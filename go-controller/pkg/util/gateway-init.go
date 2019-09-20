@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/openshift/origin/pkg/util/netutils"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
 
@@ -15,6 +17,9 @@ const (
 	// PhysicalNetworkName is the name that maps to an OVS bridge that provides
 	// access to physical/external network
 	PhysicalNetworkName = "physnet"
+	// LocalNetworkName is the name that maps to an OVS bridge that provides
+	// access to local service
+	LocalNetworkName = "locnet"
 )
 
 // GetK8sClusterRouter returns back the OVN distibuted router
@@ -152,7 +157,7 @@ func getGatewayLoadBalancers(gatewayRouter string) (string, string, error) {
 
 // GatewayInit creates a gateway router for the local chassis.
 func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddress,
-	defaultGW string, rampoutIPSubnet string, localnet bool, lspArgs []string) error {
+	defaultGW string, rampoutIPSubnet string, physnetName string, lspArgs []string) error {
 
 	ip, physicalIPNet, err := net.ParseCIDR(nicIP)
 	if err != nil {
@@ -301,10 +306,10 @@ func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddre
 	// world is accessed via this port.
 	cmdArgs := []string{"--", "--may-exist", "lsp-add", externalSwitch, ifaceID,
 		"--", "lsp-set-addresses", ifaceID, "unknown"}
-	if localnet {
+	if physnetName != "" {
 		cmdArgs = append(cmdArgs, "--", "lsp-set-type", ifaceID,
 			"localnet", "--", "lsp-set-options", ifaceID,
-			"network_name="+PhysicalNetworkName)
+			"network_name="+physnetName)
 	}
 	cmdArgs = append(cmdArgs, lspArgs...)
 	stdout, stderr, err = RunOVNNbctl(cmdArgs...)
@@ -390,6 +395,162 @@ func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddre
 					"routes in distributed router, stdout: %q, "+
 					"stderr: %q, error: %v", stdout, stderr, err)
 			}
+		}
+	}
+
+	return nil
+}
+
+// LocalGatewayInit creates a gateway router to access local service.
+func LocalGatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddress,
+	defaultGW string, physnetName string) error {
+
+	ip, physicalIPNet, err := net.ParseCIDR(nicIP)
+	if err != nil {
+		return fmt.Errorf("error parsing %s (%v)", nicIP, err)
+	}
+	n, _ := physicalIPNet.Mask.Size()
+	physicalIPMask := fmt.Sprintf("%s/%d", ip.String(), n)
+	physicalIP := ip.String()
+
+	if defaultGW != "" {
+		defaultgwByte := net.ParseIP(defaultGW)
+		defaultGW = defaultgwByte.String()
+	}
+
+	k8sClusterRouter, err := GetK8sClusterRouter()
+	if err != nil {
+		return err
+	}
+
+	systemID, err := GetNodeChassisID()
+	if err != nil {
+		return err
+	}
+
+	// Create a gateway router.
+	gatewayRouter := "GR_local_" + nodeName
+	stdout, stderr, err := RunOVNNbctl("--", "--may-exist", "lr-add",
+		gatewayRouter, "--", "set", "logical_router", gatewayRouter,
+		"options:chassis="+systemID, "external_ids:physical_ip="+physicalIP)
+	if err != nil {
+		return fmt.Errorf("Failed to create logical router %v, stdout: %q, "+
+			"stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
+	}
+
+	gwSwitchPort := "jtor-" + gatewayRouter
+	gwRouterPort := "rtoj-" + gatewayRouter
+	routerMac, routerCIDR, err := ensureGatewayPortAddress(gwSwitchPort)
+	if err != nil {
+		return err
+	}
+
+	// Must move the IP from the LSP to the LRP and set the LSP addresses
+	// to 'router' in one transaction, because IPAM doesn't consider LSPs that
+	// are attached to routers when checking reserved addresses.
+	stdout, stderr, err = RunOVNNbctl(
+		"--", "--may-exist", "lrp-add", gatewayRouter, gwRouterPort, routerMac.String(), routerCIDR.String(),
+		"--", "set", "logical_switch_port", gwSwitchPort, "type=router",
+		"options:router-port="+gwRouterPort, "addresses=router")
+	if err != nil {
+		return fmt.Errorf("failed to add logical port to router, stdout: %q, "+
+			"stderr: %q, error: %v", stdout, stderr, err)
+	}
+
+	for _, entry := range clusterIPSubnet {
+		// Add a static route in GR with distributed router as the nexthop.
+		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
+			gatewayRouter, entry, "100.64.0.1")
+		if err != nil {
+			return fmt.Errorf("Failed to add a static route in GR with distributed "+
+				"router as the nexthop, stdout: %q, stderr: %q, error: %v",
+				stdout, stderr, err)
+		}
+	}
+
+	// Add a route in distributed router to nodeIP.
+	nodeIP, err := netutils.GetNodeIP(nodeName)
+	if err != nil {
+		return fmt.Errorf("failed to obtain local IP from hostname %q: %v", nodeName, err)
+	}
+	stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
+		k8sClusterRouter, nodeIP+"/32", routerCIDR.IP.String())
+	if err != nil {
+		return fmt.Errorf("Failed to add a route to nodeIP in router "+
+			"with local_node GR as the nexthop, stdout: %q, stderr: %q, error: %v",
+			stdout, stderr, err)
+	}
+
+	// Create the external switch for the physical interface to connect to.
+	externalSwitch := "ext_local_" + nodeName
+	stdout, stderr, err = RunOVNNbctl("--may-exist", "ls-add",
+		externalSwitch)
+	if err != nil {
+		return fmt.Errorf("Failed to create logical switch, stdout: %q, "+
+			"stderr: %q, error: %v", stdout, stderr, err)
+	}
+
+	// Add external interface as a logical port to external_switch.
+	// This is a learning switch port with "unknown" address. The external
+	// world is accessed via this port.
+	cmdArgs := []string{"--", "--may-exist", "lsp-add", externalSwitch, ifaceID,
+		"--", "lsp-set-addresses", ifaceID, "unknown"}
+	if physnetName != "" {
+		cmdArgs = append(cmdArgs, "--", "lsp-set-type", ifaceID,
+			"localnet", "--", "lsp-set-options", ifaceID,
+			"network_name="+physnetName)
+	}
+	stdout, stderr, err = RunOVNNbctl(cmdArgs...)
+	if err != nil {
+		return fmt.Errorf("Failed to add logical port to switch, stdout: %q, "+
+			"stderr: %q, error: %v", stdout, stderr, err)
+	}
+
+	// Connect GR to external_switch with mac address of external interface
+	// and that IP address. In the case of `local` gateway mode, whenever ovnkube-node container
+	// restarts a new br-local bridge will be created with a new `nicMacAddress`. As a result,
+	// direct addition of logical_router_port with --may-exists will not work since the MAC
+	// has changed. So, we need to delete that port, if it exists, and it back.
+	stdout, stderr, err = RunOVNNbctl(
+		"--", "--if-exists", "lrp-del", "rtoe-"+gatewayRouter,
+		"--", "lrp-add", gatewayRouter, "rtoe-"+gatewayRouter, nicMacAddress, physicalIPMask,
+		"--", "set", "logical_router_port", "rtoe-"+gatewayRouter,
+		"external-ids:gateway-physical-ip=yes")
+	if err != nil {
+		return fmt.Errorf("Failed to add logical port to router, stdout: %q, "+
+			"stderr: %q, error: %v", stdout, stderr, err)
+	}
+
+	// Connect the external_switch to the router.
+	stdout, stderr, err = RunOVNNbctl("--", "--may-exist", "lsp-add",
+		externalSwitch, "etor-"+gatewayRouter, "--", "set",
+		"logical_switch_port", "etor-"+gatewayRouter, "type=router",
+		"options:router-port=rtoe-"+gatewayRouter,
+		"addresses="+"\""+nicMacAddress+"\"")
+	if err != nil {
+		return fmt.Errorf("Failed to add logical port to router, stdout: %q, "+
+			"stderr: %q, error: %v", stdout, stderr, err)
+	}
+
+	// Add a static route in GR with physical gateway as the default next hop.
+	if defaultGW != "" {
+		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
+			gatewayRouter, "0.0.0.0/0", defaultGW,
+			fmt.Sprintf("rtoe-%s", gatewayRouter))
+		if err != nil {
+			return fmt.Errorf("Failed to add a static route in GR with physical "+
+				"gateway as the default next hop, stdout: %q, "+
+				"stderr: %q, error: %v", stdout, stderr, err)
+		}
+	}
+
+	// Default SNAT rules.
+	for _, entry := range clusterIPSubnet {
+		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-nat-add",
+			gatewayRouter, "snat", physicalIP, entry)
+		if err != nil {
+			return fmt.Errorf("Failed to create default SNAT rules, stdout: %q, "+
+				"stderr: %q, error: %v", stdout, stderr, err)
 		}
 	}
 
