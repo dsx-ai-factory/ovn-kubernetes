@@ -85,6 +85,29 @@ func defaultFakeExec(nodeSubnet, nodeName string) (*ovntest.FakeExec, string, st
 	return fexec, tcpLBUUID, udpLBUUID
 }
 
+func deleteLocalOnlyGatewayTest(fexec *ovntest.FakeExec, nodeName, clusterRouterUUID string) {
+	const (
+		localNodeRouteUUID string = "0cac12cf-3e0f-4682-b028-5ea2e0001962"
+	)
+
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_local_" + nodeName + " networks",
+		Output: "[\"100.64.0.4/16\"]",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route nexthop=100.64.0.4",
+		Output: localNodeRouteUUID,
+	})
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 --if-exists remove logical_router " + clusterRouterUUID + " static_routes " + localNodeRouteUUID,
+	})
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 --if-exist lsp-del jtor-GR_local_" + nodeName,
+		"ovn-nbctl --timeout=15 --if-exist lr-del GR_local_" + nodeName,
+		"ovn-nbctl --timeout=15 --if-exist ls-del ext_local_" + nodeName,
+	})
+}
+
 var _ = Describe("Master Operations", func() {
 	var app *cli.App
 
@@ -219,7 +242,6 @@ var _ = Describe("Master Operations", func() {
 				node1Name         string = "openshift-node-1"
 				node1Subnet       string = "10.128.0.0/24"
 				node1RouteUUID    string = "0cac12cf-3e0f-4682-b028-5ea2e0001962"
-				node1mgtRouteUUID string = "0cac12cf-3e0f-4682-b028-5ea2e0001963"
 				masterName        string = "openshift-master-node"
 				masterSubnet      string = "10.128.2.0/24"
 				masterGWCIDR      string = "10.128.2.1/24"
@@ -259,19 +281,12 @@ subnet=%s
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 --if-exists remove logical_router " + clusterRouterUUID + " static_routes " + node1RouteUUID,
-			})
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route nexthop=10.128.0.2",
-				Output: node1mgtRouteUUID,
-			})
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 --if-exists remove logical_router " + clusterRouterUUID + " static_routes " + node1mgtRouteUUID,
-			})
-			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 --if-exist lsp-del jtor-GR_" + node1Name,
 				"ovn-nbctl --timeout=15 --if-exist lr-del GR_" + node1Name,
 				"ovn-nbctl --timeout=15 --if-exist ls-del ext_" + node1Name,
 			})
+
+			deleteLocalOnlyGatewayTest(fexec, node1Name, clusterRouterUUID)
 
 			// Expect the code to re-add the master node (which still exists)
 			// when the factory watch begins and enumerates all existing
