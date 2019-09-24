@@ -38,6 +38,11 @@ var _ = Describe("Node Operations", func() {
 
 			fexec := ovntest.NewFakeExec()
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 " +
+					"--if-exists get Open_vSwitch . external_ids:ovn-encap-ip"),
+				Output: "",
+			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
 					"external_ids:ovn-encap-type=geneve "+
 					"external_ids:ovn-encap-ip=%s "+
@@ -72,6 +77,11 @@ var _ = Describe("Node Operations", func() {
 			)
 
 			fexec := ovntest.NewFakeExec()
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 " +
+					"--if-exists get Open_vSwitch . external_ids:ovn-encap-ip"),
+				Output: "",
+			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
 					"external_ids:ovn-encap-type=geneve "+
