@@ -2,13 +2,14 @@ package cluster
 
 import (
 	"fmt"
-	"net"
+	"runtime"
 	"strings"
 
 	"github.com/sirupsen/logrus"
+	"net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -104,56 +105,44 @@ func (cluster *OvnClusterController) initGateway(
 		}
 	}
 
-	if config.Gateway.Mode == config.GatewayModeLocal {
+	switch config.Gateway.Mode {
+	case config.GatewayModeLocal:
 		return initLocalnetGateway(nodeName, clusterIPSubnet, subnet,
 			cluster.watchFactory)
-	}
+	case config.GatewayModeShared:
+		gatewayNextHop := config.Gateway.NextHop
+		gatewayIntf := config.Gateway.Interface
+		if gatewayNextHop == "" || gatewayIntf == "" {
+			// We need to get the interface details from the default gateway.
+			defaultGatewayIntf, defaultGatewayNextHop, err := getDefaultGatewayInterfaceDetails()
+			if err != nil {
+				return err
+			}
 
-	gatewayNextHop := config.Gateway.NextHop
-	gatewayIntf := config.Gateway.Interface
-	if gatewayNextHop == "" || gatewayIntf == "" {
-		// We need to get the interface details from the default gateway.
-		defaultGatewayIntf, defaultGatewayNextHop, err := getDefaultGatewayInterfaceDetails()
-		if err != nil {
-			return err
+			if gatewayNextHop == "" {
+				gatewayNextHop = defaultGatewayNextHop
+			}
+
+			if gatewayIntf == "" {
+				gatewayIntf = defaultGatewayIntf
+			}
 		}
-
-		if gatewayNextHop == "" {
-			gatewayNextHop = defaultGatewayNextHop
-		}
-
-		if gatewayIntf == "" {
-			gatewayIntf = defaultGatewayIntf
-		}
-	}
-
-	var err error
-	if config.Gateway.Mode == config.GatewayModeSpare {
-		err = initSpareGateway(nodeName, clusterIPSubnet, subnet,
-			gatewayNextHop, gatewayIntf)
-	} else if config.Gateway.Mode == config.GatewayModeShared {
-		err = initSharedGateway(nodeName, clusterIPSubnet, subnet,
+		return initSharedGateway(nodeName, clusterIPSubnet, subnet,
 			gatewayNextHop, gatewayIntf, cluster.watchFactory)
 	}
 
-	return err
+	return nil
 }
 
 // CleanupClusterNode cleans up OVS resources on the k8s node on ovnkube-node daemonset deletion.
 // This is going to be a best effort cleanup.
-func CleanupClusterNode(name string, kube *kube.Kube) error {
-	node, err := kube.GetNode(name)
-	if err != nil {
-		logrus.Errorf("Failed to get kubernetes node %q, error: %v", name, err)
-		return nil
-	}
+func CleanupClusterNode(name string) error {
+	var err error
 
+	logrus.Debugf("Cleaning up gateway resources on node: %q", name)
 	switch config.Gateway.Mode {
 	case config.GatewayModeLocal:
 		err = cleanupLocalnetGateway(util.PhysicalNetworkName)
-	case config.GatewayModeSpare:
-		nodeName := strings.ToLower(node.Name)
-		err = cleanupSpareGateway(config.Gateway.Interface, nodeName)
 	case config.GatewayModeShared:
 		err = cleanupLocalnetGateway(util.LocalNetworkName)
 		if err != nil {
@@ -175,6 +164,11 @@ func CleanupClusterNode(name string, kube *kube.Kube) error {
 		"ovn-bridge-mappings")
 	if err != nil {
 		logrus.Errorf("Failed to delete ovn-bridge-mappings, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+	}
+
+	// Delete iptable rules for management port on Linux.
+	if runtime.GOOS != "windows" {
+		ovn.DelMgtPortIptRules(name)
 	}
 
 	return nil

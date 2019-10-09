@@ -2,6 +2,7 @@ package util
 
 import (
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -20,7 +21,7 @@ func GatewayCleanup(nodeName string) error {
 	gatewayRouter := fmt.Sprintf("GR_%s", nodeName)
 
 	// Get the gateway router port's IP address (connected to join switch)
-	var routerIP string
+	var routerIP, defRouteUUID string
 	var nextHops []string
 	routerIPNetwork, stderr, err := RunOVNNbctl("--if-exist", "get",
 		"logical_router_port", "rtoj-"+gatewayRouter, "networks")
@@ -37,6 +38,9 @@ func GatewayCleanup(nodeName string) error {
 	}
 	if routerIP != "" {
 		nextHops = append(nextHops, routerIP)
+		defRouteUUID, _, _ = RunOVNNbctl("--data=bare", "--no-heading",
+			"--columns=_uuid", "find", "logical_router_static_route",
+			"ip_prefix=0.0.0.0/0", "nexthop="+routerIP)
 	}
 	staticRouteCleanup(clusterRouter, nextHops)
 
@@ -62,6 +66,24 @@ func GatewayCleanup(nodeName string) error {
 	if err != nil {
 		return fmt.Errorf("Failed to delete external switch %s, stderr: %q, "+
 			"error: %v", externalSwitch, stderr, err)
+	}
+
+	if routerIP != "" && defRouteUUID != "" {
+		var defGatewayIP net.IP
+		// need update the default GW route since the node will be deleted.
+		_, defGatewayIP, err = GetDefaultGatewayRouterIP()
+		if err != nil {
+			logrus.Errorf("failed to get default route for the distributed router "+
+				"with first GR as the nexthop, error: %v", err)
+		} else {
+			_, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
+				clusterRouter, "0.0.0.0/0", defGatewayIP.String())
+			if err != nil {
+				logrus.Errorf("failed to add a default route in distributed router "+
+					"with first GR as the nexthop, stderr: %q, error: %v",
+					stderr, err)
+			}
+		}
 	}
 
 	if config.Gateway.NodeportEnable {
