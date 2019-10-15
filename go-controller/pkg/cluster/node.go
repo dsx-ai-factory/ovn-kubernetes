@@ -96,7 +96,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 				continue
 			}
 
-			nodeCidr, ok = node.Annotations[OvnHostSubnet]
+			nodeCidr, ok = node.Annotations[ovn.OvnHostSubnet]
 			if !ok {
 				logrus.Errorf("Error starting node %s, no annotation found on node for subnet - %v", name, err)
 				continue
