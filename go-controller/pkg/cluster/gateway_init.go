@@ -9,7 +9,6 @@ import (
 	"net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -168,7 +167,7 @@ func CleanupClusterNode(name string) error {
 
 	// Delete iptable rules for management port on Linux.
 	if runtime.GOOS != "windows" {
-		ovn.DelMgtPortIptRules(name)
+		DelMgtPortIptRules(name)
 	}
 
 	return nil

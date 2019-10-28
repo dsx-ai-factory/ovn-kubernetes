@@ -58,6 +58,7 @@ func getFlagsByCategory() map[string][]cli.Flag {
 	m["OVN Northbound DB Options"] = config.OvnNBFlags
 	m["OVN Southbound DB Options"] = config.OvnSBFlags
 	m["OVN Gateway Options"] = config.OVNGatewayFlags
+	m["Master HA Options"] = config.MasterHAFlags
 
 	return m
 }
@@ -96,6 +97,7 @@ func main() {
 	c.Flags = append(c.Flags, config.OvnNBFlags...)
 	c.Flags = append(c.Flags, config.OvnSBFlags...)
 	c.Flags = append(c.Flags, config.OVNGatewayFlags...)
+	c.Flags = append(c.Flags, config.MasterHAFlags...)
 	c.Action = func(c *cli.Context) error {
 		return runOvnKube(c)
 	}
@@ -136,8 +138,7 @@ func setupPIDFile(pidfile string) error {
 		// get the pid and see if it exists
 		pid, err := ioutil.ReadFile(pidfile)
 		if err != nil {
-			logrus.Errorf("pidfile %s exists but can't be read", pidfile)
-			return err
+			return fmt.Errorf("pidfile %s exists but can't be read: %v", pidfile, err)
 		}
 		_, err1 := os.Stat("/proc/" + string(pid[:]) + "/cmdline")
 		if os.IsNotExist(err1) {
@@ -146,8 +147,7 @@ func setupPIDFile(pidfile string) error {
 				logrus.Errorf("failed to write pidfile %s (%v). Ignoring..", pidfile, err)
 			}
 		} else {
-			logrus.Errorf("pidfile %s exists and ovnkube is running", pidfile)
-			os.Exit(1)
+			return fmt.Errorf("pidfile %s exists and ovnkube is running", pidfile)
 		}
 	}
 
@@ -158,32 +158,30 @@ func runOvnKube(ctx *cli.Context) error {
 	pidfile := ctx.String("pidfile")
 	if pidfile != "" {
 		defer delPidfile(pidfile)
-		err := setupPIDFile(pidfile)
-		if err != nil {
+		if err := setupPIDFile(pidfile); err != nil {
 			return err
 		}
 	}
+
 	exec := kexec.New()
-	_, err := config.InitConfig(ctx, exec, nil)
-	if err != nil {
+	if _, err := config.InitConfig(ctx, exec, nil); err != nil {
 		return err
 	}
 
-	if err = util.SetExec(exec); err != nil {
-		logrus.Errorf("Failed to initialize exec helper: %v", err)
-		return err
+	if err := util.SetExec(exec); err != nil {
+		return fmt.Errorf("failed to initialize exec helper: %v", err)
 	}
 
 	clientset, err := util.NewClientset(&config.Kubernetes)
 	if err != nil {
-		panic(err.Error())
+		return err
 	}
 
 	// create factory and start the controllers asked for
 	stopChan := make(chan struct{})
 	factory, err := factory.NewWatchFactory(clientset, stopChan)
 	if err != nil {
-		panic(err.Error())
+		return err
 	}
 
 	master := ctx.String("init-master")
@@ -192,14 +190,17 @@ func runOvnKube(ctx *cli.Context) error {
 	cleanupNode := ctx.String("cleanup-node")
 	if cleanupNode != "" {
 		if master != "" || node != "" {
-			panic("Cannot specify cleanup-node together with 'init-node or 'init-master'.")
+			return fmt.Errorf("cannot specify cleanup-node together with 'init-node or 'init-master'")
 		}
 
 		if err := ovncluster.CleanupClusterNode(cleanupNode); err != nil {
-			logrus.Errorf(err.Error())
-			panic(err.Error())
+			return err
 		}
 		return nil
+	}
+
+	if master == "" && node == "" {
+		return fmt.Errorf("need to run ovnkube in either master and/or node mode")
 	}
 
 	// start the prometheus server
@@ -207,40 +208,29 @@ func runOvnKube(ctx *cli.Context) error {
 		ovncluster.StartMetricsServer(config.Kubernetes.MetricsBindAddress)
 	}
 
-	if master != "" || node != "" {
-		if master != "" {
-			if runtime.GOOS == "windows" {
-				panic("Windows is not supported as master node")
-			}
-			// run the master controller to init the master
-			ovnController := ovn.NewOvnController(clientset, factory)
-			err := ovnController.StartClusterMaster(master)
-			if err != nil {
-				logrus.Errorf(err.Error())
-				panic(err.Error())
-			}
-			// add watchers for relevant resources' events
-			if err := ovnController.Run(); err != nil {
-				logrus.Errorf(err.Error())
-				panic(err.Error())
-			}
+	if master != "" {
+		if runtime.GOOS == "windows" {
+			return fmt.Errorf("Windows is not supported as master node")
 		}
 
-		if node != "" {
-			if config.Kubernetes.Token == "" {
-				panic("Cannot initialize node without service account 'token'. Please provide one with --k8s-token argument")
-			}
-			clusterController := ovncluster.NewClusterController(clientset, factory)
-			err := clusterController.StartClusterNode(node)
-			if err != nil {
-				logrus.Errorf(err.Error())
-				panic(err.Error())
-			}
+		// run the HA master controller to init the master
+		ovnHAController := ovn.NewHAMasterController(clientset, factory, master)
+		if err := ovnHAController.StartHAMasterController(); err != nil {
+			return err
 		}
-
-		// run forever
-		select {}
 	}
 
-	return fmt.Errorf("need to run ovnkube in either master and/or node mode")
+	if node != "" {
+		if config.Kubernetes.Token == "" {
+			return fmt.Errorf("cannot initialize node without service account 'token'. Please provide one with --k8s-token argument")
+		}
+
+		clusterController := ovncluster.NewClusterController(clientset, factory)
+		if err := clusterController.StartClusterNode(node); err != nil {
+			return err
+		}
+	}
+
+	// run forever
+	select {}
 }
