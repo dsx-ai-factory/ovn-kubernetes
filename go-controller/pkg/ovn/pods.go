@@ -12,6 +12,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
+// Builds the logical switch port name for a given pod.
+func podLogicalPortName(pod *kapi.Pod) string {
+	return pod.Namespace + "_" + pod.Name
+}
+
 func (oc *Controller) syncPods(pods []interface{}) {
 	// get the list of logical switch ports (equivalent to pods)
 	expectedLogicalPorts := make(map[string]bool)
@@ -21,8 +26,10 @@ func (oc *Controller) syncPods(pods []interface{}) {
 			logrus.Errorf("Spurious object in syncPods: %v", podInterface)
 			continue
 		}
-		logicalPort := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
-		expectedLogicalPorts[logicalPort] = true
+		if podScheduled(pod) && podWantsNetwork(pod) {
+			logicalPort := podLogicalPortName(pod)
+			expectedLogicalPorts[logicalPort] = true
+		}
 	}
 
 	// get the list of logical ports from OVN
@@ -155,7 +162,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 	}
 
 	logrus.Infof("Deleting pod: %s", pod.Name)
-	logicalPort := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
+	logicalPort := podLogicalPortName(pod)
 	out, stderr, err := util.RunOVNNbctl("--if-exists", "lsp-del",
 		logicalPort)
 	if err != nil {
@@ -187,8 +194,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		oc.deleteACLDenyOld(pod.Namespace, pod.Spec.NodeName, logicalPort,
 			"Egress")
 	}
-	oc.deletePodFromNamespaceAddressSet(pod.Namespace, podIP)
-	return
+	oc.deletePodFromNamespace(pod.Namespace, podIP, logicalPort)
 }
 
 func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) error {
@@ -224,28 +230,26 @@ func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) error {
 	return nil
 }
 
-func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
+func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	var out, stderr string
 	var err error
-	if pod.Spec.HostNetwork {
-		return
-	}
+
+	// Keep track of how long syncs take.
+	start := time.Now()
+	defer func() {
+		logrus.Infof("[%s/%s] addLogicalPort took %v", pod.Namespace, pod.Name, time.Since(start))
+	}()
 
 	logicalSwitch := pod.Spec.NodeName
-	if logicalSwitch == "" {
-		logrus.Errorf("Failed to find the logical switch for pod %s/%s",
-			pod.Namespace, pod.Name)
-		return
-	}
-
 	if err = oc.waitForNodeLogicalSwitch(pod.Spec.NodeName); err != nil {
-		return
+		return err
 	}
 
-	portName := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
+	portName := podLogicalPortName(pod)
 	logrus.Debugf("Creating logical port for %s on switch %s", portName, logicalSwitch)
 
 	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations["ovn"])
+	annotationsSet := (err == nil)
 
 	// If pod already has annotations, just add the lsp with static ip/mac.
 	// Else, create the lsp with dynamic addresses.
@@ -259,10 +263,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 			"external-ids:pod=true", "--", "--if-exists",
 			"clear", "logical_switch_port", portName, "dynamic_addresses")
 		if err != nil {
-			logrus.Errorf("Failed to add logical port to switch "+
+			return fmt.Errorf("Failed to add logical port to switch "+
 				"stdout: %q, stderr: %q (%v)",
 				out, stderr, err)
-			return
 		}
 	} else {
 		out, stderr, err = util.RunOVNNbctl("--wait=sb", "--",
@@ -274,20 +277,17 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 			"external-ids:logical_switch="+logicalSwitch,
 			"external-ids:pod=true")
 		if err != nil {
-			logrus.Errorf("Error while creating logical port %s "+
+			return fmt.Errorf("Error while creating logical port %s "+
 				"stdout: %q, stderr: %q (%v)",
 				portName, out, stderr, err)
-			return
 		}
-
 	}
 
 	oc.logicalPortCache[portName] = logicalSwitch
 
 	gatewayIP, err := oc.getGatewayFromSwitch(logicalSwitch)
 	if err != nil {
-		logrus.Errorf("Error obtaining gateway address for switch %s", logicalSwitch)
-		return
+		return fmt.Errorf("Error obtaining gateway address for switch %s", logicalSwitch)
 	}
 
 	var podMac net.HardwareAddr
@@ -299,17 +299,14 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 			break
 		}
 		if err != nil {
-			logrus.Errorf("Error while obtaining addresses for %s - %v", portName,
-				err)
-			return
+			return fmt.Errorf("Error while obtaining addresses for %s - %v", portName, err)
 		}
 		time.Sleep(time.Second)
 		count--
 	}
 	if count == 0 {
-		logrus.Errorf("Error while obtaining addresses for %s "+
+		return fmt.Errorf("Error while obtaining addresses for %s "+
 			"stdout: %q, stderr: %q, (%v)", portName, out, stderr, err)
-		return
 	}
 
 	podCIDR := &net.IPNet{IP: podIP, Mask: gatewayIP.Mask}
@@ -318,9 +315,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 	out, stderr, err = util.RunOVNNbctl("lsp-set-port-security", portName,
 		fmt.Sprintf("%s %s", podMac, podCIDR))
 	if err != nil {
-		logrus.Errorf("error while setting port security for logical port %s "+
+		return fmt.Errorf("error while setting port security for logical port %s "+
 			"stdout: %q, stderr: %q (%v)", portName, out, stderr, err)
-		return
 	}
 
 	marshalledAnnotation, err := util.MarshalPodAnnotation(&util.PodAnnotation{
@@ -329,17 +325,22 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 		GW:  gatewayIP.IP,
 	})
 	if err != nil {
-		logrus.Errorf("error creating pod network annotation: %v", err)
-		return
+		return fmt.Errorf("error creating pod network annotation: %v", err)
 	}
+
+	oc.addPodToNamespace(pod.Namespace, podIP, portName)
 
 	logrus.Debugf("Annotation values: ip=%s ; mac=%s ; gw=%s\nAnnotation=%s",
-		podCIDR, podMac, gatewayIP, annotation)
-	err = oc.kube.SetAnnotationOnPod(pod, "ovn", marshalledAnnotation)
-	if err != nil {
-		logrus.Errorf("Failed to set annotation on pod %s - %v", pod.Name, err)
+		podCIDR, podMac, gatewayIP, marshalledAnnotation)
+	if err = oc.kube.SetAnnotationOnPod(pod, "ovn", marshalledAnnotation); err != nil {
+		return fmt.Errorf("Failed to set annotation on pod %s - %v", pod.Name, err)
 	}
-	oc.addPodToNamespaceAddressSet(pod.Namespace, podIP)
 
-	return
+	// If we're setting the annotation for the first time, observe the creation
+	// latency metric.
+	if !annotationsSet {
+		recordPodCreated(pod)
+	}
+
+	return nil
 }

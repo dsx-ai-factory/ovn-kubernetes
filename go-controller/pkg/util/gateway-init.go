@@ -8,8 +8,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/openshift/origin/pkg/util/netutils"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
 
@@ -469,7 +467,7 @@ func LocalGatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMac
 	}
 
 	// Add a route in distributed router to nodeIP.
-	nodeIP, err := netutils.GetNodeIP(nodeName)
+	nodeIP, err := GetNodeIP(nodeName)
 	if err != nil {
 		return fmt.Errorf("failed to obtain local IP from hostname %q: %v", nodeName, err)
 	}

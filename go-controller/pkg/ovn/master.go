@@ -10,9 +10,9 @@ import (
 	"k8s.io/client-go/util/retry"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/allocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	"github.com/openshift/origin/pkg/util/netutils"
 	"github.com/sirupsen/logrus"
 )
 
@@ -23,6 +23,9 @@ const (
 	OvnClusterRouter = "ovn_cluster_router"
 	// OvnNodeManagementPortMacAddress is the constant string representing the annotation key
 	OvnNodeManagementPortMacAddress = "k8s.ovn.org/node-mgmt-port-mac-address"
+	// OvnServiceIdledAt is a constant string representing the Service annotation key
+	// whose value indicates the time stamp in RFC3339 format when a Service was idled
+	OvnServiceIdledAt = "k8s.ovn.org/idled-at"
 )
 
 // StartClusterMaster runs a subnet IPAM and a controller that watches arrival/departure
@@ -47,7 +50,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 			alreadyAllocated = append(alreadyAllocated, hostsubnet)
 		}
 	}
-	masterSubnetAllocatorList := make([]*netutils.SubnetAllocator, 0)
+	masterSubnetAllocatorList := make([]*allocator.SubnetAllocator, 0)
 	// NewSubnetAllocator is a subnet IPAM, which takes a CIDR (first argument)
 	// and gives out subnets of length 'hostSubnetLength' (second argument)
 	// but omitting any that exist in 'subrange' (third argument)
@@ -62,7 +65,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 				subrange = append(subrange, allocatedRange)
 			}
 		}
-		subnetAllocator, err := netutils.NewSubnetAllocator(clusterEntry.CIDR.String(), 32-clusterEntry.HostSubnetLength, subrange)
+		subnetAllocator, err := allocator.NewSubnetAllocator(clusterEntry.CIDR.String(), 32-clusterEntry.HostSubnetLength, subrange)
 		if err != nil {
 			return err
 		}
@@ -70,33 +73,27 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	}
 	oc.masterSubnetAllocatorList = masterSubnetAllocatorList
 
+	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "port_group"); err == nil {
+		oc.portGroupSupport = true
+	}
+
+	// Multicast support requires portGroupSupport
+	if oc.portGroupSupport {
+		if _, _, err := util.RunOVNSbctl("--columns=_uuid", "list", "IGMP_Group"); err == nil {
+			oc.multicastSupport = true
+		}
+	}
+
 	if err := oc.SetupMaster(masterNodeName); err != nil {
 		logrus.Errorf("Failed to setup master (%v)", err)
 		return err
 	}
 
-	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "port_group"); err == nil {
-		oc.portGroupSupport = true
-	}
-	return nil
-}
-
-func setupOVNMaster(nodeName string) error {
-	// Configure both server and client of OVN databases, since master uses both
-	for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
-		if err := auth.SetDBAuth(); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
 // SetupMaster creates the central router and load-balancers for the network
 func (oc *Controller) SetupMaster(masterNodeName string) error {
-	if err := setupOVNMaster(masterNodeName); err != nil {
-		return err
-	}
-
 	// Create a single common distributed router for the cluster.
 	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lr-add", OvnClusterRouter,
 		"--", "set", "logical_router", OvnClusterRouter, "external_ids:k8s-cluster-router=yes")
@@ -104,6 +101,27 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		logrus.Errorf("Failed to create a single common distributed router for the cluster, "+
 			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
+	}
+
+	// If supported, enable IGMP relay on the router to forward multicast
+	// traffic between nodes.
+	if oc.multicastSupport {
+		stdout, stderr, err = util.RunOVNNbctl("--", "set", "logical_router",
+			OvnClusterRouter, "options:mcast_relay=\"true\"")
+		if err != nil {
+			logrus.Errorf("Failed to enable IGMP relay on the cluster router, "+
+				"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+			return err
+		}
+
+		// Drop IP multicast globally. Multicast is allowed only if explicitly
+		// enabled in a namespace.
+		err = oc.createDefaultDenyMulticastPolicy()
+		if err != nil {
+			logrus.Errorf("Failed to create default deny multicast policy, error: %v",
+				err)
+			return err
+		}
 	}
 
 	// Create 2 load-balancers for east-west traffic.  One handles UDP and another handles TCP.
@@ -191,7 +209,7 @@ func parseNodeManagementPortMacAddr(node *kapi.Node) (string, error) {
 	return macAddress, nil
 }
 
-func (oc *Controller) syncNodeManagementPort(node *kapi.Node) error {
+func (oc *Controller) syncNodeManagementPort(node *kapi.Node, subnet *net.IPNet) error {
 
 	macAddress, err := parseNodeManagementPortMacAddr(node)
 	if err != nil {
@@ -208,9 +226,11 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node) error {
 		return nil
 	}
 
-	subnet, err := parseNodeHostSubnet(node)
-	if err != nil {
-		return err
+	if subnet == nil {
+		subnet, err = parseNodeHostSubnet(node)
+		if err != nil {
+			return err
+		}
 	}
 
 	_, portIP := util.GetNodeWellKnownAddresses(subnet)
@@ -275,6 +295,20 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 		return err
 	}
 
+	// If supported, enable IGMP snooping and querier on the node.
+	if oc.multicastSupport {
+		stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
+			nodeName, "other-config:mcast_snoop=\"true\"",
+			"other-config:mcast_querier=\"true\"",
+			"other-config:mcast_eth_src=\""+nodeLRPMac+"\"",
+			"other-config:mcast_ip4_src=\""+firstIP.IP.String()+"\"")
+		if err != nil {
+			logrus.Errorf("Failed to enable IGMP on logical switch %v, stdout: %q, stderr: %q, error: %v",
+				nodeName, stdout, stderr, err)
+			return err
+		}
+	}
+
 	// Connect the switch to the router.
 	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", nodeName, "stor-"+nodeName,
 		"--", "set", "logical_switch_port", "stor-"+nodeName, "type=router", "options:router-port=rtos-"+nodeName, "addresses="+"\""+nodeLRPMac+"\"")
@@ -305,31 +339,31 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	return nil
 }
 
-func (oc *Controller) addNode(node *kapi.Node) (err error) {
+func (oc *Controller) addNode(node *kapi.Node) (hostsubnet *net.IPNet, err error) {
 	oc.clearInitialNodeNetworkUnavailableCondition(node)
 
-	hostsubnet, _ := parseNodeHostSubnet(node)
+	hostsubnet, _ = parseNodeHostSubnet(node)
 	if hostsubnet != nil {
 		// Node already has subnet assigned; ensure its logical network is set up
-		return oc.ensureNodeLogicalNetwork(node.Name, hostsubnet)
+		return hostsubnet, oc.ensureNodeLogicalNetwork(node.Name, hostsubnet)
 	}
 
 	// Node doesn't have a subnet assigned; reserve a new one for it
-	var subnetAllocator *netutils.SubnetAllocator
-	err = netutils.ErrSubnetAllocatorFull
+	var subnetAllocator *allocator.SubnetAllocator
+	err = allocator.ErrSubnetAllocatorFull
 	for _, subnetAllocator = range oc.masterSubnetAllocatorList {
 		hostsubnet, err = subnetAllocator.GetNetwork()
-		if err == netutils.ErrSubnetAllocatorFull {
+		if err == allocator.ErrSubnetAllocatorFull {
 			// Current subnet exhausted, check next possible subnet
 			continue
 		} else if err != nil {
-			return fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
+			return nil, fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
 		}
 		logrus.Infof("Allocated node %s HostSubnet %s", node.Name, hostsubnet.String())
 		break
 	}
-	if err == netutils.ErrSubnetAllocatorFull {
-		return fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
+	if err == allocator.ErrSubnetAllocatorFull {
+		return nil, fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
 	}
 
 	defer func() {
@@ -342,7 +376,7 @@ func (oc *Controller) addNode(node *kapi.Node) (err error) {
 	// Ensure that the node's logical network has been created
 	err = oc.ensureNodeLogicalNetwork(node.Name, hostsubnet)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Set the HostSubnet annotation on the node object to signal
@@ -352,10 +386,10 @@ func (oc *Controller) addNode(node *kapi.Node) (err error) {
 	if err != nil {
 		logrus.Errorf("Failed to set node %s host subnet annotation to %q: %v",
 			node.Name, hostsubnet.String(), err)
-		return err
+		return nil, err
 	}
 
-	return nil
+	return hostsubnet, nil
 }
 
 func (oc *Controller) deleteNodeHostSubnet(nodeName string, subnet *net.IPNet) error {

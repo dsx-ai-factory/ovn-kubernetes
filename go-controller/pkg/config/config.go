@@ -21,6 +21,8 @@ import (
 // DefaultEncapPort number used if not supplied
 const DefaultEncapPort = 6081
 
+const MetricNamespace = "ovnkube"
+
 // The following are global config parameters that other modules may access directly
 var (
 	// ovn-kubernetes version, to be changed with every release
@@ -74,6 +76,9 @@ var (
 		ElectionLeaseDuration: 60,
 		ElectionRenewDeadline: 30,
 		ElectionRetryPeriod:   20,
+		ManageDBServers:       false,
+		NbPort:                6641,
+		SbPort:                6642,
 	}
 
 	// NbctlDaemon enables ovn-nbctl to run in daemon mode
@@ -144,6 +149,8 @@ type KubernetesConfig struct {
 	ServiceCIDR        string `gcfg:"service-cidr"`
 	OVNConfigNamespace string `gcfg:"ovn-config-namespace"`
 	MetricsBindAddress string `gcfg:"metrics-bind-address"`
+	OVNEmptyLbEvents   bool   `gcfg:"ovn-empty-lb-events"`
+	PodIP              string `gcfg:"pod-ip"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -191,9 +198,12 @@ type OvnAuthConfig struct {
 // MasterHAConfig holds configuration for master HA
 // configuration.
 type MasterHAConfig struct {
-	ElectionLeaseDuration int `gcfg:"election-lease-duration"`
-	ElectionRenewDeadline int `gcfg:"election-renew-deadline"`
-	ElectionRetryPeriod   int `gcfg:"election-retry-period"`
+	ElectionLeaseDuration int  `gcfg:"election-lease-duration"`
+	ElectionRenewDeadline int  `gcfg:"election-renew-deadline"`
+	ElectionRetryPeriod   int  `gcfg:"election-retry-period"`
+	ManageDBServers       bool `gcfg:"manage-db-servers"`
+	NbPort                int  `gcfg:"port"`
+	SbPort                int  `gcfg:"port"`
 }
 
 // OvnDBScheme describes the OVN database connection transport method
@@ -498,6 +508,19 @@ var K8sFlags = []cli.Flag{
 		Usage:       "The IP address and port for the metrics server to serve on (set to 0.0.0.0 for all IPv4 interfaces)",
 		Destination: &cliConfig.Kubernetes.MetricsBindAddress,
 	},
+	cli.BoolFlag{
+		Name: "ovn-empty-lb-events",
+		Usage: "If set, then load balancers do not get deleted when all backends are removed. " +
+			"Instead, ovn-kubernetes monitors the OVN southbound database for empty lb backends " +
+			"controller events. If one arrives, then a NeedPods event is sent so that Kubernetes " +
+			"will spin up pods for the load balancer to send traffic to.",
+		Destination: &cliConfig.Kubernetes.OVNEmptyLbEvents,
+	},
+	cli.StringFlag{
+		Name:        "pod-ip",
+		Usage:       "specify the ovnkube pod IP.",
+		Destination: &cliConfig.Kubernetes.PodIP,
+	},
 }
 
 // OvnNBFlags capture OVN northbound database options
@@ -603,6 +626,21 @@ var OVNGatewayFlags = []cli.Flag{
 
 // MasterHAFlags capture OVN northbound database options
 var MasterHAFlags = []cli.Flag{
+	cli.BoolFlag{
+		Name:        "manage-db-servers",
+		Usage:       "Manages the OVN North and South DB servers in active/passive",
+		Destination: &cliConfig.MasterHA.ManageDBServers,
+	},
+	cli.IntFlag{
+		Name:        "nb-port",
+		Usage:       "Port of the OVN northbound DB server to configure (default: 6641)",
+		Destination: &cliConfig.MasterHA.NbPort,
+	},
+	cli.IntFlag{
+		Name:        "sb-port",
+		Usage:       "Port of the OVN southbound DB server to configure (default: 6642)",
+		Destination: &cliConfig.MasterHA.SbPort,
+	},
 	cli.IntFlag{
 		Name:        "ha-election-lease-duration",
 		Usage:       "Leader election lease duration (in secs) (default: 60)",
@@ -764,6 +802,11 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 		return fmt.Errorf("kubernetes service network CIDR %q invalid: %v", Kubernetes.ServiceCIDR, err)
 	}
 
+	if Kubernetes.PodIP != "" {
+		if ip := net.ParseIP(Kubernetes.PodIP); ip == nil {
+			return fmt.Errorf("Pod IP is invalid")
+		}
+	}
 	return nil
 }
 
@@ -1045,11 +1088,6 @@ func parseAddress(urlString string) (string, OvnDBScheme, error) {
 			return "", "", fmt.Errorf("failed to parse OVN DB host/port %q: %v",
 				hostPort, err)
 		}
-		ip := net.ParseIP(host)
-		if ip == nil {
-			return "", "", fmt.Errorf("OVN DB host %q must be an IP address, "+
-				"not a DNS name", hostPort)
-		}
 
 		if parsedAddress != "" {
 			parsedAddress += ","
@@ -1115,6 +1153,11 @@ func buildOvnAuth(exec kexec.Interface, northbound bool, cliAuth, confAuth *OvnA
 		}
 		auth.Scheme = OvnDBSchemeUnix
 		return auth, nil
+	} else if MasterHA.ManageDBServers {
+		if northbound {
+			return nil, fmt.Errorf("--nb-address is not allowed with --manage-db-servers")
+		}
+		return nil, fmt.Errorf("--sb-address is not allowed with --manage-db-servers")
 	}
 
 	var err error
@@ -1217,38 +1260,18 @@ func (a *OvnAuthConfig) SetDBAuth() error {
 	return nil
 }
 
-func (a *OvnAuthConfig) updateIP(newIP []string, port string) error {
-	if a.Address != "" {
-		s := strings.Split(a.Address, ":")
-		if len(s) != 3 {
-			return fmt.Errorf("failed to parse OvnAuthConfig address %q", a.Address)
-		}
-		var newPort string
-		if port != "" {
-			newPort = port
-		} else {
-			newPort = s[2]
-		}
-
-		newAddresses := make([]string, 0, len(newIP))
-		for _, ipAddress := range newIP {
-			newAddresses = append(newAddresses, s[0]+":"+ipAddress+":"+newPort)
-		}
-		a.Address = strings.Join(newAddresses, ",")
+func (a *OvnAuthConfig) updateIP(newIPs []string, port string) {
+	newAddresses := make([]string, 0, len(newIPs))
+	for _, ipAddress := range newIPs {
+		newAddresses = append(newAddresses, fmt.Sprintf("%v:%s:%s", a.Scheme, ipAddress, port))
 	}
-	return nil
+	a.Address = strings.Join(newAddresses, ",")
 }
 
 // UpdateOVNNodeAuth updates the host and URL in ClientAuth
 // for both OvnNorth and OvnSouth. It updates them with the new masterIP.
-func UpdateOVNNodeAuth(masterIP []string, southboundDBPort, northboundDBPort string) error {
+func UpdateOVNNodeAuth(masterIP []string, southboundDBPort, northboundDBPort string) {
 	logrus.Debugf("Update OVN node auth with new master ip: %s", masterIP)
-	if err := OvnNorth.updateIP(masterIP, northboundDBPort); err != nil {
-		return fmt.Errorf("failed to update OvnNorth ClientAuth URL: %v", err)
-	}
-
-	if err := OvnSouth.updateIP(masterIP, southboundDBPort); err != nil {
-		return fmt.Errorf("failed to update OvnSouth ClientAuth URL: %v", err)
-	}
-	return nil
+	OvnNorth.updateIP(masterIP, northboundDBPort)
+	OvnSouth.updateIP(masterIP, southboundDBPort)
 }

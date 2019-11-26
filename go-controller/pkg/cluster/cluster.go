@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/openshift/origin/pkg/util/netutils"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -28,13 +27,6 @@ func NewClusterController(kubeClient kubernetes.Interface, wf *factory.WatchFact
 }
 
 func setupOVNNode(nodeName string) error {
-	// Tell ovn-*bctl how to talk to the database
-	for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
-		if err := auth.SetDBAuth(); err != nil {
-			return err
-		}
-	}
-
 	var err error
 
 	nodeIP := config.Default.EncapIP
@@ -43,7 +35,7 @@ func setupOVNNode(nodeName string) error {
 		nodeIP, _, _ = util.RunOVSVsctl("--if-exists", "get",
 			"Open_vSwitch", ".", "external_ids:ovn-encap-ip")
 		if nodeIP == "" {
-			nodeIP, err = netutils.GetNodeIP(nodeName)
+			nodeIP, err = util.GetNodeIP(nodeName)
 			if err != nil {
 				return fmt.Errorf("failed to obtain local IP from hostname %q: %v", nodeName, err)
 			}

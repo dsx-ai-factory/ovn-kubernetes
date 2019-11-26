@@ -12,28 +12,33 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-// bridgedGatewayNodeSetup makes the bridge's MAC address permanent, sets up
+// bridgedGatewayNodeSetup makes the bridge's MAC address permanent (if needed), sets up
 // the physical network name mappings for the bridge, and returns an ifaceID
 // created from the bridge name and the node name
-func bridgedGatewayNodeSetup(nodeName, bridgeInterface string, physicalNetworkName string) (string, string, error) {
+func bridgedGatewayNodeSetup(nodeName, bridgeName, bridgeInterface, physicalNetworkName string,
+	syncBridgeMac bool) (string, string, error) {
 	// A OVS bridge's mac address can change when ports are added to it.
 	// We cannot let that happen, so make the bridge mac address permanent.
 	macAddress, err := util.GetOVSPortMACAddress(bridgeInterface)
 	if err != nil {
 		return "", "", err
 	}
-	stdout, stderr, err := util.RunOVSVsctl("set", "bridge",
-		bridgeInterface, "other-config:hwaddr="+macAddress)
-	if err != nil {
-		return "", "", fmt.Errorf("Failed to set bridge, stdout: %q, stderr: %q, "+
-			"error: %v", stdout, stderr, err)
+	if syncBridgeMac {
+		var err error
+
+		stdout, stderr, err := util.RunOVSVsctl("set", "bridge",
+			bridgeName, "other-config:hwaddr="+macAddress)
+		if err != nil {
+			return "", "", fmt.Errorf("Failed to set bridge, stdout: %q, stderr: %q, "+
+				"error: %v", stdout, stderr, err)
+		}
 	}
 
 	// ovn-bridge-mappings maps a physical network name to a local ovs bridge
 	// that provides connectivity to that network. It is in the form of physnet1:br1,physnet2:br2.
 	// Note that there may be multiple ovs bridge mappings, be sure not to override
 	// the mappings for the other physical network
-	stdout, stderr, err = util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
+	stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
 		"external_ids:ovn-bridge-mappings")
 	if err != nil {
 		return "", "", fmt.Errorf("Failed to get ovn-bridge-mappings stderr:%s (%v)", stderr, err)
@@ -53,16 +58,16 @@ func bridgedGatewayNodeSetup(nodeName, bridgeInterface string, physicalNetworkNa
 	if len(mapString) != 0 {
 		mapString += ","
 	}
-	mapString += physicalNetworkName + ":" + bridgeInterface
+	mapString += physicalNetworkName + ":" + bridgeName
 
 	_, stderr, err = util.RunOVSVsctl("set", "Open_vSwitch", ".",
 		fmt.Sprintf("external_ids:ovn-bridge-mappings=%s", mapString))
 	if err != nil {
 		return "", "", fmt.Errorf("Failed to set ovn-bridge-mappings for ovs bridge %s"+
-			", stderr:%s (%v)", bridgeInterface, stderr, err)
+			", stderr:%s (%v)", bridgeName, stderr, err)
 	}
 
-	ifaceID := bridgeInterface + "_" + nodeName
+	ifaceID := bridgeName + "_" + nodeName
 	return ifaceID, macAddress, nil
 }
 

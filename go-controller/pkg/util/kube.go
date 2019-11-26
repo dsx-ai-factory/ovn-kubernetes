@@ -2,6 +2,7 @@ package util
 
 import (
 	"fmt"
+	"net"
 	"strings"
 
 	kapi "k8s.io/api/core/v1"
@@ -9,6 +10,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/cert"
+	"k8s.io/klog"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
@@ -48,6 +50,9 @@ func NewClientset(conf *config.KubernetesConfig) (*kubernetes.Clientset, error) 
 		return nil, err
 	}
 
+	kconfig.AcceptContentTypes = "application/vnd.kubernetes.protobuf,application/json"
+	kconfig.ContentType = "application/vnd.kubernetes.protobuf"
+
 	return kubernetes.NewForConfig(kconfig)
 }
 
@@ -64,4 +69,59 @@ func ServiceTypeHasClusterIP(service *kapi.Service) bool {
 // ServiceTypeHasNodePort checks if the service has an associated NodePort or not
 func ServiceTypeHasNodePort(service *kapi.Service) bool {
 	return service.Spec.Type == kapi.ServiceTypeNodePort || service.Spec.Type == kapi.ServiceTypeLoadBalancer
+}
+
+func validateOVNConfigEndpoint(ep *kapi.Endpoints) bool {
+	return len(ep.Subsets) == 1 && len(ep.Subsets[0].Ports) == 2 && len(ep.Subsets[0].Addresses) > 0
+}
+
+// ExtractDbRemotesFromEndpoint extracts the DB endpoints
+func ExtractDbRemotesFromEndpoint(ep *kapi.Endpoints) ([]string, int32, int32, error) {
+	var nbDBPort int32
+	var sbDBPort int32
+	var masterIPList []string
+
+	if !validateOVNConfigEndpoint(ep) {
+		return masterIPList, nbDBPort, sbDBPort, fmt.Errorf("endpoint %s is not in the right format to configure OVN", ep.Name)
+	}
+
+	for _, ovnDB := range ep.Subsets[0].Ports {
+		if ovnDB.Name == "south" {
+			sbDBPort = ovnDB.Port
+		} else if ovnDB.Name == "north" {
+			nbDBPort = ovnDB.Port
+		}
+	}
+	for _, address := range ep.Subsets[0].Addresses {
+		masterIPList = append(masterIPList, address.IP)
+	}
+
+	return masterIPList, sbDBPort, nbDBPort, nil
+}
+
+func GetNodeIP(nodeName string) (string, error) {
+	ip := net.ParseIP(nodeName)
+	if ip == nil {
+		addrs, err := net.LookupIP(nodeName)
+		if err != nil {
+			return "", fmt.Errorf("Failed to lookup IP address for node %s: %v", nodeName, err)
+		}
+		for _, addr := range addrs {
+			// Skip loopback and non IPv4 addrs
+			if addr.IsLoopback() || addr.To4() == nil {
+				klog.V(5).Infof("Skipping loopback/non-IPv4 addr: %q for node %s", addr.String(), nodeName)
+				continue
+			}
+			ip = addr
+			break
+		}
+	} else if ip.IsLoopback() || ip.To4() == nil {
+		klog.V(5).Infof("Skipping loopback/non-IPv4 addr: %q for node %s", ip.String(), nodeName)
+		ip = nil
+	}
+
+	if ip == nil || len(ip.String()) == 0 {
+		return "", fmt.Errorf("Failed to obtain IP address from node name: %s", nodeName)
+	}
+	return ip.String(), nil
 }

@@ -257,9 +257,17 @@ func initSharedGateway(
 	nodeName string, clusterIPSubnet []string, subnet,
 	gwNextHop, gwIntf string, wf *factory.WatchFactory) error {
 	var bridgeName string
+	var uplinkName string
+	var brCreated bool
+	var err error
 
-	// Check to see whether the interface is OVS bridge.
-	if _, _, err := util.RunOVSVsctl("--", "br-exists", gwIntf); err != nil {
+	if bridgeName, _, err = util.RunOVSVsctl("--", "port-to-br", gwIntf); err == nil {
+		// This is an OVS bridge's internal port
+		uplinkName, err = util.GetNicName(bridgeName)
+		if err != nil {
+			return err
+		}
+	} else if _, _, err := util.RunOVSVsctl("--", "br-exists", gwIntf); err != nil {
 		// This is not a OVS bridge. We need to create a OVS bridge
 		// and add cluster.GatewayIntf as a port of that bridge.
 		bridgeName, err = util.NicToBridge(gwIntf)
@@ -267,27 +275,31 @@ func initSharedGateway(
 			return fmt.Errorf("failed to convert %s to OVS bridge: %v",
 				gwIntf, err)
 		}
+		uplinkName = gwIntf
+		gwIntf = bridgeName
+		brCreated = true
 	} else {
-		intfName, err := getIntfName(gwIntf)
+		// gateway interface is an OVS bridge
+		uplinkName, err = getIntfName(gwIntf)
 		if err != nil {
 			return err
 		}
 		bridgeName = gwIntf
-		gwIntf = intfName
 	}
 
 	// Now, we get IP address from OVS bridge. If IP does not exist,
 	// error out.
-	ipAddress, err := getIPv4Address(bridgeName)
+	ipAddress, err := getIPv4Address(gwIntf)
 	if err != nil {
 		return fmt.Errorf("Failed to get interface details for %s (%v)",
-			bridgeName, err)
+			gwIntf, err)
 	}
 	if ipAddress == "" {
-		return fmt.Errorf("%s does not have a ipv4 address", bridgeName)
+		return fmt.Errorf("%s does not have a ipv4 address", gwIntf)
 	}
 
-	ifaceID, macAddress, err := bridgedGatewayNodeSetup(nodeName, bridgeName, util.PhysicalNetworkName)
+	ifaceID, macAddress, err := bridgedGatewayNodeSetup(nodeName, bridgeName, gwIntf,
+		util.PhysicalNetworkName, brCreated)
 	if err != nil {
 		return fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
@@ -310,13 +322,13 @@ func initSharedGateway(
 
 	// Program cluster.GatewayIntf to let non-pod traffic to go to host
 	// stack
-	if err = addDefaultConntrackRules(nodeName, bridgeName, gwIntf); err != nil {
+	if err := addDefaultConntrackRules(nodeName, bridgeName, uplinkName); err != nil {
 		return err
 	}
 
 	if config.Gateway.NodeportEnable {
 		// Program cluster.GatewayIntf to let nodePort traffic to go to pods.
-		if err := nodePortWatcher(nodeName, bridgeName, gwIntf, wf); err != nil {
+		if err := nodePortWatcher(nodeName, bridgeName, uplinkName, wf); err != nil {
 			return err
 		}
 	}
@@ -386,7 +398,8 @@ func initLocalOnlyGateway(nodeName string, clusterIPSubnet []string) error {
 			localnetBridgeNextHop, err)
 	}
 
-	ifaceID, macAddress, err := bridgedGatewayNodeSetup(nodeName, localnetBridgeName, util.LocalNetworkName)
+	ifaceID, macAddress, err := bridgedGatewayNodeSetup(nodeName, localnetBridgeName, localnetBridgeName,
+		util.LocalNetworkName, true)
 	if err != nil {
 		return fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}

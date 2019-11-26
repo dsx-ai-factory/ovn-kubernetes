@@ -4,9 +4,11 @@ package cluster
 
 import (
 	"fmt"
-	"k8s.io/client-go/tools/cache"
+	"net"
 	"reflect"
 	"strings"
+
+	"k8s.io/client-go/tools/cache"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -157,7 +159,8 @@ func initLocalnetGateway(nodeName string, clusterIPSubnet []string,
 			localnetBridgeNextHop, err)
 	}
 
-	ifaceID, macAddress, err := bridgedGatewayNodeSetup(nodeName, localnetBridgeName, util.PhysicalNetworkName)
+	ifaceID, macAddress, err := bridgedGatewayNodeSetup(nodeName, localnetBridgeName, localnetBridgeName,
+		util.PhysicalNetworkName, true)
 	if err != nil {
 		return fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
@@ -194,7 +197,7 @@ func localnetIptRules(svc *kapi.Service) []iptRule {
 			table: "nat",
 			chain: iptableNodePortChain,
 			args: []string{"-p", string(protocol), "--dport", nodePort, "-j", "DNAT", "--to-destination",
-				strings.Split(localnetGatewayIP, "/")[0] + ":" + nodePort},
+				net.JoinHostPort(strings.Split(localnetGatewayIP, "/")[0], nodePort)},
 		})
 		rules = append(rules, iptRule{
 			table: "filter",

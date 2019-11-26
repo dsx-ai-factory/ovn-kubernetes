@@ -1,8 +1,6 @@
 package ovn
 
 import (
-	"fmt"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
@@ -85,6 +83,8 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 						logrus.Errorf("Error in creating Cluster IP for svc %s, target port: %d - %v\n", svc.Name, targetPort, err)
 						continue
 					}
+					vip := util.JoinHostPortInt32(svc.Spec.ClusterIP, svcPort.Port)
+					ovn.AddServiceVIPToName(vip, svcPort.Protocol, svc.Namespace, svc.Name)
 					ovn.handleExternalIPs(svc, svcPort, ips, targetPort)
 				}
 			}
@@ -116,6 +116,8 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 						logrus.Errorf("Error in creating Cluster IP for svc %s, target port: %d - %v\n", svc.Name, targetPort, err)
 						continue
 					}
+					vip := util.JoinHostPortInt32(svc.Spec.ClusterIP, svcPort.Port)
+					ovn.AddServiceVIPToName(vip, svcPort.Protocol, svc.Namespace, svc.Name)
 					ovn.handleExternalIPs(svc, svcPort, ips, targetPort)
 				}
 			}
@@ -257,6 +259,13 @@ func (ovn *Controller) handleExternalIPs(svc *kapi.Service, svcPort kapi.Service
 	}
 }
 
+// keepEmptyLB returns true if empty load-balancer events is enabled and if the
+// service was idled.
+func keepEmptyLB(service *kapi.Service) bool {
+	_, ok := service.Annotations[OvnServiceIdledAt]
+	return config.Kubernetes.OVNEmptyLbEvents && ok
+}
+
 func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 	svc, err := ovn.kube.GetService(ep.Namespace, ep.Name)
 	if err != nil {
@@ -278,13 +287,23 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 				lb, err)
 			continue
 		}
-		key := fmt.Sprintf("\"%s:%d\"", svc.Spec.ClusterIP, svcPort.Port)
-		_, stderr, err := util.RunOVNNbctl("remove", "load_balancer", lb,
-			"vips", key)
-		if err != nil {
-			logrus.Errorf("Error in deleting endpoints for lb %s, "+
-				"stderr: %q (%v)", lb, stderr, err)
+
+		quotedHostPort := "\"" + util.JoinHostPortInt32(svc.Spec.ClusterIP, svcPort.Port) + "\""
+		if keepEmptyLB(svc) {
+			key := "vips:" + quotedHostPort + "=\"\""
+			_, stderr, err := util.RunOVNNbctl("set", "load_balancer", lb, key)
+			if err != nil {
+				logrus.Errorf("Error in deleting endpoints for lb %s, "+
+					"stderr: %q (%v)", lb, stderr, err)
+			}
+		} else {
+			_, stderr, err := util.RunOVNNbctl("remove", "load_balancer", lb,
+				"vips", quotedHostPort)
+			if err != nil {
+				logrus.Errorf("Error in deleting lb %s, stderr: %q (%v)", lb, stderr, err)
+			}
 		}
+
 	}
 	return nil
 }
