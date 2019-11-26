@@ -116,6 +116,10 @@ spec:
             add: ["NET_ADMIN"]
 
         volumeMounts:
+        # for the iptables wrapper
+        - mountPath: /host
+          name: host-slash
+          readOnly: true
         - mountPath: /var/run/dbus/
           name: host-var-run-dbus
           readOnly: true
@@ -210,5 +214,8 @@ spec:
       - name: host-etc-cni-netd
         hostPath:
           path: /etc/cni/net.d
+      - name: host-slash
+        hostPath:
+          path: /
       tolerations:
       - operator: "Exists"

@@ -12,7 +12,7 @@ FROM ubuntu:18.04
 
 USER root
 
-RUN apt-get update && apt-get install -y iptables iproute2 curl software-properties-common setpriv
+RUN apt-get update && apt-get install -y iproute2 curl software-properties-common setpriv
 
 # Get openvswitch from Nvidia controlled source
 RUN curl -s https://packages.nvidia.com/install/repositories/sdn/nv-ovs-2-11-2/script.deb.sh | bash
@@ -40,6 +40,15 @@ COPY ovn_k8s.conf /etc/openvswitch/ovn_k8s.conf
 
 # copy git commit number into image
 COPY git_info /root
+
+# iptables wrappers
+COPY ./iptables-scripts/iptables /usr/sbin/
+COPY ./iptables-scripts/iptables-save /usr/sbin/
+COPY ./iptables-scripts/iptables-restore /usr/sbin/
+COPY ./iptables-scripts/ip6tables /usr/sbin/
+COPY ./iptables-scripts/ip6tables-save /usr/sbin/
+COPY ./iptables-scripts/ip6tables-restore /usr/sbin/
+COPY ./iptables-scripts/iptables /usr/sbin/
 
 LABEL io.k8s.display-name="ovn kubernetes" \
       io.k8s.description="ovnkube ubuntu image" 
