@@ -18,6 +18,13 @@ const (
 	// LocalNetworkName is the name that maps to an OVS bridge that provides
 	// access to local service
 	LocalNetworkName = "locnet"
+	// LocalnetGatewayIP is the SNAT IP using which host-local services are accessed
+	LocalnetGatewayIP = "169.254.33.2/24"
+	// LocalnetGatewayNextHop is the IP address to which packets to local services are forwarded
+	LocalnetGatewayNextHop = "169.254.33.1"
+	// LocalnetGatewayNextHopSubnet represents the subnet that bridges OVN logical topology and
+	// host network
+	LocalnetGatewayNextHopSubnet = "169.254.33.1/24"
 )
 
 // GetK8sClusterRouter returns back the OVN distibuted router
@@ -175,7 +182,7 @@ func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddre
 		return err
 	}
 
-	systemID, err := GetNodeChassisID()
+	systemID, err := getNodeChassisIDFromSB(nodeName)
 	if err != nil {
 		return err
 	}
@@ -400,7 +407,7 @@ func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddre
 }
 
 // LocalGatewayInit creates a gateway router to access local service.
-func LocalGatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddress,
+func LocalGatewayInit(clusterIPSubnet []string, nodeName, nodeIP, ifaceID, nicIP, nicMacAddress,
 	defaultGW string, physnetName string) error {
 
 	ip, physicalIPNet, err := net.ParseCIDR(nicIP)
@@ -421,7 +428,7 @@ func LocalGatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMac
 		return err
 	}
 
-	systemID, err := GetNodeChassisID()
+	systemID, err := getNodeChassisIDFromSB(nodeName)
 	if err != nil {
 		return err
 	}
@@ -466,11 +473,6 @@ func LocalGatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMac
 		}
 	}
 
-	// Add a route in distributed router to nodeIP.
-	nodeIP, err := GetNodeIP(nodeName)
-	if err != nil {
-		return fmt.Errorf("failed to obtain local IP from hostname %q: %v", nodeName, err)
-	}
 	stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
 		k8sClusterRouter, nodeIP+"/32", routerCIDR.IP.String())
 	if err != nil {
@@ -553,4 +555,19 @@ func LocalGatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMac
 	}
 
 	return nil
+}
+
+// getNodeChassisIDFromSB() will return the ChassisID from SBDB
+func getNodeChassisIDFromSB(nodeName string) (string, error) {
+	chassisID, stderr, err := RunOVNSbctl("--data=bare", "--no-heading",
+		"--columns=name", "find", "Chassis", "hostname="+nodeName)
+	if err != nil {
+		return "", fmt.Errorf("Failed to find Chassis ID for node %s, "+
+			"stderr: %q, error: %v", nodeName, stderr, err)
+	}
+	if chassisID == "" {
+		return "", fmt.Errorf("No chassis ID configured for node %s", nodeName)
+	}
+
+	return chassisID, nil
 }

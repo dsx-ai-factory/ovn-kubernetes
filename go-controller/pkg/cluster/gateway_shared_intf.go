@@ -7,6 +7,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/sirupsen/logrus"
@@ -254,8 +255,7 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string) error {
 }
 
 func initSharedGateway(
-	nodeName string, clusterIPSubnet []string, subnet,
-	gwNextHop, gwIntf string, wf *factory.WatchFactory) error {
+	nodeName string, subnet, gwNextHop, gwIntf string, wf *factory.WatchFactory) (map[string]string, postReadyFn, error) {
 	var bridgeName string
 	var uplinkName string
 	var brCreated bool
@@ -265,14 +265,14 @@ func initSharedGateway(
 		// This is an OVS bridge's internal port
 		uplinkName, err = util.GetNicName(bridgeName)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 	} else if _, _, err := util.RunOVSVsctl("--", "br-exists", gwIntf); err != nil {
 		// This is not a OVS bridge. We need to create a OVS bridge
 		// and add cluster.GatewayIntf as a port of that bridge.
 		bridgeName, err = util.NicToBridge(gwIntf)
 		if err != nil {
-			return fmt.Errorf("failed to convert %s to OVS bridge: %v",
+			return nil, nil, fmt.Errorf("failed to convert %s to OVS bridge: %v",
 				gwIntf, err)
 		}
 		uplinkName = gwIntf
@@ -282,7 +282,7 @@ func initSharedGateway(
 		// gateway interface is an OVS bridge
 		uplinkName, err = getIntfName(gwIntf)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 		bridgeName = gwIntf
 	}
@@ -291,49 +291,52 @@ func initSharedGateway(
 	// error out.
 	ipAddress, err := getIPv4Address(gwIntf)
 	if err != nil {
-		return fmt.Errorf("Failed to get interface details for %s (%v)",
+		return nil, nil, fmt.Errorf("Failed to get interface details for %s (%v)",
 			gwIntf, err)
 	}
 	if ipAddress == "" {
-		return fmt.Errorf("%s does not have a ipv4 address", gwIntf)
+		return nil, nil, fmt.Errorf("%s does not have a ipv4 address", gwIntf)
 	}
 
 	ifaceID, macAddress, err := bridgedGatewayNodeSetup(nodeName, bridgeName, gwIntf,
 		util.PhysicalNetworkName, brCreated)
 	if err != nil {
-		return fmt.Errorf("failed to set up shared interface gateway: %v", err)
+		return nil, nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
 
-	var lspArgs []string
-	if config.Gateway.VLANID > 0 {
-		lspArgs = []string{"--", "set", "logical_switch_port",
-			ifaceID, fmt.Sprintf("tag_request=%d", config.Gateway.VLANID)}
-	}
-
-	err = util.GatewayInit(clusterIPSubnet, nodeName, ifaceID, ipAddress,
-		macAddress, gwNextHop, subnet, util.PhysicalNetworkName, lspArgs)
+	localOnlyAnnotations, err := initLocalOnlyGateway(nodeName)
 	if err != nil {
-		return fmt.Errorf("failed to init shared interface gateway: %v", err)
+		return nil, nil, err
 	}
 
-	if err = initLocalOnlyGateway(nodeName, clusterIPSubnet); err != nil {
-		return err
+	annotations := map[string]string{
+		ovn.OvnNodeGatewayMode:       string(config.Gateway.Mode),
+		ovn.OvnNodeGatewayVlanID:     fmt.Sprintf("%d", config.Gateway.VLANID),
+		ovn.OvnNodeGatewayIfaceID:    ifaceID,
+		ovn.OvnNodeGatewayMacAddress: macAddress,
+		ovn.OvnNodeGatewayIP:         ipAddress,
+		ovn.OvnNodeGatewayNextHop:    gwNextHop,
 	}
 
-	// Program cluster.GatewayIntf to let non-pod traffic to go to host
-	// stack
-	if err := addDefaultConntrackRules(nodeName, bridgeName, uplinkName); err != nil {
-		return err
+	for k, v := range localOnlyAnnotations {
+		annotations[k] = v
 	}
 
-	if config.Gateway.NodeportEnable {
-		// Program cluster.GatewayIntf to let nodePort traffic to go to pods.
-		if err := nodePortWatcher(nodeName, bridgeName, uplinkName, wf); err != nil {
+	return annotations, func() error {
+		// Program cluster.GatewayIntf to let non-pod traffic to go to host
+		// stack
+		if err := addDefaultConntrackRules(nodeName, bridgeName, uplinkName); err != nil {
 			return err
 		}
-	}
 
-	return nil
+		if config.Gateway.NodeportEnable {
+			// Program cluster.GatewayIntf to let nodePort traffic to go to pods.
+			if err := nodePortWatcher(nodeName, bridgeName, uplinkName, wf); err != nil {
+				return err
+			}
+		}
+		return nil
+	}, nil
 }
 
 func cleanupSharedGateway() error {
@@ -353,19 +356,19 @@ func cleanupSharedGateway() error {
 	return nil
 }
 
-func initLocalOnlyGateway(nodeName string, clusterIPSubnet []string) error {
+func initLocalOnlyGateway(nodeName string) (map[string]string, error) {
 	// Create a localnet OVS bridge.
 	localnetBridgeName := "br-local"
 	_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br",
 		localnetBridgeName)
 	if err != nil {
-		return fmt.Errorf("Failed to create localnet bridge %s"+
+		return nil, fmt.Errorf("Failed to create localnet bridge %s"+
 			", stderr:%s (%v)", localnetBridgeName, stderr, err)
 	}
 
 	_, _, err = util.RunIP("link", "set", localnetBridgeName, "up")
 	if err != nil {
-		return fmt.Errorf("failed to up %s (%v)", localnetBridgeName, err)
+		return nil, fmt.Errorf("failed to up %s (%v)", localnetBridgeName, err)
 	}
 
 	// Create a localnet bridge nexthop
@@ -374,41 +377,37 @@ func initLocalOnlyGateway(nodeName string, clusterIPSubnet []string) error {
 		localnetBridgeName, localnetBridgeNextHop, "--", "set",
 		"interface", localnetBridgeNextHop, "type=internal")
 	if err != nil {
-		return fmt.Errorf("Failed to create localnet bridge next hop %s"+
+		return nil, fmt.Errorf("Failed to create localnet bridge next hop %s"+
 			", stderr:%s (%v)", localnetBridgeNextHop, stderr, err)
 	}
 	_, _, err = util.RunIP("link", "set", localnetBridgeNextHop, "up")
 	if err != nil {
-		return fmt.Errorf("failed to up %s (%v)", localnetBridgeNextHop, err)
+		return nil, fmt.Errorf("failed to up %s (%v)", localnetBridgeNextHop, err)
 	}
 
 	// Flush IPv4 address of localnetBridgeNextHop.
 	_, _, err = util.RunIP("addr", "flush", "dev", localnetBridgeNextHop)
 	if err != nil {
-		return fmt.Errorf("failed to flush ip address of %s (%v)",
+		return nil, fmt.Errorf("failed to flush ip address of %s (%v)",
 			localnetBridgeNextHop, err)
 	}
 
 	// Set localnetBridgeNextHop with an IP address.
 	_, _, err = util.RunIP("addr", "add",
-		localnetGatewayNextHopSubnet,
+		util.LocalnetGatewayNextHopSubnet,
 		"dev", localnetBridgeNextHop)
 	if err != nil {
-		return fmt.Errorf("failed to assign ip address to %s (%v)",
+		return nil, fmt.Errorf("failed to assign ip address to %s (%v)",
 			localnetBridgeNextHop, err)
 	}
 
-	ifaceID, macAddress, err := bridgedGatewayNodeSetup(nodeName, localnetBridgeName, localnetBridgeName,
+	_, macAddress, err := bridgedGatewayNodeSetup(nodeName, localnetBridgeName, localnetBridgeName,
 		util.LocalNetworkName, true)
 	if err != nil {
-		return fmt.Errorf("failed to set up shared interface gateway: %v", err)
+		return nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
 
-	err = util.LocalGatewayInit(clusterIPSubnet, nodeName, ifaceID, localnetGatewayIP,
-		macAddress, localnetGatewayNextHop, util.LocalNetworkName)
-	if err != nil {
-		return fmt.Errorf("failed to localnet gateway: %v", err)
-	}
-
-	return nil
+	return map[string]string{
+		ovn.OvnNodeLocalGatewayMacAddress: macAddress,
+	}, nil
 }
