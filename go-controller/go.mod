@@ -31,6 +31,7 @@ require (
 	gopkg.in/fsnotify/fsnotify.v1 v1.4.7
 	gopkg.in/gcfg.v1 v1.2.3
 	gopkg.in/inf.v0 v0.9.1 // indirect
+	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 	k8s.io/api v0.0.0-20190606204050-af9c91bd2759
 	k8s.io/apimachinery v0.0.0-20190404173353-6a84e37a896d

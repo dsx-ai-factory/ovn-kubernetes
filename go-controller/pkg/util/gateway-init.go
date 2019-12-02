@@ -309,13 +309,11 @@ func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddre
 	// Add external interface as a logical port to external_switch.
 	// This is a learning switch port with "unknown" address. The external
 	// world is accessed via this port.
-	cmdArgs := []string{"--", "--may-exist", "lsp-add", externalSwitch, ifaceID,
-		"--", "lsp-set-addresses", ifaceID, "unknown"}
-	if physnetName != "" {
-		cmdArgs = append(cmdArgs, "--", "lsp-set-type", ifaceID,
-			"localnet", "--", "lsp-set-options", ifaceID,
-			"network_name="+physnetName)
-	}
+	cmdArgs := []string{
+		"--", "--may-exist", "lsp-add", externalSwitch, ifaceID,
+		"--", "lsp-set-addresses", ifaceID, "unknown",
+		"--", "lsp-set-type", ifaceID, "localnet",
+		"--", "lsp-set-options", ifaceID, "network_name=" + physnetName}
 	cmdArgs = append(cmdArgs, lspArgs...)
 	stdout, stderr, err = RunOVNNbctl(cmdArgs...)
 	if err != nil {
