@@ -827,9 +827,10 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 				gwRouter     string = "GR_" + nodeName
 				clusterIPNet string = "10.1.0.0"
 				clusterCIDR  string = clusterIPNet + "/16"
-				//localnetGatewayIP      string = "100.64.0.3/24"
+				//localnetGatewayIPMask      string = "100.64.0.3/24"
 				//localnetGatewayNextHop string = "100.64.0.2"
-				localnetGatewayIP       string = "100.64.0.3/24"
+				localnetGatewayIPMask   string = "100.64.0.3/24"
+				localnetGatewayIP       string = "100.64.0.3"
 				localnetGatewayNextHop  string = "100.64.0.1"
 				localnetBridgeName      string = "br-local"
 				masterGWCIDR            string = "10.1.1.1/24"
@@ -852,7 +853,7 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 					OvnNodeGatewayVlanID:            "1024",
 					OvnNodeGatewayIfaceID:           ifaceID,
 					OvnNodeGatewayMacAddress:        brLocalnetMAC,
-					OvnNodeGatewayIP:                localnetGatewayIP,
+					OvnNodeGatewayIP:                localnetGatewayIPMask,
 					OvnNodeGatewayNextHop:           localnetGatewayNextHop,
 					OvnNodeLocalGatewayMacAddress:   localBrLocalnetMAC,
 				},

@@ -407,7 +407,7 @@ func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddre
 }
 
 // LocalGatewayInit creates a gateway router to access local service.
-func LocalGatewayInit(clusterIPSubnet []string, nodeName, nodeIP, ifaceID, nicIP, nicMacAddress,
+func LocalGatewayInit(clusterIPSubnet []string, nodeName, nodeIPMask, ifaceID, nicIP, nicMacAddress,
 	defaultGW string, physnetName string) error {
 
 	ip, physicalIPNet, err := net.ParseCIDR(nicIP)
@@ -473,12 +473,16 @@ func LocalGatewayInit(clusterIPSubnet []string, nodeName, nodeIP, ifaceID, nicIP
 		}
 	}
 
-	stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
-		k8sClusterRouter, nodeIP+"/32", routerCIDR.IP.String())
+	nodeIP, _, err := net.ParseCIDR(nodeIPMask)
 	if err != nil {
-		return fmt.Errorf("Failed to add a route to nodeIP in router "+
+		return fmt.Errorf("error parsing node's IP address %s (%v)", nodeIPMask, err)
+	}
+	stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
+		k8sClusterRouter, nodeIP.String()+"/32", routerCIDR.IP.String())
+	if err != nil {
+		return fmt.Errorf("Failed to add a route to nodeIP %q in router "+
 			"with local_node GR as the nexthop, stdout: %q, stderr: %q, error: %v",
-			stdout, stderr, err)
+			nodeIP.String(), stdout, stderr, err)
 	}
 
 	// Create the external switch for the physical interface to connect to.
