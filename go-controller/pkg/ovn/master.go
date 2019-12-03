@@ -366,7 +366,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, mode string, su
 	}
 
 	err = util.GatewayInit(clusterSubnets, node.Name, ifaceID, ipAddress,
-		gwMacAddress, gwNextHop, subnet, util.PhysicalNetworkName, lspArgs)
+		gwMacAddress, gwNextHop, subnet, lspArgs)
 	if err != nil {
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}
@@ -379,7 +379,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, mode string, su
 		}
 		localOnlyIfaceID := fmt.Sprintf("br-local_%s", node.Name)
 		err = util.LocalGatewayInit(clusterSubnets, node.Name, ipAddress, localOnlyIfaceID, util.LocalnetGatewayIP,
-			localOnlyGwMacAddress, util.LocalnetGatewayNextHop, util.LocalNetworkName)
+			localOnlyGwMacAddress, util.LocalnetGatewayNextHop)
 		if err != nil {
 			return err
 		}

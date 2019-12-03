@@ -162,7 +162,7 @@ func getGatewayLoadBalancers(gatewayRouter string) (string, string, error) {
 
 // GatewayInit creates a gateway router for the local chassis.
 func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddress,
-	defaultGW string, rampoutIPSubnet string, physnetName string, lspArgs []string) error {
+	defaultGW string, rampoutIPSubnet string, lspArgs []string) error {
 
 	ip, physicalIPNet, err := net.ParseCIDR(nicIP)
 	if err != nil {
@@ -313,7 +313,7 @@ func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddre
 		"--", "--may-exist", "lsp-add", externalSwitch, ifaceID,
 		"--", "lsp-set-addresses", ifaceID, "unknown",
 		"--", "lsp-set-type", ifaceID, "localnet",
-		"--", "lsp-set-options", ifaceID, "network_name=" + physnetName}
+		"--", "lsp-set-options", ifaceID, "network_name=" + PhysicalNetworkName}
 	cmdArgs = append(cmdArgs, lspArgs...)
 	stdout, stderr, err = RunOVNNbctl(cmdArgs...)
 	if err != nil {
@@ -406,7 +406,7 @@ func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddre
 
 // LocalGatewayInit creates a gateway router to access local service.
 func LocalGatewayInit(clusterIPSubnet []string, nodeName, nodeIPMask, ifaceID, nicIP, nicMacAddress,
-	defaultGW string, physnetName string) error {
+	defaultGW string) error {
 
 	ip, physicalIPNet, err := net.ParseCIDR(nicIP)
 	if err != nil {
@@ -495,12 +495,11 @@ func LocalGatewayInit(clusterIPSubnet []string, nodeName, nodeIPMask, ifaceID, n
 	// Add external interface as a logical port to external_switch.
 	// This is a learning switch port with "unknown" address. The external
 	// world is accessed via this port.
-	cmdArgs := []string{"--", "--may-exist", "lsp-add", externalSwitch, ifaceID,
-		"--", "lsp-set-addresses", ifaceID, "unknown"}
-	if physnetName != "" {
-		cmdArgs = append(cmdArgs, "--", "lsp-set-type", ifaceID,
-			"localnet", "--", "lsp-set-options", ifaceID,
-			"network_name="+physnetName)
+	cmdArgs := []string{
+		"--", "--may-exist", "lsp-add", externalSwitch, ifaceID,
+		"--", "lsp-set-addresses", ifaceID, "unknown",
+		"--", "lsp-set-type", ifaceID, "localnet",
+		"--", "lsp-set-options", ifaceID, "network_name=" + LocalNetworkName,
 	}
 	stdout, stderr, err = RunOVNNbctl(cmdArgs...)
 	if err != nil {
