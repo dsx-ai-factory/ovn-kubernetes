@@ -8,10 +8,10 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/util/retry"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/allocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/sirupsen/logrus"
@@ -53,40 +53,26 @@ const (
 //  If true, then either quit or perform a complete reconfiguration of the cluster (recreate switches/routers with new subnet values)
 func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 
-	alreadyAllocated := make([]string, 0)
 	existingNodes, err := oc.kube.GetNodes()
 	if err != nil {
 		logrus.Errorf("Error in initializing/fetching subnets: %v", err)
 		return err
 	}
-	for _, node := range existingNodes.Items {
-		hostsubnet, ok := node.Annotations[OvnHostSubnet]
-		if ok {
-			alreadyAllocated = append(alreadyAllocated, hostsubnet)
-		}
-	}
-	masterSubnetAllocatorList := make([]*allocator.SubnetAllocator, 0)
-	// NewSubnetAllocator is a subnet IPAM, which takes a CIDR (first argument)
-	// and gives out subnets of length 'hostSubnetLength' (second argument)
-	// but omitting any that exist in 'subrange' (third argument)
 	for _, clusterEntry := range config.Default.ClusterSubnets {
-		subrange := make([]string, 0)
-		for _, allocatedRange := range alreadyAllocated {
-			firstAddress, _, err := net.ParseCIDR(allocatedRange)
-			if err != nil {
-				return err
-			}
-			if clusterEntry.CIDR.Contains(firstAddress) {
-				subrange = append(subrange, allocatedRange)
-			}
-		}
-		subnetAllocator, err := allocator.NewSubnetAllocator(clusterEntry.CIDR.String(), 32-clusterEntry.HostSubnetLength, subrange)
+		err := oc.masterSubnetAllocator.AddNetworkRange(clusterEntry.CIDR.String(), clusterEntry.HostBits())
 		if err != nil {
 			return err
 		}
-		masterSubnetAllocatorList = append(masterSubnetAllocatorList, subnetAllocator)
 	}
-	oc.masterSubnetAllocatorList = masterSubnetAllocatorList
+	for _, node := range existingNodes.Items {
+		hostsubnet, ok := node.Annotations[OvnHostSubnet]
+		if ok {
+			err := oc.masterSubnetAllocator.MarkAllocatedNetwork(hostsubnet)
+			if err != nil {
+				utilruntime.HandleError(err)
+			}
+		}
+	}
 
 	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "port_group"); err == nil {
 		oc.portGroupSupport = true
@@ -442,14 +428,35 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	// If supported, enable IGMP snooping and querier on the node.
 	if oc.multicastSupport {
 		stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
-			nodeName, "other-config:mcast_snoop=\"true\"",
-			"other-config:mcast_querier=\"true\"",
-			"other-config:mcast_eth_src=\""+nodeLRPMac+"\"",
-			"other-config:mcast_ip4_src=\""+firstIP.IP.String()+"\"")
+			nodeName, "other-config:mcast_snoop=\"true\"")
 		if err != nil {
 			logrus.Errorf("Failed to enable IGMP on logical switch %v, stdout: %q, stderr: %q, error: %v",
 				nodeName, stdout, stderr, err)
 			return err
+		}
+
+		// Configure querier only if we have an IPv4 address, otherwise
+		// disable querier.
+		if firstIP.IP.To4() != nil {
+			stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
+				nodeName, "other-config:mcast_querier=\"true\"",
+				"other-config:mcast_eth_src=\""+nodeLRPMac+"\"",
+				"other-config:mcast_ip4_src=\""+firstIP.IP.String()+"\"")
+			if err != nil {
+				logrus.Errorf("Failed to enable IGMP Querier on logical switch %v, stdout: %q, stderr: %q, error: %v",
+					nodeName, stdout, stderr, err)
+				return err
+			}
+		} else {
+			stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
+				nodeName, "other-config:mcast_querier=\"false\"")
+			if err != nil {
+				logrus.Errorf("Failed to disable IGMP Querier on logical switch %v, stdout: %q, stderr: %q, error: %v",
+					nodeName, stdout, stderr, err)
+				return err
+			}
+			logrus.Infof("Disabled IGMP Querier on logical switch %v (No IPv4 Source IP available)",
+				nodeName)
 		}
 	}
 
@@ -493,27 +500,21 @@ func (oc *Controller) addNode(node *kapi.Node) (hostsubnet *net.IPNet, err error
 	}
 
 	// Node doesn't have a subnet assigned; reserve a new one for it
-	var subnetAllocator *allocator.SubnetAllocator
-	err = allocator.ErrSubnetAllocatorFull
-	for _, subnetAllocator = range oc.masterSubnetAllocatorList {
-		hostsubnet, err = subnetAllocator.GetNetwork()
-		if err == allocator.ErrSubnetAllocatorFull {
-			// Current subnet exhausted, check next possible subnet
-			continue
-		} else if err != nil {
-			return nil, fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
-		}
-		logrus.Infof("Allocated node %s HostSubnet %s", node.Name, hostsubnet.String())
-		break
-	}
-	if err == allocator.ErrSubnetAllocatorFull {
+	hostsubnetStr, err := oc.masterSubnetAllocator.AllocateNetwork()
+	if err != nil {
 		return nil, fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
+	}
+	logrus.Infof("Allocated node %s HostSubnet %s", node.Name, hostsubnetStr)
+
+	_, hostsubnet, err = net.ParseCIDR(hostsubnetStr)
+	if err != nil {
+		return nil, fmt.Errorf("Error in parsing hostsubnet %s - %v", hostsubnetStr, err)
 	}
 
 	defer func() {
 		// Release the allocation on error
 		if err != nil {
-			_ = subnetAllocator.ReleaseNetwork(hostsubnet)
+			_ = oc.masterSubnetAllocator.ReleaseNetwork(hostsubnetStr)
 		}
 	}()
 
@@ -526,10 +527,10 @@ func (oc *Controller) addNode(node *kapi.Node) (hostsubnet *net.IPNet, err error
 	// Set the HostSubnet annotation on the node object to signal
 	// to nodes that their logical infrastructure is set up and they can
 	// proceed with their initialization
-	err = oc.kube.SetAnnotationOnNode(node, OvnHostSubnet, hostsubnet.String())
+	err = oc.kube.SetAnnotationOnNode(node, OvnHostSubnet, hostsubnetStr)
 	if err != nil {
 		logrus.Errorf("Failed to set node %s host subnet annotation to %q: %v",
-			node.Name, hostsubnet.String(), err)
+			node.Name, hostsubnetStr, err)
 		return nil, err
 	}
 
@@ -537,15 +538,12 @@ func (oc *Controller) addNode(node *kapi.Node) (hostsubnet *net.IPNet, err error
 }
 
 func (oc *Controller) deleteNodeHostSubnet(nodeName string, subnet *net.IPNet) error {
-	for _, possibleSubnet := range oc.masterSubnetAllocatorList {
-		if err := possibleSubnet.ReleaseNetwork(subnet); err == nil {
-			logrus.Infof("Deleted HostSubnet %v for node %s", subnet, nodeName)
-			return nil
-		}
+	err := oc.masterSubnetAllocator.ReleaseNetwork(subnet.String())
+	if err != nil {
+		return fmt.Errorf("Error deleting subnet %v for node %q: %s", subnet, nodeName, err)
 	}
-	// SubnetAllocator.network is an unexported field so the only way to figure out if a subnet is in a network is to try and delete it
-	// if deletion succeeds then stop iterating, if the list is exhausted the node subnet wasn't deleteted return err
-	return fmt.Errorf("Error deleting subnet %v for node %q: subnet not found in any CIDR range or already available", subnet, nodeName)
+	logrus.Infof("Deleted HostSubnet %v for node %s", subnet, nodeName)
+	return nil
 }
 
 func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
