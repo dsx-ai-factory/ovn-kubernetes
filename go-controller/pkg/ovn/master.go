@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"strconv"
@@ -18,8 +19,10 @@ import (
 )
 
 const (
-	// OvnHostSubnet is the constant string representing the annotation key
-	OvnHostSubnet = "ovn_host_subnet"
+	// OvnHostSubnetLegacy is the old constant string representing the node subnet annotation key
+	OvnHostSubnetLegacy = "ovn_host_subnet"
+	// OvnNodeSubnets is the constant string representing the node subnets annotation key
+	OvnNodeSubnets = "k8s.ovn.org/node-subnets"
 	// OvnClusterRouter is the name of the distributed router
 	OvnClusterRouter = "ovn_cluster_router"
 	// OvnNodeManagementPortMacAddress is the constant string representing the annotation key
@@ -27,20 +30,24 @@ const (
 	// OvnServiceIdledAt is a constant string representing the Service annotation key
 	// whose value indicates the time stamp in RFC3339 format when a Service was idled
 	OvnServiceIdledAt = "k8s.ovn.org/idled-at"
-	// OvnNodeGatewayMode is the mode of the gateway
-	OvnNodeGatewayMode = "k8s.ovn.org/node-gateway-mode"
-	// OvnNodeGatewayVlanID is the vlanid used by the gateway
-	OvnNodeGatewayVlanID = "k8s.ovn.org/node-gateway-vlan-id"
-	// OvnNodeGatewayIfaceID is the interfaceID of the gateway
-	OvnNodeGatewayIfaceID = "k8s.ovn.org/node-gateway-iface-id"
-	// OvnNodeGatewayMacAddress is the MacAddress of the Gateway interface
-	OvnNodeGatewayMacAddress = "k8s.ovn.org/node-gateway-mac-address"
-	// OvnNodeGatewayIP is the IP address of the Gateway
-	OvnNodeGatewayIP = "k8s.ovn.org/node-gateway-ip"
-	// OvnNodeGatewayNextHop is the Next Hop
-	OvnNodeGatewayNextHop = "k8s.ovn.org/node-gateway-next-hop"
+	// OvnNodeL3GatewayConfig is the constant string representing the l3 gateway annotation key
+	OvnNodeL3GatewayConfig = "k8s.ovn.org/l3-gateway-config"
+	// OvnNodeGatewayMode is the mode of the gateway in the l3 gateway annotation
+	OvnNodeGatewayMode = "mode"
+	// OvnNodeGatewayVlanID is the vlanid used by the gateway in the l3 gateway annotation
+	OvnNodeGatewayVlanID = "vlan-id"
+	// OvnNodeGatewayIfaceID is the interfaceID of the gateway in the l3 gateway annotation
+	OvnNodeGatewayIfaceID = "interface-id"
+	// OvnNodeGatewayMacAddress is the MacAddress of the Gateway interface in the l3 gateway annotation
+	OvnNodeGatewayMacAddress = "mac-address"
+	// OvnNodeGatewayIP is the IP address of the Gateway in the l3 gateway annotation
+	OvnNodeGatewayIP = "ip-address"
+	// OvnNodeGatewayNextHop is the Next Hop in the l3 gateway annotation
+	OvnNodeGatewayNextHop = "next-hop"
 	// OvnNodeLocalGatewayMacAddress represents the MAC addres of the br-local bridge
-	OvnNodeLocalGatewayMacAddress = "k8s.ovn.org/node-gateway-local-mac-address"
+	OvnNodeLocalGatewayMacAddress = "local-mac-address"
+	// OvnDefaultNetworkGateway captures L3 gateway config for default OVN network interface
+	OvnDefaultNetworkGateway = "default"
 )
 
 // StartClusterMaster runs a subnet IPAM and a controller that watches arrival/departure
@@ -65,9 +72,9 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		}
 	}
 	for _, node := range existingNodes.Items {
-		hostsubnet, ok := node.Annotations[OvnHostSubnet]
-		if ok {
-			err := oc.masterSubnetAllocator.MarkAllocatedNetwork(hostsubnet)
+		hostsubnet, _ := parseNodeHostSubnet(&node)
+		if hostsubnet != nil {
+			err := oc.masterSubnetAllocator.MarkAllocatedNetwork(hostsubnet.String())
 			if err != nil {
 				utilruntime.HandleError(err)
 			}
@@ -78,10 +85,18 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		oc.portGroupSupport = true
 	}
 
-	// Multicast support requires portGroupSupport
-	if oc.portGroupSupport {
-		if _, _, err := util.RunOVNSbctl("--columns=_uuid", "list", "IGMP_Group"); err == nil {
-			oc.multicastSupport = true
+	if oc.multicastSupport {
+		// Multicast support requires portGroupSupport
+		if oc.portGroupSupport {
+			if _, _, err := util.RunOVNSbctl("--columns=_uuid", "list", "IGMP_Group"); err != nil {
+				logrus.Warningf("Multicast support enabled, however version of OVN in use does not support IGMP Group. " +
+					"Disabling Multicast Support")
+				oc.multicastSupport = false
+			}
+		} else {
+			logrus.Warningf("Multicast support enabled, however version of OVN in use does not support Port Group. " +
+				"Disabling Multicast Support")
+			oc.multicastSupport = false
 		}
 	}
 
@@ -249,19 +264,38 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, subnet *net.IPNet)
 	return nil
 }
 
-func parseGatewayIfaceID(node *kapi.Node) (string, error) {
-	ifaceID, ok := node.Annotations[OvnNodeGatewayIfaceID]
+// UnmarshalPodAnnotation returns a the unmarshalled pod annotation
+func UnmarshalNodeL3GatewayAnnotation(node *kapi.Node) (map[string]string, error) {
+	l3GatewayAnnotation, ok := node.Annotations[OvnNodeL3GatewayConfig]
+	if !ok {
+		return nil, fmt.Errorf("%s annotation not found for node %q", OvnNodeL3GatewayConfig, node.Name)
+	}
+
+	l3GatewayConfigMap := map[string]map[string]string{}
+	if err := json.Unmarshal([]byte(l3GatewayAnnotation), &l3GatewayConfigMap); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal l3 gateway config annotation %s for node %q", l3GatewayAnnotation, node.Name)
+	}
+
+	l3GatewayConfig, ok := l3GatewayConfigMap[OvnDefaultNetworkGateway]
+	if !ok {
+		return nil, fmt.Errorf("%s annotation for %s network not found", OvnNodeL3GatewayConfig, OvnDefaultNetworkGateway)
+	}
+	return l3GatewayConfig, nil
+}
+
+func parseGatewayIfaceID(l3GatewayConfig map[string]string) (string, error) {
+	ifaceID, ok := l3GatewayConfig[OvnNodeGatewayIfaceID]
 	if !ok || ifaceID == "" {
-		return "", fmt.Errorf("%s annotation not found or invalid for node %q ", OvnNodeGatewayIfaceID, node.Name)
+		return "", fmt.Errorf("%s annotation not found or invalid", OvnNodeGatewayIfaceID)
 	}
 
 	return ifaceID, nil
 }
 
-func parseLocalGatewayMacAddress(node *kapi.Node) (string, error) {
-	gatewayMacAddress, ok := node.Annotations[OvnNodeLocalGatewayMacAddress]
+func parseLocalGatewayMacAddress(l3GatewayConfig map[string]string) (string, error) {
+	gatewayMacAddress, ok := l3GatewayConfig[OvnNodeLocalGatewayMacAddress]
 	if !ok {
-		return "", fmt.Errorf("%s annotation not found for node %q ", OvnNodeLocalGatewayMacAddress, node.Name)
+		return "", fmt.Errorf("%s annotation not found", OvnNodeLocalGatewayMacAddress)
 	}
 
 	_, err := net.ParseMAC(gatewayMacAddress)
@@ -272,10 +306,10 @@ func parseLocalGatewayMacAddress(node *kapi.Node) (string, error) {
 	return gatewayMacAddress, nil
 }
 
-func parseGatewayMacAddress(node *kapi.Node) (string, error) {
-	gatewayMacAddress, ok := node.Annotations[OvnNodeGatewayMacAddress]
+func parseGatewayMacAddress(l3GatewayConfig map[string]string) (string, error) {
+	gatewayMacAddress, ok := l3GatewayConfig[OvnNodeGatewayMacAddress]
 	if !ok {
-		return "", fmt.Errorf("%s annotation not found for node %q ", OvnNodeGatewayMacAddress, node.Name)
+		return "", fmt.Errorf("%s annotation not found", OvnNodeGatewayMacAddress)
 	}
 
 	_, err := net.ParseMAC(gatewayMacAddress)
@@ -286,31 +320,31 @@ func parseGatewayMacAddress(node *kapi.Node) (string, error) {
 	return gatewayMacAddress, nil
 }
 
-func parseGatewayLogicalNetwork(node *kapi.Node) (string, string, error) {
-	ipAddress, ok := node.Annotations[OvnNodeGatewayIP]
+func parseGatewayLogicalNetwork(l3GatewayConfig map[string]string) (string, string, error) {
+	ipAddress, ok := l3GatewayConfig[OvnNodeGatewayIP]
 	if !ok {
-		return "", "", fmt.Errorf("%s annotation not found for node %q ", OvnNodeGatewayIP, node.Name)
+		return "", "", fmt.Errorf("%s annotation not found", OvnNodeGatewayIP)
 	}
 
-	gwNextHop, ok := node.Annotations[OvnNodeGatewayNextHop]
+	gwNextHop, ok := l3GatewayConfig[OvnNodeGatewayNextHop]
 	if !ok {
-		return "", "", fmt.Errorf("%s annotation not found for node %q ", OvnNodeGatewayNextHop, node.Name)
+		return "", "", fmt.Errorf("%s annotation not found", OvnNodeGatewayNextHop)
 	}
 
 	return ipAddress, gwNextHop, nil
 }
 
-func parseGatewayVLANID(node *kapi.Node, ifaceID string) ([]string, error) {
+func parseGatewayVLANID(l3GatewayConfig map[string]string, ifaceID string) ([]string, error) {
 
 	var lspArgs []string
-	vID, ok := node.Annotations[OvnNodeGatewayVlanID]
+	vID, ok := l3GatewayConfig[OvnNodeGatewayVlanID]
 	if !ok {
-		return nil, fmt.Errorf("%s annotation not found for node %q ", OvnNodeGatewayVlanID, node.Name)
+		return nil, fmt.Errorf("%s annotation not found", OvnNodeGatewayVlanID)
 	}
 
 	vlanID, errVlan := strconv.Atoi(vID)
 	if errVlan != nil {
-		return nil, fmt.Errorf("%s annotation has an invalid format for node %q ", OvnNodeGatewayVlanID, node.Name)
+		return nil, fmt.Errorf("%s annotation has an invalid format", OvnNodeGatewayVlanID)
 	}
 	if vlanID > 0 {
 		lspArgs = []string{"--", "set", "logical_switch_port",
@@ -320,24 +354,25 @@ func parseGatewayVLANID(node *kapi.Node, ifaceID string) ([]string, error) {
 	return lspArgs, nil
 }
 
-func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, mode string, subnet string) error {
+func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig map[string]string, subnet string) error {
 	var err error
 	var clusterSubnets []string
 	for _, clusterSubnet := range config.Default.ClusterSubnets {
 		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR.String())
 	}
 
-	ifaceID, err := parseGatewayIfaceID(node)
+	mode := l3GatewayConfig[OvnNodeGatewayMode]
+	ifaceID, err := parseGatewayIfaceID(l3GatewayConfig)
 	if err != nil {
 		return err
 	}
 
-	gwMacAddress, err := parseGatewayMacAddress(node)
+	gwMacAddress, err := parseGatewayMacAddress(l3GatewayConfig)
 	if err != nil {
 		return err
 	}
 
-	ipAddress, gwNextHop, err := parseGatewayLogicalNetwork(node)
+	ipAddress, gwNextHop, err := parseGatewayLogicalNetwork(l3GatewayConfig)
 	if err != nil {
 		return err
 	}
@@ -345,7 +380,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, mode string, su
 	var lspArgs []string
 	var lspErr error
 	if mode == string(config.GatewayModeShared) {
-		lspArgs, lspErr = parseGatewayVLANID(node, ifaceID)
+		lspArgs, lspErr = parseGatewayVLANID(l3GatewayConfig, ifaceID)
 		if lspErr != nil {
 			return lspErr
 		}
@@ -359,7 +394,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, mode string, su
 
 	// Add local only gateway to allow local service access
 	if mode == string(config.GatewayModeShared) {
-		localOnlyGwMacAddress, err := parseLocalGatewayMacAddress(node)
+		localOnlyGwMacAddress, err := parseLocalGatewayMacAddress(l3GatewayConfig)
 		if err != nil {
 			return err
 		}
@@ -379,9 +414,18 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, mode string, su
 }
 
 func parseNodeHostSubnet(node *kapi.Node) (*net.IPNet, error) {
-	sub, ok := node.Annotations[OvnHostSubnet]
+	sub, ok := node.Annotations[OvnNodeSubnets]
 	if !ok {
-		return nil, fmt.Errorf("Error in obtaining host subnet for node %q for deletion", node.Name)
+		sub, ok = node.Annotations[OvnHostSubnetLegacy]
+	} else {
+		nodeSubnets := make(map[string]string)
+		if err := json.Unmarshal([]byte(sub), &nodeSubnets); err != nil {
+			return nil, fmt.Errorf("error parsing node-subnets annotation: %v", err)
+		}
+		sub, ok = nodeSubnets["default"]
+	}
+	if !ok {
+		return nil, fmt.Errorf("node %q has no subnet annotation", node.Name)
 	}
 
 	_, subnet, err := net.ParseCIDR(sub)
@@ -490,11 +534,49 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	return nil
 }
 
+// annotate the node with the subnet information assigned to node's logical switch. the
+// new format of the annotation is:
+//
+// k8s.ovn.org/node-subnets: {
+//	  "default": "192.168.2.1",
+// }
+func (oc *Controller) addNodeAnnotations(node *kapi.Node, subnet string) error {
+	// nothing to do if the node already has the annotation key
+	_, ok := node.Annotations[OvnNodeSubnets]
+	if ok {
+		return nil
+	}
+
+	bytes, err := json.Marshal(map[string]string{
+		"default": subnet,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to marshal node %q annotation for subnet %s",
+			node.Name, subnet)
+	}
+	nodeAnnotations := make(map[string]interface{})
+	// if legacy annotation key exists, then remove it
+	nodeAnnotations[OvnHostSubnetLegacy] = nil
+	nodeAnnotations[OvnNodeSubnets] = string(bytes)
+	err = oc.kube.SetAnnotationsOnNode(node, nodeAnnotations)
+	if err != nil {
+		return fmt.Errorf("failed to set node annotation %q on existing node %s to %q: %v",
+			OvnNodeSubnets, node.Name, subnet, err)
+	}
+	return nil
+}
+
 func (oc *Controller) addNode(node *kapi.Node) (hostsubnet *net.IPNet, err error) {
 	oc.clearInitialNodeNetworkUnavailableCondition(node)
 
 	hostsubnet, _ = parseNodeHostSubnet(node)
 	if hostsubnet != nil {
+		// Update the node's annotation to use the new annotation key and remove the
+		// old annotation key.
+		err = oc.addNodeAnnotations(node, hostsubnet.String())
+		if err != nil {
+			return nil, err
+		}
 		// Node already has subnet assigned; ensure its logical network is set up
 		return hostsubnet, oc.ensureNodeLogicalNetwork(node.Name, hostsubnet)
 	}
@@ -527,10 +609,8 @@ func (oc *Controller) addNode(node *kapi.Node) (hostsubnet *net.IPNet, err error
 	// Set the HostSubnet annotation on the node object to signal
 	// to nodes that their logical infrastructure is set up and they can
 	// proceed with their initialization
-	err = oc.kube.SetAnnotationOnNode(node, OvnHostSubnet, hostsubnetStr)
+	err = oc.addNodeAnnotations(node, hostsubnet.String())
 	if err != nil {
-		logrus.Errorf("Failed to set node %s host subnet annotation to %q: %v",
-			node.Name, hostsubnetStr, err)
 		return nil, err
 	}
 

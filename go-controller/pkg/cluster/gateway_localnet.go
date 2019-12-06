@@ -107,7 +107,7 @@ func localnetGatewayNAT(ipt util.IPTablesHelper, ifname, ip string) error {
 }
 
 func initLocalnetGateway(nodeName string,
-	subnet string, wf *factory.WatchFactory) (map[string]string, error) {
+	subnet string, wf *factory.WatchFactory) (map[string]map[string]string, error) {
 	ipt, err := util.GetIPTablesHelper(iptables.ProtocolIPv4)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize iptables: %v", err)
@@ -163,13 +163,16 @@ func initLocalnetGateway(nodeName string,
 		return nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
 
-	annotations := map[string]string{
+	l3GatewayConfig := map[string]string{
 		ovn.OvnNodeGatewayMode:       string(config.Gateway.Mode),
 		ovn.OvnNodeGatewayVlanID:     fmt.Sprintf("%d", config.Gateway.VLANID),
 		ovn.OvnNodeGatewayIfaceID:    ifaceID,
 		ovn.OvnNodeGatewayMacAddress: macAddress,
 		ovn.OvnNodeGatewayIP:         util.LocalnetGatewayIP,
 		ovn.OvnNodeGatewayNextHop:    util.LocalnetGatewayNextHop,
+	}
+	annotations := map[string]map[string]string{
+		ovn.OvnDefaultNetworkGateway: l3GatewayConfig,
 	}
 
 	err = localnetGatewayNAT(ipt, localnetBridgeNextHop, util.LocalnetGatewayIP)

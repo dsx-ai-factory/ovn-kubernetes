@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 
@@ -208,6 +209,18 @@ func addNodeportLBs(fexec *ovntest.FakeExec, nodeName, tcpLBUUID, udpLBUUID stri
 	})
 }
 
+func getDisabledGwModeAnnotation() string {
+	l3GatewayConfig := map[string]interface{}{
+		OvnDefaultNetworkGateway: map[string]string{
+			OvnNodeGatewayMode: string(config.GatewayModeDisabled),
+		},
+	}
+	bytes, err := json.Marshal(l3GatewayConfig)
+	Expect(err).NotTo(HaveOccurred())
+
+	return string(bytes)
+}
+
 var _ = Describe("Master Operations", func() {
 	var app *cli.App
 
@@ -242,6 +255,7 @@ var _ = Describe("Master Operations", func() {
 				Name: nodeName,
 				Annotations: map[string]string{
 					OvnNodeManagementPortMacAddress: mgmtMAC,
+					OvnNodeL3GatewayConfig:          getDisabledGwModeAnnotation(),
 				},
 			}}
 
@@ -274,7 +288,7 @@ var _ = Describe("Master Operations", func() {
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 			updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(updatedNode.Annotations).To(HaveKeyWithValue(OvnHostSubnet, nodeSubnet))
+			Expect(updatedNode.Annotations[OvnNodeSubnets]).To(MatchJSON(fmt.Sprintf(`{"default": "%s"}`, nodeSubnet)))
 			Expect(updatedNode.Annotations).To(HaveKeyWithValue(OvnNodeManagementPortMacAddress, mgmtMAC))
 			Eventually(func() bool { return fexec.CalledMatchesExpected() }, 2).Should(BeTrue())
 			return nil
@@ -283,6 +297,7 @@ var _ = Describe("Master Operations", func() {
 		err := app.Run([]string{
 			app.Name,
 			"-cluster-subnets=" + clusterCIDR,
+			"-enable-multicast",
 		})
 		Expect(err).NotTo(HaveOccurred())
 	})
@@ -306,7 +321,8 @@ var _ = Describe("Master Operations", func() {
 				Name: nodeName,
 				Annotations: map[string]string{
 					OvnNodeManagementPortMacAddress: mgmtMAC,
-					OvnHostSubnet:                   nodeSubnet,
+					OvnNodeSubnets:                  fmt.Sprintf(`{"default": "%s"}`, nodeSubnet),
+					OvnNodeL3GatewayConfig:          getDisabledGwModeAnnotation(),
 				},
 			}}
 
@@ -346,7 +362,7 @@ var _ = Describe("Master Operations", func() {
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 			updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(updatedNode.Annotations).To(HaveKeyWithValue(OvnHostSubnet, nodeSubnet))
+			Expect(updatedNode.Annotations[OvnNodeSubnets]).To(MatchJSON(fmt.Sprintf(`{"default": "%s"}`, nodeSubnet)))
 			Expect(updatedNode.Annotations).To(HaveKeyWithValue(OvnNodeManagementPortMacAddress, mgmtMAC))
 			Eventually(func() bool { return fexec.CalledMatchesExpected() }, 2).Should(BeTrue())
 			return nil
@@ -355,6 +371,7 @@ var _ = Describe("Master Operations", func() {
 		err := app.Run([]string{
 			app.Name,
 			"-cluster-subnets=" + clusterCIDR,
+			"-enable-multicast",
 		})
 		Expect(err).NotTo(HaveOccurred())
 	})
@@ -442,8 +459,9 @@ subnet=%s
 				ObjectMeta: metav1.ObjectMeta{
 					Name: masterName,
 					Annotations: map[string]string{
-						OvnHostSubnet:                   masterSubnet,
+						OvnNodeSubnets:                  fmt.Sprintf(`{"default": "%s"}`, masterSubnet),
 						OvnNodeManagementPortMacAddress: masterMgmtPortMAC,
+						OvnNodeL3GatewayConfig:          getDisabledGwModeAnnotation(),
 					},
 				},
 				Status: v1.NodeStatus{
@@ -595,18 +613,23 @@ var _ = Describe("Gateway Init Operations", func() {
 			)
 
 			ifaceID := localnetBridgeName + "_" + nodeName
+			l3GatewayConfig := map[string]string{
+				OvnNodeGatewayMode:       string(config.GatewayModeLocal),
+				OvnNodeGatewayVlanID:     string(config.Gateway.VLANID),
+				OvnNodeGatewayIfaceID:    ifaceID,
+				OvnNodeGatewayMacAddress: brLocalnetMAC,
+				OvnNodeGatewayIP:         localnetGatewayIP,
+				OvnNodeGatewayNextHop:    localnetGatewayNextHop,
+			}
+			bytes, err := json.Marshal(map[string]map[string]string{"default": l3GatewayConfig})
+			Expect(err).NotTo(HaveOccurred())
 
 			testNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
 				Annotations: map[string]string{
 					OvnNodeManagementPortMacAddress: brLocalnetMAC,
-					OvnHostSubnet:                   nodeSubnet,
-					OvnNodeGatewayMode:              string(config.GatewayModeLocal),
-					OvnNodeGatewayVlanID:            string(config.Gateway.VLANID),
-					OvnNodeGatewayIfaceID:           ifaceID,
-					OvnNodeGatewayMacAddress:        brLocalnetMAC,
-					OvnNodeGatewayIP:                localnetGatewayIP,
-					OvnNodeGatewayNextHop:           localnetGatewayNextHop,
+					OvnNodeSubnets:                  fmt.Sprintf(`{"default": "%s"}`, nodeSubnet),
+					OvnNodeL3GatewayConfig:          string(bytes),
 				},
 			}}
 
@@ -615,7 +638,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			})
 
 			fexec := ovntest.NewFakeExec()
-			err := util.SetExec(fexec)
+			err = util.SetExec(fexec)
 			Expect(err).NotTo(HaveOccurred())
 
 			_, err = config.InitConfig(ctx, fexec, nil)
@@ -792,7 +815,7 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 
 			_, subnet, err := net.ParseCIDR(nodeSubnet)
 			Expect(err).NotTo(HaveOccurred())
-			err = clusterController.syncGatewayLogicalNetwork(&testNode, string(config.GatewayModeLocal), subnet.String())
+			err = clusterController.syncGatewayLogicalNetwork(&testNode, l3GatewayConfig, subnet.String())
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
@@ -844,18 +867,23 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 			ifaceID := localnetBridgeName + "_" + nodeName
 			localIfaceID := localLocalnetBridgeName + "_" + nodeName
 
+			l3GatewayConfig := map[string]string{
+				OvnNodeGatewayMode:            string(config.GatewayModeShared),
+				OvnNodeGatewayVlanID:          "1024",
+				OvnNodeGatewayIfaceID:         ifaceID,
+				OvnNodeGatewayMacAddress:      brLocalnetMAC,
+				OvnNodeGatewayIP:              localnetGatewayIPMask,
+				OvnNodeGatewayNextHop:         localnetGatewayNextHop,
+				OvnNodeLocalGatewayMacAddress: localBrLocalnetMAC,
+			}
+			bytes, err := json.Marshal(map[string]map[string]string{"default": l3GatewayConfig})
+			Expect(err).NotTo(HaveOccurred())
 			testNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
 				Annotations: map[string]string{
 					OvnNodeManagementPortMacAddress: brLocalnetMAC,
-					OvnHostSubnet:                   nodeSubnet,
-					OvnNodeGatewayMode:              string(config.GatewayModeShared),
-					OvnNodeGatewayVlanID:            "1024",
-					OvnNodeGatewayIfaceID:           ifaceID,
-					OvnNodeGatewayMacAddress:        brLocalnetMAC,
-					OvnNodeGatewayIP:                localnetGatewayIPMask,
-					OvnNodeGatewayNextHop:           localnetGatewayNextHop,
-					OvnNodeLocalGatewayMacAddress:   localBrLocalnetMAC,
+					OvnNodeSubnets:                  fmt.Sprintf(`{"default": "%s"}`, nodeSubnet),
+					OvnNodeL3GatewayConfig:          string(bytes),
 				},
 			}}
 
@@ -864,7 +892,7 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 			})
 
 			fexec := ovntest.NewFakeExec()
-			err := util.SetExec(fexec)
+			err = util.SetExec(fexec)
 			Expect(err).NotTo(HaveOccurred())
 
 			_, err = config.InitConfig(ctx, fexec, nil)
@@ -1043,7 +1071,7 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 
 			_, subnet, err := net.ParseCIDR(nodeSubnet)
 			Expect(err).NotTo(HaveOccurred())
-			err = clusterController.syncGatewayLogicalNetwork(&testNode, string(config.GatewayModeShared), subnet.String())
+			err = clusterController.syncGatewayLogicalNetwork(&testNode, l3GatewayConfig, subnet.String())
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue())

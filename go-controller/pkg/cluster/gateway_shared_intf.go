@@ -254,8 +254,8 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string) error {
 	return nil
 }
 
-func initSharedGateway(
-	nodeName string, subnet, gwNextHop, gwIntf string, wf *factory.WatchFactory) (map[string]string, postReadyFn, error) {
+func initSharedGateway(nodeName string, subnet, gwNextHop, gwIntf string,
+	wf *factory.WatchFactory) (map[string]map[string]string, postReadyFn, error) {
 	var bridgeName string
 	var uplinkName string
 	var brCreated bool
@@ -309,7 +309,7 @@ func initSharedGateway(
 		return nil, nil, err
 	}
 
-	annotations := map[string]string{
+	l3GatewayConfig := map[string]string{
 		ovn.OvnNodeGatewayMode:       string(config.Gateway.Mode),
 		ovn.OvnNodeGatewayVlanID:     fmt.Sprintf("%d", config.Gateway.VLANID),
 		ovn.OvnNodeGatewayIfaceID:    ifaceID,
@@ -319,7 +319,10 @@ func initSharedGateway(
 	}
 
 	for k, v := range localOnlyAnnotations {
-		annotations[k] = v
+		l3GatewayConfig[k] = v
+	}
+	annotations := map[string]map[string]string{
+		ovn.OvnDefaultNetworkGateway: l3GatewayConfig,
 	}
 
 	return annotations, func() error {
@@ -352,6 +355,31 @@ func cleanupSharedGateway() error {
 		if err != nil {
 			return fmt.Errorf("Failed to delete port %s stderr:%s (%v)", port, stderr, err)
 		}
+	}
+
+	// Get the OVS bridge name from ovn-bridge-mappings
+	stdout, stderr, err = util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
+		"external_ids:ovn-bridge-mappings")
+	if err != nil {
+		return fmt.Errorf("Failed to get ovn-bridge-mappings stderr:%s (%v)", stderr, err)
+	}
+	// skip the existing mapping setting for the specified physicalNetworkName
+	bridgeName := ""
+	bridgeMappings := strings.Split(stdout, ",")
+	for _, bridgeMapping := range bridgeMappings {
+		m := strings.Split(bridgeMapping, ":")
+		if network := m[0]; network == util.PhysicalNetworkName {
+			bridgeName = m[1]
+			break
+		}
+	}
+	if len(bridgeName) == 0 {
+		return nil
+	}
+
+	_, stderr, err = util.AddNormalActionOFFlow(bridgeName)
+	if err != nil {
+		return fmt.Errorf("Failed to replace-flows on bridge %q stderr:%s (%v)", bridgeName, stderr, err)
 	}
 	return nil
 }

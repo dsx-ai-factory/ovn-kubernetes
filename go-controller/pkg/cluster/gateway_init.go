@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"encoding/json"
 	"fmt"
 	"runtime"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -109,10 +111,12 @@ func (cluster *OvnClusterController) initGateway(
 		}
 	}
 
+	var err error
+	var prFn postReadyFn
+	var annotations map[string]map[string]string
 	switch config.Gateway.Mode {
 	case config.GatewayModeLocal:
-		annotations, err := initLocalnetGateway(nodeName, subnet, cluster.watchFactory)
-		return annotations, nil, err
+		annotations, err = initLocalnetGateway(nodeName, subnet, cluster.watchFactory)
 	case config.GatewayModeShared:
 		gatewayNextHop := config.Gateway.NextHop
 		gatewayIntf := config.Gateway.Interface
@@ -131,10 +135,26 @@ func (cluster *OvnClusterController) initGateway(
 				gatewayIntf = defaultGatewayIntf
 			}
 		}
-		return initSharedGateway(nodeName, subnet, gatewayNextHop, gatewayIntf, cluster.watchFactory)
+		annotations, prFn, err = initSharedGateway(nodeName, subnet, gatewayNextHop, gatewayIntf,
+			cluster.watchFactory)
+	case config.GatewayModeDisabled:
+		annotations = map[string]map[string]string{
+			ovn.OvnDefaultNetworkGateway: {
+				ovn.OvnNodeGatewayMode: string(config.GatewayModeDisabled),
+			},
+		}
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	// marshal the annotation into string
+	bytes, err := json.Marshal(annotations)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to marshal l3 gateway information %v for node %q: (%v)",
+			annotations, nodeName, err)
 	}
 
-	return nil, nil, nil
+	return map[string]string{ovn.OvnNodeL3GatewayConfig: string(bytes)}, prFn, nil
 }
 
 // CleanupClusterNode cleans up OVS resources on the k8s node on ovnkube-node daemonset deletion.

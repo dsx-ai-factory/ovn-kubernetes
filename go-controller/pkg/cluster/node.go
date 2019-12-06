@@ -1,8 +1,8 @@
 package cluster
 
 import (
+	"encoding/json"
 	"fmt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"io/ioutil"
 	"net"
 	"os"
@@ -17,6 +17,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -72,6 +73,31 @@ func isOVNControllerReady(name string) (bool, error) {
 	return true, nil
 }
 
+// TODO: GMoodalbail
+// copied from `ovn` package. fix me later.
+func parseNodeHostSubnet(node *kapi.Node) (*net.IPNet, error) {
+	sub, ok := node.Annotations[ovn.OvnNodeSubnets]
+	if !ok {
+		sub, ok = node.Annotations[ovn.OvnHostSubnetLegacy]
+	} else {
+		nodeSubnets := make(map[string]string)
+		if err := json.Unmarshal([]byte(sub), &nodeSubnets); err != nil {
+			return nil, fmt.Errorf("error parsing node-subnets annotation: %v", err)
+		}
+		sub, ok = nodeSubnets["default"]
+	}
+	if !ok {
+		return nil, fmt.Errorf("node %q has no subnet annotation", node.Name)
+	}
+
+	_, subnet, err := net.ParseCIDR(sub)
+	if err != nil {
+		return nil, fmt.Errorf("Error in parsing hostsubnet - %v", err)
+	}
+
+	return subnet, nil
+}
+
 // StartClusterNode learns the subnet assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
 func (cluster *OvnClusterController) StartClusterNode(name string) error {
@@ -81,7 +107,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	var subnet *net.IPNet
 	var clusterSubnets []string
 	var nodeCidr, lsCidr string
-	var gotAnnotation, ok bool
+	var gotAnnotation bool
 	var wg sync.WaitGroup
 
 	if config.MasterHA.ManageDBServers {
@@ -125,16 +151,12 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 				continue
 			}
 
-			nodeCidr, ok = node.Annotations[ovn.OvnHostSubnet]
-			if !ok {
+			subnet, err = parseNodeHostSubnet(node)
+			if err != nil {
 				logrus.Errorf("Error starting node %s, no annotation found on node for subnet - %v", name, err)
 				continue
 			}
-			_, subnet, err = net.ParseCIDR(nodeCidr)
-			if err != nil {
-				logrus.Errorf("Invalid hostsubnet found for node %s - %v", node.Name, err)
-				return err
-			}
+			nodeCidr = subnet.String()
 			gotAnnotation = true
 		}
 
@@ -164,28 +186,27 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 
 	type readyFunc func(string, string) (bool, error)
 	var readyFuncs []readyFunc
-	var nodeAnnotations map[string]string
-	var postReady postReadyFn
 
-	// If gateway is enabled, get gateway annotations
-	if config.Gateway.Mode != config.GatewayModeDisabled {
-		nodeAnnotations, postReady, err = cluster.initGateway(node.Name, subnet.String())
-		if err != nil {
-			return err
-		}
-		readyFuncs = append(readyFuncs, GatewayReady)
+	// get gateway annotations
+	gwAnnotations, postReady, err := cluster.initGateway(node.Name, subnet.String())
+	if err != nil {
+		return err
 	}
+	readyFuncs = append(readyFuncs, GatewayReady)
 
 	// Get management port annotations
 	mgmtPortAnnotations, err := CreateManagementPort(node.Name, subnet, clusterSubnets)
 	if err != nil {
 		return err
 	}
-
 	readyFuncs = append(readyFuncs, ManagementPortReady)
 
-	// Combine mgmtPortAnnotations with any existing gwyAnnotations
+	// Combine mgmtPortAnnotations and gwAnnotations into nodeAnnotations
+	nodeAnnotations := make(map[string]interface{})
 	for k, v := range mgmtPortAnnotations {
+		nodeAnnotations[k] = v
+	}
+	for k, v := range gwAnnotations {
 		nodeAnnotations[k] = v
 	}
 
