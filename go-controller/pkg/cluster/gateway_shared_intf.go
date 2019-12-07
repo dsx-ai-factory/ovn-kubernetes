@@ -395,6 +395,12 @@ func initLocalOnlyGateway(nodeName string) (map[string]string, error) {
 			", stderr:%s (%v)", localnetBridgeName, stderr, err)
 	}
 
+	_, macAddress, err := bridgedGatewayNodeSetup(nodeName, localnetBridgeName, localnetBridgeName,
+		util.LocalNetworkName, true)
+	if err != nil {
+		return nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
+	}
+
 	_, _, err = util.RunIP("link", "set", localnetBridgeName, "up")
 	if err != nil {
 		return nil, fmt.Errorf("failed to up %s (%v)", localnetBridgeName, err)
@@ -402,9 +408,11 @@ func initLocalOnlyGateway(nodeName string) (map[string]string, error) {
 
 	// Create a localnet bridge nexthop
 	localnetBridgeNextHop := "br-nexthop"
-	_, stderr, err = util.RunOVSVsctl("--may-exist", "add-port",
-		localnetBridgeName, localnetBridgeNextHop, "--", "set",
-		"interface", localnetBridgeNextHop, "type=internal")
+	_, stderr, err = util.RunOVSVsctl(
+		"--may-exist", "add-port", localnetBridgeName, localnetBridgeNextHop,
+		"--", "set", "interface", localnetBridgeNextHop, "type=internal",
+		"--", "set", "interface", localnetBridgeNextHop,
+		fmt.Sprintf("mac=%s", strings.ReplaceAll(util.LocalnetGatewayNextHopMac, ":", "\\:")))
 	if err != nil {
 		return nil, fmt.Errorf("Failed to create localnet bridge next hop %s"+
 			", stderr:%s (%v)", localnetBridgeNextHop, stderr, err)
@@ -428,12 +436,6 @@ func initLocalOnlyGateway(nodeName string) (map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to assign ip address to %s (%v)",
 			localnetBridgeNextHop, err)
-	}
-
-	_, macAddress, err := bridgedGatewayNodeSetup(nodeName, localnetBridgeName, localnetBridgeName,
-		util.LocalNetworkName, true)
-	if err != nil {
-		return nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
 
 	return map[string]string{

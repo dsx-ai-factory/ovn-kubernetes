@@ -51,11 +51,6 @@ func addNodeportLBs(fexec *ovntest.FakeExec, nodeName, tcpLBUUID, udpLBUUID stri
 func initLocalOnlyGatewayTest(fexec *ovntest.FakeExec, nodeName, brLocalnetMAC string) {
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovs-vsctl --timeout=15 --may-exist add-br br-local",
-		"ip link set br-local up",
-		"ovs-vsctl --timeout=15 --may-exist add-port br-local br-nexthop -- set interface br-nexthop type=internal",
-		"ip link set br-nexthop up",
-		"ip addr flush dev br-nexthop",
-		"ip addr add 169.254.33.1/24 dev br-nexthop",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface br-local mac_in_use",
@@ -70,6 +65,13 @@ func initLocalOnlyGatewayTest(fexec *ovntest.FakeExec, nodeName, brLocalnetMAC s
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.PhysicalNetworkName + ":breth0" + "," + util.LocalNetworkName + ":br-local",
+	})
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		"ip link set br-local up",
+		"ovs-vsctl --timeout=15 --may-exist add-port br-local br-nexthop -- set interface br-nexthop type=internal -- set interface br-nexthop mac=00\\:00\\:a9\\:fe\\:21\\:01",
+		"ip link set br-nexthop up",
+		"ip addr flush dev br-nexthop",
+		"ip addr add 169.254.33.1/24 dev br-nexthop",
 	})
 }
 

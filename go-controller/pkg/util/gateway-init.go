@@ -20,6 +20,9 @@ const (
 	LocalnetGatewayIP = "169.254.33.2/24"
 	// LocalnetGatewayNextHop is the IP address to which packets to local services are forwarded
 	LocalnetGatewayNextHop = "169.254.33.1"
+	// fixed MAC address for the br-nexthop interface. the last 4 hex bytes
+	// translates to the br-nexthop's IP address
+	LocalnetGatewayNextHopMac = "00:00:a9:fe:21:01"
 	// LocalnetGatewayNextHopSubnet represents the subnet that bridges OVN logical topology and
 	// host network
 	LocalnetGatewayNextHopSubnet = "169.254.33.1/24"
