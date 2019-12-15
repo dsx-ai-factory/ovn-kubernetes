@@ -23,8 +23,6 @@ const (
 	OvnHostSubnetLegacy = "ovn_host_subnet"
 	// OvnNodeSubnets is the constant string representing the node subnets annotation key
 	OvnNodeSubnets = "k8s.ovn.org/node-subnets"
-	// OvnClusterRouter is the name of the distributed router
-	OvnClusterRouter = "ovn_cluster_router"
 	// OvnNodeManagementPortMacAddress is the constant string representing the annotation key
 	OvnNodeManagementPortMacAddress = "k8s.ovn.org/node-mgmt-port-mac-address"
 	// OvnServiceIdledAt is a constant string representing the Service annotation key
@@ -113,9 +111,10 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 
 // SetupMaster creates the central router and load-balancers for the network
 func (oc *Controller) SetupMaster(masterNodeName string) error {
+	clusterRouter := util.GetK8sClusterRouter()
 	// Create a single common distributed router for the cluster.
-	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lr-add", OvnClusterRouter,
-		"--", "set", "logical_router", OvnClusterRouter, "external_ids:k8s-cluster-router=yes")
+	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lr-add", clusterRouter,
+		"--", "set", "logical_router", clusterRouter, "external_ids:k8s-cluster-router=yes")
 	if err != nil {
 		logrus.Errorf("Failed to create a single common distributed router for the cluster, "+
 			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
@@ -126,7 +125,7 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 	// traffic between nodes.
 	if oc.multicastSupport {
 		stdout, stderr, err = util.RunOVNNbctl("--", "set", "logical_router",
-			OvnClusterRouter, "options:mcast_relay=\"true\"")
+			clusterRouter, "options:mcast_relay=\"true\"")
 		if err != nil {
 			logrus.Errorf("Failed to enable IGMP relay on the cluster router, "+
 				"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
@@ -184,26 +183,26 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 	}
 
 	// Connect the distributed router to "join".
-	routerMac, stderr, err := util.RunOVNNbctl("--if-exist", "get", "logical_router_port", "rtoj-"+OvnClusterRouter, "mac")
+	routerMac, stderr, err := util.RunOVNNbctl("--if-exist", "get", "logical_router_port", "rtoj-"+clusterRouter, "mac")
 	if err != nil {
-		logrus.Errorf("Failed to get logical router port rtoj-%v, stderr: %q, error: %v", OvnClusterRouter, stderr, err)
+		logrus.Errorf("Failed to get logical router port rtoj-%v, stderr: %q, error: %v", clusterRouter, stderr, err)
 		return err
 	}
 	if routerMac == "" {
 		routerMac = util.GenerateMac()
-		stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lrp-add", OvnClusterRouter,
-			"rtoj-"+OvnClusterRouter, routerMac, joinSubnet)
+		stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lrp-add", clusterRouter,
+			"rtoj-"+clusterRouter, routerMac, joinSubnet)
 		if err != nil {
 			logrus.Errorf("Failed to add logical router port rtoj-%v, stdout: %q, stderr: %q, error: %v",
-				OvnClusterRouter, stdout, stderr, err)
+				clusterRouter, stdout, stderr, err)
 			return err
 		}
 	}
 
 	// Connect the switch "join" to the router.
-	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", "join", "jtor-"+OvnClusterRouter,
-		"--", "set", "logical_switch_port", "jtor-"+OvnClusterRouter, "type=router",
-		"options:router-port=rtoj-"+OvnClusterRouter, "addresses="+"\""+routerMac+"\"")
+	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", "join", "jtor-"+clusterRouter,
+		"--", "set", "logical_switch_port", "jtor-"+clusterRouter, "type=router",
+		"options:router-port=rtoj-"+clusterRouter, "addresses="+"\""+routerMac+"\"")
 	if err != nil {
 		logrus.Errorf("Failed to add router-type logical switch port to join, stdout: %q, stderr: %q, error: %v",
 			stdout, stderr, err)
@@ -444,7 +443,6 @@ func parseNodeHostSubnet(node *kapi.Node) (*net.IPNet, error) {
 }
 
 func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.IPNet) error {
-
 	// Get firstIP for gateway.  Skip the second address of the LogicalSwitch's
 	// subnet since we set it aside for the management port on that node.
 	firstIP, secondIP := util.GetNodeWellKnownAddresses(hostsubnet)
@@ -458,8 +456,9 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 		nodeLRPMac = util.GenerateMac()
 	}
 
+	clusterRouter := util.GetK8sClusterRouter()
 	// Create a router port and provide it the first address on the node's host subnet
-	_, stderr, err = util.RunOVNNbctl("--may-exist", "lrp-add", OvnClusterRouter, "rtos-"+nodeName,
+	_, stderr, err = util.RunOVNNbctl("--may-exist", "lrp-add", clusterRouter, "rtos-"+nodeName,
 		nodeLRPMac, firstIP.String())
 	if err != nil {
 		logrus.Errorf("Failed to add logical port to router, stderr: %q, error: %v", stderr, err)
