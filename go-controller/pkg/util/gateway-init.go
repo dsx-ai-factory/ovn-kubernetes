@@ -155,7 +155,7 @@ func getGatewayLoadBalancers(gatewayRouter string) (string, string, error) {
 }
 
 // GatewayInit creates a gateway router for the local chassis.
-func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddress,
+func GatewayInit(clusterIPSubnet []string, systemID, nodeName, ifaceID, nicIP, nicMacAddress,
 	defaultGW string, rampoutIPSubnet string, nodePortEnable bool, lspArgs []string) error {
 
 	ip, physicalIPNet, err := net.ParseCIDR(nicIP)
@@ -172,11 +172,6 @@ func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddre
 	}
 
 	k8sClusterRouter := GetK8sClusterRouter()
-	systemID, err := getNodeChassisIDFromSB(nodeName)
-	if err != nil {
-		return err
-	}
-
 	// Create a gateway router.
 	gatewayRouter := "GR_" + nodeName
 	stdout, stderr, err := RunOVNNbctl("--", "--may-exist", "lr-add",
@@ -395,7 +390,7 @@ func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddre
 }
 
 // LocalGatewayInit creates a gateway router to access local service.
-func LocalGatewayInit(clusterIPSubnet []string, nodeName, nodeIPMask, ifaceID, nicIP, nicMacAddress,
+func LocalGatewayInit(clusterIPSubnet []string, systemID, nodeName, nodeIPMask, ifaceID, nicIP, nicMacAddress,
 	defaultGW string) error {
 
 	ip, physicalIPNet, err := net.ParseCIDR(nicIP)
@@ -412,11 +407,6 @@ func LocalGatewayInit(clusterIPSubnet []string, nodeName, nodeIPMask, ifaceID, n
 	}
 
 	k8sClusterRouter := GetK8sClusterRouter()
-	systemID, err := getNodeChassisIDFromSB(nodeName)
-	if err != nil {
-		return err
-	}
-
 	// Create a gateway router.
 	gatewayRouter := "GR_local_" + nodeName
 	stdout, stderr, err := RunOVNNbctl("--", "--may-exist", "lr-add",
@@ -542,19 +532,4 @@ func LocalGatewayInit(clusterIPSubnet []string, nodeName, nodeIPMask, ifaceID, n
 	}
 
 	return nil
-}
-
-// getNodeChassisIDFromSB() will return the ChassisID from SBDB
-func getNodeChassisIDFromSB(nodeName string) (string, error) {
-	chassisID, stderr, err := RunOVNSbctl("--data=bare", "--no-heading",
-		"--columns=name", "find", "Chassis", "hostname="+nodeName)
-	if err != nil {
-		return "", fmt.Errorf("Failed to find Chassis ID for node %s, "+
-			"stderr: %q, error: %v", nodeName, stderr, err)
-	}
-	if chassisID == "" {
-		return "", fmt.Errorf("No chassis ID configured for node %s", nodeName)
-	}
-
-	return chassisID, nil
 }
