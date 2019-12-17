@@ -72,6 +72,8 @@ func initLocalOnlyGatewayTest(fexec *ovntest.FakeExec, nodeName, brLocalnetMAC s
 		"ip link set br-nexthop up",
 		"ip addr flush dev br-nexthop",
 		"ip addr add 169.254.33.1/24 dev br-nexthop",
+		"ip neigh delete 169.254.33.2 dev br-nexthop",
+		"ip neigh add 169.254.33.2 dev br-nexthop lladdr " + brLocalnetMAC,
 	})
 }
 
