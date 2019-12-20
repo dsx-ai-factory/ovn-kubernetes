@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"fmt"
+	"net"
 	"regexp"
 	"strings"
 
@@ -427,6 +428,15 @@ func initLocalOnlyGateway(nodeName string) (map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to assign ip address to %s (%v)",
 			localnetBridgeNextHop, err)
+	}
+
+	// Add arp entry for local service gateway, it is used for return traffic of local service access
+	ip, _, _ := net.ParseCIDR(util.LocalnetGatewayIP)
+	_, _, _ = util.RunIP("neigh", "delete", ip.String(), "dev", "br-nexthop")
+	_, _, err = util.RunIP("neigh", "add", ip.String(), "dev", "br-nexthop", "lladdr", macAddress)
+	if err != nil {
+		return nil, fmt.Errorf("failed to add arp entry for %s (%v)",
+			ip.String(), err)
 	}
 
 	return map[string]string{
