@@ -48,7 +48,7 @@ func addNodeportLBs(fexec *ovntest.FakeExec, nodeName, tcpLBUUID, udpLBUUID stri
 	})
 }
 
-func initLocalOnlyGatewayTest(fexec *ovntest.FakeExec, nodeName, brLocalnetMAC string) {
+func initLocalOnlyGatewayTest(fexec *ovntest.FakeExec, nodeName, brLocalnetMAC, mtu string) {
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovs-vsctl --timeout=15 --may-exist add-br br-local",
 	})
@@ -68,7 +68,7 @@ func initLocalOnlyGatewayTest(fexec *ovntest.FakeExec, nodeName, brLocalnetMAC s
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ip link set br-local up",
-		"ovs-vsctl --timeout=15 --may-exist add-port br-local br-nexthop -- set interface br-nexthop type=internal -- set interface br-nexthop mac=00\\:00\\:a9\\:fe\\:21\\:01",
+		"ovs-vsctl --timeout=15 --may-exist add-port br-local br-nexthop -- set interface br-nexthop type=internal mtu_request=" + mtu + " mac=00\\:00\\:a9\\:fe\\:21\\:01",
 		"ip link set br-nexthop up",
 		"ip addr flush dev br-nexthop",
 		"ip addr add 169.254.33.1/24 dev br-nexthop",
@@ -79,6 +79,8 @@ func initLocalOnlyGatewayTest(fexec *ovntest.FakeExec, nodeName, brLocalnetMAC s
 
 func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 	eth0Name, eth0MAC, eth0IP, eth0GWIP, eth0CIDR string, gatewayVLANID uint) {
+	const mtu string = "1234"
+
 	app.Action = func(ctx *cli.Context) error {
 		const (
 			nodeName          string = "10.1.1.15"
@@ -147,7 +149,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.PhysicalNetworkName + ":breth0",
 		})
 
-		initLocalOnlyGatewayTest(fexec, nodeName, brLocalnetMAC)
+		initLocalOnlyGatewayTest(fexec, nodeName, brLocalnetMAC, mtu)
 
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 wait-until Interface patch-breth0_" + nodeName + "-to-br-int ofport>0 -- get Interface patch-breth0_" + nodeName + "-to-br-int ofport",
@@ -274,6 +276,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 		"--gateway-interface=" + eth0Name,
 		"--nodeport",
 		"--gateway-vlanid=" + fmt.Sprintf("%d", gatewayVLANID),
+		"--mtu=" + mtu,
 	})
 	Expect(err).NotTo(HaveOccurred())
 }
