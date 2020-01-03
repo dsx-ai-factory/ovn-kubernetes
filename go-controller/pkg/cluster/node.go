@@ -73,41 +73,31 @@ func isOVNControllerReady(name string) (bool, error) {
 	return true, nil
 }
 
-// TODO: GMoodalbail
-// copied from `ovn` package. fix me later.
-func parseNodeHostSubnet(node *kapi.Node) (*net.IPNet, error) {
-	sub, ok := node.Annotations[ovn.OvnNodeSubnets]
+func getNodeHostSubnetAnnotation(node *kapi.Node) (string, error) {
+	subnet, ok := node.Annotations[ovn.OvnNodeSubnets]
 	if !ok {
-		sub, ok = node.Annotations[ovn.OvnHostSubnetLegacy]
+		subnet, ok = node.Annotations[ovn.OvnHostSubnetLegacy]
 	} else {
 		nodeSubnets := make(map[string]string)
-		if err := json.Unmarshal([]byte(sub), &nodeSubnets); err != nil {
-			return nil, fmt.Errorf("error parsing node-subnets annotation: %v", err)
+		if err := json.Unmarshal([]byte(subnet), &nodeSubnets); err != nil {
+			return "", fmt.Errorf("error parsing node-subnets annotation: %v", err)
 		}
-		sub, ok = nodeSubnets["default"]
+		subnet, ok = nodeSubnets["default"]
 	}
 	if !ok {
-		return nil, fmt.Errorf("node %q has no subnet annotation", node.Name)
+		return "", fmt.Errorf("node %q has no subnet annotation", node.Name)
 	}
-
-	_, subnet, err := net.ParseCIDR(sub)
-	if err != nil {
-		return nil, fmt.Errorf("Error in parsing hostsubnet - %v", err)
-	}
-
 	return subnet, nil
 }
 
 // StartClusterNode learns the subnet assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
 func (cluster *OvnClusterController) StartClusterNode(name string) error {
-	count := 300
 	var err error
 	var node *kapi.Node
 	var subnet *net.IPNet
 	var clusterSubnets []string
-	var nodeCidr, lsCidr string
-	var gotAnnotation bool
+	var cidr string
 	var wg sync.WaitGroup
 
 	if config.MasterHA.ManageDBServers {
@@ -137,45 +127,26 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR.String())
 	}
 
-	for count > 0 {
-		if count != 300 {
-			time.Sleep(time.Second)
+	// First wait for the node logical switch to be created by the Master, timeout is 300s.
+	err = wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
+		if node, err = cluster.Kube.GetNode(name); err != nil {
+			logrus.Errorf("error retrieving node %s: %v", name, err)
+			return false, nil
 		}
-		count--
-
-		if !gotAnnotation {
-			// setup the node, create the logical switch
-			node, err = cluster.Kube.GetNode(name)
-			if err != nil {
-				logrus.Errorf("Error starting node %s, no node found - %v", name, err)
-				continue
-			}
-
-			subnet, err = parseNodeHostSubnet(node)
-			if err != nil {
-				logrus.Errorf("Error starting node %s, no annotation found on node for subnet - %v", name, err)
-				continue
-			}
-			nodeCidr = subnet.String()
-			gotAnnotation = true
-		}
-
-		lsCidr, _, err = util.RunOVNNbctl("get", "logical_switch", node.Name, "other-config:subnet")
+		cidr, err = getNodeHostSubnetAnnotation(node)
 		if err != nil {
-			logrus.Errorf("Error getting CIDR for the node %s's logical switch", node.Name)
-			continue
+			logrus.Errorf("Error starting node %s, no annotation found on node for subnet - %v", name, err)
+			return false, nil
 		}
-		if lsCidr != nodeCidr {
-			return fmt.Errorf("OVN logical switch's CIDR (%q) and K8s node's CIDR (%q) are not the same. Please "+
-				"delete the node and add it back to the cluster", lsCidr, nodeCidr)
-		}
-
-		break
+		return true, nil
+	})
+	if err != nil {
+		return fmt.Errorf("timed out waiting for node's: %q logical switch: %v", name, err)
 	}
 
-	if count == 0 {
-		logrus.Errorf("Failed to get node/node-annotation for %s - %v", name, err)
-		return err
+	_, subnet, err = net.ParseCIDR(cidr)
+	if err != nil {
+		return fmt.Errorf("invalid hostsubnet found for node %s: %v", node.Name, err)
 	}
 
 	logrus.Infof("Node %s ready for ovn initialization with subnet %s", node.Name, subnet.String())

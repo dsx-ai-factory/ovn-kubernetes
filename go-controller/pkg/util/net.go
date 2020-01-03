@@ -111,3 +111,9 @@ func GetNodeWellKnownAddresses(subnet *net.IPNet) (*net.IPNet, *net.IPNet) {
 func JoinHostPortInt32(host string, port int32) string {
 	return net.JoinHostPort(host, strconv.Itoa(int(port)))
 }
+
+// IPAddrToHWAddr takes the four octets of IPv4 address (aa.bb.cc.dd, for example) and uses them in creating
+// a MAC address (00:00:aa:bb:cc:dd)
+func IPAddrToHWAddr(ip net.IP) string {
+	return fmt.Sprintf("00:00:%02X:%02X:%02X:%02X", ip[0], ip[1], ip[2], ip[3])
+}

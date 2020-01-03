@@ -73,7 +73,7 @@ var _ = Describe("Management Port Operations", func() {
 				serviceCIDR   string = serviceIPNet + "/24"
 				mtu           string = "1400"
 				gwIP          string = "10.1.1.1"
-				lrpMAC        string = "00:00:00:00:00:03"
+				lrpMAC        string = "00:00:0A:01:01:01"
 			)
 
 			fexec := ovntest.NewFakeExec()
@@ -86,10 +86,6 @@ var _ = Describe("Management Port Operations", func() {
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface " + mgtPort + " mac_in_use",
 				Output: mgtPortMAC,
-			})
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 lsp-get-addresses stor-" + nodeName,
-				Output: lrpMAC,
 			})
 
 			// linux-specific setup
