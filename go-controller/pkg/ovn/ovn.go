@@ -42,6 +42,7 @@ type Controller struct {
 	watchFactory *factory.WatchFactory
 
 	masterSubnetAllocator *allocator.SubnetAllocator
+	joinSubnetAllocator   *allocator.SubnetAllocator
 
 	TCPLoadBalancerUUID string
 	UDPLoadBalancerUUID string
@@ -130,6 +131,7 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory)
 		kube:                     &kube.Kube{KClient: kubeClient},
 		watchFactory:             wf,
 		masterSubnetAllocator:    allocator.NewSubnetAllocator(),
+		joinSubnetAllocator:      allocator.NewSubnetAllocator(),
 		logicalSwitchCache:       make(map[string]bool),
 		logicalPortCache:         make(map[string]string),
 		logicalPortUUIDCache:     make(map[string]string),
@@ -551,7 +553,8 @@ func (oc *Controller) WatchNodes() error {
 				"various caches", node.Name)
 
 			nodeSubnet, _ := parseNodeHostSubnet(node)
-			err := oc.deleteNode(node.Name, nodeSubnet)
+			joinSubnet, _ := parseNodeJoinSubnet(node)
+			err := oc.deleteNode(node.Name, nodeSubnet, joinSubnet)
 			if err != nil {
 				logrus.Error(err)
 			}
