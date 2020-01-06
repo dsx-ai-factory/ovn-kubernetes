@@ -10,7 +10,7 @@ import (
 	"syscall"
 
 	"github.com/urfave/cli"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
@@ -164,7 +164,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			"ovs-ofctl add-flow breth0 priority=50, in_port=7, ip, actions=ct(zone=64000, table=1)",
 			"ovs-ofctl add-flow breth0 priority=100, table=1, ct_state=+trk+est, actions=output:5",
 			"ovs-ofctl add-flow breth0 priority=100, table=1, ct_state=+trk+rel, actions=output:5",
-			"ovs-ofctl add-flow breth0 priority=0, table=1, actions=output:LOCAL",
+			"ovs-ofctl add-flow breth0 priority=0, table=1, actions=output:NORMAL",
 		})
 		// nodePortWatcher()
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -260,7 +260,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 			return nil
 		})
 
-		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 
 		expectedTables := map[string]util.FakeTable{
 			"filter": {},
@@ -303,6 +303,8 @@ var _ = Describe("Gateway Init Operations", func() {
 	})
 
 	It("sets up a localnet gateway", func() {
+		const mtu string = "1234"
+
 		app.Action = func(ctx *cli.Context) error {
 			const (
 				nodeName      string = "node1"
@@ -321,11 +323,6 @@ var _ = Describe("Gateway Init Operations", func() {
 			fexec := ovntest.NewFakeExec()
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovs-vsctl --timeout=15 --may-exist add-br br-local",
-				"ip link set br-local up",
-				"ovs-vsctl --timeout=15 --may-exist add-port br-local br-nexthop -- set interface br-nexthop type=internal",
-				"ip link set br-nexthop up",
-				"ip addr flush dev br-nexthop",
-				"ip addr add 169.254.33.1/24 dev br-nexthop",
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface br-local mac_in_use",
@@ -340,6 +337,11 @@ var _ = Describe("Gateway Init Operations", func() {
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.PhysicalNetworkName + ":br-local",
+				"ip link set br-local up",
+				"ovs-vsctl --timeout=15 --may-exist add-port br-local br-nexthop -- set interface br-nexthop type=internal mtu_request=" + mtu + " mac=00\\:00\\:a9\\:fe\\:21\\:01",
+				"ip link set br-nexthop up",
+				"ip addr flush dev br-nexthop",
+				"ip addr add 169.254.33.1/24 dev br-nexthop",
 			})
 
 			err := util.SetExec(fexec)
@@ -381,7 +383,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			_, err = initLocalnetGateway(nodeName, nodeSubnet, wf)
 			Expect(err).NotTo(HaveOccurred())
 
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 
 			expectedTables := map[string]util.FakeTable{
 				"filter": {
@@ -417,6 +419,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			"--init-gateways",
 			"--gateway-local",
 			"--nodeport",
+			"--mtu=" + mtu,
 		})
 		Expect(err).NotTo(HaveOccurred())
 	})

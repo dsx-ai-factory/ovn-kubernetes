@@ -25,7 +25,7 @@ spec:
         name: ovnkube-node
         component: network
         type: infra
-        beta.kubernetes.io/os: "linux"
+        kubernetes.io/os: "linux"
       annotations:
         scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
@@ -54,7 +54,11 @@ spec:
           readOnly: true
         - mountPath: /var/log/openvswitch/
           name: host-var-log-ovs
+        - mountPath: /var/log/ovn/
+          name: host-var-log-ovs
         - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
+        - mountPath: /var/run/ovn/
           name: host-var-run-ovs
 
         resources:
@@ -126,6 +130,8 @@ spec:
           name: host-var-log-ovnkube
         - mountPath: /var/run/openvswitch/
           name: host-var-run-ovs
+        - mountPath: /var/run/ovn/
+          name: host-var-run-ovs
         # We mount our socket here
         - mountPath: /var/run/ovn-kubernetes
           name: host-var-run-ovn-kubernetes
@@ -190,7 +196,7 @@ spec:
               command: ["/root/ovnkube.sh", "cleanup-ovn-node"]
 
       nodeSelector:
-        beta.kubernetes.io/os: "linux"
+        kubernetes.io/os: "linux"
       volumes:
       - name: host-var-run-dbus
         hostPath:

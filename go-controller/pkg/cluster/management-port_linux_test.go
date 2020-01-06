@@ -3,15 +3,17 @@
 package cluster
 
 import (
+	"fmt"
 	"io/ioutil"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/urfave/cli"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
@@ -73,7 +75,7 @@ var _ = Describe("Management Port Operations", func() {
 				serviceCIDR   string = serviceIPNet + "/24"
 				mtu           string = "1400"
 				gwIP          string = "10.1.1.1"
-				lrpMAC        string = "00:00:0A:01:01:01"
+				lrpMAC        string = "0A:58:0A:01:01:01"
 			)
 
 			fexec := ovntest.NewFakeExec()
@@ -86,6 +88,9 @@ var _ = Describe("Management Port Operations", func() {
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface " + mgtPort + " mac_in_use",
 				Output: mgtPortMAC,
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovs-vsctl --timeout=15 set interface k8s-node1 " + fmt.Sprintf("mac=%s", strings.ReplaceAll(mgtPortMAC, ":", "\\:")),
 			})
 
 			// linux-specific setup

@@ -28,7 +28,7 @@ import (
 type postReadyFn func() error
 
 func isOVNControllerReady(name string) (bool, error) {
-	const runDir string = "/var/run/openvswitch/"
+	runDir := util.GetOvnRunDir()
 
 	pid, err := ioutil.ReadFile(runDir + "ovn-controller.pid")
 	if err != nil {
@@ -99,6 +99,11 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	var clusterSubnets []string
 	var cidr string
 	var wg sync.WaitGroup
+
+	// Setting debug log level during node bring up to expose bring up process.
+	// Log level is returned to configured value when bring up is complete.
+	var LogLevel = logrus.GetLevel()
+	logrus.SetLevel(5)
 
 	if config.MasterHA.ManageDBServers {
 		var readyChan = make(chan bool, 1)
@@ -192,6 +197,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	portName := "k8s-" + node.Name
 	messages := make(chan error)
 
+	logrus.Infof("Waiting for GatewayReady and ManagementPortReady on node %s", node.Name)
 	// Wait for the portMac to be created
 	for _, f := range readyFuncs {
 		go func(rf readyFunc) {
@@ -206,6 +212,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		wg.Wait()
 		close(messages)
 	}()
+	logrus.Infof("Gateway and ManagementPort are Ready")
 
 	for i := range messages {
 		if i != nil {
@@ -219,6 +226,8 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 			return err
 		}
 	}
+
+	logrus.SetLevel(LogLevel)
 
 	confFile := filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
 	_, err = os.Stat(confFile)

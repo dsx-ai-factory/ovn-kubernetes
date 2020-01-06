@@ -74,11 +74,14 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIP, podMAC, 
 	return
 }
 
-func (p pod) addNodeSetupCmds(fexec *ovntest.FakeExec) {
+func (p pod) baseCmds(fexec *ovntest.FakeExec) {
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 get logical_switch " + p.nodeName + " other-config",
-		Output: `{exclude_ips="10.128.1.2", subnet="` + p.nodeSubnet + `"}`,
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true",
+		Output: "\n",
 	})
+}
+
+func (p pod) addNodeSetupCmds(fexec *ovntest.FakeExec) {
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-nbctl --timeout=15 get logical_switch " + p.nodeName + " other-config:subnet",
 		Output: fmt.Sprintf("%q", p.nodeSubnet),
@@ -143,6 +146,20 @@ func (p pod) delCmds(fexec *ovntest.FakeExec) {
 		"ovn-nbctl --timeout=15 --if-exists lsp-del " + p.portName,
 	})
 }
+func (p pod) delFromNamespaceCmds(fexec *ovntest.FakeExec, pod pod, isMulticastEnabled bool) {
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		fmt.Sprintf("ovn-nbctl --timeout=15 clear address_set %s addresses", hashedAddressSet(pod.namespace)),
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --if-exists get logical_switch_port %s _uuid", pod.portName),
+		Output: fakeUUID,
+	})
+	if isMulticastEnabled {
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			fmt.Sprintf("ovn-nbctl --timeout=15 --if-exists remove port_group mcastPortGroupDeny ports %s", fakeUUID),
+		})
+	}
+}
 
 var _ = Describe("OVN Pod Operations", func() {
 	var app *cli.App
@@ -189,19 +206,20 @@ var _ = Describe("OVN Pod Operations", func() {
 
 				pod, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
-				Expect(fExec.CalledMatchesExpected()).To(BeTrue())
+				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				_, ok := pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeFalse())
 
 				// Assign it and perform the update
 				t.nodeName = "node1"
+				t.portName = t.namespace + "_" + t.podName
 				t.addNodeSetupCmds(fExec)
 				t.addCmdsForNonExistingPod(fExec)
 
 				_, err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Update(newPod(t.namespace, t.podName, t.nodeName, t.podIP))
 				Expect(err).NotTo(HaveOccurred())
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
 				pod, err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
@@ -236,10 +254,7 @@ var _ = Describe("OVN Pod Operations", func() {
 				)
 
 				fExec := ovntest.NewFakeExec()
-				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true",
-					Output: "\n",
-				})
+				t.baseCmds(fExec)
 
 				fakeOvn := FakeOVN{}
 				fakeOvn.start(ctx, fExec, &v1.PodList{
@@ -249,14 +264,14 @@ var _ = Describe("OVN Pod Operations", func() {
 
 				pod, _ := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
 				Expect(pod).To(BeNil())
-				Expect(fExec.CalledMatchesExpected()).To(BeTrue())
+				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				t.addNodeSetupCmds(fExec)
 				t.addCmdsForNonExistingPod(fExec)
 
 				_, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Create(newPod(t.namespace, t.podName, t.nodeName, t.podIP))
 				Expect(err).NotTo(HaveOccurred())
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
 				pod, err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
@@ -294,7 +309,7 @@ var _ = Describe("OVN Pod Operations", func() {
 				fExec := ovntest.NewFakeExec()
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true",
-					Output: t.portName + "\n",
+					Output: "\n",
 				})
 				t.addNodeSetupCmds(fExec)
 				t.addCmdsForNonExistingPod(fExec)
@@ -313,14 +328,14 @@ var _ = Describe("OVN Pod Operations", func() {
 				podAnnotation, ok := pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeTrue())
 				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}}`))
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
 				// Delete it
 				t.delCmds(fExec)
 
 				err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Delete(t.podName, metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
 				pod, err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
 				Expect(err).To(HaveOccurred())
@@ -363,13 +378,13 @@ var _ = Describe("OVN Pod Operations", func() {
 					},
 				})
 				fakeOvn.controller.WatchPods()
-				Expect(fExec.CalledMatchesExpected()).To(BeTrue())
+				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				// Pod creation should be retried on Update event
 				t.addCmdsForNonExistingPodGatewayCached(fExec)
 				_, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Update(newPod(t.namespace, t.podName, t.nodeName, t.podIP))
 				Expect(err).NotTo(HaveOccurred())
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
 				pod, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
@@ -407,6 +422,9 @@ var _ = Describe("OVN Pod Operations", func() {
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true",
 					Output: t.portName + "\n",
 				})
+				fExec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --if-exists lsp-del " + t.portName,
+				})
 				t.addNodeSetupCmds(fExec)
 				t.addCmdsForNonExistingPod(fExec)
 
@@ -419,7 +437,6 @@ var _ = Describe("OVN Pod Operations", func() {
 
 				pod, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
-				Expect(fExec.CalledMatchesExpected()).To(BeZero())
 
 				_, ok := pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeFalse())
@@ -428,7 +445,7 @@ var _ = Describe("OVN Pod Operations", func() {
 
 				pod, err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
-				Expect(fExec.CalledMatchesExpected()).To(BeTrue())
+				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				podAnnotation, ok := pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeTrue())
@@ -467,7 +484,7 @@ var _ = Describe("OVN Pod Operations", func() {
 				fakeOvn.start(ctx, fExec)
 				fakeOvn.controller.WatchPods()
 
-				Expect(fExec.CalledMatchesExpected()).To(BeTrue())
+				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				return nil
 			}
@@ -508,7 +525,7 @@ var _ = Describe("OVN Pod Operations", func() {
 
 				pod, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
-				Expect(fExec.CalledMatchesExpected()).To(BeTrue())
+				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				podAnnotation, ok := pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeTrue())
@@ -556,7 +573,7 @@ var _ = Describe("OVN Pod Operations", func() {
 
 				pod, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
-				Expect(fExec.CalledMatchesExpected()).To(BeTrue())
+				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				podAnnotation, ok := pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeTrue())
@@ -575,7 +592,7 @@ var _ = Describe("OVN Pod Operations", func() {
 
 				pod, err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
 				// Check that pod annotations have been re-written to correct values
 				podAnnotation, ok = pod.Annotations[util.OvnPodAnnotationName]

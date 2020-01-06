@@ -34,6 +34,7 @@ var _ = Describe("Node Operations", func() {
 			const (
 				nodeName string = "1.2.5.6"
 				interval int    = 100000
+				ofintval int    = 180
 			)
 
 			fexec := ovntest.NewFakeExec()
@@ -47,8 +48,9 @@ var _ = Describe("Node Operations", func() {
 					"external_ids:ovn-encap-type=geneve "+
 					"external_ids:ovn-encap-ip=%s "+
 					"external_ids:ovn-remote-probe-interval=%d "+
+					"external_ids:ovn-openflow-probe-interval=%d "+
 					"external_ids:hostname=\"%s\"",
-					nodeName, interval, nodeName),
+					nodeName, interval, ofintval, nodeName),
 			})
 
 			err := util.SetExec(fexec)
@@ -60,7 +62,7 @@ var _ = Describe("Node Operations", func() {
 			err = setupOVNNode(nodeName)
 			Expect(err).NotTo(HaveOccurred())
 
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 			return nil
 		}
 
@@ -73,6 +75,7 @@ var _ = Describe("Node Operations", func() {
 				nodeName    string = "1.2.5.6"
 				encapPort   uint   = 666
 				interval    int    = 100000
+				ofintval    int    = 180
 				chassisUUID string = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
 			)
 
@@ -87,8 +90,9 @@ var _ = Describe("Node Operations", func() {
 					"external_ids:ovn-encap-type=geneve "+
 					"external_ids:ovn-encap-ip=%s "+
 					"external_ids:ovn-remote-probe-interval=%d "+
+					"external_ids:ovn-openflow-probe-interval=%d "+
 					"external_ids:hostname=\"%s\"",
-					nodeName, interval, nodeName),
+					nodeName, interval, ofintval, nodeName),
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 " +
@@ -110,7 +114,7 @@ var _ = Describe("Node Operations", func() {
 			err = setupOVNNode(nodeName)
 			Expect(err).NotTo(HaveOccurred())
 
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 			return nil
 		}
 

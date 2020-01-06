@@ -50,6 +50,15 @@ func createManagementPortGeneric(nodeName string, localSubnet *net.IPNet) (strin
 		return "", "", "", "", "", err
 	}
 
+	// persist the MAC address so that upon node reboot we get back the same mac address.
+	_, stderr, err = util.RunOVSVsctl("set", "interface", interfaceName,
+		fmt.Sprintf("mac=%s", strings.ReplaceAll(macAddress, ":", "\\:")))
+	if err != nil {
+		logrus.Errorf("failed to persist MAC address %q for %q: stderr:%s (%v)", macAddress,
+			interfaceName, stderr, err)
+		return "", "", "", "", "", err
+	}
+
 	return interfaceName, portIP.String(), macAddress, routerIP.IP.String(), routerMac, nil
 }
 

@@ -26,7 +26,8 @@ func (oc *Controller) syncPods(pods []interface{}) {
 			logrus.Errorf("Spurious object in syncPods: %v", podInterface)
 			continue
 		}
-		if podScheduled(pod) && podWantsNetwork(pod) {
+		_, err := util.UnmarshalPodAnnotation(pod.Annotations)
+		if podScheduled(pod) && podWantsNetwork(pod) && err == nil {
 			logicalPort := podLogicalPortName(pod)
 			expectedLogicalPorts[logicalPort] = true
 		}
@@ -186,17 +187,9 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 	delete(oc.logicalPortCache, logicalPort)
 
 	oc.lspMutex.Lock()
-	delete(oc.lspIngressDenyCache, logicalPort)
-	delete(oc.lspEgressDenyCache, logicalPort)
 	delete(oc.logicalPortUUIDCache, logicalPort)
 	oc.lspMutex.Unlock()
 
-	if !oc.portGroupSupport {
-		oc.deleteACLDenyOld(pod.Namespace, pod.Spec.NodeName, logicalPort,
-			"Ingress")
-		oc.deleteACLDenyOld(pod.Namespace, pod.Spec.NodeName, logicalPort,
-			"Egress")
-	}
 	oc.deletePodFromNamespace(pod.Namespace, podIP, logicalPort)
 }
 
@@ -212,20 +205,25 @@ func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) error {
 	// Otherwise wait for the node logical switch to be created by the ClusterController.
 	// The node switch will be created very soon after startup so we should
 	// only be waiting here once per node at most.
+	var subnet string
 	if err := wait.PollImmediate(500*time.Millisecond, 30*time.Second, func() (bool, error) {
-		if _, _, err := util.RunOVNNbctl("get", "logical_switch", nodeName, "other-config"); err != nil {
+		var err error
+		if subnet, _, err = util.RunOVNNbctl("get", "logical_switch", nodeName, "other-config:subnet"); err != nil {
+			return false, nil
+		}
+		if subnet == "" {
 			return false, nil
 		}
 		return true, nil
 	}); err != nil {
-		logrus.Errorf("timed out waiting for node %q logical switch: %v", nodeName, err)
+		logrus.Errorf("timed out waiting for logical switch %q other-config:subnet: %v", nodeName, err)
 		return err
 	}
 
 	oc.lsMutex.Lock()
 	defer oc.lsMutex.Unlock()
 	if !oc.logicalSwitchCache[nodeName] {
-		if err := oc.addAllowACLFromNode(nodeName); err != nil {
+		if err := oc.addAllowACLFromNode(nodeName, subnet); err != nil {
 			return err
 		}
 		oc.logicalSwitchCache[nodeName] = true

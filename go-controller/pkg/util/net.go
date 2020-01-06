@@ -40,10 +40,9 @@ func intToIP(i *big.Int) net.IP {
 func GetPortAddresses(portName string) (net.HardwareAddr, net.IP, error) {
 	out, stderr, err := RunOVNNbctl("get", "logical_switch_port", portName, "dynamic_addresses", "addresses")
 	if err != nil {
-		return nil, nil, fmt.Errorf("Error while obtaining addresses for %s: stdout: %q, stderr: %q, error: %v",
+		return nil, nil, fmt.Errorf("Error while obtaining dynamic addresses for %s: stdout: %q, stderr: %q, error: %v",
 			portName, out, stderr, err)
 	}
-
 	// Convert \r\n to \n to support Windows line endings
 	out = strings.Replace(out, "\r\n", "\n", -1)
 	addresses := strings.Split(out, "\n")
@@ -113,7 +112,8 @@ func JoinHostPortInt32(host string, port int32) string {
 }
 
 // IPAddrToHWAddr takes the four octets of IPv4 address (aa.bb.cc.dd, for example) and uses them in creating
-// a MAC address (00:00:aa:bb:cc:dd)
+// a MAC address (0A:58:AA:BB:CC:DD)
 func IPAddrToHWAddr(ip net.IP) string {
-	return fmt.Sprintf("00:00:%02X:%02X:%02X:%02X", ip[0], ip[1], ip[2], ip[3])
+	// safe to use private MAC prefix: 0A:58
+	return fmt.Sprintf("0A:58:%02X:%02X:%02X:%02X", ip[0], ip[1], ip[2], ip[3])
 }
