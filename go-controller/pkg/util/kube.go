@@ -129,25 +129,25 @@ func GetNodeIP(nodeName string) (string, error) {
 }
 
 const (
-	defNetworkAnnotation = "v1.multus-cni.io/default-network"
+	// DefNetworkAnnotation is the pod annotation for the cluster-wide default network
+	DefNetworkAnnotation = "v1.multus-cni.io/default-network"
+	// NetworkAttachmentAnnotation is the pod annotation for network-attachment-definition
+	NetworkAttachmentAnnotation = "k8s.v1.cni.cncf.io/networks"
 )
 
-// GetPodCustomConfig returns the custom MAC (for now) info from default-network's
-// network attachment
+// GetPodNetSelAnnotation returns the pod's Network Attachment Selection Annotation either for
+// the cluster-wide default network or the additional networks.
 //
 // This function is a simplified version of parsePodNetworkAnnotation() function in multus-cni
 // repository. We need to revisit once there is a library that we can share.
 //
 // Note that the changes below is based on following assumptions, which is true today.
-// - a pod's default network is OVN managed and that
-// - multiple OVN interfaces to a pod is not supported
-// As such, we check for custom configuration in the first network-attachment resource
-// defined in default-network annotation
-func GetPodCustomConfig(pod *kapi.Pod) (*types.NetworkSelectionElement, error) {
+// - a pod's default network is OVN managed
+func GetPodNetSelAnnotation(pod *kapi.Pod, netAttachAnnot string) ([]*types.NetworkSelectionElement, error) {
 	var networkAnnotation string
 	var networks []*types.NetworkSelectionElement
 
-	networkAnnotation, _ = pod.Annotations[defNetworkAnnotation]
+	networkAnnotation = pod.Annotations[netAttachAnnot]
 	if networkAnnotation == "" {
 		// nothing special to do
 		return nil, nil
@@ -165,8 +165,5 @@ func GetPodCustomConfig(pod *kapi.Pod) (*types.NetworkSelectionElement, error) {
 		return nil, nil
 	}
 
-	if len(networks) == 1 {
-		return networks[0], nil
-	}
-	return nil, fmt.Errorf("invalid value for %q annotation: %s", defNetworkAnnotation, networkAnnotation)
+	return networks, nil
 }

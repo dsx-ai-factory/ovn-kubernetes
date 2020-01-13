@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
@@ -231,6 +232,37 @@ func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) error {
 	return nil
 }
 
+func getRoutesGatewayIP(pod *kapi.Pod, gatewayIPnet *net.IPNet) ([]util.PodRoute, net.IP, error) {
+	// if there are other network attachments for the pod, then check if those network-attachment's
+	// annotation has default-route key. If present, then we need to skip adding default route for
+	// OVN interface
+	networks, err := util.GetPodNetSelAnnotation(pod, util.NetworkAttachmentAnnotation)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error while getting network attachment definition for [%s/%s]: %v",
+			pod.Namespace, pod.Name, err)
+	}
+	otherDefaultRoute := false
+	for _, network := range networks {
+		if len(network.GatewayRequest) != 0 && network.GatewayRequest[0] != nil {
+			otherDefaultRoute = true
+			break
+		}
+	}
+	var gatewayIP net.IP
+	routes := make([]util.PodRoute, 0)
+	if otherDefaultRoute {
+		for _, clusterSubnet := range config.Default.ClusterSubnets {
+			var route util.PodRoute
+			route.Dest = clusterSubnet.CIDR
+			route.NextHop = gatewayIPnet.IP
+			routes = append(routes, route)
+		}
+	} else {
+		gatewayIP = gatewayIPnet.IP
+	}
+	return routes, gatewayIP, nil
+}
+
 func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	var out, stderr string
 	var err error
@@ -276,13 +308,13 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	}
 
 	addressStr := "dynamic"
-	network, errMAC := util.GetPodCustomConfig(pod)
-	if errMAC != nil {
+	networks, err := util.GetPodNetSelAnnotation(pod, util.DefNetworkAnnotation)
+	if err != nil || (networks != nil && len(networks) != 1) {
 		return fmt.Errorf("error while getting custom MAC config for port %q from "+
-			"default-network's network-attachment: %v", portName, errMAC)
-	} else if network != nil && network.MacRequest != "" {
-		logrus.Debugf("Pod %s/%s requested custom MAC: %s", pod.Namespace, pod.Name, network.MacRequest)
-		addressStr = network.MacRequest + " dynamic"
+			"default-network's network-attachment: %v", portName, err)
+	} else if networks != nil && networks[0].MacRequest != "" {
+		logrus.Debugf("Pod %s/%s requested custom MAC: %s", pod.Namespace, pod.Name, networks[0].MacRequest)
+		addressStr = networks[0].MacRequest + " dynamic"
 	}
 	out, stderr, err = util.RunOVNNbctl("--wait=sb",
 		"--", "--may-exist", "lsp-add", logicalSwitch, portName,
@@ -296,7 +328,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 
 	oc.logicalPortCache[portName] = logicalSwitch
 
-	gatewayIP, err := oc.getGatewayFromSwitch(logicalSwitch)
+	gatewayIPnet, err := oc.getGatewayFromSwitch(logicalSwitch)
 	if err != nil {
 		return fmt.Errorf("Error obtaining gateway address for switch %s", logicalSwitch)
 	}
@@ -320,7 +352,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 			"stdout: %q, stderr: %q, (%v)", portName, out, stderr, err)
 	}
 
-	podCIDR := &net.IPNet{IP: podIP, Mask: gatewayIP.Mask}
+	podCIDR := &net.IPNet{IP: podIP, Mask: gatewayIPnet.Mask}
 
 	// now set the port security for the logical switch port
 	out, stderr, err = util.RunOVNNbctl("lsp-set-port-security", portName,
@@ -330,10 +362,15 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 			"stdout: %q, stderr: %q (%v)", portName, out, stderr, err)
 	}
 
+	routes, gatewayIP, err := getRoutesGatewayIP(pod, gatewayIPnet)
+	if err != nil {
+		return err
+	}
 	marshalledAnnotation, err := util.MarshalPodAnnotation(&util.PodAnnotation{
-		IP:  podCIDR,
-		MAC: podMac,
-		GW:  gatewayIP.IP,
+		IP:     podCIDR,
+		MAC:    podMac,
+		GW:     gatewayIP,
+		Routes: routes,
 	})
 	if err != nil {
 		return fmt.Errorf("error creating pod network annotation: %v", err)
@@ -342,7 +379,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	oc.addPodToNamespace(pod.Namespace, podIP, portName)
 
 	logrus.Debugf("Annotation values: ip=%s ; mac=%s ; gw=%s\nAnnotation=%s",
-		podCIDR, podMac, gatewayIP, marshalledAnnotation)
+		podCIDR, podMac, gatewayIPnet, marshalledAnnotation)
 	err = oc.kube.SetAnnotationsOnPod(pod, marshalledAnnotation)
 	if err != nil {
 		return fmt.Errorf("failed to set annotation on pod %s - %v", pod.Name, err)
