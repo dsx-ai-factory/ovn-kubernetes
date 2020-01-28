@@ -28,6 +28,8 @@ const (
 	LocalnetGatewayNextHopSubnet = "169.254.33.1/24"
 	// OvnClusterRouter is the name of the distributed router
 	OvnClusterRouter = "ovn_cluster_router"
+	// DefaultOpenFlowCookie is the identification of the default open flow rules added to each node
+	DefaultOpenFlowCookie = "0xdeff105"
 )
 
 // GetK8sClusterRouter returns back the OVN distributed router. This is meant to be used on the

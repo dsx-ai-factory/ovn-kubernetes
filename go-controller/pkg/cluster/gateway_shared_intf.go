@@ -3,8 +3,10 @@ package cluster
 import (
 	"fmt"
 	"net"
+	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -177,7 +179,7 @@ func nodePortWatcher(nodeName, gwBridge, gwIntf string, wf *factory.WatchFactory
 	return err
 }
 
-func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string) error {
+func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan struct{}) error {
 	// the name of the patch port created by ovn-controller is of the form
 	// patch-<logical_port_name_of_localnet_port>-to-br-int
 	localnetLpName := gwBridge + "_" + nodeName
@@ -199,12 +201,18 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string) error {
 			gwIntf, stderr, err)
 	}
 
+	// replace the left over OpenFlow flows with the NORMAL action flow
+	_, stderr, err = util.AddNormalActionOFFlow(gwBridge)
+	if err != nil {
+		return fmt.Errorf("failed to replace-flows on bridge %q stderr:%s (%v)", gwBridge, stderr, err)
+	}
+
 	// table 0, packets coming from pods headed externally. Commit connections
 	// so that reverse direction goes back to the pods.
 	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
-		fmt.Sprintf("priority=100, in_port=%s, ip, "+
+		fmt.Sprintf("cookie=%s, priority=100, in_port=%s, ip, "+
 			"actions=ct(commit, zone=%d), output:%s",
-			ofportPatch, config.Default.ConntrackZone, ofportPhys))
+			util.DefaultOpenFlowCookie, ofportPatch, config.Default.ConntrackZone, ofportPhys))
 	if err != nil {
 		return fmt.Errorf("Failed to add openflow flow to %s, stderr: %q, "+
 			"error: %v", gwBridge, stderr, err)
@@ -213,8 +221,8 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string) error {
 	// table 0, packets coming from external. Send it through conntrack and
 	// resubmit to table 1 to know the state of the connection.
 	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
-		fmt.Sprintf("priority=50, in_port=%s, ip, "+
-			"actions=ct(zone=%d, table=1)", ofportPhys, config.Default.ConntrackZone))
+		fmt.Sprintf("cookie=%s, priority=50, in_port=%s, ip, "+
+			"actions=ct(zone=%d, table=1)", util.DefaultOpenFlowCookie, ofportPhys, config.Default.ConntrackZone))
 	if err != nil {
 		return fmt.Errorf("Failed to add openflow flow to %s, stderr: %q, "+
 			"error: %v", gwBridge, stderr, err)
@@ -222,15 +230,15 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string) error {
 
 	// table 1, established and related connections go to pod
 	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
-		fmt.Sprintf("priority=100, table=1, ct_state=+trk+est, "+
-			"actions=output:%s", ofportPatch))
+		fmt.Sprintf("cookie=%s, priority=100, table=1, ct_state=+trk+est, "+
+			"actions=output:%s", util.DefaultOpenFlowCookie, ofportPatch))
 	if err != nil {
 		return fmt.Errorf("Failed to add openflow flow to %s, stderr: %q, "+
 			"error: %v", gwBridge, stderr, err)
 	}
 	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
-		fmt.Sprintf("priority=100, table=1, ct_state=+trk+rel, "+
-			"actions=output:%s", ofportPatch))
+		fmt.Sprintf("cookie=%s, priority=100, table=1, ct_state=+trk+rel, "+
+			"actions=output:%s", util.DefaultOpenFlowCookie, ofportPatch))
 	if err != nil {
 		return fmt.Errorf("Failed to add openflow flow to %s, stderr: %q, "+
 			"error: %v", gwBridge, stderr, err)
@@ -238,16 +246,43 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string) error {
 
 	// table 1, all other connections do normal processing
 	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
-		"priority=0, table=1, actions=output:NORMAL")
+		fmt.Sprintf("cookie=%s, priority=0, table=1, actions=output:NORMAL", util.DefaultOpenFlowCookie))
 	if err != nil {
 		return fmt.Errorf("Failed to add openflow flow to %s, stderr: %q, "+
 			"error: %v", gwBridge, stderr, err)
 	}
+
+	// start the periodic check on the default open flows that just added
+	go checkDefaultOpenFlow(gwBridge, stopChan)
 	return nil
 }
 
+// checkDefaultOpenFlow checks for the existence of default OpenFlow rules and exits if the output is not as expected
+func checkDefaultOpenFlow(gwBridge string, stopChan chan struct{}) {
+	ticker := time.NewTicker(5 * time.Second)
+
+	for {
+		select {
+		case <-ticker.C:
+			out, _, err := util.RunOVSOfctl("dump-aggregate", gwBridge,
+				fmt.Sprintf("cookie=%s/-1", util.DefaultOpenFlowCookie))
+			if err != nil {
+				logrus.Errorf("failed to dump aggregate statistics of the default OpenFlow rules: %v", err)
+				continue
+			}
+
+			if !strings.Contains(out, "flow_count=5") {
+				logrus.Errorf("fatal error: unexpected default OpenFlows count, expect 5 output: %v\n", out)
+				os.Exit(1)
+			}
+		case <-stopChan:
+			return
+		}
+	}
+}
+
 func initSharedGateway(nodeName string, subnet, gwNextHop, gwIntf string,
-	wf *factory.WatchFactory) (map[string]map[string]string, postReadyFn, error) {
+	wf *factory.WatchFactory, stopChan chan struct{}) (map[string]map[string]string, postReadyFn, error) {
 	var bridgeName string
 	var uplinkName string
 	var brCreated bool
@@ -321,7 +356,7 @@ func initSharedGateway(nodeName string, subnet, gwNextHop, gwIntf string,
 	return annotations, func() error {
 		// Program cluster.GatewayIntf to let non-pod traffic to go to host
 		// stack
-		if err := addDefaultConntrackRules(nodeName, bridgeName, uplinkName); err != nil {
+		if err := addDefaultConntrackRules(nodeName, bridgeName, uplinkName, stopChan); err != nil {
 			return err
 		}
 
