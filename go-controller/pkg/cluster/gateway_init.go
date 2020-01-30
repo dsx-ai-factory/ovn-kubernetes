@@ -146,7 +146,7 @@ func (cluster *OvnClusterController) initGateway(
 			}
 		}
 		annotations, prFn, err = initSharedGateway(nodeName, subnet, gatewayNextHop, gatewayIntf,
-			cluster.watchFactory)
+			cluster.watchFactory, cluster.stopChan)
 	case config.GatewayModeDisabled:
 		annotations = map[string]map[string]string{
 			ovn.OvnDefaultNetworkGateway: {

@@ -15,14 +15,17 @@ import (
 type OvnClusterController struct {
 	Kube         kube.Interface
 	watchFactory *factory.WatchFactory
+	stopChan     chan struct{}
 }
 
 // NewClusterController creates a new controller for IP subnet allocation to
 // a given resource type (either Namespace or Node)
-func NewClusterController(kubeClient kubernetes.Interface, wf *factory.WatchFactory) *OvnClusterController {
+func NewClusterController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
+	stopChan chan struct{}) *OvnClusterController {
 	return &OvnClusterController{
 		Kube:         &kube.Kube{KClient: kubeClient},
 		watchFactory: wf,
+		stopChan:     stopChan,
 	}
 }
 

@@ -234,7 +234,7 @@ func runOvnKube(ctx *cli.Context) error {
 			return fmt.Errorf("cannot initialize node without service account 'token'. Please provide one with --k8s-token argument")
 		}
 
-		clusterController := ovncluster.NewClusterController(clientset, factory)
+		clusterController := ovncluster.NewClusterController(clientset, factory, stopChan)
 		if err := clusterController.StartClusterNode(node); err != nil {
 			return err
 		}
