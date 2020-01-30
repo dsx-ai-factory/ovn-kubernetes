@@ -136,13 +136,14 @@ func defaultFakeExec(nodeSubnet, nodeName string) (*ovntest.FakeExec, string, st
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --may-exist lrp-add ovn_cluster_router rtos-" + nodeName + " " + lrpMAC + " " + gwCIDR,
-		"ovn-nbctl --timeout=15 -- --may-exist ls-add " + nodeName + " -- set logical_switch " + nodeName + " other-config:subnet=" + nodeSubnet + " other-config:exclude_ips=" + nodeMgmtPortIP + " external-ids:gateway_ip=" + gwCIDR,
+		"ovn-nbctl --timeout=15 -- --may-exist ls-add " + nodeName + " -- set logical_switch " + nodeName + " other-config:subnet=" + nodeSubnet + " other-config:exclude_ips=" + nodeMgmtPortIP,
 		"ovn-nbctl --timeout=15 set logical_switch " + nodeName + " other-config:mcast_snoop=\"true\"",
 		"ovn-nbctl --timeout=15 set logical_switch " + nodeName + " other-config:mcast_querier=\"true\" other-config:mcast_eth_src=\"" + lrpMAC + "\" other-config:mcast_ip4_src=\"" + gwIP + "\"",
 		"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " stor-" + nodeName + " -- set logical_switch_port stor-" + nodeName + " type=router options:router-port=rtos-" + nodeName + " addresses=\"" + lrpMAC + "\"",
 		"ovn-nbctl --timeout=15 set logical_switch " + nodeName + " load_balancer=" + tcpLBUUID,
 		"ovn-nbctl --timeout=15 add logical_switch " + nodeName + " load_balancer " + udpLBUUID,
 		"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " k8s-" + nodeName + " -- lsp-set-addresses " + "k8s-" + nodeName + " " + mgmtMAC + " " + nodeMgmtPortIP + " -- --if-exists remove logical_switch " + nodeName + " other-config exclude_ips",
+		"ovn-nbctl --timeout=15 --may-exist acl-add " + nodeName + " to-lport 1001 ip4.src==" + nodeMgmtPortIP + " allow-related",
 	})
 
 	return fexec, tcpLBUUID, udpLBUUID
@@ -252,7 +253,7 @@ var _ = Describe("Master Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer f.Shutdown()
+			defer close(stopChan)
 
 			clusterController := NewOvnController(fakeClient, f)
 			Expect(clusterController).NotTo(BeNil())
@@ -326,7 +327,7 @@ var _ = Describe("Master Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer f.Shutdown()
+			defer close(stopChan)
 
 			clusterController := NewOvnController(fakeClient, f)
 			Expect(clusterController).NotTo(BeNil())
@@ -423,11 +424,12 @@ subnet=%s
 			// Kubernetes API nodes
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 --may-exist lrp-add ovn_cluster_router rtos-" + masterName + " " + lrpMAC + " " + masterGWCIDR,
-				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + masterName + " -- set logical_switch " + masterName + " other-config:subnet=" + masterSubnet + " other-config:exclude_ips=" + masterMgmtPortIP + " external-ids:gateway_ip=" + masterGWCIDR,
+				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + masterName + " -- set logical_switch " + masterName + " other-config:subnet=" + masterSubnet + " other-config:exclude_ips=" + masterMgmtPortIP,
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + masterName + " stor-" + masterName + " -- set logical_switch_port stor-" + masterName + " type=router options:router-port=rtos-" + masterName + " addresses=\"" + lrpMAC + "\"",
 				"ovn-nbctl --timeout=15 set logical_switch " + masterName + " load_balancer=" + tcpLBUUID,
 				"ovn-nbctl --timeout=15 add logical_switch " + masterName + " load_balancer " + udpLBUUID,
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + masterName + " k8s-" + masterName + " -- lsp-set-addresses " + "k8s-" + masterName + " " + masterMgmtPortMAC + " " + masterMgmtPortIP + " -- --if-exists remove logical_switch " + masterName + " other-config exclude_ips",
+				"ovn-nbctl --timeout=15 --may-exist acl-add " + masterName + " to-lport 1001 ip4.src==" + masterMgmtPortIP + " allow-related",
 			})
 
 			cleanupGateway(fexec, masterName, masterSubnet, masterGWCIDR, masterMgmtPortIP)
@@ -469,7 +471,7 @@ subnet=%s
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer f.Shutdown()
+			defer close(stopChan)
 
 			clusterController := NewOvnController(fakeClient, f)
 			Expect(clusterController).NotTo(BeNil())
@@ -615,11 +617,12 @@ var _ = Describe("Gateway Init Operations", func() {
 
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 --may-exist lrp-add ovn_cluster_router rtos-" + nodeName + " " + nodeLRPMAC + " " + masterGWCIDR,
-				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + nodeName + " -- set logical_switch " + nodeName + " other-config:subnet=" + nodeSubnet + " other-config:exclude_ips=" + masterMgmtPortIP + " external-ids:gateway_ip=" + masterGWCIDR,
+				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + nodeName + " -- set logical_switch " + nodeName + " other-config:subnet=" + nodeSubnet + " other-config:exclude_ips=" + masterMgmtPortIP,
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " stor-" + nodeName + " -- set logical_switch_port stor-" + nodeName + " type=router options:router-port=rtos-" + nodeName + " addresses=\"" + nodeLRPMAC + "\"",
 				"ovn-nbctl --timeout=15 set logical_switch " + nodeName + " load_balancer=" + tcpLBUUID,
 				"ovn-nbctl --timeout=15 add logical_switch " + nodeName + " load_balancer " + udpLBUUID,
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " k8s-" + nodeName + " -- lsp-set-addresses " + "k8s-" + nodeName + " " + brLocalnetMAC + " " + masterMgmtPortIP + " -- --if-exists remove logical_switch " + nodeName + " other-config exclude_ips",
+				"ovn-nbctl --timeout=15 --may-exist acl-add " + nodeName + " to-lport 1001 ip4.src==" + masterMgmtPortIP + " allow-related",
 			})
 			joinSwitch := "join_" + nodeName
 			fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -703,7 +706,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			stop := make(chan struct{})
 			wf, err := factory.NewWatchFactory(fakeClient, stop)
 			Expect(err).NotTo(HaveOccurred())
-			defer wf.Shutdown()
+			defer close(stop)
 
 			clusterController := NewOvnController(fakeClient, wf)
 			Expect(clusterController).NotTo(BeNil())
@@ -807,11 +810,12 @@ var _ = Describe("Gateway Init Operations", func() {
 
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 --may-exist lrp-add ovn_cluster_router rtos-" + nodeName + " " + nodeLRPMAC + " " + nodeGWIP,
-				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + nodeName + " -- set logical_switch " + nodeName + " other-config:subnet=" + nodeSubnet + " other-config:exclude_ips=" + nodeMgmtPortIP + " external-ids:gateway_ip=" + nodeGWIP,
+				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + nodeName + " -- set logical_switch " + nodeName + " other-config:subnet=" + nodeSubnet + " other-config:exclude_ips=" + nodeMgmtPortIP,
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " stor-" + nodeName + " -- set logical_switch_port stor-" + nodeName + " type=router options:router-port=rtos-" + nodeName + " addresses=\"" + nodeLRPMAC + "\"",
 				"ovn-nbctl --timeout=15 set logical_switch " + nodeName + " load_balancer=" + tcpLBUUID,
 				"ovn-nbctl --timeout=15 add logical_switch " + nodeName + " load_balancer " + udpLBUUID,
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " k8s-" + nodeName + " -- lsp-set-addresses " + "k8s-" + nodeName + " " + nodeMgmtPortMAC + " " + nodeMgmtPortIP + " -- --if-exists remove logical_switch " + nodeName + " other-config exclude_ips",
+				"ovn-nbctl --timeout=15 --may-exist acl-add " + nodeName + " to-lport 1001 ip4.src==" + nodeMgmtPortIP + " allow-related",
 			})
 			joinSwitch := "join_" + nodeName
 			fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -839,7 +843,7 @@ var _ = Describe("Gateway Init Operations", func() {
 				"ovn-nbctl --timeout=15 --may-exist lr-nat-add " + gwRouter + " snat " + physicalGatewayIP + " " + clusterCIDR,
 			})
 
-			localGatewayInitTest(fexec, nodeName, physicalGatewayIP, clusterCIDR, clusterRouter, systemID, localIfaceID, localBrLocalnetMAC, util.LocalnetGatewayIP, util.LocalnetGatewayNextHop)
+			localGatewayInitTest(fexec, nodeName, physicalGatewayIP, clusterCIDR, clusterRouter, systemID, localIfaceID, localBrLocalnetMAC, util.LocalnetGatewayIP(), util.LocalnetGatewayNextHop())
 
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_" + nodeName,
@@ -879,7 +883,7 @@ var _ = Describe("Gateway Init Operations", func() {
 				"ovn-nbctl --timeout=15 --may-exist lr-nat-add " + gwRouter + " snat " + physicalGatewayIP + " " + clusterCIDR,
 			})
 
-			localGatewayInitTest(fexec, nodeName, physicalGatewayIP, clusterCIDR, clusterRouter, systemID, localIfaceID, localBrLocalnetMAC, util.LocalnetGatewayIP, util.LocalnetGatewayNextHop)
+			localGatewayInitTest(fexec, nodeName, physicalGatewayIP, clusterCIDR, clusterRouter, systemID, localIfaceID, localBrLocalnetMAC, util.LocalnetGatewayIP(), util.LocalnetGatewayNextHop())
 
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_" + nodeName,
@@ -897,7 +901,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			stop := make(chan struct{})
 			wf, err := factory.NewWatchFactory(fakeClient, stop)
 			Expect(err).NotTo(HaveOccurred())
-			defer wf.Shutdown()
+			defer close(stop)
 
 			clusterController := NewOvnController(fakeClient, wf)
 			Expect(clusterController).NotTo(BeNil())

@@ -244,6 +244,7 @@ var _ = Describe("Config Operations", func() {
 			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
 				{mustParseCIDR("10.128.0.0/14"), 23},
 			}))
+			Expect(IPv6Mode).To(Equal(false))
 
 			for _, a := range []OvnAuthConfig{OvnNorth, OvnSouth} {
 				Expect(a.Scheme).To(Equal(OvnDBSchemeUnix))
@@ -618,7 +619,7 @@ service-cidr=172.18.0.0/24
 
 	It("overrides config file and defaults with CLI legacy cluster-subnet option", func() {
 		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[default]
-cluster-subnets=172.18.0.0/24
+cluster-subnets=172.18.0.0/23
 `), 0644)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -628,14 +629,15 @@ cluster-subnets=172.18.0.0/24
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cfgPath).To(Equal(cfgFile.Name()))
 			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
-				{mustParseCIDR("172.15.0.0/24"), 24},
+				{mustParseCIDR("172.15.0.0/23"), 24},
 			}))
+			Expect(IPv6Mode).To(Equal(false))
 			return nil
 		}
 		cliArgs := []string{
 			app.Name,
 			"-config-file=" + cfgFile.Name(),
-			"-cluster-subnet=172.15.0.0/24",
+			"-cluster-subnet=172.15.0.0/23",
 		}
 		err = app.Run(cliArgs)
 		Expect(err).NotTo(HaveOccurred())

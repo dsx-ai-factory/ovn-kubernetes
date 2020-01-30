@@ -34,14 +34,9 @@ func setupOVNNode(nodeName string) error {
 
 	nodeIP := config.Default.EncapIP
 	if nodeIP == "" {
-		// check if the Open_vSwitch's external_ids has the information
-		nodeIP, _, _ = util.RunOVSVsctl("--if-exists", "get",
-			"Open_vSwitch", ".", "external_ids:ovn-encap-ip")
-		if nodeIP == "" {
-			nodeIP, err = util.GetNodeIP(nodeName)
-			if err != nil {
-				return fmt.Errorf("failed to obtain local IP from hostname %q: %v", nodeName, err)
-			}
+		nodeIP, err = util.GetNodeIP(nodeName)
+		if err != nil {
+			return fmt.Errorf("failed to obtain local IP from hostname %q: %v", nodeName, err)
 		}
 	} else {
 		if ip := net.ParseIP(nodeIP); ip == nil {
@@ -69,7 +64,15 @@ func setupOVNNode(nodeName string) error {
 		if err != nil {
 			return err
 		}
-		_, stderr, errSet := util.RunOVNSbctl("set", "encap", systemID,
+		uuid, _, err := util.RunOVNSbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "Encap",
+			fmt.Sprintf("chassis_name=%s", systemID))
+		if err != nil {
+			return err
+		}
+		if len(uuid) == 0 {
+			return fmt.Errorf("unable to find encap uuid to set geneve port for chassis %s", systemID)
+		}
+		_, stderr, errSet := util.RunOVNSbctl("set", "encap", uuid,
 			fmt.Sprintf("options:dst_port=%d", config.Default.EncapPort),
 		)
 		if errSet != nil {

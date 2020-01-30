@@ -43,18 +43,15 @@ func newNetworkPolicyOld(name, namespace string, podSelector metav1.LabelSelecto
 }
 
 func (n networkPolicyOld) baseCmds(fexec *ovntest.FakeExec, networkPolicy knet.NetworkPolicy) {
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=external_ids find address_set",
-		Output: "",
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=external_ids find address_set",
 	})
 }
+
 func (n networkPolicyOld) addNamespaceSelectorCmdsForGress(fexec *ovntest.FakeExec, networkPolicy knet.NetworkPolicy, gress string, i int) {
 	hashedOVNName := hashedAddressSet(fmt.Sprintf("%s.%s.%s.%d", networkPolicy.Namespace, networkPolicy.Name, gress, i))
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=%s", hashedOVNName),
-		Output: "",
-	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
+		fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=%s", hashedOVNName),
 		fmt.Sprintf("ovn-nbctl --timeout=15 create address_set name=%s external-ids:name=%s", hashedOVNName, fmt.Sprintf("%s.%s.%s.%v", networkPolicy.Namespace, networkPolicy.Name, gress, i)),
 	})
 }
@@ -281,7 +278,11 @@ func (n networkPolicyOld) delLocalPodCmds(fexec *ovntest.FakeExec, pod pod, netw
 }
 
 var _ = Describe("OVN NetworkPolicy Operations", func() {
-	var app *cli.App
+	var (
+		app     *cli.App
+		fakeOvn *FakeOVN
+		fExec   *ovntest.FakeExec
+	)
 
 	BeforeEach(func() {
 		// Restore global default values before each testcase
@@ -290,6 +291,13 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
+
+		fExec = ovntest.NewLooseCompareFakeExec()
+		fakeOvn = NewFakeOVN(fExec, false)
+	})
+
+	AfterEach(func() {
+		fakeOvn.shutdown()
 	})
 
 	Context("on startup", func() {
@@ -331,13 +339,11 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				fExec := ovntest.NewLooseCompareFakeExec()
 				nTest.baseCmds(fExec, namespace1, namespace2)
 				nTest.addCmds(fExec, namespace1, namespace2)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy)
 
-				fakeOvn := FakeOVN{}
-				fakeOvn.start(ctx, fExec,
+				fakeOvn.start(ctx,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespace1,
@@ -350,8 +356,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 				)
-				fakeOvn.controller.portGroupSupport = false
-				fakeOvn.controller.multicastSupport = false
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchNetworkPolicy()
 
@@ -413,16 +417,13 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				fExec := ovntest.NewLooseCompareFakeExec()
 				nPodTest.baseCmds(fExec)
-				nPodTest.addNodeSetupCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1)
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
 				npTest.addLocalPodSelectorCmds(fExec, nPodTest, networkPolicy)
 
-				fakeOvn := FakeOVN{}
-				fakeOvn.start(ctx, fExec,
+				fakeOvn.start(ctx,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespace1,
@@ -439,8 +440,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 				)
-				fakeOvn.controller.portGroupSupport = false
-				fakeOvn.controller.multicastSupport = false
+				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchNetworkPolicy()
@@ -514,17 +514,14 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				fExec := ovntest.NewLooseCompareFakeExec()
 				nPodTest.baseCmds(fExec)
-				nPodTest.addNodeSetupCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1, namespace2)
 				nTest.addCmds(fExec, namespace1)
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace2)
 				npTest.addPodAndNamespaceSelectorCmds(fExec, nPodTest, namespace2, networkPolicy)
 
-				fakeOvn := FakeOVN{}
-				fakeOvn.start(ctx, fExec,
+				fakeOvn.start(ctx,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespace1,
@@ -542,8 +539,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 				)
-				fakeOvn.controller.portGroupSupport = false
-				fakeOvn.controller.multicastSupport = false
+				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchNetworkPolicy()
@@ -611,17 +607,14 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				fExec := ovntest.NewLooseCompareFakeExec()
 				nPodTest.baseCmds(fExec)
-				nPodTest.addNodeSetupCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1, namespace2)
 				nTest.addCmds(fExec, namespace2)
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
 				npTest.addLocalPodAndNamespaceSelectorCmds(fExec, nPodTest, networkPolicy, namespace2)
 
-				fakeOvn := FakeOVN{}
-				fakeOvn.start(ctx, fExec,
+				fakeOvn.start(ctx,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespace1,
@@ -639,8 +632,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 				)
-				fakeOvn.controller.portGroupSupport = false
-				fakeOvn.controller.multicastSupport = false
+				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchNetworkPolicy()
@@ -710,13 +702,11 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				fExec := ovntest.NewLooseCompareFakeExec()
 				nTest.baseCmds(fExec, namespace1, namespace2)
 				nTest.addCmds(fExec, namespace1, namespace2)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy)
 
-				fakeOvn := FakeOVN{}
-				fakeOvn.start(ctx, fExec,
+				fakeOvn.start(ctx,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespace1,
@@ -729,8 +719,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 				)
-				fakeOvn.controller.portGroupSupport = false
-				fakeOvn.controller.multicastSupport = false
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchNetworkPolicy()
 
@@ -798,16 +786,13 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				fExec := ovntest.NewLooseCompareFakeExec()
 				nPodTest.baseCmds(fExec)
-				nPodTest.addNodeSetupCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1)
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
 				npTest.addLocalPodSelectorCmds(fExec, nPodTest, networkPolicy)
 
-				fakeOvn := FakeOVN{}
-				fakeOvn.start(ctx, fExec,
+				fakeOvn.start(ctx,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespace1,
@@ -824,8 +809,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 				)
-				fakeOvn.controller.portGroupSupport = false
-				fakeOvn.controller.multicastSupport = false
+				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchNetworkPolicy()
@@ -906,17 +890,14 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				fExec := ovntest.NewLooseCompareFakeExec()
 				nPodTest.baseCmds(fExec)
-				nPodTest.addNodeSetupCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1, namespace2)
 				nTest.addCmds(fExec, namespace1)
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace2)
 				npTest.addPodAndNamespaceSelectorCmds(fExec, nPodTest, namespace2, networkPolicy)
 
-				fakeOvn := FakeOVN{}
-				fakeOvn.start(ctx, fExec,
+				fakeOvn.start(ctx,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespace1,
@@ -934,8 +915,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 				)
-				fakeOvn.controller.portGroupSupport = false
-				fakeOvn.controller.multicastSupport = false
+				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchNetworkPolicy()
@@ -1012,16 +992,13 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				fExec := ovntest.NewLooseCompareFakeExec()
 				nPodTest.baseCmds(fExec)
-				nPodTest.addNodeSetupCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1)
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
 				npTest.addLocalPodSelectorCmds(fExec, nPodTest, networkPolicy)
 
-				fakeOvn := FakeOVN{}
-				fakeOvn.start(ctx, fExec,
+				fakeOvn.start(ctx,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespace1,
@@ -1038,8 +1015,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 				)
-				fakeOvn.controller.portGroupSupport = false
-				fakeOvn.controller.multicastSupport = false
+				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchNetworkPolicy()

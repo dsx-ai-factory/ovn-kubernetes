@@ -115,6 +115,10 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 				"Disabling Multicast Support")
 			oc.multicastSupport = false
 		}
+		if config.IPv6Mode {
+			logrus.Warningf("Multicast support enabled, but can not be used along with IPv6. Disabling Multicast Support")
+			oc.multicastSupport = false
+		}
 	}
 
 	if err := oc.SetupMaster(masterNodeName); err != nil {
@@ -150,7 +154,7 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 
 		// Drop IP multicast globally. Multicast is allowed only if explicitly
 		// enabled in a namespace.
-		err = oc.createDefaultDenyMulticastPolicy()
+		err = createDefaultDenyMulticastPolicy()
 		if err != nil {
 			logrus.Errorf("Failed to create default deny multicast policy, error: %v",
 				err)
@@ -297,12 +301,23 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, subnet *net.IPNet)
 	_, portIP := util.GetNodeWellKnownAddresses(subnet)
 
 	// Create this node's management logical port on the node switch
-	stdout, stderr, err := util.RunOVNNbctl(
-		"--", "--may-exist", "lsp-add", node.Name, "k8s-"+node.Name,
-		"--", "lsp-set-addresses", "k8s-"+node.Name, macAddress+" "+portIP.IP.String(),
-		"--", "--if-exists", "remove", "logical_switch", node.Name, "other-config", "exclude_ips")
+	var stdout, stderr string
+	if config.IPv6Mode {
+		stdout, stderr, err = util.RunOVNNbctl(
+			"--", "--may-exist", "lsp-add", node.Name, "k8s-"+node.Name,
+			"--", "lsp-set-addresses", "k8s-"+node.Name, macAddress+" "+portIP.IP.String())
+	} else {
+		stdout, stderr, err = util.RunOVNNbctl(
+			"--", "--may-exist", "lsp-add", node.Name, "k8s-"+node.Name,
+			"--", "lsp-set-addresses", "k8s-"+node.Name, macAddress+" "+portIP.IP.String(),
+			"--", "--if-exists", "remove", "logical_switch", node.Name, "other-config", "exclude_ips")
+	}
 	if err != nil {
 		logrus.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		return err
+	}
+
+	if err := addAllowACLFromNode(node.Name, portIP.IP); err != nil {
 		return err
 	}
 
@@ -468,7 +483,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		}
 		localOnlyIfaceID := fmt.Sprintf("br-local_%s", node.Name)
 		err = util.LocalGatewayInit(clusterSubnets, joinSubnetStr, systemID, node.Name, ipAddress, localOnlyIfaceID,
-			util.LocalnetGatewayIP, localOnlyGwMacAddress, util.LocalnetGatewayNextHop)
+			util.LocalnetGatewayIP(), localOnlyGwMacAddress, util.LocalnetGatewayNextHop())
 		if err != nil {
 			return err
 		}
@@ -541,10 +556,15 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	}
 
 	// Create a logical switch and set its subnet.
-	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "ls-add", nodeName,
-		"--", "set", "logical_switch", nodeName, "other-config:subnet="+hostsubnet.String(),
-		"other-config:exclude_ips="+secondIP.IP.String(),
-		"external-ids:gateway_ip="+firstIP.String())
+	var stdout string
+	if config.IPv6Mode {
+		stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "ls-add", nodeName,
+			"--", "set", "logical_switch", nodeName, config.OtherConfigSubnet()+"="+hostsubnet.String())
+	} else {
+		stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "ls-add", nodeName,
+			"--", "set", "logical_switch", nodeName, config.OtherConfigSubnet()+"="+hostsubnet.String(),
+			"other-config:exclude_ips="+secondIP.IP.String())
+	}
 	if err != nil {
 		logrus.Errorf("Failed to create a logical switch %v, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
 		return err
@@ -611,6 +631,14 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 		logrus.Errorf("Failed to add logical switch %v's loadbalancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
 		return err
 	}
+
+	// Add the node to the logical switch cache
+	oc.lsMutex.Lock()
+	defer oc.lsMutex.Unlock()
+	if existing, ok := oc.logicalSwitchCache[nodeName]; ok && !reflect.DeepEqual(existing, hostsubnet) {
+		logrus.Warningf("Node %q logical switch already in cache with subnet %v; replacing with %v", nodeName, existing, hostsubnet)
+	}
+	oc.logicalSwitchCache[nodeName] = hostsubnet
 
 	return nil
 }
@@ -815,7 +843,8 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 	// Note that this list will include the 'join' cluster switch, which we
 	// do not want to delete.
 	nodeSwitches, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=name,other-config", "find", "logical_switch", "other-config:subnet!=_")
+		"--columns=name,other-config", "find", "logical_switch",
+		fmt.Sprintf("%s!=_", config.OtherConfigSubnet()))
 	if err != nil {
 		logrus.Errorf("Failed to get node logical switches: stderr: %q, error: %v",
 			stderr, err)

@@ -39,11 +39,6 @@ var _ = Describe("Node Operations", func() {
 
 			fexec := ovntest.NewFakeExec()
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 " +
-					"--if-exists get Open_vSwitch . external_ids:ovn-encap-ip"),
-				Output: "",
-			})
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
 					"external_ids:ovn-encap-type=geneve "+
 					"external_ids:ovn-encap-ip=%s "+
@@ -77,14 +72,10 @@ var _ = Describe("Node Operations", func() {
 				interval    int    = 100000
 				ofintval    int    = 180
 				chassisUUID string = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
+				encapUUID   string = "e4437094-0094-4223-9f14-995d98d5fff8"
 			)
 
 			fexec := ovntest.NewFakeExec()
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 " +
-					"--if-exists get Open_vSwitch . external_ids:ovn-encap-ip"),
-				Output: "",
-			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
 					"external_ids:ovn-encap-type=geneve "+
@@ -100,8 +91,13 @@ var _ = Describe("Node Operations", func() {
 				Output: chassisUUID,
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 --data=bare --no-heading --columns=_uuid find "+
+					"Encap chassis_name=%s", chassisUUID),
+				Output: encapUUID,
+			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 set encap "+
-					"%s options:dst_port=%d", chassisUUID, encapPort),
+					"%s options:dst_port=%d", encapUUID, encapPort),
 			})
 
 			err := util.SetExec(fexec)
@@ -174,7 +170,7 @@ var _ = Describe("Node Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer f.Shutdown()
+			defer close(stopChan)
 
 			cluster := NewClusterController(fakeClient, f, stopChan)
 			Expect(cluster).NotTo(BeNil())
@@ -256,7 +252,7 @@ var _ = Describe("Node Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer f.Shutdown()
+			defer close(stopChan)
 
 			cluster := NewClusterController(fakeClient, f, stopChan)
 			Expect(cluster).NotTo(BeNil())

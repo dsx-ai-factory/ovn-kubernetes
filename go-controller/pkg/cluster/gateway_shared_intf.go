@@ -458,7 +458,7 @@ func initLocalOnlyGateway(nodeName string) (map[string]string, error) {
 
 	// Set localnetBridgeNextHop with an IP address.
 	_, _, err = util.RunIP("addr", "add",
-		util.LocalnetGatewayNextHopSubnet,
+		util.LocalnetGatewayNextHopSubnet(),
 		"dev", localnetBridgeNextHop)
 	if err != nil {
 		return nil, fmt.Errorf("failed to assign ip address to %s (%v)",
@@ -466,12 +466,23 @@ func initLocalOnlyGateway(nodeName string) (map[string]string, error) {
 	}
 
 	// Add arp entry for local service gateway, it is used for return traffic of local service access
-	ip, _, _ := net.ParseCIDR(util.LocalnetGatewayIP)
-	_, _, _ = util.RunIP("neigh", "delete", ip.String(), "dev", "br-nexthop")
-	_, _, err = util.RunIP("neigh", "add", ip.String(), "dev", "br-nexthop", "lladdr", macAddress)
-	if err != nil {
-		return nil, fmt.Errorf("failed to add arp entry for %s (%v)",
-			ip.String(), err)
+	ip, _, _ := net.ParseCIDR(util.LocalnetGatewayIP())
+	if config.IPv6Mode {
+		_, _, _ = util.RunIP("-6", "neigh", "del", ip.String(), "dev", "br-nexthop")
+		stdout, stderr, err := util.RunIP("-6", "neigh", "add", ip.String(), "dev", "br-nexthop", "lladdr", macAddress)
+		if err == nil {
+			logrus.Infof("Added MAC binding for %s on br-nexthop, stdout: '%s', stderr: '%s'",
+				ip.String(), stdout, stderr)
+		} else {
+			logrus.Errorf("Error in adding MAC binding for fd99::2 on br-nexthop: %v", err)
+		}
+	} else {
+		_, _, _ = util.RunIP("neigh", "delete", ip.String(), "dev", "br-nexthop")
+		_, _, err = util.RunIP("neigh", "add", ip.String(), "dev", "br-nexthop", "lladdr", macAddress)
+		if err != nil {
+			return nil, fmt.Errorf("failed to add arp entry for %s (%v)",
+				ip.String(), err)
+		}
 	}
 
 	return map[string]string{

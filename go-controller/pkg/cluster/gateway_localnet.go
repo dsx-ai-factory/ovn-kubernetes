@@ -108,9 +108,9 @@ func localnetGatewayNAT(ipt util.IPTablesHelper, ifname, ip string) error {
 
 func initLocalnetGateway(nodeName string,
 	subnet string, wf *factory.WatchFactory) (map[string]map[string]string, error) {
-	ipt, err := util.GetIPTablesHelper(iptables.ProtocolIPv4)
+	ipt, err := localnetIPTablesHelper()
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize iptables: %v", err)
+		return nil, err
 	}
 
 	// Create a localnet OVS bridge.
@@ -158,7 +158,7 @@ func initLocalnetGateway(nodeName string,
 
 	// Set localnetBridgeNextHop with an IP address.
 	_, _, err = util.RunIP("addr", "add",
-		util.LocalnetGatewayNextHopSubnet,
+		util.LocalnetGatewayNextHopSubnet(),
 		"dev", localnetBridgeNextHop)
 	if err != nil {
 		return nil, fmt.Errorf("failed to assign ip address to %s (%v)",
@@ -170,15 +170,27 @@ func initLocalnetGateway(nodeName string,
 		ovn.OvnNodeGatewayVlanID:     fmt.Sprintf("%d", config.Gateway.VLANID),
 		ovn.OvnNodeGatewayIfaceID:    ifaceID,
 		ovn.OvnNodeGatewayMacAddress: macAddress,
-		ovn.OvnNodeGatewayIP:         util.LocalnetGatewayIP,
-		ovn.OvnNodeGatewayNextHop:    util.LocalnetGatewayNextHop,
+		ovn.OvnNodeGatewayIP:         util.LocalnetGatewayIP(),
+		ovn.OvnNodeGatewayNextHop:    util.LocalnetGatewayNextHop(),
 		ovn.OvnNodePortEnable:        fmt.Sprintf("%t", config.Gateway.NodeportEnable),
 	}
 	annotations := map[string]map[string]string{
 		ovn.OvnDefaultNetworkGateway: l3GatewayConfig,
 	}
 
-	err = localnetGatewayNAT(ipt, localnetBridgeNextHop, util.LocalnetGatewayIP)
+	if config.IPv6Mode {
+		// TODO - IPv6 hack ... for some reason neighbor discovery isn't working here, so hard code a
+		// MAC binding for the gateway IP address for now - need to debug this further
+		_, _, _ = util.RunIP("-6", "neigh", "del", "fd99::2", "dev", "br-nexthop")
+		stdout, stderr, err := util.RunIP("-6", "neigh", "add", "fd99::2", "dev", "br-nexthop", "lladdr", macAddress)
+		if err == nil {
+			logrus.Infof("Added MAC binding for fd99::2 on br-nexthop, stdout: '%s', stderr: '%s'", stdout, stderr)
+		} else {
+			logrus.Errorf("Error in adding MAC binding for fd99::2 on br-nexthop: %v", err)
+		}
+	}
+
+	err = localnetGatewayNAT(ipt, localnetBridgeNextHop, util.LocalnetGatewayIP())
 	if err != nil {
 		return nil, fmt.Errorf("Failed to add NAT rules for localnet gateway (%v)",
 			err)
@@ -204,7 +216,7 @@ func localnetIptRules(svc *kapi.Service) []iptRule {
 			table: "nat",
 			chain: iptableNodePortChain,
 			args: []string{"-p", string(protocol), "--dport", nodePort, "-j", "DNAT", "--to-destination",
-				net.JoinHostPort(strings.Split(util.LocalnetGatewayIP, "/")[0], nodePort)},
+				net.JoinHostPort(strings.Split(util.LocalnetGatewayIP(), "/")[0], nodePort)},
 		})
 		rules = append(rules, iptRule{
 			table: "filter",
@@ -215,14 +227,29 @@ func localnetIptRules(svc *kapi.Service) []iptRule {
 	return rules
 }
 
+// localnetIPTablesHelper gets an IPTablesHelper for IPv4 or IPv6 as appropriate
+func localnetIPTablesHelper() (util.IPTablesHelper, error) {
+	var ipt util.IPTablesHelper
+	var err error
+	if config.IPv6Mode {
+		ipt, err = util.GetIPTablesHelper(iptables.ProtocolIPv6)
+	} else {
+		ipt, err = util.GetIPTablesHelper(iptables.ProtocolIPv4)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize iptables: %v", err)
+	}
+	return ipt, nil
+}
+
 // AddService adds service and creates corresponding resources in OVN
 func localnetAddService(svc *kapi.Service) error {
 	if !util.ServiceTypeHasNodePort(svc) {
 		return nil
 	}
-	ipt, err := util.GetIPTablesHelper(iptables.ProtocolIPv4)
+	ipt, err := localnetIPTablesHelper()
 	if err != nil {
-		return fmt.Errorf("failed to initialize iptables: %v", err)
+		return err
 	}
 	rules := localnetIptRules(svc)
 	logrus.Debugf("Add rules %v for service %v", rules, svc.Name)
@@ -233,9 +260,9 @@ func localnetDeleteService(svc *kapi.Service) error {
 	if !util.ServiceTypeHasNodePort(svc) {
 		return nil
 	}
-	ipt, err := util.GetIPTablesHelper(iptables.ProtocolIPv4)
+	ipt, err := localnetIPTablesHelper()
 	if err != nil {
-		return fmt.Errorf("failed to initialize iptables: %v", err)
+		return err
 	}
 	rules := localnetIptRules(svc)
 	logrus.Debugf("Delete rules %v for service %v", rules, svc.Name)

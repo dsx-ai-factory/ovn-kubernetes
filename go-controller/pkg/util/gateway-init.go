@@ -3,10 +3,13 @@ package util
 import (
 	"bytes"
 	"fmt"
-	"github.com/sirupsen/logrus"
 	"net"
 	"sort"
 	"strings"
+
+	"github.com/sirupsen/logrus"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
 
 const (
@@ -16,21 +19,48 @@ const (
 	// LocalNetworkName is the name that maps to an OVS bridge that provides
 	// access to local service
 	LocalNetworkName = "locnet"
-	// LocalnetGatewayIP is the SNAT IP using which host-local services are accessed
-	LocalnetGatewayIP = "169.254.33.2/24"
-	// LocalnetGatewayNextHop is the IP address to which packets to local services are forwarded
-	LocalnetGatewayNextHop = "169.254.33.1"
-	// fixed MAC address for the br-nexthop interface. the last 4 hex bytes
-	// translates to the br-nexthop's IP address
+	// V4LocalnetGatewayIP is the SNAT IP using which host-local services are accessed
+	V4LocalnetGatewayIP = "169.254.33.2/24"
+	// V4LocalnetGatewayNextHop is the IP address to which packets to local services are forwarded
+	V4LocalnetGatewayNextHop = "169.254.33.1"
+	// V4LocalnetGatewayNextHopMac is te fixed MAC address for the br-nexthop interface. the last
+	// 4 hex bytes translates to the br-nexthop's IP address
 	LocalnetGatewayNextHopMac = "00:00:a9:fe:21:01"
-	// LocalnetGatewayNextHopSubnet represents the subnet that bridges OVN logical topology and
+	// V4LocalnetGatewayNextHopSubnet represents the subnet that bridges OVN logical topology and
 	// host network
-	LocalnetGatewayNextHopSubnet = "169.254.33.1/24"
+	V4LocalnetGatewayNextHopSubnet = "169.254.33.1/24"
+	// V6LocalnetGatewayIP is the IPv6 counterpart of IPv4 constant above
+	V6LocalnetGatewayIP = "fd99::2/64"
+	// V6LocalnetGatewayNextHop is the IPv6 counterpart of IPv4 constant above
+	V6LocalnetGatewayNextHop = "fd99::1"
+	// V6LocalnetGatewayNextHopSubnet is the IPv6 counterpart of IPv4 constant above
+	V6LocalnetGatewayNextHopSubnet = "fd99::1/64"
 	// OvnClusterRouter is the name of the distributed router
 	OvnClusterRouter = "ovn_cluster_router"
 	// DefaultOpenFlowCookie is the identification of the default open flow rules added to each node
 	DefaultOpenFlowCookie = "0xdeff105"
 )
+
+func LocalnetGatewayIP() string {
+	if config.IPv6Mode {
+		return V6LocalnetGatewayIP
+	}
+	return V4LocalnetGatewayIP
+}
+
+func LocalnetGatewayNextHop() string {
+	if config.IPv6Mode {
+		return V6LocalnetGatewayNextHop
+	}
+	return V4LocalnetGatewayNextHop
+}
+
+func LocalnetGatewayNextHopSubnet() string {
+	if config.IPv6Mode {
+		return V6LocalnetGatewayNextHopSubnet
+	}
+	return V4LocalnetGatewayNextHopSubnet
+}
 
 // GetK8sClusterRouter returns back the OVN distributed router. This is meant to be used on the
 // master alone. If the worker nodes need to know about distributed cluster router (which they
@@ -314,8 +344,14 @@ func GatewayInit(clusterIPSubnet []string, joinSubnetStr, systemID, nodeName, if
 
 	// Add a static route in GR with physical gateway as the default next hop.
 	if defaultGW != "" {
+		var allIPs string
+		if config.IPv6Mode {
+			allIPs = "::/0"
+		} else {
+			allIPs = "0.0.0.0/0"
+		}
 		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
-			gatewayRouter, "0.0.0.0/0", defaultGW,
+			gatewayRouter, allIPs, defaultGW,
 			fmt.Sprintf("rtoe-%s", gatewayRouter))
 		if err != nil {
 			return fmt.Errorf("Failed to add a static route in GR with physical "+

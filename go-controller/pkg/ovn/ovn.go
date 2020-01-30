@@ -18,7 +18,6 @@ import (
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	kv1core "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -47,7 +46,6 @@ type Controller struct {
 	TCPLoadBalancerUUID string
 	UDPLoadBalancerUUID string
 
-	gatewayCache map[string]string
 	// For TCP and UDP type traffic, cache OVN load-balancers used for the
 	// cluster's east-west traffic.
 	loadbalancerClusterCache map[string]string
@@ -57,8 +55,8 @@ type Controller struct {
 	loadbalancerGWCache map[string]string
 	defGatewayRouter    string
 
-	// A cache of all logical switches seen by the watcher
-	logicalSwitchCache map[string]bool
+	// A cache of all logical switches seen by the watcher and their subnets
+	logicalSwitchCache map[string]*net.IPNet
 
 	// A cache of all logical ports seen by the watcher and
 	// its corresponding logical switch
@@ -97,8 +95,7 @@ type Controller struct {
 	// A mutex for lspIngressDenyCache and lspEgressDenyCache
 	lspMutex *sync.Mutex
 
-	// A mutex for gatewayCache and logicalSwitchCache which holds
-	// logicalSwitch information
+	// A mutex for logicalSwitchCache which holds logicalSwitch information
 	lsMutex *sync.Mutex
 
 	// Per namespace multicast enabled?
@@ -132,7 +129,7 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory)
 		watchFactory:             wf,
 		masterSubnetAllocator:    allocator.NewSubnetAllocator(),
 		joinSubnetAllocator:      allocator.NewSubnetAllocator(),
-		logicalSwitchCache:       make(map[string]bool),
+		logicalSwitchCache:       make(map[string]*net.IPNet),
 		logicalPortCache:         make(map[string]string),
 		logicalPortUUIDCache:     make(map[string]string),
 		namespaceAddressSet:      make(map[string]map[string]string),
@@ -143,7 +140,6 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory)
 		lspEgressDenyCache:       make(map[string]int),
 		lspMutex:                 &sync.Mutex{},
 		lsMutex:                  &sync.Mutex{},
-		gatewayCache:             make(map[string]string),
 		loadbalancerClusterCache: make(map[string]string),
 		loadbalancerGWCache:      make(map[string]string),
 		multicastEnabled:         make(map[string]bool),
@@ -341,7 +337,7 @@ func podScheduled(pod *kapi.Pod) bool {
 
 // WatchPods starts the watching of Pod resource and calls back the appropriate handler logic
 func (oc *Controller) WatchPods() error {
-	retryPods := sets.String{}
+	var retryPods sync.Map
 	_, err := oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
@@ -352,11 +348,11 @@ func (oc *Controller) WatchPods() error {
 			if podScheduled(pod) {
 				if err := oc.addLogicalPort(pod); err != nil {
 					logrus.Errorf(err.Error())
-					retryPods.Insert(string(pod.UID))
+					retryPods.Store(pod.UID, true)
 				}
 			} else {
 				// Handle unscheduled pods later in UpdateFunc
-				retryPods.Insert(string(pod.UID))
+				retryPods.Store(pod.UID, true)
 			}
 		},
 		UpdateFunc: func(old, newer interface{}) {
@@ -365,18 +361,19 @@ func (oc *Controller) WatchPods() error {
 				return
 			}
 
-			if podScheduled(pod) && retryPods.Has(string(pod.UID)) {
+			_, retry := retryPods.Load(pod.UID)
+			if podScheduled(pod) && retry {
 				if err := oc.addLogicalPort(pod); err != nil {
 					logrus.Errorf(err.Error())
 				} else {
-					retryPods.Delete(string(pod.UID))
+					retryPods.Delete(pod.UID)
 				}
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			oc.deleteLogicalPort(pod)
-			retryPods.Delete(string(pod.UID))
+			retryPods.Delete(pod.UID)
 		},
 	}, oc.syncPods)
 	return err
@@ -502,7 +499,8 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, subnet *net.IPNet) error 
 // WatchNodes starts the watching of node resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNodes() error {
-	gatewaysFailed := make(map[string]bool)
+	var gatewaysFailed sync.Map
+	macAddressFailed := make(map[string]bool)
 	_, err := oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
@@ -515,35 +513,39 @@ func (oc *Controller) WatchNodes() error {
 
 			err = oc.syncNodeManagementPort(node, hostSubnet)
 			if err != nil {
+				macAddressFailed[node.Name] = true
 				logrus.Errorf("error creating Node Management Port for node %s: %v", node.Name, err)
 			}
 
 			if err := oc.syncNodeGateway(node, hostSubnet); err != nil {
-				gatewaysFailed[node.Name] = true
 				logrus.Errorf(err.Error())
+				gatewaysFailed.Store(node.Name, true)
 			}
 		},
 		UpdateFunc: func(old, new interface{}) {
 			oldNode := old.(*kapi.Node)
 			node := new.(*kapi.Node)
-			oldMacAddress := oldNode.Annotations[OvnNodeManagementPortMacAddress]
-			macAddress := node.Annotations[OvnNodeManagementPortMacAddress]
 			logrus.Debugf("Updated event for Node %q", node.Name)
-			if oldMacAddress != macAddress {
+			if macAddressFailed[node.Name] || macAddressChanged(oldNode, node) {
 				err := oc.syncNodeManagementPort(node, nil)
 				if err != nil {
+					macAddressFailed[node.Name] = true
 					logrus.Errorf("error update Node Management Port for node %s: %v", node.Name, err)
+				} else {
+					delete(macAddressFailed, node.Name)
 				}
 			}
 
 			oc.clearInitialNodeNetworkUnavailableCondition(oldNode, node)
 
-			if gatewaysFailed[node.Name] || gatewayChanged(oldNode, node) {
-				if err := oc.syncNodeGateway(node, nil); err != nil {
-					gatewaysFailed[node.Name] = true
+			_, failed := gatewaysFailed.Load(node.Name)
+			if failed || gatewayChanged(oldNode, node) {
+				err := oc.syncNodeGateway(node, nil)
+				if err != nil {
 					logrus.Errorf(err.Error())
+					gatewaysFailed.Store(node.Name, true)
 				} else {
-					delete(gatewaysFailed, node.Name)
+					gatewaysFailed.Delete(node.Name)
 				}
 			}
 		},
@@ -559,10 +561,9 @@ func (oc *Controller) WatchNodes() error {
 				logrus.Error(err)
 			}
 			oc.lsMutex.Lock()
-			delete(oc.gatewayCache, node.Name)
 			delete(oc.logicalSwitchCache, node.Name)
 			oc.lsMutex.Unlock()
-			delete(gatewaysFailed, node.Name)
+			gatewaysFailed.Delete(node.Name)
 			if oc.defGatewayRouter == "GR_"+node.Name {
 				delete(oc.loadbalancerGWCache, TCP)
 				delete(oc.loadbalancerGWCache, UDP)
@@ -599,4 +600,11 @@ func gatewayChanged(oldNode, newNode *kapi.Node) bool {
 	}
 
 	return !reflect.DeepEqual(oldL3GatewayConfig, l3GatewayConfig)
+}
+
+// macAddressChanged() compares old annotations to new and returns true if something has changed.
+func macAddressChanged(oldNode, node *kapi.Node) bool {
+	oldMacAddress := oldNode.Annotations[OvnNodeManagementPortMacAddress]
+	macAddress := node.Annotations[OvnNodeManagementPortMacAddress]
+	return oldMacAddress != macAddress
 }
