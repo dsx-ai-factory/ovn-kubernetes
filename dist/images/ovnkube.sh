@@ -778,11 +778,17 @@ ovn-node () {
   # Ensure GENEVE's UDP port isn't firewalled
   /usr/share/openvswitch/scripts/ovs-ctl --protocol=udp --dport=6081 enable-protocol
 
+  OVN_NODE_PORT="--nodeport"
+  ovn_node_port=`ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-k8s-node-port | tr -d '\"'`
+  if [[ $? == 0 && "${ovn_node_port}" == "false" ]]; then
+    OVN_NODE_PORT=""
+  fi
+
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
       --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
       --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
-      --nodeport \
+      ${OVN_NODE_PORT} \
       --unprivileged-mode \
       --mtu=${mtu} \
       --loglevel=${ovnkube_loglevel} \
