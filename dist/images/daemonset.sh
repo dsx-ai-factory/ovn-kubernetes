@@ -117,6 +117,8 @@ ovn_db_replicas=${OVN_DB_REPLICAS:-3}
 echo "ovn_db_replicas: ${ovn_db_replicas}"
 ovn_db_vip=${OVN_DB_VIP}
 echo "ovn_db_vip: ${ovn_db_vip}"
+ovn_db_minAvailable=$(((${ovn_db_replicas} + 1) / 2))
+echo "ovn_db_minAvailable: ${ovn_db_minAvailable}"
 
 # Simplified expansion of template 
 image_str="{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
@@ -124,6 +126,7 @@ policy_str="{{ ovn_image_pull_policy | default('IfNotPresent') }}"
 ovn_db_vip_image_repl="{{ ovn_db_vip_image | default('docker.io/ovnkube/ovndb-vip-u:latest') }}"
 ovn_db_replicas_repl="{{ ovn_db_replicas | default(3) }}"
 ovn_db_vip_repl="{{ ovn_db_vip }}"
+ovn_db_minAvailable_repl="{{ ovn_db_minAvailable | default(2) }}"
 
 ovn_image=${image} ovn_image_pull_policy=${policy} kind=${KIND} ovn_gateway_mode=${ovn_gateway_mode} \
  ovn_gateway_opts=${ovn_gateway_opts} j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
@@ -138,6 +141,11 @@ sed "s,${ovn_db_vip_image_repl},${ovn_db_vip_image},
 s,${ovn_db_replicas_repl},${ovn_db_replicas},
 s,${ovn_db_vip_repl},${ovn_db_vip},
 s,${policy_str},${policy}," ../templates/ovnkube-db-vip.yaml.j2 > ../yaml/ovnkube-db-vip.yaml
+
+sed "s,${image_str},${image},
+s,${ovn_db_replicas_repl},${ovn_db_replicas},
+s,${ovn_db_minAvailable_repl},${ovn_db_minAvailable},
+s,${policy_str},${policy}," ../templates/ovnkube-db-raft.yaml.j2 > ../yaml/ovnkube-db-raft.yaml
 
 # ovn-setup.yaml
 # net_cidr=10.128.0.0/14/23
