@@ -17,6 +17,8 @@ import (
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -500,10 +502,19 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, subnet *net.IPNet) error 
 // back the appropriate handler logic
 func (oc *Controller) WatchNodes() error {
 	var gatewaysFailed sync.Map
-	macAddressFailed := make(map[string]bool)
+	var mgmtPortFailed sync.Map
 	_, err := oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
+
+			if noHostSubnet := noHostSubnet(node); noHostSubnet {
+				oc.lsMutex.Lock()
+				defer oc.lsMutex.Unlock()
+				//setting the value to nil in the cache means it was not assigned a hostSubnet by ovn-kube
+				oc.logicalSwitchCache[node.Name] = nil
+				return
+			}
+
 			logrus.Debugf("Added event for Node %q", node.Name)
 			hostSubnet, err := oc.addNode(node)
 			if err != nil {
@@ -513,8 +524,8 @@ func (oc *Controller) WatchNodes() error {
 
 			err = oc.syncNodeManagementPort(node, hostSubnet)
 			if err != nil {
-				macAddressFailed[node.Name] = true
-				logrus.Errorf("error creating Node Management Port for node %s: %v", node.Name, err)
+				logrus.Errorf("error creating management port for node %s: %v", node.Name, err)
+				mgmtPortFailed.Store(node.Name, true)
 			}
 
 			if err := oc.syncNodeGateway(node, hostSubnet); err != nil {
@@ -525,20 +536,32 @@ func (oc *Controller) WatchNodes() error {
 		UpdateFunc: func(old, new interface{}) {
 			oldNode := old.(*kapi.Node)
 			node := new.(*kapi.Node)
+
+			shouldUpdate, err := shouldUpdate(node, oldNode)
+			if err != nil {
+				logrus.Errorf(err.Error())
+			}
+			if !shouldUpdate {
+				// the hostsubnet is not assigned by ovn-kubernetes
+				return
+			}
+
 			logrus.Debugf("Updated event for Node %q", node.Name)
-			if macAddressFailed[node.Name] || macAddressChanged(oldNode, node) {
+
+			_, failed := mgmtPortFailed.Load(node.Name)
+			if failed || macAddressChanged(oldNode, node) {
 				err := oc.syncNodeManagementPort(node, nil)
 				if err != nil {
-					macAddressFailed[node.Name] = true
-					logrus.Errorf("error update Node Management Port for node %s: %v", node.Name, err)
+					logrus.Errorf("error updating management port for node %s: %v", node.Name, err)
+					mgmtPortFailed.Store(node.Name, true)
 				} else {
-					delete(macAddressFailed, node.Name)
+					mgmtPortFailed.Delete(node.Name)
 				}
 			}
 
 			oc.clearInitialNodeNetworkUnavailableCondition(oldNode, node)
 
-			_, failed := gatewaysFailed.Load(node.Name)
+			_, failed = gatewaysFailed.Load(node.Name)
 			if failed || gatewayChanged(oldNode, node) {
 				err := oc.syncNodeGateway(node, nil)
 				if err != nil {
@@ -563,6 +586,7 @@ func (oc *Controller) WatchNodes() error {
 			oc.lsMutex.Lock()
 			delete(oc.logicalSwitchCache, node.Name)
 			oc.lsMutex.Unlock()
+			mgmtPortFailed.Delete(node.Name)
 			gatewaysFailed.Delete(node.Name)
 			if oc.defGatewayRouter == "GR_"+node.Name {
 				delete(oc.loadbalancerGWCache, TCP)
@@ -607,4 +631,33 @@ func macAddressChanged(oldNode, node *kapi.Node) bool {
 	oldMacAddress := oldNode.Annotations[OvnNodeManagementPortMacAddress]
 	macAddress := node.Annotations[OvnNodeManagementPortMacAddress]
 	return oldMacAddress != macAddress
+}
+
+// noHostSubnet() compares the no-hostsubenet-nodes flag with node labels to see if the node is manageing its
+// own network.
+func noHostSubnet(node *kapi.Node) bool {
+	if config.Kubernetes.NoHostSubnetNodes == nil {
+		return false
+	}
+
+	nodeSelector, _ := metav1.LabelSelectorAsSelector(config.Kubernetes.NoHostSubnetNodes)
+	return nodeSelector.Matches(labels.Set(node.Labels))
+}
+
+// shouldUpdate() determines if the ovn-kubernetes plugin should update the state of the node.
+// ovn-kube should not perform an update if it does not assign a hostsubnet, or if you want to change
+// whether or not ovn-kubernetes assigns a hostsubnet
+func shouldUpdate(node, oldNode *kapi.Node) (bool, error) {
+	newNoHostSubnet := noHostSubnet(node)
+	oldNoHostSubnet := noHostSubnet(oldNode)
+
+	if oldNoHostSubnet && newNoHostSubnet {
+		return false, nil
+	} else if oldNoHostSubnet && !newNoHostSubnet {
+		return false, fmt.Errorf("error updating node %s, cannot remove assigned hostsubnet, please delete node and recreate.", node.Name)
+	} else if !oldNoHostSubnet && newNoHostSubnet {
+		return false, fmt.Errorf("error updating node %s, cannot assign a hostsubnet to already created node, please delete node and recreate.", node.Name)
+	}
+
+	return true, nil
 }

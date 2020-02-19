@@ -949,14 +949,14 @@ case ${cmd} in
   "cleanup-ovn-node")
 	  cleanup-ovn-node
     ;;
-  "nb-ovsdb-raft")   # pod ovnkube-db container ovsdb-raft for NB
+  "nb-ovsdb-raft")
     ovsdb-raft nb ${ovn_nb_port}
     ;;
-  "sb-ovsdb-raft")   # pod ovnkube-db container ovsdb-raft for SB
+  "sb-ovsdb-raft")
     ovsdb-raft sb ${ovn_sb_port}
     ;;
   *)
-	  echo "invalid command ${cmd}"
+    echo "invalid command ${cmd}"
     echo "valid v3 commands: ovs-server nb-ovsdb sb-ovsdb run-ovn-northd ovn-master ovn-controller ovn-node display_env display ovn_debug cleanup-ovs-server cleanup-ovn-node nb-ovsdb-raft sb-ovsdb-raft"
 	  exit 0
 esac

@@ -20,8 +20,6 @@ import (
 )
 
 const (
-	// OvnHostSubnetLegacy is the old constant string representing the node subnet annotation key
-	OvnHostSubnetLegacy = "ovn_host_subnet"
 	// OvnNodeSubnets is the constant string representing the node subnets annotation key
 	OvnNodeSubnets = "k8s.ovn.org/node-subnets"
 	// OvnNodeJoinSubnets is the constant string representing the node's join switch subnets annotation key
@@ -67,8 +65,15 @@ const (
 func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	// The gateway router need to be connected to the distributed router via a per-node join switch.
 	// We need a subnet allocator that allocates subnet for this per-node join switch. Use the 100.64.0.0/16
-	// network range with host bits set to 3. The allocator will start allocating /29 subnet (i.e, upto 6 IPs)
-	_ = oc.joinSubnetAllocator.AddNetworkRange("100.64.0.0/16", 3)
+	// or fd98::/64 network range with host bits set to 3. The allocator will start allocating subnet that has upto 6
+	// host IPs)
+	var joinSubnet string
+	if config.IPv6Mode {
+		joinSubnet = "fd98::/64"
+	} else {
+		joinSubnet = "100.64.0.0/16"
+	}
+	_ = oc.joinSubnetAllocator.AddNetworkRange(joinSubnet, 3)
 
 	existingNodes, err := oc.kube.GetNodes()
 	if err != nil {
@@ -222,7 +227,7 @@ func (oc *Controller) addNodeJoinSubnetAnnotations(node *kapi.Node, subnet strin
 	return nil
 }
 
-func (oc *Controller) getJoinSubnet(node *kapi.Node) (string, error) {
+func (oc *Controller) allocateJoinSubnet(node *kapi.Node) (string, error) {
 	joinSubnet, _ := parseNodeJoinSubnet(node)
 	if joinSubnet != nil {
 		return joinSubnet.String(), nil
@@ -464,7 +469,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	}
 
 	// get a subnet for the per-node join switch
-	joinSubnetStr, err := oc.getJoinSubnet(node)
+	joinSubnetStr, err := oc.allocateJoinSubnet(node)
 	if err != nil {
 		return err
 	}
@@ -498,9 +503,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 
 func parseNodeHostSubnet(node *kapi.Node) (*net.IPNet, error) {
 	sub, ok := node.Annotations[OvnNodeSubnets]
-	if !ok {
-		sub, ok = node.Annotations[OvnHostSubnetLegacy]
-	} else {
+	if ok {
 		nodeSubnets := make(map[string]string)
 		if err := json.Unmarshal([]byte(sub), &nodeSubnets); err != nil {
 			return nil, fmt.Errorf("error parsing node-subnets annotation: %v", err)
@@ -541,6 +544,7 @@ func parseNodeJoinSubnet(node *kapi.Node) (*net.IPNet, error) {
 }
 
 func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.IPNet) error {
+
 	// Get firstIP for gateway.  Skip the second address of the LogicalSwitch's
 	// subnet since we set it aside for the management port on that node.
 	firstIP, secondIP := util.GetNodeWellKnownAddresses(hostsubnet)
@@ -559,10 +563,10 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	var stdout string
 	if config.IPv6Mode {
 		stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "ls-add", nodeName,
-			"--", "set", "logical_switch", nodeName, config.OtherConfigSubnet()+"="+hostsubnet.String())
+			"--", "set", "logical_switch", nodeName, "other-config:ipv6_prefix="+hostsubnet.IP.String())
 	} else {
 		stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "ls-add", nodeName,
-			"--", "set", "logical_switch", nodeName, config.OtherConfigSubnet()+"="+hostsubnet.String(),
+			"--", "set", "logical_switch", nodeName, "other-config:subnet="+hostsubnet.String(),
 			"other-config:exclude_ips="+secondIP.IP.String())
 	}
 	if err != nil {
@@ -664,8 +668,6 @@ func (oc *Controller) addNodeAnnotations(node *kapi.Node, subnet string) error {
 			node.Name, subnet)
 	}
 	nodeAnnotations := make(map[string]interface{})
-	// if legacy annotation key exists, then remove it
-	nodeAnnotations[OvnHostSubnetLegacy] = nil
 	nodeAnnotations[OvnNodeSubnets] = string(bytes)
 	err = oc.kube.SetAnnotationsOnNode(node, nodeAnnotations)
 	if err != nil {
@@ -842,9 +844,15 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 	// watchNodes() will be called for all existing nodes at startup anyway.
 	// Note that this list will include the 'join' cluster switch, which we
 	// do not want to delete.
+	var subnetAttr string
+	if config.IPv6Mode {
+		subnetAttr = "ipv6_prefix"
+	} else {
+		subnetAttr = "subnet"
+	}
 	nodeSwitches, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=name,other-config", "find", "logical_switch",
-		fmt.Sprintf("%s!=_", config.OtherConfigSubnet()))
+		"other-config:"+subnetAttr+"!=_")
 	if err != nil {
 		logrus.Errorf("Failed to get node logical switches: stderr: %q, error: %v",
 			stderr, err)
@@ -874,10 +882,13 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 		}
 
 		var subnet *net.IPNet
-		configs := strings.Fields(items[1])
-		for _, config := range configs {
-			if strings.HasPrefix(config, "subnet=") {
-				subnetStr := strings.TrimPrefix(config, "subnet=")
+		attrs := strings.Fields(items[1])
+		for _, attr := range attrs {
+			if strings.HasPrefix(attr, subnetAttr+"=") {
+				subnetStr := strings.TrimPrefix(attr, subnetAttr+"=")
+				if config.IPv6Mode {
+					subnetStr += "/64"
+				}
 				_, subnet, _ = net.ParseCIDR(subnetStr)
 				break
 			}
