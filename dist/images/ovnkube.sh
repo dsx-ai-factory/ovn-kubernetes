@@ -81,7 +81,7 @@ ovn_daemonset_version=${OVN_DAEMONSET_VERSION:-"3"}
 # hostname is the host's hostname when using host networking,
 # This is useful on the master node
 # otherwise it is the container ID (useful for debugging).
-ovn_pod_host=$(hostname)
+ovn_pod_host=${K8S_NODE:-$(hostname)}
 
 # The ovs user id, by default it is going to be root:root
 ovs_user_id=${OVS_USER_ID:-""}
@@ -216,13 +216,13 @@ ready_to_start_node () {
 
   # See if ep is available ...
   IFS=" " read -a ovn_db_hosts <<< "$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
-    get ep -n ovn-kubernetes ovnkube-db -o=jsonpath='{range .subsets[0].addresses[*]}{.ip}{" "}')"
+    get ep -n ${ovn_kubernetes_namespace} ovnkube-db -o=jsonpath='{range .subsets[0].addresses[*]}{.ip}{" "}')"
   if [[ ${#ovn_db_hosts[@]} == 0 ]] ; then
       return 1
   fi
   get_ovn_db_vars
   # cannot use ovsdb-client in the case of raft, since it will succeed even if one of the
-  # instace of DB is up and running. However, ovn-nbctl always connects to the leader in the clustered
+  # instance of DB is up and running. HOwever, ovn-nbctl always connects to the leader in the clustered
   # database, so use it.
   ovn-nbctl --db=${ovn_nbdb_test} list NB_Global > /dev/null 2>&1
   if [[ $? != 0 ]] ; then
@@ -431,13 +431,12 @@ echo ovnkube.sh version ${ovnkube_version}
 }
 
 ovn_debug () {
-  ready_to_start_node
+  wait_for_event attempts=3 ready_to_start_node
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
   echo "ovn_nbdb_test ${ovn_nbdb_test}"
 
   # get ovs/ovn info from the node for debug purposes
   echo "=========== ovn_debug   hostname: ${ovn_pod_host} ============="
-  echo "=========== ovn-nbctl show ============="
   echo "=========== ovn-nbctl --db=${ovn_nbdb_test} show ============="
   ovn-nbctl --db=${ovn_nbdb_test} show
   echo " "
@@ -470,8 +469,8 @@ ovn_debug () {
   echo "=========== ovn-sbctl --db=${ovn_sbdb_test} list datapath ============="
   ovn-sbctl --db=${ovn_sbdb_test} list datapath
   echo " "
-  echo "=========== ovn-sbctl --db=${ovn_sbdb_test} list port ============="
-  ovn-sbctl --db=${ovn_sbdb_test} list port
+  echo "=========== ovn-sbctl --db=${ovn_sbdb_test} list port_binding ============="
+  ovn-sbctl --db=${ovn_sbdb_test} list port_binding
 }
 
 ovs-server () {
@@ -714,7 +713,7 @@ ovn-master () {
 
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
-    --init-master ${ovn_pod_host} \
+    --init-master ${K8S_NODE} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
     --nbctl-daemon-mode \
