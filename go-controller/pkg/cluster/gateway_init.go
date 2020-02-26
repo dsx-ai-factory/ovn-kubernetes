@@ -1,16 +1,15 @@
 package cluster
 
 import (
-	"encoding/json"
 	"fmt"
+	"net"
 	"runtime"
 	"strings"
 
-	"net"
-
-	"github.com/sirupsen/logrus"
+	"k8s.io/klog"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -102,31 +101,31 @@ loop:
 	return ipAddress, nil
 }
 
-func (cluster *OvnClusterController) initGateway(
-	nodeName string, subnet string) (map[string]string, postReadyFn, error) {
+func (cluster *OvnClusterController) initGateway(nodeName string, subnet string,
+	nodeAnnotator kube.Annotator, waiter *startupWaiter) error {
 
 	if config.Gateway.NodeportEnable {
 		err := initLoadBalancerHealthChecker(nodeName, cluster.watchFactory)
 		if err != nil {
-			return nil, nil, err
+			return err
 		}
 	}
 
 	var err error
 	var systemID string
-	var prFn postReadyFn
+	var prFn postWaitFunc
 	var annotations map[string]map[string]string
 	switch config.Gateway.Mode {
 	case config.GatewayModeLocal:
 		systemID, err = util.GetNodeChassisID()
 		if err != nil {
-			return nil, nil, err
+			return err
 		}
 		annotations, err = initLocalnetGateway(nodeName, subnet, cluster.watchFactory)
 	case config.GatewayModeShared:
 		systemID, err = util.GetNodeChassisID()
 		if err != nil {
-			return nil, nil, err
+			return err
 		}
 		gatewayNextHop := config.Gateway.NextHop
 		gatewayIntf := config.Gateway.Interface
@@ -134,7 +133,7 @@ func (cluster *OvnClusterController) initGateway(
 			// We need to get the interface details from the default gateway.
 			defaultGatewayIntf, defaultGatewayNextHop, err := getDefaultGatewayInterfaceDetails()
 			if err != nil {
-				return nil, nil, err
+				return err
 			}
 
 			if gatewayNextHop == "" {
@@ -155,21 +154,21 @@ func (cluster *OvnClusterController) initGateway(
 		}
 	}
 	if err != nil {
-		return nil, nil, err
-	}
-	// marshal the annotation into string
-	bytes, err := json.Marshal(annotations)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to marshal l3 gateway information %v for node %q: (%v)",
-			annotations, nodeName, err)
+		return err
 	}
 
-	nodeAnnotations := map[string]string{ovn.OvnNodeL3GatewayConfig: string(bytes)}
+	if err := nodeAnnotator.Set(ovn.OvnNodeL3GatewayConfig, annotations); err != nil {
+		return err
+	}
 	if systemID != "" {
-		nodeAnnotations[ovn.OvnNodeChassisID] = systemID
+		if err := nodeAnnotator.Set(ovn.OvnNodeChassisID, systemID); err != nil {
+			return err
+		}
 	}
 
-	return nodeAnnotations, prFn, nil
+	// Wait for gateway resources to be created by the master
+	waiter.AddWait(gatewayReady, prFn)
+	return nil
 }
 
 // CleanupClusterNode cleans up OVS resources on the k8s node on ovnkube-node daemonset deletion.
@@ -177,25 +176,25 @@ func (cluster *OvnClusterController) initGateway(
 func CleanupClusterNode(name string) error {
 	var err error
 
-	logrus.Debugf("Cleaning up gateway resources on node: %q", name)
+	klog.V(5).Infof("Cleaning up gateway resources on node: %q", name)
 	switch config.Gateway.Mode {
 	case config.GatewayModeLocal:
 		err = cleanupLocalnetGateway(util.PhysicalNetworkName)
 	case config.GatewayModeShared:
 		err = cleanupLocalnetGateway(util.LocalNetworkName)
 		if err != nil {
-			logrus.Errorf("Failed to cleanup Localnet Gateway, error: %v", err)
+			klog.Errorf("Failed to cleanup Localnet Gateway, error: %v", err)
 		}
 		err = cleanupSharedGateway()
 	}
 	if err != nil {
-		logrus.Errorf("Failed to cleanup Gateway, error: %v", err)
+		klog.Errorf("Failed to cleanup Gateway, error: %v", err)
 	}
 
 	stdout, stderr, err := util.RunOVSVsctl("--", "--if-exists", "remove", "Open_vSwitch", ".", "external_ids",
 		"ovn-bridge-mappings")
 	if err != nil {
-		logrus.Errorf("Failed to delete ovn-bridge-mappings, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		klog.Errorf("Failed to delete ovn-bridge-mappings, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 	}
 
 	// Delete iptable rules for management port on Linux.
@@ -207,7 +206,7 @@ func CleanupClusterNode(name string) error {
 }
 
 // GatewayReady will check to see if we have successfully added SNAT OpenFlow rules in the L3Gateway Routers
-func GatewayReady(nodeName string, portName string) (bool, error) {
+func gatewayReady(string) (bool, error) {
 	// OpenFlow table 41 performs SNATing of packets that are heading to physical network from
 	// logical network.
 	for _, clusterSubnet := range config.Default.ClusterSubnets {

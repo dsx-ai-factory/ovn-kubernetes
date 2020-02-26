@@ -72,7 +72,6 @@ func cleanupGateway(fexec *ovntest.FakeExec, nodeName string, nodeSubnet string,
 		"ovn-nbctl --timeout=15 --if-exist ls-del ext_" + nodeName,
 		"ovn-nbctl --timeout=15 --if-exist lrp-del dtoj-" + nodeName,
 	})
-
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_" + nodeName,
 		Output: "",

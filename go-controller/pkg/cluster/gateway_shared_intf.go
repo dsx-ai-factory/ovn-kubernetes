@@ -13,9 +13,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/klog"
 )
 
 func addService(service *kapi.Service, inport, outport, gwBridge string) {
@@ -34,7 +34,7 @@ func addService(service *kapi.Service, inport, outport, gwBridge string) {
 			fmt.Sprintf("priority=100, in_port=%s, %s, tp_dst=%d, actions=%s",
 				inport, protocol, svcPort.NodePort, outport))
 		if err != nil {
-			logrus.Errorf("Failed to add openflow flow on %s for nodePort "+
+			klog.Errorf("Failed to add openflow flow on %s for nodePort "+
 				"%d, stderr: %q, error: %v", gwBridge,
 				svcPort.NodePort, stderr, err)
 		}
@@ -58,7 +58,7 @@ func deleteService(service *kapi.Service, inport, gwBridge string) {
 			fmt.Sprintf("in_port=%s, %s, tp_dst=%d",
 				inport, protocol, svcPort.NodePort))
 		if err != nil {
-			logrus.Errorf("Failed to delete openflow flow on %s for nodePort "+
+			klog.Errorf("Failed to delete openflow flow on %s for nodePort "+
 				"%d, stderr: %q, error: %v", gwBridge,
 				svcPort.NodePort, stderr, err)
 		}
@@ -70,7 +70,7 @@ func syncServices(services []interface{}, inport, gwBridge string) {
 	for _, serviceInterface := range services {
 		service, ok := serviceInterface.(*kapi.Service)
 		if !ok {
-			logrus.Errorf("Spurious object in syncServices: %v",
+			klog.Errorf("Spurious object in syncServices: %v",
 				serviceInterface)
 			continue
 		}
@@ -99,14 +99,14 @@ func syncServices(services []interface{}, inport, gwBridge string) {
 	stdout, stderr, err := util.RunOVSOfctl("dump-flows",
 		gwBridge)
 	if err != nil {
-		logrus.Errorf("dump-flows failed: %q (%v)", stderr, err)
+		klog.Errorf("dump-flows failed: %q (%v)", stderr, err)
 		return
 	}
 	flows := strings.Split(stdout, "\n")
 
 	re, err := regexp.Compile(`tp_dst=(.*?)[, ]`)
 	if err != nil {
-		logrus.Errorf("regexp compile failed: %v", err)
+		klog.Errorf("regexp compile failed: %v", err)
 		return
 	}
 
@@ -134,7 +134,7 @@ func syncServices(services []interface{}, inport, gwBridge string) {
 				fmt.Sprintf("in_port=%s, %s, tp_dst=%s",
 					inport, protocol, port))
 			if err != nil {
-				logrus.Errorf("del-flows of %s failed: %q",
+				klog.Errorf("del-flows of %s failed: %q",
 					gwBridge, stdout)
 			}
 		}
@@ -267,12 +267,12 @@ func checkDefaultOpenFlow(gwBridge string, stopChan chan struct{}) {
 			out, _, err := util.RunOVSOfctl("dump-aggregate", gwBridge,
 				fmt.Sprintf("cookie=%s/-1", util.DefaultOpenFlowCookie))
 			if err != nil {
-				logrus.Errorf("failed to dump aggregate statistics of the default OpenFlow rules: %v", err)
+				klog.Errorf("failed to dump aggregate statistics of the default OpenFlow rules: %v", err)
 				continue
 			}
 
 			if !strings.Contains(out, "flow_count=5") {
-				logrus.Errorf("fatal error: unexpected default OpenFlows count, expect 5 output: %v\n", out)
+				klog.Errorf("fatal error: unexpected default OpenFlows count, expect 5 output: %v\n", out)
 				os.Exit(1)
 			}
 		case <-stopChan:
@@ -282,7 +282,7 @@ func checkDefaultOpenFlow(gwBridge string, stopChan chan struct{}) {
 }
 
 func initSharedGateway(nodeName string, subnet, gwNextHop, gwIntf string,
-	wf *factory.WatchFactory, stopChan chan struct{}) (map[string]map[string]string, postReadyFn, error) {
+	wf *factory.WatchFactory, stopChan chan struct{}) (map[string]map[string]string, postWaitFunc, error) {
 	var bridgeName string
 	var uplinkName string
 	var brCreated bool
@@ -471,10 +471,10 @@ func initLocalOnlyGateway(nodeName string) (map[string]string, error) {
 		_, _, _ = util.RunIP("-6", "neigh", "del", ip.String(), "dev", "br-nexthop")
 		stdout, stderr, err := util.RunIP("-6", "neigh", "add", ip.String(), "dev", "br-nexthop", "lladdr", macAddress)
 		if err == nil {
-			logrus.Infof("Added MAC binding for %s on br-nexthop, stdout: '%s', stderr: '%s'",
+			klog.V(5).Infof("Added MAC binding for %s on br-nexthop, stdout: '%s', stderr: '%s'",
 				ip.String(), stdout, stderr)
 		} else {
-			logrus.Errorf("Error in adding MAC binding for fd99::2 on br-nexthop: %v", err)
+			klog.Errorf("Error in adding MAC binding for fd99::2 on br-nexthop: %v", err)
 		}
 	} else {
 		_, _, _ = util.RunIP("neigh", "delete", ip.String(), "dev", "br-nexthop")
