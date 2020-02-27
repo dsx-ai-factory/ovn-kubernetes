@@ -48,6 +48,7 @@ spec:
           capabilities:
             add: ["SYS_NICE"]
 
+        terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         - mountPath: /var/run/dbus/
           name: host-var-run-dbus
@@ -78,18 +79,6 @@ spec:
             fieldRef:
               fieldPath: metadata.namespace
 
-        ports:
-        - name: healthz
-          containerPort: 10258
-        # TODO: Temporarily disabled until we determine how to wait for clean default
-        # config
-        # livenessProbe:
-        #   initialDelaySeconds: 10
-        #   httpGet:
-        #     path: /healthz
-        #     port: 10258
-        #     scheme: HTTP
-        lifecycle:
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovn-controller"]
@@ -111,6 +100,7 @@ spec:
           privileged: true
           {% endif %}
 
+        terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         # for the iptables wrapper
         - mountPath: /host
@@ -177,17 +167,6 @@ spec:
         - name: OVN_GATEWAY_OPTS
           value: "{{ ovn_gateway_opts }}"
 
-        ports:
-        - name: healthz
-          containerPort: 10259
-        # TODO: Temporarily disabled until we determine how to wait for clean default
-        # config
-        # livenessProbe:
-        #   initialDelaySeconds: 10
-        #   httpGet:
-        #     path: /healthz
-        #     port: 10259
-        #     scheme: HTTP
         lifecycle:
           preStop:
             exec:

@@ -104,6 +104,7 @@ spec:
           capabilities:
             add: ["NET_ADMIN"]
 
+        terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         # ovn db is stored in the pod in /etc/openvswitch
         # (or in /etc/ovn if OVN from new repository is used)
@@ -143,18 +144,6 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
-        ports:
-        - name: healthz
-          containerPort: 10256
-        # TODO: Temporarily disabled until we determine how to wait for clean default
-        # config
-        # livenessProbe:
-        #   initialDelaySeconds: 10
-        #   httpGet:
-        #     path: /healthz
-        #     port: 10256
-        #     scheme: HTTP
-        lifecycle:
       # end of container
 
       # sb-ovsdb - v3
@@ -168,6 +157,7 @@ spec:
           capabilities:
             add: ["NET_ADMIN"]
 
+        terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         # ovn db is stored in the pod in /etc/openvswitch
         # (or in /etc/ovn if OVN from new repository is used)
@@ -207,18 +197,6 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
-        ports:
-        - name: healthz
-          containerPort: 10255
-        # TODO: Temporarily disabled until we determine how to wait for clean default
-        # config
-        # livenessProbe:
-        #   initialDelaySeconds: 10
-        #   httpGet:
-        #     path: /healthz
-        #     port: 10255
-        #     scheme: HTTP
-        lifecycle:
       # end of container
 
       volumes:
