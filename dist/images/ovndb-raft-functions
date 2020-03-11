@@ -83,19 +83,118 @@ check_and_apply_ovnkube_db_ep () {
   fi
 }
 
+# election timer can only be at most doubled each time, and it can only be set on the leader
+#
+# set_election_timer() could be called by ovnkube-db-0 when :
+#    1. it is first initiated, or
+#    2. it restarts after the initial start has failed
+#    3. when ovnkube-db raft statefulset is recreated with existing DB. This occurs when someone did
+#       kubectl delete -f ovnkube-db-raft.yaml then kubectl apply -f ovnkube-db-raft.yaml
+#
+# In the first two cases, the cluster is a one-server cluster so ovnkube-db-0 Pod is always
+# the leader. In the third case, the election timer should already be set to the right value.
+# we do not support the case to change election timer with the existing DB
+#
+set_election_timer () {
+  local current_election_timer
+  local election_timer=${1}
+  local database="OVN_Northbound"
+
+  if [[ ${db} == "sb" ]]; then
+    database="OVN_Southbound"
+  fi
+
+  echo "setting election timer to ${election_timer} ms"
+
+  current_election_timer=$(ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl cluster/status ${database} 2>/dev/null \
+    | grep "Election" | sed "s/.*:[[:space:]]//") 
+  if [ -z "${current_election_timer}" ]; then
+    echo "Failed to get current election timer value"
+    echo "Exiting...."
+    exit 11
+  fi
+
+  while [[ ${current_election_timer} != ${election_timer} ]]; do
+    max_electinon_timer=$((${current_election_timer} * 2))
+    if [[ ${election_timer} -le ${max_electinon_timer} ]]; then
+      ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl cluster/change-election-timer ${database} ${election_timer}
+      if [[ $? != 0 ]]; then
+        echo "Failed to set election timer ${election_timer}"
+        echo "Exiting...."
+        exit 11
+      fi
+      return 0
+    else
+      ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl cluster/change-election-timer ${database} ${max_electinon_timer}
+      if [[ $? != 0 ]]; then
+        echo "Failed to set election timer ${max_election_timer}"
+        echo "Exiting...."
+        exit 11
+      fi
+      current_election_timer=${max_electinon_timer}
+    fi
+  done
+  return 0
+}
+
+# Note that ovn-nbctl set-connection can only be run by ovnkube-db-0 when it is still one-server cluster
+# and the rest of the servers have not joined. Otherwise, with ovnkube-db-0 alone in the multiple-servers
+# cluster, no leader can be elected and set-connection command would hung.
+# 
+# set_connection() could be called by ovnkube-db-0 when :
+#    1. it is first initiated, or
+#    2. it restarts after the initial start has failed
+#    3. when ovnkube-db raft statefulset is recreated with existing DB. This occurs when someone did
+#       kubectl delete -f ovnkube-db-raft.yaml then kubectl apply -f ovnkube-db-raft.yaml
+#
+# In the third case, even this is a multiple-servers cluster, the connection should have already been set.
+#
+set_connection () {
+  local port=${1}
+  local target
+  local output
+
+  echo "add port ${port} to connection table and disable inactivity probe"
+
+  output=$(ovn-${db}ctl --data=bare --no-headings --columns=target,inactivity_probe list connection 2>/dev/null)
+  if [[ $? == 0 ]]; then
+    target=$(echo "${output}" | awk "ORS=\",\"")
+    if [[ "${target}" != "ptcp:${port},0," ]]; then
+      ovn-${db}ctl --inactivity-probe=0 set-connection ptcp:${port}
+      if [[ $? != 0 ]]; then
+        echo "Failed to set connection and disable inactivity probe"
+        echo "Exiting...."
+        exit 12
+      fi
+    fi
+  fi
+  return 0
+}
+
 # v3 - create nb_ovsdb/sb_ovsdb cluster in a separate container
 ovsdb-raft () {
   trap 'kill $(jobs -p); exit 0' TERM
 
   local db=${1}
   local port=${2}
+  local raft_port=${3}
   local initialize="false"
+
+  # OVN_RAFT_ELECTION_TIMER - OVN raft election timer in ms (default 1000)
+  election_timer=${OVN_RAFT_ELECTION_TIMER:-1000}
 
   ovn_db_pidfile=${OVN_RUNDIR}/ovn${db}_db.pid
   eval ovn_log_db=\$ovn_log_${db}
   ovn_db_file=${OVN_ETCDIR}/ovn${db}_db.db
 
   rm -f ${ovn_db_pidfile}
+
+  if [[ ${election_timer} -lt 100 ]] || [[ ${election_timer} -gt 600000 ]]; then
+    echo "election timer must be between 100 and 600000, in msec"
+    echo "Exiting..."
+    exit 12
+  fi
+
   verify-ovsdb-raft
   local_ip=$(getent ahostsv4 $(hostname) | grep -v "^127\." | head -1 | awk '{ print $1 }')
   if [[ ${local_ip} == "" ]] ; then
@@ -110,7 +209,9 @@ ovsdb-raft () {
   if [[ "${POD_NAME}" == "ovnkube-db-0" ]]; then
     run_as_ovs_user_if_needed \
       ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
-      --db-${db}-cluster-local-addr=${local_ip} --ovn-${db}-log="${ovn_log_db}" &
+      --db-${db}-cluster-local-addr=${local_ip} \
+      --db-${db}-cluster-local-port=${raft_port} \
+      --ovn-${db}-log="${ovn_log_db}" &
   else
     # join the remote cluster node if the DB is not created
     if [[ "${initialize}" == "true" ]]; then
@@ -119,15 +220,20 @@ ovsdb-raft () {
     run_as_ovs_user_if_needed \
       ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
       --db-${db}-cluster-local-addr=${local_ip} --db-${db}-cluster-remote-addr=${init_ip} \
+      --db-${db}-cluster-local-port=${raft_port} --db-${db}-cluster-remote-port=${raft_port} \
       --ovn-${db}-log="${ovn_log_db}" &
   fi
 
   wait_for_event process_ready ovn${db}_db
   echo "=============== ${db}-ovsdb-raft ========== RUNNING"
 
-  if [[ "${POD_NAME}" == "ovnkube-db-0" && "${initialize}" == "true" ]] ; then
-    # set the connection and disable inactivity probe, this deletes the old connection if any
-    ovn-${db}ctl --inactivity-probe=0 set-connection ptcp:${port}
+  if [[ "${POD_NAME}" == "ovnkube-db-0" ]] ; then
+    # setting election timer; do this before setting connection to prevent the other servers from
+    # joining the cluster if election timer setting fails.
+    # Note that election timer can only be set on cluster leader so we must do this when DB
+    # is one server cluster, as the result ovnkube-db-0 is the leader.
+    set_election_timer ${election_timer}
+    set_connection ${port}
   fi
 
   last_node_index=$(expr ${replicas} - 1)
