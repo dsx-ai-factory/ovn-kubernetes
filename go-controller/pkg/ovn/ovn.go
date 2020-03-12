@@ -117,6 +117,9 @@ const (
 
 	// UDP is the constant string for the string "UDP"
 	UDP = "UDP"
+
+	// SCTP is the constant string for the string "SCTP"
+	SCTP = "SCTP"
 )
 
 // NewOvnController creates a new OVN controller for creating logical network
@@ -148,8 +151,6 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 
 // Run starts the actual watching.
 func (oc *Controller) Run(stopChan chan struct{}) error {
-	startOvnUpdater()
-
 	// WatchNodes must be started first so that its initial Add will
 	// create all node logical switches, which other watches may depend on.
 	// https://github.com/ovn-org/ovn-kubernetes/pull/859
