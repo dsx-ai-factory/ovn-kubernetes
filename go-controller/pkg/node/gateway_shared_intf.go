@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -167,6 +168,13 @@ func nodePortWatcher(nodeName, gwBridge, gwIntf string, wf *factory.WatchFactory
 			addService(service, ofportPhys, ofportPatch, gwBridge)
 		},
 		UpdateFunc: func(old, new interface{}) {
+			svcNew := new.(*kapi.Service)
+			svcOld := old.(*kapi.Service)
+			if reflect.DeepEqual(svcNew.Spec, svcOld.Spec) {
+				return
+			}
+			deleteService(svcOld, ofportPhys, gwBridge)
+			addService(svcNew, ofportPhys, ofportPatch, gwBridge)
 		},
 		DeleteFunc: func(obj interface{}) {
 			service := obj.(*kapi.Service)
