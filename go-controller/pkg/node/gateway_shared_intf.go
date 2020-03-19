@@ -2,7 +2,6 @@ package node
 
 import (
 	"fmt"
-	"net"
 	"os"
 	"reflect"
 	"regexp"
@@ -13,7 +12,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog"
@@ -418,82 +416,4 @@ func cleanupSharedGateway() error {
 		return fmt.Errorf("Failed to replace-flows on bridge %q stderr:%s (%v)", bridgeName, stderr, err)
 	}
 	return nil
-}
-
-func initLocalOnlyGateway(nodeName string) (map[string]string, error) {
-	// Create a localnet OVS bridge.
-	localnetBridgeName := "br-local"
-	_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br",
-		localnetBridgeName)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to create localnet bridge %s"+
-			", stderr:%s (%v)", localnetBridgeName, stderr, err)
-	}
-
-	_, macAddress, err := bridgedGatewayNodeSetup(nodeName, localnetBridgeName, localnetBridgeName,
-		util.LocalNetworkName, true)
-	if err != nil {
-		return nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
-	}
-
-	_, _, err = util.RunIP("link", "set", localnetBridgeName, "up")
-	if err != nil {
-		return nil, fmt.Errorf("failed to up %s (%v)", localnetBridgeName, err)
-	}
-
-	// Create a localnet bridge nexthop
-	localnetBridgeNextHop := "br-nexthop"
-	_, stderr, err = util.RunOVSVsctl(
-		"--may-exist", "add-port", localnetBridgeName, localnetBridgeNextHop,
-		"--", "set", "interface", localnetBridgeNextHop, "type=internal",
-		"mtu_request="+fmt.Sprintf("%d", config.Default.MTU),
-		fmt.Sprintf("mac=%s", strings.ReplaceAll(util.LocalnetGatewayNextHopMac, ":", "\\:")))
-	if err != nil {
-		return nil, fmt.Errorf("Failed to create localnet bridge next hop %s"+
-			", stderr:%s (%v)", localnetBridgeNextHop, stderr, err)
-	}
-	_, _, err = util.RunIP("link", "set", localnetBridgeNextHop, "up")
-	if err != nil {
-		return nil, fmt.Errorf("failed to up %s (%v)", localnetBridgeNextHop, err)
-	}
-
-	// Flush IPv4 address of localnetBridgeNextHop.
-	_, _, err = util.RunIP("addr", "flush", "dev", localnetBridgeNextHop)
-	if err != nil {
-		return nil, fmt.Errorf("failed to flush ip address of %s (%v)",
-			localnetBridgeNextHop, err)
-	}
-
-	// Set localnetBridgeNextHop with an IP address.
-	_, _, err = util.RunIP("addr", "add",
-		util.LocalnetGatewayNextHopSubnet(),
-		"dev", localnetBridgeNextHop)
-	if err != nil {
-		return nil, fmt.Errorf("failed to assign ip address to %s (%v)",
-			localnetBridgeNextHop, err)
-	}
-
-	// Add arp entry for local service gateway, it is used for return traffic of local service access
-	ip, _, _ := net.ParseCIDR(util.LocalnetGatewayIP())
-	if config.IPv6Mode {
-		_, _, _ = util.RunIP("-6", "neigh", "del", ip.String(), "dev", "br-nexthop")
-		stdout, stderr, err := util.RunIP("-6", "neigh", "add", ip.String(), "dev", "br-nexthop", "lladdr", macAddress)
-		if err == nil {
-			klog.V(5).Infof("Added MAC binding for %s on br-nexthop, stdout: '%s', stderr: '%s'",
-				ip.String(), stdout, stderr)
-		} else {
-			klog.Errorf("Error in adding MAC binding for fd99::2 on br-nexthop: %v", err)
-		}
-	} else {
-		_, _, _ = util.RunIP("neigh", "delete", ip.String(), "dev", "br-nexthop")
-		_, _, err = util.RunIP("neigh", "add", ip.String(), "dev", "br-nexthop", "lladdr", macAddress)
-		if err != nil {
-			return nil, fmt.Errorf("failed to add arp entry for %s (%v)",
-				ip.String(), err)
-		}
-	}
-
-	return map[string]string{
-		ovn.OvnNodeLocalGatewayMacAddress: macAddress,
-	}, nil
 }

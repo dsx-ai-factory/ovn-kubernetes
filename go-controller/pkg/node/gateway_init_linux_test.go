@@ -68,13 +68,7 @@ func initLocalOnlyGatewayTest(fexec *ovntest.FakeExec, nodeName, brLocalnetMAC, 
 		"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.PhysicalNetworkName + ":breth0" + "," + util.LocalNetworkName + ":br-local",
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ip link set br-local up",
 		"ovs-vsctl --timeout=15 --may-exist add-port br-local br-nexthop -- set interface br-nexthop type=internal mtu_request=" + mtu + " mac=00\\:00\\:a9\\:fe\\:21\\:01",
-		"ip link set br-nexthop up",
-		"ip addr flush dev br-nexthop",
-		"ip addr add 169.254.33.1/24 dev br-nexthop",
-		"ip neigh delete 169.254.33.2 dev br-nexthop",
-		"ip neigh add 169.254.33.2 dev br-nexthop lladdr " + brLocalnetMAC,
 	})
 }
 
@@ -87,6 +81,8 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			nodeName          string = "node1"
 			lrpMAC            string = "00:00:00:05:46:c3"
 			lrpIP             string = "100.64.0.3"
+			brNextHopIp       string = "169.254.33.1"
+			brNextHopCIDR     string = brNextHopIp + "/24"
 			lrpCIDR           string = lrpIP + "/16"
 			clusterRouterUUID string = "5cedba03-679f-41f3-b00e-b8ed7437bc6c"
 			systemID          string = "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6"
@@ -95,6 +91,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			nodeSubnet        string = "10.1.1.0/24"
 			gwRouter          string = "GR_" + nodeName
 			brLocalnetMAC     string = "11:22:33:44:55:66"
+			brLocalnetIP      string = "169.254.33.2"
 		)
 
 		fexec := ovntest.NewFakeExec()
@@ -241,6 +238,35 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 			err = n.initGateway(nodeSubnet, nodeAnnotator, waiter)
 			Expect(err).NotTo(HaveOccurred())
 
+			// check if IP adress have assigned to br-nexthop interface
+			link, err := netlink.LinkByName("br-nexthop")
+			Expect(err).NotTo(HaveOccurred())
+			addresses, err := netlink.AddrList(link, syscall.AF_INET)
+			Expect(err).NotTo(HaveOccurred())
+			var foundAddr bool
+			expectedAddress, err := netlink.ParseAddr(brNextHopCIDR)
+			Expect(err).NotTo(HaveOccurred())
+			for _, a := range addresses {
+				if a.IP.Equal(expectedAddress.IP) && bytes.Equal(a.Mask, expectedAddress.Mask) {
+					foundAddr = true
+					break
+				}
+			}
+			Expect(foundAddr).To(BeTrue())
+
+			// Check if brLocalnetIP has been added in the arp entry for br-nexthop interface
+			neigbourIP := net.ParseIP(brLocalnetIP)
+			neighbours, err := netlink.NeighList(link.Attrs().Index, netlink.FAMILY_ALL)
+			Expect(err).NotTo(HaveOccurred())
+			var foundNeighbour bool
+			for _, neighbour := range neighbours {
+				if neighbour.IP.Equal(neigbourIP) && (neighbour.HardwareAddr.String() == brLocalnetMAC) {
+					foundNeighbour = true
+					break
+				}
+			}
+			Expect(foundNeighbour).To(BeTrue())
+
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 			err = waiter.Wait()
@@ -304,6 +330,29 @@ var _ = Describe("Gateway Init Operations", func() {
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
+
+		// Set up a fake br-local & br-nexthop
+		testNS, err = testutils.NewNS()
+		Expect(err).NotTo(HaveOccurred())
+		err = testNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+
+			err := netlink.LinkAdd(&netlink.Dummy{
+				LinkAttrs: netlink.LinkAttrs{
+					Name: "br-local",
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			err = netlink.LinkAdd(&netlink.Dummy{
+				LinkAttrs: netlink.LinkAttrs{
+					Name: "br-nexthop",
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
 	})
 
 	AfterEach(func() {
@@ -319,6 +368,8 @@ var _ = Describe("Gateway Init Operations", func() {
 				lrpMAC        string = "00:00:00:05:46:c3"
 				brLocalnetMAC string = "11:22:33:44:55:66"
 				lrpIP         string = "100.64.0.3"
+				brNextHopIp   string = "169.254.33.1"
+				brNextHopCIDR string = brNextHopIp + "/24"
 				systemID      string = "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6"
 				tcpLBUUID     string = "d2e858b2-cb5a-441b-a670-ed450f79a91f"
 				udpLBUUID     string = "12832f14-eb0f-44d4-b8db-4cccbc73c792"
@@ -345,11 +396,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.PhysicalNetworkName + ":br-local",
-				"ip link set br-local up",
 				"ovs-vsctl --timeout=15 --may-exist add-port br-local br-nexthop -- set interface br-nexthop type=internal mtu_request=" + mtu + " mac=00\\:00\\:a9\\:fe\\:21\\:01",
-				"ip link set br-nexthop up",
-				"ip addr flush dev br-nexthop",
-				"ip addr add 169.254.33.1/24 dev br-nexthop",
 			})
 
 			err := util.SetExec(fexec)
@@ -388,7 +435,28 @@ var _ = Describe("Gateway Init Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			util.SetIPTablesHelper(iptables.ProtocolIPv4, ipt)
 
-			_, err = initLocalnetGateway(nodeName, nodeSubnet, wf)
+			err = testNS.Do(func(ns.NetNS) error {
+				defer GinkgoRecover()
+
+				_, err = initLocalnetGateway(nodeName, nodeSubnet, wf)
+				Expect(err).NotTo(HaveOccurred())
+				// Check if IP has been assigned to br-nexthop
+				link, err := netlink.LinkByName("br-nexthop")
+				Expect(err).NotTo(HaveOccurred())
+				addrs, err := netlink.AddrList(link, syscall.AF_INET)
+				Expect(err).NotTo(HaveOccurred())
+				var foundAddr bool
+				expectedAddr, err := netlink.ParseAddr("169.254.33.1/24")
+				Expect(err).NotTo(HaveOccurred())
+				for _, a := range addrs {
+					if a.IP.Equal(expectedAddr.IP) && bytes.Equal(a.Mask, expectedAddr.Mask) {
+						foundAddr = true
+						break
+					}
+				}
+				Expect(foundAddr).To(BeTrue())
+				return nil
+			})
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
