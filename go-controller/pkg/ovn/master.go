@@ -67,11 +67,9 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	// We need a subnet allocator that allocates subnet for this per-node join switch. Use the 100.64.0.0/16
 	// or fd98::/64 network range with host bits set to 3. The allocator will start allocating subnet that has upto 6
 	// host IPs)
-	var joinSubnet string
+	joinSubnet := config.V4JoinSubnet
 	if config.IPv6Mode {
-		joinSubnet = "fd98::/64"
-	} else {
-		joinSubnet = "100.64.0.0/16"
+		joinSubnet = config.V6JoinSubnet
 	}
 	_ = oc.joinSubnetAllocator.AddNetworkRange(joinSubnet, 3)
 
@@ -89,14 +87,14 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	for _, node := range existingNodes.Items {
 		hostsubnet, _ := parseNodeHostSubnet(&node)
 		if hostsubnet != nil {
-			err := oc.masterSubnetAllocator.MarkAllocatedNetwork(hostsubnet.String())
+			err := oc.masterSubnetAllocator.MarkAllocatedNetwork(hostsubnet)
 			if err != nil {
 				utilruntime.HandleError(err)
 			}
 		}
 		joinsubnet, _ := parseNodeJoinSubnet(&node)
 		if joinsubnet != nil {
-			err := oc.joinSubnetAllocator.MarkAllocatedNetwork(joinsubnet.String())
+			err := oc.joinSubnetAllocator.MarkAllocatedNetwork(joinsubnet)
 			if err != nil {
 				utilruntime.HandleError(err)
 			}
@@ -227,36 +225,41 @@ func (oc *Controller) addNodeJoinSubnetAnnotations(node *kapi.Node, subnet strin
 	return nil
 }
 
-func (oc *Controller) allocateJoinSubnet(node *kapi.Node) (string, error) {
-	joinSubnet, _ := parseNodeJoinSubnet(node)
-	if joinSubnet != nil {
-		return joinSubnet.String(), nil
+func (oc *Controller) allocateJoinSubnet(node *kapi.Node) (*net.IPNet, error) {
+	joinSubnet, err := parseNodeJoinSubnet(node)
+	if err == nil {
+		return joinSubnet, nil
 	}
 
 	// Allocate a new network for the join switch
-	joinSubnetStr, err := oc.joinSubnetAllocator.AllocateNetwork()
+	joinSubnets, err := oc.joinSubnetAllocator.AllocateNetworks()
 	if err != nil {
-		return "", fmt.Errorf("Error allocating subnet for join switch for node  %s: %v", node.Name, err)
+		return nil, fmt.Errorf("Error allocating subnet for join switch for node %s: %v", node.Name, err)
 	}
+	if len(joinSubnets) != 1 {
+		return nil, fmt.Errorf("Error allocating subnet for join switch for node %s: multiple subnets returned", node.Name)
+	}
+	joinSubnet = joinSubnets[0]
 
 	defer func() {
 		// Release the allocation on error
 		if err != nil {
-			_ = oc.joinSubnetAllocator.ReleaseNetwork(joinSubnetStr)
+			_ = oc.joinSubnetAllocator.ReleaseNetwork(joinSubnet)
 		}
 	}()
+
 	// Set annotation on the node
-	err = oc.addNodeJoinSubnetAnnotations(node, joinSubnetStr)
+	err = oc.addNodeJoinSubnetAnnotations(node, joinSubnet.String())
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	klog.Infof("Allocated join subnet %q for node %q", node.Name, joinSubnetStr)
-	return joinSubnetStr, nil
+	klog.Infof("Allocated join subnet %q for node %q", joinSubnet.String(), node.Name)
+	return joinSubnet, nil
 }
 
 func (oc *Controller) deleteNodeJoinSubnet(nodeName string, subnet *net.IPNet) error {
-	err := oc.joinSubnetAllocator.ReleaseNetwork(subnet.String())
+	err := oc.joinSubnetAllocator.ReleaseNetwork(subnet)
 	if err != nil {
 		return fmt.Errorf("Error deleting join subnet %v for node %q: %s", subnet, nodeName, err)
 	}
@@ -469,12 +472,12 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	}
 
 	// get a subnet for the per-node join switch
-	joinSubnetStr, err := oc.allocateJoinSubnet(node)
+	joinSubnet, err := oc.allocateJoinSubnet(node)
 	if err != nil {
 		return err
 	}
 
-	err = util.GatewayInit(clusterSubnets, joinSubnetStr, systemID, node.Name, ifaceID, ipAddress,
+	err = util.GatewayInit(clusterSubnets, joinSubnet, systemID, node.Name, ifaceID, ipAddress,
 		gwMacAddress, gwNextHop, subnet, nodePortEnable, lspArgs)
 	if err != nil {
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
@@ -487,7 +490,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 			return err
 		}
 		localOnlyIfaceID := fmt.Sprintf("br-local_%s", node.Name)
-		err = util.LocalGatewayInit(clusterSubnets, joinSubnetStr, systemID, node.Name, ipAddress, localOnlyIfaceID,
+		err = util.LocalGatewayInit(clusterSubnets, joinSubnet, systemID, node.Name, ipAddress, localOnlyIfaceID,
 			util.LocalnetGatewayIP(), localOnlyGwMacAddress, util.LocalnetGatewayNextHop())
 		if err != nil {
 			return err
@@ -498,8 +501,8 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		err = oc.handleNodePortLB(node)
 	} else {
 		// nodePort disabled, delete gateway load balancers for this node.
-		physicalGateway := "GR_" + node.Name
-		for _, proto := range []string{TCP, UDP} {
+		physicalGateway := util.GWRouterPrefix + node.Name
+		for _, proto := range []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolUDP} {
 			lbUUID, _ := oc.getGatewayLoadBalancer(physicalGateway, proto)
 			if lbUUID != "" {
 				_, _, err := util.RunOVNNbctl("--if-exists", "destroy", "load_balancer", lbUUID)
@@ -639,6 +642,15 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 		return err
 	}
 
+	// Add any service reject ACLs applicable for TCP LB
+	acls := oc.getAllACLsForServiceLB(oc.TCPLoadBalancerUUID)
+	if len(acls) > 0 {
+		_, _, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "acls", strings.Join(acls, ","))
+		if err != nil {
+			klog.Warningf("Unable to add TCP reject ACLs: %s for switch: %s, error: %v", acls, nodeName, err)
+		}
+	}
+
 	if oc.UDPLoadBalancerUUID == "" {
 		return fmt.Errorf("UDP cluster load balancer not created")
 	}
@@ -646,6 +658,15 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	if err != nil {
 		klog.Errorf("Failed to add logical switch %v's loadbalancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
 		return err
+	}
+
+	// Add any service reject ACLs applicable for UDP LB
+	acls = oc.getAllACLsForServiceLB(oc.UDPLoadBalancerUUID)
+	if len(acls) > 0 {
+		_, _, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "acls", strings.Join(acls, ","))
+		if err != nil {
+			klog.Warningf("Unable to add UDP reject ACLs: %s for switch: %s, error %v", acls, nodeName, err)
+		}
 	}
 
 	// Add the node to the logical switch cache
@@ -705,21 +726,20 @@ func (oc *Controller) addNode(node *kapi.Node) (hostsubnet *net.IPNet, err error
 	}
 
 	// Node doesn't have a subnet assigned; reserve a new one for it
-	hostsubnetStr, err := oc.masterSubnetAllocator.AllocateNetwork()
+	hostsubnets, err := oc.masterSubnetAllocator.AllocateNetworks()
 	if err != nil {
 		return nil, fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
 	}
-	klog.Infof("Allocated node %s HostSubnet %s", node.Name, hostsubnetStr)
-
-	_, hostsubnet, err = net.ParseCIDR(hostsubnetStr)
-	if err != nil {
-		return nil, fmt.Errorf("Error in parsing hostsubnet %s - %v", hostsubnetStr, err)
+	if len(hostsubnets) != 1 {
+		return nil, fmt.Errorf("Error allocating network for node %s: multiple subnets returned", node.Name)
 	}
+	hostsubnet = hostsubnets[0]
+	klog.Infof("Allocated node %s HostSubnet %s", node.Name, hostsubnet.String())
 
 	defer func() {
 		// Release the allocation on error
 		if err != nil {
-			_ = oc.masterSubnetAllocator.ReleaseNetwork(hostsubnetStr)
+			_ = oc.masterSubnetAllocator.ReleaseNetwork(hostsubnet)
 		}
 	}()
 
@@ -741,7 +761,7 @@ func (oc *Controller) addNode(node *kapi.Node) (hostsubnet *net.IPNet, err error
 }
 
 func (oc *Controller) deleteNodeHostSubnet(nodeName string, subnet *net.IPNet) error {
-	err := oc.masterSubnetAllocator.ReleaseNetwork(subnet.String())
+	err := oc.masterSubnetAllocator.ReleaseNetwork(subnet)
 	if err != nil {
 		return fmt.Errorf("Error deleting subnet %v for node %q: %s", subnet, nodeName, err)
 	}
@@ -884,7 +904,7 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 		}
 		isJoinSwitch := false
 		nodeName := items[0]
-		if strings.HasPrefix(items[0], "join_") {
+		if strings.HasPrefix(items[0], util.JoinSwitchPrefix) {
 			isJoinSwitch = true
 			nodeName = strings.Split(items[0], "_")[1]
 		}

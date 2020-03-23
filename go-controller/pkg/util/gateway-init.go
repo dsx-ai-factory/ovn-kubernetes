@@ -23,8 +23,8 @@ const (
 	V4LocalnetGatewayIP = "169.254.33.2/24"
 	// V4LocalnetGatewayNextHop is the IP address to which packets to local services are forwarded
 	V4LocalnetGatewayNextHop = "169.254.33.1"
-	// V4LocalnetGatewayNextHopMac is te fixed MAC address for the br-nexthop interface. the last
-	// 4 hex bytes translates to the br-nexthop's IP address
+	// V4LocalnetGatewayNextHopMac is te fixed MAC address for the LocalnetGatewayNextHopPort. the last
+	// 4 hex bytes translates to the LocalnetGatewayNextHopPort's IP address
 	LocalnetGatewayNextHopMac = "00:00:a9:fe:21:01"
 	// V4LocalnetGatewayNextHopSubnet represents the subnet that bridges OVN logical topology and
 	// host network
@@ -39,6 +39,12 @@ const (
 	OvnClusterRouter = "ovn_cluster_router"
 	// DefaultOpenFlowCookie is the identification of the default open flow rules added to each node
 	DefaultOpenFlowCookie = "0xdeff105"
+	// LocalnetGatewayNextHopPort is the name of the gateway port on the host to which all
+	// the packets leaving the OVN logical topology will be forwarded
+	LocalnetGatewayNextHopPort = "ovn-k8s-gw0"
+	JoinSwitchPrefix           = "join_"
+	ExternalSwitchPrefix       = "ext_"
+	GWRouterPrefix             = "GR_"
 )
 
 func LocalnetGatewayIP() string {
@@ -141,7 +147,7 @@ func getGatewayLoadBalancers(gatewayRouter string) (string, string, error) {
 }
 
 // GatewayInit creates a gateway router for the local chassis.
-func GatewayInit(clusterIPSubnet []string, joinSubnetStr, systemID, nodeName, ifaceID, nicIP, nicMacAddress,
+func GatewayInit(clusterIPSubnet []string, joinSubnet *net.IPNet, systemID, nodeName, ifaceID, nicIP, nicMacAddress,
 	defaultGW string, rampoutIPSubnet string, nodePortEnable bool, lspArgs []string) error {
 
 	ip, physicalIPNet, err := net.ParseCIDR(nicIP)
@@ -159,7 +165,7 @@ func GatewayInit(clusterIPSubnet []string, joinSubnetStr, systemID, nodeName, if
 
 	k8sClusterRouter := GetK8sClusterRouter()
 	// Create a gateway router.
-	gatewayRouter := "GR_" + nodeName
+	gatewayRouter := GWRouterPrefix + nodeName
 	stdout, stderr, err := RunOVNNbctl("--", "--may-exist", "lr-add",
 		gatewayRouter, "--", "set", "logical_router", gatewayRouter,
 		"options:chassis="+systemID, "external_ids:physical_ip="+physicalIP)
@@ -168,14 +174,13 @@ func GatewayInit(clusterIPSubnet []string, joinSubnetStr, systemID, nodeName, if
 			"stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
 	}
 
-	_, joinSubnet, _ := net.ParseCIDR(joinSubnetStr)
 	prefixLen, _ := joinSubnet.Mask.Size()
 	gwLRPIp := NextIP(joinSubnet.IP)
 	drLRPIp := NextIP(gwLRPIp)
 	gwLRPMac := IPAddrToHWAddr(gwLRPIp)
 	drLRPMac := IPAddrToHWAddr(drLRPIp)
 
-	joinSwitch := "join_" + nodeName
+	joinSwitch := JoinSwitchPrefix + nodeName
 	// create the per-node join switch
 	stdout, stderr, err = RunOVNNbctl("--", "--may-exist", "ls-add", joinSwitch)
 	if err != nil {
@@ -291,7 +296,7 @@ func GatewayInit(clusterIPSubnet []string, joinSubnetStr, systemID, nodeName, if
 	}
 
 	// Create the external switch for the physical interface to connect to.
-	externalSwitch := "ext_" + nodeName
+	externalSwitch := ExternalSwitchPrefix + nodeName
 	stdout, stderr, err = RunOVNNbctl("--may-exist", "ls-add",
 		externalSwitch)
 	if err != nil {
@@ -393,7 +398,7 @@ func GatewayInit(clusterIPSubnet []string, joinSubnetStr, systemID, nodeName, if
 }
 
 // LocalGatewayInit creates a gateway router to access local service.
-func LocalGatewayInit(clusterIPSubnet []string, joinSubnetStr, systemID, nodeName, nodeIPMask, ifaceID,
+func LocalGatewayInit(clusterIPSubnet []string, joinSubnet *net.IPNet, systemID, nodeName, nodeIPMask, ifaceID,
 	nicIP, nicMacAddress, defaultGW string) error {
 
 	ip, physicalIPNet, err := net.ParseCIDR(nicIP)
@@ -420,8 +425,7 @@ func LocalGatewayInit(clusterIPSubnet []string, joinSubnetStr, systemID, nodeNam
 			"stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
 	}
 
-	joinSwitch := "join_" + nodeName
-	_, joinSubnet, _ := net.ParseCIDR(joinSubnetStr)
+	joinSwitch := JoinSwitchPrefix + nodeName
 	prefixLen, _ := joinSubnet.Mask.Size()
 	drLRPIp := NextIP(NextIP(joinSubnet.IP))
 	gwLRPIp := NextIP(drLRPIp)

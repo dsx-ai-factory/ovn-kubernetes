@@ -32,20 +32,20 @@ import (
 
 func addNodeportLBs(fexec *ovntest.FakeExec, nodeName, tcpLBUUID, udpLBUUID string) {
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_" + nodeName,
-		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:UDP_lb_gateway_router=GR_" + nodeName,
+		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=" + util.GWRouterPrefix + nodeName,
+		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:UDP_lb_gateway_router=" + util.GWRouterPrefix + nodeName,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:TCP_lb_gateway_router=GR_" + nodeName + " protocol=tcp",
+		Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:TCP_lb_gateway_router=" + util.GWRouterPrefix + nodeName + " protocol=tcp",
 		Output: tcpLBUUID,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:UDP_lb_gateway_router=GR_" + nodeName + " protocol=udp",
+		Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:UDP_lb_gateway_router=" + util.GWRouterPrefix + nodeName + " protocol=udp",
 		Output: udpLBUUID,
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 set logical_router GR_" + nodeName + " load_balancer=" + tcpLBUUID,
-		"ovn-nbctl --timeout=15 add logical_router GR_" + nodeName + " load_balancer " + udpLBUUID,
+		"ovn-nbctl --timeout=15 set logical_router " + util.GWRouterPrefix + nodeName + " load_balancer=" + tcpLBUUID,
+		"ovn-nbctl --timeout=15 add logical_router " + util.GWRouterPrefix + nodeName + " load_balancer " + udpLBUUID,
 	})
 }
 
@@ -68,7 +68,7 @@ func initLocalOnlyGatewayTest(fexec *ovntest.FakeExec, nodeName, brLocalnetMAC, 
 		"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.PhysicalNetworkName + ":breth0" + "," + util.LocalNetworkName + ":br-local",
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovs-vsctl --timeout=15 --may-exist add-port br-local br-nexthop -- set interface br-nexthop type=internal mtu_request=" + mtu + " mac=00\\:00\\:a9\\:fe\\:21\\:01",
+		"ovs-vsctl --timeout=15 --may-exist add-port br-local " + util.LocalnetGatewayNextHopPort + " -- set interface " + util.LocalnetGatewayNextHopPort + " type=internal mtu_request=" + mtu + " mac=00\\:00\\:a9\\:fe\\:21\\:01",
 	})
 }
 
@@ -89,7 +89,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			tcpLBUUID         string = "d2e858b2-cb5a-441b-a670-ed450f79a91f"
 			udpLBUUID         string = "12832f14-eb0f-44d4-b8db-4cccbc73c792"
 			nodeSubnet        string = "10.1.1.0/24"
-			gwRouter          string = "GR_" + nodeName
+			gwRouter          string = util.GWRouterPrefix + nodeName
 			brLocalnetMAC     string = "11:22:33:44:55:66"
 			brLocalnetIP      string = "169.254.33.2"
 		)
@@ -238,8 +238,8 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 			err = n.initGateway(nodeSubnet, nodeAnnotator, waiter)
 			Expect(err).NotTo(HaveOccurred())
 
-			// check if IP adress have assigned to br-nexthop interface
-			link, err := netlink.LinkByName("br-nexthop")
+			// check if IP adress have assigned to util.LocalnetGatewayNextHopPort interface
+			link, err := netlink.LinkByName(util.LocalnetGatewayNextHopPort)
 			Expect(err).NotTo(HaveOccurred())
 			addresses, err := netlink.AddrList(link, syscall.AF_INET)
 			Expect(err).NotTo(HaveOccurred())
@@ -254,7 +254,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 			}
 			Expect(foundAddr).To(BeTrue())
 
-			// Check if brLocalnetIP has been added in the arp entry for br-nexthop interface
+			// Check if brLocalnetIP has been added in the arp entry for util.LocalnetGatewayNextHopPort interface
 			neigbourIP := net.ParseIP(brLocalnetIP)
 			neighbours, err := netlink.NeighList(link.Attrs().Index, netlink.FAMILY_ALL)
 			Expect(err).NotTo(HaveOccurred())
@@ -325,13 +325,13 @@ var _ = Describe("Gateway Init Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		// Restore global default values before each testcase
-		config.RestoreDefaultConfig()
+		config.PrepareTestConfig()
 
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
 
-		// Set up a fake br-local & br-nexthop
+		// Set up a fake br-local & util.LocalnetGatewayNextHopPort
 		testNS, err = testutils.NewNS()
 		Expect(err).NotTo(HaveOccurred())
 		err = testNS.Do(func(ns.NetNS) error {
@@ -346,7 +346,7 @@ var _ = Describe("Gateway Init Operations", func() {
 
 			err = netlink.LinkAdd(&netlink.Dummy{
 				LinkAttrs: netlink.LinkAttrs{
-					Name: "br-nexthop",
+					Name: util.LocalnetGatewayNextHopPort,
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
@@ -374,7 +374,7 @@ var _ = Describe("Gateway Init Operations", func() {
 				tcpLBUUID     string = "d2e858b2-cb5a-441b-a670-ed450f79a91f"
 				udpLBUUID     string = "12832f14-eb0f-44d4-b8db-4cccbc73c792"
 				nodeSubnet    string = "10.1.1.0/24"
-				gwRouter      string = "GR_" + nodeName
+				gwRouter      string = util.GWRouterPrefix + nodeName
 				clusterIPNet  string = "10.1.0.0"
 				clusterCIDR   string = clusterIPNet + "/16"
 			)
@@ -396,7 +396,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.PhysicalNetworkName + ":br-local",
-				"ovs-vsctl --timeout=15 --may-exist add-port br-local br-nexthop -- set interface br-nexthop type=internal mtu_request=" + mtu + " mac=00\\:00\\:a9\\:fe\\:21\\:01",
+				"ovs-vsctl --timeout=15 --may-exist add-port br-local " + util.LocalnetGatewayNextHopPort + " -- set interface " + util.LocalnetGatewayNextHopPort + " type=internal mtu_request=" + mtu + " mac=00\\:00\\:a9\\:fe\\:21\\:01",
 			})
 
 			err := util.SetExec(fexec)
@@ -440,13 +440,13 @@ var _ = Describe("Gateway Init Operations", func() {
 
 				_, err = initLocalnetGateway(nodeName, nodeSubnet, wf)
 				Expect(err).NotTo(HaveOccurred())
-				// Check if IP has been assigned to br-nexthop
-				link, err := netlink.LinkByName("br-nexthop")
+				// Check if IP has been assigned to LocalnetGatewayNextHopPort
+				link, err := netlink.LinkByName(util.LocalnetGatewayNextHopPort)
 				Expect(err).NotTo(HaveOccurred())
 				addrs, err := netlink.AddrList(link, syscall.AF_INET)
 				Expect(err).NotTo(HaveOccurred())
 				var foundAddr bool
-				expectedAddr, err := netlink.ParseAddr("169.254.33.1/24")
+				expectedAddr, err := netlink.ParseAddr(brNextHopCIDR)
 				Expect(err).NotTo(HaveOccurred())
 				for _, a := range addrs {
 					if a.IP.Equal(expectedAddr.IP) && bytes.Equal(a.Mask, expectedAddr.Mask) {
@@ -464,12 +464,12 @@ var _ = Describe("Gateway Init Operations", func() {
 			expectedTables := map[string]util.FakeTable{
 				"filter": {
 					"INPUT": []string{
-						"-i br-nexthop -m comment --comment from OVN to localhost -j ACCEPT",
+						"-i " + util.LocalnetGatewayNextHopPort + " -m comment --comment from OVN to localhost -j ACCEPT",
 					},
 					"FORWARD": []string{
 						"-j OVN-KUBE-NODEPORT",
-						"-o br-nexthop -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
-						"-i br-nexthop -j ACCEPT",
+						"-o " + util.LocalnetGatewayNextHopPort + " -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
+						"-i " + util.LocalnetGatewayNextHopPort + " -j ACCEPT",
 					},
 					"OVN-KUBE-NODEPORT": []string{},
 				},
