@@ -37,7 +37,8 @@ func initLocalOnlyGateway(nodeName string) (map[string]string, error) {
 
 	// Create a localnet bridge nexthop
 	_, stderr, err = util.RunOVSVsctl(
-		"--may-exist", "add-port", localnetBridgeName, util.LocalnetGatewayNextHopPort,
+		"--if-exists", "del-port", localnetBridgeName, util.LegacyLocalnetGatewayNextHopPort,
+		"--", "--may-exist", "add-port", localnetBridgeName, util.LocalnetGatewayNextHopPort,
 		"--", "set", "interface", util.LocalnetGatewayNextHopPort, "type=internal",
 		"mtu_request="+fmt.Sprintf("%d", config.Default.MTU),
 		fmt.Sprintf("mac=%s", strings.ReplaceAll(util.LocalnetGatewayNextHopMac, ":", "\\:")))

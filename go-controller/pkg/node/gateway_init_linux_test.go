@@ -68,7 +68,8 @@ func initLocalOnlyGatewayTest(fexec *ovntest.FakeExec, nodeName, brLocalnetMAC, 
 		"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.PhysicalNetworkName + ":breth0" + "," + util.LocalNetworkName + ":br-local",
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovs-vsctl --timeout=15 --may-exist add-port br-local " + util.LocalnetGatewayNextHopPort + " -- set interface " + util.LocalnetGatewayNextHopPort + " type=internal mtu_request=" + mtu + " mac=00\\:00\\:a9\\:fe\\:21\\:01",
+		"ovs-vsctl --timeout=15 --if-exists del-port br-local " + util.LegacyLocalnetGatewayNextHopPort +
+			" -- --may-exist add-port br-local " + util.LocalnetGatewayNextHopPort + " -- set interface " + util.LocalnetGatewayNextHopPort + " type=internal mtu_request=" + mtu + " mac=00\\:00\\:a9\\:fe\\:21\\:01",
 	})
 }
 
@@ -396,7 +397,8 @@ var _ = Describe("Gateway Init Operations", func() {
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.PhysicalNetworkName + ":br-local",
-				"ovs-vsctl --timeout=15 --may-exist add-port br-local " + util.LocalnetGatewayNextHopPort + " -- set interface " + util.LocalnetGatewayNextHopPort + " type=internal mtu_request=" + mtu + " mac=00\\:00\\:a9\\:fe\\:21\\:01",
+				"ovs-vsctl --timeout=15 --if-exists del-port br-local " + util.LegacyLocalnetGatewayNextHopPort +
+					" -- --may-exist add-port br-local " + util.LocalnetGatewayNextHopPort + " -- set interface " + util.LocalnetGatewayNextHopPort + " type=internal mtu_request=" + mtu + " mac=00\\:00\\:a9\\:fe\\:21\\:01",
 			})
 
 			err := util.SetExec(fexec)

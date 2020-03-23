@@ -41,10 +41,11 @@ const (
 	DefaultOpenFlowCookie = "0xdeff105"
 	// LocalnetGatewayNextHopPort is the name of the gateway port on the host to which all
 	// the packets leaving the OVN logical topology will be forwarded
-	LocalnetGatewayNextHopPort = "ovn-k8s-gw0"
-	JoinSwitchPrefix           = "join_"
-	ExternalSwitchPrefix       = "ext_"
-	GWRouterPrefix             = "GR_"
+	LocalnetGatewayNextHopPort       = "ovn-k8s-gw0"
+	LegacyLocalnetGatewayNextHopPort = "br-nexthop"
+	JoinSwitchPrefix                 = "join_"
+	ExternalSwitchPrefix             = "ext_"
+	GWRouterPrefix                   = "GR_"
 )
 
 func LocalnetGatewayIP() string {
