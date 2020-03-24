@@ -97,20 +97,15 @@ check_and_apply_ovnkube_db_ep () {
 #
 set_election_timer () {
   local current_election_timer
-  local election_timer=${1}
-  local database="OVN_Northbound"
 
-  if [[ ${db} == "sb" ]]; then
-    database="OVN_Southbound"
-  fi
-
+  # OVN_RAFT_ELECTION_TIMER - OVN raft election timer in ms (default 1000)
+  election_timer=${OVN_RAFT_ELECTION_TIMER:-1000}
   echo "setting election timer to ${election_timer} ms"
 
   current_election_timer=$(ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl cluster/status ${database} 2>/dev/null \
-    | grep "Election" | sed "s/.*:[[:space:]]//") 
+    | grep "Election" | sed "s/.*:[[:space:]]//")
   if [ -z "${current_election_timer}" ]; then
-    echo "Failed to get current election timer value"
-    echo "Exiting...."
+    echo "Failed to get current election timer value. Exiting..."
     exit 11
   fi
 
@@ -119,16 +114,14 @@ set_election_timer () {
     if [[ ${election_timer} -le ${max_electinon_timer} ]]; then
       ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl cluster/change-election-timer ${database} ${election_timer}
       if [[ $? != 0 ]]; then
-        echo "Failed to set election timer ${election_timer}"
-        echo "Exiting...."
+        echo "Failed to set election timer ${election_timer}. Exiting..."
         exit 11
       fi
       return 0
     else
       ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl cluster/change-election-timer ${database} ${max_electinon_timer}
       if [[ $? != 0 ]]; then
-        echo "Failed to set election timer ${max_election_timer}"
-        echo "Exiting...."
+        echo "Failed to set election timer ${max_election_timer}. Exiting..."
         exit 11
       fi
       current_election_timer=${max_electinon_timer}
@@ -175,9 +168,9 @@ set_northd_probe_interval () {
   echo "setting northd probe interval to ${northd_probe_interval} ms"
 
   # this call will fail on non-leader node since we are using unix socket and no --no-leader-only option.
-  output=$(ovn-nbctl --if-exists get NB_GLOBAL . options:northd_probe_interval)
+  output=$(ovn-nbctl --if-exists get NB_GLOBAL . options:northd_probe_interval | tr -d '\"')
   if [[ $? == 0 ]]; then
-    if [[ "${output}" != "\"${northd_probe_interval}\"" ]]; then
+    if [[ "${output}" != "${northd_probe_interval}" ]]; then
       ovn-nbctl set NB_GLOBAL . options:northd_probe_interval=${northd_probe_interval}
       if [[ $? != 0 ]]; then
         echo "Failed to set northd probe interval to ${northd_probe_interval}. Exiting....."
@@ -197,12 +190,13 @@ ovsdb-raft () {
   local raft_port=${3}
   local initialize="false"
 
-  # OVN_RAFT_ELECTION_TIMER - OVN raft election timer in ms (default 1000)
-  election_timer=${OVN_RAFT_ELECTION_TIMER:-1000}
-
   ovn_db_pidfile=${OVN_RUNDIR}/ovn${db}_db.pid
   eval ovn_log_db=\$ovn_log_${db}
   ovn_db_file=${OVN_ETCDIR}/ovn${db}_db.db
+  database="OVN_Northbound"
+  if [[ ${db} == "sb" ]]; then
+    database="OVN_Southbound"
+  fi
 
   rm -f ${ovn_db_pidfile}
 
@@ -235,16 +229,24 @@ ovsdb-raft () {
       --ovn-${db}-log="${ovn_log_db}" &
   fi
 
-  wait_for_event process_ready ovn${db}_db
+  # Following command waits for the database on server to enter a `connected` state
+  # -- Waits until a database with the given name has been added to server. Then, if database
+  # is clustered, additionally waits until it has joined and connected to its cluster.
+  echo "waiting for ${database} to join and connect to the cluster."
+  /usr/bin/ovsdb-client -t 120 wait unix:${OVN_RUNDIR}/ovn${db}_db.sock ${database} connected
+  if [[ $? != 0 ]]; then
+    echo "the ${database} has not yet joined and connected to its cluster. Exiting..."
+    exit 1
+  fi
   echo "=============== ${db}-ovsdb-raft ========== RUNNING"
 
   if [[ "${POD_NAME}" == "ovnkube-db-0" ]] ; then
     # set election timer value before other servers join the cluster. Note that the election timer can
     # only be set on the leader so we must do this in ovnkube-db-0 when it is still single-node cluster
-    set_election_timer ${election_timer}
+    set_election_timer
     if [[ ${db} == "nb" ]]; then
       set_northd_probe_interval
-    fi 
+    fi
     set_connection ${port}
   fi
 
