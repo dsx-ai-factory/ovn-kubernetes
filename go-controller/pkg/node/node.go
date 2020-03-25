@@ -235,7 +235,7 @@ func (n *OvnNode) Start() error {
 	}
 
 	nodeAnnotator := kube.NewNodeAnnotator(n.Kube, node)
-	waiter := newStartupWaiter(n.name)
+	waiter := newStartupWaiter()
 
 	// Initialize gateway resources on the node
 	if err := n.initGateway(subnet.String(), nodeAnnotator, waiter); err != nil {

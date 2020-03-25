@@ -12,6 +12,11 @@ import (
 	"k8s.io/klog"
 )
 
+// K8s mgmt interface name to be used as an OVS internal port on the node
+const (
+	k8sMgmtIntfName = "ovn-k8s-mp0"
+)
+
 func createManagementPort(nodeName string, localSubnet *net.IPNet, nodeAnnotator kube.Annotator, waiter *startupWaiter) error {
 	// Retrieve the routerIP and mangementPortIP for a given localSubnet
 	routerIP, portIP := util.GetNodeWellKnownAddresses(localSubnet)
@@ -36,31 +41,32 @@ func createManagementPort(nodeName string, localSubnet *net.IPNet, nodeAnnotator
 	}
 
 	// Create a OVS internal interface.
-	interfaceName := util.GetK8sMgmtIntfName(nodeName)
-
-	stdout, stderr, err = util.RunOVSVsctl("--", "--may-exist", "add-port",
-		"br-int", interfaceName, "--", "set", "interface", interfaceName,
+	legacyMgmtIntfName := util.GetLegacyK8sMgmtIntfName(nodeName)
+	stdout, stderr, err = util.RunOVSVsctl(
+		"--", "--if-exists", "del-port", "br-int", legacyMgmtIntfName,
+		"--", "--may-exist", "add-port", "br-int", k8sMgmtIntfName,
+		"--", "set", "interface", k8sMgmtIntfName,
 		"type=internal", "mtu_request="+fmt.Sprintf("%d", config.Default.MTU),
 		"external-ids:iface-id=k8s-"+nodeName)
 	if err != nil {
 		klog.Errorf("Failed to add port to br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
 	}
-	macAddress, err := util.GetOVSPortMACAddress(interfaceName)
+	macAddress, err := util.GetOVSPortMACAddress(k8sMgmtIntfName)
 	if err != nil {
 		klog.Errorf("Failed to get management port MAC address: %v", err)
 		return err
 	}
 	// persist the MAC address so that upon node reboot we get back the same mac address.
-	_, stderr, err = util.RunOVSVsctl("set", "interface", interfaceName,
+	_, stderr, err = util.RunOVSVsctl("set", "interface", k8sMgmtIntfName,
 		fmt.Sprintf("mac=%s", strings.ReplaceAll(macAddress, ":", "\\:")))
 	if err != nil {
 		klog.Errorf("failed to persist MAC address %q for %q: stderr:%s (%v)", macAddress,
-			interfaceName, stderr, err)
+			k8sMgmtIntfName, stderr, err)
 		return err
 	}
 
-	if err := createPlatformManagementPort(interfaceName, portIP.String(), routerIP.IP.String(), routerMac); err != nil {
+	if err := createPlatformManagementPort(k8sMgmtIntfName, portIP.String(), routerIP.IP.String(), routerMac); err != nil {
 		return nil
 	}
 
@@ -73,10 +79,9 @@ func createManagementPort(nodeName string, localSubnet *net.IPNet, nodeAnnotator
 }
 
 // managementPortReady will check to see if OpenFlow rules for management port has been created
-func managementPortReady(nodeName string) (bool, error) {
+func managementPortReady() (bool, error) {
 	// Get the OVS interface name for the Management Port
-	interfaceName := util.GetK8sMgmtIntfName(nodeName)
-	ofport, _, err := util.RunOVSVsctl("--if-exists", "get", "interface", interfaceName, "ofport")
+	ofport, _, err := util.RunOVSVsctl("--if-exists", "get", "interface", k8sMgmtIntfName, "ofport")
 	if err != nil {
 		return false, nil
 	}
