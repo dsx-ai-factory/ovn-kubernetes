@@ -123,3 +123,7 @@ func createPlatformManagementPort(interfaceName, interfaceIP, routerIP, routerMA
 
 func DelMgtPortIptRules() {
 }
+
+func checkManagementPortHealth(portIP, routerIP, routerMac string, stopChan chan struct{}) {
+	// TODO: Implement this
+}

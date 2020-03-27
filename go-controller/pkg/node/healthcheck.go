@@ -1,13 +1,19 @@
 package node
 
 import (
-	"k8s.io/client-go/tools/cache"
+	"fmt"
+	"os"
+	"strings"
+	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/healthcheck"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/klog"
 )
 
 // initLoadBalancerHealthChecker initializes the health check server for
@@ -82,4 +88,60 @@ func countLocalEndpoints(ep *kapi.Endpoints, nodeName string) int {
 		}
 	}
 	return num
+}
+
+// check for OVS internal ports without any ofport assigned, they are stale ports that must be deleted
+func checkForStaleOVSInterfaces(stopChan chan struct{}) {
+	ticker := time.NewTicker(60 * time.Second)
+
+	for {
+		select {
+		case <-ticker.C:
+			stdout, _, err := util.RunOVSVsctl("--data=bare", "--no-headings", "--columns=name", "find",
+				"interface", "ofport=-1")
+			if err != nil {
+				klog.Errorf("failed to list OVS interfaces with ofport set to -1")
+				continue
+			}
+			if len(stdout) == 0 {
+				continue
+			}
+			values := strings.Split(stdout, "\n\n")
+			for _, val := range values {
+				klog.Errorf("found stale interface %s, so deleting it", val)
+				_, stderr, err := util.RunOVSVsctl("--if-exists", "--with-iface", "del-port", val)
+				if err != nil {
+					klog.Errorf("failed to delete OVS port/interface %s: stderr: %s (%v)",
+						val, stderr, err)
+				}
+			}
+		case <-stopChan:
+			return
+		}
+	}
+}
+
+// checkDefaultOpenFlow checks for the existence of default OpenFlow rules and
+// exits if the output is not as expected
+func checkDefaultConntrackRules(gwBridge string, stopChan chan struct{}) {
+	ticker := time.NewTicker(30 * time.Second)
+
+	for {
+		select {
+		case <-ticker.C:
+			out, _, err := util.RunOVSOfctl("dump-aggregate", gwBridge,
+				fmt.Sprintf("cookie=%s/-1", util.DefaultOpenFlowCookie))
+			if err != nil {
+				klog.Errorf("failed to dump aggregate statistics of the default OpenFlow rules: %v", err)
+				continue
+			}
+
+			if !strings.Contains(out, "flow_count=5") {
+				klog.Errorf("fatal error: unexpected default OpenFlows count, expect 5 output: %v\n", out)
+				os.Exit(1)
+			}
+		case <-stopChan:
+			return
+		}
+	}
 }

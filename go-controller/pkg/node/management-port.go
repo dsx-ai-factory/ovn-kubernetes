@@ -17,7 +17,8 @@ const (
 	k8sMgmtIntfName = "ovn-k8s-mp0"
 )
 
-func createManagementPort(nodeName string, localSubnet *net.IPNet, nodeAnnotator kube.Annotator, waiter *startupWaiter) error {
+func (n *OvnNode) createManagementPort(localSubnet *net.IPNet, nodeAnnotator kube.Annotator,
+	waiter *startupWaiter) error {
 	// Retrieve the routerIP and mangementPortIP for a given localSubnet
 	routerIP, portIP := util.GetNodeWellKnownAddresses(localSubnet)
 	routerMac := util.IPAddrToHWAddr(routerIP.IP)
@@ -31,7 +32,7 @@ func createManagementPort(nodeName string, localSubnet *net.IPNet, nodeAnnotator
 	// create the port on the logical switch.
 	// Until the above is changed, switch to a lowercase hostname for
 	// initMinion.
-	nodeName = strings.ToLower(nodeName)
+	nodeName := strings.ToLower(n.name)
 
 	// Make sure br-int is created.
 	stdout, stderr, err := util.RunOVSVsctl("--", "--may-exist", "add-br", "br-int")
@@ -74,6 +75,8 @@ func createManagementPort(nodeName string, localSubnet *net.IPNet, nodeAnnotator
 		return err
 	}
 
+	// start the management port health check
+	go checkManagementPortHealth(portIP.IP.String(), routerIP.IP.String(), routerMac, n.stopChan)
 	waiter.AddWait(managementPortReady, nil)
 	return nil
 }

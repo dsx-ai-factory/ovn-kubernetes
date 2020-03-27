@@ -7,10 +7,12 @@ import (
 	"net"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/vishvananda/netlink"
 	"k8s.io/klog"
 )
 
@@ -127,4 +129,96 @@ func DelMgtPortIptRules() {
 	_ = ipt6.ClearChain("nat", iptableMgmPortChain)
 	_ = ipt.DeleteChain("nat", iptableMgmPortChain)
 	_ = ipt6.DeleteChain("nat", iptableMgmPortChain)
+}
+
+// checks to make sure that following configurations are present on the k8s node
+// 1. route entries to cluster CIDR and service CIDR through management port
+// 2. ARP entry for the node subnet's gateway ip
+// 3. IPtables chain and rule for SNATing packets entering the logical topology
+func checkManagementPortHealth(portIP, routerIP, routerMac string, stopChan chan struct{}) {
+	var link netlink.Link
+	var ipt util.IPTablesHelper
+	var err error
+
+	subnets := []string{config.Kubernetes.ServiceCIDR}
+	for _, subnet := range config.Default.ClusterSubnets {
+		subnets = append(subnets, subnet.CIDR.String())
+	}
+	ticker := time.NewTicker(30 * time.Second)
+	for {
+		select {
+		case <-ticker.C:
+			if link == nil {
+				if link, err = netlink.LinkByName(k8sMgmtIntfName); err != nil {
+					klog.Errorf("failed to lookup link %s: %v", k8sMgmtIntfName, err)
+					continue
+				}
+			}
+
+			if exists, err := util.LinkNeighExists(link, routerIP, routerMac); err == nil {
+				if !exists {
+					klog.Errorf("missing arp entry for MAC/IP binding (%s/%s) on link %s",
+						routerMac, routerIP, k8sMgmtIntfName)
+					err = util.LinkNeighAdd(link, routerIP, routerMac)
+					if err != nil {
+						klog.Errorf(err.Error())
+					}
+				}
+			} else {
+				klog.Errorf(err.Error())
+			}
+
+			for _, subnet := range subnets {
+				if exists, err := util.LinkRouteExists(link, routerIP, subnet); err == nil {
+					if !exists {
+						klog.Errorf("missing route entry for subnet %s via gateway %s on link %v",
+							subnet, routerIP, link.Attrs().Name)
+						err = util.LinkRoutesAdd(link, routerIP, []string{subnet})
+						if err != nil {
+							klog.Errorf(err.Error())
+						}
+					}
+				} else {
+					klog.Errorf(err.Error())
+				}
+			}
+
+			if ipt == nil {
+				if net.ParseIP(portIP).To4() != nil {
+					ipt, err = util.GetIPTablesHelper(iptables.ProtocolIPv4)
+				} else {
+					ipt, err = util.GetIPTablesHelper(iptables.ProtocolIPv6)
+				}
+				if err != nil {
+					klog.Errorf("failed to get iptables helper: %v", err)
+					continue
+				}
+			}
+			rule := []string{"-o", k8sMgmtIntfName, "-j", iptableMgmPortChain}
+			exists, err := ipt.Exists("nat", "POSTROUTING", rule...)
+			if err == nil && !exists {
+				klog.Errorf("missing iptables postrouting nat chain %s, adding it", iptableMgmPortChain)
+				err = ipt.Insert("nat", "POSTROUTING", 1, rule...)
+				if err != nil {
+					klog.Errorf("could not set up iptables chain rules for management port: %v", err)
+				}
+			} else if err != nil {
+				klog.Errorf(err.Error())
+			}
+			rule = []string{"-o", k8sMgmtIntfName, "-j", "SNAT", "--to-source", portIP,
+				"-m", "comment", "--comment", "OVN SNAT to Management Port"}
+			exists, err = ipt.Exists("nat", iptableMgmPortChain, rule...)
+			if err == nil && !exists {
+				klog.Errorf("missing management port nat rule in chain %s, adding it", iptableMgmPortChain)
+				err = ipt.Insert("nat", iptableMgmPortChain, 1, rule...)
+				if err != nil {
+					klog.Errorf("could not set up iptables rules for management port: %v", err)
+				}
+			} else if err != nil {
+				klog.Errorf(err.Error())
+			}
+		case <-stopChan:
+			return
+		}
+	}
 }

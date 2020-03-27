@@ -6,14 +6,16 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/vishvananda/netlink"
 	"k8s.io/klog"
 )
 
-func initLocalOnlyGateway(nodeName string) (map[string]string, error) {
+func initLocalOnlyGateway(nodeName string, stopChan chan struct{}) (map[string]string, error) {
 	// Create a localnet OVS bridge.
 	localnetBridgeName := "br-local"
 	_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br",
@@ -76,7 +78,36 @@ func initLocalOnlyGateway(nodeName string) (map[string]string, error) {
 		}
 	}
 
+	// add health check function to check ARP/ND entry for localnet gateway IP
+	go checkARPEntryForLocalGatewayIP(link, ip.String(), macAddress, stopChan)
 	return map[string]string{
 		ovn.OvnNodeLocalGatewayMacAddress: macAddress,
 	}, nil
+}
+
+// add health check function to check ARP/ND entry for localnet gateway IP
+func checkARPEntryForLocalGatewayIP(link netlink.Link, localGwIP, macAddress string, stopChan chan struct{}) {
+	ticker := time.NewTicker(30 * time.Second)
+
+	for {
+		select {
+		case <-ticker.C:
+			if exists, err := util.LinkNeighExists(link, localGwIP, macAddress); err == nil {
+				if exists {
+					continue
+				}
+				klog.Errorf("missing neighbour entry %s/%s on link %v, adding the entry",
+					util.LocalnetGatewayNextHop(), macAddress, link.Attrs().Name)
+				err = util.LinkNeighAdd(link, util.LocalnetGatewayNextHop(), macAddress)
+				if err != nil {
+					klog.Errorf("failed while checking existence of an neighbour entry %s/%s: %v",
+						util.LocalnetGatewayNextHop(), macAddress, err)
+				}
+			} else {
+				klog.Errorf(err.Error())
+			}
+		case <-stopChan:
+			return
+		}
+	}
 }

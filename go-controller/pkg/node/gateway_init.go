@@ -144,8 +144,7 @@ func (n *OvnNode) initGateway(subnet string, nodeAnnotator kube.Annotator,
 				gatewayIntf = defaultGatewayIntf
 			}
 		}
-		annotations, prFn, err = initSharedGateway(n.name, subnet, gatewayNextHop, gatewayIntf,
-			n.watchFactory, n.stopChan)
+		annotations, prFn, err = n.initSharedGateway(subnet, gatewayNextHop, gatewayIntf)
 	case config.GatewayModeDisabled:
 		annotations = map[string]map[string]string{
 			ovn.OvnDefaultNetworkGateway: {

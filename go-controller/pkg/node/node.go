@@ -243,7 +243,7 @@ func (n *OvnNode) Start() error {
 	}
 
 	// Initialize management port resources on the node
-	if err := createManagementPort(n.name, subnet, nodeAnnotator, waiter); err != nil {
+	if err := n.createManagementPort(subnet, nodeAnnotator, waiter); err != nil {
 		return err
 	}
 
@@ -262,6 +262,9 @@ func (n *OvnNode) Start() error {
 	if err := level.Set(strconv.Itoa(config.Logging.Level)); err != nil {
 		klog.Errorf("reset of initial klog \"loglevel\" failed, err: %v", err)
 	}
+
+	// start health check to ensure there are no stale OVS internal ports
+	go checkForStaleOVSInterfaces(n.stopChan)
 
 	confFile := filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
 	_, err = os.Stat(confFile)

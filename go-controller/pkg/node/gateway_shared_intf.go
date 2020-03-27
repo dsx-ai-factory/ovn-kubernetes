@@ -2,11 +2,9 @@ package node
 
 import (
 	"fmt"
-	"os"
 	"reflect"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -258,37 +256,13 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 			"error: %v", gwBridge, stderr, err)
 	}
 
-	// start the periodic check on the default open flows that just added
-	go checkDefaultOpenFlow(gwBridge, stopChan)
+	// add health check function to check default OpenFlow flows are on the shared gateway bridge
+	go checkDefaultConntrackRules(gwBridge, stopChan)
 	return nil
 }
 
-// checkDefaultOpenFlow checks for the existence of default OpenFlow rules and exits if the output is not as expected
-func checkDefaultOpenFlow(gwBridge string, stopChan chan struct{}) {
-	ticker := time.NewTicker(5 * time.Second)
-
-	for {
-		select {
-		case <-ticker.C:
-			out, _, err := util.RunOVSOfctl("dump-aggregate", gwBridge,
-				fmt.Sprintf("cookie=%s/-1", util.DefaultOpenFlowCookie))
-			if err != nil {
-				klog.Errorf("failed to dump aggregate statistics of the default OpenFlow rules: %v", err)
-				continue
-			}
-
-			if !strings.Contains(out, "flow_count=5") {
-				klog.Errorf("fatal error: unexpected default OpenFlows count, expect 5 output: %v\n", out)
-				os.Exit(1)
-			}
-		case <-stopChan:
-			return
-		}
-	}
-}
-
-func initSharedGateway(nodeName string, subnet, gwNextHop, gwIntf string,
-	wf *factory.WatchFactory, stopChan chan struct{}) (map[string]map[string]string, postWaitFunc, error) {
+func (n *OvnNode) initSharedGateway(subnet, gwNextHop, gwIntf string) (map[string]map[string]string,
+	postWaitFunc, error) {
 	var bridgeName string
 	var uplinkName string
 	var brCreated bool
@@ -331,13 +305,13 @@ func initSharedGateway(nodeName string, subnet, gwNextHop, gwIntf string,
 		return nil, nil, fmt.Errorf("%s does not have a ipv4 address", gwIntf)
 	}
 
-	ifaceID, macAddress, err := bridgedGatewayNodeSetup(nodeName, bridgeName, gwIntf,
+	ifaceID, macAddress, err := bridgedGatewayNodeSetup(n.name, bridgeName, gwIntf,
 		util.PhysicalNetworkName, brCreated)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
 
-	localOnlyAnnotations, err := initLocalOnlyGateway(nodeName)
+	localOnlyAnnotations, err := initLocalOnlyGateway(n.name, n.stopChan)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -362,13 +336,13 @@ func initSharedGateway(nodeName string, subnet, gwNextHop, gwIntf string,
 	return annotations, func() error {
 		// Program cluster.GatewayIntf to let non-pod traffic to go to host
 		// stack
-		if err := addDefaultConntrackRules(nodeName, bridgeName, uplinkName, stopChan); err != nil {
+		if err := addDefaultConntrackRules(n.name, bridgeName, uplinkName, n.stopChan); err != nil {
 			return err
 		}
 
 		if config.Gateway.NodeportEnable {
 			// Program cluster.GatewayIntf to let nodePort traffic to go to pods.
-			if err := nodePortWatcher(nodeName, bridgeName, uplinkName, wf); err != nil {
+			if err := nodePortWatcher(n.name, bridgeName, uplinkName, n.watchFactory); err != nil {
 				return err
 			}
 		}
