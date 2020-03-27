@@ -147,8 +147,10 @@ func initLocalnetGateway(nodeName string,
 		return nil, err
 	}
 
-	// Flush IPv4 address of localnetBridgeNextHop and set with an IP address.
-	err = util.LinkAddrAdd(link, util.LocalnetGatewayNextHopSubnet())
+	// Flush any addresses on localnetBridgeNextHopPort and add the new IP address.
+	if err = util.LinkAddrFlush(link); err == nil {
+		err = util.LinkAddrAdd(link, util.LocalnetGatewayNextHopSubnet())
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -52,8 +52,10 @@ func initLocalOnlyGateway(nodeName string) (map[string]string, error) {
 		return nil, err
 	}
 
-	// Flush IPv4 address of util.LocalnetGatewayNextHopPort.
-	err = util.LinkAddrAdd(link, util.LocalnetGatewayNextHopSubnet())
+	// Flush all IP addresses on util.LocalnetGatewayNextHopPort and add the new IP address
+	if err = util.LinkAddrFlush(link); err == nil {
+		err = util.LinkAddrAdd(link, util.LocalnetGatewayNextHopSubnet())
+	}
 	if err != nil {
 		return nil, err
 	}
