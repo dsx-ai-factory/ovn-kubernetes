@@ -68,7 +68,7 @@ func (n *OvnNode) createManagementPort(localSubnet *net.IPNet, nodeAnnotator kub
 	}
 
 	if err := createPlatformManagementPort(k8sMgmtIntfName, portIP.String(), routerIP.IP.String(), routerMac); err != nil {
-		return nil
+		return err
 	}
 
 	if err := nodeAnnotator.Set(ovn.OvnNodeManagementPortMacAddress, macAddress); err != nil {
