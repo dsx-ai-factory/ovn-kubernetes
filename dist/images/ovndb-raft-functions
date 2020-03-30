@@ -168,8 +168,9 @@ set_northd_probe_interval () {
   echo "setting northd probe interval to ${northd_probe_interval} ms"
 
   # this call will fail on non-leader node since we are using unix socket and no --no-leader-only option.
-  output=$(ovn-nbctl --if-exists get NB_GLOBAL . options:northd_probe_interval | tr -d '\"')
+  output=$(ovn-nbctl --if-exists get NB_GLOBAL . options:northd_probe_interval)
   if [[ $? == 0 ]]; then
+    output=$(echo ${output} | tr -d '\"')
     if [[ "${output}" != "${northd_probe_interval}" ]]; then
       ovn-nbctl set NB_GLOBAL . options:northd_probe_interval=${northd_probe_interval}
       if [[ $? != 0 ]]; then
