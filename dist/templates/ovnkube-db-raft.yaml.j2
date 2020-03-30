@@ -138,8 +138,8 @@ spec:
           value: "3"
         - name: OVN_LOG_NB
           value: "-vconsole:info -vfile:info"
-        - name: OVN_RAFT_ELECTION_TIMER
-          value: "16000"
+        - name: OVN_NB_RAFT_ELECTION_TIMER
+          value: "5000"
         - name: OVN_NORTHD_PROBE_INTERVAL
           value: "50000"
         - name: K8S_APISERVER
@@ -202,7 +202,7 @@ spec:
           value: "3"
         - name: OVN_LOG_SB
           value: "-vconsole:info -vfile:info"
-        - name: OVN_RAFT_ELECTION_TIMER
+        - name: OVN_SB_RAFT_ELECTION_TIMER
           value: "16000"
         - name: K8S_APISERVER
           valueFrom:

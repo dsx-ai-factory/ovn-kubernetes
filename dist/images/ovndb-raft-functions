@@ -96,11 +96,10 @@ check_and_apply_ovnkube_db_ep () {
 # we do not support the case to change election timer with the existing DB
 #
 set_election_timer () {
+  local election_timer=${1}
   local current_election_timer
 
-  # OVN_RAFT_ELECTION_TIMER - OVN raft election timer in ms (default 1000)
-  election_timer=${OVN_RAFT_ELECTION_TIMER:-1000}
-  echo "setting election timer to ${election_timer} ms"
+  echo "setting election timer for ${database} to ${election_timer} ms"
 
   current_election_timer=$(ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl cluster/status ${database} 2>/dev/null \
     | grep "Election" | sed "s/.*:[[:space:]]//")
@@ -189,6 +188,7 @@ ovsdb-raft () {
   local db=${1}
   local port=${2}
   local raft_port=${3}
+  local election_timer=${4}
   local initialize="false"
 
   ovn_db_pidfile=${OVN_RUNDIR}/ovn${db}_db.pid
@@ -244,7 +244,7 @@ ovsdb-raft () {
   if [[ "${POD_NAME}" == "ovnkube-db-0" ]] ; then
     # set election timer value before other servers join the cluster. Note that the election timer can
     # only be set on the leader so we must do this in ovnkube-db-0 when it is still single-node cluster
-    set_election_timer
+    set_election_timer ${election_timer}
     if [[ ${db} == "nb" ]]; then
       set_northd_probe_interval
     fi
