@@ -155,6 +155,10 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
+        - name: K8S_NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
       # end of container
 
       # sb-ovsdb - v3
@@ -217,6 +221,10 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
+        - name: K8S_NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
       # end of container
 
       # db-metrics-exporter - v3
