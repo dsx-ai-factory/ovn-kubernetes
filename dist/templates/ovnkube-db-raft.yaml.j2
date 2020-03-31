@@ -136,7 +136,7 @@ spec:
         env:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
-        - name: OVN_LOG_NB
+        - name: OVN_LOGLEVEL_NB
           value: "{{ ovn_loglevel_nb }}"
         - name: OVN_NB_RAFT_ELECTION_TIMER
           value: "5000"
@@ -204,7 +204,7 @@ spec:
         env:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
-        - name: OVN_LOG_SB
+        - name: OVN_LOGLEVEL_SB
           value: "{{ ovn_loglevel_sb }}"
         - name: OVN_SB_RAFT_ELECTION_TIMER
           value: "16000"
