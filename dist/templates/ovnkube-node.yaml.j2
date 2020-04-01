@@ -69,6 +69,8 @@ spec:
         env:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
+        - name: OVN_LOG_CONTROLLER
+          value: "{{ ovn_loglevel_controller }}"
         - name: K8S_APISERVER
           valueFrom:
             configMapKeyRef:
@@ -137,7 +139,7 @@ spec:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
         - name: OVNKUBE_LOGLEVEL
-          value: "5"
+          value: "{{ ovnkube_node_loglevel }}"
         - name: OVN_NET_CIDR
           valueFrom:
             configMapKeyRef:

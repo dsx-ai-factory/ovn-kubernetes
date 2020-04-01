@@ -9,32 +9,31 @@ import (
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/vishvananda/netlink"
 	"k8s.io/klog"
 )
 
-func initLocalOnlyGateway(nodeName string, stopChan chan struct{}) (map[string]string, error) {
+func initLocalOnlyGateway(nodeName string, stopChan chan struct{}) (string, error) {
 	// Create a localnet OVS bridge.
 	localnetBridgeName := "br-local"
 	_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br",
 		localnetBridgeName)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to create localnet bridge %s"+
+		return "", fmt.Errorf("Failed to create localnet bridge %s"+
 			", stderr:%s (%v)", localnetBridgeName, stderr, err)
 	}
 
 	_, macAddress, err := bridgedGatewayNodeSetup(nodeName, localnetBridgeName, localnetBridgeName,
 		util.LocalNetworkName, true)
 	if err != nil {
-		return nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
+		return "", fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
 
 	// Up the localnetBridgeName
 	_, err = util.LinkSetUp(localnetBridgeName)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
 	// Create a localnet bridge nexthop
@@ -45,13 +44,13 @@ func initLocalOnlyGateway(nodeName string, stopChan chan struct{}) (map[string]s
 		"mtu_request="+fmt.Sprintf("%d", config.Default.MTU),
 		fmt.Sprintf("mac=%s", strings.ReplaceAll(util.LocalnetGatewayNextHopMac, ":", "\\:")))
 	if err != nil {
-		return nil, fmt.Errorf("Failed to create localnet bridge next hop %s"+
+		return "", fmt.Errorf("Failed to create localnet bridge next hop %s"+
 			", stderr:%s (%v)", util.LocalnetGatewayNextHopPort, stderr, err)
 	}
 	// Up the util.LocalnetGatewayNextHopPort interface
 	link, err := util.LinkSetUp(util.LocalnetGatewayNextHopPort)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
 	// Flush all IP addresses on util.LocalnetGatewayNextHopPort and add the new IP address
@@ -59,7 +58,7 @@ func initLocalOnlyGateway(nodeName string, stopChan chan struct{}) (map[string]s
 		err = util.LinkAddrAdd(link, util.LocalnetGatewayNextHopSubnet())
 	}
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
 	// Add arp entry for local service gateway, it is used for return traffic of local service access
@@ -74,15 +73,13 @@ func initLocalOnlyGateway(nodeName string, stopChan chan struct{}) (map[string]s
 	} else {
 		err = util.LinkNeighAdd(link, ip.String(), macAddress)
 		if err != nil {
-			return nil, err
+			return "", err
 		}
 	}
 
 	// add health check function to check ARP/ND entry for localnet gateway IP
 	go checkARPEntryForLocalGatewayIP(link, ip.String(), macAddress, stopChan)
-	return map[string]string{
-		ovn.OvnNodeLocalGatewayMacAddress: macAddress,
-	}, nil
+	return macAddress, nil
 }
 
 // add health check function to check ARP/ND entry for localnet gateway IP

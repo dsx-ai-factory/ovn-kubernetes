@@ -104,7 +104,7 @@ spec:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
         - name: OVN_LOG_NB
-          value: "-vconsole:info -vfile:info"
+          value: "{{ ovn_loglevel_nb }}"
         - name: OVN_NORTHD_PROBE_INTERVAL
           value: "50000"
         - name: K8S_APISERVER
@@ -166,7 +166,7 @@ spec:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
         - name: OVN_LOG_SB
-          value: "-vconsole:info -vfile:info"
+          value: "{{ ovn_loglevel_sb }}"
         - name: K8S_APISERVER
           valueFrom:
             configMapKeyRef:

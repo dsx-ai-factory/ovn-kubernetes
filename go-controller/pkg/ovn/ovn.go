@@ -108,9 +108,6 @@ type Controller struct {
 	// Per namespace multicast enabled?
 	multicastEnabled map[string]bool
 
-	// Supports port_group?
-	portGroupSupport bool
-
 	// Supports multicast?
 	multicastSupport bool
 
@@ -167,6 +164,7 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 
 // Run starts the actual watching.
 func (oc *Controller) Run(stopChan chan struct{}) error {
+	oc.syncPeriodic(stopChan)
 	// WatchNodes must be started first so that its initial Add will
 	// create all node logical switches, which other watches may depend on.
 	// https://github.com/ovn-org/ovn-kubernetes/pull/859
@@ -290,6 +288,25 @@ func extractEmptyLBBackendsEvents(out []byte) ([]emptyLBBackendEvent, error) {
 	}
 
 	return events, nil
+}
+
+// syncPeriodic adds a goroutine that periodically does some work
+// right now there is only one ticker registered
+// for syncNodesPeriodic which deletes chassis records from the sbdb
+// every 5 minutes
+func (oc *Controller) syncPeriodic(stopChan chan struct{}) {
+	go func() {
+		nodeSyncTicker := time.NewTicker(5 * time.Minute)
+		for {
+			select {
+			case <-nodeSyncTicker.C:
+				oc.syncNodesPeriodic()
+			case <-stopChan:
+				return
+			}
+		}
+	}()
+
 }
 
 func (oc *Controller) ovnControllerEventChecker(stopChan chan struct{}) {
@@ -504,14 +521,18 @@ func (oc *Controller) WatchNamespaces() error {
 }
 
 func (oc *Controller) syncNodeGateway(node *kapi.Node, subnet *net.IPNet) error {
-	l3GatewayConfig, err := UnmarshalNodeL3GatewayAnnotation(node)
+	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
 	if err != nil {
 		return err
+	} else if l3GatewayConfig == nil {
+		klog.V(5).Infof("L3 gateway config annotation not found for node %q", node.Name)
+		return nil
 	}
+
 	if subnet == nil {
-		subnet, _ = parseNodeHostSubnet(node)
+		subnet, _ = util.ParseNodeHostSubnetAnnotation(node)
 	}
-	if l3GatewayConfig[OvnNodeGatewayMode] == string(config.GatewayModeDisabled) {
+	if l3GatewayConfig.Mode == config.GatewayModeDisabled {
 		if err := util.GatewayCleanup(node.Name); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
@@ -602,8 +623,8 @@ func (oc *Controller) WatchNodes() error {
 			klog.V(5).Infof("Delete event for Node %q. Removing the node from "+
 				"various caches", node.Name)
 
-			nodeSubnet, _ := parseNodeHostSubnet(node)
-			joinSubnet, _ := parseNodeJoinSubnet(node)
+			nodeSubnet, _ := util.ParseNodeHostSubnetAnnotation(node)
+			joinSubnet, _ := util.ParseNodeJoinSubnetAnnotation(node)
 			err := oc.deleteNode(node.Name, nodeSubnet, joinSubnet)
 			if err != nil {
 				klog.Error(err)
@@ -723,8 +744,8 @@ func (oc *Controller) removeServiceEndpoints(lb, vip string) {
 
 // gatewayChanged() compares old annotations to new and returns true if something has changed.
 func gatewayChanged(oldNode, newNode *kapi.Node) bool {
-	oldL3GatewayConfig, _ := UnmarshalNodeL3GatewayAnnotation(oldNode)
-	l3GatewayConfig, _ := UnmarshalNodeL3GatewayAnnotation(newNode)
+	oldL3GatewayConfig, _ := util.ParseNodeL3GatewayAnnotation(oldNode)
+	l3GatewayConfig, _ := util.ParseNodeL3GatewayAnnotation(newNode)
 
 	if oldL3GatewayConfig == nil && l3GatewayConfig == nil {
 		return false
@@ -735,8 +756,8 @@ func gatewayChanged(oldNode, newNode *kapi.Node) bool {
 
 // macAddressChanged() compares old annotations to new and returns true if something has changed.
 func macAddressChanged(oldNode, node *kapi.Node) bool {
-	oldMacAddress := oldNode.Annotations[OvnNodeManagementPortMacAddress]
-	macAddress := node.Annotations[OvnNodeManagementPortMacAddress]
+	oldMacAddress, _ := util.ParseNodeManagementPortMacAddr(oldNode)
+	macAddress, _ := util.ParseNodeManagementPortMacAddr(node)
 	return oldMacAddress != macAddress
 }
 

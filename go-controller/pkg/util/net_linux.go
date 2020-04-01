@@ -53,7 +53,7 @@ func LinkAddrAdd(link netlink.Link, address string) error {
 	return nil
 }
 
-// LinkRoutesDel flushes all the routes on the given link
+// LinkRoutesDel deletes all the routes for the given subnets via the link
 func LinkRoutesDel(link netlink.Link, subnets []string) error {
 	routes, err := netlink.RouteList(link, netlink.FAMILY_ALL)
 	if err != nil {
