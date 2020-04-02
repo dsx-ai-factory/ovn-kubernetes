@@ -206,8 +206,9 @@ ovsdb-raft () {
       echo "failed to retrieve the IP address of the host $(hostname). Exiting..."
       exit 1
   fi
-  echo "=============== run ${db}-ovsdb-raft pod ${POD_NAME} =========="
+  iptables-rules ${raft_port}
 
+  echo "=============== run ${db}-ovsdb-raft pod ${POD_NAME} =========="
   if [[ ! -e ${ovn_db_file} ]] || ovsdb-tool db-is-standalone ${ovn_db_file} ; then
     initialize="true"
   fi
