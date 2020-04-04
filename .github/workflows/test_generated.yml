@@ -14,6 +14,9 @@ jobs:
     name: Build
     runs-on: ubuntu-latest
     steps:
+    - name: Free up disk space
+      run: sudo eatmydata apt-get remove --auto-remove -y aspnetcore-* dotnet-* libmono-*
+        mono-* msbuild php-* php7* ghc-* zulu-*
     - name: Set up Go 1.12
       uses: actions/setup-go@v1
       with:
@@ -58,6 +61,9 @@ jobs:
     name: Verify
     runs-on: ubuntu-latest
     steps:
+    - name: Free up disk space
+      run: sudo eatmydata apt-get remove --auto-remove -y aspnetcore-* dotnet-* libmono-*
+        mono-* msbuild php-* php7* ghc-* zulu-*
     - name: Set up Go 1.12
       uses: actions/setup-go@v1
       with:
@@ -109,12 +115,23 @@ jobs:
         make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
         rm -rf .git
   e2e-shard-n:
-    name: e2e-kind-ovn-shard-n
+    name: e2e-kind-ovn-shard-n-${{ matrix.config.name }}
     runs-on: ubuntu-latest
     needs: k8s
+    strategy:
+      matrix:
+        config:
+        - ha: 'false'
+          name: noHA
+        - ha: 'true'
+          name: HA
     env:
-      JOB_NAME: e2e-shard-n
+      KIND_HA: "${{matrix.config.ha}}"
+      JOB_NAME: e2e-shard-n-${{ matrix.config.name }}
     steps:
+    - name: Free up disk space
+      run: sudo eatmydata apt-get remove --auto-remove -y aspnetcore-* dotnet-* libmono-*
+        mono-* msbuild php-* php7* ghc-* zulu-*
     - name: Set up Go 1.12
       uses: actions/setup-go@v1
       with:
@@ -152,7 +169,7 @@ jobs:
         chmod +x $GOPATH/bin/kubetest
 
         pushd $GOPATH/src/k8s.io/kubernetes/
-        sudo cp ./_output/local/go/bin/kubectl /usr/local/bin/
+        sudo ln ./_output/local/go/bin/kubectl /usr/local/bin/kubectl
         popd
 
         GO111MODULE="on" go get sigs.k8s.io/kind@v0.7.0
@@ -168,7 +185,11 @@ jobs:
         export NODE_NAMES=${MASTER_NAME}
 
         # all tests that don't have P as their sixth letter after the N
+<<<<<<< HEAD
         kubetest --provider=local --deployment=kind --kind-cluster-name=${KIND_CLUSTER_NAME} --test --test_args='--ginkgo.focus=\[sig-network\]\s[Nn](.{6}[^Pp].*|.{0,6}$) --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|cleanup\sfinalizer|session\saffinity)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]|kube-proxy|should\sset\sTCP\sCLOSE_WAIT\stimeout'
+=======
+        kubetest --provider=local --deployment=kind --kind-cluster-name=${KIND_CLUSTER_NAME} --test --test_args='--num-nodes=3 --ginkgo.focus=\[sig-network\]\s[Nn](.{6}[^Pp].*|.{0,6}$) --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|cleanup\sfinalizer|session\saffinity)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]|kube-proxy|should\sset\sTCP\sCLOSE_WAIT\stimeout'
+>>>>>>> openvswitch/master
     - name: Export logs
       if: always()
       run: "mkdir -p /tmp/kind/logs \nkind export logs --name ${KIND_CLUSTER_NAME}
@@ -180,12 +201,23 @@ jobs:
         name: kind-logs-${{ github.run_id }}-${{ env.JOB_NAME }}
         path: "/tmp/kind/logs"
   e2e-shard-np:
-    name: e2e-kind-ovn-shard-np
+    name: e2e-kind-ovn-shard-np-${{ matrix.config.name }}
     runs-on: ubuntu-latest
     needs: k8s
+    strategy:
+      matrix:
+        config:
+        - ha: 'false'
+          name: noHA
+        - ha: 'true'
+          name: HA
     env:
-      JOB_NAME: e2e-shard-np
+      JOB_NAME: e2e-shard-np-${{ matrix.config.name }}
+      KIND_HA: "${{matrix.config.ha}}"
     steps:
+    - name: Free up disk space
+      run: sudo eatmydata apt-get remove --auto-remove -y aspnetcore-* dotnet-* libmono-*
+        mono-* msbuild php-* php7* ghc-* zulu-*
     - name: Set up Go 1.12
       uses: actions/setup-go@v1
       with:
@@ -223,7 +255,7 @@ jobs:
         chmod +x $GOPATH/bin/kubetest
 
         pushd $GOPATH/src/k8s.io/kubernetes/
-        sudo cp ./_output/local/go/bin/kubectl /usr/local/bin/
+        sudo ln ./_output/local/go/bin/kubectl /usr/local/bin/kubectl
         popd
 
         GO111MODULE="on" go get sigs.k8s.io/kind@v0.7.0
@@ -238,7 +270,11 @@ jobs:
         export MASTER_NAME=${KIND_CLUSTER_NAME}-control-plane
         export NODE_NAMES=${MASTER_NAME}
         # all tests that have P as the sixth letter after the N
+<<<<<<< HEAD
         kubetest --provider=local --deployment=kind --kind-cluster-name=${KIND_CLUSTER_NAME} --test --test_args='--ginkgo.focus=\[sig-network\]\s[Nn].{6}[Pp].*$ --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|cleanup\sfinalizer|session\saffinity)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]|kube-proxy|should\sset\sTCP\sCLOSE_WAIT\stimeout'
+=======
+        kubetest --provider=local --deployment=kind --kind-cluster-name=${KIND_CLUSTER_NAME} --test --test_args='--num-nodes=3 --ginkgo.focus=\[sig-network\]\s[Nn].{6}[Pp].*$ --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|cleanup\sfinalizer|session\saffinity)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]|kube-proxy|should\sset\sTCP\sCLOSE_WAIT\stimeout'
+>>>>>>> openvswitch/master
     - name: Export logs
       if: always()
       run: "mkdir -p /tmp/kind/logs \nkind export logs --name ${KIND_CLUSTER_NAME}
@@ -250,12 +286,23 @@ jobs:
         name: kind-logs-${{ github.run_id }}-${{ env.JOB_NAME }}
         path: "/tmp/kind/logs"
   e2e-shard-s:
-    name: e2e-kind-ovn-shard-s
+    name: e2e-kind-ovn-shard-s-${{ matrix.config.name }}
     runs-on: ubuntu-latest
     needs: k8s
+    strategy:
+      matrix:
+        config:
+        - ha: 'false'
+          name: noHA
+        - ha: 'true'
+          name: HA
     env:
-      JOB_NAME: e2e-shard-s
+      JOB_NAME: e2e-shard-s-${{ matrix.config.name }}
+      KIND_HA: "${{matrix.config.ha}}"
     steps:
+    - name: Free up disk space
+      run: sudo eatmydata apt-get remove --auto-remove -y aspnetcore-* dotnet-* libmono-*
+        mono-* msbuild php-* php7* ghc-* zulu-*
     - name: Set up Go 1.12
       uses: actions/setup-go@v1
       with:
@@ -293,7 +340,7 @@ jobs:
         chmod +x $GOPATH/bin/kubetest
 
         pushd $GOPATH/src/k8s.io/kubernetes/
-        sudo cp ./_output/local/go/bin/kubectl /usr/local/bin/
+        sudo ln ./_output/local/go/bin/kubectl /usr/local/bin/kubectl
         popd
 
         GO111MODULE="on" go get sigs.k8s.io/kind@v0.7.0
@@ -307,7 +354,11 @@ jobs:
         export KUBECONFIG=${HOME}/admin.conf
         export MASTER_NAME=${KIND_CLUSTER_NAME}-control-plane
         export NODE_NAMES=${MASTER_NAME}
+<<<<<<< HEAD
         kubetest --provider=local --deployment=kind --kind-cluster-name=${KIND_CLUSTER_NAME} --test --test_args='--ginkgo.focus=\[sig-network\]\s[Ss].* --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|cleanup\sfinalizer|session\saffinity)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]|kube-proxy|should\sset\sTCP\sCLOSE_WAIT\stimeout'
+=======
+        kubetest --provider=local --deployment=kind --kind-cluster-name=${KIND_CLUSTER_NAME} --test --test_args='--num-nodes=3 --ginkgo.focus=\[sig-network\]\s[Ss].* --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|cleanup\sfinalizer|session\saffinity)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]|kube-proxy|should\sset\sTCP\sCLOSE_WAIT\stimeout'
+>>>>>>> openvswitch/master
     - name: Export logs
       if: always()
       run: "mkdir -p /tmp/kind/logs \nkind export logs --name ${KIND_CLUSTER_NAME}
@@ -319,12 +370,23 @@ jobs:
         name: kind-logs-${{ github.run_id }}-${{ env.JOB_NAME }}
         path: "/tmp/kind/logs"
   e2e-shard-other:
-    name: e2e-kind-ovn-shard-other
+    name: e2e-kind-ovn-shard-other-${{ matrix.config.name }}
     runs-on: ubuntu-latest
     needs: k8s
+    strategy:
+      matrix:
+        config:
+        - ha: 'false'
+          name: noHA
+        - ha: 'true'
+          name: HA
     env:
-      JOB_NAME: e2e-shard-other
+      JOB_NAME: e2e-shard-other-${{ matrix.config.name }}
+      KIND_HA: "${{matrix.config.ha}}"
     steps:
+    - name: Free up disk space
+      run: sudo eatmydata apt-get remove --auto-remove -y aspnetcore-* dotnet-* libmono-*
+        mono-* msbuild php-* php7* ghc-* zulu-*
     - name: Set up Go 1.12
       uses: actions/setup-go@v1
       with:
@@ -362,7 +424,7 @@ jobs:
         chmod +x $GOPATH/bin/kubetest
 
         pushd $GOPATH/src/k8s.io/kubernetes/
-        sudo cp ./_output/local/go/bin/kubectl /usr/local/bin/
+        sudo ln ./_output/local/go/bin/kubectl /usr/local/bin/kubectl
         popd
 
         GO111MODULE="on" go get sigs.k8s.io/kind@v0.7.0
@@ -376,7 +438,11 @@ jobs:
         export KUBECONFIG=${HOME}/admin.conf
         export MASTER_NAME=${KIND_CLUSTER_NAME}-control-plane
         export NODE_NAMES=${MASTER_NAME}
+<<<<<<< HEAD
         kubetest --provider=local --deployment=kind --kind-cluster-name=${KIND_CLUSTER_NAME} --test --test_args='--ginkgo.focus=\[sig-network\]\s[^NnSs].* --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|cleanup\sfinalizer|session\saffinity)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]|kube-proxy|should\sset\sTCP\sCLOSE_WAIT\stimeout'
+=======
+        kubetest --provider=local --deployment=kind --kind-cluster-name=${KIND_CLUSTER_NAME} --test --test_args='--num-nodes=3 --ginkgo.focus=\[sig-network\]\s[^NnSs].* --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|cleanup\sfinalizer|session\saffinity)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]|kube-proxy|should\sset\sTCP\sCLOSE_WAIT\stimeout'
+>>>>>>> openvswitch/master
     - name: Export logs
       if: always()
       run: "mkdir -p /tmp/kind/logs \nkind export logs --name ${KIND_CLUSTER_NAME}
@@ -388,12 +454,32 @@ jobs:
         name: kind-logs-${{ github.run_id }}-${{ env.JOB_NAME }}
         path: "/tmp/kind/logs"
   e2e-control-plane:
+<<<<<<< HEAD
     name: e2e-control-plane
     runs-on: ubuntu-latest
     needs: k8s
     env:
       JOB_NAME: e2e-control-plane
     steps:
+=======
+    name: e2e-control-plane-${{ matrix.config.name }}
+    runs-on: ubuntu-latest
+    needs: k8s
+    strategy:
+      matrix:
+        config:
+        - ha: 'false'
+          name: noHA
+        - ha: 'true'
+          name: HA
+    env:
+      JOB_NAME: e2e-control-plane-${{ matrix.config.name }}
+      KIND_HA: "${{matrix.config.ha}}"
+    steps:
+    - name: Free up disk space
+      run: sudo eatmydata apt-get remove --auto-remove -y aspnetcore-* dotnet-* libmono-*
+        mono-* msbuild php-* php7* ghc-* zulu-*
+>>>>>>> openvswitch/master
     - name: Set up Go 1.12
       uses: actions/setup-go@v1
       with:
@@ -431,7 +517,11 @@ jobs:
         chmod +x $GOPATH/bin/kubetest
 
         pushd $GOPATH/src/k8s.io/kubernetes/
+<<<<<<< HEAD
         sudo cp ./_output/local/go/bin/kubectl /usr/local/bin/
+=======
+        sudo ln ./_output/local/go/bin/kubectl /usr/local/bin/kubectl
+>>>>>>> openvswitch/master
         popd
 
         GO111MODULE="on" go get sigs.k8s.io/kind@v0.7.0
@@ -452,7 +542,11 @@ jobs:
 
         sed -E -i 's/"\$\{ginkgo\}" "\$\{ginkgo_args\[\@\]\:\+\$\{ginkgo_args\[\@\]\}\}" "\$\{e2e_test\}"/pushd \$GITHUB_WORKSPACE\/test\/e2e\nGO111MODULE=on "\$\{ginkgo\}" "\$\{ginkgo_args\[\@\]\:\+\$\{ginkgo_args\[\@\]\}\}"/' hack/ginkgo-e2e.sh
 
+<<<<<<< HEAD
         kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--disable-log-dump=false'
+=======
+        kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--num-nodes=3 --disable-log-dump=false'
+>>>>>>> openvswitch/master
     - name: Export logs
       if: always()
       run: "mkdir -p /tmp/kind/logs \nkind export logs --name ${KIND_CLUSTER_NAME}

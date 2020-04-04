@@ -66,8 +66,8 @@ func initLocalOnlyGatewayTest(fexec *ovntest.FakeExec, nodeName, brLocalnetMAC, 
 		"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.PhysicalNetworkName + ":breth0" + "," + util.LocalNetworkName + ":br-local",
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovs-vsctl --timeout=15 --if-exists del-port br-local " + util.LegacyLocalnetGatewayNextHopPort +
-			" -- --may-exist add-port br-local " + util.LocalnetGatewayNextHopPort + " -- set interface " + util.LocalnetGatewayNextHopPort + " type=internal mtu_request=" + mtu + " mac=00\\:00\\:a9\\:fe\\:21\\:01",
+		"ovs-vsctl --timeout=15 --if-exists del-port br-local " + legacyLocalnetGatewayNextHopPort +
+			" -- --may-exist add-port br-local " + localnetGatewayNextHopPort + " -- set interface " + localnetGatewayNextHopPort + " type=internal mtu_request=" + mtu + " mac=00\\:00\\:a9\\:fe\\:21\\:01",
 	})
 }
 
@@ -198,6 +198,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 		existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 			Name: nodeName,
 		}}
+
 		fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 			Items: []v1.Node{existingNode},
 		})
@@ -227,7 +228,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 			Expect(err).NotTo(HaveOccurred())
 
 			// check if IP adress have assigned to util.LocalnetGatewayNextHopPort interface
-			link, err := netlink.LinkByName(util.LocalnetGatewayNextHopPort)
+			link, err := netlink.LinkByName(localnetGatewayNextHopPort)
 			Expect(err).NotTo(HaveOccurred())
 			addresses, err := netlink.AddrList(link, syscall.AF_INET)
 			Expect(err).NotTo(HaveOccurred())
@@ -334,7 +335,7 @@ var _ = Describe("Gateway Init Operations", func() {
 
 			err = netlink.LinkAdd(&netlink.Dummy{
 				LinkAttrs: netlink.LinkAttrs{
-					Name: util.LocalnetGatewayNextHopPort,
+					Name: localnetGatewayNextHopPort,
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
@@ -384,10 +385,9 @@ var _ = Describe("Gateway Init Operations", func() {
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.PhysicalNetworkName + ":br-local",
-				"ovs-vsctl --timeout=15 --if-exists del-port br-local " + util.LegacyLocalnetGatewayNextHopPort +
-					" -- --may-exist add-port br-local " + util.LocalnetGatewayNextHopPort + " -- set interface " + util.LocalnetGatewayNextHopPort + " type=internal mtu_request=" + mtu + " mac=00\\:00\\:a9\\:fe\\:21\\:01",
+				"ovs-vsctl --timeout=15 --if-exists del-port br-local " + legacyLocalnetGatewayNextHopPort +
+					" -- --may-exist add-port br-local " + localnetGatewayNextHopPort + " -- set interface " + localnetGatewayNextHopPort + " type=internal mtu_request=" + mtu + " mac=00\\:00\\:a9\\:fe\\:21\\:01",
 			})
-
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
 				Output: systemID,
@@ -426,7 +426,7 @@ var _ = Describe("Gateway Init Operations", func() {
 				err = initLocalnetGateway(nodeName, nodeSubnet, wf, nodeAnnotator)
 				Expect(err).NotTo(HaveOccurred())
 				// Check if IP has been assigned to LocalnetGatewayNextHopPort
-				link, err := netlink.LinkByName(util.LocalnetGatewayNextHopPort)
+				link, err := netlink.LinkByName(localnetGatewayNextHopPort)
 				Expect(err).NotTo(HaveOccurred())
 				addrs, err := netlink.AddrList(link, syscall.AF_INET)
 				Expect(err).NotTo(HaveOccurred())
@@ -449,18 +449,18 @@ var _ = Describe("Gateway Init Operations", func() {
 			expectedTables := map[string]util.FakeTable{
 				"filter": {
 					"INPUT": []string{
-						"-i " + util.LocalnetGatewayNextHopPort + " -m comment --comment from OVN to localhost -j ACCEPT",
+						"-i " + localnetGatewayNextHopPort + " -m comment --comment from OVN to localhost -j ACCEPT",
 					},
 					"FORWARD": []string{
 						"-j OVN-KUBE-NODEPORT",
-						"-o " + util.LocalnetGatewayNextHopPort + " -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
-						"-i " + util.LocalnetGatewayNextHopPort + " -j ACCEPT",
+						"-o " + localnetGatewayNextHopPort + " -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
+						"-i " + localnetGatewayNextHopPort + " -j ACCEPT",
 					},
 					"OVN-KUBE-NODEPORT": []string{},
 				},
 				"nat": {
 					"POSTROUTING": []string{
-						"-s 169.254.33.2/24 -j MASQUERADE",
+						"-s 169.254.33.2 -j MASQUERADE",
 					},
 					"PREROUTING": []string{
 						"-j OVN-KUBE-NODEPORT",

@@ -311,7 +311,7 @@ func (n *OvnNode) initSharedGateway(subnet, gwNextHop, gwIntf string, nodeAnnota
 		return nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
 
-	localMacAddress, err := initLocalOnlyGateway(n.name, n.stopChan)
+	localMacAddress, err := initLocalOnlyGateway(n.name, subnet, n.stopChan)
 	if err != nil {
 		return nil, err
 	}

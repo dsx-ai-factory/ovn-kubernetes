@@ -10,7 +10,7 @@ metadata:
   namespace: ovn-kubernetes
   annotations:
     kubernetes.io/description: |
-      This daemonset launches the ovn-kubernetes networking components.
+      This Deployment launches the ovn-kubernetes master node networking components.
 spec:
   progressDeadlineSeconds: 600
   replicas: 1
@@ -216,10 +216,6 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-        - name: OVNKUBE_POD_IP
-          valueFrom:
-            fieldRef:
-              fieldPath: status.podIP
       # end of container
 
       volumes:

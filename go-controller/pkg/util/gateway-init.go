@@ -7,9 +7,10 @@ import (
 	"sort"
 	"strings"
 
-	"k8s.io/klog"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+
+	"k8s.io/klog"
+	utilnet "k8s.io/utils/net"
 )
 
 const (
@@ -19,55 +20,27 @@ const (
 	// LocalNetworkName is the name that maps to an OVS bridge that provides
 	// access to local service
 	LocalNetworkName = "locnet"
+
 	// V4LocalnetGatewayIP is the SNAT IP using which host-local services are accessed
-	V4LocalnetGatewayIP = "169.254.33.2/24"
+	V4LocalnetGatewayIP = "169.254.33.2"
 	// V4LocalnetGatewayNextHop is the IP address to which packets to local services are forwarded
-	V4LocalnetGatewayNextHop = "169.254.33.1"
-	// V4LocalnetGatewayNextHopMac is te fixed MAC address for the LocalnetGatewayNextHopPort. the last
-	// 4 hex bytes translates to the LocalnetGatewayNextHopPort's IP address
-	LocalnetGatewayNextHopMac = "00:00:a9:fe:21:01"
-	// V4LocalnetGatewayNextHopSubnet represents the subnet that bridges OVN logical topology and
-	// host network
-	V4LocalnetGatewayNextHopSubnet = "169.254.33.1/24"
+	V4LocalnetGatewayNextHop      = "169.254.33.1"
+	V4LocalnetGatewaySubnetPrefix = "/24"
+
 	// V6LocalnetGatewayIP is the IPv6 counterpart of IPv4 constant above
-	V6LocalnetGatewayIP = "fd99::2/64"
+	V6LocalnetGatewayIP = "fd99::2"
 	// V6LocalnetGatewayNextHop is the IPv6 counterpart of IPv4 constant above
-	V6LocalnetGatewayNextHop = "fd99::1"
-	// V6LocalnetGatewayNextHopSubnet is the IPv6 counterpart of IPv4 constant above
-	V6LocalnetGatewayNextHopSubnet = "fd99::1/64"
+	V6LocalnetGatewayNextHop      = "fd99::1"
+	V6LocalnetGatewaySubnetPrefix = "/64"
+
 	// OvnClusterRouter is the name of the distributed router
 	OvnClusterRouter = "ovn_cluster_router"
 	// DefaultOpenFlowCookie is the identification of the default open flow rules added to each node
 	DefaultOpenFlowCookie = "0xdeff105"
-	// LocalnetGatewayNextHopPort is the name of the gateway port on the host to which all
-	// the packets leaving the OVN logical topology will be forwarded
-	LocalnetGatewayNextHopPort       = "ovn-k8s-gw0"
-	LegacyLocalnetGatewayNextHopPort = "br-nexthop"
-	JoinSwitchPrefix                 = "join_"
-	ExternalSwitchPrefix             = "ext_"
-	GWRouterPrefix                   = "GR_"
+	JoinSwitchPrefix      = "join_"
+	ExternalSwitchPrefix  = "ext_"
+	GWRouterPrefix        = "GR_"
 )
-
-func LocalnetGatewayIP() string {
-	if config.IPv6Mode {
-		return V6LocalnetGatewayIP
-	}
-	return V4LocalnetGatewayIP
-}
-
-func LocalnetGatewayNextHop() string {
-	if config.IPv6Mode {
-		return V6LocalnetGatewayNextHop
-	}
-	return V4LocalnetGatewayNextHop
-}
-
-func LocalnetGatewayNextHopSubnet() string {
-	if config.IPv6Mode {
-		return V6LocalnetGatewayNextHopSubnet
-	}
-	return V4LocalnetGatewayNextHopSubnet
-}
 
 // GetK8sClusterRouter returns back the OVN distributed router. This is meant to be used on the
 // master alone. If the worker nodes need to know about distributed cluster router (which they
@@ -391,19 +364,17 @@ func GatewayInit(clusterIPSubnet []string, hostSubnet string, joinSubnet *net.IP
 
 // LocalGatewayInit creates a gateway router to access local service.
 func LocalGatewayInit(clusterIPSubnet []string, joinSubnet *net.IPNet, systemID, nodeName, nodeIPMask, ifaceID,
-	nicIP, nicMacAddress, defaultGW string) error {
-
-	ip, physicalIPNet, err := net.ParseCIDR(nicIP)
-	if err != nil {
-		return fmt.Errorf("error parsing %s (%v)", nicIP, err)
-	}
-	n, _ := physicalIPNet.Mask.Size()
-	physicalIPMask := fmt.Sprintf("%s/%d", ip.String(), n)
-	physicalIP := ip.String()
-
-	if defaultGW != "" {
-		defaultgwByte := net.ParseIP(defaultGW)
-		defaultGW = defaultgwByte.String()
+	nicMacAddress string) error {
+	var nicIP, nicIPMask, defaultGW string
+	isSubnetIPv6 := utilnet.IsIPv6CIDR(joinSubnet)
+	if isSubnetIPv6 {
+		nicIP = V6LocalnetGatewayIP
+		nicIPMask = V6LocalnetGatewayIP + V6LocalnetGatewaySubnetPrefix
+		defaultGW = V6LocalnetGatewayNextHop
+	} else {
+		nicIP = V4LocalnetGatewayIP
+		nicIPMask = V4LocalnetGatewayIP + V4LocalnetGatewaySubnetPrefix
+		defaultGW = V4LocalnetGatewayNextHop
 	}
 
 	k8sClusterRouter := GetK8sClusterRouter()
@@ -411,7 +382,7 @@ func LocalGatewayInit(clusterIPSubnet []string, joinSubnet *net.IPNet, systemID,
 	gatewayRouter := "GR_local_" + nodeName
 	stdout, stderr, err := RunOVNNbctl("--", "--may-exist", "lr-add",
 		gatewayRouter, "--", "set", "logical_router", gatewayRouter,
-		"options:chassis="+systemID, "external_ids:physical_ip="+physicalIP)
+		"options:chassis="+systemID, "external_ids:physical_ip="+nicIP)
 	if err != nil {
 		return fmt.Errorf("Failed to create logical router %v, stdout: %q, "+
 			"stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
@@ -495,7 +466,7 @@ func LocalGatewayInit(clusterIPSubnet []string, joinSubnet *net.IPNet, systemID,
 	// has changed. So, we need to delete that port, if it exists, and it back.
 	stdout, stderr, err = RunOVNNbctl(
 		"--", "--if-exists", "lrp-del", "rtoe-"+gatewayRouter,
-		"--", "lrp-add", gatewayRouter, "rtoe-"+gatewayRouter, nicMacAddress, physicalIPMask,
+		"--", "lrp-add", gatewayRouter, "rtoe-"+gatewayRouter, nicMacAddress, nicIPMask,
 		"--", "set", "logical_router_port", "rtoe-"+gatewayRouter,
 		"external-ids:gateway-physical-ip=yes")
 	if err != nil {
@@ -515,27 +486,25 @@ func LocalGatewayInit(clusterIPSubnet []string, joinSubnet *net.IPNet, systemID,
 	}
 
 	// Add a static route in GR with physical gateway as the default next hop.
-	if defaultGW != "" {
-		var allIPs string
-		if config.IPv6Mode {
-			allIPs = "::/0"
-		} else {
-			allIPs = "0.0.0.0/0"
-		}
-		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
-			gatewayRouter, allIPs, defaultGW,
-			fmt.Sprintf("rtoe-%s", gatewayRouter))
-		if err != nil {
-			return fmt.Errorf("Failed to add a static route in GR with physical "+
-				"gateway as the default next hop, stdout: %q, "+
-				"stderr: %q, error: %v", stdout, stderr, err)
-		}
+	var allIPs string
+	if isSubnetIPv6 {
+		allIPs = "::/0"
+	} else {
+		allIPs = "0.0.0.0/0"
+	}
+	stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
+		gatewayRouter, allIPs, defaultGW,
+		fmt.Sprintf("rtoe-%s", gatewayRouter))
+	if err != nil {
+		return fmt.Errorf("Failed to add a static route in GR with physical "+
+			"gateway as the default next hop, stdout: %q, "+
+			"stderr: %q, error: %v", stdout, stderr, err)
 	}
 
 	// Default SNAT rules.
 	for _, entry := range clusterIPSubnet {
 		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-nat-add",
-			gatewayRouter, "snat", physicalIP, entry)
+			gatewayRouter, "snat", nicIP, entry)
 		if err != nil {
 			return fmt.Errorf("Failed to create default SNAT rules, stdout: %q, "+
 				"stderr: %q, error: %v", stdout, stderr, err)

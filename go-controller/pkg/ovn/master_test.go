@@ -10,6 +10,7 @@ import (
 	kuberuntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	kubetesting "k8s.io/client-go/testing"
+	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -538,16 +539,27 @@ subnet=%s
 	})
 })
 
-func localGatewayInitTest(fexec *ovntest.FakeExec, nodeName, nodeIP, clusterCIDR, clusterRouter, systemID, localIfaceID, localBrLocalnetMAC, localLocalnetGatewayIP, localLocalnetGatewayNextHop string) {
+func localGatewayInitTest(fexec *ovntest.FakeExec, nodeName, nodeIP, clusterCIDR, clusterRouter, systemID, localIfaceID, localBrLocalnetMAC string) {
 	const (
 		lrpMAC  string = "0A:58:64:40:00:03"
 		lrpIP   string = "100.64.0.3"
 		drLrpIP string = "100.64.0.2"
 	)
+
+	var localLocalnetGatewayIP, localLocalnetGatewayIPMask, localLocalnetGatewayNextHop string
+	if utilnet.IsIPv6CIDRString(clusterCIDR) {
+		localLocalnetGatewayIP = util.V6LocalnetGatewayIP
+		localLocalnetGatewayIPMask = util.V6LocalnetGatewayIP + util.V6LocalnetGatewaySubnetPrefix
+		localLocalnetGatewayNextHop = util.V6LocalnetGatewayNextHop
+	} else {
+		localLocalnetGatewayIP = util.V4LocalnetGatewayIP
+		localLocalnetGatewayIPMask = util.V4LocalnetGatewayIP + util.V4LocalnetGatewaySubnetPrefix
+		localLocalnetGatewayNextHop = util.V4LocalnetGatewayNextHop
+	}
 	localGwRouter := util.GWRouterPrefix + "local_" + nodeName
 	joinSwitch := util.JoinSwitchPrefix + nodeName
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 -- --may-exist lr-add " + localGwRouter + " -- set logical_router " + localGwRouter + " options:chassis=" + systemID + " external_ids:physical_ip=169.254.33.2",
+		"ovn-nbctl --timeout=15 -- --may-exist lr-add " + localGwRouter + " -- set logical_router " + localGwRouter + " options:chassis=" + systemID + " external_ids:physical_ip=" + localLocalnetGatewayIP,
 		"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + joinSwitch + " jtor-" + localGwRouter + " -- set logical_switch_port jtor-" + localGwRouter + " type=router options:router-port=rtoj-" + localGwRouter + " addresses=router",
 		"ovn-nbctl --timeout=15 -- --may-exist lrp-add " + localGwRouter + " rtoj-" + localGwRouter + " " + lrpMAC + " " + lrpIP + "/29",
 	})
@@ -560,10 +572,10 @@ func localGatewayInitTest(fexec *ovntest.FakeExec, nodeName, nodeIP, clusterCIDR
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_local_" + nodeName + " " + localIfaceID + " -- lsp-set-addresses " + localIfaceID + " unknown -- lsp-set-type " + localIfaceID + " localnet -- lsp-set-options " + localIfaceID + " network_name=" + util.LocalNetworkName,
-		"ovn-nbctl --timeout=15 -- --if-exists lrp-del rtoe-" + localGwRouter + " -- lrp-add " + localGwRouter + " rtoe-" + localGwRouter + " " + localBrLocalnetMAC + " " + localLocalnetGatewayIP + " -- set logical_router_port rtoe-" + localGwRouter + " external-ids:gateway-physical-ip=yes",
+		"ovn-nbctl --timeout=15 -- --if-exists lrp-del rtoe-" + localGwRouter + " -- lrp-add " + localGwRouter + " rtoe-" + localGwRouter + " " + localBrLocalnetMAC + " " + localLocalnetGatewayIPMask + " -- set logical_router_port rtoe-" + localGwRouter + " external-ids:gateway-physical-ip=yes",
 		"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_local_" + nodeName + " etor-" + localGwRouter + " -- set logical_switch_port etor-" + localGwRouter + " type=router options:router-port=rtoe-" + localGwRouter + " addresses=\"" + localBrLocalnetMAC + "\"",
 		"ovn-nbctl --timeout=15 --may-exist lr-route-add " + localGwRouter + " 0.0.0.0/0 " + localLocalnetGatewayNextHop + " rtoe-" + localGwRouter,
-		"ovn-nbctl --timeout=15 --may-exist lr-nat-add " + localGwRouter + " snat 169.254.33.2 " + clusterCIDR,
+		"ovn-nbctl --timeout=15 --may-exist lr-nat-add " + localGwRouter + " snat " + localLocalnetGatewayIP + " " + clusterCIDR,
 	})
 }
 
@@ -900,7 +912,7 @@ var _ = Describe("Gateway Init Operations", func() {
 				"ovn-nbctl --timeout=15 --may-exist lr-nat-add " + gwRouter + " snat " + physicalGatewayIP + " " + clusterCIDR,
 			})
 
-			localGatewayInitTest(fexec, nodeName, physicalGatewayIP, clusterCIDR, clusterRouter, systemID, localIfaceID, localBrLocalnetMAC, util.LocalnetGatewayIP(), util.LocalnetGatewayNextHop())
+			localGatewayInitTest(fexec, nodeName, physicalGatewayIP, clusterCIDR, clusterRouter, systemID, localIfaceID, localBrLocalnetMAC)
 
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=" + util.GWRouterPrefix + nodeName,
@@ -940,7 +952,7 @@ var _ = Describe("Gateway Init Operations", func() {
 				"ovn-nbctl --timeout=15 --may-exist lr-nat-add " + gwRouter + " snat " + physicalGatewayIP + " " + clusterCIDR,
 			})
 
-			localGatewayInitTest(fexec, nodeName, physicalGatewayIP, clusterCIDR, clusterRouter, systemID, localIfaceID, localBrLocalnetMAC, util.LocalnetGatewayIP(), util.LocalnetGatewayNextHop())
+			localGatewayInitTest(fexec, nodeName, physicalGatewayIP, clusterCIDR, clusterRouter, systemID, localIfaceID, localBrLocalnetMAC)
 
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=" + util.GWRouterPrefix + nodeName,
