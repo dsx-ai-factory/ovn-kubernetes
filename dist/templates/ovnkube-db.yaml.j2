@@ -95,6 +95,9 @@ spec:
         - mountPath: /host
           name: host-slash
           readOnly: true
+        - mountPath: /ovn-cert
+          name: host-ovn-cert
+          readOnly: true
 
         resources:
           requests:
@@ -120,6 +123,8 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: status.hostIP
+        - name: OVN_SSL_ENABLE
+          value: "{{ ovn_ssl_en }}"
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnnb-db"]
@@ -157,6 +162,9 @@ spec:
         - mountPath: /host
           name: host-slash
           readOnly: true
+        - mountPath: /ovn-cert
+          name: host-ovn-cert
+          readOnly: true
 
         resources:
           requests:
@@ -180,6 +188,8 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: status.hostIP
+        - name: OVN_SSL_ENABLE
+          value: "{{ ovn_ssl_en }}"
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnsb-db"]
@@ -202,5 +212,9 @@ spec:
       - name: host-slash
         hostPath:
           path: /
+      - name: host-ovn-cert
+        hostPath:
+          path: /etc/ovn
+          type: DirectoryOrCreate
       tolerations:
       - operator: "Exists"

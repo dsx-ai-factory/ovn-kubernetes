@@ -18,11 +18,11 @@ OVN_SVC_DIDR=""
 OVN_K8S_APISERVER=""
 OVN_GATEWAY_MODE=""
 OVN_GATEWAY_OPTS=""
-# In the future we will have RAFT based HA support.
 OVN_DB_VIP_IMAGE=""
 OVN_DB_VIP=""
 OVN_DB_REPLICAS=""
 OVN_MTU="1400"
+OVN_SSL_ENABLE=""
 KIND=""
 MASTER_LOGLEVEL=""
 NODE_LOGLEVEL=""
@@ -95,6 +95,9 @@ while [ "$1" != "" ]; do
         --ovn-loglevel-nbctld)
             OVN_LOGLEVEL_NBCTLD=$VALUE
             ;;
+        --ssl)
+            OVN_SSL_ENABLE="yes"
+            ;;
         *)
             echo "WARNING: unknown parameter \"$PARAM\""
             exit 1
@@ -162,6 +165,8 @@ ovn_loglevel_controller=${OVN_LOGLEVEL_CONTROLLER:-"-vconsole:info"}
 echo "ovn_loglevel_controller: ${ovn_loglevel_controller}"
 ovn_loglevel_nbctld=${OVN_LOGLEVEL_NBCTLD:-"-vconsole:info"}
 echo "ovn_loglevel_nbctld: ${ovn_loglevel_nbctld}"
+ovn_ssl_en=${OVN_SSL_ENABLE:-"no"}
+echo "ovn_ssl_enable: ${ovn_ssl_en}"
 
 ovn_image=${image} \
 ovn_image_pull_policy=${policy} \
@@ -170,6 +175,7 @@ ovn_gateway_mode=${ovn_gateway_mode} \
 ovn_gateway_opts=${ovn_gateway_opts} \
 ovnkube_node_loglevel=${node_loglevel} \
 ovn_loglevel_controller=${ovn_loglevel_controller} \
+ovn_ssl_en=${ovn_ssl_en} \
 j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
 
 ovn_image=${image} \
@@ -177,12 +183,14 @@ ovn_image_pull_policy=${policy} \
 ovnkube_master_loglevel=${master_loglevel} \
 ovn_loglevel_northd=${ovn_loglevel_northd} \
 ovn_loglevel_nbctld=${ovn_loglevel_nbctld} \
+ovn_ssl_en=${ovn_ssl_en} \
 j2 ../templates/ovnkube-master.yaml.j2 -o ../yaml/ovnkube-master.yaml
 
 ovn_image=${image} \
 ovn_image_pull_policy=${policy} \
 ovn_loglevel_nb=${ovn_loglevel_nb} \
 ovn_loglevel_sb=${ovn_loglevel_sb} \
+ovn_ssl_en=${ovn_ssl_en} \
 j2 ../templates/ovnkube-db.yaml.j2 -o ../yaml/ovnkube-db.yaml
 
 ovn_db_vip_image=${ovn_db_vip_image} \
@@ -196,6 +204,7 @@ ovn_image_pull_policy=${policy} \
 ovn_db_replicas=${ovn_db_replicas} \
 ovn_db_minAvailable=${ovn_db_minAvailable} \
 ovn_loglevel_nb=${ovn_loglevel_nb} ovn_loglevel_sb=${ovn_loglevel_sb} \
+ovn_ssl_en=${ovn_ssl_en} \
 j2 ../templates/ovnkube-db-raft.yaml.j2 > ../yaml/ovnkube-db-raft.yaml
 
 # ovn-setup.yaml
