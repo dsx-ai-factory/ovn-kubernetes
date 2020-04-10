@@ -2,7 +2,6 @@ package controller
 
 import (
 	"fmt"
-	"net"
 	"strings"
 
 	"github.com/urfave/cli"
@@ -23,14 +22,6 @@ import (
 
 const hoNodeCliArg string = "-no-hostsubnet-nodes=" + v1.LabelOSStable + "=windows"
 
-func mustParseCIDR(cidr string) *net.IPNet {
-	_, net, err := net.ParseCIDR(cidr)
-	if err != nil {
-		panic("bad CIDR string constant " + cidr)
-	}
-	return net
-}
-
 func addGetPortAddressesCmds(fexec *ovntest.FakeExec, nodeName, hybMAC, hybIP string) {
 	addresses := hybMAC + " " + hybIP
 	addresses = strings.TrimSpace(addresses)
@@ -45,7 +36,7 @@ func addGetPortAddressesCmds(fexec *ovntest.FakeExec, nodeName, hybMAC, hybIP st
 func newTestNode(name, os, ovnHostSubnet, hybridHostSubnet, drMAC string) v1.Node {
 	annotations := make(map[string]string)
 	if ovnHostSubnet != "" {
-		subnetAnnotations, err := util.CreateNodeHostSubnetAnnotation(ovnHostSubnet)
+		subnetAnnotations, err := util.CreateNodeHostSubnetAnnotation(ovntest.MustParseIPNet(ovnHostSubnet))
 		Expect(err).NotTo(HaveOccurred())
 		for k, v := range subnetAnnotations {
 			annotations[k] = fmt.Sprintf("%s", v)

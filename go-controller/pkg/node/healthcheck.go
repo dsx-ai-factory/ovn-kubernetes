@@ -98,7 +98,7 @@ func checkForStaleOVSInterfaces(stopChan chan struct{}) {
 			stdout, _, err := util.RunOVSVsctl("--data=bare", "--no-headings", "--columns=name", "find",
 				"interface", "ofport=-1")
 			if err != nil {
-				klog.Errorf("Failed to list OVS interfaces with ofport set to -1")
+				klog.Errorf("failed to list OVS interfaces with ofport set to -1")
 				continue
 			}
 			if len(stdout) == 0 {
@@ -106,10 +106,10 @@ func checkForStaleOVSInterfaces(stopChan chan struct{}) {
 			}
 			values := strings.Split(stdout, "\n\n")
 			for _, val := range values {
-				klog.Warningf("Found stale interface %s, so deleting it", val)
+				klog.Warningf("found stale interface %s, so deleting it", val)
 				_, stderr, err := util.RunOVSVsctl("--if-exists", "--with-iface", "del-port", val)
 				if err != nil {
-					klog.Errorf("Failed to delete OVS port/interface %s: stderr: %s (%v)",
+					klog.Errorf("failed to delete OVS port/interface %s: stderr: %s (%v)",
 						val, stderr, err)
 				}
 			}
@@ -121,21 +121,21 @@ func checkForStaleOVSInterfaces(stopChan chan struct{}) {
 
 // checkDefaultOpenFlow checks for the existence of default OpenFlow rules and
 // exits if the output is not as expected
-func checkDefaultConntrackRules(gwBridge string, stopChan chan struct{}) {
-	ticker := time.NewTicker(30 * time.Second)
-
+func checkDefaultConntrackRules(gwBridge string, nFlows int, stopChan chan struct{}) {
+	flowCount := fmt.Sprintf("flow_count=%d", nFlows)
 	for {
 		select {
-		case <-ticker.C:
+		case <-time.After(30 * time.Second):
 			out, _, err := util.RunOVSOfctl("dump-aggregate", gwBridge,
-				fmt.Sprintf("cookie=%s/-1", util.DefaultOpenFlowCookie))
+				fmt.Sprintf("cookie=%s/-1", defaultOpenFlowCookie))
 			if err != nil {
 				klog.Errorf("failed to dump aggregate statistics of the default OpenFlow rules: %v", err)
 				continue
 			}
 
-			if !strings.Contains(out, "flow_count=5") {
-				klog.Errorf("fatal error: unexpected default OpenFlows count, expect 5 output: %v\n", out)
+			if !strings.Contains(out, flowCount) {
+				klog.Errorf("fatal error: unexpected default OpenFlows count, expect %d output: %v\n",
+					nFlows, out)
 				os.Exit(1)
 			}
 		case <-stopChan:

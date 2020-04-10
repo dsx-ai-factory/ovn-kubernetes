@@ -81,18 +81,18 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	err := util.SetExec(fexec)
 	Expect(err).NotTo(HaveOccurred())
 
-	nsIP, nodeSubnetCIDR, err := net.ParseCIDR(nodeSubnet)
+	nodeSubnetCIDR := ovntest.MustParseIPNet(nodeSubnet)
 	Expect(err).NotTo(HaveOccurred())
 
 	mpCIDR := &net.IPNet{
-		IP:   net.ParseIP(mgtPortIP),
+		IP:   ovntest.MustParseIP(mgtPortIP),
 		Mask: nodeSubnetCIDR.Mask,
 	}
 	mgtPortCIDR := mpCIDR.String()
 
 	iptProto := iptables.ProtocolIPv4
 	family := netlink.FAMILY_V4
-	if utilnet.IsIPv6(nsIP) {
+	if utilnet.IsIPv6CIDR(nodeSubnetCIDR) {
 		iptProto = iptables.ProtocolIPv6
 		family = netlink.FAMILY_V6
 	}
@@ -116,7 +116,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	Expect(err).NotTo(HaveOccurred())
 
 	nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &existingNode)
-	err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, nodeSubnet)
+	err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNet(nodeSubnet))
 	Expect(err).NotTo(HaveOccurred())
 	err = nodeAnnotator.Run()
 	Expect(err).NotTo(HaveOccurred())
@@ -148,12 +148,11 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 
 		// Check whether the route has been added
 		j := 0
-		gatewayIP := net.ParseIP(gwIP)
+		gatewayIP := ovntest.MustParseIP(gwIP)
 		subnets := []string{clusterCIDR, serviceCIDR}
 		for _, subnet := range subnets {
 			foundRoute := false
-			dstIPnet, err := netlink.ParseIPNet(subnet)
-			Expect(err).NotTo(HaveOccurred())
+			dstIPnet := ovntest.MustParseIPNet(subnet)
 			route := &netlink.Route{Dst: dstIPnet}
 			filterMask := netlink.RT_FILTER_DST
 			routes, err := netlink.RouteListFiltered(netlink.FAMILY_ALL, route, filterMask)
@@ -208,9 +207,9 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
 	Expect(err).NotTo(HaveOccurred())
 
-	macFromAnnotation, err := util.ParseNodeManagementPortMacAddr(updatedNode)
+	macFromAnnotation, err := util.ParseNodeManagementPortMACAddress(updatedNode)
 	Expect(err).NotTo(HaveOccurred())
-	Expect(macFromAnnotation).To(Equal(mgtPortMAC))
+	Expect(macFromAnnotation.String()).To(Equal(mgtPortMAC))
 
 	Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 }

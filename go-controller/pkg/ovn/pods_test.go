@@ -2,7 +2,6 @@ package ovn
 
 import (
 	"fmt"
-	"net"
 
 	"github.com/urfave/cli"
 
@@ -86,9 +85,7 @@ func (p pod) populateLogicalSwitchCache(fakeOvn *FakeOVN) {
 	Expect(p.nodeName).NotTo(Equal(""))
 	fakeOvn.controller.lsMutex.Lock()
 	defer fakeOvn.controller.lsMutex.Unlock()
-	_, hostsubnet, err := net.ParseCIDR(p.nodeSubnet)
-	Expect(err).NotTo(HaveOccurred())
-	fakeOvn.controller.logicalSwitchCache[p.nodeName] = hostsubnet
+	fakeOvn.controller.logicalSwitchCache[p.nodeName] = ovntest.MustParseIPNet(p.nodeSubnet)
 }
 
 func (p pod) addCmds(fexec *ovntest.FakeExec, fail bool) {
@@ -247,7 +244,7 @@ var _ = Describe("OVN Pod Operations", func() {
 
 				podAnnotation, ok := pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeTrue())
-				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}}`))
+				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
 
 				return nil
 			}
@@ -294,7 +291,7 @@ var _ = Describe("OVN Pod Operations", func() {
 
 				podAnnotation, ok := pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeTrue())
-				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}}`))
+				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
 
 				return nil
 			}
@@ -338,7 +335,7 @@ var _ = Describe("OVN Pod Operations", func() {
 
 				podAnnotation, ok := pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeTrue())
-				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}}`))
+				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
 				// Delete it
@@ -402,7 +399,7 @@ var _ = Describe("OVN Pod Operations", func() {
 
 				podAnnotation, ok := pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeTrue())
-				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}}`))
+				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
 
 				return nil
 			}
@@ -459,7 +456,7 @@ var _ = Describe("OVN Pod Operations", func() {
 
 				podAnnotation, ok := pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeTrue())
-				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}}`))
+				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
 
 				return nil
 			}
@@ -536,7 +533,7 @@ var _ = Describe("OVN Pod Operations", func() {
 
 				podAnnotation, ok := pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeTrue())
-				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}}`))
+				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
 
 				return nil
 			}
@@ -583,7 +580,7 @@ var _ = Describe("OVN Pod Operations", func() {
 
 				podAnnotation, ok := pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeTrue())
-				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}}`))
+				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
 
 				// Simulate an OVN restart with a new IP assignment and verify that the pod annotation is updated.
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -609,7 +606,7 @@ var _ = Describe("OVN Pod Operations", func() {
 				// Check that pod annotations have been re-written to correct values
 				podAnnotation, ok = pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeTrue())
-				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}}`))
+				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
 
 				return nil
 			}
@@ -653,7 +650,7 @@ var _ = Describe("OVN Pod Operations", func() {
 
 				podAnnotation, ok := pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeTrue())
-				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}}`))
+				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
 
 				// Simulate an OVN restart with a new IP assignment and verify that the pod annotation is updated.
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -679,7 +676,7 @@ var _ = Describe("OVN Pod Operations", func() {
 				// Check that pod annotations have been re-written to correct values
 				podAnnotation, ok = pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeTrue())
-				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}}`))
+				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
 
 				return nil
 			}

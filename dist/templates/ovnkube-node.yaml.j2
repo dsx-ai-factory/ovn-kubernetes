@@ -178,6 +178,10 @@ spec:
           value: "{{ ovn_gateway_opts }}"
         - name: OVN_SSL_ENABLE
           value: "{{ ovn_ssl_en }}"
+        - name: OVN_HYBRID_OVERLAY_ENABLE
+          value: "{{ ovn_hybrid_overlay_enable }}"
+        - name: OVN_HYBRID_OVERLAY_NET_CIDR
+          value: "{{ ovn_hybrid_overlay_net_cidr }}"
 
         lifecycle:
           preStop:

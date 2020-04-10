@@ -4,6 +4,7 @@ package node
 
 import (
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -15,25 +16,25 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
-func initLocalOnlyGateway(nodeName, subnet string, stopChan chan struct{}) (string, error) {
+func initLocalOnlyGateway(nodeName string, subnet *net.IPNet, stopChan chan struct{}) (net.HardwareAddr, error) {
 	// Create a localnet OVS bridge.
 	localnetBridgeName := "br-local"
 	_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br", localnetBridgeName)
 	if err != nil {
-		return "", fmt.Errorf("failed to create localnet bridge %s"+
+		return nil, fmt.Errorf("failed to create localnet bridge %s"+
 			", stderr:%s (%v)", localnetBridgeName, stderr, err)
 	}
 
 	_, macAddress, err := bridgedGatewayNodeSetup(nodeName, localnetBridgeName, localnetBridgeName,
 		util.LocalNetworkName, true)
 	if err != nil {
-		return "", fmt.Errorf("failed to set up shared interface gateway: %v", err)
+		return nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
 
 	// Up the localnetBridgeName
 	_, err = util.LinkSetUp(localnetBridgeName)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	// Create a localnet bridge nexthop
@@ -44,30 +45,35 @@ func initLocalOnlyGateway(nodeName, subnet string, stopChan chan struct{}) (stri
 		"mtu_request="+fmt.Sprintf("%d", config.Default.MTU),
 		fmt.Sprintf("mac=%s", strings.ReplaceAll(localnetGatewayNextHopMac, ":", "\\:")))
 	if err != nil {
-		return "", fmt.Errorf("failed to create localnet bridge next hop %s"+
+		return nil, fmt.Errorf("failed to create localnet bridge next hop %s"+
 			", stderr:%s (%v)", localnetGatewayNextHopPort, stderr, err)
 	}
 	// Up the localnetGatewayNextHopPort interface
 	link, err := util.LinkSetUp(localnetGatewayNextHopPort)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	var nextHopIP, gatewayIP string
-	isSubnetIPv6 := utilnet.IsIPv6CIDRString(subnet)
+	var gatewayIP, gatewayNextHop net.IP
+	var gatewaySubnetMask net.IPMask
+	isSubnetIPv6 := utilnet.IsIPv6CIDR(subnet)
 	if isSubnetIPv6 {
-		nextHopIP = util.V6LocalnetGatewayNextHop + util.V6LocalnetGatewaySubnetPrefix
-		gatewayIP = util.V6LocalnetGatewayIP
+		gatewayIP = net.ParseIP(util.V6LocalnetGatewayIP)
+		gatewayNextHop = net.ParseIP(util.V6LocalnetGatewayNextHop)
+		gatewaySubnetMask = net.CIDRMask(util.V6LocalnetGatewaySubnetPrefix, 128)
 	} else {
-		nextHopIP = util.V4LocalnetGatewayNextHop + util.V4LocalnetGatewaySubnetPrefix
-		gatewayIP = util.V4LocalnetGatewayIP
+		gatewayIP = net.ParseIP(util.V4LocalnetGatewayIP)
+		gatewayNextHop = net.ParseIP(util.V4LocalnetGatewayNextHop)
+		gatewaySubnetMask = net.CIDRMask(util.V4LocalnetGatewaySubnetPrefix, 32)
 	}
+	gatewayNextHopCIDR := &net.IPNet{IP: gatewayNextHop, Mask: gatewaySubnetMask}
+
 	// Flush all IP addresses on localnetGatewayNextHopPort and add the new IP address
 	if err = util.LinkAddrFlush(link); err == nil {
-		err = util.LinkAddrAdd(link, nextHopIP)
+		err = util.LinkAddrAdd(link, gatewayNextHopCIDR)
 	}
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	// Add arp entry for local service gateway, it is used for return traffic of local service access
@@ -81,7 +87,7 @@ func initLocalOnlyGateway(nodeName, subnet string, stopChan chan struct{}) (stri
 	} else {
 		err = util.LinkNeighAdd(link, gatewayIP, macAddress)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 	}
 
@@ -91,7 +97,8 @@ func initLocalOnlyGateway(nodeName, subnet string, stopChan chan struct{}) (stri
 }
 
 // add health check function to check ARP/ND entry for localnet gateway IP
-func checkARPEntryForLocalGatewayIP(link netlink.Link, localGwIP, macAddress string, stopChan chan struct{}) {
+func checkARPEntryForLocalGatewayIP(link netlink.Link, localGwIP net.IP, macAddress net.HardwareAddr,
+	stopChan chan struct{}) {
 	for {
 		select {
 		case <-time.After(30 * time.Second):

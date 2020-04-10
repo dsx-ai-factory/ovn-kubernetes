@@ -142,7 +142,7 @@ mtu=${OVN_MTU:-1400}
 ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
 
 # host on which ovnkube-db POD is running and this POD contains both
-# OVN NB and SB DB running in their own container. Ignore IPs in loopback range (127.0.0.0/8)
+# OVN NB and SB DB running in their own container.
 ovn_db_host=${K8S_NODE_IP:-""}
 
 # OVN_NB_PORT - ovn north db port (default 6641)
@@ -257,7 +257,7 @@ ready_to_start_node() {
   # cannot use ovsdb-client in the case of raft, since it will succeed even if one of the
   # instance of DB is up and running. HOwever, ovn-nbctl always connects to the leader in the clustered
   # database, so use it.
-  ovn-nbctl --db=${ovn_nbdb_test} ${ovndb_ctl_ssl_opts} list NB_Global >/dev/null 2>&1
+  ovn-nbctl --db=${ovn_nbdb_conn} ${ovndb_ctl_ssl_opts} list NB_Global >/dev/null 2>&1
   if [[ $? != 0 ]]; then
     return 1
   fi
@@ -294,8 +294,9 @@ get_ovn_db_vars() {
 
   echo ovn_nbdb=$ovn_nbdb
   echo ovn_sbdb=$ovn_sbdb
-  ovn_nbdb_test=$(echo ${ovn_nbdb} | sed 's;//;;g')
-  ovn_sbdb_test=$(echo ${ovn_sbdb} | sed 's;//;;g')
+  # ovsdb server connection method <transport>:<host_address>:<port>
+  ovn_nbdb_conn=$(echo ${ovn_nbdb} | sed 's;//;;g')
+  ovn_sbdb_conn=$(echo ${ovn_sbdb} | sed 's;//;;g')
 }
 
 # OVS must be up before OVN comes up.
@@ -369,8 +370,9 @@ process_healthy() {
 check_health() {
   ctl_file=""
   case ${1} in
-  "ovnkube" | "ovnkube-master") ;;
-
+  "ovnkube" | "ovnkube-master")
+    # just check for presence of pid
+    ;;
   "ovnnb_db" | "ovnsb_db")
     ctl_file=${OVN_RUNDIR}/${1}.ctl
     ;;
@@ -463,19 +465,19 @@ display_env() {
 ovn_debug() {
   wait_for_event attempts=3 ready_to_start_node
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
-  echo "ovn_nbdb_test ${ovn_nbdb_test}"
-  echo "ovn_sbdb_test ${ovn_sbdb_test}"
+  echo "ovn_nbdb_conn ${ovn_nbdb_conn}"
+  echo "ovn_sbdb_conn ${ovn_sbdb_conn}"
 
   # get ovs/ovn info from the node for debug purposes
   echo "=========== ovn_debug   hostname: ${ovn_pod_host} ============="
-  echo "=========== ovn-nbctl --db=${ovn_nbdb_test} show ============="
-  ovn-nbctl --db=${ovn_nbdb_test} show
+  echo "=========== ovn-nbctl --db=${ovn_nbdb_conn} show ============="
+  ovn-nbctl --db=${ovn_nbdb_conn} show
   echo " "
   echo "=========== ovn-nbctl list ACL ============="
-  ovn-nbctl --db=${ovn_nbdb_test} list ACL
+  ovn-nbctl --db=${ovn_nbdb_conn} list ACL
   echo " "
   echo "=========== ovn-nbctl list address_set ============="
-  ovn-nbctl --db=${ovn_nbdb_test} list address_set
+  ovn-nbctl --db=${ovn_nbdb_conn} list address_set
   echo " "
   echo "=========== ovs-vsctl show ============="
   ovs-vsctl show
@@ -489,17 +491,17 @@ ovn_debug() {
   echo "=========== ovs-ofctl dump-flows br-int ============="
   ovs-ofctl dump-flows br-int
   echo " "
-  echo "=========== ovn-sbctl --db=${ovn_sbdb_test} show ============="
-  ovn-sbctl --db=${ovn_sbdb_test} show
+  echo "=========== ovn-sbctl --db=${ovn_sbdb_conn} show ============="
+  ovn-sbctl --db=${ovn_sbdb_conn} show
   echo " "
-  echo "=========== ovn-sbctl --db=${ovn_sbdb_test} lflow-list ============="
-  ovn-sbctl --db=${ovn_sbdb_test} lflow-list
+  echo "=========== ovn-sbctl --db=${ovn_sbdb_conn} lflow-list ============="
+  ovn-sbctl --db=${ovn_sbdb_conn} lflow-list
   echo " "
-  echo "=========== ovn-sbctl --db=${ovn_sbdb_test} list datapath ============="
-  ovn-sbctl --db=${ovn_sbdb_test} list datapath
+  echo "=========== ovn-sbctl --db=${ovn_sbdb_conn} list datapath ============="
+  ovn-sbctl --db=${ovn_sbdb_conn} list datapath
   echo " "
-  echo "=========== ovn-sbctl --db=${ovn_sbdb_test} list port_binding ============="
-  ovn-sbctl --db=${ovn_sbdb_test} list port_binding
+  echo "=========== ovn-sbctl --db=${ovn_sbdb_conn} list port_binding ============="
+  ovn-sbctl --db=${ovn_sbdb_conn} list port_binding
 }
 
 ovs-server() {
@@ -512,7 +514,8 @@ ovs-server() {
   while true; do
     if /usr/share/openvswitch/scripts/ovs-ctl status &>/dev/null; then
       echo "warning: Another process is currently managing OVS, waiting 10s ..." 2>&1
-      sleep 10
+      sleep 10 &
+      wait
       ((retries += 1))
     else
       break
@@ -709,7 +712,7 @@ run-ovn-northd() {
   run_as_ovs_user_if_needed \
     ${OVNCTL_PATH} start_northd \
     --no-monitor --ovn-manage-ovsdb=no \
-    --ovn-northd-nb-db=${ovn_nbdb_test} --ovn-northd-sb-db=${ovn_sbdb_test} \
+    --ovn-northd-nb-db=${ovn_nbdb_conn} --ovn-northd-sb-db=${ovn_sbdb_conn} \
     ${ovn_northd_ssl_opts} \
     --ovn-northd-log="${ovn_loglevel_northd}" \
     ${ovn_northd_opts}
@@ -803,7 +806,7 @@ ovn-controller() {
   wait_for_event ready_to_start_node
 
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
-  echo "ovn_nbdb_test ${ovn_nbdb_test}"
+  echo "ovn_nbdb_conn ${ovn_nbdb_conn}"
 
   # cleanup any stale ovn-nb and ovn-remote keys in Open_vSwitch table
   ovs-vsctl remove Open_vSwitch . external_ids ovn-remote
@@ -849,7 +852,7 @@ ovn-node() {
   echo "=============== ovn-node - (wait for ready_to_start_node)"
   wait_for_event ready_to_start_node
 
-  echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}  ovn_nbdb_test ${ovn_nbdb_test}"
+  echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}  ovn_nbdb_conn ${ovn_nbdb_conn}"
 
   echo "=============== ovn-node - (ovn-node  wait for ovn-controller.pid)"
   wait_for_event process_ready ovn-controller
@@ -948,10 +951,10 @@ run-nbctld() {
   echo "=============== run-nbctld - (wait for ready_to_start_node)"
   wait_for_event ready_to_start_node
 
-  echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}  ovn_nbdb_test ${ovn_nbdb_test}"
+  echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}  ovn_nbdb_conn ${ovn_nbdb_conn}"
   echo "ovn_loglevel_nbctld=${ovn_loglevel_nbctld}"
 
-  /usr/bin/ovn-nbctl ${ovn_loglevel_nbctld} --pidfile --db=${ovn_nbdb_test} \
+  /usr/bin/ovn-nbctl ${ovn_loglevel_nbctld} --pidfile --db=${ovn_nbdb_conn} \
     --log-file=${OVN_LOGDIR}/ovn-nbctl.log --detach ${ovndb_ctl_ssl_opts}
 
   wait_for_event attempts=3 process_ready ovn-nbctl

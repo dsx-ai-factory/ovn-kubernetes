@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"net"
 	"testing"
+
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 )
 
 func newSubnetAllocator(clusterCIDR string, hostBits uint32) (*SubnetAllocator, error) {
 	sna := NewSubnetAllocator()
-	err := sna.AddNetworkRange(clusterCIDR, hostBits)
+	err := sna.AddNetworkRange(ovntest.MustParseIPNet(clusterCIDR), hostBits)
 	return sna, err
 }
 
@@ -34,8 +36,7 @@ func allocateOneNetwork(sna *SubnetAllocator) (*net.IPNet, error) {
 func allocateExpected(sna *SubnetAllocator, n int, expected ...string) error {
 	// Canonicalize expected; eg "fd01:0:0:0::/64" -> "fd01::/64"
 	for i, str := range expected {
-		_, cidr, _ := net.ParseCIDR(str)
-		expected[i] = cidr.String()
+		expected[i] = ovntest.MustParseIPNet(str).String()
 	}
 
 	sns, err := sna.AllocateNetworks()
@@ -278,22 +279,12 @@ func TestAllocateSubnetInvalidHostBitsOrCIDR(t *testing.T) {
 		t.Fatal("Unexpectedly succeeded in initializing subnet allocator")
 	}
 
-	_, err = newSubnetAllocator("10.1.0.0/33", 16)
-	if err == nil {
-		t.Fatal("Unexpectedly succeeded in initializing subnet allocator")
-	}
-
 	_, err = newSubnetAllocator("fd01::/64", 66)
 	if err == nil {
 		t.Fatal("Unexpectedly succeeded in initializing subnet allocator")
 	}
 
 	_, err = newSubnetAllocator("fd01::/64", 0)
-	if err == nil {
-		t.Fatal("Unexpectedly succeeded in initializing subnet allocator")
-	}
-
-	_, err = newSubnetAllocator("fd01::/129", 64)
 	if err == nil {
 		t.Fatal("Unexpectedly succeeded in initializing subnet allocator")
 	}
@@ -328,7 +319,7 @@ func TestMarkAllocatedNetwork(t *testing.T) {
 	}
 
 	// Test subnet that does not belong to network
-	_, subnet, _ := net.ParseCIDR("10.2.3.4/24")
+	subnet := ovntest.MustParseIPNet("10.2.3.0/24")
 	if err := sna.MarkAllocatedNetwork(subnet); err == nil {
 		t.Fatalf("Unexpectedly succeeded in marking allocated subnet that doesn't belong to network (sn=%s)", subnet.String())
 	}
@@ -383,7 +374,7 @@ func TestMultipleSubnets(t *testing.T) {
 	if err != nil {
 		t.Fatal("Failed to initialize IP allocator: ", err)
 	}
-	err = sna.AddNetworkRange("10.2.0.0/16", 14)
+	err = sna.AddNetworkRange(ovntest.MustParseIPNet("10.2.0.0/16"), 14)
 	if err != nil {
 		t.Fatal("Failed to add network range: ", err)
 	}
@@ -404,11 +395,11 @@ func TestMultipleSubnets(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, sn, _ := net.ParseCIDR("10.1.128.0/18")
+	sn := ovntest.MustParseIPNet("10.1.128.0/18")
 	if err := sna.ReleaseNetwork(sn); err != nil {
 		t.Fatalf("Failed to release the subnet %s: %v", sn.String(), err)
 	}
-	_, sn, _ = net.ParseCIDR("10.2.128.0/18")
+	sn = ovntest.MustParseIPNet("10.2.128.0/18")
 	if err := sna.ReleaseNetwork(sn); err != nil {
 		t.Fatalf("Failed to release the subnet %s: %v", sn.String(), err)
 	}
@@ -430,11 +421,11 @@ func TestDualStack(t *testing.T) {
 	if err != nil {
 		t.Fatal("Failed to initialize IP allocator: ", err)
 	}
-	err = sna.AddNetworkRange("10.2.0.0/16", 14)
+	err = sna.AddNetworkRange(ovntest.MustParseIPNet("10.2.0.0/16"), 14)
 	if err != nil {
 		t.Fatal("Failed to add network range: ", err)
 	}
-	err = sna.AddNetworkRange("fd01::/48", 64)
+	err = sna.AddNetworkRange(ovntest.MustParseIPNet("fd01::/48"), 64)
 	if err != nil {
 		t.Fatal("Failed to add network range: ", err)
 	}
@@ -460,19 +451,19 @@ func TestDualStack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, sn, _ := net.ParseCIDR("10.1.128.0/18")
+	sn := ovntest.MustParseIPNet("10.1.128.0/18")
 	if err := sna.ReleaseNetwork(sn); err != nil {
 		t.Fatalf("Failed to release the subnet %s: %v", sn.String(), err)
 	}
-	_, sn, _ = net.ParseCIDR("fd01:0:0:3::/64")
+	sn = ovntest.MustParseIPNet("fd01:0:0:3::/64")
 	if err := sna.ReleaseNetwork(sn); err != nil {
 		t.Fatalf("Failed to release the subnet %s: %v", sn.String(), err)
 	}
-	_, sn, _ = net.ParseCIDR("10.2.128.0/18")
+	sn = ovntest.MustParseIPNet("10.2.128.0/18")
 	if err := sna.ReleaseNetwork(sn); err != nil {
 		t.Fatalf("Failed to release the subnet %s: %v", sn.String(), err)
 	}
-	_, sn, _ = net.ParseCIDR("fd01:0:0:7::/64")
+	sn = ovntest.MustParseIPNet("fd01:0:0:7::/64")
 	if err := sna.ReleaseNetwork(sn); err != nil {
 		t.Fatalf("Failed to release the subnet %s: %v", sn.String(), err)
 	}

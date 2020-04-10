@@ -2,6 +2,8 @@
 
 package node
 
-func initLocalOnlyGateway(nodeName, subnet string, stopChan chan struct{}) (string, error) {
-	return "", nil
+import "net"
+
+func initLocalOnlyGateway(nodeName string, subnet *net.IPNet, stopChan chan struct{}) (net.HardwareAddr, error) {
+	return nil, nil
 }

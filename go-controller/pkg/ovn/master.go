@@ -111,7 +111,8 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	if config.IPv6Mode {
 		joinSubnet = config.V6JoinSubnet
 	}
-	_ = oc.joinSubnetAllocator.AddNetworkRange(joinSubnet, 3)
+	_, joinSubnetCIDR, _ := net.ParseCIDR(joinSubnet)
+	_ = oc.joinSubnetAllocator.AddNetworkRange(joinSubnetCIDR, 3)
 
 	existingNodes, err := oc.kube.GetNodes()
 	if err != nil {
@@ -119,7 +120,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		return err
 	}
 	for _, clusterEntry := range config.Default.ClusterSubnets {
-		err := oc.masterSubnetAllocator.AddNetworkRange(clusterEntry.CIDR.String(), clusterEntry.HostBits())
+		err := oc.masterSubnetAllocator.AddNetworkRange(clusterEntry.CIDR, clusterEntry.HostBits())
 		if err != nil {
 			return err
 		}
@@ -177,6 +178,17 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		return err
 	}
 
+	// Determine SCTP support
+	oc.SCTPSupport, err = util.DetectSCTPSupport()
+	if err != nil {
+		return err
+	}
+	if !oc.SCTPSupport {
+		klog.Warningf("SCTP unsupported by this version of OVN. Kubernetes service creation with SCTP will not work ")
+	} else {
+		klog.Info("SCTP support detected in OVN")
+	}
+
 	// If supported, enable IGMP relay on the router to forward multicast
 	// traffic between nodes.
 	if oc.multicastSupport {
@@ -198,7 +210,7 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		}
 	}
 
-	// Create 2 load-balancers for east-west traffic.  One handles UDP and another handles TCP.
+	// Create 3 load-balancers for east-west traffic for UDP, TCP, SCTP
 	oc.TCPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "load_balancer", "external_ids:k8s-cluster-lb-tcp=yes")
 	if err != nil {
 		klog.Errorf("Failed to get tcp load-balancer, stderr: %q, error: %v", stderr, err)
@@ -225,14 +237,27 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 			return err
 		}
 	}
+
+	oc.SCTPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "load_balancer", "external_ids:k8s-cluster-lb-sctp=yes")
+	if err != nil {
+		klog.Errorf("Failed to get sctp load-balancer, stderr: %q, error: %v", stderr, err)
+		return err
+	}
+	if oc.SCTPLoadBalancerUUID == "" && oc.SCTPSupport {
+		oc.SCTPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--", "create", "load_balancer", "external_ids:k8s-cluster-lb-sctp=yes", "protocol=sctp")
+		if err != nil {
+			klog.Errorf("Failed to create sctp load-balancer, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+			return err
+		}
+	}
 	return nil
 }
 
-func (oc *Controller) addNodeJoinSubnetAnnotations(node *kapi.Node, subnet string) error {
+func (oc *Controller) addNodeJoinSubnetAnnotations(node *kapi.Node, subnet *net.IPNet) error {
 	nodeAnnotations, err := util.CreateNodeJoinSubnetAnnotation(subnet)
 	if err != nil {
 		return fmt.Errorf("failed to marshal node %q join subnets annotation for subnet %s",
-			node.Name, subnet)
+			node.Name, subnet.String())
 	}
 	err = oc.kube.SetAnnotationsOnNode(node, nodeAnnotations)
 	if err != nil {
@@ -266,7 +291,7 @@ func (oc *Controller) allocateJoinSubnet(node *kapi.Node) (*net.IPNet, error) {
 	}()
 
 	// Set annotation on the node
-	err = oc.addNodeJoinSubnetAnnotations(node, joinSubnet.String())
+	err = oc.addNodeJoinSubnetAnnotations(node, joinSubnet)
 	if err != nil {
 		return nil, err
 	}
@@ -285,12 +310,12 @@ func (oc *Controller) deleteNodeJoinSubnet(nodeName string, subnet *net.IPNet) e
 }
 
 func (oc *Controller) syncNodeManagementPort(node *kapi.Node, subnet *net.IPNet) error {
-	macAddress, err := util.ParseNodeManagementPortMacAddr(node)
+	macAddress, err := util.ParseNodeManagementPortMACAddress(node)
 	if err != nil {
 		return err
 	}
 
-	if macAddress == "" {
+	if macAddress == nil {
 		// When macAddress was removed, delete the switch port
 		stdout, stderr, err := util.RunOVNNbctl("--", "--if-exists", "lsp-del", "k8s-"+node.Name)
 		if err != nil {
@@ -312,7 +337,7 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, subnet *net.IPNet)
 	// Create this node's management logical port on the node switch
 	stdout, stderr, err := util.RunOVNNbctl(
 		"--", "--may-exist", "lsp-add", node.Name, "k8s-"+node.Name,
-		"--", "lsp-set-addresses", "k8s-"+node.Name, macAddress+" "+portIP.IP.String())
+		"--", "lsp-set-addresses", "k8s-"+node.Name, macAddress.String()+" "+portIP.IP.String())
 	if err != nil {
 		klog.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
@@ -329,11 +354,11 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, subnet *net.IPNet)
 	return nil
 }
 
-func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig *util.L3GatewayConfig, subnet string) error {
+func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig *util.L3GatewayConfig, subnet *net.IPNet) error {
 	var err error
-	var clusterSubnets []string
+	var clusterSubnets []*net.IPNet
 	for _, clusterSubnet := range config.Default.ClusterSubnets {
-		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR.String())
+		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR)
 	}
 
 	// get a subnet for the per-node join switch
@@ -342,17 +367,14 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		return err
 	}
 
-	err = util.GatewayInit(clusterSubnets, subnet, joinSubnet, node.Name, l3GatewayConfig)
+	err = util.GatewayInit(clusterSubnets, subnet, joinSubnet, node.Name, l3GatewayConfig, oc.SCTPSupport)
 	if err != nil {
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}
 
 	// Add local only gateway to allow local service access
 	if l3GatewayConfig.Mode == config.GatewayModeShared {
-		localOnlyIfaceID := fmt.Sprintf("br-local_%s", node.Name)
-		err = util.LocalGatewayInit(clusterSubnets, joinSubnet, l3GatewayConfig.ChassisID, node.Name,
-			l3GatewayConfig.IPAddress.String(), localOnlyIfaceID,
-			l3GatewayConfig.LocalMACAddress.String())
+		err = util.LocalGatewayInit(clusterSubnets, joinSubnet, node.Name, l3GatewayConfig)
 		if err != nil {
 			return err
 		}
@@ -362,8 +384,8 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		err = oc.handleNodePortLB(node)
 	} else {
 		// nodePort disabled, delete gateway load balancers for this node.
-		physicalGateway := util.GWRouterPrefix + node.Name
-		for _, proto := range []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolUDP} {
+		physicalGateway := "GR_" + node.Name
+		for _, proto := range []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolUDP, kapi.ProtocolSCTP} {
 			lbUUID, _ := oc.getGatewayLoadBalancer(physicalGateway, proto)
 			if lbUUID != "" {
 				_, _, err := util.RunOVNNbctl("--if-exists", "destroy", "load_balancer", lbUUID)
@@ -379,18 +401,19 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 
 func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.IPNet) error {
 	firstIP, secondIP := util.GetNodeWellKnownAddresses(hostsubnet)
-	nodeLRPMac := util.IPAddrToHWAddr(firstIP.IP)
+	nodeLRPMAC := util.IPAddrToHWAddr(firstIP.IP)
 	clusterRouter := util.GetK8sClusterRouter()
 
 	// Create a router port and provide it the first address on the node's host subnet
 	_, stderr, err := util.RunOVNNbctl("--may-exist", "lrp-add", clusterRouter, "rtos-"+nodeName,
-		nodeLRPMac, firstIP.String())
+		nodeLRPMAC.String(), firstIP.String())
 	if err != nil {
 		klog.Errorf("Failed to add logical port to router, stderr: %q, error: %v", stderr, err)
 		return err
 	}
 
 	// Create a logical switch and set its subnet.
+
 	args := []string{
 		"--", "--may-exist", "ls-add", nodeName,
 		"--", "set", "logical_switch", nodeName,
@@ -431,7 +454,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 		if !utilnet.IsIPv6(firstIP.IP) {
 			stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
 				nodeName, "other-config:mcast_querier=\"true\"",
-				"other-config:mcast_eth_src=\""+nodeLRPMac+"\"",
+				"other-config:mcast_eth_src=\""+nodeLRPMAC.String()+"\"",
 				"other-config:mcast_ip4_src=\""+firstIP.IP.String()+"\"")
 			if err != nil {
 				klog.Errorf("Failed to enable IGMP Querier on logical switch %v, stdout: %q, stderr: %q, error: %v",
@@ -453,7 +476,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 
 	// Connect the switch to the router.
 	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", nodeName, "stor-"+nodeName,
-		"--", "set", "logical_switch_port", "stor-"+nodeName, "type=router", "options:router-port=rtos-"+nodeName, "addresses="+"\""+nodeLRPMac+"\"")
+		"--", "set", "logical_switch_port", "stor-"+nodeName, "type=router", "options:router-port=rtos-"+nodeName, "addresses="+"\""+nodeLRPMAC.String()+"\"")
 	if err != nil {
 		klog.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
@@ -496,6 +519,25 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 		}
 	}
 
+	if oc.SCTPSupport {
+		if oc.SCTPLoadBalancerUUID == "" {
+			return fmt.Errorf("SCTP cluster load balancer not created")
+		}
+		stdout, stderr, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "load_balancer", oc.SCTPLoadBalancerUUID)
+		if err != nil {
+			klog.Errorf("Failed to add logical switch %v's loadbalancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
+			return err
+		}
+
+		// Add any service reject ACLs applicable for SCTP LB
+		acls = oc.getAllACLsForServiceLB(oc.SCTPLoadBalancerUUID)
+		if len(acls) > 0 {
+			_, _, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "acls", strings.Join(acls, ","))
+			if err != nil {
+				klog.Warningf("Unable to add SCTP reject ACLs: %s for switch: %s, error %v", acls, nodeName, err)
+			}
+		}
+	}
 	// Add the node to the logical switch cache
 	oc.lsMutex.Lock()
 	defer oc.lsMutex.Unlock()
@@ -507,11 +549,11 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	return nil
 }
 
-func (oc *Controller) addNodeAnnotations(node *kapi.Node, subnet string) error {
+func (oc *Controller) addNodeAnnotations(node *kapi.Node, subnet *net.IPNet) error {
 	nodeAnnotations, err := util.CreateNodeHostSubnetAnnotation(subnet)
 	if err != nil {
 		return fmt.Errorf("failed to marshal node %q annotation for subnet %s",
-			node.Name, subnet)
+			node.Name, subnet.String())
 	}
 	err = oc.kube.SetAnnotationsOnNode(node, nodeAnnotations)
 	if err != nil {
@@ -557,7 +599,7 @@ func (oc *Controller) addNode(node *kapi.Node) (hostsubnet *net.IPNet, err error
 	// Set the HostSubnet annotation on the node object to signal
 	// to nodes that their logical infrastructure is set up and they can
 	// proceed with their initialization
-	err = oc.addNodeAnnotations(node, hostsubnet.String())
+	err = oc.addNodeAnnotations(node, hostsubnet)
 	if err != nil {
 		return nil, err
 	}

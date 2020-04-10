@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"io/ioutil"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -135,7 +134,7 @@ func writeTestConfigFile(path string, overrides ...string) error {
 	const defaultData string = `[default]
 mtu=1500
 conntrack-zone=64321
-cluster-subnets=10.129.0.0/14/23
+cluster-subnets=10.132.0.0/14/23
 
 [kubernetes]
 kubeconfig=/path/to/kubeconfig
@@ -154,13 +153,13 @@ conf-dir=/etc/cni/net.d22
 plugin=ovn-k8s-cni-overlay22
 
 [ovnnorth]
-address=ssl://1.2.3.4:6641
+address=ssl:1.2.3.4:6641
 client-privkey=/path/to/nb-client-private.key
 client-cert=/path/to/nb-client.crt
 client-cacert=/path/to/nb-client-ca.crt
 
 [ovnsouth]
-address=ssl://1.2.3.4:6642
+address=ssl:1.2.3.4:6642
 client-privkey=/path/to/sb-client-private.key
 client-cert=/path/to/sb-client.crt
 client-cacert=/path/to/sb-client-ca.crt
@@ -174,7 +173,7 @@ nodeport=false
 
 [hybridoverlay]
 enabled=true
-cluster-subnets=11.129.0.0/14/23
+cluster-subnets=11.132.0.0/14/23
 `
 
 	var newData string
@@ -191,14 +190,6 @@ cluster-subnets=11.129.0.0/14/23
 		newData += line + "\n"
 	}
 	return ioutil.WriteFile(path, []byte(newData), 0644)
-}
-
-func mustParseCIDR(cidr string) *net.IPNet {
-	_, net, err := net.ParseCIDR(cidr)
-	if err != nil {
-		panic("bad CIDR string constant " + cidr)
-	}
-	return net
 }
 
 var _ = Describe("Config Operations", func() {
@@ -248,7 +239,7 @@ var _ = Describe("Config Operations", func() {
 			Expect(Kubernetes.RawServiceCIDRs).To(Equal("172.16.1.0/24"))
 			Expect(Kubernetes.RawNoHostSubnetNodes).To(Equal(""))
 			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
-				{mustParseCIDR("10.128.0.0/14"), 23},
+				{ovntest.MustParseIPNet("10.128.0.0/14"), 23},
 			}))
 			Expect(IPv4Mode).To(Equal(true))
 			Expect(IPv6Mode).To(Equal(false))
@@ -482,7 +473,7 @@ var _ = Describe("Config Operations", func() {
 			Expect(Kubernetes.APIServer).To(Equal("https://1.2.3.4:6443"))
 			Expect(Kubernetes.RawServiceCIDRs).To(Equal("172.18.0.0/24"))
 			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
-				{mustParseCIDR("10.129.0.0/14"), 23},
+				{ovntest.MustParseIPNet("10.132.0.0/14"), 23},
 			}))
 
 			Expect(OvnNorth.Scheme).To(Equal(OvnDBSchemeSSL))
@@ -505,7 +496,7 @@ var _ = Describe("Config Operations", func() {
 
 			Expect(HybridOverlay.Enabled).To(BeTrue())
 			Expect(HybridOverlay.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
-				{mustParseCIDR("11.129.0.0/14"), 23},
+				{ovntest.MustParseIPNet("11.132.0.0/14"), 23},
 			}))
 
 			return nil
@@ -545,7 +536,7 @@ var _ = Describe("Config Operations", func() {
 			Expect(Kubernetes.RawServiceCIDRs).To(Equal("172.15.0.0/24"))
 			Expect(Kubernetes.RawNoHostSubnetNodes).To(Equal("test=pass"))
 			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
-				{mustParseCIDR("10.130.0.0/15"), 24},
+				{ovntest.MustParseIPNet("10.130.0.0/15"), 24},
 			}))
 
 			Expect(OvnNorth.Scheme).To(Equal(OvnDBSchemeSSL))
@@ -565,7 +556,7 @@ var _ = Describe("Config Operations", func() {
 
 			Expect(HybridOverlay.Enabled).To(BeTrue())
 			Expect(HybridOverlay.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
-				{mustParseCIDR("11.130.0.0/14"), 23},
+				{ovntest.MustParseIPNet("11.132.0.0/14"), 23},
 			}))
 			return nil
 		}
@@ -584,19 +575,19 @@ var _ = Describe("Config Operations", func() {
 			"-k8s-cacert=" + kubeCAFile,
 			"-k8s-token=asdfasdfasdfasfd",
 			"-k8s-service-cidrs=172.15.0.0/24",
-			"-nb-address=ssl://6.5.4.3:6651",
+			"-nb-address=ssl:6.5.4.3:6651",
 			"-no-hostsubnet-nodes=test=pass",
 			"-nb-client-privkey=/client/privkey",
 			"-nb-client-cert=/client/cert",
 			"-nb-client-cacert=/client/cacert",
-			"-sb-address=ssl://6.5.4.1:6652",
+			"-sb-address=ssl:6.5.4.1:6652",
 			"-sb-client-privkey=/client/privkey2",
 			"-sb-client-cert=/client/cert2",
 			"-sb-client-cacert=/client/cacert2",
 			"-gateway-mode=local",
 			"-nodeport",
 			"-enable-hybrid-overlay",
-			"-hybrid-overlay-cluster-subnets=11.130.0.0/14/23",
+			"-hybrid-overlay-cluster-subnets=11.132.0.0/14/23",
 		}
 		err = app.Run(cliArgs)
 		Expect(err).NotTo(HaveOccurred())
@@ -673,7 +664,7 @@ cluster-subnets=172.18.0.0/23
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cfgPath).To(Equal(cfgFile.Name()))
 			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
-				{mustParseCIDR("172.15.0.0/23"), 24},
+				{ovntest.MustParseIPNet("172.15.0.0/23"), 24},
 			}))
 			Expect(IPv4Mode).To(Equal(true))
 			Expect(IPv6Mode).To(Equal(false))
@@ -839,11 +830,11 @@ mode=shared
 			"-k8s-cacert=" + kubeCAFile,
 			"-k8s-token=asdfasdfasdfasfd",
 			"-k8s-service-cidr=172.15.0.0/24",
-			"-nb-address=ssl://6.5.4.3:6651,ssl://6.5.4.4:6651,ssl://6.5.4.5:6651",
+			"-nb-address=ssl:6.5.4.3:6651,ssl:6.5.4.4:6651,ssl:6.5.4.5:6651",
 			"-nb-client-privkey=/client/privkey",
 			"-nb-client-cert=/client/cert",
 			"-nb-client-cacert=/client/cacert",
-			"-sb-address=ssl://6.5.4.1:6652,ssl://6.5.4.2:6652,ssl://6.5.4.3:6652",
+			"-sb-address=ssl:6.5.4.1:6652,ssl:6.5.4.2:6652,ssl:6.5.4.3:6652",
 			"-sb-client-privkey=/client/privkey2",
 			"-sb-client-cert=/client/cert2",
 			"-sb-client-cacert=/client/cacert2",
@@ -872,9 +863,9 @@ mode=shared
 
 			Expect(Default.MTU).To(Equal(1500))
 			Expect(Default.ConntrackZone).To(Equal(64321))
-			Expect(Default.RawClusterSubnets).To(Equal("10.129.0.0/14/23"))
+			Expect(Default.RawClusterSubnets).To(Equal("10.132.0.0/14/23"))
 			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
-				{mustParseCIDR("10.129.0.0/14"), 23},
+				{ovntest.MustParseIPNet("10.132.0.0/14"), 23},
 			}))
 			Expect(Logging.File).To(Equal("/var/log/ovnkube.log"))
 			Expect(Logging.Level).To(Equal(5))
@@ -1062,17 +1053,15 @@ mode=shared
 		})
 
 		const (
-			nbURL string = "ssl://1.2.3.4:6641"
-			sbURL string = "ssl://1.2.3.4:6642"
+			nbURL string = "ssl:1.2.3.4:6641"
+			sbURL string = "ssl:1.2.3.4:6642"
 		)
 
 		It("configures client northbound SSL correctly", func() {
-			const nbURLOVN string = "ssl:1.2.3.4:6641"
-
 			fexec := ovntest.NewFakeExec()
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --db=" + nbURLOVN + " --timeout=5 --private-key=" + keyFile + " --certificate=" + certFile + " --bootstrap-ca-cert=" + caFile + " list nb_global",
-				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-nb=\"" + nbURLOVN + "\"",
+				"ovn-nbctl --db=" + nbURL + " --timeout=5 --private-key=" + keyFile + " --certificate=" + certFile + " --bootstrap-ca-cert=" + caFile + " list nb_global",
+				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-nb=\"" + nbURL + "\"",
 			})
 
 			cliConfig := &OvnAuthConfig{
@@ -1087,25 +1076,23 @@ mode=shared
 			Expect(a.PrivKey).To(Equal(keyFile))
 			Expect(a.Cert).To(Equal(certFile))
 			Expect(a.CACert).To(Equal(caFile))
-			Expect(a.Address).To(Equal("ssl:1.2.3.4:6641"))
+			Expect(a.Address).To(Equal(nbURL))
 			Expect(a.northbound).To(BeTrue())
 			Expect(a.externalID).To(Equal("ovn-nb"))
 
-			Expect(a.GetURL()).To(Equal(nbURLOVN))
+			Expect(a.GetURL()).To(Equal(nbURL))
 			err = a.SetDBAuth()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 		})
 
 		It("configures client southbound SSL correctly", func() {
-			const sbURLOVN string = "ssl:1.2.3.4:6642"
-
 			fexec := ovntest.NewFakeExec()
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --db=" + sbURLOVN + " --timeout=5 --private-key=" + keyFile + " --certificate=" + certFile + " --bootstrap-ca-cert=" + caFile + " list nb_global",
+				"ovn-nbctl --db=" + sbURL + " --timeout=5 --private-key=" + keyFile + " --certificate=" + certFile + " --bootstrap-ca-cert=" + caFile + " list nb_global",
 				"ovs-vsctl --timeout=15 del-ssl",
 				"ovs-vsctl --timeout=15 set-ssl " + keyFile + " " + certFile + " " + caFile,
-				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-remote=\"" + sbURLOVN + "\"",
+				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-remote=\"" + sbURL + "\"",
 			})
 
 			cliConfig := &OvnAuthConfig{
@@ -1120,11 +1107,60 @@ mode=shared
 			Expect(a.PrivKey).To(Equal(keyFile))
 			Expect(a.Cert).To(Equal(certFile))
 			Expect(a.CACert).To(Equal(caFile))
-			Expect(a.Address).To(Equal("ssl:1.2.3.4:6642"))
+			Expect(a.Address).To(Equal(sbURL))
 			Expect(a.northbound).To(BeFalse())
 			Expect(a.externalID).To(Equal("ovn-remote"))
 
-			Expect(a.GetURL()).To(Equal(sbURLOVN))
+			Expect(a.GetURL()).To(Equal(sbURL))
+			err = a.SetDBAuth()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+		})
+
+		const (
+			nbURLLegacy    string = "tcp://1.2.3.4:6641"
+			nbURLConverted string = "tcp:1.2.3.4:6641"
+			sbURLLegacy    string = "tcp://1.2.3.4:6642"
+			sbURLConverted string = "tcp:1.2.3.4:6642"
+		)
+
+		It("configures client northbound TCP legacy address correctly", func() {
+			fexec := ovntest.NewFakeExec()
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-nb=\"" + nbURLConverted + "\"",
+			})
+
+			cliConfig := &OvnAuthConfig{Address: nbURLLegacy}
+			a, err := buildOvnAuth(fexec, true, cliConfig, &OvnAuthConfig{}, true)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(a.Scheme).To(Equal(OvnDBSchemeTCP))
+			// Config should convert :// to : in addresses
+			Expect(a.Address).To(Equal(nbURLConverted))
+			Expect(a.northbound).To(BeTrue())
+			Expect(a.externalID).To(Equal("ovn-nb"))
+
+			Expect(a.GetURL()).To(Equal(nbURLConverted))
+			err = a.SetDBAuth()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+		})
+
+		It("configures client southbound TCP legacy address correctly", func() {
+			fexec := ovntest.NewFakeExec()
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-nb=\"" + nbURLConverted + "\"",
+			})
+
+			cliConfig := &OvnAuthConfig{Address: nbURLLegacy}
+			a, err := buildOvnAuth(fexec, true, cliConfig, &OvnAuthConfig{}, true)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(a.Scheme).To(Equal(OvnDBSchemeTCP))
+			// Config should convert :// to : in addresses
+			Expect(a.Address).To(Equal(nbURLConverted))
+			Expect(a.northbound).To(BeTrue())
+			Expect(a.externalID).To(Equal("ovn-nb"))
+
+			Expect(a.GetURL()).To(Equal(nbURLConverted))
 			err = a.SetDBAuth()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
@@ -1220,7 +1256,7 @@ mode=shared
 			generateTests("the scheme is not empty/tcp/ssl",
 				"unknown OVN DB scheme \"blah\"",
 				func() []string {
-					return []string{"address=blah://1.2.3.4:5555"}
+					return []string{"address=blah:1.2.3.4:5555"}
 				})
 
 			generateTests("the address is unix socket and certs are given",
@@ -1237,7 +1273,7 @@ mode=shared
 				"failed to parse OVN DB host/port \"4.3.2.1\": address 4.3.2.1: missing port in address",
 				func() []string {
 					return []string{
-						"address=tcp://4.3.2.1",
+						"address=tcp:4.3.2.1",
 					}
 				})
 
@@ -1245,7 +1281,7 @@ mode=shared
 				"certificate or key given; perhaps you mean to use the 'ssl' scheme?",
 				func() []string {
 					return []string{
-						"address=tcp://1.2.3.4:444",
+						"address=tcp:1.2.3.4:444",
 						"client-privkey=/bar/baz/foo",
 					}
 				})
@@ -1255,7 +1291,7 @@ mode=shared
 			generateTests("the SSL scheme is missing a client CA cert", "",
 				func() []string {
 					return []string{
-						"address=ssl://1.2.3.4:444",
+						"address=ssl:1.2.3.4:444",
 						"client-privkey=" + keyFile,
 						"client-cert=" + certFile,
 						"client-cacert=/foo/bar/baz",
@@ -1265,7 +1301,7 @@ mode=shared
 			generateTests("the SSL scheme is missing a private key file", "",
 				func() []string {
 					return []string{
-						"address=ssl://1.2.3.4:444",
+						"address=ssl:1.2.3.4:444",
 						"client-privkey=/foo/bar/baz",
 						"client-cert=" + certFile,
 						"client-cacert=" + caFile,
@@ -1275,13 +1311,12 @@ mode=shared
 			generateTests("the SSL scheme is missing a client cert file", "",
 				func() []string {
 					return []string{
-						"address=ssl://1.2.3.4:444",
+						"address=ssl:1.2.3.4:444",
 						"client-privkey=" + keyFile,
 						"client-cert=/foo/bar/baz",
 						"client-cacert=" + caFile,
 					}
 				})
-
 		})
 	})
 })

@@ -2,6 +2,7 @@ package util
 
 import (
 	"fmt"
+	"net"
 	"strings"
 
 	"k8s.io/klog"
@@ -14,8 +15,8 @@ func GatewayCleanup(nodeName string) error {
 	gatewayRouter := GWRouterPrefix + nodeName
 
 	// Get the gateway router port's IP address (connected to join switch)
-	var routerIP string
-	var nextHops []string
+	var routerIP net.IP
+	var nextHops []net.IP
 	routerIPNetwork, stderr, err := RunOVNNbctl("--if-exist", "get",
 		"logical_router_port", "rtoj-"+gatewayRouter, "networks")
 	if err != nil {
@@ -23,15 +24,18 @@ func GatewayCleanup(nodeName string) error {
 			"error: %v", stderr, err)
 	}
 
+	routerIPNetwork = strings.Trim(routerIPNetwork, "[]\"")
 	if routerIPNetwork != "" {
-		routerIPNetwork = strings.Trim(routerIPNetwork, "[]\"")
-		if routerIPNetwork != "" {
-			routerIP = strings.Split(routerIPNetwork, "/")[0]
+		routerIP, _, err = net.ParseCIDR(routerIPNetwork)
+		if err != nil {
+			return fmt.Errorf("could not parse logical router port %q: %v",
+				routerIPNetwork, err)
 		}
 	}
-	if routerIP != "" {
+	if routerIP != nil {
 		nextHops = append(nextHops, routerIP)
 	}
+
 	staticRouteCleanup(clusterRouter, nextHops)
 
 	// Remove the join switch that connects ovn_cluster_router to gateway router
@@ -66,22 +70,29 @@ func GatewayCleanup(nodeName string) error {
 	}
 
 	// If exists, remove the TCP, UDP load-balancers created for north-south traffic for gateway router.
-	k8sNSLbTCP, k8sNSLbUDP, err := getGatewayLoadBalancers(gatewayRouter)
+	k8sNSLbTCP, k8sNSLbUDP, k8sNSLbSCTP, err := getGatewayLoadBalancers(gatewayRouter)
 	if err != nil {
 		return err
 	}
 	if k8sNSLbTCP != "" {
 		_, stderr, err = RunOVNNbctl("lb-del", k8sNSLbTCP)
 		if err != nil {
-			return fmt.Errorf("Failed to delete Gateway router TCP load balancer %s, stderr: %q, "+
+			return fmt.Errorf("failed to delete Gateway router TCP load balancer %s, stderr: %q, "+
 				"error: %v", k8sNSLbTCP, stderr, err)
 		}
 	}
 	if k8sNSLbUDP != "" {
 		_, stderr, err = RunOVNNbctl("lb-del", k8sNSLbUDP)
 		if err != nil {
-			return fmt.Errorf("Failed to delete Gateway router UDP load balancer %s, stderr: %q, "+
-				"error: %v", k8sNSLbTCP, stderr, err)
+			return fmt.Errorf("failed to delete Gateway router UDP load balancer %s, stderr: %q, "+
+				"error: %v", k8sNSLbUDP, stderr, err)
+		}
+	}
+	if k8sNSLbSCTP != "" {
+		_, stderr, err = RunOVNNbctl("lb-del", k8sNSLbSCTP)
+		if err != nil {
+			return fmt.Errorf("failed to delete Gateway router SCTP load balancer %s, stderr: %q, "+
+				"error: %v", k8sNSLbSCTP, stderr, err)
 		}
 	}
 
@@ -96,7 +107,6 @@ func localGatewayCleanup(nodeName, clusterRouter string) error {
 	gatewayRouter := fmt.Sprintf("GR_local_%s", nodeName)
 
 	// Get the gateway router port's IP address (connected to join switch)
-	var routerIP string
 	routerIPNetwork, stderr, err := RunOVNNbctl("--if-exist", "get",
 		"logical_router_port", "rtoj-"+gatewayRouter, "networks")
 	if err != nil {
@@ -104,14 +114,14 @@ func localGatewayCleanup(nodeName, clusterRouter string) error {
 			"error: %v", gatewayRouter, stderr, err)
 	}
 
+	routerIPNetwork = strings.Trim(routerIPNetwork, "[]\"")
 	if routerIPNetwork != "" {
-		routerIPNetwork = strings.Trim(routerIPNetwork, "[]\"")
-		if routerIPNetwork != "" {
-			routerIP = strings.Split(routerIPNetwork, "/")[0]
-			if routerIP != "" {
-				staticRouteCleanup(clusterRouter, []string{routerIP})
-			}
+		routerIP, _, err := net.ParseCIDR(routerIPNetwork)
+		if err != nil {
+			return fmt.Errorf("could not parse logical router port %q: %v",
+				routerIPNetwork, err)
 		}
+		staticRouteCleanup(clusterRouter, []net.IP{routerIP})
 	}
 
 	// Remove any gateway routers associated with nodeName
@@ -133,17 +143,17 @@ func localGatewayCleanup(nodeName, clusterRouter string) error {
 	return nil
 }
 
-func staticRouteCleanup(clusterRouter string, nextHops []string) {
+func staticRouteCleanup(clusterRouter string, nextHops []net.IP) {
 	for _, nextHop := range nextHops {
 		// Get a list of all the routes in cluster router with the next hop IP.
 		var uuids string
 		uuids, stderr, err := RunOVNNbctl("--data=bare", "--no-heading",
 			"--columns=_uuid", "find", "logical_router_static_route",
-			"nexthop=\""+nextHop+"\"")
+			"nexthop=\""+nextHop.String()+"\"")
 		if err != nil {
 			klog.Errorf("Failed to fetch all routes with "+
 				"IP %s as nexthop, stderr: %q, "+
-				"error: %v", nextHop, stderr, err)
+				"error: %v", nextHop.String(), stderr, err)
 			continue
 		}
 
