@@ -134,7 +134,7 @@ func GatewayInit(clusterIPSubnet []*net.IPNet, hostSubnet *net.IPNet, joinSubnet
 		"options:chassis="+l3GatewayConfig.ChassisID,
 		"external_ids:physical_ip="+l3GatewayConfig.IPAddress.IP.String())
 	if err != nil {
-		return fmt.Errorf("Failed to create logical router %v, stdout: %q, "+
+		return fmt.Errorf("failed to create logical router %v, stdout: %q, "+
 			"stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
 	}
 
@@ -148,7 +148,7 @@ func GatewayInit(clusterIPSubnet []*net.IPNet, hostSubnet *net.IPNet, joinSubnet
 	// create the per-node join switch
 	stdout, stderr, err = RunOVNNbctl("--", "--may-exist", "ls-add", joinSwitch)
 	if err != nil {
-		return fmt.Errorf("Failed to create logical switch %q, stdout: %q, stderr: %q, error: %v",
+		return fmt.Errorf("failed to create logical switch %q, stdout: %q, stderr: %q, error: %v",
 			joinSwitch, stdout, stderr, err)
 	}
 
@@ -167,7 +167,8 @@ func GatewayInit(clusterIPSubnet []*net.IPNet, hostSubnet *net.IPNet, joinSubnet
 		"--", "--may-exist", "lrp-add", gatewayRouter, gwRouterPort, gwLRPMAC.String(),
 		fmt.Sprintf("%s/%d", gwLRPIp.String(), prefixLen))
 	if err != nil {
-		return fmt.Errorf("Failed to add logical router port %q, stderr: %q, error: %v", gwRouterPort, stderr, err)
+		return fmt.Errorf("failed to add logical router port %q for gateway router %s, "+
+			"stderr: %q, error: %v", gwRouterPort, gatewayRouter, stderr, err)
 	}
 
 	// jtod/dtoj - patch ports that connect the per-node join switch to distributed router
@@ -188,7 +189,8 @@ func GatewayInit(clusterIPSubnet []*net.IPNet, hostSubnet *net.IPNet, joinSubnet
 		"--", "--may-exist", "lrp-add", k8sClusterRouter, drRouterPort, drLRPMAC.String(),
 		fmt.Sprintf("%s/%d", drLRPIp.String(), prefixLen))
 	if err != nil {
-		return fmt.Errorf("Failed to add logical router port %q, stderr: %q, error: %v", drRouterPort, stderr, err)
+		return fmt.Errorf("failed to add logical router port %q to %s, "+
+			"stderr: %q, error: %v", drRouterPort, k8sClusterRouter, stderr, err)
 	}
 
 	// When there are multiple gateway routers (which would be the likely
@@ -198,8 +200,8 @@ func GatewayInit(clusterIPSubnet []*net.IPNet, hostSubnet *net.IPNet, joinSubnet
 	stdout, stderr, err = RunOVNNbctl("set", "logical_router",
 		gatewayRouter, "options:lb_force_snat_ip="+gwLRPIp.String())
 	if err != nil {
-		return fmt.Errorf("Failed to set logical router, stdout: %q, "+
-			"stderr: %q, error: %v", stdout, stderr, err)
+		return fmt.Errorf("failed to set logical router %s's lb_force_snat_ip option, "+
+			"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
 	}
 
 	for _, entry := range clusterIPSubnet {
@@ -207,9 +209,9 @@ func GatewayInit(clusterIPSubnet []*net.IPNet, hostSubnet *net.IPNet, joinSubnet
 		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
 			gatewayRouter, entry.String(), drLRPIp.String())
 		if err != nil {
-			return fmt.Errorf("Failed to add a static route in GR with distributed "+
+			return fmt.Errorf("failed to add a static route in GR %s with distributed "+
 				"router as the nexthop, stdout: %q, stderr: %q, error: %v",
-				stdout, stderr, err)
+				gatewayRouter, stdout, stderr, err)
 		}
 	}
 
@@ -237,8 +239,8 @@ func GatewayInit(clusterIPSubnet []*net.IPNet, hostSubnet *net.IPNet, joinSubnet
 					fmt.Sprintf("external_ids:%s_lb_gateway_router=%s", proto, gatewayRouter),
 					fmt.Sprintf("protocol=%s", strings.ToLower(string(proto))))
 				if err != nil {
-					return fmt.Errorf("failed to create load balancer for protocol %s: "+
-						"stderr: %q, error: %v", proto, stderr, err)
+					return fmt.Errorf("failed to create load balancer for gateway router %s for protocol %s: "+
+						"stderr: %q, error: %v", gatewayRouter, proto, stderr, err)
 				}
 			}
 		}
@@ -250,8 +252,8 @@ func GatewayInit(clusterIPSubnet []*net.IPNet, hostSubnet *net.IPNet, joinSubnet
 		stdout, stderr, err = RunOVNNbctl("set", "logical_router", gatewayRouter, "load_balancer="+lbString)
 		if err != nil {
 			return fmt.Errorf("failed to set north-south load-balancers to the "+
-				"gateway router, stdout: %q, stderr: %q, error: %v",
-				stdout, stderr, err)
+				"gateway router %s, stdout: %q, stderr: %q, error: %v",
+				gatewayRouter, stdout, stderr, err)
 		}
 	}
 
@@ -260,8 +262,8 @@ func GatewayInit(clusterIPSubnet []*net.IPNet, hostSubnet *net.IPNet, joinSubnet
 	stdout, stderr, err = RunOVNNbctl("--may-exist", "ls-add",
 		externalSwitch)
 	if err != nil {
-		return fmt.Errorf("failed to create logical switch, stdout: %q, "+
-			"stderr: %q, error: %v", stdout, stderr, err)
+		return fmt.Errorf("failed to create logical switch %s, stdout: %q, "+
+			"stderr: %q, error: %v", externalSwitch, stdout, stderr, err)
 	}
 
 	// Add external interface as a logical port to external_switch.
@@ -283,8 +285,8 @@ func GatewayInit(clusterIPSubnet []*net.IPNet, hostSubnet *net.IPNet, joinSubnet
 
 	stdout, stderr, err = RunOVNNbctl(cmdArgs...)
 	if err != nil {
-		return fmt.Errorf("Failed to add logical port to switch, stdout: %q, "+
-			"stderr: %q, error: %v", stdout, stderr, err)
+		return fmt.Errorf("failed to add logical port to switch %s, stdout: %q, "+
+			"stderr: %q, error: %v", externalSwitch, stdout, stderr, err)
 	}
 
 	// Connect GR to external_switch with mac address of external interface
@@ -299,8 +301,8 @@ func GatewayInit(clusterIPSubnet []*net.IPNet, hostSubnet *net.IPNet, joinSubnet
 		"--", "set", "logical_router_port", "rtoe-"+gatewayRouter,
 		"external-ids:gateway-physical-ip=yes")
 	if err != nil {
-		return fmt.Errorf("Failed to add logical port to router, stdout: %q, "+
-			"stderr: %q, error: %v", stdout, stderr, err)
+		return fmt.Errorf("failed to add logical port to router %s, stdout: %q, "+
+			"stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
 	}
 
 	// Connect the external_switch to the router.
@@ -310,8 +312,8 @@ func GatewayInit(clusterIPSubnet []*net.IPNet, hostSubnet *net.IPNet, joinSubnet
 		"options:router-port=rtoe-"+gatewayRouter,
 		"addresses="+"\""+l3GatewayConfig.MACAddress.String()+"\"")
 	if err != nil {
-		return fmt.Errorf("Failed to add logical port to router, stdout: %q, "+
-			"stderr: %q, error: %v", stdout, stderr, err)
+		return fmt.Errorf("failed to add logical port to router %s, stdout: %q, "+
+			"stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
 	}
 
 	// Add a static route in GR with physical gateway as the default next hop.
@@ -325,9 +327,9 @@ func GatewayInit(clusterIPSubnet []*net.IPNet, hostSubnet *net.IPNet, joinSubnet
 		gatewayRouter, allIPs, l3GatewayConfig.NextHop.String(),
 		fmt.Sprintf("rtoe-%s", gatewayRouter))
 	if err != nil {
-		return fmt.Errorf("Failed to add a static route in GR with physical "+
+		return fmt.Errorf("failed to add a static route in GR %s with physical "+
 			"gateway as the default next hop, stdout: %q, "+
-			"stderr: %q, error: %v", stdout, stderr, err)
+			"stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
 	}
 
 	// Add source IP address based routes in distributed router
@@ -336,9 +338,9 @@ func GatewayInit(clusterIPSubnet []*net.IPNet, hostSubnet *net.IPNet, joinSubnet
 		"--policy=src-ip", "lr-route-add", k8sClusterRouter,
 		hostSubnet.String(), gwLRPIp.String())
 	if err != nil {
-		return fmt.Errorf("Failed to add source IP address based "+
-			"routes in distributed router, stdout: %q, "+
-			"stderr: %q, error: %v", stdout, stderr, err)
+		return fmt.Errorf("failed to add source IP address based "+
+			"routes in distributed router %s, stdout: %q, "+
+			"stderr: %q, error: %v", k8sClusterRouter, stdout, stderr, err)
 	}
 
 	// Default SNAT rules.
@@ -346,8 +348,8 @@ func GatewayInit(clusterIPSubnet []*net.IPNet, hostSubnet *net.IPNet, joinSubnet
 		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-nat-add",
 			gatewayRouter, "snat", l3GatewayConfig.IPAddress.IP.String(), entry.String())
 		if err != nil {
-			return fmt.Errorf("Failed to create default SNAT rules, stdout: %q, "+
-				"stderr: %q, error: %v", stdout, stderr, err)
+			return fmt.Errorf("failed to create default SNAT rules for gateway router %s, "+
+				"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
 		}
 	}
 
