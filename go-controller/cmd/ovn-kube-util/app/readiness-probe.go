@@ -103,11 +103,20 @@ func ovnSBDBReadiness(target string) error {
 }
 
 func ovnNorthdReadiness(target string) error {
-	_, _, err := util.RunOVNAppctlWithTimeout(5, "-t", target, "version")
+	stdout, _, err := util.RunOVNAppctlWithTimeout(5, "-t", target, "status")
 	if err != nil {
-		return fmt.Errorf("failed to get version from %s: (%v)", target, err)
+		return fmt.Errorf("failed to get status from %s: (%v)", target, err)
+	} else if strings.HasPrefix(stdout, "Status") {
+		output := strings.Split(stdout, ":")
+		status := strings.TrimSpace(strings.Trim(output[1], "\n"))
+		if status == "active" || status == "paused" || status == "standby" {
+			return nil
+		} else {
+			return fmt.Errorf("%s status is not active or passive or standby", target)
+		}
+	} else {
+		return fmt.Errorf("failed to get status from %s", target)
 	}
-	return nil
 }
 
 func ovnNbCtldReadiness(target string) error {
