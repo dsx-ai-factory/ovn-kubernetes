@@ -257,7 +257,7 @@ ready_to_start_node() {
   # cannot use ovsdb-client in the case of raft, since it will succeed even if one of the
   # instance of DB is up and running. HOwever, ovn-nbctl always connects to the leader in the clustered
   # database, so use it.
-  ovn-nbctl --db=${ovn_nbdb_conn} ${ovndb_ctl_ssl_opts} list NB_Global >/dev/null 2>&1
+  ovn-nbctl --db=${ovn_nbdb_conn} ${ovndb_ctl_ssl_opts} list NB_Global >/dev/null
   if [[ $? != 0 ]]; then
     return 1
   fi
@@ -394,7 +394,7 @@ check_health() {
     fi
   else
     # use ovs-appctl to do the check
-    ovs-appctl -t ${ctl_file} version &>/dev/null
+    ovs-appctl -t ${ctl_file} version >/dev/null
     if [[ $? == 0 ]]; then
       return 0
     fi
@@ -512,7 +512,7 @@ ovs-server() {
   trap 'kill $(jobs -p); exit 0' TERM
   retries=0
   while true; do
-    if /usr/share/openvswitch/scripts/ovs-ctl status &>/dev/null; then
+    if /usr/share/openvswitch/scripts/ovs-ctl status >/dev/null; then
       echo "warning: Another process is currently managing OVS, waiting 10s ..." 2>&1
       sleep 10 &
       wait
@@ -560,7 +560,7 @@ ovs-server() {
   ovs_tail_pid=$!
   sleep 10
   while true; do
-    if ! /usr/share/openvswitch/scripts/ovs-ctl status &>/dev/null; then
+    if ! /usr/share/openvswitch/scripts/ovs-ctl status >/dev/null; then
       echo "OVS seems to have crashed, exiting"
       kill ${ovs_tail_pid}
       quit
@@ -623,7 +623,6 @@ nb-ovsdb() {
     echo "The IP address of the host $(hostname) could not be determined. Exiting..."
     exit 1
   fi
-  iptables-rules ${ovn_nb_port}
 
   echo "=============== run nb_ovsdb ========== MASTER ONLY"
   run_as_ovs_user_if_needed \
@@ -658,7 +657,6 @@ sb-ovsdb() {
     echo "The IP address of the host $(hostname) could not be determined. Exiting..."
     exit 1
   fi
-  iptables-rules ${ovn_sb_port}
 
   echo "=============== run sb_ovsdb ========== MASTER ONLY"
   run_as_ovs_user_if_needed \
@@ -725,15 +723,6 @@ run-ovn-northd() {
 
   process_healthy ovn-northd ${ovn_tail_pid}
   exit 8
-}
-
-# make sure the specified dport is open
-iptables-rules() {
-  dport=$1
-  iptables -C INPUT -p tcp -m tcp --dport $dport -m conntrack --ctstate NEW -j ACCEPT
-  if [[ $? != 0 ]]; then
-    iptables -I INPUT -p tcp -m tcp --dport $dport -m conntrack --ctstate NEW -j ACCEPT
-  fi
 }
 
 # v3 - run ovnkube --master
@@ -857,15 +846,9 @@ ovn-node() {
   echo "=============== ovn-node - (ovn-node  wait for ovn-controller.pid)"
   wait_for_event process_ready ovn-controller
 
-  # Ensure GENEVE's UDP port isn't firewalled. We support specifying non-default encap port.
-  /usr/share/openvswitch/scripts/ovs-ctl --protocol=udp --dport=${ovn_encap_port} enable-protocol
-
   hybrid_overlay_flags=
   if [[ -n "${ovn_hybrid_overlay_enable}" ]]; then
     hybrid_overlay_flags="--enable-hybrid-overlay"
-    # Ensure VXLAN's UDP port isn't firewalled. Non-default VXLAN ports for
-    # hybrid overlay are not currently supported.
-    /usr/share/openvswitch/scripts/ovs-ctl --protocol=udp --dport=4789 enable-protocol
   fi
 
   OVN_NODE_PORT="--nodeport"

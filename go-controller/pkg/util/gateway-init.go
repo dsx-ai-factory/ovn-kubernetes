@@ -127,12 +127,18 @@ func getGatewayLoadBalancers(gatewayRouter string) (string, string, string, erro
 // GatewayInit creates a gateway router for the local chassis.
 func GatewayInit(clusterIPSubnet []*net.IPNet, hostSubnet *net.IPNet, joinSubnet *net.IPNet, nodeName string, l3GatewayConfig *L3GatewayConfig, sctpSupport bool) error {
 	k8sClusterRouter := GetK8sClusterRouter()
+
 	// Create a gateway router.
 	gatewayRouter := GWRouterPrefix + nodeName
+	physicalIPs := make([]string, len(l3GatewayConfig.IPAddresses))
+	for i, ip := range l3GatewayConfig.IPAddresses {
+		physicalIPs[i] = ip.IP.String()
+	}
 	stdout, stderr, err := RunOVNNbctl("--", "--may-exist", "lr-add",
 		gatewayRouter, "--", "set", "logical_router", gatewayRouter,
 		"options:chassis="+l3GatewayConfig.ChassisID,
-		"external_ids:physical_ip="+l3GatewayConfig.IPAddress.IP.String())
+		"external_ids:physical_ip="+physicalIPs[0],
+		"external_ids:physical_ips="+strings.Join(physicalIPs, ","))
 	if err != nil {
 		return fmt.Errorf("failed to create logical router %v, stdout: %q, "+
 			"stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
@@ -294,12 +300,19 @@ func GatewayInit(clusterIPSubnet []*net.IPNet, hostSubnet *net.IPNet, joinSubnet
 	// restarts a new br-local bridge will be created with a new `nicMacAddress`. As a result,
 	// direct addition of logical_router_port with --may-exists will not work since the MAC
 	// has changed. So, we need to delete that port, if it exists, and it back.
-	stdout, stderr, err = RunOVNNbctl(
-		"--", "--if-exists", "lrp-del", "rtoe-"+gatewayRouter,
-		"--", "lrp-add", gatewayRouter, "rtoe-"+gatewayRouter,
-		l3GatewayConfig.MACAddress.String(), l3GatewayConfig.IPAddress.String(),
+	cmdArgs = []string{
+		"--", "--if-exists", "lrp-del", "rtoe-" + gatewayRouter,
+		"--", "lrp-add", gatewayRouter, "rtoe-" + gatewayRouter,
+		l3GatewayConfig.MACAddress.String(),
+	}
+	for _, ip := range l3GatewayConfig.IPAddresses {
+		cmdArgs = append(cmdArgs, ip.String())
+	}
+	cmdArgs = append(cmdArgs,
 		"--", "set", "logical_router_port", "rtoe-"+gatewayRouter,
 		"external-ids:gateway-physical-ip=yes")
+
+	stdout, stderr, err = RunOVNNbctl(cmdArgs...)
 	if err != nil {
 		return fmt.Errorf("failed to add logical port to router %s, stdout: %q, "+
 			"stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
@@ -316,20 +329,22 @@ func GatewayInit(clusterIPSubnet []*net.IPNet, hostSubnet *net.IPNet, joinSubnet
 			"stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
 	}
 
-	// Add a static route in GR with physical gateway as the default next hop.
-	var allIPs string
-	if utilnet.IsIPv6(l3GatewayConfig.NextHop) {
-		allIPs = "::/0"
-	} else {
-		allIPs = "0.0.0.0/0"
-	}
-	stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
-		gatewayRouter, allIPs, l3GatewayConfig.NextHop.String(),
-		fmt.Sprintf("rtoe-%s", gatewayRouter))
-	if err != nil {
-		return fmt.Errorf("failed to add a static route in GR %s with physical "+
-			"gateway as the default next hop, stdout: %q, "+
-			"stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
+	// Add static routes in GR with physical gateway as the default next hop.
+	for _, nextHop := range l3GatewayConfig.NextHops {
+		var allIPs string
+		if utilnet.IsIPv6(nextHop) {
+			allIPs = "::/0"
+		} else {
+			allIPs = "0.0.0.0/0"
+		}
+		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
+			gatewayRouter, allIPs, nextHop.String(),
+			fmt.Sprintf("rtoe-%s", gatewayRouter))
+		if err != nil {
+			return fmt.Errorf("Failed to add a static route in GR %s with physical "+
+				"gateway as the default next hop, stdout: %q, "+
+				"stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
+		}
 	}
 
 	// Add source IP address based routes in distributed router
@@ -344,9 +359,23 @@ func GatewayInit(clusterIPSubnet []*net.IPNet, hostSubnet *net.IPNet, joinSubnet
 	}
 
 	// Default SNAT rules.
+	var v4ExternalIP, v6ExternalIP string
+	for _, ip := range l3GatewayConfig.IPAddresses {
+		if utilnet.IsIPv6(ip.IP) {
+			v6ExternalIP = ip.IP.String()
+		} else {
+			v4ExternalIP = ip.IP.String()
+		}
+	}
 	for _, entry := range clusterIPSubnet {
+		var externalIP string
+		if utilnet.IsIPv6CIDR(entry) {
+			externalIP = v6ExternalIP
+		} else {
+			externalIP = v4ExternalIP
+		}
 		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-nat-add",
-			gatewayRouter, "snat", l3GatewayConfig.IPAddress.IP.String(), entry.String())
+			gatewayRouter, "snat", externalIP, entry.String())
 		if err != nil {
 			return fmt.Errorf("failed to create default SNAT rules for gateway router %s, "+
 				"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
@@ -357,11 +386,11 @@ func GatewayInit(clusterIPSubnet []*net.IPNet, hostSubnet *net.IPNet, joinSubnet
 }
 
 // LocalGatewayInit creates a gateway router to access local service.
-func LocalGatewayInit(clusterIPSubnet []*net.IPNet, joinSubnet *net.IPNet, nodeName string,
+func LocalGatewayInit(clusterIPSubnet []*net.IPNet, joinSubnet, nodeSubnet *net.IPNet, nodeName string,
 	l3GatewayConfig *L3GatewayConfig) error {
 	var nicIP, defaultGW net.IP
 	var nicIPMask net.IPMask
-	isSubnetIPv6 := utilnet.IsIPv6(l3GatewayConfig.NextHop)
+	isSubnetIPv6 := utilnet.IsIPv6CIDR(nodeSubnet)
 	if isSubnetIPv6 {
 		nicIP = net.ParseIP(V6LocalnetGatewayIP)
 		defaultGW = net.ParseIP(V6LocalnetGatewayNextHop)
@@ -419,12 +448,30 @@ func LocalGatewayInit(clusterIPSubnet []*net.IPNet, joinSubnet *net.IPNet, nodeN
 		}
 	}
 
+	var prefix string
+	for _, nicIP := range l3GatewayConfig.IPAddresses {
+		if utilnet.IsIPv6CIDR(nodeSubnet) {
+			if utilnet.IsIPv6(nicIP.IP) {
+				prefix = nicIP.IP.String() + "/128"
+				break
+			}
+		} else {
+			if !utilnet.IsIPv6(nicIP.IP) {
+				prefix = nicIP.IP.String() + "/32"
+				break
+			}
+		}
+	}
+	if prefix == "" {
+		return fmt.Errorf("configuration error: no NIC IP of same family as node subnet")
+	}
+
 	stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
-		k8sClusterRouter, l3GatewayConfig.IPAddress.IP.String()+"/32", gwLRPIp.String())
+		k8sClusterRouter, prefix, gwLRPIp.String())
 	if err != nil {
 		return fmt.Errorf("Failed to add a route to nodeIP %q in router "+
 			"with local_node GR as the nexthop, stdout: %q, stderr: %q, error: %v",
-			l3GatewayConfig.IPAddress.IP.String(), stdout, stderr, err)
+			prefix, stdout, stderr, err)
 	}
 
 	// Create the external switch for the physical interface to connect to.

@@ -16,7 +16,6 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog"
 )
@@ -28,7 +27,7 @@ const (
 
 // NodeController is the node hybrid overlay controller
 type NodeController struct {
-	kube        *kube.Kube
+	kube        kube.Interface
 	nodeName    string
 	initialized bool
 	drMAC       string
@@ -39,9 +38,9 @@ type NodeController struct {
 // It initializes the node it is currently running on. On Linux, this means:
 //  1. Setting up a VXLAN gateway and hooking to the OVN gateway
 //  2. Setting back annotations about its VTEP and gateway MAC address to its own object
-func NewNode(clientset kubernetes.Interface, nodeName string) (*NodeController, error) {
+func NewNode(kube kube.Interface, nodeName string) (*NodeController, error) {
 	node := &NodeController{
-		kube:     &kube.Kube{KClient: clientset},
+		kube:     kube,
 		nodeName: nodeName,
 	}
 	if err := node.ensureHybridOverlayBridge(); err != nil {
@@ -99,14 +98,14 @@ func podChanged(pod1 *kapi.Pod, pod2 *kapi.Pod, nodeName string) bool {
 	podIPs2, mac2, _ := getPodDetails(pod2, nodeName)
 
 	if len(podIPs1) != len(podIPs2) || !reflect.DeepEqual(mac1, mac2) {
-		return false
+		return true
 	}
 	for i := range podIPs1 {
 		if podIPs1[i].String() != podIPs2[i].String() {
-			return false
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 func (n *NodeController) syncPods(pods []interface{}) {

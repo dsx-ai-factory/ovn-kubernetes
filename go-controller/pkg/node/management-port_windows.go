@@ -18,15 +18,21 @@ import (
 // createPlatformManagementPort creates a management port attached to the node switch
 // that lets the node access its pods via their private IP address. This is used
 // for health checking and other management tasks.
-func createPlatformManagementPort(interfaceName string, interfaceIP *net.IPNet, routerIP net.IP,
-	routerMAC net.HardwareAddr, stopChan chan struct{}) error {
+func createPlatformManagementPort(interfaceName string, hostSubnets []*net.IPNet, stopChan chan struct{}) error {
+	if len(hostSubnets) != 1 || !utilnet.IsIPv6CIDR(hostSubnets[0]) {
+		klog.Fatal("IPv6/Dual-stack not supported on Windows")
+	}
+
+	gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnets[0])
+	mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnets[0])
+
 	// Up the interface.
 	_, _, err := util.RunPowershell("Enable-NetAdapter", "-IncludeHidden", interfaceName)
 	if err != nil {
 		return err
 	}
 
-	//check if interface already exists
+	// Check if interface already exists
 	ifAlias := fmt.Sprintf("-InterfaceAlias %s", interfaceName)
 	_, _, err = util.RunPowershell("Get-NetIPAddress", ifAlias)
 	if err == nil {
@@ -39,9 +45,9 @@ func createPlatformManagementPort(interfaceName string, interfaceIP *net.IPNet, 
 	}
 
 	// Assign IP address to the internal interface.
-	portPrefix, _ := interfaceIP.Mask.Size()
+	portPrefix, _ := mgmtIfAddr.Mask.Size()
 	_, _, err = util.RunPowershell("New-NetIPAddress",
-		fmt.Sprintf("-IPAddress %s", interfaceIP.IP),
+		fmt.Sprintf("-IPAddress %s", mgmtIfAddr.IP),
 		fmt.Sprintf("-PrefixLength %d", portPrefix),
 		ifAlias)
 	if err != nil {
@@ -70,13 +76,13 @@ func createPlatformManagementPort(interfaceName string, interfaceIP *net.IPNet, 
 	interfaceIndex := stdout
 
 	for _, subnet := range config.Default.ClusterSubnets {
-		err = addRoute(subnet.CIDR, routerIP, interfaceIndex)
+		err = addRoute(subnet.CIDR, gwIfAddr.IP, interfaceIndex)
 		if err != nil {
 			return err
 		}
 	}
 	for _, subnet := range config.Kubernetes.ServiceCIDRs {
-		err = addRoute(subnet, routerIP, interfaceIndex)
+		err = addRoute(subnet, gwIfAddr.IP, interfaceIndex)
 		if err != nil {
 			return err
 		}

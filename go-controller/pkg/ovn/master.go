@@ -20,6 +20,7 @@ import (
 	"k8s.io/klog"
 	utilnet "k8s.io/utils/net"
 
+	homaster "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -161,6 +162,13 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	if err := oc.SetupMaster(masterNodeName); err != nil {
 		klog.Errorf("Failed to setup master (%v)", err)
 		return err
+	}
+
+	if config.HybridOverlay.Enabled {
+		if err := homaster.StartMaster(oc.kube, oc.watchFactory); err != nil {
+			klog.Errorf("Failed to set up hybrid overlay master: %v", err)
+			return err
+		}
 	}
 
 	return nil
@@ -332,18 +340,17 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, subnet *net.IPNet)
 		}
 	}
 
-	_, portIP := util.GetNodeWellKnownAddresses(subnet)
-
 	// Create this node's management logical port on the node switch
+	mgmtIfAddr := util.GetNodeManagementIfAddr(subnet)
 	stdout, stderr, err := util.RunOVNNbctl(
 		"--", "--may-exist", "lsp-add", node.Name, "k8s-"+node.Name,
-		"--", "lsp-set-addresses", "k8s-"+node.Name, macAddress.String()+" "+portIP.IP.String())
+		"--", "lsp-set-addresses", "k8s-"+node.Name, macAddress.String()+" "+mgmtIfAddr.IP.String())
 	if err != nil {
 		klog.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
 	}
 
-	if err := addAllowACLFromNode(node.Name, portIP.IP); err != nil {
+	if err := addAllowACLFromNode(node.Name, mgmtIfAddr.IP); err != nil {
 		return err
 	}
 
@@ -374,7 +381,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 
 	// Add local only gateway to allow local service access
 	if l3GatewayConfig.Mode == config.GatewayModeShared {
-		err = util.LocalGatewayInit(clusterSubnets, joinSubnet, node.Name, l3GatewayConfig)
+		err = util.LocalGatewayInit(clusterSubnets, joinSubnet, subnet, node.Name, l3GatewayConfig)
 		if err != nil {
 			return err
 		}
@@ -400,13 +407,15 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 }
 
 func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.IPNet) error {
-	firstIP, secondIP := util.GetNodeWellKnownAddresses(hostsubnet)
-	nodeLRPMAC := util.IPAddrToHWAddr(firstIP.IP)
+	gwIfAddr := util.GetNodeGatewayIfAddr(hostsubnet)
+	mgmtIfAddr := util.GetNodeManagementIfAddr(hostsubnet)
+	hybridOverlayIfAddr := util.GetNodeHybridOverlayIfAddr(hostsubnet)
+	nodeLRPMAC := util.IPAddrToHWAddr(gwIfAddr.IP)
 	clusterRouter := util.GetK8sClusterRouter()
 
 	// Create a router port and provide it the first address on the node's host subnet
 	_, stderr, err := util.RunOVNNbctl("--may-exist", "lrp-add", clusterRouter, "rtos-"+nodeName,
-		nodeLRPMAC.String(), firstIP.String())
+		nodeLRPMAC.String(), gwIfAddr.String())
 	if err != nil {
 		klog.Errorf("Failed to add logical port to router, stderr: %q, error: %v", stderr, err)
 		return err
@@ -423,10 +432,9 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 			"other-config:ipv6_prefix="+hostsubnet.IP.String(),
 		)
 	} else {
-		excludeIPs := secondIP.IP.String()
+		excludeIPs := mgmtIfAddr.IP.String()
 		if config.HybridOverlay.Enabled {
-			thirdIP := util.NextIP(secondIP.IP)
-			excludeIPs += ".." + thirdIP.String()
+			excludeIPs += ".." + hybridOverlayIfAddr.IP.String()
 		}
 		args = append(args,
 			"other-config:subnet="+hostsubnet.String(),
@@ -451,11 +459,11 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 
 		// Configure querier only if we have an IPv4 address, otherwise
 		// disable querier.
-		if !utilnet.IsIPv6(firstIP.IP) {
+		if !utilnet.IsIPv6(gwIfAddr.IP) {
 			stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
 				nodeName, "other-config:mcast_querier=\"true\"",
 				"other-config:mcast_eth_src=\""+nodeLRPMAC.String()+"\"",
-				"other-config:mcast_ip4_src=\""+firstIP.IP.String()+"\"")
+				"other-config:mcast_ip4_src=\""+gwIfAddr.IP.String()+"\"")
 			if err != nil {
 				klog.Errorf("Failed to enable IGMP Querier on logical switch %v, stdout: %q, stderr: %q, error: %v",
 					nodeName, stdout, stderr, err)
@@ -563,10 +571,10 @@ func (oc *Controller) addNodeAnnotations(node *kapi.Node, subnet *net.IPNet) err
 	return nil
 }
 
-func (oc *Controller) addNode(node *kapi.Node) (hostsubnet *net.IPNet, err error) {
+func (oc *Controller) addNode(node *kapi.Node) (*net.IPNet, error) {
 	oc.clearInitialNodeNetworkUnavailableCondition(node, nil)
 
-	hostsubnet, _ = util.ParseNodeHostSubnetAnnotation(node)
+	hostsubnet, _ := util.ParseNodeHostSubnetAnnotation(node)
 	if hostsubnet != nil {
 		// Node already has subnet assigned; ensure its logical network is set up
 		return hostsubnet, oc.ensureNodeLogicalNetwork(node.Name, hostsubnet)

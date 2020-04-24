@@ -16,12 +16,8 @@ const (
 	k8sMgmtIntfName = "ovn-k8s-mp0"
 )
 
-func (n *OvnNode) createManagementPort(localSubnet *net.IPNet, nodeAnnotator kube.Annotator,
+func (n *OvnNode) createManagementPort(hostSubnets []*net.IPNet, nodeAnnotator kube.Annotator,
 	waiter *startupWaiter) error {
-	// Retrieve the routerIP and mangementPortIP for a given localSubnet
-	routerIP, portIP := util.GetNodeWellKnownAddresses(localSubnet)
-	routerMAC := util.IPAddrToHWAddr(routerIP.IP)
-
 	// Kubernetes emits events when pods are created. The event will contain
 	// only lowercase letters of the hostname even though the kubelet is
 	// started with a hostname that contains lowercase and uppercase letters.
@@ -32,16 +28,9 @@ func (n *OvnNode) createManagementPort(localSubnet *net.IPNet, nodeAnnotator kub
 	// Until the above is changed, switch to a lowercase hostname
 	nodeName := strings.ToLower(n.name)
 
-	// Make sure br-int is created.
-	stdout, stderr, err := util.RunOVSVsctl("--", "--may-exist", "add-br", "br-int")
-	if err != nil {
-		klog.Errorf("Failed to create br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
-		return err
-	}
-
 	// Create a OVS internal interface.
 	legacyMgmtIntfName := util.GetLegacyK8sMgmtIntfName(nodeName)
-	stdout, stderr, err = util.RunOVSVsctl(
+	stdout, stderr, err := util.RunOVSVsctl(
 		"--", "--if-exists", "del-port", "br-int", legacyMgmtIntfName,
 		"--", "--may-exist", "add-port", "br-int", k8sMgmtIntfName,
 		"--", "set", "interface", k8sMgmtIntfName,
@@ -65,7 +54,7 @@ func (n *OvnNode) createManagementPort(localSubnet *net.IPNet, nodeAnnotator kub
 		return err
 	}
 
-	err = createPlatformManagementPort(k8sMgmtIntfName, portIP, routerIP.IP, routerMAC, n.stopChan)
+	err = createPlatformManagementPort(k8sMgmtIntfName, hostSubnets, n.stopChan)
 	if err != nil {
 		return err
 	}

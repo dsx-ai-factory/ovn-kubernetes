@@ -1,6 +1,6 @@
 module github.com/ovn-org/ovn-kubernetes/go-controller
 
-go 1.12
+go 1.13
 
 require (
 	github.com/Mellanox/sriovnet v0.0.0-20190516174650-73402dc8fcaa
@@ -20,7 +20,7 @@ require (
 	github.com/onsi/gomega v1.8.1
 	github.com/prometheus/client_golang v1.2.1
 	github.com/satori/go.uuid v0.0.0-20181028125025-b2ce2384e17b // indirect
-	github.com/urfave/cli v1.22.1
+	github.com/urfave/cli/v2 v2.2.0
 	github.com/vishvananda/netlink v0.0.0-20181108222139-023a6dafdcdf
 	golang.org/x/time v0.0.0-20191024005414-555d28b269f0 // indirect
 	gopkg.in/fsnotify/fsnotify.v1 v1.4.7

@@ -14,20 +14,19 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog"
 )
 
 // MasterController is the master hybrid overlay controller
 type MasterController struct {
-	kube      *kube.Kube
+	kube      kube.Interface
 	allocator *allocator.SubnetAllocator
 }
 
 // NewMaster a new master controller that listens for node events
-func NewMaster(clientset kubernetes.Interface) (*MasterController, error) {
+func NewMaster(kube kube.Interface) (*MasterController, error) {
 	m := &MasterController{
-		kube:      &kube.Kube{KClient: clientset},
+		kube:      kube,
 		allocator: allocator.NewSubnetAllocator(),
 	}
 
@@ -59,9 +58,14 @@ func NewMaster(clientset kubernetes.Interface) (*MasterController, error) {
 	return m, nil
 }
 
-// Start is the top level function to run hybrid overlay in master mode
-func (m *MasterController) Start(wf *factory.WatchFactory) error {
-	return houtil.StartNodeWatch(m, wf)
+// StartMaster creates and starts the hybrid overlay master controller
+func StartMaster(kube kube.Interface, wf *factory.WatchFactory) error {
+	klog.Infof("Starting hybrid overlay master...")
+	master, err := NewMaster(kube)
+	if err != nil {
+		return err
+	}
+	return houtil.StartNodeWatch(master, wf)
 }
 
 // hybridOverlayNodeEnsureSubnet allocates a subnet and sets the
@@ -118,11 +122,7 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 	portMAC, portIP, _ := util.GetPortAddresses(portName)
 	if portMAC == nil || portIP == nil {
 		if portIP == nil {
-			// Get the 3rd address in the node's subnet; the first is taken
-			// by the k8s-cluster-router port, the second by the management port
-			first := util.NextIP(subnet.IP)
-			second := util.NextIP(first)
-			portIP = util.NextIP(second)
+			portIP = util.GetNodeHybridOverlayIfAddr(subnet).IP
 		}
 		if portMAC == nil {
 			portMAC = util.IPAddrToHWAddr(portIP)

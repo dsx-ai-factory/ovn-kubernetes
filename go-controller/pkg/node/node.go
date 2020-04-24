@@ -12,6 +12,7 @@ import (
 
 	"k8s.io/klog"
 
+	honode "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -206,7 +207,7 @@ func (n *OvnNode) Start() error {
 	}
 
 	// Initialize management port resources on the node
-	if err := n.createManagementPort(subnet, nodeAnnotator, waiter); err != nil {
+	if err := n.createManagementPort([]*net.IPNet{subnet}, nodeAnnotator, waiter); err != nil {
 		return err
 	}
 
@@ -221,6 +222,12 @@ func (n *OvnNode) Start() error {
 		return err
 	}
 	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
+
+	if config.HybridOverlay.Enabled {
+		if err := honode.StartNode(n.name, n.Kube, n.watchFactory); err != nil {
+			return err
+		}
+	}
 
 	if err := level.Set(strconv.Itoa(config.Logging.Level)); err != nil {
 		klog.Errorf("reset of initial klog \"loglevel\" failed, err: %v", err)
