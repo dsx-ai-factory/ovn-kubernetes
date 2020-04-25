@@ -198,7 +198,6 @@ ovsdb-raft() {
   rm -f ${ovn_db_pidfile}
 
   verify-ovsdb-raft
-  iptables-rules ${raft_port}
 
   echo "=============== run ${db}-ovsdb-raft pod ${POD_NAME} =========="
 
