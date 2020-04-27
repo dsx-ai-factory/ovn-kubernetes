@@ -5,6 +5,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
+	"k8s.io/klog"
 )
 
 var (
@@ -50,4 +51,21 @@ func RegisterOvnMetrics() {
 		},
 		func() float64 { return 1 },
 	))
+	prometheus.MustRegister(prometheus.NewGaugeFunc(
+		prometheus.GaugeOpts{
+			Namespace: MetricOvnNamespace,
+			Subsystem: MetricOvnSubsystemController,
+			Name:      "geneve_ports_total",
+			Help:      "Total number of OVN geneve ports on the node",
+		}, func() float64 {
+			stdout, stderr, err := util.RunOVSVsctl("--no-headings", "--data=bare", "--format=csv",
+				"--columns=name", "find", "interface", "type=geneve")
+			if err != nil {
+				klog.Errorf("failed to get geneve port count, stderr(%s): (%v)",
+					stderr, err)
+				return 0
+			}
+			ports := strings.Split(stdout, "\n")
+			return float64(len(ports))
+		}))
 }

@@ -18,6 +18,7 @@ const (
 	MetricOvnkubeSubsystemNode   = "node"
 	MetricOvnNamespace           = "ovn"
 	MetricOvnSubsystemDBRaft     = "db_raft"
+	MetricOvnSubsystemController = "controller"
 )
 
 // Build information. Populated at build-time.
