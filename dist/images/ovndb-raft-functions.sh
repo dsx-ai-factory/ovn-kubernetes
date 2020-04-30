@@ -236,6 +236,9 @@ ovsdb-raft() {
   else
     # join the remote cluster node if the DB is not created
     if [[ "${initialize}" == "true" ]]; then
+      # delete standalone DB file if it exists, this is to work around a bug in ovs-lib
+      # in order to join the cluster successfully
+      rm -f ${ovn_db_file}
       wait_for_event ready_to_join_cluster ${db} ${port}
     fi
     run_as_ovs_user_if_needed \
