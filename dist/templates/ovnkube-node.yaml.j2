@@ -37,8 +37,8 @@ spec:
       # as all pods.
       serviceAccountName: ovn
       hostNetwork: true
+      priorityClassName: "system-node-critical"
       containers:
-
       - name: ovn-controller
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"

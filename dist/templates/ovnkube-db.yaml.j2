@@ -61,6 +61,8 @@ spec:
       # as all pods.
       serviceAccountName: ovn
       hostNetwork: true
+      priorityClassName: "system-cluster-critical"
+
       containers:
       # firewall rules for ovn - assumed to be setup
       # iptables -A OS_FIREWALL_ALLOW -p tcp -m state --state NEW -m tcp --dport 6641 -j ACCEPT
