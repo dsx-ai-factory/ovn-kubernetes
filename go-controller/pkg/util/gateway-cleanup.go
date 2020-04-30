@@ -104,7 +104,7 @@ func localGatewayCleanup(nodeName, clusterRouter string) error {
 	routerIPNetwork, stderr, err := RunOVNNbctl("--if-exist", "get",
 		"logical_router_port", "rtoj-"+gatewayRouter, "networks")
 	if err != nil {
-		return fmt.Errorf("Failed to get logical router port rtoj-%s, stderr: %q, "+
+		return fmt.Errorf("failed to get logical router port rtoj-%s, stderr: %q, "+
 			"error: %v", gatewayRouter, stderr, err)
 	}
 
@@ -122,7 +122,7 @@ func localGatewayCleanup(nodeName, clusterRouter string) error {
 	_, stderr, err = RunOVNNbctl("--if-exist", "lr-del",
 		gatewayRouter)
 	if err != nil {
-		return fmt.Errorf("Failed to delete gateway router %s, stderr: %q, "+
+		return fmt.Errorf("failed to delete gateway router %s, stderr: %q, "+
 			"error: %v", gatewayRouter, stderr, err)
 	}
 
@@ -131,7 +131,7 @@ func localGatewayCleanup(nodeName, clusterRouter string) error {
 	_, stderr, err = RunOVNNbctl("--if-exist", "ls-del",
 		externalSwitch)
 	if err != nil {
-		return fmt.Errorf("Failed to delete external switch %s, stderr: %q, "+
+		return fmt.Errorf("failed to delete external switch %s, stderr: %q, "+
 			"error: %v", externalSwitch, stderr, err)
 	}
 	return nil
