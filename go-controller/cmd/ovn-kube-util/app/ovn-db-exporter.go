@@ -379,6 +379,7 @@ var OvnDBExporterCommand = cli.Command{
 		prometheus.MustRegister(metricOVNDBLeader)
 		prometheus.MustRegister(metricOVNDBMonitor)
 		prometheus.MustRegister(metricOVNDBSessions)
+		prometheus.MustRegister(metricDBSize)
 		prometheus.MustRegister(prometheus.NewGaugeFunc(
 			prometheus.GaugeOpts{
 				Namespace: metrics.MetricOvnNamespace,
