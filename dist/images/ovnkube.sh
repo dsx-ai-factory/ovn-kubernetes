@@ -62,6 +62,7 @@ fi
 # OVN_NB_RAFT_ELECTION_TIMER - ovn north db election timer in ms (default 1000)
 # OVN_SB_RAFT_ELECTION_TIMER - ovn south db election timer in ms (default 1000)
 # OVN_SSL_ENABLE - use SSL transport to NB/SB db and northd (default: no)
+# OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -162,6 +163,8 @@ ovn_sb_raft_election_timer=${OVN_SB_RAFT_ELECTION_TIMER:-1000}
 
 ovn_hybrid_overlay_enable=${OVN_HYBRID_OVERLAY_ENABLE:-}
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR:-}
+#OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
+ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-100000}
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
@@ -615,7 +618,7 @@ EOF
 
 # v3 - run nb_ovsdb in a separate container
 nb-ovsdb() {
-  trap 'kill $(jobs -p); exit 0' TERM
+  trap 'ovsdb_cleanup nb' TERM
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovnnb_db.pid
 
@@ -649,7 +652,7 @@ nb-ovsdb() {
 
 # v3 - run sb_ovsdb in a separate container
 sb-ovsdb() {
-  trap 'kill $(jobs -p); exit 0' TERM
+  trap 'ovsdb_cleanup sb' TERM
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovnsb_db.pid
 
@@ -858,9 +861,12 @@ ovn-node() {
   fi
 
   OVN_ENCAP_IP=""
-  ovn_encap_ip=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-encap-ip | tr -d '\"')
-  if [[ $? == 0 && "${ovn_encap_ip}" != "" ]]; then
-    OVN_ENCAP_IP=$(echo --encap-ip=${ovn_encap_ip})
+  ovn_encap_ip=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-encap-ip)
+  if [[ $? == 0 ]]; then
+    ovn_encap_ip=$(echo ${ovn_encap_ip} | tr -d '\"')
+    if [[ "${ovn_encap_ip}" != "" ]]; then
+      OVN_ENCAP_IP="--encap-ip=${ovn_encap_ip}"
+    fi
   fi
 
   local ovn_node_ssl_opts=""
@@ -889,6 +895,7 @@ ovn-node() {
     --pidfile ${OVN_RUNDIR}/ovnkube.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube.log \
     ${ovn_node_ssl_opts} \
+    --inactivity-probe=${ovn_remote_probe_interval} \
     --metrics-bind-address "0.0.0.0:9410" &
 
   wait_for_event attempts=3 process_ready ovnkube

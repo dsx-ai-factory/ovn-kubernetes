@@ -62,7 +62,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	const (
 		nodeName      string = "node1"
 		mgtPortMAC    string = "00:00:00:55:66:77"
-		mgtPort       string = k8sMgmtIntfName
+		mgtPort       string = util.K8sMgmtIntfName
 		legacyMgtPort string = "k8s-" + nodeName
 		mtu           string = "1400"
 	)
@@ -246,7 +246,7 @@ var _ = Describe("Management Port Operations", func() {
 
 			err := netlink.LinkAdd(&netlink.Dummy{
 				LinkAttrs: netlink.LinkAttrs{
-					Name: k8sMgmtIntfName,
+					Name: util.K8sMgmtIntfName,
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())

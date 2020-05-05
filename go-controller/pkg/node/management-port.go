@@ -11,11 +11,6 @@ import (
 	"k8s.io/klog"
 )
 
-// K8s mgmt interface name to be used as an OVS internal port on the node
-const (
-	k8sMgmtIntfName = "ovn-k8s-mp0"
-)
-
 func (n *OvnNode) createManagementPort(hostSubnets []*net.IPNet, nodeAnnotator kube.Annotator,
 	waiter *startupWaiter) error {
 	// Kubernetes emits events when pods are created. The event will contain
@@ -32,29 +27,29 @@ func (n *OvnNode) createManagementPort(hostSubnets []*net.IPNet, nodeAnnotator k
 	legacyMgmtIntfName := util.GetLegacyK8sMgmtIntfName(nodeName)
 	stdout, stderr, err := util.RunOVSVsctl(
 		"--", "--if-exists", "del-port", "br-int", legacyMgmtIntfName,
-		"--", "--may-exist", "add-port", "br-int", k8sMgmtIntfName,
-		"--", "set", "interface", k8sMgmtIntfName,
+		"--", "--may-exist", "add-port", "br-int", util.K8sMgmtIntfName,
+		"--", "set", "interface", util.K8sMgmtIntfName,
 		"type=internal", "mtu_request="+fmt.Sprintf("%d", config.Default.MTU),
 		"external-ids:iface-id=k8s-"+nodeName)
 	if err != nil {
 		klog.Errorf("Failed to add port to br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
 	}
-	macAddress, err := util.GetOVSPortMACAddress(k8sMgmtIntfName)
+	macAddress, err := util.GetOVSPortMACAddress(util.K8sMgmtIntfName)
 	if err != nil {
 		klog.Errorf("Failed to get management port MAC address: %v", err)
 		return err
 	}
 	// persist the MAC address so that upon node reboot we get back the same mac address.
-	_, stderr, err = util.RunOVSVsctl("set", "interface", k8sMgmtIntfName,
+	_, stderr, err = util.RunOVSVsctl("set", "interface", util.K8sMgmtIntfName,
 		fmt.Sprintf("mac=%s", strings.ReplaceAll(macAddress.String(), ":", "\\:")))
 	if err != nil {
 		klog.Errorf("failed to persist MAC address %q for %q: stderr:%s (%v)", macAddress.String(),
-			k8sMgmtIntfName, stderr, err)
+			util.K8sMgmtIntfName, stderr, err)
 		return err
 	}
 
-	err = createPlatformManagementPort(k8sMgmtIntfName, hostSubnets, n.stopChan)
+	err = createPlatformManagementPort(util.K8sMgmtIntfName, hostSubnets, n.stopChan)
 	if err != nil {
 		return err
 	}
@@ -70,7 +65,7 @@ func (n *OvnNode) createManagementPort(hostSubnets []*net.IPNet, nodeAnnotator k
 // managementPortReady will check to see if OpenFlow rules for management port has been created
 func managementPortReady() (bool, error) {
 	// Get the OVS interface name for the Management Port
-	ofport, _, err := util.RunOVSVsctl("--if-exists", "get", "interface", k8sMgmtIntfName, "ofport")
+	ofport, _, err := util.RunOVSVsctl("--if-exists", "get", "interface", util.K8sMgmtIntfName, "ofport")
 	if err != nil {
 		return false, nil
 	}

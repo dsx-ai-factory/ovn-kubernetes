@@ -14,6 +14,31 @@ import (
 	"k8s.io/klog"
 )
 
+const (
+	// K8sMgmtIntfName name to be used as an OVS internal port on the node
+	K8sMgmtIntfName = "ovn-k8s-mp0"
+
+	// PhysicalNetworkName is the name that maps to an OVS bridge that provides
+	// access to physical/external network
+	PhysicalNetworkName = "physnet"
+
+	// LocalNetworkName is the name that maps to an OVS bridge that provides
+	// access to local service
+	LocalNetworkName = "locnet"
+
+	// V4LocalnetGatewayIP is the SNAT IP using which host-local services are accessed
+	V4LocalnetGatewayIP = "169.254.33.2"
+	// V4LocalnetGatewayNextHop is the IP address to which packets to local services are forwarded
+	V4LocalnetGatewayNextHop      = "169.254.33.1"
+	V4LocalnetGatewaySubnetPrefix = 24
+
+	// V6LocalnetGatewayIP is the IPv6 counterpart of IPv4 constant above
+	V6LocalnetGatewayIP = "fd99::2"
+	// V6LocalnetGatewayNextHop is the IPv6 counterpart of IPv4 constant above
+	V6LocalnetGatewayNextHop      = "fd99::1"
+	V6LocalnetGatewaySubnetPrefix = 64
+)
+
 // StringArg gets the named command-line argument or returns an error if it is empty
 func StringArg(context *cli.Context, name string) (string, error) {
 	val := context.String(name)

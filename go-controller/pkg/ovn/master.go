@@ -176,10 +176,9 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 
 // SetupMaster creates the central router and load-balancers for the network
 func (oc *Controller) SetupMaster(masterNodeName string) error {
-	clusterRouter := util.GetK8sClusterRouter()
 	// Create a single common distributed router for the cluster.
-	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lr-add", clusterRouter,
-		"--", "set", "logical_router", clusterRouter, "external_ids:k8s-cluster-router=yes")
+	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lr-add", ovnClusterRouter,
+		"--", "set", "logical_router", ovnClusterRouter, "external_ids:k8s-cluster-router=yes")
 	if err != nil {
 		klog.Errorf("Failed to create a single common distributed router for the cluster, "+
 			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
@@ -201,7 +200,7 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 	// traffic between nodes.
 	if oc.multicastSupport {
 		stdout, stderr, err = util.RunOVNNbctl("--", "set", "logical_router",
-			clusterRouter, "options:mcast_relay=\"true\"")
+			ovnClusterRouter, "options:mcast_relay=\"true\"")
 		if err != nil {
 			klog.Errorf("Failed to enable IGMP relay on the cluster router, "+
 				"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
@@ -374,14 +373,14 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		return err
 	}
 
-	err = util.GatewayInit(clusterSubnets, subnet, joinSubnet, node.Name, l3GatewayConfig, oc.SCTPSupport)
+	err = gatewayInit(node.Name, clusterSubnets, []*net.IPNet{subnet}, []*net.IPNet{joinSubnet}, l3GatewayConfig, oc.SCTPSupport)
 	if err != nil {
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}
 
 	// Add local only gateway to allow local service access
 	if l3GatewayConfig.Mode == config.GatewayModeShared {
-		err = util.LocalGatewayInit(clusterSubnets, joinSubnet, subnet, node.Name, l3GatewayConfig)
+		err = localGatewayInit(clusterSubnets, joinSubnet, subnet, node.Name, l3GatewayConfig)
 		if err != nil {
 			return err
 		}
@@ -411,12 +410,11 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	mgmtIfAddr := util.GetNodeManagementIfAddr(hostsubnet)
 	hybridOverlayIfAddr := util.GetNodeHybridOverlayIfAddr(hostsubnet)
 	nodeLRPMAC := util.IPAddrToHWAddr(gwIfAddr.IP)
-	clusterRouter := util.GetK8sClusterRouter()
 
 	// Create a router port and provide it the first address on the node's host subnet
 	_, stderr, err := util.RunOVNNbctl(
 		"--if-exists", "lrp-del", "rtos-"+nodeName,
-		"--", "lrp-add", clusterRouter, "rtos-"+nodeName, nodeLRPMAC.String(), gwIfAddr.String())
+		"--", "lrp-add", ovnClusterRouter, "rtos-"+nodeName, nodeLRPMAC.String(), gwIfAddr.String())
 	if err != nil {
 		klog.Errorf("Failed to add logical port to router, stderr: %q, error: %v", stderr, err)
 		return err
@@ -658,7 +656,7 @@ func (oc *Controller) deleteNode(nodeName string, nodeSubnet, joinSubnet *net.IP
 		klog.Errorf("Error deleting node %s logical network: %v", nodeName, err)
 	}
 
-	if err := util.GatewayCleanup(nodeName); err != nil {
+	if err := gatewayCleanup(nodeName); err != nil {
 		return fmt.Errorf("Failed to clean up node %s gateway: (%v)", nodeName, err)
 	}
 
@@ -830,7 +828,7 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 		}
 		isJoinSwitch := false
 		nodeName := items[0]
-		if strings.HasPrefix(items[0], util.JoinSwitchPrefix) {
+		if strings.HasPrefix(items[0], joinSwitchPrefix) {
 			isJoinSwitch = true
 			nodeName = strings.Split(items[0], "_")[1]
 		}

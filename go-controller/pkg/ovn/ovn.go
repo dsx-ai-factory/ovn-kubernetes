@@ -542,7 +542,7 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, subnet *net.IPNet) error 
 		subnet, _ = util.ParseNodeHostSubnetAnnotation(node)
 	}
 	if l3GatewayConfig.Mode == config.GatewayModeDisabled {
-		if err := util.GatewayCleanup(node.Name); err != nil {
+		if err := gatewayCleanup(node.Name); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
 	} else if subnet != nil {
@@ -578,12 +578,12 @@ func (oc *Controller) WatchNodes() error {
 
 			err = oc.syncNodeManagementPort(node, hostSubnet)
 			if err != nil {
-				klog.Errorf("error creating management port for node %s: %v", node.Name, err)
+				klog.Warningf("error creating management port for node %s: %v", node.Name, err)
 				mgmtPortFailed.Store(node.Name, true)
 			}
 
 			if err := oc.syncNodeGateway(node, hostSubnet); err != nil {
-				klog.Errorf(err.Error())
+				klog.Warningf(err.Error())
 				gatewaysFailed.Store(node.Name, true)
 			}
 		},
@@ -643,7 +643,7 @@ func (oc *Controller) WatchNodes() error {
 			mgmtPortFailed.Delete(node.Name)
 			gatewaysFailed.Delete(node.Name)
 			// If this node was serving the external IP load balancer for services, migrate to a new node
-			if oc.defGatewayRouter == util.GWRouterPrefix+node.Name {
+			if oc.defGatewayRouter == gwRouterPrefix+node.Name {
 				delete(oc.loadbalancerGWCache, kapi.ProtocolTCP)
 				delete(oc.loadbalancerGWCache, kapi.ProtocolUDP)
 				delete(oc.loadbalancerGWCache, kapi.ProtocolSCTP)
