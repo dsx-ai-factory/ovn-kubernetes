@@ -14,6 +14,10 @@ import (
 	"k8s.io/klog"
 )
 
+const (
+	ovnNorthd = "ovn-northd"
+)
+
 // metricE2ETimestamp is a timestamp value we have persisted to nbdb. We will
 // also export a metric with the same column in sbdb. We will also bump this
 // every 30 seconds, so we can detect a hung northd.
@@ -54,6 +58,45 @@ var MetricMasterReadyDuration = prometheus.NewGauge(prometheus.GaugeOpts{
 
 var registerMasterMetricsOnce sync.Once
 var startMasterUpdaterOnce sync.Once
+
+var ovnNorthdCoverageShowCountersMap = map[string]*metricDetails{
+	"pstream_open": {
+		help: "Specifies the number of time passive connections " +
+			"were opened for the remote peer to connect.",
+	},
+	"stream_open": {
+		help: "Specifies the number of attempts to connect " +
+			"to a remote peer (active connection).",
+	},
+	"txn_success": {
+		help: "Specifies the number of times the OVSDB " +
+			"transaction has successfully completed.",
+	},
+	"txn_error": {
+		help: "Specifies the number of times the OVSDB " +
+			"transaction has errored out.",
+	},
+	"txn_uncommitted": {
+		help: "Specifies the number of times the OVSDB " +
+			"transaction were uncommitted.",
+	},
+	"txn_unchanged": {
+		help: "Specifies the number of times the OVSDB transaction " +
+			"resulted in no change to the database.",
+	},
+	"txn_incomplete": {
+		help: "Specifies the number of times the OVSDB transaction " +
+			"did not complete and the client had to re-try.",
+	},
+	"txn_aborted": {
+		help: "Specifies the number of times the OVSDB " +
+			" transaction has been aborted.",
+	},
+	"txn_try_again": {
+		help: "Specifies the number of times the OVSDB " +
+			"transaction failed and the client had to re-try.",
+	},
+}
 
 // RegisterMasterMetrics registers some ovnkube master metrics with the Prometheus
 // registry
@@ -102,6 +145,34 @@ func RegisterMasterMetrics() {
 			},
 			func() float64 { return 1 },
 		))
+		prometheus.MustRegister(prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{
+				Namespace: MetricOvnNamespace,
+				Subsystem: MetricOvnSubsystemNorthd,
+				Name:      "probe_interval",
+				Help: "The maximum number of milliseconds of idle time on connection to the OVN SB " +
+					"and NB DB before sending  an  inactivity probe message",
+			}, func() float64 {
+				stdout, stderr, err := util.RunOVNNbctlWithTimeout(5, "get", "NB_Global", ".",
+					"options:northd_probe_interval")
+				if err != nil {
+					klog.Errorf("Failed to get northd_probe_interval value "+
+						"stderr(%s) :(%v)", stderr, err)
+					return 0
+				}
+				value, err := strconv.ParseFloat(stdout, 64)
+				if err != nil {
+					klog.Errorf("Failed to convert northd-probe-interval "+
+						"into float :(%v)", err)
+					return 0
+				}
+				return value
+			},
+		))
+
+		// Register the ovn-northd coverage/show counters metrics with prometheus
+		registerCoverageShowCounters(ovnNorthd, MetricOvnNamespace, MetricOvnSubsystemNorthd)
+		go coverageShowCountersMetricsUpdater(ovnNorthd)
 	})
 }
 
