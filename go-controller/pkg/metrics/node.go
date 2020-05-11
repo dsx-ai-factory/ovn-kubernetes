@@ -23,7 +23,7 @@ var MetricCNIRequestDuration = prometheus.NewHistogramVec(prometheus.HistogramOp
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemNode,
 	Name:      "cni_request_duration_seconds",
-	Help:      "The duration of CNI server requests",
+	Help:      "The duration of CNI server requests.",
 	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
 	//labels
 	[]string{"command", "err"},
@@ -33,7 +33,7 @@ var MetricNodeReadyDuration = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemNode,
 	Name:      "ready_duration_seconds",
-	Help:      "The duration for the node to get to ready state",
+	Help:      "The duration for the node to get to ready state.",
 })
 
 var registerNodeMetricsOnce sync.Once
@@ -47,7 +47,7 @@ var ovnControllerCoverageShowCountersMap = map[string]*metricDetails{
 	"lflow_run": {
 		help: "Number of times ovn-controller has translated " +
 			"the Logical_Flow table in the OVN " +
-			"SB database into OpenFlow flows",
+			"SB database into OpenFlow flows.",
 	},
 	"rconn_sent": {
 		help: "Specifies the number of messages " +
@@ -86,23 +86,23 @@ var ovnControllerCoverageShowCountersMap = map[string]*metricDetails{
 	},
 	"txn_success": {
 		help: "Specifies the number of times the OVSDB " +
-			"transaction has successfully completed",
+			"transaction has successfully completed.",
 	},
 	"txn_error": {
 		help: "Specifies the number of times the OVSDB " +
-			"transaction has errored out",
+			"transaction has errored out.",
 	},
 	"txn_uncommitted": {
 		help: "Specifies the number of times the OVSDB " +
-			"transaction were uncommitted",
+			"transaction were uncommitted.",
 	},
 	"txn_unchanged": {
 		help: "Specifies the number of times the OVSDB transaction " +
-			"resulted in no change to the database",
+			"resulted in no change to the database.",
 	},
 	"txn_incomplete": {
 		help: "Specifies the number of times the OVSDB transaction " +
-			"did not complete and the client had to re-try",
+			"did not complete and the client had to re-try.",
 	},
 	"txn_aborted": {
 		help: "Specifies the number of times the OVSDB " +
@@ -110,12 +110,13 @@ var ovnControllerCoverageShowCountersMap = map[string]*metricDetails{
 	},
 	"txn_try_again": {
 		help: "Specifies the number of times the OVSDB " +
-			"transaction failed and the client had to re-try",
+			"transaction failed and the client had to re-try.",
 	},
 }
 
 var targetMetricMap = map[string]map[string]*metricDetails{
 	ovnController: ovnControllerCoverageShowCountersMap,
+	ovnNorthd:     ovnNorthdCoverageShowCountersMap,
 }
 
 // registerCoverageShowCounters registers coverage/show counter metrics for
@@ -171,7 +172,7 @@ func RegisterNodeMetrics() {
 				Namespace: MetricOvnkubeNamespace,
 				Subsystem: MetricOvnkubeSubsystemNode,
 				Name:      "integration_bridge_openflow_total",
-				Help:      "The total number of OpenFlow flows in the integration bridge",
+				Help:      "The total number of OpenFlow flows in the integration bridge.",
 			}, func() float64 {
 				stdout, stderr, err := util.RunOVSOfctl("-t", "5", "dump-aggregate", "br-int")
 				if err != nil {
@@ -198,7 +199,7 @@ func RegisterNodeMetrics() {
 				Subsystem: MetricOvnkubeSubsystemNode,
 				Name:      "build_info",
 				Help: "A metric with a constant '1' value labeled by version, revision, branch, " +
-					"and go version from which ovnkube was built and when and who built it",
+					"and go version from which ovnkube was built and when and who built it.",
 				ConstLabels: prometheus.Labels{
 					"version":    "0.0",
 					"revision":   Commit,
@@ -216,7 +217,7 @@ func RegisterNodeMetrics() {
 				Subsystem: MetricOvnSubsystemController,
 				Name:      "remote_probe_interval",
 				Help: "The maximum number of milliseconds of idle time on connection to " +
-					"the OVN SB DB before sending an inactivity probe message",
+					"the OVN SB DB before sending an inactivity probe message.",
 			}, func() float64 {
 				stdout, stderr, err := util.RunOVSVsctl("get", "Open_vSwitch", ".",
 					"external_ids:ovn-remote-probe-interval")
@@ -239,7 +240,7 @@ func RegisterNodeMetrics() {
 				Subsystem: MetricOvnSubsystemController,
 				Name:      "openflow_probe_interval",
 				Help: "The maximum number of milliseconds of idle time on OpenFlow connection " +
-					"to the OVS bridge before sending an inactivity probe message",
+					"to the OVS bridge before sending an inactivity probe message.",
 			}, func() float64 {
 				stdout, stderr, err := util.RunOVSVsctl("get", "Open_vSwitch", ".",
 					"external_ids:ovn-openflow-probe-interval")

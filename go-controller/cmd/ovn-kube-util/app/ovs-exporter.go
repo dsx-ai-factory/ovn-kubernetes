@@ -51,7 +51,7 @@ var OvsExporterCommand = cli.Command{
 			prometheus.GaugeOpts{
 				Namespace: metrics.MetricOvsNamespace,
 				Name:      "build_info",
-				Help:      "A metric with a constant '1' value labeled by ovs version",
+				Help:      "A metric with a constant '1' value labeled by ovs version.",
 				ConstLabels: prometheus.Labels{
 					"version": ovsVersion,
 				},

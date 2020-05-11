@@ -20,7 +20,8 @@ const (
 	MetricOvnSubsystemDBRaft     = "db_raft"
 	MetricOvnSubsystemController = "controller"
 	MetricOvsNamespace           = "ovs"
-	MetricOvsSubSystemVswitchd   = "vswitchd"
+	MetricOvsSubsystemVswitchd   = "vswitchd"
+	MetricOvnSubsystemNorthd     = "northd"
 )
 
 // Build information. Populated at build-time.
