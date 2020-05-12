@@ -3,26 +3,13 @@ package app
 import (
 	"k8s.io/klog"
 	"net/http"
-	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/urfave/cli/v2"
 	kexec "k8s.io/utils/exec"
 )
-
-var (
-	ovsVersion string
-)
-
-func getOvsVersionInfo() {
-	stdout, _, err := util.RunOVSVsctl("--version")
-	if err == nil && strings.HasPrefix(stdout, "ovs-vsctl (Open vSwitch)") {
-		ovsVersion = strings.Fields(stdout)[3]
-	}
-}
 
 var OvsExporterCommand = cli.Command{
 	Name:  "ovs-exporter",
@@ -42,22 +29,12 @@ var OvsExporterCommand = cli.Command{
 		if err := util.SetExec(kexec.New()); err != nil {
 			return err
 		}
+
 		mux := http.NewServeMux()
 		mux.Handle("/metrics", promhttp.Handler())
 
-		getOvsVersionInfo()
-		// register metrics that will be served off of /metrics path
-		prometheus.MustRegister(prometheus.NewGaugeFunc(
-			prometheus.GaugeOpts{
-				Namespace: metrics.MetricOvsNamespace,
-				Name:      "build_info",
-				Help:      "A metric with a constant '1' value labeled by ovs version.",
-				ConstLabels: prometheus.Labels{
-					"version": ovsVersion,
-				},
-			},
-			func() float64 { return 1 },
-		))
+		// register ovs metrics that will be served off of /metrics path
+		metrics.RegisterOvsMetrics()
 
 		err := http.ListenAndServe(bindAddress, mux)
 		if err != nil {

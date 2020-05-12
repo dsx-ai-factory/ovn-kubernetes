@@ -3,7 +3,6 @@ package metrics
 import (
 	"fmt"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -117,6 +116,7 @@ var ovnControllerCoverageShowCountersMap = map[string]*metricDetails{
 var targetMetricMap = map[string]map[string]*metricDetails{
 	ovnController: ovnControllerCoverageShowCountersMap,
 	ovnNorthd:     ovnNorthdCoverageShowCountersMap,
+	ovsVswitchd:   ovsVswitchdCoverageShowCountersMap,
 }
 
 // registerCoverageShowCounters registers coverage/show counter metrics for
@@ -140,12 +140,15 @@ func coverageShowCounters(target string) (map[string]string, error) {
 	var stdout, stderr string
 	var err error
 
-	if target == "ovn-controller" {
+	if target == ovnController {
 		stdout, stderr, err = util.RunOVNControllerAppCtl("coverage/show")
-	} else if target == "ovn-northd" {
+	} else if target == ovnNorthd {
 		stdout, stderr, err = util.RunOVNNorthAppCtl("coverage/show")
+	} else if target == ovsVswitchd {
+		stdout, stderr, err = util.RunOvsVswitchdAppCtl("coverage/show")
 	} else {
-		err = fmt.Errorf("target is not ovn-controller or ovn-northd")
+		err = fmt.Errorf("target is not ovn-controller or " +
+			"ovn-northd or ovs-vswitchd")
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get coverage/show output for %s "+
@@ -182,13 +185,8 @@ func RegisterNodeMetrics() {
 				}
 				for _, kvPair := range strings.Fields(stdout) {
 					if strings.HasPrefix(kvPair, "flow_count=") {
-						count, err := strconv.ParseFloat(strings.Split(kvPair, "=")[1], 64)
-						if err != nil {
-							klog.Errorf("Failed to parse flow_count value for br-int "+
-								"into float :(%v)", err)
-							return 0
-						}
-						return count
+						value := strings.Split(kvPair, "=")[1]
+						return parseMetricToFloat("integration_bridge_openflow_total", value)
 					}
 				}
 				return 0
@@ -226,13 +224,7 @@ func RegisterNodeMetrics() {
 						stderr, err)
 					return 0
 				}
-				value, err := strconv.ParseFloat(stdout, 64)
-				if err != nil {
-					klog.Errorf("Failed to convert ovn-remote-probe-interval "+
-						"value into float :(%v)", err)
-					return 0
-				}
-				return value
+				return parseMetricToFloat("ovn-remote-probe-interval", stdout)
 			}))
 		prometheus.MustRegister(prometheus.NewGaugeFunc(
 			prometheus.GaugeOpts{
@@ -249,13 +241,7 @@ func RegisterNodeMetrics() {
 						stderr, err)
 					return 0
 				}
-				value, err := strconv.ParseFloat(stdout, 64)
-				if err != nil {
-					klog.Errorf("Failed to convert ovn-openflow-probe-interval "+
-						"value into float :(%v)", err)
-					return 0
-				}
-				return value
+				return parseMetricToFloat("ovn-openflow-probe-interval", stdout)
 			}))
 
 		registerCoverageShowCounters(ovnController, MetricOvnNamespace, MetricOvnSubsystemController)
@@ -276,13 +262,9 @@ func coverageShowCountersMetricsUpdater(target string) {
 		coverageCountersMetricsMap := targetMetricMap[target]
 		for counterName, counterMetricInfo := range coverageCountersMetricsMap {
 			if value, ok := counters[counterName]; ok {
-				if count, err := strconv.ParseFloat(value, 64); err == nil {
-					counterMetricInfo.metric.Set(count)
-				} else {
-					klog.Errorf("Failed to convert %s counter value to float :(%v)",
-						counterName, err)
-					counterMetricInfo.metric.Set(0)
-				}
+				metricName := target + "_" + counterName
+				count := parseMetricToFloat(metricName, value)
+				counterMetricInfo.metric.Set(count)
 			} else {
 				counterMetricInfo.metric.Set(0)
 			}

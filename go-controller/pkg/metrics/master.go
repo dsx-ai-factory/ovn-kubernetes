@@ -3,7 +3,6 @@ package metrics
 import (
 	"fmt"
 	"runtime"
-	"strconv"
 	"sync"
 	"time"
 
@@ -160,13 +159,7 @@ func RegisterMasterMetrics() {
 						"stderr(%s) :(%v)", stderr, err)
 					return 0
 				}
-				value, err := strconv.ParseFloat(stdout, 64)
-				if err != nil {
-					klog.Errorf("Failed to convert northd-probe-interval "+
-						"into float :(%v)", err)
-					return 0
-				}
-				return value
+				return parseMetricToFloat("northd_probe_interval", stdout)
 			},
 		))
 
@@ -183,13 +176,7 @@ func scrapeOvnTimestamp() float64 {
 		klog.Errorf("failed to scrape timestamp: %s (%v)", stderr, err)
 		return 0
 	}
-
-	out, err := strconv.ParseFloat(output, 64)
-	if err != nil {
-		klog.Errorf("failed to parse timestamp %s: %v", output, err)
-		return 0
-	}
-	return out
+	return parseMetricToFloat("e2e_timestamp", output)
 }
 
 // startMasterMetricsUpdater adds a goroutine that updates a "timestamp" value in the
