@@ -34,6 +34,8 @@ the shards (which may change in the future):
   `[sig-network] Services ...` tests.)
 - shard-other
   - All remaining E2E tests that didn't match above.
+- shard-test
+  - Single E2E test that matches the name of the test specified with a regex. See bottom of this document for an example.
 - control-plane
   - All locally defined tests.
 
@@ -43,7 +45,7 @@ list of skipped tests is defined in
 [ovn-kubernetes/test/scripts/e2e-kind.sh](https://github.com/ovn-org/ovn-kubernetes/blob/master/test/scripts/e2e-kind.sh).
 
 The local tests are controlled in
-[test/scripts/e2e-kind.sh](https://github.com/ovn-org/ovn-kubernetes/blob/master/test/scripts/e2e-kind.sh)
+[test/scripts/e2e-cp.sh](https://github.com/ovn-org/ovn-kubernetes/blob/master/test/scripts/e2e-cp.sh)
 and the actual tests are defined in the directory
 [ovn-kubernetes/test/e2e/](https://github.com/ovn-org/ovn-kubernetes/tree/master/test/e2e).
 
@@ -148,7 +150,7 @@ Launch the KIND Deployment.
 
 ```
 $ pushd contrib
-$ KUBECONFIG=/home/$USER/admin.conf
+$ KUBECONFIG=${HOME}/admin.conf
 $ KIND_INSTALL_INGRESS=true ./kind.sh
 $ popd
 ```
@@ -208,5 +210,14 @@ $ make shard-np
 $ make shard-s
 $ make shard-other
 $ GITHUB_WORKSPACE=$GOPATH/src/github.com/ovn-org/ovn-kubernetes make control-plane
+$ popd
+```
+
+To run a single test instead, target the shard-test action, as follows:
+
+```
+$ cd $GOPATH/src/github.com/ovn-org/ovn-kubernetes
+$ pushd test
+$ make shard-test WHAT="should enforce egress policy allowing traffic to a server in a different namespace based on PodSelector and NamespaceSelector"
 $ popd
 ```

@@ -399,6 +399,7 @@ type ObjectCacheInterface interface {
 	GetService(namespace, name string) (*kapi.Service, error)
 	GetEndpoints(namespace string) ([]*kapi.Endpoints, error)
 	GetEndpoint(namespace, name string) (*kapi.Endpoints, error)
+	GetNamespace(name string) (*kapi.Namespace, error)
 	GetNamespaces() ([]*kapi.Namespace, error)
 }
 
@@ -410,7 +411,7 @@ const (
 	resyncInterval        = 12 * time.Hour
 	handlerAlive   uint32 = 0
 	handlerDead    uint32 = 1
-	numEventQueues int    = 10
+	numEventQueues int    = 15
 )
 
 var (
@@ -435,7 +436,7 @@ func NewWatchFactory(c kubernetes.Interface, stopChan chan struct{}) (*WatchFact
 	}
 	var err error
 	// Create shared informers we know we'll use
-	wf.informers[podType], err = newInformer(podType, wf.iFactory.Core().V1().Pods().Informer())
+	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), stopChan)
 	if err != nil {
 		return nil, err
 	}
@@ -684,7 +685,13 @@ func (wf *WatchFactory) GetEndpoint(namespace, name string) (*kapi.Endpoints, er
 	return endpointsLister.Endpoints(namespace).Get(name)
 }
 
-//GetNamespaces returns a list of namespaces in the cluster
+// GetNamespace returns a specific namespace
+func (wf *WatchFactory) GetNamespace(name string) (*kapi.Namespace, error) {
+	namespaceLister := wf.informers[namespaceType].lister.(listers.NamespaceLister)
+	return namespaceLister.Get(name)
+}
+
+// GetNamespaces returns a list of namespaces in the cluster
 func (wf *WatchFactory) GetNamespaces() ([]*kapi.Namespace, error) {
 	namespaceLister := wf.informers[namespaceType].lister.(listers.NamespaceLister)
 	return namespaceLister.List(labels.Everything())

@@ -16,9 +16,9 @@ import (
 )
 
 // StartNode creates and starts the hybrid overlay node controller
-func StartNode(nodeName string, kube kube.Interface, wf *factory.WatchFactory) error {
+func StartNode(nodeName string, kube kube.Interface, wf *factory.WatchFactory, stopChan <-chan struct{}) error {
 	klog.Infof("Starting hybrid overlay node...")
-	node, err := NewNode(kube, nodeName)
+	node, err := NewNode(kube, nodeName, stopChan)
 	if err != nil {
 		return err
 	}
@@ -35,9 +35,14 @@ func nodeChanged(node1 *kapi.Node, node2 *kapi.Node) bool {
 // getNodeSubnetAndIP returns the node's hybrid overlay subnet and the node's
 // first InternalIP, or nil if the subnet or node IP is invalid
 func getNodeSubnetAndIP(node *kapi.Node) (*net.IPNet, net.IP) {
+	var cidr *net.IPNet
+
 	// Parse Linux node OVN hostsubnet annotation first
-	cidr, _ := util.ParseNodeHostSubnetAnnotation(node)
-	if cidr == nil {
+	cidrs, _ := util.ParseNodeHostSubnetAnnotation(node)
+	if cidrs != nil {
+		// FIXME DUAL-STACK
+		cidr = cidrs[0]
+	} else {
 		// Otherwise parse the hybrid overlay node subnet annotation
 		subnet, ok := node.Annotations[types.HybridOverlayNodeSubnet]
 		if !ok {

@@ -100,17 +100,18 @@ func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) (*net.IPNet, err
 	// Wait for the node logical switch to be created by the ClusterController.
 	// The node switch will be created when the node's logical network infrastructure
 	// is created by the node watch.
-	var subnet *net.IPNet
+	var subnets []*net.IPNet
 	if err := wait.PollImmediate(10*time.Millisecond, 30*time.Second, func() (bool, error) {
 		oc.lsMutex.Lock()
 		defer oc.lsMutex.Unlock()
 		var ok bool
-		subnet, ok = oc.logicalSwitchCache[nodeName]
+		subnets, ok = oc.logicalSwitchCache[nodeName]
 		return ok, nil
 	}); err != nil {
 		return nil, fmt.Errorf("timed out waiting for logical switch %q subnet: %v", nodeName, err)
 	}
-	return subnet, nil
+	// FIXME DUAL-STACK
+	return subnets[0], nil
 }
 
 func getPodAddresses(portName string) (net.HardwareAddr, net.IP, bool, error) {
@@ -152,7 +153,7 @@ func waitForPodAddresses(portName string) (net.HardwareAddr, net.IP, error) {
 	return podMac, podIP, nil
 }
 
-func getRoutesGatewayIP(pod *kapi.Pod, gatewayIPnet *net.IPNet) ([]util.PodRoute, net.IP, error) {
+func getRoutesGatewayIP(pod *kapi.Pod, subnet *net.IPNet, hybridOverlayExternalGW net.IP) ([]util.PodRoute, net.IP, error) {
 	// if there are other network attachments for the pod, then check if those network-attachment's
 	// annotation has default-route key. If present, then we need to skip adding default route for
 	// OVN interface
@@ -168,9 +169,10 @@ func getRoutesGatewayIP(pod *kapi.Pod, gatewayIPnet *net.IPNet) ([]util.PodRoute
 			break
 		}
 	}
+	gatewayIPnet := util.GetNodeGatewayIfAddr(subnet)
 	var gatewayIP net.IP
 	routes := make([]util.PodRoute, 0)
-	if otherDefaultRoute {
+	if otherDefaultRoute || len(hybridOverlayExternalGW) > 0 {
 		for _, clusterSubnet := range config.Default.ClusterSubnets {
 			var route util.PodRoute
 			route.Dest = clusterSubnet.CIDR
@@ -182,6 +184,9 @@ func getRoutesGatewayIP(pod *kapi.Pod, gatewayIPnet *net.IPNet) ([]util.PodRoute
 			route.Dest = serviceSubnet
 			route.NextHop = gatewayIPnet.IP
 			routes = append(routes, route)
+		}
+		if len(hybridOverlayExternalGW) > 0 {
+			gatewayIP = util.GetNodeHybridOverlayIfAddr(subnet).IP
 		}
 	} else {
 		gatewayIP = gatewayIPnet.IP
@@ -199,8 +204,16 @@ func getRoutesGatewayIP(pod *kapi.Pod, gatewayIPnet *net.IPNet) ([]util.PodRoute
 			})
 		}
 	}
-
 	return routes, gatewayIP, nil
+}
+
+func (oc *Controller) getHybridOverlayExternalGwAnnotation(ns string) (net.IP, error) {
+	nsInfo, err := oc.waitForNamespaceLocked(ns)
+	if err != nil {
+		return nil, err
+	}
+	defer nsInfo.Unlock()
+	return nsInfo.hybridOverlayExternalGW, nil
 }
 
 func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
@@ -326,15 +339,27 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	}
 
 	if annotation == nil {
-		gwIfAddr := util.GetNodeGatewayIfAddr(nodeSubnet)
-		routes, gwIP, err := getRoutesGatewayIP(pod, gwIfAddr)
+		hybridOverlayExternalGW := net.IP{}
+		if config.HybridOverlay.Enabled {
+			hybridOverlayExternalGW, err = oc.getHybridOverlayExternalGwAnnotation(pod.Namespace)
+			if err != nil {
+				return err
+			}
+		}
+		routes, gwIP, err := getRoutesGatewayIP(pod, nodeSubnet, hybridOverlayExternalGW)
 		if err != nil {
 			return err
 		}
+
+		var gwIPs []net.IP
+		if gwIP != nil {
+			gwIPs = []net.IP{gwIP}
+		}
+
 		marshalledAnnotation, err := util.MarshalPodAnnotation(&util.PodAnnotation{
 			IPs:      []*net.IPNet{podCIDR},
 			MAC:      podMac,
-			Gateways: []net.IP{gwIP},
+			Gateways: gwIPs,
 			Routes:   routes,
 		})
 		if err != nil {
@@ -342,7 +367,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		}
 
 		klog.V(5).Infof("Annotation values: ip=%s ; mac=%s ; gw=%s\nAnnotation=%s",
-			podCIDR, podMac, gwIP, marshalledAnnotation)
+			podCIDR, podMac, gwIPs, marshalledAnnotation)
 		if err = oc.kube.SetAnnotationsOnPod(pod, marshalledAnnotation); err != nil {
 			return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
 		}

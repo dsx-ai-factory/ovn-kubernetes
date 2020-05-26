@@ -78,14 +78,14 @@ func initLocalOnlyGateway(nodeName string, subnet *net.IPNet, stopChan chan stru
 
 	// Add arp entry for local service gateway, it is used for return traffic of local service access
 	if isSubnetIPv6 {
-		err = util.LinkNeighAdd(link, gatewayIP, macAddress)
+		err = util.LinkNeighSet(link, gatewayIP, macAddress)
 		if err == nil {
 			klog.V(5).Infof("Added MAC binding for %s on %s", gatewayIP, localnetGatewayNextHopPort)
 		} else {
 			klog.Errorf("Error in adding MAC binding for %s on %s: %v", gatewayIP, localnetGatewayNextHopPort, err)
 		}
 	} else {
-		err = util.LinkNeighAdd(link, gatewayIP, macAddress)
+		err = util.LinkNeighSet(link, gatewayIP, macAddress)
 		if err != nil {
 			return nil, err
 		}

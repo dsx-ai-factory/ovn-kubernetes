@@ -103,8 +103,8 @@ func (m *MasterController) releaseNodeSubnet(nodeName string, subnet *net.IPNet)
 func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Annotator) error {
 	_, haveDRMACAnnotation := node.Annotations[types.HybridOverlayDRMAC]
 
-	subnet, err := util.ParseNodeHostSubnetAnnotation(node)
-	if subnet == nil || err != nil {
+	subnets, err := util.ParseNodeHostSubnetAnnotation(node)
+	if subnets == nil || err != nil {
 		// No subnet allocated yet; clean up
 		if haveDRMACAnnotation {
 			m.deleteOverlayPort(node)
@@ -117,6 +117,9 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 		// already set up; do nothing
 		return nil
 	}
+
+	// FIXME DUAL-STACK
+	subnet := subnets[0]
 
 	portName := houtil.GetHybridOverlayPortName(node.Name)
 	portMAC, portIP, _ := util.GetPortAddresses(portName)
@@ -132,7 +135,7 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 
 		var stderr string
 		_, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", node.Name, portName,
-			"--", "lsp-set-addresses", portName, portMAC.String()+" "+portIP.String())
+			"--", "lsp-set-addresses", portName, portMAC.String())
 		if err != nil {
 			return fmt.Errorf("failed to add hybrid overlay port for node %s"+
 				", stderr:%s: %v", node.Name, stderr, err)

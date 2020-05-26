@@ -192,7 +192,7 @@ func initLocalnetGateway(nodeName string, subnet *net.IPNet, wf *factory.WatchFa
 	if utilnet.IsIPv6CIDR(subnet) {
 		// TODO - IPv6 hack ... for some reason neighbor discovery isn't working here, so hard code a
 		// MAC binding for the gateway IP address for now - need to debug this further
-		err = util.LinkNeighAdd(link, gatewayIP, macAddress)
+		err = util.LinkNeighSet(link, gatewayIP, macAddress)
 		if err == nil {
 			klog.Infof("Added MAC binding for %s on %s", gatewayIP, localnetGatewayNextHopPort)
 		} else {

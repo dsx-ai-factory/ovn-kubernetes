@@ -305,11 +305,11 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 }
 
 // LocalGatewayInit creates a gateway router to access local service.
-func localGatewayInit(clusterIPSubnet []*net.IPNet, joinSubnet, nodeSubnet *net.IPNet, nodeName string,
+func localGatewayInit(clusterIPSubnet []*net.IPNet, joinSubnets, nodeSubnets []*net.IPNet, nodeName string,
 	l3GatewayConfig *util.L3GatewayConfig) error {
 	var nicIP, defaultGW net.IP
 	var nicIPMask net.IPMask
-	isSubnetIPv6 := utilnet.IsIPv6CIDR(nodeSubnet)
+	isSubnetIPv6 := utilnet.IsIPv6CIDR(nodeSubnets[0])
 	if isSubnetIPv6 {
 		nicIP = net.ParseIP(util.V6LocalnetGatewayIP)
 		defaultGW = net.ParseIP(util.V6LocalnetGatewayNextHop)
@@ -332,8 +332,8 @@ func localGatewayInit(clusterIPSubnet []*net.IPNet, joinSubnet, nodeSubnet *net.
 	}
 
 	joinSwitch := joinSwitchPrefix + nodeName
-	prefixLen, _ := joinSubnet.Mask.Size()
-	drLRPIp := util.NextIP(util.NextIP(joinSubnet.IP))
+	prefixLen, _ := joinSubnets[0].Mask.Size()
+	drLRPIp := util.NextIP(util.NextIP(joinSubnets[0].IP))
 	gwLRPIp := util.NextIP(drLRPIp)
 	gwLRPMac := util.IPAddrToHWAddr(gwLRPIp)
 
@@ -370,7 +370,7 @@ func localGatewayInit(clusterIPSubnet []*net.IPNet, joinSubnet, nodeSubnet *net.
 
 	var prefix string
 	for _, nicIP := range l3GatewayConfig.IPAddresses {
-		if utilnet.IsIPv6CIDR(nodeSubnet) {
+		if utilnet.IsIPv6CIDR(nodeSubnets[0]) {
 			if utilnet.IsIPv6(nicIP.IP) {
 				prefix = nicIP.IP.String() + "/128"
 				break

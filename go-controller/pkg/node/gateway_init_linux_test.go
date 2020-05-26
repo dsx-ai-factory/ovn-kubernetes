@@ -5,6 +5,7 @@ package node
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"syscall"
 
 	"github.com/urfave/cli/v2"
@@ -185,7 +186,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 
 		nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &existingNode)
 
-		err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNet(nodeSubnet))
+		err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, []*net.IPNet{ovntest.MustParseIPNet(nodeSubnet)})
 		Expect(err).NotTo(HaveOccurred())
 		err = nodeAnnotator.Run()
 		Expect(err).NotTo(HaveOccurred())
@@ -378,7 +379,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			util.SetIPTablesHelper(iptables.ProtocolIPv4, ipt)
 
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &existingNode)
-			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNet(nodeSubnet))
+			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, []*net.IPNet{ovntest.MustParseIPNet(nodeSubnet)})
 			Expect(err).NotTo(HaveOccurred())
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())

@@ -12,6 +12,7 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"k8s.io/klog"
+	utilnet "k8s.io/utils/net"
 )
 
 const (
@@ -80,7 +81,7 @@ var updateNodeSwitchLock sync.Mutex
 // spam about duplicate IP addresses.
 // See https://github.com/ovn-org/ovn-kubernetes/pull/779
 func UpdateNodeSwitchExcludeIPs(nodeName string, subnet *net.IPNet) error {
-	if config.IPv6Mode {
+	if utilnet.IsIPv6CIDR(subnet) {
 		// We don't exclude any IPs in IPv6
 		return nil
 	}
@@ -100,7 +101,8 @@ func UpdateNodeSwitchExcludeIPs(nodeName string, subnet *net.IPNet) error {
 		if strings.Contains(line, "(k8s-"+nodeName+")") {
 			haveManagementPort = true
 		} else if strings.Contains(line, "("+houtil.GetHybridOverlayPortName(nodeName)+")") {
-			haveHybridOverlayPort = true
+			// we always need to set to false because we do not reserve the IP on the LSP for HO
+			haveHybridOverlayPort = false
 		}
 	}
 
