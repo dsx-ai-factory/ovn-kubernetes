@@ -136,9 +136,15 @@ func registerCoverageShowCounters(target string, metricNamespace string, metricS
 
 // CoverageShowCounters obtains the coverage counter
 // values of various events for the specified target .
-func coverageShowCounters(target string) (map[string]string, error) {
+func coverageShowCounters(target string) (coverageCounters map[string]string, err error) {
 	var stdout, stderr string
-	var err error
+
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("recovering from a panic while parsing the coverage/show output "+
+				"for %s: %v", target, r)
+		}
+	}()
 
 	if target == ovnController {
 		stdout, stderr, err = util.RunOVNControllerAppCtl("coverage/show")
@@ -155,7 +161,7 @@ func coverageShowCounters(target string) (map[string]string, error) {
 			"stderr(%s): (%v)", target, stderr, err)
 	}
 
-	coverageCounters := make(map[string]string)
+	coverageCounters = make(map[string]string)
 	output := strings.Split(stdout, "\n")
 	for _, kvPair := range output {
 		if strings.Contains(kvPair, "total:") {
