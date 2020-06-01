@@ -111,6 +111,24 @@ var ovnControllerCoverageShowCountersMap = map[string]*metricDetails{
 		help: "Specifies the number of times the OVSDB " +
 			"transaction failed and the client had to re-try.",
 	},
+	"netlink_sent": {
+		help: "Number of netlink message sent to the kernel.",
+	},
+	"netlink_received": {
+		help: "Number of netlink messages received by the kernel.",
+	},
+	"netlink_recv_jumbo": {
+		help: "Number of netlink messages that were received from" +
+			"the kernel were more than the allocated buffer.",
+	},
+	"netlink_overflow": {
+		help: "Netlink messages dropped by the daemon due " +
+			"to buffer overflow.",
+	},
+	"packet_in": {
+		help: "Specifies the number of times ovn-controller has " +
+			"handled the packet-ins from ovs-vswitchd.",
+	},
 }
 
 var targetMetricMap = map[string]map[string]*metricDetails{
@@ -249,6 +267,56 @@ func RegisterNodeMetrics() {
 				}
 				return parseMetricToFloat("ovn-openflow-probe-interval", stdout)
 			}))
+		prometheus.MustRegister(prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{
+				Namespace: MetricOvnNamespace,
+				Subsystem: MetricOvnSubsystemController,
+				Name:      "monitor_all",
+				Help: "Specifies if ovn-controller should monitor all records of tables in OVN SB DB." +
+					"If set to false, it will conditionally monitor the records that " +
+					"is needed in the current chassis. Values are false(0), true(1) ",
+			}, func() float64 {
+				stdout, stderr, err := util.RunOVSVsctl("get", "Open_vSwitch", ".",
+					"external_ids:ovn-monitor-all")
+				if err != nil {
+					klog.Errorf("Failed to get ovn-monitor-all value stderr(%s): (%v)",
+						stderr, err)
+					return -1
+				}
+				var ovnMonitorValue float64
+				if stdout == "true" {
+					ovnMonitorValue = 1
+				}
+				return ovnMonitorValue
+			}))
+		prometheus.MustRegister(prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{
+				Namespace: MetricOvnNamespace,
+				Subsystem: MetricOvnSubsystemController,
+				Name:      "packet_in_drop",
+				Help: "Specifies the number of times the ovn-controller has dropped the " +
+					"packet-ins from ovs-vswitchd due to resource constraints",
+			}, func() float64 {
+				counters, err := coverageShowCounters(ovnController)
+				if err != nil {
+					klog.Errorf("%s", err.Error())
+					return 0
+				}
+
+				packetInDropCounters := []string{
+					"pinctrl_drop_put_mac_binding",
+					"pinctrl_drop_buffered_packets_map",
+					"pinctrl_drop_controller_event",
+					"pinctrl_drop_put_vport_binding",
+				}
+				var packetInDropMetricValue float64
+				for _, counterName := range packetInDropCounters {
+					if value, ok := counters[counterName]; ok {
+						packetInDropMetricValue += parseMetricToFloat(counterName, value)
+					}
+				}
+				return packetInDropMetricValue
+			}))
 
 		registerCoverageShowCounters(ovnController, MetricOvnNamespace, MetricOvnSubsystemController)
 		go coverageShowCountersMetricsUpdater(ovnController)
@@ -266,7 +334,11 @@ func coverageShowCountersMetricsUpdater(target string) {
 			continue
 		}
 		coverageCountersMetricsMap := targetMetricMap[target]
-		for counterName, counterMetricInfo := range coverageCountersMetricsMap {
+		for counterMetricName, counterMetricInfo := range coverageCountersMetricsMap {
+			counterName := counterMetricName
+			if counterMetricName == "packet_in" {
+				counterName = "flow_extract"
+			}
 			if value, ok := counters[counterName]; ok {
 				metricName := target + "_" + counterName
 				count := parseMetricToFloat(metricName, value)

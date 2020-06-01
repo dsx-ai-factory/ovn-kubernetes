@@ -190,6 +190,40 @@ var metricOvsBridgeFlowsTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	},
 )
 
+// ovs memory metrics
+var metricOvsHandlersTotal = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvsNamespace,
+	Subsystem: MetricOvsSubsystemVswitchd,
+	Name:      "handlers_total",
+	Help: "Represents the number of handlers thread. This thread reads upcalls from dpif, " +
+		"forwards each upcall's packet and possibly sets up a kernel flow as a cache.",
+})
+
+var metricOvsRevalidatorsTotal = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvsNamespace,
+	Subsystem: MetricOvsSubsystemVswitchd,
+	Name:      "revalidators_total",
+	Help: "Represents the number of revalidators thread. This thread processes datapath flows, " +
+		"updates OpenFlow statistics, and updates or removes them if necessary.",
+})
+
+// ovs Hw offload metrics
+var metricOvsHwOffload = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvsNamespace,
+	Subsystem: MetricOvsSubsystemVswitchd,
+	Name:      "hw_offload",
+	Help: "Represents whether netdev flow offload to hardware is enabled " +
+		"or not -- false(0) and true(1).",
+})
+
+var metricOvsTcPolicy = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvsNamespace,
+	Subsystem: MetricOvsSubsystemVswitchd,
+	Name:      "tc_policy",
+	Help: "Represents the policy used with HW offloading " +
+		"-- none(0), skip_sw(1), and skip_hw(2)..",
+})
+
 func getOvsVersionInfo() {
 	stdout, _, err := util.RunOVSVsctl("--version")
 	if err == nil && strings.HasPrefix(stdout, "ovs-vsctl (Open vSwitch)") {
@@ -694,6 +728,101 @@ func ovsInterfaceMetricsUpdate(interfaceInfo map[string]interfaceDetails) (err e
 	return nil
 }
 
+// setOvsMemoryMetrics updates the handlers, revalidators
+// count from "ovs-appctl -t ovs-vswitchd memory/show" output.
+func setOvsMemoryMetrics() (err error) {
+	var stdout, stderr string
+
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("recovering from panic while parsing the ovs-appctl "+
+				"memory/show output : %v", r)
+		}
+	}()
+
+	stdout, stderr, err = util.RunOvsVswitchdAppCtl("memory/show")
+	if err != nil {
+		return fmt.Errorf("failed to retrieve memory/show output "+
+			"for ovs-vswitchd stderr(%s) :%v", stderr, err)
+	}
+
+	for _, kvPair := range strings.Fields(stdout) {
+		if strings.HasPrefix(kvPair, "handlers:") {
+			value := strings.Split(kvPair, ":")[1]
+			count := parseMetricToFloat("handlers_total", value)
+			metricOvsHandlersTotal.Set(count)
+		} else if strings.HasPrefix(kvPair, "revalidators:") {
+			value := strings.Split(kvPair, ":")[1]
+			count := parseMetricToFloat("revalidators_total", value)
+			metricOvsRevalidatorsTotal.Set(count)
+		}
+	}
+	return nil
+}
+
+func ovsMemoryMetricsUpdate() {
+	for {
+		err := setOvsMemoryMetrics()
+		if err != nil {
+			klog.Errorf("%s", err.Error())
+		}
+		time.Sleep(30 * time.Second)
+	}
+}
+
+// setOvsHwOffloadMetrics obatains the hw-offlaod, tc-policy
+// ovs-vsctl list Open_vSwitch . and updates the corresponding metrics
+func setOvsHwOffloadMetrics() (err error) {
+	var stdout, stderr string
+
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("recovering from panic while parsing the ovs-vsctl "+
+				"list Open_vSwitch . output : %v", r)
+		}
+	}()
+
+	stdout, stderr, err = util.RunOVSVsctl("--no-headings", "--data=bare",
+		"--columns=other_config", "list", "Open_vSwitch", ".")
+	if err != nil {
+		return fmt.Errorf("failed to get output from ovs-vsctl list --columns=other_config"+
+			"open_vSwitch . stderr(%s) : %v", stderr, err)
+	}
+
+	var hwOffloadValue = "false"
+	var tcPolicyValue = "none"
+	var tcPolicyMap = map[string]float64{
+		"none":    0,
+		"skip_sw": 1,
+		"skip_hw": 2,
+	}
+	for _, kvPair := range strings.Fields(stdout) {
+		if strings.HasPrefix(kvPair, "hw-offload=") {
+			hwOffloadValue = strings.Split(kvPair, "=")[1]
+		} else if strings.HasPrefix(kvPair, "tc-policy=") {
+			tcPolicyValue = strings.Split(kvPair, "=")[1]
+		}
+	}
+
+	if hwOffloadValue == "false" {
+		metricOvsHwOffload.Set(0)
+	} else {
+		metricOvsHwOffload.Set(1)
+	}
+	metricOvsTcPolicy.Set(tcPolicyMap[tcPolicyValue])
+	return nil
+}
+
+func ovsHwOffloadMetricsUpdate() {
+	for {
+		err := setOvsHwOffloadMetrics()
+		if err != nil {
+			klog.Errorf("%s", err.Error())
+		}
+		time.Sleep(30 * time.Second)
+	}
+}
+
 type ovsInterfaceMetricsDetails struct {
 	help   string
 	metric *prometheus.GaugeVec
@@ -909,6 +1038,10 @@ var ovsVswitchdCoverageShowCountersMap = map[string]*metricDetails{
 		help: "Number of times the number of datapath actions " +
 			"were more than what the kernel can handle reliably.",
 	},
+	"packet_in": {
+		help: "Specifies the number of times ovs-vswitchd has " +
+			"handled the packet-ins on behalf of kernel datapath.",
+	},
 }
 var registerOvsMetricsOnce sync.Once
 
@@ -926,6 +1059,32 @@ func RegisterOvsMetrics() {
 			},
 			func() float64 { return 1 },
 		))
+		prometheus.MustRegister(prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{
+				Namespace: MetricOvsNamespace,
+				Subsystem: MetricOvsSubsystemVswitchd,
+				Name:      "dpif_execute",
+				Help: "Number of times the OpenFlow actions were executed in userspace " +
+					"on behalf of the datapath.",
+			}, func() float64 {
+				counters, err := coverageShowCounters(ovsVswitchd)
+				if err != nil {
+					klog.Errorf("%s", err.Error())
+					return 0
+				}
+
+				dpIfExecuteCounters := []string{
+					"dpif_execute",
+					"dpif_execute_with_help",
+				}
+				var dpIfExecuteMetricValue float64
+				for _, counterName := range dpIfExecuteCounters {
+					if value, ok := counters[counterName]; ok {
+						dpIfExecuteMetricValue += parseMetricToFloat(counterName, value)
+					}
+				}
+				return dpIfExecuteMetricValue
+			}))
 
 		// Register OVS datapath metrics.
 		prometheus.MustRegister(metricOvsDpTotal)
@@ -945,7 +1104,13 @@ func RegisterOvsMetrics() {
 		prometheus.MustRegister(metricOvsBridge)
 		prometheus.MustRegister(metricOvsBridgePortsTotal)
 		prometheus.MustRegister(metricOvsBridgeFlowsTotal)
-		//Register ovs Interface metrics withe prometheus.
+		// Register Ovsvswitchd Memory metrics
+		prometheus.MustRegister(metricOvsHandlersTotal)
+		prometheus.MustRegister(metricOvsRevalidatorsTotal)
+		// Register Ovs hwoffload metrics
+		prometheus.MustRegister(metricOvsHwOffload)
+		prometheus.MustRegister(metricOvsTcPolicy)
+		// Register ovs Interface metrics with prometheus.
 		registerOvsInterfaceMetrics(MetricOvsNamespace, MetricOvsSubsystemVswitchd)
 		// Register the ovs-vswitchd coverage/show counters metrics with prometheus
 		registerCoverageShowCounters(ovsVswitchd, MetricOvsNamespace, MetricOvsSubsystemVswitchd)
@@ -954,6 +1119,10 @@ func RegisterOvsMetrics() {
 		go ovsDataPathMetricsUpdate()
 		// ovs bridge metrics updater
 		go ovsBridgeMetricsUpdate()
+		// ovs memory metrics updater
+		go ovsMemoryMetricsUpdate()
+		// ovs HWOffload metrics updater
+		go ovsHwOffloadMetricsUpdate()
 		// ovs coverage show counters metrics updater.
 		go coverageShowCountersMetricsUpdater(ovsVswitchd)
 	})
