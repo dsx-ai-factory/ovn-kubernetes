@@ -3,6 +3,7 @@ package metrics
 import (
 	"fmt"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -53,6 +54,13 @@ var MetricMasterReadyDuration = prometheus.NewGauge(prometheus.GaugeOpts{
 	Subsystem: MetricOvnkubeSubsystemMaster,
 	Name:      "ready_duration_seconds",
 	Help:      "The duration for the master to get to ready state",
+})
+
+var MetricMasterLeader = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "leader",
+	Help:      "Identifies whether the instance of ovnkube-master is a leader(1) or not(0).",
 })
 
 var registerMasterMetricsOnce sync.Once
@@ -124,6 +132,7 @@ func RegisterMasterMetrics() {
 			}))
 		prometheus.MustRegister(MetricMasterReadyDuration)
 		prometheus.MustRegister(metricOvnCliLatency)
+		prometheus.MustRegister(MetricMasterLeader)
 		// this is to not to create circular import between metrics and util package
 		util.MetricOvnCliLatency = metricOvnCliLatency
 		prometheus.MustRegister(prometheus.NewGaugeFunc(
@@ -160,6 +169,33 @@ func RegisterMasterMetrics() {
 					return 0
 				}
 				return parseMetricToFloat("northd_probe_interval", stdout)
+			},
+		))
+		prometheus.MustRegister(prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{
+				Namespace: MetricOvnNamespace,
+				Subsystem: MetricOvnSubsystemNorthd,
+				Name:      "status",
+				Help:      "Specifies whether this instance of ovn-northd is standby(0) or active(1) or paused(2).",
+			}, func() float64 {
+				stdout, stderr, err := util.RunOVNNorthAppCtl("status")
+				if err != nil {
+					klog.Errorf("Failed to get ovn-northd status "+
+						"stderr(%s) :(%v)", stderr, err)
+					return -1
+				}
+				northdStatusMap := map[string]float64{
+					"standby": 0,
+					"active":  1,
+					"paused":  2,
+				}
+				if strings.HasPrefix(stdout, "Status:") {
+					output := strings.TrimSpace(strings.Split(stdout, ":")[1])
+					if value, ok := northdStatusMap[output]; ok {
+						return value
+					}
+				}
+				return -1
 			},
 		))
 

@@ -221,8 +221,50 @@ var metricOvsTcPolicy = prometheus.NewGauge(prometheus.GaugeOpts{
 	Subsystem: MetricOvsSubsystemVswitchd,
 	Name:      "tc_policy",
 	Help: "Represents the policy used with HW offloading " +
-		"-- none(0), skip_sw(1), and skip_hw(2)..",
+		"-- none(0), skip_sw(1), and skip_hw(2).",
 })
+
+var metricInterafceDriverName = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Namespace: MetricOvsNamespace,
+	Subsystem: MetricOvsSubsystemVswitchd,
+	Name:      "interafce_driver_name",
+	Help: "A metric with a constant '1' value labeled by driver name that " +
+		"specifies the name of the device driver controlling the network interface"},
+	[]string{
+		"bridge",
+		"port",
+		"interface",
+		"name",
+	},
+)
+
+var metricInterafceDriverVersion = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Namespace: MetricOvsNamespace,
+	Subsystem: MetricOvsSubsystemVswitchd,
+	Name:      "interface_driver_version",
+	Help: "A metric with a constant '1' value labeled by version name that " +
+		"specifies the driver version of the network driver controlling the network interface."},
+	[]string{
+		"bridge",
+		"port",
+		"interface",
+		"version",
+	},
+)
+
+var metricInterafceFirmwareVersion = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Namespace: MetricOvsNamespace,
+	Subsystem: MetricOvsSubsystemVswitchd,
+	Name:      "interface_firmware_version",
+	Help: "A metric with a constant '1' value labeled by version name that " +
+		"specifies the firmware version of the network adapter."},
+	[]string{
+		"bridge",
+		"port",
+		"interface",
+		"version",
+	},
+)
 
 func getOvsVersionInfo() {
 	stdout, _, err := util.RunOVSVsctl("--version")
@@ -644,6 +686,25 @@ func setOvsInterfaceStatistics(interfaceBridge, interfacePort, interfaceName, me
 	}
 }
 
+func setOvsInterfaceStatusFields(interfaceBridge, interfacePort, interfaceName, statusFields string) {
+	var driverName, driverVersion, firmwareVersion string
+	for _, kvPair := range strings.Fields(statusFields) {
+		if strings.HasPrefix(kvPair, "driver_name=") {
+			driverName = strings.Split(kvPair, "=")[1]
+		} else if strings.HasPrefix(kvPair, "driver_version=") {
+			driverVersion = strings.Split(kvPair, "=")[1]
+		} else if strings.HasPrefix(kvPair, "firmware_version=") {
+			firmwareVersion = strings.Split(kvPair, "=")[1]
+		}
+	}
+	metricInterafceDriverName.WithLabelValues(interfaceBridge, interfacePort,
+		interfaceName, driverName).Set(1)
+	metricInterafceDriverVersion.WithLabelValues(interfaceBridge, interfacePort,
+		interfaceName, driverVersion).Set(1)
+	metricInterafceFirmwareVersion.WithLabelValues(interfaceBridge, interfacePort,
+		interfaceName, firmwareVersion).Set(1)
+}
+
 // ovsInterfaceMetricsUpdate updates the ovs interface metrics
 // obained from ovs-vsctl --columns=<fields> list interface
 func ovsInterfaceMetricsUpdate(interfaceInfo map[string]interfaceDetails) (err error) {
@@ -662,6 +723,7 @@ func ovsInterfaceMetricsUpdate(interfaceInfo map[string]interfaceDetails) (err e
 		"ofport",
 		"ingress_policing_burst",
 		"ingress_policing_rate",
+		"status",
 	}
 	var stdout, stderr string
 
@@ -724,6 +786,8 @@ func ovsInterfaceMetricsUpdate(interfaceInfo map[string]interfaceDetails) (err e
 			"interface_ingress_policing_burst", interfaceFieldValues[12])
 		setOvsInterfaceMetrics(interfaceData.bridge, interfaceData.port, interfaceName,
 			"interface_ingress_policing_rate", interfaceFieldValues[13])
+		setOvsInterfaceStatusFields(interfaceData.bridge, interfaceData.port,
+			interfaceName, interfaceFieldValues[14])
 	}
 	return nil
 }
@@ -1042,6 +1106,25 @@ var ovsVswitchdCoverageShowCountersMap = map[string]*metricDetails{
 		help: "Specifies the number of times ovs-vswitchd has " +
 			"handled the packet-ins on behalf of kernel datapath.",
 	},
+	"ofproto_dpif_expired": {
+		help: "Number of times the flows were removed for reasons - " +
+			"idle timeout, hard timeout, flow delete,  group delete, " +
+			"meter delete, or eviction.",
+	},
+	"ofproto_flush": {
+		help: "Number of times the flows from all of ofproto's " +
+			"flow tables were flushed.",
+	},
+	"ofproto_packet_out": {
+		help: "Number of times the controller injected the packet " +
+			"into the kernel datapath.",
+	},
+	"ofproto_recv_openflow": {
+		help: "Number of times an OpenFlow message was handled.",
+	},
+	"ofproto_reinit_ports": {
+		help: "Number of times all the OpenFlow ports were reinitialized.",
+	},
 }
 var registerOvsMetricsOnce sync.Once
 
@@ -1085,6 +1168,22 @@ func RegisterOvsMetrics() {
 				}
 				return dpIfExecuteMetricValue
 			}))
+		prometheus.MustRegister(prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{
+				Namespace: MetricOvsNamespace,
+				Subsystem: MetricOvsSubsystemVswitchd,
+				Name:      "packet_in_drop",
+				Help: "Specifies the number of times the ovs-vswitchd has dropped the " +
+					"packet-ins due to resource constraints.",
+			}, func() float64 {
+				stdout, stderr, err := util.RunOvsVswitchdAppCtl("coverage/read-counter",
+					"packet_in_overflow")
+				if err != nil {
+					klog.Errorf("Failed to get ovs-vswitchd coverage/read-counter "+
+						"output for packet_in_overflow stderr(%s) : %v", stderr, err)
+				}
+				return parseMetricToFloat("packet_in_drop", stdout)
+			}))
 
 		// Register OVS datapath metrics.
 		prometheus.MustRegister(metricOvsDpTotal)
@@ -1112,6 +1211,9 @@ func RegisterOvsMetrics() {
 		prometheus.MustRegister(metricOvsTcPolicy)
 		// Register ovs Interface metrics with prometheus.
 		registerOvsInterfaceMetrics(MetricOvsNamespace, MetricOvsSubsystemVswitchd)
+		prometheus.MustRegister(metricInterafceDriverName)
+		prometheus.MustRegister(metricInterafceDriverVersion)
+		prometheus.MustRegister(metricInterafceFirmwareVersion)
 		// Register the ovs-vswitchd coverage/show counters metrics with prometheus
 		registerCoverageShowCounters(ovsVswitchd, MetricOvsNamespace, MetricOvsSubsystemVswitchd)
 
