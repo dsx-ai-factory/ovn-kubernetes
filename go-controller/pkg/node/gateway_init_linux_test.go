@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"fmt"
 	"net"
+	"strings"
 	"syscall"
 
 	"github.com/urfave/cli/v2"
@@ -28,7 +29,9 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func initLocalOnlyGatewayTest(fexec *ovntest.FakeExec, nodeName, brLocalnetMAC, mtu string) {
+func setupNodeAccessBridgeTest(fexec *ovntest.FakeExec, nodeName, brLocalnetMAC, mtu string) {
+	gwPortMac := util.IPAddrToHWAddr(net.ParseIP(util.V4NodeLocalNatSubnetNextHop)).String()
+
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovs-vsctl --timeout=15 --may-exist add-br br-local",
 	})
@@ -47,8 +50,8 @@ func initLocalOnlyGatewayTest(fexec *ovntest.FakeExec, nodeName, brLocalnetMAC, 
 		"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.PhysicalNetworkName + ":breth0" + "," + util.LocalNetworkName + ":br-local",
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovs-vsctl --timeout=15 --if-exists del-port br-local " + legacyLocalnetGatewayNextHopPort +
-			" -- --may-exist add-port br-local " + localnetGatewayNextHopPort + " -- set interface " + localnetGatewayNextHopPort + " type=internal mtu_request=" + mtu + " mac=00\\:00\\:a9\\:fe\\:21\\:01",
+		"ovs-vsctl --timeout=15 --may-exist add-port br-local " + localnetGatewayNextHopPort +
+			" -- set interface " + localnetGatewayNextHopPort + " type=internal mtu_request=" + mtu + " mac=" + strings.ReplaceAll(gwPortMac, ":", "\\:"),
 	})
 }
 
@@ -59,14 +62,13 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 	app.Action = func(ctx *cli.Context) error {
 		const (
 			nodeName      string = "node1"
-			brNextHopIp   string = "169.254.33.1"
-			brNextHopCIDR string = brNextHopIp + "/24"
+			brNextHopIp   string = util.V4NodeLocalNatSubnetNextHop
 			systemID      string = "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6"
 			nodeSubnet    string = "10.1.1.0/24"
 			brLocalnetMAC string = "11:22:33:44:55:66"
-			brLocalnetIP  string = "169.254.33.2"
 		)
 
+		brNextHopCIDR := fmt.Sprintf("%s/%d", brNextHopIp, util.V4NodeLocalNatSubnetPrefix)
 		fexec := ovntest.NewFakeExec()
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-vsctl --timeout=15 -- port-to-br eth0",
@@ -111,7 +113,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.PhysicalNetworkName + ":breth0",
 		})
 
-		initLocalOnlyGatewayTest(fexec, nodeName, brLocalnetMAC, mtu)
+		setupNodeAccessBridgeTest(fexec, nodeName, brLocalnetMAC, mtu)
 
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
@@ -175,9 +177,12 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 		})
 
 		stop := make(chan struct{})
-		wf, err := factory.NewWatchFactory(fakeClient, stop)
+		wf, err := factory.NewWatchFactory(fakeClient)
 		Expect(err).NotTo(HaveOccurred())
-		defer close(stop)
+		defer func() {
+			close(stop)
+			wf.Shutdown()
+		}()
 
 		n := NewNode(nil, wf, existingNode.Name, stop)
 
@@ -186,7 +191,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 
 		nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &existingNode)
 
-		err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, []*net.IPNet{ovntest.MustParseIPNet(nodeSubnet)})
+		err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(nodeSubnet))
 		Expect(err).NotTo(HaveOccurred())
 		err = nodeAnnotator.Run()
 		Expect(err).NotTo(HaveOccurred())
@@ -213,19 +218,6 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 				}
 			}
 			Expect(foundAddr).To(BeTrue())
-
-			// Check if brLocalnetIP has been added in the arp entry for util.LocalnetGatewayNextHopPort interface
-			neigbourIP := ovntest.MustParseIP(brLocalnetIP)
-			neighbours, err := netlink.NeighList(link.Attrs().Index, netlink.FAMILY_ALL)
-			Expect(err).NotTo(HaveOccurred())
-			var foundNeighbour bool
-			for _, neighbour := range neighbours {
-				if neighbour.IP.Equal(neigbourIP) && (neighbour.HardwareAddr.String() == brLocalnetMAC) {
-					foundNeighbour = true
-					break
-				}
-			}
-			Expect(foundNeighbour).To(BeTrue())
 
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
@@ -369,17 +361,16 @@ var _ = Describe("Gateway Init Operations", func() {
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{existingNode},
 			})
-			stop := make(chan struct{})
-			wf, err := factory.NewWatchFactory(fakeClient, stop)
+			wf, err := factory.NewWatchFactory(fakeClient)
 			Expect(err).NotTo(HaveOccurred())
-			defer close(stop)
+			defer wf.Shutdown()
 
 			ipt, err := util.NewFakeWithProtocol(iptables.ProtocolIPv4)
 			Expect(err).NotTo(HaveOccurred())
 			util.SetIPTablesHelper(iptables.ProtocolIPv4, ipt)
 
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &existingNode)
-			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, []*net.IPNet{ovntest.MustParseIPNet(nodeSubnet)})
+			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(nodeSubnet))
 			Expect(err).NotTo(HaveOccurred())
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())

@@ -23,6 +23,7 @@ import (
 	homaster "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -106,7 +107,7 @@ func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string) error
 func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	// The gateway router need to be connected to the distributed router via a per-node join switch.
 	// We need a subnet allocator that allocates subnet for this per-node join switch. Use the 100.64.0.0/16
-	// or fd98::/64 network range with host bits set to 3. The allocator will start allocating subnet that has upto 6
+	// or fd98::/64 network range with host bits set to 3. The subnetallocator will start allocating subnet that has upto 6
 	// host IPs)
 	joinSubnet := config.V4JoinSubnet
 	if config.IPv6Mode {
@@ -114,6 +115,14 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	}
 	_, joinSubnetCIDR, _ := net.ParseCIDR(joinSubnet)
 	_ = oc.joinSubnetAllocator.AddNetworkRange(joinSubnetCIDR, 3)
+
+	// FIXME DUAL-STACK SUPPORT
+	// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
+	_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(util.V4NodeLocalNatSubnet)
+	oc.nodeLocalNatIPAllocator, _ = ipallocator.NewCIDRRange(nodeLocalNatSubnetCIDR)
+	// set aside the first two IPs for the nextHop on the host and for distributed gateway port
+	_ = oc.nodeLocalNatIPAllocator.Allocate(net.ParseIP(util.V4NodeLocalNatSubnetNextHop))
+	_ = oc.nodeLocalNatIPAllocator.Allocate(net.ParseIP(util.V4NodeLocalDistributedGwPortIP))
 
 	existingNodes, err := oc.kube.GetNodes()
 	if err != nil {
@@ -137,6 +146,13 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		joinsubnets, _ := util.ParseNodeJoinSubnetAnnotation(&node)
 		for _, joinsubnet := range joinsubnets {
 			err := oc.joinSubnetAllocator.MarkAllocatedNetwork(joinsubnet)
+			if err != nil {
+				utilruntime.HandleError(err)
+			}
+		}
+		nodeLocalNatIPs, _ := util.ParseNodeLocalNatIPAnnotation(&node)
+		for _, nodeLocalNatIP := range nodeLocalNatIPs {
+			err := oc.nodeLocalNatIPAllocator.Allocate(nodeLocalNatIP)
 			if err != nil {
 				utilruntime.HandleError(err)
 			}
@@ -183,6 +199,12 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		klog.Errorf("Failed to create a single common distributed router for the cluster, "+
 			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
+	}
+
+	if config.Gateway.Mode == config.GatewayModeShared {
+		if err := addDistributedGWPort(); err != nil {
+			return err
+		}
 	}
 
 	// Determine SCTP support
@@ -390,8 +412,26 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 
 	// Add local only gateway to allow local service access
 	if l3GatewayConfig.Mode == config.GatewayModeShared {
-		err = localGatewayInit(clusterSubnets, joinSubnets, hostSubnets, node.Name, l3GatewayConfig)
+		// in the case of shared gateway mode, we need to setup
+		// 1. two policy based routes to steer traffic to the k8s node IP
+		// 	  - from the management port via the node_local_switch's localnet port
+		//    - from the hostsubnet via management port
+		// 2. a dnat_and_snat nat entry to SNAT the traffic from the management port
+		subnets, err := util.ParseNodeHostSubnetAnnotation(node)
 		if err != nil {
+			return fmt.Errorf("failed to get host subnets for %s: %v", node.Name, err)
+		}
+		mpMAC, err := util.ParseNodeManagementPortMACAddress(node)
+		if err != nil {
+			return err
+		}
+		mpIP := util.GetNodeManagementIfAddr(subnets[0]).IP.String()
+
+		if err := addPolicyBasedRoutes(node.Name, mpIP, l3GatewayConfig.IPAddresses); err != nil {
+			return err
+		}
+
+		if err := oc.addNodeLocalNatEntries(node, mpMAC.String(), mpIP); err != nil {
 			return err
 		}
 	}
@@ -669,7 +709,8 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 	return nil
 }
 
-func (oc *Controller) deleteNode(nodeName string, hostSubnets, joinSubnets []*net.IPNet) error {
+func (oc *Controller) deleteNode(nodeName string, hostSubnets, joinSubnets []*net.IPNet,
+	nodeLocalNatIPs []net.IP) error {
 	// Clean up as much as we can but don't hard error
 	for _, hostSubnet := range hostSubnets {
 		if err := oc.deleteNodeHostSubnet(nodeName, hostSubnet); err != nil {
@@ -679,6 +720,11 @@ func (oc *Controller) deleteNode(nodeName string, hostSubnets, joinSubnets []*ne
 	for _, joinSubnet := range joinSubnets {
 		if err := oc.deleteNodeJoinSubnet(nodeName, joinSubnet); err != nil {
 			klog.Errorf("Error deleting node %s JoinSubnet %v: %v", nodeName, joinSubnet, err)
+		}
+	}
+	if len(nodeLocalNatIPs) > 0 {
+		if err := oc.nodeLocalNatIPAllocator.Release(nodeLocalNatIPs[0]); err != nil {
+			klog.Errorf("Error deleting node %s's node local NAT IP %v: %v", nodeName, nodeLocalNatIPs, err)
 		}
 	}
 
@@ -896,7 +942,7 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 	}
 
 	for nodeName, nodeSubnets := range NodeSubnetsMap {
-		if err := oc.deleteNode(nodeName, nodeSubnets.hostSubnets, nodeSubnets.joinSubnets); err != nil {
+		if err := oc.deleteNode(nodeName, nodeSubnets.hostSubnets, nodeSubnets.joinSubnets, nil); err != nil {
 			klog.Error(err)
 		}
 		//remove the node from the chassis map so we don't delete it twice

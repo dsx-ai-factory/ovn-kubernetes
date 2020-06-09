@@ -349,7 +349,7 @@ func (n *OvnNode) initSharedGateway(subnet *net.IPNet, gwNextHop net.IP, gwIntf 
 		return nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
 
-	localMacAddress, err := initLocalOnlyGateway(n.name, subnet, n.stopChan)
+	err = setupLocalNodeAccessBridge(n.name, subnet)
 	if err != nil {
 		return nil, err
 	}
@@ -359,15 +359,14 @@ func (n *OvnNode) initSharedGateway(subnet *net.IPNet, gwNextHop net.IP, gwIntf 
 	}
 
 	err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
-		Mode:            config.GatewayModeShared,
-		ChassisID:       chassisID,
-		InterfaceID:     ifaceID,
-		MACAddress:      macAddress,
-		IPAddresses:     []*net.IPNet{ipAddress},
-		NextHops:        []net.IP{gwNextHop},
-		NodePortEnable:  config.Gateway.NodeportEnable,
-		VLANID:          &config.Gateway.VLANID,
-		LocalMACAddress: localMacAddress,
+		Mode:           config.GatewayModeShared,
+		ChassisID:      chassisID,
+		InterfaceID:    ifaceID,
+		MACAddress:     macAddress,
+		IPAddresses:    []*net.IPNet{ipAddress},
+		NextHops:       []net.IP{gwNextHop},
+		NodePortEnable: config.Gateway.NodeportEnable,
+		VLANID:         &config.Gateway.VLANID,
 	})
 	if err != nil {
 		return nil, err

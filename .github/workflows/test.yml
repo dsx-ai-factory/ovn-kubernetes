@@ -88,7 +88,7 @@ jobs:
     - name: Cache Kubernetes
       id: cache-k8s
       if: github.event_name == 'push' || github.event_name == 'pull_request'
-      uses: actions/cache@v1
+      uses: actions/cache@v2
       with:
         path: ${{ env.GOPATH }}/src/k8s.io/kubernetes/
         key: k8s-go-2-${{ env.K8S_VERSION }}
@@ -117,20 +117,24 @@ jobs:
       fail-fast: false
       matrix:
         target:
-          - shard-n
-          - shard-np
-          - shard-s
-          - shard-other
-          - control-plane
+          - shard: shard-n-other
+            hybrid-overlay: false
+          - shard: shard-np
+            hybrid-overlay: false
+          - shard: control-plane
+            hybrid-overlay: true
         ha:
          - enabled: "true"
            name: "HA"
          - enabled: "false"
            name: "noHA"
+        gateway-mode: [local, shared]
     needs: k8s
     env:
-      JOB_NAME: "${{ matrix.target }}-${{ matrix.ha.name }}"
+      JOB_NAME: "${{ matrix.target.shard }}-${{ matrix.ha.name }}-${{ matrix.gateway-mode }}"
       KIND_HA: "${{ matrix.ha.enabled }}"
+      OVN_HYBRID_OVERLAY_ENABLE: "${{ matrix.target.hybrid-overlay }}"
+      OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
     steps:
 
     - name: Free up disk space
@@ -154,7 +158,7 @@ jobs:
 
     - name: Restore Kubernetes from cache
       id: cache-k8s
-      uses: actions/cache@v1
+      uses: actions/cache@v2
       with:
         path: "${{ env.GOPATH }}/src/k8s.io/kubernetes/"
         key: k8s-go-2-${{ env.K8S_VERSION }}
@@ -178,7 +182,7 @@ jobs:
 
     - name: Run Tests
       run: |
-        make -C test ${{ matrix.target }}
+        make -C test ${{ matrix.target.shard }}
 
     - name: Export logs
       if: always()

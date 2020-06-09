@@ -13,7 +13,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/allocator"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -51,8 +52,9 @@ type loadBalancerConf struct {
 type namespaceInfo struct {
 	sync.Mutex
 
-	// map from pod IP address to logical port name for all pods
-	addressSet map[string]string
+	// addressSet is an address set object that holds the IP addresses
+	// of all pods in the namespace.
+	addressSet AddressSet
 
 	// map from NetworkPolicy name to namespacePolicy. You must hold the
 	// namespaceInfo's mutex to add/delete/lookup policies, but must hold the
@@ -62,6 +64,9 @@ type namespaceInfo struct {
 
 	hybridOverlayExternalGW net.IP
 	hybridOverlayVTEP       net.IP
+
+	// The UUID of the namespace-wide port group that contains all the pods in the namespace.
+	portGroupUUID string
 
 	multicastEnabled bool
 }
@@ -73,8 +78,9 @@ type Controller struct {
 	watchFactory *factory.WatchFactory
 	stopChan     <-chan struct{}
 
-	masterSubnetAllocator *allocator.SubnetAllocator
-	joinSubnetAllocator   *allocator.SubnetAllocator
+	masterSubnetAllocator   *subnetallocator.SubnetAllocator
+	joinSubnetAllocator     *subnetallocator.SubnetAllocator
+	nodeLocalNatIPAllocator *ipallocator.Range
 
 	TCPLoadBalancerUUID  string
 	UDPLoadBalancerUUID  string
@@ -102,6 +108,9 @@ type Controller struct {
 	// from inside those functions.
 	namespaces      map[string]*namespaceInfo
 	namespacesMutex sync.Mutex
+
+	// An address set factory that creates address sets
+	addressSetFactory AddressSetFactory
 
 	// Port group for ingress deny rule
 	portGroupIngressDeny string
@@ -153,17 +162,23 @@ const (
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
-func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory, stopChan <-chan struct{}) *Controller {
+func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
+	stopChan <-chan struct{}, addressSetFactory AddressSetFactory) *Controller {
+	if addressSetFactory == nil {
+		addressSetFactory = NewOvnAddressSetFactory()
+	}
 	return &Controller{
 		kube:                     &kube.Kube{KClient: kubeClient},
 		watchFactory:             wf,
 		stopChan:                 stopChan,
-		masterSubnetAllocator:    allocator.NewSubnetAllocator(),
+		masterSubnetAllocator:    subnetallocator.NewSubnetAllocator(),
+		nodeLocalNatIPAllocator:  &ipallocator.Range{},
 		logicalSwitchCache:       make(map[string][]*net.IPNet),
-		joinSubnetAllocator:      allocator.NewSubnetAllocator(),
+		joinSubnetAllocator:      subnetallocator.NewSubnetAllocator(),
 		logicalPortCache:         newPortCache(stopChan),
 		namespaces:               make(map[string]*namespaceInfo),
 		namespacesMutex:          sync.Mutex{},
+		addressSetFactory:        addressSetFactory,
 		lspIngressDenyCache:      make(map[string]int),
 		lspEgressDenyCache:       make(map[string]int),
 		lspMutex:                 &sync.Mutex{},
@@ -636,7 +651,8 @@ func (oc *Controller) WatchNodes() error {
 
 			nodeSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
 			joinSubnets, _ := util.ParseNodeJoinSubnetAnnotation(node)
-			err := oc.deleteNode(node.Name, nodeSubnets, joinSubnets)
+			dnatSnatIPs, _ := util.ParseNodeLocalNatIPAnnotation(node)
+			err := oc.deleteNode(node.Name, nodeSubnets, joinSubnets, dnatSnatIPs)
 			if err != nil {
 				klog.Error(err)
 			}

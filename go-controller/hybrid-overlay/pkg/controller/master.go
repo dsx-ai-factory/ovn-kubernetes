@@ -3,34 +3,41 @@ package controller
 import (
 	"fmt"
 	"net"
+	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
+	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/allocator"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog"
+	utilnet "k8s.io/utils/net"
 )
 
 // MasterController is the master hybrid overlay controller
 type MasterController struct {
 	kube      kube.Interface
-	allocator *allocator.SubnetAllocator
+	allocator *subnetallocator.SubnetAllocator
+	wf        *factory.WatchFactory
 }
 
 // NewMaster a new master controller that listens for node events
 func NewMaster(kube kube.Interface) (*MasterController, error) {
 	m := &MasterController{
 		kube:      kube,
-		allocator: allocator.NewSubnetAllocator(),
+		allocator: subnetallocator.NewSubnetAllocator(),
 	}
 
-	// Add our hybrid overlay CIDRs to the allocator
+	// Add our hybrid overlay CIDRs to the subnetallocator
 	for _, clusterEntry := range config.HybridOverlay.ClusterSubnets {
 		err := m.allocator.AddNetworkRange(clusterEntry.CIDR, 32-clusterEntry.HostSubnetLength)
 		if err != nil {
@@ -65,7 +72,16 @@ func StartMaster(kube kube.Interface, wf *factory.WatchFactory) error {
 	if err != nil {
 		return err
 	}
-	return houtil.StartNodeWatch(master, wf)
+
+	if err := houtil.StartNodeWatch(master, wf); err != nil {
+		return err
+	}
+
+	if err := master.startNamespaceWatch(wf); err != nil {
+		return err
+	}
+
+	return master.startPodWatch(wf)
 }
 
 // hybridOverlayNodeEnsureSubnet allocates a subnet and sets the
@@ -122,13 +138,18 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 	subnet := subnets[0]
 
 	portName := houtil.GetHybridOverlayPortName(node.Name)
-	portMAC, portIP, _ := util.GetPortAddresses(portName)
-	if portMAC == nil || portIP == nil {
-		if portIP == nil {
-			portIP = util.GetNodeHybridOverlayIfAddr(subnet).IP
+	portMAC, portIPs, _ := util.GetPortAddresses(portName)
+	if portMAC == nil || portIPs == nil {
+		if portIPs == nil {
+			portIPs = append(portIPs, util.GetNodeHybridOverlayIfAddr(subnet).IP)
 		}
 		if portMAC == nil {
-			portMAC = util.IPAddrToHWAddr(portIP)
+			for _, ip := range portIPs {
+				portMAC = util.IPAddrToHWAddr(ip)
+				if !utilnet.IsIPv6(ip) {
+					break
+				}
+			}
 		}
 
 		klog.Infof("creating node %s hybrid overlay port", node.Name)
@@ -208,4 +229,121 @@ func (m *MasterController) Delete(node *kapi.Node) {
 func (m *MasterController) Sync(nodes []*kapi.Node) {
 	// Unused because our initial node list sync needs to return
 	// errors which this function cannot do
+}
+
+// startNamespaceWatch starts a watcher for namespace events
+func (m *MasterController) startNamespaceWatch(wf *factory.WatchFactory) error {
+	m.wf = wf
+	_, err := wf.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			ns := obj.(*kapi.Namespace)
+			if err := m.addOrUpdateNamespace(ns); err != nil {
+				klog.Errorf("error adding namespace %s: %s", ns.Name, err)
+			}
+		},
+		UpdateFunc: func(old, newer interface{}) {
+			nsNew := newer.(*kapi.Namespace)
+			nsOld := old.(*kapi.Namespace)
+			if nsHybridAnnotationChanged(nsOld, nsNew) {
+				if err := m.addOrUpdateNamespace(nsNew); err != nil {
+					klog.Errorf("error updating namespace %s: %s", nsNew.Name, err)
+				}
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			// dont care about namespace delete
+		},
+	}, nil)
+	return err
+}
+
+// addOrUpdateNamespace copies namespace annotations to all pods in the namespace
+func (m *MasterController) addOrUpdateNamespace(ns *kapi.Namespace) error {
+	pods, err := m.wf.GetPods(ns.Name)
+	if err != nil {
+		return err
+	}
+	for _, pod := range pods {
+		if err := houtil.CopyNamespaceAnnotationsToPod(m.kube, ns, pod); err != nil {
+			klog.Errorf("Unable to copy hybrid-overlay namespace annotations to pod %s", pod.Name)
+		}
+	}
+	return nil
+}
+
+// startPodWatch starts a watcher for pod events
+func (m *MasterController) startPodWatch(wf *factory.WatchFactory) error {
+	m.wf = wf
+	_, err := wf.AddPodHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			pod := obj.(*kapi.Pod)
+			if err := m.addOrUpdatePod(pod); err != nil {
+				klog.Errorf("error updating pod %s: %s", pod.Name, err)
+			}
+		},
+		UpdateFunc: func(old, newer interface{}) {
+			// don't care about pod update
+		},
+		DeleteFunc: func(obj interface{}) {
+			// dont care about pod delete
+		},
+	}, nil)
+	return err
+}
+
+// waitForNamespace fetches a namespace from the cache, or waits until it's available
+func (m *MasterController) waitForNamespace(name string) (*kapi.Namespace, error) {
+	var namespaceBackoff = wait.Backoff{Duration: 1 * time.Second, Steps: 7, Factor: 1.5, Jitter: 0.1}
+	var namespace *kapi.Namespace
+	if err := wait.ExponentialBackoff(namespaceBackoff, func() (bool, error) {
+		var err error
+		namespace, err = m.wf.GetNamespace(name)
+		if err != nil {
+			if errors.IsNotFound(err) {
+				// Namespace not found; retry
+				return false, nil
+			}
+			klog.Warningf("error getting namespace: %v", err)
+			return false, err
+		}
+		return true, nil
+	}); err != nil {
+		return nil, fmt.Errorf("failed to get namespace object: %v", err)
+	}
+	return namespace, nil
+}
+
+// addOrUpdatePod ensures that hybrid overlay annotations are copied to a
+// pod when it's created. This allows the nodes to set up the appropriate
+// flows
+func (m *MasterController) addOrUpdatePod(pod *kapi.Pod) error {
+	namespace, err := m.waitForNamespace(pod.Namespace)
+	if err != nil {
+		return err
+	}
+
+	namespaceExternalGw := namespace.Annotations[hotypes.HybridOverlayExternalGw]
+	namespaceVTEP := namespace.Annotations[hotypes.HybridOverlayVTEP]
+
+	podExternalGw := pod.Annotations[hotypes.HybridOverlayExternalGw]
+	podVTEP := pod.Annotations[hotypes.HybridOverlayVTEP]
+
+	if namespaceExternalGw != podExternalGw || namespaceVTEP != podVTEP {
+		// copy namespace annotations to the pod and return
+		return houtil.CopyNamespaceAnnotationsToPod(m.kube, namespace, pod)
+	}
+	return nil
+}
+
+// nsHybridAnnotationChanged returns true if any relevant NS attributes changed
+func nsHybridAnnotationChanged(ns1 *kapi.Namespace, ns2 *kapi.Namespace) bool {
+	nsExGw1 := ns1.GetAnnotations()[hotypes.HybridOverlayExternalGw]
+	nsVTEP1 := ns1.GetAnnotations()[hotypes.HybridOverlayVTEP]
+	nsExGw2 := ns2.GetAnnotations()[hotypes.HybridOverlayExternalGw]
+	nsVTEP2 := ns2.GetAnnotations()[hotypes.HybridOverlayVTEP]
+
+	if nsExGw1 != nsExGw2 || nsVTEP1 != nsVTEP2 {
+		return true
+	}
+	return false
 }

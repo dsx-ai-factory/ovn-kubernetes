@@ -27,17 +27,16 @@ const (
 	// access to local service
 	LocalNetworkName = "locnet"
 
-	// V4LocalnetGatewayIP is the SNAT IP using which host-local services are accessed
-	V4LocalnetGatewayIP = "169.254.33.2"
-	// V4LocalnetGatewayNextHop is the IP address to which packets to local services are forwarded
-	V4LocalnetGatewayNextHop      = "169.254.33.1"
-	V4LocalnetGatewaySubnetPrefix = 24
+	// FIXME DUAL-STACK
+	V6NodeLocalNatSubnet           = "fd99::/64"
+	V6NodeLocalNatSubnetPrefix     = 64
+	V6NodeLocalNatSubnetNextHop    = "fd99::1"
+	V6NodeLocalDistributedGwPortIP = "fd99::2"
 
-	// V6LocalnetGatewayIP is the IPv6 counterpart of IPv4 constant above
-	V6LocalnetGatewayIP = "fd99::2"
-	// V6LocalnetGatewayNextHop is the IPv6 counterpart of IPv4 constant above
-	V6LocalnetGatewayNextHop      = "fd99::1"
-	V6LocalnetGatewaySubnetPrefix = 64
+	V4NodeLocalNatSubnet           = "169.254.0.0/20"
+	V4NodeLocalNatSubnetPrefix     = 20
+	V4NodeLocalNatSubnetNextHop    = "169.254.0.1"
+	V4NodeLocalDistributedGwPortIP = "169.254.0.2"
 )
 
 // StringArg gets the named command-line argument or returns an error if it is empty

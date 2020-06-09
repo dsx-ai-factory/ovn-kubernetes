@@ -21,6 +21,14 @@ import (
 )
 
 const (
+	v4localnetGatewayIP           = "169.254.33.2"
+	v4localnetGatewayNextHop      = "169.254.33.1"
+	v4localnetGatewaySubnetPrefix = 24
+
+	v6localnetGatewayIP           = "fd99::2"
+	v6localnetGatewayNextHop      = "fd99::1"
+	v6localnetGatewaySubnetPrefix = 64
+
 	// localnetGatewayNextHopPort is the name of the gateway port on the host to which all
 	// the packets leaving the OVN logical topology will be forwarded
 	localnetGatewayNextHopPort       = "ovn-k8s-gw0"
@@ -152,13 +160,13 @@ func initLocalnetGateway(nodeName string, subnet *net.IPNet, wf *factory.WatchFa
 	var gatewayIP, gatewayNextHop net.IP
 	var gatewaySubnetMask net.IPMask
 	if utilnet.IsIPv6CIDR(subnet) {
-		gatewayIP = net.ParseIP(util.V6LocalnetGatewayIP)
-		gatewayNextHop = net.ParseIP(util.V6LocalnetGatewayNextHop)
-		gatewaySubnetMask = net.CIDRMask(util.V6LocalnetGatewaySubnetPrefix, 128)
+		gatewayIP = net.ParseIP(v6localnetGatewayIP)
+		gatewayNextHop = net.ParseIP(v6localnetGatewayNextHop)
+		gatewaySubnetMask = net.CIDRMask(v6localnetGatewaySubnetPrefix, 128)
 	} else {
-		gatewayIP = net.ParseIP(util.V4LocalnetGatewayIP)
-		gatewayNextHop = net.ParseIP(util.V4LocalnetGatewayNextHop)
-		gatewaySubnetMask = net.CIDRMask(util.V4LocalnetGatewaySubnetPrefix, 32)
+		gatewayIP = net.ParseIP(v4localnetGatewayIP)
+		gatewayNextHop = net.ParseIP(v4localnetGatewayNextHop)
+		gatewaySubnetMask = net.CIDRMask(v4localnetGatewaySubnetPrefix, 32)
 	}
 	gatewayIPCIDR := &net.IPNet{IP: gatewayIP, Mask: gatewaySubnetMask}
 	gatewayNextHopCIDR := &net.IPNet{IP: gatewayNextHop, Mask: gatewaySubnetMask}
@@ -192,7 +200,7 @@ func initLocalnetGateway(nodeName string, subnet *net.IPNet, wf *factory.WatchFa
 	if utilnet.IsIPv6CIDR(subnet) {
 		// TODO - IPv6 hack ... for some reason neighbor discovery isn't working here, so hard code a
 		// MAC binding for the gateway IP address for now - need to debug this further
-		err = util.LinkNeighSet(link, gatewayIP, macAddress)
+		err = util.LinkNeighAdd(link, gatewayIP, macAddress)
 		if err == nil {
 			klog.Infof("Added MAC binding for %s on %s", gatewayIP, localnetGatewayNextHopPort)
 		} else {
@@ -368,6 +376,5 @@ func cleanupLocalnetGateway(physnet string) error {
 			break
 		}
 	}
-
-	return nil
+	return err
 }
