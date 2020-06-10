@@ -92,7 +92,21 @@ func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string) error
 	}
 
 	go leaderElector.Run(context.Background())
+	go func() {
+		for {
+			select {
+			case <-time.After(30 * time.Second):
+				if leaderElector.IsLeader() {
+					metrics.MetricMasterLeader.Set(1)
+				} else {
+					metrics.MetricMasterLeader.Set(0)
+				}
+			case <-oc.stopChan:
+				return
 
+			}
+		}
+	}()
 	return nil
 }
 
