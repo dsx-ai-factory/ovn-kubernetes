@@ -1198,8 +1198,8 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		klog.SetOutput(&lumberjack.Logger{
 			Filename:   Logging.File,
 			MaxSize:    100, // megabytes
-			MaxBackups: 10,
-			MaxAge:     30, // days
+			MaxBackups: 5,
+			MaxAge:     5, // days
 			Compress:   true,
 		})
 	}
