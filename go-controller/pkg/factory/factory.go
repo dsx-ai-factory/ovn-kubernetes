@@ -340,7 +340,7 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 	i.events = make([]chan *event, numEventQueues)
 	i.shutdownWg.Add(len(i.events))
 	for j := range i.events {
-		i.events[j] = make(chan *event, 1)
+		i.events[j] = make(chan *event, 10)
 		go i.processEvents(i.events[j], stopChan)
 	}
 	i.initialAddFunc = func(h *Handler, items []interface{}) {
@@ -352,7 +352,7 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		queueWg := &sync.WaitGroup{}
 		queueWg.Add(len(adds))
 		for j := range adds {
-			adds[j] = make(chan interface{}, 1)
+			adds[j] = make(chan interface{}, 10)
 			go func(addChan chan interface{}) {
 				defer queueWg.Done()
 				for {
@@ -701,4 +701,9 @@ func (wf *WatchFactory) GetNamespace(name string) (*kapi.Namespace, error) {
 func (wf *WatchFactory) GetNamespaces() ([]*kapi.Namespace, error) {
 	namespaceLister := wf.informers[namespaceType].lister.(listers.NamespaceLister)
 	return namespaceLister.List(labels.Everything())
+}
+
+// GetFactory returns the underlying informer factory
+func (wf *WatchFactory) GetFactory() informerfactory.SharedInformerFactory {
+	return wf.iFactory
 }

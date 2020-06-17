@@ -75,7 +75,7 @@ var MetricMasterLeader = prometheus.NewGauge(prometheus.GaugeOpts{
 })
 
 var registerMasterMetricsOnce sync.Once
-var startMasterUpdaterOnce sync.Once
+var startE2ETimeStampUpdaterOnce sync.Once
 
 var ovnNorthdCoverageShowCountersMap = map[string]*metricDetails{
 	"pstream_open": {
@@ -122,7 +122,7 @@ func RegisterMasterMetrics() {
 	registerMasterMetricsOnce.Do(func() {
 		prometheus.MustRegister(metricE2ETimestamp)
 		// following go routine is directly responsible for collecting the metric above.
-		startMasterMetricsUpdater()
+		StartE2ETimeStampMetricUpdater()
 
 		prometheus.MustRegister(metricPodCreationLatency)
 		prometheus.MustRegister(prometheus.NewCounterFunc(
@@ -227,10 +227,10 @@ func scrapeOvnTimestamp() float64 {
 	return parseMetricToFloat("e2e_timestamp", output)
 }
 
-// startMasterMetricsUpdater adds a goroutine that updates a "timestamp" value in the
+// StartE2ETimeStampMetricUpdater adds a goroutine that updates a "timestamp" value in the
 // nbdb every 30 seconds. This is so we can determine freshness of the database
-func startMasterMetricsUpdater() {
-	startMasterUpdaterOnce.Do(func() {
+func StartE2ETimeStampMetricUpdater() {
+	startE2ETimeStampUpdaterOnce.Do(func() {
 		go func() {
 			for {
 				t := time.Now().Unix()

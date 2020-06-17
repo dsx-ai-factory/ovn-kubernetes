@@ -62,6 +62,9 @@ func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string) error
 					end := time.Since(start)
 					metrics.MetricMasterReadyDuration.Set(end.Seconds())
 				}()
+				// run the End-to-end timestamp metric updater only on the
+				// active master node.
+				metrics.StartE2ETimeStampMetricUpdater()
 				if err := oc.StartClusterMaster(nodeName); err != nil {
 					panic(err.Error())
 				}
@@ -195,10 +198,17 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	}
 
 	if config.HybridOverlay.Enabled {
-		if err := homaster.StartMaster(oc.kube, oc.watchFactory); err != nil {
-			klog.Errorf("Failed to set up hybrid overlay master: %v", err)
-			return err
+		factory := oc.watchFactory.GetFactory()
+		nodeMaster, err := homaster.NewMaster(
+			oc.kube,
+			factory.Core().V1().Nodes().Informer(),
+			factory.Core().V1().Namespaces().Informer(),
+			factory.Core().V1().Pods().Informer(),
+		)
+		if err != nil {
+			return fmt.Errorf("Failed to set up hybrid overlay master: %v", err)
 		}
+		go nodeMaster.Run(oc.stopChan)
 	}
 
 	return nil
@@ -358,7 +368,7 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 
 	if macAddress == nil {
 		// When macAddress was removed, delete the switch port
-		stdout, stderr, err := util.RunOVNNbctl("--", "--if-exists", "lsp-del", "k8s-"+node.Name)
+		stdout, stderr, err := util.RunOVNNbctl("--", "--if-exists", "lsp-del", util.K8sPrefix+node.Name)
 		if err != nil {
 			klog.Errorf("Failed to delete logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		}
@@ -390,8 +400,8 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 
 	// Create this node's management logical port on the node switch
 	stdout, stderr, err := util.RunOVNNbctl(
-		"--", "--may-exist", "lsp-add", node.Name, "k8s-"+node.Name,
-		"--", "lsp-set-addresses", "k8s-"+node.Name, addresses)
+		"--", "--may-exist", "lsp-add", node.Name, util.K8sPrefix+node.Name,
+		"--", "lsp-set-addresses", util.K8sPrefix+node.Name, addresses)
 	if err != nil {
 		klog.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
@@ -481,8 +491,8 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 	}
 
 	lrpArgs := []string{
-		"--if-exists", "lrp-del", "rtos-" + nodeName,
-		"--", "lrp-add", ovnClusterRouter, "rtos-" + nodeName,
+		"--if-exists", "lrp-del", routerToSwitchPrefix + nodeName,
+		"--", "lrp-add", ovnClusterRouter, routerToSwitchPrefix + nodeName,
 		nodeLRPMAC.String(),
 	}
 
@@ -567,8 +577,9 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 	}
 
 	// Connect the switch to the router.
-	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", nodeName, "stor-"+nodeName,
-		"--", "set", "logical_switch_port", "stor-"+nodeName, "type=router", "options:router-port=rtos-"+nodeName, "addresses="+"\""+nodeLRPMAC.String()+"\"")
+	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", nodeName, switchToRouterPrefix+nodeName,
+		"--", "set", "logical_switch_port", switchToRouterPrefix+nodeName, "type=router",
+		"options:router-port="+routerToSwitchPrefix+nodeName, "addresses="+"\""+nodeLRPMAC.String()+"\"")
 	if err != nil {
 		klog.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
@@ -631,15 +642,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 		}
 	}
 	// Add the node to the logical switch cache
-	oc.lsMutex.Lock()
-	defer oc.lsMutex.Unlock()
-	if existing, ok := oc.logicalSwitchCache[nodeName]; ok && !reflect.DeepEqual(existing, hostSubnets) {
-		klog.Warningf("Node %q logical switch already in cache with subnet %s; replacing with %s", nodeName,
-			util.JoinIPNets(existing, ","), util.JoinIPNets(hostSubnets, ","))
-	}
-	oc.logicalSwitchCache[nodeName] = hostSubnets
-
-	return nil
+	return oc.lsManager.AddNode(nodeName, hostSubnets)
 }
 
 func (oc *Controller) addNodeAnnotations(node *kapi.Node, hostSubnets []*net.IPNet) error {
@@ -715,7 +718,7 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 	}
 
 	// Remove the patch port that connects distributed router to node's logical switch
-	if _, stderr, err := util.RunOVNNbctl("--if-exist", "lrp-del", "rtos-"+nodeName); err != nil {
+	if _, stderr, err := util.RunOVNNbctl("--if-exist", "lrp-del", routerToSwitchPrefix+nodeName); err != nil {
 		return fmt.Errorf("Failed to delete logical router port rtos-%s, "+
 			"stderr: %q, error: %v", nodeName, stderr, err)
 	}
