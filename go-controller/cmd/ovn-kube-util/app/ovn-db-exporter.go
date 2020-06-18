@@ -266,6 +266,16 @@ var metricDBClusterConnOutErr = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	},
 )
 
+var metricDBE2eTimestamp = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Namespace: metrics.MetricOvnNamespace,
+	Subsystem: metrics.MetricOvnSubsystemDBRaft,
+	Name:      "e2e_timestamp",
+	Help:      "The current e2e-timestamp value as observed in this instance of the database"},
+	[]string{
+		"db_name",
+	},
+)
+
 func ovnDBStatusMetricsUpdater(direction, database string) {
 	status, err := util.GetOVNDBServerInfo(5, direction, database)
 	if err != nil {
@@ -288,6 +298,30 @@ func ovnDBSizeMetricsUpdater(direction, database string) {
 		return
 	}
 	metricDBSize.WithLabelValues(database).Set(float64(fileInfo.Size()))
+}
+
+func ovnE2eTimeStampUpdater(direction, database string) {
+	var stdout, stderr string
+	var err error
+
+	if direction == "sb" {
+		stdout, stderr, err = util.RunOVNSbctl("--if-exists", "--no-leader-only",
+			"get", "SB_Global", ".", "options:e2e_timestamp")
+	} else {
+		stdout, stderr, err = util.RunOVNNbctl("--if-exists", "--no-leader-only",
+			"get", "NB_Global", ".", "options:e2e_timestamp")
+	}
+	if err != nil {
+		klog.Errorf("failed to scrape timestamp for database %s: "+
+			"stderr (%s) (%v)", database, stderr, err)
+		return
+	}
+	if value, err := strconv.ParseFloat(stdout, 64); err == nil {
+		metricDBE2eTimestamp.WithLabelValues(database).Set(value)
+	} else {
+		klog.Errorf("failed to parse %s e2e-timestamp value to float64 :(%v)",
+			database, err)
+	}
 }
 
 func ovnDBMemoryMetricsUpdater(direction, database string) {
@@ -410,6 +444,7 @@ var OvnDBExporterCommand = cli.Command{
 		prometheus.MustRegister(metricDBClusterConnOut)
 		prometheus.MustRegister(metricDBClusterConnInErr)
 		prometheus.MustRegister(metricDBClusterConnOutErr)
+		prometheus.MustRegister(metricDBE2eTimestamp)
 
 		// functions responsible for collecting the values and updating the prometheus metrics
 		go func() {
@@ -417,10 +452,13 @@ var OvnDBExporterCommand = cli.Command{
 				"nb": "OVN_Northbound",
 				"sb": "OVN_Southbound",
 			}
-			for direction, database := range dirDbMap {
-				ovnDBStatusMetricsUpdater(direction, database)
-				ovnDBMemoryMetricsUpdater(direction, database)
-				ovnDBSizeMetricsUpdater(direction, database)
+			for {
+				for direction, database := range dirDbMap {
+					ovnDBStatusMetricsUpdater(direction, database)
+					ovnDBMemoryMetricsUpdater(direction, database)
+					ovnDBSizeMetricsUpdater(direction, database)
+					ovnE2eTimeStampUpdater(direction, database)
+				}
 				time.Sleep(30 * time.Second)
 			}
 		}()
