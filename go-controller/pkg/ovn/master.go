@@ -33,6 +33,22 @@ const (
 	OvnServiceIdledAt = "k8s.ovn.org/idled-at"
 )
 
+type ovnkubeMasterLeaderMetrics struct{}
+
+func (ovnkubeMasterLeaderMetrics) On(string) {
+	metrics.MetricMasterLeader.Set(1)
+}
+
+func (ovnkubeMasterLeaderMetrics) Off(string) {
+	metrics.MetricMasterLeader.Set(0)
+}
+
+type ovnkubeMasterLeaderMetricsProvider struct{}
+
+func (_ ovnkubeMasterLeaderMetricsProvider) NewLeaderMetric() leaderelection.SwitchMetric {
+	return ovnkubeMasterLeaderMetrics{}
+}
+
 // Start waits until this process is the leader before starting master functions
 func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string) error {
 	// Set up leader election process first
@@ -89,27 +105,14 @@ func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string) error
 		},
 	}
 
+	leaderelection.SetProvider(ovnkubeMasterLeaderMetricsProvider{})
 	leaderElector, err := leaderelection.NewLeaderElector(lec)
 	if err != nil {
 		return err
 	}
 
 	go leaderElector.Run(context.Background())
-	go func() {
-		for {
-			select {
-			case <-time.After(30 * time.Second):
-				if leaderElector.IsLeader() {
-					metrics.MetricMasterLeader.Set(1)
-				} else {
-					metrics.MetricMasterLeader.Set(0)
-				}
-			case <-oc.stopChan:
-				return
 
-			}
-		}
-	}()
 	return nil
 }
 
@@ -434,7 +437,6 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}
 
-	// Add local only gateway to allow local service access
 	if l3GatewayConfig.Mode == config.GatewayModeShared {
 		// in the case of shared gateway mode, we need to setup
 		// 1. two policy based routes to steer traffic to the k8s node IP

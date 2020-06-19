@@ -55,28 +55,26 @@ const (
 )
 
 type L3GatewayConfig struct {
-	Mode            config.GatewayMode
-	ChassisID       string
-	InterfaceID     string
-	MACAddress      net.HardwareAddr
-	IPAddresses     []*net.IPNet
-	NextHops        []net.IP
-	NodePortEnable  bool
-	VLANID          *uint
-	LocalMACAddress net.HardwareAddr
+	Mode           config.GatewayMode
+	ChassisID      string
+	InterfaceID    string
+	MACAddress     net.HardwareAddr
+	IPAddresses    []*net.IPNet
+	NextHops       []net.IP
+	NodePortEnable bool
+	VLANID         *uint
 }
 
 type l3GatewayConfigJSON struct {
-	Mode            config.GatewayMode `json:"mode"`
-	InterfaceID     string             `json:"interface-id,omitempty"`
-	MACAddress      string             `json:"mac-address,omitempty"`
-	IPAddresses     []string           `json:"ip-addresses,omitempty"`
-	IPAddress       string             `json:"ip-address,omitempty"`
-	NextHops        []string           `json:"next-hops,omitempty"`
-	NextHop         string             `json:"next-hop,omitempty"`
-	NodePortEnable  string             `json:"node-port-enable,omitempty"`
-	VLANID          string             `json:"vlan-id,omitempty"`
-	LocalMACAddress string             `json:"local-mac-address,omitempty"`
+	Mode           config.GatewayMode `json:"mode"`
+	InterfaceID    string             `json:"interface-id,omitempty"`
+	MACAddress     string             `json:"mac-address,omitempty"`
+	IPAddresses    []string           `json:"ip-addresses,omitempty"`
+	IPAddress      string             `json:"ip-address,omitempty"`
+	NextHops       []string           `json:"next-hops,omitempty"`
+	NextHop        string             `json:"next-hop,omitempty"`
+	NodePortEnable string             `json:"node-port-enable,omitempty"`
+	VLANID         string             `json:"vlan-id,omitempty"`
 }
 
 func (cfg *L3GatewayConfig) MarshalJSON() ([]byte, error) {
@@ -107,9 +105,6 @@ func (cfg *L3GatewayConfig) MarshalJSON() ([]byte, error) {
 	}
 	if len(cfgjson.NextHops) == 1 {
 		cfgjson.NextHop = cfgjson.NextHops[0]
-	}
-	if cfg.LocalMACAddress != nil {
-		cfgjson.LocalMACAddress = cfg.LocalMACAddress.String()
 	}
 
 	return json.Marshal(&cfgjson)
@@ -143,12 +138,6 @@ func (cfg *L3GatewayConfig) UnmarshalJSON(bytes []byte) error {
 	cfg.MACAddress, err = net.ParseMAC(cfgjson.MACAddress)
 	if err != nil {
 		return fmt.Errorf("bad 'mac-address' value %q: %v", cfgjson.MACAddress, err)
-	}
-	if cfgjson.LocalMACAddress != "" {
-		cfg.LocalMACAddress, err = net.ParseMAC(cfgjson.LocalMACAddress)
-		if err != nil {
-			return fmt.Errorf("bad 'local-mac-address' value %q: %v", cfgjson.LocalMACAddress, err)
-		}
 	}
 
 	if len(cfgjson.IPAddresses) == 0 {

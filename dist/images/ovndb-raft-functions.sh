@@ -204,7 +204,6 @@ ovsdb-raft() {
   rm -f ${ovn_db_pidfile}
 
   verify-ovsdb-raft
-
   echo "=============== run ${db}-ovsdb-raft pod ${POD_NAME} =========="
 
   if [[ ! -e ${ovn_db_file} ]] || ovsdb-tool db-is-standalone ${ovn_db_file}; then

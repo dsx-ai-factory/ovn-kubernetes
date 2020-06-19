@@ -225,28 +225,6 @@ func defaultFakeExec(nodeSubnet, nodeName string, sctpSupport bool) (*ovntest.Fa
 	return fexec, tcpLBUUID, udpLBUUID, sctpLBUUID
 }
 
-func deleteLocalOnlyGatewayTest(fexec *ovntest.FakeExec, nodeName, clusterRouterUUID string) {
-	const (
-		localNodeRouteUUID string = "0cac12cf-3e0f-4682-b028-5ea2e0001962"
-	)
-
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_local_" + nodeName + " networks",
-		Output: "[\"100.64.0.3/29\"]",
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route nexthop=\"100.64.0.3\"",
-		Output: localNodeRouteUUID,
-	})
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 --if-exists remove logical_router " + clusterRouterUUID + " static_routes " + localNodeRouteUUID,
-	})
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 --if-exist lr-del GR_local_" + nodeName,
-		"ovn-nbctl --timeout=15 --if-exist ls-del ext_local_" + nodeName,
-	})
-}
-
 func addNodeportLBs(fexec *ovntest.FakeExec, nodeName, tcpLBUUID, udpLBUUID, sctpLBUUID string) {
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=" + gwRouterPrefix + nodeName,
