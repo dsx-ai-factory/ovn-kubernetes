@@ -13,22 +13,22 @@ import (
 const (
 	// ovnClusterRouter is the name of the distributed router
 	ovnClusterRouter = "ovn_cluster_router"
+	ovnJoinSwitch    = "join"
 
-	joinSwitchPrefix             = "join_"
-	externalSwitchPrefix         = "ext_"
-	gwRouterPrefix               = "GR_"
-	routerToSwitchPrefix         = "rtos-"
-	switchToRouterPrefix         = "stor-"
-	joinSwitchToGwRouterPrefix   = "jtor-"
-	gwRouterToJoinSwitchPrefix   = "rtoj-"
-	distRouterToJoinSwitchPrefix = "dtoj-"
-	joinSwitchToDistRouterPrefix = "jtod-"
-	extSwitchToGwRouterPrefix    = "etor-"
-	gwRouterToExtSwitchPrefix    = "rtoe-"
+	externalSwitchPrefix       = "ext_"
+	gwRouterPrefix             = "GR_"
+	routerToSwitchPrefix       = "rtos-"
+	switchToRouterPrefix       = "stor-"
+	joinSwitchToGwRouterPrefix = "jtor-"
+	gwRouterToJoinSwitchPrefix = "rtoj-"
+	extSwitchToGwRouterPrefix  = "etor-"
+	gwRouterToExtSwitchPrefix  = "rtoe-"
 
 	nodeLocalSwitch          = "node_local_switch"
 	nodeSubnetPolicyPriority = "1004"
 	mgmtPortPolicyPriority   = "1005"
+	v4JoinSubnetCidr         = "100.64.0.1/16"
+	v6JoinSubnetCidr         = "fd98::1/64"
 )
 
 func (ovn *Controller) getOvnGateways() ([]string, string, error) {

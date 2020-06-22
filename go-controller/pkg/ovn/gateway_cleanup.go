@@ -16,38 +16,23 @@ func gatewayCleanup(nodeName string) error {
 	gatewayRouter := gwRouterPrefix + nodeName
 
 	// Get the gateway router port's IP address (connected to join switch)
-	var routerIP net.IP
 	var nextHops []net.IP
-	routerIPNetworks, stderr, err := util.RunOVNNbctl("--if-exist", "get",
-		"logical_router_port", gwRouterToJoinSwitchPrefix+gatewayRouter, "networks")
+
+	networks, err := util.GetLrpNetworks(gwRouterToJoinSwitchPrefix + gatewayRouter)
 	if err != nil {
-		return fmt.Errorf("failed to get logical router port for gateway router %s, "+
-			"stderr: %q, error: %v", gatewayRouter, stderr, err)
+		return err
 	}
 
-	// eg: `["100.64.1.1/29", "fd98:1::/125"]`
-	routerIPNetworks = strings.Trim(routerIPNetworks, "[]")
-	if routerIPNetworks != "" {
-		for _, routerIPNetwork := range strings.Split(routerIPNetworks, ", ") {
-			routerIPNetwork = strings.Trim(routerIPNetwork, "\"")
-			routerIP, _, err = net.ParseCIDR(routerIPNetwork)
-			if err != nil {
-				return fmt.Errorf("could not parse logical router port %q: %v",
-					routerIPNetwork, err)
-			}
-			if routerIP != nil {
-				nextHops = append(nextHops, routerIP)
-			}
-		}
+	for _, network := range networks {
+		nextHops = append(nextHops, network.IP)
 	}
-
 	staticRouteCleanup(nextHops)
 
-	// Remove the join switch that connects ovn_cluster_router to gateway router
-	_, stderr, err = util.RunOVNNbctl("--if-exist", "ls-del", joinSwitchPrefix+nodeName)
+	// Remove the patch port that connects join switch to gateway router
+	_, stderr, err := util.RunOVNNbctl("--if-exist", "lsp-del", joinSwitchToGwRouterPrefix+gatewayRouter)
 	if err != nil {
-		return fmt.Errorf("failed to delete the join logical switch %s, "+
-			"stderr: %q, error: %v", joinSwitchPrefix+nodeName, stderr, err)
+		return fmt.Errorf("failed to delete logical switch port %s%s: "+
+			"stderr: %q, error: %v", joinSwitchToGwRouterPrefix, gatewayRouter, stderr, err)
 	}
 
 	// Remove the gateway router associated with nodeName
@@ -65,13 +50,6 @@ func gatewayCleanup(nodeName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to delete external switch %s, stderr: %q, "+
 			"error: %v", externalSwitch, stderr, err)
-	}
-
-	// Remove the patch port on the distributed router that connects to join switch
-	_, stderr, err = util.RunOVNNbctl("--if-exist", "lrp-del", distRouterToJoinSwitchPrefix+nodeName)
-	if err != nil {
-		return fmt.Errorf("failed to delete the patch port dtoj-%s on distributed router "+
-			"stderr: %q, error: %v", nodeName, stderr, err)
 	}
 
 	// If exists, remove the TCP, UDP load-balancers created for north-south traffic for gateway router.

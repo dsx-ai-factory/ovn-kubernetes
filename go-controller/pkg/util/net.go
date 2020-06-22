@@ -77,6 +77,31 @@ func GetPortAddresses(portName string) (net.HardwareAddr, []net.IP, error) {
 	return mac, ips, nil
 }
 
+// GetLrpNetworks returns the network for the given logical router port
+func GetLrpNetworks(portName string) ([]*net.IPNet, error) {
+	networks := []*net.IPNet{}
+	output, stderr, err := RunOVNNbctl("--if-exist", "get", "logical_router_port", portName, "networks")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get logical router port %s, "+
+			"stderr: %q, error: %v", portName, stderr, err)
+	}
+
+	// eg: `["100.64.1.1/29", "fd98:1::/125"]`
+	output = strings.Trim(output, "[]")
+	if output != "" {
+		for _, ipNetStr := range strings.Split(output, ", ") {
+			ipNetStr = strings.Trim(ipNetStr, "\"")
+			ip, cidr, err := net.ParseCIDR(ipNetStr)
+			if err != nil {
+				return nil, fmt.Errorf("could not parse logical router port %q: %v",
+					ipNetStr, err)
+			}
+			networks = append(networks, &net.IPNet{IP: ip, Mask: cidr.Mask})
+		}
+	}
+	return networks, nil
+}
+
 // GetOVSPortMACAddress returns the MAC address of a given OVS port
 func GetOVSPortMACAddress(portName string) (net.HardwareAddr, error) {
 	macAddress, stderr, err := RunOVSVsctl("--if-exists", "get",
