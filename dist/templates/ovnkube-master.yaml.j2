@@ -206,6 +206,12 @@ spec:
           value: "3"
         - name: OVNKUBE_LOGLEVEL
           value: "{{ ovnkube_master_loglevel }}"
+        - name: OVNKUBE_LOGFILE_MAXSIZE
+          value: "{{ ovnkube_logfile_maxsize }}"
+        - name: OVNKUBE_LOGFILE_MAXBACKUPS
+          value: "{{ ovnkube_logfile_maxbackups }}"
+        - name: OVNKUBE_LOGFILE_MAXAGE
+          value: "{{ ovnkube_logfile_maxage }}"
         - name: OVN_NET_CIDR
           valueFrom:
             configMapKeyRef:
@@ -235,6 +241,8 @@ spec:
           value: "{{ ovn_hybrid_overlay_net_cidr }}"
         - name: OVN_SSL_ENABLE
           value: "{{ ovn_ssl_en }}"
+        - name: OVN_GATEWAY_MODE
+          value: "{{ ovn_gateway_mode }}"
       # end of container
 
       volumes:

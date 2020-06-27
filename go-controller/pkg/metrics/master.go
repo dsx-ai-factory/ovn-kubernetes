@@ -231,7 +231,7 @@ func scrapeOvnTimestamp() float64 {
 	output, stderr, err := util.RunOVNSbctl("--if-exists",
 		"get", "SB_Global", ".", "options:e2e_timestamp")
 	if err != nil {
-		klog.Errorf("failed to scrape timestamp: %s (%v)", stderr, err)
+		klog.Errorf("Failed to scrape timestamp: %s (%v)", stderr, err)
 		return 0
 	}
 	return parseMetricToFloat("e2e_timestamp", output)
@@ -247,7 +247,7 @@ func StartE2ETimeStampMetricUpdater() {
 				_, stderr, err := util.RunOVNNbctl("set", "NB_Global", ".",
 					fmt.Sprintf(`options:e2e_timestamp="%d"`, t))
 				if err != nil {
-					klog.Errorf("failed to bump timestamp: %s (%v)", stderr, err)
+					klog.Errorf("Failed to bump timestamp: %s (%v)", stderr, err)
 				} else {
 					metricE2ETimestamp.Set(float64(t))
 				}

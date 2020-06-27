@@ -427,7 +427,7 @@ func RegisterNodeMetrics() {
 				stdout, stderr, err := util.RunOVSVsctl("--no-headings", "--data=bare", "--format=csv",
 					"--columns=name", "find", "interface", "type=patch")
 				if err != nil {
-					klog.Errorf("failed to get patch port count, stderr(%s): (%v)",
+					klog.Errorf("Failed to get patch port count, stderr(%s): (%v)",
 						stderr, err)
 					return 0
 				}

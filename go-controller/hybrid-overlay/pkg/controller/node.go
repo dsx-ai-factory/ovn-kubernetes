@@ -115,11 +115,11 @@ func NewNode(
 		},
 		func(obj interface{}) error {
 			pod, ok := obj.(*kapi.Pod)
-			if pod.Spec.NodeName != nodeName {
-				return nil
-			}
 			if !ok {
 				return fmt.Errorf("object is not a pod")
+			}
+			if pod.Spec.NodeName != nodeName {
+				return nil
 			}
 			return n.controller.DeletePod(pod)
 		},
@@ -171,20 +171,20 @@ func getNodeSubnetAndIP(node *kapi.Node) (*net.IPNet, net.IP) {
 		subnet, ok := node.Annotations[types.HybridOverlayNodeSubnet]
 		if !ok {
 
-			klog.V(5).Infof("missing node %q node subnet annotation", node.Name)
+			klog.V(5).Infof("Missing node %q node subnet annotation", node.Name)
 			return nil, nil
 		}
 		var err error
 		_, cidr, err = net.ParseCIDR(subnet)
 		if err != nil {
-			klog.Errorf("error parsing node %q subnet %q: %v", node.Name, subnet, err)
+			klog.Errorf("Error parsing node %q subnet %q: %v", node.Name, subnet, err)
 			return nil, nil
 		}
 	}
 
 	nodeIP, err := houtil.GetNodeInternalIP(node)
 	if err != nil {
-		klog.Errorf("error getting node %q internal IP: %v", node.Name, err)
+		klog.Errorf("Error getting node %q internal IP: %v", node.Name, err)
 		return nil, nil
 	}
 

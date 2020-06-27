@@ -61,7 +61,7 @@ func RegisterOvnMetrics() {
 			stdout, stderr, err := util.RunOVSVsctl("--no-headings", "--data=bare", "--format=csv",
 				"--columns=name", "find", "interface", "type=geneve")
 			if err != nil {
-				klog.Errorf("failed to get geneve port count, stderr(%s): (%v)",
+				klog.Errorf("Failed to get geneve port count, stderr(%s): (%v)",
 					stderr, err)
 				return 0
 			}

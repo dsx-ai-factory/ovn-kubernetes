@@ -60,9 +60,12 @@ var (
 
 	// Logging holds logging-related parsed config file parameters and command-line overrides
 	Logging = LoggingConfig{
-		File:    "", // do not log to a file by default
-		CNIFile: "",
-		Level:   4,
+		File:              "", // do not log to a file by default
+		CNIFile:           "",
+		Level:             4,
+		LogFileMaxSize:    100, // Size in Megabytes
+		LogFileMaxBackups: 5,
+		LogFileMaxAge:     5, //days
 	}
 
 	// CNI holds CNI-related parsed config file parameters and command-line overrides
@@ -162,6 +165,13 @@ type LoggingConfig struct {
 	CNIFile string `gcfg:"cnilogfile"`
 	// Level is the logging verbosity level
 	Level int `gcfg:"loglevel"`
+	// LogFileMaxSize is the maximum size in bytes of the logfile
+	// before it gets rolled.
+	LogFileMaxSize int `gcfg:"logfile-maxsize"`
+	// LogFileMaxBackups represents the the maximum number of old log files to retain
+	LogFileMaxBackups int `gcfg:"logfile-maxbackups"`
+	// LogFileMaxAge represents the maximum number of days to retain old log files
+	LogFileMaxAge int `gcfg:"logfile-maxage"`
 }
 
 // CNIConfig holds CNI-related parsed config file parameters and command-line overrides
@@ -520,6 +530,25 @@ var CommonFlags = []cli.Flag{
 		Destination: &cliConfig.Logging.CNIFile,
 		Value:       "/var/log/ovn-kubernetes/ovn-k8s-cni-overlay.log",
 	},
+	// Logfile rotation parameters
+	&cli.IntFlag{
+		Name:        "logfile-maxsize",
+		Usage:       "Maximum size in bytes of the log file before it gets rolled",
+		Destination: &cliConfig.Logging.LogFileMaxSize,
+		Value:       Logging.LogFileMaxSize,
+	},
+	&cli.IntFlag{
+		Name:        "logfile-maxbackups",
+		Usage:       "Maximum number of old log files to retain",
+		Destination: &cliConfig.Logging.LogFileMaxBackups,
+		Value:       Logging.LogFileMaxBackups,
+	},
+	&cli.IntFlag{
+		Name:        "logfile-maxage",
+		Usage:       "Maximum number of days to retain old log files",
+		Destination: &cliConfig.Logging.LogFileMaxAge,
+		Value:       Logging.LogFileMaxAge,
+	},
 }
 
 // CNIFlags capture CNI-related options
@@ -843,7 +872,7 @@ func getOVSExternalID(exec kexec.Interface, name string) string {
 		".",
 		"external_ids:"+name)
 	if err != nil {
-		klog.V(5).Infof("failed to get OVS external_id %s: %v\n\t%s", name, err, out)
+		klog.V(5).Infof("Failed to get OVS external_id %s: %v\n\t%s", name, err, out)
 		return ""
 	}
 	return out
@@ -856,7 +885,7 @@ func setOVSExternalID(exec kexec.Interface, key, value string) error {
 		".",
 		fmt.Sprintf("external_ids:%s=%s", key, value))
 	if err != nil {
-		return fmt.Errorf("Error setting OVS external ID '%s=%s': %v\n  %q", key, value, err, out)
+		return fmt.Errorf("error setting OVS external ID '%s=%s': %v\n  %q", key, value, err, out)
 	}
 	return nil
 }
@@ -1026,13 +1055,13 @@ func buildMasterHAConfig(ctx *cli.Context, cli, file *config) error {
 	}
 
 	if MasterHA.ElectionLeaseDuration <= MasterHA.ElectionRenewDeadline {
-		return fmt.Errorf("Invalid HA election lease duration '%d'. "+
+		return fmt.Errorf("invalid HA election lease duration '%d'. "+
 			"It should be greater than HA election renew deadline '%d'",
 			MasterHA.ElectionLeaseDuration, MasterHA.ElectionRenewDeadline)
 	}
 
 	if MasterHA.ElectionRenewDeadline <= MasterHA.ElectionRetryPeriod {
-		return fmt.Errorf("Invalid HA election renew deadline duration '%d'. "+
+		return fmt.Errorf("invalid HA election renew deadline duration '%d'. "+
 			"It should be greater than HA election retry period '%d'",
 			MasterHA.ElectionRenewDeadline, MasterHA.ElectionRetryPeriod)
 	}
@@ -1213,9 +1242,9 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		}
 		klog.SetOutput(&lumberjack.Logger{
 			Filename:   Logging.File,
-			MaxSize:    100, // megabytes
-			MaxBackups: 5,
-			MaxAge:     5, // days
+			MaxSize:    Logging.LogFileMaxSize, // megabytes
+			MaxBackups: Logging.LogFileMaxBackups,
+			MaxAge:     Logging.LogFileMaxAge, // days
 			Compress:   true,
 		})
 	}
@@ -1295,13 +1324,13 @@ func parseAddress(urlString string) (string, OvnDBScheme, error) {
 	for _, ovnAddress := range strings.Split(urlString, ",") {
 		splits := strings.SplitN(ovnAddress, ":", 2)
 		if len(splits) != 2 {
-			return "", "", fmt.Errorf("Failed to parse OVN address %s", urlString)
+			return "", "", fmt.Errorf("failed to parse OVN address %s", urlString)
 		}
 
 		if scheme == "" {
 			scheme = splits[0]
 		} else if scheme != splits[0] {
-			return "", "", fmt.Errorf("Invalid protocols in OVN address %s",
+			return "", "", fmt.Errorf("invalid protocols in OVN address %s",
 				urlString)
 		}
 
@@ -1423,7 +1452,7 @@ func (a *OvnAuthConfig) ensureCACert() error {
 	args = append(args, "list", "nb_global")
 	_, _ = rawExec(a.exec, "ovn-nbctl", args...)
 	if _, err := os.Stat(a.CACert); os.IsNotExist(err) {
-		klog.Warningf("bootstrapping %s CA certificate failed", a.CACert)
+		klog.Warningf("Bootstrapping %s CA certificate failed", a.CACert)
 	}
 	return nil
 }

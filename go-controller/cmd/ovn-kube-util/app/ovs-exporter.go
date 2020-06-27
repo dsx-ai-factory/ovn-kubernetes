@@ -38,7 +38,7 @@ var OvsExporterCommand = cli.Command{
 
 		err := http.ListenAndServe(bindAddress, mux)
 		if err != nil {
-			klog.Exitf("starting metrics server failed: %v", err)
+			klog.Exitf("Starting metrics server failed: %v", err)
 		}
 		return nil
 	},
