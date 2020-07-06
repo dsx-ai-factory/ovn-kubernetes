@@ -1,0 +1,185 @@
+# headless service to export the OVN SB DB Pods and also provides the
+# network domain of the statefulset pods
+apiVersion: v1
+kind: Service
+metadata:
+  name: ovn-sbdb
+  namespace: ovn-kubernetes
+spec:
+  ports:
+    - name: south
+      port: {{ ovn_sb_port }}
+      protocol: TCP
+      targetPort: {{ ovn_sb_port }}
+  sessionAffinity: None
+  clusterIP: None
+  type: ClusterIP
+
+---
+# ovn-sbdb-raft-pdb PodDisruptionBudget ensures that the number of replicas running is never brought
+# below the number needed for a quorum, by default 2 for a cluster of size 3. So, it ensures that we
+# keep a raft quorum.
+apiVersion: policy/v1beta1
+kind: PodDisruptionBudget
+metadata:
+  name: ovn-sbdb-raft-pdb
+  namespace: ovn-kubernetes
+spec:
+  minAvailable: {{ ovn_db_minAvailable | default(2) }}
+  selector:
+    matchLabels:
+      name: ovn-sbdb
+
+---
+# ovn-sbdb raft statefulset starts ovn SB daemon in a container configured to run in
+# RAFT mode
+kind: StatefulSet
+apiVersion: apps/v1
+metadata:
+  name: ovn-sbdb
+  namespace: ovn-kubernetes
+  annotations:
+    kubernetes.io/description: |
+      This statefulset launches the OVN Southbound Database raft cluster.
+spec:
+  serviceName: ovn-sbdb
+  podManagementPolicy: "Parallel"
+  replicas: {{ ovn_db_replicas | default(3) }}
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      name: ovn-sbdb
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      partition: 0
+  template:
+    metadata:
+      labels:
+        name: ovn-sbdb
+        component: network
+        type: infra
+        kubernetes.io/os: "linux"
+      annotations:
+        scheduler.alpha.kubernetes.io/critical-pod: ''
+    spec:
+      terminationGracePeriodSeconds: 30
+      imagePullSecrets:
+        - name: registry-credentials
+      serviceAccountName: ovn
+      hostNetwork: true
+      priorityClassName: "system-cluster-critical"
+
+      # required to be scheduled on node with k8s.ovn.org/ovnkube-db=true label but can
+      # only have one instance per node
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: k8s.ovn.org/ovnkube-db
+                    operator: In
+                    values:
+                      - "true"
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: name
+                    operator: In
+                    values:
+                      - ovn-sbdb
+              topologyKey: kubernetes.io/hostname
+
+      containers:
+        # sbdb - v3
+        - name: sbdb
+          image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
+          imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
+          command: ["/root/ovnkube.sh", "sb-ovsdb-raft"]
+
+          readinessProbe:
+            exec:
+              command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnsb-db-raft"]
+            initialDelaySeconds: 30
+            timeoutSeconds: 30
+            periodSeconds: 60
+
+          securityContext:
+            runAsUser: 0
+            capabilities:
+              add: ["NET_ADMIN"]
+
+          terminationMessagePolicy: FallbackToLogsOnError
+          volumeMounts:
+            # ovn db is stored in the pod in /etc/openvswitch
+            # (or in /etc/ovn if OVN from new repository is used)
+            # and on the host in /var/lib/openvswitch/
+            - mountPath: /etc/openvswitch/
+              name: host-var-lib-ovs
+            - mountPath: /etc/ovn/
+              name: host-var-lib-ovs
+            - mountPath: /var/log/openvswitch/
+              name: host-var-log-ovs
+            - mountPath: /var/log/ovn/
+              name: host-var-log-ovs
+            - mountPath: /var/run/openvswitch/
+              name: host-var-run-ovs
+            - mountPath: /var/run/ovn/
+              name: host-var-run-ovs
+            - mountPath: /ovn-cert
+              name: host-ovn-cert
+              readOnly: true
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 300Mi
+          env:
+            - name: OVN_DAEMONSET_VERSION
+              value: "3"
+            - name: OVN_LOGLEVEL_SB
+              value: "{{ ovn_loglevel_sb }}"
+            - name: K8S_APISERVER
+              valueFrom:
+                configMapKeyRef:
+                  name: ovn-config
+                  key: k8s_apiserver
+            - name: OVN_KUBERNETES_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: K8S_NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: OVN_SSL_ENABLE
+              value: "{{ ovn_ssl_en }}"
+            - name: OVN_SB_RAFT_ELECTION_TIMER
+              value: "16000"
+            - name: OVN_SB_PORT
+              value: "{{ ovn_sb_port }}"
+            - name: OVN_SB_RAFT_PORT
+              value: "{{ ovn_sb_raft_port }}"
+        # end of container
+
+      volumes:
+        - name: host-var-log-ovs
+          hostPath:
+            path: /var/log/openvswitch
+        - name: host-var-lib-ovs
+          hostPath:
+            path: /var/lib/openvswitch
+        - name: host-var-run-ovs
+          hostPath:
+            path: /var/run/openvswitch
+        - name: host-ovn-cert
+          hostPath:
+            path: /etc/ovn
+            type: DirectoryOrCreate
+      tolerations:
+        - operator: "Exists"

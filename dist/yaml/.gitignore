@@ -4,3 +4,10 @@ ovnkube-db.yaml
 ovnkube-node.yaml
 ovnkube-monitor.yaml
 ovnkube-db-raft.yaml
+ovnk8s-master.yaml
+ovnk8s-node.yaml
+ovn-north.yaml
+ovn-host.yaml
+ovn-nbdb-raft.yaml
+ovn-sbdb-raft.yaml
+ovn-db-exporter.yaml

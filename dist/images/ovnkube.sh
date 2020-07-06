@@ -150,8 +150,7 @@ mtu=${OVN_MTU:-1400}
 
 ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
 
-# host on which ovnkube-db POD is running and this POD contains both
-# OVN NB and SB DB running in their own container.
+# host on which OVN DB POD(s) are running
 ovn_db_host=${K8S_NODE_IP:-""}
 
 # OVN_NB_PORT - ovn north db port (default 6641)
@@ -247,7 +246,7 @@ wait_for_event() {
       sleeper=5
     else
       if [[ "${retries}" != 0 ]]; then
-        echo "$@ came up in ${retries} ${sleeper} sec tries"
+        echo "$@ came up in ${retries} tries ${sleeper} sec"
       fi
       break
     fi
@@ -255,14 +254,22 @@ wait_for_event() {
 }
 
 # The ovnkube-db kubernetes service must be populated with OVN DB service endpoints
-# before various OVN K8s containers can come up. This functions checks for that.
+# before various OVN K8s containers can come up. This function checks for that.
 ready_to_start_node() {
-  # See if ep is available ...
-  IFS=" " read -a ovn_db_hosts <<<"$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
-    get ep -n ${ovn_kubernetes_namespace} ovnkube-db -o=jsonpath='{range .subsets[0].addresses[*]}{.ip}{" "}')"
-  if [[ ${#ovn_db_hosts[@]} == 0 ]]; then
-    return 1
+  local svcs=("$@")
+
+  if [[ ${#svcs[@]} == 0 ]]; then
+    # check both
+    svcs=(ovn-nbdb ovn-sbdb)
   fi
+  for svc in ${svcs[@]}; do
+    # See if ep(s) are available ...
+    IFS=" " read -a ovn_db_hosts <<<"$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+      get ep -n ${ovn_kubernetes_namespace} ${svc} -o=jsonpath='{range .subsets[0].addresses[*]}{.ip}{" "}')"
+    if [[ ${#ovn_db_hosts[@]} == 0 ]]; then
+      return 1
+    fi
+  done
   get_ovn_db_vars
   return 0
 }
@@ -590,31 +597,40 @@ cleanup-ovs-server() {
   /usr/share/openvswitch/scripts/ovs-ctl stop
 }
 
-# set the ovnkube_db endpoint for other pods to query the OVN DB IP
+# set the OVN DB endpoint for other pods to query the OVN DB IP
 set_ovnkube_db_ep() {
-  ips=("$@")
+  local db=$1
+  shift
+  local ips=("$@")
 
-  echo "=============== setting ovnkube-db endpoints to ${ips[@]}"
-  # create a new endpoint for the headless onvkube-db service without selectors
+  if [[ "$db" == "nb" ]]; then
+    svc_name="ovn-nbdb"
+    port_name="north"
+    ovn_port=${ovn_nb_port}
+  else
+    svc_name="ovn-sbdb"
+    port_name="south"
+    ovn_port=${ovn_sb_port}
+  fi
+
+  echo "=============== setting ovn-${db}db endpoints to ${ips[@]}"
+  # create a new endpoint for the headless ovn-db service without selectors
   kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} apply -f - <<EOF
 apiVersion: v1
 kind: Endpoints
 metadata:
-  name: ovnkube-db
+  name: ${svc_name}
   namespace: ${ovn_kubernetes_namespace}
 subsets:
   - addresses:
 $(for ip in ${ips[@]}; do printf "    - ip: ${ip}\n"; done)
     ports:
-    - name: north
-      port: ${ovn_nb_port}
-      protocol: TCP
-    - name: south
-      port: ${ovn_sb_port}
+    - name: ${port_name}
+      port: ${ovn_port}
       protocol: TCP
 EOF
   if [[ $? != 0 ]]; then
-    echo "Failed to create endpoint with host(s) ${ips[@]} for ovnkube-db service"
+    echo "Failed to create endpoint with host(s) ${ips[@]} for ${svc_name} service"
     exit 1
   fi
 }
@@ -645,6 +661,10 @@ nb-ovsdb() {
     echo "=============== nb-ovsdb ========== reconfigured for SSL"
   }
   ovn-nbctl --inactivity-probe=0 set-connection p${transport}:${ovn_nb_port}:[${ovn_db_host}]
+
+  # create the ovn-nbdb endpoints
+  wait_for_event attempts=10 check_ovnkube_db_ep ${ovn_db_host} ${ovn_nb_port}
+  set_ovnkube_db_ep "nb" ${ovn_db_host}
 
   tail --follow=name ${OVN_LOGDIR}/ovsdb-server-nb.log &
   ovn_tail_pid=$!
@@ -678,9 +698,9 @@ sb-ovsdb() {
   }
   ovn-sbctl --inactivity-probe=0 set-connection p${transport}:${ovn_sb_port}:[${ovn_db_host}]
 
-  # create the ovnkube-db endpoints
-  wait_for_event attempts=10 check_ovnkube_db_ep ${ovn_db_host} ${ovn_nb_port}
-  set_ovnkube_db_ep ${ovn_db_host}
+  # create the ovn-sbdb endpoints
+  wait_for_event attempts=10 check_ovnkube_db_ep ${ovn_db_host} ${ovn_sb_port}
+  set_ovnkube_db_ep "sb" ${ovn_db_host}
 
   tail --follow=name ${OVN_LOGDIR}/ovsdb-server-sb.log &
   ovn_tail_pid=$!
@@ -705,7 +725,7 @@ run-ovn-northd() {
   echo "ovn_loglevel_northd=${ovn_loglevel_northd}"
 
   # no monitor (and no detach), start northd which connects to the
-  # ovnkube-db service
+  # ovn db service
   local ovn_northd_ssl_opts=""
   [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
     ovn_northd_ssl_opts="
@@ -742,9 +762,6 @@ ovn-master() {
   echo "=============== ovn-master (wait for ready_to_start_node) ========== MASTER ONLY"
   wait_for_event ready_to_start_node
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
-
-  # wait for northd to start
-  wait_for_event process_ready ovn-northd
 
   echo "=============== ovn-master (wait for ovn-nbctl daemon) ========== MASTER ONLY"
   wait_for_event process_ready ovn-nbctl
@@ -797,6 +814,7 @@ ovn-master() {
 
 # ovn-controller - all nodes
 ovn-controller() {
+  trap 'ovs-appctl -t ovn-controller exit --restart >/dev/null 2>&1; exit 0' TERM
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovn-controller.pid
 
@@ -804,14 +822,10 @@ ovn-controller() {
   wait_for_event ovs_ready
 
   echo "=============== ovn-controller - (wait for ready_to_start_node)"
-  wait_for_event ready_to_start_node
+  wait_for_event ready_to_start_node ovn-sbdb
 
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
   echo "ovn_nbdb_conn ${ovn_nbdb_conn}"
-
-  # cleanup any stale ovn-nb and ovn-remote keys in Open_vSwitch table
-  ovs-vsctl remove Open_vSwitch . external_ids ovn-remote
-  ovs-vsctl remove Open_vSwitch . external_ids ovn-nb
 
   echo "=============== ovn-controller  start_controller"
   rm -f /var/run/ovn-kubernetes/cni/*
@@ -956,7 +970,7 @@ run-nbctld() {
   rm -f ${OVN_RUNDIR}/ovn-nbctl.*.ctl
 
   echo "=============== run-nbctld - (wait for ready_to_start_node)"
-  wait_for_event ready_to_start_node
+  wait_for_event ready_to_start_node ovn-nbdb
 
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}  ovn_nbdb_conn ${ovn_nbdb_conn}"
   echo "ovn_loglevel_nbctld=${ovn_loglevel_nbctld}"

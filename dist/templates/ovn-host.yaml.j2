@@ -1,0 +1,112 @@
+# ovn-host daemonset starts the ovn-controller in a container.
+kind: DaemonSet
+apiVersion: apps/v1
+metadata:
+  name: ovn-host
+  namespace: ovn-kubernetes
+  annotations:
+    kubernetes.io/description: |
+      This DaemonSet launches the ovn's host component, namely ovn-controller for worker nodes.
+spec:
+  selector:
+    matchLabels:
+      app: ovn-host
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 80
+  template:
+    metadata:
+      labels:
+        app: ovn-host
+        name: ovn-host
+        component: network
+        type: infra
+        kubernetes.io/os: "linux"
+      annotations:
+        scheduler.alpha.kubernetes.io/critical-pod: ''
+    spec:
+      imagePullSecrets:
+        - name: registry-credentials
+      # Requires fairly broad permissions - ability to read all services and network functions as well
+      # as all pods.
+      serviceAccountName: ovn
+      hostNetwork: true
+      priorityClassName: "system-node-critical"
+      containers:
+        - name: ovn-controller
+          image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
+          imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
+
+          command: ["/root/ovnkube.sh", "ovn-controller"]
+
+          securityContext:
+            runAsUser: 0
+            capabilities:
+              add: ["SYS_NICE"]
+
+          terminationMessagePolicy: FallbackToLogsOnError
+          volumeMounts:
+            - mountPath: /var/run/dbus/
+              name: host-var-run-dbus
+              readOnly: true
+            - mountPath: /var/log/openvswitch/
+              name: host-var-log-ovs
+            - mountPath: /var/log/ovn/
+              name: host-var-log-ovs
+            - mountPath: /var/run/openvswitch/
+              name: host-var-run-ovs
+            - mountPath: /var/run/ovn/
+              name: host-var-run-ovs
+            - mountPath: /ovn-cert
+              name: host-ovn-cert
+              readOnly: true
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 300Mi
+          env:
+            - name: OVN_DAEMONSET_VERSION
+              value: "3"
+            - name: OVN_LOG_CONTROLLER
+              value: "{{ ovn_loglevel_controller }}"
+            - name: K8S_APISERVER
+              valueFrom:
+                configMapKeyRef:
+                  name: ovn-config
+                  key: k8s_apiserver
+            - name: OVN_KUBERNETES_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: OVN_SSL_ENABLE
+              value: "{{ ovn_ssl_en }}"
+
+          readinessProbe:
+            exec:
+              command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovn-controller"]
+            initialDelaySeconds: 30
+            timeoutSeconds: 30
+            periodSeconds: 60
+          # end of container
+
+      nodeSelector:
+        kubernetes.io/os: "linux"
+      volumes:
+        - name: host-var-run-dbus
+          hostPath:
+            path: /var/run/dbus
+        - name: host-var-log-ovs
+          hostPath:
+            path: /var/log/openvswitch
+        - name: host-var-run-ovs
+          hostPath:
+            path: /var/run/openvswitch
+        - name: host-ovn-cert
+          hostPath:
+            path: /etc/ovn
+            type: DirectoryOrCreate
+
+      tolerations:
+        - operator: "Exists"

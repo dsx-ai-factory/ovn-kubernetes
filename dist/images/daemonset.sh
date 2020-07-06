@@ -251,6 +251,75 @@ ovn_image=${image} \
   ovn_sb_raft_port=${ovn_sb_raft_port} \
   j2 ../templates/ovnkube-db-raft.yaml.j2 -o ../yaml/ovnkube-db-raft.yaml
 
+ovn_image=${image} \
+  ovn_image_pull_policy=${image_pull_policy} \
+  ovnkube_master_loglevel=${master_loglevel} \
+  ovn_loglevel_nbctld=${ovn_loglevel_nbctld} \
+  ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
+  ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
+  ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
+  ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
+  ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
+  ovn_ssl_en=${ovn_ssl_en} \
+  ovn_master_count=${ovn_master_count} \
+  ovn_gateway_mode=${ovn_gateway_mode} \
+  j2 ../templates/ovnk8s-master.yaml.j2 -o ../yaml/ovnk8s-master.yaml
+
+ovn_image=${image} \
+  ovn_image_pull_policy=${image_pull_policy} \
+  ovn_gateway_mode=${ovn_gateway_mode} \
+  ovn_gateway_opts=${ovn_gateway_opts} \
+  ovnkube_node_loglevel=${node_loglevel} \
+  ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
+  ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
+  ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
+  ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
+  ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
+  ovn_ssl_en=${ovn_ssl_en} \
+  ovn_remote_probe_interval=${ovn_remote_probe_interval} \
+  j2 ../templates/ovnk8s-node.yaml.j2 -o ../yaml/ovnk8s-node.yaml
+
+ovn_image=${image} \
+  ovn_image_pull_policy=${image_pull_policy} \
+  ovn_loglevel_northd=${ovn_loglevel_northd} \
+  ovn_ssl_en=${ovn_ssl_en} \
+  ovn_master_count=${ovn_master_count} \
+  j2 ../templates/ovn-north.yaml.j2 -o ../yaml/ovn-north.yaml
+
+ovn_image=${image} \
+  ovn_image_pull_policy=${image_pull_policy} \
+  ovn_db_replicas=${ovn_db_replicas} \
+  ovn_db_minAvailable=${ovn_db_minAvailable} \
+  ovn_loglevel_nb=${ovn_loglevel_nb} \
+  ovn_ssl_en=${ovn_ssl_en} \
+  ovn_nb_raft_election_timer=${ovn_nb_raft_election_timer} \
+  ovn_nb_port=${ovn_nb_port} \
+  ovn_nb_raft_port=${ovn_nb_raft_port} \
+  j2 ../templates/ovn-nbdb-raft.yaml.j2 -o ../yaml/ovn-nbdb-raft.yaml
+
+ovn_image=${image} \
+  ovn_image_pull_policy=${image_pull_policy} \
+  ovn_db_replicas=${ovn_db_replicas} \
+  ovn_db_minAvailable=${ovn_db_minAvailable} \
+  ovn_loglevel_sb=${ovn_loglevel_sb} \
+  ovn_ssl_en=${ovn_ssl_en} \
+  ovn_sb_raft_election_timer=${ovn_sb_raft_election_timer} \
+  ovn_sb_port=${ovn_sb_port} \
+  ovn_sb_raft_port=${ovn_sb_raft_port} \
+  j2 ../templates/ovn-sbdb-raft.yaml.j2 -o ../yaml/ovn-sbdb-raft.yaml
+
+ovn_image=${image} \
+  ovn_image_pull_policy=${image_pull_policy} \
+  ovn_db_replicas=${ovn_db_replicas} \
+  ovn_ssl_en=${ovn_ssl_en} \
+  j2 ../templates/ovn-db-exporter.yaml.j2 -o ../yaml/ovn-db-exporter.yaml
+
+ovn_image=${image} \
+  ovn_image_pull_policy=${image_pull_policy} \
+  ovn_loglevel_controller=${ovn_loglevel_controller} \
+  ovn_ssl_en=${ovn_ssl_en} \
+  j2 ../templates/ovn-host.yaml.j2 -o ../yaml/ovn-host.yaml
+
 # ovn-setup.yaml
 net_cidr=${OVN_NET_CIDR:-"10.128.0.0/14/23"}
 svc_cidr=${OVN_SVC_CIDR:-"172.30.0.0/16"}

@@ -1,25 +1,48 @@
-# service to expose the ovnkube-db pod
+# headless service to export the OVN NB DB Pods
+apiVersion: v1
+kind: Service
+metadata:
+  name: ovn-nbdb
+  namespace: ovn-kubernetes
+spec:
+  ports:
+    - name: north
+      port: {{ ovn_nb_port }}
+      protocol: TCP
+      targetPort: {{ ovn_nb_port }}
+  sessionAffinity: None
+  clusterIP: None
+  type: ClusterIP
+
+---
+# headless service to export the OVN SB DB Pods
+apiVersion: v1
+kind: Service
+metadata:
+  name: ovn-sbdb
+  namespace: ovn-kubernetes
+spec:
+  ports:
+    - name: south
+      port: {{ ovn_sb_port }}
+      protocol: TCP
+      targetPort: {{ ovn_sb_port }}
+  sessionAffinity: None
+  clusterIP: None
+  type: ClusterIP
+
+---
+# headless service to export the OVN NB/SB DB Pods
 apiVersion: v1
 kind: Service
 metadata:
   name: ovnkube-db
   namespace: ovn-kubernetes
 spec:
-  ports:
-  - name: north
-    port: {{ ovn_nb_port }}
-    protocol: TCP
-    targetPort: {{ ovn_nb_port }}
-  - name: south
-    port: {{ ovn_sb_port }}
-    protocol: TCP
-    targetPort: {{ ovn_sb_port }}
-  sessionAffinity: None
   clusterIP: None
   type: ClusterIP
 
 ---
-
 # ovndb-raft PodDisruptBudget to prevent majority of ovnkube raft cluster
 # nodes from disruption
 apiVersion: policy/v1beta1

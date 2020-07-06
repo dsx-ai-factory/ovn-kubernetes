@@ -1,0 +1,140 @@
+# ovn-north Pod contains following container
+# 1. ovn-northd daemon
+# It is deployed as a deployment.
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: ovn-north
+  # namespace set up by install
+  namespace: ovn-kubernetes
+  annotations:
+    kubernetes.io/description: |
+      This Deployment launches the ovn central component, namely ovn-northd
+spec:
+  progressDeadlineSeconds: 600
+  replicas: {{ ovn_master_count | default(1|int) }}
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      name: ovn-north
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        name: ovn-north
+        component: network
+        type: infra
+        kubernetes.io/os: "linux"
+      annotations:
+        scheduler.alpha.kubernetes.io/critical-pod: ''
+    spec:
+      imagePullSecrets:
+        - name: registry-credentials
+      # Requires fairly broad permissions - ability to read all services and network functions as well
+      # as all pods.
+      serviceAccountName: ovn
+      hostNetwork: true
+      priorityClassName: "system-cluster-critical"
+
+      # required to be scheduled on a node that is running ovnkube-master POD and
+      # only one instance of ovn-north pod on that node
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: name
+                    operator: In
+                    values:
+                      - ovnkube-master
+              topologyKey: kubernetes.io/hostname
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: name
+                    operator: In
+                    values:
+                      - ovn-north
+              topologyKey: kubernetes.io/hostname
+
+      containers:
+        # ovn-northd - v3
+        - name: ovn-northd
+          image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
+          imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
+
+          command: ["/root/ovnkube.sh", "run-ovn-northd"]
+
+          securityContext:
+            runAsUser: 0
+            capabilities:
+              add: ["SYS_NICE"]
+
+          terminationMessagePolicy: FallbackToLogsOnError
+          volumeMounts:
+            # Run directories where we need to be able to access sockets
+            - mountPath: /var/run/dbus/
+              name: host-var-run-dbus
+              readOnly: true
+            - mountPath: /var/log/openvswitch/
+              name: host-var-log-ovs
+            - mountPath: /var/log/ovn/
+              name: host-var-log-ovs
+            - mountPath: /var/run/openvswitch/
+              name: host-var-run-ovs
+            - mountPath: /var/run/ovn/
+              name: host-var-run-ovs
+            - mountPath: /ovn-cert
+              name: host-ovn-cert
+              readOnly: true
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 300Mi
+          env:
+            - name: OVN_DAEMONSET_VERSION
+              value: "3"
+            - name: OVN_LOGLEVEL_NORTHD
+              value: "{{ ovn_loglevel_northd }}"
+            - name: K8S_APISERVER
+              valueFrom:
+                configMapKeyRef:
+                  name: ovn-config
+                  key: k8s_apiserver
+            - name: OVN_KUBERNETES_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: OVN_SSL_ENABLE
+              value: "{{ ovn_ssl_en }}"
+          readinessProbe:
+            exec:
+              command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovn-northd"]
+            initialDelaySeconds: 30
+            timeoutSeconds: 30
+            periodSeconds: 60
+      # end of container
+
+      volumes:
+        # TODO: Need to check why we need this?
+        - name: host-var-run-dbus
+          hostPath:
+            path: /var/run/dbus
+        - name: host-var-log-ovs
+          hostPath:
+            path: /var/log/openvswitch
+        - name: host-var-run-ovs
+          hostPath:
+            path: /var/run/openvswitch
+        - name: host-ovn-cert
+          hostPath:
+            path: /etc/ovn
+            type: DirectoryOrCreate
+      tolerations:
+        - operator: "Exists"

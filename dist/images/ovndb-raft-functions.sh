@@ -10,7 +10,7 @@ verify-ovsdb-raft() {
   fi
 
   replicas=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
-    get statefulset -n ${ovn_kubernetes_namespace} ovnkube-db -o=jsonpath='{.spec.replicas}')
+    get statefulset -n ${ovn_kubernetes_namespace} ${sts_name} -o=jsonpath='{.spec.replicas}')
   if [[ ${replicas} -lt 3 || $((${replicas} % 2)) -eq 0 ]]; then
     echo "at least 3 nodes need to be configured, and it must be odd number of nodes"
     exit 1
@@ -18,14 +18,14 @@ verify-ovsdb-raft() {
 }
 
 # OVN DB must be up in the first DB node
-# This waits for ovnkube-db-0 POD to come up
+# This waits for the first OVN statefulset DB pod to come up
 ready_to_join_cluster() {
   # See if ep is available ...
   local db=${1}
   local port=${2}
 
   init_ip="$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
-    get pod -n ${ovn_kubernetes_namespace} ovnkube-db-0 -o=jsonpath='{.status.podIP}')"
+    get pod -n ${ovn_kubernetes_namespace} ${sts_name}-0 -o=jsonpath='{.status.podIP}')"
   if [[ $? != 0 ]]; then
     return 1
   fi
@@ -41,7 +41,6 @@ check_ovnkube_db_ep() {
   local dbaddr=${1}
   local dbport=${2}
 
-  # TODO: Right now only checks for NB ovsdb instances
   echo "======= checking ${dbaddr}:${dbport} OVSDB instance ==============="
   ovsdb-client ${ovndb_ctl_ssl_opts} list-dbs ${transport}:${dbaddr}:${dbport} >/dev/null
   if [[ $? != 0 ]]; then
@@ -51,13 +50,14 @@ check_ovnkube_db_ep() {
 }
 
 check_and_apply_ovnkube_db_ep() {
-  local port=${1}
+  local db=${1}
+  local port=${2}
 
-  # Get IPs of all ovnkube-db PODs
+  # Get IPs of all OVN DB PODs
   ips=()
   for ((i = 0; i < ${replicas}; i++)); do
     ip=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
-      get pod -n ${ovn_kubernetes_namespace} ovnkube-db-${i} -o=jsonpath='{.status.podIP}')
+      get pod -n ${ovn_kubernetes_namespace} ${sts_name}-${i} -o=jsonpath='{.status.podIP}')
     if [[ ${ip} == "" ]]; then
       break
     fi
@@ -65,14 +65,14 @@ check_and_apply_ovnkube_db_ep() {
   done
 
   if [[ ${i} -eq ${replicas} ]]; then
-    # Number of POD IPs is same as number of statefulset replicas. Now, if the number of ovnkube-db endpoints
+    # Number of POD IPs is same as number of statefulset replicas. Now, if the number of OVN DB endpoints
     # is 0, then we are applying the endpoint for the first time. So, we need to make sure that each of the
     # pod IP responds to the `ovsdb-client list-dbs` call before we set the endpoint. If they don't, retry several
     # times and then give up.
 
-    # Get the current set of ovnkube-db endpoints, if any
+    # Get the current set of ovn db service endpoints, if any
     IFS=" " read -a old_ips <<<"$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
-      get ep -n ${ovn_kubernetes_namespace} ovnkube-db -o=jsonpath='{range .subsets[0].addresses[*]}{.ip}{" "}')"
+      get ep -n ${ovn_kubernetes_namespace} ${sts_name} -o=jsonpath='{range .subsets[0].addresses[*]}{.ip}{" "}')"
     if [[ ${#old_ips[@]} -ne 0 ]]; then
       return
     fi
@@ -80,7 +80,7 @@ check_and_apply_ovnkube_db_ep() {
     for ip in ${ips[@]}; do
       wait_for_event attempts=10 check_ovnkube_db_ep ${ip} ${port}
     done
-    set_ovnkube_db_ep ${ips[@]}
+    set_ovnkube_db_ep ${db} ${ips[@]}
   else
     # ideally shouldn't happen
     echo "Not all the pods in the statefulset are up. Expecting ${replicas} pods, but found ${i} pods."
@@ -125,7 +125,7 @@ set_election_timer() {
   return 0
 }
 
-# set_connection() will be called for ovnkube-db-0 pod when :
+# set_connection() will be called for first OVN DB statefulset Pod pod when :
 #    1. it is first started or
 #    2. it restarts after the initial start has failed or
 #    3. subsequent restarts during the lifetime of the pod
@@ -199,6 +199,8 @@ ovsdb-raft() {
   ovn_db_pidfile=${OVN_RUNDIR}/ovn${db}_db.pid
   eval ovn_loglevel_db=\$ovn_loglevel_${db}
   ovn_db_file=${OVN_ETCDIR}/ovn${db}_db.db
+  # extract statefulset(sts) name from the POD_NAME
+  sts_name=$(echo $POD_NAME | sed 's/\(.*\)-[0-9]*/\1/')
 
   trap 'ovsdb_cleanup ${db}' TERM
   rm -f ${ovn_db_pidfile}
@@ -230,7 +232,7 @@ ovsdb-raft() {
       "
     }
   fi
-  if [[ "${POD_NAME}" == "ovnkube-db-0" ]]; then
+  if [[ "${POD_NAME}" == ${sts_name}"-0" ]]; then
     run_as_ovs_user_if_needed \
       ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
       --db-${db}-cluster-local-addr=${ovn_db_host} \
@@ -266,9 +268,9 @@ ovsdb-raft() {
   fi
   echo "=============== ${db}-ovsdb-raft ========== RUNNING"
 
-  if [[ "${POD_NAME}" == "ovnkube-db-0" ]]; then
+  if [[ "${POD_NAME}" == ${sts_name}"-0" ]]; then
     # set the election timer value before other servers join the cluster and it can
-    # only be set on the leader so we must do this in ovnkube-db-0 when it is still
+    # only be set on the leader so we must do this in the first OVN DB Pod when it is still
     # a single-node cluster
     set_election_timer ${db} ${election_timer}
     if [[ ${db} == "nb" ]]; then
@@ -279,10 +281,10 @@ ovsdb-raft() {
   fi
 
   last_node_index=$(expr ${replicas} - 1)
-  # Create endpoints only if all ovnkube-db pods have started and are running. We do this
+  # Create endpoints only if all OVN DB pods have started and are running. We do this
   # from the last pod of the statefulset.
-  if [[ ${db} == "nb" && "${POD_NAME}" == "ovnkube-db-"${last_node_index} ]]; then
-    check_and_apply_ovnkube_db_ep ${port}
+  if [[ "${POD_NAME}" == ${sts_name}-${last_node_index} ]]; then
+    check_and_apply_ovnkube_db_ep ${db} ${port}
   fi
 
   tail --follow=name ${OVN_LOGDIR}/ovsdb-server-${db}.log &
