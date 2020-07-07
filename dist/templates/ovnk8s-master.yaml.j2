@@ -47,10 +47,10 @@ spec:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
               - matchExpressions:
-                  - key: kubernetes.io/os
-                    operator: In
-                    values:
-                      - "linux"
+                - key: node-role.kubernetes.io/master
+                  operator: In
+                  values:
+                    - ""
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             - labelSelector:

@@ -77,10 +77,10 @@ spec:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
               - matchExpressions:
-                  - key: k8s.ovn.org/ovnkube-db
-                    operator: In
-                    values:
-                      - "true"
+                - key: k8s.ovn.org/ovnkube-db
+                  operator: In
+                  values:
+                    - "true"
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             - labelSelector:
