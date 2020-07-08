@@ -27,7 +27,7 @@ kind: Service
 metadata:
   labels:
     k8s-app: ovnkube-master
-  name: ovn-kubernetes-master-prometheus-discovery
+  name: ovnkube-master-prometheus-discovery
   namespace: ovn-kubernetes
 spec:
   selector:
@@ -52,7 +52,11 @@ metadata:
 spec:
   endpoints:
   - interval: 30s
-    port: http-metrics
+    port: ovnkube-node-metrics
+    path: /metrics
+    scheme: http
+  - interval: 30s
+    port: ovs-metrics
     path: /metrics
     scheme: http
   jobLabel: k8s-app
@@ -68,7 +72,7 @@ kind: Service
 metadata:
   labels:
     k8s-app: ovnkube-node
-  name: ovn-kubernetes-node-prometheus-discovery
+  name: ovnkube-node-prometheus-discovery
   namespace: ovn-kubernetes
 spec:
   selector:
@@ -77,18 +81,22 @@ spec:
   clusterIP: None
   publishNotReadyAddresses: true
   ports:
-  - name: http-metrics
+  - name: ovnkube-node-metrics
     port: 9410
     protocol: TCP
     targetPort: 9410
+  - name: ovs-metrics
+    port: 9310
+    protocol: TCP
+    targetPort: 9310
 
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   labels:
-    k8s-app: ovnkube-db
-  name: monitor-ovnkube-db
+    k8s-app: ovn-db
+  name: monitor-ovn-db
   namespace: ovn-kubernetes
 spec:
   endpoints:
@@ -102,18 +110,18 @@ spec:
       - ovn-kubernetes
   selector:
     matchLabels:
-      k8s-app: ovnkube-db
+      k8s-app: ovn-db
 ---
 apiVersion: v1
 kind: Service
 metadata:
   labels:
-    k8s-app: ovnkube-db
-  name: ovn-kubernetes-db-prometheus-discovery
+    k8s-app: ovn-db
+  name: ovn-db-prometheus-discovery
   namespace: ovn-kubernetes
 spec:
   selector:
-    name: ovnkube-db
+    name: ovn-db-exporter
   type: ClusterIP
   clusterIP: None
   publishNotReadyAddresses: true
