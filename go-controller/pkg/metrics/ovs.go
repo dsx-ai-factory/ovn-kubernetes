@@ -2,7 +2,6 @@ package metrics
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -12,15 +11,11 @@ import (
 	"k8s.io/klog"
 )
 
-const (
-	ovsVswitchd = "ovs-vswitchd"
-)
-
 var (
 	ovsVersion string
 )
 
-// ovs Data Path Metrics
+// ovs datapath Metrics
 var metricOvsDpTotal = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: MetricOvsNamespace,
 	Subsystem: MetricOvsSubsystemVswitchd,
@@ -273,20 +268,10 @@ func getOvsVersionInfo() {
 	}
 }
 
-func parseMetricToFloat(name, value string) float64 {
-	f64Value, err := strconv.ParseFloat(value, 64)
-	if err != nil {
-		klog.Errorf("Failed to parse %s value into float for metric %s :(%v)",
-			value, name, err)
-		return 0
-	}
-	return f64Value
-}
-
-// ovsDataPathLookupsMetrics obtains the ovs datapath
+// ovsDatapathLookupsMetrics obtains the ovs datapath
 // (lookups: hit, missed, lost) metrics and updates them.
-func ovsDataPathLookupsMetrics(output, dataPath string) {
-	var dataPathPacketsTotal float64
+func ovsDatapathLookupsMetrics(output, datapath string) {
+	var datapathPacketsTotal float64
 	for _, field := range strings.Fields(output) {
 		elem := strings.Split(field, ":")
 		if len(elem) != 2 {
@@ -294,24 +279,24 @@ func ovsDataPathLookupsMetrics(output, dataPath string) {
 		}
 		switch elem[0] {
 		case "hit":
-			value := parseMetricToFloat("dp_flows_lookup_hit", elem[1])
-			dataPathPacketsTotal = dataPathPacketsTotal + value
-			metricOvsDpFlowsLookupHit.WithLabelValues(dataPath).Set(value)
+			value := parseMetricToFloat(MetricOvsSubsystemVswitchd, "dp_flows_lookup_hit", elem[1])
+			datapathPacketsTotal += value
+			metricOvsDpFlowsLookupHit.WithLabelValues(datapath).Set(value)
 		case "missed":
-			value := parseMetricToFloat("dp_flows_lookup_missed", elem[1])
-			dataPathPacketsTotal = dataPathPacketsTotal + value
-			metricOvsDpFlowsLookupMissed.WithLabelValues(dataPath).Set(value)
+			value := parseMetricToFloat(MetricOvsSubsystemVswitchd, "dp_flows_lookup_missed", elem[1])
+			datapathPacketsTotal += value
+			metricOvsDpFlowsLookupMissed.WithLabelValues(datapath).Set(value)
 		case "lost":
-			value := parseMetricToFloat("dp_flows_lookup_lost", elem[1])
-			metricOvsDpFlowsLookupLost.WithLabelValues(dataPath).Set(value)
+			value := parseMetricToFloat(MetricOvsSubsystemVswitchd, "dp_flows_lookup_lost", elem[1])
+			metricOvsDpFlowsLookupLost.WithLabelValues(datapath).Set(value)
 		}
 	}
-	metricOvsDpPacketsTotal.WithLabelValues(dataPath).Set(dataPathPacketsTotal)
+	metricOvsDpPacketsTotal.WithLabelValues(datapath).Set(datapathPacketsTotal)
 }
 
-// ovsDataPathMasksMetrics obatins ovs datapath masks metrics
+// ovsDatapathMasksMetrics obatins ovs datapath masks metrics
 // (masks :hit, total, hit/pkt) and updates them.
-func ovsDataPathMasksMetrics(output, datapath string) {
+func ovsDatapathMasksMetrics(output, datapath string) {
 	for _, field := range strings.Fields(output) {
 		elem := strings.Split(field, ":")
 		if len(elem) != 2 {
@@ -319,21 +304,21 @@ func ovsDataPathMasksMetrics(output, datapath string) {
 		}
 		switch elem[0] {
 		case "hit":
-			value := parseMetricToFloat("dp_masks_hit", elem[1])
+			value := parseMetricToFloat(MetricOvsSubsystemVswitchd, "dp_masks_hit", elem[1])
 			metricOvsdpMasksHit.WithLabelValues(datapath).Set(value)
 		case "total":
-			value := parseMetricToFloat("dp_masks_total", elem[1])
+			value := parseMetricToFloat(MetricOvsSubsystemVswitchd, "dp_masks_total", elem[1])
 			metricOvsDpMasksTotal.WithLabelValues(datapath).Set(value)
 		case "hit/pkt":
-			value := parseMetricToFloat("dp_masks_hit_ratio", elem[1])
+			value := parseMetricToFloat(MetricOvsSubsystemVswitchd, "dp_masks_hit_ratio", elem[1])
 			metricOvsDpMasksHitRatio.WithLabelValues(datapath).Set(value)
 		}
 	}
 }
 
-// ovsDataPathPortMetrics obtains the ovs datapath port metrics
+// ovsDatapathPortMetrics obtains the ovs datapath port metrics
 // from ovs-appctl dpctl/show(portname, porttype, portnumber) and updates them.
-func ovsDataPathPortMetrics(output, datapath string) {
+func ovsDatapathPortMetrics(output, datapath string) {
 	portFields := strings.Fields(output)
 	portType := "system"
 	if len(portFields) > 3 {
@@ -346,8 +331,8 @@ func ovsDataPathPortMetrics(output, datapath string) {
 }
 
 // getOvsDatapaths gives list of datapaths
-// and updates the corresponding dataPath metrics
-func getOvsDataPaths() (dataPathsList []string, err error) {
+// and updates the corresponding datapath metrics
+func getOvsDatapaths() (datapathsList []string, err error) {
 	var stdout, stderr string
 
 	defer func() {
@@ -363,80 +348,76 @@ func getOvsDataPaths() (dataPathsList []string, err error) {
 			"stderr(%s) :(%v)", stderr, err)
 	}
 	for _, kvPair := range strings.Split(stdout, "\n") {
-		var dataPathType, dataPathName string
+		var datapathType, datapathName string
 		output := strings.TrimSpace(kvPair)
 		if strings.Contains(output, "@") {
-			dataPath := strings.Split(output, "@")
-			dataPathType, dataPathName = dataPath[0], dataPath[1]
+			datapath := strings.Split(output, "@")
+			datapathType, datapathName = datapath[0], datapath[1]
 		} else {
 			return nil, fmt.Errorf("datapath %s is not of format Type@Name", output)
 		}
-		metricOvsDp.WithLabelValues(dataPathName, dataPathType).Set(1)
-		dataPathsList = append(dataPathsList, dataPathName)
+		metricOvsDp.WithLabelValues(datapathName, datapathType).Set(1)
+		datapathsList = append(datapathsList, datapathName)
 	}
-	metricOvsDpTotal.Set(float64(len(dataPathsList)))
-	return dataPathsList, nil
+	metricOvsDpTotal.Set(float64(len(datapathsList)))
+	return datapathsList, nil
 }
 
-func setOvsDataPathMetrics(dataPaths []string) (err error) {
-	var stdout, stderr, dataPathName string
+func setOvsDatapathMetrics(datapaths []string) (err error) {
+	var stdout, stderr, datapathName string
 
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("recovering from a panic while parsing the ovs-dpctl "+
-				"show %s output : %v", dataPathName, r)
+				"show %s output : %v", datapathName, r)
 		}
 	}()
 
-	if len(dataPaths) == 0 {
-		klog.Infof("Currently, no datapath is present ")
-	}
-
-	for _, dataPathName = range dataPaths {
-		stdout, stderr, err = util.RunOVSDpctl("show", dataPathName)
+	for _, datapathName = range datapaths {
+		stdout, stderr, err = util.RunOVSDpctl("show", datapathName)
 		if err != nil {
 			return fmt.Errorf("failed to get datapath stats for %s "+
-				"stderr(%s) :(%v)", dataPathName, stderr, err)
+				"stderr(%s) :(%v)", datapathName, stderr, err)
 		}
-		var dataPathPortCount float64
+		var datapathPortCount float64
 		for i, kvPair := range strings.Split(stdout, "\n") {
 			if i <= 0 {
+				// skip the first line which is datapath name
 				continue
 			}
 			output := strings.TrimSpace(kvPair)
 			if strings.HasPrefix(output, "lookups:") {
-				ovsDataPathLookupsMetrics(output, dataPathName)
+				ovsDatapathLookupsMetrics(output, datapathName)
 			} else if strings.HasPrefix(output, "masks:") {
-				ovsDataPathMasksMetrics(output, dataPathName)
+				ovsDatapathMasksMetrics(output, datapathName)
 			} else if strings.HasPrefix(output, "port ") {
-				ovsDataPathPortMetrics(output, dataPathName)
-				dataPathPortCount++
+				ovsDatapathPortMetrics(output, datapathName)
+				datapathPortCount++
 			} else if strings.HasPrefix(output, "flows:") {
 				flowFields := strings.Fields(output)
-				value := parseMetricToFloat("dp_flows_total", flowFields[1])
-				metricOvsDpFlowsTotal.WithLabelValues(dataPathName).Set(value)
+				value := parseMetricToFloat(MetricOvsSubsystemVswitchd, "dp_flows_total", flowFields[1])
+				metricOvsDpFlowsTotal.WithLabelValues(datapathName).Set(value)
 			}
 		}
-		metricOvsDpIfTotal.WithLabelValues(dataPathName).Set(dataPathPortCount)
+		metricOvsDpIfTotal.WithLabelValues(datapathName).Set(datapathPortCount)
 	}
 	return nil
 }
 
-// ovsDataPathMetricsUpdate updates the ovs datapath metrics for every 30 sec
-func ovsDataPathMetricsUpdate() {
+// ovsDatapathMetricsUpdate updates the ovs datapath metrics for every 30 sec
+func ovsDatapathMetricsUpdate() {
 	for {
-		dataPaths, err := getOvsDataPaths()
+		time.Sleep(30 * time.Second)
+		datapaths, err := getOvsDatapaths()
 		if err != nil {
 			klog.Errorf("%s", err.Error())
-			time.Sleep(30 * time.Second)
 			continue
 		}
 
-		err = setOvsDataPathMetrics(dataPaths)
+		err = setOvsDatapathMetrics(datapaths)
 		if err != nil {
 			klog.Errorf("%s", err.Error())
 		}
-		time.Sleep(30 * time.Second)
 	}
 }
 
@@ -453,7 +434,7 @@ func getOvsBridgeOpenFlowsCount(bridgeName string) float64 {
 		if strings.HasPrefix(kvPair, "flow_count=") {
 			value := strings.Split(kvPair, "=")[1]
 			metricName := bridgeName + "flows_total"
-			return parseMetricToFloat(metricName, value)
+			return parseMetricToFloat(MetricOvsSubsystemVswitchd, metricName, value)
 		}
 	}
 	klog.Errorf("ovs-ofctl dump-aggregate %s output didn't contain "+
@@ -466,9 +447,9 @@ type interfaceDetails struct {
 	port   string
 }
 
-// getInterfaceToPortToBrdigeMapping obtains the interface details
+// getInterfaceToPortToBridgeMapping obtains the interface details
 // of to which port and bridge it belongs to.
-func getInterfaceToPortToBrdigeMapping(portBridgeMap map[string]string) (interfacePortbridgeMap map[string]interfaceDetails,
+func getInterfaceToPortToBridgeMapping(portBridgeMap map[string]string) (interfacePortbridgeMap map[string]interfaceDetails,
 	err error) {
 	var stdout, stderr string
 
@@ -487,7 +468,7 @@ func getInterfaceToPortToBrdigeMapping(portBridgeMap map[string]string) (interfa
 	}
 	interfacePortbridgeMap = make(map[string]interfaceDetails)
 	// output will be of format:(23967680-7899-44ce-b8d1-dfce6c471624,
-	//brenp0s8,3333db76-e2da-4062-a7ee-328d0a380a63)
+	// brenp0s8,3333db76-e2da-4062-a7ee-328d0a380a63)
 	for _, kvPair := range strings.Split(stdout, "\n") {
 		if kvPair == "" {
 			continue
@@ -506,7 +487,7 @@ func getInterfaceToPortToBrdigeMapping(portBridgeMap map[string]string) (interfa
 	return interfacePortbridgeMap, nil
 }
 
-// getBridgeInfo obtains the (per Brdige port count) &
+// getOvsBridgeInfo obtains the (per Brdige port count) &
 // port to bridge mapping for each port
 func getOvsBridgeInfo() (bridgePortCount map[string]float64, portToBridgeMap map[string]string,
 	err error) {
@@ -547,27 +528,26 @@ func getOvsBridgeInfo() (bridgePortCount map[string]float64, portToBridgeMap map
 	return bridgePortCount, portToBridgeMap, nil
 }
 
-//ovsBridgeMetricsUpdate updates bridgeMetrics & ovsInterface metrics for every 30sec
+// ovsBridgeMetricsUpdate updates bridgeMetrics & ovsInterface metrics for every 30sec
 func ovsBridgeMetricsUpdate() {
 	for {
+		time.Sleep(30 * time.Second)
 		bridgePortCountMapping, portBridgeMapping, err := getOvsBridgeInfo()
 		if err != nil {
 			klog.Errorf("%s", err.Error())
-			time.Sleep(30 * time.Second)
 			continue
 		}
-		for brName, noPorts := range bridgePortCountMapping {
+		for brName, nPorts := range bridgePortCountMapping {
 			metricOvsBridge.WithLabelValues(brName).Set(1)
-			metricOvsBridgePortsTotal.WithLabelValues(brName).Set(noPorts)
+			metricOvsBridgePortsTotal.WithLabelValues(brName).Set(nPorts)
 			flowsCount := getOvsBridgeOpenFlowsCount(brName)
 			metricOvsBridgeFlowsTotal.WithLabelValues(brName).Set(flowsCount)
 		}
 		metricOvsBridgeTotal.Set(float64(len(bridgePortCountMapping)))
 
-		interfaceToPortToBridgeMap, err := getInterfaceToPortToBrdigeMapping(portBridgeMapping)
+		interfaceToPortToBridgeMap, err := getInterfaceToPortToBridgeMapping(portBridgeMapping)
 		if err != nil {
 			klog.Errorf("%s", err.Error())
-			time.Sleep(30 * time.Second)
 			continue
 		}
 		// set ovs interface metrics.
@@ -575,7 +555,6 @@ func ovsBridgeMetricsUpdate() {
 		if err != nil {
 			klog.Errorf("%s", err.Error())
 		}
-		time.Sleep(30 * time.Second)
 	}
 }
 
@@ -641,7 +620,7 @@ func setOvsInterfaceMetrics(interfaceBridge, interfacePort, interfaceName, metri
 	var value float64
 	if metricValue != "" {
 		metric := interfaceName + "_" + metricName
-		value = parseMetricToFloat(metric, metricValue)
+		value = parseMetricToFloat(MetricOvsSubsystemVswitchd, metric, metricValue)
 	} else {
 		value = 0
 	}
@@ -671,7 +650,7 @@ func setOvsInterfaceStatistics(interfaceBridge, interfacePort, interfaceName, me
 		metric := interfaceName + "_" + statsField[0]
 		statName := strings.TrimSpace(statsField[0])
 		statValue := strings.TrimSpace(statsField[1])
-		statsMap[statName] = parseMetricToFloat(metric, statValue)
+		statsMap[statName] = parseMetricToFloat(MetricOvsSubsystemVswitchd, metric, statValue)
 	}
 	var statValue float64
 	for _, stat := range InterfaceStats {
@@ -706,7 +685,7 @@ func setOvsInterfaceStatusFields(interfaceBridge, interfacePort, interfaceName, 
 }
 
 // ovsInterfaceMetricsUpdate updates the ovs interface metrics
-// obained from ovs-vsctl --columns=<fields> list interface
+// obtained from ovs-vsctl --columns=<fields> list interface
 func ovsInterfaceMetricsUpdate(interfaceInfo map[string]interfaceDetails) (err error) {
 	interfaceColumnFields := []string{
 		"_uuid",
@@ -813,11 +792,11 @@ func setOvsMemoryMetrics() (err error) {
 	for _, kvPair := range strings.Fields(stdout) {
 		if strings.HasPrefix(kvPair, "handlers:") {
 			value := strings.Split(kvPair, ":")[1]
-			count := parseMetricToFloat("handlers_total", value)
+			count := parseMetricToFloat(MetricOvsSubsystemVswitchd, "handlers_total", value)
 			metricOvsHandlersTotal.Set(count)
 		} else if strings.HasPrefix(kvPair, "revalidators:") {
 			value := strings.Split(kvPair, ":")[1]
-			count := parseMetricToFloat("revalidators_total", value)
+			count := parseMetricToFloat(MetricOvsSubsystemVswitchd, "revalidators_total", value)
 			metricOvsRevalidatorsTotal.Set(count)
 		}
 	}
@@ -983,7 +962,7 @@ var ovsInterfaceMetricsDataMap = map[string]*ovsInterfaceMetricsDetails{
 	},
 }
 
-var ovsVswitchdCoverageShowCountersMap = map[string]*metricDetails{
+var ovsVswitchdCoverageShowMetricsMap = map[string]*metricDetails{
 	"netlink_sent": {
 		help: "Number of netlink message sent to the kernel.",
 	},
@@ -1150,7 +1129,7 @@ func RegisterOvsMetrics() {
 				Help: "Number of times the OpenFlow actions were executed in userspace " +
 					"on behalf of the datapath.",
 			}, func() float64 {
-				counters, err := coverageShowCounters(ovsVswitchd)
+				coverageShowOutputMap, err := getCoverageShowOutputMap(ovsVswitchd)
 				if err != nil {
 					klog.Errorf("%s", err.Error())
 					return 0
@@ -1161,9 +1140,9 @@ func RegisterOvsMetrics() {
 					"dpif_execute_with_help",
 				}
 				var dpIfExecuteMetricValue float64
-				for _, counterName := range dpIfExecuteCounters {
-					if value, ok := counters[counterName]; ok {
-						dpIfExecuteMetricValue += parseMetricToFloat(counterName, value)
+				for _, metrciName := range dpIfExecuteCounters {
+					if value, ok := coverageShowOutputMap[metrciName]; ok {
+						dpIfExecuteMetricValue += parseMetricToFloat(MetricOvsSubsystemVswitchd, metrciName, value)
 					}
 				}
 				return dpIfExecuteMetricValue
@@ -1181,8 +1160,9 @@ func RegisterOvsMetrics() {
 				if err != nil {
 					klog.Errorf("Failed to get ovs-vswitchd coverage/read-counter "+
 						"output for packet_in_overflow stderr(%s) : %v", stderr, err)
+					return 0
 				}
-				return parseMetricToFloat("packet_in_drop", stdout)
+				return parseMetricToFloat(MetricOvsSubsystemVswitchd, "packet_in_drop", stdout)
 			}))
 
 		// Register OVS datapath metrics.
@@ -1203,29 +1183,30 @@ func RegisterOvsMetrics() {
 		prometheus.MustRegister(metricOvsBridge)
 		prometheus.MustRegister(metricOvsBridgePortsTotal)
 		prometheus.MustRegister(metricOvsBridgeFlowsTotal)
-		// Register Ovsvswitchd Memory metrics
+		// Register ovs Memory metrics
 		prometheus.MustRegister(metricOvsHandlersTotal)
 		prometheus.MustRegister(metricOvsRevalidatorsTotal)
-		// Register Ovs hwoffload metrics
+		// Register OVS HW offload metrics
 		prometheus.MustRegister(metricOvsHwOffload)
 		prometheus.MustRegister(metricOvsTcPolicy)
-		// Register ovs Interface metrics with prometheus.
+		// Register OVS Interface metrics
 		registerOvsInterfaceMetrics(MetricOvsNamespace, MetricOvsSubsystemVswitchd)
 		prometheus.MustRegister(metricInterafceDriverName)
 		prometheus.MustRegister(metricInterafceDriverVersion)
 		prometheus.MustRegister(metricInterafceFirmwareVersion)
-		// Register the ovs-vswitchd coverage/show counters metrics with prometheus
-		registerCoverageShowCounters(ovsVswitchd, MetricOvsNamespace, MetricOvsSubsystemVswitchd)
+		// Register the OVS coverage/show metrics
+		componentCoverageShowMetricsMap[ovsVswitchd] = ovsVswitchdCoverageShowMetricsMap
+		registerCoverageShowMetrics(ovsVswitchd, MetricOvsNamespace, MetricOvsSubsystemVswitchd)
 
-		// ovs datapath metrics updater
-		go ovsDataPathMetricsUpdate()
-		// ovs bridge metrics updater
+		// OVS datapath metrics updater
+		go ovsDatapathMetricsUpdate()
+		// OVS bridge metrics updater
 		go ovsBridgeMetricsUpdate()
-		// ovs memory metrics updater
+		// OVS memory metrics updater
 		go ovsMemoryMetricsUpdate()
-		// ovs HWOffload metrics updater
+		// OVS hw Offload metrics updater
 		go ovsHwOffloadMetricsUpdate()
-		// ovs coverage show counters metrics updater.
-		go coverageShowCountersMetricsUpdater(ovsVswitchd)
+		// OVS coverage/show metrics updater.
+		go coverageShowMetricsUpdater(ovsVswitchd)
 	})
 }

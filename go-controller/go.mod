@@ -15,21 +15,22 @@ require (
 	github.com/gorilla/mux v1.7.3
 	github.com/hashicorp/golang-lru v0.5.3 // indirect
 	github.com/imdario/mergo v0.3.8 // indirect
-	github.com/onsi/ginkgo v1.10.3
+	github.com/onsi/ginkgo v1.11.0
 	github.com/onsi/gomega v1.8.1
 	github.com/prometheus/client_golang v1.2.1
 	github.com/satori/go.uuid v0.0.0-20181028125025-b2ce2384e17b // indirect
 	github.com/stretchr/testify v1.4.0
 	github.com/urfave/cli/v2 v2.2.0
-	github.com/vishvananda/netlink v0.0.0-20181108222139-023a6dafdcdf
+	github.com/vishvananda/netlink v0.0.0-20200625175047-bca67dfc8220
 	golang.org/x/time v0.0.0-20191024005414-555d28b269f0 // indirect
 	gopkg.in/fsnotify/fsnotify.v1 v1.4.7
 	gopkg.in/gcfg.v1 v1.2.3
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 	gopkg.in/warnings.v0 v0.1.2 // indirect
-	k8s.io/api v0.17.4
-	k8s.io/apimachinery v0.17.4
-	k8s.io/client-go v0.17.4
+	k8s.io/api v0.18.5
+	k8s.io/apimachinery v0.18.5
+	k8s.io/client-go v0.18.5
 	k8s.io/klog v1.0.0
-	k8s.io/utils v0.0.0-20191114184206-e782cd3c129f
+	k8s.io/utils v0.0.0-20200324210504-a9aa75ae1b89
+	sigs.k8s.io/structured-merge-diff v0.0.0-20190525122527-15d366b2352e // indirect
 )

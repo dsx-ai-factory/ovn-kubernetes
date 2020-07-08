@@ -99,8 +99,10 @@ func (n *OvnNode) initGateway(subnet *net.IPNet, nodeAnnotator kube.Annotator,
 	waiter *startupWaiter) error {
 
 	if config.Gateway.NodeportEnable {
-		err := initLoadBalancerHealthChecker(n.name, n.watchFactory)
-		if err != nil {
+		if err := initLoadBalancerHealthChecker(n.name, n.watchFactory); err != nil {
+			return err
+		}
+		if err := initPortClaimWatcher(n.recorder, n.watchFactory); err != nil {
 			return err
 		}
 	}
@@ -109,7 +111,7 @@ func (n *OvnNode) initGateway(subnet *net.IPNet, nodeAnnotator kube.Annotator,
 	var prFn postWaitFunc
 	switch config.Gateway.Mode {
 	case config.GatewayModeLocal:
-		err = initLocalnetGateway(n.name, subnet, n.watchFactory, nodeAnnotator)
+		err = n.initLocalnetGateway(subnet, nodeAnnotator)
 	case config.GatewayModeShared:
 		gatewayNextHop := net.ParseIP(config.Gateway.NextHop)
 		gatewayIntf := config.Gateway.Interface

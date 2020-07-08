@@ -11,19 +11,18 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/klog"
-
 	honode "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
+	"k8s.io/klog"
 )
 
 // OvnNode is the object holder for utilities meant for node management
@@ -32,15 +31,17 @@ type OvnNode struct {
 	Kube         kube.Interface
 	watchFactory *factory.WatchFactory
 	stopChan     chan struct{}
+	recorder     record.EventRecorder
 }
 
 // NewNode creates a new controller for node management
-func NewNode(kubeClient kubernetes.Interface, wf *factory.WatchFactory, name string, stopChan chan struct{}) *OvnNode {
+func NewNode(kubeClient kubernetes.Interface, wf *factory.WatchFactory, name string, stopChan chan struct{}, eventRecorder record.EventRecorder) *OvnNode {
 	return &OvnNode{
 		name:         name,
 		Kube:         &kube.Kube{KClient: kubeClient},
 		watchFactory: wf,
 		stopChan:     stopChan,
+		recorder:     eventRecorder,
 	}
 }
 
@@ -292,33 +293,52 @@ func (n *OvnNode) WatchEndpoints() error {
 			if reflect.DeepEqual(epNew.Subsets, epOld.Subsets) {
 				return
 			}
-			newEndpointAddressMap := buildEndpointAddressMap(epNew.Subsets)
-			for _, subset := range epOld.Subsets {
-				for _, address := range subset.Addresses {
-					if _, ok := newEndpointAddressMap[address.IP]; !ok {
-						deleteConntrack(address.IP)
+			newEpAddressMap := buildEndpointAddressMap(epNew.Subsets)
+			for item := range buildEndpointAddressMap(epOld.Subsets) {
+				if _, ok := newEpAddressMap[item]; !ok {
+					err := deleteConntrack(item.ip, item.port, item.protocol)
+					if err != nil {
+						klog.Errorf("Failed to delete conntrack entry for %s: %v", item.ip, err)
 					}
 				}
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			ep := obj.(*kapi.Endpoints)
-			for _, subset := range ep.Subsets {
-				for _, address := range subset.Addresses {
-					deleteConntrack(address.IP)
+			for item := range buildEndpointAddressMap(ep.Subsets) {
+				err := deleteConntrack(item.ip, item.port, item.protocol)
+				if err != nil {
+					klog.Errorf("Failed to delete conntrack entry for %s: %v", item.ip, err)
 				}
+
 			}
 		},
 	}, nil)
 	return err
 }
 
-func buildEndpointAddressMap(epSubsets []kapi.EndpointSubset) map[string]struct{} {
-	addressMap := make(map[string]struct{})
+type epAddressItem struct {
+	ip       string
+	port     int32
+	protocol kapi.Protocol
+}
+
+//buildEndpointAddressMap builds a map of all UDP and SCTP ports in the endpoint subset along with that port's IP address
+func buildEndpointAddressMap(epSubsets []kapi.EndpointSubset) map[epAddressItem]struct{} {
+	epMap := make(map[epAddressItem]struct{})
 	for _, subset := range epSubsets {
 		for _, address := range subset.Addresses {
-			addressMap[address.IP] = struct{}{}
+			for _, port := range subset.Ports {
+				if port.Protocol == kapi.ProtocolUDP || port.Protocol == kapi.ProtocolSCTP {
+					epMap[epAddressItem{
+						ip:       address.IP,
+						port:     port.Port,
+						protocol: port.Protocol,
+					}] = struct{}{}
+				}
+			}
 		}
 	}
-	return addressMap
+
+	return epMap
 }

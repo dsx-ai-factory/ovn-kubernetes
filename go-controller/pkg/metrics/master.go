@@ -14,10 +14,6 @@ import (
 	"k8s.io/klog"
 )
 
-const (
-	ovnNorthd = "ovn-northd"
-)
-
 // metricE2ETimestamp is a timestamp value we have persisted to nbdb. We will
 // also export a metric with the same column in sbdb. We will also bump this
 // every 30 seconds, so we can detect a hung northd.
@@ -89,7 +85,7 @@ var MetricMasterLeader = prometheus.NewGauge(prometheus.GaugeOpts{
 var registerMasterMetricsOnce sync.Once
 var startE2ETimeStampUpdaterOnce sync.Once
 
-var ovnNorthdCoverageShowCountersMap = map[string]*metricDetails{
+var ovnNorthdCoverageShowMetricsMap = map[string]*metricDetails{
 	"pstream_open": {
 		help: "Specifies the number of time passive connections " +
 			"were opened for the remote peer to connect.",
@@ -132,6 +128,7 @@ var ovnNorthdCoverageShowCountersMap = map[string]*metricDetails{
 // registry
 func RegisterMasterMetrics() {
 	registerMasterMetricsOnce.Do(func() {
+		// ovnkube-master metrics
 		prometheus.MustRegister(metricE2ETimestamp)
 		prometheus.MustRegister(MetricMasterLeader)
 		prometheus.MustRegister(metricPodCreationLatency)
@@ -175,13 +172,15 @@ func RegisterMasterMetrics() {
 			},
 			func() float64 { return 1 },
 		))
+
+		// ovn-northd metrics
 		prometheus.MustRegister(prometheus.NewGaugeFunc(
 			prometheus.GaugeOpts{
 				Namespace: MetricOvnNamespace,
 				Subsystem: MetricOvnSubsystemNorthd,
 				Name:      "probe_interval",
 				Help: "The maximum number of milliseconds of idle time on connection to the OVN SB " +
-					"and NB DB before sending  an  inactivity probe message",
+					"and NB DB before sending an inactivity probe message",
 			}, func() float64 {
 				stdout, stderr, err := util.RunOVNNbctlWithTimeout(5, "get", "NB_Global", ".",
 					"options:northd_probe_interval")
@@ -190,7 +189,7 @@ func RegisterMasterMetrics() {
 						"stderr(%s) :(%v)", stderr, err)
 					return 0
 				}
-				return parseMetricToFloat("northd_probe_interval", stdout)
+				return parseMetricToFloat(MetricOvnSubsystemNorthd, "probe_interval", stdout)
 			},
 		))
 		prometheus.MustRegister(prometheus.NewGaugeFunc(
@@ -221,9 +220,10 @@ func RegisterMasterMetrics() {
 			},
 		))
 
-		// Register the ovn-northd coverage/show counters metrics with prometheus
-		registerCoverageShowCounters(ovnNorthd, MetricOvnNamespace, MetricOvnSubsystemNorthd)
-		go coverageShowCountersMetricsUpdater(ovnNorthd)
+		// Register the ovn-northd coverage/show metrics with prometheus
+		componentCoverageShowMetricsMap[ovnNorthd] = ovnNorthdCoverageShowMetricsMap
+		registerCoverageShowMetrics(ovnNorthd, MetricOvnNamespace, MetricOvnSubsystemNorthd)
+		go coverageShowMetricsUpdater(ovnNorthd)
 	})
 }
 
@@ -234,7 +234,7 @@ func scrapeOvnTimestamp() float64 {
 		klog.Errorf("Failed to scrape timestamp: %s (%v)", stderr, err)
 		return 0
 	}
-	return parseMetricToFloat("e2e_timestamp", output)
+	return parseMetricToFloat(MetricOvnkubeSubsystemMaster, "sb_e2e_timestamp", output)
 }
 
 // StartE2ETimeStampMetricUpdater adds a goroutine that updates a "timestamp" value in the
