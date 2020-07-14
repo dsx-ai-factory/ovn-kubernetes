@@ -73,6 +73,20 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 			"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
 	}
 
+	stdout, stderr, err = util.RunOVNNbctl("set", "logical_router",
+		gatewayRouter, "options:learn_from_arp_request=false")
+	if err != nil {
+		return fmt.Errorf("failed to set logical router %s's learn_from_arp_request "+
+			"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
+	}
+
+	stdout, stderr, err = util.RunOVNNbctl("set", "logical_router",
+		gatewayRouter, "options:dynamic_neigh_routers=true")
+	if err != nil {
+		return fmt.Errorf("failed to set logical router %s's dynamic_neigh_routers "+
+			"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
+	}
+
 	nexthopIPs := make([]net.IP, 0)
 	for _, drLRPIP := range drLRPIPs {
 		nexthopIPs = append(nexthopIPs, drLRPIP.IP)
