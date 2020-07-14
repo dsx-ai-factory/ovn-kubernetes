@@ -310,12 +310,6 @@ ovn_image=${image} \
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
-  ovn_db_replicas=${ovn_db_replicas} \
-  ovn_ssl_en=${ovn_ssl_en} \
-  j2 ../templates/ovn-db-exporter.yaml.j2 -o ../yaml/ovn-db-exporter.yaml
-
-ovn_image=${image} \
-  ovn_image_pull_policy=${image_pull_policy} \
   ovn_loglevel_controller=${ovn_loglevel_controller} \
   ovn_ssl_en=${ovn_ssl_en} \
   j2 ../templates/ovn-host.yaml.j2 -o ../yaml/ovn-host.yaml

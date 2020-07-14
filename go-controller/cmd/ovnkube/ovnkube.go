@@ -246,6 +246,8 @@ func runOvnKube(ctx *cli.Context) error {
 		metrics.RegisterNodeMetrics()
 		// register ovn specific (ovn-controller) metrics
 		metrics.RegisterOvnMetrics()
+		// register ovn db specific metrics
+		metrics.RegisterOvnDBMetrics(clientset, node)
 		start := time.Now()
 		n := ovnnode.NewNode(clientset, factory, node, stopChan, util.EventRecorder(clientset))
 		if err := n.Start(); err != nil {

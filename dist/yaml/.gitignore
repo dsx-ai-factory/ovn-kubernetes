@@ -10,4 +10,3 @@ ovn-north.yaml
 ovn-host.yaml
 ovn-nbdb-raft.yaml
 ovn-sbdb-raft.yaml
-ovn-db-exporter.yaml
