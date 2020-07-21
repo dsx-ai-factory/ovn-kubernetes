@@ -13,6 +13,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog"
 )
 
@@ -148,7 +149,7 @@ func coverageShowMetricsUpdater(component string) {
 	}
 }
 
-// StartMetricsServer runs the prometheus listner so that metrics can be collected
+// StartMetricsServer runs the prometheus listener so that OVN K8s metrics can be collected
 func StartMetricsServer(bindAddress string, enablePprof bool) {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
@@ -167,5 +168,27 @@ func StartMetricsServer(bindAddress string, enablePprof bool) {
 			utilruntime.HandleError(fmt.Errorf("starting metrics server failed: %v", err))
 		}
 	}, 5*time.Second, utilwait.NeverStop)
+}
 
+var ovnRegistry = prometheus.NewRegistry()
+
+// StartOVNMetricsServer runs the prometheus listener so that OVN metrics can be collected
+func StartOVNMetricsServer(bindAddress string) {
+	handler := promhttp.InstrumentMetricHandler(ovnRegistry,
+		promhttp.HandlerFor(ovnRegistry, promhttp.HandlerOpts{}))
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", handler)
+
+	go utilwait.Until(func() {
+		err := http.ListenAndServe(bindAddress, mux)
+		if err != nil {
+			utilruntime.HandleError(fmt.Errorf("starting metrics server failed: %v", err))
+		}
+	}, 5*time.Second, utilwait.NeverStop)
+}
+
+func RegisterOvnMetrics(clientset *kubernetes.Clientset, k8sNodeName string) {
+	go RegisterOvnDBMetrics(clientset, k8sNodeName)
+	go RegisterOvnControllerMetrics()
+	go RegisterOvnNorthdMetrics(clientset, k8sNodeName)
 }

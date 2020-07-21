@@ -59,6 +59,10 @@ spec:
     port: ovs-metrics
     path: /metrics
     scheme: http
+  - interval: 30s
+    port: ovn-metrics
+    path: /metrics
+    scheme: http
   jobLabel: k8s-app
   namespaceSelector:
     matchNames:
@@ -85,6 +89,10 @@ spec:
     port: 9410
     protocol: TCP
     targetPort: 9410
+  - name: ovn-metrics
+    port: 9476
+    protocol: TCP
+    targetPort: 9476
   - name: ovs-metrics
     port: 9310
     protocol: TCP
