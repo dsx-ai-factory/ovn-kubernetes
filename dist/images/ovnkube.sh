@@ -167,6 +167,10 @@ ovn_encap_port=${OVN_ENCAP_PORT:-6081}
 ovn_nb_raft_election_timer=${OVN_NB_RAFT_ELECTION_TIMER:-1000}
 # OVN_SB_RAFT_ELECTION_TIMER - ovn south db election timer in ms (default 1000)
 ovn_sb_raft_election_timer=${OVN_SB_RAFT_ELECTION_TIMER:-1000}
+# OVN_NB_RAFT_SCHED_PRIORITY - ovn north db process priority niceness (default -12)
+ovn_nb_raft_sched_priority=${OVN_NB_RAFT_SCHED_PRIORITY:--12}
+# OVN_SB_RAFT_SCHED_PRIORITY - ovn south db process priority niceness (default -11)
+ovn_sb_raft_sched_priority=${OVN_SB_RAFT_SCHED_PRIORITY:--11}
 
 ovn_hybrid_overlay_enable=${OVN_HYBRID_OVERLAY_ENABLE:-}
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR:-}

@@ -201,6 +201,7 @@ ovsdb-raft() {
   ovn_db_file=${OVN_ETCDIR}/ovn${db}_db.db
   # extract statefulset(sts) name from the POD_NAME
   sts_name=$(echo $POD_NAME | sed 's/\(.*\)-[0-9]*/\1/')
+  eval sched_priority=\$ovn_${db}_raft_sched_priority
 
   trap 'ovsdb_cleanup ${db}' TERM
   rm -f ${ovn_db_pidfile}
@@ -233,7 +234,7 @@ ovsdb-raft() {
     }
   fi
   if [[ "${POD_NAME}" == ${sts_name}"-0" ]]; then
-    run_as_ovs_user_if_needed \
+    run_as_ovs_user_if_needed nice -n ${sched_priority} \
       ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
       --db-${db}-cluster-local-addr=${ovn_db_host} \
       --db-${db}-cluster-local-port=${raft_port} \
@@ -248,7 +249,7 @@ ovsdb-raft() {
       rm -f ${ovn_db_file}
       wait_for_event ready_to_join_cluster ${db} ${port}
     fi
-    run_as_ovs_user_if_needed \
+    run_as_ovs_user_if_needed nice -n ${sched_priority} \
       ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
       --db-${db}-cluster-local-addr=${ovn_db_host} --db-${db}-cluster-remote-addr=${init_ip} \
       --db-${db}-cluster-local-port=${raft_port} --db-${db}-cluster-remote-port=${raft_port} \
