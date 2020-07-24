@@ -1,0 +1,52 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    prometheus: k8s
+    role: alert-rules
+  name: ovnkube-rules
+  namespace: ovn-kubernetes
+spec:
+  groups:
+  - name: general.rules
+    rules:
+    - record: cluster_nodes:total
+      expr: |
+              count (
+               count by (instance)
+                (ovn_controller_integration_bridge_geneve_ports_total{job="ovnkube-node", namespace="ovn-kubernetes"}
+               )
+              )
+
+    - alert: TotalGenevePortCount
+      expr: ovn_controller_integration_bridge_geneve_ports_total{job="ovnkube-node", namespace="ovn-kubernetes"} != cluster_nodes:total - 1
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: Number of geneve ports on node are not equal to total nodes in cluster.
+        description: |
+                Number of geneve ports on {{ $labels.instance }} are {{ $value }}
+                and total nodes in cluster are
+                {{ with query "cluster_nodes:total" }}
+                {{ . | first | value }}
+                {{ end }}.
+
+    - alert: OvnNorthdStale
+      expr: max(ovnkube_master_nb_e2e_timestamp) - max(ovnkube_master_sb_e2e_timestamp) > 120
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: |
+                ovn-northd on {{ $labels.instance }} has not successfully synced changes from NorthBound DB to
+                the Southbound DB for too long.
+
+    #- alert: OvnControllerPacketInDrops
+    #  expr: ovn_controller_packet_in_drop{job="ovnkube-node", namespace="ovn-kubernetes"} > 100 # just a sample threshold
+    #  for: 10m
+    #  labels:
+    #    severity: warning
+    #  annotations:
+    #    summary: |
+    #            Too many packet drops {{ $value }} by ovn-controller on {{ $labels.instance }}.
