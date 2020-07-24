@@ -330,5 +330,6 @@ net_cidr=${net_cidr} svc_cidr=${svc_cidr} \
   j2 ../templates/ovn-setup.yaml.j2 -o ../yaml/ovn-setup.yaml
 
 cp ../templates/ovnkube-monitor.yaml.j2 ../yaml/ovnkube-monitor.yaml
+cp ../templates/ovnkube-alerts.yaml.j2 ../yaml/ovnkube-alerts.yaml
 
 exit 0
