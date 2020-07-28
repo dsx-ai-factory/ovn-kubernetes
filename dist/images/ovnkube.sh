@@ -150,6 +150,8 @@ mtu=${OVN_MTU:-1400}
 
 ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
 
+# set metrics endpoint bind to K8S_NODE_IP.
+metrics_endpoint_ip=${K8S_NODE_IP:-0.0.0.0}
 # host on which OVN DB POD(s) are running
 ovn_db_host=${K8S_NODE_IP:-""}
 
@@ -793,6 +795,8 @@ ovn-master() {
       "
   }
 
+  ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:9409"
+
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
     --init-master ${K8S_NODE} \
@@ -808,7 +812,7 @@ ovn-master() {
     --pidfile ${OVN_RUNDIR}/ovnkube-master.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
     ${ovn_master_ssl_opts} \
-    --metrics-bind-address "0.0.0.0:9409" &
+    --metrics-bind-address ${ovnkube_master_metrics_bind_address} &
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master
 
@@ -911,6 +915,9 @@ ovn-node() {
       "
   }
 
+  ovn_metrics_bind_address="${metrics_endpoint_ip}:9476"
+  ovnkube_node_metrics_bind_address="${metrics_endpoint_ip}:9410"
+
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
@@ -930,8 +937,8 @@ ovn-node() {
     --logfile /var/log/ovn-kubernetes/ovnkube.log \
     ${ovn_node_ssl_opts} \
     --inactivity-probe=${ovn_remote_probe_interval} \
-    --ovn-metrics-bind-address "0.0.0.0:9476" \
-    --metrics-bind-address "0.0.0.0:9410" &
+    --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
+    --metrics-bind-address ${ovnkube_node_metrics_bind_address} &
 
   wait_for_event attempts=3 process_ready ovnkube
   setup_cni
@@ -1000,7 +1007,7 @@ ovs-metrics() {
   echo "=============== ovs-metrics - (wait for ovs_ready)"
   wait_for_event ovs_ready
 
-  ovs_exporter_bind_address=${OVS_EXPORTER_BIND_ADDRESS:-"0.0.0.0:9310"}
+  ovs_exporter_bind_address="${metrics_endpoint_ip}:9310"
   /usr/bin/ovn-kube-util \
     --loglevel=${ovnkube_loglevel} \
     ovs-exporter \
