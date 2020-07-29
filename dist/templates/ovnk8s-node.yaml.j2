@@ -65,6 +65,10 @@ spec:
               name: host-var-run-ovs
             - mountPath: /var/run/ovn/
               name: host-var-run-ovs
+            # for ovn-db metrics
+            - mountPath: /etc/openvswitch/
+              name: host-var-lib-ovs
+              readOnly: true
             # We mount our socket here
             - mountPath: /var/run/ovn-kubernetes
               name: host-var-run-ovn-kubernetes
@@ -191,6 +195,9 @@ spec:
         - name: host-var-run-ovs
           hostPath:
             path: /var/run/openvswitch
+        - name: host-var-lib-ovs
+          hostPath:
+            path: /var/lib/openvswitch
         - name: host-var-run-ovn-kubernetes
           hostPath:
             path: /var/run/ovn-kubernetes
