@@ -26,7 +26,8 @@ var OvsExporterCommand = cli.Command{
 			bindAddress = "0.0.0.0:9310"
 		}
 
-		if err := util.SetExec(kexec.New()); err != nil {
+		if err := util.SetSpecificExec(kexec.New(), "ovs-vsctl", "ovs-dpctl",
+			"ovs-ofctl", "ovs-appctl", "ovsdb-client"); err != nil {
 			return err
 		}
 
