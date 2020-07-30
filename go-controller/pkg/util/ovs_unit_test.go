@@ -191,9 +191,9 @@ func TestSetSpecificExec(t *testing.T) {
 		},
 		{
 			desc:        "negative: unknown command",
-			expectedErr: fmt.Errorf(`unknown command: "ovs-appctl"`),
-			fnArg:       "ovs-appctl",
-			onRetArgs:   &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"ovs-appctl", nil}},
+			expectedErr: fmt.Errorf(`unknown command: "ovn-nbctl"`),
+			fnArg:       "ovn-nbctl",
+			onRetArgs:   &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"ovn-nbctl", nil}},
 			fnCallTimes: 0,
 		},
 	}

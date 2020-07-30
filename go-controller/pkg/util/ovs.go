@@ -262,6 +262,26 @@ func SetSpecificExec(exec kexec.Interface, commands ...string) error {
 			if err != nil {
 				return err
 			}
+		case ovsOfctlCommand:
+			runner.ofctlPath, err = exec.LookPath(ovsOfctlCommand)
+			if err != nil {
+				return err
+			}
+		case ovsDpctlCommand:
+			runner.dpctlPath, err = exec.LookPath(ovsDpctlCommand)
+			if err != nil {
+				return err
+			}
+		case ovsAppctlCommand:
+			runner.appctlPath, err = exec.LookPath(ovsAppctlCommand)
+			if err != nil {
+				return err
+			}
+		case ovsdbClientCommand:
+			runner.ovsdbClientPath, err = exec.LookPath(ovsdbClientCommand)
+			if err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("unknown command: %q", command)
 		}
