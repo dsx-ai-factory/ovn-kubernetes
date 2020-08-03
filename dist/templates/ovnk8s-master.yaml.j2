@@ -115,6 +115,15 @@ spec:
 
           command: ["/root/ovnkube.sh", "ovn-master"]
 
+          # starting the metrics server is one of the last things we do,
+          # so check whether metrics server is running
+          readinessProbe:
+            tcpSocket:
+              port: 9409
+            initialDelaySeconds: 30
+            timeoutSeconds: 5
+            periodSeconds: 30
+
           securityContext:
             runAsUser: 0
 
