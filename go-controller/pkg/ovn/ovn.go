@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	goovn "github.com/ebay/go-ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -23,8 +24,10 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
+	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/klog"
 )
 
@@ -140,6 +143,12 @@ type Controller struct {
 
 	// event recorder used to post events to k8s
 	recorder record.EventRecorder
+
+	// go-ovn northbound client interface
+	ovnNBClient goovn.Client
+
+	// go-ovn southbound client interface
+	ovnSBClient goovn.Client
 }
 
 const (
@@ -156,10 +165,12 @@ const (
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
 func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
-	stopChan <-chan struct{}, addressSetFactory AddressSetFactory) *Controller {
+	stopChan <-chan struct{}, addressSetFactory AddressSetFactory, ovnNBClient goovn.Client, ovnSBClient goovn.Client) *Controller {
+
 	if addressSetFactory == nil {
 		addressSetFactory = NewOvnAddressSetFactory()
 	}
+
 	return &Controller{
 		kube:                     &kube.Kube{KClient: kubeClient},
 		watchFactory:             wf,
@@ -182,6 +193,8 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		joinSwIPManager:          nil,
 		serviceLBLock:            sync.Mutex{},
 		recorder:                 util.EventRecorder(kubeClient),
+		ovnNBClient:              ovnNBClient,
+		ovnSBClient:              ovnSBClient,
 	}
 }
 
@@ -390,6 +403,17 @@ func podScheduled(pod *kapi.Pod) bool {
 	return pod.Spec.NodeName != ""
 }
 
+func (oc *Controller) recordPodEvent(addErr error, pod *kapi.Pod) {
+	podRef, err := ref.GetReference(scheme.Scheme, pod)
+	if err != nil {
+		klog.Errorf("Couldn't get a reference to pod %s/%s to post an event: '%v'",
+			pod.Namespace, pod.Name, err)
+	} else {
+		klog.V(5).Infof("Posting a %s event for Pod %s/%s", kapi.EventTypeWarning, pod.Namespace, pod.Name)
+		oc.recorder.Eventf(podRef, kapi.EventTypeWarning, "ErrorAddingLogicalPort", addErr.Error())
+	}
+}
+
 // WatchPods starts the watching of Pod resource and calls back the appropriate handler logic
 func (oc *Controller) WatchPods() error {
 	var retryPods sync.Map
@@ -405,6 +429,7 @@ func (oc *Controller) WatchPods() error {
 			if podScheduled(pod) {
 				if err := oc.addLogicalPort(pod); err != nil {
 					klog.Errorf(err.Error())
+					oc.recordPodEvent(err, pod)
 					retryPods.Store(pod.UID, true)
 				}
 			} else {
@@ -422,6 +447,7 @@ func (oc *Controller) WatchPods() error {
 			if podScheduled(pod) && retry {
 				if err := oc.addLogicalPort(pod); err != nil {
 					klog.Errorf(err.Error())
+					oc.recordPodEvent(err, pod)
 				} else {
 					retryPods.Delete(pod.UID)
 				}
@@ -625,12 +651,16 @@ func (oc *Controller) WatchNodes() error {
 
 			err = oc.syncNodeManagementPort(node, hostSubnets)
 			if err != nil {
-				klog.Warningf("Error creating management port for node %s: %v", node.Name, err)
+				if !util.IsAnnotationNotSetError(err) {
+					klog.Warningf("Error creating management port for node %s: %v", node.Name, err)
+				}
 				mgmtPortFailed.Store(node.Name, true)
 			}
 
 			if err := oc.syncNodeGateway(node, hostSubnets); err != nil {
-				klog.Warningf(err.Error())
+				if !util.IsAnnotationNotSetError(err) {
+					klog.Warningf(err.Error())
+				}
 				gatewaysFailed.Store(node.Name, true)
 			}
 		},
@@ -662,7 +692,9 @@ func (oc *Controller) WatchNodes() error {
 			if failed || macAddressChanged(oldNode, node) {
 				err := oc.syncNodeManagementPort(node, hostSubnets)
 				if err != nil {
-					klog.Errorf("Error updating management port for node %s: %v", node.Name, err)
+					if !util.IsAnnotationNotSetError(err) {
+						klog.Errorf("Error updating management port for node %s: %v", node.Name, err)
+					}
 					mgmtPortFailed.Store(node.Name, true)
 				} else {
 					mgmtPortFailed.Delete(node.Name)
@@ -675,7 +707,9 @@ func (oc *Controller) WatchNodes() error {
 			if failed || gatewayChanged(oldNode, node) {
 				err := oc.syncNodeGateway(node, nil)
 				if err != nil {
-					klog.Errorf(err.Error())
+					if !util.IsAnnotationNotSetError(err) {
+						klog.Errorf(err.Error())
+					}
 					gatewaysFailed.Store(node.Name, true)
 				} else {
 					gatewaysFailed.Delete(node.Name)

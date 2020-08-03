@@ -103,7 +103,7 @@ func getOvnControllerVersionInfo() {
 	for _, line := range strings.Split(stdout, "\n") {
 		if strings.HasPrefix("ovn-controller ", line) {
 			ovnControllerVersion = strings.Fields(line)[1]
-		} else if strings.HasPrefix("Open  vSwitch Library ", line) {
+		} else if strings.HasPrefix("Open vSwitch Library ", line) {
 			ovnControllerOvsLibVersion = strings.Fields(line)[3]
 		}
 	}

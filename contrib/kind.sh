@@ -23,11 +23,25 @@ run_kubectl() {
   done
 }
 
+# Some environments (Fedora32,31 on desktop), have problems when the cluster
+# is deleted directly with kind `kind delete cluster --name ovn`, it restarts the host.
+# The root cause is unknown, this also can not be reproduced in Ubuntu 20.04 or
+# with Fedora32 Cloud, but it does not happen if we clean first the ovn-kubernetes resources.
+delete()
+{
+  kubectl --kubeconfig ${HOME}/admin.conf delete namespace ovn-kubernetes
+  sleep 5
+  kind delete cluster --name ${KIND_CLUSTER_NAME:-ovn}
+}
+
+
 usage()
 {
     echo "usage: kind.sh [[[-cf|--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]"
-    echo "                 [-ho|--hybrid-enabled] [-ii|--install-ingress] [-n4|--no-ipv4] [-i6|--ipv6]"
-    echo "                 [-wk|--num-workers <num>]] [-gm|--gateway-mode <mode>] | [-h]]"
+    echo "                 [-ho|--hybrid-enabled] [-ii|--install-ingress] [-n4|--no-ipv4]"
+    echo "                 [-i6|--ipv6] [-wk|--num-workers <num>]"
+    echo "                 [-sw|--allow-system-writes] [-gm|--gateway-mode <mode>]] |"
+    echo "                [-h]]"
     echo ""
     echo "-cf | --config-file          Name of the KIND J2 configuration file."
     echo "                             DEFAULT: ./kind.yaml.j2"
@@ -41,7 +55,13 @@ usage()
     echo "-i6 | --ipv6                 Enable IPv6. DEFAULT: IPv6 Disabled."
     echo "-wk | --num-workers          Number of worker nodes. DEFAULT: HA - 2 worker"
     echo "                             nodes and no HA - 0 worker nodes."
-    echo "-gm | --gateway-mode         Enable 'shared' or 'local' gateway mode. DEFAULT: local."
+    echo "-sw | --allow-system-writes  Allow script to update system. Intended to allow"
+    echo "                             github CI to be updated with IPv6 settings."
+    echo "                             DEFAULT: Don't allow."
+    echo "-gm | --gateway-mode         Enable 'shared' or 'local' gateway mode."
+    echo "                             DEFAULT: local."
+    echo "-ov | --ovn-image            Use the specified docker image instead of building locally. DEFAULT: local build."
+    echo "--delete                     Delete current cluster"
     echo ""
 }
 
@@ -49,47 +69,57 @@ parse_args()
 {
     while [ "$1" != "" ]; do
         case $1 in
-            -cf | --config-file )      shift
-                                       if test ! -f "$1"; then
-                                          echo "$1 does not  exist"
-                                          usage
+            -cf | --config-file )         shift
+                                          if test ! -f "$1"; then
+                                             echo "$1 does not  exist"
+                                             usage
+                                             exit 1
+                                          fi
+                                          KIND_CONFIG=$1
+                                          ;;
+            -ii | --install-ingress )     KIND_INSTALL_INGRESS=true
+                                          ;;
+            -ha | --ha-enabled )          KIND_HA=true
+                                          ;;
+            -me | --multicast-enabled)    OVN_MULTICAST_ENABLE=true
+                                          ;;
+            -ho | --hybrid-enabled )      OVN_HYBRID_OVERLAY_ENABLE=true
+                                          ;;
+            -kt | --keep-taint )          KIND_REMOVE_TAINT=false
+                                          ;;
+            -n4 | --no-ipv4 )             KIND_IPV4_SUPPORT=false
+                                          ;;
+            -i6 | --ipv6 )                KIND_IPV6_SUPPORT=true
+                                          ;;
+            -wk | --num-workers )         shift
+                                          if ! [[ "$1" =~ ^[0-9]+$ ]]; then
+                                             echo "Invalid num-workers: $1"
+                                             usage
+                                             exit 1
+                                          fi
+                                          KIND_NUM_WORKER=$1
+                                          ;;
+            -sw | --allow-system-writes ) KIND_ALLOW_SYSTEM_WRITES=true
+                                          ;;
+            -gm | --gateway-mode )        shift
+                                          if [ "$1" != "local" ] && [ "$1" != "shared" ]; then
+                                             echo "Invalid gateway mode: $1"
+                                             usage
+                                             exit 1
+                                          fi
+                                          OVN_GATEWAY_MODE=$1
+                                          ;;
+            -ov | --ovn-image )           shift
+                                          OVN_IMAGE=$1
+                                          ;;
+            --delete )                    delete
+                                          exit
+                                          ;;
+            -h | --help )                 usage
+                                          exit
+                                          ;;
+            * )                           usage
                                           exit 1
-                                       fi
-                                       KIND_CONFIG=$1
-                                       ;;
-            -ii | --install-ingress )  KIND_INSTALL_INGRESS=true
-                                       ;;
-            -ha | --ha-enabled )       KIND_HA=true
-                                       ;;
-            -ho | --hybrid-enabled )   OVN_HYBRID_OVERLAY_ENABLE=true
-                                       ;;
-            -kt | --keep-taint )       KIND_REMOVE_TAINT=false
-                                       ;;
-            -n4 | --no-ipv4 )          KIND_IPV4_SUPPORT=false
-                                       ;;
-            -i6 | --ipv6 )             KIND_IPV6_SUPPORT=true
-                                       ;;
-            -wk | --num-workers )      shift
-                                       if ! [[ "$1" =~ ^[0-9]+$ ]]; then
-                                          echo "Invalid num-workers: $1"
-                                          usage
-                                          exit 1
-                                       fi
-                                       KIND_NUM_WORKER=$1
-                                       ;;
-            -gm | --gateway-mode )     shift
-                                       if [ "$1" != "local" ] && [ "$1" != "shared" ]; then
-                                          echo "Invalid gateway mode: $1"
-                                          usage
-                                          exit 1
-                                       fi
-                                       OVN_GATEWAY_MODE=$1
-                                       ;;
-            -h | --help )              usage
-                                       exit
-                                       ;;
-            * )                        usage
-                                       exit 1
         esac
         shift
     done
@@ -106,8 +136,11 @@ print_params()
      echo "KIND_IPV4_SUPPORT = $KIND_IPV4_SUPPORT"
      echo "KIND_IPV6_SUPPORT = $KIND_IPV6_SUPPORT"
      echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
+     echo "KIND_ALLOW_SYSTEM_WRITES = $KIND_ALLOW_SYSTEM_WRITES"
      echo "OVN_GATEWAY_MODE = $OVN_GATEWAY_MODE"
      echo "OVN_HYBRID_OVERLAY_ENABLE = $OVN_HYBRID_OVERLAY_ENABLE"
+     echo "OVN_MULTICAST_ENABLE = $OVN_MULTICAST_ENABLE"
+     echo "OVN_IMAGE = $OVN_IMAGE"
      echo ""
 }
 
@@ -124,6 +157,9 @@ KIND_REMOVE_TAINT=${KIND_REMOVE_TAINT:-true}
 KIND_IPV4_SUPPORT=${KIND_IPV4_SUPPORT:-true}
 KIND_IPV6_SUPPORT=${KIND_IPV6_SUPPORT:-false}
 OVN_HYBRID_OVERLAY_ENABLE=${OVN_HYBRID_OVERLAY_ENABLE:-false}
+OVN_MULTICAST_ENABLE=${OVN_MULTICAST_ENABLE:-false}
+KIND_ALLOW_SYSTEM_WRITES=${KIND_ALLOW_SYSTEM_WRITES:-false}
+OVN_IMAGE=${OVN_IMAGE:-local}
 
 # Input not currently validated. Modify outside script at your own risk.
 # These are the same values defaulted to in KIND code (kind/default.go).
@@ -147,52 +183,72 @@ print_params
 set -euxo pipefail
 
 # Detect IP to use as API server
-API_IPV4=""
-if [ "$KIND_IPV4_SUPPORT" == true ]; then
-  # ip -4 addr -> Run ip command for IPv4
-  # grep -oP '(?<=inet\s)\d+(\.\d+){3}' -> Use only the lines with the
-  #   IPv4 Addresses and strip off the trailing subnet mask, /xx
-  # grep -v "127.0.0.1" -> Remove local host
-  # head -n 1 -> Of the remaining, use first entry
-  API_IPV4=$(ip -4 addr | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v "127.0.0.1" | head -n 1)
-  if [ -z "$API_IPV4" ]; then
-    echo "Error detecting machine IPv4 to use as API server"
-    exit 1
-  fi
+#
+# You can't use an IPv6 address for the external API, docker does not support
+# IPv6 port mapping. Always use the IPv4 host address for the API Server field.
+# This will keep compatibility and people will be able to connect with kubectl
+# from outside
+#
+# ip -4 addr -> Run ip command for IPv4
+# grep -oP '(?<=inet\s)\d+(\.\d+){3}' -> Use only the lines with the
+#   IPv4 Addresses and strip off the trailing subnet mask, /xx
+# grep -v "127.0.0.1" -> Remove local host
+# head -n 1 -> Of the remaining, use first entry
+API_IP=$(ip -4 addr | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v "127.0.0.1" | head -n 1)
+if [ -z "$API_IP" ]; then
+  echo "Error detecting machine IPv4 to use as API server. Default to 0.0.0.0."
+  API_IP=0.0.0.0
 fi
 
-API_IPV6=""
-if [ "$KIND_IPV6_SUPPORT" == true ]; then
-  # ip -6 addr -> Run ip command for IPv6
-  # grep "inet6" -> Use only the lines with the IPv6 Address
-  # sed 's@/.*@@g' -> Strip off the trailing subnet mask, /xx
-  # grep -v "^::1$" -> Remove local host
-  # sed '/^fe80:/ d' -> Remove Link-Local Addresses
-  # head -n 1 -> Of the remaining, use first entry
-  API_IPV6=$(ip -6 addr  | grep "inet6" | awk -F' ' '{print $2}' | \
-             sed 's@/.*@@g' | grep -v "^::1$" | sed '/^fe80:/ d' | head -n 1)
-  if [ -z "$API_IPV6" ]; then
-    echo "Error detecting machine IPv6 to use as API server"
-    exit 1
+check_ipv6() {
+  # Collect additional IPv6 data on test environment
+  ERROR_FOUND=false
+  TMPVAR=`sysctl net.ipv6.conf.all.forwarding | awk '{print $3}'`
+  echo "net.ipv6.conf.all.forwarding is equal to $TMPVAR"
+  if [ "$TMPVAR" != 1 ]; then
+    if [ "$KIND_ALLOW_SYSTEM_WRITES" == true ]; then
+      sudo sysctl -w net.ipv6.conf.all.forwarding=1
+    else
+      echo "RUN: 'sudo sysctl -w net.ipv6.conf.all.forwarding=1' to use IPv6."
+      ERROR_FOUND=true
+    fi
   fi
+  TMPVAR=`sysctl net.ipv6.conf.all.disable_ipv6 | awk '{print $3}'`
+  echo "net.ipv6.conf.all.disable_ipv6 is equal to $TMPVAR"
+  if [ "$TMPVAR" != 0 ]; then
+    if [ "$KIND_ALLOW_SYSTEM_WRITES" == true ]; then
+      sudo sysctl -w net.ipv6.conf.all.disable_ipv6=0
+    else
+      echo "RUN: 'sudo sysctl -w net.ipv6.conf.all.disable_ipv6=0' to use IPv6."
+      ERROR_FOUND=true
+    fi
+  fi
+  if [ -f /proc/net/if_inet6 ]; then
+    echo "/proc/net/if_inet6 exists so IPv6 supported in kernel."
+  else
+    echo "/proc/net/if_inet6 does not exists so no IPv6 support found! Compile the kernel!!"
+    ERROR_FOUND=true
+  fi
+  if "$ERROR_FOUND"; then
+    exit 2
+  fi
+}
+
+if [ "$KIND_IPV6_SUPPORT" == true ]; then
+  check_ipv6
 fi
 
 if [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == false ]; then
-  API_IP=${API_IPV4}
   IP_FAMILY=""
   NET_CIDR=$NET_CIDR_IPV4
   SVC_CIDR=$SVC_CIDR_IPV4
   echo "IPv4 Only Support: API_IP=$API_IP --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
 elif [ "$KIND_IPV4_SUPPORT" == false ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
-  API_IP=${API_IPV6}
   IP_FAMILY="ipv6"
   NET_CIDR=$NET_CIDR_IPV6
   SVC_CIDR=$SVC_CIDR_IPV6
   echo "IPv6 Only Support: API_IP=$API_IP --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
 elif [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
-  #TODO DUALSTACK: Multiple IP Addresses for APIServer not currently supported.
-  #API_IP=${API_IPV4},${API_IPV6}
-  API_IP=${API_IPV4}
   IP_FAMILY="DualStack"
   NET_CIDR=$NET_CIDR_IPV4,$NET_CIDR_IPV6
   SVC_CIDR=$SVC_CIDR_IPV4,$SVC_CIDR_IPV6
@@ -216,40 +272,75 @@ ovn_apiServerAddress=${API_IP} \
 kind create cluster --name ${KIND_CLUSTER_NAME} --kubeconfig ${HOME}/admin.conf --image kindest/node:${K8S_VERSION} --config=${KIND_CONFIG_LCL}
 export KUBECONFIG=${HOME}/admin.conf
 cat ${KUBECONFIG}
-mkdir -p /tmp/kind
-sudo chmod 777 /tmp/kind
-count=0
-until kubectl get secrets -o jsonpath='{.items[].data.ca\.crt}'
-do
-  if [ $count -gt 10 ]; then
-    echo "Failed to get k8s crt/token"
-    exit 1
-  fi
-  count=$((count+1))
-  echo "secrets not available on attempt $count"
-  sleep 5
-done
-kubectl get secrets -o jsonpath='{.items[].data.ca\.crt}' > /tmp/kind/ca.crt
-kubectl get secrets -o jsonpath='{.items[].data.token}' > /tmp/kind/token
-pushd ../go-controller
-make
-popd
+
+if [ "${GITHUB_ACTIONS:-false}" == "true" ]; then
+  # Patch CoreDNS to work in Github CI
+  # 1. Github CI doesn´t offer IPv6 connectivity, so CoreDNS should be configured
+  # to work in an offline environment:
+  # https://github.com/coredns/coredns/issues/2494#issuecomment-457215452
+  # 2. Github CI adds following domains to resolv.conf search field:
+  # .net.
+  # CoreDNS should handle those domains and answer with NXDOMAIN instead of SERVFAIL
+  # otherwise pods stops trying to resolve the domain.
+  # Get the current config
+  original_coredns=$(kubectl get -oyaml -n=kube-system configmap/coredns)
+  echo "Original CoreDNS config:"
+  echo "${original_coredns}"
+  # Patch it
+  fixed_coredns=$(
+    printf '%s' "${original_coredns}" | sed \
+      -e 's/^.*kubernetes cluster\.local/& net/' \
+      -e '/^.*upstream$/d' \
+      -e '/^.*fallthrough.*$/d' \
+      -e '/^.*forward . \/etc\/resolv.conf$/d' \
+      -e '/^.*loop$/d' \
+  )
+  echo "Patched CoreDNS config:"
+  echo "${fixed_coredns}"
+  printf '%s' "${fixed_coredns}" | kubectl apply -f -
+fi
+
+if [ "$OVN_IMAGE" == local ]; then
+  # Build ovn docker image
+  pushd ../go-controller
+  make
+  popd
+
+  # Build ovn kube image
+  pushd ../dist/images
+  sudo cp -f ../../go-controller/_output/go/bin/* .
+  echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
+  docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
+  OVN_IMAGE=ovn-daemonset-f:dev
+  popd
+fi
+
+# Detect API IP address for OVN
+
+# Despite OVN run in pod they will only obtain the VIRTUAL apiserver address
+# and since OVN has to provide the connectivity to service
+# it can not be bootstrapped
+
+# This is the address of the node with the control-plane
+API_URL=$(kind get kubeconfig --internal --name ${KIND_CLUSTER_NAME} | grep server | awk '{ print $2 }')
+
+# Create ovn-kube manifests
 pushd ../dist/images
-sudo cp -f ../../go-controller/_output/go/bin/* .
-echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
 ./daemonset.sh \
-  --image=docker.io/library/ovn-daemonset-f:dev \
+  --image=${OVN_IMAGE} \
   --net-cidr=${NET_CIDR} \
   --svc-cidr=${SVC_CIDR} \
   --gateway-mode=${OVN_GATEWAY_MODE} \
   --hybrid-enabled=${OVN_HYBRID_OVERLAY_ENABLE} \
-  --k8s-apiserver=https://[${API_IP}]:11337 \
+  --multicast-enabled=${OVN_MULTICAST_ENABLE} \
+  --k8s-apiserver=${API_URL} \
   --ovn-master-count=${KIND_NUM_MASTER} \
   --kind \
   --master-loglevel=5
 popd
-kind load docker-image ovn-daemonset-f:dev --name ${KIND_CLUSTER_NAME}
+
+kind load docker-image ${OVN_IMAGE} --name ${KIND_CLUSTER_NAME}
+
 pushd ../dist/yaml
 run_kubectl apply -f ovn-setup.yaml
 CONTROL_NODES=$(docker ps -f name=ovn-control | grep -v NAMES | awk '{ print $NF }')
@@ -267,26 +358,33 @@ fi
 run_kubectl apply -f ovnkube-master.yaml
 run_kubectl apply -f ovnkube-node.yaml
 popd
+
+# Delete kube-proxy
 run_kubectl -n kube-system delete ds kube-proxy
 kind get clusters
 kind get nodes --name ${KIND_CLUSTER_NAME}
-kind export kubeconfig --name ovn
+kind export kubeconfig --name ${KIND_CLUSTER_NAME}
 if [ "$KIND_INSTALL_INGRESS" == true ]; then
   run_kubectl apply -f ingress/mandatory.yaml
   run_kubectl apply -f ingress/service-nodeport.yaml
 fi
 
-count=1
-until [ -z "$(kubectl get pod -A -o custom-columns=NAME:metadata.name,STATUS:.status.phase | tail -n +2 | grep -v Running)" ];do
-  if [ $count -gt 20 ]; then
-    echo "Some pods are not running after timeout"
-    exit 1
-  fi
-  echo "All pods not available yet on attempt $count:"
-  kubectl get pod -A || true
-  count=$((count+1))
-  sleep 10
-done
+# Check that everything is fine and running. IPv6 cluster seems to take a little
+# longer to come up, so extend the wait time.
+OVN_TIMEOUT=300s
+if [ "$KIND_IPV6_SUPPORT" == true ]; then
+  OVN_TIMEOUT=480s
+fi
+if ! kubectl wait -n ovn-kubernetes --for=condition=ready pods --all --timeout=${OVN_TIMEOUT} ; then
+  echo "some pods in OVN Kubernetes are not running"
+  kubectl get pods -A -o wide || true
+  exit 1
+fi
+if ! kubectl wait -n kube-system --for=condition=ready pods --all --timeout=300s ; then
+  echo "some pods in the system are not running"
+  kubectl get pods -A -o wide || true
+  exit 1
+fi
+
 echo "Pods are all up, allowing things settle for 30 seconds..."
 sleep 30
-

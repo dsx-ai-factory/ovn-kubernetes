@@ -267,8 +267,7 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 	}
 
 	// Get ofport of physical interface
-	ofportPhys, stderr, err := util.RunOVSVsctl("--if-exists", "get",
-		"interface", gwIntf, "ofport")
+	ofportPhys, stderr, err := util.RunOVSVsctl("get", "interface", gwIntf, "ofport")
 	if err != nil {
 		return fmt.Errorf("failed to get ofport of %s, stderr: %q, error: %v",
 			gwIntf, stderr, err)
@@ -337,8 +336,7 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 	return nil
 }
 
-func (n *OvnNode) initSharedGateway(subnet *net.IPNet, gwNextHop net.IP, gwIntf string,
-	nodeAnnotator kube.Annotator) (postWaitFunc, error) {
+func (n *OvnNode) initSharedGateway(subnets []*net.IPNet, gwNextHop net.IP, gwIntf string, nodeAnnotator kube.Annotator) (postWaitFunc, error) {
 	var bridgeName string
 	var uplinkName string
 	var brCreated bool
@@ -387,7 +385,7 @@ func (n *OvnNode) initSharedGateway(subnet *net.IPNet, gwNextHop net.IP, gwIntf 
 		return nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
 
-	err = setupLocalNodeAccessBridge(n.name, subnet)
+	err = setupLocalNodeAccessBridge(n.name, subnets)
 	if err != nil {
 		return nil, err
 	}

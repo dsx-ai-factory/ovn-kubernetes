@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/pprof"
@@ -8,9 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
@@ -147,6 +150,28 @@ func coverageShowMetricsUpdater(component string) {
 			metricInfo.metric.Set(metricValue)
 		}
 	}
+}
+
+// The `keepTrying` boolean when set to true will not return an error if we can't find pods with the given label.
+// This is so that the caller can re-try again to see if the pods have appeared in the k8s cluster.
+func checkPodRunsOnGivenNode(clientset *kubernetes.Clientset, label, k8sNodeName string,
+	keepTrying bool) (bool, error) {
+	pods, err := clientset.CoreV1().Pods(config.Kubernetes.OVNConfigNamespace).List(context.TODO(), metav1.ListOptions{
+		LabelSelector: label,
+	})
+	if err != nil {
+		klog.V(5).Infof("Failed to list Pods with label %q: %v. Retrying..", label, err)
+		return false, nil
+	}
+	for _, pod := range pods.Items {
+		if pod.Spec.NodeName == k8sNodeName {
+			return true, nil
+		}
+	}
+	if keepTrying {
+		return false, nil
+	}
+	return false, fmt.Errorf("the Pod matching the label %q doesn't exist on this node %s", label, k8sNodeName)
 }
 
 // StartMetricsServer runs the prometheus listener so that OVN K8s metrics can be collected

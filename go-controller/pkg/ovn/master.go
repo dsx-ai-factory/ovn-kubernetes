@@ -80,7 +80,7 @@ func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string) error
 				}()
 				// run the End-to-end timestamp metric updater only on the
 				// active master node.
-				metrics.StartE2ETimeStampMetricUpdater()
+				metrics.StartE2ETimeStampMetricUpdater(oc.stopChan, oc.ovnNBClient)
 				if err := oc.StartClusterMaster(nodeName); err != nil {
 					panic(err.Error())
 				}
@@ -139,7 +139,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		return err
 	}
 	for _, clusterEntry := range config.Default.ClusterSubnets {
-		err := oc.masterSubnetAllocator.AddNetworkRange(clusterEntry.CIDR, clusterEntry.HostBits())
+		err := oc.masterSubnetAllocator.AddNetworkRange(clusterEntry.CIDR, clusterEntry.HostSubnetLength)
 		if err != nil {
 			return err
 		}
@@ -171,8 +171,8 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 				"Disabling Multicast Support")
 			oc.multicastSupport = false
 		}
-		if config.IPv6Mode {
-			klog.Warningf("Multicast support enabled, but can not be used along with IPv6. Disabling Multicast Support")
+		if !config.IPv4Mode {
+			klog.Warningf("Multicast support enabled, but can not be used with single-stack IPv6. Disabling Multicast Support")
 			oc.multicastSupport = false
 		}
 	}
@@ -189,6 +189,8 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 			factory.Core().V1().Nodes().Informer(),
 			factory.Core().V1().Namespaces().Informer(),
 			factory.Core().V1().Pods().Informer(),
+			oc.ovnNBClient,
+			oc.ovnSBClient,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to set up hybrid overlay master: %v", err)
@@ -344,16 +346,6 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 	macAddress, err := util.ParseNodeManagementPortMACAddress(node)
 	if err != nil {
 		return err
-	}
-
-	if macAddress == nil {
-		// When macAddress was removed, delete the switch port
-		stdout, stderr, err := util.RunOVNNbctl("--", "--if-exists", "lsp-del", util.K8sPrefix+node.Name)
-		if err != nil {
-			klog.Errorf("Failed to delete logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
-		}
-
-		return nil
 	}
 
 	if hostSubnets == nil {
@@ -885,12 +877,6 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 	// watchNodes() will be called for all existing nodes at startup anyway.
 	// Note that this list will include the 'join' cluster switch, which we
 	// do not want to delete.
-	var subnetAttr string
-	if config.IPv6Mode {
-		subnetAttr = "ipv6_prefix"
-	} else {
-		subnetAttr = "subnet"
-	}
 
 	chassisData, stderr, err := util.RunOVNSbctl("--data=bare", "--no-heading",
 		"--columns=name,hostname", "--format=json", "list", "Chassis")
@@ -912,8 +898,7 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 	}
 
 	nodeSwitches, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=name,other-config", "find", "logical_switch",
-		"other-config:"+subnetAttr+"!=_")
+		"--columns=name,other-config", "find", "logical_switch")
 	if err != nil {
 		klog.Errorf("Failed to get node logical switches: stderr: %q, error: %v",
 			stderr, err)
@@ -951,6 +936,10 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 				subnets = append(subnets, subnet)
 			}
 		}
+		if len(subnets) == 0 {
+			continue
+		}
+
 		var tmp NodeSubnets
 		nodeSubnets, ok := NodeSubnetsMap[nodeName]
 		if !ok {

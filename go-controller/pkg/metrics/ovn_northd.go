@@ -28,7 +28,7 @@ func getOvnNorthdVersionInfo() {
 	for _, line := range strings.Split(stdout, "\n") {
 		if strings.HasPrefix("ovn-northd ", line) {
 			ovnNorthdVersion = strings.Fields(line)[1]
-		} else if strings.HasPrefix("Open  vSwitch Library ", line) {
+		} else if strings.HasPrefix("Open vSwitch Library ", line) {
 			ovnNorthdOvsLibVersion = strings.Fields(line)[3]
 		}
 	}
@@ -74,23 +74,16 @@ var ovnNorthdCoverageShowMetricsMap = map[string]*metricDetails{
 }
 
 func RegisterOvnNorthdMetrics(clientset *kubernetes.Clientset, k8sNodeName string) {
-	var podExists bool
-
 	err := wait.PollImmediate(1*time.Second, 300*time.Second, func() (bool, error) {
-		var err error
-		podExists, err = checkPodRunsOnGivenNode(clientset, "name=ovn-north", k8sNodeName)
-		if err != nil {
-			return false, nil
-		}
-		return true, nil
+		return checkPodRunsOnGivenNode(clientset, "name=ovn-north", k8sNodeName, true)
 	})
 	if err != nil {
-		klog.Errorf("Timed out while checking if OVN North Pod runs on this %q K8s Node: %v."+
-			"Not registering OVN North Metrics on this Node", k8sNodeName, err)
-		return
-	}
-	if !podExists {
-		klog.Infof("Not registering OVN North Metrics on this Node since ovn-northd is not running on this node.")
+		if err == wait.ErrWaitTimeout {
+			klog.Errorf("Timed out while checking if OVN North Pod runs on this %q K8s Node: %v. "+
+				"Not registering OVN North Metrics on this Node", k8sNodeName, err)
+		} else {
+			klog.Infof("Not registering OVN North Metrics on this Node since ovn-northd is not running on this node.")
+		}
 		return
 	}
 	klog.Info("Found OVN North Pod running on this node. Registering OVN North Metrics")

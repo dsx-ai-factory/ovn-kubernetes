@@ -32,7 +32,7 @@ const DefaultAPIServer = "http://localhost:8443"
 // IP address range from which subnet is allocated for per-node join switch
 const (
 	V4JoinSubnet = "100.64.0.0/16"
-	V6JoinSubnet = "fd98::/64"
+	V6JoinSubnet = "fd98::/48"
 )
 
 // Default IANA-assigned UDP port number for VXLAN
@@ -233,11 +233,12 @@ type GatewayConfig struct {
 // an OVN database (either northbound or southbound)
 type OvnAuthConfig struct {
 	// e.g: "ssl:192.168.1.2:6641,ssl:192.168.1.2:6642"
-	Address string `gcfg:"address"`
-	PrivKey string `gcfg:"client-privkey"`
-	Cert    string `gcfg:"client-cert"`
-	CACert  string `gcfg:"client-cacert"`
-	Scheme  OvnDBScheme
+	Address        string `gcfg:"address"`
+	PrivKey        string `gcfg:"client-privkey"`
+	Cert           string `gcfg:"client-cert"`
+	CACert         string `gcfg:"client-cacert"`
+	CertCommonName string `gcfg:"cert-common-name"`
+	Scheme         OvnDBScheme
 
 	northbound bool
 	externalID string // ovn-nb or ovn-remote
@@ -683,6 +684,14 @@ var OvnNBFlags = []cli.Flag{
 			"Default value for this setting is empty which defaults to use local unix socket.",
 		Destination: &cliConfig.OvnNorth.CACert,
 	},
+	&cli.StringFlag{
+		Name: "nb-cert-common-name",
+		Usage: "Common Name of the certificate used for TLS server certificate verification. " +
+			"In cases where the certificate doesn't have any SAN Extensions, this parameter " +
+			"should match the DNS(hostname) of the server. In case the certificate has a " +
+			"SAN extension, this parameter should match one of the SAN fields.",
+		Destination: &cliConfig.OvnNorth.CertCommonName,
+	},
 }
 
 //OvnSBFlags capture OVN southbound database options
@@ -711,6 +720,14 @@ var OvnSBFlags = []cli.Flag{
 		Usage: "CA certificate that the client should use for talking to the OVN database (default when ssl address is used /etc/openvswitch/ovnsb-ca.cert). " +
 			"Default value for this setting is empty which defaults to use local unix socket.",
 		Destination: &cliConfig.OvnSouth.CACert,
+	},
+	&cli.StringFlag{
+		Name: "sb-cert-common-name",
+		Usage: "Common Name of the certificate used for TLS server certificate verification. " +
+			"In cases where the certificate doesn't have any SAN Extensions, this parameter " +
+			"should match the DNS(hostname) of the server. In case the certificate has a " +
+			"SAN extension, this parameter should match one of the SAN fields.",
+		Destination: &cliConfig.OvnSouth.CertCommonName,
 	},
 }
 
@@ -1423,8 +1440,8 @@ func buildOvnAuth(exec kexec.Interface, northbound bool, cliAuth, confAuth *OvnA
 
 	switch {
 	case auth.Scheme == OvnDBSchemeSSL:
-		if auth.PrivKey == "" || auth.Cert == "" || auth.CACert == "" {
-			return nil, fmt.Errorf("must specify private key, certificate, and CA certificate for 'ssl' scheme")
+		if auth.PrivKey == "" || auth.Cert == "" || auth.CACert == "" || auth.CertCommonName == "" {
+			return nil, fmt.Errorf("must specify private key, certificate, CA certificate, and common name used in the certificate for 'ssl' scheme")
 		}
 	case auth.Scheme == OvnDBSchemeTCP:
 		if auth.PrivKey != "" || auth.Cert != "" || auth.CACert != "" {

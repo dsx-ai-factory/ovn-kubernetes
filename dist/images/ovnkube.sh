@@ -122,6 +122,7 @@ ovn_northd_pk=/ovn-cert/ovnnorthd-privkey.pem
 ovn_northd_cert=/ovn-cert/ovnnorthd-cert.pem
 ovn_controller_pk=/ovn-cert/ovncontroller-privkey.pem
 ovn_controller_cert=/ovn-cert/ovncontroller-cert.pem
+ovn_controller_cname="ovncontroller"
 
 transport="tcp"
 ovndb_ctl_ssl_opts=""
@@ -178,6 +179,7 @@ ovn_hybrid_overlay_enable=${OVN_HYBRID_OVERLAY_ENABLE:-}
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR:-}
 #OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
 ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-100000}
+ovn_multicast_enable=${OVN_MULTICAST_ENABLE:-}
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
@@ -789,14 +791,20 @@ ovn-master() {
         --nb-client-privkey ${ovn_controller_pk}
         --nb-client-cert ${ovn_controller_cert}
         --nb-client-cacert ${ovn_ca_cert}
+        --nb-cert-common-name ${ovn_controller_cname}
         --sb-client-privkey ${ovn_controller_pk}
         --sb-client-cert ${ovn_controller_cert}
         --sb-client-cacert ${ovn_ca_cert}
+        --sb-cert-common-name ${ovn_controller_cname}
       "
   }
 
-  ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:9409"
+  multicast_enabled_flag=
+  if [[ ${ovn_multicast_enable} == "true" ]]; then
+      multicast_enabled_flag="--enable-multicast"
+  fi
 
+  ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:9409"
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
     --init-master ${K8S_NODE} \
@@ -812,6 +820,7 @@ ovn-master() {
     --pidfile ${OVN_RUNDIR}/ovnkube-master.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
     ${ovn_master_ssl_opts} \
+    ${multicast_enabled_flag} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} &
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master
@@ -894,6 +903,11 @@ ovn-node() {
     OVN_NODE_PORT=""
   fi
 
+  multicast_enabled_flag=
+  if [[ ${ovn_multicast_enable} == "true" ]]; then
+      multicast_enabled_flag="--enable-multicast"
+  fi
+  
   OVN_ENCAP_IP=""
   ovn_encap_ip=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-encap-ip)
   if [[ $? == 0 ]]; then
@@ -909,9 +923,11 @@ ovn-node() {
         --nb-client-privkey ${ovn_controller_pk}
         --nb-client-cert ${ovn_controller_cert}
         --nb-client-cacert ${ovn_ca_cert}
+        --nb-cert-common-name ${ovn_controller_cname}
         --sb-client-privkey ${ovn_controller_pk}
         --sb-client-cert ${ovn_controller_cert}
         --sb-client-cacert ${ovn_ca_cert}
+        --sb-cert-common-name ${ovn_controller_cname}
       "
   }
 
@@ -937,6 +953,7 @@ ovn-node() {
     --logfile /var/log/ovn-kubernetes/ovnkube.log \
     ${ovn_node_ssl_opts} \
     --inactivity-probe=${ovn_remote_probe_interval} \
+    ${multicast_enabled_flag} \
     --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
     --metrics-bind-address ${ovnkube_node_metrics_bind_address} &
 

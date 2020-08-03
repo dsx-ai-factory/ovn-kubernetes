@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 
+	goovn "github.com/ebay/go-ovn"
 	"github.com/urfave/cli/v2"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -178,7 +180,7 @@ func defaultFakeExec(nodeSubnet, nodeName string, sctpSupport bool) (*ovntest.Fa
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_" + nodeName + " networks",
 		"ovn-sbctl --timeout=15 --data=bare --no-heading --columns=name,hostname --format=json list Chassis",
-		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch other-config:subnet!=_",
+		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch",
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --if-exists lrp-del " + routerToSwitchPrefix + nodeName + " -- lrp-add ovn_cluster_router " + routerToSwitchPrefix + nodeName + " " + lrpMAC + " " + gwCIDR,
@@ -233,12 +235,18 @@ func addNodeportLBs(fexec *ovntest.FakeExec, nodeName, tcpLBUUID, udpLBUUID, sct
 	})
 }
 
-func addGetPortAddressesCmds(fexec *ovntest.FakeExec, nodeName, hybMAC, hybIP string) {
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd: "ovn-nbctl --timeout=15 --if-exists get logical_switch_port int-" + nodeName + " dynamic_addresses addresses",
-		// hybrid overlay ports have static addresses
-		Output: "[]\n[" + hybMAC + " " + hybIP + "]\n",
-	})
+func populatePortAddresses(nodeName, hybMAC, hybIP string, ovnClient goovn.Client) {
+	lsp := "int-" + nodeName
+	cmd, err := ovnClient.LSPAdd(nodeName, lsp)
+	Expect(err).NotTo(HaveOccurred())
+	err = cmd.Execute()
+	Expect(err).NotTo(HaveOccurred())
+	addresses := hybMAC + " " + hybIP
+	addresses = strings.TrimSpace(addresses)
+	cmd, err = ovnClient.LSPSetDynamicAddresses(lsp, addresses)
+	Expect(err).NotTo(HaveOccurred())
+	err = cmd.Execute()
+	Expect(err).NotTo(HaveOccurred())
 }
 
 var _ = Describe("Master Operations", func() {
@@ -298,6 +306,10 @@ var _ = Describe("Master Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
+			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
+			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
+
+			populatePortAddresses(nodeName, hybMAC, hybIP, mockOVNNBClient)
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &testNode)
 			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{Mode: config.GatewayModeDisabled})
 			Expect(err).NotTo(HaveOccurred())
@@ -309,7 +321,11 @@ var _ = Describe("Master Operations", func() {
 			f, err = factory.NewWatchFactory(fakeClient)
 			Expect(err).NotTo(HaveOccurred())
 
-			clusterController := NewOvnController(fakeClient, f, stopChan, newFakeAddressSetFactory())
+			clusterController := NewOvnController(fakeClient, f, stopChan,
+				newFakeAddressSetFactory(),
+				mockOVNNBClient,
+				mockOVNSBClient)
+
 			Expect(clusterController).NotTo(BeNil())
 			clusterController.TCPLoadBalancerUUID = tcpLBUUID
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
@@ -380,6 +396,10 @@ var _ = Describe("Master Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
+			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
+			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
+
+			populatePortAddresses(nodeName, hybMAC, hybIP, mockOVNNBClient)
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &testNode)
 			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{Mode: config.GatewayModeDisabled})
 			Expect(err).NotTo(HaveOccurred())
@@ -391,7 +411,10 @@ var _ = Describe("Master Operations", func() {
 			f, err = factory.NewWatchFactory(fakeClient)
 			Expect(err).NotTo(HaveOccurred())
 
-			clusterController := NewOvnController(fakeClient, f, stopChan, newFakeAddressSetFactory())
+			clusterController := NewOvnController(fakeClient, f, stopChan,
+				newFakeAddressSetFactory(), mockOVNNBClient,
+				mockOVNSBClient)
+
 			Expect(clusterController).NotTo(BeNil())
 			clusterController.TCPLoadBalancerUUID = tcpLBUUID
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
@@ -457,11 +480,12 @@ var _ = Describe("Master Operations", func() {
 			err := util.SetExec(fexec)
 			Expect(err).NotTo(HaveOccurred())
 			cleanupGateway(fexec, nodeName, nodeSubnet, clusterCIDR, nextHop)
-			addGetPortAddressesCmds(fexec, nodeName, hybMAC, hybIP)
 
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
-
+			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
+			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
+			populatePortAddresses(nodeName, hybMAC, hybIP, mockOVNNBClient)
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &testNode)
 			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{Mode: config.GatewayModeDisabled})
 			Expect(err).NotTo(HaveOccurred())
@@ -475,7 +499,8 @@ var _ = Describe("Master Operations", func() {
 			f, err = factory.NewWatchFactory(fakeClient)
 			Expect(err).NotTo(HaveOccurred())
 
-			clusterController := NewOvnController(fakeClient, f, stopChan, newFakeAddressSetFactory())
+			clusterController := NewOvnController(fakeClient, f, stopChan,
+				newFakeAddressSetFactory(), mockOVNNBClient, mockOVNSBClient)
 			Expect(clusterController).NotTo(BeNil())
 			clusterController.TCPLoadBalancerUUID = tcpLBUUID
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
@@ -535,7 +560,7 @@ var _ = Describe("Master Operations", func() {
 				"ovn-sbctl --timeout=15 --data=bare --no-heading --columns=name,hostname --format=json list Chassis",
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch other-config:subnet!=_",
+				Cmd: "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch",
 				// Return two nodes
 				Output: fmt.Sprintf(`%s
 subnet=%s
@@ -620,7 +645,9 @@ subnet=%s
 			f, err = factory.NewWatchFactory(fakeClient)
 			Expect(err).NotTo(HaveOccurred())
 
-			clusterController := NewOvnController(fakeClient, f, stopChan, newFakeAddressSetFactory())
+			clusterController := NewOvnController(fakeClient, f, stopChan,
+				newFakeAddressSetFactory(), ovntest.NewMockOVNClient(goovn.DBNB),
+				ovntest.NewMockOVNClient(goovn.DBSB))
 			Expect(clusterController).NotTo(BeNil())
 			clusterController.TCPLoadBalancerUUID = tcpLBUUID
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
@@ -681,7 +708,6 @@ var _ = Describe("Gateway Init Operations", func() {
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
-
 		stopChan = make(chan struct{})
 	})
 
@@ -760,7 +786,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_" + nodeName + " networks",
 				"ovn-sbctl --timeout=15 --data=bare --no-heading --columns=name,hostname --format=json list Chassis",
-				"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch other-config:subnet!=_",
+				"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch",
 			})
 
 			fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -840,7 +866,9 @@ var _ = Describe("Gateway Init Operations", func() {
 			f, err = factory.NewWatchFactory(fakeClient)
 			Expect(err).NotTo(HaveOccurred())
 
-			clusterController := NewOvnController(fakeClient, f, stopChan, newFakeAddressSetFactory())
+			clusterController := NewOvnController(fakeClient, f, stopChan, newFakeAddressSetFactory(),
+				ovntest.NewMockOVNClient(goovn.DBNB),
+				ovntest.NewMockOVNClient(goovn.DBSB))
 			Expect(clusterController).NotTo(BeNil())
 			clusterController.TCPLoadBalancerUUID = tcpLBUUID
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
@@ -944,7 +972,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_" + nodeName + " networks",
 				"ovn-sbctl --timeout=15 --data=bare --no-heading --columns=name,hostname --format=json list Chassis",
-				"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch other-config:subnet!=_",
+				"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch",
 			})
 
 			fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -1031,7 +1059,9 @@ var _ = Describe("Gateway Init Operations", func() {
 			f, err = factory.NewWatchFactory(fakeClient)
 			Expect(err).NotTo(HaveOccurred())
 
-			clusterController := NewOvnController(fakeClient, f, stopChan, newFakeAddressSetFactory())
+			clusterController := NewOvnController(fakeClient, f, stopChan,
+				newFakeAddressSetFactory(), ovntest.NewMockOVNClient(goovn.DBNB),
+				ovntest.NewMockOVNClient(goovn.DBSB))
 			Expect(clusterController).NotTo(BeNil())
 			clusterController.TCPLoadBalancerUUID = tcpLBUUID
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
