@@ -821,7 +821,7 @@ ovn-master() {
     --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
     ${ovn_master_ssl_opts} \
     ${multicast_enabled_flag} \
-    --metrics-bind-address ${ovnkube_master_metrics_bind_address} &
+    --metrics-bind-address ${ovnkube_master_metrics_bind_address} --metrics-enable-pprof &
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master
 
@@ -955,7 +955,7 @@ ovn-node() {
     --inactivity-probe=${ovn_remote_probe_interval} \
     ${multicast_enabled_flag} \
     --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
-    --metrics-bind-address ${ovnkube_node_metrics_bind_address} &
+    --metrics-bind-address ${ovnkube_node_metrics_bind_address} --metrics-enable-pprof &
 
   wait_for_event attempts=3 process_ready ovnkube
   setup_cni
