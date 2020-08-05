@@ -96,6 +96,8 @@ spec:
         - mountPath: /ovn-cert
           name: host-ovn-cert
           readOnly: true
+        - mountPath: /var/run/ovn/
+          name: host-var-run-ovs
 
         resources:
           requests:
@@ -161,6 +163,8 @@ spec:
         - mountPath: /ovn-cert
           name: host-ovn-cert
           readOnly: true
+        - mountPath: /var/run/ovn/
+          name: host-var-run-ovs
 
         resources:
           requests:
@@ -211,5 +215,8 @@ spec:
         hostPath:
           path: /etc/ovn
           type: DirectoryOrCreate
+      - name: host-var-run-ovs
+        hostPath:
+          path: /var/run/openvswitch
       tolerations:
       - operator: "Exists"
