@@ -37,6 +37,9 @@ spec:
       # as all pods.
       serviceAccountName: ovn
       hostNetwork: true
+      {% if ovn_unprivileged_mode is defined and ovn_unprivileged_mode=="no" -%}
+      hostPID: true
+      {% endif %}
       priorityClassName: "system-node-critical"
       containers:
         - name: ovnkube-node
@@ -47,8 +50,13 @@ spec:
 
           securityContext:
             runAsUser: 0
+            {% if ovn_unprivileged_mode is defined and ovn_unprivileged_mode=="no" -%}
+            privileged: true
+            {% else -%}
             capabilities:
-              add: ["NET_ADMIN"]
+              add:
+              - NET_ADMIN
+            {% endif %}
 
           terminationMessagePolicy: FallbackToLogsOnError
           volumeMounts:
@@ -83,6 +91,11 @@ spec:
             - mountPath: /ovn-cert
               name: host-ovn-cert
               readOnly: true
+            {% if kind is defined and kind -%}
+            - mountPath: /var/run/netns
+              name: host-netns
+              mountPropagation: Bidirectional
+            {% endif %}
 
           resources:
             requests:
@@ -143,6 +156,8 @@ spec:
               value: "{{ ovn_remote_probe_interval }}"
             - name: OVN_MULTICAST_ENABLE
               value: "{{ ovn_multicast_enable }}"
+            - name: OVN_UNPRIVILEGED_MODE
+              value: "{{ ovn_unprivileged_mode | default('yes') }}"
 
           readinessProbe:
             exec:
@@ -226,6 +241,11 @@ spec:
         - name: host-config-openvswitch
           hostPath:
             path: /etc/origin/openvswitch
+        {% if kind is defined and kind -%}
+        - name: host-netns
+          hostPath:
+            path: /var/run/netns
+        {% endif %}
 
       tolerations:
         - operator: "Exists"

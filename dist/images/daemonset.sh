@@ -21,6 +21,7 @@ OVN_DB_REPLICAS=""
 OVN_MTU=""
 OVN_SSL_ENABLE=""
 KIND=""
+OVN_UNPRIVILEGED_MODE=""
 MASTER_LOGLEVEL=""
 NODE_LOGLEVEL=""
 OVN_LOGLEVEL_NORTHD=""
@@ -72,6 +73,9 @@ while [ "$1" != "" ]; do
     ;;
   --kind)
     KIND=true
+    ;;
+  --ovn-unprivileged-mode)
+    OVN_UNPRIVILEGED_MODE=$VALUE
     ;;
   --master-loglevel)
     MASTER_LOGLEVEL=$VALUE
@@ -192,6 +196,8 @@ ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR}
 echo "ovn_hybrid_overlay_net_cidr: ${ovn_hybrid_overlay_net_cidr}"
 ovn_ssl_en=${OVN_SSL_ENABLE:-"no"}
 echo "ovn_ssl_enable: ${ovn_ssl_en}"
+ovn_unprivileged_mode=${OVN_UNPRIVILEGED_MODE:-"yes"}
+echo "ovn_unprivileged_mode: ${ovn_unprivileged_mode}"
 ovn_nb_raft_election_timer=${OVN_NB_RAFT_ELECTION_TIMER:-1000}
 echo "ovn_nb_raft_election_timer: ${ovn_nb_raft_election_timer}"
 ovn_sb_raft_election_timer=${OVN_SB_RAFT_ELECTION_TIMER:-1000}
@@ -218,6 +224,7 @@ echo "ovs_metrics_scrape_interval: ${ovs_metrics_scrape_interval}"
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
   kind=${KIND} \
+  ovn_unprivileged_mode=${ovn_unprivileged_mode} \
   ovn_gateway_mode=${ovn_gateway_mode} \
   ovn_gateway_opts=${ovn_gateway_opts} \
   ovnkube_node_loglevel=${node_loglevel} \
@@ -289,6 +296,8 @@ ovn_image=${image} \
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
+  kind=${KIND} \
+  ovn_unprivileged_mode=${ovn_unprivileged_mode} \
   ovn_gateway_mode=${ovn_gateway_mode} \
   ovn_gateway_opts=${ovn_gateway_opts} \
   ovnkube_node_loglevel=${node_loglevel} \

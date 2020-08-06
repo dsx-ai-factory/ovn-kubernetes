@@ -37,6 +37,9 @@ spec:
       # as all pods.
       serviceAccountName: ovn
       hostNetwork: true
+      {% if ovn_unprivileged_mode is defined and ovn_unprivileged_mode=="no" -%}
+      hostPID: true
+      {% endif %}
       priorityClassName: "system-node-critical"
       containers:
       - name: ovn-controller
@@ -103,10 +106,12 @@ spec:
 
         securityContext:
           runAsUser: 0
-          capabilities:
-            add: ["NET_ADMIN"]
-          {% if kind is defined and kind -%}
+          {% if ovn_unprivileged_mode is defined and ovn_unprivileged_mode=="no" -%}
           privileged: true
+          {% else -%}
+          capabilities:
+            add:
+            - NET_ADMIN
           {% endif %}
 
         terminationMessagePolicy: FallbackToLogsOnError
@@ -200,6 +205,8 @@ spec:
           value: "{{ ovn_remote_probe_interval }}"
         - name: OVN_MULTICAST_ENABLE
           value: "{{ ovn_multicast_enable }}"
+        - name: OVN_UNPRIVILEGED_MODE
+          value: "{{ ovn_unprivileged_mode | default('yes') }}"
 
         lifecycle:
           preStop:
