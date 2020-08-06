@@ -348,6 +348,7 @@ func (n *OvnNode) initSharedGateway(subnets []*net.IPNet, gwNextHop net.IP, gwIn
 		if err != nil {
 			return nil, err
 		}
+		gwIntf = bridgeName
 	} else if _, _, err := util.RunOVSVsctl("--", "br-exists", gwIntf); err != nil {
 		// This is not a OVS bridge. We need to create a OVS bridge
 		// and add cluster.GatewayIntf as a port of that bridge.
