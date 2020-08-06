@@ -122,32 +122,39 @@ func getCoverageShowOutputMap(component string) (map[string]string, error) {
 
 // coverageShowMetricsUpdater updates the metric
 // by obtaining values from getCoverageShowOutputMap for specified component.
-func coverageShowMetricsUpdater(component string) {
+func coverageShowMetricsUpdater(component string, metricsScrapeInterval int, stopChan chan struct{}) {
+	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
+	defer ticker.Stop()
+
 	for {
-		time.Sleep(30 * time.Second)
-		coverageShowOutputMap, err := getCoverageShowOutputMap(component)
-		if err != nil {
-			klog.Errorf("%s", err.Error())
-			continue
-		}
-		coverageShowMetricsMap := componentCoverageShowMetricsMap[component]
-		for metricName, metricInfo := range coverageShowMetricsMap {
-			var metricValue float64
-			if metricInfo.srcName != "" {
-				metricName = metricInfo.srcName
+		select {
+		case <-ticker.C:
+			coverageShowOutputMap, err := getCoverageShowOutputMap(component)
+			if err != nil {
+				klog.Errorf("%s", err.Error())
+				continue
 			}
-			if metricInfo.aggregateFrom != nil {
-				for _, aggregateMetricName := range metricInfo.aggregateFrom {
-					if value, ok := coverageShowOutputMap[aggregateMetricName]; ok {
-						metricValue += parseMetricToFloat(component, aggregateMetricName, value)
+			coverageShowMetricsMap := componentCoverageShowMetricsMap[component]
+			for metricName, metricInfo := range coverageShowMetricsMap {
+				var metricValue float64
+				if metricInfo.srcName != "" {
+					metricName = metricInfo.srcName
+				}
+				if metricInfo.aggregateFrom != nil {
+					for _, aggregateMetricName := range metricInfo.aggregateFrom {
+						if value, ok := coverageShowOutputMap[aggregateMetricName]; ok {
+							metricValue += parseMetricToFloat(component, aggregateMetricName, value)
+						}
+					}
+				} else {
+					if value, ok := coverageShowOutputMap[metricName]; ok {
+						metricValue = parseMetricToFloat(component, metricName, value)
 					}
 				}
-			} else {
-				if value, ok := coverageShowOutputMap[metricName]; ok {
-					metricValue = parseMetricToFloat(component, metricName, value)
-				}
+				metricInfo.metric.Set(metricValue)
 			}
-			metricInfo.metric.Set(metricValue)
+		case <-stopChan:
+			return
 		}
 	}
 }
@@ -207,13 +214,27 @@ func StartOVNMetricsServer(bindAddress string) {
 	go utilwait.Until(func() {
 		err := http.ListenAndServe(bindAddress, mux)
 		if err != nil {
-			utilruntime.HandleError(fmt.Errorf("starting metrics server failed: %v", err))
+			utilruntime.HandleError(fmt.Errorf("starting ovn-metrics server failed: %v", err))
 		}
 	}, 5*time.Second, utilwait.NeverStop)
 }
 
-func RegisterOvnMetrics(clientset *kubernetes.Clientset, k8sNodeName string) {
-	go RegisterOvnDBMetrics(clientset, k8sNodeName)
-	go RegisterOvnControllerMetrics()
-	go RegisterOvnNorthdMetrics(clientset, k8sNodeName)
+// StartOVSMetricsServer runs the prometheus listener so that OVS metrics can be collected
+func StartOVSMetricsServer(bindAddress string) {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+
+	go utilwait.Until(func() {
+		err := http.ListenAndServe(bindAddress, mux)
+		if err != nil {
+			utilruntime.HandleError(fmt.Errorf("starting ovs-metrics server failed: %v", err))
+		}
+	}, 5*time.Second, utilwait.NeverStop)
+}
+
+func RegisterOvnMetrics(clientset *kubernetes.Clientset, k8sNodeName string,
+	metricsScrapeInterval int, stopChan chan struct{}) {
+	go RegisterOvnDBMetrics(clientset, k8sNodeName, metricsScrapeInterval, stopChan)
+	go RegisterOvnControllerMetrics(metricsScrapeInterval, stopChan)
+	go RegisterOvnNorthdMetrics(clientset, k8sNodeName, metricsScrapeInterval, stopChan)
 }

@@ -73,7 +73,8 @@ var ovnNorthdCoverageShowMetricsMap = map[string]*metricDetails{
 	},
 }
 
-func RegisterOvnNorthdMetrics(clientset *kubernetes.Clientset, k8sNodeName string) {
+func RegisterOvnNorthdMetrics(clientset *kubernetes.Clientset, k8sNodeName string,
+	metricsScrapeInterval int, stopChan chan struct{}) {
 	err := wait.PollImmediate(1*time.Second, 300*time.Second, func() (bool, error) {
 		return checkPodRunsOnGivenNode(clientset, "name=ovn-north", k8sNodeName, true)
 	})
@@ -153,5 +154,5 @@ func RegisterOvnNorthdMetrics(clientset *kubernetes.Clientset, k8sNodeName strin
 	// Register the ovn-northd coverage/show metrics with prometheus
 	componentCoverageShowMetricsMap[ovnNorthd] = ovnNorthdCoverageShowMetricsMap
 	registerCoverageShowMetrics(ovnNorthd, MetricOvnNamespace, MetricOvnSubsystemNorthd)
-	go coverageShowMetricsUpdater(ovnNorthd)
+	go coverageShowMetricsUpdater(ovnNorthd, metricsScrapeInterval, stopChan)
 }

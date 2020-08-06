@@ -349,7 +349,8 @@ func getOvnDbVersionInfo() {
 	}
 }
 
-func RegisterOvnDBMetrics(clientset *kubernetes.Clientset, k8sNodeName string) {
+func RegisterOvnDBMetrics(clientset *kubernetes.Clientset, k8sNodeName string,
+	metricsScrapeInterval int, stopChan chan struct{}) {
 	err := wait.PollImmediate(1*time.Second, 300*time.Second, func() (bool, error) {
 		return checkPodRunsOnGivenNode(clientset, "name in (ovn-nbdb, ovn-sbdb)", k8sNodeName, false)
 	})
@@ -408,14 +409,21 @@ func RegisterOvnDBMetrics(clientset *kubernetes.Clientset, k8sNodeName string) {
 			"nb": "OVN_Northbound",
 			"sb": "OVN_Southbound",
 		}
+		ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
+		defer ticker.Stop()
+
 		for {
-			for direction, database := range dirDbMap {
-				ovnDBClusterStatusMetricsUpdater(direction, database)
-				ovnDBMemoryMetricsUpdater(direction, database)
-				ovnDBSizeMetricsUpdater(direction, database)
-				ovnE2eTimeStampUpdater(direction, database)
+			select {
+			case <-ticker.C:
+				for direction, database := range dirDbMap {
+					ovnDBClusterStatusMetricsUpdater(direction, database)
+					ovnDBMemoryMetricsUpdater(direction, database)
+					ovnDBSizeMetricsUpdater(direction, database)
+					ovnE2eTimeStampUpdater(direction, database)
+				}
+			case <-stopChan:
+				return
 			}
-			time.Sleep(30 * time.Second)
 		}
 	}()
 }

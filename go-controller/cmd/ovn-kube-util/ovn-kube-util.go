@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/cmd/ovn-kube-util/app"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -41,7 +44,31 @@ func main() {
 		return nil
 	}
 
-	if err := c.Run(os.Args); err != nil {
+	ctx := context.Background()
+
+	// trap SIGHUP, SIGINT, SIGTERM, SIGQUIT and
+	// cancel the context
+	ctx, cancel := context.WithCancel(ctx)
+	exitCh := make(chan os.Signal, 1)
+	signal.Notify(exitCh,
+		syscall.SIGHUP,
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGQUIT)
+	defer func() {
+		signal.Stop(exitCh)
+		cancel()
+	}()
+	go func() {
+		select {
+		case s := <-exitCh:
+			klog.Infof("Received signal %s. Shutting down", s)
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
+	if err := c.RunContext(ctx, os.Args); err != nil {
 		klog.Exit(err)
 	}
 }

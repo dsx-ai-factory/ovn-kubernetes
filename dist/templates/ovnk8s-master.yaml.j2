@@ -158,6 +158,8 @@ spec:
               value: "{{ ovnkube_logfile_maxbackups }}"
             - name: OVNKUBE_LOGFILE_MAXAGE
               value: "{{ ovnkube_logfile_maxage }}"
+            - name: OVN_METRICS_SCRAPE_INTERVAL
+              value: "{{ ovn_metrics_scrape_interval }}"
             - name: OVN_NET_CIDR
               valueFrom:
                 configMapKeyRef:

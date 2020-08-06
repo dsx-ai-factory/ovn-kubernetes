@@ -118,6 +118,9 @@ var (
 
 	// IPv6Mode captures whether we are using IPv6 for OVN logical topology. (ie, single-stack IPv6 or dual-stack)
 	IPv6Mode bool
+
+	// MetricsScrapeInterval captures the interval at which ovnkube & ovn metrics should be collected.
+	MetricsScrapeInterval int
 )
 
 const (
@@ -513,6 +516,12 @@ var CommonFlags = []cli.Flag{
 		Name:        "enable-multicast",
 		Usage:       "Adds multicast support. Valid only with --init-master option.",
 		Destination: &EnableMulticast,
+	},
+	&cli.IntFlag{
+		Name:        "metrics-interval",
+		Usage:       "The Interval at which ovnkube & ovn metrics are collected",
+		Destination: &MetricsScrapeInterval,
+		Value:       30,
 	},
 	// Logging options
 	&cli.IntFlag{
