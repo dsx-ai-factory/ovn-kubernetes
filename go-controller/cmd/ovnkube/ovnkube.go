@@ -276,7 +276,7 @@ func runOvnKube(ctx *cli.Context) error {
 
 	// start the prometheus server to serve OVN Metrics (default port: 9476)
 	if config.Kubernetes.OVNMetricsBindAddress != "" {
-		metrics.RegisterOvnMetrics(clientset, node, config.MetricsScrapeInterval)
+		metrics.RegisterOvnMetrics(clientset, node, config.MetricsScrapeInterval, stopChan)
 		metrics.StartOVNMetricsServer(config.Kubernetes.OVNMetricsBindAddress)
 	}
 
