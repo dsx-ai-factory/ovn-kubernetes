@@ -349,7 +349,7 @@ func getOvnDbVersionInfo() {
 	}
 }
 
-func RegisterOvnDBMetrics(clientset *kubernetes.Clientset, k8sNodeName string) {
+func RegisterOvnDBMetrics(clientset *kubernetes.Clientset, k8sNodeName string, metricsScrapeInterval int) {
 	err := wait.PollImmediate(1*time.Second, 300*time.Second, func() (bool, error) {
 		return checkPodRunsOnGivenNode(clientset, "name in (ovn-nbdb, ovn-sbdb)", k8sNodeName, false)
 	})
@@ -415,7 +415,7 @@ func RegisterOvnDBMetrics(clientset *kubernetes.Clientset, k8sNodeName string) {
 				ovnDBSizeMetricsUpdater(direction, database)
 				ovnE2eTimeStampUpdater(direction, database)
 			}
-			time.Sleep(30 * time.Second)
+			time.Sleep(time.Duration(metricsScrapeInterval) * time.Second)
 		}
 	}()
 }

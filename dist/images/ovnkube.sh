@@ -66,6 +66,8 @@ fi
 # OVN_SB_RAFT_ELECTION_TIMER - ovn south db election timer in ms (default 1000)
 # OVN_SSL_ENABLE - use SSL transport to NB/SB db and northd (default: no)
 # OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
+# OVN_METRICS_SCRAPE_INTERVAL - ovn & ovnkube metrics scrape interval in sec (default 30)
+# OVS_METRICS_SCRAPE_INTERVAL - ovs metrics scrape interval in sec (default 30)
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -177,9 +179,13 @@ ovn_sb_raft_sched_priority=${OVN_SB_RAFT_SCHED_PRIORITY:--11}
 
 ovn_hybrid_overlay_enable=${OVN_HYBRID_OVERLAY_ENABLE:-}
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR:-}
-#OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
+# OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
 ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-100000}
 ovn_multicast_enable=${OVN_MULTICAST_ENABLE:-}
+# OVN_METRICS_SCRAPE_INTERVAL - metrics scrape interval in sec (default 30)
+ovn_metrics_scrape_interval=${OVN_METRICS_SCRAPE_INTERVAL:-30}
+# OVS_METRICS_SCRAPE_INTERVAL - metrics scrape interval in sec (default 30)
+ovs_metrics_scrape_interval=${OVS_METRICS_SCRAPE_INTERVAL:-30}
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
@@ -821,6 +827,7 @@ ovn-master() {
     --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
     ${ovn_master_ssl_opts} \
     ${multicast_enabled_flag} \
+    --metrics-interval ${ovn_metrics_scrape_interval} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} --metrics-enable-pprof &
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master
@@ -954,6 +961,7 @@ ovn-node() {
     ${ovn_node_ssl_opts} \
     --inactivity-probe=${ovn_remote_probe_interval} \
     ${multicast_enabled_flag} \
+    --metrics-interval ${ovn_metrics_scrape_interval} \
     --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
     --metrics-bind-address ${ovnkube_node_metrics_bind_address} --metrics-enable-pprof &
 
@@ -1028,6 +1036,7 @@ ovs-metrics() {
   /usr/bin/ovn-kube-util \
     --loglevel=${ovnkube_loglevel} \
     ovs-exporter \
+    --metrics-interval ${ovs_metrics_scrape_interval} \
     --metrics-bind-address ${ovs_exporter_bind_address}
 
   echo "=============== ovs-metrics with pid ${?} terminated ========== "

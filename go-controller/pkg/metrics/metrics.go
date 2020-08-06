@@ -122,9 +122,9 @@ func getCoverageShowOutputMap(component string) (map[string]string, error) {
 
 // coverageShowMetricsUpdater updates the metric
 // by obtaining values from getCoverageShowOutputMap for specified component.
-func coverageShowMetricsUpdater(component string) {
+func coverageShowMetricsUpdater(component string, metricsScrapeInterval int) {
 	for {
-		time.Sleep(30 * time.Second)
+		time.Sleep(time.Duration(metricsScrapeInterval) * time.Second)
 		coverageShowOutputMap, err := getCoverageShowOutputMap(component)
 		if err != nil {
 			klog.Errorf("%s", err.Error())
@@ -212,8 +212,8 @@ func StartOVNMetricsServer(bindAddress string) {
 	}, 5*time.Second, utilwait.NeverStop)
 }
 
-func RegisterOvnMetrics(clientset *kubernetes.Clientset, k8sNodeName string) {
-	go RegisterOvnDBMetrics(clientset, k8sNodeName)
-	go RegisterOvnControllerMetrics()
-	go RegisterOvnNorthdMetrics(clientset, k8sNodeName)
+func RegisterOvnMetrics(clientset *kubernetes.Clientset, k8sNodeName string, metricsScrapeInterval int) {
+	go RegisterOvnDBMetrics(clientset, k8sNodeName, metricsScrapeInterval)
+	go RegisterOvnControllerMetrics(metricsScrapeInterval)
+	go RegisterOvnNorthdMetrics(clientset, k8sNodeName, metricsScrapeInterval)
 }
