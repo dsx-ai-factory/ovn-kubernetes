@@ -97,14 +97,14 @@ func TestSetExec(t *testing.T) {
 			desc:         "positive, test when 'runner' is nil",
 			expectedErr:  nil,
 			onRetArgs:    &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"ip", nil}},
-			fnCallTimes:  9,
+			fnCallTimes:  10,
 			setRunnerNil: true,
 		},
 		{
 			desc:         "positive, test when 'runner' is not nil",
 			expectedErr:  nil,
 			onRetArgs:    &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"", nil}},
-			fnCallTimes:  9,
+			fnCallTimes:  10,
 			setRunnerNil: false,
 		},
 	}
