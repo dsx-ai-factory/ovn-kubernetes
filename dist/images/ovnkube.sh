@@ -924,6 +924,10 @@ ovn-node() {
     fi
   fi
 
+  echo "=============== ovn-node - disable conntrack on geneve port $ovn_encap_port"
+  iptables -t raw -A PREROUTING -p udp --dport $ovn_encap_port -j NOTRACK
+  iptables -t raw -A OUTPUT -p udp --dport $ovn_encap_port -j NOTRACK
+
   local ovn_node_ssl_opts=""
   [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
     ovn_node_ssl_opts="
