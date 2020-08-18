@@ -68,6 +68,7 @@ fi
 # OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
 # OVN_METRICS_SCRAPE_INTERVAL - ovn & ovnkube metrics scrape interval in sec (default 30)
 # OVS_METRICS_SCRAPE_INTERVAL - ovs metrics scrape interval in sec (default 30)
+# OVN_UNPRIVILEGED_MODE - redirect execution of CNI ovs/netns commands to host (default no)
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -941,12 +942,17 @@ ovn-node() {
   ovn_metrics_bind_address="${metrics_endpoint_ip}:9476"
   ovnkube_node_metrics_bind_address="${metrics_endpoint_ip}:9410"
 
+  ovn_unprivileged_flag="--unprivileged-mode"
+  if test -z "${OVN_UNPRIVILEGED_MODE+x}" -o "x${OVN_UNPRIVILEGED_MODE}" = xno; then
+    ovn_unprivileged_flag=""
+  fi
+
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
     ${OVN_NODE_PORT} \
-    --unprivileged-mode \
+    ${ovn_unprivileged_flag} \
     --mtu=${mtu} \
     ${OVN_ENCAP_IP} \
     --loglevel=${ovnkube_loglevel} \
