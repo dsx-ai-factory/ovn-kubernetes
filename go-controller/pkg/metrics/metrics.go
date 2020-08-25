@@ -34,6 +34,8 @@ const (
 	ovnNorthd     = "ovn-northd"
 	ovnController = "ovn-controller"
 	ovsVswitchd   = "ovs-vswitchd"
+	ovnNorthDB    = "ovnnb-db"
+	ovnSouthDB    = "ovnsb-db"
 )
 
 // Build information. Populated at build-time.
@@ -100,9 +102,12 @@ func getCoverageShowOutputMap(component string) (map[string]string, error) {
 		stdout, stderr, err = util.RunOVNNorthAppCtl("coverage/show")
 	} else if component == ovsVswitchd {
 		stdout, stderr, err = util.RunOvsVswitchdAppCtl("coverage/show")
+	} else if component == ovnNorthDB {
+		stdout, stderr, err = util.RunOVNNBAppCtl("coverage/show")
+	} else if component == ovnSouthDB {
+		stdout, stderr, err = util.RunOVNSBAppCtl("coverage/show")
 	} else {
-		return nil, fmt.Errorf("component is unknown, and it isn't %s, %s, or %s",
-			ovnNorthd, ovnController, ovsVswitchd)
+		return nil, fmt.Errorf("unknown coverage/show component: %s", component)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get coverage/show output for %s "+

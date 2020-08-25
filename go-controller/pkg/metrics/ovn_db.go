@@ -18,6 +18,47 @@ const (
 	dbHealthScrapeInterval = 120
 )
 
+var ovnDbCoverageShowMetricsMap = map[string]*metricDetails{
+	"hmap_pathological": {
+		help: "Registering how many hash map resize calls has been " +
+			"made that resulted in copying buckets with 6+ nodes (collision factor)",
+	},
+	"hmap_expand": {
+		help: "Registering how many hash map resizes so far has been made",
+	},
+	"lockfile_lock": {
+		help: "Registering how many expensive file locking has been made",
+	},
+	"poll_create_node": {
+		help: "How many scheduled events to wake up blocking poller (event loop busy factor)",
+	},
+	"poll_zero_timeout": {
+		help: "How many scheduled events were processed without timeout (event loop effectiveness)",
+	},
+	"seq_change": {
+		help: "Registering intensity of new objects creations",
+	},
+	"pstream_open": {
+		help: "Specifies the number of time passive connections " +
+			"were opened for the remote peer to connect.",
+	},
+	"stream_open": {
+		help: "Specifies the number of attempts to connect " +
+			"to a remote peer (active connection).",
+	},
+	"unixctl_received": {
+		help: "Another metric that shows how many JSON RPC requests " +
+			"actually received in OVSDB server",
+	},
+	"unixctl_replied": {
+		help: "Metric showing to how many of received JSON RPC requests " +
+			"OVSDB server actually replied",
+	},
+	"util_xalloc": {
+		help: "Registering intensity of memory allocations in OVSDB server",
+	},
+}
+
 var metricOVNDBSessions = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Namespace: MetricOvnNamespace,
 	Subsystem: MetricOvnSubsystemDB,
@@ -445,6 +486,27 @@ func RegisterOvnDBMetrics(clientset *kubernetes.Clientset, k8sNodeName string,
 	}
 	if dbIsClustered {
 		ovnRegistry.MustRegister(metricDBHealthStatus)
+
+		// Register the ovn*_db coverage/show metrics with prometheus
+		metricDbMap := map[string]string{
+			ovnNorthDB: "OVN_Northbound",
+			ovnSouthDB: "OVN_Southbound",
+		}
+		for dbType, database := range metricDbMap {
+			componentCoverageShowMetricsMap[dbType] = ovnDbCoverageShowMetricsMap
+			for metricName, metricInfo := range ovnDbCoverageShowMetricsMap {
+				metricInfo.metric = prometheus.NewGauge(prometheus.GaugeOpts{
+					Namespace:   MetricOvnNamespace,
+					Subsystem:   MetricOvnSubsystemDB,
+					Name:        metricName,
+					Help:        metricInfo.help,
+					ConstLabels: map[string]string{"db_name": database},
+				})
+				prometheus.MustRegister(metricInfo.metric)
+			}
+			go coverageShowMetricsUpdater(dbType, metricsScrapeInterval, stopChan)
+		}
+
 		ovnRegistry.MustRegister(metricDBClusterCID)
 		ovnRegistry.MustRegister(metricDBClusterSID)
 		ovnRegistry.MustRegister(metricDBClusterServerStatus)
