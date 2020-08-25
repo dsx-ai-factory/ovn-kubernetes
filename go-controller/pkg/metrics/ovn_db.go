@@ -403,7 +403,7 @@ func getOvnDbVersionInfo() {
 func RegisterOvnDBMetrics(clientset *kubernetes.Clientset, k8sNodeName string,
 	metricsScrapeInterval int, stopChan chan struct{}) {
 	err := wait.PollImmediate(1*time.Second, 300*time.Second, func() (bool, error) {
-		return checkPodRunsOnGivenNode(clientset, "name in (ovn-nbdb, ovn-sbdb)", k8sNodeName, false)
+		return checkPodRunsOnGivenNode(clientset, "name in (ovn-nbdb, ovn-sbdb, ovnkube-db)", k8sNodeName, false)
 	})
 	if err != nil {
 		if err == wait.ErrWaitTimeout {
