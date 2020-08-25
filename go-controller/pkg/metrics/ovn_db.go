@@ -14,6 +14,10 @@ import (
 	"k8s.io/klog"
 )
 
+const (
+	dbHealthScrapeInterval = 120
+)
+
 var metricOVNDBSessions = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Namespace: MetricOvnNamespace,
 	Subsystem: MetricOvnSubsystemDB,
@@ -41,6 +45,19 @@ var metricDBSize = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Help:      "The size of the database file associated with the OVN DB component."},
 	[]string{
 		"db_name",
+	},
+)
+
+var metricDBHealthStatus = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Namespace: MetricOvnNamespace,
+	Subsystem: MetricOvnSubsystemDB,
+	Name:      "raft_health_status",
+	Help: "Health status of a raft database file associated with OVN DB component as " +
+		"reported by ovsdb-tool check-cluster"},
+	[]string{
+		"db_name",
+		"db_status",
+		"db_info",
 	},
 )
 
@@ -261,6 +278,40 @@ func ovnDBSizeMetricsUpdater(direction, database string) {
 	metricDBSize.WithLabelValues(database).Set(float64(fileInfo.Size()))
 }
 
+// check for OVSDB health status, report error and warning
+//
+// Details:
+// `ovsdb-tool check-cluster DB` command detects unusual but not necessarily incorrect content,
+// it prints a warning or warnings on stdout. If it finds consistency errors,
+// it prints an error on stderr and exits with status 1
+//
+func ovnDBHealthStatusUpdater(direction, database string) {
+	dbFile := fmt.Sprintf("/etc/ovn/ovn%s_db.db", direction)
+	_, err := os.Stat(dbFile)
+	if err != nil {
+		return
+	}
+
+	successCode := 2.0
+	status := "ok"
+	info := ""
+
+	stdout, stderr, err := util.RunOVSDBTool("check-cluster", dbFile)
+	if err != nil {
+		klog.Errorf("Failed to check DB health status for database %s: %v", database, err)
+		status = "error"
+		info = stderr
+		successCode = 0
+	} else if len(stdout) != 0 {
+		klog.Warningf("DB health status for database %s detected unusual content: %s", database, stdout)
+		status = "warning"
+		info = stdout
+		successCode = 1
+	}
+
+	metricDBHealthStatus.WithLabelValues(database, status, info).Set(successCode)
+}
+
 func ovnE2eTimeStampUpdater(direction, database string) {
 	var stdout, stderr string
 	var err error
@@ -393,6 +444,7 @@ func RegisterOvnDBMetrics(clientset *kubernetes.Clientset, k8sNodeName string,
 		dbIsClustered = false
 	}
 	if dbIsClustered {
+		ovnRegistry.MustRegister(metricDBHealthStatus)
 		ovnRegistry.MustRegister(metricDBClusterCID)
 		ovnRegistry.MustRegister(metricDBClusterSID)
 		ovnRegistry.MustRegister(metricDBClusterServerStatus)
@@ -419,6 +471,8 @@ func RegisterOvnDBMetrics(clientset *kubernetes.Clientset, k8sNodeName string,
 		}
 		ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
 		defer ticker.Stop()
+		tickerDbHealth := time.NewTicker(time.Duration(dbHealthScrapeInterval) * time.Second)
+		defer tickerDbHealth.Stop()
 
 		for {
 			select {
@@ -430,6 +484,12 @@ func RegisterOvnDBMetrics(clientset *kubernetes.Clientset, k8sNodeName string,
 					ovnDBMemoryMetricsUpdater(direction, database)
 					ovnDBSizeMetricsUpdater(direction, database)
 					ovnE2eTimeStampUpdater(direction, database)
+				}
+			case <-tickerDbHealth.C:
+				if dbIsClustered {
+					for direction, database := range dirDbMap {
+						ovnDBHealthStatusUpdater(direction, database)
+					}
 				}
 			case <-stopChan:
 				return

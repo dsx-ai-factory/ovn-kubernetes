@@ -537,7 +537,7 @@ func RunOVSDBClient(args ...string) (string, string, error) {
 // RunOVSDBTool runs an 'ovsdb-tool [OPTIONS] COMMAND [ARG...] command'.
 func RunOVSDBTool(args ...string) (string, string, error) {
 	stdout, stderr, err := run(runner.ovsdbToolPath, args...)
-	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
+	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), strings.TrimSpace(stderr.String()), err
 }
 
 // RunOVSDBClientOVN runs an 'ovsdb-client [OPTIONS] COMMAND [SERVER] [ARG...] command' against OVN NB database.
