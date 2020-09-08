@@ -74,10 +74,11 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 			"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
 	}
 
-	stdout, stderr, err = util.RunOVNNbctl("set", "logical_router",
-		gatewayRouter, "options:learn_from_arp_request=false")
+	stdout, stderr, err = util.RunOVNNbctl(
+		"--", "--if-exists", "remove", "logical_router", gatewayRouter, "options", "learn_from_arp_request",
+		"--", "set", "logical_router", gatewayRouter, "options:always_learn_from_arp_request=false")
 	if err != nil {
-		return fmt.Errorf("failed to set logical router %s's learn_from_arp_request "+
+		return fmt.Errorf("failed to set logical router %s's always_learn_from_arp_request "+
 			"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
 	}
 
