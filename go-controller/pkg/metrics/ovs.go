@@ -19,6 +19,48 @@ var (
 	ovsVersion string
 )
 
+// ovs local db coverage/show metrics
+var ovsDbCoverageShowMetricsMap = map[string]*metricDetails{
+	"hmap_pathological": {
+		help: "Registering how many hash map resize calls has been " +
+			"made that resulted in copying buckets with 6+ nodes (collision factor)",
+	},
+	"hmap_expand": {
+		help: "Registering how many hash map resizes so far has been made",
+	},
+	"lockfile_lock": {
+		help: "Registering how many expensive file locking has been made",
+	},
+	"poll_create_node": {
+		help: "How many scheduled events to wake up blocking poller (event loop busy factor)",
+	},
+	"poll_zero_timeout": {
+		help: "How many scheduled events were processed without timeout (event loop effectiveness)",
+	},
+	"seq_change": {
+		help: "Registering intensity of new objects creations",
+	},
+	"pstream_open": {
+		help: "Specifies the number of time passive connections " +
+			"were opened for the remote peer to connect.",
+	},
+	"stream_open": {
+		help: "Specifies the number of attempts to connect " +
+			"to a remote peer (active connection).",
+	},
+	"unixctl_received": {
+		help: "Another metric that shows how many JSON RPC requests " +
+			"actually received in OVSDB server",
+	},
+	"unixctl_replied": {
+		help: "Metric showing to how many of received JSON RPC requests " +
+			"OVSDB server actually replied",
+	},
+	"util_xalloc": {
+		help: "Registering intensity of memory allocations in OVSDB server",
+	},
+}
+
 // ovs datapath Metrics
 var metricOvsDpTotal = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: MetricOvsNamespace,
@@ -1265,6 +1307,9 @@ func RegisterOvsMetrics(metricsScrapeInterval int, stopChan chan struct{}) {
 		// Register the OVS coverage/show metrics
 		componentCoverageShowMetricsMap[ovsVswitchd] = ovsVswitchdCoverageShowMetricsMap
 		registerCoverageShowMetrics(ovsVswitchd, MetricOvsNamespace, MetricOvsSubsystemVswitchd)
+		// Register OVSDB coverage/show metrics with prometheus
+		componentCoverageShowMetricsMap[ovsDB] = ovsDbCoverageShowMetricsMap
+		registerCoverageShowMetrics(ovsDB, MetricOvsNamespace, MetricOvsSubsystemOvsDB)
 
 		// OVS datapath metrics updater
 		go ovsDatapathMetricsUpdate(metricsScrapeInterval, stopChan)
@@ -1276,5 +1321,7 @@ func RegisterOvsMetrics(metricsScrapeInterval int, stopChan chan struct{}) {
 		go ovsHwOffloadMetricsUpdate(metricsScrapeInterval, stopChan)
 		// OVS coverage/show metrics updater.
 		go coverageShowMetricsUpdater(ovsVswitchd, metricsScrapeInterval, stopChan)
+		// OVSDB coverage/show metrics updater
+		go coverageShowMetricsUpdater(ovsDB, metricsScrapeInterval, stopChan)
 	})
 }

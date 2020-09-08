@@ -633,6 +633,22 @@ func RunOvsVswitchdAppCtl(args ...string) (string, string, error) {
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
+// RunOvsDbServerAppCtl runs an 'ovs-appctl -t /var/run/openvswitch/ovsdb-server.pid.ctl command'
+func RunOvsDbServerAppCtl(args ...string) (string, string, error) {
+	var cmdArgs []string
+	pid, err := ioutil.ReadFile(savedOVSRunDir + "ovsdb-server.pid")
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get ovsdb-server pid : %v", err)
+	}
+	cmdArgs = []string{
+		"-t",
+		savedOVSRunDir + fmt.Sprintf("ovsdb-server.%s.ctl", strings.TrimSpace(string(pid))),
+	}
+	cmdArgs = append(cmdArgs, args...)
+	stdout, stderr, err := runOVNretry(runner.appctlPath, nil, cmdArgs...)
+	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
+}
+
 // RunIP runs a command via the iproute2 "ip" utility
 func RunIP(args ...string) (string, string, error) {
 	stdout, stderr, err := run(runner.ipPath, args...)
