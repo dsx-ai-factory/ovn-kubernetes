@@ -30,10 +30,12 @@ const (
 	MetricOvnSubsystemController = "controller"
 	MetricOvsNamespace           = "ovs"
 	MetricOvsSubsystemVswitchd   = "vswitchd"
+	MetricOvsSubsystemOvsDB      = "ovsdb"
 
 	ovnNorthd     = "ovn-northd"
 	ovnController = "ovn-controller"
 	ovsVswitchd   = "ovs-vswitchd"
+	ovsDB         = "ovs-db"
 	ovnNorthDB    = "ovnnb-db"
 	ovnSouthDB    = "ovnsb-db"
 )
@@ -71,16 +73,27 @@ func parseMetricToFloat(componentName, metricName, value string) float64 {
 
 // registerCoverageShowMetrics registers coverage/show metricss for
 // various components(ovn-northd, ovn-controller, and ovs-vswitchd) with prometheus
-func registerCoverageShowMetrics(target string, metricNamespace string, metricSubsystem string) {
+func registerCoverageShowMetrics(target string, metricNamespace string, metricSubsystem string, constLabelsOpts ...map[string]string) {
 	coverageShowMetricsMap := componentCoverageShowMetricsMap[target]
 	for metricName, metricInfo := range coverageShowMetricsMap {
+		constLabels := make(map[string]string)
+		for _, pairs := range constLabelsOpts {
+			for k, v := range pairs {
+				constLabels[k] = v
+			}
+		}
 		metricInfo.metric = prometheus.NewGauge(prometheus.GaugeOpts{
-			Namespace: metricNamespace,
-			Subsystem: metricSubsystem,
-			Name:      metricName,
-			Help:      metricInfo.help,
+			Namespace:   metricNamespace,
+			Subsystem:   metricSubsystem,
+			Name:        metricName,
+			Help:        metricInfo.help,
+			ConstLabels: constLabels,
 		})
-		prometheus.MustRegister(metricInfo.metric)
+		if target == ovsVswitchd || target == ovsDB {
+			prometheus.MustRegister(metricInfo.metric)
+		} else {
+			ovnRegistry.MustRegister(metricInfo.metric)
+		}
 	}
 }
 
@@ -102,6 +115,8 @@ func getCoverageShowOutputMap(component string) (map[string]string, error) {
 		stdout, stderr, err = util.RunOVNNorthAppCtl("coverage/show")
 	} else if component == ovsVswitchd {
 		stdout, stderr, err = util.RunOvsVswitchdAppCtl("coverage/show")
+	} else if component == ovsDB {
+		stdout, stderr, err = util.RunOvsDbServerAppCtl("coverage/show")
 	} else if component == ovnNorthDB {
 		stdout, stderr, err = util.RunOVNNBAppCtl("coverage/show")
 	} else if component == ovnSouthDB {
