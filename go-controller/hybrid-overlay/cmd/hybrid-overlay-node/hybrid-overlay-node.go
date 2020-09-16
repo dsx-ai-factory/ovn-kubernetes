@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/urfave/cli/v2"
@@ -22,9 +23,12 @@ import (
 
 var nodeName string
 
+const windowServiceArgName = "windows-service"
+const appName = "hybrid-overlay-node"
+
 func main() {
 	c := cli.NewApp()
-	c.Name = "hybrid-overlay-node"
+	c.Name = appName
 	c.Usage = "a node controller to integrate disparate networks with VXLAN tunnels"
 	c.Version = config.Version
 	c.Flags = config.GetFlags([]cli.Flag{
@@ -32,19 +36,35 @@ func main() {
 			Name:        "node",
 			Usage:       "The name of this node in the Kubernetes cluster.",
 			Destination: &nodeName,
+		},
+		&cli.BoolFlag{
+			Name:  windowServiceArgName,
+			Usage: "Enables hybrid overlay to run as a Windows service. Ignored on Linux.",
 		}})
+
+	ctx := context.Background()
+
 	c.Action = func(c *cli.Context) error {
+		if err := initForOS(c, ctx); err != nil {
+			klog.Exit(err)
+		}
+
 		if err := runHybridOverlay(c); err != nil {
 			panic(err.Error())
 		}
 		return nil
 	}
 
-	ctx := context.Background()
+	if err := c.RunContext(ctx, os.Args); err != nil {
+		klog.Exit(err)
+	}
+}
+
+func signalHandler(c context.Context) {
+	ctx, cancel := context.WithCancel(c)
 
 	// trap SIGHUP, SIGINT, SIGTERM, SIGQUIT and
 	// cancel the context
-	ctx, cancel := context.WithCancel(ctx)
 	exitCh := make(chan os.Signal, 1)
 	signal.Notify(exitCh,
 		syscall.SIGHUP,
@@ -63,10 +83,6 @@ func main() {
 		case <-ctx.Done():
 		}
 	}()
-
-	if err := c.RunContext(ctx, os.Args); err != nil {
-		klog.Exit(err)
-	}
 }
 
 func runHybridOverlay(ctx *cli.Context) error {
@@ -83,7 +99,7 @@ func runHybridOverlay(ctx *cli.Context) error {
 		return fmt.Errorf("missing node name; use the 'node' flag to provide one")
 	}
 
-	clientset, err := util.NewClientset(&config.Kubernetes)
+	clientset, _, _, _, err := util.NewClientsets(&config.Kubernetes)
 	if err != nil {
 		return err
 	}
@@ -103,15 +119,16 @@ func runHybridOverlay(ctx *cli.Context) error {
 	}
 
 	f.Start(stopChan)
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
 	go func() {
-		err := n.Run(stopChan)
-		if err != nil {
-			klog.Error(err)
-		}
+		defer wg.Done()
+		n.Run(stopChan)
 	}()
 
 	// run until cancelled
 	<-ctx.Context.Done()
 	close(stopChan)
+	wg.Wait()
 	return nil
 }

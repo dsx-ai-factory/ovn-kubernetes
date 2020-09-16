@@ -68,7 +68,8 @@ fi
 # OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
 # OVN_METRICS_SCRAPE_INTERVAL - ovn & ovnkube metrics scrape interval in sec (default 30)
 # OVS_METRICS_SCRAPE_INTERVAL - ovs metrics scrape interval in sec (default 30)
-# OVN_UNPRIVILEGED_MODE - redirect execution of CNI ovs/netns commands to host (default no)
+# OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
+# OVN_UNPRIVILEGED_MODE - execute CNI ovs/netns commands from host (default no)
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -187,6 +188,9 @@ ovn_multicast_enable=${OVN_MULTICAST_ENABLE:-}
 ovn_metrics_scrape_interval=${OVN_METRICS_SCRAPE_INTERVAL:-30}
 # OVS_METRICS_SCRAPE_INTERVAL - metrics scrape interval in sec (default 30)
 ovs_metrics_scrape_interval=${OVS_METRICS_SCRAPE_INTERVAL:-30}
+ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-}
+#OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
+ovn_egressip_enable=${OVN_EGRESSIP_ENABLE:-false}
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
@@ -792,6 +796,10 @@ ovn-master() {
       hybrid_overlay_flags="${hybrid_overlay_flags} --hybrid-overlay-cluster-subnets=${ovn_hybrid_overlay_net_cidr}"
     fi
   fi
+  disable_snat_multiple_gws_flag=
+  if [[ ${ovn_disable_snat_multiple_gws} == "true" ]]; then
+      disable_snat_multiple_gws_flag="--disable-snat-multiple-gws"
+  fi
   local ovn_master_ssl_opts=""
   [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
     ovn_master_ssl_opts="
@@ -812,6 +820,11 @@ ovn-master() {
   fi
 
   ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:9409"
+  egressip_enabled_flag=
+  if [[ ${ovn_egressip_enable} == "true" ]]; then
+      egressip_enabled_flag="--enable-egress-ip"
+  fi
+
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
     --init-master ${K8S_NODE} \
@@ -824,10 +837,12 @@ ovn-master() {
     --logfile-maxbackups=${ovnkube_logfile_maxbackups} \
     --logfile-maxage=${ovnkube_logfile_maxage} \
     ${hybrid_overlay_flags} \
+    ${disable_snat_multiple_gws_flag} \
     --pidfile ${OVN_RUNDIR}/ovnkube-master.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
     ${ovn_master_ssl_opts} \
     ${multicast_enabled_flag} \
+    ${egressip_enabled_flag} \
     --metrics-interval ${ovn_metrics_scrape_interval} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} --metrics-enable-pprof &
   echo "=============== ovn-master ========== running"
@@ -910,10 +925,19 @@ ovn-node() {
   if [[ $? == 0 && "${ovn_node_port}" == "false" ]]; then
     OVN_NODE_PORT=""
   fi
+  disable_snat_multiple_gws_flag=
+  if [[ ${ovn_disable_snat_multiple_gws} == "true" ]]; then
+      disable_snat_multiple_gws_flag="--disable-snat-multiple-gws"
+  fi
 
   multicast_enabled_flag=
   if [[ ${ovn_multicast_enable} == "true" ]]; then
       multicast_enabled_flag="--enable-multicast"
+  fi
+
+  egressip_enabled_flag=
+  if [[ ${ovn_egressip_enable} == "true" ]]; then
+      egressip_enabled_flag="--enable-egress-ip"
   fi
   
   OVN_ENCAP_IP=""
@@ -965,12 +989,14 @@ ovn-node() {
     --logfile-maxbackups=${ovnkube_logfile_maxbackups} \
     --logfile-maxage=${ovnkube_logfile_maxage} \
     ${hybrid_overlay_flags} \
+    ${disable_snat_multiple_gws_flag} \
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
     --pidfile ${OVN_RUNDIR}/ovnkube.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube.log \
     ${ovn_node_ssl_opts} \
     --inactivity-probe=${ovn_remote_probe_interval} \
     ${multicast_enabled_flag} \
+    ${egressip_enabled_flag} \
     --metrics-interval ${ovn_metrics_scrape_interval} \
     --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
     --metrics-bind-address ${ovnkube_node_metrics_bind_address} --metrics-enable-pprof &

@@ -89,6 +89,9 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 set logical_router GR_test-node load_balancer=" + tcpLBUUID + "," + udpLBUUID,
+			"ovn-nbctl --timeout=15 get logical_switch test-node load_balancer",
+			"ovn-nbctl --timeout=15 ls-lb-add test-node " + tcpLBUUID,
+			"ovn-nbctl --timeout=15 ls-lb-add test-node " + udpLBUUID,
 		})
 
 		fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -129,10 +132,12 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		err := util.SetExec(fexec)
 		Expect(err).NotTo(HaveOccurred())
 
+		// 0a:58:ee:33:fc:1a generated from util.IPAddrToHWAddr(net.ParseIP("fd98::1")).String()
+		// 0a:58:5f:8a:48:8c generated from util.IPAddrToHWAddr(net.ParseIP("fd98::2")).String()
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 -- --may-exist lr-add GR_test-node -- set logical_router GR_test-node options:chassis=SYSTEM-ID external_ids:physical_ip=fd99::2 external_ids:physical_ips=fd99::2",
 			"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + ovnJoinSwitch + " jtor-GR_test-node -- set logical_switch_port jtor-GR_test-node type=router options:router-port=rtoj-GR_test-node addresses=router",
-			"ovn-nbctl --timeout=15 -- --if-exists lrp-del rtoj-GR_test-node -- lrp-add GR_test-node rtoj-GR_test-node 0a:58:fd:98:00:03 fd98::3/64",
+			"ovn-nbctl --timeout=15 -- --if-exists lrp-del rtoj-GR_test-node -- lrp-add GR_test-node rtoj-GR_test-node 0a:58:87:f0:33:ca fd98::3/64",
 			"ovn-nbctl --timeout=15 set logical_router GR_test-node options:lb_force_snat_ip=fd98::3",
 			"ovn-nbctl --timeout=15 set logical_router GR_test-node options:learn_from_arp_request=false",
 			"ovn-nbctl --timeout=15 set logical_router GR_test-node options:dynamic_neigh_routers=true",
@@ -157,6 +162,9 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 set logical_router GR_test-node load_balancer=" + tcpLBUUID + "," + udpLBUUID,
+			"ovn-nbctl --timeout=15 get logical_switch test-node load_balancer",
+			"ovn-nbctl --timeout=15 ls-lb-add test-node " + tcpLBUUID,
+			"ovn-nbctl --timeout=15 ls-lb-add test-node " + udpLBUUID,
 		})
 
 		fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -225,6 +233,9 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 set logical_router GR_test-node load_balancer=" + tcpLBUUID + "," + udpLBUUID,
+			"ovn-nbctl --timeout=15 get logical_switch test-node load_balancer",
+			"ovn-nbctl --timeout=15 ls-lb-add test-node " + tcpLBUUID,
+			"ovn-nbctl --timeout=15 ls-lb-add test-node " + udpLBUUID,
 		})
 
 		fexec.AddFakeCmdsNoOutputNoError([]string{

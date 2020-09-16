@@ -37,7 +37,7 @@ spec:
       # as all pods.
       serviceAccountName: ovn
       hostNetwork: true
-      {% if ovn_unprivileged_mode is defined and ovn_unprivileged_mode=="no" -%}
+      {% if ovn_unprivileged_mode=="no" -%}
       hostPID: true
       {% endif %}
       priorityClassName: "system-node-critical"
@@ -106,7 +106,7 @@ spec:
 
         securityContext:
           runAsUser: 0
-          {% if ovn_unprivileged_mode is defined and ovn_unprivileged_mode=="no" -%}
+          {% if ovn_unprivileged_mode=="no" -%}
           privileged: true
           {% else -%}
           capabilities:
@@ -197,8 +197,12 @@ spec:
           value: "{{ ovn_gateway_opts }}"
         - name: OVN_HYBRID_OVERLAY_ENABLE
           value: "{{ ovn_hybrid_overlay_enable }}"
+        - name: OVN_EGRESSIP_ENABLE
+          value: "{{ ovn_egress_ip_enable }}"
         - name: OVN_HYBRID_OVERLAY_NET_CIDR
           value: "{{ ovn_hybrid_overlay_net_cidr }}"
+        - name: OVN_DISABLE_SNAT_MULTIPLE_GWS
+          value: "{{ ovn_disable_snat_multiple_gws }}"
         - name: OVN_SSL_ENABLE
           value: "{{ ovn_ssl_en }}"
         - name: OVN_REMOTE_PROBE_INTERVAL

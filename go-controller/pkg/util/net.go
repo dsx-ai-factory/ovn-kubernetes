@@ -1,10 +1,11 @@
 package util
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"math/big"
 	"net"
-	"runtime"
 	"strconv"
 	"strings"
 
@@ -27,6 +28,54 @@ func ipToInt(ip net.IP) *big.Int {
 
 func intToIP(i *big.Int) net.IP {
 	return net.IP(i.Bytes())
+}
+
+// IPToUint32 returns a uint32 of an IPv4/IPv6 string
+func IPToUint32(egressIP string) uint32 {
+	ip := net.ParseIP(egressIP)
+	if utilnet.IsIPv6(ip) {
+		// This can obviously not be done for IPv6. But the logic here is:
+		// "allow users to create IPv6 egress IP addresses with a 1/(2^32)
+		// probability that they might collide. Or just use shared gateway
+		// mode, and live without this risk."
+		return binary.BigEndian.Uint32(ip[12:16])
+	}
+	return binary.BigEndian.Uint32(ip)
+}
+
+// GetNodeLogicalRouterIP returns the IPs (IPv4 and/or IPv6) of the provided node's logical router
+// Expected output from the ovn-nbctl command, which will need to be parsed is:
+// "chassis=939391b7-b4b3-4c3a-b9a9-665103ee13b5 lb_force_snat_ip=100.64.0.1"
+func GetNodeLogicalRouterIP(nodeName string) (net.IP, net.IP, error) {
+	stdout, _, err := RunOVNNbctl(
+		"--data=bare",
+		"--format=table",
+		"--no-heading",
+		"--columns=options",
+		"find", "logical_router",
+		fmt.Sprintf("name=GR_%s", nodeName),
+		"options:lb_force_snat_ip!=-",
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("unable to retrieve the logical router for node: %s, err: %v", nodeName, err)
+	}
+	var ipV4, ipV6 net.IP
+	tag := "lb_force_snat_ip="
+	for _, p := range strings.Fields(stdout) {
+		if strings.HasPrefix(p, tag) {
+			ipStr := p[len(tag):]
+			if ip := net.ParseIP(ipStr); ip != nil {
+				if utilnet.IsIPv6(ip) {
+					ipV6 = ip
+				} else {
+					ipV4 = ip
+				}
+			} else {
+				return nil, nil, fmt.Errorf("failed to parse gateway router %q IP %q", p, ipStr)
+			}
+		}
+	}
+	return ipV4, ipV6, nil
 }
 
 // GetPortAddresses returns the MAC and IPs of the given logical switch port
@@ -110,16 +159,6 @@ func GetOVSPortMACAddress(portName string) (net.HardwareAddr, error) {
 	if macAddress == "[]" {
 		return nil, fmt.Errorf("no mac_address found for %q", portName)
 	}
-	if runtime.GOOS == windowsOS && macAddress == "00:00:00:00:00:00" {
-		// There is a known issue with OVS not correctly picking up the
-		// physical network interface MAC address.
-		stdout, stderr, err := RunPowershell("$(Get-NetAdapter", "-IncludeHidden",
-			"-InterfaceAlias", fmt.Sprintf("\"%s\"", portName), ").MacAddress")
-		if err != nil {
-			return nil, fmt.Errorf("failed to get mac address of %q, stderr: %q, error: %v", portName, stderr, err)
-		}
-		macAddress = stdout
-	}
 	return net.ParseMAC(macAddress)
 }
 
@@ -149,8 +188,8 @@ func JoinHostPortInt32(host string, port int32) string {
 }
 
 // IPAddrToHWAddr takes the four octets of IPv4 address (aa.bb.cc.dd, for example) and uses them in creating
-// a MAC address (0A:58:AA:BB:CC:DD).  For IPv6, we'll use the first two bytes and last two bytes and hope
-// that results in a unique MAC for the scope of where it's used.
+// a MAC address (0A:58:AA:BB:CC:DD).  For IPv6, create a hash from the IPv6 string and use that for MAC Address.
+// Assumption: the caller will ensure that an empty net.IP{} will NOT be passed.
 func IPAddrToHWAddr(ip net.IP) net.HardwareAddr {
 	// Ensure that for IPv4, we are always working with the IP in 4-byte form.
 	ip4 := ip.To4()
@@ -159,8 +198,8 @@ func IPAddrToHWAddr(ip net.IP) net.HardwareAddr {
 		return net.HardwareAddr{0x0A, 0x58, ip4[0], ip4[1], ip4[2], ip4[3]}
 	}
 
-	// IPv6 - use the first two and last two bytes.
-	return net.HardwareAddr{0x0A, 0x58, ip[0], ip[1], ip[14], ip[15]}
+	hash := sha256.Sum256([]byte(ip.String()))
+	return net.HardwareAddr{0x0A, 0x58, hash[0], hash[1], hash[2], hash[3]}
 }
 
 // JoinIPs joins the string forms of an array of net.IP, as with strings.Join

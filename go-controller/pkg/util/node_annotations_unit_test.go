@@ -2,10 +2,11 @@ package util
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/mock"
 	"net"
 	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/mock"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -109,8 +110,12 @@ func TestL3GatewayConfig_UnmarshalJSON(t *testing.T) {
 		},
 		{
 			desc:       "error: test bad VLANID input",
-			inputParam: []byte(`{"mode":"local","vlan-id":"A"}`),
+			inputParam: []byte(`{"mode":"shared","vlan-id":"A"}`),
 			errMatch:   fmt.Errorf("bad 'vlan-id' value"),
+		},
+		{desc: "error: test VLANID is supported only in shared gateway mode",
+			inputParam: []byte(`{"mode":"local","vlan-id":"223"}`),
+			errMatch:   fmt.Errorf("vlan-id is supported only in shared gateway mode"),
 		},
 		{
 			desc:       "success: test valid VLANID input",

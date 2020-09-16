@@ -2,17 +2,18 @@ package ovn
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"os"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
@@ -20,7 +21,8 @@ import (
 	"k8s.io/klog"
 	utilnet "k8s.io/utils/net"
 
-	homaster "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
+	goovn "github.com/ebay/go-ovn"
+	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
@@ -30,7 +32,9 @@ import (
 const (
 	// OvnServiceIdledAt is a constant string representing the Service annotation key
 	// whose value indicates the time stamp in RFC3339 format when a Service was idled
-	OvnServiceIdledAt = "k8s.ovn.org/idled-at"
+	OvnServiceIdledAt              = "k8s.ovn.org/idled-at"
+	OvnNodeAnnotationRetryInterval = 100 * time.Millisecond
+	OvnNodeAnnotationRetryTimeout  = 1 * time.Second
 )
 
 type ovnkubeMasterLeaderMetrics struct{}
@@ -50,7 +54,7 @@ func (_ ovnkubeMasterLeaderMetricsProvider) NewLeaderMetric() leaderelection.Swi
 }
 
 // Start waits until this process is the leader before starting master functions
-func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string) error {
+func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string, wg *sync.WaitGroup) error {
 	// Set up leader election process first
 	rl, err := resourcelock.New(
 		resourcelock.ConfigMapsResourceLock,
@@ -84,7 +88,7 @@ func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string) error
 				if err := oc.StartClusterMaster(nodeName); err != nil {
 					panic(err.Error())
 				}
-				if err := oc.Run(); err != nil {
+				if err := oc.Run(wg); err != nil {
 					panic(err.Error())
 				}
 			},
@@ -125,13 +129,24 @@ func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string) error
 // TODO: Verify that the cluster was not already called with a different global subnet
 //  If true, then either quit or perform a complete reconfiguration of the cluster (recreate switches/routers with new subnet values)
 func (oc *Controller) StartClusterMaster(masterNodeName string) error {
-	// FIXME DUAL-STACK SUPPORT
-	// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
-	_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(util.V4NodeLocalNatSubnet)
-	oc.nodeLocalNatIPAllocator, _ = ipallocator.NewCIDRRange(nodeLocalNatSubnetCIDR)
-	// set aside the first two IPs for the nextHop on the host and for distributed gateway port
-	_ = oc.nodeLocalNatIPAllocator.Allocate(net.ParseIP(util.V4NodeLocalNatSubnetNextHop))
-	_ = oc.nodeLocalNatIPAllocator.Allocate(net.ParseIP(util.V4NodeLocalDistributedGwPortIP))
+	// The gateway router need to be connected to the distributed router via a per-node join switch.
+	// We need a subnet allocator that allocates subnet for this per-node join switch.
+	if config.IPv4Mode {
+		// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
+		_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(util.V4NodeLocalNatSubnet)
+		oc.nodeLocalNatIPv4Allocator, _ = ipallocator.NewCIDRRange(nodeLocalNatSubnetCIDR)
+		// set aside the first two IPs for the nextHop on the host and for distributed gateway port
+		_ = oc.nodeLocalNatIPv4Allocator.Allocate(net.ParseIP(util.V4NodeLocalNatSubnetNextHop))
+		_ = oc.nodeLocalNatIPv4Allocator.Allocate(net.ParseIP(util.V4NodeLocalDistributedGwPortIP))
+	}
+	if config.IPv6Mode {
+		// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
+		_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(util.V6NodeLocalNatSubnet)
+		oc.nodeLocalNatIPv6Allocator, _ = ipallocator.NewCIDRRange(nodeLocalNatSubnetCIDR)
+		// set aside the first two IPs for the nextHop on the host and for distributed gateway port
+		_ = oc.nodeLocalNatIPv6Allocator.Allocate(net.ParseIP(util.V6NodeLocalNatSubnetNextHop))
+		_ = oc.nodeLocalNatIPv6Allocator.Allocate(net.ParseIP(util.V6NodeLocalDistributedGwPortIP))
+	}
 
 	existingNodes, err := oc.kube.GetNodes()
 	if err != nil {
@@ -154,7 +169,12 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		}
 		nodeLocalNatIPs, _ := util.ParseNodeLocalNatIPAnnotation(&node)
 		for _, nodeLocalNatIP := range nodeLocalNatIPs {
-			err := oc.nodeLocalNatIPAllocator.Allocate(nodeLocalNatIP)
+			var err error
+			if utilnet.IsIPv6(nodeLocalNatIP) {
+				err = oc.nodeLocalNatIPv6Allocator.Allocate(nodeLocalNatIP)
+			} else {
+				err = oc.nodeLocalNatIPv4Allocator.Allocate(nodeLocalNatIP)
+			}
 			if err != nil {
 				utilruntime.HandleError(err)
 			}
@@ -184,7 +204,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 
 	if config.HybridOverlay.Enabled {
 		factory := oc.watchFactory.GetFactory()
-		nodeMaster, err := homaster.NewMaster(
+		oc.hoMaster, err = hocontroller.NewMaster(
 			oc.kube,
 			factory.Core().V1().Nodes().Informer(),
 			factory.Core().V1().Namespaces().Informer(),
@@ -195,7 +215,6 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		if err != nil {
 			return fmt.Errorf("failed to set up hybrid overlay master: %v", err)
 		}
-		go nodeMaster.Run(oc.stopChan)
 	}
 
 	return nil
@@ -420,14 +439,19 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		if err != nil {
 			return err
 		}
-		mpIP := util.GetNodeManagementIfAddr(subnets[0]).IP.String()
+		for _, subnet := range subnets {
+			hostIfAddr := util.GetNodeManagementIfAddr(subnet)
+			l3GatewayConfigIP, err := util.MatchIPFamily(utilnet.IsIPv6(hostIfAddr.IP), l3GatewayConfig.IPAddresses)
+			if err != nil {
+				return err
+			}
+			if err := addPolicyBasedRoutes(node.Name, hostIfAddr.IP.String(), l3GatewayConfigIP); err != nil {
+				return err
+			}
 
-		if err := addPolicyBasedRoutes(node.Name, mpIP, l3GatewayConfig.IPAddresses); err != nil {
-			return err
-		}
-
-		if err := oc.addNodeLocalNatEntries(node, mpMAC.String(), mpIP); err != nil {
-			return err
+			if err := oc.addNodeLocalNatEntries(node, mpMAC.String(), hostIfAddr); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -622,7 +646,18 @@ func (oc *Controller) addNodeAnnotations(node *kapi.Node, hostSubnets []*net.IPN
 		return fmt.Errorf("failed to marshal node %q annotation for subnet %s",
 			node.Name, util.JoinIPNets(hostSubnets, ","))
 	}
-	err = oc.kube.SetAnnotationsOnNode(node, nodeAnnotations)
+	// FIXME: the real solution is to reconcile the node object. Once we have a work-queue based
+	// implementation where we can add the item back to the work queue when it fails to
+	// reconcile, we can get rid of the PollImmediate.
+	err = utilwait.PollImmediate(OvnNodeAnnotationRetryInterval, OvnNodeAnnotationRetryTimeout, func() (bool, error) {
+		err = oc.kube.SetAnnotationsOnNode(node, nodeAnnotations)
+		if err != nil {
+			klog.Warningf("Failed to set node annotation, will retry for: %v",
+				OvnNodeAnnotationRetryTimeout)
+		}
+		return err == nil, nil
+	},
+	)
 	if err != nil {
 		return fmt.Errorf("failed to set node-subnets annotation on node %s: %v",
 			node.Name, err)
@@ -705,9 +740,15 @@ func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet,
 			klog.Errorf("Error deleting node %s HostSubnet %v: %v", nodeName, hostSubnet, err)
 		}
 	}
-	if len(nodeLocalNatIPs) > 0 {
-		if err := oc.nodeLocalNatIPAllocator.Release(nodeLocalNatIPs[0]); err != nil {
-			klog.Errorf("Error deleting node %s's node local NAT IP %v: %v", nodeName, nodeLocalNatIPs, err)
+	for _, nodeLocalNatIP := range nodeLocalNatIPs {
+		var err error
+		if utilnet.IsIPv6(nodeLocalNatIP) {
+			err = oc.nodeLocalNatIPv6Allocator.Release(nodeLocalNatIP)
+		} else {
+			err = oc.nodeLocalNatIPv4Allocator.Release(nodeLocalNatIP)
+		}
+		if err != nil {
+			klog.Errorf("Error deleting node %s's node local NAT IP %s from %v: %v", nodeName, nodeLocalNatIP, nodeLocalNatIPs, err)
 		}
 	}
 
@@ -782,6 +823,27 @@ func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode, newN
 	}
 }
 
+// delete chassis of the given nodeName/chassisName map
+func deleteChassis(ovnSBClient goovn.Client, chassisMap map[string]string) {
+	cmds := make([]*goovn.OvnCommand, 0, len(chassisMap))
+	for _, chassisName := range chassisMap {
+		if chassisName != "" {
+			cmd, err := ovnSBClient.ChassisDel(chassisName)
+			if err != nil {
+				klog.Errorf("Unable to create the ChassisDel command for chassis: %s from the sbdb", chassisName)
+			} else {
+				cmds = append(cmds, cmd)
+			}
+		}
+	}
+
+	if len(cmds) != 0 {
+		if err := ovnSBClient.Execute(cmds...); err != nil {
+			klog.Errorf("Failed to delete chassis for node/chassis map %v: error: %v", chassisMap, err)
+		}
+	}
+}
+
 // this is the worker function that does the periodic sync of nodes from kube API
 // and sbdb and deletes chassis that are stale
 func (oc *Controller) syncNodesPeriodic() {
@@ -798,18 +860,15 @@ func (oc *Controller) syncNodesPeriodic() {
 		nodeNames = append(nodeNames, node.Name)
 	}
 
-	chassisData, stderr, err := util.RunOVNSbctl("--data=bare", "--no-heading",
-		"--columns=name,hostname", "--format=json", "list", "Chassis")
+	chassisList, err := oc.ovnSBClient.ChassisList()
 	if err != nil {
-		klog.Errorf("Failed to get chassis list: stderr: %s, error: %v",
-			stderr, err)
+		klog.Errorf("Failed to get chassis list: error: %v", err)
 		return
 	}
 
-	chassisMap, err := oc.unmarshalChassisDataIntoMap([]byte(chassisData))
-	if err != nil {
-		klog.Errorf("Failed to unmarshal chassis data into chassis map, error: %v: %s", err, chassisData)
-		return
+	chassisMap := map[string]string{}
+	for _, chassis := range chassisList {
+		chassisMap[chassis.Hostname] = chassis.Name
 	}
 
 	//delete existing nodes from the chassis map.
@@ -817,15 +876,7 @@ func (oc *Controller) syncNodesPeriodic() {
 		delete(chassisMap, nodeName)
 	}
 
-	for nodeName, chassisName := range chassisMap {
-		if chassisName != "" {
-			_, stderr, err = util.RunOVNSbctl("--if-exist", "chassis-del", chassisName)
-			if err != nil {
-				klog.Errorf("Failed to delete chassis with name %s for node %s: stderr: %s, error: %v",
-					chassisName, nodeName, stderr, err)
-			}
-		}
-	}
+	deleteChassis(oc.ovnSBClient, chassisMap)
 }
 
 func (oc *Controller) getJoinLRPAddresses(nodeName string) []*net.IPNet {
@@ -877,19 +928,15 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 	// watchNodes() will be called for all existing nodes at startup anyway.
 	// Note that this list will include the 'join' cluster switch, which we
 	// do not want to delete.
-
-	chassisData, stderr, err := util.RunOVNSbctl("--data=bare", "--no-heading",
-		"--columns=name,hostname", "--format=json", "list", "Chassis")
+	chassisList, err := oc.ovnSBClient.ChassisList()
 	if err != nil {
-		klog.Errorf("Failed to get chassis list: stderr: %q, error: %v",
-			stderr, err)
+		klog.Errorf("Failed to get chassis list: error: %v", err)
 		return
 	}
 
-	chassisMap, err := oc.unmarshalChassisDataIntoMap([]byte(chassisData))
-	if err != nil {
-		klog.Errorf("Failed to unmarshal chassis data into chassis map, error: %v: %s", err, chassisData)
-		return
+	chassisMap := map[string]string{}
+	for _, chassis := range chassisList {
+		chassisMap[chassis.Hostname] = chassis.Name
 	}
 
 	//delete existing nodes from the chassis map.
@@ -957,65 +1004,38 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 		delete(chassisMap, nodeName)
 	}
 
-	for nodeName, chassisName := range chassisMap {
-		if chassisName != "" {
-			_, stderr, err = util.RunOVNSbctl("--if-exist", "chassis-del", chassisName)
-			if err != nil {
-				klog.Errorf("Failed to delete chassis with name %s for logical switch %s: stderr: %q, error: %v",
-					chassisName, nodeName, stderr, err)
-			}
-		}
-	}
-}
-
-func (oc *Controller) unmarshalChassisDataIntoMap(chData []byte) (map[string]string, error) {
-	//map of node name to chassis name
-	chassisMap := make(map[string]string)
-
-	type chassisList struct {
-		Data     [][]string
-		Headings []string
-	}
-	var mapUnmarshal chassisList
-
-	if len(chData) == 0 {
-		return chassisMap, nil
-	}
-
-	err := json.Unmarshal(chData, &mapUnmarshal)
-
-	if err != nil {
-		return nil, fmt.Errorf("error unmarshaling the chassis data: %s", err)
-	}
-
-	for _, chassis := range mapUnmarshal.Data {
-		if len(chassis) < 2 || chassis[0] == "" || chassis[1] == "" {
-			continue
-		}
-		chassisMap[chassis[1]] = chassis[0]
-	}
-
-	return chassisMap, nil
+	deleteChassis(oc.ovnSBClient, chassisMap)
 }
 
 func (oc *Controller) deleteNodeChassis(nodeName string) error {
-	chassisName, stderr, err := util.RunOVNSbctl("--data=bare", "--no-heading",
-		"--columns=name", "find", "Chassis",
-		"hostname="+nodeName)
+	var chNames []string
+
+	chassisList, err := oc.ovnSBClient.ChassisGet(nodeName)
 	if err != nil {
-		return fmt.Errorf("failed to get chassis name for node %s: stderr: %q, error: %v",
-			nodeName, stderr, err)
+		return fmt.Errorf("failed to get chassis list for node %s: error: %v", nodeName, err)
 	}
 
-	if chassisName == "" {
-		klog.Warningf("Chassis name is empty for node: %s", nodeName)
-	} else {
-		_, stderr, err = util.RunOVNSbctl("--if-exist", "chassis-del", chassisName)
-		if err != nil {
-			return fmt.Errorf("failed to delete chassis with name %s for node %s: stderr: %q, error: %v",
-				chassisName, nodeName, stderr, err)
+	cmds := make([]*goovn.OvnCommand, 0, len(chassisList))
+	for _, chassis := range chassisList {
+		if chassis.Name == "" {
+			klog.Warningf("Chassis name is empty for node: %s", nodeName)
+			continue
 		}
+		cmd, err := oc.ovnSBClient.ChassisDel(chassis.Name)
+		if err != nil {
+			return fmt.Errorf("unable to create the ChassisDel command for chassis: %s", chassis.Name)
+		}
+		chNames = append(chNames, chassis.Name)
+		cmds = append(cmds, cmd)
 	}
 
+	if len(cmds) == 0 {
+		return fmt.Errorf("failed to find chassis for node %s", nodeName)
+	}
+
+	if err = oc.ovnSBClient.Execute(cmds...); err != nil {
+		return fmt.Errorf("failed to delete chassis %q for node %s: error: %v",
+			strings.Join(chNames, ","), nodeName, err)
+	}
 	return nil
 }

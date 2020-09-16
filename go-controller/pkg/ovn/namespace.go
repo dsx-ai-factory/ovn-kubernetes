@@ -2,7 +2,9 @@ package ovn
 
 import (
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"net"
+	"strings"
 	"time"
 
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
@@ -15,7 +17,10 @@ import (
 
 const (
 	// Annotation used to enable/disable multicast in the namespace
-	nsMulticastAnnotation = "k8s.ovn.org/multicast-enabled"
+	nsMulticastAnnotation        = "k8s.ovn.org/multicast-enabled"
+	routingExternalGWsAnnotation = "k8s.ovn.org/routing-external-gws"
+	routingNamespaceAnnotation   = "k8s.ovn.org/routing-namespaces"
+	routingNetworkAnnotation     = "k8s.ovn.org/routing-network"
 )
 
 func (oc *Controller) syncNamespaces(namespaces []interface{}) {
@@ -42,9 +47,9 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) {
 }
 
 func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
-	nsInfo := oc.getNamespaceLocked(ns)
-	if nsInfo == nil {
-		return nil
+	nsInfo, err := oc.waitForNamespaceLocked(ns)
+	if err != nil {
+		return err
 	}
 	defer nsInfo.Unlock()
 
@@ -155,6 +160,18 @@ func (nsInfo *namespaceInfo) updateNamespacePortGroup(ns string) error {
 	return nil
 }
 
+func parseRoutingExternalGWAnnotation(annotation string) ([]net.IP, error) {
+	var routingExternalGWs []net.IP
+	for _, v := range strings.Split(annotation, ",") {
+		parsedAnnotation := net.ParseIP(v)
+		if parsedAnnotation == nil {
+			return nil, fmt.Errorf("could not parse routing external gw annotation value %s", v)
+		}
+		routingExternalGWs = append(routingExternalGWs, parsedAnnotation)
+	}
+	return routingExternalGWs, nil
+}
+
 // AddNamespace creates corresponding addressset in ovn db
 func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 	klog.V(5).Infof("Adding namespace: %s", ns.Name)
@@ -199,11 +216,22 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 			nsInfo.hybridOverlayVTEP = parsedAnnotation
 		}
 	}
-
+	annotation = ns.Annotations[routingExternalGWsAnnotation]
+	if annotation != "" {
+		nsInfo.routingExternalGWs, err = parseRoutingExternalGWAnnotation(annotation)
+		if err != nil {
+			klog.Errorf(err.Error())
+		}
+	}
 	nsInfo.addressSet, err = oc.addressSetFactory.NewAddressSet(ns.Name, ips)
 	if err != nil {
 		klog.Errorf(err.Error())
 	}
+
+	// TODO(trozet) figure out if there is any possibility of detecting if a pod GW already exists, which
+	// is servicing this namespace. Right now that would mean searching through all pods, which is very inefficient.
+	// For now it is required that a pod serving as a gateway for a namespace is added AFTER the serving namespace is
+	// created
 
 	oc.multicastUpdateNamespace(ns, nsInfo)
 }
@@ -218,7 +246,59 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 	}
 	defer nsInfo.Unlock()
 
-	annotation := newer.Annotations[hotypes.HybridOverlayExternalGw]
+	var annotation, oldAnnotation string
+	annotation = newer.Annotations[routingExternalGWsAnnotation]
+	oldAnnotation = old.Annotations[routingExternalGWsAnnotation]
+	if annotation != oldAnnotation {
+		// if old gw annotation was empty, new one must not be empty, so we should remove any per pod SNAT
+		if oldAnnotation == "" {
+			if config.Gateway.DisableSNATMultipleGWs && (len(nsInfo.routingExternalGWs) != 0 || len(nsInfo.routingExternalPodGWs) != 0) {
+				existingPods, err := oc.watchFactory.GetPods(old.Name)
+				if err != nil {
+					klog.Errorf("Failed to get all the pods (%v)", err)
+				}
+				for _, pod := range existingPods {
+					logicalPort := podLogicalPortName(pod)
+					portInfo, err := oc.logicalPortCache.get(logicalPort)
+					if err != nil {
+						klog.Warningf("Unable to get port %s in cache for SNAT rule removal", logicalPort)
+					} else {
+						oc.deletePerPodGRSNAT(pod.Spec.NodeName, portInfo.ips)
+					}
+				}
+			}
+		} else {
+			oc.deleteGWRoutesForNamespace(nsInfo)
+		}
+		exGateways, err := parseRoutingExternalGWAnnotation(annotation)
+		if err != nil {
+			klog.Error(err.Error())
+		} else {
+			err = oc.addExternalGWsForNamespace(exGateways, nsInfo, old.Name)
+			if err != nil {
+				klog.Error(err.Error())
+			}
+		}
+		// if new annotation is empty, exgws were removed, may need to add SNAT per pod
+		// check if there are any pod gateways serving this namespace as well
+		if annotation == "" && len(nsInfo.routingExternalPodGWs) == 0 && config.Gateway.DisableSNATMultipleGWs {
+			existingPods, err := oc.watchFactory.GetPods(old.Name)
+			if err != nil {
+				klog.Errorf("Failed to get all the pods (%v)", err)
+			}
+			for _, pod := range existingPods {
+				podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
+				if err != nil {
+					klog.Error(err.Error())
+				} else {
+					if err = oc.addPerPodGRSNAT(pod, podAnnotation.IPs); err != nil {
+						klog.Error(err.Error())
+					}
+				}
+			}
+		}
+	}
+	annotation = newer.Annotations[hotypes.HybridOverlayExternalGw]
 	if annotation != "" {
 		parsedAnnotation := net.ParseIP(annotation)
 		if parsedAnnotation == nil {
@@ -251,7 +331,7 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
 		return
 	}
 	defer nsInfo.Unlock()
-
+	oc.deleteGWRoutesForNamespace(nsInfo)
 	oc.multicastDeleteNamespace(ns, nsInfo)
 }
 
@@ -307,8 +387,10 @@ func (oc *Controller) createNamespaceLocked(ns string) *namespaceInfo {
 	defer oc.namespacesMutex.Unlock()
 
 	nsInfo := &namespaceInfo{
-		networkPolicies:  make(map[string]*namespacePolicy),
-		multicastEnabled: false,
+		networkPolicies:       make(map[string]*namespacePolicy),
+		podExternalRoutes:     make(map[string]map[string]string),
+		multicastEnabled:      false,
+		routingExternalPodGWs: make(map[string][]net.IP),
 	}
 	nsInfo.Lock()
 	oc.namespaces[ns] = nsInfo

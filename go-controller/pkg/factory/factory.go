@@ -8,7 +8,25 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+
+	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
+	egressfirewallscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/scheme"
+	egressfirewallinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/informers/externalversions"
+	egressfirewalllister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
+
+	egressipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
+	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
+	egressipscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/scheme"
+	egressipinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions"
+	egressiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
+	apiextensionsapi "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
+	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+	apiextensionsscheme "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/scheme"
+	apiextensionsinformerfactory "k8s.io/apiextensions-apiserver/pkg/client/informers/externalversions"
+	apiextensionslister "k8s.io/apiextensions-apiserver/pkg/client/listers/apiextensions/v1beta1"
 
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
@@ -52,11 +70,8 @@ func (h *Handler) OnDelete(obj interface{}) {
 	}
 }
 
-func (h *Handler) kill() error {
-	if !atomic.CompareAndSwapUint32(&h.tombstone, handlerAlive, handlerDead) {
-		return fmt.Errorf("event handler %d already dead", h.id)
-	}
-	return nil
+func (h *Handler) kill() bool {
+	return atomic.CompareAndSwapUint32(&h.tombstone, handlerAlive, handlerDead)
 }
 
 type event struct {
@@ -129,9 +144,10 @@ func (i *informer) addHandler(id uint64, filterFunc func(obj interface{}) bool, 
 	return handler
 }
 
-func (i *informer) removeHandler(handler *Handler) error {
-	if err := handler.kill(); err != nil {
-		return err
+func (i *informer) removeHandler(handler *Handler) {
+	if !handler.kill() {
+		klog.Errorf("Removing already-removed %v event handler %d", i.oType, handler.id)
+		return
 	}
 
 	klog.V(5).Infof("Sending %v event handler %d for removal", i.oType, handler.id)
@@ -147,8 +163,6 @@ func (i *informer) removeHandler(handler *Handler) error {
 			klog.Warningf("Tried to remove unknown object type %v event handler %d", i.oType, handler.id)
 		}
 	}()
-
-	return nil
 }
 
 func (i *informer) processEvents(events chan *event, stopChan <-chan struct{}) {
@@ -275,7 +289,7 @@ func (i *informer) removeAllHandlers() {
 	i.Lock()
 	defer i.Unlock()
 	for _, handler := range i.handlers {
-		_ = i.removeHandler(handler)
+		i.removeHandler(handler)
 	}
 }
 
@@ -300,6 +314,12 @@ func newInformerLister(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		return listers.NewNodeLister(sharedInformer.GetIndexer()), nil
 	case policyType:
 		return nil, nil
+	case egressFirewallType:
+		return egressfirewalllister.NewEgressFirewallLister(sharedInformer.GetIndexer()), nil
+	case crdType:
+		return apiextensionslister.NewCustomResourceDefinitionLister(sharedInformer.GetIndexer()), nil
+	case egressIPType:
+		return egressiplister.NewEgressIPLister(sharedInformer.GetIndexer()), nil
 	}
 
 	return nil, fmt.Errorf("cannot create lister from type %v", oType)
@@ -390,10 +410,15 @@ type WatchFactory struct {
 	// requirements with atomic accesses
 	handlerCounter uint64
 
-	iFactory  informerfactory.SharedInformerFactory
-	informers map[reflect.Type]*informer
+	iFactory    informerfactory.SharedInformerFactory
+	eipFactory  egressipinformerfactory.SharedInformerFactory
+	efFactory   egressfirewallinformerfactory.SharedInformerFactory
+	efClientset egressfirewallclientset.Interface
+	crdFactory  apiextensionsinformerfactory.SharedInformerFactory
+	informers   map[reflect.Type]*informer
 
-	stopChan chan struct{}
+	stopChan               chan struct{}
+	egressFirewallStopChan chan struct{}
 }
 
 // ObjectCacheInterface represents the exported methods for getting
@@ -423,27 +448,43 @@ const (
 )
 
 var (
-	podType       reflect.Type = reflect.TypeOf(&kapi.Pod{})
-	serviceType   reflect.Type = reflect.TypeOf(&kapi.Service{})
-	endpointsType reflect.Type = reflect.TypeOf(&kapi.Endpoints{})
-	policyType    reflect.Type = reflect.TypeOf(&knet.NetworkPolicy{})
-	namespaceType reflect.Type = reflect.TypeOf(&kapi.Namespace{})
-	nodeType      reflect.Type = reflect.TypeOf(&kapi.Node{})
+	podType            reflect.Type = reflect.TypeOf(&kapi.Pod{})
+	serviceType        reflect.Type = reflect.TypeOf(&kapi.Service{})
+	endpointsType      reflect.Type = reflect.TypeOf(&kapi.Endpoints{})
+	policyType         reflect.Type = reflect.TypeOf(&knet.NetworkPolicy{})
+	namespaceType      reflect.Type = reflect.TypeOf(&kapi.Namespace{})
+	nodeType           reflect.Type = reflect.TypeOf(&kapi.Node{})
+	egressFirewallType reflect.Type = reflect.TypeOf(&egressfirewallapi.EgressFirewall{})
+	crdType            reflect.Type = reflect.TypeOf(&apiextensionsapi.CustomResourceDefinition{})
+	egressIPType       reflect.Type = reflect.TypeOf(&egressipapi.EgressIP{})
 )
 
 // NewWatchFactory initializes a new watch factory
-func NewWatchFactory(c kubernetes.Interface) (*WatchFactory, error) {
+func NewWatchFactory(c kubernetes.Interface, eip egressipclientset.Interface, ec egressfirewallclientset.Interface, crd apiextensionsclientset.Interface) (*WatchFactory, error) {
 	// resync time is 12 hours, none of the resources being watched in ovn-kubernetes have
 	// any race condition where a resync may be required e.g. cni executable on node watching for
 	// events on pods and assuming that an 'ADD' event will contain the annotations put in by
 	// ovnkube master (currently, it is just a 'get' loop)
 	// the downside of making it tight (like 10 minutes) is needless spinning on all resources
 	wf := &WatchFactory{
-		iFactory:  informerfactory.NewSharedInformerFactory(c, resyncInterval),
-		informers: make(map[reflect.Type]*informer),
-		stopChan:  make(chan struct{}),
+		iFactory:    informerfactory.NewSharedInformerFactory(c, resyncInterval),
+		eipFactory:  egressipinformerfactory.NewSharedInformerFactory(eip, resyncInterval),
+		efClientset: ec,
+		crdFactory:  apiextensionsinformerfactory.NewSharedInformerFactory(crd, resyncInterval),
+		informers:   make(map[reflect.Type]*informer),
+		stopChan:    make(chan struct{}),
 	}
 	var err error
+
+	err = apiextensionsapi.AddToScheme(apiextensionsscheme.Scheme)
+	if err != nil {
+		return nil, err
+	}
+	err = egressipapi.AddToScheme(egressipscheme.Scheme)
+	if err != nil {
+		return nil, err
+	}
+
 	// Create shared informers we know we'll use
 	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan)
 	if err != nil {
@@ -465,19 +506,65 @@ func NewWatchFactory(c kubernetes.Interface) (*WatchFactory, error) {
 	if err != nil {
 		return nil, err
 	}
+	wf.informers[crdType], err = newInformer(crdType, wf.crdFactory.Apiextensions().V1beta1().CustomResourceDefinitions().Informer())
+	if err != nil {
+		return nil, err
+	}
 	wf.informers[nodeType], err = newQueuedInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer(), wf.stopChan)
 	if err != nil {
 		return nil, err
 	}
+	wf.informers[egressIPType], err = newInformer(egressIPType, wf.eipFactory.K8s().V1().EgressIPs().Informer())
+	if err != nil {
+		return nil, err
+	}
 
+	wf.crdFactory.Start(wf.stopChan)
+	for oType, synced := range wf.crdFactory.WaitForCacheSync(wf.stopChan) {
+		if !synced {
+			return nil, fmt.Errorf("error in syncing cache for %v informer", oType)
+		}
+	}
 	wf.iFactory.Start(wf.stopChan)
 	for oType, synced := range wf.iFactory.WaitForCacheSync(wf.stopChan) {
 		if !synced {
 			return nil, fmt.Errorf("error in syncing cache for %v informer", oType)
 		}
 	}
-
+	if config.OVNKubernetesFeature.EnableEgressIP {
+		wf.eipFactory.Start(wf.stopChan)
+		for oType, synced := range wf.eipFactory.WaitForCacheSync(wf.stopChan) {
+			if !synced {
+				return nil, fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
+		}
+	}
 	return wf, nil
+}
+
+func (wf *WatchFactory) InitializeEgressFirewallWatchFactory() error {
+	err := egressfirewallapi.AddToScheme(egressfirewallscheme.Scheme)
+	if err != nil {
+		return err
+	}
+	wf.efFactory = egressfirewallinformerfactory.NewSharedInformerFactory(wf.efClientset, resyncInterval)
+	wf.informers[egressFirewallType], err = newInformer(egressFirewallType, wf.efFactory.K8s().V1().EgressFirewalls().Informer())
+	if err != nil {
+		return err
+	}
+	wf.egressFirewallStopChan = make(chan struct{})
+	wf.efFactory.Start(wf.egressFirewallStopChan)
+	for oType, synced := range wf.efFactory.WaitForCacheSync(wf.egressFirewallStopChan) {
+		if !synced {
+			return fmt.Errorf("error in syncing cache for %v informer", oType)
+		}
+	}
+	return nil
+}
+
+func (wf *WatchFactory) ShutdownEgressFirewallWatchFactory() {
+	close(wf.egressFirewallStopChan)
+	wf.informers[egressFirewallType].shutdown()
 }
 
 func (wf *WatchFactory) Shutdown() {
@@ -515,23 +602,26 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 		if node, ok := obj.(*kapi.Node); ok {
 			return &node.ObjectMeta, nil
 		}
+	case egressFirewallType:
+		if egressFirewall, ok := obj.(*egressfirewallapi.EgressFirewall); ok {
+			return &egressFirewall.ObjectMeta, nil
+		}
+	case egressIPType:
+		if egressIP, ok := obj.(*egressipapi.EgressIP); ok {
+			return &egressIP.ObjectMeta, nil
+		}
 	}
 	return nil, fmt.Errorf("cannot get ObjectMeta from type %v", objType)
 }
 
-func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, lsel *metav1.LabelSelector, funcs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
+func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
 	inf, ok := wf.informers[objType]
 	if !ok {
-		return nil, fmt.Errorf("unknown object type %v", objType)
-	}
-
-	sel, err := metav1.LabelSelectorAsSelector(lsel)
-	if err != nil {
-		return nil, fmt.Errorf("error creating label selector: %v", err)
+		klog.Fatalf("Tried to add handler of unknown object type %v", objType)
 	}
 
 	filterFunc := func(obj interface{}) bool {
-		if namespace == "" && lsel == nil {
+		if namespace == "" && sel == nil {
 			// Unfiltered handler
 			return true
 		}
@@ -543,7 +633,7 @@ func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, lsel 
 		if namespace != "" && meta.Namespace != namespace {
 			return false
 		}
-		if lsel != nil && !sel.Matches(labels.Set(meta.Labels)) {
+		if sel != nil && !sel.Matches(labels.Set(meta.Labels)) {
 			return false
 		}
 		return true
@@ -567,89 +657,121 @@ func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, lsel 
 	handlerID := atomic.AddUint64(&wf.handlerCounter, 1)
 	handler := inf.addHandler(handlerID, filterFunc, funcs, items)
 	klog.V(5).Infof("Added %v event handler %d", objType, handler.id)
-	return handler, nil
+	return handler
 }
 
-func (wf *WatchFactory) removeHandler(objType reflect.Type, handler *Handler) error {
-	if inf, ok := wf.informers[objType]; ok {
-		return inf.removeHandler(handler)
-	}
-	return fmt.Errorf("tried to remove unknown object type %v event handler", objType)
+func (wf *WatchFactory) removeHandler(objType reflect.Type, handler *Handler) {
+	wf.informers[objType].removeHandler(handler)
 }
 
 // AddPodHandler adds a handler function that will be executed on Pod object changes
-func (wf *WatchFactory) AddPodHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
+func (wf *WatchFactory) AddPodHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
 	return wf.addHandler(podType, "", nil, handlerFuncs, processExisting)
 }
 
 // AddFilteredPodHandler adds a handler function that will be executed when Pod objects that match the given filters change
-func (wf *WatchFactory) AddFilteredPodHandler(namespace string, lsel *metav1.LabelSelector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
-	return wf.addHandler(podType, namespace, lsel, handlerFuncs, processExisting)
+func (wf *WatchFactory) AddFilteredPodHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
+	return wf.addHandler(podType, namespace, sel, handlerFuncs, processExisting)
 }
 
 // RemovePodHandler removes a Pod object event handler function
-func (wf *WatchFactory) RemovePodHandler(handler *Handler) error {
-	return wf.removeHandler(podType, handler)
+func (wf *WatchFactory) RemovePodHandler(handler *Handler) {
+	wf.removeHandler(podType, handler)
 }
 
 // AddServiceHandler adds a handler function that will be executed on Service object changes
-func (wf *WatchFactory) AddServiceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
+func (wf *WatchFactory) AddServiceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
 	return wf.addHandler(serviceType, "", nil, handlerFuncs, processExisting)
 }
 
 // RemoveServiceHandler removes a Service object event handler function
-func (wf *WatchFactory) RemoveServiceHandler(handler *Handler) error {
-	return wf.removeHandler(serviceType, handler)
+func (wf *WatchFactory) RemoveServiceHandler(handler *Handler) {
+	wf.removeHandler(serviceType, handler)
 }
 
 // AddEndpointsHandler adds a handler function that will be executed on Endpoints object changes
-func (wf *WatchFactory) AddEndpointsHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
+func (wf *WatchFactory) AddEndpointsHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
 	return wf.addHandler(endpointsType, "", nil, handlerFuncs, processExisting)
 }
 
 // AddFilteredEndpointsHandler adds a handler function that will be executed when Endpoint objects that match the given filters change
-func (wf *WatchFactory) AddFilteredEndpointsHandler(namespace string, lsel *metav1.LabelSelector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
-	return wf.addHandler(endpointsType, namespace, lsel, handlerFuncs, processExisting)
+func (wf *WatchFactory) AddFilteredEndpointsHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
+	return wf.addHandler(endpointsType, namespace, sel, handlerFuncs, processExisting)
 }
 
 // RemoveEndpointsHandler removes a Endpoints object event handler function
-func (wf *WatchFactory) RemoveEndpointsHandler(handler *Handler) error {
-	return wf.removeHandler(endpointsType, handler)
+func (wf *WatchFactory) RemoveEndpointsHandler(handler *Handler) {
+	wf.removeHandler(endpointsType, handler)
 }
 
 // AddPolicyHandler adds a handler function that will be executed on NetworkPolicy object changes
-func (wf *WatchFactory) AddPolicyHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
+func (wf *WatchFactory) AddPolicyHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
 	return wf.addHandler(policyType, "", nil, handlerFuncs, processExisting)
 }
 
 // RemovePolicyHandler removes a NetworkPolicy object event handler function
-func (wf *WatchFactory) RemovePolicyHandler(handler *Handler) error {
-	return wf.removeHandler(policyType, handler)
+func (wf *WatchFactory) RemovePolicyHandler(handler *Handler) {
+	wf.removeHandler(policyType, handler)
+}
+
+// AddEgressFirewallHandler adds a handler function that will be executed on EgressFirewall object changes
+func (wf *WatchFactory) AddEgressFirewallHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
+	return wf.addHandler(egressFirewallType, "", nil, handlerFuncs, processExisting)
+}
+
+// RemoveEgressFirewallHandler removes an EgressFirewall object event handler function
+func (wf *WatchFactory) RemoveEgressFirewallHandler(handler *Handler) {
+	wf.removeHandler(egressFirewallType, handler)
+}
+
+// AddCRDHandler adds a handler function that will be executed on CRD obje changes
+func (wf *WatchFactory) AddCRDHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
+	return wf.addHandler(crdType, "", nil, handlerFuncs, processExisting)
+}
+
+// RemoveCRDHandler removes a CRD object event handler function
+func (wf *WatchFactory) RemoveCRDHandler(handler *Handler) {
+	wf.removeHandler(crdType, handler)
+}
+
+// AddEgressIPHandler adds a handler function that will be executed on EgressIP object changes
+func (wf *WatchFactory) AddEgressIPHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
+	return wf.addHandler(egressIPType, "", nil, handlerFuncs, processExisting)
+}
+
+// RemoveEgressIPHandler removes an EgressIP object event handler function
+func (wf *WatchFactory) RemoveEgressIPHandler(handler *Handler) {
+	wf.removeHandler(egressIPType, handler)
 }
 
 // AddNamespaceHandler adds a handler function that will be executed on Namespace object changes
-func (wf *WatchFactory) AddNamespaceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
+func (wf *WatchFactory) AddNamespaceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
 	return wf.addHandler(namespaceType, "", nil, handlerFuncs, processExisting)
 }
 
 // AddFilteredNamespaceHandler adds a handler function that will be executed when Namespace objects that match the given filters change
-func (wf *WatchFactory) AddFilteredNamespaceHandler(namespace string, lsel *metav1.LabelSelector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
-	return wf.addHandler(namespaceType, namespace, lsel, handlerFuncs, processExisting)
+func (wf *WatchFactory) AddFilteredNamespaceHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
+	return wf.addHandler(namespaceType, namespace, sel, handlerFuncs, processExisting)
 }
 
 // RemoveNamespaceHandler removes a Namespace object event handler function
-func (wf *WatchFactory) RemoveNamespaceHandler(handler *Handler) error {
-	return wf.removeHandler(namespaceType, handler)
+func (wf *WatchFactory) RemoveNamespaceHandler(handler *Handler) {
+	wf.removeHandler(namespaceType, handler)
 }
 
 // AddNodeHandler adds a handler function that will be executed on Node object changes
-func (wf *WatchFactory) AddNodeHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
+func (wf *WatchFactory) AddNodeHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
 	return wf.addHandler(nodeType, "", nil, handlerFuncs, processExisting)
 }
 
+// AddFilteredNodeHandler dds a handler function that will be executed when Node objects that match the given label selector
+func (wf *WatchFactory) AddFilteredNodeHandler(sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
+	return wf.addHandler(nodeType, "", sel, handlerFuncs, processExisting)
+}
+
 // RemoveNodeHandler removes a Node object event handler function
-func (wf *WatchFactory) RemoveNodeHandler(handler *Handler) error {
-	return wf.removeHandler(nodeType, handler)
+func (wf *WatchFactory) RemoveNodeHandler(handler *Handler) {
+	wf.removeHandler(nodeType, handler)
 }
 
 // GetPod returns the pod spec given the namespace and pod name

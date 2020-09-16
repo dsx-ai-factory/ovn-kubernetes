@@ -40,8 +40,21 @@ const DefaultVXLANPort = 4789
 
 // The following are global config parameters that other modules may access directly
 var (
+	// Build information. Populated at build-time.
+	// commit ID used to build ovn-kubernetes
+	Commit = ""
+	// branch used to build ovn-kubernetes
+	Branch = ""
+	// ovn-kubernetes build user
+	BuildUser = ""
+	// ovn-kubernetes build date
+	BuildDate = ""
 	// ovn-kubernetes version, to be changed with every release
 	Version = "0.3.0"
+	// version of the go runtime used to compile ovn-kubernetes
+	GoVersion = runtime.Version()
+	// os and architecture used to build ovn-kubernetes
+	OSArch = fmt.Sprintf("%s %s", runtime.GOOS, runtime.GOARCH)
 
 	// ovn-kubernetes cni config file name
 	CNIConfFileName = "10-ovn-kubernetes.conf"
@@ -70,9 +83,8 @@ var (
 
 	// CNI holds CNI-related parsed config file parameters and command-line overrides
 	CNI = CNIConfig{
-		ConfDir:         "/etc/cni/net.d",
-		Plugin:          "ovn-k8s-cni-overlay",
-		WinHNSNetworkID: "",
+		ConfDir: "/etc/cni/net.d",
+		Plugin:  "ovn-k8s-cni-overlay",
 	}
 
 	// Kubernetes holds Kubernetes-related parsed config file parameters and command-line overrides
@@ -80,6 +92,11 @@ var (
 		APIServer:          DefaultAPIServer,
 		RawServiceCIDRs:    "172.16.1.0/24",
 		OVNConfigNamespace: "ovn-kubernetes",
+	}
+
+	// OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
+	OVNKubernetesFeature = OVNKubernetesFeatureConfig{
+		EnableEgressIP: true,
 	}
 
 	// OvnNorth holds northbound OVN database client and server authentication and location details
@@ -100,8 +117,7 @@ var (
 
 	// HybridOverlay holds hybrid overlay feature config options.
 	HybridOverlay = HybridOverlayConfig{
-		RawClusterSubnets: "10.132.0.0/14/23",
-		VXLANPort:         DefaultVXLANPort,
+		VXLANPort: DefaultVXLANPort,
 	}
 
 	// NbctlDaemon enables ovn-nbctl to run in daemon mode
@@ -183,8 +199,6 @@ type CNIConfig struct {
 	ConfDir string `gcfg:"conf-dir"`
 	// Plugin specifies the name of the CNI plugin
 	Plugin string `gcfg:"plugin"`
-	// Windows ONLY, specifies the ID of the HNS Network to which the containers will be attached
-	WinHNSNetworkID string `gcfg:"win-hnsnetwork-id"`
 }
 
 // KubernetesConfig holds Kubernetes-related parsed config file parameters and command-line overrides
@@ -204,6 +218,11 @@ type KubernetesConfig struct {
 	PodIP                 string `gcfg:"pod-ip"` // UNUSED
 	RawNoHostSubnetNodes  string `gcfg:"no-hostsubnet-nodes"`
 	NoHostSubnetNodes     *metav1.LabelSelector
+}
+
+// OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
+type OVNKubernetesFeatureConfig struct {
+	EnableEgressIP bool `gcfg:"enable-egress-ip"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -230,6 +249,8 @@ type GatewayConfig struct {
 	VLANID uint `gcfg:"vlan-id"`
 	// NodeportEnable sets whether to provide Kubernetes NodePort service or not
 	NodeportEnable bool `gcfg:"nodeport"`
+	// DisableSNATMultipleGws sets whether to disable SNAT of egress traffic in namespaces annotated with routing-external-gws
+	DisableSNATMultipleGWs bool `gcfg:"disable-snat-multiple-gws"`
 }
 
 // OvnAuthConfig holds client authentication and location details for
@@ -286,27 +307,29 @@ const (
 
 // Config is used to read the structured config file and to cache config in testcases
 type config struct {
-	Default       DefaultConfig
-	Logging       LoggingConfig
-	CNI           CNIConfig
-	Kubernetes    KubernetesConfig
-	OvnNorth      OvnAuthConfig
-	OvnSouth      OvnAuthConfig
-	Gateway       GatewayConfig
-	MasterHA      MasterHAConfig
-	HybridOverlay HybridOverlayConfig
+	Default              DefaultConfig
+	Logging              LoggingConfig
+	CNI                  CNIConfig
+	OVNKubernetesFeature OVNKubernetesFeatureConfig
+	Kubernetes           KubernetesConfig
+	OvnNorth             OvnAuthConfig
+	OvnSouth             OvnAuthConfig
+	Gateway              GatewayConfig
+	MasterHA             MasterHAConfig
+	HybridOverlay        HybridOverlayConfig
 }
 
 var (
-	savedDefault       DefaultConfig
-	savedLogging       LoggingConfig
-	savedCNI           CNIConfig
-	savedKubernetes    KubernetesConfig
-	savedOvnNorth      OvnAuthConfig
-	savedOvnSouth      OvnAuthConfig
-	savedGateway       GatewayConfig
-	savedMasterHA      MasterHAConfig
-	savedHybridOverlay HybridOverlayConfig
+	savedDefault              DefaultConfig
+	savedLogging              LoggingConfig
+	savedCNI                  CNIConfig
+	savedOVNKubernetesFeature OVNKubernetesFeatureConfig
+	savedKubernetes           KubernetesConfig
+	savedOvnNorth             OvnAuthConfig
+	savedOvnSouth             OvnAuthConfig
+	savedGateway              GatewayConfig
+	savedMasterHA             MasterHAConfig
+	savedHybridOverlay        HybridOverlayConfig
 	// legacy service-cluster-ip-range CLI option
 	serviceClusterIPRange string
 	// legacy cluster-subnet CLI option
@@ -322,14 +345,24 @@ func init() {
 	savedDefault = Default
 	savedLogging = Logging
 	savedCNI = CNI
+	savedOVNKubernetesFeature = OVNKubernetesFeature
 	savedKubernetes = Kubernetes
 	savedOvnNorth = OvnNorth
 	savedOvnSouth = OvnSouth
 	savedGateway = Gateway
 	savedMasterHA = MasterHA
 	savedHybridOverlay = HybridOverlay
+	cli.VersionPrinter = func(c *cli.Context) {
+		fmt.Printf("Version: %s\n", Version)
+		fmt.Printf("Git commit: %s\n", Commit)
+		fmt.Printf("Git branch: %s\n", Branch)
+		fmt.Printf("Go version: %s\n", GoVersion)
+		fmt.Printf("Build date: %s\n", BuildDate)
+		fmt.Printf("OS/Arch: %s\n", OSArch)
+	}
 	Flags = append(Flags, CommonFlags...)
 	Flags = append(Flags, CNIFlags...)
+	Flags = append(Flags, OVNK8sFeatureFlags...)
 	Flags = append(Flags, K8sFlags...)
 	Flags = append(Flags, OvnNBFlags...)
 	Flags = append(Flags, OvnSBFlags...)
@@ -344,6 +377,7 @@ func PrepareTestConfig() {
 	Default = savedDefault
 	Logging = savedLogging
 	CNI = savedCNI
+	OVNKubernetesFeature = savedOVNKubernetesFeature
 	Kubernetes = savedKubernetes
 	OvnNorth = savedOvnNorth
 	OvnSouth = savedOvnSouth
@@ -577,10 +611,15 @@ var CNIFlags = []cli.Flag{
 		Destination: &cliConfig.CNI.Plugin,
 		Value:       CNI.Plugin,
 	},
-	&cli.StringFlag{
-		Name:        "win-hnsnetwork-id",
-		Usage:       "the ID of the HNS network to which containers will be attached (default: not set)",
-		Destination: &cliConfig.CNI.WinHNSNetworkID,
+}
+
+// OVNK8sFeatureFlags capture OVN-Kubernetes feature related options
+var OVNK8sFeatureFlags = []cli.Flag{
+	&cli.BoolFlag{
+		Name:        "enable-egress-ip",
+		Usage:       "Configure to use EgressIP CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableEgressIP,
+		Value:       OVNKubernetesFeature.EnableEgressIP,
 	},
 }
 
@@ -775,6 +814,11 @@ var OVNGatewayFlags = []cli.Flag{
 		Usage:       "Setup nodeport based ingress on gateways.",
 		Destination: &cliConfig.Gateway.NodeportEnable,
 	},
+	&cli.BoolFlag{
+		Name:        "disable-snat-multiple-gws",
+		Usage:       "Disable SNAT for egress traffic with multiple gateways.",
+		Destination: &cliConfig.Gateway.DisableSNATMultipleGWs,
+	},
 
 	// Deprecated CLI options
 	&cli.BoolFlag{
@@ -846,6 +890,7 @@ var Flags []cli.Flag
 func GetFlags(customFlags []cli.Flag) []cli.Flag {
 	flags := CommonFlags
 	flags = append(flags, CNIFlags...)
+	flags = append(flags, OVNK8sFeatureFlags...)
 	flags = append(flags, K8sFlags...)
 	flags = append(flags, OvnNBFlags...)
 	flags = append(flags, OvnSBFlags...)
@@ -1068,9 +1113,22 @@ func buildGatewayConfig(ctx *cli.Context, cli, file *config) error {
 		if Gateway.NextHop != "" {
 			return fmt.Errorf("gateway next-hop option %q not allowed when gateway is disabled", Gateway.NextHop)
 		}
-		if Gateway.VLANID != 0 {
-			return fmt.Errorf("gateway VLAN ID option '%d' not allowed when gateway is disabled", Gateway.VLANID)
-		}
+	}
+
+	if Gateway.Mode != GatewayModeShared && Gateway.VLANID != 0 {
+		return fmt.Errorf("gateway VLAN ID option: %d is supported only in shared gateway mode", Gateway.VLANID)
+	}
+	return nil
+}
+
+func buildOVNKubernetesFeatureConfig(ctx *cli.Context, cli, file *config) error {
+	// Copy config file values over default values
+	if err := overrideFields(&OVNKubernetesFeature, &file.OVNKubernetesFeature, &savedOVNKubernetesFeature); err != nil {
+		return err
+	}
+	// And CLI overrides over config file and default values
+	if err := overrideFields(&OVNKubernetesFeature, &cli.OVNKubernetesFeature, &savedOVNKubernetesFeature); err != nil {
+		return err
 	}
 	return nil
 }
@@ -1113,14 +1171,15 @@ func buildHybridOverlayConfig(ctx *cli.Context, cli, file *config, allSubnets *c
 
 	if HybridOverlay.Enabled {
 		var err error
-		HybridOverlay.ClusterSubnets, err = ParseClusterSubnetEntries(HybridOverlay.RawClusterSubnets)
-		if err != nil {
-			return fmt.Errorf("hybrid overlay cluster subnet invalid: %v", err)
+		if len(HybridOverlay.RawClusterSubnets) > 0 {
+			HybridOverlay.ClusterSubnets, err = ParseClusterSubnetEntries(HybridOverlay.RawClusterSubnets)
+			if err != nil {
+				return fmt.Errorf("hybrid overlay cluster subnet invalid: %v", err)
+			}
+			for _, subnet := range HybridOverlay.ClusterSubnets {
+				allSubnets.append(configSubnetHybrid, subnet.CIDR)
+			}
 		}
-		for _, subnet := range HybridOverlay.ClusterSubnets {
-			allSubnets.append(configSubnetHybrid, subnet.CIDR)
-		}
-
 		if HybridOverlay.VXLANPort > 65535 {
 			return fmt.Errorf("hybrid overlay vxlan port is invalid. The port cannot be larger than 65535")
 		}
@@ -1166,14 +1225,7 @@ func getConfigFilePath(ctx *cli.Context) (string, bool) {
 	if configFile != "" {
 		return configFile, false
 	}
-
-	// Linux default
-	if runtime.GOOS != "windows" {
-		return filepath.Join("/etc", "openvswitch", "ovn_k8s.conf"), true
-	}
-
-	// Windows default
-	return filepath.Join(os.Getenv("OVS_SYSCONFDIR"), "ovn_k8s.conf"), true
+	return "/etc/openvswitch/ovn_k8s.conf", true
 }
 
 // InitConfig reads the config file and common command-line options and
@@ -1201,15 +1253,16 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	var err error
 	// initialize cfg with default values, allow file read to override
 	cfg := config{
-		Default:       savedDefault,
-		Logging:       savedLogging,
-		CNI:           savedCNI,
-		Kubernetes:    savedKubernetes,
-		OvnNorth:      savedOvnNorth,
-		OvnSouth:      savedOvnSouth,
-		Gateway:       savedGateway,
-		MasterHA:      savedMasterHA,
-		HybridOverlay: savedHybridOverlay,
+		Default:              savedDefault,
+		Logging:              savedLogging,
+		CNI:                  savedCNI,
+		OVNKubernetesFeature: savedOVNKubernetesFeature,
+		Kubernetes:           savedKubernetes,
+		OvnNorth:             savedOvnNorth,
+		OvnSouth:             savedOvnSouth,
+		Gateway:              savedGateway,
+		MasterHA:             savedMasterHA,
+		HybridOverlay:        savedHybridOverlay,
 	}
 
 	allSubnets := newConfigSubnets()
@@ -1286,6 +1339,10 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	}
 
 	if err = buildKubernetesConfig(exec, &cliConfig, &cfg, saPath, defaults, allSubnets); err != nil {
+		return "", err
+	}
+
+	if err = buildOVNKubernetesFeatureConfig(ctx, &cliConfig, &cfg); err != nil {
 		return "", err
 	}
 

@@ -35,11 +35,12 @@ const (
 	// fixed MAC address for the br-nexthop interface. the last 4 hex bytes
 	// translates to the br-nexthop's IP address
 	localnetGatewayNextHopMac = "00:00:a9:fe:21:01"
+	localnetGatewayMac        = "00:00:a9:fe:21:02"
 	// Routing table for ExternalIP communication
 	localnetGatewayExternalIDTable = "6"
 )
 
-func (n *OvnNode) initLocalnetGateway(hostSubnets []*net.IPNet, nodeAnnotator kube.Annotator) error {
+func (n *OvnNode) initLocalnetGateway(hostSubnets []*net.IPNet, nodeAnnotator kube.Annotator, defaultGatewayIntf string) error {
 	// Create a localnet OVS bridge.
 	localnetBridgeName := "br-local"
 	_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br",
@@ -115,16 +116,20 @@ func (n *OvnNode) initLocalnetGateway(hostSubnets []*net.IPNet, nodeAnnotator ku
 		}
 	}
 
+	n.initLocalEgressIP(gatewayIfAddrs, defaultGatewayIntf)
+
 	chassisID, err := util.GetNodeChassisID()
 	if err != nil {
 		return err
 	}
 
+	gwMacAddress, _ := net.ParseMAC(localnetGatewayMac)
+
 	err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
 		Mode:           config.GatewayModeLocal,
 		ChassisID:      chassisID,
 		InterfaceID:    ifaceID,
-		MACAddress:     macAddress,
+		MACAddress:     gwMacAddress,
 		IPAddresses:    gatewayIfAddrs,
 		NextHops:       nextHops,
 		NodePortEnable: config.Gateway.NodeportEnable,
@@ -156,14 +161,7 @@ func (n *OvnNode) initLocalnetGateway(hostSubnets []*net.IPNet, nodeAnnotator ku
 	return nil
 }
 
-type localPortWatcherData struct {
-	recorder     record.EventRecorder
-	gatewayIPv4  string
-	gatewayIPv6  string
-	localAddrSet map[string]net.IPNet
-}
-
-func newLocalPortWatcherData(gatewayIfAddrs []*net.IPNet, recorder record.EventRecorder, localAddrSet map[string]net.IPNet) *localPortWatcherData {
+func getGatewayFamilyAddrs(gatewayIfAddrs []*net.IPNet) (string, string) {
 	var gatewayIPv4, gatewayIPv6 string
 	for _, gatewayIfAddr := range gatewayIfAddrs {
 		if utilnet.IsIPv6(gatewayIfAddr.IP) {
@@ -172,6 +170,32 @@ func newLocalPortWatcherData(gatewayIfAddrs []*net.IPNet, recorder record.EventR
 			gatewayIPv4 = gatewayIfAddr.IP.String()
 		}
 	}
+	return gatewayIPv4, gatewayIPv6
+}
+
+func (n *OvnNode) initLocalEgressIP(gatewayIfAddrs []*net.IPNet, defaultGatewayIntf string) {
+	if !config.OVNKubernetesFeature.EnableEgressIP {
+		return
+	}
+
+	gatewayIPv4, gatewayIPv6 := getGatewayFamilyAddrs(gatewayIfAddrs)
+	n.watchEgressIP(&egressIPLocal{
+		gatewayIPv4:        gatewayIPv4,
+		gatewayIPv6:        gatewayIPv6,
+		nodeName:           n.name,
+		defaultGatewayIntf: defaultGatewayIntf,
+	})
+}
+
+type localPortWatcherData struct {
+	recorder     record.EventRecorder
+	gatewayIPv4  string
+	gatewayIPv6  string
+	localAddrSet map[string]net.IPNet
+}
+
+func newLocalPortWatcherData(gatewayIfAddrs []*net.IPNet, recorder record.EventRecorder, localAddrSet map[string]net.IPNet) *localPortWatcherData {
+	gatewayIPv4, gatewayIPv6 := getGatewayFamilyAddrs(gatewayIfAddrs)
 	return &localPortWatcherData{
 		gatewayIPv4:  gatewayIPv4,
 		gatewayIPv6:  gatewayIPv6,
@@ -221,8 +245,12 @@ func (npw *localPortWatcherData) addService(svc *kapi.Service) error {
 			}
 
 			if gatewayIP != "" {
+				// Fix Azure/GCP LoadBalancers. They will forward traffic directly to the node with the
+				// dest address as the load-balancer ingress IP and port
+				iptRules = append(iptRules, getLoadBalancerIPTRules(svc, port, gatewayIP, port.NodePort)...)
 				iptRules = append(iptRules, getNodePortIPTRules(port, nil, gatewayIP, port.NodePort)...)
-				klog.V(5).Infof("Will add iptables rule for NodePort: %v and protocol: %v", port.NodePort, port.Protocol)
+				klog.V(5).Infof("Will add iptables rule for NodePort and Cloud load balancers: %v and "+
+					"protocol: %v", port.NodePort, port.Protocol)
 			} else {
 				klog.Warningf("No gateway of appropriate IP family for NodePort Service %s/%s %s",
 					svc.Namespace, svc.Name, svc.Spec.ClusterIP)
@@ -282,8 +310,12 @@ func (npw *localPortWatcherData) deleteService(svc *kapi.Service) error {
 	for _, port := range svc.Spec.Ports {
 		if util.ServiceTypeHasNodePort(svc) {
 			if gatewayIP != "" {
+				// Fix Azure/GCP LoadBalancers. They will forward traffic directly to the node with the
+				// dest address as the load-balancer ingress IP and port
+				iptRules = append(iptRules, getLoadBalancerIPTRules(svc, port, gatewayIP, port.NodePort)...)
 				iptRules = append(iptRules, getNodePortIPTRules(port, nil, gatewayIP, port.NodePort)...)
-				klog.V(5).Infof("Will delete iptables rule for NodePort: %v and protocol: %v", port.NodePort, port.Protocol)
+				klog.V(5).Infof("Will delete iptables rule for NodePort and cloud load balancers: %v and "+
+					"protocol: %v", port.NodePort, port.Protocol)
 			}
 		}
 		for _, externalIP := range svc.Spec.ExternalIPs {
@@ -377,7 +409,7 @@ func (n *OvnNode) watchLocalPorts(npw *localPortWatcherData) error {
 	if err := initRoutingRules(); err != nil {
 		return err
 	}
-	_, err := n.watchFactory.AddServiceHandler(cache.ResourceEventHandlerFuncs{
+	n.watchFactory.AddServiceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			svc := obj.(*kapi.Service)
 			err := npw.addService(svc)
@@ -388,7 +420,8 @@ func (n *OvnNode) watchLocalPorts(npw *localPortWatcherData) error {
 		UpdateFunc: func(old, new interface{}) {
 			svcNew := new.(*kapi.Service)
 			svcOld := old.(*kapi.Service)
-			if reflect.DeepEqual(svcNew.Spec, svcOld.Spec) {
+			if reflect.DeepEqual(svcNew.Spec, svcOld.Spec) &&
+				reflect.DeepEqual(svcNew.Status, svcOld.Status) {
 				return
 			}
 			err := npw.deleteService(svcOld)
@@ -408,7 +441,7 @@ func (n *OvnNode) watchLocalPorts(npw *localPortWatcherData) error {
 			}
 		},
 	}, npw.syncServices)
-	return err
+	return nil
 }
 
 func cleanupLocalnetGateway(physnet string) error {
@@ -430,4 +463,33 @@ func cleanupLocalnetGateway(physnet string) error {
 		}
 	}
 	return err
+}
+
+func getLoadBalancerIPTRules(svc *kapi.Service, svcPort kapi.ServicePort, gatewayIP string, targetPort int32) []iptRule {
+	var rules []iptRule
+	ingPort := fmt.Sprintf("%d", svcPort.Port)
+	for _, ing := range svc.Status.LoadBalancer.Ingress {
+		if ing.IP == "" {
+			continue
+		}
+		rules = append(rules, iptRule{
+			table: "nat",
+			chain: iptableNodePortChain,
+			args: []string{
+				"-d", ing.IP,
+				"-p", string(svcPort.Protocol), "--dport", ingPort,
+				"-j", "DNAT", "--to-destination", util.JoinHostPortInt32(gatewayIP, targetPort),
+			},
+		})
+		rules = append(rules, iptRule{
+			table: "filter",
+			chain: iptableNodePortChain,
+			args: []string{
+				"-d", ing.IP,
+				"-p", string(svcPort.Protocol), "--dport", ingPort,
+				"-j", "ACCEPT",
+			},
+		})
+	}
+	return rules
 }

@@ -15,6 +15,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/spf13/afero"
 
 	"k8s.io/klog"
 	kexec "k8s.io/utils/exec"
@@ -35,6 +36,7 @@ const (
 	ovnAppctlCommand   = "ovn-appctl"
 	ovsdbClientCommand = "ovsdb-client"
 	ovsdbToolCommand   = "ovsdb-tool"
+	arpingCommand      = "arping"
 	ipCommand          = "ip"
 	powershellCommand  = "powershell"
 	netshCommand       = "netsh"
@@ -59,6 +61,9 @@ var (
 	savedOVNRunDir = ovnRunDir
 )
 
+var ovnCmdRetryCount = 200
+var AppFs = afero.NewOsFs()
+
 // PrepareTestConfig restores default config values. Used by testcases to
 // provide a pristine environment between tests.
 func PrepareTestConfig() {
@@ -74,7 +79,7 @@ func runningPlatform() (string, error) {
 	if runtime.GOOS == windowsOS {
 		return windowsOS, nil
 	}
-	fileContents, err := ioutil.ReadFile(osRelease)
+	fileContents, err := afero.ReadFile(AppFs, osRelease)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse file %s (%v)", osRelease, err)
 	}
@@ -122,6 +127,7 @@ type execHelper struct {
 	ovsdbToolPath   string
 	ovnRunDir       string
 	ipPath          string
+	arpingPath      string
 	powershellPath  string
 	netshPath       string
 	routePath       string
@@ -251,6 +257,10 @@ func SetExecWithoutOVS(exec kexec.Interface) error {
 		if err != nil {
 			return err
 		}
+		runner.arpingPath, err = exec.LookPath(arpingCommand)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -364,7 +374,7 @@ func RunOVNAppctlWithTimeout(timeout int, args ...string) (string, string, error
 // poll waitng for service to become available
 func runOVNretry(cmdPath string, envVars []string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
 
-	retriesLeft := 200
+	retriesLeft := ovnCmdRetryCount
 	for {
 		stdout, stderr, err := runWithEnvVars(cmdPath, envVars, args...)
 		if err == nil {
@@ -394,7 +404,7 @@ var SkippedNbctlDaemonCounter uint64
 func getNbctlSocketPath() (string, error) {
 	// Try already-set OVN_NB_DAEMON environment variable
 	if nbctlSocketPath := os.Getenv("OVN_NB_DAEMON"); nbctlSocketPath != "" {
-		if _, err := os.Stat(nbctlSocketPath); err != nil {
+		if _, err := AppFs.Stat(nbctlSocketPath); err != nil {
 			return "", fmt.Errorf("OVN_NB_DAEMON ovn-nbctl daemon control socket %s missing: %v",
 				nbctlSocketPath, err)
 		}
@@ -407,10 +417,10 @@ func getNbctlSocketPath() (string, error) {
 	for _, runDir := range dirs {
 		// Try autodetecting the socket path based on the nbctl daemon pid
 		pidfile := filepath.Join(runDir, "ovn-nbctl.pid")
-		if pid, err := ioutil.ReadFile(pidfile); err == nil {
+		if pid, err := afero.ReadFile(AppFs, pidfile); err == nil {
 			fname := fmt.Sprintf("ovn-nbctl.%s.ctl", strings.TrimSpace(string(pid)))
 			nbctlSocketPath := filepath.Join(runDir, fname)
-			if _, err := os.Stat(nbctlSocketPath); err == nil {
+			if _, err := AppFs.Stat(nbctlSocketPath); err == nil {
 				return "OVN_NB_DAEMON=" + nbctlSocketPath, nil
 			}
 		}
@@ -587,7 +597,7 @@ func RunOVNSBAppCtl(args ...string) (string, string, error) {
 func RunOVNNorthAppCtl(args ...string) (string, string, error) {
 	var cmdArgs []string
 
-	pid, err := ioutil.ReadFile(runner.ovnRunDir + "ovn-northd.pid")
+	pid, err := afero.ReadFile(AppFs, runner.ovnRunDir+"ovn-northd.pid")
 	if err != nil {
 		return "", "", fmt.Errorf("failed to run the command since failed to get ovn-northd's pid: %v", err)
 	}
@@ -604,7 +614,7 @@ func RunOVNNorthAppCtl(args ...string) (string, string, error) {
 // RunOVNControllerAppCtl runs an 'ovs-appctl -t ovn-controller.pid.ctl command'.
 func RunOVNControllerAppCtl(args ...string) (string, string, error) {
 	var cmdArgs []string
-	pid, err := ioutil.ReadFile(runner.ovnRunDir + "ovn-controller.pid")
+	pid, err := afero.ReadFile(AppFs, runner.ovnRunDir+"ovn-controller.pid")
 	if err != nil {
 		return "", "", fmt.Errorf("failed to get ovn-controller pid : %v", err)
 	}
@@ -620,7 +630,7 @@ func RunOVNControllerAppCtl(args ...string) (string, string, error) {
 // RunOvsVswitchdAppCtl runs an 'ovs-appctl -t /var/run/openvsiwthc/ovs-vswitchd.pid.ctl command'
 func RunOvsVswitchdAppCtl(args ...string) (string, string, error) {
 	var cmdArgs []string
-	pid, err := ioutil.ReadFile(savedOVSRunDir + "ovs-vswitchd.pid")
+	pid, err := afero.ReadFile(AppFs, savedOVSRunDir+"ovs-vswitchd.pid")
 	if err != nil {
 		return "", "", fmt.Errorf("failed to get ovs-vswitch pid : %v", err)
 	}
@@ -655,6 +665,12 @@ func RunIP(args ...string) (string, string, error) {
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
 }
 
+// RunArping runs a command via the "arping" utility
+func RunArping(args ...string) (string, string, error) {
+	stdout, stderr, err := run(runner.arpingPath, args...)
+	return strings.TrimSpace(stdout.String()), stderr.String(), err
+}
+
 // RunPowershell runs a command via the Windows powershell utility
 func RunPowershell(args ...string) (string, string, error) {
 	stdout, stderr, err := run(runner.powershellPath, args...)
@@ -673,12 +689,12 @@ func RunRoute(args ...string) (string, string, error) {
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
 }
 
-// AddNormalActionOFFlow replaces flows in the bridge with a NORMAL action flow
-func AddNormalActionOFFlow(bridgeName string) (string, string, error) {
+// AddFloodActionOFFlow replaces flows in the bridge with a FLOOD action flow
+func AddFloodActionOFFlow(bridgeName string) (string, string, error) {
 	args := []string{"-O", "OpenFlow13", "replace-flows", bridgeName, "-"}
 
 	stdin := &bytes.Buffer{}
-	stdin.Write([]byte("table=0,priority=0,actions=NORMAL\n"))
+	stdin.Write([]byte("table=0,priority=0,actions=FLOOD\n"))
 
 	cmd := runner.exec.Command(runner.ofctlPath, args...)
 	cmd.SetStdin(stdin)

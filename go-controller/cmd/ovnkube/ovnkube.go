@@ -8,8 +8,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"text/tabwriter"
 	"text/template"
@@ -189,13 +189,13 @@ func runOvnKube(ctx *cli.Context) error {
 		return fmt.Errorf("failed to initialize exec helper: %v", err)
 	}
 
-	clientset, err := util.NewClientset(&config.Kubernetes)
+	clientset, egressIPClientset, egressFirewallClientset, crdClientset, err := util.NewClientsets(&config.Kubernetes)
 	if err != nil {
 		return err
 	}
 
 	// create factory and start the controllers asked for
-	factory, err := factory.NewWatchFactory(clientset)
+	factory, err := factory.NewWatchFactory(clientset, egressIPClientset, egressFirewallClientset, crdClientset)
 	if err != nil {
 		return err
 	}
@@ -226,11 +226,9 @@ func runOvnKube(ctx *cli.Context) error {
 	}
 
 	stopChan := make(chan struct{})
+	wg := &sync.WaitGroup{}
 
 	if master != "" {
-		if runtime.GOOS == "windows" {
-			return fmt.Errorf("master nodes cannot be of OS type: Windows")
-		}
 		var ovnNBClient, ovnSBClient goovn.Client
 		var err error
 
@@ -247,8 +245,8 @@ func runOvnKube(ctx *cli.Context) error {
 		// since we capture some metrics in Start()
 		metrics.RegisterMasterMetrics(ovnNBClient, ovnSBClient)
 
-		ovnController := ovn.NewOvnController(clientset, factory, stopChan, nil, ovnNBClient, ovnSBClient)
-		if err := ovnController.Start(clientset, master); err != nil {
+		ovnController := ovn.NewOvnController(clientset, egressIPClientset, egressFirewallClientset, factory, stopChan, nil, ovnNBClient, ovnSBClient, util.EventRecorder(clientset))
+		if err := ovnController.Start(clientset, master, wg); err != nil {
 			return err
 		}
 	}
@@ -261,7 +259,7 @@ func runOvnKube(ctx *cli.Context) error {
 		metrics.RegisterNodeMetrics()
 		start := time.Now()
 		n := ovnnode.NewNode(clientset, factory, node, stopChan, util.EventRecorder(clientset))
-		if err := n.Start(); err != nil {
+		if err := n.Start(wg); err != nil {
 			return err
 		}
 		end := time.Since(start)
@@ -284,6 +282,7 @@ func runOvnKube(ctx *cli.Context) error {
 	<-ctx.Context.Done()
 	close(stopChan)
 	factory.Shutdown()
+	wg.Wait()
 	return nil
 }
 
