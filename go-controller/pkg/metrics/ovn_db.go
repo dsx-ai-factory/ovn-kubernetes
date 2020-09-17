@@ -572,6 +572,27 @@ func RegisterOvnDBMetrics(clientset *kubernetes.Clientset, k8sNodeName string,
 		for {
 			select {
 			case <-ticker.C:
+
+				if dbIsClustered {
+					// volatile metrics has to be reset prior
+					// to gathering to avoid duplicates
+					metricDBClusterCID.Reset()
+					metricDBClusterSID.Reset()
+					metricDBClusterServerStatus.Reset()
+					metricDBClusterTerm.Reset()
+					metricDBClusterServerRole.Reset()
+					metricDBClusterServerVote.Reset()
+					metricDBClusterElectionTimer.Reset()
+					metricDBClusterLogIndexStart.Reset()
+					metricDBClusterLogIndexNext.Reset()
+					metricDBClusterLogNotCommitted.Reset()
+					metricDBClusterLogNotApplied.Reset()
+					metricDBClusterConnIn.Reset()
+					metricDBClusterConnOut.Reset()
+					metricDBClusterConnInErr.Reset()
+					metricDBClusterConnOutErr.Reset()
+				}
+
 				for direction, database := range dirDbMap {
 					if dbIsClustered {
 						ovnDBClusterStatusMetricsUpdater(direction, database)
@@ -581,6 +602,7 @@ func RegisterOvnDBMetrics(clientset *kubernetes.Clientset, k8sNodeName string,
 					ovnE2eTimeStampUpdater(direction, database)
 				}
 			case <-tickerDbHealth.C:
+				metricDBHealthStatus.Reset()
 				if dbIsClustered {
 					for direction, database := range dirDbMap {
 						ovnDBHealthStatusUpdater(direction, database)

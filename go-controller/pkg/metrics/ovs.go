@@ -393,6 +393,7 @@ func getOvsDatapaths() (datapathsList []string, err error) {
 		return nil, fmt.Errorf("failed to get output of ovs-dpctl dump-dps "+
 			"stderr(%s) :(%v)", stderr, err)
 	}
+
 	for _, kvPair := range strings.Split(stdout, "\n") {
 		var datapathType, datapathName string
 		output := strings.TrimSpace(kvPair)
@@ -419,6 +420,7 @@ func setOvsDatapathMetrics(datapaths []string) (err error) {
 		}
 	}()
 
+	metricOvsDpIf.Reset()
 	for _, datapathName = range datapaths {
 		stdout, stderr, err = util.RunOVSDpctl("show", datapathName)
 		if err != nil {
@@ -590,6 +592,12 @@ func ovsBridgeMetricsUpdate(metricsScrapeInterval int, stopChan chan struct{}) {
 	for {
 		select {
 		case <-ticker.C:
+			// we need to reset metrics vectors prior to collecting new ones.
+			// this reset is local to prom client endpoint only and helps us
+			// improve performance by deleting non-actual stale metrics
+			for _, interfaceMetricInfo := range ovsInterfaceMetricsDataMap {
+				interfaceMetricInfo.metric.Reset()
+			}
 			// set geneve interface metrics
 			err := geneveInterfaceMetricsUpdate()
 			if err != nil {
@@ -743,10 +751,13 @@ func setOvsInterfaceStatusFields(interfaceBridge, interfacePort, interfaceName, 
 			firmwareVersion = strings.Split(kvPair, "=")[1]
 		}
 	}
+	metricInterafceDriverName.Reset()
 	metricInterafceDriverName.WithLabelValues(interfaceBridge, interfacePort,
 		interfaceName, driverName).Set(1)
+	metricInterafceDriverVersion.Reset()
 	metricInterafceDriverVersion.WithLabelValues(interfaceBridge, interfacePort,
 		interfaceName, driverVersion).Set(1)
+	metricInterafceFirmwareVersion.Reset()
 	metricInterafceFirmwareVersion.WithLabelValues(interfaceBridge, interfacePort,
 		interfaceName, firmwareVersion).Set(1)
 }
