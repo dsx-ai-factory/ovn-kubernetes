@@ -849,7 +849,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:lb_force_snat_ip=" + lrpIP,
-				"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:learn_from_arp_request=false",
+				"ovn-nbctl --timeout=15 -- --if-exists remove logical_router " + gwRouter + " options learn_from_arp_request -- set logical_router " + gwRouter + " options:always_learn_from_arp_request=false",
 				"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:dynamic_neigh_routers=true",
 				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " " + clusterCIDR + " " + drLrpIP,
 			})
@@ -879,7 +879,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:lb_force_snat_ip=" + lrpIP,
-				"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:learn_from_arp_request=false",
+				"ovn-nbctl --timeout=15 -- --if-exists remove logical_router " + gwRouter + " options learn_from_arp_request -- set logical_router " + gwRouter + " options:always_learn_from_arp_request=false",
 				"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:dynamic_neigh_routers=true",
 				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " " + clusterCIDR + " " + drLrpIP,
 			})
@@ -1038,7 +1038,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:lb_force_snat_ip=" + lrpIP,
-				"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:learn_from_arp_request=false",
+				"ovn-nbctl --timeout=15 -- --if-exists remove logical_router " + gwRouter + " options learn_from_arp_request -- set logical_router " + gwRouter + " options:always_learn_from_arp_request=false",
 				"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:dynamic_neigh_routers=true",
 				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " " + clusterCIDR + " " + drLrpIP,
 			})
@@ -1072,7 +1072,7 @@ var _ = Describe("Gateway Init Operations", func() {
 
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:lb_force_snat_ip=" + lrpIP,
-				"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:learn_from_arp_request=false",
+				"ovn-nbctl --timeout=15 -- --if-exists remove logical_router " + gwRouter + " options learn_from_arp_request -- set logical_router " + gwRouter + " options:always_learn_from_arp_request=false",
 				"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:dynamic_neigh_routers=true",
 				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " " + clusterCIDR + " " + drLrpIP,
 			})
