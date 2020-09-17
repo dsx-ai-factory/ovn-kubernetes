@@ -93,7 +93,7 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 		nexthopIPs = append(nexthopIPs, drLRPIP.IP)
 	}
 	for _, entry := range clusterIPSubnet {
-		drLRPIP, err := gatewayForSubnet(nexthopIPs, entry)
+		drLRPIP, err := util.MatchIPFamily(utilnet.IsIPv6CIDR(entry), nexthopIPs)
 		if err != nil {
 			return fmt.Errorf("failed to add a static route in GR %s with distributed "+
 				"router as the nexthop: %v",
@@ -270,7 +270,7 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 	// Add source IP address based routes in distributed router
 	// for this gateway router.
 	for _, hostSubnet := range hostSubnets {
-		gwLRPIP, err := gatewayForSubnet(nexthopIPs, hostSubnet)
+		gwLRPIP, err := util.MatchIPFamily(utilnet.IsIPv6CIDR(hostSubnet), nexthopIPs)
 		if err != nil {
 			return fmt.Errorf("failed to add source IP address based "+
 				"routes in distributed router %s: %v",
@@ -297,13 +297,15 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 			externalIPs[i] = ip.IP
 		}
 		for _, entry := range clusterIPSubnet {
-			externalIP, err := gatewayForSubnet(externalIPs, entry)
+			externalIP, err := util.MatchIPFamily(utilnet.IsIPv6CIDR(entry), externalIPs)
 			if err != nil {
 				return fmt.Errorf("failed to create default SNAT rules for gateway router %s: %v",
 					gatewayRouter, err)
 			}
-
-			stdout, stderr, err = util.RunOVNNbctl("--may-exist", "lr-nat-add",
+			// delete the existing lr-nat rule first otherwise gateway init fails
+			// if the external ip has changed, but the logical ip has stayed the same
+			stdout, stderr, err := util.RunOVNNbctl("--if-exists", "lr-nat-del",
+				gatewayRouter, "snat", entry.String(), "--", "lr-nat-add",
 				gatewayRouter, "snat", externalIP.String(), entry.String())
 			if err != nil {
 				return fmt.Errorf("failed to create default SNAT rules for gateway router %s, "+
@@ -524,7 +526,9 @@ func (oc *Controller) addNodeLocalNatEntries(node *kapi.Node, mgmtPortMAC string
 	}
 
 	mgmtPortName := util.K8sPrefix + node.Name
-	stdout, stderr, err := util.RunOVNNbctl("--may-exist", "lr-nat-add", ovnClusterRouter, "dnat_and_snat",
+	stdout, stderr, err := util.RunOVNNbctl("--if-exists", "lr-nat-del", ovnClusterRouter,
+		"dnat_and_snat", externalIP.String(), "--",
+		"lr-nat-add", ovnClusterRouter, "dnat_and_snat",
 		externalIP.String(), mgmtPortIfAddr.IP.String(), mgmtPortName, mgmtPortMAC)
 	if err != nil {
 		return fmt.Errorf("failed to add dnat_and_snat entry for the management port on node %s, "+
@@ -546,18 +550,4 @@ func (oc *Controller) addNodeLocalNatEntries(node *kapi.Node, mgmtPortMAC string
 			node.Name, err)
 	}
 	return nil
-}
-
-func gatewayForSubnet(gateways []net.IP, subnet *net.IPNet) (net.IP, error) {
-	isIPv6 := utilnet.IsIPv6CIDR(subnet)
-	for _, ip := range gateways {
-		if utilnet.IsIPv6(ip) == isIPv6 {
-			return ip, nil
-		}
-	}
-	if isIPv6 {
-		return nil, fmt.Errorf("no IPv6 gateway available")
-	} else {
-		return nil, fmt.Errorf("no IPv4 gateway available")
-	}
 }

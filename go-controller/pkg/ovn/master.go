@@ -441,7 +441,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		}
 		for _, subnet := range subnets {
 			hostIfAddr := util.GetNodeManagementIfAddr(subnet)
-			l3GatewayConfigIP, err := util.MatchIPFamily(utilnet.IsIPv6(hostIfAddr.IP), l3GatewayConfig.IPAddresses)
+			l3GatewayConfigIP, err := util.MatchIPNetFamily(utilnet.IsIPv6(hostIfAddr.IP), l3GatewayConfig.IPAddresses)
 			if err != nil {
 				return err
 			}
@@ -826,8 +826,9 @@ func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode, newN
 // delete chassis of the given nodeName/chassisName map
 func deleteChassis(ovnSBClient goovn.Client, chassisMap map[string]string) {
 	cmds := make([]*goovn.OvnCommand, 0, len(chassisMap))
-	for _, chassisName := range chassisMap {
+	for chassisHostname, chassisName := range chassisMap {
 		if chassisName != "" {
+			klog.Infof("Deleting stale chassis %s (%s)", chassisHostname, chassisName)
 			cmd, err := ovnSBClient.ChassisDel(chassisName)
 			if err != nil {
 				klog.Errorf("Unable to create the ChassisDel command for chassis: %s from the sbdb", chassisName)

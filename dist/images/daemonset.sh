@@ -368,6 +368,11 @@ ovn_image=${image} \
   ovn_ssl_en=${ovn_ssl_en} \
   j2 ../templates/ovn-host.yaml.j2 -o ../yaml/ovn-host.yaml
 
+ovn_image=${image} \
+  ovn_image_pull_policy=${image_pull_policy} \
+  ovn_unprivileged_mode=${ovn_unprivileged_mode} \
+  j2 ../templates/ovs-node.yaml.j2 -o ../yaml/ovs-node.yaml
+
 # ovn-setup.yaml
 net_cidr=${OVN_NET_CIDR:-"10.128.0.0/14/23"}
 svc_cidr=${OVN_SVC_CIDR:-"172.30.0.0/16"}

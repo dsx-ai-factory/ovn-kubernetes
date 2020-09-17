@@ -1,7 +1,7 @@
 ---
 # ovnkube-node
 # daemonset version 3
-# starts node daemons for ovs and ovn, each in a separate container
+# starts node daemons for ovn, each in a separate container
 # it is run on all nodes
 kind: DaemonSet
 apiVersion: apps/v1
@@ -42,6 +42,7 @@ spec:
       {% endif %}
       priorityClassName: "system-node-critical"
       containers:
+
       - name: ovn-controller
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
@@ -286,9 +287,6 @@ spec:
       - name: host-slash
         hostPath:
           path: /
-      - name: host-config-openvswitch
-        hostPath:
-          path: /etc/origin/openvswitch
       - name: host-var-lib-ovs
         hostPath:
           path: /var/lib/openvswitch

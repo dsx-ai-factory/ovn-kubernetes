@@ -98,6 +98,8 @@ spec:
           readOnly: true
         - mountPath: /var/run/ovn/
           name: host-var-run-ovs
+        - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
 
         resources:
           requests:
@@ -164,6 +166,8 @@ spec:
           name: host-ovn-cert
           readOnly: true
         - mountPath: /var/run/ovn/
+          name: host-var-run-ovs
+        - mountPath: /var/run/openvswitch/
           name: host-var-run-ovs
 
         resources:
