@@ -65,7 +65,7 @@ spec:
     spec:
       terminationGracePeriodSeconds: 30
       imagePullSecrets:
-        - name: registry-credentials
+        - name: ovncni-quay-ips
       serviceAccountName: ovn
       hostNetwork: true
       priorityClassName: "system-cluster-critical"
