@@ -214,7 +214,7 @@ ovn_nb_raft_election_timer=${OVN_NB_RAFT_ELECTION_TIMER:-1000}
 echo "ovn_nb_raft_election_timer: ${ovn_nb_raft_election_timer}"
 ovn_sb_raft_election_timer=${OVN_SB_RAFT_ELECTION_TIMER:-1000}
 echo "ovn_sb_raft_election_timer: ${ovn_sb_raft_election_timer}"
-ovn_master_count=${OVN_MASTER_COUNT:-"1"}
+ovn_master_count=${OVN_MASTER_COUNT:-"3"}
 echo "ovn_master_count: ${ovn_master_count}"
 ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-"100000"}
 echo "ovn_remote_probe_interval: ${ovn_remote_probe_interval}"

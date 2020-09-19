@@ -12,7 +12,7 @@ metadata:
       This Deployment launches the ovn central component, namely ovn-northd
 spec:
   progressDeadlineSeconds: 600
-  replicas: {{ ovn_master_count | default(1|int) }}
+  replicas: {{ ovn_master_count | default(3|int) }}
   revisionHistoryLimit: 10
   selector:
     matchLabels:
