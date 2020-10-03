@@ -24,7 +24,7 @@ spec:
       labels:
        severity: critical
       annotations:
-       description: There are multiple ovnkube-manager leader’s
+       description: There are multiple ovnkube-manager leaders
 
     - alert: OvnKubeManagerNoLeader
       expr: max(ovnkube_master_leader) == 0
@@ -309,7 +309,7 @@ spec:
        severity: critical
       annotations:
        description: |
-         Pod ovn-kubernetes/ {{ $labels.pod }} ovn-northd container’s 
+         Pod ovn-kubernetes/ {{ $labels.pod }} ovn-northd containers
          transaction error is {{ printf "%.2f" $value }} per second
 
     - alert: OvnNorthdTxnIncomplete
@@ -320,7 +320,7 @@ spec:
        severity: critical
       annotations:
        description: |
-         Pod ovn-kubernetes/ {{ $labels.pod }} ovn-northd container’s 
+         Pod ovn-kubernetes/ {{ $labels.pod }} ovn-northd containers
          transaction incomplete is {{ printf "%.2f" $value }} per second.
 
     - alert: OvnControllerContainerRestarts
@@ -343,7 +343,7 @@ spec:
        severity: critical
       annotations:
        description: |
-         Pod ovn-kubernetes/ {{ $labels.pod }} ovn-controller container’s 
+         Pod ovn-kubernetes/ {{ $labels.pod }} ovn-controller containers
          transaction error is {{ printf "%.2f" $value }} per second.
 
     - alert: OvnControllerTxnIncomplete
@@ -354,7 +354,7 @@ spec:
        severity: critical
       annotations:
        description: |
-         Pod ovn-kubernetes/ {{ $labels.pod }} ovn-controller container’s 
+         Pod ovn-kubernetes/ {{ $labels.pod }} ovn-controller containers
          transaction incomplete is {{ printf "%.2f" $value }} per second
 
     - alert: OvnControllerLflowRun
@@ -365,7 +365,7 @@ spec:
        severity: warning
       annotations:
        description: |
-         Pod ovn-kubernetes/ {{ $labels.pod }} ovn-controller container’s 
+         Pod ovn-kubernetes/ {{ $labels.pod }} ovn-controller containers
          logical flow table translation is {{ printf "%.2f" $value }} per second.
        
     - alert: OvnControllerLowerGenevePortCount
@@ -380,9 +380,7 @@ spec:
        description: |
          The list of nodes that have a lower number of Geneve Ports
          and counts they have 
-         {{ range query "ovn_controller_integration_bridge_geneve_ports_total{
-             job="ovnkube-node", namespace="ovn-kubernetes"} !=  scalar(count(kube_node_info)) - 1” 
-         }}
+         {{ range query "ovn_controller_integration_bridge_geneve_ports_total{job='ovnkube-node', namespace='ovn-kubernetes'} !=  scalar(count(kube_node_info)) - 1" }}
          {{ .Labels.instance }}: {{ .Value }}
          {{ end }}.
  
