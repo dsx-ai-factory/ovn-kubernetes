@@ -294,7 +294,7 @@ spec:
          restarting {{ printf "%.2f" $value }} times / 5 minutes
 
     - alert: OvnNorthdNotActive
-      expr: max(ovnkube_master_leader) == 0
+      expr: sum(ovn_northd_status) != 1
       for: 4m
       labels:
        severity: critical
