@@ -57,7 +57,8 @@ var _ = Describe("Node Operations", func() {
 					"external_ids:ovn-remote-probe-interval=%d "+
 					"external_ids:ovn-openflow-probe-interval=%d "+
 					"external_ids:hostname=\"%s\" "+
-					"external_ids:ovn-monitor-all=true",
+					"external_ids:ovn-monitor-all=true "+
+					"external_ids:ovn-enable-lflow-cache=false",
 					nodeIP, interval, ofintval, nodeName),
 			})
 
@@ -110,7 +111,8 @@ var _ = Describe("Node Operations", func() {
 					"external_ids:ovn-remote-probe-interval=%d "+
 					"external_ids:ovn-openflow-probe-interval=%d "+
 					"external_ids:hostname=\"%s\" "+
-					"external_ids:ovn-monitor-all=true",
+					"external_ids:ovn-monitor-all=true "+
+					"external_ids:ovn-enable-lflow-cache=false",
 					nodeIP, interval, ofintval, nodeName),
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
