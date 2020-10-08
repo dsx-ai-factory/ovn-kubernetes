@@ -1,6 +1,7 @@
 package node
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -25,8 +26,11 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
+	ctypes "github.com/containernetworking/cni/pkg/types"
+	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	honode "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
+	cnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
@@ -45,6 +49,16 @@ type OvnNode struct {
 	stopChan     chan struct{}
 	recorder     record.EventRecorder
 	gateway      Gateway
+
+	defaultNodeController     *ovnNodeController
+	nonDefaultNodeControllers sync.Map
+	defaultNetAttachDefs      sync.Map
+}
+
+type ovnNodeController struct {
+	node       *OvnNode
+	nadInfo    *util.NetAttachDefInfo
+	podHandler *factory.Handler
 }
 
 // NewNode creates a new controller for node management
@@ -245,20 +259,20 @@ func isOVNControllerReady(name string) (bool, error) {
 	return true, nil
 }
 
-// Starting with v21.03.0 OVN sets OVS.Interface.external-id:ovn-installed
-// and OVNSB.Port_Binding.up when all OVS flows associated to a
-// logical port have been successfully programmed.
-func getOVNIfUpCheckMode() (bool, error) {
-	if _, stderr, err := util.RunOVNSbctl("--columns=up", "list", "Port_Binding"); err != nil {
-		if strings.Contains(stderr, "does not contain a column") {
-			klog.Infof("Falling back to using legacy CNI OVS flow readiness checks")
-			return false, nil
-		}
-		return false, fmt.Errorf("failed to check if port_binding is supported in OVN, stderr: %q, error: %v",
-			stderr, err)
+func (n *OvnNode) NewOvnNodeController(nadInfo *util.NetAttachDefInfo) (*ovnNodeController, error) {
+	nc := &ovnNodeController{
+		node:    n,
+		nadInfo: nadInfo,
 	}
-	klog.Infof("Detected support for port binding with external IDs")
-	return true, nil
+	if !nadInfo.NotDefault {
+		n.defaultNodeController = nc
+	} else {
+		_, loaded := n.nonDefaultNodeControllers.LoadOrStore(nadInfo.NetName, nc)
+		if loaded {
+			return nil, fmt.Errorf("non default Network attachment definition %s already exists", nadInfo.NetName)
+		}
+	}
+	return nc, nil
 }
 
 // Start learns the subnets assigned to it by the master controller
@@ -270,7 +284,6 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	var mgmtPort ManagementPort
 	var mgmtPortConfig *managementPortConfig
 	var cniServer *cni.Server
-	var isOvnUpEnabled bool
 	networkUnavailableTaint := &kapi.Taint{
 		Key:    types.OvnK8sNetworkUnavailable,
 		Effect: kapi.TaintEffectNoSchedule,
@@ -329,7 +342,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 			klog.Infof("Waiting to retrieve node %s: %v", n.name, err)
 			return false, nil
 		}
-		subnets, err = util.ParseNodeHostSubnetAnnotation(node)
+		subnets, err = util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
 		if err != nil {
 			klog.Infof("Waiting for node %s to start, no annotation found on node for subnet: %v", n.name, err)
 			return false, nil
@@ -343,15 +356,11 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 
 	// Create CNI Server
 	if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
-		isOvnUpEnabled, err = getOVNIfUpCheckMode()
-		if err != nil {
-			return err
-		}
 		kclient, ok := n.Kube.(*kube.Kube)
 		if !ok {
 			return fmt.Errorf("cannot get kubeclient for starting CNI server")
 		}
-		cniServer, err = cni.NewCNIServer("", isOvnUpEnabled, n.watchFactory, kclient.KClient)
+		cniServer, err = cni.NewCNIServer("", true, n.watchFactory, kclient.KClient)
 		if err != nil {
 			return err
 		}
@@ -538,9 +547,29 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		klog.Infof("Unable to remove taint %s on node %s: %v", networkUnavailableTaint.ToString(), n.name, err)
 	}
 
-	if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
-		n.watchSmartNicPods(isOvnUpEnabled)
-	} else {
+	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
+		// create default OVN Node Controller to watch for Pods event for smart-nic plumbing/annotation
+		defaultNetConf := &cnitypes.NetConf{
+			NetConf: ctypes.NetConf{
+				Name: types.DefaultNetworkName,
+			},
+			NetCidr:    config.Default.RawClusterSubnets,
+			MTU:        config.Default.MTU,
+			NotDefault: false,
+		}
+		nadInfo := util.NewNetAttachDefInfo("default", types.DefaultNetworkName, defaultNetConf)
+		nc, _ := n.NewOvnNodeController(nadInfo)
+
+		if config.OVNKubernetesFeature.EnableMultiNetwork {
+			_ = n.watchNetworkAttachmentDefinitions()
+		}
+
+		if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
+			nc.watchSmartNicPods()
+		}
+	}
+
+	if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
 		// start the cni server
 		err = cniServer.Start(cni.HandleCNIRequest)
 	}
@@ -548,12 +577,116 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	return err
 }
 
-func getEndpointAddresses(endpointSlice *discovery.EndpointSlice) []string {
-	endpointsAddress := make([]string, 0)
-	for _, endpoint := range endpointSlice.Endpoints {
-		endpointsAddress = append(endpointsAddress, endpoint.Addresses...)
+// watchNetworkAttachmentDefinitions starts the watching of network attachment definition
+// resource and calls back the appropriate handler logic
+func (n *OvnNode) watchNetworkAttachmentDefinitions() *factory.Handler {
+	return n.watchFactory.AddNetworkattachmentdefinitionHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			netattachdef := obj.(*nettypes.NetworkAttachmentDefinition)
+			n.addNetworkAttachDefinition(netattachdef)
+		},
+		UpdateFunc: func(old, new interface{}) {},
+		DeleteFunc: func(obj interface{}) {
+			netattachdef := obj.(*nettypes.NetworkAttachmentDefinition)
+			n.deleteNetworkAttachDefinition(netattachdef)
+		},
+	}, nil)
+}
+
+func (n *OvnNode) addNetworkAttachDefinition(netattachdef *nettypes.NetworkAttachmentDefinition) {
+	netconf := &cnitypes.NetConf{MTU: config.Default.MTU}
+
+	// looking for network attachment definition that use OVN K8S CNI only
+	err := json.Unmarshal([]byte(netattachdef.Spec.Config), &netconf)
+	if err != nil {
+		klog.Errorf("Error parsing Network Attachment Definition %s: %v", netattachdef.Name, err)
+		return
 	}
-	return endpointsAddress
+
+	if netconf.Type != "ovn-k8s-cni-overlay" {
+		klog.V(5).Infof("Network Attachment Definition %s is not based on OVN plugin", netattachdef.Name)
+		return
+	}
+
+	if netconf.Name == "" {
+		netconf.Name = netattachdef.Name
+	}
+
+	nadInfo := util.NewNetAttachDefInfo(netattachdef.Namespace, netattachdef.Name, netconf)
+	if !nadInfo.NotDefault {
+		n.defaultNetAttachDefs.Store(netattachdef.Namespace+"_"+netattachdef.Name, true)
+		return
+	}
+
+	if nadInfo.NetName == types.DefaultNetworkName {
+		klog.Errorf("Non-default Network attachment definition's name cannot be %s", types.DefaultNetworkName)
+		return
+	}
+
+	nc, err := n.NewOvnNodeController(nadInfo)
+	if err != nil {
+		klog.Errorf(err.Error())
+		return
+	}
+	n.nonDefaultNodeControllers.Store(nadInfo.NetName, nc)
+
+	if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
+		nc.watchSmartNicPods()
+	}
+}
+
+func (n *OvnNode) deleteNetworkAttachDefinition(netattachdef *nettypes.NetworkAttachmentDefinition) {
+	netconf := &cnitypes.NetConf{}
+
+	// looking for network attachment definition that use OVN K8S CNI only
+	err := json.Unmarshal([]byte(netattachdef.Spec.Config), &netconf)
+	if err != nil {
+		klog.Errorf("Error parsing Network Attachment Definition %s: %v", netattachdef.Name, err)
+		return
+	}
+
+	if netconf.Type != "ovn-k8s-cni-overlay" {
+		klog.V(5).Infof("Network Attachment Definition %s is not based on OVN plugin", netattachdef.Name)
+		return
+	}
+
+	if netconf.Name == "" {
+		netconf.Name = netattachdef.Name
+	}
+
+	nadInfo := util.NewNetAttachDefInfo(netattachdef.Namespace, netattachdef.Name, netconf)
+	if !nadInfo.NotDefault {
+		n.defaultNetAttachDefs.Delete(netattachdef.Namespace + "_" + netattachdef.Name)
+		return
+	}
+
+	v, ok := n.nonDefaultNodeControllers.Load(nadInfo.NetName)
+	if !ok {
+		klog.Errorf("Failed to find network controller for network %s", nadInfo.NetName)
+		return
+	}
+
+	nc := v.(*ovnNodeController)
+	if nc.nadInfo.Namespace != netattachdef.Namespace || nc.nadInfo.Name != netattachdef.Name {
+		// this is a different net-attach-def happens to own the same netconf.Name
+		return
+	}
+	if nc.podHandler != nil {
+		nc.node.watchFactory.RemovePodHandler(nc.podHandler)
+	}
+	n.nonDefaultNodeControllers.Delete(nadInfo.NetName)
+}
+
+func getReadyEndpointAddresses(endpointSlice *discovery.EndpointSlice) []string {
+	readyEndpointsAddress := make([]string, 0)
+	for _, endpoint := range endpointSlice.Endpoints {
+		//skip endpoints that are not ready
+		if endpoint.Conditions.Ready != nil && !*endpoint.Conditions.Ready {
+			continue
+		}
+		readyEndpointsAddress = append(readyEndpointsAddress, endpoint.Addresses...)
+	}
+	return readyEndpointsAddress
 }
 
 func (n *OvnNode) WatchEndpointSlices(nodeIP string) {
@@ -573,10 +706,10 @@ func (n *OvnNode) WatchEndpointSlices(nodeIP string) {
 		UpdateFunc: func(prevObj, obj interface{}) {
 			oldEndpointSlice := prevObj.(*discovery.EndpointSlice)
 			newEndpointSlice := obj.(*discovery.EndpointSlice)
-			oldEpAddr := getEndpointAddresses(oldEndpointSlice)
-			newEpAddr := getEndpointAddresses(newEndpointSlice)
+			oldReadyEpAddr := getReadyEndpointAddresses(oldEndpointSlice)
+			newReadyEpAddr := getReadyEndpointAddresses(newEndpointSlice)
 			if reflect.DeepEqual(oldEndpointSlice.Ports, newEndpointSlice.Ports) &&
-				reflect.DeepEqual(oldEpAddr, newEpAddr) {
+				reflect.DeepEqual(oldReadyEpAddr, newReadyEpAddr) {
 				return
 			}
 			klog.Infof("Processing update for endpoint slice %s on namespace %s",

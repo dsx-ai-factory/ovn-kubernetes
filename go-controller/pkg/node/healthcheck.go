@@ -138,8 +138,9 @@ func checkForStaleOVSInternalPorts() {
 // not scheduled to the node.
 func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCacheInterface) {
 	// Get all ovn-kuberntes Pod interfaces. these are OVS interfaces that have their external_ids:sandbox set.
-	out, stderr, err := util.RunOVSVsctl("--columns=name,external_ids", "--data=bare", "--no-headings",
-		"--format=csv", "find", "Interface", "external_ids:sandbox!=\"\"")
+	ovsArgs := []string{"--columns=name,external_ids", "--data=bare", "--no-headings",
+		"--format=csv", "find", "Interface", "external_ids:sandbox!=\"\""}
+	out, stderr, err := util.RunOVSVsctl(ovsArgs...)
 	if err != nil {
 		klog.Errorf("Failed to list ovn-k8s OVS interfaces:, stderr: %q, error: %v", stderr, err)
 		return
@@ -186,13 +187,13 @@ func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCac
 		klog.Errorf("Failed to list pods. %v", err)
 		return
 	}
-	expectedIfaceIds := make(map[string]bool)
+	expectedIfaceIdsWithoutPrefix := make(map[string]bool)
 	for _, pod := range pods {
-		if pod.Spec.NodeName == nodeName {
+		if pod.Spec.NodeName == nodeName && util.PodWantsNetwork(pod) {
 			// Note: wf (WatchFactory) *usually* returns pods assigned to this node, however we dont rely on it
 			// and add this check to filter out pods assigned to other nodes. (e.g when ovnkube master and node
 			// share the same process)
-			expectedIfaceIds[strings.Join([]string{pod.Namespace, pod.Name}, "_")] = true
+			expectedIfaceIdsWithoutPrefix[util.PodLogicalPortName(pod, "")] = true
 		}
 	}
 
@@ -204,7 +205,19 @@ func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCac
 				"skipping cleanup check for interface", ifaceInfo.Name)
 			continue
 		}
-		if _, ok := expectedIfaceIds[ifaceId]; !ok {
+		prefix := ""
+		netName, ok := ifaceInfo.Attributes["network_name"]
+		if ok {
+			prefix = util.GetNetworkPrefix(netName, false)
+			if !strings.HasPrefix(ifaceId, prefix) {
+				klog.Warningf("iface-id of OVS interface %s for network %s is invalid: %s", ifaceInfo.Name,
+					netName, ifaceId)
+				continue
+			}
+			ifaceId = strings.TrimPrefix(ifaceId, prefix)
+		}
+
+		if _, ok := expectedIfaceIdsWithoutPrefix[ifaceId]; !ok {
 			// TODO(adrianc): To make this more strict we can check if the interface is a VF representor
 			// interface via sriovnet.
 			klog.Warningf("Found stale OVS Interface, deleting OVS Port with interface %s", ifaceInfo.Name)

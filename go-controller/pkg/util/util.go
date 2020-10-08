@@ -8,11 +8,13 @@ import (
 	"strings"
 	"sync"
 
+	cnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/urfave/cli/v2"
 
+	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
@@ -198,6 +200,67 @@ func HashForOVN(s string) string {
 	return fmt.Sprintf("a%s", hashString)
 }
 
+type NetNameInfo struct {
+	// netconf's name
+	NetName    string
+	Prefix     string
+	NotDefault bool
+}
+
+type NetAttachDefInfo struct {
+	NetNameInfo
+	// net-attch-def's namespace and name
+	Namespace string
+	Name      string
+	NetCidr   string
+	MTU       int
+}
+
+func NewNetAttachDefInfo(namespace, name string, netconf *cnitypes.NetConf) *NetAttachDefInfo {
+	netName := "default"
+	if netconf.NotDefault {
+		netName = netconf.Name
+	}
+	prefix := GetNetworkPrefix(netName, !netconf.NotDefault)
+
+	nadInfo := NetAttachDefInfo{
+		Namespace:   namespace,
+		Name:        name,
+		NetCidr:     netconf.NetCidr,
+		MTU:         netconf.MTU,
+		NetNameInfo: NetNameInfo{netName, prefix, netconf.NotDefault},
+	}
+	return &nadInfo
+}
+
+// Note that for port_group and address_set, it does not allow the '-' character
+func GetNetworkPrefix(netName string, isDefault bool) string {
+	if isDefault {
+		return ""
+	}
+	return strings.ReplaceAll(netName, "-", ".") + "_"
+}
+
+// GetNetworkNameFromExternalId returns the network_name of the external_id strings
+func GetNetworkNameFromExternalId(externalId string) string {
+	netName := GetDbValByKey(externalId, "network_name")
+	if netName == "" {
+		netName = types.DefaultNetworkName
+	}
+	return netName
+}
+
+// GetDbValByKey returns the value of the specified key in a space separated string (each in the form of k=v)
+func GetDbValByKey(keyValString, key string) string {
+	keyVals := strings.Fields(keyValString)
+	for _, keyVal := range keyVals {
+		if strings.HasPrefix(keyVal, key+"=") {
+			return strings.TrimPrefix(keyVal, key+"=")
+		}
+	}
+	return ""
+}
+
 // UpdateIPsSlice will search for values of oldIPs in the slice "s" and update it with newIPs values of same IP family
 func UpdateIPsSlice(s, oldIPs, newIPs []string) []string {
 	n := make([]string, len(s))
@@ -223,4 +286,9 @@ func UpdateIPsSlice(s, oldIPs, newIPs []string) []string {
 		}
 	}
 	return n
+}
+
+// Builds the logical switch port name for a given pod.
+func PodLogicalPortName(pod *kapi.Pod, netPrefix string) string {
+	return netPrefix + pod.Namespace + "_" + pod.Name
 }

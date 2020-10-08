@@ -179,6 +179,8 @@ spec:
         {% if ovnkube_app_name=="ovnkube-node" -%}
         - name: OVN_SSL_ENABLE
           value: "{{ ovn_ssl_en }}"
+        - name: OVN_MULTI_NETWORK_ENABLE
+          value: "{{ ovn_multi_network_enable }}"
         {% endif -%}
         {% if ovnkube_app_name=="ovnkube-node-smart-nic-host" -%}
         - name: OVNKUBE_NODE_MODE

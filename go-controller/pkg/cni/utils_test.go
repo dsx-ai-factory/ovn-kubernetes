@@ -6,12 +6,13 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/stretchr/testify/mock"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
+	apitypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	"time"
 )
@@ -23,7 +24,7 @@ func newPod(namespace, name string, annotations map[string]string) *v1.Pod {
 	return &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        name,
-			UID:         types.UID(name),
+			UID:         apitypes.UID(name),
 			Namespace:   namespace,
 			Annotations: annotations,
 		},
@@ -44,45 +45,70 @@ var _ = Describe("CNI Utils tests", func() {
   "ip_address":"192.168.2.3/24",
   "gateway_ip":"192.168.2.1"}
 }`}
-			Expect(isOvnReady(podAnnot)).To(Equal(true))
+			Expect(isOvnReady(podAnnot, types.DefaultNetworkName)).To(Equal(true))
 		})
 
 		It("Returns false if OVN pod network annotation does not exist", func() {
 			podAnnot := map[string]string{}
-			Expect(isOvnReady(podAnnot)).To(Equal(false))
+			Expect(isOvnReady(podAnnot, types.DefaultNetworkName)).To(Equal(false))
 		})
 	})
 
 	Context("isSmartNICReady", func() {
 		It("Returns true if smartnic.connection-status is present and Status is Ready", func() {
+			scs := util.SmartNICConnectionStatus{Status: "Ready"}
 			podAnnot := map[string]string{
-				util.OvnPodAnnotationName:         `{"ip_address": "192.168.2.3/24"}`,
-				util.SmartNicConnetionStatusAnnot: `{"Status":"Ready"}`}
-			Expect(isSmartNICReady(podAnnot)).To(Equal(true))
+				util.OvnPodAnnotationName: `{
+					"default":{"ip_addresses":["192.168.2.3/24"],
+					"mac_address":"0a:58:c0:a8:02:03",
+					"gateway_ips":["192.168.2.1"],
+					"ip_address":"192.168.2.3/24",
+					"gateway_ip":"192.168.2.1"}
+				}`}
+			util.MarshalPodSmartNicConnStatus(&podAnnot, &scs, types.DefaultNetworkName)
+			Expect(isSmartNICReady(podAnnot, types.DefaultNetworkName)).To(Equal(true))
 		})
 
 		It("Returns false if smartnic.connection-status is present and Status is not Ready", func() {
+			scs := util.SmartNICConnectionStatus{Status: "NotReady"}
 			podAnnot := map[string]string{
-				util.OvnPodAnnotationName:         `{"ip_address": "192.168.2.3/24"}`,
-				util.SmartNicConnetionStatusAnnot: `{"Status":"NotReady"}`}
-			Expect(isSmartNICReady(podAnnot)).To(Equal(false))
+				util.OvnPodAnnotationName: `{
+					"default":{"ip_addresses":["192.168.2.3/24"],
+					"mac_address":"0a:58:c0:a8:02:03",
+					"gateway_ips":["192.168.2.1"],
+					"ip_address":"192.168.2.3/24",
+					"gateway_ip":"192.168.2.1"}
+				}`}
+			util.MarshalPodSmartNicConnStatus(&podAnnot, &scs, types.DefaultNetworkName)
+			Expect(isSmartNICReady(podAnnot, types.DefaultNetworkName)).To(Equal(false))
 		})
 
 		It("Returns false if smartnic.connection-status Status is not present", func() {
 			podAnnot := map[string]string{
-				util.OvnPodAnnotationName:         `{"ip_address": "192.168.2.3/24"}`,
-				util.SmartNicConnetionStatusAnnot: `{"Foo":"Bar"}`}
-			Expect(isSmartNICReady(podAnnot)).To(Equal(false))
+				util.OvnPodAnnotationName: `{
+					"default":{"ip_addresses":["192.168.2.3/24"],
+					"mac_address":"0a:58:c0:a8:02:03",
+					"gateway_ips":["192.168.2.1"],
+					"ip_address":"192.168.2.3/24",
+					"gateway_ip":"192.168.2.1"}
+				}`,
+				util.SmartNicConnetionStatusAnnot: `{"Foo":"Bar"}`,
+			}
+			Expect(isSmartNICReady(podAnnot, types.DefaultNetworkName)).To(Equal(false))
 		})
 
 		It("Returns false if smartnic.connection-status is not present", func() {
-			podAnnot := map[string]string{util.OvnPodAnnotationName: `{"ip_address": "192.168.2.3/24"}`}
-			Expect(isSmartNICReady(podAnnot)).To(Equal(false))
+			podAnnot := map[string]string{
+				util.OvnPodAnnotationName: `{"ip_address": "192.168.2.3/24"}`,
+			}
+			Expect(isSmartNICReady(podAnnot, types.DefaultNetworkName)).To(Equal(false))
 		})
 
 		It("Returns false if OVN pod-networks is not present", func() {
 			podAnnot := map[string]string{}
-			Expect(isSmartNICReady(podAnnot)).To(Equal(false))
+			scs := util.SmartNICConnectionStatus{Status: "Ready"}
+			util.MarshalPodSmartNicConnStatus(&podAnnot, &scs, types.DefaultNetworkName)
+			Expect(isSmartNICReady(podAnnot, types.DefaultNetworkName)).To(Equal(false))
 		})
 	})
 
@@ -104,7 +130,7 @@ var _ = Describe("CNI Utils tests", func() {
 			ctx, cancelFunc := context.WithTimeout(context.Background(), 20*time.Millisecond)
 			defer cancelFunc()
 
-			cond := func(podAnnotation map[string]string) bool {
+			cond := func(podAnnotation map[string]string, netName string) bool {
 				if _, ok := podAnnotation["foo"]; ok {
 					return true
 				}
@@ -113,7 +139,7 @@ var _ = Describe("CNI Utils tests", func() {
 
 			fakeClient := newFakeKubeClientWithPod(pod)
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
-			uid, annot, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond)
+			uid, annot, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", types.DefaultNetworkName, cond)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(annot).To(Equal(podAnnot))
 			Expect(uid).To(Equal(string(pod.UID)))
@@ -122,7 +148,7 @@ var _ = Describe("CNI Utils tests", func() {
 		It("Returns with Error if context is canceled", func() {
 			ctx, cancelFunc := context.WithCancel(context.Background())
 
-			cond := func(podAnnotation map[string]string) bool {
+			cond := func(podAnnotation map[string]string, netName string) bool {
 				return false
 			}
 
@@ -133,7 +159,7 @@ var _ = Describe("CNI Utils tests", func() {
 
 			fakeClient := newFakeKubeClientWithPod(pod)
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
-			_, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond)
+			_, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", types.DefaultNetworkName, cond)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -142,7 +168,7 @@ var _ = Describe("CNI Utils tests", func() {
 			defer cancelFunc()
 
 			calledOnce := false
-			cond := func(podAnnotation map[string]string) bool {
+			cond := func(podAnnotation map[string]string, netName string) bool {
 				if calledOnce {
 					return true
 				}
@@ -152,7 +178,7 @@ var _ = Describe("CNI Utils tests", func() {
 
 			fakeClient := newFakeKubeClientWithPod(pod)
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
-			_, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond)
+			_, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", types.DefaultNetworkName, cond)
 			Expect(err).ToNot(HaveOccurred())
 		})
 
@@ -160,13 +186,13 @@ var _ = Describe("CNI Utils tests", func() {
 			ctx, cancelFunc := context.WithTimeout(context.Background(), 1*time.Second)
 			defer cancelFunc()
 
-			cond := func(podAnnotation map[string]string) bool {
+			cond := func(podAnnotation map[string]string, netName string) bool {
 				return false
 			}
 
 			fakeClient := newFakeKubeClientWithPod(pod)
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(nil, fmt.Errorf("failed to list pods"))
-			_, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond)
+			_, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", types.DefaultNetworkName, cond)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to list pods"))
 		})
@@ -176,7 +202,7 @@ var _ = Describe("CNI Utils tests", func() {
 			defer cancelFunc()
 
 			calledOnce := false
-			cond := func(podAnnotation map[string]string) bool {
+			cond := func(podAnnotation map[string]string, netName string) bool {
 				if calledOnce {
 					return true
 				}
@@ -186,7 +212,7 @@ var _ = Describe("CNI Utils tests", func() {
 
 			fakeClient := newFakeKubeClientWithPod(pod)
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(nil, errors.NewNotFound(v1.Resource("pod"), name))
-			_, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond)
+			_, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", types.DefaultNetworkName, cond)
 			Expect(err).ToNot(HaveOccurred())
 		})
 
@@ -194,13 +220,13 @@ var _ = Describe("CNI Utils tests", func() {
 			ctx, cancelFunc := context.WithTimeout(context.Background(), 1*time.Second)
 			defer cancelFunc()
 
-			cond := func(podAnnotation map[string]string) bool {
+			cond := func(podAnnotation map[string]string, netName string) bool {
 				return false
 			}
 
 			fakeClient := fake.NewSimpleClientset(&v1.PodList{Items: []v1.Pod{}})
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(nil, errors.NewNotFound(v1.Resource("pod"), name))
-			_, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond)
+			_, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", types.DefaultNetworkName, cond)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("timed out waiting for pod after 1s"))
 		})
@@ -216,26 +242,27 @@ var _ = Describe("CNI Utils tests", func() {
 "gateway_ip":"192.168.2.1",
 "mtu": "1500"}}`,
 		}
+		netNameInfo := util.NetNameInfo{types.DefaultNetworkName, "", false}
 		It("Creates PodInterfaceInfo with IsSmartNIC false", func() {
-			pif, err := PodAnnotation2PodInfo(podAnnot, false, false)
+			pif, err := PodAnnotation2PodInfo(podAnnot, false, false, 1500, netNameInfo)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.IsSmartNic).To(BeFalse())
 		})
 
 		It("Creates PodInterfaceInfo with IsSmartNIC true", func() {
-			pif, err := PodAnnotation2PodInfo(podAnnot, false, true)
+			pif, err := PodAnnotation2PodInfo(podAnnot, false, true, 1500, netNameInfo)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.IsSmartNic).To(BeTrue())
 		})
 
 		It("Creates PodInterfaceInfo with checkExtIDs false", func() {
-			pif, err := PodAnnotation2PodInfo(podAnnot, false, false)
+			pif, err := PodAnnotation2PodInfo(podAnnot, false, false, 1500, netNameInfo)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.CheckExtIDs).To(BeFalse())
 		})
 
 		It("Creates PodInterfaceInfo with checkExtIDs true", func() {
-			pif, err := PodAnnotation2PodInfo(podAnnot, true, false)
+			pif, err := PodAnnotation2PodInfo(podAnnot, true, false, 1500, netNameInfo)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.CheckExtIDs).To(BeTrue())
 		})

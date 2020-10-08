@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
@@ -17,6 +18,11 @@ import (
 	egressipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/scheme"
 	egressipinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions"
+
+	networkattachmentdefinitionapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	networkattachmentdefinitionclientset "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
+	networkattachmentdefinitionscheme "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/scheme"
+	networkattachmentdefinitioninformerfactory "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions"
 
 	icmpnetworkpolicyapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1"
 	icmpnetworkpolicyclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1/apis/clientset/versioned"
@@ -50,11 +56,14 @@ type WatchFactory struct {
 	efClientset  egressfirewallclientset.Interface
 	inpFactory   icmpnetworkpolicyinformerfactory.SharedInformerFactory
 	inpClientset icmpnetworkpolicyclientset.Interface
+	nadClientset networkattachmentdefinitionclientset.Interface
+	nadFactory   networkattachmentdefinitioninformerfactory.SharedInformerFactory
 	informers    map[reflect.Type]*informer
 
 	stopChan                  chan struct{}
 	egressFirewallStopChan    chan struct{}
 	icmpNetworkPolicyStopChan chan struct{}
+	netAttachDefStopChan      chan struct{}
 }
 
 // WatchFactory implements the ObjectCacheInterface interface.
@@ -74,15 +83,16 @@ const (
 )
 
 var (
-	podType               reflect.Type = reflect.TypeOf(&kapi.Pod{})
-	serviceType           reflect.Type = reflect.TypeOf(&kapi.Service{})
-	policyType            reflect.Type = reflect.TypeOf(&knet.NetworkPolicy{})
-	namespaceType         reflect.Type = reflect.TypeOf(&kapi.Namespace{})
-	nodeType              reflect.Type = reflect.TypeOf(&kapi.Node{})
-	egressFirewallType    reflect.Type = reflect.TypeOf(&egressfirewallapi.EgressFirewall{})
-	egressIPType          reflect.Type = reflect.TypeOf(&egressipapi.EgressIP{})
-	icmpNetworkPolicyType reflect.Type = reflect.TypeOf(&icmpnetworkpolicyapi.ICMPNetworkPolicy{})
-	endpointSliceType     reflect.Type = reflect.TypeOf(&discovery.EndpointSlice{})
+	podType                         reflect.Type = reflect.TypeOf(&kapi.Pod{})
+	serviceType                     reflect.Type = reflect.TypeOf(&kapi.Service{})
+	policyType                      reflect.Type = reflect.TypeOf(&knet.NetworkPolicy{})
+	namespaceType                   reflect.Type = reflect.TypeOf(&kapi.Namespace{})
+	nodeType                        reflect.Type = reflect.TypeOf(&kapi.Node{})
+	egressFirewallType              reflect.Type = reflect.TypeOf(&egressfirewallapi.EgressFirewall{})
+	egressIPType                    reflect.Type = reflect.TypeOf(&egressipapi.EgressIP{})
+	icmpNetworkPolicyType           reflect.Type = reflect.TypeOf(&icmpnetworkpolicyapi.ICMPNetworkPolicy{})
+	endpointSliceType               reflect.Type = reflect.TypeOf(&discovery.EndpointSlice{})
+	networkattachmentdefinitionType reflect.Type = reflect.TypeOf(&networkattachmentdefinitionapi.NetworkAttachmentDefinition{})
 )
 
 // NewMasterWatchFactory initializes a new watch factory for the master or master+node processes.
@@ -98,6 +108,7 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 		eipFactory:   egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
 		efClientset:  ovnClientset.EgressFirewallClient,
 		inpClientset: ovnClientset.ICMPNetworkPolicyClient,
+		nadClientset: ovnClientset.NetworkAttchDefClient,
 		informers:    make(map[reflect.Type]*informer),
 		stopChan:     make(chan struct{}),
 	}
@@ -111,7 +122,6 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	if err != nil {
 		return nil, err
 	}
-
 	// For Services and Endpoints, pre-populate the shared Informer with one that
 	// has a label selector excluding headless services.
 	wf.iFactory.InformerFor(&kapi.Service{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
@@ -177,6 +187,13 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 		}
 	}
 
+	if config.OVNKubernetesFeature.EnableMultiNetwork {
+		err := wf.InitializeNetAttachDefWatchFactory()
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return wf, nil
 }
 
@@ -189,6 +206,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 		informers:   make(map[reflect.Type]*informer),
 		stopChan:    make(chan struct{}),
 	}
+
 	// For Services and Endpoints, pre-populate the shared Informer with one that
 	// has a label selector excluding headless services.
 	wf.iFactory.InformerFor(&kapi.Service{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
@@ -237,6 +255,14 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 	for oType, synced := range wf.iFactory.WaitForCacheSync(wf.stopChan) {
 		if !synced {
 			return nil, fmt.Errorf("error in syncing cache for %v informer", oType)
+		}
+	}
+
+	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost && config.OVNKubernetesFeature.EnableMultiNetwork {
+		wf.nadClientset = ovnClientset.NetworkAttchDefClient
+		err := wf.InitializeNetAttachDefWatchFactory()
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -290,6 +316,34 @@ func (wf *WatchFactory) ShutdownICMPNetworkPolicyWatchFactory() {
 	wf.informers[icmpNetworkPolicyType].shutdown()
 }
 
+func (wf *WatchFactory) InitializeNetAttachDefWatchFactory() error {
+	err := networkattachmentdefinitionapi.AddToScheme(networkattachmentdefinitionscheme.Scheme)
+	if err != nil {
+		return err
+	}
+
+	wf.nadFactory = networkattachmentdefinitioninformerfactory.NewSharedInformerFactory(wf.nadClientset, resyncInterval)
+	wf.informers[networkattachmentdefinitionType], err = newInformer(networkattachmentdefinitionType,
+		wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer())
+	if err != nil {
+		return err
+	}
+
+	wf.netAttachDefStopChan = make(chan struct{})
+	wf.nadFactory.Start(wf.netAttachDefStopChan)
+	for oType, synced := range wf.nadFactory.WaitForCacheSync(wf.netAttachDefStopChan) {
+		if !synced {
+			return fmt.Errorf("error in syncing cache for %v informer", oType)
+		}
+	}
+	return nil
+}
+
+func (wf *WatchFactory) ShutdownNetAttachDefWatchFactory() {
+	close(wf.netAttachDefStopChan)
+	wf.informers[networkattachmentdefinitionType].shutdown()
+}
+
 func (wf *WatchFactory) Shutdown() {
 	close(wf.stopChan)
 
@@ -336,6 +390,10 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 	case endpointSliceType:
 		if endpointSlice, ok := obj.(*discovery.EndpointSlice); ok {
 			return &endpointSlice.ObjectMeta, nil
+		}
+	case networkattachmentdefinitionType:
+		if networkattachmentdefinition, ok := obj.(*networkattachmentdefinitionapi.NetworkAttachmentDefinition); ok {
+			return &networkattachmentdefinition.ObjectMeta, nil
 		}
 	}
 	return nil, fmt.Errorf("cannot get ObjectMeta from type %v", objType)
@@ -454,6 +512,16 @@ func (wf *WatchFactory) AddICMPNetworkPolicyHandler(handlerFuncs cache.ResourceE
 // RemoveICMPNetworkPolicyHandler removes an ICMPNetworkPolicy object event handler function
 func (wf *WatchFactory) RemoveICMPNetworkPolicyHandler(handler *Handler) {
 	wf.removeHandler(icmpNetworkPolicyType, handler)
+}
+
+// AddNetworkattachmentdefinitionHandler adds a handler function that will be executed on Networkattachmentdefinition object changes
+func (wf *WatchFactory) AddNetworkattachmentdefinitionHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
+	return wf.addHandler(networkattachmentdefinitionType, "", nil, handlerFuncs, processExisting)
+}
+
+// RemoveNetworkattachmentdefinitionHandler removes an Networkattachmentdefinition object event handler function
+func (wf *WatchFactory) RemoveNetworkattachmentdefinitionHandler(handler *Handler) {
+	wf.removeHandler(networkattachmentdefinitionType, handler)
 }
 
 // AddEgressIPHandler adds a handler function that will be executed on EgressIP object changes

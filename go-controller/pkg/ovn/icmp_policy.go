@@ -3,6 +3,7 @@ package ovn
 import (
 	"fmt"
 	"github.com/ebay/go-ovn"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	onet "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1"
 	kapi "k8s.io/api/core/v1"
@@ -49,7 +50,7 @@ func (oc *Controller) syncICMPNetworkPolicies(networkPolicies []interface{}) {
 			// policy doesn't exist on k8s. Delete the port group
 			portGroupName := fmt.Sprintf("%s_%s", namespaceName, policyName)
 			hashedLocalPortGroup := hashedPortGroup(portGroupName)
-			err := deletePortGroup(oc.ovnNBClient, hashedLocalPortGroup)
+			err := deletePortGroup(oc.mc.ovnNBClient, hashedLocalPortGroup)
 			if err != nil {
 				klog.Errorf("%v", err)
 			}
@@ -119,7 +120,7 @@ func (oc *Controller) icmpLocalPodAddDefaultDeny(nsInfo *namespaceInfo,
 	commands := make([]*goovn.OvnCommand, 0, len(addIngressPorts)+len(addEgressPorts))
 
 	for _, portInfo := range addIngressPorts {
-		cmd, err := oc.ovnNBClient.PortGroupAddPort(nsInfo.portGroupIngressDenyName, portInfo.uuid)
+		cmd, err := oc.mc.ovnNBClient.PortGroupAddPort(nsInfo.portGroupIngressDenyName, portInfo.uuid)
 		if err != nil {
 			klog.Warningf("Failed to create command: add port %s to ingress deny portgroup %s: %v",
 				portInfo.name, nsInfo.portGroupIngressDenyName, err)
@@ -129,7 +130,7 @@ func (oc *Controller) icmpLocalPodAddDefaultDeny(nsInfo *namespaceInfo,
 	}
 
 	for _, portInfo := range addEgressPorts {
-		cmd, err := oc.ovnNBClient.PortGroupAddPort(nsInfo.portGroupEgressDenyName, portInfo.uuid)
+		cmd, err := oc.mc.ovnNBClient.PortGroupAddPort(nsInfo.portGroupEgressDenyName, portInfo.uuid)
 		if err != nil {
 			klog.Warningf("Failed to create command: add port %s to egress deny portgroup %s: %v",
 				portInfo.name, nsInfo.portGroupEgressDenyName, err)
@@ -138,7 +139,7 @@ func (oc *Controller) icmpLocalPodAddDefaultDeny(nsInfo *namespaceInfo,
 		commands = append(commands, cmd)
 	}
 
-	err := oc.ovnNBClient.Execute(commands...)
+	err := oc.mc.ovnNBClient.Execute(commands...)
 	if err != nil {
 		klog.Warningf("Failed to execute add-to-default-deny-portgroup transaction: %v", err)
 	}
@@ -154,7 +155,7 @@ func (oc *Controller) icmpHandleLocalPodSelectorAddFunc(
 	}
 
 	// Get the logical port info
-	logicalPort := podLogicalPortName(pod)
+	logicalPort := util.PodLogicalPortName(pod, oc.nadInfo.Prefix)
 	portInfo, err := oc.logicalPortCache.get(logicalPort)
 	if err != nil {
 		klog.Warningf(err.Error())
@@ -178,7 +179,7 @@ func (oc *Controller) icmpHandleLocalPodSelectorAddFunc(
 		return
 	}
 
-	err = addToPortGroup(oc.ovnNBClient, np.portGroupName, portInfo)
+	err = addToPortGroup(oc.mc.ovnNBClient, np.portGroupName, portInfo)
 
 	if err != nil {
 		klog.Errorf("Failed to add logicalPort %s to portGroup %s (%v)",
@@ -214,7 +215,7 @@ func (oc *Controller) icmpHandleLocalPodSelectorSetPods(
 			continue
 		}
 
-		portInfo, err := oc.logicalPortCache.get(podLogicalPortName(pod))
+		portInfo, err := oc.logicalPortCache.get(util.PodLogicalPortName(pod, oc.nadInfo.Prefix))
 		// pod is not yet handled
 		// no big deal, we'll get the update when it is.
 		if err != nil {
@@ -236,7 +237,7 @@ func (oc *Controller) icmpHandleLocalPodSelectorSetPods(
 		return
 	}
 
-	err := setPortGroup(oc.ovnNBClient, np.portGroupName, portsToAdd...)
+	err := setPortGroup(oc.mc.ovnNBClient, np.portGroupName, portsToAdd...)
 	if err != nil {
 		klog.Errorf("Failed to set ports in PortGroup for icmp network policy %s/%s: %v", np.namespace, np.name, err)
 	}
@@ -256,7 +257,7 @@ func (oc *Controller) icmpHandleLocalPodSelector(
 	// NetworkPolicy is validated by the apiserver; this can't fail.
 	sel, _ := metav1.LabelSelectorAsSelector(&policy.Spec.PodSelector)
 
-	h := oc.watchFactory.AddFilteredPodHandler(policy.Namespace, sel,
+	h := oc.mc.watchFactory.AddFilteredPodHandler(policy.Namespace, sel,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				oc.icmpHandleLocalPodSelectorAddFunc(policy, np, nsInfo, obj)
@@ -329,7 +330,7 @@ func (oc *Controller) addICMPNetworkPolicy(policy *onet.ICMPNetworkPolicy) {
 	readableGroupName := fmt.Sprintf("%s_%s", policy.Namespace, policyName)
 	np.portGroupName = hashedPortGroup(readableGroupName)
 
-	np.portGroupUUID, err = createPortGroup(oc.ovnNBClient, readableGroupName, np.portGroupName)
+	np.portGroupUUID, err = createPortGroup(oc.mc.ovnNBClient, readableGroupName, np.portGroupName)
 	if err != nil {
 		klog.Errorf("Failed to create port_group for network policy %s in "+
 			"namespace %s", policyName, policy.Namespace)

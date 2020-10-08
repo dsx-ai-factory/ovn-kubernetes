@@ -105,7 +105,7 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 			// policy doesn't exist on k8s. Delete the port group
 			portGroupName := fmt.Sprintf("%s_%s", namespaceName, policyName)
 			hashedLocalPortGroup := hashedPortGroup(portGroupName)
-			err := deletePortGroup(oc.ovnNBClient, hashedLocalPortGroup)
+			err := deletePortGroup(oc.mc.ovnNBClient, hashedLocalPortGroup)
 			if err != nil {
 				klog.Errorf("%v", err)
 			}
@@ -298,7 +298,7 @@ func (oc *Controller) createDefaultDenyPortGroup(ns string, nsInfo *namespaceInf
 	} else if policyType == knet.PolicyTypeEgress {
 		portGroupName = defaultDenyPortGroup(ns, "egressDefaultDeny")
 	}
-	portGroupUUID, err := createPortGroup(oc.ovnNBClient, portGroupName, portGroupName)
+	portGroupUUID, err := createPortGroup(oc.mc.ovnNBClient, portGroupName, portGroupName)
 	if err != nil {
 		return fmt.Errorf("failed to create port_group for %s (%v)",
 			portGroupName, err)
@@ -425,7 +425,7 @@ func getMulticastACLEgrMatch() string {
 //   This matches only traffic originated by pods in 'ns' (based on the
 //   namespace address set).
 func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInfo) error {
-	err := nsInfo.updateNamespacePortGroup(oc.ovnNBClient, ns)
+	err := nsInfo.updateNamespacePortGroup(oc.mc.ovnNBClient, ns)
 	if err != nil {
 		return err
 	}
@@ -450,15 +450,15 @@ func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInf
 	}
 
 	// Add all ports from this namespace to the multicast allow group.
-	pods, err := oc.watchFactory.GetPods(ns)
+	pods, err := oc.mc.watchFactory.GetPods(ns)
 	if err != nil {
 		klog.Warningf("Failed to get pods for namespace %q: %v", ns, err)
 	}
 	for _, pod := range pods {
-		portName := podLogicalPortName(pod)
+		portName := util.PodLogicalPortName(pod, oc.nadInfo.Prefix)
 		if portInfo, err := oc.logicalPortCache.get(portName); err != nil {
 			klog.Errorf(err.Error())
-		} else if err := podAddAllowMulticastPolicy(oc.ovnNBClient, ns, portInfo); err != nil {
+		} else if err := podAddAllowMulticastPolicy(oc.mc.ovnNBClient, ns, portInfo); err != nil {
 			klog.Warningf("Failed to add port %s to port group ACL: %v", portName, err)
 		}
 	}
@@ -524,7 +524,7 @@ func (oc *Controller) createDefaultDenyMulticastPolicy() error {
 
 	// Remove old multicastDefaultDeny port group now that all ports
 	// have been added to the clusterPortGroup by WatchPods()
-	err = deletePortGroup(oc.ovnNBClient, legacyMulticastDefaultDenyPortGroup)
+	err = deletePortGroup(oc.mc.ovnNBClient, legacyMulticastDefaultDenyPortGroup)
 	if err != nil {
 		klog.Errorf("%v", err)
 	}
@@ -625,7 +625,7 @@ func (oc *Controller) localPodAddDefaultDeny(nsInfo *namespaceInfo,
 	commands := make([]*goovn.OvnCommand, 0, len(addIngressPorts)+len(addEgressPorts))
 
 	for _, portInfo := range addIngressPorts {
-		cmd, err := oc.ovnNBClient.PortGroupAddPort(nsInfo.portGroupIngressDenyName, portInfo.uuid)
+		cmd, err := oc.mc.ovnNBClient.PortGroupAddPort(nsInfo.portGroupIngressDenyName, portInfo.uuid)
 		if err != nil {
 			klog.Warningf("Failed to create command: add port %s to ingress deny portgroup %s: %v",
 				portInfo.name, nsInfo.portGroupIngressDenyName, err)
@@ -635,7 +635,7 @@ func (oc *Controller) localPodAddDefaultDeny(nsInfo *namespaceInfo,
 	}
 
 	for _, portInfo := range addEgressPorts {
-		cmd, err := oc.ovnNBClient.PortGroupAddPort(nsInfo.portGroupEgressDenyName, portInfo.uuid)
+		cmd, err := oc.mc.ovnNBClient.PortGroupAddPort(nsInfo.portGroupEgressDenyName, portInfo.uuid)
 		if err != nil {
 			klog.Warningf("Failed to create command: add port %s to egress deny portgroup %s: %v",
 				portInfo.name, nsInfo.portGroupEgressDenyName, err)
@@ -644,7 +644,7 @@ func (oc *Controller) localPodAddDefaultDeny(nsInfo *namespaceInfo,
 		commands = append(commands, cmd)
 	}
 
-	err := oc.ovnNBClient.Execute(commands...)
+	err := oc.mc.ovnNBClient.Execute(commands...)
 	if err != nil {
 		klog.Warningf("Failed to execute add-to-default-deny-portgroup transaction: %v", err)
 	}
@@ -692,7 +692,7 @@ func (oc *Controller) localPodDelDefaultDeny(
 	commands := make([]*goovn.OvnCommand, 0, len(delIngressPorts)+len(delEgressPorts))
 
 	for _, portInfo := range delIngressPorts {
-		cmd, err := oc.ovnNBClient.PortGroupRemovePort(nsInfo.portGroupIngressDenyName, portInfo.uuid)
+		cmd, err := oc.mc.ovnNBClient.PortGroupRemovePort(nsInfo.portGroupIngressDenyName, portInfo.uuid)
 		if err != nil {
 			klog.Warningf("Failed to create command: remove port %s from ingress deny portgroup %s: %v",
 				portInfo.name, nsInfo.portGroupIngressDenyName, err)
@@ -702,7 +702,7 @@ func (oc *Controller) localPodDelDefaultDeny(
 	}
 
 	for _, portInfo := range delEgressPorts {
-		cmd, err := oc.ovnNBClient.PortGroupRemovePort(nsInfo.portGroupEgressDenyName, portInfo.uuid)
+		cmd, err := oc.mc.ovnNBClient.PortGroupRemovePort(nsInfo.portGroupEgressDenyName, portInfo.uuid)
 		if err != nil {
 			klog.Warningf("Failed to create command: remove port %s from egress deny portgroup %s: %v",
 				portInfo.name, nsInfo.portGroupEgressDenyName, err)
@@ -711,7 +711,7 @@ func (oc *Controller) localPodDelDefaultDeny(
 		commands = append(commands, cmd)
 	}
 
-	err := oc.ovnNBClient.Execute(commands...)
+	err := oc.mc.ovnNBClient.Execute(commands...)
 	if err != nil {
 		klog.Warningf("Failed to execute add-to-default-deny-portgroup transaction: %v", err)
 	}
@@ -730,7 +730,7 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 	}
 
 	// Get the logical port info
-	logicalPort := podLogicalPortName(pod)
+	logicalPort := util.PodLogicalPortName(pod, oc.nadInfo.Prefix)
 	portInfo, err := oc.logicalPortCache.get(logicalPort)
 	if err != nil {
 		klog.Warningf(err.Error())
@@ -754,7 +754,7 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 		return
 	}
 
-	err = addToPortGroup(oc.ovnNBClient, np.portGroupName, portInfo)
+	err = addToPortGroup(oc.mc.ovnNBClient, np.portGroupName, portInfo)
 
 	if err != nil {
 		klog.Errorf("Failed to add logicalPort %s to portGroup %s (%v)",
@@ -794,7 +794,7 @@ func (oc *Controller) handleLocalPodSelectorSetPods(
 			continue
 		}
 
-		portInfo, err := oc.logicalPortCache.get(podLogicalPortName(pod))
+		portInfo, err := oc.logicalPortCache.get(util.PodLogicalPortName(pod, oc.nadInfo.Prefix))
 		// pod is not yet handled
 		// no big deal, we'll get the update when it is.
 		if err != nil {
@@ -816,7 +816,7 @@ func (oc *Controller) handleLocalPodSelectorSetPods(
 		return
 	}
 
-	err := setPortGroup(oc.ovnNBClient, np.portGroupName, portsToAdd...)
+	err := setPortGroup(oc.mc.ovnNBClient, np.portGroupName, portsToAdd...)
 	if err != nil {
 		klog.Errorf("Failed to set ports in PortGroup for network policy %s/%s: %v", np.namespace, np.name, err)
 	}
@@ -839,7 +839,7 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 	}
 
 	// Get the logical port info
-	logicalPort := podLogicalPortName(pod)
+	logicalPort := util.PodLogicalPortName(pod, oc.nadInfo.Prefix)
 	portInfo, err := oc.logicalPortCache.get(logicalPort)
 	if err != nil {
 		klog.Errorf(err.Error())
@@ -863,7 +863,7 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 		return
 	}
 
-	err = deleteFromPortGroup(oc.ovnNBClient, np.portGroupName, portInfo)
+	err = deleteFromPortGroup(oc.mc.ovnNBClient, np.portGroupName, portInfo)
 	if err != nil {
 		klog.Errorf("Failed to delete logicalPort %s from portGroup %s (%v)", portInfo.name, np.name, err)
 	}
@@ -875,7 +875,7 @@ func (oc *Controller) handleLocalPodSelector(
 	// NetworkPolicy is validated by the apiserver; this can't fail.
 	sel, _ := metav1.LabelSelectorAsSelector(&policy.Spec.PodSelector)
 
-	h := oc.watchFactory.AddFilteredPodHandler(policy.Namespace, sel,
+	h := oc.mc.watchFactory.AddFilteredPodHandler(policy.Namespace, sel,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				oc.handleLocalPodSelectorAddFunc(policy, np, nsInfo, obj)
@@ -947,7 +947,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 	readableGroupName := fmt.Sprintf("%s_%s", policy.Namespace, policy.Name)
 	np.portGroupName = hashedPortGroup(readableGroupName)
 
-	np.portGroupUUID, err = createPortGroup(oc.ovnNBClient, readableGroupName, np.portGroupName)
+	np.portGroupUUID, err = createPortGroup(oc.mc.ovnNBClient, readableGroupName, np.portGroupName)
 	if err != nil {
 		klog.Errorf("Failed to create port_group for network policy %s in "+
 			"namespace %s", policy.Name, policy.Namespace)
@@ -1118,18 +1118,18 @@ func (oc *Controller) destroyNetworkPolicy(np *networkPolicy, nsInfo *namespaceI
 	oc.localPodDelDefaultDeny(np, nsInfo, ports...)
 
 	if len(nsInfo.networkPolicies) == 0 {
-		err := deletePortGroup(oc.ovnNBClient, nsInfo.portGroupIngressDenyName)
+		err := deletePortGroup(oc.mc.ovnNBClient, nsInfo.portGroupIngressDenyName)
 		if err != nil {
 			klog.Errorf("%v", err)
 		}
-		err = deletePortGroup(oc.ovnNBClient, nsInfo.portGroupEgressDenyName)
+		err = deletePortGroup(oc.mc.ovnNBClient, nsInfo.portGroupEgressDenyName)
 		if err != nil {
 			klog.Errorf("%v", err)
 		}
 	}
 
 	// Delete the port group
-	err := deletePortGroup(oc.ovnNBClient, np.portGroupName)
+	err := deletePortGroup(oc.mc.ovnNBClient, np.portGroupName)
 	if err != nil {
 		klog.Errorf("%v", err)
 	}
@@ -1201,7 +1201,7 @@ func (oc *Controller) handlePeerServiceDelete(gp *gressPolicy, obj interface{}) 
 func (oc *Controller) handlePeerService(
 	namespace string, gp *gressPolicy, np *networkPolicy) {
 
-	h := oc.watchFactory.AddFilteredServiceHandler(namespace,
+	h := oc.mc.watchFactory.AddFilteredServiceHandler(namespace,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				// Service is matched so add VIP to addressSet
@@ -1239,7 +1239,7 @@ func (oc *Controller) handlePeerPodSelector(
 	// NetworkPolicy is validated by the apiserver; this can't fail.
 	sel, _ := metav1.LabelSelectorAsSelector(podSelector)
 
-	h := oc.watchFactory.AddFilteredPodHandler(namespace, sel,
+	h := oc.mc.watchFactory.AddFilteredPodHandler(namespace, sel,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				oc.handlePeerPodSelectorAddUpdate(gp, obj)
@@ -1266,7 +1266,7 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 	nsSel, _ := metav1.LabelSelectorAsSelector(namespaceSelector)
 	podSel, _ := metav1.LabelSelectorAsSelector(podSelector)
 
-	namespaceHandler := oc.watchFactory.AddFilteredNamespaceHandler("", nsSel,
+	namespaceHandler := oc.mc.watchFactory.AddFilteredNamespaceHandler("", nsSel,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				namespace := obj.(*kapi.Namespace)
@@ -1279,7 +1279,7 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 
 				// The AddFilteredPodHandler call might call handlePeerPodSelectorAddUpdate
 				// on existing pods so we can't be holding the lock at this point
-				podHandler := oc.watchFactory.AddFilteredPodHandler(namespace.Name, podSel,
+				podHandler := oc.mc.watchFactory.AddFilteredPodHandler(namespace.Name, podSel,
 					cache.ResourceEventHandlerFuncs{
 						AddFunc: func(obj interface{}) {
 							oc.handlePeerPodSelectorAddUpdate(gp, obj)
@@ -1296,7 +1296,7 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 				np.Lock()
 				defer np.Unlock()
 				if np.deleted {
-					oc.watchFactory.RemovePodHandler(podHandler)
+					oc.mc.watchFactory.RemovePodHandler(podHandler)
 					return
 				}
 				np.podHandlerList = append(np.podHandlerList, podHandler)
@@ -1305,7 +1305,7 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 				// when the namespace labels no longer apply
 				// remove the namespaces pods from the address_set
 				namespace := obj.(*kapi.Namespace)
-				pods, _ := oc.watchFactory.GetPods(namespace.Name)
+				pods, _ := oc.mc.watchFactory.GetPods(namespace.Name)
 
 				for _, pod := range pods {
 					oc.handlePeerPodSelectorDelete(gp, pod)
@@ -1334,7 +1334,7 @@ func (oc *Controller) handlePeerNamespaceSelector(
 	// NetworkPolicy is validated by the apiserver; this can't fail.
 	sel, _ := metav1.LabelSelectorAsSelector(namespaceSelector)
 
-	h := oc.watchFactory.AddFilteredNamespaceHandler("", sel,
+	h := oc.mc.watchFactory.AddFilteredNamespaceHandler("", sel,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				namespace := obj.(*kapi.Namespace)
@@ -1370,12 +1370,12 @@ func (oc *Controller) handlePeerNamespaceSelector(
 
 func (oc *Controller) shutdownHandlers(np *networkPolicy) {
 	for _, handler := range np.podHandlerList {
-		oc.watchFactory.RemovePodHandler(handler)
+		oc.mc.watchFactory.RemovePodHandler(handler)
 	}
 	for _, handler := range np.nsHandlerList {
-		oc.watchFactory.RemoveNamespaceHandler(handler)
+		oc.mc.watchFactory.RemoveNamespaceHandler(handler)
 	}
 	for _, handler := range np.svcHandlerList {
-		oc.watchFactory.RemoveServiceHandler(handler)
+		oc.mc.watchFactory.RemoveServiceHandler(handler)
 	}
 }

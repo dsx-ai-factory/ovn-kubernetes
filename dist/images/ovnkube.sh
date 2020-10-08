@@ -216,6 +216,8 @@ ovn_icmp_networkpolicy_enable=${OVN_ICMP_NETWORKPOLICY_ENABLE:-false}
 ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
 #OVN_EGRESSFIREWALL_ENABLE - enable egressFirewall for ovn-kubernetes
 ovn_egressfirewall_enable=${OVN_EGRESSFIREWALL_ENABLE:-false}
+#OVN_MULTI_NETWORK_ENABLE - enable multiple net-attach-def for ovn-kubernetes
+ovn_multi_network_enable=${OVN_MULTI_NETWORK_ENABLE:-false}
 #OVN_ENABLE_LFLOW_CACHE - enable lflow cache for ovn-controller 
 ovn_enable_lflow_cache=${OVN_ENABLE_LFLOW_CACHE:-false}
 ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
@@ -963,6 +965,10 @@ ovn-master() {
   if [[ ${ovn_icmp_networkpolicy_enable} == "true" ]]; then
       icmp_networkpolicy_enabled_flag="--enable-icmp-networkpolicy"
   fi
+  multi_network_enabled_flag=
+  if [[ ${ovn_multi_network_enable} == "true" ]]; then
+      multi_network_enabled_flag="--enable-multi-network"
+  fi
   egressfirewall_enabled_flag=
   if [[ ${ovn_egressfirewall_enable} == "true" ]]; then
 	  egressfirewall_enabled_flag="--enable-egress-firewall"
@@ -993,6 +999,7 @@ ovn-master() {
     ${egressip_enabled_flag} \
     ${egressfirewall_enabled_flag} \
     ${icmp_networkpolicy_enabled_flag} \
+    ${multi_network_enabled_flag} \
     --metrics-interval ${ovn_metrics_scrape_interval} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} --metrics-enable-pprof \
     --host-network-namespace ${ovn_host_network_namespace} &
@@ -1165,6 +1172,11 @@ ovn-node() {
       egressip_enabled_flag="--enable-egress-ip"
   fi
 
+  multi_network_enabled_flag=
+  if [[ ${ovn_multi_network_enable} == "true" ]]; then
+      multi_network_enabled_flag="--enable-multi-network"
+  fi
+
   enable_lflow_cache_flag=
   if [[ ${ovn_enable_lflow_cache} == "true" ]]; then
       enable_lflow_cache_flag="--enable-lflow-cache"
@@ -1270,6 +1282,7 @@ ovn-node() {
     --inactivity-probe=${ovn_remote_probe_interval} \
     ${multicast_enabled_flag} \
     ${egressip_enabled_flag} \
+    ${multi_network_enabled_flag} \
     ${netflow_targets} \
     ${sflow_targets} \
     ${ipfix_targets} \

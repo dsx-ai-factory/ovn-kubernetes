@@ -163,7 +163,7 @@ func (gp *gressPolicy) addPeerPod(oc *Controller, pods ...*v1.Pod) error {
 			gp.nodeHostNetPodsCacheLock.Unlock()
 		}
 
-		podIPs, err := util.GetAllPodIPs(pod)
+		podIPs, err := util.GetAllPodIPs(pod, util.NetNameInfo{NetName: types.DefaultNetworkName, Prefix: "", NotDefault: false})
 		if err != nil {
 			return err
 		}
@@ -181,7 +181,7 @@ func (gp *gressPolicy) deletePeerPod(oc *Controller, pod *v1.Pod) error {
 			string(gp.policyType), gp.peerAddressSet, gp.nodeHostNetPodsCache)
 	}
 
-	ips, err := util.GetAllPodIPs(pod)
+	ips, err := util.GetAllPodIPs(pod, util.NetNameInfo{NetName: types.DefaultNetworkName, Prefix: "", NotDefault: false})
 	if err != nil {
 		return err
 	}

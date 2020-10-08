@@ -268,6 +268,7 @@ type OVNKubernetesFeatureConfig struct {
 	EnableEgressIP          bool `gcfg:"enable-egress-ip"`
 	EnableEgressFirewall    bool `gcfg:"enable-egress-firewall"`
 	EnableICMPNetworkPolicy bool `gcfg:"enable-icmp-networkpolicy"`
+	EnableMultiNetwork      bool `gcfg:"enable-multi-network"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -763,6 +764,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use ICMPNetworkPolicy CRD feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableICMPNetworkPolicy,
 		Value:       OVNKubernetesFeature.EnableICMPNetworkPolicy,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-multi-network",
+		Usage:       "Configure to use multiple networkAttachmentDefinition CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableMultiNetwork,
+		Value:       OVNKubernetesFeature.EnableMultiNetwork,
 	},
 }
 

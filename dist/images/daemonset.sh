@@ -46,6 +46,7 @@ OVS_METRICS_SCRAPE_INTERVAL=""
 OVN_EGRESSIP_ENABLE="true"
 OVN_EGRESSFIREWALL_ENABLE="true"
 OVN_ICMP_NETWORKPOLICY_ENABLE="true"
+OVN_MULTI_NETWORK_ENABLE="true"
 OVN_V4_JOIN_SUBNET=""
 OVN_V6_JOIN_SUBNET=""
 OVN_NETFLOW_TARGETS=""
@@ -183,6 +184,9 @@ while [ "$1" != "" ]; do
   --icmp-networkpolicy-enable)
     OVN_ICMP_NETWORKPOLICY_ENABLE=$VALUE
     ;;
+  --multi-network-enable)
+    OVN_MULTI_NETWORK_ENABLE=$VALUE
+    ;;
   --ovn-nbcert-cname)
     OVN_NB_CERT_CNAME=$VALUE
     ;;
@@ -278,6 +282,8 @@ ovn_egress_firewall_enable=${OVN_EGRESSFIREWALL_ENABLE}
 echo "ovn_egress_firewall_enable: ${ovn_egress_firewall_enable}"
 ovn_icmp_networkpolicy_enable=${OVN_ICMP_NETWORKPOLICY_ENABLE}
 echo "ovn_icmp_networkpolicy_enable: ${ovn_icmp_networkpolicy_enable}"
+ovn_multi_network_enable=${OVN_MULTI_NETWORK_ENABLE}
+echo "ovn_multi_network_enable: ${ovn_multi_network_enable}"
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR}
 echo "ovn_hybrid_overlay_net_cidr: ${ovn_hybrid_overlay_net_cidr}"
 ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS}
@@ -351,6 +357,7 @@ ovn_image=${image} \
   ovn_v6_join_subnet=${ovn_v6_join_subnet} \
   ovn_multicast_enable=${ovn_multicast_enable} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
+  ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
   ovn_netflow_targets=${ovn_netflow_targets} \
@@ -381,6 +388,7 @@ ovn_image=${image} \
   ovn_v6_join_subnet=${ovn_v6_join_subnet} \
   ovn_multicast_enable=${ovn_multicast_enable} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
+  ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
   ovn_netflow_targets=${ovn_netflow_targets} \
   ovn_sflow_targets=${ovn_sflow_targets} \
@@ -410,6 +418,7 @@ ovn_image=${image} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
   ovn_egress_firewall_enable=${ovn_egress_firewall_enable} \
   ovn_icmp_networkpolicy_enable=${ovn_icmp_networkpolicy_enable} \
+  ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_master_count=${ovn_master_count} \
   ovn_gateway_mode=${ovn_gateway_mode} \
@@ -445,6 +454,7 @@ ovn_image=${image} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
   ovn_egress_firewall_enable=${ovn_egress_firewall_enable} \
   ovn_icmp_networkpolicy_enable=${ovn_icmp_networkpolicy_enable} \
+  ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_master_count=${ovn_master_count} \
   ovn_gateway_mode=${ovn_gateway_mode} \
@@ -474,6 +484,7 @@ ovn_image=${image} \
   ovn_v6_join_subnet=${ovn_v6_join_subnet} \
   ovn_multicast_enable=${ovn_multicast_enable} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
+  ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
   ovn_metrics_endpoint_ip=${ovn_metrics_endpoint_ip} \
@@ -507,6 +518,7 @@ ovn_image=${image} \
   ovn_v6_join_subnet=${ovn_v6_join_subnet} \
   ovn_multicast_enable=${ovn_multicast_enable} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
+  ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
   ovn_metrics_endpoint_ip=${ovn_metrics_endpoint_ip} \
   ovs_metrics_scrape_interval=${ovs_metrics_scrape_interval} \

@@ -244,7 +244,7 @@ func doPodFlowsExist(queries []openflowQuery) bool {
 // has changed either UID or MAC terminate this sandbox request early instead
 // of waiting for OVN to set up flows that will never exist.
 func checkCancelSandbox(mac string, podLister corev1listers.PodLister, kclient kubernetes.Interface,
-	namespace, name, initialPodUID string) error {
+	namespace, name, netName, initialPodUID string) error {
 	pod, err := getPod(podLister, kclient, namespace, name)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
@@ -266,7 +266,7 @@ func checkCancelSandbox(mac string, podLister corev1listers.PodLister, kclient k
 		return fmt.Errorf("canceled old pod sandbox")
 	}
 
-	ovnAnnot, err := util.UnmarshalPodAnnotation(pod.Annotations)
+	ovnAnnot, err := util.UnmarshalPodAnnotation(pod.Annotations, netName)
 	if err != nil {
 		return fmt.Errorf("pod OVN annotations deleted or invalid")
 	}
@@ -284,7 +284,7 @@ func checkCancelSandbox(mac string, podLister corev1listers.PodLister, kclient k
 func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet,
 	ifaceName, ifaceID string, ofPort int, checkExternalIDs bool,
 	podLister corev1listers.PodLister, kclient kubernetes.Interface,
-	namespace, name, initialPodUID string) error {
+	namespace, name, netName, initialPodUID string) error {
 	var queries []openflowQuery
 	var detail string
 
@@ -315,7 +315,7 @@ func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet,
 				}
 			}
 
-			if err := checkCancelSandbox(mac, podLister, kclient, namespace, name, initialPodUID); err != nil {
+			if err := checkCancelSandbox(mac, podLister, kclient, namespace, name, netName, initialPodUID); err != nil {
 				return fmt.Errorf("%v waiting for OVS port binding for %s %v", err, mac, ifAddrs)
 			}
 

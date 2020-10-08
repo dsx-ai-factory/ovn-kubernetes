@@ -16,23 +16,20 @@ import (
 )
 
 // wait on a certain pod annotation related condition
-type podAnnotWaitCond func(podAnnotation map[string]string) bool
+type podAnnotWaitCond func(podAnnotation map[string]string, netName string) bool
 
 // isOvnReady is a wait condition for OVN master to set pod-networks annotation
-func isOvnReady(podAnnotation map[string]string) bool {
-	if _, ok := podAnnotation[util.OvnPodAnnotationName]; ok {
-		return true
-	}
-	return false
+func isOvnReady(podAnnotation map[string]string, netName string) bool {
+	_, err := util.UnmarshalPodAnnotation(podAnnotation, netName)
+	return err == nil
 }
 
 // isSmartNICReady is a wait condition smart-NIC: wait for OVN master to set pod-networks annotation and
 // ovnkube running on Smart-NIC to set connection-status pod annotation and its status is Ready
-func isSmartNICReady(podAnnotation map[string]string) bool {
-	if isOvnReady(podAnnotation) {
+func isSmartNICReady(podAnnotation map[string]string, netName string) bool {
+	if isOvnReady(podAnnotation, netName) {
 		// check Smart-NIC connection status
-		status := util.SmartNICConnectionStatus{}
-		if err := status.FromPodAnnotation(podAnnotation); err == nil {
+		if status, err := util.UnmarshalPodSmartNicConnStatus(podAnnotation, netName); err == nil {
 			if status.Status == util.SmartNicConnectionStatusReady {
 				return true
 			}
@@ -64,8 +61,7 @@ func getPod(podLister corev1listers.PodLister, kclient kubernetes.Interface, nam
 	return pod, err
 }
 
-// GetPodAnnotations obtains the pod UID and annotation from the cache or apiserver
-func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, kclient kubernetes.Interface, namespace, name string, annotCond podAnnotWaitCond) (string, map[string]string, error) {
+func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, kclient kubernetes.Interface, namespace, name, netName string, annotCond podAnnotWaitCond) (string, map[string]string, error) {
 	var notFoundCount uint
 
 	timeout := time.After(30 * time.Second)
@@ -88,7 +84,7 @@ func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, k
 				}
 				// drop through to try again
 			} else if pod != nil {
-				if annotCond(pod.Annotations) {
+				if annotCond(pod.Annotations, netName) {
 					return string(pod.UID), pod.Annotations, nil
 				}
 			}
@@ -100,9 +96,9 @@ func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, k
 }
 
 // PodAnnotation2PodInfo creates PodInterfaceInfo from Pod annotations and additional attributes
-func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, isSmartNic bool) (
-	*PodInterfaceInfo, error) {
-	podAnnotSt, err := util.UnmarshalPodAnnotation(podAnnotation)
+func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, isSmartNic bool, mtu int,
+	netNameInfo util.NetNameInfo) (*PodInterfaceInfo, error) {
+	podAnnotSt, err := util.UnmarshalPodAnnotation(podAnnotation, netNameInfo.NetName)
 	if err != nil {
 		return nil, err
 	}
@@ -121,6 +117,7 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, is
 		Egress:        egress,
 		CheckExtIDs:   checkExtIDs,
 		IsSmartNic:    isSmartNic,
+		NetNameInfo:   netNameInfo,
 	}
 	return podInterfaceInfo, nil
 }

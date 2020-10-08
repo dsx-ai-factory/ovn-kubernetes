@@ -874,5 +874,5 @@ func injectNode(fakeOvn *FakeOVN) {
 			},
 		},
 	}
-	fakeOvn.controller.watchFactory.NodeInformer().GetStore().Add(node)
+	fakeOvn.controller.mc.watchFactory.NodeInformer().GetStore().Add(node)
 }
