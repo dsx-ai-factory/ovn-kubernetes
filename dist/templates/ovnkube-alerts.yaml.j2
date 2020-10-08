@@ -314,7 +314,7 @@ spec:
 
     - alert: OvnNorthdTxnIncomplete
       expr: |
-        rate(ovn_northd_txn_error{namespace="ovn-kubernetes",job="ovnkube-node"}[1m]) > 0
+        rate(ovn_northd_txn_incomplete{namespace="ovn-kubernetes",job="ovnkube-node"}[1m]) > 1
       for: 30m
       labels:
        severity: critical
@@ -348,8 +348,8 @@ spec:
 
     - alert: OvnControllerTxnIncomplete
       expr: |
-        rate(ovn_controller_txn_error{namespace="ovn-kubernetes",job="ovnkube-node"}[1m]) > 0
-      for: 10m
+        rate(ovn_controller_txn_incomplete{namespace="ovn-kubernetes",job="ovnkube-node"}[1m]) > 1
+      for: 30m
       labels:
        severity: critical
       annotations:
