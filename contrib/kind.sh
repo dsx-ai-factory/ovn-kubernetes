@@ -318,7 +318,7 @@ if [ "$OVN_IMAGE" == local ]; then
   pushd ../dist/images
   sudo cp -f ../../go-controller/_output/go/bin/* .
   echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-  docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
+  docker build -t ovn-daemonset-f:dev .
   OVN_IMAGE=ovn-daemonset-f:dev
   popd
 fi
@@ -367,14 +367,15 @@ for n in $MASTER_NODES; do
     kubectl taint node $n node-role.kubernetes.io/master:NoSchedule- || true
   fi
 done
-if [ "$OVN_HA" == true ]; then
-  run_kubectl apply -f ovnkube-db-raft.yaml
-else
-  run_kubectl apply -f ovnkube-db.yaml
-fi
+run_kubectl label node --all k8s.ovn.org/ovnkube-db=true --overwrite
 run_kubectl apply -f ovs-node.yaml
-run_kubectl apply -f ovnkube-master.yaml
-run_kubectl apply -f ovnkube-node.yaml
+run_kubectl apply -f ovn-nbdb-raft.yaml
+run_kubectl apply -f ovn-sbdb-raft.yaml
+run_kubectl apply -f ovn-north.yaml
+run_kubectl apply -f ovn-host.yaml
+run_kubectl apply -f ovnk8s-master.yaml
+run_kubectl apply -f ovnk8s-node.yaml
+
 popd
 
 # Delete kube-proxy
