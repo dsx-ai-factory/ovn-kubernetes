@@ -8,11 +8,11 @@
 #
 # So this file will change over time.
 
-FROM ubuntu:18.04
+FROM ubuntu:20.04
 
 USER root
 
-RUN apt-get update && apt-get install -y arping iproute2 curl software-properties-common setpriv
+RUN apt-get update && apt-get install -y arping iproute2 curl software-properties-common util-linux
 
 # Get openvswitch from Nvidia controlled source
 RUN curl -s https://packages.nvidia.com/install/repositories/sdn/nv-ovs-2-12-0/script.deb.sh | bash
@@ -28,7 +28,7 @@ RUN mkdir -p /var/run/openvswitch
 # Built in ../../go_controller, then the binaries are copied here.
 # put things where they are in the pkg
 RUN mkdir -p /usr/libexec/cni/
-COPY ovnkube ovn-kube-util /usr/bin/
+COPY ovnkube ovn-kube-util ovndbchecker /usr/bin/
 COPY ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
 
 # ovnkube.sh is the entry point. This script examines environment

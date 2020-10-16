@@ -38,7 +38,13 @@ func setupLocalNodeAccessBridge(nodeName string, subnets []*net.IPNet) error {
 		return err
 	}
 
-	macAddress := util.IPAddrToHWAddr(net.ParseIP(util.V4NodeLocalNatSubnetNextHop)).String()
+	var macAddress string
+	if config.IPv4Mode {
+		macAddress = util.IPAddrToHWAddr(net.ParseIP(util.V4NodeLocalNatSubnetNextHop)).String()
+	} else {
+		macAddress = util.IPAddrToHWAddr(net.ParseIP(util.V6NodeLocalNatSubnetNextHop)).String()
+	}
+
 	_, stderr, err = util.RunOVSVsctl(
 		"--may-exist", "add-port", localBridgeName, localnetGatewayNextHopPort,
 		"--", "set", "interface", localnetGatewayNextHopPort, "type=internal",
@@ -59,6 +65,7 @@ func setupLocalNodeAccessBridge(nodeName string, subnets []*net.IPNet) error {
 		return err
 	}
 
+	var gatewayIfAddrs []*net.IPNet
 	for _, subnet := range subnets {
 		var gatewayNextHop net.IP
 		var gatewaySubnetMask net.IPMask
@@ -71,9 +78,19 @@ func setupLocalNodeAccessBridge(nodeName string, subnets []*net.IPNet) error {
 			gatewaySubnetMask = net.CIDRMask(util.V4NodeLocalNatSubnetPrefix, 32)
 		}
 		gatewayNextHopCIDR := &net.IPNet{IP: gatewayNextHop, Mask: gatewaySubnetMask}
-
 		if err = util.LinkAddrAdd(link, gatewayNextHopCIDR); err != nil {
 			return err
+		}
+		gatewayIfAddrs = append(gatewayIfAddrs, gatewayNextHopCIDR)
+	}
+
+	if config.Gateway.Mode == config.GatewayModeLocal {
+		// need to add masquerading for ovn-k8s-gw0 port for hostA -> service -> hostB via DGP
+		for _, ifaddr := range gatewayIfAddrs {
+			err = initLocalGatewayNATRules(localnetGatewayNextHopPort, ifaddr)
+			if err != nil {
+				return fmt.Errorf("failed to add NAT rules for localnet gateway (%v)", err)
+			}
 		}
 	}
 

@@ -73,30 +73,23 @@ func bridgedGatewayNodeSetup(nodeName, bridgeName, bridgeInterface, physicalNetw
 
 // getNetworkInterfaceIPAddresses returns the IP addresses for the network interface 'iface'.
 func getNetworkInterfaceIPAddresses(iface string) ([]*net.IPNet, error) {
-	intf, err := net.InterfaceByName(iface)
+	allIPs, err := util.GetNetworkInterfaceIPs(iface)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not find IP addresses: %v", err)
 	}
 
-	addrs, err := intf.Addrs()
-	if err != nil {
-		return nil, err
-	}
 	var ips []*net.IPNet
 	var foundIPv4 bool
 	var foundIPv6 bool
-	for _, addr := range addrs {
-		switch ip := addr.(type) {
-		case *net.IPNet:
-			if utilnet.IsIPv6CIDR(ip) {
-				if config.IPv6Mode && !foundIPv6 {
-					ips = append(ips, ip)
-					foundIPv6 = true
-				}
-			} else if config.IPv4Mode && !foundIPv4 {
+	for _, ip := range allIPs {
+		if utilnet.IsIPv6CIDR(ip) {
+			if config.IPv6Mode && !foundIPv6 {
 				ips = append(ips, ip)
-				foundIPv4 = true
+				foundIPv6 = true
 			}
+		} else if config.IPv4Mode && !foundIPv4 {
+			ips = append(ips, ip)
+			foundIPv4 = true
 		}
 	}
 	if config.IPv4Mode && !foundIPv4 {
@@ -185,7 +178,7 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	var prFn postWaitFunc
 	switch config.Gateway.Mode {
 	case config.GatewayModeLocal:
-		err = n.initLocalnetGateway(subnets, nodeAnnotator, gatewayIntf)
+		prFn, err = n.initSharedGateway(subnets, gatewayNextHops, gatewayIntf, nodeAnnotator)
 	case config.GatewayModeShared:
 		prFn, err = n.initSharedGateway(subnets, gatewayNextHops, gatewayIntf, nodeAnnotator)
 	case config.GatewayModeDisabled:
@@ -200,8 +193,10 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	// Wait for gateway resources to be created by the master if DisableSNATMultipleGWs is not set,
 	// as that option does not add default SNAT rules on the GR and the gatewayReady function checks
 	// those default NAT rules are present
-	if !config.Gateway.DisableSNATMultipleGWs {
+	if !config.Gateway.DisableSNATMultipleGWs && config.Gateway.Mode != config.GatewayModeLocal {
 		waiter.AddWait(gatewayReady, prFn)
+	} else {
+		waiter.AddWait(func() (bool, error) { return true, nil }, prFn)
 	}
 	return nil
 }
@@ -212,10 +207,7 @@ func CleanupClusterNode(name string) error {
 	var err error
 
 	klog.V(5).Infof("Cleaning up gateway resources on node: %q", name)
-	switch config.Gateway.Mode {
-	case config.GatewayModeLocal:
-		err = cleanupLocalnetGateway(util.PhysicalNetworkName)
-	case config.GatewayModeShared:
+	if config.Gateway.Mode == config.GatewayModeLocal || config.Gateway.Mode == config.GatewayModeShared {
 		err = cleanupLocalnetGateway(util.LocalNetworkName)
 		if err != nil {
 			klog.Errorf("Failed to cleanup Localnet Gateway, error: %v", err)

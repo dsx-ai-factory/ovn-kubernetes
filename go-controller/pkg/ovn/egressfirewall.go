@@ -3,8 +3,10 @@ package ovn
 import (
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -15,10 +17,9 @@ import (
 )
 
 const (
-	defaultStartPriority           = 2000
 	egressFirewallAppliedCorrectly = "EgressFirewall Rules applied"
 	egressFirewallAddError         = "EgressFirewall Rules not correctly added"
-	egressFirewallUpdateError      = "EgressFirewall Rules did not update correctly"
+	egressFirewallUpdateError      = "EgressFirewall Rules not correctly updated"
 )
 
 type egressFirewall struct {
@@ -65,7 +66,7 @@ func newEgressFirewallRule(rawEgressFirewallRule egressfirewallapi.EgressFirewal
 }
 
 func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.EgressFirewall) []error {
-	klog.Infof("Adding egress Firewall %s in namespace %s", egressFirewall.Name, egressFirewall.Namespace)
+	klog.Infof("Adding egressFirewall %s in namespace %s", egressFirewall.Name, egressFirewall.Namespace)
 	nsInfo, err := oc.waitForNamespaceLocked(egressFirewall.Namespace)
 	if err != nil {
 		return []error{fmt.Errorf("failed to wait for namespace %s event (%v)",
@@ -81,11 +82,24 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 	ef := newEgressFirewall(egressFirewall)
 	nsInfo.egressFirewallPolicy = ef
 	var errList []error
+	egressFirewallStartPriorityInt, err := strconv.Atoi(egressFirewallStartPriority)
+	if err != nil {
+		return []error{fmt.Errorf("failed to convert egressFirewallStartPriority to Integer: cannot add egressFirewall for namespace %s", egressFirewall.Namespace)}
+	}
+	minimumReservedEgressFirewallPriorityInt, err := strconv.Atoi(minimumReservedEgressFirewallPriority)
+	if err != nil {
+		return []error{fmt.Errorf("failed to convert minumumReservedEgressFirewallPriority to Integer: cannot add egressFirewall for namespace %s", egressFirewall.Namespace)}
+	}
 	for i, egressFirewallRule := range egressFirewall.Spec.Egress {
-		//process Rules into egressFirewallRules for egressFirewall struct
+		// process Rules into egressFirewallRules for egressFirewall struct
+		if i > egressFirewallStartPriorityInt-minimumReservedEgressFirewallPriorityInt {
+			klog.Warningf("egressFirewall for namespace %s has too many rules, the rest will be ignored",
+				egressFirewall.Namespace)
+			break
+		}
 		efr, err := newEgressFirewallRule(egressFirewallRule, i)
 		if err != nil {
-			errList = append(errList, fmt.Errorf("error: cannot create EgressFirewall Rule for destination %s to namespace %s - %v",
+			errList = append(errList, fmt.Errorf("error: cannot create EgressFirewall Rule to destination %s for namespace %s - %v",
 				egressFirewallRule.To.CIDRSelector, egressFirewall.Namespace, err))
 			continue
 
@@ -96,16 +110,12 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 		return errList
 	}
 
-	err = ef.addACLToJoinSwitch(nsInfo.addressSet.GetIPv4HashName(), nsInfo.addressSet.GetIPv6HashName())
+	err = ef.addLogicalRouterPolicyToClusterRouter(nsInfo.addressSet.GetIPv4HashName(), nsInfo.addressSet.GetIPv6HashName(), egressFirewallStartPriorityInt)
 	if err != nil {
-		errList = append(errList, err)
-	}
-	if len(errList) > 0 {
-		return errList
+		return []error{err}
 	}
 
 	return nil
-
 }
 
 func (oc *Controller) updateEgressFirewall(oldEgressFirewall, newEgressFirewall *egressfirewallapi.EgressFirewall) []error {
@@ -123,21 +133,19 @@ func (oc *Controller) deleteEgressFirewall(egressFirewall *egressfirewallapi.Egr
 		nsInfo.egressFirewallPolicy = nil
 		nsInfo.Unlock()
 	}
-
-	stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=_uuid", "find", "ACL",
-		fmt.Sprintf("external-ids:egressFirewall=%s", egressFirewall.Namespace))
+	stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "logical_router_policy", fmt.Sprintf("external-ids:egressFirewall=%s", egressFirewall.Namespace))
 	if err != nil {
-		return []error{fmt.Errorf("error executing find ACL command, stderr: %q, %+v", stderr, err)}
+		return []error{fmt.Errorf("error deleting egressFirewall for namespace %s, cannot get logical router policies from LR %s - %s:%s",
+			egressFirewall.Namespace, ovnClusterRouter, err, stderr)}
 	}
+
 	var errList []error
 	uuids := strings.Fields(stdout)
 	for _, uuid := range uuids {
-		_, stderr, err := util.RunOVNNbctl("remove", "logical_switch", ovnJoinSwitch, "acls", uuid)
+		_, stderr, err := util.RunOVNNbctl("lr-policy-del", ovnClusterRouter, uuid)
 		if err != nil {
-			errList = append(errList, fmt.Errorf("failed to remove the ACL %s for "+
-				"egressFirewall %s/%s from %s switch, stderr: %q (%v)", uuid, egressFirewall.Namespace,
-				egressFirewall.Name, ovnJoinSwitch, stderr, err))
+			errList = append(errList, fmt.Errorf("failed to delete the rules for "+
+				"egressFirewall in namespace %s on logical switch %s, stderr: %q (%v)", egressFirewall.Namespace, ovnClusterRouter, stderr, err))
 		}
 	}
 	return errList
@@ -149,7 +157,7 @@ func (oc *Controller) updateEgressFirewallWithRetry(egressfirewall *egressfirewa
 	})
 }
 
-func (ef *egressFirewall) addACLToJoinSwitch(hashedAddressSetNameIPv4, hashedAddressSetNameIPv6 string) error {
+func (ef *egressFirewall) addLogicalRouterPolicyToClusterRouter(hashedAddressSetNameIPv4, hashedAddressSetNameIPv6 string, efStartPriority int) error {
 	for _, rule := range ef.egressRules {
 		var match string
 		var action string
@@ -158,43 +166,28 @@ func (ef *egressFirewall) addACLToJoinSwitch(hashedAddressSetNameIPv4, hashedAdd
 		} else {
 			action = "drop"
 		}
-
-		ipAddress, _, err := net.ParseCIDR(rule.to.cidrSelector)
-		if err != nil {
-			return fmt.Errorf("error rule.to.cidrSelector %s is not a valid CIDR (%+v)", rule.to.cidrSelector, err)
-		}
-		if !utilnet.IsIPv6(ipAddress) {
-			match = fmt.Sprintf("match=\"ip4.dst == %s && ip4.src == $%s\"", rule.to.cidrSelector, hashedAddressSetNameIPv4)
+		if !utilnet.IsIPv6CIDRString(rule.to.cidrSelector) {
+			match = fmt.Sprintf("match=\"ip4.dst == %s && ip4.src == $%s", rule.to.cidrSelector, hashedAddressSetNameIPv4)
 		} else {
-			match = fmt.Sprintf("match=\"ip6.dst == %s && ip6.src == $%s\"", rule.to.cidrSelector, hashedAddressSetNameIPv6)
+			match = fmt.Sprintf("match=\"ip6.dst == %s && ip6.src == $%s", rule.to.cidrSelector, hashedAddressSetNameIPv6)
 		}
 
 		if len(rule.ports) > 0 {
-			match = fmt.Sprintf("%s && ( %s )\"", match[:len(match)-1], egressGetL4Match(rule.ports))
+			match = fmt.Sprintf("%s && ( %s )", match, egressGetL4Match(rule.ports))
 		}
-		uuid, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-			"--columns=_uuid", "find", "ACL", match, "action="+action,
-			fmt.Sprintf("external-ids:egressFirewall=%s", ef.namespace))
 
+		match = fmt.Sprintf("%s && %s\"", match, getClusterSubnetsExclusion())
+
+		_, stderr, err := util.RunOVNNbctl("--id=@logical_router_policy", "create", "logical_router_policy",
+			fmt.Sprintf("priority=%d", efStartPriority-rule.id),
+			match, "action="+action, fmt.Sprintf("external-ids:egressFirewall=%s", ef.namespace),
+			"--", "add", "logical_router", ovnClusterRouter, "policies", "@logical_router_policy")
 		if err != nil {
-			return fmt.Errorf("error executing find ACL command, stderr: %q, %+v", stderr, err)
-		}
-		if uuid == "" {
-			_, stderr, err := util.RunOVNNbctl("--id=@acl", "create", "acl",
-				fmt.Sprintf("priority=%d", defaultStartPriority-rule.id),
-				fmt.Sprintf("direction=%s", fromLport), match, "action="+action,
-				fmt.Sprintf("external-ids:egressFirewall=%s", ef.namespace),
-				"--", "add", "logical_switch", ovnJoinSwitch,
-				"acls", "@acl")
-			if err != nil {
-				return fmt.Errorf("error executing create ACL command, stderr: %q, %+v", stderr, err)
-			}
-		} else {
-			_, stderr, err := util.RunOVNNbctl("add", "logical_switch", ovnJoinSwitch, "acls", uuid)
-			if err != nil {
-				return fmt.Errorf("error adding ACL for egressFirewall %s/%s to %s failed, stderr: %q, %+v",
-					ef.name, ef.namespace, ovnJoinSwitch, stderr, err)
-
+			// TODO: lr-policy-add doesn't support --may-exist, resort to this workaround for now.
+			// Have raised an issue against ovn repository (https://github.com/ovn-org/ovn/issues/49)
+			if !strings.Contains(stderr, "already existed") {
+				return fmt.Errorf("failed to add policy route '%s' to %s "+
+					"stderr: %s, error: %v", match, ovnClusterRouter, stderr, err)
 			}
 		}
 	}
@@ -262,4 +255,19 @@ func egressGetL4Match(ports []egressfirewallapi.EgressFirewallPort) string {
 		}
 	}
 	return l4Match
+}
+
+func getClusterSubnetsExclusion() string {
+	var exclusion string
+	for _, clusterSubnet := range config.Default.ClusterSubnets {
+		if exclusion != "" {
+			exclusion += " && "
+		}
+		if utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
+			exclusion += fmt.Sprintf("%s.dst != %s", "ip6", clusterSubnet.CIDR)
+		} else {
+			exclusion += fmt.Sprintf("%s.dst != %s", "ip4", clusterSubnet.CIDR)
+		}
+	}
+	return exclusion
 }

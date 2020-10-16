@@ -24,11 +24,18 @@ const (
 	extSwitchToGwRouterPrefix  = "etor-"
 	gwRouterToExtSwitchPrefix  = "rtoe-"
 
-	nodeLocalSwitch          = "node_local_switch"
-	nodeSubnetPolicyPriority = "1004"
-	mgmtPortPolicyPriority   = "1005"
-	v4JoinSubnetCidr         = "100.64.0.1/16"
-	v6JoinSubnetCidr         = "fd98::1/64"
+	nodeLocalSwitch  = "node_local_switch"
+	v4JoinSubnetCidr = "100.64.0.1/16"
+	v6JoinSubnetCidr = "fd98::1/64"
+
+	// priority of logical router policies on the ovnClusterRouter
+	egressFirewallStartPriority           = "10000"
+	minimumReservedEgressFirewallPriority = "2000"
+	mgmtPortPolicyPriority                = "1005"
+	nodeSubnetPolicyPriority              = "1004"
+	interNodePolicyPriority               = "1003"
+	defaultNoRereoutePriority             = "101"
+	egressIPReroutePriority               = "100"
 )
 
 func (ovn *Controller) getOvnGateways() ([]string, string, error) {

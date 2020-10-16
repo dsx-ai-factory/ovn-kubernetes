@@ -17,7 +17,7 @@ import (
 
 // gatewayInit creates a gateway router for the local chassis.
 func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*net.IPNet,
-	l3GatewayConfig *util.L3GatewayConfig, sctpSupport bool, gwLRPIPs, drLRPIPs []*net.IPNet) error {
+	l3GatewayConfig *util.L3GatewayConfig, sctpSupport bool, gwLRPIPNets, drLRPIPNets []*net.IPNet) error {
 	// Create a gateway router.
 	gatewayRouter := gwRouterPrefix + nodeName
 	physicalIPs := make([]string, len(l3GatewayConfig.IPAddresses))
@@ -46,13 +46,17 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 			"stdout: %q, stderr: %q, error: %v", gwSwitchPort, ovnJoinSwitch, stdout, stderr, err)
 	}
 
-	gwLRPMAC := util.IPAddrToHWAddr(gwLRPIPs[0].IP)
+	gwLRPIPs := make([]net.IP, 0)
+	for _, gwLRPIPNet := range gwLRPIPNets {
+		gwLRPIPs = append(gwLRPIPs, gwLRPIPNet.IP)
+	}
+	gwLRPMAC := util.IPAddrToHWAddr(gwLRPIPs[0])
 	args := []string{
 		"--", "--if-exists", "lrp-del", gwRouterPort,
 		"--", "lrp-add", gatewayRouter, gwRouterPort, gwLRPMAC.String(),
 	}
-	for _, gwLRPIP := range gwLRPIPs {
-		args = append(args, gwLRPIP.String())
+	for _, gwLRPIPNet := range gwLRPIPNets {
+		args = append(args, gwLRPIPNet.String())
 	}
 	_, stderr, err = util.RunOVNNbctl(args...)
 	if err != nil {
@@ -60,18 +64,19 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 			"stderr: %q, error: %v", gwRouterPort, gatewayRouter, stderr, err)
 	}
 
-	// When there are multiple gateway routers (which would be the likely
-	// default for any sane deployment), we need to SNAT traffic
-	// heading to the logical space with the Gateway router's IP so that
-	// return traffic comes back to the same gateway router.
-
-	// FIXME DUAL-STACK: There doesn't seem to be any way to configure multiple
-	// lb_force_snat_ip values. (https://bugzilla.redhat.com/show_bug.cgi?id=1823003)
-	stdout, stderr, err = util.RunOVNNbctl("set", "logical_router",
-		gatewayRouter, "options:lb_force_snat_ip="+gwLRPIPs[0].IP.String())
-	if err != nil {
-		return fmt.Errorf("failed to set logical router %s's lb_force_snat_ip option, "+
-			"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
+	// Local gateway mode does not need SNAT or routes on GR because GR is only used for multiple external gws
+	// without SNAT. For normal N/S traffic, ingress/egress is mp0 on node switches
+	if config.Gateway.Mode != config.GatewayModeLocal {
+		// When there are multiple gateway routers (which would be the likely
+		// default for any sane deployment), we need to SNAT traffic
+		// heading to the logical space with the Gateway router's IP so that
+		// return traffic comes back to the same gateway router.
+		stdout, stderr, err = util.RunOVNNbctl("set", "logical_router",
+			gatewayRouter, "options:lb_force_snat_ip="+util.JoinIPs(gwLRPIPs, " "))
+		if err != nil {
+			return fmt.Errorf("failed to set logical router %s's lb_force_snat_ip option, "+
+				"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
+		}
 	}
 
 	stdout, stderr, err = util.RunOVNNbctl(
@@ -89,12 +94,8 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 			"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
 	}
 
-	nexthopIPs := make([]net.IP, 0)
-	for _, drLRPIP := range drLRPIPs {
-		nexthopIPs = append(nexthopIPs, drLRPIP.IP)
-	}
 	for _, entry := range clusterIPSubnet {
-		drLRPIP, err := util.MatchIPFamily(utilnet.IsIPv6CIDR(entry), nexthopIPs)
+		drLRPIPNet, err := util.MatchIPNetFamily(utilnet.IsIPv6CIDR(entry), drLRPIPNets)
 		if err != nil {
 			return fmt.Errorf("failed to add a static route in GR %s with distributed "+
 				"router as the nexthop: %v",
@@ -103,7 +104,7 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 
 		// Add a static route in GR with distributed router as the nexthop.
 		stdout, stderr, err = util.RunOVNNbctl("--may-exist", "lr-route-add",
-			gatewayRouter, entry.String(), drLRPIP.String())
+			gatewayRouter, entry.String(), drLRPIPNet.IP.String())
 		if err != nil {
 			return fmt.Errorf("failed to add a static route in GR %s with distributed "+
 				"router as the nexthop, stdout: %q, stderr: %q, error: %v",
@@ -140,16 +141,20 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 				}
 			}
 		}
-		// Add north-south load-balancers to the gateway router.
-		lbString := fmt.Sprintf("%s,%s", protoLBMap[kapi.ProtocolTCP], protoLBMap[kapi.ProtocolUDP])
-		if sctpSupport {
-			lbString = lbString + "," + protoLBMap[kapi.ProtocolSCTP]
-		}
-		stdout, stderr, err = util.RunOVNNbctl("set", "logical_router", gatewayRouter, "load_balancer="+lbString)
-		if err != nil {
-			return fmt.Errorf("failed to set north-south load-balancers to the "+
-				"gateway router %s, stdout: %q, stderr: %q, error: %v",
-				gatewayRouter, stdout, stderr, err)
+
+		// Local gateway mode does not use GR for ingress node port traffic, it uses mp0 instead
+		if config.Gateway.Mode != config.GatewayModeLocal {
+			// Add north-south load-balancers to the gateway router.
+			lbString := fmt.Sprintf("%s,%s", protoLBMap[kapi.ProtocolTCP], protoLBMap[kapi.ProtocolUDP])
+			if sctpSupport {
+				lbString = lbString + "," + protoLBMap[kapi.ProtocolSCTP]
+			}
+			stdout, stderr, err = util.RunOVNNbctl("set", "logical_router", gatewayRouter, "load_balancer="+lbString)
+			if err != nil {
+				return fmt.Errorf("failed to set north-south load-balancers to the "+
+					"gateway router %s, stdout: %q, stderr: %q, error: %v",
+					gatewayRouter, stdout, stderr, err)
+			}
 		}
 		// Also add north-south load-balancers to local switches for pod -> nodePort traffic
 		stdout, stderr, err = util.RunOVNNbctl("get", "logical_switch", nodeName, "load_balancer")
@@ -256,42 +261,42 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 	// We need to add a /32 route to the Gateway router's IP, on the
 	// cluster router, to ensure that the return traffic goes back
 	// to the same gateway router
-	nexthopIPs = make([]net.IP, 0)
 	for _, gwLRPIP := range gwLRPIPs {
 		stdout, stderr, err = util.RunOVNNbctl("--may-exist", "lr-route-add",
-			ovnClusterRouter, gwLRPIP.IP.String(), gwLRPIP.IP.String())
+			ovnClusterRouter, gwLRPIP.String(), gwLRPIP.String())
 		if err != nil {
 			return fmt.Errorf("failed to add /32 route to Gateway router's IP of %q "+
 				"on the distributed router, stdout: %q, stderr: %q, error: %v",
-				gwLRPIP.IP.String(), stdout, stderr, err)
+				gwLRPIP.String(), stdout, stderr, err)
 		}
-		nexthopIPs = append(nexthopIPs, gwLRPIP.IP)
 	}
 
 	// Add source IP address based routes in distributed router
 	// for this gateway router.
 	for _, hostSubnet := range hostSubnets {
-		gwLRPIP, err := util.MatchIPFamily(utilnet.IsIPv6CIDR(hostSubnet), nexthopIPs)
+		gwLRPIP, err := util.MatchIPFamily(utilnet.IsIPv6CIDR(hostSubnet), gwLRPIPs)
 		if err != nil {
 			return fmt.Errorf("failed to add source IP address based "+
 				"routes in distributed router %s: %v",
 				ovnClusterRouter, err)
 		}
 
-		stdout, stderr, err = util.RunOVNNbctl("--may-exist",
-			"--policy=src-ip", "lr-route-add", ovnClusterRouter,
-			hostSubnet.String(), gwLRPIP.String())
-		if err != nil {
-			return fmt.Errorf("failed to add source IP address based "+
-				"routes in distributed router %s, stdout: %q, "+
-				"stderr: %q, error: %v", ovnClusterRouter, stdout, stderr, err)
+		if config.Gateway.Mode != config.GatewayModeLocal {
+			stdout, stderr, err = util.RunOVNNbctl("--may-exist",
+				"--policy=src-ip", "lr-route-add", ovnClusterRouter,
+				hostSubnet.String(), gwLRPIP.String())
+			if err != nil {
+				return fmt.Errorf("failed to add source IP address based "+
+					"routes in distributed router %s, stdout: %q, "+
+					"stderr: %q, error: %v", ovnClusterRouter, stdout, stderr, err)
+			}
 		}
 	}
 
 	// if config.Gateway.DisabledSNATMultipleGWs is not set (by default is not),
 	// the NAT rules for pods not having annotations to route thru either external
 	// gws or pod CNFs will be added within pods.go addLogicalPort
-	if !config.Gateway.DisableSNATMultipleGWs {
+	if !config.Gateway.DisableSNATMultipleGWs && config.Gateway.Mode != config.GatewayModeLocal {
 		// Default SNAT rules.
 		externalIPs := make([]net.IP, len(l3GatewayConfig.IPAddresses))
 		for i, ip := range l3GatewayConfig.IPAddresses {
@@ -412,21 +417,14 @@ func addDistributedGWPort() error {
 		return nil
 	}
 
-	// wait for the datapath binding of ovnClusterRouter to be created by northd
-	datapath := ""
-	err = wait.PollImmediate(500*time.Millisecond, 30*time.Second, func() (bool, error) {
-		datapath, _, err = util.RunOVNSbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "datapath",
+	// Wait a bit for northd to create the cluster router's datapath in southbound
+	var datapath string
+	err = wait.PollImmediate(time.Second, 30*time.Second, func() (bool, error) {
+		datapath, stderr, err = util.RunOVNSbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "datapath",
 			"external_ids:name="+ovnClusterRouter)
-		if err != nil {
-			return false, nil
-		}
-		// datapath of ovnClusterRouter is not created yet
-		if datapath == "" {
-			return false, nil
-		}
-		return true, nil
+		// Ignore errors; can't easily detect which are transient or fatal
+		return datapath != "", nil
 	})
-
 	if err != nil {
 		return fmt.Errorf("failed to get the datapatah UUID of %s from OVN SB, error: %v", ovnClusterRouter, err)
 	}
@@ -475,6 +473,7 @@ func addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAddr *net.IPNet) er
 		}
 	}
 
+	// policy to allow host -> service -> hairpin back to host
 	matchStr = fmt.Sprintf("%s.src == %s && %s.dst == %s /* %s */",
 		l3Prefix, mgmtPortIP, l3Prefix, hostIfAddr.IP.String(), nodeName)
 	_, stderr, err = util.RunOVNNbctl("lr-policy-add", ovnClusterRouter, mgmtPortPolicyPriority, matchStr,
@@ -485,6 +484,34 @@ func addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAddr *net.IPNet) er
 				"stderr: %s, error: %v", matchStr, nodeName, ovnClusterRouter, stderr, err)
 		}
 	}
+
+	if config.Gateway.Mode == config.GatewayModeLocal {
+		var matchDst string
+		// Local gw mode needs to use DGP to do hostA -> service -> hostB
+		var clusterL3Prefix string
+		for _, clusterSubnet := range config.Default.ClusterSubnets {
+			if utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
+				clusterL3Prefix = "ip6"
+			} else {
+				clusterL3Prefix = "ip4"
+			}
+			if l3Prefix != clusterL3Prefix {
+				continue
+			}
+			matchDst += fmt.Sprintf(" && %s.dst != %s", clusterL3Prefix, clusterSubnet.CIDR)
+		}
+		matchStr = fmt.Sprintf("%s.src == %s %s /* inter-%s */",
+			l3Prefix, mgmtPortIP, matchDst, nodeName)
+		_, stderr, err = util.RunOVNNbctl("lr-policy-add", ovnClusterRouter, interNodePolicyPriority, matchStr,
+			"reroute", natSubnetNextHop)
+		if err != nil {
+			if !strings.Contains(stderr, "already existed") {
+				return fmt.Errorf("failed to add policy route '%s' for host %q on %s "+
+					"stderr: %s, error: %v", matchStr, nodeName, ovnClusterRouter, stderr, err)
+			}
+		}
+	}
+
 	return nil
 }
 

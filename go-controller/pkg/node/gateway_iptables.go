@@ -9,7 +9,6 @@ import (
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog"
@@ -19,7 +18,6 @@ import (
 const (
 	iptableNodePortChain   = "OVN-KUBE-NODEPORT"
 	iptableExternalIPChain = "OVN-KUBE-EXTERNALIP"
-	iptableEgressIPChain   = "OVN-KUBE-EGRESSIP"
 )
 
 func clusterIPTablesProtocols() []iptables.Protocol {
@@ -175,40 +173,6 @@ func getNodePortIPTRules(svcPort kapi.ServicePort, nodeIP *net.IPNet, targetIP s
 	}
 }
 
-func getEgressIPTRules(eIPStatus egressipv1.EgressIPStatusItem, gatewayRouterIP string) []iptRule {
-	var protocol iptables.Protocol
-	if utilnet.IsIPv6String(eIPStatus.EgressIP) {
-		protocol = iptables.ProtocolIPv6
-	} else {
-		protocol = iptables.ProtocolIPv4
-	}
-	return []iptRule{
-		{
-			table: "nat",
-			chain: iptableEgressIPChain,
-			args: []string{
-				"-s", gatewayRouterIP,
-				"-m", "mark",
-				"--mark", fmt.Sprintf("0x%x", util.IPToUint32(eIPStatus.EgressIP)),
-				"-j", "SNAT",
-				"--to-source", eIPStatus.EgressIP,
-			},
-			protocol: protocol,
-		},
-		{
-			table: "filter",
-			chain: iptableEgressIPChain,
-			args: []string{
-				"-d", eIPStatus.EgressIP,
-				"-m", "conntrack",
-				"--ctstate", "NEW",
-				"-j", "REJECT",
-			},
-			protocol: protocol,
-		},
-	}
-}
-
 func getExternalIPTRules(svcPort kapi.ServicePort, externalIP, dstIP string) []iptRule {
 	var protocol iptables.Protocol
 	if utilnet.IsIPv6String(externalIP) {
@@ -243,10 +207,10 @@ func getExternalIPTRules(svcPort kapi.ServicePort, externalIP, dstIP string) []i
 	}
 }
 
-func getLocalGatewayNATRules(ifname string, ip net.IP) []iptRule {
+func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []iptRule {
 	// Allow packets to/from the gateway interface in case defaults deny
 	var protocol iptables.Protocol
-	if utilnet.IsIPv6(ip) {
+	if utilnet.IsIPv6(cidr.IP) {
 		protocol = iptables.ProtocolIPv6
 	} else {
 		protocol = iptables.ProtocolIPv4
@@ -285,7 +249,7 @@ func getLocalGatewayNATRules(ifname string, ip net.IP) []iptRule {
 			table: "nat",
 			chain: "POSTROUTING",
 			args: []string{
-				"-s", ip.String(),
+				"-s", cidr.String(),
 				"-j", "MASQUERADE",
 			},
 			protocol: protocol,
@@ -293,8 +257,9 @@ func getLocalGatewayNATRules(ifname string, ip net.IP) []iptRule {
 	}
 }
 
-func initLocalGatewayNATRules(ifname string, ip net.IP) error {
-	return addIptRules(getLocalGatewayNATRules(ifname, ip))
+// initLocalGatewayNATRules sets up iptables rules for interfaces
+func initLocalGatewayNATRules(ifname string, cidr *net.IPNet) error {
+	return addIptRules(getLocalGatewayNATRules(ifname, cidr))
 }
 
 func initGatewayIPTables(genGatewayChainRules func(chain string, proto iptables.Protocol) []iptRule) error {
