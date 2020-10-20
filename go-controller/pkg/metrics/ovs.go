@@ -862,9 +862,21 @@ func ovsInterfaceMetricsUpdate(interfaceInfo map[string]interfaceDetails) (err e
 			continue
 		}
 		interfaceFieldValues := strings.Split(kvPair, ",")
+
+		interfaceTypeValue := getOvsInterfaceType(interfaceFieldValues[3])
+		if interfaceTypeValue == 0 || interfaceTypeValue == 4 {
+			// not gathering metrics for not-typed and geneve interfaces
+			continue
+		}
+
 		interfaceId := interfaceFieldValues[0]
+		interfaceData, found := interfaceInfo[interfaceId]
+		if !found {
+			// interface is gone while filling it, skip it
+			continue
+		}
+
 		interfaceName := interfaceFieldValues[1]
-		interfaceData := interfaceInfo[interfaceId]
 
 		var duplexValue float64
 		if interfaceFieldValues[2] == "half" {
@@ -876,7 +888,6 @@ func ovsInterfaceMetricsUpdate(interfaceInfo map[string]interfaceDetails) (err e
 		}
 		ovsInterfaceMetricsDataMap["interface_duplex"].metric.WithLabelValues(
 			interfaceData.bridge, interfaceData.port, interfaceName).Set(duplexValue)
-		interfaceTypeValue := getOvsInterfaceType(interfaceFieldValues[3])
 		ovsInterfaceMetricsDataMap["interface_type"].metric.WithLabelValues(
 			interfaceData.bridge, interfaceData.port, interfaceName).Set(interfaceTypeValue)
 		adminStateValue := getOvsInterfaceState(interfaceFieldValues[4])
