@@ -204,12 +204,11 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	}
 
 	if config.HybridOverlay.Enabled {
-		factory := oc.watchFactory.GetFactory()
 		oc.hoMaster, err = hocontroller.NewMaster(
 			oc.kube,
-			factory.Core().V1().Nodes().Informer(),
-			factory.Core().V1().Namespaces().Informer(),
-			factory.Core().V1().Pods().Informer(),
+			oc.watchFactory.NodeInformer(),
+			oc.watchFactory.NamespaceInformer(),
+			oc.watchFactory.PodInformer(),
 			oc.ovnNBClient,
 			oc.ovnSBClient,
 			informer.NewDefaultEventHandler,
@@ -225,8 +224,8 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 // SetupMaster creates the central router and load-balancers for the network
 func (oc *Controller) SetupMaster(masterNodeName string) error {
 	// Create a single common distributed router for the cluster.
-	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lr-add", ovnClusterRouter,
-		"--", "set", "logical_router", ovnClusterRouter, "external_ids:k8s-cluster-router=yes")
+	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lr-add", util.OVNClusterRouter,
+		"--", "set", "logical_router", util.OVNClusterRouter, "external_ids:k8s-cluster-router=yes")
 	if err != nil {
 		klog.Errorf("Failed to create a single common distributed router for the cluster, "+
 			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
@@ -248,11 +247,18 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		klog.Info("SCTP support detected in OVN")
 	}
 
+	// Create a cluster-wide port group that all logical switch ports are part of
+	oc.clusterPortGroupUUID, err = createPortGroup(clusterPortGroupName, clusterPortGroupName)
+	if err != nil {
+		klog.Errorf("Failed to create cluster port group: %v", err)
+		return err
+	}
+
 	// If supported, enable IGMP relay on the router to forward multicast
 	// traffic between nodes.
 	if oc.multicastSupport {
 		stdout, stderr, err = util.RunOVNNbctl("--", "set", "logical_router",
-			ovnClusterRouter, "options:mcast_relay=\"true\"")
+			util.OVNClusterRouter, "options:mcast_relay=\"true\"")
 		if err != nil {
 			klog.Errorf("Failed to enable IGMP relay on the cluster router, "+
 				"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
@@ -261,10 +267,8 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 
 		// Drop IP multicast globally. Multicast is allowed only if explicitly
 		// enabled in a namespace.
-		err = createDefaultDenyMulticastPolicy()
-		if err != nil {
-			klog.Errorf("Failed to create default deny multicast policy, error: %v",
-				err)
+		if err := oc.createDefaultDenyMulticastPolicy(); err != nil {
+			klog.Errorf("Failed to create default deny multicast policy, error: %v", err)
 			return err
 		}
 	}
@@ -317,11 +321,11 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		return err
 	}
 
-	// Allocate IPs for logical router port "gwRouterToJoinSwitchPrefix + ovnClusterRouter". This should always
+	// Allocate IPs for logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter". This should always
 	// allocate the first IPs in the join switch subnets
-	gwLRPIPs, err := oc.joinSwIPManager.ensureJoinLRPIPs(ovnClusterRouter)
+	gwLRPIPs, err := oc.joinSwIPManager.ensureJoinLRPIPs(util.OVNClusterRouter)
 	if err != nil {
-		return fmt.Errorf("failed to allocate join switch IP address connected to %s: %v", ovnClusterRouter, err)
+		return fmt.Errorf("failed to allocate join switch IP address connected to %s: %v", util.OVNClusterRouter, err)
 	}
 
 	// Create ovnJoinSwitch that will be used to connect gateway routers to the distributed router.
@@ -332,12 +336,12 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 	}
 
 	// Connect the distributed router to ovnJoinSwitch.
-	drSwitchPort := joinSwitchToGwRouterPrefix + ovnClusterRouter
-	drRouterPort := gwRouterToJoinSwitchPrefix + ovnClusterRouter
+	drSwitchPort := util.JoinSwitchToGwRouterPrefix + util.OVNClusterRouter
+	drRouterPort := util.GwRouterToJoinSwitchPrefix + util.OVNClusterRouter
 	drLRPMAC := util.IPAddrToHWAddr(gwLRPIPs[0].IP)
 	args := []string{
 		"--", "--if-exists", "lrp-del", drRouterPort,
-		"--", "lrp-add", ovnClusterRouter, drRouterPort, drLRPMAC.String(),
+		"--", "lrp-add", util.OVNClusterRouter, drRouterPort, drLRPMAC.String(),
 	}
 	for _, gwLRPIP := range gwLRPIPs {
 		args = append(args, gwLRPIP.String())
@@ -390,22 +394,45 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 
 		if config.Gateway.Mode == config.GatewayModeLocal {
 			stdout, stderr, err := util.RunOVNNbctl("--may-exist",
-				"--policy=src-ip", "lr-route-add", ovnClusterRouter,
+				"--policy=src-ip", "lr-route-add", util.OVNClusterRouter,
 				hostSubnet.String(), mgmtIfAddr.IP.String())
 			if err != nil {
 				return fmt.Errorf("failed to add source IP address based "+
 					"routes in distributed router %s, stdout: %q, "+
-					"stderr: %q, error: %v", ovnClusterRouter, stdout, stderr, err)
+					"stderr: %q, error: %v", util.OVNClusterRouter, stdout, stderr, err)
 			}
 		}
 	}
 
 	// Create this node's management logical port on the node switch
+	portName := util.K8sPrefix + node.Name
 	stdout, stderr, err := util.RunOVNNbctl(
-		"--", "--may-exist", "lsp-add", node.Name, util.K8sPrefix+node.Name,
-		"--", "lsp-set-addresses", util.K8sPrefix+node.Name, addresses)
+		"--", "--may-exist", "lsp-add", node.Name, portName,
+		"--", "lsp-set-addresses", portName, addresses)
 	if err != nil {
-		klog.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		klog.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v",
+			stdout, stderr, err)
+		return err
+	}
+
+	// UUID must be retrieved separately from the lsp-add transaction since
+	// (as of OVN 2.12) a bogus UUID is returned if they are part of the same
+	// transaction.
+	uuid, stderr, err := util.RunOVNNbctl("get", "logical_switch_port", portName, "_uuid")
+	if err != nil {
+		klog.Errorf("Error getting UUID for logical port %s "+
+			"stdout: %q, stderr: %q (%v)", portName, uuid, stderr, err)
+		return err
+	}
+	if uuid == "" {
+		return fmt.Errorf("invalid logical port %s uuid %q", portName, uuid)
+	}
+
+	if err := addToPortGroup(clusterPortGroupName, &lpInfo{
+		uuid: uuid,
+		name: portName,
+	}); err != nil {
+		klog.Errorf(err.Error())
 		return err
 	}
 
@@ -431,7 +458,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		return fmt.Errorf("failed to allocate join switch port IP address for node %s: %v", node.Name, err)
 	}
 
-	drLRPIPs, _ := oc.joinSwIPManager.getJoinLRPCacheIPs(ovnClusterRouter)
+	drLRPIPs, _ := oc.joinSwIPManager.getJoinLRPCacheIPs(util.OVNClusterRouter)
 	err = gatewayInit(node.Name, clusterSubnets, hostSubnets, l3GatewayConfig, oc.SCTPSupport, gwLRPIPs, drLRPIPs)
 	if err != nil {
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
@@ -496,8 +523,8 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 	}
 
 	lrpArgs := []string{
-		"--if-exists", "lrp-del", routerToSwitchPrefix + nodeName,
-		"--", "lrp-add", ovnClusterRouter, routerToSwitchPrefix + nodeName,
+		"--if-exists", "lrp-del", util.RouterToSwitchPrefix + nodeName,
+		"--", "lrp-add", util.OVNClusterRouter, util.RouterToSwitchPrefix + nodeName,
 		nodeLRPMAC.String(),
 	}
 
@@ -582,9 +609,9 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 	}
 
 	// Connect the switch to the router.
-	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", nodeName, switchToRouterPrefix+nodeName,
-		"--", "set", "logical_switch_port", switchToRouterPrefix+nodeName, "type=router",
-		"options:router-port="+routerToSwitchPrefix+nodeName, "addresses="+"\""+nodeLRPMAC.String()+"\"")
+	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", nodeName, util.SwitchToRouterPrefix+nodeName,
+		"--", "set", "logical_switch_port", util.SwitchToRouterPrefix+nodeName, "type=router",
+		"options:router-port="+util.RouterToSwitchPrefix+nodeName, "addresses="+"\""+nodeLRPMAC.String()+"\"")
 	if err != nil {
 		klog.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
@@ -734,9 +761,9 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 	}
 
 	// Remove the patch port that connects distributed router to node's logical switch
-	if _, stderr, err := util.RunOVNNbctl("--if-exist", "lrp-del", routerToSwitchPrefix+nodeName); err != nil {
-		return fmt.Errorf("failed to delete logical router port rtos-%s, "+
-			"stderr: %q, error: %v", nodeName, stderr, err)
+	if _, stderr, err := util.RunOVNNbctl("--if-exist", "lrp-del", util.RouterToSwitchPrefix+nodeName); err != nil {
+		return fmt.Errorf("failed to delete logical router port %s%s, "+
+			"stderr: %q, error: %v", util.RouterToSwitchPrefix, nodeName, stderr, err)
 	}
 
 	return nil
@@ -893,7 +920,7 @@ func (oc *Controller) syncNodesPeriodic() {
 func (oc *Controller) getJoinLRPAddresses(nodeName string) []*net.IPNet {
 	// try to get the IPs from the logical router port
 	gwLRPIPs := []*net.IPNet{}
-	gwLrpName := gwRouterToJoinSwitchPrefix + gwRouterPrefix + nodeName
+	gwLrpName := util.GwRouterToJoinSwitchPrefix + util.GwRouterPrefix + nodeName
 	joinSubnets := oc.joinSwIPManager.lsm.GetSwitchSubnets(nodeName)
 	networks, err := util.GetLrpNetworks(gwLrpName)
 	if err == nil {

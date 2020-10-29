@@ -153,6 +153,9 @@ net_cidr=${OVN_NET_CIDR:-10.128.0.0/14/23}
 svc_cidr=${OVN_SVC_CIDR:-172.30.0.0/16}
 mtu=${OVN_MTU:-1400}
 
+# set metrics endpoint bind to K8S_NODE_IP.
+metrics_endpoint_ip=${K8S_NODE_IP:-0.0.0.0}
+metrics_endpoint_ip=$(bracketify $metrics_endpoint_ip)
 ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
 
 # set metrics endpoint bind to K8S_NODE_IP.
@@ -877,6 +880,8 @@ ovn-master() {
       egressip_enabled_flag="--enable-egress-ip"
   fi
 
+  ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:9409"
+
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
     --init-master ${K8S_NODE} \
@@ -1026,6 +1031,9 @@ ovn-node() {
   if test -z "${OVN_UNPRIVILEGED_MODE+x}" -o "x${OVN_UNPRIVILEGED_MODE}" = xno; then
     ovn_unprivileged_flag=""
   fi
+
+  ovn_metrics_bind_address="${metrics_endpoint_ip}:9476"
+  ovnkube_node_metrics_bind_address="${metrics_endpoint_ip}:9410"
 
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \

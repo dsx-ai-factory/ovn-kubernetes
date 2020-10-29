@@ -795,15 +795,7 @@ func setGeneveInterfaceStatistics(geneveInterfaceName string, link netlink.Link)
 // geneveInterfaceMetricsUpdate updates the geneve interface
 // metrics obtained through netlink library equivalent to
 // (ip -s li show genev_sys_6081)
-func geneveInterfaceMetricsUpdate() (err error) {
-
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("recovering from panic while updating geneve "+
-				"interface metric details : %v", r)
-		}
-	}()
-
+func geneveInterfaceMetricsUpdate() error {
 	geneveInterfaceName := "genev_sys_6081"
 	link, err := netlink.LinkByName(geneveInterfaceName)
 	if err != nil {

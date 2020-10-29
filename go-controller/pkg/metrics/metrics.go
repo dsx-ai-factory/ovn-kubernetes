@@ -173,7 +173,7 @@ func coverageShowMetricsUpdater(component string, metricsScrapeInterval int, sto
 
 // The `keepTrying` boolean when set to true will not return an error if we can't find pods with the given label.
 // This is so that the caller can re-try again to see if the pods have appeared in the k8s cluster.
-func checkPodRunsOnGivenNode(clientset *kubernetes.Clientset, label, k8sNodeName string,
+func checkPodRunsOnGivenNode(clientset kubernetes.Interface, label, k8sNodeName string,
 	keepTrying bool) (bool, error) {
 	pods, err := clientset.CoreV1().Pods(config.Kubernetes.OVNConfigNamespace).List(context.TODO(), metav1.ListOptions{
 		LabelSelector: label,
@@ -244,7 +244,7 @@ func StartOVSMetricsServer(bindAddress string) {
 	}, 5*time.Second, utilwait.NeverStop)
 }
 
-func RegisterOvnMetrics(clientset *kubernetes.Clientset, k8sNodeName string,
+func RegisterOvnMetrics(clientset kubernetes.Interface, k8sNodeName string,
 	metricsScrapeInterval int, stopChan chan struct{}) {
 	go RegisterOvnDBMetrics(clientset, k8sNodeName, metricsScrapeInterval, stopChan)
 	go RegisterOvnControllerMetrics(metricsScrapeInterval, stopChan)

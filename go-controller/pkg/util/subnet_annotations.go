@@ -19,10 +19,6 @@ import (
 //       {
 //         "default": "10.130.0.0/23"
 //       }
-//     k8s.ovn.org/node-join-subnets: |
-//       {
-//         "default": "100.64.2.0/29"
-//       }
 //     k8s.ovn.org/node-local-nat-ip: |
 //       {
 //         "default": ["169.254.16.21", "fd99::10:21"]
@@ -37,10 +33,6 @@ import (
 //     k8s.ovn.org/node-subnets: |
 //       {
 //         "default": ["10.130.0.0/23", "fd01:0:0:2::/64"]
-//       }
-//     k8s.ovn.org/node-join-subnets: |
-//       {
-//         "default": ["100.64.2.0/29", "fd99::10/125"]
 //       }
 
 const (

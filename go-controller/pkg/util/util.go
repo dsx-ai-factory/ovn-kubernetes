@@ -27,6 +27,21 @@ const (
 	// access to local service
 	LocalNetworkName = "locnet"
 
+	// OVNClusterRouter is the name of the distributed router
+	OVNClusterRouter = "ovn_cluster_router"
+
+	ExternalSwitchPrefix       = "ext_"
+	GwRouterPrefix             = "GR_"
+	RouterToSwitchPrefix       = "rtos-"
+	InterPrefix                = "inter-"
+	SwitchToRouterPrefix       = "stor-"
+	JoinSwitchToGwRouterPrefix = "jtor-"
+	GwRouterToJoinSwitchPrefix = "rtoj-"
+	ExtSwitchToGwRouterPrefix  = "etor-"
+	GwRouterToExtSwitchPrefix  = "rtoe-"
+
+	NodeLocalSwitch = "node_local_switch"
+
 	V6NodeLocalNatSubnet           = "fd99::/64"
 	V6NodeLocalNatSubnetPrefix     = 64
 	V6NodeLocalNatSubnetNextHop    = "fd99::1"
