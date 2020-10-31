@@ -17,7 +17,13 @@ import (
 
 // gatewayInit creates a gateway router for the local chassis.
 func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*net.IPNet,
-	l3GatewayConfig *util.L3GatewayConfig, sctpSupport bool, gwLRPIPNets, drLRPIPNets []*net.IPNet) error {
+	l3GatewayConfig *util.L3GatewayConfig, sctpSupport bool, gwLRPIfAddrs, drLRPIfAddrs []*net.IPNet) error {
+
+	gwLRPIPs := make([]net.IP, 0)
+	for _, gwLRPIfAddr := range gwLRPIfAddrs {
+		gwLRPIPs = append(gwLRPIPs, gwLRPIfAddr.IP)
+	}
+
 	// Create a gateway router.
 	gatewayRouter := util.GwRouterPrefix + nodeName
 	physicalIPs := make([]string, len(l3GatewayConfig.IPAddresses))
@@ -38,25 +44,21 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 	gwRouterPort := util.GwRouterToJoinSwitchPrefix + gatewayRouter
 
 	stdout, stderr, err = util.RunOVNNbctl(
-		"--", "--may-exist", "lsp-add", ovnJoinSwitch, gwSwitchPort,
+		"--", "--may-exist", "lsp-add", util.OVNJoinSwitch, gwSwitchPort,
 		"--", "set", "logical_switch_port", gwSwitchPort, "type=router", "options:router-port="+gwRouterPort,
 		"addresses=router")
 	if err != nil {
 		return fmt.Errorf("failed to add port %q to logical switch %q, "+
-			"stdout: %q, stderr: %q, error: %v", gwSwitchPort, ovnJoinSwitch, stdout, stderr, err)
+			"stdout: %q, stderr: %q, error: %v", gwSwitchPort, util.OVNJoinSwitch, stdout, stderr, err)
 	}
 
-	gwLRPIPs := make([]net.IP, 0)
-	for _, gwLRPIPNet := range gwLRPIPNets {
-		gwLRPIPs = append(gwLRPIPs, gwLRPIPNet.IP)
-	}
 	gwLRPMAC := util.IPAddrToHWAddr(gwLRPIPs[0])
 	args := []string{
 		"--", "--if-exists", "lrp-del", gwRouterPort,
 		"--", "lrp-add", gatewayRouter, gwRouterPort, gwLRPMAC.String(),
 	}
-	for _, gwLRPIPNet := range gwLRPIPNets {
-		args = append(args, gwLRPIPNet.String())
+	for _, gwLRPIfAddr := range gwLRPIfAddrs {
+		args = append(args, gwLRPIfAddr.String())
 	}
 	_, stderr, err = util.RunOVNNbctl(args...)
 	if err != nil {
@@ -79,23 +81,28 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 		}
 	}
 
+	// To decrease the numbers of MAC_Binding entries in a large scale cluster, change the default behavior of always
+	// learning the MAC/IP binding and adding a new MAC_Binding entry. Only do it when necessary.
+	// See details in ovn-northd(8).
 	stdout, stderr, err = util.RunOVNNbctl(
 		"--", "--if-exists", "remove", "logical_router", gatewayRouter, "options", "learn_from_arp_request",
 		"--", "set", "logical_router", gatewayRouter, "options:always_learn_from_arp_request=false")
 	if err != nil {
-		return fmt.Errorf("failed to set logical router %s's always_learn_from_arp_request "+
+		klog.Warningf("Failed to set logical router %s's always_learn_from_arp_request "+
 			"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
 	}
 
+	// To avoid flow exploding problem in large scale ovn-kubernetes cluster, not to prepopulate static mappings
+	// for all neighbor routers in the ARP/ND Resolution stage. See details in ovn-northd(8).
 	stdout, stderr, err = util.RunOVNNbctl("set", "logical_router",
 		gatewayRouter, "options:dynamic_neigh_routers=true")
 	if err != nil {
-		return fmt.Errorf("failed to set logical router %s's dynamic_neigh_routers "+
+		klog.Warningf("Failed to set logical router %s's dynamic_neigh_routers "+
 			"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
 	}
 
 	for _, entry := range clusterIPSubnet {
-		drLRPIPNet, err := util.MatchIPNetFamily(utilnet.IsIPv6CIDR(entry), drLRPIPNets)
+		drLRPIfAddr, err := util.MatchIPNetFamily(utilnet.IsIPv6CIDR(entry), drLRPIfAddrs)
 		if err != nil {
 			return fmt.Errorf("failed to add a static route in GR %s with distributed "+
 				"router as the nexthop: %v",
@@ -104,7 +111,7 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 
 		// Add a static route in GR with distributed router as the nexthop.
 		stdout, stderr, err = util.RunOVNNbctl("--may-exist", "lr-route-add",
-			gatewayRouter, entry.String(), drLRPIPNet.IP.String())
+			gatewayRouter, entry.String(), drLRPIfAddr.IP.String())
 		if err != nil {
 			return fmt.Errorf("failed to add a static route in GR %s with distributed "+
 				"router as the nexthop, stdout: %q, stderr: %q, error: %v",
@@ -258,14 +265,16 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 		}
 	}
 
-	// We need to add a /32 route to the Gateway router's IP, on the
+	// We need to add a route to the Gateway router's IP, on the
 	// cluster router, to ensure that the return traffic goes back
 	// to the same gateway router
+	//
+	// This can be removed once https://bugzilla.redhat.com/show_bug.cgi?id=1891516 is fixed.
 	for _, gwLRPIP := range gwLRPIPs {
 		stdout, stderr, err = util.RunOVNNbctl("--may-exist", "lr-route-add",
 			util.OVNClusterRouter, gwLRPIP.String(), gwLRPIP.String())
 		if err != nil {
-			return fmt.Errorf("failed to add /32 route to Gateway router's IP of %q "+
+			return fmt.Errorf("failed to add the route to Gateway router's IP of %q "+
 				"on the distributed router, stdout: %q, stderr: %q, error: %v",
 				gwLRPIP.String(), stdout, stderr, err)
 		}

@@ -30,6 +30,9 @@ const (
 	// OVNClusterRouter is the name of the distributed router
 	OVNClusterRouter = "ovn_cluster_router"
 
+	// OVNJoinSwitch is the name of the join switch
+	OVNJoinSwitch = "join"
+
 	ExternalSwitchPrefix       = "ext_"
 	GwRouterPrefix             = "GR_"
 	RouterToSwitchPrefix       = "rtos-"
@@ -51,6 +54,9 @@ const (
 	V4NodeLocalNatSubnetPrefix     = 20
 	V4NodeLocalNatSubnetNextHop    = "169.254.0.1"
 	V4NodeLocalDistributedGwPortIP = "169.254.0.2"
+
+	V4JoinSubnetCidr = "100.64.0.0/16"
+	V6JoinSubnetCidr = "fd98::/64"
 )
 
 // StringArg gets the named command-line argument or returns an error if it is empty

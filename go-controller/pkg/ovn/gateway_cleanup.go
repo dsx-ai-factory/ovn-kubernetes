@@ -18,13 +18,13 @@ func gatewayCleanup(nodeName string) error {
 	// Get the gateway router port's IP address (connected to join switch)
 	var nextHops []net.IP
 
-	networks, err := util.GetLrpNetworks(util.GwRouterToJoinSwitchPrefix + gatewayRouter)
+	gwIPAddrs, err := util.GetLRPAddrs(util.GwRouterToJoinSwitchPrefix + gatewayRouter)
 	if err != nil {
 		return err
 	}
 
-	for _, network := range networks {
-		nextHops = append(nextHops, network.IP)
+	for _, gwIPAddr := range gwIPAddrs {
+		nextHops = append(nextHops, gwIPAddr.IP)
 	}
 	staticRouteCleanup(nextHops)
 

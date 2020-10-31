@@ -341,14 +341,15 @@ func (oc *Controller) addHybridRoutePolicyForPod(podIP net.IP, node string) erro
 			l3Prefix = "ip4"
 		}
 		// get the GR to join switch ip address
-		grJoinIPnets, err := util.GetLrpNetworks(fmt.Sprintf("rtoj-GR_%s", node))
+		grJoinIfAddrs, err := util.GetLRPAddrs(util.GwRouterToJoinSwitchPrefix + util.GwRouterPrefix + node)
 		if err != nil {
-			return fmt.Errorf("unable to find IP address for node: %s, rtoj port, err: %v", node, err)
+			return fmt.Errorf("unable to find IP address for node: %s, %s port, err: %v", node, util.GwRouterToJoinSwitchPrefix, err)
 		}
-		grJoinIPnet, err := util.MatchIPNetFamily(utilnet.IsIPv6(podIP), grJoinIPnets)
+		grJoinIfAddr, err := util.MatchIPNetFamily(utilnet.IsIPv6(podIP), grJoinIfAddrs)
 		if err != nil {
-			return fmt.Errorf("unable to find %s IP address for node: %s, rtoj port, err: %v", l3Prefix, node, err)
+			return fmt.Errorf("failed to match gateway router join interface IPs: %v, err: %v", grJoinIfAddr, err)
 		}
+
 		var matchDst string
 		var clusterL3Prefix string
 		for _, clusterSubnet := range config.Default.ClusterSubnets {
@@ -366,7 +367,7 @@ func (oc *Controller) addHybridRoutePolicyForPod(podIP net.IP, node string) erro
 		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == %s`, util.RouterToSwitchPrefix, node, l3Prefix, podIP)
 		matchStr += matchDst
 		_, stderr, err := util.RunOVNNbctl("lr-policy-add", util.OVNClusterRouter, "501", matchStr, "reroute",
-			grJoinIPnet.IP.String())
+			grJoinIfAddr.IP.String())
 		if err != nil {
 			// TODO: lr-policy-add doesn't support --may-exist, resort to this workaround for now.
 			// Have raised an issue against ovn repository (https://github.com/ovn-org/ovn/issues/49)

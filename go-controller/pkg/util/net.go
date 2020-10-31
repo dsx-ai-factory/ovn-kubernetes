@@ -29,32 +29,6 @@ func intToIP(i *big.Int) net.IP {
 	return net.IP(i.Bytes())
 }
 
-// GetNodeGatewayRouterIPs returns the IPs (IPv4 and/or IPv6) of the provided node's logical router
-// Expected output from the ovn-nbctl command, which will need to be parsed is:
-// `100.64.1.1/29 fd98:1::/125`
-func GetNodeGatewayRouterIPs(nodeName string) ([]net.IP, error) {
-	stdout, _, err := RunOVNNbctl(
-		"--format=table",
-		"--data=bare",
-		"--no-heading",
-		"--columns=networks",
-		"find", "logical_router_port",
-		fmt.Sprintf("name=%s%s%s", GwRouterToJoinSwitchPrefix, GwRouterPrefix, nodeName),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("unable to retrieve the logical router for node: %s, err: %v", nodeName, err)
-	}
-	var ips []net.IP
-	for _, gatewayRouterIfAddr := range strings.Fields(stdout) {
-		if ip, _, err := net.ParseCIDR(gatewayRouterIfAddr); err == nil {
-			ips = append(ips, ip)
-		} else {
-			return nil, fmt.Errorf("unable to parse the found gateway router IP address: %s", gatewayRouterIfAddr)
-		}
-	}
-	return ips, nil
-}
-
 // GetPortAddresses returns the MAC and IPs of the given logical switch port
 func GetPortAddresses(portName string, ovnNBClient goovn.Client) (net.HardwareAddr, []net.IP, error) {
 	lsp, err := ovnNBClient.LSPGet(portName)
@@ -100,8 +74,8 @@ func GetPortAddresses(portName string, ovnNBClient goovn.Client) (net.HardwareAd
 	return mac, ips, nil
 }
 
-// GetLrpNetworks returns the network for the given logical router port
-func GetLrpNetworks(portName string) ([]*net.IPNet, error) {
+// GetLRPAddrs returns the addresses for the given logical router port
+func GetLRPAddrs(portName string) ([]*net.IPNet, error) {
 	networks := []*net.IPNet{}
 	output, stderr, err := RunOVNNbctl("--if-exist", "get", "logical_router_port", portName, "networks")
 	if err != nil {
