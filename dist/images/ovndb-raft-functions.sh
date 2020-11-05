@@ -34,8 +34,8 @@ db_part_of_cluster() {
   echo "Found ${pod} ip: $init_ip"
   init_ip=$(bracketify $init_ip)
   target=$(ovn-${db}ctl --timeout=5 --db=${transport}:${init_ip}:${port} ${ovndb_ctl_ssl_opts} \
-               --data=bare --no-headings --columns=target list connection)
-  if [[ "${target}" != "p${transport}:${port}${ovn_raft_conn_ip_url_suffix}" ]]; then
+               --data=bare --no-headings --columns=target list connection 2>&1)
+  if [[ "x${target}" != "xp${transport}:${port}${ovn_raft_conn_ip_url_suffix}" ]]; then
     echo "Unable to check correct target ${target} "
     return 1
   fi
@@ -124,6 +124,23 @@ check_and_apply_ovnkube_db_ep() {
   fi
 }
 
+change_election_timer_wait() {
+  local db=${1}
+  local election_timer=${2}
+  local result=""
+
+  while true; do
+    result=$(ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl cluster/change-election-timer ${database} ${election_timer} 2>&1)
+    test $? -eq 0 && break
+    echo "ovs-appctl: $result"
+    if ! echo $result|grep -q "change pending"; then
+      echo "Failed to set election timer ${election_timer}. Exiting..."
+      exit 11
+    fi
+    sleep 1
+  done
+}
+
 # election timer can only be at most doubled each time, and it can only be set on the leader
 set_election_timer() {
   local db=${1}
@@ -140,21 +157,13 @@ set_election_timer() {
   fi
 
   while [[ ${current_election_timer} != ${election_timer} ]]; do
-    max_electinon_timer=$((${current_election_timer} * 2))
-    if [[ ${election_timer} -le ${max_electinon_timer} ]]; then
-      ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl cluster/change-election-timer ${database} ${election_timer}
-      if [[ $? != 0 ]]; then
-        echo "Failed to set election timer ${election_timer}. Exiting..."
-        exit 11
-      fi
+    max_election_timer=$((${current_election_timer} * 2))
+    if [[ ${election_timer} -le ${max_election_timer} ]]; then
+      change_election_timer_wait $db $election_timer
       return 0
     else
-      ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl cluster/change-election-timer ${database} ${max_electinon_timer}
-      if [[ $? != 0 ]]; then
-        echo "Failed to set election timer ${max_election_timer}. Exiting..."
-        exit 11
-      fi
-      current_election_timer=${max_electinon_timer}
+      change_election_timer_wait $db $max_election_timer
+      current_election_timer=${max_election_timer}
     fi
   done
   return 0
@@ -313,6 +322,7 @@ ovsdb-raft() {
         --ovn-${db}-log="${ovn_loglevel_db}" &
       else
         echo "Cluster does not exist for DB: ${db}, waiting for ${sts_name}-0 pod to create it"
+        # all non pod-0 pods will be blocked here till connection is set
         wait_for_event cluster_exists ${db} ${port}
         run_as_ovs_user_if_needed nice -n ${sched_priority} \
         ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
@@ -351,15 +361,22 @@ ovsdb-raft() {
   echo "=============== ${db}-ovsdb-raft ========== RUNNING"
 
   if [[ "${POD_NAME}" == ${sts_name}"-0" ]]; then
-    if ${initial_raft_create}; then
-      # set the election timer value before other servers join the cluster and it can
-      # only be set on the leader so we must do this in ovn-<nb/sb>db-0 when it is still
-      # a single-node cluster
+    # post raft create work has to be done only once and in ovn-<nb/sb>db-0 while it is still
+    # a single-node cluster, additional protection against the case when pod-0 isn't a leader
+    # is needed in the cases of sudden pod-0 inititalization logic restarts
+    current_raft_role=$(ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl cluster/status ${database} 2>&1 | grep "^Role")
+    if [[ -z "${current_raft_role}" ]]; then
+      echo "Failed to get current raft role value. Exiting..."
+      exit 11
+    fi
+    if $initial_raft_create && echo $current_raft_role | grep -q -i leader; then
+      # set the election timer value before other servers join the cluster
       set_election_timer ${db} ${election_timer}
       if [[ ${db} == "nb" ]]; then
         set_northd_probe_interval
       fi
       # set the connection and disable inactivity probe, this deletes the old connection if any
+      # this will unblock pod-1 and pod-2 waiters
       set_connection ${db} ${port}
     fi
   fi
@@ -367,7 +384,7 @@ ovsdb-raft() {
   last_node_index=$(expr ${replicas} - 1)
   # Create endpoints only if all OVN DB pods have started and are running. We do this
   # from the last pod of the statefulset.
-  if [[ "${POD_NAME}" == ${sts_name}-${last_node_index} ]]; then
+  if [[ "${initialize}" == "true" && "${POD_NAME}" == ${sts_name}-${last_node_index} ]]; then
     check_and_apply_ovnkube_db_ep ${db} ${port}
   fi
 
