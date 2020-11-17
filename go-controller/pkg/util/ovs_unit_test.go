@@ -751,15 +751,15 @@ func TestSetExec(t *testing.T) {
 		{
 			desc:         "positive, test when 'runner' is nil",
 			expectedErr:  nil,
-			onRetArgs:    &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"ip", nil, "arping", nil}},
-			fnCallTimes:  11,
+			onRetArgs:    &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"ip", nil, "firewall-cmd", nil, "arping", nil}},
+			fnCallTimes:  12,
 			setRunnerNil: true,
 		},
 		{
 			desc:         "positive, test when 'runner' is not nil",
 			expectedErr:  nil,
 			onRetArgs:    &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"", nil, "", nil}},
-			fnCallTimes:  11,
+			fnCallTimes:  12,
 			setRunnerNil: false,
 		},
 	}
@@ -794,10 +794,10 @@ func TestSetExecWithoutOVS(t *testing.T) {
 		fnCallTimes int
 	}{
 		{
-			desc:        "positive, ip and arping path found",
+			desc:        "positive, ip and firewall-cmd arping path found",
 			expectedErr: nil,
-			fnCallTimes: 2,
-			onRetArgs:   &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"ip", nil, "arping", nil}},
+			fnCallTimes: 3,
+			onRetArgs:   &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"ip", nil, "firewall-cmd", nil, "arping", nil}},
 		},
 		{
 			desc:        "negative, ip path not found",

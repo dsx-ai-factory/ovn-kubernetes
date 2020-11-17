@@ -38,6 +38,7 @@ const (
 	ovsdbToolCommand   = "ovsdb-tool"
 	arpingCommand      = "arping"
 	ipCommand          = "ip"
+	firewallCommand    = "firewall-cmd"
 	powershellCommand  = "powershell"
 	netshCommand       = "netsh"
 	routeCommand       = "route"
@@ -132,6 +133,7 @@ type execHelper struct {
 	ovnRunDir       string
 	ipPath          string
 	arpingPath      string
+	firewallPath    string
 	powershellPath  string
 	netshPath       string
 	routePath       string
@@ -262,6 +264,10 @@ func SetExecWithoutOVS(exec kexec.Interface) error {
 			return err
 		}
 		runner.arpingPath, err = exec.LookPath(arpingCommand)
+		if err != nil {
+			return err
+		}
+		runner.firewallPath, err = exec.LookPath(firewallCommand)
 		if err != nil {
 			return err
 		}
@@ -672,6 +678,12 @@ func RunIP(args ...string) (string, string, error) {
 // RunArping runs a command via the "arping" utility
 func RunArping(args ...string) (string, string, error) {
 	stdout, stderr, err := run(runner.arpingPath, args...)
+	return strings.TrimSpace(stdout.String()), stderr.String(), err
+}
+
+// RunFirewallCmd runs a command via the "firewall-cmd" utility
+func RunFirewallCmd(args ...string) (string, string, error) {
+	stdout, stderr, err := run(runner.firewallPath, args...)
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
 }
 

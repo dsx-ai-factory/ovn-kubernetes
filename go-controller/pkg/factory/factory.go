@@ -207,15 +207,6 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 			noAlternateProxySelector())
 	})
 
-	wf.iFactory.InformerFor(&kapi.Endpoints{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-		return v1coreinformers.NewFilteredEndpointsInformer(
-			c,
-			kapi.NamespaceAll,
-			resyncPeriod,
-			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
-			noHeadlessServiceSelector())
-	})
-
 	// For Pods, only select pods scheduled to this node
 	wf.iFactory.InformerFor(&kapi.Pod{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
 		return v1coreinformers.NewFilteredPodInformer(
