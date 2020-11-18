@@ -952,6 +952,51 @@ ovn-controller() {
   exit 10
 }
 
+# check_firewall_state checks if the firewall is running
+# on the nodes.
+check_firewall_state() {
+  firewall_state=$(firewall-cmd --state 2>/dev/null)
+  if [[ $firewall_state != "running" ]]; then
+      echo "Exiting, firewall service is not running on node."
+      exit 1
+  fi
+}
+
+# create_ovn_firewall_zone checks whether ovn firewall zone exists, 
+# if it exists, removes and create a new ovn firewall zone
+create_ovn_firewall_zone() {
+  zones=$(firewall-cmd --get-zones | tr "[:space:]" "\n")
+  for zone in ${zones[@]}; do
+      if [[ $zone == "ovn" ]]; then
+          firewall-cmd --delete-zone=ovn --permanent
+	  if [[ $? != 0 ]]; then
+	      echo "Exiting, failed to delete the ovn firewall zone"
+	      exit 1
+	  fi
+
+	  firewall-cmd --reload
+	  if [[ $? != 0 ]]; then
+	      echo "Exiting, failed to reload the firewalld service"
+	      exit 1
+	  fi
+	  break
+      fi
+  done
+
+  firewall-cmd --new-zone=ovn --permanent
+  if [[ $? != 0 ]]; then
+      echo "Exiting, failed to create ovn firewall zone"
+      exit 1
+  fi
+
+  firewall-cmd --reload
+  if [[ $? != 0 ]]; then
+      echo "Exiting, failed to reload the firewalld service"
+      exit 1
+  fi
+
+}
+
 # ovn-node - all nodes
 ovn-node() {
   trap 'kill $(jobs -p) ; rm -f /etc/cni/net.d/10-ovn-kubernetes.conf ; exit 0' TERM
@@ -968,6 +1013,11 @@ ovn-node() {
 
   echo "=============== ovn-node - (ovn-node  wait for ovn-controller.pid)"
   wait_for_event process_ready ovn-controller
+
+  echo "=============== ovn-node - (check for firewall service status)"
+  check_firewall_state
+  echo "=============== ovn-node - (create ovn firewall zone)"
+  create_ovn_firewall_zone
 
   hybrid_overlay_flags=
   if [[ ${ovn_hybrid_overlay_enable} == "true" ]]; then
