@@ -965,7 +965,7 @@ check_firewall_state() {
 # create_ovn_firewall_zone checks whether ovn firewall zone exists, 
 # if it exists, removes and create a new ovn firewall zone
 create_ovn_firewall_zone() {
-  zones=$(firewall-cmd --get-zones | tr "[:space:]" "\n")
+  zones=$(firewall-cmd --get-zones --permanent | tr "[:space:]" "\n")
   for zone in ${zones[@]}; do
       if [[ $zone == "ovn" ]]; then
           firewall-cmd --delete-zone=ovn --permanent
