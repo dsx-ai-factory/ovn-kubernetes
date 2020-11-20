@@ -88,6 +88,14 @@ check_and_apply_ovnkube_db_ep() {
   local db=${1}
   local port=${2}
 
+  # return if ovn db service endpoint already exists
+  result=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+      get ep -n ${ovn_kubernetes_namespace} ${sts_name} 2>&1)
+  test $? -eq 0 && return
+  if ! echo ${result} | grep -q "NotFound"; then
+      echo "Failed to find ${sts_name} endpoint: ${result}, Exiting..."
+      exit 12
+  fi
   # Get IPs of all OVN DB PODs
   ips=()
   for ((i = 0; i < ${replicas}; i++)); do
@@ -100,17 +108,9 @@ check_and_apply_ovnkube_db_ep() {
   done
 
   if [[ ${i} -eq ${replicas} ]]; then
-    # Number of POD IPs is same as number of statefulset replicas. Now, if the number of OVN DB endpoints
-    # is 0, then we are applying the endpoint for the first time. So, we need to make sure that each of the
-    # pod IP responds to the `ovsdb-client list-dbs` call before we set the endpoint. If they don't, retry several
+    # Number of POD IPs is same as number of statefulset replicas. We need to make sure that each of the pod
+    # IP responds to the `ovsdb-client list-dbs` call before we set the endpoint. If they don't, retry several
     # times and then give up.
-
-    # Get the current set of ovn db service endpoints, if any
-    IFS=" " read -a old_ips <<<"$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
-      get ep -n ${ovn_kubernetes_namespace} ${sts_name} -o=jsonpath='{range .subsets[0].addresses[*]}{.ip}{" "}')"
-    if [[ ${#old_ips[@]} -ne 0 ]]; then
-      return
-    fi
 
     for ip in ${ips[@]}; do
       wait_for_event attempts=10 check_ovnkube_db_ep ${ip} ${port}
@@ -384,7 +384,7 @@ ovsdb-raft() {
   last_node_index=$(expr ${replicas} - 1)
   # Create endpoints only if all OVN DB pods have started and are running. We do this
   # from the last pod of the statefulset.
-  if [[ "${initialize}" == "true" && "${POD_NAME}" == ${sts_name}-${last_node_index} ]]; then
+  if [[ "${POD_NAME}" == ${sts_name}-${last_node_index} ]]; then
     check_and_apply_ovnkube_db_ep ${db} ${port}
   fi
 
