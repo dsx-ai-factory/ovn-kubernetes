@@ -285,7 +285,6 @@ ovsdb-raft() {
     ovn_raft_conn_ip_url_suffix=":[::]"
   fi
 
-  initial_raft_create=true
   if [[ "${initialize}" == "true" ]]; then
     # check to see if a cluster already exists. If it does, just join it.
     counter=0
@@ -301,7 +300,6 @@ ovsdb-raft() {
 
     if ${cluster_found}; then
       echo "Cluster already exists for DB: ${db}"
-      initial_raft_create=false
       run_as_ovs_user_if_needed nice -n ${sched_priority} \
       ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
       --db-${db}-cluster-local-addr=$(bracketify ${ovn_db_host}) --db-${db}-cluster-remote-addr=${init_ip} \
@@ -363,13 +361,13 @@ ovsdb-raft() {
   if [[ "${POD_NAME}" == ${sts_name}"-0" ]]; then
     # post raft create work has to be done only once and in ovn-<nb/sb>db-0 while it is still
     # a single-node cluster, additional protection against the case when pod-0 isn't a leader
-    # is needed in the cases of sudden pod-0 inititalization logic restarts
+    # is needed in the cases of sudden pod-0 initialization logic restarts
     current_raft_role=$(ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl cluster/status ${database} 2>&1 | grep "^Role")
     if [[ -z "${current_raft_role}" ]]; then
       echo "Failed to get current raft role value. Exiting..."
       exit 11
     fi
-    if $initial_raft_create && echo $current_raft_role | grep -q -i leader; then
+    if echo $current_raft_role | grep -q -i leader; then
       # set the election timer value before other servers join the cluster
       set_election_timer ${db} ${election_timer}
       if [[ ${db} == "nb" ]]; then
