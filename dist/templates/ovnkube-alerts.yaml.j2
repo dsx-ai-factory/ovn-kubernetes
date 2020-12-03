@@ -282,6 +282,38 @@ spec:
          Pod ovn-kubernetes/ {{ $labels.pod }} sbdb container is 
          restarting {{ printf "%.2f" $value }} times / 5 minutes.
 
+    - alert: OvnNBDBMultipleLeaders
+      expr: sum(ovn_db_cluster_server_role{db_name="OVN_Northbound",server_role="leader"}) > 1
+      for: 4m
+      labels:
+       severity: critical
+      annotations:
+       description: There are multiple ovn-nbdb leaders
+
+    - alert: OvnNBDBNoLeader
+      expr: max(ovn_db_cluster_server_role{db_name="OVN_Northbound",server_role="leader"}) == 0
+      for: 4m
+      labels:
+        severity: critical
+      annotations:
+       description: There is no running ovn-nbdb leader
+
+    - alert: OvnSBDBMultipleLeaders
+      expr: sum(ovn_db_cluster_server_role{db_name="OVN_Southbound",server_role="leader"}) > 1
+      for: 4m
+      labels:
+       severity: critical
+      annotations:
+       description: There are multiple ovn-sbdb leaders
+
+    - alert: OvnSBDBNoLeader
+      expr: max(ovn_db_cluster_server_role{db_name="OVN_Southbound",server_role="leader"}) == 0
+      for: 4m
+      labels:
+        severity: critical
+      annotations:
+       description: There is no running ovn-sbdb leader
+
     - alert: OvnNorthdContainerRestarts
       expr: |
         rate(kube_pod_container_status_restarts_total{namespace="ovn-kubernetes", container="ovn-northd"}[15m]) * 60 * 5 > 0
