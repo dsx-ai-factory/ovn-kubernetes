@@ -457,6 +457,10 @@ func ovnDBMemoryMetricsUpdater(direction, database string) {
 			}
 		}
 	}
+	if !strings.Contains(stdout, "sessions:") {
+		// No "sessions" in output means jsonrpc session is 0.
+		metricOVNDBSessions.WithLabelValues(database).Set(0)
+	}
 }
 
 var (
