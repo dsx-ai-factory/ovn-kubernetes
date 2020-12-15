@@ -162,6 +162,10 @@ spec:
               value: "{{ ovn_multicast_enable }}"
             - name: OVN_UNPRIVILEGED_MODE
               value: "{{ ovn_unprivileged_mode | default('yes') }}"
+            - name: OVN_NB_CERT_CNAME
+              value: "{{ ovn_nb_cert_cname }}"
+            - name: OVN_SB_CERT_CNAME
+              value: "{{ ovn_sb_cert_cname }}"
 
           readinessProbe:
             exec:

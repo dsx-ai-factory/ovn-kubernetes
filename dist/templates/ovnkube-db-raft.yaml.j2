@@ -341,6 +341,10 @@ spec:
           value: "{{ ovn_nb_port }}"
         - name: OVN_NB_RAFT_PORT
           value: "{{ ovn_nb_raft_port }}"
+        - name: OVN_NB_CERT_CNAME
+          value: "{{ ovn_nb_cert_cname }}"
+        - name: OVN_SB_CERT_CNAME
+          value: "{{ ovn_sb_cert_cname }}"
       # end of container
 
       volumes:
