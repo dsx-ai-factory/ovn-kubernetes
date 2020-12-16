@@ -126,7 +126,8 @@ ovn_northd_pk=/ovn-cert/ovnnorthd-privkey.pem
 ovn_northd_cert=/ovn-cert/ovnnorthd-cert.pem
 ovn_controller_pk=/ovn-cert/ovncontroller-privkey.pem
 ovn_controller_cert=/ovn-cert/ovncontroller-cert.pem
-ovn_controller_cname="ovncontroller"
+ovn_nb_cert_cname=${OVN_NB_CERT_CNAME:-"ovncontroller"}
+ovn_sb_cert_cname=${OVN_SB_CERT_CNAME:-"ovncontroller"}
 
 transport="tcp"
 ovndb_ctl_ssl_opts=""
@@ -757,11 +758,11 @@ ovn-dbchecker() {
         --nb-client-privkey ${ovn_controller_pk}
         --nb-client-cert ${ovn_controller_cert}
         --nb-client-cacert ${ovn_ca_cert}
-        --nb-cert-common-name ${ovn_controller_cname}
+        --nb-cert-common-name ${ovn_nb_cert_cname}
         --sb-client-privkey ${ovn_controller_pk}
         --sb-client-cert ${ovn_controller_cert}
         --sb-client-cacert ${ovn_ca_cert}
-        --sb-cert-common-name ${ovn_controller_cname}
+        --sb-cert-common-name ${ovn_sb_cert_cname}
       "
   }
   
@@ -861,11 +862,11 @@ ovn-master() {
         --nb-client-privkey ${ovn_controller_pk}
         --nb-client-cert ${ovn_controller_cert}
         --nb-client-cacert ${ovn_ca_cert}
-        --nb-cert-common-name ${ovn_controller_cname}
+        --nb-cert-common-name ${ovn_nb_cert_cname}
         --sb-client-privkey ${ovn_controller_pk}
         --sb-client-cert ${ovn_controller_cert}
         --sb-client-cacert ${ovn_ca_cert}
-        --sb-cert-common-name ${ovn_controller_cname}
+        --sb-cert-common-name ${ovn_sb_cert_cname}
       "
   }
 
@@ -1066,11 +1067,11 @@ ovn-node() {
         --nb-client-privkey ${ovn_controller_pk}
         --nb-client-cert ${ovn_controller_cert}
         --nb-client-cacert ${ovn_ca_cert}
-        --nb-cert-common-name ${ovn_controller_cname}
+        --nb-cert-common-name ${ovn_nb_cert_cname}
         --sb-client-privkey ${ovn_controller_pk}
         --sb-client-cert ${ovn_controller_cert}
         --sb-client-cacert ${ovn_ca_cert}
-        --sb-cert-common-name ${ovn_controller_cname}
+        --sb-cert-common-name ${ovn_sb_cert_cname}
       "
   }
 

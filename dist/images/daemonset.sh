@@ -155,6 +155,12 @@ while [ "$1" != "" ]; do
   --egress-ip-enable)
     OVN_EGRESSIP_ENABLE=$VALUE
     ;;
+  --ovn-nbcert-cname)
+    OVN_NB_CERT_CNAME=$VALUE
+    ;;
+  --ovn-sbcert-cname)
+    OVN_SB_CERT_CNAME=$VALUE
+    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -214,6 +220,10 @@ ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS}
 echo "ovn_disable_snat_multiple_gws: ${ovn_disable_snat_multiple_gws}"
 ovn_ssl_en=${OVN_SSL_ENABLE:-"no"}
 echo "ovn_ssl_enable: ${ovn_ssl_en}"
+ovn_nb_cert_cname=${OVN_NB_CERT_CNAME:-"ovncontroller"}
+echo "ovn_nb_cert_cname: ${ovn_nb_cert_cname}"
+ovn_sb_cert_cname=${OVN_SB_CERT_CNAME:-"ovncontroller"}
+echo "ovn_sb_cert_cname: ${ovn_sb_cert_cname}"
 ovn_unprivileged_mode=${OVN_UNPRIVILEGED_MODE:-"yes"}
 echo "ovn_unprivileged_mode: ${ovn_unprivileged_mode}"
 ovn_nb_raft_election_timer=${OVN_NB_RAFT_ELECTION_TIMER:-1000}
@@ -302,6 +312,8 @@ ovn_image=${image} \
   ovn_sb_port=${ovn_sb_port} \
   ovn_nb_raft_port=${ovn_nb_raft_port} \
   ovn_sb_raft_port=${ovn_sb_raft_port} \
+  ovn_nb_cert_cname=${ovn_nb_cert_cname} \
+  ovn_sb_cert_cname=${ovn_sb_cert_cname} \
   j2 ../templates/ovnkube-db-raft.yaml.j2 -o ../yaml/ovnkube-db-raft.yaml
 
 ovn_image=${image} \
@@ -320,6 +332,8 @@ ovn_image=${image} \
   ovn_master_count=${ovn_master_count} \
   ovn_gateway_mode=${ovn_gateway_mode} \
   ovn_metrics_scrape_interval=${ovn_metrics_scrape_interval} \
+  ovn_nb_cert_cname=${ovn_nb_cert_cname} \
+  ovn_sb_cert_cname=${ovn_sb_cert_cname} \
   j2 ../templates/ovnk8s-master.yaml.j2 -o ../yaml/ovnk8s-master.yaml
 
 ovn_image=${image} \
@@ -341,6 +355,8 @@ ovn_image=${image} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
   ovn_metrics_scrape_interval=${ovn_metrics_scrape_interval} \
   ovs_metrics_scrape_interval=${ovs_metrics_scrape_interval} \
+  ovn_nb_cert_cname=${ovn_nb_cert_cname} \
+  ovn_sb_cert_cname=${ovn_sb_cert_cname} \
   j2 ../templates/ovnk8s-node.yaml.j2 -o ../yaml/ovnk8s-node.yaml
 
 ovn_image=${image} \
