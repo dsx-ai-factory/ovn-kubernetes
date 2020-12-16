@@ -251,7 +251,7 @@ spec:
          ovn-kubernetes has not written anything to the northbound database for too long
 
     - alert: OvnSBDBStale
-      expr: max(ovnkube_master_sb_e2e_timestamp) - max(ovnkube_master_sb_e2e_timestamp) > 120
+      expr: max(ovnkube_master_nb_e2e_timestamp) - max(ovnkube_master_sb_e2e_timestamp) > 120
       for: 4m
       labels:
        severity: critical
