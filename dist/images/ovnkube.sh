@@ -117,15 +117,15 @@ fi
 # certs and private keys for k8s and OVN
 K8S_CACERT=${K8S_CACERT:-/var/run/secrets/kubernetes.io/serviceaccount/ca.crt}
 
-ovn_ca_cert=/ovn-cert/ca-cert.pem
-ovn_nb_pk=/ovn-cert/ovnnb-privkey.pem
-ovn_nb_cert=/ovn-cert/ovnnb-cert.pem
-ovn_sb_pk=/ovn-cert/ovnsb-privkey.pem
-ovn_sb_cert=/ovn-cert/ovnsb-cert.pem
-ovn_northd_pk=/ovn-cert/ovnnorthd-privkey.pem
-ovn_northd_cert=/ovn-cert/ovnnorthd-cert.pem
-ovn_controller_pk=/ovn-cert/ovncontroller-privkey.pem
-ovn_controller_cert=/ovn-cert/ovncontroller-cert.pem
+ovn_ca_cert=${OVN_CA_CERT:-/ovn-cert/ca-cert.pem}
+ovn_nb_pk=${OVN_NB_PK:-/ovn-cert/ovnnb-privkey.pem}
+ovn_nb_cert=${OVN_NB_CERT:-/ovn-cert/ovnnb-cert.pem}
+ovn_sb_pk=${OVN_SB_PK:-/ovn-cert/ovnsb-privkey.pem}
+ovn_sb_cert=${OVN_SB_CERT:-/ovn-cert/ovnsb-cert.pem}
+ovn_northd_pk=${OVN_DBCLIENT_PK:-/ovn-cert/ovnnorthd-privkey.pem}
+ovn_northd_cert=${OVN_DBCLIENT_CERT:-/ovn-cert/ovnnorthd-cert.pem}
+ovn_controller_pk=${OVN_DBCLIENT_PK:-/ovn-cert/ovncontroller-privkey.pem}
+ovn_controller_cert=${OVN_DBCLIENT_CERT:-/ovn-cert/ovncontroller-cert.pem}
 ovn_nb_cert_cname=${OVN_NB_CERT_CNAME:-"ovncontroller"}
 ovn_sb_cert_cname=${OVN_SB_CERT_CNAME:-"ovncontroller"}
 
