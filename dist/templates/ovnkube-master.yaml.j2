@@ -94,7 +94,7 @@ spec:
         - mountPath: /var/run/ovn/
           name: host-var-run-ovs
         - mountPath: /ovn-cert
-          name: host-ovn-cert
+          name: ovn-pki
           readOnly: true
 
         resources:
@@ -145,7 +145,7 @@ spec:
         - mountPath: /var/run/ovn/
           name: host-var-run-ovs
         - mountPath: /ovn-cert
-          name: host-ovn-cert
+          name: ovn-pki
           readOnly: true
         resources:
           requests:
@@ -194,7 +194,7 @@ spec:
         - mountPath: /var/run/ovn/
           name: host-var-run-ovs
         - mountPath: /ovn-cert
-          name: host-ovn-cert
+          name: ovn-pki
           readOnly: true
 
         resources:
@@ -269,7 +269,7 @@ spec:
       - name: host-var-run-ovs
         hostPath:
           path: /var/run/openvswitch
-      - name: host-ovn-cert
+      - name: ovn-pki
         hostPath:
           path: /etc/ovn
           type: DirectoryOrCreate

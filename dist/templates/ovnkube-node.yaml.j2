@@ -68,7 +68,7 @@ spec:
         - mountPath: /var/run/ovn/
           name: host-var-run-ovs
         - mountPath: /ovn-cert
-          name: host-ovn-cert
+          name: ovn-pki
           readOnly: true
 
         resources:
@@ -139,7 +139,7 @@ spec:
         - mountPath: /etc/cni/net.d
           name: host-etc-cni-netd
         - mountPath: /ovn-cert
-          name: host-ovn-cert
+          name: ovn-pki
           readOnly: true
         - mountPath: /etc/openvswitch/
           name: host-var-lib-ovs
@@ -288,7 +288,7 @@ spec:
       - name: host-etc-cni-netd
         hostPath:
           path: /etc/cni/net.d
-      - name: host-ovn-cert
+      - name: ovn-pki
         hostPath:
           path: /etc/ovn
           type: DirectoryOrCreate

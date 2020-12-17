@@ -95,7 +95,7 @@ spec:
         - mountPath: /var/log/ovn/
           name: host-var-log-ovs
         - mountPath: /ovn-cert
-          name: host-ovn-cert
+          name: ovn-pki
           readOnly: true
         - mountPath: /var/run/ovn/
           name: host-var-run-ovs
@@ -164,7 +164,7 @@ spec:
         - mountPath: /var/log/ovn/
           name: host-var-log-ovs
         - mountPath: /ovn-cert
-          name: host-ovn-cert
+          name: ovn-pki
           readOnly: true
         - mountPath: /var/run/ovn/
           name: host-var-run-ovs
@@ -216,7 +216,7 @@ spec:
       - name: host-var-log-ovs
         hostPath:
           path: /var/log/openvswitch
-      - name: host-ovn-cert
+      - name: ovn-pki
         hostPath:
           path: /etc/ovn
           type: DirectoryOrCreate
