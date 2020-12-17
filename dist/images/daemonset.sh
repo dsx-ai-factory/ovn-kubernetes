@@ -298,26 +298,6 @@ ovn_image=${image} \
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
-  ovn_db_replicas=${ovn_db_replicas} \
-  ovn_db_minAvailable=${ovn_db_minAvailable} \
-  ovn_loglevel_nb=${ovn_loglevel_nb} ovn_loglevel_sb=${ovn_loglevel_sb} \
-  ovn_dbchecker_loglevel=${db_checker_loglevel} \
-  ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
-  ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
-  ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
-  ovn_ssl_en=${ovn_ssl_en} \
-  ovn_nb_raft_election_timer=${ovn_nb_raft_election_timer} \
-  ovn_sb_raft_election_timer=${ovn_sb_raft_election_timer} \
-  ovn_nb_port=${ovn_nb_port} \
-  ovn_sb_port=${ovn_sb_port} \
-  ovn_nb_raft_port=${ovn_nb_raft_port} \
-  ovn_sb_raft_port=${ovn_sb_raft_port} \
-  ovn_nb_cert_cname=${ovn_nb_cert_cname} \
-  ovn_sb_cert_cname=${ovn_sb_cert_cname} \
-  j2 ../templates/ovnkube-db-raft.yaml.j2 -o ../yaml/ovnkube-db-raft.yaml
-
-ovn_image=${image} \
-  ovn_image_pull_policy=${image_pull_policy} \
   ovnkube_master_loglevel=${master_loglevel} \
   ovn_loglevel_nbctld=${ovn_loglevel_nbctld} \
   ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
