@@ -201,6 +201,25 @@ set_connection() {
   return 0
 }
 
+# set_ssl() will be called for leader OVN DB statefulset Pod:
+set_ssl() {
+  local db=${1}
+  eval db_pk=\$ovn_${db}_pk
+  eval db_cert=\$ovn_${db}_cert
+
+  # this call will fail on non-leader node since we are using unix socket and no --no-leader-only option.
+  ovn-${db}ctl list ssl
+  if [[ $? == 0 ]]; then
+      # this instance is a leader, set ssl table.
+      ovn-${db}ctl set-ssl ${db_pk} ${db_cert} ${ovn_ca_cert}
+      if [[ $? != 0 ]]; then
+        echo "Failed to set ${db} ssl table. Exiting....."
+        exit 13
+      fi
+  fi
+  return 0
+ }
+
 set_northd_probe_interval() {
   # OVN_NORTHD_PROBE_INTERVAL - probe interval of northd for NB and SB DB
   # connections in ms (default 5000)
@@ -372,6 +391,10 @@ ovsdb-raft() {
       set_election_timer ${db} ${election_timer}
       if [[ ${db} == "nb" ]]; then
         set_northd_probe_interval
+      fi
+      if [[ "yes" == ${OVN_SSL_ENABLE} ]]; then
+          # set the ssl table.
+          set_ssl ${db}
       fi
       # set the connection and disable inactivity probe, this deletes the old connection if any
       # this will unblock pod-1 and pod-2 waiters
