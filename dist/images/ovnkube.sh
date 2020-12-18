@@ -1146,6 +1146,13 @@ cleanup-ovn-node() {
 
 }
 
+ovndb_ctl_ssl_files_exist() {
+  if [[ -f ${ovn_controller_pk} && -f ${ovn_controller_cert} && -f ${ovn_ca_cert} ]] ; then
+    return 0
+  fi
+  return 1
+}
+
 # v3 - Runs ovn-nbctl in daemon mode
 run-nbctld() {
   trap 'ovs-appctl -t ovn-nbctl exit >/dev/null 2>&1; exit 0' TERM
@@ -1158,6 +1165,11 @@ run-nbctld() {
 
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}  ovn_nbdb_conn ${ovn_nbdb_conn}"
   echo "ovn_loglevel_nbctld=${ovn_loglevel_nbctld}"
+
+  # if SSL is enabled, wait for the SSL cert files to be populated
+  if [[ "yes" == ${OVN_SSL_ENABLE} ]]; then
+    wait_for_event attempts=20 ovndb_ctl_ssl_files_exist
+  fi
 
   /usr/bin/ovn-nbctl ${ovn_loglevel_nbctld} --pidfile --db=${ovn_nbdb_conn} \
     --log-file=${OVN_LOGDIR}/ovn-nbctl.log --detach ${ovndb_ctl_ssl_opts}
