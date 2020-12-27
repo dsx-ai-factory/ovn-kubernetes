@@ -109,14 +109,25 @@ func ovnNorthdReadiness(target string) error {
 	} else if strings.HasPrefix(stdout, "Status") {
 		output := strings.Split(stdout, ":")
 		status := strings.TrimSpace(strings.Trim(output[1], "\n"))
-		if status == "active" || status == "paused" || status == "standby" {
-			return nil
-		} else {
+		if status != "active" && status != "paused" && status != "standby" {
 			return fmt.Errorf("%s status is not active or passive or standby", target)
 		}
 	} else {
 		return fmt.Errorf("failed to get status from %s", target)
 	}
+	nbConnectionStatus, _, err := util.RunOVNAppctlWithTimeout(5, "-t", target, "nb-connection-status")
+	if err != nil {
+		return fmt.Errorf("failed to get nb-connection-status from %s: (%v)", target, err)
+	} else if nbConnectionStatus != "connected" {
+		return fmt.Errorf("%s nb-connection-status is %s", target, nbConnectionStatus)
+	}
+	sbConnectionStatus, _, err := util.RunOVNAppctlWithTimeout(5, "-t", target, "sb-connection-status")
+	if err != nil {
+		return fmt.Errorf("failed to get sb-connection-status from %s: (%v)", target, err)
+	} else if sbConnectionStatus != "connected" {
+		return fmt.Errorf("%s sb-connection-status is %s", target, sbConnectionStatus)
+	}
+	return nil
 }
 
 func ovnNbCtldReadiness(target string) error {
