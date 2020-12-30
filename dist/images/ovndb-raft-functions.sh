@@ -280,6 +280,8 @@ ovsdb-raft() {
   if [[ ${db} == "nb" ]]; then
     database="OVN_Northbound"
     [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
+      wait_for_event attempts=20 files_exist ${ovn_nb_pk} ${ovn_nb_cert} ${ovn_ca_cert} \
+        ${ovn_controller_pk} ${ovn_controller_cert}
       db_ssl_opts="
             --ovn-nb-db-ssl-key=${ovn_nb_pk}
             --ovn-nb-db-ssl-cert=${ovn_nb_cert}
@@ -289,6 +291,8 @@ ovsdb-raft() {
   else
     database="OVN_Southbound"
     [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
+      wait_for_event attempts=20 files_exist ${ovn_sb_pk} ${ovn_sb_cert} ${ovn_ca_cert} \
+        ${ovn_controller_pk} ${ovn_controller_cert}
       db_ssl_opts="
             --ovn-sb-db-ssl-key=${ovn_sb_pk}
             --ovn-sb-db-ssl-cert=${ovn_sb_cert}
