@@ -10,6 +10,9 @@ GOPATH ?= $(shell go env GOPATH)
 TEST_REPORT_DIR?=$(CURDIR)/_artifacts
 export TEST_REPORT_DIR
 
+# Hack for SDN-663
+TAG=v1.33.0
+
 .PHONY: all build check test
 
 # Example:
@@ -45,7 +48,7 @@ clean:
 .PHONY: install.tools lint gofmt
 
 install.tools:
-	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | bash -s -- -b ${GOPATH}/bin
+	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | bash -s -- -b ${GOPATH}/bin ${TAG}
 
 lint:
 	@GOPATH=${GOPATH} ./hack/lint.sh
