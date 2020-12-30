@@ -374,28 +374,58 @@ process_ready() {
 # continuously checks if process is healthy. Exits if process terminates.
 # $1 is the name of the process
 # $2 is the pid of an another process to kill before exiting
+#   it is optional if no additional arguments are needed
+# The rest of arguments:
+#   if exist, then they are the TLS files and their original modification time,
+#   in the form of <file1> <file1_mtime> <file2> <file2_mtime>.... They are used
+#   to check if the certificates have been renewed since the process started.
+#   if yes, exit the process so the restarted pod will pick up the renewed
+#   certificate.
+#
 process_healthy() {
-  case ${1} in
+  local tailpid=""
+  local proc=${1}
+  shift
+  if [[ $# > 0 ]]; then
+    tailpid=${1}
+    shift
+  fi
+  case ${process} in
   "ovsdb-server" | "ovs-vswitchd")
-    pid=$(cat ${OVS_RUNDIR}/${1}.pid)
+    pid=$(cat ${OVS_RUNDIR}/${proc}.pid)
     ;;
   *)
-    pid=$(cat ${OVN_RUNDIR}/${1}.pid)
+    pid=$(cat ${OVN_RUNDIR}/${proc}.pid)
     ;;
   esac
 
-  while true; do
-    check_health $1 ${pid}
-    if [[ $? != 0 ]]; then
-      echo "=============== pid ${pid} terminated ========== "
-      # kill the tail -f
-      if [[ $2 != "" ]]; then
-        kill $2
+  for (( interval=1; ; interval++ )); do
+    # check if certification files are updated
+    if [[ $# != 0 ]]; then
+      verify_cert_files $@
+      if [[ $? != 0 ]]; then
+        echo "error: certification file changed, exiting"
+        ovs-appctl -t ${OVN_RUNDIR}/${proc}.${pid}.ctl exit >/dev/null
+	break
       fi
-      exit 6
     fi
-    sleep 15
+
+    # only check_health every 15 seconds
+    if [[ $((interval % 15)) -eq 0 ]]; then
+      check_health ${proc} ${pid}
+      if [[ $? != 0 ]]; then
+        echo "=============== pid ${pid} terminated ========== "
+        break
+      fi
+    fi
+    sleep 1
   done
+
+  # kill the tail -f
+  if [[ ${tailpid} != "" ]]; then
+    kill ${tailpid}
+  fi
+  exit 6
 }
 
 # checks for the health of the process either using `ps` or `ovs-appctl`
@@ -438,6 +468,25 @@ check_health() {
   fi
 
   return 1
+}
+
+verify_cert_files() {
+  if [[ $(($# % 2)) -ne 0 ]]; then
+    echo "error: unexpected arguments $@"
+    return 1
+  fi
+
+  while [[ $# != 0 ]]; do
+    file=${1}
+    mtime=${2}
+    shift 2
+    newtime=$(stat -c %Y "$file")
+    if [[ $? != 0 || ${mtime} != ${newtime} ]]; then
+      echo "warning: certification ${file} has changed"
+      return 1
+    fi
+  done
+  return 0
 }
 
 display_file() {
@@ -813,13 +862,20 @@ run-ovn-northd() {
   # no monitor (and no detach), start northd which connects to the
   # ovn db service
   local ovn_northd_ssl_opts=""
+  local health_check_ssl_opts=""
   [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
     wait_for_event attempts=20 files_exist ${ovn_northd_pk} ${ovn_northd_cert} ${ovn_ca_cert}
+    t1=$(stat -c %Y "${ovn_northd_pk}") && t2=$(stat -c %Y "${ovn_northd_cert}") && t3=$(stat -c %Y "${ovn_ca_cert}")
+    if [[ $? != 0 ]]; then
+      echo failed to get create time of cert files ${ovn_northd_pk} ${ovn_northd_cert} ${ovn_ca_cert}
+      exit 1
+    fi
     ovn_northd_ssl_opts="
         --ovn-northd-ssl-key=${ovn_northd_pk}
         --ovn-northd-ssl-cert=${ovn_northd_cert}
         --ovn-northd-ssl-ca-cert=${ovn_ca_cert}
      "
+    health_check_ssl_opts="${ovn_northd_pk} ${t1} ${ovn_northd_cert} ${t2} ${ovn_ca_cert} ${t3}"
   }
 
   run_as_ovs_user_if_needed \
@@ -836,7 +892,7 @@ run-ovn-northd() {
   tail --follow=name ${OVN_LOGDIR}/ovn-northd.log &
   ovn_tail_pid=$!
 
-  process_healthy ovn-northd ${ovn_tail_pid}
+  process_healthy ovn-northd ${ovn_tail_pid} ${health_check_ssl_opts}
   exit 8
 }
 
@@ -1188,8 +1244,15 @@ run-nbctld() {
   echo "ovn_loglevel_nbctld=${ovn_loglevel_nbctld}"
 
   # if SSL is enabled, wait for the SSL cert files to be populated
+  local health_check_ssl_opts=""
   if [[ "yes" == ${OVN_SSL_ENABLE} ]]; then
     wait_for_event attempts=20 files_exist ${ovn_controller_pk} ${ovn_controller_cert} ${ovn_ca_cert}
+    t1=$(stat -c %Y "${ovn_controller_pk}") && t2=$(stat -c %Y "${ovn_controller_cert}") && t3=$(stat -c %Y "${ovn_ca_cert}")
+    if [[ $? != 0 ]]; then
+      echo failed to get createtime of cert files ${ovn_controller_pk} ${ovn_controller_cert} ${ovn_ca_cert}
+      exit 1
+    fi
+    health_check_ssl_opts="${ovn_controller_pk} ${t1} ${ovn_controller_cert} ${t2} ${ovn_ca_cert} ${t3}"
   fi
 
   /usr/bin/ovn-nbctl ${ovn_loglevel_nbctld} --pidfile --db=${ovn_nbdb_conn} \
@@ -1201,7 +1264,7 @@ run-nbctld() {
   tail --follow=name ${OVN_LOGDIR}/ovn-nbctl.log &
   nbctl_tail_pid=$!
 
-  process_healthy ovn-nbctl ${nbctl_tail_pid}
+  process_healthy ovn-nbctl ${nbctl_tail_pid} ${health_check_ssl_opts}
   echo "=============== run_ovn_nbctl ========== terminated"
 }
 
