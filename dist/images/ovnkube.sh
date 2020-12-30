@@ -671,6 +671,11 @@ nb-ovsdb() {
     exit 1
   fi
 
+  # if SSL is enabled, wait for the SSL cert files to be populated
+  if [[ "yes" == ${OVN_SSL_ENABLE} ]]; then
+    wait_for_event attempts=20 files_exist ${ovn_nb_pk} ${ovn_nb_cert} ${ovn_ca_cert}
+  fi
+
   echo "=============== run nb_ovsdb ========== MASTER ONLY"
   run_as_ovs_user_if_needed \
     ${OVNCTL_PATH} run_nb_ovsdb --no-monitor \
@@ -707,6 +712,11 @@ sb-ovsdb() {
   if [[ ${ovn_db_host} == "" ]]; then
     echo "The IP address of the host $(hostname) could not be determined. Exiting..."
     exit 1
+  fi
+
+  # if SSL is enabled, wait for the SSL cert files to be populated
+  if [[ "yes" == ${OVN_SSL_ENABLE} ]]; then
+    wait_for_event attempts=20 files_exist ${ovn_sb_pk} ${ovn_sb_cert} ${ovn_ca_cert}
   fi
 
   echo "=============== run sb_ovsdb ========== MASTER ONLY"
@@ -754,6 +764,7 @@ ovn-dbchecker() {
 
   local ovn_db_ssl_opts=""
   [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
+    wait_for_event attempts=20 files_exist ${ovn_controller_pk} ${ovn_controller_cert} ${ovn_ca_cert}
     ovn_db_ssl_opts="
         --nb-client-privkey ${ovn_controller_pk}
         --nb-client-cert ${ovn_controller_cert}
@@ -803,6 +814,7 @@ run-ovn-northd() {
   # ovn db service
   local ovn_northd_ssl_opts=""
   [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
+    wait_for_event attempts=20 files_exist ${ovn_northd_pk} ${ovn_northd_cert} ${ovn_ca_cert}
     ovn_northd_ssl_opts="
         --ovn-northd-ssl-key=${ovn_northd_pk}
         --ovn-northd-ssl-cert=${ovn_northd_cert}
@@ -858,6 +870,7 @@ ovn-master() {
   fi
   local ovn_master_ssl_opts=""
   [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
+    wait_for_event attempts=20 files_exist ${ovn_controller_pk} ${ovn_controller_cert} ${ovn_ca_cert}
     ovn_master_ssl_opts="
         --nb-client-privkey ${ovn_controller_pk}
         --nb-client-cert ${ovn_controller_cert}
@@ -931,6 +944,7 @@ ovn-controller() {
 
   local ovn_controller_ssl_opts=""
   [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
+    wait_for_event attempts=20 files_exist ${ovn_controller_pk} ${ovn_controller_cert} ${ovn_ca_cert}
     ovn_controller_ssl_opts="
           --ovn-controller-ssl-key=${ovn_controller_pk}
           --ovn-controller-ssl-cert=${ovn_controller_cert}
@@ -1014,6 +1028,10 @@ ovn-node() {
 
   echo "=============== ovn-node - (ovn-node  wait for ovn-controller.pid)"
   wait_for_event process_ready ovn-controller
+
+  [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
+    wait_for_event attempts=20 files_exist ${ovn_controller_pk} ${ovn_controller_cert} ${ovn_ca_cert}
+  }
 
   echo "=============== ovn-node - (check for firewall service status)"
   check_firewall_state
@@ -1146,11 +1164,14 @@ cleanup-ovn-node() {
 
 }
 
-ovndb_ctl_ssl_files_exist() {
-  if [[ -f ${ovn_controller_pk} && -f ${ovn_controller_cert} && -f ${ovn_ca_cert} ]] ; then
-    return 0
-  fi
-  return 1
+files_exist() {
+  for file in "$@"; do
+    if [[ ! -f ${file} ]] ; then
+       echo "info: ${file} does not exist"
+       return 1
+    fi
+  done
+  return 0
 }
 
 # v3 - Runs ovn-nbctl in daemon mode
@@ -1168,7 +1189,7 @@ run-nbctld() {
 
   # if SSL is enabled, wait for the SSL cert files to be populated
   if [[ "yes" == ${OVN_SSL_ENABLE} ]]; then
-    wait_for_event attempts=20 ovndb_ctl_ssl_files_exist
+    wait_for_event attempts=20 files_exist ${ovn_controller_pk} ${ovn_controller_cert} ${ovn_ca_cert}
   fi
 
   /usr/bin/ovn-nbctl ${ovn_loglevel_nbctld} --pidfile --db=${ovn_nbdb_conn} \
