@@ -5,6 +5,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -21,11 +22,12 @@ import (
 )
 
 const (
-	k8sTCPLoadBalancerIP  = "k8s_tcp_load_balancer"
-	k8sUDPLoadBalancerIP  = "k8s_udp_load_balancer"
-	k8sSCTPLoadBalancerIP = "k8s_sctp_load_balancer"
-	fakeUUID              = "8a86f6d8-7972-4253-b0bd-ddbef66e9303"
-	fakeUUIDv6            = "8a86f6d8-7972-4253-b0bd-ddbef66e9304"
+	k8sTCPLoadBalancerIP    = "k8s_tcp_load_balancer"
+	k8sUDPLoadBalancerIP    = "k8s_udp_load_balancer"
+	k8sSCTPLoadBalancerIP   = "k8s_sctp_load_balancer"
+	fakeUUID                = "8a86f6d8-7972-4253-b0bd-ddbef66e9303"
+	fakeUUIDv6              = "8a86f6d8-7972-4253-b0bd-ddbef66e9304"
+	ovnClusterPortGroupUUID = "740515f3-7ece-4cd1-9be5-6fdb9066d198"
 )
 
 type FakeOVN struct {
@@ -34,7 +36,7 @@ type FakeOVN struct {
 	controller   *Controller
 	stopChan     chan struct{}
 	fakeExec     *ovntest.FakeExec
-	asf          *fakeAddressSetFactory
+	asf          *addressset.FakeAddressSetFactory
 	fakeRecorder *record.FakeRecorder
 	ovnNBClient  goovn.Client
 	ovnSBClient  goovn.Client
@@ -45,7 +47,7 @@ func NewFakeOVN(fexec *ovntest.FakeExec) *FakeOVN {
 	Expect(err).NotTo(HaveOccurred())
 	return &FakeOVN{
 		fakeExec:     fexec,
-		asf:          newFakeAddressSetFactory(),
+		asf:          addressset.NewFakeAddressSetFactory(),
 		fakeRecorder: record.NewFakeRecorder(10),
 	}
 }

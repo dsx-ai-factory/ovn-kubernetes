@@ -16,6 +16,8 @@ import (
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -29,17 +31,22 @@ import (
 	kapisnetworking "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
+	utilwait "k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/informers"
+	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	ref "k8s.io/client-go/tools/reference"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 const (
-	egressfirewallCRD    string = "egressfirewalls.k8s.ovn.org"
-	clusterPortGroupName string = "clusterPortGroup"
+	egressfirewallCRD                string        = "egressfirewalls.k8s.ovn.org"
+	clusterPortGroupName             string        = "clusterPortGroup"
+	egressFirewallDNSDefaultDuration time.Duration = 30 * time.Minute
 )
 
 // ServiceVIPKey is used for looking up service namespace information for a
@@ -68,7 +75,7 @@ type namespaceInfo struct {
 
 	// addressSet is an address set object that holds the IP addresses
 	// of all pods in the namespace.
-	addressSet AddressSet
+	addressSet addressset.AddressSet
 
 	// map from NetworkPolicy name to namespacePolicy. You must hold the
 	// namespaceInfo's mutex to add/delete/lookup policies, but must hold the
@@ -76,11 +83,8 @@ type namespaceInfo struct {
 	// the policy itself.
 	networkPolicies map[string]*namespacePolicy
 
-	//defines the namespaces egressFirewallPolicy
+	// defines the namespaces egressFirewallPolicy
 	egressFirewallPolicy *egressFirewall
-
-	hybridOverlayExternalGW net.IP
-	hybridOverlayVTEP       net.IP
 
 	// routingExternalGWs is a slice of net.IP containing the values parsed from
 	// annotation k8s.ovn.org/routing-external-gws
@@ -103,6 +107,7 @@ type namespaceInfo struct {
 // Controller structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints)
 type Controller struct {
+	client                clientset.Interface
 	kube                  kube.Interface
 	watchFactory          *factory.WatchFactory
 	egressFirewallHandler *factory.Handler
@@ -138,7 +143,7 @@ type Controller struct {
 	namespacesMutex sync.Mutex
 
 	// An address set factory that creates address sets
-	addressSetFactory AddressSetFactory
+	addressSetFactory addressset.AddressSetFactory
 
 	// Port group for all cluster logical switch ports
 	clusterPortGroupUUID string
@@ -166,6 +171,8 @@ type Controller struct {
 	// Controller used for programming OVN for egress IP
 	eIPC egressIPController
 
+	egressFirewallDNS *EgressDNS
+
 	// Map of load balancers to service namespace
 	serviceVIPToName map[ServiceVIPKey]types.NamespacedName
 
@@ -186,6 +193,21 @@ type Controller struct {
 
 	// go-ovn southbound client interface
 	ovnSBClient goovn.Client
+
+	// v4HostSubnetsUsed keeps track of number of v4 subnets currently assigned to nodes
+	v4HostSubnetsUsed float64
+
+	// v6HostSubnetsUsed keeps track of number of v6 subnets currently assigned to nodes
+	v6HostSubnetsUsed float64
+
+	// Map of pods that need to be retried, and the timestamp of when they last failed
+	retryPods     map[types.UID]retryEntry
+	retryPodsLock sync.Mutex
+}
+
+type retryEntry struct {
+	pod       *kapi.Pod
+	timeStamp time.Time
 }
 
 const (
@@ -216,12 +238,12 @@ func GetIPFullMask(ip string) string {
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
 func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
-	stopChan <-chan struct{}, addressSetFactory AddressSetFactory, ovnNBClient goovn.Client, ovnSBClient goovn.Client, recorder record.EventRecorder) *Controller {
-
+	stopChan <-chan struct{}, addressSetFactory addressset.AddressSetFactory, ovnNBClient goovn.Client, ovnSBClient goovn.Client, recorder record.EventRecorder) *Controller {
 	if addressSetFactory == nil {
-		addressSetFactory = NewOvnAddressSetFactory()
+		addressSetFactory = addressset.NewOvnAddressSetFactory()
 	}
 	return &Controller{
+		client: ovnClient.KubeClient,
 		kube: &kube.Kube{
 			KClient:              ovnClient.KubeClient,
 			EIPClient:            ovnClient.EgressIPClient,
@@ -255,6 +277,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 		serviceLBMap:             make(map[string]map[string]*loadBalancerConf),
 		serviceLBLock:            sync.Mutex{},
 		joinSwIPManager:          nil,
+		retryPods:                make(map[types.UID]retryEntry),
 		recorder:                 recorder,
 		ovnNBClient:              ovnNBClient,
 		ovnSBClient:              ovnSBClient,
@@ -277,8 +300,58 @@ func (oc *Controller) Run(wg *sync.WaitGroup) error {
 	oc.WatchNodes()
 
 	oc.WatchPods()
-	oc.WatchServices()
-	oc.WatchEndpoints()
+
+	// Services are handled differently depending on the Kubernetes API versions
+	// and the OVN configuration.
+	// We use a level triggered controller to handle services if k8s > 1.19,
+	// using endpoint slices instead endpoints if OVN is configured for dual stack.
+	if util.UseEndpointSlices(oc.client) && config.IPv4Mode && config.IPv6Mode {
+		// Services are handled differently depending on the Kubernetes API versions
+		klog.Infof("Dual Stack enabled: using EndpointSlices instead of Endpoints in k8s versions > 1.19")
+		// Create our own informers to start compartamentalizing the code
+		// filter server side the things we don't care about
+		noProxyName, err := labels.NewRequirement("service.kubernetes.io/service-proxy-name", selection.DoesNotExist, nil)
+		if err != nil {
+			return err
+		}
+
+		noHeadlessEndpoints, err := labels.NewRequirement(kapi.IsHeadlessService, selection.DoesNotExist, nil)
+		if err != nil {
+			return err
+		}
+
+		labelSelector := labels.NewSelector()
+		labelSelector = labelSelector.Add(*noProxyName, *noHeadlessEndpoints)
+
+		informerFactory := informers.NewSharedInformerFactoryWithOptions(oc.client, 0,
+			informers.WithTweakListOptions(func(options *metav1.ListOptions) {
+				options.LabelSelector = labelSelector.String()
+			}))
+
+		servicesController := svccontroller.NewController(
+			oc.client,
+			informerFactory.Core().V1().Services(),
+			informerFactory.Discovery().V1beta1().EndpointSlices(),
+			oc.clusterPortGroupUUID,
+		)
+		informerFactory.Start(oc.stopChan)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// use 5 workers like most of the kubernetes controllers in the
+			// kubernetes controller-manager
+			err := servicesController.Run(5, oc.stopChan)
+			if err != nil {
+				klog.Errorf("Error running OVN Kubernetes Services controller: %v", err)
+			}
+		}()
+
+	} else {
+		klog.Infof("OVN Controller using Endpoints instead of EndpointSlices")
+		oc.WatchServices()
+		oc.WatchEndpoints()
+	}
+
 	oc.WatchNetworkPolicy()
 	oc.WatchCRD()
 
@@ -426,7 +499,6 @@ func (oc *Controller) syncPeriodic() {
 			}
 		}
 	}()
-
 }
 
 func (oc *Controller) ovnControllerEventChecker() {
@@ -489,66 +561,117 @@ func (oc *Controller) recordPodEvent(addErr error, pod *kapi.Pod) {
 	}
 }
 
+// iterateRetryPods checks if any outstanding pods have been waiting for 60 seconds of last known failure
+// then tries to re-add them if so
+func (oc *Controller) iterateRetryPods() {
+	oc.retryPodsLock.Lock()
+	defer oc.retryPodsLock.Unlock()
+	now := time.Now()
+	for uid, podEntry := range oc.retryPods {
+		pod := podEntry.pod
+		podTimer := podEntry.timeStamp.Add(time.Minute)
+		if now.After(podTimer) {
+			podDesc := fmt.Sprintf("[%s/%s/%s]", pod.UID, pod.Namespace, pod.Name)
+			klog.Infof("%s retry pod setup", podDesc)
+
+			if oc.ensurePod(nil, pod, true) {
+				klog.Infof("%s pod setup successful", podDesc)
+				delete(oc.retryPods, uid)
+			} else {
+				klog.Infof("%s setup retry failed; will try again later", podDesc)
+				oc.retryPods[uid] = retryEntry{pod, time.Now()}
+			}
+		}
+	}
+}
+
+// checkAndDeleteRetryPod deletes a specific entry from the map, if it existed, returns true
+func (oc *Controller) checkAndDeleteRetryPod(uid types.UID) bool {
+	oc.retryPodsLock.Lock()
+	defer oc.retryPodsLock.Unlock()
+	if _, ok := oc.retryPods[uid]; ok {
+		delete(oc.retryPods, uid)
+		return true
+	}
+	return false
+}
+
+// addRetryPod tracks a failed pod to retry later
+func (oc *Controller) addRetryPod(pod *kapi.Pod) {
+	oc.retryPodsLock.Lock()
+	defer oc.retryPodsLock.Unlock()
+	oc.retryPods[pod.UID] = retryEntry{pod, time.Now()}
+}
+
+func exGatewayAnnotationsChanged(oldPod, newPod *kapi.Pod) bool {
+	return oldPod.Annotations[routingNamespaceAnnotation] != newPod.Annotations[routingNamespaceAnnotation] ||
+		oldPod.Annotations[routingNetworkAnnotation] != newPod.Annotations[routingNetworkAnnotation]
+}
+
+// ensurePod tries to set up a pod. It returns success or failure; failure
+// indicates the pod should be retried later.
+func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
+	// Try unscheduled pods later
+	if !podScheduled(pod) {
+		return false
+	}
+
+	if util.PodWantsNetwork(pod) && addPort {
+		if err := oc.addLogicalPort(pod); err != nil {
+			klog.Errorf(err.Error())
+			oc.recordPodEvent(err, pod)
+			return false
+		}
+	} else {
+		if oldPod != nil && exGatewayAnnotationsChanged(oldPod, pod) {
+			// No matter if a pod is ovn networked, or host networked, we still need to check for exgw
+			// annotations. If the pod is ovn networked and is in update reschedule, addLogicalPort will take
+			// care of updating the exgw updates
+			oc.deletePodExternalGW(oldPod)
+		}
+		if err := oc.addPodExternalGW(pod); err != nil {
+			klog.Errorf(err.Error())
+			oc.recordPodEvent(err, pod)
+			return false
+		}
+	}
+
+	return true
+}
+
 // WatchPods starts the watching of Pod resource and calls back the appropriate handler logic
 func (oc *Controller) WatchPods() {
-	var retryPods sync.Map
+	go func() {
+		// track the retryPods map and every 30 seconds check if any pods need to be retried
+		utilwait.Until(oc.iterateRetryPods, 30*time.Second, oc.stopChan)
+	}()
 
 	start := time.Now()
 	oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
-			if !util.PodWantsNetwork(pod) {
-				// host network pod is able to serve as external gw for other pods
-				if err := oc.addPodExternalGW(pod); err != nil {
-					klog.Errorf(err.Error())
-				}
-				return
-			}
-			if podScheduled(pod) {
-				if err := oc.addLogicalPort(pod); err != nil {
-					klog.Errorf(err.Error())
-					oc.recordPodEvent(err, pod)
-					retryPods.Store(pod.UID, true)
-				}
-			} else {
-				// Handle unscheduled pods later in UpdateFunc
-				retryPods.Store(pod.UID, true)
+			if !oc.ensurePod(nil, pod, true) {
+				oc.addRetryPod(pod)
 			}
 		},
 		UpdateFunc: func(old, newer interface{}) {
 			oldPod := old.(*kapi.Pod)
 			pod := newer.(*kapi.Pod)
-
-			_, retry := retryPods.Load(pod.UID)
-			if podScheduled(pod) && retry && util.PodWantsNetwork(pod) {
-				if err := oc.addLogicalPort(pod); err != nil {
-					klog.Errorf(err.Error())
-					oc.recordPodEvent(err, pod)
-				} else {
-					retryPods.Delete(pod.UID)
-				}
-			} else {
-				// No matter if a pod is ovn networked, or host networked, we still need to check for exgw
-				// annotations. If the pod is ovn networked and is in update reschedule, addLogicalPort will take
-				// care of updating the exgw updates
-				if oldPod.Annotations[routingNamespaceAnnotation] != pod.Annotations[routingNamespaceAnnotation] ||
-					oldPod.Annotations[routingNetworkAnnotation] != pod.Annotations[routingNetworkAnnotation] {
-					oc.deletePodExternalGW(oldPod)
-					if err := oc.addPodExternalGW(pod); err != nil {
-						klog.Errorf(err.Error())
-					}
-				}
+			if !oc.ensurePod(oldPod, pod, oc.checkAndDeleteRetryPod(pod.UID)) {
+				// add back the failed pod
+				oc.addRetryPod(pod)
+				return
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
+			oc.checkAndDeleteRetryPod(pod.UID)
 			if !util.PodWantsNetwork(pod) {
 				oc.deletePodExternalGW(pod)
 				return
 			}
 			// deleteLogicalPort will take care of removing exgw for ovn networked pods
 			oc.deleteLogicalPort(pod)
-			retryPods.Delete(pod.UID)
 		},
 	}, oc.syncPods)
 	klog.Infof("Bootstrapping existing pods and cleaning stale pods took %v", time.Since(start))
@@ -662,6 +785,11 @@ func (oc *Controller) WatchCRD() {
 				}
 				oc.egressFirewallHandler = oc.WatchEgressFirewall()
 
+				oc.egressFirewallDNS, err = NewEgressDNS(oc.addressSetFactory, oc.stopChan)
+				oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
+				if err != nil {
+					klog.Errorf("Error Creating EgressFirewallDNS: %v", err)
+				}
 			}
 		},
 		UpdateFunc: func(old, newer interface{}) {
@@ -670,6 +798,7 @@ func (oc *Controller) WatchCRD() {
 			crd := obj.(*apiextension.CustomResourceDefinition)
 			klog.Infof("Deleting CRD %s from cluster", crd.Name)
 			if crd.Name == egressfirewallCRD {
+				oc.egressFirewallDNS.Shutdown()
 				oc.watchFactory.RemoveEgressFirewallHandler(oc.egressFirewallHandler)
 				oc.egressFirewallHandler = nil
 				oc.watchFactory.ShutdownEgressFirewallWatchFactory()
@@ -684,15 +813,15 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 	return oc.watchFactory.AddEgressFirewallHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			egressFirewall := obj.(*egressfirewall.EgressFirewall).DeepCopy()
-			errList := oc.addEgressFirewall(egressFirewall)
-			for _, err := range errList {
-				klog.Error(err)
-			}
-			if len(errList) == 0 {
-				egressFirewall.Status.Status = egressFirewallAppliedCorrectly
-			} else {
+			addErrors := oc.addEgressFirewall(egressFirewall)
+			if addErrors != nil {
+				klog.Error(addErrors)
 				egressFirewall.Status.Status = egressFirewallAddError
+			} else {
+
+				egressFirewall.Status.Status = egressFirewallAppliedCorrectly
 			}
+
 			err := oc.updateEgressFirewallWithRetry(egressFirewall)
 			if err != nil {
 				klog.Error(err)
@@ -703,11 +832,9 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 			oldEgressFirewall := old.(*egressfirewall.EgressFirewall)
 			if !reflect.DeepEqual(oldEgressFirewall.Spec, newEgressFirewall.Spec) {
 				errList := oc.updateEgressFirewall(oldEgressFirewall, newEgressFirewall)
-				if len(errList) > 0 {
+				if errList != nil {
 					newEgressFirewall.Status.Status = egressFirewallUpdateError
-					for _, err := range errList {
-						klog.Error(err)
-					}
+					klog.Error(errList)
 				} else {
 					newEgressFirewall.Status.Status = egressFirewallAppliedCorrectly
 				}
@@ -719,9 +846,9 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 		},
 		DeleteFunc: func(obj interface{}) {
 			egressFirewall := obj.(*egressfirewall.EgressFirewall)
-			errList := oc.deleteEgressFirewall(egressFirewall)
-			for _, err := range errList {
-				klog.Error(err)
+			deleteErrors := oc.deleteEgressFirewall(egressFirewall)
+			if deleteErrors != nil {
+				klog.Error(deleteErrors)
 			}
 		},
 	}, nil)
@@ -738,7 +865,10 @@ func (oc *Controller) WatchEgressNodes() {
 				klog.Error(err)
 			}
 			nodeLabels := node.GetLabels()
-			if _, hasEgressLabel := nodeLabels[nodeEgressLabel]; hasEgressLabel {
+			if _, hasEgressLabel := nodeLabels[nodeEgressLabel]; hasEgressLabel && oc.isEgressNodeReady(node) && oc.isEgressNodeReachable(node) {
+				oc.setNodeEgressAssignable(node.Name, true)
+				oc.setNodeEgressReady(node.Name, true)
+				oc.setNodeEgressReachable(node.Name, true)
 				if err := oc.addEgressNode(node); err != nil {
 					klog.Error(err)
 				}
@@ -754,13 +884,45 @@ func (oc *Controller) WatchEgressNodes() {
 			newLabels := newNode.GetLabels()
 			_, oldHadEgressLabel := oldLabels[nodeEgressLabel]
 			_, newHasEgressLabel := newLabels[nodeEgressLabel]
-			if !oldHadEgressLabel && newHasEgressLabel {
-				if err := oc.addEgressNode(newNode); err != nil {
-					klog.Error(err)
-				}
+			if !oldHadEgressLabel && !newHasEgressLabel {
+				return
 			}
 			if oldHadEgressLabel && !newHasEgressLabel {
+				klog.Infof("Node: %s has been un-labelled, deleting it from egress assignment", newNode.Name)
+				oc.setNodeEgressAssignable(oldNode.Name, false)
 				if err := oc.deleteEgressNode(oldNode); err != nil {
+					klog.Error(err)
+				}
+				return
+			}
+			isOldReady := oc.isEgressNodeReady(oldNode)
+			isNewReady := oc.isEgressNodeReady(newNode)
+			isNewReachable := oc.isEgressNodeReachable(newNode)
+			oc.setNodeEgressReady(newNode.Name, isNewReady)
+			oc.setNodeEgressReachable(newNode.Name, isNewReachable)
+			if !oldHadEgressLabel && newHasEgressLabel {
+				klog.Infof("Node: %s has been labelled, adding it for egress assignment", newNode.Name)
+				oc.setNodeEgressAssignable(newNode.Name, true)
+				if isNewReady && isNewReachable {
+					if err := oc.addEgressNode(newNode); err != nil {
+						klog.Error(err)
+					}
+				} else {
+					klog.Warningf("Node: %s has been labelled, but node is not ready and reachable, cannot use it for egress assignment", newNode.Name)
+				}
+				return
+			}
+			if isOldReady == isNewReady {
+				return
+			}
+			if !isNewReady {
+				klog.Warningf("Node: %s is not ready, deleting it from egress assignment", newNode.Name)
+				if err := oc.deleteEgressNode(newNode); err != nil {
+					klog.Error(err)
+				}
+			} else if isNewReady && isNewReachable {
+				klog.Infof("Node: %s is ready and reachable, adding it for egress assignment", newNode.Name)
+				if err := oc.addEgressNode(newNode); err != nil {
 					klog.Error(err)
 				}
 			}
@@ -1033,23 +1195,6 @@ func (oc *Controller) getServiceLBInfo(lb, vip string) (string, bool) {
 		conf = &loadBalancerConf{}
 	}
 	return conf.rejectACL, len(conf.endpoints) > 0
-}
-
-// getAllACLsForServiceLB retrieves all of the ACLs for a given load balancer
-func (oc *Controller) getAllACLsForServiceLB(lb string) []string {
-	oc.serviceLBLock.Lock()
-	defer oc.serviceLBLock.Unlock()
-	confMap, ok := oc.serviceLBMap[lb]
-	if !ok {
-		return nil
-	}
-	var acls []string
-	for _, v := range confMap {
-		if len(v.rejectACL) > 0 {
-			acls = append(acls, v.rejectACL)
-		}
-	}
-	return acls
 }
 
 // removeServiceLB removes the entire LB entry for a VIP

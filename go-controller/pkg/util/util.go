@@ -2,61 +2,19 @@ package util
 
 import (
 	"fmt"
+	"hash/fnv"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/urfave/cli/v2"
 
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
-)
-
-const (
-	K8sPrefix = "k8s-"
-	// K8sMgmtIntfName name to be used as an OVS internal port on the node
-	K8sMgmtIntfName = "ovn-k8s-mp0"
-
-	// PhysicalNetworkName is the name that maps to an OVS bridge that provides
-	// access to physical/external network
-	PhysicalNetworkName = "physnet"
-
-	// LocalNetworkName is the name that maps to an OVS bridge that provides
-	// access to local service
-	LocalNetworkName = "locnet"
-
-	// OVNClusterRouter is the name of the distributed router
-	OVNClusterRouter = "ovn_cluster_router"
-
-	// OVNJoinSwitch is the name of the join switch
-	OVNJoinSwitch = "join"
-
-	ExternalSwitchPrefix       = "ext_"
-	GwRouterPrefix             = "GR_"
-	RouterToSwitchPrefix       = "rtos-"
-	InterPrefix                = "inter-"
-	SwitchToRouterPrefix       = "stor-"
-	JoinSwitchToGwRouterPrefix = "jtor-"
-	GwRouterToJoinSwitchPrefix = "rtoj-"
-	ExtSwitchToGwRouterPrefix  = "etor-"
-	GwRouterToExtSwitchPrefix  = "rtoe-"
-
-	NodeLocalSwitch = "node_local_switch"
-
-	V6NodeLocalNatSubnet           = "fd99::/64"
-	V6NodeLocalNatSubnetPrefix     = 64
-	V6NodeLocalNatSubnetNextHop    = "fd99::1"
-	V6NodeLocalDistributedGwPortIP = "fd99::2"
-
-	V4NodeLocalNatSubnet           = "169.254.0.0/20"
-	V4NodeLocalNatSubnetPrefix     = 20
-	V4NodeLocalNatSubnetNextHop    = "169.254.0.1"
-	V4NodeLocalDistributedGwPortIP = "169.254.0.2"
-
-	V4JoinSubnetCidr = "100.64.0.0/16"
-	V6JoinSubnetCidr = "fd98::/64"
 )
 
 // StringArg gets the named command-line argument or returns an error if it is empty
@@ -71,9 +29,9 @@ func StringArg(context *cli.Context, name string) (string, error) {
 // GetLegacyK8sMgmtIntfName returns legacy management ovs-port name
 func GetLegacyK8sMgmtIntfName(nodeName string) string {
 	if len(nodeName) > 11 {
-		return K8sPrefix + (nodeName[:11])
+		return types.K8sPrefix + (nodeName[:11])
 	}
-	return K8sPrefix + nodeName
+	return types.K8sPrefix + nodeName
 }
 
 // GetNodeChassisID returns the machine's OVN chassis ID
@@ -117,7 +75,7 @@ func UpdateNodeSwitchExcludeIPs(nodeName string, subnet *net.IPNet) error {
 	lines := strings.Split(stdout, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if strings.Contains(line, "("+K8sPrefix+nodeName+")") {
+		if strings.Contains(line, "("+types.K8sPrefix+nodeName+")") {
 			haveManagementPort = true
 		} else if strings.Contains(line, "("+GetHybridOverlayPortName(nodeName)+")") {
 			// we always need to set to false because we do not reserve the IP on the LSP for HO
@@ -182,4 +140,51 @@ func newAnnotationNotSetError(format string, args ...interface{}) error {
 func IsAnnotationNotSetError(err error) bool {
 	_, ok := err.(annotationNotSetError)
 	return ok
+}
+
+// CalculateHostSubnetsForClusterEntry calculates the host subnets
+// available in a CIDR entry
+func CalculateHostSubnetsForClusterEntry(cidrEntry config.CIDRNetworkEntry,
+	v4HostSubnetCount, v6HostSubnetCount *float64) {
+	prefixLength, _ := cidrEntry.CIDR.Mask.Size()
+	var one uint64 = 1
+	if prefixLength > cidrEntry.HostSubnetLength {
+		klog.Warningf("Invalid cidr entry: %+v found while calculating subnet count",
+			cidrEntry)
+		return
+	}
+	if !utilnet.IsIPv6CIDR(cidrEntry.CIDR) {
+		*v4HostSubnetCount = *v4HostSubnetCount + float64(one<<(cidrEntry.HostSubnetLength-prefixLength))
+	} else {
+		*v6HostSubnetCount = *v6HostSubnetCount + float64(one<<(cidrEntry.HostSubnetLength-prefixLength))
+
+	}
+}
+
+// UpdateUsedHostSubnetsCount increments the v4/v6 host subnets count based on
+// the subnet being visited
+func UpdateUsedHostSubnetsCount(subnet *net.IPNet,
+	v4SubnetsAllocated, v6SubnetsAllocated *float64, isAdd bool) {
+	op := -1
+	if isAdd {
+		op = 1
+	}
+	if !utilnet.IsIPv6CIDR(subnet) {
+		*v4SubnetsAllocated = *v4SubnetsAllocated + float64(1*op)
+	} else {
+		*v6SubnetsAllocated = *v6SubnetsAllocated + float64(1*op)
+	}
+}
+
+// HashforOVN hashes the provided input to make it a valid addressSet or portGroup name.
+func HashForOVN(s string) string {
+	h := fnv.New64a()
+	_, err := h.Write([]byte(s))
+	if err != nil {
+		klog.Errorf("Failed to hash %s", s)
+		return ""
+	}
+	hashString := strconv.FormatUint(h.Sum64(), 10)
+	return fmt.Sprintf("a%s", hashString)
+
 }

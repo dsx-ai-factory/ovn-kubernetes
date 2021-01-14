@@ -6,7 +6,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,13 +17,16 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	kapi "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 // OvnNode is the object holder for utilities meant for node management
@@ -34,6 +36,7 @@ type OvnNode struct {
 	watchFactory factory.NodeWatchFactory
 	stopChan     chan struct{}
 	recorder     record.EventRecorder
+	gateway      Gateway
 }
 
 // NewNode creates a new controller for node management
@@ -209,13 +212,14 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	nodeAnnotator := kube.NewNodeAnnotator(n.Kube, node)
 	waiter := newStartupWaiter()
 
-	// Initialize gateway resources on the node
-	if err := n.initGateway(subnets, nodeAnnotator, waiter); err != nil {
+	// Initialize management port resources on the node
+	mgmtPortConfig, err := createManagementPort(n.name, subnets, nodeAnnotator, waiter)
+	if err != nil {
 		return err
 	}
 
-	// Initialize management port resources on the node
-	if err := n.createManagementPort(subnets, nodeAnnotator, waiter); err != nil {
+	// Initialize gateway resources on the node
+	if err := n.initGateway(subnets, nodeAnnotator, waiter, mgmtPortConfig); err != nil {
 		return err
 	}
 
@@ -229,6 +233,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	if err := waiter.Wait(); err != nil {
 		return err
 	}
+	go n.gateway.Run(n.stopChan, wg)
 	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
 
 	if config.HybridOverlay.Enabled {
@@ -256,6 +261,9 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	// start health check to ensure there are no stale OVS internal ports
 	go checkForStaleOVSInterfaces(n.stopChan)
 
+	// start management port health check
+	go checkManagementPortHealth(mgmtPortConfig, n.stopChan)
+
 	confFile := filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
 	_, err = os.Stat(confFile)
 	if os.IsNotExist(err) {
@@ -265,14 +273,9 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		}
 	}
 
-	kclient, ok := n.Kube.(*kube.Kube)
-	if !ok {
-		return fmt.Errorf("cannot get kubeclient for starting CNI server")
-	}
 	n.WatchEndpoints()
 
-	// start the cni server
-	cniServer := cni.NewCNIServer("", kclient.KClient)
+	cniServer := cni.NewCNIServer("", n.watchFactory)
 	err = cniServer.Start(cni.HandleCNIRequest)
 
 	return err
@@ -293,7 +296,7 @@ func (n *OvnNode) WatchEndpoints() {
 		UpdateFunc: func(old, new interface{}) {
 			epNew := new.(*kapi.Endpoints)
 			epOld := old.(*kapi.Endpoints)
-			if reflect.DeepEqual(epNew.Subsets, epOld.Subsets) {
+			if apiequality.Semantic.DeepEqual(epNew.Subsets, epOld.Subsets) {
 				return
 			}
 			// remove the epOld ports (backed by k8s-node ip's)
@@ -343,9 +346,9 @@ func (n *OvnNode) WatchEndpoints() {
 // syncEndpoints add's ovn-k8s-gw0 & ovn-k8s-mp0 ports to
 // ovn firewall zone when node restarts.
 func syncEndpoints(endpoints []interface{}) {
-	if err := addInterfaceToFirewallZone(util.K8sMgmtIntfName, ovnFirewallZone); err != nil {
+	if err := addInterfaceToFirewallZone(types.K8sMgmtIntfName, ovnFirewallZone); err != nil {
 		klog.Errorf("Failed to add interface %s to ovn firewall zone: (%v)",
-			util.K8sMgmtIntfName, err)
+			types.K8sMgmtIntfName, err)
 	}
 	if err := addInterfaceToFirewallZone(localnetGatewayNextHopPort, ovnFirewallZone); err != nil {
 		klog.Errorf("Failed to add interface %s to ovn firewall zone: (%v)",

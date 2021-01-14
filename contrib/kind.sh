@@ -24,7 +24,7 @@ run_kubectl() {
 # with Fedora32 Cloud, but it does not happen if we clean first the ovn-kubernetes resources.
 delete()
 {
-  kubectl --kubeconfig ${HOME}/admin.conf delete namespace ovn-kubernetes
+  timeout 5 kubectl --kubeconfig ${HOME}/admin.conf delete namespace ovn-kubernetes || true
   sleep 5
   kind delete cluster --name ${KIND_CLUSTER_NAME:-ovn}
 }
@@ -174,7 +174,8 @@ NET_CIDR_IPV4=${NET_CIDR_IPV4:-10.244.0.0/16}
 SVC_CIDR_IPV4=${SVC_CIDR_IPV4:-10.96.0.0/16}
 NET_CIDR_IPV6=${NET_CIDR_IPV6:-fd00:10:244::/48}
 SVC_CIDR_IPV6=${SVC_CIDR_IPV6:-fd00:10:96::/112}
-
+JOIN_SUBNET_IPV4=${JOIN_SUBNET_IPV4:-100.64.0.0/16}
+JOIN_SUBNET_IPV6=${JOIN_SUBNET_IPV6:-fd98::/64}
 KIND_NUM_MASTER=1
 if [ "$OVN_HA" == true ]; then
   KIND_NUM_MASTER=3
@@ -278,6 +279,9 @@ ovn_apiServerAddress=${API_IP} \
 
 # Create KIND cluster. For additional debug, add '--verbosity <int>': 0 None .. 3 Debug
 export KUBECONFIG=${HOME}/admin.conf
+if kind get clusters | grep ovn; then
+  delete
+fi
 kind create cluster --name ${KIND_CLUSTER_NAME} --kubeconfig ${KUBECONFIG} --image kindest/node:${K8S_VERSION} --config=${KIND_CONFIG_LCL}
 cat ${KUBECONFIG}
 
@@ -350,7 +354,9 @@ pushd ../dist/images
   --ovn-unprivileged-mode=no \
   --master-loglevel=5 \
   --dbchecker-loglevel=5\
-  --egress-ip-enable=true
+  --egress-ip-enable=true\
+  --v4-join-subnet=${JOIN_SUBNET_IPV4}\
+  --v6-join-subnet=${JOIN_SUBNET_IPV6}
 popd
 
 kind load docker-image ${OVN_IMAGE} --name ${KIND_CLUSTER_NAME}

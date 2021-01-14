@@ -5,20 +5,21 @@ import (
 	"net"
 	"strings"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 // gatewayCleanup removes all the NB DB objects created for a node's gateway
 func gatewayCleanup(nodeName string) error {
-	gatewayRouter := util.GwRouterPrefix + nodeName
+	gatewayRouter := types.GWRouterPrefix + nodeName
 
 	// Get the gateway router port's IP address (connected to join switch)
 	var nextHops []net.IP
 
-	gwIPAddrs, err := util.GetLRPAddrs(util.GwRouterToJoinSwitchPrefix + gatewayRouter)
+	gwIPAddrs, err := util.GetLRPAddrs(types.GWRouterToJoinSwitchPrefix + gatewayRouter)
 	if err != nil {
 		return err
 	}
@@ -29,10 +30,10 @@ func gatewayCleanup(nodeName string) error {
 	staticRouteCleanup(nextHops)
 
 	// Remove the patch port that connects join switch to gateway router
-	_, stderr, err := util.RunOVNNbctl("--if-exist", "lsp-del", util.JoinSwitchToGwRouterPrefix+gatewayRouter)
+	_, stderr, err := util.RunOVNNbctl("--if-exist", "lsp-del", types.JoinSwitchToGWRouterPrefix+gatewayRouter)
 	if err != nil {
 		return fmt.Errorf("failed to delete logical switch port %s%s: "+
-			"stderr: %q, error: %v", util.JoinSwitchToGwRouterPrefix, gatewayRouter, stderr, err)
+			"stderr: %q, error: %v", types.JoinSwitchToGWRouterPrefix, gatewayRouter, stderr, err)
 	}
 
 	// Remove the gateway router associated with nodeName
@@ -44,7 +45,7 @@ func gatewayCleanup(nodeName string) error {
 	}
 
 	// Remove external switch
-	externalSwitch := util.ExternalSwitchPrefix + nodeName
+	externalSwitch := types.ExternalSwitchPrefix + nodeName
 	_, stderr, err = util.RunOVNNbctl("--if-exist", "ls-del",
 		externalSwitch)
 	if err != nil {
@@ -82,7 +83,7 @@ func delPbrAndNatRules(nodeName string) {
 	// delete the dnat_and_snat entry that we added for the management port IP
 	// Note: we don't need to delete any MAC bindings that are dynamically learned from OVN SB DB
 	// because there will be none since this NAT is only for outbound traffic and not for inbound
-	mgmtPortName := util.K8sPrefix + nodeName
+	mgmtPortName := types.K8sPrefix + nodeName
 	externalIP, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=external_ip", "find", "nat", fmt.Sprintf("logical_port=%s", mgmtPortName))
 	if err != nil {
@@ -91,7 +92,7 @@ func delPbrAndNatRules(nodeName string) {
 		externalIP = ""
 	}
 	if externalIP != "" {
-		_, stderr, err = util.RunOVNNbctl("--if-exists", "lr-nat-del", util.OVNClusterRouter, "dnat_and_snat", externalIP)
+		_, stderr, err = util.RunOVNNbctl("--if-exists", "lr-nat-del", types.OVNClusterRouter, "dnat_and_snat", externalIP)
 		if err != nil {
 			klog.Errorf("Failed to delete the dnat_and_snat ip %s associated with the management "+
 				"port %s: stderr: %s, error: %v", externalIP, mgmtPortName, stderr, err)
@@ -108,23 +109,23 @@ func delPbrAndNatRules(nodeName string) {
 	}
 	// matches inport for a policy, must use ending quote to substring match to avoid matching other nodes accidentally
 	// i.e. rtos-ovn-worker would match rtos-ovn-worker2
-	nodeSubnetMatchSubStr := fmt.Sprintf("%s%s\"", util.RouterToSwitchPrefix, nodeName)
+	nodeSubnetMatchSubStr := fmt.Sprintf("%s%s\"", types.RouterToSwitchPrefix, nodeName)
 	// for inter node, match the comment in the policy, and include extra space to avoid accidental submatch
-	interNodeMatchSubStr := fmt.Sprintf("%s%s ", util.InterPrefix, nodeName)
+	interNodeMatchSubStr := fmt.Sprintf("%s%s ", types.InterPrefix, nodeName)
 	// mgmt port policy matches node name in comment, use extra spaces to avoid accidental match of other nodes
 	mgmtPortPolicyMatchSubStr := fmt.Sprintf(" %s ", nodeName)
 	for _, match := range strings.Split(matches, "\n\n") {
 		var priority string
 		if strings.Contains(match, nodeSubnetMatchSubStr) {
-			priority = nodeSubnetPolicyPriority
+			priority = types.NodeSubnetPolicyPriority
 		} else if strings.Contains(match, interNodeMatchSubStr) {
-			priority = interNodePolicyPriority
+			priority = types.InterNodePolicyPriority
 		} else if strings.Contains(match, mgmtPortPolicyMatchSubStr) {
-			priority = mgmtPortPolicyPriority
+			priority = types.MGMTPortPolicyPriority
 		} else {
 			continue
 		}
-		_, stderr, err = util.RunOVNNbctl("lr-policy-del", util.OVNClusterRouter, priority, match)
+		_, stderr, err = util.RunOVNNbctl("lr-policy-del", types.OVNClusterRouter, priority, match)
 		if err != nil {
 			klog.Errorf("Failed to remove the policy routes (%s, %s) associated with the node %s: stderr: %s, error: %v",
 				priority, match, nodeName, stderr, err)
@@ -150,11 +151,10 @@ func staticRouteCleanup(nextHops []net.IP) {
 		routes := strings.Fields(uuids)
 		for _, route := range routes {
 			_, stderr, err = util.RunOVNNbctl("--if-exists", "remove",
-				"logical_router", util.OVNClusterRouter, "static_routes", route)
+				"logical_router", types.OVNClusterRouter, "static_routes", route)
 			if err != nil {
 				klog.Errorf("Failed to delete static route %s"+
 					", stderr: %q, err = %v", route, stderr, err)
-				continue
 			}
 		}
 	}

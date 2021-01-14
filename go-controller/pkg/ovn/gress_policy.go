@@ -5,12 +5,13 @@ import (
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -22,7 +23,7 @@ type gressPolicy struct {
 
 	// peerAddressSet points to the addressSet that holds all peer pod
 	// IP addresess.
-	peerAddressSet AddressSet
+	peerAddressSet addressset.AddressSet
 
 	// peerV4AddressSets has Address sets for all namespaces and pod selectors for IPv4
 	peerV4AddressSets sets.String
@@ -73,7 +74,7 @@ func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name string)
 	}
 }
 
-func (gp *gressPolicy) ensurePeerAddressSet(factory AddressSetFactory) error {
+func (gp *gressPolicy) ensurePeerAddressSet(factory addressset.AddressSetFactory) error {
 	if gp.peerAddressSet != nil {
 		return nil
 	}
@@ -86,16 +87,22 @@ func (gp *gressPolicy) ensurePeerAddressSet(factory AddressSetFactory) error {
 	}
 
 	gp.peerAddressSet = as
-	if config.IPv4Mode {
-		gp.peerV4AddressSets.Insert("$" + as.GetIPv4HashName())
+	ipv4HashedAS, ipv6HashedAS := as.GetASHashNames()
+	if ipv4HashedAS != "" {
+		gp.peerV4AddressSets.Insert("$" + ipv4HashedAS)
 	}
-	if config.IPv6Mode {
-		gp.peerV6AddressSets.Insert("$" + as.GetIPv6HashName())
+	if ipv6HashedAS != "" {
+		gp.peerV6AddressSets.Insert("$" + ipv6HashedAS)
 	}
 	return nil
 }
 
 func (gp *gressPolicy) addPeerPod(pod *v1.Pod) error {
+	if gp.peerAddressSet == nil {
+		return fmt.Errorf("peer AddressSet is nil, cannot add peer pod: %s for gressPolicy: %s",
+			pod.ObjectMeta.Name, gp.policyName)
+	}
+
 	ips, err := util.GetAllPodIPs(pod)
 	if err != nil {
 		return err
@@ -193,8 +200,9 @@ func (gp *gressPolicy) getMatchFromIPBlock(lportMatch, l4Match string) []string 
 
 // addNamespaceAddressSet adds a new namespace address set to the gress policy
 func (gp *gressPolicy) addNamespaceAddressSet(name, portGroupName string) {
-	v4HashName := "$" + getIPv4ASHashedName(name)
-	v6HashName := "$" + getIPv6ASHashedName(name)
+	v4HashName, v6HashName := addressset.MakeAddressSetHashNames(name)
+	v4HashName = "$" + v4HashName
+	v6HashName = "$" + v6HashName
 
 	if gp.peerV4AddressSets.Has(v4HashName) || gp.peerV6AddressSets.Has(v6HashName) {
 		return
@@ -210,10 +218,10 @@ func (gp *gressPolicy) addNamespaceAddressSet(name, portGroupName string) {
 }
 
 // delNamespaceAddressSet removes a namespace address set from the gress policy
-
 func (gp *gressPolicy) delNamespaceAddressSet(name, portGroupName string) {
-	v4HashName := "$" + getIPv4ASHashedName(name)
-	v6HashName := "$" + getIPv6ASHashedName(name)
+	v4HashName, v6HashName := addressset.MakeAddressSetHashNames(name)
+	v4HashName = "$" + v4HashName
+	v6HashName = "$" + v6HashName
 
 	if !gp.peerV4AddressSets.Has(v4HashName) && !gp.peerV6AddressSets.Has(v6HashName) {
 		return
@@ -285,15 +293,11 @@ func (gp *gressPolicy) localPodAddACL(portGroupName, portGroupUUID string) {
 	}
 }
 
-// addACLAllow adds an "allow" ACL with a given match to the given Port Group
+// addACLAllow adds an ACL with a given match to the given Port Group
 func (gp *gressPolicy) addACLAllow(match, l4Match, portGroupUUID string, ipBlockCidr bool) error {
 	var direction, action string
 	direction = toLport
-	if gp.policyType == knet.PolicyTypeIngress {
-		action = "allow-related"
-	} else {
-		action = "allow"
-	}
+	action = "allow-related"
 
 	uuid, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL",
@@ -333,7 +337,7 @@ func (gp *gressPolicy) addACLAllow(match, l4Match, portGroupUUID string, ipBlock
 	return nil
 }
 
-// modifyACLAllow updates an "allow" ACL with a new match
+// modifyACLAllow updates an ACL with a new match
 func (gp *gressPolicy) modifyACLAllow(oldMatch, newMatch string) error {
 	uuid, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL", oldMatch,

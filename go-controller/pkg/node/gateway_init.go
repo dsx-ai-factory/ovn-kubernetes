@@ -5,11 +5,13 @@ import (
 	"net"
 	"strings"
 
+	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"k8s.io/klog"
-	utilnet "k8s.io/utils/net"
 )
 
 // bridgedGatewayNodeSetup makes the bridge's MAC address permanent (if needed), sets up
@@ -156,11 +158,19 @@ func getGatewayNextHops() ([]net.IP, string, error) {
 }
 
 func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator,
-	waiter *startupWaiter) error {
+	waiter *startupWaiter, managementPortConfig *managementPortConfig) error {
+	klog.Info("Initializing Gateway Functionality")
+	var err error
+
+	var loadBalancerHealthChecker *loadBalancerHealthChecker
+	var portClaimWatcher *portClaimWatcher
 
 	if config.Gateway.NodeportEnable {
-		initLoadBalancerHealthChecker(n.name, n.watchFactory)
-		initPortClaimWatcher(n.recorder, n.watchFactory)
+		loadBalancerHealthChecker = newLoadBalancerHealthChecker(n.name)
+		portClaimWatcher, err = newPortClaimWatcher(n.recorder)
+		if err != nil {
+			return err
+		}
 	}
 
 	gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
@@ -175,28 +185,37 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 		}
 	}
 
-	var prFn postWaitFunc
-	if config.Gateway.Mode != config.GatewayModeDisabled {
-		prFn, err = n.initSharedGateway(subnets, gatewayNextHops, gatewayIntf, nodeAnnotator)
-	} else {
+	var gw *gateway
+	switch config.Gateway.Mode {
+	case config.GatewayModeLocal:
+		klog.Info("Preparing Local Gateway")
+		gw, err = newLocalGateway(n.name, subnets, gatewayNextHops, gatewayIntf, nodeAnnotator, n.recorder, managementPortConfig)
+	case config.GatewayModeShared:
+		klog.Info("Preparing Shared Gateway")
+		gw, err = newSharedGateway(n.name, subnets, gatewayNextHops, gatewayIntf, nodeAnnotator)
+	case config.GatewayModeDisabled:
+		klog.Info("Gateway Mode is disabled")
+		gw = &gateway{
+			initFunc:  func() error { return nil },
+			readyFunc: func() (bool, error) { return true, nil },
+		}
 		err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
 			Mode: config.GatewayModeDisabled,
 		})
 	}
-
 	if err != nil {
 		return err
 	}
+	gw.loadBalancerHealthChecker = loadBalancerHealthChecker
+	gw.portClaimWatcher = portClaimWatcher
 
-	// Wait for gateway resources to be created by the master if DisableSNATMultipleGWs is not set,
-	// as that option does not add default SNAT rules on the GR and the gatewayReady function checks
-	// those default NAT rules are present
-	if !config.Gateway.DisableSNATMultipleGWs && config.Gateway.Mode != config.GatewayModeLocal {
-		waiter.AddWait(gatewayReady, prFn)
-	} else {
-		waiter.AddWait(func() (bool, error) { return true, nil }, prFn)
+	initGw := func() error {
+		return gw.Init(n.watchFactory)
 	}
-	return nil
+
+	waiter.AddWait(gw.readyFunc, initGw)
+	n.gateway = gw
+	return err
 }
 
 // CleanupClusterNode cleans up OVS resources on the k8s node on ovnkube-node daemonset deletion.
@@ -206,7 +225,7 @@ func CleanupClusterNode(name string) error {
 
 	klog.V(5).Infof("Cleaning up gateway resources on node: %q", name)
 	if config.Gateway.Mode == config.GatewayModeLocal || config.Gateway.Mode == config.GatewayModeShared {
-		err = cleanupLocalnetGateway(util.LocalNetworkName)
+		err = cleanupLocalnetGateway(types.LocalNetworkName)
 		if err != nil {
 			klog.Errorf("Failed to cleanup Localnet Gateway, error: %v", err)
 		}
@@ -226,28 +245,4 @@ func CleanupClusterNode(name string) error {
 	DelMgtPortIptRules()
 
 	return nil
-}
-
-// GatewayReady will check to see if we have successfully added SNAT OpenFlow rules in the L3Gateway Routers
-func gatewayReady() (bool, error) {
-	// OpenFlow table 41 performs SNATing of packets that are heading to physical network from
-	// logical network.
-	for _, clusterSubnet := range config.Default.ClusterSubnets {
-		var cidr, match string
-		cidr = clusterSubnet.CIDR.String()
-		if strings.Contains(cidr, ":") {
-			match = "ipv6,ipv6_src=" + cidr
-		} else {
-			match = "ip,nw_src=" + cidr
-		}
-		stdout, _, err := util.RunOVSOfctl("--no-stats", "--no-names", "dump-flows", "br-int",
-			"table=41,"+match)
-		if err != nil {
-			return false, nil
-		}
-		if !strings.Contains(stdout, cidr) {
-			return false, nil
-		}
-	}
-	return true, nil
 }

@@ -21,7 +21,6 @@ type CIDRNetworkEntry struct {
 // addresses from.
 func ParseClusterSubnetEntries(clusterSubnetCmd string) ([]CIDRNetworkEntry, error) {
 	var parsedClusterList []CIDRNetworkEntry
-	ipv6 := false
 	clusterEntriesList := strings.Split(clusterSubnetCmd, ",")
 
 	for _, clusterEntry := range clusterEntriesList {
@@ -39,10 +38,7 @@ func ParseClusterSubnetEntries(clusterSubnetCmd string) ([]CIDRNetworkEntry, err
 			return nil, err
 		}
 
-		if utilnet.IsIPv6(parsedClusterEntry.CIDR.IP) {
-			ipv6 = true
-		}
-
+		ipv6 := utilnet.IsIPv6(parsedClusterEntry.CIDR.IP)
 		entryMaskLength, _ := parsedClusterEntry.CIDR.Mask.Size()
 		if len(splitClusterEntry) == 3 {
 			tmp, err := strconv.Atoi(splitClusterEntry[2])
@@ -117,16 +113,6 @@ func (cs *configSubnets) append(subnetType configSubnetType, subnet *net.IPNet) 
 			cs.v4[subnetType] = true
 		}
 	}
-}
-
-// appendConst adds a single subnet to cs; it will panic if subnetStr is not a valid CIDR
-// string
-func (cs *configSubnets) appendConst(subnetType configSubnetType, subnetStr string) {
-	_, subnet, err := net.ParseCIDR(subnetStr)
-	if err != nil {
-		panic(fmt.Sprintf("could not parse constant value %q: %v", subnetStr, err))
-	}
-	cs.append(subnetType, subnet)
 }
 
 // checkForOverlaps checks if any of the subnets in cs overlap

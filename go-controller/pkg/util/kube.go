@@ -3,6 +3,7 @@ package util
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	kapi "k8s.io/api/core/v1"
@@ -13,10 +14,11 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/cert"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
+	discovery "k8s.io/api/discovery/v1beta1"
 	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
@@ -66,6 +68,8 @@ func newKubernetesRestConfig(conf *config.KubernetesConfig) (*rest.Config, error
 	if err != nil {
 		return nil, err
 	}
+	kconfig.QPS = 25
+	kconfig.Burst = 25
 	return kconfig, nil
 }
 
@@ -117,6 +121,19 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 // IsClusterIPSet checks if the service is an headless service or not
 func IsClusterIPSet(service *kapi.Service) bool {
 	return service.Spec.ClusterIP != kapi.ClusterIPNone && service.Spec.ClusterIP != ""
+}
+
+// GetClusterIPs return an array with the ClusterIPs present in the service
+// for backward compatibility with versions < 1.20
+// we need to handle the case where only ClusterIP exist
+func GetClusterIPs(service *kapi.Service) []string {
+	if len(service.Spec.ClusterIPs) > 0 {
+		return service.Spec.ClusterIPs
+	}
+	if len(service.Spec.ClusterIP) > 0 && service.Spec.ClusterIP != kapi.ClusterIPNone {
+		return []string{service.Spec.ClusterIP}
+	}
+	return []string{}
 }
 
 // ValidatePort checks if the port is non-zero and port protocol is valid
@@ -208,16 +225,37 @@ func GetPodNetSelAnnotation(pod *kapi.Pod, netAttachAnnot string) ([]*types.Netw
 	return networks, nil
 }
 
-// eventRecorder returns an EventRecorder type that can be
+// EventRecorder returns an EventRecorder type that can be
 // used to post Events to different object's lifecycles.
 func EventRecorder(kubeClient kubernetes.Interface) record.EventRecorder {
 	eventBroadcaster := record.NewBroadcaster()
 	eventBroadcaster.StartLogging(klog.Infof)
 	eventBroadcaster.StartRecordingToSink(
 		&typedcorev1.EventSinkImpl{
-			Interface: kubeClient.CoreV1().Events("")})
+			Interface: kubeClient.CoreV1().Events(""),
+		})
 	recorder := eventBroadcaster.NewRecorder(
 		scheme.Scheme,
 		kapi.EventSource{Component: "controlplane"})
 	return recorder
+}
+
+// UseEndpointSlices if the EndpointSlice API is available
+// and if the kubernetes versions supports DualStack (Kubernetes >= 1.20)
+func UseEndpointSlices(kubeClient kubernetes.Interface) bool {
+	endpointSlicesEnabled := false
+	if _, err := kubeClient.Discovery().ServerResourcesForGroupVersion(discovery.SchemeGroupVersion.String()); err == nil {
+		// The EndpointSlice API is enabled check if is running in a supported version
+		klog.V(2).Infof("Kubernetes Endpoint Slices enabled on the cluster: %s", discovery.SchemeGroupVersion.String())
+		endpointSlicesEnabled = true
+	}
+	// We only use Slices if > 1.19 since we only need them for Dual Stack
+	sv, _ := kubeClient.Discovery().ServerVersion()
+	major, _ := strconv.Atoi(sv.Major)
+	minor, _ := strconv.Atoi(sv.Minor)
+	klog.Infof("Kubernetes running with version %d.%d", major, minor)
+	if major <= 1 && minor < 20 || !endpointSlicesEnabled {
+		return false
+	}
+	return true
 }

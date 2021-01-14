@@ -185,7 +185,12 @@ ovn_sb_raft_sched_priority=${OVN_SB_RAFT_SCHED_PRIORITY:--11}
 
 ovn_hybrid_overlay_enable=${OVN_HYBRID_OVERLAY_ENABLE:-}
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR:-}
-# OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
+ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-}
+# OVN_V4_JOIN_SUBNET - v4 join subnet
+ovn_v4_join_subnet=${OVN_V4_JOIN_SUBNET:-}
+# OVN_V6_JOIN_SUBNET - v6 join subnet
+ovn_v6_join_subnet=${OVN_V6_JOIN_SUBNET:-}
+#OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
 ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-100000}
 ovn_multicast_enable=${OVN_MULTICAST_ENABLE:-}
 # OVN_METRICS_SCRAPE_INTERVAL - metrics scrape interval in sec (default 30)
@@ -924,6 +929,17 @@ ovn-master() {
   if [[ ${ovn_disable_snat_multiple_gws} == "true" ]]; then
       disable_snat_multiple_gws_flag="--disable-snat-multiple-gws"
   fi
+
+  ovn_v4_join_subnet_opt=
+  if [[ -n ${ovn_v4_join_subnet} ]]; then
+      ovn_v4_join_subnet_opt="--gateway-v4-join-subnet=${ovn_v4_join_subnet}"
+  fi
+  
+  ovn_v6_join_subnet_opt=
+  if [[ -n ${ovn_v6_join_subnet} ]]; then
+      ovn_v6_join_subnet_opt="--gateway-v6-join-subnet=${ovn_v6_join_subnet}"
+  fi
+
   local ovn_master_ssl_opts=""
   [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
     wait_for_event attempts=20 files_exist ${ovn_controller_pk} ${ovn_controller_cert} ${ovn_ca_cert}
@@ -965,6 +981,8 @@ ovn-master() {
     --logfile-maxage=${ovnkube_logfile_maxage} \
     ${hybrid_overlay_flags} \
     ${disable_snat_multiple_gws_flag} \
+    ${ovn_v4_join_subnet_opt} \
+    ${ovn_v6_join_subnet_opt} \
     --pidfile ${OVN_RUNDIR}/ovnkube-master.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
     ${ovn_master_ssl_opts} \
