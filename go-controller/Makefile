@@ -10,9 +10,6 @@ GOPATH ?= $(shell go env GOPATH)
 TEST_REPORT_DIR?=$(CURDIR)/_artifacts
 export TEST_REPORT_DIR
 
-# Hack for SDN-663
-TAG=v1.33.0
-
 .PHONY: all build check test
 
 # Example:
@@ -30,7 +27,7 @@ windows:
 	WINDOWS_BUILD="yes" hack/build-go.sh hybrid-overlay/cmd/hybrid-overlay-node
 
 check test:
-	hack/test-go.sh ${PKGS}
+	RACE=1 hack/test-go.sh ${PKGS}
 
 codegen:
 	hack/update-codegen.sh
@@ -48,7 +45,7 @@ clean:
 .PHONY: install.tools lint gofmt
 
 install.tools:
-	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | bash -s -- -b ${GOPATH}/bin ${TAG}
+	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | bash -s -- -b ${GOPATH}/bin
 
 lint:
 	@GOPATH=${GOPATH} ./hack/lint.sh

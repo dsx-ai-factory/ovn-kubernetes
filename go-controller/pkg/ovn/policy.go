@@ -3,8 +3,10 @@ package ovn
 import (
 	"fmt"
 	"net"
+	"reflect"
 	"sync"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
@@ -23,6 +25,7 @@ type namespacePolicy struct {
 	ingressPolicies []*gressPolicy
 	egressPolicies  []*gressPolicy
 	podHandlerList  []*factory.Handler
+	svcHandlerList  []*factory.Handler
 	nsHandlerList   []*factory.Handler
 	localPods       map[string]*lpInfo //pods effected by this policy
 	portGroupUUID   string             //uuid for OVN port_group
@@ -38,6 +41,7 @@ func NewNamespacePolicy(policy *knet.NetworkPolicy) *namespacePolicy {
 		ingressPolicies: make([]*gressPolicy, 0),
 		egressPolicies:  make([]*gressPolicy, 0),
 		podHandlerList:  make([]*factory.Handler, 0),
+		svcHandlerList:  make([]*factory.Handler, 0),
 		nsHandlerList:   make([]*factory.Handler, 0),
 		localPods:       make(map[string]*lpInfo),
 	}
@@ -48,6 +52,9 @@ const (
 	toLport   = "to-lport"
 	fromLport = "from-lport"
 	noneMatch = "None"
+	// IPv6 multicast traffic destined to dynamic groups must have the "T" bit
+	// set to 1: https://tools.ietf.org/html/rfc3307#section-4.3
+	ipv6DynamicMulticastMatch = "(ip6.dst[120..127] == 0xff && ip6.dst[116] == 1)"
 	// Default deny acl rule priority
 	defaultDenyPriority = "1000"
 	// Default allow acl rule priority
@@ -56,6 +63,8 @@ const (
 	defaultMcastDenyPriority = "1011"
 	// Default multicast allow acl rule priority
 	defaultMcastAllowPriority = "1012"
+	// Default routed multicast allow acl rule priority
+	defaultRoutedMcastAllowPriority = "1013"
 )
 
 func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
@@ -237,11 +246,54 @@ func (oc *Controller) createDefaultDenyPortGroup(policyType knet.PolicyType) err
 	return nil
 }
 
+func getACLMatchAF(ipv4Match, ipv6Match string) string {
+	if config.IPv4Mode && config.IPv6Mode {
+		return "(" + ipv4Match + " || " + ipv6Match + ")"
+	} else if config.IPv4Mode {
+		return ipv4Match
+	} else {
+		return ipv6Match
+	}
+}
+
+// Creates the match string used for ACLs matching on multicast traffic.
+func getMulticastACLMatch() string {
+	return "(ip4.mcast || mldv1 || mldv2 || " + ipv6DynamicMulticastMatch + ")"
+}
+
+func getMulticastACLIgrMatchV4(addrSetName string) string {
+	return "ip4.src == $" + addrSetName + " && ip4.mcast"
+}
+
+func getMulticastACLIgrMatchV6(addrSetName string) string {
+	return "ip6.src == $" + addrSetName + " && " + ipv6DynamicMulticastMatch
+}
+
 // Creates the match string used for ACLs allowing incoming multicast into a
 // namespace, that is, from IPs that are in the namespace's address set.
-func getMulticastACLMatch(nsInfo *namespaceInfo) string {
-	ipv4HashedAS, _ := nsInfo.addressSet.GetASHashNames()
-	return "ip4.src == $" + ipv4HashedAS + " && ip4.mcast"
+func getMulticastACLIgrMatch(nsInfo *namespaceInfo) string {
+	var ipv4Match, ipv6Match string
+	addrSetNameV4, addrSetNameV6 := nsInfo.addressSet.GetASHashNames()
+	if config.IPv4Mode {
+		ipv4Match = getMulticastACLIgrMatchV4(addrSetNameV4)
+	}
+	if config.IPv6Mode {
+		ipv6Match = getMulticastACLIgrMatchV6(addrSetNameV6)
+	}
+	return getACLMatchAF(ipv4Match, ipv6Match)
+}
+
+// Creates the match string used for ACLs allowing outgoing multicast from a
+// namespace.
+func getMulticastACLEgrMatch() string {
+	var ipv4Match, ipv6Match string
+	if config.IPv4Mode {
+		ipv4Match = "ip4.mcast"
+	}
+	if config.IPv6Mode {
+		ipv6Match = "(mldv1 || mldv2 || " + ipv6DynamicMulticastMatch + ")"
+	}
+	return getACLMatchAF(ipv4Match, ipv6Match)
 }
 
 // Creates a policy to allow multicast traffic within 'ns':
@@ -258,7 +310,8 @@ func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInf
 	}
 
 	portGroupName := hashedPortGroup(ns)
-	match := getACLMatch(portGroupName, "ip4.mcast", knet.PolicyTypeEgress)
+	match := getACLMatch(portGroupName, getMulticastACLEgrMatch(),
+		knet.PolicyTypeEgress)
 	err = addACLPortGroup(nsInfo.portGroupUUID, fromLport,
 		defaultMcastAllowPriority, match, "allow", knet.PolicyTypeEgress)
 	if err != nil {
@@ -266,7 +319,8 @@ func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInf
 			ns, err)
 	}
 
-	match = getACLMatch(portGroupName, getMulticastACLMatch(nsInfo), knet.PolicyTypeIngress)
+	match = getACLMatch(portGroupName, getMulticastACLIgrMatch(nsInfo),
+		knet.PolicyTypeIngress)
 	err = addACLPortGroup(nsInfo.portGroupUUID, toLport,
 		defaultMcastAllowPriority, match, "allow", knet.PolicyTypeIngress)
 	if err != nil {
@@ -293,16 +347,15 @@ func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInf
 
 func deleteMulticastACLs(ns, portGroupHash string, nsInfo *namespaceInfo) error {
 	err := deleteACLPortGroup(portGroupHash, fromLport,
-		defaultMcastAllowPriority, "ip4.mcast", "allow",
+		defaultMcastAllowPriority, getMulticastACLEgrMatch(), "allow",
 		knet.PolicyTypeEgress)
 	if err != nil {
 		return fmt.Errorf("failed to delete allow egress multicast ACL for %s (%v)",
 			ns, err)
 	}
 
-	err = deleteACLPortGroup(portGroupHash, toLport,
-		defaultMcastAllowPriority, getMulticastACLMatch(nsInfo), "allow",
-		knet.PolicyTypeIngress)
+	err = deleteACLPortGroup(portGroupHash, toLport, defaultMcastAllowPriority,
+		getMulticastACLIgrMatch(nsInfo), "allow", knet.PolicyTypeIngress)
 	if err != nil {
 		return fmt.Errorf("failed to delete allow ingress multicast ACL for %s (%v)",
 			ns, err)
@@ -334,7 +387,7 @@ func (oc *Controller) createDefaultDenyMulticastPolicy() error {
 	// By default deny any egress multicast traffic from any pod. This drops
 	// IP multicast membership reports therefore denying any multicast traffic
 	// to be forwarded to pods.
-	match := "match=\"ip4.mcast\""
+	match := "match=\"" + getMulticastACLMatch() + "\""
 	err := addACLPortGroup(oc.clusterPortGroupUUID, fromLport,
 		defaultMcastDenyPriority, match, "drop", knet.PolicyTypeEgress)
 	if err != nil {
@@ -351,6 +404,28 @@ func (oc *Controller) createDefaultDenyMulticastPolicy() error {
 	// Remove old multicastDefaultDeny port group now that all ports
 	// have been added to the clusterPortGroup by WatchPods()
 	deletePortGroup("mcastPortGroupDeny")
+	return nil
+}
+
+// Creates a global default allow multicast policy:
+// - one ACL allowing multicast traffic from cluster router ports
+// - one ACL allowing multicast traffic to cluster router ports.
+// Caller must hold the namespace's namespaceInfo object lock.
+func (oc *Controller) createDefaultAllowMulticastPolicy() error {
+	mcastMatch := getMulticastACLMatch()
+	match := getACLMatch(clusterRtrPortGroupName, mcastMatch, knet.PolicyTypeEgress)
+	err := addACLPortGroup(oc.clusterRtrPortGroupUUID, fromLport,
+		defaultRoutedMcastAllowPriority, match, "allow", knet.PolicyTypeEgress)
+	if err != nil {
+		return fmt.Errorf("failed to create default deny multicast egress ACL: %v", err)
+	}
+
+	match = getACLMatch(clusterRtrPortGroupName, mcastMatch, knet.PolicyTypeIngress)
+	err = addACLPortGroup(oc.clusterRtrPortGroupUUID, toLport,
+		defaultRoutedMcastAllowPriority, match, "allow", knet.PolicyTypeIngress)
+	if err != nil {
+		return fmt.Errorf("failed to create default deny multicast ingress ACL: %v", err)
+	}
 	return nil
 }
 
@@ -627,10 +702,13 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 		}
 
 		if hasAnyLabelSelector(ingressJSON.From) {
+			klog.V(5).Infof("Network policy %s with ingress rule %s has a selector", policy.Name, ingress.policyName)
 			if err := ingress.ensurePeerAddressSet(oc.addressSetFactory); err != nil {
 				klog.Errorf(err.Error())
 				continue
 			}
+			// Start service handlers ONLY if there's an ingress Address Set
+			oc.handlePeerService(policy, ingress, np)
 		}
 
 		for _, fromJSON := range ingressJSON.From {
@@ -662,6 +740,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 		}
 
 		if hasAnyLabelSelector(egressJSON.To) {
+			klog.V(5).Infof("Network policy %s with egress rule %s has a selector", policy.Name, egress.policyName)
 			if err := egress.ensurePeerAddressSet(oc.addressSetFactory); err != nil {
 				klog.Errorf(err.Error())
 				continue
@@ -787,6 +866,61 @@ func (oc *Controller) handlePeerPodSelectorDelete(gp *gressPolicy, obj interface
 	}
 }
 
+// handlePeerServiceSelectorAddUpdate adds the VIP of a service that selects
+// pods that are selected by the Network Policy
+func (oc *Controller) handlePeerServiceAdd(gp *gressPolicy, obj interface{}) {
+	service := obj.(*kapi.Service)
+	klog.V(5).Infof("A Service: %s matches the namespace as the gress policy: %s", service.Name, gp.policyName)
+	if err := gp.addPeerSvcVip(service); err != nil {
+		klog.Errorf(err.Error())
+	}
+}
+
+// handlePeerServiceDelete removes the VIP of a service that selects
+// pods that are selected by the Network Policy
+func (oc *Controller) handlePeerServiceDelete(gp *gressPolicy, obj interface{}) {
+	service := obj.(*kapi.Service)
+	if err := gp.deletePeerSvcVip(service); err != nil {
+		klog.Errorf(err.Error())
+	}
+}
+
+// Watch Services that are in the same Namespace as the NP
+// To account for hairpined traffic
+func (oc *Controller) handlePeerService(
+	policy *knet.NetworkPolicy, gp *gressPolicy, np *namespacePolicy) {
+
+	h := oc.watchFactory.AddFilteredServiceHandler(policy.Namespace,
+		cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				// Service is matched so add VIP to addressSet
+				oc.handlePeerServiceAdd(gp, obj)
+			},
+			DeleteFunc: func(obj interface{}) {
+				// If Service that has matched pods are deleted remove VIP
+				oc.handlePeerServiceDelete(gp, obj)
+			},
+			UpdateFunc: func(oldObj, newObj interface{}) {
+				// If Service Is updated make sure same pods are still matched
+				oldSvc := oldObj.(kapi.Service)
+				newSvc := newObj.(kapi.Service)
+				if reflect.DeepEqual(newSvc.Spec.ExternalIPs, oldSvc.Spec.ExternalIPs) &&
+					reflect.DeepEqual(newSvc.Spec.ClusterIP, oldSvc.Spec.ClusterIP) &&
+					reflect.DeepEqual(newSvc.Spec.Type, oldSvc.Spec.Type) &&
+					reflect.DeepEqual(newSvc.Status.LoadBalancer.Ingress, oldSvc.Status.LoadBalancer.Ingress) {
+
+					klog.V(5).Infof("Skipping service update for: %s as change does not apply to any of .Spec.Ports, "+
+						".Spec.ExternalIP, .Spec.ClusterIP, .Spec.Type, .Status.LoadBalancer.Ingress", newSvc.Name)
+					return
+				}
+
+				oc.handlePeerServiceDelete(gp, oldObj)
+				oc.handlePeerServiceAdd(gp, newObj)
+			},
+		}, nil)
+	np.svcHandlerList = append(np.svcHandlerList, h)
+}
+
 func (oc *Controller) handlePeerPodSelector(
 	policy *knet.NetworkPolicy, podSelector *metav1.LabelSelector,
 	gp *gressPolicy, np *namespacePolicy) {
@@ -908,5 +1042,8 @@ func (oc *Controller) shutdownHandlers(np *namespacePolicy) {
 	}
 	for _, handler := range np.nsHandlerList {
 		oc.watchFactory.RemoveNamespaceHandler(handler)
+	}
+	for _, handler := range np.svcHandlerList {
+		oc.watchFactory.RemoveServiceHandler(handler)
 	}
 }
