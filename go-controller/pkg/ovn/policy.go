@@ -60,16 +60,6 @@ const (
 	// IPv6 multicast traffic destined to dynamic groups must have the "T" bit
 	// set to 1: https://tools.ietf.org/html/rfc3307#section-4.3
 	ipv6DynamicMulticastMatch = "(ip6.dst[120..127] == 0xff && ip6.dst[116] == 1)"
-	// Default deny acl rule priority
-	defaultDenyPriority = "1000"
-	// Default allow acl rule priority
-	defaultAllowPriority = "1001"
-	// Default multicast deny acl rule priority
-	defaultMcastDenyPriority = "1011"
-	// Default multicast allow acl rule priority
-	defaultMcastAllowPriority = "1012"
-	// Default routed multicast allow acl rule priority
-	defaultRoutedMcastAllowPriority = "1013"
 )
 
 func getACLLoggingSeverity(aclLogging string) string {
@@ -124,7 +114,7 @@ func addAllowACLFromNode(logicalSwitch string, mgmtPortIP net.IP, ovnNBClient go
 	}
 	match := fmt.Sprintf("%s.src==%s", ipFamily, mgmtPortIP.String())
 
-	priority, _ := strconv.Atoi(defaultAllowPriority)
+	priority, _ := strconv.Atoi(types.DefaultAllowPriority)
 	aclcmd, err := ovnNBClient.ACLAdd(logicalSwitch, types.DirectionToLPort, match, "allow-related", priority, nil, false, "", "")
 
 	// NOTE: goovn.ErrorExist is returned if the ACL already exists, in such a case ignore that error.
@@ -261,14 +251,14 @@ func (oc *Controller) createDefaultDenyPortGroup(ns string, nsInfo *namespaceInf
 	}
 	match := getACLMatch(portGroupName, "", policyType)
 	err = addACLPortGroup(ns, portGroupUUID, types.DirectionToLPort,
-		defaultDenyPriority, match, "drop", policyType, aclLogging, policyName)
+		types.DefaultDenyPriority, match, "drop", policyType, aclLogging, policyName)
 	if err != nil {
 		return fmt.Errorf("failed to create default deny ACL for port group %v", err)
 	}
 
 	match = getACLMatch(portGroupName, "arp", policyType)
 	err = addACLPortGroup(ns, portGroupUUID, types.DirectionToLPort,
-		defaultAllowPriority, match, "allow", policyType, "", "ARPallowPolicy")
+		types.DefaultAllowPriority, match, "allow", policyType, "", "ARPallowPolicy")
 	if err != nil {
 		return fmt.Errorf("failed to create default allow ARP ACL for port group %v", err)
 	}
@@ -388,7 +378,7 @@ func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInf
 	match := getACLMatch(portGroupName, getMulticastACLEgrMatch(),
 		knet.PolicyTypeEgress)
 	err = addACLPortGroup(ns, nsInfo.portGroupUUID, types.DirectionFromLPort,
-		defaultMcastAllowPriority, match, "allow", knet.PolicyTypeEgress, "", "MulticastAllowEgress")
+		types.DefaultMcastAllowPriority, match, "allow", knet.PolicyTypeEgress, "", "MulticastAllowEgress")
 	if err != nil {
 		return fmt.Errorf("failed to create allow egress multicast ACL for %s (%v)",
 			ns, err)
@@ -397,7 +387,7 @@ func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInf
 	match = getACLMatch(portGroupName, getMulticastACLIgrMatch(nsInfo),
 		knet.PolicyTypeIngress)
 	err = addACLPortGroup(ns, nsInfo.portGroupUUID, types.DirectionToLPort,
-		defaultMcastAllowPriority, match, "allow", knet.PolicyTypeIngress, "", "MulticastAllowIngress")
+		types.DefaultMcastAllowPriority, match, "allow", knet.PolicyTypeIngress, "", "MulticastAllowIngress")
 	if err != nil {
 		return fmt.Errorf("failed to create allow ingress multicast ACL for %s (%v)",
 			ns, err)
@@ -422,14 +412,14 @@ func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInf
 
 func deleteMulticastACLs(ns, portGroupHash string, nsInfo *namespaceInfo) error {
 	err := deleteACLPortGroup(portGroupHash, types.DirectionFromLPort,
-		defaultMcastAllowPriority, getMulticastACLEgrMatch(), "allow",
+		types.DefaultMcastAllowPriority, getMulticastACLEgrMatch(), "allow",
 		knet.PolicyTypeEgress)
 	if err != nil {
 		return fmt.Errorf("failed to delete allow egress multicast ACL for %s (%v)",
 			ns, err)
 	}
 
-	err = deleteACLPortGroup(portGroupHash, types.DirectionToLPort, defaultMcastAllowPriority,
+	err = deleteACLPortGroup(portGroupHash, types.DirectionToLPort, types.DefaultMcastAllowPriority,
 		getMulticastACLIgrMatch(nsInfo), "allow", knet.PolicyTypeIngress)
 	if err != nil {
 		return fmt.Errorf("failed to delete allow ingress multicast ACL for %s (%v)",
@@ -464,14 +454,14 @@ func (oc *Controller) createDefaultDenyMulticastPolicy() error {
 	// to be forwarded to pods.
 	match := "match=\"" + getMulticastACLMatch() + "\""
 	err := addACLPortGroup("", oc.clusterPortGroupUUID, types.DirectionFromLPort,
-		defaultMcastDenyPriority, match, "drop", knet.PolicyTypeEgress, "", "DefaultDenyMulticastEgress")
+		types.DefaultMcastDenyPriority, match, "drop", knet.PolicyTypeEgress, "", "DefaultDenyMulticastEgress")
 	if err != nil {
 		return fmt.Errorf("failed to create default deny multicast egress ACL: %v", err)
 	}
 
 	// By default deny any ingress multicast traffic to any pod.
 	err = addACLPortGroup("", oc.clusterPortGroupUUID, types.DirectionToLPort,
-		defaultMcastDenyPriority, match, "drop", knet.PolicyTypeIngress, "", "DefaultDenyMulticastIngress")
+		types.DefaultMcastDenyPriority, match, "drop", knet.PolicyTypeIngress, "", "DefaultDenyMulticastIngress")
 	if err != nil {
 		return fmt.Errorf("failed to create default deny multicast ingress ACL: %v", err)
 	}
@@ -490,14 +480,14 @@ func (oc *Controller) createDefaultAllowMulticastPolicy() error {
 	mcastMatch := getMulticastACLMatch()
 	match := getACLMatch(clusterRtrPortGroupName, mcastMatch, knet.PolicyTypeEgress)
 	err := addACLPortGroup("", oc.clusterRtrPortGroupUUID, types.DirectionFromLPort,
-		defaultRoutedMcastAllowPriority, match, "allow", knet.PolicyTypeEgress, "", "DefaultAllowMulticastEgress")
+		types.DefaultRoutedMcastAllowPriority, match, "allow", knet.PolicyTypeEgress, "", "DefaultAllowMulticastEgress")
 	if err != nil {
 		return fmt.Errorf("failed to create default allow multicast egress ACL: %v", err)
 	}
 
 	match = getACLMatch(clusterRtrPortGroupName, mcastMatch, knet.PolicyTypeIngress)
 	err = addACLPortGroup("", oc.clusterRtrPortGroupUUID, types.DirectionToLPort,
-		defaultRoutedMcastAllowPriority, match, "allow", knet.PolicyTypeIngress, "", "DefaultAllowMulticastIngress")
+		types.DefaultRoutedMcastAllowPriority, match, "allow", knet.PolicyTypeIngress, "", "DefaultAllowMulticastIngress")
 	if err != nil {
 		return fmt.Errorf("failed to create default allow multicast ingress ACL: %v", err)
 	}
