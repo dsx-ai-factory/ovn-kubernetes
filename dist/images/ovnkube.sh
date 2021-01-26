@@ -58,6 +58,7 @@ fi
 # OVNKUBE_LOGFILE_MAXSIZE - log file max size in MB(default 100 MB)
 # OVNKUBE_LOGFILE_MAXBACKUPS - log file max backups (default 5)
 # OVNKUBE_LOGFILE_MAXAGE - log file max age in days (default 5 days)
+# OVN_ACL_LOGGING_RATE_LIMIT - specify default ACL logging rate limit in messages per second (default: 20)
 # OVN_NB_PORT - ovn north db port (default 6641)
 # OVN_SB_PORT - ovn south db port (default 6642)
 # OVN_NB_RAFT_PORT - ovn north db raft port (default 6643)
@@ -186,6 +187,7 @@ ovn_sb_raft_sched_priority=${OVN_SB_RAFT_SCHED_PRIORITY:--11}
 ovn_hybrid_overlay_enable=${OVN_HYBRID_OVERLAY_ENABLE:-}
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR:-}
 ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-}
+ovn_empty_lb_events=${OVN_EMPTY_LB_EVENTS:-}
 # OVN_V4_JOIN_SUBNET - v4 join subnet
 ovn_v4_join_subnet=${OVN_V4_JOIN_SUBNET:-}
 # OVN_V6_JOIN_SUBNET - v6 join subnet
@@ -200,6 +202,7 @@ ovs_metrics_scrape_interval=${OVS_METRICS_SCRAPE_INTERVAL:-30}
 ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-}
 #OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 ovn_egressip_enable=${OVN_EGRESSIP_ENABLE:-false}
+ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
@@ -930,6 +933,11 @@ ovn-master() {
       disable_snat_multiple_gws_flag="--disable-snat-multiple-gws"
   fi
 
+  empty_lb_events_flag=
+  if [[ ${ovn_empty_lb_events} == "true" ]]; then
+      empty_lb_events_flag="--ovn-empty-lb-events"
+  fi
+
   ovn_v4_join_subnet_opt=
   if [[ -n ${ovn_v4_join_subnet} ]]; then
       ovn_v4_join_subnet_opt="--gateway-v4-join-subnet=${ovn_v4_join_subnet}"
@@ -954,6 +962,11 @@ ovn-master() {
         --sb-cert-common-name ${ovn_sb_cert_cname}
       "
   }
+
+  ovn_acl_logging_rate_limit_flag=
+  if [[ -n ${ovn_acl_logging_rate_limit} ]]; then
+      ovn_acl_logging_rate_limit_flag="--acl-logging-rate-limit ${ovn_acl_logging_rate_limit}"
+  fi
 
   multicast_enabled_flag=
   if [[ ${ovn_multicast_enable} == "true" ]]; then
@@ -981,12 +994,14 @@ ovn-master() {
     --logfile-maxage=${ovnkube_logfile_maxage} \
     ${hybrid_overlay_flags} \
     ${disable_snat_multiple_gws_flag} \
+    ${empty_lb_events_flag} \
     ${ovn_v4_join_subnet_opt} \
     ${ovn_v6_join_subnet_opt} \
     --pidfile ${OVN_RUNDIR}/ovnkube-master.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
     ${ovn_master_ssl_opts} \
     ${multicast_enabled_flag} \
+    ${ovn_acl_logging_rate_limit_flag} \
     ${egressip_enabled_flag} \
     --metrics-interval ${ovn_metrics_scrape_interval} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} --metrics-enable-pprof &

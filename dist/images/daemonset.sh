@@ -33,10 +33,12 @@ OVN_LOGLEVEL_NBCTLD=""
 OVNKUBE_LOGFILE_MAXSIZE=""
 OVNKUBE_LOGFILE_MAXBACKUPS=""
 OVNKUBE_LOGFILE_MAXAGE=""
+OVN_ACL_LOGGING_RATE_LIMIT=""
 OVN_MASTER_COUNT=""
 OVN_REMOTE_PROBE_INTERVAL=""
 OVN_HYBRID_OVERLAY_ENABLE=""
 OVN_DISABLE_SNAT_MULTIPLE_GWS=""
+OVN_EMPTY_LB_EVENTS=""
 OVN_MULTICAST_ENABLE=""
 OVN_METRICS_SCRAPE_INTERVAL=""
 OVS_METRICS_SCRAPE_INTERVAL=""
@@ -115,6 +117,9 @@ while [ "$1" != "" ]; do
   --ovnkube-logfile-maxage)
     OVNKUBE_LOGFILE_MAXAGE=$VALUE
     ;;
+  --acl-logging-rate-limit)
+    OVN_ACL_LOGGING_RATE_LIMIT=$VALUE
+    ;;
   --ssl)
     OVN_SSL_ENABLE="yes"
     ;;
@@ -144,6 +149,9 @@ while [ "$1" != "" ]; do
     ;;
   --disable-snat-multiple-gws)
     OVN_DISABLE_SNAT_MULTIPLE_GWS=$VALUE
+    ;;
+  --ovn-empty-lb-events)
+    OVN_EMPTY_LB_EVENTS=$VALUE
     ;;
   --multicast-enabled)
     OVN_MULTICAST_ENABLE=$VALUE
@@ -218,6 +226,8 @@ ovnkube_logfile_maxbackups=${OVNKUBE_LOGFILE_MAXBACKUPS:-"5"}
 echo "ovnkube_logfile_maxbackups: ${ovnkube_logfile_maxbackups}"
 ovnkube_logfile_maxage=${OVNKUBE_LOGFILE_MAXAGE:-"5"}
 echo "ovnkube_logfile_maxage: ${ovnkube_logfile_maxage}"
+ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
+echo "ovn_acl_logging_rate_limit: ${ovn_acl_logging_rate_limit}"
 ovn_hybrid_overlay_enable=${OVN_HYBRID_OVERLAY_ENABLE}
 echo "ovn_hybrid_overlay_enable: ${ovn_hybrid_overlay_enable}"
 ovn_egress_ip_enable=${OVN_EGRESSIP_ENABLE}
@@ -226,6 +236,8 @@ ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR}
 echo "ovn_hybrid_overlay_net_cidr: ${ovn_hybrid_overlay_net_cidr}"
 ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS}
 echo "ovn_disable_snat_multiple_gws: ${ovn_disable_snat_multiple_gws}"
+ovn_empty_lb_events=${OVN_EMPTY_LB_EVENTS}
+echo "ovn_empty_lb_events: ${ovn_empty_lb_events}"
 ovn_ssl_en=${OVN_SSL_ENABLE:-"no"}
 echo "ovn_ssl_enable: ${ovn_ssl_en}"
 ovn_nb_cert_cname=${OVN_NB_CERT_CNAME:-"ovncontroller"}
@@ -291,9 +303,11 @@ ovn_image=${image} \
   ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
   ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
   ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
+  ovn_acl_logging_rate_limit=${ovn_acl_logging_rate_limit} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
+  ovn_empty_lb_events=${ovn_empty_lb_events} \
   ovn_v4_join_subnet=${ovn_v4_join_subnet} \
   ovn_v6_join_subnet=${ovn_v6_join_subnet} \
   ovn_multicast_enable=${ovn_multicast_enable} \
