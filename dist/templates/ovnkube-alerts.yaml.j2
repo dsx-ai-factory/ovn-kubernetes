@@ -262,11 +262,7 @@ spec:
 
     - alert: OvnNBDBContainerRestarts
       expr: |
-<<<<<<< HEAD
         rate(kube_pod_container_status_restarts_total{namespace="ovn-kubernetes", container="nbdb"}[15m]) * 60 * 5 > 0
-=======
-        rate(kube_pod_container_status_restarts_total{namespace="ovn-kubernetes", container="nb-ovsdb"}[15m]) * 60 * 5 > 0
->>>>>>> openvswitch/master
       for: 30m
       labels:
        severity: critical
@@ -277,11 +273,7 @@ spec:
 
     - alert: OvnSBDBContainerRestarts
       expr: |
-<<<<<<< HEAD
         rate(kube_pod_container_status_restarts_total{namespace="ovn-kubernetes", container="sbdb"}[15m]) * 60 * 5 > 0
-=======
-        rate(kube_pod_container_status_restarts_total{namespace="ovn-kubernetes", container="sb-ovsdb"}[15m]) * 60 * 5 > 0
->>>>>>> openvswitch/master
       for: 30m
       labels:
        severity: critical
