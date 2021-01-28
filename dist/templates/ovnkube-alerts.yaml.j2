@@ -16,7 +16,7 @@ spec:
       labels:
        severity: critical
       annotations:
-       description: There is no running ovnkube-manager
+       message: There is no running ovnkube-manager
 
     - alert: OvnKubeManagerMultipleLeaders
       expr: sum(ovnkube_master_leader) > 1
@@ -24,7 +24,7 @@ spec:
       labels:
        severity: critical
       annotations:
-       description: There are multiple ovnkube-manager leaders
+       message: There are multiple ovnkube-manager leaders
 
     - alert: OvnKubeManagerNoLeader
       expr: max(ovnkube_master_leader) == 0
@@ -32,7 +32,7 @@ spec:
       labels:
         severity: critical
       annotations:
-       description: There is no running ovnkube-manager leader
+       message: There is no running ovnkube-manager leader
 
     - alert: OvnKubePodRestarts
       expr: |
@@ -41,7 +41,7 @@ spec:
       labels:
        severity: critical
       annotations:
-       description: |
+       message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} {{ $labels.container}} is restarting 
          {{ printf "%.2f" $value }} times / 5 minutes.        
                 
@@ -53,7 +53,7 @@ spec:
       labels:
        severity: warning
       annotations:
-       description: |
+       message: |
          All K8s nodes should be running OVN K8s Agent pods, 
          but OVN K8s Agent pod is not running on {{ $labels.node }} node.  
 
@@ -65,7 +65,7 @@ spec:
       labels:
        severity: warning
       annotations:
-       description: |
+       message: |
          The OVN DB nodes k8s-ovn-01, k8s-ovn-02, and k8s-ovn-03 should be running OVN NB DB Pods,
          but OVN NB DB Pod is not running on {{ $labels.node }} node.
 
@@ -77,7 +77,7 @@ spec:
       labels:
        severity: warning
       annotations:
-       description: |
+       message: |
          The OVN DB nodes k8s-ovn-01, k8s-ovn-02, and k8s-ovn-03 should be running OVN NB DB Pods, 
          but OVN SB DB Pod is not running on {{ $labels.node }} node.
 
@@ -89,7 +89,7 @@ spec:
       labels:
        severity: warning
       annotations:
-       description: |
+       message: |
          The NGN master nodes ngn-master-01, ngn-master-02, and ngn-master-03 
          should be running ovn-north pods, but ovn-north pod is not running on 
          {{ $labels.node }} node.
@@ -102,7 +102,7 @@ spec:
       labels:
        severity: warning
       annotations:
-       description: |
+       message: |
          The NGN master nodes ngn-master-01, ngn-master-02, and ngn-master-03 
          should be running ovnkube-manager pod, but ovnkube-manager pod is not 
          running on {{ $labels.node }} node.
@@ -118,7 +118,7 @@ spec:
       labels:
        severity: warning
       annotations:
-       description: |
+       message: |
          The pod creation latency value {{ $value }} aggregated across 
          all masters for the last 15minutes is more than 5 seconds.
 
@@ -141,7 +141,7 @@ spec:
       labels:
        severity: warning
       annotations:
-       description: |
+       message: |
          The pod creation latency aggregated across all masters for the last 
          15minutes is more than 5 seconds as compared to 15 minutes before last 15 minutes.
 
@@ -157,7 +157,7 @@ spec:
       labels:
        severity: warning
       annotations:
-       description: |
+       message: |
          The ovn-nbctl 99th percentile CLI latency {{ value }} aggregated 
          across all masters for the last 15minutes is more than 3 seconds.
 
@@ -173,7 +173,7 @@ spec:
       labels:
        severity: warning
       annotations:
-       description: |
+       message: |
          The ovn-sbctl 99th percentile CLI latency {{ value }} aggregated
          across all masters for the last 15minutes is more than 3 seconds.
 
@@ -189,7 +189,7 @@ spec:
       labels:
        severity: warning
       annotations:
-       description: |
+       message: |
          The 99th percentile {{ $labels.name }} update latency {{ value }} aggregated 
          across all masters for the last 15minutes is more than 1 seconds.
 
@@ -205,7 +205,7 @@ spec:
       labels:
        severity: warning
       annotations:
-       description: |
+       message: |
          The 99th percentile {{ $labels.name }} update latency {{ value }} 
          aggregated across all masters for the last 15minutes is more than 1 seconds.
 
@@ -221,7 +221,7 @@ spec:
       labels:
        severity: warning
       annotations:
-       description: |
+       message: |
          The 99th percentile {{ $labels.name }} update latency {{ value }} aggregated 
          across all masters for the last 15minutes is more than 1 seconds.
 
@@ -237,7 +237,7 @@ spec:
       labels:
        severity: warning
       annotations:
-       description: |
+       message: |
          The 99th percentile {{ $labels.name }} update latency {{ value }} aggregated
          across all masters for the last 15minutes is more than 1 seconds.
 
@@ -247,7 +247,7 @@ spec:
       labels:
        severity: critical
       annotations:
-       description: |
+       message: |
          ovn-kubernetes has not written anything to the northbound database for too long
 
     - alert: OvnSBDBStale
@@ -256,7 +256,7 @@ spec:
       labels:
        severity: critical
       annotations:
-       description: |
+       message: |
          ovn-northd has not successfully synced changes from northbound DB 
          to the southbound DB for too long
 
@@ -267,7 +267,7 @@ spec:
       labels:
        severity: critical
       annotations:
-       description: |
+       message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} nbdb container is 
          restarting {{ printf "%.2f" $value }} times / 5 minutes
 
@@ -278,7 +278,7 @@ spec:
       labels:
        severity: critical
       annotations:
-       description: |
+       message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} sbdb container is 
          restarting {{ printf "%.2f" $value }} times / 5 minutes.
 
@@ -288,7 +288,7 @@ spec:
       labels:
        severity: critical
       annotations:
-       description: There are multiple ovn-nbdb leaders
+       message: There are multiple ovn-nbdb leaders
 
     - alert: OvnNBDBNoLeader
       expr: max(ovn_db_cluster_server_role{db_name="OVN_Northbound",server_role="leader"}) == 0
@@ -296,7 +296,7 @@ spec:
       labels:
         severity: critical
       annotations:
-       description: There is no running ovn-nbdb leader
+       message: There is no running ovn-nbdb leader
 
     - alert: OvnSBDBMultipleLeaders
       expr: sum(ovn_db_cluster_server_role{db_name="OVN_Southbound",server_role="leader"}) > 1
@@ -304,7 +304,7 @@ spec:
       labels:
        severity: critical
       annotations:
-       description: There are multiple ovn-sbdb leaders
+       message: There are multiple ovn-sbdb leaders
 
     - alert: OvnSBDBNoLeader
       expr: max(ovn_db_cluster_server_role{db_name="OVN_Southbound",server_role="leader"}) == 0
@@ -312,7 +312,7 @@ spec:
       labels:
         severity: critical
       annotations:
-       description: There is no running ovn-sbdb leader
+       message: There is no running ovn-sbdb leader
 
     - alert: OvnNorthdContainerRestarts
       expr: |
@@ -321,7 +321,7 @@ spec:
       labels:
        severity: critical
       annotations:
-       description: |
+       message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} ovn-northd container is 
          restarting {{ printf "%.2f" $value }} times / 5 minutes
 
@@ -331,7 +331,7 @@ spec:
       labels:
        severity: critical
       annotations:
-       description: There is no running ovn-northd.
+       message: There is no running ovn-northd.
 
     - alert: OvnNorthdTxnError
       expr: |
@@ -340,7 +340,7 @@ spec:
       labels:
        severity: critical
       annotations:
-       description: |
+       message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} ovn-northd containers
          transaction error is {{ printf "%.2f" $value }} per second
 
@@ -351,7 +351,7 @@ spec:
       labels:
        severity: critical
       annotations:
-       description: |
+       message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} ovn-northd containers
          transaction incomplete is {{ printf "%.2f" $value }} per second.
 
@@ -363,7 +363,7 @@ spec:
       labels:
        severity: critical
       annotations:
-       description: |
+       message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} ovn-controller container 
          is restarting {{ printf "%.2f" $value }} times / 5 minutes
 
@@ -374,7 +374,7 @@ spec:
       labels:
        severity: critical
       annotations:
-       description: |
+       message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} ovn-controller containers
          transaction error is {{ printf "%.2f" $value }} per second.
 
@@ -385,7 +385,7 @@ spec:
       labels:
        severity: critical
       annotations:
-       description: |
+       message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} ovn-controller containers
          transaction incomplete is {{ printf "%.2f" $value }} per second
 
@@ -396,7 +396,7 @@ spec:
       labels:
        severity: warning
       annotations:
-       description: |
+       message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} ovn-controller containers
          logical flow table translation is {{ printf "%.2f" $value }} per second.
        
@@ -409,7 +409,7 @@ spec:
       labels:
        severity: warning
       annotations:
-       description: |
+       message: |
          The list of nodes that have a lower number of Geneve Ports
          and counts they have 
          {{ range query "ovn_controller_integration_bridge_geneve_ports_total{job='ovnkube-node', namespace='ovn-kubernetes'} !=  scalar(count(kube_node_info)) - 1" }}
