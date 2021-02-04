@@ -11,6 +11,7 @@ pip freeze | grep j2cli || pip install j2cli[yaml] --user
 export PATH=~/.local/bin:$PATH
 
 OVN_IMAGE=""
+OVNC_IMAGE=""
 OVN_IMAGE_PULL_POLICY=""
 OVN_NET_CIDR=""
 OVN_SVC_DIDR=""
@@ -53,6 +54,9 @@ while [ "$1" != "" ]; do
   case $PARAM in
   --image)
     OVN_IMAGE=$VALUE
+    ;;
+  --imagec)
+    OVNC_IMAGE=$VALUE
     ;;
   --image-pull-policy)
     OVN_IMAGE_PULL_POLICY=$VALUE
@@ -191,6 +195,9 @@ done
 image=${OVN_IMAGE:-"docker.io/ovnkube/ovn-daemonset:latest"}
 echo "image: ${image}"
 
+imagec=${OVNC_IMAGE:-$image}
+echo "imagec: ${imagec}"
+
 image_pull_policy=${OVN_IMAGE_PULL_POLICY:-"IfNotPresent"}
 echo "imagePullPolicy: ${image_pull_policy}"
 
@@ -317,7 +324,7 @@ ovn_image=${image} \
   ovn_gateway_mode=${ovn_gateway_mode} \
   j2 ../templates/ovnkube-master.yaml.j2 -o ../yaml/ovnkube-master.yaml
 
-ovn_image=${image} \
+ovn_image=${imagec} \
   ovn_image_pull_policy=${image_pull_policy} \
   ovn_loglevel_nb=${ovn_loglevel_nb} \
   ovn_loglevel_sb=${ovn_loglevel_sb} \
@@ -369,14 +376,14 @@ ovn_image=${image} \
   ovn_sb_cert_cname=${ovn_sb_cert_cname} \
   j2 ../templates/ovnk8s-node.yaml.j2 -o ../yaml/ovnk8s-node.yaml
 
-ovn_image=${image} \
+ovn_image=${imagec} \
   ovn_image_pull_policy=${image_pull_policy} \
   ovn_loglevel_northd=${ovn_loglevel_northd} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_master_count=${ovn_master_count} \
   j2 ../templates/ovn-north.yaml.j2 -o ../yaml/ovn-north.yaml
 
-ovn_image=${image} \
+ovn_image=${imagec} \
   ovn_image_pull_policy=${image_pull_policy} \
   ovn_db_replicas=${ovn_db_replicas} \
   ovn_db_minAvailable=${ovn_db_minAvailable} \
@@ -387,7 +394,7 @@ ovn_image=${image} \
   ovn_nb_raft_port=${ovn_nb_raft_port} \
   j2 ../templates/ovn-nbdb-raft.yaml.j2 -o ../yaml/ovn-nbdb-raft.yaml
 
-ovn_image=${image} \
+ovn_image=${imagec} \
   ovn_image_pull_policy=${image_pull_policy} \
   ovn_db_replicas=${ovn_db_replicas} \
   ovn_db_minAvailable=${ovn_db_minAvailable} \
@@ -398,7 +405,7 @@ ovn_image=${image} \
   ovn_sb_raft_port=${ovn_sb_raft_port} \
   j2 ../templates/ovn-sbdb-raft.yaml.j2 -o ../yaml/ovn-sbdb-raft.yaml
 
-ovn_image=${image} \
+ovn_image=${imagec} \
   ovn_image_pull_policy=${image_pull_policy} \
   ovn_loglevel_controller=${ovn_loglevel_controller} \
   ovn_ssl_en=${ovn_ssl_en} \
