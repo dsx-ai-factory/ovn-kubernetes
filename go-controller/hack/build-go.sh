@@ -29,7 +29,8 @@ build_binaries() {
                 -X ${OVN_KUBE_GO_PACKAGE}/pkg/config.Commit=${GIT_COMMIT} \
                 -X ${OVN_KUBE_GO_PACKAGE}/pkg/config.Branch=${GIT_BRANCH} \
                 -X ${OVN_KUBE_GO_PACKAGE}/pkg/config.BuildUser=${BUILD_USER} \
-                -X ${OVN_KUBE_GO_PACKAGE}/pkg/config.BuildDate=${BUILD_DATE}" \
+                -X ${OVN_KUBE_GO_PACKAGE}/pkg/config.BuildDate=${BUILD_DATE} \
+                -X ${OVN_KUBE_GO_PACKAGE}/vendor/k8s.io/client-go/pkg/version.gitVersion=\"v0.20.0\" " \
             -o "${OVN_KUBE_OUTPUT_BINPATH}/${binbase}"\
             "./${bin}"
     done

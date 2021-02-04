@@ -3,6 +3,9 @@ package util
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -10,6 +13,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/pkg/version"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/record"
@@ -31,6 +35,21 @@ type OVNClientset struct {
 	EgressIPClient       egressipclientset.Interface
 	EgressFirewallClient egressfirewallclientset.Interface
 	APIExtensionsClient  apiextensionsclientset.Interface
+}
+
+func adjustCommit() string {
+	if len(config.Commit) < 12 {
+		return "unknown"
+	}
+	return config.Commit[:12]
+}
+
+func adjustNodeName() string {
+	hostName, err := os.Hostname()
+	if err != nil {
+		hostName = "unknown"
+	}
+	return hostName
 }
 
 // newKubernetesRestConfig create a Kubernetes rest config from either a kubeconfig,
@@ -70,6 +89,12 @@ func newKubernetesRestConfig(conf *config.KubernetesConfig) (*rest.Config, error
 	}
 	kconfig.QPS = 25
 	kconfig.Burst = 25
+
+	// if all the clients are behind HA-Proxy, then on the K8s API server side we only
+	// see the HAProxy's IP and we can't tell the actual client making the request.
+	kconfig.UserAgent = fmt.Sprintf("%s/%s@%s (%s/%s) kubernetes/%s",
+		adjustNodeName(), filepath.Base(os.Args[0]), adjustCommit(), runtime.GOOS, runtime.GOARCH,
+		version.Get().GitVersion)
 	return kconfig, nil
 }
 
