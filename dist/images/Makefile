@@ -31,11 +31,10 @@ endif
 	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-u:latest
 
 centos: bld
-	docker build -t ovn-daemonset .
-	docker tag ovn-daemonset docker.io/ovnkube/ovn-daemonset:latest
-	# docker login -u ovnkube docker.io/ovnkube
-	# docker push docker.io/ovnkube/ovn-daemonset:latest
-	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset:latest
+	docker build --target ovn -t quay.io/nvidia/ovn-c:latest .
+	docker build --target ovnkube -t quay.io/nvidia/ovnkube-c:latest .
+	./daemonset.sh --image=quay.io/nvidia/ovnkube-c:latest \
+		       --imagec=quay.io/nvidia/ovn-c:latest
 
 fedora: bld
 	docker build -t ovn-kube-f -f Dockerfile.fedora .
