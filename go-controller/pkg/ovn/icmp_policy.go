@@ -197,13 +197,13 @@ func (oc *Controller) addICMPNetworkPolicy(policy *onet.ICMPNetworkPolicy) {
 
 	np := NewNetworkPolicy(policy.Namespace, policyName, policy.Spec.PolicyTypes)
 	if len(nsInfo.networkPolicies) == 0 {
-		err := oc.createDefaultDenyPortGroup(policy.Namespace, nsInfo, knet.PolicyTypeIngress, nsInfo.aclLogging.Deny)
+		err := oc.createDefaultDenyPortGroup(policy.Namespace, nsInfo, knet.PolicyTypeIngress, nsInfo.aclLogging.Deny, policyName)
 		if err != nil {
 			nsInfo.Unlock()
 			klog.Errorf(err.Error())
 			return
 		}
-		err = oc.createDefaultDenyPortGroup(policy.Namespace, nsInfo, knet.PolicyTypeEgress, nsInfo.aclLogging.Deny)
+		err = oc.createDefaultDenyPortGroup(policy.Namespace, nsInfo, knet.PolicyTypeEgress, nsInfo.aclLogging.Deny, policyName)
 		if err != nil {
 			nsInfo.Unlock()
 			klog.Errorf(err.Error())
