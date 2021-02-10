@@ -8,6 +8,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/onsi/ginkgo"
@@ -31,9 +32,10 @@ func (asn *testAddressSetName) makeName() string {
 
 var _ = ginkgo.Describe("OVN Address Set operations", func() {
 	var (
-		app       *cli.App
-		fexec     *ovntest.FakeExec
-		asFactory AddressSetFactory
+		app         *cli.App
+		fexec       *ovntest.FakeExec
+		asFactory   AddressSetFactory
+		netNameInfo util.NetNameInfo
 	)
 
 	ginkgo.BeforeEach(func() {
@@ -46,7 +48,8 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 
 		fexec = ovntest.NewFakeExec()
 
-		asFactory = NewOvnAddressSetFactory()
+		netNameInfo = util.NetNameInfo{NetName: types.DefaultNetworkName, Prefix: "", NotDefault: false}
+		asFactory = NewOvnAddressSetFactory(netNameInfo)
 	})
 
 	ginkgo.JustBeforeEach(func() {
@@ -86,7 +89,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 					}
 				}
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=external_ids find address_set",
+					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=external_ids find address_set external_ids:network_name{=}[]",
 					Output: namespacesRes,
 				})
 
@@ -645,7 +648,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 					namespacesRes += fmt.Sprintf("name=%s\n", n.makeName())
 				}
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=external_ids find address_set",
+					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=external_ids find address_set external_ids:network_name{=}[]",
 					Output: namespacesRes,
 				})
 				fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -654,7 +657,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 					"ovn-nbctl --timeout=15 --if-exists destroy address_set " + hashedAddressSet(namespaces[2].makeName()),
 				})
 
-				err = NonDualStackAddressSetCleanup()
+				err = NonDualStackAddressSetCleanup(netNameInfo)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
 				return nil

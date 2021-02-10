@@ -50,7 +50,7 @@ func (oc *Controller) syncICMPNetworkPolicies(networkPolicies []interface{}) {
 			// policy doesn't exist on k8s. Delete the port group
 			portGroupName := fmt.Sprintf("%s_%s", namespaceName, policyName)
 			hashedLocalPortGroup := hashedPortGroup(portGroupName)
-			err := deletePortGroup(oc.mc.ovnNBClient, hashedLocalPortGroup)
+			err := deletePortGroup(oc.mc.ovnNBClient, hashedLocalPortGroup, oc.nadInfo.NetNameInfo)
 			if err != nil {
 				klog.Errorf("%v", err)
 			}
@@ -120,20 +120,22 @@ func (oc *Controller) icmpLocalPodAddDefaultDeny(nsInfo *namespaceInfo,
 	commands := make([]*goovn.OvnCommand, 0, len(addIngressPorts)+len(addEgressPorts))
 
 	for _, portInfo := range addIngressPorts {
-		cmd, err := oc.mc.ovnNBClient.PortGroupAddPort(nsInfo.portGroupIngressDenyName, portInfo.uuid)
+		portGroupName := oc.nadInfo.Prefix + nsInfo.portGroupIngressDenyName
+		cmd, err := oc.mc.ovnNBClient.PortGroupAddPort(portGroupName, portInfo.uuid)
 		if err != nil {
 			klog.Warningf("Failed to create command: add port %s to ingress deny portgroup %s: %v",
-				portInfo.name, nsInfo.portGroupIngressDenyName, err)
+				portInfo.name, portGroupName, err)
 			continue
 		}
 		commands = append(commands, cmd)
 	}
 
 	for _, portInfo := range addEgressPorts {
-		cmd, err := oc.mc.ovnNBClient.PortGroupAddPort(nsInfo.portGroupEgressDenyName, portInfo.uuid)
+		portGroupName := oc.nadInfo.Prefix + nsInfo.portGroupEgressDenyName
+		cmd, err := oc.mc.ovnNBClient.PortGroupAddPort(portGroupName, portInfo.uuid)
 		if err != nil {
 			klog.Warningf("Failed to create command: add port %s to egress deny portgroup %s: %v",
-				portInfo.name, nsInfo.portGroupEgressDenyName, err)
+				portInfo.name, portGroupName, err)
 			continue
 		}
 		commands = append(commands, cmd)
@@ -179,7 +181,7 @@ func (oc *Controller) icmpHandleLocalPodSelectorAddFunc(
 		return
 	}
 
-	err = addToPortGroup(oc.mc.ovnNBClient, np.portGroupName, portInfo)
+	err = addToPortGroup(oc.mc.ovnNBClient, oc.nadInfo.Prefix+np.portGroupName, portInfo)
 
 	if err != nil {
 		klog.Errorf("Failed to add logicalPort %s to portGroup %s (%v)",
@@ -237,7 +239,7 @@ func (oc *Controller) icmpHandleLocalPodSelectorSetPods(
 		return
 	}
 
-	err := setPortGroup(oc.mc.ovnNBClient, np.portGroupName, portsToAdd...)
+	err := setPortGroup(oc.mc.ovnNBClient, oc.nadInfo.Prefix+np.portGroupName, portsToAdd...)
 	if err != nil {
 		klog.Errorf("Failed to set ports in PortGroup for icmp network policy %s/%s: %v", np.namespace, np.name, err)
 	}
@@ -330,7 +332,7 @@ func (oc *Controller) addICMPNetworkPolicy(policy *onet.ICMPNetworkPolicy) {
 	readableGroupName := fmt.Sprintf("%s_%s", policy.Namespace, policyName)
 	np.portGroupName = hashedPortGroup(readableGroupName)
 
-	np.portGroupUUID, err = createPortGroup(oc.mc.ovnNBClient, readableGroupName, np.portGroupName)
+	np.portGroupUUID, err = createPortGroup(oc.mc.ovnNBClient, readableGroupName, np.portGroupName, oc.nadInfo.NetNameInfo)
 	if err != nil {
 		klog.Errorf("Failed to create port_group for network policy %s in "+
 			"namespace %s", policyName, policy.Namespace)
@@ -348,7 +350,7 @@ func (oc *Controller) addICMPNetworkPolicy(policy *onet.ICMPNetworkPolicy) {
 	for i, ingressJSON := range policy.Spec.Ingress {
 		klog.V(5).Infof("ICMP Network policy ingress is %+v", ingressJSON)
 
-		ingress := newGressPolicy(onet.PolicyTypeIngress, i, policy.Namespace, policyName)
+		ingress := newGressPolicy(onet.PolicyTypeIngress, i, policy.Namespace, policyName, oc.nadInfo.NetNameInfo)
 
 		// Each ingress rule can have multiple type/code to which we allow traffic.
 		for _, protocolJSON := range ingressJSON.Protocols {
@@ -385,7 +387,7 @@ func (oc *Controller) addICMPNetworkPolicy(policy *onet.ICMPNetworkPolicy) {
 	for i, egressJSON := range policy.Spec.Egress {
 		klog.V(5).Infof("ICMP Network policy egress is %+v", egressJSON)
 
-		egress := newGressPolicy(onet.PolicyTypeEgress, i, policy.Namespace, policyName)
+		egress := newGressPolicy(onet.PolicyTypeEgress, i, policy.Namespace, policyName, oc.nadInfo.NetNameInfo)
 
 		// Each egress rule can have multiple typese/code to which we allow traffic.
 		for _, protocolJSON := range egressJSON.Protocols {

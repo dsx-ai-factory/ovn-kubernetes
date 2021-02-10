@@ -34,6 +34,7 @@ import (
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	icmpnetworkpolicy "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1"
 
+	multinetworkpolicy "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	utilnet "k8s.io/utils/net"
 
 	kapi "k8s.io/api/core/v1"
@@ -71,6 +72,8 @@ type ACLLoggingLevels struct {
 // nsInfo.Unlock() on it when you are done with it. (No code outside of the code that
 // manages the oc.namespaces map is ever allowed to hold an unlocked namespaceInfo.)
 type namespaceInfo struct {
+	util.NetNameInfo
+
 	sync.Mutex
 
 	// addressSet is an address set object that holds the IP addresses
@@ -106,9 +109,9 @@ type namespaceInfo struct {
 
 	// Per-namespace port group default deny UUIDs
 	portGroupIngressDenyUUID string // Port group UUID for ingress deny rule
-	portGroupIngressDenyName string // Port group Name for ingress deny rule
+	portGroupIngressDenyName string // Port group Name for ingress deny rule, without network prefix
 	portGroupEgressDenyUUID  string // Port group UUID for egress deny rule
-	portGroupEgressDenyName  string // Port group Name for egress deny rule
+	portGroupEgressDenyName  string // Port group Name for egress deny rule, without network prefix
 }
 
 // multihome controller
@@ -145,13 +148,15 @@ type OvnMHController struct {
 // Controller structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints)
 type Controller struct {
-	mc                       *OvnMHController
-	wg                       *sync.WaitGroup
-	stopChan                 chan struct{}
-	egressFirewallHandler    *factory.Handler
-	icmpNetworkPolicyHandler *factory.Handler
-	podHandler               *factory.Handler
-	nodeHandler              *factory.Handler
+	mc                        *OvnMHController
+	wg                        *sync.WaitGroup
+	stopChan                  chan struct{}
+	egressFirewallHandler     *factory.Handler
+	icmpNetworkPolicyHandler  *factory.Handler
+	podHandler                *factory.Handler
+	nodeHandler               *factory.Handler
+	namespaceHandler          *factory.Handler
+	multiNetworkPolicyHandler *factory.Handler
 
 	nadInfo *util.NetAttachDefInfo
 
@@ -326,7 +331,7 @@ func (mc *OvnMHController) setDefaultOvnController(addressSetFactory addressset.
 func (mc *OvnMHController) NewOvnController(nadInfo *util.NetAttachDefInfo,
 	addressSetFactory addressset.AddressSetFactory) (*Controller, error) {
 	if addressSetFactory == nil {
-		addressSetFactory = addressset.NewOvnAddressSetFactory()
+		addressSetFactory = addressset.NewOvnAddressSetFactory(nadInfo.NetNameInfo)
 	}
 
 	if nadInfo.NetCidr == "" {
@@ -400,8 +405,9 @@ func (oc *Controller) Run(nodeName string) error {
 
 	// WatchNamespaces() should be started first because it has no other
 	// dependencies, and WatchNodes() depends on it
+	oc.WatchNamespaces()
+
 	if !oc.nadInfo.NotDefault {
-		oc.WatchNamespaces()
 		// Services must be started before nodes for handling new node's service sync
 		if err := oc.StartServiceController(oc.wg, true); err != nil {
 			return err
@@ -461,6 +467,9 @@ func (oc *Controller) Run(nodeName string) error {
 			}()
 		}
 	} else {
+		if oc.nadInfo.NotDefault && config.OVNKubernetesFeature.EnableMultiNetworkPolicy {
+			oc.multiNetworkPolicyHandler = oc.WatchMultiNetworkPolicy()
+		}
 		klog.Infof("Completing all the Watchers for network %s took %v", oc.nadInfo.NetName, time.Since(start))
 	}
 
@@ -504,7 +513,7 @@ func (oc *Controller) ovnTopologyCleanup() error {
 
 	// Cleanup address sets in non dual stack formats in all versions known to possibly exist.
 	if ver <= ovntypes.OvnPortBindingTopoVersion && !oc.nadInfo.NotDefault {
-		err = addressset.NonDualStackAddressSetCleanup()
+		err = addressset.NonDualStackAddressSetCleanup(oc.nadInfo.NetNameInfo)
 	}
 	return err
 }
@@ -789,6 +798,36 @@ func (oc *Controller) WatchPods() {
 	klog.Infof("Bootstrapping existing pods and cleaning stale pods took %v", time.Since(start))
 }
 
+// WatchMultiNetworkPolicy starts the watching of multi network policy resource and calls
+// back the appropriate handler logic
+func (oc *Controller) WatchMultiNetworkPolicy() *factory.Handler {
+	start := time.Now()
+	if !oc.nadInfo.NotDefault {
+		klog.Infof("WatchMultiNetworkPolicy for default network is a no-op")
+		return nil
+	}
+	handler := oc.mc.watchFactory.AddMultiNetworkPolicyHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			policy := obj.(*multinetworkpolicy.MultiNetworkPolicy)
+			oc.addMultiNetworkPolicy(policy)
+		},
+		UpdateFunc: func(old, newer interface{}) {
+			oldPolicy := old.(*multinetworkpolicy.MultiNetworkPolicy)
+			newPolicy := newer.(*multinetworkpolicy.MultiNetworkPolicy)
+			if !reflect.DeepEqual(oldPolicy, newPolicy) {
+				oc.deleteMultiNetworkPolicy(oldPolicy)
+				oc.addMultiNetworkPolicy(newPolicy)
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			policy := obj.(*multinetworkpolicy.MultiNetworkPolicy)
+			oc.deleteMultiNetworkPolicy(policy)
+		},
+	}, oc.syncMultiNetworkPolicies)
+	klog.Infof("Bootstrapping existing mulit network policies and cleaning stale policies took %v", time.Since(start))
+	return handler
+}
+
 // WatchNetworkPolicy starts the watching of network policy resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNetworkPolicy() {
@@ -848,7 +887,6 @@ func (oc *Controller) WatchICMPNetworkPolicy() *factory.Handler {
 			oc.deleteICMPNetworkPolicy(icmpnetworkpolicy)
 		},
 	}, oc.syncICMPNetworkPolicies)
-
 }
 
 // WatchEgressFirewall starts the watching of egressfirewall resource and calls
@@ -1076,13 +1114,8 @@ func (oc *Controller) WatchEgressIP() {
 // WatchNamespaces starts the watching of namespace resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNamespaces() {
-	if oc.nadInfo.NotDefault {
-		klog.Infof("WatchNamespaces for network %s is a no-op", oc.nadInfo.NetName)
-		return
-	}
-
 	start := time.Now()
-	oc.mc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
+	oc.namespaceHandler = oc.mc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			ns := obj.(*kapi.Namespace)
 			oc.AddNamespace(ns)
@@ -1417,21 +1450,9 @@ func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.
 
 	oc.wg.Wait()
 	close(oc.stopChan)
-	oc.deleteMaster()
 
-	existingNodes, err := oc.mc.kube.GetNodes()
-	if err != nil {
-		klog.Errorf("Error in initializing/fetching subnets: %v", err)
-		return
-	}
-	// remove hostsubnet annoation for this network
-	for _, node := range existingNodes.Items {
-		err := oc.deleteNodeLogicalNetwork(node.Name)
-		if err != nil {
-			klog.Error("Failed to delete node %s for network %s: %v", node.Name, oc.nadInfo.NetName, err)
-		}
-		_ = oc.updateNodeAnnotationWithRetry(node.Name, []*net.IPNet{})
-		oc.lsManager.DeleteNode(node.Name)
+	if oc.multiNetworkPolicyHandler != nil {
+		oc.mc.watchFactory.RemoveMultiNetworkPolicyHandler(oc.multiNetworkPolicyHandler)
 	}
 
 	if oc.podHandler != nil {
@@ -1440,6 +1461,33 @@ func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.
 
 	if oc.nodeHandler != nil {
 		oc.mc.watchFactory.RemoveNodeHandler(oc.nodeHandler)
+	}
+
+	if oc.namespaceHandler != nil {
+		oc.mc.watchFactory.RemoveNamespaceHandler(oc.namespaceHandler)
+	}
+
+	for namespace := range oc.namespaces {
+		ns := kapi.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
+		oc.deleteNamespace(&ns)
+	}
+
+	oc.deleteMaster()
+
+	existingNodes, err := oc.mc.kube.GetNodes()
+	if err != nil {
+		klog.Errorf("Error in initializing/fetching subnets: %v", err)
+		return
+	}
+
+	// remove hostsubnet annoation for this network
+	for _, node := range existingNodes.Items {
+		err := oc.deleteNodeLogicalNetwork(node.Name)
+		if err != nil {
+			klog.Error("Failed to delete node %s for network %s: %v", node.Name, oc.nadInfo.NetName, err)
+		}
+		_ = oc.updateNodeAnnotationWithRetry(node.Name, []*net.IPNet{})
+		oc.lsManager.DeleteNode(node.Name)
 	}
 
 	mc.nonDefaultOvnControllers.Delete(nadInfo.NetName)

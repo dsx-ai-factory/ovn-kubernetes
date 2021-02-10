@@ -9,6 +9,7 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set/mocks"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
@@ -22,7 +23,8 @@ import (
 
 func TestNewEgressDNS(t *testing.T) {
 	testCh := make(chan struct{})
-	testOvnAddFtry := addressset.NewOvnAddressSetFactory()
+	netNameInfo := util.NetNameInfo{NetName: types.DefaultNetworkName, Prefix: "", NotDefault: false}
+	testOvnAddFtry := addressset.NewOvnAddressSetFactory(netNameInfo)
 	mockDnsOps := new(util_mocks.DNSOps)
 	util.SetDNSLibOpsMockInst(mockDnsOps)
 	tests := []struct {

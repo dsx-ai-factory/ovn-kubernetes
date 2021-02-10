@@ -263,7 +263,7 @@ func GetAllPodIPs(pod *v1.Pod, netNameInfo NetNameInfo) ([]net.IP, error) {
 	}
 
 	if netNameInfo.NotDefault {
-		return []net.IP{}, fmt.Errorf("no pod annotation of pod %s/%s for network %s",
+		return []net.IP{}, fmt.Errorf("no pod annotation of pod %s/%s found for network %s",
 			pod.Namespace, pod.Name, netNameInfo.NetName)
 	}
 

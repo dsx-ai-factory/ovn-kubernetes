@@ -21,6 +21,7 @@ import (
 )
 
 type gressPolicy struct {
+	util.NetNameInfo
 	policyNamespace string
 	policyName      string
 	policyType      knet.PolicyType
@@ -78,8 +79,9 @@ func (pp *protocolPolicy) getL4Match() (string, error) {
 	return "", fmt.Errorf("unknown port protocol %v", pp.protocol)
 }
 
-func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name string) *gressPolicy {
+func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name string, netNameInfo util.NetNameInfo) *gressPolicy {
 	return &gressPolicy{
+		NetNameInfo:          netNameInfo,
 		policyNamespace:      namespace,
 		policyName:           name,
 		policyType:           policyType,
@@ -152,7 +154,7 @@ func (gp *gressPolicy) addPeerPod(oc *Controller, pods ...*v1.Pod) error {
 	}
 	ips := make([]net.IP, 0, len(pods)*podIPFactor)
 	for _, pod := range pods {
-		if pod.Spec.HostNetwork {
+		if pod.Spec.HostNetwork && !oc.nadInfo.NotDefault {
 			gp.nodeHostNetPodsCacheLock.Lock()
 			err := oc.addHostnetworkPodIPToAddressSet(pod.Spec.NodeName, fmt.Sprintf("%s/%s", pod.Namespace, pod.Name),
 				string(gp.policyType), gp.peerAddressSet, gp.nodeHostNetPodsCache)
@@ -163,7 +165,7 @@ func (gp *gressPolicy) addPeerPod(oc *Controller, pods ...*v1.Pod) error {
 			gp.nodeHostNetPodsCacheLock.Unlock()
 		}
 
-		podIPs, err := util.GetAllPodIPs(pod, util.NetNameInfo{NetName: types.DefaultNetworkName, Prefix: "", NotDefault: false})
+		podIPs, err := util.GetAllPodIPs(pod, gp.NetNameInfo)
 		if err != nil {
 			return err
 		}
@@ -174,14 +176,14 @@ func (gp *gressPolicy) addPeerPod(oc *Controller, pods ...*v1.Pod) error {
 }
 
 func (gp *gressPolicy) deletePeerPod(oc *Controller, pod *v1.Pod) error {
-	if pod.Spec.HostNetwork {
+	if pod.Spec.HostNetwork && !oc.nadInfo.NotDefault {
 		gp.nodeHostNetPodsCacheLock.Lock()
 		defer gp.nodeHostNetPodsCacheLock.Unlock()
 		return oc.delHostnetworkPodIPFromAddressSet(pod.Spec.NodeName, fmt.Sprintf("%s/%s", pod.Namespace, pod.Name),
 			string(gp.policyType), gp.peerAddressSet, gp.nodeHostNetPodsCache)
 	}
 
-	ips, err := util.GetAllPodIPs(pod, util.NetNameInfo{NetName: types.DefaultNetworkName, Prefix: "", NotDefault: false})
+	ips, err := util.GetAllPodIPs(pod, gp.NetNameInfo)
 	if err != nil {
 		return err
 	}
@@ -339,10 +341,12 @@ func (gp *gressPolicy) delNamespaceAddressSet(name string) bool {
 // localPodSetACL adds or updates an ACL that implements the gress policy's rules to the
 // given Port Group (which should contain all pod logical switch ports selected
 // by the parent NetworkPolicy)
+// portGroupName is portGroupName without network prefix
 func (gp *gressPolicy) localPodSetACL(portGroupName, portGroupUUID string, aclLogging string) {
 	l3Match := gp.getL3MatchFromAddressSet()
 	var lportMatch string
 	var cidrMatches []string
+	portGroupName = gp.Prefix + portGroupName
 	if gp.policyType == knet.PolicyTypeIngress {
 		lportMatch = fmt.Sprintf("outport == @%s", portGroupName)
 	} else {
@@ -413,14 +417,20 @@ func (gp *gressPolicy) addOrModifyACLAllow(match, l4Match, portGroupUUID string,
 		ipBlockCIDRString = fmt.Sprintf("%d", ipBlockCIDR)
 	}
 
-	uuid, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
+	cmdArgs := []string{"--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL",
 		fmt.Sprintf("external-ids:l4Match=\"%s\"", l4Match),
 		fmt.Sprintf("external-ids:ipblock_cidr=%s", ipBlockCIDRString),
 		fmt.Sprintf("external-ids:namespace=%s", gp.policyNamespace),
 		fmt.Sprintf("external-ids:policy=%s", gp.policyName),
 		fmt.Sprintf("external-ids:%s_num=%d", gp.policyType, gp.idx),
-		fmt.Sprintf("external-ids:policy_type=%s", gp.policyType))
+		fmt.Sprintf("external-ids:policy_type=%s", gp.policyType)}
+	if gp.NotDefault {
+		cmdArgs = append(cmdArgs, "external_ids:network_name="+gp.NetName)
+	} else {
+		cmdArgs = append(cmdArgs, "external_ids:network_name{=}[]")
+	}
+	uuid, stderr, err := util.RunOVNNbctl(cmdArgs...)
 	if err != nil {
 		return fmt.Errorf("find failed to get the allow rule for "+
 			"namespace=%s, policy=%s, stderr: %q (%v)",
@@ -447,7 +457,7 @@ func (gp *gressPolicy) addOrModifyACLAllow(match, l4Match, portGroupUUID string,
 		return nil
 	}
 
-	_, stderr, err = util.RunOVNNbctl("--id=@acl", "create",
+	cmdArgs = []string{"--id=@acl", "create",
 		"acl", fmt.Sprintf("priority=%s", types.DefaultAllowPriority),
 		fmt.Sprintf("direction=%s", direction),
 		match,
@@ -461,8 +471,12 @@ func (gp *gressPolicy) addOrModifyACLAllow(match, l4Match, portGroupUUID string,
 		fmt.Sprintf("external-ids:namespace=%s", gp.policyNamespace),
 		fmt.Sprintf("external-ids:policy=%s", gp.policyName),
 		fmt.Sprintf("external-ids:%s_num=%d", gp.policyType, gp.idx),
-		fmt.Sprintf("external-ids:policy_type=%s", gp.policyType),
-		"--", "add", "port_group", portGroupUUID, "acls", "@acl")
+		fmt.Sprintf("external-ids:policy_type=%s", gp.policyType)}
+	if gp.NotDefault {
+		cmdArgs = append(cmdArgs, "external_ids:network_name="+gp.NetName)
+	}
+	cmdArgs = append(cmdArgs, []string{"--", "add", "port_group", portGroupUUID, "acls", "@acl"}...)
+	_, stderr, err = util.RunOVNNbctl(cmdArgs...)
 	if err != nil {
 		return fmt.Errorf("failed to create the acl allow rule for "+
 			"namespace=%s, policy=%s, stderr: %q (%v)", gp.policyNamespace,

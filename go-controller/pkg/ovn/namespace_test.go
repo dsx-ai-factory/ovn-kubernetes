@@ -262,8 +262,9 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				gomega.Expect(len(gwLRPIPs) != 0).To(gomega.BeTrue())
 
 				// clusterController.WatchNodes() needs to following two port groups to have been created.
-				fakeOvn.controller.clusterRtrPortGroupUUID, err = createPortGroup(fakeOvn.mhController.ovnNBClient, clusterRtrPortGroupName, clusterRtrPortGroupName)
-				fakeOvn.controller.clusterPortGroupUUID, err = createPortGroup(fakeOvn.mhController.ovnNBClient, clusterPortGroupName, clusterPortGroupName)
+				netNameInfo := util.NetNameInfo{NetName: ovntypes.DefaultNetworkName, Prefix: "", NotDefault: false}
+				fakeOvn.controller.clusterRtrPortGroupUUID, err = createPortGroup(fakeOvn.mhController.ovnNBClient, clusterRtrPortGroupName, clusterRtrPortGroupName, netNameInfo)
+				fakeOvn.controller.clusterPortGroupUUID, err = createPortGroup(fakeOvn.mhController.ovnNBClient, clusterPortGroupName, clusterPortGroupName, netNameInfo)
 
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.asf.EventuallyExpectEmptyAddressSet(hostNetworkNamespace)

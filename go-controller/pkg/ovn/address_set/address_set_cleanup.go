@@ -2,6 +2,8 @@ package addressset
 
 import (
 	"k8s.io/klog/v2"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 // NonDualStackAddressSetCleanup cleans addresses in old non dual stack spec.
@@ -9,13 +11,13 @@ import (
 // of <name_[v4|v6]>, address set <name> is no longer used and removes it.
 // This method should only be called after ensuring address sets in old spec
 // are no longer being referenced from any other object.
-func NonDualStackAddressSetCleanup() error {
+func NonDualStackAddressSetCleanup(netNameInfo util.NetNameInfo) error {
 	// For each address set, track if it is in old non dual stack
 	// spec and in new dual stack spec
 	const old = 0
 	const new = 1
 	addressSets := map[string][2]bool{}
-	err := forEachAddressSet(func(name string) {
+	err := forEachAddressSet(netNameInfo, func(name string) {
 		shortName := truncateSuffixFromAddressSet(name)
 		spec, found := addressSets[shortName]
 		if !found {
@@ -41,7 +43,7 @@ func NonDualStackAddressSetCleanup() error {
 		if spec[old] {
 			if spec[new] {
 				klog.Infof("Removing old spec address set %s", name)
-				err := destroyAddressSet(name)
+				err := destroyAddressSet(netNameInfo, name)
 				if err != nil {
 					return err
 				}

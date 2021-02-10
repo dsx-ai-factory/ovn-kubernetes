@@ -146,11 +146,11 @@ func (mc *OvnMHController) Start(ctx context.Context) error {
 
 // cleanup obsolete *gressDefaultDeny port groups
 func (oc *Controller) upgradeToNamespacedDenyPGOVNTopology(existingNodeList *kapi.NodeList) error {
-	err := deletePortGroup(oc.mc.ovnNBClient, "ingressDefaultDeny")
+	err := deletePortGroup(oc.mc.ovnNBClient, "ingressDefaultDeny", oc.nadInfo.NetNameInfo)
 	if err != nil {
 		klog.Errorf("%v", err)
 	}
-	err = deletePortGroup(oc.mc.ovnNBClient, "egressDefaultDeny")
+	err = deletePortGroup(oc.mc.ovnNBClient, "egressDefaultDeny", oc.nadInfo.NetNameInfo)
 	if err != nil {
 		klog.Errorf("%v", err)
 	}
@@ -287,6 +287,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 			}
 		}
 	} else {
+		// TBD do we support multicast for non-default network? if yes, search for clusterRtrPortGroupName and clusterRtrPortGroupUUID
 		oc.multicastSupport = false
 	}
 
@@ -353,7 +354,7 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 	}
 
 	// Create a cluster-wide port group that all logical switch ports are part of
-	oc.clusterPortGroupUUID, err = createPortGroup(oc.mc.ovnNBClient, clusterPortGroupName, clusterPortGroupName)
+	oc.clusterPortGroupUUID, err = createPortGroup(oc.mc.ovnNBClient, clusterPortGroupName, clusterPortGroupName, oc.nadInfo.NetNameInfo)
 	if err != nil {
 		klog.Errorf("Failed to create cluster port group: %v", err)
 		return err
@@ -362,7 +363,7 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 	// Create a cluster-wide port group with all node-to-cluster router
 	// logical switch ports.  Currently the only user is multicast but it might
 	// be used for other features in the future.
-	oc.clusterRtrPortGroupUUID, err = createPortGroup(oc.mc.ovnNBClient, clusterRtrPortGroupName, clusterRtrPortGroupName)
+	oc.clusterRtrPortGroupUUID, err = createPortGroup(oc.mc.ovnNBClient, clusterRtrPortGroupName, clusterRtrPortGroupName, oc.nadInfo.NetNameInfo)
 	if err != nil {
 		klog.Errorf("Failed to create cluster port group: %v", err)
 		return err

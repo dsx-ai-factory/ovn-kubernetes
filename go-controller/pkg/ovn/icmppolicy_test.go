@@ -54,19 +54,19 @@ func (n icmpNetworkPolicy) baseCmds(fexec *ovntest.FakeExec, icmpNetworkPolicy *
 func (n icmpNetworkPolicy) addDefaultDenyPGCmds(fexec *ovntest.FakeExec, icmpnetworkPolicy *icmpnetworkpolicyapi.ICMPNetworkPolicy) {
 	pg_hash := hashedPortGroup(icmpnetworkPolicy.Namespace)
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"outport == @" + pg_hash + "_" + ingressDenyPG + "\" action=drop external-ids:default-deny-policy-type=Ingress",
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"outport == @" + pg_hash + "_" + ingressDenyPG + "\" action=drop external-ids:default-deny-policy-type=Ingress external_ids:network_name{=}[]",
 		Output: fakeUUID,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"outport == @" + pg_hash + "_" + ingressDenyPG + " && arp\" action=allow external-ids:default-deny-policy-type=Ingress",
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"outport == @" + pg_hash + "_" + ingressDenyPG + " && arp\" action=allow external-ids:default-deny-policy-type=Ingress external_ids:network_name{=}[]",
 		Output: fakeUUID,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"inport == @" + pg_hash + "_" + egressDenyPG + "\" action=drop external-ids:default-deny-policy-type=Egress",
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"inport == @" + pg_hash + "_" + egressDenyPG + "\" action=drop external-ids:default-deny-policy-type=Egress external_ids:network_name{=}[]",
 		Output: fakeUUID,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"inport == @" + pg_hash + "_" + egressDenyPG + " && arp\" action=allow external-ids:default-deny-policy-type=Egress",
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"inport == @" + pg_hash + "_" + egressDenyPG + " && arp\" action=allow external-ids:default-deny-policy-type=Egress external_ids:network_name{=}[]",
 		Output: fakeUUID,
 	})
 }
@@ -84,14 +84,14 @@ func (n icmpNetworkPolicy) addNamespaceSelectorCmds(fexec *ovntest.FakeExec, icm
 	for i := range icmpNetworkPolicy.Spec.Ingress {
 		ingressAsMatch := asMatch(append(as, getAddressSetName(icmpNetworkPolicy.Namespace, "icmp_"+icmpNetworkPolicy.Name, knet.PolicyTypeIngress, i)))
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Ingress_num=%v external-ids:policy_type=Ingress", icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name, i),
+			fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Ingress_num=%v external-ids:policy_type=Ingress external_ids:network_name{=}[]", icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name, i),
 			"ovn-nbctl --timeout=15 --id=@acl create acl priority=" + types.DefaultAllowPriority + " direction=" + types.DirectionToLPort + " match=\"ip4.src == {" + ingressAsMatch + "} && outport == @a13918434151227952593\" action=allow-related log=false severity=info meter=acl-logging name=" + icmpNetworkPolicy.Namespace + "_" + "icmp_" + icmpNetworkPolicy.Name + "_" + strconv.Itoa(i) + " external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=namespace1 external-ids:policy=icmp_networkpolicy1 external-ids:Ingress_num=0 external-ids:policy_type=Ingress -- add port_group " + fakePgUUID + " acls @acl",
 		})
 	}
 	for i := range icmpNetworkPolicy.Spec.Egress {
 		egressAsMatch := asMatch(append(as, getAddressSetName(icmpNetworkPolicy.Namespace, "icmp_"+icmpNetworkPolicy.Name, knet.PolicyTypeEgress, i)))
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Egress_num=%v external-ids:policy_type=Egress", icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name, i),
+			fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Egress_num=%v external-ids:policy_type=Egress external_ids:network_name{=}[]", icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name, i),
 			"ovn-nbctl --timeout=15 --id=@acl create acl priority=" + types.DefaultAllowPriority + " direction=" + types.DirectionToLPort + " match=\"ip4.dst == {" + egressAsMatch + "} && inport == @a13918434151227952593\" action=allow-related log=false severity=info meter=acl-logging name=" + icmpNetworkPolicy.Namespace + "_" + "icmp_" + icmpNetworkPolicy.Name + "_" + strconv.Itoa(i) + " external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=namespace1 external-ids:policy=icmp_networkpolicy1 external-ids:Egress_num=0 external-ids:policy_type=Egress -- add port_group " + fakePgUUID + " acls @acl",
 		})
 	}
@@ -104,7 +104,7 @@ func (n icmpNetworkPolicy) addNamespaceSelectorCmdsExistingAcl(fexec *ovntest.Fa
 			getAddressSetName(icmpNetworkPolicy.Namespace, "icmp_"+icmpNetworkPolicy.Name, knet.PolicyTypeIngress, i),
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Ingress_num=%v external-ids:policy_type=Ingress", icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name, i),
+			Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Ingress_num=%v external-ids:policy_type=Ingress external_ids:network_name{=}[]", icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name, i),
 			Output: fakeUUID,
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -265,14 +265,14 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 
 				//readableGroupName := fmt.Sprintf("%s_icmp_%s", icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
-					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Ingress_num=0 external-ids:policy_type=Ingress", icmpType, icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name),
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Ingress_num=0 external-ids:policy_type=Ingress external_ids:network_name{=}[]", icmpType, icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --id=@acl create acl priority="+types.DefaultAllowPriority+" direction="+types.DirectionToLPort+" match=\"ip4 && icmp4 && icmp4.type == %d && outport == @a13918434151227952593\" action=allow-related log=false severity=info meter=acl-logging name=%s_%s_0 external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Ingress_num=0 external-ids:policy_type=Ingress -- add port_group %s acls @acl", icmpType, icmpNetworkPolicy.Namespace, "icmp_"+icmpNetworkPolicy.Name, icmpType, icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name, fakePgUUID),
-					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Egress_num=0 external-ids:policy_type=Egress", icmpType, icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name),
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Egress_num=0 external-ids:policy_type=Egress external_ids:network_name{=}[]", icmpType, icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --id=@acl create acl priority="+types.DefaultAllowPriority+" direction="+types.DirectionToLPort+" match=\"ip4 && icmp4 && icmp4.type == %d && inport == @a13918434151227952593\" action=allow-related log=false severity=info meter=acl-logging name=%s_%s_0 external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Egress_num=0 external-ids:policy_type=Egress -- add port_group %s acls @acl", icmpType, icmpNetworkPolicy.Namespace, "icmp_"+icmpNetworkPolicy.Name, icmpType, icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name, fakePgUUID),
 
-					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Ingress_num=0 external-ids:policy_type=Ingress", icmpType2, icmpNetworkPolicy2.Namespace, icmpNetworkPolicy2.Name),
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Ingress_num=0 external-ids:policy_type=Ingress external_ids:network_name{=}[]", icmpType2, icmpNetworkPolicy2.Namespace, icmpNetworkPolicy2.Name),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --id=@acl create acl priority="+types.DefaultAllowPriority+" direction="+types.DirectionToLPort+" match=\"ip4 && icmp4 && icmp4.type == %d && outport == @a13918430852693067960\" action=allow-related log=false severity=info meter=acl-logging name=%s_%s_0 external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Ingress_num=0 external-ids:policy_type=Ingress -- add port_group %s acls @acl", icmpType2, icmpNetworkPolicy2.Namespace, "icmp_"+icmpNetworkPolicy2.Name, icmpType2, icmpNetworkPolicy2.Namespace, icmpNetworkPolicy2.Name, fakePgUUID),
-					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Egress_num=0 external-ids:policy_type=Egress", icmpType2, icmpNetworkPolicy2.Namespace, icmpNetworkPolicy2.Name),
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Egress_num=0 external-ids:policy_type=Egress external_ids:network_name{=}[]", icmpType2, icmpNetworkPolicy2.Namespace, icmpNetworkPolicy2.Name),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --id=@acl create acl priority="+types.DefaultAllowPriority+" direction="+types.DirectionToLPort+" match=\"ip4 && icmp4 && icmp4.type == %d && inport == @a13918430852693067960\" action=allow-related log=false severity=info meter=acl-logging name=%s_%s_0 external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Egress_num=0 external-ids:policy_type=Egress -- add port_group %s acls @acl", icmpType2, icmpNetworkPolicy2.Namespace, "icmp_"+icmpNetworkPolicy2.Name, icmpType2, icmpNetworkPolicy2.Namespace, icmpNetworkPolicy2.Name, fakePgUUID),
 				})
 
@@ -959,7 +959,8 @@ var _ = ginkgo.Describe("OVN ICMPNetworkPolicy Low-Level Operations", func() {
 			},
 		}
 		policyName := "icmp_" + policy.Name
-		gp := newGressPolicy(knet.PolicyType(icmpnetworkpolicyapi.PolicyTypeIngress), 0, policy.Namespace, policyName)
+		netNameInfo := util.NetNameInfo{NetName: types.DefaultNetworkName, Prefix: "", NotDefault: false}
+		gp := newGressPolicy(knet.PolicyType(icmpnetworkpolicyapi.PolicyTypeIngress), 0, policy.Namespace, policyName, netNameInfo)
 		err := gp.ensurePeerAddressSet(asFactory)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		// asName := getIPv4ASName(gp.peerAddressSet.GetName())

@@ -57,20 +57,22 @@ type AddressSet interface {
 	Destroy() error
 }
 
-type ovnAddressSetFactory struct{}
+type ovnAddressSetFactory struct {
+	util.NetNameInfo
+}
 
 // NewOvnAddressSetFactory creates a new AddressSetFactory backed by
 // address set objects that execute OVN commands
-func NewOvnAddressSetFactory() AddressSetFactory {
-	return &ovnAddressSetFactory{}
+func NewOvnAddressSetFactory(netNameInfo util.NetNameInfo) AddressSetFactory {
+	return &ovnAddressSetFactory{NetNameInfo: netNameInfo}
 }
 
 // ovnAddressSetFactory implements the AddressSetFactory interface
-var _ AddressSetFactory = &ovnAddressSetFactory{}
+//var _ AddressSetFactory = &ovnAddressSetFactory{}
 
 // NewAddressSet returns a new address set object
 func (asf *ovnAddressSetFactory) NewAddressSet(name string, ips []net.IP) (AddressSet, error) {
-	res, err := newOvnAddressSets(name, ips)
+	res, err := newOvnAddressSets(asf, name, ips)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +96,7 @@ func (asf *ovnAddressSetFactory) EnsureAddressSet(name string) error {
 			"--columns=_uuid",
 			"find",
 			"address_set",
-			"name="+hashedAddressSetName)
+			"name="+asf.Prefix+hashedAddressSet(hashedAddressSetName))
 		if err != nil {
 			return fmt.Errorf("find failed to get address set %q, stderr: %q (%v)",
 				name, stderr, err)
@@ -107,8 +109,8 @@ func (asf *ovnAddressSetFactory) EnsureAddressSet(name string) error {
 		_, stderr, err = util.RunOVNNbctl(
 			"create",
 			"address_set",
-			"name="+hashedAddressSetName,
-			"external-ids:name="+name,
+			"name="+asf.Prefix+hashedAddressSet(hashedAddressSetName),
+			"external-ids:name="+hashedAddressSetName,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to create address set %q, stderr: %q (%v)",
@@ -120,9 +122,15 @@ func (asf *ovnAddressSetFactory) EnsureAddressSet(name string) error {
 	return nil
 }
 
-func forEachAddressSet(do func(string)) error {
-	output, stderr, err := util.RunOVNNbctl("--format=csv", "--data=bare", "--no-heading",
-		"--columns=external_ids", "find", "address_set")
+func forEachAddressSet(netNameInfo util.NetNameInfo, do func(string)) error {
+	cmdArgs := []string{"--format=csv", "--data=bare", "--no-heading",
+		"--columns=external_ids", "find", "address_set"}
+	if netNameInfo.NotDefault {
+		cmdArgs = append(cmdArgs, "external_ids:network_name="+netNameInfo.NetName)
+	} else {
+		cmdArgs = append(cmdArgs, "external_ids:network_name{=}[]")
+	}
+	output, stderr, err := util.RunOVNNbctl(cmdArgs...)
 	if err != nil {
 		return fmt.Errorf("error reading address sets: "+
 			"stdout: %q, stderr: %q err: %v", output, stderr, err)
@@ -146,7 +154,7 @@ func forEachAddressSet(do func(string)) error {
 // OVN. (Unhashed address set names are of the form namespaceName[.suffix1.suffix2. .suffixN])
 func (asf *ovnAddressSetFactory) ProcessEachAddressSet(iteratorFn AddressSetIterFunc) error {
 	processedAddressSets := sets.String{}
-	err := forEachAddressSet(func(name string) {
+	err := forEachAddressSet(asf.NetNameInfo, func(name string) {
 		// Remove the suffix from the address set name and normalize
 		addrSetName := truncateSuffixFromAddressSet(name)
 		if processedAddressSets.Has(addrSetName) {
@@ -194,24 +202,24 @@ func (asf *ovnAddressSetFactory) DestroyAddressSetInBackingStore(name string) er
 	// will not have v4 and v6 suffix as they were same as namespace name. Hence we will always try to destroy
 	// the address set with raw name(namespace name), v4 name and v6 name.  The method destroyAddressSet uses
 	// --if-exists parameter which will take care of deleting the address set only if it exists.
-	err := destroyAddressSet(name)
+	err := destroyAddressSet(asf.NetNameInfo, name)
 	if err != nil {
 		return err
 	}
 	ip4ASName, ip6ASName := MakeAddressSetName(name)
-	err = destroyAddressSet(ip4ASName)
+	err = destroyAddressSet(asf.NetNameInfo, ip4ASName)
 	if err != nil {
 		return err
 	}
-	err = destroyAddressSet(ip6ASName)
+	err = destroyAddressSet(asf.NetNameInfo, ip6ASName)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func destroyAddressSet(name string) error {
-	hashName := hashedAddressSet(name)
+func destroyAddressSet(netNameInfo util.NetNameInfo, name string) error {
+	hashName := netNameInfo.Prefix + hashedAddressSet(name)
 	_, stderr, err := util.RunOVNNbctl("--if-exists", "destroy", "address_set", hashName)
 	if err != nil {
 		return fmt.Errorf("failed to destroy address set %q, stderr: %q, (%v)",
@@ -246,7 +254,7 @@ func asDetail(as *ovnAddressSet) string {
 	return fmt.Sprintf("%s/%s/%s", as.uuid, as.name, as.hashName)
 }
 
-func newOvnAddressSets(name string, ips []net.IP) (*ovnAddressSets, error) {
+func newOvnAddressSets(asf *ovnAddressSetFactory, name string, ips []net.IP) (*ovnAddressSets, error) {
 	var (
 		v4set, v6set *ovnAddressSet
 		err          error
@@ -255,13 +263,13 @@ func newOvnAddressSets(name string, ips []net.IP) (*ovnAddressSets, error) {
 
 	ip4ASName, ip6ASName := MakeAddressSetName(name)
 	if config.IPv4Mode {
-		v4set, err = newOvnAddressSet(ip4ASName, v4IPs)
+		v4set, err = newOvnAddressSet(asf, ip4ASName, v4IPs)
 		if err != nil {
 			return nil, err
 		}
 	}
 	if config.IPv6Mode {
-		v6set, err = newOvnAddressSet(ip6ASName, v6IPs)
+		v6set, err = newOvnAddressSet(asf, ip6ASName, v6IPs)
 		if err != nil {
 			return nil, err
 		}
@@ -269,10 +277,10 @@ func newOvnAddressSets(name string, ips []net.IP) (*ovnAddressSets, error) {
 	return &ovnAddressSets{name: name, ipv4: v4set, ipv6: v6set}, nil
 }
 
-func newOvnAddressSet(name string, ips []net.IP) (*ovnAddressSet, error) {
+func newOvnAddressSet(asf *ovnAddressSetFactory, name string, ips []net.IP) (*ovnAddressSet, error) {
 	as := &ovnAddressSet{
 		name:     name,
-		hashName: hashedAddressSet(name),
+		hashName: asf.Prefix + hashedAddressSet(name),
 		ips:      make(map[string]net.IP),
 	}
 	for _, ip := range ips {
@@ -301,6 +309,9 @@ func newOvnAddressSet(name string, ips []net.IP) (*ovnAddressSet, error) {
 			"address_set",
 			"name=" + as.hashName,
 			"external-ids:name=" + as.name,
+		}
+		if asf.NotDefault {
+			args = append(args, fmt.Sprintf("external-ids:network_name=%s", asf.NetName))
 		}
 		joinedIPs := joinIPs(as.allIPs())
 		if len(joinedIPs) > 0 {

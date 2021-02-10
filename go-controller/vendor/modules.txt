@@ -114,6 +114,17 @@ github.com/imdario/mergo
 github.com/json-iterator/go
 # github.com/juju/errors v0.0.0-20200330140219-3fe23663418f
 github.com/juju/errors
+# github.com/k8snetworkplumbingwg/multi-networkpolicy v0.0.0-20200914073308-0f33b9190170
+github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io
+github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1
+github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned
+github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/scheme
+github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1beta1
+github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/informers/externalversions
+github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/informers/externalversions/internalinterfaces
+github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/informers/externalversions/k8s.cni.cncf.io
+github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1beta1
+github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/listers/k8s.cni.cncf.io/v1beta1
 # github.com/k8snetworkplumbingwg/network-attachment-definition-client v0.0.0-20200626054723-37f83d1996bc
 github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io
 github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1
@@ -664,7 +675,7 @@ k8s.io/client-go/util/keyutil
 k8s.io/client-go/util/retry
 k8s.io/client-go/util/testing
 k8s.io/client-go/util/workqueue
-# k8s.io/klog v0.0.0-20181102134211-b9b56d5dfc92
+# k8s.io/klog v0.3.0
 k8s.io/klog
 # k8s.io/klog/v2 v2.4.0
 k8s.io/klog/v2

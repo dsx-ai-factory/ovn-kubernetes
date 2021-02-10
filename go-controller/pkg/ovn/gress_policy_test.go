@@ -1,6 +1,8 @@
 package ovn
 
 import (
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/stretchr/testify/assert"
 	knet "k8s.io/api/networking/v1"
 	"testing"
@@ -109,7 +111,8 @@ func TestGetMatchFromIPBlock(t *testing.T) {
 	}
 
 	for _, tc := range testcases {
-		gressPolicy := newGressPolicy(knet.PolicyTypeIngress, 5, "testing", "test")
+		netNameInfo := util.NetNameInfo{NetName: types.DefaultNetworkName, Prefix: "", NotDefault: false}
+		gressPolicy := newGressPolicy(knet.PolicyTypeIngress, 5, "testing", "test", netNameInfo)
 		for _, ipBlock := range tc.ipBlocks {
 			gressPolicy.addIPBlock(ipBlock)
 		}
