@@ -118,7 +118,7 @@ func updateSslKeyPair(ovndb, certFile, privKeyFile string, tlsConfig *tls.Config
 		for {
 			select {
 			case event, ok := <-watcher.Events:
-				if ok && event.Op&fsnotify.Write == fsnotify.Write {
+				if ok && event.Op&(fsnotify.Write|fsnotify.Remove) != 0 {
 					cert, err := tls.LoadX509KeyPair(certFile, privKeyFile)
 					if err != nil {
 						klog.Infof("Cannot load new cert with cert %s key %s err %s", certFile, privKeyFile, err)
