@@ -196,6 +196,8 @@ spec:
             - mountPath: /var/run/openvswitch/
               name: host-var-run-ovs
               readOnly: true
+            - mountPath: /etc/openvswitch/
+              name: host-etc-openvswitch
 
           resources:
             requests:
@@ -254,6 +256,9 @@ spec:
           hostPath:
             path: /var/run/netns
         {% endif %}
+        - name: host-etc-openvswitch
+          hostPath:
+            path: /etc/openvswitch/
 
       tolerations:
         - operator: "Exists"

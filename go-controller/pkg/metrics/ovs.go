@@ -4,6 +4,7 @@ package metrics
 
 import (
 	"fmt"
+	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -306,6 +307,13 @@ var metricInterafceFirmwareVersion = prometheus.NewGaugeVec(prometheus.GaugeOpts
 		"version",
 	},
 )
+
+var metricOvsDbSize = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvsNamespace,
+	Subsystem: MetricOvsSubsystemOvsDB,
+	Name:      "db_size",
+	Help:      "The size of the database file associated with the OVS DB on each node.",
+})
 
 func getOvsVersionInfo() {
 	stdout, _, err := util.RunOVSVsctl("--version")
@@ -1019,6 +1027,27 @@ func ovsHwOffloadMetricsUpdate(metricsScrapeInterval int, stopChan chan struct{}
 	}
 }
 
+func ovsDbSizeMetricUpdater(metricsScrapeInterval int, stopChan chan struct{}) {
+	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			dbFile := "/etc/openvswitch/conf.db"
+			fileInfo, err := os.Stat(dbFile)
+			if err != nil {
+				klog.Errorf("Failed to get the OVS DB size :(%v)", err)
+			} else {
+				metricOvsDbSize.Set(float64(fileInfo.Size()))
+			}
+		case <-stopChan:
+			return
+
+		}
+	}
+}
+
 type ovsInterfaceMetricsDetails struct {
 	help   string
 	metric *prometheus.GaugeVec
@@ -1318,6 +1347,8 @@ func RegisterOvsMetrics(metricsScrapeInterval int, stopChan chan struct{}) {
 		prometheus.MustRegister(metricInterafceDriverName)
 		prometheus.MustRegister(metricInterafceDriverVersion)
 		prometheus.MustRegister(metricInterafceFirmwareVersion)
+		// Register OVS DB size metric
+		prometheus.MustRegister(metricOvsDbSize)
 		// Register the OVS coverage/show metrics
 		componentCoverageShowMetricsMap[ovsVswitchd] = ovsVswitchdCoverageShowMetricsMap
 		registerCoverageShowMetrics(ovsVswitchd, MetricOvsNamespace, MetricOvsSubsystemVswitchd)
@@ -1337,5 +1368,7 @@ func RegisterOvsMetrics(metricsScrapeInterval int, stopChan chan struct{}) {
 		go coverageShowMetricsUpdater(ovsVswitchd, metricsScrapeInterval, stopChan)
 		// OVSDB coverage/show metrics updater
 		go coverageShowMetricsUpdater(ovsDB, metricsScrapeInterval, stopChan)
+		// OVSDB size metric uodater
+		go ovsDbSizeMetricUpdater(metricsScrapeInterval, stopChan)
 	})
 }

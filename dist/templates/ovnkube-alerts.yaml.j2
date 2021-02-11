@@ -415,5 +415,15 @@ spec:
          {{ range query "ovn_controller_integration_bridge_geneve_ports_total{job='ovnkube-node', namespace='ovn-kubernetes'} !=  scalar(count(kube_node_info)) - 1" }}
          {{ .Labels.instance }}: {{ .Value }}
          {{ end }}.
- 
+
+    - alert: OvsDBdbSize
+      expr: |
+        rate(ovs_ovsdb_db_size{namespace="ovn-kubernetes", job="ovnkube-node"}[15m]) * 5 * 60 / 1024 / 1024 > 1
+      for: 10m
+      labels:
+       severity: warning
+      annotations:
+       message: |
+         Pod ovn-kubernetes/ {{ $labels.pod }} ovs-db size is increasing
+         {{ printf "%.2f" $value }} Mb / 5 minutes
 
