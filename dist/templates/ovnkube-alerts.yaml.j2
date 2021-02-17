@@ -314,6 +314,17 @@ spec:
       annotations:
        message: There is no running ovn-sbdb leader
 
+    - alert: OvnDbDBSize
+      expr: |
+        rate(ovn_db_db_size{namespace="ovn-kubernetes", job="ovnkube-node"}[15m]) * 5 * 60 / 1024 / 1024 > 1
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+       message: |
+         Pod ovn-kubernetes/ {{ $labels.pod }} {{ $labels.db_name }} size is increasing
+         {{ printf "%.2f" $value }} MB / 5 minutes
+
     - alert: OvnNorthdContainerRestarts
       expr: |
         rate(kube_pod_container_status_restarts_total{namespace="ovn-kubernetes", container="ovn-northd"}[15m]) * 60 * 5 > 0
