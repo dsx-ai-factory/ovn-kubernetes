@@ -1072,13 +1072,13 @@ create_ovn_firewall_zone() {
   zones=$(firewall-cmd --get-zones --permanent | tr "[:space:]" "\n")
   for zone in ${zones[@]}; do
       if [[ $zone == "ovn" ]]; then
-          firewall-cmd --delete-zone=ovn --permanent
+          firewall-cmd --delete-zone=ovn --permanent >/dev/null
 	  if [[ $? != 0 ]]; then
 	      echo "Exiting, failed to delete the ovn firewall zone"
 	      exit 1
 	  fi
 
-	  firewall-cmd --reload
+	  firewall-cmd --reload >/dev/null
 	  if [[ $? != 0 ]]; then
 	      echo "Exiting, failed to reload the firewalld service"
 	      exit 1
@@ -1087,13 +1087,13 @@ create_ovn_firewall_zone() {
       fi
   done
 
-  firewall-cmd --new-zone=ovn --permanent
+  firewall-cmd --new-zone=ovn --permanent >/dev/null
   if [[ $? != 0 ]]; then
       echo "Exiting, failed to create ovn firewall zone"
       exit 1
   fi
 
-  firewall-cmd --reload
+  firewall-cmd --reload >/dev/null
   if [[ $? != 0 ]]; then
       echo "Exiting, failed to reload the firewalld service"
       exit 1
