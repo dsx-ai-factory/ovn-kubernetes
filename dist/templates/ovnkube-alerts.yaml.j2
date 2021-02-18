@@ -514,3 +514,14 @@ spec:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that
          number of DP flows is {{ printf "%.2f" $value }}.
+
+    - alert: OvsVswitchdOfprotoRecvOpenflow
+      expr: |
+        rate(ovs_vswitchd_ofproto_recv_openflow{namespace="ovn-kubernetes",job="ovnkube-node"}[1m]) > 50
+      for: 15m
+      labels:
+       severity: warning
+      annotations:
+       message: |
+         Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that
+         number of handled flows is {{ printf "%.2f" $value }} per second for longer than 15 mins.
