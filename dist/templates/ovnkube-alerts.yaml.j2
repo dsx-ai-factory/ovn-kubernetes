@@ -427,3 +427,79 @@ spec:
          Pod ovn-kubernetes/ {{ $labels.pod }} ovs-db size is increasing
          {{ printf "%.2f" $value }} Mb / 5 minutes
 
+    - alert: OvsVswitchdDPFlowsLookupLost
+      expr: |
+        rate(ovs_vswitchd_dp_flows_lookup_missed{namespace="ovn-kubernetes",job="ovnkube-node"}[1m]) > 1000
+      for: 15m
+      labels:
+       severity: warning
+      annotations:
+       message: |
+         Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that
+         number of dropped packets that match DP flows is {{ printf "%.2f" $value }} per second.
+
+    - alert: OvsVswitchdDPFlowsLookupMissed
+      expr: |
+        rate(ovs_vswitchd_dp_flows_lookup_missed{namespace="ovn-kubernetes",job="ovnkube-node"}[1m]) > 1000
+      for: 15m
+      labels:
+       severity: warning
+      annotations:
+       message: |
+         Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that
+         number of dropped packets that not-matching DP flows is {{ printf "%.2f" $value }} per second.
+
+    - alert: OvsVswitchdInterfaceRxErrors
+      expr: |
+        rate(ovs_vswitchd_interface_rx_errors{namespace="ovn-kubernetes",job="ovnkube-node"}[1m]) > 100
+      for: 15m
+      labels:
+       severity: warning
+      annotations:
+       message: |
+         Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that total
+         number of packets with errors received by OVS interface is {{ printf "%.2f" $value }} per second.
+
+    - alert: OvsVswitchdInterfaceTxErrors
+      expr: |
+        rate(ovs_vswitchd_interface_tx_errors{namespace="ovn-kubernetes",job="ovnkube-node"}[1m]) > 100
+      for: 15m
+      labels:
+       severity: warning
+      annotations:
+       message: |
+         Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that total
+         number of packets with errors transmitted by OVS interface is {{ printf "%.2f" $value }} per second.
+
+    - alert: OvsVswitchdPacketInDrop
+      expr: |
+        rate(ovs_vswitchd_packet_in_drop{namespace="ovn-kubernetes",job="ovnkube-node"}[1m]) > 100
+      for: 15m
+      labels:
+       severity: warning
+      annotations:
+       message: |
+         Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that
+         number of packets that dropped due to resource constraints is {{ printf "%.2f" $value }} per second.
+
+    - alert: OvsVswitchdBridgeFlowsTotal
+      expr: |
+        max(ovs_vswitchd_bridge_flows_total{namespace="ovn-kubernetes",job="ovnkube-node"}) > 350000
+      for: 15m
+      labels:
+       severity: warning
+      annotations:
+       message: |
+         Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that
+         number of Bridge flows on the OVS bridge is {{ printf "%.2f" $value }}.
+
+    - alert: OvsVswitchdDPFlowsTotal
+      expr: |
+        max(ovs_vswitchd_dp_flows_total{namespace="ovn-kubernetes",job="ovnkube-node"}) > 10000
+      for: 15m
+      labels:
+       severity: warning
+      annotations:
+       message: |
+         Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that
+         number of DP flows is {{ printf "%.2f" $value }}.
