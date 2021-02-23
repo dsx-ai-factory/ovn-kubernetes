@@ -245,7 +245,7 @@ func runOvnKube(ctx *cli.Context) error {
 		// register prometheus metrics exported by the master
 		// this must be done prior to calling controller start
 		// since we capture some metrics in Start()
-		metrics.RegisterMasterMetrics(ovnNBClient, ovnSBClient)
+		metrics.RegisterMasterMetrics(ovnNBClient, ovnSBClient, config.MetricsScrapeInterval, stopChan)
 
 		ovnController := ovn.NewOvnController(ovnClientset, masterWatchFactory, stopChan, nil, ovnNBClient, ovnSBClient, util.EventRecorder(ovnClientset.KubeClient))
 		if err := ovnController.Start(master, wg); err != nil {
@@ -270,7 +270,7 @@ func runOvnKube(ctx *cli.Context) error {
 			return fmt.Errorf("cannot initialize node without service account 'token'. Please provide one with --k8s-token argument")
 		}
 		// register ovnkube node specific prometheus metrics exported by the node
-		metrics.RegisterNodeMetrics()
+		metrics.RegisterNodeMetrics(config.MetricsScrapeInterval, stopChan)
 		start := time.Now()
 		n := ovnnode.NewNode(ovnClientset.KubeClient, nodeWatchFactory, node, stopChan, util.EventRecorder(ovnClientset.KubeClient))
 		if err := n.Start(wg); err != nil {

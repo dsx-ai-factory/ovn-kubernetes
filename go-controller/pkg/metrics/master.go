@@ -143,12 +143,24 @@ var metricV6AllocatedHostSubnetCount = prometheus.NewGauge(prometheus.GaugeOpts{
 	Help:      "The total number of v6 host subnets currently allocated",
 })
 
+// metric to get the size of ovnkube-master.log files
+var metricOvnKubeMasterLogFileSize = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "logfile_size",
+	Help:      "The size of ovnkube-master logfile on master node."},
+	[]string{
+		"logfile_name",
+	},
+)
+
 var registerMasterMetricsOnce sync.Once
 var startE2ETimeStampUpdaterOnce sync.Once
 
 // RegisterMasterMetrics registers some ovnkube master metrics with the Prometheus
 // registry
-func RegisterMasterMetrics(nbClient, sbClient goovn.Client) {
+func RegisterMasterMetrics(nbClient, sbClient goovn.Client,
+	metricsScrapeInterval int, stopChan chan struct{}) {
 	registerMasterMetricsOnce.Do(func() {
 		// ovnkube-master metrics
 		// the updater for this metric is activated
@@ -216,6 +228,9 @@ func RegisterMasterMetrics(nbClient, sbClient goovn.Client) {
 		prometheus.MustRegister(metricV4AllocatedHostSubnetCount)
 		prometheus.MustRegister(metricV6AllocatedHostSubnetCount)
 		registerWorkqueueMetrics(MetricOvnkubeNamespace, MetricOvnkubeSubsystemMaster)
+		// ovnkube-master logfile size metric
+		prometheus.MustRegister(metricOvnKubeMasterLogFileSize)
+		go ovnKubeLogFileSizeMetricsUpdater(metricOvnKubeMasterLogFileSize, metricsScrapeInterval, stopChan)
 	})
 }
 
