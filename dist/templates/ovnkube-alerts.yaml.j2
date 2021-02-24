@@ -435,7 +435,7 @@ spec:
        
     - alert: OvnControllerLowerGenevePortCount
       expr: |
-        ovn_controller_integration_bridge_geneve_ports_total and 
+        ovn_controller_integration_bridge_geneve_ports_total and kube_node_info and
         (ovn_controller_integration_bridge_geneve_ports_total{job="ovnkube-node", namespace="ovn-kubernetes"} 
         != scalar(count(kube_node_info)) - 1)
       for: 10m
