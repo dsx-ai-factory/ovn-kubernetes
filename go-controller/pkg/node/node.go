@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,7 +22,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
-	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
@@ -284,6 +284,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 func (n *OvnNode) WatchEndpoints() {
 	var nodeIP string
 
+	start := time.Now()
 	node, err := n.Kube.GetNode(n.name)
 	if err != nil {
 		klog.Errorf("Error retrieving node %s: %v", n.name, err)
@@ -304,7 +305,33 @@ func (n *OvnNode) WatchEndpoints() {
 		UpdateFunc: func(old, new interface{}) {
 			epNew := new.(*kapi.Endpoints)
 			epOld := old.(*kapi.Endpoints)
-			if apiequality.Semantic.DeepEqual(epNew.Subsets, epOld.Subsets) {
+			updateRequired := true
+			if len(epOld.Subsets) == len(epNew.Subsets) {
+				updateRequired = false
+			outer:
+				for i := 0; i < len(epOld.Subsets); i++ {
+					if !reflect.DeepEqual(epOld.Subsets[i].Ports, epNew.Subsets[i].Ports) {
+						updateRequired = true
+						break
+					}
+					if len(epOld.Subsets[i].Addresses) != len(epNew.Subsets[i].Addresses) {
+						updateRequired = true
+						break
+					}
+					epOldAddrLen := len(epOld.Subsets[i].Addresses)
+					epOldAddress := make(map[string]bool)
+					for j := 0; j < epOldAddrLen; j++ {
+						epOldAddress[epOld.Subsets[i].Addresses[j].IP] = true
+					}
+					for j := 0; j < epOldAddrLen; j++ {
+						if _, ok := epOldAddress[epNew.Subsets[i].Addresses[j].IP]; !ok {
+							updateRequired = true
+							break outer
+						}
+					}
+				}
+			}
+			if !updateRequired {
 				return
 			}
 			updateEndpoints(nodeIP, epOld.Subsets, epNew.Subsets)
@@ -338,6 +365,7 @@ func (n *OvnNode) WatchEndpoints() {
 			}
 		},
 	}, syncEndpoints)
+	klog.Infof("Bootstrapping existing endpoints took %v", time.Since(start))
 }
 
 // syncEndpoints add's ovn-k8s-gw0 & ovn-k8s-mp0 ports to
