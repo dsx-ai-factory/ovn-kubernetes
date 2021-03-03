@@ -40,6 +40,9 @@ const (
 	ovsDB         = "ovs-db"
 	ovnNorthDB    = "ovnnb-db"
 	ovnSouthDB    = "ovnsb-db"
+
+	OvsMetrics = "ovs-metrics"
+	OvnMetrics = "ovn-metrics"
 )
 
 type metricDetails struct {
@@ -270,9 +273,57 @@ func StartOVSMetricsServer(bindAddress string) {
 	}, 5*time.Second, utilwait.NeverStop)
 }
 
-func RegisterOvnMetrics(clientset kubernetes.Interface, k8sNodeName string,
+func RegisterOvnMetrics(ovsDBClient *util.OvsdbClient, clientset kubernetes.Interface, k8sNodeName string,
 	metricsScrapeInterval int, stopChan chan struct{}) {
 	go RegisterOvnDBMetrics(clientset, k8sNodeName, metricsScrapeInterval, stopChan)
-	go RegisterOvnControllerMetrics(metricsScrapeInterval, stopChan)
+	go RegisterOvnControllerMetrics(ovsDBClient, metricsScrapeInterval, stopChan)
 	go RegisterOvnNorthdMetrics(clientset, k8sNodeName, metricsScrapeInterval, stopChan)
+}
+
+func SetupOvsDBClient(metricsToMonitor string) (*util.OvsdbClient, error) {
+	var ovsdbTableColumns map[string][]string
+
+	if metricsToMonitor == OvsMetrics {
+		ovsdbTableColumns = map[string][]string{
+			"Bridge": {
+				"name",
+				"ports",
+			},
+			"Port": {
+				"name",
+				"interfaces",
+			},
+			"Interface": {
+				"name",
+				"duplex",
+				"type",
+				"admin_state",
+				"link_state",
+				"statistics",
+				"ifindex",
+				"link_resets",
+				"link_speed",
+				"mtu",
+				"ofport",
+				"ingress_policing_burst",
+				"ingress_policing_rate",
+				"status",
+			},
+			"Open_vSwitch": {
+				"other_config",
+			},
+		}
+	} else if metricsToMonitor == OvnMetrics {
+		ovsdbTableColumns = map[string][]string{
+			"Open_vSwitch": {
+				"external_ids",
+			},
+		}
+	}
+
+	cfg := &util.OvsdbConfig{
+		TableCols: ovsdbTableColumns,
+		Reconnect: true,
+	}
+	return util.NewOvsDbClient(cfg)
 }

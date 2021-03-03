@@ -1,6 +1,8 @@
 package app
 
 import (
+	"fmt"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli/v2"
@@ -36,8 +38,13 @@ var OvsExporterCommand = cli.Command{
 
 		stopChan := make(chan struct{})
 
+		// start the ovsdb client for ovs metrics monitoring
+		ovsDBClient, err := metrics.SetupOvsDBClient(metrics.OvsMetrics)
+		if err != nil {
+			return fmt.Errorf("error when trying to initialize ovsdb client: %v", err)
+		}
 		// register ovs metrics that will be served off of /metrics path
-		metrics.RegisterOvsMetrics(metricsScrapeInterval, stopChan)
+		metrics.RegisterOvsMetrics(ovsDBClient, metricsScrapeInterval, stopChan)
 		// start the prometheus server to serve OVS Metrics (default port: 9310)
 		metrics.StartOVSMetricsServer(bindAddress)
 
