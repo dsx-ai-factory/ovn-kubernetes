@@ -17,6 +17,7 @@ DOCKERFILE_ARCH =
 ifeq ($(ARCH),arm64)
         DOCKERFILE_ARCH=.arm64
 endif
+K8S_VER ?=
 
 # The image of ovnkube/ovn-daemonset-u should be multi-arched before using it on arm64
 ubuntu: bld
@@ -30,9 +31,15 @@ endif
 	# docker push docker.io/ovnkube/ovn-daemonset-u:latest
 	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-u:latest
 
+define docker_build_args
+       $(if $(K8S_VER), --build-arg K8S_VER=-$(K8S_VER))
+endef
+
 centos: bld
-	docker build --target ovn -t quay.io/nvidia/ovn-c:latest .
-	docker build --target ovnkube -t quay.io/nvidia/ovnkube-c:latest .
+	docker build $(docker_build_args) \
+		--target ovn -t quay.io/nvidia/ovn-c:latest .
+	docker build $(docker_build_args) \
+		--target ovnkube -t quay.io/nvidia/ovnkube-c:latest .
 	./daemonset.sh --image=quay.io/nvidia/ovnkube-c:latest \
 		       --imagec=quay.io/nvidia/ovn-c:latest
 
