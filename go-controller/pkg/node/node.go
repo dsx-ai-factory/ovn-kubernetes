@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -254,8 +253,9 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		}()
 	}
 
-	if err := level.Set(strconv.Itoa(config.Logging.Level)); err != nil {
-		klog.Errorf("Reset of initial klog \"loglevel\" failed, err: %v", err)
+	err = util.SetOvnKubeLogLevel(n.Kube, n.name, "ovnkube-node")
+	if err != nil {
+		klog.Errorf("Reset of klog \"loglevel\" failed, err: %v", err)
 	}
 
 	// start health check to ensure there are no stale OVS internal ports

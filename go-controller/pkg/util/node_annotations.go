@@ -10,6 +10,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"k8s.io/klog/v2"
 )
 
 // This handles the annotations used by the node to pass information about its local
@@ -57,6 +58,12 @@ const (
 
 	// OvnNodeEgressLabel is a user assigned node label indicating to ovn-kubernetes that the node is to be used for egress IP assignment
 	ovnNodeEgressLabel = "k8s.ovn.org/egress-assignable"
+
+	// ovnkubeMasterLoglevel captures ovnkube-master loglevel
+	ovnKubeMasterLoglevel = "k8s.ovn.org/ovnkube-master-loglevel"
+
+	// ovnKubeNodeLoglevel capture ovnkube-node loglevel
+	ovnKubeNodeLoglevel = "k8s.ovn.org/ovnkube-node-loglevel"
 )
 
 type L3GatewayConfig struct {
@@ -274,4 +281,50 @@ func ParseNodePrimaryIfAddr(node *kapi.Node) (string, string, error) {
 // GetNodeEgressLabel returns label annotation needed for marking nodes as egress assignable
 func GetNodeEgressLabel() string {
 	return ovnNodeEgressLabel
+}
+
+// parseOvnKubeLogLevelAnnotation returns the ovnkube(master/node) daemon loglevel
+func parseOvnKubeLogLevelAnnotation(node *kapi.Node, role string) (string, error) {
+	var logLevelAnnotation string
+	if role == "ovnkube-master" {
+		logLevelAnnotation = ovnKubeMasterLoglevel
+	} else {
+		logLevelAnnotation = ovnKubeNodeLoglevel
+	}
+	logLevel, ok := node.Annotations[logLevelAnnotation]
+	if !ok {
+		return "", fmt.Errorf("node: %s doesn't have loglevel annotation", node.Name)
+	}
+	return logLevel, nil
+}
+
+// SetOvnKubeLogLevel will check for loglevel-annotations on the node,
+// if present, will set ovnkube daemon loglevel to that value.
+// if not present, resets the ovnkube loglevel to start-time value
+func SetOvnKubeLogLevel(k kube.Interface, nodeName, role string) error {
+	node, err := k.GetNode(nodeName)
+	if err != nil {
+		return fmt.Errorf("error retrieving node %s: (%v)", node.Name, err)
+	}
+
+	var level klog.Level
+	logLevel, err := parseOvnKubeLogLevelAnnotation(node, role)
+	if err != nil {
+		// if loglevel annotation is not present,
+		// reset loglevel to intial value.
+		if err := level.Set(strconv.Itoa(config.Logging.Level)); err != nil {
+			return fmt.Errorf("setting klog \"loglevel\" to %d failed, err: %v",
+				config.Logging.Level, err)
+		} else {
+			klog.Infof("Setting klog \"loglevel\" to %d", config.Logging.Level)
+		}
+	} else {
+		if err := level.Set(logLevel); err != nil {
+			return fmt.Errorf("setting klog \"loglevel\" to %s failed, err: %v",
+				logLevel, err)
+		} else {
+			klog.Infof("Changing klog \"loglevel\" to %s", logLevel)
+		}
+	}
+	return nil
 }
