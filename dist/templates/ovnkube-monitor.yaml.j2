@@ -56,6 +56,11 @@ spec:
     path: /metrics
     scheme: http
   - interval: 60s
+    metricRelabelings:
+    - action: drop
+      sourceLabels:
+      - __name__
+      regex: ovs_vswitchd_interface.+(ingress_policing.+|_state|_of_port|_mtu|_duplex|_ifindex|_link_speed|_driver_name)
     port: ovs-metrics
     path: /metrics
     scheme: http
