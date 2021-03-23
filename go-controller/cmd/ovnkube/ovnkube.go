@@ -23,6 +23,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	ovnnode "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
@@ -104,12 +105,11 @@ func main() {
 
 	ctx := context.Background()
 
-	// trap SIGHUP, SIGINT, SIGTERM, SIGQUIT and
+	// trap SIGINT, SIGTERM, SIGQUIT and
 	// cancel the context
 	ctx, cancel := context.WithCancel(ctx)
 	exitCh := make(chan os.Signal, 1)
 	signal.Notify(exitCh,
-		syscall.SIGHUP,
 		syscall.SIGINT,
 		syscall.SIGTERM,
 		syscall.SIGQUIT)
@@ -128,6 +128,18 @@ func main() {
 
 	if err := c.RunContext(ctx, os.Args); err != nil {
 		klog.Exit(err)
+	}
+}
+
+func updateOvnKubeConfig(ovnClientset *util.OVNClientset, master, node string) error {
+	k := &kube.Kube{KClient: ovnClientset.KubeClient}
+
+	if master != "" {
+		return util.SetOvnKubeLogLevel(k, master, "ovnkube-master")
+	} else if node != "" {
+		return util.SetOvnKubeLogLevel(k, node, "ovnkube-node")
+	} else {
+		return fmt.Errorf("need to run ovnkube in either master or node mode")
 	}
 }
 
@@ -197,13 +209,16 @@ func runOvnKube(ctx *cli.Context) error {
 	master := ctx.String("init-master")
 	node := ctx.String("init-node")
 
+	// SIGHUP handler function for updating ovnkube config
+	go sighupSignalHandler(ctx, ovnClientset, master, node)
+
 	cleanupNode := ctx.String("cleanup-node")
 	if cleanupNode != "" {
 		if master != "" || node != "" {
 			return fmt.Errorf("cannot specify cleanup-node together with 'init-node or 'init-master'")
 		}
 
-		if err = ovnnode.CleanupClusterNode(cleanupNode); err != nil {
+		if err := ovnnode.CleanupClusterNode(cleanupNode); err != nil {
 			return err
 		}
 		return nil
@@ -367,4 +382,26 @@ func watchForChanges(configPath string) error {
 	}
 
 	return nil
+}
+
+// sighupSignalHandler traps the SIGHUP signal and
+// updates the ovnkube config (currently ovnkube loglevel).
+func sighupSignalHandler(ctx *cli.Context, ovnClientset *util.OVNClientset, master, node string) {
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGHUP)
+
+	defer signal.Stop(sigCh)
+
+	// Wait for the signal or for context to be done
+	for {
+		select {
+		case <-sigCh:
+			err := updateOvnKubeConfig(ovnClientset, master, node)
+			if err != nil {
+				klog.Warningf("Error in updating ovnkube loglevel: (%v)", err)
+			}
+		case <-ctx.Context.Done():
+			return
+		}
+	}
 }
