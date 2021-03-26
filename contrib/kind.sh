@@ -31,33 +31,45 @@ delete()
 
 usage()
 {
-    echo "usage: kind.sh [[[-cf|--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]"
-    echo "                 [-ho|--hybrid-enabled] [-ii|--install-ingress] [-n4|--no-ipv4]"
-    echo "                 [-i6|--ipv6] [-wk|--num-workers <num>] [-ds|--disable-snat-multiple-gws]"
-    echo "                 [-sw|--allow-system-writes] [-gm|--gateway-mode <mode>]] |"
-    echo "                [-h]]"
+    echo "usage: kind.sh [[[-cf |--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]"
+    echo "                 [-ho |--hybrid-enabled] [-ii|--install-ingress] [-n4|--no-ipv4]"
+    echo "                 [-i6 |--ipv6] [-wk|--num-workers <num>] [-ds|--disable-snat-multiple-gws]"
+    echo "                 [-sw |--allow-system-writes] [-gm|--gateway-mode <mode>]"
+    echo "                 [-nl |--node-loglevel <num>] [-ml|--master-loglevel <num>]"
+    echo "                 [-dbl|--dbchecker-loglevel <num>] [-ndl|--ovn-loglevel-northd <loglevel>]"
+    echo "                 [-nbl|--ovn-loglevel-nb <loglevel>] [-sbl|--ovn-loglevel-sb <loglevel>]"
+    echo "                 [-cl |--ovn-loglevel-controller <loglevel>] [-dl|--ovn-loglevel-nbctld <loglevel>] |"
+    echo "                 [-h]]"
     echo ""
-    echo "-cf | --config-file               Name of the KIND J2 configuration file."
-    echo "                                  DEFAULT: ./kind.yaml.j2"
-    echo "-kt | --keep-taint                Do not remove taint components."
-    echo "                                  DEFAULT: Remove taint components."
-    echo "-ha | --ha-enabled                Enable high availability. DEFAULT: HA Disabled."
-    echo "-ho | --hybrid-enabled            Enable hybrid overlay. DEFAULT: Disabled."
-    echo "-ds | --disable-snat-multiple-gws Disable SNAT for multiple gws. DEFAULT: Disabled."
-    echo "-el | --ovn-empty-lb-events       Enable empty-lb-events generation for LB without backends. DEFAULT: Disabled"
-    echo "-ii | --install-ingress           Flag to install Ingress Components."
-    echo "                                  DEFAULT: Don't install ingress components."
-    echo "-n4 | --no-ipv4                   Disable IPv4. DEFAULT: IPv4 Enabled."
-    echo "-i6 | --ipv6                      Enable IPv6. DEFAULT: IPv6 Disabled."
-    echo "-wk | --num-workers               Number of worker nodes. DEFAULT: HA - 2 worker"
-    echo "                                  nodes and no HA - 0 worker nodes."
-    echo "-sw | --allow-system-writes       Allow script to update system. Intended to allow"
-    echo "                                  github CI to be updated with IPv6 settings."
-    echo "                                  DEFAULT: Don't allow."
-    echo "-gm | --gateway-mode              Enable 'shared' or 'local' gateway mode."
-    echo "                                  DEFAULT: local."
-    echo "-ov | --ovn-image            	    Use the specified docker image instead of building locally. DEFAULT: local build."
-    echo "--delete                     	    Delete current cluster"
+    echo "-cf  | --config-file               Name of the KIND J2 configuration file."
+    echo "                                   DEFAULT: ./kind.yaml.j2"
+    echo "-kt  | --keep-taint                Do not remove taint components."
+    echo "                                   DEFAULT: Remove taint components."
+    echo "-ha  | --ha-enabled                Enable high availability. DEFAULT: HA Disabled."
+    echo "-ho  | --hybrid-enabled            Enable hybrid overlay. DEFAULT: Disabled."
+    echo "-ds  | --disable-snat-multiple-gws Disable SNAT for multiple gws. DEFAULT: Disabled."
+    echo "-el  | --ovn-empty-lb-events       Enable empty-lb-events generation for LB without backends. DEFAULT: Disabled"
+    echo "-ii  | --install-ingress           Flag to install Ingress Components."
+    echo "                                   DEFAULT: Don't install ingress components."
+    echo "-n4  | --no-ipv4                   Disable IPv4. DEFAULT: IPv4 Enabled."
+    echo "-i6  | --ipv6                      Enable IPv6. DEFAULT: IPv6 Disabled."
+    echo "-wk  | --num-workers               Number of worker nodes. DEFAULT: HA - 2 worker"
+    echo "                                   nodes and no HA - 0 worker nodes."
+    echo "-sw  | --allow-system-writes       Allow script to update system. Intended to allow"
+    echo "                                   github CI to be updated with IPv6 settings."
+    echo "                                   DEFAULT: Don't allow."
+    echo "-gm  | --gateway-mode              Enable 'shared' or 'local' gateway mode."
+    echo "                                   DEFAULT: local."
+    echo "-ov  | --ovn-image            	   Use the specified docker image instead of building locally. DEFAULT: local build."
+    echo "-ml  | --master-loglevel           Log level for ovnkube (master), DEFAULT: 5."
+    echo "-nl  | --node-loglevel             Log level for ovnkube (node), DEFAULT: 5"
+    echo "-dbl | --dbchecker-loglevel        Log level for ovn-dbchecker (ovnkube-db), DEFAULT: 5."
+    echo "-ndl | --ovn-loglevel-northd       Log config for ovn northd, DEFAULT: '-vconsole:info -vfile:info'."
+    echo "-nbl | --ovn-loglevel-nb           Log config for northbound DB DEFAULT: '-vconsole:info -vfile:info'."
+    echo "-sbl | --ovn-loglevel-sb           Log config for southboudn DB DEFAULT: '-vconsole:info -vfile:info'."
+    echo "-cl  | --ovn-loglevel-controller   Log config for ovn-controller DEFAULT: '-vconsole:info'."
+    echo "-dl  | --ovn-loglevel-nbctld       Log config for nbctl daemon DEFAULT: '-vconsole:info'."
+    echo "--delete                      	   Delete current cluster"
     echo ""
 }
 
@@ -109,12 +121,51 @@ parse_args()
                                                 fi
                                                 OVN_GATEWAY_MODE=$1
                                                 ;;
-            -ov | --ovn-image )           	shift
-                                          	OVN_IMAGE=$1
-                                          	;;
-            --delete )                    	delete
-                                          	exit
-                                          	;;
+            -ov | --ovn-image )           	    shift
+                                          	    OVN_IMAGE=$1
+                                          	    ;;
+            -ml  | --master-loglevel )          shift
+                                                if ! [[ "$1" =~ ^[0-9]$ ]]; then
+                                                    echo "Invalid master-loglevel: $1"
+                                                    usage
+                                                    exit 1
+                                                fi
+                                                MASTER_LOG_LEVEL=$1
+                                                ;;
+            -nl  | --node-loglevel )            shift
+                                                if ! [[ "$1" =~ ^[0-9]$ ]]; then
+                                                    echo "Invalid node-loglevel: $1"
+                                                    usage
+                                                    exit 1
+                                                fi
+                                                NODE_LOG_LEVEL=$1
+                                                ;;
+            -dbl | --dbchecker-loglevel )       shift
+                                                if ! [[ "$1" =~ ^[0-9]$ ]]; then
+                                                    echo "Invalid dbchecker-loglevel: $1"
+                                                    usage
+                                                    exit 1
+                                                fi
+                                                DBCHECKER_LOG_LEVEL=$1
+                                                ;;
+            -ndl | --ovn-loglevel-northd )      shift
+                                                OVN_LOG_LEVEL_NORTHD=$1
+                                                ;;
+            -nbl | --ovn-loglevel-nb )          shift
+                                                OVN_LOG_LEVEL_NB=$1
+                                                ;;
+            -sbl | --ovn-loglevel-sb )          shift
+                                                OVN_LOG_LEVEL_SB=$1
+                                                ;;
+            -cl  | --ovn-loglevel-controller )  shift
+                                                OVN_LOG_LEVEL_CONTROLLER=$1
+                                                ;;
+            -dl  | --ovn-loglevel-nbctld )      shift
+                                                OVN_LOG_LEVEL_NBCTLD=$1
+                                                ;;
+            --delete )                    	    delete
+                                          	    exit
+                                          	    ;;
             -h | --help )                       usage
                                                 exit
                                                 ;;
@@ -143,13 +194,23 @@ print_params()
      echo "OVN_EMPTY_LB_EVENTS = $OVN_EMPTY_LB_EVENTS"
      echo "OVN_MULTICAST_ENABLE = $OVN_MULTICAST_ENABLE"
      echo "OVN_IMAGE = $OVN_IMAGE"
+     echo "MASTER_LOG_LEVEL = $MASTER_LOG_LEVEL"
+     echo "NODE_LOG_LEVEL = $NODE_LOG_LEVEL"
+     echo "DBCHECKER_LOG_LEVEL = $DBCHECKER_LOG_LEVEL"
+     echo "OVN_LOG_LEVEL_NORTHD = $OVN_LOG_LEVEL_NORTHD"
+     echo "OVN_LOG_LEVEL_NB = $OVN_LOG_LEVEL_NB"
+     echo "OVN_LOG_LEVEL_SB = $OVN_LOG_LEVEL_SB"
+     echo "OVN_LOG_LEVEL_CONTROLLER = $OVN_LOG_LEVEL_CONTROLLER"
+     echo "OVN_LOG_LEVEL_NBCTLD = $OVN_LOG_LEVEL_NBCTLD"
      echo ""
 }
 
-parse_args $*
+# In order to allow providing arguments with spaces, e.g. "-vconsole:info -vfile:info" 
+# the original command <parse_args $*> was replaced by <parse_args "$@">
+parse_args "$@"
 
 # ensure j2 renderer installed
-pip install wheel
+pip install wheel --user
 pip freeze | grep j2cli || pip install j2cli[yaml] --user
 export PATH=~/.local/bin:$PATH
 
@@ -169,6 +230,14 @@ OVN_EMPTY_LB_EVENTS=${OVN_EMPTY_LB_EVENTS:-false}
 OVN_MULTICAST_ENABLE=${OVN_MULTICAST_ENABLE:-false}
 KIND_ALLOW_SYSTEM_WRITES=${KIND_ALLOW_SYSTEM_WRITES:-false}
 OVN_IMAGE=${OVN_IMAGE:-local}
+MASTER_LOG_LEVEL=${MASTER_LOG_LEVEL:-5}
+NODE_LOG_LEVEL=${NODE_LOG_LEVEL:-5}
+DBCHECKER_LOG_LEVEL=${DBCHECKER_LOG_LEVEL:-5}
+OVN_LOG_LEVEL_NORTHD=${OVN_LOG_LEVEL_NORTHD:-"-vconsole:info -vfile:info"}
+OVN_LOG_LEVEL_NB=${OVN_LOG_LEVEL_NB:-"-vconsole:info -vfile:info"}
+OVN_LOG_LEVEL_SB=${OVN_LOG_LEVEL_SB:-"-vconsole:info -vfile:info"}
+OVN_LOG_LEVEL_CONTROLLER=${OVN_LOG_LEVEL_CONTROLLER:-"-vconsole:info"}
+OVN_LOG_LEVEL_NBCTLD=${OVN_LOG_LEVEL_NBCTLD:-"-vconsole:info"}
 
 # Input not currently validated. Modify outside script at your own risk.
 # These are the same values defaulted to in KIND code (kind/default.go).
@@ -290,6 +359,19 @@ fi
 kind create cluster --name ${KIND_CLUSTER_NAME} --kubeconfig ${KUBECONFIG} --image kindest/node:${K8S_VERSION} --config=${KIND_CONFIG_LCL}
 cat ${KUBECONFIG}
 
+# Docker disables IPv6 globally inside containers except in the eth0 interface.
+# Kind enables IPv6 globally the containers ONLY for dual-stack and IPv6 deployments.
+# Ovnkube-node tries to move all global addresses from the gateway interface to the
+# bridge interface it creates. This breaks on KIND with IPv4 only deployments, because the new
+# internal bridge has IPv6 disable and can't move the IPv6 from the eth0 interface.
+# We can enable IPv6 always in the container, since the docker setup with IPv4 only
+# is not very common. 
+KIND_NODES=$(kind get nodes --name ${KIND_CLUSTER_NAME})
+for n in $KIND_NODES; do
+  docker exec $n sysctl net.ipv6.conf.all.disable_ipv6=0
+  docker exec $n sysctl net.ipv6.conf.all.forwarding=1
+done
+
 if [ "${GITHUB_ACTIONS:-false}" == "true" ]; then
   # Patch CoreDNS to work in Github CI
   # 1. Github CI doesn´t offer IPv6 connectivity, so CoreDNS should be configured
@@ -358,8 +440,14 @@ pushd ../dist/images
   --ovn-master-count=${KIND_NUM_MASTER} \
   --kind \
   --ovn-unprivileged-mode=no \
-  --master-loglevel=5 \
-  --dbchecker-loglevel=5\
+  --master-loglevel=${MASTER_LOG_LEVEL} \
+  --node-loglevel=${NODE_LOG_LEVEL} \
+  --dbchecker-loglevel=${DBCHECKER_LOG_LEVEL}\
+  --ovn-loglevel-northd="${OVN_LOG_LEVEL_NORTHD}" \
+  --ovn-loglevel-nb="${OVN_LOG_LEVEL_NB}" \
+  --ovn-loglevel-sb="${OVN_LOG_LEVEL_SB}" \
+  --ovn-loglevel-controller="${OVN_LOG_LEVEL_CONTROLLER}" \
+  --ovn-loglevel-nbctld="${OVN_LOG_LEVEL_NBCTLD}" \
   --egress-ip-enable=true\
   --v4-join-subnet=${JOIN_SUBNET_IPV4}\
   --v6-join-subnet=${JOIN_SUBNET_IPV6}
@@ -419,6 +507,19 @@ if ! kubectl wait -n kube-system --for=condition=ready pods --all --timeout=300s
   kubectl get pods -A -o wide || true
   exit 1
 fi
+
+# Clean up any leftover kube-proxy iptables rules that handle services
+KIND_NODES=$(kind get nodes --name ${KIND_CLUSTER_NAME})
+for n in $KIND_NODES; do
+  if [ "$KIND_IPV4_SUPPORT" == true ]; then
+    docker exec $n iptables -F KUBE-SERVICES
+    docker exec $n iptables -F KUBE-SERVICES -t nat
+  fi
+  if [ "$KIND_IPV6_SUPPORT" == true ]; then
+    docker exec $n ip6tables -F KUBE-SERVICES
+    docker exec $n ip6tables -F KUBE-SERVICES -t nat
+  fi
+done
 
 echo "Pods are all up, allowing things settle for 30 seconds..."
 sleep 30

@@ -381,6 +381,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		})
+
 	})
 
 })

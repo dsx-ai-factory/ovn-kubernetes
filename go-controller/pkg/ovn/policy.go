@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"strconv"
 	"sync"
 
+	goovn "github.com/ebay/go-ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -114,17 +116,26 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 	}
 }
 
-func addAllowACLFromNode(logicalSwitch string, mgmtPortIP net.IP) error {
+func addAllowACLFromNode(logicalSwitch string, mgmtPortIP net.IP, ovnNBClient goovn.Client) error {
 	ipFamily := "ip4"
 	if utilnet.IsIPv6(mgmtPortIP) {
 		ipFamily = "ip6"
 	}
 	match := fmt.Sprintf("%s.src==%s", ipFamily, mgmtPortIP.String())
-	_, stderr, err := util.RunOVNNbctl("--may-exist", "acl-add", logicalSwitch,
-		"to-lport", defaultAllowPriority, match, "allow-related")
-	if err != nil {
-		return fmt.Errorf("failed to create the node acl for "+
-			"logical_switch=%s, stderr: %q (%v)", logicalSwitch, stderr, err)
+
+	priority, _ := strconv.Atoi(defaultAllowPriority)
+	aclcmd, err := ovnNBClient.ACLAdd(logicalSwitch, "to-lport", match, "allow-related", priority, nil, false, "", "")
+
+	// NOTE: goovn.ErrorExist is returned if the ACL already exists, in such a case ignore that error.
+	// Additional Context-> Per Tim Rozet's review comments, there could be scenarios where ovnkube restarts, in which
+	// case, it would use kubernetes events to reconstruct ACLs and there is a possibility that some of the ACLs may
+	// already be present in the NBDB.
+	if err == nil {
+		if err = ovnNBClient.Execute(aclcmd); err != nil {
+			return fmt.Errorf("failed to create the node acl for logical_switch: %s, %v", logicalSwitch, err)
+		}
+	} else if err != goovn.ErrorExist {
+		return fmt.Errorf("ACLAdd() error when creating node acl for logical switch: %s, %v", logicalSwitch, err)
 	}
 
 	return nil
@@ -316,12 +327,16 @@ func getMulticastACLMatch() string {
 	return "(ip4.mcast || mldv1 || mldv2 || " + ipv6DynamicMulticastMatch + ")"
 }
 
+// Allow IGMP traffic (e.g., IGMP queries) and namespace multicast traffic
+// towards pods.
 func getMulticastACLIgrMatchV4(addrSetName string) string {
-	return "ip4.src == $" + addrSetName + " && ip4.mcast"
+	return "(igmp || (ip4.src == $" + addrSetName + " && ip4.mcast))"
 }
 
+// Allow MLD traffic (e.g., MLD queries) and namespace multicast traffic
+// towards pods.
 func getMulticastACLIgrMatchV6(addrSetName string) string {
-	return "ip6.src == $" + addrSetName + " && " + ipv6DynamicMulticastMatch
+	return "(mldv1 || mldv2 || (ip6.src == $" + addrSetName + " && " + ipv6DynamicMulticastMatch + "))"
 }
 
 // Creates the match string used for ACLs allowing incoming multicast into a
@@ -472,14 +487,14 @@ func (oc *Controller) createDefaultAllowMulticastPolicy() error {
 	err := addACLPortGroup("", oc.clusterRtrPortGroupUUID, fromLport,
 		defaultRoutedMcastAllowPriority, match, "allow", knet.PolicyTypeEgress, "")
 	if err != nil {
-		return fmt.Errorf("failed to create default deny multicast egress ACL: %v", err)
+		return fmt.Errorf("failed to create default allow multicast egress ACL: %v", err)
 	}
 
 	match = getACLMatch(clusterRtrPortGroupName, mcastMatch, knet.PolicyTypeIngress)
 	err = addACLPortGroup("", oc.clusterRtrPortGroupUUID, toLport,
 		defaultRoutedMcastAllowPriority, match, "allow", knet.PolicyTypeIngress, "")
 	if err != nil {
-		return fmt.Errorf("failed to create default deny multicast ingress ACL: %v", err)
+		return fmt.Errorf("failed to create default allow multicast ingress ACL: %v", err)
 	}
 	return nil
 }
@@ -970,8 +985,8 @@ func (oc *Controller) handlePeerService(
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
 				// If Service Is updated make sure same pods are still matched
-				oldSvc := oldObj.(kapi.Service)
-				newSvc := newObj.(kapi.Service)
+				oldSvc := oldObj.(*kapi.Service)
+				newSvc := newObj.(*kapi.Service)
 				if reflect.DeepEqual(newSvc.Spec.ExternalIPs, oldSvc.Spec.ExternalIPs) &&
 					reflect.DeepEqual(newSvc.Spec.ClusterIP, oldSvc.Spec.ClusterIP) &&
 					reflect.DeepEqual(newSvc.Spec.Type, oldSvc.Spec.Type) &&

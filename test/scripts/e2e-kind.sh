@@ -9,13 +9,15 @@ groomTestList() {
 }
 
 SKIPPED_TESTS="
-# PERFORMANCE TESTS: NOT WANTED FOR CI
+# PERFORMANCE AND DISRUPTIVE TESTS: NOT WANTED FOR CI
 Networking IPerf IPv[46]
 \[Feature:PerformanceDNS\]
+Disruptive
 
 # FEATURES NOT AVAILABLE IN OUR CI ENVIRONMENT
 \[Feature:Federation\]
 should have ipv4 and ipv6 internal node ip
+should have ipv4 and ipv6 node podCIDRs
 
 # TESTS THAT ASSUME KUBE-PROXY
 kube-proxy
@@ -41,6 +43,12 @@ service.kubernetes.io/headless
 
 # TO BE FIXED BY https://github.com/kubernetes/kubernetes/pull/95351
 should resolve connection reset issue #74839
+
+# Broken in shared gw mode
+service endpoints using hostNetwork
+
+# api flakes
+sig-api-machinery
 
 # ???
 \[Feature:NoSNAT\]
@@ -130,8 +138,10 @@ export KUBE_CONTAINER_RUNTIME_NAME=containerd
 # FIXME we should not tolerate flakes
 # but until then, we retry the test in the same job
 # to stop PR retriggers for totally broken code
-export FLAKE_ATTEMPTS=3
+export FLAKE_ATTEMPTS=5
 export NUM_NODES=20
+# Kind clusters are three node clusters
+export NUM_WORKER_NODES=3
 ginkgo --nodes=${NUM_NODES} \
 	--focus=${FOCUS} \
 	--skip=${SKIPPED_TESTS} \
@@ -142,4 +152,5 @@ ginkgo --nodes=${NUM_NODES} \
 	--provider=local \
 	--dump-logs-on-failure=false \
 	--report-dir=${E2E_REPORT_DIR}	\
-	--disable-log-dump=true
+	--disable-log-dump=true \
+	--num-nodes=${NUM_WORKER_NODES}
