@@ -74,7 +74,8 @@ type namespaceInfo struct {
 
 	// addressSet is an address set object that holds the IP addresses
 	// of all pods in the namespace.
-	addressSet addressset.AddressSet
+	addressSet           addressset.AddressSet
+	nodeHostNetPodsCache map[string]map[string]bool
 
 	// map from NetworkPolicy name to networkPolicy. You must hold the
 	// namespaceInfo's mutex to add/delete/lookup policies, but must hold the
@@ -513,6 +514,12 @@ func (oc *Controller) WatchPods() {
 	oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
+			if pod.Spec.HostNetwork && podScheduled(pod) {
+				if err := oc.addHostNetworkPodToNamespace(pod); err != nil {
+					klog.Warningf("Failed to add host network pod %s/%s's IPs on node %s to the namespace address_set: %v",
+						pod.Namespace, pod.Name, pod.Spec.NodeName, err)
+				}
+			}
 			if !oc.ensurePod(nil, pod, true) {
 				oc.addRetryPod(pod)
 			}
@@ -520,6 +527,20 @@ func (oc *Controller) WatchPods() {
 		UpdateFunc: func(old, newer interface{}) {
 			oldPod := old.(*kapi.Pod)
 			pod := newer.(*kapi.Pod)
+			if pod.Spec.HostNetwork && (oldPod.Spec.NodeName != pod.Spec.NodeName) {
+				if podScheduled(oldPod) {
+					if err := oc.delHostNetworkPodFromNamespace(oldPod); err != nil {
+						klog.Warningf("Failed to delete host network pod %s/%s's IPs on node %s from the namespace address_set: %v",
+							oldPod.Namespace, oldPod.Name, oldPod.Spec.NodeName, err)
+					}
+				}
+				if podScheduled(pod) {
+					if err := oc.addHostNetworkPodToNamespace(pod); err != nil {
+						klog.Warningf("Failed to add host network pod %s/%s's IPs on node %s to the namespace address_set: %v",
+							pod.Namespace, pod.Name, pod.Spec.NodeName, err)
+					}
+				}
+			}
 			if !oc.ensurePod(oldPod, pod, oc.checkAndDeleteRetryPod(pod.UID)) {
 				// add back the failed pod
 				oc.addRetryPod(pod)
@@ -528,6 +549,12 @@ func (oc *Controller) WatchPods() {
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
+			if pod.Spec.HostNetwork && podScheduled(pod) {
+				if err := oc.delHostNetworkPodFromNamespace(pod); err != nil {
+					klog.Warningf("Failed to delete host network pod %s/%s's IPs on node %s from the namespace address_set: %v",
+						pod.Namespace, pod.Name, pod.Spec.NodeName, err)
+				}
+			}
 			oc.checkAndDeleteRetryPod(pod.UID)
 			if !util.PodWantsNetwork(pod) {
 				oc.deletePodExternalGW(pod)

@@ -622,7 +622,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				namespaceT := *newNamespace("namespace1")
 				namespaceT.Annotations = map[string]string{"k8s.ovn.org/routing-external-gws": "9.0.0.1"}
 				namespaceT.Annotations["k8s.ovn.org/bfd-enabled"] = ""
-				namespaceX := *newNamespace("namespace2")
+				namespaceX := newNamespace("namespace2")
 
 				t := newTPod(
 					"node1",
@@ -661,7 +661,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				})
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
-				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespaceX.Name).Create(context.TODO(), &gwPod, metav1.CreateOptions{})
+				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Create(context.TODO(), namespaceX, metav1.CreateOptions{})
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespaceX.Name).Create(context.TODO(), &gwPod, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 				return nil
@@ -675,7 +676,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 
 				namespaceT := *newNamespace("namespace1")
 				namespaceT.Annotations = map[string]string{"k8s.ovn.org/routing-external-gws": "9.0.0.1"}
-				namespaceX := *newNamespace("namespace2")
+				namespaceX := newNamespace("namespace2")
 
 				t := newTPod(
 					"node1",
@@ -716,7 +717,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				})
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
-				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespaceX.Name).Create(context.TODO(), &gwPod, metav1.CreateOptions{})
+				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Create(context.TODO(), namespaceX, metav1.CreateOptions{})
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespaceX.Name).Create(context.TODO(), &gwPod, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 				return nil
