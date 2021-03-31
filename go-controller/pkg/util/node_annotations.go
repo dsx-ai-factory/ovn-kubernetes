@@ -328,3 +328,19 @@ func SetOvnKubeLogLevel(k kube.Interface, nodeName, role string) error {
 	}
 	return nil
 }
+
+// GetNodeMgmtIPs returns the node's management IP addresses
+func GetNodeMgmtIPs(node *kapi.Node) ([]net.IP, error) {
+	// Get node management IPs
+	hostSubnets, err := ParseNodeHostSubnetAnnotation(node)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse subnet annotation of node %s: %v", node.Name, err)
+	}
+
+	ips := make([]net.IP, 0, len(hostSubnets))
+	for _, hostSubnet := range hostSubnets {
+		mgmtIfAddr := GetNodeManagementIfAddr(hostSubnet)
+		ips = append(ips, mgmtIfAddr.IP)
+	}
+	return ips, nil
+}

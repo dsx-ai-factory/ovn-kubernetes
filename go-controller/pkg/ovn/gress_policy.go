@@ -3,6 +3,7 @@ package ovn
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
@@ -25,6 +26,10 @@ type gressPolicy struct {
 	// peerAddressSet points to the addressSet that holds all peer pod
 	// IP addresess.
 	peerAddressSet addressset.AddressSet
+	// captures all the hostNetworkPods for a given node
+	nodeHostNetPodsCache map[string]map[string]bool
+	// a mutex for the above cache
+	nodeHostNetPodsCacheLock sync.Mutex
 
 	// peerV4AddressSets has Address sets for all namespaces and pod selectors for IPv4
 	peerV4AddressSets sets.String
@@ -65,13 +70,14 @@ func (pp *portPolicy) getL4Match() (string, error) {
 
 func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name string) *gressPolicy {
 	return &gressPolicy{
-		policyNamespace:   namespace,
-		policyName:        name,
-		policyType:        policyType,
-		idx:               idx,
-		peerV4AddressSets: sets.String{},
-		peerV6AddressSets: sets.String{},
-		portPolicies:      make([]*portPolicy, 0),
+		policyNamespace:      namespace,
+		policyName:           name,
+		policyType:           policyType,
+		idx:                  idx,
+		peerV4AddressSets:    sets.String{},
+		peerV6AddressSets:    sets.String{},
+		portPolicies:         make([]*portPolicy, 0),
+		nodeHostNetPodsCache: make(map[string]map[string]bool),
 	}
 }
 
@@ -124,10 +130,17 @@ func (gp *gressPolicy) deletePeerSvcVip(service *v1.Service) error {
 	return gp.peerAddressSet.DeleteIPs(ips)
 }
 
-func (gp *gressPolicy) addPeerPod(pod *v1.Pod) error {
+func (gp *gressPolicy) addPeerPod(oc *Controller, pod *v1.Pod) error {
 	if gp.peerAddressSet == nil {
 		return fmt.Errorf("peer AddressSet is nil, cannot add peer pod: %s for gressPolicy: %s",
 			pod.ObjectMeta.Name, gp.policyName)
+	}
+
+	if pod.Spec.HostNetwork {
+		gp.nodeHostNetPodsCacheLock.Lock()
+		defer gp.nodeHostNetPodsCacheLock.Unlock()
+		return oc.addHostnetworkPodIPToAddressSet(pod.Spec.NodeName, fmt.Sprintf("%s/%s", pod.Namespace, pod.Name),
+			string(gp.policyType), gp.peerAddressSet, gp.nodeHostNetPodsCache)
 	}
 
 	ips, err := util.GetAllPodIPs(pod)
@@ -138,7 +151,14 @@ func (gp *gressPolicy) addPeerPod(pod *v1.Pod) error {
 	return gp.peerAddressSet.AddIPs(ips)
 }
 
-func (gp *gressPolicy) deletePeerPod(pod *v1.Pod) error {
+func (gp *gressPolicy) deletePeerPod(oc *Controller, pod *v1.Pod) error {
+	if pod.Spec.HostNetwork {
+		gp.nodeHostNetPodsCacheLock.Lock()
+		defer gp.nodeHostNetPodsCacheLock.Unlock()
+		return oc.delHostnetworkPodIPFromAddressSet(pod.Spec.NodeName, fmt.Sprintf("%s/%s", pod.Namespace, pod.Name),
+			string(gp.policyType), gp.peerAddressSet, gp.nodeHostNetPodsCache)
+	}
+
 	ips, err := util.GetAllPodIPs(pod)
 	if err != nil {
 		return err

@@ -58,7 +58,8 @@ func newPodWithLabels(namespace, name, node, podIP string, additionalLabels map[
 					Image: "containerImage",
 				},
 			},
-			NodeName: node,
+			NodeName:    node,
+			HostNetwork: false,
 		},
 		Status: v1.PodStatus{
 			Phase:  v1.PodRunning,
@@ -82,7 +83,8 @@ func newPod(namespace, name, node, podIP string) *v1.Pod {
 					Image: "containerImage",
 				},
 			},
-			NodeName: node,
+			NodeName:    node,
+			HostNetwork: false,
 		},
 		Status: v1.PodStatus{
 			Phase:  v1.PodRunning,

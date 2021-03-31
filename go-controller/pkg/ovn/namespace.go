@@ -11,6 +11,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
+	knet "k8s.io/api/networking/v1"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 )
@@ -47,6 +48,112 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) {
 	if err != nil {
 		klog.Errorf("Error in syncing namespaces: %v", err)
 	}
+}
+
+func getHostNetworkPodIPs(node *kapi.Node, policyType string) ([]net.IP, error) {
+	ips := []net.IP{}
+	if policyType == string(knet.PolicyTypeIngress) || policyType == "Both" {
+		mgmtIPs, err := util.GetNodeMgmtIPs(node)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get node %s's management IPs: %v", node.Name, err)
+		}
+		ips = append(ips, mgmtIPs...)
+	}
+
+	if policyType == string(knet.PolicyTypeEgress) || policyType == "Both" {
+		ipstr, err := util.GetNodePrimaryIP(node)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get node %s's primary IP: %v", node.Name, err)
+		}
+
+		ip := net.ParseIP(ipstr)
+		if ip == nil {
+			return nil, fmt.Errorf("invalid node %s's primary IP: %s", node.Name, ipstr)
+		}
+		ips = append(ips, ip)
+	}
+	return ips, nil
+}
+
+func (oc *Controller) addHostnetworkPodIPToAddressSet(nodeName, podName, policyType string, addressSet addressset.AddressSet,
+	nodeHostNetPodsCache map[string]map[string]bool) error {
+
+	node, err := oc.kube.GetNode(nodeName)
+	if err != nil {
+		return fmt.Errorf("failed to get node %s: %v", nodeName, err)
+	}
+
+	ips, err := getHostNetworkPodIPs(node, policyType)
+	if err != nil {
+		return fmt.Errorf("failed to get %s policy IPs for host network pod %s schedued on node %s: %v",
+			policyType, podName, nodeName, err)
+	}
+
+	// it is ok to add the same addresses to the addressset multiple times. If they already exist, it would be no-op
+	if err := addressSet.AddIPs(ips); err != nil {
+		return fmt.Errorf("failed to add host network Pod IPs %v to address_set %s", ips, addressSet.GetName())
+	}
+
+	if _, ok := nodeHostNetPodsCache[nodeName]; !ok {
+		nodeHostNetPodsCache[nodeName] = map[string]bool{}
+	}
+	nodeHostNetPodsCache[nodeName][podName] = true
+	return nil
+}
+
+func (oc *Controller) delHostnetworkPodIPFromAddressSet(nodeName, podName, policyType string, addressSet addressset.AddressSet,
+	nodeHostNetPodsCache map[string]map[string]bool) error {
+
+	if podMap, ok := nodeHostNetPodsCache[nodeName]; ok {
+		if _, ok = podMap[podName]; ok {
+			delete(podMap, podName)
+
+			// If no host network pods on this node, delete the node IPs from the network addressSet
+			if len(podMap) == 0 {
+				delete(nodeHostNetPodsCache, nodeName)
+				node, err := oc.kube.GetNode(nodeName)
+				if err != nil {
+					return fmt.Errorf("failed to get node %s: %v", nodeName, err)
+				}
+
+				ips, err := getHostNetworkPodIPs(node, policyType)
+				if err != nil {
+					return fmt.Errorf("failed to get %s policy IPs for host network pod %s schedued on node %s: %v",
+						policyType, podName, nodeName, err)
+				}
+
+				err = addressSet.DeleteIPs(ips)
+				if err != nil {
+					return fmt.Errorf("failed to delete host network Pod IPs %v from address_set %s",
+						ips, addressSet.GetName())
+				}
+			}
+			return nil
+		}
+	}
+	klog.Warningf("Host network IPs of Pod %s on node %s are not in the addressSet %s", podName, nodeName,
+		addressSet.GetName())
+	return nil
+}
+
+func (oc *Controller) addHostNetworkPodToNamespace(pod *kapi.Pod) error {
+	nsInfo, err := oc.waitForNamespaceLocked(pod.Namespace)
+	if err != nil {
+		return err
+	}
+	defer nsInfo.Unlock()
+
+	return oc.addHostnetworkPodIPToAddressSet(pod.Spec.NodeName, pod.Name, "Both", nsInfo.addressSet, nsInfo.nodeHostNetPodsCache)
+}
+
+func (oc *Controller) delHostNetworkPodFromNamespace(pod *kapi.Pod) error {
+	nsInfo, err := oc.waitForNamespaceLocked(pod.Namespace)
+	if err != nil {
+		return err
+	}
+	defer nsInfo.Unlock()
+
+	return oc.delHostnetworkPodIPFromAddressSet(pod.Spec.NodeName, pod.Name, "Both", nsInfo.addressSet, nsInfo.nodeHostNetPodsCache)
 }
 
 func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
@@ -377,6 +484,7 @@ func (oc *Controller) createNamespaceLocked(ns string) *namespaceInfo {
 		podExternalRoutes:     make(map[string]map[string]string),
 		multicastEnabled:      false,
 		routingExternalPodGWs: make(map[string]gatewayInfo),
+		nodeHostNetPodsCache:  make(map[string]map[string]bool),
 	}
 	nsInfo.Lock()
 	oc.namespaces[ns] = nsInfo
