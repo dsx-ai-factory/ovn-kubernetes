@@ -487,16 +487,21 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 			return false
 		}
 	} else {
-		if oldPod != nil && (exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod)) {
+		oldPodChanged := oldPod != nil &&
+			(exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod))
+
+		if oldPodChanged {
 			// No matter if a pod is ovn networked, or host networked, we still need to check for exgw
 			// annotations. If the pod is ovn networked and is in update reschedule, addLogicalPort will take
 			// care of updating the exgw updates
 			oc.deletePodExternalGW(oldPod)
 		}
-		if err := oc.addPodExternalGW(pod); err != nil {
-			klog.Errorf(err.Error())
-			oc.recordPodEvent(err, pod)
-			return false
+		if oldPod == nil || oldPodChanged {
+			if err := oc.addPodExternalGW(pod); err != nil {
+				klog.Errorf(err.Error())
+				oc.recordPodEvent(err, pod)
+				return false
+			}
 		}
 	}
 
@@ -523,6 +528,12 @@ func (oc *Controller) WatchPods() {
 			if !oc.ensurePod(nil, pod, true) {
 				oc.addRetryPod(pod)
 			}
+			if podScheduled(pod) {
+				err := oc.kube.SetLabelsOnPod(pod, map[string]string{util.OvnPodNodeNameAnnotation: pod.Spec.NodeName})
+				if err != nil {
+					klog.Errorf("Failed to set %s labels on pod %s: %v", util.OvnPodNodeNameAnnotation, pod.Name, err)
+				}
+			}
 		},
 		UpdateFunc: func(old, newer interface{}) {
 			oldPod := old.(*kapi.Pod)
@@ -544,7 +555,12 @@ func (oc *Controller) WatchPods() {
 			if !oc.ensurePod(oldPod, pod, oc.checkAndDeleteRetryPod(pod.UID)) {
 				// add back the failed pod
 				oc.addRetryPod(pod)
-				return
+			}
+			if !podScheduled(oldPod) && podScheduled(pod) {
+				err := oc.kube.SetLabelsOnPod(pod, map[string]string{util.OvnPodNodeNameAnnotation: pod.Spec.NodeName})
+				if err != nil {
+					klog.Errorf("Failed to set %s labels on pod %s: %v", util.OvnPodNodeNameAnnotation, pod.Name, err)
+				}
 			}
 		},
 		DeleteFunc: func(obj interface{}) {

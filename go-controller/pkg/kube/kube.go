@@ -21,6 +21,7 @@ import (
 // kubernetes resources
 type Interface interface {
 	SetAnnotationsOnPod(pod *kapi.Pod, annotations map[string]string) error
+	SetLabelsOnPod(pod *kapi.Pod, labels map[string]string) error
 	SetAnnotationsOnNode(node *kapi.Node, annotations map[string]interface{}) error
 	SetAnnotationsOnNamespace(namespace *kapi.Namespace, annotations map[string]string) error
 	UpdateEgressFirewall(egressfirewall *egressfirewall.EgressFirewall) error
@@ -43,6 +44,33 @@ type Kube struct {
 	KClient              kubernetes.Interface
 	EIPClient            egressipclientset.Interface
 	EgressFirewallClient egressfirewallclientset.Interface
+}
+
+// SetLabelsOnPod takes the pod object and map of key/value string pairs to set as labels
+func (k *Kube) SetLabelsOnPod(pod *kapi.Pod, labels map[string]string) error {
+	var err error
+	var patchData []byte
+	patch := struct {
+		Metadata map[string]interface{} `json:"metadata"`
+	}{
+		Metadata: map[string]interface{}{
+			"labels": labels,
+		},
+	}
+
+	podDesc := pod.Namespace + "/" + pod.Name
+	klog.Infof("Setting labels %v on pod %s", labels, podDesc)
+	patchData, err = json.Marshal(&patch)
+	if err != nil {
+		klog.Errorf("Error in setting labels on pod %s: %v", podDesc, err)
+		return err
+	}
+
+	_, err = k.KClient.CoreV1().Pods(pod.Namespace).Patch(context.TODO(), pod.Name, types.MergePatchType, patchData, metav1.PatchOptions{})
+	if err != nil {
+		klog.Errorf("Error in setting labels on pod %s: %v", podDesc, err)
+	}
+	return err
 }
 
 // SetAnnotationsOnPod takes the pod object and map of key/value string pairs to set as annotations
