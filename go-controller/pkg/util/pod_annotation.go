@@ -218,7 +218,7 @@ func UnmarshalPodAnnotation(annotations map[string]string) (*PodAnnotation, erro
 // and then falling back to the Pod Status IPs. This function is intended to
 // also return IPs for HostNetwork and other non-OVN-IPAM-ed pods.
 func GetAllPodIPs(pod *v1.Pod) ([]net.IP, error) {
-	annotation, err := UnmarshalPodAnnotation(pod.Annotations)
+	annotation, _ := UnmarshalPodAnnotation(pod.Annotations)
 	if annotation != nil {
 		// Use the OVN annotation if valid
 		ips := make([]net.IP, 0, len(annotation.IPs))
@@ -231,7 +231,7 @@ func GetAllPodIPs(pod *v1.Pod) ([]net.IP, error) {
 	// return error if there are no IPs in pod status
 	if len(pod.Status.PodIPs) == 0 {
 		if pod.Status.PodIP == "" {
-			return nil, fmt.Errorf("no pod IPs found on pod %s: %v", pod.Name, err)
+			return nil, fmt.Errorf("no pod IPs found on pod %s", pod.Name)
 		}
 		// Kubelets < 1.16 only set podIP
 		return []net.IP{net.ParseIP(pod.Status.PodIP)}, nil

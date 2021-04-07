@@ -596,7 +596,7 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 	logicalPort := podLogicalPortName(pod)
 	portInfo, err := oc.logicalPortCache.get(logicalPort)
 	if err != nil {
-		klog.Errorf(err.Error())
+		klog.Warningf(err.Error())
 		return
 	}
 
@@ -932,7 +932,7 @@ func (oc *Controller) handlePeerPodSelectorAddUpdate(gp *gressPolicy, obj interf
 		return
 	}
 	if err := gp.addPeerPod(oc, pod); err != nil {
-		klog.Errorf(err.Error())
+		klog.Warningf(err.Error())
 	}
 }
 
