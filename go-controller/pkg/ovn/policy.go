@@ -36,11 +36,13 @@ type networkPolicy struct {
 	deleted         bool //deleted policy
 }
 
-func NewNetworkPolicy(policy *knet.NetworkPolicy) *networkPolicy {
+// We take elements of the policy, as args, instead of the policy itself (and getting it's elements)
+// so that this can be use by NetworkPolicy as well as ICMPNetworkPolicy
+func NewNetworkPolicy(policyNameSpace, policyName string, policyTypes []knet.PolicyType) *networkPolicy {
 	np := &networkPolicy{
-		name:            policy.Name,
-		namespace:       policy.Namespace,
-		policyTypes:     policy.Spec.PolicyTypes,
+		name:            policyName,
+		namespace:       policyNameSpace,
+		policyTypes:     policyTypes,
 		ingressPolicies: make([]*gressPolicy, 0),
 		egressPolicies:  make([]*gressPolicy, 0),
 		podHandlerList:  make([]*factory.Handler, 0),
@@ -79,6 +81,8 @@ func getACLLoggingSeverity(aclLogging string) string {
 	return defaultACLLoggingSeverity
 }
 
+// Network policies can be configured by NetworkPolicy or ICMPNetworkPolicy
+// check both before deleting unused address sets.
 func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 	expectedPolicies := make(map[string]map[string]bool)
 	for _, npInterface := range networkPolicies {
@@ -88,7 +92,6 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 				npInterface)
 			continue
 		}
-
 		if nsMap, ok := expectedPolicies[policy.Namespace]; ok {
 			nsMap[policy.Name] = true
 		} else {
@@ -98,8 +101,8 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 		}
 	}
 
-	err := oc.addressSetFactory.ForEachAddressSet(func(addrSetName, namespaceName, policyName string) {
-		if policyName != "" && !expectedPolicies[namespaceName][policyName] {
+	err := oc.addressSetFactory.ForEachAddressSet(func(addrSetName, namespaceName, policyName string, icmpAddressSet bool) {
+		if !icmpAddressSet && policyName != "" && !expectedPolicies[namespaceName][policyName] {
 			// policy doesn't exist on k8s. Delete the port group
 			portGroupName := fmt.Sprintf("%s_%s", namespaceName, policyName)
 			hashedLocalPortGroup := hashedPortGroup(portGroupName)
@@ -629,8 +632,7 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 }
 
 func (oc *Controller) handleLocalPodSelectorDelFunc(
-	policy *knet.NetworkPolicy, np *networkPolicy, nsInfo *namespaceInfo,
-	obj interface{}) {
+	np *networkPolicy, nsInfo *namespaceInfo, obj interface{}) {
 	pod := obj.(*kapi.Pod)
 
 	if pod.Spec.NodeName == "" {
@@ -687,7 +689,7 @@ func (oc *Controller) handleLocalPodSelector(
 				oc.handleLocalPodSelectorAddFunc(policy, np, nsInfo, obj)
 			},
 			DeleteFunc: func(obj interface{}) {
-				oc.handleLocalPodSelectorDelFunc(policy, np, nsInfo, obj)
+				oc.handleLocalPodSelectorDelFunc(np, nsInfo, obj)
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
 				oc.handleLocalPodSelectorAddFunc(policy, np, nsInfo, newObj)
@@ -725,7 +727,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 		return
 	}
 
-	np := NewNetworkPolicy(policy)
+	np := NewNetworkPolicy(policy.Namespace, policy.Name, policy.Spec.PolicyTypes)
 
 	if len(nsInfo.networkPolicies) == 0 {
 		err := oc.createDefaultDenyPortGroup(policy.Namespace, nsInfo, knet.PolicyTypeIngress, nsInfo.aclLogging.Deny)
@@ -788,7 +790,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 				continue
 			}
 			// Start service handlers ONLY if there's an ingress Address Set
-			oc.handlePeerService(policy, ingress, np)
+			oc.handlePeerService(policy.Namespace, ingress, np)
 		}
 
 		for _, fromJSON := range ingressJSON.From {
@@ -853,19 +855,19 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 			// For each rule that contains both peer namespace selector and
 			// peer pod selector, we create a watcher for each matching namespace
 			// that populates the addressSet
-			oc.handlePeerNamespaceAndPodSelector(policy,
+			oc.handlePeerNamespaceAndPodSelector(
 				handler.namespaceSelector, handler.podSelector,
 				handler.gress, np)
 		} else if handler.namespaceSelector != nil {
 			// For each peer namespace selector, we create a watcher that
 			// populates ingress.peerAddressSets
-			oc.handlePeerNamespaceSelector(policy,
+			oc.handlePeerNamespaceSelector(
 				handler.namespaceSelector, handler.gress, np)
 		} else if handler.podSelector != nil {
 			// For each peer pod selector, we create a watcher that
 			// populates the addressSet
-			oc.handlePeerPodSelector(policy, handler.podSelector,
-				handler.gress, np)
+			oc.handlePeerPodSelector(policy.Namespace,
+				handler.podSelector, handler.gress, np)
 		}
 	}
 }
@@ -971,9 +973,9 @@ func (oc *Controller) handlePeerServiceDelete(gp *gressPolicy, obj interface{}) 
 // Watch Services that are in the same Namespace as the NP
 // To account for hairpined traffic
 func (oc *Controller) handlePeerService(
-	policy *knet.NetworkPolicy, gp *gressPolicy, np *networkPolicy) {
+	namespace string, gp *gressPolicy, np *networkPolicy) {
 
-	h := oc.watchFactory.AddFilteredServiceHandler(policy.Namespace,
+	h := oc.watchFactory.AddFilteredServiceHandler(namespace,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				// Service is matched so add VIP to addressSet
@@ -1005,13 +1007,13 @@ func (oc *Controller) handlePeerService(
 }
 
 func (oc *Controller) handlePeerPodSelector(
-	policy *knet.NetworkPolicy, podSelector *metav1.LabelSelector,
+	namespace string, podSelector *metav1.LabelSelector,
 	gp *gressPolicy, np *networkPolicy) {
 
 	// NetworkPolicy is validated by the apiserver; this can't fail.
 	sel, _ := metav1.LabelSelectorAsSelector(podSelector)
 
-	h := oc.watchFactory.AddFilteredPodHandler(policy.Namespace, sel,
+	h := oc.watchFactory.AddFilteredPodHandler(namespace, sel,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				oc.handlePeerPodSelectorAddUpdate(gp, obj)
@@ -1027,7 +1029,6 @@ func (oc *Controller) handlePeerPodSelector(
 }
 
 func (oc *Controller) handlePeerNamespaceAndPodSelector(
-	policy *knet.NetworkPolicy,
 	namespaceSelector *metav1.LabelSelector,
 	podSelector *metav1.LabelSelector,
 	gp *gressPolicy,
@@ -1087,7 +1088,6 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 }
 
 func (oc *Controller) handlePeerNamespaceSelector(
-	policy *knet.NetworkPolicy,
 	namespaceSelector *metav1.LabelSelector,
 	gress *gressPolicy, np *networkPolicy) {
 

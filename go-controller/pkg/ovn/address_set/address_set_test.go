@@ -87,7 +87,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 					Output: namespacesRes,
 				})
 
-				err = asFactory.ForEachAddressSet(func(addrSetName, namespaceName, nameSuffix string) {
+				err = asFactory.ForEachAddressSet(func(addrSetName, namespaceName, nameSuffix string, icmpAddressSet bool) {
 					found := false
 					for _, n := range namespaces {
 						name := n.makeName()

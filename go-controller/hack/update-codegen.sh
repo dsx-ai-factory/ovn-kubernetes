@@ -22,9 +22,10 @@ if  ! ( command -v controller-gen > /dev/null ); then
 fi
 
 for crd in ${crds}; do
-  echo "Generating deepcopy funcs for $crd"
+  vers=$(ls pkg/crd/$crd 2> /dev/null)
+  echo "Generating deepcopy funcs for $crd:$vers"
   deepcopy-gen \
-    --input-dirs github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1 \
+    --input-dirs github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers \
     -O zz_generated.deepcopy \
     --bounding-dirs github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd
 
@@ -33,22 +34,22 @@ for crd in ${crds}; do
   client-gen \
     --clientset-name "${CLIENTSET_NAME_VERSIONED:-versioned}" \
     --input-base "" \
-    --input github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1 \
-    --output-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis/clientset \
+    --input github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers \
+    --output-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers/apis/clientset \
     "$@"
 
   echo "Generating listers for $crd"
   lister-gen \
-    --input-dirs github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1 \
-    --output-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis/listers \
+    --input-dirs github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers \
+    --output-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers/apis/listers \
     "$@"
 
   echo "Generating informers for $crd"
   informer-gen \
-    --input-dirs github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1 \
-    --versioned-clientset-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis/clientset/versioned \
-    --listers-package  github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis/listers \
-    --output-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis/informers \
+    --input-dirs github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers \
+    --versioned-clientset-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers/apis/clientset/versioned \
+    --listers-package  github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers/apis/listers \
+    --output-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers/apis/informers \
     "$@"
 done
 

@@ -21,6 +21,7 @@ import (
 
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
+	icmpnetworkpolicyclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1/apis/clientset/versioned"
 	discovery "k8s.io/api/discovery/v1beta1"
 	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 
@@ -30,10 +31,11 @@ import (
 
 // OVNClientset is a wrapper around all clientsets used by OVN-Kubernetes
 type OVNClientset struct {
-	KubeClient           kubernetes.Interface
-	EgressIPClient       egressipclientset.Interface
-	EgressFirewallClient egressfirewallclientset.Interface
-	APIExtensionsClient  apiextensionsclientset.Interface
+	KubeClient              kubernetes.Interface
+	EgressIPClient          egressipclientset.Interface
+	EgressFirewallClient    egressfirewallclientset.Interface
+	ICMPNetworkPolicyClient icmpnetworkpolicyclientset.Interface
+	APIExtensionsClient     apiextensionsclientset.Interface
 }
 
 func adjustCommit() string {
@@ -133,11 +135,16 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 	if err != nil {
 		return nil, err
 	}
+	icmpNetworkPolicyClientset, err := icmpnetworkpolicyclientset.NewForConfig(kconfig)
+	if err != nil {
+		return nil, err
+	}
 	return &OVNClientset{
-		KubeClient:           kclientset,
-		EgressIPClient:       egressIPClientset,
-		EgressFirewallClient: egressFirewallClientset,
-		APIExtensionsClient:  crdClientset,
+		KubeClient:              kclientset,
+		EgressIPClient:          egressIPClientset,
+		EgressFirewallClient:    egressFirewallClientset,
+		ICMPNetworkPolicyClient: icmpNetworkPolicyClientset,
+		APIExtensionsClient:     crdClientset,
 	}, nil
 }
 
