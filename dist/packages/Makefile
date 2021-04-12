@@ -1,4 +1,8 @@
-# Build tarball package for various components
+# Build tarball and/or RPM package for various components
+
+SHELL = /bin/sh
+CWD := $(shell pwd)
+RPMBUILDDIR := $(CWD)/build/rpmbuild
 
 all: ovs-exporter.tar.gz
 
@@ -8,6 +12,18 @@ ovs-exporter.tar.gz: bld
 	cp bin/git_info ovs-exporter/bin
 	tar -cf ovs-exporter.tar ovs-exporter
 	gzip ovs-exporter.tar
+
+.PHONY: rpm
+rpm: ovs-exporter.tar.gz
+	mkdir -p $(RPMBUILDDIR)/BUILD
+	mkdir -p $(RPMBUILDDIR)/RPMS
+	mkdir -p $(RPMBUILDDIR)/SOURCES
+	mkdir -p $(RPMBUILDDIR)/SPECS
+	cp ovs-exporter/ovs-exporter.spec $(RPMBUILDDIR)/SPECS/
+	cp ovs-exporter.tar.gz $(RPMBUILDDIR)/SOURCES/
+	rpmbuild --define '_topdir $(RPMBUILDDIR)' -bb $(RPMBUILDDIR)/SPECS/ovs-exporter.spec
+	cp $(RPMBUILDDIR)/RPMS/*/ovs-exporter*rpm .
+	rm -rf $(RPMBUILDDIR)
 
 .PHONY: ../../go-controller/_output/go/bin/ovnkube
 ../../go-controller/_output/go/bin/ovnkube:
@@ -21,4 +37,4 @@ bld: ../../go-controller/_output/go/bin/ovnkube
 
 .PHONY: clean
 clean:
-	rm -rf bin ovs-exporter/bin ovs-exporter.tar.gz
+	rm -rf build bin ovs-exporter/bin ovs-exporter.tar.gz ovs-exporter-*.rpm

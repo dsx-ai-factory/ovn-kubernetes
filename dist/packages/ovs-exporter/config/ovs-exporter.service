@@ -2,7 +2,7 @@
 Description=OVS metrics exporter service
 
 [Service]
-ExecStart=/opt/asgard/ovs-exporter/ovn-kube-util --loglevel=4 ovs-exporter --metrics-bind-address <LISTENING_IP>:9310
+ExecStart=<EXPORTER_PATH>/ovn-kube-util --loglevel=4 ovs-exporter --metrics-bind-address <LISTENING_IP>:9310
 
 [Install]
 WantedBy=multi-user.target
