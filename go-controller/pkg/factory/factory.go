@@ -17,6 +17,12 @@ import (
 	egressipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/scheme"
 	egressipinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions"
+
+	icmpnetworkpolicyapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1"
+	icmpnetworkpolicyclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1/apis/clientset/versioned"
+	icmpnetworkpolicyscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1/apis/clientset/versioned/scheme"
+	icmpnetworkpolicyinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1/apis/informers/externalversions"
+
 	apiextensionsapi "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	apiextensionsscheme "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/scheme"
 	apiextensionsinformerfactory "k8s.io/apiextensions-apiserver/pkg/client/informers/externalversions"
@@ -42,15 +48,18 @@ type WatchFactory struct {
 	// requirements with atomic accesses
 	handlerCounter uint64
 
-	iFactory    informerfactory.SharedInformerFactory
-	eipFactory  egressipinformerfactory.SharedInformerFactory
-	efFactory   egressfirewallinformerfactory.SharedInformerFactory
-	efClientset egressfirewallclientset.Interface
-	crdFactory  apiextensionsinformerfactory.SharedInformerFactory
-	informers   map[reflect.Type]*informer
+	iFactory     informerfactory.SharedInformerFactory
+	eipFactory   egressipinformerfactory.SharedInformerFactory
+	efFactory    egressfirewallinformerfactory.SharedInformerFactory
+	efClientset  egressfirewallclientset.Interface
+	inpFactory   icmpnetworkpolicyinformerfactory.SharedInformerFactory
+	inpClientset icmpnetworkpolicyclientset.Interface
+	crdFactory   apiextensionsinformerfactory.SharedInformerFactory
+	informers    map[reflect.Type]*informer
 
-	stopChan               chan struct{}
-	egressFirewallStopChan chan struct{}
+	stopChan                  chan struct{}
+	egressFirewallStopChan    chan struct{}
+	icmpNetworkPolicyStopChan chan struct{}
 }
 
 // WatchFactory implements the ObjectCacheInterface interface.
@@ -70,15 +79,16 @@ const (
 )
 
 var (
-	podType            reflect.Type = reflect.TypeOf(&kapi.Pod{})
-	serviceType        reflect.Type = reflect.TypeOf(&kapi.Service{})
-	endpointsType      reflect.Type = reflect.TypeOf(&kapi.Endpoints{})
-	policyType         reflect.Type = reflect.TypeOf(&knet.NetworkPolicy{})
-	namespaceType      reflect.Type = reflect.TypeOf(&kapi.Namespace{})
-	nodeType           reflect.Type = reflect.TypeOf(&kapi.Node{})
-	egressFirewallType reflect.Type = reflect.TypeOf(&egressfirewallapi.EgressFirewall{})
-	crdType            reflect.Type = reflect.TypeOf(&apiextensionsapi.CustomResourceDefinition{})
-	egressIPType       reflect.Type = reflect.TypeOf(&egressipapi.EgressIP{})
+	podType               reflect.Type = reflect.TypeOf(&kapi.Pod{})
+	serviceType           reflect.Type = reflect.TypeOf(&kapi.Service{})
+	endpointsType         reflect.Type = reflect.TypeOf(&kapi.Endpoints{})
+	policyType            reflect.Type = reflect.TypeOf(&knet.NetworkPolicy{})
+	namespaceType         reflect.Type = reflect.TypeOf(&kapi.Namespace{})
+	nodeType              reflect.Type = reflect.TypeOf(&kapi.Node{})
+	egressFirewallType    reflect.Type = reflect.TypeOf(&egressfirewallapi.EgressFirewall{})
+	crdType               reflect.Type = reflect.TypeOf(&apiextensionsapi.CustomResourceDefinition{})
+	egressIPType          reflect.Type = reflect.TypeOf(&egressipapi.EgressIP{})
+	icmpNetworkPolicyType reflect.Type = reflect.TypeOf(&icmpnetworkpolicyapi.ICMPNetworkPolicy{})
 )
 
 // NewMasterWatchFactory initializes a new watch factory for the master or master+node processes.
@@ -90,12 +100,13 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	// the downside of making it tight (like 10 minutes) is needless spinning on all resources
 	// However, AddEventHandlerWithResyncPeriod can specify a per handler resync period
 	wf := &WatchFactory{
-		iFactory:    informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
-		eipFactory:  egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
-		efClientset: ovnClientset.EgressFirewallClient,
-		crdFactory:  apiextensionsinformerfactory.NewSharedInformerFactory(ovnClientset.APIExtensionsClient, resyncInterval),
-		informers:   make(map[reflect.Type]*informer),
-		stopChan:    make(chan struct{}),
+		iFactory:     informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
+		eipFactory:   egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
+		efClientset:  ovnClientset.EgressFirewallClient,
+		inpClientset: ovnClientset.ICMPNetworkPolicyClient,
+		crdFactory:   apiextensionsinformerfactory.NewSharedInformerFactory(ovnClientset.APIExtensionsClient, resyncInterval),
+		informers:    make(map[reflect.Type]*informer),
+		stopChan:     make(chan struct{}),
 	}
 	var err error
 
@@ -189,12 +200,13 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 // informers to save memory + bandwidth. It is to be used by the node-only process.
 func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*WatchFactory, error) {
 	wf := &WatchFactory{
-		iFactory:    informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
-		eipFactory:  egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
-		efClientset: ovnClientset.EgressFirewallClient,
-		crdFactory:  apiextensionsinformerfactory.NewSharedInformerFactory(ovnClientset.APIExtensionsClient, resyncInterval),
-		informers:   make(map[reflect.Type]*informer),
-		stopChan:    make(chan struct{}),
+		iFactory:     informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
+		eipFactory:   egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
+		efClientset:  ovnClientset.EgressFirewallClient,
+		inpClientset: ovnClientset.ICMPNetworkPolicyClient,
+		crdFactory:   apiextensionsinformerfactory.NewSharedInformerFactory(ovnClientset.APIExtensionsClient, resyncInterval),
+		informers:    make(map[reflect.Type]*informer),
+		stopChan:     make(chan struct{}),
 	}
 	// For Services and Endpoints, pre-populate the shared Informer with one that
 	// has a label selector excluding headless services.
@@ -275,6 +287,31 @@ func (wf *WatchFactory) ShutdownEgressFirewallWatchFactory() {
 	wf.informers[egressFirewallType].shutdown()
 }
 
+func (wf *WatchFactory) InitializeICMPNetworkPolicyWatchFactory() error {
+	err := icmpnetworkpolicyapi.AddToScheme(icmpnetworkpolicyscheme.Scheme)
+	if err != nil {
+		return err
+	}
+	wf.inpFactory = icmpnetworkpolicyinformerfactory.NewSharedInformerFactory(wf.inpClientset, resyncInterval)
+	wf.informers[icmpNetworkPolicyType], err = newInformer(icmpNetworkPolicyType, wf.inpFactory.K8s().V1alpha1().ICMPNetworkPolicies().Informer())
+	if err != nil {
+		return err
+	}
+	wf.icmpNetworkPolicyStopChan = make(chan struct{})
+	wf.inpFactory.Start(wf.icmpNetworkPolicyStopChan)
+	for oType, synced := range wf.inpFactory.WaitForCacheSync(wf.icmpNetworkPolicyStopChan) {
+		if !synced {
+			return fmt.Errorf("error in syncing cache for %v informer", oType)
+		}
+	}
+	return nil
+}
+
+func (wf *WatchFactory) ShutdownICMPNetworkPolicyWatchFactory() {
+	close(wf.icmpNetworkPolicyStopChan)
+	wf.informers[icmpNetworkPolicyType].shutdown()
+}
+
 func (wf *WatchFactory) Shutdown() {
 	close(wf.stopChan)
 
@@ -317,6 +354,10 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 	case egressIPType:
 		if egressIP, ok := obj.(*egressipapi.EgressIP); ok {
 			return &egressIP.ObjectMeta, nil
+		}
+	case icmpNetworkPolicyType:
+		if icmpNetworkPolicy, ok := obj.(*icmpnetworkpolicyapi.ICMPNetworkPolicy); ok {
+			return &icmpNetworkPolicy.ObjectMeta, nil
 		}
 	}
 	return nil, fmt.Errorf("cannot get ObjectMeta from type %v", objType)
@@ -435,6 +476,16 @@ func (wf *WatchFactory) AddEgressFirewallHandler(handlerFuncs cache.ResourceEven
 // RemoveEgressFirewallHandler removes an EgressFirewall object event handler function
 func (wf *WatchFactory) RemoveEgressFirewallHandler(handler *Handler) {
 	wf.removeHandler(egressFirewallType, handler)
+}
+
+// AddICMPNetworkPolicyHandler adds a handler function that will be executed on ICMPNetworkPolicy object changes
+func (wf *WatchFactory) AddICMPNetworkPolicyHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
+	return wf.addHandler(icmpNetworkPolicyType, "", nil, handlerFuncs, processExisting)
+}
+
+// RemoveICMPNetworkPolicyHandler removes an ICMPNetworkPolicy object event handler function
+func (wf *WatchFactory) RemoveICMPNetworkPolicyHandler(handler *Handler) {
+	wf.removeHandler(icmpNetworkPolicyType, handler)
 }
 
 // AddCRDHandler adds a handler function that will be executed on CRD obje changes

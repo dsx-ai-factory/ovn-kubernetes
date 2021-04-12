@@ -14,6 +14,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
+	icmpnetworkpolicyfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
@@ -340,12 +341,14 @@ var _ = ginkgo.Describe("Master Operations", func() {
 				Items: []v1.Node{testNode},
 			})
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
+			icmpNetworkPolicyFakeClient := &icmpnetworkpolicyfake.Clientset{}
 			crdFakeClient := &apiextensionsfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
 			fakeClient := &util.OVNClientset{
 				KubeClient:           kubeFakeClient,
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
+				ICMPNetworkPolicyClient: icmpNetworkPolicyFakeClient,
 				APIExtensionsClient:  crdFakeClient,
 			}
 
@@ -446,10 +449,12 @@ var _ = ginkgo.Describe("Master Operations", func() {
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			crdFakeClient := &apiextensionsfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
+			icmpNetworkPoicyFakeClient := &icmpnetworkpolicyfake.Clientset{}
 			fakeClient := &util.OVNClientset{
 				KubeClient:           kubeFakeClient,
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
+				ICMPNetworkPolicyClient: icmpNetworkPolicyFakeClient,
 				APIExtensionsClient:  crdFakeClient,
 			}
 
@@ -546,10 +551,12 @@ var _ = ginkgo.Describe("Master Operations", func() {
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			crdFakeClient := &apiextensionsfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
+			icmpNetworkPolicyFakeClient := &icmpnetworkpolicyfake.Clientset{}
 			fakeClient := &util.OVNClientset{
 				KubeClient:           kubeFakeClient,
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
+				ICMPNetworkPolicyClient: icmpNetworkPolicyFakeClient,
 				APIExtensionsClient:  crdFakeClient,
 			}
 
@@ -713,10 +720,12 @@ subnet=%s
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			crdFakeClient := &apiextensionsfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
+			icmpNetworkPolicyFakeClient := &icmpnetworkpolicyfake.Clientset{}
 			fakeClient := &util.OVNClientset{
 				KubeClient:           kubeFakeClient,
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
+				ICMPNetworkPolicyClient: icmpNetworkPolicyFakeClient,
 				APIExtensionsClient:  crdFakeClient,
 			}
 
@@ -852,10 +861,12 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			crdFakeClient := &apiextensionsfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
+			icmpNetworkPolicyFakeClient := &icmpnetworkpolicyfake.Clientset{}
 			fakeClient := &util.OVNClientset{
 				KubeClient:           kubeFakeClient,
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
+				ICMPNetworkPolicyClient: icmpNetworkPolicyFakeClient,
 				APIExtensionsClient:  crdFakeClient,
 			}
 
@@ -1051,11 +1062,13 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			crdFakeClient := &apiextensionsfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
+			icmpNetworkPolicyFakeClient := &icmpnetworkpolicyfake.Clientset{}
 			fakeClient := &util.OVNClientset{
-				KubeClient:           kubeFakeClient,
-				EgressIPClient:       egressIPFakeClient,
-				EgressFirewallClient: egressFirewallFakeClient,
-				APIExtensionsClient:  crdFakeClient,
+				KubeClient:              kubeFakeClient,
+				EgressIPClient:          egressIPFakeClient,
+				EgressFirewallClient:    egressFirewallFakeClient,
+				ICMPNetworkPolicyClient: icmpNetworkPolicyFakeClient,
+				APIExtensionsClient:     crdFakeClient,
 			}
 
 			fexec := ovntest.NewFakeExec()

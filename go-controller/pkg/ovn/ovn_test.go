@@ -18,6 +18,8 @@ import (
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
+	icmpnetworkpolicy "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1"
+	icmpnetworkpolicyfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1/apis/clientset/versioned/fake"
 	apiextensionsfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
 )
 
@@ -55,12 +57,15 @@ func NewFakeOVN(fexec *ovntest.FakeExec) *FakeOVN {
 func (o *FakeOVN) start(ctx *cli.Context, objects ...runtime.Object) {
 	egressIPObjects := []runtime.Object{}
 	egressFirewallObjects := []runtime.Object{}
+	icmpNetworkPolicyObjects := []runtime.Object{}
 	v1Objects := []runtime.Object{}
 	for _, object := range objects {
 		if _, isEgressIPObject := object.(*egressip.EgressIPList); isEgressIPObject {
 			egressIPObjects = append(egressIPObjects, object)
 		} else if _, isEgressFirewallObject := object.(*egressfirewall.EgressFirewallList); isEgressFirewallObject {
 			egressFirewallObjects = append(egressFirewallObjects, object)
+		} else if _, isicmpNetworkPolicyObject := object.(*icmpnetworkpolicy.ICMPNetworkPolicyList); isicmpNetworkPolicyObject {
+			icmpNetworkPolicyObjects = append(icmpNetworkPolicyObjects, object)
 		} else {
 			v1Objects = append(v1Objects, object)
 		}
@@ -68,10 +73,11 @@ func (o *FakeOVN) start(ctx *cli.Context, objects ...runtime.Object) {
 	_, err := config.InitConfig(ctx, o.fakeExec, nil)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	o.fakeClient = &util.OVNClientset{
-		KubeClient:           fake.NewSimpleClientset(v1Objects...),
-		EgressIPClient:       egressipfake.NewSimpleClientset(egressIPObjects...),
-		EgressFirewallClient: egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
-		APIExtensionsClient:  apiextensionsfake.NewSimpleClientset(),
+		KubeClient:              fake.NewSimpleClientset(v1Objects...),
+		EgressIPClient:          egressipfake.NewSimpleClientset(egressIPObjects...),
+		EgressFirewallClient:    egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
+		ICMPNetworkPolicyClient: icmpnetworkpolicyfake.NewSimpleClientset(icmpNetworkPolicyObjects...),
+		APIExtensionsClient:     apiextensionsfake.NewSimpleClientset(),
 	}
 	o.init()
 }
@@ -84,6 +90,7 @@ func (o *FakeOVN) restart() {
 func (o *FakeOVN) shutdown() {
 	close(o.stopChan)
 	o.watcher.ShutdownEgressFirewallWatchFactory()
+	o.watcher.ShutdownICMPNetworkPolicyWatchFactory()
 	o.watcher.Shutdown()
 	err := o.controller.ovnNBClient.Close()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -96,6 +103,7 @@ func (o *FakeOVN) init() {
 	o.stopChan = make(chan struct{})
 	o.watcher, err = factory.NewMasterWatchFactory(o.fakeClient)
 	o.watcher.InitializeEgressFirewallWatchFactory()
+	o.watcher.InitializeICMPNetworkPolicyWatchFactory()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	o.ovnNBClient = ovntest.NewMockOVNClient(goovn.DBNB)
 	o.ovnSBClient = ovntest.NewMockOVNClient(goovn.DBSB)

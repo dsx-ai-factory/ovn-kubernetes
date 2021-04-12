@@ -24,6 +24,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+	icmpnetworkpolicy "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1"
 
 	apiextension "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	utilnet "k8s.io/utils/net"
@@ -49,6 +50,7 @@ const (
 	clusterPortGroupName             string        = "clusterPortGroup"
 	clusterRtrPortGroupName          string        = "clusterRtrPortGroup"
 	egressFirewallDNSDefaultDuration time.Duration = 30 * time.Minute
+	icmpNetworkPolicyCRD                           = "icmpnetworkpolicies.k8s.ovn.org"
 )
 
 // loadBalancerConf contains the OVN based config for a LB
@@ -114,11 +116,12 @@ type namespaceInfo struct {
 // Controller structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints)
 type Controller struct {
-	client                clientset.Interface
-	kube                  kube.Interface
-	watchFactory          *factory.WatchFactory
-	egressFirewallHandler *factory.Handler
-	stopChan              <-chan struct{}
+	client                   clientset.Interface
+	kube                     kube.Interface
+	watchFactory             *factory.WatchFactory
+	egressFirewallHandler    *factory.Handler
+	icmpNetworkPolicyHandler *factory.Handler
+	stopChan                 <-chan struct{}
 
 	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
 	masterSubnetAllocator     *subnetallocator.SubnetAllocator
@@ -222,6 +225,9 @@ const (
 
 	// SCTP is the constant string for the string "SCTP"
 	SCTP = "SCTP"
+
+	// ICMP is the constant string for the string "ICMP"
+	ICMP = "ICMP"
 )
 
 func GetIPFullMask(ip string) string {
@@ -676,6 +682,29 @@ func (oc *Controller) WatchNetworkPolicy() {
 	klog.Infof("Bootstrapping existing policies and cleaning stale policies took %v", time.Since(start))
 }
 
+// WatchICMPNetworkPolicy starts the watching of icmpnetworkpolicy resource and calls
+// back the appropriate handler logic
+func (oc *Controller) WatchICMPNetworkPolicy() *factory.Handler {
+	return oc.watchFactory.AddICMPNetworkPolicyHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			icmpnetworkpolicy := obj.(*icmpnetworkpolicy.ICMPNetworkPolicy)
+			oc.addICMPNetworkPolicy(icmpnetworkpolicy)
+		},
+		UpdateFunc: func(old, newer interface{}) {
+			newpolicy := newer.(*icmpnetworkpolicy.ICMPNetworkPolicy)
+			oldpolicy := old.(*icmpnetworkpolicy.ICMPNetworkPolicy)
+			if !reflect.DeepEqual(oldpolicy, newpolicy) {
+				oc.deleteICMPNetworkPolicy(oldpolicy)
+				oc.addICMPNetworkPolicy(newpolicy)
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			icmpnetworkpolicy := obj.(*icmpnetworkpolicy.ICMPNetworkPolicy)
+			oc.deleteICMPNetworkPolicy(icmpnetworkpolicy)
+		},
+	}, oc.syncICMPNetworkPolicies)
+}
+
 // WatchCRD starts the watching of the CRD resource and calls back to the
 // appropriate handler logic
 func (oc *Controller) WatchCRD() {
@@ -698,6 +727,15 @@ func (oc *Controller) WatchCRD() {
 				oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
 				oc.egressFirewallHandler = oc.WatchEgressFirewall()
 			}
+			if crd.Name == icmpNetworkPolicyCRD {
+				err := oc.watchFactory.InitializeICMPNetworkPolicyWatchFactory()
+				if err != nil {
+					klog.Errorf("Error Creating ICMPNetworkPolicyWatchFactory: %v", err)
+					return
+				}
+				oc.icmpNetworkPolicyHandler = oc.WatchICMPNetworkPolicy()
+				klog.Infof("Started watching ICMPNetworkPolicy")
+			}
 		},
 		UpdateFunc: func(old, newer interface{}) {
 		},
@@ -709,6 +747,12 @@ func (oc *Controller) WatchCRD() {
 				oc.watchFactory.RemoveEgressFirewallHandler(oc.egressFirewallHandler)
 				oc.egressFirewallHandler = nil
 				oc.watchFactory.ShutdownEgressFirewallWatchFactory()
+			}
+			if crd.Name == icmpNetworkPolicyCRD {
+				oc.watchFactory.RemoveICMPNetworkPolicyHandler(oc.icmpNetworkPolicyHandler)
+				oc.icmpNetworkPolicyHandler = nil
+				oc.watchFactory.ShutdownICMPNetworkPolicyWatchFactory()
+				klog.Infof("Shutdown ICMPNetworkPolicy watcher")
 			}
 		},
 	}, nil)
