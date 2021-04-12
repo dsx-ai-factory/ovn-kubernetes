@@ -167,7 +167,6 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 
 		fakeClient := &util.OVNClientset{
 			KubeClient:              kubeFakeClient,
-			EgressIPClient:          egressIPFakeClient,
 			EgressFirewallClient:    egressFirewallFakeClient,
 			ICMPNetworkPolicyClient: icmpNetworkPolicyFakeClient,
 			APIExtensionsClient:     crdFakeClient,
