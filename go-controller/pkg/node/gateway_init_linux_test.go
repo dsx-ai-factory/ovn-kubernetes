@@ -26,11 +26,6 @@ import (
 	"github.com/containernetworking/plugins/pkg/testutils"
 	"github.com/vishvananda/netlink"
 
-	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
-	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
-	icmpnetworkpolicyfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1/apis/clientset/versioned/fake"
-	apiextensionsfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
-
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
@@ -160,17 +155,8 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
 			Items: []v1.Node{existingNode},
 		})
-		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
-		crdFakeClient := &apiextensionsfake.Clientset{}
-		egressIPFakeClient := &egressipfake.Clientset{}
-		icmpNetworkPolicyFakeClient := &icmpnetworkpolicyfake.Clientset{}
-
 		fakeClient := &util.OVNClientset{
-			KubeClient:              kubeFakeClient,
-			EgressIPClient:          egressIPFakeClient,
-			EgressFirewallClient:    egressFirewallFakeClient,
-			ICMPNetworkPolicyClient: icmpNetworkPolicyFakeClient,
-			APIExtensionsClient:     crdFakeClient,
+			KubeClient: kubeFakeClient,
 		}
 
 		stop := make(chan struct{})
@@ -182,7 +168,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			wf.Shutdown()
 		}()
 
-		k := &kube.Kube{fakeClient.KubeClient, egressIPFakeClient, egressFirewallFakeClient}
+		k := &kube.Kube{KClient: fakeClient.KubeClient}
 
 		iptV4, iptV6 := util.SetFakeIPTablesHelpers()
 
