@@ -116,7 +116,7 @@ spec:
         ) > 5
       for: 10m
       labels:
-       severity: warning
+       severity: major
       annotations:
        message: |
          The pod creation latency value {{ $value }} aggregated across 
@@ -139,7 +139,7 @@ spec:
      
       for: 10m
       labels:
-       severity: warning
+       severity: major
       annotations:
        message: |
          The pod creation latency aggregated across all masters for the last 
@@ -155,7 +155,7 @@ spec:
         ) > 3 
       for: 10m
       labels:
-       severity: warning
+       severity: major
       annotations:
        message: |
          The ovn-nbctl 99th percentile CLI latency {{ value }} aggregated 
@@ -171,7 +171,7 @@ spec:
         ) > 3
       for: 10m
       labels:
-       severity: warning
+       severity: major
       annotations:
        message: |
          The ovn-sbctl 99th percentile CLI latency {{ value }} aggregated
@@ -187,7 +187,7 @@ spec:
         ) > 1
       for: 10m
       labels:
-       severity: warning
+       severity: major
       annotations:
        message: |
          The 99th percentile {{ $labels.name }} update latency {{ value }} aggregated 
@@ -203,7 +203,7 @@ spec:
         ) > 1
       for: 10m
       labels:
-       severity: warning
+       severity: major
       annotations:
        message: |
          The 99th percentile {{ $labels.name }} update latency {{ value }} 
@@ -219,7 +219,7 @@ spec:
         ) > 1
       for: 10m
       labels:
-       severity: warning
+       severity: major
       annotations:
        message: |
          The 99th percentile {{ $labels.name }} update latency {{ value }} aggregated 
@@ -235,7 +235,7 @@ spec:
         ) > 1
       for: 10m
       labels:
-       severity: warning
+       severity: major
       annotations:
        message: |
          The 99th percentile {{ $labels.name }} update latency {{ value }} aggregated
