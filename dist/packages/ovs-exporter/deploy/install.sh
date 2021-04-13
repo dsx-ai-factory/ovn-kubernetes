@@ -36,6 +36,7 @@ install -p -m 0644 -D $PACKAGE_DIRECTORY/../bin/git_info $INSTALLATION_DIRECTORY
 
 echo "[INFO] Setting up service"
 install -p -m 0644 $PACKAGE_DIRECTORY/../config/ovs-exporter.service /etc/systemd/system/ovs-exporter.service
+sed -i 's|<EXPORTER_PATH>|'"$INSTALLATION_DIRECTORY"'|' /etc/systemd/system/ovs-exporter.service
 sed -i 's/<LISTENING_IP>/'"$LISTENING_IP"'/' /etc/systemd/system/ovs-exporter.service
 systemctl daemon-reload
 systemctl enable ovs-exporter
