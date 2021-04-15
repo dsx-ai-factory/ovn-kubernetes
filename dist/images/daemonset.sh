@@ -435,5 +435,6 @@ cp ../templates/ovnkube-monitor.yaml.j2 ../yaml/ovnkube-monitor.yaml
 cp ../templates/ovnkube-alerts.yaml.j2 ../yaml/ovnkube-alerts.yaml
 cp ../templates/k8s.ovn.org_egressfirewalls.yaml.j2 ../yaml/k8s.ovn.org_egressfirewalls.yaml
 cp ../templates/k8s.ovn.org_egressips.yaml.j2 ../yaml/k8s.ovn.org_egressips.yaml
+cp ../templates/k8s.ovn.org_icmpnetworkpolicies.yaml.j2 ../yaml/k8s.ovn.org_icmpnetworkpolicies.yaml
 
 exit 0
