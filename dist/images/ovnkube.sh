@@ -1093,6 +1093,13 @@ create_ovn_firewall_zone() {
       exit 1
   fi
 
+  # block icmp traffic in ovn zone
+  firewall-cmd --zone=ovn --add-icmp-block-inversion --permanent >/dev/null
+  if [[ $? != 0 ]]; then
+          echo "Exiting, failed to block icmp traffic in ovn zone"
+          exit 1
+  fi
+
   firewall-cmd --reload >/dev/null
   if [[ $? != 0 ]]; then
       echo "Exiting, failed to reload the firewalld service"
