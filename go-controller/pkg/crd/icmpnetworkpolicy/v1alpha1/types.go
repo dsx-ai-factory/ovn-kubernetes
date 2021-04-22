@@ -165,6 +165,7 @@ type NetworkPolicyPeer struct {
 
 // +genclient
 // +resource:path=ICMPNetworkpolicy
+// +kubebuilder:resource:shortName=icmpnetpol
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // ICMPNetworkPolicy describes what network traffic is allowed for a set of Pods
 type ICMPNetworkPolicy struct {
