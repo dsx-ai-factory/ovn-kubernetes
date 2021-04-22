@@ -16,6 +16,7 @@ spec:
       labels:
        severity: critical
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/PHqwgBHMz/k8s-control-panel-kube-manager
       annotations:
        message: There is no running ovnkube-manager
 
@@ -25,6 +26,7 @@ spec:
       labels:
        severity: critical
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/PHqwgBHMz/k8s-control-panel-kube-manager
       annotations:
        message: There are multiple ovnkube-manager leaders
 
@@ -34,6 +36,7 @@ spec:
       labels:
         severity: critical
         pduuid: P2AR7UQ
+        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/PHqwgBHMz/k8s-control-panel-kube-manager
       annotations:
        message: There is no running ovnkube-manager leader
 
@@ -44,6 +47,7 @@ spec:
       labels:
        severity: critical
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/960e_tDMk/k8s-control-panel-kube-agent
       annotations:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} {{ $labels.container}} is restarting 
@@ -57,6 +61,7 @@ spec:
       labels:
        severity: warning
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/960e_tDMk/k8s-control-panel-kube-agent
       annotations:
        message: |
          All K8s nodes should be running OVN K8s Agent pods, 
@@ -70,6 +75,7 @@ spec:
       labels:
        severity: warning
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UUPXlpvGk/central-northbound-db
       annotations:
        message: |
          The OVN DB nodes k8s-ovn-01, k8s-ovn-02, and k8s-ovn-03 should be running OVN NB DB Pods,
@@ -83,6 +89,7 @@ spec:
       labels:
        severity: warning
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/sihGi2DGz/central-southbound-db
       annotations:
        message: |
          The OVN DB nodes k8s-ovn-01, k8s-ovn-02, and k8s-ovn-03 should be running OVN NB DB Pods, 
@@ -96,6 +103,7 @@ spec:
       labels:
        severity: warning
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/rjQLlpvMk/central-north-daemon
       annotations:
        message: |
          The NGN master nodes ngn-master-01, ngn-master-02, and ngn-master-03 
@@ -110,6 +118,7 @@ spec:
       labels:
        severity: warning
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/PHqwgBHMz/k8s-control-panel-kube-manager
       annotations:
        message: |
          The NGN master nodes ngn-master-01, ngn-master-02, and ngn-master-03 
@@ -127,6 +136,7 @@ spec:
       labels:
        severity: major
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/PHqwgBHMz/k8s-control-panel-kube-manager
       annotations:
        message: |
          The pod creation latency value {{ $value }} aggregated across 
@@ -151,6 +161,7 @@ spec:
       labels:
        severity: major
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/PHqwgBHMz/k8s-control-panel-kube-manager
       annotations:
        message: |
          The pod creation latency aggregated across all masters for the last 
@@ -168,6 +179,7 @@ spec:
       labels:
        severity: major
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/PHqwgBHMz/k8s-control-panel-kube-manager
       annotations:
        message: |
          The ovn-nbctl 99th percentile CLI latency {{ value }} aggregated 
@@ -185,6 +197,7 @@ spec:
       labels:
        severity: major
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/PHqwgBHMz/k8s-control-panel-kube-manager
       annotations:
        message: |
          The ovn-sbctl 99th percentile CLI latency {{ value }} aggregated
@@ -202,6 +215,7 @@ spec:
       labels:
        severity: major
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/PHqwgBHMz/k8s-control-panel-kube-manager
       annotations:
        message: |
          The 99th percentile {{ $labels.name }} update latency {{ value }} aggregated 
@@ -219,6 +233,7 @@ spec:
       labels:
        severity: major
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/PHqwgBHMz/k8s-control-panel-kube-manager
       annotations:
        message: |
          The 99th percentile {{ $labels.name }} update latency {{ value }} 
@@ -236,6 +251,7 @@ spec:
       labels:
        severity: major
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/PHqwgBHMz/k8s-control-panel-kube-manager
       annotations:
        message: |
          The 99th percentile {{ $labels.name }} update latency {{ value }} aggregated 
@@ -253,6 +269,7 @@ spec:
       labels:
        severity: major
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/PHqwgBHMz/k8s-control-panel-kube-manager
       annotations:
        message: |
          The 99th percentile {{ $labels.name }} update latency {{ value }} aggregated
@@ -265,6 +282,7 @@ spec:
       labels:
        severity: warning
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/960e_tDMk/k8s-control-panel-kube-agent
       annotations:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} {{ $labels.logfile_name }} file size is
@@ -277,6 +295,7 @@ spec:
       labels:
        severity: warning
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/PHqwgBHMz/k8s-control-panel-kube-manager
       annotations:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} {{ $labels.logfile_name }} file size is
@@ -298,6 +317,7 @@ spec:
       labels:
        severity: critical
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/PHqwgBHMz/k8s-control-panel-kube-manager
       annotations:
        message: |
          ovn-northd has not successfully synced changes from northbound DB 
@@ -310,6 +330,7 @@ spec:
       labels:
        severity: critical
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UUPXlpvGk/central-northbound-db
       annotations:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} nbdb container is 
@@ -322,6 +343,7 @@ spec:
       labels:
        severity: critical
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/sihGi2DGz/central-southbound-db
       annotations:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} sbdb container is 
@@ -333,6 +355,7 @@ spec:
       labels:
        severity: critical
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UUPXlpvGk/central-northbound-db
       annotations:
        message: There are multiple ovn-nbdb leaders
 
@@ -342,6 +365,7 @@ spec:
       labels:
         severity: critical
         pduuid: P2AR7UQ
+        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UUPXlpvGk/central-northbound-db
       annotations:
        message: There is no running ovn-nbdb leader
 
@@ -351,6 +375,7 @@ spec:
       labels:
        severity: critical
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/sihGi2DGz/central-southbound-db
       annotations:
        message: There are multiple ovn-sbdb leaders
 
@@ -360,6 +385,7 @@ spec:
       labels:
         severity: critical
         pduuid: P2AR7UQ
+        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/sihGi2DGz/central-southbound-db
       annotations:
        message: There is no running ovn-sbdb leader
 
@@ -370,6 +396,7 @@ spec:
       labels:
         severity: warning
         pduuid: P2AR7UQ
+        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/960e_tDMk/k8s-control-panel-kube-agent
       annotations:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} {{ $labels.db_name }} size is increasing
@@ -382,6 +409,7 @@ spec:
       labels:
        severity: critical
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/rjQLlpvMk/central-north-daemon
       annotations:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} ovn-northd container is 
@@ -393,6 +421,7 @@ spec:
       labels:
        severity: critical
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/rjQLlpvMk/central-north-daemon
       annotations:
        message: There is no running ovn-northd.
 
@@ -403,6 +432,7 @@ spec:
       labels:
        severity: critical
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/rjQLlpvMk/central-north-daemon
       annotations:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} ovn-northd containers
@@ -415,6 +445,7 @@ spec:
       labels:
        severity: critical
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/rjQLlpvMk/central-north-daemon
       annotations:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} ovn-northd containers
@@ -428,6 +459,7 @@ spec:
       labels:
        severity: critical
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/9dlp8fSGk/host-controller
       annotations:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} ovn-controller container 
@@ -440,6 +472,7 @@ spec:
       labels:
        severity: critical
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/9dlp8fSGk/host-controller
       annotations:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} ovn-controller containers
@@ -452,6 +485,7 @@ spec:
       labels:
        severity: critical
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/9dlp8fSGk/host-controller
       annotations:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} ovn-controller containers
@@ -464,6 +498,7 @@ spec:
       labels:
        severity: warning
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/9dlp8fSGk/host-controller
       annotations:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} ovn-controller containers
@@ -478,6 +513,7 @@ spec:
       labels:
        severity: warning
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/9dlp8fSGk/host-controller
       annotations:
        message: |
          The list of nodes that have a lower number of Geneve Ports
@@ -493,6 +529,7 @@ spec:
       labels:
        severity: warning
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
       annotations:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} ovs-db size is increasing
@@ -505,6 +542,7 @@ spec:
       labels:
        severity: warning
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
       annotations:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that
@@ -517,6 +555,7 @@ spec:
       labels:
        severity: warning
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
       annotations:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that
@@ -529,6 +568,7 @@ spec:
       labels:
        severity: warning
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
       annotations:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that total
@@ -541,6 +581,7 @@ spec:
       labels:
        severity: warning
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
       annotations:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that total
@@ -553,6 +594,7 @@ spec:
       labels:
        severity: warning
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
       annotations:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that
@@ -565,6 +607,7 @@ spec:
       labels:
        severity: warning
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
       annotations:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that
@@ -577,6 +620,7 @@ spec:
       labels:
        severity: warning
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
       annotations:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that
@@ -589,6 +633,7 @@ spec:
       labels:
        severity: warning
        pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
       annotations:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that
