@@ -15,6 +15,7 @@ import (
 
 	egressiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
 	apiextensionslister "k8s.io/apiextensions-apiserver/pkg/client/listers/apiextensions/v1beta1"
+	discoverylisters "k8s.io/client-go/listers/discovery/v1beta1"
 
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
@@ -304,6 +305,8 @@ func newInformerLister(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		return icmpnetworkpolicylister.NewICMPNetworkPolicyLister(sharedInformer.GetIndexer()), nil
 	case egressIPType:
 		return egressiplister.NewEgressIPLister(sharedInformer.GetIndexer()), nil
+	case endpointSliceType:
+		return discoverylisters.NewEndpointSliceLister(sharedInformer.GetIndexer()), nil
 	}
 
 	return nil, fmt.Errorf("cannot create lister from type %v", oType)

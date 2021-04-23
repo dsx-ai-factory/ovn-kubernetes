@@ -29,6 +29,7 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
+	discovery "k8s.io/api/discovery/v1beta1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -89,6 +90,7 @@ var (
 	crdType               reflect.Type = reflect.TypeOf(&apiextensionsapi.CustomResourceDefinition{})
 	egressIPType          reflect.Type = reflect.TypeOf(&egressipapi.EgressIP{})
 	icmpNetworkPolicyType reflect.Type = reflect.TypeOf(&icmpnetworkpolicyapi.ICMPNetworkPolicy{})
+	endpointSliceType     reflect.Type = reflect.TypeOf(&discovery.EndpointSlice{})
 )
 
 // NewMasterWatchFactory initializes a new watch factory for the master or master+node processes.
@@ -240,6 +242,10 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 	if err != nil {
 		return nil, err
 	}
+	wf.informers[endpointSliceType], err = newInformer(endpointSliceType, wf.iFactory.Discovery().V1beta1().EndpointSlices().Informer())
+	if err != nil {
+		return nil, err
+	}
 
 	if config.HybridOverlay.Enabled {
 		wf.informers[nodeType], err = newInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer())
@@ -355,6 +361,10 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 		if icmpNetworkPolicy, ok := obj.(*icmpnetworkpolicyapi.ICMPNetworkPolicy); ok {
 			return &icmpNetworkPolicy.ObjectMeta, nil
 		}
+	case endpointSliceType:
+		if endpointSlice, ok := obj.(*discovery.EndpointSlice); ok {
+			return &endpointSlice.ObjectMeta, nil
+		}
 	}
 	return nil, fmt.Errorf("cannot get ObjectMeta from type %v", objType)
 }
@@ -442,6 +452,11 @@ func (wf *WatchFactory) RemoveServiceHandler(handler *Handler) {
 // AddEndpointsHandler adds a handler function that will be executed on Endpoints object changes
 func (wf *WatchFactory) AddEndpointsHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
 	return wf.addHandler(endpointsType, "", nil, handlerFuncs, processExisting)
+}
+
+// AddEndpointSliceHandler adds a handler function that will be executed on EndpointSlice object changes
+func (wf *WatchFactory) AddEndpointSliceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
+	return wf.addHandler(endpointSliceType, "", nil, handlerFuncs, processExisting)
 }
 
 // AddFilteredEndpointsHandler adds a handler function that will be executed when Endpoint objects that match the given filters change
