@@ -168,7 +168,7 @@ func TestSyncServices(t *testing.T) {
 					Output: "",
 				},
 				{
-					Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router options:chassis!=null`,
+					Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router options:chassis!=null load_balancer{!=}[]`,
 					Output: gatewayRouter1,
 				},
 				{
@@ -372,7 +372,7 @@ func TestUpdateServicePorts(t *testing.T) {
 	})
 	// Check if there are NodePort LoadBalancers
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router options:chassis!=null`,
+		Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router options:chassis!=null load_balancer{!=}[]`,
 		Output: "",
 	})
 

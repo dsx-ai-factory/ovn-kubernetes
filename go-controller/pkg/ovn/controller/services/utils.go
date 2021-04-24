@@ -114,7 +114,7 @@ func deleteVIPsFromOVN(vips sets.String, st *serviceTracker, name, namespace, cl
 		}
 		// end of reject ACL code
 		// NodePort and ExternalIPs use loadbalancers in each node
-		gatewayRouters, _, err := gateway.GetOvnGateways()
+		gatewayRouters, _, err := gateway.GetOvnGatewaysWithLB()
 		if err != nil {
 			return errors.Wrapf(err, "failed to retrieve OVN gateway routers")
 		}

@@ -58,7 +58,7 @@ func (r *Repair) runOnce() error {
 		ovnLBCache[p] = append(ovnLBCache[p], lbUUID)
 	}
 	// NodePort, ExternalIPs and Ingress OVN load balancers
-	gatewayRouters, _, err := gateway.GetOvnGateways()
+	gatewayRouters, _, err := gateway.GetOvnGatewaysWithLB()
 	if err != nil {
 		klog.V(4).Infof("Failed to get gateway routers due to (%v). Skipping repairing OVN GR Load balancers", err)
 	} else {

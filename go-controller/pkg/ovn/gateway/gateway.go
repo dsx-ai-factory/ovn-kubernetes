@@ -33,6 +33,19 @@ func GetOvnGateways() ([]string, string, error) {
 	return strings.Fields(out), stderr, err
 }
 
+// GetOvnGatewaysWithLB returns all created gateways with non-empty LB rules.
+func GetOvnGatewaysWithLB() ([]string, string, error) {
+	out, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
+		"--columns=name", "find",
+		"logical_router",
+		"options:chassis!=null",
+		"load_balancer{!=}[]")
+	if err != nil {
+		return nil, stderr, err
+	}
+	return strings.Fields(out), stderr, err
+}
+
 // GetGatewayPhysicalIP return gateway physical IP
 func GetGatewayPhysicalIP(gatewayRouter string) (string, error) {
 	physicalIP, stderr, err := util.RunOVNNbctl("get", "logical_router",

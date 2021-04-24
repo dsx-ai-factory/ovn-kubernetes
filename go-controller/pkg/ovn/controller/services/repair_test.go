@@ -248,7 +248,7 @@ func initializeClusterIPLBs(fexec *ovntest.FakeExec) {
 		Output: udpLBUUID,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router options:chassis!=null",
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router options:chassis!=null load_balancer{!=}[]",
 		Output: "gateway1",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{

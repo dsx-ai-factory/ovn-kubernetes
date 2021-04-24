@@ -527,7 +527,7 @@ func getSvcVips(service *kapi.Service) []net.IP {
 	ips := make([]net.IP, 0)
 
 	if util.ServiceTypeHasNodePort(service) {
-		gatewayRouters, _, err := gateway.GetOvnGateways()
+		gatewayRouters, _, err := gateway.GetOvnGatewaysWithLB()
 		if err != nil {
 			klog.Errorf("Cannot get gateways: %s", err)
 		}

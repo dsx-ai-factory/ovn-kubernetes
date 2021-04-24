@@ -333,7 +333,7 @@ func (c *Controller) syncServices(key string) error {
 
 			// Node Port
 			if svcPort.NodePort != 0 {
-				gatewayRouters, _, err := gateway.GetOvnGateways()
+				gatewayRouters, _, err := gateway.GetOvnGatewaysWithLB()
 				if err != nil {
 					return errors.Wrapf(err, "failed to retrieve OVN gateway routers")
 				}
@@ -399,7 +399,7 @@ func (c *Controller) syncServices(key string) error {
 
 			// reconcile external IPs
 			if len(externalIPs) > 0 {
-				gatewayRouters, _, err := gateway.GetOvnGateways()
+				gatewayRouters, _, err := gateway.GetOvnGatewaysWithLB()
 				if err != nil {
 					return err
 				}
