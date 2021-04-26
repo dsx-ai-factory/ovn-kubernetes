@@ -979,8 +979,6 @@ ovn-master() {
       egressip_enabled_flag="--enable-egress-ip"
   fi
 
-  ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:9409"
-
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
     --init-master ${K8S_NODE} \
@@ -1189,16 +1187,12 @@ ovn-node() {
       "
   }
 
-  ovn_metrics_bind_address="${metrics_endpoint_ip}:9476"
   ovnkube_node_metrics_bind_address="${metrics_endpoint_ip}:9410"
 
   ovn_unprivileged_flag="--unprivileged-mode"
   if test -z "${OVN_UNPRIVILEGED_MODE+x}" -o "x${OVN_UNPRIVILEGED_MODE}" = xno; then
     ovn_unprivileged_flag=""
   fi
-
-  ovn_metrics_bind_address="${metrics_endpoint_ip}:9476"
-  ovnkube_node_metrics_bind_address="${metrics_endpoint_ip}:9410"
 
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
@@ -1222,7 +1216,6 @@ ovn-node() {
     ${multicast_enabled_flag} \
     ${egressip_enabled_flag} \
     --metrics-interval ${ovn_metrics_scrape_interval} \
-    --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
     --metrics-bind-address ${ovnkube_node_metrics_bind_address} --metrics-enable-pprof &
 
   wait_for_event attempts=3 process_ready ovnkube
@@ -1307,24 +1300,6 @@ run-nbctld() {
   echo "=============== run_ovn_nbctl ========== terminated"
 }
 
-# v3 - Runs ovn-kube-util in daemon mode to export prometheus metrics related to OVS.
-ovs-metrics() {
-  check_ovn_daemonset_version "3"
-
-  echo "=============== ovs-metrics - (wait for ovs_ready)"
-  wait_for_event ovs_ready
-
-  ovs_exporter_bind_address="${metrics_endpoint_ip}:9310"
-  /usr/bin/ovn-kube-util \
-    --loglevel=${ovnkube_loglevel} \
-    ovs-exporter \
-    --metrics-interval ${ovs_metrics_scrape_interval} \
-    --metrics-bind-address ${ovs_exporter_bind_address}
-
-  echo "=============== ovs-metrics with pid ${?} terminated ========== "
-  exit 1
-}
-
 echo "================== ovnkube.sh --- version: ${ovnkube_version} ================"
 
 echo " ==================== command: ${cmd}"
@@ -1399,9 +1374,6 @@ case ${cmd} in
   ;;
 "sb-ovsdb-raft")
   ovsdb-raft sb ${ovn_sb_port} ${ovn_sb_raft_port} ${ovn_sb_raft_election_timer}
-  ;;
-"ovs-metrics")
-  ovs-metrics
   ;;
 *)
   echo "invalid command ${cmd}"

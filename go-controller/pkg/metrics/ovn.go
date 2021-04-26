@@ -308,7 +308,7 @@ func getPortCount(portType string) float64 {
 func RegisterOvnControllerMetrics(ovsDBClient *util.OvsdbClient, metricsScrapeInterval int,
 	stopChan chan struct{}) {
 	getOvnControllerVersionInfo()
-	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
+	prometheus.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemController,
@@ -324,7 +324,7 @@ func RegisterOvnControllerMetrics(ovsDBClient *util.OvsdbClient, metricsScrapeIn
 	))
 
 	// ovn-controller metrics
-	ovnRegistry.MustRegister(prometheus.NewCounterFunc(
+	prometheus.MustRegister(prometheus.NewCounterFunc(
 		prometheus.CounterOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemController,
@@ -346,7 +346,7 @@ func RegisterOvnControllerMetrics(ovsDBClient *util.OvsdbClient, metricsScrapeIn
 			}
 			return 0
 		}))
-	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
+	prometheus.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemController,
@@ -357,7 +357,7 @@ func RegisterOvnControllerMetrics(ovsDBClient *util.OvsdbClient, metricsScrapeIn
 		func() float64 {
 			return getPortCount("patch")
 		}))
-	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
+	prometheus.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemController,
@@ -369,13 +369,13 @@ func RegisterOvnControllerMetrics(ovsDBClient *util.OvsdbClient, metricsScrapeIn
 		}))
 
 	// register ovn-controller configuration metrics
-	ovnRegistry.MustRegister(metricRemoteProbeInterval)
-	ovnRegistry.MustRegister(metricOpenFlowProbeInterval)
-	ovnRegistry.MustRegister(metricMonitorAll)
-	ovnRegistry.MustRegister(metricEncapIP)
-	ovnRegistry.MustRegister(metricSbConnectionMethod)
-	ovnRegistry.MustRegister(metricEncapType)
-	ovnRegistry.MustRegister(metricBridgeMappings)
+	prometheus.MustRegister(metricRemoteProbeInterval)
+	prometheus.MustRegister(metricOpenFlowProbeInterval)
+	prometheus.MustRegister(metricMonitorAll)
+	prometheus.MustRegister(metricEncapIP)
+	prometheus.MustRegister(metricSbConnectionMethod)
+	prometheus.MustRegister(metricEncapType)
+	prometheus.MustRegister(metricBridgeMappings)
 	// Register the ovn-controller coverage/show metrics
 	componentCoverageShowMetricsMap[ovnController] = ovnControllerCoverageShowMetricsMap
 	registerCoverageShowMetrics(ovnController, MetricOvnNamespace, MetricOvnSubsystemController)

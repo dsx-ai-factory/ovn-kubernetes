@@ -112,7 +112,7 @@ func RegisterOvnNorthdMetrics(clientset kubernetes.Interface, k8sNodeName string
 
 	// ovn-northd metrics
 	getOvnNorthdVersionInfo()
-	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
+	prometheus.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemNorthd,
@@ -126,7 +126,7 @@ func RegisterOvnNorthdMetrics(clientset kubernetes.Interface, k8sNodeName string
 		},
 		func() float64 { return 1 },
 	))
-	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
+	prometheus.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemNorthd,
@@ -144,7 +144,7 @@ func RegisterOvnNorthdMetrics(clientset kubernetes.Interface, k8sNodeName string
 			return parseMetricToFloat(MetricOvnSubsystemNorthd, "probe_interval", stdout)
 		},
 	))
-	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
+	prometheus.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemNorthd,
@@ -171,7 +171,7 @@ func RegisterOvnNorthdMetrics(clientset kubernetes.Interface, k8sNodeName string
 			return -1
 		},
 	))
-	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
+	prometheus.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemNorthd,
@@ -181,7 +181,7 @@ func RegisterOvnNorthdMetrics(clientset kubernetes.Interface, k8sNodeName string
 			return getOvnNorthdConnectionStatusInfo(nbConnectionStatus)
 		},
 	))
-	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
+	prometheus.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemNorthd,
