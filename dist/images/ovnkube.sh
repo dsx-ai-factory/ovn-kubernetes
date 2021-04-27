@@ -41,7 +41,9 @@ fi
 # OVN_SVC_CIDR - the cluster-service-cidr - v3
 # OVN_KUBERNETES_NAMESPACE - k8s namespace - v3
 # K8S_NODE - hostname of the node - v3
+# K8S_NODE_IP - IP address of of the node
 #
+# OVN_METRICS_ENDPOINT_IP - metrics endpoint ip
 # OVN_DAEMONSET_VERSION - version match daemonset and image - v3
 # K8S_TOKEN - the apiserver token. Automatically detected when running in a pod - v3
 # K8S_CACERT - the apiserver CA. Automatically detected when running in a pod - v3
@@ -155,13 +157,9 @@ net_cidr=${OVN_NET_CIDR:-10.128.0.0/14/23}
 svc_cidr=${OVN_SVC_CIDR:-172.30.0.0/16}
 mtu=${OVN_MTU:-1400}
 
-# set metrics endpoint bind to K8S_NODE_IP.
-metrics_endpoint_ip=${K8S_NODE_IP:-0.0.0.0}
-metrics_endpoint_ip=$(bracketify $metrics_endpoint_ip)
+metrics_endpoint_ip=${OVN_METRICS_ENDPOINT_IP:-127.0.0.1}
 ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
 
-# set metrics endpoint bind to K8S_NODE_IP.
-metrics_endpoint_ip=${K8S_NODE_IP:-0.0.0.0}
 # host on which OVN DB POD(s) are running
 ovn_db_host=${K8S_NODE_IP:-""}
 
