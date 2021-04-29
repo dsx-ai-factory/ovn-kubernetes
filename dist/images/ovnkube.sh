@@ -41,7 +41,9 @@ fi
 # OVN_SVC_CIDR - the cluster-service-cidr - v3
 # OVN_KUBERNETES_NAMESPACE - k8s namespace - v3
 # K8S_NODE - hostname of the node - v3
+# K8S_NODE_IP - IP address of of the node
 #
+# OVN_METRICS_ENDPOINT_IP - metrics endpoint ip
 # OVN_DAEMONSET_VERSION - version match daemonset and image - v3
 # K8S_TOKEN - the apiserver token. Automatically detected when running in a pod - v3
 # K8S_CACERT - the apiserver CA. Automatically detected when running in a pod - v3
@@ -155,13 +157,9 @@ net_cidr=${OVN_NET_CIDR:-10.128.0.0/14/23}
 svc_cidr=${OVN_SVC_CIDR:-172.30.0.0/16}
 mtu=${OVN_MTU:-1400}
 
-# set metrics endpoint bind to K8S_NODE_IP.
-metrics_endpoint_ip=${K8S_NODE_IP:-0.0.0.0}
-metrics_endpoint_ip=$(bracketify $metrics_endpoint_ip)
+metrics_endpoint_ip=${OVN_METRICS_ENDPOINT_IP:-127.0.0.1}
 ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
 
-# set metrics endpoint bind to K8S_NODE_IP.
-metrics_endpoint_ip=${K8S_NODE_IP:-0.0.0.0}
 # host on which OVN DB POD(s) are running
 ovn_db_host=${K8S_NODE_IP:-""}
 
@@ -979,8 +977,6 @@ ovn-master() {
       egressip_enabled_flag="--enable-egress-ip"
   fi
 
-  ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:9409"
-
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
     --init-master ${K8S_NODE} \
@@ -1189,16 +1185,12 @@ ovn-node() {
       "
   }
 
-  ovn_metrics_bind_address="${metrics_endpoint_ip}:9476"
   ovnkube_node_metrics_bind_address="${metrics_endpoint_ip}:9410"
 
   ovn_unprivileged_flag="--unprivileged-mode"
   if test -z "${OVN_UNPRIVILEGED_MODE+x}" -o "x${OVN_UNPRIVILEGED_MODE}" = xno; then
     ovn_unprivileged_flag=""
   fi
-
-  ovn_metrics_bind_address="${metrics_endpoint_ip}:9476"
-  ovnkube_node_metrics_bind_address="${metrics_endpoint_ip}:9410"
 
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
@@ -1222,7 +1214,6 @@ ovn-node() {
     ${multicast_enabled_flag} \
     ${egressip_enabled_flag} \
     --metrics-interval ${ovn_metrics_scrape_interval} \
-    --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
     --metrics-bind-address ${ovnkube_node_metrics_bind_address} --metrics-enable-pprof &
 
   wait_for_event attempts=3 process_ready ovnkube
@@ -1307,24 +1298,6 @@ run-nbctld() {
   echo "=============== run_ovn_nbctl ========== terminated"
 }
 
-# v3 - Runs ovn-kube-util in daemon mode to export prometheus metrics related to OVS.
-ovs-metrics() {
-  check_ovn_daemonset_version "3"
-
-  echo "=============== ovs-metrics - (wait for ovs_ready)"
-  wait_for_event ovs_ready
-
-  ovs_exporter_bind_address="${metrics_endpoint_ip}:9310"
-  /usr/bin/ovn-kube-util \
-    --loglevel=${ovnkube_loglevel} \
-    ovs-exporter \
-    --metrics-interval ${ovs_metrics_scrape_interval} \
-    --metrics-bind-address ${ovs_exporter_bind_address}
-
-  echo "=============== ovs-metrics with pid ${?} terminated ========== "
-  exit 1
-}
-
 echo "================== ovnkube.sh --- version: ${ovnkube_version} ================"
 
 echo " ==================== command: ${cmd}"
@@ -1399,9 +1372,6 @@ case ${cmd} in
   ;;
 "sb-ovsdb-raft")
   ovsdb-raft sb ${ovn_sb_port} ${ovn_sb_raft_port} ${ovn_sb_raft_election_timer}
-  ;;
-"ovs-metrics")
-  ovs-metrics
   ;;
 *)
   echo "invalid command ${cmd}"

@@ -142,6 +142,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: status.hostIP
+            - name: OVN_METRICS_ENDPOINT_IP
+              value: "{{ ovn_metrics_endpoint_ip }}"
             - name: OVN_GATEWAY_MODE
               value: "{{ ovn_gateway_mode }}"
             - name: OVN_GATEWAY_OPTS
@@ -173,46 +175,32 @@ spec:
             initialDelaySeconds: 30
             timeoutSeconds: 30
             periodSeconds: 60
+        # end of container
 
-          # ovs-metrics-exporter - v3
-        - name: ovs-metrics-exporter
-          image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
-          imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
-
-          command: ["/root/ovnkube.sh", "ovs-metrics"]
-
-          securityContext:
-            runAsUser: 0
-            capabilities:
-              add: ["NET_ADMIN"]
-
-          terminationMessagePolicy: FallbackToLogsOnError
-          volumeMounts:
-            - mountPath: /var/run/dbus/
-              name: host-var-run-dbus
-              readOnly: true
-            - mountPath: /var/log/openvswitch/
-              name: host-var-log-ovs
-            - mountPath: /var/run/openvswitch/
-              name: host-var-run-ovs
-              readOnly: true
-            - mountPath: /etc/openvswitch/
-              name: host-etc-openvswitch
-
-          resources:
-            requests:
-              cpu: 100m
-              memory: 300Mi
+        - name: kube-rbac-proxy
+          args:
+          - --logtostderr
+          - --secure-listen-address=$(IP):9410
+          - --tls-cipher-suites=TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,TLS_RSA_WITH_AES_128_CBC_SHA256,TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256,TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256
+          - --upstream=http://127.0.0.1:9410/
           env:
-            - name: OVN_DAEMONSET_VERSION
-              value: "3"
-            - name: K8S_NODE_IP
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.hostIP
-            - name: OVS_METRICS_SCRAPE_INTERVAL
-              value: "{{ ovs_metrics_scrape_interval }}"
-          # end of container
+          - name: IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
+          image: quay.io/coreos/kube-rbac-proxy:v0.5.0
+          ports:
+          - containerPort: 9410
+            hostPort: 9410
+            name: https
+          resources:
+            limits:
+              cpu: 20m
+              memory: 60Mi
+            requests:
+              cpu: 10m
+              memory: 20Mi
+        # end of container
 
       nodeSelector:
         kubernetes.io/os: "linux"

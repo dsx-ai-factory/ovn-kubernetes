@@ -201,21 +201,20 @@ type CNIConfig struct {
 
 // KubernetesConfig holds Kubernetes-related parsed config file parameters and command-line overrides
 type KubernetesConfig struct {
-	Kubeconfig            string `gcfg:"kubeconfig"`
-	CACert                string `gcfg:"cacert"`
-	APIServer             string `gcfg:"apiserver"`
-	Token                 string `gcfg:"token"`
-	CompatServiceCIDR     string `gcfg:"service-cidr"`
-	RawServiceCIDRs       string `gcfg:"service-cidrs"`
-	ServiceCIDRs          []*net.IPNet
-	OVNConfigNamespace    string `gcfg:"ovn-config-namespace"`
-	MetricsBindAddress    string `gcfg:"metrics-bind-address"`
-	OVNMetricsBindAddress string `gcfg:"ovn-metrics-bind-address"`
-	MetricsEnablePprof    bool   `gcfg:"metrics-enable-pprof"`
-	OVNEmptyLbEvents      bool   `gcfg:"ovn-empty-lb-events"`
-	PodIP                 string `gcfg:"pod-ip"` // UNUSED
-	RawNoHostSubnetNodes  string `gcfg:"no-hostsubnet-nodes"`
-	NoHostSubnetNodes     *metav1.LabelSelector
+	Kubeconfig           string `gcfg:"kubeconfig"`
+	CACert               string `gcfg:"cacert"`
+	APIServer            string `gcfg:"apiserver"`
+	Token                string `gcfg:"token"`
+	CompatServiceCIDR    string `gcfg:"service-cidr"`
+	RawServiceCIDRs      string `gcfg:"service-cidrs"`
+	ServiceCIDRs         []*net.IPNet
+	OVNConfigNamespace   string `gcfg:"ovn-config-namespace"`
+	MetricsBindAddress   string `gcfg:"metrics-bind-address"`
+	MetricsEnablePprof   bool   `gcfg:"metrics-enable-pprof"`
+	OVNEmptyLbEvents     bool   `gcfg:"ovn-empty-lb-events"`
+	PodIP                string `gcfg:"pod-ip"` // UNUSED
+	RawNoHostSubnetNodes string `gcfg:"no-hostsubnet-nodes"`
+	NoHostSubnetNodes    *metav1.LabelSelector
 }
 
 // OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
@@ -683,11 +682,6 @@ var K8sFlags = []cli.Flag{
 		Name:        "metrics-bind-address",
 		Usage:       "The IP address and port for the OVN K8s metrics server to serve on (set to 0.0.0.0 for all IPv4 interfaces)",
 		Destination: &cliConfig.Kubernetes.MetricsBindAddress,
-	},
-	&cli.StringFlag{
-		Name:        "ovn-metrics-bind-address",
-		Usage:       "The IP address and port for the OVN metrics server to serve on (set to 0.0.0.0 for all IPv4 interfaces)",
-		Destination: &cliConfig.Kubernetes.OVNMetricsBindAddress,
 	},
 	&cli.BoolFlag{
 		Name:        "metrics-enable-pprof",

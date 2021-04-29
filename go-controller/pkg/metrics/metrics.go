@@ -40,9 +40,6 @@ const (
 	ovsDB         = "ovs-db"
 	ovnNorthDB    = "ovnnb-db"
 	ovnSouthDB    = "ovnsb-db"
-
-	OvsMetrics = "ovs-metrics"
-	OvnMetrics = "ovn-metrics"
 )
 
 type metricDetails struct {
@@ -86,11 +83,7 @@ func registerCoverageShowMetrics(target string, metricNamespace string, metricSu
 			Help:        metricInfo.help,
 			ConstLabels: constLabels,
 		})
-		if target == ovsVswitchd || target == ovsDB {
-			prometheus.MustRegister(metricInfo.metric)
-		} else {
-			ovnRegistry.MustRegister(metricInfo.metric)
-		}
+		prometheus.MustRegister(metricInfo.metric)
 	}
 }
 
@@ -243,82 +236,46 @@ func StartMetricsServer(bindAddress string, enablePprof bool) {
 	}, 5*time.Second, utilwait.NeverStop)
 }
 
-var ovnRegistry = prometheus.NewRegistry()
-
-// StartOVNMetricsServer runs the prometheus listener so that OVN metrics can be collected
-func StartOVNMetricsServer(bindAddress string) {
-	handler := promhttp.InstrumentMetricHandler(ovnRegistry,
-		promhttp.HandlerFor(ovnRegistry, promhttp.HandlerOpts{}))
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", handler)
-
-	go utilwait.Until(func() {
-		err := http.ListenAndServe(bindAddress, mux)
-		if err != nil {
-			utilruntime.HandleError(fmt.Errorf("starting ovn-metrics server failed: %v", err))
-		}
-	}, 5*time.Second, utilwait.NeverStop)
+func RegisterOvnNodeMetrics(ovsDBClient *util.OvsdbClient, metricsScrapeInterval int, stopChan chan struct{}) {
+	go RegisterOvnControllerMetrics(ovsDBClient, metricsScrapeInterval, stopChan)
 }
 
-// StartOVSMetricsServer runs the prometheus listener so that OVS metrics can be collected
-func StartOVSMetricsServer(bindAddress string) {
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", promhttp.Handler())
-
-	go utilwait.Until(func() {
-		err := http.ListenAndServe(bindAddress, mux)
-		if err != nil {
-			utilruntime.HandleError(fmt.Errorf("starting ovs-metrics server failed: %v", err))
-		}
-	}, 5*time.Second, utilwait.NeverStop)
-}
-
-func RegisterOvnMetrics(ovsDBClient *util.OvsdbClient, clientset kubernetes.Interface, k8sNodeName string,
+func RegisterOvnCentralMetrics(clientset kubernetes.Interface, k8sNodeName string,
 	metricsScrapeInterval int, stopChan chan struct{}) {
 	go RegisterOvnDBMetrics(clientset, k8sNodeName, metricsScrapeInterval, stopChan)
-	go RegisterOvnControllerMetrics(ovsDBClient, metricsScrapeInterval, stopChan)
 	go RegisterOvnNorthdMetrics(clientset, k8sNodeName, metricsScrapeInterval, stopChan)
 }
 
-func SetupOvsDBClient(metricsToMonitor string) (*util.OvsdbClient, error) {
-	var ovsdbTableColumns map[string][]string
-
-	if metricsToMonitor == OvsMetrics {
-		ovsdbTableColumns = map[string][]string{
-			"Bridge": {
-				"name",
-				"ports",
-			},
-			"Port": {
-				"name",
-				"interfaces",
-			},
-			"Interface": {
-				"name",
-				"duplex",
-				"type",
-				"admin_state",
-				"link_state",
-				"statistics",
-				"ifindex",
-				"link_resets",
-				"link_speed",
-				"mtu",
-				"ofport",
-				"ingress_policing_burst",
-				"ingress_policing_rate",
-				"status",
-			},
-			"Open_vSwitch": {
-				"other_config",
-			},
-		}
-	} else if metricsToMonitor == OvnMetrics {
-		ovsdbTableColumns = map[string][]string{
-			"Open_vSwitch": {
-				"external_ids",
-			},
-		}
+func SetupOvsDBClient() (*util.OvsdbClient, error) {
+	var ovsdbTableColumns = map[string][]string{
+		"Bridge": {
+			"name",
+			"ports",
+		},
+		"Port": {
+			"name",
+			"interfaces",
+		},
+		"Interface": {
+			"name",
+			"duplex",
+			"type",
+			"admin_state",
+			"link_state",
+			"statistics",
+			"ifindex",
+			"link_resets",
+			"link_speed",
+			"mtu",
+			"ofport",
+			"ingress_policing_burst",
+			"ingress_policing_rate",
+			"status",
+		},
+		"Open_vSwitch": {
+			"other_config",
+			"external_ids",
+		},
 	}
 
 	cfg := &util.OvsdbConfig{

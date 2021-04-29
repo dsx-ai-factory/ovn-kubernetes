@@ -505,10 +505,10 @@ func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string,
 	// get the ovsdb server version info
 	getOvnDbVersionInfo()
 	// register metrics that will be served off of /metrics path
-	ovnRegistry.MustRegister(metricOVNDBMonitor)
-	ovnRegistry.MustRegister(metricOVNDBSessions)
-	ovnRegistry.MustRegister(metricDBSize)
-	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
+	prometheus.MustRegister(metricOVNDBMonitor)
+	prometheus.MustRegister(metricOVNDBSessions)
+	prometheus.MustRegister(metricDBSize)
+	prometheus.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemDB,
@@ -530,7 +530,7 @@ func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string,
 		dbIsClustered = false
 	}
 	if dbIsClustered {
-		ovnRegistry.MustRegister(metricDBHealthStatus)
+		prometheus.MustRegister(metricDBHealthStatus)
 
 		// Register the ovn*_db coverage/show metrics with prometheus
 
@@ -544,23 +544,23 @@ func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string,
 			map[string]string{"db_name": "OVN_Southbound"})
 		go coverageShowMetricsUpdater(ovnSouthDB, metricsScrapeInterval, stopChan)
 
-		ovnRegistry.MustRegister(metricDBClusterCID)
-		ovnRegistry.MustRegister(metricDBClusterSID)
-		ovnRegistry.MustRegister(metricDBClusterServerStatus)
-		ovnRegistry.MustRegister(metricDBClusterTerm)
-		ovnRegistry.MustRegister(metricDBClusterServerRole)
-		ovnRegistry.MustRegister(metricDBClusterServerVote)
-		ovnRegistry.MustRegister(metricDBClusterElectionTimer)
-		ovnRegistry.MustRegister(metricDBClusterLogIndexStart)
-		ovnRegistry.MustRegister(metricDBClusterLogIndexNext)
-		ovnRegistry.MustRegister(metricDBClusterLogNotCommitted)
-		ovnRegistry.MustRegister(metricDBClusterLogNotApplied)
-		ovnRegistry.MustRegister(metricDBClusterConnIn)
-		ovnRegistry.MustRegister(metricDBClusterConnOut)
-		ovnRegistry.MustRegister(metricDBClusterConnInErr)
-		ovnRegistry.MustRegister(metricDBClusterConnOutErr)
+		prometheus.MustRegister(metricDBClusterCID)
+		prometheus.MustRegister(metricDBClusterSID)
+		prometheus.MustRegister(metricDBClusterServerStatus)
+		prometheus.MustRegister(metricDBClusterTerm)
+		prometheus.MustRegister(metricDBClusterServerRole)
+		prometheus.MustRegister(metricDBClusterServerVote)
+		prometheus.MustRegister(metricDBClusterElectionTimer)
+		prometheus.MustRegister(metricDBClusterLogIndexStart)
+		prometheus.MustRegister(metricDBClusterLogIndexNext)
+		prometheus.MustRegister(metricDBClusterLogNotCommitted)
+		prometheus.MustRegister(metricDBClusterLogNotApplied)
+		prometheus.MustRegister(metricDBClusterConnIn)
+		prometheus.MustRegister(metricDBClusterConnOut)
+		prometheus.MustRegister(metricDBClusterConnInErr)
+		prometheus.MustRegister(metricDBClusterConnOutErr)
 	}
-	ovnRegistry.MustRegister(metricDBE2eTimestamp)
+	prometheus.MustRegister(metricDBE2eTimestamp)
 
 	// functions responsible for collecting the values and updating the prometheus metrics
 	go func() {

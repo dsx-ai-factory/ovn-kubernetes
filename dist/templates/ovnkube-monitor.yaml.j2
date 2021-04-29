@@ -1,6 +1,7 @@
 # define ServiceMontior and Service resources for ovnkube-master, ovnkube-node,
 # and ovnkube-db (required for prometheus monitoring)
 
+---
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
@@ -11,8 +12,11 @@ metadata:
 spec:
   endpoints:
   - interval: 30s
-    port: http-metrics
-    scheme: http
+    port: ovnkube-master-metrics
+    scheme: https
+    bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+    tlsConfig:
+      insecureSkipVerify: true
     path: /metrics
   jobLabel: k8s-app
   namespaceSelector:
@@ -21,6 +25,7 @@ spec:
   selector:
     matchLabels:
       k8s-app: ovnkube-master
+
 ---
 apiVersion: v1
 kind: Service
@@ -36,12 +41,12 @@ spec:
   clusterIP: None
   publishNotReadyAddresses: true
   ports:
-  - name: http-metrics
+  - name: ovnkube-master-metrics
     port: 9409
     protocol: TCP
     targetPort: 9409
----
 
+---
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
@@ -51,23 +56,18 @@ metadata:
   namespace: ovn-kubernetes
 spec:
   endpoints:
-  - interval: 30s
-    port: ovnkube-node-metrics
-    path: /metrics
-    scheme: http
   - interval: 60s
     metricRelabelings:
     - action: drop
       sourceLabels:
       - __name__
       regex: ovs_vswitchd_interface.+(ingress_policing.+|_state|_of_port|_mtu|_duplex|_ifindex|_link_speed|_driver_name)
-    port: ovs-metrics
+    port: ovnkube-node-metrics
     path: /metrics
-    scheme: http
-  - interval: 30s
-    port: ovn-metrics
-    path: /metrics
-    scheme: http
+    scheme: https
+    bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+    tlsConfig:
+      insecureSkipVerify: true
   jobLabel: k8s-app
   namespaceSelector:
     matchNames:
@@ -75,6 +75,7 @@ spec:
   selector:
     matchLabels:
       k8s-app: ovnkube-node
+
 ---
 apiVersion: v1
 kind: Service
@@ -94,12 +95,3 @@ spec:
     port: 9410
     protocol: TCP
     targetPort: 9410
-  - name: ovn-metrics
-    port: 9476
-    protocol: TCP
-    targetPort: 9476
-  - name: ovs-metrics
-    port: 9310
-    protocol: TCP
-    targetPort: 9310
-

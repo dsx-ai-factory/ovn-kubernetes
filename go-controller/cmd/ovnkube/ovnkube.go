@@ -266,6 +266,13 @@ func runOvnKube(ctx *cli.Context) error {
 		if err := ovnController.Start(master, wg, ctx.Context); err != nil {
 			return err
 		}
+
+		// now that ovnkube master is running, lets expose the metrics HTTP endpoint if configured
+		// start the prometheus server to serve OVN K8s Metrics (default master port: 9409)
+		if config.Kubernetes.MetricsBindAddress != "" {
+			// serve OVS ^ovnkube_master metrics
+			metrics.StartMetricsServer(config.Kubernetes.MetricsBindAddress, config.Kubernetes.MetricsEnablePprof)
+		}
 	}
 
 	if node != "" {
@@ -293,22 +300,21 @@ func runOvnKube(ctx *cli.Context) error {
 		}
 		end := time.Since(start)
 		metrics.MetricNodeReadyDuration.Set(end.Seconds())
-	}
 
-	// now that ovnkube master/node are running, lets expose the metrics HTTP endpoint if configured
-	// start the prometheus server to serve OVN K8s Metrics (default master port: 9409, node port: 9410)
-	if config.Kubernetes.MetricsBindAddress != "" {
-		metrics.StartMetricsServer(config.Kubernetes.MetricsBindAddress, config.Kubernetes.MetricsEnablePprof)
-	}
-
-	// start the prometheus server to serve OVN Metrics (default port: 9476)
-	if config.Kubernetes.OVNMetricsBindAddress != "" {
-		ovsDBClient, err := metrics.SetupOvsDBClient(metrics.OvnMetrics)
-		if err != nil {
-			return fmt.Errorf("error when trying to initialize ovsdb client: %v", err)
+		// start the prometheus server to serve OVN Node Metrics (default port: 9410)
+		if config.Kubernetes.MetricsBindAddress != "" {
+			ovsDBClient, err := metrics.SetupOvsDBClient()
+			if err != nil {
+				return fmt.Errorf("error when trying to initialize ovsdb client: %v", err)
+			}
+			// serve OVN ^ovn_db, ^ovn_northd metrics from the ovnkube-node pod that is matching labels accordingly
+			metrics.RegisterOvnCentralMetrics(ovnClientset.KubeClient, node, config.MetricsScrapeInterval, stopChan)
+			// serve OVN ^ovn_controller metrics
+			metrics.RegisterOvnNodeMetrics(ovsDBClient, config.MetricsScrapeInterval, stopChan)
+			// serve OVS ^ovs metrics
+			metrics.RegisterOvsMetrics(ovsDBClient, config.MetricsScrapeInterval, stopChan)
+			metrics.StartMetricsServer(config.Kubernetes.MetricsBindAddress, true)
 		}
-		metrics.RegisterOvnMetrics(ovsDBClient, ovnClientset.KubeClient, node, config.MetricsScrapeInterval, stopChan)
-		metrics.StartOVNMetricsServer(config.Kubernetes.OVNMetricsBindAddress)
 	}
 
 	// run until cancelled

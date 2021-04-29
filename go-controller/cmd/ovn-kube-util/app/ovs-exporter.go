@@ -39,14 +39,14 @@ var OvsExporterCommand = cli.Command{
 		stopChan := make(chan struct{})
 
 		// start the ovsdb client for ovs metrics monitoring
-		ovsDBClient, err := metrics.SetupOvsDBClient(metrics.OvsMetrics)
+		ovsDBClient, err := metrics.SetupOvsDBClient()
 		if err != nil {
 			return fmt.Errorf("error when trying to initialize ovsdb client: %v", err)
 		}
 		// register ovs metrics that will be served off of /metrics path
 		metrics.RegisterOvsMetrics(ovsDBClient, metricsScrapeInterval, stopChan)
 		// start the prometheus server to serve OVS Metrics (default port: 9310)
-		metrics.StartOVSMetricsServer(bindAddress)
+		metrics.StartMetricsServer(bindAddress, false)
 
 		// run until cancelled
 		<-ctx.Context.Done()
