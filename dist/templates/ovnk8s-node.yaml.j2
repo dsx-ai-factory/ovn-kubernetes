@@ -91,6 +91,8 @@ spec:
             - mountPath: /ovn-cert
               name: ovn-pki
               readOnly: true
+            - mountPath: /var/log/openvswitch/
+              name: host-var-log-ovs
             {% if kind is defined and kind -%}
             - mountPath: /var/run/netns
               name: host-netns
@@ -236,17 +238,11 @@ spec:
         - name: host-slash
           hostPath:
             path: /
-        - name: host-config-openvswitch
-          hostPath:
-            path: /etc/origin/openvswitch
         {% if kind is defined and kind -%}
         - name: host-netns
           hostPath:
             path: /var/run/netns
         {% endif %}
-        - name: host-etc-openvswitch
-          hostPath:
-            path: /etc/openvswitch/
 
       tolerations:
         - operator: "Exists"
