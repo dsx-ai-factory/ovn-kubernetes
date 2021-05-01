@@ -931,7 +931,12 @@ func ovsDbSizeMetricUpdater(metricsScrapeInterval int, stopChan chan struct{}) {
 		select {
 		case <-ticker.C:
 			dbFile := "/etc/openvswitch/conf.db"
-			fileInfo, err := os.Stat(dbFile)
+			// container case, /host mountPath
+			fileInfo, err := os.Stat("/host/" + dbFile)
+			if err != nil {
+				// host case
+				fileInfo, err = os.Stat(dbFile)
+			}
 			if err != nil {
 				klog.Errorf("Failed to get the OVS DB size :(%v)", err)
 			} else {

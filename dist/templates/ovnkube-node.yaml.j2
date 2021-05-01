@@ -126,6 +126,8 @@ spec:
           readOnly: true
         - mountPath: /var/log/ovn-kubernetes/
           name: host-var-log-ovnkube
+        - mountPath: /var/log/openvswitch/
+          name: host-var-log-ovs
         - mountPath: /var/run/openvswitch/
           name: host-var-run-ovs
         - mountPath: /var/run/ovn/
