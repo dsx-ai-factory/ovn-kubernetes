@@ -389,17 +389,30 @@ spec:
       annotations:
        message: There is no running ovn-sbdb leader
 
-    - alert: OvnDbDBSize
+    - alert: OvnSBDBDbSize
       expr: |
-        rate(ovn_db_db_size{namespace="ovn-kubernetes", job="ovnkube-node"}[15m]) * 5 * 60 / 1024 / 1024 > 1
+        rate(ovn_db_db_size{namespace="ovn-kubernetes", job="ovnkube-node", db_name="OVN_Southbound"}[15m]) * 5 * 60 / 1024 / 1024 > 40
       for: 10m
       labels:
         severity: warning
         pduuid: P2AR7UQ
-        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/960e_tDMk/k8s-control-panel-kube-agent
+        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/sihGi2DGz/central-southbound-db
       annotations:
        message: |
-         Pod ovn-kubernetes/ {{ $labels.pod }} {{ $labels.db_name }} size is increasing
+         Pod ovn-kubernetes/ {{ $labels.pod }} OVN_Southbound DB size is increasing
+         {{ printf "%.2f" $value }} MB / 5 minutes
+
+    - alert: OvnNBDBDbSize
+      expr: |
+        rate(ovn_db_db_size{namespace="ovn-kubernetes", job="ovnkube-node", db_name="OVN_Northbound"}[15m]) * 5 * 60 / 1024 / 1024 > 10
+      for: 10m
+      labels:
+        severity: warning
+        pduuid: P2AR7UQ
+        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UUPXlpvGk/central-northbound-db
+      annotations:
+       message: |
+         Pod ovn-kubernetes/ {{ $labels.pod }} OVN_Northbound DB size is increasing
          {{ printf "%.2f" $value }} MB / 5 minutes
 
     - alert: OvnNorthdContainerRestarts
