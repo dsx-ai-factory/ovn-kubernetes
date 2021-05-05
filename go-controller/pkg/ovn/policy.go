@@ -511,7 +511,6 @@ func podDeleteAllowMulticastPolicy(ns string, portInfo *lpInfo) error {
 func (oc *Controller) localPodAddDefaultDeny(nsInfo *namespaceInfo,
 	policy *knet.NetworkPolicy, portInfo *lpInfo) {
 	oc.lspMutex.Lock()
-	defer oc.lspMutex.Unlock()
 
 	// Default deny rule.
 	// 1. Any pod that matches a network policy should get a default
@@ -524,12 +523,13 @@ func (oc *Controller) localPodAddDefaultDeny(nsInfo *namespaceInfo,
 	// the PolicyTypes has 'egress' in it, we add a default
 	// egress deny rule.
 
+	addIngressDeny := false
+	addEgressDeny := false
+
 	// Handle condition 1 above.
 	if !(len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == knet.PolicyTypeEgress) {
 		if oc.lspIngressDenyCache[portInfo.name] == 0 {
-			if err := addToPortGroup(nsInfo.portGroupIngressDenyUUID, portInfo); err != nil {
-				klog.Warningf("Failed to add port %s to ingress deny ACL: %v", portInfo.name, err)
-			}
+			addIngressDeny = true
 		}
 		oc.lspIngressDenyCache[portInfo.name]++
 	}
@@ -538,18 +538,34 @@ func (oc *Controller) localPodAddDefaultDeny(nsInfo *namespaceInfo,
 	if (len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == knet.PolicyTypeEgress) ||
 		len(policy.Spec.Egress) > 0 || len(policy.Spec.PolicyTypes) == 2 {
 		if oc.lspEgressDenyCache[portInfo.name] == 0 {
-			if err := addToPortGroup(nsInfo.portGroupEgressDenyUUID, portInfo); err != nil {
-				klog.Warningf("Failed to add port %s to egress deny ACL: %v", portInfo.name, err)
-			}
+			addEgressDeny = true
 		}
 		oc.lspEgressDenyCache[portInfo.name]++
 	}
+
+	// we're done with the lsp cache - release the lock before transacting
+	oc.lspMutex.Unlock()
+
+	if addIngressDeny {
+		if err := addToPortGroup(nsInfo.portGroupIngressDenyUUID, portInfo); err != nil {
+			klog.Warningf("Failed to add port %s to ingress deny ACL: %v", portInfo.name, err)
+		}
+	}
+
+	if addEgressDeny {
+		if err := addToPortGroup(nsInfo.portGroupEgressDenyUUID, portInfo); err != nil {
+			klog.Warningf("Failed to add port %s to egress deny ACL: %v", portInfo.name, err)
+		}
+	}
+
 }
 
 func (oc *Controller) localPodDelDefaultDeny(
 	np *networkPolicy, nsInfo *namespaceInfo, portInfo *lpInfo) {
 	oc.lspMutex.Lock()
-	defer oc.lspMutex.Unlock()
+
+	deleteFromIngress := false
+	deleteFromEgress := false
 
 	// Remove port from ingress deny port-group for [Ingress] and [ingress,egress] PolicyTypes
 	// If NOT [egress] PolicyType
@@ -557,9 +573,7 @@ func (oc *Controller) localPodDelDefaultDeny(
 		if oc.lspIngressDenyCache[portInfo.name] > 0 {
 			oc.lspIngressDenyCache[portInfo.name]--
 			if oc.lspIngressDenyCache[portInfo.name] == 0 {
-				if err := deleteFromPortGroup(nsInfo.portGroupIngressDenyUUID, portInfo); err != nil {
-					klog.Warningf("Failed to remove port %s from ingress deny ACL: %v", portInfo.name, err)
-				}
+				deleteFromIngress = true
 			}
 		}
 	}
@@ -570,12 +584,24 @@ func (oc *Controller) localPodDelDefaultDeny(
 		if oc.lspEgressDenyCache[portInfo.name] > 0 {
 			oc.lspEgressDenyCache[portInfo.name]--
 			if oc.lspEgressDenyCache[portInfo.name] == 0 {
-				if err := deleteFromPortGroup(nsInfo.portGroupEgressDenyUUID, portInfo); err != nil {
-					klog.Warningf("Failed to remove port %s from egress deny ACL: %v", portInfo.name, err)
-				}
+				deleteFromEgress = true
 			}
 		}
 	}
+	oc.lspMutex.Unlock()
+
+	if deleteFromIngress {
+		if err := deleteFromPortGroup(nsInfo.portGroupIngressDenyUUID, portInfo); err != nil {
+			klog.Warningf("Failed to remove port %s from ingress deny ACL: %v", portInfo.name, err)
+		}
+	}
+
+	if deleteFromEgress {
+		if err := deleteFromPortGroup(nsInfo.portGroupEgressDenyUUID, portInfo); err != nil {
+			klog.Warningf("Failed to remove port %s from egress deny ACL: %v", portInfo.name, err)
+		}
+	}
+
 }
 
 func (oc *Controller) handleLocalPodSelectorAddFunc(
