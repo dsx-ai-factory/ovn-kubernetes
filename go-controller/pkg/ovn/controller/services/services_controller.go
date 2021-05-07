@@ -447,13 +447,26 @@ func (c *Controller) syncServices(key string) error {
 	return nil
 }
 
+// RequestFullSync re-syncs every service that currently exists
+func (c *Controller) RequestFullSync() error {
+	klog.Info("Full service sync requested")
+	services, err := c.serviceLister.List(labels.Everything())
+	if err != nil {
+		return err
+	}
+	for _, service := range services {
+		c.onServiceAdd(service)
+	}
+	return nil
+}
+
 // handlers
 
-// onServiceUpdate queues the Service for processing.
+// onServiceAdd queues the Service for processing.
 func (c *Controller) onServiceAdd(obj interface{}) {
 	key, err := cache.MetaNamespaceKeyFunc(obj)
 	if err != nil {
-		utilruntime.HandleError(fmt.Errorf("Couldn't get key for object %+v: %v", obj, err))
+		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
 	klog.V(4).Infof("Adding service %s", key)
