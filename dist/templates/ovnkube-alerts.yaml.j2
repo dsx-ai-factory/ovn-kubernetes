@@ -45,7 +45,7 @@ spec:
         rate(kube_pod_container_status_restarts_total{namespace="ovn-kubernetes", container=~"ovnkube.*"}[15m]) * 60 * 5 > 0
       for: 30m
       labels:
-       severity: critical
+       severity: major
        pduuid: P2AR7UQ
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/960e_tDMk/k8s-control-panel-kube-agent
       annotations:
@@ -59,7 +59,7 @@ spec:
         (kube_pod_info{namespace="ovn-kubernetes", pod=~"ovnkube-node.*"}) > 0
       for: 10m
       labels:
-       severity: warning
+       severity: minor
        pduuid: P2AR7UQ
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/960e_tDMk/k8s-control-panel-kube-agent
       annotations:
@@ -73,7 +73,7 @@ spec:
         (kube_pod_info{namespace="ovn-kubernetes", pod=~"ovn-nbdb-.*"}) > 0
       for: 10m
       labels:
-       severity: warning
+       severity: major
        pduuid: P2AR7UQ
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UUPXlpvGk/central-northbound-db
       annotations:
@@ -87,7 +87,7 @@ spec:
         (kube_pod_info{namespace="ovn-kubernetes", pod=~"ovn-sbdb-.*"}) > 0
       for: 10m
       labels:
-       severity: warning
+       severity: major
        pduuid: P2AR7UQ
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/sihGi2DGz/central-southbound-db
       annotations:
@@ -101,7 +101,7 @@ spec:
         (kube_pod_info{namespace="ovn-kubernetes", pod=~"ovn-north-.*"}) > 0
       for: 10m
       labels:
-       severity: warning
+       severity: major
        pduuid: P2AR7UQ
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/rjQLlpvMk/central-north-daemon
       annotations:
@@ -116,7 +116,7 @@ spec:
         (kube_pod_info{namespace="ovn-kubernetes", pod=~"ovnkube-master-.*"}) > 0
       for: 10m
       labels:
-       severity: warning
+       severity: minor
        pduuid: P2AR7UQ
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/PHqwgBHMz/k8s-control-panel-kube-manager
       annotations:
@@ -305,7 +305,7 @@ spec:
       expr: time() - max(ovnkube_master_nb_e2e_timestamp) > 120
       for: 4m
       labels:
-       severity: critical
+       severity: major
        pduuid: P2AR7UQ
       annotations:
        message: |
@@ -328,7 +328,7 @@ spec:
         rate(kube_pod_container_status_restarts_total{namespace="ovn-kubernetes", container="nbdb"}[15m]) * 60 * 5 > 0
       for: 30m
       labels:
-       severity: critical
+       severity: major
        pduuid: P2AR7UQ
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UUPXlpvGk/central-northbound-db
       annotations:
@@ -341,7 +341,7 @@ spec:
         rate(kube_pod_container_status_restarts_total{namespace="ovn-kubernetes", container="sbdb"}[15m]) * 60 * 5 > 0
       for: 30m
       labels:
-       severity: critical
+       severity: major
        pduuid: P2AR7UQ
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/sihGi2DGz/central-southbound-db
       annotations:
@@ -404,7 +404,7 @@ spec:
 
     - alert: OvnNBDBDbSize
       expr: |
-        rate(ovn_db_db_size{namespace="ovn-kubernetes", job="ovnkube-node", db_name="OVN_Northbound"}[15m]) * 5 * 60 / 1024 / 1024 > 10
+        rate(ovn_db_db_size{namespace="ovn-kubernetes", job="ovnkube-node", db_name="OVN_Northbound"}[15m]) * 5 * 60 / 1024 / 1024 > 20
       for: 10m
       labels:
         severity: warning
@@ -420,7 +420,7 @@ spec:
         rate(kube_pod_container_status_restarts_total{namespace="ovn-kubernetes", container="ovn-northd"}[15m]) * 60 * 5 > 0
       for: 30m
       labels:
-       severity: critical
+       severity: major
        pduuid: P2AR7UQ
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/rjQLlpvMk/central-north-daemon
       annotations:
@@ -443,7 +443,7 @@ spec:
         rate(ovn_northd_txn_error{namespace="ovn-kubernetes",job="ovnkube-node"}[1m]) > 0
       for: 10m
       labels:
-       severity: critical
+       severity: major
        pduuid: P2AR7UQ
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/rjQLlpvMk/central-north-daemon
       annotations:
@@ -456,7 +456,7 @@ spec:
         rate(ovn_northd_txn_incomplete{namespace="ovn-kubernetes",job="ovnkube-node"}[1m]) > 1
       for: 30m
       labels:
-       severity: critical
+       severity: major
        pduuid: P2AR7UQ
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/rjQLlpvMk/central-north-daemon
       annotations:
@@ -470,7 +470,7 @@ spec:
         container="ovn-controller"}[15m]) * 60 * 5 > 0
       for: 30m
       labels:
-       severity: critical
+       severity: major
        pduuid: P2AR7UQ
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/9dlp8fSGk/host-controller
       annotations:
@@ -483,7 +483,7 @@ spec:
         rate(ovn_controller_txn_error{namespace="ovn-kubernetes",job="ovnkube-node"}[1m]) > 0
       for: 10m
       labels:
-       severity: critical
+       severity: major
        pduuid: P2AR7UQ
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/9dlp8fSGk/host-controller
       annotations:
@@ -496,7 +496,7 @@ spec:
         rate(ovn_controller_txn_incomplete{namespace="ovn-kubernetes",job="ovnkube-node"}[1m]) > 1
       for: 30m
       labels:
-       severity: critical
+       severity: major
        pduuid: P2AR7UQ
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/9dlp8fSGk/host-controller
       annotations:
