@@ -61,12 +61,3 @@ func deletePortGroup(hashName string) {
 		return
 	}
 }
-
-func stringSliceMembership(slice []string, key string) bool {
-	for _, val := range slice {
-		if val == key {
-			return true
-		}
-	}
-	return false
-}

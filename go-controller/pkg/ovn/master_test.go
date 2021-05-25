@@ -6,6 +6,7 @@ import (
 	"net"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	goovn "github.com/ebay/go-ovn"
@@ -800,6 +801,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		app      *cli.App
 		f        *factory.WatchFactory
 		stopChan chan struct{}
+		wg       *sync.WaitGroup
 	)
 
 	const (
@@ -815,11 +817,13 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		app.Name = "test"
 		app.Flags = config.Flags
 		stopChan = make(chan struct{})
+		wg = &sync.WaitGroup{}
 	})
 
 	ginkgo.AfterEach(func() {
 		close(stopChan)
 		f.Shutdown()
+		wg.Wait()
 	})
 
 	/* FIXME with update to local gw
@@ -1170,10 +1174,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 			addPBRandNATRules(fexec, nodeName, nodeSubnet, gatewayRouterIP, nodeMgmtPortIP, nodeMgmtPortMAC)
 
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 get logical_router " + types.GWRouterPrefix + nodeName + " external_ids:physical_ips",
-				Output: "169.254.33.2",
-			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 -- --may-exist lr-add " + gwRouter + " -- set logical_router " + gwRouter + " options:chassis=" + systemID + " external_ids:physical_ip=" + gatewayRouterIP + " external_ids:physical_ips=" + gatewayRouterIP,
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + types.OVNJoinSwitch + " " + types.JoinSwitchToGWRouterPrefix + gwRouter + " -- set logical_switch_port " + types.JoinSwitchToGWRouterPrefix + gwRouter + " type=router options:router-port=" + types.GWRouterToJoinSwitchPrefix + gwRouter + " addresses=router",
@@ -1205,11 +1205,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 			addPBRandNATRules(fexec, nodeName, nodeSubnet, gatewayRouterIP, nodeMgmtPortIP, nodeMgmtPortMAC)
 
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 get logical_router " + types.GWRouterPrefix + nodeName + " external_ids:physical_ips",
-				Output: "169.254.33.2",
-			})
-
 			f, err = factory.NewMasterWatchFactory(fakeClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1226,6 +1221,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 			clusterController.nodeLocalNatIPv4Allocator, _ = ipallocator.NewCIDRRange(ovntest.MustParseIPNet(types.V4NodeLocalNATSubnet))
 
+			clusterController.StartServiceController(wg, false)
 			// Let the real code run and ensure OVN database sync
 			clusterController.WatchNodes()
 

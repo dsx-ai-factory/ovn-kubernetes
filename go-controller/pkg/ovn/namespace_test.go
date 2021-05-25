@@ -2,9 +2,8 @@ package ovn
 
 import (
 	"context"
-	"net"
-
 	"github.com/urfave/cli/v2"
+	"net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
