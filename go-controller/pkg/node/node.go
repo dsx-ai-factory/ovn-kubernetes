@@ -282,13 +282,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		klog.Errorf("Failed to obtain local IP from node %q: %v", node.Name, err)
 	}
 
-	if util.UseEndpointSlices(n.client) {
-		klog.Infof("Ovnkube-node watcher using EndpointSlices")
-		n.WatchEndpointSlices(nodeIP)
-	} else {
-		klog.Infof("Ovnkube-node watcher using Endpoints instead of EndpointSlices")
-		n.WatchEndpoints(nodeIP)
-	}
+	n.WatchEndpointSlices(nodeIP)
 
 	cniServer := cni.NewCNIServer("", n.watchFactory)
 	err = cniServer.Start(cni.HandleCNIRequest)
@@ -359,7 +353,7 @@ func (n *OvnNode) WatchEndpointSlices(nodeIP string) {
 				}
 			}
 		},
-	}, syncEndpoints)
+	}, syncEndpointSlices)
 	klog.Infof("Bootstrapping existing EndpointSlices took %v", time.Since(start))
 }
 
@@ -468,85 +462,7 @@ func updateEndpointSlice(nodeIP string, oldEndpointSlice, newEndpointSlice *disc
 	}
 }
 
-func (n *OvnNode) WatchEndpoints(nodeIP string) {
-	start := time.Now()
-
-	n.watchFactory.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			ep := obj.(*kapi.Endpoints)
-			// Add the ep ports to ovn-firewall zone
-			// if backed by k8s-node ip's
-			addEPToFirewallZone(nodeIP, ep.Subsets)
-		},
-		UpdateFunc: func(old, new interface{}) {
-			epNew := new.(*kapi.Endpoints)
-			epOld := old.(*kapi.Endpoints)
-			updateRequired := true
-			if len(epOld.Subsets) == len(epNew.Subsets) {
-				updateRequired = false
-			outer:
-				for i := 0; i < len(epOld.Subsets); i++ {
-					if !reflect.DeepEqual(epOld.Subsets[i].Ports, epNew.Subsets[i].Ports) {
-						updateRequired = true
-						break
-					}
-					if len(epOld.Subsets[i].Addresses) != len(epNew.Subsets[i].Addresses) {
-						updateRequired = true
-						break
-					}
-					epOldAddrLen := len(epOld.Subsets[i].Addresses)
-					epOldAddress := make(map[string]bool)
-					for j := 0; j < epOldAddrLen; j++ {
-						epOldAddress[epOld.Subsets[i].Addresses[j].IP] = true
-					}
-					for j := 0; j < epOldAddrLen; j++ {
-						if _, ok := epOldAddress[epNew.Subsets[i].Addresses[j].IP]; !ok {
-							updateRequired = true
-							break outer
-						}
-					}
-				}
-			}
-			if !updateRequired {
-				return
-			}
-			updateEndpoints(nodeIP, epOld.Subsets, epNew.Subsets)
-		},
-		DeleteFunc: func(obj interface{}) {
-			ep := obj.(*kapi.Endpoints)
-			// Deletes the ep ports from ovn and ngn-admin zone if the endpoint IP is same as the nodeIP.
-			// Also deletes any connection tracking entries for UDP and SCTP ports
-			for _, subset := range ep.Subsets {
-				for _, port := range subset.Ports {
-					for _, address := range subset.Addresses {
-						if nodeIP == address.IP {
-							err := removePortFromFirewallZone(ovnFirewallZone, port.Port, port.Protocol)
-							if err != nil {
-								klog.Errorf("Error in removing port %d to ovn firewall zone: (%v)", port.Port, err)
-							}
-							err = removePortFromFirewallZone(ngnAdminFirewallZone, port.Port, port.Protocol)
-							if err != nil {
-								klog.Errorf("Error in removing port %d to ngn-admin firewall zone: (%v)",
-									port.Port, err)
-							}
-						}
-						if port.Protocol == kapi.ProtocolUDP || port.Protocol == kapi.ProtocolSCTP {
-							err := deleteConntrack(address.IP, port.Port, port.Protocol)
-							if err != nil {
-								klog.Errorf("Failed to delete conntrack entry for %s: %v", address.IP, err)
-							}
-						}
-					}
-				}
-			}
-		},
-	}, syncEndpoints)
-	klog.Infof("Bootstrapping existing endpoints took %v", time.Since(start))
-}
-
-// syncEndpoints add's ovn-k8s-gw0 & ovn-k8s-mp0 ports to
-// ovn firewall zone when node restarts.
-func syncEndpoints(obj []interface{}) {
+func syncEndpointSlices(obj []interface{}) {
 	if err := addInterfaceToFirewallZone(types.K8sMgmtIntfName, ovnFirewallZone); err != nil {
 		klog.Errorf("Failed to add interface %s to ovn firewall zone: (%v)",
 			types.K8sMgmtIntfName, err)
@@ -554,76 +470,5 @@ func syncEndpoints(obj []interface{}) {
 	if err := addInterfaceToFirewallZone(localnetGatewayNextHopPort, ovnFirewallZone); err != nil {
 		klog.Errorf("Failed to add interface %s to ovn firewall zone: (%v)",
 			localnetGatewayNextHopPort, err)
-	}
-}
-
-func addEPToFirewallZone(nodeIP string, epSubsets []kapi.EndpointSubset) {
-	for _, subset := range epSubsets {
-		for _, address := range subset.Addresses {
-			if nodeIP != address.IP {
-				continue
-			}
-			for _, port := range subset.Ports {
-				err := addPortToFirewallZone(ovnFirewallZone, port.Port, port.Protocol)
-				if err != nil {
-					klog.Errorf("Error in adding port %d to ovn firewall zone: (%v)", port.Port, err)
-				}
-				err = addPortToFirewallZone(ngnAdminFirewallZone, port.Port, port.Protocol)
-				if err != nil {
-					klog.Errorf("Error in adding port %d to ngn-admin firewall zone: (%v)", port.Port, err)
-				}
-			}
-			return
-		}
-	}
-}
-
-func endPointExists(epIP string, epPort int32, protocol kapi.Protocol, epNewSubsets []kapi.EndpointSubset) bool {
-	for _, subset := range epNewSubsets {
-		for _, address := range subset.Addresses {
-			for _, port := range subset.Ports {
-				if epIP == address.IP && epPort == port.Port && protocol == port.Protocol {
-					return true
-				}
-			}
-		}
-	}
-	return false
-}
-
-func updateEndpoints(nodeIP string, epOldSubsets, epNewSubsets []kapi.EndpointSubset) {
-	// add any new ports to the firewalld zone
-	addEPToFirewallZone(nodeIP, epNewSubsets)
-
-	// now remove any old ports that are not present in the new endpoint resource
-	for _, subset := range epOldSubsets {
-		for _, port := range subset.Ports {
-			for _, address := range subset.Addresses {
-				// if the port is neither UDP nor SCTP and endpointIP doesn't match the node's IP, then
-				// there is nothing to do
-				if nodeIP != address.IP && port.Protocol != kapi.ProtocolUDP && port.Protocol != kapi.ProtocolSCTP {
-					continue
-				}
-				if endPointExists(address.IP, port.Port, port.Protocol, epNewSubsets) {
-					continue
-				}
-				if nodeIP == address.IP {
-					err := removePortFromFirewallZone(ovnFirewallZone, port.Port, port.Protocol)
-					if err != nil {
-						klog.Errorf("Error in removing port %d to ovn firewall zone: (%v)", port.Port, err)
-					}
-					err = removePortFromFirewallZone(ngnAdminFirewallZone, port.Port, port.Protocol)
-					if err != nil {
-						klog.Errorf("Error in removing port %d to ngn-admin firewall zone: (%v)", port.Port, err)
-					}
-				}
-				if port.Protocol == kapi.ProtocolUDP || port.Protocol == kapi.ProtocolSCTP {
-					err := deleteConntrack(address.IP, port.Port, port.Protocol)
-					if err != nil {
-						klog.Errorf("Failed to delete conntrack entry for %s: %v", address.IP, err)
-					}
-				}
-			}
-		}
 	}
 }

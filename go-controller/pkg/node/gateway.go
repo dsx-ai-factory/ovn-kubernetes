@@ -12,6 +12,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
+	discovery "k8s.io/api/discovery/v1beta1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 )
@@ -100,21 +101,21 @@ func (g *gateway) SyncServices(objs []interface{}) {
 	}
 }
 
-func (g *gateway) AddEndpoints(ep *kapi.Endpoints) {
+func (g *gateway) AddEndpointSlice(epSlice *discovery.EndpointSlice) {
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.AddEndpoints(ep)
+		g.loadBalancerHealthChecker.AddEndpointSlice(epSlice)
 	}
 }
 
-func (g *gateway) UpdateEndpoints(old, new *kapi.Endpoints) {
+func (g *gateway) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.EndpointSlice) {
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.UpdateEndpoints(old, new)
+		g.loadBalancerHealthChecker.UpdateEndpointSlice(oldEpSlice, newEpSlice)
 	}
 }
 
-func (g *gateway) DeleteEndpoints(ep *kapi.Endpoints) {
+func (g *gateway) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) {
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.DeleteEndpoints(ep)
+		g.loadBalancerHealthChecker.DeleteEndpointSlice(epSlice)
 	}
 }
 
@@ -139,19 +140,19 @@ func (g *gateway) Init(wf factory.NodeWatchFactory) error {
 		},
 	}, g.SyncServices)
 
-	wf.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
+	wf.AddEndpointSliceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			ep := obj.(*kapi.Endpoints)
-			g.AddEndpoints(ep)
+			epSlice := obj.(*discovery.EndpointSlice)
+			g.AddEndpointSlice(epSlice)
 		},
 		UpdateFunc: func(old, new interface{}) {
-			oldEp := old.(*kapi.Endpoints)
-			newEp := new.(*kapi.Endpoints)
-			g.UpdateEndpoints(oldEp, newEp)
+			oldEpSlice := old.(*discovery.EndpointSlice)
+			newEpSlice := new.(*discovery.EndpointSlice)
+			g.UpdateEndpointSlice(oldEpSlice, newEpSlice)
 		},
 		DeleteFunc: func(obj interface{}) {
-			ep := obj.(*kapi.Endpoints)
-			g.DeleteEndpoints(ep)
+			epSlice := obj.(*discovery.EndpointSlice)
+			g.DeleteEndpointSlice(epSlice)
 		},
 	}, nil)
 	return nil
