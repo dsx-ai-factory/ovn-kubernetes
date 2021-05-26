@@ -2,7 +2,7 @@
 Description=OVS metrics exporter service
 
 [Service]
-ExecStart=<EXPORTER_PATH>/ovn-kube-util --loglevel=4 ovs-exporter --metrics-bind-address <LISTENING_IP>:9310
+ExecStart=<EXPORTER_PATH>/ovn-kube-util --loglevel=4 ovs-exporter --metrics-bind-address <LISTENING_IP>:9310 --tls-cert-file <TLS_PATH>/cert.pem --tls-key-file <TLS_PATH>/key.pem
 
 [Install]
 WantedBy=multi-user.target

@@ -236,6 +236,28 @@ func StartMetricsServer(bindAddress string, enablePprof bool) {
 	}, 5*time.Second, utilwait.NeverStop)
 }
 
+// StartMetricsServerTLS runs the prometheus listener so that OVN K8s metrics can be collected
+// This version puts the endpoint behind TLS.
+func StartMetricsServerTLS(bindAddress string, enablePprof bool, certFile string, keyFile string) {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+
+	if enablePprof {
+		mux.HandleFunc("/debug/pprof/", pprof.Index)
+		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	}
+
+	go utilwait.Until(func() {
+		err := http.ListenAndServeTLS(bindAddress, certFile, keyFile, mux)
+		if err != nil {
+			utilruntime.HandleError(fmt.Errorf("starting metrics server failed: %v", err))
+		}
+	}, 5*time.Second, utilwait.NeverStop)
+}
+
 func RegisterOvnNodeMetrics(ovsDBClient *util.OvsdbClient, metricsScrapeInterval int, stopChan chan struct{}) {
 	go RegisterOvnControllerMetrics(ovsDBClient, metricsScrapeInterval, stopChan)
 }
