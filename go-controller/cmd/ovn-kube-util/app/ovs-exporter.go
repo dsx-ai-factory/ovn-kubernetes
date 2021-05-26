@@ -24,12 +24,23 @@ var OvsExporterCommand = cli.Command{
 			Value:       30,
 			Destination: &metricsScrapeInterval,
 		},
+		&cli.StringFlag{
+			Name:  "tls-cert-file",
+			Usage: "The certificate to use for TLS",
+		},
+		&cli.StringFlag{
+			Name:  "tls-key-file",
+			Usage: "The key to use for TLS",
+		},
 	},
 	Action: func(ctx *cli.Context) error {
 		bindAddress := ctx.String("metrics-bind-address")
 		if bindAddress == "" {
 			bindAddress = "0.0.0.0:9310"
 		}
+
+		tlsCertFile := ctx.String("tls-cert-file")
+		tlsKeyFile := ctx.String("tls-key-file")
 
 		if err := util.SetSpecificExec(kexec.New(), "ovs-vsctl", "ovs-dpctl",
 			"ovs-ofctl", "ovs-appctl", "ovsdb-client"); err != nil {
@@ -46,7 +57,12 @@ var OvsExporterCommand = cli.Command{
 		// register ovs metrics that will be served off of /metrics path
 		metrics.RegisterOvsMetrics(ovsDBClient, metricsScrapeInterval, stopChan)
 		// start the prometheus server to serve OVS Metrics (default port: 9310)
-		metrics.StartMetricsServer(bindAddress, false)
+		// use TLS if cert and key file were provided at the command line
+		if tlsCertFile != "" && tlsKeyFile != "" {
+			metrics.StartMetricsServerTLS(bindAddress, false, tlsCertFile, tlsKeyFile)
+		} else {
+			metrics.StartMetricsServer(bindAddress, false)
+		}
 
 		// run until cancelled
 		<-ctx.Context.Done()
