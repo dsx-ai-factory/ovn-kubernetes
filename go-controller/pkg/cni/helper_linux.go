@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -161,11 +162,38 @@ func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInter
 	return hostIface, contIface, nil
 }
 
+// move this to SRIOVNET library
+func isVFBoundToVFIODriver(pciAddr string) (bool, error) {
+	driverLink := fmt.Sprintf("/sys/bus/pci/devices/%s/driver", pciAddr)
+	driverPath, err := filepath.EvalSymlinks(driverLink)
+	if err != nil {
+		return false, err
+	}
+	driverStat, err := os.Stat(driverPath)
+	if err != nil {
+		return false, err
+	}
+	driverName := driverStat.Name()
+	return driverName == "vfio-pci", nil
+}
+
 // Setup sriov interface in the pod
 func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInterfaceInfo, pciAddrs string) (*current.Interface, *current.Interface, error) {
 	hostIface := &current.Interface{}
 	contIface := &current.Interface{}
 	ifnameSuffix := ""
+
+	// 0. if the SR-IOV device is bound to VFIO, then there is nothing to do as it will be passed to the
+	// KVM VM directly
+	isVFIO, err := isVFBoundToVFIODriver(pciAddrs)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to determine if the PCI address %s is bound to VFIO: %v", pciAddrs, err)
+	} else if isVFIO {
+		contIface.Name = ifName
+		contIface.Mac = ifInfo.MAC.String()
+		contIface.Sandbox = netns.Path()
+		return hostIface, contIface, nil
+	}
 
 	// 1. get VF netdevice from PCI
 	vfNetdevices, err := util.GetSriovnetOps().GetNetDevicesFromPci(pciAddrs)
