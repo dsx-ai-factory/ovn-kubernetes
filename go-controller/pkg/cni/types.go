@@ -35,7 +35,6 @@ type KubeAPIAuth struct {
 type PodInterfaceInfo struct {
 	util.PodAnnotation
 
-	MTU         int   `json:"mtu"`
 	Ingress     int64 `json:"ingress"`
 	Egress      int64 `json:"egress"`
 	CheckExtIDs bool  `json:"check-external-ids"`
