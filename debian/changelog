@@ -1,0 +1,5 @@
+ovnkube-node-smart-nic (1.nv) UNRELEASED; urgency=medium
+
+  * Initial release.
+
+ -- Shahar Klein <sklein@mvidia.com>  Fri, 04 Jun 2021 11:48:07 -0700

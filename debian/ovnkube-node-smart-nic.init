@@ -1,0 +1,39 @@
+#!/bin/sh
+
+### BEGIN INIT INFO
+# Provides:          ovnkube
+# Required-Start:    $network $named $remote_fs $syslog
+# Required-Stop:     $remote_fs
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: ovnkube
+# Description:       ovnkube for ARM on BF2
+### END INIT INFO
+
+
+
+
+/usr/local/ovn-k8s/bin/ovnkube.sh "ovn-node"
+
+
+case "$1" in
+start)
+    /usr/local/ovn-k8s/bin/ovnkube.sh "ovn-node"
+    ;;
+stop)
+    echo "Stop"
+    ;;
+restart|force-reload)
+    echo "Restart"
+    ;;
+status)
+    echo "Status"
+    ;;
+*)
+    echo "Usage: /etc/init.d/ovnkube-node-smart-nic {start|stop|restart|force-reload|status}"
+    exit 1
+    ;;
+esac
+
+exit 0
+

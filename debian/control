@@ -1,0 +1,7 @@
+Source: ovnkube-node-smart-nic
+Maintainer: Girish Moodalbail <gmoodalbail@nvidia.com>
+
+Package: ovnkube-node-smart-nic
+Architecture: any
+Description: ovnkube in the smart-nic mode
+
