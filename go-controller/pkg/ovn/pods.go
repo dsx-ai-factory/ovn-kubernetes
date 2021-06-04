@@ -30,7 +30,7 @@ func (oc *Controller) syncPods(pods []interface{}) {
 			klog.Errorf("Spurious object in syncPods: %v", podInterface)
 			continue
 		}
-		on, _, err := util.IsNetworkOnPod(pod, oc.nadInfo, &oc.mc.defaultNetAttachDefs)
+		on, _, err := util.IsNetworkOnPod(pod, oc.nadInfo)
 		if err != nil {
 			continue
 		}
@@ -134,7 +134,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		return
 	}
 
-	on, _, err := util.IsNetworkOnPod(pod, oc.nadInfo, &oc.mc.defaultNetAttachDefs)
+	on, _, err := util.IsNetworkOnPod(pod, oc.nadInfo)
 	if err != nil || !on {
 		// the Pod is not attached to this specific network
 		return
@@ -367,7 +367,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	if err != nil {
 		return err
 	}
-	on, network, err := util.IsNetworkOnPod(pod, oc.nadInfo, &oc.mc.defaultNetAttachDefs)
+	on, network, err := util.IsNetworkOnPod(pod, oc.nadInfo)
 	if err != nil || !on {
 		// the pod is not attached to this specific network
 		klog.V(5).Infof("Pod %s/%s is not attached on this network: %s", pod.Namespace, pod.Name, oc.nadInfo.NetName)

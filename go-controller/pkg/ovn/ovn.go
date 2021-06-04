@@ -140,9 +140,6 @@ type OvnMHController struct {
 	ovnController *Controller
 	// controller for non default networks, key is netName of net-attach-def, value is *Controller
 	nonDefaultOvnControllers sync.Map
-	// map of default net-attach-def. There maybe more than one default net-attach-def,
-	// one for full mode and one for smart-nic mode, key is <Namespace>_<Name>
-	defaultNetAttachDefs sync.Map
 }
 
 // Controller structure is the object which holds the controls for starting
@@ -316,7 +313,7 @@ func (mc *OvnMHController) setDefaultOvnController(addressSetFactory addressset.
 		MTU:        config.Default.MTU,
 		NotDefault: false,
 	}
-	nadInfo := util.NewNetAttachDefInfo("default", ovntypes.DefaultNetworkName, defaultNetConf)
+	nadInfo := util.NewNetAttachDefInfo(defaultNetConf)
 	_, err := mc.NewOvnController(nadInfo, addressSetFactory)
 	if err != nil {
 		return err
@@ -1313,7 +1310,6 @@ func (oc *Controller) aclLoggingCanEnable(annotation string, nsInfo *namespaceIn
 }
 
 func (mc *OvnMHController) addNetworkAttachDefinition(netattachdef *nettypes.NetworkAttachmentDefinition) {
-
 	netconf := &cnitypes.NetConf{MTU: config.Default.MTU}
 
 	// looking for network attachment definition that use OVN K8S CNI only
@@ -1332,9 +1328,9 @@ func (mc *OvnMHController) addNetworkAttachDefinition(netattachdef *nettypes.Net
 		netconf.Name = netattachdef.Name
 	}
 
-	nadInfo := util.NewNetAttachDefInfo(netattachdef.Namespace, netattachdef.Name, netconf)
+	nadInfo := util.NewNetAttachDefInfo(netconf)
 	if !nadInfo.NotDefault {
-		mc.defaultNetAttachDefs.Store(netattachdef.Namespace+"_"+netattachdef.Name, true)
+		mc.ovnController.nadInfo.NetAttachDefs.Store(netattachdef.Namespace+"_"+netattachdef.Name, true)
 		return
 	}
 
@@ -1343,6 +1339,21 @@ func (mc *OvnMHController) addNetworkAttachDefinition(netattachdef *nettypes.Net
 		return
 	}
 
+	// Note that net-attach-def add/delete/update events are serialized, so we don't need locks here.
+	// Check if any Controller of the same netconf.Name already exists, if so, check its conf to see if they are the same.
+	v, ok := mc.nonDefaultOvnControllers.Load(nadInfo.NetName)
+	if ok {
+		oc := v.(*Controller)
+		if oc.nadInfo.NetCidr != nadInfo.NetCidr || oc.nadInfo.MTU != nadInfo.MTU {
+			klog.Errorf("Network attachment definition %s/%s does not share the same CNI config of name %s",
+				netattachdef.Namespace, netattachdef.Name, nadInfo.NetName)
+		} else {
+			oc.nadInfo.NetAttachDefs.Store(netattachdef.Namespace+"_"+netattachdef.Name, true)
+		}
+		return
+	}
+
+	nadInfo.NetAttachDefs.Store(netattachdef.Namespace+"_"+netattachdef.Name, true)
 	oc, err := mc.NewOvnController(nadInfo, nil)
 	if err != nil {
 		klog.Errorf(err.Error())
@@ -1378,9 +1389,9 @@ func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.
 		netconf.Name = netattachdef.Name
 	}
 
-	nadInfo := util.NewNetAttachDefInfo(netattachdef.Namespace, netattachdef.Name, netconf)
+	nadInfo := util.NewNetAttachDefInfo(netconf)
 	if !nadInfo.NotDefault {
-		mc.defaultNetAttachDefs.Delete(netattachdef.Namespace + "_" + netattachdef.Name)
+		mc.ovnController.nadInfo.NetAttachDefs.Delete(netattachdef.Namespace + "_" + netattachdef.Name)
 		return
 	}
 
@@ -1391,8 +1402,16 @@ func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.
 	}
 
 	oc := v.(*Controller)
-	if oc.nadInfo.Namespace != netattachdef.Namespace || oc.nadInfo.Name != netattachdef.Name {
-		// this is a different net-attach-def happens to own the same netconf.Name
+	oc.nadInfo.NetAttachDefs.Delete(netattachdef.Namespace + "_" + netattachdef.Name)
+
+	// check if there any net-attach-def sharing the same CNI conf name left, if yes, just return
+	netAttachDefLeft := false
+	oc.nadInfo.NetAttachDefs.Range(func(key, value interface{}) bool {
+		netAttachDefLeft = true
+		return false
+	})
+
+	if netAttachDefLeft {
 		return
 	}
 
@@ -1453,7 +1472,7 @@ func (mc *OvnMHController) syncNetworkAttachDefinition(netattachdefs []interface
 		if netConf.Name == "" {
 			netConf.Name = netattachdef.Name
 		}
-		nadInfo := util.NewNetAttachDefInfo(netattachdef.Namespace, netattachdef.Name, netConf)
+		nadInfo := util.NewNetAttachDefInfo(netConf)
 		expectedNetworks[nadInfo.NetName] = true
 	}
 

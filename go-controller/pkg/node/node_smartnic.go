@@ -36,7 +36,7 @@ func (nc *ovnNodeController) watchSmartNicPods() {
 			if !util.PodWantsNetwork(pod) {
 				return
 			}
-			on, _, err := util.IsNetworkOnPod(pod, nc.nadInfo, &nc.node.defaultNetAttachDefs)
+			on, _, err := util.IsNetworkOnPod(pod, nc.nadInfo)
 			if err != nil || !on {
 				// the Pod is not attached to this specific network
 				return
@@ -79,7 +79,7 @@ func (nc *ovnNodeController) watchSmartNicPods() {
 				retryPods.Delete(pod.UID)
 				return
 			}
-			on, _, err := util.IsNetworkOnPod(pod, nc.nadInfo, &nc.node.defaultNetAttachDefs)
+			on, _, err := util.IsNetworkOnPod(pod, nc.nadInfo)
 			if err != nil || !on {
 				retryPods.Delete(pod.UID)
 				return

@@ -52,7 +52,6 @@ type OvnNode struct {
 
 	defaultNodeController     *ovnNodeController
 	nonDefaultNodeControllers sync.Map
-	defaultNetAttachDefs      sync.Map
 }
 
 type ovnNodeController struct {
@@ -557,7 +556,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 			MTU:        config.Default.MTU,
 			NotDefault: false,
 		}
-		nadInfo := util.NewNetAttachDefInfo("default", types.DefaultNetworkName, defaultNetConf)
+		nadInfo := util.NewNetAttachDefInfo(defaultNetConf)
 		nc, _ := n.NewOvnNodeController(nadInfo)
 
 		if config.OVNKubernetesFeature.EnableMultiNetwork {
@@ -612,9 +611,9 @@ func (n *OvnNode) addNetworkAttachDefinition(netattachdef *nettypes.NetworkAttac
 		netconf.Name = netattachdef.Name
 	}
 
-	nadInfo := util.NewNetAttachDefInfo(netattachdef.Namespace, netattachdef.Name, netconf)
+	nadInfo := util.NewNetAttachDefInfo(netconf)
 	if !nadInfo.NotDefault {
-		n.defaultNetAttachDefs.Store(netattachdef.Namespace+"_"+netattachdef.Name, true)
+		n.defaultNodeController.nadInfo.NetAttachDefs.Store(netattachdef.Namespace+"_"+netattachdef.Name, true)
 		return
 	}
 
@@ -623,6 +622,21 @@ func (n *OvnNode) addNetworkAttachDefinition(netattachdef *nettypes.NetworkAttac
 		return
 	}
 
+	// Note that net-attach-def add/delete/update events are serialized, so we don't need locks here.
+	// Check if any Controller of the same netconf.Name already exists, if so, check its conf to see if they are the same.
+	v, ok := n.nonDefaultNodeControllers.Load(nadInfo.NetName)
+	if ok {
+		nc := v.(*ovnNodeController)
+		if nc.nadInfo.NetCidr != nadInfo.NetCidr || nc.nadInfo.MTU != nadInfo.MTU {
+			klog.Errorf("Network attachment definition %s/%s does not share the same CNI config of name %s",
+				netattachdef.Namespace, netattachdef.Name, nadInfo.NetName)
+		} else {
+			nc.nadInfo.NetAttachDefs.Store(netattachdef.Namespace+"_"+netattachdef.Name, true)
+		}
+		return
+	}
+
+	nadInfo.NetAttachDefs.Store(netattachdef.Namespace+"_"+netattachdef.Name, true)
 	nc, err := n.NewOvnNodeController(nadInfo)
 	if err != nil {
 		klog.Errorf(err.Error())
@@ -654,9 +668,9 @@ func (n *OvnNode) deleteNetworkAttachDefinition(netattachdef *nettypes.NetworkAt
 		netconf.Name = netattachdef.Name
 	}
 
-	nadInfo := util.NewNetAttachDefInfo(netattachdef.Namespace, netattachdef.Name, netconf)
+	nadInfo := util.NewNetAttachDefInfo(netconf)
 	if !nadInfo.NotDefault {
-		n.defaultNetAttachDefs.Delete(netattachdef.Namespace + "_" + netattachdef.Name)
+		n.defaultNodeController.nadInfo.NetAttachDefs.Delete(netattachdef.Namespace + "_" + netattachdef.Name)
 		return
 	}
 
@@ -667,8 +681,16 @@ func (n *OvnNode) deleteNetworkAttachDefinition(netattachdef *nettypes.NetworkAt
 	}
 
 	nc := v.(*ovnNodeController)
-	if nc.nadInfo.Namespace != netattachdef.Namespace || nc.nadInfo.Name != netattachdef.Name {
-		// this is a different net-attach-def happens to own the same netconf.Name
+	nc.nadInfo.NetAttachDefs.Delete(netattachdef.Namespace + "_" + netattachdef.Name)
+
+	// check if there any net-attach-def sharing the same CNI conf name left, if yes, just return
+	netAttachDefLeft := false
+	nc.nadInfo.NetAttachDefs.Range(func(key, value interface{}) bool {
+		netAttachDefLeft = true
+		return false
+	})
+
+	if netAttachDefLeft {
 		return
 	}
 	if nc.podHandler != nil {

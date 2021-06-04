@@ -209,14 +209,15 @@ type NetNameInfo struct {
 
 type NetAttachDefInfo struct {
 	NetNameInfo
-	// net-attch-def's namespace and name
-	Namespace string
-	Name      string
-	NetCidr   string
-	MTU       int
+	// net-attach-defs shared the same CNI Conf, key is <Namespace>_<Name> of net-attach-def.
+	// Note that it means they share the same logical switch (subnet cidr/MTU etc), but they might
+	// have different resource requirement (requires or not require VF, or different VF resource set)
+	NetAttachDefs sync.Map
+	NetCidr       string
+	MTU           int
 }
 
-func NewNetAttachDefInfo(namespace, name string, netconf *cnitypes.NetConf) *NetAttachDefInfo {
+func NewNetAttachDefInfo(netconf *cnitypes.NetConf) *NetAttachDefInfo {
 	netName := "default"
 	if netconf.NotDefault {
 		netName = netconf.Name
@@ -224,8 +225,6 @@ func NewNetAttachDefInfo(namespace, name string, netconf *cnitypes.NetConf) *Net
 	prefix := GetNetworkPrefix(netName, !netconf.NotDefault)
 
 	nadInfo := NetAttachDefInfo{
-		Namespace:   namespace,
-		Name:        name,
 		NetCidr:     netconf.NetCidr,
 		MTU:         netconf.MTU,
 		NetNameInfo: NetNameInfo{netName, prefix, netconf.NotDefault},

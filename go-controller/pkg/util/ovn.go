@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net"
 	"strings"
-	"sync"
 	"time"
 
 	networkattachmentdefinitionapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -154,9 +153,7 @@ func FindOVNLoadBalancer(externalID, externalValue string) (string, string, erro
 //
 // Note that since each network attachment definition has its own cidr defined, the same network cannot
 // exist in the same pod more than once, or it is configuration error.
-//
-// defaultNetAttachDefs is maps of all the net-attach-def
-func IsNetworkOnPod(pod *kapi.Pod, nadInfo *NetAttachDefInfo, defaultNetAttachDefs *sync.Map) (bool,
+func IsNetworkOnPod(pod *kapi.Pod, nadInfo *NetAttachDefInfo) (bool,
 	*networkattachmentdefinitionapi.NetworkSelectionElement, error) {
 	allNetworks, err := GetK8sPodAllNetworks(pod)
 	if err != nil {
@@ -173,7 +170,7 @@ func IsNetworkOnPod(pod *kapi.Pod, nadInfo *NetAttachDefInfo, defaultNetAttachDe
 		if defaultNetwork == nil {
 			return true, nil, nil
 		} else {
-			if _, ok := defaultNetAttachDefs.Load(defaultNetwork.Namespace + "_" + defaultNetwork.Name); !ok {
+			if _, ok := nadInfo.NetAttachDefs.Load(defaultNetwork.Namespace + "_" + defaultNetwork.Name); !ok {
 				return false, nil, nil
 			}
 		}
@@ -183,10 +180,9 @@ func IsNetworkOnPod(pod *kapi.Pod, nadInfo *NetAttachDefInfo, defaultNetAttachDe
 	// For non-default network controller, try to see if its name exists in the Pod's k8s.v1.cni.cncf.io/networks, if no,
 	// return false;
 	for _, network := range *allNetworks {
-		if network.Name == nadInfo.Name && network.Namespace == nadInfo.Namespace {
+		if _, ok := nadInfo.NetAttachDefs.Load(network.Namespace + "_" + network.Name); ok {
 			return true, network, nil
 		}
 	}
 	return false, nil, nil
-
 }
