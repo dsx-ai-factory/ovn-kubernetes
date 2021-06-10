@@ -313,6 +313,15 @@ func flowsForDefaultBridge(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost
 	// 14 bytes of overhead for ethernet header (does not include VLAN)
 	maxPktLength := getMaxFrameLength()
 
+	strip_vlan := ""
+	mod_vlan_id := ""
+	match_vlan := ""
+	if config.Gateway.VLANID != 0 {
+		strip_vlan = "strip_vlan,"
+		match_vlan = fmt.Sprintf("dl_vlan=%d,", config.Gateway.VLANID)
+		mod_vlan_id = fmt.Sprintf("mod_vlan_vid:%d,", config.Gateway.VLANID)
+	}
+
 	if config.IPv4Mode {
 		// table0, Geneve packets coming from external, perform NORMAL action
 		dftFlows = append(dftFlows,
@@ -424,19 +433,19 @@ func flowsForDefaultBridge(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost
 
 	// table 1, we check to see if this dest mac is the shared mac, if so send to host
 	dftFlows = append(dftFlows,
-		fmt.Sprintf("cookie=%s, priority=10, table=1, dl_dst=%s, actions=output:%s",
-			defaultOpenFlowCookie, bridgeMacAddress, ofPortHost))
+		fmt.Sprintf("cookie=%s, priority=10, table=1, %s dl_dst=%s, actions=%soutput:%s",
+			defaultOpenFlowCookie, match_vlan, bridgeMacAddress, strip_vlan, ofPortHost))
 
 	// table 2, dispatch from Host -> OVN
 	dftFlows = append(dftFlows,
 		fmt.Sprintf("cookie=%s, table=2, "+
-			"actions=mod_dl_dst=%s,output:%s", defaultOpenFlowCookie, bridgeMacAddress, ofPortPatch))
+			"actions=mod_dl_dst=%s,%soutput:%s", defaultOpenFlowCookie, bridgeMacAddress, mod_vlan_id, ofPortPatch))
 
 	// table 3, dispatch from OVN -> Host
 	dftFlows = append(dftFlows,
-		fmt.Sprintf("cookie=%s, table=3, "+
-			"actions=move:NXM_OF_ETH_DST[]->NXM_OF_ETH_SRC[],mod_dl_dst=%s,output:%s",
-			defaultOpenFlowCookie, bridgeMacAddress, ofPortHost))
+		fmt.Sprintf("cookie=%s, table=3, %s "+
+			"actions=move:NXM_OF_ETH_DST[]->NXM_OF_ETH_SRC[],mod_dl_dst=%s,%soutput:%s",
+			defaultOpenFlowCookie, match_vlan, bridgeMacAddress, strip_vlan, ofPortHost))
 
 	// table 4, hairpinned pkts that need to go from OVN -> Host
 	// We need to SNAT and masquerade OVN GR IP, send to table 3 for dispatch to Host
@@ -472,10 +481,17 @@ func commonFlows(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost string) [
 	var dftFlows []string
 	maxPktLength := getMaxFrameLength()
 
+	strip_vlan := ""
+	match_vlan := ""
+	if config.Gateway.VLANID != 0 {
+		strip_vlan = "strip_vlan,"
+		match_vlan = fmt.Sprintf("dl_vlan=%d,", config.Gateway.VLANID)
+	}
+
 	// table 0, we check to see if this dest mac is the shared mac, if so flood to both ports
 	dftFlows = append(dftFlows,
-		fmt.Sprintf("cookie=%s, priority=10, table=0, in_port=%s, dl_dst=%s, actions=output:%s,output:%s",
-			defaultOpenFlowCookie, ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost))
+		fmt.Sprintf("cookie=%s, priority=10, table=0, in_port=%s, %s dl_dst=%s, actions=output:%s,%soutput:%s",
+			defaultOpenFlowCookie, ofPortPhys, match_vlan, bridgeMacAddress, ofPortPatch, strip_vlan, ofPortHost))
 
 	if config.IPv4Mode {
 		// table 0, packets coming from pods headed externally. Commit connections
