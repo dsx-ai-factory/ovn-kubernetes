@@ -10,12 +10,6 @@
 # Description:       ovnkube for ARM on BF2
 ### END INIT INFO
 
-
-
-
-/usr/local/ovn-k8s/bin/ovnkube.sh "ovn-node"
-
-
 case "$1" in
 start)
     /usr/local/ovn-k8s/bin/ovnkube.sh "ovn-node"
