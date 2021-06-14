@@ -10,15 +10,25 @@
 # Description:       ovnkube for ARM on BF2
 ### END INIT INFO
 
+if [ -e /etc/default/ovn-k8s ]; then
+    . /etc/default/ovn-k8s
+fi
+
+
 case "$1" in
 start)
+    echo "Starting ovnkube..."
     /usr/local/ovn-k8s/bin/ovnkube.sh "ovn-node"
     ;;
 stop)
-    echo "Stop"
+    echo "Stopping ovnkube..."
+    killall -9 ovnkube
     ;;
 restart|force-reload)
-    echo "Restart"
+    echo "Restarting ovnkube..."
+    killall -9 ovnkube
+    sleep 1
+    /usr/local/ovn-k8s/bin/ovnkube.sh "ovn-node"
     ;;
 status)
     echo "Status"

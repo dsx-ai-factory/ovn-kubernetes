@@ -1,0 +1,30 @@
+# This is a sample file for ovnkube env params
+# The values here are an example, please set your own correct values.
+
+
+#export OVN_DAEMONSET_VERSION=3
+#export OVNKUBE_NODE_MODE="smart-nic"
+#export OVN_KUBERNETES_NAMESPACE=ovn-kubernetes
+#export OVN_GATEWAY_MODE="shared"
+#export OVNKUBE_LOGLEVEL="5"
+#export OVNKUBE_LOGFILE_MAXSIZE="100"
+#export OVNKUBE_LOGFILE_MAXBACKUPS="5"
+#export OVNKUBE_LOGFILE_MAXAGE="5"
+#export OVN_NET_CIDR="10.192.0.0/16/26"
+#export OVN_SVC_CIDR="10.223.0.0/16"
+#export K8S_NODE="nd-sjc6w-br2-001.nd-sjc6w.nvmetal.net"
+#export OVN_REMOTE_PROBE_INTERVAL=100000
+#export K8S_APISERVER="https://10.1.128.9:6443"
+#export OVN_SSL_ENABLE=yes
+#export OVN_NB_CERT_CNAME="ovnnb.nd-sjc6w.nvmetal.net"
+#export OVN_SB_CERT_CNAME="ovnsb.nd-sjc6w.nvmetal.net"
+#export OVN_DBCLIENT_PK="/etc/ovn/ovndb-client-privkey.pem"
+#export OVN_DBCLIENT_CERT="/etc/ovn/ovndb-client-cert.pem"
+#export OVN_CA_CERT="/etc/ovn/ca-cert.pem"
+#export OVN_ENCAP_IP=10.2.64.11
+#export K8S_TOKEN=$(cat /usr/local/ovn-k8s/bin/token)
+#export K8S_CACERT=/usr/local/ovn-k8s/bin/ca.crt
+#export OVN_MTU=1500
+#export OVN_GATEWAY_OPTS="--gateway-interface=brp0 --gateway-nexthop=10.1.192.1 --gateway-vlanid=3"
+#export OVN_GATEWAY_ROUTER_SUBNET="10.1.192.0/24"
+#export OVNKUBE_NODE_MGMT_PORT_NETDEV="pf0vf0"

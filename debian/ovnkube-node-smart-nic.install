@@ -1,1 +1,5 @@
-go-controller/_output/go/bin/ovnkube usr/bin/ovnkube
+go-controller/_output/go/bin/ovnkube usr/bin/
+dist/images/ovnkube.sh /usr/local/ovn-k8s/scripts
+dist/images/ovndb-raft-functions.sh /usr/local/ovn-k8s/scripts/
+debian/ovn-k8s.template /usr/local/ovn-k8s/share/
+
