@@ -183,18 +183,6 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 	contIface := &current.Interface{}
 	ifnameSuffix := ""
 
-	// 0. if the SR-IOV device is bound to VFIO, then there is nothing to do as it will be passed to the
-	// KVM VM directly
-	isVFIO, err := isVFBoundToVFIODriver(pciAddrs)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to determine if the PCI address %s is bound to VFIO: %v", pciAddrs, err)
-	} else if isVFIO {
-		contIface.Name = ifName
-		contIface.Mac = ifInfo.MAC.String()
-		contIface.Sandbox = netns.Path()
-		return hostIface, contIface, nil
-	}
-
 	// 1. get VF netdevice from PCI
 	vfNetdevices, err := util.GetSriovnetOps().GetNetDevicesFromPci(pciAddrs)
 	if err != nil {
@@ -381,7 +369,21 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 	klog.V(5).Infof("CNI Conf %v", pr.CNIConf)
 	if pr.CNIConf.DeviceID != "" {
 		// SR-IOV Case
-		hostIface, contIface, err = setupSriovInterface(netns, pr.SandboxID, pr.IfName, ifInfo, pr.CNIConf.DeviceID)
+		// TODO(gmoodalbail): having this check inside setupSriovInterface is causing unit tests
+		// to fail and getting to mock isVFBoundToVFIODriver() needs some work
+		if isVFIO, tmpErr := isVFBoundToVFIODriver(pr.CNIConf.DeviceID); tmpErr != nil {
+			err = fmt.Errorf("failed to determine if the PCI address %s is bound to VFIO: %v",
+				pr.CNIConf.DeviceID, tmpErr)
+		} else if isVFIO {
+			// if the SR-IOV device is bound to VFIO, then there is nothing to do as it will be passed to the
+			// KVM VM directly
+			contIface := &current.Interface{}
+			contIface.Name = pr.IfName
+			contIface.Mac = ifInfo.MAC.String()
+			contIface.Sandbox = netns.Path()
+		} else {
+			hostIface, contIface, err = setupSriovInterface(netns, pr.SandboxID, pr.IfName, ifInfo, pr.CNIConf.DeviceID)
+		}
 	} else {
 		if pr.IsSmartNIC {
 			return nil, fmt.Errorf("unexpected configuration, pod request on smart-nic host. " +
