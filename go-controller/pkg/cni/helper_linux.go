@@ -377,7 +377,7 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 		} else if isVFIO {
 			// if the SR-IOV device is bound to VFIO, then there is nothing to do as it will be passed to the
 			// KVM VM directly
-			contIface := &current.Interface{}
+			contIface = &current.Interface{}
 			contIface.Name = pr.IfName
 			contIface.Mac = ifInfo.MAC.String()
 			contIface.Sandbox = netns.Path()
