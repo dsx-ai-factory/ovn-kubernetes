@@ -20,7 +20,7 @@ require (
 	github.com/juju/errors v0.0.0-20200330140219-3fe23663418f // indirect
 	github.com/juju/testing v0.0.0-20200706033705-4c23f9c453cd // indirect
 	github.com/k8snetworkplumbingwg/multi-networkpolicy v0.0.0-20200914073308-0f33b9190170
-	github.com/k8snetworkplumbingwg/network-attachment-definition-client v0.0.0-20200626054723-37f83d1996bc
+	github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.1.1-0.20210510153419-66a699ae3b05
 	github.com/matttproud/golang_protobuf_extensions v1.0.2-0.20181231171920-c182affec369 // indirect
 	github.com/miekg/dns v1.1.31
 	github.com/mitchellh/copystructure v1.2.0
