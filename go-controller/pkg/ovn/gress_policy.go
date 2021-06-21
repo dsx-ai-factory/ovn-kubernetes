@@ -45,6 +45,9 @@ type gressPolicy struct {
 	protocolPolicies []*protocolPolicy
 
 	ipBlock []*knet.IPBlock
+
+	// set to true for stateless acls otherwise set to false
+	isAclStateless bool
 }
 
 // Supports TCP/UDP/SCTP ports and ICMP type/code
@@ -79,7 +82,8 @@ func (pp *protocolPolicy) getL4Match() (string, error) {
 	return "", fmt.Errorf("unknown port protocol %v", pp.protocol)
 }
 
-func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name string, netNameInfo util.NetNameInfo) *gressPolicy {
+func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name string,
+	netNameInfo util.NetNameInfo, aclState bool) *gressPolicy {
 	return &gressPolicy{
 		NetNameInfo:          netNameInfo,
 		policyNamespace:      namespace,
@@ -90,6 +94,7 @@ func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name string,
 		peerV6AddressSets:    sets.String{},
 		protocolPolicies:     make([]*protocolPolicy, 0),
 		nodeHostNetPodsCache: make(map[string]map[string]bool),
+		isAclStateless:       aclState,
 	}
 }
 
@@ -402,7 +407,11 @@ func (gp *gressPolicy) localPodSetACL(portGroupName, portGroupUUID string, aclLo
 func (gp *gressPolicy) addOrModifyACLAllow(match, l4Match, portGroupUUID string, ipBlockCIDR int, aclLogging string) error {
 	var direction, action, aclName, ipBlockCIDRString string
 	direction = types.DirectionToLPort
-	action = "allow-related"
+	if gp.isAclStateless {
+		action = "allow"
+	} else {
+		action = "allow-related"
+	}
 	aclName = fmt.Sprintf("%s_%s_%v", gp.policyNamespace, gp.policyName, gp.idx)
 
 	// For backward compatibility with existing ACLs, we use "ipblock_cidr=false" for

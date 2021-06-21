@@ -21,6 +21,10 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
+const (
+	ovnStatelessACLAnnotationName = "k8s.ovn.org/acl-stateless"
+)
+
 type networkPolicy struct {
 	// RWMutex synchronizes operations on the policy.
 	// Operations that change local and peer pods take a RLock,
@@ -945,6 +949,17 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 		return
 	}
 
+	// network policy will be annotated with this
+	// annotation -- [ "k8s.ovn.org/acl-stateless": "true"] for the ingress/egress
+	// policies to be added as stateless OVN ACL's.
+	// if the above annotation is not present or set to false in network policy,
+	// then corresponding egress/ingress policies will be added as stateful OVN ACL's.
+	var statelessACL bool
+	val, ok := policy.Annotations[ovnStatelessACLAnnotationName]
+	if ok && val == "true" {
+		statelessACL = true
+	}
+
 	np := NewNetworkPolicy(policy.Namespace, policy.Name, policy.Spec.PolicyTypes)
 
 	if len(nsInfo.networkPolicies) == 0 {
@@ -995,7 +1010,8 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 	for i, ingressJSON := range policy.Spec.Ingress {
 		klog.V(5).Infof("Network policy ingress is %+v", ingressJSON)
 
-		ingress := newGressPolicy(knet.PolicyTypeIngress, i, policy.Namespace, policy.Name, oc.nadInfo.NetNameInfo)
+		ingress := newGressPolicy(knet.PolicyTypeIngress, i, policy.Namespace, policy.Name,
+			oc.nadInfo.NetNameInfo, statelessACL)
 
 		// Each ingress rule can have multiple ports to which we allow traffic.
 		for _, portJSON := range ingressJSON.Ports {
@@ -1034,7 +1050,8 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 	for i, egressJSON := range policy.Spec.Egress {
 		klog.V(5).Infof("Network policy egress is %+v", egressJSON)
 
-		egress := newGressPolicy(knet.PolicyTypeEgress, i, policy.Namespace, policy.Name, oc.nadInfo.NetNameInfo)
+		egress := newGressPolicy(knet.PolicyTypeEgress, i, policy.Namespace, policy.Name,
+			oc.nadInfo.NetNameInfo, statelessACL)
 
 		// Each egress rule can have multiple ports to which we allow traffic.
 		for _, portJSON := range egressJSON.Ports {

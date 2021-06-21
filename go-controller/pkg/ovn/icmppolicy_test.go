@@ -960,7 +960,8 @@ var _ = ginkgo.Describe("OVN ICMPNetworkPolicy Low-Level Operations", func() {
 		}
 		policyName := "icmp_" + policy.Name
 		netNameInfo := util.NetNameInfo{NetName: types.DefaultNetworkName, Prefix: "", NotDefault: false}
-		gp := newGressPolicy(knet.PolicyType(icmpnetworkpolicyapi.PolicyTypeIngress), 0, policy.Namespace, policyName, netNameInfo)
+		gp := newGressPolicy(knet.PolicyType(icmpnetworkpolicyapi.PolicyTypeIngress), 0, policy.Namespace,
+			policyName, netNameInfo, false)
 		err := gp.ensurePeerAddressSet(asFactory)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		// asName := getIPv4ASName(gp.peerAddressSet.GetName())

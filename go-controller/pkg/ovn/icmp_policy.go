@@ -305,6 +305,17 @@ func (oc *Controller) addICMPNetworkPolicy(policy *onet.ICMPNetworkPolicy) {
 		return
 	}
 
+	// icmp network policy will be annotated with this
+	// annotation -- [ "k8s.ovn.org/acl-stateless": "true"] for the ingress/egress
+	// policies to be added as stateless OVN ACL's.
+	// if the above annotation is not present or set to false in network policy,
+	// then corresponding egress/ingress policies will be added as stateful OVN ACL's.
+	var statelessACL bool
+	val, ok := policy.Annotations[ovnStatelessACLAnnotationName]
+	if ok && val == "true" {
+		statelessACL = true
+	}
+
 	np := NewNetworkPolicy(policy.Namespace, policyName, policy.Spec.PolicyTypes)
 	if len(nsInfo.networkPolicies) == 0 {
 		err := oc.createDefaultDenyPortGroup(policy.Namespace, nsInfo, knet.PolicyTypeIngress, nsInfo.aclLogging.Deny, policyName)
@@ -350,7 +361,7 @@ func (oc *Controller) addICMPNetworkPolicy(policy *onet.ICMPNetworkPolicy) {
 	for i, ingressJSON := range policy.Spec.Ingress {
 		klog.V(5).Infof("ICMP Network policy ingress is %+v", ingressJSON)
 
-		ingress := newGressPolicy(onet.PolicyTypeIngress, i, policy.Namespace, policyName, oc.nadInfo.NetNameInfo)
+		ingress := newGressPolicy(onet.PolicyTypeIngress, i, policy.Namespace, policyName, oc.nadInfo.NetNameInfo, statelessACL)
 
 		// Each ingress rule can have multiple type/code to which we allow traffic.
 		for _, protocolJSON := range ingressJSON.Protocols {
@@ -387,7 +398,7 @@ func (oc *Controller) addICMPNetworkPolicy(policy *onet.ICMPNetworkPolicy) {
 	for i, egressJSON := range policy.Spec.Egress {
 		klog.V(5).Infof("ICMP Network policy egress is %+v", egressJSON)
 
-		egress := newGressPolicy(onet.PolicyTypeEgress, i, policy.Namespace, policyName, oc.nadInfo.NetNameInfo)
+		egress := newGressPolicy(onet.PolicyTypeEgress, i, policy.Namespace, policyName, oc.nadInfo.NetNameInfo, statelessACL)
 
 		// Each egress rule can have multiple typese/code to which we allow traffic.
 		for _, protocolJSON := range egressJSON.Protocols {
