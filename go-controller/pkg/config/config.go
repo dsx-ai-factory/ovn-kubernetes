@@ -1431,7 +1431,7 @@ func buildHybridOverlayConfig(ctx *cli.Context, cli, file *config, allSubnets *c
 	if HybridOverlay.Enabled {
 		var err error
 		if len(HybridOverlay.RawClusterSubnets) > 0 {
-			HybridOverlay.ClusterSubnets, err = ParseClusterSubnetEntries(HybridOverlay.RawClusterSubnets)
+			HybridOverlay.ClusterSubnets, err = ParseClusterSubnetEntries(HybridOverlay.RawClusterSubnets, true)
 			if err != nil {
 				return fmt.Errorf("hybrid overlay cluster subnet invalid: %v", err)
 			}
@@ -1465,7 +1465,7 @@ func buildDefaultConfig(cli, file *config, allSubnets *configSubnets) error {
 	}
 
 	var err error
-	Default.ClusterSubnets, err = ParseClusterSubnetEntries(Default.RawClusterSubnets)
+	Default.ClusterSubnets, err = ParseClusterSubnetEntries(Default.RawClusterSubnets, true)
 	if err != nil {
 		return fmt.Errorf("cluster subnet invalid: %v", err)
 	}

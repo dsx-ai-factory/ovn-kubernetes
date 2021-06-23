@@ -11,6 +11,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -34,14 +35,18 @@ func (oc *Controller) syncPods(pods []interface{}) {
 		if err != nil {
 			continue
 		}
+		lsManagerNodeName := pod.Spec.NodeName
+		if oc.nadInfo.TopoType == types.LocalnetAttachDefTopoType {
+			lsManagerNodeName = types.OVNLocalnetSwitch
+		}
 		annotations, err := util.UnmarshalPodAnnotation(pod.Annotations, oc.nadInfo.NetName)
 		if util.PodScheduled(pod) && util.PodWantsNetwork(pod) && on && err == nil {
 			logicalPort := util.PodLogicalPortName(pod, oc.nadInfo.Prefix)
 			expectedLogicalPorts[logicalPort] = true
-			if err = oc.lsManager.AllocateIPs(pod.Spec.NodeName, annotations.IPs); err != nil {
+			if err = oc.lsManager.AllocateIPs(lsManagerNodeName, annotations.IPs); err != nil {
 				klog.Errorf("Couldn't allocate IPs: %s for pod: %s on node: %s"+
 					" error: %v", util.JoinIPNetIPs(annotations.IPs, " "), logicalPort,
-					pod.Spec.NodeName, err)
+					lsManagerNodeName, err)
 			}
 		}
 	}
@@ -140,6 +145,11 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		return
 	}
 
+	lsManagerNodeName := pod.Spec.NodeName
+	if oc.nadInfo.TopoType == types.LocalnetAttachDefTopoType {
+		lsManagerNodeName = types.OVNLocalnetSwitch
+	}
+
 	podDesc := pod.Namespace + "/" + pod.Name
 	klog.Infof("Deleting pod: %s", podDesc)
 
@@ -156,11 +166,11 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 
 		// Even if the port is not in the cache, IPs annotated in the Pod annotation may already be allocated,
 		// need to release them to avoid leakage.
-		if pod.Spec.NodeName != "" {
+		if lsManagerNodeName != "" {
 			annotation, err := util.UnmarshalPodAnnotation(pod.Annotations, oc.nadInfo.NetName)
 			if err == nil {
 				podIfAddrs := annotation.IPs
-				_ = oc.lsManager.ReleaseIPs(pod.Spec.NodeName, podIfAddrs)
+				_ = oc.lsManager.ReleaseIPs(lsManagerNodeName, podIfAddrs)
 			}
 		}
 		return
@@ -183,7 +193,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 
 	if !oc.nadInfo.NotDefault {
 		if config.Gateway.DisableSNATMultipleGWs {
-			oc.deletePerPodGRSNAT(pod.Spec.NodeName, portInfo.ips)
+			oc.deletePerPodGRSNAT(lsManagerNodeName, portInfo.ips)
 		}
 		oc.deleteGWRoutesForPod(pod.Namespace, portInfo.ips)
 	}
@@ -210,12 +220,25 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 		// non default network, see if its network-attachment's annotation has default-route key.
 		// If present, then we need to add default route for it
 		podAnnotation.Gateways = append(podAnnotation.Gateways, network.GatewayRequest...)
+		if oc.nadInfo.TopoType == types.LocalnetAttachDefTopoType {
+			return nil
+		}
 		for _, podIfAddr := range podAnnotation.IPs {
 			isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
 			nodeSubnet, err := util.MatchIPNetFamily(isIPv6, nodeSubnets)
 			if err != nil {
 				return err
 			}
+
+			//var gwIP net.IP
+			//// TBD CATHY gateway nexthop is different for localnet topotype network
+			//if oc.nadInfo.TopoType == types.LocalnetAttachDefTopoType {
+			//	gwIPs, err := util.MatchIPFamily(isIPv6, oc.nadInfo.GatewayNextHops)
+			//	if err != nil {
+			//		return err
+			//	}
+			//	gwIP = gwIPs[0]
+			//}
 			gatewayIPnet := util.GetNodeGatewayIfAddr(nodeSubnet)
 
 			for _, clusterSubnet := range oc.clusterSubnets {
@@ -358,8 +381,12 @@ func (oc *Controller) updatePodAnnotationWithRetry(origPod *kapi.Pod, podInfo *u
 }
 
 func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
+	lsManagerNodeName := pod.Spec.NodeName
+	if oc.nadInfo.TopoType == types.LocalnetAttachDefTopoType {
+		lsManagerNodeName = types.OVNLocalnetSwitch
+	}
 	// If a node does node have an assigned hostsubnet don't wait for the logical switch to appear
-	if oc.lsManager.IsNonHostSubnetSwitch(pod.Spec.NodeName) {
+	if oc.lsManager.IsNonHostSubnetSwitch(lsManagerNodeName) {
 		return nil
 	}
 
@@ -380,8 +407,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		klog.Infof("[%s/%s] addLogicalPort for network %s took %v", pod.Namespace, pod.Name, oc.nadInfo.NetName, time.Since(start))
 	}()
 
-	logicalSwitch := oc.nadInfo.Prefix + pod.Spec.NodeName
-	err = oc.waitForNodeLogicalSwitch(pod.Spec.NodeName)
+	logicalSwitch := oc.nadInfo.Prefix + lsManagerNodeName
+	err = oc.waitForNodeLogicalSwitch(lsManagerNodeName)
 	if err != nil {
 		return err
 	}
@@ -416,23 +443,25 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		klog.Infof("LSP already exists for port: %s", portName)
 	}
 
-	// Bind the port to the node's chassis; prevents ping-ponging between
-	// chassis if ovnkube-node isn't running correctly and hasn't cleared
-	// out iface-id for an old instance of this pod, and the pod got
-	// rescheduled.
-	opts, err := oc.mc.ovnNBClient.LSPGetOptions(portName)
-	if err != nil && err != goovn.ErrorNotFound {
-		klog.Warningf("Failed to get options for port %s: %v", portName, err)
+	if oc.nadInfo.TopoType != types.LocalnetAttachDefTopoType {
+		// Bind the port to the node's chassis; prevents ping-ponging between
+		// chassis if ovnkube-node isn't running correctly and hasn't cleared
+		// out iface-id for an old instance of this pod, and the pod got
+		// rescheduled.
+		opts, err := oc.mc.ovnNBClient.LSPGetOptions(portName)
+		if err != nil && err != goovn.ErrorNotFound {
+			klog.Warningf("Failed to get options for port %s: %v", portName, err)
+		}
+		if opts == nil {
+			opts = make(map[string]string)
+		}
+		opts["requested-chassis"] = lsManagerNodeName
+		cmd, err = oc.mc.ovnNBClient.LSPSetOptions(portName, opts)
+		if err != nil {
+			return fmt.Errorf("unable to create the LSPSetOptions command for port: %s from the nbdb: %v", portName, err)
+		}
+		cmds = append(cmds, cmd)
 	}
-	if opts == nil {
-		opts = make(map[string]string)
-	}
-	opts["requested-chassis"] = pod.Spec.NodeName
-	cmd, err = oc.mc.ovnNBClient.LSPSetOptions(portName, opts)
-	if err != nil {
-		return fmt.Errorf("unable to create the LSPSetOptions command for port: %s from the nbdb: %v", portName, err)
-	}
-	cmds = append(cmds, cmd)
 
 	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations, oc.nadInfo.NetName)
 
@@ -446,11 +475,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 	defer func() {
 		if releaseIPs && err != nil {
-			if relErr := oc.lsManager.ReleaseIPs(pod.Spec.NodeName, podIfAddrs); relErr != nil {
+			if relErr := oc.lsManager.ReleaseIPs(lsManagerNodeName, podIfAddrs); relErr != nil {
 				klog.Errorf("Error when releasing IPs for node: %s, err: %q",
-					pod.Spec.NodeName, relErr)
+					lsManagerNodeName, relErr)
 			} else {
-				klog.Infof("Released IPs: %s for node: %s", util.JoinIPNetIPs(podIfAddrs, " "), pod.Spec.NodeName)
+				klog.Infof("Released IPs: %s for node: %s", util.JoinIPNetIPs(podIfAddrs, " "), lsManagerNodeName)
 			}
 		}
 	}()
@@ -468,7 +497,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		cmds = append(cmds, cmd)
 
 		// ensure we have reserved the IPs in the annotation
-		if err = oc.lsManager.AllocateIPs(pod.Spec.NodeName, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
+		if err = oc.lsManager.AllocateIPs(lsManagerNodeName, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
 			return fmt.Errorf("unable to ensure IPs allocated for already annotated pod: %s, IPs: %s, error: %v",
 				pod.Name, util.JoinIPNetIPs(podIfAddrs, " "), err)
 		} else {
@@ -478,27 +507,27 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 	if needsIP {
 		// try to get the IP from existing port in OVN first
-		podMac, podIfAddrs, err = oc.getPortAddresses(pod.Spec.NodeName, portName)
+		podMac, podIfAddrs, err = oc.getPortAddresses(lsManagerNodeName, portName)
 		if err != nil {
 			return fmt.Errorf("failed to get pod addresses for pod %s on node: %s, err: %v",
-				portName, pod.Spec.NodeName, err)
+				portName, lsManagerNodeName, err)
 		}
 		needsNewAllocation := false
 		// ensure we have reserved the IPs found in OVN
 		if len(podIfAddrs) == 0 {
 			needsNewAllocation = true
-		} else if err = oc.lsManager.AllocateIPs(pod.Spec.NodeName, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
+		} else if err = oc.lsManager.AllocateIPs(lsManagerNodeName, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
 			klog.Warningf("Unable to allocate IPs found on existing OVN port: %s, for pod %s on node: %s"+
-				" error: %v", util.JoinIPNetIPs(podIfAddrs, " "), portName, pod.Spec.NodeName, err)
+				" error: %v", util.JoinIPNetIPs(podIfAddrs, " "), portName, lsManagerNodeName, err)
 
 			needsNewAllocation = true
 		}
 		if needsNewAllocation {
 			// Previous attempts to use already configured IPs failed, need to assign new
-			podMac, podIfAddrs, err = oc.assignPodAddresses(pod.Spec.NodeName)
+			podMac, podIfAddrs, err = oc.assignPodAddresses(lsManagerNodeName)
 			if err != nil {
 				return fmt.Errorf("failed to assign pod addresses for pod %s on node: %s, err: %v",
-					portName, pod.Spec.NodeName, err)
+					portName, lsManagerNodeName, err)
 			}
 		}
 
@@ -518,9 +547,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			MTU: oc.nadInfo.MTU,
 		}
 		var nodeSubnets []*net.IPNet
-		if nodeSubnets = oc.lsManager.GetSwitchSubnets(pod.Spec.NodeName); nodeSubnets == nil {
+		if nodeSubnets = oc.lsManager.GetSwitchSubnets(lsManagerNodeName); nodeSubnets == nil {
 			return fmt.Errorf("cannot retrieve subnet for assigning gateway routes for pod %s, node: %s, network %s",
-				pod.Name, pod.Spec.NodeName, oc.nadInfo.NetName)
+				pod.Name, lsManagerNodeName, oc.nadInfo.NetName)
 		}
 		err = oc.addRoutesGatewayIP(pod, &podAnnotation, nodeSubnets, network, *networks)
 		if err != nil {
@@ -572,7 +601,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	// Add the pod's logical switch port to the port cache
-	portInfo := oc.logicalPortCache.add(pod.Spec.NodeName, portName, lsp.UUID, podMac, podIfAddrs)
+	portInfo := oc.logicalPortCache.add(lsManagerNodeName, portName, lsp.UUID, podMac, podIfAddrs)
 
 	// Ensure the namespace/nsInfo exists
 	if err = oc.addPodToNamespace(pod.Namespace, portInfo); err != nil {
@@ -599,7 +628,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		}
 
 		if len(gateways) > 0 {
-			err = oc.addGWRoutesForPod(gateways, podIfAddrs, pod.Namespace, pod.Spec.NodeName)
+			err = oc.addGWRoutesForPod(gateways, podIfAddrs, pod.Namespace, lsManagerNodeName)
 			if err != nil {
 				return err
 			}

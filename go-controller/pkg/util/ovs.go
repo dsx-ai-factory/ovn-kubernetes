@@ -878,36 +878,67 @@ func DetectSCTPSupport() (bool, error) {
 // DetermineOVNTopoVersionFromOVN determines what OVN Topology version is being used
 // If "k8s-ovn-topo-version" key in external_ids column does not exist, it is prior to OVN topology versioning
 // and therefore set version number to OvnCurrentTopologyVersion
-func DetermineOVNTopoVersionFromOVN(netPrefix string) (int, error) {
+func DetermineOVNTopoVersionFromOVN(netPrefix, topoType string) (int, error) {
 	ver := 0
-	ovnClusterRouter := netPrefix + types.OVNClusterRouter
-	stdout, stderr, err := RunOVNNbctl("--data=bare", "--no-headings", "--columns=name", "find", "logical_router",
-		fmt.Sprintf("name=%s", ovnClusterRouter))
-	if err != nil {
-		return ver, fmt.Errorf("failed in retrieving %s to determine the current version of OVN logical topology: "+
-			"stderr: %q, error: %v", ovnClusterRouter, stderr, err)
-	}
-	if len(stdout) == 0 {
-		// no OVNClusterRouter exists, DB is empty, nothing to upgrade
-		return math.MaxInt32, nil
-	}
-
-	stdout, stderr, err = RunOVNNbctl("--if-exists", "get", "logical_router", ovnClusterRouter,
-		"external_ids:k8s-ovn-topo-version")
-	if err != nil {
-		return 0, fmt.Errorf("failed to determine the current version of OVN logical topology: stderr: %q, error: %v",
-			stderr, err)
-	} else if len(stdout) == 0 {
-		klog.Infof("No version string found. The OVN topology is before versioning is introduced. Upgrade needed")
-	} else {
-		v, err := strconv.Atoi(stdout)
+	if topoType != types.LocalnetAttachDefTopoType {
+		ovnClusterRouter := netPrefix + types.OVNClusterRouter
+		stdout, stderr, err := RunOVNNbctl("--data=bare", "--no-headings", "--columns=name", "find", "logical_router",
+			fmt.Sprintf("name=%s", ovnClusterRouter))
 		if err != nil {
-			return 0, fmt.Errorf("invalid OVN topology version string for the cluster: %s", stdout)
-		} else {
-			ver = v
+			return ver, fmt.Errorf("failed in retrieving %s to determine the current version of OVN logical topology: "+
+				"stderr: %q, error: %v", ovnClusterRouter, stderr, err)
 		}
+		if len(stdout) == 0 {
+			// no OVNClusterRouter exists, DB is empty, nothing to upgrade
+			return math.MaxInt32, nil
+		}
+
+		stdout, stderr, err = RunOVNNbctl("--if-exists", "get", "logical_router", ovnClusterRouter,
+			"external_ids:k8s-ovn-topo-version")
+		if err != nil {
+			return 0, fmt.Errorf("failed to determine the current version of OVN logical topology: stderr: %q, error: %v",
+				stderr, err)
+		} else if len(stdout) == 0 {
+			klog.Infof("No version string found. The OVN topology is before versioning is introduced. Upgrade needed")
+		} else {
+			v, err := strconv.Atoi(stdout)
+			if err != nil {
+				return 0, fmt.Errorf("invalid OVN topology version string for the cluster: %s", stdout)
+			} else {
+				ver = v
+			}
+		}
+		return ver, nil
+	} else {
+		ovnLocalnetSwitch := netPrefix + types.OVNLocalnetSwitch
+		stdout, stderr, err := RunOVNNbctl("--data=bare", "--no-headings", "--columns=name", "find", "logical_switch",
+			fmt.Sprintf("name=%s", ovnLocalnetSwitch))
+		if err != nil {
+			return ver, fmt.Errorf("failed in retrieving %s to determine the current version of OVN logical topology: "+
+				"stderr: %q, error: %v", ovnLocalnetSwitch, stderr, err)
+		}
+		if len(stdout) == 0 {
+			// no OVNClusterRouter exists, DB is empty, nothing to upgrade
+			return math.MaxInt32, nil
+		}
+
+		stdout, stderr, err = RunOVNNbctl("--if-exists", "get", "logical_switch", ovnLocalnetSwitch,
+			"external_ids:k8s-ovn-topo-version")
+		if err != nil {
+			return 0, fmt.Errorf("failed to determine the current version of OVN logical topology: stderr: %q, error: %v",
+				stderr, err)
+		} else if len(stdout) == 0 {
+			klog.Infof("No version string found. The OVN topology is before versioning is introduced. Upgrade needed")
+		} else {
+			v, err := strconv.Atoi(stdout)
+			if err != nil {
+				return 0, fmt.Errorf("invalid OVN topology version string for the cluster: %s", stdout)
+			} else {
+				ver = v
+			}
+		}
+		return ver, nil
 	}
-	return ver, nil
 }
 
 // NBTxn hold parts of an ovn-nbctl transaction request

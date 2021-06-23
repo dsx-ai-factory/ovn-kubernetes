@@ -318,7 +318,7 @@ func (mc *OvnMHController) setDefaultOvnController(addressSetFactory addressset.
 		MTU:        config.Default.MTU,
 		NotDefault: false,
 	}
-	nadInfo := util.NewNetAttachDefInfo(defaultNetConf)
+	nadInfo, _ := util.NewNetAttachDefInfo(defaultNetConf)
 	_, err := mc.NewOvnController(nadInfo, addressSetFactory)
 	if err != nil {
 		return err
@@ -338,7 +338,7 @@ func (mc *OvnMHController) NewOvnController(nadInfo *util.NetAttachDefInfo,
 		return nil, fmt.Errorf("netcidr: %s is not specified for network %s", nadInfo.NetCidr, nadInfo.NetName)
 	}
 
-	clusterIPNet, err := config.ParseClusterSubnetEntries(nadInfo.NetCidr)
+	clusterIPNet, err := config.ParseClusterSubnetEntries(nadInfo.NetCidr, nadInfo.TopoType != ovntypes.LocalnetAttachDefTopoType)
 	if err != nil {
 		return nil, fmt.Errorf("cluster subnet %s for network %s is invalid: %v", nadInfo.NetCidr, nadInfo.NetName, err)
 	}
@@ -346,6 +346,32 @@ func (mc *OvnMHController) NewOvnController(nadInfo *util.NetAttachDefInfo,
 	stopChan := mc.stopChan
 	if nadInfo.NotDefault {
 		stopChan = make(chan struct{})
+	}
+	var lsm *logicalSwitchManager
+	if nadInfo.TopoType != ovntypes.LocalnetAttachDefTopoType {
+		lsm = newLogicalSwitchManager()
+	} else {
+		lsm = newLocalnetSwitchManager()
+		var hostSubnets []*net.IPNet
+		for _, subnet := range clusterIPNet {
+			hostSubnet := subnet.CIDR
+			hostSubnets = append(hostSubnets, hostSubnet)
+		}
+		err = lsm.AddNode(ovntypes.OVNLocalnetSwitch, hostSubnets)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize localnet switch IP manager for network %s: %v", nadInfo.NetName, err)
+		}
+		for _, excludeCidr := range nadInfo.ExcludeCidrs {
+			// convert IPNet struct mask and address to uint32
+			// network is BigEndian
+			var ip net.IP
+			for ip = util.NextIP(excludeCidr.IP); ; ip = util.NextIP(ip) {
+				if !excludeCidr.Contains(ip) {
+					break
+				}
+				_ = lsm.AllocateIPs(ovntypes.OVNLocalnetSwitch, []*net.IPNet{{IP: ip, Mask: excludeCidr.Mask}})
+			}
+		}
 	}
 	oc := &Controller{
 		mc:                        mc,
@@ -355,7 +381,7 @@ func (mc *OvnMHController) NewOvnController(nadInfo *util.NetAttachDefInfo,
 		masterSubnetAllocator:     subnetallocator.NewSubnetAllocator(),
 		nodeLocalNatIPv4Allocator: &ipallocator.Range{},
 		nodeLocalNatIPv6Allocator: &ipallocator.Range{},
-		lsManager:                 newLogicalSwitchManager(),
+		lsManager:                 lsm,
 		logicalPortCache:          newPortCache(stopChan),
 		namespaces:                make(map[string]*namespaceInfo),
 		namespacesMutex:           sync.Mutex{},
@@ -481,12 +507,19 @@ func (oc *Controller) Run(nodeName string) error {
 	}
 
 	// Master is fully running and resource handlers have synced, update Topology version in OVN
-	clusterRouterName := oc.nadInfo.Prefix + ovntypes.OVNClusterRouter
-	stdout, stderr, err := util.RunOVNNbctl("set", "logical_router", clusterRouterName,
-		fmt.Sprintf("external_ids:k8s-ovn-topo-version=%d", ovntypes.OvnCurrentTopologyVersion))
+	var stdout, stderr string
+	if oc.nadInfo.TopoType != ovntypes.LocalnetAttachDefTopoType {
+		clusterRouterName := oc.nadInfo.Prefix + ovntypes.OVNClusterRouter
+		stdout, stderr, err = util.RunOVNNbctl("set", "logical_router", clusterRouterName,
+			fmt.Sprintf("external_ids:k8s-ovn-topo-version=%d", ovntypes.OvnCurrentTopologyVersion))
+	} else {
+		ovnLocalnetSwitch := oc.nadInfo.Prefix + ovntypes.OVNLocalnetSwitch
+		stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch", ovnLocalnetSwitch,
+			fmt.Sprintf("external_ids:k8s-ovn-topo-version=%d", ovntypes.OvnCurrentTopologyVersion))
+	}
 	if err != nil {
-		klog.Errorf("Failed to set topology version in OVN, "+
-			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		klog.Errorf("Failed to set topology version in OVN for network %s, "+
+			"stdout: %q, stderr: %q, error: %v", oc.nadInfo.NetName, stdout, stderr, err)
 		return err
 	}
 
@@ -506,7 +539,7 @@ func (oc *Controller) Run(nodeName string) error {
 }
 
 func (oc *Controller) ovnTopologyCleanup() error {
-	ver, err := util.DetermineOVNTopoVersionFromOVN(oc.nadInfo.Prefix)
+	ver, err := util.DetermineOVNTopoVersionFromOVN(oc.nadInfo.Prefix, oc.nadInfo.TopoType)
 	if err != nil {
 		return err
 	}
@@ -1175,6 +1208,9 @@ func (oc *Controller) WatchNodes() {
 	var mgmtPortFailed sync.Map
 	var addNodeFailed sync.Map
 
+	if oc.nadInfo.TopoType == ovntypes.LocalnetAttachDefTopoType {
+		return
+	}
 	start := time.Now()
 	oc.nodeHandler = oc.mc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
@@ -1361,7 +1397,12 @@ func (mc *OvnMHController) addNetworkAttachDefinition(netattachdef *nettypes.Net
 		netconf.Name = netattachdef.Name
 	}
 
-	nadInfo := util.NewNetAttachDefInfo(netconf)
+	nadInfo, err := util.NewNetAttachDefInfo(netconf)
+	if err != nil {
+		klog.Errorf(err.Error())
+		return
+	}
+
 	if !nadInfo.NotDefault {
 		mc.ovnController.nadInfo.NetAttachDefs.Store(netattachdef.Namespace+"_"+netattachdef.Name, true)
 		return
@@ -1422,7 +1463,12 @@ func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.
 		netconf.Name = netattachdef.Name
 	}
 
-	nadInfo := util.NewNetAttachDefInfo(netconf)
+	nadInfo, err := util.NewNetAttachDefInfo(netconf)
+	if err != nil {
+		klog.Errorf(err.Error())
+		return
+	}
+
 	if !nadInfo.NotDefault {
 		mc.ovnController.nadInfo.NetAttachDefs.Delete(netattachdef.Namespace + "_" + netattachdef.Name)
 		return
@@ -1474,20 +1520,22 @@ func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.
 
 	oc.deleteMaster()
 
-	existingNodes, err := oc.mc.kube.GetNodes()
-	if err != nil {
-		klog.Errorf("Error in initializing/fetching subnets: %v", err)
-		return
-	}
-
-	// remove hostsubnet annoation for this network
-	for _, node := range existingNodes.Items {
-		err := oc.deleteNodeLogicalNetwork(node.Name)
+	if oc.nadInfo.TopoType != ovntypes.LocalnetAttachDefTopoType {
+		existingNodes, err := oc.mc.kube.GetNodes()
 		if err != nil {
-			klog.Error("Failed to delete node %s for network %s: %v", node.Name, oc.nadInfo.NetName, err)
+			klog.Errorf("Error in initializing/fetching subnets: %v", err)
+			return
 		}
-		_ = oc.updateNodeAnnotationWithRetry(node.Name, []*net.IPNet{})
-		oc.lsManager.DeleteNode(node.Name)
+
+		// remove hostsubnet annoation for this network
+		for _, node := range existingNodes.Items {
+			err := oc.deleteNodeLogicalNetwork(node.Name)
+			if err != nil {
+				klog.Error("Failed to delete node %s for network %s: %v", node.Name, oc.nadInfo.NetName, err)
+			}
+			_ = oc.updateNodeAnnotationWithRetry(node.Name, []*net.IPNet{})
+			oc.lsManager.DeleteNode(node.Name)
+		}
 	}
 
 	mc.nonDefaultOvnControllers.Delete(nadInfo.NetName)
@@ -1520,8 +1568,10 @@ func (mc *OvnMHController) syncNetworkAttachDefinition(netattachdefs []interface
 		if netConf.Name == "" {
 			netConf.Name = netattachdef.Name
 		}
-		nadInfo := util.NewNetAttachDefInfo(netConf)
-		expectedNetworks[nadInfo.NetName] = true
+		nadInfo, err := util.NewNetAttachDefInfo(netConf)
+		if err == nil {
+			expectedNetworks[nadInfo.NetName] = true
+		}
 	}
 
 	// Find all the logical node switches for the non-default networks and delete the ones that belong to the
@@ -1552,12 +1602,16 @@ func (mc *OvnMHController) syncNetworkAttachDefinition(netattachdefs []interface
 		}
 
 		nodeName := strings.TrimPrefix(items[0], netPrefix)
-
 		oc := &Controller{nadInfo: &util.NetAttachDefInfo{NetNameInfo: util.NetNameInfo{NetName: netName, Prefix: netPrefix, NotDefault: true}}}
-		if err := oc.deleteNodeLogicalNetwork(nodeName); err != nil {
-			klog.Errorf("Error deleting node %s logical network: %v", nodeName, err)
+		if nodeName == ovntypes.OVNLocalnetSwitch {
+			oc.nadInfo.TopoType = ovntypes.LocalnetAttachDefTopoType
+			oc.deleteMaster()
+		} else {
+			if err := oc.deleteNodeLogicalNetwork(nodeName); err != nil {
+				klog.Errorf("Error deleting node %s logical network: %v", nodeName, err)
+			}
+			_ = oc.updateNodeAnnotationWithRetry(nodeName, []*net.IPNet{})
 		}
-		_ = oc.updateNodeAnnotationWithRetry(nodeName, []*net.IPNet{})
 	}
 	clusterRouters, stderr, err := util.RunOVNNbctl("--data=bare", "--format=csv", "--no-heading",
 		"--columns=name,external_ids", "find", "logical_router", "external_ids:network_name!=_")

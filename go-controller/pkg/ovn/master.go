@@ -169,7 +169,7 @@ func (oc *Controller) upgradeToSingleSwitchOVNTopology(existingNodeList *kapi.No
 }
 
 func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
-	ver, err := util.DetermineOVNTopoVersionFromOVN(oc.nadInfo.Prefix)
+	ver, err := util.DetermineOVNTopoVersionFromOVN(oc.nadInfo.Prefix, oc.nadInfo.TopoType)
 	if err != nil {
 		return err
 	}
@@ -225,6 +225,11 @@ func (mc *OvnMHController) enableOVNLogicalDatapathGroups() error {
 //  If true, then either quit or perform a complete reconfiguration of the cluster (recreate switches/routers with new subnet values)
 func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	klog.Infof("Starting cluster master for network %s", oc.nadInfo.NetName)
+
+	if oc.nadInfo.TopoType == types.LocalnetAttachDefTopoType {
+		return oc.SetupLocalnetMaster()
+	}
+
 	// The gateway router need to be connected to the distributed router via a per-node join switch.
 	// We need a subnet allocator that allocates subnet for this per-node join switch.
 	if config.Gateway.Mode == config.GatewayModeLocal && !oc.nadInfo.NotDefault {
@@ -492,6 +497,11 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 
 // deleteMaster delete the central router and switch for the network
 func (oc *Controller) deleteMaster() {
+	if oc.nadInfo.TopoType == types.LocalnetAttachDefTopoType {
+		oc.deleteLocalnetMaster()
+		return
+	}
+
 	if !oc.nadInfo.NotDefault {
 		// delete a logical switch called "join" that will be used to connect gateway routers to the distributed router.
 		// The "join" switch will be allocated IP addresses in the range 100.64.0.0/16.

@@ -556,7 +556,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 			MTU:        config.Default.MTU,
 			NotDefault: false,
 		}
-		nadInfo := util.NewNetAttachDefInfo(defaultNetConf)
+		nadInfo, _ := util.NewNetAttachDefInfo(defaultNetConf)
 		nc, _ := n.NewOvnNodeController(nadInfo)
 
 		if config.OVNKubernetesFeature.EnableMultiNetwork {
@@ -611,7 +611,12 @@ func (n *OvnNode) addNetworkAttachDefinition(netattachdef *nettypes.NetworkAttac
 		netconf.Name = netattachdef.Name
 	}
 
-	nadInfo := util.NewNetAttachDefInfo(netconf)
+	nadInfo, err := util.NewNetAttachDefInfo(netconf)
+	if err != nil {
+		klog.Errorf(err.Error())
+		return
+	}
+
 	if !nadInfo.NotDefault {
 		n.defaultNodeController.nadInfo.NetAttachDefs.Store(netattachdef.Namespace+"_"+netattachdef.Name, true)
 		return
@@ -644,12 +649,81 @@ func (n *OvnNode) addNetworkAttachDefinition(netattachdef *nettypes.NetworkAttac
 	}
 	n.nonDefaultNodeControllers.Store(nadInfo.NetName, nc)
 
+	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
+		if nc.nadInfo.TopoType == types.LocalnetAttachDefTopoType {
+			// for smart-nic mode and full mode
+			err = nc.updateLocalnetOvnBridgeMapping(true)
+			if err != nil {
+				klog.Errorf(err.Error())
+			}
+		}
+	}
+
 	if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
 		nc.watchSmartNicPods()
 	}
 }
 
+func (nc *ovnNodeController) updateLocalnetOvnBridgeMapping(toAdd bool) error {
+	if nc.nadInfo.TopoType != types.LocalnetAttachDefTopoType || config.OvnKubeNode.Mode == types.NodeModeSmartNICHost {
+		return nil
+	}
+
+	// ovn-bridge-mappings maps a physical network name to a local ovs bridge
+	// that provides connectivity to that network. It is in the form of physnet1:br1,physnet2:br2.
+	// Note that there may be multiple ovs bridge mappings, be sure not to override
+	// the mappings for the other physical network
+	networkName := nc.nadInfo.Prefix + types.LocalNetBridgeName
+	stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
+		"external_ids:ovn-bridge-mappings")
+	if err != nil {
+		return fmt.Errorf("failed to get ovn-bridge-mappings stderr:%s (%v)", stderr, err)
+	}
+
+	bridgeMap := map[string]string{}
+	bridgeMappings := strings.Split(stdout, ",")
+	for _, bridgeMapping := range bridgeMappings {
+		m := strings.Split(bridgeMapping, ":")
+		if len(m) == 2 {
+			bridgeMap[m[0]] = m[1]
+		}
+	}
+
+	bridge, ok := bridgeMap[networkName]
+	if toAdd {
+		if ok && bridge == nc.nadInfo.BridgeName {
+			return nil
+		}
+		bridgeMap[networkName] = nc.nadInfo.BridgeName
+	} else {
+		if !ok {
+			return nil
+		}
+		delete(bridgeMap, networkName)
+	}
+
+	if len(bridgeMap) == 0 {
+		return nil
+	}
+
+	mapString := ""
+	for networkName, bridge = range bridgeMap {
+		if len(mapString) != 0 {
+			mapString += ","
+		}
+		mapString = mapString + networkName + ":" + bridge
+	}
+
+	_, stderr, err = util.RunOVSVsctl("set", "Open_vSwitch", ".",
+		fmt.Sprintf("external_ids:ovn-bridge-mappings=%s", mapString))
+	if err != nil {
+		return fmt.Errorf("failed to set ovn-bridge-mappings %s, stderr:%s (%v)", mapString, stderr, err)
+	}
+	return nil
+}
+
 func (n *OvnNode) deleteNetworkAttachDefinition(netattachdef *nettypes.NetworkAttachmentDefinition) {
+
 	netconf := &cnitypes.NetConf{}
 
 	// looking for network attachment definition that use OVN K8S CNI only
@@ -668,7 +742,12 @@ func (n *OvnNode) deleteNetworkAttachDefinition(netattachdef *nettypes.NetworkAt
 		netconf.Name = netattachdef.Name
 	}
 
-	nadInfo := util.NewNetAttachDefInfo(netconf)
+	nadInfo, err := util.NewNetAttachDefInfo(netconf)
+	if err != nil {
+		klog.Errorf(err.Error())
+		return
+	}
+
 	if !nadInfo.NotDefault {
 		n.defaultNodeController.nadInfo.NetAttachDefs.Delete(netattachdef.Namespace + "_" + netattachdef.Name)
 		return
@@ -693,9 +772,20 @@ func (n *OvnNode) deleteNetworkAttachDefinition(netattachdef *nettypes.NetworkAt
 	if netAttachDefLeft {
 		return
 	}
-	if nc.podHandler != nil {
-		nc.node.watchFactory.RemovePodHandler(nc.podHandler)
+
+	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost && nc.nadInfo.TopoType == types.LocalnetAttachDefTopoType {
+		err = nc.updateLocalnetOvnBridgeMapping(false)
+		if err != nil {
+			klog.Errorf(err.Error())
+		}
 	}
+
+	if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
+		if nc.podHandler != nil {
+			nc.node.watchFactory.RemovePodHandler(nc.podHandler)
+		}
+	}
+
 	n.nonDefaultNodeControllers.Delete(nadInfo.NetName)
 }
 

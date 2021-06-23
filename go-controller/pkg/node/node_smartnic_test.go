@@ -92,7 +92,7 @@ var _ = Describe("Node Smart NIC tests", func() {
 				Name: types.DefaultNetworkName,
 			},
 		}
-		nadInfo := util.NewNetAttachDefInfo(netconf)
+		nadInfo, _ := util.NewNetAttachDefInfo(netconf)
 		nc, _ = node.NewOvnNodeController(nadInfo)
 
 		podNamespaceLister = v1mocks.PodNamespaceLister{}

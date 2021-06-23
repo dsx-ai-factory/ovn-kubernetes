@@ -215,9 +215,22 @@ type NetAttachDefInfo struct {
 	NetAttachDefs sync.Map
 	NetCidr       string
 	MTU           int
+
+	TopoType     string
+	VlanId       int
+	BridgeName   string
+	ExcludeCidrs []*net.IPNet
 }
 
-func NewNetAttachDefInfo(netconf *cnitypes.NetConf) *NetAttachDefInfo {
+func NewNetAttachDefInfo(netconf *cnitypes.NetConf) (*NetAttachDefInfo, error) {
+	if netconf.TopoType != "" && netconf.TopoType != types.LocalnetAttachDefTopoType {
+		return nil, fmt.Errorf("invalid topotype %s for net-attach-def %s", netconf.TopoType, netconf.Name)
+	}
+
+	if !netconf.NotDefault && netconf.TopoType != "" {
+		return nil, fmt.Errorf("invalid topotype %s for default net-attach-def %s", netconf.TopoType, netconf.Name)
+	}
+
 	netName := "default"
 	if netconf.NotDefault {
 		netName = netconf.Name
@@ -227,9 +240,39 @@ func NewNetAttachDefInfo(netconf *cnitypes.NetConf) *NetAttachDefInfo {
 	nadInfo := NetAttachDefInfo{
 		NetCidr:     netconf.NetCidr,
 		MTU:         netconf.MTU,
+		TopoType:    netconf.TopoType,
+		VlanId:      netconf.VlanId,
+		BridgeName:  netconf.BridgeName,
 		NetNameInfo: NetNameInfo{netName, prefix, netconf.NotDefault},
 	}
-	return &nadInfo
+
+	if netconf.TopoType == types.LocalnetAttachDefTopoType {
+		if netconf.BridgeName == "" {
+			return nil, fmt.Errorf("missing bridge name for %s topotype net-attach-def %s", types.LocalnetAttachDefTopoType, netconf.Name)
+		}
+
+		if len(netconf.ExcludeRanges) != 0 {
+			nadInfo.ExcludeCidrs = make([]*net.IPNet, len(netconf.ExcludeRanges))
+			for i, excludeRange := range netconf.ExcludeRanges {
+				_, excludeCidr, err := net.ParseCIDR(excludeRange)
+				if err != nil {
+					return nil, fmt.Errorf("invalid CIDR in exclude list %s: %s", excludeRange, err)
+				}
+				nadInfo.ExcludeCidrs[i] = excludeCidr
+			}
+		}
+		//nexthops := strings.Split(netconf.GatewayNexthops, ",")
+		//for _, nexthop := range nexthops {
+		//	// Parse NextHop to make sure it is valid before using. Return error if not valid.
+		//	gwNexthop := net.ParseIP(nexthop)
+		//	if gwNexthop == nil {
+		//		return nil, fmt.Errorf("failed to parse configured next-hop for net-attach-def %s/%s: %s", namespace, name, nexthop)
+		//	}
+		//	nadInfo.GatewayNextHops = append(nadInfo.GatewayNextHops, gwNexthop)
+		//}
+	}
+
+	return &nadInfo, nil
 }
 
 // Note that for port_group and address_set, it does not allow the '-' character

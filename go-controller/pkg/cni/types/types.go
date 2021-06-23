@@ -13,8 +13,18 @@ type NetConf struct {
 	NetCidr string `json:"net_cidr,omitempty"`
 	// Network MTU
 	MTU int `json:"mtu,omitempty"`
+	// set to localnet if it needs public interface
+	TopoType string `json:"topology,omitempty"`
 	// set true if it is default networkattachmentdefintion
 	NotDefault bool `json:"not_default,omitempty"`
+
+	// VlanID, valid in localnet topology network
+	VlanId int `json:"vlan_id,omitempty"`
+	// bridge name, valid in localnet topology network
+	BridgeName string `json:"bridge_name,omitempty"`
+	// list of CIDRs to be excluded from being allocated for Pod, valid in localnet topology network
+	ExcludeRanges []string `json:"exclude,omitempty"`
+
 	// LogFile to log all the messages from cni shim binary to
 	LogFile string `json:"logFile,omitempty"`
 	// Level is the logging verbosity level
