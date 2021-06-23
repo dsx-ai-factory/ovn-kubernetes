@@ -408,7 +408,7 @@ func (gp *gressPolicy) addOrModifyACLAllow(match, l4Match, portGroupUUID string,
 	var direction, action, aclName, ipBlockCIDRString string
 	direction = types.DirectionToLPort
 	if gp.isAclStateless {
-		action = "allow"
+		action = "allow-stateless"
 	} else {
 		action = "allow-related"
 	}
