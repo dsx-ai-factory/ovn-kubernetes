@@ -18,17 +18,19 @@ fi
 case "$1" in
 start)
     echo "Starting ovnkube..."
-    /usr/local/ovn-k8s/bin/ovnkube.sh "ovn-node"
+    nohup /usr/local/ovn-k8s/scripts/ovnkube.sh "ovn-node" 2>&1 &
     ;;
 stop)
     echo "Stopping ovnkube..."
     killall -9 ovnkube
+    killall -9 ovnkube.sh
     ;;
 restart|force-reload)
     echo "Restarting ovnkube..."
     killall -9 ovnkube
+    killall -9 ovnkube.sh
     sleep 1
-    /usr/local/ovn-k8s/bin/ovnkube.sh "ovn-node"
+    nohup /usr/local/ovn-k8s/scripts/ovnkube.sh "ovn-node" 2>&1 &
     ;;
 status)
     echo "Status"
