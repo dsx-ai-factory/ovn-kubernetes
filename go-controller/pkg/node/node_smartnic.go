@@ -3,7 +3,6 @@ package node
 import (
 	"context"
 	"fmt"
-	"os"
 	"sync"
 	"time"
 
@@ -178,19 +177,10 @@ func (nc *ovnNodeController) addRepPort(pod *kapi.Pod, vfRepName string, ifInfo 
 	klog.Infof("Port %s added to bridge br-int", vfRepName)
 
 	// set the Pod interface's MAC address on the corresponding VF Port
-	// TODO(gmoodalbail): use sriovnet library
-	vfRepFile := fmt.Sprintf("/sys/class/net/p%s/smart_nic/vf%s/mac", smartNicCD.PfId, smartNicCD.VfId)
-	f, err := os.OpenFile(vfRepFile, os.O_WRONLY, 0)
+	err = util.GetSriovnetOps().SetRepresentorPeerMacAddress(vfRepName, ifInfo.MAC)
 	if err != nil {
-		_ = nc.delRepPort(vfRepName)
-		return fmt.Errorf("couldn't open the VF representor's sysfs file %s: %v", vfRepFile, err)
-	}
-	defer f.Close()
-	_, err = f.WriteString(ifInfo.MAC.String())
-	if err != nil {
-		_ = nc.delRepPort(vfRepName)
-		return fmt.Errorf("failed to write the MAC address %s to VF reprentor %s",
-			ifInfo.MAC.String(), vfRepFile)
+		return fmt.Errorf("failed to set the MAC address %s on VF reprentor %s",
+			ifInfo.MAC.String(), vfRepName)
 	}
 
 	link, err := util.GetNetLinkOps().LinkByName(vfRepName)

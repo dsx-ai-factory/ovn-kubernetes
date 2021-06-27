@@ -2,13 +2,11 @@ package node
 
 import (
 	"fmt"
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
-	"github.com/stretchr/testify/mock"
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"net"
 
 	ctypes "github.com/containernetworking/cni/pkg/types"
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	cnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
@@ -19,6 +17,10 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 
+	"github.com/stretchr/testify/mock"
+
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -236,6 +238,7 @@ var _ = Describe("Node Smart NIC tests", func() {
 					Cmd:    genOfctlDumpFlowsCmd("table=0,in_port=1"),
 					Output: "non-empty-output",
 				})
+				sriovnetOpsMock.On("SetRepresentorPeerMacAddress", vfRep, net.HardwareAddr(nil)).Return(nil)
 			})
 
 			Context("Fails if link configuration fails on", func() {
@@ -290,23 +293,23 @@ var _ = Describe("Node Smart NIC tests", func() {
 				})
 			})
 
-			//It("Sets smartnic-connection-status pod annotation on success", func() {
-			//	netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
-			//	netlinkOpsMock.On("LinkSetMTU", vfLink, ifInfo.MTU).Return(nil)
-			//	netlinkOpsMock.On("LinkSetUp", vfLink).Return(nil)
-			//	scs := util.SmartNICConnectionStatus{
-			//		Status: "Ready",
-			//	}
-			//	err := util.MarshalPodSmartNicConnStatus(&pod.Annotations, &scs, types.DefaultNetworkName)
-			//	Expect(err).ToNot(HaveOccurred())
-			//	kubeMock.On("UpdatePod", &pod).Return(nil)
-			//	fakeClient := newFakeKubeClientWithPod(&pod)
-			//	podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
-			//
-			//	err = nc.addRepPort(&pod, vfRep, ifInfo, &podLister, fakeClient)
-			//	Expect(err).ToNot(HaveOccurred())
-			//	Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
-			//})
+			It("Sets smartnic-connection-status pod annotation on success", func() {
+				netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
+				netlinkOpsMock.On("LinkSetMTU", vfLink, ifInfo.MTU).Return(nil)
+				netlinkOpsMock.On("LinkSetUp", vfLink).Return(nil)
+				scs := util.SmartNICConnectionStatus{
+					Status: "Ready",
+				}
+				err := util.MarshalPodSmartNicConnStatus(&pod.Annotations, &scs, types.DefaultNetworkName)
+				Expect(err).ToNot(HaveOccurred())
+				kubeMock.On("UpdatePod", &pod).Return(nil)
+
+				fakeClient := newFakeKubeClientWithPod(&pod)
+				podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
+
+				err = nc.addRepPort(&pod, vfRep, ifInfo, &podLister, fakeClient)
+				Expect(err).ToNot(HaveOccurred())
+			})
 
 			It("cleans up representor port if set pod annotation fails", func() {
 				netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)

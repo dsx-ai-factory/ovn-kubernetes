@@ -16,7 +16,9 @@ type SriovnetOps interface {
 	GetPfPciFromVfPci(vfPciAddress string) (string, error)
 	GetVfRepresentorSmartNIC(pfID, vfIndex string) (string, error)
 	GetRepresentorPeerMacAddress(netdev string) (net.HardwareAddr, error)
+	SetRepresentorPeerMacAddress(netdev string, mac net.HardwareAddr) error
 	GetRepresentorPortFlavour(netdev string) (sriovnet.PortFlavour, error)
+	IsVfPciVfioBound(pciAddr string) bool
 }
 
 type defaultSriovnetOps struct {
@@ -62,6 +64,14 @@ func (defaultSriovnetOps) GetRepresentorPeerMacAddress(netdev string) (net.Hardw
 	return sriovnet.GetRepresentorPeerMacAddress(netdev)
 }
 
+func (defaultSriovnetOps) SetRepresentorPeerMacAddress(netdev string, mac net.HardwareAddr) error {
+	return sriovnet.SetRepresentorPeerMacAddress(netdev, mac)
+}
+
 func (defaultSriovnetOps) GetRepresentorPortFlavour(netdev string) (sriovnet.PortFlavour, error) {
 	return sriovnet.GetRepresentorPortFlavour(netdev)
+}
+
+func (defaultSriovnetOps) IsVfPciVfioBound(pciAddr string) bool {
+	return sriovnet.IsVfPciVfioBound(pciAddr)
 }
