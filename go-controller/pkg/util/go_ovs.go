@@ -225,14 +225,14 @@ func (c *OvsdbClient) rowToInterface(uuid string) (*Interface, error) {
 		UUID:                 uuid,
 		Name:                 cacheInterface.Fields["name"].(string),
 		Type:                 cacheInterface.Fields["type"].(string),
-		AdminState:           cacheInterface.Fields["admin_state"].(string),
-		LinkState:            cacheInterface.Fields["link_state"].(string),
 		IfIndex:              cacheInterface.Fields["ifindex"].(float64),
 		LinkResets:           cacheInterface.Fields["link_resets"].(float64),
 		OfPort:               cacheInterface.Fields["ofport"].(float64),
 		IngressPolicingBurst: cacheInterface.Fields["ingress_policing_burst"].(float64),
 		IngressPolicingRate:  cacheInterface.Fields["ingress_policing_rate"].(float64),
 	}
+	interfaceInfo.AdminState = getColumnFieldStringValue(&cacheInterface, "admin_state")
+	interfaceInfo.LinkState = getColumnFieldStringValue(&cacheInterface, "link_state")
 	interfaceInfo.Duplex = getColumnFieldStringValue(&cacheInterface, "duplex")
 	interfaceInfo.LinkSpeed = getColumnFieldFloat64Value(&cacheInterface, "link_speed")
 	interfaceInfo.Mtu = getColumnFieldFloat64Value(&cacheInterface, "mtu")
