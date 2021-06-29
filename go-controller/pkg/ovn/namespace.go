@@ -3,6 +3,7 @@ package ovn
 import (
 	"fmt"
 	"net"
+	"reflect"
 	"strings"
 	"time"
 
@@ -163,7 +164,7 @@ func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
 	}
 	defer nsInfo.Unlock()
 
-	if nsInfo.addressSet == nil {
+	if reflect.ValueOf(nsInfo.addressSet).IsNil() {
 		nsInfo.addressSet, err = oc.createNamespaceAddrSetAllPods(ns)
 		if err != nil {
 			return fmt.Errorf("unable to add pod to namespace. Cannot create address set for namespace: %s,"+
@@ -193,7 +194,7 @@ func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) error 
 	}
 	defer nsInfo.Unlock()
 
-	if nsInfo.addressSet != nil {
+	if !reflect.ValueOf(nsInfo.addressSet).IsNil() {
 		if err := nsInfo.addressSet.DeleteIPs(createIPAddressSlice(portInfo.ips)); err != nil {
 			return err
 		}
@@ -512,7 +513,7 @@ func (oc *Controller) deleteNamespaceLocked(ns string) *namespaceInfo {
 		nsInfo.Unlock()
 		return nil
 	}
-	if nsInfo.addressSet != nil {
+	if !reflect.ValueOf(nsInfo.addressSet).IsNil() {
 		if err := nsInfo.addressSet.Destroy(); err != nil {
 			klog.Errorf(err.Error())
 		}

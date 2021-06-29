@@ -3,6 +3,7 @@ package ovn
 import (
 	"fmt"
 	"net"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -120,7 +121,7 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 		return addErrors
 	}
 
-	if nsInfo.addressSet == nil {
+	if reflect.ValueOf(nsInfo.addressSet).IsNil() {
 		// TODO(trozet): remove dependency on nsInfo object and just determine hash names to create Egress FW with
 		return fmt.Errorf("unable to add egress firewall policy, namespace: %s has no address set", egressFirewall.Namespace)
 	}
