@@ -423,6 +423,15 @@ func networkStatusAnnotationsChanged(oldPod, newPod *kapi.Pod) bool {
 	return oldPod.Annotations[nettypes.NetworkStatusAnnot] != newPod.Annotations[nettypes.NetworkStatusAnnot]
 }
 
+func podNodeNameLabelChanged(oldPod, newPod *kapi.Pod, nodeNameLabel map[string]string) bool {
+	if oldPod == nil {
+		// check if label already exists and is same as nodeNameLabel. this occurs when ovnkube
+		// is restarted and we call Add on each of the Pods
+		return newPod.Labels[util.OvnPodNodeNameLabel] != nodeNameLabel[util.OvnPodNodeNameLabel]
+	}
+	return oldPod.Labels[util.OvnPodNodeNameLabel] != newPod.Labels[util.OvnPodNodeNameLabel]
+}
+
 // ensurePod tries to set up a pod. It returns success or failure; failure
 // indicates the pod should be retried later.
 func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
@@ -431,13 +440,32 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 		return false
 	}
 
+	nodeNameLabel := map[string]string{util.OvnPodNodeNameLabel: pod.Spec.NodeName}
 	if util.PodWantsNetwork(pod) && addPort {
+		if podNodeNameLabelChanged(nil, pod, nodeNameLabel) {
+			// to avoid any throttling from the API Server on ovnkube-master restart, call this only if label is different
+			err := oc.kube.SetLabelsOnPod(pod, nodeNameLabel)
+			if err != nil {
+				klog.Errorf("Failed to set %s labels on pod %s: %v", util.OvnPodNodeNameLabel, pod.Name, err)
+				oc.recordPodEvent(err, pod)
+				return false
+			}
+		}
 		if err := oc.addLogicalPort(pod); err != nil {
 			klog.Errorf(err.Error())
 			oc.recordPodEvent(err, pod)
 			return false
 		}
 	} else {
+		if podNodeNameLabelChanged(oldPod, pod, nodeNameLabel) {
+			// to avoid any throttling from the API Server on ovnkube-master retart, call this only if label is different
+			err := oc.kube.SetLabelsOnPod(pod, nodeNameLabel)
+			if err != nil {
+				klog.Errorf("Failed to update %s labels on pod %s: %v", util.OvnPodNodeNameLabel, pod.Name, err)
+				oc.recordPodEvent(err, pod)
+				return false
+			}
+		}
 		oldPodChanged := oldPod != nil &&
 			(exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod))
 
@@ -479,12 +507,6 @@ func (oc *Controller) WatchPods() {
 			if !oc.ensurePod(nil, pod, true) {
 				oc.addRetryPod(pod)
 			}
-			if podScheduled(pod) {
-				err := oc.kube.SetLabelsOnPod(pod, map[string]string{util.OvnPodNodeNameAnnotation: pod.Spec.NodeName})
-				if err != nil {
-					klog.Errorf("Failed to set %s labels on pod %s: %v", util.OvnPodNodeNameAnnotation, pod.Name, err)
-				}
-			}
 		},
 		UpdateFunc: func(old, newer interface{}) {
 			oldPod := old.(*kapi.Pod)
@@ -506,12 +528,6 @@ func (oc *Controller) WatchPods() {
 			if !oc.ensurePod(oldPod, pod, oc.checkAndDeleteRetryPod(pod.UID)) {
 				// add back the failed pod
 				oc.addRetryPod(pod)
-			}
-			if !podScheduled(oldPod) && podScheduled(pod) {
-				err := oc.kube.SetLabelsOnPod(pod, map[string]string{util.OvnPodNodeNameAnnotation: pod.Spec.NodeName})
-				if err != nil {
-					klog.Errorf("Failed to set %s labels on pod %s: %v", util.OvnPodNodeNameAnnotation, pod.Name, err)
-				}
 			}
 		},
 		DeleteFunc: func(obj interface{}) {

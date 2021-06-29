@@ -44,8 +44,8 @@ const (
 	OvnPodAnnotationName = "k8s.ovn.org/pod-networks"
 	// OvnPodDefaultNetwork is the constant string representing the first OVN interface to the Pod
 	OvnPodDefaultNetwork = "default"
-	// OvnPodNodeNameAnnotation is the constant annotation key representing the node on which Pod is scheduled
-	OvnPodNodeNameAnnotation = "k8s.ovn.org/nodeName"
+	// OvnPodNodeNameLabel is the constant label key representing the node on which Pod is scheduled
+	OvnPodNodeNameLabel = "k8s.ovn.org/nodeName"
 )
 
 // PodAnnotation describes the assigned network details for a single pod network. (The
