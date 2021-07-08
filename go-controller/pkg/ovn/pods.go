@@ -26,6 +26,8 @@ func podLogicalPortName(pod *kapi.Pod) string {
 func (oc *Controller) syncPods(pods []interface{}) {
 	// get the list of logical switch ports (equivalent to pods)
 	expectedLogicalPorts := make(map[string]bool)
+	// get the list of namespaces need update
+	nsNeedUpdate := make(map[string][]net.IP)
 	for _, podInterface := range pods {
 		pod, ok := podInterface.(*kapi.Pod)
 		if !ok {
@@ -48,7 +50,7 @@ func (oc *Controller) syncPods(pods []interface{}) {
 	// get the list of logical ports from OVN
 	nodes, err := oc.watchFactory.GetNodes()
 	if err != nil {
-		klog.Errorf("Failed to get nodes")
+		klog.Errorf("Failed to get nodes: %v", err)
 		return
 	}
 	for _, n := range nodes {
@@ -68,6 +70,15 @@ func (oc *Controller) syncPods(pods []interface{}) {
 		if _, ok := expectedLogicalPorts[existingPort]; !ok {
 			// not found, delete this logical port
 			klog.Infof("Stale logical port found: %s. This logical port will be deleted.", existingPort)
+			_, ip, err := util.GetPortAddresses(existingPort, oc.ovnNBClient)
+			// need update address_set later
+			if err == nil {
+				ns := strings.Split(existingPort, "_")[0]
+				ips := nsNeedUpdate[ns]
+				ips = append(ips, ip...)
+				nsNeedUpdate[ns] = ips
+			}
+
 			cmd, err := oc.ovnNBClient.LSPDel(existingPort)
 			if err != nil {
 				klog.Errorf("Error in getting the cmd to delete pod's logical port %s %v", existingPort, err)
@@ -77,6 +88,23 @@ func (oc *Controller) syncPods(pods []interface{}) {
 			if err != nil {
 				klog.Errorf("Error deleting pod's logical port %s %v", existingPort, err)
 				continue
+			}
+		}
+	}
+
+	// update namespace addressSet has stale ips
+	for ns, ips := range nsNeedUpdate {
+		klog.Infof("Found stale IPs %s in Namespace %s. Removing them", ips, ns)
+		nsInfo := oc.getNamespaceLocked(ns)
+		if nsInfo == nil {
+			continue
+		}
+		defer nsInfo.Unlock()
+		if nsInfo.addressSet != nil {
+			err := nsInfo.addressSet.DeleteIPs(ips)
+			if err != nil {
+				klog.Errorf("Unable to delete stale IPs %v from namespace %s address_set, "+
+					"error: %v", ips, ns, err)
 			}
 		}
 	}
