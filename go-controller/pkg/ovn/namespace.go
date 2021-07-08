@@ -294,7 +294,13 @@ func parseRoutingExternalGWAnnotation(annotation string) ([]net.IP, error) {
 
 // AddNamespace creates corresponding addressset in ovn db
 func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
-	klog.V(5).Infof("Adding namespace: %s", ns.Name)
+	klog.Infof("[%s] adding namespace", ns.Name)
+	// Keep track of how long syncs take.
+	start := time.Now()
+	defer func() {
+		klog.Infof("[%s] adding namespace took %v", ns.Name, time.Since(start))
+	}()
+
 	nsInfo := oc.createNamespaceLocked(ns.Name)
 	defer nsInfo.Unlock()
 
@@ -331,7 +337,7 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 }
 
 func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
-	klog.V(5).Infof("Updating namespace: %s", old.Name)
+	klog.Infof("[%s] updating namespace", old.Name)
 
 	nsInfo := oc.getNamespaceLocked(old.Name)
 	if nsInfo == nil {
@@ -411,7 +417,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 }
 
 func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
-	klog.V(5).Infof("Deleting namespace: %s", ns.Name)
+	klog.Infof("[%s] deleting namespace", ns.Name)
 
 	nsInfo := oc.deleteNamespaceLocked(ns.Name)
 	if nsInfo == nil {
