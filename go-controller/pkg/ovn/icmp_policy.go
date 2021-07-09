@@ -117,14 +117,14 @@ func (oc *Controller) icmpHandleLocalPodSelectorAddFunc(
 		return
 	}
 
-	np.Lock()
-	defer np.Unlock()
-
-	if np.deleted {
+	// If we've already processed this pod, shortcut.
+	if _, ok := np.localPods.Load(logicalPort); ok {
 		return
 	}
 
-	if _, ok := np.localPods[logicalPort]; ok {
+	np.RLock()
+	defer np.RUnlock()
+	if np.deleted {
 		return
 	}
 
@@ -142,7 +142,7 @@ func (oc *Controller) icmpHandleLocalPodSelectorAddFunc(
 			"stderr: %q (%v)", logicalPort, np.portGroupUUID, stderr, err)
 	}
 
-	np.localPods[logicalPort] = portInfo
+	np.localPods.Store(logicalPort, portInfo)
 }
 
 func (oc *Controller) icmpHandleLocalPodSelector(

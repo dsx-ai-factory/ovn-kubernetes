@@ -21,7 +21,10 @@ import (
 )
 
 type networkPolicy struct {
-	sync.Mutex
+	// RWMutex synchronizes operations on the policy.
+	// Operations that change local and peer pods take a RLock,
+	// whereas operations that affect the policy take a Lock.
+	sync.RWMutex
 	name            string
 	namespace       string
 	policyTypes     []knet.PolicyType
@@ -30,10 +33,15 @@ type networkPolicy struct {
 	podHandlerList  []*factory.Handler
 	svcHandlerList  []*factory.Handler
 	nsHandlerList   []*factory.Handler
-	localPods       map[string]*lpInfo //pods effected by this policy
-	portGroupUUID   string             //uuid for OVN port_group
-	portGroupName   string
-	deleted         bool //deleted policy
+
+	// localPods is a list of pods affected by ths policy
+	// this is a sync map so we can handle multiple pods at once
+	// map of string -> *lpInfo
+	localPods sync.Map
+
+	portGroupUUID string //uuid for OVN port_group
+	portGroupName string
+	deleted       bool //deleted policy
 }
 
 // We take elements of the policy, as args, instead of the policy itself (and getting it's elements)
@@ -48,7 +56,7 @@ func NewNetworkPolicy(policyNameSpace, policyName string, policyTypes []knet.Pol
 		podHandlerList:  make([]*factory.Handler, 0),
 		svcHandlerList:  make([]*factory.Handler, 0),
 		nsHandlerList:   make([]*factory.Handler, 0),
-		localPods:       make(map[string]*lpInfo),
+		localPods:       sync.Map{},
 	}
 	return np
 }
@@ -621,14 +629,14 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 		return
 	}
 
-	np.Lock()
-	defer np.Unlock()
-
-	if np.deleted {
+	// If we've already processed this pod, shortcut.
+	if _, ok := np.localPods.Load(logicalPort); ok {
 		return
 	}
 
-	if _, ok := np.localPods[logicalPort]; ok {
+	np.RLock()
+	defer np.RUnlock()
+	if np.deleted {
 		return
 	}
 
@@ -646,7 +654,7 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 			"stderr: %q (%v)", logicalPort, np.portGroupUUID, stderr, err)
 	}
 
-	np.localPods[logicalPort] = portInfo
+	np.localPods.Store(logicalPort, portInfo)
 }
 
 func (oc *Controller) handleLocalPodSelectorDelFunc(
@@ -665,17 +673,17 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 		return
 	}
 
-	np.Lock()
-	defer np.Unlock()
+	// If we never saw this pod, short-circuit
+	if _, ok := np.localPods.LoadAndDelete(logicalPort); !ok {
+		return
+	}
 
+	np.RLock()
+	defer np.RUnlock()
 	if np.deleted {
 		return
 	}
 
-	if _, ok := np.localPods[logicalPort]; !ok {
-		return
-	}
-	delete(np.localPods, logicalPort)
 	oc.localPodDelDefaultDeny(np, nsInfo, portInfo)
 
 	oc.lspMutex.Lock()
@@ -918,9 +926,11 @@ func (oc *Controller) destroyNetworkPolicy(np *networkPolicy, nsInfo *namespaceI
 	np.deleted = true
 	oc.shutdownHandlers(np)
 
-	for _, portInfo := range np.localPods {
+	np.localPods.Range(func(_, value interface{}) bool {
+		portInfo := value.(*lpInfo)
 		oc.localPodDelDefaultDeny(np, nsInfo, portInfo)
-	}
+		return true
+	})
 
 	if len(nsInfo.networkPolicies) == 0 {
 		deletePortGroup(defaultDenyPortGroup(np.namespace, "ingressDefaultDeny"))
@@ -1060,9 +1070,9 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				namespace := obj.(*kapi.Namespace)
-				np.Lock()
+				np.RLock()
 				alreadyDeleted := np.deleted
-				np.Unlock()
+				np.RUnlock()
 				if alreadyDeleted {
 					return
 				}
@@ -1116,6 +1126,7 @@ func (oc *Controller) handlePeerNamespaceSelector(
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				namespace := obj.(*kapi.Namespace)
+				// This needs to be a write lock because there's no locking around 'gress policies
 				np.Lock()
 				defer np.Unlock()
 				if !np.deleted {
@@ -1124,6 +1135,7 @@ func (oc *Controller) handlePeerNamespaceSelector(
 			},
 			DeleteFunc: func(obj interface{}) {
 				namespace := obj.(*kapi.Namespace)
+				// This needs to be a write lock
 				np.Lock()
 				defer np.Unlock()
 				if !np.deleted {
