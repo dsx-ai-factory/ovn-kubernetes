@@ -814,18 +814,6 @@ func (n *OvnNode) deleteNetworkAttachDefinition(netattachdef *nettypes.NetworkAt
 	n.nonDefaultNodeControllers.Delete(nadInfo.NetName)
 }
 
-func getReadyEndpointAddresses(endpointSlice *discovery.EndpointSlice) []string {
-	readyEndpointsAddress := make([]string, 0)
-	for _, endpoint := range endpointSlice.Endpoints {
-		//skip endpoints that are not ready
-		if endpoint.Conditions.Ready != nil && !*endpoint.Conditions.Ready {
-			continue
-		}
-		readyEndpointsAddress = append(readyEndpointsAddress, endpoint.Addresses...)
-	}
-	return readyEndpointsAddress
-}
-
 func (n *OvnNode) WatchEndpointSlices(nodeIP string) {
 	start := time.Now()
 
@@ -843,10 +831,10 @@ func (n *OvnNode) WatchEndpointSlices(nodeIP string) {
 		UpdateFunc: func(prevObj, obj interface{}) {
 			oldEndpointSlice := prevObj.(*discovery.EndpointSlice)
 			newEndpointSlice := obj.(*discovery.EndpointSlice)
-			oldReadyEpAddr := getReadyEndpointAddresses(oldEndpointSlice)
-			newReadyEpAddr := getReadyEndpointAddresses(newEndpointSlice)
+			oldEpAddr := getEndpointAddresses(oldEndpointSlice)
+			newEpAddr := getEndpointAddresses(newEndpointSlice)
 			if reflect.DeepEqual(oldEndpointSlice.Ports, newEndpointSlice.Ports) &&
-				reflect.DeepEqual(oldReadyEpAddr, newReadyEpAddr) {
+				reflect.DeepEqual(oldEpAddr, newEpAddr) {
 				return
 			}
 			klog.Infof("Processing update for endpoint slice %s on namespace %s",
