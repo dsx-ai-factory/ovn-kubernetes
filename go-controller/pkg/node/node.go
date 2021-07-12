@@ -308,7 +308,11 @@ func (n *OvnNode) WatchEndpointSlices(nodeIP string) {
 	n.watchFactory.AddEndpointSliceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			endpointSlice := obj.(*discovery.EndpointSlice)
+			klog.Infof("Processing add for endpoint slice %s on namespace %s",
+				endpointSlice.Name, endpointSlice.Namespace)
+			startTime := time.Now()
 			addEPSliceToFirewallZone(nodeIP, endpointSlice)
+			klog.Infof("Took %v to add endpoint slice %s", time.Since(startTime), endpointSlice.Name)
 		},
 		UpdateFunc: func(prevObj, obj interface{}) {
 			oldEndpointSlice := prevObj.(*discovery.EndpointSlice)
@@ -319,7 +323,11 @@ func (n *OvnNode) WatchEndpointSlices(nodeIP string) {
 				reflect.DeepEqual(oldReadyEpAddr, newReadyEpAddr) {
 				return
 			}
+			klog.Infof("Processing update for endpoint slice %s on namespace %s",
+				newEndpointSlice.Name, newEndpointSlice.Namespace)
+			startTime := time.Now()
 			updateEndpointSlice(nodeIP, oldEndpointSlice, newEndpointSlice)
+			klog.Infof("Took %v to update endpoint slice %s", time.Since(startTime), newEndpointSlice.Name)
 		},
 		DeleteFunc: func(obj interface{}) {
 			endpointSlice := obj.(*discovery.EndpointSlice)
@@ -329,6 +337,8 @@ func (n *OvnNode) WatchEndpointSlices(nodeIP string) {
 			for _, port := range endpointSlice.Ports {
 				for _, endpoint := range endpointSlice.Endpoints {
 					for _, ip := range endpoint.Addresses {
+						klog.V(5).Infof("Endpoint address is %s and NodeIP is %s for port %d/%s",
+							ip, nodeIP, *port.Port, *port.Protocol)
 						if nodeIP == ip {
 							err := removePortFromFirewallZone(ovnFirewallZone,
 								*port.Port, *port.Protocol)
@@ -365,6 +375,8 @@ func addEPSliceToFirewallZone(nodeIP string, endpointSlice *discovery.EndpointSl
 				continue
 			}
 			for _, ip := range endpoint.Addresses {
+				klog.V(5).Infof("Endpoint address is %s and NodeIP is %s for port  %d/%s",
+					ip, nodeIP, *port.Port, *port.Protocol)
 				if nodeIP != ip {
 					continue
 				}
@@ -406,12 +418,16 @@ func updateEndpointSlice(nodeIP string, oldEndpointSlice, newEndpointSlice *disc
 				continue
 			}
 			for _, ip := range endpoint.Addresses {
+				klog.V(5).Infof("Endpoint address is %s and nodeIP is %s for port %d/%s",
+					ip, nodeIP, *port.Port, *port.Protocol)
 				if nodeIP != ip {
 					continue
 				}
 				if isEPSliceContainsEndpoint(oldEndpointSlice, ip, *port.Port, *port.Protocol) {
 					continue
 				}
+				klog.V(5).Infof("Adding the endpoint that is not present in old slice %s/%d/%s",
+					ip, *port.Port, *port.Protocol)
 				err := addPortToFirewallZone(ovnFirewallZone, *port.Port, *port.Protocol)
 				if err != nil {
 					klog.Errorf("Error in adding port %d to ovn firewall zone: (%v)", *port.Port, err)
@@ -441,6 +457,8 @@ func updateEndpointSlice(nodeIP string, oldEndpointSlice, newEndpointSlice *disc
 				if isEPSliceContainsEndpoint(newEndpointSlice, ip, *port.Port, *port.Protocol) {
 					continue
 				}
+				klog.Infof("Removing the endpoint %s/%d/%s not present in new slice but present in old slice",
+					ip, *port.Port, *port.Protocol)
 				if nodeIP == ip {
 					err := removePortFromFirewallZone(ovnFirewallZone, *port.Port, *port.Protocol)
 					if err != nil {
