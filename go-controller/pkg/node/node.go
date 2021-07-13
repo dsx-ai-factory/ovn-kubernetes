@@ -290,16 +290,12 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	return err
 }
 
-func getReadyEndpointAddresses(endpointSlice *discovery.EndpointSlice) []string {
-	readyEndpointsAddress := make([]string, 0)
+func getEndpointAddresses(endpointSlice *discovery.EndpointSlice) []string {
+	endpointsAddress := make([]string, 0)
 	for _, endpoint := range endpointSlice.Endpoints {
-		//skip endpoints that are not ready
-		if endpoint.Conditions.Ready != nil && !*endpoint.Conditions.Ready {
-			continue
-		}
-		readyEndpointsAddress = append(readyEndpointsAddress, endpoint.Addresses...)
+		endpointsAddress = append(endpointsAddress, endpoint.Addresses...)
 	}
-	return readyEndpointsAddress
+	return endpointsAddress
 }
 
 func (n *OvnNode) WatchEndpointSlices(nodeIP string) {
@@ -317,10 +313,10 @@ func (n *OvnNode) WatchEndpointSlices(nodeIP string) {
 		UpdateFunc: func(prevObj, obj interface{}) {
 			oldEndpointSlice := prevObj.(*discovery.EndpointSlice)
 			newEndpointSlice := obj.(*discovery.EndpointSlice)
-			oldReadyEpAddr := getReadyEndpointAddresses(oldEndpointSlice)
-			newReadyEpAddr := getReadyEndpointAddresses(newEndpointSlice)
+			oldEpAddr := getEndpointAddresses(oldEndpointSlice)
+			newEpAddr := getEndpointAddresses(newEndpointSlice)
 			if reflect.DeepEqual(oldEndpointSlice.Ports, newEndpointSlice.Ports) &&
-				reflect.DeepEqual(oldReadyEpAddr, newReadyEpAddr) {
+				reflect.DeepEqual(oldEpAddr, newEpAddr) {
 				return
 			}
 			klog.Infof("Processing update for endpoint slice %s on namespace %s",
@@ -370,10 +366,6 @@ func (n *OvnNode) WatchEndpointSlices(nodeIP string) {
 func addEPSliceToFirewallZone(nodeIP string, endpointSlice *discovery.EndpointSlice) {
 	for _, port := range endpointSlice.Ports {
 		for _, endpoint := range endpointSlice.Endpoints {
-			// Skip endpoints that are not ready
-			if endpoint.Conditions.Ready != nil && !*endpoint.Conditions.Ready {
-				continue
-			}
 			for _, ip := range endpoint.Addresses {
 				klog.V(5).Infof("Endpoint address is %s and NodeIP is %s for port  %d/%s",
 					ip, nodeIP, *port.Port, *port.Protocol)
@@ -397,9 +389,6 @@ func isEPSliceContainsEndpoint(epSlice *discovery.EndpointSlice,
 	epIP string, epPort int32, protocol kapi.Protocol) bool {
 	for _, port := range epSlice.Ports {
 		for _, endpoint := range epSlice.Endpoints {
-			if endpoint.Conditions.Ready != nil && !*endpoint.Conditions.Ready {
-				continue
-			}
 			for _, ip := range endpoint.Addresses {
 				if ip == epIP && *port.Port == epPort && *port.Protocol == protocol {
 					return true
@@ -414,9 +403,6 @@ func updateEndpointSlice(nodeIP string, oldEndpointSlice, newEndpointSlice *disc
 	// add any new ports to the firewalld zone that are not in oldEndpointSlice
 	for _, port := range newEndpointSlice.Ports {
 		for _, endpoint := range newEndpointSlice.Endpoints {
-			if endpoint.Conditions.Ready != nil && !*endpoint.Conditions.Ready {
-				continue
-			}
 			for _, ip := range endpoint.Addresses {
 				klog.V(5).Infof("Endpoint address is %s and nodeIP is %s for port %d/%s",
 					ip, nodeIP, *port.Port, *port.Protocol)
@@ -443,11 +429,6 @@ func updateEndpointSlice(nodeIP string, oldEndpointSlice, newEndpointSlice *disc
 	// now remove any old ports that are not present in the new endpointSlice resource
 	for _, port := range oldEndpointSlice.Ports {
 		for _, endpoint := range oldEndpointSlice.Endpoints {
-			// skip endpoints that are not ready
-			if endpoint.Conditions.Ready != nil && !*endpoint.Conditions.Ready {
-				continue
-			}
-
 			for _, ip := range endpoint.Addresses {
 				// if the port is neither UDP nor SCTP and endpointIP doesn't match the node's IP, then
 				// there is nothing to do
