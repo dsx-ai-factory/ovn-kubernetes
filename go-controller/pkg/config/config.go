@@ -61,7 +61,7 @@ var (
 		EncapIP:           "",
 		EncapPort:         DefaultEncapPort,
 		InactivityProbe:   100000, // in Milliseconds
-		OpenFlowProbe:     180,    // in Seconds
+		OpenFlowProbe:     0,      // in Seconds
 		RawClusterSubnets: "10.128.0.0/14/23",
 	}
 
