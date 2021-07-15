@@ -33,7 +33,7 @@ var _ = Describe("Node Operations", func() {
 				nodeIP   string = "1.2.5.6"
 				nodeName string = "cannot.be.resolv.ed"
 				interval int    = 100000
-				ofintval int    = 180
+				ofintval int    = 0
 			)
 			node := kapi.Node{
 				ObjectMeta: metav1.ObjectMeta{
@@ -85,7 +85,7 @@ var _ = Describe("Node Operations", func() {
 				nodeName    string = "cannot.be.resolv.ed"
 				encapPort   uint   = 666
 				interval    int    = 100000
-				ofintval    int    = 180
+				ofintval    int    = 0
 				chassisUUID string = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
 				encapUUID   string = "e4437094-0094-4223-9f14-995d98d5fff8"
 			)
