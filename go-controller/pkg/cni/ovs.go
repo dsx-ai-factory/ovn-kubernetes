@@ -199,7 +199,7 @@ func doPodFlowsExist(mac string, ifAddrs []*net.IPNet, ofPort int) bool {
 }
 
 func waitForPodFlows(ctx context.Context, mac string, ifAddrs []*net.IPNet, ifaceName, ifaceID string, ofPort int) error {
-	timeout := time.After(20 * time.Second)
+	timeout := time.After(45 * time.Second)
 	for {
 		select {
 		case <-ctx.Done():
