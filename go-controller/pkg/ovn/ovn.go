@@ -435,13 +435,9 @@ func networkStatusAnnotationsChanged(oldPod, newPod *kapi.Pod) bool {
 	return oldPod.Annotations[nettypes.NetworkStatusAnnot] != newPod.Annotations[nettypes.NetworkStatusAnnot]
 }
 
-func podNodeNameLabelChanged(oldPod, newPod *kapi.Pod, nodeNameLabel map[string]string) bool {
-	if oldPod == nil {
-		// check if label already exists and is same as nodeNameLabel. this occurs when ovnkube
-		// is restarted and we call Add on each of the Pods
-		return newPod.Labels[util.OvnPodNodeNameLabel] != nodeNameLabel[util.OvnPodNodeNameLabel]
-	}
-	return oldPod.Labels[util.OvnPodNodeNameLabel] != newPod.Labels[util.OvnPodNodeNameLabel]
+func podNodeNameLabelChanged(pod *kapi.Pod, nodeNameLabel map[string]string) bool {
+	// check if label already exists and is same as nodeNameLabel.
+	return pod.Labels[util.OvnPodNodeNameLabel] != nodeNameLabel[util.OvnPodNodeNameLabel]
 }
 
 // ensurePod tries to set up a pod. It returns success or failure; failure
@@ -454,8 +450,7 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 
 	nodeNameLabel := map[string]string{util.OvnPodNodeNameLabel: pod.Spec.NodeName}
 	if util.PodWantsNetwork(pod) && addPort {
-		if podNodeNameLabelChanged(nil, pod, nodeNameLabel) {
-			// to avoid any throttling from the API Server on ovnkube-master restart, call this only if label is different
+		if podNodeNameLabelChanged(pod, nodeNameLabel) {
 			err := oc.kube.SetLabelsOnPod(pod, nodeNameLabel)
 			if err != nil {
 				klog.Errorf("Failed to set %s labels on pod %s: %v", util.OvnPodNodeNameLabel, pod.Name, err)
@@ -469,7 +464,7 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 			return false
 		}
 	} else {
-		if podNodeNameLabelChanged(oldPod, pod, nodeNameLabel) {
+		if podNodeNameLabelChanged(pod, nodeNameLabel) {
 			// to avoid any throttling from the API Server on ovnkube-master retart, call this only if label is different
 			err := oc.kube.SetLabelsOnPod(pod, nodeNameLabel)
 			if err != nil {
