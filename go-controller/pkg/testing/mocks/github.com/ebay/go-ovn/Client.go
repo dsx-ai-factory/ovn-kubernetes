@@ -38,12 +38,12 @@ func (_m *Client) ACLAdd(ls string, direct string, match string, action string, 
 }
 
 // ACLAddEntity provides a mock function with given fields: entityType, entity, direct, match, action, priority, external_ids, logflag, meter, severity
-func (_m *Client) ACLAddEntity(entityType goovn.EntityType, entity string, direct string, match string, action string, priority int, external_ids map[string]string, logflag bool, meter string, severity string) (*goovn.OvnCommand, error) {
-	ret := _m.Called(entityType, entity, direct, match, action, priority, external_ids, logflag, meter, severity)
+func (_m *Client) ACLAddEntity(entityType goovn.EntityType, entityName, aclName, direct, match, action string, priority int, external_ids map[string]string, logflag bool, meter, severity string) (*goovn.OvnCommand, error) {
+	ret := _m.Called(entityType, entityName, aclName, direct, match, action, priority, external_ids, logflag, meter, severity)
 
 	var r0 *goovn.OvnCommand
-	if rf, ok := ret.Get(0).(func(goovn.EntityType, string, string, string, string, int, map[string]string, bool, string, string) *goovn.OvnCommand); ok {
-		r0 = rf(entityType, entity, direct, match, action, priority, external_ids, logflag, meter, severity)
+	if rf, ok := ret.Get(0).(func(goovn.EntityType, string, string, string, string, string, int, map[string]string, bool, string, string) *goovn.OvnCommand); ok {
+		r0 = rf(entityType, entityName, aclName, direct, match, action, priority, external_ids, logflag, meter, severity)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*goovn.OvnCommand)
@@ -51,8 +51,8 @@ func (_m *Client) ACLAddEntity(entityType goovn.EntityType, entity string, direc
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(goovn.EntityType, string, string, string, string, int, map[string]string, bool, string, string) error); ok {
-		r1 = rf(entityType, entity, direct, match, action, priority, external_ids, logflag, meter, severity)
+	if rf, ok := ret.Get(1).(func(goovn.EntityType, string, string, string, string, string, int, map[string]string, bool, string, string) error); ok {
+		r1 = rf(entityType, entityName, aclName, direct, match, action, priority, external_ids, logflag, meter, severity)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -84,12 +84,12 @@ func (_m *Client) ACLDel(ls string, direct string, match string, priority int, e
 }
 
 // ACLDelEntity provides a mock function with given fields: entityType, entity, direct, match, priority, external_ids
-func (_m *Client) ACLDelEntity(entityType goovn.EntityType, entity string, direct string, match string, priority int, external_ids map[string]string) (*goovn.OvnCommand, error) {
-	ret := _m.Called(entityType, entity, direct, match, priority, external_ids)
+func (_m *Client) ACLDelEntity(entityType goovn.EntityType, entityName, aclUUID string) (*goovn.OvnCommand, error) {
+	ret := _m.Called(entityType, entityName, aclUUID)
 
 	var r0 *goovn.OvnCommand
-	if rf, ok := ret.Get(0).(func(goovn.EntityType, string, string, string, int, map[string]string) *goovn.OvnCommand); ok {
-		r0 = rf(entityType, entity, direct, match, priority, external_ids)
+	if rf, ok := ret.Get(0).(func(goovn.EntityType, string, string) *goovn.OvnCommand); ok {
+		r0 = rf(entityType, entityName, aclUUID)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*goovn.OvnCommand)
@@ -97,8 +97,8 @@ func (_m *Client) ACLDelEntity(entityType goovn.EntityType, entity string, direc
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(goovn.EntityType, string, string, string, int, map[string]string) error); ok {
-		r1 = rf(entityType, entity, direct, match, priority, external_ids)
+	if rf, ok := ret.Get(1).(func(goovn.EntityType, string, string) error); ok {
+		r1 = rf(entityType, entityName, aclUUID)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -145,6 +145,75 @@ func (_m *Client) ACLListEntity(entityType goovn.EntityType, entity string) ([]*
 	var r1 error
 	if rf, ok := ret.Get(1).(func(goovn.EntityType, string) error); ok {
 		r1 = rf(entityType, entity)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// ACLSetName provides a mock function with given fields: aclUUID, aclName
+func (_m *Client) ACLSetName(aclUUID, aclName string) (*goovn.OvnCommand, error) {
+	ret := _m.Called(aclUUID, aclName)
+
+	var r0 *goovn.OvnCommand
+	if rf, ok := ret.Get(0).(func(string, string) *goovn.OvnCommand); ok {
+		r0 = rf(aclUUID, aclName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*goovn.OvnCommand)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, string) error); ok {
+		r1 = rf(aclUUID, aclName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// ACLSetMatch provides a mock function with given fields: aclUUID, newMatch
+func (_m *Client) ACLSetMatch(aclUUID, newMatch string) (*goovn.OvnCommand, error) {
+	ret := _m.Called(aclUUID, newMatch)
+
+	var r0 *goovn.OvnCommand
+	if rf, ok := ret.Get(0).(func(string, string) *goovn.OvnCommand); ok {
+		r0 = rf(aclUUID, newMatch)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*goovn.OvnCommand)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, string) error); ok {
+		r1 = rf(aclUUID, newMatch)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// ACLSetLogging provides a mock function with given fields: aclUUID, newLogflag, newMeter, newSeverity
+func (_m *Client) ACLSetLogging(aclUUID string, newLogflag bool, newMeter, newSeverity string) (*goovn.OvnCommand, error) {
+	ret := _m.Called(aclUUID, newLogflag, newMeter, newSeverity)
+
+	var r0 *goovn.OvnCommand
+	if rf, ok := ret.Get(0).(func(string, bool, string, string) *goovn.OvnCommand); ok {
+		r0 = rf(aclUUID, newLogflag, newMeter, newSeverity)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*goovn.OvnCommand)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, bool, string, string) error); ok {
+		r1 = rf(aclUUID, newLogflag, newMeter, newSeverity)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -600,6 +669,35 @@ func (_m *Client) Execute(cmds ...*goovn.OvnCommand) error {
 	return r0
 }
 
+// ExecuteR provides a mock function with given fields: cmds
+func (_m *Client) ExecuteR(cmds ...*goovn.OvnCommand) ([]string, error) {
+	_va := make([]interface{}, len(cmds))
+	for _i := range cmds {
+		_va[_i] = cmds[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 []string
+	if rf, ok := ret.Get(0).(func(...*goovn.OvnCommand) []string); ok {
+		r0 = rf(cmds...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]string)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(...*goovn.OvnCommand) error); ok {
+		r1 = rf(cmds...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetSchema provides a mock function with given fields:
 func (_m *Client) GetSchema() libovsdb.DatabaseSchema {
 	ret := _m.Called()
@@ -722,6 +820,29 @@ func (_m *Client) LBUpdate(name string, vipPort string, protocol string, addrs [
 	var r1 error
 	if rf, ok := ret.Get(1).(func(string, string, string, []string) error); ok {
 		r1 = rf(name, vipPort, protocol, addrs)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// LBList provides a mock function with given fields:
+func (_m *Client) LBList() ([]*goovn.LoadBalancer, error) {
+	ret := _m.Called()
+
+	var r0 []*goovn.LoadBalancer
+	if rf, ok := ret.Get(0).(func() []*goovn.LoadBalancer); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*goovn.LoadBalancer)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1134,6 +1255,121 @@ func (_m *Client) LRSRList(lr string) ([]*goovn.LogicalRouterStaticRoute, error)
 	return r0, r1
 }
 
+// LRPolicyAdd provides a mock function with given fields: lr, priority, match, action, nexthop, nexthops, options, external_ids
+func (_m *Client) LRPolicyAdd(lr string, priority int, match string, action string, nexthop *string, nexthops []string, options map[string]string, external_ids map[string]string) (*goovn.OvnCommand, error) {
+	ret := _m.Called(lr, priority, match, action, nexthop, nexthops, options, external_ids)
+
+	var r0 *goovn.OvnCommand
+	if rf, ok := ret.Get(0).(func(string, int, string, string, *string, []string, map[string]string, map[string]string) *goovn.OvnCommand); ok {
+		r0 = rf(lr, priority, match, action, nexthop, nexthops, options, external_ids)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*goovn.OvnCommand)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, int, string, string, *string, []string, map[string]string, map[string]string) error); ok {
+		r1 = rf(lr, priority, match, action, nexthop, nexthops, options, external_ids)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// LRPolicyDel provides a mock function with given fields: lr, priority, match
+func (_m *Client) LRPolicyDel(lr string, priority int, match *string) (*goovn.OvnCommand, error) {
+	ret := _m.Called(lr, priority, match)
+
+	var r0 *goovn.OvnCommand
+	if rf, ok := ret.Get(0).(func(string, int, *string) *goovn.OvnCommand); ok {
+		r0 = rf(lr, priority, match)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*goovn.OvnCommand)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, int, *string) error); ok {
+		r1 = rf(lr, priority, match)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// LRPolicyDelByUUID provides a mock function with given fields: lr, uuid
+func (_m *Client) LRPolicyDelByUUID(lr string, uuid string) (*goovn.OvnCommand, error) {
+	ret := _m.Called(lr, uuid)
+
+	var r0 *goovn.OvnCommand
+	if rf, ok := ret.Get(0).(func(string, string) *goovn.OvnCommand); ok {
+		r0 = rf(lr, uuid)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*goovn.OvnCommand)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, string) error); ok {
+		r1 = rf(lr, uuid)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// LRPolicyDelAll provides a mock function with given fields: lr
+func (_m *Client) LRPolicyDelAll(lr string) (*goovn.OvnCommand, error) {
+	ret := _m.Called(lr)
+
+	var r0 *goovn.OvnCommand
+	if rf, ok := ret.Get(0).(func(string) *goovn.OvnCommand); ok {
+		r0 = rf(lr)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*goovn.OvnCommand)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(lr)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// LRPolicyList provides a mock function with given fields: lr
+func (_m *Client) LRPolicyList(lr string) ([]*goovn.LogicalRouterPolicy, error) {
+	ret := _m.Called(lr)
+
+	var r0 []*goovn.LogicalRouterPolicy
+	if rf, ok := ret.Get(0).(func(string) []*goovn.LogicalRouterPolicy); ok {
+		r0 = rf(lr)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*goovn.LogicalRouterPolicy)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(lr)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // LSAdd provides a mock function with given fields: ls
 func (_m *Client) LSAdd(ls string) (*goovn.OvnCommand, error) {
 	ret := _m.Called(ls)
@@ -1516,6 +1752,29 @@ func (_m *Client) LSPGetOptions(lsp string) (map[string]string, error) {
 	var r1 error
 	if rf, ok := ret.Get(1).(func(string) error); ok {
 		r1 = rf(lsp)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// LSPList provides a mock function with given fields: lsp, portType
+func (_m *Client) LSPSetType(lsp string, portType string) (*goovn.OvnCommand, error) {
+	ret := _m.Called(lsp, portType)
+
+	var r0 *goovn.OvnCommand
+	if rf, ok := ret.Get(0).(func(string, string) *goovn.OvnCommand); ok {
+		r0 = rf(lsp, portType)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*goovn.OvnCommand)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, string) error); ok {
+		r1 = rf(lsp, portType)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2134,6 +2393,52 @@ func (_m *Client) SBGlobalSetOptions(options map[string]string) (*goovn.OvnComma
 	var r1 error
 	if rf, ok := ret.Get(1).(func(map[string]string) error); ok {
 		r1 = rf(options)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// AuxKeyValSet provides a mock function with given fields: table, rowName, auxCol, kv
+func (_m *Client) AuxKeyValSet(table string, rowName string, auxCol string, kv map[string]string) (*goovn.OvnCommand, error) {
+	ret := _m.Called(table, rowName, auxCol, kv)
+
+	var r0 *goovn.OvnCommand
+	if rf, ok := ret.Get(0).(func(string, string, string, map[string]string) *goovn.OvnCommand); ok {
+		r0 = rf(table, rowName, auxCol, kv)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*goovn.OvnCommand)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, string, string, map[string]string) error); ok {
+		r1 = rf(table, rowName, auxCol, kv)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// AuxKeyValDel provides a mock function with given fields: table, rowName, auxCol, kv
+func (_m *Client) AuxKeyValDel(table string, rowName string, auxCol string, kv map[string]*string) (*goovn.OvnCommand, error) {
+	ret := _m.Called(table, rowName, auxCol, kv)
+
+	var r0 *goovn.OvnCommand
+	if rf, ok := ret.Get(0).(func(string, string, string, map[string]*string) *goovn.OvnCommand); ok {
+		r0 = rf(table, rowName, auxCol, kv)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*goovn.OvnCommand)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, string, string, map[string]*string) error); ok {
+		r1 = rf(table, rowName, auxCol, kv)
 	} else {
 		r1 = ret.Error(1)
 	}

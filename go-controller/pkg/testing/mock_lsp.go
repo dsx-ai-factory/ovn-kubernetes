@@ -95,6 +95,11 @@ func (mock *MockOVNClient) LSPSetPortSecurity(lsp string, security ...string) (*
 	}, nil
 }
 
+// Set logical switch port type
+func (mock *MockOVNClient) LSPSetType(lsp, portType string) (*goovn.OvnCommand, error) {
+	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+}
+
 // Get all lport by lswitch
 func (mock *MockOVNClient) LSPList(ls string) ([]*goovn.LogicalSwitchPort, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
