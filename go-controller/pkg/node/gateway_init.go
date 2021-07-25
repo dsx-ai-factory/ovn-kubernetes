@@ -45,28 +45,32 @@ func bridgedGatewayNodeSetup(nodeName, bridgeName, bridgeInterface, physicalNetw
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to get ovn-bridge-mappings stderr:%s (%v)", stderr, err)
 	}
-	// skip the existing mapping setting for the specified physicalNetworkName
-	mapString := ""
-	bridgeMappings := strings.Split(stdout, ",")
-	for _, bridgeMapping := range bridgeMappings {
-		m := strings.Split(bridgeMapping, ":")
-		if network := m[0]; network != physicalNetworkName {
-			if len(mapString) != 0 {
-				mapString += ","
-			}
-			mapString += bridgeMapping
-		}
-	}
-	if len(mapString) != 0 {
-		mapString += ","
-	}
-	mapString += physicalNetworkName + ":" + bridgeName
 
-	_, stderr, err = util.RunOVSVsctl("set", "Open_vSwitch", ".",
-		fmt.Sprintf("external_ids:ovn-bridge-mappings=%s", mapString))
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to set ovn-bridge-mappings for ovs bridge %s"+
-			", stderr:%s (%v)", bridgeName, stderr, err)
+	physNetBridgeMapping := physicalNetworkName + ":" + bridgeName
+	if !strings.Contains(stdout, physNetBridgeMapping) {
+		// skip the existing mapping setting for the specified physicalNetworkName
+		mapString := ""
+		bridgeMappings := strings.Split(stdout, ",")
+		for _, bridgeMapping := range bridgeMappings {
+			m := strings.Split(bridgeMapping, ":")
+			if network := m[0]; network != physicalNetworkName {
+				if len(mapString) != 0 {
+					mapString += ","
+				}
+				mapString += bridgeMapping
+			}
+		}
+		if len(mapString) != 0 {
+			mapString += ","
+		}
+		mapString += physNetBridgeMapping
+
+		_, stderr, err = util.RunOVSVsctl("set", "Open_vSwitch", ".",
+			fmt.Sprintf("external_ids:ovn-bridge-mappings=%s", mapString))
+		if err != nil {
+			return "", nil, fmt.Errorf("failed to set ovn-bridge-mappings for ovs bridge %s"+
+				", stderr:%s (%v)", bridgeName, stderr, err)
+		}
 	}
 
 	ifaceID := bridgeName + "_" + nodeName
