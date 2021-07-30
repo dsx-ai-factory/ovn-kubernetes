@@ -7,7 +7,8 @@ if [[ "${OVNKUBE_SH_VERBOSE:-}" == "true" ]]; then
 fi
 
 # source the functions in ovndb-raft-functions.sh
-. /root/ovndb-raft-functions.sh
+BASEDIR=$(dirname $0)
+. ${BASEDIR}/ovndb-raft-functions.sh
 
 # This script is the entrypoint to the image.
 # Supports version 3 daemonsets
@@ -1124,10 +1125,12 @@ ovn-node() {
     wait_for_event attempts=20 files_exist ${ovn_controller_pk} ${ovn_controller_cert} ${ovn_ca_cert}
   }
 
-  echo "=============== ovn-node - (check for firewall service status)"
-  check_firewall_state
-  echo "=============== ovn-node - (create ovn firewall zone)"
-  create_ovn_firewall_zone
+  if [[ ${ovnkube_node_mode} != "smart-nic" ]]; then
+    echo "=============== ovn-node - (check for firewall service status)"
+    check_firewall_state
+    echo "=============== ovn-node - (create ovn firewall zone)"
+    create_ovn_firewall_zone
+  fi
 
   hybrid_overlay_flags=
   if [[ ${ovn_hybrid_overlay_enable} == "true" ]]; then
