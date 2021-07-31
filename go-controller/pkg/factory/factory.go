@@ -23,10 +23,6 @@ import (
 	icmpnetworkpolicyscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1/apis/clientset/versioned/scheme"
 	icmpnetworkpolicyinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1/apis/informers/externalversions"
 
-	apiextensionsapi "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
-	apiextensionsscheme "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/scheme"
-	apiextensionsinformerfactory "k8s.io/apiextensions-apiserver/pkg/client/informers/externalversions"
-
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1beta1"
 	knet "k8s.io/api/networking/v1"
@@ -54,7 +50,6 @@ type WatchFactory struct {
 	efClientset  egressfirewallclientset.Interface
 	inpFactory   icmpnetworkpolicyinformerfactory.SharedInformerFactory
 	inpClientset icmpnetworkpolicyclientset.Interface
-	crdFactory   apiextensionsinformerfactory.SharedInformerFactory
 	informers    map[reflect.Type]*informer
 
 	stopChan                  chan struct{}
@@ -85,7 +80,6 @@ var (
 	namespaceType         reflect.Type = reflect.TypeOf(&kapi.Namespace{})
 	nodeType              reflect.Type = reflect.TypeOf(&kapi.Node{})
 	egressFirewallType    reflect.Type = reflect.TypeOf(&egressfirewallapi.EgressFirewall{})
-	crdType               reflect.Type = reflect.TypeOf(&apiextensionsapi.CustomResourceDefinition{})
 	egressIPType          reflect.Type = reflect.TypeOf(&egressipapi.EgressIP{})
 	icmpNetworkPolicyType reflect.Type = reflect.TypeOf(&icmpnetworkpolicyapi.ICMPNetworkPolicy{})
 	endpointSliceType     reflect.Type = reflect.TypeOf(&discovery.EndpointSlice{})
@@ -104,17 +98,16 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 		eipFactory:   egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
 		efClientset:  ovnClientset.EgressFirewallClient,
 		inpClientset: ovnClientset.ICMPNetworkPolicyClient,
-		crdFactory:   apiextensionsinformerfactory.NewSharedInformerFactory(ovnClientset.APIExtensionsClient, resyncInterval),
 		informers:    make(map[reflect.Type]*informer),
 		stopChan:     make(chan struct{}),
 	}
 	var err error
 
-	err = apiextensionsapi.AddToScheme(apiextensionsscheme.Scheme)
+	err = egressipapi.AddToScheme(egressipscheme.Scheme)
 	if err != nil {
 		return nil, err
 	}
-	err = egressipapi.AddToScheme(egressipscheme.Scheme)
+	err = egressfirewallapi.AddToScheme(egressfirewallscheme.Scheme)
 	if err != nil {
 		return nil, err
 	}
@@ -148,21 +141,11 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[crdType], err = newInformer(crdType, wf.crdFactory.Apiextensions().V1beta1().CustomResourceDefinitions().Informer())
-	if err != nil {
-		return nil, err
-	}
 	wf.informers[nodeType], err = newQueuedInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer(), wf.stopChan)
 	if err != nil {
 		return nil, err
 	}
 
-	wf.crdFactory.Start(wf.stopChan)
-	for oType, synced := range wf.crdFactory.WaitForCacheSync(wf.stopChan) {
-		if !synced {
-			return nil, fmt.Errorf("error in syncing cache for %v informer", oType)
-		}
-	}
 	wf.iFactory.Start(wf.stopChan)
 	for oType, synced := range wf.iFactory.WaitForCacheSync(wf.stopChan) {
 		if !synced {
@@ -181,6 +164,19 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 			}
 		}
 	}
+	if config.OVNKubernetesFeature.EnableEgressFirewall {
+		err = wf.InitializeEgressFirewallWatchFactory()
+		if err != nil {
+			return nil, err
+		}
+	}
+	if config.OVNKubernetesFeature.EnableICMPNetworkPolicy {
+		err := wf.InitializeICMPNetworkPolicyWatchFactory()
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return wf, nil
 }
 
@@ -188,9 +184,10 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 // informers to save memory + bandwidth. It is to be used by the node-only process.
 func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*WatchFactory, error) {
 	wf := &WatchFactory{
-		iFactory:  informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
-		informers: make(map[reflect.Type]*informer),
-		stopChan:  make(chan struct{}),
+		iFactory:    informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
+		efClientset: ovnClientset.EgressFirewallClient,
+		informers:   make(map[reflect.Type]*informer),
+		stopChan:    make(chan struct{}),
 	}
 	// For Services and Endpoints, pre-populate the shared Informer with one that
 	// has a label selector excluding headless services.
@@ -247,10 +244,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 }
 
 func (wf *WatchFactory) InitializeEgressFirewallWatchFactory() error {
-	err := egressfirewallapi.AddToScheme(egressfirewallscheme.Scheme)
-	if err != nil {
-		return err
-	}
+	var err error
 	wf.efFactory = egressfirewallinformerfactory.NewSharedInformerFactory(wf.efClientset, resyncInterval)
 	wf.informers[egressFirewallType], err = newInformer(egressFirewallType, wf.efFactory.K8s().V1().EgressFirewalls().Informer())
 	if err != nil {
@@ -460,16 +454,6 @@ func (wf *WatchFactory) AddICMPNetworkPolicyHandler(handlerFuncs cache.ResourceE
 // RemoveICMPNetworkPolicyHandler removes an ICMPNetworkPolicy object event handler function
 func (wf *WatchFactory) RemoveICMPNetworkPolicyHandler(handler *Handler) {
 	wf.removeHandler(icmpNetworkPolicyType, handler)
-}
-
-// AddCRDHandler adds a handler function that will be executed on CRD obje changes
-func (wf *WatchFactory) AddCRDHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(crdType, "", nil, handlerFuncs, processExisting)
-}
-
-// RemoveCRDHandler removes a CRD object event handler function
-func (wf *WatchFactory) RemoveCRDHandler(handler *Handler) {
-	wf.removeHandler(crdType, handler)
 }
 
 // AddEgressIPHandler adds a handler function that will be executed on EgressIP object changes

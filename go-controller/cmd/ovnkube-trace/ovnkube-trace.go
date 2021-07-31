@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -58,6 +59,20 @@ type PodInfo struct {
 	StorPort                string
 	StorMAC                 string
 	HostNetwork             bool
+}
+
+func (si SvcInfo) getL3Ver() string {
+	if net.ParseIP(si.IP).To4() != nil {
+		return "ip4"
+	}
+	return "ip6"
+}
+
+func (si PodInfo) getL3Ver() string {
+	if net.ParseIP(si.IP).To4() != nil {
+		return "ip4"
+	}
+	return "ip6"
 }
 
 func execInPod(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, namespace string, podName string, containerName string, cmd string, in string) (string, string, error) {
@@ -237,7 +252,6 @@ func getPodInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 	podInfo.MAC = podMAC
 	podInfo.ContainerName = pod.Spec.Containers[0].Name
 
-	var tryJSON bool = true
 	var linkIndex int
 
 	// The interface name used depends on what network namespasce the pod uses
@@ -250,67 +264,24 @@ func getPodInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 		podInfo.HostNetwork = false
 
 		// Find index used for pod interface
+		klog.V(5).Infof("Reading interface index from /sys/class/net/...")
 
-		ipJaddrCmd := "ip -j addr show " + ethName
+		sysCmd := "cat /sys/class/net/" + ethName + "/iflink"
+		klog.V(5).Infof("The command is %s", sysCmd)
 
-		klog.V(5).Infof("Ip -j command is %s", ipJaddrCmd)
-		ipOutput, ipError, err := execInPod(coreclient, restconfig, namespace, podName, podInfo.ContainerName, ipJaddrCmd, "")
+		linkOutput, linkError, err := execInPod(coreclient, restconfig, namespace, podName, podInfo.ContainerName, sysCmd, "")
 		if err != nil {
-			klog.V(1).Infof("Ip -j command error %v stdOut: %s\n stdErr: %s", err, ipOutput, ipError)
-			tryJSON = false
+			klog.V(1).Infof("The command error %v stdOut: %s\n stdErr: %s", err, linkOutput, linkError)
+			// Give up, unknown error
+			return nil, err
 		}
 
-		if tryJSON {
-			klog.V(5).Infof("==>pod %s: ip addr show: %q", pod.Name, ipOutput)
-
-			var data []IpAddrReq
-			ipOutput = strings.Replace(ipOutput, "\n", "", -1)
-			klog.V(5).Infof("==> pod %s NOW: %s ", pod.Name, ipOutput)
-			err = json.Unmarshal([]byte(ipOutput), &data)
-			if err != nil {
-				fmt.Printf("JSON ERR: couldn't get stuff from data %v; json parse error: %v\n", data, err)
-				return nil, err
-			}
-			klog.V(5).Infof("Size of IpAddrReq array: %v\n", len(data))
-			klog.V(5).Infof("IpAddrReq: %v\n", data)
-
-			for _, addr := range data {
-				if addr.IfName == ethName {
-					linkIndex = addr.LinkIndex
-					klog.V(5).Infof("IfName: %v", addr.IfName)
-					break
-				}
-			}
-			klog.V(5).Infof("linkIndex is %d", linkIndex)
-		} else {
-			awkString := " | awk '{print $2}'"
-			iplinkCmd := "ip -o link show dev " + ethName + awkString
-
-			klog.V(5).Infof("The ip -o command is %s", iplinkCmd)
-			linkOutput, linkError, err := execInPod(coreclient, restconfig, namespace, podName, podInfo.ContainerName, iplinkCmd, "")
-			if err != nil {
-				klog.V(1).Infof("The ip -o command error %v stdOut: %s\n stdErr: %s", err, linkOutput, linkError)
-				// Give up, pod image doesn't have iproute installed
-				return nil, err
-			}
-
-			klog.V(5).Infof("AWK string is %s", awkString)
-			klog.V(5).Infof("==>pod Old Way %s: ip -o link show: %q", pod.Name, linkOutput)
-
-			linkOutput = strings.Replace(linkOutput, "\n", "", -1)
-			klog.V(5).Infof("==> pod Old Way %s NOW: %s ", pod.Name, linkOutput)
-			linkOutput = strings.Replace(linkOutput, "eth0@if", "", -1)
-			klog.V(5).Infof("==> pod Old Way %s NOW: %s ", pod.Name, linkOutput)
-			linkOutput = strings.Replace(linkOutput, ":", "", -1)
-			klog.V(5).Infof("==> pod Old Way %s NOW: %s ", pod.Name, linkOutput)
-
-			linkIndex, err = strconv.Atoi(linkOutput)
-			if err != nil {
-				klog.Error("Error converting string to int", err)
-				return nil, err
-			}
-			klog.V(5).Infof("Using ip -o link show - linkIndex is %d", linkIndex)
+		linkIndex, err = strconv.Atoi(strings.TrimSuffix(linkOutput, "\n"))
+		if err != nil {
+			klog.Error("Error converting string to int", err)
+			return nil, err
 		}
+		klog.V(5).Infof("Using '%s' - linkIndex is %d", sysCmd, linkIndex)
 	}
 	klog.V(5).Infof("Using interface name of %s with MAC of %s", ethName, podMAC)
 
@@ -374,7 +345,6 @@ func getPodInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 
 		// obnkube-node-xxx uses host network.  Find host end of veth matching pod eth0 index
 
-		tryJSON = true
 		var hostInterface string
 
 		ipCmd := "ip -j addr show"
@@ -387,53 +357,24 @@ func getPodInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 			return nil, err
 		}
 
-		if tryJSON {
-			klog.V(5).Infof("==>ovnkubePod %s: ip addr show: %q", ovnkubePod.Name, hostOutput)
+		klog.V(5).Infof("==>ovnkubePod %s: ip addr show: %q", ovnkubePod.Name, hostOutput)
 
-			var data []IpAddrReq
-			hostOutput = strings.Replace(hostOutput, "\n", "", -1)
-			klog.V(5).Infof("==> host %s NOW: %s", ovnkubePod.Name, hostOutput)
-			err = json.Unmarshal([]byte(hostOutput), &data)
-			if err != nil {
-				klog.V(1).Infof("JSON ERR: couldn't get stuff from data %v; json parse error: %v", data, err)
-				return nil, err
-			}
-			klog.V(5).Infof("Size of IpAddrReq array: %v", len(data))
-			klog.V(5).Infof("IpAddrReq: %v", data)
+		var data []IpAddrReq
+		hostOutput = strings.Replace(hostOutput, "\n", "", -1)
+		klog.V(5).Infof("==> host %s NOW: %s", ovnkubePod.Name, hostOutput)
+		err = json.Unmarshal([]byte(hostOutput), &data)
+		if err != nil {
+			klog.V(1).Infof("JSON ERR: couldn't get stuff from data %v; json parse error: %v", data, err)
+			return nil, err
+		}
+		klog.V(5).Infof("Size of IpAddrReq array: %v", len(data))
+		klog.V(5).Infof("IpAddrReq: %v", data)
 
-			for _, addr := range data {
-				if addr.IfIndex == linkIndex {
-					hostInterface = addr.IfName
-					klog.V(5).Infof("ifName: %v\n", addr.IfName)
-					break
-				}
-			}
-			klog.V(5).Infof("hostInterface is %s", hostInterface)
-		} else {
-
-			ipoCmd := "ip -o addr show"
-			klog.V(5).Infof("Command is: %s", ipoCmd)
-
-			hostOutput, hostError, err := execInPod(coreclient, restconfig, ovnNamespace, ovnkubePod.Name, "ovnkube-node", ipoCmd, "")
-			if err != nil {
-				fmt.Printf("execInPod() failed with %s stderr %s stdout %s \n", err, hostError, hostOutput)
-				klog.V(5).Infof("execInPod() failed err %s - podInfo %v - ovnkubePod Name %s", err, podInfo, ovnkubePod.Name)
-				return nil, err
-			}
-
-			hostOutput = strings.Replace(hostOutput, "\n", "", -1)
-			klog.V(5).Infof("==>node %s: ip addr show: %q", node.Name, hostOutput)
-
-			idx := strconv.Itoa(linkIndex) + ": "
-			result := strings.Split(hostOutput, idx)
-			klog.V(5).Infof("result[0]: %s", result[0])
-			klog.V(5).Infof("result[1]: %s", result[1])
-			words := strings.Fields(result[1])
-			for i, word := range words {
-				if i == 0 {
-					hostInterface = word
-					break
-				}
+		for _, addr := range data {
+			if addr.IfIndex == linkIndex {
+				hostInterface = addr.IfName
+				klog.V(5).Infof("ifName: %v\n", addr.IfName)
+				break
 			}
 		}
 		klog.V(5).Infof("hostInterface name is %s\n", hostInterface)
@@ -465,6 +406,23 @@ func getPodInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 	return podInfo, err
 }
 
+func getOvnNamespace(coreclient *corev1client.CoreV1Client, override string) (string, error) {
+	if override != "" {
+		return override, nil
+	}
+
+	listOptions := metav1.ListOptions{
+		LabelSelector: "app=ovnkube-node",
+	}
+	pods, err := coreclient.Pods("").List(context.TODO(), listOptions)
+	if err != nil || len(pods.Items) == 0 {
+		klog.V(0).Infof("Cannot find ovnkube pods in any namespace")
+		return "", err
+	}
+
+	return pods.Items[0].Namespace, nil
+}
+
 var (
 	level klog.Level
 )
@@ -477,7 +435,7 @@ func main() {
 	var ovnNamespace string
 	var err error
 
-	pcfgNamespace = flag.String("ovn-config-namespace", "openshift-ovn-kubernetes", "namespace used by ovn-config itself")
+	pcfgNamespace = flag.String("ovn-config-namespace", "", "namespace used by ovn-config itself")
 	psrcNamespace = flag.String("src-namespace", "default", "k8s namespace of source pod")
 	pdstNamespace = flag.String("dst-namespace", "default", "k8s namespace of dest pod")
 
@@ -506,8 +464,6 @@ func main() {
 
 	srcNamespace := *psrcNamespace
 	dstNamespace := *pdstNamespace
-
-	ovnNamespace = *pcfgNamespace
 
 	if *srcPodName == "" {
 		fmt.Printf("Usage: source pod must be specified\n")
@@ -579,6 +535,14 @@ func main() {
 		klog.V(1).Infof(" Unexpected error: %v", err)
 		os.Exit(-1)
 	}
+
+	// Get OVN Namespace
+	ovnNamespace, err = getOvnNamespace(coreclient, *pcfgNamespace)
+	if err != nil {
+		klog.V(1).Infof(" Unexpected error: %v", err)
+		os.Exit(-1)
+	}
+	klog.V(5).Infof("OVN Kubernetes namespace is %s", ovnNamespace)
 
 	// List all Nodes.
 	nodes, err := coreclient.Nodes().List(context.TODO(), metav1.ListOptions{})
@@ -696,8 +660,8 @@ func main() {
 		}
 		fromSrc += " && eth.dst==" + srcPodInfo.StorMAC
 		fromSrc += " && eth.src==" + srcPodInfo.MAC
-		fromSrc += " && ip4.dst==" + dstSvcInfo.IP
-		fromSrc += " && ip4.src==" + srcPodInfo.IP
+		fromSrc += fmt.Sprintf(" && %s.dst==%s", dstSvcInfo.getL3Ver(), dstSvcInfo.IP)
+		fromSrc += fmt.Sprintf(" && %s.src==%s", srcPodInfo.getL3Ver(), srcPodInfo.IP)
 		fromSrc += " && ip.ttl==64"
 		fromSrc += " && " + protocol + ".dst==" + *dstPort + " && " + protocol + ".src==52888'"
 		fromSrc += " --lb-dst " + dstSvcInfo.PodIP + ":" + dstSvcInfo.PodPort
@@ -759,8 +723,8 @@ func main() {
 	}
 	fromSrc += " && eth.dst==" + srcPodInfo.StorMAC
 	fromSrc += " && eth.src==" + srcPodInfo.MAC
-	fromSrc += " && ip4.dst==" + dstPodInfo.IP
-	fromSrc += " && ip4.src==" + srcPodInfo.IP
+	fromSrc += fmt.Sprintf(" && %s.dst==%s", dstPodInfo.getL3Ver(), dstPodInfo.IP)
+	fromSrc += fmt.Sprintf(" && %s.src==%s", srcPodInfo.getL3Ver(), srcPodInfo.IP)
 	fromSrc += " && ip.ttl==64"
 	fromSrc += " && " + protocol + ".dst==" + *dstPort + " && " + protocol + ".src==52888'"
 
@@ -802,8 +766,8 @@ func main() {
 	}
 	fromDst += " && eth.dst==" + dstPodInfo.StorMAC
 	fromDst += " && eth.src==" + dstPodInfo.MAC
-	fromDst += " && ip4.dst==" + srcPodInfo.IP
-	fromDst += " && ip4.src==" + dstPodInfo.IP
+	fromDst += fmt.Sprintf(" && %s.dst==%s", srcPodInfo.getL3Ver(), srcPodInfo.IP)
+	fromDst += fmt.Sprintf(" && %s.src==%s", dstPodInfo.getL3Ver(), dstPodInfo.IP)
 	fromDst += " && ip.ttl==64"
 	fromDst += " && " + protocol + ".src==" + *dstPort + " && " + protocol + ".dst==52888'"
 
@@ -920,23 +884,35 @@ func main() {
 		os.Exit(-1)
 	}
 
-	// ovn-detrace TODO - workaround until image supports ovs and pyOpenSSL
-
-	installCmd := "pip3 install ovs pyOpenSSL"
-	dtraceInstallOut, dtraceInstallErr, err := execInPod(coreclient, restconfig, ovnNamespace, srcPodInfo.OvnKubeContainerPodName, "ovnkube-node", installCmd, "")
-	if err != nil {
-		klog.V(0).Infof("ovn-detrace error %v stdOut: %s\n stdErr: %s", err, dtraceInstallOut, dtraceInstallErr)
-		os.Exit(-1)
+	// Install dependencies with pip3 in case they are missing (for older images)
+	podList := []string{
+		srcPodInfo.OvnKubeContainerPodName,
+		dstPodInfo.OvnKubeContainerPodName,
 	}
-	fmt.Printf("install ovn-detrace Output: %s\n", dtraceInstallOut)
-
-	installCmd2 := "pip3 install ovs pyOpenSSL"
-	dtraceInstallOut2, dtraceInstallErr2, err := execInPod(coreclient, restconfig, ovnNamespace, dstPodInfo.OvnKubeContainerPodName, "ovnkube-node", installCmd2, "")
-	if err != nil {
-		klog.V(0).Infof("ovn-detrace error %v stdOut: %s\n stdErr: %s", err, dtraceInstallOut2, dtraceInstallErr2)
-		os.Exit(-1)
+	dependencies := map[string]string{
+		"ovs":       "if type -p ovn-detrace >/dev/null 2>&1; then echo 'true' ; fi",
+		"pyOpenSSL": "if rpm -qa | egrep -q python3-pyOpenSSL; then echo 'true'; fi",
 	}
-	fmt.Printf("install ovn-detrace Output: %s\n", dtraceInstallOut2)
+	for _, podName := range podList {
+		for dependency, dependencyCmd := range dependencies {
+			depVerifyOut, depVerifyErr, err := execInPod(coreclient, restconfig, ovnNamespace, podName, "ovnkube-node", dependencyCmd, "")
+			if err != nil {
+				klog.V(0).Infof("Dependency verification error in pod %s, container %s. Error '%v', stdOut: '%s'\n stdErr: %s", podName, "ovnkube-node", err, depVerifyOut, depVerifyErr)
+				os.Exit(-1)
+			}
+			trueFalse := strings.TrimSuffix(depVerifyOut, "\n")
+			klog.V(10).Infof("Dependency check '%s' in pod '%s', container '%s' yielded '%s'", dependencyCmd, podName, "ovnkube-node", trueFalse)
+			if trueFalse != "true" {
+				installCmd := "pip3 install " + dependency
+				depInstallOut, depInstallErr, err := execInPod(coreclient, restconfig, ovnNamespace, podName, "ovnkube-node", installCmd, "")
+				if err != nil {
+					klog.V(0).Infof("ovn-detrace error in pod %s, container %s. Error '%v', stdOut: '%s'\n stdErr: %s", podName, "ovnkube-node", err, depInstallOut, depInstallErr)
+					os.Exit(-1)
+				}
+				fmt.Printf("install ovn-detrace Output: %s\n", depInstallOut)
+			}
+		}
+	}
 
 	// ovn-detrace src - dst
 	fromSrc = "--ovnnb=" + nbUri + " "

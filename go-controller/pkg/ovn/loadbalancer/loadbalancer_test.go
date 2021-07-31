@@ -151,7 +151,12 @@ func TestDeleteLoadBalancerVIP(t *testing.T) {
 			if err != nil {
 				t.Errorf("fexec error: %v", err)
 			}
-			err = DeleteLoadBalancerVIP(tt.loadBalancer, tt.vip)
+			txn := util.NewNBTxn()
+			err = DeleteLoadBalancerVIP(txn, tt.loadBalancer, tt.vip)
+			if err != nil {
+				t.Errorf("DeleteLoadBalancerVIP error: %v", err)
+			}
+			_, _, err = txn.Commit()
 			if (err != nil) != tt.wantErr {
 				t.Errorf("DeleteLoadBalancerVIP() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -250,50 +255,6 @@ func TestGetLogicalRoutersForLoadBalancer(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("GetLogicalRoutersForLoadBalancer() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestGenerateACLName(t *testing.T) {
-	type args struct {
-		lb         string
-		sourceIP   string
-		sourcePort int32
-	}
-	tests := []struct {
-		name string
-		args args
-		want string
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := GenerateACLName(tt.args.lb, tt.args.sourceIP, tt.args.sourcePort); got != tt.want {
-				t.Errorf("GenerateACLName() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestGenerateACLNameForOVNCommand(t *testing.T) {
-	type args struct {
-		lb         string
-		sourceIP   string
-		sourcePort int32
-	}
-	tests := []struct {
-		name string
-		args args
-		want string
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := GenerateACLNameForOVNCommand(tt.args.lb, tt.args.sourceIP, tt.args.sourcePort); got != tt.want {
-				t.Errorf("GenerateACLNameForOVNCommand() = %v, want %v", got, tt.want)
 			}
 		})
 	}

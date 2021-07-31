@@ -35,7 +35,7 @@ func (oc *Controller) syncPods(pods []interface{}) {
 			continue
 		}
 		annotations, err := util.UnmarshalPodAnnotation(pod.Annotations)
-		if podScheduled(pod) && util.PodWantsNetwork(pod) && err == nil {
+		if util.PodScheduled(pod) && util.PodWantsNetwork(pod) && err == nil {
 			logicalPort := podLogicalPortName(pod)
 			expectedLogicalPorts[logicalPort] = true
 			if err = oc.lsManager.AllocateIPs(pod.Spec.NodeName, annotations.IPs); err != nil {
@@ -108,9 +108,12 @@ func (oc *Controller) syncPods(pods []interface{}) {
 			}
 		}
 	}
+	// Remove legacy ecmp routes when moving to external bridge
+	oc.cleanECMPRoutes()
 }
 
 func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
+	oc.deletePodExternalGW(pod)
 	if pod.Spec.HostNetwork {
 		return
 	}
@@ -161,7 +164,6 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		oc.deletePerPodGRSNAT(pod.Spec.NodeName, portInfo.ips)
 	}
 	oc.deleteGWRoutesForPod(pod.Namespace, portInfo.ips)
-	oc.deletePodExternalGW(pod)
 	oc.logicalPortCache.remove(logicalPort)
 }
 
@@ -212,9 +214,7 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 			otherDefaultRoute = otherDefaultRouteV6
 		}
 		var gatewayIP net.IP
-		hasRoutingExternalGWs := len(oc.getRoutingExternalGWs(pod.Namespace).gws) > 0
-		hasPodRoutingGWs := len(oc.getRoutingPodGWs(pod.Namespace)) > 0
-		if otherDefaultRoute || (hasRoutingExternalGWs && hasPodRoutingGWs) {
+		if otherDefaultRoute {
 			for _, clusterSubnet := range config.Default.ClusterSubnets {
 				if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
 					podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
@@ -235,7 +235,7 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 			gatewayIP = gatewayIPnet.IP
 		}
 
-		if len(config.HybridOverlay.ClusterSubnets) > 0 && !hasRoutingExternalGWs && !hasPodRoutingGWs {
+		if len(config.HybridOverlay.ClusterSubnets) > 0 {
 			// Add a route for each hybrid overlay subnet via the hybrid
 			// overlay port on the pod's logical switch.
 			nextHop := util.GetNodeHybridOverlayIfAddr(nodeSubnet).IP
@@ -331,12 +331,30 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	if lsp == nil {
 		cmd, err = oc.ovnNBClient.LSPAdd(logicalSwitch, portName)
 		if err != nil {
-			return fmt.Errorf("unable to create the LSPAdd command for port: %s from the nbdb", portName)
+			return fmt.Errorf("unable to create the LSPAdd command for port: %s from the nbdb: %v", portName, err)
 		}
 		cmds = append(cmds, cmd)
 	} else {
 		klog.Infof("LSP already exists for port: %s", portName)
 	}
+
+	// Bind the port to the node's chassis; prevents ping-ponging between
+	// chassis if ovnkube-node isn't running correctly and hasn't cleared
+	// out iface-id for an old instance of this pod, and the pod got
+	// rescheduled.
+	opts, err := oc.ovnNBClient.LSPGetOptions(portName)
+	if err != nil && err != goovn.ErrorNotFound {
+		klog.Warningf("Failed to get options for port %s: %v", portName, err)
+	}
+	if opts == nil {
+		opts = make(map[string]string)
+	}
+	opts["requested-chassis"] = pod.Spec.NodeName
+	cmd, err = oc.ovnNBClient.LSPSetOptions(portName, opts)
+	if err != nil {
+		return fmt.Errorf("unable to create the LSPSetOptions command for port: %s from the nbdb: %v", portName, err)
+	}
+	cmds = append(cmds, cmd)
 
 	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 
@@ -450,7 +468,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 		klog.V(5).Infof("Annotation values: ip=%v ; mac=%s ; gw=%s\nAnnotation=%s",
 			podIfAddrs, podMac, podAnnotation.Gateways, marshalledAnnotation)
-		if err = oc.kube.SetAnnotationsOnPod(pod, marshalledAnnotation); err != nil {
+		if err = oc.kube.SetAnnotationsOnPod(pod.Namespace, pod.Name, marshalledAnnotation); err != nil {
 			return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
 		}
 		releaseIPs = false
@@ -492,7 +510,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// Add the pod's logical switch port to the port cache
 	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, lsp.UUID, podMac, podIfAddrs)
 
-	// Wait for namespace to exist, no calls after this should ever use waitForNamespaceLocked
+	// Ensure the namespace/nsInfo exists
 	if err = oc.addPodToNamespace(pod.Namespace, portInfo); err != nil {
 		return err
 	}

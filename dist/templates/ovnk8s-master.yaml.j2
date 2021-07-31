@@ -103,7 +103,7 @@ spec:
 
           readinessProbe:
             exec:
-              command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovn-nbctld"]
+              command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovn-nbctl"]
             initialDelaySeconds: 30
             timeoutSeconds: 30
             periodSeconds: 60
@@ -195,6 +195,10 @@ spec:
               value: "{{ ovn_hybrid_overlay_net_cidr }}"
             - name: OVN_EGRESSIP_ENABLE
               value: "{{ ovn_egress_ip_enable }}"
+            - name: OVN_EGRESSFIREWALL_ENABLE
+              value: "{{ ovn_egress_firewall_enable }}"
+            - name: OVN_ICMP_NETWORKPOLICY_ENABLE
+              value: "{{ ovn_icmp_networkpolicy_enable }}"
             - name: OVN_DISABLE_SNAT_MULTIPLE_GWS
               value: "{{ ovn_disable_snat_multiple_gws }}"
             - name: OVN_SSL_ENABLE
@@ -207,6 +211,12 @@ spec:
               value: "{{ ovn_nb_cert_cname }}"
             - name: OVN_SB_CERT_CNAME
               value: "{{ ovn_sb_cert_cname }}"
+            - name: OVN_HOST_NETWORK_NAMESPACE
+              valueFrom:
+                configMapKeyRef:
+                  name: ovn-config
+                  key: host_network_namespace
+
           # end of container
 
         - name: kube-rbac-proxy

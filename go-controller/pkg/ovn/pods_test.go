@@ -122,7 +122,10 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIP, podMAC, 
 }
 
 func (p pod) baseCmds(fexec *ovntest.FakeExec) {
-
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid,output_port find Logical_Router_Static_Route options={ecmp_symmetric_reply=\"true\"}",
+		Output: "",
+	})
 }
 
 func (p pod) populateLogicalSwitchCache(fakeOvn *FakeOVN) {
@@ -144,10 +147,6 @@ func (p pod) addCmds(fexec *ovntest.FakeExec, fail bool) {
 			Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port " + p.portName + " _uuid",
 			Output: fakeUUID + "\n",
 		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exists remove port_group mcastPortGroupDeny ports " + fakeUUID + " -- add port_group mcastPortGroupDeny ports " + fakeUUID,
-		})
-
 	} else {
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 --if-exists get logical_switch_port" + " " + p.portName + " dynamic_addresses addresses",
@@ -205,6 +204,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					"0a:58:0a:80:01:03",
 					namespaceT.Name,
 				)
+				t.baseCmds(fExec)
 
 				fakeOvn.start(ctx,
 					&v1.NamespaceList{
@@ -322,6 +322,8 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					},
 				)
 				t.populateLogicalSwitchCache(fakeOvn)
+				t.baseCmds(fExec)
+
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 
@@ -358,6 +360,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					"0a:58:0a:80:01:03",
 					namespaceT.Name,
 				)
+				t.baseCmds(fExec)
 
 				fakeOvn.start(ctx,
 					&v1.NamespaceList{
@@ -405,7 +408,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		ginkgo.It("retries a failed pod Add when namespace doesn't yet exist", func() {
+		ginkgo.It("pod Add should succeed even when namespace doesn't yet exist", func() {
 			app.Action = func(ctx *cli.Context) error {
 
 				namespaceT := newNamespace("namespace1")
@@ -420,6 +423,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					namespaceT.Name,
 				)
 				podJSON := `{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`
+				t.baseCmds(fExec)
 
 				fakeOvn.start(ctx)
 				t.populateLogicalSwitchCache(fakeOvn)
@@ -433,13 +437,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(podJSON))
 
-				fakeOvn.asf.ExpectNoAddressSet(t.namespace)
-
-				// Now add the namespace
-				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Create(context.TODO(), namespaceT, metav1.CreateOptions{})
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				// Pod creation should be retried on Update event
+				// Add Pod logical port should succeed even without namespace
 				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 				gomega.Expect(getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)).Should(gomega.MatchJSON(podJSON))
 
@@ -493,6 +491,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					},
 				)
 				t.populateLogicalSwitchCache(fakeOvn)
+				t.baseCmds(fExec)
 
 				pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -526,6 +525,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					"0a:58:0a:80:01:03",
 					namespaceT.Name,
 				)
+				t.baseCmds(fExec)
 
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true",
@@ -574,6 +574,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					"0a:58:0a:80:01:03",
 					namespaceT.Name,
 				)
+				t.baseCmds(fExec)
 
 				fakeOvn.start(ctx,
 					&v1.NamespaceList{
@@ -598,6 +599,8 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				t.populateLogicalSwitchCache(fakeOvn)
 
 				fakeOvn.restart()
+				t.baseCmds(fExec)
+
 				t.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
@@ -626,6 +629,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					"0a:58:0a:80:01:03",
 					namespaceT.Name,
 				)
+				t.baseCmds(fExec)
 
 				fakeOvn.start(ctx,
 					&v1.NamespaceList{
@@ -649,6 +653,8 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				t.populateLogicalSwitchCache(fakeOvn)
 
 				fakeOvn.restart()
+				t.baseCmds(fExec)
+
 				t.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()

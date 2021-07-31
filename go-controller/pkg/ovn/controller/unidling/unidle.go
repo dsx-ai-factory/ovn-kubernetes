@@ -1,12 +1,15 @@
 package unidling
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 
@@ -21,13 +24,15 @@ type unidlingController struct {
 	// Map of load balancers to service namespace
 	serviceVIPToName     map[ServiceVIPKey]types.NamespacedName
 	serviceVIPToNameLock sync.Mutex
+	sbClient             libovsdbclient.Client
 }
 
 // NewController creates a new unidling controller
-func NewController(recorder record.EventRecorder, serviceInformer cache.SharedIndexInformer) *unidlingController {
+func NewController(recorder record.EventRecorder, serviceInformer cache.SharedIndexInformer, sbClient libovsdbclient.Client) *unidlingController {
 	uc := &unidlingController{
 		eventRecorder:    recorder,
 		serviceVIPToName: map[ServiceVIPKey]types.NamespacedName{},
+		sbClient:         sbClient,
 	}
 
 	// we only process events on unidling, there is no reconcilation
@@ -56,7 +61,20 @@ func (uc *unidlingController) onServiceAdd(obj interface{}) {
 }
 
 func (uc *unidlingController) onServiceDelete(obj interface{}) {
-	svc := obj.(*v1.Service)
+	svc, ok := obj.(*v1.Service)
+	if !ok {
+		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("couldn't get object from tombstone %#v", obj))
+			return
+		}
+		svc, ok = tombstone.Obj.(*v1.Service)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("tombstone contained object that is not a Service: %#v", obj))
+			return
+		}
+	}
+
 	if util.ServiceTypeHasClusterIP(svc) && util.IsClusterIPSet(svc) {
 		for _, ip := range util.GetClusterIPs(svc) {
 			for _, svcPort := range svc.Spec.Ports {

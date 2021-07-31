@@ -7,64 +7,13 @@ import (
 	libovsdb "github.com/ebay/libovsdb"
 )
 
-// TODO: implement mock methods as we keep adding unit-tests
-// Get logical switch by name
-func (mock *MockOVNClient) LSGet(ls string) ([]*goovn.LogicalSwitch, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Create ls named SWITCH
-func (mock *MockOVNClient) LSAdd(ls string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Del ls and all its ports
-func (mock *MockOVNClient) LSDel(ls string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Get all logical switches
-func (mock *MockOVNClient) LSList() ([]*goovn.LogicalSwitch, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Add external_ids to logical switch
-func (mock *MockOVNClient) LSExtIdsAdd(ls string, external_ids map[string]string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Del external_ids from logical_switch
-func (mock *MockOVNClient) LSExtIdsDel(ls string, external_ids map[string]string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Link logical switch to router
-func (mock *MockOVNClient) LinkSwitchToRouter(lsw, lsp, lr, lrp, lrpMac string, networks []string, externalIds map[string]string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Add LB to LSW
-func (mock *MockOVNClient) LSLBAdd(ls string, lb string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Delete LB from LSW
-func (mock *MockOVNClient) LSLBDel(ls string, lb string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// List Load balancers for a LSW
-func (mock *MockOVNClient) LSLBList(ls string) ([]*goovn.LoadBalancer, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
 // Add ACL to entity (PORT_GROUP or LOGICAL_SWITCH)
-func (mock *MockOVNClient) ACLAddEntity(entityType goovn.EntityType, entity, aclName, direct, match, action string, priority int, external_ids map[string]string, logflag bool, meter, severity string) (*goovn.OvnCommand, error) {
+func (mock *MockOVNClient) ACLAddEntity(entityType goovn.EntityType, entityName, aclName, direct, match, action string, priority int, external_ids map[string]string, logflag bool, meter, severity string) (*goovn.OvnCommand, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }
 
 // Delete acl from entity (PORT_GROUP or LOGICAL_SWITCH)
-func (mock *MockOVNClient) ACLDelEntity(entityType goovn.EntityType, entity, aclUUID string) (*goovn.OvnCommand, error) {
+func (mock *MockOVNClient) ACLDelEntity(entityType goovn.EntityType, entityName, aclUUID string) (*goovn.OvnCommand, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }
 
@@ -78,23 +27,20 @@ func (mock *MockOVNClient) ACLListEntity(entityType goovn.EntityType, entity str
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }
 
-// Get all acl by lswitch
-func (mock *MockOVNClient) ACLList(ls string) ([]*goovn.ACL, error) {
+func (mock *MockOVNClient) ACLSetLogging(aclUUID string, newLogflag bool, newMeter, newSeverity string) (*goovn.OvnCommand, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }
 
-// Set name for ACL
-func (mock *MockOVNClient) ACLSetName(aclUUID, aclName string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Set match criteria for ACL
 func (mock *MockOVNClient) ACLSetMatch(aclUUID, newMatch string) (*goovn.OvnCommand, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }
 
-// Set logging for ACL
-func (mock *MockOVNClient) ACLSetLogging(aclUUID string, newLogflag bool, newMeter, newSeverity string) (*goovn.OvnCommand, error) {
+func (mock *MockOVNClient) ACLSetName(aclUUID, aclName string) (*goovn.OvnCommand, error) {
+	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+}
+
+// Get all acl by lswitch
+func (mock *MockOVNClient) ACLList(ls string) ([]*goovn.ACL, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }
 
@@ -123,76 +69,6 @@ func (mock *MockOVNClient) ASList() ([]*goovn.AddressSet, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }
 
-// Get LR with given name
-func (mock *MockOVNClient) LRGet(name string) ([]*goovn.LogicalRouter, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Add LR with given name
-func (mock *MockOVNClient) LRAdd(name string, external_ids map[string]string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Delete LR with given name
-func (mock *MockOVNClient) LRDel(name string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Get LRs
-func (mock *MockOVNClient) LRList() ([]*goovn.LogicalRouter, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Add LRP with given name on given lr
-func (mock *MockOVNClient) LRPAdd(lr string, lrp string, mac string, network []string, peer string, external_ids map[string]string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Delete LRP with given name on given lr
-func (mock *MockOVNClient) LRPDel(lr string, lrp string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Get all lrp by lr
-func (mock *MockOVNClient) LRPList(lr string) ([]*goovn.LogicalRouterPort, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Add LRSR with given ip_prefix on given lr
-func (mock *MockOVNClient) LRSRAdd(lr string, ip_prefix string, nexthop string, output_port *string, policy *string, external_ids map[string]string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Delete LRSR with given ip_prefix, nexthop, outputPort and policy on given lr
-func (mock *MockOVNClient) LRSRDel(lr string, prefix string, nexthop, outputPort, policy *string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Delete LRSR by uuid given lr
-func (mock *MockOVNClient) LRSRDelByUUID(lr, uuid string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Get all LRSRs by lr
-func (mock *MockOVNClient) LRSRList(lr string) ([]*goovn.LogicalRouterStaticRoute, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Add LB to LR
-func (mock *MockOVNClient) LRLBAdd(lr string, lb string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Delete LB from LR
-func (mock *MockOVNClient) LRLBDel(lr string, lb string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// List Load balancers for a LR
-func (mock *MockOVNClient) LRLBList(lr string) ([]*goovn.LoadBalancer, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
 // Get LB with given name
 func (mock *MockOVNClient) LBGet(name string) ([]*goovn.LoadBalancer, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
@@ -215,11 +91,6 @@ func (mock *MockOVNClient) LBUpdate(name string, vipPort string, protocol string
 
 // Set selection fields for LB session affinity
 func (mock *MockOVNClient) LBSetSelectionFields(name string, selectionFields string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Get LBs
-func (mock *MockOVNClient) LBList() ([]*goovn.LoadBalancer, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }
 
@@ -275,6 +146,29 @@ func (mock *MockOVNClient) LRNATDel(lr string, ntype string, ip ...string) (*goo
 
 // Get NAT List by Logical Router
 func (mock *MockOVNClient) LRNATList(lr string) ([]*goovn.NAT, error) {
+	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+}
+
+func (mock *MockOVNClient) LRPolicyAdd(lr string, priority int, match string, action string, nexthop *string, nexthops []string, options map[string]string, external_ids map[string]string) (*goovn.OvnCommand, error) {
+	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+}
+
+func (mock *MockOVNClient) LRPolicyDel(lr string, priority int, match *string) (*goovn.OvnCommand, error) {
+	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+}
+
+// Delete a LR policy by UUID
+func (mock *MockOVNClient) LRPolicyDelByUUID(lr string, uuid string) (*goovn.OvnCommand, error) {
+	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+}
+
+// Delete all LRPolicies
+func (mock *MockOVNClient) LRPolicyDelAll(lr string) (*goovn.OvnCommand, error) {
+	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+}
+
+// Get all LRPolicies by LR
+func (mock *MockOVNClient) LRPolicyList(lr string) ([]*goovn.LogicalRouterPolicy, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }
 
@@ -339,33 +233,15 @@ func (mock *MockOVNClient) SBGlobalGetOptions() (map[string]string, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }
 
-// Creates a new port group in the Port_Group table named "group" with optional "ports"  and "external_ids".
-func (mock *MockOVNClient) PortGroupAdd(group string, ports []string, external_ids map[string]string) (*goovn.OvnCommand, error) {
+func (mock *MockOVNClient) AuxKeyValDel(table string, rowName string, auxCol string, kv map[string]*string) (*goovn.OvnCommand, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }
 
-// Sets "ports" and/or "external_ids" on the port group named "group". It is an error if group does not exist.
-func (mock *MockOVNClient) PortGroupUpdate(group string, ports []string, external_ids map[string]string) (*goovn.OvnCommand, error) {
+func (mock *MockOVNClient) AuxKeyValSet(table string, rowName string, auxCol string, kv map[string]string) (*goovn.OvnCommand, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }
 
-// Add port to port group.
-func (mock *MockOVNClient) PortGroupAddPort(group string, port string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Remove port from port group.
-func (mock *MockOVNClient) PortGroupRemovePort(group string, port string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Deletes port group "group". It is an error if "group" does not exist.
-func (mock *MockOVNClient) PortGroupDel(group string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Get PortGroup data structure if it exists
-func (mock *MockOVNClient) PortGroupGet(group string) (*goovn.PortGroup, error) {
+func (mock *MockOVNClient) ExecuteR(cmds ...*goovn.OvnCommand) ([]string, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }
 
@@ -373,45 +249,4 @@ func (mock *MockOVNClient) PortGroupGet(group string) (*goovn.PortGroup, error) 
 func (mock *MockOVNClient) GetSchema() libovsdb.DatabaseSchema {
 	var dbSchema libovsdb.DatabaseSchema
 	return dbSchema
-}
-
-// Same as Execute, but returns a UUID for each object created.
-func (mock *MockOVNClient) ExecuteR(cmds ...*goovn.OvnCommand) ([]string, error) {
-	return []string{}, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Add LRPolicy
-func (mock *MockOVNClient) LRPolicyAdd(lr string, priority int, match string, action string, nexthop *string, nexthops []string, options map[string]string, external_ids map[string]string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Delete a LR policy by priority and optionally match
-func (mock *MockOVNClient) LRPolicyDel(lr string, priority int, match *string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Delete a LR policy by UUID
-func (mock *MockOVNClient) LRPolicyDelByUUID(lr string, uuid string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Delete all LRPolicies
-func (mock *MockOVNClient) LRPolicyDelAll(lr string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Get all LRPolicies by LR
-func (mock *MockOVNClient) LRPolicyList(lr string) ([]*goovn.LogicalRouterPolicy, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// AuxKeyValSet() sets keys/values for a column of OvsMap type, e.g., 'external_ids', 'other_config'.
-func (mock *MockOVNClient) AuxKeyValSet(table string, rowName string, auxCol string, kv map[string]string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// AuxKeyValDel() removes keys/values for a column of OvsMap type, e.g., 'external_ids', 'other_config'.
-// special value of 'nil' removes the given key regardless of its value
-func (mock *MockOVNClient) AuxKeyValDel(table string, rowName string, auxCol string, kv map[string]*string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }

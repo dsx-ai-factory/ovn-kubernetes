@@ -4,6 +4,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 
@@ -20,7 +21,7 @@ func NewFakeAddressSetFactory() *FakeAddressSetFactory {
 }
 
 type FakeAddressSetFactory struct {
-	sync.RWMutex
+	sync.Mutex
 	// maps address set name to object
 	sets map[string]*fakeAddressSet
 }
@@ -48,7 +49,12 @@ func (f *FakeAddressSetFactory) NewAddressSet(name string, ips []net.IP) (Addres
 	return set, nil
 }
 
-func (f *FakeAddressSetFactory) ForEachAddressSet(iteratorFn AddressSetIterFunc) error {
+// EnsureAddressSet returns nil
+func (f *FakeAddressSetFactory) EnsureAddressSet(name string) error {
+	return nil
+}
+
+func (f *FakeAddressSetFactory) ProcessEachAddressSet(iteratorFn AddressSetIterFunc) error {
 	asNames := sets.String{}
 	for _, set := range f.sets {
 		asName := truncateSuffixFromAddressSet(set.getName())
@@ -86,8 +92,8 @@ func (f *FakeAddressSetFactory) DestroyAddressSetInBackingStore(name string) err
 }
 
 func (f *FakeAddressSetFactory) getAddressSet(name string) *fakeAddressSet {
-	f.RLock()
-	defer f.RUnlock()
+	f.Lock()
+	defer f.Unlock()
 	if as, ok := f.sets[name]; ok {
 		as.Lock()
 		return as
@@ -100,12 +106,6 @@ func (f *FakeAddressSetFactory) removeAddressSet(name string) {
 	f.Lock()
 	defer f.Unlock()
 	delete(f.sets, name)
-}
-
-// ExpectNoAddressSet ensures the named address set does not exist
-func (f *FakeAddressSetFactory) ExpectNoAddressSet(name string) {
-	_, ok := f.sets[name]
-	gomega.Expect(ok).To(gomega.BeFalse())
 }
 
 // ExpectAddressSetWithIPs ensures the named address set exists with the given set of IPs
@@ -157,8 +157,8 @@ func (f *FakeAddressSetFactory) EventuallyExpectEmptyAddressSet(name string) {
 // EventuallyExpectNoAddressSet ensures the named address set eventually does not exist
 func (f *FakeAddressSetFactory) EventuallyExpectNoAddressSet(name string) {
 	gomega.Eventually(func() bool {
-		f.RLock()
-		defer f.RUnlock()
+		f.Lock()
+		defer f.Unlock()
 		_, ok := f.sets[name]
 		return ok
 	}).Should(gomega.BeFalse())
@@ -171,7 +171,7 @@ type fakeAddressSet struct {
 	name      string
 	hashName  string
 	ips       map[string]net.IP
-	destroyed bool
+	destroyed uint32
 	removeFn  removeFunc
 }
 
@@ -293,17 +293,19 @@ func (as *fakeAddressSets) Destroy() error {
 }
 
 func (as *fakeAddressSet) getHashName() string {
-	gomega.Expect(as.destroyed).To(gomega.BeFalse())
+	gomega.Expect(atomic.LoadUint32(&as.destroyed)).To(gomega.Equal(uint32(0)))
 	return as.hashName
 }
 
 func (as *fakeAddressSet) getName() string {
-	gomega.Expect(as.destroyed).To(gomega.BeFalse())
+	gomega.Expect(atomic.LoadUint32(&as.destroyed)).To(gomega.Equal(uint32(0)))
 	return as.name
 }
 
 func (as *fakeAddressSet) addIP(ip net.IP) error {
-	gomega.Expect(as.destroyed).To(gomega.BeFalse())
+	as.Lock()
+	defer as.Unlock()
+	gomega.Expect(atomic.LoadUint32(&as.destroyed)).To(gomega.Equal(uint32(0)))
 	ipStr := ip.String()
 	if _, ok := as.ips[ipStr]; !ok {
 		as.ips[ip.String()] = ip
@@ -314,19 +316,14 @@ func (as *fakeAddressSet) addIP(ip net.IP) error {
 func (as *fakeAddressSet) deleteIP(ip net.IP) error {
 	as.Lock()
 	defer as.Unlock()
-	gomega.Expect(as.destroyed).To(gomega.BeFalse())
+	gomega.Expect(atomic.LoadUint32(&as.destroyed)).To(gomega.Equal(uint32(0)))
 	delete(as.ips, ip.String())
 	return nil
 }
 
-func (as *fakeAddressSet) destroyInternal() {
-	gomega.Expect(as.destroyed).To(gomega.BeFalse())
-	as.destroyed = true
-	as.removeFn(as.name)
-}
-
 func (as *fakeAddressSet) destroy() error {
-	gomega.Expect(as.destroyed).To(gomega.BeFalse())
-	as.destroyInternal()
+	gomega.Expect(atomic.LoadUint32(&as.destroyed)).To(gomega.Equal(uint32(0)))
+	atomic.StoreUint32(&as.destroyed, 1)
+	as.removeFn(as.name)
 	return nil
 }

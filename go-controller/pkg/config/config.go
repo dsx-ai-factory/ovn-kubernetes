@@ -22,6 +22,8 @@ import (
 
 	kexec "k8s.io/utils/exec"
 	utilnet "k8s.io/utils/net"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // DefaultEncapPort number used if not supplied
@@ -62,6 +64,7 @@ var (
 		EncapPort:         DefaultEncapPort,
 		InactivityProbe:   100000, // in Milliseconds
 		OpenFlowProbe:     0,      // in Seconds
+		LFlowCacheEnable:  true,
 		RawClusterSubnets: "10.128.0.0/14/23",
 	}
 
@@ -76,6 +79,13 @@ var (
 		ACLLoggingRateLimit: 20,
 	}
 
+	// Monitoring holds monitoring-related parsed config file parameters and command-line overrides
+	Monitoring = MonitoringConfig{
+		RawNetFlowTargets: "",
+		RawSFlowTargets:   "",
+		RawIPFIXTargets:   "",
+	}
+
 	// CNI holds CNI-related parsed config file parameters and command-line overrides
 	CNI = CNIConfig{
 		ConfDir: "/etc/cni/net.d",
@@ -84,9 +94,10 @@ var (
 
 	// Kubernetes holds Kubernetes-related parsed config file parameters and command-line overrides
 	Kubernetes = KubernetesConfig{
-		APIServer:          DefaultAPIServer,
-		RawServiceCIDRs:    "172.16.1.0/24",
-		OVNConfigNamespace: "ovn-kubernetes",
+		APIServer:            DefaultAPIServer,
+		RawServiceCIDRs:      "172.16.1.0/24",
+		OVNConfigNamespace:   "ovn-kubernetes",
+		HostNetworkNamespace: "",
 	}
 
 	// OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
@@ -133,6 +144,10 @@ var (
 
 	// MetricsScrapeInterval captures the interval at which ovnkube & ovn metrics should be collected.
 	MetricsScrapeInterval int
+	// OvnKubeNode holds ovnkube-node parsed config file parameters and command-line overrides
+	OvnKubeNode = OvnKubeNodeConfig{
+		Mode: types.NodeModeFull,
+	}
 )
 
 const (
@@ -164,6 +179,19 @@ type DefaultConfig struct {
 	// Maximum number of seconds of idle time on the OpenFlow connection
 	// that ovn-controller will wait before it sends a connection health probe
 	OpenFlowProbe int `gcfg:"openflow-probe"`
+	// The  boolean  flag  indicates  if  ovn-controller  should
+	// enable/disable the logical flow in-memory cache  it  uses
+	// when processing Southbound database logical flow changes.
+	// By default caching is enabled.
+	LFlowCacheEnable bool `gcfg:"enable-lflow-cache"`
+	// Maximum  number  of logical flow cache entries ovn-controller
+	// may create when the logical flow  cache  is  enabled.  By
+	// default the size of the cache is unlimited.
+	LFlowCacheLimit uint `gcfg:"lflow-cache-limit"`
+	// Maximum  number  of logical flow cache entries ovn-controller
+	// may create when the logical flow  cache  is  enabled.  By
+	// default the size of the cache is unlimited.
+	LFlowCacheLimitKb uint `gcfg:"lflow-cache-limit-kb"`
 	// RawClusterSubnets holds the unparsed cluster subnets. Should only be
 	// used inside config module.
 	RawClusterSubnets string `gcfg:"cluster-subnets"`
@@ -191,6 +219,22 @@ type LoggingConfig struct {
 	ACLLoggingRateLimit int `gcfg:"acl-logging-rate-limit"`
 }
 
+// MonitoringConfig holds monitoring-related parsed config file parameters and command-line overrides
+type MonitoringConfig struct {
+	// RawNetFlowTargets holds the unparsed NetFlow targets. Should only be used inside the config module.
+	RawNetFlowTargets string `gcfg:"netflow-targets"`
+	// RawSFlowTargets holds the unparsed SFlow targets. Should only be used inside the config module.
+	RawSFlowTargets string `gcfg:"sflow-targets"`
+	// RawIPFIXTargets holds the unparsed IPFIX targets. Should only be used inside the config module.
+	RawIPFIXTargets string `gcfg:"ipfix-targets"`
+	// NetFlowTargets holds the parsed NetFlow targets and may be used outside the config module.
+	NetFlowTargets []HostPort
+	// SFlowTargets holds the parsed SFlow targets and may be used outside the config module.
+	SFlowTargets []HostPort
+	// IPFIXTargets holds the parsed IPFIX targets and may be used outside the config module.
+	IPFIXTargets []HostPort
+}
+
 // CNIConfig holds CNI-related parsed config file parameters and command-line overrides
 type CNIConfig struct {
 	// ConfDir specifies the CNI config directory in which to write the overlay CNI config file
@@ -203,6 +247,7 @@ type CNIConfig struct {
 type KubernetesConfig struct {
 	Kubeconfig           string `gcfg:"kubeconfig"`
 	CACert               string `gcfg:"cacert"`
+	CAData               []byte
 	APIServer            string `gcfg:"apiserver"`
 	Token                string `gcfg:"token"`
 	CompatServiceCIDR    string `gcfg:"service-cidr"`
@@ -215,11 +260,14 @@ type KubernetesConfig struct {
 	PodIP                string `gcfg:"pod-ip"` // UNUSED
 	RawNoHostSubnetNodes string `gcfg:"no-hostsubnet-nodes"`
 	NoHostSubnetNodes    *metav1.LabelSelector
+	HostNetworkNamespace string `gcfg:"host-network-namespace"`
 }
 
 // OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
 type OVNKubernetesFeatureConfig struct {
-	EnableEgressIP bool `gcfg:"enable-egress-ip"`
+	EnableEgressIP          bool `gcfg:"enable-egress-ip"`
+	EnableEgressFirewall    bool `gcfg:"enable-egress-firewall"`
+	EnableICMPNetworkPolicy bool `gcfg:"enable-icmp-networkpolicy"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -240,6 +288,8 @@ type GatewayConfig struct {
 	Mode GatewayMode `gcfg:"mode"`
 	// Interface is the network interface to use for the gateway in "shared" mode
 	Interface string `gcfg:"interface"`
+	// Exgress gateway interface is the optional network interface to use for external gw pods traffic.
+	EgressGWInterface string `gcfg:"egw-interface"`
 	// NextHop is the gateway IP address of Interface; will be autodetected if not given
 	NextHop string `gcfg:"next-hop"`
 	// VLANID is the option VLAN tag to apply to gateway traffic for "shared" mode
@@ -252,6 +302,14 @@ type GatewayConfig struct {
 	V4JoinSubnet string `gcfg:"v4-join-subnet"`
 	// V6JoinSubnet to be used in the cluster
 	V6JoinSubnet string `gcfg:"v6-join-subnet"`
+	// DisablePacketMTUCheck disables adding openflow flows to check packets too large to be
+	// delivered to OVN due to pod MTU being lower than NIC MTU. Disabling this check will result in southbound packets
+	// exceeding pod MTU to be dropped by OVN. With this check enabled, ICMP needs frag/packet too big will be sent
+	// back to the original client
+	DisablePacketMTUCheck bool `gcfg:"disable-pkt-mtu-check"`
+	// RouterSubnet is the subnet to be used for the GR external port. auto-detected if not given.
+	// Must match the the kube node IP address. Currently valid for Smart-NICs only.
+	RouterSubnet string `gcfg:"router-subnet"`
 }
 
 // OvnAuthConfig holds client authentication and location details for
@@ -293,6 +351,12 @@ type HybridOverlayConfig struct {
 	VXLANPort uint `gcfg:"hybrid-overlay-vxlan-port"`
 }
 
+// OvnKubeNodeConfig holds ovnkube-node configurations
+type OvnKubeNodeConfig struct {
+	Mode           string `gcfg:"mode"`
+	MgmtPortNetdev string `gcfg:"mgmt-port-netdev"`
+}
+
 // OvnDBScheme describes the OVN database connection transport method
 type OvnDBScheme string
 
@@ -309,6 +373,7 @@ const (
 type config struct {
 	Default              DefaultConfig
 	Logging              LoggingConfig
+	Monitoring           MonitoringConfig
 	CNI                  CNIConfig
 	OVNKubernetesFeature OVNKubernetesFeatureConfig
 	Kubernetes           KubernetesConfig
@@ -317,11 +382,13 @@ type config struct {
 	Gateway              GatewayConfig
 	MasterHA             MasterHAConfig
 	HybridOverlay        HybridOverlayConfig
+	OvnKubeNode          OvnKubeNodeConfig
 }
 
 var (
 	savedDefault              DefaultConfig
 	savedLogging              LoggingConfig
+	savedMonitoring           MonitoringConfig
 	savedCNI                  CNIConfig
 	savedOVNKubernetesFeature OVNKubernetesFeatureConfig
 	savedKubernetes           KubernetesConfig
@@ -330,6 +397,7 @@ var (
 	savedGateway              GatewayConfig
 	savedMasterHA             MasterHAConfig
 	savedHybridOverlay        HybridOverlayConfig
+	savedOvnKubeNode          OvnKubeNodeConfig
 	// legacy service-cluster-ip-range CLI option
 	serviceClusterIPRange string
 	// legacy cluster-subnet CLI option
@@ -344,6 +412,7 @@ func init() {
 	// Cache original default config values
 	savedDefault = Default
 	savedLogging = Logging
+	savedMonitoring = Monitoring
 	savedCNI = CNI
 	savedOVNKubernetesFeature = OVNKubernetesFeature
 	savedKubernetes = Kubernetes
@@ -352,6 +421,7 @@ func init() {
 	savedGateway = Gateway
 	savedMasterHA = MasterHA
 	savedHybridOverlay = HybridOverlay
+	savedOvnKubeNode = OvnKubeNode
 	cli.VersionPrinter = func(c *cli.Context) {
 		fmt.Printf("Version: %s\n", Version)
 		fmt.Printf("Git commit: %s\n", Commit)
@@ -369,6 +439,8 @@ func init() {
 	Flags = append(Flags, OVNGatewayFlags...)
 	Flags = append(Flags, MasterHAFlags...)
 	Flags = append(Flags, HybridOverlayFlags...)
+	Flags = append(Flags, MonitoringFlags...)
+	Flags = append(Flags, OvnKubeNodeFlags...)
 }
 
 // PrepareTestConfig restores default config values. Used by testcases to
@@ -377,6 +449,7 @@ func PrepareTestConfig() {
 	Default = savedDefault
 	Logging = savedLogging
 	Logging.Level = 5
+	Monitoring = savedMonitoring
 	CNI = savedCNI
 	OVNKubernetesFeature = savedOVNKubernetesFeature
 	Kubernetes = savedKubernetes
@@ -385,6 +458,7 @@ func PrepareTestConfig() {
 	Gateway = savedGateway
 	MasterHA = savedMasterHA
 	HybridOverlay = savedHybridOverlay
+	OvnKubeNode = savedOvnKubeNode
 
 	// Don't pick up defaults from the environment
 	os.Unsetenv("KUBECONFIG")
@@ -518,6 +592,30 @@ var CommonFlags = []cli.Flag{
 		Destination: &cliConfig.Default.OpenFlowProbe,
 		Value:       Default.OpenFlowProbe,
 	},
+	&cli.BoolFlag{
+		Name: "enable-lflow-cache",
+		Usage: "Enable the logical flow in-memory cache it uses " +
+			"when processing Southbound database logical flow changes. " +
+			"By default caching is enabled.",
+		Destination: &cliConfig.Default.LFlowCacheEnable,
+		Value:       Default.LFlowCacheEnable,
+	},
+	&cli.UintFlag{
+		Name: "lflow-cache-limit",
+		Usage: "Maximum number of logical flow cache entries ovn-controller " +
+			"may create when the logical flow cache is enabled. By " +
+			"default the size of the cache is unlimited.",
+		Destination: &cliConfig.Default.LFlowCacheLimit,
+		Value:       Default.LFlowCacheLimit,
+	},
+	&cli.UintFlag{
+		Name: "lflow-cache-limit-kb",
+		Usage: "Maximum size of the logical flow cache ovn-controller " +
+			"may create when the logical flow cache is enabled. By " +
+			"default the size of the cache is unlimited.",
+		Destination: &cliConfig.Default.LFlowCacheLimitKb,
+		Value:       Default.LFlowCacheLimitKb,
+	},
 	&cli.StringFlag{
 		Name:        "cluster-subnet",
 		Usage:       "Deprecated alias for cluster-subnets.",
@@ -603,6 +701,32 @@ var CommonFlags = []cli.Flag{
 	},
 }
 
+// MonitoringFlags capture monitoring-related options
+var MonitoringFlags = []cli.Flag{
+	// Monitoring options
+	&cli.StringFlag{
+		Name:  "netflow-targets",
+		Value: Monitoring.RawNetFlowTargets,
+		Usage: "A comma separated set of NetFlow collectors to export flow data (eg, \"10.128.0.150:2056,10.0.0.151:2056\")." +
+			"Each entry is given in the form [IP address:port]",
+		Destination: &cliConfig.Monitoring.RawNetFlowTargets,
+	},
+	&cli.StringFlag{
+		Name:  "sflow-targets",
+		Value: Monitoring.RawSFlowTargets,
+		Usage: "A comma separated set of SFlow collectors to export flow data (eg, \"10.128.0.150:6343,10.0.0.151:6343\")." +
+			"Each entry is given in the form [IP address:port]",
+		Destination: &cliConfig.Monitoring.RawSFlowTargets,
+	},
+	&cli.StringFlag{
+		Name:  "ipfix-targets",
+		Value: Monitoring.RawIPFIXTargets,
+		Usage: "A comma separated set of IPFIX collectors to export flow data (eg, \"10.128.0.150:2055,10.0.0.151:2055\")." +
+			"Each entry is given in the form [IP address:port]",
+		Destination: &cliConfig.Monitoring.RawIPFIXTargets,
+	},
+}
+
 // CNIFlags capture CNI-related options
 var CNIFlags = []cli.Flag{
 	// CNI options
@@ -627,6 +751,18 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use EgressIP CRD feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableEgressIP,
 		Value:       OVNKubernetesFeature.EnableEgressIP,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-egress-firewall",
+		Usage:       "Configure to use EgressFirewall CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableEgressFirewall,
+		Value:       OVNKubernetesFeature.EnableEgressFirewall,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-icmp-networkpolicy",
+		Usage:       "Configure to use ICMPNetworkPolicy CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableICMPNetworkPolicy,
+		Value:       OVNKubernetesFeature.EnableICMPNetworkPolicy,
 	},
 }
 
@@ -704,6 +840,12 @@ var K8sFlags = []cli.Flag{
 		Name:        "no-hostsubnet-nodes",
 		Usage:       "Specify a label for nodes that will manage their own hostsubnets",
 		Destination: &cliConfig.Kubernetes.RawNoHostSubnetNodes,
+	},
+	&cli.StringFlag{
+		Name:        "host-network-namespace",
+		Usage:       "specify a namespace which will be used to classify host network traffic for network policy",
+		Destination: &cliConfig.Kubernetes.HostNetworkNamespace,
+		Value:       Kubernetes.HostNetworkNamespace,
 	},
 }
 
@@ -797,6 +939,12 @@ var OVNGatewayFlags = []cli.Flag{
 		Destination: &cliConfig.Gateway.Interface,
 	},
 	&cli.StringFlag{
+		Name: "exgw-interface",
+		Usage: "The interface on nodes that will be used for external gw network traffic. " +
+			"If none specified, ovnk will use the default interface",
+		Destination: &cliConfig.Gateway.EgressGWInterface,
+	},
+	&cli.StringFlag{
 		Name: "gateway-nexthop",
 		Usage: "The external default gateway which is used as a next hop by " +
 			"OVN gateway.  This is many times just the default gateway " +
@@ -832,6 +980,19 @@ var OVNGatewayFlags = []cli.Flag{
 		Usage:       "The v6 join subnet used for assigning join switch IPv6 addresses",
 		Destination: &cliConfig.Gateway.V6JoinSubnet,
 		Value:       Gateway.V6JoinSubnet,
+	},
+	&cli.BoolFlag{
+		Name:        "disable-pkt-mtu-check",
+		Usage:       "Disable OpenFlow checks for if packet size is greater than pod MTU",
+		Destination: &cliConfig.Gateway.DisablePacketMTUCheck,
+	},
+	&cli.StringFlag{
+		Name: "gateway-router-subnet",
+		Usage: "The Subnet to be used for the gateway router external port (shared mode only). " +
+			"auto-detected if not given. Must match the the kube node IP address. " +
+			"Currently valid for Smart-NICs only",
+		Destination: &cliConfig.Gateway.RouterSubnet,
+		Value:       Gateway.RouterSubnet,
 	},
 	// Deprecated CLI options
 	&cli.BoolFlag{
@@ -894,6 +1055,24 @@ var HybridOverlayFlags = []cli.Flag{
 	},
 }
 
+// OvnKubeNodeFlags captures ovnkube-node specific configurations
+var OvnKubeNodeFlags = []cli.Flag{
+	&cli.StringFlag{
+		Name:        "ovnkube-node-mode",
+		Usage:       "ovnkube-node operating mode full(default), smart-nic, smart-nic-host",
+		Value:       OvnKubeNode.Mode,
+		Destination: &cliConfig.OvnKubeNode.Mode,
+	},
+	&cli.StringFlag{
+		Name: "ovnkube-node-mgmt-port-netdev",
+		Usage: "valid only when ovnkube-node-mode is either smart-nic or smart-nic-host. " +
+			"when provided, use this netdev as management port. it will be renamed to ovn-k8s-mp0 " +
+			"and used to allow host network services and pods to access k8s pod and service networks. ",
+		Value:       OvnKubeNode.MgmtPortNetdev,
+		Destination: &cliConfig.OvnKubeNode.MgmtPortNetdev,
+	},
+}
+
 // Flags are general command-line flags. Apps should add these flags to their
 // own urfave/cli flags and call InitConfig() early in the application.
 var Flags []cli.Flag
@@ -910,6 +1089,8 @@ func GetFlags(customFlags []cli.Flag) []cli.Flag {
 	flags = append(flags, OVNGatewayFlags...)
 	flags = append(flags, MasterHAFlags...)
 	flags = append(flags, HybridOverlayFlags...)
+	flags = append(flags, MonitoringFlags...)
+	flags = append(flags, OvnKubeNodeFlags...)
 	flags = append(flags, customFlags...)
 	return flags
 }
@@ -1000,10 +1181,11 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 
 	envConfig := savedKubernetes
 	envVarsMap := map[string]string{
-		"Kubeconfig": "KUBECONFIG",
-		"CACert":     "K8S_CACERT",
-		"APIServer":  "K8S_APISERVER",
-		"Token":      "K8S_TOKEN",
+		"Kubeconfig":           "KUBECONFIG",
+		"CACert":               "K8S_CACERT",
+		"APIServer":            "K8S_APISERVER",
+		"Token":                "K8S_TOKEN",
+		"HostNetworkNamespace": "OVN_HOST_NETWORK_NAMESPACE",
 	}
 	for k, v := range envVarsMap {
 		if x, exists := os.LookupEnv(v); exists && len(x) > 0 {
@@ -1039,8 +1221,13 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 	if Kubernetes.Kubeconfig != "" && !pathExists(Kubernetes.Kubeconfig) {
 		return fmt.Errorf("kubernetes kubeconfig file %q not found", Kubernetes.Kubeconfig)
 	}
-	if Kubernetes.CACert != "" && !pathExists(Kubernetes.CACert) {
-		return fmt.Errorf("kubernetes CA certificate file %q not found", Kubernetes.CACert)
+
+	if Kubernetes.CACert != "" {
+		bytes, err := ioutil.ReadFile(Kubernetes.CACert)
+		if err != nil {
+			return err
+		}
+		Kubernetes.CAData = bytes
 	}
 
 	url, err := url.Parse(Kubernetes.APIServer)
@@ -1186,6 +1373,36 @@ func buildMasterHAConfig(ctx *cli.Context, cli, file *config) error {
 	return nil
 }
 
+func buildMonitoringConfig(ctx *cli.Context, cli, file *config) error {
+	var err error
+	if err = overrideFields(&Monitoring, &file.Monitoring, &savedMonitoring); err != nil {
+		return err
+	}
+	if err = overrideFields(&Monitoring, &cli.Monitoring, &savedMonitoring); err != nil {
+		return err
+	}
+
+	if Monitoring.RawNetFlowTargets != "" {
+		Monitoring.NetFlowTargets, err = ParseFlowCollectors(Monitoring.RawNetFlowTargets)
+		if err != nil {
+			return fmt.Errorf("netflow targets invalid: %v", err)
+		}
+	}
+	if Monitoring.RawSFlowTargets != "" {
+		Monitoring.SFlowTargets, err = ParseFlowCollectors(Monitoring.RawSFlowTargets)
+		if err != nil {
+			return fmt.Errorf("sflow targets invalid: %v", err)
+		}
+	}
+	if Monitoring.RawIPFIXTargets != "" {
+		Monitoring.IPFIXTargets, err = ParseFlowCollectors(Monitoring.RawIPFIXTargets)
+		if err != nil {
+			return fmt.Errorf("ipfix targets invalid: %v", err)
+		}
+	}
+	return nil
+}
+
 func buildHybridOverlayConfig(ctx *cli.Context, cli, file *config, allSubnets *configSubnets) error {
 	// Copy config file values over default values
 	if err := overrideFields(&HybridOverlay, &file.HybridOverlay, &savedHybridOverlay); err != nil {
@@ -1291,6 +1508,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		Gateway:              savedGateway,
 		MasterHA:             savedMasterHA,
 		HybridOverlay:        savedHybridOverlay,
+		OvnKubeNode:          savedOvnKubeNode,
 	}
 
 	allSubnets := newConfigSubnets()
@@ -1380,6 +1598,10 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
+	if err = buildMonitoringConfig(ctx, &cliConfig, &cfg); err != nil {
+		return "", err
+	}
+
 	if err = buildHybridOverlayConfig(ctx, &cliConfig, &cfg, allSubnets); err != nil {
 		return "", err
 	}
@@ -1406,14 +1628,20 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
+	if err = buildOvnKubeNodeConfig(ctx, &cliConfig, &cfg); err != nil {
+		return "", err
+	}
+
 	klog.V(5).Infof("Default config: %+v", Default)
 	klog.V(5).Infof("Logging config: %+v", Logging)
+	klog.V(5).Infof("Monitoring config: %+v", Monitoring)
 	klog.V(5).Infof("CNI config: %+v", CNI)
 	klog.V(5).Infof("Kubernetes config: %+v", Kubernetes)
 	klog.V(5).Infof("Gateway config: %+v", Gateway)
 	klog.V(5).Infof("OVN North config: %+v", OvnNorth)
 	klog.V(5).Infof("OVN South config: %+v", OvnSouth)
 	klog.V(5).Infof("Hybrid Overlay config: %+v", HybridOverlay)
+	klog.V(5).Infof("Ovnkube Node config: %+v", OvnKubeNode)
 
 	return retConfigFile, nil
 }
@@ -1640,4 +1868,55 @@ func UpdateOVNNodeAuth(masterIP []string, southboundDBPort, northboundDBPort str
 	klog.V(5).Infof("Update OVN node auth with new master ip: %s", masterIP)
 	OvnNorth.updateIP(masterIP, northboundDBPort)
 	OvnSouth.updateIP(masterIP, southboundDBPort)
+}
+
+// ovnKubeNodeModeSupported validates the provided mode is supported by ovnkube node
+func ovnKubeNodeModeSupported(mode string) error {
+	found := false
+	supportedModes := []string{types.NodeModeFull, types.NodeModeSmartNIC, types.NodeModeSmartNICHost}
+	for _, m := range supportedModes {
+		if mode == m {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("unexpected ovnkube-node-mode: %s. supported modes: %v", mode, supportedModes)
+	}
+	return nil
+}
+
+// buildOvnKubeNodeConfig updates OvnKubeNode config from cli and config file
+func buildOvnKubeNodeConfig(ctx *cli.Context, cli, file *config) error {
+	// Copy config file values over default values
+	if err := overrideFields(&OvnKubeNode, &file.OvnKubeNode, &savedOvnKubeNode); err != nil {
+		return err
+	}
+
+	// And CLI overrides over config file and default values
+	if err := overrideFields(&OvnKubeNode, &cli.OvnKubeNode, &savedOvnKubeNode); err != nil {
+		return err
+	}
+
+	// validate ovnkube-node-mode
+	if err := ovnKubeNodeModeSupported(OvnKubeNode.Mode); err != nil {
+		return err
+	}
+
+	// ovnkube-node-mode smart-nic/smart-nic-host does not support hybrid overlay
+	if OvnKubeNode.Mode != types.NodeModeFull && HybridOverlay.Enabled {
+		return fmt.Errorf("hybrid overlay is not supported with ovnkube-node mode %s", OvnKubeNode.Mode)
+	}
+	// when Smart-NIC are used, management port is backed by a VF. get management port VF information
+	if OvnKubeNode.Mode == types.NodeModeSmartNIC || OvnKubeNode.Mode == types.NodeModeSmartNICHost {
+		if OvnKubeNode.MgmtPortNetdev == "" {
+			return fmt.Errorf("ovnkube-node-mgmt-port-netdev must be provided")
+		}
+	} else {
+		if OvnKubeNode.MgmtPortNetdev != "" {
+			return fmt.Errorf("ovnkube-node-mgmt-port-netdev is not supported with ovnkube-node mode %s",
+				OvnKubeNode.Mode)
+		}
+	}
+	return nil
 }

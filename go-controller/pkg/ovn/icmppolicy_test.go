@@ -3,6 +3,7 @@ package ovn
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
@@ -10,6 +11,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli/v2"
 
@@ -17,14 +19,14 @@ import (
 	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
+	apimachinerytypes "k8s.io/apimachinery/pkg/types"
 )
 
 type icmpNetworkPolicy struct{}
 
 func newICMPNetworkPolicyMeta(name, namespace string) metav1.ObjectMeta {
 	return metav1.ObjectMeta{
-		UID:       types.UID(namespace),
+		UID:       apimachinerytypes.UID(namespace),
 		Name:      name,
 		Namespace: namespace,
 		Labels: map[string]string{
@@ -46,23 +48,11 @@ func newICMPNetworkPolicy(name, namespace string, podSelector metav1.LabelSelect
 
 func (n icmpNetworkPolicy) baseCmds(fexec *ovntest.FakeExec, icmpNetworkPolicy *icmpnetworkpolicyapi.ICMPNetworkPolicy) string {
 	readableGroupName := fmt.Sprintf("%s_icmp_%s", icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name)
-	hashedGroupName := hashedPortGroup(readableGroupName)
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find port_group name=%s", hashedGroupName),
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 create port_group name=%s external-ids:name=%s", hashedGroupName, readableGroupName),
-		Output: readableGroupName,
-	})
 	return readableGroupName
 }
 
 func (n icmpNetworkPolicy) addDefaultDenyPGCmds(fexec *ovntest.FakeExec, icmpnetworkPolicy *icmpnetworkpolicyapi.ICMPNetworkPolicy) {
 	pg_hash := hashedPortGroup(icmpnetworkPolicy.Namespace)
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find port_group name=" + pg_hash + "_" + ingressDenyPG,
-		Output: pg_hash + "_" + ingressDenyPG,
-	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"outport == @" + pg_hash + "_" + ingressDenyPG + "\" action=drop external-ids:default-deny-policy-type=Ingress",
 		Output: fakeUUID,
@@ -70,10 +60,6 @@ func (n icmpNetworkPolicy) addDefaultDenyPGCmds(fexec *ovntest.FakeExec, icmpnet
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"outport == @" + pg_hash + "_" + ingressDenyPG + " && arp\" action=allow external-ids:default-deny-policy-type=Ingress",
 		Output: fakeUUID,
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find port_group name=" + pg_hash + "_" + egressDenyPG,
-		Output: pg_hash + "_" + egressDenyPG,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"inport == @" + pg_hash + "_" + egressDenyPG + "\" action=drop external-ids:default-deny-policy-type=Egress",
@@ -86,45 +72,57 @@ func (n icmpNetworkPolicy) addDefaultDenyPGCmds(fexec *ovntest.FakeExec, icmpnet
 }
 
 func (n icmpNetworkPolicy) addLocalPodCmds(fexec *ovntest.FakeExec, icmpnetworkPolicy *icmpnetworkpolicyapi.ICMPNetworkPolicy) {
-	pg_hash := hashedPortGroup(icmpnetworkPolicy.Namespace)
 	n.addDefaultDenyPGCmds(fexec, icmpnetworkPolicy)
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 --if-exists remove port_group " + pg_hash + "_" + ingressDenyPG + " ports " + fakeUUID + " -- add port_group " + pg_hash + "_" + ingressDenyPG + " ports " + fakeUUID,
-	})
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 --if-exists remove port_group " + pg_hash + "_" + egressDenyPG + " ports " + fakeUUID + " -- add port_group " + pg_hash + "_" + egressDenyPG + " ports " + fakeUUID,
-	})
-	if icmpnetworkPolicy != nil {
-		readableGroupName := fmt.Sprintf("%s_icmp_%s", icmpnetworkPolicy.Namespace, icmpnetworkPolicy.Name)
+}
+
+func (n icmpNetworkPolicy) addNamespaceSelectorCmds(fexec *ovntest.FakeExec, icmpNetworkPolicy *icmpnetworkpolicyapi.ICMPNetworkPolicy, namespace string) {
+	as := []string{}
+	if namespace != "" {
+		as = append(as, namespace)
+	}
+
+	for i := range icmpNetworkPolicy.Spec.Ingress {
+		ingressAsMatch := asMatch(append(as, getAddressSetName(icmpNetworkPolicy.Namespace, "icmp_"+icmpNetworkPolicy.Name, knet.PolicyTypeIngress, i)))
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exists remove port_group " + readableGroupName + " ports " + fakeUUID + " -- add port_group " + readableGroupName + " ports " + fakeUUID,
+			fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Ingress_num=%v external-ids:policy_type=Ingress", icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name, i),
+			"ovn-nbctl --timeout=15 --id=@acl create acl priority=" + types.DefaultAllowPriority + " direction=" + types.DirectionToLPort + " match=\"ip4.src == {" + ingressAsMatch + "} && outport == @a13918434151227952593\" action=allow-related log=false severity=info meter=acl-logging name=" + icmpNetworkPolicy.Namespace + "_" + "icmp_" + icmpNetworkPolicy.Name + "_" + strconv.Itoa(i) + " external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=namespace1 external-ids:policy=icmp_networkpolicy1 external-ids:Ingress_num=0 external-ids:policy_type=Ingress -- add port_group " + fakePgUUID + " acls @acl",
+		})
+	}
+	for i := range icmpNetworkPolicy.Spec.Egress {
+		egressAsMatch := asMatch(append(as, getAddressSetName(icmpNetworkPolicy.Namespace, "icmp_"+icmpNetworkPolicy.Name, knet.PolicyTypeEgress, i)))
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Egress_num=%v external-ids:policy_type=Egress", icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name, i),
+			"ovn-nbctl --timeout=15 --id=@acl create acl priority=" + types.DefaultAllowPriority + " direction=" + types.DirectionToLPort + " match=\"ip4.dst == {" + egressAsMatch + "} && inport == @a13918434151227952593\" action=allow-related log=false severity=info meter=acl-logging name=" + icmpNetworkPolicy.Namespace + "_" + "icmp_" + icmpNetworkPolicy.Name + "_" + strconv.Itoa(i) + " external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=namespace1 external-ids:policy=icmp_networkpolicy1 external-ids:Egress_num=0 external-ids:policy_type=Egress -- add port_group " + fakePgUUID + " acls @acl",
 		})
 	}
 }
 
-func (n icmpNetworkPolicy) addNamespaceSelectorCmds(fexec *ovntest.FakeExec, icmpNetworkPolicy *icmpnetworkpolicyapi.ICMPNetworkPolicy, findAgain bool) {
-	readableGroupName := n.baseCmds(fexec, icmpNetworkPolicy)
+func (n icmpNetworkPolicy) addNamespaceSelectorCmdsExistingAcl(fexec *ovntest.FakeExec, icmpNetworkPolicy *icmpnetworkpolicyapi.ICMPNetworkPolicy, namespace string) {
 	for i := range icmpNetworkPolicy.Spec.Ingress {
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Ingress_num=%v external-ids:policy_type=Ingress", icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name, i),
-			"ovn-nbctl --timeout=15 --id=@acl create acl priority=1001 direction=to-lport match=\"ip4.src == {$a10424844185291987326} && outport == @a13918434151227952593\" action=allow-related log=false severity=info meter=acl-logging name=icmp_" + icmpNetworkPolicy.Name + " external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=namespace1 external-ids:policy=icmp_networkpolicy1 external-ids:Ingress_num=0 external-ids:policy_type=Ingress -- add port_group " + readableGroupName + " acls @acl",
+		ingressAsMatch := asMatch([]string{
+			namespace,
+			getAddressSetName(icmpNetworkPolicy.Namespace, "icmp_"+icmpNetworkPolicy.Name, knet.PolicyTypeIngress, i),
 		})
-		if findAgain {
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.src == {$a10424844185291987326} && outport == @a13918434151227952593\" external-ids:namespace=namespace1 external-ids:policy=icmp_networkpolicy1 external-ids:Ingress_num=0 external-ids:policy_type=Ingress",
-			})
-		}
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Ingress_num=%v external-ids:policy_type=Ingress", icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name, i),
+			Output: fakeUUID,
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovn-nbctl --timeout=15 set acl " + fakeUUID + " match=\"ip4.src == {" + ingressAsMatch + "} && outport == @a13918434151227952593\" priority=" + types.DefaultAllowPriority + " direction=" + types.DirectionToLPort + " action=allow-related log=false severity=info meter=acl-logging name=" + icmpNetworkPolicy.Namespace + "_" + "icmp_" + icmpNetworkPolicy.Name + "_" + strconv.Itoa(i),
+		})
 	}
 	for i := range icmpNetworkPolicy.Spec.Egress {
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Egress_num=%v external-ids:policy_type=Egress", icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name, i),
-			"ovn-nbctl --timeout=15 --id=@acl create acl priority=1001 direction=to-lport match=\"ip4.dst == {$a206675675430013742} && inport == @a13918434151227952593\" action=allow-related log=false severity=info meter=acl-logging name=icmp_" + icmpNetworkPolicy.Name + " external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=namespace1 external-ids:policy=icmp_networkpolicy1 external-ids:Egress_num=0 external-ids:policy_type=Egress -- add port_group " + readableGroupName + " acls @acl",
+		egressAsMatch := asMatch([]string{
+			namespace,
+			getAddressSetName(icmpNetworkPolicy.Namespace, "icmp_"+icmpNetworkPolicy.Name, knet.PolicyTypeEgress, i),
 		})
-		if findAgain {
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.dst == {$a206675675430013742} && inport == @a13918434151227952593\" external-ids:namespace=namespace1 external-ids:policy=icmp_networkpolicy1 external-ids:Egress_num=0 external-ids:policy_type=Egress",
-			})
-		}
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Egress_num=%v external-ids:policy_type=Egress", icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name, i),
+			Output: fakeUUID,
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovn-nbctl --timeout=15 set acl " + fakeUUID + " match=\"ip4.dst == {" + egressAsMatch + "} && inport == @a13918434151227952593\" priority=" + types.DefaultAllowPriority + " direction=" + types.DirectionToLPort + " action=allow-related log=false severity=info meter=acl-logging name=" + icmpNetworkPolicy.Namespace + "_" + "icmp_" + icmpNetworkPolicy.Name + "_" + strconv.Itoa(i),
+		})
 	}
 }
 
@@ -164,46 +162,6 @@ func exteventuallyExpectEmptyAddressSets(fakeOvn *FakeOVN, icmpnetworkPolicy *ic
 	}
 }
 
-func (n icmpNetworkPolicy) delCmds(fexec *ovntest.FakeExec, pod pod, icmpNetworkPolicy *icmpnetworkpolicyapi.ICMPNetworkPolicy, withLocal bool) {
-	pg_hash := hashedPortGroup(icmpNetworkPolicy.Namespace)
-	if withLocal {
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exists remove port_group " + pg_hash + "_" + ingressDenyPG + " ports " + fakeUUID,
-		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exists remove port_group " + pg_hash + "_" + egressDenyPG + " ports " + fakeUUID,
-		})
-	}
-	readableGroupName := fmt.Sprintf("%s_icmp_%s", icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name)
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find port_group name=a13918434151227952593",
-		Output: readableGroupName,
-	})
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		fmt.Sprintf("ovn-nbctl --timeout=15 --if-exists destroy port_group %s", readableGroupName),
-	})
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find port_group name=" + pg_hash + "_" + ingressDenyPG,
-	})
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find port_group name=" + pg_hash + "_" + egressDenyPG,
-	})
-}
-
-func (n icmpNetworkPolicy) delPodCmds(fexec *ovntest.FakeExec, icmpNetworkPolicy *icmpnetworkpolicyapi.ICMPNetworkPolicy) {
-	pg_hash := hashedPortGroup(icmpNetworkPolicy.Namespace)
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 --if-exists remove port_group " + pg_hash + "_" + ingressDenyPG + " ports " + fakeUUID,
-	})
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 --if-exists remove port_group " + pg_hash + "_" + egressDenyPG + " ports " + fakeUUID,
-	})
-	readableGroupName := fmt.Sprintf("%s_icmp_%s", icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name)
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 --if-exists remove port_group " + readableGroupName + " ports " + fakeUUID,
-	})
-}
-
 var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 	const (
 		namespaceName1 = "namespace1"
@@ -218,6 +176,7 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
 		config.PrepareTestConfig()
+		config.OVNKubernetesFeature.EnableICMPNetworkPolicy = true
 
 		app = cli.NewApp()
 		app.Name = "test"
@@ -225,275 +184,16 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 
 		fExec = ovntest.NewLooseCompareFakeExec()
 		fakeOvn = NewFakeOVN(fExec)
+		ovntest.ResetNumMockExecutions()
 	})
 
 	ginkgo.AfterEach(func() {
 		fakeOvn.shutdown()
 	})
 
-	ginkgo.Context("on startup", func() {
-
-		ginkgo.It("reconciles an existing ingress icmpNetworkPolicy with a namespace selector", func() {
-			app.Action = func(ctx *cli.Context) error {
-
-				npTest := icmpNetworkPolicy{}
-
-				namespace1 := *newNamespace(namespaceName1)
-				namespace2 := *newNamespace(namespaceName2)
-				icmpNetworkPolicy := newICMPNetworkPolicy("networkpolicy1", namespace1.Name,
-					metav1.LabelSelector{},
-					[]icmpnetworkpolicyapi.NetworkPolicyIngressRule{
-						{
-							From: []icmpnetworkpolicyapi.NetworkPolicyPeer{
-								{
-									NamespaceSelector: &metav1.LabelSelector{
-										MatchLabels: map[string]string{
-											"name": namespace2.Name,
-										},
-									},
-								},
-							},
-						},
-					},
-					[]icmpnetworkpolicyapi.NetworkPolicyEgressRule{
-						{
-							To: []icmpnetworkpolicyapi.NetworkPolicyPeer{
-								{
-									NamespaceSelector: &metav1.LabelSelector{
-										MatchLabels: map[string]string{
-											"name": namespace2.Name,
-										},
-									},
-								},
-							},
-						},
-					})
-
-				npTest.addNamespaceSelectorCmds(fExec, icmpNetworkPolicy, true)
-				npTest.addDefaultDenyPGCmds(fExec, icmpNetworkPolicy)
-
-				fakeOvn.start(ctx,
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
-							namespace1,
-							namespace2,
-						},
-					},
-					&icmpnetworkpolicyapi.ICMPNetworkPolicyList{
-						Items: []icmpnetworkpolicyapi.ICMPNetworkPolicy{
-							*icmpNetworkPolicy,
-						},
-					},
-				)
-
-				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchICMPNetworkPolicy()
-
-				fakeOvn.asf.ExpectEmptyAddressSet(namespaceName1)
-				fakeOvn.asf.ExpectEmptyAddressSet(namespaceName2)
-
-				exteventuallyExpectEmptyAddressSets(fakeOvn, icmpNetworkPolicy)
-
-				_, err := fakeOvn.fakeClient.ICMPNetworkPolicyClient.K8sV1alpha1().ICMPNetworkPolicies(icmpNetworkPolicy.Namespace).Get(context.TODO(), icmpNetworkPolicy.Name, metav1.GetOptions{})
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
-
-				return nil
-			}
-
-			err := app.Run([]string{app.Name})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		})
-
-		ginkgo.It("reconciles an existing gress icmpNetworkPolicy with a pod selector in its own namespace", func() {
-			app.Action = func(ctx *cli.Context) error {
-
-				npTest := icmpNetworkPolicy{}
-
-				namespace1 := *newNamespace(namespaceName1)
-
-				nPodTest := newTPod(
-					"node1",
-					"10.128.1.0/24",
-					"10.128.1.2",
-					"10.128.1.1",
-					"myPod",
-					"10.128.1.3",
-					"0a:58:0a:80:01:03",
-					namespace1.Name,
-				)
-				icmpNetworkPolicy := newICMPNetworkPolicy("networkpolicy1", namespace1.Name,
-					metav1.LabelSelector{},
-					[]icmpnetworkpolicyapi.NetworkPolicyIngressRule{
-						{
-							From: []icmpnetworkpolicyapi.NetworkPolicyPeer{
-								{
-									PodSelector: &metav1.LabelSelector{
-										MatchLabels: map[string]string{
-											"name": nPodTest.podName,
-										},
-									},
-								},
-							},
-						},
-					},
-					[]icmpnetworkpolicyapi.NetworkPolicyEgressRule{
-						{
-							To: []icmpnetworkpolicyapi.NetworkPolicyPeer{
-								{
-									PodSelector: &metav1.LabelSelector{
-										MatchLabels: map[string]string{
-											"name": nPodTest.podName,
-										},
-									},
-								},
-							},
-						},
-					})
-
-				nPodTest.baseCmds(fExec)
-				npTest.addNamespaceSelectorCmds(fExec, icmpNetworkPolicy, false)
-				npTest.addLocalPodCmds(fExec, icmpNetworkPolicy)
-
-				fakeOvn.start(ctx,
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
-							namespace1,
-						},
-					},
-					&v1.PodList{
-						Items: []v1.Pod{
-							*newPod(nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP),
-						},
-					},
-					&icmpnetworkpolicyapi.ICMPNetworkPolicyList{
-						Items: []icmpnetworkpolicyapi.ICMPNetworkPolicy{
-							*icmpNetworkPolicy,
-						},
-					},
-				)
-				nPodTest.populateLogicalSwitchCache(fakeOvn)
-				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
-				fakeOvn.controller.WatchICMPNetworkPolicy()
-
-				extexpectAddressSetsWithIP(fakeOvn, icmpNetworkPolicy, nPodTest.podIP)
-				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
-
-				_, err := fakeOvn.fakeClient.ICMPNetworkPolicyClient.K8sV1alpha1().ICMPNetworkPolicies(icmpNetworkPolicy.Namespace).Get(context.TODO(), icmpNetworkPolicy.Name, metav1.GetOptions{})
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
-
-				return nil
-			}
-
-			err := app.Run([]string{app.Name})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		})
-
-		ginkgo.It("reconciles an existing gress icmpNetworkPolicy with a pod and namespace selector in another namespace", func() {
-			app.Action = func(ctx *cli.Context) error {
-
-				npTest := icmpNetworkPolicy{}
-
-				namespace1 := *newNamespace(namespaceName1)
-				namespace2 := *newNamespace(namespaceName2)
-
-				nPodTest := newTPod(
-					"node2",
-					"10.128.1.0/24",
-					"10.128.1.2",
-					"10.128.1.1",
-					"myPod",
-					"10.128.1.3",
-					"0a:58:0a:80:01:03",
-					namespace2.Name,
-				)
-				icmpNetworkPolicy := newICMPNetworkPolicy("networkpolicy1", namespace1.Name,
-					metav1.LabelSelector{},
-					[]icmpnetworkpolicyapi.NetworkPolicyIngressRule{
-						{
-							From: []icmpnetworkpolicyapi.NetworkPolicyPeer{
-								{
-									PodSelector: &metav1.LabelSelector{
-										MatchLabels: map[string]string{
-											"name": nPodTest.podName,
-										},
-									},
-									NamespaceSelector: &metav1.LabelSelector{
-										MatchLabels: map[string]string{
-											"name": namespace2.Name,
-										},
-									},
-								},
-							},
-						},
-					},
-					[]icmpnetworkpolicyapi.NetworkPolicyEgressRule{
-						{
-							To: []icmpnetworkpolicyapi.NetworkPolicyPeer{
-								{
-									PodSelector: &metav1.LabelSelector{
-										MatchLabels: map[string]string{
-											"name": nPodTest.podName,
-										},
-									},
-									NamespaceSelector: &metav1.LabelSelector{
-										MatchLabels: map[string]string{
-											"name": namespace2.Name,
-										},
-									},
-								},
-							},
-						},
-					})
-
-				nPodTest.baseCmds(fExec)
-				npTest.addNamespaceSelectorCmds(fExec, icmpNetworkPolicy, false)
-				npTest.addDefaultDenyPGCmds(fExec, icmpNetworkPolicy)
-
-				fakeOvn.start(ctx,
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
-							namespace1,
-							namespace2,
-						},
-					},
-					&v1.PodList{
-						Items: []v1.Pod{
-							*newPod(nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP),
-						},
-					},
-					&icmpnetworkpolicyapi.ICMPNetworkPolicyList{
-						Items: []icmpnetworkpolicyapi.ICMPNetworkPolicy{
-							*icmpNetworkPolicy,
-						},
-					},
-				)
-				nPodTest.populateLogicalSwitchCache(fakeOvn)
-				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
-				fakeOvn.controller.WatchICMPNetworkPolicy()
-
-				fakeOvn.asf.ExpectEmptyAddressSet(namespaceName1)
-				extexpectAddressSetsWithIP(fakeOvn, icmpNetworkPolicy, nPodTest.podIP)
-				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName2, []string{nPodTest.podIP})
-
-				_, err := fakeOvn.fakeClient.ICMPNetworkPolicyClient.K8sV1alpha1().ICMPNetworkPolicies(icmpNetworkPolicy.Namespace).Get(context.TODO(), icmpNetworkPolicy.Name, metav1.GetOptions{})
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
-
-				return nil
-			}
-
-			err := app.Run([]string{app.Name})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		})
-	})
-
 	ginkgo.Context("during execution", func() {
 
-		ginkgo.It("correctly creates a icmpnetworkpolicy allowing a port to a local pod", func() {
+		ginkgo.It("correctly creates and deletes a icmpnetworkpolicy allowing a port to a local pod", func() {
 			app.Action = func(ctx *cli.Context) error {
 				npTest := icmpNetworkPolicy{}
 
@@ -514,6 +214,7 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 					labelName string = "pod-name"
 					labelVal  string = "server"
 					icmpType  int32  = 8
+					icmpType2 int32  = 3
 				)
 				nPod.Labels[labelName] = labelVal
 
@@ -538,16 +239,41 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 					}},
 				)
 
+				icmpNetworkPolicy2 := newICMPNetworkPolicy("networkpolicy2", namespace1.Name,
+					metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							labelName: labelVal,
+						},
+					},
+					[]icmpnetworkpolicyapi.NetworkPolicyIngressRule{{
+						Protocols: []icmpnetworkpolicyapi.NetworkPolicyProtocol{{
+							Type:     icmpType2,
+							Protocol: icmpProtocol,
+						}},
+					}},
+					[]icmpnetworkpolicyapi.NetworkPolicyEgressRule{{
+						Protocols: []icmpnetworkpolicyapi.NetworkPolicyProtocol{{
+							Type:     icmpType2,
+							Protocol: icmpProtocol,
+						}},
+					}},
+				)
+
 				nPodTest.baseCmds(fExec)
 				npTest.baseCmds(fExec, icmpNetworkPolicy)
 				npTest.addLocalPodCmds(fExec, icmpNetworkPolicy)
 
-				readableGroupName := fmt.Sprintf("%s_icmp_%s", icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name)
+				//readableGroupName := fmt.Sprintf("%s_icmp_%s", icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Ingress_num=0 external-ids:policy_type=Ingress", icmpType, icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name),
-					fmt.Sprintf("ovn-nbctl --timeout=15 --id=@acl create acl priority=1001 direction=to-lport match=\"ip4 && icmp4 && icmp4.type == %d && outport == @a13918434151227952593\" action=allow-related log=false severity=info meter=acl-logging name=icmp_%s external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Ingress_num=0 external-ids:policy_type=Ingress -- add port_group %s acls @acl", icmpType, icmpNetworkPolicy.Name, icmpType, icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name, readableGroupName),
+					fmt.Sprintf("ovn-nbctl --timeout=15 --id=@acl create acl priority="+types.DefaultAllowPriority+" direction="+types.DirectionToLPort+" match=\"ip4 && icmp4 && icmp4.type == %d && outport == @a13918434151227952593\" action=allow-related log=false severity=info meter=acl-logging name=%s_%s_0 external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Ingress_num=0 external-ids:policy_type=Ingress -- add port_group %s acls @acl", icmpType, icmpNetworkPolicy.Namespace, "icmp_"+icmpNetworkPolicy.Name, icmpType, icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name, fakePgUUID),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Egress_num=0 external-ids:policy_type=Egress", icmpType, icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name),
-					fmt.Sprintf("ovn-nbctl --timeout=15 --id=@acl create acl priority=1001 direction=to-lport match=\"ip4 && icmp4 && icmp4.type == %d && inport == @a13918434151227952593\" action=allow-related log=false severity=info meter=acl-logging name=icmp_%s external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Egress_num=0 external-ids:policy_type=Egress -- add port_group %s acls @acl", icmpType, icmpNetworkPolicy.Name, icmpType, icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name, readableGroupName),
+					fmt.Sprintf("ovn-nbctl --timeout=15 --id=@acl create acl priority="+types.DefaultAllowPriority+" direction="+types.DirectionToLPort+" match=\"ip4 && icmp4 && icmp4.type == %d && inport == @a13918434151227952593\" action=allow-related log=false severity=info meter=acl-logging name=%s_%s_0 external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Egress_num=0 external-ids:policy_type=Egress -- add port_group %s acls @acl", icmpType, icmpNetworkPolicy.Namespace, "icmp_"+icmpNetworkPolicy.Name, icmpType, icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name, fakePgUUID),
+
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Ingress_num=0 external-ids:policy_type=Ingress", icmpType2, icmpNetworkPolicy2.Namespace, icmpNetworkPolicy2.Name),
+					fmt.Sprintf("ovn-nbctl --timeout=15 --id=@acl create acl priority="+types.DefaultAllowPriority+" direction="+types.DirectionToLPort+" match=\"ip4 && icmp4 && icmp4.type == %d && outport == @a13918430852693067960\" action=allow-related log=false severity=info meter=acl-logging name=%s_%s_0 external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Ingress_num=0 external-ids:policy_type=Ingress -- add port_group %s acls @acl", icmpType2, icmpNetworkPolicy2.Namespace, "icmp_"+icmpNetworkPolicy2.Name, icmpType2, icmpNetworkPolicy2.Namespace, icmpNetworkPolicy2.Name, fakePgUUID),
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Egress_num=0 external-ids:policy_type=Egress", icmpType2, icmpNetworkPolicy2.Namespace, icmpNetworkPolicy2.Name),
+					fmt.Sprintf("ovn-nbctl --timeout=15 --id=@acl create acl priority="+types.DefaultAllowPriority+" direction="+types.DirectionToLPort+" match=\"ip4 && icmp4 && icmp4.type == %d && inport == @a13918430852693067960\" action=allow-related log=false severity=info meter=acl-logging name=%s_%s_0 external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Egress_num=0 external-ids:policy_type=Egress -- add port_group %s acls @acl", icmpType2, icmpNetworkPolicy2.Namespace, "icmp_"+icmpNetworkPolicy2.Name, icmpType2, icmpNetworkPolicy2.Namespace, icmpNetworkPolicy2.Name, fakePgUUID),
 				})
 
 				fakeOvn.start(ctx,
@@ -570,8 +296,59 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 
 				_, err := fakeOvn.fakeClient.ICMPNetworkPolicyClient.K8sV1alpha1().ICMPNetworkPolicies(icmpNetworkPolicy.Namespace).Get(context.TODO(), icmpNetworkPolicy.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+				// gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
+
+				// assert that pod is in the default-deny portgroup
+
+				// this helper function returns a function, because it's called behind
+				// an
+				getPGPorts := func(name string) func() ([]string, error) {
+					return func() ([]string, error) {
+						pg, err := fakeOvn.ovnNBClient.PortGroupGet(name)
+						if err != nil {
+							return nil, err
+						}
+						return pg.Ports, nil
+					}
+				}
+
+				pgDefaultDenyName := defaultDenyPortGroup(namespace1.Name, "ingressDefaultDeny")
+				gomega.Eventually(getPGPorts(pgDefaultDenyName)).Should(gomega.ConsistOf(fakeUUID))
+
+				// assert that pod is in the NP's portgroup
+				np1PG := hashedPortGroup(fmt.Sprintf("%s_icmp_%s", icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name))
+				gomega.Eventually(getPGPorts(np1PG)).Should(gomega.ConsistOf(fakeUUID))
+				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
+
+				// Create a second NP
+				ginkgo.By("Creating and deleting another policy that references that pod")
+
+				_, err = fakeOvn.fakeClient.ICMPNetworkPolicyClient.K8sV1alpha1().ICMPNetworkPolicies(icmpNetworkPolicy.Namespace).Create(context.TODO(), icmpNetworkPolicy2, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// Check that portgroups look sane
+				np2PG := hashedPortGroup(fmt.Sprintf("%s_icmp_%s", icmpNetworkPolicy2.Namespace, icmpNetworkPolicy2.Name))
+				gomega.Eventually(getPGPorts(pgDefaultDenyName)).Should(gomega.ConsistOf(fakeUUID))
+				gomega.Eventually(getPGPorts(np2PG)).Should(gomega.ConsistOf(fakeUUID))
+
+				// Delete the second network policy
+				err = fakeOvn.fakeClient.ICMPNetworkPolicyClient.K8sV1alpha1().ICMPNetworkPolicies(icmpNetworkPolicy2.Namespace).Delete(context.TODO(), icmpNetworkPolicy2.Name, metav1.DeleteOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// Ensure the pod still has default deny
+				gomega.Eventually(getPGPorts(pgDefaultDenyName)).Should(gomega.ConsistOf(fakeUUID))
+
+				// Delete the first network policy
+				ginkgo.By("Deleting that ICMPNetwork policy")
+				err = fakeOvn.fakeClient.ICMPNetworkPolicyClient.K8sV1alpha1().ICMPNetworkPolicies(icmpNetworkPolicy.Namespace).Delete(context.TODO(), icmpNetworkPolicy.Name, metav1.DeleteOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// Check that the default-deny portgroup is now deleted
+				gomega.Eventually(func() error { _, err := getPGPorts(pgDefaultDenyName)(); return err }).Should(gomega.MatchError("object not found"))
+
+				// fake exec checkup
+				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 
 				return nil
 			}
@@ -629,7 +406,7 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				npTest.addNamespaceSelectorCmds(fExec, icmpNetworkPolicy, true)
+				npTest.addNamespaceSelectorCmds(fExec, icmpNetworkPolicy, namespace2.Name)
 				npTest.addLocalPodCmds(fExec, icmpNetworkPolicy)
 
 				fakeOvn.start(ctx,
@@ -661,16 +438,7 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
 
-				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.src == {$a10424844185291987326, $a4615334824109672969} && outport == @a13918434151227952593\" external-ids:namespace=namespace1 external-ids:policy=icmp_networkpolicy1 external-ids:Ingress_num=0 external-ids:policy_type=Ingress",
-					Output: fakeUUID,
-				})
-				fExec.AddFakeCmdsNoOutputNoError([]string{
-					"ovn-nbctl --timeout=15 set acl " + fakeUUID + " match=\"ip4.src == {$a10424844185291987326} && outport == @a13918434151227952593\"",
-				})
-				fExec.AddFakeCmdsNoOutputNoError([]string{
-					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.dst == {$a206675675430013742, $a4615334824109672969} && inport == @a13918434151227952593\" external-ids:namespace=namespace1 external-ids:policy=icmp_networkpolicy1 external-ids:Egress_num=0 external-ids:policy_type=Egress",
-				})
+				npTest.addNamespaceSelectorCmds(fExec, icmpNetworkPolicy, "")
 
 				err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Delete(context.TODO(), namespace2.Name, *metav1.NewDeleteOptions(0))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -720,7 +488,7 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 						},
 					})
 
-				npTest.addNamespaceSelectorCmds(fExec, icmpNetworkPolicy, true)
+				npTest.addNamespaceSelectorCmds(fExec, icmpNetworkPolicy, namespace2.Name)
 				npTest.addDefaultDenyPGCmds(fExec, icmpNetworkPolicy)
 
 				fakeOvn.start(ctx,
@@ -744,16 +512,7 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 
-				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.src == {$a10424844185291987326, $a4615334824109672969} && outport == @a13918434151227952593\" external-ids:namespace=namespace1 external-ids:policy=icmp_networkpolicy1 external-ids:Ingress_num=0 external-ids:policy_type=Ingress",
-					Output: fakeUUID,
-				})
-				fExec.AddFakeCmdsNoOutputNoError([]string{
-					"ovn-nbctl --timeout=15 set acl " + fakeUUID + " match=\"ip4.src == {$a10424844185291987326} && outport == @a13918434151227952593\"",
-				})
-				fExec.AddFakeCmdsNoOutputNoError([]string{
-					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.dst == {$a206675675430013742, $a4615334824109672969} && inport == @a13918434151227952593\" external-ids:namespace=namespace1 external-ids:policy=icmp_networkpolicy1 external-ids:Egress_num=0 external-ids:policy_type=Egress",
-				})
+				npTest.addNamespaceSelectorCmds(fExec, icmpNetworkPolicy, "")
 
 				err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Delete(context.TODO(), namespace2.Name, *metav1.NewDeleteOptions(0))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -812,7 +571,7 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				npTest.addNamespaceSelectorCmds(fExec, icmpNetworkPolicy, false)
+				npTest.addNamespaceSelectorCmds(fExec, icmpNetworkPolicy, "")
 				npTest.addLocalPodCmds(fExec, icmpNetworkPolicy)
 
 				fakeOvn.start(ctx,
@@ -844,8 +603,6 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 				_, err := fakeOvn.fakeClient.ICMPNetworkPolicyClient.K8sV1alpha1().ICMPNetworkPolicies(icmpNetworkPolicy.Namespace).Get(context.TODO(), icmpNetworkPolicy.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
-
-				npTest.delPodCmds(fExec, icmpNetworkPolicy)
 
 				err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(nPodTest.namespace).Delete(context.TODO(), nPodTest.podName, *metav1.NewDeleteOptions(0))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -918,7 +675,7 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				npTest.addNamespaceSelectorCmds(fExec, icmpNetworkPolicy, false)
+				npTest.addNamespaceSelectorCmds(fExec, icmpNetworkPolicy, "")
 				npTest.addDefaultDenyPGCmds(fExec, icmpNetworkPolicy)
 
 				fakeOvn.start(ctx,
@@ -1026,7 +783,7 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				npTest.addNamespaceSelectorCmds(fExec, icmpNetworkPolicy, false)
+				npTest.addNamespaceSelectorCmds(fExec, icmpNetworkPolicy, "")
 				npTest.addDefaultDenyPGCmds(fExec, icmpNetworkPolicy)
 
 				fakeOvn.start(ctx,
@@ -1124,7 +881,7 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				npTest.addNamespaceSelectorCmds(fExec, icmpNetworkPolicy, false)
+				npTest.addNamespaceSelectorCmds(fExec, icmpNetworkPolicy, "")
 				npTest.addLocalPodCmds(fExec, icmpNetworkPolicy)
 
 				fakeOvn.start(ctx,
@@ -1154,8 +911,6 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
-
-				npTest.delCmds(fExec, nPodTest, icmpNetworkPolicy, true)
 
 				err = fakeOvn.fakeClient.ICMPNetworkPolicyClient.K8sV1alpha1().ICMPNetworkPolicies(icmpNetworkPolicy.Namespace).Delete(context.TODO(), icmpNetworkPolicy.Name, *metav1.NewDeleteOptions(0))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1198,7 +953,7 @@ var _ = ginkgo.Describe("OVN ICMPNetworkPolicy Low-Level Operations", func() {
 
 		policy := &icmpnetworkpolicyapi.ICMPNetworkPolicy{
 			ObjectMeta: metav1.ObjectMeta{
-				UID:       types.UID("testing"),
+				UID:       apimachinerytypes.UID("testing"),
 				Name:      "policy",
 				Namespace: "testing",
 			},
@@ -1218,70 +973,80 @@ var _ = ginkgo.Describe("OVN ICMPNetworkPolicy Low-Level Operations", func() {
 		six := fmt.Sprintf("testing.policy.ingress.6")
 
 		cur := addExpectedGressCmds(fExec, gp, pgName, []string{asName}, []string{asName, one})
-		gp.addNamespaceAddressSet(one, pgName)
+		gomega.Expect(gp.addNamespaceAddressSet(one)).To(gomega.BeTrue())
+		gp.localPodSetACL(pgName, pgUUID, defaultACLLoggingSeverity)
 		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, one, two})
-		gp.addNamespaceAddressSet(two, pgName)
+		gomega.Expect(gp.addNamespaceAddressSet(two)).To(gomega.BeTrue())
+		gp.localPodSetACL(pgName, pgUUID, defaultACLLoggingSeverity)
 		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 		// address sets should be alphabetized
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, one, two, three})
-		gp.addNamespaceAddressSet(three, pgName)
+		gomega.Expect(gp.addNamespaceAddressSet(three)).To(gomega.BeTrue())
+		gp.localPodSetACL(pgName, pgUUID, defaultACLLoggingSeverity)
 		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 		// re-adding an existing set is a no-op
-		gp.addNamespaceAddressSet(one, pgName)
-		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
+		gp.addNamespaceAddressSet(one)
+		gomega.Expect(gp.addNamespaceAddressSet(three)).To(gomega.BeFalse())
 
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, one, two, three, four})
-		gp.addNamespaceAddressSet(four, pgName)
+		gomega.Expect(gp.addNamespaceAddressSet(four)).To(gomega.BeTrue())
+		gp.localPodSetACL(pgName, pgUUID, defaultACLLoggingSeverity)
 		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 		// now delete a set
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, two, three, four})
-		gp.delNamespaceAddressSet(one, pgName)
+		gomega.Expect(gp.delNamespaceAddressSet(one)).To(gomega.BeTrue())
+		gp.localPodSetACL(pgName, pgUUID, defaultACLLoggingSeverity)
 		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 		// deleting again is a no-op
-		gp.delNamespaceAddressSet(one, pgName)
+		gp.delNamespaceAddressSet(one)
 		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 		// add and delete some more...
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, two, three, four, five})
-		gp.addNamespaceAddressSet(five, pgName)
+		gomega.Expect(gp.addNamespaceAddressSet(five)).To(gomega.BeTrue())
+		gp.localPodSetACL(pgName, pgUUID, defaultACLLoggingSeverity)
 		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, two, four, five})
-		gp.delNamespaceAddressSet(three, pgName)
+		gomega.Expect(gp.delNamespaceAddressSet(three)).To(gomega.BeTrue())
+		gp.localPodSetACL(pgName, pgUUID, defaultACLLoggingSeverity)
 		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 		// deleting again is no-op
-		gp.delNamespaceAddressSet(one, pgName)
-		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
+		gomega.Expect(gp.delNamespaceAddressSet(one)).To(gomega.BeFalse())
 
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, two, four, five, six})
-		gp.addNamespaceAddressSet(six, pgName)
+		gomega.Expect(gp.addNamespaceAddressSet(six)).To(gomega.BeTrue())
+		gp.localPodSetACL(pgName, pgUUID, defaultACLLoggingSeverity)
 		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, four, five, six})
-		gp.delNamespaceAddressSet(two, pgName)
+		gomega.Expect(gp.delNamespaceAddressSet(two)).To(gomega.BeTrue())
+		gp.localPodSetACL(pgName, pgUUID, defaultACLLoggingSeverity)
 		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, four, six})
-		gp.delNamespaceAddressSet(five, pgName)
+		gomega.Expect(gp.delNamespaceAddressSet(five)).To(gomega.BeTrue())
+		gp.localPodSetACL(pgName, pgUUID, defaultACLLoggingSeverity)
 		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, four})
-		gp.delNamespaceAddressSet(six, pgName)
+		gomega.Expect(gp.delNamespaceAddressSet(six)).To(gomega.BeTrue())
+		gp.localPodSetACL(pgName, pgUUID, defaultACLLoggingSeverity)
 		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName})
-		gp.delNamespaceAddressSet(four, pgName)
+		gomega.Expect(gp.delNamespaceAddressSet(four)).To(gomega.BeTrue())
+		gp.localPodSetACL(pgName, pgUUID, defaultACLLoggingSeverity)
 		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 		// deleting again is no-op
-		gp.delNamespaceAddressSet(four, pgName)
-		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
+		gomega.Expect(gp.delNamespaceAddressSet(four)).To(gomega.BeFalse())
 	})
 })

@@ -1,12 +1,12 @@
 ---
-# ovnkube-node
+# {{ ovnkube_app_name }}
 # daemonset version 3
 # starts node daemons for ovs and ovn, each in a separate container
 # it is run on all nodes
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
-  name: ovnkube-node
+  name: {{ ovnkube_app_name }}
   # namespace set up by install
   namespace: ovn-kubernetes
   annotations:
@@ -15,7 +15,7 @@ metadata:
 spec:
   selector:
     matchLabels:
-      app: ovnkube-node
+      app: {{ ovnkube_app_name }}
   updateStrategy:
     type: RollingUpdate
     rollingUpdate:
@@ -23,8 +23,8 @@ spec:
   template:
     metadata:
       labels:
-        app: ovnkube-node
-        name: ovnkube-node
+        app: {{ ovnkube_app_name }}
+        name: {{ ovnkube_app_name }}
         component: network
         type: infra
         kubernetes.io/os: "linux"
@@ -37,10 +37,8 @@ spec:
       # as all pods.
       serviceAccountName: ovn
       hostNetwork: true
-      {% if ovn_unprivileged_mode=="no" -%}
-      hostPID: true
-      {% endif %}
       priorityClassName: "system-node-critical"
+      {{ "hostPID: true" if ovn_unprivileged_mode=="no" }}
       containers:
         - name: ovnkube-node
           image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
@@ -60,6 +58,7 @@ spec:
 
           terminationMessagePolicy: FallbackToLogsOnError
           volumeMounts:
+            # Common mounts
             # for the iptables wrapper
             - mountPath: /host
               name: host-slash
@@ -69,18 +68,7 @@ spec:
               readOnly: true
             - mountPath: /var/log/ovn-kubernetes/
               name: host-var-log-ovnkube
-            - mountPath: /var/run/openvswitch/
-              name: host-var-run-ovs
-            - mountPath: /var/run/ovn/
-              name: host-var-run-ovs
-            # for ovn-db metrics
-            - mountPath: /etc/openvswitch/
-              name: host-var-lib-ovs
-              readOnly: true
-            - mountPath: /etc/ovn/
-              name: host-var-lib-ovs
-              readOnly: true
-            # We mount our socket here
+              # We mount our socket here
             - mountPath: /var/run/ovn-kubernetes
               name: host-var-run-ovn-kubernetes
             # CNI related mounts which we take over
@@ -88,16 +76,32 @@ spec:
               name: host-opt-cni-bin
             - mountPath: /etc/cni/net.d
               name: host-etc-cni-netd
-            - mountPath: /ovn-cert
-              name: ovn-pki
-              readOnly: true
-            - mountPath: /var/log/openvswitch/
-              name: host-var-log-ovs
             {% if kind is defined and kind -%}
             - mountPath: /var/run/netns
               name: host-netns
               mountPropagation: Bidirectional
             {% endif %}
+            {%- if ovnkube_app_name=="ovnkube-node" %}
+            # ovnkube-node only mounts (non smart-nic related)
+            - mountPath: /var/run/openvswitch/
+              name: host-var-run-ovs
+            - mountPath: /var/run/ovn/
+              name: host-var-run-ovs
+            - mountPath: /ovn-cert
+              name: ovn-pki
+              readOnly: true
+            # for ovn-db metrics
+            - mountPath: /etc/openvswitch/
+              name: host-var-lib-ovs
+              readOnly: true
+            - mountPath: /etc/ovn/
+              name: host-var-lib-ovs
+              readOnly: true
+            {%- elif ovnkube_app_name=="ovnkube-node-smart-nic-host" %}
+            # ovnkube-node smart-nic-host mounts
+            - mountPath: /var/run/ovn
+              name: var-run-ovn
+            {%- endif %}
 
           resources:
             requests:
@@ -158,18 +162,45 @@ spec:
               value: "{{ ovn_egress_ip_enable }}"
             - name: OVN_DISABLE_SNAT_MULTIPLE_GWS
               value: "{{ ovn_disable_snat_multiple_gws }}"
-            - name: OVN_SSL_ENABLE
-              value: "{{ ovn_ssl_en }}"
+            - name: OVN_DISABLE_PKT_MTU_CHECK
+              value: "{{ ovn_disable_pkt_mtu_check }}"
+            - name: OVN_NETFLOW_TARGETS
+              value: "{{ ovn_netflow_targets }}"
+            - name: OVN_SFLOW_TARGETS
+              value: "{{ ovn_sflow_targets }}"
+            - name: OVN_IPFIX_TARGETS
+              value: "{{ ovn_ipfix_targets }}"
+            - name: OVN_V4_JOIN_SUBNET
+              value: "{{ ovn_v4_join_subnet }}"
+            - name: OVN_V6_JOIN_SUBNET
+              value: "{{ ovn_v6_join_subnet }}"
             - name: OVN_REMOTE_PROBE_INTERVAL
               value: "{{ ovn_remote_probe_interval }}"
             - name: OVN_MULTICAST_ENABLE
               value: "{{ ovn_multicast_enable }}"
             - name: OVN_UNPRIVILEGED_MODE
               value: "{{ ovn_unprivileged_mode | default('yes') }}"
+            - name: OVN_EX_GW_NETWORK_INTERFACE
+              value: "{{ ovn_ex_gw_networking_interface }}"
+            {% if ovnkube_app_name=="ovnkube-node" -%}
             - name: OVN_NB_CERT_CNAME
               value: "{{ ovn_nb_cert_cname }}"
             - name: OVN_SB_CERT_CNAME
               value: "{{ ovn_sb_cert_cname }}"
+            - name: OVN_SSL_ENABLE
+              value: "{{ ovn_ssl_en }}"
+            {% endif -%}
+            {% if ovnkube_app_name=="ovnkube-node-smart-nic-host" -%}
+            - name: OVNKUBE_NODE_MODE
+              value: "smart-nic-host"
+            - name: OVNKUBE_NODE_MGMT_PORT_NETDEV
+              value: "{{ ovnkube_node_mgmt_port_netdev }}"
+            {% endif -%}
+            - name: OVN_HOST_NETWORK_NAMESPACE
+              valueFrom:
+                configMapKeyRef:
+                  name: ovn-config
+                  key: host_network_namespace
 
           readinessProbe:
             exec:
@@ -204,24 +235,29 @@ spec:
               memory: 20Mi
         # end of container
 
+      {% if ovnkube_app_name=="ovnkube-node-smart-nic-host" -%}
       nodeSelector:
         kubernetes.io/os: "linux"
+        k8s.ovn.org/smart-nic: ""
+      {% else -%}
+      nodeSelector:
+        kubernetes.io/os: "linux"
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: k8s.ovn.org/smart-nic
+                operator: DoesNotExist
+      {% endif -%}
       volumes:
+        # Common volumes
         - name: host-var-run-dbus
           hostPath:
             path: /var/run/dbus
-        - name: host-var-log-ovs
-          hostPath:
-            path: /var/log/openvswitch
         - name: host-var-log-ovnkube
           hostPath:
             path: /var/log/ovn-kubernetes
-        - name: host-var-run-ovs
-          hostPath:
-            path: /var/run/openvswitch
-        - name: host-var-lib-ovs
-          hostPath:
-            path: /var/lib/openvswitch
         - name: host-var-run-ovn-kubernetes
           hostPath:
             path: /var/run/ovn-kubernetes
@@ -231,10 +267,6 @@ spec:
         - name: host-etc-cni-netd
           hostPath:
             path: /etc/cni/net.d
-        - name: ovn-pki
-          hostPath:
-            path: /etc/ovn
-            type: DirectoryOrCreate
         - name: host-slash
           hostPath:
             path: /
@@ -243,6 +275,22 @@ spec:
           hostPath:
             path: /var/run/netns
         {% endif %}
+        {%- if ovnkube_app_name=="ovnkube-node" %}
+        # non Smart-NIC related volumes
+        - name: host-var-run-ovs
+          hostPath:
+            path: /var/run/openvswitch
+        - name: host-var-lib-ovs
+          hostPath:
+            path: /var/lib/openvswitch
+        - name: ovn-pki
+          hostPath:
+            path: /etc/ovn
+            type: DirectoryOrCreate
+        {%- elif ovnkube_app_name=="ovnkube-node-smart-nic-host" %}
+        - name: var-run-ovn
+          emptyDir: {}
+        {%- endif %}
 
       tolerations:
         - operator: "Exists"

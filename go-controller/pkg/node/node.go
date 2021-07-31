@@ -11,28 +11,35 @@ import (
 	"sync"
 	"time"
 
+	kapi "k8s.io/api/core/v1"
+	discovery "k8s.io/api/discovery/v1beta1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/informers"
+	clientset "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/util/retry"
+	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
+
 	honode "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/upgrade"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
-	kapi "k8s.io/api/core/v1"
-	discovery "k8s.io/api/discovery/v1beta1"
-	"k8s.io/apimachinery/pkg/util/wait"
-	clientset "k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/tools/record"
-	"k8s.io/klog/v2"
 )
 
 // OvnNode is the object holder for utilities meant for node management
 type OvnNode struct {
-	client       clientset.Interface
 	name         string
+	client       clientset.Interface
 	Kube         kube.Interface
 	watchFactory factory.NodeWatchFactory
 	stopChan     chan struct{}
@@ -43,8 +50,8 @@ type OvnNode struct {
 // NewNode creates a new controller for node management
 func NewNode(kubeClient clientset.Interface, wf factory.NodeWatchFactory, name string, stopChan chan struct{}, eventRecorder record.EventRecorder) *OvnNode {
 	return &OvnNode{
-		client:       kubeClient,
 		name:         name,
+		client:       kubeClient,
 		Kube:         &kube.Kube{KClient: kubeClient},
 		watchFactory: wf,
 		stopChan:     stopChan,
@@ -67,7 +74,8 @@ func setupOVNNode(node *kapi.Node) error {
 		}
 	}
 
-	_, stderr, err := util.RunOVSVsctl("set",
+	setExternalIdsCmd := []string{
+		"set",
 		"Open_vSwitch",
 		".",
 		fmt.Sprintf("external_ids:ovn-encap-type=%s", config.Default.EncapType),
@@ -78,8 +86,22 @@ func setupOVNNode(node *kapi.Node) error {
 			config.Default.OpenFlowProbe),
 		fmt.Sprintf("external_ids:hostname=\"%s\"", node.Name),
 		"external_ids:ovn-monitor-all=true",
-		"external_ids:ovn-enable-lflow-cache=false",
-	)
+		fmt.Sprintf("external_ids:ovn-enable-lflow-cache=%t", config.Default.LFlowCacheEnable),
+	}
+
+	if config.Default.LFlowCacheLimit > 0 {
+		setExternalIdsCmd = append(setExternalIdsCmd,
+			fmt.Sprintf("external_ids:ovn-limit-lflow-cache=%d", config.Default.LFlowCacheLimit),
+		)
+	}
+
+	if config.Default.LFlowCacheLimitKb > 0 {
+		setExternalIdsCmd = append(setExternalIdsCmd,
+			fmt.Sprintf("external_ids:ovn-limit-lflow-cache-kb=%d", config.Default.LFlowCacheLimitKb),
+		)
+	}
+
+	_, stderr, err := util.RunOVSVsctl(setExternalIdsCmd...)
 	if err != nil {
 		return fmt.Errorf("error setting OVS external IDs: %v\n  %q", err, stderr)
 	}
@@ -102,6 +124,69 @@ func setupOVNNode(node *kapi.Node) error {
 		)
 		if errSet != nil {
 			return fmt.Errorf("error setting OVS encap-port: %v\n  %q", errSet, stderr)
+		}
+	}
+	if config.Monitoring.NetFlowTargets != nil {
+		collectors := ""
+		for _, v := range config.Monitoring.NetFlowTargets {
+			collectors += "\"" + util.JoinHostPortInt32(v.Host.String(), v.Port) + "\"" + ","
+		}
+		collectors = strings.TrimSuffix(collectors, ",")
+
+		_, stderr, err := util.RunOVSVsctl(
+			"--",
+			"--id=@netflow",
+			"create",
+			"netflow",
+			fmt.Sprintf("targets=[%s]", collectors),
+			"active_timeout=60",
+			"--",
+			"set", "bridge", "br-int", "netflow=@netflow",
+		)
+		if err != nil {
+			return fmt.Errorf("error setting NetFlow: %v\n  %q", err, stderr)
+		}
+	}
+	if config.Monitoring.SFlowTargets != nil {
+		collectors := ""
+		for _, v := range config.Monitoring.SFlowTargets {
+			collectors += "\"" + util.JoinHostPortInt32(v.Host.String(), v.Port) + "\"" + ","
+		}
+		collectors = strings.TrimSuffix(collectors, ",")
+
+		_, stderr, err := util.RunOVSVsctl(
+			"--",
+			"--id=@sflow",
+			"create",
+			"sflow",
+			"agent="+types.SFlowAgent,
+			fmt.Sprintf("targets=[%s]", collectors),
+			"--",
+			"set", "bridge", "br-int", "sflow=@sflow",
+		)
+		if err != nil {
+			return fmt.Errorf("error setting SFlow: %v\n  %q", err, stderr)
+		}
+	}
+	if config.Monitoring.IPFIXTargets != nil {
+		collectors := ""
+		for _, v := range config.Monitoring.IPFIXTargets {
+			collectors += "\"" + util.JoinHostPortInt32(v.Host.String(), v.Port) + "\"" + ","
+		}
+		collectors = strings.TrimSuffix(collectors, ",")
+
+		_, stderr, err := util.RunOVSVsctl(
+			"--",
+			"--id=@ipfix",
+			"create",
+			"ipfix",
+			fmt.Sprintf("targets=[%s]", collectors),
+			"cache_active_timeout=60",
+			"--",
+			"set", "bridge", "br-int", "ipfix=@ipfix",
+		)
+		if err != nil {
+			return fmt.Errorf("error setting IPFIX: %v\n  %q", err, stderr)
 		}
 	}
 	return nil
@@ -160,12 +245,50 @@ func isOVNControllerReady(name string) (bool, error) {
 	return true, nil
 }
 
+// Starting with v21.03.0 OVN sets OVS.Interface.external-id:ovn-installed
+// and OVNSB.Port_Binding.up when all OVS flows associated to a
+// logical port have been successfully programmed.
+func getOVNIfUpCheckMode() (bool, error) {
+	if _, stderr, err := util.RunOVNSbctl("--columns=up", "list", "Port_Binding"); err != nil {
+		if strings.Contains(stderr, "does not contain a column") {
+			klog.Infof("Falling back to using legacy CNI OVS flow readiness checks")
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to check if port_binding is supported in OVN, stderr: %q, error: %v",
+			stderr, err)
+	}
+	klog.Infof("Detected support for port binding with external IDs")
+	return true, nil
+}
+
 // Start learns the subnets assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
 func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	var err error
 	var node *kapi.Node
 	var subnets []*net.IPNet
+	var mgmtPort ManagementPort
+	var mgmtPortConfig *managementPortConfig
+	var cniServer *cni.Server
+	var isOvnUpEnabled bool
+	networkUnavailableTaint := &kapi.Taint{
+		Key:    types.OvnK8sNetworkUnavailable,
+		Effect: kapi.TaintEffectNoSchedule,
+	}
+
+	klog.Infof("OVN Kube Node initialization, Mode: %s", config.OvnKubeNode.Mode)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-n.stopChan
+		klog.Infof("Received node's stop channel signal. Adding taint %s.", networkUnavailableTaint.ToString())
+		// Add the NoSchedule Taint on the node, before ovnkube pod gets deleted. Ignore errors.
+		err := n.Kube.SetTaintOnNode(n.name, networkUnavailableTaint)
+		if err != nil {
+			klog.Infof("Unable to add taint %s on node %s: %v", networkUnavailableTaint.ToString(), n.name, err)
+		}
+	}()
 
 	// Setting debug log level during node bring up to expose bring up process.
 	// Log level is returned to configured value when bring up is complete.
@@ -174,18 +297,30 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		klog.Errorf("Setting klog \"loglevel\" to 5 failed, err: %v", err)
 	}
 
-	for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
-		if err := auth.SetDBAuth(); err != nil {
-			return err
-		}
-	}
-
 	if node, err = n.Kube.GetNode(n.name); err != nil {
 		return fmt.Errorf("error retrieving node %s: %v", n.name, err)
 	}
-	err = setupOVNNode(node)
+
+	nodeAddrStr, err := util.GetNodePrimaryIP(node)
 	if err != nil {
 		return err
+	}
+	nodeAddr := net.ParseIP(nodeAddrStr)
+	if nodeAddr == nil {
+		return fmt.Errorf("failed to parse kubernetes node IP address. %v", err)
+	}
+
+	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
+		for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
+			if err := auth.SetDBAuth(); err != nil {
+				return err
+			}
+		}
+
+		err = setupOVNNode(node)
+		if err != nil {
+			return err
+		}
 	}
 
 	// First wait for the node logical switch to be created by the Master, timeout is 300s.
@@ -204,25 +339,50 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	if err != nil {
 		return fmt.Errorf("timed out waiting for node's: %q logical switch: %v", n.name, err)
 	}
-
 	klog.Infof("Node %s ready for ovn initialization with subnet %s", n.name, util.JoinIPNets(subnets, ","))
 
-	if _, err = isOVNControllerReady(n.name); err != nil {
-		return err
+	// Create CNI Server
+	if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
+		isOvnUpEnabled, err = getOVNIfUpCheckMode()
+		if err != nil {
+			return err
+		}
+		kclient, ok := n.Kube.(*kube.Kube)
+		if !ok {
+			return fmt.Errorf("cannot get kubeclient for starting CNI server")
+		}
+		cniServer, err = cni.NewCNIServer("", isOvnUpEnabled, n.watchFactory, kclient.KClient)
+		if err != nil {
+			return err
+		}
 	}
 
+	// Setup Management port and gateway
+	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
+		if _, err = isOVNControllerReady(n.name); err != nil {
+			return err
+		}
+	}
+
+	mgmtPort = NewManagementPort(n.name, subnets)
 	nodeAnnotator := kube.NewNodeAnnotator(n.Kube, node)
 	waiter := newStartupWaiter()
 
-	// Initialize management port resources on the node
-	mgmtPortConfig, err := createManagementPort(n.name, subnets, nodeAnnotator, waiter)
+	mgmtPortConfig, err = mgmtPort.Create(nodeAnnotator, waiter)
 	if err != nil {
 		return err
 	}
 
-	// Initialize gateway resources on the node
-	if err := n.initGateway(subnets, nodeAnnotator, waiter, mgmtPortConfig); err != nil {
-		return err
+	// Initialize gateway
+	if config.OvnKubeNode.Mode == types.NodeModeSmartNICHost {
+		err = n.initGatewaySmartNicHost(nodeAddr)
+		if err != nil {
+			return err
+		}
+	} else {
+		if err := n.initGateway(subnets, nodeAnnotator, waiter, mgmtPortConfig, nodeAddr); err != nil {
+			return err
+		}
 	}
 
 	if err := nodeAnnotator.Run(); err != nil {
@@ -238,7 +398,88 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	go n.gateway.Run(n.stopChan, wg)
 	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
 
+	// Note(adrianc): Smart-NIC deployments are expected to support the new shared gateway changes, upgrade flow
+	// is not needed. Future upgrade flows will need to take Smart-NICs into account.
+	if config.OvnKubeNode.Mode == types.NodeModeFull {
+		// Upgrade for Node. If we upgrade workers before masters, then we need to keep service routing via
+		// mgmt port until masters have been updated and modified OVN config. Run a goroutine to handle this case
+
+		// note this will change in the future to control-plane:
+		// https://github.com/kubernetes/kubernetes/pull/95382
+		masterNode, err := labels.NewRequirement("node-role.kubernetes.io/master", selection.Exists, nil)
+		if err != nil {
+			return err
+		}
+
+		labelSelector := labels.NewSelector()
+		labelSelector = labelSelector.Add(*masterNode)
+
+		informerFactory := informers.NewSharedInformerFactoryWithOptions(n.client, 0,
+			informers.WithTweakListOptions(func(options *metav1.ListOptions) {
+				options.LabelSelector = labelSelector.String()
+			}))
+
+		upgradeController := upgrade.NewController(n.Kube, informerFactory.Core().V1().Nodes())
+		initialTopoVersion := upgradeController.GetInitialTopoVersion()
+		bridgeName := n.gateway.GetGatewayBridgeIface()
+
+		needLegacySvcRoute := true
+		if initialTopoVersion >= types.OvnHostToSvcOFTopoVersion && config.GatewayModeShared == config.Gateway.Mode {
+			// Configure route for svc towards shared gw bridge
+			// Have to have the route to bridge for multi-NIC mode, where the default gateway may go to a non-OVS interface
+			if err := configureSvcRouteViaBridge(bridgeName); err != nil {
+				return err
+			}
+			needLegacySvcRoute = false
+		}
+
+		// Determine if we need to run upgrade checks
+		if initialTopoVersion != types.OvnCurrentTopologyVersion {
+			if needLegacySvcRoute && config.GatewayModeShared == config.Gateway.Mode {
+				klog.Info("System may be upgrading, falling back to to legacy K8S Service via mp0")
+				// add back legacy route for service via mp0
+				link, err := util.LinkSetUp(types.K8sMgmtIntfName)
+				if err != nil {
+					return fmt.Errorf("unable to get link for %s, error: %v", types.K8sMgmtIntfName, err)
+				}
+				var gwIP net.IP
+				for _, subnet := range config.Kubernetes.ServiceCIDRs {
+					if utilnet.IsIPv4CIDR(subnet) {
+						gwIP = mgmtPortConfig.ipv4.gwIP
+					} else {
+						gwIP = mgmtPortConfig.ipv6.gwIP
+					}
+					err := util.LinkRoutesAdd(link, gwIP, []*net.IPNet{subnet}, 0)
+					if err != nil && !os.IsExist(err) {
+						return fmt.Errorf("unable to add legacy route for services via mp0, error: %v", err)
+					}
+				}
+			}
+			// need to run upgrade controller
+			informerStop := make(chan struct{})
+			informerFactory.Start(informerStop)
+			go func() {
+				if err := upgradeController.Run(n.stopChan, informerStop); err != nil {
+					klog.Fatalf("Error while running upgrade controller: %v", err)
+				}
+				// upgrade complete now see what needs upgrading
+				// migrate service route from ovn-k8s-mp0 to shared gw bridge
+				if initialTopoVersion < types.OvnHostToSvcOFTopoVersion && config.GatewayModeShared == config.Gateway.Mode {
+					if err := upgradeServiceRoute(bridgeName); err != nil {
+						klog.Fatalf("Failed to upgrade service route for node, error: %v", err)
+					}
+				}
+				// ensure CNI support for port binding built into OVN, as masters have been upgraded
+				if initialTopoVersion < types.OvnPortBindingTopoVersion && cniServer != nil {
+					cniServer.EnableOVNPortUpSupport()
+				}
+			}()
+		}
+	}
+
 	if config.HybridOverlay.Enabled {
+		// Not supported with Smart-NIC, enforced in config
+		// TODO(adrianc): Revisit above comment
 		nodeController, err := honode.NewNode(
 			n.Kube,
 			n.name,
@@ -261,19 +502,14 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		klog.Errorf("Reset of klog \"loglevel\" failed, err: %v", err)
 	}
 
-	// start health check to ensure there are no stale OVS internal ports
-	go checkForStaleOVSInterfaces(n.stopChan)
-
 	// start management port health check
-	go checkManagementPortHealth(mgmtPortConfig, n.stopChan)
+	mgmtPort.CheckManagementPortHealth(mgmtPortConfig, n.stopChan)
 
-	confFile := filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
-	_, err = os.Stat(confFile)
-	if os.IsNotExist(err) {
-		err = config.WriteCNIConfig()
-		if err != nil {
-			return err
-		}
+	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
+		// start health check to ensure there are no stale OVS internal ports
+		go wait.Until(func() {
+			checkForStaleOVSInterfaces(n.name, n.watchFactory.(*factory.WatchFactory))
+		}, time.Minute, n.stopChan)
 	}
 
 	var nodeIP string
@@ -284,8 +520,30 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 
 	n.WatchEndpointSlices(nodeIP)
 
-	cniServer := cni.NewCNIServer("", n.watchFactory)
-	err = cniServer.Start(cni.HandleCNIRequest)
+	if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
+		// conditionally write cni config file
+		confFile := filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
+		_, err = os.Stat(confFile)
+		if os.IsNotExist(err) {
+			err = config.WriteCNIConfig()
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	// Remove the NoSchedule Taint from the node, now that networking setup is done. Ignore errors.
+	err = n.Kube.RemoveTaintFromNode(n.name, networkUnavailableTaint)
+	if err != nil {
+		klog.Infof("Unable to remove taint %s on node %s: %v", networkUnavailableTaint.ToString(), n.name, err)
+	}
+
+	if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
+		n.watchSmartNicPods(isOvnUpEnabled)
+	} else {
+		// start the cni server
+		err = cniServer.Start(cni.HandleCNIRequest)
+	}
 
 	return err
 }
@@ -303,12 +561,14 @@ func (n *OvnNode) WatchEndpointSlices(nodeIP string) {
 
 	n.watchFactory.AddEndpointSliceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			endpointSlice := obj.(*discovery.EndpointSlice)
-			klog.Infof("Processing add for endpoint slice %s on namespace %s",
-				endpointSlice.Name, endpointSlice.Namespace)
-			startTime := time.Now()
-			addEPSliceToFirewallZone(nodeIP, endpointSlice)
-			klog.Infof("Took %v to add endpoint slice %s", time.Since(startTime), endpointSlice.Name)
+			if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
+				endpointSlice := obj.(*discovery.EndpointSlice)
+				klog.Infof("Processing add for endpoint slice %s on namespace %s",
+					endpointSlice.Name, endpointSlice.Namespace)
+				startTime := time.Now()
+				addEPSliceToFirewallZone(nodeIP, endpointSlice)
+				klog.Infof("Took %v to add endpoint slice %s", time.Since(startTime), endpointSlice.Name)
+			}
 		},
 		UpdateFunc: func(prevObj, obj interface{}) {
 			oldEndpointSlice := prevObj.(*discovery.EndpointSlice)
@@ -335,7 +595,7 @@ func (n *OvnNode) WatchEndpointSlices(nodeIP string) {
 					for _, ip := range endpoint.Addresses {
 						klog.V(5).Infof("Endpoint address is %s and NodeIP is %s for port %d/%s",
 							ip, nodeIP, *port.Port, *port.Protocol)
-						if nodeIP == ip {
+						if config.OvnKubeNode.Mode != types.NodeModeSmartNIC && nodeIP == ip {
 							err := removePortFromFirewallZone(ovnFirewallZone,
 								*port.Port, *port.Protocol)
 							if err != nil {
@@ -349,7 +609,8 @@ func (n *OvnNode) WatchEndpointSlices(nodeIP string) {
 									"ngn-admin firewall zone: (%v)", *port.Port, err)
 							}
 						}
-						if *port.Protocol == kapi.ProtocolUDP || *port.Protocol == kapi.ProtocolSCTP {
+						if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost &&
+							(*port.Protocol == kapi.ProtocolUDP || *port.Protocol == kapi.ProtocolSCTP) {
 							err := deleteConntrack(ip, *port.Port, *port.Protocol)
 							if err != nil {
 								klog.Errorf("Failed to delete conntrack entry for %s: %v", ip, err)
@@ -399,28 +660,68 @@ func isEPSliceContainsEndpoint(epSlice *discovery.EndpointSlice,
 	return false
 }
 
+// validateGatewayMTU checks if the MTU of the given network interface is big
+// enough to carry the `config.Default.MTU` and the Geneve header. If the MTU
+// is not big enough, it will taint the node with the value of
+// `types.OvnK8sSmallMTUTaintKey`
+func (n *OvnNode) validateGatewayMTU(gatewayInterfaceName string) error {
+	tooSmallMTUTaint := &kapi.Taint{Key: types.OvnK8sSmallMTUTaintKey, Effect: kapi.TaintEffectNoSchedule}
+
+	mtu, err := util.GetNetworkInterfaceMTU(gatewayInterfaceName)
+	if err != nil {
+		return fmt.Errorf("could not get MTU from gateway network interface %s: %w", gatewayInterfaceName, err)
+	}
+
+	// calc required MTU
+	var requiredMTU int
+	if config.IPv4Mode && !config.IPv6Mode {
+		// we run in single-stack IPv4 only
+		requiredMTU = config.Default.MTU + types.GeneveHeaderLengthIPv4
+	} else {
+		// we run in single-stack IPv6 or dual-stack mode
+		requiredMTU = config.Default.MTU + types.GeneveHeaderLengthIPv6
+	}
+
+	// check if node needs to be tainted
+	if mtu < requiredMTU {
+		klog.V(2).Infof("MTU (%d) of gateway network interface %s is not big enough to deal with Geneve header overhead (sum %d). Tainting node with %v...", mtu, gatewayInterfaceName, requiredMTU, tooSmallMTUTaint)
+
+		return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			return n.Kube.SetTaintOnNode(n.name, tooSmallMTUTaint)
+		})
+	} else {
+		klog.V(2).Infof("MTU (%d) of gateway network interface %s is big enough to deal with Geneve header overhead (sum %d). Making sure node is not tainted with %v...", mtu, gatewayInterfaceName, requiredMTU, tooSmallMTUTaint)
+
+		return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			return n.Kube.RemoveTaintFromNode(n.name, tooSmallMTUTaint)
+		})
+	}
+}
+
 func updateEndpointSlice(nodeIP string, oldEndpointSlice, newEndpointSlice *discovery.EndpointSlice) {
-	// add any new ports to the firewalld zone that are not in oldEndpointSlice
-	for _, port := range newEndpointSlice.Ports {
-		for _, endpoint := range newEndpointSlice.Endpoints {
-			for _, ip := range endpoint.Addresses {
-				klog.V(5).Infof("Endpoint address is %s and nodeIP is %s for port %d/%s",
-					ip, nodeIP, *port.Port, *port.Protocol)
-				if nodeIP != ip {
-					continue
-				}
-				if isEPSliceContainsEndpoint(oldEndpointSlice, ip, *port.Port, *port.Protocol) {
-					continue
-				}
-				klog.V(5).Infof("Adding the endpoint that is not present in old slice %s/%d/%s",
-					ip, *port.Port, *port.Protocol)
-				err := addPortToFirewallZone(ovnFirewallZone, *port.Port, *port.Protocol)
-				if err != nil {
-					klog.Errorf("Error in adding port %d to ovn firewall zone: (%v)", *port.Port, err)
-				}
-				err = addPortToFirewallZone(ngnAdminFirewallZone, *port.Port, *port.Protocol)
-				if err != nil {
-					klog.Errorf("Error in adding port %d to ngn-admin firewall zone: (%v)", *port.Port, err)
+	if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
+		// add any new ports to the firewalld zone that are not in oldEndpointSlice
+		for _, port := range newEndpointSlice.Ports {
+			for _, endpoint := range newEndpointSlice.Endpoints {
+				for _, ip := range endpoint.Addresses {
+					klog.V(5).Infof("Endpoint address is %s and nodeIP is %s for port %d/%s",
+						ip, nodeIP, *port.Port, *port.Protocol)
+					if nodeIP != ip {
+						continue
+					}
+					if isEPSliceContainsEndpoint(oldEndpointSlice, ip, *port.Port, *port.Protocol) {
+						continue
+					}
+					klog.V(5).Infof("Adding the endpoint that is not present in old slice %s/%d/%s",
+						ip, *port.Port, *port.Protocol)
+					err := addPortToFirewallZone(ovnFirewallZone, *port.Port, *port.Protocol)
+					if err != nil {
+						klog.Errorf("Error in adding port %d to ovn firewall zone: (%v)", *port.Port, err)
+					}
+					err = addPortToFirewallZone(ngnAdminFirewallZone, *port.Port, *port.Protocol)
+					if err != nil {
+						klog.Errorf("Error in adding port %d to ngn-admin firewall zone: (%v)", *port.Port, err)
+					}
 				}
 			}
 		}
@@ -432,15 +733,26 @@ func updateEndpointSlice(nodeIP string, oldEndpointSlice, newEndpointSlice *disc
 			for _, ip := range endpoint.Addresses {
 				// if the port is neither UDP nor SCTP and endpointIP doesn't match the node's IP, then
 				// there is nothing to do
-				if nodeIP != ip && *port.Protocol != kapi.ProtocolUDP && *port.Protocol != kapi.ProtocolSCTP {
-					continue
+				switch config.OvnKubeNode.Mode {
+				case types.NodeModeSmartNIC:
+					if *port.Protocol != kapi.ProtocolUDP && *port.Protocol != kapi.ProtocolSCTP {
+						continue
+					}
+				case types.NodeModeSmartNICHost:
+					if nodeIP != ip {
+						continue
+					}
+				case types.NodeModeFull:
+					if nodeIP != ip && *port.Protocol != kapi.ProtocolUDP && *port.Protocol != kapi.ProtocolSCTP {
+						continue
+					}
 				}
 				if isEPSliceContainsEndpoint(newEndpointSlice, ip, *port.Port, *port.Protocol) {
 					continue
 				}
 				klog.Infof("Removing the endpoint %s/%d/%s not present in new slice but present in old slice",
 					ip, *port.Port, *port.Protocol)
-				if nodeIP == ip {
+				if config.OvnKubeNode.Mode != types.NodeModeSmartNIC && nodeIP == ip {
 					err := removePortFromFirewallZone(ovnFirewallZone, *port.Port, *port.Protocol)
 					if err != nil {
 						klog.Errorf("Error in removing port %d to ovn firewall zone: (%v)", *port.Port, err)
@@ -450,7 +762,8 @@ func updateEndpointSlice(nodeIP string, oldEndpointSlice, newEndpointSlice *disc
 						klog.Errorf("Error in removing port %d to ngn-admin firewall zone: (%v)", *port.Port, err)
 					}
 				}
-				if *port.Protocol == kapi.ProtocolUDP || *port.Protocol == kapi.ProtocolSCTP {
+				if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost &&
+					(*port.Protocol == kapi.ProtocolUDP || *port.Protocol == kapi.ProtocolSCTP) {
 					err := deleteConntrack(ip, *port.Port, *port.Protocol)
 					if err != nil {
 						klog.Errorf("Failed to delete conntrack entry for %s: %v", ip, err)
@@ -462,12 +775,44 @@ func updateEndpointSlice(nodeIP string, oldEndpointSlice, newEndpointSlice *disc
 }
 
 func syncEndpointSlices(obj []interface{}) {
-	if err := addInterfaceToFirewallZone(types.K8sMgmtIntfName, ovnFirewallZone); err != nil {
-		klog.Errorf("Failed to add interface %s to ovn firewall zone: (%v)",
-			types.K8sMgmtIntfName, err)
+	if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
+		if err := addInterfaceToFirewallZone(types.K8sMgmtIntfName, ovnFirewallZone); err != nil {
+			klog.Errorf("Failed to add interface %s to ovn firewall zone: (%v)",
+				types.K8sMgmtIntfName, err)
+		}
+		if err := addInterfaceToFirewallZone(localnetGatewayNextHopPort, ovnFirewallZone); err != nil {
+			klog.Errorf("Failed to add interface %s to ovn firewall zone: (%v)",
+				localnetGatewayNextHopPort, err)
+		}
 	}
-	if err := addInterfaceToFirewallZone(localnetGatewayNextHopPort, ovnFirewallZone); err != nil {
-		klog.Errorf("Failed to add interface %s to ovn firewall zone: (%v)",
-			localnetGatewayNextHopPort, err)
+}
+
+func configureSvcRouteViaBridge(bridge string) error {
+	gwIPs, _, err := getGatewayNextHops()
+	if err != nil {
+		return fmt.Errorf("unable to get the gateway next hops, error: %v", err)
 	}
+	return configureSvcRouteViaInterface(bridge, gwIPs)
+}
+
+func upgradeServiceRoute(bridgeName string) error {
+	klog.Info("Updating K8S Service route")
+	// Flush old routes
+	link, err := util.LinkSetUp(types.K8sMgmtIntfName)
+	if err != nil {
+		return fmt.Errorf("unable to get link: %s, error: %v", types.K8sMgmtIntfName, err)
+	}
+	if err := util.LinkRoutesDel(link, config.Kubernetes.ServiceCIDRs); err != nil {
+		return fmt.Errorf("unable to delete routes on upgrade, error: %v", err)
+	}
+	// add route via OVS bridge
+	if err := configureSvcRouteViaBridge(bridgeName); err != nil {
+		return fmt.Errorf("unable to add svc route via OVS bridge interface, error: %v", err)
+	}
+	klog.Info("Successfully updated Kubernetes service route towards OVS")
+	// Clean up gw0 and local ovs bridge as best effort
+	if err := deleteLocalNodeAccessBridge(); err != nil {
+		klog.Warningf("Error while removing Local Node Access Bridge, error: %v", err)
+	}
+	return nil
 }

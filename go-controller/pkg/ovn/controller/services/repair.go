@@ -1,11 +1,12 @@
 package services
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/pkg/errors"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/acl"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gateway"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -25,14 +26,16 @@ import (
 type Repair struct {
 	interval time.Duration
 	// serviceTracker tracks services and maps them to OVN LoadBalancers
-	serviceLister corelisters.ServiceLister
+	serviceLister        corelisters.ServiceLister
+	clusterPortGroupUUID string
 }
 
 // NewRepair creates a controller that periodically ensures that there is no stale data in OVN
-func NewRepair(interval time.Duration, serviceLister corelisters.ServiceLister) *Repair {
+func NewRepair(interval time.Duration, serviceLister corelisters.ServiceLister, clusterPortGroupUUID string) *Repair {
 	return &Repair{
-		interval:      interval,
-		serviceLister: serviceLister,
+		interval:             interval,
+		serviceLister:        serviceLister,
+		clusterPortGroupUUID: clusterPortGroupUUID,
 	}
 }
 
@@ -42,7 +45,6 @@ func (r *Repair) runOnce() error {
 	klog.V(4).Infof("Starting repairing loop for services")
 	defer func() {
 		klog.V(4).Infof("Finished repairing loop for services: %v", time.Since(startTime))
-		metrics.MetricSyncServiceLatency.WithLabelValues("repair-loop").Observe(time.Since(startTime).Seconds())
 	}()
 
 	// Obtain all the load balancers UUID
@@ -53,7 +55,7 @@ func (r *Repair) runOnce() error {
 	for _, p := range protocols {
 		lbUUID, err := loadbalancer.GetOVNKubeLoadBalancer(p)
 		if err != nil {
-			return errors.Wrapf(err, "Failed to get OVN load balancer for protocol %s", p)
+			return errors.Wrapf(err, "Failed to get Cluster IP OVN load balancer for protocol %s", p)
 		}
 		ovnLBCache[p] = append(ovnLBCache[p], lbUUID)
 	}
@@ -67,13 +69,33 @@ func (r *Repair) runOnce() error {
 				lbUUID, err := gateway.GetGatewayLoadBalancer(gatewayRouter, p)
 				if err != nil {
 					if err != gateway.OVNGatewayLBIsEmpty {
-						klog.V(5).Infof("Failed to get OVN GR load balancer for protocol %s, err: %v", p, err)
+						klog.V(5).Infof("Failed to get OVN GR: %s load balancer for protocol %s, err: %v",
+							gatewayRouter, p, err)
+					}
+				} else {
+					ovnLBCache[p] = append(ovnLBCache[p], lbUUID)
+				}
+				workerNode := util.GetWorkerFromGatewayRouter(gatewayRouter)
+				workerLB, err := loadbalancer.GetWorkerLoadBalancer(workerNode, p)
+				if err != nil {
+					if err != gateway.OVNGatewayLBIsEmpty {
+						klog.V(5).Infof("Failed to get OVN Worker: %s load balancer for protocol %s, err: %v",
+							workerNode, p, err)
 					}
 					continue
 				}
-				ovnLBCache[p] = append(ovnLBCache[p], lbUUID)
+				ovnLBCache[p] = append(ovnLBCache[p], workerLB)
 			}
 		}
+	}
+
+	// Idling load balancers
+	for _, p := range protocols {
+		lb, err := loadbalancer.GetOVNKubeIdlingLoadBalancer(p)
+		if err != nil {
+			return errors.Wrapf(err, "Failed to get Idling OVN load balancer for protocol %s", p)
+		}
+		ovnLBCache[p] = append(ovnLBCache[p], lb)
 	}
 
 	// Get Kubernetes Service state
@@ -102,17 +124,32 @@ func (r *Repair) runOnce() error {
 				klog.V(4).Infof("Failed to get vips for %s load balancer %s, err: %v", p, lb, err)
 				continue
 			}
+			txn := util.NewNBTxn()
 			for vip := range vips {
 				key := virtualIPKey(vip, p)
 				// Virtual IP and protocol doesn't belong to a Kubernetes service
 				if !svcVIPsProtocolMap.Has(key) {
 					klog.Infof("Deleting non-existing Kubernetes vip %s from OVN %s load balancer %s", vip, p, lb)
-					if err := loadbalancer.DeleteLoadBalancerVIP(lb, vip); err != nil {
+					if err := loadbalancer.DeleteLoadBalancerVIP(txn, lb, vip); err != nil {
 						klog.V(4).Infof("Failed to delete %s load balancer vips %s for %s, err: %v", p, vip, lb, err)
 					}
 				}
 			}
+			stdout, stderr, err := txn.Commit()
+			if err != nil {
+				return fmt.Errorf("error in deleting %s load balancer %s stale vips, "+
+					"stdout: %q, stderr: %q, err: %v",
+					p, lb, stdout, stderr, err)
+			}
 		}
+	}
+
+	// Remove existing reject rules. They are not used anymore
+	// given the introduction of idling loadbalancers
+	err = acl.PurgeRejectRules(r.clusterPortGroupUUID)
+	if err != nil {
+		klog.Errorf("Failed to purge existing reject rules: %v", err)
+		return err
 	}
 	return nil
 }

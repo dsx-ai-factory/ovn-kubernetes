@@ -9,7 +9,8 @@ PKGS ?=
 GOPATH ?= $(shell go env GOPATH)
 TEST_REPORT_DIR?=$(CURDIR)/_artifacts
 export TEST_REPORT_DIR
-GO_DOCKER_IMG = quay.io/giantswarm/golang:1.15.7
+GO_VERSION ?= 1.16.3
+GO_DOCKER_IMG = quay.io/giantswarm/golang:${GO_VERSION}
 # CONTAINER_RUNNABLE determines if the tests can be run inside a container. It checks to see if
 # podman/docker is installed on the system.
 PODMAN ?= $(shell podman -v > /dev/null 2>&1; echo $$?)
@@ -19,6 +20,7 @@ else
 CONTAINER_RUNTIME=docker
 endif
 CONTAINER_RUNNABLE ?= $(shell $(CONTAINER_RUNTIME) -v > /dev/null 2>&1; echo $$?)
+OVN_VERSION ?= v20.12.0
 
 .PHONY: all build check test
 
@@ -39,12 +41,12 @@ windows:
 # tests in a container. Refer: https://www.projectatomic.io/blog/2016/03/dwalsh_selinux_containers/ for additional context
 check test:
 ifeq ($(CONTAINER_RUNNABLE), 0)
-	$(CONTAINER_RUNTIME) run --security-opt label=disable --cap-add=NET_ADMIN --cap-add=SYS_ADMIN -v $(shell dirname $(PWD)):/go/src/github.com/ovn-org/ovn-kubernetes -w /go/src/github.com/ovn-org/ovn-kubernetes/go-controller -e COVERALLS=${COVERALLS} $(GO_DOCKER_IMG) sh -c "RACE=1 DOCKER_TEST=1 COVERALLS=${COVERALLS} hack/test-go.sh ${PKGS}"
+	$(CONTAINER_RUNTIME) run -it --rm --security-opt label=disable --cap-add=NET_ADMIN --cap-add=SYS_ADMIN -v $(shell dirname $(PWD)):/go/src/github.com/ovn-org/ovn-kubernetes -w /go/src/github.com/ovn-org/ovn-kubernetes/go-controller -e COVERALLS=${COVERALLS} -e GINKGO_FOCUS="${GINKGO_FOCUS}" $(GO_DOCKER_IMG) sh -c "RACE=1 DOCKER_TEST=1 COVERALLS=${COVERALLS} PKGS="${PKGS}" hack/test-go.sh focus \"${GINKGO_FOCUS}\" "
 else
-	RACE=1 hack/test-go.sh ${PKGS}
+	RACE=1 hack/test-go.sh
 endif
 
-codegen:
+codegen: pkg/nbdb/ovn-nb.ovsschema pkg/sbdb/ovn-sb.ovsschema
 	hack/update-codegen.sh
 
 install:
@@ -56,6 +58,8 @@ install:
 clean:
 	rm -rf ${OUT_DIR}
 	rm -rf ${TEST_REPORT_DIR}
+	rm -f ./pkg/nbdb/ovn-nb.ovsschema
+	rm -f ./pkg/sbdb/ovn-sb.ovsschema
 
 .PHONY: install.tools lint gofmt
 
@@ -71,7 +75,13 @@ endif
 
 gofmt:
 ifeq ($(CONTAINER_RUNNABLE), 0)
-	$(CONTAINER_RUNTIME) run --security-opt label=disable -v $(shell dirname $(PWD)):/go/src/github.com/ovn-org/ovn-kubernetes -w /go/src/github.com/ovn-org/ovn-kubernetes/go-controller $(GO_DOCKER_IMG) hack/verify-gofmt.sh
+	$(CONTAINER_RUNTIME) run -it --rm --security-opt label=disable -v $(shell dirname $(PWD)):/go/src/github.com/ovn-org/ovn-kubernetes -w /go/src/github.com/ovn-org/ovn-kubernetes/go-controller $(GO_DOCKER_IMG) hack/verify-gofmt.sh
 else
 	@./hack/verify-gofmt.sh
 endif
+
+pkg/nbdb/ovn-nb.ovsschema:
+	curl -sSL https://raw.githubusercontent.com/ovn-org/ovn/$(OVN_VERSION)/ovn-nb.ovsschema -o $@
+
+pkg/sbdb/ovn-sb.ovsschema:
+	curl -sSL https://raw.githubusercontent.com/ovn-org/ovn/$(OVN_VERSION)/ovn-sb.ovsschema -o $@

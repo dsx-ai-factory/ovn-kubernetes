@@ -2,9 +2,9 @@ package ovn
 
 import (
 	"fmt"
+	"github.com/ebay/go-ovn"
 
 	onet "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -44,12 +44,15 @@ func (oc *Controller) syncICMPNetworkPolicies(networkPolicies []interface{}) {
 		}
 	}
 
-	err := oc.addressSetFactory.ForEachAddressSet(func(addrSetName, namespaceName, policyName string, icmpAddressSet bool) {
+	err := oc.addressSetFactory.ProcessEachAddressSet(func(addrSetName, namespaceName, policyName string, icmpAddressSet bool) {
 		if icmpAddressSet && policyName != "" && !expectedPolicies[namespaceName][policyName] {
 			// policy doesn't exist on k8s. Delete the port group
 			portGroupName := fmt.Sprintf("%s_%s", namespaceName, policyName)
 			hashedLocalPortGroup := hashedPortGroup(portGroupName)
-			deletePortGroup(hashedLocalPortGroup)
+			err := deletePortGroup(oc.ovnNBClient, hashedLocalPortGroup)
+			if err != nil {
+				klog.Errorf("%v", err)
+			}
 
 			// delete the address sets for this old policy from OVN
 			if err := oc.addressSetFactory.DestroyAddressSetInBackingStore(addrSetName); err != nil {
@@ -63,9 +66,8 @@ func (oc *Controller) syncICMPNetworkPolicies(networkPolicies []interface{}) {
 }
 
 func (oc *Controller) icmpLocalPodAddDefaultDeny(nsInfo *namespaceInfo,
-	policy *onet.ICMPNetworkPolicy, portInfo *lpInfo) {
+	policy *onet.ICMPNetworkPolicy, ports ...*lpInfo) {
 	oc.lspMutex.Lock()
-	defer oc.lspMutex.Unlock()
 
 	// Default deny rule.
 	// 1. Any pod that matches a network policy should get a default
@@ -78,25 +80,67 @@ func (oc *Controller) icmpLocalPodAddDefaultDeny(nsInfo *namespaceInfo,
 	// the PolicyTypes has 'egress' in it, we add a default
 	// egress deny rule.
 
+	addIngressPorts := []*lpInfo{}
+	addEgressPorts := []*lpInfo{}
+
 	// Handle condition 1 above.
 	if !(len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == onet.PolicyTypeEgress) {
-		if oc.lspIngressDenyCache[portInfo.name] == 0 {
-			if err := addToPortGroup(nsInfo.portGroupIngressDenyUUID, portInfo); err != nil {
-				klog.Warningf("Failed to add port %s to ingress deny ACL: %v", portInfo.name, err)
+		for _, portInfo := range ports {
+			// if this is the first NP referencing this pod, then we
+			// need to add it to the port group.
+			if oc.lspIngressDenyCache[portInfo.name] == 0 {
+				addIngressPorts = append(addIngressPorts, portInfo)
 			}
+
+			// increment the reference count.
+			oc.lspIngressDenyCache[portInfo.name]++
 		}
-		oc.lspIngressDenyCache[portInfo.name]++
 	}
 
 	// Handle condition 2 above.
 	if (len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == onet.PolicyTypeEgress) ||
 		len(policy.Spec.Egress) > 0 || len(policy.Spec.PolicyTypes) == 2 {
-		if oc.lspEgressDenyCache[portInfo.name] == 0 {
-			if err := addToPortGroup(nsInfo.portGroupEgressDenyUUID, portInfo); err != nil {
-				klog.Warningf("Failed to add port %s to egress deny ACL: %v", portInfo.name, err)
+		for _, portInfo := range ports {
+			if oc.lspEgressDenyCache[portInfo.name] == 0 {
+				// again, reference count is 0, so add to port
+				addEgressPorts = append(addEgressPorts, portInfo)
 			}
+
+			// bump reference count
+			oc.lspEgressDenyCache[portInfo.name]++
 		}
-		oc.lspEgressDenyCache[portInfo.name]++
+	}
+
+	// we're done with the lsp cache - release the lock before transacting
+	oc.lspMutex.Unlock()
+
+	// Generate a single OVN transaction that adds all ports to the
+	// appropriate port groups.
+	commands := make([]*goovn.OvnCommand, 0, len(addIngressPorts)+len(addEgressPorts))
+
+	for _, portInfo := range addIngressPorts {
+		cmd, err := oc.ovnNBClient.PortGroupAddPort(nsInfo.portGroupIngressDenyName, portInfo.uuid)
+		if err != nil {
+			klog.Warningf("Failed to create command: add port %s to ingress deny portgroup %s: %v",
+				portInfo.name, nsInfo.portGroupIngressDenyName, err)
+			continue
+		}
+		commands = append(commands, cmd)
+	}
+
+	for _, portInfo := range addEgressPorts {
+		cmd, err := oc.ovnNBClient.PortGroupAddPort(nsInfo.portGroupEgressDenyName, portInfo.uuid)
+		if err != nil {
+			klog.Warningf("Failed to create command: add port %s to egress deny portgroup %s: %v",
+				portInfo.name, nsInfo.portGroupEgressDenyName, err)
+			continue
+		}
+		commands = append(commands, cmd)
+	}
+
+	err := oc.ovnNBClient.Execute(commands...)
+	if err != nil {
+		klog.Warningf("Failed to execute add-to-default-deny-portgroup transaction: %v", err)
 	}
 }
 
@@ -134,15 +178,76 @@ func (oc *Controller) icmpHandleLocalPodSelectorAddFunc(
 		return
 	}
 
-	_, stderr, err := util.RunOVNNbctl("--if-exists", "remove",
-		"port_group", np.portGroupUUID, "ports", portInfo.uuid, "--",
-		"add", "port_group", np.portGroupUUID, "ports", portInfo.uuid)
+	err = addToPortGroup(oc.ovnNBClient, np.portGroupName, portInfo)
+
 	if err != nil {
-		klog.Errorf("Failed to add logicalPort %s to portGroup %s "+
-			"stderr: %q (%v)", logicalPort, np.portGroupUUID, stderr, err)
+		klog.Errorf("Failed to add logicalPort %s to portGroup %s (%v)",
+			logicalPort, np.portGroupUUID, err)
 	}
 
 	np.localPods.Store(logicalPort, portInfo)
+}
+
+func (oc *Controller) icmpHandleLocalPodSelectorSetPods(
+	policy *onet.ICMPNetworkPolicy, np *networkPolicy, nsInfo *namespaceInfo,
+	objs []interface{}) {
+
+	// Take the write lock since this is called once and we will want to bulk-update
+	// localPods
+	np.Lock()
+	defer np.Unlock()
+	if np.deleted {
+		return
+	}
+
+	klog.Infof("Setting icmp NetworkPolicy %s/%s to have %d local pods...",
+		np.namespace, np.name, len(objs))
+
+	// get list of pods and their logical ports to add
+	// theoretically this should never filter any pods but it's always good to be
+	// paranoid.
+	portsToAdd := make([]*lpInfo, 0, len(objs))
+	for _, obj := range objs {
+		pod := obj.(*kapi.Pod)
+
+		if pod.Spec.NodeName == "" {
+			continue
+		}
+
+		portInfo, err := oc.logicalPortCache.get(podLogicalPortName(pod))
+		// pod is not yet handled
+		// no big deal, we'll get the update when it is.
+		if err != nil {
+			continue
+		}
+
+		// this pod is somehow already added to this policy, then skip
+		if _, ok := np.localPods.Load(portInfo.name); ok {
+			continue
+		}
+
+		portsToAdd = append(portsToAdd, portInfo)
+	}
+
+	// add all ports to default deny
+	oc.icmpLocalPodAddDefaultDeny(nsInfo, policy, portsToAdd...)
+
+	if np.portGroupUUID == "" {
+		return
+	}
+
+	err := setPortGroup(oc.ovnNBClient, np.portGroupName, portsToAdd...)
+	if err != nil {
+		klog.Errorf("Failed to set ports in PortGroup for icmp network policy %s/%s: %v", np.namespace, np.name, err)
+	}
+
+	for _, portInfo := range portsToAdd {
+		np.localPods.Store(portInfo.name, portInfo)
+	}
+
+	klog.Infof("Done setting icmp NetworkPolicy %s/%s local pods",
+		np.namespace, np.name)
+
 }
 
 func (oc *Controller) icmpHandleLocalPodSelector(
@@ -162,7 +267,9 @@ func (oc *Controller) icmpHandleLocalPodSelector(
 			UpdateFunc: func(oldObj, newObj interface{}) {
 				oc.icmpHandleLocalPodSelectorAddFunc(policy, np, nsInfo, newObj)
 			},
-		}, nil)
+		}, func(objs []interface{}) {
+			oc.icmpHandleLocalPodSelectorSetPods(policy, np, nsInfo, objs)
+		})
 
 	np.podHandlerList = append(np.podHandlerList, h)
 }
@@ -222,7 +329,7 @@ func (oc *Controller) addICMPNetworkPolicy(policy *onet.ICMPNetworkPolicy) {
 	readableGroupName := fmt.Sprintf("%s_%s", policy.Namespace, policyName)
 	np.portGroupName = hashedPortGroup(readableGroupName)
 
-	np.portGroupUUID, err = createPortGroup(readableGroupName, np.portGroupName)
+	np.portGroupUUID, err = createPortGroup(oc.ovnNBClient, readableGroupName, np.portGroupName)
 	if err != nil {
 		klog.Errorf("Failed to create port_group for network policy %s in "+
 			"namespace %s", policyName, policy.Namespace)
@@ -269,7 +376,6 @@ func (oc *Controller) addICMPNetworkPolicy(policy *onet.ICMPNetworkPolicy) {
 				podSelector:       fromJSON.PodSelector,
 			})
 		}
-		ingress.localPodAddACL(np.portGroupName, np.portGroupUUID, nsInfo.aclLogging.Allow)
 		np.ingressPolicies = append(np.ingressPolicies, ingress)
 	}
 
@@ -305,7 +411,7 @@ func (oc *Controller) addICMPNetworkPolicy(policy *onet.ICMPNetworkPolicy) {
 				podSelector:       toJSON.PodSelector,
 			})
 		}
-		egress.localPodAddACL(np.portGroupName, np.portGroupUUID, nsInfo.aclLogging.Allow)
+
 		np.egressPolicies = append(np.egressPolicies, egress)
 	}
 	np.Unlock()
@@ -334,6 +440,9 @@ func (oc *Controller) addICMPNetworkPolicy(policy *onet.ICMPNetworkPolicy) {
 				handler.podSelector, handler.gress, np)
 		}
 	}
+
+	// Finally, make sure that all ACLs are set
+	oc.addNetworkPolicyACL(np, nsInfo.aclLogging.Allow)
 }
 
 // Maybe consolidtae with deleteNetworkPolicy

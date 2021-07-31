@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	kapi "k8s.io/api/core/v1"
+	discovery "k8s.io/api/discovery/v1beta1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -18,12 +20,11 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/cert"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
 	icmpnetworkpolicyclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1/apis/clientset/versioned"
-	discovery "k8s.io/api/discovery/v1beta1"
-	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -35,7 +36,6 @@ type OVNClientset struct {
 	EgressIPClient          egressipclientset.Interface
 	EgressFirewallClient    egressfirewallclientset.Interface
 	ICMPNetworkPolicyClient icmpnetworkpolicyclientset.Interface
-	APIExtensionsClient     apiextensionsclientset.Interface
 }
 
 func adjustCommit() string {
@@ -54,7 +54,8 @@ func adjustNodeName() string {
 }
 
 // newKubernetesRestConfig create a Kubernetes rest config from either a kubeconfig,
-// TLS properties, or an apiserver URL
+// TLS properties, or an apiserver URL. If the CA certificate data is passed in the
+// CAData in the KubernetesConfig, the CACert path is ignored.
 func newKubernetesRestConfig(conf *config.KubernetesConfig) (*rest.Config, error) {
 	var kconfig *rest.Config
 	var err error
@@ -63,19 +64,16 @@ func newKubernetesRestConfig(conf *config.KubernetesConfig) (*rest.Config, error
 		// uses the current context in kubeconfig
 		kconfig, err = clientcmd.BuildConfigFromFlags("", conf.Kubeconfig)
 	} else if strings.HasPrefix(conf.APIServer, "https") {
-		// TODO: Looks like the check conf.APIServer is redundant and can be removed
-		if conf.APIServer == "" || conf.Token == "" {
+		if conf.Token == "" || len(conf.CAData) == 0 {
 			return nil, fmt.Errorf("TLS-secured apiservers require token and CA certificate")
 		}
-		kconfig = &rest.Config{
-			Host:        conf.APIServer,
-			BearerToken: conf.Token,
+		if _, err := cert.NewPoolFromBytes(conf.CAData); err != nil {
+			return nil, err
 		}
-		if conf.CACert != "" {
-			if _, err := cert.NewPool(conf.CACert); err != nil {
-				return nil, err
-			}
-			kconfig.TLSClientConfig = rest.TLSClientConfig{CAFile: conf.CACert}
+		kconfig = &rest.Config{
+			Host:            conf.APIServer,
+			BearerToken:     conf.Token,
+			TLSClientConfig: rest.TLSClientConfig{CAData: conf.CAData},
 		}
 	} else if strings.HasPrefix(conf.APIServer, "http") {
 		kconfig, err = clientcmd.BuildConfigFromFlags(conf.APIServer, "")
@@ -123,10 +121,6 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unable to create kubernetes rest config, err: %v", err)
 	}
-	crdClientset, err := apiextensionsclientset.NewForConfig(kconfig)
-	if err != nil {
-		return nil, err
-	}
 	egressFirewallClientset, err := egressfirewallclientset.NewForConfig(kconfig)
 	if err != nil {
 		return nil, err
@@ -144,7 +138,6 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		EgressIPClient:          egressIPClientset,
 		EgressFirewallClient:    egressFirewallClientset,
 		ICMPNetworkPolicyClient: icmpNetworkPolicyClientset,
-		APIExtensionsClient:     crdClientset,
 	}, nil
 }
 
@@ -217,6 +210,11 @@ func PodWantsNetwork(pod *kapi.Pod) bool {
 	return !pod.Spec.HostNetwork
 }
 
+// PodScheduled returns if the given pod is scheduled
+func PodScheduled(pod *kapi.Pod) bool {
+	return pod.Spec.NodeName != ""
+}
+
 const (
 	// DefNetworkAnnotation is the pod annotation for the cluster-wide default network
 	DefNetworkAnnotation = "v1.multus-cni.io/default-network"
@@ -278,6 +276,91 @@ func UseEndpointSlices(kubeClient kubernetes.Interface) bool {
 	if _, err := kubeClient.Discovery().ServerResourcesForGroupVersion(discovery.SchemeGroupVersion.String()); err == nil {
 		klog.V(2).Infof("Kubernetes Endpoint Slices enabled on the cluster: %s", discovery.SchemeGroupVersion.String())
 		return true
+	}
+	return false
+}
+
+type LbEndpoints struct {
+	IPs  []string
+	Port int32
+}
+
+// GetLbEndpoints return the endpoints that belong to the IPFamily as a slice of IPs
+func GetLbEndpoints(slices []*discovery.EndpointSlice, svcPort kapi.ServicePort, family kapi.IPFamily) LbEndpoints {
+	epsSet := sets.NewString()
+	lbEps := LbEndpoints{[]string{}, 0}
+	// return an empty object so the caller don't have to check for nil and can use it as an iterator
+	if len(slices) == 0 {
+		return lbEps
+	}
+
+	for _, slice := range slices {
+		klog.V(4).Infof("Getting endpoints for slice %s", slice.Name)
+		// Only return addresses that belong to the requested IP family
+		if slice.AddressType != discovery.AddressType(family) {
+			klog.V(4).Infof("Slice %s with different IP Family endpoints, requested: %s received: %s",
+				slice.Name, slice.AddressType, family)
+			continue
+		}
+
+		// build the list of endpoints in the slice
+		for _, port := range slice.Ports {
+			// If Service port name set it must match the name field in the endpoint
+			// If Service port name is not set we just use the endpoint port
+			if svcPort.Name != "" && svcPort.Name != *port.Name {
+				klog.V(5).Infof("Slice %s with different Port name, requested: %s received: %s",
+					slice.Name, svcPort.Name, *port.Name)
+				continue
+			}
+
+			// Skip ports that doesn't match the protocol
+			if *port.Protocol != svcPort.Protocol {
+				klog.V(5).Infof("Slice %s with different Port protocol, requested: %s received: %s",
+					slice.Name, svcPort.Protocol, *port.Protocol)
+				continue
+			}
+
+			lbEps.Port = *port.Port
+			for _, endpoint := range slice.Endpoints {
+				// Skip endpoints that are not ready
+				if endpoint.Conditions.Ready != nil && !*endpoint.Conditions.Ready {
+					klog.V(4).Infof("Slice endpoints Not Ready")
+					continue
+				}
+				for _, ip := range endpoint.Addresses {
+					klog.V(4).Infof("Adding slice %s endpoints: %v, port: %d", slice.Name, endpoint.Addresses, *port.Port)
+					epsSet.Insert(ip)
+				}
+			}
+		}
+	}
+
+	lbEps.IPs = epsSet.List()
+	klog.V(4).Infof("LB Endpoints for %s are: %v on port: %d", slices[0].Labels[discovery.LabelServiceName],
+		lbEps.IPs, lbEps.Port)
+	return lbEps
+}
+
+// HasValidEndpoint returns true if at least one valid endpoint is contained in the given
+// slices
+func HasValidEndpoint(service *kapi.Service, slices []*discovery.EndpointSlice) bool {
+	if slices == nil {
+		return false
+	}
+	if len(slices) == 0 {
+		return false
+	}
+	for _, ip := range GetClusterIPs(service) {
+		family := kapi.IPv4Protocol
+		if utilnet.IsIPv6String(ip) {
+			family = kapi.IPv6Protocol
+		}
+		for _, svcPort := range service.Spec.Ports {
+			eps := GetLbEndpoints(slices, svcPort, family)
+			if len(eps.IPs) > 0 {
+				return true
+			}
+		}
 	}
 	return false
 }

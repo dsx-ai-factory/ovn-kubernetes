@@ -12,6 +12,7 @@ import (
 	kexec "k8s.io/utils/exec"
 
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	. "github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
@@ -112,12 +113,13 @@ var _ = AfterSuite(func() {
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 })
 
-func createTempFile(name string) (string, error) {
+func createTempFile(name string) (string, []byte, error) {
+	fileData := []byte{0x20}
 	fname := filepath.Join(tmpDir, name)
-	if err := ioutil.WriteFile(fname, []byte{0x20}, 0644); err != nil {
-		return "", err
+	if err := ioutil.WriteFile(fname, fileData, 0644); err != nil {
+		return "", nil, err
 	}
-	return fname, nil
+	return fname, fileData, nil
 }
 
 func createTempFileContent(name, value string) (string, error) {
@@ -135,6 +137,8 @@ func writeTestConfigFile(path string, overrides ...string) error {
 mtu=1500
 conntrack-zone=64321
 cluster-subnets=10.132.0.0/14/23
+lflow-cache-limit=1000
+lflow-cache-limit-kb=100000
 
 [kubernetes]
 kubeconfig=/path/to/kubeconfig
@@ -147,6 +151,11 @@ no-hostsubnet-nodes=label=another-test-label
 [logging]
 loglevel=5
 logfile=/var/log/ovnkube.log
+
+[monitoring]
+netflow-targets=2.2.2.2:2055
+sflow-targets=2.2.2.2:2056
+ipfix-targets=2.2.2.2:2057
 
 [cni]
 conf-dir=/etc/cni/net.d22
@@ -174,10 +183,14 @@ vlan-id=10
 nodeport=false
 v4-join-subnet=100.65.0.0/16
 v6-join-subnet=fd90::/64
+router-subnet=10.50.0.0/16
 
 [hybridoverlay]
 enabled=true
 cluster-subnets=11.132.0.0/14/23
+
+[ovnkubenode]
+mode=full
 `
 
 	var newData string
@@ -232,12 +245,19 @@ var _ = Describe("Config Operations", func() {
 
 			gomega.Expect(Default.MTU).To(gomega.Equal(1400))
 			gomega.Expect(Default.ConntrackZone).To(gomega.Equal(64000))
+			gomega.Expect(Default.LFlowCacheEnable).To(gomega.BeTrue())
+			gomega.Expect(Default.LFlowCacheLimit).To(gomega.Equal(uint(0)))
+			gomega.Expect(Default.LFlowCacheLimitKb).To(gomega.Equal(uint(0)))
 			gomega.Expect(Logging.File).To(gomega.Equal(""))
 			gomega.Expect(Logging.Level).To(gomega.Equal(5))
+			gomega.Expect(Monitoring.RawNetFlowTargets).To(gomega.Equal(""))
+			gomega.Expect(Monitoring.RawSFlowTargets).To(gomega.Equal(""))
+			gomega.Expect(Monitoring.RawIPFIXTargets).To(gomega.Equal(""))
 			gomega.Expect(CNI.ConfDir).To(gomega.Equal("/etc/cni/net.d"))
 			gomega.Expect(CNI.Plugin).To(gomega.Equal("ovn-k8s-cni-overlay"))
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(""))
 			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(""))
+			gomega.Expect(Kubernetes.CAData).To(gomega.Equal([]byte{}))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal(""))
 			gomega.Expect(Kubernetes.APIServer).To(gomega.Equal(DefaultAPIServer))
 			gomega.Expect(Kubernetes.RawServiceCIDRs).To(gomega.Equal("172.16.1.0/24"))
@@ -248,6 +268,9 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(IPv4Mode).To(gomega.Equal(true))
 			gomega.Expect(IPv6Mode).To(gomega.Equal(false))
 			gomega.Expect(HybridOverlay.Enabled).To(gomega.Equal(false))
+			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeFull))
+			gomega.Expect(OvnKubeNode.MgmtPortNetdev).To(gomega.Equal(""))
+			gomega.Expect(Gateway.RouterSubnet).To(gomega.Equal(""))
 
 			for _, a := range []OvnAuthConfig{OvnNorth, OvnSouth} {
 				gomega.Expect(a.Scheme).To(gomega.Equal(OvnDBSchemeUnix))
@@ -279,7 +302,7 @@ var _ = Describe("Config Operations", func() {
 				Output: "asadfasdfasrw3atr3r3rf33fasdaa3233",
 			})
 			// k8s-ca-certificate
-			fname, err := createTempFile("ca.crt")
+			fname, fdata, err := createTempFile("ca.crt")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:k8s-ca-certificate",
@@ -303,6 +326,7 @@ var _ = Describe("Config Operations", func() {
 
 			gomega.Expect(Kubernetes.APIServer).To(gomega.Equal("https://somewhere.com:8081"))
 			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(fname))
+			gomega.Expect(Kubernetes.CAData).To(gomega.Equal(fdata))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal("asadfasdfasrw3atr3r3rf33fasdaa3233"))
 
 			gomega.Expect(OvnNorth.Scheme).To(gomega.Equal(OvnDBSchemeTCP))
@@ -341,7 +365,7 @@ var _ = Describe("Config Operations", func() {
 				Output: "asadfasdfasrw3atr3r3rf33fasdaa3233",
 			})
 			// k8s-ca-certificate
-			fname, err := createTempFile("kube-cacert.pem")
+			fname, fdata, err := createTempFile("kube-cacert.pem")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:k8s-ca-certificate",
@@ -369,6 +393,7 @@ var _ = Describe("Config Operations", func() {
 
 			gomega.Expect(Kubernetes.APIServer).To(gomega.Equal("https://somewhere.com:8081"))
 			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(fname))
+			gomega.Expect(Kubernetes.CAData).To(gomega.Equal(fdata))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal("asadfasdfasrw3atr3r3rf33fasdaa3233"))
 
 			gomega.Expect(OvnNorth.Scheme).To(gomega.Equal(OvnDBSchemeTCP))
@@ -393,9 +418,9 @@ var _ = Describe("Config Operations", func() {
 	})
 
 	It("uses serviceaccount files", func() {
-		kubeCAcertFile, err := createTempFile("ca.crt")
+		caFile, caData, err := createTempFile("ca.crt")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		defer os.Remove(kubeCAcertFile)
+		defer os.Remove(caFile)
 
 		tokenFile, err1 := createTempFileContent("token", "TG9yZW0gaXBzdW0gZ")
 		gomega.Expect(err1).NotTo(gomega.HaveOccurred())
@@ -405,7 +430,8 @@ var _ = Describe("Config Operations", func() {
 			_, err := InitConfigSa(ctx, kexec.New(), tmpDir, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(kubeCAcertFile))
+			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(caFile))
+			gomega.Expect(Kubernetes.CAData).To(gomega.Equal(caData))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal("TG9yZW0gaXBzdW0gZ"))
 
 			return nil
@@ -416,7 +442,7 @@ var _ = Describe("Config Operations", func() {
 	})
 
 	It("uses environment variables", func() {
-		kubeconfigEnvFile, err := createTempFile("kubeconfig.env")
+		kubeconfigEnvFile, _, err := createTempFile("kubeconfig.env")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeconfigEnvFile)
 		os.Setenv("KUBECONFIG", kubeconfigEnvFile)
@@ -428,7 +454,7 @@ var _ = Describe("Config Operations", func() {
 		os.Setenv("K8S_APISERVER", "https://9.2.3.4:6443")
 		defer os.Setenv("K8S_APISERVER", "")
 
-		kubeCAFile, err1 := createTempFile("kube-ca.crt")
+		kubeCAFile, kubeCAData, err1 := createTempFile("kube-ca.crt")
 		gomega.Expect(err1).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeCAFile)
 		os.Setenv("K8S_CACERT", kubeCAFile)
@@ -442,6 +468,7 @@ var _ = Describe("Config Operations", func() {
 
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(kubeconfigEnvFile))
 			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(kubeCAFile))
+			gomega.Expect(Kubernetes.CAData).To(gomega.Equal(kubeCAData))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal("this is the  token test"))
 			gomega.Expect(Kubernetes.APIServer).To(gomega.Equal("https://9.2.3.4:6443"))
 
@@ -453,11 +480,11 @@ var _ = Describe("Config Operations", func() {
 	})
 
 	It("overrides defaults with config file options", func() {
-		kubeconfigFile, err := createTempFile("kubeconfig")
+		kubeconfigFile, _, err := createTempFile("kubeconfig")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeconfigFile)
 
-		kubeCAFile, err := createTempFile("kube-ca.crt")
+		kubeCAFile, kubeCAData, err := createTempFile("kube-ca.crt")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeCAFile)
 
@@ -472,13 +499,20 @@ var _ = Describe("Config Operations", func() {
 
 			gomega.Expect(Default.MTU).To(gomega.Equal(1500))
 			gomega.Expect(Default.ConntrackZone).To(gomega.Equal(64321))
+			gomega.Expect(Default.LFlowCacheEnable).To(gomega.BeTrue())
+			gomega.Expect(Default.LFlowCacheLimit).To(gomega.Equal(uint(1000)))
+			gomega.Expect(Default.LFlowCacheLimitKb).To(gomega.Equal(uint(100000)))
 			gomega.Expect(Logging.File).To(gomega.Equal("/var/log/ovnkube.log"))
 			gomega.Expect(Logging.Level).To(gomega.Equal(5))
 			gomega.Expect(Logging.ACLLoggingRateLimit).To(gomega.Equal(20))
+			gomega.Expect(Monitoring.RawNetFlowTargets).To(gomega.Equal("2.2.2.2:2055"))
+			gomega.Expect(Monitoring.RawSFlowTargets).To(gomega.Equal("2.2.2.2:2056"))
+			gomega.Expect(Monitoring.RawIPFIXTargets).To(gomega.Equal("2.2.2.2:2057"))
 			gomega.Expect(CNI.ConfDir).To(gomega.Equal("/etc/cni/net.d22"))
 			gomega.Expect(CNI.Plugin).To(gomega.Equal("ovn-k8s-cni-overlay22"))
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(kubeconfigFile))
 			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(kubeCAFile))
+			gomega.Expect(Kubernetes.CAData).To(gomega.Equal(kubeCAData))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal("TG9yZW0gaXBzdW0gZ"))
 			gomega.Expect(Kubernetes.APIServer).To(gomega.Equal("https://1.2.3.4:6443"))
 			gomega.Expect(Kubernetes.RawServiceCIDRs).To(gomega.Equal("172.18.0.0/24"))
@@ -507,6 +541,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Gateway.NodeportEnable).To(gomega.BeFalse())
 			gomega.Expect(Gateway.V4JoinSubnet).To(gomega.Equal("100.65.0.0/16"))
 			gomega.Expect(Gateway.V6JoinSubnet).To(gomega.Equal("fd90::/64"))
+			gomega.Expect(Gateway.RouterSubnet).To(gomega.Equal("10.50.0.0/16"))
 
 			gomega.Expect(HybridOverlay.Enabled).To(gomega.BeTrue())
 			gomega.Expect(HybridOverlay.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
@@ -520,11 +555,11 @@ var _ = Describe("Config Operations", func() {
 	})
 
 	It("overrides config file and defaults with CLI options", func() {
-		kubeconfigFile, err := createTempFile("kubeconfig")
+		kubeconfigFile, _, err := createTempFile("kubeconfig")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeconfigFile)
 
-		kubeCAFile, err := createTempFile("kube-ca.crt")
+		kubeCAFile, kubeCAData, err := createTempFile("kube-ca.crt")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeCAFile)
 
@@ -539,6 +574,9 @@ var _ = Describe("Config Operations", func() {
 
 			gomega.Expect(Default.MTU).To(gomega.Equal(1234))
 			gomega.Expect(Default.ConntrackZone).To(gomega.Equal(5555))
+			gomega.Expect(Default.LFlowCacheEnable).To(gomega.BeTrue())
+			gomega.Expect(Default.LFlowCacheLimit).To(gomega.Equal(uint(500)))
+			gomega.Expect(Default.LFlowCacheLimitKb).To(gomega.Equal(uint(50000)))
 			gomega.Expect(Logging.File).To(gomega.Equal("/some/logfile"))
 			gomega.Expect(Logging.Level).To(gomega.Equal(3))
 			gomega.Expect(Logging.ACLLoggingRateLimit).To(gomega.Equal(30))
@@ -546,6 +584,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(CNI.Plugin).To(gomega.Equal("a-plugin"))
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(kubeconfigFile))
 			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(kubeCAFile))
+			gomega.Expect(Kubernetes.CAData).To(gomega.Equal(kubeCAData))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal("asdfasdfasdfasfd"))
 			gomega.Expect(Kubernetes.APIServer).To(gomega.Equal("https://4.4.3.2:8080"))
 			gomega.Expect(Kubernetes.RawServiceCIDRs).To(gomega.Equal("172.15.0.0/24"))
@@ -572,11 +611,13 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Gateway.NodeportEnable).To(gomega.BeTrue())
 			gomega.Expect(Gateway.V4JoinSubnet).To(gomega.Equal("100.63.0.0/16"))
 			gomega.Expect(Gateway.V6JoinSubnet).To(gomega.Equal("fd99::/48"))
+			gomega.Expect(Gateway.RouterSubnet).To(gomega.Equal("10.55.0.0/16"))
 
 			gomega.Expect(HybridOverlay.Enabled).To(gomega.BeTrue())
 			gomega.Expect(HybridOverlay.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("11.132.0.0/14"), 23},
 			}))
+
 			return nil
 		}
 		cliArgs := []string{
@@ -584,6 +625,8 @@ var _ = Describe("Config Operations", func() {
 			"-config-file=" + cfgFile.Name(),
 			"-mtu=1234",
 			"-conntrack-zone=5555",
+			"-lflow-cache-limit=500",
+			"-lflow-cache-limit-kb=50000",
 			"-loglevel=3",
 			"-logfile=/some/logfile",
 			"-acl-logging-rate-limit=30",
@@ -610,6 +653,7 @@ var _ = Describe("Config Operations", func() {
 			"-nodeport",
 			"-gateway-v4-join-subnet=100.63.0.0/16",
 			"-gateway-v6-join-subnet=fd99::/48",
+			"-gateway-router-subnet=10.55.0.0/16",
 			"-enable-hybrid-overlay",
 			"-hybrid-overlay-cluster-subnets=11.132.0.0/14/23",
 		}
@@ -834,11 +878,11 @@ mode=shared
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 	It("overrides config file and defaults with CLI options (multi-master)", func() {
-		kubeconfigFile, err := createTempFile("kubeconfig")
+		kubeconfigFile, _, err := createTempFile("kubeconfig")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeconfigFile)
 
-		kubeCAFile, err := createTempFile("kube-ca.crt")
+		kubeCAFile, kubeCAData, err := createTempFile("kube-ca.crt")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeCAFile)
 
@@ -853,12 +897,19 @@ mode=shared
 
 			gomega.Expect(Default.MTU).To(gomega.Equal(1234))
 			gomega.Expect(Default.ConntrackZone).To(gomega.Equal(5555))
+			gomega.Expect(Default.LFlowCacheEnable).To(gomega.BeTrue())
+			gomega.Expect(Default.LFlowCacheLimit).To(gomega.Equal(uint(500)))
+			gomega.Expect(Default.LFlowCacheLimitKb).To(gomega.Equal(uint(50000)))
 			gomega.Expect(Logging.File).To(gomega.Equal("/some/logfile"))
 			gomega.Expect(Logging.Level).To(gomega.Equal(3))
+			gomega.Expect(Monitoring.RawNetFlowTargets).To(gomega.Equal("2.2.2.2:2055"))
+			gomega.Expect(Monitoring.RawSFlowTargets).To(gomega.Equal("2.2.2.2:2056"))
+			gomega.Expect(Monitoring.RawIPFIXTargets).To(gomega.Equal("2.2.2.2:2057"))
 			gomega.Expect(CNI.ConfDir).To(gomega.Equal("/some/cni/dir"))
 			gomega.Expect(CNI.Plugin).To(gomega.Equal("a-plugin"))
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(kubeconfigFile))
 			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(kubeCAFile))
+			gomega.Expect(Kubernetes.CAData).To(gomega.Equal(kubeCAData))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal("asdfasdfasdfasfd"))
 			gomega.Expect(Kubernetes.APIServer).To(gomega.Equal("https://4.4.3.2:8080"))
 			gomega.Expect(Kubernetes.RawNoHostSubnetNodes).To(gomega.Equal("label=another-test-label"))
@@ -887,8 +938,13 @@ mode=shared
 			"-config-file=" + cfgFile.Name(),
 			"-mtu=1234",
 			"-conntrack-zone=5555",
+			"-lflow-cache-limit=500",
+			"-lflow-cache-limit-kb=50000",
 			"-loglevel=3",
 			"-logfile=/some/logfile",
+			"-netflow-targets=2.2.2.2:2055",
+			"-sflow-targets=2.2.2.2:2056",
+			"-ipfix-targets=2.2.2.2:2057",
 			"-cni-conf-dir=/some/cni/dir",
 			"-cni-plugin=a-plugin",
 			"-k8s-kubeconfig=" + kubeconfigFile,
@@ -912,11 +968,11 @@ mode=shared
 	})
 
 	It("does not override config file settings with default cli options", func() {
-		kubeconfigFile, err := createTempFile("kubeconfig")
+		kubeconfigFile, _, err := createTempFile("kubeconfig")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeconfigFile)
 
-		kubeCAFile, err := createTempFile("kube-ca.crt")
+		kubeCAFile, kubeCAData, err := createTempFile("kube-ca.crt")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeCAFile)
 
@@ -931,6 +987,9 @@ mode=shared
 
 			gomega.Expect(Default.MTU).To(gomega.Equal(1500))
 			gomega.Expect(Default.ConntrackZone).To(gomega.Equal(64321))
+			gomega.Expect(Default.LFlowCacheEnable).To(gomega.BeTrue())
+			gomega.Expect(Default.LFlowCacheLimit).To(gomega.Equal(uint(1000)))
+			gomega.Expect(Default.LFlowCacheLimitKb).To(gomega.Equal(uint(100000)))
 			gomega.Expect(Default.RawClusterSubnets).To(gomega.Equal("10.132.0.0/14/23"))
 			gomega.Expect(Default.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("10.132.0.0/14"), 23},
@@ -941,6 +1000,7 @@ mode=shared
 			gomega.Expect(CNI.Plugin).To(gomega.Equal("ovn-k8s-cni-overlay22"))
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(kubeconfigFile))
 			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(kubeCAFile))
+			gomega.Expect(Kubernetes.CAData).To(gomega.Equal(kubeCAData))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal("TG9yZW0gaXBzdW0gZ"))
 			gomega.Expect(Kubernetes.RawServiceCIDRs).To(gomega.Equal("172.18.0.0/24"))
 
@@ -1105,9 +1165,9 @@ mode=shared
 
 		BeforeEach(func() {
 			var err error
-			certFile, err = createTempFile("cert.crt")
+			certFile, _, err = createTempFile("cert.crt")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			keyFile, err = createTempFile("priv.key")
+			keyFile, _, err = createTempFile("priv.key")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			caFile = filepath.Join(tmpDir, "ca.crt")
 		})
@@ -1263,7 +1323,7 @@ mode=shared
 	Describe("Kubernetes config options", func() {
 		Context("returns an error when the", func() {
 			generateTestsSimple("CA cert does not exist",
-				"kubernetes CA certificate file \"/foo/bar/baz.cert\" not found",
+				"open /foo/bar/baz.cert: no such file or directory",
 				"-k8s-apiserver=https://localhost:8443", "-k8s-cacert=/foo/bar/baz.cert")
 
 			generateTestsSimple("apiserver URL scheme is invalid",
@@ -1285,11 +1345,11 @@ mode=shared
 
 		BeforeEach(func() {
 			var err error
-			certFile, err = createTempFile("cert.crt")
+			certFile, _, err = createTempFile("cert.crt")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			keyFile, err = createTempFile("priv.key")
+			keyFile, _, err = createTempFile("priv.key")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			caFile, err = createTempFile("ca.crt")
+			caFile, _, err = createTempFile("ca.crt")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
@@ -1367,6 +1427,104 @@ mode=shared
 						"cert-common-name=foobar",
 					}
 				})
+		})
+	})
+
+	Describe("OVN Kube Node config", func() {
+		// NOTE: We test this here as the test that overrides values also sets hybridOverlay to true
+		// which yields an invalid configuration.
+		It("Overrides value from Config file", func() {
+			cliConfig := config{
+				OvnKubeNode: OvnKubeNodeConfig{
+					Mode: types.NodeModeFull,
+				},
+			}
+			file := config{
+				OvnKubeNode: OvnKubeNodeConfig{
+					Mode:           types.NodeModeSmartNIC,
+					MgmtPortNetdev: "enp1s0f0v0",
+				},
+			}
+			err := buildOvnKubeNodeConfig(nil, &cliConfig, &file)
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeSmartNIC))
+			gomega.Expect(OvnKubeNode.MgmtPortNetdev).To(gomega.Equal("enp1s0f0v0"))
+		})
+
+		It("Overrides value from CLI", func() {
+			cliConfig := config{
+				OvnKubeNode: OvnKubeNodeConfig{
+					Mode:           types.NodeModeSmartNIC,
+					MgmtPortNetdev: "enp1s0f0v0",
+				},
+			}
+			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeSmartNIC))
+			gomega.Expect(OvnKubeNode.MgmtPortNetdev).To(gomega.Equal("enp1s0f0v0"))
+		})
+
+		It("Fails with unsupported mode", func() {
+			cliConfig := config{
+				OvnKubeNode: OvnKubeNodeConfig{
+					Mode: "invalid",
+				},
+			}
+			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("unexpected ovnkube-node-mode"))
+		})
+
+		It("Fails if hybrid overlay is enabled and ovnkube node mode is not full", func() {
+			HybridOverlay.Enabled = true
+			cliConfig := config{
+				OvnKubeNode: OvnKubeNodeConfig{
+					Mode: types.NodeModeSmartNIC,
+				},
+			}
+			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring(
+				"hybrid overlay is not supported with ovnkube-node mode"))
+		})
+
+		It("Fails if management port is not provided and ovnkube node mode is smart-nic", func() {
+			cliConfig := config{
+				OvnKubeNode: OvnKubeNodeConfig{
+					Mode: types.NodeModeSmartNIC,
+				},
+			}
+			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("ovnkube-node-mgmt-port-netdev must be provided"))
+		})
+
+		It("Fails if management port is not provided and ovnkube node mode is smart-nic-host", func() {
+			cliConfig := config{
+				OvnKubeNode: OvnKubeNodeConfig{
+					Mode: types.NodeModeSmartNICHost,
+				},
+			}
+			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("ovnkube-node-mgmt-port-netdev must be provided"))
+		})
+
+		It("Fails if management port is provided but ovnkube node mode is full", func() {
+			cliConfig := config{
+				OvnKubeNode: OvnKubeNodeConfig{
+					Mode:           types.NodeModeFull,
+					MgmtPortNetdev: "ens1f0v0",
+				},
+			}
+			file := config{
+				OvnKubeNode: OvnKubeNodeConfig{
+					Mode: types.NodeModeFull,
+				},
+			}
+			err := buildOvnKubeNodeConfig(nil, &cliConfig, &file)
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("ovnkube-node-mgmt-port-netdev is not supported"))
 		})
 	})
 })

@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/pkg/errors"
+	utilnet "k8s.io/utils/net"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -12,19 +15,78 @@ import (
 	"k8s.io/klog/v2"
 )
 
+const (
+	// used to indicate if the service is running on node load balancers
+	NodeLoadBalancer = "NodeLoadBalancer"
+	// used to indicate if the service is running on idling load balancers
+	IdlingLoadBalancer = "IdlingLoadBalancer"
+)
+
+type NotFoundError struct {
+	What string
+}
+
+func (e NotFoundError) Error() string {
+	return e.What + " not found"
+}
+
+var LBNotFound = NotFoundError{What: "Load balancer"}
+
 // GetOVNKubeLoadBalancer returns the LoadBalancer matching the protocol
-// in the OVN database using the external_ids = k8s-cluster-lb-${protocol}
 func GetOVNKubeLoadBalancer(protocol kapi.Protocol) (string, error) {
-	id := fmt.Sprintf("external_ids:k8s-cluster-lb-%s=yes", strings.ToLower(string(protocol)))
-	out, _, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid",
-		"find", "load_balancer", id)
+	return getLoadBalancerByProtocolType(protocol, types.ClusterLBPrefix)
+}
+
+// GetOVNKubeIdlingLoadBalancer returns the LoadBalancer matching the protocol
+func GetOVNKubeIdlingLoadBalancer(protocol kapi.Protocol) (string, error) {
+	return getLoadBalancerByProtocolType(protocol, types.ClusterIdlingLBPrefix)
+}
+
+func getLoadBalancerByProtocolType(protocol kapi.Protocol, idkey string) (string, error) {
+	id, value := fmt.Sprintf("%s-%s", idkey, strings.ToLower(string(protocol))), "yes"
+	res, _, err := util.FindOVNLoadBalancer(id, value)
 	if err != nil {
+		return "", errors.Wrapf(err, "Failed to get ovnkube balancer %v %s", protocol, idkey)
+	}
+	if res == "" {
+		return "", LBNotFound
+	}
+	return res, nil
+}
+
+// CreateLoadBalancer creates the loadbalancer if it doesn´t exist to avoid
+// consumers to create duplicate loadbalancers with the same name and externalID
+func CreateLoadBalancer(protocol kapi.Protocol, idkey string) (string, error) {
+	lbUUID, err := getLoadBalancerByProtocolType(protocol, idkey)
+	if err != nil && !errors.Is(err, LBNotFound) {
+		return "", errors.Wrapf(err, "Failed to get OVN load balancer for protocol %s", protocol)
+	}
+	// create the load balancer if it doesn't exist yet
+	if lbUUID == "" {
+		lbUUID, err = createLoadBalancer(protocol, idkey)
+		if err != nil {
+			return "", errors.Wrapf(err, "Failed to create OVN load balancer for protocol %s", protocol)
+		}
+	}
+	return lbUUID, nil
+}
+
+// createLoadBalancer creates a loadbalancer for the specified protocol
+// all loadbalancers but idling ones reject packets for vips without endpoints by default
+func createLoadBalancer(protocol kapi.Protocol, idkey string) (string, error) {
+	id := fmt.Sprintf("external_ids:%s-%s=yes", idkey, strings.ToLower(string(protocol)))
+	proto := fmt.Sprintf("protocol=%s", strings.ToLower(string(protocol)))
+	reject := true
+	if idkey == types.ClusterIdlingLBPrefix {
+		reject = false
+	}
+	options := fmt.Sprintf("options:reject=%t", reject)
+	lbID, stderr, err := util.RunOVNNbctl("create", "load_balancer", id, proto, options)
+	if err != nil {
+		klog.Errorf("Failed to create %s load balancer, stderr: %q, error: %v", protocol, stderr, err)
 		return "", err
 	}
-	if out == "" {
-		return "", fmt.Errorf("no load balancer found in the database")
-	}
-	return out, nil
+	return lbID, nil
 }
 
 // GetLoadBalancerVIPs returns a map whose keys are VIPs (IP:port) on loadBalancer
@@ -50,14 +112,27 @@ func GetLoadBalancerVIPs(loadBalancer string) (map[string]string, error) {
 }
 
 // DeleteLoadBalancerVIP removes the VIP as well as any reject ACLs associated to the LB
-func DeleteLoadBalancerVIP(loadBalancer, vip string) error {
+func DeleteLoadBalancerVIP(txn *util.NBTxn, loadBalancer, vip string) error {
 	vipQuotes := fmt.Sprintf("\"%s\"", vip)
-	stdout, stderr, err := util.RunOVNNbctl("--if-exists", "remove", "load_balancer", loadBalancer, "vips", vipQuotes)
+	request := []string{"--if-exists", "remove", "load_balancer", loadBalancer, "vips", vipQuotes}
+	stdout, stderr, err := txn.AddOrCommit(request)
 	if err != nil {
 		// if we hit an error and fail to remove load balancer, we skip removing the rejectACL
 		return fmt.Errorf("error in deleting load balancer vip %s for %s"+
 			"stdout: %q, stderr: %q, error: %v",
 			vip, loadBalancer, stdout, stderr, err)
+	}
+	return nil
+}
+
+// DeleteLoadBalancerVIPs removes the VIPs across lbs in a single shot
+func DeleteLoadBalancerVIPs(txn *util.NBTxn, loadBalancers, vips []string) error {
+	for _, loadBalancer := range loadBalancers {
+		for _, vip := range vips {
+			if err := DeleteLoadBalancerVIP(txn, loadBalancer, vip); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -142,12 +217,116 @@ func GenerateACLName(lb string, sourceIP string, sourcePort int32) string {
 	return aclName
 }
 
-// GenerateACLNameForOVNCommand sanitize the ACL name because the generateACLName
-// function was including backslash escapes for the ACL
-// name for use in OVN commands that have trouble with literal ":". That
-// was causing a mismatch when services were syncing because the name
-// actually returned from an OVN command does not include any backslashes
-// so the names would not match. #1749
-func GenerateACLNameForOVNCommand(lb string, sourceIP string, sourcePort int32) string {
-	return strings.ReplaceAll(GenerateACLName(lb, sourceIP, sourcePort), ":", "\\:")
+func GetWorkerLoadBalancer(node string, protocol kapi.Protocol) (string, error) {
+	var out string
+	var err error
+	if protocol == kapi.ProtocolTCP {
+		out, _, err = util.FindOVNLoadBalancer(types.WorkerLBTCP, node)
+	} else if protocol == kapi.ProtocolUDP {
+		out, _, err = util.FindOVNLoadBalancer(types.WorkerLBUDP, node)
+	} else if protocol == kapi.ProtocolSCTP {
+		out, _, err = util.FindOVNLoadBalancer(types.WorkerLBSCTP, node)
+	}
+	if err != nil {
+		return "", err
+	}
+	if out == "" {
+		return "", fmt.Errorf("no %s load balancer found in the database for worker %s", protocol, node)
+	}
+
+	return out, nil
+}
+
+// GetWorkerLoadBalancers find TCP, SCTP, UDP load-balancers from worker
+func GetWorkerLoadBalancers(node string) (string, string, string, error) {
+	lbTCP, stderr, err := util.FindOVNLoadBalancer(types.WorkerLBTCP, node)
+	if err != nil {
+		return "", "", "", errors.Wrapf(err, "failed to get gateway router %q TCP "+
+			"load balancer, stderr: %q", node, stderr)
+	}
+
+	lbUDP, stderr, err := util.FindOVNLoadBalancer(types.WorkerLBUDP, node)
+	if err != nil {
+		return "", "", "", errors.Wrapf(err, "failed to get gateway router %q UDP "+
+			"load balancer, stderr: %q", node, stderr)
+	}
+
+	lbSCTP, stderr, err := util.FindOVNLoadBalancer(types.WorkerLBSCTP, node)
+	if err != nil {
+		return "", "", "", errors.Wrapf(err, "failed to get gateway router %q SCTP "+
+			"load balancer, stderr: %q", node, stderr)
+	}
+	return lbTCP, lbUDP, lbSCTP, nil
+}
+
+// CreateLoadBalancerVIPs either creates or updates a set of load balancer VIPs mapping
+// from SourcePort on each IP of a given address family in sourceIPs, to TargetPort on
+// each IP of the same address family in TargetIPs
+func CreateLoadBalancerVIPs(lb string,
+	sourceIPs []string, sourcePort int32,
+	targetIPs []string, targetPort int32) error {
+	klog.V(5).Infof("Creating lb with %s, [%v], %d, [%v], %d", lb, sourceIPs, sourcePort, targetIPs, targetPort)
+	txn := util.NewNBTxn()
+	for _, sourceIP := range sourceIPs {
+		isIPv6 := utilnet.IsIPv6String(sourceIP)
+
+		var targets []string
+		for _, targetIP := range targetIPs {
+			if utilnet.IsIPv6String(targetIP) == isIPv6 {
+				targets = append(targets, util.JoinHostPortInt32(targetIP, targetPort))
+			}
+		}
+		vip := util.JoinHostPortInt32(sourceIP, sourcePort)
+		lbTarget := fmt.Sprintf(`vips:"%s"="%s"`, vip, strings.Join(targets, ","))
+		request := []string{"set", "load_balancer", lb, lbTarget}
+		_, stderr, err := txn.AddOrCommit(request)
+		if err != nil {
+			return fmt.Errorf("unable to create load balancer: stderr: %s, err: %v", stderr, err)
+		}
+	}
+	_, stderr, err := txn.Commit()
+	if err != nil {
+		return fmt.Errorf("unable to create load balancer: stderr: %s, err: %v", stderr, err)
+	}
+	return nil
+}
+
+type Entry struct {
+	LoadBalancer string
+	SourceIPS    []string
+	SourcePort   int32
+	TargetIPs    []string
+	TargetPort   int32
+}
+
+// BundleCreateLoadBalancerVIPs is the same as CreateLoadBalancerVIPs but batches multiple load balancer config
+// together into a single transaction
+// creates or updates a set of load balancer VIPs mapping
+// from SourcePort on each IP of a given address family in sourceIPs, to TargetPort on
+// each IP of the same address family in TargetIPs
+func BundleCreateLoadBalancerVIPs(lbEntries []Entry) error {
+	txn := util.NewNBTxn()
+	for _, entry := range lbEntries {
+		for _, sourceIP := range entry.SourceIPS {
+			isIPv6 := utilnet.IsIPv6String(sourceIP)
+			var targets []string
+			for _, targetIP := range entry.TargetIPs {
+				if utilnet.IsIPv6String(targetIP) == isIPv6 {
+					targets = append(targets, util.JoinHostPortInt32(targetIP, entry.TargetPort))
+				}
+			}
+			vip := util.JoinHostPortInt32(sourceIP, entry.SourcePort)
+			lbTarget := fmt.Sprintf(`vips:"%s"="%s"`, vip, strings.Join(targets, ","))
+			request := []string{"set", "load_balancer", entry.LoadBalancer, lbTarget}
+			_, stderr, err := txn.AddOrCommit(request)
+			if err != nil {
+				return fmt.Errorf("unable to create load balancer bundle: stderr: %s, err: %v", stderr, err)
+			}
+		}
+	}
+	_, stderr, err := txn.Commit()
+	if err != nil {
+		return fmt.Errorf("unable to create load balancer bundle: stderr: %s, err: %v", stderr, err)
+	}
+	return nil
 }

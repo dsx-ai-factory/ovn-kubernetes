@@ -14,7 +14,6 @@ import (
 	icmpnetworkpolicylister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1/apis/listers/icmpnetworkpolicy/v1alpha1"
 
 	egressiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
-	apiextensionslister "k8s.io/apiextensions-apiserver/pkg/client/listers/apiextensions/v1beta1"
 	discoverylisters "k8s.io/client-go/listers/discovery/v1beta1"
 
 	listers "k8s.io/client-go/listers/core/v1"
@@ -312,8 +311,6 @@ func newInformerLister(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		return nil, nil
 	case egressFirewallType:
 		return egressfirewalllister.NewEgressFirewallLister(sharedInformer.GetIndexer()), nil
-	case crdType:
-		return apiextensionslister.NewCustomResourceDefinitionLister(sharedInformer.GetIndexer()), nil
 	case icmpNetworkPolicyType:
 		return icmpnetworkpolicylister.NewICMPNetworkPolicyLister(sharedInformer.GetIndexer()), nil
 	case egressIPType:

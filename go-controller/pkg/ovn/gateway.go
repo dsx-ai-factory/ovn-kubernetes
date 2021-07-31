@@ -12,6 +12,10 @@ import (
 	"k8s.io/klog/v2"
 )
 
+func (ovn *Controller) getGatewayPhysicalIPs(gatewayRouter string) ([]string, error) {
+	return gateway.GetGatewayPhysicalIPs(gatewayRouter)
+}
+
 func (ovn *Controller) getGatewayLoadBalancer(gatewayRouter string, protocol kapi.Protocol) (string, error) {
 	return gateway.GetGatewayLoadBalancer(gatewayRouter, protocol)
 }

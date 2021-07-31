@@ -3,6 +3,7 @@ package kube
 import (
 	"context"
 	"encoding/json"
+
 	"k8s.io/klog/v2"
 
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
@@ -13,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/client-go/kubernetes"
 	kv1core "k8s.io/client-go/kubernetes/typed/core/v1"
 )
@@ -20,10 +22,13 @@ import (
 // Interface represents the exported methods for dealing with getting/setting
 // kubernetes resources
 type Interface interface {
-	SetAnnotationsOnPod(pod *kapi.Pod, annotations map[string]string) error
+	SetAnnotationsOnPod(namespace, podName string, annotations map[string]string) error
 	SetLabelsOnPod(pod *kapi.Pod, labels map[string]string) error
 	SetAnnotationsOnNode(node *kapi.Node, annotations map[string]interface{}) error
 	SetAnnotationsOnNamespace(namespace *kapi.Namespace, annotations map[string]string) error
+	SetTaintOnNode(nodeName string, taint *kapi.Taint) error
+	RemoveTaintFromNode(nodeName string, taint *kapi.Taint) error
+	PatchNode(old, new *kapi.Node) error
 	UpdateEgressFirewall(egressfirewall *egressfirewall.EgressFirewall) error
 	UpdateEgressIP(eIP *egressipv1.EgressIP) error
 	UpdateNodeStatus(node *kapi.Node) error
@@ -31,6 +36,7 @@ type Interface interface {
 	GetNodes() (*kapi.NodeList, error)
 	GetEgressIP(name string) (*egressipv1.EgressIP, error)
 	GetEgressIPs() (*egressipv1.EgressIPList, error)
+	GetEgressFirewalls() (*egressfirewall.EgressFirewallList, error)
 	GetNamespaces(labelSelector metav1.LabelSelector) (*kapi.NamespaceList, error)
 	GetPods(namespace string, labelSelector metav1.LabelSelector) (*kapi.PodList, error)
 	GetNode(name string) (*kapi.Node, error)
@@ -74,7 +80,7 @@ func (k *Kube) SetLabelsOnPod(pod *kapi.Pod, labels map[string]string) error {
 }
 
 // SetAnnotationsOnPod takes the pod object and map of key/value string pairs to set as annotations
-func (k *Kube) SetAnnotationsOnPod(pod *kapi.Pod, annotations map[string]string) error {
+func (k *Kube) SetAnnotationsOnPod(namespace, podName string, annotations map[string]string) error {
 	var err error
 	var patchData []byte
 	patch := struct {
@@ -85,7 +91,7 @@ func (k *Kube) SetAnnotationsOnPod(pod *kapi.Pod, annotations map[string]string)
 		},
 	}
 
-	podDesc := pod.Namespace + "/" + pod.Name
+	podDesc := namespace + "/" + podName
 	klog.Infof("Setting annotations %v on pod %s", annotations, podDesc)
 	patchData, err = json.Marshal(&patch)
 	if err != nil {
@@ -93,7 +99,7 @@ func (k *Kube) SetAnnotationsOnPod(pod *kapi.Pod, annotations map[string]string)
 		return err
 	}
 
-	_, err = k.KClient.CoreV1().Pods(pod.Namespace).Patch(context.TODO(), pod.Name, types.MergePatchType, patchData, metav1.PatchOptions{})
+	_, err = k.KClient.CoreV1().Pods(namespace).Patch(context.TODO(), podName, types.MergePatchType, patchData, metav1.PatchOptions{})
 	if err != nil {
 		klog.Errorf("Error in setting annotation on pod %s: %v", podDesc, err)
 	}
@@ -150,6 +156,96 @@ func (k *Kube) SetAnnotationsOnNamespace(namespace *kapi.Namespace, annotations 
 		klog.Errorf("Error in setting annotation on namespace %s: %v", namespace.Name, err)
 	}
 	return err
+}
+
+// SetTaintOnNode tries to add a new taint to the node. If the taint already exists, it doesn't do anything.
+func (k *Kube) SetTaintOnNode(nodeName string, taint *kapi.Taint) error {
+	node, err := k.GetNode(nodeName)
+	if err != nil {
+		klog.Errorf("Unable to retrieve node %s for tainting %s: %v", nodeName, taint.ToString(), err)
+		return err
+	}
+	newNode := node.DeepCopy()
+	nodeTaints := newNode.Spec.Taints
+
+	var newTaints []kapi.Taint
+	for i := range nodeTaints {
+		if taint.MatchTaint(&nodeTaints[i]) {
+			klog.Infof("Taint %s already exists on Node %s", taint.ToString(), node.Name)
+			return nil
+		}
+		newTaints = append(newTaints, nodeTaints[i])
+	}
+
+	klog.Infof("Setting taint %s on Node %s", taint.ToString(), node.Name)
+	newTaints = append(newTaints, *taint)
+	newNode.Spec.Taints = newTaints
+	err = k.PatchNode(node, newNode)
+	if err != nil {
+		klog.Errorf("Unable to add taint %s on node %s: %v", taint.ToString(), node.Name, err)
+		return err
+	}
+
+	klog.Infof("Added taint %s on node %s", taint.ToString(), node.Name)
+	return nil
+}
+
+// RemoveTaintFromNode removes all the taints that have the same key and effect from the node.
+// If the taint doesn't exist, it doesn't do anything.
+func (k *Kube) RemoveTaintFromNode(nodeName string, taint *kapi.Taint) error {
+	node, err := k.GetNode(nodeName)
+	if err != nil {
+		klog.Errorf("Unable to retrieve node %s for tainting %s: %v", nodeName, taint.ToString(), err)
+		return err
+	}
+	newNode := node.DeepCopy()
+	nodeTaints := newNode.Spec.Taints
+
+	var newTaints []kapi.Taint
+	for i := range nodeTaints {
+		if taint.MatchTaint(&nodeTaints[i]) {
+			klog.Infof("Removing taint %s from Node %s", taint.ToString(), node.Name)
+			continue
+		}
+		newTaints = append(newTaints, nodeTaints[i])
+	}
+
+	newNode.Spec.Taints = newTaints
+	err = k.PatchNode(node, newNode)
+	if err != nil {
+		klog.Errorf("Unable to remove taint %s on node %s: %v", taint.ToString(), node.Name, err)
+		return err
+	}
+	klog.Infof("Removed taint %s on node %s", taint.ToString(), node.Name)
+	return nil
+}
+
+// PatchNode patches the old node object with the changes provided in the new node object.
+func (k *Kube) PatchNode(old, new *kapi.Node) error {
+	oldNodeObjectJson, err := json.Marshal(old)
+	if err != nil {
+		klog.Errorf("Unable to marshal node %s: %v", old.Name, err)
+		return err
+	}
+
+	newNodeObjectJson, err := json.Marshal(new)
+	if err != nil {
+		klog.Errorf("Unable to marshal node %s: %v", new.Name, err)
+		return err
+	}
+
+	patchBytes, err := strategicpatch.CreateTwoWayMergePatch(oldNodeObjectJson, newNodeObjectJson, kapi.Node{})
+	if err != nil {
+		klog.Errorf("Unable to patch node %s: %v", old.Name, err)
+		return err
+	}
+
+	if _, err = k.KClient.CoreV1().Nodes().Patch(context.TODO(), old.Name, types.StrategicMergePatchType, patchBytes, metav1.PatchOptions{}); err != nil {
+		klog.Errorf("Unable to patch node %s: %v", old.Name, err)
+		return err
+	}
+
+	return nil
 }
 
 // UpdateEgressFirewall updates the EgressFirewall with the provided EgressFirewall data
@@ -217,6 +313,11 @@ func (k *Kube) GetEgressIP(name string) (*egressipv1.EgressIP, error) {
 // GetEgressIPs returns the list of all EgressIP objects from kubernetes
 func (k *Kube) GetEgressIPs() (*egressipv1.EgressIPList, error) {
 	return k.EIPClient.K8sV1().EgressIPs().List(context.TODO(), metav1.ListOptions{})
+}
+
+// GetEgressFirewalls returns the list of all EgressFirewall objects from kubernetes
+func (k *Kube) GetEgressFirewalls() (*egressfirewall.EgressFirewallList, error) {
+	return k.EgressFirewallClient.K8sV1().EgressFirewalls(metav1.NamespaceAll).List(context.TODO(), metav1.ListOptions{})
 }
 
 // GetEndpoint returns the Endpoints resource

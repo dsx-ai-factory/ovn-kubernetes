@@ -7,7 +7,6 @@ import (
 	"io/ioutil"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -17,17 +16,17 @@ import (
 
 	"k8s.io/klog/v2"
 
-	goovn "github.com/ebay/go-ovn"
-	"github.com/urfave/cli/v2"
-	"gopkg.in/fsnotify/fsnotify.v1"
-
+	"github.com/ebay/go-ovn"
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	ovnnode "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/urfave/cli/v2"
 
 	kexec "k8s.io/utils/exec"
 )
@@ -67,6 +66,7 @@ func getFlagsByCategory() map[string][]cli.Flag {
 	m["OVN Southbound DB Options"] = config.OvnSBFlags
 	m["OVN Gateway Options"] = config.OVNGatewayFlags
 	m["Master HA Options"] = config.MasterHAFlags
+	m["OVN Kube Node flags"] = config.OvnKubeNodeFlags
 
 	return m
 }
@@ -192,7 +192,7 @@ func runOvnKube(ctx *cli.Context) error {
 	}
 
 	exec := kexec.New()
-	configFile, err := config.InitConfig(ctx, exec, nil)
+	_, err := config.InitConfig(ctx, exec, nil)
 	if err != nil {
 		return err
 	}
@@ -228,12 +228,6 @@ func runOvnKube(ctx *cli.Context) error {
 		return fmt.Errorf("need to run ovnkube in either master and/or node mode")
 	}
 
-	// Set up a watch on our config file; if it changes, we exit -
-	// (we don't have the ability to dynamically reload config changes).
-	if err := watchForChanges(configFile); err != nil {
-		return fmt.Errorf("unable to setup configuration watch: %v", err)
-	}
-
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
 
@@ -248,6 +242,7 @@ func runOvnKube(ctx *cli.Context) error {
 		}
 		watchFactory = masterWatchFactory
 		var ovnNBClient, ovnSBClient goovn.Client
+		var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
 
 		if ovnNBClient, err = util.NewOVNNBClient(); err != nil {
 			return fmt.Errorf("error when trying to initialize go-ovn NB client: %v", err)
@@ -257,12 +252,21 @@ func runOvnKube(ctx *cli.Context) error {
 			return fmt.Errorf("error when trying to initialize go-ovn SB client: %v", err)
 		}
 
+		if libovsdbOvnNBClient, err = util.NewNBClient(stopChan); err != nil {
+			return fmt.Errorf("error when trying to initialize libovsdb NB client: %v", err)
+		}
+
+		if libovsdbOvnSBClient, err = util.NewSBClient(stopChan); err != nil {
+			return fmt.Errorf("error when trying to initialize libovsdb SB client: %v", err)
+		}
+
 		// register prometheus metrics exported by the master
 		// this must be done prior to calling controller start
 		// since we capture some metrics in Start()
 		metrics.RegisterMasterMetrics(ovnNBClient, ovnSBClient, config.MetricsScrapeInterval, stopChan)
 
-		ovnController := ovn.NewOvnController(ovnClientset, masterWatchFactory, stopChan, nil, ovnNBClient, ovnSBClient, util.EventRecorder(ovnClientset.KubeClient))
+		ovnController := ovn.NewOvnController(ovnClientset, masterWatchFactory, stopChan, nil,
+			ovnNBClient, ovnSBClient, libovsdbOvnNBClient, libovsdbOvnSBClient, util.EventRecorder(ovnClientset.KubeClient))
 		if err := ovnController.Start(master, wg, ctx.Context); err != nil {
 			return err
 		}
@@ -303,16 +307,20 @@ func runOvnKube(ctx *cli.Context) error {
 
 		// start the prometheus server to serve OVN Node Metrics (default port: 9410)
 		if config.Kubernetes.MetricsBindAddress != "" {
-			ovsDBClient, err := metrics.SetupOvsDBClient()
-			if err != nil {
-				return fmt.Errorf("error when trying to initialize ovsdb client: %v", err)
+			if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
+				ovsDBClient, err := metrics.SetupOvsDBClient()
+				if err != nil {
+					return fmt.Errorf("error when trying to initialize ovsdb client: %v", err)
+				}
+				// serve OVN ^ovn_controller metrics
+				metrics.RegisterOvnNodeMetrics(ovsDBClient, config.MetricsScrapeInterval, stopChan)
+				// serve OVS ^ovs metrics
+				metrics.RegisterOvsMetrics(ovsDBClient, config.MetricsScrapeInterval, stopChan)
 			}
-			// serve OVN ^ovn_db, ^ovn_northd metrics from the ovnkube-node pod that is matching labels accordingly
-			metrics.RegisterOvnCentralMetrics(ovnClientset.KubeClient, node, config.MetricsScrapeInterval, stopChan)
-			// serve OVN ^ovn_controller metrics
-			metrics.RegisterOvnNodeMetrics(ovsDBClient, config.MetricsScrapeInterval, stopChan)
-			// serve OVS ^ovs metrics
-			metrics.RegisterOvsMetrics(ovsDBClient, config.MetricsScrapeInterval, stopChan)
+			if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
+				// serve OVN ^ovn_db, ^ovn_northd metrics from the ovnkube-node pod that is matching labels accordingly
+				metrics.RegisterOvnCentralMetrics(ovnClientset.KubeClient, node, config.MetricsScrapeInterval, stopChan)
+			}
 			metrics.StartMetricsServer(config.Kubernetes.MetricsBindAddress, true)
 		}
 	}
@@ -322,71 +330,6 @@ func runOvnKube(ctx *cli.Context) error {
 	close(stopChan)
 	watchFactory.Shutdown()
 	wg.Wait()
-	return nil
-}
-
-// watchForChanges exits if the configuration file changed.
-func watchForChanges(configPath string) error {
-	if configPath == "" {
-		return nil
-	}
-	configPath, err := filepath.Abs(configPath)
-	if err != nil {
-		return err
-	}
-
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return err
-	}
-	defer watcher.Close()
-
-	go func() {
-		for {
-			select {
-			case event, ok := <-watcher.Events:
-				if !ok {
-					return
-				}
-				if event.Op&fsnotify.Write == fsnotify.Write {
-					klog.Infof("Configuration file %s changed, exiting...", event.Name)
-					os.Exit(0)
-					return
-				}
-			case err, ok := <-watcher.Errors:
-				if !ok {
-					return
-				}
-				klog.Errorf("Error watching for changes to configmap: %s, err: %v", configPath, err)
-			}
-		}
-	}()
-
-	// Watch all symlinks for changes
-	p := configPath
-	maxdepth := 100
-	for depth := 0; depth < maxdepth; depth++ {
-		if err := watcher.Add(p); err != nil {
-			return err
-		}
-		klog.Infof("Watching config file %s for changes", p)
-
-		stat, err := os.Lstat(p)
-		if err != nil {
-			return err
-		}
-
-		// configmaps are usually symlinks
-		if stat.Mode()&os.ModeSymlink > 0 {
-			p, err = filepath.EvalSymlinks(p)
-			if err != nil {
-				return err
-			}
-		} else {
-			break
-		}
-	}
-
 	return nil
 }
 

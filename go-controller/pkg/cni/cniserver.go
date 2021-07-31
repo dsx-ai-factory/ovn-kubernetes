@@ -2,22 +2,24 @@ package cni
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/mux"
-	kapi "k8s.io/api/core/v1"
+	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
-	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // *** The Server is PRIVATE API between OVN components and may be
@@ -46,20 +48,42 @@ import (
 // started.
 
 // NewCNIServer creates and returns a new Server object which will listen on a socket in the given path
-func NewCNIServer(rundir string, factory factory.NodeWatchFactory) *Server {
+func NewCNIServer(rundir string, useOVSExternalIDs bool, factory factory.NodeWatchFactory, kclient kubernetes.Interface) (*Server, error) {
+	if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
+		return nil, fmt.Errorf("unsupported ovnkube-node mode for CNI server: %s", config.OvnKubeNode.Mode)
+	}
+
 	if len(rundir) == 0 {
 		rundir = serverRunDir
 	}
 	router := mux.NewRouter()
 
+	// we use atomic lib to store port binding mode state, so use int32 to represent bool
+	var ovnPortBinding int32
+	if useOVSExternalIDs {
+		ovnPortBinding = 1
+	}
+
 	s := &Server{
 		Server: http.Server{
 			Handler: router,
 		},
-		rundir:             rundir,
-		podLister:          corev1listers.NewPodLister(factory.LocalPodInformer().GetIndexer()),
-		runningSandboxAdds: make(map[string]*PodRequest),
+		rundir:            rundir,
+		useOVSExternalIDs: ovnPortBinding,
+		podLister:         corev1listers.NewPodLister(factory.LocalPodInformer().GetIndexer()),
+		kclient:           kclient,
+		mode:              config.OvnKubeNode.Mode,
+		kubeAuth: &KubeAPIAuth{
+			Kubeconfig:    config.Kubernetes.Kubeconfig,
+			KubeAPIServer: config.Kubernetes.APIServer,
+			KubeAPIToken:  config.Kubernetes.Token,
+		},
 	}
+
+	if len(config.Kubernetes.CAData) > 0 {
+		s.kubeAuth.KubeCAData = base64.StdEncoding.EncodeToString(config.Kubernetes.CAData)
+	}
+
 	router.NotFoundHandler = http.HandlerFunc(http.NotFound)
 	router.HandleFunc("/metrics", s.handleCNIMetrics).Methods("POST")
 	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -76,41 +100,7 @@ func NewCNIServer(rundir string, factory factory.NodeWatchFactory) *Server {
 		}
 	}).Methods("POST")
 
-	factory.AddPodHandler(cache.ResourceEventHandlerFuncs{
-		DeleteFunc: func(obj interface{}) {
-			pod := obj.(*kapi.Pod)
-			s.cancelOldestPodAdd(pod)
-		},
-	}, nil)
-
-	return s
-}
-
-// cancelOldestPodAdd requests that the earliest outstanding add operation for a given
-// pod should be canceled.
-func (s *Server) cancelOldestPodAdd(pod *kapi.Pod) {
-	s.runningSandboxAddsLock.Lock()
-	defer s.runningSandboxAddsLock.Unlock()
-
-	oldest := time.Now()
-	var found *PodRequest
-
-	// There may be >= 0 sandboxes for a Pod Namespace+Name. Kubelet defers
-	// sandbox deletion to GC, and if a pod is deleted and re-created kubelet
-	// will start a second sandbox for the "new" Pod which has a different UID.
-	// We only want to cancel the oldest sandbox because it's either the
-	// only sandbox or has been superceded by a newer request.
-	for _, req := range s.runningSandboxAdds {
-		if req.PodNamespace == pod.Namespace && req.PodName == pod.Name && req.timestamp.Before(oldest) {
-			found = req
-			oldest = req.timestamp
-		}
-	}
-
-	if found != nil {
-		found.cancel()
-		klog.Infof("%s canceled sandbox ADD request", found)
-	}
+	return s, nil
 }
 
 // Split the "CNI_ARGS" environment variable's value into a map.  CNI_ARGS
@@ -134,7 +124,7 @@ func gatherCNIArgs(env map[string]string) (map[string]string, error) {
 	return mapArgs, nil
 }
 
-func cniRequestToPodRequest(cr *Request) (*PodRequest, error) {
+func cniRequestToPodRequest(cr *Request, podLister corev1listers.PodLister, kclient kubernetes.Interface) (*PodRequest, error) {
 	cmd, ok := cr.Env["CNI_COMMAND"]
 	if !ok {
 		return nil, fmt.Errorf("unexpected or missing CNI_COMMAND")
@@ -173,6 +163,15 @@ func cniRequestToPodRequest(cr *Request) (*PodRequest, error) {
 		return nil, fmt.Errorf("missing K8S_POD_NAME")
 	}
 
+	// UID may not be passed by all runtimes yet. Will be passed
+	// by CRIO 1.20+ and containerd 1.5+ soon.
+	// CRIO 1.20: https://github.com/cri-o/cri-o/pull/5029
+	// CRIO 1.21: https://github.com/cri-o/cri-o/pull/5028
+	// CRIO 1.22: https://github.com/cri-o/cri-o/pull/5026
+	// containerd 1.6: https://github.com/containerd/containerd/pull/5640
+	// containerd 1.5: https://github.com/containerd/containerd/pull/5643
+	req.PodUID = cniArgs["K8S_POD_UID"]
+
 	conf, err := config.ReadCNIConfig(cr.Config)
 	if err != nil {
 		return nil, fmt.Errorf("broken stdin args")
@@ -184,32 +183,6 @@ func cniRequestToPodRequest(cr *Request) (*PodRequest, error) {
 	return req, nil
 }
 
-func (s *Server) startSandboxRequest(req *PodRequest) error {
-	// Only sandbox add requests are tracked because only adds need
-	// to be canceled when the pod is deleted. Delete requests should
-	// be run to completion to clean up anything the earlier add
-	// already configured.
-	if req.Command == CNIAdd {
-		s.runningSandboxAddsLock.Lock()
-		defer s.runningSandboxAddsLock.Unlock()
-		if _, ok := s.runningSandboxAdds[req.SandboxID]; ok {
-			// Should never happen as the runtime is required to
-			// serialize operations for the same sandbox
-			return fmt.Errorf("%s ADD already started", req)
-		}
-		s.runningSandboxAdds[req.SandboxID] = req
-	}
-	return nil
-}
-
-func (s *Server) finishSandboxRequest(req *PodRequest) {
-	if req.Command == CNIAdd {
-		s.runningSandboxAddsLock.Lock()
-		defer s.runningSandboxAddsLock.Unlock()
-		delete(s.runningSandboxAdds, req.SandboxID)
-	}
-}
-
 // Dispatch a pod request to the request handler and return the result to the
 // CNI server client
 func (s *Server) handleCNIRequest(r *http.Request) ([]byte, error) {
@@ -218,17 +191,19 @@ func (s *Server) handleCNIRequest(r *http.Request) ([]byte, error) {
 	if err := json.Unmarshal(b, &cr); err != nil {
 		return nil, err
 	}
-	req, err := cniRequestToPodRequest(&cr)
+	req, err := cniRequestToPodRequest(&cr, s.podLister, s.kclient)
 	if err != nil {
 		return nil, err
 	}
-
-	if err := s.startSandboxRequest(req); err != nil {
-		return nil, err
+	if s.mode == types.NodeModeSmartNICHost {
+		req.IsSmartNIC = true
 	}
-	defer s.finishSandboxRequest(req)
 
-	result, err := s.requestFunc(req, s.podLister)
+	useOVSExternalIDs := false
+	if atomic.LoadInt32(&s.useOVSExternalIDs) > 0 {
+		useOVSExternalIDs = true
+	}
+	result, err := s.requestFunc(req, s.podLister, useOVSExternalIDs, s.kclient, s.kubeAuth)
 	if err != nil {
 		// Prefix error with request information for easier debugging
 		return nil, fmt.Errorf("%s %v", req, err)
@@ -252,4 +227,9 @@ func (s *Server) handleCNIMetrics(w http.ResponseWriter, r *http.Request) {
 	if _, err := w.Write([]byte{}); err != nil {
 		klog.Warningf("Error writing %s HTTP response for metrics post", err)
 	}
+}
+
+func (s *Server) EnableOVNPortUpSupport() {
+	atomic.StoreInt32(&s.useOVSExternalIDs, 1)
+	klog.Info("OVN Port Binding support now enabled in CNI Server")
 }

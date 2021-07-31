@@ -10,23 +10,38 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/client-go/kubernetes"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 	kexec "k8s.io/utils/exec"
 )
 
 var runner kexec.Interface
 var vsctlPath string
+var ofctlPath string
 
-func setExec(r kexec.Interface) error {
+func SetExec(r kexec.Interface) error {
 	runner = r
 	var err error
 	vsctlPath, err = r.LookPath("ovs-vsctl")
+	if err != nil {
+		return err
+	}
+	ofctlPath, err = r.LookPath("ovs-ofctl")
 	return err
+}
+
+// ResetRunner used by unit-tests to reset runner to its initial (un-initialized) value
+func ResetRunner() {
+	runner = nil
 }
 
 func ovsExec(args ...string) (string, error) {
 	if runner == nil {
-		if err := setExec(kexec.New()); err != nil {
+		if err := SetExec(kexec.New()); err != nil {
 			return "", err
 		}
 	}
@@ -86,23 +101,29 @@ func ovsClear(table, record string, columns ...string) error {
 }
 
 func ofctlExec(args ...string) (string, error) {
+	if runner == nil {
+		if err := SetExec(kexec.New()); err != nil {
+			return "", err
+		}
+	}
+
 	args = append([]string{"--timeout=10", "--no-stats", "--strict"}, args...)
 	var stdout, stderr bytes.Buffer
-	cmd := runner.Command("ovs-ofctl", args...)
+	cmd := runner.Command(ofctlPath, args...)
 	cmd.SetStdout(&stdout)
 	cmd.SetStderr(&stderr)
 
 	cmdStr := strings.Join(args, " ")
-	klog.V(5).Infof("exec: ovs-ofctl %s", cmdStr)
+	klog.V(5).Infof("exec: %s %s", ofctlPath, cmdStr)
 
 	err := cmd.Run()
 	if err != nil {
 		stderrStr := stderr.String()
-		klog.Errorf("exec: ovs-ofctl %s : stderr: %q", cmdStr, stderrStr)
-		return "", fmt.Errorf("failed to run 'ovs-ofctl %s': %v\n  %q", cmdStr, err, stderrStr)
+		klog.Errorf("exec: %s %s : stderr: %q", ofctlPath, cmdStr, stderrStr)
+		return "", fmt.Errorf("failed to run '%s %s': %v\n  %q", ofctlPath, cmdStr, err, stderrStr)
 	}
 	stdoutStr := stdout.String()
-	klog.V(5).Infof("exec: ovs-ofctl %s: stdout: %q", cmdStr, stdoutStr)
+	klog.V(5).Infof("exec: %s %s: stdout: %q", ofctlPath, cmdStr, stdoutStr)
 
 	trimmed := strings.TrimSpace(stdoutStr)
 	// If output is a single line, strip the trailing newline
@@ -126,6 +147,17 @@ func isIfaceIDSet(ifaceName, ifaceID string) error {
 	return nil
 }
 
+func isIfaceOvnInstalledSet(ifaceName string) bool {
+	out, err := ovsGet("Interface", ifaceName, "external-ids", "ovn-installed")
+	if err == nil && out == "true" {
+		klog.V(5).Infof("Interface %s has ovn-installed=true", ifaceName)
+		return true
+	}
+
+	klog.V(5).Infof("Still waiting for OVS port %s to have ovn-installed=true", ifaceName)
+	return false
+}
+
 // getIfaceOFPort returns the of port number for an interface
 func getIfaceOFPort(ifaceName string) (int, error) {
 	port, err := ovsGet("Interface", ifaceName, "ofport", "")
@@ -140,28 +172,14 @@ func getIfaceOFPort(ifaceName string) (int, error) {
 	return iPort, nil
 }
 
-func doPodFlowsExist(mac string, ifAddrs []*net.IPNet, ofPort int) bool {
-	// Function checks for OpenFlow flows to know the pod is ready
-	// TODO(trozet): in the future use a more stable mechanism provided by OVN:
-	// https://bugzilla.redhat.com/show_bug.cgi?id=1839102
+type openflowQuery struct {
+	match  string
+	tables []int
+}
 
-	// query represents the match criteria, and different OF tables that this query may match on
-	type query struct {
-		match  string
-		tables []int
-	}
-
+func getLegacyFlowQueries(mac string, ifAddrs []*net.IPNet, ofPort int) []openflowQuery {
 	// Query the flows by mac address for in_port_security and OF port
-	queries := []query{
-		{
-			match:  "dl_src=" + mac,
-			tables: []int{9},
-		},
-		{
-			match:  fmt.Sprintf("in_port=%d", ofPort),
-			tables: []int{0},
-		},
-	}
+	queries := getMinimalFlowQueries(mac, ofPort)
 	for _, ifAddr := range ifAddrs {
 		var ipMatch string
 		if !utilnet.IsIPv6(ifAddr.IP) {
@@ -173,9 +191,31 @@ func doPodFlowsExist(mac string, ifAddrs []*net.IPNet, ofPort int) bool {
 		// note we need to support table 48 for 20.06 OVN backwards compatibility. Table 49 is now
 		// where out_port_security lives
 		queries = append(queries,
-			query{fmt.Sprintf("%s=%s", ipMatch, ifAddr.IP), []int{48, 49}},
+			openflowQuery{fmt.Sprintf("%s=%s", ipMatch, ifAddr.IP), []int{48, 49}},
 		)
 	}
+	return queries
+}
+
+func getMinimalFlowQueries(mac string, ofPort int) []openflowQuery {
+	// Query the flows by mac address for in_port_security and OF port
+	queries := []openflowQuery{
+		{
+			match:  "dl_src=" + mac,
+			tables: []int{9},
+		},
+		{
+			match:  fmt.Sprintf("in_port=%d", ofPort),
+			tables: []int{0},
+		},
+	}
+	return queries
+}
+
+func doPodFlowsExist(queries []openflowQuery) bool {
+	// Function checks for OpenFlow flows to know the pod is ready
+	// TODO(trozet): in the future use a more stable mechanism provided by OVN:
+	// https://bugzilla.redhat.com/show_bug.cgi?id=1839102
 
 	// Must find the right flows in all queries to succeed
 	for _, query := range queries {
@@ -198,22 +238,87 @@ func doPodFlowsExist(mac string, ifAddrs []*net.IPNet, ofPort int) bool {
 	return true
 }
 
-func waitForPodFlows(ctx context.Context, mac string, ifAddrs []*net.IPNet, ifaceName, ifaceID string, ofPort int) error {
+// checkCancelSandbox checks that this sandbox is still valid for the current
+// instance of the pod in the apiserver. Sandbox requests and pod instances
+// have a 1:1 relationship determined by pod UID. If we detect that the pod
+// has changed either UID or MAC terminate this sandbox request early instead
+// of waiting for OVN to set up flows that will never exist.
+func checkCancelSandbox(mac string, podLister corev1listers.PodLister, kclient kubernetes.Interface,
+	namespace, name, initialPodUID string) error {
+	pod, err := getPod(podLister, kclient, namespace, name)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("pod deleted")
+		}
+		klog.Warningf("[%s/%s] failed to get pod while waiting for OVS port binding: %v", namespace, name, err)
+		return nil
+	}
+
+	if pod == nil {
+		// Not all node CNI modes can pass non-nil podLister or kclient in which
+		// case pod will be nil
+		return nil
+	}
+
+	if string(pod.UID) != initialPodUID {
+		// Pod UID changed and this sandbox should be canceled
+		// so the new pod sandbox can run
+		return fmt.Errorf("canceled old pod sandbox")
+	}
+
+	ovnAnnot, err := util.UnmarshalPodAnnotation(pod.Annotations)
+	if err != nil {
+		return fmt.Errorf("pod OVN annotations deleted or invalid")
+	}
+
+	// Pod OVN annotation changed and this sandbox should
+	// be canceled so the new pod sandbox can run with the
+	// updated MAC/IP
+	if mac != ovnAnnot.MAC.String() {
+		return fmt.Errorf("pod OVN annotations changed")
+	}
+
+	return nil
+}
+
+func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet,
+	ifaceName, ifaceID string, ofPort int, checkExternalIDs bool,
+	podLister corev1listers.PodLister, kclient kubernetes.Interface,
+	namespace, name, initialPodUID string) error {
+	var queries []openflowQuery
+	var detail string
+
+	if checkExternalIDs {
+		queries = getMinimalFlowQueries(mac, ofPort)
+		detail = " (ovn-installed)"
+	} else {
+		queries = getLegacyFlowQueries(mac, ifAddrs, ofPort)
+	}
 	timeout := time.After(45 * time.Second)
 	for {
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("canceled waiting for OVS flows")
+			return fmt.Errorf("canceled waiting for OVS port binding for %s %v", mac, ifAddrs)
 		case <-timeout:
-			return fmt.Errorf("timed out waiting for OVS flows")
+			return fmt.Errorf("timed out waiting for OVS port binding%s for %s %v", detail, mac, ifAddrs)
 		default:
 			if err := isIfaceIDSet(ifaceName, ifaceID); err != nil {
 				return err
 			}
-			if doPodFlowsExist(mac, ifAddrs, ofPort) {
-				// success
-				return nil
+			if doPodFlowsExist(queries) {
+				if checkExternalIDs {
+					if isIfaceOvnInstalledSet(ifaceName) {
+						return nil
+					}
+				} else {
+					return nil
+				}
 			}
+
+			if err := checkCancelSandbox(mac, podLister, kclient, namespace, name, initialPodUID); err != nil {
+				return fmt.Errorf("%v waiting for OVS port binding for %s %v", err, mac, ifAddrs)
+			}
+
 			// try again later
 			time.Sleep(200 * time.Millisecond)
 		}

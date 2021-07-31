@@ -5,15 +5,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 	"unicode"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+
+	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/afero"
 
@@ -46,6 +53,8 @@ const (
 	rhel               = "RHEL"
 	ubuntu             = "Ubuntu"
 	windowsOS          = "windows"
+	defaultOSMaxArgs   = 262144
+	minOSArgs          = 1000
 )
 
 const (
@@ -69,6 +78,8 @@ var (
 var ovnCmdRetryCount = 200
 var AppFs = afero.NewOsFs()
 
+var MaxArgsError = errors.New("requested transaction exceeds maximum arguments")
+
 // PrepareTestConfig restores default config values. Used by testcases to
 // provide a pristine environment between tests.
 func PrepareTestConfig() {
@@ -79,6 +90,36 @@ func PrepareTestConfig() {
 // this metric is set only for the ovnkube in master mode since 99.9% of
 // all the ovn-nbctl/ovn-sbctl calls occur on the master
 var MetricOvnCliLatency *prometheus.HistogramVec
+
+var maxArgs int
+
+func init() {
+	maxArgs = findMaxArgsUsable(defaultOSMaxArgs)
+	klog.Infof("Maximum command line arguments set to: %d", maxArgs)
+}
+
+// findMaxArgsUsable finds the maximum amount of usable args on the system, which may be
+// different than what the kernel returns for ARG_MAX
+func findMaxArgsUsable(estimatedMax int) int {
+	backoff := .9
+	args := make([]string, estimatedMax)
+	for i := range args {
+		args[i] = "a"
+	}
+
+	for estimatedMax > minOSArgs {
+		if _, err := exec.Command("/bin/true", args...).Output(); err == nil {
+			break
+		}
+		estimatedMax = int(float64(estimatedMax) * backoff)
+		args = args[:estimatedMax]
+	}
+
+	if estimatedMax < minOSArgs {
+		estimatedMax = minOSArgs
+	}
+	return estimatedMax
+}
 
 func runningPlatform() (string, error) {
 	if runtime.GOOS == windowsOS {
@@ -322,6 +363,11 @@ func GetExec() kexec.Interface {
 	return runner.exec
 }
 
+// ResetRunner used by unit-tests to reset runner to its initial (un-initialized) value
+func ResetRunner() {
+	runner = nil
+}
+
 var runCounter uint64
 
 func runCmd(cmd kexec.Cmd, cmdPath string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
@@ -356,6 +402,15 @@ func RunOVSVsctl(args ...string) (string, string, error) {
 	cmdArgs = append(cmdArgs, args...)
 	stdout, stderr, err := run(runner.vsctlPath, cmdArgs...)
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
+}
+
+// GetOVSOfPort runs get ofport via ovs-vsctl and handle special return strings.
+func GetOVSOfPort(args ...string) (string, string, error) {
+	stdout, stderr, err := RunOVSVsctl(args...)
+	if stdout == "[]" || stdout == "-1" {
+		err = fmt.Errorf("%s return invalid result %s err %s", args, stdout, err)
+	}
+	return stdout, stderr, err
 }
 
 // RunOVSAppctlWithTimeout runs a command via ovs-appctl.
@@ -813,5 +868,135 @@ func DetectSCTPSupport() (bool, error) {
 			return true, nil
 		}
 	}
+	return false, nil
+}
+
+// DetermineOVNTopoVersionFromOVN determines what OVN Topology version is being used
+// If "k8s-ovn-topo-version" key in external_ids column does not exist, it is prior to OVN topology versioning
+// and therefore set version number to OvnCurrentTopologyVersion
+func DetermineOVNTopoVersionFromOVN() (int, error) {
+	ver := 0
+	stdout, stderr, err := RunOVNNbctl("--data=bare", "--no-headings", "--columns=name", "find", "logical_router",
+		fmt.Sprintf("name=%s", types.OVNClusterRouter))
+	if err != nil {
+		return ver, fmt.Errorf("failed in retrieving %s to determine the current version of OVN logical topology: "+
+			"stderr: %q, error: %v", types.OVNClusterRouter, stderr, err)
+	}
+	if len(stdout) == 0 {
+		// no OVNClusterRouter exists, DB is empty, nothing to upgrade
+		return math.MaxInt32, nil
+	}
+
+	stdout, stderr, err = RunOVNNbctl("--if-exists", "get", "logical_router", types.OVNClusterRouter,
+		"external_ids:k8s-ovn-topo-version")
+	if err != nil {
+		return 0, fmt.Errorf("failed to determine the current version of OVN logical topology: stderr: %q, error: %v",
+			stderr, err)
+	} else if len(stdout) == 0 {
+		klog.Infof("No version string found. The OVN topology is before versioning is introduced. Upgrade needed")
+	} else {
+		v, err := strconv.Atoi(stdout)
+		if err != nil {
+			return 0, fmt.Errorf("invalid OVN topology version string for the cluster: %s", stdout)
+		} else {
+			ver = v
+		}
+	}
+	return ver, nil
+}
+
+// NBTxn hold parts of an ovn-nbctl transaction request
+type NBTxn struct {
+	args    []string
+	txnArgs []string
+	env     []string
+}
+
+// NewNBTxn returns a new ovn-nbctl transaction request object
+func NewNBTxn() *NBTxn {
+	args, env := getNbctlArgsAndEnv(ovsCommandTimeout, []string{}...)
+	return &NBTxn{
+		args: args,
+		env:  env,
+	}
+}
+
+// Add adds a new request to the transaction
+func (t *NBTxn) add(args ...string) {
+	if len(t.txnArgs) > 0 {
+		t.txnArgs = append(t.txnArgs, "--")
+	}
+	t.txnArgs = append(t.txnArgs, args...)
+}
+
+// Commit commits all parts of the transaction and returns output and errors
+func (t *NBTxn) Commit() (string, string, error) {
+	if len(t.txnArgs) == 0 {
+		return "", "", nil
+	}
+	allArgs := append(t.args, t.txnArgs...)
+	stdout, stderr, err := runOVNretry(runner.nbctlPath, t.env, allArgs...)
+	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
+}
+
+// AddOrCommit adds a slice of requests to a transaction
+// If the incoming slice to be added would be greater than the maximum
+// number of arguments for a transaction; the transaction is committed
+// and the current transactions arguments are reset to the slice
+// Note: This method should be called once with a slice of dependent args
+// For example, using create --id=@acl with dependent add to switch cmds
+// should all be added in a single AddOrCommit call
+// The caller should take care not to overload the call with a too large
+// slice exceeding max args, or the command can never be committed
+func (t *NBTxn) AddOrCommit(args []string) (string, string, error) {
+	if len(args) > maxArgs {
+		return "", "", MaxArgsError
+	}
+	// assume a 10 argument buffer for other arguments by default added to the nbctl call
+	buffer := 10
+	incomingLength := len(args)
+	if len(t.txnArgs) > 0 {
+		// increment for --
+		incomingLength += 1
+	}
+
+	klog.V(5).Infof("Number of args: %d, txnArgs: %d, incomingLen: %d, buffer: %d", len(t.args),
+		len(t.txnArgs), incomingLength, buffer)
+
+	// case where we are going to exceed max arguments
+	// also check entire line length is going be over 100k
+	// maximum bash command seems to be a combination of max args and length of each argument
+	// maximum length is PAGE_SIZE * 32 which we can assume to be 4k page, and equals 131072
+	if len(t.args)+len(t.txnArgs)+incomingLength+buffer > maxArgs || len(strings.Join(t.args, " "))+
+		len(strings.Join(t.txnArgs, " "))+len(strings.Join(args, " ")) > 100000 {
+		klog.Info("Requested transaction add is too large, committing...")
+		if stdout, stderr, err := t.Commit(); err != nil {
+			return stdout, stderr, err
+		}
+		// reset txnArgs
+		t.txnArgs = []string{}
+	}
+
+	t.add(args...)
+	return "", "", nil
+}
+
+// DetectCheckPktLengthSupport checks if OVN supports check packet length action in OVS kernel datapath
+func DetectCheckPktLengthSupport(bridge string) (bool, error) {
+	stdout, stderr, err := RunOVSAppctl("dpif/show-dp-features", bridge)
+	if err != nil {
+		klog.Errorf("Failed to query OVS for check packet length support, "+
+			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		return false, err
+	}
+
+	re := regexp.MustCompile(`(?i)yes|(?i)true`)
+
+	for _, line := range strings.Split(strings.TrimSuffix(stdout, "\n"), "\n") {
+		if strings.Contains(line, "Check pkt length action") && re.MatchString(line) {
+			return true, nil
+		}
+	}
+
 	return false, nil
 }

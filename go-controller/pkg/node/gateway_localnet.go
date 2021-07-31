@@ -52,39 +52,30 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 		}
 	}
 
-	bridgeName, uplinkName, macAddress, _, err := gatewayInitInternal(
-		nodeName, gwIntf, hostSubnets, gwNextHops, nodeAnnotator)
+	gwBridge, _, err := gatewayInitInternal(
+		nodeName, gwIntf, "", hostSubnets, gwNextHops, nil, nodeAnnotator)
 	if err != nil {
 		return nil, err
 	}
 
-	// the name of the patch port created by ovn-controller is of the form
-	// patch-<logical_port_name_of_localnet_port>-to-br-int
-	patchPort := "patch-" + bridgeName + "_" + nodeName + "-to-br-int"
-
 	if config.Gateway.NodeportEnable {
-		localAddrSet, err := getLocalAddrs()
-		if err != nil {
-			return nil, err
-		}
-
 		if err := initLocalGatewayIPTables(); err != nil {
 			return nil, err
 		}
-		if err := initRoutingRules(); err != nil {
-			return nil, err
-		}
-		gw.localPortWatcher = newLocalPortWatcher(gatewayIfAddrs, recorder, localAddrSet)
+		gw.localPortWatcher = newLocalPortWatcher(gatewayIfAddrs, recorder)
 	}
 
 	gw.readyFunc = func() (bool, error) {
-		return gatewayReady(patchPort)
+		return gatewayReady(gwBridge.patchPort)
 	}
 
 	gw.initFunc = func() error {
 		klog.Info("Creating Local Gateway Openflow Manager")
-		var err error
-		gw.openflowManager, err = newLocalGatewayOpenflowManager(patchPort, macAddress.String(), bridgeName, uplinkName)
+		err := setBridgeOfPorts(gwBridge)
+		if err != nil {
+			return err
+		}
+		gw.openflowManager, err = newLocalGatewayOpenflowManager(gwBridge)
 		return err
 	}
 
@@ -104,19 +95,17 @@ func getGatewayFamilyAddrs(gatewayIfAddrs []*net.IPNet) (string, string) {
 }
 
 type localPortWatcher struct {
-	recorder     record.EventRecorder
-	gatewayIPv4  string
-	gatewayIPv6  string
-	localAddrSet map[string]net.IPNet
+	recorder    record.EventRecorder
+	gatewayIPv4 string
+	gatewayIPv6 string
 }
 
-func newLocalPortWatcher(gatewayIfAddrs []*net.IPNet, recorder record.EventRecorder, localAddrSet map[string]net.IPNet) *localPortWatcher {
+func newLocalPortWatcher(gatewayIfAddrs []*net.IPNet, recorder record.EventRecorder) *localPortWatcher {
 	gatewayIPv4, gatewayIPv6 := getGatewayFamilyAddrs(gatewayIfAddrs)
 	return &localPortWatcher{
-		recorder:     recorder,
-		gatewayIPv4:  gatewayIPv4,
-		gatewayIPv6:  gatewayIPv6,
-		localAddrSet: localAddrSet,
+		recorder:    recorder,
+		gatewayIPv4: gatewayIPv4,
+		gatewayIPv6: gatewayIPv6,
 	}
 }
 
@@ -172,17 +161,8 @@ func getLocalAddrs() (map[string]net.IPNet, error) {
 	return localAddrSet, nil
 }
 
-func (l *localPortWatcher) networkHasAddress(ip net.IP) bool {
-	for _, net := range l.localAddrSet {
-		if net.Contains(ip) {
-			return true
-		}
-	}
-	return false
-}
-
 func (l *localPortWatcher) addService(svc *kapi.Service) error {
-	// don't process headless service or services that doesn't have NodePorts or ExternalIPs
+	// don't process headless service or services that do not have NodePorts or ExternalIPs
 	if !util.ServiceTypeHasClusterIP(svc) || !util.IsClusterIPSet(svc) {
 		return nil
 	}
@@ -194,8 +174,6 @@ func (l *localPortWatcher) addService(svc *kapi.Service) error {
 		if isIPv6Service {
 			gatewayIP = l.gatewayIPv6
 		}
-		// holds map of external ips and if they are currently using routes
-		routeUsage := make(map[string]bool)
 		for _, port := range svc.Spec.Ports {
 			// Fix Azure/GCP LoadBalancers. They will forward traffic directly to the node with the
 			// dest address as the load-balancer ingress IP and port
@@ -215,26 +193,10 @@ func (l *localPortWatcher) addService(svc *kapi.Service) error {
 				if utilnet.IsIPv6String(externalIP) != isIPv6Service {
 					continue
 				}
-				if _, exists := l.localAddrSet[externalIP]; exists {
-					iptRules = append(iptRules, getExternalIPTRules(port, externalIP, ip)...)
-					klog.V(5).Infof("Will add iptables rule for ExternalIP: %s", externalIP)
-				} else if l.networkHasAddress(net.ParseIP(externalIP)) {
-					klog.V(5).Infof("ExternalIP: %s is reachable through one of the interfaces on this node, will skip setup", externalIP)
-				} else {
-					if gatewayIP != "" {
-						routeUsage[externalIP] = true
-					} else {
-						klog.Warningf("No gateway of appropriate IP family for ExternalIP %s for Service %s/%s",
-							externalIP, svc.Namespace, svc.Name)
-					}
-				}
-			}
-		}
-		for externalIP := range routeUsage {
-			if stdout, stderr, err := util.RunIP("route", "replace", externalIP, "via", gatewayIP, "dev", types.K8sMgmtIntfName, "table", localnetGatewayExternalIDTable); err != nil {
-				klog.Errorf("Error adding routing table entry for ExternalIP %s, via gw: %s: stdout: %s, stderr: %s, err: %v", externalIP, gatewayIP, stdout, stderr, err)
-			} else {
-				klog.Infof("Successfully added route for ExternalIP: %s", externalIP)
+
+				iptRules = append(iptRules, getExternalIPTRules(port, externalIP, ip)...)
+				klog.V(5).Infof("Adding iptables rules for service: %s with external IP: %s", svc.Name, externalIP)
+
 			}
 		}
 		klog.Infof("Adding iptables rules: %v for service: %v", iptRules, svc.Name)
@@ -258,8 +220,6 @@ func (l *localPortWatcher) deleteService(svc *kapi.Service) error {
 		if isIPv6Service {
 			gatewayIP = l.gatewayIPv6
 		}
-		// holds map of external ips and if they are currently using routes
-		routeUsage := make(map[string]bool)
 		// Note that unlike with addService we just silently ignore IPv4/IPv6 mismatches here
 		for _, port := range svc.Spec.Ports {
 			// Fix Azure/GCP LoadBalancers. They will forward traffic directly to the node with the
@@ -276,24 +236,10 @@ func (l *localPortWatcher) deleteService(svc *kapi.Service) error {
 				if utilnet.IsIPv6String(externalIP) != isIPv6Service {
 					continue
 				}
-				if _, exists := l.localAddrSet[externalIP]; exists {
-					iptRules = append(iptRules, getExternalIPTRules(port, externalIP, ip)...)
-					klog.V(5).Infof("Will delete iptables rule for ExternalIP: %s", externalIP)
-				} else if l.networkHasAddress(net.ParseIP(externalIP)) {
-					klog.V(5).Infof("ExternalIP: %s is reachable through one of the interfaces on this node, will skip cleanup", externalIP)
-				} else {
-					if gatewayIP != "" {
-						routeUsage[externalIP] = true
-					}
-				}
-			}
-		}
 
-		for externalIP := range routeUsage {
-			if stdout, stderr, err := util.RunIP("route", "del", externalIP, "via", gatewayIP, "dev", types.K8sMgmtIntfName, "table", localnetGatewayExternalIDTable); err != nil {
-				klog.Errorf("Error delete routing table entry for ExternalIP %s: stdout: %s, stderr: %s, err: %v", externalIP, stdout, stderr, err)
-			} else {
-				klog.Infof("Successfully deleted route for ExternalIP: %s", externalIP)
+				iptRules = append(iptRules, getExternalIPTRules(port, externalIP, ip)...)
+				klog.V(5).Infof("Will delete iptables rule for ExternalIP: %s", externalIP)
+
 			}
 		}
 
@@ -306,31 +252,7 @@ func (l *localPortWatcher) deleteService(svc *kapi.Service) error {
 }
 
 func (l *localPortWatcher) SyncServices(serviceInterface []interface{}) {
-	removeStaleRoutes := func(keepRoutes []string) {
-		stdout, stderr, err := util.RunIP("route", "list", "table", localnetGatewayExternalIDTable)
-		if err != nil || stdout == "" {
-			klog.Infof("No routing table entries for ExternalIP table %s: stdout: %s, stderr: %s, err: %v",
-				localnetGatewayExternalIDTable, stdout, strings.Replace(stderr, "\n", "", -1), err)
-			return
-		}
-		for _, existingRoute := range strings.Split(stdout, "\n") {
-			isFound := false
-			for _, keepRoute := range keepRoutes {
-				if strings.Contains(existingRoute, keepRoute) {
-					isFound = true
-					break
-				}
-			}
-			if !isFound {
-				klog.Infof("Deleting stale routing rule: %s", existingRoute)
-				if _, stderr, err := util.RunIP("route", "del", existingRoute, "table", localnetGatewayExternalIDTable); err != nil {
-					klog.Errorf("Error deleting stale routing rule: stderr: %s, err: %v", stderr, err)
-				}
-			}
-		}
-	}
 	keepIPTRules := []iptRule{}
-	keepRoutes := []string{}
 	for _, service := range serviceInterface {
 		svc, ok := service.(*kapi.Service)
 		if !ok {
@@ -338,25 +260,17 @@ func (l *localPortWatcher) SyncServices(serviceInterface []interface{}) {
 			continue
 		}
 		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(svc, []string{l.gatewayIPv4, l.gatewayIPv6})...)
-		keepRoutes = append(keepRoutes, svc.Spec.ExternalIPs...)
 	}
 	for _, chain := range []string{iptableNodePortChain, iptableExternalIPChain} {
 		recreateIPTRules("nat", chain, keepIPTRules)
 	}
-	removeStaleRoutes(keepRoutes)
-}
 
-func initRoutingRules() error {
-	stdout, stderr, err := util.RunIP("rule")
-	if err != nil {
-		return fmt.Errorf("error listing routing rules, stdout: %s, stderr: %s, err: %v", stdout, stderr, err)
+	// Previously LGW used routes in the localnetGatewayExternalIDTable, to handle
+	// upgrades correctly make sure we flush this table of all routes
+	klog.Infof("Flushing host's routing table: %s", localnetGatewayExternalIDTable)
+	if _, stderr, err := util.RunIP("route", "flush", "table", localnetGatewayExternalIDTable); err != nil {
+		klog.Errorf("Error flushing host's routing table: %s stderr: %s err: %v", localnetGatewayExternalIDTable, stderr, err)
 	}
-	if !strings.Contains(stdout, fmt.Sprintf("from all lookup %s", localnetGatewayExternalIDTable)) {
-		if stdout, stderr, err := util.RunIP("rule", "add", "from", "all", "table", localnetGatewayExternalIDTable); err != nil {
-			return fmt.Errorf("error adding routing rule for ExternalIP table (%s): stdout: %s, stderr: %s, err: %v", localnetGatewayExternalIDTable, stdout, stderr, err)
-		}
-	}
-	return nil
 }
 
 func cleanupLocalnetGateway(physnet string) error {
@@ -405,28 +319,25 @@ func getLoadBalancerIPTRules(svc *kapi.Service, svcPort kapi.ServicePort, gatewa
 // -- to also connection track the outbound north-south traffic through l3 gateway so that
 //    the return traffic can be steered back to OVN logical topology
 // -- to also handle unDNAT return traffic back out of the host
-func newLocalGatewayOpenflowManager(patchPort, macAddress, gwBridge, gwIntf string) (*openflowManager, error) {
-	// Get ofport of patchPort, but before that make sure ovn-controller created
-	// one for us (waits for about ovsCommandTimeout seconds)
-	ofportPatch, stderr, err := util.RunOVSVsctl("get", "Interface", patchPort, "ofport")
-	if err != nil {
-		return nil, fmt.Errorf("failed while waiting on patch port %q to be created by ovn-controller and "+
-			"while getting ofport. stderr: %q, error: %v", patchPort, stderr, err)
-	}
-
-	// Get ofport of physical interface
-	ofportPhys, stderr, err := util.RunOVSVsctl("get", "interface", gwIntf, "ofport")
-	if err != nil {
-		return nil, fmt.Errorf("failed to get ofport of %s, stderr: %q, error: %v",
-			gwIntf, stderr, err)
-	}
+func newLocalGatewayOpenflowManager(gwBridge *bridgeConfiguration) (*openflowManager, error) {
+	// 14 bytes of overhead for ethernet header (does not include VLAN)
+	maxPktLength := getMaxFrameLength()
 
 	var dftFlows []string
 
 	// table 0, we check to see if this dest mac is the shared mac, if so flood to both ports (non-IP traffic)
 	dftFlows = append(dftFlows,
 		fmt.Sprintf("cookie=%s, priority=10, table=0, in_port=%s, dl_dst=%s, actions=output:%s,output:LOCAL",
-			defaultOpenFlowCookie, ofportPhys, macAddress, ofportPatch))
+			defaultOpenFlowCookie, gwBridge.ofPortPhys, gwBridge.macAddress, gwBridge.ofPortPatch))
+
+	var actions string
+	if config.Gateway.DisablePacketMTUCheck {
+		actions = fmt.Sprintf("output:%s", gwBridge.ofPortPatch)
+	} else {
+		// check packet length larger than MTU + eth header - vlan overhead
+		// send to table 11 to check if it needs to go to kernel for ICMP needs frag
+		actions = fmt.Sprintf("check_pkt_larger(%d)->reg0[0],resubmit(,11)", maxPktLength)
+	}
 
 	if config.IPv4Mode {
 		// table 0, packets coming from pods headed externally. Commit connections
@@ -434,13 +345,13 @@ func newLocalGatewayOpenflowManager(patchPort, macAddress, gwBridge, gwIntf stri
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=100, table=0, in_port=%s, ip, "+
 				"actions=ct(commit, exec(load:0x1->NXM_NX_CT_LABEL), zone=%d), output:%s",
-				defaultOpenFlowCookie, ofportPatch, config.Default.ConntrackZone, ofportPhys))
+				defaultOpenFlowCookie, gwBridge.ofPortPatch, config.Default.ConntrackZone, gwBridge.ofPortPhys))
 
 		// table 0, packets coming from external. Send it through conntrack and
 		// resubmit to table 1 to know the state of the connection.
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=50, table=0, in_port=%s, ip, "+
-				"actions=ct(zone=%d, table=1)", defaultOpenFlowCookie, ofportPhys, config.Default.ConntrackZone))
+				"actions=ct(zone=%d, table=1)", defaultOpenFlowCookie, gwBridge.ofPortPhys, config.Default.ConntrackZone))
 	}
 	if config.IPv6Mode {
 		// table 0, packets coming from pods headed externally. Commit connections
@@ -448,29 +359,30 @@ func newLocalGatewayOpenflowManager(patchPort, macAddress, gwBridge, gwIntf stri
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=100, table=0, in_port=%s, ipv6, "+
 				"actions=ct(commit, exec(load:0x1->NXM_NX_CT_LABEL), zone=%d), output:%s",
-				defaultOpenFlowCookie, ofportPatch, config.Default.ConntrackZone, ofportPhys))
+				defaultOpenFlowCookie, gwBridge.ofPortPatch, config.Default.ConntrackZone, gwBridge.ofPortPhys))
 
 		// table 0, packets coming from external. Send it through conntrack and
 		// resubmit to table 1 to know the state of the connection.
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=50, table=0, in_port=%s, ipv6, "+
-				"actions=ct(zone=%d, table=1)", defaultOpenFlowCookie, ofportPhys, config.Default.ConntrackZone))
+				"actions=ct(zone=%d, table=1)", defaultOpenFlowCookie, gwBridge.ofPortPhys, config.Default.ConntrackZone))
 	}
 
 	// table 0, packets coming from host should go out physical port
 	dftFlows = append(dftFlows,
 		fmt.Sprintf("cookie=%s, priority=100, table=0, in_port=LOCAL, actions=output:%s",
-			defaultOpenFlowCookie, ofportPhys))
+			defaultOpenFlowCookie, gwBridge.ofPortPhys))
 
 	// table 0, packets coming from OVN that are not IP should go out of the host
 	dftFlows = append(dftFlows,
 		fmt.Sprintf("cookie=%s, priority=99, table=0, in_port=%s, actions=output:%s",
-			defaultOpenFlowCookie, ofportPatch, ofportPhys))
+			defaultOpenFlowCookie, gwBridge.ofPortPatch, gwBridge.ofPortPhys))
 
 	// table 1, known connections with ct_label 1 go to pod
 	dftFlows = append(dftFlows,
 		fmt.Sprintf("cookie=%s, priority=100, table=1, ct_label=0x1, "+
-			"actions=output:%s", defaultOpenFlowCookie, ofportPatch))
+			"actions=%s",
+			defaultOpenFlowCookie, actions))
 
 	// table 1, traffic to pod subnet go directly to OVN
 	for _, clusterEntry := range config.Default.ClusterSubnets {
@@ -483,8 +395,21 @@ func newLocalGatewayOpenflowManager(patchPort, macAddress, gwBridge, gwIntf stri
 		}
 		mask, _ := cidr.Mask.Size()
 		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=15, table=1, %s, %s_dst=%s/%d, actions=output:%s",
-				defaultOpenFlowCookie, ipPrefix, ipPrefix, cidr.IP, mask, ofportPatch))
+			fmt.Sprintf("cookie=%s, priority=15, table=1, %s, %s_dst=%s/%d, "+
+				"actions=%s",
+				defaultOpenFlowCookie, ipPrefix, ipPrefix, cidr.IP, mask, actions))
+	}
+
+	// New dispatch table 11
+	// packets larger than known acceptable MTU need to go to kernel to create ICMP frag needed
+	if !config.Gateway.DisablePacketMTUCheck {
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=10, table=11, reg0=0x1, "+
+				"actions=LOCAL", defaultOpenFlowCookie))
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=1, table=11, "+
+				"actions=output:%s", defaultOpenFlowCookie, gwBridge.ofPortPatch))
+
 	}
 
 	if config.IPv6Mode {
@@ -499,20 +424,20 @@ func newLocalGatewayOpenflowManager(patchPort, macAddress, gwBridge, gwIntf stri
 		// We send BFD traffic both on the host and in ovn
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=13, table=1, in_port=%s, udp6, tp_dst=3784, actions=output:%s,output:LOCAL",
-				defaultOpenFlowCookie, ofportPhys, ofportPatch))
+				defaultOpenFlowCookie, gwBridge.ofPortPhys, gwBridge.ofPortPatch))
 	}
 
 	if config.IPv4Mode {
 		// We send BFD traffic both on the host and in ovn
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=13, table=1, in_port=%s, udp, tp_dst=3784, actions=output:%s,output:LOCAL",
-				defaultOpenFlowCookie, ofportPhys, ofportPatch))
+				defaultOpenFlowCookie, gwBridge.ofPortPhys, gwBridge.ofPortPatch))
 	}
 
 	// table 1, we check to see if this dest mac is the shared mac, if so send to host
 	dftFlows = append(dftFlows,
 		fmt.Sprintf("cookie=%s, priority=10, table=1, dl_dst=%s, actions=output:LOCAL",
-			defaultOpenFlowCookie, macAddress))
+			defaultOpenFlowCookie, gwBridge.macAddress))
 
 	// table 1, all other connections do normal processing
 	dftFlows = append(dftFlows,
@@ -520,14 +445,10 @@ func newLocalGatewayOpenflowManager(patchPort, macAddress, gwBridge, gwIntf stri
 
 	// add health check function to check default OpenFlow flows are on the shared gateway bridge
 	ofm := &openflowManager{
-		gwBridge:    gwBridge,
-		physIntf:    gwIntf,
-		patchIntf:   patchPort,
-		ofportPhys:  ofportPhys,
-		ofportPatch: ofportPatch,
-		flowCache:   make(map[string][]string),
-		flowMutex:   sync.Mutex{},
-		flowChan:    make(chan struct{}, 1),
+		defaultBridge: gwBridge,
+		flowCache:     make(map[string][]string),
+		flowMutex:     sync.Mutex{},
+		flowChan:      make(chan struct{}, 1),
 	}
 	ofm.updateFlowCacheEntry("NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
 	ofm.updateFlowCacheEntry("DEFAULT", dftFlows)

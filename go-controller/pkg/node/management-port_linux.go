@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -53,9 +52,11 @@ func newManagementPortIPFamilyConfig(hostSubnet *net.IPNet, isIPv6 bool) (*manag
 			cfg.allSubnets = append(cfg.allSubnets, subnet.CIDR)
 		}
 	}
-	for _, subnet := range config.Kubernetes.ServiceCIDRs {
-		if utilnet.IsIPv6CIDR(subnet) == isIPv6 {
-			cfg.allSubnets = append(cfg.allSubnets, subnet)
+	if config.Gateway.Mode != config.GatewayModeShared {
+		for _, subnet := range config.Kubernetes.ServiceCIDRs {
+			if utilnet.IsIPv6CIDR(subnet) == isIPv6 {
+				cfg.allSubnets = append(cfg.allSubnets, subnet)
+			}
 		}
 	}
 
@@ -134,19 +135,16 @@ func tearDownManagementPortConfig(mpcfg *managementPortConfig) error {
 		return err
 	}
 
+	if err := util.LinkRoutesDel(mpcfg.link, nil); err != nil {
+		return err
+	}
 	if mpcfg.ipv4 != nil {
-		if err := util.LinkRoutesDel(mpcfg.link, mpcfg.ipv4.allSubnets); err != nil {
-			return err
-		}
 		if err := mpcfg.ipv4.ipt.ClearChain("nat", iptableMgmPortChain); err != nil {
 			return fmt.Errorf("could not clear the iptables chain for management port: %v", err)
 		}
 	}
 
 	if mpcfg.ipv6 != nil {
-		if err := util.LinkRoutesDel(mpcfg.link, mpcfg.ipv6.allSubnets); err != nil {
-			return err
-		}
 		if err := mpcfg.ipv6.ipt.ClearChain("nat", iptableMgmPortChain); err != nil {
 			return fmt.Errorf("could not clear the iptables chain for management port: %v", err)
 		}
@@ -176,7 +174,7 @@ func setupManagementPortIPFamilyConfig(mpcfg *managementPortConfig, cfg *managem
 			// we need to warn so that it can be debugged as to why routes are disappearing
 			warnings = append(warnings, fmt.Sprintf("missing route entry for subnet %s via gateway %s on link %v",
 				subnet, cfg.gwIP, mpcfg.ifName))
-			err = util.LinkRoutesAdd(mpcfg.link, cfg.gwIP, []*net.IPNet{subnet})
+			err = util.LinkRoutesAdd(mpcfg.link, cfg.gwIP, []*net.IPNet{subnet}, 0)
 			if err != nil {
 				if os.IsExist(err) {
 					klog.V(5).Infof("Ignoring error %s from 'route add %s via %s' - already added via IPv6 RA?",
@@ -300,19 +298,12 @@ func DelMgtPortIptRules() {
 // 1. route entries to cluster CIDR and service CIDR through management port
 // 2. ARP entry for the node subnet's gateway ip
 // 3. IPtables chain and rule for SNATing packets entering the logical topology
-func checkManagementPortHealth(cfg *managementPortConfig, stopChan chan struct{}) {
-	for {
-		select {
-		case <-time.After(30 * time.Second):
-			warnings, err := setupManagementPortConfig(cfg)
-			for _, warning := range warnings {
-				klog.Warningf(warning)
-			}
-			if err != nil {
-				klog.Errorf(err.Error())
-			}
-		case <-stopChan:
-			return
-		}
+func checkManagementPortHealth(cfg *managementPortConfig) {
+	warnings, err := setupManagementPortConfig(cfg)
+	for _, warning := range warnings {
+		klog.Warningf(warning)
+	}
+	if err != nil {
+		klog.Errorf(err.Error())
 	}
 }

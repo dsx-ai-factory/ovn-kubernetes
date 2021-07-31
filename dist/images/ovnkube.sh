@@ -51,6 +51,7 @@ fi
 # OVN_NORTHD_OPTS - the options for the ovn northbound db
 # OVN_GATEWAY_MODE - the gateway mode (shared or local) - v3
 # OVN_GATEWAY_OPTS - the options for the ovn gateway
+# OVN_GATEWAY_ROUTER_SUBNET - the gateway router subnet (shared mode, Smart-NIC only) - v3
 # OVNKUBE_LOGLEVEL - log level for ovnkube (0..5, default 4) - v3
 # OVN_LOGLEVEL_NORTHD - log level (ovn-ctl default: -vconsole:emer -vsyslog:err -vfile:info) - v3
 # OVN_LOGLEVEL_NB - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3
@@ -72,7 +73,12 @@ fi
 # OVN_METRICS_SCRAPE_INTERVAL - ovn & ovnkube metrics scrape interval in sec (default 30)
 # OVS_METRICS_SCRAPE_INTERVAL - ovs metrics scrape interval in sec (default 30)
 # OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
+# OVN_EGRESSFIREWALL_ENABLE - enable egressFirewall for ovn-kubernetes
 # OVN_UNPRIVILEGED_MODE - execute CNI ovs/netns commands from host (default no)
+# OVNKUBE_NODE_MODE - ovnkube node mode of operation, one of: full, smart-nic, smart-nic-host (default: full)
+# OVNKUBE_NODE_MGMT_PORT_NETDEV - ovnkube node management port netdev. valid when ovnkube node mode is: smart-nic, smart-nic-host
+# OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node. mandatory in case ovnkube-node-mode=="smart-nic"
+# OVN_HOST_NETWORK_NAMESPACE - namespace to classify host network traffic for applying network policies
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -152,6 +158,7 @@ ovnkube_loglevel=${OVNKUBE_LOGLEVEL:-4}
 # two gateway modes that we support using `images/daemonset.sh` tool
 ovn_gateway_mode=${OVN_GATEWAY_MODE:-"shared"}
 ovn_gateway_opts=${OVN_GATEWAY_OPTS:-""}
+ovn_gateway_router_subnet=${OVN_GATEWAY_ROUTER_SUBNET:-""}
 
 net_cidr=${OVN_NET_CIDR:-10.128.0.0/14/23}
 svc_cidr=${OVN_SVC_CIDR:-172.30.0.0/16}
@@ -159,6 +166,8 @@ mtu=${OVN_MTU:-1400}
 
 metrics_endpoint_ip=${OVN_METRICS_ENDPOINT_IP:-127.0.0.1}
 ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
+# namespace used for classifying host network traffic
+ovn_host_network_namespace=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
 
 # host on which OVN DB POD(s) are running
 ovn_db_host=${K8S_NODE_IP:-""}
@@ -185,6 +194,7 @@ ovn_sb_raft_sched_priority=${OVN_SB_RAFT_SCHED_PRIORITY:--11}
 ovn_hybrid_overlay_enable=${OVN_HYBRID_OVERLAY_ENABLE:-}
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR:-}
 ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-}
+ovn_disable_pkt_mtu_check=${OVN_DISABLE_PKT_MTU_CHECK:-}
 ovn_empty_lb_events=${OVN_EMPTY_LB_EVENTS:-}
 # OVN_V4_JOIN_SUBNET - v4 join subnet
 ovn_v4_join_subnet=${OVN_V4_JOIN_SUBNET:-}
@@ -200,7 +210,26 @@ ovs_metrics_scrape_interval=${OVS_METRICS_SCRAPE_INTERVAL:-30}
 ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-}
 #OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 ovn_egressip_enable=${OVN_EGRESSIP_ENABLE:-false}
+#OVN_ICMP_NETWORKPOLICY_ENABLE - enable icmp networkpolicy for ovn-kubernetes
+ovn_icmp_networkpolicy_enable=${OVN_ICMP_NETWORKPOLICY_ENABLE:-false}
 ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
+#OVN_EGRESSFIREWALL_ENABLE - enable egressFirewall for ovn-kubernetes
+ovn_egressfirewall_enable=${OVN_EGRESSFIREWALL_ENABLE:-false}
+#OVN_ENABLE_LFLOW_CACHE - enable lflow cache for ovn-controller 
+ovn_enable_lflow_cache=${OVN_ENABLE_LFLOW_CACHE:-false}
+ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
+ovn_netflow_targets=${OVN_NETFLOW_TARGETS:-}
+ovn_sflow_targets=${OVN_SFLOW_TARGETS:-}
+ovn_ipfix_targets=${OVN_IPFIX_TARGETS:-}
+
+# OVNKUBE_NODE_MODE - is the mode which ovnkube node operates
+ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
+# OVNKUBE_NODE_mgmt_PORT_NETDEV - is the net device to be used for management port
+ovnkube_node_mgmt_port_netdev=${OVNKUBE_NODE_MGMT_PORT_NETDEV:-}
+# OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node
+ovn_encap_ip=${OVN_ENCAP_IP:-}
+
+ovn_ex_gw_network_interface=${OVN_EX_GW_NETWORK_INTERFACE:-}
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
@@ -496,6 +525,7 @@ display_env() {
   echo OVN_LOGLEVEL_CONTROLLER ${ovn_loglevel_controller}
   echo OVN_GATEWAY_MODE ${ovn_gateway_mode}
   echo OVN_GATEWAY_OPTS ${ovn_gateway_opts}
+  echo OVN_GATEWAY_ROUTER_SUBNET ${ovn_gateway_router_subnet}
   echo OVN_NET_CIDR ${net_cidr}
   echo OVN_SVC_CIDR ${svc_cidr}
   echo OVN_NB_PORT ${ovn_nb_port}
@@ -503,7 +533,10 @@ display_env() {
   echo K8S_APISERVER ${K8S_APISERVER}
   echo OVNKUBE_LOGLEVEL ${ovnkube_loglevel}
   echo OVN_DAEMONSET_VERSION ${ovn_daemonset_version}
+  echo OVNKUBE_NODE_MODE ${ovnkube_node_mode}
+  echo OVN_ENCAP_IP ${ovn_encap_ip}
   echo ovnkube.sh version ${ovnkube_version}
+  echo OVN_HOST_NETWORK_NAMESPACE ${ovn_host_network_namespace}
 }
 
 ovn_debug() {
@@ -875,6 +908,11 @@ ovn-master() {
       disable_snat_multiple_gws_flag="--disable-snat-multiple-gws"
   fi
 
+  disable_pkt_mtu_check_flag=
+  if [[ ${ovn_disable_pkt_mtu_check} == "true" ]]; then
+      disable_pkt_mtu_check_flag="--disable-pkt-mtu-check"
+  fi
+
   empty_lb_events_flag=
   if [[ ${ovn_empty_lb_events} == "true" ]]; then
       empty_lb_events_flag="--ovn-empty-lb-events"
@@ -920,6 +958,15 @@ ovn-master() {
   if [[ ${ovn_egressip_enable} == "true" ]]; then
       egressip_enabled_flag="--enable-egress-ip"
   fi
+  icmp_networkpolicy_enabled_flag=
+  if [[ ${ovn_icmp_networkpolicy_enable} == "true" ]]; then
+      icmp_networkpolicy_enabled_flag="--enable-icmp-networkpolicy"
+  fi
+  egressfirewall_enabled_flag=
+  if [[ ${ovn_egressfirewall_enable} == "true" ]]; then
+	  egressfirewall_enabled_flag="--enable-egress-firewall"
+  fi
+  echo "egressfirewall_enabled_flag=${egressfirewall_enabled_flag}"
 
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
@@ -943,8 +990,12 @@ ovn-master() {
     ${multicast_enabled_flag} \
     ${ovn_acl_logging_rate_limit_flag} \
     ${egressip_enabled_flag} \
+    ${egressfirewall_enabled_flag} \
+    ${icmp_networkpolicy_enabled_flag} \
     --metrics-interval ${ovn_metrics_scrape_interval} \
-    --metrics-bind-address ${ovnkube_master_metrics_bind_address} --metrics-enable-pprof &
+    --metrics-bind-address ${ovnkube_master_metrics_bind_address} --metrics-enable-pprof \
+    --host-network-namespace ${ovn_host_network_namespace} &
+
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master
 
@@ -1054,16 +1105,20 @@ ovn-node() {
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovnkube.pid
 
-  echo "=============== ovn-node - (wait for ovs)"
-  wait_for_event ovs_ready
+  if [[ ${ovnkube_node_mode} != "smart-nic-host" ]]; then
+    echo "=============== ovn-node - (wait for ovs)"
+    wait_for_event ovs_ready
+  fi
 
   echo "=============== ovn-node - (wait for ready_to_start_node)"
   wait_for_event ready_to_start_node
 
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}  ovn_nbdb_conn ${ovn_nbdb_conn}"
 
-  echo "=============== ovn-node - (ovn-node  wait for ovn-controller.pid)"
-  wait_for_event process_ready ovn-controller
+  if [[ ${ovnkube_node_mode} != "smart-nic-host" ]]; then
+    echo "=============== ovn-node - (ovn-node  wait for ovn-controller.pid)"
+    wait_for_event process_ready ovn-controller
+  fi
 
   [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
     wait_for_event attempts=20 files_exist ${ovn_controller_pk} ${ovn_controller_cert} ${ovn_ca_cert}
@@ -1092,6 +1147,11 @@ ovn-node() {
       disable_snat_multiple_gws_flag="--disable-snat-multiple-gws"
   fi
 
+  disable_pkt_mtu_check_flag=
+  if [[ ${ovn_disable_pkt_mtu_check} == "true" ]]; then
+      disable_pkt_mtu_check_flag="--disable-pkt-mtu-check"
+  fi
+
   multicast_enabled_flag=
   if [[ ${ovn_multicast_enable} == "true" ]]; then
       multicast_enabled_flag="--enable-multicast"
@@ -1102,12 +1162,53 @@ ovn-node() {
       egressip_enabled_flag="--enable-egress-ip"
   fi
 
-  OVN_ENCAP_IP=""
-  ovn_encap_ip=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-encap-ip)
-  if [[ $? == 0 ]]; then
-    ovn_encap_ip=$(echo ${ovn_encap_ip} | tr -d '\"')
-    if [[ "${ovn_encap_ip}" != "" ]]; then
-      OVN_ENCAP_IP="--encap-ip=${ovn_encap_ip}"
+  enable_lflow_cache_flag=
+  if [[ ${ovn_enable_lflow_cache} == "true" ]]; then
+      enable_lflow_cache_flag="--enable-lflow-cache"
+  fi
+
+  netflow_targets=
+  if [[ -n ${ovn_netflow_targets} ]]; then
+      netflow_targets="--netflow-targets ${ovn_netflow_targets}"
+  fi
+
+  sflow_targets=
+  if [[ -n ${ovn_sflow_targets} ]]; then
+      sflow_targets="--sflow-targets ${ovn_sflow_targets}"
+  fi
+
+  ipfix_targets=
+  if [[ -n ${ovn_ipfix_targets} ]]; then
+      ipfix_targets="--ipfix-targets ${ovn_ipfix_targets}"
+  fi
+
+  egress_interface=
+  if [[ -n ${ovn_ex_gw_network_interface} ]]; then
+      egress_interface="--exgw-interface ${ovn_ex_gw_network_interface}"
+  fi
+
+  ovn_encap_ip_flag=
+  if [[ ${ovn_encap_ip} != "" ]]; then
+    ovn_encap_ip_flag="--encap-ip=${ovn_encap_ip}"
+  else
+    ovn_encap_ip=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-encap-ip)
+    if [[ $? == 0 ]]; then
+      ovn_encap_ip=$(echo ${ovn_encap_ip} | tr -d '\"')
+      if [[ "${ovn_encap_ip}" != "" ]]; then
+        ovn_encap_ip_flag="--encap-ip=${ovn_encap_ip}"
+      fi
+    fi
+  fi
+
+  ovnkube_node_mode_flag=
+  if [[ ${ovnkube_node_mode} != "" ]]; then
+    ovnkube_node_mode_flag="--ovnkube-node-mode=${ovnkube_node_mode}"
+    if [[ ${ovnkube_node_mode} == "smart-nic" ]]; then
+      # encap IP is required for smart-nic, this is either provided via OVN_ENCAP_IP env variable or taken from ovs
+      if [[ ${ovn_encap_ip} == "" ]]; then
+        echo "ovn encap IP must be provided if \"ovnkube-node-mode\" set to \"smart-nic\". Exiting..."
+        exit 1
+      fi
     fi
   fi
 
@@ -1115,19 +1216,26 @@ ovn-node() {
   iptables -t raw -A PREROUTING -p udp --dport $ovn_encap_port -j NOTRACK
   iptables -t raw -A OUTPUT -p udp --dport $ovn_encap_port -j NOTRACK
 
+  ovnkube_node_mgmt_port_netdev_flag=
+  if [[ ${ovnkube_node_mgmt_port_netdev} != "" ]]; then
+    ovnkube_node_mgmt_port_netdev_flag="--ovnkube-node-mgmt-port-netdev=${ovnkube_node_mgmt_port_netdev}"
+  fi
+
   local ovn_node_ssl_opts=""
-  [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
-    ovn_node_ssl_opts="
-        --nb-client-privkey ${ovn_controller_pk}
-        --nb-client-cert ${ovn_controller_cert}
-        --nb-client-cacert ${ovn_ca_cert}
-        --nb-cert-common-name ${ovn_nb_cert_cname}
-        --sb-client-privkey ${ovn_controller_pk}
-        --sb-client-cert ${ovn_controller_cert}
-        --sb-client-cacert ${ovn_ca_cert}
-        --sb-cert-common-name ${ovn_sb_cert_cname}
-      "
-  }
+  if [[ ${ovnkube_node_mode} != "smart-nic-host" ]]; then
+      [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
+        ovn_node_ssl_opts="
+            --nb-client-privkey ${ovn_controller_pk}
+            --nb-client-cert ${ovn_controller_cert}
+            --nb-client-cacert ${ovn_ca_cert}
+            --nb-cert-common-name ${ovn_nb_cert_cname}
+            --sb-client-privkey ${ovn_controller_pk}
+            --sb-client-cert ${ovn_controller_cert}
+            --sb-client-cacert ${ovn_ca_cert}
+            --sb-cert-common-name ${ovn_sb_cert_cname}
+          "
+      }
+  fi
 
   ovnkube_node_metrics_bind_address="${metrics_endpoint_ip}:9410"
 
@@ -1143,25 +1251,37 @@ ovn-node() {
     ${OVN_NODE_PORT} \
     ${ovn_unprivileged_flag} \
     --mtu=${mtu} \
-    ${OVN_ENCAP_IP} \
+    ${ovn_encap_ip_flag} \
     --loglevel=${ovnkube_loglevel} \
     --logfile-maxsize=${ovnkube_logfile_maxsize} \
     --logfile-maxbackups=${ovnkube_logfile_maxbackups} \
     --logfile-maxage=${ovnkube_logfile_maxage} \
     ${hybrid_overlay_flags} \
     ${disable_snat_multiple_gws_flag} \
+    ${disable_pkt_mtu_check_flag} \
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
+    --gateway-router-subnet=${ovn_gateway_router_subnet} \
     --pidfile ${OVN_RUNDIR}/ovnkube.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube.log \
     ${ovn_node_ssl_opts} \
     --inactivity-probe=${ovn_remote_probe_interval} \
     ${multicast_enabled_flag} \
     ${egressip_enabled_flag} \
+    ${netflow_targets} \
+    ${sflow_targets} \
+    ${ipfix_targets} \
+    ${enable_lflow_cache_flag} \
     --metrics-interval ${ovn_metrics_scrape_interval} \
-    --metrics-bind-address ${ovnkube_node_metrics_bind_address} --metrics-enable-pprof &
+    --metrics-bind-address ${ovnkube_node_metrics_bind_address} --metrics-enable-pprof \
+     ${ovnkube_node_mode_flag} \
+    ${egress_interface} \
+    --host-network-namespace ${ovn_host_network_namespace} \
+     ${ovnkube_node_mgmt_port_netdev_flag} &
 
   wait_for_event attempts=3 process_ready ovnkube
-  setup_cni
+  if [[ ${ovnkube_node_mode} != "smart-nic" ]]; then
+    setup_cni
+  fi
   echo "=============== ovn-node ========== running"
 
   process_healthy ovnkube

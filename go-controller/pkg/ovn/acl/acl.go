@@ -15,16 +15,6 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
-// GetACLByName returns the ACL UUID
-func GetACLByName(aclName string) (string, error) {
-	aclUUID, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "acl",
-		fmt.Sprintf("name=%s", aclName))
-	if err != nil {
-		return "", errors.Wrapf(err, "Error while querying ACLs by name: %s", stderr)
-	}
-	return aclUUID, nil
-}
-
 // GetRejectACLs returns a map with the ACLs with a reject action
 // the map uses the name of the ACL as key and the uuid as value
 func GetRejectACLs() (map[string]string, error) {
@@ -126,4 +116,38 @@ func AddRejectACLToLogicalSwitch(logicalSwitch, aclName, sourceIP string, source
 		return "", errors.Wrapf(err, "Failed to add ACL: %s, %q, to cluster switch %s, stderr: %q", aclUUID, aclName, logicalSwitch, stderr)
 	}
 	return aclUUID, nil
+}
+
+func PurgeRejectRules(clusterPortGroupUUID string) error {
+	data, stderr, err := util.RunOVNNbctl("--columns=_uuid", "--format=csv", "--data=bare", "--no-headings", "find", "acl", "action=reject")
+	if err != nil {
+		return errors.Wrapf(err, "Error while querying ACLs with reject action: %s", stderr)
+	}
+	if strings.TrimSpace(data) == "" {
+		klog.Info("No reject ACLs to remove")
+		return nil
+	}
+
+	for _, uuid := range strings.Split(data, "\n") {
+		err = RemoveACLFromPortGroup(uuid, clusterPortGroupUUID)
+		if err != nil {
+			klog.Errorf("Error trying to remove ACL for clusterPortGroupUUID %s/%s: %v", uuid, clusterPortGroupUUID, err)
+		}
+
+		data, stderr, err := util.RunOVNNbctl("--format=csv", "--data=bare", "--no-headings", "--columns=_uuid", "find", "logical_switch", fmt.Sprintf("acls{>=}%s", uuid))
+		if err != nil {
+			return errors.Wrapf(err, "Error while querying ACLs uuid:%s with reject action: %s", uuid, stderr)
+		}
+		ls := strings.Split(data, "\n")
+		err = RemoveACLFromNodeSwitches(ls, uuid)
+		if err != nil {
+			return errors.Wrapf(err, "Failed to remove reject acl from logical switches")
+		}
+		_, stderr, err = util.RunOVNNbctl("--if-exists", "destroy", "acl", uuid)
+		if err != nil {
+			klog.Errorf("Failed to destroy ACL %s, stderr: %q, (%v)",
+				uuid, stderr, err)
+		}
+	}
+	return nil
 }

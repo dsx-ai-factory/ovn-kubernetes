@@ -12,6 +12,10 @@ install-kind:
 	KIND_IPV6_SUPPORT=$(KIND_IPV6_SUPPORT) \
 	./scripts/install-kind.sh
 
+.PHONY : upgrade-ovn
+upgrade-ovn:
+	./scripts/upgrade-ovn.sh
+
 .PHONY: shard-%
 shard-%:
 	E2E_REPORT_DIR=$(E2E_REPORT_DIR) \
@@ -26,4 +30,5 @@ control-plane:
 	E2E_REPORT_PREFIX=$(JOB_NAME)_ \
 	KIND_IPV4_SUPPORT=$(KIND_IPV4_SUPPORT) \
 	KIND_IPV6_SUPPORT=$(KIND_IPV6_SUPPORT) \
+	OVN_HA=$(OVN_HA) \
 	./scripts/e2e-cp.sh $(WHAT)

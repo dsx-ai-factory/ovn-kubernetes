@@ -17,8 +17,10 @@ import (
 )
 
 type NetLinkOps interface {
+	LinkList() ([]netlink.Link, error)
 	LinkByName(ifaceName string) (netlink.Link, error)
 	LinkSetDown(link netlink.Link) error
+	LinkDelete(link netlink.Link) error
 	LinkSetName(link netlink.Link, newName string) error
 	LinkSetUp(link netlink.Link) error
 	LinkSetNsFd(link netlink.Link, fd int) error
@@ -47,9 +49,18 @@ func SetNetLinkOpMockInst(mockInst NetLinkOps) {
 	netLinkOps = mockInst
 }
 
+// ResetNetLinkOpMockInst resets the mock instance for netlink to the defaultNetLinkOps
+func ResetNetLinkOpMockInst() {
+	netLinkOps = &defaultNetLinkOps{}
+}
+
 // GetNetLinkOps will be invoked by functions in other packages that would need access to the netlink library methods.
 func GetNetLinkOps() NetLinkOps {
 	return netLinkOps
+}
+
+func (defaultNetLinkOps) LinkList() ([]netlink.Link, error) {
+	return netlink.LinkList()
 }
 
 func (defaultNetLinkOps) LinkByName(ifaceName string) (netlink.Link, error) {
@@ -58,6 +69,10 @@ func (defaultNetLinkOps) LinkByName(ifaceName string) (netlink.Link, error) {
 
 func (defaultNetLinkOps) LinkSetDown(link netlink.Link) error {
 	return netlink.LinkSetDown(link)
+}
+
+func (defaultNetLinkOps) LinkDelete(link netlink.Link) error {
+	return netlink.LinkDel(link)
 }
 
 func (defaultNetLinkOps) LinkSetUp(link netlink.Link) error {
@@ -145,6 +160,19 @@ func LinkSetUp(interfaceName string) (netlink.Link, error) {
 	return link, nil
 }
 
+// LinkDelete removes an interface
+func LinkDelete(interfaceName string) error {
+	link, err := netLinkOps.LinkByName(interfaceName)
+	if err != nil {
+		return fmt.Errorf("failed to lookup link %s: %v", interfaceName, err)
+	}
+	err = netLinkOps.LinkDelete(link)
+	if err != nil {
+		return fmt.Errorf("failed to remove link %s, error: %v", interfaceName, err)
+	}
+	return nil
+}
+
 // LinkAddrFlush flushes all the addresses on the given link, except IPv6 link-local addresses
 func LinkAddrFlush(link netlink.Link) error {
 	addrs, err := netLinkOps.AddrList(link, netlink.FAMILY_ALL)
@@ -189,14 +217,23 @@ func LinkAddrAdd(link netlink.Link, address *net.IPNet) error {
 }
 
 // LinkRoutesDel deletes all the routes for the given subnets via the link
+// if subnets is empty, then all routes will be removed for a link
 func LinkRoutesDel(link netlink.Link, subnets []*net.IPNet) error {
 	routes, err := netLinkOps.RouteList(link, netlink.FAMILY_ALL)
 	if err != nil {
 		return fmt.Errorf("failed to get all the routes for link %s: %v",
 			link.Attrs().Name, err)
 	}
-	for _, subnet := range subnets {
-		for _, route := range routes {
+	for _, route := range routes {
+		if len(subnets) == 0 {
+			err = netLinkOps.RouteDel(&route)
+			if err != nil {
+				return fmt.Errorf("failed to delete route '%s via %s' for link %s : %v\n",
+					route.Dst.String(), route.Gw.String(), link.Attrs().Name, err)
+			}
+			continue
+		}
+		for _, subnet := range subnets {
 			if route.Dst.String() == subnet.String() {
 				err = netLinkOps.RouteDel(&route)
 				if err != nil {
@@ -211,13 +248,16 @@ func LinkRoutesDel(link netlink.Link, subnets []*net.IPNet) error {
 }
 
 // LinkRoutesAdd adds a new route for given subnets through the gwIPstr
-func LinkRoutesAdd(link netlink.Link, gwIP net.IP, subnets []*net.IPNet) error {
+func LinkRoutesAdd(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int) error {
 	for _, subnet := range subnets {
 		route := &netlink.Route{
 			Dst:       subnet,
 			LinkIndex: link.Attrs().Index,
 			Scope:     netlink.SCOPE_UNIVERSE,
 			Gw:        gwIP,
+		}
+		if mtu != 0 {
+			route.MTU = mtu
 		}
 		err := netLinkOps.RouteAdd(route)
 		if err != nil {
@@ -347,4 +387,47 @@ func GetNetworkInterfaceIPs(iface string) ([]*net.IPNet, error) {
 		ips = append(ips, addr.IPNet)
 	}
 	return ips, nil
+}
+
+// GetIPv6OnSubnet when given an IPv6 address with a 128 prefix for an interface,
+// looks for possible broadest subnet on-link routes and returns the same address
+// with the found subnet prefix. Otherwise it returns the provided address unchanged.
+func GetIPv6OnSubnet(iface string, ip *net.IPNet) (*net.IPNet, error) {
+	if s, _ := ip.Mask.Size(); s != 128 {
+		return ip, nil
+	}
+
+	link, err := netLinkOps.LinkByName(iface)
+	if err != nil {
+		return nil, fmt.Errorf("failed to lookup link %s: %v", iface, err)
+	}
+
+	routeFilter := &netlink.Route{
+		LinkIndex: link.Attrs().Index,
+		Gw:        nil,
+	}
+	filterMask := netlink.RT_FILTER_GW | netlink.RT_FILTER_OIF
+	routes, err := netLinkOps.RouteListFiltered(netlink.FAMILY_V6, routeFilter, filterMask)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get on-link routes for ip %s and iface %s", ip.String(), iface)
+	}
+
+	dst := *ip
+	for _, route := range routes {
+		if route.Dst.Contains(dst.IP) && !dst.Contains(route.Dst.IP) {
+			dst.Mask = route.Dst.Mask
+		}
+	}
+
+	return &dst, nil
+}
+
+// GetNetworkInterfaceMTU returns the MTU for the given network interface
+func GetNetworkInterfaceMTU(iface string) (int, error) {
+	link, err := netLinkOps.LinkByName(iface)
+	if err != nil {
+		return 0, fmt.Errorf("failed to lookup link %s: %v", iface, err)
+	}
+
+	return link.Attrs().MTU, nil
 }

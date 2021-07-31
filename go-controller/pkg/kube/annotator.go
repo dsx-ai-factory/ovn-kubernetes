@@ -4,26 +4,23 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sync"
 
 	kapi "k8s.io/api/core/v1"
 )
 
 // Annotator represents the exported methods for handling node annotations
+// Implementations should enforce thread safety on the declared methods
 type Annotator interface {
 	Set(key string, value interface{}) error
-	SetWithFailureHandler(key string, value interface{}, failFn FailureHandlerFn) error
 	Delete(key string)
 	Run() error
 }
-
-// FailureHandlerFn is a function called when adding an annotation fails
-type FailureHandlerFn func(obj interface{}, key string, val interface{})
 
 type action struct {
 	key     string
 	val     string
 	origVal interface{}
-	failFn  FailureHandlerFn
 }
 
 type nodeAnnotator struct {
@@ -31,6 +28,7 @@ type nodeAnnotator struct {
 	node *kapi.Node
 
 	changes map[string]*action
+	sync.Mutex
 }
 
 // NewNodeAnnotator returns a new annotator for Node objects
@@ -43,14 +41,9 @@ func NewNodeAnnotator(kube Interface, node *kapi.Node) Annotator {
 }
 
 func (na *nodeAnnotator) Set(key string, val interface{}) error {
-	return na.SetWithFailureHandler(key, val, nil)
-}
-
-func (na *nodeAnnotator) SetWithFailureHandler(key string, val interface{}, failFn FailureHandlerFn) error {
 	act := &action{
 		key:     key,
 		origVal: val,
-		failFn:  failFn,
 	}
 	if val != nil {
 		// Annotations must be either a valid string value or nil; coerce
@@ -65,16 +58,22 @@ func (na *nodeAnnotator) SetWithFailureHandler(key string, val interface{}, fail
 			act.val = string(bytes)
 		}
 	}
+	na.Lock()
+	defer na.Unlock()
 	na.changes[key] = act
 	return nil
 }
 
 func (na *nodeAnnotator) Delete(key string) {
+	na.Lock()
+	defer na.Unlock()
 	na.changes[key] = &action{key: key}
 }
 
 func (na *nodeAnnotator) Run() error {
 	annotations := make(map[string]interface{})
+	na.Lock()
+	defer na.Unlock()
 	for k, act := range na.changes {
 		// Ignore annotations that already exist with the same value
 		if existing, ok := na.node.Annotations[k]; existing != act.val || !ok {
@@ -91,16 +90,7 @@ func (na *nodeAnnotator) Run() error {
 		return nil
 	}
 
-	err := na.kube.SetAnnotationsOnNode(na.node, annotations)
-	if err != nil {
-		// Let failure handlers clean up
-		for _, act := range na.changes {
-			if act.failFn != nil {
-				act.failFn(na.node, act.key, act.origVal)
-			}
-		}
-	}
-	return err
+	return na.kube.SetAnnotationsOnNode(na.node, annotations)
 }
 
 // NewPodAnnotator returns a new annotator for Pod objects
@@ -117,17 +107,13 @@ type podAnnotator struct {
 	pod  *kapi.Pod
 
 	changes map[string]*action
+	sync.Mutex
 }
 
 func (pa *podAnnotator) Set(key string, val interface{}) error {
-	return pa.SetWithFailureHandler(key, val, nil)
-}
-
-func (pa *podAnnotator) SetWithFailureHandler(key string, val interface{}, failFn FailureHandlerFn) error {
 	act := &action{
 		key:     key,
 		origVal: val,
-		failFn:  failFn,
 	}
 	if val != nil {
 		// Annotations must be either a valid string value or nil; coerce
@@ -142,16 +128,22 @@ func (pa *podAnnotator) SetWithFailureHandler(key string, val interface{}, failF
 			act.val = string(bytes)
 		}
 	}
+	pa.Lock()
+	defer pa.Unlock()
 	pa.changes[key] = act
 	return nil
 }
 
 func (pa *podAnnotator) Delete(key string) {
+	pa.Lock()
+	defer pa.Unlock()
 	pa.changes[key] = &action{key: key}
 }
 
 func (pa *podAnnotator) Run() error {
 	annotations := make(map[string]string)
+	pa.Lock()
+	defer pa.Unlock()
 	for k, act := range pa.changes {
 		// Ignore annotations that already exist with the same value
 		if existing, ok := pa.pod.Annotations[k]; existing != act.val || !ok {
@@ -168,16 +160,7 @@ func (pa *podAnnotator) Run() error {
 		return nil
 	}
 
-	err := pa.kube.SetAnnotationsOnPod(pa.pod, annotations)
-	if err != nil {
-		// Let failure handlers clean up
-		for _, act := range pa.changes {
-			if act.failFn != nil {
-				act.failFn(pa.pod, act.key, act.origVal)
-			}
-		}
-	}
-	return err
+	return pa.kube.SetAnnotationsOnPod(pa.pod.Namespace, pa.pod.Name, annotations)
 }
 
 // NewNamespaceAnnotator returns a new annotator for Namespace objects
@@ -194,17 +177,13 @@ type namespaceAnnotator struct {
 	namespace *kapi.Namespace
 
 	changes map[string]*action
+	sync.Mutex
 }
 
 func (na *namespaceAnnotator) Set(key string, val interface{}) error {
-	return na.SetWithFailureHandler(key, val, nil)
-}
-
-func (na *namespaceAnnotator) SetWithFailureHandler(key string, val interface{}, failFn FailureHandlerFn) error {
 	act := &action{
 		key:     key,
 		origVal: val,
-		failFn:  failFn,
 	}
 	if val != nil {
 		// Annotations must be either a valid string value or nil; coerce
@@ -219,16 +198,22 @@ func (na *namespaceAnnotator) SetWithFailureHandler(key string, val interface{},
 			act.val = string(bytes)
 		}
 	}
+	na.Lock()
+	defer na.Unlock()
 	na.changes[key] = act
 	return nil
 }
 
 func (na *namespaceAnnotator) Delete(key string) {
+	na.Lock()
+	defer na.Unlock()
 	na.changes[key] = &action{key: key}
 }
 
 func (na *namespaceAnnotator) Run() error {
 	annotations := make(map[string]string)
+	na.Lock()
+	defer na.Unlock()
 	for k, act := range na.changes {
 		// Ignore annotations that already exist with the same value
 		if existing, ok := na.namespace.Annotations[k]; existing != act.val || !ok {
@@ -245,14 +230,5 @@ func (na *namespaceAnnotator) Run() error {
 		return nil
 	}
 
-	err := na.kube.SetAnnotationsOnNamespace(na.namespace, annotations)
-	if err != nil {
-		// Let failure handlers clean up
-		for _, act := range na.changes {
-			if act.failFn != nil {
-				act.failFn(na.namespace, act.key, act.origVal)
-			}
-		}
-	}
-	return err
+	return na.kube.SetAnnotationsOnNamespace(na.namespace, annotations)
 }
