@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"net/http/pprof"
@@ -215,6 +216,24 @@ func checkPodRunsOnGivenNode(clientset kubernetes.Interface, label, k8sNodeName 
 	return false, fmt.Errorf("the Pod matching the label %q doesn't exist on this node %s", label, k8sNodeName)
 }
 
+func listenAndServeTLS(addr, certFile, privKeyFile string, handler http.Handler) error {
+	tlsConfig := &tls.Config{
+		GetCertificate: func(info *tls.ClientHelloInfo) (*tls.Certificate, error) {
+			cert, err := tls.LoadX509KeyPair(certFile, privKeyFile)
+			if err != nil {
+				return nil, fmt.Errorf("error generating x509 certs for metrics TLS endpoint: %v", err)
+			}
+			return &cert, nil
+		},
+	}
+	server := &http.Server{
+		Addr:      addr,
+		Handler:   handler,
+		TLSConfig: tlsConfig,
+	}
+	return server.ListenAndServeTLS("", "")
+}
+
 // StartMetricsServerTLS runs the prometheus listener so that OVN K8s metrics can be collected
 // It puts the endpoint behind TLS if certFile and keyFile are defined.
 func StartMetricsServer(bindAddress string, enablePprof bool, certFile string, keyFile string) {
@@ -232,7 +251,7 @@ func StartMetricsServer(bindAddress string, enablePprof bool, certFile string, k
 	go utilwait.Until(func() {
 		var err error
 		if certFile != "" && keyFile != "" {
-			err = http.ListenAndServeTLS(bindAddress, certFile, keyFile, mux)
+			err = listenAndServeTLS(bindAddress, certFile, keyFile, mux)
 		} else {
 			err = http.ListenAndServe(bindAddress, mux)
 		}
