@@ -407,8 +407,8 @@ ovn_image=${image} \
   ovnkube_app_name=ovnkube-node \
   j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
 
-# ovnkube node for smart-nic host daemonset
-# TODO: We probably dont need all of these when running on smart-nic host
+# ovnkube node for dpu host daemonset
+# TODO: we probably dont need all of these when running on dpu host
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
   kind=${KIND} \
@@ -433,8 +433,8 @@ ovn_image=${image} \
   ovn_ipfix_targets=${ovn_ipfix_targets} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
-  ovnkube_app_name=ovnkube-node-smart-nic-host \
-  j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node-smart-nic-host.yaml
+  ovnkube_app_name=ovnkube-node-dpu-host \
+  j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node-dpu-host.yaml
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -564,8 +564,8 @@ ovn_image=${image} \
   ovn_ipfix_targets=${ovn_ipfix_targets} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
-  ovnkube_app_name=ovnkube-node-smart-nic-host \
-  j2 ../templates/ovnk8s-node.yaml.j2 -o ../yaml/ovnk8s-node-smart-nic-host.yaml
+  ovnkube_app_name=ovnkube-node-dpu-host \
+  j2 ../templates/ovnk8s-node.yaml.j2 -o ../yaml/ovnk8s-node-dpu-host.yaml
 
 ovn_image=${image_ubuntu} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -591,7 +591,7 @@ ovn_image=${image_ubuntu} \
   ovn_enable_lflow_cache=${ovn_enable_lflow_cache} \
   ovn_lflow_cache_limit=${ovn_lflow_cache_limit} \
   ovn_lflow_cache_limit_kb=${ovn_lflow_cache_limit_kb} \
-  j2 ../templates/ovnk8s-node-smart-nic.yaml.j2 -o ../yaml/ovnk8s-node-smart-nic.yaml
+  j2 ../templates/ovnk8s-node-dpu.yaml.j2 -o ../yaml/ovnk8s-node-dpu.yaml
 
 ovn_image=${imagec} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -632,7 +632,7 @@ ovn_image=${imagec_ubuntu} \
   ovn_image_pull_policy=${image_pull_policy} \
   ovn_loglevel_controller=${ovn_loglevel_controller} \
   ovn_ssl_en=${ovn_ssl_en} \
-  j2 ../templates/ovn-host-smart-nic.yaml.j2 -o ../yaml/ovn-host-smart-nic.yaml
+  j2 ../templates/ovn-host-dpu.yaml.j2 -o ../yaml/ovn-host-dpu.yaml
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \

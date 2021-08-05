@@ -82,7 +82,7 @@ spec:
               mountPropagation: Bidirectional
             {% endif %}
             {%- if ovnkube_app_name=="ovnkube-node" %}
-            # ovnkube-node only mounts (non smart-nic related)
+            # ovnkube-node only mounts (non dpu related)
             - mountPath: /var/run/openvswitch/
               name: host-var-run-ovs
             - mountPath: /var/run/ovn/
@@ -94,8 +94,8 @@ spec:
             - mountPath: /etc/ovn/
               name: host-var-lib-ovs
               readOnly: true
-            {%- elif ovnkube_app_name=="ovnkube-node-smart-nic-host" %}
-            # ovnkube-node smart-nic-host mounts
+            {%- elif ovnkube_app_name=="ovnkube-node-dpu-host" %}
+            # ovnkube-node dpu-host mounts
             - mountPath: /var/run/ovn
               name: var-run-ovn
             {%- endif %}
@@ -191,9 +191,9 @@ spec:
             - name: OVN_LFLOW_CACHE_LIMIT_KB
               value: "{{ ovn_lflow_cache_limit_kb }}"
             {% endif -%}
-            {% if ovnkube_app_name=="ovnkube-node-smart-nic-host" -%}
+            {% if ovnkube_app_name=="ovnkube-node-dpu-host" -%}
             - name: OVNKUBE_NODE_MODE
-              value: "smart-nic-host"
+              value: "dpu-host"
             - name: OVNKUBE_NODE_MGMT_PORT_NETDEV
               value: "{{ ovnkube_node_mgmt_port_netdev }}"
             {% endif -%}
@@ -211,10 +211,10 @@ spec:
             periodSeconds: 60
         # end of container
 
-      {% if ovnkube_app_name=="ovnkube-node-smart-nic-host" -%}
+      {% if ovnkube_app_name=="ovnkube-node-dpu-host" -%}
       nodeSelector:
         kubernetes.io/arch: amd64
-        k8s.ovn.org/smart-nic: ""
+        k8s.ovn.org/dpu-host: ""
       {% else -%}
       nodeSelector:
         kubernetes.io/arch: amd64
@@ -223,7 +223,7 @@ spec:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
             - matchExpressions:
-              - key: k8s.ovn.org/smart-nic
+              - key: k8s.ovn.org/dpu-host
                 operator: DoesNotExist
       {% endif -%}
       volumes:
@@ -252,14 +252,14 @@ spec:
             path: /var/run/netns
         {% endif %}
         {%- if ovnkube_app_name=="ovnkube-node" %}
-        # non Smart-NIC related volumes
+        # non DPU related volumes
         - name: host-var-run-ovs
           hostPath:
             path: /var/run/openvswitch
         - name: host-var-lib-ovs
           hostPath:
             path: /var/lib/openvswitch
-        {%- elif ovnkube_app_name=="ovnkube-node-smart-nic-host" %}
+        {%- elif ovnkube_app_name=="ovnkube-node-dpu-host" %}
         - name: var-run-ovn
           emptyDir: {}
         {%- endif %}

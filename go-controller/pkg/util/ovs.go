@@ -261,7 +261,7 @@ func SetExec(exec kexec.Interface) error {
 		runner.ovnRunDir = ovnRunDir
 	}
 
-	if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
+	if config.OvnKubeNode.Mode != types.NodeModeDPU {
 		runner.nbctlPath, err = exec.LookPath(ovnNbctlCommand)
 		if err != nil {
 			return err
@@ -311,7 +311,7 @@ func SetExecWithoutOVS(exec kexec.Interface) error {
 		if err != nil {
 			return err
 		}
-		if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
+		if config.OvnKubeNode.Mode != types.NodeModeDPU {
 			runner.firewallPath, err = exec.LookPath(firewallCommand)
 			if err != nil {
 				return err

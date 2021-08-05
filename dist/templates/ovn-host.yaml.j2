@@ -98,7 +98,7 @@ spec:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
             - matchExpressions:
-              - key: k8s.ovn.org/smart-nic
+              - key: k8s.ovn.org/dpu-host
                 operator: DoesNotExist
       volumes:
         - name: host-var-run-dbus

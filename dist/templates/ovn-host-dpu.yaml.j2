@@ -2,7 +2,7 @@
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
-  name: ovn-host-smart-nic
+  name: ovn-host-dpu
   namespace: ovn-kubernetes
   annotations:
     kubernetes.io/description: |
@@ -10,7 +10,7 @@ metadata:
 spec:
   selector:
     matchLabels:
-      app: ovn-host-smart-nic
+      app: ovn-host-dpu
   updateStrategy:
     type: RollingUpdate
     rollingUpdate:
@@ -18,8 +18,8 @@ spec:
   template:
     metadata:
       labels:
-        app: ovn-host-smart-nic
-        name: ovn-host-smart-nic
+        app: ovn-host-dpu
+        name: ovn-host-dpu
         component: network
         type: infra
         kubernetes.io/os: "linux"

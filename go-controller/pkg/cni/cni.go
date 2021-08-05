@@ -128,18 +128,18 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 		if err != nil {
 			return nil, fmt.Errorf("failed in cmdAdd while getting VF Netdevice name: %v", err)
 		}
-		if config.OvnKubeNode.Mode == types.NodeModeSmartNICHost {
-			// Add Smart-NIC connection-details annotation so ovnkube-node running on smart-NIC
+		if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+			// Add DPU connection-details annotation so ovnkube-node running on DPU
 			// performs the needed network plumbing.
-			if err = pr.addSmartNICConnectionDetailsAnnot(kubecli, vfNetdevName); err != nil {
+			if err = pr.addDPUConnectionDetailsAnnot(kubecli, vfNetdevName); err != nil {
 				return nil, err
 			}
-			annotCondFn = isSmartNICReady
+			annotCondFn = isDPUReady
 		}
 		// Todo(gmoodalbail): For the CX5 ASAP2 VF case we need to store the VF name somewhere
 	}
 	// Get the IP address and MAC address of the pod
-	// for Smart-Nic, ensure connection-details is present
+	// for DPU, ensure connection-details is present
 	podUID, annotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, namespace, podName,
 		pr.effectiveNADName, annotCondFn)
 	if err != nil {
@@ -186,25 +186,25 @@ func (pr *PodRequest) cmdDel(podLister corev1listers.PodLister, kclient kubernet
 		if pr.IsVFIO {
 			return response, nil
 		}
-		if config.OvnKubeNode.Mode == types.NodeModeSmartNICHost {
+		if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
 			pod, err := getPod(podLister, kclient, namespace, podName)
 			if err != nil {
 				klog.Errorf("Failed to get pod %s/%s: %v", namespace, podName, err)
 				return response, nil
 			}
-			smartNicCD, err := util.UnmarshalPodSmartNicConnDetails(pod.Annotations, pr.effectiveNADName)
+			dpuCD, err := util.UnmarshalPodDPUConnDetails(pod.Annotations, pr.effectiveNADName)
 			if err != nil {
-				klog.Errorf("Failed to get smart-nic annotation for pod %s/%s network %s: %v", namespace, podName, pr.effectiveNetName, err)
+				klog.Errorf("Failed to get dpu annotation for pod %s/%s network %s: %v", namespace, podName, pr.effectiveNetName, err)
 				return response, nil
 			}
-			vfNetdevName = smartNicCD.VfDevName
+			vfNetdevName = dpuCD.VfDevName
 		}
 		// TODO(gmoodalbail): add for the CX5 ASAP2 VF case
 	}
 
 	podInterfaceInfo := &PodInterfaceInfo{
-		IsSmartNICHostMode: config.OvnKubeNode.Mode == types.NodeModeSmartNICHost,
-		VfNetdevNmae:       vfNetdevName,
+		IsDPUHostMode: config.OvnKubeNode.Mode == types.NodeModeDPUHost,
+		VfNetdevNmae:  vfNetdevName,
 	}
 	if !config.UnprivilegedMode {
 		err := pr.UnconfigureInterface(podInterfaceInfo)
@@ -213,7 +213,7 @@ func (pr *PodRequest) cmdDel(podLister corev1listers.PodLister, kclient kubernet
 		}
 		// succeed, return an empty Result
 	} else {
-		// pass the isSmartNIC flag and vfNetdevName back to cniShim
+		// pass the isDPU flag and vfNetdevName back to cniShim
 		response.Result = nil
 		response.PodIFInfo = podInterfaceInfo
 	}

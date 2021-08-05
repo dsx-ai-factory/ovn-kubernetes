@@ -6,7 +6,7 @@
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
-  name: ovnkube-node-smart-nic
+  name: ovnkube-node-dpu
   # namespace set up by install
   namespace: ovn-kubernetes
   annotations:
@@ -15,7 +15,7 @@ metadata:
 spec:
   selector:
     matchLabels:
-      app: ovnkube-node-smart-nic
+      app: ovnkube-node-dpu
   updateStrategy:
     type: RollingUpdate
     rollingUpdate:
@@ -23,8 +23,8 @@ spec:
   template:
     metadata:
       labels:
-        app: ovnkube-node-smart-nic
-        name: ovnkube-node-smart-nic
+        app: ovnkube-node-dpu
+        name: ovnkube-node-dpu
         component: network
         type: infra
         kubernetes.io/os: "linux"
@@ -158,7 +158,7 @@ spec:
         - name: OVN_EX_GW_NETWORK_INTERFACE
           value: "{{ ovn_ex_gw_networking_interface }}"
         - name: OVNKUBE_NODE_MODE
-          value: "smart-nic"
+          value: "dpu"
         - name: OVN_GATEWAY_ROUTER_SUBNET
           value: ""
         - name: OVNKUBE_NODE_MGMT_PORT_NETDEV

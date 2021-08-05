@@ -310,7 +310,7 @@ func runOvnKube(ctx *cli.Context) error {
 
 		// start the prometheus server to serve OVN Node Metrics (default port: 9410)
 		if config.Kubernetes.MetricsBindAddress != "" {
-			if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
+			if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 				ovsDBClient, err := metrics.SetupOvsDBClient()
 				if err != nil {
 					return fmt.Errorf("error when trying to initialize ovsdb client: %v", err)
@@ -320,7 +320,7 @@ func runOvnKube(ctx *cli.Context) error {
 				// serve OVS ^ovs metrics
 				metrics.RegisterOvsMetrics(ovsDBClient, config.MetricsScrapeInterval, stopChan)
 			}
-			if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
+			if config.OvnKubeNode.Mode != types.NodeModeDPU {
 				// serve OVN ^ovn_db, ^ovn_northd metrics from the ovnkube-node pod that is matching labels accordingly
 				metrics.RegisterOvnCentralMetrics(ovnClientset.KubeClient, node, config.MetricsScrapeInterval, stopChan)
 			}
