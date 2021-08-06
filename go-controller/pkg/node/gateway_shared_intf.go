@@ -323,7 +323,13 @@ func flowsForDefaultBridge(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost
 	}
 
 	if config.IPv4Mode {
-		// table0, Geneve packets coming from external, perform NORMAL action
+		// table0, Geneve packets coming from external. Skip conntrack and go directly to host
+		// if dest mac is the shared mac send directly to host.
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=60, in_port=%s, dl_dst=%s, udp, udp_dst=%d, "+
+				"actions=output:%s", defaultOpenFlowCookie, ofPortPhys, bridgeMacAddress, config.Default.EncapPort,
+				ovsLocalPort))
+		// perform NORMAL action otherwise.
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=55, in_port=%s, udp, udp_dst=%d, "+
 				"actions=NORMAL", defaultOpenFlowCookie, ofPortPhys, config.Default.EncapPort))
@@ -346,7 +352,13 @@ func flowsForDefaultBridge(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost
 				defaultOpenFlowCookie, ofPortHost, types.V4OVNMasqueradeIP, OVNMasqCTZone))
 	}
 	if config.IPv6Mode {
-		// table0, Geneve packets coming from external, perform NORMAL action
+		// table0, Geneve packets coming from external. Skip conntrack and go directly to host
+		// if dest mac is the shared mac send directly to host.
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=60, in_port=%s, dl_dst=%s, udp6, udp_dst=%d, "+
+				"actions=output:%s", defaultOpenFlowCookie, ofPortPhys, bridgeMacAddress, config.Default.EncapPort,
+				ovsLocalPort))
+		// perform NORMAL action otherwise.
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=55, in_port=%s, udp6, udp_dst=%d, "+
 				"actions=NORMAL", defaultOpenFlowCookie, ofPortPhys, config.Default.EncapPort))
