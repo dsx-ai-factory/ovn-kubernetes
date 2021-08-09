@@ -226,6 +226,7 @@ func (mc *OvnMHController) enableOVNLogicalDatapathGroups() error {
 func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	klog.Infof("Starting cluster master for network %s", oc.nadInfo.NetName)
 
+	oc.isStarted = true
 	if oc.nadInfo.TopoType == types.LocalnetAttachDefTopoType {
 		return oc.SetupLocalnetMaster()
 	}

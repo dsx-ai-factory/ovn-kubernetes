@@ -157,6 +157,7 @@ type Controller struct {
 	nodeHandler               *factory.Handler
 	namespaceHandler          *factory.Handler
 	multiNetworkPolicyHandler *factory.Handler
+	isStarted                 bool
 
 	nadInfo *util.NetAttachDefInfo
 
@@ -389,6 +390,7 @@ func (mc *OvnMHController) NewOvnController(nadInfo *util.NetAttachDefInfo,
 		lspIngressDenyCache:       make(map[string]int),
 		lspEgressDenyCache:        make(map[string]int),
 		lspMutex:                  &sync.Mutex{},
+		isStarted:                 false,
 		eIPC: egressIPController{
 			assignmentRetryMutex:  &sync.Mutex{},
 			assignmentRetry:       make(map[string]bool),
@@ -1378,19 +1380,18 @@ func (oc *Controller) aclLoggingCanEnable(annotation string, nsInfo *namespaceIn
 	return okCnt > 0
 }
 
-func (mc *OvnMHController) addNetworkAttachDefinition(netattachdef *nettypes.NetworkAttachmentDefinition) {
+func (mc *OvnMHController) initOvnController(netattachdef *nettypes.NetworkAttachmentDefinition) (*Controller, error) {
 	netconf := &cnitypes.NetConf{MTU: config.Default.MTU}
 
 	// looking for network attachment definition that use OVN K8S CNI only
 	err := json.Unmarshal([]byte(netattachdef.Spec.Config), &netconf)
 	if err != nil {
-		klog.Errorf("Error parsing Network Attachment Definition %s: %v", netattachdef.Name, err)
-		return
+		return nil, fmt.Errorf("error parsing Network Attachment Definition %s: %v", netattachdef.Name, err)
 	}
 
 	if netconf.Type != "ovn-k8s-cni-overlay" {
 		klog.V(5).Infof("Network Attachment Definition %s is not based on OVN plugin", netattachdef.Name)
-		return
+		return nil, nil
 	}
 
 	if netconf.Name == "" {
@@ -1399,18 +1400,16 @@ func (mc *OvnMHController) addNetworkAttachDefinition(netattachdef *nettypes.Net
 
 	nadInfo, err := util.NewNetAttachDefInfo(netconf)
 	if err != nil {
-		klog.Errorf(err.Error())
-		return
+		return nil, err
 	}
 
 	if !nadInfo.NotDefault {
 		mc.ovnController.nadInfo.NetAttachDefs.Store(netattachdef.Namespace+"_"+netattachdef.Name, true)
-		return
+		return mc.ovnController, nil
 	}
 
 	if nadInfo.NetName == ovntypes.DefaultNetworkName {
-		klog.Errorf("Non-default Network attachment definition's name cannot be %s", ovntypes.DefaultNetworkName)
-		return
+		return nil, fmt.Errorf("non-default Network attachment definition's name cannot be %s", ovntypes.DefaultNetworkName)
 	}
 
 	// Note that net-attach-def add/delete/update events are serialized, so we don't need locks here.
@@ -1419,18 +1418,27 @@ func (mc *OvnMHController) addNetworkAttachDefinition(netattachdef *nettypes.Net
 	if ok {
 		oc := v.(*Controller)
 		if oc.nadInfo.NetCidr != nadInfo.NetCidr || oc.nadInfo.MTU != nadInfo.MTU {
-			klog.Errorf("Network attachment definition %s/%s does not share the same CNI config of name %s",
+			return nil, fmt.Errorf("network attachment definition %s/%s does not share the same CNI config of name %s",
 				netattachdef.Namespace, netattachdef.Name, nadInfo.NetName)
 		} else {
 			oc.nadInfo.NetAttachDefs.Store(netattachdef.Namespace+"_"+netattachdef.Name, true)
+			return oc, nil
 		}
-		return
 	}
 
 	nadInfo.NetAttachDefs.Store(netattachdef.Namespace+"_"+netattachdef.Name, true)
-	oc, err := mc.NewOvnController(nadInfo, nil)
+	return mc.NewOvnController(nadInfo, nil)
+}
+
+func (mc *OvnMHController) addNetworkAttachDefinition(netattachdef *nettypes.NetworkAttachmentDefinition) {
+	oc, err := mc.initOvnController(netattachdef)
 	if err != nil {
 		klog.Errorf(err.Error())
+		return
+	}
+
+	// This controller may already started if it is shared by multiple net-attach-def
+	if oc == nil || oc.isStarted {
 		return
 	}
 
@@ -1543,35 +1551,30 @@ func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.
 
 // syncNetworkAttachDefinition() delete OVN logical entities of the obsoleted netNames.
 func (mc *OvnMHController) syncNetworkAttachDefinition(netattachdefs []interface{}) {
-	// Get all the existing non-default netNames
+	// Get all the expected netNames
 	expectedNetworks := make(map[string]bool)
+
+	// we need to walk through all net-attach-def and add them into Controller.nadInfo.NetAttachDefs, so that when each
+	// Controller is running, watchPods()->addLogicalPod()->IsNetworkOnPod() can correctly check Pods need to be plumbed
+	// for the specific Controller
 	for _, netattachdefIntf := range netattachdefs {
 		netattachdef, ok := netattachdefIntf.(*nettypes.NetworkAttachmentDefinition)
 		if !ok {
 			klog.Errorf("Spurious object in syncNetworkAttachDefinition: %v", netattachdefIntf)
 			continue
 		}
-		netConf := &cnitypes.NetConf{}
-		err := json.Unmarshal([]byte(netattachdef.Spec.Config), &netConf)
+
+		// ovnController.nadInfo.NetAttachDefs
+		oc, err := mc.initOvnController(netattachdef)
 		if err != nil {
-			klog.Errorf("Unrecognized Spec.Config of NetworkAttachmentDefinition %s: %v", netattachdef.Name, err)
+			klog.Errorf(err.Error())
 			continue
 		}
-		if netConf.Type != "ovn-k8s-cni-overlay" {
-			klog.V(5).Infof("Network Attachment Definition %s is not based on OVN plugin", netattachdef.Name)
-			return
-		}
-		// If this is the NetworkAttachmentDefinition for the default network, skip it
-		if !netConf.NotDefault {
+
+		if oc == nil {
 			continue
 		}
-		if netConf.Name == "" {
-			netConf.Name = netattachdef.Name
-		}
-		nadInfo, err := util.NewNetAttachDefInfo(netConf)
-		if err == nil {
-			expectedNetworks[nadInfo.NetName] = true
-		}
+		expectedNetworks[oc.nadInfo.NetName] = true
 	}
 
 	// Find all the logical node switches for the non-default networks and delete the ones that belong to the

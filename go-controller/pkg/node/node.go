@@ -58,6 +58,7 @@ type ovnNodeController struct {
 	node       *OvnNode
 	nadInfo    *util.NetAttachDefInfo
 	podHandler *factory.Handler
+	added      bool
 }
 
 // NewNode creates a new controller for node management
@@ -262,6 +263,7 @@ func (n *OvnNode) NewOvnNodeController(nadInfo *util.NetAttachDefInfo) (*ovnNode
 	nc := &ovnNodeController{
 		node:    n,
 		nadInfo: nadInfo,
+		added:   false,
 	}
 	if !nadInfo.NotDefault {
 		n.defaultNodeController = nc
@@ -559,12 +561,12 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		nadInfo, _ := util.NewNetAttachDefInfo(defaultNetConf)
 		nc, _ := n.NewOvnNodeController(nadInfo)
 
-		if config.OVNKubernetesFeature.EnableMultiNetwork {
-			_ = n.watchNetworkAttachmentDefinitions()
-		}
-
 		if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
 			nc.watchSmartNicPods()
+		}
+
+		if config.OVNKubernetesFeature.EnableMultiNetwork {
+			_ = n.watchNetworkAttachmentDefinitions()
 		}
 	}
 
@@ -589,22 +591,21 @@ func (n *OvnNode) watchNetworkAttachmentDefinitions() *factory.Handler {
 			netattachdef := obj.(*nettypes.NetworkAttachmentDefinition)
 			n.deleteNetworkAttachDefinition(netattachdef)
 		},
-	}, nil)
+	}, n.syncNetworkAttachDefinition)
 }
 
-func (n *OvnNode) addNetworkAttachDefinition(netattachdef *nettypes.NetworkAttachmentDefinition) {
+func (n *OvnNode) initOvnNodeController(netattachdef *nettypes.NetworkAttachmentDefinition) (*ovnNodeController, error) {
 	netconf := &cnitypes.NetConf{MTU: config.Default.MTU}
 
 	// looking for network attachment definition that use OVN K8S CNI only
 	err := json.Unmarshal([]byte(netattachdef.Spec.Config), &netconf)
 	if err != nil {
-		klog.Errorf("Error parsing Network Attachment Definition %s: %v", netattachdef.Name, err)
-		return
+		return nil, fmt.Errorf("error parsing Network Attachment Definition %s: %v", netattachdef.Name, err)
 	}
 
 	if netconf.Type != "ovn-k8s-cni-overlay" {
 		klog.V(5).Infof("Network Attachment Definition %s is not based on OVN plugin", netattachdef.Name)
-		return
+		return nil, nil
 	}
 
 	if netconf.Name == "" {
@@ -613,18 +614,16 @@ func (n *OvnNode) addNetworkAttachDefinition(netattachdef *nettypes.NetworkAttac
 
 	nadInfo, err := util.NewNetAttachDefInfo(netconf)
 	if err != nil {
-		klog.Errorf(err.Error())
-		return
+		return nil, err
 	}
 
 	if !nadInfo.NotDefault {
 		n.defaultNodeController.nadInfo.NetAttachDefs.Store(netattachdef.Namespace+"_"+netattachdef.Name, true)
-		return
+		return n.defaultNodeController, nil
 	}
 
 	if nadInfo.NetName == types.DefaultNetworkName {
-		klog.Errorf("Non-default Network attachment definition's name cannot be %s", types.DefaultNetworkName)
-		return
+		return nil, fmt.Errorf("non-default Network attachment definition's name cannot be %s", types.DefaultNetworkName)
 	}
 
 	// Note that net-attach-def add/delete/update events are serialized, so we don't need locks here.
@@ -633,22 +632,49 @@ func (n *OvnNode) addNetworkAttachDefinition(netattachdef *nettypes.NetworkAttac
 	if ok {
 		nc := v.(*ovnNodeController)
 		if nc.nadInfo.NetCidr != nadInfo.NetCidr || nc.nadInfo.MTU != nadInfo.MTU {
-			klog.Errorf("Network attachment definition %s/%s does not share the same CNI config of name %s",
+			return nil, fmt.Errorf("network attachment definition %s/%s does not share the same CNI config of name %s",
 				netattachdef.Namespace, netattachdef.Name, nadInfo.NetName)
 		} else {
 			nc.nadInfo.NetAttachDefs.Store(netattachdef.Namespace+"_"+netattachdef.Name, true)
 		}
-		return
+		return nc, nil
 	}
 
 	nadInfo.NetAttachDefs.Store(netattachdef.Namespace+"_"+netattachdef.Name, true)
-	nc, err := n.NewOvnNodeController(nadInfo)
+	return n.NewOvnNodeController(nadInfo)
+}
+
+// syncNetworkAttachDefinition() delete OVN logical entities of the obsoleted netNames.
+func (n *OvnNode) syncNetworkAttachDefinition(netattachdefs []interface{}) {
+	// we need to walk through all net-attach-def and add them into Controller.nadInfo.NetAttachDefs, so that when each
+	// Controller is running, watchSmartNicPods()->IsNetworkOnPod() can correctly check Pods need to be plumbed
+	// for the specific Controller
+	for _, netattachdefIntf := range netattachdefs {
+		netattachdef, ok := netattachdefIntf.(*nettypes.NetworkAttachmentDefinition)
+		if !ok {
+			klog.Errorf("Spurious object in syncNetworkAttachDefinition: %v", netattachdefIntf)
+			continue
+		}
+
+		_, err := n.initOvnNodeController(netattachdef)
+		if err != nil {
+			klog.Errorf(err.Error())
+		}
+	}
+}
+
+func (n *OvnNode) addNetworkAttachDefinition(netattachdef *nettypes.NetworkAttachmentDefinition) {
+	nc, err := n.initOvnNodeController(netattachdef)
 	if err != nil {
 		klog.Errorf(err.Error())
 		return
 	}
-	n.nonDefaultNodeControllers.Store(nadInfo.NetName, nc)
 
+	if nc == nil || nc.added {
+		return
+	}
+
+	nc.added = true
 	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
 		if nc.nadInfo.TopoType == types.LocalnetAttachDefTopoType {
 			// for smart-nic mode and full mode
