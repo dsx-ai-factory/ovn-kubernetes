@@ -1163,18 +1163,6 @@ func getOVSExternalID(exec kexec.Interface, name string) string {
 	return out
 }
 
-func setOVSExternalID(exec kexec.Interface, key, value string) error {
-	out, err := runOVSVsctl(exec,
-		"set",
-		"Open_vSwitch",
-		".",
-		fmt.Sprintf("external_ids:%s=%s", key, value))
-	if err != nil {
-		return fmt.Errorf("error setting OVS external ID '%s=%s': %v\n  %q", key, value, err, out)
-	}
-	return nil
-}
-
 func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath string, defaults *Defaults, allSubnets *configSubnets) error {
 	// token adn ca.crt may be from files mounted in container.
 	saConfig := savedKubernetes
@@ -1837,30 +1825,6 @@ func (a *OvnAuthConfig) SetDBAuth() error {
 	if a.Scheme == OvnDBSchemeSSL {
 		// Client can bootstrap the CA cert from the DB
 		if err := a.ensureCACert(); err != nil {
-			return err
-		}
-
-		// Tell Southbound DB clients (like ovn-controller)
-		// which certificates to use to talk to the DB.
-		// Must happen *before* setting the "ovn-remote"
-		// external-id.
-		if !a.northbound {
-			out, err := runOVSVsctl(a.exec, "del-ssl")
-			if err != nil {
-				return fmt.Errorf("error deleting ovs-vsctl SSL "+
-					"configuration: %q (%v)", out, err)
-			}
-
-			out, err = runOVSVsctl(a.exec, "set-ssl", a.PrivKey, a.Cert, a.CACert)
-			if err != nil {
-				return fmt.Errorf("error setting client southbound DB SSL options: %v\n  %q", err, out)
-			}
-		}
-	}
-
-	if !a.northbound {
-		// store the Southbound Database address in an external id - "external_ids:ovn-remote"
-		if err := setOVSExternalID(a.exec, "ovn-remote", "\""+a.GetURL()+"\""); err != nil {
 			return err
 		}
 	}

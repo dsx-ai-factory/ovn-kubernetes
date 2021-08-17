@@ -487,7 +487,6 @@ ovn_image=${image} \
   ovn_multicast_enable=${ovn_multicast_enable} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
-  ovn_ssl_en=${ovn_ssl_en} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
   ovn_metrics_scrape_interval=${ovn_metrics_scrape_interval} \
   ovs_metrics_scrape_interval=${ovs_metrics_scrape_interval} \

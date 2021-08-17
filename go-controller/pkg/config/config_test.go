@@ -1220,9 +1220,6 @@ mode=shared
 			fexec := ovntest.NewFakeExec()
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --db=" + sbURL + " --timeout=5 --private-key=" + keyFile + " --certificate=" + certFile + " --bootstrap-ca-cert=" + caFile + " list nb_global",
-				"ovs-vsctl --timeout=15 del-ssl",
-				"ovs-vsctl --timeout=15 set-ssl " + keyFile + " " + certFile + " " + caFile,
-				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-remote=\"" + sbURL + "\"",
 			})
 
 			cliConfig := &OvnAuthConfig{
@@ -1243,31 +1240,6 @@ mode=shared
 			gomega.Expect(a.northbound).To(gomega.BeFalse())
 
 			gomega.Expect(a.GetURL()).To(gomega.Equal(sbURL))
-			err = a.SetDBAuth()
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
-		})
-
-		const (
-			sbURLLegacy    string = "tcp://1.2.3.4:6642"
-			sbURLConverted string = "tcp:1.2.3.4:6642"
-		)
-
-		It("configures client southbound TCP legacy address correctly", func() {
-			fexec := ovntest.NewFakeExec()
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-remote=\"" + sbURLConverted + "\"",
-			})
-
-			cliConfig := &OvnAuthConfig{Address: sbURLLegacy}
-			a, err := buildOvnAuth(fexec, false, cliConfig, &OvnAuthConfig{}, true)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(a.Scheme).To(gomega.Equal(OvnDBSchemeTCP))
-			// Config should convert :// to : in addresses
-			gomega.Expect(a.Address).To(gomega.Equal(sbURLConverted))
-			gomega.Expect(a.northbound).To(gomega.BeFalse())
-
-			gomega.Expect(a.GetURL()).To(gomega.Equal(sbURLConverted))
 			err = a.SetDBAuth()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
