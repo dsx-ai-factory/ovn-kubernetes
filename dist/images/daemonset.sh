@@ -170,9 +170,6 @@ while [ "$1" != "" ]; do
   --multicast-enabled)
     OVN_MULTICAST_ENABLE=$VALUE
     ;;
-  --ovn-metrics-endpoint-ip)
-    OVN_METRICS_ENDPOINT_IP=$VALUE
-    ;;
   --ovn-metrics-interval)
     OVN_METRICS_SCRAPE_INTERVAL=$VALUE
     ;;
@@ -324,8 +321,6 @@ ovn_sb_raft_port=${OVN_SB_RAFT_PORT:-6644}
 echo "ovn_sb_raft_port: ${ovn_sb_raft_port}"
 ovn_multicast_enable=${OVN_MULTICAST_ENABLE}
 echo "ovn_multicast_enable: ${ovn_multicast_enable}"
-ovn_metrics_endpoint_ip=${OVN_METRICS_ENDPOINT_IP:-127.0.0.1}
-echo "ovn_metrics_endpoint_ip: ${ovn_metrics_endpoint_ip}"
 ovn_metrics_scrape_interval=${OVN_METRICS_SCRAPE_INTERVAL:-30}
 echo "ovn_metrics_scrape_interval: ${ovn_metrics_scrape_interval}"
 ovs_metrics_scrape_interval=${OVS_METRICS_SCRAPE_INTERVAL:-30}
@@ -466,7 +461,6 @@ ovn_image=${image} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_master_count=${ovn_master_count} \
   ovn_gateway_mode=${ovn_gateway_mode} \
-  ovn_metrics_endpoint_ip=${ovn_metrics_endpoint_ip} \
   ovn_metrics_scrape_interval=${ovn_metrics_scrape_interval} \
   ovn_nb_cert_cname=${ovn_nb_cert_cname} \
   ovn_sb_cert_cname=${ovn_sb_cert_cname} \
@@ -495,9 +489,8 @@ ovn_image=${image} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
-  ovn_metrics_endpoint_ip=${ovn_metrics_endpoint_ip} \
-  ovs_metrics_scrape_interval=${ovs_metrics_scrape_interval} \
   ovn_metrics_scrape_interval=${ovn_metrics_scrape_interval} \
+  ovs_metrics_scrape_interval=${ovs_metrics_scrape_interval} \
   ovn_nb_cert_cname=${ovn_nb_cert_cname} \
   ovn_sb_cert_cname=${ovn_sb_cert_cname} \
   ovn_netflow_targets=${ovn_netflow_targets} \
@@ -528,7 +521,6 @@ ovn_image=${image} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
-  ovn_metrics_endpoint_ip=${ovn_metrics_endpoint_ip} \
   ovs_metrics_scrape_interval=${ovs_metrics_scrape_interval} \
   ovn_metrics_scrape_interval=${ovn_metrics_scrape_interval} \
   ovn_netflow_targets=${ovn_netflow_targets} \

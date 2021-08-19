@@ -192,8 +192,6 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            - name: OVN_METRICS_ENDPOINT_IP
-              value: "{{ ovn_metrics_endpoint_ip }}"
             - name: OVN_HYBRID_OVERLAY_ENABLE
               value: "{{ ovn_hybrid_overlay_enable }}"
             - name: OVN_HYBRID_OVERLAY_NET_CIDR
@@ -226,31 +224,6 @@ spec:
                   name: ovn-config
                   key: host_network_namespace
 
-          # end of container
-
-        - name: kube-rbac-proxy
-          args:
-          - --logtostderr
-          - --secure-listen-address=$(IP):9409
-          - --tls-cipher-suites=TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,TLS_RSA_WITH_AES_128_CBC_SHA256,TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256,TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256
-          - --upstream=http://127.0.0.1:9409/
-          env:
-          - name: IP
-            valueFrom:
-              fieldRef:
-                fieldPath: status.podIP
-          image: quay.io/coreos/kube-rbac-proxy:v0.5.0
-          ports:
-          - containerPort: 9409
-            hostPort: 9409
-            name: https
-          resources:
-            limits:
-              cpu: 20m
-              memory: 60Mi
-            requests:
-              cpu: 10m
-              memory: 20Mi
           # end of container
 
       volumes:

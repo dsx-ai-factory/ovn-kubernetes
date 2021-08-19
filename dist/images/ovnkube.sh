@@ -165,7 +165,12 @@ net_cidr=${OVN_NET_CIDR:-10.128.0.0/14/23}
 svc_cidr=${OVN_SVC_CIDR:-172.30.0.0/16}
 mtu=${OVN_MTU:-1400}
 
-metrics_endpoint_ip=${OVN_METRICS_ENDPOINT_IP:-127.0.0.1}
+# set metrics endpoint bind to K8S_NODE_IP
+metrics_endpoint_ip=${OVN_METRICS_ENDPOINT_IP}
+if [[ -z ${metrics_endpoint_ip} ]]; then
+  metrics_endpoint_ip=${K8S_NODE_IP:-0.0.0.0}
+fi
+metrics_endpoint_ip=$(bracketify $metrics_endpoint_ip)
 ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
 # namespace used for classifying host network traffic
 ovn_host_network_namespace=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}

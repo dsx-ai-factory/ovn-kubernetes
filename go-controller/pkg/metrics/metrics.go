@@ -215,30 +215,9 @@ func checkPodRunsOnGivenNode(clientset kubernetes.Interface, label, k8sNodeName 
 	return false, fmt.Errorf("the Pod matching the label %q doesn't exist on this node %s", label, k8sNodeName)
 }
 
-// StartMetricsServer runs the prometheus listener so that OVN K8s metrics can be collected
-func StartMetricsServer(bindAddress string, enablePprof bool) {
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", promhttp.Handler())
-
-	if enablePprof {
-		mux.HandleFunc("/debug/pprof/", pprof.Index)
-		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
-	}
-
-	go utilwait.Until(func() {
-		err := http.ListenAndServe(bindAddress, mux)
-		if err != nil {
-			utilruntime.HandleError(fmt.Errorf("starting metrics server failed: %v", err))
-		}
-	}, 5*time.Second, utilwait.NeverStop)
-}
-
 // StartMetricsServerTLS runs the prometheus listener so that OVN K8s metrics can be collected
-// This version puts the endpoint behind TLS.
-func StartMetricsServerTLS(bindAddress string, enablePprof bool, certFile string, keyFile string) {
+// It puts the endpoint behind TLS if certFile and keyFile are defined.
+func StartMetricsServer(bindAddress string, enablePprof bool, certFile string, keyFile string) {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
 
@@ -251,9 +230,14 @@ func StartMetricsServerTLS(bindAddress string, enablePprof bool, certFile string
 	}
 
 	go utilwait.Until(func() {
-		err := http.ListenAndServeTLS(bindAddress, certFile, keyFile, mux)
+		var err error
+		if certFile != "" && keyFile != "" {
+			err = http.ListenAndServeTLS(bindAddress, certFile, keyFile, mux)
+		} else {
+			err = http.ListenAndServe(bindAddress, mux)
+		}
 		if err != nil {
-			utilruntime.HandleError(fmt.Errorf("starting metrics server failed: %v", err))
+			utilruntime.HandleError(fmt.Errorf("starting metrics server failed for address %s: %v", bindAddress, err))
 		}
 	}, 5*time.Second, utilwait.NeverStop)
 }
