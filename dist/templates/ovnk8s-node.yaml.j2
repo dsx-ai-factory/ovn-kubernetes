@@ -205,6 +205,11 @@ spec:
             periodSeconds: 60
         # end of container
 
+      {% if ovnkube_app_name=="ovnkube-node-smart-nic-host" -%}
+      nodeSelector:
+        kubernetes.io/os: "linux"
+        k8s.ovn.org/smart-nic: ""
+      {% else -%}
       nodeSelector:
         kubernetes.io/os: "linux"
       affinity:
