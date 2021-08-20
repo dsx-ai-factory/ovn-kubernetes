@@ -138,6 +138,7 @@ ovn_controller_pk=${OVN_DBCLIENT_PK:-/ovn-cert/ovncontroller-privkey.pem}
 ovn_controller_cert=${OVN_DBCLIENT_CERT:-/ovn-cert/ovncontroller-cert.pem}
 ovn_nb_cert_cname=${OVN_NB_CERT_CNAME:-"ovncontroller"}
 ovn_sb_cert_cname=${OVN_SB_CERT_CNAME:-"ovncontroller"}
+OVN_SSL_ENABLE=${OVN_SSL_ENABLE:-"no"}
 
 transport="tcp"
 ovndb_ctl_ssl_opts=""
@@ -1038,6 +1039,15 @@ ovn-controller() {
 
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
   echo "ovn_nbdb_conn ${ovn_nbdb_conn}"
+  echo "ovn_sbdb_conn ${ovn_sbdb_conn}"
+
+  # delete ssl table setting so the ssl command line takes precedence
+  ovs-vsctl del-ssl >/dev/null 2>&1
+  ovs-vsctl set Open_vSwitch . external_ids:ovn-remote=${ovn_sbdb_conn}
+  if [[ $? != 0 ]]; then
+    echo "Exiting, failed to set OVS external ID ovn-remote=${ovn_nbdb_conn}"
+    exit 1
+  fi
 
   echo "=============== ovn-controller  start_controller"
   rm -f /var/run/ovn-kubernetes/cni/*

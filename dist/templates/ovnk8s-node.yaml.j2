@@ -87,9 +87,6 @@ spec:
               name: host-var-run-ovs
             - mountPath: /var/run/ovn/
               name: host-var-run-ovs
-            - mountPath: /ovn-cert
-              name: ovn-pki
-              readOnly: true
             # for ovn-db metrics
             - mountPath: /etc/openvswitch/
               name: host-var-lib-ovs
@@ -185,8 +182,6 @@ spec:
               value: "{{ ovn_nb_cert_cname }}"
             - name: OVN_SB_CERT_CNAME
               value: "{{ ovn_sb_cert_cname }}"
-            - name: OVN_SSL_ENABLE
-              value: "{{ ovn_ssl_en }}"
             - name: OVN_MULTI_NETWORK_ENABLE
               value: "{{ ovn_multi_network_enable }}"
             {% endif -%}
@@ -210,6 +205,11 @@ spec:
             periodSeconds: 60
         # end of container
 
+      {% if ovnkube_app_name=="ovnkube-node-smart-nic-host" -%}
+      nodeSelector:
+        kubernetes.io/os: "linux"
+        k8s.ovn.org/smart-nic: ""
+      {% else -%}
       nodeSelector:
         kubernetes.io/os: "linux"
       affinity:
@@ -253,10 +253,6 @@ spec:
         - name: host-var-lib-ovs
           hostPath:
             path: /var/lib/openvswitch
-        - name: ovn-pki
-          hostPath:
-            path: /etc/ovn
-            type: DirectoryOrCreate
         {%- elif ovnkube_app_name=="ovnkube-node-smart-nic-host" %}
         - name: var-run-ovn
           emptyDir: {}

@@ -325,12 +325,6 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	}
 
 	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
-		for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
-			if err := auth.SetDBAuth(); err != nil {
-				return err
-			}
-		}
-
 		err = setupOVNNode(node)
 		if err != nil {
 			return err

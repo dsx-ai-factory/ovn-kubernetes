@@ -15,7 +15,6 @@
 #export K8S_NODE="nd-sjc6w-br2-001.nd-sjc6w.nvmetal.net"
 #export OVN_REMOTE_PROBE_INTERVAL=100000
 #export K8S_APISERVER="https://10.1.128.9:6443"
-#export OVN_SSL_ENABLE=yes
 #export OVN_NB_CERT_CNAME="ovnnb.nd-sjc6w.nvmetal.net"
 #export OVN_SB_CERT_CNAME="ovnsb.nd-sjc6w.nvmetal.net"
 #export OVN_DBCLIENT_PK="/etc/ovn/ovndb-client-privkey.pem"
