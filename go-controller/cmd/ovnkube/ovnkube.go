@@ -324,7 +324,7 @@ func runOvnKube(ctx *cli.Context) error {
 				metrics.RegisterOvnCentralMetrics(ovnClientset.KubeClient, node, config.MetricsScrapeInterval, stopChan)
 			}
 			metrics.StartMetricsServer(config.Kubernetes.MetricsBindAddress, config.Kubernetes.MetricsEnablePprof,
-				config.OvnNorth.Cert, config.OvnNorth.PrivKey)
+				config.Kubernetes.MetricsNodeServerCert, config.Kubernetes.MetricsNodeServerPrivKey)
 		}
 	}
 

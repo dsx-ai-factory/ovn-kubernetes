@@ -245,22 +245,24 @@ type CNIConfig struct {
 
 // KubernetesConfig holds Kubernetes-related parsed config file parameters and command-line overrides
 type KubernetesConfig struct {
-	Kubeconfig           string `gcfg:"kubeconfig"`
-	CACert               string `gcfg:"cacert"`
-	CAData               []byte
-	APIServer            string `gcfg:"apiserver"`
-	Token                string `gcfg:"token"`
-	CompatServiceCIDR    string `gcfg:"service-cidr"`
-	RawServiceCIDRs      string `gcfg:"service-cidrs"`
-	ServiceCIDRs         []*net.IPNet
-	OVNConfigNamespace   string `gcfg:"ovn-config-namespace"`
-	MetricsBindAddress   string `gcfg:"metrics-bind-address"`
-	MetricsEnablePprof   bool   `gcfg:"metrics-enable-pprof"`
-	OVNEmptyLbEvents     bool   `gcfg:"ovn-empty-lb-events"`
-	PodIP                string `gcfg:"pod-ip"` // UNUSED
-	RawNoHostSubnetNodes string `gcfg:"no-hostsubnet-nodes"`
-	NoHostSubnetNodes    *metav1.LabelSelector
-	HostNetworkNamespace string `gcfg:"host-network-namespace"`
+	Kubeconfig               string `gcfg:"kubeconfig"`
+	CACert                   string `gcfg:"cacert"`
+	CAData                   []byte
+	APIServer                string `gcfg:"apiserver"`
+	Token                    string `gcfg:"token"`
+	CompatServiceCIDR        string `gcfg:"service-cidr"`
+	RawServiceCIDRs          string `gcfg:"service-cidrs"`
+	ServiceCIDRs             []*net.IPNet
+	OVNConfigNamespace       string `gcfg:"ovn-config-namespace"`
+	MetricsBindAddress       string `gcfg:"metrics-bind-address"`
+	MetricsEnablePprof       bool   `gcfg:"metrics-enable-pprof"`
+	OVNEmptyLbEvents         bool   `gcfg:"ovn-empty-lb-events"`
+	PodIP                    string `gcfg:"pod-ip"` // UNUSED
+	RawNoHostSubnetNodes     string `gcfg:"no-hostsubnet-nodes"`
+	MetricsNodeServerPrivKey string `gcfg:"metrics-node-server-privkey"`
+	MetricsNodeServerCert    string `gcfg:"metrics-node-server-cert"`
+	NoHostSubnetNodes        *metav1.LabelSelector
+	HostNetworkNamespace     string `gcfg:"host-network-namespace"`
 }
 
 // OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
@@ -837,6 +839,16 @@ var K8sFlags = []cli.Flag{
 		Name:        "metrics-enable-pprof",
 		Usage:       "If true, then also accept pprof requests on the metrics port.",
 		Destination: &cliConfig.Kubernetes.MetricsEnablePprof,
+	},
+	&cli.StringFlag{
+		Name:        "metrics-node-server-privkey",
+		Usage:       "Private key that the OVN node K8s metrics server uses to server on.",
+		Destination: &cliConfig.Kubernetes.MetricsNodeServerPrivKey,
+	},
+	&cli.StringFlag{
+		Name:        "metrics-node-server-cert",
+		Usage:       "Certificate that the OVN node K8s metrics server use to server on.",
+		Destination: &cliConfig.Kubernetes.MetricsNodeServerCert,
 	},
 	&cli.BoolFlag{
 		Name: "ovn-empty-lb-events",
