@@ -147,6 +147,8 @@ token=TG9yZW0gaXBzdW0gZ
 cacert=/path/to/kubeca.crt
 service-cidrs=172.18.0.0/24
 no-hostsubnet-nodes=label=another-test-label
+metrics-node-server-privkey=/path/to/node-metrics-private.key
+metrics-node-server-cert=/path/to/node-metrics.crt
 
 [logging]
 loglevel=5
@@ -262,6 +264,8 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Kubernetes.APIServer).To(gomega.Equal(DefaultAPIServer))
 			gomega.Expect(Kubernetes.RawServiceCIDRs).To(gomega.Equal("172.16.1.0/24"))
 			gomega.Expect(Kubernetes.RawNoHostSubnetNodes).To(gomega.Equal(""))
+			gomega.Expect(Kubernetes.MetricsNodeServerPrivKey).To(gomega.Equal(""))
+			gomega.Expect(Kubernetes.MetricsNodeServerCert).To(gomega.Equal(""))
 			gomega.Expect(Default.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("10.128.0.0/14"), 23},
 			}))
@@ -516,6 +520,8 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal("TG9yZW0gaXBzdW0gZ"))
 			gomega.Expect(Kubernetes.APIServer).To(gomega.Equal("https://1.2.3.4:6443"))
 			gomega.Expect(Kubernetes.RawServiceCIDRs).To(gomega.Equal("172.18.0.0/24"))
+			gomega.Expect(Kubernetes.MetricsNodeServerPrivKey).To(gomega.Equal("/path/to/node-metrics-private.key"))
+			gomega.Expect(Kubernetes.MetricsNodeServerCert).To(gomega.Equal("/path/to/node-metrics.crt"))
 			gomega.Expect(Default.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("10.132.0.0/14"), 23},
 			}))
@@ -592,6 +598,8 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Default.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("10.130.0.0/15"), 24},
 			}))
+			gomega.Expect(Kubernetes.MetricsNodeServerPrivKey).To(gomega.Equal("/tls/nodeprivkey"))
+			gomega.Expect(Kubernetes.MetricsNodeServerCert).To(gomega.Equal("/tls/nodecert"))
 
 			gomega.Expect(OvnNorth.Scheme).To(gomega.Equal(OvnDBSchemeSSL))
 			gomega.Expect(OvnNorth.PrivKey).To(gomega.Equal("/client/privkey"))
@@ -649,6 +657,8 @@ var _ = Describe("Config Operations", func() {
 			"-sb-client-cert=/client/cert2",
 			"-sb-client-cacert=/client/cacert2",
 			"-sb-cert-common-name=testsbcommonname",
+			"-metrics-node-server-privkey=/tls/nodeprivkey",
+			"-metrics-node-server-cert=/tls/nodecert",
 			"-gateway-mode=shared",
 			"-nodeport",
 			"-gateway-v4-join-subnet=100.63.0.0/16",

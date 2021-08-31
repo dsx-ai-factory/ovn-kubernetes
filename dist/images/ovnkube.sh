@@ -1151,6 +1151,21 @@ ovn-node() {
     wait_for_event process_ready ovn-controller
   fi
 
+  local tls_dir="/root/tls_dir"
+  mkdir -p -m 0700 ${tls_dir}
+  chown root.root ${tls_dir}
+  openssl req -x509 -nodes -newkey rsa:4096 -keyout ${tls_dir}/key.pem -out ${tls_dir}/cert.pem -days 365 -subj '/CN=*.nvmetal.net' 2>&1 > /dev/null
+  if [[ $? != 0 ]]; then
+    echo "Exiting, failed to generate TLS cert/key"
+    exit 1
+  fi
+
+  local tls_ssl_opts=""
+  tls_ssl_opts="
+    --metrics-node-server-privkey ${tls_dir}/key.pem
+    --metrics-node-server-cert ${tls_dir}/cert.pem
+      "
+
   [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
     wait_for_event attempts=20 files_exist ${ovn_controller_pk} ${ovn_controller_cert} ${ovn_ca_cert}
   }
@@ -1302,6 +1317,7 @@ ovn-node() {
     --pidfile ${OVN_RUNDIR}/ovnkube.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube.log \
     ${ovn_node_ssl_opts} \
+    ${tls_ssl_opts} \
     --inactivity-probe=${ovn_remote_probe_interval} \
     ${multicast_enabled_flag} \
     ${egressip_enabled_flag} \
