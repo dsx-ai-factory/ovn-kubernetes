@@ -2,6 +2,7 @@ package factory
 
 import (
 	kapi "k8s.io/api/core/v1"
+	discovery "k8s.io/api/discovery/v1beta1"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -9,10 +10,12 @@ import (
 // kubernetes resources from the informer cache
 type ObjectCacheInterface interface {
 	GetPod(namespace, name string) (*kapi.Pod, error)
+	GetAllPods() ([]*kapi.Pod, error)
 	GetPods(namespace string) ([]*kapi.Pod, error)
 	GetNodes() ([]*kapi.Node, error)
 	GetNode(name string) (*kapi.Node, error)
 	GetService(namespace, name string) (*kapi.Service, error)
+	GetEndpointSlices(namespace, svcName string) ([]*discovery.EndpointSlice, error)
 	GetNamespace(name string) (*kapi.Namespace, error)
 	GetNamespaces() ([]*kapi.Namespace, error)
 }
@@ -24,6 +27,8 @@ type ObjectCacheInterface interface {
 // in factory.go NewNodeWatchFactory
 type NodeWatchFactory interface {
 	Shutdownable
+
+	Start() error
 
 	AddServiceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler
 	AddFilteredServiceHandler(namespace string, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler
@@ -37,11 +42,11 @@ type NodeWatchFactory interface {
 	AddNetworkattachmentdefinitionHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler
 	RemoveNetworkattachmentdefinitionHandler(handler *Handler)
 
-	InitializeNetAttachDefWatchFactory() error
-	ShutdownNetAttachDefWatchFactory()
-
 	NodeInformer() cache.SharedIndexInformer
 	LocalPodInformer() cache.SharedIndexInformer
+
+	GetService(namespace, name string) (*kapi.Service, error)
+	GetEndpointSlices(namespace, svcName string) ([]*discovery.EndpointSlice, error)
 }
 
 type Shutdownable interface {

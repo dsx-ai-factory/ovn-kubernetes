@@ -46,12 +46,13 @@ const (
 
 type podCondition = func(pod *v1.Pod) (bool, error)
 
-func checkContinuousConnectivity(f *framework.Framework, nodeName, podName, host string, port, timeout int, podChan chan *v1.Pod, errChan chan error) {
+func checkContinuousConnectivity(f *framework.Framework, nodeName, podName, host string, port, tries, timeout int, podChan chan *v1.Pod, errChan chan error) {
 	contName := fmt.Sprintf("%s-container", podName)
 
 	command := []string{
 		"bash", "-c",
-		"set -xe; for i in {1..10}; do nc -vz -w " + strconv.Itoa(timeout) + " " + host + " " + strconv.Itoa(port) + "; sleep 2; done",
+		fmt.Sprintf("set -xe; for i in {1..%d}; do nc -vz -w %d %s %d ; sleep 2; done",
+			tries, timeout, host, port),
 	}
 
 	pod := &v1.Pod{
@@ -427,9 +428,28 @@ func restartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nod
 		}
 	}
 
-	if err := e2epod.WaitForPodsReady(clientset, namespace, "ovnkube-node", 15); err != nil {
-		return fmt.Errorf("could not wait for ovnkube-node pod be be ready again: %w", err)
-	}
+	framework.Logf("waiting for node %s to have running ovnkube-node pod", nodeName)
+	wait.Poll(2*time.Second, 5*time.Minute, func() (bool, error) {
+		ovnKubeNodePods, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
+			LabelSelector: "name=ovnkube-node",
+			FieldSelector: "spec.nodeName=" + nodeName,
+		})
+		if err != nil {
+			return false, fmt.Errorf("could not get ovnkube-node pods: %w", err)
+		}
+
+		if len(ovnKubeNodePods.Items) <= 0 {
+			framework.Logf("Node %s has no ovnkube-node pod yet", nodeName)
+			return false, nil
+		}
+		for _, pod := range ovnKubeNodePods.Items {
+			if ready, err := testutils.PodRunningReady(&pod); !ready {
+				framework.Logf("%v", err)
+				return false, nil
+			}
+		}
+		return true, nil
+	})
 
 	return nil
 }
@@ -438,6 +458,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 	var svcname = "nettest"
 
 	f := framework.NewDefaultFramework(svcname)
+	var numMasters int
 
 	ginkgo.BeforeEach(func() {
 		// Assert basic external connectivity.
@@ -451,6 +472,12 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		if resp.StatusCode != http.StatusOK {
 			framework.Failf("Unexpected error code, expected 200, got, %v (%v)", resp.StatusCode, resp)
 		}
+
+		masterPods, err := f.ClientSet.CoreV1().Pods("ovn-kubernetes").List(context.Background(), metav1.ListOptions{
+			LabelSelector: "name=ovnkube-master",
+		})
+		framework.ExpectNoError(err)
+		numMasters = len(masterPods.Items)
 	})
 
 	ginkgo.It("should provide Internet connection continuously when ovn-k8s pod is killed", func() {
@@ -459,30 +486,22 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		podChan, errChan := make(chan *v1.Pod), make(chan error)
 		go func() {
 			defer ginkgo.GinkgoRecover()
-			checkContinuousConnectivity(f, "", "connectivity-test-continuous", "8.8.8.8", 53, 30, podChan, errChan)
+			checkContinuousConnectivity(f, "", "connectivity-test-continuous", "8.8.8.8", 53, 30, 30, podChan, errChan)
 		}()
 
 		testPod := <-podChan
-		framework.Logf("Test pod running on %q", testPod.Spec.NodeName)
+		nodeName := testPod.Spec.NodeName
+		framework.Logf("Test pod running on %q", nodeName)
 
-		time.Sleep(5 * time.Second)
+		ginkgo.By("Deleting ovn-kube pod on node " + nodeName)
+		err := restartOVNKubeNodePod(f.ClientSet, "ovn-kubernetes", nodeName)
+		framework.ExpectNoError(err)
 
-		podClient := f.ClientSet.CoreV1().Pods("ovn-kubernetes")
-
-		podList, _ := podClient.List(context.Background(), metav1.ListOptions{})
-		podName := ""
-		for _, pod := range podList.Items {
-			if strings.HasPrefix(pod.Name, "ovnkube-node") && pod.Spec.NodeName == testPod.Spec.NodeName {
-				podName = pod.Name
-				break
-			}
-		}
-
-		err := podClient.Delete(context.Background(), podName, metav1.DeleteOptions{})
-		framework.ExpectNoError(err, "should delete ovnkube-node pod")
-		framework.Logf("Deleted ovnkube-node %q", podName)
-
+		ginkgo.By("Ensuring there were no connectivity errors")
 		framework.ExpectNoError(<-errChan)
+
+		err = waitClusterHealthy(f, numMasters)
+		framework.ExpectNoError(err, "one or more nodes failed to go back ready, schedulable, and untainted")
 	})
 
 	ginkgo.It("should provide Internet connection continuously when master is killed", func() {
@@ -491,7 +510,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		podChan, errChan := make(chan *v1.Pod), make(chan error)
 		go func() {
 			defer ginkgo.GinkgoRecover()
-			checkContinuousConnectivity(f, "", "connectivity-test-continuous", "8.8.8.8", 53, 30, podChan, errChan)
+			checkContinuousConnectivity(f, "", "connectivity-test-continuous", "8.8.8.8", 53, 30, 30, podChan, errChan)
 		}()
 		testPod := <-podChan
 		framework.Logf("Test pod running on %q", testPod.Spec.NodeName)
@@ -500,7 +519,11 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 
 		podClient := f.ClientSet.CoreV1().Pods("ovn-kubernetes")
 
-		podList, _ := podClient.List(context.Background(), metav1.ListOptions{})
+		podList, err := podClient.List(context.Background(), metav1.ListOptions{
+			LabelSelector: "name=ovnkube-master",
+		})
+		framework.ExpectNoError(err)
+
 		podName := ""
 		for _, pod := range podList.Items {
 			if strings.HasPrefix(pod.Name, "ovnkube-master") {
@@ -509,19 +532,24 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 			}
 		}
 
-		err := podClient.Delete(context.Background(), podName, metav1.DeleteOptions{})
-		framework.ExpectNoError(err, "should delete ovnkube-master pod")
+		ginkgo.By("Deleting ovn-kube master pod " + podName)
+		e2epod.DeletePodWithWaitByName(f.ClientSet, podName, "ovn-kubernetes")
 		framework.Logf("Deleted ovnkube-master %q", podName)
 
+		ginkgo.By("Ensring there were no connectivity errors")
 		framework.ExpectNoError(<-errChan)
+
+		err = waitClusterHealthy(f, numMasters)
+		framework.ExpectNoError(err, "one or more nodes failed to go back ready, schedulable, and untainted")
 	})
+
 	ginkgo.It("should provide connection to external host by DNS name from a pod", func() {
 		ginkgo.By("Running container which tries to connect to www.google.com. in a loop")
 
 		podChan, errChan := make(chan *v1.Pod), make(chan error)
 		go func() {
 			defer ginkgo.GinkgoRecover()
-			checkContinuousConnectivity(f, "", "connectivity-test-continuous", "www.google.com.", 443, 30, podChan, errChan)
+			checkContinuousConnectivity(f, "", "connectivity-test-continuous", "www.google.com.", 443, 10, 30, podChan, errChan)
 		}()
 
 		testPod := <-podChan
@@ -552,6 +580,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 
 			// make sure node is not already tainted
 			e2enode.RemoveTaintOffNode(f.ClientSet, testNodeName, tooSmallMTUTaint)
+
 		})
 
 		ginkgo.AfterEach(func() {
@@ -565,6 +594,9 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 			if err := restartOVNKubeNodePod(f.ClientSet, ovnNamespace, testNodeName); err != nil {
 				framework.Failf("could not restart ovnkube-node pod: %s", err)
 			}
+
+			err = waitClusterHealthy(f, numMasters)
+			framework.ExpectNoError(err, "one or more nodes failed to go back ready, schedulable, and untainted")
 		})
 
 		ginkgo.It("should taint the node with a too small MTU", func() {
@@ -1397,7 +1429,7 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway and update validation", 
 			framework.Failf("failed to add the pod host route on the test container: %v", err)
 		}
 		_, err = runCommand("docker", "exec", gwContainerNameAlt1, "ping", "-c", "5", pingSrc)
-		framework.ExpectNoError(err, "Failed to ping ", pingSrc, gwContainerNameAlt1)
+		framework.ExpectNoError(err, "Failed to ping %s from container %s", pingSrc, gwContainerNameAlt1)
 
 		time.Sleep(time.Second * 15)
 		// Verify the gateway and remote address is reachable from the initial pod
@@ -1439,7 +1471,7 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway and update validation", 
 		}
 
 		_, err = runCommand("docker", "exec", gwContainerNameAlt2, "ping", "-c", "5", pingSrc)
-		framework.ExpectNoError(err, "Failed to ping ", pingSrc, gwContainerNameAlt1)
+		framework.ExpectNoError(err, "Failed to ping %s from container %s", pingSrc, gwContainerNameAlt1)
 
 		// Verify the updated gateway and remote address is reachable from the initial pod
 		ginkgo.By(fmt.Sprintf("Verifying connectivity without vxlan to the updated annotation and new external gateway %s and remote IP %s", exGWRemoteIpAlt2, exGWIpAlt2))
@@ -1688,6 +1720,8 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 	maxTries := 0
 	var nodes *v1.NodeList
 	var newNodeAddresses []string
+	var externalIpv4 string
+	var externalIpv6 string
 
 	ginkgo.Context("Validating ingress traffic", func() {
 		ginkgo.BeforeEach(func() {
@@ -1727,7 +1761,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			ginkgo.By("Creating an external container to send the traffic from")
 			// the client uses the netexec command from the agnhost image, which is able to receive commands for poking other
 			// addresses.
-			createClusterExternalContainer(clientContainerName, agnhostImage, []string{"--network", "kind", "-P"}, []string{"netexec", "--http-port=80"})
+			externalIpv4, externalIpv6 = createClusterExternalContainer(clientContainerName, agnhostImage, []string{"--network", "kind", "-P"}, []string{"netexec", "--http-port=80"})
 		})
 
 		ginkgo.AfterEach(func() {
@@ -1746,7 +1780,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 		ginkgo.It("Should be allowed by nodeport services", func() {
 			serviceName := "nodeportsvc"
 			ginkgo.By("Creating the nodeport service")
-			npSpec := nodePortServiceSpecFrom(serviceName, endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, endpointsSelector)
+			npSpec := nodePortServiceSpecFrom(serviceName, endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, endpointsSelector, v1.ServiceExternalTrafficPolicyTypeCluster)
 			np, err := f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), npSpec, metav1.CreateOptions{})
 			nodeTCPPort, nodeUDPPort := nodePortsFromService(np)
 			framework.ExpectNoError(err)
@@ -1787,7 +1821,71 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 				}
 			}
 		})
+		// This test validates ingress traffic to nodeports with externalTrafficPolicy Set to local.
+		// It creates a nodeport service on both udp and tcp, and creates a backend pod on each node.
+		// The backend pod is using the agnhost - netexec command which replies to commands
+		// with different protocols. We use the "hostname" and "clientip" commands to have each backend
+		// pod to reply with its hostname and the request packet's srcIP.
+		// We use an external container to poke the service exposed on the node and ensure that only the
+		// nodeport on the node with the backend actually receives traffic and that the packet is not
+		// SNATed.
+		// In case of dual stack enabled cluster, we iterate over all the nodes ips and try to hit the
+		// endpoints from both each node's ips.
+		ginkgo.It("Should be allowed to node local cluster-networked endpoints by nodeport services with externalTrafficPolicy=local", func() {
+			serviceName := "nodeportsvclocal"
+			ginkgo.By("Creating the nodeport service with externalTrafficPolicy=local")
+			npSpec := nodePortServiceSpecFrom(serviceName, endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, endpointsSelector, v1.ServiceExternalTrafficPolicyTypeLocal)
+			np, err := f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), npSpec, metav1.CreateOptions{})
+			nodeTCPPort, nodeUDPPort := nodePortsFromService(np)
+			framework.ExpectNoError(err)
 
+			ginkgo.By("Waiting for the endpoints to pop up")
+			err = framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, serviceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
+			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", serviceName, f.Namespace.Name)
+
+			for _, protocol := range []string{"http", "udp"} {
+				for _, node := range nodes.Items {
+					for _, nodeAddress := range node.Status.Addresses {
+						// skipping hostnames
+						if !addressIsIP(nodeAddress) {
+							continue
+						}
+
+						responses := sets.NewString()
+						// Fill expected responses, it should hit the nodeLocal endpoints and not SNAT packet IP
+						expectedResponses := sets.NewString()
+
+						if utilnet.IsIPv6String(nodeAddress.Address) {
+							expectedResponses.Insert(node.Name+"-ep", externalIpv6)
+						} else {
+							expectedResponses.Insert(node.Name+"-ep", externalIpv4)
+						}
+
+						valid := false
+						nodePort := nodeTCPPort
+						if protocol == "udp" {
+							nodePort = nodeUDPPort
+						}
+
+						ginkgo.By("Hitting the nodeport on " + node.Name + " and trying to reach only the local endpoint with protocol " + protocol)
+
+						for i := 0; i < maxTries; i++ {
+							epHostname := pokeEndpointHostname(clientContainerName, protocol, nodeAddress.Address, nodePort)
+							epClientIP := pokeEndpointClientIP(clientContainerName, protocol, nodeAddress.Address, nodePort)
+							responses.Insert(epHostname, epClientIP)
+
+							if responses.Equal(expectedResponses) {
+								framework.Logf("Validated local endpoint on node %s with address %s, and packet src IP ", node.Name, nodeAddress.Address, epClientIP)
+								valid = true
+								break
+							}
+
+						}
+						framework.ExpectEqual(valid, true, "Validation failed for node", node.Name, responses, nodePort)
+					}
+				}
+			}
+		})
 		// This test validates ingress traffic to externalservices.
 		// It creates a service on both udp and tcp and assignes all the first node's addresses as
 		// external addresses. Then, creates a backend pod on each node.
@@ -1956,6 +2054,263 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 						}
 					}
 					framework.ExpectEqual(valid, true, "Validation failed for external address", externalAddress)
+				}
+			}
+		})
+	})
+})
+
+var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation", func() {
+	const (
+		endpointHTTPPort = 8085
+		endpointUDPPort  = 9095
+		clusterHTTPPort  = 81
+		clusterUDPPort   = 91
+
+		clientContainerName = "npclient"
+	)
+
+	f := framework.NewDefaultFramework("nodeport-ingress-test")
+	hostNetEndpointsSelector := map[string]string{"hostNetservicebackend": "true"}
+	var endPoints []*v1.Pod
+	var nodesHostnames sets.String
+	maxTries := 0
+	var nodes *v1.NodeList
+	var externalIpv4 string
+	var externalIpv6 string
+
+	// This test validates ingress traffic to nodeports with externalTrafficPolicy Set to local.
+	// It creates a nodeport service on both udp and tcp, and creates a host networked
+	// backend pod on each node. The backend pod is using the agnhost - netexec command which
+	// replies to commands with different protocols. We use the "hostname" and "clientip" commands
+	// to have each backend pod to reply with its hostname and the request packet's srcIP.
+	// We use an external container to poke the service exposed on the node and ensure that only the
+	// nodeport on the node with the backend actually receives traffic and that the packet is not
+	// SNATed.
+	ginkgo.Context("Validating ingress traffic to Host Netwoked pods", func() {
+		ginkgo.BeforeEach(func() {
+			endPoints = make([]*v1.Pod, 0)
+			nodesHostnames = sets.NewString()
+
+			var err error
+			nodes, err = e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+			framework.ExpectNoError(err)
+
+			if len(nodes.Items) < 3 {
+				framework.Failf(
+					"Test requires >= 3 Ready nodes, but there are only %v nodes",
+					len(nodes.Items))
+			}
+
+			ginkgo.By("Creating the endpoints pod, one for each worker")
+			for _, node := range nodes.Items {
+				// this create a udp / http netexec listener which is able to receive the "hostname"
+				// command. We use this to validate that each endpoint is received at least once
+				args := []string{
+					"netexec",
+					fmt.Sprintf("--http-port=%d", endpointHTTPPort),
+					fmt.Sprintf("--udp-port=%d", endpointUDPPort),
+				}
+
+				// create hostNeworkedPods
+				hostNetPod, err := createPod(f, node.Name+"-hostnet-ep", node.Name, f.Namespace.Name, []string{}, hostNetEndpointsSelector, func(p *v1.Pod) {
+					p.Spec.Containers[0].Args = args
+					p.Spec.HostNetwork = true
+				})
+
+				framework.ExpectNoError(err)
+				endPoints = append(endPoints, hostNetPod)
+				nodesHostnames.Insert(hostNetPod.Name)
+
+				// this is arbitrary and mutuated from k8s network e2e tests. We aim to hit all the endpoints at least once
+				maxTries = len(endPoints)*len(endPoints) + 30
+			}
+
+			ginkgo.By("Creating an external container to send the traffic from")
+			// the client uses the netexec command from the agnhost image, which is able to receive commands for poking other
+			// addresses.
+			externalIpv4, externalIpv6 = createClusterExternalContainer(clientContainerName, agnhostImage, []string{"--network", "kind", "-P"}, []string{"netexec", "--http-port=80"})
+		})
+
+		ginkgo.AfterEach(func() {
+			deleteClusterExternalContainer(clientContainerName)
+		})
+		ginkgo.JustAfterEach(func() {
+			// Since we're using host neworked pods in the test wait until namespaces delete after each test
+			framework.WaitForNamespacesDeleted(f.ClientSet, []string{f.Namespace.Name}, wait.ForeverTestTimeout)
+		})
+
+		// Make sure ingress traffic can reach host pod backends for a service without SNAT when externalTrafficPolicy is set to local
+		ginkgo.It("Should be allowed to node local host-networked endpoints by nodeport services with externalTrafficPolicy=local", func() {
+			serviceName := "nodeportsvclocalhostnet"
+			ginkgo.By("Creating the nodeport service with externalTrafficPolicy=local")
+			npSpec := nodePortServiceSpecFrom(serviceName, endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, hostNetEndpointsSelector, v1.ServiceExternalTrafficPolicyTypeLocal)
+			np, err := f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), npSpec, metav1.CreateOptions{})
+			framework.ExpectNoError(err)
+			nodeTCPPort, nodeUDPPort := nodePortsFromService(np)
+
+			ginkgo.By("Waiting for the endpoints to pop up")
+			err = framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, serviceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
+			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", serviceName, f.Namespace.Name)
+
+			for _, protocol := range []string{"http", "udp"} {
+				for _, node := range nodes.Items {
+					for _, nodeAddress := range node.Status.Addresses {
+						// skipping hostnames
+						if !addressIsIP(nodeAddress) {
+							continue
+						}
+
+						responses := sets.NewString()
+						// Fill expected responses, it should hit the nodeLocal endpoints and not SNAT packet IP
+						expectedResponses := sets.NewString()
+
+						if utilnet.IsIPv6String(nodeAddress.Address) {
+							expectedResponses.Insert(node.Name, externalIpv6)
+						} else {
+							expectedResponses.Insert(node.Name, externalIpv4)
+						}
+
+						valid := false
+						nodePort := nodeTCPPort
+						if protocol == "udp" {
+							nodePort = nodeUDPPort
+						}
+
+						ginkgo.By("Hitting the nodeport on " + node.Name + " and trying to reach only the local endpoint with protocol " + protocol)
+						for i := 0; i < maxTries; i++ {
+							epHostname := pokeEndpointHostname(clientContainerName, protocol, nodeAddress.Address, nodePort)
+							epClientIP := pokeEndpointClientIP(clientContainerName, protocol, nodeAddress.Address, nodePort)
+							responses.Insert(epHostname, epClientIP)
+
+							if responses.Equal(expectedResponses) {
+								framework.Logf("Validated local endpoint on node %s with address %s, and packet src IP %s ", node.Name, nodeAddress.Address, epClientIP)
+								valid = true
+								break
+							}
+
+						}
+						framework.ExpectEqual(valid, true, "Validation failed for node", node.Name, responses, nodePort)
+					}
+				}
+			}
+		})
+	})
+})
+
+// Send traffic from the cluster node itself to a nodeport service on that node
+var _ = ginkgo.Describe("host to host-networked pods traffic validation", func() {
+	const (
+		endpointHTTPPort = 8085
+		endpointUDPPort  = 9095
+		clusterHTTPPort  = 81
+		clusterUDPPort   = 91
+	)
+
+	f := framework.NewDefaultFramework("host-to-host-test")
+	hostNetEndpointsSelector := map[string]string{"hostNetservicebackend": "true"}
+	var endPoints []*v1.Pod
+	var nodesHostnames sets.String
+	maxTries := 0
+	var nodes *v1.NodeList
+	// This test validates ingress traffic to nodeports with externalTrafficPolicy Set to local.
+	// It creates a nodeport service on both udp and tcp, and creates a host networked
+	// backend pod on each node. The backend pod is using the agnhost - netexec command which
+	// replies to commands with different protocols. We use the "hostname" and "clientip" commands
+	// to have each backend pod to reply with its hostname and the request packet's srcIP.
+	// We use the docker exec command to poke the service exposed on the node from the node itself
+	// and ensure that only the nodeport on the node with the backend actually receives traffic and
+	// that the packet is not SNATed.
+	ginkgo.Context("Validating Host to Host Netwoked pods traffic", func() {
+		ginkgo.BeforeEach(func() {
+			endPoints = make([]*v1.Pod, 0)
+			nodesHostnames = sets.NewString()
+
+			var err error
+			nodes, err = e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+			framework.ExpectNoError(err)
+
+			if len(nodes.Items) < 3 {
+				framework.Failf(
+					"Test requires >= 3 Ready nodes, but there are only %v nodes",
+					len(nodes.Items))
+			}
+
+			ginkgo.By("Creating the endpoints pod, one for each worker")
+			for _, node := range nodes.Items {
+				// this create a http netexec listener which is able to receive the "hostname"
+				// command. We use this to validate that each endpoint is received at least once
+				args := []string{
+					"netexec",
+					fmt.Sprintf("--http-port=%d", endpointHTTPPort),
+				}
+
+				// create hostNeworkPods
+				hostNetPod, err := createPod(f, node.Name+"-hostnet-ep", node.Name, f.Namespace.Name, []string{}, hostNetEndpointsSelector, func(p *v1.Pod) {
+					p.Spec.Containers[0].Args = args
+					p.Spec.HostNetwork = true
+				})
+
+				framework.ExpectNoError(err)
+				endPoints = append(endPoints, hostNetPod)
+				nodesHostnames.Insert(hostNetPod.Name)
+
+				// this is arbitrary and mutuated from k8s network e2e tests. We aim to hit all the endpoints at least once
+				maxTries = len(endPoints)*len(endPoints) + 30
+			}
+		})
+		ginkgo.JustAfterEach(func() {
+			// Since we're using host neworked pods in the test wait until namespaces delete after each test
+			framework.WaitForNamespacesDeleted(f.ClientSet, []string{f.Namespace.Name}, wait.ForeverTestTimeout)
+		})
+		// Make sure host sourced traffic can reach host pod backends for a service without SNAT when externalTrafficPolicy is set to local
+		// Only verify with http
+		ginkgo.It("Should be allowed to node local host-networked endpoints by nodeport services with externalTrafficPolicy=local", func() {
+			serviceName := "nodeportsvclocalhostnet"
+			ginkgo.By("Creating the nodeport service with externalTrafficPolicy=local")
+			npSpec := nodePortServiceSpecFrom(serviceName, endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, hostNetEndpointsSelector, v1.ServiceExternalTrafficPolicyTypeLocal)
+			np, err := f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), npSpec, metav1.CreateOptions{})
+			nodeTCPPort, _ := nodePortsFromService(np)
+			framework.ExpectNoError(err)
+
+			ginkgo.By("Waiting for the endpoints to pop up")
+			err = framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, serviceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
+			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", serviceName, f.Namespace.Name)
+
+			for _, protocol := range []string{"http"} {
+				for _, node := range nodes.Items {
+					for _, nodeAddress := range node.Status.Addresses {
+						// skipping hostnames
+						if !addressIsIP(nodeAddress) {
+							continue
+						}
+
+						responses := sets.NewString()
+						// Fill expected responses, it should hit the nodeLocal endpoints only and not SNAT packet IP
+						expectedResponses := sets.NewString()
+
+						expectedResponses.Insert(node.Name, nodeAddress.Address)
+
+						valid := false
+						nodePort := nodeTCPPort
+
+						ginkgo.By("Hitting the nodeport on " + node.Name + " and trying to reach only the local endpoint with protocol " + protocol)
+						for i := 0; i < maxTries; i++ {
+							epHostname := curlInContainer(node.Name, protocol, nodeAddress.Address, nodePort, "hostname")
+							epClientIP := curlInContainer(node.Name, protocol, nodeAddress.Address, nodePort, "clientip")
+							ip, _, err := net.SplitHostPort(epClientIP)
+							framework.ExpectNoError(err)
+							responses.Insert(epHostname, ip)
+
+							if responses.Equal(expectedResponses) {
+								framework.Logf("Validated local endpoint on node %s with address %s, and packet src IP %s ", node.Name, nodeAddress.Address, epClientIP)
+								valid = true
+								break
+							}
+
+						}
+						framework.ExpectEqual(valid, true, "Validation failed for node", node.Name, responses, nodePort)
+					}
 				}
 			}
 		})
@@ -2218,10 +2573,20 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 
 	// waitForPodToFinishFullRestart waits for a the pod to finish it's reset cycle and returns.
 	waitForPodToFinishFullRestart := func(f *framework.Framework, pod *v1.Pod) {
-		err := e2epod.WaitForPodCondition(f.ClientSet, pod.Namespace, pod.Name, "not ready", 5*time.Minute, testutils.PodNotReady)
-		if err != nil {
-			framework.Failf("pod %v is not arrived to not-ready state: %v", pod.Name, err)
-		}
+		podClient := f.ClientSet.CoreV1().Pods(pod.Namespace)
+		// loop until pod with new UID exists
+		err := wait.PollImmediate(retryInterval, 5*time.Minute, func() (bool, error) {
+			newPod, err := podClient.Get(context.Background(), pod.Name, metav1.GetOptions{})
+			if apierrors.IsNotFound(err) {
+				return true, nil
+			} else if err != nil {
+				return false, err
+			}
+
+			return pod.UID != newPod.UID, nil
+		})
+		framework.ExpectNoError(err)
+
 		// during this stage on the restarting process we can encounter "pod not found" errors.
 		// these types of errors are valid because the pod is restarting so there will be a period of time it is unavailable
 		// so we will use "WaitForPodConditionAllowNotFoundErrors" in order to handle properly those errors.
@@ -2229,13 +2594,17 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		if err != nil {
 			framework.Failf("pod %v is not arrived to running and ready state: %v", pod.Name, err)
 		}
-		return
 	}
 
 	deletePod := func(f *framework.Framework, namespace string, podName string) {
 		podClient := f.ClientSet.CoreV1().Pods(namespace)
-		err := podClient.Delete(context.Background(), podName, metav1.DeleteOptions{})
-		framework.ExpectNoError(err, "failed to delete ovnkube-node pod")
+		_, err := podClient.Get(context.Background(), podName, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return
+		}
+
+		err = podClient.Delete(context.Background(), podName, metav1.DeleteOptions{})
+		framework.ExpectNoError(err, "failed to delete pod "+podName)
 	}
 
 	fileExistsOnPod := func(f *framework.Framework, namespace string, pod *v1.Pod, file string) bool {
@@ -2285,7 +2654,7 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 
 		go func() {
 			defer ginkgo.GinkgoRecover()
-			checkContinuousConnectivity(f, "", podName, getApiAddress(), 443, 30, podChan, errChan)
+			checkContinuousConnectivity(f, "", podName, getApiAddress(), 443, 10, 30, podChan, errChan)
 		}()
 		testPod := <-podChan
 
@@ -2444,7 +2813,6 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 			// Delete the db-pod in order to emulate the pod restart
 			dbPod.Status.Message = "check"
 			deletePod(f, ovnNs, dbPodName)
-			e2epod.WaitForPodTerminatedInNamespace(f.ClientSet, dbPodName, "", ovnNs)
 		}
 
 		framework.Logf("wait for all the Deployment to become ready again after pod deletion")

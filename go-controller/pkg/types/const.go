@@ -36,6 +36,7 @@ const (
 	JoinSwitchPrefix             = "join_"
 	ExternalSwitchPrefix         = "ext_"
 	GWRouterPrefix               = "GR_"
+	GWRouterLocalLBPostfix       = "_local"
 	RouterToSwitchPrefix         = "rtos-"
 	InterPrefix                  = "inter-"
 	HybridSubnetPrefix           = "hybrid-subnet-"
@@ -99,20 +100,6 @@ const (
 	NeighborAdvertisementICMPType = 136
 
 	OvnACLLoggingMeter = "acl-logging"
-
-	// LoadBalancer External Names
-	ClusterLBTCP          = "k8s-cluster-lb-tcp"
-	ClusterLBUDP          = "k8s-cluster-lb-udp"
-	ClusterLBSCTP         = "k8s-cluster-lb-sctp"
-	ClusterLBPrefix       = "k8s-cluster-lb"
-	ClusterIdlingLBPrefix = "k8s-idling-lb"
-	WorkerLBPrefix        = "k8s-worker-lb"
-	WorkerLBTCP           = WorkerLBPrefix + "-tcp"
-	WorkerLBUDP           = WorkerLBPrefix + "-udp"
-	WorkerLBSCTP          = WorkerLBPrefix + "-sctp"
-	GatewayLBTCP          = "TCP_lb_gateway_router"
-	GatewayLBUDP          = "UDP_lb_gateway_router"
-	GatewayLBSCTP         = "SCTP_lb_gateway_router"
 
 	// OVN-K8S Topology Versions
 	OvnSingleJoinSwitchTopoVersion = 1

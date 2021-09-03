@@ -10,8 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ebay/go-ovn"
-	"github.com/pkg/errors"
+	goovn "github.com/ebay/go-ovn"
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -27,7 +26,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
+	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -100,6 +99,11 @@ func (mc *OvnMHController) Start(ctx context.Context) error {
 					panic(err.Error())
 				}
 
+				// Start and sync the watch factory to begin listening for events
+				if err := mc.watchFactory.Start(); err != nil {
+					panic(err.Error())
+				}
+
 				if config.OVNKubernetesFeature.EnableMultiNetwork {
 					mc.watchNetworkAttachmentDefinitions()
 				}
@@ -159,7 +163,7 @@ func (oc *Controller) upgradeToNamespacedDenyPGOVNTopology(existingNodeList *kap
 
 // It is already single join switch based topology, simply set its topology version
 func (oc *Controller) upgradeToSingleSwitchOVNTopology(existingNodeList *kapi.NodeList) error {
-	_, stderr, err := util.RunOVNNbctl("--", "set", "logical_router", types.OVNClusterRouter,
+	_, stderr, err := util.RunOVNNbctl("--", "set", "logical_router", oc.nadInfo.Prefix+types.OVNClusterRouter,
 		fmt.Sprintf("external_ids:k8s-ovn-topo-version=%d", types.OvnSingleJoinSwitchTopoVersion))
 	if err != nil {
 		return fmt.Errorf("failed to set current version of OVN logical topology to %d: "+
@@ -401,46 +405,6 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		}
 	}
 
-	// Create load balancers
-
-	// If we enable idling we have to set the option before creating the loadbalancers
-	if config.Kubernetes.OVNEmptyLbEvents {
-		_, _, err := util.RunOVNNbctl("set", "nb_global", ".", "options:controller_event=true")
-		if err != nil {
-			klog.Error("Unable to enable controller events. Unidling not possible")
-			return err
-		}
-	}
-
-	// We have 3 load-balancers per protocol to implement the East-west traffic	//
-	protocols := []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolUDP}
-	if oc.SCTPSupport {
-		protocols = append(protocols, kapi.ProtocolSCTP)
-	}
-	// Create load-balancers for east-west traffic for each protocol UDP, TCP, SCTP
-	// and for Idling services if empty-lb-backends is enabled
-	lbExternalIds := []string{types.ClusterLBPrefix}
-	// If we enable idling we have to set the option before creating the loadbalancers
-	// and create the new set of loadbalancers.
-	if config.Kubernetes.OVNEmptyLbEvents {
-		_, _, err := util.RunOVNNbctl("set", "nb_global", ".", "options:controller_event=true")
-		if err != nil {
-			klog.Error("Unable to enable controller events. Unidling not possible")
-			return err
-		}
-		lbExternalIds = append(lbExternalIds, types.ClusterIdlingLBPrefix)
-	}
-	// Create the LoadBalancers if they don´t exist
-	for _, lbExternalID := range lbExternalIds {
-		for _, p := range protocols {
-			uuid, err := loadbalancer.CreateLoadBalancer(p, lbExternalID)
-			if err != nil {
-				return errors.Wrapf(err, "Failed to create OVN load balancer for protocol %s", p)
-			}
-			oc.clusterLBsUUIDs = append(oc.clusterLBsUUIDs, uuid)
-		}
-	}
-
 	// Initialize the OVNJoinSwitch switch IP manager
 	// The OVNJoinSwitch will be allocated IP addresses in the range 100.64.0.0/16 or fd98::/64.
 	oc.joinSwIPManager, err = initJoinLogicalSwitchIPManager()
@@ -639,18 +603,6 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}
 
-	// Add cluster load balancers to GR for Host -> Cluster IP Service traffic
-	if config.Gateway.Mode != config.GatewayModeLocal {
-		gr := util.GetGatewayRouterFromNode(node.Name)
-		for _, clusterLB := range oc.clusterLBsUUIDs {
-			_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-lb-add", gr, clusterLB)
-			if err != nil {
-				return fmt.Errorf("unable to add cluster LB: %s to %s, stderr: %q, error: %v",
-					clusterLB, gr, stderr, err)
-			}
-		}
-	}
-
 	// in the case of shared gateway mode, we need to setup
 	// 1. two policy based routes to steer traffic to the k8s node IP
 	// 	  - from the management port via the node_local_switch's localnet port
@@ -685,31 +637,62 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		}
 	}
 
-	if l3GatewayConfig.NodePortEnable {
-		gatewayRouter := types.GWRouterPrefix + node.Name
-		if physicalIPs, _ := oc.getGatewayPhysicalIPs(gatewayRouter); physicalIPs == nil {
-			return fmt.Errorf("gateway physical IP for node %q does not yet exist", node.Name)
-		}
-		// if new services controller run a full sync on all services
-		// services that have host network endpoints, are nodeport, external IP or ingress all have unique
-		// per-node load balancers. Since we cannot determine which services those are without significant parsing
-		// just sync all services
-		err = oc.svcController.RequestFullSync()
-	} else {
-		// nodePort disabled, delete gateway load balancers for this node.
-		gatewayRouter := util.GetGatewayRouterFromNode(node.Name)
-		for _, proto := range []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolUDP, kapi.ProtocolSCTP} {
-			lbUUID, _ := oc.getGatewayLoadBalancer(gatewayRouter, proto)
-			if lbUUID != "" {
-				_, _, err := util.RunOVNNbctl("--if-exists", "destroy", "load_balancer", lbUUID)
-				if err != nil {
-					klog.Errorf("Failed to destroy %s load balancer for gateway %s: %v", proto, gatewayRouter, err)
-				}
-			}
+	return err
+}
+
+// syncNodeClusterRouterPort ensures a node's LS to the cluster router's LRP is created.
+// NOTE: We could have created the router port in ensureNodeLogicalNetwork() instead of here,
+// but chassis ID is not available at that moment. We need the chassis ID to set the
+// gateway-chassis, which in effect pins the logical switch to the current node in OVN.
+// Otherwise, ovn-controller will flood-fill unrelated datapaths unnecessarily, causing scale
+// problems.
+func (oc *Controller) syncNodeClusterRouterPort(node *kapi.Node, hostSubnets []*net.IPNet) error {
+	chassisID, err := util.ParseNodeChassisIDAnnotation(node)
+	if err != nil {
+		return err
+	}
+
+	if hostSubnets == nil {
+		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, oc.nadInfo.NetName)
+		if err != nil {
+			return err
 		}
 	}
 
-	return err
+	// logical router port MAC is based on IPv4 subnet if there is one, else IPv6
+	var nodeLRPMAC net.HardwareAddr
+	for _, hostSubnet := range hostSubnets {
+		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
+		nodeLRPMAC = util.IPAddrToHWAddr(gwIfAddr.IP)
+		if !utilnet.IsIPv6CIDR(hostSubnet) {
+			break
+		}
+	}
+
+	switchName := oc.nadInfo.Prefix + node.Name
+	clusterRouterName := oc.nadInfo.Prefix + types.OVNClusterRouter
+	lrpName := types.RouterToSwitchPrefix + switchName
+	lrpArgs := []string{
+		"--if-exists", "lrp-del", lrpName,
+		"--", "lrp-add", clusterRouterName, lrpName, nodeLRPMAC.String(),
+	}
+	for _, hostSubnet := range hostSubnets {
+		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
+		lrpArgs = append(lrpArgs, gwIfAddr.String())
+	}
+	if config.Gateway.Mode != config.GatewayModeLocal {
+		// "local" mode requires NAT on the cluster router, which is not yet supported yet when
+		// multiple DGPs are on the same router, so we can't set the gateway-chassis here.
+		lrpArgs = append(lrpArgs, "--", "lrp-set-gateway-chassis", lrpName, chassisID, "1")
+	}
+
+	_, stderr, err := util.RunOVNNbctl(lrpArgs...)
+	if err != nil {
+		klog.Errorf("Failed to add logical port to router, stderr: %q, error: %v", stderr, err)
+		return err
+	}
+
+	return nil
 }
 
 func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*net.IPNet) error {
@@ -725,14 +708,6 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 	}
 
 	switchName := oc.nadInfo.Prefix + nodeName
-	clusterRouterName := oc.nadInfo.Prefix + types.OVNClusterRouter
-
-	lrpArgs := []string{
-		"--if-exists", "lrp-del", types.RouterToSwitchPrefix + switchName,
-		"--", "lrp-add", clusterRouterName, types.RouterToSwitchPrefix + switchName,
-		nodeLRPMAC.String(),
-	}
-
 	lsArgs := []string{
 		"--may-exist",
 		"ls-add", switchName,
@@ -748,8 +723,8 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 	for _, hostSubnet := range hostSubnets {
 		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
 		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
-		lrpArgs = append(lrpArgs, gwIfAddr.String())
 		hostNetworkPolicyIPs = append(hostNetworkPolicyIPs, mgmtIfAddr.IP)
+
 		if utilnet.IsIPv6CIDR(hostSubnet) {
 			v6Gateway = gwIfAddr.IP
 
@@ -768,13 +743,6 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 				"other-config:exclude_ips="+excludeIPs,
 			)
 		}
-	}
-
-	// Create a router port and provide it the first address on the node's host subnet
-	_, stderr, err := util.RunOVNNbctl(lrpArgs...)
-	if err != nil {
-		klog.Errorf("Failed to add logical port to router, stderr: %q, error: %v", stderr, err)
-		return err
 	}
 
 	// Create a logical switch and set its subnet.
@@ -800,15 +768,11 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 		if err = func() error {
 			hostNetworkNamespace := config.Kubernetes.HostNetworkNamespace
 			if hostNetworkNamespace != "" {
-				nsInfo := oc.ensureNamespaceLocked(hostNetworkNamespace)
-				defer nsInfo.Unlock()
-				if nsInfo.addressSet == nil {
-					nsInfo.addressSet, err = oc.createNamespaceAddrSetAllPods(hostNetworkNamespace)
-					if err != nil {
-						return fmt.Errorf("cannot create address set for namespace: %s,"+
-							"error: %v", hostNetworkNamespace, err)
-					}
+				nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(hostNetworkNamespace, true)
+				if err != nil {
+					return fmt.Errorf("failed to ensure namespace locked: %v", err)
 				}
+				defer nsUnlock()
 				if err = nsInfo.addressSet.AddIPs(hostNetworkPolicyIPs); err != nil {
 					return err
 				}
@@ -883,18 +847,6 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 			klog.Errorf(err.Error())
 			return err
 		}
-
-		for i, loadBalancerUUID := range oc.clusterLBsUUIDs {
-			if i == 0 {
-				stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch", nodeName, "load_balancer="+loadBalancerUUID)
-			} else {
-				stdout, stderr, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "load_balancer", loadBalancerUUID)
-			}
-			if err != nil {
-				klog.Errorf("Failed to set logical switch %v's load balancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
-				return err
-			}
-		}
 	}
 
 	// Add the node to the logical switch cache
@@ -935,7 +887,7 @@ func (oc *Controller) allocateNodeSubnets(node *kapi.Node) ([]*net.IPNet, []*net
 	hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, oc.nadInfo.NetName)
 	if err != nil {
 		// Log the error and try to allocate new subnets
-		klog.Infof("Failed to get node %s host subnets annotations: %v", node.Name, err)
+		klog.Infof("Failed to get node %s host subnets annotations for network %s: %v", node.Name, oc.nadInfo.NetName, err)
 	}
 	allocatedSubnets := []*net.IPNet{}
 
@@ -950,7 +902,7 @@ func (oc *Controller) allocateNodeSubnets(node *kapi.Node) ([]*net.IPNet, []*net
 	// node already has the expected subnets annotated
 	// assume IP families match, i.e. no IPv6 config and node annotation IPv4
 	if expectedHostSubnets == currentHostSubnets {
-		klog.Infof("Allocated Subnets %v on Node %s", hostSubnets, node.Name)
+		klog.Infof("Allocated Subnets %v on Node %s for network %s", hostSubnets, node.Name, oc.nadInfo.NetName)
 		return hostSubnets, allocatedSubnets, nil
 	}
 
@@ -1149,6 +1101,12 @@ func (oc *Controller) deleteNodeHostSubnet(nodeName string, subnet *net.IPNet) e
 }
 
 func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
+	// Remove switch to lb associations from the LBCache before removing the switch
+	lbCache, err := ovnlb.GetLBCache()
+	if err != nil {
+		return fmt.Errorf("failed to get load_balancer cache for node %s: %v", nodeName, err)
+	}
+	lbCache.RemoveSwitch(nodeName)
 	// Remove the logical switch associated with the node
 	switchName := oc.nadInfo.Prefix + nodeName
 	if _, stderr, err := util.RunOVNNbctl("--if-exist", "ls-del", switchName); err != nil {
@@ -1381,8 +1339,10 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 		}
 		if !oc.nadInfo.NotDefault {
 			// For each existing node, reserve its joinSwitch LRP IPs if they already exist.
-			gwLRPIPs := oc.getJoinLRPAddresses(node.Name)
-			_ = oc.joinSwIPManager.reserveJoinLRPIPs(node.Name, gwLRPIPs)
+			_, err := oc.joinSwIPManager.ensureJoinLRPIPs(node.Name)
+			if err != nil {
+				klog.Errorf("Failed to get join switch port IP address for node %s: %v", node.Name, err)
+			}
 		}
 	}
 

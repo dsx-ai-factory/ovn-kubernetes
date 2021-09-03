@@ -13,9 +13,12 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
+	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
+	testutils "k8s.io/kubernetes/test/utils"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -184,7 +187,7 @@ func unmarshalPodAnnotation(annotations map[string]string) (*PodAnnotation, erro
 	return podAnnotation, nil
 }
 
-func nodePortServiceSpecFrom(svcName string, httpPort, updPort, clusterHTTPPort, clusterUDPPort int, selector map[string]string) *v1.Service {
+func nodePortServiceSpecFrom(svcName string, httpPort, updPort, clusterHTTPPort, clusterUDPPort int, selector map[string]string, local v1.ServiceExternalTrafficPolicyType) *v1.Service {
 	preferDual := v1.IPFamilyPolicyPreferDualStack
 
 	res := &v1.Service{
@@ -197,8 +200,9 @@ func nodePortServiceSpecFrom(svcName string, httpPort, updPort, clusterHTTPPort,
 				{Port: int32(clusterHTTPPort), Name: "http", Protocol: v1.ProtocolTCP, TargetPort: intstr.FromInt(httpPort)},
 				{Port: int32(clusterUDPPort), Name: "udp", Protocol: v1.ProtocolUDP, TargetPort: intstr.FromInt(updPort)},
 			},
-			Selector:       selector,
-			IPFamilyPolicy: &preferDual,
+			Selector:              selector,
+			IPFamilyPolicy:        &preferDual,
+			ExternalTrafficPolicy: local,
 		},
 	}
 
@@ -228,6 +232,7 @@ func externalIPServiceSpecFrom(svcName string, httpPort, updPort, clusterHTTPPor
 
 // leverages a container running the netexec command to send a "hostname" request to a target running
 // netexec on the given target host / protocol / port
+// returns either the name of backend pod or "Timeout" if the curl request timed out
 func pokeEndpointHostname(clientContainer, protocol, targetHost string, targetPort int32) string {
 	ipPort := net.JoinHostPort("localhost", "80")
 	cmd := []string{"docker", "exec", clientContainer}
@@ -243,8 +248,64 @@ func pokeEndpointHostname(clientContainer, protocol, targetHost string, targetPo
 	res, err := runCommand(cmd...)
 	framework.ExpectNoError(err, "failed to run command on external container")
 	hostName, err := parseNetexecResponse(res)
+	if err != nil {
+		fmt.Printf("FAILED Command was %s", curlCommand)
+		fmt.Printf("FAILED Response was %v", res)
+	}
 	framework.ExpectNoError(err)
+
 	return hostName
+}
+
+// leverages a container running the netexec command to send a "clientip" request to a target running
+// netexec on the given target host / protocol / port
+// returns either the src ip of the packet or "Timeout" if the curl request timed out
+func pokeEndpointClientIP(clientContainer, protocol, targetHost string, targetPort int32) string {
+	ipPort := net.JoinHostPort("localhost", "80")
+	cmd := []string{"docker", "exec", clientContainer}
+
+	// we leverage the dial command from netexec, that is already supporting multiple protocols
+	curlCommand := strings.Split(fmt.Sprintf("curl -g -q -s http://%s/dial?request=clientip&protocol=%s&host=%s&port=%d&tries=1",
+		ipPort,
+		protocol,
+		targetHost,
+		targetPort), " ")
+
+	cmd = append(cmd, curlCommand...)
+	res, err := runCommand(cmd...)
+	framework.ExpectNoError(err, "failed to run command on external container")
+	clientIP, err := parseNetexecResponse(res)
+	framework.ExpectNoError(err)
+	ip, _, err := net.SplitHostPort(clientIP)
+	if err != nil {
+		fmt.Printf("FAILED Command was %s", curlCommand)
+		fmt.Printf("FAILED Response was %v", res)
+	}
+	framework.ExpectNoError(err, "failed to parse client ip:port")
+
+	return ip
+}
+
+// leverages a container running the netexec command to send a request to a target running
+// netexec on the given target host / protocol / port
+// returns either the name of backend pod or "Timeout" if the curl request timed out
+func curlInContainer(clientContainer, protocol, targetHost string, targetPort int32, endPoint string) string {
+	cmd := []string{"docker", "exec", clientContainer}
+	if utilnet.IsIPv6String(targetHost) {
+		targetHost = fmt.Sprintf("[%s]", targetHost)
+	}
+
+	// we leverage the dial command from netexec, that is already supporting multiple protocols
+	curlCommand := strings.Split(fmt.Sprintf("curl -g -q -s http://%s:%d/%s",
+		targetHost,
+		targetPort,
+		endPoint), " ")
+
+	cmd = append(cmd, curlCommand...)
+	res, err := runCommand(cmd...)
+	framework.ExpectNoError(err, "failed to run command on external container")
+
+	return res
 }
 
 func parseNetexecResponse(response string) (string, error) {
@@ -256,6 +317,9 @@ func parseNetexecResponse(response string) (string, error) {
 		return "", fmt.Errorf("failed to unmarshal curl response %s", response)
 	}
 	if len(res.Errors) > 0 {
+		if strings.Contains(strings.ToLower(res.Errors[0]), "timeout") {
+			return "Timeout", nil
+		}
 		return "", fmt.Errorf("curl response %s contains errors", response)
 	}
 	if len(res.Responses) == 0 {
@@ -336,10 +400,76 @@ func getContainerAddressesForNetwork(container, network string) (string, string)
 // accept the namespace as a parameter.
 func deletePodSyncNS(clientSet kubernetes.Interface, namespace, podName string) {
 	err := clientSet.CoreV1().Pods(namespace).Delete(context.Background(), podName, metav1.DeleteOptions{})
-	framework.ExpectNoError(err, "Failed to get delete the pod in the default namespace", podName)
+	framework.ExpectNoError(err, "Failed to delete pod %s in the default namespace", podName)
 
 	gomega.Eventually(func() bool {
 		_, err := clientSet.CoreV1().Pods(namespace).Get(context.Background(), podName, metav1.GetOptions{})
 		return apierrors.IsNotFound(err)
 	}, 3*time.Minute, 5*time.Second).Should(gomega.BeTrue(), "Pod was not being deleted")
+}
+
+// waitClusterHealthy ensures we have a given number of ovn-k worker and master nodes,
+// as well as all nodes are healthy
+func waitClusterHealthy(f *framework.Framework, numMasters int) error {
+	return wait.PollImmediate(2*time.Second, 120*time.Second, func() (bool, error) {
+		nodes, err := f.ClientSet.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
+		if err != nil {
+			return false, fmt.Errorf("failed to list nodes: %w", err)
+		}
+
+		numNodes := len(nodes.Items)
+		if numNodes == 0 {
+			return false, fmt.Errorf("list returned no Node objects, something is wrong")
+		}
+
+		// Check that every node is schedulable
+		afterNodes, err := e2enode.GetReadySchedulableNodes(f.ClientSet)
+		if err != nil {
+			return false, fmt.Errorf("failed to look for healthy nodes: %w", err)
+		}
+		if len(afterNodes.Items) != numNodes {
+			framework.Logf("Not enough schedulable nodes, have %d want %d", len(afterNodes.Items), numNodes)
+			return false, nil
+		}
+
+		podClient := f.ClientSet.CoreV1().Pods("ovn-kubernetes")
+		// Ensure all nodes are running and healthy
+		podList, err := podClient.List(context.Background(), metav1.ListOptions{
+			LabelSelector: "app=ovnkube-node",
+		})
+		if err != nil {
+			return false, fmt.Errorf("failed to list ovn-kube node pods: %w", err)
+		}
+		if len(podList.Items) != numNodes {
+			framework.Logf("Not enough running ovnkube-node pods, want %d, have %d", numNodes, len(podList.Items))
+			return false, nil
+		}
+
+		for _, pod := range podList.Items {
+			if ready, err := testutils.PodRunningReady(&pod); !ready {
+				framework.Logf("%v", err)
+				return false, nil
+			}
+		}
+
+		podList, err = podClient.List(context.Background(), metav1.ListOptions{
+			LabelSelector: "name=ovnkube-master",
+		})
+		if err != nil {
+			return false, fmt.Errorf("failed to list ovn-kube node pods: %w", err)
+		}
+		if len(podList.Items) != numMasters {
+			framework.Logf("Not enough running ovnkube-master pods, want %d, have %d", numMasters, len(podList.Items))
+			return false, nil
+		}
+
+		for _, pod := range podList.Items {
+			if ready, err := testutils.PodRunningReady(&pod); !ready {
+				framework.Logf("%v", err)
+				return false, nil
+			}
+		}
+
+		return true, nil
+	})
 }

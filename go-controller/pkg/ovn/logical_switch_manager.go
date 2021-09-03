@@ -343,11 +343,30 @@ func (jsIPManager *joinSwitchIPManager) getJoinLRPCacheIPs(nodeName string) ([]*
 	return gwLRPIPs, ok
 }
 
+func sameIPs(a, b []*net.IPNet) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for _, aip := range a {
+		found := false
+		for _, bip := range b {
+			if aip.String() == bip.String() {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
 func (jsIPManager *joinSwitchIPManager) setJoinLRPCacheIPs(nodeName string, gwLRPIPs []*net.IPNet) error {
 	jsIPManager.lrpIPCacheLock.Lock()
 	defer jsIPManager.lrpIPCacheLock.Unlock()
-	if _, ok := jsIPManager.lrpIPCache[nodeName]; ok {
-		return fmt.Errorf("join switch IPs already allocated for node %s", nodeName)
+	if oldIPs, ok := jsIPManager.lrpIPCache[nodeName]; ok && !sameIPs(oldIPs, gwLRPIPs) {
+		return fmt.Errorf("join switch IPs %v already cached", oldIPs)
 	}
 	jsIPManager.lrpIPCache[nodeName] = gwLRPIPs
 	return nil
@@ -372,7 +391,7 @@ func (jsIPManager *joinSwitchIPManager) reserveJoinLRPIPs(nodeName string, gwLRP
 			}
 		}()
 		if err = jsIPManager.setJoinLRPCacheIPs(nodeName, gwLRPIPs); err != nil {
-			klog.Errorf("Failed to add reserved IPs to the join switch IP cache: %s", err.Error())
+			klog.Errorf("Failed to add node %s reserved IPs %v to the join switch IP cache: %s", nodeName, gwLRPIPs, err.Error())
 		}
 	}
 	return err
@@ -384,6 +403,17 @@ func (jsIPManager *joinSwitchIPManager) ensureJoinLRPIPs(nodeName string) (gwLRP
 	// first check the IP cache, return if an entry already exists
 	gwLRPIPs, ok = jsIPManager.getJoinLRPCacheIPs(nodeName)
 	if ok {
+		return gwLRPIPs, nil
+	}
+	// second check the running DB
+	gwLRPIPs = jsIPManager.getJoinLRPAddresses(nodeName)
+	if len(gwLRPIPs) > 0 {
+		// Saving the hit in the cache
+		err = jsIPManager.reserveJoinLRPIPs(nodeName, gwLRPIPs)
+		if err != nil {
+			klog.Errorf("Failed to add reserve IPs to the join switch IP cache: %s", err.Error())
+			return nil, err
+		}
 		return gwLRPIPs, nil
 	}
 	gwLRPIPs, err = jsIPManager.lsm.AllocateNextIPs(types.OVNJoinSwitch)
@@ -401,11 +431,43 @@ func (jsIPManager *joinSwitchIPManager) ensureJoinLRPIPs(nodeName string) (gwLRP
 	}()
 
 	if err = jsIPManager.setJoinLRPCacheIPs(nodeName, gwLRPIPs); err != nil {
-		klog.Errorf("Failed to add allocated IPs to the join switch IP cache: %s", err.Error())
+		klog.Errorf("Failed to add node %s reserved IPs %v to the join switch IP cache: %s", nodeName, gwLRPIPs, err.Error())
 		return nil, err
 	}
 
 	return gwLRPIPs, nil
+}
+
+// getJoinLRPAddresses check if IPs of gateway logical router port are within the join switch IP range, and return them if true.
+func (jsIPManager *joinSwitchIPManager) getJoinLRPAddresses(nodeName string) []*net.IPNet {
+	// try to get the IPs from the logical router port
+	gwLRPIPs := []*net.IPNet{}
+	gwLrpName := types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName
+	joinSubnets := jsIPManager.lsm.GetSwitchSubnets(types.OVNJoinSwitch)
+	ifAddrs, err := util.GetLRPAddrs(gwLrpName)
+	if err == nil {
+		for _, ifAddr := range ifAddrs {
+			for _, subnet := range joinSubnets {
+				if subnet.Contains(ifAddr.IP) {
+					gwLRPIPs = append(gwLRPIPs, &net.IPNet{IP: ifAddr.IP, Mask: subnet.Mask})
+					break
+				}
+			}
+		}
+	}
+
+	if len(gwLRPIPs) != len(joinSubnets) {
+		var errStr string
+		if len(gwLRPIPs) == 0 {
+			errStr = fmt.Sprintf("Failed to get IPs for logical router port %s", gwLrpName)
+		} else {
+			errStr = fmt.Sprintf("Invalid IPs %s (possibly not in the range of subnet %s)",
+				util.JoinIPNetIPs(gwLRPIPs, " "), util.JoinIPNetIPs(joinSubnets, " "))
+		}
+		klog.Warningf("%s for logical router port %s", errStr, gwLrpName)
+		return []*net.IPNet{}
+	}
+	return gwLRPIPs
 }
 
 func (jsIPManager *joinSwitchIPManager) releaseJoinLRPIPs(nodeName string) error {

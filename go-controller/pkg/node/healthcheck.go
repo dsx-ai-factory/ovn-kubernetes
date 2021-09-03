@@ -14,6 +14,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1beta1"
 	ktypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 )
 
@@ -108,6 +109,19 @@ func countReadyEndpoints(epSlice *discovery.EndpointSlice) int {
 		num++
 	}
 	return num
+}
+
+func hasHostNetworkEndpoints(epSlices []*discovery.EndpointSlice, nodeAddresses *sets.String) bool {
+	for _, epSlice := range epSlices {
+		for _, endpoint := range epSlice.Endpoints {
+			for _, ip := range endpoint.Addresses {
+				if nodeAddresses.Has(ip) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // checkForStaleOVSInternalPorts checks for OVS internal ports without any ofport assigned,
