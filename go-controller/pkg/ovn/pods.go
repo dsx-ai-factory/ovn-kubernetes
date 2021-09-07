@@ -182,7 +182,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		klog.Errorf(err.Error())
 	}
 
-	if err := oc.lsManager.ReleaseIPs(portInfo.nodeName, portInfo.ips); err != nil {
+	if err := oc.lsManager.ReleaseIPs(lsManagerNodeName, portInfo.ips); err != nil {
 		klog.Errorf(err.Error())
 	}
 
