@@ -40,6 +40,10 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
+const (
+	ovnSkipFirewalldAnnotationName = "k8s.ovn.org/skip-firewalld"
+)
+
 // OvnNode is the object holder for utilities meant for node management
 type OvnNode struct {
 	name         string
@@ -53,6 +57,7 @@ type OvnNode struct {
 
 	defaultNodeController     *ovnNodeController
 	nonDefaultNodeControllers sync.Map
+	svcAnnotationMap          sync.Map
 }
 
 type ovnNodeController struct {
@@ -65,12 +70,13 @@ type ovnNodeController struct {
 // NewNode creates a new controller for node management
 func NewNode(kubeClient clientset.Interface, wf factory.NodeWatchFactory, name string, stopChan chan struct{}, eventRecorder record.EventRecorder) *OvnNode {
 	return &OvnNode{
-		name:         name,
-		client:       kubeClient,
-		Kube:         &kube.Kube{KClient: kubeClient},
-		watchFactory: wf,
-		stopChan:     stopChan,
-		recorder:     eventRecorder,
+		name:             name,
+		client:           kubeClient,
+		Kube:             &kube.Kube{KClient: kubeClient},
+		watchFactory:     wf,
+		stopChan:         stopChan,
+		recorder:         eventRecorder,
+		svcAnnotationMap: sync.Map{},
 	}
 }
 
@@ -561,14 +567,6 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		}, time.Minute, n.stopChan)
 	}
 
-	var nodeIP string
-	nodeIP, err = util.GetNodePrimaryIP(node)
-	if err != nil {
-		klog.Errorf("Failed to obtain local IP from node %q: %v", node.Name, err)
-	}
-
-	n.WatchEndpointSlices(nodeIP)
-
 	if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
 		// conditionally write cni config file
 		confFile := filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
@@ -579,22 +577,31 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 				return err
 			}
 		}
+		var nodeIP string
+		nodeIP, err = util.GetNodePrimaryIP(node)
+		if err != nil {
+			klog.Errorf("Failed to obtain local IP from node %q: %v", node.Name, err)
+		}
+
+		n.WatchEndpointSlices(nodeIP)
 	}
 
 	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
-		// create default OVN Node Controller to watch for Pods event for smart-nic plumbing/annotation
-		defaultNetConf := &cnitypes.NetConf{
-			NetConf: ctypes.NetConf{
-				Name: types.DefaultNetworkName,
-			},
-			NetCidr:    config.Default.RawClusterSubnets,
-			MTU:        config.Default.MTU,
-			NotDefault: false,
-		}
-		nadInfo, _ := util.NewNetAttachDefInfo(defaultNetConf)
-		nc, _ := n.NewOvnNodeController(nadInfo)
-
 		if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
+			n.WatchEndpointSlicesOnSmartNIC()
+
+			// create the default OVN Node Controller to watch for Pods event for smart-nic plumbing/annotation
+			defaultNetConf := &cnitypes.NetConf{
+				NetConf: ctypes.NetConf{
+					Name: types.DefaultNetworkName,
+				},
+				NetCidr:    config.Default.RawClusterSubnets,
+				MTU:        config.Default.MTU,
+				NotDefault: false,
+			}
+			nadInfo, _ := util.NewNetAttachDefInfo(defaultNetConf)
+			nc, _ := n.NewOvnNodeController(nadInfo)
+
 			nc.watchSmartNicPods(n.ovnUpEnabled)
 		}
 
@@ -848,23 +855,59 @@ func (n *OvnNode) deleteNetworkAttachDefinition(netattachdef *nettypes.NetworkAt
 	n.nonDefaultNodeControllers.Delete(nadInfo.NetName)
 }
 
+// checkForSkipFirewalldAnnotation looks for "k8s.ovn.org/skip-firewalld" annotation
+// on service of endpointslice and returns the corresponding value.
+func (n *OvnNode) checkForSkipFirewalldAnnotation(epSlice *discovery.EndpointSlice) bool {
+	svcName, ok := epSlice.Labels[discovery.LabelServiceName]
+	if !ok || svcName == "" {
+		klog.Errorf("EndpointSlice %s/%s missing %s label",
+			epSlice.Namespace, epSlice.Name, discovery.LabelServiceName)
+		return false
+	}
+	svc, err := n.watchFactory.GetService(epSlice.Namespace, svcName)
+	if err != nil {
+		klog.Errorf("%s/%s service not found in informers cache :(%v)",
+			epSlice.Namespace, svcName, err)
+		return false
+	}
+	val, ok := svc.Annotations[ovnSkipFirewalldAnnotationName]
+	if ok && val == "true" {
+		return true
+	}
+	return false
+}
+
 func (n *OvnNode) WatchEndpointSlices(nodeIP string) {
 	start := time.Now()
 
 	n.watchFactory.AddEndpointSliceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
-				endpointSlice := obj.(*discovery.EndpointSlice)
-				klog.Infof("Processing add for endpoint slice %s on namespace %s",
-					endpointSlice.Name, endpointSlice.Namespace)
-				startTime := time.Now()
+			endpointSlice := obj.(*discovery.EndpointSlice)
+			klog.Infof("Processing add for endpoint slice %s on namespace %s",
+				endpointSlice.Name, endpointSlice.Namespace)
+			startTime := time.Now()
+			// open firewalld ports for host node services only if
+			// "k8s.ovn.org/skip-firewalld" annotation is not set to true
+			// on the corresponding service for endpoints.
+			skipFirewalldAnnotation := n.checkForSkipFirewalldAnnotation(endpointSlice)
+			annotationMapKey := endpointSlice.Namespace + "/" + endpointSlice.Name
+			n.svcAnnotationMap.Store(annotationMapKey, skipFirewalldAnnotation)
+			if !skipFirewalldAnnotation {
 				addEPSliceToFirewallZone(nodeIP, endpointSlice)
-				klog.Infof("Took %v to add endpoint slice %s", time.Since(startTime), endpointSlice.Name)
+			} else {
+				klog.Infof("Skipping firewalld for endpointslice: %s/%s", endpointSlice.Namespace, endpointSlice.Name)
 			}
+			klog.Infof("Took %v to add endpoint slice %s/%s",
+				time.Since(startTime), endpointSlice.Namespace, endpointSlice.Name)
 		},
 		UpdateFunc: func(prevObj, obj interface{}) {
+			var skipFirewalldAnnotation bool
 			oldEndpointSlice := prevObj.(*discovery.EndpointSlice)
 			newEndpointSlice := obj.(*discovery.EndpointSlice)
+			annotationMapKey := newEndpointSlice.Namespace + "/" + newEndpointSlice.Name
+			if val, ok := n.svcAnnotationMap.Load(annotationMapKey); ok {
+				skipFirewalldAnnotation = val.(bool)
+			}
 			oldEpAddr := getEndpointAddresses(oldEndpointSlice)
 			newEpAddr := getEndpointAddresses(newEndpointSlice)
 			if reflect.DeepEqual(oldEndpointSlice.Ports, newEndpointSlice.Ports) &&
@@ -874,20 +917,27 @@ func (n *OvnNode) WatchEndpointSlices(nodeIP string) {
 			klog.Infof("Processing update for endpoint slice %s on namespace %s",
 				newEndpointSlice.Name, newEndpointSlice.Namespace)
 			startTime := time.Now()
-			updateEndpointSlice(nodeIP, oldEndpointSlice, newEndpointSlice)
-			klog.Infof("Took %v to update endpoint slice %s", time.Since(startTime), newEndpointSlice.Name)
+			updateEndpointSlice(nodeIP, skipFirewalldAnnotation, oldEndpointSlice, newEndpointSlice)
+			klog.Infof("Took %v to update endpoint slice %s/%s",
+				time.Since(startTime), newEndpointSlice.Namespace, newEndpointSlice.Name)
 		},
 		DeleteFunc: func(obj interface{}) {
+			var skipFirewalldAnnotation bool
 			endpointSlice := obj.(*discovery.EndpointSlice)
+			annotationMapKey := endpointSlice.Namespace + "/" + endpointSlice.Name
+			if val, ok := n.svcAnnotationMap.LoadAndDelete(annotationMapKey); ok {
+				skipFirewalldAnnotation = val.(bool)
+			}
 
-			// Deletes the ep ports from ovn and ngn-admin zone if the endpoint IP is same as the nodeIP.
+			// Deletes the ep ports from ovn and ngn-admin zone if the endpoint IP
+			// is same as the nodeIP and "k8s.ovn.org/skip-firewalld" annotation is not set to true.
 			// Also deletes any connection tracking entries for UDP and SCTP ports
 			for _, port := range endpointSlice.Ports {
 				for _, endpoint := range endpointSlice.Endpoints {
 					for _, ip := range endpoint.Addresses {
 						klog.V(5).Infof("Endpoint address is %s and NodeIP is %s for port %d/%s",
 							ip, nodeIP, *port.Port, *port.Protocol)
-						if config.OvnKubeNode.Mode != types.NodeModeSmartNIC && nodeIP == ip {
+						if nodeIP == ip && !skipFirewalldAnnotation {
 							err := removePortFromFirewallZone(ovnFirewallZone,
 								*port.Port, *port.Protocol)
 							if err != nil {
@@ -990,9 +1040,11 @@ func (n *OvnNode) validateGatewayMTU(gatewayInterfaceName string) error {
 	}
 }
 
-func updateEndpointSlice(nodeIP string, oldEndpointSlice, newEndpointSlice *discovery.EndpointSlice) {
-	if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
-		// add any new ports to the firewalld zone that are not in oldEndpointSlice
+func updateEndpointSlice(nodeIP string, skipFirewalldAnnotation bool,
+	oldEndpointSlice, newEndpointSlice *discovery.EndpointSlice) {
+	// don't add ports to firewalld if skip-firewalld annotation is set
+	// on service of endpointslice
+	if !skipFirewalldAnnotation {
 		for _, port := range newEndpointSlice.Ports {
 			for _, endpoint := range newEndpointSlice.Endpoints {
 				for _, ip := range endpoint.Addresses {
@@ -1025,26 +1077,17 @@ func updateEndpointSlice(nodeIP string, oldEndpointSlice, newEndpointSlice *disc
 			for _, ip := range endpoint.Addresses {
 				// if the port is neither UDP nor SCTP and endpointIP doesn't match the node's IP, then
 				// there is nothing to do
-				switch config.OvnKubeNode.Mode {
-				case types.NodeModeSmartNIC:
-					if *port.Protocol != kapi.ProtocolUDP && *port.Protocol != kapi.ProtocolSCTP {
-						continue
-					}
-				case types.NodeModeSmartNICHost:
-					if nodeIP != ip {
-						continue
-					}
-				case types.NodeModeFull:
-					if nodeIP != ip && *port.Protocol != kapi.ProtocolUDP && *port.Protocol != kapi.ProtocolSCTP {
-						continue
-					}
+				if nodeIP != ip && *port.Protocol != kapi.ProtocolUDP && *port.Protocol != kapi.ProtocolSCTP {
+					continue
 				}
 				if isEPSliceContainsEndpoint(newEndpointSlice, ip, *port.Port, *port.Protocol) {
 					continue
 				}
-				klog.Infof("Removing the endpoint %s/%d/%s not present in new slice but present in old slice",
-					ip, *port.Port, *port.Protocol)
-				if config.OvnKubeNode.Mode != types.NodeModeSmartNIC && nodeIP == ip {
+				// if skip-firewalld annotation is set, don't remove the
+				// ports from firewalld
+				if nodeIP == ip && !skipFirewalldAnnotation {
+					klog.Infof("Removing the endpoint %s/%d/%s not present in new slice but present in old slice",
+						ip, *port.Port, *port.Protocol)
 					err := removePortFromFirewallZone(ovnFirewallZone, *port.Port, *port.Protocol)
 					if err != nil {
 						klog.Errorf("Error in removing port %d to ovn firewall zone: (%v)", *port.Port, err)
@@ -1067,15 +1110,13 @@ func updateEndpointSlice(nodeIP string, oldEndpointSlice, newEndpointSlice *disc
 }
 
 func syncEndpointSlices(obj []interface{}) {
-	if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
-		if err := addInterfaceToFirewallZone(types.K8sMgmtIntfName, ovnFirewallZone); err != nil {
-			klog.Errorf("Failed to add interface %s to ovn firewall zone: (%v)",
-				types.K8sMgmtIntfName, err)
-		}
-		if err := addInterfaceToFirewallZone(localnetGatewayNextHopPort, ovnFirewallZone); err != nil {
-			klog.Errorf("Failed to add interface %s to ovn firewall zone: (%v)",
-				localnetGatewayNextHopPort, err)
-		}
+	if err := addInterfaceToFirewallZone(types.K8sMgmtIntfName, ovnFirewallZone); err != nil {
+		klog.Errorf("Failed to add interface %s to ovn firewall zone: (%v)",
+			types.K8sMgmtIntfName, err)
+	}
+	if err := addInterfaceToFirewallZone(localnetGatewayNextHopPort, ovnFirewallZone); err != nil {
+		klog.Errorf("Failed to add interface %s to ovn firewall zone: (%v)",
+			localnetGatewayNextHopPort, err)
 	}
 }
 
@@ -1107,4 +1148,50 @@ func upgradeServiceRoute(bridgeName string) error {
 		klog.Warningf("Error while removing Local Node Access Bridge, error: %v", err)
 	}
 	return nil
+}
+
+func (n *OvnNode) WatchEndpointSlicesOnSmartNIC() {
+	n.watchFactory.AddEndpointSliceHandler(cache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(prevObj, obj interface{}) {
+			oldEndpointSlice := prevObj.(*discovery.EndpointSlice)
+			newEndpointSlice := obj.(*discovery.EndpointSlice)
+			oldEpAddr := getEndpointAddresses(oldEndpointSlice)
+			newEpAddr := getEndpointAddresses(newEndpointSlice)
+			if reflect.DeepEqual(oldEndpointSlice.Ports, newEndpointSlice.Ports) &&
+				reflect.DeepEqual(oldEpAddr, newEpAddr) {
+				return
+			}
+			klog.Infof("Processing update for endpoint slice %s on namespace %s",
+				newEndpointSlice.Name, newEndpointSlice.Namespace)
+			startTime := time.Now()
+			deleteConntrackEntries(newEndpointSlice, oldEndpointSlice)
+			klog.Infof("Took %v to complete update for endpoint slice %s/%s",
+				time.Since(startTime), newEndpointSlice.Namespace, newEndpointSlice.Name)
+		},
+		DeleteFunc: func(obj interface{}) {
+			deleteConntrackEntries(nil, obj.(*discovery.EndpointSlice))
+		},
+	}, nil)
+}
+
+// Also deletes any connection tracking entries for UDP and SCTP ports
+func deleteConntrackEntries(checkEpSlice, fromEpSlice *discovery.EndpointSlice) {
+	for _, port := range fromEpSlice.Ports {
+		for _, endpoint := range fromEpSlice.Endpoints {
+			for _, ip := range endpoint.Addresses {
+				if *port.Protocol != kapi.ProtocolUDP && *port.Protocol != kapi.ProtocolSCTP {
+					continue
+				}
+				if checkEpSlice != nil {
+					if isEPSliceContainsEndpoint(checkEpSlice, ip, *port.Port, *port.Protocol) {
+						continue
+					}
+				}
+				err := deleteConntrack(ip, *port.Port, *port.Protocol)
+				if err != nil {
+					klog.Errorf("Failed to delete conntrack entry for %s: %v", ip, err)
+				}
+			}
+		}
+	}
 }
