@@ -516,7 +516,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			return err
 		}
 		klog.V(5).Infof("Annotation values for network %s: ip=%v ; mac=%s ; gw=%s\n",
-			podIfAddrs, podMac, oc.nadInfo.NetName, podAnnotation.Gateways)
+			oc.nadInfo.NetName, podIfAddrs, podMac, podAnnotation.Gateways)
 
 		if err = oc.updatePodAnnotationWithRetry(pod, &podAnnotation); err != nil {
 			return err
