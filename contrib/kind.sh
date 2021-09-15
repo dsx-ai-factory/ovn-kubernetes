@@ -269,7 +269,7 @@ set_default_params() {
   # Set default values
   KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}
   KIND_IMAGE=${KIND_IMAGE:-kindest/node}
-  K8S_VERSION=${K8S_VERSION:-v1.20.0}
+  K8S_VERSION=${K8S_VERSION:-v1.21.1}
   OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-shared}
   KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
   OVN_HA=${OVN_HA:-false}
