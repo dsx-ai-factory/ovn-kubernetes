@@ -355,7 +355,8 @@ func (oc *Controller) SetupMaster(masterNodeName string, existingNodeNames []str
 
 	// Create a single common distributed router for the cluster.
 	cmdArgs := []string{"--", "--may-exist", "lr-add", clusterRouterName,
-		"--", "set", "logical_router", clusterRouterName, "external_ids:k8s-cluster-router=yes"}
+		"--", "set", "logical_router", clusterRouterName, "external_ids:k8s-cluster-router=yes",
+		"options:always_learn_from_arp_request=false"}
 	if oc.nadInfo.NotDefault {
 		cmdArgs = append(cmdArgs, "external_ids:network_name="+oc.nadInfo.NetName)
 	}
