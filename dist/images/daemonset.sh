@@ -48,6 +48,7 @@ OVN_EGRESSFIREWALL_ENABLE="true"
 OVN_ICMP_NETWORKPOLICY_ENABLE="true"
 OVN_MULTI_NETWORK_ENABLE="true"
 OVN_MULTI_NETWORKPOLICY_ENABLE="true"
+OVN_DISABLE_OVN_IFACE_ID_VER="true"
 OVN_V4_JOIN_SUBNET=""
 OVN_V6_JOIN_SUBNET=""
 OVN_NETFLOW_TARGETS=""
@@ -188,6 +189,9 @@ while [ "$1" != "" ]; do
   --multi-networkpolicy-enable)
     OVN_MULTI_NETWORKPOLICY_ENABLE=$VALUE
     ;;
+  --disabe-ovn-iface-id-ver)
+    OVN_DISABLE_OVN_IFACE_ID_VER=$VALUE
+    ;;
   --ovn-nbcert-cname)
     OVN_NB_CERT_CNAME=$VALUE
     ;;
@@ -287,6 +291,8 @@ ovn_multi_network_enable=${OVN_MULTI_NETWORK_ENABLE}
 echo "ovn_multi_network_enable: ${ovn_multi_network_enable}"
 ovn_multi_networkpolicy_enable=${OVN_MULTI_NETWORKPOLICY_ENABLE}
 echo "ovn_multi_networkpolicy_enable: ${ovn_multi_networkpolicy_enable}"
+ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER}
+echo "ovn_disable_ovn_iface_id_ver: ${ovn_disable_ovn_iface_id_ver}"
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR}
 echo "ovn_hybrid_overlay_net_cidr: ${ovn_hybrid_overlay_net_cidr}"
 ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS}
@@ -363,6 +369,7 @@ ovn_image=${image} \
   ovn_sflow_targets=${ovn_sflow_targets} \
   ovn_ipfix_targets=${ovn_ipfix_targets} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
+  ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
   ovnkube_app_name=ovnkube-node \
   j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
 
@@ -490,6 +497,7 @@ ovn_image=${image} \
   ovn_sflow_targets=${ovn_sflow_targets} \
   ovn_ipfix_targets=${ovn_ipfix_targets} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
+  ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
   ovnkube_app_name=ovnkube-node \
   j2 ../templates/ovnk8s-node.yaml.j2 -o ../yaml/ovnk8s-node.yaml
 
