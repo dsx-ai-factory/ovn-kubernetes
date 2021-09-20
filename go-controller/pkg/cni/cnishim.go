@@ -213,11 +213,16 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 			klog.Error(err.Error())
 			return err
 		}
+		podInterfaceInfo := response.PodIFInfo
+		if err := pr.checkOrUpdatePodUID(podInterfaceInfo.PodUID); err != nil {
+			klog.Error(err.Error())
+			return err
+		}
 		defer pr.cancel()
 
-		result, err = pr.getCNIResult(nil, kclient, response.PodIFInfo)
+		result, err = pr.getCNIResult(nil, kclient, podInterfaceInfo)
 		if err != nil {
-			err = fmt.Errorf("failed to get CNI Result from pod interface info %v: %v", response.PodIFInfo, err)
+			err = fmt.Errorf("failed to get CNI Result from pod interface info %v: %v", podInterfaceInfo, err)
 			klog.Error(err.Error())
 			return err
 		}

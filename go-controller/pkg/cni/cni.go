@@ -144,6 +144,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 			return nil, err
 		}
 	} else {
+		podInterfaceInfo.PodUID = pr.PodUID
 		response.PodIFInfo = podInterfaceInfo
 	}
 
