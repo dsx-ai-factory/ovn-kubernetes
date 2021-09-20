@@ -111,7 +111,7 @@ func (oc *Controller) syncPods(pods []interface{}) {
 	// update namespace addressSet has stale ips
 	for ns, ips := range nsNeedUpdate {
 		klog.Infof("Found stale IPs %s in Namespace %s. Removing them", ips, ns)
-		nsInfo, nsUnlock := oc.getNamespaceLocked(ns, false)
+		nsInfo, nsUnlock := oc.getNamespaceLocked(ns, true)
 		if nsInfo == nil {
 			continue
 		}

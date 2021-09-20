@@ -138,7 +138,7 @@ func (oc *Controller) delHostnetworkPodIPFromAddressSet(nodeName, podName, polic
 }
 
 func (oc *Controller) addHostNetworkPodToNamespace(pod *kapi.Pod) error {
-	nsInfo, nsUnlock, err := oc.waitForNamespaceLocked(pod.Namespace, false)
+	nsInfo, nsUnlock, err := oc.waitForNamespaceLocked(pod.Namespace, true)
 	if err != nil {
 		return err
 	}
@@ -148,7 +148,7 @@ func (oc *Controller) addHostNetworkPodToNamespace(pod *kapi.Pod) error {
 }
 
 func (oc *Controller) delHostNetworkPodFromNamespace(pod *kapi.Pod) error {
-	nsInfo, nsUnlock, err := oc.waitForNamespaceLocked(pod.Namespace, false)
+	nsInfo, nsUnlock, err := oc.waitForNamespaceLocked(pod.Namespace, true)
 	if err != nil {
 		return err
 	}
