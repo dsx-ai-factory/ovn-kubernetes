@@ -16,7 +16,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
-	discovery "k8s.io/api/discovery/v1beta1"
+	discovery "k8s.io/api/discovery/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -311,6 +311,14 @@ func (npw *nodePortWatcher) getAndDeleteServiceInfo(index ktypes.NamespacedName)
 	return out, exists
 }
 
+// getServiceInfo returns the serviceConfig for a service and if it exists
+func (npw *nodePortWatcher) getServiceInfo(index ktypes.NamespacedName) (out *serviceConfig, exists bool) {
+	npw.serviceInfoLock.Lock()
+	defer npw.serviceInfoLock.Unlock()
+	out, exists = npw.serviceInfo[index]
+	return out, exists
+}
+
 // getAndSetServiceInfo creates and sets the serviceConfig, returns if it existed and whatever was there
 func (npw *nodePortWatcher) getAndSetServiceInfo(index ktypes.NamespacedName, service *kapi.Service, etpHostRules bool) (old *serviceConfig, exists bool) {
 	npw.serviceInfoLock.Lock()
@@ -504,7 +512,7 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) {
 
 		epSlices, err := npw.watchFactory.GetEndpointSlices(service.Namespace, service.Name)
 		if err != nil {
-			klog.V(5).Infof("No endpoint found for service %s in namespace %s during sync", service.Name, service.Namespace)
+			klog.V(5).Infof("No endpointslice found for service %s in namespace %s during sync", service.Name, service.Namespace)
 			continue
 		}
 
@@ -514,7 +522,7 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) {
 		npw.updateServiceFlowCache(service, false, hasHostNet)
 		npw.updateServiceFlowCache(service, true, hasHostNet)
 		// Add correct iptables rules
-		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, nil, hasHostNet)...)
+		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, hasHostNet)...)
 	}
 	// sync OF rules once
 	npw.ofm.requestFlowSync()
@@ -526,12 +534,7 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) {
 
 func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) {
 	var etpHostRules bool
-	svcName, ok := epSlice.Labels[discovery.LabelServiceName]
-	if !ok || svcName == "" {
-		klog.Errorf("Service name not found for endpointslice %s in namespace %s during add", epSlice.Name, epSlice.Namespace)
-		return
-	}
-
+	svcName := epSlice.Labels[discovery.LabelServiceName]
 	name := ktypes.NamespacedName{Namespace: epSlice.Namespace, Name: svcName}
 
 	svc, err := npw.watchFactory.GetService(epSlice.Namespace, svcName)
@@ -572,12 +575,7 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 
 	klog.V(5).Infof("Deleting endpointslice %s in namespace %s", epSlice.Name, epSlice.Namespace)
 	// remove rules for endpoints and add back normal ones
-	svcName, ok := epSlice.Labels[discovery.LabelServiceName]
-	if !ok || svcName == "" {
-		klog.Errorf("Service name not found for endpointslice %s in namespace %s during delete", epSlice.Name, epSlice.Namespace)
-		return
-	}
-
+	svcName := epSlice.Labels[discovery.LabelServiceName]
 	name := ktypes.NamespacedName{Namespace: epSlice.Namespace, Name: svcName}
 	if svcConfig, exists := npw.updateServiceInfo(name, nil, &etpHostRules); exists {
 		// Lock the cache mutex here so we don't miss a service delete during an endpoint delete
@@ -601,9 +599,17 @@ func getEndpointAddresses(endpointSlice *discovery.EndpointSlice) []string {
 func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.EndpointSlice) {
 	oldEpAddr := getEndpointAddresses(oldEpSlice)
 	newEpAddr := getEndpointAddresses(newEpSlice)
-	if reflect.DeepEqual(oldEpSlice.Ports, newEpSlice.Ports) &&
-		reflect.DeepEqual(oldEpAddr, newEpAddr) {
+	if reflect.DeepEqual(oldEpAddr, newEpAddr) {
 		return
+	}
+
+	svcName := oldEpSlice.Labels[discovery.LabelServiceName]
+	name := ktypes.NamespacedName{Namespace: oldEpSlice.Namespace, Name: svcName}
+	// Delete old endpoint rules and add normal ones back
+	if len(newEpAddr) == 0 {
+		if _, exists := npw.getServiceInfo(name); exists {
+			npw.DeleteEndpointSlice(oldEpSlice)
+		}
 	}
 
 	klog.V(5).Infof("Updating endpointslice %s in namespace %s", oldEpSlice.Name, oldEpSlice.Namespace)
@@ -658,7 +664,7 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) {
 			continue
 		}
 		// Add correct iptables rules
-		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, nil, false)...)
+		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, false)...)
 	}
 
 	// sync IPtables rules once
@@ -1155,16 +1161,6 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 			if err != nil {
 				return err
 			}
-			// In the shared gateway mode, the NodePort service is handled by the OpenFlow flows configured
-			// on the OVS bridge in the host. These flows act only on the packets coming in from outside
-			// of the node. If someone on the node is trying to access the NodePort service, those packets
-			// will not be processed by the OpenFlow flows, so we need to add iptable rules that DNATs the
-			// NodePortIP:NodePort to ClusterServiceIP:Port.
-			if config.OvnKubeNode.Mode == types.NodeModeFull {
-				if err := initSharedGatewayIPTables(); err != nil {
-					return err
-				}
-			}
 		} else {
 			// no service OpenFlows, request to sync flows now.
 			gw.openflowManager.requestFlowSync()
@@ -1198,9 +1194,12 @@ func newNodePortWatcher(patchPort, gwBridge, gwIntf string, ips []*net.IPNet, of
 	// on the OVS bridge in the host. These flows act only on the packets coming in from outside
 	// of the node. If someone on the node is trying to access the NodePort service, those packets
 	// will not be processed by the OpenFlow flows, so we need to add iptable rules that DNATs the
-	// NodePortIP:NodePort to ClusterServiceIP:Port.
-	if err := initSharedGatewayIPTables(); err != nil {
-		return nil, err
+	// NodePortIP:NodePort to ClusterServiceIP:Port. We don't need to do this while
+	// running on Smart-NIC or on Smart-NIC-Host.
+	if config.OvnKubeNode.Mode == types.NodeModeFull {
+		if err := initSharedGatewayIPTables(); err != nil {
+			return nil, err
+		}
 	}
 
 	// used to tell addServiceRules which rules to add

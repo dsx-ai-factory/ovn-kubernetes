@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"net/http"
 	"reflect"
 	"strconv"
 	"strings"
@@ -27,6 +26,7 @@ import (
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
+	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -177,7 +177,7 @@ type Controller struct {
 	loadbalancerClusterCache map[kapi.Protocol]string
 
 	// A cache of all logical switches seen by the watcher and their subnets
-	lsManager *logicalSwitchManager
+	lsManager *lsm.LogicalSwitchManager
 
 	// A cache of all logical ports known to the controller
 	logicalPortCache *portCache
@@ -227,7 +227,7 @@ type Controller struct {
 	// Is ACL logging enabled while configuring meters?
 	aclLoggingEnabled bool
 
-	joinSwIPManager *joinSwitchIPManager
+	joinSwIPManager *lsm.JoinSwitchIPManager
 
 	// v4HostSubnetsUsed keeps track of number of v4 subnets currently assigned to nodes
 	v4HostSubnetsUsed float64
@@ -346,17 +346,17 @@ func (mc *OvnMHController) NewOvnController(nadInfo *util.NetAttachDefInfo,
 	if nadInfo.NotDefault {
 		stopChan = make(chan struct{})
 	}
-	var lsm *logicalSwitchManager
+	var lsManager *lsm.LogicalSwitchManager
 	if nadInfo.TopoType != ovntypes.LocalnetAttachDefTopoType {
-		lsm = newLogicalSwitchManager()
+		lsManager = lsm.NewLogicalSwitchManager()
 	} else {
-		lsm = newLocalnetSwitchManager()
+		lsManager = lsm.NewLocalnetSwitchManager()
 		var hostSubnets []*net.IPNet
 		for _, subnet := range clusterIPNet {
 			hostSubnet := subnet.CIDR
 			hostSubnets = append(hostSubnets, hostSubnet)
 		}
-		err = lsm.AddNode(ovntypes.OVNLocalnetSwitch, hostSubnets)
+		err = lsManager.AddNode(ovntypes.OVNLocalnetSwitch, hostSubnets)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize localnet switch IP manager for network %s: %v", nadInfo.NetName, err)
 		}
@@ -368,7 +368,7 @@ func (mc *OvnMHController) NewOvnController(nadInfo *util.NetAttachDefInfo,
 				if !excludeCidr.Contains(ip) {
 					break
 				}
-				_ = lsm.AllocateIPs(ovntypes.OVNLocalnetSwitch, []*net.IPNet{{IP: ip, Mask: excludeCidr.Mask}})
+				_ = lsManager.AllocateIPs(ovntypes.OVNLocalnetSwitch, []*net.IPNet{{IP: ip, Mask: excludeCidr.Mask}})
 			}
 		}
 	}
@@ -380,7 +380,7 @@ func (mc *OvnMHController) NewOvnController(nadInfo *util.NetAttachDefInfo,
 		masterSubnetAllocator:     subnetallocator.NewSubnetAllocator(),
 		nodeLocalNatIPv4Allocator: &ipallocator.Range{},
 		nodeLocalNatIPv6Allocator: &ipallocator.Range{},
-		lsManager:                 lsm,
+		lsManager:                 lsManager,
 		logicalPortCache:          newPortCache(stopChan),
 		namespaces:                make(map[string]*namespaceInfo),
 		namespacesMutex:           sync.Mutex{},
@@ -599,32 +599,34 @@ func (oc *Controller) iterateRetryPods(updateAll bool) {
 		if podEntry.ignore {
 			continue
 		}
+
 		pod := podEntry.pod
-		if !util.PodScheduled(pod) {
+		podDesc := fmt.Sprintf("[%s/%s/%s]", pod.UID, pod.Namespace, pod.Name)
+		// it could be that the Pod got deleted, but Pod's DeleteFunc has not been called yet, so don't retry
+		kPod, err := oc.mc.watchFactory.GetPod(pod.Namespace, pod.Name)
+		if err != nil && errors.IsNotFound(err) {
+			klog.Infof("%s pod not found in the informers cache, not going to retry pod setup", podDesc)
+			delete(oc.retryPods, uid)
+			continue
+		}
+
+		if !util.PodScheduled(kPod) {
+			klog.V(5).Infof("retry: %s not scheduled", podDesc)
 			continue
 		}
 		podTimer := podEntry.timeStamp.Add(time.Minute)
 		if updateAll || now.After(podTimer) {
-			podDesc := fmt.Sprintf("[%s/%s/%s]", pod.UID, pod.Namespace, pod.Name)
-			// it could be that the Pod got deleted, but Pod's DeleteFunc has not been called yet, so don't retry
-			_, err := oc.mc.watchFactory.GetPod(pod.Namespace, pod.Name)
-			if err != nil {
-				if e, ok := err.(*errors.StatusError); ok && e.ErrStatus.Code == http.StatusNotFound {
-					klog.Infof("%s pod not found in the informers cache, not going to retry pod setup", podDesc)
-					delete(oc.retryPods, uid)
-					continue
-				}
-			}
-
 			klog.Infof("%s retry pod setup", podDesc)
 
-			if oc.ensurePod(nil, pod, true) {
+			if oc.ensurePod(nil, kPod, true) {
 				klog.Infof("%s pod setup successful", podDesc)
 				delete(oc.retryPods, uid)
 			} else {
 				klog.Infof("%s setup retry failed; will try again later", podDesc)
 				oc.retryPods[uid] = &retryEntry{pod, time.Now(), false}
 			}
+		} else {
+			klog.V(5).Infof("%s retry pod not after timer yet, time: %s", podDesc, podTimer)
 		}
 	}
 }
@@ -797,6 +799,21 @@ func (oc *Controller) WatchPods() {
 		UpdateFunc: func(old, newer interface{}) {
 			oldPod := old.(*kapi.Pod)
 			pod := newer.(*kapi.Pod)
+			// there may be a situation where this update event is not the latest
+			// and we rely on annotations to determine the pod mac/ifaddr
+			// this would create a situation where
+			// 1. addLogicalPort is executing with an older pod annotation, skips setting a new annotation
+			// 2. creates OVN logical port with old pod annotation value
+			// 3. CNI flows check fails and pod annotation does not match what is in OVN
+			// Therefore we need to get the latest version of this pod to attempt to addLogicalPort with
+			podName := pod.Name
+			podNs := pod.Namespace
+			pod, err := oc.mc.watchFactory.GetPod(podNs, podName)
+			if err != nil {
+				klog.Warningf("Unable to get pod %s/%s for pod update, most likely it was already deleted",
+					podNs, podName)
+				return
+			}
 			if pod.Spec.HostNetwork && (oldPod.Spec.NodeName != pod.Spec.NodeName) && !oc.nadInfo.NotDefault {
 				if util.PodScheduled(oldPod) {
 					if err := oc.delHostNetworkPodFromNamespace(oldPod); err != nil {
@@ -1185,14 +1202,17 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 	}
 
 	if hostSubnets == nil {
-		hostSubnets, _ = util.ParseNodeHostSubnetAnnotation(node, oc.nadInfo.NetName)
+		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, oc.nadInfo.NetName)
+		if err != nil {
+			return err
+		}
 	}
 
 	if l3GatewayConfig.Mode == config.GatewayModeDisabled {
 		if err := gatewayCleanup(node.Name); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
-		if err := oc.joinSwIPManager.releaseJoinLRPIPs(node.Name); err != nil {
+		if err := oc.joinSwIPManager.ReleaseJoinLRPIPs(node.Name); err != nil {
 			return err
 		}
 	} else if hostSubnets != nil {
@@ -1782,7 +1802,7 @@ func newServiceController(client clientset.Interface, nbClient libovsdbclient.Cl
 		client,
 		nbClient,
 		svcFactory.Core().V1().Services(),
-		svcFactory.Discovery().V1beta1().EndpointSlices(),
+		svcFactory.Discovery().V1().EndpointSlices(),
 		svcFactory.Core().V1().Nodes(),
 	)
 

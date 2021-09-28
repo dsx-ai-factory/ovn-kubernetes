@@ -388,7 +388,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 						klog.Errorf("Failed to get all the pods (%v)", err)
 					}
 					for _, pod := range existingPods {
-						logicalPort := util.PodLogicalPortName(pod, oc.nadInfo.Prefix)
+						logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name, oc.nadInfo.Prefix)
 						portInfo, err := oc.logicalPortCache.get(logicalPort)
 						if err != nil {
 							klog.Warningf("Unable to get port %s in cache for SNAT rule removal", logicalPort)
@@ -655,7 +655,7 @@ func (oc *Controller) createNamespaceAddrSetAllPods(ns string) (addressset.Addre
 				}
 				// for shared gateway mode we will use LRP IPs to SNAT host network traffic
 				// so add these to the address set.
-				lrpIPs, err := oc.joinSwIPManager.ensureJoinLRPIPs(node.Name)
+				lrpIPs, err := oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name)
 				if err != nil {
 					klog.Errorf("Failed to get join switch port IP address for node %s: %v", node.Name, err)
 				}

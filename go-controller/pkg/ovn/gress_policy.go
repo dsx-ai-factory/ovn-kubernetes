@@ -40,9 +40,9 @@ type gressPolicy struct {
 	// peerV6AddressSets has Address sets for all namespaces and pod selectors for IPv6
 	peerV6AddressSets sets.String
 
-	// protocolPolicies represents all the protocol filters which allow traffic
+	// portPolicies represents all the protocol filters which allow traffic
 	// for the rule in question.
-	protocolPolicies []*protocolPolicy
+	portPolicies []*portPolicy
 
 	ipBlock []*knet.IPBlock
 
@@ -51,35 +51,38 @@ type gressPolicy struct {
 }
 
 // Supports TCP/UDP/SCTP ports and ICMP type/code
-type protocolPolicy struct {
+type portPolicy struct {
 	protocol string
 	port     int32
+	endPort  int32
 	icmptype int32
 }
 
-func (pp *protocolPolicy) getL4Match() (string, error) {
-	if pp.protocol == TCP {
-		if pp.port != 0 {
-			return fmt.Sprintf("tcp && tcp.dst==%d", pp.port), nil
+func (pp *portPolicy) getL4Match() (string, error) {
+	var supportedProtocols = []string{TCP, UDP, SCTP}
+	var foundProtocol string
+	for _, protocol := range supportedProtocols {
+		if protocol == pp.protocol {
+			foundProtocol = strings.ToLower(pp.protocol)
+			break
 		}
-		return "tcp", nil
-	} else if pp.protocol == UDP {
-		if pp.port != 0 {
-			return fmt.Sprintf("udp && udp.dst==%d", pp.port), nil
-		}
-		return "udp", nil
-	} else if pp.protocol == SCTP {
-		if pp.port != 0 {
-			return fmt.Sprintf("sctp && sctp.dst==%d", pp.port), nil
-		}
-		return "sctp", nil
-	} else if pp.protocol == ICMP {
-		if pp.icmptype != 0 {
-			return fmt.Sprintf("icmp4 && icmp4.type == %d", pp.icmptype), nil
-		}
-		return "icmp4", nil
 	}
-	return "", fmt.Errorf("unknown port protocol %v", pp.protocol)
+	if len(foundProtocol) == 0 {
+		if pp.protocol == ICMP {
+			if pp.icmptype != 0 {
+				return fmt.Sprintf("icmp4 && icmp4.type == %d", pp.icmptype), nil
+			}
+			return "icmp4", nil
+		}
+		return "", fmt.Errorf("unknown port protocol %v", pp.protocol)
+	}
+	if pp.endPort != 0 && pp.endPort != pp.port {
+		return fmt.Sprintf("%s && %d<=%s.dst<=%d", foundProtocol, pp.port, foundProtocol, pp.endPort), nil
+
+	} else if pp.port != 0 {
+		return fmt.Sprintf("%s && %s.dst==%d", foundProtocol, foundProtocol, pp.port), nil
+	}
+	return foundProtocol, nil
 }
 
 func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name string,
@@ -92,7 +95,7 @@ func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name string,
 		idx:                  idx,
 		peerV4AddressSets:    sets.String{},
 		peerV6AddressSets:    sets.String{},
-		protocolPolicies:     make([]*protocolPolicy, 0),
+		portPolicies:         make([]*portPolicy, 0),
 		nodeHostNetPodsCache: make(map[string]map[string]bool),
 		isAclStateless:       aclState,
 	}
@@ -197,27 +200,31 @@ func (gp *gressPolicy) deletePeerPod(oc *Controller, pod *v1.Pod) error {
 
 // If the port is not specified, it implies all ports for that protocol
 func (gp *gressPolicy) addPortPolicy(portJSON *knet.NetworkPolicyPort) {
-	pp := &protocolPolicy{protocol: string(*portJSON.Protocol),
+	pp := &portPolicy{protocol: string(*portJSON.Protocol),
 		port:     0,
+		endPort:  0,
 		icmptype: 0,
 	}
 	if portJSON.Port != nil {
 		pp.port = portJSON.Port.IntVal
 	}
-	gp.protocolPolicies = append(gp.protocolPolicies, pp)
+	if portJSON.EndPort != nil {
+		pp.endPort = *portJSON.EndPort
+	}
+	gp.portPolicies = append(gp.portPolicies, pp)
 }
 
 // ICMP policies, if type/code is not specified, implies all types/codes
 func (gp *gressPolicy) addICMPPolicy(protocolJSON *icmpnet.NetworkPolicyProtocol) {
-	pp := &protocolPolicy{protocol: protocolJSON.Protocol,
+	pp := &portPolicy{protocol: protocolJSON.Protocol,
 		port:     0,
+		endPort:  0,
 		icmptype: 0,
 	}
 	if protocolJSON.Type != 0 {
 		pp.icmptype = protocolJSON.Type
 	}
-	gp.protocolPolicies = append(gp.protocolPolicies, pp)
-
+	gp.portPolicies = append(gp.portPolicies, pp)
 }
 
 func (gp *gressPolicy) addIPBlock(ipblockJSON *knet.IPBlock) {
@@ -358,7 +365,7 @@ func (gp *gressPolicy) localPodSetACL(portGroupName, portGroupUUID string, aclLo
 		lportMatch = fmt.Sprintf("inport == @%s", portGroupName)
 	}
 
-	if len(gp.protocolPolicies) == 0 {
+	if len(gp.portPolicies) == 0 {
 		match := fmt.Sprintf("match=\"%s && %s\"", l3Match, lportMatch)
 		l4Match := noneMatch
 
@@ -379,7 +386,7 @@ func (gp *gressPolicy) localPodSetACL(portGroupName, portGroupUUID string, aclLo
 			}
 		}
 	}
-	for _, port := range gp.protocolPolicies {
+	for _, port := range gp.portPolicies {
 		l4Match, err := port.getL4Match()
 		if err != nil {
 			klog.Warning("Failed to get L4 match filter for localPodAdd: %s", err.Error())

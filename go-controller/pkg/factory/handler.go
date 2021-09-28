@@ -16,10 +16,10 @@ import (
 	icmpnetworkpolicylister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1/apis/listers/icmpnetworkpolicy/v1alpha1"
 
 	egressiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
-	discoverylisters "k8s.io/client-go/listers/discovery/v1beta1"
 
 	ktypes "k8s.io/apimachinery/pkg/types"
 	listers "k8s.io/client-go/listers/core/v1"
+	discoverylisters "k8s.io/client-go/listers/discovery/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 )

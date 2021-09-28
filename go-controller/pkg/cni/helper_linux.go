@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 
@@ -279,7 +278,7 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	ifInfo *PodInterfaceInfo, sandboxID string, podLister corev1listers.PodLister,
 	kclient kubernetes.Interface, initialPodUID string) error {
 	klog.Infof("ConfigureOVS: namespace: %s, podName: %s, network: %s", namespace, podName, ifInfo.NetNameInfo.NetName)
-	ifaceID := fmt.Sprintf("%s%s_%s", ifInfo.Prefix, namespace, podName)
+	ifaceID := util.GetIfaceId(namespace, podName, ifInfo.Prefix)
 
 	// Find and remove any existing OVS port with this iface-id. Pods can
 	// have multiple sandboxes if some are waiting for garbage collection,
@@ -300,6 +299,7 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 		"interface", hostIfaceName,
 		fmt.Sprintf("external_ids:attached_mac=%s", ifInfo.MAC),
 		fmt.Sprintf("external_ids:iface-id=%s", ifaceID),
+		fmt.Sprintf("external_ids:iface-id-ver=%s", initialPodUID),
 		fmt.Sprintf("external_ids:ip_addresses=%s", strings.Join(ipStrs, ",")),
 		fmt.Sprintf("external_ids:sandbox=%s", sandboxID),
 	}
@@ -379,6 +379,7 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 		err = ConfigureOVS(pr.ctx, pr.PodNamespace, pr.PodName, hostIface.Name, ifInfo, pr.SandboxID,
 			podLister, kclient, pr.PodUID)
 		if err != nil {
+			pr.deletePorts()
 			return nil, err
 		}
 	}
@@ -437,18 +438,19 @@ func (pr *PodRequest) deletePodConntrack() {
 	}
 }
 
-// PlatformSpecificCleanup deletes the OVS port
-func (pr *PodRequest) PlatformSpecificCleanup() error {
+func (pr *PodRequest) deletePorts() {
 	ifaceName := pr.SandboxID[:15]
-	ovsArgs := []string{
-		"del-port", "br-int", ifaceName,
-	}
-	out, err := exec.Command("ovs-vsctl", ovsArgs...).CombinedOutput()
-	if err != nil && !strings.Contains(string(out), "no port named") {
+	out, err := ovsExec("del-port", "br-int", ifaceName)
+	_ = util.LinkDelete(ifaceName)
+	if err != nil && !strings.Contains(out, "no port named") {
 		// DEL should be idempotent; don't return an error just log it
 		klog.Warningf("Failed to delete OVS port %s: %v\n  %q", ifaceName, err, string(out))
 	}
+}
 
+// PlatformSpecificCleanup deletes the OVS port
+func (pr *PodRequest) PlatformSpecificCleanup() error {
+	pr.deletePorts()
 	_ = clearPodBandwidth(pr.SandboxID)
 	pr.deletePodConntrack()
 

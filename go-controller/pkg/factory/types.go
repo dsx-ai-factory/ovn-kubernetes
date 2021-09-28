@@ -2,7 +2,7 @@ package factory
 
 import (
 	kapi "k8s.io/api/core/v1"
-	discovery "k8s.io/api/discovery/v1beta1"
+	discovery "k8s.io/api/discovery/v1"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -35,6 +35,7 @@ type NodeWatchFactory interface {
 	RemoveServiceHandler(handler *Handler)
 
 	AddEndpointSliceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler
+	RemoveEndpointSliceHandler(handler *Handler)
 
 	AddPodHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler
 	RemovePodHandler(handler *Handler)

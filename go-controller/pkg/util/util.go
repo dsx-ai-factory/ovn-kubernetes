@@ -14,7 +14,6 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
@@ -330,11 +329,6 @@ func UpdateIPsSlice(s, oldIPs, newIPs []string) []string {
 	return n
 }
 
-// Builds the logical switch port name for a given pod.
-func PodLogicalPortName(pod *kapi.Pod, netPrefix string) string {
-	return netPrefix + pod.Namespace + "_" + pod.Name
-}
-
 // FilterIPsSlice will filter a list of IPs by a list of CIDRs. By default,
 // it will *remove* all IPs that match filter, unless keep is true.
 //
@@ -370,4 +364,22 @@ ipLoop:
 	}
 
 	return out
+}
+
+func GetLogicalPortName(podNamespace, podName, netPrefix string) string {
+	return composePortName(podNamespace, podName, netPrefix)
+}
+
+func GetIfaceId(podNamespace, podName, netPrefix string) string {
+	return composePortName(podNamespace, podName, netPrefix)
+}
+
+// composePortName should be called both for LogicalPortName and iface-id
+// because ovn-nb man says:
+// Logical_Switch_Port.name must match external_ids:iface-id
+// in the Open_vSwitch database’s Interface table,
+// because hypervisors use external_ids:iface-id as a lookup key to
+// identify the network interface of that entity.
+func composePortName(podNamespace, podName, netPrefix string) string {
+	return netPrefix + podNamespace + "_" + podName
 }

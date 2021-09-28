@@ -218,7 +218,13 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-enable-lflow-cache=true",
 						nodeIP, interval, ofintval, nodeName),
 				})
-
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 -- clear bridge br-int netflow" +
+						" -- " +
+						"clear bridge br-int sflow" +
+						" -- " +
+						"clear bridge br-int ipfix",
+				})
 				err := util.SetExec(fexec)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -286,6 +292,13 @@ var _ = Describe("Node", func() {
 					Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 set encap "+
 						"%s options:dst_port=%d", encapUUID, encapPort),
 				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 -- clear bridge br-int netflow" +
+						" -- " +
+						"clear bridge br-int sflow" +
+						" -- " +
+						"clear bridge br-int ipfix",
+				})
 
 				err := util.SetExec(fexec)
 				Expect(err).NotTo(HaveOccurred())
@@ -340,7 +353,13 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-limit-lflow-cache-kb=100000",
 						nodeIP, interval, ofintval, nodeName),
 				})
-
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 -- clear bridge br-int netflow" +
+						" -- " +
+						"clear bridge br-int sflow" +
+						" -- " +
+						"clear bridge br-int ipfix",
+				})
 				err := util.SetExec(fexec)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -357,74 +376,6 @@ var _ = Describe("Node", func() {
 				return nil
 			}
 
-			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
-		})
-		It("add taint on shutdown", func() {
-			app.Action = func(ctx *cli.Context) error {
-				const (
-					nodeIP   string = "1.2.5.6"
-					nodeName string = "node"
-					interval int    = 100000
-					ofintval int    = 0
-				)
-				taint := kapi.Taint{
-					Key:    "YouKnowNothing",
-					Value:  "JonSnow",
-					Effect: "NoSchedule",
-				}
-				expectedTaint := kapi.Taint{
-					Key:    types.OvnK8sNetworkUnavailable,
-					Effect: kapi.TaintEffectNoSchedule,
-				}
-
-				node := kapi.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: nodeName,
-						Annotations: map[string]string{
-							"k8s.ovn.org/node-subnets": "{\"default\":\"10.244.0.0/24\"}",
-						},
-					},
-					Status: kapi.NodeStatus{
-						Addresses: []kapi.NodeAddress{
-							{
-								Type:    kapi.NodeExternalIP,
-								Address: nodeIP,
-							},
-						},
-					},
-					Spec: kapi.NodeSpec{
-						Taints: []kapi.Taint{taint},
-					},
-				}
-
-				fexec := ovntest.NewFakeExec()
-				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
-						"external_ids:ovn-encap-type=geneve "+
-						"external_ids:ovn-encap-ip=%s "+
-						"external_ids:ovn-remote-probe-interval=%d "+
-						"external_ids:ovn-openflow-probe-interval=%d "+
-						"external_ids:hostname=\"%s\" "+
-						"external_ids:ovn-monitor-all=true "+
-						"external_ids:ovn-enable-lflow-cache=true",
-						nodeIP, interval, ofintval, nodeName),
-				})
-				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 --columns=up list Port_Binding"),
-				})
-
-				fakeOvnNode := NewFakeOVNNode(fexec)
-				fakeOvnNode.start(ctx, &node)
-				res, err := fakeOvnNode.node.Kube.GetNode(node.Name)
-				Expect(err).ToNot(HaveOccurred())
-				Expect(res.Spec.Taints).To(Equal([]kapi.Taint{taint}))
-				fakeOvnNode.shutdown() // stop and see if taint gets added.
-				res, err = fakeOvnNode.node.Kube.GetNode(node.Name)
-				Expect(err).ToNot(HaveOccurred())
-				Expect(res.Spec.Taints).To(Equal([]kapi.Taint{taint, expectedTaint}))
-				return nil
-			}
 			err := app.Run([]string{app.Name})
 			Expect(err).NotTo(HaveOccurred())
 		})

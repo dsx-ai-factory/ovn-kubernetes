@@ -476,7 +476,7 @@ func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInf
 		klog.Warningf("Failed to get pods for namespace %q: %v", ns, err)
 	}
 	for _, pod := range pods {
-		portName := util.PodLogicalPortName(pod, oc.nadInfo.Prefix)
+		portName := util.GetLogicalPortName(pod.Namespace, pod.Name, oc.nadInfo.Prefix)
 		if portInfo, err := oc.logicalPortCache.get(portName); err != nil {
 			klog.Errorf(err.Error())
 		} else if err := podAddAllowMulticastPolicy(oc.mc.ovnNBClient, ns, portInfo, oc.nadInfo.NetNameInfo); err != nil {
@@ -758,7 +758,7 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 	}
 
 	// Get the logical port info
-	logicalPort := util.PodLogicalPortName(pod, oc.nadInfo.Prefix)
+	logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name, oc.nadInfo.Prefix)
 	portInfo, err := oc.logicalPortCache.get(logicalPort)
 	if err != nil {
 		klog.Warningf(err.Error())
@@ -822,7 +822,7 @@ func (oc *Controller) handleLocalPodSelectorSetPods(
 			continue
 		}
 
-		portInfo, err := oc.logicalPortCache.get(util.PodLogicalPortName(pod, oc.nadInfo.Prefix))
+		portInfo, err := oc.logicalPortCache.get(util.GetLogicalPortName(pod.Namespace, pod.Name, oc.nadInfo.Prefix))
 		// pod is not yet handled
 		// no big deal, we'll get the update when it is.
 		if err != nil {
@@ -867,7 +867,7 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 	}
 
 	// Get the logical port info
-	logicalPort := util.PodLogicalPortName(pod, oc.nadInfo.Prefix)
+	logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name, oc.nadInfo.Prefix)
 	portInfo, err := oc.logicalPortCache.get(logicalPort)
 	if err != nil {
 		klog.Errorf(err.Error())

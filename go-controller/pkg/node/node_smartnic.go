@@ -20,7 +20,7 @@ import (
 )
 
 //watchSmartNicPods watch updates for pod smart nic annotations
-func (nc *ovnNodeController) watchSmartNicPods() {
+func (nc *ovnNodeController) watchSmartNicPods(isOvnUpEnabled bool) {
 	var retryPods sync.Map
 	// servedPods tracks the pods that got a VF
 	var servedPods sync.Map
@@ -54,7 +54,7 @@ func (nc *ovnNodeController) watchSmartNicPods() {
 					retryPods.Store(pod.UID, true)
 					return
 				}
-				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, true, true,
+				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled, true,
 					nc.nadInfo.MTU, nc.nadInfo.NetNameInfo)
 				if err != nil {
 					retryPods.Store(pod.UID, true)
@@ -96,7 +96,7 @@ func (nc *ovnNodeController) watchSmartNicPods() {
 					klog.Infof("Failed to get rep name, %s. retrying", err)
 					return
 				}
-				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, true, true,
+				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled, true,
 					nc.nadInfo.MTU, nc.nadInfo.NetNameInfo)
 				if err != nil {
 					return

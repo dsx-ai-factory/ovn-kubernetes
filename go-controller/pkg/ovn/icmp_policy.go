@@ -157,7 +157,7 @@ func (oc *Controller) icmpHandleLocalPodSelectorAddFunc(
 	}
 
 	// Get the logical port info
-	logicalPort := util.PodLogicalPortName(pod, oc.nadInfo.Prefix)
+	logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name, oc.nadInfo.Prefix)
 	portInfo, err := oc.logicalPortCache.get(logicalPort)
 	if err != nil {
 		klog.Warningf(err.Error())
@@ -217,7 +217,7 @@ func (oc *Controller) icmpHandleLocalPodSelectorSetPods(
 			continue
 		}
 
-		portInfo, err := oc.logicalPortCache.get(util.PodLogicalPortName(pod, oc.nadInfo.Prefix))
+		portInfo, err := oc.logicalPortCache.get(util.GetLogicalPortName(pod.Namespace, pod.Name, oc.nadInfo.Prefix))
 		// pod is not yet handled
 		// no big deal, we'll get the update when it is.
 		if err != nil {
