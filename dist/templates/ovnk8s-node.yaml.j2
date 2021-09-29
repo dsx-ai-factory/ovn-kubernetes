@@ -165,10 +165,6 @@ spec:
               value: "{{ ovn_sflow_targets }}"
             - name: OVN_IPFIX_TARGETS
               value: "{{ ovn_ipfix_targets }}"
-            - name: OVN_V4_JOIN_SUBNET
-              value: "{{ ovn_v4_join_subnet }}"
-            - name: OVN_V6_JOIN_SUBNET
-              value: "{{ ovn_v6_join_subnet }}"
             - name: OVN_REMOTE_PROBE_INTERVAL
               value: "{{ ovn_remote_probe_interval }}"
             - name: OVN_MULTICAST_ENABLE
@@ -184,6 +180,8 @@ spec:
               value: "{{ ovn_sb_cert_cname }}"
             - name: OVN_MULTI_NETWORK_ENABLE
               value: "{{ ovn_multi_network_enable }}"
+            - name: OVN_DISABLE_OVN_IFACE_ID_VER
+              value: "{{ ovn_disable_ovn_iface_id_ver }}"
             {% endif -%}
             {% if ovnkube_app_name=="ovnkube-node-smart-nic-host" -%}
             - name: OVNKUBE_NODE_MODE

@@ -5,6 +5,7 @@ import (
 	"net"
 	"strings"
 
+	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -36,6 +37,13 @@ func gatewayCleanup(nodeName string) error {
 			"stderr: %q, error: %v", types.JoinSwitchToGWRouterPrefix, gatewayRouter, stderr, err)
 	}
 
+	// Remove router to lb associations from the LBCache before removing the router
+	lbCache, err := ovnlb.GetLBCache()
+	if err != nil {
+		return fmt.Errorf("failed to get load_balancer cache for router %s: %v", gatewayRouter, err)
+	}
+	lbCache.RemoveRouter(gatewayRouter)
+
 	// Remove the gateway router associated with nodeName
 	_, stderr, err = util.RunOVNNbctl("--if-exist", "lr-del",
 		gatewayRouter)
@@ -59,26 +67,6 @@ func gatewayCleanup(nodeName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to delete external switch %s, stderr: %q, "+
 			"error: %v", exGWexternalSwitch, stderr, err)
-	}
-
-	// If exists, remove the TCP, UDP load-balancers created for north-south traffic for gateway router.
-	k8sNSLbTCP, k8sNSLbUDP, k8sNSLbSCTP, err := getGatewayLoadBalancers(gatewayRouter)
-	if err != nil {
-		return err
-	}
-	protoLBMap := map[kapi.Protocol]string{
-		kapi.ProtocolTCP:  k8sNSLbTCP,
-		kapi.ProtocolUDP:  k8sNSLbUDP,
-		kapi.ProtocolSCTP: k8sNSLbSCTP,
-	}
-	for proto, uuid := range protoLBMap {
-		if uuid != "" {
-			_, stderr, err = util.RunOVNNbctl("lb-del", uuid)
-			if err != nil {
-				return fmt.Errorf("failed to delete Gateway router %s's %s load balancer %s, stderr: %q, "+
-					"error: %v", gatewayRouter, proto, uuid, stderr, err)
-			}
-		}
 	}
 
 	// We don't know the gateway mode as this is running in the master, try to delete the additional local

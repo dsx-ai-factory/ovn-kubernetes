@@ -13,7 +13,7 @@ import (
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
 	kapi "k8s.io/api/core/v1"
-	discovery "k8s.io/api/discovery/v1beta1"
+	discovery "k8s.io/api/discovery/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 )
@@ -34,10 +34,10 @@ type gateway struct {
 	loadBalancerHealthChecker informer.ServiceAndEndpointsEventHandler
 	// portClaimWatcher is for reserving ports for virtual IPs allocated by the cluster on the host
 	portClaimWatcher informer.ServiceEventHandler
-	// nodePortWatcher is used in Shared GW mode to handle nodePort flows in shared OVS bridge
-	nodePortWatcher informer.ServiceEventHandler
 	// nodePortWatcherIptables is used in Shared GW mode to handle nodePort IPTable rules
 	nodePortWatcherIptables informer.ServiceEventHandler
+	// nodePortWatcher is used in Shared GW mode to handle nodePort flows in shared OVS bridge
+	nodePortWatcher informer.ServiceAndEndpointsEventHandler
 	// localPortWatcher is used in Local GW mode to handle iptables rules and routes for services
 	localPortWatcher informer.ServiceEventHandler
 	openflowManager  *openflowManager
@@ -122,17 +122,26 @@ func (g *gateway) AddEndpointSlice(epSlice *discovery.EndpointSlice) {
 	if g.loadBalancerHealthChecker != nil {
 		g.loadBalancerHealthChecker.AddEndpointSlice(epSlice)
 	}
+	if g.nodePortWatcher != nil {
+		g.nodePortWatcher.AddEndpointSlice(epSlice)
+	}
 }
 
 func (g *gateway) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.EndpointSlice) {
 	if g.loadBalancerHealthChecker != nil {
 		g.loadBalancerHealthChecker.UpdateEndpointSlice(oldEpSlice, newEpSlice)
 	}
+	if g.nodePortWatcher != nil {
+		g.nodePortWatcher.UpdateEndpointSlice(oldEpSlice, newEpSlice)
+	}
 }
 
 func (g *gateway) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) {
 	if g.loadBalancerHealthChecker != nil {
 		g.loadBalancerHealthChecker.DeleteEndpointSlice(epSlice)
+	}
+	if g.nodePortWatcher != nil {
+		g.nodePortWatcher.DeleteEndpointSlice(epSlice)
 	}
 }
 

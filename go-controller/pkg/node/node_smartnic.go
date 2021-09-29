@@ -20,7 +20,7 @@ import (
 )
 
 //watchSmartNicPods watch updates for pod smart nic annotations
-func (nc *ovnNodeController) watchSmartNicPods() {
+func (nc *ovnNodeController) watchSmartNicPods(isOvnUpEnabled bool) {
 	var retryPods sync.Map
 	// servedPods tracks the pods that got a VF
 	var servedPods sync.Map
@@ -39,6 +39,7 @@ func (nc *ovnNodeController) watchSmartNicPods() {
 			on, _, err := util.IsNetworkOnPod(pod, nc.nadInfo)
 			if err != nil || !on {
 				// the Pod is not attached to this specific network
+				klog.V(5).Infof("Pod %s/%s is not attached on this network: %s", pod.Namespace, pod.Name, nc.nadInfo.NetName)
 				return
 			}
 			if util.PodScheduled(pod) {
@@ -53,7 +54,7 @@ func (nc *ovnNodeController) watchSmartNicPods() {
 					retryPods.Store(pod.UID, true)
 					return
 				}
-				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, true, true,
+				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled, true,
 					nc.nadInfo.MTU, nc.nadInfo.NetNameInfo)
 				if err != nil {
 					retryPods.Store(pod.UID, true)
@@ -95,7 +96,7 @@ func (nc *ovnNodeController) watchSmartNicPods() {
 					klog.Infof("Failed to get rep name, %s. retrying", err)
 					return
 				}
-				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, true, true,
+				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled, true,
 					nc.nadInfo.MTU, nc.nadInfo.NetNameInfo)
 				if err != nil {
 					return
@@ -134,7 +135,7 @@ func (nc *ovnNodeController) watchSmartNicPods() {
 func (nc *ovnNodeController) getVfRepName(pod *kapi.Pod) (string, error) {
 	smartNicCD, err := util.UnmarshalPodSmartNicConnDetails(pod.Annotations, nc.nadInfo.NetName)
 	if err != nil {
-		return "", fmt.Errorf("failed to get smart-nic annotation for pod %s/%s network %sL %v",
+		return "", fmt.Errorf("failed to get smart-nic annotation for pod %s/%s network %s: %v",
 			pod.Namespace, pod.Name, nc.nadInfo.NetName, err)
 	}
 
@@ -165,7 +166,7 @@ func (nc *ovnNodeController) addRepPort(pod *kapi.Pod, vfRepName string, ifInfo 
 	klog.Infof("Adding VF representor %s for pod %s/%s network %s", vfRepName, pod.Namespace, pod.Name, nc.nadInfo.NetName)
 	smartNicCD, err := util.UnmarshalPodSmartNicConnDetails(pod.Annotations, nc.nadInfo.NetName)
 	if err != nil {
-		return fmt.Errorf("failed to get smart-nic annotation. %v", err)
+		return fmt.Errorf("failed to get smart-nic annotation: %v", err)
 	}
 
 	err = cni.ConfigureOVS(context.TODO(), pod.Namespace, pod.Name, vfRepName, ifInfo, smartNicCD.SandboxId, podLister, kclient, string(pod.UID))

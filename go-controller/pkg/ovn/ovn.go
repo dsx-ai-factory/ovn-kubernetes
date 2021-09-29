@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"net/http"
 	"reflect"
 	"strconv"
 	"strings"
@@ -27,6 +26,7 @@ import (
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
+	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -74,7 +74,7 @@ type ACLLoggingLevels struct {
 type namespaceInfo struct {
 	util.NetNameInfo
 
-	sync.Mutex
+	sync.RWMutex
 
 	// addressSet is an address set object that holds the IP addresses
 	// of all pods in the namespace.
@@ -170,16 +170,14 @@ type Controller struct {
 
 	hoMaster *hocontroller.MasterController
 
-	// All the uuid related to global load balancers
-	clusterLBsUUIDs []string
-	SCTPSupport     bool
+	SCTPSupport bool
 
 	// For TCP, UDP, and SCTP type traffic, cache OVN load-balancers used for the
 	// cluster's east-west traffic.
 	loadbalancerClusterCache map[kapi.Protocol]string
 
 	// A cache of all logical switches seen by the watcher and their subnets
-	lsManager *logicalSwitchManager
+	lsManager *lsm.LogicalSwitchManager
 
 	// A cache of all logical ports known to the controller
 	logicalPortCache *portCache
@@ -229,7 +227,7 @@ type Controller struct {
 	// Is ACL logging enabled while configuring meters?
 	aclLoggingEnabled bool
 
-	joinSwIPManager *joinSwitchIPManager
+	joinSwIPManager *lsm.JoinSwitchIPManager
 
 	// v4HostSubnetsUsed keeps track of number of v4 subnets currently assigned to nodes
 	v4HostSubnetsUsed float64
@@ -332,7 +330,7 @@ func (mc *OvnMHController) setDefaultOvnController(addressSetFactory addressset.
 func (mc *OvnMHController) NewOvnController(nadInfo *util.NetAttachDefInfo,
 	addressSetFactory addressset.AddressSetFactory) (*Controller, error) {
 	if addressSetFactory == nil {
-		addressSetFactory = addressset.NewOvnAddressSetFactory(nadInfo.NetNameInfo)
+		addressSetFactory = addressset.NewOvnAddressSetFactory(nadInfo.NetNameInfo, mc.nbClient)
 	}
 
 	if nadInfo.NetCidr == "" {
@@ -348,17 +346,17 @@ func (mc *OvnMHController) NewOvnController(nadInfo *util.NetAttachDefInfo,
 	if nadInfo.NotDefault {
 		stopChan = make(chan struct{})
 	}
-	var lsm *logicalSwitchManager
+	var lsManager *lsm.LogicalSwitchManager
 	if nadInfo.TopoType != ovntypes.LocalnetAttachDefTopoType {
-		lsm = newLogicalSwitchManager()
+		lsManager = lsm.NewLogicalSwitchManager()
 	} else {
-		lsm = newLocalnetSwitchManager()
+		lsManager = lsm.NewLocalnetSwitchManager()
 		var hostSubnets []*net.IPNet
 		for _, subnet := range clusterIPNet {
 			hostSubnet := subnet.CIDR
 			hostSubnets = append(hostSubnets, hostSubnet)
 		}
-		err = lsm.AddNode(ovntypes.OVNLocalnetSwitch, hostSubnets)
+		err = lsManager.AddNode(ovntypes.OVNLocalnetSwitch, hostSubnets)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize localnet switch IP manager for network %s: %v", nadInfo.NetName, err)
 		}
@@ -370,7 +368,7 @@ func (mc *OvnMHController) NewOvnController(nadInfo *util.NetAttachDefInfo,
 				if !excludeCidr.Contains(ip) {
 					break
 				}
-				_ = lsm.AllocateIPs(ovntypes.OVNLocalnetSwitch, []*net.IPNet{{IP: ip, Mask: excludeCidr.Mask}})
+				_ = lsManager.AllocateIPs(ovntypes.OVNLocalnetSwitch, []*net.IPNet{{IP: ip, Mask: excludeCidr.Mask}})
 			}
 		}
 	}
@@ -382,7 +380,7 @@ func (mc *OvnMHController) NewOvnController(nadInfo *util.NetAttachDefInfo,
 		masterSubnetAllocator:     subnetallocator.NewSubnetAllocator(),
 		nodeLocalNatIPv4Allocator: &ipallocator.Range{},
 		nodeLocalNatIPv6Allocator: &ipallocator.Range{},
-		lsManager:                 lsm,
+		lsManager:                 lsManager,
 		logicalPortCache:          newPortCache(stopChan),
 		namespaces:                make(map[string]*namespaceInfo),
 		namespacesMutex:           sync.Mutex{},
@@ -407,11 +405,11 @@ func (mc *OvnMHController) NewOvnController(nadInfo *util.NetAttachDefInfo,
 		joinSwIPManager:          nil,
 		retryPods:                make(map[types.UID]*retryEntry),
 		retryPodsChan:            make(chan struct{}, 1),
-		clusterLBsUUIDs:          make([]string, 0),
 	}
 	if !nadInfo.NotDefault {
 		oc.wg = mc.wg
 		mc.ovnController = oc
+		oc.svcController = newServiceController(mc.client, mc.nbClient, stopChan)
 	} else {
 		oc.multicastSupport = false
 		oc.wg = &sync.WaitGroup{}
@@ -431,21 +429,25 @@ func (oc *Controller) Run(nodeName string) error {
 	klog.Infof("Starting all the Watchers for network %s...", oc.nadInfo.NetName)
 	start := time.Now()
 
+	// Sync external gateway routes. External gateway may be set in namespaces
+	// or via pods. So execute an individual sync method at startup
+	oc.cleanExGwECMPRoutes()
+
 	// WatchNamespaces() should be started first because it has no other
 	// dependencies, and WatchNodes() depends on it
 	oc.WatchNamespaces()
-
-	if !oc.nadInfo.NotDefault {
-		// Services must be started before nodes for handling new node's service sync
-		if err := oc.StartServiceController(oc.wg, true); err != nil {
-			return err
-		}
-	}
 
 	// WatchNodes must be started next because it creates the node switch
 	// which most other watches depend on.
 	// https://github.com/ovn-org/ovn-kubernetes/pull/859
 	oc.WatchNodes()
+
+	if !oc.nadInfo.NotDefault {
+		// Services should be started after nodes to prevent LB churn
+		if err := oc.StartServiceController(oc.wg, true); err != nil {
+			return err
+		}
+	}
 
 	oc.WatchPods()
 
@@ -548,7 +550,7 @@ func (oc *Controller) ovnTopologyCleanup() error {
 
 	// Cleanup address sets in non dual stack formats in all versions known to possibly exist.
 	if ver <= ovntypes.OvnPortBindingTopoVersion && !oc.nadInfo.NotDefault {
-		err = addressset.NonDualStackAddressSetCleanup(oc.nadInfo.NetNameInfo)
+		err = addressset.NonDualStackAddressSetCleanup(oc.nadInfo.NetNameInfo, oc.mc.nbClient)
 	}
 	return err
 }
@@ -597,32 +599,34 @@ func (oc *Controller) iterateRetryPods(updateAll bool) {
 		if podEntry.ignore {
 			continue
 		}
+
 		pod := podEntry.pod
-		if !util.PodScheduled(pod) {
+		podDesc := fmt.Sprintf("[%s/%s/%s]", pod.UID, pod.Namespace, pod.Name)
+		// it could be that the Pod got deleted, but Pod's DeleteFunc has not been called yet, so don't retry
+		kPod, err := oc.mc.watchFactory.GetPod(pod.Namespace, pod.Name)
+		if err != nil && errors.IsNotFound(err) {
+			klog.Infof("%s pod not found in the informers cache, not going to retry pod setup", podDesc)
+			delete(oc.retryPods, uid)
+			continue
+		}
+
+		if !util.PodScheduled(kPod) {
+			klog.V(5).Infof("retry: %s not scheduled", podDesc)
 			continue
 		}
 		podTimer := podEntry.timeStamp.Add(time.Minute)
 		if updateAll || now.After(podTimer) {
-			podDesc := fmt.Sprintf("[%s/%s/%s]", pod.UID, pod.Namespace, pod.Name)
-			// it could be that the Pod got deleted, but Pod's DeleteFunc has not been called yet, so don't retry
-			_, err := oc.mc.watchFactory.GetPod(pod.Namespace, pod.Name)
-			if err != nil {
-				if e, ok := err.(*errors.StatusError); ok && e.ErrStatus.Code == http.StatusNotFound {
-					klog.Infof("%s pod not found in the informers cache, not going to retry pod setup", podDesc)
-					delete(oc.retryPods, uid)
-					continue
-				}
-			}
-
 			klog.Infof("%s retry pod setup", podDesc)
 
-			if oc.ensurePod(nil, pod, true) {
+			if oc.ensurePod(nil, kPod, true) {
 				klog.Infof("%s pod setup successful", podDesc)
 				delete(oc.retryPods, uid)
 			} else {
 				klog.Infof("%s setup retry failed; will try again later", podDesc)
 				oc.retryPods[uid] = &retryEntry{pod, time.Now(), false}
 			}
+		} else {
+			klog.V(5).Infof("%s retry pod not after timer yet, time: %s", podDesc, podTimer)
 		}
 	}
 }
@@ -737,10 +741,13 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 			return true
 		}
 
-		if err := oc.addPodExternalGW(pod); err != nil {
-			klog.Errorf(err.Error())
-			oc.recordPodEvent(err, pod)
-			return false
+		// either pod is host-networked or its an update for a normal pod (addPort=false case)
+		if oldPod == nil || exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod) {
+			if err := oc.addPodExternalGW(pod); err != nil {
+				klog.Errorf(err.Error())
+				oc.recordPodEvent(err, pod)
+				return false
+			}
 		}
 	}
 
@@ -792,6 +799,21 @@ func (oc *Controller) WatchPods() {
 		UpdateFunc: func(old, newer interface{}) {
 			oldPod := old.(*kapi.Pod)
 			pod := newer.(*kapi.Pod)
+			// there may be a situation where this update event is not the latest
+			// and we rely on annotations to determine the pod mac/ifaddr
+			// this would create a situation where
+			// 1. addLogicalPort is executing with an older pod annotation, skips setting a new annotation
+			// 2. creates OVN logical port with old pod annotation value
+			// 3. CNI flows check fails and pod annotation does not match what is in OVN
+			// Therefore we need to get the latest version of this pod to attempt to addLogicalPort with
+			podName := pod.Name
+			podNs := pod.Namespace
+			pod, err := oc.mc.watchFactory.GetPod(podNs, podName)
+			if err != nil {
+				klog.Warningf("Unable to get pod %s/%s for pod update, most likely it was already deleted",
+					podNs, podName)
+				return
+			}
 			if pod.Spec.HostNetwork && (oldPod.Spec.NodeName != pod.Spec.NodeName) && !oc.nadInfo.NotDefault {
 				if util.PodScheduled(oldPod) {
 					if err := oc.delHostNetworkPodFromNamespace(oldPod); err != nil {
@@ -1167,6 +1189,7 @@ func (oc *Controller) WatchNamespaces() {
 	klog.Infof("Bootstrapping existing namespaces and cleaning stale namespaces took %v", time.Since(start))
 }
 
+// syncNodeGateway ensures a node's gateway router is configured
 func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet) error {
 	if oc.nadInfo.NotDefault {
 		klog.Infof("WatchNamespaces for network %s is a no-op", oc.nadInfo.NetName)
@@ -1179,13 +1202,17 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 	}
 
 	if hostSubnets == nil {
-		hostSubnets, _ = util.ParseNodeHostSubnetAnnotation(node, oc.nadInfo.NetName)
+		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, oc.nadInfo.NetName)
+		if err != nil {
+			return err
+		}
 	}
+
 	if l3GatewayConfig.Mode == config.GatewayModeDisabled {
 		if err := gatewayCleanup(node.Name); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
-		if err := oc.joinSwIPManager.releaseJoinLRPIPs(node.Name); err != nil {
+		if err := oc.joinSwIPManager.ReleaseJoinLRPIPs(node.Name); err != nil {
 			return err
 		}
 	} else if hostSubnets != nil {
@@ -1209,6 +1236,7 @@ func (oc *Controller) WatchNodes() {
 	var gatewaysFailed sync.Map
 	var mgmtPortFailed sync.Map
 	var addNodeFailed sync.Map
+	var nodeClusterRouterPortFailed sync.Map
 
 	if oc.nadInfo.TopoType == ovntypes.LocalnetAttachDefTopoType {
 		return
@@ -1235,6 +1263,13 @@ func (oc *Controller) WatchNodes() {
 				return
 			}
 
+			if err = oc.syncNodeClusterRouterPort(node, hostSubnets); err != nil {
+				if !util.IsAnnotationNotSetError(err) {
+					klog.Warningf(err.Error())
+				}
+				nodeClusterRouterPortFailed.Store(node.Name, true)
+			}
+
 			// ensure pods that already exist on this node have their logical ports created
 			options := metav1.ListOptions{FieldSelector: fields.OneTermEqualSelector("spec.nodeName", node.Name).String()}
 			pods, err := oc.mc.client.CoreV1().Pods(metav1.NamespaceAll).List(context.TODO(), options)
@@ -1248,6 +1283,7 @@ func (oc *Controller) WatchNodes() {
 			if oc.nadInfo.NotDefault {
 				return
 			}
+
 			err = oc.syncNodeManagementPort(node, hostSubnets)
 			if err != nil {
 				if !util.IsAnnotationNotSetError(err) {
@@ -1285,6 +1321,18 @@ func (oc *Controller) WatchNodes() {
 					return
 				}
 				addNodeFailed.Delete(node.Name)
+			}
+
+			_, failed = nodeClusterRouterPortFailed.Load(node.Name)
+			if failed || nodeChassisChanged(oldNode, node) || nodeSubnetChanged(oldNode, node, oc.nadInfo.NetName) {
+				if err = oc.syncNodeClusterRouterPort(node, nil); err != nil {
+					if !util.IsAnnotationNotSetError(err) {
+						klog.Warningf(err.Error())
+					}
+					nodeClusterRouterPortFailed.Store(node.Name, true)
+				} else {
+					nodeClusterRouterPortFailed.Delete(node.Name)
+				}
 			}
 
 			if oc.nadInfo.NotDefault {
@@ -1336,6 +1384,7 @@ func (oc *Controller) WatchNodes() {
 			addNodeFailed.Delete(node.Name)
 			mgmtPortFailed.Delete(node.Name)
 			gatewaysFailed.Delete(node.Name)
+			nodeClusterRouterPortFailed.Delete(node.Name)
 		},
 	}, oc.syncNodes)
 	klog.Infof("Bootstrapping existing nodes and cleaning stale nodes took %v", time.Since(start))
@@ -1343,14 +1392,14 @@ func (oc *Controller) WatchNodes() {
 
 // GetNetworkPolicyACLLogging retrieves ACL deny policy logging setting for the Namespace
 func (oc *Controller) GetNetworkPolicyACLLogging(ns string) *ACLLoggingLevels {
-	nsInfo := oc.getNamespaceLocked(ns)
+	nsInfo, nsUnlock := oc.getNamespaceLocked(ns, true)
 	if nsInfo == nil {
 		return &ACLLoggingLevels{
 			Allow: "",
 			Deny:  "",
 		}
 	}
-	defer nsInfo.Unlock()
+	defer nsUnlock()
 	return &nsInfo.aclLogging
 }
 
@@ -1728,26 +1777,38 @@ func shouldUpdate(node, oldNode *kapi.Node) (bool, error) {
 	return true, nil
 }
 
-func (oc *Controller) newServiceFactory() (informers.SharedInformerFactory, error) {
+func newServiceController(client clientset.Interface, nbClient libovsdbclient.Client, stopChan <-chan struct{}) *svccontroller.Controller {
 	// Create our own informers to start compartmentalizing the code
 	// filter server side the things we don't care about
 	noProxyName, err := labels.NewRequirement("service.kubernetes.io/service-proxy-name", selection.DoesNotExist, nil)
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
 
 	noHeadlessEndpoints, err := labels.NewRequirement(kapi.IsHeadlessService, selection.DoesNotExist, nil)
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
 
 	labelSelector := labels.NewSelector()
 	labelSelector = labelSelector.Add(*noProxyName, *noHeadlessEndpoints)
 
-	return informers.NewSharedInformerFactoryWithOptions(oc.mc.client, 0,
+	svcFactory := informers.NewSharedInformerFactoryWithOptions(client, 0,
 		informers.WithTweakListOptions(func(options *metav1.ListOptions) {
 			options.LabelSelector = labelSelector.String()
-		})), nil
+		}))
+
+	controller := svccontroller.NewController(
+		client,
+		nbClient,
+		svcFactory.Core().V1().Services(),
+		svcFactory.Discovery().V1().EndpointSlices(),
+		svcFactory.Core().V1().Nodes(),
+	)
+
+	svcFactory.Start(stopChan)
+
+	return controller
 }
 
 func (oc *Controller) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
@@ -1756,25 +1817,12 @@ func (oc *Controller) StartServiceController(wg *sync.WaitGroup, runRepair bool)
 		return nil
 	}
 	klog.Infof("Starting OVN Service Controller: Using Endpoint Slices")
-	svcFactory, err := oc.newServiceFactory()
-	if err != nil {
-		return err
-	}
-
-	oc.svcController = svccontroller.NewController(
-		oc.mc.client,
-		oc.mc.nbClient,
-		svcFactory.Core().V1().Services(),
-		svcFactory.Discovery().V1beta1().EndpointSlices(),
-		oc.clusterPortGroupUUID,
-	)
-	svcFactory.Start(oc.stopChan)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		// use 5 workers like most of the kubernetes controllers in the
 		// kubernetes controller-manager
-		err := oc.svcController.Run(5, oc.stopChan, runRepair)
+		err := oc.svcController.Run(5, oc.stopChan, runRepair, oc.clusterPortGroupUUID)
 		if err != nil {
 			klog.Errorf("Error running OVN Kubernetes Services controller: %v", err)
 		}

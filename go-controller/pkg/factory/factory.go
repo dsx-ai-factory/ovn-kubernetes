@@ -11,7 +11,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
-	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressfirewallscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/scheme"
 	egressfirewallinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/informers/externalversions"
 
@@ -20,22 +19,19 @@ import (
 	egressipinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions"
 
 	multinetworkpolicyapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
-	multinetworkpolicyclientset "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned"
 	multinetworkpolicyscheme "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/scheme"
 	multinetworkpolicyinformerfactory "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/informers/externalversions"
 
 	networkattachmentdefinitionapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	networkattachmentdefinitionclientset "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
 	networkattachmentdefinitionscheme "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/scheme"
 	networkattachmentdefinitioninformerfactory "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions"
 
 	icmpnetworkpolicyapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1"
-	icmpnetworkpolicyclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1/apis/clientset/versioned"
 	icmpnetworkpolicyscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1/apis/clientset/versioned/scheme"
 	icmpnetworkpolicyinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1/apis/informers/externalversions"
 
 	kapi "k8s.io/api/core/v1"
-	discovery "k8s.io/api/discovery/v1beta1"
+	discovery "k8s.io/api/discovery/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -43,8 +39,10 @@ import (
 	"k8s.io/apimachinery/pkg/selection"
 	informerfactory "k8s.io/client-go/informers"
 	v1coreinformers "k8s.io/client-go/informers/core/v1"
+	discoveryinformers "k8s.io/client-go/informers/discovery/v1"
 	"k8s.io/client-go/kubernetes"
 	listers "k8s.io/client-go/listers/core/v1"
+	discoverylisters "k8s.io/client-go/listers/discovery/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 )
@@ -55,23 +53,15 @@ type WatchFactory struct {
 	// requirements with atomic accesses
 	handlerCounter uint64
 
-	iFactory     informerfactory.SharedInformerFactory
-	eipFactory   egressipinformerfactory.SharedInformerFactory
-	efFactory    egressfirewallinformerfactory.SharedInformerFactory
-	efClientset  egressfirewallclientset.Interface
-	inpFactory   icmpnetworkpolicyinformerfactory.SharedInformerFactory
-	inpClientset icmpnetworkpolicyclientset.Interface
-	nadClientset networkattachmentdefinitionclientset.Interface
-	nadFactory   networkattachmentdefinitioninformerfactory.SharedInformerFactory
-	mnpClientset multinetworkpolicyclientset.Interface
-	mnpFactory   multinetworkpolicyinformerfactory.SharedInformerFactory
-	informers    map[reflect.Type]*informer
+	iFactory   informerfactory.SharedInformerFactory
+	eipFactory egressipinformerfactory.SharedInformerFactory
+	efFactory  egressfirewallinformerfactory.SharedInformerFactory
+	inpFactory icmpnetworkpolicyinformerfactory.SharedInformerFactory
+	nadFactory networkattachmentdefinitioninformerfactory.SharedInformerFactory
+	mnpFactory multinetworkpolicyinformerfactory.SharedInformerFactory
+	informers  map[reflect.Type]*informer
 
-	stopChan                   chan struct{}
-	egressFirewallStopChan     chan struct{}
-	icmpNetworkPolicyStopChan  chan struct{}
-	netAttachDefStopChan       chan struct{}
-	multiNetworkPolicyStopChan chan struct{}
+	stopChan chan struct{}
 }
 
 // WatchFactory implements the ObjectCacheInterface interface.
@@ -87,7 +77,9 @@ const (
 	resyncInterval        = 0
 	handlerAlive   uint32 = 0
 	handlerDead    uint32 = 1
-	numEventQueues int    = 15
+
+	// namespace, node, and pod handlers
+	defaultNumEventQueues uint32 = 15
 )
 
 var (
@@ -113,26 +105,32 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	// the downside of making it tight (like 10 minutes) is needless spinning on all resources
 	// However, AddEventHandlerWithResyncPeriod can specify a per handler resync period
 	wf := &WatchFactory{
-		iFactory:     informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
-		eipFactory:   egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
-		efClientset:  ovnClientset.EgressFirewallClient,
-		inpClientset: ovnClientset.ICMPNetworkPolicyClient,
-		nadClientset: ovnClientset.NetworkAttchDefClient,
-		mnpClientset: ovnClientset.MultiNetworkPolicyClient,
-		informers:    make(map[reflect.Type]*informer),
-		stopChan:     make(chan struct{}),
+		iFactory:   informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
+		eipFactory: egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
+		efFactory:  egressfirewallinformerfactory.NewSharedInformerFactory(ovnClientset.EgressFirewallClient, resyncInterval),
+		inpFactory: icmpnetworkpolicyinformerfactory.NewSharedInformerFactory(ovnClientset.ICMPNetworkPolicyClient, resyncInterval),
+		nadFactory: networkattachmentdefinitioninformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval),
+		mnpFactory: multinetworkpolicyinformerfactory.NewSharedInformerFactory(ovnClientset.MultiNetworkPolicyClient, resyncInterval),
+		informers:  make(map[reflect.Type]*informer),
+		stopChan:   make(chan struct{}),
 	}
-	var err error
 
-	err = egressipapi.AddToScheme(egressipscheme.Scheme)
-	if err != nil {
+	if err := egressipapi.AddToScheme(egressipscheme.Scheme); err != nil {
 		return nil, err
 	}
-	err = egressfirewallapi.AddToScheme(egressfirewallscheme.Scheme)
-	if err != nil {
+	if err := egressfirewallapi.AddToScheme(egressfirewallscheme.Scheme); err != nil {
 		return nil, err
 	}
-	// For Services and Endpoints, pre-populate the shared Informer with one that
+	if err := icmpnetworkpolicyapi.AddToScheme(icmpnetworkpolicyscheme.Scheme); err != nil {
+		return nil, err
+	}
+	if err := networkattachmentdefinitionapi.AddToScheme(networkattachmentdefinitionscheme.Scheme); err != nil {
+		return nil, err
+	}
+	if err := multinetworkpolicyapi.AddToScheme(multinetworkpolicyscheme.Scheme); err != nil {
+		return nil, err
+	}
+	// For Services, pre-populate the shared Informer with one that
 	// has a label selector excluding headless services.
 	wf.iFactory.InformerFor(&kapi.Service{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
 		return v1coreinformers.NewFilteredServiceInformer(
@@ -143,8 +141,10 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 			noAlternateProxySelector())
 	})
 
+	var err error
 	// Create our informer-wrapper informer (and underlying shared informer) for types we need
-	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan)
+	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
+		defaultNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
@@ -157,71 +157,117 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 		return nil, err
 	}
 	wf.informers[namespaceType], err = newQueuedInformer(namespaceType, wf.iFactory.Core().V1().Namespaces().Informer(),
-		wf.stopChan)
+		wf.stopChan, defaultNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[nodeType], err = newQueuedInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer(), wf.stopChan)
+	wf.informers[nodeType], err = newQueuedInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer(), wf.stopChan,
+		defaultNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
 
-	wf.iFactory.Start(wf.stopChan)
-	for oType, synced := range wf.iFactory.WaitForCacheSync(wf.stopChan) {
-		if !synced {
-			return nil, fmt.Errorf("error in syncing cache for %v informer", oType)
-		}
-	}
 	if config.OVNKubernetesFeature.EnableEgressIP {
 		wf.informers[egressIPType], err = newInformer(egressIPType, wf.eipFactory.K8s().V1().EgressIPs().Informer())
 		if err != nil {
 			return nil, err
 		}
+	}
+	if config.OVNKubernetesFeature.EnableEgressFirewall {
+		wf.informers[egressFirewallType], err = newInformer(egressFirewallType, wf.efFactory.K8s().V1().EgressFirewalls().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if config.OVNKubernetesFeature.EnableICMPNetworkPolicy {
+		wf.informers[icmpNetworkPolicyType], err = newInformer(icmpNetworkPolicyType, wf.inpFactory.K8s().V1alpha1().ICMPNetworkPolicies().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
+	if config.OVNKubernetesFeature.EnableMultiNetwork {
+		wf.informers[networkattachmentdefinitionType], err = newInformer(networkattachmentdefinitionType,
+			wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
+	if config.OVNKubernetesFeature.EnableMultiNetworkPolicy {
+		wf.informers[multinetworkpolicyType], err = newInformer(multinetworkpolicyType,
+			wf.mnpFactory.K8sCniCncfIo().V1beta1().MultiNetworkPolicies().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
+	return wf, nil
+}
+
+// Start starts the factory and begins processing events
+func (wf *WatchFactory) Start() error {
+	wf.iFactory.Start(wf.stopChan)
+	for oType, synced := range wf.iFactory.WaitForCacheSync(wf.stopChan) {
+		if !synced {
+			return fmt.Errorf("error in syncing cache for %v informer", oType)
+		}
+	}
+	if config.OVNKubernetesFeature.EnableEgressIP && wf.eipFactory != nil {
 		wf.eipFactory.Start(wf.stopChan)
 		for oType, synced := range wf.eipFactory.WaitForCacheSync(wf.stopChan) {
 			if !synced {
-				return nil, fmt.Errorf("error in syncing cache for %v informer", oType)
+				return fmt.Errorf("error in syncing cache for %v informer", oType)
 			}
 		}
 	}
-	if config.OVNKubernetesFeature.EnableEgressFirewall {
-		err = wf.InitializeEgressFirewallWatchFactory()
-		if err != nil {
-			return nil, err
+	if config.OVNKubernetesFeature.EnableEgressFirewall && wf.efFactory != nil {
+		wf.efFactory.Start(wf.stopChan)
+		for oType, synced := range wf.efFactory.WaitForCacheSync(wf.stopChan) {
+			if !synced {
+				return fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
 		}
 	}
-	if config.OVNKubernetesFeature.EnableICMPNetworkPolicy {
-		err := wf.InitializeICMPNetworkPolicyWatchFactory()
-		if err != nil {
-			return nil, err
+	if config.OVNKubernetesFeature.EnableICMPNetworkPolicy && wf.inpFactory != nil {
+		wf.inpFactory.Start(wf.stopChan)
+		for oType, synced := range wf.inpFactory.WaitForCacheSync(wf.stopChan) {
+			if !synced {
+				return fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
+		}
+	}
+	if config.OVNKubernetesFeature.EnableMultiNetwork && wf.nadFactory != nil {
+		wf.nadFactory.Start(wf.stopChan)
+		for oType, synced := range wf.nadFactory.WaitForCacheSync(wf.stopChan) {
+			if !synced {
+				return fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
+		}
+	}
+	if config.OVNKubernetesFeature.EnableMultiNetworkPolicy && wf.mnpFactory != nil {
+		wf.mnpFactory.Start(wf.stopChan)
+		for oType, synced := range wf.mnpFactory.WaitForCacheSync(wf.stopChan) {
+			if !synced {
+				return fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
 		}
 	}
 
-	if config.OVNKubernetesFeature.EnableMultiNetwork {
-		err := wf.InitializeNetAttachDefWatchFactory()
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if config.OVNKubernetesFeature.EnableMultiNetworkPolicy {
-		err := wf.InitializeMultiNetworkPolicyWatchFactory()
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return wf, nil
+	return nil
 }
 
 // NewNodeWatchFactory initializes a watch factory with significantly fewer
 // informers to save memory + bandwidth. It is to be used by the node-only process.
 func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*WatchFactory, error) {
 	wf := &WatchFactory{
-		iFactory:    informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
-		efClientset: ovnClientset.EgressFirewallClient,
-		informers:   make(map[reflect.Type]*informer),
-		stopChan:    make(chan struct{}),
+		iFactory:  informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
+		informers: make(map[reflect.Type]*informer),
+		stopChan:  make(chan struct{}),
+	}
+	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost && config.OVNKubernetesFeature.EnableMultiNetwork {
+		wf.nadFactory = networkattachmentdefinitioninformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval)
+		if err := networkattachmentdefinitionapi.AddToScheme(networkattachmentdefinitionscheme.Scheme); err != nil {
+			return nil, err
+		}
 	}
 
 	// For Services and Endpoints, pre-populate the shared Informer with one that
@@ -247,8 +293,18 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 			})
 	})
 
+	wf.iFactory.InformerFor(&discovery.EndpointSlice{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+		return discoveryinformers.NewFilteredEndpointSliceInformer(
+			c,
+			kapi.NamespaceAll,
+			resyncPeriod,
+			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+			noServiceNameSelector())
+	})
+
 	var err error
-	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan)
+	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
+		defaultNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
@@ -256,7 +312,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[endpointSliceType], err = newInformer(endpointSliceType, wf.iFactory.Discovery().V1beta1().EndpointSlices().Informer())
+	wf.informers[endpointSliceType], err = newInformer(endpointSliceType, wf.iFactory.Discovery().V1().EndpointSlices().Informer())
 	if err != nil {
 		return nil, err
 	}
@@ -268,126 +324,15 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 		}
 	}
 
-	wf.iFactory.Start(wf.stopChan)
-	for oType, synced := range wf.iFactory.WaitForCacheSync(wf.stopChan) {
-		if !synced {
-			return nil, fmt.Errorf("error in syncing cache for %v informer", oType)
-		}
-	}
-
 	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost && config.OVNKubernetesFeature.EnableMultiNetwork {
-		wf.nadClientset = ovnClientset.NetworkAttchDefClient
-		err := wf.InitializeNetAttachDefWatchFactory()
+		wf.informers[networkattachmentdefinitionType], err = newInformer(networkattachmentdefinitionType,
+			wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer())
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	return wf, nil
-}
-
-func (wf *WatchFactory) InitializeEgressFirewallWatchFactory() error {
-	var err error
-	wf.efFactory = egressfirewallinformerfactory.NewSharedInformerFactory(wf.efClientset, resyncInterval)
-	wf.informers[egressFirewallType], err = newInformer(egressFirewallType, wf.efFactory.K8s().V1().EgressFirewalls().Informer())
-	if err != nil {
-		return err
-	}
-	wf.egressFirewallStopChan = make(chan struct{})
-	wf.efFactory.Start(wf.egressFirewallStopChan)
-	for oType, synced := range wf.efFactory.WaitForCacheSync(wf.egressFirewallStopChan) {
-		if !synced {
-			return fmt.Errorf("error in syncing cache for %v informer", oType)
-		}
-	}
-	return nil
-}
-
-func (wf *WatchFactory) ShutdownEgressFirewallWatchFactory() {
-	close(wf.egressFirewallStopChan)
-	wf.informers[egressFirewallType].shutdown()
-}
-
-func (wf *WatchFactory) InitializeICMPNetworkPolicyWatchFactory() error {
-	err := icmpnetworkpolicyapi.AddToScheme(icmpnetworkpolicyscheme.Scheme)
-	if err != nil {
-		return err
-	}
-	wf.inpFactory = icmpnetworkpolicyinformerfactory.NewSharedInformerFactory(wf.inpClientset, resyncInterval)
-	wf.informers[icmpNetworkPolicyType], err = newInformer(icmpNetworkPolicyType, wf.inpFactory.K8s().V1alpha1().ICMPNetworkPolicies().Informer())
-	if err != nil {
-		return err
-	}
-	wf.icmpNetworkPolicyStopChan = make(chan struct{})
-	wf.inpFactory.Start(wf.icmpNetworkPolicyStopChan)
-	for oType, synced := range wf.inpFactory.WaitForCacheSync(wf.icmpNetworkPolicyStopChan) {
-		if !synced {
-			return fmt.Errorf("error in syncing cache for %v informer", oType)
-		}
-	}
-	return nil
-}
-
-func (wf *WatchFactory) ShutdownICMPNetworkPolicyWatchFactory() {
-	close(wf.icmpNetworkPolicyStopChan)
-	wf.informers[icmpNetworkPolicyType].shutdown()
-}
-
-func (wf *WatchFactory) InitializeNetAttachDefWatchFactory() error {
-	err := networkattachmentdefinitionapi.AddToScheme(networkattachmentdefinitionscheme.Scheme)
-	if err != nil {
-		return err
-	}
-
-	wf.nadFactory = networkattachmentdefinitioninformerfactory.NewSharedInformerFactory(wf.nadClientset, resyncInterval)
-	wf.informers[networkattachmentdefinitionType], err = newInformer(networkattachmentdefinitionType,
-		wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer())
-	if err != nil {
-		return err
-	}
-
-	wf.netAttachDefStopChan = make(chan struct{})
-	wf.nadFactory.Start(wf.netAttachDefStopChan)
-	for oType, synced := range wf.nadFactory.WaitForCacheSync(wf.netAttachDefStopChan) {
-		if !synced {
-			return fmt.Errorf("error in syncing cache for %v informer", oType)
-		}
-	}
-	return nil
-}
-
-func (wf *WatchFactory) ShutdownNetAttachDefWatchFactory() {
-	close(wf.netAttachDefStopChan)
-	wf.informers[networkattachmentdefinitionType].shutdown()
-}
-
-func (wf *WatchFactory) InitializeMultiNetworkPolicyWatchFactory() error {
-	err := multinetworkpolicyapi.AddToScheme(multinetworkpolicyscheme.Scheme)
-	if err != nil {
-		return err
-	}
-
-	wf.mnpFactory = multinetworkpolicyinformerfactory.NewSharedInformerFactory(wf.mnpClientset, resyncInterval)
-	wf.informers[multinetworkpolicyType], err = newInformer(multinetworkpolicyType,
-		wf.mnpFactory.K8sCniCncfIo().V1beta1().MultiNetworkPolicies().Informer())
-	if err != nil {
-		return err
-	}
-
-	wf.multiNetworkPolicyStopChan = make(chan struct{})
-	wf.mnpFactory.Start(wf.multiNetworkPolicyStopChan)
-	for oType, synced := range wf.mnpFactory.WaitForCacheSync(wf.multiNetworkPolicyStopChan) {
-		if !synced {
-			return fmt.Errorf("error in syncing cache for %v informer", oType)
-		}
-	}
-
-	return nil
-}
-
-func (wf *WatchFactory) ShutdownMultiNetworkPolicyWatchFactory() {
-	close(wf.netAttachDefStopChan)
-	wf.informers[multinetworkpolicyType].shutdown()
 }
 
 func (wf *WatchFactory) Shutdown() {
@@ -534,6 +479,11 @@ func (wf *WatchFactory) AddEndpointSliceHandler(handlerFuncs cache.ResourceEvent
 	return wf.addHandler(endpointSliceType, "", nil, handlerFuncs, processExisting)
 }
 
+// RemoveEndpointSliceHandler removes a EndpointSlice object event handler function
+func (wf *WatchFactory) RemoveEndpointSliceHandler(handler *Handler) {
+	wf.removeHandler(endpointSliceType, handler)
+}
+
 // AddPolicyHandler adds a handler function that will be executed on NetworkPolicy object changes
 func (wf *WatchFactory) AddPolicyHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
 	return wf.addHandler(policyType, "", nil, handlerFuncs, processExisting)
@@ -630,10 +580,22 @@ func (wf *WatchFactory) GetPod(namespace, name string) (*kapi.Pod, error) {
 	return podLister.Pods(namespace).Get(name)
 }
 
+// GetAllPods returns all the pods in the cluster
+func (wf *WatchFactory) GetAllPods() ([]*kapi.Pod, error) {
+	podLister := wf.informers[podType].lister.(listers.PodLister)
+	return podLister.List(labels.Everything())
+}
+
 // GetPods returns all the pods in a given namespace
 func (wf *WatchFactory) GetPods(namespace string) ([]*kapi.Pod, error) {
 	podLister := wf.informers[podType].lister.(listers.PodLister)
 	return podLister.Pods(namespace).List(labels.Everything())
+}
+
+// GetPods returns all the pods in a given namespace by the label selector
+func (wf *WatchFactory) GetPodsBySelector(namespace string, selector metav1.LabelSelector) ([]*kapi.Pod, error) {
+	podLister := wf.informers[podType].lister.(listers.PodLister)
+	return podLister.Pods(namespace).List(labels.Set(selector.MatchLabels).AsSelector())
 }
 
 // GetNodes returns the node specs of all the nodes
@@ -660,10 +622,25 @@ func (wf *WatchFactory) GetNamespace(name string) (*kapi.Namespace, error) {
 	return namespaceLister.Get(name)
 }
 
+// GetServiceEndpointSlice returns the endpointSlice associated with a service
+func (wf *WatchFactory) GetEndpointSlices(namespace, svcName string) ([]*discovery.EndpointSlice, error) {
+	esLabelSelector := labels.Set(map[string]string{
+		discovery.LabelServiceName: svcName,
+	}).AsSelectorPreValidated()
+	endpointSliceLister := wf.informers[endpointSliceType].lister.(discoverylisters.EndpointSliceLister)
+	return endpointSliceLister.EndpointSlices(namespace).List(esLabelSelector)
+}
+
 // GetNamespaces returns a list of namespaces in the cluster
 func (wf *WatchFactory) GetNamespaces() ([]*kapi.Namespace, error) {
 	namespaceLister := wf.informers[namespaceType].lister.(listers.NamespaceLister)
 	return namespaceLister.List(labels.Everything())
+}
+
+// GetNamespaces returns a list of namespaces in the cluster by the label selector
+func (wf *WatchFactory) GetNamespacesBySelector(selector metav1.LabelSelector) ([]*kapi.Namespace, error) {
+	namespaceLister := wf.informers[namespaceType].lister.(listers.NamespaceLister)
+	return namespaceLister.List(labels.Set(selector.MatchLabels).AsSelector())
 }
 
 func (wf *WatchFactory) NodeInformer() cache.SharedIndexInformer {
@@ -686,6 +663,33 @@ func (wf *WatchFactory) NamespaceInformer() cache.SharedIndexInformer {
 
 func (wf *WatchFactory) ServiceInformer() cache.SharedIndexInformer {
 	return wf.informers[serviceType].inf
+}
+
+// noServiceNameSelector is a LabelSelector added to the watch for
+// endpointslices that excludes endpointslices which doesn't
+// have "kubernetes.io/service-name" label and also the one's
+// that have "kubernetes.io/service-name" label value set to "".
+func noServiceNameSelector() func(options *metav1.ListOptions) {
+	// if the LabelServiceName label doesn't exists, skip it.
+	svcNameLabel, err := labels.NewRequirement(discovery.LabelServiceName, selection.Exists, nil)
+	if err != nil {
+		// cannot occur
+		panic(err)
+	}
+
+	notEmptySvcName, err := labels.NewRequirement(discovery.LabelServiceName, selection.NotEquals, []string{""})
+	if err != nil {
+		// cannot occur
+		panic(err)
+	}
+
+	selector := labels.NewSelector()
+	selector.Add(*svcNameLabel)
+	selector.Add(*notEmptySvcName)
+
+	return func(options *metav1.ListOptions) {
+		options.LabelSelector = selector.String()
+	}
 }
 
 // noAlternateProxySelector is a LabelSelector added to the watch for

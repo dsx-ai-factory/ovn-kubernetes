@@ -37,7 +37,7 @@ func ovnControllerReadiness(target string) error {
 	if err != nil {
 		return fmt.Errorf("failed getting coverage/show of %q: (%v)", target, err)
 	} else if result == "0" {
-		return fmt.Errorf("%q still downloading SB database, status: (%s)", target, result)
+		return fmt.Errorf("%q has not completed logical flows processing yet", target)
 	}
 
 	// Ensure that the ovs-vswitchd and ovsdb-server processes that ovn-controller
@@ -114,7 +114,7 @@ func ovnNorthdReadiness(target string) error {
 		return fmt.Errorf("failed to get status from %s: (%v)", target, err)
 	} else if strings.HasPrefix(stdout, "Status") {
 		output := strings.Split(stdout, ":")
-		status := strings.TrimSpace(strings.Trim(output[1], "\n"))
+		status := strings.TrimSpace(output[1])
 		if status != "active" && status != "paused" && status != "standby" {
 			return fmt.Errorf("%s status is not active or passive or standby", target)
 		}

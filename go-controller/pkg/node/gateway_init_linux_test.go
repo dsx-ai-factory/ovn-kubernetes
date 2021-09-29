@@ -159,6 +159,25 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Name: nodeName,
 		}}
 
+		_, nodeNet, err := net.ParseCIDR(nodeSubnet)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Make a fake MgmtPortConfig with only the fields we care about
+		fakeMgmtPortIPFamilyConfig := managementPortIPFamilyConfig{
+			ipt:        nil,
+			allSubnets: nil,
+			ifAddr:     nodeNet,
+			gwIP:       nodeNet.IP,
+		}
+
+		fakeMgmtPortConfig := managementPortConfig{
+			ifName:    nodeName,
+			link:      nil,
+			routerMAC: nil,
+			ipv4:      &fakeMgmtPortIPFamilyConfig,
+			ipv6:      nil,
+		}
+
 		kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
 			Items: []v1.Node{existingNode},
 		})
@@ -171,12 +190,13 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 
 		stop := make(chan struct{})
 		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
-
 		Expect(err).NotTo(HaveOccurred())
 		defer func() {
 			close(stop)
 			wf.Shutdown()
 		}()
+		err = wf.Start()
+		Expect(err).NotTo(HaveOccurred())
 
 		k := &kube.Kube{fakeClient.KubeClient, egressIPFakeClient, egressFirewallFakeClient}
 
@@ -193,8 +213,8 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			defer GinkgoRecover()
 
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
-			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops,
-				gatewayIntf, "", nil, nodeAnnotator)
+			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", nil, nodeAnnotator,
+				&fakeMgmtPortConfig, nil)
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.Init(wf)
 			Expect(err).NotTo(HaveOccurred())
@@ -414,14 +434,34 @@ func shareGatewayInterfaceSmartNICTest(app *cli.App, testNS ns.NetNS,
 			EgressFirewallClient: egressFirewallFakeClient,
 		}
 
+		_, nodeNet, err := net.ParseCIDR(nodeSubnet)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Make a fake MgmtPortConfig with only the fields we care about
+		fakeMgmtPortIPFamilyConfig := managementPortIPFamilyConfig{
+			ipt:        nil,
+			allSubnets: nil,
+			ifAddr:     nodeNet,
+			gwIP:       nodeNet.IP,
+		}
+
+		fakeMgmtPortConfig := managementPortConfig{
+			ifName:    nodeName,
+			link:      nil,
+			routerMAC: nil,
+			ipv4:      &fakeMgmtPortIPFamilyConfig,
+			ipv6:      nil,
+		}
+
 		stop := make(chan struct{})
 		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
-
 		Expect(err).NotTo(HaveOccurred())
 		defer func() {
 			close(stop)
 			wf.Shutdown()
 		}()
+		err = wf.Start()
+		Expect(err).NotTo(HaveOccurred())
 
 		k := &kube.Kube{fakeClient.KubeClient, egressIPFakeClient, egressFirewallFakeClient}
 
@@ -439,7 +479,8 @@ func shareGatewayInterfaceSmartNICTest(app *cli.App, testNS ns.NetNS,
 			// provide host IP as GR IP
 			gwIPs := []*net.IPNet{ovntest.MustParseIPNet(hostCIDR)}
 			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops,
-				gatewayIntf, "", gwIPs, nodeAnnotator)
+				gatewayIntf, "", gwIPs, nodeAnnotator, &fakeMgmtPortConfig, nil)
+
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.Init(wf)
 			Expect(err).NotTo(HaveOccurred())
@@ -506,12 +547,13 @@ func shareGatewayInterfaceSmartNICHostTest(app *cli.App, testNS ns.NetNS, uplink
 
 		stop := make(chan struct{})
 		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
-
 		Expect(err).NotTo(HaveOccurred())
 		defer func() {
 			close(stop)
 			wf.Shutdown()
 		}()
+		err = wf.Start()
+		Expect(err).NotTo(HaveOccurred())
 
 		n := OvnNode{watchFactory: wf}
 
@@ -617,9 +659,7 @@ func localNetInterfaceTest(app *cli.App, testNS ns.NetNS,
 			},
 		)
 
-		nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeOvnNode.fakeClient.KubeClient, &egressipfake.Clientset{},
-            &egressfirewallfake.Clientset{}, &apiextensionsfake.Clientset{},
-            &networkattachmentdefinitionfake.Clientset{}}, &existingNode)
+		nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeOvnNode.fakeClient.KubeClient, &egressipfake.Clientset{}, &egressfirewallfake.Clientset{}}, &existingNode)
 		err := util.SetNodeHostSubnetAnnotation(nodeAnnotator, subnets)
 		Expect(err).NotTo(HaveOccurred())
 		err = nodeAnnotator.Run()
@@ -874,6 +914,7 @@ var _ = Describe("Gateway Operations Smart-NIC", func() {
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
+		_, _ = util.SetFakeIPTablesHelpers()
 	})
 
 	AfterEach(func() {

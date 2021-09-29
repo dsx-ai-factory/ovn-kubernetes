@@ -124,10 +124,6 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIP, podMAC, 
 }
 
 func (p pod) baseCmds(fexec *ovntest.FakeExec) {
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid,output_port find Logical_Router_Static_Route options={ecmp_symmetric_reply=\"true\"}",
-		Output: "",
-	})
 }
 
 func (p pod) populateLogicalSwitchCache(fakeOvn *FakeOVN) {
@@ -232,7 +228,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 				// Assign it and perform the update
 				t.nodeName = "node1"
-				t.portName = t.namespace + "_" + t.podName
+				t.portName = util.GetLogicalPortName(t.namespace, t.podName, "")
 				t.populateLogicalSwitchCache(fakeOvn)
 
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Update(context.TODO(), newPod(t.namespace, t.podName, t.nodeName, t.podIP), metav1.UpdateOptions{})
@@ -443,7 +439,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 				gomega.Expect(getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)).Should(gomega.MatchJSON(podJSON))
 
-				lsp, err := fakeOvn.ovnNBClient.LSPGet(t.namespace + "_" + t.podName)
+				lsp, err := fakeOvn.ovnNBClient.LSPGet(t.portName)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(lsp.Addresses).To(gomega.HaveLen(1))
 				gomega.Expect(lsp.Addresses[0]).To(gomega.ContainSubstring(t.podIP))

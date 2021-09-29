@@ -2,14 +2,16 @@ package ovn
 
 import (
 	"context"
+	"net"
+
 	"github.com/urfave/cli/v2"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -159,9 +161,6 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 					DrLrpIP:              "100.64.0.1",
 					PhysicalBridgeMAC:    "11:22:33:44:55:66",
 					SystemID:             "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6",
-					TCPLBUUID:            "d2e858b2-cb5a-441b-a670-ed450f79a91f",
-					UDPLBUUID:            "12832f14-eb0f-44d4-b8db-4cccbc73c792",
-					SCTPLBUUID:           "0514c521-a120-4756-aec6-883fe5db7139",
 					NodeSubnet:           "10.1.1.0/24",
 					GWRouter:             ovntypes.GWRouterPrefix + "node1",
 					GatewayRouterIPMask:  "172.16.16.2/24",
@@ -245,7 +244,6 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				fakeOvn.fakeClient = fakeClient
 				fakeOvn.init()
 				fakeOvn.controller.multicastSupport = false
-				fakeOvn.controller.clusterLBsUUIDs = []string{node1.TCPLBUUID, node1.UDPLBUUID, node1.SCTPLBUUID}
 				_, clusterNetwork, err := net.ParseCIDR(clusterCIDR)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -254,11 +252,19 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				fakeOvn.controller.SCTPSupport = true
 
 				fexec := fakeOvn.fakeExec
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_" + ovntypes.OVNClusterRouter + " networks",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_" + node1.Name + " networks",
+					Output: "[\"100.64.0.2/16\"]",
+				})
+
 				addNodeLogicalFlows(fexec, &node1, clusterCIDR, config.IPv6Mode, false)
-				fakeOvn.controller.joinSwIPManager, _ = initJoinLogicalSwitchIPManager()
-				_, err = fakeOvn.controller.joinSwIPManager.ensureJoinLRPIPs(ovntypes.OVNClusterRouter)
+				fakeOvn.controller.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager([]string{node1.Name})
+				_, err = fakeOvn.controller.joinSwIPManager.EnsureJoinLRPIPs(ovntypes.OVNClusterRouter)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gwLRPIPs, err := fakeOvn.controller.joinSwIPManager.ensureJoinLRPIPs(node1.Name)
+				gwLRPIPs, err := fakeOvn.controller.joinSwIPManager.EnsureJoinLRPIPs(node1.Name)
 				gomega.Expect(len(gwLRPIPs) != 0).To(gomega.BeTrue())
 
 				// clusterController.WatchNodes() needs to following two port groups to have been created.
@@ -269,9 +275,9 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.asf.EventuallyExpectEmptyAddressSet(hostNetworkNamespace)
 
-				fakeOvn.controller.StartServiceController(fakeOvn.wg, false)
-
 				fakeOvn.controller.WatchNodes()
+
+				fakeOvn.controller.StartServiceController(fakeOvn.wg, false)
 
 				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
 

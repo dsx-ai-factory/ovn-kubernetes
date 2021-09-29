@@ -13,7 +13,7 @@ import (
 	"time"
 
 	kapi "k8s.io/api/core/v1"
-	discovery "k8s.io/api/discovery/v1beta1"
+	discovery "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
@@ -49,6 +49,7 @@ type OvnNode struct {
 	stopChan     chan struct{}
 	recorder     record.EventRecorder
 	gateway      Gateway
+	ovnUpEnabled bool
 
 	defaultNodeController     *ovnNodeController
 	nonDefaultNodeControllers sync.Map
@@ -71,6 +72,88 @@ func NewNode(kubeClient clientset.Interface, wf factory.NodeWatchFactory, name s
 		stopChan:     stopChan,
 		recorder:     eventRecorder,
 	}
+}
+
+func clearOVSFlowTargets() error {
+	_, _, err := util.RunOVSVsctl(
+		"--",
+		"clear", "bridge", "br-int", "netflow",
+		"--",
+		"clear", "bridge", "br-int", "sflow",
+		"--",
+		"clear", "bridge", "br-int", "ipfix",
+	)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func setOVSFlowTargets() error {
+	if config.Monitoring.NetFlowTargets != nil {
+		collectors := ""
+		for _, v := range config.Monitoring.NetFlowTargets {
+			collectors += "\"" + util.JoinHostPortInt32(v.Host.String(), v.Port) + "\"" + ","
+		}
+		collectors = strings.TrimSuffix(collectors, ",")
+
+		_, stderr, err := util.RunOVSVsctl(
+			"--",
+			"--id=@netflow",
+			"create",
+			"netflow",
+			fmt.Sprintf("targets=[%s]", collectors),
+			"active_timeout=60",
+			"--",
+			"set", "bridge", "br-int", "netflow=@netflow",
+		)
+		if err != nil {
+			return fmt.Errorf("error setting NetFlow: %v\n  %q", err, stderr)
+		}
+	}
+	if config.Monitoring.SFlowTargets != nil {
+		collectors := ""
+		for _, v := range config.Monitoring.SFlowTargets {
+			collectors += "\"" + util.JoinHostPortInt32(v.Host.String(), v.Port) + "\"" + ","
+		}
+		collectors = strings.TrimSuffix(collectors, ",")
+
+		_, stderr, err := util.RunOVSVsctl(
+			"--",
+			"--id=@sflow",
+			"create",
+			"sflow",
+			"agent="+types.SFlowAgent,
+			fmt.Sprintf("targets=[%s]", collectors),
+			"--",
+			"set", "bridge", "br-int", "sflow=@sflow",
+		)
+		if err != nil {
+			return fmt.Errorf("error setting SFlow: %v\n  %q", err, stderr)
+		}
+	}
+	if config.Monitoring.IPFIXTargets != nil {
+		collectors := ""
+		for _, v := range config.Monitoring.IPFIXTargets {
+			collectors += "\"" + util.JoinHostPortInt32(v.Host.String(), v.Port) + "\"" + ","
+		}
+		collectors = strings.TrimSuffix(collectors, ",")
+
+		_, stderr, err := util.RunOVSVsctl(
+			"--",
+			"--id=@ipfix",
+			"create",
+			"ipfix",
+			fmt.Sprintf("targets=[%s]", collectors),
+			"cache_active_timeout=60",
+			"--",
+			"set", "bridge", "br-int", "ipfix=@ipfix",
+		)
+		if err != nil {
+			return fmt.Errorf("error setting IPFIX: %v\n  %q", err, stderr)
+		}
+	}
+	return nil
 }
 
 func setupOVNNode(node *kapi.Node) error {
@@ -140,69 +223,18 @@ func setupOVNNode(node *kapi.Node) error {
 			return fmt.Errorf("error setting OVS encap-port: %v\n  %q", errSet, stderr)
 		}
 	}
-	if config.Monitoring.NetFlowTargets != nil {
-		collectors := ""
-		for _, v := range config.Monitoring.NetFlowTargets {
-			collectors += "\"" + util.JoinHostPortInt32(v.Host.String(), v.Port) + "\"" + ","
-		}
-		collectors = strings.TrimSuffix(collectors, ",")
 
-		_, stderr, err := util.RunOVSVsctl(
-			"--",
-			"--id=@netflow",
-			"create",
-			"netflow",
-			fmt.Sprintf("targets=[%s]", collectors),
-			"active_timeout=60",
-			"--",
-			"set", "bridge", "br-int", "netflow=@netflow",
-		)
-		if err != nil {
-			return fmt.Errorf("error setting NetFlow: %v\n  %q", err, stderr)
-		}
+	// clear stale ovs flow targets if needed
+	err = clearOVSFlowTargets()
+	if err != nil {
+		return fmt.Errorf("error clearing stale ovs flow targets: %q", err)
 	}
-	if config.Monitoring.SFlowTargets != nil {
-		collectors := ""
-		for _, v := range config.Monitoring.SFlowTargets {
-			collectors += "\"" + util.JoinHostPortInt32(v.Host.String(), v.Port) + "\"" + ","
-		}
-		collectors = strings.TrimSuffix(collectors, ",")
+	// set new ovs flow targets if needed
+	err = setOVSFlowTargets()
+	if err != nil {
+		return fmt.Errorf("error setting ovs flow targets: %q", err)
+	}
 
-		_, stderr, err := util.RunOVSVsctl(
-			"--",
-			"--id=@sflow",
-			"create",
-			"sflow",
-			"agent="+types.SFlowAgent,
-			fmt.Sprintf("targets=[%s]", collectors),
-			"--",
-			"set", "bridge", "br-int", "sflow=@sflow",
-		)
-		if err != nil {
-			return fmt.Errorf("error setting SFlow: %v\n  %q", err, stderr)
-		}
-	}
-	if config.Monitoring.IPFIXTargets != nil {
-		collectors := ""
-		for _, v := range config.Monitoring.IPFIXTargets {
-			collectors += "\"" + util.JoinHostPortInt32(v.Host.String(), v.Port) + "\"" + ","
-		}
-		collectors = strings.TrimSuffix(collectors, ",")
-
-		_, stderr, err := util.RunOVSVsctl(
-			"--",
-			"--id=@ipfix",
-			"create",
-			"ipfix",
-			fmt.Sprintf("targets=[%s]", collectors),
-			"cache_active_timeout=60",
-			"--",
-			"set", "bridge", "br-int", "ipfix=@ipfix",
-		)
-		if err != nil {
-			return fmt.Errorf("error setting IPFIX: %v\n  %q", err, stderr)
-		}
-	}
 	return nil
 }
 
@@ -276,6 +308,20 @@ func (n *OvnNode) NewOvnNodeController(nadInfo *util.NetAttachDefInfo) (*ovnNode
 	return nc, nil
 }
 
+// Starting with v21.03.0 OVN sets OVS.Interface.external-id:ovn-installed
+// and OVNSB.Port_Binding.up when all OVS flows associated to a
+// logical port have been successfully programmed.
+// OVS.Interface.external-id:ovn-installed can only be used correctly
+// in a combination with OVS.Interface.external-id:iface-id-ver
+func getOVNIfUpCheckMode() (bool, error) {
+	if config.OvnKubeNode.DisableOVNIfaceIdVer {
+		klog.Infof("'iface-id-ver' is manually disabled, ovn-installed feature can't be used")
+		return false, nil
+	}
+	klog.Infof("Detected support for port binding with external IDs")
+	return true, nil
+}
+
 // Start learns the subnets assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
 func (n *OvnNode) Start(wg *sync.WaitGroup) error {
@@ -285,30 +331,19 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	var mgmtPort ManagementPort
 	var mgmtPortConfig *managementPortConfig
 	var cniServer *cni.Server
-	networkUnavailableTaint := &kapi.Taint{
-		Key:    types.OvnK8sNetworkUnavailable,
-		Effect: kapi.TaintEffectNoSchedule,
-	}
 
 	klog.Infof("OVN Kube Node initialization, Mode: %s", config.OvnKubeNode.Mode)
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		<-n.stopChan
-		klog.Infof("Received node's stop channel signal. Adding taint %s.", networkUnavailableTaint.ToString())
-		// Add the NoSchedule Taint on the node, before ovnkube pod gets deleted. Ignore errors.
-		err := n.Kube.SetTaintOnNode(n.name, networkUnavailableTaint)
-		if err != nil {
-			klog.Infof("Unable to add taint %s on node %s: %v", networkUnavailableTaint.ToString(), n.name, err)
-		}
-	}()
 
 	// Setting debug log level during node bring up to expose bring up process.
 	// Log level is returned to configured value when bring up is complete.
 	var level klog.Level
 	if err := level.Set("5"); err != nil {
 		klog.Errorf("Setting klog \"loglevel\" to 5 failed, err: %v", err)
+	}
+
+	// Start and sync the watch factory to begin listening for events
+	if err := n.watchFactory.Start(); err != nil {
+		return err
 	}
 
 	if node, err = n.Kube.GetNode(n.name); err != nil {
@@ -351,11 +386,15 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 
 	// Create CNI Server
 	if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
+		n.ovnUpEnabled, err = getOVNIfUpCheckMode()
+		if err != nil {
+			return err
+		}
 		kclient, ok := n.Kube.(*kube.Kube)
 		if !ok {
 			return fmt.Errorf("cannot get kubeclient for starting CNI server")
 		}
-		cniServer, err = cni.NewCNIServer("", true, n.watchFactory, kclient.KClient)
+		cniServer, err = cni.NewCNIServer("", n.ovnUpEnabled, n.watchFactory, kclient.KClient)
 		if err != nil {
 			return err
 		}
@@ -474,8 +513,14 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 					}
 				}
 				// ensure CNI support for port binding built into OVN, as masters have been upgraded
-				if initialTopoVersion < types.OvnPortBindingTopoVersion && cniServer != nil {
-					cniServer.EnableOVNPortUpSupport()
+				if initialTopoVersion < types.OvnPortBindingTopoVersion && cniServer != nil && !n.ovnUpEnabled {
+					n.ovnUpEnabled, err = getOVNIfUpCheckMode()
+					if err != nil {
+						klog.Errorf("%v", err)
+					}
+					if n.ovnUpEnabled {
+						cniServer.EnableOVNPortUpSupport()
+					}
 				}
 			}()
 		}
@@ -536,12 +581,6 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		}
 	}
 
-	// Remove the NoSchedule Taint from the node, now that networking setup is done. Ignore errors.
-	err = n.Kube.RemoveTaintFromNode(n.name, networkUnavailableTaint)
-	if err != nil {
-		klog.Infof("Unable to remove taint %s on node %s: %v", networkUnavailableTaint.ToString(), n.name, err)
-	}
-
 	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
 		// create default OVN Node Controller to watch for Pods event for smart-nic plumbing/annotation
 		defaultNetConf := &cnitypes.NetConf{
@@ -556,7 +595,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		nc, _ := n.NewOvnNodeController(nadInfo)
 
 		if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
-			nc.watchSmartNicPods()
+			nc.watchSmartNicPods(n.ovnUpEnabled)
 		}
 
 		if config.OVNKubernetesFeature.EnableMultiNetwork {
@@ -680,7 +719,7 @@ func (n *OvnNode) addNetworkAttachDefinition(netattachdef *nettypes.NetworkAttac
 	}
 
 	if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
-		nc.watchSmartNicPods()
+		nc.watchSmartNicPods(n.ovnUpEnabled)
 	}
 }
 
@@ -809,18 +848,6 @@ func (n *OvnNode) deleteNetworkAttachDefinition(netattachdef *nettypes.NetworkAt
 	n.nonDefaultNodeControllers.Delete(nadInfo.NetName)
 }
 
-func getReadyEndpointAddresses(endpointSlice *discovery.EndpointSlice) []string {
-	readyEndpointsAddress := make([]string, 0)
-	for _, endpoint := range endpointSlice.Endpoints {
-		//skip endpoints that are not ready
-		if endpoint.Conditions.Ready != nil && !*endpoint.Conditions.Ready {
-			continue
-		}
-		readyEndpointsAddress = append(readyEndpointsAddress, endpoint.Addresses...)
-	}
-	return readyEndpointsAddress
-}
-
 func (n *OvnNode) WatchEndpointSlices(nodeIP string) {
 	start := time.Now()
 
@@ -838,10 +865,10 @@ func (n *OvnNode) WatchEndpointSlices(nodeIP string) {
 		UpdateFunc: func(prevObj, obj interface{}) {
 			oldEndpointSlice := prevObj.(*discovery.EndpointSlice)
 			newEndpointSlice := obj.(*discovery.EndpointSlice)
-			oldReadyEpAddr := getReadyEndpointAddresses(oldEndpointSlice)
-			newReadyEpAddr := getReadyEndpointAddresses(newEndpointSlice)
+			oldEpAddr := getEndpointAddresses(oldEndpointSlice)
+			newEpAddr := getEndpointAddresses(newEndpointSlice)
 			if reflect.DeepEqual(oldEndpointSlice.Ports, newEndpointSlice.Ports) &&
-				reflect.DeepEqual(oldReadyEpAddr, newReadyEpAddr) {
+				reflect.DeepEqual(oldEpAddr, newEpAddr) {
 				return
 			}
 			klog.Infof("Processing update for endpoint slice %s on namespace %s",

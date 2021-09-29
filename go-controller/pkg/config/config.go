@@ -326,8 +326,8 @@ type OvnAuthConfig struct {
 	CACert         string `gcfg:"client-cacert"`
 	CertCommonName string `gcfg:"cert-common-name"`
 	Scheme         OvnDBScheme
-
-	northbound bool
+	ElectionTimer  uint `gcfg:"election-timer"`
+	northbound     bool
 
 	exec kexec.Interface
 }
@@ -357,8 +357,9 @@ type HybridOverlayConfig struct {
 
 // OvnKubeNodeConfig holds ovnkube-node configurations
 type OvnKubeNodeConfig struct {
-	Mode           string `gcfg:"mode"`
-	MgmtPortNetdev string `gcfg:"mgmt-port-netdev"`
+	Mode                 string `gcfg:"mode"`
+	MgmtPortNetdev       string `gcfg:"mgmt-port-netdev"`
+	DisableOVNIfaceIdVer bool   `gcfg:"disable-ovn-iface-id-ver"`
 }
 
 // OvnDBScheme describes the OVN database connection transport method
@@ -910,6 +911,11 @@ var OvnNBFlags = []cli.Flag{
 			"SAN extension, this parameter should match one of the SAN fields.",
 		Destination: &cliConfig.OvnNorth.CertCommonName,
 	},
+	&cli.UintFlag{
+		Name:        "nb-raft-election-timer",
+		Usage:       "The desired northbound database election timer.",
+		Destination: &cliConfig.OvnNorth.ElectionTimer,
+	},
 }
 
 //OvnSBFlags capture OVN southbound database options
@@ -946,6 +952,11 @@ var OvnSBFlags = []cli.Flag{
 			"should match the DNS(hostname) of the server. In case the certificate has a " +
 			"SAN extension, this parameter should match one of the SAN fields.",
 		Destination: &cliConfig.OvnSouth.CertCommonName,
+	},
+	&cli.UintFlag{
+		Name:        "sb-raft-election-timer",
+		Usage:       "The desired southbound database election timer.",
+		Destination: &cliConfig.OvnSouth.ElectionTimer,
 	},
 }
 
@@ -1096,6 +1107,13 @@ var OvnKubeNodeFlags = []cli.Flag{
 			"and used to allow host network services and pods to access k8s pod and service networks. ",
 		Value:       OvnKubeNode.MgmtPortNetdev,
 		Destination: &cliConfig.OvnKubeNode.MgmtPortNetdev,
+	},
+	&cli.BoolFlag{
+		Name: "disable-ovn-iface-id-ver",
+		Usage: "if iface-id-ver option is not enabled in ovn, set this flag to True " +
+			"(depends on ovn version, minimal required is 21.09)",
+		Value:       OvnKubeNode.DisableOVNIfaceIdVer,
+		Destination: &cliConfig.OvnKubeNode.DisableOVNIfaceIdVer,
 	},
 }
 

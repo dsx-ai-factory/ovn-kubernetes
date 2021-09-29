@@ -476,7 +476,7 @@ func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInf
 		klog.Warningf("Failed to get pods for namespace %q: %v", ns, err)
 	}
 	for _, pod := range pods {
-		portName := util.PodLogicalPortName(pod, oc.nadInfo.Prefix)
+		portName := util.GetLogicalPortName(pod.Namespace, pod.Name, oc.nadInfo.Prefix)
 		if portInfo, err := oc.logicalPortCache.get(portName); err != nil {
 			klog.Errorf(err.Error())
 		} else if err := podAddAllowMulticastPolicy(oc.mc.ovnNBClient, ns, portInfo, oc.nadInfo.NetNameInfo); err != nil {
@@ -758,7 +758,7 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 	}
 
 	// Get the logical port info
-	logicalPort := util.PodLogicalPortName(pod, oc.nadInfo.Prefix)
+	logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name, oc.nadInfo.Prefix)
 	portInfo, err := oc.logicalPortCache.get(logicalPort)
 	if err != nil {
 		klog.Warningf(err.Error())
@@ -822,7 +822,7 @@ func (oc *Controller) handleLocalPodSelectorSetPods(
 			continue
 		}
 
-		portInfo, err := oc.logicalPortCache.get(util.PodLogicalPortName(pod, oc.nadInfo.Prefix))
+		portInfo, err := oc.logicalPortCache.get(util.GetLogicalPortName(pod.Namespace, pod.Name, oc.nadInfo.Prefix))
 		// pod is not yet handled
 		// no big deal, we'll get the update when it is.
 		if err != nil {
@@ -867,7 +867,7 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 	}
 
 	// Get the logical port info
-	logicalPort := util.PodLogicalPortName(pod, oc.nadInfo.Prefix)
+	logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name, oc.nadInfo.Prefix)
 	portInfo, err := oc.logicalPortCache.get(logicalPort)
 	if err != nil {
 		klog.Errorf(err.Error())
@@ -937,7 +937,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 	klog.Infof("Adding network policy %s in namespace %s", policy.Name,
 		policy.Namespace)
 
-	nsInfo, err := oc.waitForNamespaceLocked(policy.Namespace)
+	nsInfo, nsUnlock, err := oc.waitForNamespaceLocked(policy.Namespace, false)
 	if err != nil {
 		klog.Errorf("Failed to wait for namespace %s event (%v)",
 			policy.Namespace, err)
@@ -945,7 +945,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 	}
 	_, alreadyExists := nsInfo.networkPolicies[policy.Name]
 	if alreadyExists {
-		nsInfo.Unlock()
+		nsUnlock()
 		return
 	}
 
@@ -978,7 +978,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 	}
 	nsInfo.networkPolicies[policy.Name] = np
 
-	nsInfo.Unlock()
+	nsUnlock()
 	np.Lock()
 
 	// Create a port group for the policy. All the pods that this policy
@@ -1128,13 +1128,13 @@ func (oc *Controller) deleteNetworkPolicy(policy *knet.NetworkPolicy) {
 	klog.Infof("Deleting network policy %s in namespace %s",
 		policy.Name, policy.Namespace)
 
-	nsInfo := oc.getNamespaceLocked(policy.Namespace)
+	nsInfo, nsUnlock := oc.getNamespaceLocked(policy.Namespace, false)
 	if nsInfo == nil {
 		klog.V(5).Infof("Failed to get namespace lock when deleting policy %s in namespace %s",
 			policy.Name, policy.Namespace)
 		return
 	}
-	defer nsInfo.Unlock()
+	defer nsUnlock()
 
 	np := nsInfo.networkPolicies[policy.Name]
 	if np == nil {

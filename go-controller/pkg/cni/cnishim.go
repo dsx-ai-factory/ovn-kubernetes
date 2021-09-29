@@ -207,10 +207,22 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 		result = response.Result
 	} else {
 		// Use the IPAM details from ovnkube-node to configure the pod interface
-		pr, _ := cniRequestToPodRequest(req, nil, kclient)
-		result, err = pr.getCNIResult(nil, kclient, response.PodIFInfo)
+		pr, err := cniRequestToPodRequest(req, nil, kclient)
 		if err != nil {
-			err = fmt.Errorf("failed to get CNI Result from pod interface info %v: %v", response.PodIFInfo, err)
+			err = fmt.Errorf("failed to create pod request: %v", err)
+			klog.Error(err.Error())
+			return err
+		}
+		podInterfaceInfo := response.PodIFInfo
+		if err := pr.checkOrUpdatePodUID(podInterfaceInfo.PodUID); err != nil {
+			klog.Error(err.Error())
+			return err
+		}
+		defer pr.cancel()
+
+		result, err = pr.getCNIResult(nil, kclient, podInterfaceInfo)
+		if err != nil {
+			err = fmt.Errorf("failed to get CNI Result from pod interface info %v: %v", podInterfaceInfo, err)
 			klog.Error(err.Error())
 			return err
 		}

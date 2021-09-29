@@ -157,7 +157,7 @@ func (oc *Controller) icmpHandleLocalPodSelectorAddFunc(
 	}
 
 	// Get the logical port info
-	logicalPort := util.PodLogicalPortName(pod, oc.nadInfo.Prefix)
+	logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name, oc.nadInfo.Prefix)
 	portInfo, err := oc.logicalPortCache.get(logicalPort)
 	if err != nil {
 		klog.Warningf(err.Error())
@@ -217,7 +217,7 @@ func (oc *Controller) icmpHandleLocalPodSelectorSetPods(
 			continue
 		}
 
-		portInfo, err := oc.logicalPortCache.get(util.PodLogicalPortName(pod, oc.nadInfo.Prefix))
+		portInfo, err := oc.logicalPortCache.get(util.GetLogicalPortName(pod.Namespace, pod.Name, oc.nadInfo.Prefix))
 		// pod is not yet handled
 		// no big deal, we'll get the update when it is.
 		if err != nil {
@@ -293,15 +293,15 @@ func (oc *Controller) addICMPNetworkPolicy(policy *onet.ICMPNetworkPolicy) {
 	klog.Infof("Adding ICMP network policy %s in namespace %s", policy.Name,
 		policy.Namespace)
 	policyName := "icmp_" + policy.Name
-	nsInfo, err := oc.waitForNamespaceLocked(policy.Namespace)
+	nsInfo, nsUnlock, err := oc.waitForNamespaceLocked(policy.Namespace, false)
 	if err != nil {
 		klog.Errorf("Failed to wait for namespace %s event (%v)",
 			policy.Namespace, err)
 		return
 	}
-	_, alreadyExists := nsInfo.networkPolicies[policyName]
+	_, alreadyExists := nsInfo.networkPolicies[policy.Name]
 	if alreadyExists {
-		nsInfo.Unlock()
+		nsUnlock()
 		return
 	}
 
@@ -465,13 +465,13 @@ func (oc *Controller) deleteICMPNetworkPolicy(policy *onet.ICMPNetworkPolicy) {
 		policy.Name, policy.Namespace)
 	policyName := "icmp_" + policy.Name
 
-	nsInfo := oc.getNamespaceLocked(policy.Namespace)
+	nsInfo, nsUnlock := oc.getNamespaceLocked(policy.Namespace, false)
 	if nsInfo == nil {
-		klog.V(5).Infof("Failed to get namespace lock when deleting ICMP network policy %s in namespace %s",
+		klog.V(5).Infof("Failed to get namespace lock when deleting policy %s in namespace %s",
 			policyName, policy.Namespace)
 		return
 	}
-	defer nsInfo.Unlock()
+	defer nsUnlock()
 
 	np := nsInfo.networkPolicies[policyName]
 	if np == nil {

@@ -12,8 +12,9 @@ import (
 	"github.com/pkg/errors"
 
 	kapi "k8s.io/api/core/v1"
-	discovery "k8s.io/api/discovery/v1beta1"
+	discovery "k8s.io/api/discovery/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 )
 
@@ -60,43 +61,28 @@ func (l *loadBalancerHealthChecker) DeleteService(svc *kapi.Service) {
 func (l *loadBalancerHealthChecker) SyncServices(svcs []interface{}) {}
 
 func (l *loadBalancerHealthChecker) AddEndpointSlice(epSlice *discovery.EndpointSlice) {
-	svcName, ok := epSlice.Labels[discovery.LabelServiceName]
-	if !ok || svcName == "" {
-		klog.Errorf("EndpointSlice %s/%s missing % label",
-			epSlice.Namespace, epSlice.Name, discovery.LabelServiceName)
-	} else {
-		name := ktypes.NamespacedName{Namespace: epSlice.Namespace, Name: svcName}
-		if _, exists := l.services[name]; exists {
-			l.endpoints[name] = countReadyEndpoints(epSlice)
-			_ = l.server.SyncEndpoints(l.endpoints)
-		}
+	svcName := epSlice.Labels[discovery.LabelServiceName]
+	name := ktypes.NamespacedName{Namespace: epSlice.Namespace, Name: svcName}
+	if _, exists := l.services[name]; exists {
+		l.endpoints[name] = countReadyEndpoints(epSlice)
+		_ = l.server.SyncEndpoints(l.endpoints)
 	}
 }
 
 func (l *loadBalancerHealthChecker) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.EndpointSlice) {
-	svcName, ok := newEpSlice.Labels[discovery.LabelServiceName]
-	if !ok || svcName == "" {
-		klog.Errorf("EndpointSlice %s/%s missing % label",
-			newEpSlice.Namespace, newEpSlice.Name, discovery.LabelServiceName)
-	} else {
-		name := ktypes.NamespacedName{Namespace: newEpSlice.Namespace, Name: svcName}
-		if _, exists := l.services[name]; exists {
-			l.endpoints[name] = countReadyEndpoints(newEpSlice)
-			_ = l.server.SyncEndpoints(l.endpoints)
-		}
+	svcName := newEpSlice.Labels[discovery.LabelServiceName]
+	name := ktypes.NamespacedName{Namespace: newEpSlice.Namespace, Name: svcName}
+	if _, exists := l.services[name]; exists {
+		l.endpoints[name] = countReadyEndpoints(newEpSlice)
+		_ = l.server.SyncEndpoints(l.endpoints)
 	}
 }
 
 func (l *loadBalancerHealthChecker) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) {
-	svcName, ok := epSlice.Labels[discovery.LabelServiceName]
-	if !ok || svcName == "" {
-		klog.Errorf("EndpointSlice %s/%s missing % label",
-			epSlice.Namespace, epSlice.Name, discovery.LabelServiceName)
-	} else {
-		name := ktypes.NamespacedName{Namespace: epSlice.Namespace, Name: svcName}
-		delete(l.endpoints, name)
-		_ = l.server.SyncEndpoints(l.endpoints)
-	}
+	svcName := epSlice.Labels[discovery.LabelServiceName]
+	name := ktypes.NamespacedName{Namespace: epSlice.Namespace, Name: svcName}
+	delete(l.endpoints, name)
+	_ = l.server.SyncEndpoints(l.endpoints)
 }
 
 func countReadyEndpoints(epSlice *discovery.EndpointSlice) int {
@@ -108,6 +94,19 @@ func countReadyEndpoints(epSlice *discovery.EndpointSlice) int {
 		num++
 	}
 	return num
+}
+
+func hasHostNetworkEndpoints(epSlices []*discovery.EndpointSlice, nodeAddresses *sets.String) bool {
+	for _, epSlice := range epSlices {
+		for _, endpoint := range epSlice.Endpoints {
+			for _, ip := range endpoint.Addresses {
+				if nodeAddresses.Has(ip) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // checkForStaleOVSInternalPorts checks for OVS internal ports without any ofport assigned,
@@ -193,7 +192,7 @@ func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCac
 			// Note: wf (WatchFactory) *usually* returns pods assigned to this node, however we dont rely on it
 			// and add this check to filter out pods assigned to other nodes. (e.g when ovnkube master and node
 			// share the same process)
-			expectedIfaceIdsWithoutPrefix[util.PodLogicalPortName(pod, "")] = true
+			expectedIfaceIdsWithoutPrefix[util.GetIfaceId(pod.Namespace, pod.Name, "")] = true
 		}
 	}
 
