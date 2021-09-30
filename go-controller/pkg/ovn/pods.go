@@ -382,7 +382,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	var addresses []string
 	var cmd *goovn.OvnCommand
 	var releaseIPs bool
-	var opts map[string]string
+
+	opts := make(map[string]string)
 	needsIP := true
 
 	// Check if the pod's logical switch port already exists. If it
@@ -392,21 +393,6 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	lsp, err := oc.mc.ovnNBClient.LSPGet(portName)
 	if err != nil && err != goovn.ErrorNotFound && err != goovn.ErrorSchema {
 		return fmt.Errorf("unable to get the lsp: %s from the nbdb: %s", portName, err)
-	}
-
-	if oc.nadInfo.TopoType != types.LocalnetAttachDefTopoType {
-		// Bind the port to the node's chassis; prevents ping-ponging between
-		// chassis if ovnkube-node isn't running correctly and hasn't cleared
-		// out iface-id for an old instance of this pod, and the pod got
-		// rescheduled.
-		opts, err = oc.mc.ovnNBClient.LSPGetOptions(portName)
-		if err != nil && err != goovn.ErrorNotFound {
-			klog.Warningf("Failed to get options for port %s: %v", portName, err)
-		}
-		if opts == nil {
-			opts = make(map[string]string)
-		}
-		opts["requested-chassis"] = pod.Spec.NodeName
 	}
 
 	if lsp == nil {
@@ -426,6 +412,24 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		opts["iface-id-ver"] = string(pod.UID)
 	} else {
 		klog.Infof("LSP already exists for port: %s", portName)
+
+		// Get LSP Options
+		for k, v := range lsp.Options {
+			key, keyOk := k.(string)
+			value, valueOk := v.(string)
+			if !keyOk || !valueOk {
+				continue
+			}
+			opts[key] = value
+		}
+	}
+
+	if !config.Kubernetes.SkipRequestedChassis {
+		// Bind the port to the node's chassis; prevents ping-ponging between
+		// chassis if ovnkube-node isn't running correctly and hasn't cleared
+		// out iface-id for an old instance of this pod, and the pod got
+		// rescheduled.
+		opts["requested-chassis"] = pod.Spec.NodeName
 	}
 
 	if len(opts) != 0 {

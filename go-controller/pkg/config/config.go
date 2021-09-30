@@ -98,6 +98,7 @@ var (
 		RawServiceCIDRs:      "172.16.1.0/24",
 		OVNConfigNamespace:   "ovn-kubernetes",
 		HostNetworkNamespace: "",
+		SkipRequestedChassis: true,
 	}
 
 	// OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
@@ -263,6 +264,7 @@ type KubernetesConfig struct {
 	MetricsNodeServerCert    string `gcfg:"metrics-node-server-cert"`
 	NoHostSubnetNodes        *metav1.LabelSelector
 	HostNetworkNamespace     string `gcfg:"host-network-namespace"`
+	SkipRequestedChassis     bool
 }
 
 // OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
