@@ -67,6 +67,7 @@ func getFlagsByCategory() map[string][]cli.Flag {
 	m["OVN Gateway Options"] = config.OVNGatewayFlags
 	m["Master HA Options"] = config.MasterHAFlags
 	m["OVN Kube Node flags"] = config.OvnKubeNodeFlags
+	m["Monitoring Options"] = config.MonitoringFlags
 
 	return m
 }

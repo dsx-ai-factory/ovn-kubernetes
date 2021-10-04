@@ -92,9 +92,7 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 	// To decrease the numbers of MAC_Binding entries in a large scale cluster, change the default behavior of always
 	// learning the MAC/IP binding and adding a new MAC_Binding entry. Only do it when necessary.
 	// See details in ovn-northd(8).
-	stdout, stderr, err = util.RunOVNNbctl(
-		"--", "--if-exists", "remove", "logical_router", gatewayRouter, "options", "learn_from_arp_request",
-		"--", "set", "logical_router", gatewayRouter, "options:always_learn_from_arp_request=false")
+	stdout, stderr, err = util.RunOVNNbctl("set", "logical_router", gatewayRouter, "options:always_learn_from_arp_request=false")
 	if err != nil {
 		klog.Warningf("Failed to set logical router %s's always_learn_from_arp_request "+
 			"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)

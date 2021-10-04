@@ -53,8 +53,8 @@ function testrun {
     if [ "$go_test" == "go test -mod=vendor" ]; then
         args=${args}${pkg}
     fi
-    echo "${go_test} -mod=vendor -test.v ${args} ${ginkgoargs}"
-    ${go_test} -mod=vendor -test.v ${args} ${ginkgoargs} 2>&1
+    echo "${go_test} -test.v ${args} ${ginkgoargs}"
+    ${go_test} -test.v ${args} ${ginkgoargs} 2>&1
 }
 
 # These packages requires root for network namespace maniuplation in unit tests

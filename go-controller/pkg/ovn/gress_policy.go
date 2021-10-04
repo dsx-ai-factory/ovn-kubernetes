@@ -9,7 +9,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	icmpnet "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gateway"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -59,7 +58,7 @@ type portPolicy struct {
 }
 
 func (pp *portPolicy) getL4Match() (string, error) {
-	var supportedProtocols = []string{TCP, UDP, SCTP}
+	var supportedProtocols = []string{TCP, UDP, SCTP, ICMP}
 	var foundProtocol string
 	for _, protocol := range supportedProtocols {
 		if protocol == pp.protocol {
@@ -68,13 +67,13 @@ func (pp *portPolicy) getL4Match() (string, error) {
 		}
 	}
 	if len(foundProtocol) == 0 {
-		if pp.protocol == ICMP {
-			if pp.icmptype != 0 {
-				return fmt.Sprintf("icmp4 && icmp4.type == %d", pp.icmptype), nil
-			}
-			return "icmp4", nil
-		}
 		return "", fmt.Errorf("unknown port protocol %v", pp.protocol)
+	}
+	if pp.protocol == ICMP {
+		if pp.icmptype != 0 {
+			return fmt.Sprintf("icmp4 && icmp4.type == %d", pp.icmptype), nil
+		}
+		return "icmp4", nil
 	}
 	if pp.endPort != 0 && pp.endPort != pp.port {
 		return fmt.Sprintf("%s && %d<=%s.dst<=%d", foundProtocol, pp.port, foundProtocol, pp.endPort), nil
@@ -150,7 +149,7 @@ func (gp *gressPolicy) deletePeerSvcVip(service *v1.Service) error {
 	return gp.peerAddressSet.DeleteIPs(ips)
 }
 
-func (gp *gressPolicy) addPeerPod(oc *Controller, pods ...*v1.Pod) error {
+func (gp *gressPolicy) addPeerPods(oc *Controller, pods ...*v1.Pod) error {
 	if gp.peerAddressSet == nil {
 		return fmt.Errorf("peer AddressSet is nil, cannot add peer pod(s): for gressPolicy: %s",
 			gp.policyName)
@@ -167,17 +166,17 @@ func (gp *gressPolicy) addPeerPod(oc *Controller, pods ...*v1.Pod) error {
 			err := oc.addHostnetworkPodIPToAddressSet(pod.Spec.NodeName, fmt.Sprintf("%s/%s", pod.Namespace, pod.Name),
 				string(gp.policyType), gp.peerAddressSet, gp.nodeHostNetPodsCache)
 			if err != nil {
-				gp.nodeHostNetPodsCacheLock.Unlock()
-				return err
+				klog.Errorf("Failed while adding Hostnetwrok IP for pod %s/%s on node (%s) to address_set: %v",
+					pod.Namespace, pod.Name, pod.Spec.NodeName, err)
 			}
 			gp.nodeHostNetPodsCacheLock.Unlock()
+		} else {
+			podIPs, err := util.GetAllPodIPs(pod, gp.NetNameInfo)
+			if err != nil {
+				return err
+			}
+			ips = append(ips, podIPs...)
 		}
-
-		podIPs, err := util.GetAllPodIPs(pod, gp.NetNameInfo)
-		if err != nil {
-			return err
-		}
-		ips = append(ips, podIPs...)
 	}
 
 	return gp.peerAddressSet.AddIPs(ips)
@@ -533,40 +532,19 @@ func (gp *gressPolicy) destroy() error {
 		if err := gp.peerAddressSet.Destroy(); err != nil {
 			return err
 		}
+		gp.peerAddressSet = nil
 	}
 	return nil
 }
 
 // SVC can be of types 1. clusterIP, 2. NodePort, 3. LoadBalancer,
 // or 4.ExternalIP
+// NOTE: For NGN usecase we don't support hair-pin through NodePort
 // TODO adjust for upstream patch when it lands:
 // https://bugzilla.redhat.com/show_bug.cgi?id=1908540
 func getSvcVips(service *v1.Service) []net.IP {
 	ips := make([]net.IP, 0)
 
-	if util.ServiceTypeHasNodePort(service) {
-		gatewayRouters, _, err := gateway.GetOvnGateways()
-		if err != nil {
-			klog.Errorf("Cannot get gateways: %s", err)
-		}
-		for _, gatewayRouter := range gatewayRouters {
-			// VIPs would be the physical IPS of the GRs(IPs of the node) in this case
-			physicalIPs, err := gateway.GetGatewayPhysicalIPs(gatewayRouter)
-			if err != nil {
-				klog.Errorf("Unable to get gateway router %s physical ip, error: %v", gatewayRouter, err)
-				continue
-			}
-
-			for _, physicalIP := range physicalIPs {
-				ip := net.ParseIP(physicalIP)
-				if ip == nil {
-					klog.Errorf("Failed to parse physical IP %q", physicalIP)
-					continue
-				}
-				ips = append(ips, ip)
-			}
-		}
-	}
 	if util.ServiceTypeHasClusterIP(service) {
 		if util.IsClusterIPSet(service) {
 			ip := net.ParseIP(service.Spec.ClusterIP)

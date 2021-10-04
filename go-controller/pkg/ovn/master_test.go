@@ -259,7 +259,7 @@ func addNodeLogicalFlows(fexec *ovntest.FakeExec, node *tNode, clusterCIDR strin
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 set logical_router " + node.GWRouter + " options:lb_force_snat_ip=router_ip",
 		"ovn-nbctl --timeout=15 set logical_router " + node.GWRouter + " options:snat-ct-zone=0",
-		"ovn-nbctl --timeout=15 -- --if-exists remove logical_router " + node.GWRouter + " options learn_from_arp_request -- set logical_router " + node.GWRouter + " options:always_learn_from_arp_request=false",
+		"ovn-nbctl --timeout=15 set logical_router " + node.GWRouter + " options:always_learn_from_arp_request=false",
 		"ovn-nbctl --timeout=15 set logical_router " + node.GWRouter + " options:dynamic_neigh_routers=true",
 		"ovn-nbctl --timeout=15 --may-exist lr-route-add " + node.GWRouter + " " + clusterCIDR + " " + node.DrLrpIP,
 	})
@@ -297,7 +297,7 @@ func addNodeLogicalFlows(fexec *ovntest.FakeExec, node *tNode, clusterCIDR strin
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 set logical_router " + node.GWRouter + " options:lb_force_snat_ip=router_ip",
 			"ovn-nbctl --timeout=15 set logical_router " + node.GWRouter + " options:snat-ct-zone=0",
-			"ovn-nbctl --timeout=15 -- --if-exists remove logical_router " + node.GWRouter + " options learn_from_arp_request -- set logical_router " + node.GWRouter + " options:always_learn_from_arp_request=false",
+			"ovn-nbctl --timeout=15 set logical_router " + node.GWRouter + " options:always_learn_from_arp_request=false",
 			"ovn-nbctl --timeout=15 set logical_router " + node.GWRouter + " options:dynamic_neigh_routers=true",
 			"ovn-nbctl --timeout=15 --may-exist lr-route-add " + node.GWRouter + " " + clusterCIDR + " " + node.DrLrpIP,
 		})

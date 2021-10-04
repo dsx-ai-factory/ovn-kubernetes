@@ -1204,7 +1204,7 @@ func (oc *Controller) handlePeerPodSelectorAddUpdate(gp *gressPolicy, objs ...in
 		}
 		pods = append(pods, pod)
 	}
-	if err := gp.addPeerPod(oc, pods...); err != nil {
+	if err := gp.addPeerPods(oc, pods...); err != nil {
 		klog.Errorf(err.Error())
 	}
 }

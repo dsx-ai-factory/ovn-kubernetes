@@ -148,7 +148,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 	}
 
 	netNameInfo := util.NetNameInfo{NetName: netName, Prefix: netPrefix, NotDefault: pr.CNIConf.NotDefault}
-	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, useOVSExternalIDs, pr.IsSmartNIC, isVFIO, vfNetdevice, netNameInfo)
+	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, useOVSExternalIDs, pr.IsSmartNIC, isVFIO, pr.PodUID, vfNetdevice, netNameInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +160,6 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 			return nil, err
 		}
 	} else {
-		podInterfaceInfo.PodUID = pr.PodUID
 		response.PodIFInfo = podInterfaceInfo
 	}
 

@@ -229,7 +229,6 @@ ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-}
 ovn_egressip_enable=${OVN_EGRESSIP_ENABLE:-false}
 #OVN_ICMP_NETWORKPOLICY_ENABLE - enable icmp networkpolicy for ovn-kubernetes
 ovn_icmp_networkpolicy_enable=${OVN_ICMP_NETWORKPOLICY_ENABLE:-false}
-ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
 #OVN_EGRESSFIREWALL_ENABLE - enable egressFirewall for ovn-kubernetes
 ovn_egressfirewall_enable=${OVN_EGRESSFIREWALL_ENABLE:-false}
 #OVN_MULTI_NETWORK_ENABLE - enable multiple net-attach-def for ovn-kubernetes
