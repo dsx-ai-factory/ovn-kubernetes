@@ -577,14 +577,14 @@ func (oc *Controller) syncPeriodic() {
 	}()
 }
 
-func (oc *Controller) recordPodEvent(addErr error, pod *kapi.Pod) {
+func (oc *Controller) recordPodEvent(reason string, addErr error, pod *kapi.Pod) {
 	podRef, err := ref.GetReference(scheme.Scheme, pod)
 	if err != nil {
 		klog.Errorf("Couldn't get a reference to pod %s/%s to post an event: '%v'",
 			pod.Namespace, pod.Name, err)
 	} else {
 		klog.V(5).Infof("Posting a %s event for Pod %s/%s", kapi.EventTypeWarning, pod.Namespace, pod.Name)
-		oc.mc.recorder.Eventf(podRef, kapi.EventTypeWarning, "ErrorAddingLogicalPort", addErr.Error())
+		oc.mc.recorder.Eventf(podRef, kapi.EventTypeWarning, reason, addErr.Error())
 	}
 }
 
@@ -724,7 +724,7 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 			err := oc.mc.kube.SetLabelsOnPod(pod, nodeNameLabel)
 			if err != nil {
 				klog.Errorf("Failed to set %s labels on pod %s: %v", util.OvnPodNodeNameLabel, pod.Name, err)
-				oc.recordPodEvent(err, pod)
+				oc.recordPodEvent("ErrorSettingPodLabel", err, pod)
 				return false
 			}
 		}
@@ -733,7 +733,7 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 	if util.PodWantsNetwork(pod) && addPort {
 		if err := oc.addLogicalPort(pod); err != nil {
 			klog.Errorf(err.Error())
-			oc.recordPodEvent(err, pod)
+			oc.recordPodEvent("ErrorAddingLogicalPort", err, pod)
 			return false
 		}
 	} else {
@@ -745,7 +745,7 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 		if oldPod == nil || exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod) {
 			if err := oc.addPodExternalGW(pod); err != nil {
 				klog.Errorf(err.Error())
-				oc.recordPodEvent(err, pod)
+				oc.recordPodEvent("ErrorAddingPodExternalGW", err, pod)
 				return false
 			}
 		}
