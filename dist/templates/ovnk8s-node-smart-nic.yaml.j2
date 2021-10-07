@@ -167,6 +167,8 @@ spec:
           value: "true"
         - name: OVN_DISABLE_OVN_IFACE_ID_VER
           value: "true"
+        - name: OVN_MONITOR_ALL
+          value: "{{ ovn_monitor_all }}"
         - name: OVN_HOST_NETWORK_NAMESPACE
           valueFrom:
             configMapKeyRef:

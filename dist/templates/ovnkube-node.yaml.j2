@@ -179,6 +179,8 @@ spec:
           value: "{{ ovn_multi_network_enable }}"
         - name: OVN_DISABLE_OVN_IFACE_ID_VER
           value: "{{ ovn_disable_ovn_iface_id_ver }}"
+        - name: OVN_MONITOR_ALL
+          value: "{{ ovn_monitor_all }}"
         {% endif -%}
         {% if ovnkube_app_name=="ovnkube-node-smart-nic-host" -%}
         - name: OVNKUBE_NODE_MODE
