@@ -73,6 +73,7 @@ BASEDIR=$(dirname $0)
 # OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
 # OVN_METRICS_SCRAPE_INTERVAL - ovn & ovnkube metrics scrape interval in sec (default 30)
 # OVS_METRICS_SCRAPE_INTERVAL - ovs metrics scrape interval in sec (default 30)
+# OVN_MONITOR_ALL - ovn-controller monitor all data in SB DB (default true)
 # OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 # OVN_EGRESSFIREWALL_ENABLE - enable egressFirewall for ovn-kubernetes
 # OVN_UNPRIVILEGED_MODE - execute CNI ovs/netns commands from host (default no)
@@ -209,6 +210,8 @@ ovn_v4_join_subnet=${OVN_V4_JOIN_SUBNET:-}
 ovn_v6_join_subnet=${OVN_V6_JOIN_SUBNET:-}
 #OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
 ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-100000}
+#OVN_MONITOR_ALL - ovn-controller monitor all data in SB DB (default true)
+ovn_monitor_all=${OVN_MONITOR_ALL:-true}
 ovn_multicast_enable=${OVN_MULTICAST_ENABLE:-}
 # OVN_METRICS_SCRAPE_INTERVAL - metrics scrape interval in sec (default 30)
 ovn_metrics_scrape_interval=${OVN_METRICS_SCRAPE_INTERVAL:-30}
@@ -1383,6 +1386,7 @@ ovn-node() {
     ${ovn_node_ssl_opts} \
     ${tls_ssl_opts} \
     --inactivity-probe=${ovn_remote_probe_interval} \
+    --monitor-all=${ovn_monitor_all} \
     ${multicast_enabled_flag} \
     ${egressip_enabled_flag} \
     ${multi_network_enabled_flag} \
