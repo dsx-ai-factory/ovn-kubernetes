@@ -586,22 +586,24 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		n.WatchEndpointSlices(nodeIP)
 	}
 
+	if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
+		n.WatchEndpointSlicesOnSmartNIC()
+	}
+
 	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
+		// create the default OVN Node Controller to watch for Pods event for smart-nic plumbing/annotation
+		defaultNetConf := &cnitypes.NetConf{
+			NetConf: ctypes.NetConf{
+				Name: types.DefaultNetworkName,
+			},
+			NetCidr:    config.Default.RawClusterSubnets,
+			MTU:        config.Default.MTU,
+			NotDefault: false,
+		}
+		nadInfo, _ := util.NewNetAttachDefInfo(defaultNetConf)
+		nc, _ := n.NewOvnNodeController(nadInfo)
+
 		if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
-			n.WatchEndpointSlicesOnSmartNIC()
-
-			// create the default OVN Node Controller to watch for Pods event for smart-nic plumbing/annotation
-			defaultNetConf := &cnitypes.NetConf{
-				NetConf: ctypes.NetConf{
-					Name: types.DefaultNetworkName,
-				},
-				NetCidr:    config.Default.RawClusterSubnets,
-				MTU:        config.Default.MTU,
-				NotDefault: false,
-			}
-			nadInfo, _ := util.NewNetAttachDefInfo(defaultNetConf)
-			nc, _ := n.NewOvnNodeController(nadInfo)
-
 			nc.watchSmartNicPods(n.ovnUpEnabled)
 		}
 

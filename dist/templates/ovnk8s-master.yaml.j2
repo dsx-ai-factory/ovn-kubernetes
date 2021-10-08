@@ -118,10 +118,8 @@ spec:
           # starting the metrics server is one of the last things we do,
           # so check whether metrics server is running
           readinessProbe:
-            httpGet:
-              path: /metrics
+            tcpSocket:
               port: 9409
-              scheme: HTTPS
             initialDelaySeconds: 30
             timeoutSeconds: 5
             periodSeconds: 30
