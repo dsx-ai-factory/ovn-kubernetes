@@ -27,3 +27,7 @@
 #export OVN_GATEWAY_OPTS="--gateway-interface=brp0 --gateway-nexthop=10.1.192.1 --gateway-vlanid=3"
 #export OVN_GATEWAY_ROUTER_SUBNET="10.1.192.0/24"
 #export OVNKUBE_NODE_MGMT_PORT_NETDEV="pf0vf0"
+#export OVN_MONITOR_ALL="false"
+#export OVN_ENABLE_LFLOW_CACHE="false"
+#export OVN_LFLOW_CACHE_LIMIT=""
+#export OVN_LFLOW_CACHE_LIMIT_KB=""

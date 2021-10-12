@@ -74,6 +74,9 @@ BASEDIR=$(dirname $0)
 # OVN_METRICS_SCRAPE_INTERVAL - ovn & ovnkube metrics scrape interval in sec (default 30)
 # OVS_METRICS_SCRAPE_INTERVAL - ovs metrics scrape interval in sec (default 30)
 # OVN_MONITOR_ALL - ovn-controller monitor all data in SB DB
+# OVN_ENABLE_LFLOW_CACHE - enable ovn-controller lflow-cache
+# OVN_LFLOW_CACHE_LIMIT - maximum number of logical flow cache entries of ovn-controller
+# OVN_LFLOW_CACHE_LIMIT_KB - maximum size of the logical flow cache of ovn-controller
 # OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 # OVN_EGRESSFIREWALL_ENABLE - enable egressFirewall for ovn-kubernetes
 # OVN_UNPRIVILEGED_MODE - execute CNI ovs/netns commands from host (default no)
@@ -212,6 +215,10 @@ ovn_v6_join_subnet=${OVN_V6_JOIN_SUBNET:-}
 ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-100000}
 #OVN_MONITOR_ALL - ovn-controller monitor all data in SB DB
 ovn_monitor_all=${OVN_MONITOR_ALL:-}
+#OVN_ENABLE_LFLOW_CACHE - enable lflow cache for ovn-controller
+ovn_enable_lflow_cache=${OVN_ENABLE_LFLOW_CACHE:-}
+ovn_lflow_cache_limit=${OVN_LFLOW_CACHE_LIMIT:-}
+ovn_lflow_cache_limit_kb=${OVN_LFLOW_CACHE_LIMIT_KB:-}
 ovn_multicast_enable=${OVN_MULTICAST_ENABLE:-}
 # OVN_METRICS_SCRAPE_INTERVAL - metrics scrape interval in sec (default 30)
 ovn_metrics_scrape_interval=${OVN_METRICS_SCRAPE_INTERVAL:-30}
@@ -229,8 +236,6 @@ ovn_egressfirewall_enable=${OVN_EGRESSFIREWALL_ENABLE:-false}
 ovn_multi_network_enable=${OVN_MULTI_NETWORK_ENABLE:-false}
 #OVN_MULTI_NETWORKPOLICY_ENABLE - enable multi network policy for ovn-kubernetes
 ovn_multi_networkpolicy_enable=${OVN_MULTI_NETWORKPOLICY_ENABLE:-false}
-#OVN_ENABLE_LFLOW_CACHE - enable lflow cache for ovn-controller 
-ovn_enable_lflow_cache=${OVN_ENABLE_LFLOW_CACHE:-false}
 #OVN_DISABLE_OVN_IFACE_ID_VER - disable usage of the OVN iface-id-ver option
 ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER:-false}
 ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
@@ -1225,11 +1230,6 @@ ovn-node() {
       multi_network_enabled_flag="--enable-multi-network"
   fi
 
-  enable_lflow_cache_flag=
-  if [[ ${ovn_enable_lflow_cache} == "true" ]]; then
-      enable_lflow_cache_flag="--enable-lflow-cache"
-  fi
-
   disable_ovn_iface_id_ver_flag=
   if [[ ${ovn_disable_ovn_iface_id_ver} == "true" ]]; then
       disable_ovn_iface_id_ver_flag="--disable-ovn-iface-id-ver"
@@ -1253,6 +1253,21 @@ ovn-node() {
   monitor_all=
   if [[ -n ${ovn_monitor_all} ]]; then
      monitor_all="--monitor-all=${ovn_monitor_all}"
+  fi
+
+  enable_lflow_cache=
+  if [[ -n ${ovn_enable_lflow_cache} ]]; then
+     enable_lflow_cache="--enable-lflow-cache=${ovn_enable_lflow_cache}"
+  fi
+
+  lflow_cache_limit=
+  if [[ -n ${ovn_lflow_cache_limit} ]]; then
+     lflow_cache_limit="--lflow-cache-limit=${ovn_lflow_cache_limit}"
+  fi
+
+  lflow_cache_limit_kb=
+  if [[ -n ${ovn_lflow_cache_limit_kb} ]]; then
+     lflow_cache_limit_kb="--lflow-cache-limit-kb=${ovn_lflow_cache_limit_kb}"
   fi
 
   egress_interface=
@@ -1392,6 +1407,9 @@ ovn-node() {
     ${tls_ssl_opts} \
     --inactivity-probe=${ovn_remote_probe_interval} \
     ${monitor_all} \
+    ${enable_lflow_cache} \
+    ${lflow_cache_limit} \
+    ${lflow_cache_limit_kb} \
     ${multicast_enabled_flag} \
     ${egressip_enabled_flag} \
     ${multi_network_enabled_flag} \
@@ -1399,7 +1417,6 @@ ovn-node() {
     ${netflow_targets} \
     ${sflow_targets} \
     ${ipfix_targets} \
-    ${enable_lflow_cache_flag} \
     --metrics-interval ${ovn_metrics_scrape_interval} \
     --metrics-bind-address ${ovnkube_node_metrics_bind_address} --metrics-enable-pprof \
      ${ovnkube_node_mode_flag} \

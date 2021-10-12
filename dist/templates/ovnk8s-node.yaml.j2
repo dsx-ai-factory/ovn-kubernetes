@@ -184,6 +184,12 @@ spec:
               value: "{{ ovn_disable_ovn_iface_id_ver }}"
             - name: OVN_MONITOR_ALL
               value: "{{ ovn_monitor_all }}"
+            - name: OVN_ENABLE_LFLOW_CACHE
+              value: "{{ ovn_enable_lflow_cache }}"
+            - name: OVN_LFLOW_CACHE_LIMIT
+              value: "{{ ovn_lflow_cache_limit }}"
+            - name: OVN_LFLOW_CACHE_LIMIT_KB
+              value: "{{ ovn_lflow_cache_limit_kb }}"
             {% endif -%}
             {% if ovnkube_app_name=="ovnkube-node-smart-nic-host" -%}
             - name: OVNKUBE_NODE_MODE
