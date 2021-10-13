@@ -1,0 +1,208 @@
+---
+# ovnkube-node
+# daemonset version 3
+# starts node daemons for ovs and ovn, each in a separate container
+# it is run on all nodes
+kind: DaemonSet
+apiVersion: apps/v1
+metadata:
+  name: ovnkube-node-smart-nic
+  # namespace set up by install
+  namespace: ovn-kubernetes
+  annotations:
+    kubernetes.io/description: |
+      This DaemonSet launches the ovn-kubernetes networking components for worker nodes.
+spec:
+  selector:
+    matchLabels:
+      app: ovnkube-node-smart-nic
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 10%
+  template:
+    metadata:
+      labels:
+        app: ovnkube-node-smart-nic
+        name: ovnkube-node-smart-nic
+        component: network
+        type: infra
+        kubernetes.io/os: "linux"
+      annotations:
+        scheduler.alpha.kubernetes.io/critical-pod: ''
+    spec:
+      nodeSelector:
+        kubernetes.io/arch: arm64
+      imagePullSecrets:
+      - name: ovncni-quay-ips
+      # Requires fairly broad permissions - ability to read all services and network functions as well
+      # as all pods.
+      serviceAccountName: ovn
+      hostNetwork: true
+
+      priorityClassName: "system-node-critical"
+      containers:
+      - name: ovnkube-node
+        image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
+        imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
+
+        command: ["/root/ovnkube.sh", "ovn-node"]
+
+        securityContext:
+          runAsUser: 0
+          capabilities:
+            add:
+            - NET_ADMIN
+
+
+        terminationMessagePolicy: FallbackToLogsOnError
+        volumeMounts:
+        # Common mounts
+        # for the iptables wrapper
+        - mountPath: /host
+          name: host-slash
+          readOnly: true
+        - mountPath: /var/run/dbus/
+          name: host-var-run-dbus
+          readOnly: true
+        - mountPath: /var/log/ovn-kubernetes/
+          name: host-var-log-ovnkube
+        # We mount our socket here
+        - mountPath: /var/run/ovn-kubernetes
+          name: host-var-run-ovn-kubernetes
+        # CNI related mounts which we take over
+        - mountPath: /opt/cni/bin
+          name: host-opt-cni-bin
+        - mountPath: /etc/cni/net.d
+          name: host-etc-cni-netd
+        - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
+        - mountPath: /var/run/ovn/
+          name: host-var-run-ovs
+        # for ovn-db metrics
+        - mountPath: /etc/openvswitch/
+          name: host-var-lib-ovs
+          readOnly: true
+        - mountPath: /etc/ovn/
+          name: host-var-lib-ovs
+          readOnly: true
+
+
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 300Mi
+        env:
+        - name: OVN_DAEMONSET_VERSION
+          value: "3"
+        - name: OVNKUBE_LOGLEVEL
+          value: "{{ ovnkube_node_loglevel }}"
+        - name: OVNKUBE_LOGFILE_MAXSIZE
+          value: "{{ ovnkube_logfile_maxsize }}"
+        - name: OVNKUBE_LOGFILE_MAXBACKUPS
+          value: "{{ ovnkube_logfile_maxbackups }}"
+        - name: OVNKUBE_LOGFILE_MAXAGE
+          value: "{{ ovnkube_logfile_maxage }}"
+        - name: OVN_METRICS_SCRAPE_INTERVAL
+          value: "{{ ovn_metrics_scrape_interval }}"
+        - name: OVN_NET_CIDR
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: net_cidr
+        - name: OVN_SVC_CIDR
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: svc_cidr
+        - name: K8S_APISERVER
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: k8s_apiserver
+        - name: OVN_MTU
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: mtu
+        - name: OVN_GATEWAY_MODE
+          value: "shared"
+        - name: OVN_GATEWAY_OPTS
+          value: ""
+        - name: OVN_HYBRID_OVERLAY_ENABLE
+          value: ""
+        - name: OVN_HYBRID_OVERLAY_NET_CIDR
+          value: ""
+        - name: OVN_EGRESSIP_ENABLE
+          value: "{{ ovn_egress_ip_enable }}"
+        - name: OVN_DISABLE_SNAT_MULTIPLE_GWS
+          value: "{{ ovn_disable_snat_multiple_gws }}"
+        - name: OVN_DISABLE_PKT_MTU_CHECK
+          value: "true"
+        - name: OVN_NETFLOW_TARGETS
+          value: "{{ ovn_netflow_targets }}"
+        - name: OVN_SFLOW_TARGETS
+          value: "{{ ovn_sflow_targets }}"
+        - name: OVN_IPFIX_TARGETS
+          value: "{{ ovn_ipfix_targets }}"
+        - name: OVN_REMOTE_PROBE_INTERVAL
+          value: "{{ ovn_remote_probe_interval }}"
+        - name: OVN_MULTICAST_ENABLE
+          value: "{{ ovn_multicast_enable }}"
+        - name: OVN_UNPRIVILEGED_MODE
+          value: "yes"
+        - name: OVN_EX_GW_NETWORK_INTERFACE
+          value: "{{ ovn_ex_gw_networking_interface }}"
+        - name: OVNKUBE_NODE_MODE
+          value: "smart-nic"
+        - name: OVN_GATEWAY_ROUTER_SUBNET
+          value: ""
+        - name: OVNKUBE_NODE_MGMT_PORT_NETDEV
+          value: "pf0vf0"
+        - name: OVN_MULTI_NETWORK_ENABLE
+          value: "true"
+        - name: OVN_DISABLE_OVN_IFACE_ID_VER
+          value: "true"
+        - name: OVN_HOST_NETWORK_NAMESPACE
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: host_network_namespace
+
+      #        readinessProbe:
+      #          exec:
+      #            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnkube-node"]
+      #          initialDelaySeconds: 30
+      #          timeoutSeconds: 30
+      #          periodSeconds: 60
+
+      volumes:
+      - name: host-var-run-dbus
+        hostPath:
+          path: /var/run/dbus
+      - name: host-var-log-ovnkube
+        hostPath:
+          path: /var/log/ovn-kubernetes
+      - name: host-var-run-ovs
+        hostPath:
+          path: /var/run/openvswitch
+      - name: host-var-lib-ovs
+        hostPath:
+          path: /var/lib/openvswitch
+      - name: host-var-run-ovn-kubernetes
+        hostPath:
+          path: /var/run/ovn-kubernetes
+      - name: host-opt-cni-bin
+        hostPath:
+          path: /opt/cni/bin
+      - name: host-etc-cni-netd
+        hostPath:
+          path: /etc/cni/net.d
+      - name: host-slash
+        hostPath:
+          path: /
+
+
+      tolerations:
+      - operator: "Exists"

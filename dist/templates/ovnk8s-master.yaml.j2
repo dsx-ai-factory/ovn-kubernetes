@@ -218,6 +218,8 @@ spec:
               value: "{{ ovn_nb_cert_cname }}"
             - name: OVN_SB_CERT_CNAME
               value: "{{ ovn_sb_cert_cname }}"
+            - name: OVN_NOHOSTSUBNET_LABEL
+              value: "{{ ovn_nohostsubnet_label }}"
             - name: OVN_HOST_NETWORK_NAMESPACE
               valueFrom:
                 configMapKeyRef:

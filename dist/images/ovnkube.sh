@@ -1309,6 +1309,53 @@ ovn-node() {
     ovn_unprivileged_flag=""
   fi
 
+  ovn_gateway_router_subnet_opt=
+  if [[ ${ovnkube_node_mode} == "smart-nic" ]]; then
+    # in the case of smart-nic mode we want the host K8s Node Name and not the DPU K8s Node Name
+    K8S_NODE=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:host-k8s-nodename | tr -d \")
+    if [[ ${K8S_NODE} == "" ]]; then
+      echo "Couldn't get the required Host K8s Nodename. Exiting..."
+      exit 1
+    fi
+
+    if [[ ${ovn_gateway_opts} == "" ]]; then
+      # get the gateway interface
+      gw_iface=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-interface | tr -d \")
+      if [[ ${gw_iface} == "" ]]; then
+        echo "Couldn't get the required OVN Gateway Interface. Exiting..."
+        exit 1
+      fi
+      # get the gateway nexthop
+      gw_nexthop=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-nexthop | tr -d \")
+      if [[ ${gw_nexthop} == "" ]]; then
+        echo "Couldn't get the required OVN Gateway NextHop. Exiting..."
+        exit 1
+      fi
+      # get the gateway vlanid
+      gw_vlanid=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-vlanid | tr -d \")
+      if [[ ${gw_vlanid} == "" ]]; then
+        echo "Couldn't get the required OVN Gateway VLAN ID. Exiting..."
+        exit 1
+      fi
+      ovn_gateway_opts="
+        --gateway-interface=${gw_iface}
+        --gateway-nexthop=${gw_nexthop}
+        --gateway-vlanid=${gw_vlanid}
+      "
+    fi
+
+    # this is required if the DPU and DPU Host are in different subnets
+    if [[ ${ovn_gateway_router_subnet} == "" ]]; then
+      # get the gateway router subnet
+      ovn_gateway_router_subnet=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-router-subnet | tr -d \")
+      if [[ ${ovn_gateway_router_subnet} == "" ]]; then
+        echo "Could get the required OVN Gateway Router Subnet. Exiting..."
+        exit 1
+      fi
+    fi
+    ovn_gateway_router_subnet_opt="--gateway-router-subnet=${ovn_gateway_router_subnet}"
+  fi
+
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
@@ -1325,7 +1372,7 @@ ovn-node() {
     ${disable_snat_multiple_gws_flag} \
     ${disable_pkt_mtu_check_flag} \
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
-    --gateway-router-subnet=${ovn_gateway_router_subnet} \
+    ${ovn_gateway_router_subnet_opt} \
     --pidfile ${OVN_RUNDIR}/ovnkube.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube.log \
     ${ovn_node_ssl_opts} \

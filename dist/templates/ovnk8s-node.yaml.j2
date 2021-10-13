@@ -205,11 +205,11 @@ spec:
 
       {% if ovnkube_app_name=="ovnkube-node-smart-nic-host" -%}
       nodeSelector:
-        kubernetes.io/os: "linux"
+        kubernetes.io/arch: amd64
         k8s.ovn.org/smart-nic: ""
       {% else -%}
       nodeSelector:
-        kubernetes.io/os: "linux"
+        kubernetes.io/arch: amd64
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:

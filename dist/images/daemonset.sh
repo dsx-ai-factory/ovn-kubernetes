@@ -538,6 +538,28 @@ ovn_image=${image} \
   ovnkube_app_name=ovnkube-node-smart-nic-host \
   j2 ../templates/ovnk8s-node.yaml.j2 -o ../yaml/ovnk8s-node-smart-nic-host.yaml
 
+ovn_image=${image_ubuntu} \
+  ovn_image_pull_policy=${image_pull_policy} \
+  ovnkube_node_loglevel=${node_loglevel} \
+  ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
+  ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
+  ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
+  ovn_multicast_enable=${ovn_multicast_enable} \
+  ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
+  ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
+  ovn_multicast_enable=${ovn_multicast_enable} \
+  ovn_egress_ip_enable=${ovn_egress_ip_enable} \
+  ovn_multi_network_enable=${ovn_multi_network_enable} \
+  ovn_remote_probe_interval=${ovn_remote_probe_interval} \
+  ovn_metrics_scrape_interval=${ovn_metrics_scrape_interval} \
+  ovs_metrics_scrape_interval=${ovs_metrics_scrape_interval} \
+  ovn_netflow_targets=${ovn_netflow_targets} \
+  ovn_sflow_targets=${ovn_sflow_targets} \
+  ovn_ipfix_targets=${ovn_ipfix_targets} \
+  ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
+  ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
+  j2 ../templates/ovnk8s-node-smart-nic.yaml.j2 -o ../yaml/ovnk8s-node-smart-nic.yaml
+
 ovn_image=${imagec} \
   ovn_image_pull_policy=${image_pull_policy} \
   ovn_loglevel_northd=${ovn_loglevel_northd} \
@@ -572,6 +594,12 @@ ovn_image=${imagec} \
   ovn_loglevel_controller=${ovn_loglevel_controller} \
   ovn_ssl_en=${ovn_ssl_en} \
   j2 ../templates/ovn-host.yaml.j2 -o ../yaml/ovn-host.yaml
+
+ovn_image=${imagec_ubuntu} \
+  ovn_image_pull_policy=${image_pull_policy} \
+  ovn_loglevel_controller=${ovn_loglevel_controller} \
+  ovn_ssl_en=${ovn_ssl_en} \
+  j2 ../templates/ovn-host-smart-nic.yaml.j2 -o ../yaml/ovn-host-smart-nic.yaml
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
