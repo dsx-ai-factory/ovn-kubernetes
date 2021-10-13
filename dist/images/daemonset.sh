@@ -57,6 +57,7 @@ OVN_IPFIX_TARGETS=""
 OVN_HOST_NETWORK_NAMESPACE=""
 OVN_EX_GW_NETWORK_INTERFACE=""
 OVNKUBE_NODE_MGMT_PORT_NETDEV=""
+OVN_NOHOSTSUBNET_LABEL="k8s.ovn.org/ovn-managed=false"
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -225,6 +226,9 @@ while [ "$1" != "" ]; do
   --ovnkube-node-mgmt-port-netdev)
     OVNKUBE_NODE_MGMT_PORT_NETDEV=$VALUE
     ;;
+  --no-hostsubnet-label)
+    OVN_NOHOSTSUBNET_LABEL=$VALUE
+    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -345,6 +349,8 @@ ovn_ex_gw_networking_interface=${OVN_EX_GW_NETWORK_INTERFACE}
 echo "ovn_ex_gw_networking_interface: ${ovn_ex_gw_networking_interface}"
 ovnkube_node_mgmt_port_netdev=${OVNKUBE_NODE_MGMT_PORT_NETDEV}
 echo "ovnkube_node_mgmt_port_netdev: ${ovnkube_node_mgmt_port_netdev}"
+ovn_nohostsubnet_label=${OVN_NOHOSTSUBNET_LABEL}
+echo "ovn_nohostsubnet_label: ${ovn_nohostsubnet_label}"
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -428,6 +434,7 @@ ovn_image=${image} \
   ovn_master_count=${ovn_master_count} \
   ovn_gateway_mode=${ovn_gateway_mode} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
+  ovn_nohostsubnet_label=${ovn_nohostsubnet_label} \
   j2 ../templates/ovnkube-master.yaml.j2 -o ../yaml/ovnkube-master.yaml
 
 ovn_image=${imagec} \
@@ -468,6 +475,7 @@ ovn_image=${image} \
   ovn_nb_cert_cname=${ovn_nb_cert_cname} \
   ovn_sb_cert_cname=${ovn_sb_cert_cname} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
+  ovn_nohostsubnet_label=${ovn_nohostsubnet_label} \
   j2 ../templates/ovnk8s-master.yaml.j2 -o ../yaml/ovnk8s-master.yaml
 
 ovn_image=${image} \

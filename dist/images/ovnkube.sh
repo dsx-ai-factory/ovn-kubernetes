@@ -987,7 +987,11 @@ ovn-master() {
   if [[ ${ovn_egressfirewall_enable} == "true" ]]; then
 	  egressfirewall_enabled_flag="--enable-egress-firewall"
   fi
-  echo "egressfirewall_enabled_flag=${egressfirewall_enabled_flag}"
+
+  nohostsubnet_label_option=
+  if [[ ${OVN_NOHOSTSUBNET_LABEL} != "" ]]; then
+	  nohostsubnet_label_option="--no-hostsubnet-nodes=${OVN_NOHOSTSUBNET_LABEL}"
+  fi
 
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
@@ -1008,6 +1012,7 @@ ovn-master() {
     ${ovn_v6_join_subnet_opt} \
     --pidfile ${OVN_RUNDIR}/ovnkube-master.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
+    ${nohostsubnet_label_option} \
     ${ovn_master_ssl_opts} \
     ${multicast_enabled_flag} \
     ${ovn_acl_logging_rate_limit_flag} \
