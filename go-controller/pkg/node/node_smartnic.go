@@ -180,14 +180,14 @@ func (nc *ovnNodeController) addRepPort(pod *kapi.Pod, vfRepName string, ifInfo 
 	// set the Pod interface's MAC address on the corresponding VF Port
 	err = util.GetSriovnetOps().SetRepresentorPeerMacAddress(vfRepName, ifInfo.MAC)
 	if err != nil {
-		return fmt.Errorf("failed to set the MAC address %s on VF reprentor %s",
-			ifInfo.MAC.String(), vfRepName)
+		return fmt.Errorf("failed to set the MAC address %s on VF reprentor %s: %v",
+			ifInfo.MAC.String(), vfRepName, err)
 	}
 
 	link, err := util.GetNetLinkOps().LinkByName(vfRepName)
 	if err != nil {
 		_ = nc.delRepPort(vfRepName)
-		return fmt.Errorf("failed to get link device for interface %s", vfRepName)
+		return fmt.Errorf("failed to get link device for interface %s: %v", vfRepName, err)
 	}
 
 	if err = util.GetNetLinkOps().LinkSetMTU(link, ifInfo.MTU); err != nil {
