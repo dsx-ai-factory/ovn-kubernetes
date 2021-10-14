@@ -365,12 +365,12 @@ func SetRepresentorPeerMacAddress(netdev string, mac net.HardwareAddr) error {
 	}
 
 	uplinkPhysPortName := fmt.Sprintf("p%d", pfID)
-	uplinkNetdev, err := findNetdevWithPortNameCriteria(func(pname string) bool { return pname == uplinkPhysPortName })
-	if err != nil {
-		return fmt.Errorf("failed to find netdev for physical port name %s. %v", uplinkPhysPortName, err)
-	}
+	//uplinkNetdev, err := findNetdevWithPortNameCriteria(func(pname string) bool { return pname == uplinkPhysPortName })
+	//if err != nil {
+	//	return fmt.Errorf("failed to find netdev for physical port name %s. %v", uplinkPhysPortName, err)
+	//}
 	vfRepName := fmt.Sprintf("vf%d", vfIndex)
-	sysfsVfRepMacFile := filepath.Join(NetSysDir, uplinkNetdev, "smart_nic", vfRepName, "mac")
+	sysfsVfRepMacFile := filepath.Join(NetSysDir, uplinkPhysPortName, "smart_nic", vfRepName, "mac")
 	_, err = utilfs.Fs.Stat(sysfsVfRepMacFile)
 	if err != nil {
 		return fmt.Errorf("couldn't stat VF representor's sysfs file %s: %v", sysfsVfRepMacFile, err)
