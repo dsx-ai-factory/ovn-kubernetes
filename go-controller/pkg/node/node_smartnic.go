@@ -32,7 +32,7 @@ func (nc *ovnNodeController) watchSmartNicPods(isOvnUpEnabled bool) {
 	nc.podHandler = n.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
-			klog.Infof("Add for Pod: %s/%s", pod.ObjectMeta.GetNamespace(), pod.ObjectMeta.GetName())
+			klog.Infof("Add for Pod: %s/%s for network %s", pod.ObjectMeta.GetNamespace(), pod.ObjectMeta.GetName(), nc.nadInfo.NetName)
 			if !util.PodWantsNetwork(pod) {
 				return
 			}
@@ -57,6 +57,7 @@ func (nc *ovnNodeController) watchSmartNicPods(isOvnUpEnabled bool) {
 				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled, true,
 					nc.nadInfo.MTU, nc.nadInfo.NetNameInfo)
 				if err != nil {
+					klog.Infof("Failed to get pod interface information: %v. retrying", err)
 					retryPods.Store(pod.UID, true)
 					return
 				}
@@ -75,7 +76,7 @@ func (nc *ovnNodeController) watchSmartNicPods(isOvnUpEnabled bool) {
 		},
 		UpdateFunc: func(old, newer interface{}) {
 			pod := newer.(*kapi.Pod)
-			klog.Infof("Update for Pod: %s/%s", pod.ObjectMeta.GetNamespace(), pod.ObjectMeta.GetName())
+			klog.Infof("Update for Pod: %s/%s for network %s", pod.ObjectMeta.GetNamespace(), pod.ObjectMeta.GetName(), nc.nadInfo.NetName)
 			if !util.PodWantsNetwork(pod) {
 				retryPods.Delete(pod.UID)
 				return
@@ -99,6 +100,7 @@ func (nc *ovnNodeController) watchSmartNicPods(isOvnUpEnabled bool) {
 				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled, true,
 					nc.nadInfo.MTU, nc.nadInfo.NetNameInfo)
 				if err != nil {
+					klog.Infof("Failed to get pod interface information: %v. retrying", err)
 					return
 				}
 				err = nc.addRepPort(pod, vfRepName, podInterfaceInfo, podLister, kclient.KClient)
@@ -112,7 +114,7 @@ func (nc *ovnNodeController) watchSmartNicPods(isOvnUpEnabled bool) {
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
-			klog.Infof("Delete for Pod: %s/%s", pod.ObjectMeta.GetNamespace(), pod.ObjectMeta.GetName())
+			klog.Infof("Delete for Pod: %s/%s for network %s", pod.ObjectMeta.GetNamespace(), pod.ObjectMeta.GetName(), nc.nadInfo.NetName)
 			if _, ok := servedPods.Load(pod.UID); !ok {
 				return
 			}
@@ -120,12 +122,13 @@ func (nc *ovnNodeController) watchSmartNicPods(isOvnUpEnabled bool) {
 			retryPods.Delete(pod.UID)
 			vfRepName, err := nc.getVfRepName(pod)
 			if err != nil {
-				klog.Errorf("Failed to get VF Representor Name from Pod: %s. Representor port may have been deleted.", err)
+				klog.Errorf("Failed to get VF Representor Name for Pod %s/%s: %s. Representor port may have been deleted.",
+					pod.Namespace, pod.Name, err)
 				return
 			}
 			err = nc.delRepPort(vfRepName)
 			if err != nil {
-				klog.Errorf("Failed to delete VF representor %s. %s", vfRepName, err)
+				klog.Errorf("Failed to delete VF representor %s for pod %s/%s. %s", vfRepName, pod.Namespace, pod.Name, err)
 			}
 		},
 	}, nil)
@@ -133,6 +136,8 @@ func (nc *ovnNodeController) watchSmartNicPods(isOvnUpEnabled bool) {
 
 // getVfRepName returns the VF's representor of the VF assigned to the pod
 func (nc *ovnNodeController) getVfRepName(pod *kapi.Pod) (string, error) {
+	klog.V(5).Infof("Get VF representor name of pod %s/%s of network %s. annoations: %v", pod.Namespace, pod.Name,
+		nc.nadInfo.NetName, pod.Annotations[util.SmartNicConnectionDetailsAnnot])
 	smartNicCD, err := util.UnmarshalPodSmartNicConnDetails(pod.Annotations, nc.nadInfo.NetName)
 	if err != nil {
 		return "", fmt.Errorf("failed to get smart-nic annotation for pod %s/%s network %s: %v",

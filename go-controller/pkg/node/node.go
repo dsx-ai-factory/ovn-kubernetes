@@ -606,6 +606,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
 			nc.watchSmartNicPods(n.ovnUpEnabled)
 		}
+		nc.added = true
 
 		if config.OVNKubernetesFeature.EnableMultiNetwork {
 			_ = n.watchNetworkAttachmentDefinitions()
