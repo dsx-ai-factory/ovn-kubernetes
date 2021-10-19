@@ -848,14 +848,14 @@ func flowsForDefaultBridge(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost
 
 		// table 1, established and related connections in zone 64000 with ct_mark ctMarkHost go to host
 		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=100, table=1, ip, ct_state=+trk+est, ct_mark=%s, "+
-				"actions=output:%s",
-				defaultOpenFlowCookie, ctMarkHost, ofPortHost))
+			fmt.Sprintf("cookie=%s, priority=100, table=1, %s ip, ct_state=+trk+est, ct_mark=%s, "+
+				"actions=%soutput:%s",
+				defaultOpenFlowCookie, match_vlan, ctMarkHost, strip_vlan, ofPortHost))
 
 		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=100, table=1, ip, ct_state=+trk+rel, ct_mark=%s, "+
-				"actions=output:%s",
-				defaultOpenFlowCookie, ctMarkHost, ofPortHost))
+			fmt.Sprintf("cookie=%s, priority=100, table=1, %s ip, ct_state=+trk+rel, ct_mark=%s, "+
+				"actions=%soutput:%s",
+				defaultOpenFlowCookie, match_vlan, ctMarkHost, strip_vlan, ofPortHost))
 	}
 
 	if config.IPv6Mode {
@@ -872,14 +872,14 @@ func flowsForDefaultBridge(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost
 
 		// table 1, established and related connections in zone 64000 with ct_mark ctMarkHost go to host
 		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=100, table=1, ip6, ct_state=+trk+est, ct_mark=%s, "+
-				"actions=output:%s",
-				defaultOpenFlowCookie, ctMarkHost, ofPortHost))
+			fmt.Sprintf("cookie=%s, priority=100, table=1, %s ip6, ct_state=+trk+est, ct_mark=%s, "+
+				"actions=%soutput:%s",
+				defaultOpenFlowCookie, match_vlan, ctMarkHost, strip_vlan, ofPortHost))
 
 		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=100, table=1, ip6, ct_state=+trk+rel, ct_mark=%s, "+
-				"actions=output:%s",
-				defaultOpenFlowCookie, ctMarkHost, ofPortHost))
+			fmt.Sprintf("cookie=%s, priority=100, table=1, %s ip6, ct_state=+trk+rel, ct_mark=%s, "+
+				"actions=%soutput:%s",
+				defaultOpenFlowCookie, match_vlan, ctMarkHost, strip_vlan, ofPortHost))
 	}
 
 	// table 2, dispatch from Host -> OVN
@@ -929,9 +929,11 @@ func commonFlows(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost string) [
 
 	strip_vlan := ""
 	match_vlan := ""
+	mod_vlan_id := ""
 	if config.Gateway.VLANID != 0 {
 		strip_vlan = "strip_vlan,"
 		match_vlan = fmt.Sprintf("dl_vlan=%d,", config.Gateway.VLANID)
+		mod_vlan_id = fmt.Sprintf("mod_vlan_vid:%d,", config.Gateway.VLANID)
 	}
 
 	// table 0, we check to see if this dest mac is the shared mac, if so flood to both ports
@@ -951,8 +953,8 @@ func commonFlows(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost string) [
 		// so that reverse direction goes back to the host.
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=100, in_port=%s, ip, "+
-				"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:%s",
-				defaultOpenFlowCookie, ofPortHost, config.Default.ConntrackZone, ctMarkHost, ofPortPhys))
+				"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), %soutput:%s",
+				defaultOpenFlowCookie, ofPortHost, config.Default.ConntrackZone, ctMarkHost, mod_vlan_id, ofPortPhys))
 
 		// table 0, packets coming from external. Send it through conntrack and
 		// resubmit to table 1 to know the state and mark of the connection.
@@ -972,8 +974,8 @@ func commonFlows(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost string) [
 		// so that reverse direction goes back to the host.
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=100, in_port=%s, ipv6, "+
-				"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:%s",
-				defaultOpenFlowCookie, ofPortHost, config.Default.ConntrackZone, ctMarkHost, ofPortPhys))
+				"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), %soutput:%s",
+				defaultOpenFlowCookie, ofPortHost, config.Default.ConntrackZone, ctMarkHost, mod_vlan_id, ofPortPhys))
 
 		// table 0, packets coming from external. Send it through conntrack and
 		// resubmit to table 1 to know the state and mark of the connection.
