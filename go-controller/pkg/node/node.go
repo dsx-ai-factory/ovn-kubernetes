@@ -171,6 +171,7 @@ func setupOVNNode(node *kapi.Node) error {
 		if err != nil {
 			return fmt.Errorf("failed to obtain local IP from node %q: %v", node.Name, err)
 		}
+		config.Default.EncapIP = encapIP
 	} else {
 		if ip := net.ParseIP(encapIP); ip == nil {
 			return fmt.Errorf("invalid encapsulation IP provided %q", encapIP)
@@ -1011,15 +1012,9 @@ func isEPSliceContainsEndpoint(epSlice *discovery.EndpointSlice,
 func (n *OvnNode) validateVTEPInterfaceMTU() error {
 	tooSmallMTUTaint := &kapi.Taint{Key: types.OvnK8sSmallMTUTaintKey, Effect: kapi.TaintEffectNoSchedule}
 
-	ovnEncapIPStr, stderr, err := util.RunOVSVsctl("--if-exists", "get",
-		"Open_vSwitch", ".", "external_ids:ovn-encap-ip")
-	if err != nil {
-		return fmt.Errorf("failed to obtain the ovn-encap-ip from Open_vSwtich table. stderr: %s, %v",
-			stderr, err)
-	}
-	ovnEncapIP := net.ParseIP(ovnEncapIPStr)
+	ovnEncapIP := net.ParseIP(config.Default.EncapIP)
 	if ovnEncapIP == nil {
-		return fmt.Errorf("the set OVN Encap IP is invalid: (%s)", ovnEncapIPStr)
+		return fmt.Errorf("the set OVN Encap IP is invalid: (%s)", config.Default.EncapIP)
 	}
 	interfaceName, mtu, err := util.GetIFNameAndMTUForAddress(ovnEncapIP)
 	if err != nil {

@@ -428,23 +428,25 @@ func GetIPv6OnSubnet(iface string, ip *net.IPNet) (*net.IPNet, error) {
 }
 
 // GetIFNameAndMTUForAddress returns the interfaceName and MTU for the given network address
-func GetIFNameAndMTUForAddress(addr net.IP) (string, int, error) {
+func GetIFNameAndMTUForAddress(ifAddress net.IP) (string, int, error) {
 	// from the IP address arrive at the link
-	routeFilter := &netlink.Route{Src: addr, Scope: unix.RT_SCOPE_LINK}
-	filterMask := netlink.RT_FILTER_SRC | netlink.RT_FILTER_SCOPE
-	routes, err := netLinkOps.RouteListFiltered(getFamily(addr), routeFilter, filterMask)
+	addressFamily := getFamily(ifAddress)
+	allAddresses, err := netLinkOps.AddrList(nil, addressFamily)
 	if err != nil {
-		return "", 0, fmt.Errorf("failed to get routes associated with OVN Encap IP (%s): %v", addr, err)
-	} else if len(routes) != 1 {
-		return "", 0, fmt.Errorf("expecting one source route for OVN Encap IP (%s), but returned %v routes", addr, routes)
+		return "", 0, fmt.Errorf("failed to list all the addresses for address family (%d): %v", addressFamily, err)
+
+	}
+	for _, address := range allAddresses {
+		if address.IP.Equal(ifAddress) {
+			link, err := netLinkOps.LinkByIndex(address.LinkIndex)
+			if err != nil {
+				return "", 0, fmt.Errorf("failed to lookup link with address(%s) and index(%d): %v",
+					ifAddress, address.LinkIndex, err)
+			}
+
+			return link.Attrs().Name, link.Attrs().MTU, nil
+		}
 	}
 
-	index := routes[0].LinkIndex
-	link, err := netLinkOps.LinkByIndex(index)
-	if err != nil {
-		return "", 0, fmt.Errorf("failed to lookup link with address(%s) and index(%d) : %v",
-			addr, routes[0].LinkIndex, err)
-	}
-
-	return link.Attrs().Name, link.Attrs().MTU, nil
+	return "", 0, fmt.Errorf("couldn't not find a link associated with the given OVN Encap IP (%s)", ifAddress)
 }

@@ -2,7 +2,6 @@ package node
 
 import (
 	"fmt"
-	"golang.org/x/sys/unix"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/urfave/cli/v2"
@@ -34,10 +33,10 @@ var _ = Describe("Node", func() {
 		)
 
 		const (
-			nodeName      = "my-node"
-			linkName      = "breth0"
-			linkIPaddress = "10.1.0.40"
-			linkIndex     = 4
+			nodeName  = "my-node"
+			linkName  = "breth0"
+			linkIPNet = "10.1.0.40/32"
+			linkIndex = 4
 
 			configDefaultMTU               = 1500 //value for config.Default.MTU
 			mtuTooSmallForIPv4AndIPv6      = configDefaultMTU + types.GeneveHeaderLengthIPv4 - 1
@@ -51,18 +50,9 @@ var _ = Describe("Node", func() {
 			netlinkLinkMock = new(netlink_mocks.Link)
 
 			util.SetNetLinkOpMockInst(netlinkOpsMock)
-			routeFilter := &netlink.Route{Src: ovntest.MustParseIP(linkIPaddress), Scope: unix.RT_SCOPE_LINK}
-			filterMask := netlink.RT_FILTER_SRC | netlink.RT_FILTER_SCOPE
-			netlinkOpsMock.On("RouteListFiltered", netlink.FAMILY_V4, routeFilter, filterMask).Return([]netlink.Route{{LinkIndex: linkIndex}}, nil)
+			netlinkOpsMock.On("AddrList", nil, netlink.FAMILY_V4).
+				Return([]netlink.Addr{{LinkIndex: linkIndex, IPNet: ovntest.MustParseIPNet(linkIPNet)}}, nil)
 			netlinkOpsMock.On("LinkByIndex", 4).Return(netlinkLinkMock, nil)
-
-			fexec := ovntest.NewFakeExec()
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    fmt.Sprintf("ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:ovn-encap-ip"),
-				Output: linkIPaddress,
-			})
-			err := util.SetExec(fexec)
-			Expect(err).NotTo(HaveOccurred())
 
 			ovnNode = &OvnNode{
 				name: nodeName,
@@ -70,6 +60,7 @@ var _ = Describe("Node", func() {
 			}
 
 			config.Default.MTU = configDefaultMTU
+			config.Default.EncapIP = "10.1.0.40"
 
 			kubeMock.On("SetTaintOnNode", nodeName, mock.AnythingOfType("*v1.Taint")).Return(nil)
 			kubeMock.On("RemoveTaintFromNode", nodeName, mock.AnythingOfType("*v1.Taint")).Return(nil)
