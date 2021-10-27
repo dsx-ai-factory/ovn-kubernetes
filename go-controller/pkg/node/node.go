@@ -1128,10 +1128,6 @@ func syncEndpointSlices(obj []interface{}) {
 		klog.Errorf("Failed to add interface %s to ovn firewall zone: (%v)",
 			types.K8sMgmtIntfName, err)
 	}
-	if err := addInterfaceToFirewallZone(localnetGatewayNextHopPort, ovnFirewallZone); err != nil {
-		klog.Errorf("Failed to add interface %s to ovn firewall zone: (%v)",
-			localnetGatewayNextHopPort, err)
-	}
 }
 
 func configureSvcRouteViaBridge(bridge string) error {
