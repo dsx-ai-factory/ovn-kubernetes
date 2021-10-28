@@ -166,21 +166,10 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 	contIface := &current.Interface{}
 	ifnameSuffix := ""
 
-	// 1. get VF netdevice from PCI
-	vfNetdevices, err := util.GetSriovnetOps().GetNetDevicesFromPci(pciAddrs)
-	if err != nil {
-		return nil, nil, err
+	vfNetdevice := ifInfo.VfNetdevice
 
-	}
-
-	// Make sure we have 1 netdevice per pci address
-	if len(vfNetdevices) != 1 {
-		return nil, nil, fmt.Errorf("failed to get one netdevice interface per %s", pciAddrs)
-	}
-	vfNetdevice := vfNetdevices[0]
-
-	// 2. Move VF to Container namespace
-	err = moveIfToNetns(vfNetdevice, netns)
+	// 1. Move VF to Container namespace
+	err := moveIfToNetns(vfNetdevice, netns)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -224,26 +213,26 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 	}
 
 	if !ifInfo.IsSmartNic {
-		// 3. get Uplink netdevice
+		// 2. get Uplink netdevice
 		uplink, err := util.GetSriovnetOps().GetUplinkRepresentor(pciAddrs)
 		if err != nil {
 			return nil, nil, err
 		}
 
-		// 4. get VF index from PCI
+		// 3. get VF index from PCI
 		vfIndex, err := util.GetSriovnetOps().GetVfIndexByPciAddress(pciAddrs)
 		if err != nil {
 			return nil, nil, err
 		}
 
-		// 5. lookup representor
+		// 4. lookup representor
 		rep, err := util.GetSriovnetOps().GetVfRepresentor(uplink, vfIndex)
 		if err != nil {
 			return nil, nil, err
 		}
 		oldHostRepName := rep
 
-		// 6. rename the host VF representor
+		// 5. rename the host VF representor
 		hostIface.Name = containerID[:(15-len(ifnameSuffix))] + ifnameSuffix
 		if err = renameLink(oldHostRepName, hostIface.Name); err != nil {
 			return nil, nil, fmt.Errorf("failed to rename %s to %s: %v", oldHostRepName, hostIface.Name, err)
@@ -255,7 +244,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 		}
 		hostIface.Mac = link.Attrs().HardwareAddr.String()
 
-		// 7. set MTU on VF representor
+		// 6. set MTU on VF representor
 		if err = util.GetNetLinkOps().LinkSetMTU(link, ifInfo.MTU); err != nil {
 			return nil, nil, fmt.Errorf("failed to set MTU on %s: %v", hostIface.Name, err)
 		}
@@ -381,7 +370,7 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 		err = ConfigureOVS(pr.ctx, pr.PodNamespace, pr.PodName, hostIface.Name, ifInfo, pr.SandboxID,
 			podLister, kclient, pr.PodUID)
 		if err != nil {
-			pr.deletePorts()
+			pr.deletePorts(hostIface.Name)
 			return nil, err
 		}
 	}
@@ -413,6 +402,93 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 	return []*current.Interface{hostIface, contIface}, nil
 }
 
+func (pr *PodRequest) UnconfigureInterface(oldVfName string) error {
+	podDesc := fmt.Sprintf("for pod %s/%s network %s", pr.PodNamespace, pr.PodName, pr.CNIConf.Name)
+	klog.V(5).Infof("Tear down interface %+v CNI Conf %v %s", *pr, pr.CNIConf, podDesc)
+	if pr.CNIConf.DeviceID == "" && pr.IsSmartNIC {
+		klog.Warningf("Unexpected configuration %s, pod request on smart-nic host. device ID must be provided", podDesc)
+		return nil
+	}
+	if pr.CNIConf.DeviceID != "" {
+		if isVFIO := util.GetSriovnetOps().IsVfPciVfioBound(pr.CNIConf.DeviceID); isVFIO {
+			klog.V(5).Infof("VFIO case %s, nothing to do", podDesc)
+			return nil
+		}
+	}
+
+	// 1. For SRIOV case, we'd need to move the VF from container namespace back to the host namespace
+	// 2. If it is non-default network and non-smart-nic mode, needs to get the container interface index
+	//    so that we know the host-side interface name.
+	ifnameSuffix := ""
+	if pr.CNIConf.DeviceID != "" || (pr.CNIConf.NotDefault && !pr.IsSmartNIC) {
+		netns, err := ns.GetNS(pr.Netns)
+		if err != nil {
+			return fmt.Errorf("failed to get container namespace %s: %v", podDesc, err)
+		}
+		defer netns.Close()
+
+		hostNS, err := ns.GetCurrentNS()
+		if err != nil {
+			return fmt.Errorf("failed to get host namespace %s: %v", podDesc, err)
+		}
+		defer hostNS.Close()
+
+		err = netns.Do(func(_ ns.NetNS) error {
+			// container side interface deletion
+			link, err := util.GetNetLinkOps().LinkByName(pr.IfName)
+			if err != nil {
+				return fmt.Errorf("failed to get container interface %s %s: %v", pr.IfName, podDesc, err)
+			}
+			// SR-IOV Case
+			if pr.CNIConf.DeviceID != "" {
+				err = util.GetNetLinkOps().LinkSetDown(link)
+				if err != nil {
+					return fmt.Errorf("failed to bring down container interface %s %s: %v", pr.IfName, podDesc, err)
+				}
+				// rename VF device to make sure it is unique in the host namespace:
+				// if the VF's original name is emptry, sandbox id and a '0' letter prefix is used to make up the unique name.
+				if oldVfName == "" {
+					id := fmt.Sprintf("_0%d", link.Attrs().Index)
+					oldVfName = pr.SandboxID[:(15-len(id))] + id
+				}
+				if err := util.GetNetLinkOps().LinkSetName(link, oldVfName); err != nil {
+					return fmt.Errorf("failed to rename container interface %s to %s %s: %v", pr.IfName, oldVfName, podDesc, err)
+				}
+				// move VF device to host netns
+				if err = util.GetNetLinkOps().LinkSetNsFd(link, int(hostNS.Fd())); err != nil {
+					return fmt.Errorf("failed to move container interface %s back to host namespace %s: %v", pr.IfName, podDesc, err)
+				}
+			}
+			if pr.CNIConf.NotDefault && !pr.IsSmartNIC {
+				ifnameSuffix = fmt.Sprintf("_%d", link.Attrs().Index)
+			}
+			return nil
+		})
+		if err != nil {
+			klog.Errorf(err.Error())
+		}
+	}
+
+	if !pr.IsSmartNIC {
+		// host side interface deletion
+		ifName := pr.SandboxID[:(15-len(ifnameSuffix))] + ifnameSuffix
+		out, err := ovsExec("del-port", "br-int", ifName)
+		if err != nil && !strings.Contains(out, "no port named") {
+			// DEL should be idempotent; don't return an error just log it
+			klog.Warningf("Failed to delete OVS port %s %s from br-int: %v\n %q", ifName, podDesc, err, string(out))
+		}
+		err = clearPodBandwidth(pr.SandboxID)
+		if err != nil {
+			klog.Errorf("Failed to clearPodBandwidth sandbox %v %s: %v", pr.SandboxID, podDesc, err)
+		}
+		if err = util.LinkDelete(ifName); err != nil {
+			klog.Errorf("Failed to delete interface %s %s: %v", ifName, podDesc, err)
+		}
+		pr.deletePodConntrack()
+	}
+	return nil
+}
+
 func (pr *PodRequest) deletePodConntrack() {
 	if pr.CNIConf.PrevResult == nil {
 		return
@@ -440,21 +516,11 @@ func (pr *PodRequest) deletePodConntrack() {
 	}
 }
 
-func (pr *PodRequest) deletePorts() {
-	ifaceName := pr.SandboxID[:15]
+func (pr *PodRequest) deletePorts(ifaceName string) {
 	out, err := ovsExec("del-port", "br-int", ifaceName)
 	_ = util.LinkDelete(ifaceName)
 	if err != nil && !strings.Contains(out, "no port named") {
 		// DEL should be idempotent; don't return an error just log it
 		klog.Warningf("Failed to delete OVS port %s: %v\n  %q", ifaceName, err, string(out))
 	}
-}
-
-// PlatformSpecificCleanup deletes the OVS port
-func (pr *PodRequest) PlatformSpecificCleanup() error {
-	pr.deletePorts()
-	_ = clearPodBandwidth(pr.SandboxID)
-	pr.deletePodConntrack()
-
-	return nil
 }

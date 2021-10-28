@@ -97,7 +97,7 @@ func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, k
 }
 
 // PodAnnotation2PodInfo creates PodInterfaceInfo from Pod annotations and additional attributes
-func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, isSmartNic bool, mtu int,
+func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, isSmartNic bool, vfNetdevice string,
 	netNameInfo util.NetNameInfo) (*PodInterfaceInfo, error) {
 	podAnnotSt, err := util.UnmarshalPodAnnotation(podAnnotation, netNameInfo.NetName)
 	if err != nil {
@@ -119,6 +119,7 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, is
 		CheckExtIDs:   checkExtIDs,
 		IsSmartNic:    isSmartNic,
 		NetNameInfo:   netNameInfo,
+		VfNetdevice:   vfNetdevice,
 	}
 	return podInterfaceInfo, nil
 }

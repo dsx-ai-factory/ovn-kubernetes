@@ -62,12 +62,12 @@ var _ = Describe("cnismartnic tests", func() {
 			Expect(err).ToNot(HaveOccurred())
 			fakeKubeInterface.On("UpdatePod", pod).Return(nil)
 
-			err = pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface, ovntypes.DefaultNetworkName)
+			err = pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface, "", ovntypes.DefaultNetworkName)
 			Expect(err).ToNot(HaveOccurred())
 		})
 
 		It("Fails if DeviceID is not present in CNI config", func() {
-			err := pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface, ovntypes.DefaultNetworkName)
+			err := pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface, "", ovntypes.DefaultNetworkName)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -75,7 +75,7 @@ var _ = Describe("cnismartnic tests", func() {
 			pr.CNIConf.DeviceID = "0000:05:00.4"
 			fakeSriovnetOps.On("GetPfPciFromVfPci", pr.CNIConf.DeviceID).Return(
 				"", fmt.Errorf("failed to get PF address"))
-			err := pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface, ovntypes.DefaultNetworkName)
+			err := pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface, "", ovntypes.DefaultNetworkName)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -84,7 +84,7 @@ var _ = Describe("cnismartnic tests", func() {
 			fakeSriovnetOps.On("GetPfPciFromVfPci", pr.CNIConf.DeviceID).Return("0000:05:00.0", nil)
 			fakeSriovnetOps.On("GetVfIndexByPciAddress", pr.CNIConf.DeviceID).Return(
 				-1, fmt.Errorf("failed to get VF index"))
-			err := pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface, ovntypes.DefaultNetworkName)
+			err := pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface, "", ovntypes.DefaultNetworkName)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -92,7 +92,7 @@ var _ = Describe("cnismartnic tests", func() {
 			pr.CNIConf.DeviceID = "0000:05:00.4"
 			fakeSriovnetOps.On("GetPfPciFromVfPci", pr.CNIConf.DeviceID).Return("05:00.0", nil)
 			fakeSriovnetOps.On("GetVfIndexByPciAddress", pr.CNIConf.DeviceID).Return(2, nil)
-			err := pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface, ovntypes.DefaultNetworkName)
+			err := pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface, "", ovntypes.DefaultNetworkName)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -109,7 +109,7 @@ var _ = Describe("cnismartnic tests", func() {
 			err := util.MarshalPodSmartNicConnDetails(&pod.Annotations, &smartNicCd, ovntypes.DefaultNetworkName)
 			Expect(err).ToNot(HaveOccurred())
 			fakeKubeInterface.On("UpdatePod", pod).Return(fmt.Errorf("failed to set annotation"))
-			err = pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface, ovntypes.DefaultNetworkName)
+			err = pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface, "", ovntypes.DefaultNetworkName)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to set annotation"))
 		})

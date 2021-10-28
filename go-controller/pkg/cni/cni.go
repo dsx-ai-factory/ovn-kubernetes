@@ -101,22 +101,34 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 		return nil, fmt.Errorf("required CNI variable missing")
 	}
 	netName := types.DefaultNetworkName
-	mtu := config.Default.MTU
 	if pr.CNIConf.NotDefault {
 		netName = pr.CNIConf.Name
-		if pr.CNIConf.MTU != 0 {
-			mtu = pr.CNIConf.MTU
-		}
 	}
 	netPrefix := util.GetNetworkPrefix(netName, !pr.CNIConf.NotDefault)
 
 	kubecli := &kube.Kube{KClient: kclient}
 	annotCondFn := isOvnReady
 
-	if pr.IsSmartNIC {
+	vfNetdevice := ""
+	if pr.CNIConf.DeviceID != "" {
 		// Add Smart-NIC connection-details annotation so ovnkube-node running on smart-NIC
 		// performs the needed network plumbing.
-		if err := pr.addSmartNICConnectionDetailsAnnot(kubecli, netName); err != nil {
+
+		// Get the vf device Name
+		vfNetdevices, err := util.GetSriovnetOps().GetNetDevicesFromPci(pr.CNIConf.DeviceID)
+		if err != nil {
+			return nil, err
+
+		}
+		// Make sure we have 1 netdevice per pci address
+		if len(vfNetdevices) != 1 {
+			return nil, fmt.Errorf("failed to get one netdevice interface per %s", pr.CNIConf.DeviceID)
+		}
+		vfNetdevice = vfNetdevices[0]
+	}
+
+	if pr.IsSmartNIC {
+		if err := pr.addSmartNICConnectionDetailsAnnot(kubecli, vfNetdevice, netName); err != nil {
 			return nil, err
 		}
 		annotCondFn = isSmartNICReady
@@ -132,7 +144,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 	}
 
 	netNameInfo := util.NetNameInfo{NetName: netName, Prefix: netPrefix, NotDefault: pr.CNIConf.NotDefault}
-	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, useOVSExternalIDs, pr.IsSmartNIC, mtu, netNameInfo)
+	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, useOVSExternalIDs, pr.IsSmartNIC, vfNetdevice, netNameInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -151,16 +163,47 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 	return response, nil
 }
 
-func (pr *PodRequest) cmdDel() error {
-	if pr.IsSmartNIC {
-		// nothing to do
-		return nil
+func (pr *PodRequest) cmdDel(podLister corev1listers.PodLister, kclient kubernetes.Interface) (*Response, error) {
+	namespace := pr.PodNamespace
+	podName := pr.PodName
+	if namespace == "" || podName == "" {
+		return nil, fmt.Errorf("required CNI variable missing")
+	}
+	netName := types.DefaultNetworkName
+	if pr.CNIConf.NotDefault {
+		netName = pr.CNIConf.Name
 	}
 
-	if err := pr.PlatformSpecificCleanup(); err != nil {
-		return err
+	vfDevice := ""
+	if pr.CNIConf.DeviceID != "" {
+		pod, err := getPod(podLister, kclient, namespace, podName)
+		if err != nil {
+			klog.Errorf("Failed to get pod %s/%s: %v", namespace, podName, err)
+			return nil, nil
+		}
+		smartNicCD, err := util.UnmarshalPodSmartNicConnDetails(pod.Annotations, netName)
+		if err != nil {
+			klog.Errorf("Failed to get smart-nic annotation for pod %s/%s network %s: %v", namespace, podName, netName, err)
+			return nil, nil
+		}
+		vfDevice = smartNicCD.VfDevName
 	}
-	return nil
+
+	podInterfaceInfo := &PodInterfaceInfo{IsSmartNic: pr.IsSmartNIC, VfNetdevice: vfDevice}
+	response := &Response{}
+
+	if !config.UnprivilegedMode {
+		err := pr.UnconfigureInterface(vfDevice)
+		if err != nil {
+			return nil, err
+		}
+		// succeed, return an empty Result
+		response.Result = &current.Result{}
+	} else {
+		// pass the isSmartNIC flag back to cniShim
+		response.PodIFInfo = podInterfaceInfo
+	}
+	return response, nil
 }
 
 func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface) error {
@@ -248,14 +291,13 @@ func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister, us
 	if request.CNIConf.NotDefault {
 		netName = request.CNIConf.Name
 	}
-
-	klog.Infof("%s %s starting CNI request %+v for pod %s/%s network %s", request, request.Command, *request,
-		request.PodNamespace, request.PodName, netName)
+	klog.Infof("%s %s starting CNI request %+v DeviceID(%q) for pod %s/%s network %s", request, request.Command, request,
+		request.CNIConf.DeviceID, request.PodNamespace, request.PodName, netName)
 	switch request.Command {
 	case CNIAdd:
 		response, err = request.cmdAdd(kubeAuth, podLister, useOVSExternalIDs, kclient)
 	case CNIDel:
-		err = request.cmdDel()
+		response, err = request.cmdDel(podLister, kclient)
 	case CNICheck:
 		err = request.cmdCheck(podLister, useOVSExternalIDs, kclient)
 	default:

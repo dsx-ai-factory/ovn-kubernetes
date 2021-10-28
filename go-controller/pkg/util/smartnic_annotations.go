@@ -46,6 +46,7 @@ type SmartNICConnectionDetails struct {
 	PfId      string `json:"pfId"`
 	VfId      string `json:"vfId"`
 	SandboxId string `json:"sandboxId"`
+	VfDevName string `json:"vfDevName,omitempty"`
 }
 
 type SmartNICConnectionStatus struct {

@@ -226,7 +226,7 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 			}
 
 			//var gwIP net.IP
-			//// TBD CATHY gateway nexthop is different for localnet topotype network
+			//// TBD gateway nexthop is different for localnet topotype network
 			//if oc.nadInfo.TopoType == types.LocalnetAttachDefTopoType {
 			//	gwIPs, err := util.MatchIPFamily(isIPv6, oc.nadInfo.GatewayNextHops)
 			//	if err != nil {

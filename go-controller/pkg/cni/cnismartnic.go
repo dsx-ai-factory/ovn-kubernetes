@@ -37,7 +37,7 @@ func (pr *PodRequest) updatePodSmartNicConnDetailsWithRetry(kube kube.Interface,
 	return nil
 }
 
-func (pr *PodRequest) addSmartNICConnectionDetailsAnnot(kube kube.Interface, netName string) error {
+func (pr *PodRequest) addSmartNICConnectionDetailsAnnot(kube kube.Interface, vfNetDevice, netName string) error {
 	// 1. Verify there is a device id
 	if pr.CNIConf.DeviceID == "" {
 		return fmt.Errorf("DeviceID must be set for Pod request with SmartNIC")
@@ -68,6 +68,7 @@ func (pr *PodRequest) addSmartNICConnectionDetailsAnnot(kube kube.Interface, net
 		PfId:      fmt.Sprint(fn),
 		VfId:      fmt.Sprint(vfindex),
 		SandboxId: pr.SandboxID,
+		VfDevName: vfNetDevice,
 	}
 
 	return pr.updatePodSmartNicConnDetailsWithRetry(kube, &smartNicConnDetails)

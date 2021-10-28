@@ -43,6 +43,7 @@ type PodInterfaceInfo struct {
 	CheckExtIDs bool   `json:"check-external-ids"`
 	IsSmartNic  bool   `json:"smartnic"`
 	PodUID      string `json:"pod-uid"`
+	VfNetdevice string `json:"vf-device"`
 }
 
 // Explicit type for CNI commands the server handles

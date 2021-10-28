@@ -233,18 +233,50 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 
 // CmdDel is the callback for 'teardown' cni calls from skel
 func (p *Plugin) CmdDel(args *skel.CmdArgs) error {
+	var err error
+	var body []byte
+	var pr *PodRequest
+	var conf *ovntypes.NetConf
+
 	startTime := time.Now()
+	defer func() {
+		p.postMetrics(startTime, CNIDel, err)
+		if err != nil {
+			klog.Errorf(err.Error())
+		}
+	}()
+
 	// read the config stdin args
-	conf, err := config.ReadCNIConfig(args.StdinData)
-	if err == nil {
-		setupLogging(conf)
+	conf, err = config.ReadCNIConfig(args.StdinData)
+	if err != nil {
+		return err
+	}
+	setupLogging(conf)
+
+	req := newCNIRequest(args)
+	body, err = p.doCNI("http://dummy/", req)
+	if err != nil {
+		return err
 	}
 
-	_, err = p.doCNI("http://dummy/", newCNIRequest(args))
+	response := &Response{}
+	err = json.Unmarshal(body, response)
 	if err != nil {
-		klog.Errorf(err.Error())
+		err = fmt.Errorf("failed to unmarshal response '%s': %v", string(body), err)
+		return err
 	}
-	p.postMetrics(startTime, CNIDel, err)
+
+	// if no Result, it is privileged mode, do unconfiguration of Interface here.
+	if response.Result == nil {
+		pr, err = cniRequestToPodRequest(req, nil, nil)
+		if err != nil {
+			err = fmt.Errorf("failed to create pod request: %v", err)
+			return err
+		}
+		pr.IsSmartNIC = response.PodIFInfo.IsSmartNic
+		defer pr.cancel()
+		err = pr.UnconfigureInterface(response.PodIFInfo.VfNetdevice)
+	}
 	return err
 }
 

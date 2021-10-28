@@ -55,7 +55,7 @@ func (nc *ovnNodeController) watchSmartNicPods(isOvnUpEnabled bool) {
 					return
 				}
 				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled, true,
-					nc.nadInfo.MTU, nc.nadInfo.NetNameInfo)
+					"", nc.nadInfo.NetNameInfo)
 				if err != nil {
 					klog.Infof("Failed to get pod interface information: %v. retrying", err)
 					retryPods.Store(pod.UID, true)
@@ -98,7 +98,7 @@ func (nc *ovnNodeController) watchSmartNicPods(isOvnUpEnabled bool) {
 					return
 				}
 				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled, true,
-					nc.nadInfo.MTU, nc.nadInfo.NetNameInfo)
+					"", nc.nadInfo.NetNameInfo)
 				if err != nil {
 					klog.Infof("Failed to get pod interface information: %v. retrying", err)
 					return
