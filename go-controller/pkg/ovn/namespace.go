@@ -8,6 +8,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	goovn "github.com/ebay/go-ovn"
@@ -54,11 +55,23 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) {
 func getHostNetworkPodIPs(node *kapi.Node, policyType string) ([]net.IP, error) {
 	ips := []net.IP{}
 	if policyType == string(knet.PolicyTypeIngress) || policyType == "Both" {
+		// the packets from the host towards the Pod IP will have the source IP of the
+		// OVN K8s Management Port
 		mgmtIPs, err := util.GetNodeMgmtIPs(node)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get node %s's management IPs: %v", node.Name, err)
 		}
 		ips = append(ips, mgmtIPs...)
+
+		// the packets from the host towards the Cluster IP will have the source IP of the
+		// Gateway Router to Join Switch port's IP address
+		grJoinIfAddrs, err := util.GetLRPAddrs(types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node.Name)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get node %s's gateway router to join switch IP: %v", node.Name, err)
+		}
+		for _, grJoinIfAddr := range grJoinIfAddrs {
+			ips = append(ips, grJoinIfAddr.IP)
+		}
 	}
 
 	if policyType == string(knet.PolicyTypeEgress) || policyType == "Both" {
