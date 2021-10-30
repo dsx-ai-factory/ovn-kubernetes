@@ -166,15 +166,6 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 	contIface := &current.Interface{}
 	ifnameSuffix := ""
 
-	// 0. if the SR-IOV device is bound to VFIO, then there is nothing to do as it will be passed to the
-	// KVM VM directly
-	if isVFIO := util.GetSriovnetOps().IsVfPciVfioBound(pciAddrs); isVFIO {
-		contIface.Name = ifName
-		contIface.Mac = ifInfo.MAC.String()
-		contIface.Sandbox = netns.Path()
-		return hostIface, contIface, nil
-	}
-
 	// 1. get VF netdevice from PCI
 	vfNetdevices, err := util.GetSriovnetOps().GetNetDevicesFromPci(pciAddrs)
 	if err != nil {
@@ -362,6 +353,17 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 	klog.V(5).Infof("CNI Conf %v", pr.CNIConf)
 	if pr.CNIConf.DeviceID != "" {
 		// SR-IOV Case
+		// if the SR-IOV device is bound to VFIO, then there is nothing to do as it will be passed to the
+		// KVM VM directly
+		if isVFIO := util.GetSriovnetOps().IsVfPciVfioBound(pr.CNIConf.DeviceID); isVFIO {
+			hostIface := &current.Interface{}
+			contIface := &current.Interface{
+				Name:    pr.IfName,
+				Mac:     ifInfo.MAC.String(),
+				Sandbox: netns.Path(),
+			}
+			return []*current.Interface{hostIface, contIface}, nil
+		}
 		hostIface, contIface, err = setupSriovInterface(netns, pr.SandboxID, pr.IfName, ifInfo, pr.CNIConf.DeviceID)
 	} else {
 		if pr.IsSmartNIC {

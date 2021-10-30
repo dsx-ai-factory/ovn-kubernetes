@@ -467,7 +467,7 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpPCIAddrs: "0000:03:00.1",
 			errExp:      true,
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "IsVfPciVfioBound", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{false}},
+				//{OnCallMethodName: "IsVfPciVfioBound", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{false}},
 				{OnCallMethodName: "GetNetDevicesFromPci", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{nil, fmt.Errorf("mock error")}},
 			},
 		},
@@ -482,7 +482,7 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpPCIAddrs: "0000:03:00.1",
 			errMatch:    fmt.Errorf("failed to get one netdevice interface per"),
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "IsVfPciVfioBound", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{false}},
+				//{OnCallMethodName: "IsVfPciVfioBound", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{false}},
 				// e.g; `ls -l /sys/bus/pci/devices/0000:01:00.0/net/` is the equivalent command line to get devices info
 				{OnCallMethodName: "GetNetDevicesFromPci", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{[]string{"en01", "eno2"}, nil}},
 			},
@@ -498,7 +498,7 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpPCIAddrs: "0000:03:00.1",
 			errExp:      true,
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "IsVfPciVfioBound", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{false}},
+				//{OnCallMethodName: "IsVfPciVfioBound", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{false}},
 				{OnCallMethodName: "GetNetDevicesFromPci", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{[]string{"en01"}, nil}},
 				//{OnCallMethodName: "GetUplinkRepresentor", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"testlinkrepresentor", nil}},
 				//{OnCallMethodName: "GetVfIndexByPciAddress", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{0, nil}},
@@ -533,7 +533,7 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpPCIAddrs: "0000:03:00.1",
 			errExp:      true,
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "IsVfPciVfioBound", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{false}},
+				//{OnCallMethodName: "IsVfPciVfioBound", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{false}},
 				{OnCallMethodName: "GetNetDevicesFromPci", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{[]string{"en01"}, nil}},
 				//{OnCallMethodName: "GetUplinkRepresentor", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"testlinkrepresentor", nil}},
 				//{OnCallMethodName: "GetVfIndexByPciAddress", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{0, nil}},
@@ -574,7 +574,7 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpPCIAddrs: "0000:03:00.1",
 			errExp:      true,
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "IsVfPciVfioBound", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{false}},
+				//{OnCallMethodName: "IsVfPciVfioBound", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{false}},
 				{OnCallMethodName: "GetNetDevicesFromPci", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{[]string{"en01"}, nil}},
 				{OnCallMethodName: "GetUplinkRepresentor", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"", fmt.Errorf("mock error")}},
 			},
@@ -610,7 +610,7 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpPCIAddrs: "0000:03:00.1",
 			errExp:      true,
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "IsVfPciVfioBound", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{false}},
+				//{OnCallMethodName: "IsVfPciVfioBound", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{false}},
 				{OnCallMethodName: "GetNetDevicesFromPci", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{[]string{"en01"}, nil}},
 				{OnCallMethodName: "GetUplinkRepresentor", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"testlinkrepresentor", nil}},
 				{OnCallMethodName: "GetVfIndexByPciAddress", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{-1, fmt.Errorf("mock error")}},
@@ -647,7 +647,7 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpPCIAddrs: "0000:03:00.1",
 			errExp:      true,
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "IsVfPciVfioBound", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{false}},
+				//{OnCallMethodName: "IsVfPciVfioBound", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{false}},
 				{OnCallMethodName: "GetNetDevicesFromPci", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{[]string{"en01"}, nil}},
 				{OnCallMethodName: "GetUplinkRepresentor", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"testlinkrepresentor", nil}},
 				{OnCallMethodName: "GetVfIndexByPciAddress", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{0, nil}},
@@ -685,7 +685,7 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpPCIAddrs: "0000:03:00.1",
 			errMatch:    fmt.Errorf("failed to rename"),
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "IsVfPciVfioBound", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{false}},
+				//{OnCallMethodName: "IsVfPciVfioBound", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{false}},
 				{OnCallMethodName: "GetNetDevicesFromPci", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{[]string{"en01"}, nil}},
 				{OnCallMethodName: "GetUplinkRepresentor", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"testlinkrepresentor", nil}},
 				{OnCallMethodName: "GetVfIndexByPciAddress", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{0, nil}},
@@ -716,7 +716,7 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpPCIAddrs: "0000:03:00.1",
 			errExp:      true,
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "IsVfPciVfioBound", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{false}},
+				//{OnCallMethodName: "IsVfPciVfioBound", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{false}},
 				{OnCallMethodName: "GetNetDevicesFromPci", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{[]string{"en01"}, nil}},
 				{OnCallMethodName: "GetUplinkRepresentor", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"testlinkrepresentor", nil}},
 				{OnCallMethodName: "GetVfIndexByPciAddress", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{0, nil}},
@@ -752,7 +752,7 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpPCIAddrs: "0000:03:00.1",
 			errMatch:    fmt.Errorf("failed to set MTU on"),
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "IsVfPciVfioBound", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{false}},
+				//{OnCallMethodName: "IsVfPciVfioBound", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{false}},
 				{OnCallMethodName: "GetNetDevicesFromPci", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{[]string{"en01"}, nil}},
 				{OnCallMethodName: "GetUplinkRepresentor", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"testlinkrepresentor", nil}},
 				{OnCallMethodName: "GetVfIndexByPciAddress", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{0, nil}},
@@ -795,7 +795,7 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpPCIAddrs: "0000:03:00.1",
 			errExp:      false,
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "IsVfPciVfioBound", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{false}},
+				//{OnCallMethodName: "IsVfPciVfioBound", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{false}},
 				{OnCallMethodName: "GetNetDevicesFromPci", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{[]string{"en01"}, nil}},
 			},
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
