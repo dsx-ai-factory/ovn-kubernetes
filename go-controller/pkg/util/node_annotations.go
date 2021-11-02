@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -51,6 +52,9 @@ const (
 
 	// ovnNodeChassisID is the systemID of the node needed for creating L3 gateway
 	ovnNodeChassisID = "k8s.ovn.org/node-chassis-id"
+
+	// skipPinnedLS specifies whether the node logial switch should be pinned or not
+	skipPinnedLS = "k8s.ovn.org/node-skip-pinned-logical-switch"
 
 	// ovnNodeCIDR is the CIDR form representation of primary network interface's attached IP address (i.e: 192.168.126.31/24 or 0:0:0:0:0:feff:c0a8:8e0c/64)
 	ovnNodeIfAddr = "k8s.ovn.org/node-primary-ifaddr"
@@ -283,6 +287,16 @@ func ParseNodeChassisIDAnnotation(node *kapi.Node) (string, error) {
 	}
 
 	return chassisID, nil
+}
+
+// ParseSkipPinnedLSAnnotation returns the node's skipPinnedLSAnnotation annotation
+func ParseSkipPinnedLSAnnotation(node *kapi.Node) bool {
+	skip, ok := node.Annotations[skipPinnedLS]
+	if !ok {
+		return false
+	}
+
+	return strings.ToLower(skip) == "true"
 }
 
 func SetNodeManagementPortMACAddress(nodeAnnotator kube.Annotator, macAddress net.HardwareAddr) error {
