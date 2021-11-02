@@ -54,7 +54,20 @@ func (pr *PodRequest) addSmartNICConnectionDetailsAnnot(kube kube.Interface, vfN
 		return err
 	}
 
-	// 3. Set smart-nic connection-details pod annotation
+	// 3. Get the PF MAC Address from pciAddress
+	pfNetdevs, err := util.GetSriovnetOps().GetNetDevicesFromPci(pfPciAddress)
+	if err != nil {
+		return fmt.Errorf("failed to get the PF name from the PCI Address: %s, %v", pfPciAddress, err)
+	}
+	if len(pfNetdevs) != 1 {
+		return fmt.Errorf("found %d PF name(s) - %s - for the PCI Address: %s", len(pfNetdevs), pfNetdevs, pfPciAddress)
+	}
+	pfLink, err := util.GetNetLinkOps().LinkByName(pfNetdevs[0])
+	if err != nil {
+		return fmt.Errorf("failed to get netlink object for link name: %s, %v", pfNetdevs[0], err)
+	}
+
+	// 4. Set smart-nic connection-details pod annotation
 	var domain, bus, dev, fn int
 	parsed, err := fmt.Sscanf(pfPciAddress, "%04x:%02x:%02x.%d", &domain, &bus, &dev, &fn)
 	if err != nil {
@@ -67,6 +80,7 @@ func (pr *PodRequest) addSmartNICConnectionDetailsAnnot(kube kube.Interface, vfN
 	smartNicConnDetails := util.SmartNICConnectionDetails{
 		PfId:      fmt.Sprint(fn),
 		VfId:      fmt.Sprint(vfindex),
+		PfMAC:     pfLink.Attrs().HardwareAddr.String(),
 		SandboxId: pr.SandboxID,
 		VfDevName: vfNetDevice,
 	}

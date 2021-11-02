@@ -19,8 +19,24 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
+func (nc *ovnNodeController) shouldSmartNICHandleThisPod(pod *kapi.Pod, pfMACs []string) (bool, error) {
+	// Get the `pfMAC` from the pod annotation
+	smartNicCD, err := util.UnmarshalPodSmartNicConnDetails(pod.Annotations, nc.nadInfo.NetName)
+	if err != nil {
+		return false, fmt.Errorf("failed to get smart-nic annotation for pod %s/%s network %s: %v",
+			pod.Namespace, pod.Name, nc.nadInfo.NetName, err)
+	}
+
+	for _, pfMAC := range pfMACs {
+		if pfMAC == smartNicCD.PfMAC {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 //watchSmartNicPods watch updates for pod smart nic annotations
-func (nc *ovnNodeController) watchSmartNicPods(isOvnUpEnabled bool) {
+func (nc *ovnNodeController) watchSmartNicPods(isOvnUpEnabled bool, pfMACs []string) {
 	var retryPods sync.Map
 	// servedPods tracks the pods that got a VF
 	var servedPods sync.Map
@@ -45,6 +61,15 @@ func (nc *ovnNodeController) watchSmartNicPods(isOvnUpEnabled bool) {
 			if util.PodScheduled(pod) {
 				// Is this pod created on same node where the smart NIC
 				if n.name != pod.Spec.NodeName {
+					return
+				}
+				// Check if the ovnkube-node instance of BF2 should handle this Pod or not
+				if handle, err := nc.shouldSmartNICHandleThisPod(pod, pfMACs); err != nil {
+					klog.Infof("Failed to check whether ovnkube-node should handle this pod %s/%s, err: %v. retrying",
+						pod.Namespace, pod.Name, err)
+					retryPods.Store(pod.UID, true)
+					return
+				} else if !handle {
 					return
 				}
 
@@ -92,6 +117,17 @@ func (nc *ovnNodeController) watchSmartNicPods(isOvnUpEnabled bool) {
 					retryPods.Delete(pod.UID)
 					return
 				}
+
+				// Check if the ovnkube-node instance of BF2 should handle this Pod or not
+				if handle, err := nc.shouldSmartNICHandleThisPod(pod, pfMACs); err != nil {
+					klog.Infof("Failed to check whether ovnkube-node should handle this pod %s/%s that was updated, err: %v. retrying",
+						pod.Namespace, pod.Name, err)
+					return
+				} else if !handle {
+					retryPods.Delete(pod.UID)
+					return
+				}
+
 				vfRepName, err := nc.getVfRepName(pod)
 				if err != nil {
 					klog.Infof("Failed to get rep name, %s. retrying", err)

@@ -7,9 +7,12 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	kubeMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	netlink_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
+	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"time"
@@ -18,13 +21,20 @@ import (
 var _ = Describe("cnismartnic tests", func() {
 	var fakeKubeInterface kubeMocks.KubeInterface
 	var fakeSriovnetOps utilMocks.SriovnetOps
+	var mockNetLinkOps *utilMocks.NetLinkOps
+	var existingMockLink *netlink_mocks.Link
 	var pr PodRequest
 	var pod *v1.Pod
 
 	BeforeEach(func() {
 		fakeKubeInterface = kubeMocks.KubeInterface{}
 		fakeSriovnetOps = utilMocks.SriovnetOps{}
+		mockNetLinkOps = new(utilMocks.NetLinkOps)
+		existingMockLink = new(netlink_mocks.Link)
+		util.SetNetLinkOpMockInst(mockNetLinkOps)
 		util.SetSriovnetOpsInst(&fakeSriovnetOps)
+		existingMockLink.On("Attrs").Return(&netlink.LinkAttrs{HardwareAddr: ovntest.MustParseMAC("00:00:00:01:02:03")})
+
 		pr = PodRequest{
 			Command:      CNIAdd,
 			PodNamespace: "foo-ns",
@@ -52,9 +62,12 @@ var _ = Describe("cnismartnic tests", func() {
 			pr.CNIConf.DeviceID = "0000:05:00.4"
 			fakeSriovnetOps.On("GetPfPciFromVfPci", pr.CNIConf.DeviceID).Return("0000:05:00.0", nil)
 			fakeSriovnetOps.On("GetVfIndexByPciAddress", pr.CNIConf.DeviceID).Return(2, nil)
+			fakeSriovnetOps.On("GetNetDevicesFromPci", "0000:05:00.0").Return([]string{"enp1s0f0"}, nil)
+			mockNetLinkOps.On("LinkByName", "enp1s0f0").Return(existingMockLink, nil)
 			smartNicCd := util.SmartNICConnectionDetails{
 				PfId:      "0",
 				VfId:      "2",
+				PfMAC:     "00:00:00:01:02:03",
 				SandboxId: pr.SandboxID,
 			}
 			fakeKubeInterface.On("GetPod", pr.PodNamespace, pr.PodName).Return(pod, nil)
@@ -92,6 +105,8 @@ var _ = Describe("cnismartnic tests", func() {
 			pr.CNIConf.DeviceID = "0000:05:00.4"
 			fakeSriovnetOps.On("GetPfPciFromVfPci", pr.CNIConf.DeviceID).Return("05:00.0", nil)
 			fakeSriovnetOps.On("GetVfIndexByPciAddress", pr.CNIConf.DeviceID).Return(2, nil)
+			fakeSriovnetOps.On("GetNetDevicesFromPci", "05:00.0").Return([]string{"enp1s0f0"}, nil)
+			mockNetLinkOps.On("LinkByName", "enp1s0f0").Return(existingMockLink, nil)
 			err := pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface, "", ovntypes.DefaultNetworkName)
 			Expect(err).To(HaveOccurred())
 		})
@@ -100,9 +115,12 @@ var _ = Describe("cnismartnic tests", func() {
 			pr.CNIConf.DeviceID = "0000:05:00.4"
 			fakeSriovnetOps.On("GetPfPciFromVfPci", pr.CNIConf.DeviceID).Return("0000:05:00.0", nil)
 			fakeSriovnetOps.On("GetVfIndexByPciAddress", pr.CNIConf.DeviceID).Return(2, nil)
+			fakeSriovnetOps.On("GetNetDevicesFromPci", "0000:05:00.0").Return([]string{"enp1s0f0"}, nil)
+			mockNetLinkOps.On("LinkByName", "enp1s0f0").Return(existingMockLink, nil)
 			smartNicCd := util.SmartNICConnectionDetails{
 				PfId:      "0",
 				VfId:      "2",
+				PfMAC:     "00:00:00:01:02:03",
 				SandboxId: pr.SandboxID,
 			}
 			fakeKubeInterface.On("GetPod", pr.PodNamespace, pr.PodName).Return(pod, nil)

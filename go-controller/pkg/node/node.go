@@ -581,7 +581,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		var nodeIP string
 		nodeIP, err = util.GetNodePrimaryIP(node)
 		if err != nil {
-			klog.Errorf("Failed to obtain local IP from node %q: %v", node.Name, err)
+			return fmt.Errorf("failed to obtain local IP from node %q: %v", node.Name, err)
 		}
 
 		n.WatchEndpointSlices(nodeIP)
@@ -605,7 +605,12 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		nc, _ := n.NewOvnNodeController(nadInfo)
 
 		if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
-			nc.watchSmartNicPods(n.ovnUpEnabled)
+			// Get all the PFMACs on the Smart NIC Host
+			pfMACs, err := util.GetAllSmartNICHostPFMACAddress()
+			if err != nil {
+				return fmt.Errorf("failed to get the MAC address for all the PFs on the host: %v", err)
+			}
+			nc.watchSmartNicPods(n.ovnUpEnabled, pfMACs)
 		}
 		nc.added = true
 
@@ -730,7 +735,13 @@ func (n *OvnNode) addNetworkAttachDefinition(netattachdef *nettypes.NetworkAttac
 	}
 
 	if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
-		nc.watchSmartNicPods(n.ovnUpEnabled)
+		// Get all the PFMACs on the Smart NIC Host
+		pfMACs, err := util.GetAllSmartNICHostPFMACAddress()
+		if err != nil {
+			// TODO(gmoodalbail): should this be fatal error
+			klog.Errorf("Failed to get the MAC address for all the PFs on the host: %v", err)
+		}
+		nc.watchSmartNicPods(n.ovnUpEnabled, pfMACs)
 	}
 }
 

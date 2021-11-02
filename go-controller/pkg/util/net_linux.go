@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 
 	kapi "k8s.io/api/core/v1"
 
+	"github.com/Mellanox/sriovnet"
+	utilfs "github.com/Mellanox/sriovnet/pkg/utils/filesystem"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 
@@ -449,4 +452,50 @@ func GetIFNameAndMTUForAddress(ifAddress net.IP) (string, int, error) {
 	}
 
 	return "", 0, fmt.Errorf("couldn't not find a link associated with the given OVN Encap IP (%s)", ifAddress)
+}
+
+// TODO(gmoodalbail): This funciton is copied over from the sriovnet library
+func isSwitchdev(netdevice string) bool {
+	swIDFile := filepath.Join(sriovnet.NetSysDir, netdevice, "phys_switch_id")
+	physSwitchID, err := utilfs.Fs.ReadFile(swIDFile)
+	if err != nil {
+		return false
+	}
+	if physSwitchID != nil && string(physSwitchID) != "" {
+		return true
+	}
+	return false
+}
+
+// GetAllSmartNICHostPFMACAddress returns the MAC addresses of all the Host PFs (pf0hpf, pf1hpf, and so on)
+func GetAllSmartNICHostPFMACAddress() ([]string, error) {
+	links, err := GetNetLinkOps().LinkList()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list network devices in the system. %v", err)
+	}
+
+	var pfMACs []string
+	for _, link := range links {
+		linkName := link.Attrs().Name
+		if !isSwitchdev(linkName) {
+			continue
+		}
+		flavor, err := GetSriovnetOps().GetRepresentorPortFlavour(linkName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get flavor for representor port %q error: %v",
+				linkName, err)
+		}
+		if flavor != sriovnet.PORT_FLAVOUR_PCI_PF {
+			continue
+		}
+		// host representor interface found, find the peer MAC address
+		macAddress, err := GetSriovnetOps().GetRepresentorPeerMacAddress(linkName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get the MAC address for the Host "+
+				"Representor Port %q: %v", linkName, err)
+		}
+		pfMACs = append(pfMACs, macAddress.String())
+	}
+
+	return pfMACs, nil
 }

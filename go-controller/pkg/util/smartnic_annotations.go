@@ -45,6 +45,7 @@ const (
 type SmartNICConnectionDetails struct {
 	PfId      string `json:"pfId"`
 	VfId      string `json:"vfId"`
+	PfMAC     string `json:"pfMac,omitempty"`
 	SandboxId string `json:"sandboxId"`
 	VfDevName string `json:"vfDevName,omitempty"`
 }
