@@ -50,6 +50,7 @@ spec:
 
         securityContext:
           runAsUser: 0
+          privileged: true
           capabilities:
             add:
             - NET_ADMIN
@@ -86,6 +87,8 @@ spec:
         - mountPath: /etc/ovn/
           name: host-var-lib-ovs
           readOnly: true
+        - mountPath: /sys
+          name: sysfs
 
 
 
@@ -178,6 +181,9 @@ spec:
       #          periodSeconds: 60
 
       volumes:
+      - name: sysfs
+        hostPath:
+          path: /sys
       - name: host-var-run-dbus
         hostPath:
           path: /var/run/dbus
