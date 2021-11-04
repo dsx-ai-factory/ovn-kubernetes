@@ -275,7 +275,7 @@ func (p *Plugin) CmdDel(args *skel.CmdArgs) error {
 		}
 		pr.IsSmartNIC = response.PodIFInfo.IsSmartNic
 		defer pr.cancel()
-		err = pr.UnconfigureInterface(response.PodIFInfo.VfNetdevice)
+		err = pr.UnconfigureInterface(response.PodIFInfo.VfNetdevice, response.PodIFInfo.IsVFIO)
 	}
 	return err
 }

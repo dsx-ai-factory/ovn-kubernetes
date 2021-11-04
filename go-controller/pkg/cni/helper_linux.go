@@ -344,7 +344,7 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 		// SR-IOV Case
 		// if the SR-IOV device is bound to VFIO, then there is nothing to do as it will be passed to the
 		// KVM VM directly
-		if isVFIO := util.GetSriovnetOps().IsVfPciVfioBound(pr.CNIConf.DeviceID); isVFIO {
+		if ifInfo.IsVFIO {
 			hostIface := &current.Interface{}
 			contIface := &current.Interface{
 				Name:    pr.IfName,
@@ -402,18 +402,16 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 	return []*current.Interface{hostIface, contIface}, nil
 }
 
-func (pr *PodRequest) UnconfigureInterface(oldVfName string) error {
+func (pr *PodRequest) UnconfigureInterface(oldVfName string, isVFIO bool) error {
 	podDesc := fmt.Sprintf("for pod %s/%s network %s", pr.PodNamespace, pr.PodName, pr.CNIConf.Name)
 	klog.V(5).Infof("Tear down interface %+v CNI Conf %v %s", *pr, pr.CNIConf, podDesc)
 	if pr.CNIConf.DeviceID == "" && pr.IsSmartNIC {
 		klog.Warningf("Unexpected configuration %s, pod request on smart-nic host. device ID must be provided", podDesc)
 		return nil
 	}
-	if pr.CNIConf.DeviceID != "" {
-		if isVFIO := util.GetSriovnetOps().IsVfPciVfioBound(pr.CNIConf.DeviceID); isVFIO {
-			klog.V(5).Infof("VFIO case %s, nothing to do", podDesc)
-			return nil
-		}
+	if isVFIO {
+		klog.V(5).Infof("VFIO case %s, nothing to do", podDesc)
+		return nil
 	}
 
 	// 1. For SRIOV case, we'd need to move the VF from container namespace back to the host namespace

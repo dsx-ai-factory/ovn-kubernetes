@@ -110,21 +110,25 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 	annotCondFn := isOvnReady
 
 	vfNetdevice := ""
+	isVFIO := false
 	if pr.CNIConf.DeviceID != "" {
-		// Add Smart-NIC connection-details annotation so ovnkube-node running on smart-NIC
-		// performs the needed network plumbing.
+		isVFIO = util.GetSriovnetOps().IsVfPciVfioBound(pr.CNIConf.DeviceID)
+		if !isVFIO {
+			// Add Smart-NIC connection-details annotation so ovnkube-node running on smart-NIC
+			// performs the needed network plumbing.
 
-		// Get the vf device Name
-		vfNetdevices, err := util.GetSriovnetOps().GetNetDevicesFromPci(pr.CNIConf.DeviceID)
-		if err != nil {
-			return nil, err
+			// Get the vf device Name
+			vfNetdevices, err := util.GetSriovnetOps().GetNetDevicesFromPci(pr.CNIConf.DeviceID)
+			if err != nil {
+				return nil, err
 
+			}
+			// Make sure we have 1 netdevice per pci address
+			if len(vfNetdevices) != 1 {
+				return nil, fmt.Errorf("failed to get one netdevice interface per %s", pr.CNIConf.DeviceID)
+			}
+			vfNetdevice = vfNetdevices[0]
 		}
-		// Make sure we have 1 netdevice per pci address
-		if len(vfNetdevices) != 1 {
-			return nil, fmt.Errorf("failed to get one netdevice interface per %s", pr.CNIConf.DeviceID)
-		}
-		vfNetdevice = vfNetdevices[0]
 	}
 
 	if pr.IsSmartNIC {
@@ -144,7 +148,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 	}
 
 	netNameInfo := util.NetNameInfo{NetName: netName, Prefix: netPrefix, NotDefault: pr.CNIConf.NotDefault}
-	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, useOVSExternalIDs, pr.IsSmartNIC, vfNetdevice, netNameInfo)
+	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, useOVSExternalIDs, pr.IsSmartNIC, isVFIO, vfNetdevice, netNameInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -164,6 +168,10 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 }
 
 func (pr *PodRequest) cmdDel(podLister corev1listers.PodLister, kclient kubernetes.Interface) (*Response, error) {
+	// assume success case, return an empty Result
+	response := &Response{}
+	response.Result = &current.Result{}
+
 	namespace := pr.PodNamespace
 	podName := pr.PodName
 	if namespace == "" || podName == "" {
@@ -175,32 +183,37 @@ func (pr *PodRequest) cmdDel(podLister corev1listers.PodLister, kclient kubernet
 	}
 
 	vfDevice := ""
+	isVFIO := false
 	if pr.CNIConf.DeviceID != "" {
-		pod, err := getPod(podLister, kclient, namespace, podName)
-		if err != nil {
-			klog.Errorf("Failed to get pod %s/%s: %v", namespace, podName, err)
-			return nil, nil
+		isVFIO = util.GetSriovnetOps().IsVfPciVfioBound(pr.CNIConf.DeviceID)
+		if isVFIO {
+			return response, nil
 		}
-		smartNicCD, err := util.UnmarshalPodSmartNicConnDetails(pod.Annotations, netName)
-		if err != nil {
-			klog.Errorf("Failed to get smart-nic annotation for pod %s/%s network %s: %v", namespace, podName, netName, err)
-			return nil, nil
+		if !isVFIO {
+			pod, err := getPod(podLister, kclient, namespace, podName)
+			if err != nil {
+				klog.Errorf("Failed to get pod %s/%s: %v", namespace, podName, err)
+				return response, nil
+			}
+			smartNicCD, err := util.UnmarshalPodSmartNicConnDetails(pod.Annotations, netName)
+			if err != nil {
+				klog.Errorf("Failed to get smart-nic annotation for pod %s/%s network %s: %v", namespace, podName, netName, err)
+				return response, nil
+			}
+			vfDevice = smartNicCD.VfDevName
 		}
-		vfDevice = smartNicCD.VfDevName
 	}
 
-	podInterfaceInfo := &PodInterfaceInfo{IsSmartNic: pr.IsSmartNIC, VfNetdevice: vfDevice}
-	response := &Response{}
-
+	podInterfaceInfo := &PodInterfaceInfo{IsSmartNic: pr.IsSmartNIC, VfNetdevice: vfDevice, IsVFIO: isVFIO}
 	if !config.UnprivilegedMode {
-		err := pr.UnconfigureInterface(vfDevice)
+		err := pr.UnconfigureInterface(vfDevice, isVFIO)
 		if err != nil {
 			return nil, err
 		}
 		// succeed, return an empty Result
-		response.Result = &current.Result{}
 	} else {
 		// pass the isSmartNIC flag back to cniShim
+		response.Result = nil
 		response.PodIFInfo = podInterfaceInfo
 	}
 	return response, nil
