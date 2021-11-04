@@ -147,7 +147,8 @@ var (
 	MetricsScrapeInterval int
 	// OvnKubeNode holds ovnkube-node parsed config file parameters and command-line overrides
 	OvnKubeNode = OvnKubeNodeConfig{
-		Mode: types.NodeModeFull,
+		Mode:              types.NodeModeFull,
+		IsPrimarySmartNIC: true,
 	}
 )
 
@@ -362,6 +363,7 @@ type OvnKubeNodeConfig struct {
 	Mode                 string `gcfg:"mode"`
 	MgmtPortNetdev       string `gcfg:"mgmt-port-netdev"`
 	DisableOVNIfaceIdVer bool   `gcfg:"disable-ovn-iface-id-ver"`
+	IsPrimarySmartNIC    bool
 }
 
 // OvnDBScheme describes the OVN database connection transport method
@@ -1928,5 +1930,12 @@ func buildOvnKubeNodeConfig(ctx *cli.Context, cli, file *config) error {
 				OvnKubeNode.Mode)
 		}
 	}
+
+	// if we are running on the SmartNIC, determine if this smartNIC is primary or not
+	if OvnKubeNode.Mode == types.NodeModeSmartNIC {
+		isPrimaryDPU := os.Getenv("OVN_BF2_PRIMARY")
+		OvnKubeNode.IsPrimarySmartNIC = (isPrimaryDPU == "" || strings.ToLower(isPrimaryDPU) == "true")
+	}
+
 	return nil
 }

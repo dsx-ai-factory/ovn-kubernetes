@@ -30,6 +30,9 @@ func newManagementPortSmartNIC(nodeName string, hostSubnets []*net.IPNet) Manage
 }
 
 func (mp *managementPortSmartNIC) Create(nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
+	if !config.OvnKubeNode.IsPrimarySmartNIC {
+		return &managementPortConfig{}, nil
+	}
 	// Get management port representor name
 	link, err := util.GetNetLinkOps().LinkByName(mp.vfRepName)
 	if err != nil {

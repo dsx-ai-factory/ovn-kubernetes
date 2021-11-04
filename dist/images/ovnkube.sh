@@ -1318,7 +1318,12 @@ ovn-node() {
       exit 1
     fi
 
-    if [[ ${ovn_gateway_opts} == "" ]]; then
+    is_bf2_primary=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-primary-bf2 | tr -d \")
+    if [[ ${is_bf2_primary} == "" ]]; then
+      is_bf2_primary="true"
+    fi
+    export OVN_BF2_PRIMARY=${is_bf2_primary}
+    if [[ ${ovn_gateway_opts} == "" && ${is_bf2_primary} == "true" ]]; then
       # get the gateway interface
       gw_iface=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-interface | tr -d \")
       if [[ ${gw_iface} == "" ]]; then
@@ -1345,11 +1350,11 @@ ovn-node() {
     fi
 
     # this is required if the DPU and DPU Host are in different subnets
-    if [[ ${ovn_gateway_router_subnet} == "" ]]; then
+    if [[ ${ovn_gateway_router_subnet} == "" && ${is_bf2_primary} == "true" ]]; then
       # get the gateway router subnet
       ovn_gateway_router_subnet=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-router-subnet | tr -d \")
       if [[ ${ovn_gateway_router_subnet} == "" ]]; then
-        echo "Could get the required OVN Gateway Router Subnet. Exiting..."
+        echo "Could not get the required OVN Gateway Router Subnet. Exiting..."
         exit 1
       fi
     fi

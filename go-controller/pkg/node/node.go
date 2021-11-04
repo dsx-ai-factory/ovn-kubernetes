@@ -587,7 +587,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		n.WatchEndpointSlices(nodeIP)
 	}
 
-	if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
+	if config.OvnKubeNode.Mode == types.NodeModeSmartNIC && config.OvnKubeNode.IsPrimarySmartNIC {
 		n.WatchEndpointSlicesOnSmartNIC()
 	}
 

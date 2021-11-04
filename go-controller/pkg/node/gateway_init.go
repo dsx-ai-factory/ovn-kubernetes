@@ -257,10 +257,18 @@ func configureSvcRouteViaInterface(iface string, gwIPs []net.IP) error {
 
 func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator,
 	waiter *startupWaiter, managementPortConfig *managementPortConfig, kubeNodeIP net.IP) error {
-	klog.Info("Initializing Gateway Functionality")
 	var err error
 	var ifAddrs []*net.IPNet
+	var gw *gateway
 
+	// we need to setup gateway configuration only on the 1st BF2 adapter
+	if config.OvnKubeNode.Mode == types.NodeModeSmartNIC && !config.OvnKubeNode.IsPrimarySmartNIC {
+		klog.Info("Skipping Gateway functionally on this DPU since it is not a primary DPU")
+		n.gateway = &gateway{}
+		return n.validateVTEPInterfaceMTU()
+	}
+
+	klog.Info("Initializing Gateway Functionality")
 	var loadBalancerHealthChecker *loadBalancerHealthChecker
 	var portClaimWatcher *portClaimWatcher
 
@@ -303,7 +311,6 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 		klog.Errorf("Unable to set primary IP net label on node, err: %v", err)
 	}
 
-	var gw *gateway
 	switch config.Gateway.Mode {
 	case config.GatewayModeLocal:
 		klog.Info("Preparing Local Gateway")
