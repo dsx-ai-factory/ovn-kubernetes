@@ -161,7 +161,12 @@ func (gp *gressPolicy) addPeerPods(oc *Controller, pods ...*v1.Pod) error {
 	}
 	ips := make([]net.IP, 0, len(pods)*podIPFactor)
 	for _, pod := range pods {
-		if pod.Spec.HostNetwork && !oc.nadInfo.NotDefault {
+		if pod.Spec.HostNetwork {
+			// the NAD should be the default network since we don't allow Multi-homed networks
+			// for host network pods
+			if oc.nadInfo.NotDefault {
+				continue
+			}
 			gp.nodeHostNetPodsCacheLock.Lock()
 			err := oc.addHostnetworkPodIPToAddressSet(pod.Spec.NodeName, fmt.Sprintf("%s/%s", pod.Namespace, pod.Name),
 				string(gp.policyType), gp.peerAddressSet, gp.nodeHostNetPodsCache)
