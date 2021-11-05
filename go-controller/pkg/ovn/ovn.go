@@ -1451,8 +1451,17 @@ func (mc *OvnMHController) initOvnController(netattachdef *nettypes.NetworkAttac
 		return nil, err
 	}
 
+	// nadName must be in the correct form for non-default net-attach-def
+	if nadInfo.NotDefault {
+		nadName := util.GetNadName(netattachdef.Namespace, netattachdef.Name, !nadInfo.NotDefault)
+		if netconf.NadName != nadName {
+			return nil, fmt.Errorf("unexpected net_attach_def_name %s of Network Attachment Definition %s/%s, expected: %s",
+				netconf.NadName, netattachdef.Namespace, netattachdef.Name, nadName)
+		}
+	}
+
 	if !nadInfo.NotDefault {
-		mc.ovnController.nadInfo.NetAttachDefs.Store(netattachdef.Namespace+"_"+netattachdef.Name, true)
+		mc.ovnController.nadInfo.NetAttachDefs.Store(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name), true)
 		return mc.ovnController, nil
 	}
 
@@ -1470,12 +1479,12 @@ func (mc *OvnMHController) initOvnController(netattachdef *nettypes.NetworkAttac
 			return nil, fmt.Errorf("network attachment definition %s/%s does not share the same CNI config of name %s",
 				netattachdef.Namespace, netattachdef.Name, nadInfo.NetName)
 		} else {
-			oc.nadInfo.NetAttachDefs.Store(netattachdef.Namespace+"_"+netattachdef.Name, true)
+			oc.nadInfo.NetAttachDefs.Store(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name), true)
 			return oc, nil
 		}
 	}
 
-	nadInfo.NetAttachDefs.Store(netattachdef.Namespace+"_"+netattachdef.Name, true)
+	nadInfo.NetAttachDefs.Store(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name), true)
 	return mc.NewOvnController(nadInfo, nil)
 }
 
@@ -1526,8 +1535,17 @@ func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.
 		return
 	}
 
+	if netconf.NadName != "" {
+		nadName := util.GetNadName(netattachdef.Namespace, netattachdef.Name, !nadInfo.NotDefault)
+		if netconf.NadName != nadName {
+			klog.Errorf("Unexpected net_attach_def_name %s of Network Attachment Definition %s/%s, expected: %s",
+				netconf.NadName, netattachdef.Namespace, netattachdef.Name, nadName)
+			return
+		}
+	}
+
 	if !nadInfo.NotDefault {
-		mc.ovnController.nadInfo.NetAttachDefs.Delete(netattachdef.Namespace + "_" + netattachdef.Name)
+		mc.ovnController.nadInfo.NetAttachDefs.Delete(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name))
 		return
 	}
 
@@ -1538,7 +1556,7 @@ func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.
 	}
 
 	oc := v.(*Controller)
-	oc.nadInfo.NetAttachDefs.Delete(netattachdef.Namespace + "_" + netattachdef.Name)
+	oc.nadInfo.NetAttachDefs.Delete(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name))
 
 	// check if there any net-attach-def sharing the same CNI conf name left, if yes, just return
 	netAttachDefLeft := false

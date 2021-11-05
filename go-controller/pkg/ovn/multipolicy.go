@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"strings"
 
 	multinetworkpolicy "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
@@ -132,7 +133,7 @@ func (oc *Controller) addMultiNetworkPolicy(mpolicy *multinetworkpolicy.MultiNet
 			networkName = a[1]
 			expectedNamespace = a[0]
 		}
-		if _, ok := oc.nadInfo.NetAttachDefs.Load(expectedNamespace + "_" + networkName); ok {
+		if _, ok := oc.nadInfo.NetAttachDefs.Load(util.GetNadKeyName(expectedNamespace, networkName)); ok {
 			found = true
 			break
 		}
@@ -164,7 +165,7 @@ func (oc *Controller) deleteMultiNetworkPolicy(mpolicy *multinetworkpolicy.Multi
 			networkName = a[1]
 			expectedNamespace = a[0]
 		}
-		if _, ok := oc.nadInfo.NetAttachDefs.Load(expectedNamespace + "_" + networkName); ok {
+		if _, ok := oc.nadInfo.NetAttachDefs.Load(util.GetNadKeyName(expectedNamespace, networkName)); ok {
 			found = true
 			break
 		}

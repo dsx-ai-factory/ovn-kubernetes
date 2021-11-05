@@ -1,6 +1,7 @@
 package node
 
 import (
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"os"
 	"strings"
 	"sync"
@@ -192,7 +193,7 @@ func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCac
 			// Note: wf (WatchFactory) *usually* returns pods assigned to this node, however we dont rely on it
 			// and add this check to filter out pods assigned to other nodes. (e.g when ovnkube master and node
 			// share the same process)
-			expectedIfaceIdsWithoutPrefix[util.GetIfaceId(pod.Namespace, pod.Name, "")] = true
+			expectedIfaceIdsWithoutPrefix[util.GetIfaceId(pod.Namespace, pod.Name, types.DefaultNetworkName, true)] = true
 		}
 	}
 
@@ -205,12 +206,12 @@ func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCac
 			continue
 		}
 		prefix := ""
-		netName, ok := ifaceInfo.Attributes["network_name"]
+		nadName, ok := ifaceInfo.Attributes["network_name"]
 		if ok {
-			prefix = util.GetNetworkPrefix(netName, false)
+			prefix = util.GetNetworkPrefix(nadName, false)
 			if !strings.HasPrefix(ifaceId, prefix) {
 				klog.Warningf("iface-id of OVS interface %s for network %s is invalid: %s", ifaceInfo.Name,
-					netName, ifaceId)
+					nadName, ifaceId)
 				continue
 			}
 			ifaceId = strings.TrimPrefix(ifaceId, prefix)

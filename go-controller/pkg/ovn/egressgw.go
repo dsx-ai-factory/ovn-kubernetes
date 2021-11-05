@@ -104,7 +104,7 @@ func (oc *Controller) addExternalGWsForNamespace(egress gatewayInfo, nsInfo *nam
 }
 
 // addGWRoutesForNamespace handles adding routes for all existing pods in namespace
-// This should only be called with a lock on nsInfo
+// This should only be called with a lock on nsInfo, default network only
 func (oc *Controller) addGWRoutesForNamespace(namespace string, egress gatewayInfo, nsInfo *namespaceInfo) error {
 	existingPods, err := oc.mc.watchFactory.GetPods(namespace)
 	if err != nil {
@@ -113,7 +113,7 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, egress gatewayIn
 	// TODO (trozet): use the go bindings here and batch commands
 	for _, pod := range existingPods {
 		if config.Gateway.DisableSNATMultipleGWs {
-			logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name, oc.nadInfo.Prefix)
+			logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name, types.DefaultNetworkName, !oc.nadInfo.NotDefault)
 			portInfo, err := oc.logicalPortCache.get(logicalPort)
 			if err != nil {
 				klog.Warningf("Unable to get port %s in cache for SNAT rule removal", logicalPort)

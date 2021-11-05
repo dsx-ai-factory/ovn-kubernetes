@@ -16,7 +16,6 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -36,6 +35,50 @@ func (nc *ovnNodeController) shouldSmartNICHandleThisPod(pod *kapi.Pod, nadName 
 	return false, nil
 }
 
+func (nc *ovnNodeController) addSmartNicPod4Nad(pod *kapi.Pod, pfMACs []string, isOvnUpEnabled bool, nadName string,
+	podLister corev1listers.PodLister, kclient kubernetes.Interface) error {
+	podDesc := fmt.Sprintf("pod %s/%s on network %s", pod.Namespace, pod.Name, nadName)
+	// Check if the ovnkube-node instance of BF2 should handle this Pod or not
+	if handle, err := nc.shouldSmartNICHandleThisPod(pod, nadName, pfMACs); err != nil {
+		klog.Infof("Failed to check whether ovnkube-node should handle %s, err: %v. retrying",
+			podDesc, err)
+		return err
+	} else if !handle {
+		return nil
+	}
+
+	vfRepName, err := nc.getVfRepName(pod, nadName)
+	if err != nil {
+		klog.Infof("Failed to get rep name of %s, %s. retrying", podDesc, err)
+		return err
+	}
+	podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled, string(pod.UID), "",
+		nadName, nc.nadInfo.NetNameInfo)
+	if err != nil {
+		klog.Infof("Failed to get pod interface information of %s: %v. retrying", podDesc, err)
+		return err
+	}
+	err = nc.addRepPort(pod, vfRepName, podInterfaceInfo, podLister, kclient)
+	if err != nil {
+		klog.Infof("Failed to add rep port for %s, %s. retrying", podDesc, err)
+	}
+	return err
+}
+
+func (nc *ovnNodeController) addSmartNicPods(pod *kapi.Pod, pfMACs []string, isOvnUpEnabled bool,
+	podLister corev1listers.PodLister, kclient kubernetes.Interface, retryCache, servedCache map[string]bool) {
+	if util.PodScheduled(pod) {
+		for nadName := range retryCache {
+			klog.Infof("Add SmartNic for pod %s/%s nad %s", pod.Namespace, pod.Name, nadName)
+			err := nc.addSmartNicPod4Nad(pod, pfMACs, isOvnUpEnabled, nadName, podLister, kclient)
+			if err == nil {
+				delete(retryCache, nadName)
+				servedCache[nadName] = true
+			}
+		}
+	}
+}
+
 //watchSmartNicPods watch updates for pod smart nic annotations
 func (nc *ovnNodeController) watchSmartNicPods(isOvnUpEnabled bool, pfMACs []string) {
 	var retryPods sync.Map
@@ -50,141 +93,76 @@ func (nc *ovnNodeController) watchSmartNicPods(isOvnUpEnabled bool, pfMACs []str
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			klog.Infof("Add for Pod: %s/%s for network %s", pod.ObjectMeta.GetNamespace(), pod.ObjectMeta.GetName(), nc.nadInfo.NetName)
-			if !util.PodWantsNetwork(pod) {
+			// Is this pod based on hostNetwork or it is created on different node where the smart NIC
+			if !util.PodWantsNetwork(pod) || (util.PodScheduled(pod) && n.name != pod.Spec.NodeName) {
 				return
 			}
-			on, network, err := util.IsNetworkOnPod(pod, nc.nadInfo)
+			on, networkMap, _, err := util.IsNetworkOnPod(pod, nc.nadInfo)
 			if err != nil || !on {
 				// the Pod is not attached to this specific network
 				klog.V(5).Infof("Pod %s/%s is not attached on this network: %s", pod.Namespace, pod.Name, nc.nadInfo.NetName)
 				return
 			}
-			nadName := types.DefaultNetworkName
-			if nc.nadInfo.NotDefault {
-				nadName = fmt.Sprintf("%s/%s", network.Namespace, network.Name)
+			// add all the Pod's needed Nad into Pod's retryCache
+			retryCache := map[string]bool{}
+			for nadName := range networkMap {
+				retryCache[nadName] = true
 			}
-			if util.PodScheduled(pod) {
-				// Is this pod created on same node where the smart NIC
-				if n.name != pod.Spec.NodeName {
-					return
-				}
-				// Check if the ovnkube-node instance of BF2 should handle this Pod or not
-				if handle, err := nc.shouldSmartNICHandleThisPod(pod, nadName, pfMACs); err != nil {
-					klog.Infof("Failed to check whether ovnkube-node should handle this pod %s/%s, err: %v. retrying",
-						pod.Namespace, pod.Name, err)
-					retryPods.Store(pod.UID, true)
-					return
-				} else if !handle {
-					return
-				}
-
-				vfRepName, err := nc.getVfRepName(pod, nadName)
-				if err != nil {
-					klog.Infof("Failed to get rep name, %s. retrying", err)
-					retryPods.Store(pod.UID, true)
-					return
-				}
-				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled,
-					string(pod.UID), "", nadName, nc.nadInfo.NetNameInfo)
-				if err != nil {
-					klog.Infof("Failed to get pod interface information: %v. retrying", err)
-					retryPods.Store(pod.UID, true)
-					return
-				}
-				err = nc.addRepPort(pod, vfRepName, podInterfaceInfo, podLister, kclient.KClient)
-				if err != nil {
-					klog.Infof("Failed to add rep port, %s. retrying", err)
-					retryPods.Store(pod.UID, true)
-				} else {
-					servedPods.Store(pod.UID, true)
-				}
-			} else {
-				// Handle unscheduled pods later in UpdateFunc
-				retryPods.Store(pod.UID, true)
-				return
-			}
+			retryPods.Store(pod.UID, retryCache)
+			servedCache := map[string]bool{}
+			servedPods.Store(pod.UID, servedCache)
+			nc.addSmartNicPods(pod, pfMACs, isOvnUpEnabled, podLister, kclient.KClient, retryCache, servedCache)
+			retryPods.Store(pod.UID, retryCache)
+			servedPods.Store(pod.UID, servedCache)
 		},
 		UpdateFunc: func(old, newer interface{}) {
 			pod := newer.(*kapi.Pod)
 			klog.Infof("Update for Pod: %s/%s for network %s", pod.ObjectMeta.GetNamespace(), pod.ObjectMeta.GetName(), nc.nadInfo.NetName)
-			if !util.PodWantsNetwork(pod) {
+			// Is this pod based on hostNetwork or it is created on different node where the smart NIC
+			if !util.PodWantsNetwork(pod) || (util.PodScheduled(pod) && n.name != pod.Spec.NodeName) {
 				retryPods.Delete(pod.UID)
+				servedPods.Delete(pod.UID)
 				return
 			}
-			on, network, err := util.IsNetworkOnPod(pod, nc.nadInfo)
-			if err != nil || !on {
-				retryPods.Delete(pod.UID)
+			retryCache := map[string]bool{}
+			v, ok := retryPods.Load(pod.UID)
+			if ok {
+				retryCache = v.(map[string]bool)
+			}
+			if len(retryCache) == 0 {
 				return
 			}
-			nadName := types.DefaultNetworkName
-			if nc.nadInfo.NotDefault {
-				nadName = fmt.Sprintf("%s/%s", network.Namespace, network.Name)
+			servedCache := map[string]bool{}
+			v, ok = servedPods.Load(pod.UID)
+			if ok {
+				servedCache = v.(map[string]bool)
 			}
-			_, retry := retryPods.Load(pod.UID)
-			if util.PodScheduled(pod) && retry {
-				if n.name != pod.Spec.NodeName {
-					retryPods.Delete(pod.UID)
-					return
-				}
-
-				// Check if the ovnkube-node instance of BF2 should handle this Pod or not
-				if handle, err := nc.shouldSmartNICHandleThisPod(pod, nadName, pfMACs); err != nil {
-					klog.Infof("Failed to check whether ovnkube-node should handle this pod %s/%s that was updated, err: %v. retrying",
-						pod.Namespace, pod.Name, err)
-					return
-				} else if !handle {
-					retryPods.Delete(pod.UID)
-					return
-				}
-
-				vfRepName, err := nc.getVfRepName(pod, nadName)
-				if err != nil {
-					klog.Infof("Failed to get rep name, %s. retrying", err)
-					return
-				}
-				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled,
-					string(pod.UID), "", nadName, nc.nadInfo.NetNameInfo)
-				if err != nil {
-					klog.Infof("Failed to get pod interface information: %v. retrying", err)
-					return
-				}
-				err = nc.addRepPort(pod, vfRepName, podInterfaceInfo, podLister, kclient.KClient)
-				if err != nil {
-					klog.Infof("Failed to add rep port, %s. retrying", err)
-				} else {
-					servedPods.Store(pod.UID, true)
-					retryPods.Delete(pod.UID)
-				}
-			}
+			nc.addSmartNicPods(pod, pfMACs, isOvnUpEnabled, podLister, kclient.KClient, retryCache, servedCache)
+			retryPods.Store(pod.UID, retryCache)
+			servedPods.Store(pod.UID, servedCache)
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			klog.Infof("Delete for Pod: %s/%s for network %s", pod.ObjectMeta.GetNamespace(), pod.ObjectMeta.GetName(), nc.nadInfo.NetName)
-			if _, ok := servedPods.Load(pod.UID); !ok {
-				return
-			}
-			// Todo(gmoodalbail): move this to Cathy's changes later
-			_, network, err := util.IsNetworkOnPod(pod, nc.nadInfo)
-			if err != nil {
-				klog.Errorf("Failed to get the Network selection element to "+
-					"get the NAD info for %s/%s: %v", pod.Namespace, pod.Name, err)
-				return
-			}
-			nadName := types.DefaultNetworkName
-			if nc.nadInfo.NotDefault {
-				nadName = fmt.Sprintf("%s/%s", network.Namespace, network.Name)
-			}
-			servedPods.Delete(pod.UID)
 			retryPods.Delete(pod.UID)
-			vfRepName, err := nc.getVfRepName(pod, nadName)
-			if err != nil {
-				klog.Errorf("Failed to get VF Representor Name for Pod %s/%s: %s. Representor port may have been deleted.",
-					pod.Namespace, pod.Name, err)
+			v, ok := servedPods.Load(pod.UID)
+			if !ok {
 				return
 			}
-			err = nc.delRepPort(vfRepName)
-			if err != nil {
-				klog.Errorf("Failed to delete VF representor %s for pod %s/%s. %s", vfRepName, pod.Namespace, pod.Name, err)
+			servedCache := v.(map[string]bool)
+			servedPods.Delete(pod.UID)
+			for nadName := range servedCache {
+				klog.Infof("Delelete SmartNic for pod %s/%s nad %s", pod.Namespace, pod.Name, nadName)
+				vfRepName, err := nc.getVfRepName(pod, nadName)
+				if err != nil {
+					klog.Errorf("Failed to get VF Representor Name for Pod %s/%s: %s. Representor port may have been deleted.",
+						pod.Namespace, pod.Name, err)
+					continue
+				}
+				err = nc.delRepPort(vfRepName)
+				if err != nil {
+					klog.Errorf("Failed to delete VF representor %s for pod %s/%s. %s", vfRepName, pod.Namespace, pod.Name, err)
+				}
 			}
 		},
 	}, nil)
@@ -197,7 +175,7 @@ func (nc *ovnNodeController) getVfRepName(pod *kapi.Pod, nadName string) (string
 	smartNicCD, err := util.UnmarshalPodSmartNicConnDetails(pod.Annotations, nadName)
 	if err != nil {
 		return "", fmt.Errorf("failed to get smart-nic annotation for pod %s/%s network %s: %v",
-			pod.Namespace, pod.Name, nc.nadInfo.NetName, err)
+			pod.Namespace, pod.Name, nadName, err)
 	}
 
 	return util.GetSriovnetOps().GetVfRepresentorSmartNIC(smartNicCD.PfId, smartNicCD.VfId)
@@ -217,14 +195,14 @@ func (nc *ovnNodeController) updatePodSmartNicConnStatusWithRetry(kube kube.Inte
 	})
 	if resultErr != nil {
 		return fmt.Errorf("failed to update %s annotation on pod %s/%s for network %s: %v",
-			util.SmartNicConnetionStatusAnnot, pod.Namespace, pod.Name, nc.nadInfo.NetName, resultErr)
+			util.SmartNicConnetionStatusAnnot, pod.Namespace, pod.Name, nadName, resultErr)
 	}
 	return nil
 }
 
 // addRepPort adds the representor of the VF to the ovs bridge
 func (nc *ovnNodeController) addRepPort(pod *kapi.Pod, vfRepName string, ifInfo *cni.PodInterfaceInfo, podLister corev1listers.PodLister, kclient kubernetes.Interface) error {
-	klog.Infof("Adding VF representor %s for pod %s/%s network %s", vfRepName, pod.Namespace, pod.Name, nc.nadInfo.NetName)
+	klog.Infof("Adding VF representor %s for pod %s/%s network %s", vfRepName, pod.Namespace, pod.Name, ifInfo.NadName)
 	smartNicCD, err := util.UnmarshalPodSmartNicConnDetails(pod.Annotations, ifInfo.NadName)
 	if err != nil {
 		return fmt.Errorf("failed to get smart-nic annotation: %v", err)

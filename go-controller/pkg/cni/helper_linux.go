@@ -257,8 +257,8 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	ifInfo *PodInterfaceInfo, sandboxID string, podLister corev1listers.PodLister,
 	kclient kubernetes.Interface) error {
-	klog.Infof("ConfigureOVS: namespace: %s, podName: %s, network: %s", namespace, podName, ifInfo.NetNameInfo.NetName)
-	ifaceID := util.GetIfaceId(namespace, podName, ifInfo.Prefix)
+	klog.Infof("ConfigureOVS: namespace: %s, podName: %s, network: %s", namespace, podName, ifInfo.NadName)
+	ifaceID := util.GetIfaceId(namespace, podName, ifInfo.NadName, !ifInfo.NotDefault)
 	initialPodUID := ifInfo.PodUID
 
 	// Find and remove any existing OVS port with this iface-id. Pods can
@@ -286,7 +286,7 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	}
 
 	if ifInfo.NotDefault {
-		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:network_name=%s", ifInfo.NetName))
+		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:network_name=%s", ifInfo.NadName))
 	} else {
 		ovsArgs = append(ovsArgs, []string{"--", "--if-exists", "remove", "interface", hostIfaceName, "external_ids", "network_name"}...)
 	}
@@ -404,7 +404,7 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 }
 
 func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
-	podDesc := fmt.Sprintf("for pod %s/%s network %s", pr.PodNamespace, pr.PodName, pr.CNIConf.Name)
+	podDesc := fmt.Sprintf("for pod %s/%s network %s", pr.PodNamespace, pr.PodName, pr.effectiveNADName)
 	klog.V(5).Infof("Tear down interface %+v CNI Conf %v %s", *pr, pr.CNIConf, podDesc)
 	if pr.CNIConf.DeviceID == "" && ifInfo.IsSmartNICHostMode {
 		klog.Warningf("Unexpected configuration %s, pod request on smart-nic host. device ID must be provided", podDesc)

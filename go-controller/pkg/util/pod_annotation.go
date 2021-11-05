@@ -6,11 +6,9 @@ import (
 	"net"
 	"strconv"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-
 	netattachdefapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	netattachdefutils "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -254,24 +252,25 @@ func UnmarshalPodAnnotation(annotations map[string]string, netName string) (*Pod
 // non-OVN-IPAM-ed pods.
 func GetAllPodIPs(pod *v1.Pod, netAttachInfo *NetAttachDefInfo) ([]net.IP, error) {
 
-	on, network, err := IsNetworkOnPod(pod, netAttachInfo)
+	ips := []net.IP{}
+	on, networkMap, _, err := IsNetworkOnPod(pod, netAttachInfo)
 	if err != nil {
 		return nil, err
 	} else if !on {
 		// the pod is not attached to this specific network, don't return error
-		return []net.IP{}, nil
+		return ips, nil
 	}
-	nadName := types.DefaultNetworkName
-	if netAttachInfo.NotDefault {
-		nadName = fmt.Sprintf("%s/%s", network.Namespace, network.Name)
-	}
-	annotation, _ := UnmarshalPodAnnotation(pod.Annotations, nadName)
-	if annotation != nil {
-		// Use the OVN annotation if valid
-		ips := make([]net.IP, 0, len(annotation.IPs))
-		for _, ip := range annotation.IPs {
-			ips = append(ips, ip.IP)
+	for nadName := range networkMap {
+		annotation, _ := UnmarshalPodAnnotation(pod.Annotations, nadName)
+		if annotation != nil {
+			// Use the OVN annotation if valid
+			for _, ip := range annotation.IPs {
+				ips = append(ips, ip.IP)
+			}
 		}
+	}
+
+	if len(ips) != 0 {
 		return ips, nil
 	}
 
@@ -280,7 +279,7 @@ func GetAllPodIPs(pod *v1.Pod, netAttachInfo *NetAttachDefInfo) ([]net.IP, error
 			pod.Namespace, pod.Name, netAttachInfo.NetName)
 	}
 
-	// return error if there are no IPs in pod status
+	// default network, return error if there are no IPs in pod status
 	if len(pod.Status.PodIPs) == 0 {
 		if pod.Status.PodIP == "" {
 			return nil, fmt.Errorf("no pod IPs found on pod %s/%s", pod.Namespace, pod.Name)
@@ -290,7 +289,7 @@ func GetAllPodIPs(pod *v1.Pod, netAttachInfo *NetAttachDefInfo) ([]net.IP, error
 	}
 
 	// Otherwise if the annotation is not valid try to use Kube API pod IPs
-	ips := make([]net.IP, 0, len(pod.Status.PodIPs))
+	ips = make([]net.IP, 0, len(pod.Status.PodIPs))
 	for _, podIP := range pod.Status.PodIPs {
 		ip := net.ParseIP(podIP.IP)
 		if ip == nil {

@@ -208,7 +208,7 @@ type NetNameInfo struct {
 
 type NetAttachDefInfo struct {
 	NetNameInfo
-	// net-attach-defs shared the same CNI Conf, key is <Namespace>_<Name> of net-attach-def.
+	// net-attach-defs shared the same CNI Conf, key is <Namespace>/<Name> of net-attach-def.
 	// Note that it means they share the same logical switch (subnet cidr/MTU etc), but they might
 	// have different resource requirement (requires or not require VF, or different VF resource set)
 	NetAttachDefs sync.Map
@@ -285,11 +285,27 @@ func NewNetAttachDefInfo(netconf *cnitypes.NetConf) (*NetAttachDefInfo, error) {
 }
 
 // Note that for port_group and address_set, it does not allow the '-' character
+func GetNadName(namespace, name string, isDefault bool) string {
+	if isDefault {
+		return "default"
+	}
+	return GetNadKeyName(namespace, name)
+}
+
+// key of NetAttachDefInfo.NetAttachDefs map
+func GetNadKeyName(namespace, name string) string {
+	return fmt.Sprintf("%s/%s", namespace, name)
+}
+
+// Note that for port_group and address_set, it does not allow the '-' character
+// Also replace "/" in nadName with "."
 func GetNetworkPrefix(netName string, isDefault bool) string {
 	if isDefault {
 		return ""
 	}
-	return strings.ReplaceAll(netName, "-", ".") + "_"
+	name := strings.ReplaceAll(netName, "-", ".")
+	name = strings.ReplaceAll(name, "/", ".")
+	return name + "_"
 }
 
 // GetNetworkNameFromExternalId returns the network_name of the external_id strings
@@ -376,11 +392,13 @@ ipLoop:
 	return out
 }
 
-func GetLogicalPortName(podNamespace, podName, netPrefix string) string {
+func GetLogicalPortName(podNamespace, podName, nadName string, isDefault bool) string {
+	netPrefix := GetNetworkPrefix(nadName, isDefault)
 	return composePortName(podNamespace, podName, netPrefix)
 }
 
-func GetIfaceId(podNamespace, podName, netPrefix string) string {
+func GetIfaceId(podNamespace, podName, nadName string, isDefault bool) string {
+	netPrefix := GetNetworkPrefix(nadName, isDefault)
 	return composePortName(podNamespace, podName, netPrefix)
 }
 
@@ -392,4 +410,23 @@ func GetIfaceId(podNamespace, podName, netPrefix string) string {
 // identify the network interface of that entity.
 func composePortName(podNamespace, podName, netPrefix string) string {
 	return netPrefix + podNamespace + "_" + podName
+}
+
+// Get all possible logical ports name of this network
+func GetAllLogicalPortNames(podNamespace, podName string, nadInfo *NetAttachDefInfo) []string {
+	if !nadInfo.NotDefault {
+		return []string{GetLogicalPortName(podNamespace, podName, types.DefaultNetworkName, true)}
+	}
+	ports := []string{}
+	nadInfo.NetAttachDefs.Range(func(key, value interface{}) bool {
+		name, ok := key.(string)
+		if !ok {
+			return true
+		}
+		// for non-default network, name is in the same form as the nadName (namespace/name)
+		portName := GetLogicalPortName(podNamespace, podName, name, false)
+		ports = append(ports, portName)
+		return true
+	})
+	return ports
 }

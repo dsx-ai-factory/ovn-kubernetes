@@ -56,7 +56,7 @@ type SmartNICConnectionStatus struct {
 }
 
 // MarshalPodSmartNicConnDetails returns a JSON-formatted annotation describing the pod's smart-nic connection details
-func MarshalPodSmartNicConnDetails(pannotations *map[string]string, scd *SmartNICConnectionDetails, netName string) error {
+func MarshalPodSmartNicConnDetails(pannotations *map[string]string, scd *SmartNICConnectionDetails, nadName string) error {
 	annotations := *pannotations
 	if annotations == nil {
 		annotations = make(map[string]string)
@@ -70,7 +70,7 @@ func MarshalPodSmartNicConnDetails(pannotations *map[string]string, scd *SmartNI
 				ovnAnnotation, err)
 		}
 	}
-	podScds[netName] = *scd
+	podScds[nadName] = *scd
 	bytes, err := json.Marshal(podScds)
 	if err != nil {
 		return fmt.Errorf("failed marshaling pod annotation map %v: %v", podScds, err)
@@ -100,7 +100,7 @@ func UnmarshalPodSmartNicConnDetails(annotations map[string]string, netName stri
 }
 
 // MarshalPodSmartNicConnStatus returns a JSON-formatted annotation describing the pod's smart-nic connection status
-func MarshalPodSmartNicConnStatus(pannotations *map[string]string, scs *SmartNICConnectionStatus, netName string) error {
+func MarshalPodSmartNicConnStatus(pannotations *map[string]string, scs *SmartNICConnectionStatus, nadName string) error {
 	annotations := *pannotations
 	if annotations == nil {
 		annotations = make(map[string]string)
@@ -114,7 +114,7 @@ func MarshalPodSmartNicConnStatus(pannotations *map[string]string, scs *SmartNIC
 				ovnAnnotation, err)
 		}
 	}
-	podScds[netName] = *scs
+	podScds[nadName] = *scs
 	bytes, err := json.Marshal(podScds)
 	if err != nil {
 		return fmt.Errorf("failed marshaling pod annotation map %v: %v", podScds, err)

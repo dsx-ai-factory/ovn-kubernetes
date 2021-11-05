@@ -481,12 +481,15 @@ func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInf
 	if err != nil {
 		klog.Warningf("Failed to get pods for namespace %q: %v", ns, err)
 	}
+
 	for _, pod := range pods {
-		portName := util.GetLogicalPortName(pod.Namespace, pod.Name, oc.nadInfo.Prefix)
-		if portInfo, err := oc.logicalPortCache.get(portName); err != nil {
-			klog.Errorf(err.Error())
-		} else if err := podAddAllowMulticastPolicy(oc.mc.ovnNBClient, ns, portInfo, oc.nadInfo.NetNameInfo); err != nil {
-			klog.Warningf("Failed to add port %s to port group ACL: %v", portName, err)
+		portNames := util.GetAllLogicalPortNames(pod.Namespace, pod.Name, oc.nadInfo)
+		for _, portName := range portNames {
+			if portInfo, err := oc.logicalPortCache.get(portName); err != nil {
+				klog.Errorf(err.Error())
+			} else if err := podAddAllowMulticastPolicy(oc.mc.ovnNBClient, ns, portInfo, oc.nadInfo.NetNameInfo); err != nil {
+				klog.Warningf("Failed to add port %s to port group ACL: %v", portName, err)
+			}
 		}
 	}
 
@@ -764,16 +767,20 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 	}
 
 	// Get the logical port info
-	logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name, oc.nadInfo.Prefix)
-	portInfo, err := oc.logicalPortCache.get(logicalPort)
-	if err != nil {
-		klog.Warningf(err.Error())
-		return
-	}
+	logicalPorts := util.GetAllLogicalPortNames(pod.Namespace, pod.Name, oc.nadInfo)
+	portsToAdd := make([]*lpInfo, 0, len(logicalPorts))
+	for _, logicalPort := range logicalPorts {
+		portInfo, err := oc.logicalPortCache.get(logicalPort)
+		if err != nil {
+			klog.Warningf(err.Error())
+			continue
+		}
 
-	// If we've already processed this pod, shortcut.
-	if _, ok := np.localPods.Load(logicalPort); ok {
-		return
+		// If we've already processed this pod, shortcut.
+		if _, ok := np.localPods.Load(logicalPort); ok {
+			continue
+		}
+		portsToAdd = append(portsToAdd, portInfo)
 	}
 
 	np.RLock()
@@ -782,20 +789,21 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 		return
 	}
 
-	oc.localPodAddDefaultDeny(nsInfo, policy, portInfo)
+	oc.localPodAddDefaultDeny(nsInfo, policy, portsToAdd...)
 
 	if np.portGroupUUID == "" {
 		return
 	}
 
-	err = addToPortGroup(oc.mc.ovnNBClient, oc.nadInfo.Prefix+np.portGroupName, portInfo)
+	err := addToPortGroup(oc.mc.ovnNBClient, oc.nadInfo.Prefix+np.portGroupName, portsToAdd...)
 
 	if err != nil {
-		klog.Errorf("Failed to add logicalPort %s to portGroup %s (%v)",
-			logicalPort, np.portGroupUUID, err)
+		klog.Errorf("Failed to add logicalPorts to portGroup %s (%v)", np.portGroupUUID, err)
 	}
 
-	np.localPods.Store(logicalPort, portInfo)
+	for _, portInfo := range portsToAdd {
+		np.localPods.Store(portInfo.name, portInfo)
+	}
 }
 
 // handleLocalPodSelectorSetPods is a more efficient way of
@@ -828,19 +836,22 @@ func (oc *Controller) handleLocalPodSelectorSetPods(
 			continue
 		}
 
-		portInfo, err := oc.logicalPortCache.get(util.GetLogicalPortName(pod.Namespace, pod.Name, oc.nadInfo.Prefix))
-		// pod is not yet handled
-		// no big deal, we'll get the update when it is.
-		if err != nil {
-			continue
-		}
+		logicalPorts := util.GetAllLogicalPortNames(pod.Namespace, pod.Name, oc.nadInfo)
+		for _, logicalPort := range logicalPorts {
+			portInfo, err := oc.logicalPortCache.get(logicalPort)
+			// pod is not yet handled
+			// no big deal, we'll get the update when it is.
+			if err != nil {
+				continue
+			}
 
-		// this pod is somehow already added to this policy, then skip
-		if _, ok := np.localPods.Load(portInfo.name); ok {
-			continue
-		}
+			// this pod is somehow already added to this policy, then skip
+			if _, ok := np.localPods.Load(portInfo.name); ok {
+				continue
+			}
 
-		portsToAdd = append(portsToAdd, portInfo)
+			portsToAdd = append(portsToAdd, portInfo)
+		}
 	}
 
 	// add all ports to default deny
@@ -873,16 +884,20 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 	}
 
 	// Get the logical port info
-	logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name, oc.nadInfo.Prefix)
-	portInfo, err := oc.logicalPortCache.get(logicalPort)
-	if err != nil {
-		klog.Errorf(err.Error())
-		return
-	}
+	logicalPorts := util.GetAllLogicalPortNames(pod.Namespace, pod.Name, oc.nadInfo)
+	portsToDelete := make([]*lpInfo, 0, len(logicalPorts))
+	for _, logicalPort := range logicalPorts {
+		portInfo, err := oc.logicalPortCache.get(logicalPort)
+		if err != nil {
+			klog.Errorf(err.Error())
+			continue
+		}
 
-	// If we never saw this pod, short-circuit
-	if _, ok := np.localPods.LoadAndDelete(logicalPort); !ok {
-		return
+		// If we never saw this pod, short-circuit
+		if _, ok := np.localPods.LoadAndDelete(logicalPort); !ok {
+			continue
+		}
+		portsToDelete = append(portsToDelete, portInfo)
 	}
 
 	np.RLock()
@@ -891,15 +906,15 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 		return
 	}
 
-	oc.localPodDelDefaultDeny(np, nsInfo, portInfo)
+	oc.localPodDelDefaultDeny(np, nsInfo, portsToDelete...)
 
 	if np.portGroupUUID == "" {
 		return
 	}
 
-	err = deleteFromPortGroup(oc.mc.ovnNBClient, oc.nadInfo.Prefix+np.portGroupName, portInfo)
+	err := deleteFromPortGroup(oc.mc.ovnNBClient, oc.nadInfo.Prefix+np.portGroupName, portsToDelete...)
 	if err != nil {
-		klog.Errorf("Failed to delete logicalPort %s from portGroup %s (%v)", portInfo.name, np.name, err)
+		klog.Errorf("Failed to delete logicalPorts from portGroup %s (%v)", np.name, err)
 	}
 }
 

@@ -157,16 +157,19 @@ func (oc *Controller) icmpHandleLocalPodSelectorAddFunc(
 	}
 
 	// Get the logical port info
-	logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name, oc.nadInfo.Prefix)
-	portInfo, err := oc.logicalPortCache.get(logicalPort)
-	if err != nil {
-		klog.Warningf(err.Error())
-		return
-	}
-
-	// If we've already processed this pod, shortcut.
-	if _, ok := np.localPods.Load(logicalPort); ok {
-		return
+	logicalPorts := util.GetAllLogicalPortNames(pod.Namespace, pod.Name, oc.nadInfo)
+	portsToAdd := make([]*lpInfo, 0, len(logicalPorts))
+	for _, logicalPort := range logicalPorts {
+		portInfo, err := oc.logicalPortCache.get(logicalPort)
+		if err != nil {
+			klog.Warningf(err.Error())
+			continue
+		}
+		// If we've already processed this pod, shortcut.
+		if _, ok := np.localPods.Load(logicalPort); ok {
+			continue
+		}
+		portsToAdd = append(portsToAdd, portInfo)
 	}
 
 	np.RLock()
@@ -175,20 +178,21 @@ func (oc *Controller) icmpHandleLocalPodSelectorAddFunc(
 		return
 	}
 
-	oc.icmpLocalPodAddDefaultDeny(nsInfo, policy, portInfo)
+	oc.icmpLocalPodAddDefaultDeny(nsInfo, policy, portsToAdd...)
 
 	if np.portGroupUUID == "" {
 		return
 	}
 
-	err = addToPortGroup(oc.mc.ovnNBClient, oc.nadInfo.Prefix+np.portGroupName, portInfo)
+	err := addToPortGroup(oc.mc.ovnNBClient, oc.nadInfo.Prefix+np.portGroupName, portsToAdd...)
 
 	if err != nil {
-		klog.Errorf("Failed to add logicalPort %s to portGroup %s (%v)",
-			logicalPort, np.portGroupUUID, err)
+		klog.Errorf("Failed to add logicalPorts to portGroup %s (%v)", np.portGroupUUID, err)
 	}
 
-	np.localPods.Store(logicalPort, portInfo)
+	for _, portInfo := range portsToAdd {
+		np.localPods.Store(portInfo.name, portInfo)
+	}
 }
 
 func (oc *Controller) icmpHandleLocalPodSelectorSetPods(
@@ -217,19 +221,20 @@ func (oc *Controller) icmpHandleLocalPodSelectorSetPods(
 			continue
 		}
 
-		portInfo, err := oc.logicalPortCache.get(util.GetLogicalPortName(pod.Namespace, pod.Name, oc.nadInfo.Prefix))
-		// pod is not yet handled
-		// no big deal, we'll get the update when it is.
-		if err != nil {
-			continue
+		logicalPorts := util.GetAllLogicalPortNames(pod.Namespace, pod.Name, oc.nadInfo)
+		for _, logicalPort := range logicalPorts {
+			portInfo, err := oc.logicalPortCache.get(logicalPort)
+			// pod is not yet handled
+			// no big deal, we'll get the update when it is.
+			if err != nil {
+				continue
+			}
+			// this pod is somehow already added to this policy, then skip
+			if _, ok := np.localPods.Load(portInfo.name); ok {
+				continue
+			}
+			portsToAdd = append(portsToAdd, portInfo)
 		}
-
-		// this pod is somehow already added to this policy, then skip
-		if _, ok := np.localPods.Load(portInfo.name); ok {
-			continue
-		}
-
-		portsToAdd = append(portsToAdd, portInfo)
 	}
 
 	// add all ports to default deny

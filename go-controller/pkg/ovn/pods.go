@@ -31,26 +31,24 @@ func (oc *Controller) syncPods(pods []interface{}) {
 			klog.Errorf("Spurious object in syncPods: %v", podInterface)
 			continue
 		}
-		on, network, err := util.IsNetworkOnPod(pod, oc.nadInfo)
+		on, networkMap, _, err := util.IsNetworkOnPod(pod, oc.nadInfo)
 		if err != nil || !on {
 			continue
-		}
-		nadName := types.DefaultNetworkName
-		if oc.nadInfo.NotDefault {
-			nadName = fmt.Sprintf("%s/%s", network.Namespace, network.Name)
 		}
 		lsManagerNodeName := pod.Spec.NodeName
 		if oc.nadInfo.TopoType == types.LocalnetAttachDefTopoType {
 			lsManagerNodeName = types.OVNLocalnetSwitch
 		}
-		annotations, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
-		if util.PodScheduled(pod) && util.PodWantsNetwork(pod) && on && err == nil {
-			logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name, oc.nadInfo.Prefix)
-			expectedLogicalPorts[logicalPort] = true
-			if err = oc.lsManager.AllocateIPs(lsManagerNodeName, annotations.IPs); err != nil {
-				klog.Errorf("Couldn't allocate IPs: %s for pod: %s on node: %s"+
-					" error: %v", util.JoinIPNetIPs(annotations.IPs, " "), logicalPort,
-					lsManagerNodeName, err)
+		for nadName := range networkMap {
+			annotations, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
+			if util.PodScheduled(pod) && util.PodWantsNetwork(pod) && err == nil {
+				logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name, nadName, !oc.nadInfo.NotDefault)
+				expectedLogicalPorts[logicalPort] = true
+				if err = oc.lsManager.AllocateIPs(lsManagerNodeName, annotations.IPs); err != nil {
+					klog.Errorf("Couldn't allocate IPs: %s for pod: %s on node: %s"+
+						" error: %v", util.JoinIPNetIPs(annotations.IPs, " "), logicalPort,
+						lsManagerNodeName, err)
+				}
 			}
 		}
 	}
@@ -138,14 +136,10 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		return
 	}
 
-	on, network, err := util.IsNetworkOnPod(pod, oc.nadInfo)
+	on, networkMap, _, err := util.IsNetworkOnPod(pod, oc.nadInfo)
 	if err != nil || !on {
-		// the Pod is not attached to this specific network
+		// the pod is not attached to this specific network
 		return
-	}
-	nadName := types.DefaultNetworkName
-	if oc.nadInfo.NotDefault {
-		nadName = fmt.Sprintf("%s/%s", network.Namespace, network.Name)
 	}
 
 	lsManagerNodeName := pod.Spec.NodeName
@@ -153,10 +147,18 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		lsManagerNodeName = types.OVNLocalnetSwitch
 	}
 
-	podDesc := pod.Namespace + "/" + pod.Name
-	klog.Infof("Deleting pod: %s", podDesc)
+	for nadName, network := range networkMap {
+		oc.delLogicalPort4Nad(pod, nadName, lsManagerNodeName, network)
+	}
+}
 
-	logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name, oc.nadInfo.Prefix)
+func (oc *Controller) delLogicalPort4Nad(pod *kapi.Pod, nadName, lsManagerNodeName string,
+	network *networkattachmentdefinitionapi.NetworkSelectionElement) {
+
+	podDesc := pod.Namespace + "/" + pod.Name
+	klog.Infof("Deleting pod %s on network: %s", podDesc, nadName)
+
+	logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name, nadName, !oc.nadInfo.NotDefault)
 	portInfo, err := oc.logicalPortCache.get(logicalPort)
 	if err != nil {
 		klog.Errorf(err.Error())
@@ -217,13 +219,16 @@ func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) error {
 
 func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodAnnotation, nodeSubnets []*net.IPNet,
 	network *networkattachmentdefinitionapi.NetworkSelectionElement,
-	networks []*networkattachmentdefinitionapi.NetworkSelectionElement) (err error) {
+	networks []*networkattachmentdefinitionapi.NetworkSelectionElement, isFirst bool) (err error) {
 
 	if oc.nadInfo.NotDefault {
 		// non default network, see if its network-attachment's annotation has default-route key.
 		// If present, then we need to add default route for it
 		podAnnotation.Gateways = append(podAnnotation.Gateways, network.GatewayRequest...)
-
+		// Only add route to clusterSubnet if this is the first Nad the pod is plumbing on to avoid duplicate route
+		if !isFirst {
+			return nil
+		}
 		for _, podIfAddr := range podAnnotation.IPs {
 			isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
 			// TBD localnet type does need this only for a temp workaround, to be removed.
@@ -331,7 +336,8 @@ func (oc *Controller) updatePodAnnotationWithRetry(origPod *kapi.Pod, podInfo *u
 		return oc.mc.kube.UpdatePod(cpod)
 	})
 	if resultErr != nil {
-		return fmt.Errorf("failed to update annotation on pod %s/%s: %v", origPod.Namespace, origPod.Name, resultErr)
+		return fmt.Errorf("failed to update annotation on pod %s/%s for network %s: %v",
+			origPod.Namespace, origPod.Name, nadName, resultErr)
 	}
 	return nil
 }
@@ -350,18 +356,27 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	if err != nil {
 		return err
 	}
-	on, network, err := util.IsNetworkOnPod(pod, oc.nadInfo)
+	on, networkMap, firstNadName, err := util.IsNetworkOnPod(pod, oc.nadInfo)
 	if err != nil || !on {
 		// the pod is not attached to this specific network
-		klog.V(5).Infof("Pod %s/%s is not attached on this overlay network controller: %s", pod.Namespace, pod.Name,
-			oc.nadInfo.NetName)
+		klog.V(5).Infof("Pod %s/%s is not attached on this overlay network controller %s error (%v) ", pod.Namespace, pod.Name,
+			oc.nadInfo.NetName, err)
 		return nil
 	}
-	nadName := types.DefaultNetworkName
-	if oc.nadInfo.NotDefault {
-		nadName = fmt.Sprintf("%s/%s", network.Namespace, network.Name)
-	}
 
+	klog.V(5).Infof("Pod %s/%s is attached on this network: %s", pod.Namespace, pod.Name, oc.nadInfo.NetName)
+	for nadName, network := range networkMap {
+		err1 := oc.addLogicalPort4Nad(pod, nadName, lsManagerNodeName, network, networks, firstNadName == nadName)
+		if err1 != nil {
+			err = err1
+		}
+	}
+	return err
+}
+
+func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, lsManagerNodeName string,
+	network *networkattachmentdefinitionapi.NetworkSelectionElement,
+	networks *[]*networkattachmentdefinitionapi.NetworkSelectionElement, isFirst bool) (err error) {
 	// Keep track of how long syncs take.
 	start := time.Now()
 	defer func() {
@@ -374,8 +389,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		return err
 	}
 
-	portName := util.GetLogicalPortName(pod.Namespace, pod.Name, oc.nadInfo.Prefix)
-	klog.Infof("[%s/%s] creating logical port for pod on switch %s for network %s", pod.Namespace, pod.Name, logicalSwitch, oc.nadInfo.NetName)
+	portName := util.GetLogicalPortName(pod.Namespace, pod.Name, nadName, !oc.nadInfo.NotDefault)
+	klog.Infof("[%s/%s] creating logical port for pod on switch %s for network %s", pod.Namespace, pod.Name, logicalSwitch, nadName)
 
 	var podMac net.HardwareAddr
 	var podIfAddrs []*net.IPNet
@@ -512,11 +527,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		releaseIPs = true
 		if network != nil && network.MacRequest != "" {
 			klog.V(5).Infof("Pod %s/%s for network %s requested custom MAC: %s", pod.Namespace, pod.Name,
-				oc.nadInfo.NetName, network.MacRequest)
+				nadName, network.MacRequest)
 			podMac, err = net.ParseMAC(network.MacRequest)
 			if err != nil {
 				return fmt.Errorf("failed to parse mac %s requested in annotation for pod %s on network %s: Error %v",
-					network.MacRequest, pod.Name, oc.nadInfo.NetName, err)
+					network.MacRequest, pod.Name, nadName, err)
 			}
 		}
 		podAnnotation := util.PodAnnotation{
@@ -527,14 +542,14 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		var nodeSubnets []*net.IPNet
 		if nodeSubnets = oc.lsManager.GetSwitchSubnets(lsManagerNodeName); nodeSubnets == nil {
 			return fmt.Errorf("cannot retrieve subnet for assigning gateway routes for pod %s, node: %s, network %s",
-				pod.Name, lsManagerNodeName, oc.nadInfo.NetName)
+				pod.Name, lsManagerNodeName, nadName)
 		}
-		err = oc.addRoutesGatewayIP(pod, &podAnnotation, nodeSubnets, network, *networks)
+		err = oc.addRoutesGatewayIP(pod, &podAnnotation, nodeSubnets, network, *networks, isFirst)
 		if err != nil {
 			return err
 		}
 		klog.V(5).Infof("Annotation values for network %s: ip=%v ; mac=%s ; gw=%s\n",
-			oc.nadInfo.NetName, podIfAddrs, podMac, podAnnotation.Gateways)
+			nadName, podIfAddrs, podMac, podAnnotation.Gateways)
 
 		if err = oc.updatePodAnnotationWithRetry(pod, &podAnnotation, nadName); err != nil {
 			return err
