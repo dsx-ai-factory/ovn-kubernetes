@@ -138,8 +138,6 @@ type PodRequest struct {
 	ctx context.Context
 	// cancel should be called to cancel this request
 	cancel context.CancelFunc
-	// Interface to pod is a Smart-NIC interface
-	IsSmartNIC bool
 }
 
 type cniRequestFunc func(request *PodRequest, podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface, kubeAuth *KubeAPIAuth) ([]byte, error)
@@ -154,7 +152,4 @@ type Server struct {
 	kclient           kubernetes.Interface
 	podLister         corev1listers.PodLister
 	kubeAuth          *KubeAPIAuth
-
-	// CNI Server mode
-	mode string
 }

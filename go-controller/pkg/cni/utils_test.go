@@ -5,6 +5,7 @@ import (
 	"fmt"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -245,25 +246,27 @@ var _ = Describe("CNI Utils tests", func() {
 		netNameInfo := util.NetNameInfo{types.DefaultNetworkName, "", false}
 		podUID := "4d06bae8-9c38-41f6-945c-f92320e782e4"
 		It("Creates PodInterfaceInfo with IsSmartNIC false", func() {
-			pif, err := PodAnnotation2PodInfo(podAnnot, false, false, false, podUID, "", netNameInfo)
+			config.OvnKubeNode.Mode = types.NodeModeFull
+			pif, err := PodAnnotation2PodInfo(podAnnot, false, false, podUID, "", netNameInfo)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.IsSmartNic).To(BeFalse())
 		})
 
 		It("Creates PodInterfaceInfo with IsSmartNIC true", func() {
-			pif, err := PodAnnotation2PodInfo(podAnnot, false, true, false, podUID, "", netNameInfo)
+			config.OvnKubeNode.Mode = types.NodeModeSmartNICHost
+			pif, err := PodAnnotation2PodInfo(podAnnot, false, false, podUID, "", netNameInfo)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.IsSmartNic).To(BeTrue())
 		})
 
 		It("Creates PodInterfaceInfo with checkExtIDs false", func() {
-			pif, err := PodAnnotation2PodInfo(podAnnot, false, false, false, podUID, "", netNameInfo)
+			pif, err := PodAnnotation2PodInfo(podAnnot, false, false, podUID, "", netNameInfo)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.CheckExtIDs).To(BeFalse())
 		})
 
 		It("Creates PodInterfaceInfo with checkExtIDs true", func() {
-			pif, err := PodAnnotation2PodInfo(podAnnot, true, false, false, podUID, "", netNameInfo)
+			pif, err := PodAnnotation2PodInfo(podAnnot, true, false, podUID, "", netNameInfo)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.CheckExtIDs).To(BeTrue())
 		})

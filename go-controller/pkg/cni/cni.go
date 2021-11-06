@@ -130,7 +130,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 		}
 	}
 
-	if pr.IsSmartNIC {
+	if config.OvnKubeNode.Mode == types.NodeModeSmartNICHost {
 		if err := pr.addSmartNICConnectionDetailsAnnot(kubecli, vfNetdevice, netName); err != nil {
 			return nil, err
 		}
@@ -147,7 +147,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 	}
 
 	netNameInfo := util.NetNameInfo{NetName: netName, Prefix: netPrefix, NotDefault: pr.CNIConf.NotDefault}
-	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, useOVSExternalIDs, pr.IsSmartNIC, isVFIO, pr.PodUID, vfNetdevice, netNameInfo)
+	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, useOVSExternalIDs, isVFIO, pr.PodUID, vfNetdevice, netNameInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -202,9 +202,13 @@ func (pr *PodRequest) cmdDel(podLister corev1listers.PodLister, kclient kubernet
 		}
 	}
 
-	podInterfaceInfo := &PodInterfaceInfo{IsSmartNic: pr.IsSmartNIC, VfNetdevice: vfDevice, IsVFIO: isVFIO}
+	podInterfaceInfo := &PodInterfaceInfo{
+		IsSmartNic:  config.OvnKubeNode.Mode == types.NodeModeSmartNICHost,
+		VfNetdevice: vfDevice,
+		IsVFIO:      isVFIO,
+	}
 	if !config.UnprivilegedMode {
-		err := pr.UnconfigureInterface(vfDevice, isVFIO)
+		err := pr.UnconfigureInterface(podInterfaceInfo)
 		if err != nil {
 			return nil, err
 		}

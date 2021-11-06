@@ -46,8 +46,7 @@ var _ = Describe("cnismartnic tests", func() {
 				NetConf:  cnitypes.NetConf{},
 				DeviceID: "",
 			},
-			timestamp:  time.Time{},
-			IsSmartNIC: true,
+			timestamp: time.Time{},
 		}
 		pod = &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{

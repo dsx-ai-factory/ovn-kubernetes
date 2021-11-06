@@ -264,9 +264,8 @@ func (p *Plugin) CmdDel(args *skel.CmdArgs) error {
 			err = fmt.Errorf("failed to create pod request: %v", err)
 			return err
 		}
-		pr.IsSmartNIC = response.PodIFInfo.IsSmartNic
 		defer pr.cancel()
-		err = pr.UnconfigureInterface(response.PodIFInfo.VfNetdevice, response.PodIFInfo.IsVFIO)
+		err = pr.UnconfigureInterface(response.PodIFInfo)
 	}
 	return err
 }

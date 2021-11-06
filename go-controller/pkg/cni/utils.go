@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -97,7 +99,7 @@ func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, k
 }
 
 // PodAnnotation2PodInfo creates PodInterfaceInfo from Pod annotations and additional attributes
-func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs, isSmartNic, isVFIO bool, podUID string,
+func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs, isVFIO bool, podUID string,
 	vfNetdevice string, netNameInfo util.NetNameInfo) (*PodInterfaceInfo, error) {
 	podAnnotSt, err := util.UnmarshalPodAnnotation(podAnnotation, netNameInfo.NetName)
 	if err != nil {
@@ -117,7 +119,7 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs, isSmart
 		Ingress:       ingress,
 		Egress:        egress,
 		CheckExtIDs:   checkExtIDs,
-		IsSmartNic:    isSmartNic,
+		IsSmartNic:    config.OvnKubeNode.Mode == types.NodeModeSmartNICHost,
 		PodUID:        podUID,
 		NetNameInfo:   netNameInfo,
 		VfNetdevice:   vfNetdevice,

@@ -79,7 +79,7 @@ func (nc *ovnNodeController) watchSmartNicPods(isOvnUpEnabled bool, pfMACs []str
 					retryPods.Store(pod.UID, true)
 					return
 				}
-				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled, true, false,
+				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled, false,
 					string(pod.UID), "", nc.nadInfo.NetNameInfo)
 				if err != nil {
 					klog.Infof("Failed to get pod interface information: %v. retrying", err)
@@ -133,7 +133,7 @@ func (nc *ovnNodeController) watchSmartNicPods(isOvnUpEnabled bool, pfMACs []str
 					klog.Infof("Failed to get rep name, %s. retrying", err)
 					return
 				}
-				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled, true, false,
+				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled, false,
 					string(pod.UID), "", nc.nadInfo.NetNameInfo)
 				if err != nil {
 					klog.Infof("Failed to get pod interface information: %v. retrying", err)
