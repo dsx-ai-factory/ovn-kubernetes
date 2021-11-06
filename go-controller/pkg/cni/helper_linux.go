@@ -166,7 +166,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 	contIface := &current.Interface{}
 	ifnameSuffix := ""
 
-	vfNetdevice := ifInfo.VfNetdevice
+	vfNetdevice := ifInfo.VfNetdevNmae
 
 	// 1. Move VF to Container namespace
 	err := moveIfToNetns(vfNetdevice, netns)
@@ -212,7 +212,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 		return nil, nil, err
 	}
 
-	if !ifInfo.IsSmartNic {
+	if !ifInfo.IsSmartNICHostMode {
 		// 2. get Uplink netdevice
 		uplink, err := util.GetSriovnetOps().GetUplinkRepresentor(pciAddrs)
 		if err != nil {
@@ -356,7 +356,7 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 		}
 		hostIface, contIface, err = setupSriovInterface(netns, pr.SandboxID, pr.IfName, ifInfo, pr.CNIConf.DeviceID)
 	} else {
-		if ifInfo.IsSmartNic {
+		if ifInfo.IsSmartNICHostMode {
 			return nil, fmt.Errorf("unexpected configuration, pod request on smart-nic host. " +
 				"device ID must be provided")
 		}
@@ -367,7 +367,7 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 		return nil, err
 	}
 
-	if !ifInfo.IsSmartNic {
+	if !ifInfo.IsSmartNICHostMode {
 		err = ConfigureOVS(pr.ctx, pr.PodNamespace, pr.PodName, hostIface.Name, ifInfo, pr.SandboxID,
 			podLister, kclient)
 		if err != nil {
@@ -406,7 +406,7 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 	podDesc := fmt.Sprintf("for pod %s/%s network %s", pr.PodNamespace, pr.PodName, pr.CNIConf.Name)
 	klog.V(5).Infof("Tear down interface %+v CNI Conf %v %s", *pr, pr.CNIConf, podDesc)
-	if pr.CNIConf.DeviceID == "" && ifInfo.IsSmartNic {
+	if pr.CNIConf.DeviceID == "" && ifInfo.IsSmartNICHostMode {
 		klog.Warningf("Unexpected configuration %s, pod request on smart-nic host. device ID must be provided", podDesc)
 		return nil
 	}
@@ -419,7 +419,7 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 	// 2. If it is non-default network and non-smart-nic mode, needs to get the container interface index
 	//    so that we know the host-side interface name.
 	ifnameSuffix := ""
-	if pr.CNIConf.DeviceID != "" || (pr.CNIConf.NotDefault && !ifInfo.IsSmartNic) {
+	if pr.CNIConf.DeviceID != "" || (pr.CNIConf.NotDefault && !ifInfo.IsSmartNICHostMode) {
 		netns, err := ns.GetNS(pr.Netns)
 		if err != nil {
 			return fmt.Errorf("failed to get container namespace %s: %v", podDesc, err)
@@ -446,7 +446,7 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 				}
 				// rename VF device to make sure it is unique in the host namespace:
 				// if the VF's original name is emptry, sandbox id and a '0' letter prefix is used to make up the unique name.
-				oldVfName := ifInfo.VfNetdevice
+				oldVfName := ifInfo.VfNetdevNmae
 				if oldVfName == "" {
 					id := fmt.Sprintf("_0%d", link.Attrs().Index)
 					oldVfName = pr.SandboxID[:(15-len(id))] + id
@@ -459,7 +459,7 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 					return fmt.Errorf("failed to move container interface %s back to host namespace %s: %v", pr.IfName, podDesc, err)
 				}
 			}
-			if pr.CNIConf.NotDefault && !ifInfo.IsSmartNic {
+			if pr.CNIConf.NotDefault && !ifInfo.IsSmartNICHostMode {
 				ifnameSuffix = fmt.Sprintf("_%d", link.Attrs().Index)
 			}
 			return nil
@@ -469,7 +469,7 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 		}
 	}
 
-	if !ifInfo.IsSmartNic {
+	if !ifInfo.IsSmartNICHostMode {
 		// host side interface deletion
 		ifName := pr.SandboxID[:(15-len(ifnameSuffix))] + ifnameSuffix
 		out, err := ovsExec("del-port", "br-int", ifName)

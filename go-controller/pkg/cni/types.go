@@ -38,13 +38,13 @@ type PodInterfaceInfo struct {
 	util.PodAnnotation
 	util.NetNameInfo
 
-	Ingress     int64  `json:"ingress"`
-	Egress      int64  `json:"egress"`
-	CheckExtIDs bool   `json:"check-external-ids"`
-	IsSmartNic  bool   `json:"smartnic"`
-	PodUID      string `json:"pod-uid"`
-	VfNetdevice string `json:"vf-device"`
-	IsVFIO      bool   `json:"vfio"`
+	Ingress            int64  `json:"ingress"`
+	Egress             int64  `json:"egress"`
+	CheckExtIDs        bool   `json:"check-external-ids"`
+	IsSmartNICHostMode bool   `json:"is-smartnic-host-mode"`
+	PodUID             string `json:"pod-uid"`
+	VfNetdevNmae       string `json:"vf-netdev-name"`
+	IsVFIO             bool   `json:"vfio"`
 }
 
 // Explicit type for CNI commands the server handles

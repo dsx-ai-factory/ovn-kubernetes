@@ -494,7 +494,7 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
 				PodAnnotation: util.PodAnnotation{},
-				VfNetdevice:   "en01",
+				VfNetdevNmae:  "en01",
 			},
 			inpPCIAddrs:        "0000:03:00.1",
 			errExp:             true,
@@ -530,7 +530,7 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
 				PodAnnotation: util.PodAnnotation{},
-				VfNetdevice:   "en01",
+				VfNetdevNmae:  "en01",
 			},
 			inpPCIAddrs:        "0000:03:00.1",
 			errExp:             true,
@@ -572,7 +572,7 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
 				PodAnnotation: util.PodAnnotation{},
-				VfNetdevice:   "en01",
+				VfNetdevNmae:  "en01",
 			},
 			inpPCIAddrs: "0000:03:00.1",
 			errExp:      true,
@@ -609,7 +609,7 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
 				PodAnnotation: util.PodAnnotation{},
-				VfNetdevice:   "en01",
+				VfNetdevNmae:  "en01",
 			},
 			inpPCIAddrs: "0000:03:00.1",
 			errExp:      true,
@@ -647,7 +647,7 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
 				PodAnnotation: util.PodAnnotation{},
-				VfNetdevice:   "en01",
+				VfNetdevNmae:  "en01",
 			},
 			inpPCIAddrs: "0000:03:00.1",
 			errExp:      true,
@@ -686,7 +686,7 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
 				PodAnnotation: util.PodAnnotation{},
-				VfNetdevice:   "en01",
+				VfNetdevNmae:  "en01",
 			},
 			inpPCIAddrs: "0000:03:00.1",
 			errMatch:    fmt.Errorf("failed to rename"),
@@ -718,7 +718,7 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
 				PodAnnotation: util.PodAnnotation{},
-				VfNetdevice:   "en01",
+				VfNetdevNmae:  "en01",
 			},
 			inpPCIAddrs: "0000:03:00.1",
 			errExp:      true,
@@ -755,7 +755,7 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
 				PodAnnotation: util.PodAnnotation{},
-				VfNetdevice:   "en01",
+				VfNetdevNmae:  "en01",
 			},
 			inpPCIAddrs: "0000:03:00.1",
 			errMatch:    fmt.Errorf("failed to set MTU on"),
@@ -797,9 +797,9 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpContID:    "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a",
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{},
-				VfNetdevice:   "en01",
-				IsSmartNic:    true,
+				PodAnnotation:      util.PodAnnotation{},
+				VfNetdevNmae:       "en01",
+				IsSmartNICHostMode: true,
 			},
 			inpPCIAddrs:        "0000:03:00.1",
 			errExp:             false,

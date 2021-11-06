@@ -146,12 +146,12 @@ var _ = Describe("Node Smart NIC tests", func() {
 			vfRep = "pf0vf9"
 			vfLink = &linkMock.Link{}
 			ifInfo = &cni.PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{},
-				Ingress:       -1,
-				Egress:        -1,
-				IsSmartNic:    true,
-				PodUID:        "a-pod",
-				NetNameInfo:   util.NetNameInfo{types.DefaultNetworkName, "", false},
+				PodAnnotation:      util.PodAnnotation{},
+				Ingress:            -1,
+				Egress:             -1,
+				IsSmartNICHostMode: true,
+				PodUID:             "a-pod",
+				NetNameInfo:        util.NetNameInfo{types.DefaultNetworkName, "", false},
 			}
 
 			scd := util.SmartNICConnectionDetails{

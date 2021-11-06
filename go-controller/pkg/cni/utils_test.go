@@ -249,14 +249,14 @@ var _ = Describe("CNI Utils tests", func() {
 			config.OvnKubeNode.Mode = types.NodeModeFull
 			pif, err := PodAnnotation2PodInfo(podAnnot, false, false, podUID, "", netNameInfo)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(pif.IsSmartNic).To(BeFalse())
+			Expect(pif.IsSmartNICHostMode).To(BeFalse())
 		})
 
 		It("Creates PodInterfaceInfo with IsSmartNIC true", func() {
 			config.OvnKubeNode.Mode = types.NodeModeSmartNICHost
 			pif, err := PodAnnotation2PodInfo(podAnnot, false, false, podUID, "", netNameInfo)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(pif.IsSmartNic).To(BeTrue())
+			Expect(pif.IsSmartNICHostMode).To(BeTrue())
 		})
 
 		It("Creates PodInterfaceInfo with checkExtIDs false", func() {

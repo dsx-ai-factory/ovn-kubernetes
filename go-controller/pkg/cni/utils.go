@@ -115,15 +115,15 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs, isVFIO 
 	}
 
 	podInterfaceInfo := &PodInterfaceInfo{
-		PodAnnotation: *podAnnotSt,
-		Ingress:       ingress,
-		Egress:        egress,
-		CheckExtIDs:   checkExtIDs,
-		IsSmartNic:    config.OvnKubeNode.Mode == types.NodeModeSmartNICHost,
-		PodUID:        podUID,
-		NetNameInfo:   netNameInfo,
-		VfNetdevice:   vfNetdevice,
-		IsVFIO:        isVFIO,
+		PodAnnotation:      *podAnnotSt,
+		Ingress:            ingress,
+		Egress:             egress,
+		CheckExtIDs:        checkExtIDs,
+		IsSmartNICHostMode: config.OvnKubeNode.Mode == types.NodeModeSmartNICHost,
+		PodUID:             podUID,
+		NetNameInfo:        netNameInfo,
+		VfNetdevNmae:       vfNetdevice,
+		IsVFIO:             isVFIO,
 	}
 	return podInterfaceInfo, nil
 }

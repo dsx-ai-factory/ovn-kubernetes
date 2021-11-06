@@ -203,9 +203,9 @@ func (pr *PodRequest) cmdDel(podLister corev1listers.PodLister, kclient kubernet
 	}
 
 	podInterfaceInfo := &PodInterfaceInfo{
-		IsSmartNic:  config.OvnKubeNode.Mode == types.NodeModeSmartNICHost,
-		VfNetdevice: vfDevice,
-		IsVFIO:      isVFIO,
+		IsSmartNICHostMode: config.OvnKubeNode.Mode == types.NodeModeSmartNICHost,
+		VfNetdevNmae:       vfDevice,
+		IsVFIO:             isVFIO,
 	}
 	if !config.UnprivilegedMode {
 		err := pr.UnconfigureInterface(podInterfaceInfo)
