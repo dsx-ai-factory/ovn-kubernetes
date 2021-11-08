@@ -345,7 +345,7 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 		// SR-IOV Case
 		// if the SR-IOV device is bound to VFIO, then there is nothing to do as it will be passed to the
 		// KVM VM directly
-		if ifInfo.IsVFIO {
+		if pr.IsVFIO {
 			hostIface := &current.Interface{}
 			contIface := &current.Interface{
 				Name:    pr.IfName,
@@ -410,8 +410,8 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 		klog.Warningf("Unexpected configuration %s, pod request on smart-nic host. device ID must be provided", podDesc)
 		return nil
 	}
-	if ifInfo.IsVFIO {
-		klog.V(5).Infof("VFIO case %s, nothing to do", podDesc)
+	if pr.IsVFIO {
+		klog.Infof("VFIO case %s, nothing to do", podDesc)
 		return nil
 	}
 

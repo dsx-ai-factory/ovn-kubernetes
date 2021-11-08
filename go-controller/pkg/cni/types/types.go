@@ -15,6 +15,8 @@ type NetConf struct {
 	MTU int `json:"mtu,omitempty"`
 	// set to localnet if it needs public interface
 	TopoType string `json:"topology,omitempty"`
+	// captures net-attach-def name in the form of namespace/name
+	NadName string `json:"net_attach_def_name,omitempty"`
 	// set true if it is default networkattachmentdefintion
 	NotDefault bool `json:"not_default,omitempty"`
 

@@ -18,6 +18,7 @@ import (
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 	cni020 "github.com/containernetworking/cni/pkg/types/020"
+	util_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 	"k8s.io/client-go/kubernetes/fake"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	utiltesting "k8s.io/client-go/util/testing"
@@ -95,6 +96,10 @@ func TestCNIServer(t *testing.T) {
 	if err := s.Start(serverHandleCNI); err != nil {
 		t.Fatalf("error starting CNI server: %v", err)
 	}
+	// setup mock operations for the sriovnetops
+	mockSriovnetOps := new(util_mocks.SriovnetOps)
+	util.SetSriovnetOpsInst(mockSriovnetOps)
+	mockSriovnetOps.On("IsVfPciVfioBound", "").Return(false)
 
 	client := &http.Client{
 		Transport: &http.Transport{

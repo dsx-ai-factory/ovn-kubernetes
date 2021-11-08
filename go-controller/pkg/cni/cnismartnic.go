@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"k8s.io/client-go/util/retry"
@@ -12,10 +11,6 @@ import (
 
 // updatePodSmartNicConnDetailsWithRetry update the pod annotion with the givin connection details
 func (pr *PodRequest) updatePodSmartNicConnDetailsWithRetry(kube kube.Interface, smartNicConnDetails *util.SmartNICConnectionDetails) error {
-	netName := types.DefaultNetworkName
-	if pr.CNIConf.NotDefault {
-		netName = pr.CNIConf.Name
-	}
 	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		// Informer cache should not be mutated, so get a copy of the object
 		pod, err := kube.GetPod(pr.PodNamespace, pr.PodName)
@@ -24,7 +19,7 @@ func (pr *PodRequest) updatePodSmartNicConnDetailsWithRetry(kube kube.Interface,
 		}
 
 		cpod := pod.DeepCopy()
-		err = util.MarshalPodSmartNicConnDetails(&cpod.Annotations, smartNicConnDetails, netName)
+		err = util.MarshalPodSmartNicConnDetails(&cpod.Annotations, smartNicConnDetails, pr.effectiveNetName)
 		if err != nil {
 			return err
 		}
@@ -32,12 +27,12 @@ func (pr *PodRequest) updatePodSmartNicConnDetailsWithRetry(kube kube.Interface,
 	})
 	if resultErr != nil {
 		return fmt.Errorf("failed to update %s annotation on pod %s/%s for network %s: %v",
-			util.SmartNicConnectionDetailsAnnot, pr.PodNamespace, pr.PodName, netName, resultErr)
+			util.SmartNicConnectionDetailsAnnot, pr.PodNamespace, pr.PodName, pr.effectiveNetName, resultErr)
 	}
 	return nil
 }
 
-func (pr *PodRequest) addSmartNICConnectionDetailsAnnot(kube kube.Interface, vfNetDevice, netName string) error {
+func (pr *PodRequest) addSmartNICConnectionDetailsAnnot(kube kube.Interface, vfNetDevice string) error {
 	// 1. Verify there is a device id
 	if pr.CNIConf.DeviceID == "" {
 		return fmt.Errorf("DeviceID must be set for Pod request with SmartNIC")

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+
 	"io/ioutil"
 	"net/http"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 // *** The Server is PRIVATE API between OVN components and may be
@@ -176,6 +178,17 @@ func cniRequestToPodRequest(cr *Request, podLister corev1listers.PodLister, kcli
 		return nil, fmt.Errorf("broken stdin args")
 	}
 
+	// the first network to the Pod is always named as `default`, so we need
+	// to capture the effective NetConf name and NAD Name
+	req.effectiveNetName = types.DefaultNetworkName
+	req.effectiveNADName = types.DefaultNetworkName
+	if conf.NotDefault {
+		req.effectiveNetName = conf.Name
+		req.effectiveNADName = conf.NadName
+	}
+	if conf.DeviceID != "" {
+		req.IsVFIO = util.GetSriovnetOps().IsVfPciVfioBound(conf.DeviceID)
+	}
 	req.CNIConf = conf
 	req.timestamp = time.Now()
 	req.ctx, req.cancel = context.WithTimeout(context.Background(), time.Minute)

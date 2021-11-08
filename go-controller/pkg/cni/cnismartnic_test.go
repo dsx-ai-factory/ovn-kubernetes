@@ -46,7 +46,10 @@ var _ = Describe("cnismartnic tests", func() {
 				NetConf:  cnitypes.NetConf{},
 				DeviceID: "",
 			},
-			timestamp: time.Time{},
+			timestamp:        time.Time{},
+			IsVFIO:           false,
+			effectiveNetName: ovntypes.DefaultNetworkName,
+			effectiveNADName: ovntypes.DefaultNetworkName,
 		}
 		pod = &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
@@ -74,12 +77,12 @@ var _ = Describe("cnismartnic tests", func() {
 			Expect(err).ToNot(HaveOccurred())
 			fakeKubeInterface.On("UpdatePod", pod).Return(nil)
 
-			err = pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface, "", ovntypes.DefaultNetworkName)
+			err = pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface, "")
 			Expect(err).ToNot(HaveOccurred())
 		})
 
 		It("Fails if DeviceID is not present in CNI config", func() {
-			err := pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface, "", ovntypes.DefaultNetworkName)
+			err := pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface, "")
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -87,7 +90,7 @@ var _ = Describe("cnismartnic tests", func() {
 			pr.CNIConf.DeviceID = "0000:05:00.4"
 			fakeSriovnetOps.On("GetPfPciFromVfPci", pr.CNIConf.DeviceID).Return(
 				"", fmt.Errorf("failed to get PF address"))
-			err := pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface, "", ovntypes.DefaultNetworkName)
+			err := pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface, "")
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -96,7 +99,7 @@ var _ = Describe("cnismartnic tests", func() {
 			fakeSriovnetOps.On("GetPfPciFromVfPci", pr.CNIConf.DeviceID).Return("0000:05:00.0", nil)
 			fakeSriovnetOps.On("GetVfIndexByPciAddress", pr.CNIConf.DeviceID).Return(
 				-1, fmt.Errorf("failed to get VF index"))
-			err := pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface, "", ovntypes.DefaultNetworkName)
+			err := pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface, "")
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -106,7 +109,7 @@ var _ = Describe("cnismartnic tests", func() {
 			fakeSriovnetOps.On("GetVfIndexByPciAddress", pr.CNIConf.DeviceID).Return(2, nil)
 			fakeSriovnetOps.On("GetNetDevicesFromPci", "05:00.0").Return([]string{"enp1s0f0"}, nil)
 			mockNetLinkOps.On("LinkByName", "enp1s0f0").Return(existingMockLink, nil)
-			err := pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface, "", ovntypes.DefaultNetworkName)
+			err := pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface, "")
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -126,7 +129,7 @@ var _ = Describe("cnismartnic tests", func() {
 			err := util.MarshalPodSmartNicConnDetails(&pod.Annotations, &smartNicCd, ovntypes.DefaultNetworkName)
 			Expect(err).ToNot(HaveOccurred())
 			fakeKubeInterface.On("UpdatePod", pod).Return(fmt.Errorf("failed to set annotation"))
-			err = pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface, "", ovntypes.DefaultNetworkName)
+			err = pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface, "")
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to set annotation"))
 		})
