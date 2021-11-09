@@ -1011,7 +1011,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 		klog.V(5).Infof("Network policy ingress is %+v", ingressJSON)
 
 		ingress := newGressPolicy(knet.PolicyTypeIngress, i, policy.Namespace, policy.Name,
-			oc.nadInfo.NetNameInfo, statelessACL)
+			oc.nadInfo, statelessACL)
 
 		// Each ingress rule can have multiple ports to which we allow traffic.
 		for _, portJSON := range ingressJSON.Ports {
@@ -1051,7 +1051,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 		klog.V(5).Infof("Network policy egress is %+v", egressJSON)
 
 		egress := newGressPolicy(knet.PolicyTypeEgress, i, policy.Namespace, policy.Name,
-			oc.nadInfo.NetNameInfo, statelessACL)
+			oc.nadInfo, statelessACL)
 
 		// Each egress rule can have multiple ports to which we allow traffic.
 		for _, portJSON := range egressJSON.Ports {

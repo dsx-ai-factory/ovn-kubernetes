@@ -20,7 +20,7 @@ import (
 )
 
 type gressPolicy struct {
-	util.NetNameInfo
+	netAttachInfo   *util.NetAttachDefInfo
 	policyNamespace string
 	policyName      string
 	policyType      knet.PolicyType
@@ -85,9 +85,9 @@ func (pp *portPolicy) getL4Match() (string, error) {
 }
 
 func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name string,
-	netNameInfo util.NetNameInfo, aclState bool) *gressPolicy {
+	netAttachInfo *util.NetAttachDefInfo, aclState bool) *gressPolicy {
 	return &gressPolicy{
-		NetNameInfo:          netNameInfo,
+		netAttachInfo:        netAttachInfo,
 		policyNamespace:      namespace,
 		policyName:           name,
 		policyType:           policyType,
@@ -176,7 +176,7 @@ func (gp *gressPolicy) addPeerPods(oc *Controller, pods ...*v1.Pod) error {
 			}
 			gp.nodeHostNetPodsCacheLock.Unlock()
 		} else {
-			podIPs, err := util.GetAllPodIPs(pod, gp.NetNameInfo)
+			podIPs, err := util.GetAllPodIPs(pod, gp.netAttachInfo)
 			if err != nil {
 				return err
 			}
@@ -195,7 +195,7 @@ func (gp *gressPolicy) deletePeerPod(oc *Controller, pod *v1.Pod) error {
 			string(gp.policyType), gp.peerAddressSet, gp.nodeHostNetPodsCache)
 	}
 
-	ips, err := util.GetAllPodIPs(pod, gp.NetNameInfo)
+	ips, err := util.GetAllPodIPs(pod, gp.netAttachInfo)
 	if err != nil {
 		return err
 	}
@@ -362,7 +362,7 @@ func (gp *gressPolicy) localPodSetACL(portGroupName, portGroupUUID string, aclLo
 	l3Match := gp.getL3MatchFromAddressSet()
 	var lportMatch string
 	var cidrMatches []string
-	portGroupName = gp.Prefix + portGroupName
+	portGroupName = gp.netAttachInfo.Prefix + portGroupName
 	if gp.policyType == knet.PolicyTypeIngress {
 		lportMatch = fmt.Sprintf("outport == @%s", portGroupName)
 	} else {
@@ -445,8 +445,8 @@ func (gp *gressPolicy) addOrModifyACLAllow(match, l4Match, portGroupUUID string,
 		fmt.Sprintf("external-ids:policy=%s", gp.policyName),
 		fmt.Sprintf("external-ids:%s_num=%d", gp.policyType, gp.idx),
 		fmt.Sprintf("external-ids:policy_type=%s", gp.policyType)}
-	if gp.NotDefault {
-		cmdArgs = append(cmdArgs, "external_ids:network_name="+gp.NetName)
+	if gp.netAttachInfo.NotDefault {
+		cmdArgs = append(cmdArgs, "external_ids:network_name="+gp.netAttachInfo.NetName)
 	} else {
 		cmdArgs = append(cmdArgs, "external_ids:network_name{=}[]")
 	}
@@ -492,8 +492,8 @@ func (gp *gressPolicy) addOrModifyACLAllow(match, l4Match, portGroupUUID string,
 		fmt.Sprintf("external-ids:policy=%s", gp.policyName),
 		fmt.Sprintf("external-ids:%s_num=%d", gp.policyType, gp.idx),
 		fmt.Sprintf("external-ids:policy_type=%s", gp.policyType)}
-	if gp.NotDefault {
-		cmdArgs = append(cmdArgs, "external_ids:network_name="+gp.NetName)
+	if gp.netAttachInfo.NotDefault {
+		cmdArgs = append(cmdArgs, "external_ids:network_name="+gp.netAttachInfo.NetName)
 	}
 	cmdArgs = append(cmdArgs, []string{"--", "add", "port_group", portGroupUUID, "acls", "@acl"}...)
 	_, stderr, err = util.RunOVNNbctl(cmdArgs...)

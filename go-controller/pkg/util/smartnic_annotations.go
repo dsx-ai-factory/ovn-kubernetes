@@ -124,7 +124,7 @@ func MarshalPodSmartNicConnStatus(pannotations *map[string]string, scs *SmartNIC
 }
 
 // UnmarshalPodSmartNicConnStatus returns smart-nic connection status for the specified network
-func UnmarshalPodSmartNicConnStatus(annotations map[string]string, netName string) (*SmartNICConnectionStatus, error) {
+func UnmarshalPodSmartNicConnStatus(annotations map[string]string, nadName string) (*SmartNICConnectionStatus, error) {
 	ovnAnnotation, ok := annotations[SmartNicConnetionStatusAnnot]
 	if !ok {
 		return nil, newAnnotationNotSetError("could not find OVN pod annotation in %v", annotations)
@@ -135,10 +135,10 @@ func UnmarshalPodSmartNicConnStatus(annotations map[string]string, netName strin
 		return nil, fmt.Errorf("failed to unmarshal ovn pod annotation %q: %v",
 			ovnAnnotation, err)
 	}
-	scs, ok := podScss[netName]
+	scs, ok := podScss[nadName]
 	if !ok {
 		return nil, fmt.Errorf("no smart-nic connection status annotation for network %s: %q",
-			netName, ovnAnnotation)
+			nadName, ovnAnnotation)
 	}
 	return &scs, nil
 }

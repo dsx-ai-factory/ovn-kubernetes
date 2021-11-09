@@ -127,12 +127,12 @@ var _ = Describe("Node Smart NIC tests", func() {
 			Expect(err).ToNot(HaveOccurred())
 			pod.Annotations = podAnnot
 			sriovnetOpsMock.On("GetVfRepresentorSmartNIC", "0", "9").Return("pf0vf9", nil)
-			rep, err := nc.getVfRepName(&pod)
+			rep, err := nc.getVfRepName(&pod, types.DefaultNetworkName)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(rep).To(Equal("pf0vf9"))
 		})
 		It("Fails if smartnic.connection-details annotation is missing from Pod", func() {
-			_, err := nc.getVfRepName(&pod)
+			_, err := nc.getVfRepName(&pod, types.DefaultNetworkName)
 			Expect(err).To(HaveOccurred())
 		})
 	})
@@ -152,6 +152,7 @@ var _ = Describe("Node Smart NIC tests", func() {
 				IsSmartNICHostMode: true,
 				PodUID:             "a-pod",
 				NetNameInfo:        util.NetNameInfo{types.DefaultNetworkName, "", false},
+				NadName:            types.DefaultNetworkName,
 			}
 
 			scd := util.SmartNICConnectionDetails{

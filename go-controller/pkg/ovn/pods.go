@@ -31,15 +31,19 @@ func (oc *Controller) syncPods(pods []interface{}) {
 			klog.Errorf("Spurious object in syncPods: %v", podInterface)
 			continue
 		}
-		on, _, err := util.IsNetworkOnPod(pod, oc.nadInfo)
-		if err != nil {
+		on, network, err := util.IsNetworkOnPod(pod, oc.nadInfo)
+		if err != nil || !on {
 			continue
+		}
+		nadName := types.DefaultNetworkName
+		if oc.nadInfo.NotDefault {
+			nadName = fmt.Sprintf("%s/%s", network.Namespace, network.Name)
 		}
 		lsManagerNodeName := pod.Spec.NodeName
 		if oc.nadInfo.TopoType == types.LocalnetAttachDefTopoType {
 			lsManagerNodeName = types.OVNLocalnetSwitch
 		}
-		annotations, err := util.UnmarshalPodAnnotation(pod.Annotations, oc.nadInfo.NetName)
+		annotations, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
 		if util.PodScheduled(pod) && util.PodWantsNetwork(pod) && on && err == nil {
 			logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name, oc.nadInfo.Prefix)
 			expectedLogicalPorts[logicalPort] = true
@@ -134,10 +138,14 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		return
 	}
 
-	on, _, err := util.IsNetworkOnPod(pod, oc.nadInfo)
+	on, network, err := util.IsNetworkOnPod(pod, oc.nadInfo)
 	if err != nil || !on {
 		// the Pod is not attached to this specific network
 		return
+	}
+	nadName := types.DefaultNetworkName
+	if oc.nadInfo.NotDefault {
+		nadName = fmt.Sprintf("%s/%s", network.Namespace, network.Name)
 	}
 
 	lsManagerNodeName := pod.Spec.NodeName
@@ -162,7 +170,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		// Even if the port is not in the cache, IPs annotated in the Pod annotation may already be allocated,
 		// need to release them to avoid leakage.
 		if lsManagerNodeName != "" {
-			annotation, err := util.UnmarshalPodAnnotation(pod.Annotations, oc.nadInfo.NetName)
+			annotation, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
 			if err == nil {
 				podIfAddrs := annotation.IPs
 				_ = oc.lsManager.ReleaseIPs(lsManagerNodeName, podIfAddrs)
@@ -319,7 +327,7 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 	return nil
 }
 
-func (oc *Controller) updatePodAnnotationWithRetry(origPod *kapi.Pod, podInfo *util.PodAnnotation) error {
+func (oc *Controller) updatePodAnnotationWithRetry(origPod *kapi.Pod, podInfo *util.PodAnnotation, nadName string) error {
 	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		// Informer cache should not be mutated, so get a copy of the object
 		pod, err := oc.mc.kube.GetPod(origPod.Namespace, origPod.Name)
@@ -328,7 +336,7 @@ func (oc *Controller) updatePodAnnotationWithRetry(origPod *kapi.Pod, podInfo *u
 		}
 
 		cpod := pod.DeepCopy()
-		err = util.MarshalPodAnnotation(&cpod.Annotations, podInfo, oc.nadInfo.NetName)
+		err = util.MarshalPodAnnotation(&cpod.Annotations, podInfo, nadName)
 		if err != nil {
 			return err
 		}
@@ -357,14 +365,19 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	on, network, err := util.IsNetworkOnPod(pod, oc.nadInfo)
 	if err != nil || !on {
 		// the pod is not attached to this specific network
-		klog.V(5).Infof("Pod %s/%s is not attached on this network: %s", pod.Namespace, pod.Name, oc.nadInfo.NetName)
+		klog.V(5).Infof("Pod %s/%s is not attached on this overlay network controller: %s", pod.Namespace, pod.Name,
+			oc.nadInfo.NetName)
 		return nil
+	}
+	nadName := types.DefaultNetworkName
+	if oc.nadInfo.NotDefault {
+		nadName = fmt.Sprintf("%s/%s", network.Namespace, network.Name)
 	}
 
 	// Keep track of how long syncs take.
 	start := time.Now()
 	defer func() {
-		klog.Infof("[%s/%s] addLogicalPort for network %s took %v", pod.Namespace, pod.Name, oc.nadInfo.NetName, time.Since(start))
+		klog.Infof("[%s/%s] addLogicalPort for network %s took %v", pod.Namespace, pod.Name, nadName, time.Since(start))
 	}()
 
 	logicalSwitch := oc.nadInfo.Prefix + lsManagerNodeName
@@ -440,7 +453,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		cmds = append(cmds, cmd)
 	}
 
-	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations, oc.nadInfo.NetName)
+	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
 
 	// the IPs we allocate in this function need to be released back to the
 	// IPAM pool if there is some error in any step of addLogicalPort past
@@ -535,7 +548,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		klog.V(5).Infof("Annotation values for network %s: ip=%v ; mac=%s ; gw=%s\n",
 			oc.nadInfo.NetName, podIfAddrs, podMac, podAnnotation.Gateways)
 
-		if err = oc.updatePodAnnotationWithRetry(pod, &podAnnotation); err != nil {
+		if err = oc.updatePodAnnotationWithRetry(pod, &podAnnotation, nadName); err != nil {
 			return err
 		}
 		releaseIPs = false

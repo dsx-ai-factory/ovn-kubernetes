@@ -184,6 +184,9 @@ func cniRequestToPodRequest(cr *Request, podLister corev1listers.PodLister, kcli
 	req.effectiveNADName = types.DefaultNetworkName
 	if conf.NotDefault {
 		req.effectiveNetName = conf.Name
+		if conf.NadName == "" {
+			return nil, fmt.Errorf("OVN Netconf %q doesn't contain network-attachment-definition name", conf.Name)
+		}
 		req.effectiveNADName = conf.NadName
 	}
 	if conf.DeviceID != "" {

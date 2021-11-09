@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	netattachdefapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	netattachdefutils "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils"
@@ -251,8 +252,20 @@ func UnmarshalPodAnnotation(annotations map[string]string, netName string) (*Pod
 // first from the OVN annotation and then falling back to the Pod Status IPs.
 // This function is intended to also return IPs for HostNetwork and other
 // non-OVN-IPAM-ed pods.
-func GetAllPodIPs(pod *v1.Pod, netNameInfo NetNameInfo) ([]net.IP, error) {
-	annotation, _ := UnmarshalPodAnnotation(pod.Annotations, netNameInfo.NetName)
+func GetAllPodIPs(pod *v1.Pod, netAttachInfo *NetAttachDefInfo) ([]net.IP, error) {
+
+	on, network, err := IsNetworkOnPod(pod, netAttachInfo)
+	if err != nil {
+		return nil, err
+	} else if !on {
+		// the pod is not attached to this specific network, don't return error
+		return []net.IP{}, nil
+	}
+	nadName := types.DefaultNetworkName
+	if netAttachInfo.NotDefault {
+		nadName = fmt.Sprintf("%s/%s", network.Namespace, network.Name)
+	}
+	annotation, _ := UnmarshalPodAnnotation(pod.Annotations, nadName)
 	if annotation != nil {
 		// Use the OVN annotation if valid
 		ips := make([]net.IP, 0, len(annotation.IPs))
@@ -262,9 +275,9 @@ func GetAllPodIPs(pod *v1.Pod, netNameInfo NetNameInfo) ([]net.IP, error) {
 		return ips, nil
 	}
 
-	if netNameInfo.NotDefault {
+	if netAttachInfo.NotDefault {
 		return []net.IP{}, fmt.Errorf("no pod annotation of pod %s/%s found for network %s",
-			pod.Namespace, pod.Name, netNameInfo.NetName)
+			pod.Namespace, pod.Name, netAttachInfo.NetName)
 	}
 
 	// return error if there are no IPs in pod status

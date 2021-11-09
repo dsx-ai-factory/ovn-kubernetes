@@ -245,28 +245,28 @@ var _ = Describe("CNI Utils tests", func() {
 		}
 		netNameInfo := util.NetNameInfo{types.DefaultNetworkName, "", false}
 		podUID := "4d06bae8-9c38-41f6-945c-f92320e782e4"
-		It("Creates PodInterfaceInfo with IsSmartNIC false", func() {
+		It("Creates PodInterfaceInfo in NodeModeFull mode", func() {
 			config.OvnKubeNode.Mode = types.NodeModeFull
-			pif, err := PodAnnotation2PodInfo(podAnnot, false, podUID, "", netNameInfo)
+			pif, err := PodAnnotation2PodInfo(podAnnot, false, podUID, "", types.DefaultNetworkName, netNameInfo)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.IsSmartNICHostMode).To(BeFalse())
 		})
 
-		It("Creates PodInterfaceInfo with IsSmartNIC true", func() {
+		It("Creates PodInterfaceInfo with NodeModeSmartNICHost Mode", func() {
 			config.OvnKubeNode.Mode = types.NodeModeSmartNICHost
-			pif, err := PodAnnotation2PodInfo(podAnnot, false, podUID, "", netNameInfo)
+			pif, err := PodAnnotation2PodInfo(podAnnot, false, podUID, "", types.DefaultNetworkName, netNameInfo)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.IsSmartNICHostMode).To(BeTrue())
 		})
 
 		It("Creates PodInterfaceInfo with checkExtIDs false", func() {
-			pif, err := PodAnnotation2PodInfo(podAnnot, false, podUID, "", netNameInfo)
+			pif, err := PodAnnotation2PodInfo(podAnnot, false, podUID, "", types.DefaultNetworkName, netNameInfo)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.CheckExtIDs).To(BeFalse())
 		})
 
 		It("Creates PodInterfaceInfo with checkExtIDs true", func() {
-			pif, err := PodAnnotation2PodInfo(podAnnot, true, podUID, "", netNameInfo)
+			pif, err := PodAnnotation2PodInfo(podAnnot, true, podUID, "", types.DefaultNetworkName, netNameInfo)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.CheckExtIDs).To(BeTrue())
 		})

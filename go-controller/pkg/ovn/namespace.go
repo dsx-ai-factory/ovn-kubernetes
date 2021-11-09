@@ -430,7 +430,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 					klog.Errorf("Failed to get all the pods (%v)", err)
 				}
 				for _, pod := range existingPods {
-					podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, oc.nadInfo.NetName)
+					podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, types.DefaultNetworkName)
 					if err != nil {
 						klog.Error(err.Error())
 					} else {
@@ -687,7 +687,7 @@ func (oc *Controller) createNamespaceAddrSetAllPods(ns string) (addressset.Addre
 		ips = make([]net.IP, 0, len(existingPods))
 		for _, pod := range existingPods {
 			if pod.Status.PodIP != "" && !pod.Spec.HostNetwork {
-				podIPs, err := util.GetAllPodIPs(pod, oc.nadInfo.NetNameInfo)
+				podIPs, err := util.GetAllPodIPs(pod, oc.nadInfo)
 				if err != nil {
 					klog.Warningf(err.Error())
 					continue

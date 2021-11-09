@@ -140,7 +140,8 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 	}
 	// Get the IP address and MAC address of the pod
 	// for Smart-Nic, ensure connection-details is present
-	podUID, annotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, namespace, podName, pr.effectiveNetName, annotCondFn)
+	podUID, annotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, namespace, podName,
+		pr.effectiveNADName, annotCondFn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
 	}
@@ -150,7 +151,8 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 
 	netPrefix := util.GetNetworkPrefix(pr.effectiveNetName, !pr.CNIConf.NotDefault)
 	netNameInfo := util.NetNameInfo{NetName: pr.effectiveNetName, Prefix: netPrefix, NotDefault: pr.CNIConf.NotDefault}
-	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, useOVSExternalIDs, pr.PodUID, vfNetdevName, netNameInfo)
+	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, useOVSExternalIDs, pr.PodUID, vfNetdevName,
+		pr.effectiveNADName, netNameInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -190,7 +192,7 @@ func (pr *PodRequest) cmdDel(podLister corev1listers.PodLister, kclient kubernet
 				klog.Errorf("Failed to get pod %s/%s: %v", namespace, podName, err)
 				return response, nil
 			}
-			smartNicCD, err := util.UnmarshalPodSmartNicConnDetails(pod.Annotations, pr.effectiveNetName)
+			smartNicCD, err := util.UnmarshalPodSmartNicConnDetails(pod.Annotations, pr.effectiveNADName)
 			if err != nil {
 				klog.Errorf("Failed to get smart-nic annotation for pod %s/%s network %s: %v", namespace, podName, pr.effectiveNetName, err)
 				return response, nil

@@ -44,6 +44,7 @@ type PodInterfaceInfo struct {
 	IsSmartNICHostMode bool   `json:"is-smartnic-host-mode"`
 	PodUID             string `json:"pod-uid"`
 	VfNetdevNmae       string `json:"vf-netdev-name"`
+	NadName            string `json:"nadName"`
 }
 
 // Explicit type for CNI commands the server handles

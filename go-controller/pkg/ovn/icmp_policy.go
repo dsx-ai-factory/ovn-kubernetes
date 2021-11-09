@@ -361,7 +361,7 @@ func (oc *Controller) addICMPNetworkPolicy(policy *onet.ICMPNetworkPolicy) {
 	for i, ingressJSON := range policy.Spec.Ingress {
 		klog.V(5).Infof("ICMP Network policy ingress is %+v", ingressJSON)
 
-		ingress := newGressPolicy(onet.PolicyTypeIngress, i, policy.Namespace, policyName, oc.nadInfo.NetNameInfo, statelessACL)
+		ingress := newGressPolicy(onet.PolicyTypeIngress, i, policy.Namespace, policyName, oc.nadInfo, statelessACL)
 
 		// Each ingress rule can have multiple type/code to which we allow traffic.
 		for _, protocolJSON := range ingressJSON.Protocols {
@@ -398,7 +398,7 @@ func (oc *Controller) addICMPNetworkPolicy(policy *onet.ICMPNetworkPolicy) {
 	for i, egressJSON := range policy.Spec.Egress {
 		klog.V(5).Infof("ICMP Network policy egress is %+v", egressJSON)
 
-		egress := newGressPolicy(onet.PolicyTypeEgress, i, policy.Namespace, policyName, oc.nadInfo.NetNameInfo, statelessACL)
+		egress := newGressPolicy(onet.PolicyTypeEgress, i, policy.Namespace, policyName, oc.nadInfo, statelessACL)
 
 		// Each egress rule can have multiple typese/code to which we allow traffic.
 		for _, protocolJSON := range egressJSON.Protocols {

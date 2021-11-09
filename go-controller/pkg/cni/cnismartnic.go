@@ -19,7 +19,7 @@ func (pr *PodRequest) updatePodSmartNicConnDetailsWithRetry(kube kube.Interface,
 		}
 
 		cpod := pod.DeepCopy()
-		err = util.MarshalPodSmartNicConnDetails(&cpod.Annotations, smartNicConnDetails, pr.effectiveNetName)
+		err = util.MarshalPodSmartNicConnDetails(&cpod.Annotations, smartNicConnDetails, pr.effectiveNADName)
 		if err != nil {
 			return err
 		}
@@ -27,7 +27,7 @@ func (pr *PodRequest) updatePodSmartNicConnDetailsWithRetry(kube kube.Interface,
 	})
 	if resultErr != nil {
 		return fmt.Errorf("failed to update %s annotation on pod %s/%s for network %s: %v",
-			util.SmartNicConnectionDetailsAnnot, pr.PodNamespace, pr.PodName, pr.effectiveNetName, resultErr)
+			util.SmartNicConnectionDetailsAnnot, pr.PodNamespace, pr.PodName, pr.effectiveNADName, resultErr)
 	}
 	return nil
 }
