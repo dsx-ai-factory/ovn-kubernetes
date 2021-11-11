@@ -24,8 +24,8 @@ type NetConf struct {
 	VlanId int `json:"vlan_id,omitempty"`
 	// bridge name, valid in localnet topology network
 	BridgeName string `json:"bridge_name,omitempty"`
-	// list of CIDRs to be excluded from being allocated for Pod, valid in localnet topology network
-	ExcludeRanges []string `json:"exclude,omitempty"`
+	// list of IPs to be excluded from being allocated for Pod, valid in localnet topology network
+	ExcludeIPs []string `json:"exclude_ips,omitempty"`
 
 	// LogFile to log all the messages from cni shim binary to
 	LogFile string `json:"logFile,omitempty"`

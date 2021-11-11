@@ -360,16 +360,15 @@ func (mc *OvnMHController) NewOvnController(nadInfo *util.NetAttachDefInfo,
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize localnet switch IP manager for network %s: %v", nadInfo.NetName, err)
 		}
-		for _, excludeCidr := range nadInfo.ExcludeCidrs {
-			// convert IPNet struct mask and address to uint32
-			// network is BigEndian
-			var ip net.IP
-			for ip = util.NextIP(excludeCidr.IP); ; ip = util.NextIP(ip) {
-				if !excludeCidr.Contains(ip) {
-					break
-				}
-				_ = lsManager.AllocateIPs(ovntypes.OVNLocalnetSwitch, []*net.IPNet{{IP: ip, Mask: excludeCidr.Mask}})
+		for _, excludeIP := range nadInfo.ExcludeIPs {
+			var ipMask net.IPMask
+			if (*excludeIP).To4() != nil {
+				ipMask = net.CIDRMask(32, 32)
+			} else {
+				ipMask = net.CIDRMask(128, 128)
 			}
+
+			_ = lsManager.AllocateIPs(ovntypes.OVNLocalnetSwitch, []*net.IPNet{{IP: *excludeIP, Mask: ipMask}})
 		}
 	}
 	oc := &Controller{

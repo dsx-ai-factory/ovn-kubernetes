@@ -215,10 +215,10 @@ type NetAttachDefInfo struct {
 	NetCidr       string
 	MTU           int
 
-	TopoType     string
-	VlanId       int
-	BridgeName   string
-	ExcludeCidrs []*net.IPNet
+	TopoType   string
+	VlanId     int
+	BridgeName string
+	ExcludeIPs []*net.IP
 }
 
 func NewNetAttachDefInfo(netconf *cnitypes.NetConf) (*NetAttachDefInfo, error) {
@@ -250,14 +250,33 @@ func NewNetAttachDefInfo(netconf *cnitypes.NetConf) (*NetAttachDefInfo, error) {
 			return nil, fmt.Errorf("missing bridge name for %s topotype net-attach-def %s", types.LocalnetAttachDefTopoType, netconf.Name)
 		}
 
-		if len(netconf.ExcludeRanges) != 0 {
-			nadInfo.ExcludeCidrs = make([]*net.IPNet, len(netconf.ExcludeRanges))
-			for i, excludeRange := range netconf.ExcludeRanges {
-				_, excludeCidr, err := net.ParseCIDR(excludeRange)
-				if err != nil {
-					return nil, fmt.Errorf("invalid CIDR in exclude list %s: %s", excludeRange, err)
+		if len(netconf.ExcludeIPs) != 0 {
+			// TODO(gmoodalbail): we should parse this once and stash it in a structure
+			netCIDRs, err := config.ParseClusterSubnetEntries(netconf.NetCidr, netconf.TopoType != types.LocalnetAttachDefTopoType)
+			if err != nil {
+				return nil, fmt.Errorf("failed while parsing the provided NetCIDR %q for Network %q", netconf.NetCidr, netName)
+			}
+
+			nadInfo.ExcludeIPs = make([]*net.IP, len(netconf.ExcludeIPs))
+			for i, excludeIPstr := range netconf.ExcludeIPs {
+				excludeIP := net.ParseIP(excludeIPstr)
+				if excludeIP == nil {
+					return nil, fmt.Errorf("invalid IP %q provided in the exclude_ips list %s for network %s",
+						excludeIPstr, netconf.ExcludeIPs, netName)
 				}
-				nadInfo.ExcludeCidrs[i] = excludeCidr
+				// check if the exclude IP is within the netconf.
+				found := false
+				for _, netCIDR := range netCIDRs {
+					if netCIDR.CIDR.Contains(excludeIP) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					return nil, fmt.Errorf("provided exclude_ip %q is not part of any of the Network CIDRs (%v) for network %s",
+						excludeIP, netCIDRs, netName)
+				}
+				nadInfo.ExcludeIPs[i] = &excludeIP
 			}
 		}
 		//nexthops := strings.Split(netconf.GatewayNexthops, ",")
