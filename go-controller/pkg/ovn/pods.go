@@ -223,27 +223,15 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 		// non default network, see if its network-attachment's annotation has default-route key.
 		// If present, then we need to add default route for it
 		podAnnotation.Gateways = append(podAnnotation.Gateways, network.GatewayRequest...)
-		if oc.nadInfo.TopoType == types.LocalnetAttachDefTopoType {
-			return nil
-		}
+
 		for _, podIfAddr := range podAnnotation.IPs {
 			isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
+			// TBD localnet type does need this only for a temp workaround, to be removed.
 			nodeSubnet, err := util.MatchIPNetFamily(isIPv6, nodeSubnets)
 			if err != nil {
 				return err
 			}
-
-			//var gwIP net.IP
-			//// TBD gateway nexthop is different for localnet topotype network
-			//if oc.nadInfo.TopoType == types.LocalnetAttachDefTopoType {
-			//	gwIPs, err := util.MatchIPFamily(isIPv6, oc.nadInfo.GatewayNextHops)
-			//	if err != nil {
-			//		return err
-			//	}
-			//	gwIP = gwIPs[0]
-			//}
 			gatewayIPnet := util.GetNodeGatewayIfAddr(nodeSubnet)
-
 			for _, clusterSubnet := range oc.clusterSubnets {
 				if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
 					podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{

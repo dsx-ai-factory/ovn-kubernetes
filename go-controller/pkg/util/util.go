@@ -279,15 +279,6 @@ func NewNetAttachDefInfo(netconf *cnitypes.NetConf) (*NetAttachDefInfo, error) {
 				nadInfo.ExcludeIPs[i] = &excludeIP
 			}
 		}
-		//nexthops := strings.Split(netconf.GatewayNexthops, ",")
-		//for _, nexthop := range nexthops {
-		//	// Parse NextHop to make sure it is valid before using. Return error if not valid.
-		//	gwNexthop := net.ParseIP(nexthop)
-		//	if gwNexthop == nil {
-		//		return nil, fmt.Errorf("failed to parse configured next-hop for net-attach-def %s/%s: %s", namespace, name, nexthop)
-		//	}
-		//	nadInfo.GatewayNextHops = append(nadInfo.GatewayNextHops, gwNexthop)
-		//}
 	}
 
 	return &nadInfo, nil
