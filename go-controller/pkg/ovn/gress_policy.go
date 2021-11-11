@@ -417,7 +417,11 @@ func (gp *gressPolicy) localPodSetACL(portGroupName, portGroupUUID string, aclLo
 // addOrModifyACLAllow adds or modifies an ACL with a given match to the given Port Group
 func (gp *gressPolicy) addOrModifyACLAllow(match, l4Match, portGroupUUID string, ipBlockCIDR int, aclLogging string) error {
 	var direction, action, aclName, ipBlockCIDRString string
-	direction = types.DirectionToLPort
+	if gp.policyType == knet.PolicyTypeEgress && gp.netAttachInfo.TopoType == types.LocalnetAttachDefTopoType {
+		direction = types.DirectionFromLPort
+	} else {
+		direction = types.DirectionToLPort
+	}
 	if gp.isAclStateless {
 		action = "allow-stateless"
 	} else {

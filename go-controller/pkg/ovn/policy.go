@@ -314,9 +314,15 @@ func defaultDenyPortGroup(namespace, gressSuffix string) string {
 
 func (oc *Controller) createDefaultDenyPortGroup(ns string, nsInfo *namespaceInfo, policyType knet.PolicyType, aclLogging string, policyName string) error {
 	var portGroupName string
+	var direction string
+
+	direction = types.DirectionToLPort
 	if policyType == knet.PolicyTypeIngress {
 		portGroupName = defaultDenyPortGroup(ns, "ingressDefaultDeny")
 	} else if policyType == knet.PolicyTypeEgress {
+		if oc.nadInfo.TopoType == types.LocalnetAttachDefTopoType {
+			direction = types.DirectionFromLPort
+		}
 		portGroupName = defaultDenyPortGroup(ns, "egressDefaultDeny")
 	}
 	portGroupUUID, err := createPortGroup(oc.mc.ovnNBClient, portGroupName, portGroupName, oc.nadInfo.NetNameInfo)
@@ -325,14 +331,14 @@ func (oc *Controller) createDefaultDenyPortGroup(ns string, nsInfo *namespaceInf
 			portGroupName, err)
 	}
 	match := getACLMatch(portGroupName, "", policyType, oc.nadInfo.NetNameInfo)
-	err = addACLPortGroup(ns, portGroupUUID, types.DirectionToLPort, types.DefaultDenyPriority, match, "drop",
+	err = addACLPortGroup(ns, portGroupUUID, direction, types.DefaultDenyPriority, match, "drop",
 		policyType, aclLogging, policyName, oc.nadInfo.NetNameInfo)
 	if err != nil {
 		return fmt.Errorf("failed to create default deny ACL for port group %v", err)
 	}
 
 	match = getACLMatch(portGroupName, "arp", policyType, oc.nadInfo.NetNameInfo)
-	err = addACLPortGroup(ns, portGroupUUID, types.DirectionToLPort, types.DefaultAllowPriority, match, "allow",
+	err = addACLPortGroup(ns, portGroupUUID, direction, types.DefaultAllowPriority, match, "allow",
 		policyType, "", "ARPallowPolicy", oc.nadInfo.NetNameInfo)
 	if err != nil {
 		return fmt.Errorf("failed to create default allow ARP ACL for port group %v", err)
