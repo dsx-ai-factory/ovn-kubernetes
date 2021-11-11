@@ -84,6 +84,13 @@ func (oc *Controller) syncPods(pods []interface{}) {
 		}
 	}
 
+	// for default network, logical_port name is in the form of podNamespace_podName, otherwise,
+	// logical_port name is in the form of prefix_podNamespace_podName. inddex to get podNamespace
+	// from logical_port name would be different in these two cases.
+	nsIndex := 0
+	if oc.nadInfo.NotDefault {
+		nsIndex = 1
+	}
 	for _, existingPort := range existingLogicalPorts {
 		if _, ok := expectedLogicalPorts[existingPort]; !ok {
 			// not found, delete this logical port
@@ -91,7 +98,7 @@ func (oc *Controller) syncPods(pods []interface{}) {
 			_, ip, err := util.GetPortAddresses(existingPort, oc.mc.ovnNBClient)
 			// need update address_set later
 			if err == nil {
-				ns := strings.Split(existingPort, "_")[0]
+				ns := strings.Split(existingPort, "_")[nsIndex]
 				ips := nsNeedUpdate[ns]
 				ips = append(ips, ip...)
 				nsNeedUpdate[ns] = ips
