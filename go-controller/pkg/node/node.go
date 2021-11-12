@@ -772,10 +772,18 @@ func (nc *ovnNodeController) updateLocalnetOvnBridgeMapping(toAdd bool) error {
 
 	bridge, ok := bridgeMap[networkName]
 	if toAdd {
-		if ok && bridge == nc.nadInfo.BridgeName {
+		bridgeName := nc.nadInfo.BridgeName
+		stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
+			"external_ids:ngn-public-bridge")
+		if err != nil {
+			klog.Warningf("Failed to get ngn-public-bridge for network %s stderr:%s (%v)", nc.nadInfo.NetName, stderr, err)
+		} else if stdout != "" {
+			bridgeName = stdout
+		}
+		if ok && bridge == bridgeName {
 			return nil
 		}
-		bridgeMap[networkName] = nc.nadInfo.BridgeName
+		bridgeMap[networkName] = bridgeName
 	} else {
 		if !ok {
 			return nil

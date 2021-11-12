@@ -1465,7 +1465,8 @@ func (mc *OvnMHController) initOvnController(netattachdef *nettypes.NetworkAttac
 	v, ok := mc.nonDefaultOvnControllers.Load(nadInfo.NetName)
 	if ok {
 		oc := v.(*Controller)
-		if oc.nadInfo.NetCidr != nadInfo.NetCidr || oc.nadInfo.MTU != nadInfo.MTU {
+		if oc.nadInfo.NetCidr != nadInfo.NetCidr || oc.nadInfo.MTU != nadInfo.MTU || oc.nadInfo.TopoType != nadInfo.TopoType ||
+			oc.nadInfo.VlanId != nadInfo.VlanId || oc.nadInfo.BridgeName != nadInfo.BridgeName {
 			return nil, fmt.Errorf("network attachment definition %s/%s does not share the same CNI config of name %s",
 				netattachdef.Namespace, netattachdef.Name, nadInfo.NetName)
 		} else {
@@ -1481,7 +1482,7 @@ func (mc *OvnMHController) initOvnController(netattachdef *nettypes.NetworkAttac
 func (mc *OvnMHController) addNetworkAttachDefinition(netattachdef *nettypes.NetworkAttachmentDefinition) {
 	oc, err := mc.initOvnController(netattachdef)
 	if err != nil {
-		klog.Errorf(err.Error())
+		klog.Errorf("Failed to add Network Attachment Definition %s/%s: %v", err)
 		return
 	}
 
