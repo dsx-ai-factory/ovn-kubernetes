@@ -157,7 +157,7 @@ func (oc *Controller) icmpHandleLocalPodSelectorAddFunc(
 	}
 
 	// Get the logical port info
-	logicalPorts := util.GetAllLogicalPortNames(pod.Namespace, pod.Name, oc.nadInfo)
+	logicalPorts := util.GetAllLogicalPortNames(pod, oc.nadInfo)
 	portsToAdd := make([]*lpInfo, 0, len(logicalPorts))
 	for _, logicalPort := range logicalPorts {
 		portInfo, err := oc.logicalPortCache.get(logicalPort)
@@ -221,7 +221,7 @@ func (oc *Controller) icmpHandleLocalPodSelectorSetPods(
 			continue
 		}
 
-		logicalPorts := util.GetAllLogicalPortNames(pod.Namespace, pod.Name, oc.nadInfo)
+		logicalPorts := util.GetAllLogicalPortNames(pod, oc.nadInfo)
 		for _, logicalPort := range logicalPorts {
 			portInfo, err := oc.logicalPortCache.get(logicalPort)
 			// pod is not yet handled

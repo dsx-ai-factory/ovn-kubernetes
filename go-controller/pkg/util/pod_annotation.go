@@ -253,7 +253,7 @@ func UnmarshalPodAnnotation(annotations map[string]string, netName string) (*Pod
 func GetAllPodIPs(pod *v1.Pod, netAttachInfo *NetAttachDefInfo) ([]net.IP, error) {
 
 	ips := []net.IP{}
-	on, networkMap, _, err := IsNetworkOnPod(pod, netAttachInfo)
+	on, networkMap, err := IsNetworkOnPod(pod, netAttachInfo)
 	if err != nil {
 		return nil, err
 	} else if !on {

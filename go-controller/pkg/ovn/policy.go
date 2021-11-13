@@ -483,7 +483,7 @@ func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInf
 	}
 
 	for _, pod := range pods {
-		portNames := util.GetAllLogicalPortNames(pod.Namespace, pod.Name, oc.nadInfo)
+		portNames := util.GetAllLogicalPortNames(pod, oc.nadInfo)
 		for _, portName := range portNames {
 			if portInfo, err := oc.logicalPortCache.get(portName); err != nil {
 				klog.Errorf(err.Error())
@@ -767,7 +767,7 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 	}
 
 	// Get the logical port info
-	logicalPorts := util.GetAllLogicalPortNames(pod.Namespace, pod.Name, oc.nadInfo)
+	logicalPorts := util.GetAllLogicalPortNames(pod, oc.nadInfo)
 	portsToAdd := make([]*lpInfo, 0, len(logicalPorts))
 	for _, logicalPort := range logicalPorts {
 		portInfo, err := oc.logicalPortCache.get(logicalPort)
@@ -836,7 +836,7 @@ func (oc *Controller) handleLocalPodSelectorSetPods(
 			continue
 		}
 
-		logicalPorts := util.GetAllLogicalPortNames(pod.Namespace, pod.Name, oc.nadInfo)
+		logicalPorts := util.GetAllLogicalPortNames(pod, oc.nadInfo)
 		for _, logicalPort := range logicalPorts {
 			portInfo, err := oc.logicalPortCache.get(logicalPort)
 			// pod is not yet handled
@@ -884,7 +884,7 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 	}
 
 	// Get the logical port info
-	logicalPorts := util.GetAllLogicalPortNames(pod.Namespace, pod.Name, oc.nadInfo)
+	logicalPorts := util.GetAllLogicalPortNames(pod, oc.nadInfo)
 	portsToDelete := make([]*lpInfo, 0, len(logicalPorts))
 	for _, logicalPort := range logicalPorts {
 		portInfo, err := oc.logicalPortCache.get(logicalPort)

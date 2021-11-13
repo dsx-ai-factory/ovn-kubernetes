@@ -31,7 +31,7 @@ func (oc *Controller) syncPods(pods []interface{}) {
 			klog.Errorf("Spurious object in syncPods: %v", podInterface)
 			continue
 		}
-		on, networkMap, _, err := util.IsNetworkOnPod(pod, oc.nadInfo)
+		on, networkMap, err := util.IsNetworkOnPod(pod, oc.nadInfo)
 		if err != nil || !on {
 			continue
 		}
@@ -136,7 +136,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		return
 	}
 
-	on, networkMap, _, err := util.IsNetworkOnPod(pod, oc.nadInfo)
+	on, networkMap, err := util.IsNetworkOnPod(pod, oc.nadInfo)
 	if err != nil || !on {
 		// the pod is not attached to this specific network
 		return
@@ -219,16 +219,12 @@ func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) error {
 
 func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodAnnotation, nodeSubnets []*net.IPNet,
 	network *networkattachmentdefinitionapi.NetworkSelectionElement,
-	networks []*networkattachmentdefinitionapi.NetworkSelectionElement, isFirst bool) (err error) {
+	networks []*networkattachmentdefinitionapi.NetworkSelectionElement) (err error) {
 
 	if oc.nadInfo.NotDefault {
 		// non default network, see if its network-attachment's annotation has default-route key.
 		// If present, then we need to add default route for it
 		podAnnotation.Gateways = append(podAnnotation.Gateways, network.GatewayRequest...)
-		// Only add route to clusterSubnet if this is the first Nad the pod is plumbing on to avoid duplicate route
-		if !isFirst {
-			return nil
-		}
 		for _, podIfAddr := range podAnnotation.IPs {
 			isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
 			// TBD localnet type does need this only for a temp workaround, to be removed.
@@ -356,7 +352,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	if err != nil {
 		return err
 	}
-	on, networkMap, firstNadName, err := util.IsNetworkOnPod(pod, oc.nadInfo)
+	on, networkMap, err := util.IsNetworkOnPod(pod, oc.nadInfo)
 	if err != nil || !on {
 		// the pod is not attached to this specific network
 		klog.V(5).Infof("Pod %s/%s is not attached on this overlay network controller %s error (%v) ", pod.Namespace, pod.Name,
@@ -366,7 +362,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 	klog.V(5).Infof("Pod %s/%s is attached on this network: %s", pod.Namespace, pod.Name, oc.nadInfo.NetName)
 	for nadName, network := range networkMap {
-		err1 := oc.addLogicalPort4Nad(pod, nadName, lsManagerNodeName, network, networks, firstNadName == nadName)
+		err1 := oc.addLogicalPort4Nad(pod, nadName, lsManagerNodeName, network, networks)
 		if err1 != nil {
 			err = err1
 		}
@@ -376,7 +372,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, lsManagerNodeName string,
 	network *networkattachmentdefinitionapi.NetworkSelectionElement,
-	networks *[]*networkattachmentdefinitionapi.NetworkSelectionElement, isFirst bool) (err error) {
+	networks *[]*networkattachmentdefinitionapi.NetworkSelectionElement) (err error) {
 	// Keep track of how long syncs take.
 	start := time.Now()
 	defer func() {
@@ -544,7 +540,7 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, lsManagerNodeNa
 			return fmt.Errorf("cannot retrieve subnet for assigning gateway routes for pod %s, node: %s, network %s",
 				pod.Name, lsManagerNodeName, nadName)
 		}
-		err = oc.addRoutesGatewayIP(pod, &podAnnotation, nodeSubnets, network, *networks, isFirst)
+		err = oc.addRoutesGatewayIP(pod, &podAnnotation, nodeSubnets, network, *networks)
 		if err != nil {
 			return err
 		}

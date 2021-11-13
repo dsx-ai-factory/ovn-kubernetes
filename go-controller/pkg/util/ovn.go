@@ -154,16 +154,15 @@ func FindOVNLoadBalancer(externalID, externalValue string) (string, string, erro
 // Return value:
 //    bool: if this Pod is on this Network; true or false
 //    map[string]*networkattachmentdefinitionapi.NetworkSelectionElement: map of NetworkSelectionElement that pod is requested
-//    string: first nadName that the Pod is on (there may be multiple)
 //    error:  error in case of failure
 // Note that the same network could exist in the same Pod more than once, but with different net-attach-def name
 // The NetworkSelectionElement map is in the form of map{net_attach_def_name]*networkattachmentdefinitionapi.NetworkSelectionElement
 func IsNetworkOnPod(pod *kapi.Pod, netAttachInfo *NetAttachDefInfo) (bool,
-	map[string]*networkattachmentdefinitionapi.NetworkSelectionElement, string, error) {
+	map[string]*networkattachmentdefinitionapi.NetworkSelectionElement, error) {
 	nseMap := map[string]*networkattachmentdefinitionapi.NetworkSelectionElement{}
 	allNetworks, err := GetK8sPodAllNetworks(pod)
 	if err != nil {
-		return false, nil, "", err
+		return false, nil, err
 	}
 
 	podDesc := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
@@ -171,31 +170,27 @@ func IsNetworkOnPod(pod *kapi.Pod, netAttachInfo *NetAttachDefInfo) (bool,
 		defaultNetwork, err := GetK8sPodDefaultNetwork(pod)
 		if err != nil {
 			// multus won't add this Pod if this fails, should never happen
-			return false, nil, "", fmt.Errorf("failed to get default network for pod %s: %v", podDesc, err)
+			return false, nil, fmt.Errorf("failed to get default network for pod %s: %v", podDesc, err)
 		}
 		if defaultNetwork == nil {
 			nseMap[ovntypes.DefaultNetworkName] = nil
-			return true, nseMap, ovntypes.DefaultNetworkName, nil
+			return true, nseMap, nil
 		} else {
 			if _, ok := netAttachInfo.NetAttachDefs.Load(GetNadKeyName(defaultNetwork.Namespace, defaultNetwork.Name)); !ok {
-				return false, nil, "", nil
+				return false, nil, nil
 			}
 		}
 		nseMap[ovntypes.DefaultNetworkName] = defaultNetwork
-		return true, nseMap, ovntypes.DefaultNetworkName, nil
+		return true, nseMap, nil
 	}
 
 	// For non-default network controller, try to see if its name exists in the Pod's k8s.v1.cni.cncf.io/networks, if no,
 	// return false;
-	firstNadName := ""
 	for _, network := range *allNetworks {
 		if _, ok := netAttachInfo.NetAttachDefs.Load(GetNadKeyName(network.Namespace, network.Name)); ok {
 			nadName := GetNadName(network.Namespace, network.Name, false)
-			if firstNadName == "" {
-				firstNadName = nadName
-			}
 			nseMap[nadName] = network
 		}
 	}
-	return len(nseMap) != 0, nseMap, firstNadName, nil
+	return len(nseMap) != 0, nseMap, nil
 }

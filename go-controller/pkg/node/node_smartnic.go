@@ -97,7 +97,7 @@ func (nc *ovnNodeController) watchSmartNicPods(isOvnUpEnabled bool, pfMACs []str
 			if !util.PodWantsNetwork(pod) || (util.PodScheduled(pod) && n.name != pod.Spec.NodeName) {
 				return
 			}
-			on, networkMap, _, err := util.IsNetworkOnPod(pod, nc.nadInfo)
+			on, networkMap, err := util.IsNetworkOnPod(pod, nc.nadInfo)
 			if err != nil || !on {
 				// the Pod is not attached to this specific network
 				klog.V(5).Infof("Pod %s/%s is not attached on this network: %s", pod.Namespace, pod.Name, nc.nadInfo.NetName)

@@ -14,6 +14,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 
+	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
@@ -413,20 +414,17 @@ func composePortName(podNamespace, podName, netPrefix string) string {
 }
 
 // Get all possible logical ports name of this network
-func GetAllLogicalPortNames(podNamespace, podName string, nadInfo *NetAttachDefInfo) []string {
-	if !nadInfo.NotDefault {
-		return []string{GetLogicalPortName(podNamespace, podName, types.DefaultNetworkName, true)}
-	}
+func GetAllLogicalPortNames(pod *kapi.Pod, nadInfo *NetAttachDefInfo) []string {
 	ports := []string{}
-	nadInfo.NetAttachDefs.Range(func(key, value interface{}) bool {
-		name, ok := key.(string)
-		if !ok {
-			return true
+	on, networkMap, err := IsNetworkOnPod(pod, nadInfo)
+	if err != nil {
+		klog.Errorf(err.Error())
+	} else if on {
+		// the pod is attached to this specific network
+		for nadName := range networkMap {
+			portName := GetLogicalPortName(pod.Namespace, pod.Name, nadName, !nadInfo.NotDefault)
+			ports = append(ports, portName)
 		}
-		// for non-default network, name is in the same form as the nadName (namespace/name)
-		portName := GetLogicalPortName(podNamespace, podName, name, false)
-		ports = append(ports, portName)
-		return true
-	})
+	}
 	return ports
 }
