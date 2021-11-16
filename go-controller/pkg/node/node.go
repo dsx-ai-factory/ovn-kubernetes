@@ -761,12 +761,36 @@ func (nc *ovnNodeController) updateLocalnetOvnBridgeMapping(toAdd bool) error {
 		return nil
 	}
 
+	// ngn-localnet-bridge-mappings exernal_ids is in the form of "<network_prefix1>:<br1>,<network_prefix2>:<br2>...".
+	// It sets all the possible localnet networks and associated bridge names on this node.
+	stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
+		"external_ids:ngn-localnet-bridge-mappings")
+	if err != nil {
+		klog.Warningf("Failed to get ngn-localnet-bridge-mappings from Open_vSwitch table stderr:%s (%v)", stderr, err)
+		return nil
+	}
+
+	bridgeName := ""
+	bridgeMapConfs := strings.Split(stdout, ",")
+	for _, bridgeMapConf := range bridgeMapConfs {
+		maps := strings.Split(bridgeMapConf, ":")
+		if len(maps) == 2 && strings.HasPrefix(nc.nadInfo.NetName, maps[0]) {
+			bridgeName = maps[1]
+			break
+		}
+	}
+
+	if bridgeName == "" {
+		klog.V(5).Infof("Localnet network %s is not needed on this node %s", nc.nadInfo.NetName, nc.node.name)
+		return nil
+	}
+
 	// ovn-bridge-mappings maps a physical network name to a local ovs bridge
 	// that provides connectivity to that network. It is in the form of physnet1:br1,physnet2:br2.
 	// Note that there may be multiple ovs bridge mappings, be sure not to override
 	// the mappings for the other physical network
 	networkName := nc.nadInfo.Prefix + types.LocalNetBridgeName
-	stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
+	stdout, stderr, err = util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
 		"external_ids:ovn-bridge-mappings")
 	if err != nil {
 		return fmt.Errorf("failed to get ovn-bridge-mappings stderr:%s (%v)", stderr, err)
@@ -783,14 +807,6 @@ func (nc *ovnNodeController) updateLocalnetOvnBridgeMapping(toAdd bool) error {
 
 	bridge, ok := bridgeMap[networkName]
 	if toAdd {
-		bridgeName := nc.nadInfo.BridgeName
-		stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
-			"external_ids:ngn-public-bridge")
-		if err != nil {
-			klog.Warningf("Failed to get ngn-public-bridge for network %s stderr:%s (%v)", nc.nadInfo.NetName, stderr, err)
-		} else if stdout != "" {
-			bridgeName = stdout
-		}
 		if ok && bridge == bridgeName {
 			return nil
 		}
