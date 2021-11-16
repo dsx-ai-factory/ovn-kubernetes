@@ -103,8 +103,8 @@ func setupNetwork(link netlink.Link, ifInfo *PodInterfaceInfo) error {
 		}
 	}
 	for _, route := range ifInfo.Routes {
-		if err := cniPluginLibOps.AddRoute(route.Dest, route.NextHop, link); err != nil {
-			klog.Warningf("Failed to add pod route %v via %v: %v", route.Dest, route.NextHop, err)
+		if err := cniPluginLibOps.AddRoute(route.Dest, route.NextHop, link); err != nil && !os.IsExist(err) {
+			return fmt.Errorf("failed to add pod route %v via %v: %v", route.Dest, route.NextHop, err)
 		}
 	}
 
