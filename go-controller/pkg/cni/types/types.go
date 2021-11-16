@@ -19,14 +19,13 @@ type NetConf struct {
 	NadName string `json:"net_attach_def_name,omitempty"`
 	// set true if it is default networkattachmentdefintion
 	NotDefault bool `json:"not_default,omitempty"`
-
 	// VlanID, valid in localnet topology network
 	VlanId int `json:"vlan_id,omitempty"`
 	// bridge name, valid in localnet topology network
 	BridgeName string `json:"bridge_name,omitempty"`
-	// list of IPs to be excluded from being allocated for Pod, valid in localnet topology network
-	ExcludeIPs []string `json:"exclude_ips,omitempty"`
-
+	// list of IPs, expressed with prefix length, to be excluded from being allocated for Pod
+	// valid for localnet network topology (L2 networks)
+	ExcludeCIDRs []string `json:"exclude_cidrs,omitempty"`
 	// LogFile to log all the messages from cni shim binary to
 	LogFile string `json:"logFile,omitempty"`
 	// Level is the logging verbosity level

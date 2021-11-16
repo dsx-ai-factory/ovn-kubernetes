@@ -219,7 +219,7 @@ type NetAttachDefInfo struct {
 	TopoType   string
 	VlanId     int
 	BridgeName string
-	ExcludeIPs []*net.IP
+	ExcludeIPs []net.IP
 }
 
 func NewNetAttachDefInfo(netconf *cnitypes.NetConf) (*NetAttachDefInfo, error) {
@@ -251,21 +251,24 @@ func NewNetAttachDefInfo(netconf *cnitypes.NetConf) (*NetAttachDefInfo, error) {
 			return nil, fmt.Errorf("missing bridge name for %s topotype net-attach-def %s", types.LocalnetAttachDefTopoType, netconf.Name)
 		}
 
-		if len(netconf.ExcludeIPs) != 0 {
-			// TODO(gmoodalbail): we should parse this once and stash it in a structure
-			netCIDRs, err := config.ParseClusterSubnetEntries(netconf.NetCidr, netconf.TopoType != types.LocalnetAttachDefTopoType)
+		if len(netconf.ExcludeCIDRs) == 0 {
+			return &nadInfo, nil
+		}
+		// TODO(gmoodalbail): we should parse this once and stash it in a structure
+		netCIDRs, err := config.ParseClusterSubnetEntries(netconf.NetCidr, netconf.TopoType != types.LocalnetAttachDefTopoType)
+		if err != nil {
+			return nil, fmt.Errorf("failed while parsing the provided NetCIDR %q for Network %q", netconf.NetCidr, netName)
+		}
+
+		nadInfo.ExcludeIPs = make([]net.IP, 0)
+		for _, excludeCIDRstr := range netconf.ExcludeCIDRs {
+			_, excludeCIDR, err := net.ParseCIDR(excludeCIDRstr)
 			if err != nil {
-				return nil, fmt.Errorf("failed while parsing the provided NetCIDR %q for Network %q", netconf.NetCidr, netName)
+				return nil, fmt.Errorf("invalid subnet %q provided in the exclude_cidrs list %s for network %s",
+					excludeCIDRstr, netconf.ExcludeCIDRs, netName)
 			}
 
-			nadInfo.ExcludeIPs = make([]*net.IP, len(netconf.ExcludeIPs))
-			for i, excludeIPstr := range netconf.ExcludeIPs {
-				excludeIP := net.ParseIP(excludeIPstr)
-				if excludeIP == nil {
-					return nil, fmt.Errorf("invalid IP %q provided in the exclude_ips list %s for network %s",
-						excludeIPstr, netconf.ExcludeIPs, netName)
-				}
-				// check if the exclude IP is within the netconf.
+			for excludeIP := excludeCIDR.IP; excludeCIDR.Contains(excludeIP); excludeIP = NextIP(excludeIP) {
 				found := false
 				for _, netCIDR := range netCIDRs {
 					if netCIDR.CIDR.Contains(excludeIP) {
@@ -274,10 +277,10 @@ func NewNetAttachDefInfo(netconf *cnitypes.NetConf) (*NetAttachDefInfo, error) {
 					}
 				}
 				if !found {
-					return nil, fmt.Errorf("provided exclude_ip %q is not part of any of the Network CIDRs (%v) for network %s",
-						excludeIP, netCIDRs, netName)
+					return nil, fmt.Errorf("ip to be excluded %q is not part of any of the provided Network CIDRs "+
+						"(%v) for network %s", excludeIP, netCIDRs, netName)
 				}
-				nadInfo.ExcludeIPs[i] = &excludeIP
+				nadInfo.ExcludeIPs = append(nadInfo.ExcludeIPs, excludeIP)
 			}
 		}
 	}

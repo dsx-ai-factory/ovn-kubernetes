@@ -362,13 +362,13 @@ func (mc *OvnMHController) NewOvnController(nadInfo *util.NetAttachDefInfo,
 		}
 		for _, excludeIP := range nadInfo.ExcludeIPs {
 			var ipMask net.IPMask
-			if (*excludeIP).To4() != nil {
+			if excludeIP.To4() != nil {
 				ipMask = net.CIDRMask(32, 32)
 			} else {
 				ipMask = net.CIDRMask(128, 128)
 			}
 
-			_ = lsManager.AllocateIPs(ovntypes.OVNLocalnetSwitch, []*net.IPNet{{IP: *excludeIP, Mask: ipMask}})
+			_ = lsManager.AllocateIPs(ovntypes.OVNLocalnetSwitch, []*net.IPNet{{IP: excludeIP, Mask: ipMask}})
 		}
 	}
 	oc := &Controller{
