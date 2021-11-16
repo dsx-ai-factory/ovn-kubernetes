@@ -160,10 +160,6 @@ func FindOVNLoadBalancer(externalID, externalValue string) (string, string, erro
 func IsNetworkOnPod(pod *kapi.Pod, netAttachInfo *NetAttachDefInfo) (bool,
 	map[string]*networkattachmentdefinitionapi.NetworkSelectionElement, error) {
 	nseMap := map[string]*networkattachmentdefinitionapi.NetworkSelectionElement{}
-	allNetworks, err := GetK8sPodAllNetworks(pod)
-	if err != nil {
-		return false, nil, err
-	}
 
 	podDesc := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
 	if !netAttachInfo.NotDefault {
@@ -186,7 +182,11 @@ func IsNetworkOnPod(pod *kapi.Pod, netAttachInfo *NetAttachDefInfo) (bool,
 
 	// For non-default network controller, try to see if its name exists in the Pod's k8s.v1.cni.cncf.io/networks, if no,
 	// return false;
-	for _, network := range *allNetworks {
+	allNetworks, err := GetK8sPodAllNetworks(pod)
+	if err != nil {
+		return false, nil, err
+	}
+	for _, network := range allNetworks {
 		if _, ok := netAttachInfo.NetAttachDefs.Load(GetNadKeyName(network.Namespace, network.Name)); ok {
 			nadName := GetNadName(network.Namespace, network.Name, false)
 			nseMap[nadName] = network

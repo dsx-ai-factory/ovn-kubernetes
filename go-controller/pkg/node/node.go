@@ -615,7 +615,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		nc.added = true
 
 		if config.OVNKubernetesFeature.EnableMultiNetwork {
-			_ = n.watchNetworkAttachmentDefinitions()
+			n.watchNetworkAttachmentDefinitions()
 		}
 	}
 
@@ -629,8 +629,9 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 
 // watchNetworkAttachmentDefinitions starts the watching of network attachment definition
 // resource and calls back the appropriate handler logic
-func (n *OvnNode) watchNetworkAttachmentDefinitions() *factory.Handler {
-	return n.watchFactory.AddNetworkattachmentdefinitionHandler(cache.ResourceEventHandlerFuncs{
+func (n *OvnNode) watchNetworkAttachmentDefinitions() {
+	start := time.Now()
+	_ = n.watchFactory.AddNetworkattachmentdefinitionHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			netattachdef := obj.(*nettypes.NetworkAttachmentDefinition)
 			n.addNetworkAttachDefinition(netattachdef)
@@ -641,6 +642,7 @@ func (n *OvnNode) watchNetworkAttachmentDefinitions() *factory.Handler {
 			n.deleteNetworkAttachDefinition(netattachdef)
 		},
 	}, n.syncNetworkAttachDefinition)
+	klog.Infof("Bootstrapping existing Network Attachment Definitions took %v", time.Since(start))
 }
 
 func (n *OvnNode) initOvnNodeController(netattachdef *nettypes.NetworkAttachmentDefinition) (*ovnNodeController, error) {

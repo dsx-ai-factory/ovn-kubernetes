@@ -326,7 +326,7 @@ func GetK8sPodDefaultNetwork(pod *v1.Pod) (*netattachdefapi.NetworkSelectionElem
 }
 
 // GetK8sPodAllNetworks get pod's all network NetworkSelectionElement from k8s.v1.cni.cncf.io/networks annotation
-func GetK8sPodAllNetworks(pod *v1.Pod) (*[]*netattachdefapi.NetworkSelectionElement, error) {
+func GetK8sPodAllNetworks(pod *v1.Pod) ([]*netattachdefapi.NetworkSelectionElement, error) {
 	networks, err := netattachdefutils.ParsePodNetworkAnnotation(pod)
 	if err != nil {
 		if _, ok := err.(*netattachdefapi.NoK8sNetworkError); !ok {
@@ -334,5 +334,5 @@ func GetK8sPodAllNetworks(pod *v1.Pod) (*[]*netattachdefapi.NetworkSelectionElem
 		}
 		networks = []*netattachdefapi.NetworkSelectionElement{}
 	}
-	return &networks, nil
+	return networks, nil
 }

@@ -218,8 +218,7 @@ func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) error {
 }
 
 func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodAnnotation, nodeSubnets []*net.IPNet,
-	network *networkattachmentdefinitionapi.NetworkSelectionElement,
-	networks []*networkattachmentdefinitionapi.NetworkSelectionElement) (err error) {
+	network *networkattachmentdefinitionapi.NetworkSelectionElement) error {
 
 	if oc.nadInfo.NotDefault {
 		// non default network, see if its network-attachment's annotation has default-route key.
@@ -249,6 +248,11 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 	// if there are other network attachments for the pod, then check if those network-attachment's
 	// annotation has default-route key. If present, then we need to skip adding default route for
 	// OVN interface
+	networks, err := util.GetK8sPodAllNetworks(pod)
+	if err != nil {
+		return fmt.Errorf("error while getting all network attachment definitions for [%s/%s]: %v",
+			pod.Namespace, pod.Name, err)
+	}
 	otherDefaultRouteV4 := false
 	otherDefaultRouteV6 := false
 	for _, n := range networks {
@@ -348,10 +352,6 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		return nil
 	}
 
-	networks, err := util.GetK8sPodAllNetworks(pod)
-	if err != nil {
-		return err
-	}
 	on, networkMap, err := util.IsNetworkOnPod(pod, oc.nadInfo)
 	if err != nil || !on {
 		// the pod is not attached to this specific network
@@ -362,7 +362,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 	klog.V(5).Infof("Pod %s/%s is attached on this network: %s", pod.Namespace, pod.Name, oc.nadInfo.NetName)
 	for nadName, network := range networkMap {
-		err1 := oc.addLogicalPort4Nad(pod, nadName, lsManagerNodeName, network, networks)
+		err1 := oc.addLogicalPort4Nad(pod, nadName, lsManagerNodeName, network)
 		if err1 != nil {
 			err = err1
 		}
@@ -371,8 +371,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 }
 
 func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, lsManagerNodeName string,
-	network *networkattachmentdefinitionapi.NetworkSelectionElement,
-	networks *[]*networkattachmentdefinitionapi.NetworkSelectionElement) (err error) {
+	network *networkattachmentdefinitionapi.NetworkSelectionElement) (err error) {
 	// Keep track of how long syncs take.
 	start := time.Now()
 	defer func() {
@@ -540,7 +539,7 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, lsManagerNodeNa
 			return fmt.Errorf("cannot retrieve subnet for assigning gateway routes for pod %s, node: %s, network %s",
 				pod.Name, lsManagerNodeName, nadName)
 		}
-		err = oc.addRoutesGatewayIP(pod, &podAnnotation, nodeSubnets, network, *networks)
+		err = oc.addRoutesGatewayIP(pod, &podAnnotation, nodeSubnets, network)
 		if err != nil {
 			return err
 		}
