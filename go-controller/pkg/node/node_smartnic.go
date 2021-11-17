@@ -38,15 +38,6 @@ func (nc *ovnNodeController) shouldSmartNICHandleThisPod(pod *kapi.Pod, nadName 
 func (nc *ovnNodeController) addSmartNicPod4Nad(pod *kapi.Pod, pfMACs []string, isOvnUpEnabled bool, nadName string,
 	podLister corev1listers.PodLister, kclient kubernetes.Interface) error {
 	podDesc := fmt.Sprintf("pod %s/%s on network %s", pod.Namespace, pod.Name, nadName)
-	// Check if the ovnkube-node instance of BF2 should handle this Pod or not
-	if handle, err := nc.shouldSmartNICHandleThisPod(pod, nadName, pfMACs); err != nil {
-		klog.Infof("Failed to check whether ovnkube-node should handle %s, err: %v. retrying",
-			podDesc, err)
-		return err
-	} else if !handle {
-		return nil
-	}
-
 	vfRepName, err := nc.getVfRepName(pod, nadName)
 	if err != nil {
 		klog.Infof("Failed to get rep name of %s, %s. retrying", podDesc, err)
@@ -70,6 +61,18 @@ func (nc *ovnNodeController) addSmartNicPods(pod *kapi.Pod, pfMACs []string, isO
 	if util.PodScheduled(pod) {
 		for nadName := range retryCache {
 			klog.Infof("Add SmartNic for pod %s/%s nad %s", pod.Namespace, pod.Name, nadName)
+
+			// Check if the ovnkube-node instance of BF2 should handle this Pod or not
+			if handle, err := nc.shouldSmartNICHandleThisPod(pod, nadName, pfMACs); err != nil {
+				klog.Infof("Failed to check whether ovnkube-node should handle pod %s/%s on network %s, err: %v. retrying",
+					pod.Namespace, pod.Name, nadName, err)
+				continue
+			} else if !handle {
+				// this instance of BF2 should not handel this pod
+				delete(retryCache, nadName)
+				continue
+			}
+
 			err := nc.addSmartNicPod4Nad(pod, pfMACs, isOvnUpEnabled, nadName, podLister, kclient)
 			if err == nil {
 				delete(retryCache, nadName)
