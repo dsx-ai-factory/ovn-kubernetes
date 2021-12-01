@@ -9,8 +9,8 @@ import (
 	"k8s.io/client-go/util/retry"
 )
 
-// updatePodSmartNicConnDetailsWithRetry update the pod annotion with the givin connection details
-func (pr *PodRequest) updatePodSmartNicConnDetailsWithRetry(kube kube.Interface, smartNicConnDetails *util.SmartNICConnectionDetails) error {
+// updatePodDPUConnDetailsWithRetry update the pod annotion with the givin connection details
+func (pr *PodRequest) updatePodDPUConnDetailsWithRetry(kube kube.Interface, dpuConnDetails *util.DPUConnectionDetails) error {
 	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		// Informer cache should not be mutated, so get a copy of the object
 		pod, err := kube.GetPod(pr.PodNamespace, pr.PodName)
@@ -19,7 +19,7 @@ func (pr *PodRequest) updatePodSmartNicConnDetailsWithRetry(kube kube.Interface,
 		}
 
 		cpod := pod.DeepCopy()
-		err = util.MarshalPodSmartNicConnDetails(&cpod.Annotations, smartNicConnDetails, pr.effectiveNADName)
+		err = util.MarshalPodDPUConnDetails(&cpod.Annotations, dpuConnDetails, pr.effectiveNADName)
 		if err != nil {
 			return err
 		}
@@ -27,15 +27,15 @@ func (pr *PodRequest) updatePodSmartNicConnDetailsWithRetry(kube kube.Interface,
 	})
 	if resultErr != nil {
 		return fmt.Errorf("failed to update %s annotation on pod %s/%s for network %s: %v",
-			util.SmartNicConnectionDetailsAnnot, pr.PodNamespace, pr.PodName, pr.effectiveNADName, resultErr)
+			util.DPUConnectionDetailsAnnot, pr.PodNamespace, pr.PodName, pr.effectiveNADName, resultErr)
 	}
 	return nil
 }
 
-func (pr *PodRequest) addSmartNICConnectionDetailsAnnot(kube kube.Interface, vfNetDevice string) error {
+func (pr *PodRequest) addDPUConnectionDetailsAnnot(kube kube.Interface, vfNetDevice string) error {
 	// 1. Verify there is a device id
 	if pr.CNIConf.DeviceID == "" {
-		return fmt.Errorf("DeviceID must be set for Pod request with SmartNIC")
+		return fmt.Errorf("DeviceID must be set for Pod request with DPU")
 	}
 	pciAddress := pr.CNIConf.DeviceID
 
@@ -62,7 +62,7 @@ func (pr *PodRequest) addSmartNICConnectionDetailsAnnot(kube kube.Interface, vfN
 		return fmt.Errorf("failed to get netlink object for link name: %s, %v", pfNetdevs[0], err)
 	}
 
-	// 4. Set smart-nic connection-details pod annotation
+	// 4. Set dpu connection-details pod annotation
 	var domain, bus, dev, fn int
 	parsed, err := fmt.Sscanf(pfPciAddress, "%04x:%02x:%02x.%d", &domain, &bus, &dev, &fn)
 	if err != nil {
@@ -72,7 +72,7 @@ func (pr *PodRequest) addSmartNICConnectionDetailsAnnot(kube kube.Interface, vfN
 		return fmt.Errorf("failed to parse PF PCI address %s. Unexpected format", pfPciAddress)
 	}
 
-	smartNicConnDetails := util.SmartNICConnectionDetails{
+	dpuConnDetails := util.DPUConnectionDetails{
 		PfId:      fmt.Sprint(fn),
 		VfId:      fmt.Sprint(vfindex),
 		PfMAC:     pfLink.Attrs().HardwareAddr.String(),
@@ -80,5 +80,5 @@ func (pr *PodRequest) addSmartNICConnectionDetailsAnnot(kube kube.Interface, vfN
 		VfDevName: vfNetDevice,
 	}
 
-	return pr.updatePodSmartNicConnDetailsWithRetry(kube, &smartNicConnDetails)
+	return pr.updatePodDPUConnDetailsWithRetry(kube, &dpuConnDetails)
 }

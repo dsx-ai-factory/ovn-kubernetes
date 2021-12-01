@@ -5,14 +5,14 @@ import (
 	"github.com/onsi/gomega"
 )
 
-var _ = Describe("Smart-NIC Annotations test", func() {
-	Describe("SmartNICConnectionDetails", func() {
-		var cd SmartNICConnectionDetails
+var _ = Describe("DPU Annotations test", func() {
+	Describe("DPUConnectionDetails", func() {
+		var cd DPUConnectionDetails
 		var annot map[string]string
 		//t := GinkgoT()
 
 		BeforeEach(func() {
-			cd = SmartNICConnectionDetails{}
+			cd = DPUConnectionDetails{}
 			annot = make(map[string]string)
 		})
 
@@ -21,9 +21,9 @@ var _ = Describe("Smart-NIC Annotations test", func() {
 				cd.PfId = "1"
 				cd.VfId = "4"
 				cd.SandboxId = "35b82dbe2c3976"
-				err := MarshalPodSmartNicConnDetails(&annot, &cd, "default")
+				err := MarshalPodDPUConnDetails(&annot, &cd, "default")
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				pcd, err := UnmarshalPodSmartNicConnDetails(annot, "default")
+				pcd, err := UnmarshalPodDPUConnDetails(annot, "default")
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				gomega.Expect(pcd.PfId).To(gomega.Equal("1"))
 				gomega.Expect(pcd.VfId).To(gomega.Equal("4"))
@@ -32,7 +32,7 @@ var _ = Describe("Smart-NIC Annotations test", func() {
 			})
 
 			It("Fails to populate on missing annotations", func() {
-				_, err := UnmarshalPodSmartNicConnDetails(annot, "default")
+				_, err := UnmarshalPodDPUConnDetails(annot, "default")
 				gomega.Expect(err).To(gomega.HaveOccurred())
 			})
 		})
@@ -42,7 +42,7 @@ var _ = Describe("Smart-NIC Annotations test", func() {
 				cd.PfId = "1"
 				cd.VfId = "4"
 				cd.SandboxId = "35b82dbe2c3976"
-				err := MarshalPodSmartNicConnDetails(&annot, &cd, "default")
+				err := MarshalPodDPUConnDetails(&annot, &cd, "default")
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			})
 
@@ -50,9 +50,9 @@ var _ = Describe("Smart-NIC Annotations test", func() {
 				cd.PfId = "0"
 				cd.VfId = "3"
 				cd.SandboxId = "35b82dbe2c3973"
-				err := MarshalPodSmartNicConnDetails(&annot, &cd, "non-default")
+				err := MarshalPodDPUConnDetails(&annot, &cd, "non-default")
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				pcd, err := UnmarshalPodSmartNicConnDetails(annot, "non-default")
+				pcd, err := UnmarshalPodDPUConnDetails(annot, "non-default")
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				gomega.Expect(pcd.PfId).To(gomega.Equal("0"))
 				gomega.Expect(pcd.VfId).To(gomega.Equal("3"))
@@ -61,35 +61,35 @@ var _ = Describe("Smart-NIC Annotations test", func() {
 			})
 
 			It("Fails to populate on missing annotations", func() {
-				_, err := UnmarshalPodSmartNicConnDetails(annot, "non-default")
+				_, err := UnmarshalPodDPUConnDetails(annot, "non-default")
 				gomega.Expect(err).To(gomega.HaveOccurred())
 			})
 		})
 	})
 
-	Describe("SmartNICConnectionStatus", func() {
-		var cs SmartNICConnectionStatus
+	Describe("DPUConnectionStatus", func() {
+		var cs DPUConnectionStatus
 		var annot map[string]string
 		//t := GinkgoT()
 
 		BeforeEach(func() {
-			cs = SmartNICConnectionStatus{}
+			cs = DPUConnectionStatus{}
 			annot = make(map[string]string)
 		})
 
 		Context("Default network", func() {
 			It("Get correct Pod annotation for default network", func() {
 				cs.Status = "Ready"
-				err := MarshalPodSmartNicConnStatus(&annot, &cs, "default")
+				err := MarshalPodDPUConnStatus(&annot, &cs, "default")
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				pcs, err := UnmarshalPodSmartNicConnStatus(annot, "default")
+				pcs, err := UnmarshalPodDPUConnStatus(annot, "default")
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				gomega.Expect(pcs.Status).To(gomega.Equal("Ready"))
 				gomega.Expect(pcs.Reason).To(gomega.Equal(""))
 			})
 
 			It("Fails to populate on missing annotations", func() {
-				_, err := UnmarshalPodSmartNicConnStatus(annot, "default")
+				_, err := UnmarshalPodDPUConnStatus(annot, "default")
 				gomega.Expect(err).To(gomega.HaveOccurred())
 			})
 		})
@@ -97,22 +97,22 @@ var _ = Describe("Smart-NIC Annotations test", func() {
 		Context("Non-default network", func() {
 			BeforeEach(func() {
 				cs.Status = "Ready"
-				err := MarshalPodSmartNicConnStatus(&annot, &cs, "default")
+				err := MarshalPodDPUConnStatus(&annot, &cs, "default")
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			})
 
 			It("Get correct Pod annotation for non-default network", func() {
 				cs.Status = "Ready"
-				err := MarshalPodSmartNicConnStatus(&annot, &cs, "non-default")
+				err := MarshalPodDPUConnStatus(&annot, &cs, "non-default")
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				pcs, err := UnmarshalPodSmartNicConnStatus(annot, "non-default")
+				pcs, err := UnmarshalPodDPUConnStatus(annot, "non-default")
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				gomega.Expect(pcs.Status).To(gomega.Equal("Ready"))
 				gomega.Expect(pcs.Reason).To(gomega.Equal(""))
 			})
 
 			It("Fails to populate on missing annotations", func() {
-				_, err := UnmarshalPodSmartNicConnStatus(annot, "non-default")
+				_, err := UnmarshalPodDPUConnStatus(annot, "non-default")
 				gomega.Expect(err).To(gomega.HaveOccurred())
 			})
 		})

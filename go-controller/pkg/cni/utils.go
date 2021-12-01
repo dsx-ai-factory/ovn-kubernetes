@@ -26,13 +26,13 @@ func isOvnReady(podAnnotation map[string]string, nadName string) bool {
 	return err == nil
 }
 
-// isSmartNICReady is a wait condition smart-NIC: wait for OVN master to set pod-networks annotation and
-// ovnkube running on Smart-NIC to set connection-status pod annotation and its status is Ready
-func isSmartNICReady(podAnnotation map[string]string, nadName string) bool {
+// isDPUReady is a wait condition for DPU: wait for OVN master to set pod-networks annotation and
+// ovnkube running on DPU to set connection-status pod annotation and its status is Ready
+func isDPUReady(podAnnotation map[string]string, nadName string) bool {
 	if isOvnReady(podAnnotation, nadName) {
-		// check Smart-NIC connection status
-		if status, err := util.UnmarshalPodSmartNicConnStatus(podAnnotation, nadName); err == nil {
-			if status.Status == util.SmartNicConnectionStatusReady {
+		// check DPU connection status
+		if status, err := util.UnmarshalPodDPUConnStatus(podAnnotation, nadName); err == nil {
+			if status.Status == util.DPUConnectionStatusReady {
 				return true
 			}
 		}
@@ -116,15 +116,15 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, po
 	}
 
 	podInterfaceInfo := &PodInterfaceInfo{
-		PodAnnotation:      *podAnnotSt,
-		Ingress:            ingress,
-		Egress:             egress,
-		CheckExtIDs:        checkExtIDs,
-		IsSmartNICHostMode: config.OvnKubeNode.Mode == types.NodeModeSmartNICHost,
-		PodUID:             podUID,
-		NetNameInfo:        netNameInfo,
-		VfNetdevNmae:       vfNetdevice,
-		NadName:            nadName,
+		PodAnnotation: *podAnnotSt,
+		Ingress:       ingress,
+		Egress:        egress,
+		CheckExtIDs:   checkExtIDs,
+		IsDPUHostMode: config.OvnKubeNode.Mode == types.NodeModeDPUHost,
+		PodUID:        podUID,
+		NetNameInfo:   netNameInfo,
+		VfNetdevNmae:  vfNetdevice,
+		NadName:       nadName,
 	}
 	return podInterfaceInfo, nil
 }

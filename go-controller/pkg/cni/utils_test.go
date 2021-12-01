@@ -55,9 +55,9 @@ var _ = Describe("CNI Utils tests", func() {
 		})
 	})
 
-	Context("isSmartNICReady", func() {
-		It("Returns true if smartnic.connection-status is present and Status is Ready", func() {
-			scs := util.SmartNICConnectionStatus{Status: "Ready"}
+	Context("isDPUReady", func() {
+		It("Returns true if dpu.connection-status is present and Status is Ready", func() {
+			dcs := util.DPUConnectionStatus{Status: "Ready"}
 			podAnnot := map[string]string{
 				util.OvnPodAnnotationName: `{
 					"default":{"ip_addresses":["192.168.2.3/24"],
@@ -66,12 +66,12 @@ var _ = Describe("CNI Utils tests", func() {
 					"ip_address":"192.168.2.3/24",
 					"gateway_ip":"192.168.2.1"}
 				}`}
-			util.MarshalPodSmartNicConnStatus(&podAnnot, &scs, types.DefaultNetworkName)
-			Expect(isSmartNICReady(podAnnot, types.DefaultNetworkName)).To(Equal(true))
+			util.MarshalPodDPUConnStatus(&podAnnot, &dcs, types.DefaultNetworkName)
+			Expect(isDPUReady(podAnnot, types.DefaultNetworkName)).To(Equal(true))
 		})
 
-		It("Returns false if smartnic.connection-status is present and Status is not Ready", func() {
-			scs := util.SmartNICConnectionStatus{Status: "NotReady"}
+		It("Returns false if dpu.connection-status is present and Status is not Ready", func() {
+			dcs := util.DPUConnectionStatus{Status: "NotReady"}
 			podAnnot := map[string]string{
 				util.OvnPodAnnotationName: `{
 					"default":{"ip_addresses":["192.168.2.3/24"],
@@ -80,11 +80,11 @@ var _ = Describe("CNI Utils tests", func() {
 					"ip_address":"192.168.2.3/24",
 					"gateway_ip":"192.168.2.1"}
 				}`}
-			util.MarshalPodSmartNicConnStatus(&podAnnot, &scs, types.DefaultNetworkName)
-			Expect(isSmartNICReady(podAnnot, types.DefaultNetworkName)).To(Equal(false))
+			util.MarshalPodDPUConnStatus(&podAnnot, &dcs, types.DefaultNetworkName)
+			Expect(isDPUReady(podAnnot, types.DefaultNetworkName)).To(Equal(false))
 		})
 
-		It("Returns false if smartnic.connection-status Status is not present", func() {
+		It("Returns false if dpu.connection-status Status is not present", func() {
 			podAnnot := map[string]string{
 				util.OvnPodAnnotationName: `{
 					"default":{"ip_addresses":["192.168.2.3/24"],
@@ -93,23 +93,23 @@ var _ = Describe("CNI Utils tests", func() {
 					"ip_address":"192.168.2.3/24",
 					"gateway_ip":"192.168.2.1"}
 				}`,
-				util.SmartNicConnetionStatusAnnot: `{"Foo":"Bar"}`,
+				util.DPUConnetionStatusAnnot: `{"Foo":"Bar"}`,
 			}
-			Expect(isSmartNICReady(podAnnot, types.DefaultNetworkName)).To(Equal(false))
+			Expect(isDPUReady(podAnnot, types.DefaultNetworkName)).To(Equal(false))
 		})
 
-		It("Returns false if smartnic.connection-status is not present", func() {
+		It("Returns false if dpu.connection-status is not present", func() {
 			podAnnot := map[string]string{
 				util.OvnPodAnnotationName: `{"ip_address": "192.168.2.3/24"}`,
 			}
-			Expect(isSmartNICReady(podAnnot, types.DefaultNetworkName)).To(Equal(false))
+			Expect(isDPUReady(podAnnot, types.DefaultNetworkName)).To(Equal(false))
 		})
 
 		It("Returns false if OVN pod-networks is not present", func() {
 			podAnnot := map[string]string{}
-			scs := util.SmartNICConnectionStatus{Status: "Ready"}
-			util.MarshalPodSmartNicConnStatus(&podAnnot, &scs, types.DefaultNetworkName)
-			Expect(isSmartNICReady(podAnnot, types.DefaultNetworkName)).To(Equal(false))
+			dcs := util.DPUConnectionStatus{Status: "Ready"}
+			util.MarshalPodDPUConnStatus(&podAnnot, &dcs, types.DefaultNetworkName)
+			Expect(isDPUReady(podAnnot, types.DefaultNetworkName)).To(Equal(false))
 		})
 	})
 
@@ -249,14 +249,14 @@ var _ = Describe("CNI Utils tests", func() {
 			config.OvnKubeNode.Mode = types.NodeModeFull
 			pif, err := PodAnnotation2PodInfo(podAnnot, false, podUID, "", types.DefaultNetworkName, netNameInfo)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(pif.IsSmartNICHostMode).To(BeFalse())
+			Expect(pif.IsDPUHostMode).To(BeFalse())
 		})
 
-		It("Creates PodInterfaceInfo with NodeModeSmartNICHost Mode", func() {
-			config.OvnKubeNode.Mode = types.NodeModeSmartNICHost
+		It("Creates PodInterfaceInfo with NodeModeDPUHost Mode", func() {
+			config.OvnKubeNode.Mode = types.NodeModeDPUHost
 			pif, err := PodAnnotation2PodInfo(podAnnot, false, podUID, "", types.DefaultNetworkName, netNameInfo)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(pif.IsSmartNICHostMode).To(BeTrue())
+			Expect(pif.IsDPUHostMode).To(BeTrue())
 		})
 
 		It("Creates PodInterfaceInfo with checkExtIDs false", func() {

@@ -263,7 +263,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 		informers: make(map[reflect.Type]*informer),
 		stopChan:  make(chan struct{}),
 	}
-	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost && config.OVNKubernetesFeature.EnableMultiNetwork {
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost && config.OVNKubernetesFeature.EnableMultiNetwork {
 		wf.nadFactory = networkattachmentdefinitioninformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval)
 		if err := networkattachmentdefinitionapi.AddToScheme(networkattachmentdefinitionscheme.Scheme); err != nil {
 			return nil, err
@@ -324,7 +324,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 		}
 	}
 
-	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost && config.OVNKubernetesFeature.EnableMultiNetwork {
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost && config.OVNKubernetesFeature.EnableMultiNetwork {
 		wf.informers[networkattachmentdefinitionType], err = newInformer(networkattachmentdefinitionType,
 			wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer())
 		if err != nil {

@@ -366,7 +366,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		return fmt.Errorf("failed to parse kubernetes node IP address. %v", err)
 	}
 
-	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		err = setupOVNNode(node)
 		if err != nil {
 			return err
@@ -392,7 +392,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	klog.Infof("Node %s ready for ovn initialization with subnet %s", n.name, util.JoinIPNets(subnets, ","))
 
 	// Create CNI Server
-	if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
+	if config.OvnKubeNode.Mode != types.NodeModeDPU {
 		n.ovnUpEnabled, err = getOVNIfUpCheckMode()
 		if err != nil {
 			return err
@@ -408,7 +408,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	}
 
 	// Setup Management port and gateway
-	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		if _, err = isOVNControllerReady(n.name); err != nil {
 			return err
 		}
@@ -424,8 +424,8 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	}
 
 	// Initialize gateway
-	if config.OvnKubeNode.Mode == types.NodeModeSmartNICHost {
-		err = n.initGatewaySmartNicHost(nodeAddr)
+	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+		err = n.initGatewayDPUHost(nodeAddr)
 		if err != nil {
 			return err
 		}
@@ -448,8 +448,8 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	go n.gateway.Run(n.stopChan, wg)
 	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
 
-	// Note(adrianc): Smart-NIC deployments are expected to support the new shared gateway changes, upgrade flow
-	// is not needed. Future upgrade flows will need to take Smart-NICs into account.
+	// Note(adrianc): DPU deployments are expected to support the new shared gateway changes, upgrade flow
+	// is not needed. Future upgrade flows will need to take DPUs into account.
 	if config.OvnKubeNode.Mode == types.NodeModeFull {
 		// Upgrade for Node. If we upgrade workers before masters, then we need to keep service routing via
 		// mgmt port until masters have been updated and modified OVN config. Run a goroutine to handle this case
@@ -534,7 +534,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	}
 
 	if config.HybridOverlay.Enabled {
-		// Not supported with Smart-NIC, enforced in config
+		// Not supported with DPUs, enforced in config
 		// TODO(adrianc): Revisit above comment
 		nodeController, err := honode.NewNode(
 			n.Kube,
@@ -561,14 +561,14 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	// start management port health check
 	mgmtPort.CheckManagementPortHealth(mgmtPortConfig, n.stopChan)
 
-	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		// start health check to ensure there are no stale OVS internal ports
 		go wait.Until(func() {
 			checkForStaleOVSInterfaces(n.name, n.watchFactory.(*factory.WatchFactory))
 		}, time.Minute, n.stopChan)
 	}
 
-	if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
+	if config.OvnKubeNode.Mode != types.NodeModeDPU {
 		// conditionally write cni config file
 		confFile := filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
 		_, err = os.Stat(confFile)
@@ -587,12 +587,12 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		n.WatchEndpointSlices(nodeIP)
 	}
 
-	if config.OvnKubeNode.Mode == types.NodeModeSmartNIC && config.OvnKubeNode.IsPrimarySmartNIC {
-		n.WatchEndpointSlicesOnSmartNIC()
+	if config.OvnKubeNode.Mode == types.NodeModeDPU && config.OvnKubeNode.IsPrimaryDPU {
+		n.WatchEndpointSlicesOnDPU()
 	}
 
-	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
-		// create the default OVN Node Controller to watch for Pods event for smart-nic plumbing/annotation
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+		// create the default OVN Node Controller to watch for Pods event for dpu plumbing/annotation
 		defaultNetConf := &cnitypes.NetConf{
 			NetConf: ctypes.NetConf{
 				Name: types.DefaultNetworkName,
@@ -604,13 +604,13 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		nadInfo, _ := util.NewNetAttachDefInfo(defaultNetConf)
 		nc, _ := n.NewOvnNodeController(nadInfo)
 
-		if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
-			// Get all the PFMACs on the Smart NIC Host
-			pfMACs, err := util.GetAllSmartNICHostPFMACAddress()
+		if config.OvnKubeNode.Mode == types.NodeModeDPU {
+			// Get all the PFMACs on the DPU Host
+			pfMACs, err := util.GetAllDPUHostPFMACAddress()
 			if err != nil {
 				return fmt.Errorf("failed to get the MAC address for all the PFs on the host: %v", err)
 			}
-			nc.watchSmartNicPods(n.ovnUpEnabled, pfMACs)
+			nc.watchPodsDPU(n.ovnUpEnabled, pfMACs)
 		}
 		nc.added = true
 
@@ -619,7 +619,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		}
 	}
 
-	if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
+	if config.OvnKubeNode.Mode != types.NodeModeDPU {
 		// start the cni server
 		err = cniServer.Start(cni.HandleCNIRequest)
 	}
@@ -707,7 +707,7 @@ func (n *OvnNode) initOvnNodeController(netattachdef *nettypes.NetworkAttachment
 // syncNetworkAttachDefinition() delete OVN logical entities of the obsoleted netNames.
 func (n *OvnNode) syncNetworkAttachDefinition(netattachdefs []interface{}) {
 	// we need to walk through all net-attach-def and add them into Controller.nadInfo.NetAttachDefs, so that when each
-	// Controller is running, watchSmartNicPods()->IsNetworkOnPod() can correctly check Pods need to be plumbed
+	// Controller is running, watchPodsDPU()->IsNetworkOnPod() can correctly check Pods need to be plumbed
 	// for the specific Controller
 	for _, netattachdefIntf := range netattachdefs {
 		netattachdef, ok := netattachdefIntf.(*nettypes.NetworkAttachmentDefinition)
@@ -735,9 +735,9 @@ func (n *OvnNode) addNetworkAttachDefinition(netattachdef *nettypes.NetworkAttac
 	}
 
 	nc.added = true
-	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		if nc.nadInfo.TopoType == types.LocalnetAttachDefTopoType {
-			// for smart-nic mode and full mode
+			// for dpu mode and full mode
 			err = nc.updateLocalnetOvnBridgeMapping(true)
 			if err != nil {
 				klog.Errorf(err.Error())
@@ -745,19 +745,19 @@ func (n *OvnNode) addNetworkAttachDefinition(netattachdef *nettypes.NetworkAttac
 		}
 	}
 
-	if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
-		// Get all the PFMACs on the Smart NIC Host
-		pfMACs, err := util.GetAllSmartNICHostPFMACAddress()
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		// Get all the PFMACs on the DPU Host
+		pfMACs, err := util.GetAllDPUHostPFMACAddress()
 		if err != nil {
 			// TODO(gmoodalbail): should this be fatal error
 			klog.Errorf("Failed to get the MAC address for all the PFs on the host: %v", err)
 		}
-		nc.watchSmartNicPods(n.ovnUpEnabled, pfMACs)
+		nc.watchPodsDPU(n.ovnUpEnabled, pfMACs)
 	}
 }
 
 func (nc *ovnNodeController) updateLocalnetOvnBridgeMapping(toAdd bool) error {
-	if nc.nadInfo.TopoType != types.LocalnetAttachDefTopoType || config.OvnKubeNode.Mode == types.NodeModeSmartNICHost {
+	if nc.nadInfo.TopoType != types.LocalnetAttachDefTopoType || config.OvnKubeNode.Mode == types.NodeModeDPUHost {
 		return nil
 	}
 
@@ -898,14 +898,14 @@ func (n *OvnNode) deleteNetworkAttachDefinition(netattachdef *nettypes.NetworkAt
 		return
 	}
 
-	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost && nc.nadInfo.TopoType == types.LocalnetAttachDefTopoType {
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost && nc.nadInfo.TopoType == types.LocalnetAttachDefTopoType {
 		err = nc.updateLocalnetOvnBridgeMapping(false)
 		if err != nil {
 			klog.Errorf(err.Error())
 		}
 	}
 
-	if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		if nc.podHandler != nil {
 			nc.node.watchFactory.RemovePodHandler(nc.podHandler)
 		}
@@ -1010,7 +1010,7 @@ func (n *OvnNode) WatchEndpointSlices(nodeIP string) {
 									"ngn-admin firewall zone: (%v)", *port.Port, err)
 							}
 						}
-						if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost &&
+						if config.OvnKubeNode.Mode != types.NodeModeDPUHost &&
 							(*port.Protocol == kapi.ProtocolUDP || *port.Protocol == kapi.ProtocolSCTP) {
 							err := deleteConntrack(ip, *port.Port, *port.Protocol)
 							if err != nil {
@@ -1161,7 +1161,7 @@ func updateEndpointSlice(nodeIP string, skipFirewalldAnnotation bool,
 						klog.Errorf("Error in removing port %d to ngn-admin firewall zone: (%v)", *port.Port, err)
 					}
 				}
-				if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost &&
+				if config.OvnKubeNode.Mode != types.NodeModeDPUHost &&
 					(*port.Protocol == kapi.ProtocolUDP || *port.Protocol == kapi.ProtocolSCTP) {
 					err := deleteConntrack(ip, *port.Port, *port.Protocol)
 					if err != nil {
@@ -1210,7 +1210,7 @@ func upgradeServiceRoute(bridgeName string) error {
 	return nil
 }
 
-func (n *OvnNode) WatchEndpointSlicesOnSmartNIC() {
+func (n *OvnNode) WatchEndpointSlicesOnDPU() {
 	n.watchFactory.AddEndpointSliceHandler(cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(prevObj, obj interface{}) {
 			oldEndpointSlice := prevObj.(*discovery.EndpointSlice)

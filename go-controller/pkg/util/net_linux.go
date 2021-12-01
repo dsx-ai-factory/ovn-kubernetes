@@ -467,8 +467,8 @@ func isSwitchdev(netdevice string) bool {
 	return false
 }
 
-// GetAllSmartNICHostPFMACAddress returns the MAC addresses of all the Host PFs (pf0hpf, pf1hpf, and so on)
-func GetAllSmartNICHostPFMACAddress() ([]string, error) {
+// GetAllDPUHostPFMACAddress returns the MAC addresses of all the Host PFs (pf0hpf, pf1hpf, and so on)
+func GetAllDPUHostPFMACAddress() ([]string, error) {
 	links, err := GetNetLinkOps().LinkList()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list network devices in the system. %v", err)
