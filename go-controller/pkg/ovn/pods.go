@@ -626,12 +626,20 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, lsManagerNodeNa
 	cmds = append(cmds, cmd)
 
 	// CNI depends on the flows from port security, delay setting it until end
-	cmd, err = oc.mc.ovnNBClient.LSPSetPortSecurity(portName, strings.Join(addresses, " "))
-	if err != nil {
-		return fmt.Errorf("unable to create LSPSetPortSecurity command for port: %s", portName)
+	// There are Pods which requires the spoof check to be disabled, so do it here.
+	// ex: for IGW's private and public underlay networks we need the port security to be disabled
+	// on the corresponding LSP so that it can provide high availability for the default gateway IP.
+	// TODO(gmoodalbail): need a correct way to disable portSecurity for default network
+	skipPortSecurity := util.SkipSpoofCheckForNAD(pod.Annotations, nadName)
+	if !skipPortSecurity {
+		cmd, err = oc.mc.ovnNBClient.LSPSetPortSecurity(portName, strings.Join(addresses, " "))
+		if err != nil {
+			return fmt.Errorf("unable to create LSPSetPortSecurity command for port: %s", portName)
+		}
+		cmds = append(cmds, cmd)
+	} else {
+		klog.Infof("Skip setting port security for port %s on NAD %s", portName, nadName)
 	}
-
-	cmds = append(cmds, cmd)
 
 	// execute all the commands together. If a single operation fails, all commands will roll back =>
 	// for new Pod no LSP will be created

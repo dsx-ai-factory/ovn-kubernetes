@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 
 	netattachdefapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	netattachdefutils "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils"
@@ -53,6 +54,9 @@ const (
 	OvnPodAnnotationName = "k8s.ovn.org/pod-networks"
 	// OvnPodNodeNameLabel is the constant label key representing the node on which Pod is scheduled
 	OvnPodNodeNameLabel = "k8s.ovn.org/nodeName"
+	// skipSpoofCheckAnnotationName skips setting Port security on Logical Switch Ports that are
+	// part of the specified networks
+	skipSpoofCheckAnnotationName = "k8s.ovn.org/skip-spoofchk-on-networks"
 )
 
 // PodAnnotation describes the assigned network details for a single pod network. (The
@@ -335,4 +339,19 @@ func GetK8sPodAllNetworks(pod *v1.Pod) ([]*netattachdefapi.NetworkSelectionEleme
 		networks = []*netattachdefapi.NetworkSelectionElement{}
 	}
 	return networks, nil
+}
+
+// SkipSpoofCheckForNAD checks whether we should skip spoof check for the given NAD
+func SkipSpoofCheckForNAD(annotations map[string]string, nadName string) bool {
+	skipSpoofCheckForNetworks, ok := annotations[skipSpoofCheckAnnotationName]
+	if !ok {
+		return false
+	}
+	for _, name := range strings.Split(skipSpoofCheckForNetworks, ",") {
+		name = strings.TrimSpace(name)
+		if name == nadName {
+			return true
+		}
+	}
+	return false
 }
