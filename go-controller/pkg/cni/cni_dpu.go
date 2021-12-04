@@ -7,6 +7,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"k8s.io/client-go/util/retry"
+	"k8s.io/klog/v2"
 )
 
 // updatePodDPUConnDetailsWithRetry update the pod annotion with the givin connection details
@@ -80,5 +81,6 @@ func (pr *PodRequest) addDPUConnectionDetailsAnnot(kube kube.Interface, vfNetDev
 		VfDevName: vfNetDevice,
 	}
 
+	klog.Infof("Updating pod %s/%s with connection details (%+v)", pr.PodNamespace, pr.PodName, dpuConnDetails)
 	return pr.updatePodDPUConnDetailsWithRetry(kube, &dpuConnDetails)
 }

@@ -273,7 +273,7 @@ func checkCancelSandbox(mac string, podLister corev1listers.PodLister, kclient k
 }
 
 func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet,
-	ifaceName, ifaceID string, ofPort int, checkExternalIDs bool,
+	ifaceName, ifaceID string, ofPort int, checkExternalIDs, skipSpoofCheck bool,
 	podLister corev1listers.PodLister, kclient kubernetes.Interface,
 	namespace, name, nadName, initialPodUID string) error {
 	var detail string
@@ -299,7 +299,7 @@ func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet,
 					//success
 					return nil
 				}
-			} else {
+			} else if !skipSpoofCheck {
 				if doPodFlowsExist(mac, ifAddrs, ofPort) {
 					// success
 					return nil

@@ -320,7 +320,7 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	}
 
 	if err = waitForPodInterface(ctx, ifInfo.MAC.String(), ifInfo.IPs, hostIfaceName,
-		ifaceID, ofPort, ifInfo.CheckExtIDs, podLister, kclient, namespace, podName, ifInfo.NadName,
+		ifaceID, ofPort, ifInfo.CheckExtIDs, ifInfo.SkipSpoofCheck, podLister, kclient, namespace, podName, ifInfo.NadName,
 		initialPodUID); err != nil {
 		// Ensure the error shows up in node logs, rather than just
 		// being reported back to the runtime.
