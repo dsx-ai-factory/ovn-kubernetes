@@ -304,6 +304,9 @@ func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet,
 					// success
 					return nil
 				}
+			} else if skipSpoofCheck {
+				// nothing to do, so return
+				return nil
 			}
 
 			if err := checkCancelSandbox(mac, podLister, kclient, namespace, name, nadName, initialPodUID); err != nil {
