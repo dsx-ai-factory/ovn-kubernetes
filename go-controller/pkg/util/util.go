@@ -456,3 +456,33 @@ func UpdateNodeSwitchExcludeIPs(nbClient libovsdbclient.Client, nodeName string,
 
 	return nil
 }
+
+// GetDbValByKey returns the value of the specified key in a space separated string (each in the form of k=v)
+func GetDbValByKey(keyValString, key string) string {
+	keyVals := strings.Fields(keyValString)
+	for _, keyVal := range keyVals {
+		if strings.HasPrefix(keyVal, key+"=") {
+			return strings.TrimPrefix(keyVal, key+"=")
+		}
+	}
+	return ""
+}
+
+// Get OVS interface associated pod information (sandbox/network), return false if the OVS interface does not exists
+func GetOVSPortPodInfo(hostIfName string) (bool, string, string, error) {
+	stdout, stderr, err := RunOVSVsctl("--no-heading", "--format=csv", "--data=bare",
+		"--columns=external_ids", "find", "Interface", "name="+hostIfName)
+	if err != nil {
+		return false, "", "", fmt.Errorf("failed to get OVS interface %s, stderr %v: %v", hostIfName, stderr, err)
+	}
+	if stdout == "" {
+		return false, "", "", nil
+	}
+	sandbox := GetDbValByKey(stdout, "sandbox")
+	nadName := GetDbValByKey(stdout, "network_name")
+	// if network_name does not exists, it is default network
+	if nadName == "" {
+		nadName = types.DefaultNetworkName
+	}
+	return true, sandbox, nadName, nil
+}

@@ -183,7 +183,12 @@ func (pr *PodRequest) cmdDel(podLister corev1listers.PodLister, kclient kubernet
 
 	vfNetdevName := ""
 	if pr.CNIConf.DeviceID != "" {
+		kubecli := &kube.Kube{KClient: kclient}
 		if pr.IsVFIO {
+			if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+				// Delete the DPU connection-details annotation
+				_ = pr.updatePodDPUConnDetailsWithRetry(kubecli, nil)
+			}
 			return response, nil
 		}
 		if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
@@ -198,6 +203,9 @@ func (pr *PodRequest) cmdDel(podLister corev1listers.PodLister, kclient kubernet
 				return response, nil
 			}
 			vfNetdevName = dpuCD.VfDevName
+
+			// Delete the DPU connection-details annotation
+			_ = pr.updatePodDPUConnDetailsWithRetry(kubecli, nil)
 		}
 		// TODO(gmoodalbail): add for the CX5 ASAP2 VF case
 	}

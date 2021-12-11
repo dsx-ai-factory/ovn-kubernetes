@@ -76,7 +76,11 @@ func MarshalPodDPUConnDetails(pannotations *map[string]string, dcd *DPUConnectio
 				ovnAnnotation, err)
 		}
 	}
-	podDcds[nadName] = *dcd
+	if dcd != nil {
+		podDcds[nadName] = *dcd
+	} else {
+		delete(podDcds, nadName)
+	}
 	bytes, err := json.Marshal(podDcds)
 	if err != nil {
 		return fmt.Errorf("failed marshaling pod annotation map %v: %v", podDcds, err)
@@ -120,7 +124,11 @@ func MarshalPodDPUConnStatus(pannotations *map[string]string, dcs *DPUConnection
 				ovnAnnotation, err)
 		}
 	}
-	podDcds[nadName] = *dcs
+	if dcs != nil {
+		podDcds[nadName] = *dcs
+	} else {
+		delete(podDcds, nadName)
+	}
 	bytes, err := json.Marshal(podDcds)
 	if err != nil {
 		return fmt.Errorf("failed marshaling pod annotation map %v: %v", podDcds, err)

@@ -271,6 +271,18 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 			klog.Warningf("Failed to clear stale OVS port %q iface-id %q: %v\n  %q", uuid, ifaceID, err, out)
 		}
 	}
+
+	// if the specified port was created for other Pod/Network, return error
+	ifExists, sandboxStr, networkNameStr, err := util.GetOVSPortPodInfo(hostIfaceName)
+	if err == nil && ifExists {
+		if sandboxStr != sandboxID {
+			return fmt.Errorf("OVS port %s was added for sandbox (%s), now readding it for (%s)", hostIfaceName, sandboxStr, sandboxID)
+		}
+		if networkNameStr != ifInfo.NadName {
+			return fmt.Errorf("OVS port %s was added for nad (%s), expect (%s)", hostIfaceName, networkNameStr, ifInfo.NadName)
+		}
+	}
+
 	ipStrs := make([]string, len(ifInfo.IPs))
 	for i, ip := range ifInfo.IPs {
 		ipStrs[i] = ip.String()
