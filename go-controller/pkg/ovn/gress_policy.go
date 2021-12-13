@@ -304,8 +304,8 @@ func (gp *gressPolicy) getMatchFromIPBlock(lportMatch, l4Match string) []string 
 // if it does not exist and returns `false` if it does.
 func (gp *gressPolicy) addNamespaceAddressSet(name string) bool {
 	v4HashName, v6HashName := addressset.MakeAddressSetHashNames(name)
-	v4HashName = "$" + v4HashName
-	v6HashName = "$" + v6HashName
+	v4HashName = "$" + gp.netAttachInfo.Prefix + v4HashName
+	v6HashName = "$" + gp.netAttachInfo.Prefix + v6HashName
 
 	if gp.peerV4AddressSets.Has(v4HashName) || gp.peerV6AddressSets.Has(v6HashName) {
 		return false
@@ -339,8 +339,8 @@ func (gp *gressPolicy) addNamespaceAddressSets(namespaces []interface{}) {
 // and returns whether the address set was in the policy or not.
 func (gp *gressPolicy) delNamespaceAddressSet(name string) bool {
 	v4HashName, v6HashName := addressset.MakeAddressSetHashNames(name)
-	v4HashName = "$" + v4HashName
-	v6HashName = "$" + v6HashName
+	v4HashName = "$" + gp.netAttachInfo.Prefix + v4HashName
+	v6HashName = "$" + gp.netAttachInfo.Prefix + v6HashName
 
 	if !gp.peerV4AddressSets.Has(v4HashName) && !gp.peerV6AddressSets.Has(v6HashName) {
 		return false
