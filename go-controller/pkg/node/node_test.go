@@ -224,9 +224,9 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-encap-ip=%s "+
 						"external_ids:ovn-remote-probe-interval=%d "+
 						"external_ids:ovn-openflow-probe-interval=%d "+
-						"external_ids:hostname=\"%s\" "+
 						"external_ids:ovn-monitor-all=true "+
-						"external_ids:ovn-enable-lflow-cache=true",
+						"external_ids:ovn-enable-lflow-cache=true "+
+						"external_ids:hostname=\"%s\"",
 						nodeIP, interval, ofintval, nodeName),
 				})
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -241,7 +241,7 @@ var _ = Describe("Node", func() {
 
 				_, err = config.InitConfig(ctx, fexec, nil)
 				Expect(err).NotTo(HaveOccurred())
-
+				config.OvnKubeNode.Mode = types.NodeModeFull
 				err = setupOVNNode(&node)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -284,9 +284,9 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-encap-ip=%s "+
 						"external_ids:ovn-remote-probe-interval=%d "+
 						"external_ids:ovn-openflow-probe-interval=%d "+
-						"external_ids:hostname=\"%s\" "+
 						"external_ids:ovn-monitor-all=true "+
-						"external_ids:ovn-enable-lflow-cache=true",
+						"external_ids:ovn-enable-lflow-cache=true "+
+						"external_ids:hostname=\"%s\"",
 						nodeIP, interval, ofintval, nodeName),
 				})
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -317,7 +317,7 @@ var _ = Describe("Node", func() {
 				_, err = config.InitConfig(ctx, fexec, nil)
 				Expect(err).NotTo(HaveOccurred())
 				config.Default.EncapPort = encapPort
-
+				config.OvnKubeNode.Mode = types.NodeModeFull
 				err = setupOVNNode(&node)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -357,11 +357,11 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-encap-ip=%s "+
 						"external_ids:ovn-remote-probe-interval=%d "+
 						"external_ids:ovn-openflow-probe-interval=%d "+
-						"external_ids:hostname=\"%s\" "+
 						"external_ids:ovn-monitor-all=true "+
 						"external_ids:ovn-enable-lflow-cache=false "+
 						"external_ids:ovn-limit-lflow-cache=1000 "+
-						"external_ids:ovn-limit-lflow-cache-kb=100000",
+						"external_ids:ovn-limit-lflow-cache-kb=100000 "+
+						"external_ids:hostname=\"%s\"",
 						nodeIP, interval, ofintval, nodeName),
 				})
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -380,6 +380,7 @@ var _ = Describe("Node", func() {
 				config.Default.LFlowCacheEnable = false
 				config.Default.LFlowCacheLimit = 1000
 				config.Default.LFlowCacheLimitKb = 100000
+				config.OvnKubeNode.Mode = types.NodeModeFull
 				err = setupOVNNode(&node)
 				Expect(err).NotTo(HaveOccurred())
 

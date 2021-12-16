@@ -188,7 +188,6 @@ func setupOVNNode(node *kapi.Node) error {
 			config.Default.InactivityProbe),
 		fmt.Sprintf("external_ids:ovn-openflow-probe-interval=%d",
 			config.Default.OpenFlowProbe),
-		fmt.Sprintf("external_ids:hostname=\"%s\"", node.Name),
 		fmt.Sprintf("external_ids:ovn-monitor-all=%t", config.Default.MonitorAll),
 		fmt.Sprintf("external_ids:ovn-enable-lflow-cache=%t", config.Default.LFlowCacheEnable),
 	}
@@ -203,6 +202,12 @@ func setupOVNNode(node *kapi.Node) error {
 		setExternalIdsCmd = append(setExternalIdsCmd,
 			fmt.Sprintf("external_ids:ovn-limit-lflow-cache-kb=%d", config.Default.LFlowCacheLimitKb),
 		)
+	}
+
+	// In the case of DPU, the hostname should be that of the DPU and not the K8s Node.
+	// So, skip setting the incorrect hostname.
+	if config.OvnKubeNode.Mode != types.NodeModeDPU {
+		setExternalIdsCmd = append(setExternalIdsCmd, fmt.Sprintf("external_ids:hostname=\"%s\"", node.Name))
 	}
 
 	_, stderr, err := util.RunOVSVsctl(setExternalIdsCmd...)
