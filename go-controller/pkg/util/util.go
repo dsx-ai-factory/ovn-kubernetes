@@ -77,8 +77,16 @@ type annotationNotSetError struct {
 	msg string
 }
 
+type annotationAlreadySetError struct {
+	msg string
+}
+
 func (anse annotationNotSetError) Error() string {
 	return anse.msg
+}
+
+func (aase annotationAlreadySetError) Error() string {
+	return aase.msg
 }
 
 // newAnnotationNotSetError returns an error for an annotation that is not set
@@ -86,9 +94,20 @@ func newAnnotationNotSetError(format string, args ...interface{}) error {
 	return annotationNotSetError{msg: fmt.Sprintf(format, args...)}
 }
 
+// newAnnotationAlreadySetError returns an error for an annotation that is not set
+func newAnnotationAlreadySetError(format string, args ...interface{}) error {
+	return annotationAlreadySetError{msg: fmt.Sprintf(format, args...)}
+}
+
 // IsAnnotationNotSetError returns true if the error indicates that an annotation is not set
 func IsAnnotationNotSetError(err error) bool {
 	_, ok := err.(annotationNotSetError)
+	return ok
+}
+
+// IsAnnotationAlreadySetError returns true if the error indicates that an annotation is already set
+func IsAnnotationAlreadySetError(err error) bool {
+	_, ok := err.(annotationAlreadySetError)
 	return ok
 }
 

@@ -22,6 +22,9 @@ func (pr *PodRequest) updatePodDPUConnDetailsWithRetry(kube kube.Interface, dpuC
 		cpod := pod.DeepCopy()
 		err = util.MarshalPodDPUConnDetails(&cpod.Annotations, dpuConnDetails, pr.effectiveNADName)
 		if err != nil {
+			if util.IsAnnotationAlreadySetError(err) {
+				return nil
+			}
 			return err
 		}
 		return kube.UpdatePod(cpod)

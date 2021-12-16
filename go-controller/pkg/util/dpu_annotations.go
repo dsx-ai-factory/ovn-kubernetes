@@ -76,9 +76,18 @@ func MarshalPodDPUConnDetails(pannotations *map[string]string, dcd *DPUConnectio
 				ovnAnnotation, err)
 		}
 	}
+	dc, ok := podDcds[nadName]
 	if dcd != nil {
+		if ok && dc == *dcd {
+			return newAnnotationAlreadySetError("OVN pod %s annotation for nad %s already exists in %v",
+				DPUConnectionDetailsAnnot, nadName, ovnAnnotation)
+		}
 		podDcds[nadName] = *dcd
 	} else {
+		if !ok {
+			return newAnnotationAlreadySetError("OVN pod %s annotation for nad %s already removed",
+				DPUConnectionDetailsAnnot, nadName)
+		}
 		delete(podDcds, nadName)
 	}
 	bytes, err := json.Marshal(podDcds)
@@ -103,7 +112,7 @@ func UnmarshalPodDPUConnDetails(annotations map[string]string, netName string) (
 	}
 	dcd, ok := podDcds[netName]
 	if !ok {
-		return nil, fmt.Errorf("no DPU connection details annotation for network %s: %q",
+		return nil, newAnnotationNotSetError("no DPU connection details annotation for network %s: %q",
 			netName, ovnAnnotation)
 	}
 	return &dcd, nil
@@ -120,13 +129,22 @@ func MarshalPodDPUConnStatus(pannotations *map[string]string, dcs *DPUConnection
 	ovnAnnotation, ok := annotations[DPUConnetionStatusAnnot]
 	if ok {
 		if err := json.Unmarshal([]byte(ovnAnnotation), &podDcds); err != nil {
-			return fmt.Errorf("failed to unmarshal ovn pod annotation %q: %v",
-				ovnAnnotation, err)
+			return fmt.Errorf("failed to unmarshal ovn pod %s annotation %q: %v",
+				DPUConnetionStatusAnnot, ovnAnnotation, err)
 		}
 	}
+	dc, ok := podDcds[nadName]
 	if dcs != nil {
+		if ok && dc == *dcs {
+			return newAnnotationAlreadySetError("OVN pod %s annotation for nad %s already exists in %v",
+				DPUConnetionStatusAnnot, nadName, ovnAnnotation)
+		}
 		podDcds[nadName] = *dcs
 	} else {
+		if !ok {
+			return newAnnotationAlreadySetError("OVN pod %s annotation for nad %s already removed",
+				DPUConnetionStatusAnnot, nadName)
+		}
 		delete(podDcds, nadName)
 	}
 	bytes, err := json.Marshal(podDcds)
@@ -151,7 +169,7 @@ func UnmarshalPodDPUConnStatus(annotations map[string]string, nadName string) (*
 	}
 	dcs, ok := podDcss[nadName]
 	if !ok {
-		return nil, fmt.Errorf("no DPU connection status annotation for network %s: %q",
+		return nil, newAnnotationNotSetError("no DPU connection status annotation for network %s: %q",
 			nadName, ovnAnnotation)
 	}
 	return &dcs, nil
