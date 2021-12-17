@@ -53,8 +53,9 @@ const (
 	// ovnNodeChassisID is the systemID of the node needed for creating L3 gateway
 	ovnNodeChassisID = "k8s.ovn.org/node-chassis-id"
 
-	// skipPinnedLS specifies whether the node logial switch should be pinned or not
-	skipPinnedLS = "k8s.ovn.org/node-skip-pinned-logical-switch"
+	// skipPinnedLS specifies whether the logical switch should be pinned or not on this node for the
+	// specified networks
+	skipPinnedLS = "k8s.ovn.org/node-skip-pinned-ls-for-networks"
 
 	// ovnNodeCIDR is the CIDR form representation of primary network interface's attached IP address (i.e: 192.168.126.31/24 or 0:0:0:0:0:feff:c0a8:8e0c/64)
 	ovnNodeIfAddr = "k8s.ovn.org/node-primary-ifaddr"
@@ -289,14 +290,29 @@ func ParseNodeChassisIDAnnotation(node *kapi.Node) (string, error) {
 	return chassisID, nil
 }
 
-// ParseSkipPinnedLSAnnotation returns the node's skipPinnedLSAnnotation annotation
-func ParseSkipPinnedLSAnnotation(node *kapi.Node) bool {
+// ShouldSkipPinnedLS returns true if the node's skipPinnedLSAnnotation annotation include the given network's net-attach-def
+// note that for default network, "default" would be directly specified in the annotation if needed
+func ShouldSkipPinnedLS(node *kapi.Node, nadInfo *NetAttachDefInfo) bool {
 	skip, ok := node.Annotations[skipPinnedLS]
 	if !ok {
 		return false
 	}
 
-	return strings.ToLower(skip) == "true"
+	nadNames := strings.Split(skip, ",")
+	for _, nadName := range nadNames {
+		nadName = strings.TrimSpace(nadName)
+		if !nadInfo.NotDefault {
+			if nadName == types.DefaultNetworkName {
+				return true
+			}
+		} else {
+			if _, ok := nadInfo.NetAttachDefs.Load(nadName); ok {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 func SetNodeManagementPortMACAddress(nodeAnnotator kube.Annotator, macAddress net.HardwareAddr) error {

@@ -701,7 +701,7 @@ func (oc *Controller) syncNodeClusterRouterPort(node *kapi.Node, hostSubnets []*
 		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
 		lrpArgs = append(lrpArgs, gwIfAddr.String())
 	}
-	skipPinnedLS := util.ParseSkipPinnedLSAnnotation(node)
+	skipPinnedLS := util.ShouldSkipPinnedLS(node, oc.nadInfo)
 	if config.Gateway.Mode != config.GatewayModeLocal && !skipPinnedLS {
 		// "local" mode requires NAT on the cluster router, which is not yet supported yet when
 		// multiple DGPs are on the same router, so we can't set the gateway-chassis here.
