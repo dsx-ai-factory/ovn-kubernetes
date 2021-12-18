@@ -32,14 +32,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-const (
-	// IdledServiceAnnotationSuffix is a constant string representing the suffix of the Service annotation key
-	// whose value indicates the time stamp in RFC3339 format when a Service was idled
-	IdledServiceAnnotationSuffix   = "idled-at"
-	OvnNodeAnnotationRetryInterval = 100 * time.Millisecond
-	OvnNodeAnnotationRetryTimeout  = 1 * time.Second
-)
-
 type ovnkubeMasterLeaderMetrics struct{}
 
 func (ovnkubeMasterLeaderMetrics) On(string) {
@@ -153,7 +145,7 @@ func (mc *OvnMHController) Start(ctx context.Context) error {
 }
 
 // cleanup obsolete *gressDefaultDeny port groups
-func (oc *Controller) upgradeToNamespacedDenyPGOVNTopology(existingNodeList *kapi.NodeList) error {
+func (oc *Controller) upgradeToNamespacedDenyPGOVNTopology() error {
 	err := deletePortGroup(oc.mc.ovnNBClient, "ingressDefaultDeny", oc.nadInfo.NetNameInfo)
 	if err != nil {
 		klog.Errorf("%v", err)
@@ -166,7 +158,7 @@ func (oc *Controller) upgradeToNamespacedDenyPGOVNTopology(existingNodeList *kap
 }
 
 // It is already single join switch based topology, simply set its topology version
-func (oc *Controller) upgradeToSingleSwitchOVNTopology(existingNodeList *kapi.NodeList) error {
+func (oc *Controller) upgradeToSingleSwitchOVNTopology() error {
 	_, stderr, err := util.RunOVNNbctl("--", "set", "logical_router", oc.nadInfo.Prefix+types.OVNClusterRouter,
 		fmt.Sprintf("external_ids:k8s-ovn-topo-version=%d", types.OvnSingleJoinSwitchTopoVersion))
 	if err != nil {
@@ -185,11 +177,11 @@ func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
 	// If current DB version is greater than OvnSingleJoinSwitchTopoVersion, no need to upgrade to single switch topology
 	if ver < types.OvnSingleJoinSwitchTopoVersion {
 		klog.Infof("Upgrading to Single Switch OVN Topology")
-		err = oc.upgradeToSingleSwitchOVNTopology(existingNodes)
+		err = oc.upgradeToSingleSwitchOVNTopology()
 	}
 	if err == nil && ver < types.OvnNamespacedDenyPGTopoVersion {
 		klog.Infof("Upgrading to Namespace Deny PortGroup OVN Topology")
-		err = oc.upgradeToNamespacedDenyPGOVNTopology(existingNodes)
+		err = oc.upgradeToNamespacedDenyPGOVNTopology()
 	}
 	// If version is less than Host -> Service with OpenFlow, we need to remove and cleanup DGP
 	if err == nil && ver < types.OvnHostToSvcOFTopoVersion && config.Gateway.Mode == config.GatewayModeShared {
@@ -325,7 +317,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		oc.multicastSupport = false
 	}
 
-	if err := oc.SetupMaster(masterNodeName, nodeNames); err != nil {
+	if err := oc.SetupMaster(nodeNames); err != nil {
 		klog.Errorf("Failed to setup master (%v)", err)
 		return err
 	}
@@ -350,7 +342,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 }
 
 // SetupMaster creates the central router and load-balancers for the network
-func (oc *Controller) SetupMaster(masterNodeName string, existingNodeNames []string) error {
+func (oc *Controller) SetupMaster(existingNodeNames []string) error {
 	clusterRouterName := oc.nadInfo.Prefix + types.OVNClusterRouter
 
 	// Create a single common distributed router for the cluster.
@@ -875,7 +867,10 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 }
 
 func isError(err error) bool {
-	return true
+	if err != nil {
+		return true
+	}
+	return false
 }
 
 func (oc *Controller) updateNodeAnnotationWithRetry(nodeName string, hostSubnets []*net.IPNet) error {

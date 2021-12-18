@@ -387,7 +387,7 @@ func parseOvnKubeLogLevelAnnotation(node *kapi.Node, role string) (string, error
 func SetOvnKubeLogLevel(k kube.Interface, nodeName, role string) error {
 	node, err := k.GetNode(nodeName)
 	if err != nil {
-		return fmt.Errorf("error retrieving node %s: (%v)", node.Name, err)
+		return fmt.Errorf("error retrieving node %s: (%v)", nodeName, err)
 	}
 
 	var level klog.Level
