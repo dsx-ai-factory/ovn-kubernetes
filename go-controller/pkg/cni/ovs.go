@@ -310,7 +310,7 @@ func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet,
 			}
 
 			if err := checkCancelSandbox(mac, podLister, kclient, namespace, name, nadName, initialPodUID); err != nil {
-				return fmt.Errorf("%v waiting for OVS port binding for %s %v", err, mac, ifAddrs)
+				return fmt.Errorf("%v waiting for OVS port binding%s for %s %v", err, detail, mac, ifAddrs)
 			}
 
 			// try again later
