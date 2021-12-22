@@ -1,19 +1,14 @@
 package ovn
 
 import (
-	"sync"
-
-	goovn "github.com/ebay/go-ovn"
 	"github.com/onsi/gomega"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	"github.com/urfave/cli/v2"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/record"
@@ -46,29 +41,26 @@ type FakeOVN struct {
 	mhController *OvnMHController
 	controller   *Controller
 	stopChan     chan struct{}
-	fakeExec     *ovntest.FakeExec
 	asf          *addressset.FakeAddressSetFactory
 	fakeRecorder *record.FakeRecorder
-	ovnNBClient  goovn.Client
-	ovnSBClient  goovn.Client
 	nbClient     libovsdbclient.Client
 	sbClient     libovsdbclient.Client
 	dbSetup      libovsdbtest.TestSetup
-	wg           *sync.WaitGroup
+	nbsbCleanup  *libovsdbtest.Cleanup
 }
 
-func NewFakeOVN(fexec *ovntest.FakeExec) *FakeOVN {
-	err := util.SetExec(fexec)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+func NewFakeOVN() *FakeOVN {
 	return &FakeOVN{
-		fakeExec:     fexec,
 		asf:          addressset.NewFakeAddressSetFactory(),
 		fakeRecorder: record.NewFakeRecorder(10),
-		wg:           &sync.WaitGroup{},
 	}
 }
 
-func (o *FakeOVN) start(ctx *cli.Context, objects ...runtime.Object) {
+func (o *FakeOVN) start(objects ...runtime.Object) {
+	fexec := ovntest.NewFakeExec()
+	err := util.SetExec(fexec)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
 	egressIPObjects := []runtime.Object{}
 	egressFirewallObjects := []runtime.Object{}
 	icmpNetworkPolicyObjects := []runtime.Object{}
@@ -84,8 +76,6 @@ func (o *FakeOVN) start(ctx *cli.Context, objects ...runtime.Object) {
 			v1Objects = append(v1Objects, object)
 		}
 	}
-	_, err := config.InitConfig(ctx, o.fakeExec, nil)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	o.fakeClient = &util.OVNClientset{
 		KubeClient:              fake.NewSimpleClientset(v1Objects...),
 		EgressIPClient:          egressipfake.NewSimpleClientset(egressIPObjects...),
@@ -96,74 +86,30 @@ func (o *FakeOVN) start(ctx *cli.Context, objects ...runtime.Object) {
 	o.init()
 }
 
-func (o *FakeOVN) startWithDBSetup(ctx *cli.Context, dbSetup libovsdbtest.TestSetup, objects ...runtime.Object) {
+func (o *FakeOVN) startWithDBSetup(dbSetup libovsdbtest.TestSetup, objects ...runtime.Object) {
 	o.dbSetup = dbSetup
-	o.start(ctx, objects...)
-}
-
-func (o *FakeOVN) restart() {
-	o.shutdown()
-	o.init()
+	o.start(objects...)
 }
 
 func (o *FakeOVN) shutdown() {
-	close(o.stopChan)
 	o.watcher.Shutdown()
-	err := o.mhController.ovnNBClient.Close()
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	err = o.mhController.ovnSBClient.Close()
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	o.wg.Wait()
+	close(o.stopChan)
+	o.nbsbCleanup.Cleanup()
 }
 
 func (o *FakeOVN) init() {
 	var err error
-	o.stopChan = make(chan struct{})
 	o.watcher, err = factory.NewMasterWatchFactory(o.fakeClient)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	err = o.watcher.Start()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	o.ovnNBClient = ovntest.NewMockOVNClient(goovn.DBNB)
-	o.ovnSBClient = ovntest.NewMockOVNClient(goovn.DBSB)
-	o.nbClient, o.sbClient, err = libovsdbtest.NewNBSBTestHarness(o.dbSetup, o.stopChan)
+	o.nbClient, o.sbClient, o.nbsbCleanup, err = libovsdbtest.NewNBSBTestHarness(o.dbSetup)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	o.stopChan = make(chan struct{})
 	o.mhController = NewOvnMHController(o.fakeClient, "", o.watcher,
-		o.stopChan, o.ovnNBClient, o.ovnSBClient,
-		o.nbClient, o.sbClient,
+		o.stopChan, o.nbClient, o.sbClient,
 		o.fakeRecorder, nil)
 	_ = o.mhController.setDefaultOvnController(o.asf)
 	o.controller = o.mhController.ovnController
 	o.controller.multicastSupport = true
-}
-
-func mockAddNBDBError(table, name, field string, err error, ovnNBClient goovn.Client) {
-	mockClient, ok := ovnNBClient.(*ovntest.MockOVNClient)
-	if !ok {
-		panic("type assertion failed for mock NB client")
-	}
-	mockClient.AddToErrorCache(table, name, field, err)
-}
-
-func mockAddSBDBError(table, name, field string, err error, ovnSBClient goovn.Client) {
-	mockClient, ok := ovnSBClient.(*ovntest.MockOVNClient)
-	if !ok {
-		panic("type assertion failed for mock SB client")
-	}
-	mockClient.AddToErrorCache(table, name, field, err)
-}
-
-func mockDelNBDBError(table, name, field string, ovnNBClient goovn.Client) {
-	mockClient, ok := ovnNBClient.(*ovntest.MockOVNClient)
-	if !ok {
-		panic("type assertion failed for mock NB client")
-	}
-	mockClient.RemoveFromErrorCache(table, name, field)
-}
-
-func mockDelSBDBError(table, name, field string, ovnSBClient goovn.Client) {
-	mockClient, ok := ovnSBClient.(*ovntest.MockOVNClient)
-	if !ok {
-		panic("type assertion failed for mock SB client")
-	}
-	mockClient.RemoveFromErrorCache(table, name, field)
 }

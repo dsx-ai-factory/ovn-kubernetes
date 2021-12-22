@@ -1,7 +1,9 @@
 package addressset
 
 import (
+	"context"
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"net"
 	"sort"
 	"strings"
@@ -37,7 +39,7 @@ type AddressSetFactory interface {
 	NewAddressSet(name string, ips []net.IP) (AddressSet, error)
 	// EnsureAddressSet makes sure that an address set object exists in ovn
 	// with the given name
-	EnsureAddressSet(name string) error
+	EnsureAddressSet(name string) (AddressSet, error)
 	// ProcessEachAddressSet calls the given function for each address set
 	// known to the factory
 	ProcessEachAddressSet(iteratorFn AddressSetIterFunc) error
@@ -55,6 +57,8 @@ type AddressSet interface {
 	GetName() string
 	// AddIPs adds the array of IPs to the address set
 	AddIPs(ip []net.IP) error
+	// GetIPs gets the list of v4 & v6 IPs from the address set
+	GetIPs() ([]string, []string)
 	// SetIPs sets the address set to the given array of addresses
 	SetIPs(ip []net.IP) error
 	DeleteIPs(ip []net.IP) error
@@ -87,45 +91,79 @@ func (asf *ovnAddressSetFactory) NewAddressSet(name string, ips []net.IP) (Addre
 	return res, nil
 }
 
-// EnsureAddressSet ensures the address_set with the given name exists and if it does not creates an empty addressSet
-func (asf *ovnAddressSetFactory) EnsureAddressSet(name string) error {
-	hashedAddressSetNames := []string{}
+// ensureAddressSet ensures the address_set with the given name exists and if it does not creates an empty addressSet
+func ensureOvnAddressSet(asf *ovnAddressSetFactory, name string) (*ovnAddressSet, error) {
+	as := &ovnAddressSet{
+		nbClient: asf.nbClient,
+		name:     name,
+		hashName: asf.Prefix + hashedAddressSet(name),
+	}
+
+	addrset := &nbdb.AddressSet{Name: as.hashName, ExternalIDs: map[string]string{"name": name}}
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	err := as.nbClient.Get(ctx, addrset)
+	if err != nil && err != libovsdbclient.ErrNotFound {
+		return nil, fmt.Errorf("ensuring address set %s failed: %+v", name, err)
+	}
+
+	if len(addrset.UUID) == 0 {
+		//create the address_set with no IPs
+		ops, err := as.nbClient.Create(&nbdb.AddressSet{
+			Name:        as.hashName,
+			ExternalIDs: map[string]string{"name": name},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create address set %s (%v)",
+				name, err)
+		}
+		results, err := libovsdbops.TransactAndCheck(as.nbClient, ops)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create address set %s (%v)",
+				name, err)
+		}
+		if len(results) == 1 {
+			as.uuid = results[0].UUID.GoUUID
+		} else {
+			//should never happen
+			return nil, fmt.Errorf("returned too many results from addressSet creation")
+		}
+	} else {
+		// if there is already an addressSet, reuse the addressSet and return it
+		as.uuid = addrset.UUID
+	}
+
+	return as, nil
+}
+
+// EnsureAddressSet ensures the address_set with the given name exists. If it exists it returns the set
+// and if it does not exist, creates an empty addressSet and returns it.
+func (asf *ovnAddressSetFactory) EnsureAddressSet(name string) (AddressSet, error) {
+	var (
+		v4set, v6set *ovnAddressSet
+		err          error
+	)
 	ip4ASName, ip6ASName := MakeAddressSetName(name)
 	if config.IPv4Mode {
-		hashedAddressSetNames = append(hashedAddressSetNames, ip4ASName)
+		v4set, err = ensureOvnAddressSet(asf, ip4ASName)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if config.IPv6Mode {
-		hashedAddressSetNames = append(hashedAddressSetNames, ip6ASName)
-	}
-	for _, hashedAddressSetName := range hashedAddressSetNames {
-		addrset := &nbdb.AddressSet{Name: asf.Prefix + hashedAddressSet(hashedAddressSetName), ExternalIDs: map[string]string{"name": hashedAddressSetName}}
-		err := asf.nbClient.Get(addrset)
-		if err != nil && err != libovsdbclient.ErrNotFound {
-			return fmt.Errorf("ensuring address set %s failed: %+v", name, err)
-		}
-		if len(addrset.UUID) == 0 {
-			// create the address_set with no IPs
-			ops, err := asf.nbClient.Create(&nbdb.AddressSet{
-				Name:        asf.Prefix + hashedAddressSet(hashedAddressSetName),
-				ExternalIDs: map[string]string{"name": hashedAddressSetName},
-			})
-			if err != nil {
-				return fmt.Errorf("failed to ensure address set %s (%v)",
-					name, err)
-			}
-			_, err = libovsdbops.TransactAndCheck(asf.nbClient, ops)
-			if err != nil {
-				return fmt.Errorf("failed to ensure address set %s (%v)",
-					name, err)
-			}
+		v6set, err = ensureOvnAddressSet(asf, ip6ASName)
+		if err != nil {
+			return nil, err
 		}
 	}
 
-	return nil
+	return &ovnAddressSets{name: name, ipv4: v4set, ipv6: v6set}, nil
 }
 
 func forEachAddressSet(netNameInfo util.NetNameInfo, nbClient libovsdbclient.Client, do func(string)) error {
 	addrSetList := &[]nbdb.AddressSet{}
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
 	err := nbClient.WhereCache(
 		func(addrSet *nbdb.AddressSet) bool {
 			netName, exists := addrSet.ExternalIDs["network_name"]
@@ -138,7 +176,7 @@ func forEachAddressSet(netNameInfo util.NetNameInfo, nbClient libovsdbclient.Cli
 			}
 			_, exists = addrSet.ExternalIDs["name"]
 			return exists
-		}).List(addrSetList)
+		}).List(ctx, addrSetList)
 	if err != nil {
 		return fmt.Errorf("error reading address sets: %+v", err)
 	}
@@ -291,8 +329,10 @@ func newOvnAddressSet(asf *ovnAddressSetFactory, name string, ips []net.IP) (*ov
 		hashName: asf.Prefix + hashedAddressSet(name),
 	}
 	uniqIPs := ipToStringSort(ips)
-	addrSet := &nbdb.AddressSet{Name: asf.Prefix + hashedAddressSet(name)}
-	err := as.nbClient.Get(addrSet)
+	addrSet := &nbdb.AddressSet{Name: as.hashName}
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	err := as.nbClient.Get(ctx, addrSet)
 	if err != nil && err != libovsdbclient.ErrNotFound {
 		return nil, err
 	}
@@ -386,6 +426,20 @@ func (as *ovnAddressSets) SetIPs(ips []net.IP) error {
 	return err
 }
 
+func (as *ovnAddressSets) GetIPs() ([]string, []string) {
+	var v4ips []string
+	var v6ips []string
+
+	if as.ipv6 != nil {
+		v6ips, _ = as.ipv6.getIPs()
+	}
+	if as.ipv4 != nil {
+		v4ips, _ = as.ipv4.getIPs()
+	}
+
+	return v4ips, v6ips
+}
+
 func (as *ovnAddressSets) AddIPs(ips []net.IP) error {
 	if len(ips) == 0 {
 		return nil
@@ -462,6 +516,19 @@ func (as *ovnAddressSet) setIPs(ips []net.IP) error {
 	}
 
 	return nil
+}
+
+// getIPs gets the IPs of a given address set in OVN from libovsdb cache
+func (as *ovnAddressSet) getIPs() ([]string, error) {
+	addrset := &nbdb.AddressSet{Name: as.hashName}
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	err := as.nbClient.Get(ctx, addrset)
+	if err != nil {
+		return nil, err
+	}
+
+	return addrset.Addresses, nil
 }
 
 // addIPs appends the set of IPs to the existing address_set.

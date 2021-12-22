@@ -16,11 +16,11 @@ import (
 
 	"k8s.io/klog/v2"
 
-	"github.com/ebay/go-ovn"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	ovnnode "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
@@ -66,7 +66,7 @@ func getFlagsByCategory() map[string][]cli.Flag {
 	m["OVN Southbound DB Options"] = config.OvnSBFlags
 	m["OVN Gateway Options"] = config.OVNGatewayFlags
 	m["Master HA Options"] = config.MasterHAFlags
-	m["OVN Kube Node flags"] = config.OvnKubeNodeFlags
+	m["OVN Kube Node Options"] = config.OvnKubeNodeFlags
 	m["Monitoring Options"] = config.MonitoringFlags
 
 	return m
@@ -242,32 +242,23 @@ func runOvnKube(ctx *cli.Context) error {
 			return err
 		}
 		watchFactory = masterWatchFactory
-		var ovnNBClient, ovnSBClient goovn.Client
 		var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
 
-		if ovnNBClient, err = util.NewOVNNBClient(); err != nil {
-			return fmt.Errorf("error when trying to initialize go-ovn NB client: %v", err)
-		}
-
-		if ovnSBClient, err = util.NewOVNSBClient(); err != nil {
-			return fmt.Errorf("error when trying to initialize go-ovn SB client: %v", err)
-		}
-
-		if libovsdbOvnNBClient, err = util.NewNBClient(stopChan); err != nil {
+		if libovsdbOvnNBClient, err = libovsdb.NewNBClient(stopChan); err != nil {
 			return fmt.Errorf("error when trying to initialize libovsdb NB client: %v", err)
 		}
 
-		if libovsdbOvnSBClient, err = util.NewSBClient(stopChan); err != nil {
+		if libovsdbOvnSBClient, err = libovsdb.NewSBClient(stopChan); err != nil {
 			return fmt.Errorf("error when trying to initialize libovsdb SB client: %v", err)
 		}
 
 		// register prometheus metrics exported by the master
 		// this must be done prior to calling controller start
 		// since we capture some metrics in Start()
-		metrics.RegisterMasterMetrics(ovnNBClient, ovnSBClient, config.MetricsScrapeInterval, stopChan)
+		metrics.RegisterMasterMetrics(libovsdbOvnSBClient, config.MetricsScrapeInterval, stopChan)
 
 		ovnMHController := ovn.NewOvnMHController(ovnClientset, master, masterWatchFactory,
-			stopChan, ovnNBClient, ovnSBClient, libovsdbOvnNBClient, libovsdbOvnSBClient, util.EventRecorder(ovnClientset.KubeClient), wg)
+			stopChan, libovsdbOvnNBClient, libovsdbOvnSBClient, util.EventRecorder(ovnClientset.KubeClient), wg)
 		err = ovnMHController.Start(ctx.Context)
 		if err != nil {
 			return err

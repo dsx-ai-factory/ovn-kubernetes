@@ -17,9 +17,13 @@ Example:
     annotations:
         k8s.ovn.org/dpu.connection-details: |
             {
-                "pfId": “0”,
-                “vfId”: "3",
-                "sandboxId": "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a"
+                "default": {
+                    "pfId":      “0”,
+                    “vfId”:      "3",
+		    "pfMac":     "b7:cf:f6:71:cc:56",
+		    "vfDevName": "eth2",
+                    "sandboxId": "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a"
+	        }
             }
 
 Annotation: "k8s.ovn.org/dpu.connection-status"
@@ -29,8 +33,10 @@ Example:
     annotations:
         k8s.ovn.org/dpu.connection-status: |
             {
-                "status": “Ready”,
-                "reason": ""
+                "default": {
+                    "status": “Ready”,
+                    "reason": ""
+		}
             }
 */
 

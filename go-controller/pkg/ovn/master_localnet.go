@@ -2,8 +2,9 @@ package ovn
 
 import (
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -12,55 +13,84 @@ import (
 // SetupLocalnetMaster creates localnet switch for the network
 func (oc *Controller) SetupLocalnetMaster() error {
 	switchName := oc.nadInfo.Prefix + types.OVNLocalnetSwitch
+
 	// Create a single common switch for the cluster.
-	lsArgs := []string{"--", "--may-exist", "ls-add", switchName,
-		"--", "set", "logical_switch", switchName, "external_ids:network_name=" + oc.nadInfo.NetName}
+	logicalSwitch := nbdb.LogicalSwitch{
+		Name: switchName,
+	}
+	if oc.nadInfo.NotDefault {
+		logicalSwitch.ExternalIDs = map[string]string{"network_name": oc.nadInfo.NetName}
+	}
 
 	for _, subnet := range oc.clusterSubnets {
 		hostSubnet := subnet.CIDR
 		if utilnet.IsIPv6CIDR(hostSubnet) {
-			lsArgs = append(lsArgs,
-				"other-config:ipv6_prefix="+hostSubnet.IP.String(),
-			)
+			logicalSwitch.OtherConfig = map[string]string{"ipv6_prefix": hostSubnet.IP.String()}
 		} else {
 			//mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
 			//excludeIPs := mgmtIfAddr.IP.String()
-			lsArgs = append(lsArgs,
-				"other-config:subnet="+hostSubnet.String(),
-			)
+			logicalSwitch.OtherConfig = map[string]string{"subnet": hostSubnet.String()}
 		}
 	}
 
+	// Create the Node's Logical Switch and set it's subnet
+	opModels := []libovsdbops.OperationModel{
+		{
+			Model:          &logicalSwitch,
+			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == switchName },
+			OnModelUpdates: []interface{}{
+				&logicalSwitch.OtherConfig,
+				&logicalSwitch.ExternalIDs,
+			},
+			ErrNotFound: true,
+		},
+	}
 	// TBD other-config:mcast_snoop, other-config:mcast_querier etc. see
-	stdout, stderr, err := util.RunOVNNbctl(lsArgs...)
-	if err != nil {
-		klog.Errorf("Failed to create a common localnet switch for network %s, "+
-			"stdout: %q, stderr: %q, error: %v", oc.nadInfo.NetName, stdout, stderr, err)
+	if _, err := oc.mc.modelClient.CreateOrUpdate(opModels...); err != nil {
+		klog.Errorf("Failed to create a common localnet switch for network %s: %v", oc.nadInfo.NetName, err)
 		return err
 	}
 
 	// Add external interface as a logical port to external_switch.
 	// This is a learning switch port with "unknown" address. The external
 	// world is accessed via this port.
-	portName := oc.nadInfo.Prefix + types.OVNLocalnetPort
-	cmdArgs := []string{
-		"--", "--may-exist", "lsp-add", switchName, portName,
-		"--", "lsp-set-addresses", portName, "unknown",
-		"--", "lsp-set-type", portName, "localnet",
-		"--", "lsp-set-options", portName, "network_name=" + oc.nadInfo.Prefix + types.LocalNetBridgeName}
-
+	logicalSwitchPort := nbdb.LogicalSwitchPort{
+		Addresses: []string{"unknown"},
+		Type:      "localnet",
+		Options: map[string]string{
+			"network_name": oc.nadInfo.Prefix + types.LocalNetBridgeName,
+		},
+		Name: oc.nadInfo.Prefix + types.OVNLocalnetPort,
+	}
 	if oc.nadInfo.VlanId != 0 {
-		lspArgs := []string{
-			"--", "set", "logical_switch_port", portName,
-			fmt.Sprintf("tag_request=%d", oc.nadInfo.VlanId),
-		}
-		cmdArgs = append(cmdArgs, lspArgs...)
+		intVlanID := int(oc.nadInfo.VlanId)
+		logicalSwitchPort.TagRequest = &intVlanID
 	}
 
-	stdout, stderr, err = util.RunOVNNbctl(cmdArgs...)
-	if err != nil {
-		return fmt.Errorf("failed to add logical port %s to switch %s, stdout: %q, "+
-			"stderr: %q, error: %v", portName, switchName, stdout, stderr, err)
+	opModels = []libovsdbops.OperationModel{
+		{
+			Model: &logicalSwitchPort,
+			OnModelUpdates: []interface{}{
+				&logicalSwitchPort.Addresses,
+				&logicalSwitchPort.Type,
+				&logicalSwitchPort.TagRequest,
+				&logicalSwitchPort.Options,
+			},
+			DoAfter: func() {
+				logicalSwitch.Ports = []string{logicalSwitchPort.UUID}
+			},
+		},
+		{
+			Model:          &logicalSwitch,
+			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == switchName },
+			OnModelMutations: []interface{}{
+				&logicalSwitch.Ports,
+			},
+			ErrNotFound: true,
+		},
+	}
+	if _, err := oc.mc.modelClient.CreateOrUpdate(opModels...); err != nil {
+		return fmt.Errorf("failed to add logical switch port: %s to switch %s, err: %v", oc.nadInfo.Prefix+types.OVNLocalnetPort, switchName, err)
 	}
 
 	return nil
@@ -69,10 +99,11 @@ func (oc *Controller) SetupLocalnetMaster() error {
 // deleteLocalnetMaster delete localnet switch for the network
 func (oc *Controller) deleteLocalnetMaster() {
 	switchName := oc.nadInfo.Prefix + types.OVNLocalnetSwitch
-	lsArgs := []string{"--if-exist", "ls-del", switchName}
-	stdout, stderr, err := util.RunOVNNbctl(lsArgs...)
-	if err != nil {
-		klog.Errorf("Failed to delete logical switch %s, stdout: %q, "+
-			"stderr: %q, error: %v", switchName, stdout, stderr, err)
+	opModel := libovsdbops.OperationModel{
+		ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == switchName },
+		ExistingResult: &[]nbdb.LogicalSwitch{},
+	}
+	if err := oc.mc.modelClient.Delete(opModel); err != nil {
+		klog.Errorf("Failed to delete logical switch %s: %v", switchName, err)
 	}
 }

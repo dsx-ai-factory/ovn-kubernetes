@@ -7,22 +7,27 @@ import (
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
+	"github.com/onsi/gomega/format"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	icmpnetworkpolicyapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	"github.com/urfave/cli/v2"
 
-	icmpnetworkpolicyapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	apimachinerytypes "k8s.io/apimachinery/pkg/types"
 )
 
-type icmpNetworkPolicy struct{}
+type kIcmpNetworkPolicy struct{}
 
 func newICMPNetworkPolicyMeta(name, namespace string) metav1.ObjectMeta {
 	return metav1.ObjectMeta{
@@ -46,120 +51,263 @@ func newICMPNetworkPolicy(name, namespace string, podSelector metav1.LabelSelect
 	}
 }
 
-func (n icmpNetworkPolicy) baseCmds(fexec *ovntest.FakeExec, icmpNetworkPolicy *icmpnetworkpolicyapi.ICMPNetworkPolicy) string {
-	readableGroupName := fmt.Sprintf("%s_icmp_%s", icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name)
-	return readableGroupName
-}
+func (n kIcmpNetworkPolicy) getDefaultDenyData(networkPolicy *icmpnetworkpolicyapi.ICMPNetworkPolicy, ports []string, logSeverity nbdb.ACLSeverity) []libovsdb.TestData {
+	pgHash := hashedPortGroup(networkPolicy.Namespace)
+	policyName := "icmp_" + networkPolicy.Name
+	shouldBeLogged := logSeverity != nbdb.ACLSeverityInfo
+	egressDenyACL := libovsdbops.BuildACL(
+		networkPolicy.Namespace+"_"+policyName,
+		nbdb.ACLDirectionToLport,
+		types.DefaultDenyPriority,
+		"inport == @"+pgHash+"_"+egressDenyPG,
+		nbdb.ACLActionDrop,
+		types.OvnACLLoggingMeter,
+		logSeverity,
+		shouldBeLogged,
+		map[string]string{
+			defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeEgress),
+		},
+	)
+	egressDenyACL.UUID = libovsdbops.BuildNamedUUID()
 
-func (n icmpNetworkPolicy) addDefaultDenyPGCmds(fexec *ovntest.FakeExec, icmpnetworkPolicy *icmpnetworkpolicyapi.ICMPNetworkPolicy) {
-	pg_hash := hashedPortGroup(icmpnetworkPolicy.Namespace)
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"outport == @" + pg_hash + "_" + ingressDenyPG + "\" action=drop external-ids:default-deny-policy-type=Ingress external_ids:network_name{=}[]",
-		Output: fakeUUID,
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"outport == @" + pg_hash + "_" + ingressDenyPG + " && arp\" action=allow external-ids:default-deny-policy-type=Ingress external_ids:network_name{=}[]",
-		Output: fakeUUID,
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"inport == @" + pg_hash + "_" + egressDenyPG + "\" action=drop external-ids:default-deny-policy-type=Egress external_ids:network_name{=}[]",
-		Output: fakeUUID,
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"inport == @" + pg_hash + "_" + egressDenyPG + " && arp\" action=allow external-ids:default-deny-policy-type=Egress external_ids:network_name{=}[]",
-		Output: fakeUUID,
-	})
-}
+	egressAllowACL := libovsdbops.BuildACL(
+		networkPolicy.Namespace+"_ARPallowPolicy",
+		nbdb.ACLDirectionToLport,
+		types.DefaultAllowPriority,
+		"inport == @"+pgHash+"_"+egressDenyPG+" && arp",
+		nbdb.ACLActionAllow,
+		types.OvnACLLoggingMeter,
+		nbdb.ACLSeverityInfo,
+		false,
+		map[string]string{
+			defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeEgress),
+		},
+	)
+	egressAllowACL.UUID = libovsdbops.BuildNamedUUID()
 
-func (n icmpNetworkPolicy) addLocalPodCmds(fexec *ovntest.FakeExec, icmpnetworkPolicy *icmpnetworkpolicyapi.ICMPNetworkPolicy) {
-	n.addDefaultDenyPGCmds(fexec, icmpnetworkPolicy)
-}
+	ingressDenyACL := libovsdbops.BuildACL(
+		networkPolicy.Namespace+"_"+policyName,
+		nbdb.ACLDirectionToLport,
+		types.DefaultDenyPriority,
+		"outport == @"+pgHash+"_"+ingressDenyPG,
+		nbdb.ACLActionDrop,
+		types.OvnACLLoggingMeter,
+		logSeverity,
+		shouldBeLogged,
+		map[string]string{
+			defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeIngress),
+		},
+	)
+	ingressDenyACL.UUID = libovsdbops.BuildNamedUUID()
 
-func (n icmpNetworkPolicy) addNamespaceSelectorCmds(fexec *ovntest.FakeExec, icmpNetworkPolicy *icmpnetworkpolicyapi.ICMPNetworkPolicy, namespace string) {
-	as := []string{}
-	if namespace != "" {
-		as = append(as, namespace)
+	ingressAllowACL := libovsdbops.BuildACL(
+		networkPolicy.Namespace+"_ARPallowPolicy",
+		nbdb.ACLDirectionToLport,
+		types.DefaultAllowPriority,
+		"outport == @"+pgHash+"_"+ingressDenyPG+" && arp",
+		nbdb.ACLActionAllow,
+		types.OvnACLLoggingMeter,
+		nbdb.ACLSeverityInfo,
+		false,
+		map[string]string{
+			defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeIngress),
+		},
+	)
+	ingressAllowACL.UUID = libovsdbops.BuildNamedUUID()
+
+	lsps := []*nbdb.LogicalSwitchPort{}
+	for _, uuid := range ports {
+		lsps = append(lsps, &nbdb.LogicalSwitchPort{UUID: uuid})
 	}
 
-	for i := range icmpNetworkPolicy.Spec.Ingress {
-		ingressAsMatch := asMatch(append(as, getAddressSetName(icmpNetworkPolicy.Namespace, "icmp_"+icmpNetworkPolicy.Name, knet.PolicyTypeIngress, i)))
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Ingress_num=%v external-ids:policy_type=Ingress external_ids:network_name{=}[]", icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name, i),
-			"ovn-nbctl --timeout=15 --id=@acl create acl priority=" + types.DefaultAllowPriority + " direction=" + types.DirectionToLPort + " match=\"ip4.src == {" + ingressAsMatch + "} && outport == @a13918434151227952593\" action=allow-related log=false severity=info meter=acl-logging name=" + icmpNetworkPolicy.Namespace + "_" + "icmp_" + icmpNetworkPolicy.Name + "_" + strconv.Itoa(i) + " external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=namespace1 external-ids:policy=icmp_networkpolicy1 external-ids:Ingress_num=0 external-ids:policy_type=Ingress -- add port_group " + fakePgUUID + " acls @acl",
-		})
-	}
-	for i := range icmpNetworkPolicy.Spec.Egress {
-		egressAsMatch := asMatch(append(as, getAddressSetName(icmpNetworkPolicy.Namespace, "icmp_"+icmpNetworkPolicy.Name, knet.PolicyTypeEgress, i)))
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Egress_num=%v external-ids:policy_type=Egress external_ids:network_name{=}[]", icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name, i),
-			"ovn-nbctl --timeout=15 --id=@acl create acl priority=" + types.DefaultAllowPriority + " direction=" + types.DirectionToLPort + " match=\"ip4.dst == {" + egressAsMatch + "} && inport == @a13918434151227952593\" action=allow-related log=false severity=info meter=acl-logging name=" + icmpNetworkPolicy.Namespace + "_" + "icmp_" + icmpNetworkPolicy.Name + "_" + strconv.Itoa(i) + " external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=namespace1 external-ids:policy=icmp_networkpolicy1 external-ids:Egress_num=0 external-ids:policy_type=Egress -- add port_group " + fakePgUUID + " acls @acl",
-		})
+	egressDenyPG := buildPortGroup(
+		pgHash+"_"+egressDenyPG,
+		pgHash+"_"+egressDenyPG,
+		lsps,
+		[]*nbdb.ACL{egressDenyACL, egressAllowACL},
+		util.NetNameInfo{types.DefaultNetworkName, "", false},
+	)
+	egressDenyPG.UUID = libovsdbops.BuildNamedUUID()
+
+	ingressDenyPG := buildPortGroup(
+		pgHash+"_"+ingressDenyPG,
+		pgHash+"_"+ingressDenyPG,
+		lsps,
+		[]*nbdb.ACL{ingressDenyACL, ingressAllowACL},
+		util.NetNameInfo{types.DefaultNetworkName, "", false},
+	)
+	ingressDenyPG.UUID = libovsdbops.BuildNamedUUID()
+
+	return []libovsdb.TestData{
+		egressDenyACL,
+		egressAllowACL,
+		ingressDenyACL,
+		ingressAllowACL,
+		egressDenyPG,
+		ingressDenyPG,
 	}
 }
 
-func (n icmpNetworkPolicy) addNamespaceSelectorCmdsExistingAcl(fexec *ovntest.FakeExec, icmpNetworkPolicy *icmpnetworkpolicyapi.ICMPNetworkPolicy, namespace string) {
-	for i := range icmpNetworkPolicy.Spec.Ingress {
-		ingressAsMatch := asMatch([]string{
-			namespace,
-			getAddressSetName(icmpNetworkPolicy.Namespace, "icmp_"+icmpNetworkPolicy.Name, knet.PolicyTypeIngress, i),
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Ingress_num=%v external-ids:policy_type=Ingress external_ids:network_name{=}[]", icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name, i),
-			Output: fakeUUID,
-		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 set acl " + fakeUUID + " match=\"ip4.src == {" + ingressAsMatch + "} && outport == @a13918434151227952593\" priority=" + types.DefaultAllowPriority + " direction=" + types.DirectionToLPort + " action=allow-related log=false severity=info meter=acl-logging name=" + icmpNetworkPolicy.Namespace + "_" + "icmp_" + icmpNetworkPolicy.Name + "_" + strconv.Itoa(i),
-		})
-	}
-	for i := range icmpNetworkPolicy.Spec.Egress {
-		egressAsMatch := asMatch([]string{
-			namespace,
-			getAddressSetName(icmpNetworkPolicy.Namespace, "icmp_"+icmpNetworkPolicy.Name, knet.PolicyTypeEgress, i),
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Egress_num=%v external-ids:policy_type=Egress", icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name, i),
-			Output: fakeUUID,
-		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 set acl " + fakeUUID + " match=\"ip4.dst == {" + egressAsMatch + "} && inport == @a13918434151227952593\" priority=" + types.DefaultAllowPriority + " direction=" + types.DirectionToLPort + " action=allow-related log=false severity=info meter=acl-logging name=" + icmpNetworkPolicy.Namespace + "_" + "icmp_" + icmpNetworkPolicy.Name + "_" + strconv.Itoa(i),
-		})
-	}
-}
-
-func exteventuallyExpectNoAddressSets(fakeOvn *FakeOVN, icmpnetworkPolicy *icmpnetworkpolicyapi.ICMPNetworkPolicy) {
-	policyName := "icmp_" + icmpnetworkPolicy.Name
-	for i := range icmpnetworkPolicy.Spec.Ingress {
-		asName := getAddressSetName(icmpnetworkPolicy.Namespace, policyName, knet.PolicyTypeIngress, i)
+func icmpEventuallyExpectNoAddressSets(fakeOvn *FakeOVN, networkPolicy *icmpnetworkpolicyapi.ICMPNetworkPolicy) {
+	for i := range networkPolicy.Spec.Ingress {
+		asName := getAddressSetName(networkPolicy.Namespace, "icmp_"+networkPolicy.Name, knet.PolicyTypeIngress, i)
 		fakeOvn.asf.EventuallyExpectNoAddressSet(asName)
 	}
-	for i := range icmpnetworkPolicy.Spec.Egress {
-		asName := getAddressSetName(icmpnetworkPolicy.Namespace, policyName, knet.PolicyTypeEgress, i)
+	for i := range networkPolicy.Spec.Egress {
+		asName := getAddressSetName(networkPolicy.Namespace, "icmp_"+networkPolicy.Name, knet.PolicyTypeEgress, i)
 		fakeOvn.asf.EventuallyExpectNoAddressSet(asName)
 	}
 }
 
-func extexpectAddressSetsWithIP(fakeOvn *FakeOVN, icmpnetworkPolicy *icmpnetworkpolicyapi.ICMPNetworkPolicy, ip string) {
-	policyName := "icmp_" + icmpnetworkPolicy.Name
-	for i := range icmpnetworkPolicy.Spec.Ingress {
-		asName := getAddressSetName(icmpnetworkPolicy.Namespace, policyName, knet.PolicyTypeIngress, i)
-		fakeOvn.asf.ExpectAddressSetWithIPs(asName, []string{ip})
+func icmpEventuallyExpectAddressSetsWithIP(fakeOvn *FakeOVN, networkPolicy *icmpnetworkpolicyapi.ICMPNetworkPolicy, ip string) {
+	for i := range networkPolicy.Spec.Ingress {
+		asName := getAddressSetName(networkPolicy.Namespace, "icmp_"+networkPolicy.Name, knet.PolicyTypeIngress, i)
+		fakeOvn.asf.EventuallyExpectAddressSetWithIPs(asName, []string{ip})
 	}
-	for i := range icmpnetworkPolicy.Spec.Egress {
-		asName := getAddressSetName(icmpnetworkPolicy.Namespace, policyName, knet.PolicyTypeEgress, i)
-		fakeOvn.asf.ExpectAddressSetWithIPs(asName, []string{ip})
+	for i := range networkPolicy.Spec.Egress {
+		asName := getAddressSetName(networkPolicy.Namespace, "icmp_"+networkPolicy.Name, knet.PolicyTypeEgress, i)
+		fakeOvn.asf.EventuallyExpectAddressSetWithIPs(asName, []string{ip})
 	}
 }
 
-func exteventuallyExpectEmptyAddressSets(fakeOvn *FakeOVN, icmpnetworkPolicy *icmpnetworkpolicyapi.ICMPNetworkPolicy) {
-	policyName := "icmp_" + icmpnetworkPolicy.Name
-	for i := range icmpnetworkPolicy.Spec.Ingress {
-		asName := getAddressSetName(icmpnetworkPolicy.Namespace, policyName, knet.PolicyTypeIngress, i)
-		fakeOvn.asf.EventuallyExpectEmptyAddressSet(asName)
+func icmpEventuallyExpectEmptyAddressSetsExist(fakeOvn *FakeOVN, networkPolicy *icmpnetworkpolicyapi.ICMPNetworkPolicy) {
+	for i := range networkPolicy.Spec.Ingress {
+		asName := getAddressSetName(networkPolicy.Namespace, "icmp_"+networkPolicy.Name, knet.PolicyTypeIngress, i)
+		fakeOvn.asf.EventuallyExpectEmptyAddressSetExist(asName)
 	}
-	for i := range icmpnetworkPolicy.Spec.Egress {
-		asName := getAddressSetName(icmpnetworkPolicy.Namespace, policyName, knet.PolicyTypeEgress, i)
-		fakeOvn.asf.EventuallyExpectEmptyAddressSet(asName)
+	for i := range networkPolicy.Spec.Egress {
+		asName := getAddressSetName(networkPolicy.Namespace, "icmp_"+networkPolicy.Name, knet.PolicyTypeEgress, i)
+		fakeOvn.asf.EventuallyExpectEmptyAddressSetExist(asName)
 	}
+}
+
+func (n kIcmpNetworkPolicy) getPolicyData(networkPolicy *icmpnetworkpolicyapi.ICMPNetworkPolicy, policyPorts []string, peerNamespaces []string, icmpTypes []int32, logSeverity nbdb.ACLSeverity) []libovsdb.TestData {
+	policyName := "icmp_" + networkPolicy.Name
+	pgName := networkPolicy.Namespace + "_" + policyName
+	pgHash := hashedPortGroup(pgName)
+	acls := []*nbdb.ACL{}
+
+	shouldBeLogged := logSeverity != nbdb.ACLSeverityInfo
+	for i := range networkPolicy.Spec.Ingress {
+		aclName := networkPolicy.Namespace + "_" + policyName + "_" + strconv.Itoa(i)
+		policyType := string(knet.PolicyTypeIngress)
+		if peerNamespaces != nil {
+			ingressAsMatch := asMatch(append(peerNamespaces, getAddressSetName(networkPolicy.Namespace, policyName, knet.PolicyTypeIngress, i)))
+			acl := libovsdbops.BuildACL(
+				aclName,
+				nbdb.ACLDirectionToLport,
+				types.DefaultAllowPriority,
+				fmt.Sprintf("ip4.src == {%s} && outport == @%s", ingressAsMatch, pgHash),
+				nbdb.ACLActionAllowRelated,
+				types.OvnACLLoggingMeter,
+				logSeverity,
+				shouldBeLogged,
+				map[string]string{
+					l4MatchACLExtIdKey:     "None",
+					ipBlockCIDRACLExtIdKey: "false",
+					namespaceACLExtIdKey:   networkPolicy.Namespace,
+					policyACLExtIdKey:      policyName,
+					policyTypeACLExtIdKey:  policyType,
+					policyType + "_num":    strconv.Itoa(i),
+				},
+			)
+			acl.UUID = libovsdbops.BuildNamedUUID()
+			acls = append(acls, acl)
+		}
+		for _, v := range icmpTypes {
+			acl := libovsdbops.BuildACL(
+				aclName,
+				nbdb.ACLDirectionToLport,
+				types.DefaultAllowPriority,
+				fmt.Sprintf("ip4 && icmp4 && icmp4.type == %d && outport == @%s", v, pgHash),
+				nbdb.ACLActionAllowRelated,
+				types.OvnACLLoggingMeter,
+				logSeverity,
+				shouldBeLogged,
+				map[string]string{
+					l4MatchACLExtIdKey:     fmt.Sprintf("icmp4 && icmp4.type == %d", v),
+					ipBlockCIDRACLExtIdKey: "false",
+					namespaceACLExtIdKey:   networkPolicy.Namespace,
+					policyACLExtIdKey:      policyName,
+					policyTypeACLExtIdKey:  policyType,
+					policyType + "_num":    strconv.Itoa(i),
+				},
+			)
+			acl.UUID = libovsdbops.BuildNamedUUID()
+			acls = append(acls, acl)
+		}
+	}
+
+	for i := range networkPolicy.Spec.Egress {
+		aclName := networkPolicy.Namespace + "_" + policyName + "_" + strconv.Itoa(i)
+		policyType := string(knet.PolicyTypeEgress)
+		if peerNamespaces != nil {
+			egressAsMatch := asMatch(append(peerNamespaces, getAddressSetName(networkPolicy.Namespace, policyName, knet.PolicyTypeEgress, i)))
+			acl := libovsdbops.BuildACL(
+				aclName,
+				nbdb.ACLDirectionToLport,
+				types.DefaultAllowPriority,
+				fmt.Sprintf("ip4.dst == {%s} && inport == @%s", egressAsMatch, pgHash),
+				nbdb.ACLActionAllowRelated,
+				types.OvnACLLoggingMeter,
+				logSeverity,
+				shouldBeLogged,
+				map[string]string{
+					l4MatchACLExtIdKey:     "None",
+					ipBlockCIDRACLExtIdKey: "false",
+					namespaceACLExtIdKey:   networkPolicy.Namespace,
+					policyACLExtIdKey:      policyName,
+					policyTypeACLExtIdKey:  policyType,
+					policyType + "_num":    strconv.Itoa(i),
+				},
+			)
+			acl.UUID = libovsdbops.BuildNamedUUID()
+			acls = append(acls, acl)
+		}
+		for _, v := range icmpTypes {
+			acl := libovsdbops.BuildACL(
+				aclName,
+				nbdb.ACLDirectionToLport,
+				types.DefaultAllowPriority,
+				fmt.Sprintf("ip4 && icmp4 && icmp4.type == %d && inport == @%s", v, pgHash),
+				nbdb.ACLActionAllowRelated,
+				types.OvnACLLoggingMeter,
+				logSeverity,
+				shouldBeLogged,
+				map[string]string{
+					l4MatchACLExtIdKey:     fmt.Sprintf("icmp4 && icmp4.type == %d", v),
+					ipBlockCIDRACLExtIdKey: "false",
+					namespaceACLExtIdKey:   networkPolicy.Namespace,
+					policyACLExtIdKey:      policyName,
+					policyTypeACLExtIdKey:  policyType,
+					policyType + "_num":    strconv.Itoa(i),
+				},
+			)
+			acl.UUID = libovsdbops.BuildNamedUUID()
+			acls = append(acls, acl)
+		}
+	}
+
+	lsps := []*nbdb.LogicalSwitchPort{}
+	for _, uuid := range policyPorts {
+		lsps = append(lsps, &nbdb.LogicalSwitchPort{UUID: uuid})
+	}
+
+	pg := buildPortGroup(
+		pgHash,
+		pgName,
+		lsps,
+		acls,
+		util.NetNameInfo{types.DefaultNetworkName, "", false},
+	)
+	pg.UUID = libovsdbops.BuildNamedUUID()
+
+	data := []libovsdb.TestData{}
+	for _, acl := range acls {
+		data = append(data, acl)
+	}
+	data = append(data, pg)
+	return data
 }
 
 var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
@@ -168,9 +316,11 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 		namespaceName2 = "namespace2"
 	)
 	var (
-		app     *cli.App
-		fakeOvn *FakeOVN
-		fExec   *ovntest.FakeExec
+		app       *cli.App
+		fakeOvn   *FakeOVN
+		initialDB libovsdb.TestSetup
+
+		gomegaFormatMaxLength int
 	)
 
 	ginkgo.BeforeEach(func() {
@@ -182,21 +332,28 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 		app.Name = "test"
 		app.Flags = config.Flags
 
-		fExec = ovntest.NewLooseCompareFakeExec()
-		fakeOvn = NewFakeOVN(fExec)
-		ovntest.ResetNumMockExecutions()
+		fakeOvn = NewFakeOVN()
+
+		gomegaFormatMaxLength = format.MaxLength
+		format.MaxLength = 0
+		initialDB = libovsdb.TestSetup{
+			NBData: []libovsdb.TestData{
+				&nbdb.LogicalSwitch{
+					Name: "node1",
+				},
+			},
+		}
 	})
 
 	ginkgo.AfterEach(func() {
 		fakeOvn.shutdown()
+		format.MaxLength = gomegaFormatMaxLength
 	})
 
 	ginkgo.Context("during execution", func() {
 
 		ginkgo.It("correctly creates and deletes a icmpnetworkpolicy allowing a port to a local pod", func() {
 			app.Action = func(ctx *cli.Context) error {
-				npTest := icmpNetworkPolicy{}
-
 				namespace1 := *newNamespace(namespaceName1)
 				nPodTest := newTPod(
 					"node1",
@@ -259,24 +416,15 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 					}},
 				)
 
-				nPodTest.baseCmds(fExec)
-				npTest.baseCmds(fExec, icmpNetworkPolicy)
-				npTest.addLocalPodCmds(fExec, icmpNetworkPolicy)
+				npTest := kIcmpNetworkPolicy{}
+				gressPolicy1ExpectedData := npTest.getPolicyData(icmpNetworkPolicy, []string{nPodTest.portUUID}, nil, []int32{icmpType}, nbdb.ACLSeverityInfo)
+				defaultDenyExpectedData := npTest.getDefaultDenyData(icmpNetworkPolicy, []string{nPodTest.portUUID}, nbdb.ACLSeverityInfo)
+				expectedData := []libovsdb.TestData{}
+				expectedData = append(expectedData, gressPolicy1ExpectedData...)
+				expectedData = append(expectedData, defaultDenyExpectedData...)
+				expectedData = append(expectedData, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)
 
-				//readableGroupName := fmt.Sprintf("%s_icmp_%s", icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name)
-				fExec.AddFakeCmdsNoOutputNoError([]string{
-					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Ingress_num=0 external-ids:policy_type=Ingress external_ids:network_name{=}[]", icmpType, icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name),
-					fmt.Sprintf("ovn-nbctl --timeout=15 --id=@acl create acl priority="+types.DefaultAllowPriority+" direction="+types.DirectionToLPort+" match=\"ip4 && icmp4 && icmp4.type == %d && outport == @a13918434151227952593\" action=allow-related log=false severity=info meter=acl-logging name=%s_%s_0 external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Ingress_num=0 external-ids:policy_type=Ingress -- add port_group %s acls @acl", icmpType, icmpNetworkPolicy.Namespace, "icmp_"+icmpNetworkPolicy.Name, icmpType, icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name, fakePgUUID),
-					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Egress_num=0 external-ids:policy_type=Egress external_ids:network_name{=}[]", icmpType, icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name),
-					fmt.Sprintf("ovn-nbctl --timeout=15 --id=@acl create acl priority="+types.DefaultAllowPriority+" direction="+types.DirectionToLPort+" match=\"ip4 && icmp4 && icmp4.type == %d && inport == @a13918434151227952593\" action=allow-related log=false severity=info meter=acl-logging name=%s_%s_0 external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Egress_num=0 external-ids:policy_type=Egress -- add port_group %s acls @acl", icmpType, icmpNetworkPolicy.Namespace, "icmp_"+icmpNetworkPolicy.Name, icmpType, icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name, fakePgUUID),
-
-					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Ingress_num=0 external-ids:policy_type=Ingress external_ids:network_name{=}[]", icmpType2, icmpNetworkPolicy2.Namespace, icmpNetworkPolicy2.Name),
-					fmt.Sprintf("ovn-nbctl --timeout=15 --id=@acl create acl priority="+types.DefaultAllowPriority+" direction="+types.DirectionToLPort+" match=\"ip4 && icmp4 && icmp4.type == %d && outport == @a13918430852693067960\" action=allow-related log=false severity=info meter=acl-logging name=%s_%s_0 external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Ingress_num=0 external-ids:policy_type=Ingress -- add port_group %s acls @acl", icmpType2, icmpNetworkPolicy2.Namespace, "icmp_"+icmpNetworkPolicy2.Name, icmpType2, icmpNetworkPolicy2.Namespace, icmpNetworkPolicy2.Name, fakePgUUID),
-					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Egress_num=0 external-ids:policy_type=Egress external_ids:network_name{=}[]", icmpType2, icmpNetworkPolicy2.Namespace, icmpNetworkPolicy2.Name),
-					fmt.Sprintf("ovn-nbctl --timeout=15 --id=@acl create acl priority="+types.DefaultAllowPriority+" direction="+types.DirectionToLPort+" match=\"ip4 && icmp4 && icmp4.type == %d && inport == @a13918430852693067960\" action=allow-related log=false severity=info meter=acl-logging name=%s_%s_0 external-ids:l4Match=\"icmp4 && icmp4.type == %d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=icmp_%s external-ids:Egress_num=0 external-ids:policy_type=Egress -- add port_group %s acls @acl", icmpType2, icmpNetworkPolicy2.Namespace, "icmp_"+icmpNetworkPolicy2.Name, icmpType2, icmpNetworkPolicy2.Namespace, icmpNetworkPolicy2.Name, fakePgUUID),
-				})
-
-				fakeOvn.start(ctx,
+				fakeOvn.startWithDBSetup(initialDB,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{namespace1},
 					},
@@ -284,9 +432,7 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 						Items: []v1.Pod{*nPod},
 					},
 					&icmpnetworkpolicyapi.ICMPNetworkPolicyList{
-						Items: []icmpnetworkpolicyapi.ICMPNetworkPolicy{
-							*icmpNetworkPolicy,
-						},
+						Items: []icmpnetworkpolicyapi.ICMPNetworkPolicy{*icmpNetworkPolicy},
 					},
 				)
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
@@ -294,61 +440,41 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchICMPNetworkPolicy()
 
+				ginkgo.By("Creating a ICMP network policy that applies to a pod")
+
 				_, err := fakeOvn.fakeClient.ICMPNetworkPolicyClient.K8sV1alpha1().ICMPNetworkPolicies(icmpNetworkPolicy.Namespace).Get(context.TODO(), icmpNetworkPolicy.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				// gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
-
-				// assert that pod is in the default-deny portgroup
-
-				// this helper function returns a function, because it's called behind
-				// an
-				getPGPorts := func(name string) func() ([]string, error) {
-					return func() ([]string, error) {
-						pg, err := fakeOvn.ovnNBClient.PortGroupGet(name)
-						if err != nil {
-							return nil, err
-						}
-						return pg.Ports, nil
-					}
-				}
-
-				pgDefaultDenyName := defaultDenyPortGroup(namespace1.Name, "ingressDefaultDeny")
-				gomega.Eventually(getPGPorts(pgDefaultDenyName)).Should(gomega.ConsistOf(fakeUUID))
-
-				// assert that pod is in the NP's portgroup
-				np1PG := hashedPortGroup(fmt.Sprintf("%s_icmp_%s", icmpNetworkPolicy.Namespace, icmpNetworkPolicy.Name))
-				gomega.Eventually(getPGPorts(np1PG)).Should(gomega.ConsistOf(fakeUUID))
-				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
 
 				// Create a second NP
-				ginkgo.By("Creating and deleting another policy that references that pod")
+				ginkgo.By("Creating and deleting another ICMP network policy that references that pod")
 
 				_, err = fakeOvn.fakeClient.ICMPNetworkPolicyClient.K8sV1alpha1().ICMPNetworkPolicies(icmpNetworkPolicy.Namespace).Create(context.TODO(), icmpNetworkPolicy2, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				// Check that portgroups look sane
-				np2PG := hashedPortGroup(fmt.Sprintf("%s_icmp_%s", icmpNetworkPolicy2.Namespace, icmpNetworkPolicy2.Name))
-				gomega.Eventually(getPGPorts(pgDefaultDenyName)).Should(gomega.ConsistOf(fakeUUID))
-				gomega.Eventually(getPGPorts(np2PG)).Should(gomega.ConsistOf(fakeUUID))
+				gressPolicy2ExpectedData := npTest.getPolicyData(icmpNetworkPolicy2, []string{nPodTest.portUUID}, nil, []int32{icmpType2}, nbdb.ACLSeverityInfo)
+				expectedDataWithPolicy2 := append(expectedData, gressPolicy2ExpectedData...)
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedDataWithPolicy2...))
 
 				// Delete the second network policy
 				err = fakeOvn.fakeClient.ICMPNetworkPolicyClient.K8sV1alpha1().ICMPNetworkPolicies(icmpNetworkPolicy2.Namespace).Delete(context.TODO(), icmpNetworkPolicy2.Name, metav1.DeleteOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				// Ensure the pod still has default deny
-				gomega.Eventually(getPGPorts(pgDefaultDenyName)).Should(gomega.ConsistOf(fakeUUID))
+				// TODO: test server does not garbage collect ACLs, so we just expect policy2 portgroup to be removed
+				expectedDataWithoutPolicy2 := append(expectedData, gressPolicy2ExpectedData[:len(gressPolicy2ExpectedData)-1]...)
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedDataWithoutPolicy2...))
 
 				// Delete the first network policy
-				ginkgo.By("Deleting that ICMPNetwork policy")
+				ginkgo.By("Deleting that ICMP network policy")
 				err = fakeOvn.fakeClient.ICMPNetworkPolicyClient.K8sV1alpha1().ICMPNetworkPolicies(icmpNetworkPolicy.Namespace).Delete(context.TODO(), icmpNetworkPolicy.Name, metav1.DeleteOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				// Check that the default-deny portgroup is now deleted
-				gomega.Eventually(func() error { _, err := getPGPorts(pgDefaultDenyName)(); return err }).Should(gomega.MatchError("object not found"))
-
-				// fake exec checkup
-				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+				// TODO: test server does not garbage collect ACLs, so we just expect policy & deny portgroups to be removed
+				acls := []libovsdb.TestData{}
+				acls = append(acls, gressPolicy1ExpectedData[:len(gressPolicy1ExpectedData)-1]...)
+				acls = append(acls, gressPolicy2ExpectedData[:len(gressPolicy2ExpectedData)-1]...)
+				acls = append(acls, defaultDenyExpectedData[:len(defaultDenyExpectedData)-2]...)
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(append(acls, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)))
 
 				return nil
 			}
@@ -359,9 +485,6 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 
 		ginkgo.It("reconciles a deleted namespace referenced by a icmpnetworkpolicy with a local running pod", func() {
 			app.Action = func(ctx *cli.Context) error {
-
-				npTest := icmpNetworkPolicy{}
-
 				namespace1 := *newNamespace(namespaceName1)
 				namespace2 := *newNamespace(namespaceName2)
 
@@ -405,11 +528,15 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 						},
 					})
 
-				nPodTest.baseCmds(fExec)
-				npTest.addNamespaceSelectorCmds(fExec, icmpNetworkPolicy, namespace2.Name)
-				npTest.addLocalPodCmds(fExec, icmpNetworkPolicy)
+				npTest := kIcmpNetworkPolicy{}
+				gressPolicyExpectedData := npTest.getPolicyData(icmpNetworkPolicy, []string{nPodTest.portUUID}, []string{namespace2.Name}, nil, nbdb.ACLSeverityInfo)
+				defaultDenyExpectedData := npTest.getDefaultDenyData(icmpNetworkPolicy, []string{nPodTest.portUUID}, nbdb.ACLSeverityInfo)
+				expectedData := []libovsdb.TestData{}
+				expectedData = append(expectedData, gressPolicyExpectedData...)
+				expectedData = append(expectedData, defaultDenyExpectedData...)
+				expectedData = append(expectedData, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)
 
-				fakeOvn.start(ctx,
+				fakeOvn.startWithDBSetup(initialDB,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespace1,
@@ -427,7 +554,6 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 						},
 					},
 				)
-
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
@@ -435,15 +561,19 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 
 				_, err := fakeOvn.fakeClient.ICMPNetworkPolicyClient.K8sV1alpha1().ICMPNetworkPolicies(icmpNetworkPolicy.Namespace).Get(context.TODO(), icmpNetworkPolicy.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
 
-				npTest.addNamespaceSelectorCmds(fExec, icmpNetworkPolicy, "")
+				expectedData = []libovsdb.TestData{}
+				gressPolicyExpectedData = npTest.getPolicyData(icmpNetworkPolicy, []string{nPodTest.portUUID}, []string{}, nil, nbdb.ACLSeverityInfo)
+				expectedData = append(expectedData, gressPolicyExpectedData...)
+				expectedData = append(expectedData, defaultDenyExpectedData...)
+				expectedData = append(expectedData, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)
 
 				err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Delete(context.TODO(), namespace2.Name, *metav1.NewDeleteOptions(0))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 				fakeOvn.asf.EventuallyExpectNoAddressSet(namespaceName2)
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
 
 				return nil
 			}
@@ -454,9 +584,6 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 
 		ginkgo.It("reconciles a deleted namespace referenced by a icmpnetworkpolicy", func() {
 			app.Action = func(ctx *cli.Context) error {
-
-				npTest := icmpNetworkPolicy{}
-
 				namespace1 := *newNamespace(namespaceName1)
 				namespace2 := *newNamespace(namespaceName2)
 				icmpNetworkPolicy := newICMPNetworkPolicy("networkpolicy1", namespace1.Name,
@@ -488,10 +615,18 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 						},
 					})
 
-				npTest.addNamespaceSelectorCmds(fExec, icmpNetworkPolicy, namespace2.Name)
-				npTest.addDefaultDenyPGCmds(fExec, icmpNetworkPolicy)
+				npTest := kIcmpNetworkPolicy{}
+				gressPolicyExpectedData := npTest.getPolicyData(icmpNetworkPolicy, nil, []string{namespace2.Name}, nil, nbdb.ACLSeverityInfo)
+				defaultDenyExpectedData := npTest.getDefaultDenyData(icmpNetworkPolicy, nil, nbdb.ACLSeverityInfo)
+				expectedData := []libovsdb.TestData{}
+				expectedData = append(expectedData, gressPolicyExpectedData...)
+				expectedData = append(expectedData, defaultDenyExpectedData...)
+				expectedData = append(expectedData, &nbdb.LogicalSwitch{
+					UUID: libovsdbops.BuildNamedUUID(),
+					Name: "node1",
+				})
 
-				fakeOvn.start(ctx,
+				fakeOvn.startWithDBSetup(initialDB,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespace1,
@@ -510,13 +645,21 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 
 				_, err := fakeOvn.fakeClient.ICMPNetworkPolicyClient.K8sV1alpha1().ICMPNetworkPolicies(icmpNetworkPolicy.Namespace).Get(context.TODO(), icmpNetworkPolicy.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
 
-				npTest.addNamespaceSelectorCmds(fExec, icmpNetworkPolicy, "")
+				expectedData = []libovsdb.TestData{}
+				gressPolicyExpectedData = npTest.getPolicyData(icmpNetworkPolicy, nil, []string{}, nil, nbdb.ACLSeverityInfo)
+				expectedData = append(expectedData, gressPolicyExpectedData...)
+				expectedData = append(expectedData, defaultDenyExpectedData...)
+				expectedData = append(expectedData, &nbdb.LogicalSwitch{
+					UUID: libovsdbops.BuildNamedUUID(),
+					Name: "node1",
+				})
 
 				err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Delete(context.TODO(), namespace2.Name, *metav1.NewDeleteOptions(0))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
+
 				return nil
 			}
 
@@ -526,9 +669,6 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 
 		ginkgo.It("reconciles a deleted pod referenced by a icmpnetworkpolicy in its own namespace", func() {
 			app.Action = func(ctx *cli.Context) error {
-
-				npTest := icmpNetworkPolicy{}
-
 				namespace1 := *newNamespace(namespaceName1)
 
 				nPodTest := newTPod(
@@ -570,11 +710,15 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 						},
 					})
 
-				nPodTest.baseCmds(fExec)
-				npTest.addNamespaceSelectorCmds(fExec, icmpNetworkPolicy, "")
-				npTest.addLocalPodCmds(fExec, icmpNetworkPolicy)
+				npTest := kIcmpNetworkPolicy{}
+				gressPolicyExpectedData := npTest.getPolicyData(icmpNetworkPolicy, []string{nPodTest.portUUID}, []string{}, nil, nbdb.ACLSeverityInfo)
+				defaultDenyExpectedData := npTest.getDefaultDenyData(icmpNetworkPolicy, []string{nPodTest.portUUID}, nbdb.ACLSeverityInfo)
+				expectedData := []libovsdb.TestData{}
+				expectedData = append(expectedData, gressPolicyExpectedData...)
+				expectedData = append(expectedData, defaultDenyExpectedData...)
+				expectedData = append(expectedData, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)
 
-				fakeOvn.start(ctx,
+				fakeOvn.startWithDBSetup(initialDB,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespace1,
@@ -597,19 +741,30 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchICMPNetworkPolicy()
 
-				extexpectAddressSetsWithIP(fakeOvn, icmpNetworkPolicy, nPodTest.podIP)
+				icmpEventuallyExpectAddressSetsWithIP(fakeOvn, icmpNetworkPolicy, nPodTest.podIP)
 				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
 
 				_, err := fakeOvn.fakeClient.ICMPNetworkPolicyClient.K8sV1alpha1().ICMPNetworkPolicies(icmpNetworkPolicy.Namespace).Get(context.TODO(), icmpNetworkPolicy.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
 
 				err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(nPodTest.namespace).Delete(context.TODO(), nPodTest.podName, *metav1.NewDeleteOptions(0))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 
-				exteventuallyExpectEmptyAddressSets(fakeOvn, icmpNetworkPolicy)
-				fakeOvn.asf.EventuallyExpectEmptyAddressSet(namespaceName1)
+				icmpEventuallyExpectEmptyAddressSetsExist(fakeOvn, icmpNetworkPolicy)
+				fakeOvn.asf.EventuallyExpectEmptyAddressSetExist(namespaceName1)
+
+				gressPolicyExpectedData = npTest.getPolicyData(icmpNetworkPolicy, nil, []string{}, nil, nbdb.ACLSeverityInfo)
+				defaultDenyExpectedData = npTest.getDefaultDenyData(icmpNetworkPolicy, nil, nbdb.ACLSeverityInfo)
+				expectedData = []libovsdb.TestData{}
+				expectedData = append(expectedData, gressPolicyExpectedData...)
+				expectedData = append(expectedData, defaultDenyExpectedData...)
+				expectedData = append(expectedData, &nbdb.LogicalSwitch{
+					UUID: libovsdbops.BuildNamedUUID(),
+					Name: "node1",
+				})
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
+
 				return nil
 			}
 
@@ -619,9 +774,6 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 
 		ginkgo.It("reconciles a deleted pod referenced by a icmpnetworkpolicy in another namespace", func() {
 			app.Action = func(ctx *cli.Context) error {
-
-				npTest := icmpNetworkPolicy{}
-
 				namespace1 := *newNamespace(namespaceName1)
 				namespace2 := *newNamespace(namespaceName2)
 
@@ -674,11 +826,15 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 						},
 					})
 
-				nPodTest.baseCmds(fExec)
-				npTest.addNamespaceSelectorCmds(fExec, icmpNetworkPolicy, "")
-				npTest.addDefaultDenyPGCmds(fExec, icmpNetworkPolicy)
+				npTest := kIcmpNetworkPolicy{}
+				gressPolicyExpectedData := npTest.getPolicyData(icmpNetworkPolicy, nil, []string{}, nil, nbdb.ACLSeverityInfo)
+				defaultDenyExpectedData := npTest.getDefaultDenyData(icmpNetworkPolicy, nil, nbdb.ACLSeverityInfo)
+				expectedData := []libovsdb.TestData{}
+				expectedData = append(expectedData, gressPolicyExpectedData...)
+				expectedData = append(expectedData, defaultDenyExpectedData...)
+				expectedData = append(expectedData, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)
 
-				fakeOvn.start(ctx,
+				fakeOvn.startWithDBSetup(initialDB,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespace1,
@@ -696,27 +852,26 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 						},
 					},
 				)
-
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchICMPNetworkPolicy()
 
 				fakeOvn.asf.ExpectEmptyAddressSet(namespaceName1)
-				extexpectAddressSetsWithIP(fakeOvn, icmpNetworkPolicy, nPodTest.podIP)
+				icmpEventuallyExpectAddressSetsWithIP(fakeOvn, icmpNetworkPolicy, nPodTest.podIP)
 				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName2, []string{nPodTest.podIP})
 
 				_, err := fakeOvn.fakeClient.ICMPNetworkPolicyClient.K8sV1alpha1().ICMPNetworkPolicies(icmpNetworkPolicy.Namespace).Get(context.TODO(), icmpNetworkPolicy.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
 
 				err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(nPodTest.namespace).Delete(context.TODO(), nPodTest.podName, *metav1.NewDeleteOptions(0))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
 
 				// After deleting the pod all address sets should be empty
-				exteventuallyExpectEmptyAddressSets(fakeOvn, icmpNetworkPolicy)
-				fakeOvn.asf.EventuallyExpectEmptyAddressSet(namespaceName1)
+				icmpEventuallyExpectEmptyAddressSetsExist(fakeOvn, icmpNetworkPolicy)
+				fakeOvn.asf.EventuallyExpectEmptyAddressSetExist(namespaceName1)
 
 				return nil
 			}
@@ -727,9 +882,6 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 
 		ginkgo.It("reconciles an updated namespace label", func() {
 			app.Action = func(ctx *cli.Context) error {
-
-				npTest := icmpNetworkPolicy{}
-
 				namespace1 := *newNamespace(namespaceName1)
 				namespace2 := *newNamespace(namespaceName2)
 
@@ -782,11 +934,15 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 						},
 					})
 
-				nPodTest.baseCmds(fExec)
-				npTest.addNamespaceSelectorCmds(fExec, icmpNetworkPolicy, "")
-				npTest.addDefaultDenyPGCmds(fExec, icmpNetworkPolicy)
+				npTest := kIcmpNetworkPolicy{}
+				gressPolicyExpectedData := npTest.getPolicyData(icmpNetworkPolicy, nil, []string{}, nil, nbdb.ACLSeverityInfo)
+				defaultDenyExpectedData := npTest.getDefaultDenyData(icmpNetworkPolicy, nil, nbdb.ACLSeverityInfo)
+				expectedData := []libovsdb.TestData{}
+				expectedData = append(expectedData, gressPolicyExpectedData...)
+				expectedData = append(expectedData, defaultDenyExpectedData...)
+				expectedData = append(expectedData, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)
 
-				fakeOvn.start(ctx,
+				fakeOvn.startWithDBSetup(initialDB,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespace1,
@@ -810,22 +966,22 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 				fakeOvn.controller.WatchICMPNetworkPolicy()
 
 				fakeOvn.asf.ExpectEmptyAddressSet(namespaceName1)
-				extexpectAddressSetsWithIP(fakeOvn, icmpNetworkPolicy, nPodTest.podIP)
+				icmpEventuallyExpectAddressSetsWithIP(fakeOvn, icmpNetworkPolicy, nPodTest.podIP)
 				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName2, []string{nPodTest.podIP})
 
 				_, err := fakeOvn.fakeClient.ICMPNetworkPolicyClient.K8sV1alpha1().ICMPNetworkPolicies(icmpNetworkPolicy.Namespace).Get(context.TODO(), icmpNetworkPolicy.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
 
 				namespace2.ObjectMeta.Labels = map[string]string{"labels": "test"}
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), &namespace2, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
 
 				// After updating the namespace all address sets should be empty
-				exteventuallyExpectEmptyAddressSets(fakeOvn, icmpNetworkPolicy)
+				icmpEventuallyExpectEmptyAddressSetsExist(fakeOvn, icmpNetworkPolicy)
 
-				fakeOvn.asf.EventuallyExpectEmptyAddressSet(namespaceName1)
+				fakeOvn.asf.EventuallyExpectEmptyAddressSetExist(namespaceName1)
 
 				return nil
 			}
@@ -836,9 +992,6 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 
 		ginkgo.It("reconciles a deleted icmpnetworkpolicy", func() {
 			app.Action = func(ctx *cli.Context) error {
-
-				npTest := icmpNetworkPolicy{}
-
 				namespace1 := *newNamespace(namespaceName1)
 
 				nPodTest := newTPod(
@@ -880,11 +1033,15 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 						},
 					})
 
-				nPodTest.baseCmds(fExec)
-				npTest.addNamespaceSelectorCmds(fExec, icmpNetworkPolicy, "")
-				npTest.addLocalPodCmds(fExec, icmpNetworkPolicy)
+				npTest := kIcmpNetworkPolicy{}
+				gressPolicyExpectedData := npTest.getPolicyData(icmpNetworkPolicy, []string{nPodTest.portUUID}, []string{}, nil, nbdb.ACLSeverityInfo)
+				defaultDenyExpectedData := npTest.getDefaultDenyData(icmpNetworkPolicy, []string{nPodTest.portUUID}, nbdb.ACLSeverityInfo)
+				expectedData := []libovsdb.TestData{}
+				expectedData = append(expectedData, gressPolicyExpectedData...)
+				expectedData = append(expectedData, defaultDenyExpectedData...)
+				expectedData = append(expectedData, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)
 
-				fakeOvn.start(ctx,
+				fakeOvn.startWithDBSetup(initialDB,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespace1,
@@ -909,13 +1066,17 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 
 				_, err := fakeOvn.fakeClient.ICMPNetworkPolicyClient.K8sV1alpha1().ICMPNetworkPolicies(icmpNetworkPolicy.Namespace).Get(context.TODO(), icmpNetworkPolicy.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
 				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
 
 				err = fakeOvn.fakeClient.ICMPNetworkPolicyClient.K8sV1alpha1().ICMPNetworkPolicies(icmpNetworkPolicy.Namespace).Delete(context.TODO(), icmpNetworkPolicy.Name, *metav1.NewDeleteOptions(0))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
-				exteventuallyExpectNoAddressSets(fakeOvn, icmpNetworkPolicy)
+				icmpEventuallyExpectNoAddressSets(fakeOvn, icmpNetworkPolicy)
+
+				acls := []libovsdb.TestData{}
+				acls = append(acls, gressPolicyExpectedData[:len(gressPolicyExpectedData)-1]...)
+				acls = append(acls, defaultDenyExpectedData[:len(defaultDenyExpectedData)-2]...)
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(append(acls, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)))
 
 				return nil
 			}
@@ -929,27 +1090,30 @@ var _ = ginkgo.Describe("OVN Ext NetworkPolicy Operations", func() {
 
 var _ = ginkgo.Describe("OVN ICMPNetworkPolicy Low-Level Operations", func() {
 	var (
-		fExec     *ovntest.FakeExec
 		asFactory *addressset.FakeAddressSetFactory
+		nbCleanup *libovsdbtest.Cleanup
 	)
 
 	ginkgo.BeforeEach(func() {
-		// Restore global default values before each testcase
-		config.PrepareTestConfig()
-		fExec = ovntest.NewLooseCompareFakeExec()
-		err := util.SetExec(fExec)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		nbCleanup = nil
+	})
 
-		asFactory = addressset.NewFakeAddressSetFactory()
-		config.IPv4Mode = true
-		config.IPv6Mode = false
+	ginkgo.AfterEach(func() {
+		if nbCleanup != nil {
+			nbCleanup.Cleanup()
+		}
 	})
 
 	ginkgo.It("computes match strings from address sets correctly", func() {
 		const (
-			pgUUID string = "pg-uuid"
 			pgName string = "pg-name"
 		)
+		// Restore global default values before each testcase
+		config.PrepareTestConfig()
+
+		asFactory = addressset.NewFakeAddressSetFactory()
+		config.IPv4Mode = true
+		config.IPv6Mode = false
 
 		policy := &icmpnetworkpolicyapi.ICMPNetworkPolicy{
 			ObjectMeta: metav1.ObjectMeta{
@@ -974,79 +1138,77 @@ var _ = ginkgo.Describe("OVN ICMPNetworkPolicy Low-Level Operations", func() {
 		five := fmt.Sprintf("testing.policy.ingress.5")
 		six := fmt.Sprintf("testing.policy.ingress.6")
 
-		cur := addExpectedGressCmds(fExec, gp, pgName, []string{asName}, []string{asName, one})
 		gomega.Expect(gp.addNamespaceAddressSet(one)).To(gomega.BeTrue())
-		gp.localPodSetACL(pgName, pgUUID, defaultACLLoggingSeverity)
-		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
+		expected := buildExpectedACL(gp, pgName, []string{asName, one})
+		actual := gp.buildLocalPodACLs(pgName, defaultACLLoggingSeverity)
+		gomega.Expect(actual).To(gomega.ConsistOf(libovsdb.EqualIgnoringUUIDs(expected)))
 
-		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, one, two})
 		gomega.Expect(gp.addNamespaceAddressSet(two)).To(gomega.BeTrue())
-		gp.localPodSetACL(pgName, pgUUID, defaultACLLoggingSeverity)
-		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
+		expected = buildExpectedACL(gp, pgName, []string{asName, one, two})
+		actual = gp.buildLocalPodACLs(pgName, defaultACLLoggingSeverity)
+		gomega.Expect(actual).To(gomega.ConsistOf(libovsdb.EqualIgnoringUUIDs(expected)))
 
 		// address sets should be alphabetized
-		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, one, two, three})
 		gomega.Expect(gp.addNamespaceAddressSet(three)).To(gomega.BeTrue())
-		gp.localPodSetACL(pgName, pgUUID, defaultACLLoggingSeverity)
-		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
+		expected = buildExpectedACL(gp, pgName, []string{asName, one, two, three})
+		actual = gp.buildLocalPodACLs(pgName, defaultACLLoggingSeverity)
+		gomega.Expect(actual).To(gomega.ConsistOf(libovsdb.EqualIgnoringUUIDs(expected)))
 
 		// re-adding an existing set is a no-op
-		gp.addNamespaceAddressSet(one)
 		gomega.Expect(gp.addNamespaceAddressSet(three)).To(gomega.BeFalse())
 
-		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, one, two, three, four})
 		gomega.Expect(gp.addNamespaceAddressSet(four)).To(gomega.BeTrue())
-		gp.localPodSetACL(pgName, pgUUID, defaultACLLoggingSeverity)
-		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
+		expected = buildExpectedACL(gp, pgName, []string{asName, one, two, three, four})
+		actual = gp.buildLocalPodACLs(pgName, defaultACLLoggingSeverity)
+		gomega.Expect(actual).To(gomega.ConsistOf(libovsdb.EqualIgnoringUUIDs(expected)))
 
 		// now delete a set
-		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, two, three, four})
 		gomega.Expect(gp.delNamespaceAddressSet(one)).To(gomega.BeTrue())
-		gp.localPodSetACL(pgName, pgUUID, defaultACLLoggingSeverity)
-		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
+		expected = buildExpectedACL(gp, pgName, []string{asName, two, three, four})
+		actual = gp.buildLocalPodACLs(pgName, defaultACLLoggingSeverity)
+		gomega.Expect(actual).To(gomega.ConsistOf(libovsdb.EqualIgnoringUUIDs(expected)))
 
 		// deleting again is a no-op
-		gp.delNamespaceAddressSet(one)
-		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
+		gomega.Expect(gp.delNamespaceAddressSet(one)).To(gomega.BeFalse())
 
 		// add and delete some more...
-		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, two, three, four, five})
 		gomega.Expect(gp.addNamespaceAddressSet(five)).To(gomega.BeTrue())
-		gp.localPodSetACL(pgName, pgUUID, defaultACLLoggingSeverity)
-		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
+		expected = buildExpectedACL(gp, pgName, []string{asName, two, three, four, five})
+		actual = gp.buildLocalPodACLs(pgName, defaultACLLoggingSeverity)
+		gomega.Expect(actual).To(gomega.ConsistOf(libovsdb.EqualIgnoringUUIDs(expected)))
 
-		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, two, four, five})
 		gomega.Expect(gp.delNamespaceAddressSet(three)).To(gomega.BeTrue())
-		gp.localPodSetACL(pgName, pgUUID, defaultACLLoggingSeverity)
-		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
+		expected = buildExpectedACL(gp, pgName, []string{asName, two, four, five})
+		actual = gp.buildLocalPodACLs(pgName, defaultACLLoggingSeverity)
+		gomega.Expect(actual).To(gomega.ConsistOf(libovsdb.EqualIgnoringUUIDs(expected)))
 
 		// deleting again is no-op
 		gomega.Expect(gp.delNamespaceAddressSet(one)).To(gomega.BeFalse())
 
-		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, two, four, five, six})
 		gomega.Expect(gp.addNamespaceAddressSet(six)).To(gomega.BeTrue())
-		gp.localPodSetACL(pgName, pgUUID, defaultACLLoggingSeverity)
-		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
+		expected = buildExpectedACL(gp, pgName, []string{asName, two, four, five, six})
+		actual = gp.buildLocalPodACLs(pgName, defaultACLLoggingSeverity)
+		gomega.Expect(actual).To(gomega.ConsistOf(libovsdb.EqualIgnoringUUIDs(expected)))
 
-		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, four, five, six})
 		gomega.Expect(gp.delNamespaceAddressSet(two)).To(gomega.BeTrue())
-		gp.localPodSetACL(pgName, pgUUID, defaultACLLoggingSeverity)
-		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
+		expected = buildExpectedACL(gp, pgName, []string{asName, four, five, six})
+		actual = gp.buildLocalPodACLs(pgName, defaultACLLoggingSeverity)
+		gomega.Expect(actual).To(gomega.ConsistOf(libovsdb.EqualIgnoringUUIDs(expected)))
 
-		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, four, six})
 		gomega.Expect(gp.delNamespaceAddressSet(five)).To(gomega.BeTrue())
-		gp.localPodSetACL(pgName, pgUUID, defaultACLLoggingSeverity)
-		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
+		expected = buildExpectedACL(gp, pgName, []string{asName, four, six})
+		actual = gp.buildLocalPodACLs(pgName, defaultACLLoggingSeverity)
+		gomega.Expect(actual).To(gomega.ConsistOf(libovsdb.EqualIgnoringUUIDs(expected)))
 
-		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, four})
 		gomega.Expect(gp.delNamespaceAddressSet(six)).To(gomega.BeTrue())
-		gp.localPodSetACL(pgName, pgUUID, defaultACLLoggingSeverity)
-		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
+		expected = buildExpectedACL(gp, pgName, []string{asName, four})
+		actual = gp.buildLocalPodACLs(pgName, defaultACLLoggingSeverity)
+		gomega.Expect(actual).To(gomega.ConsistOf(libovsdb.EqualIgnoringUUIDs(expected)))
 
-		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName})
 		gomega.Expect(gp.delNamespaceAddressSet(four)).To(gomega.BeTrue())
-		gp.localPodSetACL(pgName, pgUUID, defaultACLLoggingSeverity)
-		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
+		expected = buildExpectedACL(gp, pgName, []string{asName})
+		actual = gp.buildLocalPodACLs(pgName, defaultACLLoggingSeverity)
+		gomega.Expect(actual).To(gomega.ConsistOf(libovsdb.EqualIgnoringUUIDs(expected)))
 
 		// deleting again is no-op
 		gomega.Expect(gp.delNamespaceAddressSet(four)).To(gomega.BeFalse())

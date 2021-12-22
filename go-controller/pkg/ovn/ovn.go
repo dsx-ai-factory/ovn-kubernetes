@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
+	"math/rand"
 	"net"
 	"reflect"
 	"strconv"
@@ -13,7 +15,6 @@ import (
 	"time"
 
 	ctypes "github.com/containernetworking/cni/pkg/types"
-	"github.com/ebay/go-ovn"
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
@@ -22,10 +23,12 @@ import (
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -45,6 +48,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
+	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
@@ -56,8 +60,6 @@ import (
 )
 
 const (
-	clusterPortGroupName             string        = "clusterPortGroup"
-	clusterRtrPortGroupName          string        = "clusterRtrPortGroup"
 	egressFirewallDNSDefaultDuration time.Duration = 30 * time.Minute
 )
 
@@ -90,17 +92,10 @@ type namespaceInfo struct {
 	// routingExternalGWs is a slice of net.IP containing the values parsed from
 	// annotation k8s.ovn.org/routing-external-gws
 	routingExternalGWs gatewayInfo
-	// podExternalRoutes is a cache keeping the LR routes added to the GRs when
-	// the k8s.ovn.org/routing-external-gws annotation is used. The first map key
-	// is the podIP, the second the GW and the third the GR
-	podExternalRoutes map[string]map[string]string
 
 	// routingExternalPodGWs contains a map of all pods serving as exgws as well as their
 	// exgw IPs
 	routingExternalPodGWs map[string]gatewayInfo
-
-	// The UUID of the namespace-wide port group that contains all the pods in the namespace.
-	portGroupUUID string
 
 	multicastEnabled bool
 
@@ -108,9 +103,7 @@ type namespaceInfo struct {
 	aclLogging ACLLoggingLevels
 
 	// Per-namespace port group default deny UUIDs
-	portGroupIngressDenyUUID string // Port group UUID for ingress deny rule
 	portGroupIngressDenyName string // Port group Name for ingress deny rule, without network prefix
-	portGroupEgressDenyUUID  string // Port group UUID for egress deny rule
 	portGroupEgressDenyName  string // Port group Name for egress deny rule, without network prefix
 }
 
@@ -127,17 +120,13 @@ type OvnMHController struct {
 	// event recorder used to post events to k8s
 	recorder record.EventRecorder
 
-	// go-ovn northbound client interface
-	ovnNBClient goovn.Client
-
-	// go-ovn southbound client interface
-	ovnSBClient goovn.Client
-
 	// libovsdb northbound client interface
 	nbClient libovsdbclient.Client
 
 	// libovsdb southbound client interface
 	sbClient libovsdbclient.Client
+
+	modelClient libovsdbops.ModelClient
 
 	// default network controller
 	ovnController *Controller
@@ -164,9 +153,7 @@ type Controller struct {
 	// configured cluster subnets
 	clusterSubnets []config.CIDRNetworkEntry
 	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
-	masterSubnetAllocator     *subnetallocator.SubnetAllocator
-	nodeLocalNatIPv4Allocator *ipallocator.Range
-	nodeLocalNatIPv6Allocator *ipallocator.Range
+	masterSubnetAllocator *subnetallocator.SubnetAllocator
 
 	hoMaster *hocontroller.MasterController
 
@@ -189,18 +176,14 @@ type Controller struct {
 	namespaces      map[string]*namespaceInfo
 	namespacesMutex sync.Mutex
 
+	externalGWCache map[ktypes.NamespacedName]*externalRouteInfo
+	exGWCacheMutex  sync.RWMutex
+
 	// egressFirewalls is a map of namespaces and the egressFirewall attached to it
 	egressFirewalls sync.Map
 
 	// An address set factory that creates address sets
 	addressSetFactory addressset.AddressSetFactory
-
-	// Port group for all cluster logical switch ports
-	clusterPortGroupUUID string
-
-	// Port group for all node logical switch ports connected to the cluster
-	// logical router
-	clusterRtrPortGroupUUID string
 
 	// For each logical port, the number of network policies that want
 	// to add a ingress deny rule.
@@ -221,6 +204,8 @@ type Controller struct {
 
 	// Controller used to handle services
 	svcController *svccontroller.Controller
+	// svcFactory used to handle service related events
+	svcFactory informers.SharedInformerFactory
 
 	egressFirewallDNS *EgressDNS
 
@@ -244,8 +229,9 @@ type Controller struct {
 }
 
 type retryEntry struct {
-	pod       *kapi.Pod
-	timeStamp time.Time
+	pod        *kapi.Pod
+	timeStamp  time.Time
+	backoffSec time.Duration
 	// whether to include this pod in retry iterations
 	ignore bool
 }
@@ -279,9 +265,9 @@ func GetIPFullMask(ip string) string {
 }
 
 func NewOvnMHController(ovnClient *util.OVNClientset, nodeName string, wf *factory.WatchFactory,
-	stopChan chan struct{}, ovnNBClient goovn.Client, ovnSBClient goovn.Client,
-	libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
+	stopChan chan struct{}, libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
 	recorder record.EventRecorder, wg *sync.WaitGroup) *OvnMHController {
+	modelClient := libovsdbops.NewModelClient(libovsdbOvnNBClient)
 	return &OvnMHController{
 		client: ovnClient.KubeClient,
 		kube: &kube.Kube{
@@ -293,10 +279,9 @@ func NewOvnMHController(ovnClient *util.OVNClientset, nodeName string, wf *facto
 		wg:           wg,
 		stopChan:     stopChan,
 		recorder:     recorder,
-		ovnNBClient:  ovnNBClient,
-		ovnSBClient:  ovnSBClient,
 		nbClient:     libovsdbOvnNBClient,
 		sbClient:     libovsdbOvnSBClient,
+		modelClient:  modelClient,
 		nodeName:     nodeName,
 		//addressSetFactory: addressSetFactory,
 	}
@@ -372,31 +357,33 @@ func (mc *OvnMHController) NewOvnController(nadInfo *util.NetAttachDefInfo,
 		}
 	}
 	oc := &Controller{
-		mc:                        mc,
-		stopChan:                  stopChan,
-		nadInfo:                   nadInfo,
-		clusterSubnets:            clusterIPNet,
-		masterSubnetAllocator:     subnetallocator.NewSubnetAllocator(),
-		nodeLocalNatIPv4Allocator: &ipallocator.Range{},
-		nodeLocalNatIPv6Allocator: &ipallocator.Range{},
-		lsManager:                 lsManager,
-		logicalPortCache:          newPortCache(stopChan),
-		namespaces:                make(map[string]*namespaceInfo),
-		namespacesMutex:           sync.Mutex{},
-		addressSetFactory:         addressSetFactory,
-		lspIngressDenyCache:       make(map[string]int),
-		lspEgressDenyCache:        make(map[string]int),
-		lspMutex:                  &sync.Mutex{},
-		isStarted:                 false,
+		mc:                    mc,
+		stopChan:              stopChan,
+		nadInfo:               nadInfo,
+		clusterSubnets:        clusterIPNet,
+		masterSubnetAllocator: subnetallocator.NewSubnetAllocator(),
+		lsManager:             lsManager,
+		logicalPortCache:      newPortCache(stopChan),
+		namespaces:            make(map[string]*namespaceInfo),
+		namespacesMutex:       sync.Mutex{},
+		externalGWCache:       make(map[ktypes.NamespacedName]*externalRouteInfo),
+		exGWCacheMutex:        sync.RWMutex{},
+		addressSetFactory:     addressSetFactory,
+		lspIngressDenyCache:   make(map[string]int),
+		lspEgressDenyCache:    make(map[string]int),
+		lspMutex:              &sync.Mutex{},
+		isStarted:             false,
 		eIPC: egressIPController{
 			assignmentRetryMutex:  &sync.Mutex{},
 			assignmentRetry:       make(map[string]bool),
 			namespaceHandlerMutex: &sync.Mutex{},
-			namespaceHandlerCache: make(map[string]factory.Handler),
+			namespaceHandlerCache: make(map[string]*factory.Handler),
 			podHandlerMutex:       &sync.Mutex{},
-			podHandlerCache:       make(map[string]factory.Handler),
-			allocatorMutex:        &sync.Mutex{},
-			allocator:             make(map[string]*egressNode),
+			podHandlerCache:       make(map[string]*factory.Handler),
+			allocator:             allocator{&sync.Mutex{}, make(map[string]*egressNode)},
+			nbClient:              mc.nbClient,
+			modelClient:           mc.modelClient,
+			watchFactory:          mc.watchFactory,
 		},
 		loadbalancerClusterCache: make(map[kapi.Protocol]string),
 		multicastSupport:         config.EnableMulticast,
@@ -408,7 +395,7 @@ func (mc *OvnMHController) NewOvnController(nadInfo *util.NetAttachDefInfo,
 	if !nadInfo.NotDefault {
 		oc.wg = mc.wg
 		mc.ovnController = oc
-		oc.svcController = newServiceController(mc.client, mc.nbClient, stopChan)
+		oc.svcController, oc.svcFactory = newServiceController(mc.client, mc.nbClient)
 	} else {
 		oc.multicastSupport = false
 		oc.wg = &sync.WaitGroup{}
@@ -442,6 +429,9 @@ func (oc *Controller) Run(nodeName string) error {
 	oc.WatchNodes()
 
 	if !oc.nadInfo.NotDefault {
+		// Start service watch factory and sync services
+		oc.svcFactory.Start(oc.stopChan)
+
 		// Services should be started after nodes to prevent LB churn
 		if err := oc.StartServiceController(oc.wg, true); err != nil {
 			return err
@@ -510,20 +500,57 @@ func (oc *Controller) Run(nodeName string) error {
 	}
 
 	// Master is fully running and resource handlers have synced, update Topology version in OVN
-	var stdout, stderr string
+	currentTopologyVersion := strconv.Itoa(ovntypes.OvnCurrentTopologyVersion)
+	logicalRouterRes := []nbdb.LogicalRouter{}
+	logicalSwitchRes := []nbdb.LogicalSwitch{}
+	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
+	defer cancel()
+	var opModel libovsdbops.OperationModel
 	if oc.nadInfo.TopoType != ovntypes.LocalnetAttachDefTopoType {
 		clusterRouterName := oc.nadInfo.Prefix + ovntypes.OVNClusterRouter
-		stdout, stderr, err = util.RunOVNNbctl("set", "logical_router", clusterRouterName,
-			fmt.Sprintf("external_ids:k8s-ovn-topo-version=%d", ovntypes.OvnCurrentTopologyVersion))
+		if err := oc.mc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
+			return lr.Name == clusterRouterName
+		}).List(ctx, &logicalRouterRes); err != nil {
+			return fmt.Errorf("failed in retrieving %s, error: %v", clusterRouterName, err)
+		}
+		// Update topology version on distributed cluster router
+		logicalRouterRes[0].ExternalIDs["k8s-ovn-topo-version"] = currentTopologyVersion
+		logicalRouter := nbdb.LogicalRouter{
+			Name:        clusterRouterName,
+			ExternalIDs: logicalRouterRes[0].ExternalIDs,
+		}
+		opModel = libovsdbops.OperationModel{
+			Model:          &logicalRouter,
+			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == clusterRouterName },
+			OnModelUpdates: []interface{}{
+				&logicalRouter.ExternalIDs,
+			},
+			ErrNotFound: true,
+		}
 	} else {
 		ovnLocalnetSwitch := oc.nadInfo.Prefix + ovntypes.OVNLocalnetSwitch
-		stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch", ovnLocalnetSwitch,
-			fmt.Sprintf("external_ids:k8s-ovn-topo-version=%d", ovntypes.OvnCurrentTopologyVersion))
+		if err := oc.mc.nbClient.WhereCache(func(ls *nbdb.LogicalSwitch) bool {
+			return ls.Name == ovnLocalnetSwitch
+		}).List(ctx, &logicalSwitchRes); err != nil {
+			return fmt.Errorf("failed in retrieving %s, error: %v", ovnLocalnetSwitch, err)
+		}
+		// Update topology version on distributed cluster router
+		logicalSwitchRes[0].ExternalIDs["k8s-ovn-topo-version"] = currentTopologyVersion
+		logicalSwitch := nbdb.LogicalSwitch{
+			Name:        ovnLocalnetSwitch,
+			ExternalIDs: logicalSwitchRes[0].ExternalIDs,
+		}
+		opModel = libovsdbops.OperationModel{
+			Model:          &logicalSwitch,
+			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == ovnLocalnetSwitch },
+			OnModelUpdates: []interface{}{
+				&logicalSwitch.ExternalIDs,
+			},
+			ErrNotFound: true,
+		}
 	}
-	if err != nil {
-		klog.Errorf("Failed to set topology version in OVN for network %s, "+
-			"stdout: %q, stderr: %q, error: %v", oc.nadInfo.NetName, stdout, stderr, err)
-		return err
+	if _, err := oc.mc.modelClient.CreateOrUpdate(opModel); err != nil {
+		return fmt.Errorf("failed to generate set topology version in OVNf for network %s, err: %v", oc.nadInfo.NetName, err)
 	}
 
 	if !oc.nadInfo.NotDefault {
@@ -532,7 +559,7 @@ func (oc *Controller) Run(nodeName string) error {
 		if err != nil {
 			return fmt.Errorf("unable to get node: %s", nodeName)
 		}
-		err = oc.mc.kube.SetAnnotationsOnNode(node, map[string]interface{}{ovntypes.OvnK8sTopoAnno: strconv.Itoa(ovntypes.OvnCurrentTopologyVersion)})
+		err = oc.mc.kube.SetAnnotationsOnNode(node.Name, map[string]interface{}{ovntypes.OvnK8sTopoAnno: strconv.Itoa(ovntypes.OvnCurrentTopologyVersion)})
 		if err != nil {
 			return fmt.Errorf("failed to set topology annotation for node %s", node.Name)
 		}
@@ -542,7 +569,7 @@ func (oc *Controller) Run(nodeName string) error {
 }
 
 func (oc *Controller) ovnTopologyCleanup() error {
-	ver, err := util.DetermineOVNTopoVersionFromOVN(oc.nadInfo.Prefix, oc.nadInfo.TopoType)
+	ver, err := oc.determineOVNTopoVersionFromOVN()
 	if err != nil {
 		return err
 	}
@@ -552,6 +579,55 @@ func (oc *Controller) ovnTopologyCleanup() error {
 		err = addressset.NonDualStackAddressSetCleanup(oc.nadInfo.NetNameInfo, oc.mc.nbClient)
 	}
 	return err
+}
+
+// determineOVNTopoVersionFromOVN determines what OVN Topology version is being used
+// If "k8s-ovn-topo-version" key in external_ids column does not exist, it is prior to OVN topology versioning
+// and therefore set version number to OvnCurrentTopologyVersion
+func (oc *Controller) determineOVNTopoVersionFromOVN() (int, error) {
+	ver := 0
+	logicalRouterRes := []nbdb.LogicalRouter{}
+	logicalSwitchRes := []nbdb.LogicalSwitch{}
+	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
+	defer cancel()
+
+	var v string
+	var exists bool
+
+	if oc.nadInfo.TopoType != ovntypes.LocalnetAttachDefTopoType {
+		if err := oc.mc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
+			return lr.Name == oc.nadInfo.Prefix+ovntypes.OVNClusterRouter
+		}).List(ctx, &logicalRouterRes); err != nil {
+			return ver, fmt.Errorf("failed in retrieving %s to determine the current version of OVN logical topology: "+
+				"error: %v", oc.nadInfo.Prefix+ovntypes.OVNClusterRouter, err)
+		}
+		if len(logicalRouterRes) == 0 {
+			// no OVNClusterRouter exists, DB is empty, nothing to upgrade
+			return math.MaxInt32, nil
+		}
+		v, exists = logicalRouterRes[0].ExternalIDs["k8s-ovn-topo-version"]
+	} else {
+		if err := oc.mc.nbClient.WhereCache(func(ls *nbdb.LogicalSwitch) bool {
+			return ls.Name == oc.nadInfo.Prefix+ovntypes.OVNLocalnetSwitch
+		}).List(ctx, &logicalSwitchRes); err != nil {
+			return ver, fmt.Errorf("failed in retrieving %s to determine the current version of OVN logical topology: "+
+				"error: %v", oc.nadInfo.Prefix+ovntypes.OVNLocalnetSwitch, err)
+		}
+		if len(logicalSwitchRes) == 0 {
+			// no OVNLocalnetSwitch exists, DB is empty, nothing to upgrade
+			return math.MaxInt32, nil
+		}
+		v, exists = logicalSwitchRes[0].ExternalIDs["k8s-ovn-topo-version"]
+	}
+	if !exists {
+		klog.Infof("No version string found. The OVN topology is before versioning is introduced. Upgrade needed")
+		return ver, nil
+	}
+	ver, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, fmt.Errorf("invalid OVN topology version string for the cluster, err: %v", err)
+	}
+	return ver, nil
 }
 
 // syncPeriodic adds a goroutine that periodically does some work
@@ -613,7 +689,12 @@ func (oc *Controller) iterateRetryPods(updateAll bool) {
 			klog.V(5).Infof("retry: %s not scheduled", podDesc)
 			continue
 		}
-		podTimer := podEntry.timeStamp.Add(time.Minute)
+		podEntry.backoffSec = (podEntry.backoffSec * 2)
+		if podEntry.backoffSec > 60 {
+			podEntry.backoffSec = 60
+		}
+		backoff := (podEntry.backoffSec * time.Second) + (time.Duration(rand.Intn(500)) * time.Millisecond)
+		podTimer := podEntry.timeStamp.Add(backoff)
 		if updateAll || now.After(podTimer) {
 			klog.Infof("%s retry pod setup", podDesc)
 
@@ -622,7 +703,7 @@ func (oc *Controller) iterateRetryPods(updateAll bool) {
 				delete(oc.retryPods, uid)
 			} else {
 				klog.Infof("%s setup retry failed; will try again later", podDesc)
-				oc.retryPods[uid] = &retryEntry{pod, time.Now(), false}
+				oc.retryPods[uid] = &retryEntry{pod, time.Now(), podEntry.backoffSec, false}
 			}
 		} else {
 			klog.V(5).Infof("%s retry pod not after timer yet, time: %s", podDesc, podTimer)
@@ -670,7 +751,7 @@ func (oc *Controller) initRetryPod(pod *kapi.Pod) {
 	if entry, ok := oc.retryPods[pod.UID]; ok {
 		entry.timeStamp = time.Now()
 	} else {
-		oc.retryPods[pod.UID] = &retryEntry{pod, time.Now(), true}
+		oc.retryPods[pod.UID] = &retryEntry{pod, time.Now(), 1, true}
 	}
 }
 
@@ -682,7 +763,7 @@ func (oc *Controller) addRetryPods(pods []kapi.Pod) {
 		if entry, ok := oc.retryPods[pod.UID]; ok {
 			entry.timeStamp = time.Now()
 		} else {
-			oc.retryPods[pod.UID] = &retryEntry{&pod, time.Now(), false}
+			oc.retryPods[pod.UID] = &retryEntry{&pod, time.Now(), 1, false}
 		}
 	}
 }
@@ -913,8 +994,8 @@ func (oc *Controller) WatchNetworkPolicy() {
 	klog.Infof("Bootstrapping existing policies and cleaning stale policies took %v", time.Since(start))
 }
 
-// WatchICMPNetworkPolicy starts the watching of icmpnetworkpolicy resource and calls
-// back the appropriate handler logic
+//WatchICMPNetworkPolicy starts the watching of icmpnetworkpolicy resource and calls
+//back the appropriate handler logic
 func (oc *Controller) WatchICMPNetworkPolicy() *factory.Handler {
 	if oc.nadInfo.NotDefault {
 		klog.Infof("WatchNetworkPolicy for network %s is a no-op", oc.nadInfo.NetName)
@@ -956,7 +1037,7 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 		AddFunc: func(obj interface{}) {
 			egressFirewall := obj.(*egressfirewall.EgressFirewall).DeepCopy()
 			txn := util.NewNBTxn()
-			addErrors := oc.addEgressFirewall(egressFirewall, txn)
+			addErrors := oc.addEgressFirewall(egressFirewall)
 			if addErrors != nil {
 				klog.Error(addErrors)
 				egressFirewall.Status.Status = egressFirewallAddError
@@ -974,13 +1055,15 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 			if err != nil {
 				klog.Error(err)
 			}
+			metrics.UpdateEgressFirewallRuleCount(float64(len(egressFirewall.Spec.Egress)))
+			metrics.IncrementEgressFirewallCount()
 		},
 		UpdateFunc: func(old, newer interface{}) {
 			newEgressFirewall := newer.(*egressfirewall.EgressFirewall).DeepCopy()
 			oldEgressFirewall := old.(*egressfirewall.EgressFirewall)
 			if !reflect.DeepEqual(oldEgressFirewall.Spec, newEgressFirewall.Spec) {
 				txn := util.NewNBTxn()
-				errList := oc.updateEgressFirewall(oldEgressFirewall, newEgressFirewall, txn)
+				errList := oc.updateEgressFirewall(oldEgressFirewall, newEgressFirewall)
 				if errList != nil {
 					newEgressFirewall.Status.Status = egressFirewallUpdateError
 					klog.Error(errList)
@@ -998,12 +1081,13 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 				if err != nil {
 					klog.Error(err)
 				}
+				metrics.UpdateEgressFirewallRuleCount(float64(len(newEgressFirewall.Spec.Egress) - len(oldEgressFirewall.Spec.Egress)))
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			egressFirewall := obj.(*egressfirewall.EgressFirewall)
 			txn := util.NewNBTxn()
-			deleteErrors := oc.deleteEgressFirewall(egressFirewall, txn)
+			deleteErrors := oc.deleteEgressFirewall(egressFirewall)
 			if deleteErrors != nil {
 				klog.Error(deleteErrors)
 				return
@@ -1012,6 +1096,8 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 			if err != nil {
 				klog.Errorf("Failed to commit db changes for egressFirewall in namespace %s stdout: %q, stderr: %q, err: %+v", egressFirewall.Namespace, stdout, stderr, err)
 			}
+			metrics.UpdateEgressFirewallRuleCount(float64(-len(egressFirewall.Spec.Egress)))
+			metrics.DecrementEgressFirewallCount()
 		},
 	}, oc.syncEgressFirewall)
 }
@@ -1137,6 +1223,7 @@ func (oc *Controller) WatchEgressIP() {
 			if err := oc.updateEgressIPWithRetry(eIP); err != nil {
 				klog.Error(err)
 			}
+			metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator))
 		},
 		UpdateFunc: func(old, new interface{}) {
 			oldEIP := old.(*egressipv1.EgressIP)
@@ -1156,6 +1243,7 @@ func (oc *Controller) WatchEgressIP() {
 				if err := oc.updateEgressIPWithRetry(newEIP); err != nil {
 					klog.Error(err)
 				}
+				metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator))
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
@@ -1163,6 +1251,7 @@ func (oc *Controller) WatchEgressIP() {
 			if err := oc.deleteEgressIP(eIP); err != nil {
 				klog.Error(err)
 			}
+			metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator))
 		},
 	}, oc.syncEgressIPs)
 }
@@ -1208,7 +1297,7 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 	}
 
 	if l3GatewayConfig.Mode == config.GatewayModeDisabled {
-		if err := gatewayCleanup(node.Name); err != nil {
+		if err := oc.gatewayCleanup(node.Name); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
 		if err := oc.joinSwIPManager.ReleaseJoinLRPIPs(node.Name); err != nil {
@@ -1377,8 +1466,7 @@ func (oc *Controller) WatchNodes() {
 				"various caches", node.Name)
 
 			nodeSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, oc.nadInfo.NetName)
-			dnatSnatIPs, _ := util.ParseNodeLocalNatIPAnnotation(node)
-			oc.deleteNode(node.Name, nodeSubnets, dnatSnatIPs)
+			oc.deleteNode(node.Name, nodeSubnets)
 			oc.lsManager.DeleteNode(node.Name)
 			addNodeFailed.Delete(node.Name)
 			mgmtPortFailed.Delete(node.Name)
@@ -1646,32 +1734,28 @@ func (mc *OvnMHController) syncNetworkAttachDefinition(netattachdefs []interface
 
 	// Find all the logical node switches for the non-default networks and delete the ones that belong to the
 	// obsolete networks
-	nodeSwitches, stderr, err := util.RunOVNNbctl("--data=bare", "--format=csv", "--no-heading",
-		"--columns=name,external_ids", "find", "logical_switch", "external_ids:network_name!=_")
+	nodeSwitches, err := libovsdbops.FindSwitchesWithOtherConfig(mc.nbClient)
 	if err != nil {
-		klog.Errorf("No logical switches with non-default network: stderr: %q, error: %v", stderr, err)
+		klog.Errorf("Failed to get node logical switches which have other-config set error: %v", err)
 		return
 	}
-	for _, result := range strings.Split(nodeSwitches, "\n") {
-		items := strings.Split(result, ",")
-		if len(items) != 2 || len(items[0]) == 0 {
+	for _, nodeSwitch := range nodeSwitches {
+		netName, ok := nodeSwitch.ExternalIDs["network_name"]
+		if !ok {
 			continue
 		}
-
-		netName := util.GetNetworkNameFromExternalId(items[1])
 		if _, ok := expectedNetworks[netName]; ok {
 			// network still exists, no cleanup to do
 			continue
 		}
-
 		netPrefix := util.GetNetworkPrefix(netName, false)
 		// items[0] is the switch name, which should be prefixed with netName
-		if netName == ovntypes.DefaultNetworkName || !strings.HasPrefix(items[0], netPrefix) {
-			klog.Warningf("Unexpected logical switch %s for network %s during sync external_id %s", items[0], netName, items[1])
+		if netName == ovntypes.DefaultNetworkName || !strings.HasPrefix(nodeSwitch.Name, netPrefix) {
+			klog.Warningf("Unexpected logical switch %s for network %s during sync", nodeSwitch.Name, netName)
 			continue
 		}
 
-		nodeName := strings.TrimPrefix(items[0], netPrefix)
+		nodeName := strings.TrimPrefix(nodeSwitch.Name, netPrefix)
 		oc := &Controller{nadInfo: &util.NetAttachDefInfo{NetNameInfo: util.NetNameInfo{NetName: netName, Prefix: netPrefix, NotDefault: true}}}
 		if nodeName == ovntypes.OVNLocalnetSwitch {
 			oc.nadInfo.TopoType = ovntypes.LocalnetAttachDefTopoType
@@ -1683,20 +1767,16 @@ func (mc *OvnMHController) syncNetworkAttachDefinition(netattachdefs []interface
 			_ = oc.updateNodeAnnotationWithRetry(nodeName, []*net.IPNet{})
 		}
 	}
-	clusterRouters, stderr, err := util.RunOVNNbctl("--data=bare", "--format=csv", "--no-heading",
-		"--columns=name,external_ids", "find", "logical_router", "external_ids:network_name!=_")
+	clusterRouters, err := libovsdbops.FindRoutersWitherExternalIds(mc.nbClient, map[string]string{"k8s-cluster-router": "yes"})
 	if err != nil {
-		klog.Errorf("Failed to get logical routers with non-default network name: stderr: %q, error: %v",
-			stderr, err)
+		klog.Errorf("Failed to get all distributed logical routers: %v", err)
 		return
 	}
-	for _, result := range strings.Split(clusterRouters, "\n") {
-		items := strings.Split(result, ",")
-		if len(items) != 2 || len(items[0]) == 0 {
+	for _, clusterRouter := range clusterRouters {
+		netName, ok := clusterRouter.ExternalIDs["network_name"]
+		if !ok {
 			continue
 		}
-
-		netName := util.GetNetworkNameFromExternalId(items[1])
 		if _, ok := expectedNetworks[netName]; ok {
 			// network still exists, no cleanup to do
 			continue
@@ -1704,8 +1784,8 @@ func (mc *OvnMHController) syncNetworkAttachDefinition(netattachdefs []interface
 
 		netPrefix := util.GetNetworkPrefix(netName, false)
 		// items[0] is the router name, which should be prefixed with netName
-		if netName == ovntypes.DefaultNetworkName || !strings.HasPrefix(items[0], netPrefix) {
-			klog.Warningf("Unexpected logical router %s for network %s during sync, external_ids: %s", items[0], netPrefix, items[1])
+		if netName == ovntypes.DefaultNetworkName || !strings.HasPrefix(clusterRouter.Name, netPrefix) {
+			klog.Warningf("Unexpected logical router %s for network %s during sync", clusterRouter.Name, netName)
 			continue
 		}
 
@@ -1795,7 +1875,7 @@ func shouldUpdate(node, oldNode *kapi.Node) (bool, error) {
 	return true, nil
 }
 
-func newServiceController(client clientset.Interface, nbClient libovsdbclient.Client, stopChan <-chan struct{}) *svccontroller.Controller {
+func newServiceController(client clientset.Interface, nbClient libovsdbclient.Client) (*svccontroller.Controller, informers.SharedInformerFactory) {
 	// Create our own informers to start compartmentalizing the code
 	// filter server side the things we don't care about
 	noProxyName, err := labels.NewRequirement("service.kubernetes.io/service-proxy-name", selection.DoesNotExist, nil)
@@ -1824,9 +1904,7 @@ func newServiceController(client clientset.Interface, nbClient libovsdbclient.Cl
 		svcFactory.Core().V1().Nodes(),
 	)
 
-	svcFactory.Start(stopChan)
-
-	return controller
+	return controller, svcFactory
 }
 
 func (oc *Controller) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
@@ -1840,7 +1918,7 @@ func (oc *Controller) StartServiceController(wg *sync.WaitGroup, runRepair bool)
 		defer wg.Done()
 		// use 5 workers like most of the kubernetes controllers in the
 		// kubernetes controller-manager
-		err := oc.svcController.Run(5, oc.stopChan, runRepair, oc.clusterPortGroupUUID)
+		err := oc.svcController.Run(5, oc.stopChan, runRepair)
 		if err != nil {
 			klog.Errorf("Error running OVN Kubernetes Services controller: %v", err)
 		}

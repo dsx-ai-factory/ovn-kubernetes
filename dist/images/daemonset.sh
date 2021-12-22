@@ -407,7 +407,7 @@ ovn_image=${image} \
   ovnkube_app_name=ovnkube-node \
   j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
 
-# ovnkube node for dpu host daemonset
+# ovnkube node for dpu-host daemonset
 # TODO: we probably dont need all of these when running on dpu host
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -427,7 +427,6 @@ ovn_image=${image} \
   ovn_multicast_enable=${ovn_multicast_enable} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
-  ovn_remote_probe_interval=${ovn_remote_probe_interval} \
   ovn_netflow_targets=${ovn_netflow_targets} \
   ovn_sflow_targets=${ovn_sflow_targets} \
   ovn_ipfix_targets=${ovn_ipfix_targets} \
@@ -556,7 +555,6 @@ ovn_image=${image} \
   ovn_multicast_enable=${ovn_multicast_enable} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
-  ovn_remote_probe_interval=${ovn_remote_probe_interval} \
   ovs_metrics_scrape_interval=${ovs_metrics_scrape_interval} \
   ovn_metrics_scrape_interval=${ovn_metrics_scrape_interval} \
   ovn_netflow_targets=${ovn_netflow_targets} \

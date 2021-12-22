@@ -1,3 +1,4 @@
+//go:build linux
 // +build linux
 
 package util
@@ -74,8 +75,8 @@ func GetNicName(brName string) (string, error) {
 	if len(systemPorts) == 1 {
 		return systemPorts[0], nil
 	} else if len(systemPorts) > 1 {
-		klog.Infof("Found more than one system ports on the OVS bridge %s, so skipping "+
-			"this method of determining uplink port", brName)
+		klog.Infof("Found more than one system Type ports on the OVS bridge %s, so skipping "+
+			"this method of determining the uplink port", brName)
 	}
 
 	// Check for bridge-uplink to indicate the NIC

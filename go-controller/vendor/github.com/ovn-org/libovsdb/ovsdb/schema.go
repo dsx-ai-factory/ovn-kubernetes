@@ -47,18 +47,17 @@ func (schema DatabaseSchema) Print(w io.Writer) {
 }
 
 // SchemaFromFile returns a DatabaseSchema from a file
-func SchemaFromFile(f *os.File) (*DatabaseSchema, error) {
+func SchemaFromFile(f *os.File) (DatabaseSchema, error) {
 	data, err := ioutil.ReadAll(f)
 	if err != nil {
-		return nil, err
+		return DatabaseSchema{}, err
 	}
 	var schema DatabaseSchema
 	err = json.Unmarshal(data, &schema)
 	if err != nil {
-		return nil, err
+		return DatabaseSchema{}, err
 	}
-
-	return &schema, nil
+	return schema, nil
 }
 
 // ValidateOperations performs basic validation for operations against a DatabaseSchema
@@ -507,7 +506,7 @@ func (c *ColumnSchema) Ephemeral() bool {
 	return false
 }
 
-// UnmarshalJSON unmarshalls a json-formatted column
+// UnmarshalJSON unmarshals a json-formatted column
 func (c *ColumnSchema) UnmarshalJSON(data []byte) error {
 	// ColumnJSON represents the known json values for a Column
 	var colJSON struct {

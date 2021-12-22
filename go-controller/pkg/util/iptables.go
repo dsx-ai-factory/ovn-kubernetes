@@ -1,3 +1,4 @@
+//go:build linux
 // +build linux
 
 package util
@@ -94,6 +95,7 @@ func newFakeWithProtocol(protocol iptables.Protocol) *FakeIPTables {
 	}
 	// Prepopulate some common tables
 	ipt.tables["nat"] = newFakeTable()
+	ipt.tables["filter"] = newFakeTable()
 	return ipt
 }
 

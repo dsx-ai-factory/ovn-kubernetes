@@ -250,54 +250,39 @@ func setupOVNNode(node *kapi.Node) error {
 	return nil
 }
 
-func isOVNControllerReady(name string) (bool, error) {
+func isOVNControllerReady() (bool, error) {
+	// check node's connection status
 	runDir := util.GetOvnRunDir()
-
 	pid, err := ioutil.ReadFile(runDir + "ovn-controller.pid")
 	if err != nil {
 		return false, fmt.Errorf("unknown pid for ovn-controller process: %v", err)
 	}
-
-	err = wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
-		ctlFile := runDir + fmt.Sprintf("ovn-controller.%s.ctl", strings.TrimSuffix(string(pid), "\n"))
-		ret, _, err := util.RunOVSAppctl("-t", ctlFile, "connection-status")
-		if err == nil {
-			klog.Infof("Node %s connection status = %s", name, ret)
-			return ret == "connected", nil
-		}
-		return false, err
-	})
+	ctlFile := runDir + fmt.Sprintf("ovn-controller.%s.ctl", strings.TrimSuffix(string(pid), "\n"))
+	ret, _, err := util.RunOVSAppctl("-t", ctlFile, "connection-status")
 	if err != nil {
-		return false, fmt.Errorf("timed out waiting sbdb for node %s: %v", name, err)
+		return false, fmt.Errorf("could not get connection status: %w", err)
+	}
+	klog.Infof("Node connection status = %s", ret)
+	if ret != "connected" {
+		return false, nil
 	}
 
-	err = wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
-		_, _, err := util.RunOVSVsctl("--", "br-exists", "br-int")
-		if err != nil {
-			return false, nil
-		}
-		return true, nil
-	})
+	// check whether br-int exists on node
+	_, _, err = util.RunOVSVsctl("--", "br-exists", "br-int")
 	if err != nil {
-		return false, fmt.Errorf("timed out checking whether br-int exists or not on node %s: %v", name, err)
+		return false, nil
 	}
 
-	err = wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
-		stdout, _, err := util.RunOVSOfctl("dump-aggregate", "br-int")
-		if err != nil {
-			klog.V(5).Infof("Error dumping aggregate flows: %v "+
-				"for node: %s", err, name)
-			return false, nil
-		}
-		ret := strings.Contains(stdout, "flow_count=0")
-		if ret {
-			klog.V(5).Infof("Got a flow count of 0 when "+
-				"dumping flows for node: %s", name)
-		}
-		return !ret, nil
-	})
+	// check by dumping br-int flow entries
+	stdout, _, err := util.RunOVSOfctl("dump-aggregate", "br-int")
 	if err != nil {
-		return false, fmt.Errorf("timed out dumping br-int flow entries for node %s: %v", name, err)
+		klog.V(5).Infof("Error dumping aggregate flows: %v", err)
+		return false, nil
+	}
+	hasFlowCountZero := strings.Contains(stdout, "flow_count=0")
+	if hasFlowCountZero {
+		klog.V(5).Info("Got a flow count of 0 when dumping flows for node")
+		return false, nil
 	}
 
 	return true, nil
@@ -396,12 +381,15 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	}
 	klog.Infof("Node %s ready for ovn initialization with subnet %s", n.name, util.JoinIPNets(subnets, ","))
 
-	// Create CNI Server
 	if config.OvnKubeNode.Mode != types.NodeModeDPU {
 		n.ovnUpEnabled, err = getOVNIfUpCheckMode()
 		if err != nil {
 			return err
 		}
+	}
+
+	// Create CNI Server
+	if config.OvnKubeNode.Mode != types.NodeModeDPU {
 		kclient, ok := n.Kube.(*kube.Kube)
 		if !ok {
 			return fmt.Errorf("cannot get kubeclient for starting CNI server")
@@ -413,14 +401,8 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	}
 
 	// Setup Management port and gateway
-	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
-		if _, err = isOVNControllerReady(n.name); err != nil {
-			return err
-		}
-	}
-
 	mgmtPort = NewManagementPort(n.name, subnets)
-	nodeAnnotator := kube.NewNodeAnnotator(n.Kube, node)
+	nodeAnnotator := kube.NewNodeAnnotator(n.Kube, node.Name)
 	waiter := newStartupWaiter()
 
 	mgmtPortConfig, err = mgmtPort.Create(nodeAnnotator, waiter)
@@ -479,7 +461,8 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		bridgeName := n.gateway.GetGatewayBridgeIface()
 
 		needLegacySvcRoute := true
-		if initialTopoVersion >= types.OvnHostToSvcOFTopoVersion && config.GatewayModeShared == config.Gateway.Mode {
+		if (initialTopoVersion >= types.OvnHostToSvcOFTopoVersion && config.GatewayModeShared == config.Gateway.Mode) ||
+			(initialTopoVersion >= types.OvnRoutingViaHostTopoVersion) {
 			// Configure route for svc towards shared gw bridge
 			// Have to have the route to bridge for multi-NIC mode, where the default gateway may go to a non-OVS interface
 			if err := configureSvcRouteViaBridge(bridgeName); err != nil {
@@ -490,7 +473,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 
 		// Determine if we need to run upgrade checks
 		if initialTopoVersion != types.OvnCurrentTopologyVersion {
-			if needLegacySvcRoute && config.GatewayModeShared == config.Gateway.Mode {
+			if needLegacySvcRoute {
 				klog.Info("System may be upgrading, falling back to to legacy K8S Service via mp0")
 				// add back legacy route for service via mp0
 				link, err := util.LinkSetUp(types.K8sMgmtIntfName)
@@ -519,7 +502,8 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 				}
 				// upgrade complete now see what needs upgrading
 				// migrate service route from ovn-k8s-mp0 to shared gw bridge
-				if initialTopoVersion < types.OvnHostToSvcOFTopoVersion && config.GatewayModeShared == config.Gateway.Mode {
+				if (initialTopoVersion < types.OvnHostToSvcOFTopoVersion && config.GatewayModeShared == config.Gateway.Mode) ||
+					(initialTopoVersion < types.OvnRoutingViaHostTopoVersion) {
 					if err := upgradeServiceRoute(bridgeName); err != nil {
 						klog.Fatalf("Failed to upgrade service route for node, error: %v", err)
 					}
@@ -1211,6 +1195,17 @@ func upgradeServiceRoute(bridgeName string) error {
 	// Clean up gw0 and local ovs bridge as best effort
 	if err := deleteLocalNodeAccessBridge(); err != nil {
 		klog.Warningf("Error while removing Local Node Access Bridge, error: %v", err)
+	}
+	// Clean up gw0 related IPTable rules as best effort.
+	for _, ip := range []string{types.V4NodeLocalNATSubnet, types.V6NodeLocalNATSubnet} {
+		_, IPNet, err := net.ParseCIDR(ip)
+		if err != nil {
+			klog.Errorf("Failed to LocalGatewayNATRules: %v", err)
+		}
+		rules := getLocalGatewayNATRules(types.LocalnetGatewayNextHopPort, IPNet)
+		if err := delIptRules(rules); err != nil {
+			klog.Errorf("Failed to LocalGatewayNATRules: %v", err)
+		}
 	}
 	return nil
 }

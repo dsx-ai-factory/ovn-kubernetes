@@ -1,7 +1,6 @@
 package util
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,7 +24,6 @@ import (
 	"k8s.io/klog/v2"
 
 	multinetworkpolicyclientset "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned"
-	networkattachmentdefinitionapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	networkattchmentdefclientset "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
@@ -241,39 +239,6 @@ const (
 	// DefNetworkAnnotation is the pod annotation for the cluster-wide default network
 	DefNetworkAnnotation = "v1.multus-cni.io/default-network"
 )
-
-// GetPodNetSelAnnotation returns the pod's Network Attachment Selection Annotation either for
-// the cluster-wide default network or the additional networks.
-//
-// This function is a simplified version of parsePodNetworkAnnotation() function in multus-cni
-// repository. We need to revisit once there is a library that we can share.
-//
-// Note that the changes below is based on following assumptions, which is true today.
-// - a pod's default network is OVN managed
-func GetPodNetSelAnnotation(pod *kapi.Pod, netAttachAnnot string) ([]*networkattachmentdefinitionapi.NetworkSelectionElement, error) {
-	var networkAnnotation string
-	var networks []*networkattachmentdefinitionapi.NetworkSelectionElement
-
-	networkAnnotation = pod.Annotations[netAttachAnnot]
-	if networkAnnotation == "" {
-		// nothing special to do
-		return nil, nil
-	}
-
-	// it is possible the default network is defined in the form of comma-delimited list of
-	// network attachment resource names (i.e. list of <namespace>/<network name>@<ifname>), but
-	// we are only interested in the NetworkSelectionElement json form that has custom MAC/IP
-	if json.Valid([]byte(networkAnnotation)) {
-		if err := json.Unmarshal([]byte(networkAnnotation), &networks); err != nil {
-			return nil, fmt.Errorf("failed to parse pod's net-attach-definition JSON %q: %v", networkAnnotation, err)
-		}
-	} else {
-		// nothing special to do
-		return nil, nil
-	}
-
-	return networks, nil
-}
 
 // EventRecorder returns an EventRecorder type that can be
 // used to post Events to different object's lifecycles.

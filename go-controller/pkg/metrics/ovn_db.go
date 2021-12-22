@@ -123,7 +123,7 @@ var metricOVNDBMonitor = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 var metricDBSize = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Namespace: MetricOvnNamespace,
 	Subsystem: MetricOvnSubsystemDB,
-	Name:      "db_size",
+	Name:      "db_size_bytes",
 	Help:      "The size of the database file associated with the OVN DB component."},
 	[]string{
 		"db_name",
@@ -427,9 +427,9 @@ func ovnDBMemoryMetricsUpdater(direction, database string) {
 	var err error
 
 	if direction == "sb" {
-		stdout, stderr, err = util.RunOVNSBAppCtl("--timeout=5", "memory/show")
+		stdout, stderr, err = util.RunOVNSBAppCtlWithTimeout(5, "memory/show")
 	} else {
-		stdout, stderr, err = util.RunOVNNBAppCtl("--timeout=5", "memory/show")
+		stdout, stderr, err = util.RunOVNNBAppCtlWithTimeout(5, "memory/show")
 	}
 	if err != nil {
 		klog.Errorf("Failed retrieving memory/show output for %q, stderr: %s, err: (%v)",
@@ -489,7 +489,7 @@ func getOvnDbVersionInfo() {
 func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string,
 	metricsScrapeInterval int, stopChan chan struct{}) {
 	err := wait.PollImmediate(1*time.Second, 300*time.Second, func() (bool, error) {
-		return checkPodRunsOnGivenNode(clientset, "name in (ovn-nbdb, ovn-sbdb, ovnkube-db)", k8sNodeName, false)
+		return checkPodRunsOnGivenNode(clientset, []string{"name in (ovn-nbdb, ovn-sbdb, ovnkube-db)"}, k8sNodeName, false)
 	})
 	if err != nil {
 		if err == wait.ErrWaitTimeout {
@@ -649,11 +649,9 @@ func getOVNDBClusterStatusInfo(timeout int, direction, database string) (cluster
 	}()
 
 	if direction == "sb" {
-		stdout, stderr, err = util.RunOVNSBAppCtl(fmt.Sprintf("--timeout=%d", timeout),
-			"cluster/status", database)
+		stdout, stderr, err = util.RunOVNSBAppCtlWithTimeout(timeout, "cluster/status", database)
 	} else {
-		stdout, stderr, err = util.RunOVNNBAppCtl(fmt.Sprintf("--timeout=%d", timeout),
-			"cluster/status", database)
+		stdout, stderr, err = util.RunOVNNBAppCtlWithTimeout(timeout, "cluster/status", database)
 	}
 	if err != nil {
 		klog.Errorf("Failed to retrieve cluster/status info for database %q, stderr: %s, err: (%v)",
