@@ -3,7 +3,6 @@ package node
 import (
 	"fmt"
 	"net"
-	"os"
 	"strings"
 
 	"k8s.io/klog/v2"
@@ -247,9 +246,17 @@ func configureSvcRouteViaInterface(iface string, gwIPs []net.IP) error {
 		if err != nil {
 			return fmt.Errorf("unable to find gateway IP for subnet: %v, found IPs: %v", subnet, gwIPs)
 		}
-		err = util.LinkRoutesAdd(link, gwIP[0], []*net.IPNet{subnet}, config.Default.MTU)
-		if err != nil && !os.IsExist(err) {
-			return fmt.Errorf("unable to add route for service via %s, error: %v", iface, err)
+
+		route, err := util.LinkRouteGet(link, gwIP[0], subnet)
+		if err != nil {
+			return fmt.Errorf("unable to get route[%s via %s dev %s]: %v", subnet, gwIP[0], iface, err)
+		}
+		if route == nil || route.MTU != config.Default.MTU {
+			// Add or update the route
+			err = util.LinkRoutesReplace(link, gwIP[0], []*net.IPNet{subnet}, config.Default.MTU)
+			if err != nil {
+				return fmt.Errorf("unable to add/update route for service via %s, error: %v", iface, err)
+			}
 		}
 	}
 	return nil
@@ -314,10 +321,11 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	switch config.Gateway.Mode {
 	case config.GatewayModeLocal:
 		klog.Info("Preparing Local Gateway")
-		gw, err = newLocalGateway(n.name, subnets, gatewayNextHops, gatewayIntf, nodeAnnotator, n.recorder, managementPortConfig)
+		gw, err = newLocalGateway(n.name, subnets, gatewayNextHops, gatewayIntf, ifAddrs, nodeAnnotator,
+			managementPortConfig, n.Kube, n.watchFactory)
 	case config.GatewayModeShared:
 		klog.Info("Preparing Shared Gateway")
-		gw, err = newSharedGateway(n.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator,
+		gw, err = newSharedGateway(n.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator, n.Kube,
 			managementPortConfig, n.watchFactory)
 	case config.GatewayModeDisabled:
 		var chassisID string
@@ -343,21 +351,27 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	// value was nil by comparing the interface to nil. this is because if the value is `nil`,
 	// then the interface will still hold the type of the value being set.
 
-	if config.Gateway.Mode == config.GatewayModeShared && config.OvnKubeNode.Mode == types.NodeModeFull {
-		gw.nodeIPManager = newAddressManager(nodeAnnotator, managementPortConfig)
-	}
-
 	if loadBalancerHealthChecker != nil {
 		gw.loadBalancerHealthChecker = loadBalancerHealthChecker
 	}
 	if portClaimWatcher != nil {
 		gw.portClaimWatcher = portClaimWatcher
 	}
-	initGw := func() error {
+
+	initGwFunc := func() error {
 		return gw.Init(n.watchFactory)
 	}
 
-	waiter.AddWait(gw.readyFunc, initGw)
+	readyGwFunc := func() (bool, error) {
+		controllerReady, err := isOVNControllerReady()
+		if err != nil || !controllerReady {
+			return false, err
+		}
+
+		return gw.readyFunc()
+	}
+
+	waiter.AddWait(readyGwFunc, initGwFunc)
 	n.gateway = gw
 
 	return n.validateVTEPInterfaceMTU()

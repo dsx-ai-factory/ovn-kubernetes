@@ -82,7 +82,7 @@ func (nc *ovnNodeController) addDPUPods(pod *kapi.Pod, pfMACs []string, isOvnUpE
 	}
 }
 
-//watchPodsDPU watch updates for pod DPU annotations
+//watchPodsDPU watch updates for pod dpu annotations
 func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) {
 	var retryPods sync.Map
 	// servedPods tracks the pods that got a VF

@@ -1,12 +1,15 @@
 package types
 
+import "time"
+
 const (
 	DefaultNetworkName = "default"
 
 	// topology type defined in CNI netconf for localnet faced interface
 	LocalnetAttachDefTopoType = "localnet"
 
-	K8sPrefix = "k8s-"
+	K8sPrefix           = "k8s-"
+	HybridOverlayPrefix = "int-"
 	// K8sMgmtIntfName name to be used as an OVS internal port on the node
 	K8sMgmtIntfName = "ovn-k8s-mp0"
 
@@ -20,7 +23,8 @@ const (
 	LocalNetworkName = "locnet"
 
 	// Local Bridge used for DGP access
-	LocalBridgeName = "br-local"
+	LocalBridgeName            = "br-local"
+	LocalnetGatewayNextHopPort = "ovn-k8s-gw0"
 
 	// Local Bridge used for localnet topology network access
 	LocalNetBridgeName = "br-localnet"
@@ -52,32 +56,32 @@ const (
 	NodeLocalSwitch = "node_local_switch"
 
 	// ACL directions
-	DirectionToLPort   = "to-lport"
-	DirectionFromLPort = "from-lport"
-
+	//DirectionToLPort   = "to-lport"
+	//DirectionFromLPort = "from-lport"
+	//
 	// ACL Priorities
 
 	// Default routed multicast allow acl rule priority
-	DefaultRoutedMcastAllowPriority = "1013"
+	DefaultRoutedMcastAllowPriority = 1013
 	// Default multicast allow acl rule priority
-	DefaultMcastAllowPriority = "1012"
+	DefaultMcastAllowPriority = 1012
 	// Default multicast deny acl rule priority
-	DefaultMcastDenyPriority = "1011"
+	DefaultMcastDenyPriority = 1011
 	// Default allow acl rule priority
-	DefaultAllowPriority = "1001"
+	DefaultAllowPriority = 1001
 	// Default deny acl rule priority
-	DefaultDenyPriority = "1000"
+	DefaultDenyPriority = 1000
 
 	// priority of logical router policies on the OVNClusterRouter
-	EgressFirewallStartPriority           = "10000"
-	MinimumReservedEgressFirewallPriority = "2000"
+	EgressFirewallStartPriority           = 10000
+	MinimumReservedEgressFirewallPriority = 2000
 	MGMTPortPolicyPriority                = "1005"
 	NodeSubnetPolicyPriority              = "1004"
 	InterNodePolicyPriority               = "1003"
 	HybridOverlaySubnetPriority           = "1002"
 	HybridOverlayReroutePriority          = "501"
-	DefaultNoRereoutePriority             = "101"
-	EgressIPReroutePriority               = "100"
+	DefaultNoRereoutePriority             = 101
+	EgressIPReroutePriority               = 100
 
 	V6NodeLocalNATSubnet           = "fd99::/64"
 	V6NodeLocalNATSubnetPrefix     = 64
@@ -101,12 +105,16 @@ const (
 
 	OvnACLLoggingMeter = "acl-logging"
 
+	// OVN-K8S Address Sets Names
+	HybridRoutePolicyPrefix = "hybrid-route-pods-"
+
 	// OVN-K8S Topology Versions
 	OvnSingleJoinSwitchTopoVersion = 1
 	OvnNamespacedDenyPGTopoVersion = 2
 	OvnHostToSvcOFTopoVersion      = 3
 	OvnPortBindingTopoVersion      = 4
-	OvnCurrentTopologyVersion      = OvnPortBindingTopoVersion
+	OvnRoutingViaHostTopoVersion   = 5
+	OvnCurrentTopologyVersion      = OvnRoutingViaHostTopoVersion
 
 	// OVN-K8S annotation & taint constants
 	OvnK8sPrefix           = "k8s.ovn.org"
@@ -125,4 +133,9 @@ const (
 	GeneveHeaderLengthIPv4 = 58
 	// Geneve header length for IPv6 (https://github.com/openshift/cluster-network-operator/pull/720#issuecomment-664020823)
 	GeneveHeaderLengthIPv6 = GeneveHeaderLengthIPv4 + 20
+
+	ClusterPortGroupName    = "clusterPortGroup"
+	ClusterRtrPortGroupName = "clusterRtrPortGroup"
+
+	OVSDBTimeout = 10 * time.Second
 )

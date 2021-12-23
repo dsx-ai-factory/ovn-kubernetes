@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/google/uuid"
 	"github.com/ovn-org/libovsdb/cache"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
@@ -11,21 +12,21 @@ import (
 
 // Database abstracts database operations from ovsdb
 type Database interface {
-	CreateDatabase(database string, model *ovsdb.DatabaseSchema) error
+	CreateDatabase(database string, model ovsdb.DatabaseSchema) error
 	Exists(database string) bool
-	Commit(database string, updates ovsdb.TableUpdates) error
+	Commit(database string, id uuid.UUID, updates ovsdb.TableUpdates2) error
 	CheckIndexes(database string, table string, m model.Model) error
-	List(database, table string, conditions ...ovsdb.Condition) ([]model.Model, error)
+	List(database, table string, conditions ...ovsdb.Condition) (map[string]model.Model, error)
 	Get(database, table string, uuid string) (model.Model, error)
 }
 
 type inMemoryDatabase struct {
 	databases map[string]*cache.TableCache
-	models    map[string]*model.DBModel
+	models    map[string]model.ClientDBModel
 	mutex     sync.RWMutex
 }
 
-func NewInMemoryDatabase(models map[string]*model.DBModel) Database {
+func NewInMemoryDatabase(models map[string]model.ClientDBModel) Database {
 	return &inMemoryDatabase{
 		databases: make(map[string]*cache.TableCache),
 		models:    models,
@@ -33,15 +34,19 @@ func NewInMemoryDatabase(models map[string]*model.DBModel) Database {
 	}
 }
 
-func (db *inMemoryDatabase) CreateDatabase(name string, schema *ovsdb.DatabaseSchema) error {
+func (db *inMemoryDatabase) CreateDatabase(name string, schema ovsdb.DatabaseSchema) error {
 	db.mutex.Lock()
 	defer db.mutex.Unlock()
-	var mo *model.DBModel
+	var mo model.ClientDBModel
 	var ok bool
 	if mo, ok = db.models[schema.Name]; !ok {
 		return fmt.Errorf("no db model provided for schema with name %s", name)
 	}
-	database, err := cache.NewTableCache(schema, mo, nil)
+	dbModel, errs := model.NewDatabaseModel(schema, mo)
+	if len(errs) > 0 {
+		return fmt.Errorf("failed to create DatabaseModel: %#+v", errs)
+	}
+	database, err := cache.NewTableCache(dbModel, nil, nil)
 	if err != nil {
 		return nil
 	}
@@ -56,15 +61,14 @@ func (db *inMemoryDatabase) Exists(name string) bool {
 	return ok
 }
 
-func (db *inMemoryDatabase) Commit(database string, updates ovsdb.TableUpdates) error {
+func (db *inMemoryDatabase) Commit(database string, id uuid.UUID, updates ovsdb.TableUpdates2) error {
 	if !db.Exists(database) {
 		return fmt.Errorf("db does not exist")
 	}
 	db.mutex.RLock()
 	targetDb := db.databases[database]
 	db.mutex.RLock()
-	targetDb.Populate(updates)
-	return nil
+	return targetDb.Populate2(updates)
 }
 
 func (db *inMemoryDatabase) CheckIndexes(database string, table string, m model.Model) error {
@@ -78,7 +82,7 @@ func (db *inMemoryDatabase) CheckIndexes(database string, table string, m model.
 	return targetTable.IndexExists(m)
 }
 
-func (db *inMemoryDatabase) List(database, table string, conditions ...ovsdb.Condition) ([]model.Model, error) {
+func (db *inMemoryDatabase) List(database, table string, conditions ...ovsdb.Condition) (map[string]model.Model, error) {
 	if !db.Exists(database) {
 		return nil, fmt.Errorf("db does not exist")
 	}

@@ -67,7 +67,7 @@ func TestCreateSubnetAnnotation(t *testing.T) {
 func TestSetSubnetAnnotation(t *testing.T) {
 	fakeClient := fake.NewSimpleClientset(&v1.NodeList{})
 	k := &kube.Kube{KClient: fakeClient}
-	testAnnotator := kube.NewNodeAnnotator(k, &v1.Node{})
+	testAnnotator := kube.NewNodeAnnotator(k, "")
 	tests := []struct {
 		desc             string
 		inpNodeAnnotator kube.Annotator
@@ -178,6 +178,74 @@ func TestParseSubnetAnnotation(t *testing.T) {
 	}
 }
 
+func TestNodeSubnetAnnotationChanged(t *testing.T) {
+	tests := []struct {
+		desc    string
+		oldNode *v1.Node
+		newNode *v1.Node
+		result  bool
+	}{
+		{
+			desc: "true: annotation changed",
+			oldNode: &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{},
+				},
+			},
+			newNode: &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-subnets": "{\"default\":\"10.244.0.0/24\"}",
+					},
+				},
+			},
+			result: true,
+		},
+		{
+			desc: "true: annotation's value changed",
+			newNode: &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-subnets": "{\"default\":\"10.244.0.0/24\"}",
+					},
+				},
+			},
+			oldNode: &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-subnets": "{\"default\":\"10.244.2.0/24\"}",
+					},
+				},
+			},
+			result: true,
+		},
+		{
+			desc: "false: annotation didn't change",
+			newNode: &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-subnets": "{\"default\":\"10.244.0.0/24\"}",
+					},
+				},
+			},
+			oldNode: &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-subnets": "{\"default\":\"10.244.0.0/24\"}",
+					},
+				},
+			},
+			result: false,
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			result := NodeSubnetAnnotationChanged(tc.oldNode, tc.newNode)
+			assert.Equal(t, tc.result, result)
+		})
+	}
+}
+
 func TestCreateNodeHostSubnetAnnotation(t *testing.T) {
 	tests := []struct {
 		desc            string
@@ -214,7 +282,7 @@ func TestCreateNodeHostSubnetAnnotation(t *testing.T) {
 func TestSetNodeHostSubnetAnnotation(t *testing.T) {
 	fakeClient := fake.NewSimpleClientset(&v1.NodeList{})
 	k := &kube.Kube{KClient: fakeClient}
-	testAnnotator := kube.NewNodeAnnotator(k, &v1.Node{})
+	testAnnotator := kube.NewNodeAnnotator(k, "")
 
 	tests := []struct {
 		desc             string
@@ -242,7 +310,7 @@ func TestSetNodeHostSubnetAnnotation(t *testing.T) {
 func TestDeleteNodeHostSubnetAnnotation(t *testing.T) {
 	fakeClient := fake.NewSimpleClientset(&v1.NodeList{})
 	k := &kube.Kube{KClient: fakeClient}
-	testAnnotator := kube.NewNodeAnnotator(k, &v1.Node{})
+	testAnnotator := kube.NewNodeAnnotator(k, "")
 
 	tests := []struct {
 		desc             string
@@ -287,130 +355,6 @@ func TestParseNodeHostSubnetAnnotation(t *testing.T) {
 			} else {
 				assert.NotNil(t, res)
 			}
-		})
-	}
-}
-
-func TestCreateNodeLocalNatAnnotation(t *testing.T) {
-	tests := []struct {
-		desc      string
-		inpIPList []net.IP
-		expOutput map[string]interface{}
-	}{
-		{
-			desc:      "empty IP List",
-			inpIPList: ovntest.MustParseIPs(),
-			expOutput: map[string]interface{}{
-				"k8s.ovn.org/node-local-nat-ip": `{"default":[]}`,
-			},
-		},
-		{
-			desc:      "valid IP list",
-			inpIPList: ovntest.MustParseIPs("192.168.1.25", "10.168.12.5"),
-			expOutput: map[string]interface{}{
-				"k8s.ovn.org/node-local-nat-ip": `{"default":["192.168.1.25","10.168.12.5"]}`,
-			},
-		},
-	}
-	for i, tc := range tests {
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			res, err := CreateNodeLocalNatAnnotation(tc.inpIPList)
-			t.Log(res, err)
-			assert.Equal(t, tc.expOutput, res)
-		})
-	}
-}
-
-func TestSetNodeLocalNatAnnotation(t *testing.T) {
-	fakeClient := fake.NewSimpleClientset(&v1.NodeList{})
-	k := &kube.Kube{KClient: fakeClient}
-	testAnnotator := kube.NewNodeAnnotator(k, &v1.Node{})
-	tests := []struct {
-		desc             string
-		inpNodeAnnotator kube.Annotator
-		inpLocalNatIPs   []net.IP
-		errExp           bool
-	}{
-		// Note: error path unit test not applicable as CreateNodeLocalNatAnnotation returns error only when there is json.Marshal error
-		{
-			desc:             "test function success path",
-			inpNodeAnnotator: testAnnotator,
-			inpLocalNatIPs:   ovntest.MustParseIPs("192.168.1.3"),
-		},
-	}
-	for i, tc := range tests {
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			err := SetNodeLocalNatAnnotation(tc.inpNodeAnnotator, tc.inpLocalNatIPs)
-			t.Log(err)
-			if tc.errExp {
-				assert.Error(t, err)
-			}
-		})
-	}
-}
-
-func TestParseNodeLocalNatIPAnnotation(t *testing.T) {
-	tests := []struct {
-		desc      string
-		inpNode   v1.Node
-		expOutput []net.IP
-		expErr    bool
-	}{
-		{
-			desc:      "k8s.ovn.org/node-local-nat-ip annotation missing on the node",
-			inpNode:   v1.Node{},
-			expOutput: nil,
-			expErr:    true,
-		},
-		{
-			desc: "annotation not parseable as value not in list format",
-			inpNode: v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "testNode",
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-local-nat-ip": `{"default":"10.244.0.0"}`,
-					},
-				},
-			},
-		},
-		{
-			desc: "key `default` is NOT in node annotation i.e default network missing",
-			inpNode: v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "testNode",
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-local-nat-ip": `{"blah":["10.244.0.0"]}`,
-					},
-				},
-			},
-		},
-		{
-			desc: "annotation with invalid value for default network",
-			inpNode: v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "testNode",
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-local-nat-ip": `{"default":["10.244.0.0/24"]}`,
-					},
-				},
-			},
-		},
-		{
-			desc: "correct annotation with valid values",
-			inpNode: v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "testNode",
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-local-nat-ip": `{"default":["10.244.0.0"]}`,
-					},
-				},
-			},
-		},
-	}
-	for i, tc := range tests {
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			res, err := ParseNodeLocalNatIPAnnotation(&tc.inpNode)
-			t.Log(res, err)
 		})
 	}
 }

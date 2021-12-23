@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"sync"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ipam "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator/allocator"
@@ -160,11 +161,17 @@ func (manager *LogicalSwitchManager) GetSwitchSubnets(nodeName string) []*net.IP
 // AllocateIPs will block off IPs in the ipnets slice as already allocated
 // for a given switch
 func (manager *LogicalSwitchManager) AllocateIPs(nodeName string, ipnets []*net.IPNet) error {
+	if len(ipnets) == 0 {
+		return fmt.Errorf("unable to allocate empty IPs")
+	}
 	manager.RLock()
 	defer manager.RUnlock()
 	lsi, ok := manager.cache[nodeName]
-	if len(ipnets) == 0 || !ok || len(lsi.ipams) == 0 {
-		return fmt.Errorf("unable to allocate ips %v for node: %s",
+	if !ok {
+		return fmt.Errorf("unable to allocate ips: %v, node: %s does not exist in logical switch manager",
+			ipnets, nodeName)
+	} else if len(lsi.ipams) == 0 {
+		return fmt.Errorf("unable to allocate ips %v for node: %s. logical switch manager has no IPAM",
 			ipnets, nodeName)
 
 	}
@@ -190,7 +197,7 @@ func (manager *LogicalSwitchManager) AllocateIPs(nodeName string, ipnets []*net.
 			cidr := ipam.CIDR()
 			if cidr.Contains(ipnet.IP) {
 				if _, ok = allocated[idx]; ok {
-					err = fmt.Errorf("Error: attempt to reserve multiple IPs in the same IPAM instance")
+					err = fmt.Errorf("error attempting to reserve multiple IPs in the same IPAM instance")
 					return err
 				}
 				if err = ipam.Allocate(ipnet.IP); err != nil {
@@ -288,6 +295,7 @@ func (manager *LogicalSwitchManager) ReleaseIPs(nodeName string, ipnets []*net.I
 // IP allocator manager for join switch's IPv4 and IPv6 subnets.
 type JoinSwitchIPManager struct {
 	lsm            *LogicalSwitchManager
+	nbClient       libovsdbclient.Client
 	lrpIPCache     map[string][]*net.IPNet
 	lrpIPCacheLock sync.Mutex
 }
@@ -306,12 +314,13 @@ func NewJoinIPAMAllocator(cidr *net.IPNet) (ipam.Interface, error) {
 
 // Initializes a new join switch logical switch manager.
 // This IPmanager guaranteed to always have both IPv4 and IPv6 regardless of dual-stack
-func NewJoinLogicalSwitchIPManager(existingNodeNames []string) (*JoinSwitchIPManager, error) {
+func NewJoinLogicalSwitchIPManager(nbClient libovsdbclient.Client, existingNodeNames []string) (*JoinSwitchIPManager, error) {
 	j := JoinSwitchIPManager{
 		lsm: &LogicalSwitchManager{
 			cache:    make(map[string]logicalSwitchInfo),
 			ipamFunc: NewJoinIPAMAllocator,
 		},
+		nbClient:   nbClient,
 		lrpIPCache: make(map[string][]*net.IPNet),
 	}
 	var joinSubnets []*net.IPNet
@@ -448,7 +457,7 @@ func (jsIPManager *JoinSwitchIPManager) getJoinLRPAddresses(nodeName string) []*
 	gwLRPIPs := []*net.IPNet{}
 	gwLrpName := types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName
 	joinSubnets := jsIPManager.lsm.GetSwitchSubnets(types.OVNJoinSwitch)
-	ifAddrs, err := util.GetLRPAddrs(gwLrpName)
+	ifAddrs, err := util.GetLRPAddrs(jsIPManager.nbClient, gwLrpName)
 	if err == nil {
 		for _, ifAddr := range ifAddrs {
 			for _, subnet := range joinSubnets {

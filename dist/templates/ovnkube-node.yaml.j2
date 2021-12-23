@@ -164,8 +164,6 @@ spec:
           value: "{{ ovn_sflow_targets }}"
         - name: OVN_IPFIX_TARGETS
           value: "{{ ovn_ipfix_targets }}"
-        - name: OVN_REMOTE_PROBE_INTERVAL
-          value: "{{ ovn_remote_probe_interval }}"
         - name: OVN_MULTICAST_ENABLE
           value: "{{ ovn_multicast_enable }}"
         - name: OVN_UNPRIVILEGED_MODE
@@ -179,6 +177,8 @@ spec:
           value: "{{ ovn_multi_network_enable }}"
         - name: OVN_DISABLE_OVN_IFACE_ID_VER
           value: "{{ ovn_disable_ovn_iface_id_ver }}"
+        - name: OVN_REMOTE_PROBE_INTERVAL
+          value: "{{ ovn_remote_probe_interval }}"
         - name: OVN_MONITOR_ALL
           value: "{{ ovn_monitor_all }}"
         - name: OVN_ENABLE_LFLOW_CACHE

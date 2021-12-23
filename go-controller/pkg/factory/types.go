@@ -46,6 +46,8 @@ type NodeWatchFactory interface {
 	NodeInformer() cache.SharedIndexInformer
 	LocalPodInformer() cache.SharedIndexInformer
 
+	GetNode(name string) (*kapi.Node, error)
+
 	GetService(namespace, name string) (*kapi.Service, error)
 	GetEndpointSlices(namespace, svcName string) ([]*discovery.EndpointSlice, error)
 }

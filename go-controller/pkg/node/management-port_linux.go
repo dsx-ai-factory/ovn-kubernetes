@@ -1,3 +1,4 @@
+//go:build linux
 // +build linux
 
 package node
@@ -50,13 +51,6 @@ func newManagementPortIPFamilyConfig(hostSubnet *net.IPNet, isIPv6 bool) (*manag
 	for _, subnet := range config.Default.ClusterSubnets {
 		if utilnet.IsIPv6CIDR(subnet.CIDR) == isIPv6 {
 			cfg.allSubnets = append(cfg.allSubnets, subnet.CIDR)
-		}
-	}
-	if config.Gateway.Mode != config.GatewayModeShared {
-		for _, subnet := range config.Kubernetes.ServiceCIDRs {
-			if utilnet.IsIPv6CIDR(subnet) == isIPv6 {
-				cfg.allSubnets = append(cfg.allSubnets, subnet)
-			}
 		}
 	}
 

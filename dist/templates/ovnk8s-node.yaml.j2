@@ -165,8 +165,6 @@ spec:
               value: "{{ ovn_sflow_targets }}"
             - name: OVN_IPFIX_TARGETS
               value: "{{ ovn_ipfix_targets }}"
-            - name: OVN_REMOTE_PROBE_INTERVAL
-              value: "{{ ovn_remote_probe_interval }}"
             - name: OVN_MULTICAST_ENABLE
               value: "{{ ovn_multicast_enable }}"
             - name: OVN_UNPRIVILEGED_MODE
@@ -190,6 +188,8 @@ spec:
               value: "{{ ovn_lflow_cache_limit }}"
             - name: OVN_LFLOW_CACHE_LIMIT_KB
               value: "{{ ovn_lflow_cache_limit_kb }}"
+            - name: OVN_REMOTE_PROBE_INTERVAL
+              value: "{{ ovn_remote_probe_interval }}"
             {% endif -%}
             {% if ovnkube_app_name=="ovnkube-node-dpu-host" -%}
             - name: OVNKUBE_NODE_MODE

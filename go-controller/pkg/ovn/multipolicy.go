@@ -2,10 +2,12 @@ package ovn
 
 import (
 	"fmt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"strings"
 
 	multinetworkpolicy "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	knet "k8s.io/api/networking/v1"
 	"k8s.io/klog/v2"
 )
@@ -30,24 +32,27 @@ func (oc *Controller) syncMultiNetworkPolicies(multiPolicies []interface{}) {
 		}
 	}
 
+	stalePGs := []string{}
 	err := oc.addressSetFactory.ProcessEachAddressSet(func(addrSetName, namespaceName, policyName string, icmpAddressSet bool) {
 		if !icmpAddressSet && policyName != "" && !expectedPolicies[namespaceName][policyName] {
 			// policy doesn't exist on k8s. Delete the port group
 			portGroupName := fmt.Sprintf("%s_%s", namespaceName, policyName)
-			hashedLocalPortGroup := hashedPortGroup(portGroupName)
-			err := deletePortGroup(oc.mc.ovnNBClient, hashedLocalPortGroup, oc.nadInfo.NetNameInfo)
-			if err != nil {
-				klog.Errorf("%v", err)
-			}
-
+			hashedLocalPortGroup := oc.nadInfo.Prefix + hashedPortGroup(portGroupName)
+			stalePGs = append(stalePGs, hashedLocalPortGroup)
 			// delete the address sets for this old policy from OVN
-			if err = oc.addressSetFactory.DestroyAddressSetInBackingStore(addrSetName); err != nil {
+			if err := oc.addressSetFactory.DestroyAddressSetInBackingStore(addrSetName); err != nil {
 				klog.Errorf(err.Error())
 			}
 		}
 	})
 	if err != nil {
 		klog.Errorf("Error in syncing multi network policies: %v", err)
+	}
+	if len(stalePGs) > 0 {
+		err = libovsdbops.DeletePortGroups(oc.mc.nbClient, stalePGs...)
+		if err != nil {
+			klog.Errorf("Error removing stale port groups %v: %v", stalePGs, err)
+		}
 	}
 }
 
