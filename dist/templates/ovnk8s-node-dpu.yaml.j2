@@ -90,6 +90,9 @@ spec:
           readOnly: true
         - mountPath: /sys
           name: sysfs
+        - mountPath: /ovn-cert
+          name: ovn-pki
+          readOnly: true
 
 
 
@@ -217,6 +220,10 @@ spec:
       - name: host-slash
         hostPath:
           path: /
+      - name: ovn-pki
+        hostPath:
+          path: /etc/ovn
+          type: DirectoryOrCreate
 
 
       tolerations:

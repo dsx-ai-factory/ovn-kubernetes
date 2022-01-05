@@ -76,6 +76,9 @@ spec:
               name: host-opt-cni-bin
             - mountPath: /etc/cni/net.d
               name: host-etc-cni-netd
+            - mountPath: /ovn-cert
+              name: ovn-pki
+              readOnly: true
             {% if kind is defined and kind -%}
             - mountPath: /var/run/netns
               name: host-netns
@@ -243,6 +246,10 @@ spec:
         - name: host-etc-cni-netd
           hostPath:
             path: /etc/cni/net.d
+        - name: ovn-pki
+          hostPath:
+            path: /etc/ovn
+            type: DirectoryOrCreate
         - name: host-slash
           hostPath:
             path: /
