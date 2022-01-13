@@ -156,7 +156,6 @@ type NetAttachDefInfo struct {
 
 	TopoType   string
 	VlanId     int
-	BridgeName string
 	ExcludeIPs []net.IP
 }
 
@@ -180,15 +179,10 @@ func NewNetAttachDefInfo(netconf *cnitypes.NetConf) (*NetAttachDefInfo, error) {
 		MTU:         netconf.MTU,
 		TopoType:    netconf.TopoType,
 		VlanId:      netconf.VlanId,
-		BridgeName:  netconf.BridgeName,
 		NetNameInfo: NetNameInfo{netName, prefix, netconf.NotDefault},
 	}
 
 	if netconf.TopoType == types.LocalnetAttachDefTopoType {
-		if netconf.BridgeName == "" {
-			return nil, fmt.Errorf("missing bridge name for %s topotype net-attach-def %s", types.LocalnetAttachDefTopoType, netconf.Name)
-		}
-
 		if len(netconf.ExcludeCIDRs) == 0 {
 			return &nadInfo, nil
 		}
