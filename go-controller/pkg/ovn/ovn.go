@@ -1563,7 +1563,7 @@ func (mc *OvnMHController) initOvnController(netattachdef *nettypes.NetworkAttac
 	if ok {
 		oc := v.(*Controller)
 		if oc.nadInfo.NetCidr != nadInfo.NetCidr || oc.nadInfo.MTU != nadInfo.MTU || oc.nadInfo.TopoType != nadInfo.TopoType ||
-			oc.nadInfo.VlanId != nadInfo.VlanId || oc.nadInfo.BridgeName != nadInfo.BridgeName {
+			oc.nadInfo.VlanId != nadInfo.VlanId {
 			return nil, fmt.Errorf("network attachment definition %s/%s does not share the same CNI config of name %s",
 				netattachdef.Namespace, netattachdef.Name, nadInfo.NetName)
 		} else {
