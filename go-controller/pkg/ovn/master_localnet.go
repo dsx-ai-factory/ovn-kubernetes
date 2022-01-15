@@ -42,7 +42,6 @@ func (oc *Controller) SetupLocalnetMaster() error {
 				&logicalSwitch.OtherConfig,
 				&logicalSwitch.ExternalIDs,
 			},
-			ErrNotFound: true,
 		},
 	}
 	// TBD other-config:mcast_snoop, other-config:mcast_querier etc. see
