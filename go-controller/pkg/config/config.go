@@ -67,6 +67,7 @@ var (
 		MonitorAll:        true,
 		LFlowCacheEnable:  true,
 		RawClusterSubnets: "10.128.0.0/14/23",
+		EncapToSValue:     "none",
 	}
 
 	// Logging holds logging-related parsed config file parameters and command-line overrides
@@ -205,6 +206,9 @@ type DefaultConfig struct {
 	// ClusterSubnets holds parsed cluster subnet entries and may be used
 	// outside the config module.
 	ClusterSubnets []CIDRNetworkEntry
+	// The  value to be used for the Tos in the outer encap header.
+	// By default we set it to none
+	EncapToSValue string `gcfg:"ovn-encap-tos"`
 }
 
 // LoggingConfig holds logging-related parsed config file parameters and command-line overrides
@@ -727,6 +731,12 @@ var CommonFlags = []cli.Flag{
 		Usage:       "The largest number of messages per second that gets logged before drop (default 20)",
 		Destination: &cliConfig.Logging.ACLLoggingRateLimit,
 		Value:       20,
+	},
+	&cli.StringFlag{
+		Name:        "ovn-encap-tos",
+		Usage:       "The value for the tos on the outer encap header",
+		Destination: &cliConfig.Default.EncapToSValue,
+		Value:       Default.EncapToSValue,
 	},
 }
 

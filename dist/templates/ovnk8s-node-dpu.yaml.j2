@@ -184,6 +184,8 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: host_network_namespace
+        - name: OVN_ENCAP_TOS
+          value: "{{ ovn_encap_tos }}"
 
       #        readinessProbe:
       #          exec:

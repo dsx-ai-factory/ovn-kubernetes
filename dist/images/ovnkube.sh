@@ -84,6 +84,7 @@ BASEDIR=$(dirname $0)
 # OVNKUBE_NODE_MGMT_PORT_NETDEV - ovnkube node management port netdev. valid when ovnkube node mode is: dpu, dpu-host
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node. mandatory in case ovnkube-node-mode=="dpu"
 # OVN_HOST_NETWORK_NAMESPACE - namespace to classify host network traffic for applying network policies
+# OVN_ENCAP_TOS - set a TOS value for the outer header
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -195,6 +196,8 @@ ovn_nb_raft_port=${OVN_NB_RAFT_PORT:-6643}
 ovn_sb_raft_port=${OVN_SB_RAFT_PORT:-6644}
 # OVN_ENCAP_PORT - GENEVE UDP port (default 6081)
 ovn_encap_port=${OVN_ENCAP_PORT:-6081}
+# OVN_ENCAP_TOS - TOS value for the outer/geneve header. Default is none
+ovn_encap_tos=${OVN_ENCAP_TOS:-"none"}
 # OVN_NB_RAFT_ELECTION_TIMER - ovn north db election timer in ms (default 1000)
 ovn_nb_raft_election_timer=${OVN_NB_RAFT_ELECTION_TIMER:-1000}
 # OVN_SB_RAFT_ELECTION_TIMER - ovn south db election timer in ms (default 1000)
@@ -1385,6 +1388,7 @@ ovn-node() {
     ${ovn_unprivileged_flag} \
     --mtu=${mtu} \
     ${ovn_encap_ip_flag} \
+    --ovn-encap-tos=${ovn_encap_tos} \
     --loglevel=${ovnkube_loglevel} \
     --logfile-maxsize=${ovnkube_logfile_maxsize} \
     --logfile-maxbackups=${ovnkube_logfile_maxbackups} \
