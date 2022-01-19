@@ -1522,11 +1522,11 @@ func (mc *OvnMHController) initOvnController(netattachdef *nettypes.NetworkAttac
 	// looking for network attachment definition that use OVN K8S CNI only
 	err := json.Unmarshal([]byte(netattachdef.Spec.Config), &netconf)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing Network Attachment Definition %s: %v", netattachdef.Name, err)
+		return nil, fmt.Errorf("error parsing Network Attachment Definition %s/%s: %v", netattachdef.Namespace, netattachdef.Name, err)
 	}
 
 	if netconf.Type != "ovn-k8s-cni-overlay" {
-		klog.V(5).Infof("Network Attachment Definition %s is not based on OVN plugin", netattachdef.Name)
+		klog.V(5).Infof("Network Attachment Definition %s/%s is not based on OVN plugin", netattachdef.Namespace, netattachdef.Name)
 		return nil, nil
 	}
 
@@ -1538,6 +1538,7 @@ func (mc *OvnMHController) initOvnController(netattachdef *nettypes.NetworkAttac
 	if err != nil {
 		return nil, err
 	}
+	klog.V(5).Infof("Add Network Attachment Definition %s/%s to nad %s", netattachdef.Namespace, netattachdef.Name, nadInfo.NetName)
 
 	// nadName must be in the correct form for non-default net-attach-def
 	if nadInfo.NotDefault {
@@ -1577,9 +1578,10 @@ func (mc *OvnMHController) initOvnController(netattachdef *nettypes.NetworkAttac
 }
 
 func (mc *OvnMHController) addNetworkAttachDefinition(netattachdef *nettypes.NetworkAttachmentDefinition) {
+	klog.Infof("Add Network Attachment Definition %s/%s", netattachdef.Namespace, netattachdef.Name)
 	oc, err := mc.initOvnController(netattachdef)
 	if err != nil {
-		klog.Errorf("Failed to add Network Attachment Definition %s/%s: %v", err)
+		klog.Errorf("Failed to add Network Attachment Definition %s/%s: %v", netattachdef.Namespace, netattachdef.Name, err)
 		return
 	}
 
@@ -1588,6 +1590,8 @@ func (mc *OvnMHController) addNetworkAttachDefinition(netattachdef *nettypes.Net
 		return
 	}
 
+	klog.Infof("The first Network Attachment Definition %s/%s is added to nad %s, create associated logical entities",
+		netattachdef.Namespace, netattachdef.Name, oc.nadInfo.NetName)
 	// run the cluster controller to init the master
 	err = oc.StartClusterMaster(mc.nodeName)
 	if err != nil {
@@ -1602,6 +1606,7 @@ func (mc *OvnMHController) addNetworkAttachDefinition(netattachdef *nettypes.Net
 }
 
 func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.NetworkAttachmentDefinition) {
+	klog.Infof("Delete Network Attachment Definition %s/%s", netattachdef.Namespace, netattachdef.Name)
 	netconf := &cnitypes.NetConf{}
 	err := json.Unmarshal([]byte(netattachdef.Spec.Config), &netconf)
 	if err != nil && netconf.Type != "ovn-k8s-cni-overlay" {
@@ -1622,6 +1627,8 @@ func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.
 		klog.Errorf(err.Error())
 		return
 	}
+
+	klog.Infof("Delete net-attach-def %s/%s from nad %s", netattachdef.Namespace, netattachdef.Name, nadInfo.NetName)
 
 	if netconf.NadName != "" {
 		nadName := util.GetNadName(netattachdef.Namespace, netattachdef.Name, !nadInfo.NotDefault)
@@ -1657,6 +1664,8 @@ func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.
 		return
 	}
 
+	klog.Infof("The last Network Attachment Definition %s/%s is deleted from nad %s, delete associated logical entities",
+		netattachdef.Namespace, netattachdef.Name, nadInfo.NetName)
 	oc.wg.Wait()
 	close(oc.stopChan)
 
