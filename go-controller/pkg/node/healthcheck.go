@@ -134,11 +134,15 @@ func checkForStaleOVSInternalPorts() {
 	staleInterfaceArgs := []string{}
 	values := strings.Split(stdout, "\n\n")
 	for _, val := range values {
+		if val == types.K8sMgmtIntfName {
+			klog.Errorf("The representor for the ovn-k8s-mp0 management port is missing on the DPU. " +
+				"Perhaps the host rebooted or SR-IOV VFs were disabled on the host.")
+			continue
+		}
 		klog.Warningf("Found stale interface %s, so queuing it to be deleted", val)
 		if len(staleInterfaceArgs) > 0 {
 			staleInterfaceArgs = append(staleInterfaceArgs, "--")
 		}
-
 		staleInterfaceArgs = append(staleInterfaceArgs, "--if-exists", "--with-iface", "del-port", val)
 	}
 
