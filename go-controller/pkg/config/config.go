@@ -68,6 +68,7 @@ var (
 		LFlowCacheEnable:  true,
 		RawClusterSubnets: "10.128.0.0/14/23",
 		EncapToSValue:     "none",
+		DisableCTInvFlows: false,
 	}
 
 	// Logging holds logging-related parsed config file parameters and command-line overrides
@@ -209,6 +210,8 @@ type DefaultConfig struct {
 	// The  value to be used for the Tos in the outer encap header.
 	// By default we set it to none
 	EncapToSValue string `gcfg:"ovn-encap-tos"`
+	// To disable CT inv flows in the north
+	DisableCTInvFlows bool `gcfg:"ovn-ctinv-flows-disable"`
 }
 
 // LoggingConfig holds logging-related parsed config file parameters and command-line overrides
@@ -737,6 +740,12 @@ var CommonFlags = []cli.Flag{
 		Usage:       "The value for the tos on the outer encap header",
 		Destination: &cliConfig.Default.EncapToSValue,
 		Value:       Default.EncapToSValue,
+	},
+	&cli.BoolFlag{
+		Name:        "ovn-ctinv-flows-disable",
+		Usage:       "The knob to disable CT Inv flows in the north",
+		Destination: &cliConfig.Default.DisableCTInvFlows,
+		Value:       Default.DisableCTInvFlows,
 	},
 }
 

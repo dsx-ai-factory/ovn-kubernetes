@@ -85,6 +85,7 @@ BASEDIR=$(dirname $0)
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node. mandatory in case ovnkube-node-mode=="dpu"
 # OVN_HOST_NETWORK_NAMESPACE - namespace to classify host network traffic for applying network policies
 # OVN_ENCAP_TOS - set a TOS value for the outer header
+# OVN_CTINV_FLOWS_DISABLE - enable/disable northd from configuring CT Invalid flows as it is not offload friendly
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -198,6 +199,8 @@ ovn_sb_raft_port=${OVN_SB_RAFT_PORT:-6644}
 ovn_encap_port=${OVN_ENCAP_PORT:-6081}
 # OVN_ENCAP_TOS - TOS value for the outer/geneve header. Default is none
 ovn_encap_tos=${OVN_ENCAP_TOS:-"none"}
+# OVN_CTINV_FLOWS_DISABLE - Enable/Disable CT Inv flows 
+ovn_ctinv_flows_disable=${OVN_CTINV_FLOWS_DISABLE:-false}
 # OVN_NB_RAFT_ELECTION_TIMER - ovn north db election timer in ms (default 1000)
 ovn_nb_raft_election_timer=${OVN_NB_RAFT_ELECTION_TIMER:-1000}
 # OVN_SB_RAFT_ELECTION_TIMER - ovn south db election timer in ms (default 1000)
@@ -1005,6 +1008,11 @@ ovn-master() {
 	  nohostsubnet_label_option="--no-hostsubnet-nodes=${OVN_NOHOSTSUBNET_LABEL}"
   fi
 
+  ctinv_flows_disable_flag=
+  if [[ ${ovn_ctinv_flows_disable} == "true" ]]; then
+      ctinv_flows_disable_flag="--ovn-ctinv-flows-disable"
+  fi
+
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
     --init-master ${K8S_NODE} \
@@ -1035,7 +1043,8 @@ ovn-master() {
     ${multi_networkpolicy_enabled_flag} \
     --metrics-interval ${ovn_metrics_scrape_interval} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} --metrics-enable-pprof \
-    --host-network-namespace ${ovn_host_network_namespace} &
+    --host-network-namespace ${ovn_host_network_namespace} \
+    ${ctinv_flows_disable_flag} &
 
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master

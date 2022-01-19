@@ -281,6 +281,8 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: host_network_namespace
+        - name: OVN_CTINV_FLOWS_DISABLE
+          value: "{{ ovn_ctinv_flows_disable }}"
       # end of container
 
       volumes:

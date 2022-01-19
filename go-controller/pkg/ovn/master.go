@@ -94,6 +94,11 @@ func (mc *OvnMHController) Start(ctx context.Context) error {
 				if err := mc.enableOVNLogicalDatapathGroups(); err != nil {
 					panic(err.Error())
 				}
+				if config.Default.DisableCTInvFlows {
+					if err := mc.disableOVNCTInvalidFlows(); err != nil {
+						panic(err.Error())
+					}
+				}
 
 				// Start and sync the watch factory to begin listening for events
 				if err := mc.watchFactory.Start(); err != nil {
@@ -201,6 +206,18 @@ func (mc *OvnMHController) enableOVNLogicalDatapathGroups() error {
 		return err
 	}
 	return nil
+}
+
+// disableOVNCTInvalidFlows sets the flag use_ct_inv_match in NB global
+// options to disable northd from configuring CT Invalid flows as they
+// inhibit offload.
+func (mc *OvnMHController) disableOVNCTInvalidFlows() error {
+	err := libovsdbops.UpdateNBGlobalOptions(mc.nbClient, map[string]string{"use_ct_inv_match": "false"})
+	if err != nil {
+		klog.Errorf("Failed to disable NB global options use_ct_inv_match: %v", err)
+	}
+
+	return err
 }
 
 // StartClusterMaster runs a subnet IPAM and a controller that watches arrival/departure

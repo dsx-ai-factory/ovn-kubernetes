@@ -63,6 +63,7 @@ OVN_EX_GW_NETWORK_INTERFACE=""
 OVNKUBE_NODE_MGMT_PORT_NETDEV=""
 OVN_NOHOSTSUBNET_LABEL="k8s.ovn.org/ovn-managed=false"
 OVN_ENCAP_TOS="inherit"
+OVN_CTINV_FLOWS_DISABLE="true"
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -249,6 +250,9 @@ while [ "$1" != "" ]; do
   --encap-tos)
     OVN_ENCAP_TOS=$VALUE
     ;;
+  --ovn-ctinv-flows-disable)
+    OVN_CTINV_FLOWS_DISABLE=$VALUE
+    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -381,6 +385,8 @@ ovn_nohostsubnet_label=${OVN_NOHOSTSUBNET_LABEL}
 echo "ovn_nohostsubnet_label: ${ovn_nohostsubnet_label}"
 ovn_encap_tos=${OVN_ENCAP_TOS}
 echo "ovn_encap_tos: ${ovn_encap_tos}"
+ovn_ctinv_flows_disable=${OVN_CTINV_FLOWS_DISABLE}
+echo "ovn_ctinv_flows_disable: ${ovn_ctinv_flows_disable}"
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -468,6 +474,7 @@ ovn_image=${image} \
   ovn_gateway_mode=${ovn_gateway_mode} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovn_nohostsubnet_label=${ovn_nohostsubnet_label} \
+  ovn_ctinv_flows_disable=${ovn_ctinv_flows_disable} \
   j2 ../templates/ovnkube-master.yaml.j2 -o ../yaml/ovnkube-master.yaml
 
 ovn_image=${imagec} \
@@ -508,6 +515,7 @@ ovn_image=${image} \
   ovn_sb_cert_cname=${ovn_sb_cert_cname} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovn_nohostsubnet_label=${ovn_nohostsubnet_label} \
+  ovn_ctinv_flows_disable=${ovn_ctinv_flows_disable} \
   j2 ../templates/ovnk8s-master.yaml.j2 -o ../yaml/ovnk8s-master.yaml
 
 ovn_image=${image} \
