@@ -1114,6 +1114,11 @@ func (oc *Controller) WatchEgressNodes() {
 	oc.mc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
+			// non-OVN managed node cannot be used for EgressIP assignment. For example: DPUs
+			if noHostSubnet(node) {
+				klog.Infof("Skipping node %s for EgressIP assignment since it is not managed by OVN", node.Name)
+				return
+			}
 			if err := oc.addNodeForEgress(node); err != nil {
 				klog.Error(err)
 			}
@@ -1139,6 +1144,20 @@ func (oc *Controller) WatchEgressNodes() {
 		UpdateFunc: func(old, new interface{}) {
 			oldNode := old.(*kapi.Node)
 			newNode := new.(*kapi.Node)
+			// non-OVN managed node cannot be used for EgressIP assignment. For example: DPUs
+			oldNoHostSubnet := noHostSubnet(oldNode)
+			newNoHostSubnet := noHostSubnet(newNode)
+			if oldNoHostSubnet && newNoHostSubnet {
+				return
+			} else if oldNoHostSubnet && !newNoHostSubnet {
+				klog.Errorf("Node has been marked for OVN management at runtime. This is not supported,"+
+					" so please delete node and add.", oldNode.Name)
+				return
+			} else if !oldNoHostSubnet && newNoHostSubnet {
+				klog.Errorf("Node has been marked for non-OVN management at runtime. This is not supported,"+
+					" so please delete node and add.", oldNode.Name)
+				return
+			}
 			if err := oc.initEgressIPAllocator(newNode); err != nil {
 				klog.Error(err)
 			}
@@ -1191,6 +1210,9 @@ func (oc *Controller) WatchEgressNodes() {
 		},
 		DeleteFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
+			if noHostSubnet(node) {
+				return
+			}
 			if err := oc.deleteNodeForEgress(node); err != nil {
 				klog.Error(err)
 			}
