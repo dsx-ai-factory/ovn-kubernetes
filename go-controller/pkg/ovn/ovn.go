@@ -10,7 +10,6 @@ import (
 	"net"
 	"reflect"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -25,7 +24,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
@@ -1736,94 +1735,94 @@ func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.
 }
 
 // syncNetworkAttachDefinition() delete OVN logical entities of the obsoleted netNames.
-func (mc *OvnMHController) syncNetworkAttachDefinition(netattachdefs []interface{}) {
-	// Get all the expected netNames
-	expectedNetworks := make(map[string]bool)
-
-	// we need to walk through all net-attach-def and add them into Controller.nadInfo.NetAttachDefs, so that when each
-	// Controller is running, watchPods()->addLogicalPod()->IsNetworkOnPod() can correctly check Pods need to be plumbed
-	// for the specific Controller
-	for _, netattachdefIntf := range netattachdefs {
-		netattachdef, ok := netattachdefIntf.(*nettypes.NetworkAttachmentDefinition)
-		if !ok {
-			klog.Errorf("Spurious object in syncNetworkAttachDefinition: %v", netattachdefIntf)
-			continue
-		}
-
-		// ovnController.nadInfo.NetAttachDefs
-		oc, err := mc.initOvnController(netattachdef)
-		if err != nil {
-			klog.Errorf(err.Error())
-			continue
-		}
-
-		if oc == nil {
-			continue
-		}
-		expectedNetworks[oc.nadInfo.NetName] = true
-	}
-
-	// Find all the logical node switches for the non-default networks and delete the ones that belong to the
-	// obsolete networks
-	nodeSwitches, err := libovsdbops.FindSwitchesWithOtherConfig(mc.nbClient)
-	if err != nil {
-		klog.Errorf("Failed to get node logical switches which have other-config set error: %v", err)
-		return
-	}
-	for _, nodeSwitch := range nodeSwitches {
-		netName, ok := nodeSwitch.ExternalIDs["network_name"]
-		if !ok {
-			continue
-		}
-		if _, ok := expectedNetworks[netName]; ok {
-			// network still exists, no cleanup to do
-			continue
-		}
-		netPrefix := util.GetNetworkPrefix(netName, false)
-		// items[0] is the switch name, which should be prefixed with netName
-		if netName == ovntypes.DefaultNetworkName || !strings.HasPrefix(nodeSwitch.Name, netPrefix) {
-			klog.Warningf("Unexpected logical switch %s for network %s during sync", nodeSwitch.Name, netName)
-			continue
-		}
-
-		nodeName := strings.TrimPrefix(nodeSwitch.Name, netPrefix)
-		oc := &Controller{nadInfo: &util.NetAttachDefInfo{NetNameInfo: util.NetNameInfo{NetName: netName, Prefix: netPrefix, NotDefault: true}}}
-		if nodeName == ovntypes.OVNLocalnetSwitch {
-			oc.nadInfo.TopoType = ovntypes.LocalnetAttachDefTopoType
-			oc.deleteMaster()
-		} else {
-			if err := oc.deleteNodeLogicalNetwork(nodeName); err != nil {
-				klog.Errorf("Error deleting node %s logical network: %v", nodeName, err)
-			}
-			_ = oc.updateNodeAnnotationWithRetry(nodeName, []*net.IPNet{})
-		}
-	}
-	clusterRouters, err := libovsdbops.FindRoutersWitherExternalIds(mc.nbClient, map[string]string{"k8s-cluster-router": "yes"})
-	if err != nil {
-		klog.Errorf("Failed to get all distributed logical routers: %v", err)
-		return
-	}
-	for _, clusterRouter := range clusterRouters {
-		netName, ok := clusterRouter.ExternalIDs["network_name"]
-		if !ok {
-			continue
-		}
-		if _, ok := expectedNetworks[netName]; ok {
-			// network still exists, no cleanup to do
-			continue
-		}
-
-		netPrefix := util.GetNetworkPrefix(netName, false)
-		// items[0] is the router name, which should be prefixed with netName
-		if netName == ovntypes.DefaultNetworkName || !strings.HasPrefix(clusterRouter.Name, netPrefix) {
-			klog.Warningf("Unexpected logical router %s for network %s during sync", clusterRouter.Name, netName)
-			continue
-		}
-
-		oc := &Controller{nadInfo: &util.NetAttachDefInfo{NetNameInfo: util.NetNameInfo{NetName: netName, Prefix: netPrefix, NotDefault: true}}}
-		oc.deleteMaster()
-	}
-}
+//func (mc *OvnMHController) syncNetworkAttachDefinition(netattachdefs []interface{}) {
+//	// Get all the expected netNames
+//	expectedNetworks := make(map[string]bool)
+//
+//	// we need to walk through all net-attach-def and add them into Controller.nadInfo.NetAttachDefs, so that when each
+//	// Controller is running, watchPods()->addLogicalPod()->IsNetworkOnPod() can correctly check Pods need to be plumbed
+//	// for the specific Controller
+//	for _, netattachdefIntf := range netattachdefs {
+//		netattachdef, ok := netattachdefIntf.(*nettypes.NetworkAttachmentDefinition)
+//		if !ok {
+//			klog.Errorf("Spurious object in syncNetworkAttachDefinition: %v", netattachdefIntf)
+//			continue
+//		}
+//
+//		// ovnController.nadInfo.NetAttachDefs
+//		oc, err := mc.initOvnController(netattachdef)
+//		if err != nil {
+//			klog.Errorf(err.Error())
+//			continue
+//		}
+//
+//		if oc == nil {
+//			continue
+//		}
+//		expectedNetworks[oc.nadInfo.NetName] = true
+//	}
+//
+//	// Find all the logical node switches for the non-default networks and delete the ones that belong to the
+//	// obsolete networks
+//	nodeSwitches, err := libovsdbops.FindSwitchesWithOtherConfig(mc.nbClient)
+//	if err != nil {
+//		klog.Errorf("Failed to get node logical switches which have other-config set error: %v", err)
+//		return
+//	}
+//	for _, nodeSwitch := range nodeSwitches {
+//		netName, ok := nodeSwitch.ExternalIDs["network_name"]
+//		if !ok {
+//			continue
+//		}
+//		if _, ok := expectedNetworks[netName]; ok {
+//			// network still exists, no cleanup to do
+//			continue
+//		}
+//		netPrefix := util.GetNetworkPrefix(netName, false)
+//		// items[0] is the switch name, which should be prefixed with netName
+//		if netName == ovntypes.DefaultNetworkName || !strings.HasPrefix(nodeSwitch.Name, netPrefix) {
+//			klog.Warningf("Unexpected logical switch %s for network %s during sync", nodeSwitch.Name, netName)
+//			continue
+//		}
+//
+//		nodeName := strings.TrimPrefix(nodeSwitch.Name, netPrefix)
+//		oc := &Controller{mc: mc, nadInfo: &util.NetAttachDefInfo{NetNameInfo: util.NetNameInfo{NetName: netName, Prefix: netPrefix, NotDefault: true}}}
+//		if nodeName == ovntypes.OVNLocalnetSwitch {
+//			oc.nadInfo.TopoType = ovntypes.LocalnetAttachDefTopoType
+//			oc.deleteMaster()
+//		} else {
+//			if err := oc.deleteNodeLogicalNetwork(nodeName); err != nil {
+//				klog.Errorf("Error deleting node %s logical network: %v", nodeName, err)
+//			}
+//			_ = oc.updateNodeAnnotationWithRetry(nodeName, []*net.IPNet{})
+//		}
+//	}
+//	clusterRouters, err := libovsdbops.FindRoutersWitherExternalIds(mc.nbClient, map[string]string{"k8s-cluster-router": "yes"})
+//	if err != nil {
+//		klog.Errorf("Failed to get all distributed logical routers: %v", err)
+//		return
+//	}
+//	for _, clusterRouter := range clusterRouters {
+//		netName, ok := clusterRouter.ExternalIDs["network_name"]
+//		if !ok {
+//			continue
+//		}
+//		if _, ok := expectedNetworks[netName]; ok {
+//			// network still exists, no cleanup to do
+//			continue
+//		}
+//
+//		netPrefix := util.GetNetworkPrefix(netName, false)
+//		// items[0] is the router name, which should be prefixed with netName
+//		if netName == ovntypes.DefaultNetworkName || !strings.HasPrefix(clusterRouter.Name, netPrefix) {
+//			klog.Warningf("Unexpected logical router %s for network %s during sync", clusterRouter.Name, netName)
+//			continue
+//		}
+//
+//		oc := &Controller{mc: mc, nadInfo: &util.NetAttachDefInfo{NetNameInfo: util.NetNameInfo{NetName: netName, Prefix: netPrefix, NotDefault: true}}}
+//		oc.deleteMaster()
+//	}
+//}
 
 // watchNetworkAttachmentDefinitions starts the watching of network attachment definition
 // resource and calls back the appropriate handler logic
@@ -1838,7 +1837,7 @@ func (mc *OvnMHController) watchNetworkAttachmentDefinitions() *factory.Handler 
 			netattachdef := obj.(*nettypes.NetworkAttachmentDefinition)
 			mc.deleteNetworkAttachDefinition(netattachdef)
 		},
-	}, mc.syncNetworkAttachDefinition)
+	}, nil)
 }
 
 // gatewayChanged() compares old annotations to new and returns true if something has changed.
