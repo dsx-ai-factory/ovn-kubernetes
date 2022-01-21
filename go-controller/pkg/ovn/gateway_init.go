@@ -52,6 +52,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 	}
 	opModels := []libovsdbops.OperationModel{
 		{
+			Name:           logicalRouter.Name,
 			Model:          &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == gatewayRouter },
 			OnModelUpdates: []interface{}{
@@ -86,6 +87,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 			},
 		},
 		{
+			Name:           logicalSwitch.Name,
 			Model:          &logicalSwitch,
 			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.OVNJoinSwitch },
 			OnModelMutations: []interface{}{
@@ -122,6 +124,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 			},
 		},
 		{
+			Name:           logicalRouter.Name,
 			Model:          &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == gatewayRouter },
 			OnModelMutations: []interface{}{
@@ -176,6 +179,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 				},
 			},
 			{
+				Name:           logicalRouter.Name,
 				Model:          &logicalRouter,
 				ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == gatewayRouter },
 				OnModelMutations: []interface{}{
@@ -245,6 +249,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 				},
 			},
 			{
+				Name:           logicalRouter.Name,
 				Model:          &logicalRouter,
 				ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == gatewayRouter },
 				OnModelMutations: []interface{}{
@@ -286,6 +291,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 				},
 			},
 			{
+				Name:           logicalRouter.Name,
 				Model:          &logicalRouter,
 				ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
 				OnModelMutations: []interface{}{
@@ -333,6 +339,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 					},
 				},
 				{
+					Name:           logicalRouter.Name,
 					Model:          &logicalRouter,
 					ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
 					OnModelMutations: []interface{}{
@@ -398,6 +405,7 @@ func (oc *Controller) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRo
 	}
 	opModels := []libovsdbops.OperationModel{
 		{
+			Name:           externalLogicalSwitch.Name,
 			Model:          &externalLogicalSwitch,
 			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == externalSwitch },
 		},
@@ -436,6 +444,7 @@ func (oc *Controller) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRo
 			},
 		},
 		{
+			Name:           externalLogicalSwitch.Name,
 			Model:          &externalLogicalSwitch,
 			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == externalSwitch },
 			OnModelMutations: []interface{}{
@@ -479,6 +488,7 @@ func (oc *Controller) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRo
 			},
 		},
 		{
+			Name:           logicalRouter.Name,
 			Model:          &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == gatewayRouter },
 			OnModelMutations: []interface{}{
@@ -515,6 +525,7 @@ func (oc *Controller) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRo
 			},
 		},
 		{
+			Name:           externalLogicalSwitch.Name,
 			Model:          &externalLogicalSwitch,
 			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == externalSwitch },
 			OnModelMutations: []interface{}{
@@ -683,6 +694,7 @@ func (oc *Controller) createPolicyBasedRoutes(match, priority, nexthops string) 
 			},
 		},
 		{
+			Name:           logicalRouter.Name,
 			Model:          &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
 			OnModelMutations: []interface{}{

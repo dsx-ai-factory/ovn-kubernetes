@@ -989,6 +989,7 @@ func (e *egressIPController) createEgressReroutePolicy(filterOption, egressIPNam
 			},
 		},
 		{
+			Name:           logicalRouter.Name,
 			Model:          &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
 			OnModelMutations: []interface{}{
@@ -1236,6 +1237,7 @@ func (oc *Controller) createLogicalRouterPolicy(match string, priority int) erro
 			},
 		},
 		{
+			Name:           logicalRouter.Name,
 			Model:          &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
 			OnModelMutations: []interface{}{

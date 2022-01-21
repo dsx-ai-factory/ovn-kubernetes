@@ -511,6 +511,7 @@ func (oc *Controller) Run(nodeName string) error {
 			ExternalIDs: logicalRouterRes[0].ExternalIDs,
 		}
 		opModel = libovsdbops.OperationModel{
+			Name:           logicalRouter.Name,
 			Model:          &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == clusterRouterName },
 			OnModelUpdates: []interface{}{
@@ -532,6 +533,7 @@ func (oc *Controller) Run(nodeName string) error {
 			ExternalIDs: logicalSwitchRes[0].ExternalIDs,
 		}
 		opModel = libovsdbops.OperationModel{
+			Name:           logicalSwitch.Name,
 			Model:          &logicalSwitch,
 			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == ovnLocalnetSwitch },
 			OnModelUpdates: []interface{}{

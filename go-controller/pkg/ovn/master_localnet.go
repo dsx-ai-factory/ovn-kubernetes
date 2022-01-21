@@ -36,6 +36,7 @@ func (oc *Controller) SetupLocalnetMaster() error {
 	// Create the Node's Logical Switch and set it's subnet
 	opModels := []libovsdbops.OperationModel{
 		{
+			Name:           logicalSwitch.Name,
 			Model:          &logicalSwitch,
 			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == switchName },
 			OnModelUpdates: []interface{}{
@@ -80,6 +81,7 @@ func (oc *Controller) SetupLocalnetMaster() error {
 			},
 		},
 		{
+			Name:           logicalSwitch.Name,
 			Model:          &logicalSwitch,
 			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == switchName },
 			OnModelMutations: []interface{}{

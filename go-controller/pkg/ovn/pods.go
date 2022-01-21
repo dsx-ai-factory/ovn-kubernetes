@@ -682,6 +682,17 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, lsManagerNodeNa
 	}
 
 	if !lspExist {
+		timeout := ovntypes.OVSDBWaitTimeout
+		allOps = append(allOps, ovsdb.Operation{
+			Op:      ovsdb.OperationWait,
+			Timeout: &timeout,
+			Table:   "Logical_Switch_Port",
+			Where:   []ovsdb.Condition{{Column: "name", Function: ovsdb.ConditionEqual, Value: lsp.Name}},
+			Columns: []string{"name"},
+			Until:   "!=",
+			Rows:    []ovsdb.Row{{"name": lsp.Name}},
+		})
+
 		// create new logical switch port
 		ops, err := oc.mc.nbClient.Create(lsp)
 		if err != nil {
