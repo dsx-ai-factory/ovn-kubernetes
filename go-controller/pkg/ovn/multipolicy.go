@@ -23,6 +23,9 @@ func (oc *Controller) syncMultiNetworkPolicies(multiPolicies []interface{}) {
 				npInterface)
 			continue
 		}
+		if !oc.shouldApplyMultiPolicy(policy) {
+			continue
+		}
 		if nsMap, ok := expectedPolicies[policy.Namespace]; ok {
 			nsMap[policy.Name] = true
 		} else {
@@ -54,6 +57,27 @@ func (oc *Controller) syncMultiNetworkPolicies(multiPolicies []interface{}) {
 			klog.Errorf("Error removing stale port groups %v: %v", stalePGs, err)
 		}
 	}
+}
+
+func (oc *Controller) shouldApplyMultiPolicy(mpolicy *multinetworkpolicy.MultiNetworkPolicy) bool {
+	policyForAnnot, ok := mpolicy.Annotations[PolicyNetworkAnnotation]
+	if !ok {
+		return false
+	}
+	policyForAnnot = strings.ReplaceAll(policyForAnnot, " ", "")
+	policyNetworks := strings.Split(policyForAnnot, ",")
+	for _, networkName := range policyNetworks {
+		networkNamespace := mpolicy.Namespace
+		a := strings.Split(networkName, "/")
+		if len(a) > 1 {
+			networkName = a[1]
+			networkNamespace = a[0]
+		}
+		if _, ok := oc.nadInfo.NetAttachDefs.Load(util.GetNadKeyName(networkNamespace, networkName)); ok {
+			return true
+		}
+	}
+	return false
 }
 
 func multiNetworkPolicy2NetworkPolicy(mpolicy *multinetworkpolicy.MultiNetworkPolicy) *knet.NetworkPolicy {
@@ -124,26 +148,7 @@ func multiNetworkPolicy2NetworkPolicy(mpolicy *multinetworkpolicy.MultiNetworkPo
 func (oc *Controller) addMultiNetworkPolicy(mpolicy *multinetworkpolicy.MultiNetworkPolicy) {
 	klog.Infof("Adding multi network policy %s in namespace %s: %v", mpolicy.Name, mpolicy.Namespace, mpolicy)
 
-	policyNetworksAnnot, ok := mpolicy.Annotations[PolicyNetworkAnnotation]
-	if !ok {
-		return
-	}
-	policyNetworksAnnot = strings.ReplaceAll(policyNetworksAnnot, " ", "")
-	policyNetworks := strings.Split(policyNetworksAnnot, ",")
-	found := false
-	for _, networkName := range policyNetworks {
-		expectedNamespace := mpolicy.Namespace
-		a := strings.Split(networkName, "/")
-		if len(a) > 1 {
-			networkName = a[1]
-			expectedNamespace = a[0]
-		}
-		if _, ok := oc.nadInfo.NetAttachDefs.Load(util.GetNadKeyName(expectedNamespace, networkName)); ok {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !oc.shouldApplyMultiPolicy(mpolicy) {
 		return
 	}
 
@@ -156,26 +161,7 @@ func (oc *Controller) deleteMultiNetworkPolicy(mpolicy *multinetworkpolicy.Multi
 	klog.Infof("Deleting multi network policy %s in namespace %s: %v",
 		mpolicy.Name, mpolicy.Namespace, mpolicy)
 
-	policyNetworksAnnot, ok := mpolicy.Annotations[PolicyNetworkAnnotation]
-	if !ok {
-		return
-	}
-	policyNetworksAnnot = strings.ReplaceAll(policyNetworksAnnot, " ", "")
-	policyNetworks := strings.Split(policyNetworksAnnot, ",")
-	found := false
-	for _, networkName := range policyNetworks {
-		expectedNamespace := mpolicy.Namespace
-		a := strings.Split(networkName, "/")
-		if len(a) > 1 {
-			networkName = a[1]
-			expectedNamespace = a[0]
-		}
-		if _, ok := oc.nadInfo.NetAttachDefs.Load(util.GetNadKeyName(expectedNamespace, networkName)); ok {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !oc.shouldApplyMultiPolicy(mpolicy) {
 		return
 	}
 
