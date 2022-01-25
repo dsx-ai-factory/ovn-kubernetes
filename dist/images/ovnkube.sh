@@ -178,8 +178,6 @@ if [[ -z ${metrics_endpoint_ip} ]]; then
   metrics_endpoint_ip=${K8S_NODE_IP:-0.0.0.0}
 fi
 metrics_endpoint_ip=$(bracketify $metrics_endpoint_ip)
-ovnkube_metrics_pk=${OVNKUBE_METRICS_PK:-/ovn-cert/ovnkube-metrics-privkey.pem}
-ovnkube_metrics_cert=${OVNKUBE_METRICS_CERT:-/ovn-cert/ovnkube-metrics-cert.pem}
 ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
 # namespace used for classifying host network traffic
 ovn_host_network_namespace=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
@@ -1179,11 +1177,19 @@ ovn-node() {
     wait_for_event process_ready ovn-controller
   fi
 
+  local tls_dir="/root/tls_dir"
+  mkdir -p -m 0700 ${tls_dir}
+  chown root.root ${tls_dir}
+  openssl req -x509 -nodes -newkey rsa:4096 -keyout ${tls_dir}/key.pem -out ${tls_dir}/cert.pem -days 365 -subj '/CN=*.nvmetal.net' 2>&1 > /dev/null
+  if [[ $? != 0 ]]; then
+    echo "Exiting, failed to generate TLS cert/key"
+    exit 1
+  fi
+
   local tls_ssl_opts=""
-  wait_for_event attempts=20 files_exist ${ovnkube_metrics_pk} ${ovnkube_metrics_cert}
   tls_ssl_opts="
-    --metrics-node-server-privkey ${ovnkube_metrics_pk}
-    --metrics-node-server-cert ${ovnkube_metrics_cert}
+    --metrics-node-server-privkey ${tls_dir}/key.pem
+    --metrics-node-server-cert ${tls_dir}/cert.pem
       "
 
   [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
