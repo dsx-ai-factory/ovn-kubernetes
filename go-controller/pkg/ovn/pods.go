@@ -720,21 +720,19 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, lsManagerNodeNa
 		allOps = append(allOps, ops...)
 	}
 
-	results, err := libovsdbops.TransactAndCheck(oc.mc.nbClient, allOps)
+	results, err := libovsdbops.TransactAndCheckAndSetUUIDs(oc.mc.nbClient, lsp, allOps)
 	if err != nil {
 
 		return fmt.Errorf("could not perform creation or update of logical switch port %s - %+v", portName, err)
 	}
 
-	// Add the pod's logical switch port to the port cache
-	var lspUUID string
-	if len(results) >= 1 && !lspExist {
-		// the results may have mutltiple entries but should only be on one UUID
-		lspUUID = results[0].UUID.GoUUID
-	} else {
-		lspUUID = lsp.UUID
+	// if somehow lspUUID is empty, there is a bug here with interpreting OVSDB results
+	if len(lsp.UUID) == 0 {
+		return fmt.Errorf("UUID is empty from LSP: %q create operation. OVSDB results: %#v", portName, results)
 	}
-	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, lspUUID, podMac, podIfAddrs)
+
+	// Add the pod's logical switch port to the port cache
+	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, lsp.UUID, podMac, podIfAddrs)
 
 	// If multicast is allowed and enabled for the namespace, add the port to the allow policy.
 	// FIXME: there's a race here with the Namespace multicastUpdateNamespace() handler, but

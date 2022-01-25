@@ -99,15 +99,18 @@ func ensureOvnAddressSet(asf *ovnAddressSetFactory, name string) (*ovnAddressSet
 		hashName: asf.Prefix + hashedAddressSet(name),
 	}
 
-	addrset := &nbdb.AddressSet{Name: as.hashName, ExternalIDs: map[string]string{"name": name}}
+	addrSet := &nbdb.AddressSet{Name: as.hashName, ExternalIDs: map[string]string{"name": name}}
+	if asf.IsSecondary {
+		addrSet.ExternalIDs["network_name"] = asf.NetName
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 	defer cancel()
-	err := as.nbClient.Get(ctx, addrset)
+	err := as.nbClient.Get(ctx, addrSet)
 	if err != nil && err != libovsdbclient.ErrNotFound {
 		return nil, fmt.Errorf("ensuring address set %s failed: %+v", name, err)
 	}
 
-	if len(addrset.UUID) == 0 {
+	if len(addrSet.UUID) == 0 {
 		ops := make([]ovsdb.Operation, 0, 2)
 		timeout := types.OVSDBWaitTimeout
 		ops = append(ops, ovsdb.Operation{
@@ -119,30 +122,30 @@ func ensureOvnAddressSet(asf *ovnAddressSetFactory, name string) (*ovnAddressSet
 			Until:   "!=",
 			Rows:    []ovsdb.Row{{"name": name}},
 		})
-		//create the address_set with no IPs
-		op, err := as.nbClient.Create(&nbdb.AddressSet{
-			Name:        as.hashName,
-			ExternalIDs: map[string]string{"name": name},
-		})
+		// hack used to make TransactAndCheckAndSetUUIDs track the model correctly
+		addrSet.UUID = libovsdbops.BuildNamedUUID()
+		// create the address_set with no IPs
+		op, err := as.nbClient.Create(addrSet)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create address set %s (%v)",
 				name, err)
 		}
 		ops = append(ops, op...)
-		results, err := libovsdbops.TransactAndCheck(as.nbClient, ops)
+		results, err := libovsdbops.TransactAndCheckAndSetUUIDs(as.nbClient, addrSet, ops)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create address set %s (%v)",
 				name, err)
 		}
-		if len(results) == 1 {
-			as.uuid = results[0].UUID.GoUUID
-		} else {
+		as.uuid = addrSet.UUID
+
+		if len(as.uuid) == 0 {
 			//should never happen
-			return nil, fmt.Errorf("returned too many results from addressSet creation")
+			return nil, fmt.Errorf("ensureOvnAddressSet: empty UUID in address set %q, model: %#v, results: %#v",
+				name, *addrSet, results)
 		}
 	} else {
 		// if there is already an addressSet, reuse the addressSet and return it
-		as.uuid = addrset.UUID
+		as.uuid = addrSet.UUID
 	}
 
 	return as, nil
@@ -265,6 +268,9 @@ func destroyAddressSet(netNameInfo util.NetNameInfo, nbClient libovsdbclient.Cli
 		Name:        netNameInfo.Prefix + hashedAddressSet(name),
 		ExternalIDs: map[string]string{"name": name},
 	}
+	if netNameInfo.IsSecondary {
+		addrset.ExternalIDs["network_name"] = netNameInfo.NetName
+	}
 	ops, err := nbClient.Where(addrset).Delete()
 	if err != nil {
 		return fmt.Errorf("failed to delete address set %s (%v)",
@@ -341,20 +347,19 @@ func newOvnAddressSet(asf *ovnAddressSetFactory, name string, ips []net.IP) (*ov
 		return nil, err
 	}
 
+	// Update address set IPs and external ID
+	addrSet.Addresses = uniqIPs
+	addrSet.ExternalIDs = map[string]string{"name": as.name}
+	if asf.IsSecondary {
+		addrSet.ExternalIDs["network_name"] = asf.NetName
+	}
+
 	if len(addrSet.UUID) > 0 {
 		// if there is already an addressSet, reuse the addressSet and set the IPs to the slice provided
 		as.uuid = addrSet.UUID
 		klog.V(5).Infof("New(%s) already exists; updating IPs", asDetail(as))
 
-		addrset := &nbdb.AddressSet{
-			UUID:        as.uuid,
-			Addresses:   uniqIPs,
-			ExternalIDs: map[string]string{"name": as.name},
-		}
-		if asf.IsSecondary {
-			addrset.ExternalIDs["network_name"] = asf.NetName
-		}
-		ops, err := as.nbClient.Where(addrset).Update(addrset, &addrset.Addresses)
+		ops, err := as.nbClient.Where(addrSet).Update(addrSet, &addrSet.Addresses)
 		if err != nil {
 			return nil, err
 		}
@@ -364,30 +369,38 @@ func newOvnAddressSet(asf *ovnAddressSetFactory, name string, ips []net.IP) (*ov
 				name, err)
 		}
 	} else {
-		//create a new addressSet
-		externalIds := map[string]string{"name": as.name}
-		if asf.IsSecondary {
-			externalIds["network_name"] = asf.NetName
-		}
-		ops, err := asf.nbClient.Create(&nbdb.AddressSet{
-			Name:        as.hashName,
-			Addresses:   uniqIPs,
-			ExternalIDs: externalIds,
+		ops := make([]ovsdb.Operation, 0, 2)
+		timeout := types.OVSDBWaitTimeout
+		ops = append(ops, ovsdb.Operation{
+			Op:      ovsdb.OperationWait,
+			Timeout: &timeout,
+			Table:   "Address_Set",
+			Where:   []ovsdb.Condition{{Column: "name", Function: ovsdb.ConditionEqual, Value: name}},
+			Columns: []string{"name"},
+			Until:   "!=",
+			Rows:    []ovsdb.Row{{"name": name}},
 		})
+		if addrSet.UUID == "" {
+			// hack used to make TransactAndCheckAndSetUUIDs track the model correctly
+			addrSet.UUID = libovsdbops.BuildNamedUUID()
+		}
+		// create a new addressSet
+		op, err := asf.nbClient.Create(addrSet)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create address set %s (%v)",
 				name, err)
 		}
-		results, err := libovsdbops.TransactAndCheck(asf.nbClient, ops)
+		ops = append(ops, op...)
+		results, err := libovsdbops.TransactAndCheckAndSetUUIDs(asf.nbClient, addrSet, ops)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create new address set %s (%v)",
 				name, err)
 		}
-		if len(results) == 1 {
-			as.uuid = results[0].UUID.GoUUID
-		} else {
-			//should never happen
-			return nil, fmt.Errorf("returned too many results from addressSet creation")
+		as.uuid = addrSet.UUID
+		if len(as.uuid) == 0 {
+			// should never happen
+			return nil, fmt.Errorf("newOVNAddressSet: empty UUID in address set %q, model: %#v,"+
+				" results: %#v", name, *addrSet, results)
 		}
 	}
 
