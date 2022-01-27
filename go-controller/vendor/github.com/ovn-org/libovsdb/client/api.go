@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -127,7 +126,7 @@ func (a api) List(ctx context.Context, result interface{}) error {
 	}
 	i := resultVal.Len()
 
-	for _, row := range tableCache.Rows() {
+	for _, row := range tableCache.RowsShallow() {
 		if i >= resultVal.Cap() {
 			break
 		}
@@ -139,8 +138,10 @@ func (a api) List(ctx context.Context, result interface{}) error {
 				continue
 			}
 		}
+		// clone only the models that match the predicate
+		m := model.Clone(row)
 
-		resultVal.Set(reflect.Append(resultVal, reflect.Indirect(reflect.ValueOf(row))))
+		resultVal.Set(reflect.Append(resultVal, reflect.Indirect(reflect.ValueOf(m))))
 		i++
 	}
 	return nil
@@ -223,8 +224,7 @@ func (a api) Get(ctx context.Context, m model.Model) error {
 		return ErrNotFound
 	}
 
-	foundBytes, _ := json.Marshal(found)
-	_ = json.Unmarshal(foundBytes, m)
+	model.CloneInto(found, m)
 
 	return nil
 }
