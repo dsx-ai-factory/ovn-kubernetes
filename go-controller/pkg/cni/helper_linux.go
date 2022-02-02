@@ -443,6 +443,14 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 			}
 			// SR-IOV Case
 			if pr.CNIConf.DeviceID != "" {
+				// for VMI's virt-lanuncher pod, Ifname is renamed to Ifname+"-nic0"
+				if strings.HasPrefix(pr.PodName, "virt-launcher") {
+					ifName := pr.IfName + "-nic0"
+					link, err = util.GetNetLinkOps().LinkByName(ifName)
+					if err != nil {
+						return fmt.Errorf("failed to get virt-launcher container interface %s %s: %v", ifName, podDesc, err)
+					}
+				}
 				err = util.GetNetLinkOps().LinkSetDown(link)
 				if err != nil {
 					return fmt.Errorf("failed to bring down container interface %s %s: %v", pr.IfName, podDesc, err)
