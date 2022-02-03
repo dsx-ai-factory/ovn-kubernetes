@@ -97,6 +97,11 @@ func (oc *Controller) addHostnetworkPodIPToAddressSet(nodeName, podName, policyT
 		return fmt.Errorf("failed to get node %s: %v", nodeName, err)
 	}
 
+	// if the node is not managed by OVN, then we have nothing to do
+	if noHostSubnet(node) {
+		return nil
+	}
+
 	ips, err := oc.getHostNetworkPodIPs(node, policyType)
 	if err != nil {
 		return fmt.Errorf("failed to get %s policy IPs for host network pod %s schedued on node %s: %v",
@@ -128,6 +133,11 @@ func (oc *Controller) delHostnetworkPodIPFromAddressSet(nodeName, podName, polic
 				node, err := oc.mc.kube.GetNode(nodeName)
 				if err != nil {
 					return fmt.Errorf("failed to get node %s: %v", nodeName, err)
+				}
+
+				// if node is not managed by OVN, there is nothing to do
+				if noHostSubnet(node) {
+					return nil
 				}
 
 				ips, err := oc.getHostNetworkPodIPs(node, policyType)
