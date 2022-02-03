@@ -182,7 +182,7 @@ func (gp *gressPolicy) addPeerPods(oc *Controller, pods ...*v1.Pod) error {
 		} else {
 			podIPs, err := util.GetAllPodIPs(pod, gp.netAttachInfo)
 			if err != nil {
-				klog.Errorf("Failed to get all Pod IPs for pod %s/%s on network %s: err", pod.Namespace, pod.Name, gp.netAttachInfo.NetName, err)
+				klog.Errorf("Failed to get all Pod IPs for pod %s/%s on network %s: err: %v", pod.Namespace, pod.Name, gp.netAttachInfo.NetName, err)
 			} else {
 				ips = append(ips, podIPs...)
 			}
