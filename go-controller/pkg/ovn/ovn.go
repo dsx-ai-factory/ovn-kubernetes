@@ -144,6 +144,7 @@ type Controller struct {
 	namespaceHandler          *factory.Handler
 	multiNetworkPolicyHandler *factory.Handler
 	isStarted                 bool
+	startMutex                sync.Mutex
 
 	nadInfo *util.NetAttachDefInfo
 
@@ -1567,21 +1568,13 @@ func (mc *OvnMHController) addNetworkAttachDefinition(netattachdef *nettypes.Net
 		return
 	}
 
-	// This controller may already started if it is shared by multiple net-attach-def
-	if oc == nil || oc.isStarted {
+	// return if oc is nil, or nadInfo is for default network
+	if oc == nil || !oc.nadInfo.IsSecondary {
 		return
 	}
 
-	klog.Infof("The first Network Attachment Definition %s/%s is added to nad %s, create associated logical entities",
-		netattachdef.Namespace, netattachdef.Name, oc.nadInfo.NetName)
 	// run the cluster controller to init the master
-	err = oc.StartClusterMaster(mc.nodeName)
-	if err != nil {
-		klog.Errorf(err.Error())
-		return
-	}
-
-	err = oc.Run(oc.mc.nodeName)
+	err = oc.Init(mc.nodeName)
 	if err != nil {
 		klog.Errorf(err.Error())
 	}
@@ -1915,4 +1908,21 @@ func (oc *Controller) StartServiceController(wg *sync.WaitGroup, runRepair bool)
 		}
 	}()
 	return nil
+}
+
+func (oc *Controller) Init(nodeName string) error {
+	oc.startMutex.Lock()
+	if oc.isStarted {
+		oc.startMutex.Unlock()
+		return nil
+	}
+	oc.isStarted = true
+	oc.startMutex.Unlock()
+	klog.Infof("The first Network Attachment Definition is added to nad %s, create associated logical entities", oc.nadInfo.NetName)
+
+	if err := oc.StartClusterMaster(nodeName); err != nil {
+		return err
+	}
+
+	return oc.Run(nodeName)
 }

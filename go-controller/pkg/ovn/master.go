@@ -109,10 +109,7 @@ func (mc *OvnMHController) Start(ctx context.Context) error {
 					mc.watchNetworkAttachmentDefinitions()
 				}
 
-				if err := mc.ovnController.StartClusterMaster(mc.nodeName); err != nil {
-					panic(err.Error())
-				}
-				if err := mc.ovnController.Run(mc.nodeName); err != nil {
+				if err := mc.ovnController.Init(mc.nodeName); err != nil {
 					panic(err.Error())
 				}
 			},
@@ -231,7 +228,6 @@ func (mc *OvnMHController) disableOVNCTInvalidFlows() error {
 func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	klog.Infof("Starting cluster master for network %s", oc.nadInfo.NetName)
 
-	oc.isStarted = true
 	if oc.nadInfo.TopoType == types.LocalnetAttachDefTopoType {
 		return oc.SetupLocalnetMaster()
 	}
