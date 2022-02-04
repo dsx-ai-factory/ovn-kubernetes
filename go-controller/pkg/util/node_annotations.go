@@ -312,7 +312,7 @@ func ShouldSkipPinnedLS(node *kapi.Node, nadInfo *NetAttachDefInfo) bool {
 	nadNames := strings.Split(skip, ",")
 	for _, nadName := range nadNames {
 		nadName = strings.TrimSpace(nadName)
-		if !nadInfo.NotDefault {
+		if !nadInfo.IsSecondary {
 			if nadName == types.DefaultNetworkName {
 				return true
 			}

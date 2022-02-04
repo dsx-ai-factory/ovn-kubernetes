@@ -112,7 +112,7 @@ func TestGetMatchFromIPBlock(t *testing.T) {
 
 	for _, tc := range testcases {
 		netAttachInfo := &util.NetAttachDefInfo{
-			NetNameInfo: util.NetNameInfo{NetName: types.DefaultNetworkName, Prefix: "", NotDefault: false},
+			NetNameInfo: util.NetNameInfo{NetName: types.DefaultNetworkName, Prefix: "", IsSecondary: false},
 			TopoType:    "",
 		}
 		gressPolicy := newGressPolicy(knet.PolicyTypeIngress, 5, "testing", "test", netAttachInfo, false)

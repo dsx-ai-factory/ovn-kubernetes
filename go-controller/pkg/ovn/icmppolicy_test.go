@@ -1123,7 +1123,7 @@ var _ = ginkgo.Describe("OVN ICMPNetworkPolicy Low-Level Operations", func() {
 			},
 		}
 		policyName := "icmp_" + policy.Name
-		netAttachInfo := &util.NetAttachDefInfo{NetNameInfo: util.NetNameInfo{NetName: types.DefaultNetworkName, Prefix: "", NotDefault: false}}
+		netAttachInfo := &util.NetAttachDefInfo{NetNameInfo: util.NetNameInfo{NetName: types.DefaultNetworkName, Prefix: "", IsSecondary: false}}
 		gp := newGressPolicy(knet.PolicyType(icmpnetworkpolicyapi.PolicyTypeIngress), 0, policy.Namespace,
 			policyName, netAttachInfo, false)
 		err := gp.ensurePeerAddressSet(asFactory)

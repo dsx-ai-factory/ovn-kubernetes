@@ -297,9 +297,9 @@ func (mc *OvnMHController) setDefaultOvnController(addressSetFactory addressset.
 		NetConf: ctypes.NetConf{
 			Name: ovntypes.DefaultNetworkName,
 		},
-		NetCidr:    config.Default.RawClusterSubnets,
-		MTU:        config.Default.MTU,
-		NotDefault: false,
+		NetCidr:     config.Default.RawClusterSubnets,
+		MTU:         config.Default.MTU,
+		IsSecondary: false,
 	}
 	nadInfo, _ := util.NewNetAttachDefInfo(defaultNetConf)
 	_, err := mc.NewOvnController(nadInfo, addressSetFactory)
@@ -327,7 +327,7 @@ func (mc *OvnMHController) NewOvnController(nadInfo *util.NetAttachDefInfo,
 	}
 
 	stopChan := mc.stopChan
-	if nadInfo.NotDefault {
+	if nadInfo.IsSecondary {
 		stopChan = make(chan struct{})
 	}
 	var lsManager *lsm.LogicalSwitchManager
@@ -391,7 +391,7 @@ func (mc *OvnMHController) NewOvnController(nadInfo *util.NetAttachDefInfo,
 		retryPods:                make(map[types.UID]*retryEntry),
 		retryPodsChan:            make(chan struct{}, 1),
 	}
-	if !nadInfo.NotDefault {
+	if !nadInfo.IsSecondary {
 		oc.wg = mc.wg
 		mc.ovnController = oc
 		oc.svcController, oc.svcFactory = newServiceController(mc.client, mc.nbClient)
@@ -408,7 +408,7 @@ func (mc *OvnMHController) NewOvnController(nadInfo *util.NetAttachDefInfo,
 
 // Run starts the actual watching.
 func (oc *Controller) Run(nodeName string) error {
-	if !oc.nadInfo.NotDefault {
+	if !oc.nadInfo.IsSecondary {
 		oc.syncPeriodic()
 	}
 	klog.Infof("Starting all the Watchers for network %s...", oc.nadInfo.NetName)
@@ -427,7 +427,7 @@ func (oc *Controller) Run(nodeName string) error {
 	// https://github.com/ovn-org/ovn-kubernetes/pull/859
 	oc.WatchNodes()
 
-	if !oc.nadInfo.NotDefault {
+	if !oc.nadInfo.IsSecondary {
 		// Start service watch factory and sync services
 		oc.svcFactory.Start(oc.stopChan)
 
@@ -439,7 +439,7 @@ func (oc *Controller) Run(nodeName string) error {
 
 	oc.WatchPods()
 
-	if !oc.nadInfo.NotDefault {
+	if !oc.nadInfo.IsSecondary {
 		// WatchNetworkPolicy depends on WatchPods and WatchNamespaces
 		oc.WatchNetworkPolicy()
 
@@ -485,7 +485,7 @@ func (oc *Controller) Run(nodeName string) error {
 			}()
 		}
 	} else {
-		if oc.nadInfo.NotDefault && config.OVNKubernetesFeature.EnableMultiNetworkPolicy {
+		if oc.nadInfo.IsSecondary && config.OVNKubernetesFeature.EnableMultiNetworkPolicy {
 			oc.multiNetworkPolicyHandler = oc.WatchMultiNetworkPolicy()
 		}
 		klog.Infof("Completing all the Watchers for network %s took %v", oc.nadInfo.NetName, time.Since(start))
@@ -552,7 +552,7 @@ func (oc *Controller) Run(nodeName string) error {
 		return fmt.Errorf("failed to generate set topology version in OVNf for network %s, err: %v", oc.nadInfo.NetName, err)
 	}
 
-	if !oc.nadInfo.NotDefault {
+	if !oc.nadInfo.IsSecondary {
 		// Update topology version on node
 		node, err := oc.mc.kube.GetNode(nodeName)
 		if err != nil {
@@ -574,7 +574,7 @@ func (oc *Controller) ovnTopologyCleanup() error {
 	}
 
 	// Cleanup address sets in non dual stack formats in all versions known to possibly exist.
-	if ver <= ovntypes.OvnPortBindingTopoVersion && !oc.nadInfo.NotDefault {
+	if ver <= ovntypes.OvnPortBindingTopoVersion && !oc.nadInfo.IsSecondary {
 		err = addressset.NonDualStackAddressSetCleanup(oc.nadInfo.NetNameInfo, oc.mc.nbClient)
 	}
 	return err
@@ -634,7 +634,7 @@ func (oc *Controller) determineOVNTopoVersionFromOVN() (int, error) {
 // for syncNodesPeriodic which deletes chassis records from the sbdb
 // every 5 minutes
 func (oc *Controller) syncPeriodic() {
-	if oc.nadInfo.NotDefault {
+	if oc.nadInfo.IsSecondary {
 		return
 	}
 
@@ -790,7 +790,7 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 		return false
 	}
 
-	if !oc.nadInfo.NotDefault {
+	if !oc.nadInfo.IsSecondary {
 		if oldPod != nil && (exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod)) {
 			// No matter if a pod is ovn networked, or host networked, we still need to check for exgw
 			// annotations. If the pod is ovn networked and is in update reschedule, addLogicalPort will take
@@ -816,7 +816,7 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 			return false
 		}
 	} else {
-		if oc.nadInfo.NotDefault {
+		if oc.nadInfo.IsSecondary {
 			return true
 		}
 
@@ -862,7 +862,7 @@ func (oc *Controller) WatchPods() {
 	oc.podHandler = oc.mc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
-			if pod.Spec.HostNetwork && util.PodScheduled(pod) && !oc.nadInfo.NotDefault {
+			if pod.Spec.HostNetwork && util.PodScheduled(pod) && !oc.nadInfo.IsSecondary {
 				if err := oc.addHostNetworkPodToNamespace(pod); err != nil {
 					klog.Warningf("Failed to add host network pod %s/%s's IPs on node %s to the namespace address_set: %v",
 						pod.Namespace, pod.Name, pod.Spec.NodeName, err)
@@ -893,7 +893,7 @@ func (oc *Controller) WatchPods() {
 					podNs, podName)
 				return
 			}
-			if pod.Spec.HostNetwork && (oldPod.Spec.NodeName != pod.Spec.NodeName) && !oc.nadInfo.NotDefault {
+			if pod.Spec.HostNetwork && (oldPod.Spec.NodeName != pod.Spec.NodeName) && !oc.nadInfo.IsSecondary {
 				if util.PodScheduled(oldPod) {
 					if err := oc.delHostNetworkPodFromNamespace(oldPod); err != nil {
 						klog.Warningf("Failed to delete host network pod %s/%s's IPs on node %s from the namespace address_set: %v",
@@ -916,14 +916,14 @@ func (oc *Controller) WatchPods() {
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
-			if pod.Spec.HostNetwork && util.PodScheduled(pod) && !oc.nadInfo.NotDefault {
+			if pod.Spec.HostNetwork && util.PodScheduled(pod) && !oc.nadInfo.IsSecondary {
 				if err := oc.delHostNetworkPodFromNamespace(pod); err != nil {
 					klog.Warningf("Failed to delete host network pod %s/%s's IPs on node %s from the namespace address_set: %v",
 						pod.Namespace, pod.Name, pod.Spec.NodeName, err)
 				}
 			}
 			oc.checkAndDeleteRetryPod(pod.UID)
-			if !util.PodWantsNetwork(pod) && !oc.nadInfo.NotDefault {
+			if !util.PodWantsNetwork(pod) && !oc.nadInfo.IsSecondary {
 				oc.deletePodExternalGW(pod)
 				return
 			}
@@ -938,7 +938,7 @@ func (oc *Controller) WatchPods() {
 // back the appropriate handler logic
 func (oc *Controller) WatchMultiNetworkPolicy() *factory.Handler {
 	start := time.Now()
-	if !oc.nadInfo.NotDefault {
+	if !oc.nadInfo.IsSecondary {
 		klog.Infof("WatchMultiNetworkPolicy for default network is a no-op")
 		return nil
 	}
@@ -967,7 +967,7 @@ func (oc *Controller) WatchMultiNetworkPolicy() *factory.Handler {
 // WatchNetworkPolicy starts the watching of network policy resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNetworkPolicy() {
-	if oc.nadInfo.NotDefault {
+	if oc.nadInfo.IsSecondary {
 		klog.Infof("WatchNetworkPolicy for network %s is a no-op", oc.nadInfo.NetName)
 		return
 	}
@@ -996,7 +996,7 @@ func (oc *Controller) WatchNetworkPolicy() {
 //WatchICMPNetworkPolicy starts the watching of icmpnetworkpolicy resource and calls
 //back the appropriate handler logic
 func (oc *Controller) WatchICMPNetworkPolicy() *factory.Handler {
-	if oc.nadInfo.NotDefault {
+	if oc.nadInfo.IsSecondary {
 		klog.Infof("WatchNetworkPolicy for network %s is a no-op", oc.nadInfo.NetName)
 		return nil
 	}
@@ -1028,7 +1028,7 @@ func (oc *Controller) WatchICMPNetworkPolicy() *factory.Handler {
 // WatchEgressFirewall starts the watching of egressfirewall resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchEgressFirewall() *factory.Handler {
-	if oc.nadInfo.NotDefault {
+	if oc.nadInfo.IsSecondary {
 		return nil
 	}
 
@@ -1104,7 +1104,7 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 // WatchEgressNodes starts the watching of egress assignable nodes and calls
 // back the appropriate handler logic.
 func (oc *Controller) WatchEgressNodes() {
-	if oc.nadInfo.NotDefault {
+	if oc.nadInfo.IsSecondary {
 		klog.Infof("WatchEgressNodes for network %s is a no-op", oc.nadInfo.NetName)
 		return
 	}
@@ -1228,7 +1228,7 @@ func (oc *Controller) WatchEgressNodes() {
 // WatchEgressIP starts the watching of egressip resource and calls
 // back the appropriate handler logic.
 func (oc *Controller) WatchEgressIP() {
-	if oc.nadInfo.NotDefault {
+	if oc.nadInfo.IsSecondary {
 		klog.Infof("WatchEgressIP for network %s is a no-op", oc.nadInfo.NetName)
 		return
 	}
@@ -1300,7 +1300,7 @@ func (oc *Controller) WatchNamespaces() {
 
 // syncNodeGateway ensures a node's gateway router is configured
 func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet) error {
-	if oc.nadInfo.NotDefault {
+	if oc.nadInfo.IsSecondary {
 		klog.Infof("WatchNamespaces for network %s is a no-op", oc.nadInfo.NetName)
 		return nil
 	}
@@ -1389,7 +1389,7 @@ func (oc *Controller) WatchNodes() {
 				oc.requestRetryPods()
 			}
 
-			if oc.nadInfo.NotDefault {
+			if oc.nadInfo.IsSecondary {
 				return
 			}
 
@@ -1444,7 +1444,7 @@ func (oc *Controller) WatchNodes() {
 				}
 			}
 
-			if oc.nadInfo.NotDefault {
+			if oc.nadInfo.IsSecondary {
 				return
 			}
 
@@ -1562,15 +1562,15 @@ func (mc *OvnMHController) initOvnController(netattachdef *nettypes.NetworkAttac
 	klog.V(5).Infof("Add Network Attachment Definition %s/%s to nad %s", netattachdef.Namespace, netattachdef.Name, nadInfo.NetName)
 
 	// nadName must be in the correct form for non-default net-attach-def
-	if nadInfo.NotDefault {
-		nadName := util.GetNadName(netattachdef.Namespace, netattachdef.Name, !nadInfo.NotDefault)
+	if nadInfo.IsSecondary {
+		nadName := util.GetNadName(netattachdef.Namespace, netattachdef.Name, !nadInfo.IsSecondary)
 		if netconf.NadName != nadName {
 			return nil, fmt.Errorf("unexpected net_attach_def_name %s of Network Attachment Definition %s/%s, expected: %s",
 				netconf.NadName, netattachdef.Namespace, netattachdef.Name, nadName)
 		}
 	}
 
-	if !nadInfo.NotDefault {
+	if !nadInfo.IsSecondary {
 		mc.ovnController.nadInfo.NetAttachDefs.Store(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name), true)
 		return mc.ovnController, nil
 	}
@@ -1652,7 +1652,7 @@ func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.
 	klog.Infof("Delete net-attach-def %s/%s from nad %s", netattachdef.Namespace, netattachdef.Name, nadInfo.NetName)
 
 	if netconf.NadName != "" {
-		nadName := util.GetNadName(netattachdef.Namespace, netattachdef.Name, !nadInfo.NotDefault)
+		nadName := util.GetNadName(netattachdef.Namespace, netattachdef.Name, !nadInfo.IsSecondary)
 		if netconf.NadName != nadName {
 			klog.Errorf("Unexpected net_attach_def_name %s of Network Attachment Definition %s/%s, expected: %s",
 				netconf.NadName, netattachdef.Namespace, netattachdef.Name, nadName)
@@ -1660,7 +1660,7 @@ func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.
 		}
 	}
 
-	if !nadInfo.NotDefault {
+	if !nadInfo.IsSecondary {
 		mc.ovnController.nadInfo.NetAttachDefs.Delete(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name))
 		return
 	}
@@ -1786,7 +1786,7 @@ func (mc *OvnMHController) syncNetworkAttachDefinition(netattachdefs []interface
 	//	}
 	//
 	//	nodeName := strings.TrimPrefix(nodeSwitch.Name, netPrefix)
-	//	oc := &Controller{mc: mc, nadInfo: &util.NetAttachDefInfo{NetNameInfo: util.NetNameInfo{NetName: netName, Prefix: netPrefix, NotDefault: true}}}
+	//	oc := &Controller{mc: mc, nadInfo: &util.NetAttachDefInfo{NetNameInfo: util.NetNameInfo{NetName: netName, Prefix: netPrefix, IsSecondary: true}}}
 	//	if nodeName == ovntypes.OVNLocalnetSwitch {
 	//		oc.nadInfo.TopoType = ovntypes.LocalnetAttachDefTopoType
 	//		oc.deleteMaster()
@@ -1819,7 +1819,7 @@ func (mc *OvnMHController) syncNetworkAttachDefinition(netattachdefs []interface
 	//		continue
 	//	}
 	//
-	//	oc := &Controller{mc: mc, nadInfo: &util.NetAttachDefInfo{NetNameInfo: util.NetNameInfo{NetName: netName, Prefix: netPrefix, NotDefault: true}}}
+	//	oc := &Controller{mc: mc, nadInfo: &util.NetAttachDefInfo{NetNameInfo: util.NetNameInfo{NetName: netName, Prefix: netPrefix, IsSecondary: true}}}
 	//	oc.deleteMaster()
 	//}
 }
@@ -1842,7 +1842,7 @@ func (mc *OvnMHController) watchNetworkAttachmentDefinitions() *factory.Handler 
 
 // gatewayChanged() compares old annotations to new and returns true if something has changed.
 func (oc *Controller) gatewayChanged(oldNode, newNode *kapi.Node) bool {
-	if oc.nadInfo.NotDefault {
+	if oc.nadInfo.IsSecondary {
 		return false
 	}
 	oldL3GatewayConfig, _ := util.ParseNodeL3GatewayAnnotation(oldNode)
@@ -1938,7 +1938,7 @@ func newServiceController(client clientset.Interface, nbClient libovsdbclient.Cl
 }
 
 func (oc *Controller) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
-	if oc.nadInfo.NotDefault {
+	if oc.nadInfo.IsSecondary {
 		klog.Infof("StartServiceController for network %s is a no-op", oc.nadInfo.NetName)
 		return nil
 	}

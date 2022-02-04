@@ -208,7 +208,7 @@ func buildACL(namespace, portGroup, name, direction string, priority int, match,
 	if policyType != "" {
 		externalIds[defaultDenyPolicyTypeACLExtIdKey] = string(policyType)
 	}
-	if netNameInfo.NotDefault {
+	if netNameInfo.IsSecondary {
 		externalIds["network_name"] = netNameInfo.NetName
 	}
 
@@ -220,7 +220,7 @@ func buildPortGroup(hashName, name string, ports []*nbdb.LogicalSwitchPort, acls
 	var externalIds map[string]string
 	pgName := netNameInfo.Prefix + hashName
 	externalIds = map[string]string{"name": name}
-	if netNameInfo.NotDefault {
+	if netNameInfo.IsSecondary {
 		externalIds["network_name"] = netNameInfo.NetName
 	}
 	return libovsdbops.BuildPortGroup(pgName, name, ports, acls, externalIds)
@@ -898,7 +898,7 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 				klog.Errorf(err.Error())
 				continue
 			}
-			if !oc.nadInfo.NotDefault {
+			if !oc.nadInfo.IsSecondary {
 				// Start service handlers ONLY if there's an ingress Address Set
 				oc.handlePeerService(policy.Namespace, ingress, np)
 			}

@@ -140,9 +140,9 @@ func HashForOVN(s string) string {
 
 type NetNameInfo struct {
 	// netconf's name
-	NetName    string
-	Prefix     string
-	NotDefault bool
+	NetName     string
+	Prefix      string
+	IsSecondary bool
 }
 
 type NetAttachDefInfo struct {
@@ -160,26 +160,31 @@ type NetAttachDefInfo struct {
 }
 
 func NewNetAttachDefInfo(netconf *cnitypes.NetConf) (*NetAttachDefInfo, error) {
+	// if not_default is set to be true, override IsSecondary
+	if netconf.NotDefault {
+		netconf.IsSecondary = true
+	}
+
 	if netconf.TopoType != "" && netconf.TopoType != types.LocalnetAttachDefTopoType {
 		return nil, fmt.Errorf("invalid topotype %s for net-attach-def %s", netconf.TopoType, netconf.Name)
 	}
 
-	if !netconf.NotDefault && netconf.TopoType != "" {
+	if !netconf.IsSecondary && netconf.TopoType != "" {
 		return nil, fmt.Errorf("invalid topotype %s for default net-attach-def %s", netconf.TopoType, netconf.Name)
 	}
 
 	netName := "default"
-	if netconf.NotDefault {
+	if netconf.IsSecondary {
 		netName = netconf.Name
 	}
-	prefix := GetNetworkPrefix(netName, !netconf.NotDefault)
+	prefix := GetNetworkPrefix(netName, !netconf.IsSecondary)
 
 	nadInfo := NetAttachDefInfo{
 		NetCidr:     netconf.NetCidr,
 		MTU:         netconf.MTU,
 		TopoType:    netconf.TopoType,
 		VlanId:      netconf.VlanId,
-		NetNameInfo: NetNameInfo{netName, prefix, netconf.NotDefault},
+		NetNameInfo: NetNameInfo{netName, prefix, netconf.IsSecondary},
 	}
 
 	if netconf.TopoType == types.LocalnetAttachDefTopoType {
@@ -337,7 +342,7 @@ func GetAllLogicalPortNames(pod *kapi.Pod, nadInfo *NetAttachDefInfo) []string {
 	} else if on {
 		// the pod is attached to this specific network
 		for nadName := range networkMap {
-			portName := GetLogicalPortName(pod.Namespace, pod.Name, nadName, !nadInfo.NotDefault)
+			portName := GetLogicalPortName(pod.Namespace, pod.Name, nadName, !nadInfo.IsSecondary)
 			ports = append(ports, portName)
 		}
 	}

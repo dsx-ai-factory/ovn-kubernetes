@@ -30,7 +30,7 @@ func TestNewEgressDNS(t *testing.T) {
 	assert.Nil(t, err)
 	t.Cleanup(libovsdbCleanup.Cleanup)
 
-	netNameInfo := util.NetNameInfo{NetName: types.DefaultNetworkName, Prefix: "", NotDefault: false}
+	netNameInfo := util.NetNameInfo{NetName: types.DefaultNetworkName, Prefix: "", IsSecondary: false}
 	testOvnAddFtry := addressset.NewOvnAddressSetFactory(netNameInfo, libovsdbOvnNBClient)
 	mockDnsOps := new(util_mocks.DNSOps)
 	util.SetDNSLibOpsMockInst(mockDnsOps)

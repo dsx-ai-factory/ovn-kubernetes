@@ -58,7 +58,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 		app.Name = "test"
 		app.Flags = config.Flags
 
-		netNameInfo = util.NetNameInfo{NetName: types.DefaultNetworkName, Prefix: "", NotDefault: false}
+		netNameInfo = util.NetNameInfo{NetName: types.DefaultNetworkName, Prefix: "", IsSecondary: false}
 		libovsdbCleanup = nil
 	})
 

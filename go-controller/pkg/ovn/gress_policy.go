@@ -168,7 +168,7 @@ func (gp *gressPolicy) addPeerPods(oc *Controller, pods ...*v1.Pod) error {
 		if pod.Spec.HostNetwork {
 			// the NAD should be the default network since we don't allow Multi-homed networks
 			// for host network pods
-			if oc.nadInfo.NotDefault {
+			if oc.nadInfo.IsSecondary {
 				continue
 			}
 			gp.nodeHostNetPodsCacheLock.Lock()
@@ -193,7 +193,7 @@ func (gp *gressPolicy) addPeerPods(oc *Controller, pods ...*v1.Pod) error {
 }
 
 func (gp *gressPolicy) deletePeerPod(oc *Controller, pod *v1.Pod) error {
-	if pod.Spec.HostNetwork && !oc.nadInfo.NotDefault {
+	if pod.Spec.HostNetwork && !oc.nadInfo.IsSecondary {
 		gp.nodeHostNetPodsCacheLock.Lock()
 		defer gp.nodeHostNetPodsCacheLock.Unlock()
 		return oc.delHostnetworkPodIPFromAddressSet(pod.Spec.NodeName, fmt.Sprintf("%s/%s", pod.Namespace, pod.Name),
@@ -457,7 +457,7 @@ func (gp *gressPolicy) buildACLAllow(match, l4Match string, ipBlockCIDR int, acl
 		policyTypeACLExtIdKey:  string(gp.policyType),
 		policyTypeNum:          policyTypeIndex,
 	}
-	if gp.netAttachInfo.NotDefault {
+	if gp.netAttachInfo.IsSecondary {
 		externalIds["network_name"] = gp.netAttachInfo.NetName
 	}
 

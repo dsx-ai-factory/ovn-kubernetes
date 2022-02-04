@@ -270,7 +270,7 @@ func (oc *Controller) createICMPNetworkPolicy(np *networkPolicy, policy *onet.IC
 				klog.Errorf(err.Error())
 				continue
 			}
-			if !oc.nadInfo.NotDefault {
+			if !oc.nadInfo.IsSecondary {
 				// Start service handlers ONLY if there's an ingress Address Set
 				oc.handlePeerService(policy.Namespace, ingress, np)
 			}

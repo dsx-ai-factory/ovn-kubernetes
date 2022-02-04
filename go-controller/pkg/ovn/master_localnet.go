@@ -18,7 +18,7 @@ func (oc *Controller) SetupLocalnetMaster() error {
 	logicalSwitch := nbdb.LogicalSwitch{
 		Name: switchName,
 	}
-	if oc.nadInfo.NotDefault {
+	if oc.nadInfo.IsSecondary {
 		logicalSwitch.ExternalIDs = map[string]string{"network_name": oc.nadInfo.NetName}
 	}
 

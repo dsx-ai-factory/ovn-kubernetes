@@ -72,5 +72,9 @@ func ReadCNIConfig(bytes []byte) (*ovntypes.NetConf, error) {
 			return nil, err
 		}
 	}
+	// if not_default is set to be true, override IsSecondary
+	if conf.NotDefault {
+		conf.IsSecondary = true
+	}
 	return conf, nil
 }

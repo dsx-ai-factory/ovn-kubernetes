@@ -355,7 +355,7 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 // configureNamespace ensures internal structures are updated based on namespace
 // must be called with nsInfo lock
 func (oc *Controller) configureNamespace(nsInfo *namespaceInfo, ns *kapi.Namespace) {
-	if !oc.nadInfo.NotDefault {
+	if !oc.nadInfo.IsSecondary {
 		if annotation, ok := ns.Annotations[routingExternalGWsAnnotation]; ok {
 			exGateways, err := parseRoutingExternalGWAnnotation(annotation)
 			if err != nil {
@@ -400,7 +400,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 	}
 	defer nsUnlock()
 
-	if !oc.nadInfo.NotDefault {
+	if !oc.nadInfo.IsSecondary {
 		gwAnnotation := newer.Annotations[routingExternalGWsAnnotation]
 		oldGWAnnotation := old.Annotations[routingExternalGWsAnnotation]
 		_, newBFDEnabled := newer.Annotations[bfdAnnotation]
@@ -415,7 +415,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 						klog.Errorf("Failed to get all the pods (%v)", err)
 					}
 					for _, pod := range existingPods {
-						logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name, types.DefaultNetworkName, !oc.nadInfo.NotDefault)
+						logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name, types.DefaultNetworkName, !oc.nadInfo.IsSecondary)
 						portInfo, err := oc.logicalPortCache.get(logicalPort)
 						if err != nil {
 							klog.Warningf("Unable to get port %s in cache for SNAT rule removal", logicalPort)
@@ -491,7 +491,7 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
 		delete(nsInfo.networkPolicies, np.name)
 		oc.destroyNetworkPolicy(np, nsInfo)
 	}
-	if !oc.nadInfo.NotDefault {
+	if !oc.nadInfo.IsSecondary {
 		oc.deleteGWRoutesForNamespace(ns.Name)
 	}
 	oc.multicastDeleteNamespace(ns, nsInfo)
@@ -665,7 +665,7 @@ func (oc *Controller) createNamespaceAddrSetAllPods(ns string) (addressset.Addre
 	var ips []net.IP
 	// special handling of host network namespace
 	if config.Kubernetes.HostNetworkNamespace != "" &&
-		ns == config.Kubernetes.HostNetworkNamespace && !oc.nadInfo.NotDefault {
+		ns == config.Kubernetes.HostNetworkNamespace && !oc.nadInfo.IsSecondary {
 		// add the mp0 interface addresses to this namespace.
 		existingNodes, err := oc.mc.watchFactory.GetNodes()
 		if err != nil {

@@ -142,7 +142,7 @@ func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInter
 		oldHostVethName = hostVeth.Name
 
 		// to generate the unique host interface name, postfix it with the podInterface index for non-default network
-		if ifInfo.NotDefault {
+		if ifInfo.IsSecondary {
 			ifnameSuffix = fmt.Sprintf("_%d", containerVeth.Index)
 		}
 
@@ -203,7 +203,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 		contIface.Sandbox = netns.Path()
 
 		// to generate the unique host interface name, postfix it with the podInterface index for non-default network
-		if ifInfo.NotDefault {
+		if ifInfo.IsSecondary {
 			ifnameSuffix = fmt.Sprintf("_%d", link.Attrs().Index)
 		}
 
@@ -259,7 +259,7 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	ifInfo *PodInterfaceInfo, sandboxID string, podLister corev1listers.PodLister,
 	kclient kubernetes.Interface) error {
 	klog.Infof("ConfigureOVS: namespace: %s, podName: %s, network: %s", namespace, podName, ifInfo.NadName)
-	ifaceID := util.GetIfaceId(namespace, podName, ifInfo.NadName, !ifInfo.NotDefault)
+	ifaceID := util.GetIfaceId(namespace, podName, ifInfo.NadName, !ifInfo.IsSecondary)
 	initialPodUID := ifInfo.PodUID
 
 	// Find and remove any existing OVS port with this iface-id. Pods can
@@ -288,7 +288,7 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 		"other_config:transient=true",
 	}
 
-	if ifInfo.NotDefault {
+	if ifInfo.IsSecondary {
 		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:network_name=%s", ifInfo.NadName))
 	} else {
 		ovsArgs = append(ovsArgs, []string{"--", "--if-exists", "remove", "interface", hostIfaceName, "external_ids", "network_name"}...)
@@ -422,7 +422,7 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 	// 2. If it is non-default network and non-dpu mode, needs to get the container interface index
 	//    so that we know the host-side interface name.
 	ifnameSuffix := ""
-	if pr.CNIConf.DeviceID != "" || (pr.CNIConf.NotDefault && !ifInfo.IsDPUHostMode) {
+	if pr.CNIConf.DeviceID != "" || (pr.CNIConf.IsSecondary && !ifInfo.IsDPUHostMode) {
 		netns, err := ns.GetNS(pr.Netns)
 		if err != nil {
 			return fmt.Errorf("failed to get container namespace %s: %v", podDesc, err)
@@ -470,7 +470,7 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 					return fmt.Errorf("failed to move container interface %s back to host namespace %s: %v", pr.IfName, podDesc, err)
 				}
 			}
-			if pr.CNIConf.NotDefault && !ifInfo.IsDPUHostMode {
+			if pr.CNIConf.IsSecondary && !ifInfo.IsDPUHostMode {
 				ifnameSuffix = fmt.Sprintf("_%d", link.Attrs().Index)
 			}
 			return nil

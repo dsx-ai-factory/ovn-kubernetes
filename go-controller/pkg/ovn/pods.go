@@ -51,7 +51,7 @@ func (oc *Controller) syncPods(pods []interface{}) {
 		for nadName := range networkMap {
 			annotations, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
 			if util.PodScheduled(pod) && util.PodWantsNetwork(pod) && err == nil {
-				logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name, nadName, !oc.nadInfo.NotDefault)
+				logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name, nadName, !oc.nadInfo.IsSecondary)
 				expectedLogicalPorts[logicalPort] = true
 				if err = oc.waitForNodeLogicalSwitchInCache(lsManagerNodeName); err != nil {
 					klog.Errorf("Failed to wait for node %s to be added to cache. IP allocation may fail!",
@@ -99,7 +99,7 @@ func (oc *Controller) syncPods(pods []interface{}) {
 	// logical_port name is in the form of prefix_podNamespace_podName. inddex to get podNamespace
 	// from logical_port name would be different in these two cases.
 	nsIndex := 0
-	if oc.nadInfo.NotDefault {
+	if oc.nadInfo.IsSecondary {
 		nsIndex = 1
 	}
 	for _, switchName := range switches {
@@ -115,7 +115,7 @@ func (oc *Controller) syncPods(pods []interface{}) {
 				continue
 			}
 			netName, ok := portCache[port].ExternalIDs["network_name"]
-			if oc.nadInfo.NotDefault {
+			if oc.nadInfo.IsSecondary {
 				if !ok || netName != oc.nadInfo.NetName {
 					continue
 				}
@@ -176,7 +176,7 @@ func (oc *Controller) syncPods(pods []interface{}) {
 }
 
 func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
-	if !oc.nadInfo.NotDefault {
+	if !oc.nadInfo.IsSecondary {
 		oc.deletePodExternalGW(pod)
 	}
 	if pod.Spec.HostNetwork {
@@ -208,7 +208,7 @@ func (oc *Controller) delLogicalPort4Nad(pod *kapi.Pod, nadName, lsManagerNodeNa
 	podDesc := pod.Namespace + "/" + pod.Name
 	klog.Infof("Deleting pod %s on network: %s", podDesc, nadName)
 
-	logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name, nadName, !oc.nadInfo.NotDefault)
+	logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name, nadName, !oc.nadInfo.IsSecondary)
 	portInfo, err := oc.logicalPortCache.get(logicalPort)
 	if err != nil {
 		klog.Errorf(err.Error())
@@ -246,7 +246,7 @@ func (oc *Controller) delLogicalPort4Nad(pod *kapi.Pod, nadName, lsManagerNodeNa
 		klog.Errorf(err.Error())
 	}
 
-	if !oc.nadInfo.NotDefault {
+	if !oc.nadInfo.IsSecondary {
 		if config.Gateway.DisableSNATMultipleGWs {
 			if err := deletePerPodGRSNAT(oc.mc.nbClient, pod.Spec.NodeName, portInfo.ips); err != nil {
 				klog.Errorf(err.Error())
@@ -297,7 +297,7 @@ func (oc *Controller) waitForNodeLogicalSwitchInCache(nodeName string) error {
 func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodAnnotation, nodeSubnets []*net.IPNet,
 	network *networkattachmentdefinitionapi.NetworkSelectionElement) error {
 
-	if oc.nadInfo.NotDefault {
+	if oc.nadInfo.IsSecondary {
 		// non default network, see if its network-attachment's annotation has default-route key.
 		// If present, then we need to add default route for it
 		podAnnotation.Gateways = append(podAnnotation.Gateways, network.GatewayRequest...)
@@ -461,7 +461,7 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, lsManagerNodeNa
 		return err
 	}
 
-	portName := util.GetLogicalPortName(pod.Namespace, pod.Name, nadName, !oc.nadInfo.NotDefault)
+	portName := util.GetLogicalPortName(pod.Namespace, pod.Name, nadName, !oc.nadInfo.IsSecondary)
 	klog.Infof("[%s/%s] creating logical port for pod on switch %s for network %s", pod.Namespace, pod.Name, logicalSwitch, nadName)
 
 	var podMac net.HardwareAddr
@@ -617,7 +617,7 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, lsManagerNodeNa
 		return err
 	}
 
-	if !oc.nadInfo.NotDefault {
+	if !oc.nadInfo.IsSecondary {
 		// if we have any external or pod Gateways, add routes
 		gateways := make([]*gatewayInfo, 0)
 
@@ -664,7 +664,7 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, lsManagerNodeNa
 
 	// add external ids
 	lsp.ExternalIDs = map[string]string{"namespace": pod.Namespace, "pod": "true"}
-	if oc.nadInfo.NotDefault {
+	if oc.nadInfo.IsSecondary {
 		lsp.ExternalIDs["network_name"] = oc.nadInfo.NetName
 	}
 
@@ -738,7 +738,7 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, lsManagerNodeNa
 		}
 	}
 	// observe the pod creation latency metric, default network for now
-	if !oc.nadInfo.NotDefault {
+	if !oc.nadInfo.IsSecondary {
 		metrics.RecordPodCreated(pod)
 	}
 	return nil

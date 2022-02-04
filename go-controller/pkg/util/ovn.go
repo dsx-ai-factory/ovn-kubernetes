@@ -84,7 +84,7 @@ func IsNetworkOnPod(pod *kapi.Pod, netAttachInfo *NetAttachDefInfo) (bool,
 	nseMap := map[string]*networkattachmentdefinitionapi.NetworkSelectionElement{}
 
 	podDesc := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
-	if !netAttachInfo.NotDefault {
+	if !netAttachInfo.IsSecondary {
 		defaultNetwork, err := GetK8sPodDefaultNetwork(pod)
 		if err != nil {
 			// multus won't add this Pod if this fails, should never happen

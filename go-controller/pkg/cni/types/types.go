@@ -17,8 +17,10 @@ type NetConf struct {
 	TopoType string `json:"topology,omitempty"`
 	// captures net-attach-def name in the form of namespace/name
 	NadName string `json:"net_attach_def_name,omitempty"`
-	// set true if it is default networkattachmentdefintion
+	// set to true if it is not default networkattachmentdefintion (to be replaced by isSecondary)
 	NotDefault bool `json:"not_default,omitempty"`
+	// set to true if it is a secondary networkattachmentdefintion
+	IsSecondary bool `json:"isSecondary,omitempty"`
 	// VlanID, valid in localnet topology network
 	VlanId int `json:"vlan_id,omitempty"`
 	// bridge name, valid in localnet topology network

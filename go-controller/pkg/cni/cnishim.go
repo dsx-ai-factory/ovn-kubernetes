@@ -171,7 +171,7 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 	}
 	setupLogging(conf)
 
-	if conf.NotDefault && conf.NetCidr == "" {
+	if conf.IsSecondary && conf.NetCidr == "" {
 		return fmt.Errorf("netcidr needs to be specified in Network Attachment Definition for non-default network")
 	}
 

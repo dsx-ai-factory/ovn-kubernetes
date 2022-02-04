@@ -279,7 +279,7 @@ func GetAllPodIPs(pod *v1.Pod, netAttachInfo *NetAttachDefInfo) ([]net.IP, error
 		return ips, nil
 	}
 
-	if netAttachInfo.NotDefault {
+	if netAttachInfo.IsSecondary {
 		return []net.IP{}, fmt.Errorf("no pod annotation of pod %s/%s found for network %s",
 			pod.Namespace, pod.Name, netAttachInfo.NetName)
 	}

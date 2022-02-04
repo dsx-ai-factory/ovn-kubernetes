@@ -167,7 +167,7 @@ func forEachAddressSet(netNameInfo util.NetNameInfo, nbClient libovsdbclient.Cli
 	err := nbClient.WhereCache(
 		func(addrSet *nbdb.AddressSet) bool {
 			netName, exists := addrSet.ExternalIDs["network_name"]
-			if netNameInfo.NotDefault {
+			if netNameInfo.IsSecondary {
 				if !exists || netName != netNameInfo.NetName {
 					return false
 				}
@@ -347,7 +347,7 @@ func newOvnAddressSet(asf *ovnAddressSetFactory, name string, ips []net.IP) (*ov
 			Addresses:   uniqIPs,
 			ExternalIDs: map[string]string{"name": as.name},
 		}
-		if asf.NotDefault {
+		if asf.IsSecondary {
 			addrset.ExternalIDs["network_name"] = asf.NetName
 		}
 		ops, err := as.nbClient.Where(addrset).Update(addrset, &addrset.Addresses)
@@ -362,7 +362,7 @@ func newOvnAddressSet(asf *ovnAddressSetFactory, name string, ips []net.IP) (*ov
 	} else {
 		//create a new addressSet
 		externalIds := map[string]string{"name": as.name}
-		if asf.NotDefault {
+		if asf.IsSecondary {
 			externalIds["network_name"] = asf.NetName
 		}
 		ops, err := asf.nbClient.Create(&nbdb.AddressSet{

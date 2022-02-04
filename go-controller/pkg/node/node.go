@@ -296,7 +296,7 @@ func (n *OvnNode) NewOvnNodeController(nadInfo *util.NetAttachDefInfo) (*ovnNode
 		nadInfo: nadInfo,
 		added:   false,
 	}
-	if !nadInfo.NotDefault {
+	if !nadInfo.IsSecondary {
 		n.defaultNodeController = nc
 	} else {
 		_, loaded := n.nonDefaultNodeControllers.LoadOrStore(nadInfo.NetName, nc)
@@ -588,9 +588,9 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 			NetConf: ctypes.NetConf{
 				Name: types.DefaultNetworkName,
 			},
-			NetCidr:    config.Default.RawClusterSubnets,
-			MTU:        config.Default.MTU,
-			NotDefault: false,
+			NetCidr:     config.Default.RawClusterSubnets,
+			MTU:         config.Default.MTU,
+			IsSecondary: false,
 		}
 		nadInfo, _ := util.NewNetAttachDefInfo(defaultNetConf)
 		nc, _ := n.NewOvnNodeController(nadInfo)
@@ -660,15 +660,15 @@ func (n *OvnNode) initOvnNodeController(netattachdef *nettypes.NetworkAttachment
 	}
 
 	// nadName must be in the correct form for non-default net-attach-def
-	if nadInfo.NotDefault {
-		nadName := util.GetNadName(netattachdef.Namespace, netattachdef.Name, !nadInfo.NotDefault)
+	if nadInfo.IsSecondary {
+		nadName := util.GetNadName(netattachdef.Namespace, netattachdef.Name, !nadInfo.IsSecondary)
 		if netconf.NadName != nadName {
 			return nil, fmt.Errorf("unexpected net_attach_def_name %s of Network Attachment Definition %s/%s, expected: %s",
 				netconf.NadName, netattachdef.Namespace, netattachdef.Name, nadName)
 		}
 	}
 
-	if !nadInfo.NotDefault {
+	if !nadInfo.IsSecondary {
 		n.defaultNodeController.nadInfo.NetAttachDefs.Store(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name), true)
 		return n.defaultNodeController, nil
 	}
@@ -856,7 +856,7 @@ func (n *OvnNode) deleteNetworkAttachDefinition(netattachdef *nettypes.NetworkAt
 	}
 
 	if netconf.NadName != "" {
-		nadName := util.GetNadName(netattachdef.Namespace, netattachdef.Name, !nadInfo.NotDefault)
+		nadName := util.GetNadName(netattachdef.Namespace, netattachdef.Name, !nadInfo.IsSecondary)
 		if netconf.NadName != nadName {
 			klog.Errorf("Unexpected net_attach_def_name %s of Network Attachment Definition %s/%s, expected: %s",
 				netconf.NadName, netattachdef.Namespace, netattachdef.Name, nadName)
@@ -864,7 +864,7 @@ func (n *OvnNode) deleteNetworkAttachDefinition(netattachdef *nettypes.NetworkAt
 		}
 	}
 
-	if !nadInfo.NotDefault {
+	if !nadInfo.IsSecondary {
 		n.defaultNodeController.nadInfo.NetAttachDefs.Delete(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name))
 		return
 	}
