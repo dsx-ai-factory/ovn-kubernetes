@@ -91,6 +91,10 @@ func (oc *Controller) syncPods(pods []interface{}) {
 		}
 		switches = make([]string, len(nodes))
 		for i, n := range nodes {
+			if noHostSubnet(n) {
+				// skip those nodes that's not OVN managed
+				continue
+			}
 			switches[i] = oc.nadInfo.Prefix + n.Name
 		}
 	}

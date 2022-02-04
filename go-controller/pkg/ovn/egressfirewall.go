@@ -340,6 +340,10 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 			return fmt.Errorf("unable to setup egress firewall ACLs on cluster nodes, err: %v", err)
 		}
 		for _, node := range nodes {
+			if noHostSubnet(node) {
+				// skip those nodes that's not OVN managed
+				continue
+			}
 			logicalSwitches = append(logicalSwitches, node.Name)
 		}
 	} else {

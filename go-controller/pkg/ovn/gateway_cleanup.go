@@ -186,6 +186,9 @@ func (oc *Controller) cleanupDGP(nodes *kapi.NodeList) error {
 	klog.Infof("Removing DGP %v", nodes)
 	// remove dnat_snat entries as well as LRPs
 	for _, node := range nodes.Items {
+		if noHostSubnet(&node) {
+			continue
+		}
 		oc.delPbrAndNatRules(node.Name, []string{types.InterNodePolicyPriority, types.MGMTPortPolicyPriority})
 	}
 	// remove SBDB MAC bindings for DGP

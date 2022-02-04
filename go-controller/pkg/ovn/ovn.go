@@ -1450,6 +1450,10 @@ func (oc *Controller) WatchNodes() {
 			klog.V(5).Infof("Delete event for Node %q. Removing the node from "+
 				"various caches", node.Name)
 
+			if noHostSubnet(node) {
+				oc.lsManager.DeleteNode(node.Name)
+				return
+			}
 			nodeSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, oc.nadInfo.NetName)
 			oc.deleteNode(node.Name, nodeSubnets)
 			oc.lsManager.DeleteNode(node.Name)
@@ -1678,6 +1682,10 @@ func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.
 
 		// remove hostsubnet annoation for this network
 		for _, node := range existingNodes.Items {
+			if noHostSubnet(&node) {
+				oc.lsManager.DeleteNode(node.Name)
+				continue
+			}
 			err := oc.deleteNodeLogicalNetwork(node.Name)
 			if err != nil {
 				klog.Error("Failed to delete node %s for network %s: %v", node.Name, oc.nadInfo.NetName, err)

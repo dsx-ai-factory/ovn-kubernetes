@@ -314,7 +314,7 @@ func NewJoinIPAMAllocator(cidr *net.IPNet) (ipam.Interface, error) {
 
 // Initializes a new join switch logical switch manager.
 // This IPmanager guaranteed to always have both IPv4 and IPv6 regardless of dual-stack
-func NewJoinLogicalSwitchIPManager(nbClient libovsdbclient.Client, existingNodeNames []string) (*JoinSwitchIPManager, error) {
+func NewJoinLogicalSwitchIPManager(nbClient libovsdbclient.Client, existingOvnManagedNodeNames []string) (*JoinSwitchIPManager, error) {
 	j := JoinSwitchIPManager{
 		lsm: &LogicalSwitchManager{
 			cache:    make(map[string]logicalSwitchInfo),
@@ -342,7 +342,7 @@ func NewJoinLogicalSwitchIPManager(nbClient libovsdbclient.Client, existingNodeN
 	if err != nil {
 		return nil, err
 	}
-	for _, nodeName := range existingNodeNames {
+	for _, nodeName := range existingOvnManagedNodeNames {
 		gwLRPIPs := j.getJoinLRPAddresses(nodeName)
 		if len(gwLRPIPs) > 0 {
 			klog.Infof("Initializing and reserving the join switch IP for node: %s to: %v", nodeName, gwLRPIPs)

@@ -253,9 +253,12 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		klog.V(5).Infof("Added network range %s to the allocator", ipnet.CIDR)
 		util.CalculateHostSubnetsForClusterEntry(ipnet, &v4HostSubnetCount, &v6HostSubnetCount)
 	}
-	nodeNames := []string{}
+	ovnManagedNodeNames := []string{}
 	for _, node := range existingNodes.Items {
-		nodeNames = append(nodeNames, node.Name)
+		if noHostSubnet(&node) {
+			continue
+		}
+		ovnManagedNodeNames = append(ovnManagedNodeNames, node.Name)
 	}
 
 	// update metrics for host subnets
@@ -297,7 +300,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		oc.multicastSupport = false
 	}
 
-	if err := oc.SetupMaster(nodeNames); err != nil {
+	if err := oc.SetupMaster(ovnManagedNodeNames); err != nil {
 		klog.Errorf("Failed to setup master (%v)", err)
 		return err
 	}
@@ -321,7 +324,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 }
 
 // SetupMaster creates the central router and load-balancers for the network
-func (oc *Controller) SetupMaster(existingNodeNames []string) error {
+func (oc *Controller) SetupMaster(ovnManagedNodeNames []string) error {
 	clusterRouterName := oc.nadInfo.Prefix + types.OVNClusterRouter
 
 	// Create a single common distributed router for the cluster.
@@ -405,7 +408,7 @@ func (oc *Controller) SetupMaster(existingNodeNames []string) error {
 
 	// Initialize the OVNJoinSwitch switch IP manager
 	// The OVNJoinSwitch will be allocated IP addresses in the range 100.64.0.0/16 or fd98::/64.
-	oc.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(oc.mc.nbClient, existingNodeNames)
+	oc.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(oc.mc.nbClient, ovnManagedNodeNames)
 	if err != nil {
 		return err
 	}
@@ -1418,6 +1421,9 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 		}
 		foundNodes.Insert(node.Name)
 
+		if noHostSubnet(node) {
+			continue
+		}
 		hostSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, oc.nadInfo.NetName)
 		klog.V(5).Infof("Node %s contains subnets: %v for network %s", node.Name, hostSubnets, oc.nadInfo.NetName)
 		for _, hostSubnet := range hostSubnets {

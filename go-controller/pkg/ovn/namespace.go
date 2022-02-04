@@ -673,6 +673,10 @@ func (oc *Controller) createNamespaceAddrSetAllPods(ns string) (addressset.Addre
 		} else {
 			ips = make([]net.IP, 0, len(existingNodes))
 			for _, node := range existingNodes {
+				if noHostSubnet(node) {
+					// skip those nodes that's not OVN managed
+					continue
+				}
 				hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, oc.nadInfo.NetName)
 				if err != nil {
 					klog.Warningf("Error parsing host subnet annotation for node %s (%v)",
