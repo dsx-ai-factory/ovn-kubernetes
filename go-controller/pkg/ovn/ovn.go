@@ -937,11 +937,11 @@ func (oc *Controller) WatchPods() {
 // WatchMultiNetworkPolicy starts the watching of multi network policy resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchMultiNetworkPolicy() *factory.Handler {
-	start := time.Now()
 	if !oc.nadInfo.IsSecondary {
-		klog.Infof("WatchMultiNetworkPolicy for default network is a no-op")
+		klog.Infof("WatchMultiNetworkPolicy for OVN Primary network is a no-op")
 		return nil
 	}
+	start := time.Now()
 	handler := oc.mc.watchFactory.AddMultiNetworkPolicyHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			policy := obj.(*multinetworkpolicy.MultiNetworkPolicy)
@@ -950,17 +950,19 @@ func (oc *Controller) WatchMultiNetworkPolicy() *factory.Handler {
 		UpdateFunc: func(old, newer interface{}) {
 			oldPolicy := old.(*multinetworkpolicy.MultiNetworkPolicy)
 			newPolicy := newer.(*multinetworkpolicy.MultiNetworkPolicy)
-			if !reflect.DeepEqual(oldPolicy, newPolicy) {
-				oc.deleteMultiNetworkPolicy(oldPolicy)
-				oc.addMultiNetworkPolicy(newPolicy)
+			if oldPolicy.ResourceVersion == newPolicy.ResourceVersion ||
+				!newPolicy.GetDeletionTimestamp().IsZero() {
+				return
 			}
+			oc.deleteMultiNetworkPolicy(oldPolicy)
+			oc.addMultiNetworkPolicy(newPolicy)
 		},
 		DeleteFunc: func(obj interface{}) {
 			policy := obj.(*multinetworkpolicy.MultiNetworkPolicy)
 			oc.deleteMultiNetworkPolicy(policy)
 		},
 	}, oc.syncMultiNetworkPolicies)
-	klog.Infof("Bootstrapping existing mulit network policies and cleaning stale policies took %v", time.Since(start))
+	klog.Infof("Bootstrapping existing multi network policies and cleaning stale policies took %v", time.Since(start))
 	return handler
 }
 
@@ -981,13 +983,13 @@ func (oc *Controller) WatchNetworkPolicy() {
 			oldPolicy := old.(*kapisnetworking.NetworkPolicy)
 			newPolicy := newer.(*kapisnetworking.NetworkPolicy)
 			if !reflect.DeepEqual(oldPolicy, newPolicy) {
-				oc.deleteNetworkPolicy(oldPolicy)
+				oc.deleteNetworkPolicy(oldPolicy.Name, oldPolicy.Namespace)
 				oc.addNetworkPolicy(newPolicy)
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			policy := obj.(*kapisnetworking.NetworkPolicy)
-			oc.deleteNetworkPolicy(policy)
+			oc.deleteNetworkPolicy(policy.Name, policy.Namespace)
 		},
 	}, oc.syncNetworkPolicies)
 	klog.Infof("Bootstrapping existing policies and cleaning stale policies took %v", time.Since(start))

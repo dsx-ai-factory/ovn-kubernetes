@@ -1097,24 +1097,24 @@ func (oc *Controller) buildNetworkPolicyACLs(np *networkPolicy, aclLogging strin
 	return acls
 }
 
-func (oc *Controller) deleteNetworkPolicy(policy *knet.NetworkPolicy) {
+func (oc *Controller) deleteNetworkPolicy(policyName, policyNamespace string) {
 	klog.Infof("Deleting network policy %s in namespace %s",
-		policy.Name, policy.Namespace)
+		policyName, policyNamespace)
 
-	nsInfo, nsUnlock := oc.getNamespaceLocked(policy.Namespace, false)
+	nsInfo, nsUnlock := oc.getNamespaceLocked(policyNamespace, false)
 	if nsInfo == nil {
 		klog.V(5).Infof("Failed to get namespace lock when deleting policy %s in namespace %s",
-			policy.Name, policy.Namespace)
+			policyName, policyNamespace)
 		return
 	}
 	defer nsUnlock()
 
-	np := nsInfo.networkPolicies[policy.Name]
+	np := nsInfo.networkPolicies[policyName]
 	if np == nil {
 		return
 	}
 
-	delete(nsInfo.networkPolicies, policy.Name)
+	delete(nsInfo.networkPolicies, policyName)
 
 	oc.destroyNetworkPolicy(np, nsInfo)
 }

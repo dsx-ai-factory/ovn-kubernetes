@@ -12,7 +12,7 @@ import (
 	"k8s.io/klog/v2"
 )
 
-const PolicyNetworkAnnotation = "k8s.v1.cni.cncf.io/policy-for"
+const PolicyForAnnotation = "k8s.v1.cni.cncf.io/policy-for"
 
 func (oc *Controller) syncMultiNetworkPolicies(multiPolicies []interface{}) {
 	expectedPolicies := make(map[string]map[string]bool)
@@ -24,6 +24,8 @@ func (oc *Controller) syncMultiNetworkPolicies(multiPolicies []interface{}) {
 			continue
 		}
 		if !oc.shouldApplyMultiPolicy(policy) {
+			klog.V(5).Infof("[controller(%s)] skipping syncing policy %s/%s",
+				oc.nadInfo.NetName, policy.Namespace, policy.Name)
 			continue
 		}
 		if nsMap, ok := expectedPolicies[policy.Namespace]; ok {
@@ -55,18 +57,21 @@ func (oc *Controller) syncMultiNetworkPolicies(multiPolicies []interface{}) {
 		err = libovsdbops.DeletePortGroups(oc.mc.nbClient, stalePGs...)
 		if err != nil {
 			klog.Errorf("Error removing stale port groups %v: %v", stalePGs, err)
+		} else {
+			klog.V(5).Infof("Removed following stale port groups: %v", stalePGs)
 		}
 	}
 }
 
 func (oc *Controller) shouldApplyMultiPolicy(mpolicy *multinetworkpolicy.MultiNetworkPolicy) bool {
-	policyForAnnot, ok := mpolicy.Annotations[PolicyNetworkAnnotation]
+	policyForAnnot, ok := mpolicy.Annotations[PolicyForAnnotation]
 	if !ok {
+		// should never happen.
 		return false
 	}
 	policyForAnnot = strings.ReplaceAll(policyForAnnot, " ", "")
-	policyNetworks := strings.Split(policyForAnnot, ",")
-	for _, networkName := range policyNetworks {
+	policyForNetworks := strings.Split(policyForAnnot, ",")
+	for _, networkName := range policyForNetworks {
 		networkNamespace := mpolicy.Namespace
 		a := strings.Split(networkName, "/")
 		if len(a) > 1 {
@@ -80,13 +85,12 @@ func (oc *Controller) shouldApplyMultiPolicy(mpolicy *multinetworkpolicy.MultiNe
 	return false
 }
 
-func multiNetworkPolicy2NetworkPolicy(mpolicy *multinetworkpolicy.MultiNetworkPolicy) *knet.NetworkPolicy {
+func convertMultiNetPolicyToNetPolicy(mpolicy *multinetworkpolicy.MultiNetworkPolicy) *knet.NetworkPolicy {
 	var policy knet.NetworkPolicy
 	var ipb *knet.IPBlock
 
 	policy.Name = mpolicy.Name
 	policy.Namespace = mpolicy.Namespace
-
 	policy.Spec.PodSelector = mpolicy.Spec.PodSelector
 	policy.Spec.Ingress = make([]knet.NetworkPolicyIngressRule, len(mpolicy.Spec.Ingress))
 	for i, mingress := range mpolicy.Spec.Ingress {
@@ -146,26 +150,20 @@ func multiNetworkPolicy2NetworkPolicy(mpolicy *multinetworkpolicy.MultiNetworkPo
 // addMultiNetworkPolicy creates and applies OVN ACLs to pod logical switch
 // ports from Kubernetes NetworkPolicy objects using OVN Port Groups
 func (oc *Controller) addMultiNetworkPolicy(mpolicy *multinetworkpolicy.MultiNetworkPolicy) {
-	klog.Infof("Adding multi network policy %s in namespace %s: %v", mpolicy.Name, mpolicy.Namespace, mpolicy)
-
 	if !oc.shouldApplyMultiPolicy(mpolicy) {
 		return
 	}
-
-	policy := multiNetworkPolicy2NetworkPolicy(mpolicy)
-	klog.Infof("Adding multi network policy :%v", policy)
+	klog.Infof("[controller(%s)] adding multi network policy %s in namespace %s for networks %q",
+		oc.nadInfo.NetName, mpolicy.Name, mpolicy.Namespace, mpolicy.Annotations[PolicyForAnnotation])
+	policy := convertMultiNetPolicyToNetPolicy(mpolicy)
 	oc.addNetworkPolicy(policy)
 }
 
 func (oc *Controller) deleteMultiNetworkPolicy(mpolicy *multinetworkpolicy.MultiNetworkPolicy) {
-	klog.Infof("Deleting multi network policy %s in namespace %s: %v",
-		mpolicy.Name, mpolicy.Namespace, mpolicy)
-
 	if !oc.shouldApplyMultiPolicy(mpolicy) {
 		return
 	}
-
-	policy := multiNetworkPolicy2NetworkPolicy(mpolicy)
-	klog.Infof("Deleting multi network policy :%v", policy)
-	oc.deleteNetworkPolicy(policy)
+	klog.Infof("[controller(%s)] deleting multi network policy %s in namespace %s for networks %q",
+		oc.nadInfo.NetName, mpolicy.Name, mpolicy.Namespace, mpolicy.Annotations[PolicyForAnnotation])
+	oc.deleteNetworkPolicy(mpolicy.Name, mpolicy.Namespace)
 }
