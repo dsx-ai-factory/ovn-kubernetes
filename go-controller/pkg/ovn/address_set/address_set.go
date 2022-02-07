@@ -117,10 +117,10 @@ func ensureOvnAddressSet(asf *ovnAddressSetFactory, name string) (*ovnAddressSet
 			Op:      ovsdb.OperationWait,
 			Timeout: &timeout,
 			Table:   "Address_Set",
-			Where:   []ovsdb.Condition{{Column: "name", Function: ovsdb.ConditionEqual, Value: name}},
+			Where:   []ovsdb.Condition{{Column: "name", Function: ovsdb.ConditionEqual, Value: addrSet.Name}},
 			Columns: []string{"name"},
 			Until:   "!=",
-			Rows:    []ovsdb.Row{{"name": name}},
+			Rows:    []ovsdb.Row{{"name": addrSet.Name}},
 		})
 		// hack used to make TransactAndCheckAndSetUUIDs track the model correctly
 		addrSet.UUID = libovsdbops.BuildNamedUUID()
