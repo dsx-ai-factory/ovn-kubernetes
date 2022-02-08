@@ -13,7 +13,6 @@ import (
 	multinetworkpolicylister "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/listers/k8s.cni.cncf.io/v1beta1"
 	networkattachmentdefinitionlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	egressfirewalllister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
-	icmpnetworkpolicylister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1/apis/listers/icmpnetworkpolicy/v1alpha1"
 
 	egressiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
 
@@ -376,8 +375,6 @@ func newInformerLister(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		return netlisters.NewNetworkPolicyLister(sharedInformer.GetIndexer()), nil
 	case egressFirewallType:
 		return egressfirewalllister.NewEgressFirewallLister(sharedInformer.GetIndexer()), nil
-	case icmpNetworkPolicyType:
-		return icmpnetworkpolicylister.NewICMPNetworkPolicyLister(sharedInformer.GetIndexer()), nil
 	case egressIPType:
 		return egressiplister.NewEgressIPLister(sharedInformer.GetIndexer()), nil
 	case endpointSliceType:

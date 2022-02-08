@@ -68,13 +68,11 @@ type networkPolicy struct {
 	created       bool
 }
 
-// We take elements of the policy, as args, instead of the policy itself (and getting it's elements)
-// so that this can be use by NetworkPolicy as well as ICMPNetworkPolicy
-func NewNetworkPolicy(policyNameSpace, policyName string, policyTypes []knet.PolicyType) *networkPolicy {
+func NewNetworkPolicy(policy *knet.NetworkPolicy) *networkPolicy {
 	np := &networkPolicy{
-		name:            policyName,
-		namespace:       policyNameSpace,
-		policyTypes:     policyTypes,
+		name:            policy.Name,
+		namespace:       policy.Namespace,
+		policyTypes:     policy.Spec.PolicyTypes,
 		ingressPolicies: make([]*gressPolicy, 0),
 		egressPolicies:  make([]*gressPolicy, 0),
 		podHandlerList:  make([]*factory.Handler, 0),
@@ -108,8 +106,6 @@ func hashedPortGroup(s string) string {
 	return util.HashForOVN(s)
 }
 
-// Network policies can be configured by NetworkPolicy or ICMPNetworkPolicy
-// check both before deleting unused address sets.
 func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 	expectedPolicies := make(map[string]map[string]bool)
 	for _, npInterface := range networkPolicies {
@@ -129,8 +125,8 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 	}
 
 	stalePGs := []string{}
-	err := oc.addressSetFactory.ProcessEachAddressSet(func(addrSetName, namespaceName, policyName string, icmpAddressSet bool) {
-		if !icmpAddressSet && policyName != "" && !expectedPolicies[namespaceName][policyName] {
+	err := oc.addressSetFactory.ProcessEachAddressSet(func(addrSetName, namespaceName, policyName string) {
+		if policyName != "" && !expectedPolicies[namespaceName][policyName] {
 			// policy doesn't exist on k8s. Delete the port group
 			portGroupName := fmt.Sprintf("%s_%s", namespaceName, policyName)
 			hashedLocalPortGroup := oc.nadInfo.Prefix + hashedPortGroup(portGroupName)
@@ -900,7 +896,7 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 			}
 			if !oc.nadInfo.IsSecondary {
 				// Start service handlers ONLY if there's an ingress Address Set
-				oc.handlePeerService(policy.Namespace, ingress, np)
+				oc.handlePeerService(policy, ingress, np)
 			}
 		}
 
@@ -969,8 +965,7 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 		} else if handler.podSelector != nil {
 			// For each peer pod selector, we create a watcher that
 			// populates the addressSet
-			oc.handlePeerPodSelector(policy.Namespace,
-				handler.podSelector, handler.gress, np)
+			oc.handlePeerPodSelector(policy, handler.podSelector, handler.gress, np)
 		}
 	}
 
@@ -1063,7 +1058,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 		statelessACL = true
 	}
 
-	np := NewNetworkPolicy(policy.Namespace, policy.Name, policy.Spec.PolicyTypes)
+	np := NewNetworkPolicy(policy)
 	if len(nsInfo.networkPolicies) == 0 {
 		err = oc.createDefaultDenyPGAndACLs(policy.Namespace, policy.Name, nsInfo)
 		if err != nil {
@@ -1233,9 +1228,9 @@ func (oc *Controller) handlePeerServiceDelete(gp *gressPolicy, obj interface{}) 
 // Watch Services that are in the same Namespace as the NP
 // To account for hairpined traffic
 func (oc *Controller) handlePeerService(
-	namespace string, gp *gressPolicy, np *networkPolicy) {
+	policy *knet.NetworkPolicy, gp *gressPolicy, np *networkPolicy) {
 
-	h := oc.mc.watchFactory.AddFilteredServiceHandler(namespace,
+	h := oc.mc.watchFactory.AddFilteredServiceHandler(policy.Namespace,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				// Service is matched so add VIP to addressSet
@@ -1267,13 +1262,13 @@ func (oc *Controller) handlePeerService(
 }
 
 func (oc *Controller) handlePeerPodSelector(
-	namespace string, podSelector *metav1.LabelSelector,
+	policy *knet.NetworkPolicy, podSelector *metav1.LabelSelector,
 	gp *gressPolicy, np *networkPolicy) {
 
 	// NetworkPolicy is validated by the apiserver; this can't fail.
 	sel, _ := metav1.LabelSelectorAsSelector(podSelector)
 
-	h := oc.mc.watchFactory.AddFilteredPodHandler(namespace, sel,
+	h := oc.mc.watchFactory.AddFilteredPodHandler(policy.Namespace, sel,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				oc.handlePeerPodSelectorAddUpdate(gp, obj)

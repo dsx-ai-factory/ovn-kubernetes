@@ -27,9 +27,6 @@ import (
 	egressip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 
-	icmpnetworkpolicy "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1"
-	icmpnetworkpolicyfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1/apis/clientset/versioned/fake"
-
 	networkattachmentdefinitionapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	networkattachmentdefinitionfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
 	. "github.com/onsi/ginkgo"
@@ -145,12 +142,6 @@ func newEgressIP(name, namespace string) *egressip.EgressIP {
 
 }
 
-func newICMPNetworkPolicy(name, namespace string) *icmpnetworkpolicy.ICMPNetworkPolicy {
-	return &icmpnetworkpolicy.ICMPNetworkPolicy{
-		ObjectMeta: newObjectMeta(name, namespace),
-	}
-}
-
 func newNetworkAttchDef(name, namespace string) *networkattachmentdefinitionapi.NetworkAttachmentDefinition {
 	return &networkattachmentdefinitionapi.NetworkAttachmentDefinition{
 		ObjectMeta: newObjectMeta(name, namespace),
@@ -175,13 +166,6 @@ func egressFirewallObjSetup(c *egressfirewallfake.Clientset, objType string, lis
 }
 
 func egressIPObjSetup(c *egressipfake.Clientset, objType string, listFn func(core.Action) (bool, runtime.Object, error)) *watch.FakeWatcher {
-	w := watch.NewFake()
-	c.AddWatchReactor(objType, core.DefaultWatchReactor(w, nil))
-	c.AddReactor("list", objType, listFn)
-	return w
-}
-
-func icmpNetworkPolicyObjSetup(c *icmpnetworkpolicyfake.Clientset, objType string, listFn func(core.Action) (bool, runtime.Object, error)) *watch.FakeWatcher {
 	w := watch.NewFake()
 	c.AddWatchReactor(objType, core.DefaultWatchReactor(w, nil))
 	c.AddReactor("list", objType, listFn)
@@ -219,14 +203,12 @@ var _ = Describe("Watch Factory Operations", func() {
 		fakeClient                          *fake.Clientset
 		egressIPFakeClient                  *egressipfake.Clientset
 		egressFirewallFakeClient            *egressfirewallfake.Clientset
-		icmpNetworkPolicyFakeClient         *icmpnetworkpolicyfake.Clientset
 		networkAttchDefClient               *networkattachmentdefinitionfake.Clientset
 		podWatch, namespaceWatch, nodeWatch *watch.FakeWatcher
 		policyWatch, serviceWatch           *watch.FakeWatcher
 		egressFirewallWatch                 *watch.FakeWatcher
 		egressIPWatch                       *watch.FakeWatcher
 		endpointSliceWatch                  *watch.FakeWatcher
-		icmpNetworkPolicyWatch              *watch.FakeWatcher
 		networkAttchDefWatch                *watch.FakeWatcher
 		pods                                []*v1.Pod
 		namespaces                          []*v1.Namespace
@@ -238,7 +220,6 @@ var _ = Describe("Watch Factory Operations", func() {
 		netAttchDefs                        []*networkattachmentdefinitionapi.NetworkAttachmentDefinition
 		wf                                  *WatchFactory
 		egressFirewalls                     []*egressfirewall.EgressFirewall
-		icmpNetworkPolicies                 []*icmpnetworkpolicy.ICMPNetworkPolicy
 		err                                 error
 	)
 
@@ -252,21 +233,18 @@ var _ = Describe("Watch Factory Operations", func() {
 		config.PrepareTestConfig()
 		config.OVNKubernetesFeature.EnableEgressIP = true
 		config.OVNKubernetesFeature.EnableEgressFirewall = true
-		config.OVNKubernetesFeature.EnableICMPNetworkPolicy = true
 		config.OVNKubernetesFeature.EnableMultiNetwork = true
 
 		fakeClient = &fake.Clientset{}
 		egressFirewallFakeClient = &egressfirewallfake.Clientset{}
 		egressIPFakeClient = &egressipfake.Clientset{}
-		icmpNetworkPolicyFakeClient = &icmpnetworkpolicyfake.Clientset{}
 		networkAttchDefClient = &networkattachmentdefinitionfake.Clientset{}
 
 		ovnClientset = &util.OVNClientset{
-			KubeClient:              fakeClient,
-			EgressIPClient:          egressIPFakeClient,
-			EgressFirewallClient:    egressFirewallFakeClient,
-			ICMPNetworkPolicyClient: icmpNetworkPolicyFakeClient,
-			NetworkAttchDefClient:   networkAttchDefClient,
+			KubeClient:            fakeClient,
+			EgressIPClient:        egressIPFakeClient,
+			EgressFirewallClient:  egressFirewallFakeClient,
+			NetworkAttchDefClient: networkAttchDefClient,
 		}
 
 		pods = make([]*v1.Pod, 0)
@@ -336,15 +314,6 @@ var _ = Describe("Watch Factory Operations", func() {
 		egressIPWatch = egressIPObjSetup(egressIPFakeClient, "egressips", func(core.Action) (bool, runtime.Object, error) {
 			obj := &egressip.EgressIPList{}
 			for _, p := range egressIPs {
-				obj.Items = append(obj.Items, *p)
-			}
-			return true, obj, nil
-		})
-
-		icmpNetworkPolicies = make([]*icmpnetworkpolicy.ICMPNetworkPolicy, 0)
-		icmpNetworkPolicyWatch = icmpNetworkPolicyObjSetup(icmpNetworkPolicyFakeClient, "icmpnetworkpolicies", func(core.Action) (bool, runtime.Object, error) {
-			obj := &icmpnetworkpolicy.ICMPNetworkPolicyList{}
-			for _, p := range icmpNetworkPolicies {
 				obj.Items = append(obj.Items, *p)
 			}
 			return true, obj, nil
@@ -421,10 +390,6 @@ var _ = Describe("Watch Factory Operations", func() {
 		It("is called for each existing egressIP", func() {
 			egressIPs = append(egressIPs, newEgressIP("myEgressIP", "default"))
 			testExisting(egressIPType, "", nil)
-		})
-		It("is called for each existing icmpNetworkPolicy", func() {
-			icmpNetworkPolicies = append(icmpNetworkPolicies, newICMPNetworkPolicy("myICMPNetworkPolicy", "default"))
-			testExisting(icmpNetworkPolicyType, "", nil)
 		})
 
 		It("is called for each existing net-attach-def", func() {
@@ -516,11 +481,6 @@ var _ = Describe("Watch Factory Operations", func() {
 			egressIPs = append(egressIPs, newEgressIP("myEgressIP", "default"))
 			egressIPs = append(egressIPs, newEgressIP("myEgressIP1", "default"))
 			testExisting(egressIPType)
-		})
-		It("calls ADD for each existing extpolicy", func() {
-			icmpNetworkPolicies = append(icmpNetworkPolicies, newICMPNetworkPolicy("denyall", "default"))
-			icmpNetworkPolicies = append(icmpNetworkPolicies, newICMPNetworkPolicy("denyall2", "default"))
-			testExisting(icmpNetworkPolicyType)
 		})
 		It("calls ADD for each existing net-attach-def", func() {
 			netAttchDefs = append(netAttchDefs, newNetworkAttchDef("myNetAttachDef", "default"))
@@ -1163,42 +1123,6 @@ var _ = Describe("Watch Factory Operations", func() {
 		Eventually(c.getDeleted, 2).Should(Equal(1))
 
 		wf.RemoveEgressFirewallHandler(h)
-	})
-
-	It("responds to extpolicy add/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
-		Expect(err).NotTo(HaveOccurred())
-		err = wf.Start()
-		Expect(err).NotTo(HaveOccurred())
-
-		added := newICMPNetworkPolicy("myextpolicy", "default")
-		h, c := addHandler(wf, icmpNetworkPolicyType, cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj interface{}) {
-				enp := obj.(*icmpnetworkpolicy.ICMPNetworkPolicy)
-				Expect(reflect.DeepEqual(enp, added)).To(BeTrue())
-			},
-			UpdateFunc: func(old, new interface{}) {
-				newENP := new.(*icmpnetworkpolicy.ICMPNetworkPolicy)
-				Expect(reflect.DeepEqual(newENP, added)).To(BeTrue())
-				Expect(newENP.Spec.PolicyTypes).To(Equal([]knet.PolicyType{icmpnetworkpolicy.PolicyTypeIngress}))
-			},
-			DeleteFunc: func(obj interface{}) {
-				enp := obj.(*icmpnetworkpolicy.ICMPNetworkPolicy)
-				Expect(reflect.DeepEqual(enp, added)).To(BeTrue())
-			},
-		})
-
-		icmpNetworkPolicies = append(icmpNetworkPolicies, added)
-		icmpNetworkPolicyWatch.Add(added)
-		Eventually(c.getAdded, 2).Should(Equal(1))
-		added.Spec.PolicyTypes = []knet.PolicyType{icmpnetworkpolicy.PolicyTypeIngress}
-		icmpNetworkPolicyWatch.Modify(added)
-		Eventually(c.getUpdated, 2).Should(Equal(1))
-		icmpNetworkPolicies = icmpNetworkPolicies[:0]
-		icmpNetworkPolicyWatch.Delete(added)
-		Eventually(c.getDeleted, 2).Should(Equal(1))
-
-		wf.RemoveICMPNetworkPolicyHandler(h)
 	})
 
 	It("responds to egressIP add/update/delete events", func() {

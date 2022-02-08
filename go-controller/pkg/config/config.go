@@ -284,7 +284,6 @@ type KubernetesConfig struct {
 type OVNKubernetesFeatureConfig struct {
 	EnableEgressIP           bool `gcfg:"enable-egress-ip"`
 	EnableEgressFirewall     bool `gcfg:"enable-egress-firewall"`
-	EnableICMPNetworkPolicy  bool `gcfg:"enable-icmp-networkpolicy"`
 	EnableMultiNetwork       bool `gcfg:"enable-multi-network"`
 	EnableMultiNetworkPolicy bool `gcfg:"enable-multi-networkpolicy"`
 }
@@ -805,12 +804,6 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use EgressFirewall CRD feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableEgressFirewall,
 		Value:       OVNKubernetesFeature.EnableEgressFirewall,
-	},
-	&cli.BoolFlag{
-		Name:        "enable-icmp-networkpolicy",
-		Usage:       "Configure to use ICMPNetworkPolicy CRD feature with ovn-kubernetes.",
-		Destination: &cliConfig.OVNKubernetesFeature.EnableICMPNetworkPolicy,
-		Value:       OVNKubernetesFeature.EnableICMPNetworkPolicy,
 	},
 	&cli.BoolFlag{
 		Name:        "enable-multi-network",

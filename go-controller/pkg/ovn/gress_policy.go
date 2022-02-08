@@ -9,7 +9,6 @@ import (
 
 	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	icmpnet "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
@@ -53,16 +52,15 @@ type gressPolicy struct {
 	isAclStateless bool
 }
 
-// Supports TCP/UDP/SCTP ports and ICMP type/code
+// Supports TCP/UDP/SCTP ports
 type portPolicy struct {
 	protocol string
 	port     int32
 	endPort  int32
-	icmptype int32
 }
 
 func (pp *portPolicy) getL4Match() (string, error) {
-	var supportedProtocols = []string{TCP, UDP, SCTP, ICMP}
+	var supportedProtocols = []string{TCP, UDP, SCTP}
 	var foundProtocol string
 	for _, protocol := range supportedProtocols {
 		if protocol == pp.protocol {
@@ -72,12 +70,6 @@ func (pp *portPolicy) getL4Match() (string, error) {
 	}
 	if len(foundProtocol) == 0 {
 		return "", fmt.Errorf("unknown port protocol %v", pp.protocol)
-	}
-	if pp.protocol == ICMP {
-		if pp.icmptype != 0 {
-			return fmt.Sprintf("icmp4 && icmp4.type == %d", pp.icmptype), nil
-		}
-		return "icmp4", nil
 	}
 	if pp.endPort != 0 && pp.endPort != pp.port {
 		return fmt.Sprintf("%s && %d<=%s.dst<=%d", foundProtocol, pp.port, foundProtocol, pp.endPort), nil
@@ -210,28 +202,14 @@ func (gp *gressPolicy) deletePeerPod(oc *Controller, pod *v1.Pod) error {
 // If the port is not specified, it implies all ports for that protocol
 func (gp *gressPolicy) addPortPolicy(portJSON *knet.NetworkPolicyPort) {
 	pp := &portPolicy{protocol: string(*portJSON.Protocol),
-		port:     0,
-		endPort:  0,
-		icmptype: 0,
+		port:    0,
+		endPort: 0,
 	}
 	if portJSON.Port != nil {
 		pp.port = portJSON.Port.IntVal
 	}
 	if portJSON.EndPort != nil {
 		pp.endPort = *portJSON.EndPort
-	}
-	gp.portPolicies = append(gp.portPolicies, pp)
-}
-
-// ICMP policies, if type/code is not specified, implies all types/codes
-func (gp *gressPolicy) addICMPPolicy(protocolJSON *icmpnet.NetworkPolicyProtocol) {
-	pp := &portPolicy{protocol: protocolJSON.Protocol,
-		port:     0,
-		endPort:  0,
-		icmptype: 0,
-	}
-	if protocolJSON.Type != 0 {
-		pp.icmptype = protocolJSON.Type
 	}
 	gp.portPolicies = append(gp.portPolicies, pp)
 }

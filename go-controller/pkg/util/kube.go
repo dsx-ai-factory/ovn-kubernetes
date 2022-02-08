@@ -27,7 +27,6 @@ import (
 	networkattchmentdefclientset "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
-	icmpnetworkpolicyclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1/apis/clientset/versioned"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -38,7 +37,6 @@ type OVNClientset struct {
 	KubeClient               kubernetes.Interface
 	EgressIPClient           egressipclientset.Interface
 	EgressFirewallClient     egressfirewallclientset.Interface
-	ICMPNetworkPolicyClient  icmpnetworkpolicyclientset.Interface
 	NetworkAttchDefClient    networkattchmentdefclientset.Interface
 	MultiNetworkPolicyClient multinetworkpolicyclientset.Interface
 }
@@ -135,10 +133,6 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 	if err != nil {
 		return nil, err
 	}
-	icmpNetworkPolicyClientset, err := icmpnetworkpolicyclientset.NewForConfig(kconfig)
-	if err != nil {
-		return nil, err
-	}
 	networkAttchmntDefClientset, err := networkattchmentdefclientset.NewForConfig(kconfig)
 	if err != nil {
 		return nil, err
@@ -151,7 +145,6 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		KubeClient:               kclientset,
 		EgressIPClient:           egressIPClientset,
 		EgressFirewallClient:     egressFirewallClientset,
-		ICMPNetworkPolicyClient:  icmpNetworkPolicyClientset,
 		NetworkAttchDefClient:    networkAttchmntDefClientset,
 		MultiNetworkPolicyClient: multiNetworkPolicyClientset,
 	}, nil

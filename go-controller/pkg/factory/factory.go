@@ -26,10 +26,6 @@ import (
 	networkattachmentdefinitionscheme "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/scheme"
 	networkattachmentdefinitioninformerfactory "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions"
 
-	icmpnetworkpolicyapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1"
-	icmpnetworkpolicyscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1/apis/clientset/versioned/scheme"
-	icmpnetworkpolicyinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1/apis/informers/externalversions"
-
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	knet "k8s.io/api/networking/v1"
@@ -56,7 +52,6 @@ type WatchFactory struct {
 	iFactory   informerfactory.SharedInformerFactory
 	eipFactory egressipinformerfactory.SharedInformerFactory
 	efFactory  egressfirewallinformerfactory.SharedInformerFactory
-	inpFactory icmpnetworkpolicyinformerfactory.SharedInformerFactory
 	nadFactory networkattachmentdefinitioninformerfactory.SharedInformerFactory
 	mnpFactory multinetworkpolicyinformerfactory.SharedInformerFactory
 	informers  map[reflect.Type]*informer
@@ -90,7 +85,6 @@ var (
 	nodeType                        reflect.Type = reflect.TypeOf(&kapi.Node{})
 	egressFirewallType              reflect.Type = reflect.TypeOf(&egressfirewallapi.EgressFirewall{})
 	egressIPType                    reflect.Type = reflect.TypeOf(&egressipapi.EgressIP{})
-	icmpNetworkPolicyType           reflect.Type = reflect.TypeOf(&icmpnetworkpolicyapi.ICMPNetworkPolicy{})
 	endpointSliceType               reflect.Type = reflect.TypeOf(&discovery.EndpointSlice{})
 	networkattachmentdefinitionType reflect.Type = reflect.TypeOf(&networkattachmentdefinitionapi.NetworkAttachmentDefinition{})
 	multinetworkpolicyType          reflect.Type = reflect.TypeOf(&multinetworkpolicyapi.MultiNetworkPolicy{})
@@ -108,7 +102,6 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 		iFactory:   informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
 		eipFactory: egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
 		efFactory:  egressfirewallinformerfactory.NewSharedInformerFactory(ovnClientset.EgressFirewallClient, resyncInterval),
-		inpFactory: icmpnetworkpolicyinformerfactory.NewSharedInformerFactory(ovnClientset.ICMPNetworkPolicyClient, resyncInterval),
 		nadFactory: networkattachmentdefinitioninformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval),
 		mnpFactory: multinetworkpolicyinformerfactory.NewSharedInformerFactory(ovnClientset.MultiNetworkPolicyClient, resyncInterval),
 		informers:  make(map[reflect.Type]*informer),
@@ -119,9 +112,6 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 		return nil, err
 	}
 	if err := egressfirewallapi.AddToScheme(egressfirewallscheme.Scheme); err != nil {
-		return nil, err
-	}
-	if err := icmpnetworkpolicyapi.AddToScheme(icmpnetworkpolicyscheme.Scheme); err != nil {
 		return nil, err
 	}
 	if err := networkattachmentdefinitionapi.AddToScheme(networkattachmentdefinitionscheme.Scheme); err != nil {
@@ -180,12 +170,6 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 		}
 	}
 
-	if config.OVNKubernetesFeature.EnableICMPNetworkPolicy {
-		wf.informers[icmpNetworkPolicyType], err = newInformer(icmpNetworkPolicyType, wf.inpFactory.K8s().V1alpha1().ICMPNetworkPolicies().Informer())
-		if err != nil {
-			return nil, err
-		}
-	}
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
 		wf.informers[networkattachmentdefinitionType], err = newInformer(networkattachmentdefinitionType,
 			wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer())
@@ -222,14 +206,6 @@ func (wf *WatchFactory) Start() error {
 	if config.OVNKubernetesFeature.EnableEgressFirewall && wf.efFactory != nil {
 		wf.efFactory.Start(wf.stopChan)
 		for oType, synced := range wf.efFactory.WaitForCacheSync(wf.stopChan) {
-			if !synced {
-				return fmt.Errorf("error in syncing cache for %v informer", oType)
-			}
-		}
-	}
-	if config.OVNKubernetesFeature.EnableICMPNetworkPolicy && wf.inpFactory != nil {
-		wf.inpFactory.Start(wf.stopChan)
-		for oType, synced := range wf.inpFactory.WaitForCacheSync(wf.stopChan) {
 			if !synced {
 				return fmt.Errorf("error in syncing cache for %v informer", oType)
 			}
@@ -372,10 +348,6 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 		if egressIP, ok := obj.(*egressipapi.EgressIP); ok {
 			return &egressIP.ObjectMeta, nil
 		}
-	case icmpNetworkPolicyType:
-		if icmpNetworkPolicy, ok := obj.(*icmpnetworkpolicyapi.ICMPNetworkPolicy); ok {
-			return &icmpNetworkPolicy.ObjectMeta, nil
-		}
 	case endpointSliceType:
 		if endpointSlice, ok := obj.(*discovery.EndpointSlice); ok {
 			return &endpointSlice.ObjectMeta, nil
@@ -500,16 +472,6 @@ func (wf *WatchFactory) AddEgressFirewallHandler(handlerFuncs cache.ResourceEven
 // RemoveEgressFirewallHandler removes an EgressFirewall object event handler function
 func (wf *WatchFactory) RemoveEgressFirewallHandler(handler *Handler) {
 	wf.removeHandler(egressFirewallType, handler)
-}
-
-// AddICMPNetworkPolicyHandler adds a handler function that will be executed on ICMPNetworkPolicy object changes
-func (wf *WatchFactory) AddICMPNetworkPolicyHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(icmpNetworkPolicyType, "", nil, handlerFuncs, processExisting)
-}
-
-// RemoveICMPNetworkPolicyHandler removes an ICMPNetworkPolicy object event handler function
-func (wf *WatchFactory) RemoveICMPNetworkPolicyHandler(handler *Handler) {
-	wf.removeHandler(icmpNetworkPolicyType, handler)
 }
 
 // AddNetworkattachmentdefinitionHandler adds a handler function that will be executed on Networkattachmentdefinition object changes

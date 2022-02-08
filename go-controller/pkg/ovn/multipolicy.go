@@ -38,8 +38,8 @@ func (oc *Controller) syncMultiNetworkPolicies(multiPolicies []interface{}) {
 	}
 
 	stalePGs := []string{}
-	err := oc.addressSetFactory.ProcessEachAddressSet(func(addrSetName, namespaceName, policyName string, icmpAddressSet bool) {
-		if !icmpAddressSet && policyName != "" && !expectedPolicies[namespaceName][policyName] {
+	err := oc.addressSetFactory.ProcessEachAddressSet(func(addrSetName, namespaceName, policyName string) {
+		if policyName != "" && !expectedPolicies[namespaceName][policyName] {
 			// policy doesn't exist on k8s. Delete the port group
 			portGroupName := fmt.Sprintf("%s_%s", namespaceName, policyName)
 			hashedLocalPortGroup := oc.nadInfo.Prefix + hashedPortGroup(portGroupName)

@@ -49,7 +49,6 @@ OVN_METRICS_SCRAPE_INTERVAL=""
 OVS_METRICS_SCRAPE_INTERVAL=""
 OVN_EGRESSIP_ENABLE="true"
 OVN_EGRESSFIREWALL_ENABLE="true"
-OVN_ICMP_NETWORKPOLICY_ENABLE="true"
 OVN_MULTI_NETWORK_ENABLE="true"
 OVN_MULTI_NETWORKPOLICY_ENABLE="true"
 OVN_DISABLE_OVN_IFACE_ID_VER="true"
@@ -199,9 +198,6 @@ while [ "$1" != "" ]; do
   --egress-ip-enable)
     OVN_EGRESSIP_ENABLE=$VALUE
     ;;
-  --icmp-networkpolicy-enable)
-    OVN_ICMP_NETWORKPOLICY_ENABLE=$VALUE
-    ;;
   --multi-network-enable)
     OVN_MULTI_NETWORK_ENABLE=$VALUE
     ;;
@@ -313,8 +309,6 @@ ovn_egress_ip_enable=${OVN_EGRESSIP_ENABLE}
 echo "ovn_egress_ip_enable: ${ovn_egress_ip_enable}"
 ovn_egress_firewall_enable=${OVN_EGRESSFIREWALL_ENABLE}
 echo "ovn_egress_firewall_enable: ${ovn_egress_firewall_enable}"
-ovn_icmp_networkpolicy_enable=${OVN_ICMP_NETWORKPOLICY_ENABLE}
-echo "ovn_icmp_networkpolicy_enable: ${ovn_icmp_networkpolicy_enable}"
 ovn_multi_network_enable=${OVN_MULTI_NETWORK_ENABLE}
 echo "ovn_multi_network_enable: ${ovn_multi_network_enable}"
 ovn_multi_networkpolicy_enable=${OVN_MULTI_NETWORKPOLICY_ENABLE}
@@ -466,7 +460,6 @@ ovn_image=${image} \
   ovn_multicast_enable=${ovn_multicast_enable} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
   ovn_egress_firewall_enable=${ovn_egress_firewall_enable} \
-  ovn_icmp_networkpolicy_enable=${ovn_icmp_networkpolicy_enable} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovn_multi_networkpolicy_enable=${ovn_multi_networkpolicy_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
@@ -504,7 +497,6 @@ ovn_image=${image} \
   ovn_multicast_enable=${ovn_multicast_enable} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
   ovn_egress_firewall_enable=${ovn_egress_firewall_enable} \
-  ovn_icmp_networkpolicy_enable=${ovn_icmp_networkpolicy_enable} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovn_multi_networkpolicy_enable=${ovn_multi_networkpolicy_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
@@ -673,6 +665,5 @@ cp ../templates/ovnkube-monitor.yaml.j2 ../yaml/ovnkube-monitor.yaml
 cp ../templates/ovnkube-alerts.yaml.j2 ../yaml/ovnkube-alerts.yaml
 cp ../templates/k8s.ovn.org_egressfirewalls.yaml.j2 ../yaml/k8s.ovn.org_egressfirewalls.yaml
 cp ../templates/k8s.ovn.org_egressips.yaml.j2 ../yaml/k8s.ovn.org_egressips.yaml
-cp ../templates/k8s.ovn.org_icmpnetworkpolicies.yaml.j2 ../yaml/k8s.ovn.org_icmpnetworkpolicies.yaml
 
 exit 0

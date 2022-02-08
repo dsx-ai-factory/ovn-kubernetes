@@ -233,8 +233,6 @@ ovs_metrics_scrape_interval=${OVS_METRICS_SCRAPE_INTERVAL:-30}
 ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-}
 #OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 ovn_egressip_enable=${OVN_EGRESSIP_ENABLE:-false}
-#OVN_ICMP_NETWORKPOLICY_ENABLE - enable icmp networkpolicy for ovn-kubernetes
-ovn_icmp_networkpolicy_enable=${OVN_ICMP_NETWORKPOLICY_ENABLE:-false}
 #OVN_EGRESSFIREWALL_ENABLE - enable egressFirewall for ovn-kubernetes
 ovn_egressfirewall_enable=${OVN_EGRESSFIREWALL_ENABLE:-false}
 #OVN_MULTI_NETWORK_ENABLE - enable multiple net-attach-def for ovn-kubernetes
@@ -984,10 +982,6 @@ ovn-master() {
   if [[ ${ovn_egressip_enable} == "true" ]]; then
       egressip_enabled_flag="--enable-egress-ip"
   fi
-  icmp_networkpolicy_enabled_flag=
-  if [[ ${ovn_icmp_networkpolicy_enable} == "true" ]]; then
-      icmp_networkpolicy_enabled_flag="--enable-icmp-networkpolicy"
-  fi
   multi_network_enabled_flag=
   if [[ ${ovn_multi_network_enable} == "true" ]]; then
       multi_network_enabled_flag="--enable-multi-network"
@@ -1036,7 +1030,6 @@ ovn-master() {
     ${ovn_acl_logging_rate_limit_flag} \
     ${egressip_enabled_flag} \
     ${egressfirewall_enabled_flag} \
-    ${icmp_networkpolicy_enabled_flag} \
     ${multi_network_enabled_flag} \
     ${multi_networkpolicy_enabled_flag} \
     --metrics-interval ${ovn_metrics_scrape_interval} \

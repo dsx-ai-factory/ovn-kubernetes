@@ -18,8 +18,6 @@ import (
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
-	icmpnetworkpolicy "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1"
-	icmpnetworkpolicyfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1/apis/clientset/versioned/fake"
 )
 
 const (
@@ -63,25 +61,21 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 
 	egressIPObjects := []runtime.Object{}
 	egressFirewallObjects := []runtime.Object{}
-	icmpNetworkPolicyObjects := []runtime.Object{}
 	v1Objects := []runtime.Object{}
 	for _, object := range objects {
 		if _, isEgressIPObject := object.(*egressip.EgressIPList); isEgressIPObject {
 			egressIPObjects = append(egressIPObjects, object)
 		} else if _, isEgressFirewallObject := object.(*egressfirewall.EgressFirewallList); isEgressFirewallObject {
 			egressFirewallObjects = append(egressFirewallObjects, object)
-		} else if _, isicmpNetworkPolicyObject := object.(*icmpnetworkpolicy.ICMPNetworkPolicyList); isicmpNetworkPolicyObject {
-			icmpNetworkPolicyObjects = append(icmpNetworkPolicyObjects, object)
 		} else {
 			v1Objects = append(v1Objects, object)
 		}
 	}
 	o.fakeClient = &util.OVNClientset{
-		KubeClient:              fake.NewSimpleClientset(v1Objects...),
-		EgressIPClient:          egressipfake.NewSimpleClientset(egressIPObjects...),
-		EgressFirewallClient:    egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
-		ICMPNetworkPolicyClient: icmpnetworkpolicyfake.NewSimpleClientset(icmpNetworkPolicyObjects...),
-		NetworkAttchDefClient:   networkattachmentdefinitionfake.NewSimpleClientset(),
+		KubeClient:            fake.NewSimpleClientset(v1Objects...),
+		EgressIPClient:        egressipfake.NewSimpleClientset(egressIPObjects...),
+		EgressFirewallClient:  egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
+		NetworkAttchDefClient: networkattachmentdefinitionfake.NewSimpleClientset(),
 	}
 	o.init()
 }

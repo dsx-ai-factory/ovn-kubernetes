@@ -28,7 +28,7 @@ const (
 	ipv6AddressSetSuffix = "_v6"
 )
 
-type AddressSetIterFunc func(hashedName, namespace, suffix string, icmpAddressSet bool)
+type AddressSetIterFunc func(hashedName, namespace, suffix string)
 type AddressSetDoFunc func(as AddressSet) error
 
 // AddressSetFactory is an interface for managing address set objects
@@ -204,19 +204,11 @@ func (asf *ovnAddressSetFactory) ProcessEachAddressSet(iteratorFn AddressSetIter
 		processedAddressSets.Insert(addrSetName)
 		names := strings.Split(addrSetName, ".")
 		addrSetNamespace := names[0]
-		icmpAddressSet := false
 		nameSuffix := ""
 		if len(names) >= 2 {
 			nameSuffix = names[1]
-			// This could be something like
-			// gs-policy.ingress.1_v4 for
-			// NetworkPolicy, and
-			// icmp_gs-policy.ingress.1_v4 for
-			// ICMPNetworkPolicy.
-			policyKind := strings.Split(nameSuffix, "_")
-			icmpAddressSet = len(policyKind) > 0 && policyKind[0] == "icmp"
 		}
-		iteratorFn(addrSetName, addrSetNamespace, nameSuffix, icmpAddressSet)
+		iteratorFn(addrSetName, addrSetNamespace, nameSuffix)
 	})
 
 	return err

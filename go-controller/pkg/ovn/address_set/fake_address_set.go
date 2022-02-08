@@ -81,14 +81,11 @@ func (f *FakeAddressSetFactory) ProcessEachAddressSet(iteratorFn AddressSetIterF
 		asNames.Insert(asName)
 		parts := strings.Split(asName, ".")
 		addrSetNamespace := parts[0]
-		icmpAddressSet := false
 		nameSuffix := ""
 		if len(parts) >= 2 {
 			nameSuffix = parts[1]
-			policyKind := strings.Split(nameSuffix, "_")
-			icmpAddressSet = len(policyKind) > 0 && policyKind[0] == "icmp"
 		}
-		iteratorFn(asName, addrSetNamespace, nameSuffix, icmpAddressSet)
+		iteratorFn(asName, addrSetNamespace, nameSuffix)
 	}
 	return nil
 }

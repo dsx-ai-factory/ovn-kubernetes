@@ -34,7 +34,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
-	icmpnetworkpolicy "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/icmpnetworkpolicy/v1alpha1"
 
 	multinetworkpolicy "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	utilnet "k8s.io/utils/net"
@@ -140,7 +139,6 @@ type Controller struct {
 	wg                        *sync.WaitGroup
 	stopChan                  chan struct{}
 	egressFirewallHandler     *factory.Handler
-	icmpNetworkPolicyHandler  *factory.Handler
 	podHandler                *factory.Handler
 	nodeHandler               *factory.Handler
 	namespaceHandler          *factory.Handler
@@ -244,9 +242,6 @@ const (
 
 	// SCTP is the constant string for the string "SCTP"
 	SCTP = "SCTP"
-
-	// ICMP is the constant string for the string "ICMP"
-	ICMP = "ICMP"
 )
 
 func GetIPFullMask(ip string) string {
@@ -442,10 +437,6 @@ func (oc *Controller) Run(nodeName string) error {
 	if !oc.nadInfo.IsSecondary {
 		// WatchNetworkPolicy depends on WatchPods and WatchNamespaces
 		oc.WatchNetworkPolicy()
-
-		if config.OVNKubernetesFeature.EnableICMPNetworkPolicy {
-			oc.icmpNetworkPolicyHandler = oc.WatchICMPNetworkPolicy()
-		}
 
 		if config.OVNKubernetesFeature.EnableEgressIP {
 			oc.WatchEgressNodes()
@@ -993,38 +984,6 @@ func (oc *Controller) WatchNetworkPolicy() {
 		},
 	}, oc.syncNetworkPolicies)
 	klog.Infof("Bootstrapping existing policies and cleaning stale policies took %v", time.Since(start))
-}
-
-//WatchICMPNetworkPolicy starts the watching of icmpnetworkpolicy resource and calls
-//back the appropriate handler logic
-func (oc *Controller) WatchICMPNetworkPolicy() *factory.Handler {
-	if oc.nadInfo.IsSecondary {
-		klog.Infof("WatchNetworkPolicy for network %s is a no-op", oc.nadInfo.NetName)
-		return nil
-	}
-
-	start := time.Now()
-	defer func() {
-		klog.Infof("Bootstrapping existing icmp policies and cleaning stale icmp policies took %v", time.Since(start))
-	}()
-	return oc.mc.watchFactory.AddICMPNetworkPolicyHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			icmpnetworkpolicy := obj.(*icmpnetworkpolicy.ICMPNetworkPolicy)
-			oc.addICMPNetworkPolicy(icmpnetworkpolicy)
-		},
-		UpdateFunc: func(old, newer interface{}) {
-			newpolicy := newer.(*icmpnetworkpolicy.ICMPNetworkPolicy)
-			oldpolicy := old.(*icmpnetworkpolicy.ICMPNetworkPolicy)
-			if !reflect.DeepEqual(oldpolicy, newpolicy) {
-				oc.deleteICMPNetworkPolicy(oldpolicy)
-				oc.addICMPNetworkPolicy(newpolicy)
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			icmpnetworkpolicy := obj.(*icmpnetworkpolicy.ICMPNetworkPolicy)
-			oc.deleteICMPNetworkPolicy(icmpnetworkpolicy)
-		},
-	}, oc.syncICMPNetworkPolicies)
 }
 
 // WatchEgressFirewall starts the watching of egressfirewall resource and calls
