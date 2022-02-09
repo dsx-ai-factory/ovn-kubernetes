@@ -479,7 +479,12 @@ coredns_patch() {
 }
 
 build_ovn_image() {
+
   if [ "$OVN_IMAGE" == local ]; then
+    # SDN nv patch
+    sed  -i "s/ovnkube_metrics_pk=.*/ovnkube_metrics_pk=""/;s/ovnkube_metrics_cert=.*/ovnkube_metrics_cert=""/" ../dist/images/ovnkube.sh
+    sed -i "/check_firewall_state() {.*/a return 0" ../dist/images/ovnkube.sh
+    sed -i "/create_ovn_firewall_zone() {.*/a return 0" ../dist/images/ovnkube.sh
     # Build ovn docker image
     pushd ../go-controller
     make
@@ -498,6 +503,7 @@ build_ovn_image() {
 
 create_ovn_kube_manifests() {
   pushd ../dist/images
+  sed -i "s/if kind is defined and kind -/if true /" ../templates/ovnk8s-node.yaml.j2
   ./daemonset.sh \
     --image="${OVN_IMAGE}" \
     --net-cidr="${NET_CIDR}" \
@@ -539,9 +545,14 @@ install_ovn_image() {
 }
 
 install_ovn() {
+
+  run_kubectl apply -f /root/git/k8s-yaml/multus/multus.yaml
+  run_kubectl apply -f /root/git/k8s-yaml/ovn/centos/shared/multinetworkpolicy.yaml
   pushd ../dist/yaml
   run_kubectl apply -f k8s.ovn.org_egressfirewalls.yaml
   run_kubectl apply -f k8s.ovn.org_egressips.yaml
+  test -f k8s.ovn.org_icmpnetworkpolicies.yaml && run_kubectl apply -f k8s.ovn.org_icmpnetworkpolicies.yaml
+  run_kubectl apply -f /root/git/k8s-yaml/multus/ovn-primary-crd.yaml
   run_kubectl apply -f ovn-setup.yaml
   MASTER_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sort | head -n "${KIND_NUM_MASTER}")
   # We want OVN HA not Kubernetes HA
@@ -556,12 +567,37 @@ install_ovn() {
   done
   run_kubectl label node --all k8s.ovn.org/ovnkube-db=true --overwrite
   run_kubectl apply -f ovs-node.yaml
-  run_kubectl apply -f ovn-nbdb-raft.yaml
-  run_kubectl apply -f ovn-sbdb-raft.yaml
+  #run_kubectl apply -f ovn-nbdb-raft.yaml
+  #run_kubectl apply -f ovn-sbdb-raft.yaml
+  run_kubectl apply -f ovnkube-db.yaml
   run_kubectl apply -f ovn-north.yaml
   run_kubectl apply -f ovn-host.yaml
+# needed to avoid certs
+  sed -i "s/HTTPS/HTTP/" ovnk8s-master.yaml
   run_kubectl apply -f ovnk8s-master.yaml
   run_kubectl apply -f ovnk8s-node.yaml
+
+  set +e
+  #set mock bf2 resource
+  killall kubectl
+  sleep 2
+  kubectl proxy & curl -s --header "Content-Type: application/json-patch+json" --request PATCH --data '[{"op": "add", "path": "/status/capacity/nvidia.com~1bf2", "value": "64"}]' http://localhost:8001/api/v1/nodes/ovn-worker/status >/dev/null
+  curl -s --header "Content-Type: application/json-patch+json" --request PATCH --data '[{"op": "add", "path": "/status/capacity/nvidia.com~1bf2", "value": "64"}]' http://localhost:8001/api/v1/nodes/ovn-worker2/status >/dev/null
+  sleep 2
+  curl -s --header "Content-Type: application/json-patch+json" --request PATCH --data '[{"op": "add", "path": "/status/capacity/nvidia.com~1bf2", "value": "64"}]' http://localhost:8001/api/v1/nodes/ovn-worker/status | grep bf2
+  curl -s --header "Content-Type: application/json-patch+json" --request PATCH --data '[{"op": "add", "path": "/status/capacity/nvidia.com~1bf2", "value": "64"}]' http://localhost:8001/api/v1/nodes/ovn-worker2/status | grep bf2
+
+  pushd /root/git/k8s-yaml/sdn-mutator
+  kubectl delete -f deployment.yaml -f sdn-mutator-webhook-cfg.yaml
+  kubectl delete -f sdn-mutator-setup.yaml
+  kubectl apply -f sdn-mutator-setup.yaml
+  ./create-signed-cert.sh --service sdn-mutator-svc --secret sdn-mutator-certs --namespace sdn-mutator
+  cat sdn-mutator-webhook-cfg.yaml.template | ./patch-ca-bundle.sh > sdn-mutator-webhook-cfg.yaml
+  kubectl create -f deployment.yaml -f sdn-mutator-webhook-cfg.yaml
+  sleep 3
+  kubectl -n sdn-mutator wait --for=condition=Available deploy/sdn-mutator --timeout=120s 
+  popd
+  set -e
 
   popd
 }
