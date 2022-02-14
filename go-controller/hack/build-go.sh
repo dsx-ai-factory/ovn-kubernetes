@@ -27,7 +27,7 @@ build_binaries() {
         if [ "$binbase" = "ovn-k8s-cni-overlay" ]; then
             CGO_ENABLED=0
         fi
-        env CGO_ENABLED=$CGO_ENABLED go build -v \
+        env CGO_ENABLED=$CGO_ENABLED GOPRIVATE=gitlab-master.nvidia.com go build -v \
             -mod vendor \
             -gcflags "${GCFLAGS}" \
             -ldflags "-B ${BUILDID} \

@@ -46,6 +46,7 @@ require (
 
 replace (
 	github.com/gogo/protobuf => github.com/gogo/protobuf v1.3.2
+	github.com/k8snetworkplumbingwg/multi-networkpolicy => gitlab-master.nvidia.com/sdn/multi-networkpolicy v0.0.0-20220216192038-2cad3bdd98e5
 	k8s.io/api => k8s.io/api v0.22.0
 	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.22.0
 	k8s.io/apimachinery => k8s.io/apimachinery v0.22.0
