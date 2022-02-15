@@ -264,7 +264,7 @@ func setOvnControllerConfigurationMetrics(ovsDBClient *util.OvsdbClient) (err er
 	// set ovn-remote-probe-interval metric
 	remoteProbeField := openVswitchRow.ExternalIds["ovn-remote-probe-interval"]
 	remoteProbeValue := parseMetricToFloat(MetricOvnSubsystemController, "ovn-remote-probe-interval", remoteProbeField)
-	metricRemoteProbeInterval.Set(remoteProbeValue)
+	metricRemoteProbeInterval.Set(remoteProbeValue / 1000)
 	// set ovn-monitor-all metric value
 	var ovnMonitorValue float64
 	ovnMonitorField := openVswitchRow.ExternalIds["ovn-monitor-all"]

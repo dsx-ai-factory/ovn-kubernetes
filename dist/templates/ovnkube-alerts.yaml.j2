@@ -182,7 +182,7 @@ spec:
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/PHqwgBHMz/k8s-control-panel-kube-manager
       annotations:
        message: |
-         The ovn-nbctl 99th percentile CLI latency {{ value }} aggregated 
+         The ovn-nbctl 99th percentile CLI latency {{ $value }} aggregated 
          across all masters for the last 15minutes is more than 3 seconds.
 
     - alert: OvnKubeHighSBCliLatency99thPercentile
@@ -200,7 +200,7 @@ spec:
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/PHqwgBHMz/k8s-control-panel-kube-manager
       annotations:
        message: |
-         The ovn-sbctl 99th percentile CLI latency {{ value }} aggregated
+         The ovn-sbctl 99th percentile CLI latency {{ $value }} aggregated
          across all masters for the last 15minutes is more than 3 seconds.
 
     - alert: OvnKubeHighK8sNetworkPolicyUpdateLatency99thPercentile
@@ -218,7 +218,7 @@ spec:
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/PHqwgBHMz/k8s-control-panel-kube-manager
       annotations:
        message: |
-         The 99th percentile {{ $labels.name }} update latency {{ value }} aggregated 
+         The 99th percentile {{ $labels.name }} update latency {{ $value }} aggregated 
          across all masters for the last 15minutes is more than 1 seconds.
 
     - alert: OvnKubeHighK8sNamespaceUpdateLatency99thPercentile
@@ -236,7 +236,7 @@ spec:
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/PHqwgBHMz/k8s-control-panel-kube-manager
       annotations:
        message: |
-         The 99th percentile {{ $labels.name }} update latency {{ value }} 
+         The 99th percentile {{ $labels.name }} update latency {{ $value }} 
          aggregated across all masters for the last 15minutes is more than 1 seconds.
 
     - alert: OvnKubeHighK8sServiceUpdateLatency99thPercentile
@@ -254,7 +254,7 @@ spec:
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/PHqwgBHMz/k8s-control-panel-kube-manager
       annotations:
        message: |
-         The 99th percentile {{ $labels.name }} update latency {{ value }} aggregated 
+         The 99th percentile {{ $labels.name }} update latency {{ $value }} aggregated 
          across all masters for the last 15minutes is more than 1 seconds.
 
     - alert: OvnKubeHighK8sEndpointUpdateLatency99thPercentile
@@ -272,7 +272,7 @@ spec:
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/PHqwgBHMz/k8s-control-panel-kube-manager
       annotations:
        message: |
-         The 99th percentile {{ $labels.name }} update latency {{ value }} aggregated
+         The 99th percentile {{ $labels.name }} update latency {{ $value }} aggregated
          across all masters for the last 15minutes is more than 1 seconds.
 
     - alert: OvnKubeNodeLogFileSize
@@ -391,7 +391,7 @@ spec:
 
     - alert: OvnSBDBDbSize
       expr: |
-        rate(ovn_db_db_size{namespace="ovn-kubernetes", job="ovnkube-node", db_name="OVN_Southbound"}[15m]) * 5 * 60 / 1024 / 1024 > 40
+        rate(ovn_db_db_size_bytes{namespace="ovn-kubernetes", job="ovnkube-node", db_name="OVN_Southbound"}[15m]) * 5 * 60 / 1024 / 1024 > 40
       for: 10m
       labels:
         severity: warning
@@ -404,7 +404,7 @@ spec:
 
     - alert: OvnNBDBDbSize
       expr: |
-        rate(ovn_db_db_size{namespace="ovn-kubernetes", job="ovnkube-node", db_name="OVN_Northbound"}[15m]) * 5 * 60 / 1024 / 1024 > 20
+        rate(ovn_db_db_size_bytes{namespace="ovn-kubernetes", job="ovnkube-node", db_name="OVN_Northbound"}[15m]) * 5 * 60 / 1024 / 1024 > 20
       for: 10m
       labels:
         severity: warning
@@ -537,7 +537,7 @@ spec:
 
     - alert: OvsDBdbSize
       expr: |
-        rate(ovs_ovsdb_db_size{namespace="ovn-kubernetes", job="ovnkube-node"}[15m]) * 5 * 60 / 1024 / 1024 > 1
+        rate(ovs_ovsdb_db_size_bytes{namespace="ovn-kubernetes", job="ovnkube-node"}[15m]) * 5 * 60 / 1024 / 1024 > 1
       for: 10m
       labels:
        severity: warning
