@@ -651,3 +651,18 @@ spec:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that
          number of handled flows is {{ printf "%.2f" $value }} per second for longer than 15 mins.
+
+    - alert: OvsVswitchdVtep0InterfaceMtu
+      expr: |
+        ovs_vswitchd_interface_mtu and
+        (ovs_vswitchd_interface_mtu{namespace="ovn-kubernetes",job="ovnkube-node",interface="vtep0"} != 1560)
+        and (ovs_vswitchd_interface_mtu{namespace="ovn-kubernetes",job="ovnkube-node",interface="vtep0"} != 9100)
+      for: 10m
+      labels:
+       severity: warning
+       pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
+      annotations:
+       message: |
+         Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that
+         vtep0 interface MTU value is {{ $value }}
