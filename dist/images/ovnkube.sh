@@ -86,6 +86,8 @@ BASEDIR=$(dirname $0)
 # OVN_HOST_NETWORK_NAMESPACE - namespace to classify host network traffic for applying network policies
 # OVN_ENCAP_TOS - set a TOS value for the outer header
 # OVN_CTINV_FLOWS_DISABLE - enable/disable northd from configuring CT Invalid flows as it is not offload friendly
+# OVN_MAX_NEWCONN_PPS - Max new outbound connections allowed on this VF
+# OVN_MAX_NEWCONN_BURST - Max burst of new outbound connections allowed on this VF
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -207,6 +209,10 @@ ovn_sb_raft_election_timer=${OVN_SB_RAFT_ELECTION_TIMER:-1000}
 ovn_nb_raft_sched_priority=${OVN_NB_RAFT_SCHED_PRIORITY:--12}
 # OVN_SB_RAFT_SCHED_PRIORITY - ovn south db process priority niceness (default -11)
 ovn_sb_raft_sched_priority=${OVN_SB_RAFT_SCHED_PRIORITY:--11}
+# OVN_MAX_NEWCONN_PPS - Max new outbound connection allowed, default is 0 pps: no limit
+OVN_MAX_NEWCONN_PPS=${OVN_MAX_NEWCONN_PPS:-0}
+# OVN_MAX_NEWCONN_BURST - Max burst of new outbound connection allowed, default is 0 : no limit
+OVN_MAX_NEWCONN_BURST=${OVN_MAX_NEWCONN_BURST:-0}
 
 ovn_hybrid_overlay_enable=${OVN_HYBRID_OVERLAY_ENABLE:-}
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR:-}
@@ -1427,7 +1433,9 @@ ovn-node() {
      ${ovnkube_node_mode_flag} \
     ${egress_interface} \
     --host-network-namespace ${ovn_host_network_namespace} \
-     ${ovnkube_node_mgmt_port_netdev_flag} &
+     ${ovnkube_node_mgmt_port_netdev_flag} \
+     --ovn-max-newconn-pps=${OVN_MAX_NEWCONN_PPS} \
+     --ovn-max-newconn-burst=${OVN_MAX_NEWCONN_BURST} &
 
   wait_for_event attempts=3 process_ready ovnkube
   if [[ ${ovnkube_node_mode} != "dpu" ]]; then

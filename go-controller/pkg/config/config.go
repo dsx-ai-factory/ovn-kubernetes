@@ -375,6 +375,8 @@ type OvnKubeNodeConfig struct {
 	MgmtPortNetdev       string `gcfg:"mgmt-port-netdev"`
 	DisableOVNIfaceIdVer bool   `gcfg:"disable-ovn-iface-id-ver"`
 	IsPrimaryDPU         bool
+	MaxNewConnPPS        uint `gcfg:"ovn-max-newconn-pps"`
+	MaxNewConnBurst      uint `gcfg:"ovn-max-newconn-burst"`
 }
 
 // OvnDBScheme describes the OVN database connection transport method
@@ -1150,6 +1152,18 @@ var OvnKubeNodeFlags = []cli.Flag{
 			"(depends on ovn version, minimal required is 21.09)",
 		Value:       OvnKubeNode.DisableOVNIfaceIdVer,
 		Destination: &cliConfig.OvnKubeNode.DisableOVNIfaceIdVer,
+	},
+	&cli.UintFlag{
+		Name:        "ovn-max-newconn-pps",
+		Usage:       "set the max new connections rate for interfaces backed by a VF",
+		Value:       OvnKubeNode.MaxNewConnPPS,
+		Destination: &cliConfig.OvnKubeNode.MaxNewConnPPS,
+	},
+	&cli.UintFlag{
+		Name:        "ovn-max-newconn-burst",
+		Usage:       "set the max new connections burst for interfaces backed by a VF",
+		Value:       OvnKubeNode.MaxNewConnBurst,
+		Destination: &cliConfig.OvnKubeNode.MaxNewConnBurst,
 	},
 }
 

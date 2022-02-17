@@ -498,6 +498,7 @@ func SetupOvsDBClient() (*util.OvsdbClient, error) {
 			"ingress_policing_burst",
 			"ingress_policing_rate",
 			"status",
+			"external_ids",
 		},
 		"Open_vSwitch": {
 			"other_config",

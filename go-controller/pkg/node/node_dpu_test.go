@@ -165,6 +165,7 @@ var _ = Describe("Node DPU tests", func() {
 			Expect(err).ToNot(HaveOccurred())
 			// set pod annotations
 			pod.Annotations = podAnnot
+			sriovnetOpsMock.On("SetRepresentorVFMissPktRate", vfRep, uint(0), uint(0)).Return(nil)
 		})
 
 		It("Fails if dpu.connection-details Pod annotation is not present", func() {
@@ -346,6 +347,7 @@ var _ = Describe("Node DPU tests", func() {
 		BeforeEach(func() {
 			vfRep = "pf0vf9"
 			vfLink = &linkMock.Link{}
+			sriovnetOpsMock.On("SetRepresentorVFMissPktRate", vfRep, uint(0), uint(0)).Return(nil)
 		})
 
 		It("Sets link down for VF representor and removes VF representor from OVS", func() {

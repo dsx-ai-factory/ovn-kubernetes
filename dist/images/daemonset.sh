@@ -63,6 +63,10 @@ OVNKUBE_NODE_MGMT_PORT_NETDEV=""
 OVN_NOHOSTSUBNET_LABEL="k8s.ovn.org/ovn-managed=false"
 OVN_ENCAP_TOS="inherit"
 OVN_CTINV_FLOWS_DISABLE="true"
+# Rate limit on the VFs to mitigate DoS; the maximum packets per second
+# and burst of new connections allowed on the VF
+OVN_MAX_NEWCONN_PPS="10"
+OVN_MAX_NEWCONN_BURST="100"
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -249,6 +253,12 @@ while [ "$1" != "" ]; do
   --ovn-ctinv-flows-disable)
     OVN_CTINV_FLOWS_DISABLE=$VALUE
     ;;
+  --max-newconn-pps)
+    OVN_MAX_NEWCONN_PPS=$VALUE
+    ;;
+  --max-newconn-burst)
+    OVN_MAX_NEWCONN_BURST=$VALUE
+    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -381,6 +391,10 @@ ovn_encap_tos=${OVN_ENCAP_TOS}
 echo "ovn_encap_tos: ${ovn_encap_tos}"
 ovn_ctinv_flows_disable=${OVN_CTINV_FLOWS_DISABLE}
 echo "ovn_ctinv_flows_disable: ${ovn_ctinv_flows_disable}"
+ovn_max_newconn_pps=${OVN_MAX_NEWCONN_PPS}
+echo "ovn_max_newconn_pps: ${ovn_max_newconn_pps}"
+ovn_max_newconn_burst=${OVN_MAX_NEWCONN_BURST}
+echo "ovn_max_newconn_burst: ${ovn_max_newconn_burst}"
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -596,6 +610,8 @@ ovn_image=${image_ubuntu} \
   ovn_lflow_cache_limit=${ovn_lflow_cache_limit} \
   ovn_lflow_cache_limit_kb=${ovn_lflow_cache_limit_kb} \
   ovn_encap_tos=${ovn_encap_tos} \
+  ovn_max_newconn_pps=${ovn_max_newconn_pps} \
+  ovn_max_newconn_burst=${ovn_max_newconn_burst} \
   j2 ../templates/ovnk8s-node-dpu.yaml.j2 -o ../yaml/ovnk8s-node-dpu.yaml
 
 ovn_image=${imagec} \

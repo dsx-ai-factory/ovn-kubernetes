@@ -90,6 +90,7 @@ type Interface struct {
 	IngressPolicingRate  float64
 	Statistics           map[string]float64
 	Status               map[string]string
+	ExternalIds          map[string]string
 }
 
 type OpenVswitch struct {
@@ -236,6 +237,22 @@ func (c *OvsdbClient) rowToInterface(uuid string) (*Interface, error) {
 	interfaceInfo.Duplex = getColumnFieldStringValue(&cacheInterface, "duplex")
 	interfaceInfo.LinkSpeed = getColumnFieldFloat64Value(&cacheInterface, "link_speed")
 	interfaceInfo.Mtu = getColumnFieldFloat64Value(&cacheInterface, "mtu")
+
+	externalIdsMap := make(map[string]string)
+	if externalIds, ok := cacheInterface.Fields["external_ids"]; ok {
+		if extIdMap, ok := externalIds.(libovsdb.OvsMap); ok {
+			for field, value := range extIdMap.GoMap {
+				if fi, ok := field.(string); ok {
+					if v, ok := value.(string); ok {
+						externalIdsMap[fi] = v
+					}
+				}
+			}
+		} else {
+			return nil, fmt.Errorf("type libovsdb.OvsMap casting failed")
+		}
+	}
+	interfaceInfo.ExternalIds = externalIdsMap
 
 	statsMap := make(map[string]float64)
 	if stats, ok := cacheInterface.Fields["statistics"]; ok {

@@ -154,9 +154,11 @@ type NetAttachDefInfo struct {
 	NetCidr       string
 	MTU           int
 
-	TopoType   string
-	VlanId     int
-	ExcludeIPs []net.IP
+	TopoType        string
+	VlanId          int
+	MaxNewConnPPS   uint
+	MaxNewConnBurst uint
+	ExcludeIPs      []net.IP
 }
 
 func NewNetAttachDefInfo(netconf *cnitypes.NetConf) (*NetAttachDefInfo, error) {
@@ -180,11 +182,13 @@ func NewNetAttachDefInfo(netconf *cnitypes.NetConf) (*NetAttachDefInfo, error) {
 	prefix := GetNetworkPrefix(netName, !netconf.IsSecondary)
 
 	nadInfo := NetAttachDefInfo{
-		NetCidr:     netconf.NetCidr,
-		MTU:         netconf.MTU,
-		TopoType:    netconf.TopoType,
-		VlanId:      netconf.VlanId,
-		NetNameInfo: NetNameInfo{netName, prefix, netconf.IsSecondary},
+		NetCidr:         netconf.NetCidr,
+		MTU:             netconf.MTU,
+		TopoType:        netconf.TopoType,
+		VlanId:          netconf.VlanId,
+		NetNameInfo:     NetNameInfo{netName, prefix, netconf.IsSecondary},
+		MaxNewConnPPS:   netconf.MaxNewConnPPS,
+		MaxNewConnBurst: netconf.MaxNewConnBurst,
 	}
 
 	if netconf.TopoType == types.LocalnetAttachDefTopoType {
@@ -221,6 +225,7 @@ func NewNetAttachDefInfo(netconf *cnitypes.NetConf) (*NetAttachDefInfo, error) {
 			}
 		}
 	}
+	klog.Infof("NewNetAttachDefInfo: PPS info for  Nad %s is %u/%u", netconf.Name, nadInfo.MaxNewConnPPS, nadInfo.MaxNewConnBurst)
 
 	return &nadInfo, nil
 }

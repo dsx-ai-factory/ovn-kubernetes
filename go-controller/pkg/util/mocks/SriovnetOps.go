@@ -214,3 +214,66 @@ func (_m *SriovnetOps) SetRepresentorPeerMacAddress(netdev string, mac net.Hardw
 
 	return r0
 }
+
+// SetRepresentorVFMissPktRate provides a mock function with given fields: netdev, max_pps, max_burst
+func (_m *SriovnetOps) SetRepresentorVFMissPktRate(netdev string, max_pps, max_burst uint) error {
+	ret := _m.Called(netdev, max_pps, max_burst)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, uint, uint) error); ok {
+		r0 = rf(netdev, max_pps, max_burst)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// GetRepresentorVFMissPktRate provides a mock function with given fields: netdev
+func (_m *SriovnetOps) GetRepresentorVFMissPktRate(netdev string) (uint64, uint64, error) {
+	ret := _m.Called(netdev)
+
+	var r0 uint64
+	if rf, ok := ret.Get(0).(func(string) uint64); ok {
+		r0 = rf(netdev)
+	} else {
+		r0 = ret.Get(0).(uint64)
+	}
+
+	var r1 uint64
+	if rf, ok := ret.Get(1).(func(string) uint64); ok {
+		r1 = rf(netdev)
+	} else {
+		r1 = ret.Get(1).(uint64)
+	}
+
+	var r2 error
+	if rf, ok := ret.Get(2).(func(string) error); ok {
+		r2 = rf(netdev)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
+}
+
+// GetRepresentorVFMissPktDrops provides a mock function with given fields: netdev
+func (_m *SriovnetOps) GetRepresentorVFMissPktDrops(netdev string) (uint64, error) {
+	ret := _m.Called(netdev)
+
+	var r0 uint64
+	if rf, ok := ret.Get(0).(func(string) uint64); ok {
+		r0 = rf(netdev)
+	} else {
+		r0 = ret.Get(0).(uint64)
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(2).(func(string) error); ok {
+		r1 = rf(netdev)
+	} else {
+		r1 = ret.Error(2)
+	}
+
+	return r0, r1
+}

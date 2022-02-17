@@ -695,6 +695,34 @@ func setOvsInterfaceStatistics(interfaceBridge, interfacePort, interfaceName str
 	}
 }
 
+func setOvsPortMissPktsInfo(interfaceBridge, interfacePort, interfaceName, interfaceDriverName string) {
+	// Check if this is Representor, if so, let's get any rate configured on it.
+	if strings.Compare(interfaceDriverName, "mlx5e_rep") != 0 {
+		// Check if we need to explicitly set these to 0
+		return
+	}
+	// In theory we don't need to get this information every time, but this value can
+	// change, so we can read it along with the dropped stats.
+	maxPPS, burstPPS, err := util.GetSriovnetOps().GetRepresentorVFMissPktRate(interfaceName)
+	if err != nil {
+		// Maybe set some value that indicates  "unknown" and trigger an alert based on that.
+		klog.Errorf("setOvsPortMissPktsInfo: error getting misspkt rate..: %v", err)
+		return
+	}
+	ovsInterfaceMetricsDataMap["interface_tx_misspkts_pps"].metric.WithLabelValues(
+		interfaceBridge, interfacePort, interfaceName).Set(float64(maxPPS))
+	ovsInterfaceMetricsDataMap["interface_tx_misspkts_burst"].metric.WithLabelValues(
+		interfaceBridge, interfacePort, interfaceName).Set(float64(burstPPS))
+	dropPacktCount, err := util.GetSriovnetOps().GetRepresentorVFMissPktDrops(interfaceName)
+	if err != nil {
+		// Maybe set some value that indicates  "unknown" and trigger an alert based on that.
+		klog.Errorf("setOvsPortMissPktsInfo: error getting misspkt drops..: %v", err)
+		return
+	}
+	ovsInterfaceMetricsDataMap["interface_tx_misspkts_packets_drops"].metric.WithLabelValues(
+		interfaceBridge, interfacePort, interfaceName).Set(float64(dropPacktCount))
+}
+
 func setOvsInterfaceStatusFields(interfaceBridge, interfacePort, interfaceName string,
 	statusMap map[string]string) {
 
@@ -783,35 +811,41 @@ func ovsInterfaceMetricsUpdate(ovsDBClient *util.OvsdbClient,
 			// not gathering metrics for not-typed and geneve interfaces
 			continue
 		}
+		portName := interfaceData.port
+		if ifaceID, ok := interfaceInfo.ExternalIds["iface-id"]; ok {
+			portName = ifaceID
+		}
 		ovsInterfaceMetricsDataMap["interface_type"].metric.WithLabelValues(
-			interfaceData.bridge, interfaceData.port, interfaceName).Set(interfaceTypeValue)
+			interfaceData.bridge, portName, interfaceName).Set(interfaceTypeValue)
 		duplexType := getOvsInterfaceDuplexType(interfaceInfo.Duplex)
 		ovsInterfaceMetricsDataMap["interface_duplex"].metric.WithLabelValues(
-			interfaceData.bridge, interfaceData.port, interfaceName).Set(duplexType)
+			interfaceData.bridge, portName, interfaceName).Set(duplexType)
 		adminStateValue := getOvsInterfaceState(interfaceInfo.AdminState)
 		ovsInterfaceMetricsDataMap["interface_admin_state"].metric.WithLabelValues(
-			interfaceData.bridge, interfaceData.port, interfaceName).Set(adminStateValue)
+			interfaceData.bridge, portName, interfaceName).Set(adminStateValue)
 		linkStatevalue := getOvsInterfaceState(interfaceInfo.LinkState)
 		ovsInterfaceMetricsDataMap["interface_link_state"].metric.WithLabelValues(
-			interfaceData.bridge, interfaceData.port, interfaceName).Set(linkStatevalue)
+			interfaceData.bridge, portName, interfaceName).Set(linkStatevalue)
 		ovsInterfaceMetricsDataMap["interface_ifindex"].metric.WithLabelValues(
-			interfaceData.bridge, interfaceData.port, interfaceName).Set(interfaceInfo.IfIndex)
+			interfaceData.bridge, portName, interfaceName).Set(interfaceInfo.IfIndex)
 		ovsInterfaceMetricsDataMap["interface_link_resets"].metric.WithLabelValues(
-			interfaceData.bridge, interfaceData.port, interfaceName).Set(interfaceInfo.LinkResets)
+			interfaceData.bridge, portName, interfaceName).Set(interfaceInfo.LinkResets)
 		ovsInterfaceMetricsDataMap["interface_link_speed"].metric.WithLabelValues(
-			interfaceData.bridge, interfaceData.port, interfaceName).Set(interfaceInfo.LinkSpeed)
+			interfaceData.bridge, portName, interfaceName).Set(interfaceInfo.LinkSpeed)
 		ovsInterfaceMetricsDataMap["interface_mtu"].metric.WithLabelValues(
-			interfaceData.bridge, interfaceData.port, interfaceName).Set(interfaceInfo.Mtu)
+			interfaceData.bridge, portName, interfaceName).Set(interfaceInfo.Mtu)
 		ovsInterfaceMetricsDataMap["interface_of_port"].metric.WithLabelValues(
-			interfaceData.bridge, interfaceData.port, interfaceName).Set(interfaceInfo.OfPort)
+			interfaceData.bridge, portName, interfaceName).Set(interfaceInfo.OfPort)
 		ovsInterfaceMetricsDataMap["interface_ingress_policing_burst"].metric.WithLabelValues(
-			interfaceData.bridge, interfaceData.port, interfaceName).Set(interfaceInfo.IngressPolicingBurst)
+			interfaceData.bridge, portName, interfaceName).Set(interfaceInfo.IngressPolicingBurst)
 		ovsInterfaceMetricsDataMap["interface_ingress_policing_rate"].metric.WithLabelValues(
-			interfaceData.bridge, interfaceData.port, interfaceName).Set(interfaceInfo.IngressPolicingRate)
+			interfaceData.bridge, portName, interfaceName).Set(interfaceInfo.IngressPolicingRate)
 		// set the ovs interface status fields
-		setOvsInterfaceStatusFields(interfaceData.bridge, interfaceData.port, interfaceName, interfaceInfo.Status)
+		setOvsInterfaceStatusFields(interfaceData.bridge, portName, interfaceName, interfaceInfo.Status)
 		// set ovs interface stastics fields
-		setOvsInterfaceStatistics(interfaceData.bridge, interfaceData.port, interfaceName, interfaceInfo.Statistics)
+		setOvsInterfaceStatistics(interfaceData.bridge, portName, interfaceName, interfaceInfo.Statistics)
+		// set interface limits, if any, on the number of new connections (i.e. missed packets)  initiated.
+		setOvsPortMissPktsInfo(interfaceData.bridge, portName, interfaceName, interfaceInfo.Status["driver_name"])
 	}
 	return nil
 }
@@ -1004,6 +1038,12 @@ var ovsInterfaceMetricsDataMap = map[string]*ovsInterfaceMetricsDetails{
 		help: "Represents the total number of packets with errors " +
 			"transmitted by OVS interface.",
 	},
+	// Not adding bytes currently, as the packets stats should suffice for
+	// this metric.
+	"interface_tx_misspkts_packets_drops": {
+		help: "Represents the number of new connection packets dropped " +
+			"by the hardware.",
+	},
 	"interface_ingress_policing_rate": {
 		help: "Maximum rate for data received on OVS interface, " +
 			"in kbps. If the value is 0, then policing is disabled.",
@@ -1043,6 +1083,14 @@ var ovsInterfaceMetricsDataMap = map[string]*ovsInterfaceMetricsDetails{
 	"interface_link_resets": {
 		help: "The number of times Open vSwitch has observed the " +
 			"link_state of OVS interface change.",
+	},
+	"interface_tx_misspkts_pps": {
+		help: "Maximum rate of allowed new connections on OVS interface, " +
+			"in pps. If the value is 0, then rate is disabled.",
+	},
+	"interface_tx_misspkts_burst": {
+		help: "Maximum burst size of allowed new connections on OVS interface, " +
+			"in pps.",
 	},
 }
 

@@ -15,6 +15,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -244,6 +245,19 @@ func (nc *ovnNodeController) addRepPort(pod *kapi.Pod, vfRepName string, ifInfo 
 		return fmt.Errorf("failed to setup representor port. failed to set link up for interface %s: %v", vfRepName, err)
 	}
 
+	maxNewConnPPS := config.OvnKubeNode.MaxNewConnPPS
+	maxNewConnBurst := config.OvnKubeNode.MaxNewConnBurst
+	if nc.nadInfo.IsSecondary {
+		maxNewConnPPS = nc.nadInfo.MaxNewConnPPS
+		maxNewConnBurst = nc.nadInfo.MaxNewConnBurst
+	}
+	klog.Infof("Adding Limit %v/%v for VF representor %s for pod %s/%s network %s", maxNewConnPPS, maxNewConnBurst, vfRepName, pod.Namespace, pod.Name, ifInfo.NadName)
+	// set the VF rate limit configured for this network. This rate is for the allowed no. of new connections.
+	if err = util.GetSriovnetOps().SetRepresentorVFMissPktRate(vfRepName, maxNewConnPPS, maxNewConnBurst); err != nil {
+		_ = nc.delRepPort(vfRepName)
+		return fmt.Errorf("failed to setup Rate limiting  for interface %s: %v", vfRepName, err)
+	}
+
 	// Update connection-status annotation
 	// TODO(adrianc): we should update Status in case of error as well
 	connStatus := util.DPUConnectionStatus{Status: util.DPUConnectionStatusReady, Reason: ""}
@@ -268,6 +282,12 @@ func (nc *ovnNodeController) delRepPort(vfRepName string) error {
 		if linkDownErr := util.GetNetLinkOps().LinkSetDown(link); linkDownErr != nil {
 			klog.Warningf("Failed to set link down for representor port %s. %v", vfRepName, linkDownErr)
 		}
+	}
+	// reset the VF rate limit configured so that it doesn't get carried over to other users of this VF.
+	// We should also reset the dropped information since that is cumulative; there is a bug that doesn't
+	// allow clearing the value currently.
+	if err = util.GetSriovnetOps().SetRepresentorVFMissPktRate(vfRepName, 0, 0); err != nil {
+		klog.Warningf("Failed to reset VF rate limits on representor port %s. %v", vfRepName, err)
 	}
 
 	// remove from br-int
