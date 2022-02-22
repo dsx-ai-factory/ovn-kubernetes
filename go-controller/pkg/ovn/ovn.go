@@ -1399,7 +1399,8 @@ func (oc *Controller) WatchNodes() {
 			}
 
 			_, failed = nodeClusterRouterPortFailed.Load(node.Name)
-			if failed || nodeChassisChanged(oldNode, node) || nodeSubnetChanged(oldNode, node, oc.nadInfo.NetName) {
+			if failed || nodeChassisChanged(oldNode, node) || nodeSubnetChanged(oldNode, node, oc.nadInfo.NetName) ||
+				skipPinnedLSChanged(oldNode, node, oc.nadInfo) {
 				if err = oc.syncNodeClusterRouterPort(node, nil); err != nil {
 					if !util.IsAnnotationNotSetError(err) {
 						klog.Warningf(err.Error())
@@ -1840,6 +1841,12 @@ func nodeChassisChanged(oldNode, node *kapi.Node) bool {
 	oldChassis, _ := util.ParseNodeChassisIDAnnotation(oldNode)
 	newChassis, _ := util.ParseNodeChassisIDAnnotation(node)
 	return oldChassis != newChassis
+}
+
+func skipPinnedLSChanged(oldNode, node *kapi.Node, nadInfo *util.NetAttachDefInfo) bool {
+	oldSkipPinnedLS := util.ShouldSkipPinnedLS(oldNode, nadInfo)
+	newSkipPinnedLS := util.ShouldSkipPinnedLS(node, nadInfo)
+	return oldSkipPinnedLS != newSkipPinnedLS
 }
 
 // noHostSubnet() compares the no-hostsubenet-nodes flag with node labels to see if the node is manageing its

@@ -815,6 +815,32 @@ func (oc *Controller) syncNodeClusterRouterPort(node *kapi.Node, hostSubnets []*
 			klog.Errorf("Failed to add gateway chassis %s to logical router port %s, error: %v", chassisID, lrpName, err)
 			return err
 		}
+	} else {
+		gatewayChassis := nbdb.GatewayChassis{
+			Name: lrpName + "-" + chassisID,
+		}
+		opModels := []libovsdbops.OperationModel{
+			{
+				Model: &gatewayChassis,
+				DoAfter: func() {
+					if gatewayChassis.UUID != "" {
+						logicalRouterPort.GatewayChassis = []string{gatewayChassis.UUID}
+					} else {
+						logicalRouterPort.GatewayChassis = []string{}
+					}
+				},
+			},
+			{
+				Model: &logicalRouterPort,
+				OnModelMutations: []interface{}{
+					&logicalRouterPort.GatewayChassis,
+				},
+			},
+		}
+		if err := oc.mc.modelClient.Delete(opModels...); err != nil {
+			klog.Errorf("Failed to delete gateway chassis %s from logical router port %s, error: %v", chassisID, lrpName, err)
+			return err
+		}
 	}
 
 	return nil
