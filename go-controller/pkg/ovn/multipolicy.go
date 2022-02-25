@@ -92,6 +92,7 @@ func convertMultiNetPolicyToNetPolicy(mpolicy *multinetworkpolicy.MultiNetworkPo
 	policy.Name = mpolicy.Name
 	policy.Namespace = mpolicy.Namespace
 	policy.Spec.PodSelector = mpolicy.Spec.PodSelector
+	policy.Annotations = mpolicy.Annotations
 	policy.Spec.Ingress = make([]knet.NetworkPolicyIngressRule, len(mpolicy.Spec.Ingress))
 	for i, mingress := range mpolicy.Spec.Ingress {
 		var ingress knet.NetworkPolicyIngressRule
