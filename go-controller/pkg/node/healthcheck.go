@@ -1,14 +1,15 @@
 package node
 
 import (
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/healthcheck"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
 
@@ -253,7 +254,9 @@ func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCac
 
 // checkForStaleOVSInterfaces periodically checks for stale OVS interfaces
 func checkForStaleOVSInterfaces(nodeName string, wf factory.ObjectCacheInterface) {
-	checkForStaleOVSInternalPorts()
+	if config.OvnKubeNode.Mode == types.NodeModeFull {
+		checkForStaleOVSInternalPorts()
+	}
 	checkForStaleOVSRepresentorInterfaces(nodeName, wf)
 }
 
