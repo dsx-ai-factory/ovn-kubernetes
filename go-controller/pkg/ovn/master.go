@@ -804,7 +804,7 @@ func (oc *Controller) syncNodeClusterRouterPort(node *kapi.Node, hostSubnets []*
 			},
 			{
 				Model: &logicalRouterPort,
-				OnModelMutations: []interface{}{
+				OnModelUpdates: []interface{}{
 					&logicalRouterPort.GatewayChassis,
 				},
 				ErrNotFound: true,
