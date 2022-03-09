@@ -1141,11 +1141,11 @@ func (oc *Controller) destroyNetworkPolicy(np *networkPolicy, nsInfo *namespaceI
 			klog.Errorf("%v", err)
 		}
 	} else {
-		ops, err = libovsdbops.DeletePortsFromPortGroupOps(oc.mc.nbClient, ops, nsInfo.portGroupIngressDenyName, ingressDenyPorts...)
+		ops, err = libovsdbops.DeletePortsFromPortGroupOps(oc.mc.nbClient, ops, oc.nadInfo.Prefix+nsInfo.portGroupIngressDenyName, ingressDenyPorts...)
 		if err != nil {
 			klog.Errorf(err.Error())
 		}
-		ops, err = libovsdbops.DeletePortsFromPortGroupOps(oc.mc.nbClient, ops, nsInfo.portGroupEgressDenyName, egressDenyPorts...)
+		ops, err = libovsdbops.DeletePortsFromPortGroupOps(oc.mc.nbClient, ops, oc.nadInfo.Prefix+nsInfo.portGroupEgressDenyName, egressDenyPorts...)
 		if err != nil {
 			klog.Errorf(err.Error())
 		}
