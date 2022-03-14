@@ -89,13 +89,13 @@ func (oc *Controller) syncPods(pods []interface{}) {
 			klog.Errorf("Failed to get nodes: %v", err)
 			return
 		}
-		switches = make([]string, len(nodes))
-		for i, n := range nodes {
+		switches = make([]string, 0, len(nodes))
+		for _, n := range nodes {
 			if noHostSubnet(n) {
 				// skip those nodes that's not OVN managed
 				continue
 			}
-			switches[i] = oc.nadInfo.Prefix + n.Name
+			switches = append(switches, oc.nadInfo.Prefix+n.Name)
 		}
 	}
 
