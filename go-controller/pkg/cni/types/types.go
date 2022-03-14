@@ -24,9 +24,9 @@ type NetConf struct {
 	// VlanID, valid in localnet topology network
 	VlanId int `json:"vlan_id,omitempty"`
 	// Limit on new connections initiated (PPS)
-	MaxNewConnPPS uint `json:"max_newconn_pps,omitempty"`
+	MaxNewConnPPS uint `json:"maxNewConnPPS,omitempty"`
 	// Max Burst of new connections initiated (Packets)
-	MaxNewConnBurst uint `json:"max_newconn_burst,omitempty"`
+	MaxNewConnBurst uint `json:"maxNewConnBurst,omitempty"`
 	// bridge name, valid in localnet topology network
 	BridgeName string `json:"bridge_name,omitempty"`
 	// list of IPs, expressed with prefix length, to be excluded from being allocated for Pod
