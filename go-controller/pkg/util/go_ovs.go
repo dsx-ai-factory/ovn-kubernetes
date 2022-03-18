@@ -223,15 +223,16 @@ func (c *OvsdbClient) rowToInterface(uuid string) (*Interface, error) {
 	}
 
 	interfaceInfo := &Interface{
-		UUID:                 uuid,
-		Name:                 cacheInterface.Fields["name"].(string),
-		Type:                 cacheInterface.Fields["type"].(string),
-		IfIndex:              cacheInterface.Fields["ifindex"].(float64),
-		LinkResets:           cacheInterface.Fields["link_resets"].(float64),
-		OfPort:               cacheInterface.Fields["ofport"].(float64),
-		IngressPolicingBurst: cacheInterface.Fields["ingress_policing_burst"].(float64),
-		IngressPolicingRate:  cacheInterface.Fields["ingress_policing_rate"].(float64),
+		UUID: uuid,
+		Name: cacheInterface.Fields["name"].(string),
+		Type: cacheInterface.Fields["type"].(string),
 	}
+
+	interfaceInfo.IfIndex = getColumnFieldFloat64Value(&cacheInterface, "ifindex")
+	interfaceInfo.LinkResets = getColumnFieldFloat64Value(&cacheInterface, "link_resets")
+	interfaceInfo.OfPort = getColumnFieldFloat64Value(&cacheInterface, "ofport")
+	interfaceInfo.IngressPolicingBurst = getColumnFieldFloat64Value(&cacheInterface, "ingress_policing_burst")
+	interfaceInfo.IngressPolicingRate = getColumnFieldFloat64Value(&cacheInterface, "ingress_policing_rate")
 	interfaceInfo.AdminState = getColumnFieldStringValue(&cacheInterface, "admin_state")
 	interfaceInfo.LinkState = getColumnFieldStringValue(&cacheInterface, "link_state")
 	interfaceInfo.Duplex = getColumnFieldStringValue(&cacheInterface, "duplex")
