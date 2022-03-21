@@ -6,8 +6,10 @@ import (
 	"crypto/x509"
 	"fmt"
 	"io/ioutil"
+	"os"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/ovn-org/libovsdb/client"
@@ -17,6 +19,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"gopkg.in/fsnotify/fsnotify.v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	"k8s.io/klog/v2/klogr"
 )
@@ -171,14 +174,25 @@ func newSSLKeyPairWatcherFunc(certFile, privKeyFile string, tlsConfig *tls.Confi
 	if err := watcher.Add(certFile); err != nil {
 		return nil, err
 	}
-	if err := watcher.Add(privKeyFile); err != nil {
-		return nil, err
-	}
 	fn := func(client client.Client, stopChan <-chan struct{}) {
 		for {
 			select {
 			case event, ok := <-watcher.Events:
-				if ok && event.Op&(fsnotify.Write|fsnotify.Remove) != 0 {
+				if ok && event.Op&fsnotify.Remove != 0 {
+					// cert/key file removed, need wait for the file to be created again.
+					if err := wait.PollImmediate(10*time.Millisecond, 5*time.Second, func() (bool, error) {
+						if _, err := os.Stat(event.Name); os.IsNotExist(err) {
+							return false, nil
+						}
+						return true, nil
+					}); err != nil {
+						klog.Errorf("Fatal error: tiemout waiting for %s to be created", event.Name)
+						os.Exit(1)
+					}
+					if err := watcher.Add(event.Name); err != nil {
+						klog.Errorf("Cannot add %s back to watcher, err: %s", event.Name, err)
+						os.Exit(1)
+					}
 					cert, err := tls.LoadX509KeyPair(certFile, privKeyFile)
 					if err != nil {
 						klog.Infof("Cannot load new cert with cert %s key %s err %s", certFile, privKeyFile, err)
@@ -190,7 +204,7 @@ func newSSLKeyPairWatcherFunc(certFile, privKeyFile string, tlsConfig *tls.Confi
 					}
 					tlsConfig.Certificates = []tls.Certificate{cert}
 					client.Disconnect()
-					klog.Infof("TLS connection to %s force reconnected with new TLS config")
+					klog.Infof("TLS connection to %s force reconnected with new TLS config", client.Schema().Name)
 					// We do not call client.Connect() as reconnection is handled in the reconnect goroutine
 				}
 			case err, ok := <-watcher.Errors:
