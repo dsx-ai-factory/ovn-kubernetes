@@ -8,8 +8,8 @@ type (
 )
 
 var (
-	LogicalRouterStaticRoutePolicySrcIP LogicalRouterStaticRoutePolicy = "src-ip"
 	LogicalRouterStaticRoutePolicyDstIP LogicalRouterStaticRoutePolicy = "dst-ip"
+	LogicalRouterStaticRoutePolicySrcIP LogicalRouterStaticRoutePolicy = "src-ip"
 )
 
 // LogicalRouterStaticRoute defines an object in Logical_Router_Static_Route table
@@ -22,4 +22,5 @@ type LogicalRouterStaticRoute struct {
 	Options     map[string]string               `ovsdb:"options"`
 	OutputPort  *string                         `ovsdb:"output_port"`
 	Policy      *LogicalRouterStaticRoutePolicy `ovsdb:"policy"`
+	RouteTable  string                          `ovsdb:"route_table"`
 }
