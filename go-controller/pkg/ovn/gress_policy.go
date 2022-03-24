@@ -400,7 +400,7 @@ func (gp *gressPolicy) buildLocalPodACLs(portGroupName, aclLogging string) []*nb
 func (gp *gressPolicy) buildACLAllow(match, l4Match string, ipBlockCIDR int, aclLogging string) *nbdb.ACL {
 	var direction, action, ipBlockCIDRString string
 	priority := types.DefaultAllowPriority
-	if gp.policyType == knet.PolicyTypeEgress && gp.netAttachInfo.TopoType == types.LocalnetAttachDefTopoType {
+	if gp.policyType == knet.PolicyTypeEgress {
 		direction = nbdb.ACLDirectionFromLport
 	} else {
 		direction = nbdb.ACLDirectionToLport

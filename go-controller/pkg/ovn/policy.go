@@ -147,6 +147,41 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 			klog.Errorf("Error removing stale port groups %v: %v", stalePGs, err)
 		}
 	}
+
+	// update existing egress network policies to use the updated ACLs
+	var allEgressACLs []nbdb.ACL
+	egressACLs, err := libovsdbops.FindACLsByExternalID(oc.mc.nbClient, map[string]string{policyTypeACLExtIdKey: string(knet.PolicyTypeEgress)})
+	if err != nil {
+		klog.Errorf("Error cannot sync NetworkPolicy Egress obj: %v", err)
+		return
+	}
+	allEgressACLs = append(allEgressACLs, egressACLs...)
+	egressACLs, err = libovsdbops.FindACLsByExternalID(oc.mc.nbClient, map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeEgress)})
+	if err != nil {
+		klog.Errorf("Error cannot sync NetworkPolicy Egress obj: %v", err)
+		return
+	}
+	allEgressACLs = append(allEgressACLs, egressACLs...)
+	// if the first egress ACL is correct they should all be correct and not need to update
+	if allEgressACLs != nil && allEgressACLs[0].Direction != nbdb.ACLDirectionFromLport {
+		// TODO(jtanenba) make all the libovsdbops.ACL commands deal with pointers to ACLs
+		var egressACLsPTR []*nbdb.ACL
+		for _, acl := range allEgressACLs {
+			acl.Direction = nbdb.ACLDirectionFromLport
+			acl.Options = map[string]string{"apply-after-lb": "true"}
+			egressACLsPTR = append(egressACLsPTR, &acl)
+		}
+		ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.mc.nbClient, nil, egressACLsPTR...)
+		if err != nil {
+			klog.Errorf("Cannot create ops to update old Egress NetworkPolicy ACLs: %v", err)
+			return
+		}
+		_, err = libovsdbops.TransactAndCheck(oc.mc.nbClient, ops)
+		if err != nil {
+			klog.Errorf("Cannot update old Egress NetworkPolicy ACLs: %v", err)
+			return
+		}
+	}
 }
 
 func addAllowACLFromNode(nodeName string, mgmtPortIP net.IP, nbClient libovsdbclient.Client) error {
@@ -229,7 +264,7 @@ func defaultDenyPortGroup(namespace, gressSuffix string) string {
 // pg is the portGroupName without network prefix
 func buildDenyACLs(namespace, policy, pg, aclLogging string, policyType knet.PolicyType, nadInfo *util.NetAttachDefInfo) (denyACL, allowACL *nbdb.ACL) {
 	direction := nbdb.ACLDirectionToLport
-	if policyType == knet.PolicyTypeEgress && nadInfo.TopoType == types.LocalnetAttachDefTopoType {
+	if policyType == knet.PolicyTypeEgress {
 		direction = nbdb.ACLDirectionFromLport
 	}
 	denyMatch := getACLMatch(pg, "", policyType, nadInfo.NetNameInfo)
