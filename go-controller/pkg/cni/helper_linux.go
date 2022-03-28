@@ -16,6 +16,7 @@ import (
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/containernetworking/cni/pkg/types/current"
@@ -273,8 +274,15 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	}
 
 	// if the specified port was created for other Pod/Network, return error
-	ifExists, sandboxStr, networkNameStr, err := util.GetOVSPortPodInfo(hostIfaceName)
-	if err == nil && ifExists {
+	extIds, err := ovsFind("Interface", "external_ids", "name="+hostIfaceName)
+	if err == nil && len(extIds) == 1 {
+		extId := extIds[0]
+		sandboxStr := util.GetDbValByKey(extId, "sandbox")
+		networkNameStr := util.GetDbValByKey(extId, "network_name")
+		// if network_name does not exists, it is default network
+		if networkNameStr == "" {
+			networkNameStr = types.DefaultNetworkName
+		}
 		if sandboxStr != sandboxID {
 			return fmt.Errorf("OVS port %s was added for sandbox (%s), now readding it for (%s)", hostIfaceName, sandboxStr, sandboxID)
 		}
