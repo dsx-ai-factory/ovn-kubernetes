@@ -30,7 +30,7 @@ func newManagementPortDPU(nodeName string, hostSubnets []*net.IPNet) ManagementP
 }
 
 func (mp *managementPortDPU) Create(nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
-	k8sMgmtIntfName := util.GetK8sMgmtIntfName()
+	k8sMgmtIntfName := config.OvnKubeNode.MgmtPortIntfName
 	if !config.OvnKubeNode.IsPrimaryDPU {
 		return &managementPortConfig{}, nil
 	}
@@ -101,7 +101,7 @@ func (mp *managementPortDPU) Create(nodeAnnotator kube.Annotator, waiter *startu
 
 func (mp *managementPortDPU) checkRepresentorPortHealth(cfg *managementPortConfig) {
 	// After host reboot, management port link name changes back to default name.
-	k8sMgmtIntfName := util.GetK8sMgmtIntfName()
+	k8sMgmtIntfName := config.OvnKubeNode.MgmtPortIntfName
 	link, err := util.GetNetLinkOps().LinkByName(k8sMgmtIntfName)
 	if err != nil {
 		klog.Errorf("Failed to get link device %s, error: %v", k8sMgmtIntfName, err)
@@ -161,7 +161,7 @@ func newManagementPortDPUHost(hostSubnets []*net.IPNet) ManagementPort {
 
 func (mp *managementPortDPUHost) Create(nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
 	// get Netdev that is used for management port.
-	k8sMgmtIntfName := util.GetK8sMgmtIntfName()
+	k8sMgmtIntfName := config.OvnKubeNode.MgmtPortIntfName
 	link, err := util.GetNetLinkOps().LinkByName(mp.netdevName)
 	if err != nil {
 		// this may not the first time invoked on the node after reboot

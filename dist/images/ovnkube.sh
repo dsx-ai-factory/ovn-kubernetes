@@ -99,6 +99,7 @@ BASEDIR=$(dirname $0)
 # OVN_NB_ENABLE_LEADER_XFER_FOR_SNAPSHOT - Transfer leader election when snapshotting ovn nb db
 # OVN_SB_ENABLE_LEADER_XFER_FOR_SNAPSHOT - Transfer leader election when snapshotting ovn sb db
 # K8S_CLUSTER_NAME - name of the kubernetes cluster
+# OVN_CONNTRACK_ZONE - Conntrack zone number used for openflow rules (default 64000)
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -312,6 +313,8 @@ ovnkube_node_mgmt_port_netdev=${OVNKUBE_NODE_MGMT_PORT_NETDEV:-}
 ovnkube_config_duration_enable=${OVNKUBE_CONFIG_DURATION_ENABLE:-false}
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node
 ovn_encap_ip=${OVN_ENCAP_IP:-}
+# OVN_CONNTRACK_ZONE - conntrack zone number used for openflow rules (default 64000)
+ovn_conntrack_zone=${OVN_CONNTRACK_ZONE:-}
 
 ovn_ex_gw_network_interface=${OVN_EX_GW_NETWORK_INTERFACE:-}
 
@@ -626,6 +629,7 @@ display_env() {
   echo OVN_DAEMONSET_VERSION ${ovn_daemonset_version}
   echo OVNKUBE_NODE_MODE ${ovnkube_node_mode}
   echo OVN_ENCAP_IP ${ovn_encap_ip}
+  echo OVN_CONNTRACK_ZONE ${ovn_conntrack_zone}
   echo ovnkube.sh version ${ovnkube_version}
   echo OVN_HOST_NETWORK_NAMESPACE ${ovn_host_network_namespace}
   echo K8S_CLUSTER_NAME ${k8s_cluster_name}
@@ -1336,7 +1340,7 @@ ovn-node() {
     wait_for_event attempts=20 files_exist ${ovn_controller_pk} ${ovn_controller_cert} ${ovn_ca_cert}
   }
 
-  if [[ ${ovnkube_node_mode} != "dpu" ]]; then
+  if [[ ${ovnkube_node_mode} != "dpu" ]] && [[ $(lscpu | grep Architecture | awk '{print$2}') != 'aarch64' ]]; then
     echo "=============== ovn-node - (check for firewall service status)"
     check_firewall_state
     echo "=============== ovn-node - (create ovn firewall zone)"
@@ -1458,6 +1462,11 @@ ovn-node() {
         ovn_encap_ip_flag="--encap-ip=${ovn_encap_ip}"
       fi
     fi
+  fi
+
+  ovn_conntrack_zone_flag=
+  if [[ ${ovn_conntrack_zone} != "" ]]; then
+     ovn_conntrack_zone_flag="--conntrack-zone=${ovn_conntrack_zone}"
   fi
 
   ovnkube_node_mode_flag=
@@ -1589,6 +1598,7 @@ ovn-node() {
     --mtu=${mtu} \
     ${routable_mtu_flag} \
     ${ovn_encap_ip_flag} \
+    ${ovn_conntrack_zone_flag} \
     --ovn-encap-tos=${ovn_encap_tos} \
     --loglevel=${ovnkube_loglevel} \
     --logfile-maxsize=${ovnkube_logfile_maxsize} \

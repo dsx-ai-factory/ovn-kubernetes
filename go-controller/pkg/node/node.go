@@ -558,9 +558,9 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 			if needLegacySvcRoute {
 				klog.Info("System may be upgrading, falling back to to legacy K8S Service via mp0")
 				// add back legacy route for service via mp0
-				link, err := util.LinkSetUp(util.GetK8sMgmtIntfName())
+				link, err := util.LinkSetUp(config.OvnKubeNode.MgmtPortIntfName)
 				if err != nil {
-					return fmt.Errorf("unable to get link for %s, error: %v", util.GetK8sMgmtIntfName(), err)
+					return fmt.Errorf("unable to get link for %s, error: %v", config.OvnKubeNode.MgmtPortIntfName, err)
 				}
 				var gwIP net.IP
 				for _, subnet := range config.Kubernetes.ServiceCIDRs {
@@ -1433,10 +1433,10 @@ func updateEndpointSlice(nodeIP string, skipFirewalldAnnotation bool,
 }
 
 func syncEndpointSlices(obj []interface{}) error {
-	err := addInterfaceToFirewallZone(util.GetK8sMgmtIntfName(), ovnFirewallZone)
+	err := addInterfaceToFirewallZone(config.OvnKubeNode.MgmtPortIntfName, ovnFirewallZone)
 	if err != nil {
 		klog.Errorf("Failed to add interface %s to ovn firewall zone: (%v)",
-			util.GetK8sMgmtIntfName(), err)
+			config.OvnKubeNode.MgmtPortIntfName, err)
 	}
 	// TODO(gmoodalbail): we need to clean up any stale ports in ovn and ngn-admin zone
 	return err
@@ -1453,9 +1453,9 @@ func configureSvcRouteViaBridge(bridge string) error {
 func upgradeServiceRoute(bridgeName string) error {
 	klog.Info("Updating K8S Service route")
 	// Flush old routes
-	link, err := util.LinkSetUp(util.GetK8sMgmtIntfName())
+	link, err := util.LinkSetUp(config.OvnKubeNode.MgmtPortIntfName)
 	if err != nil {
-		return fmt.Errorf("unable to get link: %s, error: %v", util.GetK8sMgmtIntfName(), err)
+		return fmt.Errorf("unable to get link: %s, error: %v", config.OvnKubeNode.MgmtPortIntfName, err)
 	}
 	if err := util.LinkRoutesDel(link, config.Kubernetes.ServiceCIDRs); err != nil {
 		return fmt.Errorf("unable to delete routes on upgrade, error: %v", err)

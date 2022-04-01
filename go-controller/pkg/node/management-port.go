@@ -61,7 +61,7 @@ func newManagementPort(nodeName string, hostSubnets []*net.IPNet) ManagementPort
 }
 
 func (mp *managementPort) Create(nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
-	k8sMgmtIntfName := util.GetK8sMgmtIntfName()
+	k8sMgmtIntfName := config.OvnKubeNode.MgmtPortIntfName
 	// Create a OVS internal interface.
 	legacyMgmtIntfName := util.GetLegacyK8sMgmtIntfName(mp.nodeName)
 	stdout, stderr, err := util.RunOVSVsctl(
@@ -112,7 +112,7 @@ func (mpc *managementPort) CheckManagementPortHealth(cfg *managementPortConfig, 
 
 func managementPortReady() (bool, error) {
 	// Get the OVS interface name for the Management Port
-	ofport, _, err := util.RunOVSVsctl("--if-exists", "get", "interface", util.GetK8sMgmtIntfName(), "ofport")
+	ofport, _, err := util.RunOVSVsctl("--if-exists", "get", "interface", config.OvnKubeNode.MgmtPortIntfName, "ofport")
 	if err != nil {
 		return false, nil
 	}

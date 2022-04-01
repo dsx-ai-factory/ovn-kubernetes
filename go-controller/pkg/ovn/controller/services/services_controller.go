@@ -3,10 +3,12 @@ package services
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -202,6 +204,11 @@ func (c *Controller) processNextWorkItem() bool {
 }
 
 func (c *Controller) handleErr(err error, key interface{}) {
+	if err == nil {
+		c.queue.Forget(key)
+		return
+	}
+	_, key = extractClusterName(key.(string))
 	ns, name, keyErr := cache.SplitMetaNamespaceKey(key.(string))
 	if keyErr != nil {
 		klog.ErrorS(err, "Failed to split meta namespace cache key", "key", key)
@@ -234,6 +241,8 @@ func (c *Controller) handleErr(err error, key interface{}) {
 // All Load_Balancer objects are tagged with their owner, so it's easy to find stale objects.
 func (c *Controller) syncService(key string) error {
 	startTime := time.Now()
+	_, key = extractClusterName(key)
+
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		return err
@@ -352,6 +361,20 @@ func (c *Controller) RequestFullSync() {
 	}
 }
 
+func prefixClusterName(key string) string {
+	return config.Kubernetes.ClusterName + "/" + key
+}
+
+func extractClusterName(key string) (clustername string, rest string) {
+	parts := strings.Split(key, "/")
+	if len(parts) == 3 {
+		klog.Infof("Splitting incoming LB key into clustername %s and key %s",
+			parts[0], parts[1]+"/"+parts[2])
+		return parts[0], parts[1] + "/" + parts[2]
+	}
+	return "", key
+}
+
 // handlers
 
 // onServiceAdd queues the Service for processing.
@@ -364,6 +387,7 @@ func (c *Controller) onServiceAdd(obj interface{}) {
 	klog.V(4).Infof("Adding service %s", key)
 	service := obj.(*v1.Service)
 	metrics.GetConfigDurationRecorder().Start("service", service.Namespace, service.Name, util.NetNameInfo{NetName: "", Prefix: "", IsSecondary: false})
+	key = prefixClusterName(key)
 	c.queue.Add(key)
 }
 
@@ -381,6 +405,7 @@ func (c *Controller) onServiceUpdate(oldObj, newObj interface{}) {
 	key, err := cache.MetaNamespaceKeyFunc(newObj)
 	if err == nil {
 		metrics.GetConfigDurationRecorder().Start("service", newService.Namespace, newService.Name, util.NetNameInfo{NetName: "", Prefix: "", IsSecondary: false})
+		key = prefixClusterName(key)
 		c.queue.Add(key)
 	}
 }
@@ -395,6 +420,7 @@ func (c *Controller) onServiceDelete(obj interface{}) {
 	klog.V(4).Infof("Deleting service %s", key)
 	service := obj.(*v1.Service)
 	metrics.GetConfigDurationRecorder().Start("service", service.Namespace, service.Name, util.NetNameInfo{NetName: "", Prefix: "", IsSecondary: false})
+	key = prefixClusterName(key)
 	c.queue.Add(key)
 }
 

@@ -164,7 +164,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 		nodeName,
 		gatewayRouter,
 		l3GatewayConfig.MACAddress.String(),
-		types.PhysicalNetworkName,
+		util.GetPhysNetNameKey(),
 		l3GatewayConfig.IPAddresses,
 		l3GatewayConfig.VLANID); err != nil {
 		return err
@@ -218,6 +218,10 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 		lrsr := nbdb.LogicalRouterStaticRoute{
 			IPPrefix: gwLRPIP.String(),
 			Nexthop:  gwLRPIP.String(),
+		}
+		// If cluster_name is present, set it in external_ids.
+		if config.Kubernetes.ClusterName != "" {
+			lrsr.ExternalIDs = map[string]string{"cluster_name": config.Kubernetes.ClusterName}
 		}
 		p := func(item *nbdb.LogicalRouterStaticRoute) bool {
 			return item.Nexthop == lrsr.Nexthop && item.IPPrefix == lrsr.IPPrefix

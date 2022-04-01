@@ -217,7 +217,7 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 		Addresses: []string{"unknown"},
 		Type:      "localnet",
 		Options: map[string]string{
-			"network_name": types.PhysicalNetworkName,
+			"network_name": util.GetPhysNetNameKey(),
 		},
 		Name: l3GatewayConfig.InterfaceID,
 	}

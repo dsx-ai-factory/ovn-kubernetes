@@ -91,7 +91,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Output: "",
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + types.PhysicalNetworkName + ":breth0",
+			"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.GetPhysNetNameKey() + ":breth0",
 		})
 
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -357,7 +357,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			Output: "",
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + types.PhysicalNetworkName + ":" + brphys,
+			"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.GetPhysNetNameKey() + ":" + brphys,
 		})
 		// GetNodeChassisID
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -663,7 +663,7 @@ func localGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Output: "",
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + types.PhysicalNetworkName + ":breth0",
+			"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.GetPhysNetNameKey() + ":breth0",
 		})
 
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{

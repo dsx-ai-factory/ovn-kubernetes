@@ -402,21 +402,36 @@ func ExternalIDsForObject(obj K8sObject) map[string]string {
 	return map[string]string{
 		types.OvnK8sPrefix + "/owner": nsn.String(),
 		types.OvnK8sPrefix + "/kind":  gk.String(),
+		"cluster_name":                config.Kubernetes.ClusterName,
 	}
 }
 
 var clusterNamePrefix string
+var prefixSepartor = "_"
 
 func SetClusterName(clustername string) {
 	if clustername != "" {
-		clusterNamePrefix = clustername + "_"
+		clusterNamePrefix = clustername + prefixSepartor
 	}
 }
 
+// GetClusterNamePrefix generates a prefix with cluster_name
+// If there is no cluster_name specified, it returns empty
 func GetClusterNamePrefix() string {
 	return clusterNamePrefix
 }
 
+// GetOVNClusterRouterName returns the name of the `ovn cluster router`,
+// suitably extended with prefixes as necessary.
+// When called with no prefixes:
+//  a) If there is no cluster_name set, returns types.OVNClusterRouter
+//  b) If a cluster_name is set, returns <cluster_name>_<types.OVNClusterRouter>
+// When called with at least one additional prefixes (like the NadInfo prefix)
+//  a) If there is no cluster_name set, returns <prefix>_<types.OVNClusterRouter>
+//  b) If a cluster_name is set, returns <cluster_name>_<prefix>_<types.OVNClusterRouter>
+// When called with a prefix list (more than one prefix), the above logic
+// is extended for each prefix.
+// i.e. [cluster_name]_<prefix1>_<prefix2>....._<types.OVNClusterRouter>
 func GetOVNClusterRouterName(prefixes ...string) string {
 	if len(prefixes) == 1 { // typically the NadInfo prefix
 		return GetClusterNamePrefix() + prefixes[0] + types.OVNClusterRouter
@@ -429,6 +444,7 @@ func GetOVNClusterRouterName(prefixes ...string) string {
 		}
 		return GetClusterNamePrefix() + partprefix + types.OVNClusterRouter
 	}
+	// No prefix provided, just add cluster_name prefix if present.
 	return GetClusterNamePrefix() + types.OVNClusterRouter
 }
 
@@ -436,18 +452,18 @@ func GetOVNJoinSwitchName() string {
 	return GetClusterNamePrefix() + types.OVNJoinSwitch
 }
 
-var ovnK8sMgmtIntfName string
+func GetPhysNetNameKey() string {
+	if config.Gateway.PhysNetNameKey != "" {
+		return config.Gateway.PhysNetNameKey
+	}
+	return types.PhysicalNetworkName
+}
 
-func GetK8sMgmtIntfName() string {
-	if ovnK8sMgmtIntfName != "" {
-		return ovnK8sMgmtIntfName
+var conntrackzone int
+
+func GetConntrackZone() int {
+	if conntrackzone == 0 {
+		conntrackzone = config.Default.ConntrackZone
 	}
-	// first time call, setup var for faster return
-	if config.OvnKubeNode.MgmtPortIntfName != "" {
-		ovnK8sMgmtIntfName = config.OvnKubeNode.MgmtPortIntfName
-	} else {
-		// return default mgmt port name
-		ovnK8sMgmtIntfName = types.K8sMgmtIntfName
-	}
-	return ovnK8sMgmtIntfName
+	return conntrackzone
 }

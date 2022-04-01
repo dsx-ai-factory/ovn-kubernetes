@@ -314,8 +314,18 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 	res := bridgeConfiguration{}
 	gwIntf := intfName
 	bridgeCreated := false
+	uplinkName := config.Gateway.UplinkPort
 
-	if bridgeName, _, err := util.RunOVSVsctl("port-to-br", intfName); err == nil {
+	if uplinkName != "" { // Uplink name is explicitly set
+		bridgeName, _, err := util.RunOVSVsctl("port-to-br", uplinkName)
+		if err != nil {
+			return nil, errors.Wrapf(err, "Failed to find bridge that has port %s", uplinkName)
+		}
+		if intfName == bridgeName {
+			res.bridgeName = intfName
+			res.uplinkName = uplinkName
+		}
+	} else if bridgeName, _, err := util.RunOVSVsctl("port-to-br", intfName); err == nil {
 		// This is an OVS bridge's internal port
 		uplinkName, err := util.GetNicName(bridgeName)
 		if err != nil {

@@ -203,6 +203,11 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 		return fmt.Errorf("failed to initialize exec helper: %v", err)
 	}
 
+	// Setup cluster name , if config.Kubernetes.ClusterName exists
+	if config.Kubernetes.ClusterName != "" {
+		util.SetClusterName(config.Kubernetes.ClusterName)
+	}
+
 	ovnClientset, err := util.NewOVNClientset(&config.Kubernetes)
 	if err != nil {
 		return err

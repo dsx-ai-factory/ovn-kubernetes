@@ -163,8 +163,9 @@ var (
 	MetricsScrapeInterval int
 	// OvnKubeNode holds ovnkube-node parsed config file parameters and command-line overrides
 	OvnKubeNode = OvnKubeNodeConfig{
-		Mode:         types.NodeModeFull,
-		IsPrimaryDPU: true,
+		Mode:             types.NodeModeFull,
+		IsPrimaryDPU:     true,
+		MgmtPortIntfName: types.K8sMgmtIntfName,
 	}
 )
 
@@ -378,6 +379,12 @@ type GatewayConfig struct {
 	EgressGWInterface string `gcfg:"egw-interface"`
 	// NextHop is the gateway IP address of Interface; will be autodetected if not given
 	NextHop string `gcfg:"next-hop"`
+	// PhysNetNameKey is the key name used to map to an OVS bridge that provides
+	// access to physical/external network. Default is  "physnet".
+	PhysNetNameKey string `gcfg:"physnetname-key"`
+	// UplinkPort is the port used as the uplink on the gateway interface bridge.
+	// Used in scenarios when it cannot be auto detected.
+	UplinkPort string `gcfg:"uplink-port"`
 	// VLANID is the option VLAN tag to apply to gateway traffic for "shared" mode
 	VLANID uint `gcfg:"vlan-id"`
 	// NodeportEnable sets whether to provide Kubernetes NodePort service or not
@@ -1024,8 +1031,9 @@ var K8sFlags = []cli.Flag{
 		Value:       Kubernetes.PlatformType,
 	},
 	&cli.StringFlag{
-		Name:        "cluster-name",
-		Usage:       "name of the cluster",
+		Name: "cluster-name",
+		Usage: "name of the cluster, used to identify this cluster in multi cluster setup. " +
+			"should be unique in a multi cluster environment with shared OVN DB.",
 		Destination: &cliConfig.Kubernetes.ClusterName,
 		Value:       Kubernetes.ClusterName,
 		Required:    false,
@@ -1180,6 +1188,18 @@ var OVNGatewayFlags = []cli.Flag{
 			"configured in the node is used. Only useful with " +
 			"\"init-gateways\"",
 		Destination: &cliConfig.Gateway.NextHop,
+	},
+	&cli.StringFlag{
+		Name: "gateway-physnetname-key",
+		Usage: "The key name used to map to an OVS bridge that provides " +
+			"access to physical/external network. Default is  `physnet`",
+		Destination: &cliConfig.Gateway.PhysNetNameKey,
+	},
+	&cli.StringFlag{
+		Name: "gateway-uplink-port",
+		Usage: "The port to be used as the uplink on the gateway interface bridge." +
+			"Used in scenarios when it cannot be auto detected.",
+		Destination: &cliConfig.Gateway.UplinkPort,
 	},
 	&cli.UintFlag{
 		Name: "gateway-vlanid",

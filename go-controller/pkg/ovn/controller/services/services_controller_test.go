@@ -630,6 +630,7 @@ func serviceExternalIDs(namespacedServiceName string) map[string]string {
 	return map[string]string{
 		"k8s.ovn.org/kind":  "Service",
 		"k8s.ovn.org/owner": namespacedServiceName,
+		"cluster_name":      "",
 	}
 }
 

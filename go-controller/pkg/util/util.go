@@ -446,7 +446,7 @@ func GetIfaceId(podNamespace, podName, nadName string, isDefault bool) string {
 // because hypervisors use external_ids:iface-id as a lookup key to
 // identify the network interface of that entity.
 func composePortName(podNamespace, podName, netPrefix string) string {
-	return netPrefix + podNamespace + "_" + podName
+	return GetClusterNamePrefix() + netPrefix + podNamespace + "_" + podName
 }
 
 // Get all possible logical ports name of this network
