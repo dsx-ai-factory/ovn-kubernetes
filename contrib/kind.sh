@@ -495,7 +495,10 @@ build_ovn_image() {
     # Find all built executables, but ignore the 'windows' directory if it exists
     find ../../go-controller/_output/go/bin/ -maxdepth 1 -type f -exec cp -f {} . \;
     echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-    $OCI_BIN build -t localhost/ovn-daemonset-f:dev .
+    . /tmp/latest-sdn-version-tags/versions
+    NGN21_OVS_L2_VER="-${NGN21_OVS}"
+    NGN21_OVN_L2_VER="-${NGN21_OVN}"
+    $OCI_BIN build -t localhost/ovn-daemonset-f:dev --build-arg OVS_VER=${NGN21_OVS_L2_VER} --build-arg OVN_VER=${NGN21_OVN_L2_VER} --no-cache .
     OVN_IMAGE=localhost/ovn-daemonset-f:dev
     popd
   fi
@@ -558,8 +561,10 @@ install_ovn() {
   # We want OVN HA not Kubernetes HA
   # leverage the kubeadm well-known label node-role.kubernetes.io/master=
   # to choose the nodes where ovn master components will be placed
+  kubectl label node --all ngn2.nvidia.com/hosttype=GS --overwrite
   for n in $MASTER_NODES; do
     kubectl label node "$n" k8s.ovn.org/ovnkube-db=true node-role.kubernetes.io/master="" --overwrite
+    kubectl label node "$n" ngn2.nvidia.com/hosttype="" --overwrite
     if [ "$KIND_REMOVE_TAINT" == true ]; then
       # do not error if it fails to remove the taint
       kubectl taint node "$n" node-role.kubernetes.io/master:NoSchedule- || true
