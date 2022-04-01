@@ -258,6 +258,7 @@ func getMaxFrameLength() int {
 type bridgeConfiguration struct {
 	bridgeName  string
 	uplinkName  string
+	hostRepName string // empty in case of non-DPU mode
 	ips         []*net.IPNet
 	interfaceID string
 	macAddress  net.HardwareAddr

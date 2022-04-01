@@ -1081,7 +1081,7 @@ func setBridgeOfPorts(bridge *bridgeConfiguration) error {
 		if err != nil {
 			return err
 		}
-
+		bridge.hostRepName = hostRep
 		bridge.ofPortHost, stderr, err = util.RunOVSVsctl("get", "interface", hostRep, "ofport")
 		if err != nil {
 			return fmt.Errorf("failed to get ofport of host interface %s, stderr: %q, error: %v",
