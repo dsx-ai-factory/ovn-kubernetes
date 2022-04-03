@@ -266,10 +266,11 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	// Find and remove any existing OVS port with this iface-id. Pods can
 	// have multiple sandboxes if some are waiting for garbage collection,
 	// but only the latest one should have the iface-id set.
-	uuids, _ := ovsFind("Interface", "_uuid", "external-ids:iface-id="+ifaceID)
-	for _, uuid := range uuids {
-		if out, err := ovsExec("remove", "Interface", uuid, "external-ids", "iface-id"); err != nil {
-			klog.Warningf("Failed to clear stale OVS port %q iface-id %q: %v\n  %q", uuid, ifaceID, err, out)
+	names, _ := ovsFind("Interface", "name", "external-ids:iface-id="+ifaceID)
+	for _, name := range names {
+		if out, err := ovsExec("del-port", "br-int", name); err != nil {
+			klog.Warningf("Failed to delete stale OVS port %q with iface-id %q from br-int: %v\n %q",
+				name, ifaceID, err, string(out))
 		}
 	}
 

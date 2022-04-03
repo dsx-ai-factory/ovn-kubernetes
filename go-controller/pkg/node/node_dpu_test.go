@@ -178,7 +178,7 @@ var _ = Describe("Node DPU tests", func() {
 			sriovnetOpsMock.On("GetVfRepresentorDPU", "0", "9").Return(vfRep, nil)
 			// set ovs CMD output
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: genOVSFindCmd("30", "Interface", "_uuid",
+				Cmd: genOVSFindCmd("30", "Interface", "name",
 					"external-ids:iface-id="+genIfaceID(pod.Namespace, pod.Name)),
 			})
 			checkOVSPortPodInfo(execMock, vfRep, false, "30", "", "")
@@ -204,7 +204,7 @@ var _ = Describe("Node DPU tests", func() {
 				sriovnetOpsMock.On("GetVfRepresentorDPU", "0", "9").Return("pf0vf9", nil)
 				// set ovs CMD output so cni.ConfigureOVS passes without error
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: genOVSFindCmd("30", "Interface", "_uuid",
+					Cmd: genOVSFindCmd("30", "Interface", "name",
 						"external-ids:iface-id="+genIfaceID(pod.Namespace, pod.Name)),
 				})
 				checkOVSPortPodInfo(execMock, vfRep, false, "30", "", "")
