@@ -23,9 +23,14 @@ OVS_BRANCH ?= master
 OVN_BRANCH ?= main
 OCI_BIN ?= docker
 
+docker_build_args := $(if $(K8S_VER), $(docker_build_args) --build-arg K8S_VER==$(K8S_VER))
+docker_build_args := $(if $(OVS_VER), $(docker_build_args) --build-arg OVS_VER==$(OVS_VER))
+docker_build_args := $(if $(OVN_VER), $(docker_build_args) --build-arg OVN_VER==$(OVN_VER))
+docker_build_args := $(if $(JFROG_CREDENTIAL), $(docker_build_args) --build-arg JFROG_CREDENTIAL==$(JFROG_CREDENTIAL))
+
 # The image of ovnkube/ovn-daemonset-u should be multi-arched before using it on arm64
 ubuntu: bld
-	${OCI_BIN} build -t ovn-kube-u$(IMAGE_ARCH) -f Dockerfile.ubuntu$(DOCKERFILE_ARCH) .
+	${OCI_BIN} build -t ovn-kube-u$(IMAGE_ARCH) $(docker_build_args) -f Dockerfile.ubuntu$(DOCKERFILE_ARCH) .
 ifeq ($(ARCH),amd64)
 	${OCI_BIN} tag "ovn-kube-u$(IMAGE_ARCH):latest" \
               "ovn-kube-u:latest"
@@ -34,10 +39,6 @@ endif
 	# ${OCI_BIN} login -u ovnkube docker.io/ovnkube
 	# ${OCI_BIN} push docker.io/ovnkube/ovn-daemonset-u:latest
 	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-u:latest
-
-define docker_build_args
-       $(if $(K8S_VER), --build-arg K8S_VER=-$(K8S_VER))
-endef
 
 centos: bld
 	${OCI_BIN} build $(docker_build_args) \
