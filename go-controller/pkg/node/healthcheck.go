@@ -154,16 +154,16 @@ func checkForStaleOVSInternalPorts() {
 	}
 }
 
-// checkForStaleOVSRepresentorInterfaces checks for stale OVS ports backed by Repreresentor interfaces,
-// derive iface-id from pod name and namespace then remove any interfaces assoicated with a sandbox that are
+// checkForStaleOVSRepresentorInterfaces checks for stale OVS ports backed by Representor interfaces,
+// derive iface-id from pod name and namespace then remove any interfaces associated with a sandbox that are
 // not scheduled to the node.
 func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCacheInterface) {
-	// Get all ovn-kuberntes Pod interfaces. these are OVS interfaces that have their external_ids:sandbox set.
+	// Get all ovn-kubernetes Pod interfaces. these are OVS interfaces that have their external_ids:sandbox set.
 	ovsArgs := []string{"--columns=name,external_ids", "--data=bare", "--no-headings",
 		"--format=csv", "find", "Interface", "external_ids:sandbox!=\"\""}
 	out, stderr, err := util.RunOVSVsctl(ovsArgs...)
 	if err != nil {
-		klog.Errorf("Failed to list ovn-k8s OVS interfaces:, stderr: %q, error: %v", stderr, err)
+		klog.Errorf("Failed to list ovn-k8s OVS interfaces, stderr: %q, error: %v", stderr, err)
 		return
 	}
 
@@ -222,8 +222,14 @@ func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCac
 	for _, ifaceInfo := range interfaceInfos {
 		ifaceId, ok := ifaceInfo.Attributes["iface-id"]
 		if !ok {
+			// interface with external-ids:sandbox set but no iface-id, delete it
 			klog.Warningf("iface-id attribute was not found for OVS interface %s. "+
-				"skipping cleanup check for interface", ifaceInfo.Name)
+				"deleting OVS port with interface %s", ifaceInfo.Name)
+			_, stderr, err := util.RunOVSVsctl("--if-exists", "--with-iface", "del-port", ifaceInfo.Name)
+			if err != nil {
+				klog.Errorf("Failed to delete interface %q . stderr: %q, error: %v",
+					ifaceInfo.Name, stderr, err)
+			}
 			continue
 		}
 		prefix := ""
@@ -244,7 +250,7 @@ func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCac
 			klog.Warningf("Found stale OVS Interface, deleting OVS Port with interface %s", ifaceInfo.Name)
 			_, stderr, err := util.RunOVSVsctl("--if-exists", "--with-iface", "del-port", ifaceInfo.Name)
 			if err != nil {
-				klog.Errorf("Failed to delete interface %q . stderr: %q, error: %v",
+				klog.Errorf("Failed to delete interface %q, stderr: %q, error: %v",
 					ifaceInfo.Name, stderr, err)
 				continue
 			}
