@@ -341,15 +341,12 @@ func (c *openflowManager) Run(stopChan <-chan struct{}) {
 	for {
 		select {
 		case <-time.After(15 * time.Second):
-			if err := checkPorts(c.defaultBridge.patchPort, c.defaultBridge.ofPortPatch,
-				c.defaultBridge.uplinkName, c.defaultBridge.ofPortPhys); err != nil {
+			if err := checkPorts(c.defaultBridge); err != nil {
 				klog.Errorf("Checkports failed %v", err)
 				continue
 			}
 			if c.externalGatewayBridge != nil {
-				if err := checkPorts(
-					c.externalGatewayBridge.patchPort, c.externalGatewayBridge.ofPortPatch,
-					c.externalGatewayBridge.uplinkName, c.externalGatewayBridge.ofPortPhys); err != nil {
+				if err := checkPorts(c.externalGatewayBridge); err != nil {
 					klog.Errorf("Checkports failed %v", err)
 					continue
 				}
@@ -363,30 +360,43 @@ func (c *openflowManager) Run(stopChan <-chan struct{}) {
 	}
 }
 
-func checkPorts(patchIntf, ofPortPatch, physIntf, ofPortPhys string) error {
+func checkPorts(bridge *bridgeConfiguration) error {
 	// it could be that the ovn-controller recreated the patch between the host OVS bridge and
 	// the integration bridge, as a result the ofport number changed for that patch interface
-	curOfportPatch, stderr, err := util.GetOVSOfPort("--if-exists", "get", "Interface", patchIntf, "ofport")
+	curOfportPatch, stderr, err := util.GetOVSOfPort("--if-exists", "get", "Interface", bridge.patchPort, "ofport")
 	if err != nil {
-		return errors.Wrapf(err, "Failed to get ofport of %s, stderr: %q", patchIntf, stderr)
+		return errors.Wrapf(err, "Failed to get ofport of %s, stderr: %q", bridge.patchPort, stderr)
 
 	}
-	if ofPortPatch != curOfportPatch {
+	if bridge.ofPortPatch != curOfportPatch {
 		klog.Errorf("Fatal error: patch port %s ofport changed from %s to %s",
-			patchIntf, ofPortPatch, curOfportPatch)
+			bridge.patchPort, bridge.ofPortPatch, curOfportPatch)
 		os.Exit(1)
 	}
 
 	// it could be that someone removed the physical interface and added it back on the OVS host
 	// bridge, as a result the ofport number changed for that physical interface
-	curOfportPhys, stderr, err := util.GetOVSOfPort("--if-exists", "get", "interface", physIntf, "ofport")
+	curOfportPhys, stderr, err := util.GetOVSOfPort("--if-exists", "get", "interface", bridge.uplinkName, "ofport")
 	if err != nil {
-		return errors.Wrapf(err, "Failed to get ofport of %s, stderr: %q", physIntf, stderr)
+		return errors.Wrapf(err, "Failed to get ofport of %s, stderr: %q", bridge.uplinkName, stderr)
 	}
-	if ofPortPhys != curOfportPhys {
+	if bridge.ofPortPhys != curOfportPhys {
 		klog.Errorf("Fatal error: phys port %s ofport changed from %s to %s",
-			physIntf, ofPortPhys, curOfportPhys)
+			bridge.uplinkName, bridge.ofPortPhys, curOfportPhys)
 		os.Exit(1)
+	}
+
+	// it could be ofport number of host representor interface changed
+	if bridge.hostRepName != "" {
+		curOfportHost, stderr, err := util.GetOVSOfPort("--if-exists", "get", "interface", bridge.hostRepName, "ofport")
+		if err != nil {
+			return errors.Wrapf(err, "Failed to get ofport of %s, stderr: %q", bridge.hostRepName, stderr)
+		}
+		if bridge.ofPortHost != curOfportHost {
+			klog.Errorf("Fatal error: host representor port %s ofport changed from %s to %s",
+				bridge.hostRepName, bridge.ofPortHost, curOfportHost)
+			os.Exit(1)
+		}
 	}
 	return nil
 }
