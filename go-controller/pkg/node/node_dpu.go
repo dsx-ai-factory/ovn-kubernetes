@@ -25,6 +25,7 @@ import (
 // If true, return its dpuConnDetails, otherwise return nil
 func (nc *ovnNodeController) podReadyToAddDPU(pod *kapi.Pod, nadName string, pfMACs []string) *util.DPUConnectionDetails {
 	if nc.node.name != pod.Spec.NodeName {
+		klog.V(5).Infof("Pod %s/%s is not scheduled on this node %s", pod.Namespace, pod.Name, nc.node.name)
 		return nil
 	}
 
@@ -33,6 +34,9 @@ func (nc *ovnNodeController) podReadyToAddDPU(pod *kapi.Pod, nadName string, pfM
 		if !util.IsAnnotationNotSetError(err) {
 			klog.Errorf("Failed to get dpu annotation for pod %s/%s nad %s: %v",
 				pod.Namespace, pod.Name, nadName, err)
+		} else {
+			klog.V(5).Infof("DPU connection details annotation still not found for %s/%s for NAD %s",
+				pod.Namespace, pod.Name, nadName)
 		}
 		return nil
 	}
@@ -43,6 +47,7 @@ func (nc *ovnNodeController) podReadyToAddDPU(pod *kapi.Pod, nadName string, pfM
 			return dpuCD
 		}
 	}
+	klog.V(5).Infof("Pod %s/%s on NAD %s is not associated with this dpu", pod.Namespace, pod.Name, nadName)
 	return nil
 }
 
@@ -98,13 +103,13 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 			podNadCache.Store(pod.UID, networkMap)
 
 			// initialize serverCache to be empty
-			servedCache := map[string]bool{}
+			servedCache := map[string]*util.DPUConnectionDetails{}
 			for nadName := range networkMap {
 				dpuCD := nc.podReadyToAddDPU(pod, nadName, pfMACs)
 				if dpuCD != nil {
 					err = nc.addDPUPod4Nad(pod, dpuCD, isOvnUpEnabled, nadName, podLister, kclient.KClient)
 					if err == nil {
-						servedCache[nadName] = true
+						servedCache[nadName] = dpuCD
 					}
 				}
 			}
@@ -123,23 +128,26 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 
 			networkMap := v.(map[string]*netattchdefapi.NetworkSelectionElement)
 
-			servedCache := map[string]bool{}
+			servedCache := map[string]*util.DPUConnectionDetails{}
 			v, ok = servedPods.Load(newPod.UID)
 			if ok {
-				servedCache = v.(map[string]bool)
+				servedCache = v.(map[string]*util.DPUConnectionDetails)
 			}
 			for nadName := range networkMap {
 				podDesc := fmt.Sprintf("pod %s/%s for nad %s", newPod.Namespace, newPod.Name, nadName)
-				oldDpuCD := nc.podReadyToAddDPU(oldPod, nadName, pfMACs)
+				var oldDpuCD *util.DPUConnectionDetails
+				v, ok := servedCache[nadName]
+				if ok {
+					oldDpuCD = v
+				}
 				newDpuCD := nc.podReadyToAddDPU(newPod, nadName, pfMACs)
 				if oldDpuCD == nil && newDpuCD == nil {
 					continue
 				}
-				_, ok := servedCache[nadName]
 				if oldDpuCD != nil {
 					// VF already added, but new Pod has changed, we'd need to delete the old VF
-					if ok && (newDpuCD == nil || oldDpuCD.PfId != newDpuCD.PfId ||
-						oldDpuCD.VfId != newDpuCD.VfId || oldDpuCD.SandboxId != newDpuCD.SandboxId) {
+					if newDpuCD == nil || oldDpuCD.PfId != newDpuCD.PfId ||
+						oldDpuCD.VfId != newDpuCD.VfId || oldDpuCD.SandboxId != newDpuCD.SandboxId {
 						klog.Infof("Deleting the old VF since either kubelet issued cmdDEL or assigned a new VF or "+
 							"the sandbox id itself changed. Old connection details (%v), New connection details (%v)",
 							oldDpuCD, newDpuCD)
@@ -161,14 +169,14 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 				}
 				if newDpuCD != nil {
 					// if VF was failed to be added before or, if new Pod has changed, we'd need to add the new VF
-					if !ok || (oldDpuCD == nil || oldDpuCD.PfId != newDpuCD.PfId ||
-						oldDpuCD.VfId != newDpuCD.VfId || oldDpuCD.SandboxId != newDpuCD.SandboxId) {
+					if oldDpuCD == nil || oldDpuCD.PfId != newDpuCD.PfId ||
+						oldDpuCD.VfId != newDpuCD.VfId || oldDpuCD.SandboxId != newDpuCD.SandboxId {
 						klog.Infof("Adding VF during update because either during Pod Add we failed to add VF or "+
 							"connection details weren't present or the VF Ids changed. Old connection details (%v), "+
 							"New connection details (%v)", oldDpuCD, newDpuCD)
 						err := nc.addDPUPod4Nad(newPod, newDpuCD, isOvnUpEnabled, nadName, podLister, kclient.KClient)
 						if err == nil {
-							servedCache[nadName] = true
+							servedCache[nadName] = newDpuCD
 						}
 					}
 				}
@@ -190,16 +198,11 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 				klog.V(5).Infof("Pod %s/%s is not attached to network: %s", pod.Namespace, pod.Name, nc.nadInfo.NetName)
 				return
 			}
-			servedCache := v.(map[string]bool)
+			servedCache := v.(map[string]*util.DPUConnectionDetails)
 			servedPods.Delete(pod.UID)
-			for nadName := range servedCache {
+			for nadName, dpuCD := range servedCache {
 				podDesc := fmt.Sprintf("pod %s/%s for nad %s", pod.Namespace, pod.Name, nadName)
 				klog.Infof("Deleting %s from DPU", podDesc)
-				dpuCD, err := util.UnmarshalPodDPUConnDetails(pod.Annotations, nadName)
-				if err != nil {
-					klog.Errorf("Failed to get dpu annotation for %s: %v", podDesc, err)
-					continue
-				}
 				vfRepName, err := util.GetSriovnetOps().GetVfRepresentorDPU(dpuCD.PfId, dpuCD.VfId)
 				if err != nil {
 					klog.Errorf("Failed to get VF Representor for %s, dpuConnDetail %+v. Representor port may have been deleted", podDesc, dpuCD, err)

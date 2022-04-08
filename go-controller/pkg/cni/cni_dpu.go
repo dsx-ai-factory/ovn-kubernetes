@@ -10,7 +10,7 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// updatePodDPUConnDetailsWithRetry update the pod annotion with the givin connection details
+// updatePodDPUConnDetailsWithRetry update the pod annotation with the given connection details
 func (pr *PodRequest) updatePodDPUConnDetailsWithRetry(kube kube.Interface, dpuConnDetails *util.DPUConnectionDetails) error {
 	klog.Infof("Updating pod %s/%s with connection details (%+v) for NAD %s", pr.PodNamespace, pr.PodName,
 		dpuConnDetails, pr.effectiveNADName)
