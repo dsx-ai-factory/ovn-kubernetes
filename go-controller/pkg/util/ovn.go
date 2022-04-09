@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	networkattachmentdefinitionapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -115,4 +116,13 @@ func IsNetworkOnPod(pod *kapi.Pod, netAttachInfo *NetAttachDefInfo) (bool,
 		}
 	}
 	return len(nseMap) != 0, nseMap, nil
+}
+
+func GetNADNamesFromMap(netAttachDefs *sync.Map) []string {
+	nadNames := []string{}
+	(*netAttachDefs).Range(func(key, value interface{}) bool {
+		nadNames = append(nadNames, key.(string))
+		return true
+	})
+	return nadNames
 }

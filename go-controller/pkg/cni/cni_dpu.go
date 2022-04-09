@@ -12,6 +12,9 @@ import (
 
 // updatePodDPUConnDetailsWithRetry update the pod annotion with the givin connection details
 func (pr *PodRequest) updatePodDPUConnDetailsWithRetry(kube kube.Interface, dpuConnDetails *util.DPUConnectionDetails) error {
+	klog.Infof("Updating pod %s/%s with connection details (%+v) for NAD %s", pr.PodNamespace, pr.PodName,
+		dpuConnDetails, pr.effectiveNADName)
+
 	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		// Informer cache should not be mutated, so get a copy of the object
 		pod, err := kube.GetPod(pr.PodNamespace, pr.PodName)
@@ -30,7 +33,7 @@ func (pr *PodRequest) updatePodDPUConnDetailsWithRetry(kube kube.Interface, dpuC
 		return kube.UpdatePod(cpod)
 	})
 	if resultErr != nil {
-		return fmt.Errorf("failed to update %s annotation dpuConnDetails %+v on pod %s/%s for network %s: %v",
+		return fmt.Errorf("failed to update %s annotation dpuConnDetails %+v on pod %s/%s for NAD %s: %v",
 			util.DPUConnectionDetailsAnnot, dpuConnDetails, pr.PodNamespace, pr.PodName, pr.effectiveNADName, resultErr)
 	}
 	return nil
@@ -84,6 +87,5 @@ func (pr *PodRequest) addDPUConnectionDetailsAnnot(kube kube.Interface, vfNetDev
 		VfDevName: vfNetDevice,
 	}
 
-	klog.Infof("Updating pod %s/%s with connection details (%+v)", pr.PodNamespace, pr.PodName, dpuConnDetails)
 	return pr.updatePodDPUConnDetailsWithRetry(kube, &dpuConnDetails)
 }

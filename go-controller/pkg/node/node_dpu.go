@@ -53,17 +53,17 @@ func (nc *ovnNodeController) addDPUPod4Nad(pod *kapi.Pod, dpuCD *util.DPUConnect
 	podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled, string(pod.UID), "",
 		nadName, nc.nadInfo.NetNameInfo)
 	if err != nil {
-		klog.Infof("Failed to get pod interface information of %s: %v. retrying", podDesc, err)
+		klog.Errorf("Failed to get pod interface information of %s: %v. retrying", podDesc, err)
 		return err
 	}
 	err = nc.addRepPort(pod, dpuCD, podInterfaceInfo, podLister, kclient)
 	if err != nil {
-		klog.Infof("Failed to add rep port for %s, %v. retrying", podDesc, err)
+		klog.Errorf("Failed to add rep port for %s, %v. retrying", podDesc, err)
 	}
 	return err
 }
 
-//watchPodsDPU watch updates for pod dpu annotations
+// watchPodsDPU watch updates for pod dpu annotations
 func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) {
 	// servedPods tracks the pods that got a VF
 	var servedPods sync.Map
@@ -72,6 +72,9 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 	// key is pod.UUID, value is networkMap
 	var podNadCache sync.Map
 
+	klog.Infof("Controller %q for NADs %v is starting Pod watch with following DPU PF MACs: %v", nc.nadInfo.NetName,
+		util.GetNADNamesFromMap(&nc.nadInfo.NetAttachDefs), pfMACs)
+
 	n := nc.node
 	podLister := corev1listers.NewPodLister(n.watchFactory.LocalPodInformer().GetIndexer())
 	kclient := n.Kube.(*kube.Kube)
@@ -79,7 +82,6 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 	nc.podHandler = n.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
-			klog.Infof("Add for Pod: %s/%s for network %s", pod.ObjectMeta.GetNamespace(), pod.ObjectMeta.GetName(), nc.nadInfo.NetName)
 			// Is this pod based on hostNetwork, return directly
 			if !util.PodWantsNetwork(pod) {
 				return
@@ -87,9 +89,11 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 			on, networkMap, err := util.IsNetworkOnPod(pod, nc.nadInfo)
 			if err != nil || !on {
 				// the Pod is not attached to this specific network
-				klog.V(5).Infof("Pod %s/%s is not attached to this network: %s", pod.Namespace, pod.Name, nc.nadInfo.NetName)
+				klog.V(5).Infof("Skipping add for Pod %s/%s as it is not attached to network: %s",
+					pod.Namespace, pod.Name, nc.nadInfo.NetName)
 				return
 			}
+			klog.Infof("Add for Pod: %s/%s for network %s", pod.Namespace, pod.Name, nc.nadInfo.NetName)
 			// add all the Pod's Nad into Pod's podNadCache
 			podNadCache.Store(pod.UID, networkMap)
 
@@ -109,12 +113,14 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 		UpdateFunc: func(old, newer interface{}) {
 			oldPod := old.(*kapi.Pod)
 			newPod := newer.(*kapi.Pod)
-			klog.Infof("Update for Pod: %s/%s for network %s", newPod.ObjectMeta.GetNamespace(), newPod.ObjectMeta.GetName(), nc.nadInfo.NetName)
 			v, ok := podNadCache.Load(newPod.UID)
 			if !ok {
-				klog.V(5).Infof("Pod %s/%s is not attached to this network: %s", newPod.Namespace, newPod.Name, nc.nadInfo.NetName)
+				klog.V(5).Infof("Skipping update for Pod %s/%s as it is not attached to network: %s",
+					newPod.Namespace, newPod.Name, nc.nadInfo.NetName)
 				return
 			}
+			klog.Infof("Update for Pod %s/%s for network %s", newPod.Namespace, newPod.Name, nc.nadInfo.NetName)
+
 			networkMap := v.(map[string]*netattchdefapi.NetworkSelectionElement)
 
 			servedCache := map[string]bool{}
@@ -127,13 +133,16 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 				oldDpuCD := nc.podReadyToAddDPU(oldPod, nadName, pfMACs)
 				newDpuCD := nc.podReadyToAddDPU(newPod, nadName, pfMACs)
 				if oldDpuCD == nil && newDpuCD == nil {
-					return
+					continue
 				}
 				_, ok := servedCache[nadName]
 				if oldDpuCD != nil {
 					// VF already added, but new Pod has changed, we'd need to delete the old VF
 					if ok && (newDpuCD == nil || oldDpuCD.PfId != newDpuCD.PfId ||
 						oldDpuCD.VfId != newDpuCD.VfId || oldDpuCD.SandboxId != newDpuCD.SandboxId) {
+						klog.Infof("Deleting the old VF since either kubelet issued cmdDEL or assigned a new VF or "+
+							"the sandbox id itself changed. Old connection details (%v), New connection details (%v)",
+							oldDpuCD, newDpuCD)
 						err := nc.updatePodDPUConnStatusWithRetry(nc.node.Kube, oldPod, nil, nadName)
 						if err != nil {
 							klog.Errorf("Failed to remove the old DPU connection status annotation for %s: %v", podDesc, err)
@@ -154,6 +163,9 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 					// if VF was failed to be added before or, if new Pod has changed, we'd need to add the new VF
 					if !ok || (oldDpuCD == nil || oldDpuCD.PfId != newDpuCD.PfId ||
 						oldDpuCD.VfId != newDpuCD.VfId || oldDpuCD.SandboxId != newDpuCD.SandboxId) {
+						klog.Infof("Adding VF during update because either during Pod Add we failed to add VF or "+
+							"connection details weren't present or the VF Ids changed. Old connection details (%v), "+
+							"New connection details (%v)", oldDpuCD, newDpuCD)
 						err := nc.addDPUPod4Nad(newPod, newDpuCD, isOvnUpEnabled, nadName, podLister, kclient.KClient)
 						if err == nil {
 							servedCache[nadName] = true
@@ -165,23 +177,24 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
-			klog.Infof("Delete for Pod: %s/%s for network %s", pod.ObjectMeta.GetNamespace(), pod.ObjectMeta.GetName(), nc.nadInfo.NetName)
 			_, ok := podNadCache.Load(pod.UID)
 			if !ok {
-				klog.V(5).Infof("Pod %s/%s is not attached to this network: %s", pod.Namespace, pod.Name, nc.nadInfo.NetName)
+				klog.V(5).Infof("Skipping delete for Pod %s/%s as it is not attached to network: %s",
+					pod.Namespace, pod.Name, nc.nadInfo.NetName)
 				return
 			}
+			klog.Infof("Delete for Pod: %s/%s for network %s", pod.Namespace, pod.Name, nc.nadInfo.NetName)
 			podNadCache.Delete(pod.UID)
 			v, ok := servedPods.Load(pod.UID)
 			if !ok {
-				klog.V(5).Infof("Pod %s/%s is not attached to this network: %s", pod.Namespace, pod.Name, nc.nadInfo.NetName)
+				klog.V(5).Infof("Pod %s/%s is not attached to network: %s", pod.Namespace, pod.Name, nc.nadInfo.NetName)
 				return
 			}
 			servedCache := v.(map[string]bool)
 			servedPods.Delete(pod.UID)
 			for nadName := range servedCache {
 				podDesc := fmt.Sprintf("pod %s/%s for nad %s", pod.Namespace, pod.Name, nadName)
-				klog.Infof("Deleling %s from DPU", podDesc)
+				klog.Infof("Deleting %s from DPU", podDesc)
 				dpuCD, err := util.UnmarshalPodDPUConnDetails(pod.Annotations, nadName)
 				if err != nil {
 					klog.Errorf("Failed to get dpu annotation for %s: %v", podDesc, err)
@@ -205,6 +218,7 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 func (nc *ovnNodeController) updatePodDPUConnStatusWithRetry(kube kube.Interface, origPod *kapi.Pod,
 	dpuConnStatus *util.DPUConnectionStatus, nadName string) error {
 	podDesc := fmt.Sprintf("pod %s/%s for nad %s", origPod.Namespace, origPod.Name, nadName)
+	klog.Infof("Updating pod %s with connection status (%+v) for NAD %s", podDesc, dpuConnStatus, nadName)
 	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		pod, err := kube.GetPod(origPod.Namespace, origPod.Name)
 		if err != nil {
