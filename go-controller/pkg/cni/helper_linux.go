@@ -364,7 +364,8 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 
 	var hostIface, contIface *current.Interface
 
-	klog.V(5).Infof("CNI Conf %v", pr.CNIConf)
+	klog.V(5).Infof("Set up interface %+v with CNI Conf %v for pod %s/%s on network %s",
+		*pr, pr.CNIConf, pr.PodNamespace, pr.PodName, pr.effectiveNADName)
 	if pr.CNIConf.DeviceID != "" {
 		// SR-IOV Case
 		// if the SR-IOV device is bound to VFIO, then there is nothing to do as it will be passed to the
@@ -429,7 +430,7 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 
 func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 	podDesc := fmt.Sprintf("for pod %s/%s network %s", pr.PodNamespace, pr.PodName, pr.effectiveNADName)
-	klog.V(5).Infof("Tear down interface %+v CNI Conf %v %s", *pr, pr.CNIConf, podDesc)
+	klog.V(5).Infof("Tear down interface %+v with CNI Conf %v %s", *pr, pr.CNIConf, podDesc)
 	if pr.CNIConf.DeviceID == "" && ifInfo.IsDPUHostMode {
 		klog.Warningf("Unexpected configuration %s, pod request on DPU host. device ID must be provided", podDesc)
 		return nil
