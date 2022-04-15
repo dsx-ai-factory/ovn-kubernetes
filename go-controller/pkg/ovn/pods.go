@@ -29,6 +29,26 @@ import (
 )
 
 func (oc *Controller) syncPods(pods []interface{}) {
+	// Note that retryPod could be added by addNode handler. To avoid duplicate IPs being allocated to
+	// multiple pods, start retryPod handler and get ready to handle the retryPod after the IPs of the
+	// existing Pods are reserved in syncPods(). Only then those IPs won't be reallocated to any new
+	// Pods (that are added when ovnkube-master is down/restarting).
+	defer func() {
+		go func() {
+			// track the retryPods map and every 30 seconds check if any pods need to be retried
+			for {
+				select {
+				case <-time.After(30 * time.Second):
+					oc.iterateRetryPods(false)
+				case <-oc.retryPodsChan:
+					oc.iterateRetryPods(true)
+				case <-oc.stopChan:
+					return
+				}
+			}
+		}()
+	}()
+
 	var allOps []ovsdb.Operation
 	// get the list of logical switch ports (equivalent to pods)
 	expectedLogicalPorts := make(map[string]bool)

@@ -839,20 +839,6 @@ func (oc *Controller) requestRetryPods() {
 
 // WatchPods starts the watching of Pod resource and calls back the appropriate handler logic
 func (oc *Controller) WatchPods() {
-	go func() {
-		// track the retryPods map and every 30 seconds check if any pods need to be retried
-		for {
-			select {
-			case <-time.After(30 * time.Second):
-				oc.iterateRetryPods(false)
-			case <-oc.retryPodsChan:
-				oc.iterateRetryPods(true)
-			case <-oc.stopChan:
-				return
-			}
-		}
-	}()
-
 	start := time.Now()
 	oc.podHandler = oc.mc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
