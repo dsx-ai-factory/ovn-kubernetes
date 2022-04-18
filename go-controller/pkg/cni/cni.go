@@ -74,7 +74,7 @@ func extractPodBandwidth(podAnnotations map[string]string, dir direction) (int64
 }
 
 func (pr *PodRequest) String() string {
-	return fmt.Sprintf("[%s/%s %s]", pr.PodNamespace, pr.PodName, pr.SandboxID)
+	return fmt.Sprintf("[%s/%s %s %s]", pr.PodNamespace, pr.PodName, pr.Netns, pr.SandboxID)
 }
 
 // checkOrUpdatePodUID validates the given pod UID against the request's existing
@@ -184,11 +184,7 @@ func (pr *PodRequest) cmdDel(podLister corev1listers.PodLister, kclient kubernet
 	vfNetdevName := ""
 	if pr.CNIConf.DeviceID != "" {
 		kubecli := &kube.Kube{KClient: kclient}
-		if pr.IsVFIO {
-			if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
-				// Delete the DPU connection-details annotation
-				_ = pr.updatePodDPUConnDetailsWithRetry(kubecli, nil)
-			}
+		if pr.IsVFIO && config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 			return response, nil
 		}
 		if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
@@ -202,17 +198,29 @@ func (pr *PodRequest) cmdDel(podLister corev1listers.PodLister, kclient kubernet
 				klog.Errorf("Failed to get dpu annotation for pod %s/%s network %s: %v", namespace, podName, pr.effectiveNetName, err)
 				return response, nil
 			}
-			vfNetdevName = dpuCD.VfDevName
+			// check if this cmdDel is meant for the current sandbox, if not, directly return
+			if dpuCD.SandboxId != pr.SandboxID {
+				klog.Infof("The cmdDel request for sandbox %s is not meant for the currently configured "+
+					"pod %s/%s on network %s with sandbox %s. Ignoring this request.",
+					pr.SandboxID, namespace, podName, pr.effectiveNetName, dpuCD.SandboxId)
+				return response, nil
+			}
 
 			// Delete the DPU connection-details annotation
 			_ = pr.updatePodDPUConnDetailsWithRetry(kubecli, nil)
+
+			if pr.IsVFIO {
+				return response, nil
+			}
+
+			vfNetdevName = dpuCD.VfDevName
 		}
 		// TODO(gmoodalbail): add for the CX5 ASAP2 VF case
 	}
 
 	podInterfaceInfo := &PodInterfaceInfo{
 		IsDPUHostMode: config.OvnKubeNode.Mode == types.NodeModeDPUHost,
-		VfNetdevNmae:  vfNetdevName,
+		VfNetdevName:  vfNetdevName,
 	}
 	if !config.UnprivilegedMode {
 		err := pr.UnconfigureInterface(podInterfaceInfo)

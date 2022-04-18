@@ -168,7 +168,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 	contIface := &current.Interface{}
 	ifnameSuffix := ""
 
-	vfNetdevice := ifInfo.VfNetdevNmae
+	vfNetdevice := ifInfo.VfNetdevName
 
 	// 1. Move VF to Container namespace
 	err := moveIfToNetns(vfNetdevice, netns)
@@ -478,8 +478,8 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 					return fmt.Errorf("failed to bring down container interface %s %s: %v", pr.IfName, podDesc, err)
 				}
 				// rename VF device to make sure it is unique in the host namespace:
-				// if the VF's original name is emptry, sandbox id and a '0' letter prefix is used to make up the unique name.
-				oldVfName := ifInfo.VfNetdevNmae
+				// if the VF's original name is empty, sandbox id and a '0' letter prefix is used to make up the unique name.
+				oldVfName := ifInfo.VfNetdevName
 				if oldVfName == "" {
 					id := fmt.Sprintf("_0%d", link.Attrs().Index)
 					oldVfName = pr.SandboxID[:(15-len(id))] + id

@@ -123,7 +123,7 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, po
 		IsDPUHostMode:  config.OvnKubeNode.Mode == types.NodeModeDPUHost,
 		PodUID:         podUID,
 		NetNameInfo:    netNameInfo,
-		VfNetdevNmae:   vfNetdevice,
+		VfNetdevName:   vfNetdevice,
 		NadName:        nadName,
 		SkipSpoofCheck: util.SkipSpoofCheckForNAD(podAnnotation, nadName),
 	}

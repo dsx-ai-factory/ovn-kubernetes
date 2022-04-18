@@ -43,7 +43,7 @@ type PodInterfaceInfo struct {
 	CheckExtIDs    bool   `json:"check-external-ids"`
 	IsDPUHostMode  bool   `json:"is-dpu-host-mode"`
 	PodUID         string `json:"pod-uid"`
-	VfNetdevNmae   string `json:"vf-netdev-name"`
+	VfNetdevName   string `json:"vf-netdev-name"`
 	NadName        string `json:"nadName"`
 	SkipSpoofCheck bool   `json:"skip-spoof-check"`
 }
