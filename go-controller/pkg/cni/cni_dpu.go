@@ -14,6 +14,7 @@ import (
 func (pr *PodRequest) updatePodDPUConnDetailsWithRetry(kube kube.Interface, dpuConnDetails *util.DPUConnectionDetails) error {
 	klog.Infof("Updating pod %s/%s with connection details (%+v) for NAD %s", pr.PodNamespace, pr.PodName,
 		dpuConnDetails, pr.effectiveNADName)
+	annoNadKeyName := util.GetAnnotationKeyFromNadName(pr.effectiveNADName, !pr.isSecondary)
 
 	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		// Informer cache should not be mutated, so get a copy of the object
@@ -23,7 +24,7 @@ func (pr *PodRequest) updatePodDPUConnDetailsWithRetry(kube kube.Interface, dpuC
 		}
 
 		cpod := pod.DeepCopy()
-		err = util.MarshalPodDPUConnDetails(&cpod.Annotations, dpuConnDetails, pr.effectiveNADName)
+		err = util.MarshalPodDPUConnDetails(&cpod.Annotations, dpuConnDetails, annoNadKeyName)
 		if err != nil {
 			if util.IsAnnotationAlreadySetError(err) {
 				return nil

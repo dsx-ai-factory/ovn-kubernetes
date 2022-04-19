@@ -346,7 +346,8 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	ifInfo *PodInterfaceInfo, sandboxID string, podLister corev1listers.PodLister,
 	kclient kubernetes.Interface) error {
 
-	ifaceID := util.GetIfaceId(namespace, podName, ifInfo.NadName, !ifInfo.IsSecondary)
+	annoNadKeyName := util.GetAnnotationKeyFromNadName(ifInfo.NadName, !ifInfo.IsSecondary)
+	ifaceID := util.GetIfaceId(namespace, podName, annoNadKeyName, !ifInfo.IsSecondary)
 	initialPodUID := ifInfo.PodUID
 
 	ipStrs := make([]string, len(ifInfo.IPs))
@@ -381,7 +382,7 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 		if sandboxStr != sandboxID {
 			return fmt.Errorf("OVS port %s was added for sandbox (%s), now readding it for (%s)", hostIfaceName, sandboxStr, sandboxID)
 		}
-		if networkNameStr != ifInfo.NadName {
+		if networkNameStr != annoNadKeyName {
 			return fmt.Errorf("OVS port %s was added for nad (%s), expect (%s)", hostIfaceName, networkNameStr, ifInfo.NadName)
 		}
 	}
@@ -474,9 +475,8 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 		}
 	}
 
-	if err = waitForPodInterface(ctx, ifInfo.MAC.String(), ifInfo.IPs, hostIfaceName,
-		ifaceID, ifInfo.CheckExtIDs, ifInfo.SkipSpoofCheck, podLister, kclient, namespace, podName, ifInfo.NadName,
-		initialPodUID); err != nil {
+	if err = waitForPodInterface(ctx, ifInfo, hostIfaceName, ifaceID, podLister, kclient,
+		namespace, podName, initialPodUID); err != nil {
 		// Ensure the error shows up in node logs, rather than just
 		// being reported back to the runtime.
 		klog.Warningf("[%s/%s %s] pod uid %s: %v", namespace, podName, sandboxID, initialPodUID, err)

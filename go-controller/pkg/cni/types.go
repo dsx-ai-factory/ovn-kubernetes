@@ -49,7 +49,7 @@ type PodInterfaceInfo struct {
 	PodUID               string `json:"pod-uid"`
 	VfNetdevName         string `json:"vf-netdev-name"`
 	EnableUDPAggregation bool   `json:"enable-udp-aggregation"`
-	NadName              string `json:"nadName"`
+	NadName              string `json:"nadName"` // nad's <namesapce/name>, when associated with a net-attach-def
 	SkipSpoofCheck       bool   `json:"skip-spoof-check"`
 }
 
@@ -151,6 +151,7 @@ type PodRequest struct {
 	// captures the same.
 	effectiveNetName string
 	effectiveNADName string
+	isSecondary      bool
 }
 
 type cniRequestFunc func(request *PodRequest, podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface, kubeAuth *KubeAPIAuth) ([]byte, error)

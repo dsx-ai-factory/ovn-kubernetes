@@ -260,7 +260,15 @@ func GetNadName(namespace, name string, isDefault bool) string {
 	return GetNadKeyName(namespace, name)
 }
 
-// key of NetAttachDefInfo.NetAttachDefs map
+// for default network, nadName is always "default", otherwide, it is the same as nadKeyName
+func GetAnnotationKeyFromNadName(nadName string, isDefault bool) string {
+	if isDefault {
+		return "default"
+	}
+	return nadName
+}
+
+// key of NetAttachDefInfo.NetAttachDefs map, always in he form of namespace/name no matter it is of default network
 func GetNadKeyName(namespace, name string) string {
 	return fmt.Sprintf("%s/%s", namespace, name)
 }

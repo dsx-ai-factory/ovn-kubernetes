@@ -143,8 +143,9 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 	}
 	// Get the IP address and MAC address of the pod
 	// for DPU, ensure connection-details is present
+	annoNadKeyName := util.GetAnnotationKeyFromNadName(pr.effectiveNADName, !pr.isSecondary)
 	podUID, annotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, namespace, podName,
-		pr.effectiveNADName, annotCondFn)
+		annoNadKeyName, annotCondFn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
 	}
@@ -196,7 +197,8 @@ func (pr *PodRequest) cmdDel(podLister corev1listers.PodLister, kclient kubernet
 				klog.Errorf("Failed to get pod %s/%s: %v", namespace, podName, err)
 				return response, nil
 			}
-			dpuCD, err := util.UnmarshalPodDPUConnDetails(pod.Annotations, pr.effectiveNADName)
+			annoNadKeyName := util.GetAnnotationKeyFromNadName(pr.effectiveNADName, !pr.isSecondary)
+			dpuCD, err := util.UnmarshalPodDPUConnDetails(pod.Annotations, annoNadKeyName)
 			if err != nil {
 				klog.Errorf("Failed to get dpu annotation for pod %s/%s network %s: %v", namespace, podName, pr.effectiveNetName, err)
 				return response, nil

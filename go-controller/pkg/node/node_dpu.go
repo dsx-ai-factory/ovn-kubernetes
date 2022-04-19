@@ -6,9 +6,11 @@ import (
 	"sync"
 	"time"
 
+	netattchdefapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -28,7 +30,8 @@ func (nc *ovnNodeController) podReadyToAddDPU(pod *kapi.Pod, nadName string, pfM
 		return nil
 	}
 
-	dpuCD, err := util.UnmarshalPodDPUConnDetails(pod.Annotations, nadName)
+	annoNadKeyName := util.GetAnnotationKeyFromNadName(nadName, !nc.nadInfo.IsSecondary)
+	dpuCD, err := util.UnmarshalPodDPUConnDetails(pod.Annotations, annoNadKeyName)
 	if err != nil {
 		if !util.IsAnnotationNotSetError(err) {
 			klog.Errorf("Failed to get dpu annotation for pod %s/%s nad %s: %v",
@@ -51,7 +54,7 @@ func (nc *ovnNodeController) podReadyToAddDPU(pod *kapi.Pod, nadName string, pfM
 }
 
 func (nc *ovnNodeController) addDPUPod4Nad(pod *kapi.Pod, dpuCD *util.DPUConnectionDetails, isOvnUpEnabled bool, nadName string,
-	nadConf *util.NadConfig, podLister corev1listers.PodLister, kclient kubernetes.Interface) error {
+	podLister corev1listers.PodLister, kclient kubernetes.Interface) error {
 	podDesc := fmt.Sprintf("pod %s/%s for nad %s", pod.Namespace, pod.Name, nadName)
 	klog.Infof("Adding %s on DPU", podDesc)
 	podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled, string(pod.UID), "",
@@ -60,7 +63,7 @@ func (nc *ovnNodeController) addDPUPod4Nad(pod *kapi.Pod, dpuCD *util.DPUConnect
 		klog.Errorf("Failed to get pod interface information of %s: %v. retrying", podDesc, err)
 		return err
 	}
-	err = nc.addRepPort(pod, dpuCD, podInterfaceInfo, nadConf, podLister, kclient)
+	err = nc.addRepPort(pod, dpuCD, podInterfaceInfo, podLister, kclient)
 	if err != nil {
 		klog.Errorf("Failed to add rep port for %s, %v. retrying", podDesc, err)
 	}
@@ -73,7 +76,7 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 	var servedPods sync.Map
 	// podNadCache stores all the net-attach-defs that the given Pod is attached for this controller,
 	// we assume that Pod's Network Attachment Selection Annotation will not change over time.
-	// key is pod.UUID, value is networkMap of map[string]*util.PodNadInfo type
+	// key is pod.UUID, value is networkMap
 	var podNadCache sync.Map
 
 	klog.Infof("Controller %q for NADs %v is starting Pod watch with following DPU PF MACs: %v", nc.nadInfo.NetName,
@@ -104,10 +107,10 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 
 			// initialize serverCache to be empty
 			servedCache := map[string]*util.DPUConnectionDetails{}
-			for nadName, podNadInfo := range networkMap {
+			for nadName := range networkMap {
 				dpuCD := nc.podReadyToAddDPU(pod, nadName, pfMACs)
 				if dpuCD != nil {
-					err = nc.addDPUPod4Nad(pod, dpuCD, isOvnUpEnabled, nadName, podNadInfo.NadConfig, podLister, kclient.KClient)
+					err = nc.addDPUPod4Nad(pod, dpuCD, isOvnUpEnabled, nadName, podLister, kclient.KClient)
 					if err == nil {
 						servedCache[nadName] = dpuCD
 					}
@@ -126,14 +129,14 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 			}
 			klog.Infof("Update for Pod %s/%s for network %s", newPod.Namespace, newPod.Name, nc.nadInfo.NetName)
 
-			networkMap := v.(map[string]*util.PodNadInfo)
+			networkMap := v.(map[string]*netattchdefapi.NetworkSelectionElement)
 
 			servedCache := map[string]*util.DPUConnectionDetails{}
 			v, ok = servedPods.Load(newPod.UID)
 			if ok {
 				servedCache = v.(map[string]*util.DPUConnectionDetails)
 			}
-			for nadName, podNadInfo := range networkMap {
+			for nadName := range networkMap {
 				podDesc := fmt.Sprintf("pod %s/%s for nad %s", newPod.Namespace, newPod.Name, nadName)
 				var oldDpuCD *util.DPUConnectionDetails
 				v, ok := servedCache[nadName]
@@ -174,7 +177,7 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 						klog.Infof("Adding VF during update because either during Pod Add we failed to add VF or "+
 							"connection details weren't present or the VF Ids changed. Old connection details (%v), "+
 							"New connection details (%v)", oldDpuCD, newDpuCD)
-						err := nc.addDPUPod4Nad(newPod, newDpuCD, isOvnUpEnabled, nadName, podNadInfo.NadConfig, podLister, kclient.KClient)
+						err := nc.addDPUPod4Nad(newPod, newDpuCD, isOvnUpEnabled, nadName, podLister, kclient.KClient)
 						if err == nil {
 							servedCache[nadName] = newDpuCD
 						}
@@ -222,6 +225,7 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 func (nc *ovnNodeController) updatePodDPUConnStatusWithRetry(kube kube.Interface, origPod *kapi.Pod,
 	dpuConnStatus *util.DPUConnectionStatus, nadName string) error {
 	podDesc := fmt.Sprintf("pod %s/%s for nad %s", origPod.Namespace, origPod.Name, nadName)
+	annoNadKeyName := util.GetAnnotationKeyFromNadName(nadName, !nc.nadInfo.IsSecondary)
 	klog.Infof("Updating pod %s with connection status (%+v) for NAD %s", podDesc, dpuConnStatus, nadName)
 	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		pod, err := kube.GetPod(origPod.Namespace, origPod.Name)
@@ -230,7 +234,7 @@ func (nc *ovnNodeController) updatePodDPUConnStatusWithRetry(kube kube.Interface
 		}
 		// Informer cache should not be mutated, so get a copy of the object
 		cpod := pod.DeepCopy()
-		err = util.MarshalPodDPUConnStatus(&cpod.Annotations, dpuConnStatus, nadName)
+		err = util.MarshalPodDPUConnStatus(&cpod.Annotations, dpuConnStatus, annoNadKeyName)
 		if err != nil {
 			if util.IsAnnotationAlreadySetError(err) {
 				return nil
@@ -246,8 +250,7 @@ func (nc *ovnNodeController) updatePodDPUConnStatusWithRetry(kube kube.Interface
 }
 
 // addRepPort adds the representor of the VF to the ovs bridge
-func (nc *ovnNodeController) addRepPort(pod *kapi.Pod, dpuCD *util.DPUConnectionDetails, ifInfo *cni.PodInterfaceInfo,
-	nadConf *util.NadConfig, podLister corev1listers.PodLister, kclient kubernetes.Interface) error {
+func (nc *ovnNodeController) addRepPort(pod *kapi.Pod, dpuCD *util.DPUConnectionDetails, ifInfo *cni.PodInterfaceInfo, podLister corev1listers.PodLister, kclient kubernetes.Interface) error {
 	nadName := ifInfo.NadName
 	podDesc := fmt.Sprintf("pod %s/%s for nad %s", pod.Namespace, pod.Name, nadName)
 	vfRepName, err := util.GetSriovnetOps().GetVfRepresentorDPU(dpuCD.PfId, dpuCD.VfId)
@@ -291,9 +294,19 @@ func (nc *ovnNodeController) addRepPort(pod *kapi.Pod, dpuCD *util.DPUConnection
 		return fmt.Errorf("failed to setup representor port. failed to set link up for interface %s: %v", vfRepName, err)
 	}
 
+	// set the VF rate limit configured for this network. This rate is for the allowed no. of new connections.
+	// default rate limit configuration
+	missRateLimitConfig := util.MissRateLimitConfig{MaxNewConnPPS: config.OvnKubeNode.MaxNewConnPPS, MaxNewConnBurst: config.OvnKubeNode.MaxNewConnBurst}
+	nadConf := &util.NadConfig{MissRateLimitConfig: missRateLimitConfig}
+	if v, ok := nc.nadInfo.NetAttachDefs.Load(nadName); ok {
+		nadConf = v.(*util.NadConfig)
+	} else if nadName != types.DefaultNetworkName {
+		// Failed to find the per nad configuration. This is only possible if this is default network
+		// which is not associated with a net-attach-def
+		klog.Errorf("Failed to find per nad configuration for nad %s", nadName)
+	}
 	klog.Infof("Adding Limit %v/%v for VF representor %s for %s",
 		nadConf.MaxNewConnPPS, nadConf.MaxNewConnBurst, vfRepName, podDesc)
-	// set the VF rate limit configured for this network. This rate is for the allowed no. of new connections.
 	if err = util.GetSriovnetOps().SetRepresentorVFMissPktRate(vfRepName, nadConf.MaxNewConnPPS, nadConf.MaxNewConnBurst); err != nil {
 		_ = nc.delRepPort(pod, dpuCD, vfRepName, nadName, podDesc)
 		return fmt.Errorf("failed to setup Rate limiting  for interface %s: %v", vfRepName, err)
@@ -323,7 +336,7 @@ func (nc *ovnNodeController) addRepPort(pod *kapi.Pod, dpuCD *util.DPUConnection
 	// Update connection-status annotation
 	// TODO(adrianc): we should update Status in case of error as well
 	connStatus := util.DPUConnectionStatus{Status: util.DPUConnectionStatusReady, Reason: ""}
-	err = nc.updatePodDPUConnStatusWithRetry(nc.node.Kube, pod, &connStatus, ifInfo.NadName)
+	err = nc.updatePodDPUConnStatusWithRetry(nc.node.Kube, pod, &connStatus, nadName)
 	if err != nil {
 		_ = util.GetNetLinkOps().LinkSetDown(link)
 		_ = nc.delRepPort(pod, dpuCD, vfRepName, nadName, podDesc)
@@ -336,6 +349,7 @@ func (nc *ovnNodeController) addRepPort(pod *kapi.Pod, dpuCD *util.DPUConnection
 func (nc *ovnNodeController) delRepPort(pod *kapi.Pod, dpuCD *util.DPUConnectionDetails, vfRepName, nadName, podDesc string) error {
 	//TODO(adrianc): handle: clearPodBandwidth(pr.SandboxID), pr.deletePodConntrack()
 	klog.Infof("Deleting VF representor %s for %s", vfRepName, podDesc)
+	annoNadKeyName := util.GetAnnotationKeyFromNadName(nadName, !nc.nadInfo.IsSecondary)
 	ifExists, sandbox, networkName, err := util.GetOVSPortPodInfo(vfRepName)
 	if err != nil {
 		return fmt.Errorf(err.Error())
@@ -347,8 +361,8 @@ func (nc *ovnNodeController) delRepPort(pod *kapi.Pod, dpuCD *util.DPUConnection
 	if sandbox != dpuCD.SandboxId {
 		return fmt.Errorf("OVS port %s was added for sandbox (%s), expecting (%s)", vfRepName, sandbox, dpuCD.SandboxId)
 	}
-	if networkName != nadName {
-		return fmt.Errorf("OVS port %s was added for nad (%s), expecting (%s)", vfRepName, networkName, nadName)
+	if networkName != annoNadKeyName {
+		return fmt.Errorf("OVS port %s was added for nad (%s), expecting (%s)", vfRepName, networkName, annoNadKeyName)
 	}
 	// Remove XDP xonfigurationfor this network
 	if nc.nadInfo.XDPService {
@@ -357,7 +371,7 @@ func (nc *ovnNodeController) delRepPort(pod *kapi.Pod, dpuCD *util.DPUConnection
 		if config.OvnKubeNode.IsPrimaryDPU {
 			gw = nc.node.gateway.(*gateway)
 		}
-		netAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
+		netAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, annoNadKeyName)
 		if err == nil {
 			// If this pod needs Syn-Flooding mitigation on the DPU (to protect DPU cores)
 			// by adding a bump-in-the-path kind of service before signalling that pod as ready.
@@ -365,10 +379,10 @@ func (nc *ovnNodeController) delRepPort(pod *kapi.Pod, dpuCD *util.DPUConnection
 				return fmt.Errorf("failed to tear down XDP: %v", err)
 			}
 		} else {
-			klog.Infof("Failed to get pod annotation for %s[%s] (%v): %v", nc.nadInfo.NetName, nadName, pod.Annotations, err)
+			klog.Infof("Failed to get pod annotation for %s[%s] (%v): %v", nc.nadInfo.NetName, annoNadKeyName, pod.Annotations, err)
 		}
 	} else {
-		klog.Infof("XDP service not used for pod %s/%s network %s", pod.Namespace, pod.Name, nadName)
+		klog.Infof("XDP service not used for pod %s/%s network %s", pod.Namespace, pod.Name, annoNadKeyName)
 	}
 
 	// Set link down for representor port

@@ -55,7 +55,8 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 			continue
 		}
 		for nadName := range networkMap {
-			annotations, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
+			annoNadKeyName := util.GetAnnotationKeyFromNadName(nadName, !oc.nadInfo.IsSecondary)
+			annotations, err := util.UnmarshalPodAnnotation(pod.Annotations, annoNadKeyName)
 			if err == nil {
 				logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name, nadName, !oc.nadInfo.IsSecondary)
 				expectedLogicalPorts[logicalPort] = true
@@ -192,8 +193,8 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfoMap map[string]*l
 		lsManagerNodeName = ovntypes.OVNLocalnetSwitch
 	}
 
-	for nadName, podNadInfo := range networkMap {
-		err = oc.delLogicalPort4Nad(pod, nadName, lsManagerNodeName, podNadInfo.Network, portInfoMap[nadName])
+	for nadName, network := range networkMap {
+		err = oc.delLogicalPort4Nad(pod, nadName, lsManagerNodeName, network, portInfoMap[nadName])
 		if err != nil {
 			return err
 		}
@@ -215,7 +216,8 @@ func (oc *Controller) delLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string
 	if portInfo == nil {
 		// If ovnkube-master restarts, it is also possible the Pod's logical switch port
 		// is not re-added into the cache. Delete logical switch port anyway.
-		annotation, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
+		annoNadKeyName := util.GetAnnotationKeyFromNadName(nadName, !oc.nadInfo.IsSecondary)
+		annotation, err := util.UnmarshalPodAnnotation(pod.Annotations, annoNadKeyName)
 		if err != nil {
 			if util.IsAnnotationNotSetError(err) {
 				// if the annotation doesn’t exist, that’s not an error. It means logical port does not need to be deleted.
@@ -462,7 +464,7 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 	return nil
 }
 
-func (oc *Controller) updatePodAnnotationWithRetry(origPod *kapi.Pod, podInfo *util.PodAnnotation, nadName string) error {
+func (oc *Controller) updatePodAnnotationWithRetry(origPod *kapi.Pod, podInfo *util.PodAnnotation, annoNadKeyName string) error {
 	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		// Informer cache should not be mutated, so get a copy of the object
 		pod, err := oc.mc.kube.GetPod(origPod.Namespace, origPod.Name)
@@ -471,20 +473,20 @@ func (oc *Controller) updatePodAnnotationWithRetry(origPod *kapi.Pod, podInfo *u
 		}
 
 		cpod := pod.DeepCopy()
-		err = util.MarshalPodAnnotation(&cpod.Annotations, podInfo, nadName)
+		err = util.MarshalPodAnnotation(&cpod.Annotations, podInfo, annoNadKeyName)
 		if err != nil {
 			return err
 		}
 		err = oc.mc.kube.UpdatePod(cpod)
 		if err != nil {
 			klog.V(5).Infof("Failed to update pod annotation %s/%s on network %s, err (%v)",
-				cpod.Namespace, cpod.Name, nadName, err)
+				cpod.Namespace, cpod.Name, annoNadKeyName, err)
 		}
 		return err
 	})
 	if resultErr != nil {
 		return fmt.Errorf("failed to update annotation on pod %s/%s for nad %s: %v",
-			origPod.Namespace, origPod.Name, nadName, resultErr)
+			origPod.Namespace, origPod.Name, annoNadKeyName, resultErr)
 	}
 	return nil
 }
@@ -508,8 +510,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	klog.V(5).Infof("Pod %s is attached on this network: %s", podDesc, oc.nadInfo.NetName)
-	for nadName, podNadInfo := range networkMap {
-		err1 := oc.addLogicalPort4Nad(pod, nadName, lsManagerNodeName, podNadInfo.Network)
+	for nadName, network := range networkMap {
+		err1 := oc.addLogicalPort4Nad(pod, nadName, lsManagerNodeName, network)
 		if err1 != nil {
 			err = err1
 		}
@@ -579,7 +581,8 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string
 		lsp.Options["requested-chassis"] = pod.Spec.NodeName
 	}
 
-	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
+	annoNadKeyName := util.GetAnnotationKeyFromNadName(nadName, !oc.nadInfo.IsSecondary)
+	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations, annoNadKeyName)
 
 	// the IPs we allocate in this function need to be released back to the
 	// IPAM pool if there is some error in any step of addLogicalPort past
@@ -674,10 +677,10 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string
 			podDesc, nadName, podIfAddrs, podMac, podAnnotation.Gateways)
 
 		annoStart := time.Now()
-		err = oc.updatePodAnnotationWithRetry(pod, &podAnnotation, nadName)
+		err = oc.updatePodAnnotationWithRetry(pod, &podAnnotation, annoNadKeyName)
 		podAnnoTime = time.Since(annoStart)
 		if err != nil {
-			return fmt.Errorf("failed to update annotation on pod %s/%s for nad %s: %v", pod.Namespace, pod.Name, nadName, err)
+			return fmt.Errorf("failed to update annotation on pod %s/%s for nad %s: %v", pod.Namespace, pod.Name, annoNadKeyName, err)
 		}
 		releaseIPs = false
 	}
@@ -746,7 +749,7 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string
 	// ex: for IGW's private and public underlay networks we need the port security to be disabled
 	// on the corresponding LSP so that it can provide high availability for the default gateway IP.
 	// TODO(gmoodalbail): need a correct way to disable portSecurity for default network
-	skipPortSecurity := util.SkipSpoofCheckForNAD(pod.Annotations, nadName)
+	skipPortSecurity := util.SkipSpoofCheckForNAD(pod.Annotations, annoNadKeyName)
 	if !skipPortSecurity {
 		lsp.PortSecurity = addresses
 	} else {

@@ -21,17 +21,17 @@ import (
 type podAnnotWaitCond func(map[string]string, string) bool
 
 // isOvnReady is a wait condition for OVN master to set pod-networks annotation
-func isOvnReady(podAnnotation map[string]string, nadName string) bool {
-	_, err := util.UnmarshalPodAnnotation(podAnnotation, nadName)
+func isOvnReady(podAnnotation map[string]string, annoNadKeyName string) bool {
+	_, err := util.UnmarshalPodAnnotation(podAnnotation, annoNadKeyName)
 	return err == nil
 }
 
 // isDPUReady is a wait condition for DPU: wait for OVN master to set pod-networks annotation and
 // ovnkube running on DPU to set connection-status pod annotation and its status is Ready
-func isDPUReady(podAnnotation map[string]string, nadName string) bool {
-	if isOvnReady(podAnnotation, nadName) {
+func isDPUReady(podAnnotation map[string]string, annoNadKeyName string) bool {
+	if isOvnReady(podAnnotation, annoNadKeyName) {
 		// check DPU connection status
-		if status, err := util.UnmarshalPodDPUConnStatus(podAnnotation, nadName); err == nil {
+		if status, err := util.UnmarshalPodDPUConnStatus(podAnnotation, annoNadKeyName); err == nil {
 			if status.Status == util.DPUConnectionStatusReady {
 				return true
 			}
@@ -64,7 +64,7 @@ func getPod(podLister corev1listers.PodLister, kclient kubernetes.Interface, nam
 }
 
 func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, kclient kubernetes.Interface,
-	namespace, name, nadName string, annotCond podAnnotWaitCond) (string, map[string]string, error) {
+	namespace, name, annoNadKeyName string, annotCond podAnnotWaitCond) (string, map[string]string, error) {
 	var notFoundCount uint
 
 	for {
@@ -88,7 +88,7 @@ func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, k
 				}
 				// drop through to try again
 			} else if pod != nil {
-				if annotCond(pod.Annotations, nadName) {
+				if annotCond(pod.Annotations, annoNadKeyName) {
 					return string(pod.UID), pod.Annotations, nil
 				}
 			}
@@ -102,7 +102,8 @@ func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, k
 // PodAnnotation2PodInfo creates PodInterfaceInfo from Pod annotations and additional attributes
 func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, podUID string,
 	vfNetdevice, nadName string, netNameInfo util.NetNameInfo) (*PodInterfaceInfo, error) {
-	podAnnotSt, err := util.UnmarshalPodAnnotation(podAnnotation, nadName)
+	annoNadKeyName := util.GetAnnotationKeyFromNadName(nadName, !netNameInfo.IsSecondary)
+	podAnnotSt, err := util.UnmarshalPodAnnotation(podAnnotation, annoNadKeyName)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +128,7 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, po
 		NetNameInfo:          netNameInfo,
 		VfNetdevName:         vfNetdevice,
 		NadName:              nadName,
-		SkipSpoofCheck:       util.SkipSpoofCheckForNAD(podAnnotation, nadName),
+		SkipSpoofCheck:       util.SkipSpoofCheckForNAD(podAnnotation, annoNadKeyName),
 	}
 	return podInterfaceInfo, nil
 }

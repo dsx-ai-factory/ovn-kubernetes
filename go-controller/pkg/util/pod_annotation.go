@@ -107,7 +107,7 @@ type podRoute struct {
 
 // MarshalPodAnnotation returns a JSON-formatted annotation describing the pod's
 // network details
-func MarshalPodAnnotation(pannotations *map[string]string, podInfo *PodAnnotation, netName string) error {
+func MarshalPodAnnotation(pannotations *map[string]string, podInfo *PodAnnotation, annoNadKeyName string) error {
 	annotations := *pannotations
 	if annotations == nil {
 		annotations = make(map[string]string)
@@ -154,7 +154,7 @@ func MarshalPodAnnotation(pannotations *map[string]string, podInfo *PodAnnotatio
 			NextHop: nh,
 		})
 	}
-	podNetworks[netName] = pa
+	podNetworks[annoNadKeyName] = pa
 	bytes, err := json.Marshal(podNetworks)
 	if err != nil {
 		return fmt.Errorf("failed marshaling pod annotation map %v: %v", podNetworks, err)
@@ -269,8 +269,9 @@ func GetAllPodIPs(pod *v1.Pod, netAttachInfo *NetAttachDefInfo) ([]net.IP, error
 		return ips, nil
 	}
 	for nadName := range networkMap {
-		annotation, _ := UnmarshalPodAnnotation(pod.Annotations, nadName)
-		if err == nil && annotation != nil {
+		annoNadKeyName := GetAnnotationKeyFromNadName(nadName, !netAttachInfo.IsSecondary)
+		annotation, _ := UnmarshalPodAnnotation(pod.Annotations, annoNadKeyName)
+		if annotation != nil {
 			// Use the OVN annotation if valid
 			for _, ip := range annotation.IPs {
 				ips = append(ips, ip.IP)
@@ -354,14 +355,14 @@ func GetK8sPodAllNetworks(pod *v1.Pod) ([]*netattachdefapi.NetworkSelectionEleme
 }
 
 // SkipSpoofCheckForNAD checks whether we should skip spoof check for the given NAD
-func SkipSpoofCheckForNAD(annotations map[string]string, nadName string) bool {
+func SkipSpoofCheckForNAD(annotations map[string]string, annoNadKeyName string) bool {
 	skipSpoofCheckForNetworks, ok := annotations[skipSpoofCheckAnnotationName]
 	if !ok {
 		return false
 	}
 	for _, name := range strings.Split(skipSpoofCheckForNetworks, ",") {
 		name = strings.TrimSpace(name)
-		if name == nadName {
+		if name == annoNadKeyName {
 			return true
 		}
 	}
