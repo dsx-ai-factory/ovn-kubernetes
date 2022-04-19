@@ -1517,6 +1517,12 @@ func (mc *OvnMHController) initOvnController(netattachdef *nettypes.NetworkAttac
 	if err != nil {
 		return nil, err
 	}
+
+	nadConf, err := util.GetNadConfig(netattachdef, nadInfo.IsSecondary)
+	if err != nil {
+		return nil, err
+	}
+
 	klog.V(5).Infof("Add Network Attachment Definition %s/%s to nad %s", netattachdef.Namespace, netattachdef.Name, nadInfo.NetName)
 
 	// nadName must be in the correct form for non-default net-attach-def
@@ -1529,7 +1535,7 @@ func (mc *OvnMHController) initOvnController(netattachdef *nettypes.NetworkAttac
 	}
 
 	if !nadInfo.IsSecondary {
-		mc.ovnController.nadInfo.NetAttachDefs.Store(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name), true)
+		mc.ovnController.nadInfo.NetAttachDefs.Store(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name), nadConf)
 		return mc.ovnController, nil
 	}
 
@@ -1547,12 +1553,12 @@ func (mc *OvnMHController) initOvnController(netattachdef *nettypes.NetworkAttac
 			return nil, fmt.Errorf("network attachment definition %s/%s does not share the same CNI config of name %s",
 				netattachdef.Namespace, netattachdef.Name, nadInfo.NetName)
 		} else {
-			oc.nadInfo.NetAttachDefs.Store(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name), true)
+			oc.nadInfo.NetAttachDefs.Store(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name), nadConf)
 			return oc, nil
 		}
 	}
 
-	nadInfo.NetAttachDefs.Store(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name), true)
+	nadInfo.NetAttachDefs.Store(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name), nadConf)
 	return mc.NewOvnController(nadInfo, nil)
 }
 

@@ -221,8 +221,8 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		lsManagerNodeName = types.OVNLocalnetSwitch
 	}
 
-	for nadName, network := range networkMap {
-		oc.delLogicalPort4Nad(pod, nadName, lsManagerNodeName, network)
+	for nadName, podNadInfo := range networkMap {
+		oc.delLogicalPort4Nad(pod, nadName, lsManagerNodeName, podNadInfo.Network)
 	}
 }
 
@@ -462,8 +462,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	klog.V(5).Infof("Pod %s/%s is attached on this network: %s", pod.Namespace, pod.Name, oc.nadInfo.NetName)
-	for nadName, network := range networkMap {
-		err1 := oc.addLogicalPort4Nad(pod, nadName, lsManagerNodeName, network)
+	for nadName, podNadInfo := range networkMap {
+		err1 := oc.addLogicalPort4Nad(pod, nadName, lsManagerNodeName, podNadInfo.Network)
 		if err1 != nil {
 			err = err1
 		}

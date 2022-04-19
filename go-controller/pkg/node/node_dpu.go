@@ -6,9 +6,7 @@ import (
 	"sync"
 	"time"
 
-	netattchdefapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -52,7 +50,7 @@ func (nc *ovnNodeController) podReadyToAddDPU(pod *kapi.Pod, nadName string, pfM
 }
 
 func (nc *ovnNodeController) addDPUPod4Nad(pod *kapi.Pod, dpuCD *util.DPUConnectionDetails, isOvnUpEnabled bool, nadName string,
-	podLister corev1listers.PodLister, kclient kubernetes.Interface) error {
+	nadConf *util.NadConfig, podLister corev1listers.PodLister, kclient kubernetes.Interface) error {
 	podDesc := fmt.Sprintf("pod %s/%s for nad %s", pod.Namespace, pod.Name, nadName)
 	klog.Infof("Adding %s on DPU", podDesc)
 	podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled, string(pod.UID), "",
@@ -61,7 +59,7 @@ func (nc *ovnNodeController) addDPUPod4Nad(pod *kapi.Pod, dpuCD *util.DPUConnect
 		klog.Errorf("Failed to get pod interface information of %s: %v. retrying", podDesc, err)
 		return err
 	}
-	err = nc.addRepPort(pod, dpuCD, podInterfaceInfo, podLister, kclient)
+	err = nc.addRepPort(pod, dpuCD, podInterfaceInfo, nadConf, podLister, kclient)
 	if err != nil {
 		klog.Errorf("Failed to add rep port for %s, %v. retrying", podDesc, err)
 	}
@@ -74,7 +72,7 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 	var servedPods sync.Map
 	// podNadCache stores all the net-attach-defs that the given Pod is attached for this controller,
 	// we assume that Pod's Network Attachment Selection Annotation will not change over time.
-	// key is pod.UUID, value is networkMap
+	// key is pod.UUID, value is networkMap of map[string]*util.PodNadInfo type
 	var podNadCache sync.Map
 
 	klog.Infof("Controller %q for NADs %v is starting Pod watch with following DPU PF MACs: %v", nc.nadInfo.NetName,
@@ -104,10 +102,10 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 
 			// initialize serverCache to be empty
 			servedCache := map[string]*util.DPUConnectionDetails{}
-			for nadName := range networkMap {
+			for nadName, podNadInfo := range networkMap {
 				dpuCD := nc.podReadyToAddDPU(pod, nadName, pfMACs)
 				if dpuCD != nil {
-					err = nc.addDPUPod4Nad(pod, dpuCD, isOvnUpEnabled, nadName, podLister, kclient.KClient)
+					err = nc.addDPUPod4Nad(pod, dpuCD, isOvnUpEnabled, nadName, podNadInfo.NadConfig, podLister, kclient.KClient)
 					if err == nil {
 						servedCache[nadName] = dpuCD
 					}
@@ -126,14 +124,14 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 			}
 			klog.Infof("Update for Pod %s/%s for network %s", newPod.Namespace, newPod.Name, nc.nadInfo.NetName)
 
-			networkMap := v.(map[string]*netattchdefapi.NetworkSelectionElement)
+			networkMap := v.(map[string]*util.PodNadInfo)
 
 			servedCache := map[string]*util.DPUConnectionDetails{}
 			v, ok = servedPods.Load(newPod.UID)
 			if ok {
 				servedCache = v.(map[string]*util.DPUConnectionDetails)
 			}
-			for nadName := range networkMap {
+			for nadName, podNadInfo := range networkMap {
 				podDesc := fmt.Sprintf("pod %s/%s for nad %s", newPod.Namespace, newPod.Name, nadName)
 				var oldDpuCD *util.DPUConnectionDetails
 				v, ok := servedCache[nadName]
@@ -174,7 +172,7 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 						klog.Infof("Adding VF during update because either during Pod Add we failed to add VF or "+
 							"connection details weren't present or the VF Ids changed. Old connection details (%v), "+
 							"New connection details (%v)", oldDpuCD, newDpuCD)
-						err := nc.addDPUPod4Nad(newPod, newDpuCD, isOvnUpEnabled, nadName, podLister, kclient.KClient)
+						err := nc.addDPUPod4Nad(newPod, newDpuCD, isOvnUpEnabled, nadName, podNadInfo.NadConfig, podLister, kclient.KClient)
 						if err == nil {
 							servedCache[nadName] = newDpuCD
 						}
@@ -245,7 +243,8 @@ func (nc *ovnNodeController) updatePodDPUConnStatusWithRetry(kube kube.Interface
 }
 
 // addRepPort adds the representor of the VF to the ovs bridge
-func (nc *ovnNodeController) addRepPort(pod *kapi.Pod, dpuCD *util.DPUConnectionDetails, ifInfo *cni.PodInterfaceInfo, podLister corev1listers.PodLister, kclient kubernetes.Interface) error {
+func (nc *ovnNodeController) addRepPort(pod *kapi.Pod, dpuCD *util.DPUConnectionDetails, ifInfo *cni.PodInterfaceInfo,
+	nadConf *util.NadConfig, podLister corev1listers.PodLister, kclient kubernetes.Interface) error {
 	nadName := ifInfo.NadName
 	podDesc := fmt.Sprintf("pod %s/%s for nad %s", pod.Namespace, pod.Name, nadName)
 	vfRepName, err := util.GetSriovnetOps().GetVfRepresentorDPU(dpuCD.PfId, dpuCD.VfId)
@@ -289,15 +288,10 @@ func (nc *ovnNodeController) addRepPort(pod *kapi.Pod, dpuCD *util.DPUConnection
 		return fmt.Errorf("failed to setup representor port. failed to set link up for interface %s: %v", vfRepName, err)
 	}
 
-	maxNewConnPPS := config.OvnKubeNode.MaxNewConnPPS
-	maxNewConnBurst := config.OvnKubeNode.MaxNewConnBurst
-	if nc.nadInfo.IsSecondary {
-		maxNewConnPPS = nc.nadInfo.MaxNewConnPPS
-		maxNewConnBurst = nc.nadInfo.MaxNewConnBurst
-	}
-	klog.Infof("Adding Limit %v/%v for VF representor %s for pod %s/%s network %s", maxNewConnPPS, maxNewConnBurst, vfRepName, pod.Namespace, pod.Name, ifInfo.NadName)
+	klog.Infof("Adding Limit %v/%v for VF representor %s for %s",
+		nadConf.MaxNewConnPPS, nadConf.MaxNewConnBurst, vfRepName, podDesc)
 	// set the VF rate limit configured for this network. This rate is for the allowed no. of new connections.
-	if err = util.GetSriovnetOps().SetRepresentorVFMissPktRate(vfRepName, maxNewConnPPS, maxNewConnBurst); err != nil {
+	if err = util.GetSriovnetOps().SetRepresentorVFMissPktRate(vfRepName, nadConf.MaxNewConnPPS, nadConf.MaxNewConnBurst); err != nil {
 		_ = nc.delRepPort(dpuCD, vfRepName, nadName, podDesc)
 		return fmt.Errorf("failed to setup Rate limiting  for interface %s: %v", vfRepName, err)
 	}

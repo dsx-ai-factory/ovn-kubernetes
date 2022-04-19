@@ -166,18 +166,17 @@ type NetNameInfo struct {
 
 type NetAttachDefInfo struct {
 	NetNameInfo
-	// net-attach-defs shared the same CNI Conf, key is <Namespace>/<Name> of net-attach-def.
-	// Note that it means they share the same logical switch (subnet cidr/MTU etc), but they might
-	// have different resource requirement (requires or not require VF, or different VF resource set)
+	// net-attach-defs share the same NetConf. so, multiple net-attach-defs share the same logical switch
+	// (subnet cidr, MTU, and so on), but they might have different attachment points (no VF, requires a VF, requires a
+	// VF from a different PF). in the map below, key is <Namespace>/<Name> of net-attach-def and value is the nad
+	// specific configuration (derived from the annotations of the net-attach-def).
 	NetAttachDefs sync.Map
 	NetCidr       string
 	MTU           int
 
-	TopoType        string
-	VlanId          int
-	MaxNewConnPPS   uint
-	MaxNewConnBurst uint
-	ExcludeIPs      []net.IP
+	TopoType   string
+	VlanId     int
+	ExcludeIPs []net.IP
 }
 
 func NewNetAttachDefInfo(netconf *cnitypes.NetConf) (*NetAttachDefInfo, error) {
@@ -201,13 +200,11 @@ func NewNetAttachDefInfo(netconf *cnitypes.NetConf) (*NetAttachDefInfo, error) {
 	prefix := GetNetworkPrefix(netName, !netconf.IsSecondary)
 
 	nadInfo := NetAttachDefInfo{
-		NetCidr:         netconf.NetCidr,
-		MTU:             netconf.MTU,
-		TopoType:        netconf.TopoType,
-		VlanId:          netconf.VlanId,
-		NetNameInfo:     NetNameInfo{netName, prefix, netconf.IsSecondary},
-		MaxNewConnPPS:   netconf.MaxNewConnPPS,
-		MaxNewConnBurst: netconf.MaxNewConnBurst,
+		NetCidr:     netconf.NetCidr,
+		MTU:         netconf.MTU,
+		TopoType:    netconf.TopoType,
+		VlanId:      netconf.VlanId,
+		NetNameInfo: NetNameInfo{netName, prefix, netconf.IsSecondary},
 	}
 
 	if netconf.TopoType == types.LocalnetAttachDefTopoType {
@@ -244,7 +241,6 @@ func NewNetAttachDefInfo(netconf *cnitypes.NetConf) (*NetAttachDefInfo, error) {
 			}
 		}
 	}
-	klog.Infof("NewNetAttachDefInfo: PPS info for  Nad %s is %u/%u", netconf.Name, nadInfo.MaxNewConnPPS, nadInfo.MaxNewConnBurst)
 
 	return &nadInfo, nil
 }

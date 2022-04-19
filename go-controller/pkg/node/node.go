@@ -640,6 +640,13 @@ func (n *OvnNode) initOvnNodeController(netattachdef *nettypes.NetworkAttachment
 		return nil, err
 	}
 
+	nadConf, err := util.GetNadConfig(netattachdef, nadInfo.IsSecondary)
+	if err != nil {
+		return nil, err
+	}
+
+	klog.Infof("NewNetAttachDefInfo: PPS info for nad %s/%s is %u/%u", netattachdef.Namespace, netattachdef.Name, nadConf.MaxNewConnPPS, nadConf.MaxNewConnBurst)
+
 	// nadName must be in the correct form for non-default net-attach-def
 	if nadInfo.IsSecondary {
 		nadName := util.GetNadName(netattachdef.Namespace, netattachdef.Name, !nadInfo.IsSecondary)
@@ -650,7 +657,7 @@ func (n *OvnNode) initOvnNodeController(netattachdef *nettypes.NetworkAttachment
 	}
 
 	if !nadInfo.IsSecondary {
-		n.defaultNodeController.nadInfo.NetAttachDefs.Store(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name), true)
+		n.defaultNodeController.nadInfo.NetAttachDefs.Store(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name), nadConf)
 		return n.defaultNodeController, nil
 	}
 
@@ -667,12 +674,12 @@ func (n *OvnNode) initOvnNodeController(netattachdef *nettypes.NetworkAttachment
 			return nil, fmt.Errorf("network attachment definition %s/%s does not share the same CNI config of name %s",
 				netattachdef.Namespace, netattachdef.Name, nadInfo.NetName)
 		} else {
-			nc.nadInfo.NetAttachDefs.Store(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name), true)
+			nc.nadInfo.NetAttachDefs.Store(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name), nadConf)
 		}
 		return nc, nil
 	}
 
-	nadInfo.NetAttachDefs.Store(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name), true)
+	nadInfo.NetAttachDefs.Store(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name), nadConf)
 	return n.NewOvnNodeController(nadInfo)
 }
 

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	networkattachmentdefinitionapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	kapi "k8s.io/api/core/v1"
@@ -71,18 +72,26 @@ func GetDatapathUUID(datapathName string) (string, error) {
 	return datapath, nil
 }
 
+// Information about a nad associated with a specific pod, including:
+// - nad configuration, currently only MissRateLimitConfig
+// - NetworkSelectionElement representing the nad
+type PodNadInfo struct {
+	*NadConfig
+	Network *networkattachmentdefinitionapi.NetworkSelectionElement
+}
+
 // See if this pod needs to plumb over this given network specified by netconf,
 // and return all the matching NetworkSelectionElement map if any exists.
 //
 // Return value:
 //    bool: if this Pod is on this Network; true or false
-//    map[string]*networkattachmentdefinitionapi.NetworkSelectionElement: map of NetworkSelectionElement that pod is requested
+//    map[string]*PodNadInfo: see above
 //    error:  error in case of failure
 // Note that the same network could exist in the same Pod more than once, but with different net-attach-def name
-// The NetworkSelectionElement map is in the form of map{net_attach_def_name]*networkattachmentdefinitionapi.NetworkSelectionElement
-func IsNetworkOnPod(pod *kapi.Pod, netAttachInfo *NetAttachDefInfo) (bool,
-	map[string]*networkattachmentdefinitionapi.NetworkSelectionElement, error) {
-	nseMap := map[string]*networkattachmentdefinitionapi.NetworkSelectionElement{}
+func IsNetworkOnPod(pod *kapi.Pod, netAttachInfo *NetAttachDefInfo) (bool, map[string]*PodNadInfo, error) {
+	nseMap := map[string]*PodNadInfo{}
+	// default rate limit configuration of the default network
+	nadConf := &NadConfig{MissRateLimitConfig{config.OvnKubeNode.MaxNewConnPPS, config.OvnKubeNode.MaxNewConnBurst}}
 
 	podDesc := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
 	if !netAttachInfo.IsSecondary {
@@ -92,14 +101,14 @@ func IsNetworkOnPod(pod *kapi.Pod, netAttachInfo *NetAttachDefInfo) (bool,
 			return false, nil, fmt.Errorf("failed to get default network for pod %s: %v", podDesc, err)
 		}
 		if defaultNetwork == nil {
-			nseMap[ovntypes.DefaultNetworkName] = nil
+			nseMap[ovntypes.DefaultNetworkName] = &PodNadInfo{nadConf, nil}
 			return true, nseMap, nil
-		} else {
-			if _, ok := netAttachInfo.NetAttachDefs.Load(GetNadKeyName(defaultNetwork.Namespace, defaultNetwork.Name)); !ok {
-				return false, nil, nil
-			}
 		}
-		nseMap[ovntypes.DefaultNetworkName] = defaultNetwork
+		v, ok := netAttachInfo.NetAttachDefs.Load(GetNadKeyName(defaultNetwork.Namespace, defaultNetwork.Name))
+		if !ok {
+			return false, nil, nil
+		}
+		nseMap[ovntypes.DefaultNetworkName] = &PodNadInfo{v.(*NadConfig), defaultNetwork}
 		return true, nseMap, nil
 	}
 
@@ -110,9 +119,9 @@ func IsNetworkOnPod(pod *kapi.Pod, netAttachInfo *NetAttachDefInfo) (bool,
 		return false, nil, err
 	}
 	for _, network := range allNetworks {
-		if _, ok := netAttachInfo.NetAttachDefs.Load(GetNadKeyName(network.Namespace, network.Name)); ok {
+		if v, ok := netAttachInfo.NetAttachDefs.Load(GetNadKeyName(network.Namespace, network.Name)); ok {
 			nadName := GetNadName(network.Namespace, network.Name, false)
-			nseMap[nadName] = network
+			nseMap[nadName] = &PodNadInfo{v.(*NadConfig), network}
 		}
 	}
 	return len(nseMap) != 0, nseMap, nil
