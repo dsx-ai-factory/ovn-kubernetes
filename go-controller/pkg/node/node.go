@@ -546,6 +546,9 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 			if err != nil {
 				return err
 			}
+		} else if err != nil {
+			return fmt.Errorf("failed while checking whether to write CNI config file or not for node %q: %v",
+				node.Name, err)
 		}
 		var nodeIP string
 		nodeIP, err = util.GetNodePrimaryIP(node)
