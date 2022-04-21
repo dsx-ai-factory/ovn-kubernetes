@@ -662,6 +662,7 @@ func (oc *Controller) recordPodEvent(reason string, addErr error, pod *kapi.Pod)
 func (oc *Controller) iterateRetryPods(updateAll bool) {
 	oc.retryPodsLock.Lock()
 	defer oc.retryPodsLock.Unlock()
+	klog.V(5).Infof("iterateRetryPods started for network %s", oc.nadInfo.NetName)
 	now := time.Now()
 	for uid, podEntry := range oc.retryPods {
 		if podEntry.ignore {
@@ -669,7 +670,7 @@ func (oc *Controller) iterateRetryPods(updateAll bool) {
 		}
 
 		pod := podEntry.pod
-		podDesc := fmt.Sprintf("[%s/%s/%s]", pod.UID, pod.Namespace, pod.Name)
+		podDesc := fmt.Sprintf("[%s/%s/%s] uid %s network %s", pod.UID, pod.Namespace, pod.Name, uid, oc.nadInfo.NetName)
 		// it could be that the Pod got deleted, but Pod's DeleteFunc has not been called yet, so don't retry
 		kPod, err := oc.mc.watchFactory.GetPod(pod.Namespace, pod.Name)
 		if err != nil && errors.IsNotFound(err) {
@@ -702,16 +703,20 @@ func (oc *Controller) iterateRetryPods(updateAll bool) {
 			klog.V(5).Infof("%s retry pod not after timer yet, time: %s", podDesc, podTimer)
 		}
 	}
+	klog.V(5).Infof("iterateRetryPods ended (in %v) for network %s", time.Since(now), oc.nadInfo.NetName)
 }
 
 // checkAndDeleteRetryPod deletes a specific entry from the map, if it existed, returns true
 func (oc *Controller) checkAndDeleteRetryPod(uid types.UID) bool {
 	oc.retryPodsLock.Lock()
 	defer oc.retryPodsLock.Unlock()
+	podDesc := fmt.Sprintf("[podUID %s] on network %s", uid, oc.nadInfo.NetName)
 	if _, ok := oc.retryPods[uid]; ok {
+		klog.V(5).Infof("checkAndDeleteRetryPod %s, already exists", podDesc)
 		delete(oc.retryPods, uid)
 		return true
 	}
+	klog.V(5).Infof("checkAndDeleteRetryPod %s", podDesc)
 	return false
 }
 
@@ -720,10 +725,13 @@ func (oc *Controller) checkAndDeleteRetryPod(uid types.UID) bool {
 func (oc *Controller) checkAndSkipRetryPod(uid types.UID) bool {
 	oc.retryPodsLock.Lock()
 	defer oc.retryPodsLock.Unlock()
+	podDesc := fmt.Sprintf("[podUID %s] on network %s", uid, oc.nadInfo.NetName)
 	if entry, ok := oc.retryPods[uid]; ok {
+		klog.V(5).Infof("checkAndSkipRetryPod %s, already exists", podDesc)
 		entry.ignore = true
 		return true
 	}
+	klog.V(5).Infof("checkAndSkipRetryPod %s", podDesc)
 	return false
 }
 
@@ -731,8 +739,12 @@ func (oc *Controller) checkAndSkipRetryPod(uid types.UID) bool {
 func (oc *Controller) unSkipRetryPod(pod *kapi.Pod) {
 	oc.retryPodsLock.Lock()
 	defer oc.retryPodsLock.Unlock()
+	podDesc := fmt.Sprintf("[%s/%s/%s] on network %s", pod.UID, pod.Namespace, pod.Name, oc.nadInfo.NetName)
 	if entry, ok := oc.retryPods[pod.UID]; ok {
+		klog.V(5).Infof("unSkipRetryPod %s, already exists", podDesc)
 		entry.ignore = false
+	} else {
+		klog.V(5).Infof("unSkipRetryPod %s", podDesc)
 	}
 }
 
@@ -741,10 +753,13 @@ func (oc *Controller) unSkipRetryPod(pod *kapi.Pod) {
 func (oc *Controller) initRetryPod(pod *kapi.Pod) {
 	oc.retryPodsLock.Lock()
 	defer oc.retryPodsLock.Unlock()
+	podDesc := fmt.Sprintf("[%s/%s/%s] on network %s", pod.UID, pod.Namespace, pod.Name, oc.nadInfo.NetName)
 	if entry, ok := oc.retryPods[pod.UID]; ok {
 		entry.timeStamp = time.Now()
 		entry.ignore = true
+		klog.V(5).Infof("initRetryPod %s, already exists", podDesc)
 	} else {
+		klog.V(5).Infof("initRetryPod %s", podDesc)
 		oc.retryPods[pod.UID] = &retryEntry{pod, time.Now(), 1, true}
 	}
 }
@@ -755,9 +770,12 @@ func (oc *Controller) addRetryPods(pods []kapi.Pod) {
 	defer oc.retryPodsLock.Unlock()
 	for _, pod := range pods {
 		pod := pod
+		podDesc := fmt.Sprintf("[%s/%s/%s] on network %s", pod.UID, pod.Namespace, pod.Name, oc.nadInfo.NetName)
 		if entry, ok := oc.retryPods[pod.UID]; ok {
+			klog.V(5).Infof("addRetryPods %s, already exists", podDesc)
 			entry.timeStamp = time.Now()
 		} else {
+			klog.V(5).Infof("addRetryPods %s", podDesc)
 			oc.retryPods[pod.UID] = &retryEntry{&pod, time.Now(), 1, false}
 		}
 	}
@@ -850,6 +868,8 @@ func (oc *Controller) WatchPods() {
 						pod.Namespace, pod.Name, pod.Spec.NodeName, err)
 				}
 			}
+			podDesc := fmt.Sprintf("[%s/%s/%s] on network %s", pod.UID, pod.Namespace, pod.Name, oc.nadInfo.NetName)
+			klog.V(5).Infof("Pod %s add event handler", podDesc)
 			oc.initRetryPod(pod)
 			if !oc.ensurePod(nil, pod, true) {
 				oc.unSkipRetryPod(pod)
@@ -875,6 +895,8 @@ func (oc *Controller) WatchPods() {
 					podNs, podName)
 				return
 			}
+			podDesc := fmt.Sprintf("[%s/%s/%s] network %s", pod.UID, pod.Namespace, pod.Name, oc.nadInfo.NetName)
+			klog.V(5).Infof("Pod %s update event handler", podDesc)
 			if pod.Spec.HostNetwork && (oldPod.Spec.NodeName != pod.Spec.NodeName) && !oc.nadInfo.IsSecondary {
 				if util.PodScheduled(oldPod) {
 					if err := oc.delHostNetworkPodFromNamespace(oldPod); err != nil {
@@ -898,6 +920,8 @@ func (oc *Controller) WatchPods() {
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
+			podDesc := fmt.Sprintf("[%s/%s/%s] network %s", pod.UID, pod.Namespace, pod.Name, oc.nadInfo.NetName)
+			klog.V(5).Infof("Pod %s delete event handler", podDesc)
 			if pod.Spec.HostNetwork && util.PodScheduled(pod) && !oc.nadInfo.IsSecondary {
 				if err := oc.delHostNetworkPodFromNamespace(pod); err != nil {
 					klog.Warningf("Failed to delete host network pod %s/%s's IPs on node %s from the namespace address_set: %v",
@@ -1338,6 +1362,8 @@ func (oc *Controller) WatchNodes() {
 			if err != nil {
 				klog.Errorf("Unable to list existing pods on node: %s, existing pods on this node may not function")
 			} else {
+				klog.V(5).Infof("Adding %d Pods to RetryPods Map from node %s for network %s",
+					len(pods.Items), node.Name, oc.nadInfo.NetName)
 				oc.addRetryPods(pods.Items)
 				oc.requestRetryPods()
 			}

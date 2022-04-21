@@ -452,16 +452,16 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	if oc.lsManager.IsNonHostSubnetSwitch(lsManagerNodeName) {
 		return nil
 	}
-
+	podDesc := fmt.Sprintf("[%s/%s/%s]", pod.UID, pod.Namespace, pod.Name)
 	on, networkMap, err := util.IsNetworkOnPod(pod, oc.nadInfo)
 	if err != nil || !on {
 		// the pod is not attached to this specific network
-		klog.V(5).Infof("Pod %s/%s is not attached on this overlay network controller %s error (%v) ", pod.Namespace, pod.Name,
+		klog.V(5).Infof("Pod %s is not attached on this overlay network controller %s error (%v) ", podDesc,
 			oc.nadInfo.NetName, err)
 		return nil
 	}
 
-	klog.V(5).Infof("Pod %s/%s is attached on this network: %s", pod.Namespace, pod.Name, oc.nadInfo.NetName)
+	klog.V(5).Infof("Pod %s is attached on this network: %s", podDesc, oc.nadInfo.NetName)
 	for nadName, podNadInfo := range networkMap {
 		err1 := oc.addLogicalPort4Nad(pod, nadName, lsManagerNodeName, podNadInfo.Network)
 		if err1 != nil {
@@ -473,10 +473,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, lsManagerNodeName string,
 	network *networkattachmentdefinitionapi.NetworkSelectionElement) (err error) {
+	podDesc := fmt.Sprintf("%s/%s/%s", pod.UID, pod.Namespace, pod.Name)
 	// Keep track of how long syncs take.
 	start := time.Now()
 	defer func() {
-		klog.Infof("[%s/%s] addLogicalPort for network %s took %v", pod.Namespace, pod.Name, nadName, time.Since(start))
+		klog.Infof("[%s] addLogicalPort for network %s took %v", podDesc, nadName, time.Since(start))
 	}()
 
 	logicalSwitch := oc.nadInfo.Prefix + lsManagerNodeName
@@ -486,7 +487,7 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, lsManagerNodeNa
 	}
 
 	portName := util.GetLogicalPortName(pod.Namespace, pod.Name, nadName, !oc.nadInfo.IsSecondary)
-	klog.Infof("[%s/%s] creating logical port for pod on switch %s for network %s", pod.Namespace, pod.Name, logicalSwitch, nadName)
+	klog.Infof("[%s] creating logical port for pod on switch %s for network %s", podDesc, logicalSwitch, nadName)
 
 	var podMac net.HardwareAddr
 	var podIfAddrs []*net.IPNet
@@ -604,7 +605,7 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, lsManagerNodeNa
 
 		releaseIPs = true
 		if network != nil && network.MacRequest != "" {
-			klog.V(5).Infof("Pod %s/%s for network %s requested custom MAC: %s", pod.Namespace, pod.Name,
+			klog.V(5).Infof("Pod %s for network %s requested custom MAC: %s", podDesc,
 				nadName, network.MacRequest)
 			podMac, err = net.ParseMAC(network.MacRequest)
 			if err != nil {
@@ -620,14 +621,14 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, lsManagerNodeNa
 		var nodeSubnets []*net.IPNet
 		if nodeSubnets = oc.lsManager.GetSwitchSubnets(lsManagerNodeName); nodeSubnets == nil {
 			return fmt.Errorf("cannot retrieve subnet for assigning gateway routes for pod %s, node: %s, network %s",
-				pod.Name, lsManagerNodeName, nadName)
+				podDesc, lsManagerNodeName, nadName)
 		}
 		err = oc.addRoutesGatewayIP(pod, &podAnnotation, nodeSubnets, network)
 		if err != nil {
 			return err
 		}
-		klog.V(5).Infof("Annotation values for network %s: ip=%v ; mac=%s ; gw=%s\n",
-			nadName, podIfAddrs, podMac, podAnnotation.Gateways)
+		klog.V(5).Infof("Annotation values for pod %s network %s: ip=%v ; mac=%s ; gw=%s\n",
+			podDesc, nadName, podIfAddrs, podMac, podAnnotation.Gateways)
 
 		if err = oc.updatePodAnnotationWithRetry(pod, &podAnnotation, nadName); err != nil {
 			return err
