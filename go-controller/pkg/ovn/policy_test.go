@@ -231,6 +231,7 @@ func (n kNetworkPolicy) getPolicyData(networkPolicy *knet.NetworkPolicy, policyP
 				shouldBeLogged,
 				map[string]string{
 					l4MatchACLExtIdKey:     fmt.Sprintf("tcp && tcp.dst==%d", v),
+					l4MatchFusedExtIdKey:   "true",
 					ipBlockCIDRACLExtIdKey: "false",
 					namespaceACLExtIdKey:   networkPolicy.Namespace,
 					policyACLExtIdKey:      networkPolicy.Name,
@@ -285,6 +286,7 @@ func (n kNetworkPolicy) getPolicyData(networkPolicy *knet.NetworkPolicy, policyP
 				shouldBeLogged,
 				map[string]string{
 					l4MatchACLExtIdKey:     fmt.Sprintf("tcp && tcp.dst==%d", v),
+					l4MatchFusedExtIdKey:   "true",
 					ipBlockCIDRACLExtIdKey: "false",
 					namespaceACLExtIdKey:   networkPolicy.Namespace,
 					policyACLExtIdKey:      networkPolicy.Name,

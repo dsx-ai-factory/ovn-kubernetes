@@ -438,6 +438,8 @@ func (oc *Controller) Run(nodeName string) error {
 	if !oc.nadInfo.IsSecondary {
 		// WatchNetworkPolicy depends on WatchPods and WatchNamespaces
 		oc.WatchNetworkPolicy()
+		// Clean up stale L4 network policies.
+		oc.CleanStaleNetworkPolicy()
 
 		if config.OVNKubernetesFeature.EnableEgressIP {
 			oc.WatchEgressNodes()
@@ -479,6 +481,7 @@ func (oc *Controller) Run(nodeName string) error {
 	} else {
 		if oc.nadInfo.IsSecondary && config.OVNKubernetesFeature.EnableMultiNetworkPolicy {
 			oc.multiNetworkPolicyHandler = oc.WatchMultiNetworkPolicy()
+			oc.CleanStaleNetworkPolicy()
 		}
 		klog.Infof("Completing all the Watchers for network %s took %v", oc.nadInfo.NetName, time.Since(start))
 	}
@@ -970,6 +973,56 @@ func (oc *Controller) WatchMultiNetworkPolicy() *factory.Handler {
 	}, oc.syncMultiNetworkPolicies)
 	klog.Infof("Bootstrapping existing multi network policies and cleaning stale policies took %v", time.Since(start))
 	return handler
+}
+
+func (oc *Controller) CleanStaleNetworkPolicy() {
+	start := time.Now()
+	klog.V(5).Infof("Cleaning up stale OVN ACLs that are left behind after L4 Port consolidation")
+	// now that we have added all the OVN ACLs with optimization, it is time to remove the stale OVN
+	// ACL entries from the database
+	network_name := ""
+	if oc.nadInfo.IsSecondary {
+		network_name = oc.nadInfo.NetName
+	}
+	// want ACLs configured for network_name and that don't have l4fused key
+	eqExtIds := map[string]string{
+		"network_name":       network_name,
+		l4MatchFusedExtIdKey: "",
+	}
+	// want ACLs with l4Match is present and is not set to "None"
+	notEqExtIds := map[string]string{
+		l4MatchACLExtIdKey: noneMatch,
+	}
+	staleACLs, err := libovsdbops.FindACLsByExternalIDExtended(oc.mc.nbClient, eqExtIds, notEqExtIds)
+	if err != nil {
+		klog.Warningf("Failed to retrieve stale OVN ACL entries that wre not optimized " +
+			"for L4 Ports consolidation: %v, err")
+	} else {
+		// it could be that delete all the acls in one go might fail for various reasons,
+		// so lets try to delete one at a time so that we can remove as many stale acls
+		// as possible.
+		klog.V(5).Infof("Number of staleACLS to be cleaned is %d", len(staleACLs))
+		for _, staleACL := range staleACLs {
+			staleACL := staleACL
+			nsName := staleACL.ExternalIDs[namespaceACLExtIdKey]
+			policyName := staleACL.ExternalIDs[policyACLExtIdKey]
+			pgName := fmt.Sprintf("%s_%s", nsName, policyName)
+			pgName = oc.nadInfo.NetNameInfo.Prefix + hashedPortGroup(pgName)
+			aclDesc := fmt.Sprintf("stale ACL %s/%s/%s in port group %s", staleACL.UUID, nsName, policyName, pgName)
+			klog.V(5).Infof("About to delete %s", aclDesc)
+			ops, err := libovsdbops.DeleteACLsFromPortGroupOps(oc.mc.nbClient, nil, pgName, &staleACL)
+			if err != nil {
+				klog.Warningf("Failed to get ops to delete %s: %v", aclDesc, err)
+				continue
+			}
+			_, err = libovsdbops.TransactAndCheck(oc.mc.nbClient, ops)
+			if err != nil {
+				klog.Warningf("Failed to delete %s: %v", aclDesc, err)
+				continue
+			}
+		}
+	}
+	klog.V(5).Infof("Completed cleaning up stale OVN ACLs in %v", time.Since(start))
 }
 
 // WatchNetworkPolicy starts the watching of network policy resource and calls

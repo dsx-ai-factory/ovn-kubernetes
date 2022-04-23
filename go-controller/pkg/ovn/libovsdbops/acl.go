@@ -118,6 +118,32 @@ func FindACLsByExternalID(nbClient libovsdbclient.Client, externalIDs map[string
 	return findACLsByPredicate(nbClient, ACLLookupFcn)
 }
 
+// FindACLsByExternalIDExtended finds acls such that it satifies constraints in eqExtIds and notEqExtIds.
+// All the constraints need to satisfy for the match to succeed.
+func FindACLsByExternalIDExtended(nbClient libovsdbclient.Client, eqExtIds, notEqExtIds map[string]string) ([]nbdb.ACL, error) {
+	ACLLookupFcn := func(item *nbdb.ACL) bool {
+		for k, v := range eqExtIds {
+			itemVal, ok := item.ExternalIDs[k]
+			if ok && itemVal != v {
+				return false
+			} else if !ok && v != "" {
+				return false
+			}
+		}
+		for k, v := range notEqExtIds {
+			itemVal, ok := item.ExternalIDs[k]
+			if ok && itemVal == v {
+				return false
+			} else if !ok {
+				return false
+			}
+		}
+		return true
+	}
+
+	return findACLsByPredicate(nbClient, ACLLookupFcn)
+}
+
 func ensureACLUUID(acl *nbdb.ACL) {
 	if acl.UUID == "" {
 		acl.UUID = BuildNamedUUID()

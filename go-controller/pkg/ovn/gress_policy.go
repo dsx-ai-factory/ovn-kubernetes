@@ -470,6 +470,9 @@ func (gp *gressPolicy) buildACLAllow(match, l4Match string, ipBlockCIDR int, acl
 		policyTypeACLExtIdKey:  string(gp.policyType),
 		policyTypeNum:          policyTypeIndex,
 	}
+	if l4Match != noneMatch {
+		externalIds[l4MatchFusedExtIdKey] = "true"
+	}
 	if gp.netAttachInfo.IsSecondary {
 		externalIds["network_name"] = gp.netAttachInfo.NetName
 	}
