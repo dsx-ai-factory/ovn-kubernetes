@@ -576,6 +576,17 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		nadInfo, _ := util.NewNetAttachDefInfo(defaultNetConf)
 		nc, _ := n.NewOvnNodeController(nadInfo)
 
+		// Mark default controller to be "added" so that the other default network net-attach-def
+		// won't start pod watcher
+		nc.added = true
+
+		if config.OVNKubernetesFeature.EnableMultiNetwork {
+			n.watchNetworkAttachmentDefinitions()
+		}
+
+		// Only start default network Pod watcher after other default net-attach-defs are added.
+		// This is needed to correctly determine if a pod is scheduled on the default network
+		// if the pod's default network is defined by v1.multus-cni.io/default-network annotation.
 		if config.OvnKubeNode.Mode == types.NodeModeDPU {
 			// Get all the PFMACs on the DPU Host
 			pfMACs, err := util.GetAllDPUHostPFMACAddress()
@@ -583,11 +594,6 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 				return fmt.Errorf("failed to get the MAC address for all the PFs on the host: %v", err)
 			}
 			nc.watchPodsDPU(n.ovnUpEnabled, pfMACs)
-		}
-		nc.added = true
-
-		if config.OVNKubernetesFeature.EnableMultiNetwork {
-			n.watchNetworkAttachmentDefinitions()
 		}
 	}
 
