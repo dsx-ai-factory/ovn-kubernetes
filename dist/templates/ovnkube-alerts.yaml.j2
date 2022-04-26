@@ -547,6 +547,19 @@ spec:
          Pod ovn-kubernetes/ {{ $labels.pod }} vault-agent container
          is restarting {{ printf "%.2f" $value }} times / 5 minutes
 
+    - alert: OvsInSwBytesTooHigh
+      expr: |
+        rate(ovs_vswitchd_interface_in_sw_bytes{namespace="ovn-kubernetes"}[15m]) / 1024 / 1024 > 10
+      for: 10m
+      labels:
+       severity: critical
+       pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
+      annotations:
+       message: |
+         Noticed higher than 10MiB/s in-software rates on the host with pod ovn-kubernetes/ {{ $labels.pod }}
+         instance {{ $labels.instance }} port {{ $labels.port }} interface {{ $labels.interface }} for longer than 10m
+
     - alert: OvsDBdbSize
       expr: |
         rate(ovs_ovsdb_db_size_bytes{namespace="ovn-kubernetes", job="ovnkube-node"}[15m]) * 5 * 60 / 1024 / 1024 > 1
