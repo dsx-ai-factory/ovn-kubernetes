@@ -626,6 +626,7 @@ var _ = Describe("Config Operations", func() {
 				{ovntest.MustParseIPNet("11.132.0.0/14"), 23},
 			}))
 			gomega.Expect(Default.MonitorAll).To(gomega.BeFalse())
+			gomega.Expect(Default.OfctrlWaitBeforeClear).To(gomega.Equal(5000))
 
 			return nil
 		}
@@ -668,6 +669,7 @@ var _ = Describe("Config Operations", func() {
 			"-enable-hybrid-overlay",
 			"-hybrid-overlay-cluster-subnets=11.132.0.0/14/23",
 			"-monitor-all=false",
+			"-ofctrl-wait-before-clear=5000",
 		}
 		err = app.Run(cliArgs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
