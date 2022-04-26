@@ -301,7 +301,7 @@ spec:
          Pod ovn-kubernetes/ {{ $labels.pod }} {{ $labels.logfile_name }} file size is
          increasing {{ printf "%.2f" $value }} Mb / 5 minutes
 
-    - alert: OvnNBDBStale
+    - alert: OvnKubeManagerStale
       expr: time() - max(ovnkube_master_nb_e2e_timestamp) > 120
       for: 4m
       labels:
@@ -311,7 +311,7 @@ spec:
        message: |
          ovn-kubernetes has not written anything to the northbound database for too long
 
-    - alert: OvnSBDBStale
+    - alert: OvnNorthdStale
       expr: max(ovnkube_master_nb_e2e_timestamp) - max(ovnkube_master_sb_e2e_timestamp) > 120
       for: 4m
       labels:
@@ -678,3 +678,25 @@ spec:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that
          vtep0 interface MTU value is {{ $value }}
+
+    - alert: SdnMutatorContainerNotRunning
+      expr: |
+        kube_pod_container_status_running{namespace="sdn-mutator", container="mutator"} and
+        (kube_pod_container_status_running{namespace="sdn-mutator", container="mutator"} ! = 1)
+      for: 5m
+      labels:
+       severity: warning
+      annotations:
+       message: |
+         sdn-mutator/ {{ $labels.pod }} pod mutator container is in not running state
+
+    - alert: SdnMutatorVaultAgentContainerNotRunning
+      expr: |
+        kube_pod_container_status_running{namespace="sdn-mutator", container="vault-agent"} and
+        (kube_pod_container_status_running{namespace="sdn-mutator", container="vault-agent"} != 1)
+      for: 5m
+      labels:
+       severity: warning
+      annotations:
+       message: |
+         sdn-mutator/ {{ $labels.pod }} pod vault-agent container is in not running state
