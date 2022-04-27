@@ -37,6 +37,7 @@ OVN_ACL_LOGGING_RATE_LIMIT=""
 OVN_MASTER_COUNT=""
 OVN_REMOTE_PROBE_INTERVAL=""
 OVN_MONITOR_ALL="false"
+OVN_OFCTRL_WAIT_BEFORE_CLEAR=""
 OVN_ENABLE_LFLOW_CACHE="false"
 OVN_LFLOW_CACHE_LIMIT=""
 OVN_LFLOW_CACHE_LIMIT_KB=""
@@ -90,6 +91,9 @@ while [ "$1" != "" ]; do
     ;;
   --ovn-monitor-all)
     OVN_MONITOR_ALL=$VALUE
+    ;;
+  --ovn-ofctrl-wait-before-clear)
+    OVN_OFCTRL_WAIT_BEFORE_CLEAR=$VALUE
     ;;
   --ovn-enable-lflow-cache)
     OVN_ENABLE_LFLOW_CACHE=$VALUE
@@ -351,6 +355,8 @@ ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-"100000"}
 echo "ovn_remote_probe_interval: ${ovn_remote_probe_interval}"
 ovn_monitor_all=${OVN_MONITOR_ALL}
 echo "ovn_monitor_all: ${ovn_monitor_all}"
+ovn_ofctrl_wait_before_clear=${OVN_OFCTRL_WAIT_BEFORE_CLEAR}
+echo "ovn_ofctrl_wait_before_clear: ${ovn_ofctrl_wait_before_clear}"
 ovn_enable_lflow_cache=${OVN_ENABLE_LFLOW_CACHE}
 echo "ovn_enable_lflow_cache: ${ovn_enable_lflow_cache}"
 ovn_lflow_cache_limit=${OVN_LFLOW_CACHE_LIMIT}
@@ -416,6 +422,7 @@ ovn_image=${image} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
   ovn_monitor_all=${ovn_monitor_all} \
+  ovn_ofctrl_wait_before_clear=${ovn_ofctrl_wait_before_clear} \
   ovn_enable_lflow_cache=${ovn_enable_lflow_cache} \
   ovn_lflow_cache_limit=${ovn_lflow_cache_limit} \
   ovn_lflow_cache_limit_kb=${ovn_lflow_cache_limit_kb} \
