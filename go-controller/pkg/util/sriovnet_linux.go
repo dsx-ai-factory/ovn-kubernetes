@@ -118,9 +118,13 @@ func (defaultSriovnetOps) SetRepresentorVFMissPktRate(netdev string, maxPPS, max
 
 // Get the configured rate and Burst
 func (defaultSriovnetOps) GetRepresentorVFMissPktRate(netdev string) (uint64, uint64, error) {
-	_, err := sriovnet.GetRepresentorPortFlavour(netdev)
+	flavor, err := sriovnet.GetRepresentorPortFlavour(netdev)
 	if err != nil {
 		return 0, 0, fmt.Errorf("unknown port flavour for netdev %s. %v", netdev, err)
+	}
+	// connection rate-limiting is supported only on PF and VF representors.
+	if flavor != sriovnet.PORT_FLAVOUR_PCI_PF && flavor != sriovnet.PORT_FLAVOUR_PCI_VF {
+		return 0, 0, nil
 	}
 	sysfsVfMissPktRateFile := filepath.Join(NetSysDir, netdev, "rep_config", "miss_rl_cfg")
 	_, err = utilfs.Fs.Stat(sysfsVfMissPktRateFile)
