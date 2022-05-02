@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -157,7 +158,7 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 						if err != nil {
 							klog.Errorf("Failed to get old VF Representor for %s, dpuConnDetail %+v Representor port may have been deleted", podDesc, oldDpuCD, err)
 						} else {
-							err = nc.delRepPort(oldDpuCD, vfRepName, nadName, podDesc)
+							err = nc.delRepPort(oldPod, oldDpuCD, vfRepName, nadName, podDesc)
 							if err != nil {
 								klog.Errorf("Failed to delete VF representor for %s: %v", podDesc, err)
 							}
@@ -206,7 +207,7 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 					klog.Errorf("Failed to get VF Representor for %s, dpuConnDetail %+v. Representor port may have been deleted", podDesc, dpuCD, err)
 					continue
 				}
-				err = nc.delRepPort(dpuCD, vfRepName, nadName, podDesc)
+				err = nc.delRepPort(pod, dpuCD, vfRepName, nadName, podDesc)
 				if err != nil {
 					klog.Errorf("Failed to delete VF representor for %s: %v", podDesc, err)
 				}
@@ -259,7 +260,7 @@ func (nc *ovnNodeController) addRepPort(pod *kapi.Pod, dpuCD *util.DPUConnection
 	err = cni.ConfigureOVS(ctx, pod.Namespace, pod.Name, vfRepName, ifInfo, dpuCD.SandboxId, podLister, kclient)
 	if err != nil {
 		// Note(adrianc): we are lenient with cleanup in this method as pod is going to be retried anyway.
-		_ = nc.delRepPort(dpuCD, vfRepName, nadName, podDesc)
+		_ = nc.delRepPort(pod, dpuCD, vfRepName, nadName, podDesc)
 		return err
 	}
 	klog.Infof("Port %s added to bridge br-int", vfRepName)
@@ -267,24 +268,24 @@ func (nc *ovnNodeController) addRepPort(pod *kapi.Pod, dpuCD *util.DPUConnection
 	// set the Pod interface's MAC address on the corresponding VF Port
 	err = util.GetSriovnetOps().SetRepresentorPeerMacAddress(vfRepName, ifInfo.MAC)
 	if err != nil {
-		_ = nc.delRepPort(dpuCD, vfRepName, nadName, podDesc)
+		_ = nc.delRepPort(pod, dpuCD, vfRepName, nadName, podDesc)
 		return fmt.Errorf("failed to set the MAC address %s on VF reprentor %s: %v",
 			ifInfo.MAC.String(), vfRepName, err)
 	}
 
 	link, err := util.GetNetLinkOps().LinkByName(vfRepName)
 	if err != nil {
-		_ = nc.delRepPort(dpuCD, vfRepName, nadName, podDesc)
+		_ = nc.delRepPort(pod, dpuCD, vfRepName, nadName, podDesc)
 		return fmt.Errorf("failed to get link device for interface %s: %v", vfRepName, err)
 	}
 
 	if err = util.GetNetLinkOps().LinkSetMTU(link, ifInfo.MTU); err != nil {
-		_ = nc.delRepPort(dpuCD, vfRepName, nadName, podDesc)
+		_ = nc.delRepPort(pod, dpuCD, vfRepName, nadName, podDesc)
 		return fmt.Errorf("failed to setup representor port. failed to set MTU %d for interface %s: %v", ifInfo.MTU, vfRepName, err)
 	}
 
 	if err = util.GetNetLinkOps().LinkSetUp(link); err != nil {
-		_ = nc.delRepPort(dpuCD, vfRepName, nadName, podDesc)
+		_ = nc.delRepPort(pod, dpuCD, vfRepName, nadName, podDesc)
 		return fmt.Errorf("failed to setup representor port. failed to set link up for interface %s: %v", vfRepName, err)
 	}
 
@@ -292,24 +293,45 @@ func (nc *ovnNodeController) addRepPort(pod *kapi.Pod, dpuCD *util.DPUConnection
 		nadConf.MaxNewConnPPS, nadConf.MaxNewConnBurst, vfRepName, podDesc)
 	// set the VF rate limit configured for this network. This rate is for the allowed no. of new connections.
 	if err = util.GetSriovnetOps().SetRepresentorVFMissPktRate(vfRepName, nadConf.MaxNewConnPPS, nadConf.MaxNewConnBurst); err != nil {
-		_ = nc.delRepPort(dpuCD, vfRepName, nadName, podDesc)
+		_ = nc.delRepPort(pod, dpuCD, vfRepName, nadName, podDesc)
 		return fmt.Errorf("failed to setup Rate limiting  for interface %s: %v", vfRepName, err)
 	}
-
+	// Configure XDP for this network
+	if nc.nadInfo.XDPService {
+		klog.Infof("Setting up XDP service for pod %s/%s network %s", pod.Namespace, pod.Name, ifInfo.NadName)
+		gw := nc.gateway.(*gateway)
+		// Check if the (localnet) patch port is in place
+		gwReady, _ := gw.readyFunc()
+		if !gwReady {
+			_ = nc.delRepPort(pod, dpuCD, vfRepName, nadName, podDesc)
+			return fmt.Errorf("failed to setup XDP, gateway not ready: %v", err)
+		}
+		if config.OvnKubeNode.IsPrimaryDPU {
+			gw = nc.node.gateway.(*gateway)
+		}
+		// If this pod needs Syn-Flooding mitigation on the DPU (to protect DPU cores)
+		// by adding a bump-in-the-path kind of service before signalling that pod as ready.
+		if err = SetupXDPServiceForInterface(&ifInfo.PodAnnotation, nc.nadInfo, nc.gateway.(*gateway), gw); err != nil {
+			_ = nc.delRepPort(pod, dpuCD, vfRepName, nadName, podDesc)
+			return fmt.Errorf("failed to setup XDP for network: %v", err)
+		}
+	} else {
+		klog.Infof("XDP not needed for pod %s/%s network %s", pod.Namespace, pod.Name, ifInfo.NadName)
+	}
 	// Update connection-status annotation
 	// TODO(adrianc): we should update Status in case of error as well
 	connStatus := util.DPUConnectionStatus{Status: util.DPUConnectionStatusReady, Reason: ""}
 	err = nc.updatePodDPUConnStatusWithRetry(nc.node.Kube, pod, &connStatus, ifInfo.NadName)
 	if err != nil {
 		_ = util.GetNetLinkOps().LinkSetDown(link)
-		_ = nc.delRepPort(dpuCD, vfRepName, nadName, podDesc)
+		_ = nc.delRepPort(pod, dpuCD, vfRepName, nadName, podDesc)
 		return fmt.Errorf("failed to setup representor port. failed to set pod annotations. %v", err)
 	}
 	return nil
 }
 
 // delRepPort delete the representor of the VF from the ovs bridge
-func (nc *ovnNodeController) delRepPort(dpuCD *util.DPUConnectionDetails, vfRepName, nadName, podDesc string) error {
+func (nc *ovnNodeController) delRepPort(pod *kapi.Pod, dpuCD *util.DPUConnectionDetails, vfRepName, nadName, podDesc string) error {
 	//TODO(adrianc): handle: clearPodBandwidth(pr.SandboxID), pr.deletePodConntrack()
 	klog.Infof("Deleting VF representor %s for %s", vfRepName, podDesc)
 	ifExists, sandbox, networkName, err := util.GetOVSPortPodInfo(vfRepName)
@@ -325,6 +347,26 @@ func (nc *ovnNodeController) delRepPort(dpuCD *util.DPUConnectionDetails, vfRepN
 	}
 	if networkName != nadName {
 		return fmt.Errorf("OVS port %s was added for nad (%s), expecting (%s)", vfRepName, networkName, nadName)
+	}
+	// Remove XDP xonfigurationfor this network
+	if nc.nadInfo.XDPService {
+		klog.Infof("Removing XDP service for pod %s/%s network %s", pod.Namespace, pod.Name, nadName)
+		gw := nc.gateway.(*gateway)
+		if config.OvnKubeNode.IsPrimaryDPU {
+			gw = nc.node.gateway.(*gateway)
+		}
+		netAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
+		if err == nil {
+			// If this pod needs Syn-Flooding mitigation on the DPU (to protect DPU cores)
+			// by adding a bump-in-the-path kind of service before signalling that pod as ready.
+			if err = TeardownXDPServiceForInterface(netAnnotation, nc.nadInfo, nc.gateway.(*gateway), gw); err != nil {
+				return fmt.Errorf("failed to tear down XDP: %v", err)
+			}
+		} else {
+			klog.Infof("Failed to get pod annotation for %s[%s] (%v): %v", nc.nadInfo.NetName, nadName, pod.Annotations, err)
+		}
+	} else {
+		klog.Infof("XDP service not used for pod %s/%s network %s", pod.Namespace, pod.Name, nadName)
 	}
 
 	// Set link down for representor port

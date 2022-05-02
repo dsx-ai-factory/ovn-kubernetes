@@ -351,7 +351,9 @@ func (c *openflowManager) Run(stopChan <-chan struct{}) {
 					continue
 				}
 			}
-			c.syncFlows()
+			if c.flowCache != nil {
+				c.syncFlows()
+			}
 		case <-c.flowChan:
 			c.syncFlows()
 		case <-stopChan:
@@ -368,10 +370,24 @@ func checkPorts(bridge *bridgeConfiguration) error {
 		return errors.Wrapf(err, "Failed to get ofport of %s, stderr: %q", bridge.patchPort, stderr)
 
 	}
+	// For XDP gateway the localnet patch port may be deleted and recreated as needed. So, we can't
+	// always expect the ofPortPatch to agree. If the ofPortPatch changes we just check if there
+	// are any flows using the ofPortPatch and error out if so; i.e. the localnet is deleted
+	// but flows using the localnet port are still around.
+	// However, if the of ports disagree, but there are no flows that use the old of port,
+	// then it is not an error.
+	// This assumes ofPortPhys doesn't change, which we'll still consider as fatal.
+	// For the N/S gateway we should not have a situation where the patch's OF port changes,
+	// so will make this check specific to localnet ports.
 	if bridge.ofPortPatch != curOfportPatch {
-		klog.Errorf("Fatal error: patch port %s ofport changed from %s to %s",
-			bridge.patchPort, bridge.ofPortPatch, curOfportPatch)
-		os.Exit(1)
+		// XXX- Maybe, use gateway type
+		if strings.Contains(bridge.patchPort, "localnet_port") {
+			xdpCheckPatchPort(bridge.bridgeName, bridge.ofPortPhys, bridge.patchPort, bridge.ofPortPatch, curOfportPatch)
+		} else {
+			klog.Errorf("Fatal error: patch port %s ofport changed from %s to %s",
+				bridge.patchPort, bridge.ofPortPatch, curOfportPatch)
+			os.Exit(1)
+		}
 	}
 
 	// it could be that someone removed the physical interface and added it back on the OVS host

@@ -366,14 +366,14 @@ var _ = Describe("Node DPU tests", func() {
 
 		It("Attemps to remove VF representor of another sandbox from OVS, return failure", func() {
 			checkOVSPortPodInfo(execMock, vfRep, true, "15", scd.SandboxId+"1", types.DefaultNetworkName)
-			err := nc.delRepPort(&scd, vfRep, types.DefaultNetworkName, podDesc)
+			err := nc.delRepPort(&pod, &scd, vfRep, types.DefaultNetworkName, podDesc)
 			Expect(err).To(HaveOccurred())
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 		})
 
 		It("Attemps to remove VF representor of the same sandbox but different network from OVS, return failure", func() {
 			checkOVSPortPodInfo(execMock, vfRep, true, "15", scd.SandboxId, "non-default")
-			err := nc.delRepPort(&scd, vfRep, types.DefaultNetworkName, podDesc)
+			err := nc.delRepPort(&pod, &scd, vfRep, types.DefaultNetworkName, podDesc)
 			Expect(err).To(HaveOccurred())
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 		})
@@ -385,7 +385,7 @@ var _ = Describe("Node DPU tests", func() {
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 --if-exists del-port br-int %s", "pf0vf9"),
 			})
-			err := nc.delRepPort(&scd, vfRep, types.DefaultNetworkName, podDesc)
+			err := nc.delRepPort(&pod, &scd, vfRep, types.DefaultNetworkName, podDesc)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 		})
@@ -396,7 +396,7 @@ var _ = Describe("Node DPU tests", func() {
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: genOVSDelPortCmd("pf0vf9"),
 			})
-			err := nc.delRepPort(&scd, vfRep, types.DefaultNetworkName, podDesc)
+			err := nc.delRepPort(&pod, &scd, vfRep, types.DefaultNetworkName, podDesc)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 		})
@@ -416,7 +416,7 @@ var _ = Describe("Node DPU tests", func() {
 				Err: nil,
 			})
 			// pass on the second
-			err := nc.delRepPort(&scd, vfRep, types.DefaultNetworkName, podDesc)
+			err := nc.delRepPort(&pod, &scd, vfRep, types.DefaultNetworkName, podDesc)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 		})

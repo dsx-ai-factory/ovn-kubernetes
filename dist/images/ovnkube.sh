@@ -89,6 +89,9 @@ BASEDIR=$(dirname $0)
 # OVN_CTINV_FLOWS_DISABLE - enable/disable northd from configuring CT Invalid flows as it is not offload friendly
 # OVN_MAX_NEWCONN_PPS - Max new outbound connections allowed on this VF
 # OVN_MAX_NEWCONN_BURST - Max burst of new outbound connections allowed on this VF
+# OVN_XDP_SFREP - Name of the SF rep for XDP
+# OVN_XDP_VETH - Name of the Veth for XDP
+# OVN_XDP_NS - Name of the XDP NS
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -214,6 +217,12 @@ ovn_sb_raft_sched_priority=${OVN_SB_RAFT_SCHED_PRIORITY:--11}
 OVN_MAX_NEWCONN_PPS=${OVN_MAX_NEWCONN_PPS:-0}
 # OVN_MAX_NEWCONN_BURST - Max burst of new outbound connection allowed, default is 0 : no limit
 OVN_MAX_NEWCONN_BURST=${OVN_MAX_NEWCONN_BURST:-0}
+# OVN_XDP_SFREP - XDP SF Rep 
+OVN_XDP_SFREP=${OVN_XDP_SFREP:-"xdp_sf"}
+# OVN_XDP_VETH - XDP Veth
+OVN_XDP_VETH=${OVN_XDP_VETH:-"xdp_veth"}
+# OVN_XDP_NS - XDP Namespace
+OVN_XDP_NS=${OVN_XDP_NS:-"xdp_ns"}
 
 ovn_hybrid_overlay_enable=${OVN_HYBRID_OVERLAY_ENABLE:-}
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR:-}
@@ -1351,6 +1360,7 @@ ovn-node() {
   fi
 
   ovn_gateway_router_subnet_opt=
+  ovn_xdp_opts=
   if [[ ${ovnkube_node_mode} == "dpu" ]]; then
     # in the case of dpu mode we want the host K8s Node Name and not the DPU K8s Node Name
     K8S_NODE=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:host-k8s-nodename | tr -d \")
@@ -1400,6 +1410,11 @@ ovn-node() {
       fi
     fi
     ovn_gateway_router_subnet_opt="--gateway-router-subnet=${ovn_gateway_router_subnet}"
+    ovn_xdp_opts="
+      --ovn-xdp-sfrep=${OVN_XDP_SFREP}
+      --ovn-xdp-veth=${OVN_XDP_VETH}
+      --ovn-xdp-ns=${OVN_XDP_NS}
+    "
   fi
 
   echo "=============== ovn-node   --init-node"
@@ -1444,7 +1459,8 @@ ovn-node() {
     --host-network-namespace ${ovn_host_network_namespace} \
      ${ovnkube_node_mgmt_port_netdev_flag} \
      --ovn-max-newconn-pps=${OVN_MAX_NEWCONN_PPS} \
-     --ovn-max-newconn-burst=${OVN_MAX_NEWCONN_BURST} &
+     --ovn-max-newconn-burst=${OVN_MAX_NEWCONN_BURST} \
+     ${ovn_xdp_opts} &
 
   wait_for_event attempts=3 process_ready ovnkube
   if [[ ${ovnkube_node_mode} != "dpu" ]]; then

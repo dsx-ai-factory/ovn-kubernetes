@@ -38,6 +38,7 @@ var (
 	HostMasqCTZone     = config.Default.ConntrackZone + 1 //64001
 	OVNMasqCTZone      = HostMasqCTZone + 1               //64002
 	HostNodePortCTZone = config.Default.ConntrackZone + 3 //64003
+	HostXDPCTZone      = config.Default.ConntrackZone + 4 //64004
 )
 
 // nodePortWatcherIptables manages iptables rules for shared gateway

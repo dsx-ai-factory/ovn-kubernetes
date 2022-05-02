@@ -177,6 +177,10 @@ type NetAttachDefInfo struct {
 	TopoType   string
 	VlanId     int
 	ExcludeIPs []net.IP
+	Gateway    string
+	GatewayMac string
+	BridgeName string
+	XDPService bool
 }
 
 func NewNetAttachDefInfo(netconf *cnitypes.NetConf) (*NetAttachDefInfo, error) {
@@ -205,6 +209,9 @@ func NewNetAttachDefInfo(netconf *cnitypes.NetConf) (*NetAttachDefInfo, error) {
 		TopoType:    netconf.TopoType,
 		VlanId:      netconf.VlanId,
 		NetNameInfo: NetNameInfo{netName, prefix, netconf.IsSecondary},
+		XDPService:  netconf.XDPService,
+		Gateway:     netconf.Gateway,
+		GatewayMac:  netconf.GatewayMac,
 	}
 
 	if netconf.TopoType == types.LocalnetAttachDefTopoType {

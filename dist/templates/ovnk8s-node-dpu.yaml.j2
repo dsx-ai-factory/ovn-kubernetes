@@ -104,6 +104,8 @@ spec:
         - mountPath: /ovn-cert
           name: ovn-pki
           readOnly: true
+        - mountPath: /var/run/netns
+          name: host-var-run-netns
 
 
 
@@ -201,6 +203,12 @@ spec:
           value: "{{ ovn_max_newconn_pps }}"
         - name: OVN_MAX_NEWCONN_BURST
           value: "{{ ovn_max_newconn_burst }}"
+        - name: OVN_XDP_SFREP
+          value: "{{ ovn_xdp_sfrep }}"
+        - name: OVN_XDP_VETH
+          value: "{{ ovn_xdp_veth }}"
+        - name: OVN_XDP_NS
+          value: "{{ ovn_xdp_ns }}"
 
 
       volumes:
@@ -235,6 +243,9 @@ spec:
         hostPath:
           path: /etc/ovn
           type: DirectoryOrCreate
+      - name: host-var-run-netns
+        hostPath:
+          path: /var/run/netns
 
 
       tolerations:

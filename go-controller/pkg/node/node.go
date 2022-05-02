@@ -60,7 +60,10 @@ type ovnNodeController struct {
 	node       *OvnNode
 	nadInfo    *util.NetAttachDefInfo
 	podHandler *factory.Handler
-	added      bool
+	// Some controllers, e.g those needing XDP and on non-primary DPU, need to manage shared gateway
+	// other than the NS gateway on the primary DPU.
+	gateway Gateway
+	added   bool
 }
 
 // NewNode creates a new controller for node management
@@ -575,6 +578,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 			IsSecondary: false,
 		}
 		nadInfo, _ := util.NewNetAttachDefInfo(defaultNetConf)
+		// Default node controller should not fail, e.g for XDP
 		nc, _ := n.NewOvnNodeController(nadInfo)
 
 		// Mark default controller to be "added" so that the other default network net-attach-def
@@ -638,6 +642,17 @@ func (n *OvnNode) initOvnNodeController(netattachdef *nettypes.NetworkAttachment
 		return nil, nil
 	}
 
+	if config.OvnKubeNode.Mode == types.NodeModeDPU && netconf.XDPService {
+		if netconf.TopoType != types.LocalnetAttachDefTopoType {
+			klog.Warningf("XDP only supported for Localnet based Network Attachment Definition")
+			return nil, nil
+		}
+		if config.OvnKubeNode.XDPSFRep == "" || config.OvnKubeNode.XDPVeth == "" || config.OvnKubeNode.XDPNamespace == "" {
+			klog.Warningf("DPU not configured for XDP")
+			return nil, nil
+		}
+	}
+
 	if netconf.Name == "" {
 		netconf.Name = netattachdef.Name
 	}
@@ -677,7 +692,7 @@ func (n *OvnNode) initOvnNodeController(netattachdef *nettypes.NetworkAttachment
 	v, ok := n.nonDefaultNodeControllers.Load(nadInfo.NetName)
 	if ok {
 		nc := v.(*ovnNodeController)
-		if nc.nadInfo.NetCidr != nadInfo.NetCidr || nc.nadInfo.MTU != nadInfo.MTU {
+		if nc.nadInfo.NetCidr != nadInfo.NetCidr || nc.nadInfo.MTU != nadInfo.MTU || nc.nadInfo.XDPService != nadInfo.XDPService {
 			return nil, fmt.Errorf("network attachment definition %s/%s does not share the same CNI config of name %s",
 				netattachdef.Namespace, netattachdef.Name, nadInfo.NetName)
 		} else {
@@ -737,6 +752,27 @@ func (n *OvnNode) addNetworkAttachDefinition(netattachdef *nettypes.NetworkAttac
 		if err != nil {
 			// TODO(gmoodalbail): should this be fatal error
 			klog.Errorf("Failed to get the MAC address for all the PFs on the host: %v", err)
+			return
+		}
+		// If this NAD is backed by a XDP service, initialize the shared XDP gateway on the controller.
+		// Currently only supported for localnet NAD.  nc.gateway should be nil here.
+		if nc.nadInfo.XDPService {
+			klog.Infof("NAD %s configured for XDP", nc.nadInfo.NetName)
+			if nc.nadInfo.BridgeName == "" {
+				klog.Errorf("Failed getting XDP bridge for NAD %s", nc.nadInfo.NetName)
+				return
+			}
+			if nc.gateway != nil {
+				klog.Infof("Gateway already configured for %s", nc.nadInfo.NetName)
+			} else {
+				gw, err := n.initGatewayDPUXDP(nc.nadInfo)
+				if err != nil {
+					klog.Errorf("Failed initializing XDP for NAD %s: %v", nc.nadInfo.NetName, err)
+					return
+				}
+				nc.gateway = gw
+				klog.Infof("Initialized XDP for NAD %s", nc.nadInfo.NetName)
+			}
 		}
 		nc.watchPodsDPU(n.ovnUpEnabled, pfMACs)
 	}
@@ -747,28 +783,33 @@ func (nc *ovnNodeController) updateLocalnetOvnBridgeMapping(toAdd bool) error {
 		return nil
 	}
 
-	// ngn-localnet-bridge-mappings exernal_ids is in the form of "<network_prefix1>:<br1>,<network_prefix2>:<br2>...".
-	// It sets all the possible localnet networks and associated bridge names on this node.
-	stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
-		"external_ids:ngn-localnet-bridge-mappings")
-	if err != nil {
-		klog.Warningf("Failed to get ngn-localnet-bridge-mappings from Open_vSwitch table stderr:%s (%v)", stderr, err)
-		return nil
-	}
-
 	bridgeName := ""
-	bridgeMapConfs := strings.Split(stdout, ",")
-	for _, bridgeMapConf := range bridgeMapConfs {
-		maps := strings.Split(bridgeMapConf, ":")
-		if len(maps) == 2 && strings.HasPrefix(nc.nadInfo.NetName, maps[0]) {
-			bridgeName = maps[1]
-			break
+	if toAdd {
+		// ngn-localnet-bridge-mappings exernal_ids is in the form of "<network_prefix1>:<br1>,<network_prefix2>:<br2>...".
+		// It sets all the possible localnet networks and associated bridge names on this node.
+		stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
+			"external_ids:ngn-localnet-bridge-mappings")
+		if err != nil {
+			klog.Warningf("Failed to get ngn-localnet-bridge-mappings from Open_vSwitch table stderr:%s (%v)", stderr, err)
+			return nil
 		}
-	}
 
-	if bridgeName == "" {
-		klog.V(5).Infof("Localnet network %s is not needed on this node %s", nc.nadInfo.NetName, nc.node.name)
-		return nil
+		bridgeMapConfs := strings.Split(stdout, ",")
+		for _, bridgeMapConf := range bridgeMapConfs {
+			maps := strings.Split(bridgeMapConf, ":")
+			if len(maps) == 2 && strings.HasPrefix(nc.nadInfo.NetName, maps[0]) {
+				bridgeName = maps[1]
+				break
+			}
+		}
+
+		if bridgeName == "" {
+			klog.V(5).Infof("Localnet network %s is not needed on this node %s", nc.nadInfo.NetName, nc.node.name)
+			return nil
+		}
+		nc.nadInfo.BridgeName = bridgeName
+	} else {
+		bridgeName = nc.nadInfo.BridgeName
 	}
 
 	// ovn-bridge-mappings maps a physical network name to a local ovs bridge
@@ -776,7 +817,7 @@ func (nc *ovnNodeController) updateLocalnetOvnBridgeMapping(toAdd bool) error {
 	// Note that there may be multiple ovs bridge mappings, be sure not to override
 	// the mappings for the other physical network
 	networkName := nc.nadInfo.Prefix + types.LocalNetBridgeName
-	stdout, stderr, err = util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
+	stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
 		"external_ids:ovn-bridge-mappings")
 	if err != nil {
 		return fmt.Errorf("failed to get ovn-bridge-mappings stderr:%s (%v)", stderr, err)
@@ -871,6 +912,7 @@ func (n *OvnNode) deleteNetworkAttachDefinition(netattachdef *nettypes.NetworkAt
 	}
 
 	nc := v.(*ovnNodeController)
+
 	nc.nadInfo.NetAttachDefs.Delete(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name))
 
 	// check if there any net-attach-def sharing the same CNI conf name left, if yes, just return
@@ -894,6 +936,16 @@ func (n *OvnNode) deleteNetworkAttachDefinition(netattachdef *nettypes.NetworkAt
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		if nc.podHandler != nil {
 			nc.node.watchFactory.RemovePodHandler(nc.podHandler)
+		}
+		// Currently, only XDP uses nc.gateway, so we can assume XDP if
+		// this is set.
+		if nc.gateway != nil {
+			klog.Infof("Removing XDP for NAD %s", nadInfo.NetName)
+			err = n.cleanGatewayDPUXDP(nc.nadInfo, nc.gateway.(*gateway))
+			if err != nil {
+				klog.Infof("Failed to remove XDP config: %v", err)
+			}
+			klog.Infof("Destroyed XDP config")
 		}
 	}
 

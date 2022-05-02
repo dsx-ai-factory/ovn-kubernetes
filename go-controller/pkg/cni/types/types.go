@@ -41,4 +41,10 @@ type NetConf struct {
 	// LogFileMaxAge represents the maximum number
 	// of days to retain old log files
 	LogFileMaxAge int `json:"logfile-maxage"`
+	// Gateway, valid in localnet topology network
+	Gateway string `json:"gatewayIP,omitempty"`
+	// Gateway MAC, valid in localnet topology network
+	GatewayMac string `json:"gatewayMAC,omitempty"`
+	// Enable XDP Service
+	XDPService bool `json:"xdpService,omitempty"`
 }

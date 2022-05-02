@@ -380,8 +380,11 @@ type OvnKubeNodeConfig struct {
 	MgmtPortNetdev       string `gcfg:"mgmt-port-netdev"`
 	DisableOVNIfaceIdVer bool   `gcfg:"disable-ovn-iface-id-ver"`
 	IsPrimaryDPU         bool
-	MaxNewConnPPS        uint `gcfg:"ovn-max-newconn-pps"`
-	MaxNewConnBurst      uint `gcfg:"ovn-max-newconn-burst"`
+	MaxNewConnPPS        uint   `gcfg:"ovn-max-newconn-pps"`
+	MaxNewConnBurst      uint   `gcfg:"ovn-max-newconn-burst"`
+	XDPSFRep             string `gcfg:"ovn-xdp-sfrep"`
+	XDPVeth              string `gcfg:"ovn-xdp-veth"`
+	XDPNamespace         string `gcfg:"ovn-xdp-ns"`
 }
 
 // OvnDBScheme describes the OVN database connection transport method
@@ -1177,6 +1180,24 @@ var OvnKubeNodeFlags = []cli.Flag{
 		Usage:       "set the max new connections burst for interfaces backed by a VF",
 		Value:       OvnKubeNode.MaxNewConnBurst,
 		Destination: &cliConfig.OvnKubeNode.MaxNewConnBurst,
+	},
+	&cli.StringFlag{
+		Name:        "ovn-xdp-sfrep",
+		Usage:       "the name of the SF rep used for XDP",
+		Value:       OvnKubeNode.XDPSFRep,
+		Destination: &cliConfig.OvnKubeNode.XDPSFRep,
+	},
+	&cli.StringFlag{
+		Name:        "ovn-xdp-veth",
+		Usage:       "the name of the Veth used for XDP",
+		Value:       OvnKubeNode.XDPVeth,
+		Destination: &cliConfig.OvnKubeNode.XDPVeth,
+	},
+	&cli.StringFlag{
+		Name:        "ovn-xdp-ns",
+		Usage:       "the name of the namespace used for XDP",
+		Value:       OvnKubeNode.XDPNamespace,
+		Destination: &cliConfig.OvnKubeNode.XDPNamespace,
 	},
 }
 
