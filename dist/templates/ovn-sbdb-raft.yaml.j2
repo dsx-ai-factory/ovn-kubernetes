@@ -108,7 +108,7 @@ spec:
           securityContext:
             runAsUser: 0
             capabilities:
-              add: ["NET_ADMIN", "SYS_NICE"]
+              add: ["SYS_NICE"]
 
           terminationMessagePolicy: FallbackToLogsOnError
           volumeMounts:
