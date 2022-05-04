@@ -309,7 +309,7 @@ func runOvnKube(ctx *cli.Context) error {
 				// serve OVN ^ovn_controller metrics
 				metrics.RegisterOvnNodeMetrics(ovsDBClient, config.MetricsScrapeInterval, stopChan)
 				// serve OVS ^ovs metrics
-				metrics.RegisterOvsMetrics(ovsDBClient, config.MetricsScrapeInterval, stopChan)
+				metrics.RegisterOvsMetrics(node, ovsDBClient, config.MetricsScrapeInterval, stopChan)
 			}
 			if config.OvnKubeNode.Mode != types.NodeModeDPU {
 				// serve OVN ^ovn_db, ^ovn_northd metrics from the ovnkube-node pod that is matching labels accordingly

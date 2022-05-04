@@ -1312,7 +1312,7 @@ var ovsVswitchdCoverageShowMetricsMap = map[string]*metricDetails{
 }
 var registerOvsMetricsOnce sync.Once
 
-func RegisterOvsMetrics(ovsDBClient *util.OvsdbClient, metricsScrapeInterval int,
+func RegisterOvsMetrics(nodeName string, ovsDBClient *util.OvsdbClient, metricsScrapeInterval int,
 	stopChan chan struct{}) {
 	registerOvsMetricsOnce.Do(func() {
 		getOvsVersionInfo()
@@ -1322,7 +1322,8 @@ func RegisterOvsMetrics(ovsDBClient *util.OvsdbClient, metricsScrapeInterval int
 				Name:      "build_info",
 				Help:      "A metric with a constant '1' value labeled by ovs version.",
 				ConstLabels: prometheus.Labels{
-					"version": ovsVersion,
+					"version":  ovsVersion,
+					"nodename": nodeName,
 				},
 			},
 			func() float64 { return 1 },
