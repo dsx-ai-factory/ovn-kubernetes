@@ -158,9 +158,13 @@ func (defaultSriovnetOps) GetRepresentorVFMissPktRate(netdev string) (uint64, ui
 
 // Get the packets dropped due to exceeding the configured limit.
 func (defaultSriovnetOps) GetRepresentorVFMissPktDrops(netdev string) (uint64, error) {
-	_, err := sriovnet.GetRepresentorPortFlavour(netdev)
+	flavor, err := sriovnet.GetRepresentorPortFlavour(netdev)
 	if err != nil {
 		return 0, fmt.Errorf("unknown port flavour for netdev %s. %v", netdev, err)
+	}
+	// connection rate-limiting is supported only on PF and VF representors.
+	if flavor != sriovnet.PORT_FLAVOUR_PCI_PF && flavor != sriovnet.PORT_FLAVOUR_PCI_VF {
+		return 0, nil
 	}
 	sysfsVfMissPktDropFile := filepath.Join(NetSysDir, netdev, "rep_config", "miss_rl_dropped_packets")
 	_, err = utilfs.Fs.Stat(sysfsVfMissPktDropFile)

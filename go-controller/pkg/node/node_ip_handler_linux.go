@@ -210,7 +210,6 @@ func (c *addressManager) sync() {
 			continue
 		}
 		if !c.isValidNodeIP(ip) {
-			klog.V(5).Infof("Skipping non-useable IP address for host: %s", ip.String())
 			continue
 		}
 		currAddresses.Insert(ip.String())
