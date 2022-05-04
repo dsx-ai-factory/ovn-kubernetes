@@ -667,7 +667,8 @@ func (n *OvnNode) initOvnNodeController(netattachdef *nettypes.NetworkAttachment
 		return nil, err
 	}
 
-	klog.Infof("NewNetAttachDefInfo: PPS info for nad %s/%s is %u/%u", netattachdef.Namespace, netattachdef.Name, nadConf.MaxNewConnPPS, nadConf.MaxNewConnBurst)
+	klog.Infof("NewNetAttachDefInfo: PPS info for nad %s/%s is %d/%d", netattachdef.Namespace, netattachdef.Name,
+		nadConf.MaxNewConnPPS, nadConf.MaxNewConnBurst)
 
 	// nadName must be in the correct form for non-default net-attach-def
 	if nadInfo.IsSecondary {
