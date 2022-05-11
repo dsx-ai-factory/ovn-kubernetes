@@ -45,6 +45,8 @@ BASEDIR=$(dirname $0)
 # K8S_NODE_IP - IP address of of the node
 #
 # OVN_METRICS_ENDPOINT_IP - metrics endpoint ip
+# OVN_METRICS_MASTER_PORT - metrics master port
+# OVN_METRICS_WORKER_PORT - metrics worker port
 # OVN_DAEMONSET_VERSION - version match daemonset and image - v3
 # K8S_TOKEN - the apiserver token. Automatically detected when running in a pod - v3
 # K8S_CACERT - the apiserver CA. Automatically detected when running in a pod - v3
@@ -184,6 +186,19 @@ if [[ -z ${metrics_endpoint_ip} ]]; then
   metrics_endpoint_ip=${K8S_NODE_IP:-0.0.0.0}
 fi
 metrics_endpoint_ip=$(bracketify $metrics_endpoint_ip)
+
+# set metrics endpoint master port bind to K8S_NODE_IP
+metrics_master_port=${OVN_METRICS_MASTER_PORT}
+if [[ -z ${metrics_master_port} ]]; then
+  metrics_master_port=9409
+fi
+
+# set metrics endpoint worker port bind to K8S_NODE_IP
+metrics_worker_port=${OVN_METRICS_WORKER_PORT}
+if [[ -z ${metrics_worker_port} ]]; then
+  metrics_worker_port=9410
+fi
+
 ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
 # namespace used for classifying host network traffic
 ovn_host_network_namespace=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
@@ -995,7 +1010,7 @@ ovn-master() {
       multicast_enabled_flag="--enable-multicast"
   fi
 
-  ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:9409"
+  ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:${metrics_master_port}"
   egressip_enabled_flag=
   if [[ ${ovn_egressip_enable} == "true" ]]; then
       egressip_enabled_flag="--enable-egress-ip"
@@ -1352,7 +1367,7 @@ ovn-node() {
       }
   fi
 
-  ovnkube_node_metrics_bind_address="${metrics_endpoint_ip}:9410"
+  ovnkube_node_metrics_bind_address="${metrics_endpoint_ip}:${metrics_worker_port}"
 
   ovn_unprivileged_flag="--unprivileged-mode"
   if test -z "${OVN_UNPRIVILEGED_MODE+x}" -o "x${OVN_UNPRIVILEGED_MODE}" = xno; then
