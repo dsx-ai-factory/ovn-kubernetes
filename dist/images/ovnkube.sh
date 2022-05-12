@@ -1169,9 +1169,10 @@ create_ovn_firewall_zone() {
 
 # ovn-node - all nodes
 ovn-node() {
-  trap 'kill $(jobs -p) ; rm -f /etc/cni/net.d/10-ovn-kubernetes.conf ; exit 0' TERM
+  trap 'kill $(jobs -p) ; exit 0' TERM
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovnkube.pid
+  rm -f /etc/cni/net.d/10-ovn-kubernetes.conf
 
   if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
     echo "=============== ovn-node - (wait for ovs)"

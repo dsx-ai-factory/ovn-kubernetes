@@ -46,6 +46,17 @@ spec:
 
           command: ["/root/ovnkube.sh", "ovn-node"]
 
+          # starting the metrics server is one of the last things we do,
+          # so check whether metrics server is running
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: 9410
+              scheme: HTTPS
+            initialDelaySeconds: 30
+            timeoutSeconds: 5
+            periodSeconds: 30
+            
           securityContext:
             runAsUser: 0
             {% if ovn_unprivileged_mode=="no" -%}
@@ -206,12 +217,6 @@ spec:
                   name: ovn-config
                   key: host_network_namespace
 
-          readinessProbe:
-            exec:
-              command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnkube-node"]
-            initialDelaySeconds: 30
-            timeoutSeconds: 30
-            periodSeconds: 60
         # end of container
 
       {% if ovnkube_app_name=="ovnkube-node-dpu-host" -%}
