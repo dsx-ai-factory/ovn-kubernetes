@@ -271,7 +271,8 @@ func UpdateACLsLoggingOps(nbClient libovsdbclient.Client, ops []libovsdb.Operati
 
 func DeleteACLs(nbClient libovsdbclient.Client, acls []nbdb.ACL) error {
 	opModels := []OperationModel{}
-	for _, acl := range acls {
+	for index := 0; index < len(acls); index++ {
+		acl := acls[index]
 		opModels = append(opModels, OperationModel{
 			Model:          &acl,
 			ModelPredicate: func(item *nbdb.ACL) bool { return IsEquivalentACL(item, &acl) },

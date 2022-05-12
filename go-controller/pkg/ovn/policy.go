@@ -168,7 +168,8 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 	if allEgressACLs != nil && allEgressACLs[0].Direction != nbdb.ACLDirectionFromLport {
 		// TODO(jtanenba) make all the libovsdbops.ACL commands deal with pointers to ACLs
 		var egressACLsPTR []*nbdb.ACL
-		for _, acl := range allEgressACLs {
+		for index := 0; index < len(allEgressACLs); index++ {
+			acl := allEgressACLs[index]
 			acl.Direction = nbdb.ACLDirectionFromLport
 			acl.Options = map[string]string{"apply-after-lb": "true"}
 			egressACLsPTR = append(egressACLsPTR, &acl)
