@@ -5,7 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
-	"net/http/pprof"
+	_ "net/http/pprof"
 	"os"
 	"path"
 	"regexp"
@@ -438,16 +438,19 @@ func listenAndServeTLS(addr, certFile, privKeyFile string, handler http.Handler)
 
 // StartMetricsServerTLS runs the prometheus listener so that OVN K8s metrics can be collected
 // It puts the endpoint behind TLS if certFile and keyFile are defined.
-func StartMetricsServer(bindAddress string, enablePprof bool, certFile string, keyFile string) {
+func StartMetricsServer(bindAddress, pprofBindAddress string, certFile string, keyFile string) {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
 
-	if enablePprof {
-		mux.HandleFunc("/debug/pprof/", pprof.Index)
-		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	if len(pprofBindAddress) != 0 {
+		go utilwait.Until(func() {
+			// importing net/http/pprof adds all the debug pprof http paths
+			err := http.ListenAndServe(pprofBindAddress, nil)
+			if err != nil {
+				utilruntime.HandleError(fmt.Errorf("starting profile server failed for address %s: %v",
+					pprofBindAddress, err))
+			}
+		}, 5*time.Second, utilwait.NeverStop)
 	}
 
 	go utilwait.Until(func() {
