@@ -69,10 +69,10 @@ github.com/ebay/libovsdb
 github.com/evanphx/json-patch
 # github.com/fsnotify/fsnotify v1.4.9
 github.com/fsnotify/fsnotify
-# github.com/go-logr/logr v1.1.0
+# github.com/go-logr/logr v1.2.2
 github.com/go-logr/logr
 github.com/go-logr/logr/funcr
-# github.com/go-logr/stdr v1.1.0
+# github.com/go-logr/stdr v1.2.2
 github.com/go-logr/stdr
 # github.com/gogo/protobuf v1.3.2 => github.com/gogo/protobuf v1.3.2
 github.com/gogo/protobuf/gogoproto
@@ -196,7 +196,7 @@ github.com/onsi/gomega/matchers/support/goraph/edge
 github.com/onsi/gomega/matchers/support/goraph/node
 github.com/onsi/gomega/matchers/support/goraph/util
 github.com/onsi/gomega/types
-# github.com/ovn-org/libovsdb v0.6.1-0.20220127023511-a619f0fd93be
+# github.com/ovn-org/libovsdb v0.6.1-0.20220517011431-3f40c8abb6ff
 github.com/ovn-org/libovsdb/cache
 github.com/ovn-org/libovsdb/client
 github.com/ovn-org/libovsdb/mapper
