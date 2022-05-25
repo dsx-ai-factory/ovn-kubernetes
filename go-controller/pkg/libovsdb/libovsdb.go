@@ -97,7 +97,8 @@ func NewSBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (cl
 			// used by unidling controller
 			client.WithTable(&sbdb.ControllerEvent{}),
 			// used for gateway
-			client.WithTable(&sbdb.MACBinding{}),
+			// SDN-1535: MacBinding is not required in ngn 2.1
+			// client.WithTable(&sbdb.MACBinding{}),
 			// used by libovsdbops
 			client.WithTable(&sbdb.Chassis{}),
 			// used for metrics
