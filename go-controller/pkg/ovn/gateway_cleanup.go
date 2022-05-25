@@ -9,7 +9,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -192,7 +191,8 @@ func (oc *Controller) cleanupDGP(nodes *kapi.NodeList) error {
 		oc.delPbrAndNatRules(node.Name, []string{types.InterNodePolicyPriority, types.MGMTPortPolicyPriority})
 	}
 	// remove SBDB MAC bindings for DGP
-	for _, ip := range []string{types.V4NodeLocalNATSubnetNextHop, types.V6NodeLocalNATSubnetNextHop} {
+	// SDN-1535: MacBinding deletion is not required in ngn 2.1
+	/*for _, ip := range []string{types.V4NodeLocalNATSubnetNextHop, types.V6NodeLocalNATSubnetNextHop} {
 		opModels := []libovsdbops.OperationModel{
 			{
 				Model: &sbdb.MACBinding{
@@ -203,7 +203,7 @@ func (oc *Controller) cleanupDGP(nodes *kapi.NodeList) error {
 		if err := oc.mc.modelClient.WithClient(oc.mc.sbClient).Delete(opModels...); err != nil {
 			return fmt.Errorf("unable to remove mac_binding for DGP, err: %v", err)
 		}
-	}
+	}*/
 	// remove node local switch
 	opModels := []libovsdbops.OperationModel{
 		{
