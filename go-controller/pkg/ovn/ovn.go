@@ -942,6 +942,10 @@ func (oc *Controller) WatchPods() {
 			podDesc := fmt.Sprintf("[%s/%s/%s] on network %s", pod.UID, pod.Namespace, pod.Name, oc.nadInfo.NetName)
 			klog.V(5).Infof("Pod %s add event handler", podDesc)
 			oc.initRetryPod(pod)
+			if !util.PodScheduled(pod) {
+				// pod is unscheduled, keep the pod as ignored in the retryCache, then wait for the next pod update event
+				return
+			}
 			if !oc.ensurePod(nil, pod, true) {
 				oc.unSkipRetryPod(pod)
 				return
