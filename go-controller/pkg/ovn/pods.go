@@ -434,7 +434,12 @@ func (oc *Controller) updatePodAnnotationWithRetry(origPod *kapi.Pod, podInfo *u
 		if err != nil {
 			return err
 		}
-		return oc.mc.kube.UpdatePod(cpod)
+		err = oc.mc.kube.UpdatePod(cpod)
+		if err != nil {
+			klog.V(5).Infof("Failed to update pod annotation %s/%s on network %s, err (%v)",
+				cpod.Namespace, cpod.Name, nadName, err)
+		}
+		return err
 	})
 	if resultErr != nil {
 		return fmt.Errorf("failed to update annotation on pod %s/%s for network %s: %v",
@@ -476,8 +481,10 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, lsManagerNodeNa
 	podDesc := fmt.Sprintf("%s/%s/%s", pod.UID, pod.Namespace, pod.Name)
 	// Keep track of how long syncs take.
 	start := time.Now()
+	var apiTook time.Duration
+	var ovsdbTook time.Duration
 	defer func() {
-		klog.Infof("[%s] addLogicalPort for network %s took %v", podDesc, nadName, time.Since(start))
+		klog.Infof("[%s] addLogicalPort for network %s took %v, api took %v, ovsdb took %v, err: %v", podDesc, nadName, time.Since(start), apiTook, ovsdbTook, err)
 	}()
 
 	logicalSwitch := oc.nadInfo.Prefix + lsManagerNodeName
@@ -630,9 +637,11 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, lsManagerNodeNa
 		klog.V(5).Infof("Annotation values for pod %s network %s: ip=%v ; mac=%s ; gw=%s\n",
 			podDesc, nadName, podIfAddrs, podMac, podAnnotation.Gateways)
 
+		apiStart := time.Now()
 		if err = oc.updatePodAnnotationWithRetry(pod, &podAnnotation, nadName); err != nil {
 			return err
 		}
+		apiTook = time.Since(apiStart)
 		releaseIPs = false
 	}
 
@@ -745,11 +754,13 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, lsManagerNodeNa
 		allOps = append(allOps, ops...)
 	}
 
+	ovsdbStart := time.Now()
 	results, err := libovsdbops.TransactAndCheckAndSetUUIDs(oc.mc.nbClient, lsp, allOps)
 	if err != nil {
 
 		return fmt.Errorf("could not perform creation or update of logical switch port %s - %+v", portName, err)
 	}
+	ovsdbTook = time.Since(ovsdbStart)
 
 	// if somehow lspUUID is empty, there is a bug here with interpreting OVSDB results
 	if len(lsp.UUID) == 0 {
