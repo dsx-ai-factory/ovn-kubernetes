@@ -11,11 +11,15 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -259,7 +263,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	ifInfo *PodInterfaceInfo, sandboxID string, podLister corev1listers.PodLister,
 	kclient kubernetes.Interface) error {
-	klog.Infof("ConfigureOVS: namespace: %s, podName: %s, network: %s", namespace, podName, ifInfo.NadName)
+	klog.Infof("ConfigureOVS: namespace: %s, podName: %s, network: %s, mode %s", namespace, podName, ifInfo.NadName, config.OvnKubeNode.Mode)
 	ifaceID := util.GetIfaceId(namespace, podName, ifInfo.NadName, !ifInfo.IsSecondary)
 	initialPodUID := ifInfo.PodUID
 
@@ -315,8 +319,51 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 		ovsArgs = append(ovsArgs, []string{"--", "--if-exists", "remove", "interface", hostIfaceName, "external_ids", "network_name"}...)
 	}
 
-	if out, err := ovsExec(ovsArgs...); err != nil {
-		return fmt.Errorf("failure in plugging pod interface: %v\n  %q", err, out)
+	// add ovs port with 3 retries every 100 ms
+	backoff := wait.Backoff{
+		Duration: 100 * time.Millisecond,
+		Steps:    3,
+	}
+	var link netlink.Link
+	err = retry.OnError(backoff, func(e error) bool {
+		if config.OvnKubeNode.Mode != types.NodeModeDPU {
+			// no retry for non-dpu case
+			return false
+		}
+		delPortArgs := []string{
+			"--if-exists", "del-port", "br-int", hostIfaceName,
+		}
+		if out, err := ovsExec(delPortArgs...); err != nil {
+			klog.Errorf("Fail to delete pod interface %s, stdout: %s, error: %v", hostIfaceName, out, err)
+			// couldn't clean up port, stop retrying
+			return false
+		}
+		return true // retry
+	}, func() error {
+		if out, err := ovsExec(ovsArgs...); err != nil {
+			return fmt.Errorf("failure in plugging pod interface %s: stdout: %q, error: %v", hostIfaceName, out, err)
+		}
+		if config.OvnKubeNode.Mode != types.NodeModeDPU {
+			return nil
+		}
+		// to make sure offload is enabled on dpu node, look for tc ingress
+		// filters for the link, return error if no rules are found
+		if link == nil {
+			if link, err = util.GetNetLinkOps().LinkByName(hostIfaceName); err != nil {
+				return fmt.Errorf("failed to find interface %s: %v", hostIfaceName, err)
+			}
+		}
+		if numOfIngress, err := util.GetNetLinkOps().CountIngressFilters(link); err != nil {
+			return fmt.Errorf("failed to find ingress filter for %s: %v", hostIfaceName, err)
+		} else if numOfIngress == 0 {
+			return fmt.Errorf("ingress filters for %s not found", hostIfaceName)
+		} else {
+			klog.V(5).Infof("Found %d ingress filter(s) for %s", numOfIngress, hostIfaceName)
+			return nil
+		}
+	})
+	if err != nil {
+		return err
 	}
 
 	if err := clearPodBandwidth(sandboxID); err != nil {

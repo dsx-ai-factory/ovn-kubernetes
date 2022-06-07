@@ -43,6 +43,7 @@ type NetLinkOps interface {
 	NeighAdd(neigh *netlink.Neigh) error
 	NeighList(linkIndex, family int) ([]netlink.Neigh, error)
 	ConntrackDeleteFilter(table netlink.ConntrackTableType, family netlink.InetFamily, filter netlink.CustomConntrackFilter) (uint, error)
+	CountIngressFilters(link netlink.Link) (uint, error)
 }
 
 type defaultNetLinkOps struct {
@@ -151,6 +152,20 @@ func (defaultNetLinkOps) NeighList(linkIndex, family int) ([]netlink.Neigh, erro
 
 func (defaultNetLinkOps) ConntrackDeleteFilter(table netlink.ConntrackTableType, family netlink.InetFamily, filter netlink.CustomConntrackFilter) (uint, error) {
 	return netlink.ConntrackDeleteFilter(table, family, filter)
+}
+
+func (defaultNetLinkOps) CountIngressFilters(link netlink.Link) (uint, error) {
+	qdiscList, err := netlink.QdiscList(link)
+	if err != nil {
+		return 0, err
+	}
+	ingressCounter := uint(0)
+	for _, qdisc := range qdiscList {
+		if _, ok := qdisc.(*netlink.Ingress); ok {
+			ingressCounter++
+		}
+	}
+	return ingressCounter, nil
 }
 
 func getFamily(ip net.IP) int {

@@ -392,3 +392,8 @@ func (_m *NetLinkOps) RouteListFiltered(family int, filter *netlink.Route, filte
 
 	return r0, r1
 }
+
+// RouteListFiltered provides a mock function with given fields: family, filter, filterMask
+func (_m *NetLinkOps) CountIngressFilters(link netlink.Link) (uint, error) {
+	return 1, nil
+}
