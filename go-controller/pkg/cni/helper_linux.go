@@ -330,7 +330,7 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 			// no retry for non-dpu case
 			return false
 		}
-		klog.Errorf("Failed to add port %s to br-int: %s", hostIfaceName, err.Error())
+		klog.Errorf("Failed to add port %s to br-int: %v", hostIfaceName, e)
 		delPortArgs := []string{
 			"--if-exists", "del-port", "br-int", hostIfaceName,
 		}
