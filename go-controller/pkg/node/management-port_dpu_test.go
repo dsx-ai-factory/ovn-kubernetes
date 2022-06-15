@@ -2,6 +2,8 @@ package node
 
 import (
 	"fmt"
+	"net"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -13,7 +15,6 @@ import (
 	utilMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 	"github.com/stretchr/testify/mock"
 	"github.com/vishvananda/netlink"
-	"net"
 )
 
 func genOVSAddMgmtPortCmd(nodeName string) string {
@@ -49,8 +50,8 @@ var _ = Describe("Mananagement port DPU tests", func() {
 
 	Context("Create Management port DPU", func() {
 		It("Fails if representor and ovn-k8s-mp0 netdev is not found", func() {
-			mgmtPortDpu := managementPortDPU{
-				vfRepName: "non-existent-netdev",
+			mgmtPortDpu := managementPortRepresentor{
+				repName: "non-existent-netdev",
 			}
 			netlinkOpsMock.On("LinkByName", "non-existent-netdev").Return(
 				nil, fmt.Errorf("failed to get interface"))
@@ -62,8 +63,8 @@ var _ = Describe("Mananagement port DPU tests", func() {
 		})
 
 		It("Fails if set Name to ovn-k8s-mp0 fails", func() {
-			mgmtPortDpu := managementPortDPU{
-				vfRepName: "enp3s0f0v0",
+			mgmtPortDpu := managementPortRepresentor{
+				repName: "enp3s0f0v0",
 			}
 			linkMock := &mocks.Link{}
 			linkMock.On("Attrs").Return(&netlink.LinkAttrs{Name: "enp3s0f0v0", MTU: 1400})
@@ -82,10 +83,10 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			Expect(err).ToNot(HaveOccurred())
 			expectedMgmtPortMac := util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(ipnet).IP)
 			config.Default.MTU = 1400
-			mgmtPortDpu := managementPortDPU{
+			mgmtPortDpu := managementPortRepresentor{
 				nodeName:    "k8s-worker0",
 				hostSubnets: []*net.IPNet{ipnet},
-				vfRepName:   "enp3s0f0v0",
+				repName:     "enp3s0f0v0",
 			}
 			nodeAnnotatorMock.On("Set", mock.Anything, expectedMgmtPortMac.String()).Return(nil)
 			linkMock := &mocks.Link{}
@@ -113,10 +114,10 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			Expect(err).ToNot(HaveOccurred())
 			expectedMgmtPortMac := util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(ipnet).IP)
 			config.Default.MTU = 1400
-			mgmtPortDpu := managementPortDPU{
+			mgmtPortDpu := managementPortRepresentor{
 				nodeName:    "k8s-worker0",
 				hostSubnets: []*net.IPNet{ipnet},
-				vfRepName:   "enp3s0f0v0",
+				repName:     "enp3s0f0v0",
 			}
 			nodeAnnotatorMock.On("Set", mock.Anything, expectedMgmtPortMac.String()).Return(nil)
 			linkMock := &mocks.Link{}
@@ -141,7 +142,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 
 	Context("Create Management port DPU host", func() {
 		It("Fails if netdev does not exist", func() {
-			mgmtPortDpuHost := managementPortDPUHost{
+			mgmtPortDpuHost := managementPortNetdev{
 				netdevName: "non-existent-netdev",
 			}
 			netlinkOpsMock.On("LinkByName", "non-existent-netdev").Return(
@@ -160,7 +161,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			currentMgmtPortMac, err := net.ParseMAC("00:bb:cc:dd:ee:11")
 			Expect(err).ToNot(HaveOccurred())
 			config.Default.MTU = 1400
-			mgmtPortDpuHost := managementPortDPUHost{
+			mgmtPortDpuHost := managementPortNetdev{
 				hostSubnets: []*net.IPNet{ipnet},
 				netdevName:  "enp3s0f0v0",
 			}
@@ -194,7 +195,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			expectedMgmtPortMac := util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(ipnet).IP)
 			config.Default.MTU = 1400
 			config.Default.ClusterSubnets = []config.CIDRNetworkEntry{{CIDR: clusterCidr, HostSubnetLength: 8}}
-			mgmtPortDpuHost := managementPortDPUHost{
+			mgmtPortDpuHost := managementPortNetdev{
 				hostSubnets: []*net.IPNet{ipnet},
 				netdevName:  "enp3s0f0v0",
 			}
