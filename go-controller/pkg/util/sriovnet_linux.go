@@ -25,8 +25,11 @@ const (
 type SriovnetOps interface {
 	GetNetDevicesFromPci(pciAddress string) ([]string, error)
 	GetUplinkRepresentor(vfPciAddress string) (string, error)
+	GetUplinkRepresentorFromAux(auxDev string) (string, error)
 	GetVfIndexByPciAddress(vfPciAddress string) (int, error)
+	GetSfIndexByAuxDev(auxDev string) (int, error)
 	GetVfRepresentor(uplink string, vfIndex int) (string, error)
+	GetSfRepresentor(uplink string, sfIndex int) (string, error)
 	GetPfPciFromVfPci(vfPciAddress string) (string, error)
 	GetVfRepresentorDPU(pfID, vfIndex string) (string, error)
 	GetRepresentorPeerMacAddress(netdev string) (net.HardwareAddr, error)
@@ -61,12 +64,24 @@ func (defaultSriovnetOps) GetUplinkRepresentor(vfPciAddress string) (string, err
 	return sriovnet.GetUplinkRepresentor(vfPciAddress)
 }
 
+func (defaultSriovnetOps) GetUplinkRepresentorFromAux(auxDev string) (string, error) {
+	return sriovnet.GetUplinkRepresentorFromAux(auxDev)
+}
+
 func (defaultSriovnetOps) GetVfIndexByPciAddress(vfPciAddress string) (int, error) {
 	return sriovnet.GetVfIndexByPciAddress(vfPciAddress)
 }
 
+func (defaultSriovnetOps) GetSfIndexByAuxDev(auxDev string) (int, error) {
+	return sriovnet.GetSfIndexByAuxDev(auxDev)
+}
+
 func (defaultSriovnetOps) GetVfRepresentor(uplink string, vfIndex int) (string, error) {
 	return sriovnet.GetVfRepresentor(uplink, vfIndex)
+}
+
+func (defaultSriovnetOps) GetSfRepresentor(uplink string, sfIndex int) (string, error) {
+	return sriovnet.GetSfRepresentor(uplink, sfIndex)
 }
 
 func (defaultSriovnetOps) GetPfPciFromVfPci(vfPciAddress string) (string, error) {
@@ -176,4 +191,40 @@ func (defaultSriovnetOps) GetRepresentorVFMissPktDrops(netdev string) (uint64, e
 	}
 
 	return packetsDropped, nil
+}
+
+// GetFunctionRepresentorName returns representor name for passed device ID. Supported devices are Virtual Function
+// or Scalable Function
+func GetFunctionRepresentorName(deviceID string) (string, error) {
+	var rep, uplink string
+	var err error
+	var index int
+
+	if IsPCIDeviceName(deviceID) { // PCI device
+		uplink, err = GetSriovnetOps().GetUplinkRepresentor(deviceID)
+		if err != nil {
+			return "", err
+		}
+		index, err = GetSriovnetOps().GetVfIndexByPciAddress(deviceID)
+		if err != nil {
+			return "", err
+		}
+		rep, err = GetSriovnetOps().GetVfRepresentor(uplink, index)
+	} else if IsAuxDeviceName(deviceID) { // Auxiliary device
+		uplink, err = GetSriovnetOps().GetUplinkRepresentorFromAux(deviceID)
+		if err != nil {
+			return "", err
+		}
+		index, err = GetSriovnetOps().GetSfIndexByAuxDev(deviceID)
+		if err != nil {
+			return "", err
+		}
+		rep, err = GetSriovnetOps().GetSfRepresentor(uplink, index)
+	} else {
+		return "", fmt.Errorf("cannot determine device type for id '%s'", deviceID)
+	}
+	if err != nil {
+		return "", err
+	}
+	return rep, nil
 }

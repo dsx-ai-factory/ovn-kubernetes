@@ -86,7 +86,7 @@ BASEDIR=$(dirname $0)
 # OVN_UNPRIVILEGED_MODE - execute CNI ovs/netns commands from host (default no)
 # OVNKUBE_NODE_MODE - ovnkube node mode of operation, one of: full, dpu, dpu-host (default: full)
 # OVNKUBE_NODE_MGMT_PORT_INTF_NAME - Name of interface to be used as ovnkubernetes mgmt port (default: ovn-k8s-mp0)
-# OVNKUBE_NODE_MGMT_PORT_NETDEV - ovnkube node management port netdev. valid when ovnkube node mode is: dpu, dpu-host
+# OVNKUBE_NODE_MGMT_PORT_NETDEV - ovnkube node management port netdev.
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node. mandatory in case ovnkube-node-mode=="dpu"
 # OVN_HOST_NETWORK_NAMESPACE - namespace to classify host network traffic for applying network policies
 # OVN_ENCAP_TOS - set a TOS value for the outer header
@@ -316,7 +316,7 @@ ovn_ipfix_cache_active_timeout=${OVN_IPFIX_CACHE_ACTIVE_TIMEOUT:-} \
 ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
 # OVNKUBE_NODE_MGMT_PORT_INTF_NAME - name of interface being used as management port
 ovnkube_node_mgmt_port_intf_name=${OVNKUBE_NODE_MGMT_PORT_INTF_NAME:-}
-# OVNKUBE_NODE_mgmt_PORT_NETDEV - is the net device to be used for management port
+# OVNKUBE_NODE_MGMT_PORT_NETDEV - is the net device to be used for management port
 ovnkube_node_mgmt_port_netdev=${OVNKUBE_NODE_MGMT_PORT_NETDEV:-}
 ovnkube_config_duration_enable=${OVNKUBE_CONFIG_DURATION_ENABLE:-false}
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node

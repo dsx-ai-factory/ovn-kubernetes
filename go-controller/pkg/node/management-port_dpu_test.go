@@ -50,6 +50,8 @@ var _ = Describe("Mananagement port DPU tests", func() {
 
 	Context("Create Management port DPU", func() {
 		It("Fails if representor and ovn-k8s-mp0 netdev is not found", func() {
+			config.OvnKubeNode.Mode = types.NodeModeDPU
+			config.OvnKubeNode.MgmtPortRepresentor = ""
 			mgmtPortDpu := managementPortRepresentor{
 				repName: "non-existent-netdev",
 			}

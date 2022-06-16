@@ -449,7 +449,8 @@ type OvnKubeNodeConfig struct {
 	Mode                 string `gcfg:"mode"`
 	MgmtPortIntfName     string `gcfg:"mgmt-port-netdev-intf-name"`
 	MgmtPortNetdev       string `gcfg:"mgmt-port-netdev"`
-	DisableOVNIfaceIdVer bool   `gcfg:"disable-ovn-iface-id-ver"`
+	MgmtPortRepresentor  string
+	DisableOVNIfaceIdVer bool `gcfg:"disable-ovn-iface-id-ver"`
 	IsPrimaryDPU         bool
 	XDPSFRep             string `gcfg:"ovn-xdp-sfrep"`
 	XDPVeth              string `gcfg:"ovn-xdp-veth"`
@@ -2308,11 +2309,6 @@ func buildOvnKubeNodeConfig(ctx *cli.Context, cli, file *config) error {
 	if OvnKubeNode.Mode == types.NodeModeDPU || OvnKubeNode.Mode == types.NodeModeDPUHost {
 		if OvnKubeNode.MgmtPortNetdev == "" {
 			return fmt.Errorf("ovnkube-node-mgmt-port-netdev must be provided")
-		}
-	} else {
-		if OvnKubeNode.MgmtPortNetdev != "" {
-			return fmt.Errorf("ovnkube-node-mgmt-port-netdev is not supported with ovnkube-node mode %s",
-				OvnKubeNode.Mode)
 		}
 	}
 

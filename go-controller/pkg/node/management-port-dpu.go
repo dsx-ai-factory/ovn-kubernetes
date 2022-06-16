@@ -22,15 +22,26 @@ type managementPortRepresentor struct {
 
 // newManagementPortRepresentor creates a new managementPortRepresentor
 func newManagementPortRepresentor(nodeName string, hostSubnets []*net.IPNet) ManagementPort {
+	var repName string
+
+	// In ovnkube-node mode DPU representor name stored in MgmtPortNetdev variable
+	if config.OvnKubeNode.MgmtPortRepresentor == "" {
+		repName = config.OvnKubeNode.MgmtPortNetdev
+	} else {
+		repName = config.OvnKubeNode.MgmtPortRepresentor
+	}
 	return &managementPortRepresentor{
 		nodeName:    nodeName,
 		hostSubnets: hostSubnets,
-		repName:     config.OvnKubeNode.MgmtPortNetdev,
+		repName:     repName,
 	}
 }
 
 func (mp *managementPortRepresentor) Create(nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
 	k8sMgmtIntfName := config.OvnKubeNode.MgmtPortIntfName
+	if config.OvnKubeNode.MgmtPortRepresentor != "" {
+		k8sMgmtIntfName += "_0"
+	}
 	if !config.OvnKubeNode.IsPrimaryDPU {
 		return &managementPortConfig{}, nil
 	}
@@ -57,7 +68,7 @@ func (mp *managementPortRepresentor) Create(nodeAnnotator kube.Annotator, waiter
 		if setName {
 			if err = util.GetNetLinkOps().LinkSetName(link, k8sMgmtIntfName); err != nil {
 				// NOTE(adrianc): rename may fail with "file exists" in case an interface is already named
-				// ovn-k8s-mp0, this may happen if mgmt-port-netdev changes during deployment. ATM we are
+				// ovn-k8s-mp*, this may happen if mgmt-port-netdev changes during deployment. ATM we are
 				// not handling it.
 				// TODO: handle mgmt-port-netdev change.
 				return nil, fmt.Errorf("failed to set link name for device %s. %v", mp.repName, err)
@@ -165,7 +176,7 @@ func (mp *managementPortNetdev) Create(nodeAnnotator kube.Annotator, waiter *sta
 	link, err := util.GetNetLinkOps().LinkByName(mp.netdevName)
 	if err != nil {
 		// this may not the first time invoked on the node after reboot
-		// netdev may have already been renamed to ovn-k8s-mp0.
+		// netdev may have already been renamed to ovn-k8s-mp*.
 		link, err = util.GetNetLinkOps().LinkByName(k8sMgmtIntfName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get link device for %s. %v", mp.netdevName, err)

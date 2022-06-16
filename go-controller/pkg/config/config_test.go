@@ -296,6 +296,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(HybridOverlay.Enabled).To(gomega.Equal(false))
 			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeFull))
 			gomega.Expect(OvnKubeNode.MgmtPortNetdev).To(gomega.Equal(""))
+			gomega.Expect(OvnKubeNode.MgmtPortRepresentor).To(gomega.Equal(""))
 			gomega.Expect(Gateway.RouterSubnet).To(gomega.Equal(""))
 			gomega.Expect(OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout).To(gomega.Equal(1))
 
@@ -1676,7 +1677,7 @@ foo=bar
 			gomega.Expect(err.Error()).To(gomega.ContainSubstring("ovnkube-node-mgmt-port-netdev must be provided"))
 		})
 
-		It("Fails if management port is provided but ovnkube node mode is full", func() {
+		It("Succeeds if management netdev provided in the full mode", func() {
 			cliConfig := config{
 				OvnKubeNode: OvnKubeNodeConfig{
 					Mode:           types.NodeModeFull,
@@ -1689,8 +1690,7 @@ foo=bar
 				},
 			}
 			err := buildOvnKubeNodeConfig(nil, &cliConfig, &file)
-			gomega.Expect(err).To(gomega.HaveOccurred())
-			gomega.Expect(err.Error()).To(gomega.ContainSubstring("ovnkube-node-mgmt-port-netdev is not supported"))
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 		})
 	})
 })

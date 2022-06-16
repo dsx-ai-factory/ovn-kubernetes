@@ -150,9 +150,9 @@ func checkForStaleOVSInternalPorts() {
 	staleInterfaceArgs := []string{}
 	values := strings.Split(stdout, "\n\n")
 	for _, val := range values {
-		if val == config.OvnKubeNode.MgmtPortIntfName {
-			klog.Errorf("The representor for the management port: %s is missing on the DPU. "+
-				"Perhaps the host rebooted or SR-IOV VFs were disabled on the host.", config.OvnKubeNode.MgmtPortIntfName)
+		if val == config.OvnKubeNode.MgmtPortIntfName || val == config.OvnKubeNode.MgmtPortIntfName+"_0" {
+			klog.Errorf("Management port %s is missing. Perhaps the host rebooted "+
+				"or SR-IOV VFs were disabled on the host.", val)
 			continue
 		}
 		klog.Warningf("Found stale interface %s, so queuing it to be deleted", val)
@@ -160,6 +160,11 @@ func checkForStaleOVSInternalPorts() {
 			staleInterfaceArgs = append(staleInterfaceArgs, "--")
 		}
 		staleInterfaceArgs = append(staleInterfaceArgs, "--if-exists", "--with-iface", "del-port", val)
+	}
+
+	// Don't call ovs if all interfaces were skipped in the loop above
+	if len(staleInterfaceArgs) == 0 {
+		return
 	}
 
 	_, stderr, err := util.RunOVSVsctl(staleInterfaceArgs...)

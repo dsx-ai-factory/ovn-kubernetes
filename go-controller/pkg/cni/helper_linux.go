@@ -425,15 +425,16 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:cluster_name=%s", ifInfo.ClusterName))
 	}
 
+	if len(ifInfo.VfNetdevName) != 0 {
+		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:vf-netdev-name=%s", ifInfo.VfNetdevName))
+	}
+
 	if ifInfo.IsSecondary {
 		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:network_name=%s", ifInfo.NadName))
 	} else {
 		ovsArgs = append(ovsArgs, []string{"--", "--if-exists", "remove", "interface", hostIfaceName, "external_ids", "network_name"}...)
 	}
 
-	if len(ifInfo.VfNetdevName) != 0 {
-		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:vf-netdev-name=%s", ifInfo.VfNetdevName))
-	}
 	// add ovs port with 3 retries every 100 ms
 	backoff := wait.Backoff{
 		Duration: 100 * time.Millisecond,
