@@ -209,7 +209,12 @@ spec:
           value: "{{ ovn_xdp_veth }}"
         - name: OVN_XDP_NS
           value: "{{ ovn_xdp_ns }}"
-
+        - name: OVS_MAX_REVALIDATOR
+          value: "{{ ovs_max_revalidator }}"
+        - name: OVS_MIN_REVALIDATE_PPS
+          value: "{{ ovs_min_revalidate_pps }}"
+        - name: OVS_MAX_IDLE
+          value: "{{ ovs_max_idle }}"
 
       volumes:
       - name: sysfs

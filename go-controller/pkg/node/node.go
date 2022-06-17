@@ -249,6 +249,37 @@ func setupOVNNode(node *kapi.Node) error {
 		return fmt.Errorf("error setting ovs flow targets: %q", err)
 	}
 
+	// set max-revalidator, min-revalidate-pps and max-idle for dpu node if the values are set
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		var err error
+		if config.OvnKubeNode.MaxRevalidator == 0 {
+			// clear to use default
+			err = updateOVSOtherConfig("max-revalidator", nil)
+		} else {
+			err = updateOVSOtherConfig("max-revalidator", config.OvnKubeNode.MaxRevalidator)
+		}
+		if err != nil {
+			return err
+		}
+		if config.OvnKubeNode.MinRevalidatePPS == 0 {
+			// clear to use default
+			err = updateOVSOtherConfig("min-revalidate-pps", nil)
+		} else {
+			err = updateOVSOtherConfig("min-revalidate-pps", config.OvnKubeNode.MinRevalidatePPS)
+		}
+		if err != nil {
+			return err
+		}
+		if config.OvnKubeNode.MaxIdle == 0 {
+			// clear to use default
+			err = updateOVSOtherConfig("max-idle", nil)
+		} else {
+			err = updateOVSOtherConfig("max-idle", config.OvnKubeNode.MaxIdle)
+		}
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -1304,4 +1335,19 @@ func deleteConntrackEntries(checkEpSlice, fromEpSlice *discovery.EndpointSlice) 
 			}
 		}
 	}
+}
+
+func updateOVSOtherConfig(key string, value interface{}) error {
+	var args []string
+	if value == nil {
+		// no value is passed, remove the config
+		args = []string{"remove", "Open_vSwitch", ".", "other_config", key}
+	} else {
+		// set config
+		args = []string{"set", "Open_vSwitch", ".", fmt.Sprintf("other_config:%s=%v", key, value)}
+	}
+	if _, stderr, err := util.RunOVSVsctl(args...); err != nil {
+		return fmt.Errorf("error setting/removing other_config:%s: %v\n  %q", key, err, stderr)
+	}
+	return nil
 }
