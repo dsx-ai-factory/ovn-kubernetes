@@ -72,6 +72,10 @@ OVN_MAX_NEWCONN_BURST="100"
 OVN_XDP_SFREP="xdp_sf"
 OVN_XDP_VETH="xdp_veth"
 OVN_XDP_NS="xdp_ns"
+# ovs "other-config"
+OVS_MAX_REVALIDATOR="5000"
+OVS_MIN_REVALIDATE_PPS="1"
+OVS_MAX_IDLE="20000"
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -276,6 +280,15 @@ while [ "$1" != "" ]; do
   --xdp-ns)
     OVN_XDP_NS=$VALUE
     ;;
+  --max-revalidator)
+    OVS_MAX_REVALIDATOR=$VALUE
+    ;;
+  --min-revalidate-pps)
+    OVS_MIN_REVALIDATE_PPS=$VALUE
+    ;;
+  --max-idle)
+    OVS_MAX_IDLE=$VALUE
+    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -420,6 +433,12 @@ ovn_xdp_veth=${OVN_XDP_VETH}
 echo "ovn_xdp_veth: ${ovn_xdp_veth}"
 ovn_xdp_ns=${OVN_XDP_NS}
 echo "ovn_xdp_ns: ${ovn_xdp_ns}"
+ovs_max_revalidator=${OVS_MAX_REVALIDATOR}
+echo "ovs_max_revalidator: ${ovs_max_revalidator}"
+ovs_min_revalidate_pps=${OVS_MIN_REVALIDATE_PPS}
+echo "ovs_min_revalidate_pps: ${ovs_min_revalidate_pps}"
+ovs_max_idle=${OVS_MAX_IDLE}
+echo "ovs_max_idle: ${ovs_max_idle}"
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -641,6 +660,9 @@ ovn_image=${image_ubuntu} \
   ovn_xdp_sfrep=${ovn_xdp_sfrep} \
   ovn_xdp_veth=${ovn_xdp_veth} \
   ovn_xdp_ns=${ovn_xdp_ns} \
+  ovs_max_revalidator=${ovs_max_revalidator} \
+  ovs_min_revalidate_pps=${ovs_min_revalidate_pps} \
+  ovs_max_idle=${ovs_max_idle} \
   j2 ../templates/ovnk8s-node-dpu.yaml.j2 -o ../yaml/ovnk8s-node-dpu.yaml
 
 ovn_image=${imagec} \

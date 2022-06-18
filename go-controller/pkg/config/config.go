@@ -385,6 +385,9 @@ type OvnKubeNodeConfig struct {
 	XDPSFRep             string `gcfg:"ovn-xdp-sfrep"`
 	XDPVeth              string `gcfg:"ovn-xdp-veth"`
 	XDPNamespace         string `gcfg:"ovn-xdp-ns"`
+	MaxRevalidator       uint   `gcfg:"ovs-max-revalidator"`
+	MinRevalidatePPS     uint   `gcfg:"ovs-min-revalidate-pps"`
+	MaxIdle              uint   `gcfg:"ovs-max-idle"`
 }
 
 // OvnDBScheme describes the OVN database connection transport method
@@ -1198,6 +1201,24 @@ var OvnKubeNodeFlags = []cli.Flag{
 		Usage:       "the name of the namespace used for XDP",
 		Value:       OvnKubeNode.XDPNamespace,
 		Destination: &cliConfig.OvnKubeNode.XDPNamespace,
+	},
+	&cli.UintFlag{
+		Name:        "ovs-max-revalidator",
+		Usage:       "the max time (in ms) that revalidator threads will wait before executing flow revalidation",
+		Value:       OvnKubeNode.MaxRevalidator,
+		Destination: &cliConfig.OvnKubeNode.MaxRevalidator,
+	},
+	&cli.UintFlag{
+		Name:        "ovs-min-revalidate-pps",
+		Usage:       "the minimum pps that flow must have in order to be revalidated when revalidation duration exceeds half of max-revalidator config variable",
+		Value:       OvnKubeNode.MinRevalidatePPS,
+		Destination: &cliConfig.OvnKubeNode.MinRevalidatePPS,
+	},
+	&cli.UintFlag{
+		Name:        "ovs-max-idle",
+		Usage:       "the maximum time (in ms) that idle flows will remain cached in the datapath",
+		Value:       OvnKubeNode.MaxIdle,
+		Destination: &cliConfig.OvnKubeNode.MaxIdle,
 	},
 }
 
