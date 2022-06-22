@@ -205,14 +205,12 @@ func (runsvc *defaultExecRunner) RunCmd(cmd kexec.Cmd, cmdPath string, envVars [
 	cmd.SetStderr(stderr)
 
 	counter := atomic.AddUint64(&runCounter, 1)
-	logCmd := fmt.Sprintf("%s %s", cmdPath, strings.Join(args, " "))
-	klog.V(5).Infof("exec(%d): %s", counter, logCmd)
-
+	klog.V(6).Infof("exec(%d): %s", counter, fmt.Sprintf("%s %s", cmdPath, strings.Join(args, " ")))
 	err := cmd.Run()
-	klog.V(5).Infof("exec(%d): stdout: %q", counter, stdout)
-	klog.V(5).Infof("exec(%d): stderr: %q", counter, stderr)
+	klog.V(6).Infof("exec(%d): stdout: %q", counter, stdout)
+	klog.V(6).Infof("exec(%d): stderr: %q", counter, stderr)
 	if err != nil {
-		klog.V(5).Infof("exec(%d): err: %v", counter, err)
+		klog.V(5).Infof("exec(%d): err: %v, stderr: %q", counter, err, stderr)
 	}
 	return stdout, stderr, err
 }

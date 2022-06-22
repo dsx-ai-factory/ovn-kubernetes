@@ -337,29 +337,37 @@ func (c *openflowManager) syncFlows() {
 
 // checkDefaultOpenFlow checks for the existence of default OpenFlow rules and
 // exits if the output is not as expected
-func (c *openflowManager) Run(stopChan <-chan struct{}) {
-	for {
-		select {
-		case <-time.After(15 * time.Second):
-			if err := checkPorts(c.defaultBridge); err != nil {
-				klog.Errorf("Checkports failed %v", err)
-				continue
-			}
-			if c.externalGatewayBridge != nil {
-				if err := checkPorts(c.externalGatewayBridge); err != nil {
+func (c *openflowManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
+	doneWg.Add(1)
+	go func() {
+		defer doneWg.Done()
+		syncPeriod := 15 * time.Second
+		timer := time.NewTicker(syncPeriod)
+		defer timer.Stop()
+		for {
+			select {
+			case <-timer.C:
+				if err := checkPorts(c.defaultBridge); err != nil {
 					klog.Errorf("Checkports failed %v", err)
 					continue
 				}
-			}
-			if c.flowCache != nil {
+				if c.externalGatewayBridge != nil {
+					if err := checkPorts(c.externalGatewayBridge); err != nil {
+						klog.Errorf("Checkports failed %v", err)
+						continue
+					}
+				}
+				if c.flowCache != nil {
+					c.syncFlows()
+				}
+			case <-c.flowChan:
 				c.syncFlows()
+				timer.Reset(syncPeriod)
+			case <-stopChan:
+				return
 			}
-		case <-c.flowChan:
-			c.syncFlows()
-		case <-stopChan:
-			return
 		}
-	}
+	}()
 }
 
 func checkPorts(bridge *bridgeConfiguration) error {
