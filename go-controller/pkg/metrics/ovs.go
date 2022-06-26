@@ -1309,6 +1309,21 @@ var ovsVswitchdCoverageShowMetricsMap = map[string]*metricDetails{
 	"ofproto_reinit_ports": {
 		help: "Number of times all the OpenFlow ports were reinitialized.",
 	},
+	"revalidate_missed_dp_flow": {
+		help: "Number of times missed datapath flows had to be revalidated",
+	},
+	"upcall_flow_del_rev": {
+		help: "Number of times flows were deleted after revalidation determined to delete the flow",
+	},
+	"upcall_flow_del_no_rev": {
+		help: "Number of times flows were deleted because the flow didn't have min-revalidator-pps fulfilled",
+	},
+	"upcall_flow_del_idle_or_limit": {
+		help: "Number of times flows were deleted because we reached the limit or flow was idle for more than max-idle time",
+	},
+	"upcall_flow_del_purge": {
+		help: "Number of times flows were purged",
+	},
 }
 var registerOvsMetricsOnce sync.Once
 
