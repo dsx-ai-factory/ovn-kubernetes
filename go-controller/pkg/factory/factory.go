@@ -278,6 +278,19 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 			noServiceNameSelector())
 	})
 
+	// For Nodes, in DPU or full mode, only the given node is needed if HybridOverlay is not enabled (required by addressManager)
+	if !config.HybridOverlay.Enabled && config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+		wf.iFactory.InformerFor(&kapi.Node{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+			return v1coreinformers.NewFilteredNodeInformer(
+				c,
+				resyncPeriod,
+				cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+				func(opts *metav1.ListOptions) {
+					opts.LabelSelector = fmt.Sprintf("kubernetes.io/hostname=%s", nodeName)
+				})
+		})
+	}
+
 	var err error
 	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
 		defaultNumEventQueues)
@@ -293,9 +306,12 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 		return nil, err
 	}
 
-	wf.informers[nodeType], err = newInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer())
-	if err != nil {
-		return nil, err
+	// if HybridOverlay is not enabled, node informer is not required in the dpuHost mode
+	if config.HybridOverlay.Enabled || config.OvnKubeNode.Mode == types.NodeModeDPU || config.OvnKubeNode.Mode == types.NodeModeFull {
+		wf.informers[nodeType], err = newInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer())
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost && config.OVNKubernetesFeature.EnableMultiNetwork {
