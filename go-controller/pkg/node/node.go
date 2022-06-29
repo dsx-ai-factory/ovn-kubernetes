@@ -261,12 +261,7 @@ func setupOVNNode(node *kapi.Node) error {
 		if err != nil {
 			return err
 		}
-		if config.OvnKubeNode.MinRevalidatePPS == 0 {
-			// clear to use default
-			err = updateOVSOtherConfig("min-revalidate-pps", nil)
-		} else {
-			err = updateOVSOtherConfig("min-revalidate-pps", config.OvnKubeNode.MinRevalidatePPS)
-		}
+		err = updateOVSOtherConfig("min-revalidate-pps", config.OvnKubeNode.MinRevalidatePPS)
 		if err != nil {
 			return err
 		}
