@@ -547,6 +547,18 @@ spec:
          Pod ovn-kubernetes/ {{ $labels.pod }} vault-agent container
          is restarting {{ printf "%.2f" $value }} times / 5 minutes
 
+    - alert: OvsVfRepInterfaceDown
+      expr: |
+        ovs_vswitchd_interface_link_state{interface=~"pf.*", port!=""} != 2
+      for: 10m
+      labels:
+       severity: major
+       pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
+      annotations:
+       message: |
+         Interface {{ $labels.interface }} on instance {{ $labels.instance }} is not up for longer than 10m
+
     - alert: OvsNoOffloadBytesTooHigh
       expr: |
         (rate(ovs_vswitchd_interface_rx_bytes{interface=~"pf.*"}[15m])-rate(ovs_vswitchd_interface_in_hw_bytes{interface=~"pf.*"}[15m])) / 1024 / 1024 > 10
