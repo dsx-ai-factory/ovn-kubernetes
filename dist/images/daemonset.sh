@@ -76,6 +76,8 @@ OVN_XDP_NS="xdp_ns"
 OVS_MAX_REVALIDATOR="5000"
 OVS_MIN_REVALIDATE_PPS="1"
 OVS_MAX_IDLE="20000"
+OVN_NB_ENABLE_LEADER_XFER_FOR_SNAPSHOT="false"
+OVN_SB_ENABLE_LEADER_XFER_FOR_SNAPSHOT="false"
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -289,6 +291,12 @@ while [ "$1" != "" ]; do
   --max-idle)
     OVS_MAX_IDLE=$VALUE
     ;;
+  --enable-ovn-nb-leader-xfer-for-snapshot)
+    OVN_NB_ENABLE_LEADER_XFER_FOR_SNAPSHOT=$VALUE
+    ;;
+  --enable-ovn-sb-leader-xfer-for-snapshot)
+    OVN_SB_ENABLE_LEADER_XFER_FOR_SNAPSHOT=$VALUE
+    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -439,6 +447,10 @@ ovs_min_revalidate_pps=${OVS_MIN_REVALIDATE_PPS}
 echo "ovs_min_revalidate_pps: ${ovs_min_revalidate_pps}"
 ovs_max_idle=${OVS_MAX_IDLE}
 echo "ovs_max_idle: ${ovs_max_idle}"
+ovn_nb_enable_leader_xfer_for_snapshot=${OVN_NB_ENABLE_LEADER_XFER_FOR_SNAPSHOT}
+echo "ovn_nb_enable_leader_xfer_for_snapshot: ${ovn_nb_enable_leader_xfer_for_snapshot}"
+ovn_sb_enable_leader_xfer_for_snapshot=${OVN_SB_ENABLE_LEADER_XFER_FOR_SNAPSHOT}
+echo "ovn_sb_enable_leader_xfer_for_snapshot: ${ovn_sb_enable_leader_xfer_for_snapshot}"
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -681,6 +693,7 @@ ovn_image=${imagec} \
   ovn_nb_raft_election_timer=${ovn_nb_raft_election_timer} \
   ovn_nb_port=${ovn_nb_port} \
   ovn_nb_raft_port=${ovn_nb_raft_port} \
+  ovn_nb_enable_leader_xfer_for_snapshot=${ovn_nb_enable_leader_xfer_for_snapshot} \
   j2 ../templates/ovn-nbdb-raft.yaml.j2 -o ../yaml/ovn-nbdb-raft.yaml
 
 ovn_image=${imagec} \
@@ -692,6 +705,7 @@ ovn_image=${imagec} \
   ovn_sb_raft_election_timer=${ovn_sb_raft_election_timer} \
   ovn_sb_port=${ovn_sb_port} \
   ovn_sb_raft_port=${ovn_sb_raft_port} \
+  ovn_sb_enable_leader_xfer_for_snapshot=${ovn_sb_enable_leader_xfer_for_snapshot} \
   j2 ../templates/ovn-sbdb-raft.yaml.j2 -o ../yaml/ovn-sbdb-raft.yaml
 
 ovn_image=${imagec} \

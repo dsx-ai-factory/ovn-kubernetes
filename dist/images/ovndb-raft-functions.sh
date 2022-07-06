@@ -169,6 +169,22 @@ set_election_timer() {
   return 0
 }
 
+# set leader-trans-for-snapshot to true/false
+set_leader_xfer_for_snapshot() {
+  local db=${1}
+  local enabled=${2}
+  local result=""
+
+  echo "setting leader-trans-for-snapshot for ${database} to ${enabled}"
+  result=$(ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl cluster/set-leader-trans-for-snapshot ${enabled})
+  if [[ $? -ne 0 ]]; then
+    echo "Failed to set leader-trans-for-snapshot to ${enabled}: ${result}. Exiting..."
+    exit 11
+  fi
+  echo "set leader-trans-for-snapshot to ${enabled} successfully"
+  return 0
+}
+
 # set_connection() will be called for first OVN DB statefulset Pod pod when :
 #    1. it is first started or
 #    2. it restarts after the initial start has failed or
@@ -415,6 +431,13 @@ ovsdb-raft() {
   # from the last pod of the statefulset.
   if [[ "${POD_NAME}" == ${sts_name}-${last_node_index} ]]; then
     check_and_apply_ovnkube_db_ep ${db} ${port}
+  fi
+
+  # set leader-trans-for-snapshot according to env var
+  if [[ ${db} == "nb" ]]; then
+    set_leader_xfer_for_snapshot ${db} ${OVN_NB_ENABLE_LEADER_XFER_FOR_SNAPSHOT}
+  else
+    set_leader_xfer_for_snapshot ${db} ${OVN_SB_ENABLE_LEADER_XFER_FOR_SNAPSHOT}
   fi
 
   tail --follow=name ${OVN_LOGDIR}/ovsdb-server-${db}.log &

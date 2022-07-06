@@ -97,6 +97,8 @@ BASEDIR=$(dirname $0)
 # OVS_MAX_REVALIDATOR - The maximum time (in ms) that revalidator threads will wait before executing flow revalidation
 # OVS_MIN_REVALIDATE_PPS - The minimum pps that flow must have in order to be revalidated when revalidation duration exceeds half of max-revalidator config variable
 # OVS_MAX_IDLE - The maximum time (in ms) that idle flows will remain cached in the datapath
+# OVN_NB_ENABLE_LEADER_XFER_FOR_SNAPSHOT - Transfer leader election when snapshotting ovn nb db
+# OVN_SB_ENABLE_LEADER_XFER_FOR_SNAPSHOT - Transfer leader election when snapshotting ovn sb db
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -247,6 +249,10 @@ OVS_MAX_REVALIDATOR=${OVS_MAX_REVALIDATOR:-"5000"}
 OVS_MIN_REVALIDATE_PPS=${OVS_MIN_REVALIDATE_PPS:-"1"}
 # OVS_MAX_IDLE, "other_config:max_idle" in ovs, default to 20000
 OVS_MAX_IDLE=${OVS_MAX_IDLE:-"20000"}
+# OVN_NB_ENABLE_LEADER_XFER_FOR_SNAPSHOT
+OVN_NB_ENABLE_LEADER_XFER_FOR_SNAPSHOT=${OVN_NB_ENABLE_LEADER_XFER_FOR_SNAPSHOT:-false}
+# OVN_SB_ENABLE_LEADER_XFER_FOR_SNAPSHOT
+OVN_SB_ENABLE_LEADER_XFER_FOR_SNAPSHOT=${OVN_SB_ENABLE_LEADER_XFER_FOR_SNAPSHOT:-false}
 
 ovn_hybrid_overlay_enable=${OVN_HYBRID_OVERLAY_ENABLE:-}
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR:-}

@@ -165,6 +165,8 @@ spec:
               value: "{{ ovn_sb_port }}"
             - name: OVN_SB_RAFT_PORT
               value: "{{ ovn_sb_raft_port }}"
+            - name: OVN_SB_ENABLE_LEADER_XFER_FOR_SNAPSHOT
+              value: "{{ ovn_sb_enable_leader_xfer_for_snapshot }}"
         # end of container
 
       volumes:
