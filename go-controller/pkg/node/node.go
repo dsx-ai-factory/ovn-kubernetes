@@ -1243,6 +1243,7 @@ func syncEndpointSlices(obj []interface{}) {
 		klog.Errorf("Failed to add interface %s to ovn firewall zone: (%v)",
 			types.K8sMgmtIntfName, err)
 	}
+	// TODO(gmoodalbail): we need to clean up any stale ports in ovn and ngn-admin zone
 }
 
 func configureSvcRouteViaBridge(bridge string) error {

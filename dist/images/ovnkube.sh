@@ -1149,44 +1149,36 @@ check_firewall_state() {
   fi
 }
 
-# create_ovn_firewall_zone checks whether ovn firewall zone exists, 
-# if it exists, removes and create a new ovn firewall zone
 create_ovn_firewall_zone() {
-  zones=$(firewall-cmd --get-zones --permanent | tr "[:space:]" "\n")
-  for zone in ${zones[@]}; do
-      if [[ $zone == "ovn" ]]; then
-          firewall-cmd --delete-zone=ovn --permanent >/dev/null
-	  if [[ $? != 0 ]]; then
-	      echo "Exiting, failed to delete the ovn firewall zone"
-	      exit 1
-	  fi
-
-	  firewall-cmd --reload >/dev/null
-	  if [[ $? != 0 ]]; then
-	      echo "Exiting, failed to reload the firewalld service"
-	      exit 1
-	  fi
-	  break
-      fi
-  done
-
-  firewall-cmd --new-zone=ovn --permanent >/dev/null
+  # if ovn zone is not present, create it and apply it by performing reload
+  firewall-cmd --zone=ovn --list-ports >/dev/null
   if [[ $? != 0 ]]; then
+    # this should rarely happen now that kubespray creates it for us
+    echo "ovn firewall zone does not exist, so creating it..."
+    firewall-cmd --new-zone=ovn --permanent >/dev/null
+    if [[ $? != 0 ]]; then
       echo "Exiting, failed to create ovn firewall zone"
       exit 1
+    fi
+
+    firewall-cmd --reload >/dev/null
+    if [[ $? != 0 ]]; then
+      echo "Exiting, failed to reload the firewalld service"
+      exit 1
+    fi
   fi
 
   # block icmp traffic in ovn zone
   firewall-cmd --zone=ovn --add-icmp-block-inversion --permanent >/dev/null
   if [[ $? != 0 ]]; then
-          echo "Exiting, failed to block icmp traffic in ovn zone"
-          exit 1
+    echo "Exiting, failed to apply block icmp traffic in ovn zone to permanent configuration"
+    exit 1
   fi
 
-  firewall-cmd --reload >/dev/null
+  firewall-cmd --zone=ovn --add-icmp-block-inversion >/dev/null
   if [[ $? != 0 ]]; then
-      echo "Exiting, failed to reload the firewalld service"
-      exit 1
+    echo "Exiting, failed to apply block icmp traffic in ovn zone to running configuration"
+    exit 1
   fi
 
 }
