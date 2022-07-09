@@ -193,6 +193,16 @@ var metricOvsDpMasksHitRatio = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	},
 )
 
+var metricOvsDpOffloadedFlowsTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Namespace: MetricOvsNamespace,
+	Subsystem: MetricOvsSubsystemVswitchd,
+	Name:      "dp_offloaded_flows_total",
+	Help:      "Represents the total offloaded flows in datapath."},
+	[]string{
+		"datapath",
+	},
+)
+
 // ovs bridge statistics & attributes metrics
 var metricOvsBridgeTotal = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: MetricOvsNamespace,
@@ -467,6 +477,30 @@ func setOvsDatapathMetrics(datapaths []string) (err error) {
 	return nil
 }
 
+func setOvsDatapathOffloadMetrics() error {
+	stdout, stderr, err := util.RunOvsVswitchdAppCtl("upcall/show")
+	if err != nil {
+		return fmt.Errorf("failed to get output of ovs-appctl upcall/show "+
+			"stderr(%s) :(%v)", stderr, err)
+	}
+
+	output := strings.Split(stdout, "\n")
+	var datapathName string
+	for _, line := range output {
+		if strings.Contains(line, "@") {
+			datapath := strings.Split(line, "@")
+			datapathName = strings.TrimSuffix(datapath[1], ":")
+		} else if strings.Contains(line, "offloaded flows") {
+			offloadFields := strings.Split(line, ":")
+			offloadValue := strings.TrimSpace(offloadFields[1])
+			value := parseMetricToFloat(MetricOvsSubsystemVswitchd, "dp_offloaded_flows_total", offloadValue)
+			metricOvsDpOffloadedFlowsTotal.WithLabelValues(datapathName).Set(value)
+			break
+		}
+	}
+	return nil
+}
+
 // ovsDatapathMetricsUpdate updates the ovs datapath metrics for every 30 sec
 func ovsDatapathMetricsUpdate(metricsScrapeInterval int, stopChan chan struct{}) {
 	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
@@ -482,6 +516,11 @@ func ovsDatapathMetricsUpdate(metricsScrapeInterval int, stopChan chan struct{})
 			}
 
 			err = setOvsDatapathMetrics(datapaths)
+			if err != nil {
+				klog.Errorf("%s", err.Error())
+			}
+
+			err = setOvsDatapathOffloadMetrics()
 			if err != nil {
 				klog.Errorf("%s", err.Error())
 			}
@@ -1363,6 +1402,7 @@ func RegisterOvsMetrics(nodeName string, ovsDBClient *util.OvsdbClient, metricsS
 		prometheus.MustRegister(metricOvsdpMasksHit)
 		prometheus.MustRegister(metricOvsDpMasksTotal)
 		prometheus.MustRegister(metricOvsDpMasksHitRatio)
+		prometheus.MustRegister(metricOvsDpOffloadedFlowsTotal)
 		// Register OVS bridge statistics & attributes metrics
 		prometheus.MustRegister(metricOvsBridgeTotal)
 		prometheus.MustRegister(metricOvsBridge)
