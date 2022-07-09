@@ -5,7 +5,6 @@ package metrics
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"reflect"
 	"strings"
@@ -20,10 +19,6 @@ import (
 
 var (
 	ovsVersion string
-)
-
-const (
-	OVSRuntimeDir = "/var/run/openvswitch"
 )
 
 // ovs local db coverage/show metrics
@@ -322,15 +317,9 @@ var metricOvsDbSize = prometheus.NewGauge(prometheus.GaugeOpts{
 })
 
 func getOvsVersionInfo() {
-	data, err := ioutil.ReadFile(fmt.Sprintf("%s/ovs-vswitchd.pid", OVSRuntimeDir))
+	stdout, _, err := util.RunOvsVswitchdAppCtl("version")
 	if err != nil {
-		klog.Errorf("Failed to get pid of ovs-vswitchd: %s", err.Error())
-		return
-	}
-	ctlFile := fmt.Sprintf("%s/ovs-vswitchd.%s.ctl", OVSRuntimeDir, strings.TrimSpace(string(data)))
-	stdout, _, err := util.RunOVSAppctlWithTimeout(3, "-t", ctlFile, "version")
-	if err != nil {
-		klog.Errorf("Failed to exec ovs-appctl cmd: %s", err.Error())
+		klog.Errorf("Failed to exec ovs-appctl cmd to get version: %s", err.Error())
 		return
 	}
 	if !strings.HasPrefix(stdout, "ovs-vswitchd (Open vSwitch)") {
