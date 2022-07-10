@@ -6,6 +6,7 @@ package util
 import (
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -118,17 +119,13 @@ func (defaultSriovnetOps) SetRepresentorVFMissPktRate(netdev string, maxPPS, max
 
 // Get the configured rate and Burst
 func (defaultSriovnetOps) GetRepresentorVFMissPktRate(netdev string) (uint64, uint64, error) {
-	flavor, err := sriovnet.GetRepresentorPortFlavour(netdev)
-	if err != nil {
-		return 0, 0, fmt.Errorf("unknown port flavour for netdev %s. %v", netdev, err)
-	}
-	// connection rate-limiting is supported only on PF and VF representors.
-	if flavor != sriovnet.PORT_FLAVOUR_PCI_PF && flavor != sriovnet.PORT_FLAVOUR_PCI_VF {
-		return 0, 0, nil
-	}
 	sysfsVfMissPktRateFile := filepath.Join(NetSysDir, netdev, "rep_config", "miss_rl_cfg")
-	_, err = utilfs.Fs.Stat(sysfsVfMissPktRateFile)
+	_, err := utilfs.Fs.Stat(sysfsVfMissPktRateFile)
 	if err != nil {
+		if os.IsNotExist(err) {
+			// connection rate-limiting is supported only on PF and VF representors.
+			return 0, 0, nil
+		}
 		return 0, 0, fmt.Errorf("couldn't stat VF representor's sysfs file %s: %v", sysfsVfMissPktRateFile, err)
 	}
 	missPktRateInfo, err := utilfs.Fs.ReadFile(sysfsVfMissPktRateFile)
@@ -158,17 +155,13 @@ func (defaultSriovnetOps) GetRepresentorVFMissPktRate(netdev string) (uint64, ui
 
 // Get the packets dropped due to exceeding the configured limit.
 func (defaultSriovnetOps) GetRepresentorVFMissPktDrops(netdev string) (uint64, error) {
-	flavor, err := sriovnet.GetRepresentorPortFlavour(netdev)
-	if err != nil {
-		return 0, fmt.Errorf("unknown port flavour for netdev %s. %v", netdev, err)
-	}
-	// connection rate-limiting is supported only on PF and VF representors.
-	if flavor != sriovnet.PORT_FLAVOUR_PCI_PF && flavor != sriovnet.PORT_FLAVOUR_PCI_VF {
-		return 0, nil
-	}
 	sysfsVfMissPktDropFile := filepath.Join(NetSysDir, netdev, "rep_config", "miss_rl_dropped_packets")
-	_, err = utilfs.Fs.Stat(sysfsVfMissPktDropFile)
+	_, err := utilfs.Fs.Stat(sysfsVfMissPktDropFile)
 	if err != nil {
+		if os.IsNotExist(err) {
+			// connection rate-limiting is supported only on PF and VF representors.
+			return 0, nil
+		}
 		return 0, fmt.Errorf("couldn't stat VF representor's sysfs file %s: %v", sysfsVfMissPktDropFile, err)
 	}
 	missPktDropCount, err := utilfs.Fs.ReadFile(sysfsVfMissPktDropFile)
