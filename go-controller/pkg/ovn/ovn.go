@@ -1537,8 +1537,9 @@ func (oc *Controller) WatchNodes() {
 			}
 
 			_, failed = nodeClusterRouterPortFailed.Load(node.Name)
-			if failed || nodeChassisChanged(oldNode, node) || nodeSubnetChanged(oldNode, node, oc.nadInfo.NetName) ||
-				skipPinnedLSChanged(oldNode, node, oc.nadInfo) {
+			chassisChanged := nodeChassisChanged(oldNode, node)
+			subnetChanged := nodeSubnetChanged(oldNode, node, oc.nadInfo.NetName)
+			if failed || chassisChanged || subnetChanged || skipPinnedLSChanged(oldNode, node, oc.nadInfo) {
 				if err = oc.syncNodeClusterRouterPort(node, nil); err != nil {
 					if !util.IsAnnotationNotSetError(err) {
 						klog.Warningf(err.Error())
@@ -1554,7 +1555,7 @@ func (oc *Controller) WatchNodes() {
 			}
 
 			_, failed = mgmtPortFailed.Load(node.Name)
-			if failed || macAddressChanged(oldNode, node) || nodeSubnetChanged(oldNode, node, oc.nadInfo.NetName) {
+			if failed || macAddressChanged(oldNode, node) || subnetChanged {
 				err := oc.syncNodeManagementPort(node, hostSubnets)
 				if err != nil {
 					if !util.IsAnnotationNotSetError(err) {
@@ -1566,7 +1567,7 @@ func (oc *Controller) WatchNodes() {
 				}
 			}
 
-			if nodeChassisChanged(oldNode, node) {
+			if chassisChanged {
 				// delete stale chassis in SBDB if any
 				oc.deleteStaleNodeChassis(node)
 			}
@@ -1574,7 +1575,7 @@ func (oc *Controller) WatchNodes() {
 			oc.clearInitialNodeNetworkUnavailableCondition(oldNode, node)
 
 			_, failed = gatewaysFailed.Load(node.Name)
-			if failed || oc.gatewayChanged(oldNode, node) || nodeSubnetChanged(oldNode, node, oc.nadInfo.NetName) || hostAddressesChanged(oldNode, node) {
+			if failed || oc.gatewayChanged(oldNode, node) || subnetChanged || hostAddressesChanged(oldNode, node) {
 				err := oc.syncNodeGateway(node, nil)
 				if err != nil {
 					if !util.IsAnnotationNotSetError(err) {
