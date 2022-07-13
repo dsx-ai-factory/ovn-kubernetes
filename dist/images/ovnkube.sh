@@ -1336,7 +1336,11 @@ ovn-node() {
   trap 'kill $(jobs -p) ; exit 0' TERM
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovnkube.pid
-  rm -f /etc/cni/net.d/10-ovn-kubernetes.conf
+
+  if [[ ${ovnkube_node_mode} != "dpu" ]]; then
+    echo "removing OVN CNI conf"
+    rm -vf /etc/cni/net.d/10-ovn-kubernetes.conf
+  fi
 
   if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
     echo "=============== ovn-node - (wait for ovs)"
