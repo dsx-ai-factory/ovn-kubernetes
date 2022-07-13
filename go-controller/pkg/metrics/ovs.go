@@ -13,6 +13,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/safchain/ethtool"
 	"github.com/vishvananda/netlink"
 	"k8s.io/klog/v2"
 )
@@ -775,6 +776,55 @@ func setOvsInterfaceHwOffloadInfo(fd int, interfaceBridge, interfacePort, interf
 		interfaceBridge, interfacePort, interfaceName).Set(float64(hwPackets))
 }
 
+func setHwOffloadInfoViaEthtool(etHandler *ethtool.Ethtool, interfaceBridge, interfacePort, interfaceName,
+	interfaceDriverName string) {
+	// Check if this is Representor, skip anything else
+	if etHandler == nil || strings.Compare(interfaceDriverName, "mlx5e_rep") != 0 {
+		// Check if we need to explicitly set these to 0
+		return
+	}
+
+	ethStats, err := etHandler.Stats(interfaceName)
+	if err != nil {
+		klog.Errorf("Failed to get stats using ethtool binding: %v", err)
+		return
+	}
+
+	// Pod Receive is VF-Representor transmit
+	swRxBytes := ethStats["tx_bytes"]
+	swRxPackets := ethStats["tx_packets"]
+	totalRxBytes := ethStats["vport_tx_bytes"]
+	totalRxPackets := ethStats["vport_tx_packets"]
+	hwRxBytes := totalRxBytes - swRxBytes
+	hwRxPackets := totalRxPackets - swRxPackets
+
+	// Pod Transmit is VF-Representor receive
+	swTxBytes := ethStats["rx_bytes"]
+	swTxPackets := ethStats["rx_packets"]
+	totalTxBytes := ethStats["vport_rx_bytes"]
+	totalTxPackets := ethStats["vport_rx_packets"]
+	hwTxBytes := totalTxBytes - swTxBytes
+	hwTxPackets := totalTxPackets - swTxPackets
+
+	ovsInterfaceMetricsDataMap["interface_tx_sw_bytes"].metric.WithLabelValues(
+		interfaceBridge, interfacePort, interfaceName).Set(float64(swTxBytes))
+	ovsInterfaceMetricsDataMap["interface_tx_hw_bytes"].metric.WithLabelValues(
+		interfaceBridge, interfacePort, interfaceName).Set(float64(hwTxBytes))
+	ovsInterfaceMetricsDataMap["interface_tx_sw_packets"].metric.WithLabelValues(
+		interfaceBridge, interfacePort, interfaceName).Set(float64(swTxPackets))
+	ovsInterfaceMetricsDataMap["interface_tx_hw_packets"].metric.WithLabelValues(
+		interfaceBridge, interfacePort, interfaceName).Set(float64(hwTxPackets))
+
+	ovsInterfaceMetricsDataMap["interface_rx_sw_bytes"].metric.WithLabelValues(
+		interfaceBridge, interfacePort, interfaceName).Set(float64(swRxBytes))
+	ovsInterfaceMetricsDataMap["interface_rx_hw_bytes"].metric.WithLabelValues(
+		interfaceBridge, interfacePort, interfaceName).Set(float64(hwRxBytes))
+	ovsInterfaceMetricsDataMap["interface_rx_sw_packets"].metric.WithLabelValues(
+		interfaceBridge, interfacePort, interfaceName).Set(float64(swRxPackets))
+	ovsInterfaceMetricsDataMap["interface_rx_hw_packets"].metric.WithLabelValues(
+		interfaceBridge, interfacePort, interfaceName).Set(float64(hwRxPackets))
+}
+
 func setOvsPortMissPktsInfo(interfaceBridge, interfacePort, interfaceName, interfaceDriverName string) {
 	// Check if this is Representor, if so, let's get any rate configured on it.
 	if strings.Compare(interfaceDriverName, "mlx5e_rep") != 0 {
@@ -886,6 +936,15 @@ func ovsInterfaceMetricsUpdate(ovsDBClient *util.OvsdbClient,
 		defer util.NetlinkFilterClose(nlFd)
 	}
 
+	// it is ok to do it here since calling NewEthtool() is inexpensive.
+	// also, if we fail opening the handler, we will retry again in next attempt
+	etHandler, err := ethtool.NewEthtool()
+	if err != nil {
+		klog.Infof("Error opening ethtool: %s", err.Error())
+	} else {
+		defer etHandler.Close()
+	}
+
 	interfaceList, err := ovsDBClient.GetOvsInterfaceTable()
 	if err != nil {
 		return fmt.Errorf("failed to get ovsdb interface table :(%v)", err)
@@ -938,6 +997,8 @@ func ovsInterfaceMetricsUpdate(ovsDBClient *util.OvsdbClient,
 			setOvsInterfaceHwOffloadInfo(
 				nlFd, interfaceData.bridge, portName, interfaceName, interfaceInfo.Status["driver_name"])
 		}
+		// set interface hw-offload stats initiated.
+		setHwOffloadInfoViaEthtool(etHandler, interfaceData.bridge, portName, interfaceName, interfaceInfo.Status["driver_name"])
 	}
 	return nil
 }
@@ -1184,6 +1245,7 @@ var ovsInterfaceMetricsDataMap = map[string]*ovsInterfaceMetricsDetails{
 		help: "Maximum burst size of allowed new connections on OVS interface, " +
 			"in pps.",
 	},
+	// next 4 metrics are here for backwards compatibilty, and will be removed later..
 	"interface_in_sw_bytes": {
 		help: "Sent bytes via software OVS path",
 	},
@@ -1195,6 +1257,32 @@ var ovsInterfaceMetricsDataMap = map[string]*ovsInterfaceMetricsDetails{
 	},
 	"interface_in_hw_packets": {
 		help: "Sent packets via hardware accelerated OVS path",
+	},
+	// Pod transmit metrics
+	"interface_tx_sw_bytes": {
+		help: "Sent bytes via software OVS path",
+	},
+	"interface_tx_hw_bytes": {
+		help: "Sent bytes via hardware accelerated OVS path",
+	},
+	"interface_tx_sw_packets": {
+		help: "Sent packets via software OVS path",
+	},
+	"interface_tx_hw_packets": {
+		help: "Sent packets via hardware accelerated OVS path",
+	},
+	// Pod Receive metrics
+	"interface_rx_sw_bytes": {
+		help: "Received bytes via software OVS path",
+	},
+	"interface_rx_hw_bytes": {
+		help: "Received bytes via hardware accelerated OVS path",
+	},
+	"interface_rx_sw_packets": {
+		help: "Received packets via software OVS path",
+	},
+	"interface_rx_hw_packets": {
+		help: "Received packets via hardware accelerated OVS path",
 	},
 }
 
