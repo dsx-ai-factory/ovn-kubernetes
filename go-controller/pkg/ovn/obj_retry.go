@@ -1525,10 +1525,19 @@ func (oc *Controller) updateResourceHandler(old, newer interface{}, objectsToRet
 	}
 
 	// skip the whole update if the new object doesn't exist anymore in the API server
-	newer, err = oc.getResourceFromInformerCache(objectsToRetry.oType, newKey)
+	latest, err := oc.getResourceFromInformerCache(objectsToRetry.oType, newKey)
 	if err != nil {
-		klog.Warningf("Unable to get %v %s from informer cache (perhaps it was already"+
-			" deleted?), skipping update: %v", objectsToRetry.oType, newKey, err)
+		// When processing an object in terminal state there is a chance that it was already removed from
+		//  the API server. Since delete events for objects in terminal state are skipped delete it here.
+		// This only applies to pod watchers (pods + dynamic network policy handlers watching pods).
+		if kerrors.IsNotFound(err) && oc.isObjectInTerminalState(objectsToRetry.oType, newer) {
+			klog.Warningf("%s %s is in terminal state but no longer exists in informer cache, removing",
+				objectsToRetry.oType, newKey)
+			oc.processObjectInTerminalState(objectsToRetry, newer, newKey, resourceEventUpdate)
+		} else {
+			klog.Warningf("Unable to get %s %s from informer cache (perhaps it was already"+
+				" deleted?), skipping update: %v", objectsToRetry.oType, newKey, err)
+		}
 		return
 	}
 
@@ -1556,7 +1565,7 @@ func (oc *Controller) updateResourceHandler(old, newer interface{}, objectsToRet
 			retryEntry.config); err != nil {
 			klog.Errorf("Failed to delete stale object %s, during update: %v", oldKey, err)
 			oc.recordErrorEvent(objectsToRetry.oType, retryEntry.oldObj, "ErrorDeletingResource", err)
-			objectsToRetry.initRetryObjWithAdd(newer, newKey)
+			objectsToRetry.initRetryObjWithAdd(latest, newKey)
 			objectsToRetry.unSkipRetryObj(oldKey)
 			objectsToRetry.increaseFailedAttemptsCounter(newKey)
 			return
@@ -1564,7 +1573,7 @@ func (oc *Controller) updateResourceHandler(old, newer interface{}, objectsToRet
 		// remove the old object from retry entry since it was correctly deleted
 		objectsToRetry.removeDeleteFromRetryObj(oldKey)
 
-	} else if oc.isObjectInTerminalState(objectsToRetry.oType, newer) { // check the latest status on newer
+	} else if oc.isObjectInTerminalState(objectsToRetry.oType, latest) { // check the latest status on newer
 		// [step 1b] The object is in a terminal state: delete it from the cluster,
 		// delete its retry entry and return. This only applies to pod watchers
 		// (pods + dynamic network policy handlers watching pods).
@@ -1584,7 +1593,7 @@ func (oc *Controller) updateResourceHandler(old, newer interface{}, objectsToRet
 				objectsToRetry.oType, oldKey, err)
 			oc.recordErrorEvent(objectsToRetry.oType, old, "ErrorDeletingResource", err)
 			objectsToRetry.initRetryObjWithDelete(old, oldKey, nil, false)
-			objectsToRetry.initRetryObjWithAdd(newer, newKey)
+			objectsToRetry.initRetryObjWithAdd(latest, newKey)
 			objectsToRetry.unSkipRetryObj(oldKey)
 			objectsToRetry.increaseFailedAttemptsCounter(oldKey)
 			return
@@ -1598,11 +1607,11 @@ func (oc *Controller) updateResourceHandler(old, newer interface{}, objectsToRet
 	// function is available.
 	if hasUpdateFunc {
 		// if this resource type has an update func, just call the update function
-		if err := oc.updateResource(objectsToRetry, old, newer, objectsToRetry.checkRetryObj(newKey)); err != nil {
+		if err := oc.updateResource(objectsToRetry, old, latest, objectsToRetry.checkRetryObj(newKey)); err != nil {
 			if resourceNeedsUpdate(objectsToRetry.oType) {
-				objectsToRetry.initRetryObjWithUpdate(old, newer, newKey)
+				objectsToRetry.initRetryObjWithUpdate(old, latest, newKey)
 			} else {
-				objectsToRetry.initRetryObjWithAdd(newer, newKey)
+				objectsToRetry.initRetryObjWithAdd(latest, newKey)
 			}
 			objectsToRetry.unSkipRetryObj(newKey)
 			objectsToRetry.increaseFailedAttemptsCounter(newKey)
@@ -1610,9 +1619,9 @@ func (oc *Controller) updateResourceHandler(old, newer interface{}, objectsToRet
 		}
 	} else { // we previously deleted old object, now let's add the new one
 		klog.Infof("Adding new %s of type %s", newKey, objectsToRetry.oType)
-		if err := oc.addResource(objectsToRetry, newer, false); err != nil {
-			oc.recordErrorEvent(objectsToRetry.oType, newer, "ErrorAddingResource", err)
-			objectsToRetry.initRetryObjWithAdd(newer, newKey)
+		if err := oc.addResource(objectsToRetry, latest, false); err != nil {
+			oc.recordErrorEvent(objectsToRetry.oType, latest, "ErrorAddingResource", err)
+			objectsToRetry.initRetryObjWithAdd(latest, newKey)
 			objectsToRetry.unSkipRetryObj(newKey)
 			objectsToRetry.increaseFailedAttemptsCounter(newKey)
 			klog.Errorf("Failed to add %s %s, during update: %v",
@@ -1621,7 +1630,7 @@ func (oc *Controller) updateResourceHandler(old, newer interface{}, objectsToRet
 		}
 	}
 	objectsToRetry.deleteRetryObj(newKey, true)
-	oc.recordSuccessEvent(objectsToRetry.oType, newer)
+	oc.recordSuccessEvent(objectsToRetry.oType, latest)
 }
 
 func (oc *Controller) deleteResourceHandler(obj interface{}, objectsToRetry *retryObjs) {
