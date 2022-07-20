@@ -143,7 +143,9 @@ func (oc *Controller) updateStaleDefaultDenyACLNames(npType knet.PolicyType, gre
 		newName := namespacePortGroupACLName(namespace, "", gressSuffix)
 		if len(aclList) > 1 {
 			// this should never be the case but delete everything except 1st ACL
-			err := libovsdbops.DeleteACLs(oc.mc.nbClient, aclList[1:]...)
+			ingressPGName := oc.nadInfo.Prefix + defaultDenyPortGroup(namespace, ingressDefaultDenySuffix)
+			egressPGName := oc.nadInfo.Prefix + defaultDenyPortGroup(namespace, egressDefaultDenySuffix)
+			err := libovsdbops.DeleteACLs(oc.mc.nbClient, []string{ingressPGName, egressPGName}, nil, aclList[1:]...)
 			if err != nil {
 				return err
 			}
@@ -254,6 +256,14 @@ func (oc *Controller) syncNetworkPoliciesRetriableCommon(expectedPolicies map[st
 	// remove stale egress and ingress allow arp ACLs that were leftover as a result
 	// of ACL migration for "ARPallowPolicy" when the match changed from "arp" to "(arp || nd)"
 	p = func(item *nbdb.ACL) bool {
+		netName, ok := item.ExternalIDs["network_name"]
+		if oc.nadInfo.IsSecondary {
+			if !ok || netName != oc.nadInfo.NetName {
+				return false
+			}
+		} else if ok {
+			return false
+		}
 		return strings.Contains(item.Match, " && arp") &&
 			strings.Contains(*item.Name, arpAllowPolicySuffix)
 	}
@@ -262,6 +272,7 @@ func (oc *Controller) syncNetworkPoliciesRetriableCommon(expectedPolicies map[st
 		return fmt.Errorf("cannot find stale arp allow ACLs: %v", err)
 	}
 	// Remove these stale ACLs from port groups and then delete them
+	var ops []ovsdb.Operation
 	for _, gressACL := range gressACLs {
 		gressACL := gressACL
 		pgName := ""
@@ -273,17 +284,12 @@ func (oc *Controller) syncNetworkPoliciesRetriableCommon(expectedPolicies map[st
 			pgName = strings.TrimPrefix(gressACL.Match, "outport == @")
 		}
 		pgName = strings.TrimSuffix(pgName, " && arp")
-		ops, err := libovsdbops.DeleteACLsFromPortGroupOps(oc.mc.nbClient, nil, pgName, gressACL)
-		if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
-			return fmt.Errorf("cannot construct ops to delete ACL %+v from portgroup %s: %v",
-				gressACL, pgName, err)
-		}
-		_, err = libovsdbops.TransactAndCheck(oc.mc.nbClient, ops)
+		ops, err = libovsdbops.DeleteACLsOps(oc.mc.nbClient, ops, []string{pgName}, nil, gressACL)
 		if err != nil {
-			return fmt.Errorf("cannot delete ACL %+v from portgroup %s: %v", gressACL, pgName, err)
+			return fmt.Errorf("failed getting delete acl ops: %v", err)
 		}
 	}
-	err = libovsdbops.DeleteACLs(oc.mc.nbClient, gressACLs...)
+	_, err = libovsdbops.TransactAndCheck(oc.mc.nbClient, ops)
 	if err != nil {
 		return fmt.Errorf("cannot delete stale arp allow ACLs: %v", err)
 	}
@@ -450,19 +456,22 @@ func (oc *Controller) deleteDefaultDenyPGAndACLs(namespace, policy string, nsInf
 	egressDenyACL, egressAllowACL := buildDenyACLs(namespace, policy, egressPGName, aclLogging, knet.PolicyTypeEgress, oc.nadInfo)
 	aclsToBeDeleted = append(aclsToBeDeleted, egressDenyACL, egressAllowACL)
 
-	err := libovsdbops.DeletePortGroups(oc.mc.nbClient, ingressPGName, egressPGName)
+	ops, err := libovsdbops.DeletePortGroupsOps(oc.mc.nbClient, nil, oc.nadInfo.Prefix+ingressPGName, oc.nadInfo.Prefix+egressPGName)
 	if err != nil {
 		return err
 	}
-
+	// Manually remove the default ACLs instead of relying on ovsdb garbage collection to do so
+	// don't delete ACL references because port group is completely deleted in the same tnx
+	ops, err = libovsdbops.DeleteACLsOps(oc.mc.nbClient, ops, nil, nil, aclsToBeDeleted...)
+	if err != nil {
+		return err
+	}
+	_, err = libovsdbops.TransactAndCheck(oc.mc.nbClient, ops)
+	if err != nil {
+		return fmt.Errorf("failed to transact deleteDefaultDenyPGAndACLs: %v", err)
+	}
 	nsInfo.portGroupEgressDenyName = ""
 	nsInfo.portGroupIngressDenyName = ""
-
-	// Manually remove the default ACLs instead of relying on ovsdb garbage collection to do so
-	err = libovsdbops.DeleteACLs(oc.mc.nbClient, aclsToBeDeleted...)
-	if err != nil {
-		return err
-	}
 
 	return nil
 }
