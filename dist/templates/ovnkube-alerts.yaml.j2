@@ -559,9 +559,9 @@ spec:
        message: |
          Interface {{ $labels.interface }} on instance {{ $labels.instance }} is not up for longer than 10m
 
-    - alert: OvsNoOffloadBytesTooHigh
+    - alert: OvsTxNoOffloadBytesCriticallyHigh
       expr: |
-        (rate(ovs_vswitchd_interface_rx_bytes{interface=~"pf.*"}[15m])-rate(ovs_vswitchd_interface_in_hw_bytes{interface=~"pf.*"}[15m])) / 1024 / 1024 > 10
+        rate(ovs_vswitchd_interface_tx_sw_bytes{interface=~"pf.*"}[15m]) / 1024 / 1024 > 60
       for: 10m
       labels:
        severity: critical
@@ -569,12 +569,38 @@ spec:
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
       annotations:
        message: |
-         Noticed higher than 10MiB/s rx rates without offload on the host with pod ovn-kubernetes/ {{ $labels.pod }}
+         Noticed higher than 60MiB/s TX rates without offload on the host with pod ovn-kubernetes/ {{ $labels.pod }}
          instance {{ $labels.instance }} port {{ $labels.port }} interface {{ $labels.interface }} for longer than 10m
 
-    - alert: OvsInSwBytesTooHigh
+    - alert: OvsTxNoOffloadBytesTooHigh
       expr: |
-        rate(ovs_vswitchd_interface_in_sw_bytes{namespace="ovn-kubernetes"}[15m]) / 1024 / 1024 > 10
+        rate(ovs_vswitchd_interface_tx_sw_bytes{interface=~"pf.*"}[10m]) / 1024 / 1024 > 40
+      for: 5m
+      labels:
+       severity: minor
+       pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
+      annotations:
+       message: |
+         Noticed higher than 40MiB/s TX rates without offload on the host with pod ovn-kubernetes/ {{ $labels.pod }}
+         instance {{ $labels.instance }} port {{ $labels.port }} interface {{ $labels.interface }} for longer than 5m
+
+    - alert: OvsTxNoOffloadBytesUnusuallyHigh
+      expr: |
+        rate(ovs_vswitchd_interface_tx_sw_bytes{interface=~"pf.*"}[5m]) / 1024 / 1024 > 20
+      for: 5m
+      labels:
+       severity: warning
+       pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
+      annotations:
+       message: |
+         Noticed higher than 20MiB/s TX rates without offload on the host with pod ovn-kubernetes/ {{ $labels.pod }}
+         instance {{ $labels.instance }} port {{ $labels.port }} interface {{ $labels.interface }} for longer than 5m
+
+    - alert: OvsRxNoOffloadBytesCriticallyHigh
+      expr: |
+        rate(ovs_vswitchd_interface_rx_sw_bytes{interface=~"pf.*"}[15m]) / 1024 / 1024 > 60
       for: 10m
       labels:
        severity: critical
@@ -582,8 +608,34 @@ spec:
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
       annotations:
        message: |
-         Noticed higher than 10MiB/s in-software rates on the host with pod ovn-kubernetes/ {{ $labels.pod }}
+         Noticed higher than 60MiB/s RX rates without offload on the host with pod ovn-kubernetes/ {{ $labels.pod }}
          instance {{ $labels.instance }} port {{ $labels.port }} interface {{ $labels.interface }} for longer than 10m
+
+    - alert: OvsRxNoOffloadBytesTooHigh
+      expr: |
+        rate(ovs_vswitchd_interface_rx_sw_bytes{interface=~"pf.*"}[10m]) / 1024 / 1024 > 40
+      for: 5m
+      labels:
+       severity: minor
+       pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
+      annotations:
+       message: |
+         Noticed higher than 40MiB/s RX rates without offload on the host with pod ovn-kubernetes/ {{ $labels.pod }}
+         instance {{ $labels.instance }} port {{ $labels.port }} interface {{ $labels.interface }} for longer than 5m
+
+    - alert: OvsRxNoOffloadBytesUnusuallyHigh
+      expr: |
+        rate(ovs_vswitchd_interface_rx_sw_bytes{interface=~"pf.*"}[5m]) / 1024 / 1024 > 20
+      for: 5m
+      labels:
+       severity: warning
+       pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
+      annotations:
+       message: |
+         Noticed higher than 20MiB/s RX rates without offload on the host with pod ovn-kubernetes/ {{ $labels.pod }}
+         instance {{ $labels.instance }} port {{ $labels.port }} interface {{ $labels.interface }} for longer than 5m
 
     - alert: OvsDBdbSize
       expr: |
