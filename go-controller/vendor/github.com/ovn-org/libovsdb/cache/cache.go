@@ -595,7 +595,7 @@ func (t *TableCache) Populate(tableUpdates ovsdb.TableUpdates) error {
 		}
 		tCache := t.cache[table]
 		for uuid, row := range updates {
-			dbgLogger := t.logger.WithValues("uuid", uuid, "table", table).V(5)
+			dbgLogger := t.logger.WithValues("uuid", uuid, "table", table).V(6)
 			dbgLogger.Info("processing update")
 			if row.New != nil {
 				newModel, err := t.CreateModel(table, row.New, uuid)
@@ -653,7 +653,7 @@ func (t *TableCache) Populate2(tableUpdates ovsdb.TableUpdates2) error {
 		}
 		tCache := t.cache[table]
 		for uuid, row := range updates {
-			dbgLogger := t.logger.WithValues("uuid", uuid, "table", table).V(5)
+			dbgLogger := t.logger.WithValues("uuid", uuid, "table", table).V(6)
 			dbgLogger.Info("processing update")
 			switch {
 			case row.Initial != nil:
