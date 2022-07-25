@@ -637,6 +637,19 @@ spec:
          Noticed higher than 20MiB/s RX rates without offload on the host with pod ovn-kubernetes/ {{ $labels.pod }}
          instance {{ $labels.instance }} port {{ $labels.port }} interface {{ $labels.interface }} for longer than 5m
 
+    - alert: OvsTxRateLimitDropsUnusuallyHigh
+      expr: |
+        rate(ovs_vswitchd_interface_tx_misspkts_packets_drops[5m]) > 0
+      for: 5m
+      labels:
+       severity: warning
+       pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
+      annotations:
+       message: |
+         Noticed TX rate limit caused {{ $value }} packet per second drops on the host with pod ovn-kubernetes/ {{ $labels.pod }}
+         instance {{ $labels.instance }} port {{ $labels.port }} interface {{ $labels.interface }} for longer than 5m
+
     - alert: OvsDBdbSize
       expr: |
         rate(ovs_ovsdb_db_size_bytes{namespace="ovn-kubernetes", job="ovnkube-node"}[15m]) * 5 * 60 / 1024 / 1024 > 1
