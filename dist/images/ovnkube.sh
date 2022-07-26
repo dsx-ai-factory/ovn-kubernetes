@@ -771,6 +771,24 @@ EOF
   fi
 }
 
+vf_rate_limiting_opts=
+set_vf_rate_limiting_opts_if_gs() {
+  k8s_node_name=$1
+  hosttype=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} get node ${k8s_node_name} -o=jsonpath='{@.metadata.labels.ngn2\.nvidia\.com\/hosttype}')
+  if [[ $? != 0 ]]; then
+    echo "couldn't get host type from k8s node ${k8s_node_name}"
+    exit 12
+  fi
+  if [[ ${hosttype} == "GS" ]]; then
+    vf_rate_limiting_opts="
+      --ovn-max-newconn-pps=${OVN_MAX_NEWCONN_PPS}
+      --ovn-max-newconn-burst=${OVN_MAX_NEWCONN_BURST}
+    "
+  else
+    echo "skip limiting vf rate for non-GS host type: ${hosttype}"
+  fi
+}
+
 # v3 - run nb_ovsdb in a separate container
 nb-ovsdb() {
   trap 'ovsdb_cleanup nb' TERM
@@ -1444,6 +1462,7 @@ ovn-node() {
       --ovs-min-revalidate-pps=${OVS_MIN_REVALIDATE_PPS}
       --ovs-max-idle=${OVS_MAX_IDLE}
     "
+    set_vf_rate_limiting_opts_if_gs ${K8S_NODE}
   fi
 
   echo "=============== ovn-node   --init-node"
@@ -1487,8 +1506,7 @@ ovn-node() {
     ${egress_interface} \
     --host-network-namespace ${ovn_host_network_namespace} \
      ${ovnkube_node_mgmt_port_netdev_flag} \
-     --ovn-max-newconn-pps=${OVN_MAX_NEWCONN_PPS} \
-     --ovn-max-newconn-burst=${OVN_MAX_NEWCONN_BURST} \
+     ${vf_rate_limiting_opts} \
      ${ovn_xdp_opts} \
      ${ovs_other_config_opts} &
 
