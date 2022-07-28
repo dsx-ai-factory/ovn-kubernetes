@@ -1145,24 +1145,33 @@ func (oc *Controller) deleteResource(objectsToRetry *retryObjs, obj, cachedObj i
 	}
 }
 
-type localRetryEntry struct {
-	key string // the key in the retryObjs map holding retryObjs value
-	// cached newObj holds k8s resource failed during add operation
-	newObj interface{}
-	// cached oldObj holds k8s resource failed during delete operation
-	oldObj interface{}
-	// resource retrieved from the K8s API Server
-	kObj interface{}
-}
-
-func (oc *Controller) resourceRetry(r *retryObjs, lre *localRetryEntry, now time.Time) {
-	objKey := lre.key
+func (oc *Controller) resourceRetry(r *retryObjs, objKey string, now time.Time) {
 	entry := r.ensureRetryEntryLocked(objKey, nil)
 	if entry == nil {
 		klog.V(5).Infof("%v resource %s was not found in the iterateRetryResources map while retrying resource setup", r.oType, objKey)
 		return
 	}
 	defer entry.Unlock()
+	var kObj interface{}
+	var err error
+	// check if we need to create the object
+	if entry.newObj != nil {
+		// get the latest version of the object from the informer;
+		// if it doesn't exist we are not going to create the new object.
+		kObj, err = oc.getResourceFromInformerCache(r.oType, objKey)
+		if err != nil {
+			if kerrors.IsNotFound(err) {
+				klog.Infof("%s %s not found in the informers cache,"+
+					" not going to retry object create", r.oType, objKey)
+				kObj = nil
+			} else {
+				klog.Errorf("Failed to look up %s %s in the informers cache,"+
+					" will retry later: %v", r.oType, objKey, err)
+				return
+			}
+		}
+	}
+
 	if entry.ignore {
 		klog.V(5).Infof("Skipping %v resource %s setup since ignore is set to true", r.oType, objKey)
 		return
@@ -1202,7 +1211,7 @@ func (oc *Controller) resourceRetry(r *retryObjs, lre *localRetryEntry, now time
 	klog.Infof("Retry object setup: %s %s", r.oType, objKey)
 
 	if entry.newObj != nil {
-		entry.newObj = lre.kObj
+		entry.newObj = kObj
 	}
 	if resourceNeedsUpdate(r.oType) && entry.config != nil && entry.newObj != nil {
 		klog.Infof("%v retry: updating object %s", r.oType, objKey)
@@ -1265,31 +1274,10 @@ func (oc *Controller) resourceRetry(r *retryObjs, lre *localRetryEntry, now time
 func (oc *Controller) iterateRetryResources(r *retryObjs) {
 	r.retryMutex.Lock()
 	now := time.Now()
-	localRetryEntries := make([]*localRetryEntry, 0, len(r.entries))
-	var kObj interface{}
-	var err error
-	for objKey, entry := range r.entries {
-		entry.Lock()
-		// check if we need to create the object
-		if entry.newObj != nil {
-			// get the latest version of the object from the informer;
-			// if it doesn't exist we are not going to create the new object.
-			kObj, err = oc.getResourceFromInformerCache(r.oType, objKey)
-			if err != nil {
-				if kerrors.IsNotFound(err) {
-					klog.Infof("%s %s not found in the informers cache,"+
-						" not going to retry object create", r.oType, objKey)
-					kObj = nil
-				} else {
-					klog.Errorf("Failed to look up %s %s in the informers cache,"+
-						" will retry later: %v", r.oType, objKey, err)
-					continue
-				}
-			}
-		}
+	localRetryEntries := make([]string, 0, len(r.entries))
+	for objKey := range r.entries {
 		klog.Infof("Gathered %v resource %s for retry", r.oType, objKey)
-		localRetryEntries = append(localRetryEntries, &localRetryEntry{objKey, entry.newObj, entry.oldObj, kObj})
-		entry.Unlock()
+		localRetryEntries = append(localRetryEntries, objKey)
 	}
 	r.retryMutex.Unlock()
 
@@ -1297,12 +1285,12 @@ func (oc *Controller) iterateRetryResources(r *retryObjs) {
 	klog.V(5).Infof("Going to retry resource setup for %d number of resource", len(localRetryEntries))
 
 	wg := &sync.WaitGroup{}
-	for _, lre := range localRetryEntries {
+	for _, objKey := range localRetryEntries {
 		wg.Add(1)
-		go func(lre *localRetryEntry) {
+		go func(objKey string) {
 			defer wg.Done()
-			oc.resourceRetry(r, lre, now)
-		}(lre)
+			oc.resourceRetry(r, objKey, now)
+		}(objKey)
 	}
 	klog.V(5).Infof("Waiting for all the %s retry setup to complete in iterateRetryResources", r.oType)
 	wg.Wait()
