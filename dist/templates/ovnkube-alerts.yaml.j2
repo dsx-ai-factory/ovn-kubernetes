@@ -129,10 +129,10 @@ spec:
       expr: |
         histogram_quantile(0.99,
          sum by (le) (
-           rate(ovnkube_master_pod_creation_latency_seconds_bucket[15m])
+           rate(ovnkube_master_pod_creation_latency_seconds_bucket[2m])
          ) 
-        ) > 5
-      for: 10m
+        ) > 20
+      for: 30m
       labels:
        severity: major
        pduuid: P2AR7UQ
@@ -140,24 +140,23 @@ spec:
       annotations:
        message: |
          The pod creation latency value {{ $value }} aggregated across 
-         all masters for the last 15minutes is more than 5 seconds.
+         all masters for the last 30 minutes is more than 20 seconds.
 
     - alert: OvnKubeIncreaseInPodCreationLatency99thPercentile
       expr: |
         histogram_quantile(0.99,
          sum by (le) ( 
-          rate(ovnkube_master_pod_creation_latency_seconds_bucket[15m] 
+          rate(ovnkube_master_pod_creation_latency_seconds_bucket[2m] 
           offset 15m)
          )
         )
         -
         histogram_quantile(0.99,
          sum by (le) (
-          rate(ovnkube_master_pod_creation_latency_seconds_bucket[15m])
+          rate(ovnkube_master_pod_creation_latency_seconds_bucket[2m])
          )
-        ) > 5 
-     
-      for: 10m
+        ) > 20 
+      for: 30m
       labels:
        severity: major
        pduuid: P2AR7UQ
@@ -165,7 +164,7 @@ spec:
       annotations:
        message: |
          The pod creation latency aggregated across all masters for the last 
-         15minutes is more than 5 seconds as compared to 15 minutes before last 15 minutes.
+         30 minutes is more than 20 seconds as compared to 15 minutes before last 2 minutes.
 
     - alert: OvnKubeHighNBCliLatency99thPercentile
       expr: |
@@ -639,7 +638,7 @@ spec:
 
     - alert: OvsTxRateLimitDropsUnusuallyHigh
       expr: |
-        rate(ovs_vswitchd_interface_tx_misspkts_packets_drops[5m]) > 0
+        rate(ovs_vswitchd_interface_tx_misspkts_packets_drops[5m]) > 40
       for: 5m
       labels:
        severity: warning
