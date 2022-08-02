@@ -2,9 +2,8 @@ package addressset
 
 import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"k8s.io/klog/v2"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"k8s.io/klog/v2"
 )
 
 // NonDualStackAddressSetCleanup cleans addresses in old non dual stack spec.
@@ -18,7 +17,7 @@ func NonDualStackAddressSetCleanup(netNameInfo util.NetNameInfo, nbClient libovs
 	const old = 0
 	const new = 1
 	addressSets := map[string][2]bool{}
-	err := forEachAddressSet(netNameInfo, nbClient, func(name string) {
+	err := forEachAddressSet(netNameInfo, nbClient, func(name string) error {
 		shortName := truncateSuffixFromAddressSet(name)
 		spec, found := addressSets[shortName]
 		if !found {
@@ -32,6 +31,7 @@ func NonDualStackAddressSetCleanup(netNameInfo util.NetNameInfo, nbClient libovs
 			spec[new] = true
 		}
 		addressSets[shortName] = spec
+		return nil
 	})
 
 	if err != nil {

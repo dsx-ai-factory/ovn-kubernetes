@@ -1,7 +1,9 @@
 package node
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -18,7 +20,6 @@ import (
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
-	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
@@ -34,6 +35,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/upgrade"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/vishvananda/netlink"
 )
 
 const (
@@ -46,6 +48,7 @@ type OvnNode struct {
 	client       clientset.Interface
 	Kube         kube.Interface
 	watchFactory factory.NodeWatchFactory
+	wg           *sync.WaitGroup
 	stopChan     chan struct{}
 	recorder     record.EventRecorder
 	gateway      Gateway
@@ -67,7 +70,7 @@ type ovnNodeController struct {
 }
 
 // NewNode creates a new controller for node management
-func NewNode(kubeClient clientset.Interface, wf factory.NodeWatchFactory, name string, stopChan chan struct{}, eventRecorder record.EventRecorder) *OvnNode {
+func NewNode(kubeClient clientset.Interface, wf factory.NodeWatchFactory, name string, stopChan chan struct{}, eventRecorder record.EventRecorder, wg *sync.WaitGroup) *OvnNode {
 	return &OvnNode{
 		name:             name,
 		client:           kubeClient,
@@ -76,6 +79,7 @@ func NewNode(kubeClient clientset.Interface, wf factory.NodeWatchFactory, name s
 		stopChan:         stopChan,
 		recorder:         eventRecorder,
 		svcAnnotationMap: sync.Map{},
+		wg:               wg,
 	}
 }
 
@@ -94,13 +98,40 @@ func clearOVSFlowTargets() error {
 	return nil
 }
 
-func setOVSFlowTargets() error {
-	if config.Monitoring.NetFlowTargets != nil {
-		collectors := ""
-		for _, v := range config.Monitoring.NetFlowTargets {
-			collectors += "\"" + util.JoinHostPortInt32(v.Host.String(), v.Port) + "\"" + ","
+// collectorsString joins all HostPort entry into a string that is acceptable as
+// target by the ovs-vsctl command. If an entry has an empty host, it uses the Node IP
+func collectorsString(node *kapi.Node, targets []config.HostPort) (string, error) {
+	if len(targets) == 0 {
+		return "", errors.New("collector targets can't be empty")
+	}
+	var joined strings.Builder
+	for n, v := range targets {
+		if n == 0 {
+			joined.WriteByte('"')
+		} else {
+			joined.WriteString(`","`)
 		}
-		collectors = strings.TrimSuffix(collectors, ",")
+		var host string
+		if v.Host != nil && len(*v.Host) != 0 {
+			host = v.Host.String()
+		} else {
+			var err error
+			if host, err = util.GetNodePrimaryIP(node); err != nil {
+				return "", fmt.Errorf("composing flow collectors' IPs: %w", err)
+			}
+		}
+		joined.WriteString(util.JoinHostPortInt32(host, v.Port))
+	}
+	joined.WriteByte('"')
+	return joined.String(), nil
+}
+
+func setOVSFlowTargets(node *kapi.Node) error {
+	if len(config.Monitoring.NetFlowTargets) != 0 {
+		collectors, err := collectorsString(node, config.Monitoring.NetFlowTargets)
+		if err != nil {
+			return fmt.Errorf("error joining NetFlow targets: %w", err)
+		}
 
 		_, stderr, err := util.RunOVSVsctl(
 			"--",
@@ -116,12 +147,11 @@ func setOVSFlowTargets() error {
 			return fmt.Errorf("error setting NetFlow: %v\n  %q", err, stderr)
 		}
 	}
-	if config.Monitoring.SFlowTargets != nil {
-		collectors := ""
-		for _, v := range config.Monitoring.SFlowTargets {
-			collectors += "\"" + util.JoinHostPortInt32(v.Host.String(), v.Port) + "\"" + ","
+	if len(config.Monitoring.SFlowTargets) != 0 {
+		collectors, err := collectorsString(node, config.Monitoring.SFlowTargets)
+		if err != nil {
+			return fmt.Errorf("error joining SFlow targets: %w", err)
 		}
-		collectors = strings.TrimSuffix(collectors, ",")
 
 		_, stderr, err := util.RunOVSVsctl(
 			"--",
@@ -137,23 +167,28 @@ func setOVSFlowTargets() error {
 			return fmt.Errorf("error setting SFlow: %v\n  %q", err, stderr)
 		}
 	}
-	if config.Monitoring.IPFIXTargets != nil {
-		collectors := ""
-		for _, v := range config.Monitoring.IPFIXTargets {
-			collectors += "\"" + util.JoinHostPortInt32(v.Host.String(), v.Port) + "\"" + ","
+	if len(config.Monitoring.IPFIXTargets) != 0 {
+		collectors, err := collectorsString(node, config.Monitoring.IPFIXTargets)
+		if err != nil {
+			return fmt.Errorf("error joining IPFIX targets: %w", err)
 		}
-		collectors = strings.TrimSuffix(collectors, ",")
 
-		_, stderr, err := util.RunOVSVsctl(
+		args := []string{
 			"--",
 			"--id=@ipfix",
 			"create",
 			"ipfix",
 			fmt.Sprintf("targets=[%s]", collectors),
-			"cache_active_timeout=60",
-			"--",
-			"set", "bridge", "br-int", "ipfix=@ipfix",
-		)
+			fmt.Sprintf("cache_active_timeout=%d", config.IPFIX.CacheActiveTimeout),
+		}
+		if config.IPFIX.CacheMaxFlows != 0 {
+			args = append(args, fmt.Sprintf("cache_max_flows=%d", config.IPFIX.CacheMaxFlows))
+		}
+		if config.IPFIX.Sampling != 0 {
+			args = append(args, fmt.Sprintf("sampling=%d", config.IPFIX.Sampling))
+		}
+		args = append(args, "--", "set", "bridge", "br-int", "ipfix=@ipfix")
+		_, stderr, err := util.RunOVSVsctl(args...)
 		if err != nil {
 			return fmt.Errorf("error setting IPFIX: %v\n  %q", err, stderr)
 		}
@@ -202,7 +237,7 @@ func setupOVNNode(node *kapi.Node) error {
 
 	if config.Default.LFlowCacheLimitKb > 0 {
 		setExternalIdsCmd = append(setExternalIdsCmd,
-			fmt.Sprintf("external_ids:ovn-limit-lflow-cache-kb=%d", config.Default.LFlowCacheLimitKb),
+			fmt.Sprintf("external_ids:ovn-memlimit-lflow-cache-kb=%d", config.Default.LFlowCacheLimitKb),
 		)
 	}
 
@@ -244,7 +279,7 @@ func setupOVNNode(node *kapi.Node) error {
 		return fmt.Errorf("error clearing stale ovs flow targets: %q", err)
 	}
 	// set new ovs flow targets if needed
-	err = setOVSFlowTargets()
+	err = setOVSFlowTargets(node)
 	if err != nil {
 		return fmt.Errorf("error setting ovs flow targets: %q", err)
 	}
@@ -349,7 +384,7 @@ func getOVNIfUpCheckMode() (bool, error) {
 
 // Start learns the subnets assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
-func (n *OvnNode) Start(wg *sync.WaitGroup) error {
+func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 	var err error
 	var node *kapi.Node
 	var subnets []*net.IPNet
@@ -409,7 +444,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	}
 	klog.Infof("Node %s ready for ovn initialization with subnet %s", n.name, util.JoinIPNets(subnets, ","))
 
-	if config.OvnKubeNode.Mode != types.NodeModeDPU {
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		n.ovnUpEnabled, err = getOVNIfUpCheckMode()
 		if err != nil {
 			return err
@@ -468,8 +503,12 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	if config.OvnKubeNode.Mode == types.NodeModeFull {
 		// Upgrade for Node. If we upgrade workers before masters, then we need to keep service routing via
 		// mgmt port until masters have been updated and modified OVN config. Run a goroutine to handle this case
-		upgradeController := upgrade.NewController(n.client)
-		initialTopoVersion := upgradeController.GetInitialTopoVersion()
+		upgradeController := upgrade.NewController(n.client, n.watchFactory)
+		initialTopoVersion, err := upgradeController.GetTopologyVersion(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to get initial topology version: %w", err)
+		}
+		klog.Infof("Current control-plane topology version is %d", initialTopoVersion)
 		bridgeName := n.gateway.GetGatewayBridgeIface()
 
 		needLegacySvcRoute := true
@@ -499,16 +538,16 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 					} else {
 						gwIP = mgmtPortConfig.ipv6.gwIP
 					}
-					err := util.LinkRoutesAdd(link, gwIP, []*net.IPNet{subnet}, 0)
-					if err != nil && !os.IsExist(err) {
+					err := util.LinkRoutesAddOrUpdateMTU(link, gwIP, []*net.IPNet{subnet}, config.Default.RoutableMTU)
+					if err != nil {
 						return fmt.Errorf("unable to add legacy route for services via mp0, error: %v", err)
 					}
 				}
 			}
 			// need to run upgrade controller
 			go func() {
-				if err := upgradeController.Run(n.stopChan); err != nil {
-					klog.Fatalf("Error while running upgrade controller: %v", err)
+				if err := upgradeController.WaitForTopologyVersion(ctx, types.OvnCurrentTopologyVersion, 30*time.Minute); err != nil {
+					klog.Fatalf("Error while waiting for Topology Version to be updated: %v", err)
 				}
 				// upgrade complete now see what needs upgrading
 				// migrate service route from ovn-k8s-mp0 to shared gw bridge
@@ -586,11 +625,17 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 			return fmt.Errorf("failed to obtain local IP from node %q: %v", node.Name, err)
 		}
 
-		n.WatchEndpointSlices(nodeIP)
+		err = n.WatchEndpointSlices(nodeIP)
+		if err != nil {
+			return fmt.Errorf("failed to watch endpointSlices: %w", err)
+		}
 	}
 
 	if config.OvnKubeNode.Mode == types.NodeModeDPU && config.OvnKubeNode.IsPrimaryDPU {
-		n.WatchEndpointSlicesOnDPU()
+		err = n.WatchEndpointSlicesOnDPU()
+		if err != nil {
+			return fmt.Errorf("failed to watch endpointSlices: %w", err)
+		}
 	}
 
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
@@ -612,7 +657,10 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		nc.added = true
 
 		if config.OVNKubernetesFeature.EnableMultiNetwork {
-			n.watchNetworkAttachmentDefinitions()
+			err = n.watchNetworkAttachmentDefinitions()
+			if err != nil {
+				return fmt.Errorf("failed to watch network attachment definitions: %w", err)
+			}
 		}
 
 		// Only start default network Pod watcher after other default net-attach-defs are added.
@@ -624,23 +672,46 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 			if err != nil {
 				return fmt.Errorf("failed to get the MAC address for all the PFs on the host: %v", err)
 			}
-			nc.watchPodsDPU(n.ovnUpEnabled, pfMACs)
+			if err = nc.watchPodsDPU(n.ovnUpEnabled, pfMACs); err != nil {
+				return err
+			}
+		}
+
+		// default network only
+		if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+			util.SetARPTimeout()
+			err := nc.WatchNamespaces()
+			if err != nil {
+				return fmt.Errorf("failed to watch namespaces: %w", err)
+			}
+			// every minute cleanup stale conntrack entries if any
+			go wait.Until(func() {
+				nc.checkAndDeleteStaleConntrackEntries()
+			}, time.Minute*1, n.stopChan)
 		}
 	}
 
 	if config.OvnKubeNode.Mode != types.NodeModeDPU {
 		// start the cni server
-		err = cniServer.Start(cni.HandleCNIRequest)
+		if err := cniServer.Start(cni.HandleCNIRequest); err != nil {
+			return err
+		}
+
+		// Write CNI config file if it doesn't already exist
+		if err := config.WriteCNIConfig(); err != nil {
+			return err
+		}
 	}
 
-	return err
+	klog.Infof("OVN Kube Node initialized and ready.")
+	return nil
 }
 
 // watchNetworkAttachmentDefinitions starts the watching of network attachment definition
 // resource and calls back the appropriate handler logic
-func (n *OvnNode) watchNetworkAttachmentDefinitions() {
+func (n *OvnNode) watchNetworkAttachmentDefinitions() error {
 	start := time.Now()
-	_ = n.watchFactory.AddNetworkattachmentdefinitionHandler(cache.ResourceEventHandlerFuncs{
+	_, err := n.watchFactory.AddNetworkattachmentdefinitionHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			netattachdef := obj.(*nettypes.NetworkAttachmentDefinition)
 			n.addNetworkAttachDefinition(netattachdef)
@@ -652,6 +723,7 @@ func (n *OvnNode) watchNetworkAttachmentDefinitions() {
 		},
 	}, n.syncNetworkAttachDefinition)
 	klog.Infof("Bootstrapping existing Network Attachment Definitions took %v", time.Since(start))
+	return err
 }
 
 func (n *OvnNode) initOvnNodeController(netattachdef *nettypes.NetworkAttachmentDefinition) (*ovnNodeController, error) {
@@ -733,7 +805,7 @@ func (n *OvnNode) initOvnNodeController(netattachdef *nettypes.NetworkAttachment
 }
 
 // syncNetworkAttachDefinition() delete OVN logical entities of the obsoleted netNames.
-func (n *OvnNode) syncNetworkAttachDefinition(netattachdefs []interface{}) {
+func (n *OvnNode) syncNetworkAttachDefinition(netattachdefs []interface{}) error {
 	// we need to walk through all net-attach-def and add them into Controller.nadInfo.NetAttachDefs, so that when each
 	// Controller is running, watchPodsDPU()->IsNetworkOnPod() can correctly check Pods need to be plumbed
 	// for the specific Controller
@@ -749,6 +821,7 @@ func (n *OvnNode) syncNetworkAttachDefinition(netattachdefs []interface{}) {
 			klog.Errorf(err.Error())
 		}
 	}
+	return nil
 }
 
 func (n *OvnNode) addNetworkAttachDefinition(netattachdef *nettypes.NetworkAttachmentDefinition) {
@@ -801,7 +874,9 @@ func (n *OvnNode) addNetworkAttachDefinition(netattachdef *nettypes.NetworkAttac
 				klog.Infof("Initialized XDP for NAD %s", nc.nadInfo.NetName)
 			}
 		}
-		nc.watchPodsDPU(n.ovnUpEnabled, pfMACs)
+		if err = nc.watchPodsDPU(n.ovnUpEnabled, pfMACs); err != nil {
+			klog.Errorf("Failed watch dpu annotation update of Pods: %v", nc.nadInfo.NetName, err)
+		}
 	}
 }
 
@@ -1001,10 +1076,10 @@ func (n *OvnNode) checkForSkipFirewalldAnnotation(epSlice *discovery.EndpointSli
 	return false
 }
 
-func (n *OvnNode) WatchEndpointSlices(nodeIP string) {
+func (n *OvnNode) WatchEndpointSlices(nodeIP string) error {
 	start := time.Now()
 
-	n.watchFactory.AddEndpointSliceHandler(cache.ResourceEventHandlerFuncs{
+	_, err := n.watchFactory.AddEndpointSliceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			endpointSlice := obj.(*discovery.EndpointSlice)
 			klog.Infof("Processing add for endpoint slice %s on namespace %s",
@@ -1077,7 +1152,7 @@ func (n *OvnNode) WatchEndpointSlices(nodeIP string) {
 						}
 						if config.OvnKubeNode.Mode != types.NodeModeDPUHost &&
 							(*port.Protocol == kapi.ProtocolUDP || *port.Protocol == kapi.ProtocolSCTP) {
-							err := deleteConntrack(ip, *port.Port, *port.Protocol)
+							err := util.DeleteConntrack(ip, *port.Port, *port.Protocol, netlink.ConntrackReplyAnyIP, nil)
 							if err != nil {
 								klog.Errorf("Failed to delete conntrack entry for %s: %v", ip, err)
 							}
@@ -1088,6 +1163,7 @@ func (n *OvnNode) WatchEndpointSlices(nodeIP string) {
 		},
 	}, syncEndpointSlices)
 	klog.Infof("Bootstrapping existing EndpointSlices took %v", time.Since(start))
+	return err
 }
 
 func addEPSliceToFirewallZone(nodeIP string, endpointSlice *discovery.EndpointSlice) {
@@ -1126,12 +1202,115 @@ func isEPSliceContainsEndpoint(epSlice *discovery.EndpointSlice,
 	return false
 }
 
+func exGatewayPodsAnnotationsChanged(oldNs, newNs *kapi.Namespace) bool {
+	// In reality we only care about exgw pod deletions, however since the list of IPs is not expected to change
+	// that often, let's check for *any* changes to these annotations compared to their previous state and trigger
+	// the logic for checking if we need to delete any conntrack entries
+	return (oldNs.Annotations[util.ExternalGatewayPodIPsAnnotation] != newNs.Annotations[util.ExternalGatewayPodIPsAnnotation]) ||
+		(oldNs.Annotations[util.RoutingExternalGWsAnnotation] != newNs.Annotations[util.RoutingExternalGWsAnnotation])
+}
+
+func (nc *ovnNodeController) checkAndDeleteStaleConntrackEntries() {
+	namespaces, err := nc.node.watchFactory.GetNamespaces()
+	if err != nil {
+		klog.Errorf("Unable to get pods from informer: %v", err)
+	}
+	for _, namespace := range namespaces {
+		_, foundRoutingExternalGWsAnnotation := namespace.Annotations[util.RoutingExternalGWsAnnotation]
+		_, foundExternalGatewayPodIPsAnnotation := namespace.Annotations[util.ExternalGatewayPodIPsAnnotation]
+		if foundRoutingExternalGWsAnnotation || foundExternalGatewayPodIPsAnnotation {
+			pods, err := nc.node.watchFactory.GetPods(namespace.Name)
+			if err != nil {
+				klog.Warningf("Unable to get pods from informer for namespace %s: %v", namespace.Name, err)
+			}
+			if len(pods) > 0 || err != nil {
+				// we only need to proceed if there is at least one pod in this namespace on this node
+				// OR if we couldn't fetch the pods for some reason at this juncture
+				nc.checkAndDeleteStaleConntrackEntriesForNamespace(namespace)
+			}
+		}
+	}
+}
+
+func (nc *ovnNodeController) checkAndDeleteStaleConntrackEntriesForNamespace(newNs *kapi.Namespace) {
+	// loop through all the IPs on the annotations; ARP for their MACs and form an allowlist
+	gatewayIPs := strings.Split(newNs.Annotations[util.ExternalGatewayPodIPsAnnotation], ",")
+	gatewayIPs = append(gatewayIPs, strings.Split(newNs.Annotations[util.RoutingExternalGWsAnnotation], ",")...)
+	var wg sync.WaitGroup
+	wg.Add(len(gatewayIPs))
+	validMACs := sync.Map{}
+	for _, gwIP := range gatewayIPs {
+		go func(gwIP string) {
+			defer wg.Done()
+			if len(gwIP) > 0 {
+				if hwAddr, err := util.GetMACAddressFromARP(net.ParseIP(gwIP)); err != nil {
+					klog.Errorf("Failed to lookup hardware address for gatewayIP %s: %v", gwIP, err)
+				} else if len(hwAddr) > 0 {
+					// we need to reverse the mac before passing it to the conntrack filter since OVN saves the MAC in the following format
+					// +------------------------------------------------------------ +
+					// | 128 ...  112 ... 96 ... 80 ... 64 ... 48 ... 32 ... 16 ... 0|
+					// +------------------+-------+--------------------+-------------|
+					// |                  | UNUSED|    MAC ADDRESS     |   UNUSED    |
+					// +------------------+-------+--------------------+-------------+
+					for i, j := 0, len(hwAddr)-1; i < j; i, j = i+1, j-1 {
+						hwAddr[i], hwAddr[j] = hwAddr[j], hwAddr[i]
+					}
+					validMACs.Store(gwIP, []byte(hwAddr))
+				}
+			}
+		}(gwIP)
+	}
+	wg.Wait()
+
+	validNextHopMACs := [][]byte{}
+	validMACs.Range(func(key interface{}, value interface{}) bool {
+		validNextHopMACs = append(validNextHopMACs, value.([]byte))
+		return true
+	})
+	// Handle corner case where there are 0 IPs on the annotations OR none of the ARPs were successful; i.e allowMACList={empty}.
+	// This means we *need to* pass a label > 128 bits that will not match on any conntrack entry labels for these pods.
+	// That way any remaining entries with labels having MACs set will get purged.
+	if len(validNextHopMACs) == 0 {
+		validNextHopMACs = append(validNextHopMACs, []byte("does-not-contain-anything"))
+	}
+
+	pods, err := nc.node.watchFactory.GetPods(newNs.Name)
+	if err != nil {
+		klog.Errorf("Unable to get pods from informer: %v", err)
+	}
+	for _, pod := range pods {
+		pod := pod
+		podIPs, err := util.GetAllPodIPs(pod, nc.nadInfo)
+		if err != nil {
+			klog.Errorf("Unable to fetch IP for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+		}
+		for _, podIP := range podIPs { // flush conntrack only for UDP
+			// for this pod, we check if the conntrack entry has a label that is not in the provided allowlist of MACs
+			// only caveat here is we assume egressGW served pods shouldn't have conntrack entries with other labels set
+			err := util.DeleteConntrack(podIP.String(), 0, kapi.ProtocolUDP, netlink.ConntrackOrigDstIP, validNextHopMACs)
+			if err != nil {
+				klog.Errorf("Failed to delete conntrack entry for pod %s: %v", podIP.String(), err)
+			}
+		}
+	}
+}
+
+func (nc *ovnNodeController) WatchNamespaces() error {
+	_, err := nc.node.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(old, new interface{}) {
+			oldNs, newNs := old.(*kapi.Namespace), new.(*kapi.Namespace)
+			if exGatewayPodsAnnotationsChanged(oldNs, newNs) {
+				nc.checkAndDeleteStaleConntrackEntriesForNamespace(newNs)
+			}
+		},
+	}, nil)
+	return err
+}
+
 // validateVTEPInterfaceMTU checks if the MTU of the interface that has ovn-encap-ip is big
 // enough to carry the `config.Default.MTU` and the Geneve header. If the MTU is not big
-// enough, it will taint the node with the value of `types.OvnK8sSmallMTUTaintKey`
+// enough, it will return an error
 func (n *OvnNode) validateVTEPInterfaceMTU() error {
-	tooSmallMTUTaint := &kapi.Taint{Key: types.OvnK8sSmallMTUTaintKey, Effect: kapi.TaintEffectNoSchedule}
-
 	ovnEncapIP := net.ParseIP(config.Default.EncapIP)
 	if ovnEncapIP == nil {
 		return fmt.Errorf("the set OVN Encap IP is invalid: (%s)", config.Default.EncapIP)
@@ -1151,22 +1330,12 @@ func (n *OvnNode) validateVTEPInterfaceMTU() error {
 		requiredMTU = config.Default.MTU + types.GeneveHeaderLengthIPv6
 	}
 
-	// check if node needs to be tainted
 	if mtu < requiredMTU {
-		klog.V(2).Infof("MTU (%d) of network interface %s is not big enough to deal with Geneve "+
-			"header overhead (sum %d). Tainting node with %v...", mtu, interfaceName,
-			requiredMTU, tooSmallMTUTaint)
-
-		return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			return n.Kube.SetTaintOnNode(n.name, tooSmallMTUTaint)
-		})
+		return fmt.Errorf("interface MTU (%d) is too small for specified overlay MTU (%d)", mtu, requiredMTU)
 	}
-	klog.V(2).Infof("MTU (%d) of network interface %s is big enough to deal with Geneve header overhead (sum %d). "+
-		"Making sure node is not tainted with %v...", mtu, interfaceName, requiredMTU, tooSmallMTUTaint)
-
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		return n.Kube.RemoveTaintFromNode(n.name, tooSmallMTUTaint)
-	})
+	klog.V(2).Infof("MTU (%d) of network interface %s is big enough to deal with Geneve header overhead (sum %d). ",
+		mtu, interfaceName, requiredMTU)
+	return nil
 }
 
 func updateEndpointSlice(nodeIP string, skipFirewalldAnnotation bool,
@@ -1228,7 +1397,7 @@ func updateEndpointSlice(nodeIP string, skipFirewalldAnnotation bool,
 				}
 				if config.OvnKubeNode.Mode != types.NodeModeDPUHost &&
 					(*port.Protocol == kapi.ProtocolUDP || *port.Protocol == kapi.ProtocolSCTP) {
-					err := deleteConntrack(ip, *port.Port, *port.Protocol)
+					err := util.DeleteConntrack(ip, *port.Port, *port.Protocol, netlink.ConntrackReplyAnyIP, nil)
 					if err != nil {
 						klog.Errorf("Failed to delete conntrack entry for %s: %v", ip, err)
 					}
@@ -1238,12 +1407,14 @@ func updateEndpointSlice(nodeIP string, skipFirewalldAnnotation bool,
 	}
 }
 
-func syncEndpointSlices(obj []interface{}) {
-	if err := addInterfaceToFirewallZone(types.K8sMgmtIntfName, ovnFirewallZone); err != nil {
+func syncEndpointSlices(obj []interface{}) error {
+	err := addInterfaceToFirewallZone(types.K8sMgmtIntfName, ovnFirewallZone)
+	if err != nil {
 		klog.Errorf("Failed to add interface %s to ovn firewall zone: (%v)",
 			types.K8sMgmtIntfName, err)
 	}
 	// TODO(gmoodalbail): we need to clean up any stale ports in ovn and ngn-admin zone
+	return err
 }
 
 func configureSvcRouteViaBridge(bridge string) error {
@@ -1287,8 +1458,8 @@ func upgradeServiceRoute(bridgeName string) error {
 	return nil
 }
 
-func (n *OvnNode) WatchEndpointSlicesOnDPU() {
-	n.watchFactory.AddEndpointSliceHandler(cache.ResourceEventHandlerFuncs{
+func (n *OvnNode) WatchEndpointSlicesOnDPU() error {
+	_, err := n.watchFactory.AddEndpointSliceHandler(cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(prevObj, obj interface{}) {
 			oldEndpointSlice := prevObj.(*discovery.EndpointSlice)
 			newEndpointSlice := obj.(*discovery.EndpointSlice)
@@ -1309,6 +1480,7 @@ func (n *OvnNode) WatchEndpointSlicesOnDPU() {
 			deleteConntrackEntries(nil, obj.(*discovery.EndpointSlice))
 		},
 	}, nil)
+	return err
 }
 
 // Also deletes any connection tracking entries for UDP and SCTP ports
@@ -1324,7 +1496,7 @@ func deleteConntrackEntries(checkEpSlice, fromEpSlice *discovery.EndpointSlice) 
 						continue
 					}
 				}
-				err := deleteConntrack(ip, *port.Port, *port.Protocol)
+				err := util.DeleteConntrack(ip, *port.Port, *port.Protocol, netlink.ConntrackReplyAnyIP, nil)
 				if err != nil {
 					klog.Errorf("Failed to delete conntrack entry for %s: %v", ip, err)
 				}

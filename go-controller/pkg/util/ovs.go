@@ -2,19 +2,15 @@ package util
 
 import (
 	"bytes"
-	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
 	"sync/atomic"
 	"time"
-	"unicode"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -35,19 +31,18 @@ const (
 	ovsCommandTimeout  = 15
 	ovsVsctlCommand    = "ovs-vsctl"
 	ovsOfctlCommand    = "ovs-ofctl"
-	ovsDpctlCommand    = "ovs-dpctl"
 	ovsAppctlCommand   = "ovs-appctl"
 	ovnNbctlCommand    = "ovn-nbctl"
 	ovnSbctlCommand    = "ovn-sbctl"
 	ovnAppctlCommand   = "ovn-appctl"
 	ovsdbClientCommand = "ovsdb-client"
 	ovsdbToolCommand   = "ovsdb-tool"
-	arpingCommand      = "arping"
 	ipCommand          = "ip"
 	firewallCommand    = "firewall-cmd"
 	powershellCommand  = "powershell"
 	netshCommand       = "netsh"
 	routeCommand       = "route"
+	sysctlCommand      = "sysctl"
 	osRelease          = "/etc/os-release"
 	rhel               = "RHEL"
 	ubuntu             = "Ubuntu"
@@ -162,7 +157,6 @@ type execHelper struct {
 	exec            kexec.Interface
 	ofctlPath       string
 	vsctlPath       string
-	dpctlPath       string
 	appctlPath      string
 	ovnappctlPath   string
 	nbctlPath       string
@@ -172,11 +166,11 @@ type execHelper struct {
 	ovsdbToolPath   string
 	ovnRunDir       string
 	ipPath          string
-	arpingPath      string
 	firewallPath    string
 	powershellPath  string
 	netshPath       string
 	routePath       string
+	sysctlPath      string
 }
 
 var runner *execHelper
@@ -205,12 +199,14 @@ func (runsvc *defaultExecRunner) RunCmd(cmd kexec.Cmd, cmdPath string, envVars [
 	cmd.SetStderr(stderr)
 
 	counter := atomic.AddUint64(&runCounter, 1)
-	klog.V(6).Infof("exec(%d): %s", counter, fmt.Sprintf("%s %s", cmdPath, strings.Join(args, " ")))
+	logCmd := fmt.Sprintf("%s %s", cmdPath, strings.Join(args, " "))
+	klog.V(6).Infof("Exec(%d): %s", counter, logCmd)
+
 	err := cmd.Run()
-	klog.V(6).Infof("exec(%d): stdout: %q", counter, stdout)
-	klog.V(6).Infof("exec(%d): stderr: %q", counter, stderr)
+	klog.V(6).Infof("Exec(%d): stdout: %q", counter, stdout)
+	klog.V(6).Infof("Exec(%d): stderr: %q", counter, stderr)
 	if err != nil {
-		klog.V(5).Infof("exec(%d): err: %v, stderr: %q", counter, err, stderr)
+		klog.V(5).Infof("Exec(%d): err: %v, stderr: %q", counter, err, stderr)
 	}
 	return stdout, stderr, err
 }
@@ -230,10 +226,6 @@ func SetExec(exec kexec.Interface) error {
 		return err
 	}
 	runner.vsctlPath, err = exec.LookPath(ovsVsctlCommand)
-	if err != nil {
-		return err
-	}
-	runner.dpctlPath, err = exec.LookPath(ovsDpctlCommand)
 	if err != nil {
 		return err
 	}
@@ -303,15 +295,15 @@ func SetExecWithoutOVS(exec kexec.Interface) error {
 		if err != nil {
 			return err
 		}
-		runner.arpingPath, err = exec.LookPath(arpingCommand)
-		if err != nil {
-			return err
-		}
 		if config.OvnKubeNode.Mode != types.NodeModeDPU {
 			runner.firewallPath, err = exec.LookPath(firewallCommand)
 			if err != nil {
 				return err
 			}
+		}
+		runner.sysctlPath, err = exec.LookPath(sysctlCommand)
+		if err != nil {
+			return err
 		}
 	}
 	return nil
@@ -332,11 +324,6 @@ func SetSpecificExec(exec kexec.Interface, commands ...string) error {
 			}
 		case ovsOfctlCommand:
 			runner.ofctlPath, err = exec.LookPath(ovsOfctlCommand)
-			if err != nil {
-				return err
-			}
-		case ovsDpctlCommand:
-			runner.dpctlPath, err = exec.LookPath(ovsDpctlCommand)
 			if err != nil {
 				return err
 			}
@@ -391,12 +378,6 @@ func RunOVSOfctl(args ...string) (string, string, error) {
 	return strings.Trim(stdout.String(), "\" \n"), stderr.String(), err
 }
 
-// RunOVSDpctl runs a command via ovs-dpctl.
-func RunOVSDpctl(args ...string) (string, string, error) {
-	stdout, stderr, err := run(runner.dpctlPath, args...)
-	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
-}
-
 // RunOVSVsctl runs a command via ovs-vsctl.
 func RunOVSVsctl(args ...string) (string, string, error) {
 	cmdArgs := []string{fmt.Sprintf("--timeout=%d", ovsCommandTimeout)}
@@ -438,6 +419,7 @@ func RunOVNAppctlWithTimeout(timeout int, args ...string) (string, string, error
 
 // Run the ovn-ctl command and retry if "Connection refused"
 // poll waitng for service to become available
+// FIXME: Remove when https://github.com/ovn-org/libovsdb/issues/235 is fixed
 func runOVNretry(cmdPath string, envVars []string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
 
 	retriesLeft := ovnCmdRetryCount
@@ -462,57 +444,8 @@ func runOVNretry(cmdPath string, envVars []string, args ...string) (*bytes.Buffe
 	}
 }
 
-var SkippedNbctlDaemonCounter uint64
-
-// getNbctlSocketPath returns the OVN_NB_DAEMON environment variable to add to
-// the ovn-nbctl child process environment, or an error if the nbctl daemon
-// control socket cannot be found
-func getNbctlSocketPath() (string, error) {
-	// Try already-set OVN_NB_DAEMON environment variable
-	if nbctlSocketPath := os.Getenv("OVN_NB_DAEMON"); nbctlSocketPath != "" {
-		if _, err := AppFs.Stat(nbctlSocketPath); err != nil {
-			return "", fmt.Errorf("OVN_NB_DAEMON ovn-nbctl daemon control socket %s missing: %v",
-				nbctlSocketPath, err)
-		}
-		return "OVN_NB_DAEMON=" + nbctlSocketPath, nil
-	}
-
-	// OVN 2.13 (by mistake?) didn't switch the default nbctl control socket
-	// path from /var/run/openvswitch -> /var/run/ovn. Try both
-	dirs := []string{ovnRunDir, ovsRunDir}
-	for _, runDir := range dirs {
-		// Try autodetecting the socket path based on the nbctl daemon pid
-		pidfile := filepath.Join(runDir, "ovn-nbctl.pid")
-		if pid, err := afero.ReadFile(AppFs, pidfile); err == nil {
-			fname := fmt.Sprintf("ovn-nbctl.%s.ctl", strings.TrimSpace(string(pid)))
-			nbctlSocketPath := filepath.Join(runDir, fname)
-			if _, err := AppFs.Stat(nbctlSocketPath); err == nil {
-				return "OVN_NB_DAEMON=" + nbctlSocketPath, nil
-			}
-		}
-	}
-
-	return "", fmt.Errorf("failed to find ovn-nbctl daemon pidfile/socket in %s", strings.Join(dirs, ","))
-}
-
 func getNbctlArgsAndEnv(timeout int, args ...string) ([]string, []string) {
 	var cmdArgs []string
-
-	if config.NbctlDaemonMode {
-		// when ovn-nbctl is running in a "daemon mode", the user first starts
-		// ovn-nbctl running in the background and afterward uses the daemon to execute
-		// operations. The client needs to use the control socket and set the path to the
-		// control socket in environment variable OVN_NB_DAEMON
-		envVar, err := getNbctlSocketPath()
-		if err == nil {
-			envVars := []string{envVar}
-			cmdArgs = append(cmdArgs, fmt.Sprintf("--timeout=%d", timeout))
-			cmdArgs = append(cmdArgs, args...)
-			return cmdArgs, envVars
-		}
-		klog.Warningf(err.Error() + "; resorting to non-daemon mode")
-		atomic.AddUint64(&SkippedNbctlDaemonCounter, 1)
-	}
 
 	if config.OvnNorth.Scheme == config.OvnDBSchemeSSL {
 		cmdArgs = append(cmdArgs,
@@ -542,23 +475,15 @@ func getNbOVSDBArgs(command string, args ...string) []string {
 	return cmdArgs
 }
 
-// RunOVNNbctlUnix runs command via ovn-nbctl, with ovn-nbctl using the unix
-// domain sockets to connect to the ovsdb-server backing the OVN NB database.
-func RunOVNNbctlUnix(args ...string) (string, string, error) {
-	cmdArgs := []string{fmt.Sprintf("--timeout=%d", ovsCommandTimeout)}
-	cmdArgs = append(cmdArgs, args...)
-	stdout, stderr, err := runOVNretry(runner.nbctlPath, nil, cmdArgs...)
-	return strings.Trim(strings.TrimFunc(stdout.String(), unicode.IsSpace), "\""),
-		stderr.String(), err
-}
-
 // RunOVNNbctlWithTimeout runs command via ovn-nbctl with a specific timeout
+// FIXME: Remove when https://github.com/ovn-org/libovsdb/issues/235 is fixed
 func RunOVNNbctlWithTimeout(timeout int, args ...string) (string, string, error) {
 	stdout, stderr, err := RunOVNNbctlRawOutput(timeout, args...)
 	return strings.Trim(strings.TrimSpace(stdout), "\""), stderr, err
 }
 
 // RunOVNNbctlRawOutput returns the output with no trimming or other string manipulation
+// FIXME: Remove when https://github.com/ovn-org/libovsdb/issues/235 is fixed
 func RunOVNNbctlRawOutput(timeout int, args ...string) (string, string, error) {
 	cmdArgs, envVars := getNbctlArgsAndEnv(timeout, args...)
 	start := time.Now()
@@ -569,43 +494,14 @@ func RunOVNNbctlRawOutput(timeout int, args ...string) (string, string, error) {
 	return stdout.String(), stderr.String(), err
 }
 
-// RunOVNNbctlCSV runs an nbctl command that results in CSV output, parses the rows returned,
-// and returns the records
-func RunOVNNbctlCSV(args []string) ([][]string, error) {
-	args = append([]string{"--no-heading", "--format=csv"}, args...)
-
-	stdout, _, err := RunOVNNbctlRawOutput(15, args...)
-	if err != nil {
-		return nil, err
-	}
-	if len(stdout) == 0 {
-		return nil, nil
-	}
-
-	r := csv.NewReader(strings.NewReader(stdout))
-	records, err := r.ReadAll()
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse nbctl CSV response: %w", err)
-	}
-	return records, nil
-}
-
 // RunOVNNbctl runs a command via ovn-nbctl.
+// FIXME: Remove when https://github.com/ovn-org/libovsdb/issues/235 is fixed
 func RunOVNNbctl(args ...string) (string, string, error) {
 	return RunOVNNbctlWithTimeout(ovsCommandTimeout, args...)
 }
 
-// RunOVNSbctlUnix runs command via ovn-sbctl, with ovn-sbctl using the unix
-// domain sockets to connect to the ovsdb-server backing the OVN SB database.
-func RunOVNSbctlUnix(args ...string) (string, string, error) {
-	cmdArgs := []string{fmt.Sprintf("--timeout=%d", ovsCommandTimeout)}
-	cmdArgs = append(cmdArgs, args...)
-	stdout, stderr, err := runOVNretry(runner.sbctlPath, nil, cmdArgs...)
-	return strings.Trim(strings.TrimFunc(stdout.String(), unicode.IsSpace), "\""),
-		stderr.String(), err
-}
-
 // RunOVNSbctlWithTimeout runs command via ovn-sbctl with a specific timeout
+// FIXME: Remove when https://github.com/ovn-org/libovsdb/issues/235 is fixed
 func RunOVNSbctlWithTimeout(timeout int, args ...string) (string, string,
 	error) {
 	var cmdArgs []string
@@ -623,6 +519,7 @@ func RunOVNSbctlWithTimeout(timeout int, args ...string) (string, string,
 	}
 
 	cmdArgs = append(cmdArgs, fmt.Sprintf("--timeout=%d", timeout))
+	cmdArgs = append(cmdArgs, "--no-leader-only")
 	cmdArgs = append(cmdArgs, args...)
 	start := time.Now()
 	stdout, stderr, err := runOVNretry(runner.sbctlPath, nil, cmdArgs...)
@@ -652,14 +549,9 @@ func RunOVSDBClientOVNNB(command string, args ...string) (string, string, error)
 }
 
 // RunOVNSbctl runs a command via ovn-sbctl.
+// FIXME: Remove when https://github.com/ovn-org/libovsdb/issues/235 is fixed
 func RunOVNSbctl(args ...string) (string, string, error) {
 	return RunOVNSbctlWithTimeout(ovsCommandTimeout, args...)
-}
-
-// RunOVNCtl runs an ovn-ctl command.
-func RunOVNCtl(args ...string) (string, string, error) {
-	stdout, stderr, err := runOVNretry(runner.ovnctlPath, nil, args...)
-	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
 // RunOVNNBAppCtlWithTimeout runs an ovn-appctl command with a timeout to nbdb
@@ -773,15 +665,15 @@ func RunIP(args ...string) (string, string, error) {
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
 }
 
-// RunArping runs a command via the "arping" utility
-func RunArping(args ...string) (string, string, error) {
-	stdout, stderr, err := run(runner.arpingPath, args...)
-	return strings.TrimSpace(stdout.String()), stderr.String(), err
-}
-
 // RunFirewallCmd runs a command via the "firewall-cmd" utility
 func RunFirewallCmd(args ...string) (string, string, error) {
 	stdout, stderr, err := run(runner.firewallPath, args...)
+	return strings.TrimSpace(stdout.String()), stderr.String(), err
+}
+
+// RunSysctl runs a command via the procps "sysctl" utility
+func RunSysctl(args ...string) (string, string, error) {
+	stdout, stderr, err := run(runner.sysctlPath, args...)
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
 }
 
@@ -1034,4 +926,33 @@ func DetectCheckPktLengthSupport(bridge string) (bool, error) {
 	}
 
 	return false, nil
+}
+
+type OvsDbProperties struct {
+	AppCtl        func(timeout int, args ...string) (string, string, error)
+	DbAlias       string
+	DbName        string
+	ElectionTimer int
+}
+
+// GetOvsDbProperties inits OvsDbProperties based on db file path given to it.
+// Now it only works with ovn dbs (nbdb and sbdb)
+func GetOvsDbProperties(db string) (*OvsDbProperties, error) {
+	if strings.Contains(db, "ovnnb") {
+		return &OvsDbProperties{
+			ElectionTimer: int(config.OvnNorth.ElectionTimer) * 1000,
+			AppCtl:        RunOVNNBAppCtlWithTimeout,
+			DbName:        "OVN_Northbound",
+			DbAlias:       db,
+		}, nil
+	} else if strings.Contains(db, "ovnsb") {
+		return &OvsDbProperties{
+			ElectionTimer: int(config.OvnSouth.ElectionTimer) * 1000,
+			AppCtl:        RunOVNSBAppCtlWithTimeout,
+			DbName:        "OVN_Southbound",
+			DbAlias:       db,
+		}, nil
+	} else {
+		return nil, fmt.Errorf("failed to parse ovn db type Northbound/Southbound from the path %s", db)
+	}
 }

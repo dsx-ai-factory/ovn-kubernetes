@@ -49,7 +49,7 @@ func (ni *nodeInfo) nodeSubnets() []net.IPNet {
 	out := append([]net.IPNet{}, ni.podSubnets...)
 	for _, ipStr := range ni.nodeIPs {
 		ip := net.ParseIP(ipStr)
-		if ip := ip.To4(); ip != nil {
+		if ipv4 := ip.To4(); ipv4 != nil {
 			out = append(out, net.IPNet{
 				IP:   ip,
 				Mask: net.CIDRMask(32, 32),
@@ -104,16 +104,16 @@ func newNodeTracker(nodeInformer coreinformers.NodeInformer) *nodeTracker {
 			if !ok {
 				tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
 				if !ok {
-					klog.Errorf("couldn't understand non-tombstone object")
+					klog.Errorf("Couldn't understand non-tombstone object")
 					return
 				}
 				node, ok = tombstone.Obj.(*v1.Node)
 				if !ok {
-					klog.Errorf("couldn't understand tombstone object")
+					klog.Errorf("Couldn't understand tombstone object")
 					return
 				}
 			}
-			nt.removeNode(node.Name)
+			nt.removeNodeWithServiceReSync(node.Name)
 		},
 	})
 
@@ -148,6 +148,13 @@ func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName string, n
 
 	klog.Infof("Node %s switch + router changed, syncing services", nodeName)
 	// Resync all services
+	nt.resyncFn()
+}
+
+// removeNodeWithServiceReSync removes a node from the LB -> node mapper
+// *and* forces full reconciliation of services.
+func (nt *nodeTracker) removeNodeWithServiceReSync(nodeName string) {
+	nt.removeNode(nodeName)
 	nt.resyncFn()
 }
 

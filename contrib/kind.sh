@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
-export KUBECONFIG=${HOME}/admin.conf
+# Returns the full directory name of the script
+DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
 run_kubectl() {
   local retries=0
@@ -31,55 +32,67 @@ delete() {
 }
 
 usage() {
-    echo "usage: kind.sh [[[-cf |--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]"
+    echo "usage: kind.sh [[[-cf |--config-file <file>] [-kt|--keep-taint] [-ha|--ha-enabled]"
     echo "                 [-ho |--hybrid-enabled] [-ii|--install-ingress] [-n4|--no-ipv4]"
     echo "                 [-i6 |--ipv6] [-wk|--num-workers <num>] [-ds|--disable-snat-multiple-gws]"
     echo "                 [-dp |--disable-pkt-mtu-check]"
-    echo "                 [-nf |--netflow-targets <targets>] [sf|--sflow-targets <targets>] [-if|--ipfix-targets]"
+    echo "                 [-nf |--netflow-targets <targets>] [sf|--sflow-targets <targets>]"
+    echo "                 [-if |--ipfix-targets <targets>]  [-ifs|--ipfix-sampling <num>]"
+    echo "                 [-ifm|--ipfix-cache-max-flows <num>] [-ifa|--ipfix-cache-active-timeout <num>]"
     echo "                 [-sw |--allow-system-writes] [-gm|--gateway-mode <mode>]"
     echo "                 [-nl |--node-loglevel <num>] [-ml|--master-loglevel <num>]"
     echo "                 [-dbl|--dbchecker-loglevel <num>] [-ndl|--ovn-loglevel-northd <loglevel>]"
     echo "                 [-nbl|--ovn-loglevel-nb <loglevel>] [-sbl|--ovn-loglevel-sb <loglevel>]"
-    echo "                 [-cl |--ovn-loglevel-controller <loglevel>] [-dl|--ovn-loglevel-nbctld <loglevel>]"
+    echo "                 [-cl |--ovn-loglevel-controller <loglevel>]"
     echo "                 [-ep |--experimental-provider <name>] |"
-    echo "                 [-eb |--egress-gw-separate-bridge]"
+    echo "                 [-eb |--egress-gw-separate-bridge] |"
+    echo "                 [-lr |--local-kind-registry |"
+    echo "                 [-dd |--dns-domain |"
+    echo "                 [-ric | --run-in-container |"
+    echo "                 [-cn | --cluster-name |"
     echo "                 [-h]]"
     echo ""
-    echo "-cf  | --config-file               Name of the KIND J2 configuration file."
-    echo "                                   DEFAULT: ./kind.yaml.j2"
-    echo "-kt  | --keep-taint                Do not remove taint components."
-    echo "                                   DEFAULT: Remove taint components."
-    echo "-ha  | --ha-enabled                Enable high availability. DEFAULT: HA Disabled."
-    echo "-ho  | --hybrid-enabled            Enable hybrid overlay. DEFAULT: Disabled."
-    echo "-ds  | --disable-snat-multiple-gws Disable SNAT for multiple gws. DEFAULT: Disabled."
-    echo "-dp  | --disable-pkt-mtu-check     Disable checking packet size greater than MTU. Default: Disabled"
-    echo "-nf  | --netflow-targets           Comma delimited list of ip:port netflow collectors. DEFAULT: Disabled."
-    echo "-sf  | --sflow-targets             Comma delimited list of ip:port sflow collectors. DEFAULT: Disabled."
-    echo "-if  | --ipfix-targets             Comma delimited list of ip:port ipfix collectors. DEFAULT: Disabled."
-    echo "-el  | --ovn-empty-lb-events       Enable empty-lb-events generation for LB without backends. DEFAULT: Disabled"
-    echo "-ii  | --install-ingress           Flag to install Ingress Components."
-    echo "                                   DEFAULT: Don't install ingress components."
-    echo "-n4  | --no-ipv4                   Disable IPv4. DEFAULT: IPv4 Enabled."
-    echo "-i6  | --ipv6                      Enable IPv6. DEFAULT: IPv6 Disabled."
-    echo "-wk  | --num-workers               Number of worker nodes. DEFAULT: HA - 2 worker"
-    echo "                                   nodes and no HA - 0 worker nodes."
-    echo "-sw  | --allow-system-writes       Allow script to update system. Intended to allow"
-    echo "                                   github CI to be updated with IPv6 settings."
-    echo "                                   DEFAULT: Don't allow."
-    echo "-gm  | --gateway-mode              Enable 'shared' or 'local' gateway mode."
-    echo "                                   DEFAULT: shared."
-    echo "-ov  | --ovn-image            	   Use the specified docker image instead of building locally. DEFAULT: local build."
-    echo "-ml  | --master-loglevel           Log level for ovnkube (master), DEFAULT: 5."
-    echo "-nl  | --node-loglevel             Log level for ovnkube (node), DEFAULT: 5"
-    echo "-dbl | --dbchecker-loglevel        Log level for ovn-dbchecker (ovnkube-db), DEFAULT: 5."
-    echo "-ndl | --ovn-loglevel-northd       Log config for ovn northd, DEFAULT: '-vconsole:info -vfile:info'."
-    echo "-nbl | --ovn-loglevel-nb           Log config for northbound DB DEFAULT: '-vconsole:info -vfile:info'."
-    echo "-sbl | --ovn-loglevel-sb           Log config for southboudn DB DEFAULT: '-vconsole:info -vfile:info'."
-    echo "-cl  | --ovn-loglevel-controller   Log config for ovn-controller DEFAULT: '-vconsole:info'."
-    echo "-dl  | --ovn-loglevel-nbctld       Log config for nbctl daemon DEFAULT: '-vconsole:info'."
-    echo "-ep  | --experimental-provider     Use an experimental OCI provider such as podman, instead of docker. DEFAULT: Disabled."
-    echo "-eb  | --egress-gw-separate-bridge The external gateway traffic uses a separate bridge."
-    echo "--delete                      	   Delete current cluster"
+    echo "-cf  | --config-file                Name of the KIND J2 configuration file."
+    echo "                                    DEFAULT: ./kind.yaml.j2"
+    echo "-kt  | --keep-taint                 Do not remove taint components."
+    echo "                                    DEFAULT: Remove taint components."
+    echo "-ha  | --ha-enabled                 Enable high availability. DEFAULT: HA Disabled."
+    echo "-ho  | --hybrid-enabled             Enable hybrid overlay. DEFAULT: Disabled."
+    echo "-ds  | --disable-snat-multiple-gws  Disable SNAT for multiple gws. DEFAULT: Disabled."
+    echo "-dp  | --disable-pkt-mtu-check      Disable checking packet size greater than MTU. Default: Disabled"
+    echo "-nf  | --netflow-targets            Comma delimited list of ip:port or :port (using node IP) netflow collectors. DEFAULT: Disabled."
+    echo "-sf  | --sflow-targets              Comma delimited list of ip:port or :port (using node IP) sflow collectors. DEFAULT: Disabled."
+    echo "-if  | --ipfix-targets              Comma delimited list of ip:port or :port (using node IP) ipfix collectors. DEFAULT: Disabled."
+    echo "-ifs | --ipfix-sampling             Fraction of packets that are sampled and sent to each target collector: 1 packet out of every <num>. DEFAULT: 400 (1 out of 400 packets)."
+    echo "-ifm | --ipfix-cache-max-flows      Maximum number of IPFIX flow records that can be cached at a time. If 0, caching is disabled. DEFAULT: Disabled."
+    echo "-ifa | --ipfix-cache-active-timeout Maximum period in seconds for which an IPFIX flow record is cached and aggregated before being sent. If 0, caching is disabled. DEFAULT: 60."
+    echo "-el  | --ovn-empty-lb-events        Enable empty-lb-events generation for LB without backends. DEFAULT: Disabled"
+    echo "-ii  | --install-ingress            Flag to install Ingress Components."
+    echo "                                    DEFAULT: Don't install ingress components."
+    echo "-n4  | --no-ipv4                    Disable IPv4. DEFAULT: IPv4 Enabled."
+    echo "-i6  | --ipv6                       Enable IPv6. DEFAULT: IPv6 Disabled."
+    echo "-wk  | --num-workers                Number of worker nodes. DEFAULT: HA - 2 worker"
+    echo "                                    nodes and no HA - 0 worker nodes."
+    echo "-sw  | --allow-system-writes        Allow script to update system. Intended to allow"
+    echo "                                    github CI to be updated with IPv6 settings."
+    echo "                                    DEFAULT: Don't allow."
+    echo "-gm  | --gateway-mode               Enable 'shared' or 'local' gateway mode."
+    echo "                                    DEFAULT: shared."
+    echo "-ov  | --ovn-image            	    Use the specified docker image instead of building locally. DEFAULT: local build."
+    echo "-ml  | --master-loglevel            Log level for ovnkube (master), DEFAULT: 5."
+    echo "-nl  | --node-loglevel              Log level for ovnkube (node), DEFAULT: 5"
+    echo "-dbl | --dbchecker-loglevel         Log level for ovn-dbchecker (ovnkube-db), DEFAULT: 5."
+    echo "-ndl | --ovn-loglevel-northd        Log config for ovn northd, DEFAULT: '-vconsole:info -vfile:info'."
+    echo "-nbl | --ovn-loglevel-nb            Log config for northbound DB DEFAULT: '-vconsole:info -vfile:info'."
+    echo "-sbl | --ovn-loglevel-sb            Log config for southboudn DB DEFAULT: '-vconsole:info -vfile:info'."
+    echo "-cl  | --ovn-loglevel-controller    Log config for ovn-controller DEFAULT: '-vconsole:info'."
+    echo "-ep  | --experimental-provider      Use an experimental OCI provider such as podman, instead of docker. DEFAULT: Disabled."
+    echo "-eb  | --egress-gw-separate-bridge  The external gateway traffic uses a separate bridge."
+    echo "-lr  | --local-kind-registry        Configure kind to use a local docker registry rather than manually loading images"
+    echo "-dd  | --dns-domain                 Configure a custom dnsDomain for k8s services, Defaults to 'cluster.local'"
+    echo "-cn  | --cluster-name               Configure the kind cluster's name"
+    echo "-ric | --run-in-container           Configure the script to be run from a docker container, allowing it to still communicate with the kind controlplane" 
+    echo "--delete                      	    Delete current cluster"
     echo ""
 }
 
@@ -117,6 +130,15 @@ parse_args() {
                                                 ;;
             -if | --ipfix-targets )             shift
                                                 OVN_IPFIX_TARGETS=$1
+                                                ;;
+            -ifs | --ipfix-sampling )           shift
+                                                OVN_IPFIX_SAMPLING=$1
+                                                ;;
+            -ifm | --ipfix-cache-max-flows )    shift
+                                                OVN_IPFIX_CACHE_MAX_FLOWS=$1
+                                                ;;
+            -ifa | --ipfix-cache-active-timeout ) shift
+                                                OVN_IPFIX_CACHE_ACTIVE_TIMEOUT=$1
                                                 ;;
             -el | --ovn-empty-lb-events )       OVN_EMPTY_LB_EVENTS=true
                                                 ;;
@@ -185,10 +207,20 @@ parse_args() {
             -cl  | --ovn-loglevel-controller )  shift
                                                 OVN_LOG_LEVEL_CONTROLLER=$1
                                                 ;;
-            -dl  | --ovn-loglevel-nbctld )      shift
-                                                OVN_LOG_LEVEL_NBCTLD=$1
-                                                ;;
             -hns | --host-network-namespace )   OVN_HOST_NETWORK_NAMESPACE=$1
+                                                ;;
+            -lr | --local-kind-registry )       KIND_LOCAL_REGISTRY=true
+                                                ;;
+            -dd | --dns-domain )                shift
+                                                KIND_DNS_DOMAIN=$1
+                                                ;;
+            -cn | --cluster-name )              shift
+                                                KIND_CLUSTER_NAME=$1
+                                                ;;
+            -kc | --kubeconfig )                shift
+                                                KUBECONFIG=$1
+                                                ;;
+            -ric | --run-in-container )         RUN_IN_CONTAINER=true
                                                 ;;
             --delete )                          delete
                                                 exit
@@ -206,8 +238,14 @@ parse_args() {
 print_params() {
      echo "Using these parameters to install KIND"
      echo ""
+     echo "KUBECONFIG = $KUBECONFIG"
+     echo "MANIFEST_OUTPUT_DIR = $MANIFEST_OUTPUT_DIR"
      echo "KIND_INSTALL_INGRESS = $KIND_INSTALL_INGRESS"
      echo "OVN_HA = $OVN_HA"
+     echo "RUN_IN_CONTAINER = $RUN_IN_CONTAINER"
+     echo "KIND_CLUSTER_NAME = $KIND_CLUSTER_NAME"
+     echo "KIND_LOCAL_REGISTRY = $KIND_LOCAL_REGISTRY"
+     echo "KIND_DNS_DOMAIN = $KIND_DNS_DOMAIN"
      echo "KIND_CONFIG_FILE = $KIND_CONFIG"
      echo "KIND_REMOVE_TAINT = $KIND_REMOVE_TAINT"
      echo "KIND_IPV4_SUPPORT = $KIND_IPV4_SUPPORT"
@@ -222,6 +260,9 @@ print_params() {
      echo "OVN_NETFLOW_TARGETS = $OVN_NETFLOW_TARGETS"
      echo "OVN_SFLOW_TARGETS = $OVN_SFLOW_TARGETS"
      echo "OVN_IPFIX_TARGETS = $OVN_IPFIX_TARGETS"
+     echo "OVN_IPFIX_SAMPLING = $OVN_IPFIX_SAMPLING"
+     echo "OVN_IPFIX_CACHE_MAX_FLOWS = $OVN_IPFIX_CACHE_MAX_FLOWS"
+     echo "OVN_IPFIX_CACHE_ACTIVE_TIMEOUT = $OVN_IPFIX_CACHE_ACTIVE_TIMEOUT"
      echo "OVN_EMPTY_LB_EVENTS = $OVN_EMPTY_LB_EVENTS"
      echo "OVN_MULTICAST_ENABLE = $OVN_MULTICAST_ENABLE"
      echo "OVN_IMAGE = $OVN_IMAGE"
@@ -241,21 +282,7 @@ print_params() {
 
 command_exists() {
   cmd="$1"
-  which ${cmd} >/dev/null 2>&1
-}
-
-check_dependencies() {
-  for cmd in pip jq kind ; do
-    if ! command_exists ${cmd} ; then
-  	  echo "Dependency not met: Command not found '${cmd}'"
-  	  exit 1
-    fi
-  done
-
-  if ! command_exists docker && ! command_exists podman; then
-  	  echo "Dependency not met: Neither docker nor podman found"
-  	  exit 1
-  fi
+  command -v ${cmd} >/dev/null 2>&1
 }
 
 install_j2_renderer() {
@@ -265,15 +292,53 @@ install_j2_renderer() {
   export PATH=~/.local/bin:$PATH
 }
 
+check_dependencies() {
+  if ! command_exists kind ; then
+    echo "Dependency not met: Command not found 'kind'"
+    exit 1
+  fi
+
+  if ! command_exists jq ; then
+    echo "Dependency not met: Command not found 'jq'"
+    exit 1
+  fi
+
+  if ! command_exists j2 ; then
+    if ! command_exists pip ; then
+      echo "Dependency not met: 'j2' not installed and cannot install with 'pip'"
+      exit 1
+    fi
+    echo "'j2' not found, installing with 'pip'"
+    install_j2_renderer
+  fi
+
+  if ! command_exists docker && ! command_exists podman; then
+  	  echo "Dependency not met: Neither docker nor podman found"
+  	  exit 1
+  fi
+}
+
 set_default_params() {
   # Set default values
+  # Used for multi cluster setups
   KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}
+  # Setup KUBECONFIG patch based on cluster-name
+  export KUBECONFIG=${KUBECONFIG:-${HOME}/${KIND_CLUSTER_NAME}.conf}
+  # Scrub any existing kubeconfigs at the path
+  rm -f ${KUBECONFIG}
+  MANIFEST_OUTPUT_DIR=${MANIFEST_OUTPUT_DIR:-${DIR}/../dist/yaml}
+  if [ ${KIND_CLUSTER_NAME} != "ovn" ]; then
+    MANIFEST_OUTPUT_DIR="${DIR}/../dist/yaml/${KIND_CLUSTER_NAME}"
+  fi
+  RUN_IN_CONTAINER=${RUN_IN_CONTAINER:-false}
   KIND_IMAGE=${KIND_IMAGE:-kindest/node}
-  K8S_VERSION=${K8S_VERSION:-v1.21.1}
+  K8S_VERSION=${K8S_VERSION:-v1.24.0}
   OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-shared}
   KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
   OVN_HA=${OVN_HA:-false}
-  KIND_CONFIG=${KIND_CONFIG:-./kind.yaml.j2}
+  KIND_LOCAL_REGISTRY=${KIND_LOCAL_REGISTRY:-false}
+  KIND_DNS_DOMAIN=${KIND_DNS_DOMAIN:-"cluster.local"}
+  KIND_CONFIG=${KIND_CONFIG:-${DIR}/kind.yaml.j2}
   KIND_REMOVE_TAINT=${KIND_REMOVE_TAINT:-true}
   KIND_IPV4_SUPPORT=${KIND_IPV4_SUPPORT:-true}
   KIND_IPV6_SUPPORT=${KIND_IPV6_SUPPORT:-false}
@@ -318,26 +383,6 @@ set_default_params() {
   fi
   OVN_HOST_NETWORK_NAMESPACE=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
   OCI_BIN=${KIND_EXPERIMENTAL_PROVIDER:-docker}
-}
-
-detect_apiserver_ip() {
-  # Detect API_IP used for external communication
-  #
-  # You can't use an IPv6 address for the external API, docker does not support
-  # IPv6 port mapping. Always use the IPv4 host address for the API Server field.
-  # This will keep compatibility and people will be able to connect with kubectl
-  # from outside
-  #
-  # ip -4 addr -> Run ip command for IPv4
-  # grep -oP '(?<=inet\s)\d+(\.\d+){3}' -> Use only the lines with the
-  #   IPv4 Addresses and strip off the trailing subnet mask, /xx
-  # grep -v "127.0.0.1" -> Remove local host
-  # head -n 1 -> Of the remaining, use first entry
-  API_IP=$(ip -4 addr | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v "127.0.0.1" | head -n 1)
-  if [ -z "$API_IP" ]; then
-    echo "Error detecting machine IPv4 to use as API server. Default to 0.0.0.0."
-    API_IP=0.0.0.0
-  fi
 }
 
 detect_apiserver_url() {
@@ -392,17 +437,17 @@ set_cluster_cidr_ip_families() {
     IP_FAMILY=""
     NET_CIDR=$NET_CIDR_IPV4
     SVC_CIDR=$SVC_CIDR_IPV4
-    echo "IPv4 Only Support: API_IP=$API_IP --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
+    echo "IPv4 Only Support: --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
   elif [ "$KIND_IPV4_SUPPORT" == false ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
     IP_FAMILY="ipv6"
     NET_CIDR=$NET_CIDR_IPV6
     SVC_CIDR=$SVC_CIDR_IPV6
-    echo "IPv6 Only Support: API_IP=$API_IP --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
+    echo "IPv6 Only Support: --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
   elif [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
     IP_FAMILY="dual"
     NET_CIDR=$NET_CIDR_IPV4,$NET_CIDR_IPV6
     SVC_CIDR=$SVC_CIDR_IPV4,$SVC_CIDR_IPV6
-    echo "Dual Stack Support: API_IP=$API_IP --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
+    echo "Dual Stack Support: --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
   else
     echo "Invalid setup. KIND_IPV4_SUPPORT and/or KIND_IPV6_SUPPORT must be true."
     exit 1
@@ -411,13 +456,14 @@ set_cluster_cidr_ip_families() {
 
 create_kind_cluster() {
   # Output of the j2 command
-  KIND_CONFIG_LCL=./kind.yaml
+  KIND_CONFIG_LCL=${DIR}/kind-${KIND_CLUSTER_NAME}.yaml
 
-  ovn_apiServerAddress=${API_IP} \
     ovn_ip_family=${IP_FAMILY} \
     ovn_ha=${OVN_HA} \
     net_cidr=${NET_CIDR} \
     svc_cidr=${SVC_CIDR} \
+    use_local_registy=${KIND_LOCAL_REGISTRY} \
+    dns_domain=${KIND_DNS_DOMAIN} \
     ovn_num_master=${KIND_NUM_MASTER} \
     ovn_num_worker=${KIND_NUM_WORKER} \
     cluster_log_level=${KIND_CLUSTER_LOGLEVEL:-4} \
@@ -427,7 +473,7 @@ create_kind_cluster() {
   if kind get clusters | grep ovn; then
     delete
   fi
-  kind create cluster --name "${KIND_CLUSTER_NAME}" --kubeconfig "${KUBECONFIG}" --image "${KIND_IMAGE}":"${K8S_VERSION}" --config=${KIND_CONFIG_LCL}
+  kind create cluster --name "${KIND_CLUSTER_NAME}" --kubeconfig "${KUBECONFIG}" --image "${KIND_IMAGE}":"${K8S_VERSION}" --config=${KIND_CONFIG_LCL} --retain
   cat "${KUBECONFIG}"
 }
 
@@ -485,29 +531,43 @@ build_ovn_image() {
     sed  -i "s/ovnkube_metrics_pk=.*/ovnkube_metrics_pk=""/;s/ovnkube_metrics_cert=.*/ovnkube_metrics_cert=""/" ../dist/images/ovnkube.sh
     sed -i "/check_firewall_state() {.*/a return 0" ../dist/images/ovnkube.sh
     sed -i "/create_ovn_firewall_zone() {.*/a return 0" ../dist/images/ovnkube.sh
+
+    # if we're using the local registry and still need to build, push to local registry
+    if [ "$KIND_LOCAL_REGISTRY" == true ];then
+      OVN_IMAGE="localhost:5000/ovn-daemonset-f:latest"
+    else
+      OVN_IMAGE="localhost/ovn-daemonset-f:dev"
+    fi
+
     # Build ovn docker image
-    pushd ../go-controller
+    pushd ${DIR}/../go-controller
     make
     popd
 
     # Build ovn kube image
-    pushd ../dist/images
+    pushd ${DIR}/../dist/images
     # Find all built executables, but ignore the 'windows' directory if it exists
     find ../../go-controller/_output/go/bin/ -maxdepth 1 -type f -exec cp -f {} . \;
     echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
     . /tmp/latest-sdn-version-tags/versions
     NGN21_OVS_L2_VER="-${NGN21_OVS}"
     NGN21_OVN_L2_VER="-${NGN21_OVN}"
-    $OCI_BIN build -t localhost/ovn-daemonset-f:dev --build-arg OVS_VER=${NGN21_OVS_L2_VER} --build-arg OVN_VER=${NGN21_OVN_L2_VER} --no-cache .
-    OVN_IMAGE=localhost/ovn-daemonset-f:dev
+    $OCI_BIN build -t "${OVN_IMAGE}" --build-arg OVS_VER=${NGN21_OVS_L2_VER} --build-arg OVN_VER=${NGN21_OVN_L2_VER} --no-cache .
+
+    # store in local registry
+    if [ "$KIND_LOCAL_REGISTRY" == true ];then
+      echo "Pushing built image to local docker registry"
+      docker push "${OVN_IMAGE}"
+    fi
     popd
   fi
 }
 
 create_ovn_kube_manifests() {
-  pushd ../dist/images
+  pushd ${DIR}/../dist/images
   sed -i "s/if kind is defined and kind -/if true /" ../templates/ovnk8s-node.yaml.j2
   ./daemonset.sh \
+    --output-directory="${MANIFEST_OUTPUT_DIR}"\
     --image="${OVN_IMAGE}" \
     --net-cidr="${NET_CIDR}" \
     --svc-cidr="${SVC_CIDR}" \
@@ -527,9 +587,10 @@ create_ovn_kube_manifests() {
     --ovn-loglevel-nb="${OVN_LOG_LEVEL_NB}" \
     --ovn-loglevel-sb="${OVN_LOG_LEVEL_SB}" \
     --ovn-loglevel-controller="${OVN_LOG_LEVEL_CONTROLLER}" \
-    --ovn-loglevel-nbctld="${OVN_LOG_LEVEL_NBCTLD}" \
+    --ovnkube-config-duration-enable=true \
     --egress-ip-enable=true \
     --egress-firewall-enable=true \
+    --egress-qos-enable=true \
     --v4-join-subnet="${JOIN_SUBNET_IPV4}" \
     --v6-join-subnet="${JOIN_SUBNET_IPV6}" \
     --ex-gw-network-interface="${OVN_EX_GW_NETWORK_INTERFACE}"
@@ -537,13 +598,18 @@ create_ovn_kube_manifests() {
 }
 
 install_ovn_image() {
-  if [ "$OCI_BIN" == "podman" ]; then
-    # podman: cf https://github.com/kubernetes-sigs/kind/issues/2027
-    rm -f /tmp/ovn-kube-f.tar
-    podman save -o /tmp/ovn-kube-f.tar "${OVN_IMAGE}"
-    kind load image-archive /tmp/ovn-kube-f.tar --name "${KIND_CLUSTER_NAME}"
+  # If local registry is being used push image there for consumption by kind cluster
+  if [ "$KIND_LOCAL_REGISTRY" == true ]; then
+    echo "OVN-K Image: ${OVN_IMAGE} should already be avaliable in local registry, not loading"
   else
-    kind load docker-image "${OVN_IMAGE}" --name "${KIND_CLUSTER_NAME}"
+    if [ "$OCI_BIN" == "podman" ]; then
+      # podman: cf https://github.com/kubernetes-sigs/kind/issues/2027
+      rm -f /tmp/ovn-kube-f.tar
+      podman save -o /tmp/ovn-kube-f.tar "${OVN_IMAGE}"
+      kind load image-archive /tmp/ovn-kube-f.tar --name "${KIND_CLUSTER_NAME}"
+    else
+      kind load docker-image "${OVN_IMAGE}" --name "${KIND_CLUSTER_NAME}"
+    fi
   fi
 }
 
@@ -551,23 +617,28 @@ install_ovn() {
 
   run_kubectl apply -f /root/git/k8s-yaml/multus/multus.yaml
   run_kubectl apply -f /root/git/k8s-yaml/ovn/centos/shared/multinetworkpolicy.yaml
-  pushd ../dist/yaml
+  pushd ${MANIFEST_OUTPUT_DIR}
+
   run_kubectl apply -f k8s.ovn.org_egressfirewalls.yaml
   run_kubectl apply -f k8s.ovn.org_egressips.yaml
+  run_kubectl apply -f k8s.ovn.org_egressqoses.yaml
   test -f k8s.ovn.org_icmpnetworkpolicies.yaml && run_kubectl apply -f k8s.ovn.org_icmpnetworkpolicies.yaml
   run_kubectl apply -f /root/git/k8s-yaml/multus/ovn-primary-crd.yaml
   run_kubectl apply -f ovn-setup.yaml
   MASTER_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sort | head -n "${KIND_NUM_MASTER}")
   # We want OVN HA not Kubernetes HA
-  # leverage the kubeadm well-known label node-role.kubernetes.io/master=
+  # leverage the kubeadm well-known label node-role.kubernetes.io/control-plane=
   # to choose the nodes where ovn master components will be placed
   kubectl label node --all ngn2.nvidia.com/hosttype=GS --overwrite
   for n in $MASTER_NODES; do
-    kubectl label node "$n" k8s.ovn.org/ovnkube-db=true node-role.kubernetes.io/master="" --overwrite
+    kubectl label node "$n" k8s.ovn.org/ovnkube-db=true node-role.kubernetes.io/control-plane="" --overwrite
     kubectl label node "$n" ngn2.nvidia.com/hosttype="" --overwrite
     if [ "$KIND_REMOVE_TAINT" == true ]; then
       # do not error if it fails to remove the taint
+      # remove both master and control-plane taints until master is removed from 1.25
+      # // https://github.com/kubernetes/kubernetes/pull/107533
       kubectl taint node "$n" node-role.kubernetes.io/master:NoSchedule- || true
+      kubectl taint node "$n" node-role.kubernetes.io/control-plane:NoSchedule- || true
     fi
   done
   run_kubectl label node --all k8s.ovn.org/ovnkube-db=true --overwrite
@@ -625,7 +696,7 @@ kubectl_wait_pods() {
     sleep 1
   done
 
-  if [[ "${PODS_CREATED}" == false ]]; then
+  if [[ "$PODS_CREATED" == false ]]; then
     echo "ovn-kubernetes pods were not created."
     exit 1
   fi
@@ -666,20 +737,44 @@ sleep_until_pods_settle() {
   sleep 30
 }
 
+# run_script_in_container should be used when kind.sh is run nested in a container
+# and makes sure the control-plane node is rechable by substituting 127.0.0.1
+# with the control-plane container's IP
+run_script_in_container() {
+  local master_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ${KIND_CLUSTER_NAME}-control-plane | head -n 1)
+  sed -i -- "s/server: .*/server: https:\/\/$master_ip:6443/g" $KUBECONFIG
+  chmod a+r $KUBECONFIG
+}
+
+# fixup_config_names should be used to ensure kind clusters are named based off
+# provided values, essentially it removes the 'kind' prefix from the cluster names
+fixup_kubeconfig_names() {
+  sed -i -- "s/user: kind-.*/user: ${KIND_CLUSTER_NAME}/g" $KUBECONFIG
+  sed -i -- "s/name: kind-.*/name: ${KIND_CLUSTER_NAME}/g" $KUBECONFIG
+  sed -i -- "s/cluster: kind-.*/cluster: ${KIND_CLUSTER_NAME}/g" $KUBECONFIG
+  sed -i -- "s/current-context: .*/current-context: ${KIND_CLUSTER_NAME}/g" $KUBECONFIG
+}
+
 check_dependencies
-install_j2_renderer
-# In order to allow providing arguments with spaces, e.g. "-vconsole:info -vfile:info" 
+# In order to allow providing arguments with spaces, e.g. "-vconsole:info -vfile:info"
 # the original command <parse_args $*> was replaced by <parse_args "$@">
 parse_args "$@"
 set_default_params
 print_params
+
 set -euxo pipefail
-detect_apiserver_ip
 check_ipv6
 set_cluster_cidr_ip_families
 create_kind_cluster
+if [ "$RUN_IN_CONTAINER" == true ]; then
+  run_script_in_container
+fi
+# if cluster name is specified fixup kubeconfig
+if [ "$KIND_CLUSTER_NAME"} != "ovn" ]; then
+  fixup_kubeconfig_names
+fi
 docker_disable_ipv6
-if [ $OVN_ENABLE_EX_GW_NETWORK_BRIDGE == true ]; then
+if [ "$OVN_ENABLE_EX_GW_NETWORK_BRIDGE" == true ]; then
   docker_create_second_interface
 fi
 coredns_patch

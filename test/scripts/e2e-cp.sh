@@ -4,14 +4,15 @@ set -ex
 
 # setting this env prevents ginkgo e2e from trying to run provider setup
 export KUBERNETES_CONFORMANCE_TEST=y
-export KUBECONFIG=${HOME}/admin.conf
+export KUBECONFIG=${HOME}/ovn.conf
 
 # Skip tests which are not IPv6 ready yet (see description of https://github.com/ovn-org/ovn-kubernetes/pull/2276)
 # (Note that netflow v5 is IPv4 only)
 IPV6_SKIPPED_TESTS="Should be allowed by externalip services|\
 should provide connection to external host by DNS name from a pod|\
 Should validate flow data of br-int is sent to an external gateway with netflow v5|\
-test tainting a node according to its defaults interface MTU size"
+test tainting a node according to its defaults interface MTU size|\
+ipv4 pod"
 
 SKIPPED_TESTS=""
 
@@ -22,7 +23,7 @@ if [ "$KIND_IPV4_SUPPORT" == true ]; then
     else
 	# Skip sflow in IPv4 since it's a long test (~5 minutes)
 	# We're validating netflow v5 with an ipv4 cluster, sflow with an ipv6 cluster
-	SKIPPED_TESTS="Should validate flow data of br-int is sent to an external gateway with sflow"
+	SKIPPED_TESTS="Should validate flow data of br-int is sent to an external gateway with sflow|ipv6 pod"
     fi
 fi
 
@@ -39,7 +40,8 @@ else
   	SKIPPED_TESTS+="|"
   fi
 
-  SKIPPED_TESTS+="Should validate connectivity before and after deleting all the db-pods at once in Non-HA mode"
+  SKIPPED_TESTS+="Should validate connectivity before and after deleting all the db-pods at once in Non-HA mode|\
+  e2e br-int NetFlow export validation"
 fi
 
 if [ "$KIND_IPV6_SUPPORT" == true ]; then
@@ -50,13 +52,11 @@ if [ "$KIND_IPV6_SUPPORT" == true ]; then
   SKIPPED_TESTS+=$IPV6_SKIPPED_TESTS
 fi
 
-if [ "$OVN_GATEWAY_MODE" == "local" ]; then
+if [ "$OVN_DISABLE_SNAT_MULTIPLE_GWS" == false ]; then
   if [ "$SKIPPED_TESTS" != "" ]; then
-  	SKIPPED_TESTS+="|"
+    SKIPPED_TESTS+="|"
   fi
-  SKIPPED_TESTS+="Should be allowed to node local cluster-networked endpoints by nodeport services with externalTrafficPolicy=local|\
-e2e ingress to host-networked pods traffic validation|\
-host to host-networked pods traffic validation"
+  SKIPPED_TESTS+="e2e multiple external gateway stale conntrack entry deletion validation"
 fi
 
 # setting these is required to make RuntimeClass tests work ... :/

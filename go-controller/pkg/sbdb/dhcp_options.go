@@ -3,20 +3,22 @@
 
 package sbdb
 
+import "github.com/ovn-org/libovsdb/model"
+
 type (
 	DHCPOptionsType = string
 )
 
 var (
 	DHCPOptionsTypeBool         DHCPOptionsType = "bool"
-	DHCPOptionsTypeDomains      DHCPOptionsType = "domains"
-	DHCPOptionsTypeHostID       DHCPOptionsType = "host_id"
+	DHCPOptionsTypeUint8        DHCPOptionsType = "uint8"
+	DHCPOptionsTypeUint16       DHCPOptionsType = "uint16"
+	DHCPOptionsTypeUint32       DHCPOptionsType = "uint32"
 	DHCPOptionsTypeIpv4         DHCPOptionsType = "ipv4"
 	DHCPOptionsTypeStaticRoutes DHCPOptionsType = "static_routes"
 	DHCPOptionsTypeStr          DHCPOptionsType = "str"
-	DHCPOptionsTypeUint16       DHCPOptionsType = "uint16"
-	DHCPOptionsTypeUint32       DHCPOptionsType = "uint32"
-	DHCPOptionsTypeUint8        DHCPOptionsType = "uint8"
+	DHCPOptionsTypeHostID       DHCPOptionsType = "host_id"
+	DHCPOptionsTypeDomains      DHCPOptionsType = "domains"
 )
 
 // DHCPOptions defines an object in DHCP_Options table
@@ -26,3 +28,37 @@ type DHCPOptions struct {
 	Name string          `ovsdb:"name"`
 	Type DHCPOptionsType `ovsdb:"type"`
 }
+
+func (a *DHCPOptions) DeepCopyInto(b *DHCPOptions) {
+	*b = *a
+}
+
+func (a *DHCPOptions) DeepCopy() *DHCPOptions {
+	b := new(DHCPOptions)
+	a.DeepCopyInto(b)
+	return b
+}
+
+func (a *DHCPOptions) CloneModelInto(b model.Model) {
+	c := b.(*DHCPOptions)
+	a.DeepCopyInto(c)
+}
+
+func (a *DHCPOptions) CloneModel() model.Model {
+	return a.DeepCopy()
+}
+
+func (a *DHCPOptions) Equals(b *DHCPOptions) bool {
+	return a.UUID == b.UUID &&
+		a.Code == b.Code &&
+		a.Name == b.Name &&
+		a.Type == b.Type
+}
+
+func (a *DHCPOptions) EqualsModel(b model.Model) bool {
+	c := b.(*DHCPOptions)
+	return a.Equals(c)
+}
+
+var _ model.CloneableModel = &DHCPOptions{}
+var _ model.ComparableModel = &DHCPOptions{}

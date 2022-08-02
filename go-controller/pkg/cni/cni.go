@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/containernetworking/cni/pkg/types/current"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
+	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -120,6 +120,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 
 	kubecli := &kube.Kube{KClient: kclient}
 	annotCondFn := isOvnReady
+
 	vfNetdevName := ""
 	if pr.CNIConf.DeviceID != "" {
 		var err error
@@ -137,6 +138,8 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 			annotCondFn = isDPUReady
 		}
 		// Todo(gmoodalbail): For the CX5 ASAP2 VF case we need to store the VF name somewhere
+		// In the case of SmartNIC (CX5), we store the VFNetdevname in the VF representor's
+		// OVS interface's external_id column. This is done in ConfigureInterface().
 	}
 	// Get the IP address and MAC address of the pod
 	// for DPU, ensure connection-details is present
@@ -213,9 +216,30 @@ func (pr *PodRequest) cmdDel(podLister corev1listers.PodLister, kclient kubernet
 				return response, nil
 			}
 
-			vfNetdevName = dpuCD.VfDevName
+			vfNetdevName = dpuCD.VfNetdevName
+		} else {
+			// Find the the hostInterface name
+			condString := "external-ids:sandbox=" + pr.SandboxID
+			if pr.CNIConf.IsSecondary {
+				condString += " external_ids:network_name=" + pr.effectiveNADName
+			} else {
+				condString += " external_ids:network_name{=}[]"
+			}
+			ovsIfNames, err := ovsFind("Interface", "name", condString)
+			if err != nil || len(ovsIfNames) != 1 {
+				klog.Warningf("Couldn't find the OVS interface for pod %s/%s nad %s: %v",
+					pr.PodNamespace, pr.PodName, pr.effectiveNADName, err)
+			} else {
+				ovsIfName := ovsIfNames[0]
+				out, err := ovsGet("interface", ovsIfName, "external_ids", "vf-netdev-name")
+				if err != nil {
+					klog.Warningf("Couldn't find the original VF Netdev name from OVS interface %s for pod %s/%s: %v",
+						ovsIfName, pr.PodNamespace, pr.PodName, err)
+				} else {
+					vfNetdevName = out
+				}
+			}
 		}
-		// TODO(gmoodalbail): add for the CX5 ASAP2 VF case
 	}
 
 	podInterfaceInfo := &PodInterfaceInfo{

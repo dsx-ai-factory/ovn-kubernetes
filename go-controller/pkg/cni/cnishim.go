@@ -150,6 +150,7 @@ func kubeClientsetFromConfig(auth *KubeAPIAuth) (*kubernetes.Clientset, error) {
 		Kubeconfig: auth.Kubeconfig,
 		APIServer:  auth.KubeAPIServer,
 		Token:      auth.KubeAPIToken,
+		TokenFile:  auth.KubeAPITokenFile,
 		CAData:     caData,
 	})
 }
@@ -253,11 +254,11 @@ func (p *Plugin) CmdDel(args *skel.CmdArgs) error {
 	response := &Response{}
 	err = json.Unmarshal(body, response)
 	if err != nil {
-		err = fmt.Errorf("failed to unmarshal response '%s': %v", string(body), err)
+		err = fmt.Errorf("cmdDel: failed to unmarshal response '%s': %v", string(body), err)
 		return err
 	}
 
-	// if no Result, it is privileged mode, do unconfiguration of Interface here.
+	// if Result is nil, then ovnkube-node is running in unprivileged mode so unconfigure the Interface from here.
 	if response.Result == nil {
 		pr, err = cniRequestToPodRequest(req, nil, nil)
 		if err != nil {

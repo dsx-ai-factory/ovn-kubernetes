@@ -28,8 +28,6 @@ spec:
         component: network
         type: infra
         kubernetes.io/os: "linux"
-      annotations:
-        scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
       imagePullSecrets:
         - name: ovncni-quay-ips
@@ -37,6 +35,7 @@ spec:
       # as all pods.
       serviceAccountName: ovn
       hostNetwork: true
+      dnsPolicy: Default
       priorityClassName: "system-node-critical"
       {{ "hostPID: true" if ovn_unprivileged_mode=="no" }}
       containers:
@@ -179,6 +178,12 @@ spec:
               value: "{{ ovn_sflow_targets }}"
             - name: OVN_IPFIX_TARGETS
               value: "{{ ovn_ipfix_targets }}"
+            - name: OVN_IPFIX_SAMPLING
+              value: "{{ ovn_ipfix_sampling }}"
+            - name: OVN_IPFIX_CACHE_MAX_FLOWS
+              value: "{{ ovn_ipfix_cache_max_flows }}"
+            - name: OVN_IPFIX_CACHE_ACTIVE_TIMEOUT
+              value: "{{ ovn_ipfix_cache_active_timeout }}"
             - name: OVN_MULTICAST_ENABLE
               value: "{{ ovn_multicast_enable }}"
             - name: OVN_UNPRIVILEGED_MODE
@@ -194,6 +199,8 @@ spec:
               value: "{{ ovn_multi_network_enable }}"
             - name: OVN_DISABLE_OVN_IFACE_ID_VER
               value: "{{ ovn_disable_ovn_iface_id_ver }}"
+            - name: OVN_OFCTRL_WAIT_BEFORE_CLEAR
+              value: "{{ ovn_ofctrl_wait_before_clear }}"
             - name: OVN_MONITOR_ALL
               value: "{{ ovn_monitor_all }}"
             - name: OVN_ENABLE_LFLOW_CACHE

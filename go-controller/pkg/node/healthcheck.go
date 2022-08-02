@@ -1,6 +1,7 @@
 package node
 
 import (
+	"net"
 	"os"
 	"strings"
 	"sync"
@@ -16,7 +17,6 @@ import (
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 )
 
@@ -24,6 +24,7 @@ import (
 // ServiceTypeLoadBalancer services
 
 type loadBalancerHealthChecker struct {
+	sync.Mutex
 	nodeName  string
 	server    healthcheck.Server
 	services  map[ktypes.NamespacedName]uint16
@@ -41,6 +42,8 @@ func newLoadBalancerHealthChecker(nodeName string) *loadBalancerHealthChecker {
 
 func (l *loadBalancerHealthChecker) AddService(svc *kapi.Service) {
 	if svc.Spec.HealthCheckNodePort != 0 {
+		l.Lock()
+		defer l.Unlock()
 		name := ktypes.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
 		l.services[name] = uint16(svc.Spec.HealthCheckNodePort)
 		_ = l.server.SyncServices(l.services)
@@ -53,6 +56,8 @@ func (l *loadBalancerHealthChecker) UpdateService(old, new *kapi.Service) {
 
 func (l *loadBalancerHealthChecker) DeleteService(svc *kapi.Service) {
 	if svc.Spec.HealthCheckNodePort != 0 {
+		l.Lock()
+		defer l.Unlock()
 		name := ktypes.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
 		delete(l.services, name)
 		delete(l.endpoints, name)
@@ -60,11 +65,15 @@ func (l *loadBalancerHealthChecker) DeleteService(svc *kapi.Service) {
 	}
 }
 
-func (l *loadBalancerHealthChecker) SyncServices(svcs []interface{}) {}
+func (l *loadBalancerHealthChecker) SyncServices(svcs []interface{}) error {
+	return nil
+}
 
 func (l *loadBalancerHealthChecker) AddEndpointSlice(epSlice *discovery.EndpointSlice) {
 	svcName := epSlice.Labels[discovery.LabelServiceName]
 	name := ktypes.NamespacedName{Namespace: epSlice.Namespace, Name: svcName}
+	l.Lock()
+	defer l.Unlock()
 	if _, exists := l.services[name]; exists {
 		l.endpoints[name] = countReadyEndpoints(epSlice)
 		_ = l.server.SyncEndpoints(l.endpoints)
@@ -74,6 +83,8 @@ func (l *loadBalancerHealthChecker) AddEndpointSlice(epSlice *discovery.Endpoint
 func (l *loadBalancerHealthChecker) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.EndpointSlice) {
 	svcName := newEpSlice.Labels[discovery.LabelServiceName]
 	name := ktypes.NamespacedName{Namespace: newEpSlice.Namespace, Name: svcName}
+	l.Lock()
+	defer l.Unlock()
 	if _, exists := l.services[name]; exists {
 		l.endpoints[name] = countReadyEndpoints(newEpSlice)
 		_ = l.server.SyncEndpoints(l.endpoints)
@@ -83,6 +94,8 @@ func (l *loadBalancerHealthChecker) UpdateEndpointSlice(oldEpSlice, newEpSlice *
 func (l *loadBalancerHealthChecker) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) {
 	svcName := epSlice.Labels[discovery.LabelServiceName]
 	name := ktypes.NamespacedName{Namespace: epSlice.Namespace, Name: svcName}
+	l.Lock()
+	defer l.Unlock()
 	delete(l.endpoints, name)
 	_ = l.server.SyncEndpoints(l.endpoints)
 }
@@ -98,12 +111,17 @@ func countReadyEndpoints(epSlice *discovery.EndpointSlice) int {
 	return num
 }
 
-func hasHostNetworkEndpoints(epSlices []*discovery.EndpointSlice, nodeAddresses *sets.String) bool {
+// hasLocalHostNetworkEndpoints returns true if there is at least one host-networked endpoint
+// in the provided list that is local to this node.
+// It returns false if none of the endpoints are local host-networked endpoints or if ep.Subsets is nil.
+func hasLocalHostNetworkEndpoints(epSlices []*discovery.EndpointSlice, nodeAddresses []net.IP) bool {
 	for _, epSlice := range epSlices {
 		for _, endpoint := range epSlice.Endpoints {
 			for _, ip := range endpoint.Addresses {
-				if nodeAddresses.Has(ip) {
-					return true
+				for _, nodeIP := range nodeAddresses {
+					if nodeIP.String() == ip {
+						return true
+					}
 				}
 			}
 		}
@@ -220,6 +238,10 @@ func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCac
 
 	// Remove any stale representor ports
 	for _, ifaceInfo := range interfaceInfos {
+		// TBD, upgrde path? ignore non-vf representor ports
+		//if _, ok := ifaceInfo.Attributes["vf-netdev-name"]; !ok {
+		//	continue
+		//}
 		ifaceId, ok := ifaceInfo.Attributes["iface-id"]
 		if !ok {
 			// interface with external-ids:sandbox set but no iface-id, delete it
@@ -245,8 +267,6 @@ func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCac
 		}
 
 		if _, ok := expectedIfaceIdsWithoutPrefix[ifaceId]; !ok {
-			// TODO(adrianc): To make this more strict we can check if the interface is a VF representor
-			// interface via sriovnet.
 			klog.Warningf("Found stale OVS Interface, deleting OVS Port with interface %s", ifaceInfo.Name)
 			_, stderr, err := util.RunOVSVsctl("--if-exists", "--with-iface", "del-port", ifaceInfo.Name)
 			if err != nil {

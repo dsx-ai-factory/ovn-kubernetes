@@ -6,7 +6,6 @@ package node
 import (
 	"fmt"
 	"net"
-	"os"
 	"strings"
 
 	"github.com/coreos/go-iptables/iptables"
@@ -52,6 +51,21 @@ func newManagementPortIPFamilyConfig(hostSubnet *net.IPNet, isIPv6 bool) (*manag
 		if utilnet.IsIPv6CIDR(subnet.CIDR) == isIPv6 {
 			cfg.allSubnets = append(cfg.allSubnets, subnet.CIDR)
 		}
+	}
+	// add the .3 masqueradeIP to add the route via mp0 for ETP=local case
+	// used only in LGW but we create it in SGW as well to maintain parity.
+	if isIPv6 {
+		_, masqueradeSubnet, err := net.ParseCIDR(types.V6HostETPLocalMasqueradeIP + "/128")
+		if err != nil {
+			return nil, err
+		}
+		cfg.allSubnets = append(cfg.allSubnets, masqueradeSubnet)
+	} else {
+		_, masqueradeSubnet, err := net.ParseCIDR(types.V4HostETPLocalMasqueradeIP + "/32")
+		if err != nil {
+			return nil, err
+		}
+		cfg.allSubnets = append(cfg.allSubnets, masqueradeSubnet)
 	}
 
 	if utilnet.IsIPv6CIDR(cfg.ifAddr) {
@@ -168,15 +182,12 @@ func setupManagementPortIPFamilyConfig(mpcfg *managementPortConfig, cfg *managem
 			// we need to warn so that it can be debugged as to why routes are disappearing
 			warnings = append(warnings, fmt.Sprintf("missing route entry for subnet %s via gateway %s on link %v",
 				subnet, cfg.gwIP, mpcfg.ifName))
-			err = util.LinkRoutesAdd(mpcfg.link, cfg.gwIP, []*net.IPNet{subnet}, 0)
-			if err != nil {
-				if os.IsExist(err) {
-					klog.V(5).Infof("Ignoring error %s from 'route add %s via %s' - already added via IPv6 RA?",
-						err.Error(), subnet, cfg.gwIP)
-					continue
-				}
-			}
 		}
+		if err != nil {
+			return warnings, err
+		}
+
+		err = util.LinkRoutesAddOrUpdateMTU(mpcfg.link, cfg.gwIP, []*net.IPNet{subnet}, config.Default.RoutableMTU)
 		if err != nil {
 			return warnings, err
 		}
@@ -220,7 +231,8 @@ func setupManagementPortIPFamilyConfig(mpcfg *managementPortConfig, cfg *managem
 	if exists, err = cfg.ipt.Exists("nat", iptableMgmPortChain, rule...); err == nil && !exists {
 		warnings = append(warnings, fmt.Sprintf("missing management port nat rule in chain %s, adding it",
 			iptableMgmPortChain))
-		err = cfg.ipt.Insert("nat", iptableMgmPortChain, 1, rule...)
+		// NOTE: SNAT to mp0 rule should be the last in the chain, so append it
+		err = cfg.ipt.Append("nat", iptableMgmPortChain, rule...)
 	}
 	if err != nil {
 		return warnings, fmt.Errorf("could not insert iptable rule %q for management port: %v",

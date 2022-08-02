@@ -53,8 +53,6 @@ spec:
         component: network
         type: infra
         kubernetes.io/os: "linux"
-      annotations:
-        scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
       imagePullSecrets:
         - name: ovncni-quay-ips
@@ -63,7 +61,7 @@ spec:
       serviceAccountName: ovn
       hostNetwork: true
       priorityClassName: "system-cluster-critical"
-
+      dnsPolicy: Default
       containers:
       # firewall rules for ovn - assumed to be setup
       # iptables -A OS_FIREWALL_ALLOW -p tcp -m state --state NEW -m tcp --dport 6641 -j ACCEPT
@@ -207,7 +205,7 @@ spec:
       # end of container
 
       nodeSelector:
-        node-role.kubernetes.io/master: ""
+        node-role.kubernetes.io/control-plane: ""
         kubernetes.io/os: "linux"
       volumes:
       - name: host-var-lib-ovs

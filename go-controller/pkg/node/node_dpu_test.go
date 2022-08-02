@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"net"
 
-	ctypes "github.com/containernetworking/cni/pkg/types"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+
+	ctypes "github.com/containernetworking/cni/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	cnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
@@ -30,8 +31,9 @@ func genOVSFindCmd(timeout, table, column, condition string) string {
 }
 
 func genOVSAddPortCmd(hostIfaceName, ifaceID, mac, ip, sandboxID, podUID string) string {
-	return fmt.Sprintf("ovs-vsctl --timeout=30 --may-exist add-port br-int %s -- set interface %s external_ids:attached_mac=%s "+
-		"external_ids:iface-id=%s external_ids:iface-id-ver=%s external_ids:ip_addresses=%s external_ids:sandbox=%s other_config:transient=true "+
+	return fmt.Sprintf("ovs-vsctl --timeout=30 --may-exist add-port br-int %s other_config:transient=true "+
+		"-- set interface %s external_ids:attached_mac=%s "+
+		"external_ids:iface-id=%s external_ids:iface-id-ver=%s external_ids:ip_addresses=%s external_ids:sandbox=%s "+
 		"-- --if-exists remove interface %s external_ids network_name",
 		hostIfaceName, hostIfaceName, mac, ifaceID, podUID, ip, sandboxID, hostIfaceName)
 }

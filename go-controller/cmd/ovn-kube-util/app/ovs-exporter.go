@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -35,6 +36,7 @@ var OvsExporterCommand = cli.Command{
 		},
 	},
 	Action: func(ctx *cli.Context) error {
+		stopChan := make(chan struct{})
 		bindAddress := ctx.String("metrics-bind-address")
 		if bindAddress == "" {
 			bindAddress = "0.0.0.0:9310"
@@ -48,7 +50,7 @@ var OvsExporterCommand = cli.Command{
 			return err
 		}
 
-		stopChan := make(chan struct{})
+		wg := &sync.WaitGroup{}
 
 		// start the ovsdb client for ovs metrics monitoring
 		ovsDBClient, err := metrics.SetupOvsDBClient()
@@ -60,14 +62,15 @@ var OvsExporterCommand = cli.Command{
 			return fmt.Errorf("cannot get hostname: %v", err)
 		}
 		// register ovs metrics that will be served off of /metrics path
-		metrics.RegisterOvsMetrics(hostName, ovsDBClient, metricsScrapeInterval, stopChan)
+		metrics.RegisterStandaloneOvsMetrics(hostName, ovsDBClient, metricsScrapeInterval, stopChan)
 		// start the prometheus server to serve OVS Metrics (default port: 9310)
 		// use TLS if cert and key file were provided at the command line
-		metrics.StartMetricsServer(bindAddress, "", tlsCertFile, tlsKeyFile)
+		metrics.StartMetricsServer(bindAddress, "", tlsCertFile, tlsKeyFile, stopChan, wg)
 
 		// run until cancelled
 		<-ctx.Context.Done()
 		close(stopChan)
+		wg.Wait()
 		return nil
 	},
 }

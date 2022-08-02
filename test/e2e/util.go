@@ -5,13 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"regexp"
 	"strings"
 	"time"
 
+	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -20,10 +23,14 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	testutils "k8s.io/kubernetes/test/utils"
+	admissionapi "k8s.io/pod-security-admission/api"
 	utilnet "k8s.io/utils/net"
 )
 
-const ovnNamespace = "ovn-kubernetes"
+const (
+	ovnNamespace   = "ovn-kubernetes"
+	ovnNodeSubnets = "k8s.ovn.org/node-subnets"
+)
 
 type IpNeighbor struct {
 	Dst    string `dst`
@@ -75,10 +82,11 @@ type annotationNotSetError struct {
 
 // newAgnhostPod returns a pod that uses the agnhost image. The image's binary supports various subcommands
 // that behave the same, no matter the underlying OS.
-func newAgnhostPod(name string, command ...string) *v1.Pod {
+func newAgnhostPod(namespace, name string, command ...string) *v1.Pod {
 	return &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
+			Name:      name,
+			Namespace: namespace,
 		},
 		Spec: v1.PodSpec{
 			Containers: []v1.Container{
@@ -193,9 +201,7 @@ func unmarshalPodAnnotation(annotations map[string]string) (*PodAnnotation, erro
 	return podAnnotation, nil
 }
 
-func nodePortServiceSpecFrom(svcName string, httpPort, updPort, clusterHTTPPort, clusterUDPPort int, selector map[string]string, local v1.ServiceExternalTrafficPolicyType) *v1.Service {
-	preferDual := v1.IPFamilyPolicyPreferDualStack
-
+func nodePortServiceSpecFrom(svcName string, ipFamily v1.IPFamilyPolicyType, httpPort, updPort, clusterHTTPPort, clusterUDPPort int, selector map[string]string, local v1.ServiceExternalTrafficPolicyType) *v1.Service {
 	res := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: svcName,
@@ -207,7 +213,7 @@ func nodePortServiceSpecFrom(svcName string, httpPort, updPort, clusterHTTPPort,
 				{Port: int32(clusterUDPPort), Name: "udp", Protocol: v1.ProtocolUDP, TargetPort: intstr.FromInt(updPort)},
 			},
 			Selector:              selector,
-			IPFamilyPolicy:        &preferDual,
+			IPFamilyPolicy:        &ipFamily,
 			ExternalTrafficPolicy: local,
 		},
 	}
@@ -236,9 +242,9 @@ func externalIPServiceSpecFrom(svcName string, httpPort, updPort, clusterHTTPPor
 	return res
 }
 
-// leverages a container running the netexec command to send a "hostname" request to a target running
-// netexec on the given target host / protocol / port
-// returns either the name of backend pod or "Timeout" if the curl request timed out
+// pokeEndpointHostname leverages a container running the netexec command to send a "hostname" request to a target running
+// netexec on the given target host / protocol / port.
+// Returns the name of backend pod.
 func pokeEndpointHostname(clientContainer, protocol, targetHost string, targetPort int32) string {
 	ipPort := net.JoinHostPort("localhost", "80")
 	cmd := []string{"docker", "exec", clientContainer}
@@ -255,8 +261,8 @@ func pokeEndpointHostname(clientContainer, protocol, targetHost string, targetPo
 	framework.ExpectNoError(err, "failed to run command on external container")
 	hostName, err := parseNetexecResponse(res)
 	if err != nil {
-		fmt.Printf("FAILED Command was %s", curlCommand)
-		fmt.Printf("FAILED Response was %v", res)
+		framework.Logf("FAILED Command was %s", curlCommand)
+		framework.Logf("FAILED Response was %v", res)
 	}
 	framework.ExpectNoError(err)
 
@@ -369,9 +375,9 @@ func isNeighborEntryStable(clientContainer, targetHost string, iterations int) b
 	return true
 }
 
-// leverages a container running the netexec command to send a "clientip" request to a target running
-// netexec on the given target host / protocol / port
-// returns either the src ip of the packet or "Timeout" if the curl request timed out
+// pokeEndpointClientIP leverages a container running the netexec command to send a "clientip" request to a target running
+// netexec on the given target host / protocol / port.
+// Returns the src ip of the packet.
 func pokeEndpointClientIP(clientContainer, protocol, targetHost string, targetPort int32) string {
 	ipPort := net.JoinHostPort("localhost", "80")
 	cmd := []string{"docker", "exec", clientContainer}
@@ -390,36 +396,36 @@ func pokeEndpointClientIP(clientContainer, protocol, targetHost string, targetPo
 	framework.ExpectNoError(err)
 	ip, _, err := net.SplitHostPort(clientIP)
 	if err != nil {
-		fmt.Printf("FAILED Command was %s", curlCommand)
-		fmt.Printf("FAILED Response was %v", res)
+		framework.Logf("FAILED Command was %s", curlCommand)
+		framework.Logf("FAILED Response was %v", res)
 	}
 	framework.ExpectNoError(err, "failed to parse client ip:port")
 
 	return ip
 }
 
-// leverages a container running the netexec command to send a request to a target running
-// netexec on the given target host / protocol / port
-// returns either the name of backend pod or "Timeout" if the curl request timed out
-func curlInContainer(clientContainer, protocol, targetHost string, targetPort int32, endPoint string) string {
+// curlInContainer leverages a container running the netexec command to send a request to a target running
+// netexec on the given target host / protocol / port.
+// Returns a pair of either result, nil or "", error in case of an error.
+func curlInContainer(clientContainer, protocol, targetHost string, targetPort int32, endPoint string, maxTime int) (string, error) {
 	cmd := []string{"docker", "exec", clientContainer}
 	if utilnet.IsIPv6String(targetHost) {
 		targetHost = fmt.Sprintf("[%s]", targetHost)
 	}
 
 	// we leverage the dial command from netexec, that is already supporting multiple protocols
-	curlCommand := strings.Split(fmt.Sprintf("curl -g -q -s http://%s:%d/%s",
+	curlCommand := strings.Split(fmt.Sprintf("curl -g -q -s --max-time %d http://%s:%d/%s",
+		maxTime,
 		targetHost,
 		targetPort,
 		endPoint), " ")
 
 	cmd = append(cmd, curlCommand...)
-	res, err := runCommand(cmd...)
-	framework.ExpectNoError(err, "failed to run command on external container")
-
-	return res
+	return runCommand(cmd...)
 }
 
+// parseNetexecResponse parses a json string of type '{"responses":"...", "errors":""}'.
+// it returns "", error if the errors value is not empty, or the responses otherwise.
 func parseNetexecResponse(response string) (string, error) {
 	res := struct {
 		Responses []string `json:"responses"`
@@ -429,9 +435,6 @@ func parseNetexecResponse(response string) (string, error) {
 		return "", fmt.Errorf("failed to unmarshal curl response %s", response)
 	}
 	if len(res.Errors) > 0 {
-		if strings.Contains(strings.ToLower(res.Errors[0]), "timeout") {
-			return "Timeout", nil
-		}
 		return "", fmt.Errorf("curl response %s contains errors", response)
 	}
 	if len(res.Responses) == 0 {
@@ -461,6 +464,26 @@ func addressIsIP(address v1.NodeAddress) bool {
 		return false
 	}
 	return true
+}
+
+// addressIsIPv4 tells whether the given address is an
+// IPv4 address.
+func addressIsIPv4(address v1.NodeAddress) bool {
+	addr := net.ParseIP(address.Address)
+	if addr == nil {
+		return false
+	}
+	return utilnet.IsIPv4String(addr.String())
+}
+
+// addressIsIPv6 tells whether the given address is an
+// IPv6 address.
+func addressIsIPv6(address v1.NodeAddress) bool {
+	addr := net.ParseIP(address.Address)
+	if addr == nil {
+		return false
+	}
+	return utilnet.IsIPv6String(addr.String())
 }
 
 // Returns pod's ipv4 and ipv6 addresses IN ORDER
@@ -506,6 +529,18 @@ func getContainerAddressesForNetwork(container, network string) (string, string)
 		framework.Failf("failed to inspect external test container for its IPv4: %v", err)
 	}
 	return strings.TrimSuffix(ipv4, "\n"), strings.TrimSuffix(ipv6, "\n")
+}
+
+// Returns the container's MAC addresses
+// related to the given network.
+func getMACAddressesForNetwork(container, network string) string {
+	mac := fmt.Sprintf("{{.NetworkSettings.Networks.%s.MacAddress}}", network)
+
+	macAddr, err := runCommand("docker", "inspect", "-f", mac, container)
+	if err != nil {
+		framework.Failf("failed to inspect external test container for its MAC: %v", err)
+	}
+	return strings.TrimSuffix(macAddr, "\n")
 }
 
 // deletePodSyncNS deletes a pod and wait for its deletion.
@@ -636,20 +671,199 @@ func pokePod(fr *framework.Framework, srcPodName string, dstPodIP string) error 
 	return fmt.Errorf("http request failed; stdout: %s, err: %v", stdout+stderr, err)
 }
 
-func assertDenyLogs(targetNodeName string, namespace string, policyName string, expectedAclSeverity string) (bool, error) {
+func pokeExternalHostFromPod(fr *framework.Framework, namespace string, srcPodName, dstIp string, dstPort int) error {
+	stdout, stderr, err := ExecShellInPodWithFullOutput(
+		fr,
+		namespace,
+		srcPodName,
+		fmt.Sprintf("curl --output /dev/stdout -m 1 -I %s:%d | head -n1", dstIp, dstPort))
+	if err == nil && stdout == "HTTP/1.1 200 OK" {
+		return nil
+	}
+	return fmt.Errorf("http request failed; stdout: %s, err: %v", stdout+stderr, err)
+}
+
+// ExecShellInPodWithFullOutput is a shameless copy/paste from the framework methods so that we can specify the pod namespace.
+func ExecShellInPodWithFullOutput(f *framework.Framework, namespace, podName string, cmd string) (string, string, error) {
+	return execCommandInPodWithFullOutput(f, namespace, podName, "/bin/sh", "-c", cmd)
+}
+
+// execCommandInPodWithFullOutput is a shameless copy/paste from the framework methods so that we can specify the pod namespace.
+func execCommandInPodWithFullOutput(f *framework.Framework, namespace, podName string, cmd ...string) (string, string, error) {
+	pod, err := f.PodClientNS(namespace).Get(context.TODO(), podName, metav1.GetOptions{})
+	framework.ExpectNoError(err, "failed to get pod %v", podName)
+	gomega.Expect(pod.Spec.Containers).NotTo(gomega.BeEmpty())
+	return ExecCommandInContainerWithFullOutput(f, namespace, podName, pod.Spec.Containers[0].Name, cmd...)
+}
+
+// ExecCommandInContainerWithFullOutput is a shameless copy/paste from the framework methods so that we can specify the pod namespace.
+func ExecCommandInContainerWithFullOutput(f *framework.Framework, namespace, podName, containerName string, cmd ...string) (string, string, error) {
+	options := framework.ExecOptions{
+		Command:            cmd,
+		Namespace:          namespace,
+		PodName:            podName,
+		ContainerName:      containerName,
+		Stdin:              nil,
+		CaptureStdout:      true,
+		CaptureStderr:      true,
+		PreserveWhitespace: false,
+	}
+	return f.ExecWithOptions(options)
+}
+
+func assertAclLogs(targetNodeName string, policyNameRegex string, expectedAclVerdict string, expectedAclSeverity string) (bool, error) {
 	framework.Logf("collecting the ovn-controller logs for node: %s", targetNodeName)
 	targetNodeLog, err := runCommand([]string{"docker", "exec", targetNodeName, "grep", "acl_log", ovnControllerLogPath}...)
 	if err != nil {
 		return false, fmt.Errorf("error accessing logs in node %s: %v", targetNodeName, err)
 	}
 
-	composedPolicyName := fmt.Sprintf("%s_%s", namespace, policyName)
-	framework.Logf("Ensuring the *deny* audit log contains: '%s\", verdict=drop' AND 'severity=%s'", composedPolicyName, expectedAclSeverity)
+	framework.Logf("Ensuring the audit log contains: 'name=\"%s\"', 'verdict=%s' AND 'severity=%s'", policyNameRegex, expectedAclVerdict, expectedAclSeverity)
 	for _, logLine := range strings.Split(targetNodeLog, "\n") {
-		if strings.Contains(logLine, fmt.Sprintf("%s\", verdict=drop", composedPolicyName)) &&
+		matched, err := regexp.MatchString(fmt.Sprintf("name=\"%s\"", policyNameRegex), logLine)
+		if err != nil {
+			return false, err
+		}
+		if matched &&
+			strings.Contains(logLine, fmt.Sprintf("verdict=%s", expectedAclVerdict)) &&
 			strings.Contains(logLine, fmt.Sprintf("severity=%s", expectedAclSeverity)) {
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+// patchService patches service serviceName in namespace serviceNamespace.
+func patchService(c kubernetes.Interface, serviceName, serviceNamespace, jsonPath, value string) error {
+	patch := []struct {
+		Op    string `json:"op"`
+		Path  string `json:"path"`
+		Value string `json:"value"`
+	}{{
+		Op:    "replace",
+		Path:  jsonPath,
+		Value: value,
+	}}
+	patchBytes, _ := json.Marshal(patch)
+
+	_, err := c.CoreV1().Services(serviceNamespace).Patch(
+		context.TODO(),
+		serviceName,
+		types.JSONPatchType,
+		patchBytes,
+		metav1.PatchOptions{})
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// isDualStackCluster returns 'true' if at least one of the nodes has more than one node subnet.
+// This can reliably be determined by checking that Annotations["k8s.ovn.org/node-subnets"] parses into map[string][]string.
+func isDualStackCluster(nodes *v1.NodeList) bool {
+	for _, node := range nodes.Items {
+		annotation, ok := node.Annotations[ovnNodeSubnets]
+		if !ok {
+			continue
+		}
+
+		subnetsDual := make(map[string][]string)
+		if err := json.Unmarshal([]byte(annotation), &subnetsDual); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// used to inject OVN specific test actions
+func wrappedTestFramework(basename string) *framework.Framework {
+	f := newPrivelegedTestFramework(basename)
+	// inject dumping dbs on failure
+	ginkgo.JustAfterEach(func() {
+		if !ginkgo.CurrentGinkgoTestDescription().Failed {
+			return
+		}
+
+		ovnDocker := "ovn-control-plane"
+
+		logLocation := "/var/log"
+		dbLocation := "/var/lib/openvswitch"
+		ovsdbLocation := "/etc/origin/openvswitch"
+		dbs := []string{"ovnnb_db.db", "ovnsb_db.db"}
+		ovsdb := "conf.db"
+
+		testName := strings.Replace(ginkgo.CurrentGinkgoTestDescription().TestText, " ", "_", -1)
+		logDir := fmt.Sprintf("%s/e2e-dbs/%s-%s", logLocation, testName, f.UniqueName)
+
+		var args []string
+
+		// grab all OVS dbs
+		nodes, err := f.ClientSet.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
+		framework.ExpectNoError(err)
+		for _, node := range nodes.Items {
+			// ensure e2e-dbs directory with test case exists
+			args = []string{"docker", "exec", node.Name, "mkdir", "-p", logDir}
+			_, err = runCommand(args...)
+			framework.ExpectNoError(err)
+
+			// node name is the same in kapi and docker
+			args = []string{"docker", "exec", node.Name, "cp", "-f", fmt.Sprintf("%s/%s", ovsdbLocation, ovsdb),
+				fmt.Sprintf("%s/%s", logDir, fmt.Sprintf("%s-%s", node.Name, ovsdb))}
+			_, err = runCommand(args...)
+			framework.ExpectNoError(err)
+		}
+
+		args = []string{"docker", "exec", ovnDocker, "stat", fmt.Sprintf("%s/%s", dbLocation, dbs[0])}
+		_, err = runCommand(args...)
+		framework.ExpectNoError(err)
+
+		// grab the OVN dbs
+		for _, db := range dbs {
+			args = []string{"docker", "exec", ovnDocker, "cp", "-f", fmt.Sprintf("%s/%s", dbLocation, db),
+				fmt.Sprintf("%s/%s", logDir, db)}
+			_, err = runCommand(args...)
+			framework.ExpectNoError(err)
+		}
+	})
+
+	return f
+}
+
+func newPrivelegedTestFramework(basename string) *framework.Framework {
+	f := framework.NewDefaultFramework(basename)
+	f.NamespacePodSecurityEnforceLevel = admissionapi.LevelPrivileged
+	return f
+}
+
+// countAclLogs connects to <targetNodeName> (ovn-control-plane, ovn-worker or ovn-worker2 in kind environments) via the docker exec
+// command and it greps for the string "acl_log" inside the OVN controller logs. It then checks if the line contains name=<policyNameRegex>
+// and if it does, it increases the counter if both the verdict and the severity for this line match what's expected.
+func countAclLogs(targetNodeName string, policyNameRegex string, expectedAclVerdict string, expectedAclSeverity string) (int, error) {
+	count := 0
+
+	framework.Logf("collecting the ovn-controller logs for node: %s", targetNodeName)
+	targetNodeLog, err := runCommand([]string{"docker", "exec", targetNodeName, "cat", ovnControllerLogPath}...)
+	if err != nil {
+		return 0, fmt.Errorf("error accessing logs in node %s: %v", targetNodeName, err)
+	}
+
+	stringToMatch := fmt.Sprintf(
+		".*acl_log.*name=\"%s\".*verdict=%s.*severity=%s.*",
+		policyNameRegex,
+		expectedAclVerdict,
+		expectedAclSeverity)
+
+	for _, logLine := range strings.Split(targetNodeLog, "\n") {
+		matched, err := regexp.MatchString(stringToMatch, logLine)
+		if err != nil {
+			return 0, err
+		}
+		if matched {
+			count++
+		}
+	}
+
+	framework.Logf("The audit log contains %d occurrences of: '%s'", count, stringToMatch)
+	return count, nil
 }

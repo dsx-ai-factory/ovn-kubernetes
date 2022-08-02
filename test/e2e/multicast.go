@@ -24,7 +24,7 @@ const (
 
 var _ = ginkgo.Describe("Multicast", func() {
 
-	fr := framework.NewDefaultFramework("multicast")
+	fr := wrappedTestFramework("multicast")
 
 	type nodeInfo struct {
 		name   string
@@ -88,31 +88,31 @@ var _ = ginkgo.Describe("Multicast", func() {
 			iperf = iperf + " -V"
 		}
 		cmd := []string{"/bin/sh", "-c", iperf}
-		clientPod := newAgnhostPod(mcastSource, cmd...)
+		clientPod := newAgnhostPod(fr.Namespace.Name, mcastSource, cmd...)
 		clientPod.Spec.NodeName = clientNodeInfo.name
 		fr.PodClient().CreateSync(clientPod)
 
 		// Start a multicast listener on the same groups and verify it received the traffic (iperf server is the multicast listener)
 		// join multicast group (-B 224.3.3.3), UDP (-u), during (-t 30) seconds, report every (-i 1) seconds
 		ginkgo.By("creating first multicast listener pod in node " + serverNodeInfo.name)
-		iperf = fmt.Sprintf("iperf -s -B %s -u -t 30 -i 5", mcastGroup)
+		iperf = fmt.Sprintf("iperf -s -B %s -u -t 180 -i 5", mcastGroup)
 		if IsIPv6Cluster(cs) {
 			iperf = iperf + " -V"
 		}
 		cmd = []string{"/bin/sh", "-c", iperf}
-		mcastServerPod1 := newAgnhostPod(mcastServer1, cmd...)
+		mcastServerPod1 := newAgnhostPod(fr.Namespace.Name, mcastServer1, cmd...)
 		mcastServerPod1.Spec.NodeName = serverNodeInfo.name
 		fr.PodClient().CreateSync(mcastServerPod1)
 
 		// Start a multicast listener on on other group and verify it does not receive the traffic (iperf server is the multicast listener)
 		// join multicast group (-B 224.4.4.4), UDP (-u), during (-t 30) seconds, report every (-i 1) seconds
 		ginkgo.By("creating second multicast listener pod in node " + serverNodeInfo.name)
-		iperf = fmt.Sprintf("iperf -s -B %s -u -t 30 -i 5", mcastGroupBad)
+		iperf = fmt.Sprintf("iperf -s -B %s -u -t 180 -i 5", mcastGroupBad)
 		if IsIPv6Cluster(cs) {
 			iperf = iperf + " -V"
 		}
 		cmd = []string{"/bin/sh", "-c", iperf}
-		mcastServerPod2 := newAgnhostPod(mcastServer2, cmd...)
+		mcastServerPod2 := newAgnhostPod(fr.Namespace.Name, mcastServer2, cmd...)
 		mcastServerPod2.Spec.NodeName = serverNodeInfo.name
 		fr.PodClient().CreateSync(mcastServerPod2)
 

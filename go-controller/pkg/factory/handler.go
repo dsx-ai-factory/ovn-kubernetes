@@ -14,7 +14,9 @@ import (
 	multinetworkpolicylister "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/listers/k8s.cni.cncf.io/v1beta2"
 	networkattachmentdefinitionlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	egressfirewalllister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
+	egressqoslister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
 
+	cloudprivateipconfiglister "github.com/openshift/client-go/cloudnetwork/listers/cloudnetwork/v1"
 	egressiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
 
 	ktypes "k8s.io/apimachinery/pkg/types"
@@ -92,13 +94,8 @@ type informer struct {
 
 func (i *informer) forEachQueuedHandler(f func(h *Handler)) {
 	i.RLock()
-	curHandlers := make([]*Handler, 0, len(i.handlers))
+	defer i.RUnlock()
 	for _, handler := range i.handlers {
-		curHandlers = append(curHandlers, handler)
-	}
-	i.RUnlock()
-
-	for _, handler := range curHandlers {
 		f(handler)
 	}
 }
@@ -243,7 +240,7 @@ func (i *informer) unrefQueueEntry(key ktypes.NamespacedName, entry *queueMapEnt
 // enqueueEvent adds an event to the appropriate queue for the object
 func (i *informer) enqueueEvent(oldObj, obj interface{}, queueNum uint32, etype string, processFunc func(*event)) {
 	start := time.Now()
-	if reflect.TypeOf(obj) == podType {
+	if reflect.TypeOf(obj) == PodType {
 		defer func() {
 			pod := obj.(*kapi.Pod)
 			klog.V(5).Infof("Enqueue %s event for pod %s/%s on queue %d took %v", etype, pod.Namespace, pod.Name, queueNum, time.Since(start))
@@ -284,7 +281,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 					h.OnAdd(e.obj)
 				})
 				metrics.MetricResourceAddLatency.Observe(time.Since(start).Seconds())
-				if reflect.TypeOf(e.obj) == podType {
+				if reflect.TypeOf(e.obj) == PodType {
 					pod := e.obj.(*kapi.Pod)
 					klog.V(5).Infof("Process add event for Pod %s/%s on queue %d took %v", pod.Namespace, pod.Name, entry.queue, time.Since(start))
 				}
@@ -300,7 +297,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 					h.OnUpdate(e.oldObj, e.obj)
 				})
 				metrics.MetricResourceUpdateLatency.Observe(time.Since(start).Seconds())
-				if reflect.TypeOf(e.oldObj) == podType {
+				if reflect.TypeOf(e.oldObj) == PodType {
 					pod := e.oldObj.(*kapi.Pod)
 					klog.V(5).Infof("Process update event for Pod %s/%s on queue %d took %v", pod.Namespace, pod.Name, entry.queue, time.Since(start))
 				}
@@ -321,7 +318,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 					h.OnDelete(e.obj)
 				})
 				metrics.MetricResourceDeleteLatency.Observe(time.Since(start).Seconds())
-				if reflect.TypeOf(e.obj) == podType {
+				if reflect.TypeOf(e.obj) == PodType {
 					pod := e.obj.(*kapi.Pod)
 					klog.V(5).Infof("Process delete event for Pod %s/%s on queue %d took %v", pod.Namespace, pod.Name, entry.queue, time.Since(start))
 				}
@@ -383,26 +380,30 @@ func (i *informer) shutdown() {
 
 func newInformerLister(oType reflect.Type, sharedInformer cache.SharedIndexInformer) (listerInterface, error) {
 	switch oType {
-	case podType:
+	case PodType:
 		return listers.NewPodLister(sharedInformer.GetIndexer()), nil
-	case serviceType:
+	case ServiceType:
 		return listers.NewServiceLister(sharedInformer.GetIndexer()), nil
-	case namespaceType:
+	case NamespaceType:
 		return listers.NewNamespaceLister(sharedInformer.GetIndexer()), nil
-	case nodeType:
+	case NodeType:
 		return listers.NewNodeLister(sharedInformer.GetIndexer()), nil
-	case policyType:
+	case PolicyType:
 		return netlisters.NewNetworkPolicyLister(sharedInformer.GetIndexer()), nil
-	case egressFirewallType:
+	case EgressFirewallType:
 		return egressfirewalllister.NewEgressFirewallLister(sharedInformer.GetIndexer()), nil
-	case egressIPType:
+	case EgressIPType:
 		return egressiplister.NewEgressIPLister(sharedInformer.GetIndexer()), nil
-	case endpointSliceType:
+	case CloudPrivateIPConfigType:
+		return cloudprivateipconfiglister.NewCloudPrivateIPConfigLister(sharedInformer.GetIndexer()), nil
+	case EndpointSliceType:
 		return discoverylisters.NewEndpointSliceLister(sharedInformer.GetIndexer()), nil
-	case networkattachmentdefinitionType:
+	case NetworkattachmentdefinitionType:
 		return networkattachmentdefinitionlister.NewNetworkAttachmentDefinitionLister(sharedInformer.GetIndexer()), nil
-	case multinetworkpolicyType:
+	case MultinetworkpolicyType:
 		return multinetworkpolicylister.NewMultiNetworkPolicyLister(sharedInformer.GetIndexer()), nil
+	case EgressQoSType:
+		return egressqoslister.NewEgressQoSLister(sharedInformer.GetIndexer()), nil
 	}
 
 	return nil, fmt.Errorf("cannot create lister from type %v", oType)

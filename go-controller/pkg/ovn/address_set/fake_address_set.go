@@ -1,11 +1,13 @@
 package addressset
 
 import (
+	"k8s.io/klog/v2"
 	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
 
+	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -85,7 +87,9 @@ func (f *FakeAddressSetFactory) ProcessEachAddressSet(iteratorFn AddressSetIterF
 		if len(parts) >= 2 {
 			nameSuffix = parts[1]
 		}
-		iteratorFn(asName, addrSetNamespace, nameSuffix)
+		if err := iteratorFn(asName, addrSetNamespace, nameSuffix); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -146,7 +150,21 @@ func (f *FakeAddressSetFactory) ExpectAddressSetWithIPs(name string, ips []strin
 			gomega.Expect(as4.ips).To(gomega.HaveKey(ip))
 		}
 	}
+	if lenAddressSet != len(ips) {
+		var addrs []string
+		if as4 != nil {
+			for _, v := range as4.ips {
+				addrs = append(addrs, v.String())
+			}
+		}
+		if as6 != nil {
+			for _, v := range as6.ips {
+				addrs = append(addrs, v.String())
+			}
+		}
 
+		klog.Errorf("IPv4 addresses mismatch in cache: %#v, expected: %#v", addrs, ips)
+	}
 	gomega.Expect(lenAddressSet).To(gomega.Equal(len(ips)))
 }
 
@@ -259,17 +277,25 @@ func (as *fakeAddressSets) AddIPs(ips []net.IP) error {
 	as.Lock()
 	defer as.Unlock()
 
+	_, err = as.AddIPsReturnOps(ips)
+	return err
+}
+
+func (as *fakeAddressSets) AddIPsReturnOps(ips []net.IP) ([]ovsdb.Operation, error) {
+	var ops []ovsdb.Operation
+	var err error
+
 	for _, ip := range ips {
 		if utilnet.IsIPv6(ip) {
-			err = as.ipv6.addIP(ip)
+			ops, err = as.ipv6.addIP(ip)
 		} else {
-			err = as.ipv4.addIP(ip)
+			ops, err = as.ipv4.addIP(ip)
 		}
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return ops, nil
 }
 
 func (as *fakeAddressSets) GetIPs() ([]string, []string) {
@@ -290,8 +316,25 @@ func (as *fakeAddressSets) GetIPs() ([]string, []string) {
 }
 
 func (as *fakeAddressSets) SetIPs(ips []net.IP) error {
-	// NOOP
-	return nil
+	allIPs := []net.IP{}
+	if as.ipv4 != nil {
+		for _, ip := range as.ipv4.ips {
+			allIPs = append(allIPs, ip)
+		}
+	}
+
+	if as.ipv6 != nil {
+		for _, ip := range as.ipv6.ips {
+			allIPs = append(allIPs, ip)
+		}
+	}
+
+	err := as.DeleteIPs(allIPs)
+	if err != nil {
+		return err
+	}
+
+	return as.AddIPs(ips)
 }
 
 func (as *fakeAddressSets) DeleteIPs(ips []net.IP) error {
@@ -299,17 +342,25 @@ func (as *fakeAddressSets) DeleteIPs(ips []net.IP) error {
 	as.Lock()
 	defer as.Unlock()
 
+	_, err = as.DeleteIPsReturnOps(ips)
+	return err
+}
+
+func (as *fakeAddressSets) DeleteIPsReturnOps(ips []net.IP) ([]ovsdb.Operation, error) {
+	var ops []ovsdb.Operation
+	var err error
+
 	for _, ip := range ips {
 		if utilnet.IsIPv6(ip) {
-			err = as.ipv6.deleteIP(ip)
+			ops, err = as.ipv6.deleteIP(ip)
 		} else {
-			err = as.ipv4.deleteIP(ip)
+			ops, err = as.ipv4.deleteIP(ip)
 		}
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return ops, nil
 }
 
 func (as *fakeAddressSets) Destroy() error {
@@ -338,7 +389,7 @@ func (as *fakeAddressSet) getName() string {
 	return as.name
 }
 
-func (as *fakeAddressSet) addIP(ip net.IP) error {
+func (as *fakeAddressSet) addIP(ip net.IP) ([]ovsdb.Operation, error) {
 	as.Lock()
 	defer as.Unlock()
 	gomega.Expect(atomic.LoadUint32(&as.destroyed)).To(gomega.Equal(uint32(0)))
@@ -346,7 +397,7 @@ func (as *fakeAddressSet) addIP(ip net.IP) error {
 	if _, ok := as.ips[ipStr]; !ok {
 		as.ips[ip.String()] = ip
 	}
-	return nil
+	return nil, nil
 }
 
 func (as *fakeAddressSet) getIPs() ([]string, error) {
@@ -360,12 +411,12 @@ func (as *fakeAddressSet) getIPs() ([]string, error) {
 	return uniqIPs, nil
 }
 
-func (as *fakeAddressSet) deleteIP(ip net.IP) error {
+func (as *fakeAddressSet) deleteIP(ip net.IP) ([]ovsdb.Operation, error) {
 	as.Lock()
 	defer as.Unlock()
 	gomega.Expect(atomic.LoadUint32(&as.destroyed)).To(gomega.Equal(uint32(0)))
 	delete(as.ips, ip.String())
-	return nil
+	return nil, nil
 }
 
 func (as *fakeAddressSet) destroy() error {

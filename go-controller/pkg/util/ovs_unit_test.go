@@ -19,7 +19,7 @@ import (
 func TestRunningPlatform(t *testing.T) {
 	// Below is defined in ovs.go file
 	AppFs = afero.NewMemMapFs()
-	AppFs.MkdirAll("/etc", 0755)
+	AppFs.MkdirAll("/etc", 0o755)
 	tests := []struct {
 		desc            string
 		fileContent     []byte
@@ -35,31 +35,31 @@ func TestRunningPlatform(t *testing.T) {
 			desc:            "failed to find platform name",
 			expErr:          fmt.Errorf("failed to find the platform name"),
 			fileContent:     []byte("NAME="),
-			filePermissions: 0755,
+			filePermissions: 0o755,
 		},
 		{
 			desc:            "platform name returned is RHEL",
 			expOut:          "RHEL",
 			fileContent:     []byte("NAME=\"CentOS Linux\""),
-			filePermissions: 0755,
+			filePermissions: 0o755,
 		},
 		{
 			desc:            "platform name returned is Ubuntu",
 			expOut:          "Ubuntu",
 			fileContent:     []byte("NAME=\"Debian\""),
-			filePermissions: 0755,
+			filePermissions: 0o755,
 		},
 		{
 			desc:            "platform name returned is Photon",
 			expOut:          "Photon",
 			fileContent:     []byte("NAME=\"VMware\""),
-			filePermissions: 0755,
+			filePermissions: 0o755,
 		},
 		{
 			desc:            "unknown platform",
 			expErr:          fmt.Errorf("unknown platform"),
 			fileContent:     []byte("NAME=\"blah\""),
-			filePermissions: 0755,
+			filePermissions: 0o755,
 		},
 	}
 	for i, tc := range tests {
@@ -140,140 +140,20 @@ func TestRunOVNretry(t *testing.T) {
 	}
 }
 
-func TestGetNbctlSocketPath(t *testing.T) {
-	// Below is defined in ovs.go file
-	AppFs = afero.NewMemMapFs()
-
-	tests := []struct {
-		desc         string
-		mockEnvKey   string
-		mockEnvVal   string
-		errMatch     error
-		outExp       string
-		dirFileMocks []ovntest.AferoDirMockHelper
-	}{
-		{
-			desc:       "test code path when `os.Getenv() is non empty` and when Stat() returns error",
-			mockEnvKey: "OVN_NB_DAEMON",
-			mockEnvVal: "/some/blah/path",
-			errMatch:   fmt.Errorf("OVN_NB_DAEMON ovn-nbctl daemon control socket"),
-			outExp:     "",
-		},
-		{
-			desc:       "test code path when `os.Getenv() is non empty` and when Stat() returns success",
-			mockEnvKey: "OVN_NB_DAEMON",
-			mockEnvVal: "/some/blah/path",
-			dirFileMocks: []ovntest.AferoDirMockHelper{
-				{
-					DirName:     "/some/blah/",
-					Permissions: 0755,
-					Files: []ovntest.AferoFileMockHelper{
-						{"/some/blah/path", 0755, []byte("blah")},
-					},
-				},
-			},
-			outExp: "OVN_NB_DAEMON=/some/blah/path",
-		},
-		{
-			desc: "test code path when ReadFile() returns error",
-			dirFileMocks: []ovntest.AferoDirMockHelper{
-				{
-					DirName:     "/some/blah/",
-					Permissions: 0755,
-					Files: []ovntest.AferoFileMockHelper{
-						{"/some/blah/path", 0755, []byte("blah")},
-					},
-				},
-			},
-			errMatch: fmt.Errorf("failed to find ovn-nbctl daemon pidfile/socket in /var/run/ovn/,/var/run/openvswitch/"),
-		},
-		{
-			desc: "test code path when ReadFile() and Stat succeed",
-			dirFileMocks: []ovntest.AferoDirMockHelper{
-				{
-					DirName:     "/var/run/ovn/",
-					Permissions: 0755,
-					Files: []ovntest.AferoFileMockHelper{
-						{"/var/run/ovn/ovn-nbctl.pid", 0755, []byte("pid")},
-						{"/var/run/ovn/ovn-nbctl.pid.ctl", 0755, []byte("blah")},
-					},
-				},
-			},
-			outExp: "OVN_NB_DAEMON=/var/run/ovn/ovn-nbctl.pid.ctl",
-		},
-	}
-	for i, tc := range tests {
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			if len(tc.mockEnvKey) != 0 && len(tc.mockEnvVal) != 0 {
-				prevVal := os.Getenv(tc.mockEnvKey)
-				os.Setenv(tc.mockEnvKey, tc.mockEnvVal)
-				defer os.Setenv(tc.mockEnvKey, prevVal)
-			}
-			if len(tc.dirFileMocks) > 0 {
-				for _, item := range tc.dirFileMocks {
-					AppFs.MkdirAll(item.DirName, item.Permissions)
-					defer AppFs.Remove(item.DirName)
-					if len(item.Files) != 0 {
-						for _, f := range item.Files {
-							afero.WriteFile(AppFs, f.FileName, f.Content, f.Permissions)
-						}
-					}
-				}
-			}
-			out, err := getNbctlSocketPath()
-			t.Log(out, err)
-			if tc.errMatch != nil {
-				assert.Contains(t, err.Error(), tc.errMatch.Error())
-				assert.Equal(t, len(out), 0)
-			} else {
-				assert.Nil(t, err)
-				assert.Equal(t, tc.outExp, out)
-			}
-		})
-	}
-}
-
 func TestGetNbctlArgsAndEnv(t *testing.T) {
 	// Below is defined in ovs.go file
 	AppFs = afero.NewMemMapFs()
 
 	tests := []struct {
-		desc            string
-		nbctlDaemonMode bool
-		ovnnbscheme     config.OvnDBScheme
-		mockEnvKey      string
-		mockEnvVal      string
-		dirFileMocks    []ovntest.AferoDirMockHelper
-		inpTimeout      int
-		outCmdArgs      []string
-		outEnvArgs      []string
+		desc         string
+		ovnnbscheme  config.OvnDBScheme
+		mockEnvKey   string
+		mockEnvVal   string
+		dirFileMocks []ovntest.AferoDirMockHelper
+		inpTimeout   int
+		outCmdArgs   []string
+		outEnvArgs   []string
 	}{
-		{
-			desc:            "test success path when confg.NbctlDaemonMode is true",
-			nbctlDaemonMode: true,
-			mockEnvKey:      "OVN_NB_DAEMON",
-			mockEnvVal:      "/some/blah/path",
-			dirFileMocks: []ovntest.AferoDirMockHelper{
-				{
-					DirName:     "/some/blah/",
-					Permissions: 0755,
-					Files: []ovntest.AferoFileMockHelper{
-						{"/some/blah/path", 0755, []byte("blah")},
-					},
-				},
-			},
-			inpTimeout: 15,
-			outCmdArgs: []string{"--timeout=15"},
-			outEnvArgs: []string{"OVN_NB_DAEMON=/some/blah/path"},
-		},
-		{
-			desc:            "test error path when config.NbctlDaemonMode is true",
-			nbctlDaemonMode: true,
-			ovnnbscheme:     config.OvnDBSchemeUnix,
-			inpTimeout:      15,
-			outCmdArgs:      []string{"--timeout=15"},
-			outEnvArgs:      []string{},
-		},
 		{
 			desc:        "test path when config.OvnNorth.Scheme == config.OvnDBSchemeSSL",
 			ovnnbscheme: config.OvnDBSchemeSSL,
@@ -303,14 +183,6 @@ func TestGetNbctlArgsAndEnv(t *testing.T) {
 				prevVal := os.Getenv(tc.mockEnvKey)
 				os.Setenv(tc.mockEnvKey, tc.mockEnvVal)
 				defer os.Setenv(tc.mockEnvKey, prevVal)
-			}
-			if tc.nbctlDaemonMode {
-				preValNbctlDaemonMode := config.NbctlDaemonMode
-				config.NbctlDaemonMode = tc.nbctlDaemonMode
-				// defining below func to reset daemon mode to the previous value
-				resetMode := func(preVal bool) { config.NbctlDaemonMode = preVal }
-				// defer is allowed only for functions
-				defer resetMode(preValNbctlDaemonMode)
 			}
 			if len(tc.ovnnbscheme) != 0 {
 				preValOvnNBScheme := config.OvnNorth.Scheme
@@ -412,9 +284,9 @@ func TestRunOVNNorthAppCtl(t *testing.T) {
 			dirFileMocks: []ovntest.AferoDirMockHelper{
 				{
 					DirName:     "/var/run/ovn/",
-					Permissions: 0755,
+					Permissions: 0o755,
 					Files: []ovntest.AferoFileMockHelper{
-						{"/var/run/ovn/ovn-northd.pid", 0755, []byte("pid")},
+						{"/var/run/ovn/ovn-northd.pid", 0o755, []byte("pid")},
 					},
 				},
 			},
@@ -485,9 +357,9 @@ func TestRunOVNControllerAppCtl(t *testing.T) {
 			dirFileMocks: []ovntest.AferoDirMockHelper{
 				{
 					DirName:     "/var/run/ovn/",
-					Permissions: 0755,
+					Permissions: 0o755,
 					Files: []ovntest.AferoFileMockHelper{
-						{"/var/run/ovn/ovn-controller.pid", 0755, []byte("pid")},
+						{"/var/run/ovn/ovn-controller.pid", 0o755, []byte("pid")},
 					},
 				},
 			},
@@ -556,9 +428,9 @@ func TestRunOvsVswitchdAppCtl(t *testing.T) {
 			dirFileMocks: []ovntest.AferoDirMockHelper{
 				{
 					DirName:     "/var/run/openvswitch/",
-					Permissions: 0755,
+					Permissions: 0o755,
 					Files: []ovntest.AferoFileMockHelper{
-						{"/var/run/openvswitch/ovs-vswitchd.pid", 0755, []byte("pid")},
+						{"/var/run/openvswitch/ovs-vswitchd.pid", 0o755, []byte("pid")},
 					},
 				},
 			},
@@ -620,18 +492,6 @@ func TestDefaultExecRunner_RunCmd(t *testing.T) {
 			cmd:         nil,
 		},
 		{
-			desc:        "set envars and ensure cmd.SetEnv is invoked",
-			expectedErr: nil,
-			cmd:         mockCmd,
-			envVars:     []string{"OVN_NB_DAEMON=/some/blah/path"},
-			onRetArgsCmdList: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "Run", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil}},
-				{OnCallMethodName: "SetStdout", OnCallMethodArgType: []string{"*bytes.Buffer"}, RetArgList: nil},
-				{OnCallMethodName: "SetStderr", OnCallMethodArgType: []string{"*bytes.Buffer"}, RetArgList: nil},
-				{OnCallMethodName: "SetEnv", OnCallMethodArgType: []string{"[]string"}, RetArgList: nil},
-			},
-		},
-		{
 			desc:        "cmd.Run returns error test",
 			expectedErr: fmt.Errorf("mock error"),
 			cmd:         mockCmd,
@@ -667,13 +527,13 @@ func TestSetExec(t *testing.T) {
 		{
 			desc:         "positive, test when 'runner' is nil",
 			expectedErr:  nil,
-			onRetArgs:    &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"ip", nil, "firewall-cmd", nil, "arping", nil}, CallTimes: 12},
+			onRetArgs:    &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"ip", nil, "firewall-cmd", nil}, CallTimes: 11},
 			setRunnerNil: true,
 		},
 		{
 			desc:         "positive, test when 'runner' is not nil",
 			expectedErr:  nil,
-			onRetArgs:    &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"", nil, "", nil}, CallTimes: 12},
+			onRetArgs:    &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"", nil}, CallTimes: 11},
 			setRunnerNil: false,
 		},
 	}
@@ -700,14 +560,24 @@ func TestSetExecWithoutOVS(t *testing.T) {
 		onRetArgs   *ovntest.TestifyMockHelper
 	}{
 		{
-			desc:        "positive, ip, firewall-cmd, and arping path found",
+			desc:        "positive, ip, firewall-cmd path found",
 			expectedErr: nil,
-			onRetArgs:   &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"ip", nil, "firewall-cmd", nil, "arping", nil}, CallTimes: 3},
+			onRetArgs:   &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"ip", nil, "firewall-cmd", nil}, CallTimes: 3},
+		},
+		{
+			desc:        "positive, sysctl path found",
+			expectedErr: nil,
+			onRetArgs:   &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"sysctl", nil}, CallTimes: 3},
 		},
 		{
 			desc:        "negative, ip path not found",
 			expectedErr: fmt.Errorf(`exec: \"ip:\" executable file not found in $PATH`),
-			onRetArgs:   &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"", fmt.Errorf(`exec: \"ip:\" executable file not found in $PATH`), "arping", nil}},
+			onRetArgs:   &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"", fmt.Errorf(`exec: \"ip:\" executable file not found in $PATH`)}},
+		},
+		{
+			desc:        "negative, sysctl path not found",
+			expectedErr: fmt.Errorf(`exec: \"sysctl:\" executable file not found in $PATH`),
+			onRetArgs:   &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"", fmt.Errorf(`exec: \"sysctl:\" executable file not found in $PATH`)}},
 		},
 	}
 
@@ -912,17 +782,16 @@ func TestRunWithEnvVars(t *testing.T) {
 			},
 		},
 		{
-			desc:           "positive: run `ip addr` command with envVars",
+			desc:           "positive: run `ip addr` command",
 			expectedErr:    nil,
 			cmdPath:        "ip",
 			cmdArg:         "a",
-			envArgs:        []string{"OVN_NB_DAEMON=/some/blah/path"},
+			envArgs:        []string{},
 			onRetArgsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{mockCmd}},
 			onRetArgsCmdList: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "Run", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil}},
 				{OnCallMethodName: "SetStdout", OnCallMethodArgType: []string{"*bytes.Buffer"}, RetArgList: nil},
 				{OnCallMethodName: "SetStderr", OnCallMethodArgType: []string{"*bytes.Buffer"}, RetArgList: nil},
-				{OnCallMethodName: "SetEnv", OnCallMethodArgType: []string{"[]string"}, RetArgList: nil},
 			},
 		},
 		{
@@ -1087,47 +956,6 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0
 
 			// make sure that we get the correct list of ports
 			assert.ElementsMatch(t, ports, tc.expectedOut)
-		})
-	}
-}
-
-func TestRunOVSDpctl(t *testing.T) {
-	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
-	mockExecRunner := new(mocks.ExecRunner)
-	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
-	// below is defined in ovs.go
-	runCmdExecRunner = mockExecRunner
-	// note runner is defined in ovs.go file
-	runner = &execHelper{exec: mockKexecIface}
-	tests := []struct {
-		desc                    string
-		expectedErr             error
-		onRetArgsExecUtilsIface *ovntest.TestifyMockHelper
-		onRetArgsKexecIface     *ovntest.TestifyMockHelper
-	}{
-		{
-			desc:                    "negative: run `ovs-dpctl` command",
-			expectedErr:             fmt.Errorf("failed to execute ovs-dpctl command"),
-			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string"}, RetArgList: []interface{}{nil, nil, fmt.Errorf("failed to execute ovs-dpctl command")}},
-			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockCmd}},
-		},
-		{
-			desc:                    "positive: run `ovs-dpctl` ",
-			expectedErr:             nil,
-			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("testblah")), bytes.NewBuffer([]byte("")), nil}},
-			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockCmd}},
-		},
-	}
-	for i, tc := range tests {
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			ovntest.ProcessMockFn(&mockExecRunner.Mock, *tc.onRetArgsExecUtilsIface)
-			ovntest.ProcessMockFn(&mockKexecIface.Mock, *tc.onRetArgsKexecIface)
-
-			_, _, e := RunOVSDpctl()
-
-			assert.Equal(t, e, tc.expectedErr)
-			mockExecRunner.AssertExpectations(t)
-			mockKexecIface.AssertExpectations(t)
 		})
 	}
 }
@@ -1302,49 +1130,6 @@ func TestRunOVNAppctlWithTimeout(t *testing.T) {
 	}
 }
 
-func TestRunOVNNbctlUnix(t *testing.T) {
-	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
-	mockExecRunner := new(mocks.ExecRunner)
-	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
-	// below is defined in ovs.go
-	runCmdExecRunner = mockExecRunner
-	// note runner is defined in ovs.go file
-	runner = &execHelper{exec: mockKexecIface}
-	tests := []struct {
-		desc                    string
-		expectedErr             error
-		onRetArgsExecUtilsIface *ovntest.TestifyMockHelper
-		onRetArgsKexecIface     *ovntest.TestifyMockHelper
-	}{
-		{
-			desc:                    "negative: run `ovn-nbctl` command with no env vars generated",
-			expectedErr:             fmt.Errorf("failed to execute ovn-nbctl command"),
-			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string"}, RetArgList: []interface{}{nil, nil, fmt.Errorf("failed to execute ovn-nbctl command")}},
-			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{mockCmd}},
-		},
-		{
-			desc:                    "positive: run `ovn-nbctl` command with no env vars generated",
-			expectedErr:             nil,
-			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("testblah")), bytes.NewBuffer([]byte("")), nil}},
-			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{mockCmd}},
-		},
-	}
-	for i, tc := range tests {
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			ovntest.ProcessMockFn(&mockExecRunner.Mock, *tc.onRetArgsExecUtilsIface)
-			ovntest.ProcessMockFn(&mockKexecIface.Mock, *tc.onRetArgsKexecIface)
-
-			_, _, e := RunOVNNbctlUnix()
-
-			if tc.expectedErr != nil {
-				assert.Error(t, e)
-			}
-			mockExecRunner.AssertExpectations(t)
-			mockKexecIface.AssertExpectations(t)
-		})
-	}
-}
-
 func TestRunOVNNbctlWithTimeout(t *testing.T) {
 	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
 	mockExecRunner := new(mocks.ExecRunner)
@@ -1434,49 +1219,6 @@ func TestRunOVNNbctl(t *testing.T) {
 	}
 }
 
-func TestRunOVNSbctlUnix(t *testing.T) {
-	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
-	mockExecRunner := new(mocks.ExecRunner)
-	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
-	// below is defined in ovs.go
-	runCmdExecRunner = mockExecRunner
-	// note runner is defined in ovs.go file
-	runner = &execHelper{exec: mockKexecIface}
-	tests := []struct {
-		desc                    string
-		expectedErr             error
-		onRetArgsExecUtilsIface *ovntest.TestifyMockHelper
-		onRetArgsKexecIface     *ovntest.TestifyMockHelper
-	}{
-		{
-			desc:                    "negative: run `ovn-sbctl` command with no env vars generated",
-			expectedErr:             fmt.Errorf("failed to execute ovn-sbctl command"),
-			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string"}, RetArgList: []interface{}{nil, nil, fmt.Errorf("failed to execute ovn-sbctl command")}},
-			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{mockCmd}},
-		},
-		{
-			desc:                    "positive: run `ovn-sbctl` command with no env vars generated",
-			expectedErr:             nil,
-			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("testblah")), bytes.NewBuffer([]byte("")), nil}},
-			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{mockCmd}},
-		},
-	}
-	for i, tc := range tests {
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			ovntest.ProcessMockFn(&mockExecRunner.Mock, *tc.onRetArgsExecUtilsIface)
-			ovntest.ProcessMockFn(&mockKexecIface.Mock, *tc.onRetArgsKexecIface)
-
-			_, _, e := RunOVNSbctlUnix()
-
-			if tc.expectedErr != nil {
-				assert.Error(t, e)
-			}
-			mockExecRunner.AssertExpectations(t)
-			mockKexecIface.AssertExpectations(t)
-		})
-	}
-}
-
 func TestRunOVNSbctlWithTimeout(t *testing.T) {
 	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
 	mockExecRunner := new(mocks.ExecRunner)
@@ -1496,15 +1238,15 @@ func TestRunOVNSbctlWithTimeout(t *testing.T) {
 			desc:                    "negative: run `ovn-sbctl` command with timeout",
 			expectedErr:             fmt.Errorf("failed to execute ovn-sbctl command"),
 			timeout:                 5,
-			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string"}, RetArgList: []interface{}{nil, nil, fmt.Errorf("failed to execute ovn-sbctl command")}},
-			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{mockCmd}},
+			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string"}, RetArgList: []interface{}{nil, nil, fmt.Errorf("failed to execute ovn-sbctl command")}},
+			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
 		},
 		{
 			desc:                    "positive: run `ovn-sbctl` command with timeout",
 			expectedErr:             nil,
 			timeout:                 15,
-			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("testblah")), bytes.NewBuffer([]byte("")), nil}},
-			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{mockCmd}},
+			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("testblah")), bytes.NewBuffer([]byte("")), nil}},
+			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
 		},
 	}
 	for i, tc := range tests {
@@ -1540,14 +1282,14 @@ func TestRunOVNSbctl(t *testing.T) {
 		{
 			desc:                    "negative: run `ovn-sbctl` command",
 			expectedErr:             fmt.Errorf("failed to execute ovn-sbctl command"),
-			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string"}, RetArgList: []interface{}{nil, nil, fmt.Errorf("failed to execute ovn-sbctl command")}},
-			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{mockCmd}},
+			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string"}, RetArgList: []interface{}{nil, nil, fmt.Errorf("failed to execute ovn-sbctl command")}},
+			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
 		},
 		{
 			desc:                    "positive: run `ovn-sbctl` command",
 			expectedErr:             nil,
-			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("testblah")), bytes.NewBuffer([]byte("")), nil}},
-			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{mockCmd}},
+			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("testblah")), bytes.NewBuffer([]byte("")), nil}},
+			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
 		},
 	}
 	for i, tc := range tests {
@@ -1695,49 +1437,6 @@ func TestRunOVSDBClientOVNNB(t *testing.T) {
 	}
 }
 
-func TestRunOVNCtl(t *testing.T) {
-	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
-	mockExecRunner := new(mocks.ExecRunner)
-	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
-	// below is defined in ovs.go
-	runCmdExecRunner = mockExecRunner
-	// note runner is defined in ovs.go file
-	runner = &execHelper{exec: mockKexecIface}
-	tests := []struct {
-		desc                    string
-		expectedErr             error
-		onRetArgsExecUtilsIface *ovntest.TestifyMockHelper
-		onRetArgsKexecIface     *ovntest.TestifyMockHelper
-	}{
-		{
-			desc:                    "negative: run `ovn-ctl` command",
-			expectedErr:             fmt.Errorf("failed to execute ovn-ctl command"),
-			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string"}, RetArgList: []interface{}{nil, nil, fmt.Errorf("failed to execute ovn-ctl command")}},
-			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-		},
-		{
-			desc:                    "positive: run `ovn-ctl` command",
-			expectedErr:             nil,
-			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("testblah")), bytes.NewBuffer([]byte("")), nil}},
-			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-		},
-	}
-	for i, tc := range tests {
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			ovntest.ProcessMockFn(&mockExecRunner.Mock, *tc.onRetArgsExecUtilsIface)
-			ovntest.ProcessMockFn(&mockKexecIface.Mock, *tc.onRetArgsKexecIface)
-
-			_, _, e := RunOVNCtl()
-
-			if tc.expectedErr != nil {
-				assert.Error(t, e)
-			}
-			mockExecRunner.AssertExpectations(t)
-			mockKexecIface.AssertExpectations(t)
-		})
-	}
-}
-
 func TestRunOVNNBAppCtl(t *testing.T) {
 	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
 	mockExecRunner := new(mocks.ExecRunner)
@@ -1851,6 +1550,41 @@ func TestRunIP(t *testing.T) {
 			ovntest.ProcessMockFn(&mockKexecIface.Mock, *tc.onRetArgsKexecIface)
 
 			_, _, e := RunIP()
+
+			assert.Equal(t, e, tc.expectedErr)
+			mockExecRunner.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
+		})
+	}
+}
+
+func TestRunSysctl(t *testing.T) {
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockExecRunner := new(mocks.ExecRunner)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
+	// below is defined in ovs.go
+	runCmdExecRunner = mockExecRunner
+	// note runner is defined in ovs.go file
+	runner = &execHelper{exec: mockKexecIface}
+	tests := []struct {
+		desc                    string
+		expectedErr             error
+		onRetArgsExecUtilsIface *ovntest.TestifyMockHelper
+		onRetArgsKexecIface     *ovntest.TestifyMockHelper
+	}{
+		{
+			desc:                    "positive: run sysctl",
+			expectedErr:             nil,
+			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("testblah")), bytes.NewBuffer([]byte("")), nil}},
+			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			ovntest.ProcessMockFn(&mockExecRunner.Mock, *tc.onRetArgsExecUtilsIface)
+			ovntest.ProcessMockFn(&mockKexecIface.Mock, *tc.onRetArgsKexecIface)
+
+			_, _, e := RunSysctl("-w", "net.ipv4.conf.eth0.rp_filter=2")
 
 			assert.Equal(t, e, tc.expectedErr)
 			mockExecRunner.AssertExpectations(t)

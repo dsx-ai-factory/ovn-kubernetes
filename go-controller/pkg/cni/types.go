@@ -29,6 +29,9 @@ type KubeAPIAuth struct {
 	KubeAPIServer string `json:"kube-api-server,omitempty"`
 	// KubeAPIToken is a Kubernetes API token (not required if kubeconfig is given)
 	KubeAPIToken string `json:"kube-api-token,omitempty"`
+	// KubeAPITokenFile is the path to Kubernetes API token
+	// If set, it is periodically read and takes precedence over KubeAPIToken
+	KubeAPITokenFile string `json:"kube-api-token-file,omitempty"`
 	// KubeCAData is the Base64-ed Kubernetes API CA certificate data (not required if kubeconfig is given)
 	KubeCAData string `json:"kube-ca-data,omitempty"`
 }
@@ -38,14 +41,16 @@ type PodInterfaceInfo struct {
 	util.PodAnnotation
 	util.NetNameInfo
 
-	Ingress        int64  `json:"ingress"`
-	Egress         int64  `json:"egress"`
-	CheckExtIDs    bool   `json:"check-external-ids"`
-	IsDPUHostMode  bool   `json:"is-dpu-host-mode"`
-	PodUID         string `json:"pod-uid"`
-	VfNetdevName   string `json:"vf-netdev-name"`
-	NadName        string `json:"nadName"`
-	SkipSpoofCheck bool   `json:"skip-spoof-check"`
+	RoutableMTU          int    `json:"routable-mtu"`
+	Ingress              int64  `json:"ingress"`
+	Egress               int64  `json:"egress"`
+	CheckExtIDs          bool   `json:"check-external-ids"`
+	IsDPUHostMode        bool   `json:"is-dpu-host-mode"`
+	PodUID               string `json:"pod-uid"`
+	VfNetdevName         string `json:"vf-netdev-name"`
+	EnableUDPAggregation bool   `json:"enable-udp-aggregation"`
+	NadName              string `json:"nadName"`
+	SkipSpoofCheck       bool   `json:"skip-spoof-check"`
 }
 
 // Explicit type for CNI commands the server handles
@@ -99,7 +104,7 @@ func (response *Response) MarshalForLogging() ([]byte, error) {
 		return nil, nil
 	}
 
-	// Only one of Result and PodIFInfo is ever set by cmdAdd
+	// Only one of Result and PodIFInfo is ever set by cmdAdd/cmdDel
 	if response.Result != nil {
 		noAuth = response.Result
 	} else {

@@ -5,8 +5,6 @@ networking:
   kubeProxyMode: "none"
   # the default CNI will not be installed
   disableDefaultCNI: true
-  apiServerAddress: {{ ovn_apiServerAddress | default('0.0.0.0') }}
-  apiServerPort: 11337
 {%- if net_cidr %}
   podSubnet: "{{ net_cidr }}"
 {%- endif %}
@@ -16,10 +14,11 @@ networking:
 {%- if ovn_ip_family %}
   ipFamily: {{ ovn_ip_family }}
 {%- endif %}
-featureGates:
-  SCTPSupport: true
-{%- if ovn_ip_family == "dual" %}
-  IPv6DualStack: true
+{%- if use_local_registy == "true"%}
+containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost:5000"]
+      endpoint = ["http://kind-registry:5000"]
 {%- endif %}
 kubeadmConfigPatches:
 - |
@@ -35,6 +34,8 @@ kubeadmConfigPatches:
   scheduler:
     extraArgs:
       "v": "{{ cluster_log_level }}"
+  networking: 
+    dnsDomain: {{ dns_domain }}
   ---
   kind: InitConfiguration
   nodeRegistration:

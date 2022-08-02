@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -19,31 +20,98 @@ import (
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/plugins/pkg/ip"
 	"github.com/containernetworking/plugins/pkg/ns"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/safchain/ethtool"
 	"github.com/vishvananda/netlink"
 )
 
 type CNIPluginLibOps interface {
-	AddRoute(ipn *net.IPNet, gw net.IP, dev netlink.Link) error
-	SetupVeth(contVethName string, mtu int, hostNS ns.NetNS) (net.Interface, net.Interface, error)
+	AddRoute(ipn *net.IPNet, gw net.IP, dev netlink.Link, mtu int) error
+	SetupVeth(contVethName string, hostVethName string, mtu int, hostNS ns.NetNS) (net.Interface, net.Interface, error)
 }
 
 type defaultCNIPluginLibOps struct{}
 
 var cniPluginLibOps CNIPluginLibOps = &defaultCNIPluginLibOps{}
 
-func (defaultCNIPluginLibOps) AddRoute(ipn *net.IPNet, gw net.IP, dev netlink.Link) error {
-	return ip.AddRoute(ipn, gw, dev)
+func (defaultCNIPluginLibOps) AddRoute(ipn *net.IPNet, gw net.IP, dev netlink.Link, mtu int) error {
+	route := &netlink.Route{
+		LinkIndex: dev.Attrs().Index,
+		Scope:     netlink.SCOPE_UNIVERSE,
+		Dst:       ipn,
+		Gw:        gw,
+		MTU:       mtu,
+	}
+
+	return util.GetNetLinkOps().RouteAdd(route)
 }
 
-func (defaultCNIPluginLibOps) SetupVeth(contVethName string, mtu int, hostNS ns.NetNS) (net.Interface, net.Interface, error) {
-	return ip.SetupVeth(contVethName, mtu, hostNS)
+func (defaultCNIPluginLibOps) SetupVeth(contVethName string, hostVethName string, mtu int, hostNS ns.NetNS) (net.Interface, net.Interface, error) {
+	return ip.SetupVethWithName(contVethName, hostVethName, mtu, hostNS)
+}
+
+// This is a good value that allows fast streams of small packets to be aggregated,
+// without introducing noticeable latency in slower traffic.
+const udpPacketAggregationTimeout = 50 * time.Microsecond
+
+var udpPacketAggregationTimeoutBytes = []byte(fmt.Sprintf("%d\n", udpPacketAggregationTimeout.Nanoseconds()))
+
+// sets up the host side of a veth for UDP packet aggregation
+func setupVethUDPAggregationHost(ifname string) error {
+	e, err := ethtool.NewEthtool()
+	if err != nil {
+		return fmt.Errorf("failed to initialize ethtool: %v", err)
+	}
+	defer e.Close()
+
+	err = e.Change(ifname, map[string]bool{
+		"rx-gro":                true,
+		"rx-udp-gro-forwarding": true,
+	})
+	if err != nil {
+		return fmt.Errorf("could not enable interface features: %v", err)
+	}
+	channels, err := e.GetChannels(ifname)
+	if err == nil {
+		channels.RxCount = uint32(runtime.NumCPU())
+		_, err = e.SetChannels(ifname, channels)
+	}
+	if err != nil {
+		return fmt.Errorf("could not update channels: %v", err)
+	}
+
+	timeoutFile := fmt.Sprintf("/sys/class/net/%s/gro_flush_timeout", ifname)
+	err = os.WriteFile(timeoutFile, udpPacketAggregationTimeoutBytes, 0644)
+	if err != nil {
+		return fmt.Errorf("could not set flush timeout: %v", err)
+	}
+
+	return nil
+}
+
+// sets up the container side of a veth for UDP packet aggregation
+func setupVethUDPAggregationContainer(ifname string) error {
+	e, err := ethtool.NewEthtool()
+	if err != nil {
+		return fmt.Errorf("failed to initialize ethtool: %v", err)
+	}
+	defer e.Close()
+
+	channels, err := e.GetChannels(ifname)
+	if err == nil {
+		channels.TxCount = uint32(runtime.NumCPU())
+		_, err = e.SetChannels(ifname, channels)
+	}
+	if err != nil {
+		return fmt.Errorf("could not update channels: %v", err)
+	}
+
+	return nil
 }
 
 func renameLink(curName, newName string) error {
@@ -66,7 +134,7 @@ func renameLink(curName, newName string) error {
 }
 
 func setSysctl(sysctl string, newVal int) error {
-	return ioutil.WriteFile(sysctl, []byte(strconv.Itoa(newVal)), 0640)
+	return ioutil.WriteFile(sysctl, []byte(strconv.Itoa(newVal)), 0o640)
 }
 
 func moveIfToNetns(ifname string, netns ns.NetNS) error {
@@ -104,12 +172,12 @@ func setupNetwork(link netlink.Link, ifInfo *PodInterfaceInfo) error {
 		}
 	}
 	for _, gw := range ifInfo.Gateways {
-		if err := cniPluginLibOps.AddRoute(nil, gw, link); err != nil {
+		if err := cniPluginLibOps.AddRoute(nil, gw, link, ifInfo.RoutableMTU); err != nil {
 			return fmt.Errorf("failed to add gateway route: %v", err)
 		}
 	}
 	for _, route := range ifInfo.Routes {
-		if err := cniPluginLibOps.AddRoute(route.Dest, route.NextHop, link); err != nil && !os.IsExist(err) {
+		if err := cniPluginLibOps.AddRoute(route.Dest, route.NextHop, link, ifInfo.RoutableMTU); err != nil && !os.IsExist(err) {
 			return fmt.Errorf("failed to add pod route %v via %v: %v", route.Dest, route.NextHop, err)
 		}
 	}
@@ -125,7 +193,7 @@ func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInter
 	var oldHostVethName string
 	err := netns.Do(func(hostNS ns.NetNS) error {
 		// create the veth pair in the container and move host end into host netns
-		hostVeth, containerVeth, err := cniPluginLibOps.SetupVeth(ifName, ifInfo.MTU, hostNS)
+		hostVeth, containerVeth, err := cniPluginLibOps.SetupVeth(ifName, "", ifInfo.MTU, hostNS)
 		if err != nil {
 			return err
 		}
@@ -144,6 +212,13 @@ func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInter
 		contIface.Mac = ifInfo.MAC.String()
 		contIface.Sandbox = netns.Path()
 
+		if ifInfo.EnableUDPAggregation {
+			err = setupVethUDPAggregationContainer(contIface.Name)
+			if err != nil {
+				return fmt.Errorf("could not enable UDP packet aggregation in container: %v", err)
+			}
+		}
+
 		oldHostVethName = hostVeth.Name
 
 		// to generate the unique host interface name, postfix it with the podInterface index for non-default network
@@ -161,6 +236,13 @@ func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInter
 	hostIface.Name = containerID[:(15-len(ifnameSuffix))] + ifnameSuffix
 	if err := renameLink(oldHostVethName, hostIface.Name); err != nil {
 		return nil, nil, fmt.Errorf("failed to rename %s to %s: %v", oldHostVethName, hostIface.Name, err)
+	}
+
+	if ifInfo.EnableUDPAggregation {
+		err = setupVethUDPAggregationHost(hostIface.Name)
+		if err != nil {
+			return nil, nil, fmt.Errorf("could not enable UDP packet aggregation on host veth interface %q: %v", hostIface.Name, err)
+		}
 	}
 
 	return hostIface, contIface, nil
@@ -263,9 +345,17 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	ifInfo *PodInterfaceInfo, sandboxID string, podLister corev1listers.PodLister,
 	kclient kubernetes.Interface) error {
-	klog.Infof("ConfigureOVS: namespace: %s, podName: %s, network: %s, mode %s", namespace, podName, ifInfo.NadName, config.OvnKubeNode.Mode)
+
 	ifaceID := util.GetIfaceId(namespace, podName, ifInfo.NadName, !ifInfo.IsSecondary)
 	initialPodUID := ifInfo.PodUID
+
+	ipStrs := make([]string, len(ifInfo.IPs))
+	for i, ip := range ifInfo.IPs {
+		ipStrs[i] = ip.String()
+	}
+
+	klog.Infof("ConfigureOVS: namespace: %s, podName: %s, network: %s, mode %s, SandboxID: %q, UID: %q, MAC: %s, IPs: %v",
+		namespace, podName, ifInfo.NadName, config.OvnKubeNode.Mode, sandboxID, initialPodUID, ifInfo.MAC, ipStrs)
 
 	// Find and remove any existing OVS port with this iface-id. Pods can
 	// have multiple sandboxes if some are waiting for garbage collection,
@@ -296,21 +386,16 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 		}
 	}
 
-	ipStrs := make([]string, len(ifInfo.IPs))
-	for i, ip := range ifInfo.IPs {
-		ipStrs[i] = ip.String()
-	}
-	// Add the new sandbox's OVS port, tag the interface as transient so stale
-	// pod interfaces are scrubbed on hard reboot
+	// Add the new sandbox's OVS port, tag the port as transient so stale
+	// pod ports are scrubbed on hard reboot
 	ovsArgs := []string{
-		"--may-exist", "add-port", "br-int", hostIfaceName, "--", "set",
+		"--may-exist", "add-port", "br-int", hostIfaceName, "other_config:transient=true", "--", "set",
 		"interface", hostIfaceName,
 		fmt.Sprintf("external_ids:attached_mac=%s", ifInfo.MAC),
 		fmt.Sprintf("external_ids:iface-id=%s", ifaceID),
 		fmt.Sprintf("external_ids:iface-id-ver=%s", initialPodUID),
 		fmt.Sprintf("external_ids:ip_addresses=%s", strings.Join(ipStrs, ",")),
 		fmt.Sprintf("external_ids:sandbox=%s", sandboxID),
-		"other_config:transient=true",
 	}
 
 	if ifInfo.IsSecondary {
@@ -319,6 +404,9 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 		ovsArgs = append(ovsArgs, []string{"--", "--if-exists", "remove", "interface", hostIfaceName, "external_ids", "network_name"}...)
 	}
 
+	if len(ifInfo.VfNetdevName) != 0 {
+		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:vf-netdev-name=%s", ifInfo.VfNetdevName))
+	}
 	// add ovs port with 3 retries every 100 ms
 	backoff := wait.Backoff{
 		Duration: 100 * time.Millisecond,
@@ -386,13 +474,8 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 		}
 	}
 
-	ofPort, err := getIfaceOFPort(hostIfaceName)
-	if err != nil {
-		return err
-	}
-
 	if err = waitForPodInterface(ctx, ifInfo.MAC.String(), ifInfo.IPs, hostIfaceName,
-		ifaceID, ofPort, ifInfo.CheckExtIDs, ifInfo.SkipSpoofCheck, podLister, kclient, namespace, podName, ifInfo.NadName,
+		ifaceID, ifInfo.CheckExtIDs, ifInfo.SkipSpoofCheck, podLister, kclient, namespace, podName, ifInfo.NadName,
 		initialPodUID); err != nil {
 		// Ensure the error shows up in node logs, rather than just
 		// being reported back to the runtime.
@@ -430,7 +513,7 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 		hostIface, contIface, err = setupSriovInterface(netns, pr.SandboxID, pr.IfName, ifInfo, pr.CNIConf.DeviceID)
 	} else {
 		if ifInfo.IsDPUHostMode {
-			return nil, fmt.Errorf("unexpected configuration, pod request on DPU host. " +
+			return nil, fmt.Errorf("unexpected configuration, pod request on dpu host. " +
 				"device ID must be provided")
 		}
 		// General case
@@ -444,7 +527,7 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 		err = ConfigureOVS(pr.ctx, pr.PodNamespace, pr.PodName, hostIface.Name, ifInfo, pr.SandboxID,
 			podLister, kclient)
 		if err != nil {
-			pr.deletePorts(hostIface.Name)
+			pr.deletePorts(hostIface.Name, pr.PodNamespace, pr.PodName)
 			return nil, err
 		}
 	}
@@ -480,9 +563,10 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 	podDesc := fmt.Sprintf("for pod %s/%s network %s", pr.PodNamespace, pr.PodName, pr.effectiveNADName)
 	klog.V(5).Infof("Tear down interface %+v with CNI Conf %v %s", *pr, pr.CNIConf, podDesc)
 	if pr.CNIConf.DeviceID == "" && ifInfo.IsDPUHostMode {
-		klog.Warningf("Unexpected configuration %s, pod request on DPU host. device ID must be provided", podDesc)
+		klog.Warningf("Unexpected configuration %s, Device ID must be present for pod request on smart-nic host", podDesc)
 		return nil
 	}
+
 	if pr.IsVFIO {
 		klog.Infof("VFIO case %s, nothing to do", podDesc)
 		return nil
@@ -493,6 +577,7 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 	//    so that we know the host-side interface name.
 	ifnameSuffix := ""
 	if pr.CNIConf.DeviceID != "" || (pr.CNIConf.IsSecondary && !ifInfo.IsDPUHostMode) {
+		// For SRIOV case, we'd need to move the VF from container namespace back to the host namespace
 		netns, err := ns.GetNS(pr.Netns)
 		if err != nil {
 			return fmt.Errorf("failed to get container namespace %s: %v", podDesc, err)
@@ -511,8 +596,8 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 			if err != nil {
 				return fmt.Errorf("failed to get container interface %s %s: %v", pr.IfName, podDesc, err)
 			}
-			// SR-IOV Case
 			if pr.CNIConf.DeviceID != "" {
+				// SR-IOV Case
 				// for VMI's virt-lanuncher pod, Ifname is renamed to Ifname+"-nic0"
 				if strings.HasPrefix(pr.PodName, "virt-launcher") {
 					ifName := pr.IfName + "-nic0"
@@ -550,23 +635,19 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 		}
 	}
 
-	if !ifInfo.IsDPUHostMode {
-		// host side interface deletion
-		ifName := pr.SandboxID[:(15-len(ifnameSuffix))] + ifnameSuffix
-		out, err := ovsExec("del-port", "br-int", ifName)
-		if err != nil && !strings.Contains(out, "no port named") {
-			// DEL should be idempotent; don't return an error just log it
-			klog.Warningf("Failed to delete OVS port %s %s from br-int: %v\n %q", ifName, podDesc, err, string(out))
-		}
-		err = clearPodBandwidth(pr.SandboxID)
-		if err != nil {
-			klog.Errorf("Failed to clearPodBandwidth sandbox %v %s: %v", pr.SandboxID, podDesc, err)
-		}
-		if err = util.LinkDelete(ifName); err != nil {
-			klog.Errorf("Failed to delete interface %s %s: %v", ifName, podDesc, err)
-		}
-		pr.deletePodConntrack()
+	if ifInfo.IsDPUHostMode {
+		// there is nothing else to do in the DPU-Host mode
+		return nil
 	}
+
+	// host side deletion of OVS port and kernel interface
+	ifName := pr.SandboxID[:(15-len(ifnameSuffix))] + ifnameSuffix
+	pr.deletePorts(ifName, pr.PodNamespace, pr.PodName)
+
+	if err := clearPodBandwidth(pr.SandboxID); err != nil {
+		klog.Warningf("Failed to clearPodBandwidth sandbox %v %s: %v", pr.SandboxID, podDesc, err)
+	}
+	pr.deletePodConntrack()
 	return nil
 }
 
@@ -589,7 +670,7 @@ func (pr *PodRequest) deletePodConntrack() {
 				continue
 			}
 		}
-		err = util.DeleteConntrack(ip.Address.IP.String(), 0, "")
+		err = util.DeleteConntrack(ip.Address.IP.String(), 0, "", netlink.ConntrackReplyAnyIP, nil)
 		if err != nil {
 			klog.Errorf("Failed to delete Conntrack Entry for %s: %v", ip.Address.IP.String(), err)
 			continue
@@ -597,11 +678,18 @@ func (pr *PodRequest) deletePodConntrack() {
 	}
 }
 
-func (pr *PodRequest) deletePorts(ifaceName string) {
+func (pr *PodRequest) deletePorts(ifaceName, podNamespace, podName string) {
+	podDesc := fmt.Sprintf("%s/%s", podNamespace, podName)
+
 	out, err := ovsExec("del-port", "br-int", ifaceName)
-	_ = util.LinkDelete(ifaceName)
-	if err != nil && !strings.Contains(out, "no port named") {
+	if err != nil && !strings.Contains(err.Error(), "no port named") {
 		// DEL should be idempotent; don't return an error just log it
-		klog.Warningf("Failed to delete OVS port %s: %v\n  %q", ifaceName, err, string(out))
+		klog.Warningf("Failed to delete pod %q OVS port %s: %v\n  %q", podDesc, ifaceName, err, string(out))
+	}
+	// skip deleting representor ports
+	if pr.CNIConf.DeviceID == "" {
+		if err = util.LinkDelete(ifaceName); err != nil {
+			klog.Warningf("Failed to delete pod %q interface %s: %v", podDesc, ifaceName, err)
+		}
 	}
 }

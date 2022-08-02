@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"sync"
 
 	. "github.com/onsi/gomega"
@@ -69,6 +70,6 @@ func (o *FakeOVNNode) init() {
 	o.watcher, err = factory.NewNodeWatchFactory(o.fakeClient, fakeNodeName)
 	Expect(err).NotTo(HaveOccurred())
 
-	o.node = NewNode(o.fakeClient.KubeClient, o.watcher, fakeNodeName, o.stopChan, o.recorder)
-	o.node.Start(o.wg)
+	o.node = NewNode(o.fakeClient.KubeClient, o.watcher, fakeNodeName, o.stopChan, o.recorder, o.wg)
+	o.node.Start(context.TODO(), o.wg)
 }

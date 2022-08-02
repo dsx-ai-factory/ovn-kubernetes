@@ -68,7 +68,7 @@ func (nc *ovnNodeController) addDPUPod4Nad(pod *kapi.Pod, dpuCD *util.DPUConnect
 }
 
 // watchPodsDPU watch updates for pod dpu annotations
-func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) {
+func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) error {
 	// servedPods tracks the pods that got a VF
 	var servedPods sync.Map
 	// podNadCache stores all the net-attach-defs that the given Pod is attached for this controller,
@@ -83,7 +83,8 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 	podLister := corev1listers.NewPodLister(n.watchFactory.LocalPodInformer().GetIndexer())
 	kclient := n.Kube.(*kube.Kube)
 
-	nc.podHandler = n.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
+	var err error
+	nc.podHandler, err = n.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			// Is this pod based on hostNetwork, return directly
@@ -214,6 +215,7 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 			}
 		},
 	}, nil)
+	return err
 }
 
 // updatePodDPUConnStatusWithRetry update the pod annotion with the givin connection details

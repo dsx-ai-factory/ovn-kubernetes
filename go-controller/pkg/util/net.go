@@ -1,15 +1,15 @@
 package util
 
 import (
-	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"math/big"
 	"net"
 	"strconv"
 	"strings"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 
 	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -35,7 +35,8 @@ func intToIP(i *big.Int) net.IP {
 	return net.IP(i.Bytes())
 }
 
-func GetLSPAddresses(lsp *nbdb.LogicalSwitchPort) (net.HardwareAddr, []net.IP, error) {
+// ExtractPortAddresses returns the MAC and IPs of the given logical switch port
+func ExtractPortAddresses(lsp *nbdb.LogicalSwitchPort) (net.HardwareAddr, []net.IP, error) {
 	var addresses []string
 
 	if lsp.DynamicAddresses == nil {
@@ -67,30 +68,12 @@ func GetLSPAddresses(lsp *nbdb.LogicalSwitchPort) (net.HardwareAddr, []net.IP, e
 	return mac, ips, nil
 }
 
-// GetPortAddresses returns the MAC and IPs of the given logical switch port
-func GetPortAddresses(portName string, nbClient client.Client) (net.HardwareAddr, []net.IP, error) {
-	lsp := &nbdb.LogicalSwitchPort{Name: portName}
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-	defer cancel()
-	err := nbClient.Get(ctx, lsp)
-	if err != nil {
-		if err == client.ErrNotFound {
-			return nil, nil, nil
-		}
-		return nil, nil, err
-	}
-
-	return GetLSPAddresses(lsp)
-}
-
 // GetLRPAddrs returns the addresses for the given logical router port
 func GetLRPAddrs(nbClient client.Client, portName string) ([]*net.IPNet, error) {
-	lrp := nbdb.LogicalRouterPort{Name: portName}
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-	defer cancel()
-	err := nbClient.Get(ctx, &lrp)
+	lrp := &nbdb.LogicalRouterPort{Name: portName}
+	lrp, err := libovsdbops.GetLogicalRouterPort(nbClient, lrp)
 	if err != nil {
-		return nil, fmt.Errorf("unable to find router port: %s, err: %v", portName, err)
+		return nil, fmt.Errorf("unable to find router port %s: %w", portName, err)
 	}
 	gwLRPIPs := []*net.IPNet{}
 	for _, network := range lrp.Networks {

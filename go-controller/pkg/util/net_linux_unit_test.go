@@ -535,6 +535,109 @@ func TestLinkRoutesAdd(t *testing.T) {
 	}
 }
 
+func TestLinkRoutesAddOrUpdateMTU(t *testing.T) {
+	mockNetLinkOps := new(mocks.NetLinkOps)
+	mockLink := new(netlink_mocks.Link)
+	// below is defined in net_linux.go
+	netLinkOps = mockNetLinkOps
+
+	tests := []struct {
+		desc                     string
+		inputLink                netlink.Link
+		inputGwIP                net.IP
+		inputSubnets             []*net.IPNet
+		inputMTU                 int
+		errExp                   bool
+		onRetArgsNetLinkLibOpers []ovntest.TestifyMockHelper
+		onRetArgsLinkIfaceOpers  []ovntest.TestifyMockHelper
+	}{
+		{
+			desc:         "Route get fails",
+			inputLink:    mockLink,
+			inputGwIP:    ovntest.MustParseIP("192.168.0.1"),
+			inputSubnets: ovntest.MustParseIPNets("10.18.20.0/24"),
+			errExp:       true,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "RouteListFiltered", OnCallMethodArgType: []string{"int", "*netlink.Route", "uint64"}, RetArgList: []interface{}{[]netlink.Route{}, fmt.Errorf("mock error")}},
+			},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			},
+		},
+		{
+			desc:         "Route does not exist and is added",
+			inputLink:    mockLink,
+			inputGwIP:    ovntest.MustParseIP("192.168.0.1"),
+			inputSubnets: ovntest.MustParseIPNets("10.18.20.0/24"),
+			errExp:       false,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "RouteListFiltered", OnCallMethodArgType: []string{"int", "*netlink.Route", "uint64"}, RetArgList: []interface{}{[]netlink.Route{}, nil}},
+				{OnCallMethodName: "RouteAdd", OnCallMethodArgType: []string{"*netlink.Route"}, RetArgList: []interface{}{nil}},
+			},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			},
+		},
+		{
+			desc:         "Route exists, has the same mtu and is not updated",
+			inputLink:    mockLink,
+			inputGwIP:    ovntest.MustParseIP("192.168.0.1"),
+			inputSubnets: ovntest.MustParseIPNets("10.18.20.0/24"),
+			inputMTU:     1400,
+			errExp:       false,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "RouteListFiltered", OnCallMethodArgType: []string{"int", "*netlink.Route", "uint64"}, RetArgList: []interface{}{[]netlink.Route{
+					{
+						Gw:  ovntest.MustParseIP("192.168.0.1"),
+						MTU: 1400,
+					},
+				}, nil}},
+			},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			},
+		},
+		{
+			desc:         "Route exists, has different mtu and is updated",
+			inputLink:    mockLink,
+			inputGwIP:    ovntest.MustParseIP("192.168.0.1"),
+			inputSubnets: ovntest.MustParseIPNets("10.18.20.0/24"),
+			inputMTU:     1400,
+			errExp:       false,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "RouteListFiltered", OnCallMethodArgType: []string{"int", "*netlink.Route", "uint64"}, RetArgList: []interface{}{[]netlink.Route{
+					{Gw: ovntest.MustParseIP("192.168.0.1")},
+				}, nil}},
+				{OnCallMethodName: "RouteReplace", OnCallMethodArgType: []string{"*netlink.Route"}, RetArgList: []interface{}{nil}},
+			},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			},
+		},
+		{
+			desc: "LinkRoutesAddOrUpdateMTU() returns NO error when subnets input list is empty",
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+
+			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
+			ovntest.ProcessMockFnList(&mockLink.Mock, tc.onRetArgsLinkIfaceOpers)
+
+			err := LinkRoutesAddOrUpdateMTU(tc.inputLink, tc.inputGwIP, tc.inputSubnets, tc.inputMTU)
+			t.Log(err)
+			if tc.errExp {
+				assert.Error(t, err)
+			} else {
+				assert.Nil(t, err)
+			}
+			mockNetLinkOps.AssertExpectations(t)
+			mockLink.AssertExpectations(t)
+		})
+	}
+}
+
 func TestLinkRouteExists(t *testing.T) {
 	mockNetLinkOps := new(mocks.NetLinkOps)
 	mockLink := new(netlink_mocks.Link)
@@ -810,6 +913,7 @@ func TestDeleteConntrack(t *testing.T) {
 		inputIPStr               string
 		inputPort                int32
 		inputProtocol            kapi.Protocol
+		labels                   [][]byte
 		onRetArgsNetLinkLibOpers []ovntest.TestifyMockHelper
 	}{
 		{
@@ -848,6 +952,14 @@ func TestDeleteConntrack(t *testing.T) {
 			},
 		},
 		{
+			desc:          "Valid IPv4 address input with TCP protocol",
+			inputIPStr:    "192.168.1.14",
+			inputProtocol: kapi.ProtocolTCP,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "ConntrackDeleteFilter", OnCallMethodArgType: []string{"netlink.ConntrackTableType", "netlink.InetFamily", "*netlink.ConntrackFilter"}, RetArgList: []interface{}{uint(1), nil}},
+			},
+		},
+		{
 			desc:       "Valid IPv4 address input with valid port input and NO layer 4 protocol input",
 			errExp:     true,
 			inputIPStr: "192.168.1.14",
@@ -857,10 +969,11 @@ func TestDeleteConntrack(t *testing.T) {
 			},*/
 		},
 		{
-			desc:          "Valid IPv6 address input with valid port input and valid Layer 4 protocol",
+			desc:          "Valid IPv6 address input with valid port input and valid Layer 4 protocol and labels",
 			inputIPStr:    "fffb::1",
 			inputProtocol: kapi.ProtocolSCTP,
 			inputPort:     9999,
+			labels:        [][]byte{{3, 4, 61, 141, 207, 170}, {0x2}},
 			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "ConntrackDeleteFilter", OnCallMethodArgType: []string{"netlink.ConntrackTableType", "netlink.InetFamily", "*netlink.ConntrackFilter"}, RetArgList: []interface{}{uint(1), nil}},
 			},
@@ -870,7 +983,20 @@ func TestDeleteConntrack(t *testing.T) {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
 
-			err := DeleteConntrack(tc.inputIPStr, tc.inputPort, tc.inputProtocol)
+			err := DeleteConntrack(tc.inputIPStr, tc.inputPort, tc.inputProtocol, netlink.ConntrackReplyAnyIP, tc.labels)
+			if tc.errExp {
+				assert.Error(t, err)
+			} else {
+				assert.Nil(t, err)
+			}
+			mockNetLinkOps.AssertExpectations(t)
+		})
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
+
+			err := DeleteConntrack(tc.inputIPStr, tc.inputPort, tc.inputProtocol, netlink.ConntrackOrigDstIP, tc.labels)
 			if tc.errExp {
 				assert.Error(t, err)
 			} else {

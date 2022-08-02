@@ -29,8 +29,6 @@ spec:
         type: infra
         kubernetes.io/os: "linux"
         metrics: ovnkube-node
-      annotations:
-        scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
       nodeSelector:
         kubernetes.io/arch: arm64
@@ -40,6 +38,7 @@ spec:
       # as all pods.
       serviceAccountName: ovn
       hostNetwork: true
+      dnsPolicy: Default
 
       priorityClassName: "system-node-critical"
       containers:
@@ -184,6 +183,8 @@ spec:
           value: "true"
         - name: OVN_DISABLE_OVN_IFACE_ID_VER
           value: "true"
+        - name: OVN_OFCTRL_WAIT_BEFORE_CLEAR
+          value: "{{ ovn_ofctrl_wait_before_clear }}"
         - name: OVN_MONITOR_ALL
           value: "{{ ovn_monitor_all }}"
         - name: OVN_ENABLE_LFLOW_CACHE

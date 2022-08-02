@@ -46,7 +46,7 @@ Launch the KIND Deployment.
 
 ```
 $ pushd contrib
-$ export KUBECONFIG=${HOME}/admin.conf
+$ export KUBECONFIG=${HOME}/ovn.conf
 $ ./kind.sh
 $ popd
 ```
@@ -85,51 +85,55 @@ usage: kind.sh [[[-cf |--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]
                  [-ho |--hybrid-enabled] [-ii|--install-ingress] [-n4|--no-ipv4]
                  [-i6 |--ipv6] [-wk|--num-workers <num>] [-ds|--disable-snat-multiple-gws]
                  [-dp |--disable-pkt-mtu-check]
-                 [-nf |--netflow-targets <targets>] [sf|--sflow-targets <targets>] [-if|--ipfix-targets]
+                 [-nf |--netflow-targets <targets>] [sf|--sflow-targets <targets>]
+                 [-if |--ipfix-targets <targets>] [-ifs|--ipfix-sampling <num>]
+                 [-ifm|--ipfix-cache-max-flows <num>] [-ifa|--ipfix-cache-active-timeout <num>]
                  [-sw |--allow-system-writes] [-gm|--gateway-mode <mode>]
                  [-nl |--node-loglevel <num>] [-ml|--master-loglevel <num>]
                  [-dbl|--dbchecker-loglevel <num>] [-ndl|--ovn-loglevel-northd <loglevel>]
                  [-nbl|--ovn-loglevel-nb <loglevel>] [-sbl|--ovn-loglevel-sb <loglevel>]
-                 [-cl |--ovn-loglevel-controller <loglevel>] [-dl|--ovn-loglevel-nbctld <loglevel>]
+                 [-cl |--ovn-loglevel-controller <loglevel>]
                  [-ep |--experimental-provider <name>] |
                  [-eb |--egress-gw-separate-bridge]
                  [-h]]
 
--cf  | --config-file               Name of the KIND J2 configuration file.
-                                   DEFAULT: ./kind.yaml.j2
--kt  | --keep-taint                Do not remove taint components.
-                                   DEFAULT: Remove taint components.
--ha  | --ha-enabled                Enable high availability. DEFAULT: HA Disabled.
--ho  | --hybrid-enabled            Enable hybrid overlay. DEFAULT: Disabled.
--ds  | --disable-snat-multiple-gws Disable SNAT for multiple gws. DEFAULT: Disabled.
--dp  | --disable-pkt-mtu-check     Disable checking packet size greater than MTU. Default: Disabled
--nf  | --netflow-targets           Comma delimited list of ip:port netflow collectors. DEFAULT: Disabled.
--sf  | --sflow-targets             Comma delimited list of ip:port sflow collectors. DEFAULT: Disabled.
--if  | --ipfix-targets             Comma delimited list of ip:port ipfix collectors. DEFAULT: Disabled.
--el  | --ovn-empty-lb-events       Enable empty-lb-events generation for LB without backends. DEFAULT: Disabled
--ii  | --install-ingress           Flag to install Ingress Components.
-                                   DEFAULT: Don't install ingress components.
--n4  | --no-ipv4                   Disable IPv4. DEFAULT: IPv4 Enabled.
--i6  | --ipv6                      Enable IPv6. DEFAULT: IPv6 Disabled.
--wk  | --num-workers               Number of worker nodes. DEFAULT: HA - 2 worker
-                                   nodes and no HA - 0 worker nodes.
--sw  | --allow-system-writes       Allow script to update system. Intended to allow
-                                   github CI to be updated with IPv6 settings.
-                                   DEFAULT: Don't allow.
--gm  | --gateway-mode              Enable 'shared' or 'local' gateway mode.
-                                   DEFAULT: shared.
--ov  | --ovn-image            	   Use the specified docker image instead of building locally. DEFAULT: local build.
--ml  | --master-loglevel           Log level for ovnkube (master), DEFAULT: 5.
--nl  | --node-loglevel             Log level for ovnkube (node), DEFAULT: 5
--dbl | --dbchecker-loglevel        Log level for ovn-dbchecker (ovnkube-db), DEFAULT: 5.
--ndl | --ovn-loglevel-northd       Log config for ovn northd, DEFAULT: '-vconsole:info -vfile:info'.
--nbl | --ovn-loglevel-nb           Log config for northbound DB DEFAULT: '-vconsole:info -vfile:info'.
--sbl | --ovn-loglevel-sb           Log config for southboudn DB DEFAULT: '-vconsole:info -vfile:info'.
--cl  | --ovn-loglevel-controller   Log config for ovn-controller DEFAULT: '-vconsole:info'.
--dl  | --ovn-loglevel-nbctld       Log config for nbctl daemon DEFAULT: '-vconsole:info'.
--ep  | --experimental-provider     Use an experimental OCI provider such as podman, instead of docker. DEFAULT: Disabled.
--eb  | --egress-gw-separate-bridge The external gateway traffic uses a separate bridge.
---delete                      	   Delete current cluster
+-cf  | --config-file                Name of the KIND J2 configuration file.
+                                    DEFAULT: ./kind.yaml.j2
+-kt  | --keep-taint                 Do not remove taint components.
+                                    DEFAULT: Remove taint components.
+-ha  | --ha-enabled                 Enable high availability. DEFAULT: HA Disabled.
+-ho  | --hybrid-enabled             Enable hybrid overlay. DEFAULT: Disabled.
+-ds  | --disable-snat-multiple-gws  Disable SNAT for multiple gws. DEFAULT: Disabled.
+-dp  | --disable-pkt-mtu-check      Disable checking packet size greater than MTU. Default: Disabled
+-nf  | --netflow-targets            Comma delimited list of ip:port or :port (using node IP) netflow collectors. DEFAULT: Disabled.
+-sf  | --sflow-targets              Comma delimited list of ip:port or :port (using node IP) sflow collectors. DEFAULT: Disabled.
+-if  | --ipfix-targets              Comma delimited list of ip:port or :port (using node IP) ipfix collectors. DEFAULT: Disabled.
+-ifs | --ipfix-sampling             Fraction of packets that are sampled and sent to each target collector: 1 packet out of every <num>. DEFAULT: 400 (1 out of 400 packets).
+-ifm | --ipfix-cache-max-flows      Maximum number of IPFIX flow records that can be cached at a time. If 0, caching is disabled. DEFAULT: Disabled.
+-ifa | --ipfix-cache-active-timeout Maximum period in seconds for which an IPFIX flow record is cached and aggregated before being sent. If 0, caching is disabled. DEFAULT: 60.
+-el  | --ovn-empty-lb-events        Enable empty-lb-events generation for LB without backends. DEFAULT: Disabled
+-ii  | --install-ingress            Flag to install Ingress Components.
+                                    DEFAULT: Don't install ingress components.
+-n4  | --no-ipv4                    Disable IPv4. DEFAULT: IPv4 Enabled.
+-i6  | --ipv6                       Enable IPv6. DEFAULT: IPv6 Disabled.
+-wk  | --num-workers                Number of worker nodes. DEFAULT: HA - 2 worker
+                                    nodes and no HA - 0 worker nodes.
+-sw  | --allow-system-writes        Allow script to update system. Intended to allow
+                                    github CI to be updated with IPv6 settings.
+                                    DEFAULT: Don't allow.
+-gm  | --gateway-mode               Enable 'shared' or 'local' gateway mode.
+                                    DEFAULT: shared.
+-ov  | --ovn-image            	    Use the specified docker image instead of building locally. DEFAULT: local build.
+-ml  | --master-loglevel            Log level for ovnkube (master), DEFAULT: 5.
+-nl  | --node-loglevel              Log level for ovnkube (node), DEFAULT: 5
+-dbl | --dbchecker-loglevel         Log level for ovn-dbchecker (ovnkube-db), DEFAULT: 5.
+-ndl | --ovn-loglevel-northd        Log config for ovn northd, DEFAULT: '-vconsole:info -vfile:info'.
+-nbl | --ovn-loglevel-nb            Log config for northbound DB DEFAULT: '-vconsole:info -vfile:info'.
+-sbl | --ovn-loglevel-sb            Log config for southboudn DB DEFAULT: '-vconsole:info -vfile:info'.
+-cl  | --ovn-loglevel-controller    Log config for ovn-controller DEFAULT: '-vconsole:info'.
+-ep  | --experimental-provider      Use an experimental OCI provider such as podman, instead of docker. DEFAULT: Disabled.
+-eb  | --egress-gw-separate-bridge  The external gateway traffic uses a separate bridge.
+--delete                      	    Delete current cluster
 ```
 
 As seen above, if you do not specify any options the script will assume the default values.
@@ -147,7 +151,7 @@ To deploy KIND however, you need to start it as root and then copy root's kube c
 ```
 $ pushd contrib
 $ sudo ./kind.sh -ep podman
-$ sudo cp /root/admin.conf ~/.kube/kind-config
+$ sudo cp /root/ovn.conf ~/.kube/kind-config
 $ sudo chown $(id -u):$(id -g) ~/.kube/kind-config
 $ export KUBECONFIG=~/.kube/kind-config
 $ popd
@@ -304,9 +308,9 @@ $ KIND_IPV4_SUPPORT=false KIND_IPV6_SUPPORT=true ./kind.sh
 Once `kind.sh` completes, setup kube config file:
 
 ```
-$ cp ~/admin.conf ~/.kube/config
+$ cp ~/ovn.conf ~/.kube/config
 -- OR --
-$ KUBECONFIG=~/admin.conf
+$ KUBECONFIG=~/ovn.conf
 ```
 
 Once testing is complete, to tear down the KIND deployment:
@@ -346,7 +350,7 @@ sudo ln -s /usr/bin/kubectl-v1.17.3 /usr/bin/kubectl
 Download and install latest version of `kubectl`:
 
 ```
-$ K8S_VERSION=v1.18.0
+$ K8S_VERSION=v1.24.0
 $ curl -LO https://storage.googleapis.com/kubernetes-release/release/$K8S_VERSION/bin/linux/amd64/kubectl
 $ chmod +x kubectl
 $ sudo mv kubectl /usr/bin/kubectl-v1.18.0
@@ -401,15 +405,15 @@ $ cd ../dist/images/
 $ make fedora
 
 $ cd ../../contrib/
-$ KIND_IPV4_SUPPORT=true KIND_IPV6_SUPPORT=true K8S_VERSION=v1.18.0 ./kind.sh
+$ KIND_IPV4_SUPPORT=true KIND_IPV6_SUPPORT=true K8S_VERSION=v1.24.0 ./kind.sh
 ```
 
 Once `kind.sh` completes, setup kube config file:
 
 ```
-$ cp ~/admin.conf ~/.kube/config
+$ cp ~/ovn.conf ~/.kube/config
 -- OR --
-$ KUBECONFIG=~/admin.conf
+$ KUBECONFIG=~/ovn.conf
 ```
 
 Once testing is complete, to tear down the KIND deployment:
@@ -427,7 +431,7 @@ one (or both of) the following variables:
 
 ```
 $ cd ../../contrib/
-$ KIND_IMAGE=example.com/kindest/node K8S_VERSION=v1.20.0 ./kind.sh
+$ KIND_IMAGE=example.com/kindest/node K8S_VERSION=v1.24.0 ./kind.sh
 ```
 
 ### Current Status

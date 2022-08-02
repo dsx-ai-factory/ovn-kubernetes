@@ -178,7 +178,7 @@ func (n *OvnNode) initGatewayDPUXDP(nadInfo *util.NetAttachDefInfo) (*gateway, e
 	}
 
 	// XXX Check wg
-	go gw.openflowManager.Run(n.stopChan, &sync.WaitGroup{})
+	go gw.openflowManager.Run(n.stopChan, n.wg)
 
 	err = InitializeXDPServiceForNAD(nadInfo)
 	if err != nil {

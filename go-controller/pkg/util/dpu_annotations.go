@@ -18,11 +18,11 @@ Example:
         k8s.ovn.org/dpu.connection-details: |
             {
                 "default": {
-                    "pfId":      “0”,
-                    “vfId”:      "3",
-		    "pfMac":     "b7:cf:f6:71:cc:56",
-		    "vfDevName": "eth2",
-                    "sandboxId": "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a"
+                    "pfId":         “0”,
+                    “vfId”:         "3",
+		    "pfMac":        "b7:cf:f6:71:cc:56",
+		    "vfNetdevName": "eth2",
+                    "sandboxId":    "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a"
 	        }
             }
 
@@ -49,11 +49,11 @@ const (
 )
 
 type DPUConnectionDetails struct {
-	PfId      string `json:"pfId"`
-	VfId      string `json:"vfId"`
-	PfMAC     string `json:"pfMac,omitempty"`
-	SandboxId string `json:"sandboxId"`
-	VfDevName string `json:"vfDevName,omitempty"`
+	PfId         string `json:"pfId"`
+	VfId         string `json:"vfId"`
+	PfMAC        string `json:"pfMac,omitempty"`
+	SandboxId    string `json:"sandboxId"`
+	VfNetdevName string `json:"vfNetdevName,omitempty"`
 }
 
 type DPUConnectionStatus struct {
@@ -169,7 +169,7 @@ func UnmarshalPodDPUConnStatus(annotations map[string]string, nadName string) (*
 	}
 	dcs, ok := podDcss[nadName]
 	if !ok {
-		return nil, newAnnotationNotSetError("no DPU connection status annotation for network %s: %q",
+		return nil, fmt.Errorf("no dpu connection status annotation for network %s: %q",
 			nadName, ovnAnnotation)
 	}
 	return &dcs, nil

@@ -30,8 +30,6 @@ spec:
         component: network
         type: infra
         kubernetes.io/os: "linux"
-      annotations:
-        scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
       imagePullSecrets:
         - name: ovncni-quay-ips
@@ -39,6 +37,7 @@ spec:
       # as all pods.
       serviceAccountName: ovn
       hostNetwork: true
+      dnsPolicy: Default
       priorityClassName: "system-cluster-critical"
 
       # required to be scheduled on a linux node and only one instance of ovnkube-master pod per node
@@ -62,53 +61,6 @@ spec:
               topologyKey: kubernetes.io/hostname
 
       containers:
-        - name: nbctl-daemon
-          image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
-          imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
-
-          command: ["/root/ovnkube.sh", "run-nbctld"]
-
-          securityContext:
-            runAsUser: 0
-
-          terminationMessagePolicy: FallbackToLogsOnError
-          volumeMounts:
-            - mountPath: /var/log/openvswitch/
-              name: host-var-log-ovs
-            - mountPath: /var/log/ovn/
-              name: host-var-log-ovs
-            - mountPath: /var/run/openvswitch/
-              name: host-var-run-ovs
-            - mountPath: /var/run/ovn/
-              name: host-var-run-ovs
-            - mountPath: /ovn-cert
-              name: ovn-pki
-              readOnly: true
-          resources:
-            requests:
-              cpu: 100m
-              memory: 300Mi
-          env:
-            - name: OVN_DAEMONSET_VERSION
-              value: "3"
-            - name: OVN_LOGLEVEL_NBCTLD
-              value: "{{ ovn_loglevel_nbctld }}"
-            - name: K8S_APISERVER
-              valueFrom:
-                configMapKeyRef:
-                  name: ovn-config
-                  key: k8s_apiserver
-            - name: OVN_SSL_ENABLE
-              value: "{{ ovn_ssl_en }}"
-
-          readinessProbe:
-            exec:
-              command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovn-nbctl"]
-            initialDelaySeconds: 30
-            timeoutSeconds: 30
-            periodSeconds: 60
-          # end of container
-
         - name: ovnkube-master
           image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
           imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
@@ -206,6 +158,8 @@ spec:
               value: "{{ ovn_multi_network_enable }}"
             - name: OVN_MULTI_NETWORKPOLICY_ENABLE
               value: "{{ ovn_multi_networkpolicy_enable }}"
+            - name: OVN_EGRESSQOS_ENABLE
+              value: "{{ ovn_egress_qos_enable }}"
             - name: OVN_DISABLE_SNAT_MULTIPLE_GWS
               value: "{{ ovn_disable_snat_multiple_gws }}"
             - name: OVN_EMPTY_LB_EVENTS

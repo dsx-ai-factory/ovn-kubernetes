@@ -2,13 +2,14 @@ package node
 
 import (
 	"fmt"
+	"net"
 
-	"github.com/stretchr/testify/mock"
 	"github.com/urfave/cli/v2"
 	"github.com/vishvananda/netlink"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
+
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	netlink_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -62,8 +63,6 @@ var _ = Describe("Node", func() {
 			config.Default.MTU = configDefaultMTU
 			config.Default.EncapIP = "10.1.0.40"
 
-			kubeMock.On("SetTaintOnNode", nodeName, mock.AnythingOfType("*v1.Taint")).Return(nil)
-			kubeMock.On("RemoveTaintFromNode", nodeName, mock.AnythingOfType("*v1.Taint")).Return(nil)
 		})
 
 		AfterEach(func() {
@@ -86,9 +85,7 @@ var _ = Describe("Node", func() {
 					})
 
 					err := ovnNode.validateVTEPInterfaceMTU()
-					Expect(err).NotTo(HaveOccurred())
-					kubeMock.AssertNumberOfCalls(GinkgoT(), "SetTaintOnNode", 1)
-					kubeMock.AssertNumberOfCalls(GinkgoT(), "RemoveTaintFromNode", 0)
+					Expect(err).To(HaveOccurred())
 				})
 			})
 
@@ -102,8 +99,6 @@ var _ = Describe("Node", func() {
 
 					err := ovnNode.validateVTEPInterfaceMTU()
 					Expect(err).NotTo(HaveOccurred())
-					kubeMock.AssertNumberOfCalls(GinkgoT(), "SetTaintOnNode", 0)
-					kubeMock.AssertNumberOfCalls(GinkgoT(), "RemoveTaintFromNode", 1)
 				})
 			})
 		})
@@ -123,9 +118,7 @@ var _ = Describe("Node", func() {
 					})
 
 					err := ovnNode.validateVTEPInterfaceMTU()
-					Expect(err).NotTo(HaveOccurred())
-					kubeMock.AssertNumberOfCalls(GinkgoT(), "SetTaintOnNode", 1)
-					kubeMock.AssertNumberOfCalls(GinkgoT(), "RemoveTaintFromNode", 0)
+					Expect(err).To(HaveOccurred())
 				})
 			})
 
@@ -139,8 +132,6 @@ var _ = Describe("Node", func() {
 
 					err := ovnNode.validateVTEPInterfaceMTU()
 					Expect(err).NotTo(HaveOccurred())
-					kubeMock.AssertNumberOfCalls(GinkgoT(), "SetTaintOnNode", 0)
-					kubeMock.AssertNumberOfCalls(GinkgoT(), "RemoveTaintFromNode", 1)
 				})
 			})
 		})
@@ -160,9 +151,7 @@ var _ = Describe("Node", func() {
 					})
 
 					err := ovnNode.validateVTEPInterfaceMTU()
-					Expect(err).NotTo(HaveOccurred())
-					kubeMock.AssertNumberOfCalls(GinkgoT(), "SetTaintOnNode", 1)
-					kubeMock.AssertNumberOfCalls(GinkgoT(), "RemoveTaintFromNode", 0)
+					Expect(err).To(HaveOccurred())
 				})
 			})
 
@@ -176,8 +165,6 @@ var _ = Describe("Node", func() {
 
 					err := ovnNode.validateVTEPInterfaceMTU()
 					Expect(err).NotTo(HaveOccurred())
-					kubeMock.AssertNumberOfCalls(GinkgoT(), "SetTaintOnNode", 0)
-					kubeMock.AssertNumberOfCalls(GinkgoT(), "RemoveTaintFromNode", 1)
 				})
 			})
 		})
@@ -299,12 +286,12 @@ var _ = Describe("Node", func() {
 					Output: chassisUUID,
 				})
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 --data=bare --no-heading --columns=_uuid find "+
+					Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 --no-leader-only --data=bare --no-heading --columns=_uuid find "+
 						"Encap chassis_name=%s", chassisUUID),
 					Output: encapUUID,
 				})
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 set encap "+
+					Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 --no-leader-only set encap "+
 						"%s options:dst_port=%d", encapUUID, encapPort),
 				})
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -366,7 +353,7 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
 						"external_ids:ovn-enable-lflow-cache=false "+
 						"external_ids:ovn-limit-lflow-cache=1000 "+
-						"external_ids:ovn-limit-lflow-cache-kb=100000 "+
+						"external_ids:ovn-memlimit-lflow-cache-kb=100000 "+
 						"external_ids:hostname=\"%s\"",
 						nodeIP, interval, ofintval, nodeName),
 				})
@@ -394,6 +381,230 @@ var _ = Describe("Node", func() {
 				return nil
 			}
 
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+		It("sets default IPFIX configuration", func() {
+			app.Action = func(ctx *cli.Context) error {
+				const (
+					nodeIP    string = "1.2.5.6"
+					nodeName  string = "cannot.be.resolv.ed"
+					interval  int    = 100000
+					ofintval  int    = 0
+					ipfixPort int32  = 456
+				)
+				ipfixIP := net.IP{1, 2, 3, 4}
+
+				node := kapi.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: nodeName,
+					},
+					Status: kapi.NodeStatus{
+						Addresses: []kapi.NodeAddress{
+							{
+								Type:    kapi.NodeExternalIP,
+								Address: nodeIP,
+							},
+						},
+					},
+				}
+
+				fexec := ovntest.NewFakeExec()
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
+						"external_ids:ovn-encap-type=geneve "+
+						"external_ids:ovn-encap-ip=%s "+
+						"external_ids:ovn-remote-probe-interval=%d "+
+						"external_ids:ovn-openflow-probe-interval=%d "+
+						"external_ids:ovn-encap-tos=none "+
+						"external_ids:ovn-monitor-all=true "+
+						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
+						"external_ids:ovn-enable-lflow-cache=true "+
+						"external_ids:hostname=\"%s\"",
+						nodeIP, interval, ofintval, nodeName),
+				})
+
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 -- clear bridge br-int netflow" +
+						" -- " +
+						"clear bridge br-int sflow" +
+						" -- " +
+						"clear bridge br-int ipfix",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15"+
+						" -- "+
+						"--id=@ipfix create ipfix "+
+						"targets=[\"%s:%d\"] cache_active_timeout=60 sampling=400"+
+						" -- "+
+						"set bridge br-int ipfix=@ipfix", ipfixIP, ipfixPort),
+				})
+				err := util.SetExec(fexec)
+				Expect(err).NotTo(HaveOccurred())
+
+				_, err = config.InitConfig(ctx, fexec, nil)
+				Expect(err).NotTo(HaveOccurred())
+				config.Monitoring.IPFIXTargets = []config.HostPort{
+					{Host: &ipfixIP, Port: ipfixPort},
+				}
+				err = setupOVNNode(&node)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+		It("allows overriding IPFIX configuration", func() {
+			app.Action = func(ctx *cli.Context) error {
+				const (
+					nodeIP    string = "1.2.5.6"
+					nodeName  string = "cannot.be.resolv.ed"
+					interval  int    = 100000
+					ofintval  int    = 0
+					ipfixPort int32  = 456
+				)
+				ipfixIP := net.IP{1, 2, 3, 4}
+
+				node := kapi.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: nodeName,
+					},
+					Status: kapi.NodeStatus{
+						Addresses: []kapi.NodeAddress{
+							{
+								Type:    kapi.NodeExternalIP,
+								Address: nodeIP,
+							},
+						},
+					},
+				}
+
+				fexec := ovntest.NewFakeExec()
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
+						"external_ids:ovn-encap-type=geneve "+
+						"external_ids:ovn-encap-ip=%s "+
+						"external_ids:ovn-remote-probe-interval=%d "+
+						"external_ids:ovn-openflow-probe-interval=%d "+
+						"external_ids:ovn-encap-tos=none "+
+						"external_ids:ovn-monitor-all=true "+
+						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
+						"external_ids:ovn-enable-lflow-cache=true "+
+						"external_ids:hostname=\"%s\"",
+						nodeIP, interval, ofintval, nodeName),
+				})
+
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 -- clear bridge br-int netflow" +
+						" -- " +
+						"clear bridge br-int sflow" +
+						" -- " +
+						"clear bridge br-int ipfix",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15"+
+						" -- "+
+						"--id=@ipfix create ipfix "+
+						"targets=[\"%s:%d\"] cache_active_timeout=123 cache_max_flows=456 sampling=789"+
+						" -- "+
+						"set bridge br-int ipfix=@ipfix", ipfixIP, ipfixPort),
+				})
+				err := util.SetExec(fexec)
+				Expect(err).NotTo(HaveOccurred())
+
+				_, err = config.InitConfig(ctx, fexec, nil)
+				Expect(err).NotTo(HaveOccurred())
+				config.Monitoring.IPFIXTargets = []config.HostPort{
+					{Host: &ipfixIP, Port: ipfixPort},
+				}
+				config.IPFIX.CacheActiveTimeout = 123
+				config.IPFIX.CacheMaxFlows = 456
+				config.IPFIX.Sampling = 789
+				err = setupOVNNode(&node)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+		It("uses Node IP when the flow tracing targets only specify a port", func() {
+			app.Action = func(ctx *cli.Context) error {
+				const (
+					nodeIP   string = "1.2.5.6"
+					nodeName string = "anyhost.test"
+					interval int    = 100000
+					ofintval int    = 0
+				)
+				node := kapi.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: nodeName,
+					},
+					Status: kapi.NodeStatus{
+						Addresses: []kapi.NodeAddress{
+							{
+								Type:    kapi.NodeExternalIP,
+								Address: nodeIP,
+							},
+						},
+					},
+				}
+
+				fexec := ovntest.NewFakeExec()
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
+						"external_ids:ovn-encap-type=geneve "+
+						"external_ids:ovn-encap-ip=%s "+
+						"external_ids:ovn-remote-probe-interval=%d "+
+						"external_ids:ovn-openflow-probe-interval=%d "+
+						"external_ids:ovn-encap-tos=none "+
+						"external_ids:ovn-monitor-all=true "+
+						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
+						"external_ids:ovn-enable-lflow-cache=true "+
+						"external_ids:hostname=\"%s\"",
+						nodeIP, interval, ofintval, nodeName),
+				})
+
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 -- clear bridge br-int netflow" +
+						" -- " +
+						"clear bridge br-int sflow" +
+						" -- " +
+						"clear bridge br-int ipfix",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15" +
+						" -- " +
+						"--id=@ipfix create ipfix " +
+						// verify that the 1.2.5.6 IP has been attached to the :8888 target below
+						`targets=["10.0.0.2:3030","1.2.5.6:8888","[2020:1111:f::1:933]:3333"] cache_active_timeout=60` +
+						" -- " +
+						"set bridge br-int ipfix=@ipfix",
+				})
+				err := util.SetExec(fexec)
+				Expect(err).NotTo(HaveOccurred())
+
+				_, err = config.InitConfig(ctx, fexec, nil)
+				Expect(err).NotTo(HaveOccurred())
+
+				config.Monitoring.IPFIXTargets, err =
+					config.ParseFlowCollectors("10.0.0.2:3030,:8888,[2020:1111:f::1:0933]:3333")
+				config.IPFIX.CacheActiveTimeout = 60
+				config.IPFIX.CacheMaxFlows = 0
+				config.IPFIX.Sampling = 0
+				Expect(err).NotTo(HaveOccurred())
+
+				err = setupOVNNode(&node)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+				return nil
+			}
 			err := app.Run([]string{app.Name})
 			Expect(err).NotTo(HaveOccurred())
 		})

@@ -6,7 +6,9 @@ import (
 	"sync"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+
 	"k8s.io/apimachinery/pkg/util/sets"
 )
 
@@ -49,6 +51,7 @@ type CachedLB struct {
 
 	Switches sets.String
 	Routers  sets.String
+	Groups   sets.String
 }
 
 // update the database with any existing LBs, along with any
@@ -73,6 +76,7 @@ func (c *LBCache) update(existing []LB, toDelete []string) {
 
 			Switches: sets.NewString(lb.Switches...),
 			Routers:  sets.NewString(lb.Routers...),
+			Groups:   sets.NewString(lb.Groups...),
 		}
 	}
 }
@@ -166,7 +170,10 @@ func newCache(nbClient libovsdbclient.Client) (*LBCache, error) {
 		c.existing[lbs[i].UUID] = &lbs[i]
 	}
 
-	switches, err := libovsdbops.ListSwitchesWithLoadBalancers(nbClient)
+	ps := func(item *nbdb.LogicalSwitch) bool {
+		return len(item.LoadBalancer) > 0
+	}
+	switches, err := libovsdbops.FindLogicalSwitchesWithPredicate(nbClient, ps)
 	if err != nil {
 		return nil, err
 	}
@@ -179,7 +186,10 @@ func newCache(nbClient libovsdbclient.Client) (*LBCache, error) {
 		}
 	}
 
-	routers, err := libovsdbops.ListRoutersWithLoadBalancers(nbClient)
+	pr := func(item *nbdb.LogicalRouter) bool {
+		return len(item.LoadBalancer) > 0
+	}
+	routers, err := libovsdbops.FindLogicalRoutersWithPredicate(nbClient, pr)
 	if err != nil {
 		return nil, err
 	}
@@ -188,6 +198,23 @@ func newCache(nbClient libovsdbclient.Client) (*LBCache, error) {
 		for _, lbuuid := range router.LoadBalancer {
 			if lb, ok := c.existing[lbuuid]; ok {
 				lb.Routers.Insert(router.Name)
+			}
+		}
+	}
+
+	// Get non-empty LB groups
+	pg := func(item *nbdb.LoadBalancerGroup) bool {
+		return len(item.LoadBalancer) > 0
+	}
+	groups, err := libovsdbops.FindLoadBalancerGroupsWithPredicate(nbClient, pg)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, group := range groups {
+		for _, lbuuid := range group.LoadBalancer {
+			if lb, ok := c.existing[lbuuid]; ok {
+				lb.Groups.Insert(group.Name)
 			}
 		}
 	}
@@ -211,6 +238,7 @@ func listLBs(nbClient libovsdbclient.Client) ([]CachedLB, error) {
 			VIPs:        sets.String{},
 			Switches:    sets.String{},
 			Routers:     sets.String{},
+			Groups:      sets.String{},
 		}
 
 		if lb.Protocol != nil {

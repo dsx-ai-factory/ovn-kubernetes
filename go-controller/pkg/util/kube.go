@@ -27,7 +27,10 @@ import (
 	networkattchmentdefclientset "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
+	egressqosclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+
+	ocpcloudnetworkclientset "github.com/openshift/client-go/cloudnetwork/clientset/versioned"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
@@ -37,6 +40,8 @@ type OVNClientset struct {
 	KubeClient               kubernetes.Interface
 	EgressIPClient           egressipclientset.Interface
 	EgressFirewallClient     egressfirewallclientset.Interface
+	CloudNetworkClient       ocpcloudnetworkclientset.Interface
+	EgressQoSClient          egressqosclientset.Interface
 	NetworkAttchDefClient    networkattchmentdefclientset.Interface
 	MultiNetworkPolicyClient multinetworkpolicyclientset.Interface
 }
@@ -76,6 +81,7 @@ func newKubernetesRestConfig(conf *config.KubernetesConfig) (*rest.Config, error
 		kconfig = &rest.Config{
 			Host:            conf.APIServer,
 			BearerToken:     conf.Token,
+			BearerTokenFile: conf.TokenFile,
 			TLSClientConfig: rest.TLSClientConfig{CAData: conf.CAData},
 		}
 	} else if strings.HasPrefix(conf.APIServer, "http") {
@@ -133,6 +139,14 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 	if err != nil {
 		return nil, err
 	}
+	cloudNetworkClientset, err := ocpcloudnetworkclientset.NewForConfig(kconfig)
+	if err != nil {
+		return nil, err
+	}
+	egressqosClientset, err := egressqosclientset.NewForConfig(kconfig)
+	if err != nil {
+		return nil, err
+	}
 	networkAttchmntDefClientset, err := networkattchmentdefclientset.NewForConfig(kconfig)
 	if err != nil {
 		return nil, err
@@ -145,6 +159,8 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		KubeClient:               kclientset,
 		EgressIPClient:           egressIPClientset,
 		EgressFirewallClient:     egressFirewallClientset,
+		CloudNetworkClient:       cloudNetworkClientset,
+		EgressQoSClient:          egressqosClientset,
 		NetworkAttchDefClient:    networkAttchmntDefClientset,
 		MultiNetworkPolicyClient: multiNetworkPolicyClientset,
 	}, nil
@@ -166,6 +182,20 @@ func GetClusterIPs(service *kapi.Service) []string {
 		return []string{service.Spec.ClusterIP}
 	}
 	return []string{}
+}
+
+// GetExternalAndLBIPs returns an array with the ExternalIPs and LoadBalancer IPs present in the service
+func GetExternalAndLBIPs(service *kapi.Service) []string {
+	svcVIPs := []string{}
+	svcVIPs = append(svcVIPs, service.Spec.ExternalIPs...)
+	if ServiceTypeHasLoadBalancer(service) {
+		for _, ingressVIP := range service.Status.LoadBalancer.Ingress {
+			if len(ingressVIP.IP) > 0 {
+				svcVIPs = append(svcVIPs, ingressVIP.IP)
+			}
+		}
+	}
+	return svcVIPs
 }
 
 // ValidatePort checks if the port is non-zero and port protocol is valid
@@ -194,8 +224,17 @@ func ServiceTypeHasNodePort(service *kapi.Service) bool {
 	return service.Spec.Type == kapi.ServiceTypeNodePort || service.Spec.Type == kapi.ServiceTypeLoadBalancer
 }
 
+// ServiceTypeHasLoadBalancer checks if the service has an associated LoadBalancer or not
+func ServiceTypeHasLoadBalancer(service *kapi.Service) bool {
+	return service.Spec.Type == kapi.ServiceTypeLoadBalancer
+}
+
 func ServiceExternalTrafficPolicyLocal(service *kapi.Service) bool {
 	return service.Spec.ExternalTrafficPolicy == kapi.ServiceExternalTrafficPolicyTypeLocal
+}
+
+func ServiceInternalTrafficPolicyLocal(service *kapi.Service) bool {
+	return service.Spec.InternalTrafficPolicy != nil && *service.Spec.InternalTrafficPolicy == kapi.ServiceInternalTrafficPolicyLocal
 }
 
 // GetNodePrimaryIP extracts the primary IP address from the node status in the  API
@@ -221,6 +260,11 @@ func GetNodePrimaryIP(node *kapi.Node) (string, error) {
 // needs to be setup
 func PodWantsNetwork(pod *kapi.Pod) bool {
 	return !pod.Spec.HostNetwork
+}
+
+// PodCompleted checks if the pod is marked as completed (in a terminal state)
+func PodCompleted(pod *kapi.Pod) bool {
+	return pod.Status.Phase == kapi.PodSucceeded || pod.Status.Phase == kapi.PodFailed
 }
 
 // PodScheduled returns if the given pod is scheduled

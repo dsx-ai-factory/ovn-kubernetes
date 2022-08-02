@@ -9,9 +9,10 @@ import (
 
 	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -205,11 +206,12 @@ func (gp *gressPolicy) addPeerPods(oc *Controller, pods ...*v1.Pod) error {
 			gp.nodeHostNetPodsCacheLock.Lock()
 			err := oc.addHostnetworkPodIPToAddressSet(pod.Spec.NodeName, fmt.Sprintf("%s/%s", pod.Namespace, pod.Name),
 				string(gp.policyType), gp.peerAddressSet, gp.nodeHostNetPodsCache)
+			gp.nodeHostNetPodsCacheLock.Unlock()
 			if err != nil {
 				klog.Errorf("Failed while adding Hostnetwrok IP for pod %s/%s on node (%s) to address_set: %v",
 					pod.Namespace, pod.Name, pod.Spec.NodeName, err)
 			}
-			gp.nodeHostNetPodsCacheLock.Unlock()
+			return err
 		} else {
 			podIPs, err := util.GetAllPodIPs(pod, gp.netAttachInfo)
 			if err != nil {
@@ -322,7 +324,8 @@ func (gp *gressPolicy) getMatchFromIPBlock(lportMatch, l4Match string) []string 
 }
 
 // addNamespaceAddressSet adds a namespace address set to the gress policy
-// if it does not exist and returns `false` if it does.
+// if the address set does not exist and returns `true`;  if the address set already exists,
+// it returns `false`.
 func (gp *gressPolicy) addNamespaceAddressSet(name string) bool {
 	v4HashName, v6HashName := addressset.MakeAddressSetHashNames(name)
 	v4HashName = "$" + gp.netAttachInfo.Prefix + v4HashName
@@ -434,12 +437,14 @@ func (gp *gressPolicy) buildLocalPodACLs(portGroupName, aclLogging string) []*nb
 // buildACLAllow builds an allow-related ACL for a given given match
 func (gp *gressPolicy) buildACLAllow(match, l4Match string, ipBlockCIDR int, aclLogging string) *nbdb.ACL {
 	var direction, action, ipBlockCIDRString string
-	priority := types.DefaultAllowPriority
-	if gp.policyType == knet.PolicyTypeEgress {
-		direction = nbdb.ACLDirectionFromLport
-	} else {
+	var options map[string]string
+	if gp.policyType == knet.PolicyTypeIngress {
 		direction = nbdb.ACLDirectionToLport
+	} else {
+		direction = nbdb.ACLDirectionFromLport
+		options = map[string]string{"apply-after-lb": "true"}
 	}
+	priority := types.DefaultAllowPriority
 	if gp.isAclStateless {
 		action = nbdb.ACLActionAllowStateless
 	} else {
@@ -477,7 +482,7 @@ func (gp *gressPolicy) buildACLAllow(match, l4Match string, ipBlockCIDR int, acl
 		externalIds["network_name"] = gp.netAttachInfo.NetName
 	}
 
-	acl := libovsdbops.BuildACL(aclName, direction, priority, match, action, types.OvnACLLoggingMeter, getACLLoggingSeverity(aclLogging), aclLogging != "", externalIds)
+	acl := libovsdbops.BuildACL(aclName, direction, priority, match, action, types.OvnACLLoggingMeter, getACLLoggingSeverity(aclLogging), aclLogging != "", externalIds, options)
 	return acl
 }
 
@@ -526,10 +531,12 @@ func getSvcVips(nbClient client.Client, service *v1.Service) []net.IP {
 	ips := make([]net.IP, 0)
 
 	if util.ServiceTypeHasClusterIP(service) {
-		if util.IsClusterIPSet(service) {
-			ip := net.ParseIP(service.Spec.ClusterIP)
+		ipStrs := util.GetClusterIPs(service)
+		for _, ipStr := range ipStrs {
+			ip := net.ParseIP(ipStr)
 			if ip == nil {
 				klog.Errorf("Failed to parse cluster IP %q", service.Spec.ClusterIP)
+				continue
 			}
 			ips = append(ips, ip)
 		}

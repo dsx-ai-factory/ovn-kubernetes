@@ -13,6 +13,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/safchain/ethtool"
 	"github.com/vishvananda/netlink"
 	"k8s.io/klog/v2"
@@ -410,13 +411,13 @@ func getOvsDatapaths() (datapathsList []string, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("recovering from a panic while parsing the "+
-				"ovs-dpctl dump-dps output : %v", r)
+				"ovs-appctl dpctl/dump-dps output : %v", r)
 		}
 	}()
 
-	stdout, stderr, err = util.RunOVSDpctl("dump-dps")
+	stdout, stderr, err = util.RunOVSAppctl("dpctl/dump-dps")
 	if err != nil {
-		return nil, fmt.Errorf("failed to get output of ovs-dpctl dump-dps "+
+		return nil, fmt.Errorf("failed to get output of ovs-appctl dpctl/dump-dps "+
 			"stderr(%s) :(%v)", stderr, err)
 	}
 
@@ -441,14 +442,14 @@ func setOvsDatapathMetrics(datapaths []string) (err error) {
 
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("recovering from a panic while parsing the ovs-dpctl "+
+			err = fmt.Errorf("recovering from a panic while parsing the ovs-appctl dpctl/"+
 				"show %s output : %v", datapathName, r)
 		}
 	}()
 
 	metricOvsDpIf.Reset()
 	for _, datapathName = range datapaths {
-		stdout, stderr, err = util.RunOVSDpctl("show", datapathName)
+		stdout, stderr, err = util.RunOVSAppctl("dpctl/show", datapathName)
 		if err != nil {
 			return fmt.Errorf("failed to get datapath stats for %s "+
 				"stderr(%s) :(%v)", datapathName, stderr, err)
@@ -643,7 +644,7 @@ func ovsBridgeMetricsUpdate(ovsDBClient *util.OvsdbClient, metricsScrapeInterval
 	}
 }
 
-func registerOvsInterfaceMetrics(metricNamespace, metricSubsystem string) {
+func registerOvsInterfaceMetrics(registry prometheus.Registerer, metricNamespace, metricSubsystem string) {
 	for InterfaceMetricName, InterfaceMetricInfo := range ovsInterfaceMetricsDataMap {
 		InterfaceMetricInfo.metric = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Namespace: metricNamespace,
@@ -656,7 +657,7 @@ func registerOvsInterfaceMetrics(metricNamespace, metricSubsystem string) {
 				"port",
 				"interface",
 			})
-		prometheus.MustRegister(InterfaceMetricInfo.metric)
+		registry.MustRegister(InterfaceMetricInfo.metric)
 	}
 }
 
@@ -1460,11 +1461,21 @@ var ovsVswitchdCoverageShowMetricsMap = map[string]*metricDetails{
 }
 var registerOvsMetricsOnce sync.Once
 
-func RegisterOvsMetrics(nodeName string, ovsDBClient *util.OvsdbClient, metricsScrapeInterval int,
+func RegisterStandaloneOvsMetrics(nodeName string, ovsDBClient *util.OvsdbClient, metricsScrapeInterval int,
 	stopChan chan struct{}) {
+	registerOvsMetrics(nodeName, prometheus.DefaultRegisterer, ovsDBClient, metricsScrapeInterval, stopChan)
+}
+
+func RegisterOvsMetricsWithOvnMetrics(nodeName string, ovsDBClient *util.OvsdbClient, metricsScrapeInterval int,
+	stopChan chan struct{}) {
+	registerOvsMetrics(nodeName, ovnRegistry, ovsDBClient, metricsScrapeInterval, stopChan)
+}
+
+func registerOvsMetrics(nodeName string, registry prometheus.Registerer, ovsDBClient *util.OvsdbClient,
+	metricsScrapeInterval int, stopChan chan struct{}) {
 	registerOvsMetricsOnce.Do(func() {
 		getOvsVersionInfo()
-		prometheus.MustRegister(prometheus.NewGaugeFunc(
+		registry.MustRegister(prometheus.NewGaugeFunc(
 			prometheus.GaugeOpts{
 				Namespace: MetricOvsNamespace,
 				Name:      "build_info",
@@ -1478,43 +1489,51 @@ func RegisterOvsMetrics(nodeName string, ovsDBClient *util.OvsdbClient, metricsS
 		))
 
 		// Register OVS datapath metrics.
-		prometheus.MustRegister(metricOvsDpTotal)
-		prometheus.MustRegister(metricOvsDp)
-		prometheus.MustRegister(metricOvsDpIfTotal)
-		prometheus.MustRegister(metricOvsDpIf)
-		prometheus.MustRegister(metricOvsDpFlowsTotal)
-		prometheus.MustRegister(metricOvsDpFlowsLookupHit)
-		prometheus.MustRegister(metricOvsDpFlowsLookupMissed)
-		prometheus.MustRegister(metricOvsDpFlowsLookupLost)
-		prometheus.MustRegister(metricOvsDpPacketsTotal)
-		prometheus.MustRegister(metricOvsdpMasksHit)
-		prometheus.MustRegister(metricOvsDpMasksTotal)
-		prometheus.MustRegister(metricOvsDpMasksHitRatio)
-		prometheus.MustRegister(metricOvsDpOffloadedFlowsTotal)
+		registry.MustRegister(metricOvsDpTotal)
+		registry.MustRegister(metricOvsDp)
+		registry.MustRegister(metricOvsDpIfTotal)
+		registry.MustRegister(metricOvsDpIf)
+		registry.MustRegister(metricOvsDpFlowsTotal)
+		registry.MustRegister(metricOvsDpFlowsLookupHit)
+		registry.MustRegister(metricOvsDpFlowsLookupMissed)
+		registry.MustRegister(metricOvsDpFlowsLookupLost)
+		registry.MustRegister(metricOvsDpPacketsTotal)
+		registry.MustRegister(metricOvsdpMasksHit)
+		registry.MustRegister(metricOvsDpMasksTotal)
+		registry.MustRegister(metricOvsDpMasksHitRatio)
+		registry.MustRegister(metricOvsDpOffloadedFlowsTotal)
 		// Register OVS bridge statistics & attributes metrics
-		prometheus.MustRegister(metricOvsBridgeTotal)
-		prometheus.MustRegister(metricOvsBridge)
-		prometheus.MustRegister(metricOvsBridgePortsTotal)
-		prometheus.MustRegister(metricOvsBridgeFlowsTotal)
+		registry.MustRegister(metricOvsBridgeTotal)
+		registry.MustRegister(metricOvsBridge)
+		registry.MustRegister(metricOvsBridgePortsTotal)
+		registry.MustRegister(metricOvsBridgeFlowsTotal)
 		// Register ovs Memory metrics
-		prometheus.MustRegister(metricOvsHandlersTotal)
-		prometheus.MustRegister(metricOvsRevalidatorsTotal)
+		registry.MustRegister(metricOvsHandlersTotal)
+		registry.MustRegister(metricOvsRevalidatorsTotal)
 		// Register OVS HW offload metrics
-		prometheus.MustRegister(metricOvsHwOffload)
-		prometheus.MustRegister(metricOvsTcPolicy)
+		registry.MustRegister(metricOvsHwOffload)
+		registry.MustRegister(metricOvsTcPolicy)
 		// Register OVS Interface metrics
-		registerOvsInterfaceMetrics(MetricOvsNamespace, MetricOvsSubsystemVswitchd)
-		prometheus.MustRegister(metricInterafceDriverName)
-		prometheus.MustRegister(metricInterafceDriverVersion)
-		prometheus.MustRegister(metricInterafceFirmwareVersion)
-		// Register OVS DB size metric
-		prometheus.MustRegister(metricOvsDbSize)
+		registerOvsInterfaceMetrics(registry, MetricOvsNamespace, MetricOvsSubsystemVswitchd)
+		registry.MustRegister(metricInterafceDriverName)
+		registry.MustRegister(metricInterafceDriverVersion)
+		registry.MustRegister(metricInterafceFirmwareVersion)
+		registry.MustRegister(metricOvsDbSize)
 		// Register the OVS coverage/show metrics
 		componentCoverageShowMetricsMap[ovsVswitchd] = ovsVswitchdCoverageShowMetricsMap
 		registerCoverageShowMetrics(ovsVswitchd, MetricOvsNamespace, MetricOvsSubsystemVswitchd)
 		// Register OVSDB coverage/show metrics with prometheus
 		componentCoverageShowMetricsMap[ovsDB] = ovsDbCoverageShowMetricsMap
 		registerCoverageShowMetrics(ovsDB, MetricOvsNamespace, MetricOvsSubsystemOvsDB)
+
+		registry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{
+			PidFn:     prometheus.NewPidFileFn("/var/run/openvswitch/ovs-vswitchd.pid"),
+			Namespace: fmt.Sprintf("%s_%s", MetricOvsNamespace, MetricOvsSubsystemVswitchd),
+		}))
+		registry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{
+			PidFn:     prometheus.NewPidFileFn("/var/run/openvswitch/ovsdb-server.pid"),
+			Namespace: fmt.Sprintf("%s_%s", MetricOvsNamespace, MetricOvsSubsystemDB),
+		}))
 
 		// OVS datapath metrics updater
 		go ovsDatapathMetricsUpdate(metricsScrapeInterval, stopChan)

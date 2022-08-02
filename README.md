@@ -2,6 +2,14 @@
 
 On Linux, the easiest way to get started is to use OVN DaemonSet and Deployments.
 
+# Master Based Ovn-Kubernetes Images 
+
+With every PR that is merged into master, ovn-kubernetes images are automatically
+rebuilt and pushed to ghcr.io (i.e [ovn-org's packages](https://github.com/orgs/ovn-org/packages))
+for consumption.  They are built with fedora, and ubuntu base images both of which 
+are built for arm64 and amd64 architectures.  These are not official releases and are just provided to make 
+using ovn-kubernetes easier for other projects.    
+
 ## Install Open vSwitch kernel modules on all hosts.
 
 Most Linux distributions come with Open vSwitch kernel module by default.  You
@@ -43,7 +51,6 @@ list to the above command. Set values are the default values.
     --ovn-loglevel-nb="-vconsole:info -vfile:info" \\ Log config for northbound db
     --ovn-loglevel-sb="-vconsole:info -vfile:info" \\ Log config for southboudn db
     --ovn-loglevel-controller="-vconsole:info" \\ Log config for ovn-controller
-    --ovn-loglevel-nbctld="-vconsole:info" \\ Log config for nbctl daemon
 ```
 
 If you are not running OVS directly in the nodes, you must apply the OVS Daemonset yaml.
@@ -175,6 +182,11 @@ This feature allows to offload the OVS data-plane to the NIC while maintaining O
 can be clustered. The databases are OVN_Northbound and OVN_Southbound. This document explains how to 
 cluster them and start various daemons for the ovn-kubernetes integration.
 
+[External IP and LoadBalancer Ingress](./docs/external-ip-and-loadbalancer-ingress.md)
+OVN Kubernetes implements both External IPs and LoadBalancer Ingress IPs in the form of highly available
+OVN load balancers. It is the administrator's responsibility to route traffic to the Kubernetes nodes for
+both of these VIP types.
+
 ## Other
 [Unit test mocks](./docs/mocks-ut-faq.md)
 
@@ -183,5 +195,5 @@ ovn-kubernetes driven cluster.
 
 # OVN Kubernetes Basics
 A good resource to get started with understanding `ovn-kubernetes` is the following recording and slides, which run through the basic architecture and functionality of the system.
-[slides](https://docs.google.com/presentation/d/1vlEjEqqVz02P4_oubt_FmMSHrvpS8ewmHWNuEl4lKDI/edit?usp=sharing)
-[recording](https://drive.google.com/file/d/1FogbqRgT-yIA8UKfcAQNXNQrcq5Hz0z9/view?usp=sharing)
+[slides](https://docs.google.com/presentation/d/1ZtwP3t6uNAU0g4S7IbqSxPg2bmQW-pPGyMW2ZNj9Nrg/edit?usp=sharing)
+[recording](https://youtu.be/IzhR0Ig2030)

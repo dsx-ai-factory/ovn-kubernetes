@@ -14,6 +14,7 @@ import (
 	"text/template"
 	"time"
 
+	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -68,6 +69,7 @@ func getFlagsByCategory() map[string][]cli.Flag {
 	m["Master HA Options"] = config.MasterHAFlags
 	m["OVN Kube Node Options"] = config.OvnKubeNodeFlags
 	m["Monitoring Options"] = config.MonitoringFlags
+	m["IPFIX Flow Tracing Options"] = config.IPFIXFlags
 
 	return m
 }
@@ -100,15 +102,14 @@ func main() {
 	c.CustomAppHelpTemplate = CustomAppHelpTemplate
 	c.Flags = config.GetFlags(nil)
 
-	c.Action = func(c *cli.Context) error {
-		return runOvnKube(c)
-	}
-
 	ctx := context.Background()
+	ctx, cancel := context.WithCancel(ctx)
+	c.Action = func(ctx *cli.Context) error {
+		return runOvnKube(ctx, cancel)
+	}
 
 	// trap SIGINT, SIGTERM, SIGQUIT and
 	// cancel the context
-	ctx, cancel := context.WithCancel(ctx)
 	exitCh := make(chan os.Signal, 1)
 	signal.Notify(exitCh,
 		syscall.SIGINT,
@@ -160,7 +161,7 @@ func setupPIDFile(pidfile string) error {
 
 	// Create if it doesn't exist, else exit with error
 	if os.IsNotExist(err) {
-		if err := ioutil.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err != nil {
+		if err := ioutil.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644); err != nil {
 			klog.Errorf("Failed to write pidfile %s (%v). Ignoring..", pidfile, err)
 		}
 	} else {
@@ -172,7 +173,7 @@ func setupPIDFile(pidfile string) error {
 		_, err1 := os.Stat("/proc/" + string(pid[:]) + "/cmdline")
 		if os.IsNotExist(err1) {
 			// Left over pid from dead process
-			if err := ioutil.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err != nil {
+			if err := ioutil.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644); err != nil {
 				klog.Errorf("Failed to write pidfile %s (%v). Ignoring..", pidfile, err)
 			}
 		} else {
@@ -183,7 +184,7 @@ func setupPIDFile(pidfile string) error {
 	return nil
 }
 
-func runOvnKube(ctx *cli.Context) error {
+func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	pidfile := ctx.String("pidfile")
 	if pidfile != "" {
 		defer delPidfile(pidfile)
@@ -231,9 +232,9 @@ func runOvnKube(ctx *cli.Context) error {
 
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
-
 	var watchFactory factory.Shutdownable
 	var masterWatchFactory *factory.WatchFactory
+	var masterEventRecorder record.EventRecorder
 	if master != "" {
 		var err error
 		// create factory and start the controllers asked for
@@ -255,30 +256,33 @@ func runOvnKube(ctx *cli.Context) error {
 		// register prometheus metrics exported by the master
 		// this must be done prior to calling controller start
 		// since we capture some metrics in Start()
-		metrics.RegisterMasterMetrics(libovsdbOvnSBClient, config.MetricsScrapeInterval, stopChan)
+		metrics.RegisterMasterMetrics(libovsdbOvnNBClient, libovsdbOvnSBClient, config.MetricsScrapeInterval, stopChan)
 
+		masterEventRecorder = util.EventRecorder(ovnClientset.KubeClient)
 		ovnMHController := ovn.NewOvnMHController(ovnClientset, master, masterWatchFactory,
-			stopChan, libovsdbOvnNBClient, libovsdbOvnSBClient, util.EventRecorder(ovnClientset.KubeClient), wg)
-		err = ovnMHController.Start(ctx.Context)
+			stopChan, libovsdbOvnNBClient, libovsdbOvnSBClient, masterEventRecorder, wg)
+		err = ovnMHController.Start(ctx.Context, cancel)
 		if err != nil {
 			return err
 		}
 
 		// now that ovnkube master is running, lets expose the metrics HTTPs endpoint if configured
 		// start the prometheus server to serve OVN K8s Metrics (default master port: 9409)
-		if config.Kubernetes.MetricsBindAddress != "" {
+		if config.Metrics.BindAddress != "" {
 			pprofBindAddress := ""
-			if config.Kubernetes.MetricsEnablePprof {
+			if config.Metrics.EnablePprof {
 				pprofBindAddress = "127.0.0.1:19409"
 			}
 			// serve ovnkube_master metrics
-			metrics.StartMetricsServer(config.Kubernetes.MetricsBindAddress, pprofBindAddress,
-				config.OvnNorth.Cert, config.OvnNorth.PrivKey)
+			metrics.StartMetricsServer(config.Metrics.BindAddress, pprofBindAddress,
+				config.OvnNorth.Cert, config.OvnNorth.PrivKey, stopChan, wg)
 		}
 	}
 
 	if node != "" {
 		var nodeWatchFactory factory.NodeWatchFactory
+		var nodeEventRecorder record.EventRecorder
+
 		if masterWatchFactory == nil {
 			var err error
 			nodeWatchFactory, err = factory.NewNodeWatchFactory(ovnClientset, node)
@@ -290,21 +294,27 @@ func runOvnKube(ctx *cli.Context) error {
 			nodeWatchFactory = masterWatchFactory
 		}
 
+		if masterEventRecorder == nil {
+			nodeEventRecorder = util.EventRecorder(ovnClientset.KubeClient)
+		} else {
+			nodeEventRecorder = masterEventRecorder
+		}
+
 		if config.Kubernetes.Token == "" {
 			return fmt.Errorf("cannot initialize node without service account 'token'. Please provide one with --k8s-token argument")
 		}
 		// register ovnkube node specific prometheus metrics exported by the node
 		metrics.RegisterNodeMetrics(config.MetricsScrapeInterval, stopChan)
 		start := time.Now()
-		n := ovnnode.NewNode(ovnClientset.KubeClient, nodeWatchFactory, node, stopChan, util.EventRecorder(ovnClientset.KubeClient))
-		if err := n.Start(wg); err != nil {
+		n := ovnnode.NewNode(ovnClientset.KubeClient, nodeWatchFactory, node, stopChan, nodeEventRecorder, wg)
+		if err := n.Start(ctx.Context, wg); err != nil {
 			return err
 		}
 		end := time.Since(start)
 		metrics.MetricNodeReadyDuration.Set(end.Seconds())
 
-		// start the prometheus server to serve OVN Node Metrics (default port: 9410)
-		if config.Kubernetes.MetricsBindAddress != "" {
+		// start the prometheus server to serve OVS and OVN Node Metrics (default port: 9410)
+		if config.Metrics.BindAddress != "" {
 			if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 				ovsDBClient, err := metrics.SetupOvsDBClient()
 				if err != nil {
@@ -312,19 +322,21 @@ func runOvnKube(ctx *cli.Context) error {
 				}
 				// serve OVN ^ovn_controller metrics
 				metrics.RegisterOvnNodeMetrics(ovsDBClient, config.MetricsScrapeInterval, stopChan)
-				// serve OVS ^ovs metrics
-				metrics.RegisterOvsMetrics(node, ovsDBClient, config.MetricsScrapeInterval, stopChan)
+				if config.Metrics.ExportOVSMetrics {
+					// serve OVS ^ovs metrics
+					metrics.RegisterOvsMetricsWithOvnMetrics(node, ovsDBClient, config.MetricsScrapeInterval, stopChan)
+				}
 			}
 			if config.OvnKubeNode.Mode != types.NodeModeDPU {
 				// serve OVN ^ovn_db, ^ovn_northd metrics from the ovnkube-node pod that is matching labels accordingly
 				metrics.RegisterOvnCentralMetrics(ovnClientset.KubeClient, node, config.MetricsScrapeInterval, stopChan)
 			}
 			pprofBindAddress := ""
-			if config.Kubernetes.MetricsEnablePprof {
+			if config.Metrics.EnablePprof {
 				pprofBindAddress = "127.0.0.1:19410"
 			}
-			metrics.StartMetricsServer(config.Kubernetes.MetricsBindAddress, pprofBindAddress,
-				config.Kubernetes.MetricsNodeServerCert, config.Kubernetes.MetricsNodeServerPrivKey)
+			metrics.StartOVNMetricsServer(config.Metrics.BindAddress, pprofBindAddress,
+				config.Metrics.NodeServerCert, config.Metrics.NodeServerPrivKey, stopChan, wg)
 		}
 	}
 

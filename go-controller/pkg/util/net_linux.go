@@ -9,11 +9,13 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"time"
 
 	kapi "k8s.io/api/core/v1"
 
 	"github.com/Mellanox/sriovnet"
 	utilfs "github.com/Mellanox/sriovnet/pkg/utils/filesystem"
+	"github.com/j-keck/arping"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 
@@ -306,30 +308,30 @@ func LinkRoutesAdd(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int
 			if os.IsExist(err) {
 				return err
 			}
-			return fmt.Errorf("failed to add route for subnet %s via gateway %s: %v",
-				subnet.String(), gwIP.String(), err)
+			return fmt.Errorf("failed to add route for subnet %s via gateway %s with mtu %d: %v",
+				subnet.String(), gwIP.String(), mtu, err)
 		}
 	}
 	return nil
 }
 
-// LinkRoutesReplace adds or changes a route for given subnets through the gwIPstr
-func LinkRoutesReplace(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int) error {
+func LinkRoutesAddOrUpdateMTU(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int) error {
 	for _, subnet := range subnets {
-		route := &netlink.Route{
-			Dst:       subnet,
-			LinkIndex: link.Attrs().Index,
-			Scope:     netlink.SCOPE_UNIVERSE,
-			Gw:        gwIP,
-		}
-		if mtu != 0 {
-			route.MTU = mtu
-		}
-
-		err := netLinkOps.RouteReplace(route)
+		route, err := LinkRouteGet(link, gwIP, subnet)
 		if err != nil {
-			return fmt.Errorf("failed to replace a route for subnet %s via gateway %s: %v",
-				subnet.String(), gwIP.String(), err)
+			return err
+		}
+		if route != nil {
+			if route.MTU == mtu {
+				return nil
+			}
+			route.MTU = mtu
+			err = netLinkOps.RouteReplace(route)
+			if err != nil {
+				return fmt.Errorf("failed to replace route for subnet %s via gateway %s with mtu %d: %v", subnet.String(), gwIP.String(), mtu, err)
+			}
+		} else {
+			return LinkRoutesAdd(link, gwIP, []*net.IPNet{subnet}, mtu)
 		}
 	}
 	return nil
@@ -374,6 +376,18 @@ func LinkNeighAdd(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAddr) 
 	return nil
 }
 
+func SetARPTimeout() {
+	arping.SetTimeout(50 * time.Millisecond) // hard-coded for now
+}
+
+func GetMACAddressFromARP(neighIP net.IP) (net.HardwareAddr, error) {
+	hwAddr, _, err := arping.Ping(neighIP)
+	if err != nil {
+		return nil, err
+	}
+	return hwAddr, nil
+}
+
 // LinkNeighExists checks to see if the given MAC/IP bindings exists
 func LinkNeighExists(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAddr) (bool, error) {
 	neighs, err := netLinkOps.NeighList(link.Attrs().Index, getFamily(neighIP))
@@ -393,7 +407,7 @@ func LinkNeighExists(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAdd
 	return false, nil
 }
 
-func DeleteConntrack(ip string, port int32, protocol kapi.Protocol) error {
+func DeleteConntrack(ip string, port int32, protocol kapi.Protocol, ipFilterType netlink.ConntrackFilterType, labels [][]byte) error {
 	ipAddress := net.ParseIP(ip)
 	if ipAddress == nil {
 		return fmt.Errorf("value %q passed to DeleteConntrack is not an IP address", ipAddress)
@@ -410,15 +424,28 @@ func DeleteConntrack(ip string, port int32, protocol kapi.Protocol) error {
 		if err := filter.AddProtocol(132); err != nil {
 			return fmt.Errorf("could not add Protocol SCTP to conntrack filter %v", err)
 		}
+	} else if protocol == kapi.ProtocolTCP {
+		// 6 = TCP protocol
+		if err := filter.AddProtocol(6); err != nil {
+			return fmt.Errorf("could not add Protocol TCP to conntrack filter %v", err)
+		}
 	}
 	if port > 0 {
 		if err := filter.AddPort(netlink.ConntrackOrigDstPort, uint16(port)); err != nil {
 			return fmt.Errorf("could not add port %d to conntrack filter: %v", port, err)
 		}
 	}
-	if err := filter.AddIP(netlink.ConntrackReplyAnyIP, ipAddress); err != nil {
+	if err := filter.AddIP(ipFilterType, ipAddress); err != nil {
 		return fmt.Errorf("could not add IP: %s to conntrack filter: %v", ipAddress, err)
 	}
+
+	if len(labels) > 0 {
+		// for now we only need unmatch label, we can add match label later if needed
+		if err := filter.AddLabels(netlink.ConntrackUnmatchLabels, labels); err != nil {
+			return fmt.Errorf("could not add label %s to conntrack filter: %v", labels, err)
+		}
+	}
+
 	if ipAddress.To4() != nil {
 		if _, err := netLinkOps.ConntrackDeleteFilter(netlink.ConntrackTable, netlink.FAMILY_V4, filter); err != nil {
 			return err

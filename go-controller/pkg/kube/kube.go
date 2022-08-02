@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 
-	"k8s.io/klog/v2"
-
+	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
+	ocpcloudnetworkclientset "github.com/openshift/client-go/cloudnetwork/clientset/versioned"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/client-go/kubernetes"
 	kv1core "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/klog/v2"
 )
 
 // Interface represents the exported methods for dealing with getting/setting
@@ -31,6 +32,7 @@ type Interface interface {
 	PatchNode(old, new *kapi.Node) error
 	UpdateEgressFirewall(egressfirewall *egressfirewall.EgressFirewall) error
 	UpdateEgressIP(eIP *egressipv1.EgressIP) error
+	PatchEgressIP(name string, patchData []byte) error
 	UpdateNodeStatus(node *kapi.Node) error
 	UpdateNode(node *kapi.Node) error
 	GetAnnotationsOnPod(namespace, name string) (map[string]string, error)
@@ -44,6 +46,9 @@ type Interface interface {
 	GetPod(namespace, name string) (*kapi.Pod, error)
 	GetEndpoint(namespace, name string) (*kapi.Endpoints, error)
 	CreateEndpoint(namespace string, ep *kapi.Endpoints) (*kapi.Endpoints, error)
+	CreateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
+	UpdateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
+	DeleteCloudPrivateIPConfig(name string) error
 	Events() kv1core.EventInterface
 	UpdatePod(pod *kapi.Pod) error
 }
@@ -53,6 +58,7 @@ type Kube struct {
 	KClient              kubernetes.Interface
 	EIPClient            egressipclientset.Interface
 	EgressFirewallClient egressfirewallclientset.Interface
+	CloudNetworkClient   ocpcloudnetworkclientset.Interface
 }
 
 // SetLabelsOnPod takes the pod object and map of key/value string pairs to set as labels
@@ -260,8 +266,13 @@ func (k *Kube) UpdateEgressFirewall(egressfirewall *egressfirewall.EgressFirewal
 
 // UpdateEgressIP updates the EgressIP with the provided EgressIP data
 func (k *Kube) UpdateEgressIP(eIP *egressipv1.EgressIP) error {
-	klog.Infof("Updating status on EgressIP %s", eIP.Name)
+	klog.Infof("Updating status on EgressIP %s status %v", eIP.Name, eIP.Status)
 	_, err := k.EIPClient.K8sV1().EgressIPs().Update(context.TODO(), eIP, metav1.UpdateOptions{})
+	return err
+}
+
+func (k *Kube) PatchEgressIP(name string, patchData []byte) error {
+	_, err := k.EIPClient.K8sV1().EgressIPs().Patch(context.TODO(), name, types.JSONPatchType, patchData, metav1.PatchOptions{})
 	return err
 }
 
@@ -350,6 +361,17 @@ func (k *Kube) GetEndpoint(namespace, name string) (*kapi.Endpoints, error) {
 // CreateEndpoint creates the Endpoints resource
 func (k *Kube) CreateEndpoint(namespace string, ep *kapi.Endpoints) (*kapi.Endpoints, error) {
 	return k.KClient.CoreV1().Endpoints(namespace).Create(context.TODO(), ep, metav1.CreateOptions{})
+}
+
+func (k *Kube) CreateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error) {
+	return k.CloudNetworkClient.CloudV1().CloudPrivateIPConfigs().Create(context.TODO(), cloudPrivateIPConfig, metav1.CreateOptions{})
+}
+
+func (k *Kube) UpdateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error) {
+	return k.CloudNetworkClient.CloudV1().CloudPrivateIPConfigs().Update(context.TODO(), cloudPrivateIPConfig, metav1.UpdateOptions{})
+}
+func (k *Kube) DeleteCloudPrivateIPConfig(name string) error {
+	return k.CloudNetworkClient.CloudV1().CloudPrivateIPConfigs().Delete(context.TODO(), name, metav1.DeleteOptions{})
 }
 
 // Events returns events to use when creating an EventSinkImpl

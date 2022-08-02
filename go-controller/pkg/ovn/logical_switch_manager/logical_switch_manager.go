@@ -22,6 +22,8 @@ type logicalSwitchInfo struct {
 	hostSubnets  []*net.IPNet
 	ipams        []ipam.Interface
 	noHostSubnet bool
+	// the uuid of the logicalSwitch described by this struct
+	uuid string
 }
 
 type ipamFactoryFunc func(*net.IPNet) (ipam.Interface, error)
@@ -32,6 +34,16 @@ type LogicalSwitchManager struct {
 	// A RW mutex for LogicalSwitchManager which holds logicalSwitch information
 	sync.RWMutex
 	ipamFunc ipamFactoryFunc
+}
+
+// GetUUID returns the UUID for the given logical switch name if
+func (manager *LogicalSwitchManager) GetUUID(switchName string) (string, bool) {
+	manager.RLock()
+	defer manager.RUnlock()
+	if _, ok := manager.cache[switchName]; !ok {
+		return "", ok
+	}
+	return manager.cache[switchName].uuid, true
 }
 
 // NewIPAMAllocator provides an ipam interface which can be used for IPAM
@@ -91,26 +103,27 @@ func NewLogicalSwitchManager() *LogicalSwitchManager {
 
 // AddNode adds/updates a node to the logical switch manager for subnet
 // and IPAM management.
-func (manager *LogicalSwitchManager) AddNode(nodeName string, hostSubnets []*net.IPNet) error {
+func (manager *LogicalSwitchManager) AddNode(switchName, uuid string, hostSubnets []*net.IPNet) error {
 	manager.Lock()
 	defer manager.Unlock()
-	if lsi, ok := manager.cache[nodeName]; ok && !reflect.DeepEqual(lsi.hostSubnets, hostSubnets) {
-		klog.Warningf("Node %q logical switch already in cache with subnet %s; replacing with %s", nodeName,
+	if lsi, ok := manager.cache[switchName]; ok && !reflect.DeepEqual(lsi.hostSubnets, hostSubnets) {
+		klog.Warningf("Logical switch %s already in cache with subnet %s; replacing with %s", switchName,
 			util.JoinIPNets(lsi.hostSubnets, ","), util.JoinIPNets(hostSubnets, ","))
 	}
 	var ipams []ipam.Interface
 	for _, subnet := range hostSubnets {
 		ipam, err := manager.ipamFunc(subnet)
 		if err != nil {
-			klog.Errorf("IPAM for subnet %s was not initialized for node %q", subnet, nodeName)
+			klog.Errorf("IPAM for subnet %s was not initialized for switch %q", subnet, switchName)
 			return err
 		}
 		ipams = append(ipams, ipam)
 	}
-	manager.cache[nodeName] = logicalSwitchInfo{
+	manager.cache[switchName] = logicalSwitchInfo{
 		hostSubnets:  hostSubnets,
 		ipams:        ipams,
 		noHostSubnet: len(hostSubnets) == 0,
+		uuid:         uuid,
 	}
 
 	return nil
@@ -118,33 +131,33 @@ func (manager *LogicalSwitchManager) AddNode(nodeName string, hostSubnets []*net
 
 // AddNoHostSubnetNode adds/updates a node without any host subnets
 // to the logical switch manager
-func (manager *LogicalSwitchManager) AddNoHostSubnetNode(nodeName string) error {
+func (manager *LogicalSwitchManager) AddNoHostSubnetNode(switchName string) error {
 	// setting the hostSubnets slice argument to nil in the cache means an object
 	// exists for the switch but it was not assigned a hostSubnet by ovn-kubernetes
 	// this will be true for nodes that are marked as host-subnet only.
-	return manager.AddNode(nodeName, nil)
+	return manager.AddNode(switchName, "", nil)
 }
 
 // Remove a switch/node from the the logical switch manager
-func (manager *LogicalSwitchManager) DeleteNode(nodeName string) {
+func (manager *LogicalSwitchManager) DeleteNode(switchName string) {
 	manager.Lock()
 	defer manager.Unlock()
-	delete(manager.cache, nodeName)
+	delete(manager.cache, switchName)
 }
 
 // Given a switch name, checks if the switch is a noHostSubnet switch
-func (manager *LogicalSwitchManager) IsNonHostSubnetSwitch(nodeName string) bool {
+func (manager *LogicalSwitchManager) IsNonHostSubnetSwitch(switchName string) bool {
 	manager.RLock()
 	defer manager.RUnlock()
-	lsi, ok := manager.cache[nodeName]
+	lsi, ok := manager.cache[switchName]
 	return ok && lsi.noHostSubnet
 }
 
 // Given a switch name, get all its host-subnets
-func (manager *LogicalSwitchManager) GetSwitchSubnets(nodeName string) []*net.IPNet {
+func (manager *LogicalSwitchManager) GetSwitchSubnets(switchName string) []*net.IPNet {
 	manager.RLock()
 	defer manager.RUnlock()
-	lsi, ok := manager.cache[nodeName]
+	lsi, ok := manager.cache[switchName]
 	// make a deep-copy of the underlying slice and return so that there is no
 	// resource contention
 	if ok && len(lsi.hostSubnets) > 0 {
@@ -158,21 +171,40 @@ func (manager *LogicalSwitchManager) GetSwitchSubnets(nodeName string) []*net.IP
 	return nil
 }
 
+// AllocateUntilFull used for unit testing only, allocates the rest of the node subnet
+func (manager *LogicalSwitchManager) AllocateUntilFull(switchName string) error {
+	manager.RLock()
+	defer manager.RUnlock()
+	lsi, ok := manager.cache[switchName]
+	if !ok {
+		return fmt.Errorf("unable to allocate ips, switch: %s does not exist in logical switch manager", switchName)
+	} else if len(lsi.ipams) == 0 {
+		return fmt.Errorf("unable to allocate ips for switch: %s. logical switch manager has no IPAM", switchName)
+	}
+	var err error
+	for err != ipam.ErrFull {
+		for _, ipam := range lsi.ipams {
+			_, err = ipam.AllocateNext()
+		}
+	}
+	return nil
+}
+
 // AllocateIPs will block off IPs in the ipnets slice as already allocated
 // for a given switch
-func (manager *LogicalSwitchManager) AllocateIPs(nodeName string, ipnets []*net.IPNet) error {
+func (manager *LogicalSwitchManager) AllocateIPs(switchName string, ipnets []*net.IPNet) error {
 	if len(ipnets) == 0 {
 		return fmt.Errorf("unable to allocate empty IPs")
 	}
 	manager.RLock()
 	defer manager.RUnlock()
-	lsi, ok := manager.cache[nodeName]
+	lsi, ok := manager.cache[switchName]
 	if !ok {
-		return fmt.Errorf("unable to allocate ips: %v, node: %s does not exist in logical switch manager",
-			ipnets, nodeName)
+		return fmt.Errorf("unable to allocate ips: %v, switch: %s does not exist in logical switch manager",
+			ipnets, switchName)
 	} else if len(lsi.ipams) == 0 {
-		return fmt.Errorf("unable to allocate ips %v for node: %s. logical switch manager has no IPAM",
-			ipnets, nodeName)
+		return fmt.Errorf("unable to allocate ips %v for switch: %s. logical switch manager has no IPAM",
+			ipnets, switchName)
 
 	}
 
@@ -183,10 +215,9 @@ func (manager *LogicalSwitchManager) AllocateIPs(nodeName string, ipnets []*net.
 			// iterate over range of already allocated indices and release
 			// ips allocated before the error occurred.
 			for relIdx, relIPNet := range allocated {
-				if relErr := lsi.ipams[relIdx].Release(relIPNet.IP); relErr != nil {
-					klog.Errorf("Error while releasing IP: %s, err: %v", relIPNet.IP, relErr)
-				} else {
-					klog.Warningf("Reserved IP: %s were released", relIPNet.IP.String())
+				lsi.ipams[relIdx].Release(relIPNet.IP)
+				if relIPNet.IP != nil {
+					klog.Warningf("Reserved IP: %s was released", relIPNet.IP.String())
 				}
 			}
 		}
@@ -213,25 +244,25 @@ func (manager *LogicalSwitchManager) AllocateIPs(nodeName string, ipnets []*net.
 
 // AllocateNextIPs allocates IP addresses from each of the host subnets
 // for a given switch
-func (manager *LogicalSwitchManager) AllocateNextIPs(nodeName string) ([]*net.IPNet, error) {
+func (manager *LogicalSwitchManager) AllocateNextIPs(switchName string) ([]*net.IPNet, error) {
 	manager.RLock()
 	defer manager.RUnlock()
 	var ipnets []*net.IPNet
 	var ip net.IP
 	var err error
-	lsi, ok := manager.cache[nodeName]
+	lsi, ok := manager.cache[switchName]
 
 	if !ok {
-		return nil, fmt.Errorf("node %s not found in the logical switch manager cache", nodeName)
+		return nil, fmt.Errorf("switch %s not found in the logical switch manager cache", switchName)
 	}
 
 	if len(lsi.ipams) == 0 {
-		return nil, fmt.Errorf("failed to allocate IPs for node %s because there is no IPAM instance", nodeName)
+		return nil, fmt.Errorf("failed to allocate IPs for switch %s because there is no IPAM instance", switchName)
 	}
 
 	if len(lsi.ipams) != len(lsi.hostSubnets) {
-		return nil, fmt.Errorf("failed to allocate IPs for node %s because host subnet instances: %d"+
-			" don't match ipam instances: %d", nodeName, len(lsi.hostSubnets), len(lsi.ipams))
+		return nil, fmt.Errorf("failed to allocate IPs for switch %s because host subnet instances: %d"+
+			" don't match ipam instances: %d", switchName, len(lsi.hostSubnets), len(lsi.ipams))
 	}
 
 	defer func() {
@@ -239,11 +270,11 @@ func (manager *LogicalSwitchManager) AllocateNextIPs(nodeName string) ([]*net.IP
 			// iterate over range of already allocated indices and release
 			// ips allocated before the error occurred.
 			for relIdx, relIPNet := range ipnets {
-				if relErr := lsi.ipams[relIdx].Release(relIPNet.IP); relErr != nil {
-					klog.Errorf("Error while releasing IP: %s, err: %v", relIPNet.IP, relErr)
+				lsi.ipams[relIdx].Release(relIPNet.IP)
+				if relIPNet.IP != nil {
+					klog.Warningf("Reserved IP: %s was released", relIPNet.IP.String())
 				}
 			}
-			klog.Warningf("Allocated IPs: %s were released", util.JoinIPNetIPs(ipnets, " "))
 		}
 	}()
 
@@ -263,33 +294,65 @@ func (manager *LogicalSwitchManager) AllocateNextIPs(nodeName string) ([]*net.IP
 
 // Mark the IPs in ipnets slice as available for allocation
 // by releasing them from the IPAM pool of allocated IPs.
-func (manager *LogicalSwitchManager) ReleaseIPs(nodeName string, ipnets []*net.IPNet) error {
+func (manager *LogicalSwitchManager) ReleaseIPs(switchName string, ipnets []*net.IPNet) error {
 	manager.RLock()
 	defer manager.RUnlock()
-	if ipnets == nil || nodeName == "" {
-		klog.V(5).Infof("Node name is empty or ip slice to release is nil")
+	if ipnets == nil || switchName == "" {
+		klog.V(5).Infof("Switch name is empty or ip slice to release is nil")
 		return nil
 	}
-	lsi, ok := manager.cache[nodeName]
+	lsi, ok := manager.cache[switchName]
 	if !ok {
-		return fmt.Errorf("node %s not found in the logical switch manager cache",
-			nodeName)
+		return fmt.Errorf("switch %s not found in the logical switch manager cache",
+			switchName)
 	}
 	if len(lsi.ipams) == 0 {
-		return fmt.Errorf("failed to release IPs for node %s because there is no IPAM instance", nodeName)
+		return fmt.Errorf("failed to release IPs for switch %s because there is no IPAM instance", switchName)
 	}
 	for _, ipnet := range ipnets {
 		for _, ipam := range lsi.ipams {
 			cidr := ipam.CIDR()
 			if cidr.Contains(ipnet.IP) {
-				if err := ipam.Release(ipnet.IP); err != nil {
-					return err
-				}
+				ipam.Release(ipnet.IP)
 				break
 			}
 		}
 	}
 	return nil
+}
+
+// ConditionalIPRelease determines if any IP is available to be released from an IPAM conditionally if func is true.
+// It guarantees state of the allocator will not change while executing the predicate function
+// TODO(trozet): add unit testing for this function
+func (manager *LogicalSwitchManager) ConditionalIPRelease(switchName string, ipnets []*net.IPNet, predicate func() (bool, error)) (bool, error) {
+	manager.RLock()
+	defer manager.RUnlock()
+	if ipnets == nil || switchName == "" {
+		klog.V(5).Infof("Node name is empty or ip slice to release is nil")
+		return false, nil
+	}
+	lsi, ok := manager.cache[switchName]
+	if !ok {
+		return false, nil
+	}
+	if len(lsi.ipams) == 0 {
+		return false, nil
+	}
+
+	// check if ipam has one of the ip addresses, and then execute the predicate function to determine
+	// if this IP should be released or not
+	for _, ipnet := range ipnets {
+		for _, ipam := range lsi.ipams {
+			cidr := ipam.CIDR()
+			if cidr.Contains(ipnet.IP) {
+				if ipam.Has(ipnet.IP) {
+					return predicate()
+				}
+			}
+		}
+	}
+
+	return false, nil
 }
 
 // IP allocator manager for join switch's IPv4 and IPv6 subnets.
@@ -314,7 +377,7 @@ func NewJoinIPAMAllocator(cidr *net.IPNet) (ipam.Interface, error) {
 
 // Initializes a new join switch logical switch manager.
 // This IPmanager guaranteed to always have both IPv4 and IPv6 regardless of dual-stack
-func NewJoinLogicalSwitchIPManager(nbClient libovsdbclient.Client, existingOvnManagedNodeNames []string) (*JoinSwitchIPManager, error) {
+func NewJoinLogicalSwitchIPManager(nbClient libovsdbclient.Client, uuid string, existingOvnManagedNodeNames []string) (*JoinSwitchIPManager, error) {
 	j := JoinSwitchIPManager{
 		lsm: &LogicalSwitchManager{
 			cache:    make(map[string]logicalSwitchInfo),
@@ -338,7 +401,7 @@ func NewJoinLogicalSwitchIPManager(nbClient libovsdbclient.Client, existingOvnMa
 		}
 		joinSubnets = append(joinSubnets, joinSubnet)
 	}
-	err := j.lsm.AddNode(types.OVNJoinSwitch, joinSubnets)
+	err := j.lsm.AddNode(types.OVNJoinSwitch, uuid, joinSubnets)
 	if err != nil {
 		return nil, err
 	}
@@ -390,23 +453,25 @@ func (jsIPManager *JoinSwitchIPManager) delJoinLRPCacheIPs(nodeName string) {
 	delete(jsIPManager.lrpIPCache, nodeName)
 }
 
-// reserveJoinLRPIPs tries to add the LRP IPs to the JoinSwitchIPManager, then they will be stored in the cache;
-func (jsIPManager *JoinSwitchIPManager) reserveJoinLRPIPs(nodeName string, gwLRPIPs []*net.IPNet) (err error) {
+// reserveJoinLRPIPs tries to add the LRP IPs to the joinSwitchIPManager, then they will be stored in the cache;
+func (jsIPManager *JoinSwitchIPManager) reserveJoinLRPIPs(nodeName string, gwLRPIPs []*net.IPNet) error {
 	// reserve the given IP in the allocator
-	if err = jsIPManager.lsm.AllocateIPs(types.OVNJoinSwitch, gwLRPIPs); err == nil {
-		defer func() {
-			if err != nil {
-				if relErr := jsIPManager.lsm.ReleaseIPs(types.OVNJoinSwitch, gwLRPIPs); relErr != nil {
-					klog.Errorf("Failed to release logical router port IPs %v just reserved for node %s: %q",
-						util.JoinIPNetIPs(gwLRPIPs, " "), nodeName, relErr)
-				}
-			}
-		}()
-		if err = jsIPManager.setJoinLRPCacheIPs(nodeName, gwLRPIPs); err != nil {
-			klog.Errorf("Failed to add node %s reserved IPs %v to the join switch IP cache: %s", nodeName, gwLRPIPs, err.Error())
-		}
+	if err := jsIPManager.lsm.AllocateIPs(types.OVNJoinSwitch, gwLRPIPs); err != nil {
+		return err
 	}
-	return err
+
+	// store the allocated IPs in the cache if possible
+	if err := jsIPManager.setJoinLRPCacheIPs(nodeName, gwLRPIPs); err != nil {
+		// if storing the IPs to the cache fails, release the IPs again and return the error
+		klog.Errorf("Failed to add node %s reserved IPs %v to the join switch IP cache: %s", nodeName, gwLRPIPs, err.Error())
+		if relErr := jsIPManager.lsm.ReleaseIPs(types.OVNJoinSwitch, gwLRPIPs); relErr != nil {
+			klog.Errorf("Failed to release logical router port IPs %v just reserved for node %s: %q",
+				util.JoinIPNetIPs(gwLRPIPs, " "), nodeName, relErr)
+		}
+		return err
+	}
+
+	return nil
 }
 
 // ensureJoinLRPIPs tries to allocate the LRP IPs if it is not yet allocated, then they will be stored in the cache

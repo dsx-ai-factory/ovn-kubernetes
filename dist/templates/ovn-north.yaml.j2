@@ -29,8 +29,6 @@ spec:
         component: network
         type: infra
         kubernetes.io/os: "linux"
-      annotations:
-        scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
       imagePullSecrets:
         - name: ovncni-quay-ips
@@ -38,6 +36,7 @@ spec:
       # as all pods.
       serviceAccountName: ovn
       hostNetwork: true
+      dnsPolicy: Default
       priorityClassName: "system-cluster-critical"
 
       # required to be scheduled on a node that is running ovnkube-master POD and

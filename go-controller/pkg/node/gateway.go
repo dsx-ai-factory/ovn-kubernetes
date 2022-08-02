@@ -12,6 +12,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
+	"github.com/safchain/ethtool"
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	"k8s.io/client-go/tools/cache"
@@ -89,19 +90,24 @@ func (g *gateway) DeleteService(svc *kapi.Service) {
 	}
 }
 
-func (g *gateway) SyncServices(objs []interface{}) {
+func (g *gateway) SyncServices(objs []interface{}) error {
+	var err error
 	if g.portClaimWatcher != nil {
-		g.portClaimWatcher.SyncServices(objs)
+		err = g.portClaimWatcher.SyncServices(objs)
 	}
-	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.SyncServices(objs)
+	if err == nil && g.loadBalancerHealthChecker != nil {
+		err = g.loadBalancerHealthChecker.SyncServices(objs)
 	}
-	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.SyncServices(objs)
+	if err == nil && g.nodePortWatcher != nil {
+		err = g.nodePortWatcher.SyncServices(objs)
 	}
-	if g.nodePortWatcherIptables != nil {
-		g.nodePortWatcherIptables.SyncServices(objs)
+	if err == nil && g.nodePortWatcherIptables != nil {
+		err = g.nodePortWatcherIptables.SyncServices(objs)
 	}
+	if err != nil {
+		return fmt.Errorf("gateway sync services failed: %v", err)
+	}
+	return nil
 }
 
 func (g *gateway) AddEndpointSlice(epSlice *discovery.EndpointSlice) {
@@ -136,7 +142,7 @@ func (g *gateway) Init(wf factory.NodeWatchFactory) error {
 	if err != nil {
 		return err
 	}
-	wf.AddServiceHandler(cache.ResourceEventHandlerFuncs{
+	_, err = wf.AddServiceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			svc := obj.(*kapi.Service)
 			g.AddService(svc)
@@ -151,8 +157,12 @@ func (g *gateway) Init(wf factory.NodeWatchFactory) error {
 			g.DeleteService(svc)
 		},
 	}, g.SyncServices)
+	if err != nil {
+		klog.Errorf("Gateway init failed to add service handler: %v", err)
+		return err
+	}
 
-	wf.AddEndpointSliceHandler(cache.ResourceEventHandlerFuncs{
+	_, err = wf.AddEndpointSliceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			epSlice := obj.(*discovery.EndpointSlice)
 			g.AddEndpointSlice(epSlice)
@@ -167,6 +177,10 @@ func (g *gateway) Init(wf factory.NodeWatchFactory) error {
 			g.DeleteEndpointSlice(epSlice)
 		},
 	}, nil)
+	if err != nil {
+		klog.Errorf("Gateway init failed to add endpoints handler: %v", err)
+		return err
+	}
 	return nil
 }
 
@@ -181,7 +195,26 @@ func (g *gateway) Start(stopChan <-chan struct{}, wg *sync.WaitGroup) {
 	}
 }
 
-func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, subnets []*net.IPNet, gwNextHops []net.IP, gwIPs []*net.IPNet, nodeAnnotator kube.Annotator) (
+// sets up an uplink interface for UDP Generic Receive Offload forwarding as part of
+// the EnableUDPAggregation feature.
+func setupUDPAggregationUplink(ifname string) error {
+	e, err := ethtool.NewEthtool()
+	if err != nil {
+		return fmt.Errorf("failed to initialize ethtool: %v", err)
+	}
+	defer e.Close()
+
+	err = e.Change(ifname, map[string]bool{
+		"rx-udp-gro-forwarding": true,
+	})
+	if err != nil {
+		return fmt.Errorf("could not enable UDP offload features on %q: %v", ifname, err)
+	}
+
+	return nil
+}
+
+func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops []net.IP, gwIPs []*net.IPNet, nodeAnnotator kube.Annotator) (
 	*bridgeConfiguration, *bridgeConfiguration, error) {
 	gatewayBridge, err := bridgeForInterface(gwIntf, nodeName, types.PhysicalNetworkName, gwIPs)
 	if err != nil {
@@ -214,8 +247,19 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, subnets []*
 		}
 	}
 
+	if config.Default.EnableUDPAggregation {
+		err = setupUDPAggregationUplink(gatewayBridge.uplinkName)
+		if err == nil && egressGWBridge != nil {
+			err = setupUDPAggregationUplink(egressGWBridge.uplinkName)
+		}
+		if err != nil {
+			klog.Warningf("Could not enable UDP packet aggregation on uplink interface (aggregation will be disabled): %v", err)
+			config.Default.EnableUDPAggregation = false
+		}
+	}
+
 	l3GwConfig := util.L3GatewayConfig{
-		Mode:           config.GatewayModeShared,
+		Mode:           config.Gateway.Mode,
 		ChassisID:      chassisID,
 		InterfaceID:    gatewayBridge.interfaceID,
 		MACAddress:     gatewayBridge.macAddress,

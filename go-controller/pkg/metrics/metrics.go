@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -35,6 +36,7 @@ const (
 	MetricOvsNamespace           = "ovs"
 	MetricOvsSubsystemVswitchd   = "vswitchd"
 	MetricOvsSubsystemOvsDB      = "ovsdb"
+	MetricOvsSubsystemDB         = "db"
 
 	ovnNorthd     = "ovn-northd"
 	ovnController = "ovn-controller"
@@ -114,7 +116,7 @@ func registerCoverageShowMetrics(target string, metricNamespace string, metricSu
 			Help:        metricInfo.help,
 			ConstLabels: constLabels,
 		})
-		prometheus.MustRegister(metricInfo.metric)
+		ovnRegistry.MustRegister(metricInfo.metric)
 	}
 }
 
@@ -187,7 +189,7 @@ func ovnKubeLogFileSizeMetricsUpdater(ovnKubeLogFileMetric *prometheus.GaugeVec,
 
 // coverageShowMetricsUpdater updates the metric
 // by obtaining values from getCoverageShowOutputMap for specified component.
-func coverageShowMetricsUpdater(component string, metricsScrapeInterval int, stopChan chan struct{}) {
+func coverageShowMetricsUpdater(component string, metricsScrapeInterval int, stopChan <-chan struct{}) {
 	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
 	defer ticker.Stop()
 
@@ -196,7 +198,7 @@ func coverageShowMetricsUpdater(component string, metricsScrapeInterval int, sto
 		case <-ticker.C:
 			coverageShowOutputMap, err := getCoverageShowOutputMap(component)
 			if err != nil {
-				klog.Errorf("%s", err.Error())
+				klog.Errorf("Getting coverage/show metrics for %s failed: %s", component, err.Error())
 				continue
 			}
 			coverageShowMetricsMap := componentCoverageShowMetricsMap[component]
@@ -265,12 +267,12 @@ func registerStopwatchShowMetrics(component string, metricNamespace string, metr
 			Name:      fmt.Sprintf("%s_long_term_avg", metricName),
 		})
 
-		prometheus.MustRegister(metricInfo.metrics.totalSamples)
-		prometheus.MustRegister(metricInfo.metrics.min)
-		prometheus.MustRegister(metricInfo.metrics.max)
-		prometheus.MustRegister(metricInfo.metrics.percentile95th)
-		prometheus.MustRegister(metricInfo.metrics.shortTermAvg)
-		prometheus.MustRegister(metricInfo.metrics.longTermAvg)
+		ovnRegistry.MustRegister(metricInfo.metrics.totalSamples)
+		ovnRegistry.MustRegister(metricInfo.metrics.min)
+		ovnRegistry.MustRegister(metricInfo.metrics.max)
+		ovnRegistry.MustRegister(metricInfo.metrics.percentile95th)
+		ovnRegistry.MustRegister(metricInfo.metrics.shortTermAvg)
+		ovnRegistry.MustRegister(metricInfo.metrics.longTermAvg)
 	}
 }
 
@@ -353,42 +355,49 @@ func parseStopwatchShowOutput(output string) map[string]stopwatchStatistics {
 
 // stopwatchShowMetricsUpdater updates the metric by obtaining the stopwatch/show
 // metrics for the specified component.
-func stopwatchShowMetricsUpdater(component string) {
-	for range time.Tick(metricsUpdateInterval) {
-		stopwatchShowOutputMap, err := getStopwatchShowOutputMap(component)
-		if err != nil {
-			klog.Error(err)
-			continue
-		}
-
-		if len(stopwatchShowOutputMap) == 0 {
-			klog.Warningf("No stopwatch/show metrics for component %s", component)
-			continue
-		}
-
-		stopwatchShowInterestingMetrics := componentStopwatchShowMetricsMap[component]
-		for metricName, metricInfo := range stopwatchShowInterestingMetrics {
-			var totalSamplesMetricValue, maxMetricValue, minMetricValue, percentile95thMetricValue, shortTermAvgMetricValue, longTermAvgMetricValue float64
-
-			if metricInfo.srcName != "" {
-				metricName = metricInfo.srcName
+func stopwatchShowMetricsUpdater(component string, stopChan <-chan struct{}) {
+	ticker := time.NewTicker(metricsUpdateInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			stopwatchShowOutputMap, err := getStopwatchShowOutputMap(component)
+			if err != nil {
+				klog.Errorf("Getting stopwatch/show metrics for %s failed: %s", component, err.Error())
+				continue
 			}
 
-			if value, ok := stopwatchShowOutputMap[metricName]; ok {
-				totalSamplesMetricValue = parseMetricToFloat(component, metricName, value.totalSamples)
-				minMetricValue = parseMetricToFloat(component, metricName, value.min)
-				maxMetricValue = parseMetricToFloat(component, metricName, value.max)
-				percentile95thMetricValue = parseMetricToFloat(component, metricName, value.percentile95th)
-				shortTermAvgMetricValue = parseMetricToFloat(component, metricName, value.shortTermAvg)
-				longTermAvgMetricValue = parseMetricToFloat(component, metricName, value.longTermAvg)
+			if len(stopwatchShowOutputMap) == 0 {
+				klog.Warningf("No stopwatch/show metrics for component %s", component)
+				continue
 			}
 
-			metricInfo.metrics.totalSamples.Set(totalSamplesMetricValue)
-			metricInfo.metrics.min.Set(minMetricValue)
-			metricInfo.metrics.max.Set(maxMetricValue)
-			metricInfo.metrics.percentile95th.Set(percentile95thMetricValue)
-			metricInfo.metrics.shortTermAvg.Set(shortTermAvgMetricValue)
-			metricInfo.metrics.longTermAvg.Set(longTermAvgMetricValue)
+			stopwatchShowInterestingMetrics := componentStopwatchShowMetricsMap[component]
+			for metricName, metricInfo := range stopwatchShowInterestingMetrics {
+				var totalSamplesMetricValue, maxMetricValue, minMetricValue, percentile95thMetricValue, shortTermAvgMetricValue, longTermAvgMetricValue float64
+
+				if metricInfo.srcName != "" {
+					metricName = metricInfo.srcName
+				}
+
+				if value, ok := stopwatchShowOutputMap[metricName]; ok {
+					totalSamplesMetricValue = parseMetricToFloat(component, metricName, value.totalSamples)
+					minMetricValue = parseMetricToFloat(component, metricName, value.min)
+					maxMetricValue = parseMetricToFloat(component, metricName, value.max)
+					percentile95thMetricValue = parseMetricToFloat(component, metricName, value.percentile95th)
+					shortTermAvgMetricValue = parseMetricToFloat(component, metricName, value.shortTermAvg)
+					longTermAvgMetricValue = parseMetricToFloat(component, metricName, value.longTermAvg)
+				}
+
+				metricInfo.metrics.totalSamples.Set(totalSamplesMetricValue)
+				metricInfo.metrics.min.Set(minMetricValue)
+				metricInfo.metrics.max.Set(maxMetricValue)
+				metricInfo.metrics.percentile95th.Set(percentile95thMetricValue)
+				metricInfo.metrics.shortTermAvg.Set(shortTermAvgMetricValue)
+				metricInfo.metrics.longTermAvg.Set(longTermAvgMetricValue)
+			}
+		case <-stopChan:
+			return
 		}
 	}
 }
@@ -418,7 +427,9 @@ func checkPodRunsOnGivenNode(clientset kubernetes.Interface, labels []string, k8
 		strings.Join(labels, ","), k8sNodeName)
 }
 
-func listenAndServeTLS(addr, certFile, privKeyFile string, handler http.Handler) error {
+// using the cyrpto/tls module's GetCertificate() callback function helps in picking up
+// the latest certificate (due to cert rotation on cert expiry)
+func getTLSServer(addr, certFile, privKeyFile string, handler http.Handler) *http.Server {
 	tlsConfig := &tls.Config{
 		GetCertificate: func(info *tls.ClientHelloInfo) (*tls.Certificate, error) {
 			cert, err := tls.LoadX509KeyPair(certFile, privKeyFile)
@@ -433,37 +444,88 @@ func listenAndServeTLS(addr, certFile, privKeyFile string, handler http.Handler)
 		Handler:   handler,
 		TLSConfig: tlsConfig,
 	}
-	return server.ListenAndServeTLS("", "")
+	return server
+}
+
+func StartMetricsServerCommon(bindAddress string, pprofBindAddress string, certFile string, keyFile string, handler http.Handler,
+	stopChan <-chan struct{}, wg *sync.WaitGroup) {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", handler)
+
+	var server *http.Server
+	if len(pprofBindAddress) != 0 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			go utilwait.Until(func() {
+				// importing net/http/pprof adds all the debug pprof http paths
+				server = &http.Server{
+					Addr:    pprofBindAddress,
+					Handler: http.DefaultServeMux,
+				}
+				err := server.ListenAndServe()
+				if err != nil && err != http.ErrServerClosed {
+					utilruntime.HandleError(fmt.Errorf("starting profile server failed for address %s: %v",
+						pprofBindAddress, err))
+				}
+			}, 5*time.Second, stopChan)
+
+			<-stopChan
+			klog.Infof("Stopping profile server %s", server.Addr)
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := server.Shutdown(shutdownCtx); err != nil {
+				klog.Errorf("Error stopping profile server: %v", err)
+			}
+		}()
+
+	}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		go utilwait.Until(func() {
+			var err error
+			if certFile != "" && keyFile != "" {
+				server = getTLSServer(bindAddress, certFile, keyFile, mux)
+				err = server.ListenAndServeTLS("", "")
+			} else {
+				server = &http.Server{
+					Addr:    bindAddress,
+					Handler: mux,
+				}
+				err = server.ListenAndServe()
+			}
+			if err != nil && err != http.ErrServerClosed {
+				utilruntime.HandleError(fmt.Errorf("starting metrics server failed for address %s: %v", bindAddress, err))
+			}
+		}, 5*time.Second, stopChan)
+
+		<-stopChan
+		klog.Infof("Stopping metrics server %s", server.Addr)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			klog.Errorf("Error stopping metrics server for address %s: %v", bindAddress, err)
+		}
+	}()
 }
 
 // StartMetricsServerTLS runs the prometheus listener so that OVN K8s metrics can be collected
 // It puts the endpoint behind TLS if certFile and keyFile are defined.
-func StartMetricsServer(bindAddress, pprofBindAddress string, certFile string, keyFile string) {
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", promhttp.Handler())
+func StartMetricsServer(bindAddress string, pprofBindAddress string, certFile string, keyFile string,
+	stopChan <-chan struct{}, wg *sync.WaitGroup) {
+	StartMetricsServerCommon(bindAddress, pprofBindAddress, certFile, keyFile, promhttp.Handler(), stopChan, wg)
+}
 
-	if len(pprofBindAddress) != 0 {
-		go utilwait.Until(func() {
-			// importing net/http/pprof adds all the debug pprof http paths
-			err := http.ListenAndServe(pprofBindAddress, nil)
-			if err != nil {
-				utilruntime.HandleError(fmt.Errorf("starting profile server failed for address %s: %v",
-					pprofBindAddress, err))
-			}
-		}, 5*time.Second, utilwait.NeverStop)
-	}
+var ovnRegistry = prometheus.NewRegistry()
 
-	go utilwait.Until(func() {
-		var err error
-		if certFile != "" && keyFile != "" {
-			err = listenAndServeTLS(bindAddress, certFile, keyFile, mux)
-		} else {
-			err = http.ListenAndServe(bindAddress, mux)
-		}
-		if err != nil {
-			utilruntime.HandleError(fmt.Errorf("starting metrics server failed for address %s: %v", bindAddress, err))
-		}
-	}, 5*time.Second, utilwait.NeverStop)
+// StartOVNMetricsServer runs the prometheus listener so that OVN metrics can be collected
+func StartOVNMetricsServer(bindAddress string, pprofBindAddress string, certFile, keyFile string,
+	stopChan <-chan struct{}, wg *sync.WaitGroup) {
+	handler := promhttp.InstrumentMetricHandler(ovnRegistry,
+		promhttp.HandlerFor(ovnRegistry, promhttp.HandlerOpts{}))
+	StartMetricsServerCommon(bindAddress, pprofBindAddress, certFile, keyFile, handler, stopChan, wg)
 }
 
 func RegisterOvnNodeMetrics(ovsDBClient *util.OvsdbClient, metricsScrapeInterval int, stopChan chan struct{}) {

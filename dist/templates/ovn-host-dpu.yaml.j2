@@ -23,8 +23,6 @@ spec:
         component: network
         type: infra
         kubernetes.io/os: "linux"
-      annotations:
-        scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
       nodeSelector:
         kubernetes.io/arch: arm64
@@ -34,6 +32,7 @@ spec:
       # as all pods.
       serviceAccountName: ovn
       hostNetwork: true
+      dnsPolicy: Default
       priorityClassName: "system-node-critical"
       containers:
       - name: ovn-controller

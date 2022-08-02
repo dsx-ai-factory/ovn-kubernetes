@@ -2,6 +2,7 @@ package util
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -59,6 +60,8 @@ const (
 	// part of the specified networks
 	skipSpoofCheckAnnotationName = "k8s.ovn.org/skip-spoofchk-on-networks"
 )
+
+var ErrNoPodIPFound = errors.New("no pod IPs found")
 
 // PodAnnotation describes the assigned network details for a single pod network. (The
 // actual annotation may include the equivalent of multiple PodAnnotations.)
@@ -267,10 +270,15 @@ func GetAllPodIPs(pod *v1.Pod, netAttachInfo *NetAttachDefInfo) ([]net.IP, error
 	}
 	for nadName := range networkMap {
 		annotation, _ := UnmarshalPodAnnotation(pod.Annotations, nadName)
-		if annotation != nil {
+		if err == nil && annotation != nil {
 			// Use the OVN annotation if valid
 			for _, ip := range annotation.IPs {
 				ips = append(ips, ip.IP)
+			}
+			// An OVN annotation should never have empty IPs, but just in case
+			if len(ips) == 0 {
+				klog.Warningf("No IPs found in existing OVN annotation for nad %s! Pod Name: %s, Annotation: %#v",
+					nadName, pod.Name, annotation)
 			}
 		}
 	}
@@ -284,16 +292,7 @@ func GetAllPodIPs(pod *v1.Pod, netAttachInfo *NetAttachDefInfo) ([]net.IP, error
 			pod.Namespace, pod.Name, netAttachInfo.NetName)
 	}
 
-	// default network, return error if there are no IPs in pod status
-	if len(pod.Status.PodIPs) == 0 {
-		if pod.Status.PodIP == "" {
-			return nil, fmt.Errorf("no pod IPs found on pod %s/%s", pod.Namespace, pod.Name)
-		}
-		// Kubelets < 1.16 only set podIP
-		return []net.IP{net.ParseIP(pod.Status.PodIP)}, nil
-	}
-
-	// Otherwise if the annotation is not valid try to use Kube API pod IPs
+	// Otherwise, default network, if the annotation is not valid try to use Kube API pod IPs
 	ips = make([]net.IP, 0, len(pod.Status.PodIPs))
 	for _, podIP := range pod.Status.PodIPs {
 		ip := net.ParseIP(podIP.IP)
@@ -303,7 +302,19 @@ func GetAllPodIPs(pod *v1.Pod, netAttachInfo *NetAttachDefInfo) ([]net.IP, error
 		}
 		ips = append(ips, ip)
 	}
-	return ips, nil
+
+	if len(ips) > 0 {
+		return ips, nil
+	}
+
+	// Fallback check pod.Status.PodIP
+	// Kubelet < 1.16 only set podIP
+	ip := net.ParseIP(pod.Status.PodIP)
+	if ip == nil {
+		return nil, fmt.Errorf("pod %s/%s: %w ", pod.Namespace, pod.Name, ErrNoPodIPFound)
+	}
+
+	return []net.IP{ip}, nil
 }
 
 // GetK8sPodDefaultNetwork get pod default network from annotations

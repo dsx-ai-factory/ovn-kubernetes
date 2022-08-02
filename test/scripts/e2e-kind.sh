@@ -10,7 +10,7 @@ groomTestList() {
 
 SKIPPED_TESTS="
 # PERFORMANCE, DISRUPTIVE, OR UNRELATED TESTS: NOT WANTED FOR CI
-Networking IPerf IPv[46]
+\[Feature:Networking-Performance\]
 \[Feature:PerformanceDNS\]
 Disruptive
 DisruptionController
@@ -20,11 +20,11 @@ DisruptionController
 # FEATURES NOT AVAILABLE IN OUR CI ENVIRONMENT
 \[Feature:Federation\]
 should have ipv4 and ipv6 internal node ip
-should have ipv4 and ipv6 node podCIDRs
 
 # TESTS THAT ASSUME KUBE-PROXY
 kube-proxy
 should set TCP CLOSE_WAIT timeout
+\[Feature:ProxyTerminatingEndpoints\]
 
 # not implemented - OVN doesn't support time
 should have session affinity timeout work
@@ -33,7 +33,7 @@ should have session affinity timeout work
 named port.+\[Feature:NetworkPolicy\]
 
 # Clean up SCTP tests https://github.com/kubernetes/kubernetes/issues/96717
-\[Feature:SCTP\]
+should create a Pod with SCTP HostPort
 
 # https://github.com/ovn-org/ovn-kubernetes/issues/1907
 service.kubernetes.io/headless
@@ -44,14 +44,24 @@ should resolve connection reset issue #74839
 # api flakes
 sig-api-machinery
 
-# ???
+# TODO: Figure out why NoSNAT is failing (https://github.com/ovn-org/ovn-kubernetes/issues/1316)
 \[Feature:NoSNAT\]
-Services.+(ESIPP|cleanup finalizer)
+
+# KIND doesn't support svcType=LB, the externalIP stays in pending state
+LoadBalancers should
+
+# TODO: Figure out why DNS configMap nameserver is failing (https://github.com/ovn-org/ovn-kubernetes/issues/1316)
 configMap nameserver
 ClusterDns \[Feature:Example\]
+
+# TODO: Figure out why default value on new IngressClass is failing (https://github.com/ovn-org/ovn-kubernetes/pull/1349#issuecomment-631218507)
 should set default value on new IngressClass
+
 # RACE CONDITION IN TEST, SEE https://github.com/kubernetes/kubernetes/pull/90254
 should prevent Ingress creation if more than 1 IngressClass marked as default
+
+# TODO: Figure out why the below test is failing and if we need to add support in OVN-K for them
+validates that there is no conflict between pods with same hostPort but different hostIP and protocol
 "
 
 IPV4_ONLY_TESTS="
@@ -73,6 +83,12 @@ Network.+should resolve connection reset issue
 #  See: https://github.com/ovn-org/ovn-kubernetes/issues/1517
 NetworkPolicy.+should allow egress access to server in CIDR block
 "
+
+SINGLESTACK_IPV4_ONLY_TESTS="
+# See: https://github.com/ovn-org/ovn-kubernetes/issues/2798
+should provider Internet connection for containers using DNS
+"
+
 IPV6_ONLY_TESTS="
 # Limit the IPv6 related tests to IPv6 only deployments
 #  See: https://github.com/leblancd/kube-v6-test
@@ -86,6 +102,11 @@ DUALSTACK_ONLY_TESTS="
 # Github CI doesn´t offer IPv6 connectivity, so always skip IPv6 only tests.
 #  See: https://github.com/ovn-org/ovn-kubernetes/issues/1522
 SKIPPED_TESTS=$SKIPPED_TESTS$IPV6_ONLY_TESTS
+
+# Either single stack IPV6 or dualstack
+if [ "$KIND_IPV6_SUPPORT" == true ]; then
+  SKIPPED_TESTS=$SKIPPED_TESTS$SINGLESTACK_IPV4_ONLY_TESTS
+fi
 
 # IPv6 Only, skip any IPv4 Only Tests
 if [ "$KIND_IPV4_SUPPORT" == false ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
@@ -103,7 +124,7 @@ SKIPPED_TESTS="$(groomTestList "${SKIPPED_TESTS}")"
 # if we set PARALLEL=true, skip serial test
 if [ "${PARALLEL:-false}" = "true" ]; then
   export GINKGO_PARALLEL=y
-  export GINKGO_PARALLEL_NODES=20
+  export GINKGO_PARALLEL_NODES=10
   SKIPPED_TESTS="${SKIPPED_TESTS}|\\[Serial\\]"
 fi
 
@@ -133,7 +154,7 @@ export KUBE_CONTAINER_RUNTIME_NAME=containerd
 # but until then, we retry the test in the same job
 # to stop PR retriggers for totally broken code
 export FLAKE_ATTEMPTS=5
-export NUM_NODES=20
+export NUM_NODES=10  # number of parallel (ginkgo) test nodes to run
 # Kind clusters are three node clusters
 export NUM_WORKER_NODES=3
 ginkgo --nodes=${NUM_NODES} \
@@ -142,7 +163,7 @@ ginkgo --nodes=${NUM_NODES} \
 	--flakeAttempts=${FLAKE_ATTEMPTS} \
 	/usr/local/bin/e2e.test \
 	-- \
-	--kubeconfig=${HOME}/admin.conf \
+	--kubeconfig=${HOME}/ovn.conf \
 	--provider=local \
 	--dump-logs-on-failure=false \
 	--report-dir=${E2E_REPORT_DIR}	\

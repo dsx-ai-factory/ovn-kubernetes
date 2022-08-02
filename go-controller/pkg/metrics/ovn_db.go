@@ -340,24 +340,37 @@ var metricDBClusterConnOutErr = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	},
 )
 
-var metricDBE2eTimestamp = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
-	Subsystem: MetricOvnSubsystemDB,
-	Name:      "e2e_timestamp",
-	Help:      "The current e2e-timestamp value as observed in this instance of the database"},
-	[]string{
-		"db_name",
-	},
-)
-
-func ovnDBSizeMetricsUpdater(direction, database string) {
-	dbFile := fmt.Sprintf("/etc/ovn/ovn%s_db.db", direction)
-	fileInfo, err := os.Stat(dbFile)
-	if err != nil {
-		klog.Errorf("Failed to get the DB size for database %s: %v", database, err)
-		return
+func ovnDBSizeMetricsUpdater(dbProps *util.OvsDbProperties) {
+	if size, err := getOvnDBSizeViaPath(dbProps); err != nil {
+		klog.Errorf("Failed to update OVN DB size metric: %v", err)
+	} else {
+		metricDBSize.WithLabelValues(dbProps.DbName).Set(float64(size))
 	}
-	metricDBSize.WithLabelValues(database).Set(float64(fileInfo.Size()))
+}
+
+func resetOvnDbSizeMetric() {
+	metricDBSize.Reset()
+}
+
+// isOvnDBFoundViaPath attempts to find the OVN DBs, return false if not found.
+func isOvnDBFoundViaPath(dbProperties []*util.OvsDbProperties) bool {
+	enabled := true
+	for _, dbProperty := range dbProperties {
+		if _, err := getOvnDBSizeViaPath(dbProperty); err != nil {
+			enabled = false
+			break
+		}
+	}
+	return enabled
+}
+
+func getOvnDBSizeViaPath(dbProperties *util.OvsDbProperties) (int64, error) {
+	fileInfo, err := os.Stat(dbProperties.DbAlias)
+	if err != nil {
+		return 0, fmt.Errorf("failed to find OVN DB database %s at path %s: %v",
+			dbProperties.DbName, dbProperties.DbAlias, err)
+	}
+	return fileInfo.Size(), nil
 }
 
 // check for OVSDB health status, report error and warning
@@ -367,9 +380,8 @@ func ovnDBSizeMetricsUpdater(direction, database string) {
 // it prints a warning or warnings on stdout. If it finds consistency errors,
 // it prints an error on stderr and exits with status 1
 //
-func ovnDBHealthStatusUpdater(direction, database string) {
-	dbFile := fmt.Sprintf("/etc/ovn/ovn%s_db.db", direction)
-	_, err := os.Stat(dbFile)
+func ovnDBHealthStatusUpdater(dbProperties *util.OvsDbProperties) {
+	_, err := os.Stat(dbProperties.DbAlias)
 	if err != nil {
 		return
 	}
@@ -378,62 +390,30 @@ func ovnDBHealthStatusUpdater(direction, database string) {
 	status := "ok"
 	info := ""
 
-	stdout, stderr, err := util.RunOVSDBTool("check-cluster", dbFile)
+	stdout, stderr, err := util.RunOVSDBTool("check-cluster", dbProperties.DbAlias)
 	if err != nil {
-		klog.Errorf("Failed to check DB health status for database %s: %v", database, err)
+		klog.Errorf("Failed to check DB health status for database %s: %v", dbProperties.DbName, err)
 		status = "error"
 		info = stderr
 		successCode = 0
 	} else if len(stdout) != 0 {
-		klog.Warningf("DB health status for database %s detected unusual content: %s", database, stdout)
+		klog.Warningf("DB health status for database %s detected unusual content: %s", dbProperties.DbName, stdout)
 		status = "warning"
 		info = stdout
 		successCode = 1
 	}
 
-	metricDBHealthStatus.WithLabelValues(database, status, info).Set(successCode)
+	metricDBHealthStatus.WithLabelValues(dbProperties.DbName, status, info).Set(successCode)
 }
 
-func ovnE2eTimeStampUpdater(direction, database string) {
+func ovnDBMemoryMetricsUpdater(dbProperties *util.OvsDbProperties) {
 	var stdout, stderr string
 	var err error
 
-	if direction == "sb" {
-		stdout, stderr, err = util.RunOVNSbctlUnix("--if-exists", "--no-leader-only",
-			"get", "SB_Global", ".", "options:e2e_timestamp")
-	} else {
-		stdout, stderr, err = util.RunOVNNbctlUnix("--if-exists", "--no-leader-only",
-			"get", "NB_Global", ".", "options:e2e_timestamp")
-	}
-	if err != nil {
-		klog.Errorf("Failed to scrape timestamp for database %s: "+
-			"stderr (%s) (%v)", database, stderr, err)
-		return
-	}
-	if stdout != "" {
-		if value, err := strconv.ParseFloat(stdout, 64); err == nil {
-			metricDBE2eTimestamp.WithLabelValues(database).Set(value)
-		} else {
-			klog.Errorf("Failed to parse %s e2e-timestamp value to float64 :(%v)",
-				database, err)
-		}
-	} else {
-		metricDBE2eTimestamp.WithLabelValues(database).Set(0)
-	}
-}
-
-func ovnDBMemoryMetricsUpdater(direction, database string) {
-	var stdout, stderr string
-	var err error
-
-	if direction == "sb" {
-		stdout, stderr, err = util.RunOVNSBAppCtlWithTimeout(5, "memory/show")
-	} else {
-		stdout, stderr, err = util.RunOVNNBAppCtlWithTimeout(5, "memory/show")
-	}
+	stdout, stderr, err = dbProperties.AppCtl(5, "memory/show")
 	if err != nil {
 		klog.Errorf("Failed retrieving memory/show output for %q, stderr: %s, err: (%v)",
-			strings.ToUpper(database), stderr, err)
+			strings.ToUpper(dbProperties.DbName), stderr, err)
 		return
 	}
 	for _, kvPair := range strings.Fields(stdout) {
@@ -441,7 +421,7 @@ func ovnDBMemoryMetricsUpdater(direction, database string) {
 			// kvPair will be of the form monitors:2
 			fields := strings.Split(kvPair, ":")
 			if value, err := strconv.ParseFloat(fields[1], 64); err == nil {
-				metricOVNDBMonitor.WithLabelValues(database).Set(value)
+				metricOVNDBMonitor.WithLabelValues(dbProperties.DbName).Set(value)
 			} else {
 				klog.Errorf("Failed to parse the monitor's value %s to float64: err(%v)",
 					fields[1], err)
@@ -450,7 +430,7 @@ func ovnDBMemoryMetricsUpdater(direction, database string) {
 			// kvPair will be of the form sessions:2
 			fields := strings.Split(kvPair, ":")
 			if value, err := strconv.ParseFloat(fields[1], 64); err == nil {
-				metricOVNDBSessions.WithLabelValues(database).Set(value)
+				metricOVNDBSessions.WithLabelValues(dbProperties.DbName).Set(value)
 			} else {
 				klog.Errorf("Failed to parse the sessions' value %s to float64: err(%v)",
 					fields[1], err)
@@ -459,8 +439,13 @@ func ovnDBMemoryMetricsUpdater(direction, database string) {
 	}
 	if !strings.Contains(stdout, "sessions:") {
 		// No "sessions" in output means jsonrpc session is 0.
-		metricOVNDBSessions.WithLabelValues(database).Set(0)
+		metricOVNDBSessions.WithLabelValues(dbProperties.DbName).Set(0)
 	}
+}
+
+func resetOvnDbMemoryMetrics() {
+	metricOVNDBMonitor.Reset()
+	metricOVNDBSessions.Reset()
 }
 
 var (
@@ -469,26 +454,48 @@ var (
 	sbDbSchemaVersion string
 )
 
+func getNBDBSockPath() (string, error) {
+	paths := []string{"/var/run/openvswitch/", "/var/run/ovn/"}
+	for _, basePath := range paths {
+		if _, err := os.Stat(basePath + "ovnnb_db.sock"); err == nil {
+			klog.Infof("ovnnb_db.sock found at %s", basePath)
+			return basePath, nil
+		} else {
+			klog.Infof("%sovnnb_db.sock getting info failed: %s", basePath, err)
+		}
+	}
+	return "", fmt.Errorf("ovn db sock files weren't found in %s", strings.Join(paths, " or "))
+}
+
 func getOvnDbVersionInfo() {
 	ctlPath := "/var/run/openvswitch/ovnnb_db.ctl"
 	stdout, _, err := util.RunOVSAppctl("-t", ctlPath, "version")
 	if err == nil && strings.HasPrefix(stdout, "ovsdb-server (Open vSwitch) ") {
 		ovnDbVersion = strings.Fields(stdout)[3]
 	}
-	sockPath := "unix:/var/run/openvswitch/ovnnb_db.sock"
+	basePath, err := getNBDBSockPath()
+	if err != nil {
+		klog.Errorf("OVN db schema versions can't be fetched: %s", err)
+		return
+	}
+	sockPath := "unix:" + basePath + "ovnnb_db.sock"
 	stdout, _, err = util.RunOVSDBClient("get-schema-version", sockPath, "OVN_Northbound")
 	if err == nil {
 		nbDbSchemaVersion = strings.TrimSpace(stdout)
+	} else {
+		klog.Errorf("OVN nbdb schema version can't be fetched: %s", err)
 	}
-	sockPath = "unix:/var/run/openvswitch/ovnsb_db.sock"
+	sockPath = "unix:" + basePath + "ovnsb_db.sock"
 	stdout, _, err = util.RunOVSDBClient("get-schema-version", sockPath, "OVN_Southbound")
 	if err == nil {
 		sbDbSchemaVersion = strings.TrimSpace(stdout)
+	} else {
+		klog.Errorf("OVN sbdb schema version can't be fetched: %s", err)
 	}
 }
 
 func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string,
-	metricsScrapeInterval int, stopChan chan struct{}) {
+	metricsScrapeInterval int, stopChan <-chan struct{}) {
 	err := wait.PollImmediate(1*time.Second, 300*time.Second, func() (bool, error) {
 		return checkPodRunsOnGivenNode(clientset, []string{"name in (ovn-nbdb, ovn-sbdb, ovnkube-db)"}, k8sNodeName, false)
 	})
@@ -506,10 +513,9 @@ func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string,
 	// get the ovsdb server version info
 	getOvnDbVersionInfo()
 	// register metrics that will be served off of /metrics path
-	prometheus.MustRegister(metricOVNDBMonitor)
-	prometheus.MustRegister(metricOVNDBSessions)
-	prometheus.MustRegister(metricDBSize)
-	prometheus.MustRegister(prometheus.NewGaugeFunc(
+	ovnRegistry.MustRegister(metricOVNDBMonitor)
+	ovnRegistry.MustRegister(metricOVNDBSessions)
+	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemDB,
@@ -524,14 +530,36 @@ func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string,
 		},
 		func() float64 { return 1 },
 	))
+	var dbProperties []*util.OvsDbProperties
+	nbdbProps, err := util.GetOvsDbProperties(util.OvnNbdbLocation)
+	if err != nil {
+		klog.Errorf("Failed to init nbdb properties: %s", err)
+	} else {
+		dbProperties = append(dbProperties, nbdbProps)
+	}
+	sbdbProps, err := util.GetOvsDbProperties(util.OvnSbdbLocation)
+	if err != nil {
+		klog.Errorf("Failed to init sbdb properties: %s", err)
+	} else {
+		dbProperties = append(dbProperties, sbdbProps)
+	}
+	if len(dbProperties) == 0 {
+		klog.Errorf("Failed to init properties for all databases")
+		return
+	}
 	// check if DB is clustered or not
+	// the usual way would be to call `ovsdb-tool db-is-standalone`,
+	// but that command requires access to the db, and we don't always have it.
+	// Therefore, we check cluster/status output for "not valid command" error
 	dbIsClustered := true
-	_, _, err = util.RunOVSDBTool("db-is-standalone", "/etc/openvswitch/ovnsb_db.db")
-	if err == nil {
+	_, stderr, err := dbProperties[0].AppCtl(5, "cluster/status", dbProperties[0].DbName)
+	if err != nil && strings.Contains(stderr, "is not a valid command") {
 		dbIsClustered = false
+		klog.Info("Found db is standalone, don't register db_cluster metrics")
 	}
 	if dbIsClustered {
-		prometheus.MustRegister(metricDBHealthStatus)
+		klog.Info("Found db is clustered, register db_cluster metrics")
+		ovnRegistry.MustRegister(metricDBHealthStatus)
 
 		// Register the ovn*_db coverage/show metrics with prometheus
 
@@ -545,30 +573,32 @@ func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string,
 			map[string]string{"db_name": "OVN_Southbound"})
 		go coverageShowMetricsUpdater(ovnSouthDB, metricsScrapeInterval, stopChan)
 
-		prometheus.MustRegister(metricDBClusterCID)
-		prometheus.MustRegister(metricDBClusterSID)
-		prometheus.MustRegister(metricDBClusterServerStatus)
-		prometheus.MustRegister(metricDBClusterTerm)
-		prometheus.MustRegister(metricDBClusterServerRole)
-		prometheus.MustRegister(metricDBClusterServerVote)
-		prometheus.MustRegister(metricDBClusterElectionTimer)
-		prometheus.MustRegister(metricDBClusterLogIndexStart)
-		prometheus.MustRegister(metricDBClusterLogIndexNext)
-		prometheus.MustRegister(metricDBClusterLogNotCommitted)
-		prometheus.MustRegister(metricDBClusterLogNotApplied)
-		prometheus.MustRegister(metricDBClusterConnIn)
-		prometheus.MustRegister(metricDBClusterConnOut)
-		prometheus.MustRegister(metricDBClusterConnInErr)
-		prometheus.MustRegister(metricDBClusterConnOutErr)
+		ovnRegistry.MustRegister(metricDBClusterCID)
+		ovnRegistry.MustRegister(metricDBClusterSID)
+		ovnRegistry.MustRegister(metricDBClusterServerStatus)
+		ovnRegistry.MustRegister(metricDBClusterTerm)
+		ovnRegistry.MustRegister(metricDBClusterServerRole)
+		ovnRegistry.MustRegister(metricDBClusterServerVote)
+		ovnRegistry.MustRegister(metricDBClusterElectionTimer)
+		ovnRegistry.MustRegister(metricDBClusterLogIndexStart)
+		ovnRegistry.MustRegister(metricDBClusterLogIndexNext)
+		ovnRegistry.MustRegister(metricDBClusterLogNotCommitted)
+		ovnRegistry.MustRegister(metricDBClusterLogNotApplied)
+		ovnRegistry.MustRegister(metricDBClusterConnIn)
+		ovnRegistry.MustRegister(metricDBClusterConnOut)
+		ovnRegistry.MustRegister(metricDBClusterConnInErr)
+		ovnRegistry.MustRegister(metricDBClusterConnOutErr)
 	}
-	prometheus.MustRegister(metricDBE2eTimestamp)
 
+	dbFoundViaPath := isOvnDBFoundViaPath(dbProperties)
+
+	if dbFoundViaPath {
+		ovnRegistry.MustRegister(metricDBSize)
+	} else {
+		klog.Infof("Unable to enable OVN DB size metric because no OVN DBs found")
+	}
 	// functions responsible for collecting the values and updating the prometheus metrics
 	go func() {
-		dirDbMap := map[string]string{
-			"nb": "OVN_Northbound",
-			"sb": "OVN_Southbound",
-		}
 		ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
 		defer ticker.Stop()
 		tickerDbHealth := time.NewTicker(time.Duration(dbHealthScrapeInterval) * time.Second)
@@ -577,40 +607,28 @@ func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string,
 		for {
 			select {
 			case <-ticker.C:
-
+				// To update not only values but also labels for metrics, we use Reset() to delete previous labels+value
 				if dbIsClustered {
-					// volatile metrics has to be reset prior
-					// to gathering to avoid duplicates
-					metricDBClusterCID.Reset()
-					metricDBClusterSID.Reset()
-					metricDBClusterServerStatus.Reset()
-					metricDBClusterTerm.Reset()
-					metricDBClusterServerRole.Reset()
-					metricDBClusterServerVote.Reset()
-					metricDBClusterElectionTimer.Reset()
-					metricDBClusterLogIndexStart.Reset()
-					metricDBClusterLogIndexNext.Reset()
-					metricDBClusterLogNotCommitted.Reset()
-					metricDBClusterLogNotApplied.Reset()
-					metricDBClusterConnIn.Reset()
-					metricDBClusterConnOut.Reset()
-					metricDBClusterConnInErr.Reset()
-					metricDBClusterConnOutErr.Reset()
+					resetOvnDbClusterMetrics()
 				}
-
-				for direction, database := range dirDbMap {
+				if dbFoundViaPath {
+					resetOvnDbSizeMetric()
+				}
+				resetOvnDbMemoryMetrics()
+				for _, dbProperty := range dbProperties {
 					if dbIsClustered {
-						ovnDBClusterStatusMetricsUpdater(direction, database)
+						ovnDBClusterStatusMetricsUpdater(dbProperty)
 					}
-					ovnDBMemoryMetricsUpdater(direction, database)
-					ovnDBSizeMetricsUpdater(direction, database)
-					ovnE2eTimeStampUpdater(direction, database)
+					if dbFoundViaPath {
+						ovnDBSizeMetricsUpdater(dbProperty)
+					}
+					ovnDBMemoryMetricsUpdater(dbProperty)
 				}
 			case <-tickerDbHealth.C:
 				metricDBHealthStatus.Reset()
 				if dbIsClustered {
-					for direction, database := range dirDbMap {
-						ovnDBHealthStatusUpdater(direction, database)
+					for _, dbProperty := range dbProperties {
+						ovnDBHealthStatusUpdater(dbProperty)
 					}
 				}
 			case <-stopChan:
@@ -638,25 +656,21 @@ type OVNDBClusterStatus struct {
 	connOutErr      float64
 }
 
-func getOVNDBClusterStatusInfo(timeout int, direction, database string) (clusterStatus *OVNDBClusterStatus,
+func getOVNDBClusterStatusInfo(timeout int, dbProperties *util.OvsDbProperties) (clusterStatus *OVNDBClusterStatus,
 	err error) {
 	var stdout, stderr string
 
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("recovering from a panic while parsing the cluster/status output "+
-				"for database %q: %v", database, r)
+				"for database %q: %v", dbProperties.DbName, r)
 		}
 	}()
 
-	if direction == "sb" {
-		stdout, stderr, err = util.RunOVNSBAppCtlWithTimeout(timeout, "cluster/status", database)
-	} else {
-		stdout, stderr, err = util.RunOVNNBAppCtlWithTimeout(timeout, "cluster/status", database)
-	}
+	stdout, stderr, err = dbProperties.AppCtl(timeout, "cluster/status", dbProperties.DbName)
 	if err != nil {
 		klog.Errorf("Failed to retrieve cluster/status info for database %q, stderr: %s, err: (%v)",
-			database, stderr, err)
+			dbProperties.DbName, stderr, err)
 		return nil, err
 	}
 
@@ -704,6 +718,10 @@ func getOVNDBClusterStatusInfo(timeout int, direction, database string) (cluster
 				clusterStatus.logNotApplied = value
 			}
 		case "Connections":
+			// db cluster with 1 member has empty Connections list
+			if idx+2 >= len(line) {
+				continue
+			}
 			// the value is of the format `->0000 (->56d7) <-46ac <-56d7`
 			var connIn, connOut, connInErr, connOutErr float64
 			for _, conn := range strings.Fields(line[idx+2:]) {
@@ -727,37 +745,55 @@ func getOVNDBClusterStatusInfo(timeout int, direction, database string) (cluster
 	return clusterStatus, nil
 }
 
-func ovnDBClusterStatusMetricsUpdater(direction, database string) {
-	clusterStatus, err := getOVNDBClusterStatusInfo(5, direction, database)
+func ovnDBClusterStatusMetricsUpdater(dbProperties *util.OvsDbProperties) {
+	clusterStatus, err := getOVNDBClusterStatusInfo(5, dbProperties)
 	if err != nil {
 		klog.Errorf(err.Error())
 		return
 	}
-	metricDBClusterCID.WithLabelValues(database, clusterStatus.cid).Set(1)
-	metricDBClusterSID.WithLabelValues(database, clusterStatus.cid, clusterStatus.sid).Set(1)
-	metricDBClusterServerStatus.WithLabelValues(database, clusterStatus.cid, clusterStatus.sid,
+	metricDBClusterCID.WithLabelValues(dbProperties.DbName, clusterStatus.cid).Set(1)
+	metricDBClusterSID.WithLabelValues(dbProperties.DbName, clusterStatus.cid, clusterStatus.sid).Set(1)
+	metricDBClusterServerStatus.WithLabelValues(dbProperties.DbName, clusterStatus.cid, clusterStatus.sid,
 		clusterStatus.status).Set(1)
-	metricDBClusterTerm.WithLabelValues(database, clusterStatus.cid, clusterStatus.sid).Set(clusterStatus.term)
-	metricDBClusterServerRole.WithLabelValues(database, clusterStatus.cid, clusterStatus.sid,
+	metricDBClusterTerm.WithLabelValues(dbProperties.DbName, clusterStatus.cid, clusterStatus.sid).Set(clusterStatus.term)
+	metricDBClusterServerRole.WithLabelValues(dbProperties.DbName, clusterStatus.cid, clusterStatus.sid,
 		clusterStatus.role).Set(1)
-	metricDBClusterServerVote.WithLabelValues(database, clusterStatus.cid, clusterStatus.sid,
+	metricDBClusterServerVote.WithLabelValues(dbProperties.DbName, clusterStatus.cid, clusterStatus.sid,
 		clusterStatus.vote).Set(1)
-	metricDBClusterElectionTimer.WithLabelValues(database, clusterStatus.cid,
+	metricDBClusterElectionTimer.WithLabelValues(dbProperties.DbName, clusterStatus.cid,
 		clusterStatus.sid).Set(clusterStatus.electionTimer)
-	metricDBClusterLogIndexStart.WithLabelValues(database, clusterStatus.cid,
+	metricDBClusterLogIndexStart.WithLabelValues(dbProperties.DbName, clusterStatus.cid,
 		clusterStatus.sid).Set(clusterStatus.logIndexStart)
-	metricDBClusterLogIndexNext.WithLabelValues(database, clusterStatus.cid,
+	metricDBClusterLogIndexNext.WithLabelValues(dbProperties.DbName, clusterStatus.cid,
 		clusterStatus.sid).Set(clusterStatus.logIndexNext)
-	metricDBClusterLogNotCommitted.WithLabelValues(database, clusterStatus.cid,
+	metricDBClusterLogNotCommitted.WithLabelValues(dbProperties.DbName, clusterStatus.cid,
 		clusterStatus.sid).Set(clusterStatus.logNotCommitted)
-	metricDBClusterLogNotApplied.WithLabelValues(database, clusterStatus.cid,
+	metricDBClusterLogNotApplied.WithLabelValues(dbProperties.DbName, clusterStatus.cid,
 		clusterStatus.sid).Set(clusterStatus.logNotApplied)
-	metricDBClusterConnIn.WithLabelValues(database, clusterStatus.cid,
+	metricDBClusterConnIn.WithLabelValues(dbProperties.DbName, clusterStatus.cid,
 		clusterStatus.sid).Set(clusterStatus.connIn)
-	metricDBClusterConnOut.WithLabelValues(database, clusterStatus.cid,
+	metricDBClusterConnOut.WithLabelValues(dbProperties.DbName, clusterStatus.cid,
 		clusterStatus.sid).Set(clusterStatus.connOut)
-	metricDBClusterConnInErr.WithLabelValues(database, clusterStatus.cid,
+	metricDBClusterConnInErr.WithLabelValues(dbProperties.DbName, clusterStatus.cid,
 		clusterStatus.sid).Set(clusterStatus.connInErr)
-	metricDBClusterConnOutErr.WithLabelValues(database, clusterStatus.cid,
+	metricDBClusterConnOutErr.WithLabelValues(dbProperties.DbName, clusterStatus.cid,
 		clusterStatus.sid).Set(clusterStatus.connOutErr)
+}
+
+func resetOvnDbClusterMetrics() {
+	metricDBClusterCID.Reset()
+	metricDBClusterSID.Reset()
+	metricDBClusterServerStatus.Reset()
+	metricDBClusterTerm.Reset()
+	metricDBClusterServerRole.Reset()
+	metricDBClusterServerVote.Reset()
+	metricDBClusterElectionTimer.Reset()
+	metricDBClusterLogIndexStart.Reset()
+	metricDBClusterLogIndexNext.Reset()
+	metricDBClusterLogNotCommitted.Reset()
+	metricDBClusterLogNotApplied.Reset()
+	metricDBClusterConnIn.Reset()
+	metricDBClusterConnOut.Reset()
+	metricDBClusterConnInErr.Reset()
+	metricDBClusterConnOutErr.Reset()
 }

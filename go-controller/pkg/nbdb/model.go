@@ -45,7 +45,7 @@ func FullDatabaseModel() (model.ClientDBModel, error) {
 
 var schema = `{
   "name": "OVN_Northbound",
-  "version": "5.35.1",
+  "version": "6.1.0",
   "tables": {
     "ACL": {
       "columns": {
@@ -112,7 +112,8 @@ var schema = `{
             "key": {
               "type": "string"
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "name": {
@@ -122,7 +123,8 @@ var schema = `{
               "minLength": 63,
               "maxLength": 63
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "options": {
@@ -154,14 +156,15 @@ var schema = `{
                 "set",
                 [
                   "alert",
-                  "debug",
-                  "info",
+                  "warning",
                   "notice",
-                  "warning"
+                  "info",
+                  "debug"
                 ]
               ]
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         }
       }
@@ -207,7 +210,8 @@ var schema = `{
               "type": "integer",
               "minInteger": 1
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "dst_ip": {
@@ -233,7 +237,8 @@ var schema = `{
             "key": {
               "type": "integer"
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "min_tx": {
@@ -242,7 +247,8 @@ var schema = `{
               "type": "integer",
               "minInteger": 1
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "options": {
@@ -264,14 +270,15 @@ var schema = `{
               "enum": [
                 "set",
                 [
-                  "admin_down",
                   "down",
                   "init",
-                  "up"
+                  "up",
+                  "admin_down"
                 ]
               ]
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         }
       },
@@ -301,11 +308,13 @@ var schema = `{
             "key": {
               "type": "integer"
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "is_connected": {
-          "type": "boolean"
+          "type": "boolean",
+          "ephemeral": true
         },
         "max_backoff": {
           "type": {
@@ -313,7 +322,8 @@ var schema = `{
               "type": "integer",
               "minInteger": 1000
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "other_config": {
@@ -338,7 +348,8 @@ var schema = `{
             },
             "min": 0,
             "max": "unlimited"
-          }
+          },
+          "ephemeral": true
         },
         "target": {
           "type": "string"
@@ -352,6 +363,18 @@ var schema = `{
     },
     "Copp": {
       "columns": {
+        "external_ids": {
+          "type": {
+            "key": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "min": 0,
+            "max": "unlimited"
+          }
+        },
         "meters": {
           "type": {
             "key": {
@@ -363,8 +386,16 @@ var schema = `{
             "min": 0,
             "max": "unlimited"
           }
+        },
+        "name": {
+          "type": "string"
         }
-      }
+      },
+      "indexes": [
+        [
+          "name"
+        ]
+      ]
     },
     "DHCP_Options": {
       "columns": {
@@ -432,6 +463,7 @@ var schema = `{
             "key": {
               "type": "string"
             },
+            "min": 1,
             "max": "unlimited"
           }
         },
@@ -555,7 +587,8 @@ var schema = `{
           "type": {
             "key": {
               "type": "uuid",
-              "refTable": "HA_Chassis"
+              "refTable": "HA_Chassis",
+              "refType": "strong"
             },
             "min": 0,
             "max": "unlimited"
@@ -589,7 +622,8 @@ var schema = `{
           "type": {
             "key": {
               "type": "uuid",
-              "refTable": "Load_Balancer_Health_Check"
+              "refTable": "Load_Balancer_Health_Check",
+              "refType": "strong"
             },
             "min": 0,
             "max": "unlimited"
@@ -629,13 +663,14 @@ var schema = `{
               "enum": [
                 "set",
                 [
-                  "sctp",
                   "tcp",
-                  "udp"
+                  "udp",
+                  "sctp"
                 ]
               ]
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "selection_fields": {
@@ -645,12 +680,12 @@ var schema = `{
               "enum": [
                 "set",
                 [
-                  "eth_dst",
                   "eth_src",
-                  "ip_dst",
+                  "eth_dst",
                   "ip_src",
-                  "tp_dst",
-                  "tp_src"
+                  "ip_dst",
+                  "tp_src",
+                  "tp_dst"
                 ]
               ]
             },
@@ -735,7 +770,8 @@ var schema = `{
               "refTable": "Copp",
               "refType": "weak"
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "enabled": {
@@ -743,7 +779,8 @@ var schema = `{
             "key": {
               "type": "boolean"
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "external_ids": {
@@ -786,7 +823,8 @@ var schema = `{
           "type": {
             "key": {
               "type": "uuid",
-              "refTable": "NAT"
+              "refTable": "NAT",
+              "refType": "strong"
             },
             "min": 0,
             "max": "unlimited"
@@ -808,7 +846,8 @@ var schema = `{
           "type": {
             "key": {
               "type": "uuid",
-              "refTable": "Logical_Router_Policy"
+              "refTable": "Logical_Router_Policy",
+              "refType": "strong"
             },
             "min": 0,
             "max": "unlimited"
@@ -818,7 +857,8 @@ var schema = `{
           "type": {
             "key": {
               "type": "uuid",
-              "refTable": "Logical_Router_Port"
+              "refTable": "Logical_Router_Port",
+              "refType": "strong"
             },
             "min": 0,
             "max": "unlimited"
@@ -828,7 +868,8 @@ var schema = `{
           "type": {
             "key": {
               "type": "uuid",
-              "refTable": "Logical_Router_Static_Route"
+              "refTable": "Logical_Router_Static_Route",
+              "refType": "strong"
             },
             "min": 0,
             "max": "unlimited"
@@ -873,7 +914,8 @@ var schema = `{
             "key": {
               "type": "string"
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "nexthops": {
@@ -915,7 +957,8 @@ var schema = `{
             "key": {
               "type": "boolean"
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "external_ids": {
@@ -934,7 +977,8 @@ var schema = `{
           "type": {
             "key": {
               "type": "uuid",
-              "refTable": "Gateway_Chassis"
+              "refTable": "Gateway_Chassis",
+              "refType": "strong"
             },
             "min": 0,
             "max": "unlimited"
@@ -944,9 +988,11 @@ var schema = `{
           "type": {
             "key": {
               "type": "uuid",
-              "refTable": "HA_Chassis_Group"
+              "refTable": "HA_Chassis_Group",
+              "refType": "strong"
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "ipv6_prefix": {
@@ -981,6 +1027,7 @@ var schema = `{
             "key": {
               "type": "string"
             },
+            "min": 1,
             "max": "unlimited"
           }
         },
@@ -1001,7 +1048,8 @@ var schema = `{
             "key": {
               "type": "string"
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         }
       },
@@ -1020,7 +1068,8 @@ var schema = `{
               "refTable": "BFD",
               "refType": "weak"
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "external_ids": {
@@ -1058,7 +1107,8 @@ var schema = `{
             "key": {
               "type": "string"
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "policy": {
@@ -1068,12 +1118,13 @@ var schema = `{
               "enum": [
                 "set",
                 [
-                  "dst-ip",
-                  "src-ip"
+                  "src-ip",
+                  "dst-ip"
                 ]
               ]
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "route_table": {
@@ -1087,7 +1138,8 @@ var schema = `{
           "type": {
             "key": {
               "type": "uuid",
-              "refTable": "ACL"
+              "refTable": "ACL",
+              "refType": "strong"
             },
             "min": 0,
             "max": "unlimited"
@@ -1100,7 +1152,8 @@ var schema = `{
               "refTable": "Copp",
               "refType": "weak"
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "dns_records": {
@@ -1130,7 +1183,8 @@ var schema = `{
           "type": {
             "key": {
               "type": "uuid",
-              "refTable": "Forwarding_Group"
+              "refTable": "Forwarding_Group",
+              "refType": "strong"
             },
             "min": 0,
             "max": "unlimited"
@@ -1176,7 +1230,8 @@ var schema = `{
           "type": {
             "key": {
               "type": "uuid",
-              "refTable": "Logical_Switch_Port"
+              "refTable": "Logical_Switch_Port",
+              "refType": "strong"
             },
             "min": 0,
             "max": "unlimited"
@@ -1186,7 +1241,8 @@ var schema = `{
           "type": {
             "key": {
               "type": "uuid",
-              "refTable": "QoS"
+              "refTable": "QoS",
+              "refType": "strong"
             },
             "min": 0,
             "max": "unlimited"
@@ -1212,7 +1268,8 @@ var schema = `{
               "refTable": "DHCP_Options",
               "refType": "weak"
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "dhcpv6_options": {
@@ -1222,7 +1279,8 @@ var schema = `{
               "refTable": "DHCP_Options",
               "refType": "weak"
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "dynamic_addresses": {
@@ -1230,7 +1288,8 @@ var schema = `{
             "key": {
               "type": "string"
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "enabled": {
@@ -1238,7 +1297,8 @@ var schema = `{
             "key": {
               "type": "boolean"
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "external_ids": {
@@ -1257,9 +1317,11 @@ var schema = `{
           "type": {
             "key": {
               "type": "uuid",
-              "refTable": "HA_Chassis_Group"
+              "refTable": "HA_Chassis_Group",
+              "refType": "strong"
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "name": {
@@ -1282,7 +1344,8 @@ var schema = `{
             "key": {
               "type": "string"
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "port_security": {
@@ -1301,7 +1364,8 @@ var schema = `{
               "minInteger": 1,
               "maxInteger": 4095
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "tag_request": {
@@ -1311,7 +1375,8 @@ var schema = `{
               "minInteger": 0,
               "maxInteger": 4095
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "type": {
@@ -1322,7 +1387,8 @@ var schema = `{
             "key": {
               "type": "boolean"
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         }
       },
@@ -1338,8 +1404,10 @@ var schema = `{
           "type": {
             "key": {
               "type": "uuid",
-              "refTable": "Meter_Band"
+              "refTable": "Meter_Band",
+              "refType": "strong"
             },
+            "min": 1,
             "max": "unlimited"
           }
         },
@@ -1360,7 +1428,8 @@ var schema = `{
             "key": {
               "type": "boolean"
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "name": {
@@ -1435,18 +1504,22 @@ var schema = `{
           "type": {
             "key": {
               "type": "uuid",
-              "refTable": "Address_Set"
+              "refTable": "Address_Set",
+              "refType": "strong"
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "exempted_ext_ips": {
           "type": {
             "key": {
               "type": "uuid",
-              "refTable": "Address_Set"
+              "refTable": "Address_Set",
+              "refType": "strong"
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "external_ids": {
@@ -1469,7 +1542,8 @@ var schema = `{
             "key": {
               "type": "string"
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "external_port_range": {
@@ -1483,7 +1557,8 @@ var schema = `{
             "key": {
               "type": "string"
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         },
         "options": {
@@ -1506,8 +1581,8 @@ var schema = `{
                 "set",
                 [
                   "dnat",
-                  "dnat_and_snat",
-                  "snat"
+                  "snat",
+                  "dnat_and_snat"
                 ]
               ]
             }
@@ -1581,7 +1656,8 @@ var schema = `{
               "type": "uuid",
               "refTable": "SSL"
             },
-            "min": 0
+            "min": 0,
+            "max": 1
           }
         }
       }
@@ -1592,7 +1668,8 @@ var schema = `{
           "type": {
             "key": {
               "type": "uuid",
-              "refTable": "ACL"
+              "refTable": "ACL",
+              "refType": "strong"
             },
             "min": 0,
             "max": "unlimited"
@@ -1655,8 +1732,8 @@ var schema = `{
               "enum": [
                 "set",
                 [
-                  "burst",
-                  "rate"
+                  "rate",
+                  "burst"
                 ]
               ]
             },

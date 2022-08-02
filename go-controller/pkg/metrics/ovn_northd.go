@@ -111,24 +111,20 @@ var ovnNorthdStopwatchShowMetricsMap = map[string]*stopwatchMetricDetails{
 }
 
 func RegisterOvnNorthdMetrics(clientset kubernetes.Interface, k8sNodeName string,
-	metricsScrapeInterval int, stopChan chan struct{}) {
+	metricsScrapeInterval int, stopChan <-chan struct{}) {
 	err := wait.PollImmediate(1*time.Second, 300*time.Second, func() (bool, error) {
 		return checkPodRunsOnGivenNode(clientset, []string{"name=ovn-north"}, k8sNodeName, true)
 	})
 	if err != nil {
-		if err == wait.ErrWaitTimeout {
-			klog.Errorf("Timed out while checking if OVN North Pod runs on this %q K8s Node: %v. "+
-				"Not registering OVN North Metrics on this Node", k8sNodeName, err)
-		} else {
-			klog.Infof("Not registering OVN North Metrics on this Node since ovn-northd is not running on this node.")
-		}
+		klog.Infof("Not registering OVN North Metrics because OVNKube North Pod was not found running on this "+
+			"node (%s)", k8sNodeName)
 		return
 	}
 	klog.Info("Found OVN North Pod running on this node. Registering OVN North Metrics")
 
 	// ovn-northd metrics
 	getOvnNorthdVersionInfo()
-	prometheus.MustRegister(prometheus.NewGaugeFunc(
+	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemNorthd,
@@ -142,7 +138,7 @@ func RegisterOvnNorthdMetrics(clientset kubernetes.Interface, k8sNodeName string
 		},
 		func() float64 { return 1 },
 	))
-	prometheus.MustRegister(prometheus.NewGaugeFunc(
+	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemNorthd,
@@ -169,7 +165,7 @@ func RegisterOvnNorthdMetrics(clientset kubernetes.Interface, k8sNodeName string
 			return -1
 		},
 	))
-	prometheus.MustRegister(prometheus.NewGaugeFunc(
+	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemNorthd,
@@ -179,7 +175,7 @@ func RegisterOvnNorthdMetrics(clientset kubernetes.Interface, k8sNodeName string
 			return getOvnNorthdConnectionStatusInfo(nbConnectionStatus)
 		},
 	))
-	prometheus.MustRegister(prometheus.NewGaugeFunc(
+	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemNorthd,
@@ -198,5 +194,5 @@ func RegisterOvnNorthdMetrics(clientset kubernetes.Interface, k8sNodeName string
 	// Register the ovn-northd stopwatch/show metrics with prometheus
 	componentStopwatchShowMetricsMap[ovnNorthd] = ovnNorthdStopwatchShowMetricsMap
 	registerStopwatchShowMetrics(ovnNorthd, MetricOvnNamespace, MetricOvnSubsystemNorthd)
-	go stopwatchShowMetricsUpdater(ovnNorthd)
+	go stopwatchShowMetricsUpdater(ovnNorthd, stopChan)
 }

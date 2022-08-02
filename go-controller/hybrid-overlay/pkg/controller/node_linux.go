@@ -19,6 +19,7 @@ import (
 	"github.com/vishvananda/netlink"
 
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/wait"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
@@ -43,6 +44,7 @@ type NodeController struct {
 	initialized bool
 	drMAC       net.HardwareAddr
 	drIP        net.IP
+	gwLRPIP     net.IP
 	vxlanPort   uint16
 	// contains a map of pods to corresponding tunnels
 	flowCache map[string]*flowCacheEntry
@@ -90,9 +92,13 @@ func (n *NodeController) AddPod(pod *kapi.Pod) error {
 	if !util.PodWantsNetwork(pod) {
 		return nil
 	}
+	if util.PodCompleted(pod) {
+		klog.Infof("Cleaning up hybrid overlay pod %s/%s because it has completed", pod.Namespace, pod.Name)
+		return n.DeletePod(pod)
+	}
 	podIPs, podMAC, err := getPodDetails(pod)
 	if err != nil {
-		klog.V(5).Infof("Cleaning up hybrid overlay pod %s/%s because %v", pod.Namespace, pod.Name, err)
+		klog.Warningf("Cleaning up hybrid overlay pod %s/%s because it has no OVN annotation %v", pod.Namespace, pod.Name, err)
 		return n.DeletePod(pod)
 	}
 
@@ -207,6 +213,37 @@ func (n *NodeController) hybridOverlayNodeUpdate(node *kapi.Node) error {
 			"output:"+extVXLANName,
 			cookie, cidr.String(), hotypes.HybridOverlayVNI, nodeIP.String(), drMAC.String()))
 
+	flows = append(flows,
+		fmt.Sprintf("cookie=0x%s,table=0,priority=101,ip,nw_dst=%s,nw_src=%s,"+
+			"actions=load:%d->NXM_NX_TUN_ID[0..31],"+
+			"set_field:%s->nw_src,"+
+			"set_field:%s->tun_dst,"+
+			"set_field:%s->eth_dst,"+
+			"output:"+extVXLANName,
+			cookie, cidr.String(), n.gwLRPIP.String(), hotypes.HybridOverlayVNI, n.drIP, nodeIP.String(), drMAC.String()))
+
+	if len(config.HybridOverlay.ClusterSubnets) == 0 {
+		// No static cluster subnet is provided in config. Try to detect the hybrid overlay node subnet dynamically
+		// Add a route via the hybrid overlay port IP through the management port
+		// interface for each hybrid overlay cluster subnet
+		mgmtPortLink, err := netlink.LinkByName(types.K8sMgmtIntfName)
+		if err != nil {
+			return fmt.Errorf("failed to lookup link %s: %v", types.K8sMgmtIntfName, err)
+		}
+
+		route := &netlink.Route{
+			Dst:       cidr,
+			LinkIndex: mgmtPortLink.Attrs().Index,
+			Scope:     netlink.SCOPE_UNIVERSE,
+			Gw:        n.drIP,
+		}
+		err = netlink.RouteAdd(route)
+		if err != nil && !os.IsExist(err) {
+			return fmt.Errorf("failed to add route for subnet %s via gateway %s: %v",
+				route.Dst, route.Gw, err)
+		}
+	}
+
 	n.updateFlowCacheEntry(cookie, flows, false)
 	n.requestFlowSync()
 	return nil
@@ -214,12 +251,24 @@ func (n *NodeController) hybridOverlayNodeUpdate(node *kapi.Node) error {
 
 // AddNode handles node additions and updates
 func (n *NodeController) AddNode(node *kapi.Node) error {
+	klog.Info("Add Node ", node.Name)
 	var err error
+	if n.drIP == nil {
+		subnet, err := getLocalNodeSubnet(n.nodeName)
+		if err != nil {
+			return err
+		}
+		// n.drIP is always 3rd address in the subnet
+		hybridOverlayIfAddr := util.GetNodeHybridOverlayIfAddr(subnet)
+		n.drIP = hybridOverlayIfAddr.IP
+	}
+
 	if node.Name == n.nodeName {
 		// Retry hybrid overlay initialization if the master was
 		// slow to add the hybrid overlay logical network elements
 		err = n.EnsureHybridOverlayBridge(node)
 	} else {
+		klog.Infof("Add hybridOverlay Node %s", node.Name)
 		err = n.hybridOverlayNodeUpdate(node)
 	}
 	return err
@@ -238,6 +287,32 @@ func (n *NodeController) DeleteNode(node *kapi.Node) error {
 	}
 
 	n.deleteFlowsByCookie(nameToCookie(node.Name))
+
+	cidr, _, _, err := getNodeDetails(node)
+	if cidr == nil || err != nil {
+		return fmt.Errorf("failed to lookup hybrid overlay node cidr for node %s: %v", node.Name, err)
+	}
+	if len(config.HybridOverlay.ClusterSubnets) == 0 {
+		// No static cluster subnet is provided in config. Try to detect the hybrid overlay node subnet dynamically
+		// Add a route via the hybrid overlay port IP through the management port
+		// interface for each hybrid overlay cluster subnet
+		mgmtPortLink, err := netlink.LinkByName(types.K8sMgmtIntfName)
+		if err != nil {
+			return fmt.Errorf("failed to lookup link %s: %v", types.K8sMgmtIntfName, err)
+		}
+
+		route := &netlink.Route{
+			Dst:       cidr,
+			LinkIndex: mgmtPortLink.Attrs().Index,
+			Scope:     netlink.SCOPE_UNIVERSE,
+			Gw:        n.drIP,
+		}
+		err = netlink.RouteDel(route)
+		if err != nil && !os.IsExist(err) {
+			return fmt.Errorf("failed to delete route for subnet %s via gateway %s: %v",
+				route.Dst, route.Gw, err)
+		}
+	}
 	return nil
 }
 
@@ -279,6 +354,13 @@ func getIPAsHexString(ip net.IP) string {
 func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
 	if n.initialized {
 		return nil
+	}
+	if n.gwLRPIP == nil {
+		gwLRPIP, err := util.ParseNodeGatewayRouterLRPAddr(node)
+		if err != nil {
+			return fmt.Errorf("invalid Gateway Router LRP IP: %v", err)
+		}
+		n.gwLRPIP = gwLRPIP
 	}
 
 	subnet, err := getLocalNodeSubnet(n.nodeName)
@@ -403,14 +485,14 @@ func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
 			"IN_PORT",
 			extVXLANName, subnet.String(), hotypes.HybridOverlayVNI, n.drMAC.String(), portMACRaw))
 
+	// Add a route via the hybrid overlay port IP through the management port
+	// interface for each hybrid overlay cluster subnet
+	mgmtPortLink, err := netlink.LinkByName(types.K8sMgmtIntfName)
+	if err != nil {
+		return fmt.Errorf("failed to lookup link %s: %v", types.K8sMgmtIntfName, err)
+	}
+	mgmtPortMAC := mgmtPortLink.Attrs().HardwareAddr
 	if len(config.HybridOverlay.ClusterSubnets) > 0 {
-		// Add a route via the hybrid overlay port IP through the management port
-		// interface for each hybrid overlay cluster subnet
-		mgmtPortLink, err := netlink.LinkByName(types.K8sMgmtIntfName)
-		if err != nil {
-			return fmt.Errorf("failed to lookup link %s: %v", types.K8sMgmtIntfName, err)
-		}
-		mgmtPortMAC := mgmtPortLink.Attrs().HardwareAddr
 		for _, clusterEntry := range config.HybridOverlay.ClusterSubnets {
 			route := &netlink.Route{
 				Dst:       clusterEntry.CIDR,
@@ -424,14 +506,41 @@ func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
 					route.Dst, route.Gw, err)
 			}
 		}
-
-		// Add a rule to fix up return host-network traffic
-		mgmtIfAddr := util.GetNodeManagementIfAddr(subnet)
-		flows = append(flows,
-			fmt.Sprintf("table=10,priority=100,ip,nw_dst=%s,"+
-				"actions=mod_dl_src:%s,mod_dl_dst:%s,output:ext",
-				mgmtIfAddr.IP.String(), portMAC.String(), mgmtPortMAC.String()))
+	} else {
+		nodes, err := n.nodeLister.List(labels.Everything())
+		if err != nil {
+			return err
+		}
+		for _, node := range nodes {
+			if subnet, _ := houtil.ParseHybridOverlayHostSubnet(node); subnet != nil {
+				route := &netlink.Route{
+					Dst:       subnet,
+					LinkIndex: mgmtPortLink.Attrs().Index,
+					Scope:     netlink.SCOPE_UNIVERSE,
+					Gw:        n.drIP,
+				}
+				err := netlink.RouteAdd(route)
+				if err != nil && !os.IsExist(err) {
+					return fmt.Errorf("failed to add route for subnet %s via gateway %s: %v",
+						route.Dst, route.Gw, err)
+				}
+			}
+		}
 	}
+
+	// Add a rule to fix up return host-network traffic
+	mgmtIfAddr := util.GetNodeManagementIfAddr(subnet)
+	flows = append(flows,
+		fmt.Sprintf("table=10,priority=100,ip,nw_dst=%s,"+
+			"actions=mod_dl_src:%s,mod_dl_dst:%s,output:ext",
+			mgmtIfAddr.IP.String(), portMAC.String(), mgmtPortMAC.String()))
+	// Add a rule to fix up return nodePort service traffic
+	gwIfAddr := util.GetNodeGatewayIfAddr(subnet)
+	gwPortMAC := util.IPAddrToHWAddr(gwIfAddr.IP)
+	flows = append(flows,
+		fmt.Sprintf("table=10,priority=100,ip,nw_dst=%s,"+
+			"actions=mod_nw_dst:%s,mod_dl_src:%s,mod_dl_dst:%s,output:ext",
+			n.drIP, n.gwLRPIP.String(), portMAC.String(), gwPortMAC.String()))
 
 	n.updateFlowCacheEntry("0x0", flows, false)
 	n.requestFlowSync()
@@ -448,13 +557,16 @@ func (n *NodeController) RunFlowSync(stopCh <-chan struct{}) {
 	klog.Info("Starting hybrid overlay OpenFlow sync thread")
 	klog.Info("Running initial OpenFlow sync")
 	n.syncFlows()
-
+	syncPeriod := 30 * time.Second
+	timer := time.NewTicker(syncPeriod)
+	defer timer.Stop()
 	for {
 		select {
-		case <-time.After(30 * time.Second):
+		case <-timer.C:
 			n.syncFlows()
 		case <-n.flowChan:
 			n.syncFlows()
+			timer.Reset(syncPeriod)
 		case <-stopCh:
 			klog.Info("Shutting down OpenFlow sync thread")
 			return
@@ -515,9 +627,9 @@ func (n *NodeController) syncFlows() {
 			flows = append(flows, entry.learnedFlow)
 		}
 	}
-	_, _, err = util.ReplaceOFFlows(extBridgeName, flows)
+	_, stderr, err = util.ReplaceOFFlows(extBridgeName, flows)
 	if err != nil {
-		klog.Errorf("Failed to add flows, error: %v, flows: %s", err, flows)
+		klog.Errorf("Failed to add flows, error: %v, stderr: %s, flows: %s", err, stderr, flows)
 	}
 }
 

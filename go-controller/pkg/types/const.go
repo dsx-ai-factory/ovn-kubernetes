@@ -55,10 +55,6 @@ const (
 
 	NodeLocalSwitch = "node_local_switch"
 
-	// ACL directions
-	//DirectionToLPort   = "to-lport"
-	//DirectionFromLPort = "from-lport"
-	//
 	// ACL Priorities
 
 	// Default routed multicast allow acl rule priority
@@ -78,8 +74,8 @@ const (
 	MGMTPortPolicyPriority                = "1005"
 	NodeSubnetPolicyPriority              = "1004"
 	InterNodePolicyPriority               = "1003"
-	HybridOverlaySubnetPriority           = "1002"
-	HybridOverlayReroutePriority          = "501"
+	HybridOverlaySubnetPriority           = 1002
+	HybridOverlayReroutePriority          = 501
 	DefaultNoRereoutePriority             = 101
 	EgressIPReroutePriority               = 100
 
@@ -93,20 +89,37 @@ const (
 	V4NodeLocalNATSubnetNextHop    = "169.254.0.1"
 	V4NodeLocalDistributedGWPortIP = "169.254.0.2"
 
-	V4MasqueradeSubnet = "169.254.169.0/30"
-	V4HostMasqueradeIP = "169.254.169.2"
-	V6HostMasqueradeIP = "fd69::2"
-	V4OVNMasqueradeIP  = "169.254.169.1"
-	V6OVNMasqueradeIP  = "fd69::1"
+	V4MasqueradeSubnet         = "169.254.169.0/30"
+	V4HostMasqueradeIP         = "169.254.169.2"
+	V6HostMasqueradeIP         = "fd69::2"
+	V4OVNMasqueradeIP          = "169.254.169.1"
+	V6OVNMasqueradeIP          = "fd69::1"
+	V4HostETPLocalMasqueradeIP = "169.254.169.3"
+	V6HostETPLocalMasqueradeIP = "fd69::3"
 
 	// OpenFlow and Networking constants
 	RouteAdvertisementICMPType    = 134
 	NeighborAdvertisementICMPType = 136
 
-	OvnACLLoggingMeter = "acl-logging"
+	// Meter constants
+	OvnACLLoggingMeter   = "acl-logging"
+	OvnRateLimitingMeter = "rate-limiter"
+	PacketsPerSecond     = "pktps"
+	MeterAction          = "drop"
+
+	// Default Meters created on GRs.
+	OVNARPRateLimiter              = "arp"
+	OVNARPResolveRateLimiter       = "arp-resolve"
+	OVNBFDRateLimiter              = "bfd"
+	OVNControllerEventsRateLimiter = "event-elb"
+	OVNICMPV4ErrorsRateLimiter     = "icmp4-error"
+	OVNICMPV6ErrorsRateLimiter     = "icmp6-error"
+	OVNRejectRateLimiter           = "reject"
+	OVNTCPRSTRateLimiter           = "tcp-reset"
 
 	// OVN-K8S Address Sets Names
 	HybridRoutePolicyPrefix = "hybrid-route-pods-"
+	EgressQoSRulePrefix     = "egress-qos-pods-"
 
 	// OVN-K8S Topology Versions
 	OvnSingleJoinSwitchTopoVersion = 1
@@ -117,9 +130,14 @@ const (
 	OvnCurrentTopologyVersion      = OvnRoutingViaHostTopoVersion
 
 	// OVN-K8S annotation & taint constants
-	OvnK8sPrefix           = "k8s.ovn.org"
+	OvnK8sPrefix = "k8s.ovn.org"
+	// Deprecated: we used to set topology version as an annotation on the node. We don't do this anymore.
 	OvnK8sTopoAnno         = OvnK8sPrefix + "/" + "topology-version"
 	OvnK8sSmallMTUTaintKey = OvnK8sPrefix + "/" + "mtu-too-small"
+
+	// name of the configmap used to synchronize status (e.g. watch for topology changes)
+	OvnK8sStatusCMName         = "control-plane-status"
+	OvnK8sStatusKeyTopoVersion = "topology-version"
 
 	// Monitoring constants
 	SFlowAgent = "ovn-k8s-mp0"
@@ -139,4 +157,6 @@ const (
 
 	OVSDBTimeout     = 10 * time.Second
 	OVSDBWaitTimeout = 0
+
+	ClusterLBGroupName = "clusterLBGroup"
 )

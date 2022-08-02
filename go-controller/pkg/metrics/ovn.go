@@ -274,12 +274,16 @@ func setOvnControllerConfigurationMetrics(ovsDBClient *util.OvsdbClient) (err er
 	metricMonitorAll.Set(ovnMonitorValue)
 	// set ovn-encap-ip metric
 	encapIPValue := openVswitchRow.ExternalIds["ovn-encap-ip"]
+	// To update not only values but also labels for metrics, we use Reset() to delete previous labels+value
+	metricEncapIP.Reset()
 	metricEncapIP.WithLabelValues(encapIPValue).Set(1)
 	// set ovn-remote metric
 	ovnRemoteValue := openVswitchRow.ExternalIds["ovn-remote"]
+	metricSbConnectionMethod.Reset()
 	metricSbConnectionMethod.WithLabelValues(ovnRemoteValue).Set(1)
 	// set ovn-encap-type metric
 	encapTypeValue := openVswitchRow.ExternalIds["ovn-encap-type"]
+	metricEncapType.Reset()
 	metricEncapType.WithLabelValues(encapTypeValue).Set(1)
 	// set ovn-k8s-node-port metric
 	var ovnNodePortValue = 1
@@ -290,12 +294,13 @@ func setOvnControllerConfigurationMetrics(ovsDBClient *util.OvsdbClient) (err er
 	metricOvnNodePortEnabled.Set(float64(ovnNodePortValue))
 	// set ovn-bridge-mappings metric
 	brdigeMappingValue := openVswitchRow.ExternalIds["ovn-bridge-mappings"]
+	metricBridgeMappings.Reset()
 	metricBridgeMappings.WithLabelValues(brdigeMappingValue).Set(1)
 	return nil
 }
 
 func ovnControllerConfigurationMetricsUpdater(ovsDBClient *util.OvsdbClient,
-	metricsScrapeInterval int, stopChan chan struct{}) {
+	metricsScrapeInterval int, stopChan <-chan struct{}) {
 	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
 	defer ticker.Stop()
 
@@ -304,7 +309,7 @@ func ovnControllerConfigurationMetricsUpdater(ovsDBClient *util.OvsdbClient,
 		case <-ticker.C:
 			err := setOvnControllerConfigurationMetrics(ovsDBClient)
 			if err != nil {
-				klog.Errorf("%s", err.Error())
+				klog.Errorf("Setting ovn controller config metrics failed: %s", err.Error())
 			}
 		case <-stopChan:
 			return
@@ -336,9 +341,9 @@ func getPortCount(portType string) float64 {
 }
 
 func RegisterOvnControllerMetrics(ovsDBClient *util.OvsdbClient, metricsScrapeInterval int,
-	stopChan chan struct{}) {
+	stopChan <-chan struct{}) {
 	getOvnControllerVersionInfo()
-	prometheus.MustRegister(prometheus.NewGaugeFunc(
+	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemController,
@@ -354,7 +359,7 @@ func RegisterOvnControllerMetrics(ovsDBClient *util.OvsdbClient, metricsScrapeIn
 	))
 
 	// ovn-controller metrics
-	prometheus.MustRegister(prometheus.NewCounterFunc(
+	ovnRegistry.MustRegister(prometheus.NewCounterFunc(
 		prometheus.CounterOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemController,
@@ -376,7 +381,7 @@ func RegisterOvnControllerMetrics(ovsDBClient *util.OvsdbClient, metricsScrapeIn
 			}
 			return 0
 		}))
-	prometheus.MustRegister(prometheus.NewGaugeFunc(
+	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemController,
@@ -387,7 +392,7 @@ func RegisterOvnControllerMetrics(ovsDBClient *util.OvsdbClient, metricsScrapeIn
 		func() float64 {
 			return getPortCount("patch")
 		}))
-	prometheus.MustRegister(prometheus.NewGaugeFunc(
+	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemController,
@@ -399,13 +404,13 @@ func RegisterOvnControllerMetrics(ovsDBClient *util.OvsdbClient, metricsScrapeIn
 		}))
 
 	// register ovn-controller configuration metrics
-	prometheus.MustRegister(metricRemoteProbeInterval)
-	prometheus.MustRegister(metricOpenFlowProbeInterval)
-	prometheus.MustRegister(metricMonitorAll)
-	prometheus.MustRegister(metricEncapIP)
-	prometheus.MustRegister(metricSbConnectionMethod)
-	prometheus.MustRegister(metricEncapType)
-	prometheus.MustRegister(metricBridgeMappings)
+	ovnRegistry.MustRegister(metricRemoteProbeInterval)
+	ovnRegistry.MustRegister(metricOpenFlowProbeInterval)
+	ovnRegistry.MustRegister(metricMonitorAll)
+	ovnRegistry.MustRegister(metricEncapIP)
+	ovnRegistry.MustRegister(metricSbConnectionMethod)
+	ovnRegistry.MustRegister(metricEncapType)
+	ovnRegistry.MustRegister(metricBridgeMappings)
 	// Register the ovn-controller coverage/show metrics
 	componentCoverageShowMetricsMap[ovnController] = ovnControllerCoverageShowMetricsMap
 	registerCoverageShowMetrics(ovnController, MetricOvnNamespace, MetricOvnSubsystemController)
@@ -419,5 +424,5 @@ func RegisterOvnControllerMetrics(ovsDBClient *util.OvsdbClient, metricsScrapeIn
 	// ovn-controller coverage show metrics updater
 	go coverageShowMetricsUpdater(ovnController, metricsScrapeInterval, stopChan)
 	// ovn-controller stopwatch show metrics updater
-	go stopwatchShowMetricsUpdater(ovnController)
+	go stopwatchShowMetricsUpdater(ovnController, stopChan)
 }

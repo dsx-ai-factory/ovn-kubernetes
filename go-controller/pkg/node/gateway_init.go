@@ -142,7 +142,7 @@ func getGatewayNextHops() ([]net.IP, string, error) {
 	}
 	gatewayIntf := config.Gateway.Interface
 	if needIPv4NextHop || needIPv6NextHop || gatewayIntf == "" {
-		defaultGatewayIntf, defaultGatewayNextHops, err := getDefaultGatewayInterfaceDetails()
+		defaultGatewayIntf, defaultGatewayNextHops, err := getDefaultGatewayInterfaceDetails(gatewayIntf)
 		if err != nil {
 			return nil, "", err
 		}
@@ -247,16 +247,14 @@ func configureSvcRouteViaInterface(iface string, gwIPs []net.IP) error {
 			return fmt.Errorf("unable to find gateway IP for subnet: %v, found IPs: %v", subnet, gwIPs)
 		}
 
-		route, err := util.LinkRouteGet(link, gwIP[0], subnet)
-		if err != nil {
-			return fmt.Errorf("unable to get route[%s via %s dev %s]: %v", subnet, gwIP[0], iface, err)
+		mtu := config.Default.MTU
+		if config.Default.RoutableMTU != 0 {
+			mtu = config.Default.RoutableMTU
 		}
-		if route == nil || route.MTU != config.Default.MTU {
-			// Add or update the route
-			err = util.LinkRoutesReplace(link, gwIP[0], []*net.IPNet{subnet}, config.Default.MTU)
-			if err != nil {
-				return fmt.Errorf("unable to add/update route for service via %s, error: %v", iface, err)
-			}
+
+		err = util.LinkRoutesAddOrUpdateMTU(link, gwIP[0], []*net.IPNet{subnet}, mtu)
+		if err != nil {
+			return fmt.Errorf("unable to add/update route for service via %s, error: %v", iface, err)
 		}
 	}
 	return nil
@@ -321,7 +319,7 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	switch config.Gateway.Mode {
 	case config.GatewayModeLocal:
 		klog.Info("Preparing Local Gateway")
-		gw, err = newLocalGateway(n.name, subnets, gatewayNextHops, gatewayIntf, ifAddrs, nodeAnnotator,
+		gw, err = newLocalGateway(n.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator,
 			managementPortConfig, n.Kube, n.watchFactory)
 	case config.GatewayModeShared:
 		klog.Info("Preparing Shared Gateway")

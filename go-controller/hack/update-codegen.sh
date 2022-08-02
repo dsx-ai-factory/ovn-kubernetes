@@ -10,7 +10,7 @@ if  ! ( command -v modelgen > /dev/null ); then
   olddir="${PWD}"
   builddir="$(mktemp -d)"
   cd "${builddir}"
-  GO111MODULE=on go install github.com/ovn-org/libovsdb/cmd/modelgen@8b93f8d269af
+  GO111MODULE=on go install github.com/ovn-org/libovsdb/cmd/modelgen@2cbe2d093e1247d42050306dd5c9a2d6c11f2460
   cd "${olddir}"
   if [[ "${builddir}" == /tmp/* ]]; then #paranoia
       rm -rf "${builddir}"
@@ -41,6 +41,7 @@ for crd in ${crds}; do
   vers=$(ls pkg/crd/$crd 2> /dev/null)
   echo "Generating deepcopy funcs for $crd:$vers"
   deepcopy-gen \
+    --go-header-file hack/boilerplate.go.txt \
     --input-dirs github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers \
     -O zz_generated.deepcopy \
     --bounding-dirs github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd
@@ -48,6 +49,7 @@ for crd in ${crds}; do
 
   echo "Generating clientset for $crd"
   client-gen \
+    --go-header-file hack/boilerplate.go.txt \
     --clientset-name "${CLIENTSET_NAME_VERSIONED:-versioned}" \
     --input-base "" \
     --input github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers \
@@ -56,12 +58,14 @@ for crd in ${crds}; do
 
   echo "Generating listers for $crd"
   lister-gen \
+    --go-header-file hack/boilerplate.go.txt \
     --input-dirs github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers \
     --output-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers/apis/listers \
     "$@"
 
   echo "Generating informers for $crd"
   informer-gen \
+    --go-header-file hack/boilerplate.go.txt \
     --input-dirs github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers \
     --versioned-clientset-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers/apis/clientset/versioned \
     --listers-package  github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers/apis/listers \
@@ -83,3 +87,8 @@ sed -i -e':begin;$!N;s/.*metadata:\n.*type: object/&\n            properties:\n 
 ## adding validation to objects only to the fields
 sed -i -e ':begin;$!N;s/                          type: string\n.*type: object/&\n                      minProperties: 1\n                      maxProperties: 1/;P;D' \
 	_output/crds/k8s.ovn.org_egressfirewalls.yaml
+
+echo "Editing EgressQoS CRD"
+## We desire that only EgressQoS with the name "default" are accepted by the apiserver.
+sed -i -e':begin;$!N;s/.*metadata:\n.*type: object/&\n            properties:\n              name:\n                type: string\n                pattern: ^default$/;P;D' \
+	_output/crds/k8s.ovn.org_egressqoses.yaml

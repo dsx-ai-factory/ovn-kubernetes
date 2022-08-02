@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	multinetworkpolicy "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta2"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	knet "k8s.io/api/networking/v1"
@@ -14,14 +13,12 @@ import (
 
 const PolicyForAnnotation = "k8s.v1.cni.cncf.io/policy-for"
 
-func (oc *Controller) syncMultiNetworkPolicies(multiPolicies []interface{}) {
+func (oc *Controller) syncMultiNetworkPolicies(multiPolicies []interface{}) error {
 	expectedPolicies := make(map[string]map[string]bool)
 	for _, npInterface := range multiPolicies {
 		policy, ok := npInterface.(*multinetworkpolicy.MultiNetworkPolicy)
 		if !ok {
-			klog.Errorf("Spurious object in syncMultiNetworkPolicies: %v",
-				npInterface)
-			continue
+			return fmt.Errorf("spurious object in syncMultiNetworkPolicies: %v", npInterface)
 		}
 		if !oc.shouldApplyMultiPolicy(policy) {
 			klog.V(5).Infof("[controller(%s)] skipping syncing policy %s/%s",
@@ -37,30 +34,7 @@ func (oc *Controller) syncMultiNetworkPolicies(multiPolicies []interface{}) {
 		}
 	}
 
-	stalePGs := []string{}
-	err := oc.addressSetFactory.ProcessEachAddressSet(func(addrSetName, namespaceName, policyName string) {
-		if policyName != "" && !expectedPolicies[namespaceName][policyName] {
-			// policy doesn't exist on k8s. Delete the port group
-			portGroupName := fmt.Sprintf("%s_%s", namespaceName, policyName)
-			hashedLocalPortGroup := oc.nadInfo.Prefix + hashedPortGroup(portGroupName)
-			stalePGs = append(stalePGs, hashedLocalPortGroup)
-			// delete the address sets for this old policy from OVN
-			if err := oc.addressSetFactory.DestroyAddressSetInBackingStore(addrSetName); err != nil {
-				klog.Errorf(err.Error())
-			}
-		}
-	})
-	if err != nil {
-		klog.Errorf("Error in syncing multi network policies: %v", err)
-	}
-	if len(stalePGs) > 0 {
-		err = libovsdbops.DeletePortGroups(oc.mc.nbClient, stalePGs...)
-		if err != nil {
-			klog.Errorf("Error removing stale port groups %v: %v", stalePGs, err)
-		} else {
-			klog.V(5).Infof("Removed following stale port groups: %v", stalePGs)
-		}
-	}
+	return oc.syncNetworkPoliciesRetriableCommon(expectedPolicies)
 }
 
 func (oc *Controller) shouldApplyMultiPolicy(mpolicy *multinetworkpolicy.MultiNetworkPolicy) bool {
@@ -148,25 +122,4 @@ func convertMultiNetPolicyToNetPolicy(mpolicy *multinetworkpolicy.MultiNetworkPo
 		policy.Spec.PolicyTypes[i] = knet.PolicyType(mpolicytype)
 	}
 	return &policy
-}
-
-// addMultiNetworkPolicy creates and applies OVN ACLs to pod logical switch
-// ports from Kubernetes NetworkPolicy objects using OVN Port Groups
-func (oc *Controller) addMultiNetworkPolicy(mpolicy *multinetworkpolicy.MultiNetworkPolicy) {
-	if !oc.shouldApplyMultiPolicy(mpolicy) {
-		return
-	}
-	klog.Infof("[controller(%s)] adding multi network policy %s in namespace %s for networks %q",
-		oc.nadInfo.NetName, mpolicy.Name, mpolicy.Namespace, mpolicy.Annotations[PolicyForAnnotation])
-	policy := convertMultiNetPolicyToNetPolicy(mpolicy)
-	oc.addNetworkPolicy(policy)
-}
-
-func (oc *Controller) deleteMultiNetworkPolicy(mpolicy *multinetworkpolicy.MultiNetworkPolicy) {
-	if !oc.shouldApplyMultiPolicy(mpolicy) {
-		return
-	}
-	klog.Infof("[controller(%s)] deleting multi network policy %s in namespace %s for networks %q",
-		oc.nadInfo.NetName, mpolicy.Name, mpolicy.Namespace, mpolicy.Annotations[PolicyForAnnotation])
-	oc.deleteNetworkPolicy(mpolicy.Name, mpolicy.Namespace)
 }

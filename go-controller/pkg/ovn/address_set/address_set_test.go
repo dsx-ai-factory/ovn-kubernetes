@@ -14,6 +14,7 @@ import (
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
+	"github.com/ovn-org/libovsdb/ovsdb"
 )
 
 type testAddressSetName struct {
@@ -109,7 +110,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 					},
 				}
 
-				err = asFactory.ProcessEachAddressSet(func(addrSetName, namespaceName, nameSuffix string) {
+				err = asFactory.ProcessEachAddressSet(func(addrSetName, namespaceName, nameSuffix string) error {
 					found := false
 					for _, n := range namespaces {
 						name := n.makeNames()
@@ -119,6 +120,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 						}
 					}
 					gomega.Expect(found).To(gomega.BeTrue())
+					return nil
 				})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				return nil
@@ -471,6 +473,77 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
+		ginkgo.It("returns ops to add an IP to an empty address set", func() {
+			app.Action = func(ctx *cli.Context) error {
+				const addr1 string = "1.2.3.4"
+
+				dbSetup := libovsdbtest.TestSetup{}
+				var libovsdbOvnNBClient libovsdbclient.Client
+				var err error
+				libovsdbOvnNBClient, _, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				asFactory = NewOvnAddressSetFactory(netNameInfo, libovsdbOvnNBClient)
+
+				_, err = config.InitConfig(ctx, nil, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				as, err := asFactory.NewAddressSet("foobar", nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				ops, err := as.AddIPsReturnOps([]net.IP{net.ParseIP(addr1)})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				var addr1Interface interface{} = addr1
+				expectedOps, err := ovsdb.NewOvsSet(addr1Interface)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(ops[0].Mutations[0].Value).To(gomega.Equal(expectedOps))
+				expectedDatabaseState := &nbdb.AddressSet{
+					Name:        hashedAddressSet(addrsetName + ipv4AddressSetSuffix),
+					Addresses:   []string{}, // nothing added to address set yet since transact isn't called
+					ExternalIDs: map[string]string{"name": addrsetName + ipv4AddressSetSuffix},
+				}
+				gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("returns ops to add duplicate IPs to an empty address set", func() {
+			app.Action = func(ctx *cli.Context) error {
+				const addr1 string = "1.2.3.4"
+				dbSetup := libovsdbtest.TestSetup{}
+				var libovsdbOvnNBClient libovsdbclient.Client
+				var err error
+				libovsdbOvnNBClient, _, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				asFactory = NewOvnAddressSetFactory(netNameInfo, libovsdbOvnNBClient)
+
+				_, err = config.InitConfig(ctx, nil, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				as, err := asFactory.NewAddressSet("foobar", nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				ops, err := as.AddIPsReturnOps([]net.IP{net.ParseIP(addr1), net.ParseIP(addr1)})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				var addr1Interface interface{} = addr1
+				expectedOps, err := ovsdb.NewOvsSet(addr1Interface)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(ops[0].Mutations[0].Value).To(gomega.Equal(expectedOps))
+				expectedDatabaseState := &nbdb.AddressSet{
+					Name:        hashedAddressSet(addrsetName + ipv4AddressSetSuffix),
+					Addresses:   []string{}, // nothing added to address set yet since transact isn't called
+					ExternalIDs: map[string]string{"name": addrsetName + ipv4AddressSetSuffix},
+				}
+				gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
 		ginkgo.It("gets all IPs from an address set", func() {
 			app.Action = func(ctx *cli.Context) error {
 				dbSetup := libovsdbtest.TestSetup{
@@ -540,6 +613,42 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
+
+		ginkgo.It("returns ops to delete an IP from an address set", func() {
+			app.Action = func(ctx *cli.Context) error {
+				const addr1 string = "1.2.3.4"
+
+				_, err := config.InitConfig(ctx, nil, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				dbSetup := libovsdbtest.TestSetup{}
+				var libovsdbOvnNBClient libovsdbclient.Client
+				libovsdbOvnNBClient, _, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				asFactory = NewOvnAddressSetFactory(netNameInfo, libovsdbOvnNBClient)
+				as, err := asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1)})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				ops, err := as.DeleteIPsReturnOps([]net.IP{net.ParseIP(addr1)})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				var addr1Interface interface{} = addr1
+				expectedOps, err := ovsdb.NewOvsSet(addr1Interface)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(ops[0].Mutations[0].Value).To(gomega.Equal(expectedOps))
+				expectedDatabaseState := &nbdb.AddressSet{
+					Name:        hashedAddressSet(addrsetName + ipv4AddressSetSuffix),
+					Addresses:   []string{addr1}, // nothing is deleted from address set yet since transact isn't called,
+					ExternalIDs: map[string]string{"name": addrsetName + ipv4AddressSetSuffix},
+				}
+				gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
 		ginkgo.It("sets an already set addressSet", func() {
 			app.Action = func(ctx *cli.Context) error {
 				const addr1 string = "1.2.3.4"

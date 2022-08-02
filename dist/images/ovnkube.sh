@@ -26,7 +26,6 @@ BASEDIR=$(dirname $0)
 #    ovn-node       Runs ovnkube in node mode (v3)
 #    cleanup-ovn-node   Runs ovnkube to cleanup the node (v3)
 #    cleanup-ovs-server Cleanup ovs-server (v3)
-#    run-nbctld     Runs ovn-nbctl in the daemon mode (v3)
 #    display        Displays log files
 #    display_env    Displays environment variables
 #    ovn_debug      Displays ovn/ovs configuration and flows
@@ -82,6 +81,7 @@ BASEDIR=$(dirname $0)
 # OVN_LFLOW_CACHE_LIMIT_KB - maximum size of the logical flow cache of ovn-controller
 # OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 # OVN_EGRESSFIREWALL_ENABLE - enable egressFirewall for ovn-kubernetes
+# OVN_EGRESSQOS_ENABLE - enable egress QoS for ovn-kubernetes
 # OVN_UNPRIVILEGED_MODE - execute CNI ovs/netns commands from host (default no)
 # OVNKUBE_NODE_MODE - ovnkube node mode of operation, one of: full, dpu, dpu-host (default: full)
 # OVNKUBE_NODE_MGMT_PORT_NETDEV - ovnkube node management port netdev. valid when ovnkube node mode is: dpu, dpu-host
@@ -110,7 +110,6 @@ ovn_loglevel_northd=${OVN_LOGLEVEL_NORTHD:-"-vconsole:info"}
 ovn_loglevel_nb=${OVN_LOGLEVEL_NB:-"-vconsole:info"}
 ovn_loglevel_sb=${OVN_LOGLEVEL_SB:-"-vconsole:info"}
 ovn_loglevel_controller=${OVN_LOGLEVEL_CONTROLLER:-"-vconsole:info"}
-ovn_loglevel_nbctld=${OVN_LOGLEVEL_NBCTLD:-"-vconsole:info"}
 
 ovnkubelogdir=/var/log/ovn-kubernetes
 
@@ -184,6 +183,7 @@ ovn_gateway_router_subnet=${OVN_GATEWAY_ROUTER_SUBNET:-""}
 net_cidr=${OVN_NET_CIDR:-10.128.0.0/14/23}
 svc_cidr=${OVN_SVC_CIDR:-172.30.0.0/16}
 mtu=${OVN_MTU:-1400}
+routable_mtu=${OVN_ROUTABLE_MTU:-}
 
 # set metrics endpoint bind to K8S_NODE_IP
 metrics_endpoint_ip=${OVN_METRICS_ENDPOINT_IP}
@@ -287,17 +287,23 @@ ovn_egressfirewall_enable=${OVN_EGRESSFIREWALL_ENABLE:-false}
 ovn_multi_network_enable=${OVN_MULTI_NETWORK_ENABLE:-false}
 #OVN_MULTI_NETWORKPOLICY_ENABLE - enable multi network policy for ovn-kubernetes
 ovn_multi_networkpolicy_enable=${OVN_MULTI_NETWORKPOLICY_ENABLE:-false}
+#OVN_EGRESSQOS_ENABLE - enable egress QoS for ovn-kubernetes
+ovn_egressqos_enable=${OVN_EGRESSQOS_ENABLE:-false}
 #OVN_DISABLE_OVN_IFACE_ID_VER - disable usage of the OVN iface-id-ver option
 ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER:-false}
 ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
 ovn_netflow_targets=${OVN_NETFLOW_TARGETS:-}
 ovn_sflow_targets=${OVN_SFLOW_TARGETS:-}
 ovn_ipfix_targets=${OVN_IPFIX_TARGETS:-}
+ovn_ipfix_sampling=${OVN_IPFIX_SAMPLING:-} \
+ovn_ipfix_cache_max_flows=${OVN_IPFIX_CACHE_MAX_FLOWS:-} \
+ovn_ipfix_cache_active_timeout=${OVN_IPFIX_CACHE_ACTIVE_TIMEOUT:-} \
 
 # OVNKUBE_NODE_MODE - is the mode which ovnkube node operates
 ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
 # OVNKUBE_NODE_mgmt_PORT_NETDEV - is the net device to be used for management port
 ovnkube_node_mgmt_port_netdev=${OVNKUBE_NODE_MGMT_PORT_NETDEV:-}
+ovnkube_config_duration_enable=${OVNKUBE_CONFIG_DURATION_ENABLE:-false}
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node
 ovn_encap_ip=${OVN_ENCAP_IP:-}
 
@@ -517,7 +523,7 @@ check_health() {
   "ovnnb_db" | "ovnsb_db")
     ctl_file=${OVN_RUNDIR}/${1}.ctl
     ;;
-  "ovn-northd" | "ovn-controller" | "ovn-nbctl")
+  "ovn-northd" | "ovn-controller")
     ctl_file=${OVN_RUNDIR}/${1}.${2}.ctl
     ;;
   "ovsdb-server" | "ovs-vswitchd")
@@ -569,7 +575,6 @@ display() {
   display_file "ovsdb-server" ${OVS_RUNDIR}/ovsdb-server.pid ${OVS_LOGDIR}/ovsdb-server.log
   display_file "ovn-controller" ${OVN_RUNDIR}/ovn-controller.pid ${OVN_LOGDIR}/ovn-controller.log
   display_file "ovnkube" ${OVN_RUNDIR}/ovnkube.pid ${ovnkubelogdir}/ovnkube.log
-  display_file "run-nbctld" ${OVN_RUNDIR}/ovn-nbctl.pid ${OVN_LOGDIR}/ovn-nbctl.log
   display_file "ovn-dbchecker" ${OVN_RUNDIR}/ovn-dbchecker.pid ${OVN_LOGDIR}/ovn-dbchecker.log
 }
 
@@ -771,6 +776,19 @@ EOF
   fi
 }
 
+function memory_trim_on_compaction_supported {
+  if [[ $1 == "nbdb" ]]; then
+    mem_trim_check=$(ovn-appctl -t ${OVN_RUNDIR}/ovnnb_db.ctl list-commands | grep "memory-trim-on-compaction")
+  elif [[ $1 == "sbdb"  ]]; then
+    mem_trim_check=$(ovn-appctl -t ${OVN_RUNDIR}/ovnsb_db.ctl list-commands | grep "memory-trim-on-compaction")
+  fi
+  if [[ ${mem_trim_check} != "" ]]; then
+    return $(/bin/true)
+  else
+    return $(/bin/false)
+  fi
+}
+
 vf_rate_limiting_opts=
 set_vf_rate_limiting_opts_if_gs() {
   k8s_node_name=$1
@@ -825,9 +843,15 @@ nb-ovsdb() {
   wait_for_event attempts=10 check_ovnkube_db_ep ${ovn_db_host} ${ovn_nb_port}
   set_ovnkube_db_ep "nb" ${ovn_db_host}
 
+  if memory_trim_on_compaction_supported "nbdb"
+  then
+    # Enable NBDB memory trimming on DB compaction, Every 10mins DBs are compacted
+    # memory on the heap is freed, when enable memory trimmming freed memory will go back to OS.
+    ovn-appctl -t ${OVN_RUNDIR}/ovnnb_db.ctl ovsdb-server/memory-trim-on-compaction on
+  fi
+
   tail --follow=name ${OVN_LOGDIR}/ovsdb-server-nb.log &
   ovn_tail_pid=$!
-
   process_healthy ovnnb_db ${ovn_tail_pid}
   echo "=============== run nb_ovsdb ========== terminated"
 }
@@ -866,6 +890,12 @@ sb-ovsdb() {
   wait_for_event attempts=10 check_ovnkube_db_ep ${ovn_db_host} ${ovn_sb_port}
   set_ovnkube_db_ep "sb" ${ovn_db_host}
 
+  if memory_trim_on_compaction_supported "sbdb"
+  then
+    # Enable SBDB memory trimming on DB compaction, Every 10mins DBs are compacted
+    # memory on the heap is freed, when enable memory trimmming freed memory will go back to OS.
+    ovn-appctl -t ${OVN_RUNDIR}/ovnsb_db.ctl ovsdb-server/memory-trim-on-compaction on
+  fi
   tail --follow=name ${OVN_LOGDIR}/ovsdb-server-sb.log &
   ovn_tail_pid=$!
 
@@ -979,9 +1009,6 @@ ovn-master() {
   wait_for_event ready_to_start_node
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
 
-  echo "=============== ovn-master (wait for ovn-nbctl daemon) ========== MASTER ONLY"
-  wait_for_event process_ready ovn-nbctl
-
   # wait for ovs-servers to start since ovn-master sets some fields in OVS DB
   echo "=============== ovn-master - (wait for ovs)"
   wait_for_event ovs_ready
@@ -1043,7 +1070,6 @@ ovn-master() {
       multicast_enabled_flag="--enable-multicast"
   fi
 
-  ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:${metrics_master_port}"
   egressip_enabled_flag=
   if [[ ${ovn_egressip_enable} == "true" ]]; then
       egressip_enabled_flag="--enable-egress-ip"
@@ -1060,6 +1086,11 @@ ovn-master() {
   if [[ ${ovn_egressfirewall_enable} == "true" ]]; then
 	  egressfirewall_enabled_flag="--enable-egress-firewall"
   fi
+  echo "egressfirewall_enabled_flag=${egressfirewall_enabled_flag}"
+  egressqos_enabled_flag=
+  if [[ ${ovn_egressqos_enable} == "true" ]]; then
+	  egressqos_enabled_flag="--enable-egress-qos"
+  fi
 
   nohostsubnet_label_option=
   if [[ ${OVN_NOHOSTSUBNET_LABEL} != "" ]]; then
@@ -1071,6 +1102,21 @@ ovn-master() {
       ctinv_flows_disable_flag="--ovn-ctinv-flows-disable"
   fi
 
+  ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:${metrics_master_port}"
+  local ovnkube_metrics_tls_opts=""
+  #if [[ ${OVNKUBE_METRICS_PK} != "" && ${OVNKUBE_METRICS_CERT} != "" ]]; then
+  #  ovnkube_metrics_tls_opts="
+  #      --node-server-privkey ${OVNKUBE_METRICS_PK}
+  #      --node-server-cert ${OVNKUBE_METRICS_CERT}
+  #    "
+  #fi
+
+  ovnkube_config_duration_enable_flag=
+  if [[ ${ovnkube_config_duration_enable} == "true" ]]; then
+    ovnkube_config_duration_enable_flag="--metrics-enable-config-duration"
+  fi
+  echo "ovnkube_config_duration_enable_flag: ${ovnkube_config_duration_enable_flag}"
+
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
     --init-master ${K8S_NODE} \
@@ -1078,7 +1124,6 @@ ovn-master() {
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
     --gateway-mode=${ovn_gateway_mode} \
-    --nbctl-daemon-mode \
     --loglevel=${ovnkube_loglevel} \
     --logfile-maxsize=${ovnkube_logfile_maxsize} \
     --logfile-maxbackups=${ovnkube_logfile_maxbackups} \
@@ -1092,13 +1137,16 @@ ovn-master() {
     --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
     ${nohostsubnet_label_option} \
     ${ovn_master_ssl_opts} \
+    ${ovnkube_metrics_tls_opts} \
     ${multicast_enabled_flag} \
     ${ovn_acl_logging_rate_limit_flag} \
     ${egressip_enabled_flag} \
     ${egressfirewall_enabled_flag} \
+    ${egressqos_enabled_flag} \
     ${multi_network_enabled_flag} \
     ${multi_networkpolicy_enabled_flag} \
     --metrics-interval ${ovn_metrics_scrape_interval} \
+    ${ovnkube_config_duration_enable_flag} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} --metrics-enable-pprof \
     --host-network-namespace ${ovn_host_network_namespace} \
     ${ctinv_flows_disable_flag} &
@@ -1238,10 +1286,10 @@ ovn-node() {
     exit 1
   fi
 
-  local tls_ssl_opts=""
-  tls_ssl_opts="
-    --metrics-node-server-privkey ${tls_dir}/key.pem
-    --metrics-node-server-cert ${tls_dir}/cert.pem
+  local ovnkube_metrics_tls_opts=""
+  ovnkube_metrics_tls_opts="
+    --node-server-privkey ${tls_dir}/key.pem
+    --node-server-cert ${tls_dir}/cert.pem
       "
 
   [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
@@ -1254,6 +1302,11 @@ ovn-node() {
     echo "=============== ovn-node - (create ovn firewall zone)"
     create_ovn_firewall_zone
   fi
+
+  ovn_routable_mtu_flag=
+  if [[ -n "${routable_mtu}" ]]; then
+	  routable_mtu_flag="--routable-mtu ${routable_mtu}"
+  fi  
 
   hybrid_overlay_flags=
   if [[ ${ovn_hybrid_overlay_enable} == "true" ]]; then
@@ -1311,6 +1364,17 @@ ovn-node() {
   ipfix_targets=
   if [[ -n ${ovn_ipfix_targets} ]]; then
       ipfix_targets="--ipfix-targets ${ovn_ipfix_targets}"
+  fi
+
+  ipfix_config=
+  if [[ -n ${ovn_ipfix_sampling} ]]; then
+      ipfix_config="--ipfix-sampling ${ovn_ipfix_sampling}"
+  fi
+  if [[ -n ${ovn_ipfix_cache_max_flows} ]]; then
+      ipfix_config="${ipfix_config} --ipfix-cache-max-flows ${ovn_ipfix_cache_max_flows}"
+  fi
+  if [[ -n ${ovn_ipfix_cache_active_timeout} ]]; then
+      ipfix_config="${ipfix_config} --ipfix-cache-active-timeout ${ovn_ipfix_cache_active_timeout}"
   fi
 
   monitor_all=
@@ -1378,6 +1442,7 @@ ovn-node() {
   fi
 
   local ovn_node_ssl_opts=""
+  local export_ovs_metrics_opts=""
   if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
       [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
         ovn_node_ssl_opts="
@@ -1391,6 +1456,7 @@ ovn-node() {
             --sb-cert-common-name ${ovn_sb_cert_cname}
           "
       }
+      export_ovs_metrics_opts="--export-ovs-metrics"
   fi
 
   ovnkube_node_metrics_bind_address="${metrics_endpoint_ip}:${metrics_worker_port}"
@@ -1472,6 +1538,7 @@ ovn-node() {
     ${OVN_NODE_PORT} \
     ${ovn_unprivileged_flag} \
     --mtu=${mtu} \
+    ${routable_mtu_flag} \
     ${ovn_encap_ip_flag} \
     --ovn-encap-tos=${ovn_encap_tos} \
     --loglevel=${ovnkube_loglevel} \
@@ -1486,7 +1553,7 @@ ovn-node() {
     --pidfile ${OVN_RUNDIR}/ovnkube.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube.log \
     ${ovn_node_ssl_opts} \
-    ${tls_ssl_opts} \
+    ${ovnkube_metrics_tls_opts} \
     --inactivity-probe=${ovn_remote_probe_interval} \
     ${monitor_all} \
     ${ofctrl_wait_before_clear} \
@@ -1500,9 +1567,11 @@ ovn-node() {
     ${netflow_targets} \
     ${sflow_targets} \
     ${ipfix_targets} \
+    ${ipfix_config} \
     --metrics-interval ${ovn_metrics_scrape_interval} \
     --metrics-bind-address ${ovnkube_node_metrics_bind_address} --metrics-enable-pprof \
-     ${ovnkube_node_mode_flag} \
+    ${export_ovs_metrics_opts} \
+    ${ovnkube_node_mode_flag} \
     ${egress_interface} \
     --host-network-namespace ${ovn_host_network_namespace} \
      ${ovnkube_node_mgmt_port_netdev_flag} \
@@ -1556,37 +1625,6 @@ files_exist() {
   return 0
 }
 
-# v3 - Runs ovn-nbctl in daemon mode
-run-nbctld() {
-  trap 'ovs-appctl -t ovn-nbctl exit >/dev/null 2>&1; exit 0' TERM
-  check_ovn_daemonset_version "3"
-  rm -f ${OVN_RUNDIR}/ovn-nbctl.pid
-  rm -f ${OVN_RUNDIR}/ovn-nbctl.*.ctl
-
-  echo "=============== run-nbctld - (wait for ready_to_start_node)"
-  wait_for_event ready_to_start_node ovn-nbdb
-
-  echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}  ovn_nbdb_conn ${ovn_nbdb_conn}"
-  echo "ovn_loglevel_nbctld=${ovn_loglevel_nbctld}"
-
-  # if SSL is enabled, wait for the SSL cert files to be populated
-  if [[ "yes" == ${OVN_SSL_ENABLE} ]]; then
-    wait_for_event attempts=20 files_exist ${ovn_controller_pk} ${ovn_controller_cert} ${ovn_ca_cert}
-  fi
-
-  /usr/bin/ovn-nbctl ${ovn_loglevel_nbctld} --pidfile --db=${ovn_nbdb_conn} \
-    --log-file=${OVN_LOGDIR}/ovn-nbctl.log --detach ${ovndb_ctl_ssl_opts}
-
-  wait_for_event attempts=3 process_ready ovn-nbctl
-  echo "=============== run_ovn_nbctl ========== RUNNING"
-
-  tail --follow=name ${OVN_LOGDIR}/ovn-nbctl.log &
-  nbctl_tail_pid=$!
-
-  process_healthy ovn-nbctl ${nbctl_tail_pid}
-  echo "=============== run_ovn_nbctl ========== terminated"
-}
-
 echo "================== ovnkube.sh --- version: ${ovnkube_version} ================"
 
 echo " ==================== command: ${cmd}"
@@ -1631,9 +1669,6 @@ case ${cmd} in
   ;;
 "ovn-node") # pod ovnkube-node container ovn-node
   ovn-node
-  ;;
-"run-nbctld") # pod ovnkube-master container run-nbctld
-  run-nbctld
   ;;
 "ovn-northd")
   ovn-northd

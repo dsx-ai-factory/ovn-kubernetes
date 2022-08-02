@@ -28,9 +28,13 @@ import (
 // the stopCh is required to ensure the goroutine for ssl cert
 // update is not leaked
 func newClient(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, stopCh <-chan struct{}) (client.Client, error) {
+	const connectTimeout time.Duration = types.OVSDBTimeout * 2
 	logger := klogr.New()
 	options := []client.Option{
-		client.WithReconnect(types.OVSDBTimeout, &backoff.ZeroBackOff{}),
+		// Reading and parsing the DB after reconnect at scale can (unsurprisingly)
+		// take longer than a normal ovsdb operation. Give it a bit more time so
+		// we don't time out and enter a reconnect loop.
+		client.WithReconnect(connectTimeout, &backoff.ZeroBackOff{}),
 		client.WithLeaderOnly(true),
 		client.WithLogger(&logger),
 	}
@@ -55,7 +59,7 @@ func newClient(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, stopCh <-c
 		return nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
 	defer cancel()
 	err = client.Connect(ctx)
 	if err != nil {
@@ -92,17 +96,24 @@ func NewSBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (cl
 	}()
 
 	// Only Monitor Required SBDB tables to reduce memory overhead
+	chassisPrivate := sbdb.ChassisPrivate{}
 	_, err = c.Monitor(ctx,
 		c.NewMonitor(
 			// used by unidling controller
 			client.WithTable(&sbdb.ControllerEvent{}),
 			// used for gateway
 			// SDN-1535: MacBinding is not required in ngn 2.1
-			// client.WithTable(&sbdb.MACBinding{}),
-			// used by libovsdbops
+			//client.WithTable(&sbdb.MACBinding{}),
+			// used by node sync
 			client.WithTable(&sbdb.Chassis{}),
+			// used by node sync, only interested in names
+			client.WithTable(&chassisPrivate, &chassisPrivate.Name),
 			// used for metrics
 			client.WithTable(&sbdb.SBGlobal{}),
+			// used for metrics
+			client.WithTable(&sbdb.PortBinding{}),
+			// used for hybrid-overlay
+			client.WithTable(&sbdb.DatapathBinding{}),
 		),
 	)
 	if err != nil {

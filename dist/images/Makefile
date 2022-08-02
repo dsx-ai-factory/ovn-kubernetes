@@ -8,7 +8,7 @@
 # The registry is configured in /etc/containers/registries.conf
 # on each node in both "registries:" and "insecure_registries:" sections.
 
-all: ubuntu centos fedora
+all: ubuntu fedora
 
 SLASH = -
 ARCH = $(subst aarch64,arm64,$(subst x86_64,amd64,$(patsubst i%86,386,$(shell uname -m))))
@@ -18,7 +18,6 @@ ifeq ($(ARCH),arm64)
         DOCKERFILE_ARCH=.arm64
 endif
 K8S_VER ?=
-KERNEL_VERSION ?= `uname -r`
 OVS_BRANCH ?= master
 OVN_BRANCH ?= main
 OCI_BIN ?= docker
@@ -39,11 +38,17 @@ define docker_build_args
        $(if $(K8S_VER), --build-arg K8S_VER=-$(K8S_VER))
 endef
 
+define docker_build_ver_args
+       --build-arg OVS_VER=-2.17.1.e8c89baa.06871943 --build-arg OVN_VER=-22.03.0.d7cd4eeb.06871943
+endef
+
 centos: bld
 	${OCI_BIN} build $(docker_build_args) \
+		$(docker_build_ver_args) \
 		--build-arg rpmArch=$(shell uname -m) \
 		--target ovn -t quay.io/nvidia/ovn-c:latest .
 	${OCI_BIN} build $(docker_build_args) \
+		$(docker_build_ver_args) \
 		--build-arg rpmArch=$(shell uname -m) \
 		--target ovnkube -t quay.io/nvidia/ovnkube-c:latest .
 	./daemonset.sh --image=quay.io/nvidia/ovnkube-c:latest \
@@ -56,10 +61,7 @@ fedora: bld
 	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-f:latest
 
 fedora-dev: bld
-	# To build (OVN Datapath)  with specific kernel version, please override KERNEL_VERSION.
-	# By default it will build with the host machine's kernel version.
-
-	${OCI_BIN} build --build-arg KERNEL_VERSION=$(KERNEL_VERSION) \
+	${OCI_BIN} build \
 		     --build-arg OVS_BRANCH=$(OVS_BRANCH) \
 		     --build-arg OVN_BRANCH=$(OVN_BRANCH) \
 		     -t ovn-kube-f-dev -f Dockerfile.fedora.dev .
@@ -75,7 +77,6 @@ fedora-dev: bld
                     --ovn-loglevel-nb="-vconsole:info -vfile:info" \
                     --ovn-loglevel-sb="-vconsole:info -vfile:info" \
                     --ovn-loglevel-controller="-vconsole:info" \
-                    --ovn-loglevel-nbctld="-vconsole:info" \
                     --ovn_nb_raft_election_timer="1000" \
                     --ovn_sb_raft_election_timer="1000"
 

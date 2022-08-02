@@ -90,6 +90,14 @@ var (
 		RawIPFIXTargets:   "",
 	}
 
+	// IPFIX holds IPFIX-related performance configuration options. It requires that the
+	// IPFIXTargets value of the Monitoring section contains at least one endpoint.
+	IPFIX = IPFIXConfig{
+		Sampling:           400,
+		CacheActiveTimeout: 60,
+		CacheMaxFlows:      0,
+	}
+
 	// CNI holds CNI-related parsed config file parameters and command-line overrides
 	CNI = CNIConfig{
 		ConfDir: "/etc/cni/net.d",
@@ -103,10 +111,16 @@ var (
 		OVNConfigNamespace:   "ovn-kubernetes",
 		HostNetworkNamespace: "",
 		SkipRequestedChassis: true,
+		PlatformType:         "",
 	}
 
+	// Metrics holds Prometheus metrics-related parameters.
+	Metrics MetricsConfig
+
 	// OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
-	OVNKubernetesFeature OVNKubernetesFeatureConfig
+	OVNKubernetesFeature = OVNKubernetesFeatureConfig{
+		EgressIPReachabiltyTotalTimeout: 1,
+	}
 
 	// OvnNorth holds northbound OVN database client and server authentication and location details
 	OvnNorth OvnAuthConfig
@@ -131,9 +145,6 @@ var (
 	HybridOverlay = HybridOverlayConfig{
 		VXLANPort: DefaultVXLANPort,
 	}
-
-	// NbctlDaemon enables ovn-nbctl to run in daemon mode
-	NbctlDaemonMode bool
 
 	// UnprivilegedMode allows ovnkube-node to run without SYS_ADMIN capability, by performing interface setup in the CNI plugin
 	UnprivilegedMode bool
@@ -166,6 +177,10 @@ const (
 type DefaultConfig struct {
 	// MTU value used for the overlay networks.
 	MTU int `gcfg:"mtu"`
+	// RoutableMTU is the maximum routable MTU between nodes, used to facilitate
+	// an MTU migration procedure where different nodes might be using different
+	// MTU values
+	RoutableMTU int `gcfg:"routable-mtu"`
 	// ConntrackZone affects only the gateway nodes, This value is used to track connections
 	// that are initiated from the pods so that the reverse connections go back to the pods.
 	// This represents the conntrack zone used for the conntrack flow rules.
@@ -217,6 +232,11 @@ type DefaultConfig struct {
 	EncapToSValue string `gcfg:"ovn-encap-tos"`
 	// To disable CT inv flows in the north
 	DisableCTInvFlows bool `gcfg:"ovn-ctinv-flows-disable"`
+	// EnableUDPAggregation is true if ovn-kubernetes should use UDP Generic Receive
+	// Offload forwarding to improve the performance of containers that transmit lots
+	// of small UDP packets by allowing them to be aggregated before passing through
+	// the kernel network stack. This requires a new-enough kernel (5.15 or RHEL 8.5).
+	EnableUDPAggregation bool `gcfg:"enable-udp-aggregation"`
 }
 
 // LoggingConfig holds logging-related parsed config file parameters and command-line overrides
@@ -254,6 +274,23 @@ type MonitoringConfig struct {
 	IPFIXTargets []HostPort
 }
 
+// IPFIXConfig holds IPFIX-related performance configuration options. It requires that the ipfix-targets
+// value of the [monitoring] section contains at least one endpoint.
+type IPFIXConfig struct {
+	// Sampling is an optional integer in range 1 to 4,294,967,295. It holds the rate at which
+	// packets should be sampled and sent to each target collector. If not specified, defaults to
+	// 400, which means one out of 400 packets, on average, will be sent to each target collector.
+	Sampling uint `gcfg:"sampling"`
+	// CacheActiveTimeout is an optional integer in range 0 to 4,200. It holds the maximum period in
+	// seconds for which an IPFIX flow record is cached and aggregated before being sent. If not
+	// specified, defaults to 60. If 0, caching is disabled.
+	CacheActiveTimeout uint `gcfg:"cache-active-timeout"`
+	// CacheMaxFlows is an optional integer in range 0 to 4,294,967,295. It holds the maximum number
+	// of IPFIX flow records that can be cached at a time. If not specified in OVS, defaults to 0
+	// (however, this controller defaults it to 60). If 0, caching is disabled.
+	CacheMaxFlows uint `gcfg:"cache-max-flows"`
+}
+
 // CNIConfig holds CNI-related parsed config file parameters and command-line overrides
 type CNIConfig struct {
 	// ConfDir specifies the CNI config directory in which to write the overlay CNI config file
@@ -264,33 +301,55 @@ type CNIConfig struct {
 
 // KubernetesConfig holds Kubernetes-related parsed config file parameters and command-line overrides
 type KubernetesConfig struct {
-	Kubeconfig               string `gcfg:"kubeconfig"`
-	CACert                   string `gcfg:"cacert"`
-	CAData                   []byte
-	APIServer                string `gcfg:"apiserver"`
-	Token                    string `gcfg:"token"`
-	CompatServiceCIDR        string `gcfg:"service-cidr"`
-	RawServiceCIDRs          string `gcfg:"service-cidrs"`
-	ServiceCIDRs             []*net.IPNet
-	OVNConfigNamespace       string `gcfg:"ovn-config-namespace"`
-	MetricsBindAddress       string `gcfg:"metrics-bind-address"`
-	MetricsEnablePprof       bool   `gcfg:"metrics-enable-pprof"`
-	OVNEmptyLbEvents         bool   `gcfg:"ovn-empty-lb-events"`
-	PodIP                    string `gcfg:"pod-ip"` // UNUSED
-	RawNoHostSubnetNodes     string `gcfg:"no-hostsubnet-nodes"`
-	MetricsNodeServerPrivKey string `gcfg:"metrics-node-server-privkey"`
-	MetricsNodeServerCert    string `gcfg:"metrics-node-server-cert"`
-	NoHostSubnetNodes        *metav1.LabelSelector
-	HostNetworkNamespace     string `gcfg:"host-network-namespace"`
-	SkipRequestedChassis     bool
+	Kubeconfig           string `gcfg:"kubeconfig"`
+	CACert               string `gcfg:"cacert"`
+	CAData               []byte
+	APIServer            string `gcfg:"apiserver"`
+	Token                string `gcfg:"token"`
+	TokenFile            string `gcfg:"tokenFile"`
+	CompatServiceCIDR    string `gcfg:"service-cidr"`
+	RawServiceCIDRs      string `gcfg:"service-cidrs"`
+	ServiceCIDRs         []*net.IPNet
+	OVNConfigNamespace   string `gcfg:"ovn-config-namespace"`
+	OVNEmptyLbEvents     bool   `gcfg:"ovn-empty-lb-events"`
+	PodIP                string `gcfg:"pod-ip"` // UNUSED
+	RawNoHostSubnetNodes string `gcfg:"no-hostsubnet-nodes"`
+	NoHostSubnetNodes    *metav1.LabelSelector
+	HostNetworkNamespace string `gcfg:"host-network-namespace"`
+	SkipRequestedChassis bool
+	PlatformType         string `gcfg:"platform-type"`
+
+	// CompatMetricsBindAddress is overridden by the corresponding option in MetricsConfig
+	CompatMetricsBindAddress string `gcfg:"metrics-bind-address"`
+	// CompatMetricsEnablePprof is overridden by the corresponding option in MetricsConfig
+	CompatMetricsEnablePprof bool `gcfg:"metrics-enable-pprof"`
+	// CompatMetricsNodeServerPrivKey is overridden by the corresponding option in MetricsConfig
+	CompatMetricsNodeServerPrivKey string `gcfg:"metrics-node-server-privkey"`
+	// CompatMetricsNodeServerCert is overridden by the corresponding option in MetricsConfig
+	CompatMetricsNodeServerCert string `gcfg:"metrics-node-server-cert"`
+}
+
+// MetricsConfig holds Prometheus metrics-related parameters.
+type MetricsConfig struct {
+	BindAddress       string `gcfg:"bind-address"`
+	ExportOVSMetrics  bool   `gcfg:"export-ovs-metrics"`
+	EnablePprof       bool   `gcfg:"enable-pprof"`
+	NodeServerPrivKey string `gcfg:"node-server-privkey"`
+	NodeServerCert    string `gcfg:"node-server-cert"`
+	// EnableConfigDuration holds the boolean flag to enable OVN-Kubernetes master to monitor OVN-Kubernetes master
+	// configuration duration and optionally, its application to all nodes
+	EnableConfigDuration bool `gcfg:"enable-config-duration"`
 }
 
 // OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
 type OVNKubernetesFeatureConfig struct {
-	EnableEgressIP           bool `gcfg:"enable-egress-ip"`
-	EnableEgressFirewall     bool `gcfg:"enable-egress-firewall"`
-	EnableMultiNetwork       bool `gcfg:"enable-multi-network"`
-	EnableMultiNetworkPolicy bool `gcfg:"enable-multi-networkpolicy"`
+	EnableEgressIP bool `gcfg:"enable-egress-ip"`
+	// EgressIP node reachability total timeout in seconds
+	EgressIPReachabiltyTotalTimeout int  `gcfg:"egressip-reachability-total-timeout"`
+	EnableEgressFirewall            bool `gcfg:"enable-egress-firewall"`
+	EnableEgressQoS                 bool `gcfg:"enable-egress-qos"`
+	EnableMultiNetwork              bool `gcfg:"enable-multi-network"`
+	EnableMultiNetworkPolicy        bool `gcfg:"enable-multi-networkpolicy"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -407,9 +466,11 @@ type config struct {
 	Default              DefaultConfig
 	Logging              LoggingConfig
 	Monitoring           MonitoringConfig
+	IPFIX                IPFIXConfig
 	CNI                  CNIConfig
 	OVNKubernetesFeature OVNKubernetesFeatureConfig
 	Kubernetes           KubernetesConfig
+	Metrics              MetricsConfig
 	OvnNorth             OvnAuthConfig
 	OvnSouth             OvnAuthConfig
 	Gateway              GatewayConfig
@@ -422,9 +483,11 @@ var (
 	savedDefault              DefaultConfig
 	savedLogging              LoggingConfig
 	savedMonitoring           MonitoringConfig
+	savedIPFIX                IPFIXConfig
 	savedCNI                  CNIConfig
 	savedOVNKubernetesFeature OVNKubernetesFeatureConfig
 	savedKubernetes           KubernetesConfig
+	savedMetrics              MetricsConfig
 	savedOvnNorth             OvnAuthConfig
 	savedOvnSouth             OvnAuthConfig
 	savedGateway              GatewayConfig
@@ -446,9 +509,11 @@ func init() {
 	savedDefault = Default
 	savedLogging = Logging
 	savedMonitoring = Monitoring
+	savedIPFIX = IPFIX
 	savedCNI = CNI
 	savedOVNKubernetesFeature = OVNKubernetesFeature
 	savedKubernetes = Kubernetes
+	savedMetrics = Metrics
 	savedOvnNorth = OvnNorth
 	savedOvnSouth = OvnSouth
 	savedGateway = Gateway
@@ -463,17 +528,7 @@ func init() {
 		fmt.Printf("Build date: %s\n", BuildDate)
 		fmt.Printf("OS/Arch: %s\n", OSArch)
 	}
-	Flags = append(Flags, CommonFlags...)
-	Flags = append(Flags, CNIFlags...)
-	Flags = append(Flags, OVNK8sFeatureFlags...)
-	Flags = append(Flags, K8sFlags...)
-	Flags = append(Flags, OvnNBFlags...)
-	Flags = append(Flags, OvnSBFlags...)
-	Flags = append(Flags, OVNGatewayFlags...)
-	Flags = append(Flags, MasterHAFlags...)
-	Flags = append(Flags, HybridOverlayFlags...)
-	Flags = append(Flags, MonitoringFlags...)
-	Flags = append(Flags, OvnKubeNodeFlags...)
+	Flags = GetFlags([]cli.Flag{})
 }
 
 // PrepareTestConfig restores default config values. Used by testcases to
@@ -483,9 +538,11 @@ func PrepareTestConfig() error {
 	Logging = savedLogging
 	Logging.Level = 5
 	Monitoring = savedMonitoring
+	IPFIX = savedIPFIX
 	CNI = savedCNI
 	OVNKubernetesFeature = savedOVNKubernetesFeature
 	Kubernetes = savedKubernetes
+	Metrics = savedMetrics
 	OvnNorth = savedOvnNorth
 	OvnSouth = savedOvnSouth
 	Gateway = savedGateway
@@ -503,6 +560,7 @@ func PrepareTestConfig() error {
 	os.Unsetenv("K8S_CACERT")
 	os.Unsetenv("K8S_APISERVER")
 	os.Unsetenv("K8S_TOKEN")
+	os.Unsetenv("K8S_TOKEN_FILE")
 
 	return nil
 }
@@ -594,6 +652,11 @@ var CommonFlags = []cli.Flag{
 		Usage:       "MTU value used for the overlay networks (default: 1400)",
 		Destination: &cliConfig.Default.MTU,
 		Value:       Default.MTU,
+	},
+	&cli.IntFlag{
+		Name:        "routable-mtu",
+		Usage:       "Maximum routable MTU between nodes, used to facilitate an MTU migration procedure where different nodes might be using different MTU values",
+		Destination: &cliConfig.Default.RoutableMTU,
 	},
 	&cli.IntFlag{
 		Name:        "conntrack-zone",
@@ -692,11 +755,6 @@ var CommonFlags = []cli.Flag{
 		Destination: &cliConfig.Default.RawClusterSubnets,
 	},
 	&cli.BoolFlag{
-		Name:        "nbctl-daemon-mode",
-		Usage:       "Run ovn-nbctl in daemon mode to improve performance in large clusters",
-		Destination: &NbctlDaemonMode,
-	},
-	&cli.BoolFlag{
 		Name:        "unprivileged-mode",
 		Usage:       "Run ovnkube-node container in unprivileged mode. Valid only with --init-node option.",
 		Destination: &UnprivilegedMode,
@@ -776,22 +834,43 @@ var MonitoringFlags = []cli.Flag{
 		Name:  "netflow-targets",
 		Value: Monitoring.RawNetFlowTargets,
 		Usage: "A comma separated set of NetFlow collectors to export flow data (eg, \"10.128.0.150:2056,10.0.0.151:2056\")." +
-			"Each entry is given in the form [IP address:port]",
+			"Each entry is given in the form [IP address:port] or [:port]. If only port is provided, it uses the Node IP",
 		Destination: &cliConfig.Monitoring.RawNetFlowTargets,
 	},
 	&cli.StringFlag{
 		Name:  "sflow-targets",
 		Value: Monitoring.RawSFlowTargets,
 		Usage: "A comma separated set of SFlow collectors to export flow data (eg, \"10.128.0.150:6343,10.0.0.151:6343\")." +
-			"Each entry is given in the form [IP address:port]",
+			"Each entry is given in the form [IP address:port] or [:port]. If only port is provided, it uses the Node IP",
 		Destination: &cliConfig.Monitoring.RawSFlowTargets,
 	},
 	&cli.StringFlag{
 		Name:  "ipfix-targets",
 		Value: Monitoring.RawIPFIXTargets,
 		Usage: "A comma separated set of IPFIX collectors to export flow data (eg, \"10.128.0.150:2055,10.0.0.151:2055\")." +
-			"Each entry is given in the form [IP address:port]",
+			"Each entry is given in the form [IP address:port] or [:port]. If only port is provided, it uses the Node IP",
 		Destination: &cliConfig.Monitoring.RawIPFIXTargets,
+	},
+}
+
+// IPFIXFlags capture IPFIX-related options
+var IPFIXFlags = []cli.Flag{
+	&cli.UintFlag{
+		Name:        "ipfix-sampling",
+		Usage:       "Rate at which packets should be sampled and sent to each target collector (default: 400)",
+		Destination: &cliConfig.IPFIX.Sampling,
+		Value:       IPFIX.Sampling,
+	},
+	&cli.UintFlag{
+		Name:        "ipfix-cache-max-flows",
+		Usage:       "Maximum number of IPFIX flow records that can be cached at a time. If 0, caching is disabled (default: 0)",
+		Destination: &cliConfig.IPFIX.CacheMaxFlows,
+		Value:       IPFIX.CacheMaxFlows,
+	}, &cli.UintFlag{
+		Name:        "ipfix-cache-active-timeout",
+		Usage:       "Maximum period in seconds for which an IPFIX flow record is cached and aggregated before being sent. If 0, caching is disabled (default: 60)",
+		Destination: &cliConfig.IPFIX.CacheActiveTimeout,
+		Value:       IPFIX.CacheActiveTimeout,
 	},
 }
 
@@ -820,11 +899,23 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Destination: &cliConfig.OVNKubernetesFeature.EnableEgressIP,
 		Value:       OVNKubernetesFeature.EnableEgressIP,
 	},
+	&cli.IntFlag{
+		Name:        "egressip-reachability-total-timeout",
+		Usage:       "EgressIP node reachability total timeout in seconds (default: 1)",
+		Destination: &cliConfig.OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout,
+		Value:       1,
+	},
 	&cli.BoolFlag{
 		Name:        "enable-egress-firewall",
 		Usage:       "Configure to use EgressFirewall CRD feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableEgressFirewall,
 		Value:       OVNKubernetesFeature.EnableEgressFirewall,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-egress-qos",
+		Usage:       "Configure to use EgressQoS CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableEgressQoS,
+		Value:       OVNKubernetesFeature.EnableEgressQoS,
 	},
 	&cli.BoolFlag{
 		Name:        "enable-multi-network",
@@ -883,30 +974,15 @@ var K8sFlags = []cli.Flag{
 		Destination: &cliConfig.Kubernetes.Token,
 	},
 	&cli.StringFlag{
+		Name:        "k8s-token-file",
+		Usage:       "the path to Kubernetes API token. If set, it is periodically read and takes precedence over k8s-token",
+		Destination: &cliConfig.Kubernetes.TokenFile,
+	},
+	&cli.StringFlag{
 		Name:        "ovn-config-namespace",
 		Usage:       "specify a namespace which will contain services to config the OVN databases",
 		Destination: &cliConfig.Kubernetes.OVNConfigNamespace,
 		Value:       Kubernetes.OVNConfigNamespace,
-	},
-	&cli.StringFlag{
-		Name:        "metrics-bind-address",
-		Usage:       "The IP address and port for the OVN K8s metrics server to serve on (set to 0.0.0.0 for all IPv4 interfaces)",
-		Destination: &cliConfig.Kubernetes.MetricsBindAddress,
-	},
-	&cli.BoolFlag{
-		Name:        "metrics-enable-pprof",
-		Usage:       "If true, then also accept pprof requests on the metrics port.",
-		Destination: &cliConfig.Kubernetes.MetricsEnablePprof,
-	},
-	&cli.StringFlag{
-		Name:        "metrics-node-server-privkey",
-		Usage:       "Private key that the OVN node K8s metrics server uses to server on.",
-		Destination: &cliConfig.Kubernetes.MetricsNodeServerPrivKey,
-	},
-	&cli.StringFlag{
-		Name:        "metrics-node-server-cert",
-		Usage:       "Certificate that the OVN node K8s metrics server use to server on.",
-		Destination: &cliConfig.Kubernetes.MetricsNodeServerCert,
 	},
 	&cli.BoolFlag{
 		Name: "ovn-empty-lb-events",
@@ -930,6 +1006,48 @@ var K8sFlags = []cli.Flag{
 		Usage:       "specify a namespace which will be used to classify host network traffic for network policy",
 		Destination: &cliConfig.Kubernetes.HostNetworkNamespace,
 		Value:       Kubernetes.HostNetworkNamespace,
+	},
+	&cli.StringFlag{
+		Name: "platform-type",
+		Usage: "The cloud provider platform type ovn-kubernetes is deployed on. " +
+			"Valid values can be found in: https://github.com/ovn-org/ovn-kubernetes/blob/master/go-controller/vendor/github.com/openshift/api/config/v1/types_infrastructure.go#L130-L172",
+		Destination: &cliConfig.Kubernetes.PlatformType,
+		Value:       Kubernetes.PlatformType,
+	},
+}
+
+// MetricsFlags capture metrics-related options
+var MetricsFlags = []cli.Flag{
+	&cli.StringFlag{
+		Name:        "metrics-bind-address",
+		Usage:       "The IP address and port for the OVN K8s metrics server to serve on (set to 0.0.0.0 for all IPv4 interfaces)",
+		Destination: &cliConfig.Metrics.BindAddress,
+	},
+	&cli.BoolFlag{
+		Name:        "export-ovs-metrics",
+		Usage:       "When true exports OVS metrics from the OVN metrics server",
+		Destination: &cliConfig.Metrics.ExportOVSMetrics,
+	},
+	&cli.BoolFlag{
+		Name:        "metrics-enable-pprof",
+		Usage:       "If true, then also accept pprof requests on the metrics port.",
+		Destination: &cliConfig.Metrics.EnablePprof,
+		Value:       Metrics.EnablePprof,
+	},
+	&cli.StringFlag{
+		Name:        "node-server-privkey",
+		Usage:       "Private key that the OVN node K8s metrics server uses to serve metrics over TLS.",
+		Destination: &cliConfig.Metrics.NodeServerPrivKey,
+	},
+	&cli.StringFlag{
+		Name:        "node-server-cert",
+		Usage:       "Certificate that the OVN node K8s metrics server uses to serve metrics over TLS.",
+		Destination: &cliConfig.Metrics.NodeServerCert,
+	},
+	&cli.BoolFlag{
+		Name:        "metrics-enable-config-duration",
+		Usage:       "Enables monitoring OVN-Kubernetes master and OVN configuration duration",
+		Destination: &cliConfig.Metrics.EnableConfigDuration,
 	},
 }
 
@@ -1233,12 +1351,14 @@ func GetFlags(customFlags []cli.Flag) []cli.Flag {
 	flags = append(flags, CNIFlags...)
 	flags = append(flags, OVNK8sFeatureFlags...)
 	flags = append(flags, K8sFlags...)
+	flags = append(flags, MetricsFlags...)
 	flags = append(flags, OvnNBFlags...)
 	flags = append(flags, OvnSBFlags...)
 	flags = append(flags, OVNGatewayFlags...)
 	flags = append(flags, MasterHAFlags...)
 	flags = append(flags, HybridOverlayFlags...)
 	flags = append(flags, MonitoringFlags...)
+	flags = append(flags, IPFIXFlags...)
 	flags = append(flags, OvnKubeNodeFlags...)
 	flags = append(flags, customFlags...)
 	return flags
@@ -1251,6 +1371,7 @@ type Defaults struct {
 	OvnNorthAddress bool
 	K8sAPIServer    bool
 	K8sToken        bool
+	K8sTokenFile    bool
 	K8sCert         bool
 }
 
@@ -1265,10 +1386,10 @@ func rawExec(exec kexec.Interface, cmd string, args ...string) (string, error) {
 		return "", err
 	}
 
-	klog.V(5).Infof("exec: %s %s", cmdPath, strings.Join(args, " "))
+	klog.V(5).Infof("Exec: %s %s", cmdPath, strings.Join(args, " "))
 	out, err := exec.Command(cmdPath, args...).CombinedOutput()
 	if err != nil {
-		klog.V(5).Infof("exec: %s %s => %v", cmdPath, strings.Join(args, " "), err)
+		klog.V(5).Infof("Exec: %s %s => %v", cmdPath, strings.Join(args, " "), err)
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
@@ -1303,6 +1424,7 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 	saConfig := savedKubernetes
 	if data, err := ioutil.ReadFile(filepath.Join(saPath, kubeServiceAccountFileToken)); err == nil {
 		saConfig.Token = string(data)
+		saConfig.TokenFile = filepath.Join(saPath, kubeServiceAccountFileToken)
 	}
 	if _, err2 := os.Stat(filepath.Join(saPath, kubeServiceAccountFileCACert)); err2 == nil {
 		saConfig.CACert = filepath.Join(saPath, kubeServiceAccountFileCACert)
@@ -1322,6 +1444,7 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 		"CACert":               "K8S_CACERT",
 		"APIServer":            "K8S_APISERVER",
 		"Token":                "K8S_TOKEN",
+		"TokenFile":            "K8S_TOKEN_FILE",
 		"HostNetworkNamespace": "OVN_HOST_NETWORK_NAMESPACE",
 	}
 	for k, v := range envVarsMap {
@@ -1351,6 +1474,10 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 	if defaults.K8sToken {
 		Kubernetes.Token = getOVSExternalID(exec, "k8s-api-token")
 	}
+	if defaults.K8sTokenFile {
+		Kubernetes.TokenFile = getOVSExternalID(exec, "k8s-api-token-file")
+	}
+
 	if defaults.K8sCert {
 		Kubernetes.CACert = getOVSExternalID(exec, "k8s-ca-certificate")
 	}
@@ -1411,6 +1538,33 @@ func completeKubernetesConfig(allSubnets *configSubnets) error {
 		} else {
 			return fmt.Errorf("labelSelector \"%s\" is invalid: %v", Kubernetes.RawNoHostSubnetNodes, err)
 		}
+	}
+
+	return nil
+}
+
+func buildMetricsConfig(cli, file *config) error {
+	// Copy KubernetesConfig backwards-compat values over default values
+	if Kubernetes.CompatMetricsBindAddress != "" {
+		Metrics.BindAddress = Kubernetes.CompatMetricsBindAddress
+	}
+	if Kubernetes.CompatMetricsNodeServerPrivKey != "" {
+		Metrics.NodeServerPrivKey = Kubernetes.CompatMetricsNodeServerPrivKey
+	}
+	if Kubernetes.CompatMetricsNodeServerCert != "" {
+		Metrics.NodeServerCert = Kubernetes.CompatMetricsNodeServerCert
+	}
+
+	Metrics.EnablePprof = Kubernetes.CompatMetricsEnablePprof
+
+	// Copy config file values over Kubernetes and default values
+	if err := overrideFields(&Metrics, &file.Metrics, &savedMetrics); err != nil {
+		return err
+	}
+
+	// And CLI overrides over config file, Kubernetes, and default values
+	if err := overrideFields(&Metrics, &cli.Metrics, &savedMetrics); err != nil {
+		return err
 	}
 
 	return nil
@@ -1559,6 +1713,13 @@ func completeMonitoringConfig() error {
 	return nil
 }
 
+func buildIPFIXConfig(cli, file *config) error {
+	if err := overrideFields(&IPFIX, &file.IPFIX, &savedIPFIX); err != nil {
+		return err
+	}
+	return overrideFields(&IPFIX, &cli.IPFIX, &savedIPFIX)
+}
+
 func buildHybridOverlayConfig(ctx *cli.Context, cli, file *config) error {
 	// Copy config file values over default values
 	if err := overrideFields(&HybridOverlay, &file.HybridOverlay, &savedHybridOverlay); err != nil {
@@ -1680,6 +1841,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	cfg := config{
 		Default:              savedDefault,
 		Logging:              savedLogging,
+		IPFIX:                savedIPFIX,
 		CNI:                  savedCNI,
 		OVNKubernetesFeature: savedOVNKubernetesFeature,
 		Kubernetes:           savedKubernetes,
@@ -1768,6 +1930,12 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
+	// Metrics must be built after Kubernetes to ensure metrics options override
+	// legacy Kubernetes metrics options
+	if err = buildMetricsConfig(&cliConfig, &cfg); err != nil {
+		return "", err
+	}
+
 	if err = buildOVNKubernetesFeatureConfig(ctx, &cliConfig, &cfg); err != nil {
 		return "", err
 	}
@@ -1781,6 +1949,10 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	}
 
 	if err = buildMonitoringConfig(ctx, &cliConfig, &cfg); err != nil {
+		return "", err
+	}
+
+	if err = buildIPFIXConfig(&cliConfig, &cfg); err != nil {
 		return "", err
 	}
 
@@ -1811,9 +1983,11 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	klog.V(5).Infof("Default config: %+v", Default)
 	klog.V(5).Infof("Logging config: %+v", Logging)
 	klog.V(5).Infof("Monitoring config: %+v", Monitoring)
+	klog.V(5).Infof("IPFIX config: %+v", IPFIX)
 	klog.V(5).Infof("CNI config: %+v", CNI)
 	klog.V(5).Infof("Kubernetes config: %+v", stripTokenFromK8sConfig())
 	klog.V(5).Infof("Gateway config: %+v", Gateway)
+	klog.V(5).Infof("Metrics config: %+v", Metrics)
 	klog.V(5).Infof("OVN North config: %+v", OvnNorth)
 	klog.V(5).Infof("OVN South config: %+v", OvnSouth)
 	klog.V(5).Infof("Hybrid Overlay config: %+v", HybridOverlay)
@@ -1885,16 +2059,23 @@ func parseAddress(urlString string) (string, OvnDBScheme, error) {
 				urlString)
 		}
 
-		host, port, err := net.SplitHostPort(splits[1])
-		if err != nil {
-			return "", "", fmt.Errorf("failed to parse OVN DB host/port %q: %v",
-				splits[1], err)
-		}
+		if scheme == "unix" {
+			if parsedAddress != "" {
+				parsedAddress += ","
+			}
+			parsedAddress += ovnAddress
+		} else {
+			host, port, err := net.SplitHostPort(splits[1])
+			if err != nil {
+				return "", "", fmt.Errorf("failed to parse OVN DB host/port %q: %v",
+					splits[1], err)
+			}
 
-		if parsedAddress != "" {
-			parsedAddress += ","
+			if parsedAddress != "" {
+				parsedAddress += ","
+			}
+			parsedAddress += fmt.Sprintf("%s:%s", scheme, net.JoinHostPort(host, port))
 		}
-		parsedAddress += fmt.Sprintf("%s:%s", scheme, net.JoinHostPort(host, port))
 	}
 
 	switch {
@@ -1902,6 +2083,8 @@ func parseAddress(urlString string) (string, OvnDBScheme, error) {
 		parsedScheme = OvnDBSchemeSSL
 	case scheme == "tcp":
 		parsedScheme = OvnDBSchemeTCP
+	case scheme == "unix":
+		parsedScheme = OvnDBSchemeUnix
 	default:
 		return "", "", fmt.Errorf("unknown OVN DB scheme %q", scheme)
 	}
@@ -1955,6 +2138,7 @@ func buildOvnAuth(exec kexec.Interface, northbound bool, cliAuth, confAuth *OvnA
 			return nil, fmt.Errorf("certificate or key given; perhaps you mean to use the 'ssl' scheme?")
 		}
 		auth.Scheme = OvnDBSchemeUnix
+		auth.Address = fmt.Sprintf("unix:/var/run/ovn/ovn%s_db.sock", direction)
 		return auth, nil
 	}
 
@@ -1970,6 +2154,10 @@ func buildOvnAuth(exec kexec.Interface, northbound bool, cliAuth, confAuth *OvnA
 			return nil, fmt.Errorf("must specify private key, certificate, CA certificate, and common name used in the certificate for 'ssl' scheme")
 		}
 	case auth.Scheme == OvnDBSchemeTCP:
+		if auth.PrivKey != "" || auth.Cert != "" || auth.CACert != "" {
+			return nil, fmt.Errorf("certificate or key given; perhaps you mean to use the 'ssl' scheme?")
+		}
+	case auth.Scheme == OvnDBSchemeUnix:
 		if auth.PrivKey != "" || auth.Cert != "" || auth.CACert != "" {
 			return nil, fmt.Errorf("certificate or key given; perhaps you mean to use the 'ssl' scheme?")
 		}
@@ -2015,10 +2203,7 @@ func (a *OvnAuthConfig) GetURL() string {
 // SetDBAuth sets the authentication configuration and connection method
 // for the OVN northbound or southbound database server or client
 func (a *OvnAuthConfig) SetDBAuth() error {
-	if a.Scheme == OvnDBSchemeUnix {
-		// Nothing to do
-		return nil
-	} else if a.Scheme == OvnDBSchemeSSL {
+	if a.Scheme == OvnDBSchemeSSL {
 		// Both server and client SSL schemes require privkey and cert
 		if !pathExists(a.PrivKey) {
 			return fmt.Errorf("private key file %s not found", a.PrivKey)
@@ -2026,9 +2211,7 @@ func (a *OvnAuthConfig) SetDBAuth() error {
 		if !pathExists(a.Cert) {
 			return fmt.Errorf("certificate file %s not found", a.Cert)
 		}
-	}
 
-	if a.Scheme == OvnDBSchemeSSL {
 		// Client can bootstrap the CA cert from the DB
 		if err := a.ensureCACert(); err != nil {
 			return err

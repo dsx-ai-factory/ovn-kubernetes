@@ -39,7 +39,7 @@ func (pr *PodRequest) updatePodDPUConnDetailsWithRetry(kube kube.Interface, dpuC
 	return nil
 }
 
-func (pr *PodRequest) addDPUConnectionDetailsAnnot(kube kube.Interface, vfNetDevice string) error {
+func (pr *PodRequest) addDPUConnectionDetailsAnnot(k kube.Interface, vfNetDevice string) error {
 	// 1. Verify there is a device id
 	if pr.CNIConf.DeviceID == "" {
 		return fmt.Errorf("DeviceID must be set for Pod request with DPU")
@@ -80,12 +80,12 @@ func (pr *PodRequest) addDPUConnectionDetailsAnnot(kube kube.Interface, vfNetDev
 	}
 
 	dpuConnDetails := util.DPUConnectionDetails{
-		PfId:      fmt.Sprint(fn),
-		VfId:      fmt.Sprint(vfindex),
-		PfMAC:     pfLink.Attrs().HardwareAddr.String(),
-		SandboxId: pr.SandboxID,
-		VfDevName: vfNetDevice,
+		PfId:         fmt.Sprint(fn),
+		VfId:         fmt.Sprint(vfindex),
+		PfMAC:        pfLink.Attrs().HardwareAddr.String(),
+		SandboxId:    pr.SandboxID,
+		VfNetdevName: vfNetDevice,
 	}
 
-	return pr.updatePodDPUConnDetailsWithRetry(kube, &dpuConnDetails)
+	return pr.updatePodDPUConnDetailsWithRetry(k, &dpuConnDetails)
 }
