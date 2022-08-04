@@ -1719,7 +1719,7 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) (*factory.Handler
 
 	if err != nil {
 		return nil, fmt.Errorf("watchResource for resource %v. "+
-			"Failed addHandlerFunc: %v", objectsToRetry.oType, err)
+			"Failed addHandlerFunc for network %v: %v", objectsToRetry.oType, oc.nadInfo.NetName, err)
 	}
 
 	// track the retry entries and every 30 seconds (or upon explicit request) check if any objects

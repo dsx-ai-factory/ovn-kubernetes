@@ -1492,7 +1492,7 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 				if util.PodCompleted(&pod) {
 					continue
 				}
-				klog.V(5).Infof("Adding pod %s/%s/%s from node to retryPods for network %s", pod.UID, pod.Namespace, pod.Name, node.Name, oc.nadInfo.NetName)
+				klog.V(5).Infof("Adding pod %s/%s/%s from node %s to retryPods for network %s", pod.UID, pod.Namespace, pod.Name, node.Name, oc.nadInfo.NetName)
 				oc.retryPods.addRetryObjWithAddNoBackoff(&pod)
 			}
 			oc.retryPods.requestRetryObjs()

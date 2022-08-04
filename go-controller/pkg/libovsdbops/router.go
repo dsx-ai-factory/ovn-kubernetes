@@ -1036,7 +1036,7 @@ func DeleteGatewayChassisWithPredicate(nbClient libovsdbclient.Client, portName 
 		Name: portName,
 	}
 
-	deleted := []*nbdb.LogicalRouterPolicy{}
+	deleted := []*nbdb.GatewayChassis{}
 	opModels := []operationModel{
 		{
 			ModelPredicate: p,
