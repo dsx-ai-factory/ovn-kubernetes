@@ -415,7 +415,7 @@ func (oc *Controller) deleteEgressFirewallRules(externalID string) error {
 	}
 	err = libovsdbops.DeleteACLs(oc.mc.nbClient, nil, pSwitch, egressFirewallACLs...)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to delete egressFirewall ACLs %v: %v", egressFirewallACLs, err)
 	}
 
 	return nil

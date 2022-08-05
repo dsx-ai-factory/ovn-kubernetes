@@ -124,6 +124,14 @@ func hashedPortGroup(s string) string {
 func (oc *Controller) updateStaleDefaultDenyACLNames(npType knet.PolicyType, gressSuffix string) error {
 	cleanUpDefaultDeny := make(map[string][]*nbdb.ACL)
 	p := func(item *nbdb.ACL) bool {
+		netName, ok := item.ExternalIDs["network_name"]
+		if oc.nadInfo.IsSecondary {
+			if !ok || netName != oc.nadInfo.NetName {
+				return false
+			}
+		} else if ok {
+			return false
+		}
 		return item.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] == string(npType) && // default-deny-policy-type:Egress or default-deny-policy-type:Ingress
 			strings.Contains(item.Match, gressSuffix) && // Match:inport ==	@ablah80448_egressDefaultDeny or Match:inport == @ablah80448_ingressDefaultDeny
 			!strings.Contains(*item.Name, arpAllowPolicySuffix) && // != name: namespace_ARPallowPolicy
@@ -147,7 +155,7 @@ func (oc *Controller) updateStaleDefaultDenyACLNames(npType knet.PolicyType, gre
 			egressPGName := oc.nadInfo.Prefix + defaultDenyPortGroup(namespace, egressDefaultDenySuffix)
 			err := libovsdbops.DeleteACLs(oc.mc.nbClient, []string{ingressPGName, egressPGName}, nil, aclList[1:]...)
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to delete stale default deny acls for namespace %s network %s: %v", namespace, oc.nadInfo.NetName, err)
 			}
 		}
 		aclList[0].Name = &newName
