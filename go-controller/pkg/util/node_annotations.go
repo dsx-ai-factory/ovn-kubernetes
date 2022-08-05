@@ -287,7 +287,7 @@ func ParseNodeL3GatewayAnnotation(node *kapi.Node) (*L3GatewayConfig, error) {
 	if cfg.Mode != config.GatewayModeDisabled {
 		cfg.ChassisID, ok = node.Annotations[ovnNodeChassisID]
 		if !ok {
-			return nil, fmt.Errorf("%s annotation not found", ovnNodeChassisID)
+			return nil, newAnnotationNotSetError("%s annotation not found", ovnNodeChassisID)
 		}
 	}
 	return cfg, nil

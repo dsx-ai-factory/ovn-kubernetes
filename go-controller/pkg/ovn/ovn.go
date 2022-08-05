@@ -946,7 +946,7 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 		return err
 	}
 
-	if hostSubnets == nil {
+	if len(hostSubnets) == 0 {
 		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, oc.nadInfo.NetName)
 		if err != nil {
 			return err

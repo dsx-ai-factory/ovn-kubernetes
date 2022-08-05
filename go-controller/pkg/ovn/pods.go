@@ -775,7 +775,12 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string
 		return fmt.Errorf("error transacting operations %+v: %v", ops, err)
 	}
 	txOkCallBack()
-	oc.mc.podRecorder.AddLSP(pod.UID, oc.nadInfo.NetNameInfo, nadName)
+	// primary network lsp does not set nadName external_ids so set its nadName to be empty
+	if oc.nadInfo.IsSecondary {
+		oc.mc.podRecorder.AddLSP(pod.UID, oc.nadInfo.NetNameInfo, nadName)
+	} else {
+		oc.mc.podRecorder.AddLSP(pod.UID, oc.nadInfo.NetNameInfo, "")
+	}
 
 	if !oc.nadInfo.IsSecondary {
 		// check if this pod is serving as an external GW
