@@ -413,12 +413,12 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 		Duration: 100 * time.Millisecond,
 		Steps:    3,
 	}
+	hwOffloadEnabled, err := isHWOffloadEnabled()
+	if err != nil {
+		return fmt.Errorf("error checking hw-offload flag: %v", err)
+	}
 	var link netlink.Link
 	err = retry.OnError(backoff, func(e error) bool {
-		if config.OvnKubeNode.Mode != types.NodeModeDPU {
-			// no retry for non-dpu case
-			return false
-		}
 		klog.Errorf("Failed to add port %s to br-int: %v", hostIfaceName, e)
 		delPortArgs := []string{
 			"--if-exists", "del-port", "br-int", hostIfaceName,
@@ -433,10 +433,11 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 		if out, err := ovsExec(ovsArgs...); err != nil {
 			return fmt.Errorf("failure in plugging pod interface %s: stdout: %q, error: %v", hostIfaceName, out, err)
 		}
-		if config.OvnKubeNode.Mode != types.NodeModeDPU {
+		if !hwOffloadEnabled {
+			klog.V(7).Info("Skip offload verification since hw-offload is not enabled")
 			return nil
 		}
-		// to make sure offload is enabled on dpu node, look for tc ingress
+		// to make sure offload is enabled for the interface, look for tc ingress
 		// filters for the link, return error if no rules are found
 		if link == nil {
 			if link, err = util.GetNetLinkOps().LinkByName(hostIfaceName); err != nil {
