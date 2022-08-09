@@ -74,7 +74,7 @@ type namespaceInfo struct {
 	// addressSet is an address set object that holds the IP addresses
 	// of all pods in the namespace.
 	addressSet           addressset.AddressSet
-	nodeHostNetPodsCache map[string]map[string]bool
+	nodeHostNetPodsCache map[string]map[string][]net.IP
 
 	// map from NetworkPolicy name to networkPolicy. You must hold the
 	// namespaceInfo's mutex to add/delete/lookup policies, but must hold the

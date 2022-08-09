@@ -34,7 +34,7 @@ type gressPolicy struct {
 	// IP addresess.
 	peerAddressSet addressset.AddressSet
 	// captures all the hostNetworkPods for a given node
-	nodeHostNetPodsCache map[string]map[string]bool
+	nodeHostNetPodsCache map[string]map[string][]net.IP
 	// a mutex for the above cache
 	nodeHostNetPodsCacheLock sync.Mutex
 
@@ -131,7 +131,7 @@ func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name string,
 		peerV4AddressSets:    sets.String{},
 		peerV6AddressSets:    sets.String{},
 		portPolicies:         make([]*portPolicy, 0),
-		nodeHostNetPodsCache: make(map[string]map[string]bool),
+		nodeHostNetPodsCache: make(map[string]map[string][]net.IP),
 		isAclStateless:       aclState,
 	}
 }
@@ -230,7 +230,7 @@ func (gp *gressPolicy) deletePeerPod(oc *Controller, pod *v1.Pod) error {
 		gp.nodeHostNetPodsCacheLock.Lock()
 		defer gp.nodeHostNetPodsCacheLock.Unlock()
 		return oc.delHostnetworkPodIPFromAddressSet(pod.Spec.NodeName, fmt.Sprintf("%s/%s", pod.Namespace, pod.Name),
-			string(gp.policyType), gp.peerAddressSet, gp.nodeHostNetPodsCache)
+			gp.peerAddressSet, gp.nodeHostNetPodsCache)
 	}
 
 	ips, err := util.GetAllPodIPs(pod, gp.netAttachInfo)
