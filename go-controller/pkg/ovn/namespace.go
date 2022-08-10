@@ -84,7 +84,7 @@ func (oc *Controller) getHostNetworkPodIPs(node *kapi.Node, policyType string) (
 }
 
 func (oc *Controller) addHostnetworkPodIPToAddressSet(nodeName, podName, policyType string, addressSet addressset.AddressSet,
-	nodeHostNetPodsCache map[string]map[string]bool) error {
+	nodeHostNetPodsCache map[string]map[string][]net.IP) error {
 
 	node, err := oc.mc.kube.GetNode(nodeName)
 	if err != nil {
@@ -108,39 +108,23 @@ func (oc *Controller) addHostnetworkPodIPToAddressSet(nodeName, podName, policyT
 	}
 
 	if _, ok := nodeHostNetPodsCache[nodeName]; !ok {
-		nodeHostNetPodsCache[nodeName] = map[string]bool{}
+		nodeHostNetPodsCache[nodeName] = map[string][]net.IP{}
 	}
-	nodeHostNetPodsCache[nodeName][podName] = true
+	nodeHostNetPodsCache[nodeName][podName] = ips
 	return nil
 }
 
-func (oc *Controller) delHostnetworkPodIPFromAddressSet(nodeName, podName, policyType string, addressSet addressset.AddressSet,
-	nodeHostNetPodsCache map[string]map[string]bool) error {
+func (oc *Controller) delHostnetworkPodIPFromAddressSet(nodeName, podName string, addressSet addressset.AddressSet,
+	nodeHostNetPodsCache map[string]map[string][]net.IP) error {
 
 	if podMap, ok := nodeHostNetPodsCache[nodeName]; ok {
-		if _, ok = podMap[podName]; ok {
+		if ips, ok := podMap[podName]; ok {
 			delete(podMap, podName)
 
 			// If no host network pods on this node, delete the node IPs from the network addressSet
 			if len(podMap) == 0 {
 				delete(nodeHostNetPodsCache, nodeName)
-				node, err := oc.mc.kube.GetNode(nodeName)
-				if err != nil {
-					return fmt.Errorf("failed to get node %s: %v", nodeName, err)
-				}
-
-				// if node is not managed by OVN, there is nothing to do
-				if noHostSubnet(node) {
-					return nil
-				}
-
-				ips, err := oc.getHostNetworkPodIPs(node, policyType)
-				if err != nil {
-					return fmt.Errorf("failed to get %s policy IPs for host network pod %s schedued on node %s: %v",
-						policyType, podName, nodeName, err)
-				}
-
-				err = addressSet.DeleteIPs(ips)
+				err := addressSet.DeleteIPs(ips)
 				if err != nil {
 					return fmt.Errorf("failed to delete host network Pod IPs %v from address_set %s",
 						ips, addressSet.GetName())
@@ -171,7 +155,7 @@ func (oc *Controller) delHostNetworkPodFromNamespace(pod *kapi.Pod) error {
 	}
 	defer nsUnlock()
 
-	return oc.delHostnetworkPodIPFromAddressSet(pod.Spec.NodeName, pod.Name, "Both", nsInfo.addressSet, nsInfo.nodeHostNetPodsCache)
+	return oc.delHostnetworkPodIPFromAddressSet(pod.Spec.NodeName, pod.Name, nsInfo.addressSet, nsInfo.nodeHostNetPodsCache)
 }
 
 func (oc *Controller) getRoutingExternalGWs(nsInfo *namespaceInfo) *gatewayInfo {
@@ -305,33 +289,6 @@ func (oc *Controller) multicastDeleteNamespace(ns *kapi.Namespace, nsInfo *names
 		}
 	}
 }
-
-//// updateNamepacePortGroup updates the port_group applied to the namespace. Multiple objects
-//// that apply network configuration to all pods in a namespace will use the same port group.
-//// This function ensures that the namespace wide port group will only be created once and
-//// cleaned up when no object that relies on it exists.
-//func (nsInfo *namespaceInfo) updateNamespacePortGroup(ovnNBClient goovn.Client, ns string) error {
-//	if nsInfo.multicastEnabled {
-//		if nsInfo.portGroupUUID != "" {
-//			// Multicast is enabled and the port group exists so there is nothing to do.
-//			return nil
-//		}
-//
-//		// The port group should exist but doesn't so create it
-//		portGroupUUID, err := createPortGroup(ovnNBClient, ns, hashedPortGroup(ns), nsInfo.NetNameInfo)
-//		if err != nil {
-//			return fmt.Errorf("failed to create port_group for %s (%v)", ns, err)
-//		}
-//		nsInfo.portGroupUUID = portGroupUUID
-//	} else {
-//		err := deletePortGroup(ovnNBClient, hashedPortGroup(ns), nsInfo.NetNameInfo)
-//		if err != nil {
-//			klog.Errorf("%v", err)
-//		}
-//		nsInfo.portGroupUUID = ""
-//	}
-//	return nil
-//}
 
 // AddNamespace creates corresponding addressset in ovn db
 func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
@@ -579,7 +536,7 @@ func (oc *Controller) ensureNamespaceLocked(ns string, readOnly bool, namespace 
 			multicastEnabled:      false,
 			routingExternalPodGWs: make(map[string]gatewayInfo),
 			routingExternalGWs:    gatewayInfo{gws: sets.NewString(), bfdEnabled: false},
-			nodeHostNetPodsCache:  make(map[string]map[string]bool),
+			nodeHostNetPodsCache:  make(map[string]map[string][]net.IP),
 		}
 		// we are creating nsInfo and going to set it in namespaces map
 		// so safe to hold the lock while we create and add it

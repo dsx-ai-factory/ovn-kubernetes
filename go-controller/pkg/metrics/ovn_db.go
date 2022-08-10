@@ -14,10 +14,6 @@ import (
 	"k8s.io/klog/v2"
 )
 
-const (
-	dbHealthScrapeInterval = 120
-)
-
 var ovnSouthDbCoverageShowMetricsMap = map[string]*metricDetails{
 	"hmap_pathological": {
 		help: "Registering how many hash map resize calls has been " +
@@ -127,19 +123,6 @@ var metricDBSize = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Help:      "The size of the database file associated with the OVN DB component."},
 	[]string{
 		"db_name",
-	},
-)
-
-var metricDBHealthStatus = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
-	Subsystem: MetricOvnSubsystemDB,
-	Name:      "raft_health_status",
-	Help: "Health status of a raft database file associated with OVN DB component as " +
-		"reported by ovsdb-tool check-cluster"},
-	[]string{
-		"db_name",
-		"db_status",
-		"db_info",
 	},
 )
 
@@ -373,39 +356,6 @@ func getOvnDBSizeViaPath(dbProperties *util.OvsDbProperties) (int64, error) {
 	return fileInfo.Size(), nil
 }
 
-// check for OVSDB health status, report error and warning
-//
-// Details:
-// `ovsdb-tool check-cluster DB` command detects unusual but not necessarily incorrect content,
-// it prints a warning or warnings on stdout. If it finds consistency errors,
-// it prints an error on stderr and exits with status 1
-//
-func ovnDBHealthStatusUpdater(dbProperties *util.OvsDbProperties) {
-	_, err := os.Stat(dbProperties.DbAlias)
-	if err != nil {
-		return
-	}
-
-	successCode := 2.0
-	status := "ok"
-	info := ""
-
-	stdout, stderr, err := util.RunOVSDBTool("check-cluster", dbProperties.DbAlias)
-	if err != nil {
-		klog.Errorf("Failed to check DB health status for database %s: %v", dbProperties.DbName, err)
-		status = "error"
-		info = stderr
-		successCode = 0
-	} else if len(stdout) != 0 {
-		klog.Warningf("DB health status for database %s detected unusual content: %s", dbProperties.DbName, stdout)
-		status = "warning"
-		info = stdout
-		successCode = 1
-	}
-
-	metricDBHealthStatus.WithLabelValues(dbProperties.DbName, status, info).Set(successCode)
-}
-
 func ovnDBMemoryMetricsUpdater(dbProperties *util.OvsDbProperties) {
 	var stdout, stderr string
 	var err error
@@ -558,9 +508,6 @@ func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string,
 		klog.Info("Found db is standalone, don't register db_cluster metrics")
 	}
 	if dbIsClustered {
-		klog.Info("Found db is clustered, register db_cluster metrics")
-		ovnRegistry.MustRegister(metricDBHealthStatus)
-
 		// Register the ovn*_db coverage/show metrics with prometheus
 
 		componentCoverageShowMetricsMap[ovnNorthDB] = ovnNorthDbCoverageShowMetricsMap
@@ -601,8 +548,6 @@ func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string,
 	go func() {
 		ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
 		defer ticker.Stop()
-		tickerDbHealth := time.NewTicker(time.Duration(dbHealthScrapeInterval) * time.Second)
-		defer tickerDbHealth.Stop()
 
 		for {
 			select {
@@ -623,13 +568,6 @@ func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string,
 						ovnDBSizeMetricsUpdater(dbProperty)
 					}
 					ovnDBMemoryMetricsUpdater(dbProperty)
-				}
-			case <-tickerDbHealth.C:
-				metricDBHealthStatus.Reset()
-				if dbIsClustered {
-					for _, dbProperty := range dbProperties {
-						ovnDBHealthStatusUpdater(dbProperty)
-					}
 				}
 			case <-stopChan:
 				return
