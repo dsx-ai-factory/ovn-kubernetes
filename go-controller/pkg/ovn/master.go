@@ -1434,22 +1434,12 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 		oc.addNodeFailed.Delete(node.Name)
 	}
 
-	// hostSubnets annotation should already be set here, but it may not be shown in node.Annotations
-	// yet, as it has not been updated by the watcher informer.
 	if nSyncs.syncClusterRouterPort {
-		err = oc.syncNodeClusterRouterPort(node, hostSubnets)
-		// if annotation is not set, return success and it will be handled in next node update.
-		// otherwise, if this is called in syncResources(), and if it reaches retry limit,
-		// the controller's bringing up process would fail. It is ok for default controller,
-		// as ovnkube-master will restart, but it is fatal for non default controller
-		if err == nil || util.IsAnnotationNotSetError(err) {
-			if err != nil {
-				klog.Warningf("Adding node %s failed for network %s: %v", node.Name, oc.nadInfo.NetName, err)
-			}
-			oc.nodeClusterRouterPortFailed.Delete(node.Name)
-		} else {
+		if err = oc.syncNodeClusterRouterPort(node, hostSubnets); err != nil {
 			errs = append(errs, err)
 			oc.nodeClusterRouterPortFailed.Store(node.Name, true)
+		} else {
+			oc.nodeClusterRouterPortFailed.Delete(node.Name)
 		}
 	}
 
