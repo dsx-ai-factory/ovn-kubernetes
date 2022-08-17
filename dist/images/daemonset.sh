@@ -82,10 +82,6 @@ OVNKUBE_NODE_MGMT_PORT_NETDEV=""
 OVN_NOHOSTSUBNET_LABEL="k8s.ovn.org/ovn-managed=false"
 OVN_ENCAP_TOS="inherit"
 OVN_CTINV_FLOWS_DISABLE="true"
-# Rate limit on the VFs to mitigate DoS; the maximum packets per second
-# and burst of new connections allowed on the VF
-OVN_MAX_NEWCONN_PPS="10"
-OVN_MAX_NEWCONN_BURST="100"
 # XDP related information: SF Rep, Veth, NS.
 OVN_XDP_SFREP="xdp_sf"
 OVN_XDP_VETH="xdp_veth"
@@ -301,12 +297,6 @@ while [ "$1" != "" ]; do
   --ovn-ctinv-flows-disable)
     OVN_CTINV_FLOWS_DISABLE=$VALUE
     ;;
-  --max-newconn-pps)
-    OVN_MAX_NEWCONN_PPS=$VALUE
-    ;;
-  --max-newconn-burst)
-    OVN_MAX_NEWCONN_BURST=$VALUE
-    ;;
   --xdp-sfrep)
     OVN_XDP_SFREP=$VALUE
     ;;
@@ -488,10 +478,6 @@ ovn_encap_tos=${OVN_ENCAP_TOS}
 echo "ovn_encap_tos: ${ovn_encap_tos}"
 ovn_ctinv_flows_disable=${OVN_CTINV_FLOWS_DISABLE}
 echo "ovn_ctinv_flows_disable: ${ovn_ctinv_flows_disable}"
-ovn_max_newconn_pps=${OVN_MAX_NEWCONN_PPS}
-echo "ovn_max_newconn_pps: ${ovn_max_newconn_pps}"
-ovn_max_newconn_burst=${OVN_MAX_NEWCONN_BURST}
-echo "ovn_max_newconn_burst: ${ovn_max_newconn_burst}"
 ovn_xdp_sfrep=${OVN_XDP_SFREP}
 echo "ovn_xdp_sfrep: ${ovn_xdp_sfrep}"
 ovn_xdp_veth=${OVN_XDP_VETH}
@@ -742,8 +728,6 @@ ovn_image=${image_ubuntu} \
   ovn_lflow_cache_limit=${ovn_lflow_cache_limit} \
   ovn_lflow_cache_limit_kb=${ovn_lflow_cache_limit_kb} \
   ovn_encap_tos=${ovn_encap_tos} \
-  ovn_max_newconn_pps=${ovn_max_newconn_pps} \
-  ovn_max_newconn_burst=${ovn_max_newconn_burst} \
   ovn_xdp_sfrep=${ovn_xdp_sfrep} \
   ovn_xdp_veth=${ovn_xdp_veth} \
   ovn_xdp_ns=${ovn_xdp_ns} \

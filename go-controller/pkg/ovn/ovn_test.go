@@ -118,6 +118,14 @@ func (o *FakeOVN) init() {
 	o.controller = o.mhController.ovnController
 	o.controller.multicastSupport = true
 	o.controller.loadBalancerGroupUUID = types.ClusterLBGroupName + "-UUID"
+	o.controller.nadInfo = &util.NetAttachDefInfo{
+		NetNameInfo: util.NetNameInfo{
+			NetName:     "default",
+			IsSecondary: false,
+		},
+		MTU: 1400,
+	}
+	o.controller.nadInfo.NetAttachDefs.Store("default/ovn-primary", &util.NadConfig{MissRateLimitConfig: util.MissRateLimitConfig{MaxNewConnPPS: 10, MaxNewConnBurst: 100}})
 }
 
 func resetNBClient(ctx context.Context, nbClient libovsdbclient.Client) {

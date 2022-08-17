@@ -14,10 +14,14 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	kapi "k8s.io/api/core/v1"
 )
+
+var defaultOVNPrimary = networkattachmentdefinitionapi.NetworkSelectionElement{
+	Namespace: "default",
+	Name:      "ovn-primary",
+}
 
 // CreateMACBinding Creates MAC binding in OVN SBDB
 func CreateMACBinding(sbClient libovsdbclient.Client, logicalPort, datapathName string, portMAC net.HardwareAddr, nextHop net.IP) error {
@@ -72,8 +76,8 @@ func IsNetworkOnPod(pod *kapi.Pod, netAttachInfo *NetAttachDefInfo) (bool,
 			return false, nil, fmt.Errorf("failed to get default network for pod %s: %v", podDesc, err)
 		}
 		if defaultNetwork == nil {
-			nseMap[ovntypes.DefaultNetworkName] = nil
-			return true, nseMap, nil
+			// pod has no annotations indicating default NAD, use default/ovn-primary
+			defaultNetwork = &defaultOVNPrimary
 		}
 		nadKeyName := GetNadKeyName(defaultNetwork.Namespace, defaultNetwork.Name)
 		_, ok := netAttachInfo.NetAttachDefs.Load(nadKeyName)
