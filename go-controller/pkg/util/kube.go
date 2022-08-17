@@ -272,6 +272,17 @@ func PodScheduled(pod *kapi.Pod) bool {
 	return pod.Spec.NodeName != ""
 }
 
+// PodReady returns if the given pod is in Ready state
+func PodReady(pod *kapi.Pod) bool {
+	for _, cond := range pod.Status.Conditions {
+		if cond.Type != kapi.PodReady {
+			continue
+		}
+		return cond.Status == kapi.ConditionTrue
+	}
+	return false
+}
+
 const (
 	// DefNetworkAnnotation is the pod annotation for the cluster-wide default network
 	DefNetworkAnnotation = "v1.multus-cni.io/default-network"

@@ -446,6 +446,10 @@ func RecordPodCreated(pod *kapi.Pod) {
 		}
 		creationLatency := t.Sub(cond.LastTransitionTime.Time).Seconds()
 		metricPodCreationLatency.Observe(creationLatency)
+		if creationLatency >= 60 {
+			klog.Errorf("Abnormal latency recorded for pod: %s/%s with latency: %v", pod.Namespace, pod.Name,
+				creationLatency)
+		}
 		return
 	}
 }
