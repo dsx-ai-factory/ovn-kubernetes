@@ -615,6 +615,10 @@ func SetNodeHostAddresses(nodeAnnotator kube.Annotator, addresses sets.String) e
 	return nodeAnnotator.Set(ovnNodeHostAddresses, addresses.List())
 }
 
+func DelNodeHostAddresses(nodeAnnotator kube.Annotator) {
+	nodeAnnotator.Delete(ovnNodeHostAddresses)
+}
+
 // ParseNodeHostAddresses returns the parsed host addresses living on a node
 func ParseNodeHostAddresses(node *kapi.Node) (sets.String, error) {
 	addrAnnotation, ok := node.Annotations[ovnNodeHostAddresses]
