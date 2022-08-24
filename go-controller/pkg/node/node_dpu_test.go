@@ -38,8 +38,12 @@ func genOVSAddPortCmd(hostIfaceName, ifaceID, mac, ip, sandboxID, podUID string)
 		hostIfaceName, hostIfaceName, mac, ifaceID, podUID, ip, sandboxID, hostIfaceName)
 }
 
-func genOVSDelPortCmd(portName string) string {
-	return fmt.Sprintf("ovs-vsctl --timeout=15 --if-exists del-port br-int %s", portName)
+func genOVSDelPortCmd(portName string, timeout ...int) string {
+	_timeout := 15
+	if len(timeout) > 0 {
+		_timeout = timeout[0]
+	}
+	return fmt.Sprintf("ovs-vsctl --timeout=%d --if-exists del-port br-int %s", _timeout, portName)
 }
 
 func genOVSGetCmd(table, record, column, key string) string {
@@ -185,10 +189,34 @@ var _ = Describe("Node DPU tests", func() {
 			})
 			checkOVSPortPodInfo(execMock, vfRep, false, "30", "", "")
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    genOVSGetCmd("Open_vSwitch", ".", "other_config", "hw-offload"),
+				Output: "true",
+			})
+			// add-port, fail, del & retry
+			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
 				Err: fmt.Errorf("failed to run ovs command"),
 			})
-
+			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    genOVSDelPortCmd(vfRep, 30),
+				Output: "true",
+			})
+			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
+				Err: fmt.Errorf("failed to run ovs command"),
+			})
+			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    genOVSDelPortCmd(vfRep, 30),
+				Output: "true",
+			})
+			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
+				Err: fmt.Errorf("failed to run ovs command"),
+			})
+			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    genOVSDelPortCmd(vfRep, 30),
+				Output: "true",
+			})
 			// Mock netlink/ovs calls for cleanup
 			checkOVSPortPodInfo(execMock, vfRep, false, "15", "", "")
 			fakeClient := newFakeKubeClientWithPod(&pod)
@@ -210,6 +238,10 @@ var _ = Describe("Node DPU tests", func() {
 						"external-ids:iface-id="+genIfaceID(pod.Namespace, pod.Name)),
 				})
 				checkOVSPortPodInfo(execMock, vfRep, false, "30", "", "")
+				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    genOVSGetCmd("Open_vSwitch", ".", "other_config", "hw-offload"),
+					Output: "true",
+				})
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
 				})
@@ -245,16 +277,54 @@ var _ = Describe("Node DPU tests", func() {
 
 			Context("Fails if link configuration fails on", func() {
 				It("LinkByName()", func() {
-					netlinkOpsMock.On("LinkByName", vfRep).Return(nil, fmt.Errorf("failed to get link"))
+					execMock := ovntest.NewFakeExec()
+					e := util.SetExec(execMock)
+					Expect(e).NotTo(HaveOccurred())
+					e = cni.SetExec(execMock)
+					Expect(e).NotTo(HaveOccurred())
+					execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+						Cmd: genOVSFindCmd("30", "Interface", "name",
+							"external-ids:iface-id="+genIfaceID(pod.Namespace, pod.Name)),
+					})
+					checkOVSPortPodInfo(execMock, vfRep, false, "30", "", "")
+					execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+						Cmd:    genOVSGetCmd("Open_vSwitch", ".", "other_config", "hw-offload"),
+						Output: "true",
+					})
+					// add-port, fail, del & retry
+					execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+						Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
+					})
+					execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+						Cmd:    genOVSDelPortCmd(vfRep, 30),
+						Output: "true",
+					})
+					execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+						Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
+						Err: fmt.Errorf("failed to run ovs command"),
+					})
+					execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+						Cmd:    genOVSDelPortCmd(vfRep, 30),
+						Output: "true",
+					})
+					execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+						Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
+						Err: fmt.Errorf("failed to run ovs command"),
+					})
+					execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+						Cmd:    genOVSDelPortCmd(vfRep, 30),
+						Output: "true",
+					})
 					// Mock ovs calls for cleanup
 					checkOVSPortPodInfo(execMock, vfRep, true, "15", scd.SandboxId, types.DefaultNetworkName)
 					execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-						Cmd: genOVSDelPortCmd("pf0vf9"),
+						Cmd:    genOVSDelPortCmd(vfRep),
+						Output: "true",
 					})
-
+					// fail LinkByName
+					netlinkOpsMock.On("LinkByName", vfRep).Return(nil, fmt.Errorf("failed to get link"))
 					fakeClient := newFakeKubeClientWithPod(&pod)
 					podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
-
 					err := nc.addRepPort(&pod, &scd, ifInfo, &podLister, fakeClient)
 					Expect(err).To(HaveOccurred())
 					Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())

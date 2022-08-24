@@ -9,14 +9,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 	kexec "k8s.io/utils/exec"
 	utilnet "k8s.io/utils/net"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 var runner kexec.Interface
@@ -333,4 +333,14 @@ func waitForPodInterface(ctx context.Context, ifInfo *PodInterfaceInfo,
 			time.Sleep(200 * time.Millisecond)
 		}
 	}
+}
+
+// isHWOffloadEnabled checks if hw-offload is enabled or not
+func isHWOffloadEnabled() (bool, error) {
+	out, err := ovsGet("Open_vSwitch", ".", "other_config", "hw-offload")
+	if err != nil {
+		return false, err
+	}
+
+	return out == "true", nil
 }
