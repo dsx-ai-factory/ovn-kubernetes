@@ -415,7 +415,7 @@ func getOvsDatapaths() (datapathsList []string, err error) {
 		}
 	}()
 
-	stdout, stderr, err = util.RunOVSAppctl("dpctl/dump-dps")
+	stdout, stderr, err = util.RunOvsVswitchdAppCtl("dpctl/dump-dps")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get output of ovs-appctl dpctl/dump-dps "+
 			"stderr(%s) :(%v)", stderr, err)
@@ -449,7 +449,7 @@ func setOvsDatapathMetrics(datapaths []string) (err error) {
 
 	metricOvsDpIf.Reset()
 	for _, datapathName = range datapaths {
-		stdout, stderr, err = util.RunOVSAppctl("dpctl/show", datapathName)
+		stdout, stderr, err = util.RunOvsVswitchdAppCtl("dpctl/show", datapathName)
 		if err != nil {
 			return fmt.Errorf("failed to get datapath stats for %s "+
 				"stderr(%s) :(%v)", datapathName, stderr, err)
