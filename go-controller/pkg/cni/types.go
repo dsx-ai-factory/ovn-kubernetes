@@ -51,7 +51,7 @@ type PodInterfaceInfo struct {
 	EnableUDPAggregation bool   `json:"enable-udp-aggregation"`
 	NadName              string `json:"nadName"` // nad's <namesapce/name>, when associated with a net-attach-def
 	SkipSpoofCheck       bool   `json:"skip-spoof-check"`
-	ClusterName    string `json:"clusterName"`
+	ClusterName          string `json:"clusterName"`
 }
 
 // Explicit type for CNI commands the server handles

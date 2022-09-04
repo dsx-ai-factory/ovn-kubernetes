@@ -74,6 +74,7 @@ BASEDIR=$(dirname $0)
 # OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
 # OVN_METRICS_SCRAPE_INTERVAL - ovn & ovnkube metrics scrape interval in sec (default 30)
 # OVS_METRICS_SCRAPE_INTERVAL - ovs metrics scrape interval in sec (default 30)
+# OVN_METRICS_ENABLE_PPROF - Enable/Disable pprof server
 # OVN_MONITOR_ALL - ovn-controller monitor all data in SB DB
 # OVN_OFCTRL_WAIT_BEFORE_CLEAR - ovn-controller wait time in ms before clearing OpenFlow rules during start up
 # OVN_ENABLE_LFLOW_CACHE - enable ovn-controller lflow-cache
@@ -100,6 +101,7 @@ BASEDIR=$(dirname $0)
 # OVN_SB_ENABLE_LEADER_XFER_FOR_SNAPSHOT - Transfer leader election when snapshotting ovn sb db
 # K8S_CLUSTER_NAME - name of the kubernetes cluster
 # OVN_CONNTRACK_ZONE - Conntrack zone number used for openflow rules (default 64000)
+
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -283,6 +285,12 @@ ovn_multicast_enable=${OVN_MULTICAST_ENABLE:-}
 ovn_metrics_scrape_interval=${OVN_METRICS_SCRAPE_INTERVAL:-30}
 # OVS_METRICS_SCRAPE_INTERVAL - metrics scrape interval in sec (default 30)
 ovs_metrics_scrape_interval=${OVS_METRICS_SCRAPE_INTERVAL:-30}
+# OVN_METRICS_ENABLE_PPROF - Enable/Disable pprof server
+ovn_metrics_enable_pprof=${OVN_METRICS_ENABLE_PPROF:-true}
+echo "ovn_metrics_enable_pprof=${ovn_metrics_enable_pprof}"
+if [[ ${ovn_metrics_enable_pprof} == "true" ]]; then
+  ovn_metrics_enable_pprof_flag="--metrics-enable-pprof"
+fi
 ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-}
 #OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 ovn_egressip_enable=${OVN_EGRESSIP_ENABLE:-false}
@@ -1140,7 +1148,7 @@ ovn-master() {
     --mtu=${mtu} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
-    --gateway-mode=${ovn_gateway_mode} \
+    --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
     --loglevel=${ovnkube_loglevel} \
     --logfile-maxsize=${ovnkube_logfile_maxsize} \
     --logfile-maxbackups=${ovnkube_logfile_maxbackups} \
@@ -1164,7 +1172,7 @@ ovn-master() {
     ${multi_networkpolicy_enabled_flag} \
     --metrics-interval ${ovn_metrics_scrape_interval} \
     ${ovnkube_config_duration_enable_flag} \
-    --metrics-bind-address ${ovnkube_master_metrics_bind_address} --metrics-enable-pprof \
+    --metrics-bind-address ${ovnkube_master_metrics_bind_address} ${ovn_metrics_enable_pprof_flag} \
     --host-network-namespace ${ovn_host_network_namespace} \
     ${ctinv_flows_disable_flag} \
     ${ovn_master_ha_opts} \
@@ -1628,7 +1636,7 @@ ovn-node() {
     ${ipfix_targets} \
     ${ipfix_config} \
     --metrics-interval ${ovn_metrics_scrape_interval} \
-    --metrics-bind-address ${ovnkube_node_metrics_bind_address} --metrics-enable-pprof \
+    --metrics-bind-address ${ovnkube_node_metrics_bind_address} ${ovn_metrics_enable_pprof_flag} \
     ${export_ovs_metrics_opts} \
     ${ovnkube_node_mode_flag} \
     ${egress_interface} \

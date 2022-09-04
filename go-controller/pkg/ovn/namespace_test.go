@@ -195,8 +195,9 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				Name: ovntypes.OVNClusterRouter,
 			}
 			expectedNodeSwitch := &nbdb.LogicalSwitch{
-				UUID: node1.Name + "-UUID",
-				Name: node1.Name,
+				UUID:        node1.Name + "-UUID",
+				Name:        node1.Name,
+				ExternalIDs: map[string]string{"cluster_name": config.Kubernetes.ClusterName},
 			}
 			expectedClusterRouterPortGroup := &nbdb.PortGroup{
 				UUID: ovntypes.ClusterRtrPortGroupName + "-UUID",

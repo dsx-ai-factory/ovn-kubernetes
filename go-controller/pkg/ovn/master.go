@@ -29,7 +29,6 @@ import (
 
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -280,7 +279,7 @@ func (oc *Controller) StartClusterMaster() error {
 		klog.Warningf("Load Balancer Group support enabled, however version of OVN in use does not support Load Balancer Groups.")
 	} else {
 		loadBalancerGroup := nbdb.LoadBalancerGroup{
-			Name: oc.nadInfo.Prefix + types.ClusterLBGroupName,
+			Name: util.GetClusterNamePrefix() + oc.nadInfo.Prefix + types.ClusterLBGroupName,
 		}
 		err := libovsdbops.CreateOrUpdateLoadBalancerGroup(oc.mc.nbClient, &loadBalancerGroup)
 		if err != nil {
@@ -402,7 +401,7 @@ func (oc *Controller) SetupMaster(ovnManagedNodeNames []string) error {
 	}
 
 	// Create OVNJoinSwitch that will be used to connect gateway routers to the distributed router.
-	joinSwitchName := oc.nadInfo.Prefix + types.OVNJoinSwitch
+	joinSwitchName := util.GetClusterNamePrefix() + oc.nadInfo.Prefix + types.OVNJoinSwitch
 	logicalSwitch := nbdb.LogicalSwitch{
 		Name: joinSwitchName,
 	}
@@ -459,7 +458,7 @@ func (oc *Controller) SetupMaster(ovnManagedNodeNames []string) error {
 	}
 	//ToDo(Hareesh): Check if nadInfo.Prefix is needed
 	//joinSwitchName := util.GetClusterNamePrefix() + oc.nadInfo.Prefix + types.OVNJoinSwitch
-	joinSwitchName = util.GetClusterNamePrefix() + types.OVNJoinSwitch
+	joinSwitchName = util.GetClusterNamePrefix() + oc.nadInfo.Prefix + types.OVNJoinSwitch
 	sw := nbdb.LogicalSwitch{Name: joinSwitchName}
 	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.mc.nbClient, &sw, &logicalSwitchPort)
 	if err != nil {
@@ -1330,6 +1329,12 @@ func (oc *Controller) syncNodesRetriable(nodes []interface{}) error {
 
 	p := func(item *nbdb.LogicalSwitch) bool {
 		if len(item.OtherConfig) > 0 {
+			if config.Kubernetes.ClusterName != "" {
+				cluster_name, ok := item.ExternalIDs["cluster_name"]
+				if ok && cluster_name != config.Kubernetes.ClusterName {
+					return false
+				}
+			}
 			netName, ok := item.ExternalIDs["network_name"]
 			if oc.nadInfo.IsSecondary {
 				if ok && netName == oc.nadInfo.NetName {
@@ -1381,6 +1386,7 @@ func (oc *Controller) syncNodesRetriable(nodes []interface{}) error {
 			continue
 		}
 
+		klog.Infof("syncNodesRetriable(): Deleting Node: %v", nodeName)
 		if err := oc.deleteNode(nodeName, subnets); err != nil {
 			return fmt.Errorf("failed to delete node:%s for network %s, err:%v", nodeName, oc.nadInfo.NetName, err)
 		}
@@ -1391,7 +1397,13 @@ func (oc *Controller) syncNodesRetriable(nodes []interface{}) error {
 	}
 
 	// cleanup stale chassis with no corresponding nodes
-	chassisList, err := libovsdbops.ListChassis(oc.mc.sbClient)
+	var chassisList []*sbdb.Chassis
+	if config.Kubernetes.ClusterName != "" {
+		// Cluster name is set, find only chassis marked to this cluster.
+		chassisList, err = libovsdbops.ListChassisWithClusterName(oc.mc.sbClient, config.Kubernetes.ClusterName)
+	} else {
+		chassisList, err = libovsdbops.ListChassis(oc.mc.sbClient)
+	}
 	if err != nil {
 		return fmt.Errorf("failed to get chassis list: %v", err)
 	}
@@ -1408,7 +1420,12 @@ func (oc *Controller) syncNodesRetriable(nodes []interface{}) error {
 	}
 
 	// cleanup stale chassis private with no corresponding chassis
-	chassisPrivateList, err := libovsdbops.ListChassisPrivate(oc.mc.sbClient)
+	var chassisPrivateList []*sbdb.ChassisPrivate
+	if config.Kubernetes.ClusterName != "" {
+		chassisPrivateList, err = libovsdbops.ListChassisPrivateWithClusterName(oc.mc.sbClient, config.Kubernetes.ClusterName)
+	} else {
+		chassisPrivateList, err = libovsdbops.ListChassisPrivate(oc.mc.sbClient)
+	}
 	if err != nil {
 		return fmt.Errorf("failed to get chassis private list: %v", err)
 	}
@@ -1425,6 +1442,7 @@ func (oc *Controller) syncNodesRetriable(nodes []interface{}) error {
 	}
 
 	// Delete stale chassis and associated chassis private
+	klog.Infof("syncNodesRetriable(): Deleting Stale Chassis: %v", chassisDeleteList)
 	if err := libovsdbops.DeleteChassis(oc.mc.sbClient, chassisDeleteList...); err != nil {
 		return fmt.Errorf("failed deleting chassis %v: %v", chassisDeleteList, err)
 	}

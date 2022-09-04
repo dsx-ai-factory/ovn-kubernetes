@@ -251,10 +251,10 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 			Ports: []string{gwSwitchPort + "-UUID"},
 		},
 		&nbdb.LogicalSwitch{
-			UUID:  externalSwitch + "-UUID",
-			Name:  externalSwitch,
+			UUID:        externalSwitch + "-UUID",
+			Name:        externalSwitch,
 			ExternalIDs: map[string]string{"cluster_name": config.Kubernetes.ClusterName},
-			Ports: []string{l3GatewayConfig.InterfaceID + "-UUID", externalSwitchPortToRouter + "-UUID"},
+			Ports:       []string{l3GatewayConfig.InterfaceID + "-UUID", externalSwitchPortToRouter + "-UUID"},
 		},
 		&nbdb.LoadBalancerGroup{
 			Name: types.ClusterLBGroupName,

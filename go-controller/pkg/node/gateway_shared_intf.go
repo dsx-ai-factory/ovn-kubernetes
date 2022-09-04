@@ -606,6 +606,7 @@ func (npw *nodePortWatcher) DeleteService(service *kapi.Service) {
 }
 
 func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
+	initCTZones()
 	keepIPTRules := []iptRule{}
 	for _, serviceInterface := range services {
 		name := ktypes.NamespacedName{Namespace: serviceInterface.(*kapi.Service).Namespace, Name: serviceInterface.(*kapi.Service).Name}
@@ -1279,7 +1280,7 @@ func initSvcViaMgmPortRoutingRules(hostSubnets []*net.IPNet) error {
 		gatewayIP := util.GetNodeGatewayIfAddr(hostSubnet).IP.String()
 		for _, svcCIDR := range config.Kubernetes.ServiceCIDRs {
 			if isIPv6 == utilnet.IsIPv6CIDR(svcCIDR) {
-				if stdout, stderr, err := util.RunIP("route", "replace", "table", ovnkubeSvcViaMgmPortRT, svcCIDR.String(), "via", gatewayIP, "dev", types.K8sMgmtIntfName); err != nil {
+				if stdout, stderr, err := util.RunIP("route", "replace", "table", ovnkubeSvcViaMgmPortRT, svcCIDR.String(), "via", gatewayIP, "dev", config.OvnKubeNode.MgmtPortIntfName); err != nil {
 					return fmt.Errorf("error adding routing table entry into custom routing table: %s: stdout: %s, stderr: %s, err: %v", ovnkubeSvcViaMgmPortRT, stdout, stderr, err)
 				}
 				klog.V(5).Infof("Successfully added route into custom routing table: %s", ovnkubeSvcViaMgmPortRT)

@@ -12,6 +12,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -55,7 +56,7 @@ func (oc *Controller) reportTopologyVersion(ctx context.Context) error {
 			return fmt.Errorf("failed to generate set topology version in OVN, err: %v", err)
 		}
 	} else {
-		clusterRouterName := oc.nadInfo.Prefix + ovntypes.OVNClusterRouter
+		clusterRouterName := util.GetOVNClusterRouterName(oc.nadInfo.Prefix)
 		logicalRouter := nbdb.LogicalRouter{
 			Name:        clusterRouterName,
 			ExternalIDs: map[string]string{"k8s-ovn-topo-version": currentTopologyVersion},
@@ -128,7 +129,7 @@ func (oc *Controller) determineOVNTopoVersionFromOVN() (int, error) {
 	var v string
 	var exists bool
 	if oc.nadInfo.TopoType != ovntypes.LocalnetAttachDefTopoType && oc.nadInfo.TopoType != ovntypes.Layer2AttachDefTopoType {
-		logicalRouter := &nbdb.LogicalRouter{Name: oc.nadInfo.Prefix + ovntypes.OVNClusterRouter}
+		logicalRouter := &nbdb.LogicalRouter{Name: util.GetOVNClusterRouterName(oc.nadInfo.Prefix + ovntypes.OVNClusterRouter)}
 		logicalRouter, err := libovsdbops.GetLogicalRouter(oc.mc.nbClient, logicalRouter)
 		if err != nil && err != libovsdbclient.ErrNotFound {
 			return 0, fmt.Errorf("error getting router %s: %v", logicalRouter.Name, err)

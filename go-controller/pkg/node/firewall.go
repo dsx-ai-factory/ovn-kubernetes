@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+	"runtime"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
@@ -15,7 +16,17 @@ const (
 	removePort           = "remove port"
 )
 
+//TODO(Hareesh): Temporary workaround till we add firewall support for DPU as well. Otherwise this fails for DPU.
+func isARM() bool {
+	// This is not the right way to detect platform since this only tests what the binary was compiled for.
+	// But this is a good substitute for our needs since full firewall support for DPU is going to be added.
+	return runtime.GOARCH == "arm64"
+}
+
 func changeFirewallConfig(cmdArgs []string, action string) error {
+	if isARM() {
+		return nil
+	}
 	// apply changes to runtime firewall config
 	_, stderr, err := util.RunFirewallCmd(cmdArgs...)
 	if err != nil {
@@ -33,6 +44,9 @@ func changeFirewallConfig(cmdArgs []string, action string) error {
 }
 
 func addInterfaceToFirewallZone(interfaceName, zoneName string) error {
+	if isARM() {
+		return nil
+	}
 	cmdArgs := []string{
 		fmt.Sprintf("--zone=%s", zoneName),
 		fmt.Sprintf("--change-interface=%s", interfaceName),
@@ -47,6 +61,9 @@ func addInterfaceToFirewallZone(interfaceName, zoneName string) error {
 }
 
 func firewallPortExists(zoneName string, port int32, protocol string) (bool, error) {
+	if isARM() {
+		return false, nil
+	}
 	cmdArgs := []string{
 		fmt.Sprintf("--zone=%s", zoneName),
 		fmt.Sprintf("--query-port=%d/%s", port, protocol),
@@ -69,6 +86,9 @@ func firewallPortExists(zoneName string, port int32, protocol string) (bool, err
 }
 
 func addPortToFirewallZone(zoneName string, port int32, protocol kapi.Protocol) error {
+	if isARM() {
+		return nil
+	}
 	var portType, portArgs string
 	if protocol == kapi.ProtocolTCP {
 		portArgs = fmt.Sprintf("--add-port=%d/tcp", port)
@@ -102,6 +122,9 @@ func addPortToFirewallZone(zoneName string, port int32, protocol kapi.Protocol) 
 }
 
 func removePortFromFirewallZone(zoneName string, port int32, protocol kapi.Protocol) error {
+	if isARM() {
+		return nil
+	}
 	var portType, portArgs string
 	if protocol == kapi.ProtocolTCP {
 		portArgs = fmt.Sprintf("--remove-port=%d/tcp", port)

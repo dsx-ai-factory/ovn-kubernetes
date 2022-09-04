@@ -355,9 +355,8 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 		ipStrs[i] = ip.String()
 	}
 
-	klog.Infof("ConfigureOVS: namespace: %s, podName: %s, network: %s, mode %s, SandboxID: %q, UID: %q, MAC: %s, IPs: %v, clusterNamePrefix: %s",
-		namespace, podName, ifInfo.NadName, config.OvnKubeNode.Mode, sandboxID, initialPodUID, ifInfo.MAC, ipStrs, util.GetClusterNamePrefix())
-
+	klog.Infof("ConfigureOVS: namespace: %s, podName: %s, network: %s, mode %s, SandboxID: %q, UID: %q, MAC: %s, IPs: %v, clusterName: %s",
+		namespace, podName, ifInfo.NadName, config.OvnKubeNode.Mode, sandboxID, initialPodUID, ifInfo.MAC, ipStrs, ifInfo.ClusterName)
 
 	// ConfigureOVS should prefix ovs ports with cluster name to differentiate
 	// pods with same name belonging to multiple clusters.
