@@ -24,6 +24,7 @@ const (
 
 type SriovnetOps interface {
 	GetNetDevicesFromPci(pciAddress string) ([]string, error)
+	GetNetDevicesFromAux(auxDev string) ([]string, error)
 	GetUplinkRepresentor(vfPciAddress string) (string, error)
 	GetUplinkRepresentorFromAux(auxDev string) (string, error)
 	GetVfIndexByPciAddress(vfPciAddress string) (int, error)
@@ -31,6 +32,7 @@ type SriovnetOps interface {
 	GetVfRepresentor(uplink string, vfIndex int) (string, error)
 	GetSfRepresentor(uplink string, sfIndex int) (string, error)
 	GetPfPciFromVfPci(vfPciAddress string) (string, error)
+	GetPfPciFromAux(auxDev string) (string, error)
 	GetVfRepresentorDPU(pfID, vfIndex string) (string, error)
 	GetRepresentorPeerMacAddress(netdev string) (net.HardwareAddr, error)
 	SetRepresentorPeerMacAddress(netdev string, mac net.HardwareAddr) error
@@ -60,6 +62,10 @@ func (defaultSriovnetOps) GetNetDevicesFromPci(pciAddress string) ([]string, err
 	return sriovnet.GetNetDevicesFromPci(pciAddress)
 }
 
+func (defaultSriovnetOps) GetNetDevicesFromAux(auxDev string) ([]string, error) {
+	return sriovnet.GetNetDevicesFromAux(auxDev)
+}
+
 func (defaultSriovnetOps) GetUplinkRepresentor(vfPciAddress string) (string, error) {
 	return sriovnet.GetUplinkRepresentor(vfPciAddress)
 }
@@ -86,6 +92,10 @@ func (defaultSriovnetOps) GetSfRepresentor(uplink string, sfIndex int) (string, 
 
 func (defaultSriovnetOps) GetPfPciFromVfPci(vfPciAddress string) (string, error) {
 	return sriovnet.GetPfPciFromVfPci(vfPciAddress)
+}
+
+func (defaultSriovnetOps) GetPfPciFromAux(auxDev string) (string, error) {
+	return sriovnet.GetPfPciFromAux(auxDev)
 }
 
 func (defaultSriovnetOps) GetVfRepresentorDPU(pfID, vfIndex string) (string, error) {

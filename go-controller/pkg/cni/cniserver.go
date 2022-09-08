@@ -194,7 +194,18 @@ func cniRequestToPodRequest(cr *Request, podLister corev1listers.PodLister, kcli
 		req.effectiveNADName = conf.NadName
 	}
 	if conf.DeviceID != "" {
-		req.IsVFIO = util.GetSriovnetOps().IsVfPciVfioBound(conf.DeviceID)
+		if util.IsPCIDeviceName(conf.DeviceID) {
+			// DeviceID is a PCI address
+			req.IsVFIO = util.GetSriovnetOps().IsVfPciVfioBound(conf.DeviceID)
+		} else if util.IsAuxDeviceName(conf.DeviceID) {
+			// DeviceID is an Auxiliary device name - <driver_name>.<kind_of_a_type>.<id>
+			chunks := strings.Split(conf.DeviceID, ".")
+			if chunks[1] != "sf" {
+				return nil, fmt.Errorf("only SF auxiliary devices are supported")
+			}
+		} else {
+			return nil, fmt.Errorf("expected PCI or Auxiliary device name, got - %s", conf.DeviceID)
+		}
 	}
 	req.CNIConf = conf
 	req.timestamp = time.Now()

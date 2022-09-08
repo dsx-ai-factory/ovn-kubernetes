@@ -138,13 +138,13 @@ func setSysctl(sysctl string, newVal int) error {
 }
 
 func moveIfToNetns(ifname string, netns ns.NetNS) error {
-	vfDev, err := util.GetNetLinkOps().LinkByName(ifname)
+	dev, err := util.GetNetLinkOps().LinkByName(ifname)
 	if err != nil {
-		return fmt.Errorf("failed to lookup vf device %v: %q", ifname, err)
+		return fmt.Errorf("failed to lookup device %v: %q", ifname, err)
 	}
 
-	// move VF device to ns
-	if err = util.GetNetLinkOps().LinkSetNsFd(vfDev, int(netns.Fd())); err != nil {
+	// move device to ns
+	if err = util.GetNetLinkOps().LinkSetNsFd(dev, int(netns.Fd())); err != nil {
 		return fmt.Errorf("failed to move device %+v to netns: %q", ifname, err)
 	}
 
@@ -249,22 +249,22 @@ func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInter
 }
 
 // Setup sriov interface in the pod
-func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInterfaceInfo, pciAddrs string) (*current.Interface, *current.Interface, error) {
+func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInterfaceInfo, deviceID string) (*current.Interface, *current.Interface, error) {
 	hostIface := &current.Interface{}
 	contIface := &current.Interface{}
 	ifnameSuffix := ""
 
-	vfNetdevice := ifInfo.VfNetdevName
+	netdevice := ifInfo.NetdevName
 
-	// 1. Move VF to Container namespace
-	err := moveIfToNetns(vfNetdevice, netns)
+	// 1. Move device to Container namespace
+	err := moveIfToNetns(netdevice, netns)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	err = netns.Do(func(hostNS ns.NetNS) error {
 		contIface.Name = ifName
-		err = renameLink(vfNetdevice, contIface.Name)
+		err = renameLink(netdevice, contIface.Name)
 		if err != nil {
 			return err
 		}
@@ -301,26 +301,13 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 	}
 
 	if !ifInfo.IsDPUHostMode {
-		// 2. get Uplink netdevice
-		uplink, err := util.GetSriovnetOps().GetUplinkRepresentor(pciAddrs)
+		// 2. get device representor name
+		oldHostRepName, err := util.GetFunctionRepresentorName(deviceID)
 		if err != nil {
 			return nil, nil, err
 		}
 
-		// 3. get VF index from PCI
-		vfIndex, err := util.GetSriovnetOps().GetVfIndexByPciAddress(pciAddrs)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		// 4. lookup representor
-		rep, err := util.GetSriovnetOps().GetVfRepresentor(uplink, vfIndex)
-		if err != nil {
-			return nil, nil, err
-		}
-		oldHostRepName := rep
-
-		// 5. rename the host VF representor
+		// 3. rename the host representor
 		hostIface.Name = containerID[:(15-len(ifnameSuffix))] + ifnameSuffix
 		if err = renameLink(oldHostRepName, hostIface.Name); err != nil {
 			return nil, nil, fmt.Errorf("failed to rename %s to %s: %v", oldHostRepName, hostIface.Name, err)
@@ -332,7 +319,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 		}
 		hostIface.Mac = link.Attrs().HardwareAddr.String()
 
-		// 6. set MTU on VF representor
+		// 4. set MTU on the representor
 		if err = util.GetNetLinkOps().LinkSetMTU(link, ifInfo.MTU); err != nil {
 			return nil, nil, fmt.Errorf("failed to set MTU on %s: %v", hostIface.Name, err)
 		}
@@ -425,8 +412,8 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:cluster_name=%s", ifInfo.ClusterName))
 	}
 
-	if len(ifInfo.VfNetdevName) != 0 {
-		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:vf-netdev-name=%s", ifInfo.VfNetdevName))
+	if len(ifInfo.NetdevName) != 0 {
+		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:netdev-name=%s", ifInfo.NetdevName))
 	}
 
 	if ifInfo.IsSecondary {
@@ -600,12 +587,12 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 		return nil
 	}
 
-	// 1. For SRIOV case, we'd need to move the VF from container namespace back to the host namespace
+	// 1. For SRIOV case, we'd need to move device from container namespace back to the host namespace
 	// 2. If it is non-default network and non-dpu mode, needs to get the container interface index
 	//    so that we know the host-side interface name.
 	ifnameSuffix := ""
 	if pr.CNIConf.DeviceID != "" || (pr.CNIConf.IsSecondary && !ifInfo.IsDPUHostMode) {
-		// For SRIOV case, we'd need to move the VF from container namespace back to the host namespace
+		// For SRIOV case, we'd need to move device from container namespace back to the host namespace
 		netns, err := ns.GetNS(pr.Netns)
 		if err != nil {
 			return fmt.Errorf("failed to get container namespace %s: %v", podDesc, err)
@@ -638,17 +625,17 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 				if err != nil {
 					return fmt.Errorf("failed to bring down container interface %s %s: %v", pr.IfName, podDesc, err)
 				}
-				// rename VF device to make sure it is unique in the host namespace:
-				// if the VF's original name is empty, sandbox id and a '0' letter prefix is used to make up the unique name.
-				oldVfName := ifInfo.VfNetdevName
-				if oldVfName == "" {
+				// rename device to make sure it is unique in the host namespace:
+				// if the device original name is empty, sandbox id and a '0' letter prefix is used to make up the unique name.
+				oldName := ifInfo.NetdevName
+				if oldName == "" {
 					id := fmt.Sprintf("_0%d", link.Attrs().Index)
-					oldVfName = pr.SandboxID[:(15-len(id))] + id
+					oldName = pr.SandboxID[:(15-len(id))] + id
 				}
-				if err := util.GetNetLinkOps().LinkSetName(link, oldVfName); err != nil {
-					return fmt.Errorf("failed to rename container interface %s to %s %s: %v", pr.IfName, oldVfName, podDesc, err)
+				if err := util.GetNetLinkOps().LinkSetName(link, oldName); err != nil {
+					return fmt.Errorf("failed to rename container interface %s to %s %s: %v", pr.IfName, oldName, podDesc, err)
 				}
-				// move VF device to host netns
+				// move device to host netns
 				if err = util.GetNetLinkOps().LinkSetNsFd(link, int(hostNS.Fd())); err != nil {
 					return fmt.Errorf("failed to move container interface %s back to host namespace %s: %v", pr.IfName, podDesc, err)
 				}
