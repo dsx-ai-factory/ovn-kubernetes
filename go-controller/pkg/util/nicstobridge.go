@@ -35,10 +35,11 @@ func getBridgePortsInterfaces(brName string) (map[string][]string, error) {
 	portsToInterfaces := make(map[string][]string)
 	for _, port := range strings.Split(stdout, "\n") {
 		stdout, stderr, err = RunOVSVsctl("get", "Port", port, "Interfaces")
+		// Log a message and proceed.
 		if err != nil {
-			return nil, fmt.Errorf("failed to get port %q on bridge %q:, stderr: %q, error: %v",
+			klog.Infof("Failed to get port %q on bridge %q:, stderr: %q, error: %v",
 				port, brName, stderr, err)
-
+			continue
 		}
 		// remove brackets on list of interfaces
 		ifaces := strings.TrimPrefix(strings.TrimSuffix(stdout, "]"), "[")
@@ -61,10 +62,11 @@ func GetNicName(brName string) (string, error) {
 	for port, ifaces := range portsToInterfaces {
 		for _, iface := range ifaces {
 			stdout, stderr, err = RunOVSVsctl("get", "Interface", strings.TrimSpace(iface), "Type")
+			// Log a message and proceed.
 			if err != nil {
-				return "", fmt.Errorf("failed to get Interface %q Type on bridge %q:, stderr: %q, error: %v",
+				klog.Infof("Failed to get Interface %q Type on bridge %q:, stderr: %q, error: %v",
 					iface, brName, stderr, err)
-
+				continue
 			}
 			// If system Type we know this is the OVS port is the NIC
 			if stdout == "system" {
@@ -90,6 +92,9 @@ func GetNicName(brName string) (string, error) {
 		// This would happen if the bridge was created before the bridge-uplink
 		// changes got integrated. Assuming naming format of "br<nic name>".
 		return brName[len("br"):], nil
+	}
+	if stdout == "" {
+		return "", fmt.Errorf("failed to get physical NIC name for the bridge %q", brName)
 	}
 	return stdout, nil
 }
@@ -366,10 +371,11 @@ func GetDPUHostInterface(bridgeName string) (string, error) {
 	for _, ifaces := range portsToInterfaces {
 		for _, iface := range ifaces {
 			stdout, stderr, err := RunOVSVsctl("get", "Interface", strings.TrimSpace(iface), "Name")
+			// Log message and proceed.
 			if err != nil {
-				return "", fmt.Errorf("failed to get Interface %q Name on bridge %q:, stderr: %q, error: %v",
+				klog.Infof("Failed to get Interface %q Name on bridge %q:, stderr: %q, error: %v",
 					iface, bridgeName, stderr, err)
-
+				continue
 			}
 			flavor, err := GetSriovnetOps().GetRepresentorPortFlavour(stdout)
 			if err == nil && flavor == sriovnet.PORT_FLAVOUR_PCI_PF {
