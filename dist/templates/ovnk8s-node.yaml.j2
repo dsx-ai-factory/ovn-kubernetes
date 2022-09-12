@@ -45,13 +45,14 @@ spec:
 
           command: ["/root/ovnkube.sh", "ovn-node"]
 
-          # starting the metrics server is one of the last things we do,
-          # so check whether metrics server is running
+          # ovnkube-node-probe.sh checks
+          # - whether the metrics server is running since it is one of the last things we do,
+          # - also checks if we can access KUBERNETES_SERVICE_HOST:KUBERNETES_SERVICE_PORT
           readinessProbe:
-            httpGet:
-              path: /metrics
-              port: 9410
-              scheme: HTTPS
+            exec:
+              command:
+              - /bin/bash
+              - /root/ovnkube-node-probe.sh
             initialDelaySeconds: 30
             timeoutSeconds: 5
             periodSeconds: 30
