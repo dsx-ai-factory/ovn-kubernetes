@@ -44,8 +44,6 @@ type Interface interface {
 	GetPods(namespace string, labelSelector metav1.LabelSelector) (*kapi.PodList, error)
 	GetNode(name string) (*kapi.Node, error)
 	GetPod(namespace, name string) (*kapi.Pod, error)
-	GetEndpoint(namespace, name string) (*kapi.Endpoints, error)
-	CreateEndpoint(namespace string, ep *kapi.Endpoints) (*kapi.Endpoints, error)
 	CreateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
 	UpdateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
 	DeleteCloudPrivateIPConfig(name string) error
