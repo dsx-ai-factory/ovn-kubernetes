@@ -439,8 +439,6 @@ type OvnKubeNodeConfig struct {
 	MgmtPortNetdev       string `gcfg:"mgmt-port-netdev"`
 	DisableOVNIfaceIdVer bool   `gcfg:"disable-ovn-iface-id-ver"`
 	IsPrimaryDPU         bool
-	MaxNewConnPPS        uint   `gcfg:"ovn-max-newconn-pps"`
-	MaxNewConnBurst      uint   `gcfg:"ovn-max-newconn-burst"`
 	XDPSFRep             string `gcfg:"ovn-xdp-sfrep"`
 	XDPVeth              string `gcfg:"ovn-xdp-veth"`
 	XDPNamespace         string `gcfg:"ovn-xdp-ns"`
@@ -623,7 +621,7 @@ func overrideFields(dst, src, defaults interface{}) error {
 
 var cliConfig config
 
-//CommonFlags capture general options.
+// CommonFlags capture general options.
 var CommonFlags = []cli.Flag{
 	// Mode flags
 	&cli.StringFlag{
@@ -1093,7 +1091,7 @@ var OvnNBFlags = []cli.Flag{
 	},
 }
 
-//OvnSBFlags capture OVN southbound database options
+// OvnSBFlags capture OVN southbound database options
 var OvnSBFlags = []cli.Flag{
 	&cli.StringFlag{
 		Name: "sb-address",
@@ -1135,7 +1133,7 @@ var OvnSBFlags = []cli.Flag{
 	},
 }
 
-//OVNGatewayFlags capture L3 Gateway related flags
+// OVNGatewayFlags capture L3 Gateway related flags
 var OVNGatewayFlags = []cli.Flag{
 	&cli.StringFlag{
 		Name: "gateway-mode",
@@ -1289,18 +1287,6 @@ var OvnKubeNodeFlags = []cli.Flag{
 			"(depends on ovn version, minimal required is 21.09)",
 		Value:       OvnKubeNode.DisableOVNIfaceIdVer,
 		Destination: &cliConfig.OvnKubeNode.DisableOVNIfaceIdVer,
-	},
-	&cli.UintFlag{
-		Name:        "ovn-max-newconn-pps",
-		Usage:       "set the max new connections rate for interfaces backed by a VF",
-		Value:       OvnKubeNode.MaxNewConnPPS,
-		Destination: &cliConfig.OvnKubeNode.MaxNewConnPPS,
-	},
-	&cli.UintFlag{
-		Name:        "ovn-max-newconn-burst",
-		Usage:       "set the max new connections burst for interfaces backed by a VF",
-		Value:       OvnKubeNode.MaxNewConnBurst,
-		Destination: &cliConfig.OvnKubeNode.MaxNewConnBurst,
 	},
 	&cli.StringFlag{
 		Name:        "ovn-xdp-sfrep",

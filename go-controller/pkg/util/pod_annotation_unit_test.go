@@ -278,6 +278,7 @@ func TestGetAllPodIPs(t *testing.T) {
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
 			netAttachInfo := &NetAttachDefInfo{NetNameInfo: NetNameInfo{NetName: types.DefaultNetworkName, Prefix: "", IsSecondary: false}}
+			netAttachInfo.NetAttachDefs.Store("default/ovn-primary", &NadConfig{MissRateLimitConfig: MissRateLimitConfig{MaxNewConnPPS: 10, MaxNewConnBurst: 100}})
 			res, e := GetAllPodIPs(tc.inpPod, netAttachInfo)
 			t.Log(res, e)
 			if tc.errAssert {

@@ -2,7 +2,6 @@ package node
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -40,11 +39,13 @@ import (
 
 const (
 	ovnSkipFirewalldAnnotationName = "k8s.ovn.org/skip-firewalld"
+	ngnHostTypeAnnotationName      = "ngn2.nvidia.com/hosttype"
 )
 
 // OvnNode is the object holder for utilities meant for node management
 type OvnNode struct {
 	name         string
+	hostType     string
 	client       clientset.Interface
 	Kube         kube.Interface
 	watchFactory factory.NodeWatchFactory
@@ -67,6 +68,12 @@ type ovnNodeController struct {
 	// other than the NS gateway on the primary DPU.
 	gateway Gateway
 	added   bool
+	// servedPods tracks the pods that got a VF
+	servedPods sync.Map
+	// podNadCache stores all the net-attach-defs that the given Pod is attached for this controller,
+	// we assume that Pod's Network Attachment Selection Annotation will not change over time.
+	// key is pod.UUID, value is networkMap of map[string]*util.PodNadInfo type
+	podNadCache sync.Map
 }
 
 // NewNode creates a new controller for node management
@@ -418,7 +425,14 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 	if nodeAddr == nil {
 		return fmt.Errorf("failed to parse kubernetes node IP address. %v", err)
 	}
-
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		if hostType, exists := node.Labels[ngnHostTypeAnnotationName]; !exists {
+			klog.Errorf("%s: annotation \"%s\" is required for dpu node", n.name, ngnHostTypeAnnotationName)
+			return fmt.Errorf("%s: annotation \"%s\" is required for dpu node", n.name, ngnHostTypeAnnotationName)
+		} else {
+			n.hostType = hostType
+		}
+	}
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		err = setupOVNNode(node)
 		if err != nil {
@@ -716,7 +730,15 @@ func (n *OvnNode) watchNetworkAttachmentDefinitions() error {
 			netattachdef := obj.(*nettypes.NetworkAttachmentDefinition)
 			n.addNetworkAttachDefinition(netattachdef)
 		},
-		UpdateFunc: func(old, new interface{}) {},
+		UpdateFunc: func(old, new interface{}) {
+			if config.OvnKubeNode.Mode != types.NodeModeDPU {
+				// only update vf rate limit for dpu mode
+				return
+			}
+			oldNAD := old.(*nettypes.NetworkAttachmentDefinition)
+			newNAD := new.(*nettypes.NetworkAttachmentDefinition)
+			n.updateRateLimitingConfig(oldNAD, newNAD)
+		},
 		DeleteFunc: func(obj interface{}) {
 			netattachdef := obj.(*nettypes.NetworkAttachmentDefinition)
 			n.deleteNetworkAttachDefinition(netattachdef)
@@ -727,55 +749,13 @@ func (n *OvnNode) watchNetworkAttachmentDefinitions() error {
 }
 
 func (n *OvnNode) initOvnNodeController(netattachdef *nettypes.NetworkAttachmentDefinition) (*ovnNodeController, error) {
-	netconf := &cnitypes.NetConf{MTU: config.Default.MTU}
-
-	// looking for network attachment definition that use OVN K8S CNI only
-	err := json.Unmarshal([]byte(netattachdef.Spec.Config), &netconf)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing Network Attachment Definition %s: %v", netattachdef.Name, err)
-	}
-
-	if netconf.Type != "ovn-k8s-cni-overlay" {
-		klog.V(5).Infof("Network Attachment Definition %s is not based on OVN plugin", netattachdef.Name)
-		return nil, nil
-	}
-
-	if config.OvnKubeNode.Mode == types.NodeModeDPU && netconf.XDPService {
-		if netconf.TopoType != types.LocalnetAttachDefTopoType {
-			klog.Warningf("XDP only supported for Localnet based Network Attachment Definition")
-			return nil, nil
-		}
-		if config.OvnKubeNode.XDPSFRep == "" || config.OvnKubeNode.XDPVeth == "" || config.OvnKubeNode.XDPNamespace == "" {
-			klog.Warningf("DPU not configured for XDP")
-			return nil, nil
-		}
-	}
-
-	if netconf.Name == "" {
-		netconf.Name = netattachdef.Name
-	}
-
-	nadInfo, err := util.NewNetAttachDefInfo(netconf)
+	nadInfo, nadConf, err := util.ParseNADInfo(netattachdef)
 	if err != nil {
 		return nil, err
 	}
 
-	nadConf, err := util.GetNadConfig(netattachdef, nadInfo.IsSecondary)
-	if err != nil {
-		return nil, err
-	}
-
-	klog.Infof("NewNetAttachDefInfo: PPS info for nad %s/%s is %d/%d", netattachdef.Namespace, netattachdef.Name,
-		nadConf.MaxNewConnPPS, nadConf.MaxNewConnBurst)
-
-	// nadName must be in the correct form for non-default net-attach-def
-	if nadInfo.IsSecondary {
-		nadName := util.GetNadName(netattachdef.Namespace, netattachdef.Name, !nadInfo.IsSecondary)
-		if netconf.NadName != nadName {
-			return nil, fmt.Errorf("unexpected net_attach_def_name %s of Network Attachment Definition %s/%s, expected: %s",
-				netconf.NadName, netattachdef.Namespace, netattachdef.Name, nadName)
-		}
-	}
+	klog.Infof("NewNetAttachDefInfo: PPS info for nad %s/%s is %d/%d, applicable to host type(s) %s", netattachdef.Namespace, netattachdef.Name,
+		nadConf.MaxNewConnPPS, nadConf.MaxNewConnBurst, nadConf.HostTypes)
 
 	if !nadInfo.IsSecondary {
 		n.defaultNodeController.nadInfo.NetAttachDefs.Store(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name), nadConf)
@@ -815,10 +795,12 @@ func (n *OvnNode) syncNetworkAttachDefinition(netattachdefs []interface{}) error
 			klog.Errorf("Spurious object in syncNetworkAttachDefinition: %v", netattachdefIntf)
 			continue
 		}
-
 		_, err := n.initOvnNodeController(netattachdef)
 		if err != nil {
-			klog.Errorf(err.Error())
+			// ignore error if the net-attach-def is not managed by OVN
+			if err != util.ErrorAttachDefNotOvnManaged {
+				klog.Errorf(err.Error())
+			}
 		}
 	}
 	return nil
@@ -827,11 +809,13 @@ func (n *OvnNode) syncNetworkAttachDefinition(netattachdefs []interface{}) error
 func (n *OvnNode) addNetworkAttachDefinition(netattachdef *nettypes.NetworkAttachmentDefinition) {
 	nc, err := n.initOvnNodeController(netattachdef)
 	if err != nil {
-		klog.Errorf(err.Error())
+		if err != util.ErrorAttachDefNotOvnManaged {
+			klog.Errorf(err.Error())
+		}
 		return
 	}
 
-	if nc == nil || nc.added {
+	if nc.added {
 		return
 	}
 
@@ -968,54 +952,33 @@ func (nc *ovnNodeController) updateLocalnetOvnBridgeMapping(toAdd bool) error {
 }
 
 func (n *OvnNode) deleteNetworkAttachDefinition(netattachdef *nettypes.NetworkAttachmentDefinition) {
-
-	netconf := &cnitypes.NetConf{}
-
-	// looking for network attachment definition that use OVN K8S CNI only
-	err := json.Unmarshal([]byte(netattachdef.Spec.Config), &netconf)
+	klog.Infof("Delete Network Attachment Definition %s/%s", netattachdef.Namespace, netattachdef.Name)
+	netconf, err := util.ParseNetConf(netattachdef)
 	if err != nil {
-		klog.Errorf("Error parsing Network Attachment Definition %s: %v", netattachdef.Name, err)
-		return
-	}
-
-	if netconf.Type != "ovn-k8s-cni-overlay" {
-		klog.V(5).Infof("Network Attachment Definition %s is not based on OVN plugin", netattachdef.Name)
-		return
-	}
-
-	if netconf.Name == "" {
-		netconf.Name = netattachdef.Name
-	}
-
-	nadInfo, err := util.NewNetAttachDefInfo(netconf)
-	if err != nil {
-		klog.Errorf(err.Error())
-		return
-	}
-
-	if netconf.NadName != "" {
-		nadName := util.GetNadName(netattachdef.Namespace, netattachdef.Name, !nadInfo.IsSecondary)
-		if netconf.NadName != nadName {
-			klog.Errorf("Unexpected net_attach_def_name %s of Network Attachment Definition %s/%s, expected: %s",
-				netconf.NadName, netattachdef.Namespace, netattachdef.Name, nadName)
-			return
+		if err != util.ErrorAttachDefNotOvnManaged {
+			klog.Error(err)
 		}
+		return
 	}
-
-	if !nadInfo.IsSecondary {
-		n.defaultNodeController.nadInfo.NetAttachDefs.Delete(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name))
+	nadName := util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name)
+	if !netconf.IsSecondary {
+		n.defaultNodeController.nadInfo.NetAttachDefs.Delete(nadName)
 		return
 	}
 
-	v, ok := n.nonDefaultNodeControllers.Load(nadInfo.NetName)
+	netName := netconf.Name
+	v, ok := n.nonDefaultNodeControllers.Load(netName)
 	if !ok {
-		klog.Errorf("Failed to find network controller for network %s", nadInfo.NetName)
+		klog.Errorf("Failed to find network controller for network %s", netName)
 		return
 	}
 
 	nc := v.(*ovnNodeController)
-
-	nc.nadInfo.NetAttachDefs.Delete(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name))
+	_, ok = nc.nadInfo.NetAttachDefs.LoadAndDelete(nadName)
+	if !ok {
+		klog.Errorf("Failed to find nad %s from network controller for network %s", nadName, netName)
+		return
+	}
 
 	// check if there any net-attach-def sharing the same CNI conf name left, if yes, just return
 	netAttachDefLeft := false
@@ -1037,12 +1000,13 @@ func (n *OvnNode) deleteNetworkAttachDefinition(netattachdef *nettypes.NetworkAt
 
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		if nc.podHandler != nil {
+			// wait for pod handler routines to exit
 			nc.node.watchFactory.RemovePodHandler(nc.podHandler)
 		}
 		// Currently, only XDP uses nc.gateway, so we can assume XDP if
 		// this is set.
 		if nc.gateway != nil {
-			klog.Infof("Removing XDP for NAD %s", nadInfo.NetName)
+			klog.Infof("Removing XDP for NAD %s", nadName)
 			err = n.cleanGatewayDPUXDP(nc.nadInfo, nc.gateway.(*gateway))
 			if err != nil {
 				klog.Infof("Failed to remove XDP config: %v", err)
@@ -1051,7 +1015,7 @@ func (n *OvnNode) deleteNetworkAttachDefinition(netattachdef *nettypes.NetworkAt
 		}
 	}
 
-	n.nonDefaultNodeControllers.Delete(nadInfo.NetName)
+	n.nonDefaultNodeControllers.Delete(netName)
 }
 
 // checkForSkipFirewalldAnnotation looks for "k8s.ovn.org/skip-firewalld" annotation
@@ -1481,6 +1445,72 @@ func (n *OvnNode) WatchEndpointSlicesOnDPU() error {
 		},
 	}, nil)
 	return err
+}
+
+func (n *OvnNode) updateRateLimitingConfig(old, new *nettypes.NetworkAttachmentDefinition) {
+	oldNetconf, err1 := util.ParseNetConf(old)
+	newNetconf, err2 := util.ParseNetConf(new)
+	if err1 == util.ErrorAttachDefNotOvnManaged && err2 == util.ErrorAttachDefNotOvnManaged {
+		n.recorder.Eventf(new, kapi.EventTypeWarning, "UnsupportedChange", "net-attach-def %s/%s not managed by ovn", old.Namespace, old.Name)
+		klog.Warningf("net-attach-def %s/%s not managed by ovn", old.Namespace, old.Name)
+		return
+	}
+	if oldNetconf == nil || newNetconf == nil || !reflect.DeepEqual(oldNetconf, newNetconf) {
+		n.recorder.Event(new, kapi.EventTypeWarning, "UnsupportedChange", "Netconf change is not supported")
+		klog.Errorf("Netconf change is not supported for Network Attachment Definition %s/%s", old.Namespace, old.Name)
+		return
+	}
+	// compare values of k8s.ovn.org/miss-rl-config
+	oldMRLConfigStr := old.Annotations[util.MissRateLimitConfigAnnot]
+	newMRLConfigStr := new.Annotations[util.MissRateLimitConfigAnnot]
+	if oldMRLConfigStr == newMRLConfigStr {
+		// no change
+		return
+	}
+
+	nadInfo, nadConfig, err := util.ParseNADInfo(new)
+	if err != nil {
+		klog.Errorf("Failed to parse NAD configuration for %s/%s: %v", new.Namespace, new.Name, err)
+		return
+	}
+
+	if !nadInfo.IsSecondary {
+		// update nad config in default controller
+		if err := n.defaultNodeController.updateNADConfig(util.GetNadKeyName(new.Namespace, new.Name), nadConfig); err != nil {
+			klog.Errorf("Failed to update network config in controller: %v", err)
+		} else {
+			n.updateRateLimitingForPods(n.defaultNodeController, util.GetNadName(new.Namespace, new.Name, true))
+		}
+		return
+	}
+	val, ok := n.nonDefaultNodeControllers.Load(nadInfo.NetName)
+	if !ok || val == nil {
+		klog.Errorf("NodeController for %s not found", nadInfo.NetName)
+		return
+	}
+	nc := val.(*ovnNodeController)
+	// update nad config in non-default controller
+	if err := nc.updateNADConfig(util.GetNadKeyName(new.Namespace, new.Name), nadConfig); err != nil {
+		klog.Errorf("Failed to update network config in controller: %v", err)
+	} else {
+		n.updateRateLimitingForPods(nc, util.GetNadName(new.Namespace, new.Name, true))
+	}
+}
+
+// go through pods to update rate limit config
+func (n *OvnNode) updateRateLimitingForPods(controller *ovnNodeController, nadKey string) {
+	// informer cache has pods filtered by node name
+	pods, err := n.watchFactory.GetAllPods()
+	if err != nil {
+		klog.Errorf("Failed to list pods: %v", err)
+		return
+	}
+	for _, pod := range pods {
+		klog.V(5).Infof("Updating rate limit config for pod %s/%s", pod.Namespace, pod.Name)
+		if err := controller.updateRateLimitingForPod(pod, nadKey); err != nil {
+			klog.Error(err)
+		}
+	}
 }
 
 // Also deletes any connection tracking entries for UDP and SCTP ports

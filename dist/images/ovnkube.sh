@@ -89,8 +89,6 @@ BASEDIR=$(dirname $0)
 # OVN_HOST_NETWORK_NAMESPACE - namespace to classify host network traffic for applying network policies
 # OVN_ENCAP_TOS - set a TOS value for the outer header
 # OVN_CTINV_FLOWS_DISABLE - enable/disable northd from configuring CT Invalid flows as it is not offload friendly
-# OVN_MAX_NEWCONN_PPS - Max new outbound connections allowed on this VF
-# OVN_MAX_NEWCONN_BURST - Max burst of new outbound connections allowed on this VF
 # OVN_XDP_SFREP - Name of the SF rep for XDP
 # OVN_XDP_VETH - Name of the Veth for XDP
 # OVN_XDP_NS - Name of the XDP NS
@@ -233,10 +231,6 @@ ovn_sb_raft_election_timer=${OVN_SB_RAFT_ELECTION_TIMER:-1000}
 ovn_nb_raft_sched_priority=${OVN_NB_RAFT_SCHED_PRIORITY:--12}
 # OVN_SB_RAFT_SCHED_PRIORITY - ovn south db process priority niceness (default -11)
 ovn_sb_raft_sched_priority=${OVN_SB_RAFT_SCHED_PRIORITY:--11}
-# OVN_MAX_NEWCONN_PPS - Max new outbound connection allowed, default is 0 pps: no limit
-OVN_MAX_NEWCONN_PPS=${OVN_MAX_NEWCONN_PPS:-0}
-# OVN_MAX_NEWCONN_BURST - Max burst of new outbound connection allowed, default is 0 : no limit
-OVN_MAX_NEWCONN_BURST=${OVN_MAX_NEWCONN_BURST:-0}
 # OVN_XDP_SFREP - XDP SF Rep 
 OVN_XDP_SFREP=${OVN_XDP_SFREP:-"xdp_sf"}
 # OVN_XDP_VETH - XDP Veth
@@ -786,24 +780,6 @@ function memory_trim_on_compaction_supported {
     return $(/bin/true)
   else
     return $(/bin/false)
-  fi
-}
-
-vf_rate_limiting_opts=
-set_vf_rate_limiting_opts_if_gs() {
-  k8s_node_name=$1
-  hosttype=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} get node ${k8s_node_name} -o=jsonpath='{@.metadata.labels.ngn2\.nvidia\.com\/hosttype}')
-  if [[ $? != 0 ]]; then
-    echo "couldn't get host type from k8s node ${k8s_node_name}"
-    exit 12
-  fi
-  if [[ ${hosttype} == "GS" ]]; then
-    vf_rate_limiting_opts="
-      --ovn-max-newconn-pps=${OVN_MAX_NEWCONN_PPS}
-      --ovn-max-newconn-burst=${OVN_MAX_NEWCONN_BURST}
-    "
-  else
-    echo "skip limiting vf rate for non-GS host type: ${hosttype}"
   fi
 }
 
@@ -1528,7 +1504,6 @@ ovn-node() {
       --ovs-min-revalidate-pps=${OVS_MIN_REVALIDATE_PPS}
       --ovs-max-idle=${OVS_MAX_IDLE}
     "
-    set_vf_rate_limiting_opts_if_gs ${K8S_NODE}
   fi
 
   echo "=============== ovn-node   --init-node"
@@ -1575,7 +1550,6 @@ ovn-node() {
     ${egress_interface} \
     --host-network-namespace ${ovn_host_network_namespace} \
      ${ovnkube_node_mgmt_port_netdev_flag} \
-     ${vf_rate_limiting_opts} \
      ${ovn_xdp_opts} \
      ${ovs_other_config_opts} &
 

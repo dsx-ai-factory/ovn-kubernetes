@@ -113,6 +113,7 @@ var _ = Describe("Node DPU tests", func() {
 			},
 		}
 		nadInfo, _ := util.NewNetAttachDefInfo(netconf)
+		nadInfo.NetAttachDefs.Store("default", &util.NadConfig{MissRateLimitConfig: util.MissRateLimitConfig{MaxNewConnPPS: 0, MaxNewConnBurst: 0}})
 		nc, _ = node.NewOvnNodeController(nadInfo)
 
 		podNamespaceLister = v1mocks.PodNamespaceLister{}

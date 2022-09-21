@@ -3,14 +3,12 @@ package node
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	netattchdefapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -72,13 +70,6 @@ func (nc *ovnNodeController) addDPUPod4Nad(pod *kapi.Pod, dpuCD *util.DPUConnect
 
 // watchPodsDPU watch updates for pod dpu annotations
 func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) error {
-	// servedPods tracks the pods that got a VF
-	var servedPods sync.Map
-	// podNadCache stores all the net-attach-defs that the given Pod is attached for this controller,
-	// we assume that Pod's Network Attachment Selection Annotation will not change over time.
-	// key is pod.UUID, value is networkMap
-	var podNadCache sync.Map
-
 	klog.Infof("Controller %q for NADs %v is starting Pod watch with following DPU PF MACs: %v", nc.nadInfo.NetName,
 		util.GetNADNamesFromMap(&nc.nadInfo.NetAttachDefs), pfMACs)
 
@@ -94,6 +85,9 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 			if !util.PodWantsNetwork(pod) {
 				return
 			}
+			// lock pod to avoid racing on `servedCache`
+			unlock := util.LockByKey.Acquire(string(pod.UID))
+			defer unlock()
 			on, networkMap, err := util.IsNetworkOnPod(pod, nc.nadInfo)
 			if err != nil || !on {
 				// the Pod is not attached to this specific network
@@ -103,7 +97,7 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 			}
 			klog.Infof("Add for Pod: %s/%s for network %s", pod.Namespace, pod.Name, nc.nadInfo.NetName)
 			// add all the Pod's Nad into Pod's podNadCache
-			podNadCache.Store(pod.UID, networkMap)
+			nc.podNadCache.Store(pod.UID, networkMap)
 
 			// initialize serverCache to be empty
 			servedCache := map[string]*util.DPUConnectionDetails{}
@@ -116,12 +110,15 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 					}
 				}
 			}
-			servedPods.Store(pod.UID, servedCache)
+			nc.servedPods.Store(pod.UID, servedCache)
 		},
 		UpdateFunc: func(old, newer interface{}) {
 			oldPod := old.(*kapi.Pod)
 			newPod := newer.(*kapi.Pod)
-			v, ok := podNadCache.Load(newPod.UID)
+			// lock pod to avoid racing on `servedCache`
+			unlock := util.LockByKey.Acquire(string(oldPod.UID))
+			defer unlock()
+			v, ok := nc.podNadCache.Load(newPod.UID)
 			if !ok {
 				klog.V(5).Infof("Skipping update for Pod %s/%s as it is not attached to network: %s",
 					newPod.Namespace, newPod.Name, nc.nadInfo.NetName)
@@ -132,7 +129,7 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 			networkMap := v.(map[string]*netattchdefapi.NetworkSelectionElement)
 
 			servedCache := map[string]*util.DPUConnectionDetails{}
-			v, ok = servedPods.Load(newPod.UID)
+			v, ok = nc.servedPods.Load(newPod.UID)
 			if ok {
 				servedCache = v.(map[string]*util.DPUConnectionDetails)
 			}
@@ -184,25 +181,31 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 					}
 				}
 			}
-			servedPods.Store(newPod.UID, servedCache)
+			nc.servedPods.Store(newPod.UID, servedCache)
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
-			_, ok := podNadCache.Load(pod.UID)
+			// lock pod to avoid racing on `servedCache`
+			unlock := util.LockByKey.Acquire(string(pod.UID))
+			defer func() {
+				util.LockByKey.Delete(string(pod.UID))
+				unlock()
+			}()
+			_, ok := nc.podNadCache.Load(pod.UID)
 			if !ok {
 				klog.V(5).Infof("Skipping delete for Pod %s/%s as it is not attached to network: %s",
 					pod.Namespace, pod.Name, nc.nadInfo.NetName)
 				return
 			}
 			klog.Infof("Delete for Pod: %s/%s for network %s", pod.Namespace, pod.Name, nc.nadInfo.NetName)
-			podNadCache.Delete(pod.UID)
-			v, ok := servedPods.Load(pod.UID)
+			nc.podNadCache.Delete(pod.UID)
+			v, ok := nc.servedPods.Load(pod.UID)
 			if !ok {
 				klog.V(5).Infof("Pod %s/%s is not attached to network: %s", pod.Namespace, pod.Name, nc.nadInfo.NetName)
 				return
 			}
 			servedCache := v.(map[string]*util.DPUConnectionDetails)
-			servedPods.Delete(pod.UID)
+			nc.servedPods.Delete(pod.UID)
 			for nadName, dpuCD := range servedCache {
 				podDesc := fmt.Sprintf("pod %s/%s for nad %s", pod.Namespace, pod.Name, nadName)
 				klog.Infof("Deleting %s from DPU", podDesc)
@@ -294,20 +297,17 @@ func (nc *ovnNodeController) addRepPort(pod *kapi.Pod, dpuCD *util.DPUConnection
 		return fmt.Errorf("failed to setup representor port. failed to set link up for interface %s: %v", vfRepName, err)
 	}
 
-	// set the VF rate limit configured for this network. This rate is for the allowed no. of new connections.
-	// default rate limit configuration
-	missRateLimitConfig := util.MissRateLimitConfig{MaxNewConnPPS: config.OvnKubeNode.MaxNewConnPPS, MaxNewConnBurst: config.OvnKubeNode.MaxNewConnBurst}
-	nadConf := &util.NadConfig{MissRateLimitConfig: missRateLimitConfig}
+	var nadConf *util.NadConfig
 	if v, ok := nc.nadInfo.NetAttachDefs.Load(nadName); ok {
 		nadConf = v.(*util.NadConfig)
-	} else if nadName != types.DefaultNetworkName {
-		// Failed to find the per nad configuration. This is only possible if this is default network
-		// which is not associated with a net-attach-def
-		klog.Errorf("Failed to find per nad configuration for nad %s", nadName)
+	} else {
+		// Failed to find the per nad configuration
+		return fmt.Errorf("failed to find nad configuration for %s", nadName)
 	}
-	klog.Infof("Adding Limit %v/%v for VF representor %s for %s",
-		nadConf.MaxNewConnPPS, nadConf.MaxNewConnBurst, vfRepName, podDesc)
-	if err = util.GetSriovnetOps().SetRepresentorVFMissPktRate(vfRepName, nadConf.MaxNewConnPPS, nadConf.MaxNewConnBurst); err != nil {
+	maxNewConnPPS, maxNewConnBurst := nadConf.GetMissRateLimitConfig(nc.node.hostType)
+	klog.Infof("Adding Limit %v/%v for VF representor %s for %s", maxNewConnPPS, maxNewConnBurst, vfRepName, podDesc)
+	// set the VF rate limit configured for this network. This rate is for the allowed no. of new connections.
+	if err = util.GetSriovnetOps().SetRepresentorVFMissPktRate(vfRepName, maxNewConnPPS, maxNewConnBurst); err != nil {
 		_ = nc.delRepPort(pod, dpuCD, vfRepName, nadName, podDesc)
 		return fmt.Errorf("failed to setup Rate limiting  for interface %s: %v", vfRepName, err)
 	}
@@ -410,4 +410,53 @@ func (nc *ovnNodeController) delRepPort(pod *kapi.Pod, dpuCD *util.DPUConnection
 		klog.Infof("Port %s deleted from bridge br-int", vfRepName)
 		return true, nil
 	})
+}
+
+func (nc *ovnNodeController) updateNADConfig(key string, newConfig *util.NadConfig) error {
+	val, found := nc.nadInfo.NetAttachDefs.Load(key)
+	if !found {
+		return fmt.Errorf("NadConfig %s not found in cache", key)
+	}
+	oldConfig := val.(*util.NadConfig)
+	oldConfig.Lock()
+	defer oldConfig.Unlock()
+	oldConfig.MaxNewConnBurst = newConfig.MaxNewConnBurst
+	oldConfig.MaxNewConnPPS = newConfig.MaxNewConnPPS
+	oldConfig.HostTypes = newConfig.HostTypes
+	return nil
+}
+
+func (nc *ovnNodeController) updateRateLimitingForPod(pod *kapi.Pod, nadKey string) error {
+	// acquire a lock per pod to avoid racing on `servedCache` in pod watcher
+	unlock := util.LockByKey.Acquire(string(pod.UID))
+	defer unlock()
+	val, ok := nc.servedPods.Load(pod.UID)
+	if !ok {
+		klog.V(5).Infof("DPUConnectionDetails for pod %s/%s not found in cache, skip", pod.Namespace, pod.Name)
+		return nil
+	}
+	connDetails := val.(map[string]*util.DPUConnectionDetails)
+	connDetail, ok := connDetails[nadKey]
+	if !ok {
+		klog.V(5).Infof("DPUConnectionDetails for pod %s/%s, net-attach-def %s not found in cache, skip", pod.Namespace, pod.Name, nadKey)
+		return nil
+	}
+	var nadConfig *util.NadConfig
+	if v, ok := nc.nadInfo.NetAttachDefs.Load(nadKey); ok {
+		nadConfig = v.(*util.NadConfig)
+	} else {
+		// Failed to find the per nad configuration
+		return fmt.Errorf("failed to find nad configuration for %s", nadKey)
+	}
+	vfRepName, err := util.GetSriovnetOps().GetVfRepresentorDPU(connDetail.PfId, connDetail.VfId)
+	if err != nil {
+		klog.Errorf("Failed to look up vf representor by %s/%s: %v", connDetail.PfId, connDetail.VfId, err)
+		return err
+	}
+	maxNewConnPPS, maxNewConnBurst := nadConfig.GetMissRateLimitConfig(nc.node.hostType)
+	if err = util.GetSriovnetOps().SetRepresentorVFMissPktRate(vfRepName, maxNewConnPPS, maxNewConnBurst); err != nil {
+		return fmt.Errorf("failed to update Rate limiting (%d/%d) for interface %s: %v", maxNewConnPPS, maxNewConnBurst, vfRepName, err)
+	}
+	klog.V(4).Infof("Rate limit of %s/%s/%s updated to %v/%v based on NAD %s", pod.Namespace, pod.Name, vfRepName, maxNewConnPPS, maxNewConnBurst, nadKey)
+	return nil
 }

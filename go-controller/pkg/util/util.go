@@ -1,6 +1,8 @@
 package util
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"net"
@@ -8,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	cnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 
@@ -88,6 +91,8 @@ func (anse annotationNotSetError) Error() string {
 func (aase annotationAlreadySetError) Error() string {
 	return aase.msg
 }
+
+var ErrorAttachDefNotOvnManaged = errors.New("net-attach-def not managed by OVN")
 
 // newAnnotationNotSetError returns an error for an annotation that is not set
 func newAnnotationNotSetError(format string, args ...interface{}) error {
@@ -250,6 +255,51 @@ func NewNetAttachDefInfo(netconf *cnitypes.NetConf) (*NetAttachDefInfo, error) {
 	}
 
 	return &nadInfo, nil
+}
+
+// Parse config in NAD spec and return a NetAttachDefInfo object
+func ParseNADInfo(netattachdef *nettypes.NetworkAttachmentDefinition) (*NetAttachDefInfo, *NadConfig, error) {
+	netconf, err := ParseNetConf(netattachdef)
+	if err != nil {
+		return nil, nil, err
+	}
+	nadKey := GetNadKeyName(netattachdef.Namespace, netattachdef.Name)
+	if netconf.IsSecondary && netconf.NadName != nadKey {
+		return nil, nil, fmt.Errorf("net-attach-def name (%s) is inconsistent with config (%s)", nadKey, netconf.NadName)
+	}
+	nadInfo, err := NewNetAttachDefInfo(netconf)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to construct NetAttachDefInfo %s/%s: %s", netattachdef.Namespace, netattachdef.Name, err)
+	}
+	nadConfig, err := GetNadConfig(netattachdef, nadInfo.IsSecondary)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to construct NadConfig %s/%s: %s", netattachdef.Namespace, netattachdef.Name, err)
+	}
+	if config.OvnKubeNode.Mode == types.NodeModeDPU && netconf.XDPService {
+		if netconf.TopoType != types.LocalnetAttachDefTopoType {
+			return nil, nil, fmt.Errorf("XDP only supported for Localnet based Network Attachment Definition")
+		}
+		if config.OvnKubeNode.XDPSFRep == "" || config.OvnKubeNode.XDPVeth == "" || config.OvnKubeNode.XDPNamespace == "" {
+			return nil, nil, fmt.Errorf("DPU not configured for XDP")
+		}
+	}
+	return nadInfo, nadConfig, nil
+}
+
+func ParseNetConf(netattachdef *nettypes.NetworkAttachmentDefinition) (*cnitypes.NetConf, error) {
+	netconf := &cnitypes.NetConf{MTU: config.Default.MTU}
+	// looking for network attachment definition that use OVN K8S CNI only
+	err := json.Unmarshal([]byte(netattachdef.Spec.Config), &netconf)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing Network Attachment Definition %s/%s: %v", netattachdef.Namespace, netattachdef.Name, err)
+	}
+	if netconf.Type != "ovn-k8s-cni-overlay" {
+		return nil, ErrorAttachDefNotOvnManaged
+	}
+	if netconf.Name == "" {
+		netconf.Name = netattachdef.Name
+	}
+	return netconf, nil
 }
 
 // Note that for port_group and address_set, it does not allow the '-' character

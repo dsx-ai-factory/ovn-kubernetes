@@ -21,7 +21,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
@@ -1034,43 +1033,11 @@ func (oc *Controller) aclLoggingCanEnable(annotation string, nsInfo *namespaceIn
 }
 
 func (mc *OvnMHController) initOvnController(netattachdef *nettypes.NetworkAttachmentDefinition) (*Controller, error) {
-	netconf := &cnitypes.NetConf{MTU: config.Default.MTU}
-
-	// looking for network attachment definition that use OVN K8S CNI only
-	err := json.Unmarshal([]byte(netattachdef.Spec.Config), &netconf)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing Network Attachment Definition %s/%s: %v", netattachdef.Namespace, netattachdef.Name, err)
-	}
-
-	if netconf.Type != "ovn-k8s-cni-overlay" {
-		klog.V(5).Infof("Network Attachment Definition %s/%s is not based on OVN plugin", netattachdef.Namespace, netattachdef.Name)
-		return nil, nil
-	}
-
-	if netconf.Name == "" {
-		netconf.Name = netattachdef.Name
-	}
-
-	nadInfo, err := util.NewNetAttachDefInfo(netconf)
+	nadInfo, nadConf, err := util.ParseNADInfo(netattachdef)
 	if err != nil {
 		return nil, err
 	}
-
-	nadConf, err := util.GetNadConfig(netattachdef, nadInfo.IsSecondary)
-	if err != nil {
-		return nil, err
-	}
-
 	klog.V(5).Infof("Add Network Attachment Definition %s/%s to nad %s", netattachdef.Namespace, netattachdef.Name, nadInfo.NetName)
-
-	// nadName must be in the correct form for non-default net-attach-def
-	if nadInfo.IsSecondary {
-		nadName := util.GetNadName(netattachdef.Namespace, netattachdef.Name, !nadInfo.IsSecondary)
-		if netconf.NadName != nadName {
-			return nil, fmt.Errorf("unexpected net_attach_def_name %s of Network Attachment Definition %s/%s, expected: %s",
-				netconf.NadName, netattachdef.Namespace, netattachdef.Name, nadName)
-		}
-	}
 
 	if !nadInfo.IsSecondary {
 		mc.ovnController.nadInfo.NetAttachDefs.Store(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name), nadConf)
@@ -1104,12 +1071,15 @@ func (mc *OvnMHController) addNetworkAttachDefinition(netattachdef *nettypes.Net
 	klog.Infof("Add Network Attachment Definition %s/%s", netattachdef.Namespace, netattachdef.Name)
 	oc, err := mc.initOvnController(netattachdef)
 	if err != nil {
-		klog.Errorf("Failed to add Network Attachment Definition %s/%s: %v", netattachdef.Namespace, netattachdef.Name, err)
+		// if the net-attach-def is not managed by OVN, return silently
+		if err != util.ErrorAttachDefNotOvnManaged {
+			klog.Errorf("Failed to add Network Attachment Definition %s/%s: %v", netattachdef.Namespace, netattachdef.Name, err)
+		}
 		return
 	}
 
 	// return if oc is nil, or nadInfo is for default network
-	if oc == nil || !oc.nadInfo.IsSecondary {
+	if !oc.nadInfo.IsSecondary {
 		return
 	}
 
@@ -1122,65 +1092,45 @@ func (mc *OvnMHController) addNetworkAttachDefinition(netattachdef *nettypes.Net
 
 func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.NetworkAttachmentDefinition) {
 	klog.Infof("Delete Network Attachment Definition %s/%s", netattachdef.Namespace, netattachdef.Name)
-	netconf := &cnitypes.NetConf{}
-	err := json.Unmarshal([]byte(netattachdef.Spec.Config), &netconf)
-	if err != nil && netconf.Type != "ovn-k8s-cni-overlay" {
+	netconf, err := util.ParseNetConf(netattachdef)
+	if err != nil {
+		if err != util.ErrorAttachDefNotOvnManaged {
+			klog.Error(err)
+		}
 		return
 	}
-
-	if netconf.Type != "ovn-k8s-cni-overlay" {
-		klog.V(5).Infof("Network Attachment Definition %s is not based on OVN plugin", netattachdef.Name)
-		return
-	}
-
-	if netconf.Name == "" {
-		netconf.Name = netattachdef.Name
-	}
-
 	nadInfo, err := util.NewNetAttachDefInfo(netconf)
 	if err != nil {
 		klog.Errorf(err.Error())
 		return
 	}
-
-	klog.Infof("Delete net-attach-def %s/%s from nad %s", netattachdef.Namespace, netattachdef.Name, nadInfo.NetName)
-
-	if netconf.NadName != "" {
-		nadName := util.GetNadName(netattachdef.Namespace, netattachdef.Name, !nadInfo.IsSecondary)
-		if netconf.NadName != nadName {
-			klog.Errorf("Unexpected net_attach_def_name %s of Network Attachment Definition %s/%s, expected: %s",
-				netconf.NadName, netattachdef.Namespace, netattachdef.Name, nadName)
-			return
-		}
-	}
-
-	if !nadInfo.IsSecondary {
-		mc.ovnController.nadInfo.NetAttachDefs.Delete(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name))
+	nadName := util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name)
+	if !netconf.IsSecondary {
+		mc.ovnController.nadInfo.NetAttachDefs.Delete(nadName)
 		return
 	}
-
-	v, ok := mc.nonDefaultOvnControllers.Load(nadInfo.NetName)
+	v, ok := mc.nonDefaultOvnControllers.Load(netconf.Name)
 	if !ok {
-		klog.Errorf("Failed to find network controller for network %s", nadInfo.NetName)
+		klog.Errorf("Failed to find network controller for network %s", netconf.Name)
 		return
 	}
-
 	oc := v.(*Controller)
-	oc.nadInfo.NetAttachDefs.Delete(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name))
-
+	_, ok = oc.nadInfo.NetAttachDefs.LoadAndDelete(nadName)
+	if !ok {
+		klog.Errorf("Failed to find nad %s from network controller for network %s", nadName, netconf.Name)
+		return
+	}
 	// check if there any net-attach-def sharing the same CNI conf name left, if yes, just return
 	netAttachDefLeft := false
 	oc.nadInfo.NetAttachDefs.Range(func(key, value interface{}) bool {
 		netAttachDefLeft = true
 		return false
 	})
-
 	if netAttachDefLeft {
 		return
 	}
-
 	klog.Infof("The last Network Attachment Definition %s/%s is deleted from nad %s, delete associated logical entities",
-		netattachdef.Namespace, netattachdef.Name, nadInfo.NetName)
+		netattachdef.Namespace, netattachdef.Name, netconf.Name)
 	oc.wg.Wait()
 	close(oc.stopChan)
 
@@ -1228,8 +1178,7 @@ func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.
 			oc.lsManager.DeleteNode(nadInfo.Prefix + node.Name)
 		}
 	}
-
-	mc.nonDefaultOvnControllers.Delete(nadInfo.NetName)
+	mc.nonDefaultOvnControllers.Delete(netconf.Name)
 }
 
 // syncNetworkAttachDefinition() walk through all net-attach-def and add them into Controller.nadInfo.NetAttachDefs
@@ -1250,7 +1199,10 @@ func (mc *OvnMHController) syncNetworkAttachDefinition(netattachdefs []interface
 		// ovnController.nadInfo.NetAttachDefs
 		_, err := mc.initOvnController(netattachdef)
 		if err != nil {
-			klog.Errorf(err.Error())
+			// if the net-attach-def is not managed by OVN, return silently
+			if err != util.ErrorAttachDefNotOvnManaged {
+				klog.Errorf(err.Error())
+			}
 			continue
 		}
 		//
