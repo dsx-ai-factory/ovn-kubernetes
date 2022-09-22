@@ -45,32 +45,36 @@ func TestGetNicName(t *testing.T) {
 		},
 		{
 			desc:      "test code path when `ovs-vsctl get Port port Interfaces` returns error",
-			errMatch:  fmt.Errorf("failed to get port"),
+			errMatch:  fmt.Errorf("failed to get physical NIC name for the bridge"),
 			outputExp: "",
 			inpBrName: "testPortName",
 			onRetArgsExecIface: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("port1\nport2")), bytes.NewBuffer([]byte("")), nil}},
+				{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("port1")), bytes.NewBuffer([]byte("")), nil}},
 				{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("")), bytes.NewBuffer([]byte("")), fmt.Errorf("mock error")}},
+				{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("")), bytes.NewBuffer([]byte("")), nil}},
 			},
 			onRetArgsKexecIface: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
 				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
+				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
 			},
 		},
 		{
 			desc:      "test code path when `ovs-vsctl get Interface ifaceId Type` returns error",
-			errMatch:  fmt.Errorf("failed to get Interface"),
+			errMatch:  fmt.Errorf("failed to get physical NIC name for the bridge"),
 			outputExp: "",
 			inpBrName: "testPortName",
 			onRetArgsExecIface: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("port1")), bytes.NewBuffer([]byte("")), nil}},
 				{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("[080841d8-4e12-4003-b0ac-36fefd63bae1]")), bytes.NewBuffer([]byte("")), nil}},
 				{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("")), bytes.NewBuffer([]byte("")), fmt.Errorf("mock error")}},
+				{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("")), bytes.NewBuffer([]byte("")), nil}},
 			},
 			onRetArgsKexecIface: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
 				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
 				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
+				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
 			},
 		},
 		{
