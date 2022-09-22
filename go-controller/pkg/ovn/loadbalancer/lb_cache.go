@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 
@@ -224,7 +225,16 @@ func newCache(nbClient libovsdbclient.Client) (*LBCache, error) {
 
 // listLBs lists all load balancers in nbdb
 func listLBs(nbClient libovsdbclient.Client) ([]CachedLB, error) {
-	lbs, err := libovsdbops.ListLoadBalancers(nbClient)
+	var lbs []*nbdb.LoadBalancer
+	var err error
+	if config.Kubernetes.ClusterName != "" {
+		searchPredicate := func(item *nbdb.LoadBalancer) bool {
+			return item.ExternalIDs["cluster_name"] == config.Kubernetes.ClusterName
+		}
+		lbs, err = libovsdbops.ListLoadBalancersByPredicate(nbClient, searchPredicate)
+	} else {
+		lbs, err = libovsdbops.ListLoadBalancers(nbClient)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("could not list load_balancer: %w", err)
 	}

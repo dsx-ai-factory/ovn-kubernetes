@@ -33,7 +33,6 @@ func ListChassisPrivateWithClusterName(sbClient libovsdbclient.Client, clusterNa
 	// So we cannot filter based on that. So instead we get list of ChassisPrivate entries as well a list of
 	// chassis entries filtered by cluster name. We prepare a final list with only items of the chassis Private
 	// present in the chassis List (which is already filtered for cluster name)
-	// ToDo(Hareesh): Revisit for a better option at a later stage.
 
 	chassisPrivate, err := ListChassisPrivate(sbClient)
 	if err != nil {

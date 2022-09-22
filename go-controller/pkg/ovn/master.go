@@ -456,8 +456,6 @@ func (oc *Controller) SetupMaster(ovnManagedNodeNames []string) error {
 		},
 		Addresses: []string{"router"},
 	}
-	//ToDo(Hareesh): Check if nadInfo.Prefix is needed
-	//joinSwitchName := util.GetClusterNamePrefix() + oc.nadInfo.Prefix + types.OVNJoinSwitch
 	joinSwitchName = util.GetClusterNamePrefix() + oc.nadInfo.Prefix + types.OVNJoinSwitch
 	sw := nbdb.LogicalSwitch{Name: joinSwitchName}
 	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.mc.nbClient, &sw, &logicalSwitchPort)
@@ -1251,7 +1249,6 @@ func (oc *Controller) syncNodesPeriodic() {
 		nodeNames = append(nodeNames, node.Name)
 	}
 
-	//ToDo(Hareesh): Review block below
 	var chassisList []*sbdb.Chassis
 	if config.Kubernetes.ClusterName != "" {
 		// Cluster name is set, find only chassis marked to this cluster.

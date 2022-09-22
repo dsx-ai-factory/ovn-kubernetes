@@ -223,7 +223,7 @@ func (c *Controller) handleErr(err error, key interface{}) {
 
 	if c.queue.NumRequeues(key) < maxRetries {
 		klog.V(2).InfoS("Error syncing service, retrying", "service", klog.KRef(ns, name), "err", err)
-		c.queue.AddRateLimited(key)
+		c.queue.AddRateLimited(prefixClusterName(key.(string)))
 		return
 	}
 
@@ -318,7 +318,7 @@ func (c *Controller) syncService(key string) error {
 	// Short-circuit if nothing has changed
 	c.alreadyAppliedLock.Lock()
 	existingLBs, ok := c.alreadyApplied[key]
-	c.alreadyAppliedLock.Unlock()
+
 	if ok && ovnlb.LoadBalancersEqualNoUUID(existingLBs, lbs) {
 		klog.V(3).Infof("Skipping no-op change for service %s", key)
 	} else {
@@ -328,14 +328,13 @@ func (c *Controller) syncService(key string) error {
 		// Note: this may fail if a node was deleted between listing nodes and applying.
 		// If so, this will fail and we will resync.
 		if err := ovnlb.EnsureLBs(c.nbClient, service, lbs); err != nil {
+			// We need to release lock before returning so a new syncService worker can grab the lock
+			c.alreadyAppliedLock.Unlock()
 			return fmt.Errorf("failed to ensure service %s load balancers: %w", key, err)
 		}
-
-		c.alreadyAppliedLock.Lock()
 		c.alreadyApplied[key] = lbs
-		c.alreadyAppliedLock.Unlock()
 	}
-
+	c.alreadyAppliedLock.Unlock()
 	if !c.repair.legacyLBsDeleted() {
 		if err := deleteServiceFromLegacyLBs(c.nbClient, service); err != nil {
 			klog.Warningf("Failed to delete legacy vips for service %s: %v", key)
@@ -368,10 +367,11 @@ func prefixClusterName(key string) string {
 func extractClusterName(key string) (clustername string, rest string) {
 	parts := strings.Split(key, "/")
 	if len(parts) == 3 {
-		klog.Infof("Splitting incoming LB key into clustername %s and key %s",
+		klog.Infof("[extractClusterName] Splitting incoming LB key into clustername %s and key %s",
 			parts[0], parts[1]+"/"+parts[2])
 		return parts[0], parts[1] + "/" + parts[2]
 	}
+	klog.Infof("[extractClusterName] Nothing to extract for key: %s", key)
 	return "", key
 }
 
@@ -486,7 +486,7 @@ func (c *Controller) queueServiceForEndpointSlice(endpointSlice *discovery.Endpo
 		return
 	}
 
-	c.queue.Add(key)
+	c.queue.Add(prefixClusterName(key))
 }
 
 // serviceControllerKey returns a controller key for a Service but derived from
