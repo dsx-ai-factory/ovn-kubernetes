@@ -24,7 +24,7 @@ OCI_BIN ?= docker
 
 # The image of ovnkube/ovn-daemonset-u should be multi-arched before using it on arm64
 ubuntu: bld
-	${OCI_BIN} build -t ovn-kube-u$(IMAGE_ARCH) -f Dockerfile.ubuntu$(DOCKERFILE_ARCH) .
+	${OCI_BIN} build -t ovn-kube-u$(IMAGE_ARCH) --build-arg ARTIFACTORY_CERT=${JFROG_CREDENTIAL} -f Dockerfile.ubuntu$(DOCKERFILE_ARCH) .
 ifeq ($(ARCH),amd64)
 	${OCI_BIN} tag "ovn-kube-u$(IMAGE_ARCH):latest" \
               "ovn-kube-u:latest"
@@ -46,6 +46,7 @@ centos: bld
 	${OCI_BIN} build $(docker_build_args) \
 		$(docker_build_ver_args) \
 		--build-arg rpmArch=$(shell uname -m) \
+                --build-arg ARTIFACTORY_CERT=${JFROG_CREDENTIAL} \
 		--target ovn -t quay.io/nvidia/ovn-c:latest .
 	${OCI_BIN} build $(docker_build_args) \
 		$(docker_build_ver_args) \
