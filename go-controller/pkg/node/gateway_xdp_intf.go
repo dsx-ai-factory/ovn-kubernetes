@@ -46,7 +46,7 @@ func newXDPSharedGatewayOpenFlowManager(gwBridge *bridgeConfiguration, ofFlowMan
 // A watered down version of bridgeForInterface since we assume bridge is created
 // etc.
 func bridgeForXDPInterface(nadInfo *util.NetAttachDefInfo) (*bridgeConfiguration, error) {
-	klog.Info("Setting up new XDP shared gateway for NAD %s", nadInfo.NetName)
+	klog.Infof("Setting up new XDP shared gateway for NAD %s", nadInfo.NetName)
 
 	uplinkName, err := getIntfName(nadInfo.BridgeName)
 	if err != nil {
@@ -62,7 +62,7 @@ func bridgeForXDPInterface(nadInfo *util.NetAttachDefInfo) (*bridgeConfiguration
 	// TODO(gmoodalbail): can this be nadInfo.NetNameInfo.Prefix?
 	patchNADStr := strings.Replace(nadInfo.NetName, "-", ".", -1)
 	res.patchPort = "patch-" + patchNADStr + "_ovn_localnet_port-to-br-int"
-	klog.Info("Patch port for XDP shared gateway for NAD %s is %s", nadInfo.NetName, res.patchPort)
+	klog.Infof("Patch port for XDP shared gateway for NAD %s is %s", nadInfo.NetName, res.patchPort)
 
 	return &res, nil
 }
@@ -97,7 +97,7 @@ func setXDPBridgePatchOfPorts(bridge *bridgeConfiguration) error {
 	// configured. We check just to make sure.
 	if bridge.ofPortPatch != "" && bridge.ofPortPatch != ofportPatch {
 		xdpCheckPatchPort(bridge.bridgeName, bridge.ofPortPhys, bridge.patchPort, bridge.ofPortPatch, ofportPatch)
-		klog.Info("XDP patch port %q changing ofport from %s to %s", bridge.patchPort, bridge.ofPortPatch,
+		klog.Infof("XDP patch port %q changing ofport from %s to %s", bridge.patchPort, bridge.ofPortPatch,
 			ofportPatch)
 	}
 	bridge.ofPortPatch = ofportPatch
@@ -105,12 +105,12 @@ func setXDPBridgePatchOfPorts(bridge *bridgeConfiguration) error {
 }
 
 func newXDPSharedGateway(nadInfo *util.NetAttachDefInfo, isPrimaryDPU bool) (*gateway, error) {
-	klog.Info("Creating new XDP shared gateway for %s", nadInfo.NetName)
+	klog.Infof("Creating new XDP shared gateway for %s", nadInfo.NetName)
 	gw := &gateway{}
 
 	gwBridge, err := bridgeForXDPInterface(nadInfo)
 	if err != nil {
-		klog.Info("Failed creating new XDP shared gateway: %v", err)
+		klog.Infof("Failed creating new XDP shared gateway: %v", err)
 		return nil, err
 	}
 
@@ -118,7 +118,7 @@ func newXDPSharedGateway(nadInfo *util.NetAttachDefInfo, isPrimaryDPU bool) (*ga
 		klog.Info("Setting patch ports for XDP Shared Gateway Openflow Manager")
 		err := setXDPBridgePatchOfPorts(gwBridge)
 		if err != nil {
-			klog.Info("Failed setting up  XDP Shared Gateway: %v", err)
+			klog.Infof("Failed setting up  XDP Shared Gateway: %v", err)
 			return false, err
 		}
 		klog.Info("XDP Gateway is ready")
@@ -129,13 +129,13 @@ func newXDPSharedGateway(nadInfo *util.NetAttachDefInfo, isPrimaryDPU bool) (*ga
 		klog.Info("Setting phys ports for XDP Shared Gateway Openflow Manager")
 		err := setXDPBridgePhysOfPorts(gwBridge)
 		if err != nil {
-			klog.Info("Failed setting up  XDP Shared Gateway: %v", err)
+			klog.Infof("Failed setting up  XDP Shared Gateway: %v", err)
 			return err
 		}
 
 		gw.openflowManager, err = newXDPSharedGatewayOpenFlowManager(gwBridge, !isPrimaryDPU)
 		if err != nil {
-			klog.Info("Failed Creating XDP Shared Gateway Openflow Manager: %v", err)
+			klog.Infof("Failed Creating XDP Shared Gateway Openflow Manager: %v", err)
 			return err
 		}
 
@@ -147,7 +147,7 @@ func newXDPSharedGateway(nadInfo *util.NetAttachDefInfo, isPrimaryDPU bool) (*ga
 }
 
 func (n *OvnNode) initGatewayDPUXDP(nadInfo *util.NetAttachDefInfo) (*gateway, error) {
-	klog.Info("Initializing XDP Gateway Functionality on DPU for %s", nadInfo.NetName)
+	klog.Infof("Initializing XDP Gateway Functionality on DPU for %s", nadInfo.NetName)
 	var err error
 
 	start := time.Now()
