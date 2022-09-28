@@ -308,6 +308,10 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 		start := time.Now()
 		n := ovnnode.NewNode(ovnClientset.KubeClient, nodeWatchFactory, node, stopChan, nodeEventRecorder, wg)
 		if err := n.Start(ctx.Context, wg); err != nil {
+			// exit gracefully.
+			close(stopChan)
+			wg.Wait()
+			watchFactory.Shutdown()
 			return err
 		}
 		end := time.Since(start)
@@ -318,6 +322,10 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 			if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 				ovsDBClient, err := metrics.SetupOvsDBClient()
 				if err != nil {
+					// exit gracefully.
+					close(stopChan)
+					wg.Wait()
+					watchFactory.Shutdown()
 					return fmt.Errorf("error when trying to initialize ovsdb client: %v", err)
 				}
 				// serve OVN ^ovn_controller metrics
