@@ -70,33 +70,30 @@ func (l *loadBalancerHealthChecker) SyncServices(svcs []interface{}) error {
 }
 
 func (l *loadBalancerHealthChecker) AddEndpointSlice(epSlice *discovery.EndpointSlice) {
-	svcName := epSlice.Labels[discovery.LabelServiceName]
-	name := ktypes.NamespacedName{Namespace: epSlice.Namespace, Name: svcName}
+	namespacedName := namespacedNameFromEPSlice(epSlice)
 	l.Lock()
 	defer l.Unlock()
-	if _, exists := l.services[name]; exists {
-		l.endpoints[name] = countReadyEndpoints(epSlice)
+	if _, exists := l.services[namespacedName]; exists {
+		l.endpoints[namespacedName] = countReadyEndpoints(epSlice)
 		_ = l.server.SyncEndpoints(l.endpoints)
 	}
 }
 
 func (l *loadBalancerHealthChecker) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.EndpointSlice) {
-	svcName := newEpSlice.Labels[discovery.LabelServiceName]
-	name := ktypes.NamespacedName{Namespace: newEpSlice.Namespace, Name: svcName}
+	namespacedName := namespacedNameFromEPSlice(newEpSlice)
 	l.Lock()
 	defer l.Unlock()
-	if _, exists := l.services[name]; exists {
-		l.endpoints[name] = countReadyEndpoints(newEpSlice)
+	if _, exists := l.services[namespacedName]; exists {
+		l.endpoints[namespacedName] = countReadyEndpoints(newEpSlice)
 		_ = l.server.SyncEndpoints(l.endpoints)
 	}
 }
 
 func (l *loadBalancerHealthChecker) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) {
-	svcName := epSlice.Labels[discovery.LabelServiceName]
-	name := ktypes.NamespacedName{Namespace: epSlice.Namespace, Name: svcName}
+	namespacedName := namespacedNameFromEPSlice(epSlice)
 	l.Lock()
 	defer l.Unlock()
-	delete(l.endpoints, name)
+	delete(l.endpoints, namespacedName)
 	_ = l.server.SyncEndpoints(l.endpoints)
 }
 
@@ -104,9 +101,8 @@ func countReadyEndpoints(epSlice *discovery.EndpointSlice) int {
 	var num int
 	for _, endpoint := range epSlice.Endpoints {
 		if endpoint.Conditions.Ready != nil && !*endpoint.Conditions.Ready {
-			continue
+			num++
 		}
-		num++
 	}
 	return num
 }
@@ -443,4 +439,9 @@ func checkPorts(bridge *bridgeConfiguration) error {
 		}
 	}
 	return nil
+}
+
+func namespacedNameFromEPSlice(epSlice *discovery.EndpointSlice) ktypes.NamespacedName {
+	svcName := epSlice.Labels[discovery.LabelServiceName]
+	return ktypes.NamespacedName{Namespace: epSlice.Namespace, Name: svcName}
 }

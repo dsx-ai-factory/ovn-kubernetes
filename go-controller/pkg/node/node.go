@@ -1152,7 +1152,9 @@ func addEPSliceToFirewallZone(nodeIP string, endpointSlice *discovery.EndpointSl
 	}
 }
 
-func isEPSliceContainsEndpoint(epSlice *discovery.EndpointSlice,
+// doesEPSliceContainEndpoint checks whether the endpointslice
+// contains a specific endpoint with IP/Port/Protocol
+func doesEPSliceContainEndpoint(epSlice *discovery.EndpointSlice,
 	epIP string, epPort int32, protocol kapi.Protocol) bool {
 	for _, port := range epSlice.Ports {
 		for _, endpoint := range epSlice.Endpoints {
@@ -1315,7 +1317,7 @@ func updateEndpointSlice(nodeIP string, skipFirewalldAnnotation bool,
 					if nodeIP != ip {
 						continue
 					}
-					if isEPSliceContainsEndpoint(oldEndpointSlice, ip, *port.Port, *port.Protocol) {
+					if doesEPSliceContainEndpoint(oldEndpointSlice, ip, *port.Port, *port.Protocol) {
 						continue
 					}
 					klog.V(5).Infof("Adding the endpoint that is not present in old slice %s/%d/%s",
@@ -1342,7 +1344,7 @@ func updateEndpointSlice(nodeIP string, skipFirewalldAnnotation bool,
 				if nodeIP != ip && *port.Protocol != kapi.ProtocolUDP && *port.Protocol != kapi.ProtocolSCTP {
 					continue
 				}
-				if isEPSliceContainsEndpoint(newEndpointSlice, ip, *port.Port, *port.Protocol) {
+				if doesEPSliceContainEndpoint(newEndpointSlice, ip, *port.Port, *port.Protocol) {
 					continue
 				}
 				// if skip-firewalld annotation is set, don't remove the
@@ -1522,7 +1524,7 @@ func deleteConntrackEntries(checkEpSlice, fromEpSlice *discovery.EndpointSlice) 
 					continue
 				}
 				if checkEpSlice != nil {
-					if isEPSliceContainsEndpoint(checkEpSlice, ip, *port.Port, *port.Protocol) {
+					if doesEPSliceContainEndpoint(checkEpSlice, ip, *port.Port, *port.Protocol) {
 						continue
 					}
 				}
