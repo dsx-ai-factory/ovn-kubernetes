@@ -8,8 +8,10 @@ import (
 	"sync"
 	"time"
 
+	ovnconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/vishvananda/netlink"
@@ -39,6 +41,12 @@ func newAddressManager(nodeName string, k kube.Interface, config *managementPort
 		OnChanged:      func() {},
 	}
 	mgr.nodeAnnotator = kube.NewNodeAnnotator(k, nodeName)
+	if ovnconfig.OvnKubeNode.Mode == types.NodeModeDPU {
+		util.DelNodeHostAddresses(mgr.nodeAnnotator)
+		if err := mgr.nodeAnnotator.Run(); err != nil {
+			klog.Errorf("Failed to delete node host-addresses annotations: %v", err)
+		}
+	}
 	mgr.sync()
 	return mgr
 }
@@ -88,6 +96,9 @@ func (c *addressManager) ListAddresses() []net.IP {
 }
 
 func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
+	if ovnconfig.OvnKubeNode.Mode == types.NodeModeDPU {
+		return
+	}
 	var addrChan chan netlink.AddrUpdate
 	addrSubscribeOptions := netlink.AddrSubscribeOptions{
 		ErrorCallback: func(err error) {
@@ -220,6 +231,10 @@ func (c *addressManager) isValidNodeIP(addr net.IP) bool {
 }
 
 func (c *addressManager) sync() {
+	if ovnconfig.OvnKubeNode.Mode == types.NodeModeDPU {
+		return
+	}
+
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
 		klog.Errorf("Failed to sync Node IP Manager: unable list all IPs on the node, error: %v", err)
