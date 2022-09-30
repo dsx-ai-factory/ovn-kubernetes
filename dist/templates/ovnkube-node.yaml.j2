@@ -70,10 +70,43 @@ spec:
 
         terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
-        # Common mounts
-        # for the iptables wrapper
-        - mountPath: /host
-          name: host-slash
+        # /usr/bin/firewall-cmd
+        - mountPath: /host/usr/bin
+          name: host-usr-bin
+          readOnly: true
+        # ubuntu /sbin/iptables - > /etc/alternatives/iptables
+        - mountPath: /host/etc/alternatives
+          name: host-etc-alts
+          readOnly: true
+        # centos /sbin/iptables, /sbin -> /usr/sbin
+        - mountPath: /host/sbin
+          name: host-usr-sbin
+          readOnly: true
+        - mountPath: /host/usr/sbin
+          name: host-usr-sbin
+          readOnly: true
+        # firewall-cmd dependencies
+        - mountPath: /host/usr/lib
+          name: host-usr-lib
+          readOnly: true
+        - mountPath: /host/lib
+          name: host-lib
+          readOnly: true
+        - mountPath: /host/lib64
+          name: host-lib64
+          readOnly: true
+        - mountPath: /host/usr/lib64
+          name: host-usr-lib64
+          readOnly: true
+        - mountPath: /host/usr/libexec
+          name: host-usr-libexec
+          readOnly: true
+        # /usr/local/lib/python3.6/site-packages/six.py
+        - mountPath: /host/usr/local/lib
+          name: host-usr-local-lib
+          readOnly: true
+        - mountPath: /host/run/dbus
+          name: host-var-run-dbus
           readOnly: true
         - mountPath: /var/run/dbus/
           name: host-var-run-dbus
@@ -81,9 +114,10 @@ spec:
         - mountPath: /var/lib/kubelet
           name: host-kubelet
           readOnly: true
+        # ovn-k8s log
         - mountPath: /var/log/ovn-kubernetes/
           name: host-var-log-ovnkube
-          # We mount our socket here
+        # We mount our socket here
         - mountPath: /var/run/ovn-kubernetes
           name: host-var-run-ovn-kubernetes
         # CNI related mounts which we take over
@@ -103,9 +137,15 @@ spec:
         - mountPath: /ovn-cert
           name: ovn-pki
           readOnly: true
+        {% if kind is defined and kind -%}
         - mountPath: /etc/openvswitch/
-          name: host-etc-ovs
+          name: host-config-openvswitch
           readOnly: true
+        {% else -%}
+        - mountPath: /etc/openvswitch/
+          name: host-etc-openvswitch
+          readOnly: true
+        {% endif %}
         - mountPath: /etc/ovn/
           name: host-var-lib-ovs
           readOnly: true
@@ -362,7 +402,7 @@ spec:
                 operator: DoesNotExist
       {% endif -%}
       volumes:
-      # Common volumes
+      # dbus socket
       - name: host-var-run-dbus
         hostPath:
           path: /var/run/dbus
@@ -381,9 +421,38 @@ spec:
       - name: host-etc-cni-netd
         hostPath:
           path: /etc/cni/net.d
-      - name: host-slash
+      # /sbin/iptables on centos, sbin -> /usr/sbin
+      - name: host-usr-sbin
         hostPath:
-          path: /
+          path: /usr/sbin
+      # /usr/sbin/iptables -> /etc/alternatives/iptables
+      - name: host-etc-alts
+        hostPath:
+          path: /etc/alternatives
+      # /usr/bin/firewall-cmd
+      - name: host-usr-bin
+        hostPath:
+          path: /usr/bin
+      # dependencies
+      - name: host-usr-lib
+        hostPath:
+          path: /usr/lib
+      - name: host-lib
+        hostPath:
+          path: /lib
+      - name: host-lib64
+        hostPath:
+          path: /lib64
+      - name: host-usr-lib64
+        hostPath:
+          path: /usr/lib64
+      - name: host-usr-libexec
+        hostPath:
+          path: /usr/libexec
+      # /usr/local/lib/python3.6/site-packages
+      - name: host-usr-local-lib
+        hostPath:
+          path: /usr/local/lib
       - name: host-netns
         hostPath:
           path: /var/run/netns
@@ -402,15 +471,23 @@ spec:
         hostPath:
           path: /etc/ovn
           type: DirectoryOrCreate
+      - name: host-etc-openvswitch
+        hostPath:
+          path: /etc/openvswitch
       - name: host-var-lib-ovs
         hostPath:
           path: /var/lib/openvswitch
       - name: host-etc-ovs
         hostPath:
           path: /etc/openvswitch
-      {%- else %}
+      {%- elif ovnkube_app_name=="ovnkube-node-dpu-host" %}
       - name: var-run-ovn
         emptyDir: {}
+      {%- endif %}
+      {% if kind is defined and kind -%}
+      - name: host-config-openvswitch
+        hostPath:
+          path: /etc/origin/openvswitch
       {%- endif %}
 
       tolerations:

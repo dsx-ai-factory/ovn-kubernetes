@@ -87,13 +87,6 @@ spec:
         terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         # Common mounts
-        # for the iptables wrapper
-        - mountPath: /host
-          name: host-slash
-          readOnly: true
-        - mountPath: /var/run/dbus/
-          name: host-var-run-dbus
-          readOnly: true
         - mountPath: /var/log/ovn-kubernetes/
           name: host-var-log-ovnkube
         # We mount our socket here
@@ -122,7 +115,30 @@ spec:
           readOnly: true
         - mountPath: /var/run/netns
           name: host-var-run-netns
-
+        - mountPath: /opt/mellanox
+          name: host-opt-mlnx
+        # ubuntu /sbin/iptables, /sbin -> /usr/sbin
+        - mountPath: /host/sbin
+          name: host-usr-sbin
+          readOnly: true
+        # ubuntu /sbin/iptables - > /etc/alternatives/iptables
+        - mountPath: /host/etc/alternatives
+          name: host-etc-alts
+          readOnly: true
+        # ubuntu /etc/alternatives/iptables -> /usr/sbin/iptables-legacy
+        - mountPath: /host/usr/sbin
+          name: host-usr-sbin
+          readOnly: true
+        - mountPath: /host/lib
+          name: host-lib
+          readOnly: true
+        - mountPath: /host/usr/lib
+          name: host-usr-lib
+          readOnly: true
+        # firewall-cmd needs /run/dbus
+        - mountPath: /host/run/dbus
+          name: host-var-run-dbus
+          readOnly: true
         resources:
           requests:
             cpu: 100m
@@ -263,14 +279,13 @@ spec:
           value: "{{ disable_ovs_metrics }}"
         - name: REPRESENTOR_METERING_NODES
           value: ngn2.nvidia.com/hosttype
-
       volumes:
-      - name: sysfs
-        hostPath:
-          path: /sys
       - name: host-var-run-dbus
         hostPath:
           path: /var/run/dbus
+      - name: sysfs
+        hostPath:
+          path: /sys
       - name: host-var-log-ovnkube
         hostPath:
           path: /var/log/ovn-kubernetes
@@ -289,9 +304,6 @@ spec:
       - name: host-etc-cni-netd
         hostPath:
           path: /etc/cni/net.d
-      - name: host-slash
-        hostPath:
-          path: /
       - name: ovn-pki
         hostPath:
           path: /etc/ovn
@@ -299,7 +311,22 @@ spec:
       - name: host-var-run-netns
         hostPath:
           path: /var/run/netns
-
-
+      # /usr/sbin/iptables* (ubuntu)
+      - name: host-usr-sbin
+        hostPath:
+          path: /usr/sbin
+      # /usr/sbin/iptables -> /etc/alternatives/iptables
+      - name: host-etc-alts
+        hostPath:
+          path: /etc/alternatives
+      - name: host-lib
+        hostPath:
+          path: /lib
+      - name: host-usr-lib
+        hostPath:
+          path: /usr/lib
+      - name: host-opt-mlnx
+        hostPath:
+          path: /opt/mellanox
       tolerations:
       - operator: "Exists"
