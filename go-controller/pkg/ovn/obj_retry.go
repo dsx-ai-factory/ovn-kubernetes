@@ -1652,17 +1652,22 @@ func (oc *Controller) deleteResourceHandler(obj interface{}, objectsToRetry *ret
 	oc.recordSuccessEvent(objectsToRetry.oType, obj)
 }
 
-func (oc *Controller) shouldApply(objType reflect.Type, obj interface{}) (bool, reflect.Type, interface{}) {
+func (oc *Controller) shouldApply(objType reflect.Type, obj interface{}) (bool, interface{}, error) {
 	switch objType {
 	case factory.MultinetworkpolicyType:
+		// convert multinetworkpolicy object to networkPolicy object
+		// and return true if this multinetwork policy applies to this controller
 		mp, ok := obj.(*multinetworkpolicy.MultiNetworkPolicy)
-		if ok && oc.shouldApplyMultiPolicy(mp) {
+		if ok {
 			np := convertMultiNetPolicyToNetPolicy(mp)
-			return true, factory.PolicyType, np
+			if oc.shouldApplyMultiPolicy(mp) {
+				return true, np, nil
+			}
+			return false, np, nil
 		}
-		return false, objType, obj
+		return false, nil, fmt.Errorf("could not cast %T object to *MultiNetworkPolicy", obj)
 	}
-	return true, objType, obj
+	return true, obj, nil
 }
 
 // WatchResource starts the watching of a resource type, manages its retry entries and calls
@@ -1689,30 +1694,51 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) (*factory.Handler
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				// only add resource if it applies
-				apply, _, nObj := oc.shouldApply(objectsToRetry.oType, obj)
+				apply, nObj, err := oc.shouldApply(objectsToRetry.oType, obj)
+				if err != nil {
+					klog.Errorf("Upon add event: %v", err)
+					return
+				}
 				if apply {
 					oc.addResourceHandler(nObj, objectsToRetry)
 				}
 			},
 
 			UpdateFunc: func(old, newer interface{}) {
-				oldApply, _, oldObj := oc.shouldApply(objectsToRetry.oType, old)
-				newApply, _, newObj := oc.shouldApply(objectsToRetry.oType, newer)
+				oldApply, oldObj, err := oc.shouldApply(objectsToRetry.oType, old)
+				if err != nil {
+					klog.Errorf("Upon update event: %v", err)
+					return
+				}
+				newApply, newObj, err := oc.shouldApply(objectsToRetry.oType, newer)
+				if err != nil {
+					klog.Errorf("Upon update event: %v", err)
+					return
+				}
 				if oldApply == newApply {
 					if !oldApply {
+						// both do not apply to this controller, nothing to do
 						return
 					}
+					// both apply to this controller, update event
 					oc.updateResourceHandler(oldObj, newObj, objectsToRetry)
 				} else {
 					if newApply {
+						// apply to this controller only now, add event
 						oc.addResourceHandler(newObj, objectsToRetry)
 					} else {
+						// no longer apply to this controller, delete event
 						oc.deleteResourceHandler(oldObj, objectsToRetry)
 					}
 				}
 			},
 			DeleteFunc: func(obj interface{}) {
-				oc.deleteResourceHandler(obj, objectsToRetry)
+				_, nObj, err := oc.shouldApply(objectsToRetry.oType, obj)
+				if err != nil {
+					klog.Errorf("Upon delete event: %v", err)
+					return
+				}
+				oc.deleteResourceHandler(nObj, objectsToRetry)
 			},
 		},
 		syncFunc) // adds all existing objects at startup
