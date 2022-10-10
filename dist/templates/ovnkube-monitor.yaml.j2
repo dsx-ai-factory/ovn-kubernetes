@@ -12,6 +12,9 @@ metadata:
 spec:
   endpoints:
   - interval: 30s
+    metricRelabelings:
+    - action: labeldrop
+      regex: endpoint|service
     port: ovnkube-master-metrics
     scheme: https
     bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
@@ -62,6 +65,8 @@ spec:
       sourceLabels:
       - __name__
       regex: ovs_vswitchd_interface.+(ingress_policing.+|_of_port|_mtu|_duplex|_ifindex|_link_speed|_driver_name)
+    - action: labeldrop
+      regex: endpoint|service
     port: ovnkube-node-metrics
     path: /metrics
     scheme: https
