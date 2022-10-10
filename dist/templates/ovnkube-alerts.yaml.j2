@@ -636,6 +636,19 @@ spec:
          Noticed higher than 20MiB/s RX rates without offload on the host with pod ovn-kubernetes/ {{ $labels.pod }}
          instance {{ $labels.instance }} port {{ $labels.port }} interface {{ $labels.interface }} for longer than 5m
 
+    - alert: OvsMegaFlowsTotalUnusuallyHigh
+      expr: |
+        (ovs_vswitchd_dp_offloaded_flows_total + ovs_vswitchd_dp_flows_total) > 10000
+      for: 5m
+      labels:
+       severity: warning
+       pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
+      annotations:
+       message: |
+         Noticed unusually high number {{ $value }} of fast-path flows on the host with
+         pod ovn-kubernetes/ {{ $labels.pod }} instance {{ $labels.instance }} for longer than 5m
+
     - alert: OvsTxRateLimitDropsUnusuallyHigh
       expr: |
         rate(ovs_vswitchd_interface_tx_misspkts_packets_drops[5m]) > 40
@@ -664,29 +677,29 @@ spec:
 
     - alert: OvsVswitchdDPFlowsLookupLost
       expr: |
-        rate(ovs_vswitchd_dp_flows_lookup_missed{namespace="ovn-kubernetes",job="ovnkube-node"}[1m]) > 1000
-      for: 15m
+        rate(ovs_vswitchd_dp_flows_lookup_lost{namespace="ovn-kubernetes",job="ovnkube-node"}[5m]) > 0
+      for: 5m
       labels:
-       severity: warning
+       severity: major
        pduuid: P2AR7UQ
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
       annotations:
        message: |
-         Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that
-         number of dropped packets that match DP flows is {{ printf "%.2f" $value }} per second.
+         Noticed unusually high rate of slow-path {{ $value }} packets flows lookup lost per second on the host with
+         pod ovn-kubernetes/ {{ $labels.pod }} instance {{ $labels.instance }} for longer than 5m
 
     - alert: OvsVswitchdDPFlowsLookupMissed
       expr: |
-        rate(ovs_vswitchd_dp_flows_lookup_missed{namespace="ovn-kubernetes",job="ovnkube-node"}[1m]) > 1000
-      for: 15m
+        rate(ovs_vswitchd_dp_flows_lookup_missed{namespace="ovn-kubernetes",job="ovnkube-node"}[5m]) > 200
+      for: 5m
       labels:
        severity: warning
        pduuid: P2AR7UQ
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
       annotations:
        message: |
-         Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that
-         number of dropped packets that not-matching DP flows is {{ printf "%.2f" $value }} per second.
+         Noticed unusually high rate of slow-path {{ $value }} packets flows lookup misses per second on the host with
+         pod ovn-kubernetes/ {{ $labels.pod }} instance {{ $labels.instance }} for longer than 5m
 
     - alert: OvsVswitchdInterfaceRxErrors
       expr: |
