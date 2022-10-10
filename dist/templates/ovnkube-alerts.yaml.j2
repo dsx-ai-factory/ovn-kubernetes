@@ -368,6 +368,16 @@ spec:
       annotations:
        message: There is no running ovn-nbdb leader
 
+    - alert: OvnNBDBRaftTermChange
+      expr: rate(ovn_db_cluster_term{db_name="OVN_Northbound"}[5m]) != 0
+      for: 1m
+      labels:
+        severity: warning
+        pduuid: P2AR7UQ
+        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UUPXlpvGk/central-northbound-db
+      annotations:
+       message: NBDB RAFT term change detected
+
     - alert: OvnSBDBMultipleLeaders
       expr: sum(ovn_db_cluster_server_role{db_name="OVN_Southbound",server_role="leader"}) > 1
       for: 4m
@@ -388,6 +398,52 @@ spec:
       annotations:
        message: There is no running ovn-sbdb leader
 
+    - alert: OvnSBDBRaftTermChange
+      expr: rate(ovn_db_cluster_term{db_name="OVN_Southbound"}[5m]) != 0
+      for: 4m
+      labels:
+        severity: warning
+        pduuid: P2AR7UQ
+        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/sihGi2DGz/central-southbound-db
+      annotations:
+       message: SBDB RAFT term change detected
+
+    - alert: OvnSBDBMemoryConsumptionUnusuallyHigh
+      expr: |
+        container_memory_usage_bytes{job="kubelet", namespace="ovn-kubernetes", pod=~"^ovn-sbdb-.*", container="sbdb"} / 1024 / 1024 / 1024 > 10
+      for: 10m
+      labels:
+        severity: warning
+        pduuid: P2AR7UQ
+        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/sihGi2DGz/central-southbound-db
+      annotations:
+       message: |
+         Pod ovn-kubernetes/ {{ $labels.pod }} OVN_Southbound DB pod memory consumption crossed warning threshold and now at {{ printf "%.2f" $value }} GB
+
+    - alert: OvnSBDBMemoryConsumptionTooHigh
+      expr: |
+        container_memory_usage_bytes{job="kubelet", namespace="ovn-kubernetes", pod=~"^ovn-sbdb-.*", container="sbdb"} / 1024 / 1024 / 1024 > 15
+      for: 10m
+      labels:
+        severity: minor
+        pduuid: P2AR7UQ
+        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/sihGi2DGz/central-southbound-db
+      annotations:
+       message: |
+         Pod ovn-kubernetes/ {{ $labels.pod }} OVN_Southbound DB pod memory consumption crossed threshold and now at {{ printf "%.2f" $value }} GB
+
+    - alert: OvnSBDBMemoryConsumptionCriticallyHigh
+      expr: |
+        container_memory_usage_bytes{job="kubelet", namespace="ovn-kubernetes", pod=~"^ovn-sbdb-.*", container="sbdb"} / 1024 / 1024 / 1024 > 20
+      for: 10m
+      labels:
+        severity: major
+        pduuid: P2AR7UQ
+        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/sihGi2DGz/central-southbound-db
+      annotations:
+       message: |
+         Pod ovn-kubernetes/ {{ $labels.pod }} OVN_Southbound DB pod memory consumption crossed critical threshold and now at {{ printf "%.2f" $value }} GB
+
     - alert: OvnSBDBDbSize
       expr: |
         rate(ovn_db_db_size_bytes{namespace="ovn-kubernetes", job="ovnkube-node", db_name="OVN_Southbound"}[15m]) * 5 * 60 / 1024 / 1024 > 40
@@ -400,6 +456,42 @@ spec:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} OVN_Southbound DB size is increasing
          {{ printf "%.2f" $value }} MB / 5 minutes
+
+    - alert: OvnNBDBMemoryConsumptionUnusuallyHigh
+      expr: |
+        container_memory_usage_bytes{job="kubelet", namespace="ovn-kubernetes", pod=~"^ovn-nbdb-.*", container="nbdb"} / 1024 / 1024 / 1024 > 5
+      for: 10m
+      labels:
+        severity: warning
+        pduuid: P2AR7UQ
+        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UUPXlpvGk/central-northbound-db
+      annotations:
+       message: |
+         Pod ovn-kubernetes/ {{ $labels.pod }} OVN_Northbound DB pod memory consumption crossed warning threshold and now at {{ printf "%.2f" $value }} GB
+
+    - alert: OvnNBDBMemoryConsumptionTooHigh
+      expr: |
+        container_memory_usage_bytes{job="kubelet", namespace="ovn-kubernetes", pod=~"^ovn-nbdb-.*", container="nbdb"} / 1024 / 1024 / 1024 > 7
+      for: 10m
+      labels:
+        severity: minor
+        pduuid: P2AR7UQ
+        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UUPXlpvGk/central-northbound-db
+      annotations:
+       message: |
+         Pod ovn-kubernetes/ {{ $labels.pod }} OVN_Northbound DB pod memory consumption crossed threshold and now at {{ printf "%.2f" $value }} GB
+
+    - alert: OvnNBDBMemoryConsumptionCriticallyHigh
+      expr: |
+        container_memory_usage_bytes{job="kubelet", namespace="ovn-kubernetes", pod=~"^ovn-nbdb-.*", container="nbdb"} / 1024 / 1024 / 1024 > 10
+      for: 10m
+      labels:
+        severity: major
+        pduuid: P2AR7UQ
+        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UUPXlpvGk/central-northbound-db
+      annotations:
+       message: |
+         Pod ovn-kubernetes/ {{ $labels.pod }} OVN_Northbound DB pod memory consumption crossed critical threshold and now at {{ printf "%.2f" $value }} GB
 
     - alert: OvnNBDBDbSize
       expr: |
