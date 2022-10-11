@@ -341,7 +341,6 @@ ovsdb-raft() {
       echo "Cluster already exists for DB: ${db}"
       run_as_ovs_user_if_needed nice -n ${sched_priority} \
       ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
-      --ovsdb-disable-file-column-diff=yes \
       --db-${db}-cluster-local-addr=$(bracketify ${ovn_db_host}) --db-${db}-cluster-remote-addr=${init_ip} \
       --db-${db}-cluster-local-port=${raft_port} --db-${db}-cluster-remote-port=${raft_port} \
       --db-${db}-cluster-local-proto=${transport} --db-${db}-cluster-remote-proto=${transport} \
@@ -353,7 +352,6 @@ ovsdb-raft() {
         echo "Cluster does not exist for DB: ${db}, creating new raft cluster"
         run_as_ovs_user_if_needed nice -n ${sched_priority} \
         ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
-        --ovsdb-disable-file-column-diff=yes \
         --db-${db}-cluster-local-addr=$(bracketify ${ovn_db_host}) \
         --db-${db}-cluster-local-port=${raft_port} \
         --db-${db}-cluster-local-proto=${transport} \
@@ -365,7 +363,6 @@ ovsdb-raft() {
         wait_for_event cluster_exists ${db} ${port}
         run_as_ovs_user_if_needed nice -n ${sched_priority} \
         ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
-        --ovsdb-disable-file-column-diff=yes \
         --db-${db}-cluster-local-addr=$(bracketify ${ovn_db_host}) --db-${db}-cluster-remote-addr=${init_ip} \
         --db-${db}-cluster-local-port=${raft_port} --db-${db}-cluster-remote-port=${raft_port} \
         --db-${db}-cluster-local-proto=${transport} --db-${db}-cluster-remote-proto=${transport} \
@@ -381,7 +378,6 @@ ovsdb-raft() {
     #     in the db
     run_as_ovs_user_if_needed nice -n ${sched_priority} \
     ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
-    --ovsdb-disable-file-column-diff=yes \
     --db-${db}-cluster-local-addr=[${ovn_db_host}] \
     --db-${db}-cluster-local-port=${raft_port} \
     --db-${db}-cluster-local-proto=${transport} \
