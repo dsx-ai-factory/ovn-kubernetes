@@ -552,7 +552,7 @@ build_ovn_image() {
     . /tmp/latest-sdn-version-tags/versions
     NGN21_OVS_L2_VER="-${NGN21_OVS}"
     NGN21_OVN_L2_VER="-${NGN21_OVN}"
-    $OCI_BIN build -t "${OVN_IMAGE}" --build-arg OVS_VER=${NGN21_OVS_L2_VER} --build-arg OVN_VER=${NGN21_OVN_L2_VER} --no-cache .
+    $OCI_BIN build -t "${OVN_IMAGE}" --build-arg ARTIFACTORY_CERT=${JFROG_CREDENTIAL} --build-arg OVS_VER=${NGN21_OVS_L2_VER} --build-arg OVN_VER=${NGN21_OVN_L2_VER} --no-cache .
 
     # store in local registry
     if [ "$KIND_LOCAL_REGISTRY" == true ];then
