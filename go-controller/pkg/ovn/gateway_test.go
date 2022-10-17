@@ -333,7 +333,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			sctpSupport := false
 
 			var err error
-			fakeOvn.controller.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
+			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			err = fakeOvn.controller.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
@@ -390,7 +390,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			sctpSupport := false
 
 			var err error
-			fakeOvn.controller.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
+			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			err = fakeOvn.controller.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
@@ -446,7 +446,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			sctpSupport := false
 
 			var err error
-			fakeOvn.controller.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
+			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			err = fakeOvn.controller.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
@@ -503,7 +503,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			config.Gateway.DisableSNATMultipleGWs = true
 
 			var err error
-			fakeOvn.controller.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
+			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			err = fakeOvn.controller.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
@@ -585,7 +585,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			sctpSupport := false
 
 			var err error
-			fakeOvn.controller.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
+			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			err = fakeOvn.controller.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)

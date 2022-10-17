@@ -305,6 +305,13 @@ func (oc *Controller) StartClusterMaster() error {
 
 // SetupMaster creates the central router and load-balancers for the network
 func (oc *Controller) SetupMaster(ovnManagedNodeNames []string) error {
+	// Create default Control Plane Protection (COPP) entry for routers
+	var err error
+	oc.defaultCOPPUUID, err = EnsureDefaultCOPP(oc.mc.nbClient)
+	if err != nil {
+		return fmt.Errorf("unable to create router control plane protection: %w", err)
+	}
+
 	clusterRouterName := oc.nadInfo.Prefix + types.OVNClusterRouter
 
 	// Create a single common distributed router for the cluster.
@@ -316,6 +323,7 @@ func (oc *Controller) SetupMaster(ovnManagedNodeNames []string) error {
 		Options: map[string]string{
 			"always_learn_from_arp_request": "false",
 		},
+		Copp: &oc.defaultCOPPUUID,
 	}
 	if oc.nadInfo.IsSecondary {
 		logicalRouter.ExternalIDs["network_name"] = oc.nadInfo.NetName
@@ -324,7 +332,7 @@ func (oc *Controller) SetupMaster(ovnManagedNodeNames []string) error {
 		logicalRouter.Options["mcast_relay"] = "true"
 	}
 
-	err := libovsdbops.CreateOrUpdateLogicalRouter(oc.mc.nbClient, &logicalRouter)
+	err = libovsdbops.CreateOrUpdateLogicalRouter(oc.mc.nbClient, &logicalRouter)
 	if err != nil {
 		return fmt.Errorf("failed to create a single common distributed router for the cluster network %s, error: %v", oc.nadInfo.NetName, err)
 	}
@@ -441,11 +449,6 @@ func (oc *Controller) SetupMaster(ovnManagedNodeNames []string) error {
 	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.mc.nbClient, &sw, &logicalSwitchPort)
 	if err != nil {
 		return fmt.Errorf("failed to create logical switch port %+v and switch %s: %v", logicalSwitchPort, types.OVNJoinSwitch, err)
-	}
-
-	// Create default gateway Control Plane Protection (COPP) entry for gateway routers
-	if oc.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(oc.mc.nbClient); err != nil {
-		return fmt.Errorf("unable to create gateway router control plane protection: %w", err)
 	}
 
 	return nil
