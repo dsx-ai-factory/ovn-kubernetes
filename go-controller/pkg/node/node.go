@@ -1098,7 +1098,7 @@ func (n *OvnNode) WatchEndpointSlices(nodeIP string) error {
 			for _, port := range endpointSlice.Ports {
 				for _, endpoint := range endpointSlice.Endpoints {
 					for _, ip := range endpoint.Addresses {
-						klog.V(5).Infof("Endpoint address is %s and NodeIP is %s for port %d/%s",
+						klog.V(7).Infof("Endpoint address is %s and NodeIP is %s for port %d/%s",
 							ip, nodeIP, *port.Port, *port.Protocol)
 						if nodeIP == ip && !skipFirewalldAnnotation {
 							err := removePortFromFirewallZone(ovnFirewallZone,
@@ -1134,7 +1134,7 @@ func addEPSliceToFirewallZone(nodeIP string, endpointSlice *discovery.EndpointSl
 	for _, port := range endpointSlice.Ports {
 		for _, endpoint := range endpointSlice.Endpoints {
 			for _, ip := range endpoint.Addresses {
-				klog.V(5).Infof("Endpoint address is %s and NodeIP is %s for port  %d/%s",
+				klog.V(7).Infof("Endpoint address is %s and NodeIP is %s for port %d/%s",
 					ip, nodeIP, *port.Port, *port.Protocol)
 				if nodeIP != ip {
 					continue
@@ -1312,7 +1312,7 @@ func updateEndpointSlice(nodeIP string, skipFirewalldAnnotation bool,
 		for _, port := range newEndpointSlice.Ports {
 			for _, endpoint := range newEndpointSlice.Endpoints {
 				for _, ip := range endpoint.Addresses {
-					klog.V(5).Infof("Endpoint address is %s and nodeIP is %s for port %d/%s",
+					klog.V(7).Infof("Endpoint address is %s and NodeIP is %s for port %d/%s",
 						ip, nodeIP, *port.Port, *port.Protocol)
 					if nodeIP != ip {
 						continue
