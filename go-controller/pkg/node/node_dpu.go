@@ -12,6 +12,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
@@ -252,6 +253,15 @@ func (nc *ovnNodeController) updatePodDPUConnStatusWithRetry(kube kube.Interface
 	return nil
 }
 
+func isNadForPodClampedDown(podAnnotation map[string]string, nadName string) bool {
+	if status, err := util.UnmarshalPodDPUConnStatus(podAnnotation, nadName); err == nil {
+		if status.Status == util.DPUConnectionStatusClampedDown {
+			return true
+		}
+	}
+	return false
+}
+
 // addRepPort adds the representor of the VF to the ovs bridge
 func (nc *ovnNodeController) addRepPort(pod *kapi.Pod, dpuCD *util.DPUConnectionDetails, ifInfo *cni.PodInterfaceInfo, podLister corev1listers.PodLister, kclient kubernetes.Interface) error {
 	nadName := ifInfo.NadName
@@ -261,6 +271,7 @@ func (nc *ovnNodeController) addRepPort(pod *kapi.Pod, dpuCD *util.DPUConnection
 		klog.Infof("Failed to get rep name of %s dpuConnDetail +%v: %v", podDesc, dpuCD, err)
 		return err
 	}
+	dpuCD.ConnPrivateInfo.ConnVFRepName = vfRepName
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -304,7 +315,32 @@ func (nc *ovnNodeController) addRepPort(pod *kapi.Pod, dpuCD *util.DPUConnection
 		// Failed to find the per nad configuration
 		return fmt.Errorf("failed to find nad configuration for %s", nadName)
 	}
-	maxNewConnPPS, maxNewConnBurst := nadConf.GetMissRateLimitConfig(nc.node.hostType)
+	// Update connection-status annotation
+	// TODO(adrianc): we should update Status in case of error as well
+	connStatus := util.DPUConnectionStatus{Status: util.DPUConnectionStatusReady, Reason: ""}
+	maxNewConnPPS, maxNewConnBurst, disableDoSCheck := nadConf.GetMissRateLimitConfig(nc.node.hostType)
+	if maxNewConnPPS > 0 && !disableDoSCheck {
+		dpuCD.ConnPrivateInfo.MissRateDoSCheck = true
+		//
+		// We use the Pod annotation to see if it is clamped down for this NAD instead of checking the existing
+		// value on the VF. Reason being if the DPU reboots, we'll lose the VF configuration so we can't rely
+		// on that.
+		nadClampedDown := isNadForPodClampedDown(pod.Annotations, ifInfo.NadName)
+		if nadClampedDown {
+			maxNewConnPPS = ClampdownDoSRate
+			maxNewConnBurst = ClampdownDoSBurst
+			dpuCD.ConnPrivateInfo.ConnClampedDown = true
+			connStatus = util.DPUConnectionStatus{Status: util.DPUConnectionStatusClampedDown, Reason: ""}
+		} else {
+			// Collect the drop statistics so we can initialize it.
+			if dpuCD.ConnPrivateInfo.MissRateLimitDropInitial, err = util.GetSriovnetOps().GetRepresentorVFMissPktDrops(vfRepName); err != nil {
+				_ = nc.delRepPort(pod, dpuCD, vfRepName, nadName, podDesc)
+				return fmt.Errorf("failed to get initial Miss RL drops for %s dpuConnDetail +%v: %v", podDesc, dpuCD, err)
+			} else {
+				klog.V(5).Infof("DoS: Initial Drop limit for VF representor %s for %s: %v", vfRepName, podDesc, dpuCD.ConnPrivateInfo.MissRateLimitDropInitial)
+			}
+		}
+	}
 	klog.Infof("Adding Limit %v/%v for VF representor %s for %s", maxNewConnPPS, maxNewConnBurst, vfRepName, podDesc)
 	// set the VF rate limit configured for this network. This rate is for the allowed no. of new connections.
 	if err = util.GetSriovnetOps().SetRepresentorVFMissPktRate(vfRepName, maxNewConnPPS, maxNewConnBurst); err != nil {
@@ -333,9 +369,6 @@ func (nc *ovnNodeController) addRepPort(pod *kapi.Pod, dpuCD *util.DPUConnection
 	} else {
 		klog.Infof("XDP not needed for pod %s/%s network %s", pod.Namespace, pod.Name, ifInfo.NadName)
 	}
-	// Update connection-status annotation
-	// TODO(adrianc): we should update Status in case of error as well
-	connStatus := util.DPUConnectionStatus{Status: util.DPUConnectionStatusReady, Reason: ""}
 	err = nc.updatePodDPUConnStatusWithRetry(nc.node.Kube, pod, &connStatus, nadName)
 	if err != nil {
 		_ = util.GetNetLinkOps().LinkSetDown(link)
@@ -413,16 +446,26 @@ func (nc *ovnNodeController) delRepPort(pod *kapi.Pod, dpuCD *util.DPUConnection
 }
 
 func (nc *ovnNodeController) updateNADConfig(key string, newConfig *util.NadConfig) error {
+	enableChecker := false
+	klog.Infof("DoS check : updating for %s", key)
 	val, found := nc.nadInfo.NetAttachDefs.Load(key)
 	if !found {
 		return fmt.Errorf("NadConfig %s not found in cache", key)
 	}
 	oldConfig := val.(*util.NadConfig)
 	oldConfig.Lock()
-	defer oldConfig.Unlock()
+	// Enabling Rate limit for this NAD, check if the controller has the checker running
+	if oldConfig.MaxNewConnPPS == 0 && newConfig.MaxNewConnPPS > 0 {
+		enableChecker = true
+	}
 	oldConfig.MaxNewConnBurst = newConfig.MaxNewConnBurst
 	oldConfig.MaxNewConnPPS = newConfig.MaxNewConnPPS
 	oldConfig.HostTypes = newConfig.HostTypes
+	oldConfig.DisableDoSCheck = newConfig.DisableDoSCheck
+	oldConfig.Unlock()
+	if enableChecker {
+		nc.enableDoSChecker()
+	}
 	return nil
 }
 
@@ -448,15 +491,130 @@ func (nc *ovnNodeController) updateRateLimitingForPod(pod *kapi.Pod, nadKey stri
 		// Failed to find the per nad configuration
 		return fmt.Errorf("failed to find nad configuration for %s", nadKey)
 	}
-	vfRepName, err := util.GetSriovnetOps().GetVfRepresentorDPU(connDetail.PfId, connDetail.VfId)
-	if err != nil {
-		klog.Errorf("Failed to look up vf representor by %s/%s: %v", connDetail.PfId, connDetail.VfId, err)
-		return err
+	vfRepName := connDetail.ConnPrivateInfo.ConnVFRepName
+	maxNewConnPPS, maxNewConnBurst, disableDoSCheck := nadConfig.GetMissRateLimitConfig(nc.node.hostType)
+	if !disableDoSCheck && connDetail.ConnPrivateInfo.ConnClampedDown {
+		klog.V(5).Infof("Skip setting limit for VF representor %s/%s/%s on NAD %s since it is clamped down", pod.Namespace, pod.Name, vfRepName, nadKey)
+		return nil
 	}
-	maxNewConnPPS, maxNewConnBurst := nadConfig.GetMissRateLimitConfig(nc.node.hostType)
-	if err = util.GetSriovnetOps().SetRepresentorVFMissPktRate(vfRepName, maxNewConnPPS, maxNewConnBurst); err != nil {
+	err := util.GetSriovnetOps().SetRepresentorVFMissPktRate(vfRepName, maxNewConnPPS, maxNewConnBurst)
+	if err != nil {
 		return fmt.Errorf("failed to update Rate limiting (%d/%d) for interface %s: %v", maxNewConnPPS, maxNewConnBurst, vfRepName, err)
+	}
+	// Disable doscheck, and lift the clampdown, if needed.
+	if connDetail.ConnPrivateInfo.MissRateDoSCheck && disableDoSCheck {
+		connDetail.ConnPrivateInfo.MissRateDoSCheck = false
+		if connDetail.ConnPrivateInfo.ConnClampedDown {
+			connDetail.ConnPrivateInfo.ConnClampedDown = false
+			connStatus := util.DPUConnectionStatus{Status: util.DPUConnectionStatusReady, Reason: ""}
+			err = nc.updatePodDPUConnStatusWithRetry(nc.node.Kube, pod, &connStatus, nadKey)
+			if err != nil {
+				klog.Errorf("Failed to update connection status annotation the pod %s/%s: %v", pod.Namespace, pod.Name, err)
+			}
+		}
+		// Enable doscheck, if needed.
+	} else if !disableDoSCheck && !connDetail.ConnPrivateInfo.MissRateDoSCheck {
+		// Collect the drop statistics so we can initialize it. We could do it when the
+		// rep was added regardless of disableDoSCheck and use that to determine if the
+		// interface needs to be clamped, but given we enable disableDoSCheck here, we might
+		// want to start accounting from now. Note, if we fail to get drop count we'll
+		// flag an error and not set doSCheck, otherwise if the drop count is non-0,
+		// we'll clamp down the interface right away.
+		if connDetail.ConnPrivateInfo.MissRateLimitDropInitial, err = util.GetSriovnetOps().GetRepresentorVFMissPktDrops(vfRepName); err != nil {
+			klog.Errorf("Failed to get initial Miss RL drops for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+		} else {
+			connDetail.ConnPrivateInfo.MissRateDoSCheck = true
+			klog.Infof("DoS: Initial Drop limit for VF representor %s for %s/%s: %v", vfRepName, pod.Namespace, pod.Name, connDetail.ConnPrivateInfo.MissRateLimitDropInitial)
+		}
 	}
 	klog.V(4).Infof("Rate limit of %s/%s/%s updated to %v/%v based on NAD %s", pod.Namespace, pod.Name, vfRepName, maxNewConnPPS, maxNewConnBurst, nadKey)
 	return nil
+}
+
+// Caller has lock on the interested pod
+// Walk the pods and get the pod with the interested uid
+func (nc *ovnNodeController) getPodforUID(uid types.UID) (*kapi.Pod, error) {
+	// informer cache has pods filtered by node name
+	pods, err := nc.node.watchFactory.GetAllPods()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pods: %v", err)
+	}
+	for _, pod := range pods {
+		if pod.UID == uid {
+			return pod, nil
+		}
+	}
+	return nil, fmt.Errorf("failed to get pod with uid %v: %v", uid, err)
+}
+
+// Check the pods served by this controller, and if the drop count has incremented
+// clampdown the VF (LinkSetDown makes sense, but we could get some mileage with
+// clampdown, which will still let offloaded traffic to contine, so it is not
+// completely stopping the interface).
+func (nc *ovnNodeController) checkPodForDoS(uid types.UID, connDetails map[string]*util.DPUConnectionDetails) {
+	for nadName, dpuCD := range connDetails {
+		if !dpuCD.ConnPrivateInfo.MissRateDoSCheck || dpuCD.ConnPrivateInfo.ConnClampedDown {
+			continue
+		}
+		vfRepName := dpuCD.ConnPrivateInfo.ConnVFRepName
+		newDrop, err := util.GetSriovnetOps().GetRepresentorVFMissPktDrops(vfRepName)
+		if err != nil {
+			klog.Errorf("Failed to get drop Count for representor %s for dpuConnDetail %+v.", vfRepName, dpuCD, err)
+			continue
+		}
+		prevDrop := dpuCD.ConnPrivateInfo.MissRateLimitDropInitial
+		klog.V(5).Infof("DoS: Drop VF representor %s: old (%v); current(%v)", vfRepName, prevDrop, newDrop)
+		// DoS Suspect, clampdown the VF. Alternatively, we can bring down the interface or
+		// do something more drastic, this is a simple first step, and we can improve on
+		// this as we have more experience.
+		if newDrop > prevDrop {
+			// Get the corresponding pod to update it's connection status; slightly inefficient, but
+			// this is an infrequent operation.
+			// In case of failure, just log an error, no point failing.
+			pod, err := nc.getPodforUID(uid)
+			if err != nil {
+				klog.Errorf("Failed to find pod with %v to update connection status: %v", uid, err)
+				continue
+			}
+			klog.V(5).Infof("Clamping down Limit to 1/1 for VF representor %s", vfRepName)
+			// We can do this only if it not already clampeddown (based on annotation), but if the
+			// value is somehow reset outside this service, there'll be a mismatch, so we can just
+			// do this even if it may be redundant. We could get the value and check, but might
+			// be easier just to set it, regardless.
+			// set the VF rate limit configured for this network. This rate is for the allowed no. of new connections.
+			if err = util.GetSriovnetOps().SetRepresentorVFMissPktRate(vfRepName, ClampdownDoSRate, ClampdownDoSBurst); err != nil {
+				klog.Errorf("Failed to Clamp down rate for Representor %s for dpuConnDetail %+v.", vfRepName, dpuCD, err)
+				continue
+			}
+			dpuCD.ConnPrivateInfo.ConnClampedDown = true
+			connStatus := util.DPUConnectionStatus{Status: util.DPUConnectionStatusClampedDown, Reason: ""}
+			err = nc.updatePodDPUConnStatusWithRetry(nc.node.Kube, pod, &connStatus, nadName)
+			// If this  fails, then the rate is already adjusted, so there'll be a mismatch.
+			if err != nil {
+				klog.Errorf("Failed to update connection status annotation the pod %s/%s: %v", pod.Namespace, pod.Name, err)
+			}
+		}
+	}
+}
+
+// XXX-Check in the context of concurrent delete in servedPods
+//
+// Range does not necessarily correspond to any consistent snapshot of the Map's contents:
+// no key will be visited more than once, but if the value for any key is stored or deleted
+// concurrently (including by f), Range may reflect any mapping for that key from any point
+// during the Range call. Range does not block other methods on the receiver; even f itself
+// may call any method on m.
+
+// Alternatively, we could do this per-node; go thru pods and walk thru all the controllers;
+// that seems a bit inefficient.
+
+func (nc *ovnNodeController) checkforDoSSuspects() {
+	nc.servedPods.Range(func(key, val interface{}) bool {
+		podUID := key.(types.UID)
+		unlock := util.LockByKey.Acquire(string(podUID))
+		connDetails := val.(map[string]*util.DPUConnectionDetails)
+		nc.checkPodForDoS(podUID, connDetails)
+		unlock()
+		return true
+	})
 }

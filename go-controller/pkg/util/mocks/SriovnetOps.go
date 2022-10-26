@@ -269,10 +269,10 @@ func (_m *SriovnetOps) GetRepresentorVFMissPktDrops(netdev string) (uint64, erro
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(2).(func(string) error); ok {
+	if rf, ok := ret.Get(1).(func(string) error); ok {
 		r1 = rf(netdev)
 	} else {
-		r1 = ret.Error(2)
+		r1 = ret.Error(1)
 	}
 
 	return r0, r1

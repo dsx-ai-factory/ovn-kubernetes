@@ -70,6 +70,7 @@ var (
 		RawClusterSubnets:     "10.128.0.0/14/23",
 		EncapToSValue:         "none",
 		DisableCTInvFlows:     false,
+		DoSCheckInterval:      100, // in Milliseconds
 	}
 
 	// Logging holds logging-related parsed config file parameters and command-line overrides
@@ -237,6 +238,8 @@ type DefaultConfig struct {
 	// of small UDP packets by allowing them to be aggregated before passing through
 	// the kernel network stack. This requires a new-enough kernel (5.15 or RHEL 8.5).
 	EnableUDPAggregation bool `gcfg:"enable-udp-aggregation"`
+	// Periodic checks to see if a Pod is potentially source of DoS attack
+	DoSCheckInterval int `gcfg:"dos-check-interval"`
 }
 
 // LoggingConfig holds logging-related parsed config file parameters and command-line overrides
@@ -822,6 +825,12 @@ var CommonFlags = []cli.Flag{
 		Usage:       "The knob to disable CT Inv flows in the north",
 		Destination: &cliConfig.Default.DisableCTInvFlows,
 		Value:       Default.DisableCTInvFlows,
+	},
+	&cli.IntFlag{
+		Name:        "dos-check-interval",
+		Usage:       "Interval in milliseconds to check if any Pod is a source of DoS attack",
+		Destination: &cliConfig.Default.DoSCheckInterval,
+		Value:       Default.DoSCheckInterval,
 	},
 }
 

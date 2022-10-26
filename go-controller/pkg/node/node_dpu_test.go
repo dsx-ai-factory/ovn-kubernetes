@@ -167,6 +167,8 @@ var _ = Describe("Node DPU tests", func() {
 			// set pod annotations
 			pod.Annotations = podAnnot
 			sriovnetOpsMock.On("SetRepresentorVFMissPktRate", vfRep, uint(0), uint(0)).Return(nil)
+			sriovnetOpsMock.On("GetRepresentorVFMissPktDrops", vfRep).Return(uint64(0), nil)
+			sriovnetOpsMock.On("GetRepresentorVFMissPktRate", vfRep).Return(uint64(0), uint64(0), nil)
 		})
 
 		It("Fails if GetVfRepresentorDPU fails", func() {

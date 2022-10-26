@@ -46,7 +46,21 @@ const (
 
 	DPUConnectionStatusReady = "Ready"
 	DPUConnectionStatusError = "Error"
+	// maybe use uint so we can check status > some state
+	DPUConnectionStatusClampedDown = "ClampedDown"
 )
+
+// Private info per connection
+// Currently used to keep information about the interface w.r.t
+// miss rl config.. specifically, whether DoS check is enabled,
+// the initial drop count when DoS check was enabled,
+// and the device name (rep) name.
+type DPUConnPrivateInfo struct {
+	MissRateLimitDropInitial uint64
+	MissRateDoSCheck         bool
+	ConnVFRepName            string
+	ConnClampedDown          bool
+}
 
 type DPUConnectionDetails struct {
 	PfId         string `json:"pfId"`
@@ -54,6 +68,8 @@ type DPUConnectionDetails struct {
 	PfMAC        string `json:"pfMac,omitempty"`
 	SandboxId    string `json:"sandboxId"`
 	VfNetdevName string `json:"vfNetdevName,omitempty"`
+	// Private connection info.
+	ConnPrivateInfo DPUConnPrivateInfo
 }
 
 type DPUConnectionStatus struct {
