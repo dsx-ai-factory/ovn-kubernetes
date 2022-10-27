@@ -621,18 +621,6 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 	}
 
 	if config.OvnKubeNode.Mode != types.NodeModeDPU {
-		// conditionally write cni config file
-		confFile := filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
-		_, err = os.Stat(confFile)
-		if os.IsNotExist(err) {
-			err = config.WriteCNIConfig()
-			if err != nil {
-				return err
-			}
-		} else if err != nil {
-			return fmt.Errorf("failed while checking whether to write CNI config file or not for node %q: %v",
-				node.Name, err)
-		}
 		var nodeIP string
 		nodeIP, err = util.GetNodePrimaryIP(node)
 		if err != nil {
@@ -711,9 +699,17 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 			return err
 		}
 
-		// Write CNI config file if it doesn't already exist
-		if err := config.WriteCNIConfig(); err != nil {
-			return err
+		// conditionally write cni config file
+		confFile := filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
+		_, err = os.Stat(confFile)
+		if os.IsNotExist(err) {
+			err = config.WriteCNIConfig()
+			if err != nil {
+				return err
+			}
+		} else if err != nil {
+			return fmt.Errorf("failed while checking whether to write CNI config file or not for node %q: %v",
+				node.Name, err)
 		}
 	}
 
