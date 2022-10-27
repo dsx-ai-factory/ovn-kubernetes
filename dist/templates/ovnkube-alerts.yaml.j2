@@ -368,6 +368,16 @@ spec:
       annotations:
        message: There is no running ovn-nbdb leader
 
+    - alert: OvnNBDBRaftTermChange
+      expr: rate(ovn_db_cluster_term{db_name="OVN_Northbound"}[5m]) != 0
+      for: 1m
+      labels:
+        severity: warning
+        pduuid: P2AR7UQ
+        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UUPXlpvGk/central-northbound-db
+      annotations:
+       message: NBDB RAFT term change detected
+
     - alert: OvnSBDBMultipleLeaders
       expr: sum(ovn_db_cluster_server_role{db_name="OVN_Southbound",server_role="leader"}) > 1
       for: 4m
@@ -388,6 +398,52 @@ spec:
       annotations:
        message: There is no running ovn-sbdb leader
 
+    - alert: OvnSBDBRaftTermChange
+      expr: rate(ovn_db_cluster_term{db_name="OVN_Southbound"}[5m]) != 0
+      for: 4m
+      labels:
+        severity: warning
+        pduuid: P2AR7UQ
+        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/sihGi2DGz/central-southbound-db
+      annotations:
+       message: SBDB RAFT term change detected
+
+    - alert: OvnSBDBMemoryConsumptionUnusuallyHigh
+      expr: |
+        container_memory_usage_bytes{job="kubelet", namespace="ovn-kubernetes", pod=~"^ovn-sbdb-.*", container="sbdb"} / 1024 / 1024 / 1024 > 10
+      for: 10m
+      labels:
+        severity: warning
+        pduuid: P2AR7UQ
+        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/sihGi2DGz/central-southbound-db
+      annotations:
+       message: |
+         Pod ovn-kubernetes/ {{ $labels.pod }} OVN_Southbound DB pod memory consumption crossed warning threshold and now at {{ printf "%.2f" $value }} GB
+
+    - alert: OvnSBDBMemoryConsumptionTooHigh
+      expr: |
+        container_memory_usage_bytes{job="kubelet", namespace="ovn-kubernetes", pod=~"^ovn-sbdb-.*", container="sbdb"} / 1024 / 1024 / 1024 > 15
+      for: 10m
+      labels:
+        severity: minor
+        pduuid: P2AR7UQ
+        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/sihGi2DGz/central-southbound-db
+      annotations:
+       message: |
+         Pod ovn-kubernetes/ {{ $labels.pod }} OVN_Southbound DB pod memory consumption crossed threshold and now at {{ printf "%.2f" $value }} GB
+
+    - alert: OvnSBDBMemoryConsumptionCriticallyHigh
+      expr: |
+        container_memory_usage_bytes{job="kubelet", namespace="ovn-kubernetes", pod=~"^ovn-sbdb-.*", container="sbdb"} / 1024 / 1024 / 1024 > 20
+      for: 10m
+      labels:
+        severity: major
+        pduuid: P2AR7UQ
+        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/sihGi2DGz/central-southbound-db
+      annotations:
+       message: |
+         Pod ovn-kubernetes/ {{ $labels.pod }} OVN_Southbound DB pod memory consumption crossed critical threshold and now at {{ printf "%.2f" $value }} GB
+
     - alert: OvnSBDBDbSize
       expr: |
         rate(ovn_db_db_size_bytes{namespace="ovn-kubernetes", job="ovnkube-node", db_name="OVN_Southbound"}[15m]) * 5 * 60 / 1024 / 1024 > 40
@@ -400,6 +456,42 @@ spec:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} OVN_Southbound DB size is increasing
          {{ printf "%.2f" $value }} MB / 5 minutes
+
+    - alert: OvnNBDBMemoryConsumptionUnusuallyHigh
+      expr: |
+        container_memory_usage_bytes{job="kubelet", namespace="ovn-kubernetes", pod=~"^ovn-nbdb-.*", container="nbdb"} / 1024 / 1024 / 1024 > 5
+      for: 10m
+      labels:
+        severity: warning
+        pduuid: P2AR7UQ
+        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UUPXlpvGk/central-northbound-db
+      annotations:
+       message: |
+         Pod ovn-kubernetes/ {{ $labels.pod }} OVN_Northbound DB pod memory consumption crossed warning threshold and now at {{ printf "%.2f" $value }} GB
+
+    - alert: OvnNBDBMemoryConsumptionTooHigh
+      expr: |
+        container_memory_usage_bytes{job="kubelet", namespace="ovn-kubernetes", pod=~"^ovn-nbdb-.*", container="nbdb"} / 1024 / 1024 / 1024 > 7
+      for: 10m
+      labels:
+        severity: minor
+        pduuid: P2AR7UQ
+        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UUPXlpvGk/central-northbound-db
+      annotations:
+       message: |
+         Pod ovn-kubernetes/ {{ $labels.pod }} OVN_Northbound DB pod memory consumption crossed threshold and now at {{ printf "%.2f" $value }} GB
+
+    - alert: OvnNBDBMemoryConsumptionCriticallyHigh
+      expr: |
+        container_memory_usage_bytes{job="kubelet", namespace="ovn-kubernetes", pod=~"^ovn-nbdb-.*", container="nbdb"} / 1024 / 1024 / 1024 > 10
+      for: 10m
+      labels:
+        severity: major
+        pduuid: P2AR7UQ
+        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UUPXlpvGk/central-northbound-db
+      annotations:
+       message: |
+         Pod ovn-kubernetes/ {{ $labels.pod }} OVN_Northbound DB pod memory consumption crossed critical threshold and now at {{ printf "%.2f" $value }} GB
 
     - alert: OvnNBDBDbSize
       expr: |
@@ -636,6 +728,19 @@ spec:
          Noticed higher than 20MiB/s RX rates without offload on the host with pod ovn-kubernetes/ {{ $labels.pod }}
          instance {{ $labels.instance }} port {{ $labels.port }} interface {{ $labels.interface }} for longer than 5m
 
+    - alert: OvsMegaFlowsTotalUnusuallyHigh
+      expr: |
+        (ovs_vswitchd_dp_offloaded_flows_total + ovs_vswitchd_dp_flows_total) > 10000
+      for: 5m
+      labels:
+       severity: warning
+       pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
+      annotations:
+       message: |
+         Noticed unusually high number {{ $value }} of fast-path flows on the host with
+         pod ovn-kubernetes/ {{ $labels.pod }} instance {{ $labels.instance }} for longer than 5m
+
     - alert: OvsTxRateLimitDropsUnusuallyHigh
       expr: |
         rate(ovs_vswitchd_interface_tx_misspkts_packets_drops[5m]) > 40
@@ -664,29 +769,29 @@ spec:
 
     - alert: OvsVswitchdDPFlowsLookupLost
       expr: |
-        rate(ovs_vswitchd_dp_flows_lookup_missed{namespace="ovn-kubernetes",job="ovnkube-node"}[1m]) > 1000
-      for: 15m
+        rate(ovs_vswitchd_dp_flows_lookup_lost{namespace="ovn-kubernetes",job="ovnkube-node"}[5m]) > 0
+      for: 5m
       labels:
-       severity: warning
+       severity: major
        pduuid: P2AR7UQ
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
       annotations:
        message: |
-         Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that
-         number of dropped packets that match DP flows is {{ printf "%.2f" $value }} per second.
+         Noticed unusually high rate of slow-path {{ $value }} packets flows lookup lost per second on the host with
+         pod ovn-kubernetes/ {{ $labels.pod }} instance {{ $labels.instance }} for longer than 5m
 
     - alert: OvsVswitchdDPFlowsLookupMissed
       expr: |
-        rate(ovs_vswitchd_dp_flows_lookup_missed{namespace="ovn-kubernetes",job="ovnkube-node"}[1m]) > 1000
-      for: 15m
+        rate(ovs_vswitchd_dp_flows_lookup_missed{namespace="ovn-kubernetes",job="ovnkube-node"}[5m]) > 200
+      for: 5m
       labels:
        severity: warning
        pduuid: P2AR7UQ
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
       annotations:
        message: |
-         Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that
-         number of dropped packets that not-matching DP flows is {{ printf "%.2f" $value }} per second.
+         Noticed unusually high rate of slow-path {{ $value }} packets flows lookup misses per second on the host with
+         pod ovn-kubernetes/ {{ $labels.pod }} instance {{ $labels.instance }} for longer than 5m
 
     - alert: OvsVswitchdInterfaceRxErrors
       expr: |
