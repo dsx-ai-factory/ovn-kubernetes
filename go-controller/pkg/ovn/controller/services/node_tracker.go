@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -70,7 +71,7 @@ func newNodeTracker(nodeInformer coreinformers.NodeInformer) (*nodeTracker, erro
 		nodes: map[string]nodeInfo{},
 	}
 
-	_, err := nodeInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, err := nodeInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node, ok := obj.(*v1.Node)
 			if !ok {
@@ -115,12 +116,11 @@ func newNodeTracker(nodeInformer coreinformers.NodeInformer) (*nodeTracker, erro
 			}
 			nt.removeNodeWithServiceReSync(node.Name)
 		},
-	})
+	}))
 	if err != nil {
 		return nil, err
 	}
 	return nt, nil
-
 }
 
 // updateNodeInfo updates the node info cache, and syncs all services

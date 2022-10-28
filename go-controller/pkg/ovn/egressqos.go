@@ -11,6 +11,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressqosapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
 	egressqosinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions/egressqos/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
@@ -170,11 +171,11 @@ func (oc *Controller) initEgressQoSController(
 		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
 		"egressqos",
 	)
-	_, err := eqInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, err := eqInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    oc.onEgressQoSAdd,
 		UpdateFunc: oc.onEgressQoSUpdate,
 		DeleteFunc: oc.onEgressQoSDelete,
-	})
+	}))
 	if err != nil {
 		return fmt.Errorf("could not add Event Handler for eqInformer during egressqosController initialization, %w", err)
 	}
@@ -185,11 +186,11 @@ func (oc *Controller) initEgressQoSController(
 		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
 		"egressqospods",
 	)
-	_, err = podInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, err = podInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    oc.onEgressQoSPodAdd,
 		UpdateFunc: oc.onEgressQoSPodUpdate,
 		DeleteFunc: oc.onEgressQoSPodDelete,
-	})
+	}))
 	if err != nil {
 		return fmt.Errorf("could not add Event Handler for podInformer during egressqosController initialization, %w", err)
 	}
