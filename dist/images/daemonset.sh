@@ -240,7 +240,7 @@ while [ "$1" != "" ]; do
   --multi-networkpolicy-enable)
     OVN_MULTI_NETWORKPOLICY_ENABLE=$VALUE
     ;;
-  --disabe-ovn-iface-id-ver)
+  --disable-ovn-iface-id-ver)
     OVN_DISABLE_OVN_IFACE_ID_VER=$VALUE
     ;;
   --ovn-nbcert-cname)
