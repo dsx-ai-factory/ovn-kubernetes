@@ -410,7 +410,7 @@ spec:
 
     - alert: OvnSBDBMemoryConsumptionUnusuallyHigh
       expr: |
-        container_memory_usage_bytes{job="kubelet", namespace="ovn-kubernetes", pod=~"^ovn-sbdb-.*", container="sbdb"} / 1024 / 1024 / 1024 > 10
+        container_memory_working_set_bytes{job="kubelet", namespace="ovn-kubernetes", pod=~"^ovn-sbdb-.*", container="sbdb"} / 1024 / 1024 / 1024 > 10
       for: 10m
       labels:
         severity: warning
@@ -422,7 +422,7 @@ spec:
 
     - alert: OvnSBDBMemoryConsumptionTooHigh
       expr: |
-        container_memory_usage_bytes{job="kubelet", namespace="ovn-kubernetes", pod=~"^ovn-sbdb-.*", container="sbdb"} / 1024 / 1024 / 1024 > 15
+        container_memory_working_set_bytes{job="kubelet", namespace="ovn-kubernetes", pod=~"^ovn-sbdb-.*", container="sbdb"} / 1024 / 1024 / 1024 > 15
       for: 10m
       labels:
         severity: minor
@@ -434,7 +434,7 @@ spec:
 
     - alert: OvnSBDBMemoryConsumptionCriticallyHigh
       expr: |
-        container_memory_usage_bytes{job="kubelet", namespace="ovn-kubernetes", pod=~"^ovn-sbdb-.*", container="sbdb"} / 1024 / 1024 / 1024 > 20
+        container_memory_working_set_bytes{job="kubelet", namespace="ovn-kubernetes", pod=~"^ovn-sbdb-.*", container="sbdb"} / 1024 / 1024 / 1024 > 20
       for: 10m
       labels:
         severity: major
@@ -459,7 +459,7 @@ spec:
 
     - alert: OvnNBDBMemoryConsumptionUnusuallyHigh
       expr: |
-        container_memory_usage_bytes{job="kubelet", namespace="ovn-kubernetes", pod=~"^ovn-nbdb-.*", container="nbdb"} / 1024 / 1024 / 1024 > 5
+        container_memory_working_set_bytes{job="kubelet", namespace="ovn-kubernetes", pod=~"^ovn-nbdb-.*", container="nbdb"} / 1024 / 1024 / 1024 > 5
       for: 10m
       labels:
         severity: warning
@@ -471,7 +471,7 @@ spec:
 
     - alert: OvnNBDBMemoryConsumptionTooHigh
       expr: |
-        container_memory_usage_bytes{job="kubelet", namespace="ovn-kubernetes", pod=~"^ovn-nbdb-.*", container="nbdb"} / 1024 / 1024 / 1024 > 7
+        container_memory_working_set_bytes{job="kubelet", namespace="ovn-kubernetes", pod=~"^ovn-nbdb-.*", container="nbdb"} / 1024 / 1024 / 1024 > 7
       for: 10m
       labels:
         severity: minor
@@ -483,7 +483,7 @@ spec:
 
     - alert: OvnNBDBMemoryConsumptionCriticallyHigh
       expr: |
-        container_memory_usage_bytes{job="kubelet", namespace="ovn-kubernetes", pod=~"^ovn-nbdb-.*", container="nbdb"} / 1024 / 1024 / 1024 > 10
+        container_memory_working_set_bytes{job="kubelet", namespace="ovn-kubernetes", pod=~"^ovn-nbdb-.*", container="nbdb"} / 1024 / 1024 / 1024 > 10
       for: 10m
       labels:
         severity: major
