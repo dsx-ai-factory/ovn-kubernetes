@@ -6,17 +6,17 @@ import (
 	"strconv"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/klog"
+	utilnet "k8s.io/utils/net"
+
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
-	"k8s.io/apimachinery/pkg/util/sets"
-	utilnet "k8s.io/utils/net"
 )
 
 // gatewayInit creates a gateway router for the local chassis.
@@ -159,12 +159,21 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 		}
 	}
 
+	node, err := oc.mc.watchFactory.GetNode(nodeName)
+	if err != nil {
+		klog.Errorf("Unable to get node:%s from informer", nodeName)
+		return err
+	}
+
+	physnetNameKey := util.GetPhysNetNameKeyForNode(nodeName, node.Labels)
+	klog.V(5).Infof("AddExternalSwitch NodeName: %s  PhysnetNameKey: %s", nodeName, physnetNameKey)
+
 	if err := oc.addExternalSwitch("",
 		l3GatewayConfig.InterfaceID,
 		nodeName,
 		gatewayRouter,
 		l3GatewayConfig.MACAddress.String(),
-		util.GetPhysNetNameKey(),
+		physnetNameKey,
 		l3GatewayConfig.IPAddresses,
 		l3GatewayConfig.VLANID); err != nil {
 		return err

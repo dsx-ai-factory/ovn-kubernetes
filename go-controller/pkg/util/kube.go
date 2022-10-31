@@ -459,6 +459,20 @@ func GetPhysNetNameKey() string {
 	return types.PhysicalNetworkName
 }
 
+func GetPhysNetNameKeyForNode(nodeName string, labels map[string]string) string {
+	if config.Gateway.PhysNetNameKey != "" {
+		// XXX put a normal comment here
+		if nodeName != "" {
+			if value, ok := labels["k8s.ovn.org/physnet-name-key"]; ok {
+				return value
+			}
+		}
+		// Default behaviour
+		return config.Gateway.PhysNetNameKey
+	}
+	return types.PhysicalNetworkName
+}
+
 var conntrackzone int
 
 func GetConntrackZone() int {
