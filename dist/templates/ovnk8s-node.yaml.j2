@@ -31,9 +31,11 @@ spec:
     spec:
       imagePullSecrets:
         - name: ovncni-quay-ips
-      # Requires fairly broad permissions - ability to read all services and network functions as well
-      # as all pods.
-      serviceAccountName: ovn
+      {%- if ovnkube_app_name=="ovnkube-node" %}
+      serviceAccountName: ovn-node
+      {%- elif ovnkube_app_name=="ovnkube-node-dpu-host" %}
+      serviceAccountName: ovn-node-dpu-host
+      {%- endif %}
       hostNetwork: true
       dnsPolicy: Default
       priorityClassName: "system-node-critical"

@@ -65,7 +65,7 @@ spec:
       terminationGracePeriodSeconds: 30
       imagePullSecrets:
         - name: ovncni-quay-ips
-      serviceAccountName: ovn
+      serviceAccountName: ovn-db
       hostNetwork: true
       dnsPolicy: Default
       priorityClassName: "system-cluster-critical"

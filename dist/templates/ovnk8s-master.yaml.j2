@@ -35,7 +35,7 @@ spec:
         - name: ovncni-quay-ips
       # Requires fairly broad permissions - ability to read all services and network functions as well
       # as all pods.
-      serviceAccountName: ovn
+      serviceAccountName: ovn-master
       hostNetwork: true
       dnsPolicy: Default
       priorityClassName: "system-cluster-critical"
