@@ -96,6 +96,7 @@ OVNKUBE_CONFIG_DURATION_ENABLE=
 # IN_UPGRADE is true only if called by upgrade-ovn.sh during the upgrade test,
 # it will render only the parts in ovn-setup.yaml related to RBAC permissions.
 IN_UPGRADE=
+COREDNS_CLUSTER_IP="10.96.0.10"
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -496,6 +497,8 @@ ovn_sb_enable_leader_xfer_for_snapshot=${OVN_SB_ENABLE_LEADER_XFER_FOR_SNAPSHOT}
 echo "ovn_sb_enable_leader_xfer_for_snapshot: ${ovn_sb_enable_leader_xfer_for_snapshot}"
 ovnkube_config_duration_enable=${OVNKUBE_CONFIG_DURATION_ENABLE}
 echo "ovnkube_config_duration_enable: ${ovnkube_config_duration_enable}"
+coredns_cluster_ip=${COREDNS_CLUSTER_IP}
+echo "coredns_cluster_ip: ${coredns_cluster_ip}"
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -669,6 +672,7 @@ ovn_image=${image} \
   ovn_ipfix_cache_active_timeout=${ovn_ipfix_cache_active_timeout} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
+  coredns_cluster_ip=${coredns_cluster_ip} \
   ovnkube_app_name=ovnkube-node \
   j2 ../templates/ovnk8s-node.yaml.j2 -o ${output_dir}/ovnk8s-node.yaml
 
@@ -699,6 +703,7 @@ ovn_image=${image} \
   ovn_ipfix_cache_active_timeout=${ovn_ipfix_cache_active_timeout} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
+  coredns_cluster_ip=${coredns_cluster_ip} \
   ovnkube_app_name=ovnkube-node-dpu-host \
   j2 ../templates/ovnk8s-node.yaml.j2 -o ${output_dir}/ovnk8s-node-dpu-host.yaml
 

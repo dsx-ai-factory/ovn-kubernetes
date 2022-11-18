@@ -50,6 +50,7 @@ spec:
           # ovnkube-node-probe.sh checks
           # - whether the metrics server is running since it is one of the last things we do,
           # - also checks if we can access KUBERNETES_SERVICE_HOST:KUBERNETES_SERVICE_PORT
+          # - also checks if we can access coredns service
           readinessProbe:
             exec:
               command:
@@ -193,6 +194,8 @@ spec:
               value: "{{ ovn_unprivileged_mode | default('yes') }}"
             - name: OVN_EX_GW_NETWORK_INTERFACE
               value: "{{ ovn_ex_gw_networking_interface }}"
+            - name: COREDNS_CLUSTER_IP
+              value: "{{ coredns_cluster_ip }}"
             {% if ovnkube_app_name=="ovnkube-node" -%}
             - name: OVN_NB_CERT_CNAME
               value: "{{ ovn_nb_cert_cname }}"
