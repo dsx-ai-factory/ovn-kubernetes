@@ -5,6 +5,8 @@ kind: Service
 metadata:
   name: ovn-sbdb
   namespace: ovn-kubernetes
+  annotations:
+    k8s.ovn.org/skip-firewalld: "true"
 spec:
   ports:
     - name: south

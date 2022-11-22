@@ -1197,6 +1197,28 @@ check_firewall_state() {
   fi
 }
 
+
+remove_ovn_firewall_zone_db_ports() {
+  # remove ports 6641/tcp and 6642/tcp if present
+  ports=('6641/tcp' '6642/tcp')
+  for port in ${ports[@]}; do
+    port_enabled=$(firewall-cmd --query-port=$port --zone=ovn)
+    if [[ $port_enabled == "yes" ]]; then
+      echo "Removing port $port from ovn zone."
+      status=$(firewall-cmd --remove-port=$port --zone=ovn)
+      if [[ $status != "success" ]]; then
+        echo "Exiting, Could not remove port $port from ovn zone."
+        exit 1
+      fi
+      status=$(firewall-cmd --remove-port=$port --zone=ovn --permanent)
+      if [[ $status != "success" ]]; then
+        echo "Exiting, Could not remove port $port permanently from ovn zone."
+        exit 1
+      fi
+    fi
+  done
+}
+
 create_ovn_firewall_zone() {
   # if ovn zone is not present, create it and apply it by performing reload
   firewall-cmd --zone=ovn --list-ports >/dev/null
@@ -1214,6 +1236,8 @@ create_ovn_firewall_zone() {
       echo "Exiting, failed to reload the firewalld service"
       exit 1
     fi
+  else
+    remove_ovn_firewall_zone_db_ports
   fi
 
   # block icmp traffic in ovn zone
