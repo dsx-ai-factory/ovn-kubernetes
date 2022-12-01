@@ -1376,7 +1376,7 @@ ovn-node() {
     wait_for_event attempts=20 files_exist ${ovn_controller_pk} ${ovn_controller_cert} ${ovn_ca_cert}
   }
 
-  if [[ ${ovnkube_node_mode} != "dpu" ]] && [[ $(lscpu | grep Architecture | awk '{print$2}') != 'aarch64' ]]; then
+  if [[ ${ovnkube_node_mode} != "dpu" ]]; then
     echo "=============== ovn-node - (check for firewall service status)"
     check_firewall_state
     echo "=============== ovn-node - (create ovn firewall zone)"
