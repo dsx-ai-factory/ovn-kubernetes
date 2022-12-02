@@ -837,6 +837,20 @@ func (o *ovsdbClient) Monitor(ctx context.Context, monitor *Monitor) (MonitorCoo
 	return cookie, o.monitor(ctx, cookie, false, monitor)
 }
 
+// If fields is provided, the request will be constrained to the provided columns
+// If no fields are provided, all columns will be used
+func newMonitorRequest(data *mapper.Info, fields []string) (*ovsdb.MonitorRequest, error) {
+	var columns []string
+	if len(fields) > 0 {
+		columns = append(columns, fields...)
+	} else {
+		for c := range data.Metadata.TableSchema.Columns {
+			columns = append(columns, c)
+		}
+	}
+	return &ovsdb.MonitorRequest{Columns: columns, Select: ovsdb.NewDefaultMonitorSelect()}, nil
+}
+
 //gocyclo:ignore
 // monitor must only be called with a lock on monitorsMutex
 func (o *ovsdbClient) monitor(ctx context.Context, cookie MonitorCookie, reconnecting bool, monitor *Monitor) error {
@@ -861,7 +875,6 @@ func (o *ovsdbClient) monitor(ctx context.Context, cookie MonitorCookie, reconne
 	dbName := cookie.DatabaseName
 	db := o.databases[dbName]
 	db.modelMutex.RLock()
-	mmapper := db.model.Mapper
 	typeMap := db.model.Types()
 	requests := make(map[string]ovsdb.MonitorRequest)
 	for _, o := range monitor.Tables {
@@ -877,7 +890,7 @@ func (o *ovsdbClient) monitor(ctx context.Context, cookie MonitorCookie, reconne
 		if err != nil {
 			return err
 		}
-		request, err := mmapper.NewMonitorRequest(info, o.Fields)
+		request, err := newMonitorRequest(info, o.Fields)
 		if err != nil {
 			return err
 		}
