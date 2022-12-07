@@ -351,7 +351,7 @@ func hasResourceAnUpdateFunc(objType reflect.Type) bool {
 // type considers them equal and therefore no update is needed. It returns false when the two objects are not considered
 // equal and an update needs be executed. This is regardless of how the update is carried out (whether with a dedicated update
 // function or with a delete on the old obj followed by an add on the new obj).
-func areResourcesEqual(objType reflect.Type, obj1, obj2 interface{}) (bool, error) {
+func (oc *Controller) areResourcesEqual(objType reflect.Type, obj1, obj2 interface{}) (bool, error) {
 	// switch based on type
 	switch objType {
 	case factory.PolicyType,
@@ -377,9 +377,18 @@ func areResourcesEqual(objType reflect.Type, obj1, obj2 interface{}) (bool, erro
 		}
 
 		// when shouldUpdate is false, the hostsubnet is not assigned by ovn-kubernetes
-		shouldUpdate, err := shouldUpdate(node2, node1)
+		shouldUpdate, err := shouldUpdate(oc.mc.kube, node2, node1)
 		if err != nil {
 			klog.Errorf(err.Error())
+		}
+		switchName := oc.nadInfo.Prefix + node1.Name
+		if shouldUpdate && oc.lsManager.IsNonHostSubnetSwitch(switchName) {
+			// Node is managed now, need to reconfigure all logical elements
+			oc.lsManager.DeleteNode(switchName)
+			oc.addNodeFailed.Store(node1.Name, true)
+			oc.mgmtPortFailed.Store(node1.Name, true)
+			oc.gatewaysFailed.Store(node1.Name, true)
+			oc.nodeClusterRouterPortFailed.Store(node1.Name, true)
 		}
 		return !shouldUpdate, nil
 
@@ -1497,7 +1506,7 @@ func (oc *Controller) addResourceHandler(obj interface{}, objectsToRetry *retryO
 
 func (oc *Controller) updateResourceHandler(old, newer interface{}, objectsToRetry *retryObjs) {
 	// skip the whole update if old and newer are equal
-	areEqual, err := areResourcesEqual(objectsToRetry.oType, old, newer)
+	areEqual, err := oc.areResourcesEqual(objectsToRetry.oType, old, newer)
 	if err != nil {
 		klog.Errorf("Could not compare old and newer resource objects of type %v: %v",
 			objectsToRetry.oType, err)
