@@ -1172,10 +1172,12 @@ var _ = Describe("Gateway Operations DPU", func() {
 
 var _ = Describe("Gateway unit tests", func() {
 	var netlinkMock *utilMock.NetLinkOps
+	var lnk *linkMock.Link
 	origNetlinkInst := util.GetNetLinkOps()
 
 	BeforeEach(func() {
 		config.PrepareTestConfig()
+		lnk = &linkMock.Link{}
 		netlinkMock = &utilMock.NetLinkOps{}
 		util.SetNetLinkOpMockInst(netlinkMock)
 	})
@@ -1184,43 +1186,58 @@ var _ = Describe("Gateway unit tests", func() {
 		util.SetNetLinkOpMockInst(origNetlinkInst)
 	})
 
-	Context("getDPUHostPrimaryIPAddresses", func() {
+	Context("getPrimaryIPAddresses", func() {
 
 		It("returns Gateway IP/Subnet for kubernetes node IP", func() {
-			_, dpuSubnet, _ := net.ParseCIDR("10.0.0.101/24")
 			nodeIP := net.ParseIP("10.0.0.11")
 			expectedGwSubnet := []*net.IPNet{
 				{IP: nodeIP, Mask: net.CIDRMask(24, 32)},
 			}
-			gwSubnet, err := getDPUHostPrimaryIPAddresses(nodeIP, []*net.IPNet{dpuSubnet})
+			addrs := []netlink.Addr{{IPNet: expectedGwSubnet[0]}}
+			netlinkMock.On("LinkByName", mock.AnythingOfType("string")).Return(lnk, nil)
+			netlinkMock.On("AddrList", lnk, mock.Anything).Return(addrs, nil)
+
+			gwSubnet, err := getPrimaryIPAddresses("breth0", nodeIP)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(gwSubnet).To(Equal(expectedGwSubnet))
 		})
 
 		It("Fails if node IP is not in host subnets", func() {
-			_, dpuSubnet, _ := net.ParseCIDR("10.0.0.101/24")
+			config.OvnKubeNode.Mode = types.NodeModeDPU
 			nodeIP := net.ParseIP("10.0.1.11")
-			_, err := getDPUHostPrimaryIPAddresses(nodeIP, []*net.IPNet{dpuSubnet})
+			lnkIpnet1 := &net.IPNet{
+				IP:   net.ParseIP("10.0.0.11"),
+				Mask: net.CIDRMask(24, 32),
+			}
+			lnkIpnet2 := &net.IPNet{
+				IP:   net.ParseIP("10.0.0.12"),
+				Mask: net.CIDRMask(24, 32),
+			}
+			addrs := []netlink.Addr{{IPNet: lnkIpnet1}, {IPNet: lnkIpnet2}}
+			netlinkMock.On("LinkByName", mock.AnythingOfType("string")).Return(lnk, nil)
+			netlinkMock.On("AddrList", lnk, mock.Anything).Return(addrs, nil)
+			_, err := getPrimaryIPAddresses("breth0", nodeIP)
 			Expect(err).To(HaveOccurred())
 		})
 
 		It("returns node IP with config.Gateway.RouterSubnet subnet", func() {
+			config.OvnKubeNode.Mode = types.NodeModeDPU
 			config.Gateway.RouterSubnet = "10.1.0.0/16"
-			_, dpuSubnet, _ := net.ParseCIDR("10.0.0.101/24")
 			nodeIP := net.ParseIP("10.1.0.11")
 			expectedGwSubnet := []*net.IPNet{
 				{IP: nodeIP, Mask: net.CIDRMask(16, 32)},
 			}
-			gwSubnet, err := getDPUHostPrimaryIPAddresses(nodeIP, []*net.IPNet{dpuSubnet})
+			netlinkMock.On("LinkByName", mock.AnythingOfType("string")).Return(lnk, nil)
+			gwSubnet, err := getPrimaryIPAddresses("breth0", nodeIP)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(gwSubnet).To(Equal(expectedGwSubnet))
 		})
 
 		It("Fails if node IP is not in config.Gateway.RouterSubnet subnet", func() {
+			config.OvnKubeNode.Mode = types.NodeModeDPU
 			config.Gateway.RouterSubnet = "10.1.0.0/16"
-			_, dpuSubnet, _ := net.ParseCIDR("10.0.0.101/24")
 			nodeIP := net.ParseIP("10.0.0.11")
-			_, err := getDPUHostPrimaryIPAddresses(nodeIP, []*net.IPNet{dpuSubnet})
+			_, err := getPrimaryIPAddresses("breth0", nodeIP)
 			Expect(err).To(HaveOccurred())
 		})
 	})

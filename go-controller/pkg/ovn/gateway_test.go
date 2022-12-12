@@ -18,6 +18,8 @@ import (
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -265,7 +267,8 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 
 var _ = ginkgo.Describe("Gateway Init Operations", func() {
 	var (
-		fakeOvn *FakeOVN
+		fakeOvn  *FakeOVN
+		testNode v1.Node
 	)
 
 	ginkgo.BeforeEach(func() {
@@ -275,6 +278,11 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		ovnlb.TestOnlySetCache(nil)
 
 		fakeOvn = NewFakeOVN()
+		testNode = v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+			},
+		}
 	})
 
 	ginkgo.AfterEach(func() {
@@ -317,6 +325,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedOVNClusterRouter,
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
+				},
+			}, &v1.NodeList{
+				Items: []v1.Node{
+					testNode,
 				},
 			})
 
@@ -375,13 +387,16 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
 				},
+			}, &v1.NodeList{
+				Items: []v1.Node{
+					testNode,
+				},
 			})
 
 			clusterIPSubnets := ovntest.MustParseIPNets("fd01::/48")
 			hostSubnets := ovntest.MustParseIPNets("fd01:0:0:2::/64")
 			joinLRPIPs := ovntest.MustParseIPNets("fd98::3/64")
 			defLRPIPs := ovntest.MustParseIPNets("fd98::1/64")
-			nodeName := "test-node"
 			l3GatewayConfig := &util.L3GatewayConfig{
 				Mode:           config.GatewayModeLocal,
 				ChassisID:      "SYSTEM-ID",
@@ -432,13 +447,16 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
 				},
+			}, &v1.NodeList{
+				Items: []v1.Node{
+					testNode,
+				},
 			})
 
 			clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14", "fd01::/48")
 			hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23", "fd01:0:0:2::/64")
 			joinLRPIPs := ovntest.MustParseIPNets("100.64.0.3/16", "fd98::3/64")
 			defLRPIPs := ovntest.MustParseIPNets("100.64.0.1/16", "fd98::1/64")
-			nodeName := "test-node"
 			l3GatewayConfig := &util.L3GatewayConfig{
 				Mode:           config.GatewayModeLocal,
 				ChassisID:      "SYSTEM-ID",
@@ -489,13 +507,16 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
 				},
+			}, &v1.NodeList{
+				Items: []v1.Node{
+					testNode,
+				},
 			})
 
 			clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14")
 			hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23")
 			joinLRPIPs := ovntest.MustParseIPNets("100.64.0.3/16")
 			defLRPIPs := ovntest.MustParseIPNets("100.64.0.1/16")
-			nodeName := "test-node"
 			l3GatewayConfig := &util.L3GatewayConfig{
 				Mode:           config.GatewayModeLocal,
 				ChassisID:      "SYSTEM-ID",
@@ -573,13 +594,16 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
 				},
+			}, &v1.NodeList{
+				Items: []v1.Node{
+					testNode,
+				},
 			})
 
 			clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14", "fd01::/48")
 			hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23", "fd01:0:0:2::/64")
 			joinLRPIPs := ovntest.MustParseIPNets("100.64.0.3/16", "fd98::3/64")
 			defLRPIPs := ovntest.MustParseIPNets("100.64.0.1/16", "fd98::1/64")
-			nodeName := "test-node"
 			l3GatewayConfig := &util.L3GatewayConfig{
 				Mode:           config.GatewayModeLocal,
 				ChassisID:      "SYSTEM-ID",
@@ -612,7 +636,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 	ginkgo.Context("Gateway Cleanup Operations", func() {
 
 		ginkgo.It("cleans up a single-stack gateway in OVN", func() {
-			nodeName := "test-node"
 
 			nodeSubnetPriority, _ := strconv.Atoi(types.NodeSubnetPolicyPriority)
 
@@ -732,7 +755,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		})
 
 		ginkgo.It("cleans up a dual-stack gateway in OVN", func() {
-			nodeName := "test-node"
 
 			nodeSubnetPriority, _ := strconv.Atoi(types.NodeSubnetPolicyPriority)
 
