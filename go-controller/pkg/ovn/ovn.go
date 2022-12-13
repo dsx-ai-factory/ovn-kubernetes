@@ -18,6 +18,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -28,9 +29,13 @@ import (
 
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
+	adminpbrapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
+
+	virtualip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
 	utilnet "k8s.io/utils/net"
 
 	egressqoslisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
@@ -47,7 +52,6 @@ import (
 	"k8s.io/client-go/tools/record"
 	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/client-go/util/workqueue"
-
 	"k8s.io/klog/v2"
 )
 
@@ -265,6 +269,18 @@ type Controller struct {
 	mgmtPortFailed              sync.Map
 	addNodeFailed               sync.Map
 	nodeClusterRouterPortFailed sync.Map
+
+	adminPBRHandler          *factory.Handler
+	adminPBRNodeHandler      *factory.Handler
+	adminPBRNamespaceHandler *factory.Handler
+	// map of admin pbr policies
+	adminPBRStore      sync.Map
+	adminPBRRetryQueue workqueue.RateLimitingInterface
+
+	// map & workqueue for virtualIP operations
+	virtualIPHandler    *factory.Handler
+	virtualIPs          sync.Map
+	virtualIPRetryQueue workqueue.RateLimitingInterface
 }
 
 const (
@@ -302,6 +318,8 @@ func NewOvnMHController(ovnClient *util.OVNClientset, identity string, wf *facto
 			EIPClient:            ovnClient.EgressIPClient,
 			EgressFirewallClient: ovnClient.EgressFirewallClient,
 			CloudNetworkClient:   ovnClient.CloudNetworkClient,
+			AdminPBRClient:       ovnClient.AdminPBRClient,
+			VIPClient:            ovnClient.VirtualIPClient,
 		},
 		watchFactory:   wf,
 		wg:             wg,
@@ -508,6 +526,17 @@ func (oc *Controller) Run(ctx context.Context) error {
 		return err
 	}
 
+	if config.OVNKubernetesFeature.EnableVirtualIP {
+		err := oc.WatchVirtualIPs()
+		if err != nil {
+			return err
+		}
+	}
+	if config.OVNKubernetesFeature.EnableAdminPolicyBasedRouting {
+		if err := oc.WatchAdminPolicyBasedRoutes(); err != nil {
+			return err
+		}
+	}
 	if !oc.nadInfo.IsSecondary {
 		// WatchNetworkPolicy depends on WatchPods and WatchNamespaces
 		if err := oc.WatchNetworkPolicy(); err != nil {
@@ -771,7 +800,8 @@ func (oc *Controller) removePod(pod *kapi.Pod, portInfoMap map[string]*lpInfo) e
 
 // WatchPods starts the watching of the Pod resource and calls back the appropriate handler logic
 func (oc *Controller) WatchPods() error {
-	_, err := oc.WatchResource(oc.retryPods)
+	var err error
+	oc.podHandler, err = oc.WatchResource(oc.retryPods)
 	return err
 }
 
@@ -947,6 +977,201 @@ func (oc *Controller) WatchNamespaces() (err error) {
 		klog.Errorf("Failed to watch namespaces err: %v", err)
 		return err
 	}
+	return nil
+}
+
+// WatchAdminPolicyBasedRoutes starts the watching of adminpolicybasedroute resource and calls
+// back the appropriate handler logic
+func (oc *Controller) WatchAdminPolicyBasedRoutes() error {
+	start := time.Now()
+	if !oc.nadInfo.IsSecondary {
+		// delete logical router policies created by egressip since they would block rerouting between pods
+		err := oc.deleteLogicalRouterPoliciesByPriority(ovntypes.DefaultNoRereoutePriority)
+		if err != nil && err != libovsdbclient.ErrNotFound {
+			return fmt.Errorf("failed to clean up egressip default noreroute policies: %v", err)
+		}
+	}
+	oc.adminPBRRetryQueue = workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "adminpbr")
+	filterAdminPBR := func(obj interface{}) bool {
+		apbr, ok := obj.(*adminpbrapi.AdminPolicyBasedRoute)
+		if !ok {
+			return false
+		}
+		_, ok = oc.nadInfo.NetAttachDefs.Load(apbr.Spec.NetworkAttachmentName)
+		return ok
+	}
+	oc.adminPBRHandler, _ = oc.mc.watchFactory.AddHandlerWithFilterFunc(reflect.TypeOf(&adminpbrapi.AdminPolicyBasedRoute{}), filterAdminPBR, cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			apbr, ok := obj.(*adminpbrapi.AdminPolicyBasedRoute)
+			if !ok {
+				klog.Errorf("Not an AdminPolicyBasedRoute object: %v", apbr)
+				return
+			}
+			oc.onAdminPBRAddOrUpdate(apbr)
+		},
+		UpdateFunc: func(old, new interface{}) {
+			if oc.nadInfo.TopoType != ovntypes.Layer3AttachDefTopoType {
+				klog.V(5).Infof("Skipping AdminPBR event since the network topology of %s is not L3", oc.nadInfo.NetName)
+				return
+			}
+			oldPolicy, ok := old.(*adminpbrapi.AdminPolicyBasedRoute)
+			if !ok {
+				klog.Errorf("Old object is not an AdminPolicyBasedRoute object: %v", oldPolicy)
+				return
+			}
+			newPolicy, ok := new.(*adminpbrapi.AdminPolicyBasedRoute)
+			if !ok {
+				klog.Errorf("New object is not an AdminPolicyBasedRoute object: %v", newPolicy)
+				return
+			}
+			// object is marked for deletion, don't do anything
+			if !newPolicy.DeletionTimestamp.IsZero() {
+				return
+			}
+			if !reflect.DeepEqual(oldPolicy.Spec, newPolicy.Spec) {
+				oc.onAdminPBRAddOrUpdate(newPolicy)
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			if oc.nadInfo.TopoType != ovntypes.Layer3AttachDefTopoType {
+				klog.V(5).Infof("Skipping AdminPBR event since the network topology of %s is not L3", oc.nadInfo.NetName)
+				return
+			}
+			apbr, ok := obj.(*adminpbrapi.AdminPolicyBasedRoute)
+			if !ok {
+				klog.Errorf("Not an AdminPolicyBasedRoute object: %v", apbr)
+				return
+			}
+			oc.onAdminPBRDelete(apbr)
+		},
+	}, nil)
+
+	oc.adminPBRNodeHandler, _ = oc.mc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			oc.syncAdminPBROnNodeChange(nil, obj)
+		},
+		UpdateFunc: func(old, new interface{}) {
+			oc.syncAdminPBROnNodeChange(old, new)
+		},
+		DeleteFunc: func(obj interface{}) {},
+	}, nil)
+
+	oc.adminPBRNamespaceHandler, _ = oc.mc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			oc.syncAdminPBROnNamespaceChange(nil, obj)
+		},
+		UpdateFunc: func(old, new interface{}) {
+			oc.syncAdminPBROnNamespaceChange(old, new)
+		},
+		DeleteFunc: func(obj interface{}) {},
+	}, nil)
+
+	klog.Infof("Bootstrapping existing adminpbrs and cleaning stale adminpbrs took %v", time.Since(start))
+	if oc.nadInfo.TopoType != ovntypes.Layer3AttachDefTopoType {
+		klog.V(4).Infof("Skip periodical sync for non-L3 network %s(%s)", oc.nadInfo.NetName, oc.nadInfo.TopoType)
+		return nil
+	}
+	go func() {
+		ticker := time.NewTicker(ovntypes.AdminPBRResyncInterval)
+		for {
+			select {
+			case <-ticker.C:
+				oc.syncAdminPBRPeriodic()
+				oc.syncAddressSetPeriodic()
+			case <-oc.stopChan:
+				ticker.Stop()
+				oc.adminPBRRetryQueue.ShutDown()
+				return
+			}
+		}
+	}()
+	go func() {
+		for oc.retryAdminPBROperations() {
+		}
+	}()
+	return nil
+}
+
+// WatchVirtualIPs starts the watching of virtual-ip resources and calls
+// back the appropriate handler logic
+func (oc *Controller) WatchVirtualIPs() error {
+	start := time.Now()
+	oc.virtualIPRetryQueue = workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "virtualIP")
+	// filterVirtualIP checks if the virtualIP nad belongs to this controller and
+	filterVirtualIP := func(obj interface{}) bool {
+		virtIP, ok := obj.(*virtualip.VirtualIP)
+		if !ok {
+			return false
+		}
+		_, ok = oc.nadInfo.NetAttachDefs.Load(virtIP.Spec.NetworkAttachmentName)
+		return ok
+	}
+
+	// creates corresponding add/update/delete handlers
+	oc.virtualIPHandler, _ = oc.mc.watchFactory.AddHandlerWithFilterFunc(reflect.TypeOf(&virtualip.VirtualIP{}), filterVirtualIP, cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			virtIP := obj.(*virtualip.VirtualIP)
+			err := oc.addVirtualIP(virtIP)
+			if err != nil {
+				klog.Errorf(err.Error())
+				oc.recordVirtualIPEvent("VirtualIPAddError", err.Error(), virtIP)
+			}
+		},
+		UpdateFunc: func(old, newer interface{}) {
+			oldVirtIP := old.(*virtualip.VirtualIP)
+			newVirtIP := newer.(*virtualip.VirtualIP)
+			// only compare spec changes as we constantly do updates for
+			// virtualIP status.
+			if !reflect.DeepEqual(oldVirtIP.Spec, newVirtIP.Spec) {
+				if err := oc.deleteVirtualIP(oldVirtIP); err != nil {
+					klog.Errorf(err.Error())
+				}
+				if err := oc.addVirtualIP(newVirtIP); err != nil {
+					klog.Errorf(err.Error())
+				}
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			virtIP := obj.(*virtualip.VirtualIP)
+			if err := oc.deleteVirtualIP(virtIP); err != nil {
+				klog.Error(err)
+			}
+		},
+	}, nil)
+
+	// run this only for l2 networks
+	if oc.nadInfo.TopoType == ovntypes.Layer2AttachDefTopoType {
+		dbModel, err := sbdb.FullDatabaseModel()
+		if err != nil {
+			return fmt.Errorf("failed to create sdbdb model: (%v)", err)
+		}
+		client, err := libovsdb.NewClient(config.OvnSouth, dbModel, oc.mc.stopChan)
+		if err != nil {
+			return err
+		}
+
+		go func() {
+			ticker := time.NewTicker(ovntypes.VirtualIPResyncInterval)
+			for {
+				select {
+				case <-ticker.C:
+					oc.syncVirtualIPsPeriodic()
+				case <-oc.stopChan:
+					ticker.Stop()
+					oc.virtualIPRetryQueue.ShutDown()
+					return
+				}
+			}
+		}()
+		// for virtualIPRetry operations
+		go func() {
+			for oc.retryVirtualIPOperations() {
+			}
+		}()
+
+		return oc.watchPortBindingTable(client)
+	}
+	klog.Infof("Bootstrapping existing virtualIPs and cleaning stale virtualIPs took %v", time.Since(start))
 	return nil
 }
 
@@ -1162,6 +1387,19 @@ func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.
 
 	if oc.namespaceHandler != nil {
 		oc.mc.watchFactory.RemoveNamespaceHandler(oc.namespaceHandler)
+	}
+
+	if oc.adminPBRHandler != nil {
+		oc.mc.watchFactory.RemoveAdminPBRHandler(oc.adminPBRHandler)
+	}
+	if oc.adminPBRNodeHandler != nil {
+		oc.mc.watchFactory.RemoveNodeHandler(oc.adminPBRNodeHandler)
+	}
+	if oc.adminPBRNamespaceHandler != nil {
+		oc.mc.watchFactory.RemoveNamespaceHandler(oc.adminPBRNamespaceHandler)
+	}
+	if oc.virtualIPHandler != nil {
+		oc.mc.watchFactory.RemoveVirtualIPHandler(oc.virtualIPHandler)
 	}
 
 	for namespace := range oc.namespaces {

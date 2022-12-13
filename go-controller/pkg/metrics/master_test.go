@@ -40,7 +40,7 @@ func getKubeClient(nodeCount int) *kube.Kube {
 	fakeClient := &util.OVNClientset{
 		KubeClient: kubeFakeClient,
 	}
-	return &kube.Kube{fakeClient.KubeClient, nil, nil, nil}
+	return &kube.Kube{fakeClient.KubeClient, nil, nil, nil, nil, nil}
 }
 
 func setHvCfg(nbClient client.Client, hvCfg int, hvCfgTimestamp time.Time) {

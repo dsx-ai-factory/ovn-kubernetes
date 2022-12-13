@@ -358,6 +358,9 @@ type OVNKubernetesFeatureConfig struct {
 	EnableEgressQoS                 bool `gcfg:"enable-egress-qos"`
 	EnableMultiNetwork              bool `gcfg:"enable-multi-network"`
 	EnableMultiNetworkPolicy        bool `gcfg:"enable-multi-networkpolicy"`
+	// EnableAdminPolicyBasedRouting allows admin to manage PBR rules
+	EnableAdminPolicyBasedRouting bool `gcfg:"enable-admin-pbr"`
+	EnableVirtualIP               bool `gcfg:"enable-virtual-ip"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -948,6 +951,18 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use multiple networkAttachmentDefinition CRD feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableMultiNetworkPolicy,
 		Value:       OVNKubernetesFeature.EnableMultiNetworkPolicy,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-admin-pbr",
+		Usage:       "Configure to enable policy based route feature.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableAdminPolicyBasedRouting,
+		Value:       OVNKubernetesFeature.EnableAdminPolicyBasedRouting,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-virtual-ip",
+		Usage:       "Configure to use VirtualIP CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableVirtualIP,
+		Value:       OVNKubernetesFeature.EnableVirtualIP,
 	},
 }
 
@@ -2034,6 +2049,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	klog.V(5).Infof("OVN South config: %+v", OvnSouth)
 	klog.V(5).Infof("Hybrid Overlay config: %+v", HybridOverlay)
 	klog.V(5).Infof("Ovnkube Node config: %+v", OvnKubeNode)
+	klog.V(5).Infof("Ovnkube Feature config: %+v", OVNKubernetesFeature)
 
 	return retConfigFile, nil
 }

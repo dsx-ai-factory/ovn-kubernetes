@@ -30,7 +30,7 @@ if  ! ( command -v controller-gen > /dev/null ); then
   olddir="${PWD}"
   builddir="$(mktemp -d)"
   cd "${builddir}"
-  GO111MODULE=on go get -u sigs.k8s.io/controller-tools/cmd/controller-gen
+  GO111MODULE=on go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest
   cd "${olddir}"
   if [[ "${builddir}" == /tmp/* ]]; then #paranoia
       rm -rf "${builddir}"
@@ -81,14 +81,14 @@ echo "Editing egressFirewall CRD"
 ## way that we can put a pattern for validation on the name of the object which is embedded in
 ## metav1.ObjectMeta it is required that we add it after the generation of the CRD.
 sed -i -e':begin;$!N;s/.*metadata:\n.*type: object/&\n            properties:\n              name:\n                type: string\n                pattern: ^default$/;P;D' \
-	_output/crds/k8s.ovn.org_egressfirewalls.yaml
+	$(pwd)/_output/crds/k8s.ovn.org_egressfirewalls.yaml
 ## It is also required that we restrict the number of properties on the 'to' section of the egressfirewall
 ## so that either 'dnsName' or 'cidrSelector is set in the crd and currently kubebuilder does not support
 ## adding validation to objects only to the fields
 sed -i -e ':begin;$!N;s/                          type: string\n.*type: object/&\n                      minProperties: 1\n                      maxProperties: 1/;P;D' \
-	_output/crds/k8s.ovn.org_egressfirewalls.yaml
+	$(pwd)/_output/crds/k8s.ovn.org_egressfirewalls.yaml
 
 echo "Editing EgressQoS CRD"
 ## We desire that only EgressQoS with the name "default" are accepted by the apiserver.
 sed -i -e':begin;$!N;s/.*metadata:\n.*type: object/&\n            properties:\n              name:\n                type: string\n                pattern: ^default$/;P;D' \
-	_output/crds/k8s.ovn.org_egressqoses.yaml
+	$(pwd)/_output/crds/k8s.ovn.org_egressqoses.yaml

@@ -45,7 +45,8 @@ func (oc *Controller) setupLayer2Switch(switchName string) error {
 
 	err = oc.lsManager.AddNode(switchName, logicalSwitch.UUID, hostSubnets)
 	if err != nil {
-		return fmt.Errorf("failed to initialize localnet switch IP manager for network %s: %v", oc.nadInfo.NetName, err)
+		return fmt.Errorf("failed to initialize %s switch IP manager for network %s: %v",
+			oc.nadInfo.TopoType, oc.nadInfo.NetName, err)
 	}
 	for _, excludeIP := range oc.nadInfo.ExcludeIPs {
 		var ipMask net.IPMask

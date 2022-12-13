@@ -302,7 +302,6 @@ func (oc *Controller) delLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string
 	}
 	allOps = append(allOps, ops...)
 
-	// TBD Cathy for secondary controller
 	recordOps, txOkCallBack, _, err := metrics.GetConfigDurationRecorder().AddOVN(oc.mc.nbClient, "pod", pod.Namespace,
 		pod.Name, oc.nadInfo.NetNameInfo)
 	if err != nil {

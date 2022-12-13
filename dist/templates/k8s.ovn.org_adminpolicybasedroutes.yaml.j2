@@ -1,0 +1,292 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: adminpolicybasedroutes.k8s.ovn.org
+spec:
+  group: k8s.ovn.org
+  names:
+    kind: AdminPolicyBasedRoute
+    listKind: AdminPolicyBasedRouteList
+    plural: adminpolicybasedroutes
+    shortNames:
+    - adminpbr
+    singular: adminpolicybasedroute
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.networkAttachmentName
+      name: NetworkName
+      type: string
+    - jsonPath: .status.status
+      name: Status
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        description: "AdminPolicyBasedRoute cluster-scoped API provides a way to influence
+          routing decisions in the SDN network. The API can be used to match the packets
+          originating from and/or -- kubernetes nodes, namespaces, pods -- and forward
+          them to different destination for further processing. \n This API leverages
+          OVN's Logical Router Policy feature. The AdminPolicyBasedRoute policies
+          or translated to OVN policies and these policies override OVN's static routing
+          decision. The priority of the policy rules is set to 100 (priority in range
+          of 0 to 32,767, with numerically higher priority taking precedence over
+          those with lower), and it processed after all the OVN K8s' pre-defined rules."
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: AdminPolicyBasedRouteSpec defines the desired state of cluster
+              scoped routing policies
+            properties:
+              networkAttachmentName:
+                description: Selects the network-attachment-definition for which the
+                  policy routes need to be applied. The NAD should be of type Layer-3.
+                  Specifying anything else (Layer-2 or Localnet) will be an invalid
+                  configuration.
+                pattern: ^[0-9a-zA-Z\-]+\/[0-9a-zA-Z\-]+$
+                type: string
+              policies:
+                description: a collection of policy objects to influence routing
+                items:
+                  description: RoutingPolicyRule is a single routing policy rule object
+                  properties:
+                    from:
+                      description: From matches the packets for the routing policy
+                      minProperties: 1
+                      properties:
+                        namespaceSelector:
+                          description: NamespaceSelector matches the source packets
+                            only from the namespace(s) whose label matches this definition.
+                            This field is optional.
+                          properties:
+                            matchExpressions:
+                              description: matchExpressions is a list of label selector
+                                requirements. The requirements are ANDed.
+                              items:
+                                description: A label selector requirement is a selector
+                                  that contains values, a key, and an operator that
+                                  relates the key and values.
+                                properties:
+                                  key:
+                                    description: key is the label key that the selector
+                                      applies to.
+                                    type: string
+                                  operator:
+                                    description: operator represents a key's relationship
+                                      to a set of values. Valid operators are In,
+                                      NotIn, Exists and DoesNotExist.
+                                    type: string
+                                  values:
+                                    description: values is an array of string values.
+                                      If the operator is In or NotIn, the values array
+                                      must be non-empty. If the operator is Exists
+                                      or DoesNotExist, the values array must be empty.
+                                      This array is replaced during a strategic merge
+                                      patch.
+                                    items:
+                                      type: string
+                                    type: array
+                                required:
+                                - key
+                                - operator
+                                type: object
+                              type: array
+                            matchLabels:
+                              additionalProperties:
+                                type: string
+                              description: matchLabels is a map of {key,value} pairs.
+                                A single {key,value} in the matchLabels map is equivalent
+                                to an element of matchExpressions, whose key field
+                                is "key", the operator is "In", and the values array
+                                contains only "value". The requirements are ANDed.
+                              type: object
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        nodeSelector:
+                          description: NodeSelector matches the source packets only
+                            from the node(s) whose label matches this definition.
+                            This field is optional.
+                          properties:
+                            matchExpressions:
+                              description: matchExpressions is a list of label selector
+                                requirements. The requirements are ANDed.
+                              items:
+                                description: A label selector requirement is a selector
+                                  that contains values, a key, and an operator that
+                                  relates the key and values.
+                                properties:
+                                  key:
+                                    description: key is the label key that the selector
+                                      applies to.
+                                    type: string
+                                  operator:
+                                    description: operator represents a key's relationship
+                                      to a set of values. Valid operators are In,
+                                      NotIn, Exists and DoesNotExist.
+                                    type: string
+                                  values:
+                                    description: values is an array of string values.
+                                      If the operator is In or NotIn, the values array
+                                      must be non-empty. If the operator is Exists
+                                      or DoesNotExist, the values array must be empty.
+                                      This array is replaced during a strategic merge
+                                      patch.
+                                    items:
+                                      type: string
+                                    type: array
+                                required:
+                                - key
+                                - operator
+                                type: object
+                              type: array
+                            matchLabels:
+                              additionalProperties:
+                                type: string
+                              description: matchLabels is a map of {key,value} pairs.
+                                A single {key,value} in the matchLabels map is equivalent
+                                to an element of matchExpressions, whose key field
+                                is "key", the operator is "In", and the values array
+                                contains only "value". The requirements are ANDed.
+                              type: object
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        podSelector:
+                          description: 'PodSelector matches the source packets only
+                            from the pods whose label matches this definition. This
+                            field is optional, and in case it is not set: results
+                            in matching packets from all the pods in the namespace(s)
+                            matched by the NamespaceSelector. In case it is set: is
+                            intersected with the NamespaceSelector, thus matching
+                            the packets from the pods (in the namespace(s) already
+                            matched by the NamespaceSelector) which match this pod
+                            selector.'
+                          properties:
+                            matchExpressions:
+                              description: matchExpressions is a list of label selector
+                                requirements. The requirements are ANDed.
+                              items:
+                                description: A label selector requirement is a selector
+                                  that contains values, a key, and an operator that
+                                  relates the key and values.
+                                properties:
+                                  key:
+                                    description: key is the label key that the selector
+                                      applies to.
+                                    type: string
+                                  operator:
+                                    description: operator represents a key's relationship
+                                      to a set of values. Valid operators are In,
+                                      NotIn, Exists and DoesNotExist.
+                                    type: string
+                                  values:
+                                    description: values is an array of string values.
+                                      If the operator is In or NotIn, the values array
+                                      must be non-empty. If the operator is Exists
+                                      or DoesNotExist, the values array must be empty.
+                                      This array is replaced during a strategic merge
+                                      patch.
+                                    items:
+                                      type: string
+                                    type: array
+                                required:
+                                - key
+                                - operator
+                                type: object
+                              type: array
+                            matchLabels:
+                              additionalProperties:
+                                type: string
+                              description: matchLabels is a map of {key,value} pairs.
+                                A single {key,value} in the matchLabels map is equivalent
+                                to an element of matchExpressions, whose key field
+                                is "key", the operator is "In", and the values array
+                                contains only "value". The requirements are ANDed.
+                              type: object
+                          type: object
+                          x-kubernetes-map-type: atomic
+                      type: object
+                    nexthop:
+                      description: NextHop defines where the matched packets should
+                        be forwarded
+                      properties:
+                        ips:
+                          description: NextHopIPs is the list of next-hop IP addresses
+                            for this route. With more than one IP address, ECMP will
+                            kick in and one of the IP address will be selected based
+                            on the 5-tuple hashing of the packet header. Currently,
+                            only one IP address is supported. Furthermore, this IP
+                            address must be an overlay address, i.e., an address within
+                            the OVN Logical Topology.
+                          format: ipv4
+                          items:
+                            type: string
+                          maxItems: 1
+                          minItems: 1
+                          type: array
+                      required:
+                      - ips
+                      type: object
+                    to:
+                      description: To specifies destination addresses used to match
+                        the same in the packets
+                      properties:
+                        cidr:
+                          description: CIDR is a string representing the IP Block
+                            Valid examples are "192.168.1.1/24" or "2001:db9::/64"
+                          type: string
+                        except:
+                          description: Except is a slice of CIDRs that should not
+                            be included within an IP Block Valid examples are "192.168.1.1/24"
+                            or "2001:db9::/64" Except values will be rejected if they
+                            are outside the CIDR range
+                          items:
+                            type: string
+                          type: array
+                      required:
+                      - cidr
+                      type: object
+                  required:
+                  - from
+                  - nexthop
+                  - to
+                  type: object
+                type: array
+            required:
+            - networkAttachmentName
+            - policies
+            type: object
+          status:
+            description: AdminPolicyBasedRouteStatus describes the current status
+              of the AdminPolicyBasedRoute.
+            properties:
+              messages:
+                description: An array of Human-readable messages indicating details
+                  about the status of the object.
+                items:
+                  type: string
+                type: array
+              status:
+                description: A concise indication of whether the AdminPolicyBasedRoute
+                  resource is applied or not
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -166,5 +166,32 @@ const (
 
 	ClusterLBGroupName = "clusterLBGroup"
 
+	AdminPBRResyncInterval = 30 * time.Second
+
+	CacheIndexPodByIP        = "index-pod-by-ip"
+	CacheIndexPodByNodeIP    = "index-pod-by-node-ip"
+	CacheIndexPodByNamespace = "index-pod-by-ns"
+
+	ExternalIDK8sOwner     = OvnK8sPrefix + "/" + "owner"
+	ExternalIDHash         = "hash"
+	ExternalIDNetAttachDef = "nad_name"
+	ExternalIDRouter       = "logical_router_name"
+	ExternalIDName         = "name"
+	ExternalIDNamespace    = "namespace"
+
+	// virtual port constants
+	VirtualIPResyncInterval = 30 * time.Second
+
+	VirtualPortType   = "virtual"
+	TablePortBinding  = "Port_Binding"
+	VirtualPortPrefix = "ovn_k8s_vport"
+
 	OvnK8sClusterNameKey = OvnK8sPrefix + "/" + "cluster_name"
+)
+
+type OvnK8sStatus string
+
+const (
+	OvnK8sStatusSucceeded OvnK8sStatus = "Succeeded"
+	OvnK8sStatusFailed    OvnK8sStatus = "Failed"
 )

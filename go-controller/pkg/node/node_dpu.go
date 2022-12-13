@@ -188,10 +188,7 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 			pod := obj.(*kapi.Pod)
 			// lock pod to avoid racing on `servedCache`
 			unlock := util.LockByKey.Acquire(string(pod.UID))
-			defer func() {
-				util.LockByKey.Delete(string(pod.UID))
-				unlock()
-			}()
+			defer unlock()
 			_, ok := nc.podNadCache.Load(pod.UID)
 			if !ok {
 				klog.V(5).Infof("Skipping delete for Pod %s/%s as it is not attached to network: %s",

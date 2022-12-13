@@ -53,10 +53,14 @@ func newPodMeta(namespace, name string, additionalLabels map[string]string) meta
 	}
 }
 
-func newPodWithLabels(namespace, name, node, podIP string, additionalLabels map[string]string) *v1.Pod {
+func newPodWithLabels(namespace, name, node, podIP string, additionalLabels map[string]string, hostIP ...string) *v1.Pod {
 	podIPs := []v1.PodIP{}
 	if podIP != "" {
 		podIPs = append(podIPs, v1.PodIP{IP: podIP})
+	}
+	_hostIP := ""
+	if len(hostIP) > 0 {
+		_hostIP = hostIP[0]
 	}
 	return &v1.Pod{
 		ObjectMeta: newPodMeta(namespace, name, additionalLabels),
@@ -74,6 +78,7 @@ func newPodWithLabels(namespace, name, node, podIP string, additionalLabels map[
 			Phase:  v1.PodRunning,
 			PodIP:  podIP,
 			PodIPs: podIPs,
+			HostIP: _hostIP,
 		},
 	}
 }
