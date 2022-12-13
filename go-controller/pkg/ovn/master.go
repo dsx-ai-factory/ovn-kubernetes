@@ -208,7 +208,11 @@ func (oc *Controller) StartClusterMaster() error {
 	}
 
 	if oc.nadInfo.TopoType == types.LocalnetAttachDefTopoType {
-		return oc.SetupLocalnetMaster()
+		return oc.setupLocalnetMaster()
+	}
+
+	if oc.nadInfo.TopoType == types.Layer2AttachDefTopoType {
+		return oc.setupLayer2Master()
 	}
 
 	existingNodes, err := oc.mc.kube.GetNodes()
@@ -462,6 +466,11 @@ func (oc *Controller) deleteMaster() {
 
 	if oc.nadInfo.TopoType == types.LocalnetAttachDefTopoType {
 		oc.deleteLocalnetMaster()
+		return
+	}
+
+	if oc.nadInfo.TopoType == types.Layer2AttachDefTopoType {
+		oc.deleteLayer2Master()
 		return
 	}
 
@@ -1111,11 +1120,11 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 		return fmt.Errorf("failed to delete logical switch %s: %v", switchName, err)
 	}
 
-	logiccalRouter := nbdb.LogicalRouter{Name: clusterRouterName}
+	logicalRouter := nbdb.LogicalRouter{Name: clusterRouterName}
 	logicalRouterPort := nbdb.LogicalRouterPort{
 		Name: logicalRouterPortName,
 	}
-	err = libovsdbops.DeleteLogicalRouterPorts(oc.mc.nbClient, &logiccalRouter, &logicalRouterPort)
+	err = libovsdbops.DeleteLogicalRouterPorts(oc.mc.nbClient, &logicalRouter, &logicalRouterPort)
 	if err != nil {
 		return fmt.Errorf("failed to delete router port %s: %v", logicalRouterPort.Name, err)
 	}

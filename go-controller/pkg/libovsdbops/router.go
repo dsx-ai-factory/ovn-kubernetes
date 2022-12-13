@@ -170,8 +170,8 @@ func CreateOrUpdateLogicalRouterPorts(nbClient libovsdbclient.Client, router *nb
 
 // DeleteLogicalRouterPorts deletes the provided logical router ports and
 // removes them from the provided logical router
-func DeleteLogicalRouterPorts(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter, lrps ...*nbdb.LogicalRouterPort) error {
-	originalPorts := router.Ports
+func DeleteLogicalRouterPortsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, router *nbdb.LogicalRouter,
+	lrps ...*nbdb.LogicalRouterPort) ([]libovsdb.Operation, error) {
 	router.Ports = make([]string, 0, len(lrps))
 	opModels := make([]operationModel, 0, len(lrps)+1)
 	for i := range lrps {
@@ -198,7 +198,19 @@ func DeleteLogicalRouterPorts(nbClient libovsdbclient.Client, router *nbdb.Logic
 	opModels = append(opModels, opModel)
 
 	m := newModelClient(nbClient)
-	err := m.Delete(opModels...)
+	return m.DeleteOps(ops, opModels...)
+}
+
+// DeleteLogicalRouterPorts deletes the provided logical router ports and
+// removes them from the provided logical router
+func DeleteLogicalRouterPorts(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter, lrps ...*nbdb.LogicalRouterPort) error {
+	originalPorts := router.Ports
+	ops, err := DeleteLogicalRouterPortsOps(nbClient, nil, router, lrps...)
+	if err != nil {
+		router.Ports = originalPorts
+		return err
+	}
+	_, err = TransactAndCheck(nbClient, ops)
 	router.Ports = originalPorts
 	return err
 }

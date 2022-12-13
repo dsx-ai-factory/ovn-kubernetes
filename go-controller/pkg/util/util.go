@@ -180,12 +180,17 @@ type NetAttachDefInfo struct {
 	MTU           int
 
 	TopoType   string
-	VlanId     int
 	ExcludeIPs []net.IP
+
+	// localnet network only
+	VlanId     int
 	Gateway    string
 	GatewayMac string
 	BridgeName string
 	XDPService bool
+
+	// layer 2 network only
+	ConnectToNad string
 }
 
 func NewNetAttachDefInfo(netconf *cnitypes.NetConf) (*NetAttachDefInfo, error) {
@@ -194,11 +199,13 @@ func NewNetAttachDefInfo(netconf *cnitypes.NetConf) (*NetAttachDefInfo, error) {
 		netconf.IsSecondary = true
 	}
 
-	if netconf.TopoType != "" && netconf.TopoType != types.LocalnetAttachDefTopoType {
+	if netconf.TopoType != types.Layer3AttachDefTopoType &&
+		netconf.TopoType != types.LocalnetAttachDefTopoType &&
+		netconf.TopoType != types.Layer2AttachDefTopoType {
 		return nil, fmt.Errorf("invalid topotype %s for net-attach-def %s", netconf.TopoType, netconf.Name)
 	}
 
-	if !netconf.IsSecondary && netconf.TopoType != "" {
+	if !netconf.IsSecondary && netconf.TopoType != types.Layer3AttachDefTopoType {
 		return nil, fmt.Errorf("invalid topotype %s for default net-attach-def %s", netconf.TopoType, netconf.Name)
 	}
 
@@ -219,12 +226,12 @@ func NewNetAttachDefInfo(netconf *cnitypes.NetConf) (*NetAttachDefInfo, error) {
 		GatewayMac:  netconf.GatewayMac,
 	}
 
-	if netconf.TopoType == types.LocalnetAttachDefTopoType {
+	if netconf.TopoType == types.LocalnetAttachDefTopoType || netconf.TopoType == types.Layer2AttachDefTopoType {
 		if len(netconf.ExcludeCIDRs) == 0 {
 			return &nadInfo, nil
 		}
 		// TODO(gmoodalbail): we should parse this once and stash it in a structure
-		netCIDRs, err := config.ParseClusterSubnetEntries(netconf.NetCidr, netconf.TopoType != types.LocalnetAttachDefTopoType)
+		netCIDRs, err := config.ParseClusterSubnetEntries(netconf.NetCidr, false)
 		if err != nil {
 			return nil, fmt.Errorf("failed while parsing the provided NetCIDR %q for Network %q", netconf.NetCidr, netName)
 		}
@@ -271,6 +278,11 @@ func ParseNADInfo(netattachdef *nettypes.NetworkAttachmentDefinition) (*NetAttac
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to construct NetAttachDefInfo %s/%s: %s", netattachdef.Namespace, netattachdef.Name, err)
 	}
+	if netconf.TopoType == types.Layer2AttachDefTopoType {
+		if nad, ok := netattachdef.Annotations[types.OvnK8sConnectToNad]; ok {
+			nadInfo.ConnectToNad = nad
+		}
+	}
 	nadConfig, err := GetNadConfig(netattachdef, nadInfo.IsSecondary)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to construct NadConfig %s/%s: %s", netattachdef.Namespace, netattachdef.Name, err)
@@ -287,7 +299,7 @@ func ParseNADInfo(netattachdef *nettypes.NetworkAttachmentDefinition) (*NetAttac
 }
 
 func ParseNetConf(netattachdef *nettypes.NetworkAttachmentDefinition) (*cnitypes.NetConf, error) {
-	netconf := &cnitypes.NetConf{MTU: config.Default.MTU}
+	netconf := &cnitypes.NetConf{MTU: config.Default.MTU, TopoType: types.Layer3AttachDefTopoType}
 	// looking for network attachment definition that use OVN K8S CNI only
 	err := json.Unmarshal([]byte(netattachdef.Spec.Config), &netconf)
 	if err != nil {
@@ -299,13 +311,16 @@ func ParseNetConf(netattachdef *nettypes.NetworkAttachmentDefinition) (*cnitypes
 	if netconf.Name == "" {
 		netconf.Name = netattachdef.Name
 	}
+	if netconf.IsSecondary && netconf.Name == types.DefaultNetworkName {
+		return nil, fmt.Errorf("non-default Network attachment definition's name cannot be %s", types.DefaultNetworkName)
+	}
 	return netconf, nil
 }
 
 // Note that for port_group and address_set, it does not allow the '-' character
 func GetNadName(namespace, name string, isDefault bool) string {
 	if isDefault {
-		return "default"
+		return types.DefaultNetworkName
 	}
 	return GetNadKeyName(namespace, name)
 }

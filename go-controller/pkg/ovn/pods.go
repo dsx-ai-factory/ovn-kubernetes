@@ -48,6 +48,8 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 		nodeName := pod.Spec.NodeName
 		if oc.nadInfo.TopoType == ovntypes.LocalnetAttachDefTopoType {
 			nodeName = ovntypes.OVNLocalnetSwitch
+		} else if oc.nadInfo.TopoType == ovntypes.Layer2AttachDefTopoType {
+			nodeName = ovntypes.OvnLayer2Switch
 		}
 		switchName := oc.nadInfo.Prefix + nodeName
 		// skip nodes that are not running ovnk (inferred from host subnets)
@@ -83,6 +85,8 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 	var switches []string
 	if oc.nadInfo.TopoType == ovntypes.LocalnetAttachDefTopoType {
 		switches = []string{oc.nadInfo.Prefix + ovntypes.OVNLocalnetSwitch}
+	} else if oc.nadInfo.TopoType == ovntypes.Layer2AttachDefTopoType {
+		switches = []string{oc.nadInfo.Prefix + ovntypes.OvnLayer2Switch}
 	} else {
 		// get all the nodes from the watchFactory
 		nodes, err := oc.mc.watchFactory.GetNodes()
@@ -191,6 +195,8 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfoMap map[string]*l
 	lsManagerNodeName := pod.Spec.NodeName
 	if oc.nadInfo.TopoType == ovntypes.LocalnetAttachDefTopoType {
 		lsManagerNodeName = ovntypes.OVNLocalnetSwitch
+	} else if oc.nadInfo.TopoType == ovntypes.Layer2AttachDefTopoType {
+		lsManagerNodeName = ovntypes.OvnLayer2Switch
 	}
 
 	for nadName, network := range networkMap {
@@ -495,6 +501,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	lsManagerNodeName := pod.Spec.NodeName
 	if oc.nadInfo.TopoType == ovntypes.LocalnetAttachDefTopoType {
 		lsManagerNodeName = ovntypes.OVNLocalnetSwitch
+	} else if oc.nadInfo.TopoType == ovntypes.Layer2AttachDefTopoType {
+		lsManagerNodeName = ovntypes.OvnLayer2Switch
 	}
 	// If a node does node have an assigned hostsubnet don't wait for the logical switch to appear
 	if oc.lsManager.IsNonHostSubnetSwitch(oc.nadInfo.Prefix + lsManagerNodeName) {

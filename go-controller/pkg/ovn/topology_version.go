@@ -39,10 +39,15 @@ func (oc *Controller) ovnTopologyCleanup() error {
 func (oc *Controller) reportTopologyVersion(ctx context.Context) error {
 	currentTopologyVersion := strconv.Itoa(ovntypes.OvnCurrentTopologyVersion)
 	var err error
-	if oc.nadInfo.TopoType == ovntypes.LocalnetAttachDefTopoType {
-		ovnLocalnetSwitch := oc.nadInfo.Prefix + ovntypes.OVNLocalnetSwitch
+	if oc.nadInfo.TopoType == ovntypes.LocalnetAttachDefTopoType || oc.nadInfo.TopoType == ovntypes.Layer2AttachDefTopoType {
+		var switchName string
+		if oc.nadInfo.TopoType == ovntypes.LocalnetAttachDefTopoType {
+			switchName = oc.nadInfo.Prefix + ovntypes.OVNLocalnetSwitch
+		} else {
+			switchName = oc.nadInfo.Prefix + ovntypes.OvnLayer2Switch
+		}
 		logicalSwitch := nbdb.LogicalSwitch{
-			Name:        ovnLocalnetSwitch,
+			Name:        switchName,
 			ExternalIDs: map[string]string{"k8s-ovn-topo-version": currentTopologyVersion},
 		}
 		err = libovsdbops.UpdateLogicalSwitchSetExternalIDs(oc.mc.nbClient, &logicalSwitch)
@@ -122,7 +127,7 @@ func (oc *Controller) cleanTopologyAnnotation() error {
 func (oc *Controller) determineOVNTopoVersionFromOVN() (int, error) {
 	var v string
 	var exists bool
-	if oc.nadInfo.TopoType != ovntypes.LocalnetAttachDefTopoType {
+	if oc.nadInfo.TopoType != ovntypes.LocalnetAttachDefTopoType && oc.nadInfo.TopoType != ovntypes.Layer2AttachDefTopoType {
 		logicalRouter := &nbdb.LogicalRouter{Name: oc.nadInfo.Prefix + ovntypes.OVNClusterRouter}
 		logicalRouter, err := libovsdbops.GetLogicalRouter(oc.mc.nbClient, logicalRouter)
 		if err != nil && err != libovsdbclient.ErrNotFound {
@@ -134,7 +139,14 @@ func (oc *Controller) determineOVNTopoVersionFromOVN() (int, error) {
 		}
 		v, exists = logicalRouter.ExternalIDs["k8s-ovn-topo-version"]
 	} else {
-		logicalSwitch := &nbdb.LogicalSwitch{Name: oc.nadInfo.Prefix + ovntypes.OVNLocalnetSwitch}
+		var l2Switch string
+		if oc.nadInfo.TopoType == ovntypes.LocalnetAttachDefTopoType {
+			l2Switch = oc.nadInfo.Prefix + ovntypes.OVNLocalnetSwitch
+		} else {
+			// oc.nadInfo.TopoType == ovntypes.Layer2AttachDefTopoType
+			l2Switch = oc.nadInfo.Prefix + ovntypes.OvnLayer2Switch
+		}
+		logicalSwitch := &nbdb.LogicalSwitch{Name: l2Switch}
 		logicalSwitch, err := libovsdbops.GetLogicalSwitch(oc.mc.nbClient, logicalSwitch)
 		if err != nil && err != libovsdbclient.ErrNotFound {
 			return 0, fmt.Errorf("error getting switch %s: %v", logicalSwitch.Name, err)

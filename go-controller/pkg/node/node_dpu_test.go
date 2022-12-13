@@ -111,6 +111,7 @@ var _ = Describe("Node DPU tests", func() {
 			NetConf: ctypes.NetConf{
 				Name: types.DefaultNetworkName,
 			},
+			TopoType: types.Layer3AttachDefTopoType,
 		}
 		nadInfo, _ := util.NewNetAttachDefInfo(netconf)
 		nadInfo.NetAttachDefs.Store("default", &util.NadConfig{MissRateLimitConfig: util.MissRateLimitConfig{MaxNewConnPPS: 0, MaxNewConnBurst: 0}})

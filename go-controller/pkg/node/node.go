@@ -666,6 +666,7 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 			NetCidr:     config.Default.RawClusterSubnets,
 			MTU:         config.Default.MTU,
 			IsSecondary: false,
+			TopoType:    types.Layer3AttachDefTopoType,
 		}
 		nadInfo, _ := util.NewNetAttachDefInfo(defaultNetConf)
 		// Default node controller should not fail, e.g for XDP
@@ -812,10 +813,6 @@ func (n *OvnNode) initOvnNodeController(netattachdef *nettypes.NetworkAttachment
 			n.defaultNodeController.enableDoSChecker()
 		}
 		return n.defaultNodeController, nil
-	}
-
-	if nadInfo.NetName == types.DefaultNetworkName {
-		return nil, fmt.Errorf("non-default Network attachment definition's name cannot be %s", types.DefaultNetworkName)
 	}
 
 	// Note that net-attach-def add/delete/update events are serialized, so we don't need locks here.
