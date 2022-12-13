@@ -342,8 +342,8 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 		ipStrs[i] = ip.String()
 	}
 
-	klog.Infof("ConfigureOVS: namespace: %s, podName: %s, network: %s, mode %s, SandboxID: %q, UID: %q, MAC: %s, IPs: %v, clusterName: %s",
-		namespace, podName, ifInfo.NadName, config.OvnKubeNode.Mode, sandboxID, initialPodUID, ifInfo.MAC, ipStrs, ifInfo.ClusterName)
+	klog.Infof("ConfigureOVS: namespace: %s, podName: %s, network: %s, mode %s, SandboxID: %q, UID: %q, MAC: %s, IPs: %v, clusterName: %s, ovn_kube_mode: %s",
+		namespace, podName, ifInfo.NadName, config.OvnKubeNode.Mode, sandboxID, initialPodUID, ifInfo.MAC, ipStrs, ifInfo.ClusterName, ifInfo.OvnKubeMode)
 
 	// ConfigureOVS should prefix ovs ports with cluster name to differentiate
 	// pods with same name belonging to multiple clusters.
@@ -410,6 +410,12 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 		// We have cluster name, mark our OVS ports with cluster_name so that we can differentiate
 		// when searching for stale ports during healthcheck.
 		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:cluster_name=%s", ifInfo.ClusterName))
+	}
+
+	if ifInfo.OvnKubeMode != "" {
+		// Since ovn-kube can run in full mode and dpu mode, we need to mark the type in order to know
+		// which owns what resource
+		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:ovn_kube_mode=%s", ifInfo.OvnKubeMode))
 	}
 
 	if len(ifInfo.NetdevName) != 0 {

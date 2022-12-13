@@ -185,6 +185,9 @@ func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCac
 	if config.Kubernetes.ClusterName != "" {
 		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:cluster_name=%s", config.Kubernetes.ClusterName))
 	}
+	// check only for resources created by the current type of ovn-kube
+	ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:ovn_kube_mode=%s", config.OvnKubeNode.Mode))
+
 	out, stderr, err := util.RunOVSVsctl(ovsArgs...)
 	if err != nil {
 		klog.Errorf("Failed to list ovn-k8s OVS interfaces, stderr: %q, error: %v", stderr, err)
