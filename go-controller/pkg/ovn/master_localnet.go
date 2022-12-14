@@ -121,8 +121,8 @@ func (oc *Controller) connectToLogicalRouter(logicalRouterName string) error {
 	}
 	logicalRouter := nbdb.LogicalRouter{Name: logicalRouterName}
 
-	err := libovsdbops.CreateOrUpdateLogicalRouterPorts(oc.mc.nbClient, &logicalRouter,
-		[]*nbdb.LogicalRouterPort{&logicalRouterPort}, &logicalRouterPort.Networks, &logicalRouterPort.MAC)
+	err := libovsdbops.CreateOrUpdateLogicalRouterPort(oc.mc.nbClient, &logicalRouter,
+		&logicalRouterPort, nil, &logicalRouterPort.MAC, &logicalRouterPort.Networks)
 	if err != nil {
 		return fmt.Errorf("failed to add logical router port %v to router %s: %v", logicalRouterPortName, logicalRouterName, err)
 	}
