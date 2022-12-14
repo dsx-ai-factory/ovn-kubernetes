@@ -276,7 +276,7 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 		if config.Metrics.BindAddress != "" {
 			pprofBindAddress := ""
 			if config.Metrics.EnablePprof {
-				pprofBindAddress = "127.0.0.1:19409"
+				pprofBindAddress = config.Metrics.PprofBindAddress
 			}
 			// serve ovnkube_master metrics
 			metrics.StartMetricsServer(config.Metrics.BindAddress, pprofBindAddress,
@@ -346,7 +346,7 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 			}
 			pprofBindAddress := ""
 			if config.Metrics.EnablePprof {
-				pprofBindAddress = "127.0.0.1:19410"
+				pprofBindAddress = config.Metrics.PprofBindAddress
 			}
 			metrics.StartOVNMetricsServer(config.Metrics.BindAddress, pprofBindAddress,
 				config.Metrics.NodeServerCert, config.Metrics.NodeServerPrivKey, stopChan, wg)

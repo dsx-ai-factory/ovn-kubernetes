@@ -44,8 +44,11 @@ BASEDIR=$(dirname $0)
 # K8S_NODE_IP - IP address of of the node
 #
 # OVN_METRICS_ENDPOINT_IP - metrics endpoint ip
+# OVN_METRICS_PPROF_ENDPOINT_IP - metrics endpoint ip
 # OVN_METRICS_MASTER_PORT - metrics master port
 # OVN_METRICS_WORKER_PORT - metrics worker port
+# OVN_METRICS_PPROF_MASTER_PORT - metrics pprof master port
+# OVN_METRICS_PPROF_WORKER_PORT - metrics pprof worker port
 # OVN_DAEMONSET_VERSION - version match daemonset and image - v3
 # K8S_TOKEN - the apiserver token. Automatically detected when running in a pod - v3
 # K8S_CACERT - the apiserver CA. Automatically detected when running in a pod - v3
@@ -200,16 +203,35 @@ if [[ -z ${metrics_endpoint_ip} ]]; then
 fi
 metrics_endpoint_ip=$(bracketify $metrics_endpoint_ip)
 
+# set metrics pprof endpoint bind to 127.0.0.1
+metrics_pprof_endpoint_ip=${OVN_METRICS_PPROF_ENDPOINT_IP}
+if [[ -z ${metrics_pprof_endpoint_ip} ]]; then
+  metrics_pprof_endpoint_ip=127.0.0.1
+fi
+metrics_pprof_endpoint_ip=$(bracketify $metrics_pprof_endpoint_ip)
+
 # set metrics endpoint master port bind to K8S_NODE_IP
 metrics_master_port=${OVN_METRICS_MASTER_PORT}
 if [[ -z ${metrics_master_port} ]]; then
   metrics_master_port=9409
 fi
 
+# set metrics endpoint pprof master port bind to K8S_NODE_IP
+metrics_pprof_master_port=${OVN_METRICS_PPROF_MASTER_PORT}
+if [[ -z ${metrics_pprof_master_port} ]]; then
+  metrics_pprof_master_port=19409
+fi
+
 # set metrics endpoint worker port bind to K8S_NODE_IP
 metrics_worker_port=${OVN_METRICS_WORKER_PORT}
 if [[ -z ${metrics_worker_port} ]]; then
   metrics_worker_port=9410
+fi
+
+# set metrics endpoint pprof worker port bind to K8S_NODE_IP
+metrics_pprof_worker_port=${OVN_METRICS_PPROF_WORKER_PORT}
+if [[ -z ${metrics_pprof_worker_port} ]]; then
+  metrics_pprof_worker_port=19410
 fi
 
 ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
@@ -1118,6 +1140,7 @@ ovn-master() {
   fi
 
   ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:${metrics_master_port}"
+  ovnkube_master_metrics_pprof_bind_address="${metrics_pprof_endpoint_ip}:${metrics_pprof_master_port}"
   local ovnkube_metrics_tls_opts=""
   #if [[ ${OVNKUBE_METRICS_PK} != "" && ${OVNKUBE_METRICS_CERT} != "" ]]; then
   #  ovnkube_metrics_tls_opts="
@@ -1172,7 +1195,8 @@ ovn-master() {
     ${multi_networkpolicy_enabled_flag} \
     --metrics-interval ${ovn_metrics_scrape_interval} \
     ${ovnkube_config_duration_enable_flag} \
-    --metrics-bind-address ${ovnkube_master_metrics_bind_address} ${ovn_metrics_enable_pprof_flag} \
+    --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
+    --metrics-pprof-bind-address ${ovnkube_master_metrics_pprof_bind_address} ${ovn_metrics_enable_pprof_flag} \
     --host-network-namespace ${ovn_host_network_namespace} \
     ${ctinv_flows_disable_flag} \
     ${ovn_master_ha_opts} \
@@ -1522,6 +1546,7 @@ ovn-node() {
   fi
 
   ovnkube_node_metrics_bind_address="${metrics_endpoint_ip}:${metrics_worker_port}"
+  ovnkube_node_metrics_pprof_bind_address="${metrics_pprof_endpoint_ip}:${metrics_pprof_worker_port}"
 
   ovn_unprivileged_flag="--unprivileged-mode"
   if test -z "${OVN_UNPRIVILEGED_MODE+x}" -o "x${OVN_UNPRIVILEGED_MODE}" = xno; then
@@ -1636,7 +1661,8 @@ ovn-node() {
     ${ipfix_targets} \
     ${ipfix_config} \
     --metrics-interval ${ovn_metrics_scrape_interval} \
-    --metrics-bind-address ${ovnkube_node_metrics_bind_address} ${ovn_metrics_enable_pprof_flag} \
+    --metrics-bind-address ${ovnkube_node_metrics_bind_address} \
+    --metrics-pprof-bind-address ${ovnkube_node_metrics_pprof_bind_address} ${ovn_metrics_enable_pprof_flag} \
     ${export_ovs_metrics_opts} \
     ${ovnkube_node_mode_flag} \
     ${egress_interface} \

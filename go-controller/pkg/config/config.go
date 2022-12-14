@@ -326,6 +326,8 @@ type KubernetesConfig struct {
 
 	// CompatMetricsBindAddress is overridden by the corresponding option in MetricsConfig
 	CompatMetricsBindAddress string `gcfg:"metrics-bind-address"`
+	// CompatMetricsPprofBindAddress is overridden by the corresponding option in MetricsConfig
+	CompatMetricsPprofBindAddress string `gcfg:"metrics-pprof-bind-address"`
 	// CompatMetricsEnablePprof is overridden by the corresponding option in MetricsConfig
 	CompatMetricsEnablePprof bool `gcfg:"metrics-enable-pprof"`
 	// CompatMetricsNodeServerPrivKey is overridden by the corresponding option in MetricsConfig
@@ -337,6 +339,7 @@ type KubernetesConfig struct {
 // MetricsConfig holds Prometheus metrics-related parameters.
 type MetricsConfig struct {
 	BindAddress       string `gcfg:"bind-address"`
+	PprofBindAddress  string `gcfg:"pprof-bind-address"`
 	ExportOVSMetrics  bool   `gcfg:"export-ovs-metrics"`
 	EnablePprof       bool   `gcfg:"enable-pprof"`
 	NodeServerPrivKey string `gcfg:"node-server-privkey"`
@@ -1048,6 +1051,11 @@ var MetricsFlags = []cli.Flag{
 		Usage:       "The IP address and port for the OVN K8s metrics server to serve on (set to 0.0.0.0 for all IPv4 interfaces)",
 		Destination: &cliConfig.Metrics.BindAddress,
 	},
+	&cli.StringFlag{
+		Name:        "metrics-pprof-bind-address",
+		Usage:       "The IP address and port for the OVN K8s pprof server to serve on (set to 0.0.0.0 for all IPv4 interfaces)",
+		Destination: &cliConfig.Metrics.PprofBindAddress,
+	},
 	&cli.BoolFlag{
 		Name:        "export-ovs-metrics",
 		Usage:       "When true exports OVS metrics from the OVN metrics server",
@@ -1584,6 +1592,9 @@ func buildMetricsConfig(cli, file *config) error {
 	}
 	if Kubernetes.CompatMetricsNodeServerCert != "" {
 		Metrics.NodeServerCert = Kubernetes.CompatMetricsNodeServerCert
+	}
+	if Kubernetes.CompatMetricsPprofBindAddress != "" {
+		Metrics.PprofBindAddress = Kubernetes.CompatMetricsPprofBindAddress
 	}
 
 	Metrics.EnablePprof = Kubernetes.CompatMetricsEnablePprof
