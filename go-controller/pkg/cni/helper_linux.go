@@ -363,6 +363,11 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	// but only the latest one should have the iface-id set.
 	names, _ := ovsFind("Interface", "name", "external-ids:iface-id="+ifaceID)
 	for _, name := range names {
+		if name == hostIfaceName {
+			// this may be result of restarting ovnkube-node, and it is trying to add the same VF representor to
+			// br-int for the same pod; do not delete port in this case.
+			continue
+		}
 		if out, err := ovsExec("del-port", "br-int", name); err != nil {
 			klog.Warningf("Failed to delete stale OVS port %q with iface-id %q from br-int: %v\n %q",
 				name, ifaceID, err, string(out))
