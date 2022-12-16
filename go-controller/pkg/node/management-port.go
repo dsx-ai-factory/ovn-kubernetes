@@ -61,33 +61,34 @@ func newManagementPort(nodeName string, hostSubnets []*net.IPNet) ManagementPort
 }
 
 func (mp *managementPort) Create(nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
+	k8sMgmtIntfName := util.GetK8sMgmtIntfName()
 	// Create a OVS internal interface.
 	legacyMgmtIntfName := util.GetLegacyK8sMgmtIntfName(mp.nodeName)
 	stdout, stderr, err := util.RunOVSVsctl(
 		"--", "--if-exists", "del-port", "br-int", legacyMgmtIntfName,
-		"--", "--may-exist", "add-port", "br-int", types.K8sMgmtIntfName,
-		"--", "set", "interface", types.K8sMgmtIntfName,
+		"--", "--may-exist", "add-port", "br-int", k8sMgmtIntfName,
+		"--", "set", "interface", k8sMgmtIntfName,
 		"type=internal", "mtu_request="+fmt.Sprintf("%d", config.Default.MTU),
 		"external-ids:iface-id="+types.K8sPrefix+mp.nodeName)
 	if err != nil {
 		klog.Errorf("Failed to add port to br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return nil, err
 	}
-	macAddress, err := util.GetOVSPortMACAddress(types.K8sMgmtIntfName)
+	macAddress, err := util.GetOVSPortMACAddress(k8sMgmtIntfName)
 	if err != nil {
 		klog.Errorf("Failed to get management port MAC address: %v", err)
 		return nil, err
 	}
 	// persist the MAC address so that upon node reboot we get back the same mac address.
-	_, stderr, err = util.RunOVSVsctl("set", "interface", types.K8sMgmtIntfName,
+	_, stderr, err = util.RunOVSVsctl("set", "interface", k8sMgmtIntfName,
 		fmt.Sprintf("mac=%s", strings.ReplaceAll(macAddress.String(), ":", "\\:")))
 	if err != nil {
 		klog.Errorf("Failed to persist MAC address %q for %q: stderr:%s (%v)", macAddress.String(),
-			types.K8sMgmtIntfName, stderr, err)
+			k8sMgmtIntfName, stderr, err)
 		return nil, err
 	}
 
-	cfg, err := createPlatformManagementPort(types.K8sMgmtIntfName, mp.hostSubnets)
+	cfg, err := createPlatformManagementPort(k8sMgmtIntfName, mp.hostSubnets)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +112,7 @@ func (mpc *managementPort) CheckManagementPortHealth(cfg *managementPortConfig, 
 
 func managementPortReady() (bool, error) {
 	// Get the OVS interface name for the Management Port
-	ofport, _, err := util.RunOVSVsctl("--if-exists", "get", "interface", types.K8sMgmtIntfName, "ofport")
+	ofport, _, err := util.RunOVSVsctl("--if-exists", "get", "interface", util.GetK8sMgmtIntfName(), "ofport")
 	if err != nil {
 		return false, nil
 	}

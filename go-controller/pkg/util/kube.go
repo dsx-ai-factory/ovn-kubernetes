@@ -404,3 +404,50 @@ func ExternalIDsForObject(obj K8sObject) map[string]string {
 		types.OvnK8sPrefix + "/kind":  gk.String(),
 	}
 }
+
+var clusterNamePrefix string
+
+func SetClusterName(clustername string) {
+	if clustername != "" {
+		clusterNamePrefix = clustername + "_"
+	}
+}
+
+func GetClusterNamePrefix() string {
+	return clusterNamePrefix
+}
+
+func GetOVNClusterRouterName(prefixes ...string) string {
+	if len(prefixes) == 1 { // typically the NadInfo prefix
+		return GetClusterNamePrefix() + prefixes[0] + types.OVNClusterRouter
+	}
+
+	if len(prefixes) > 1 {
+		var partprefix string
+		for _, prefix := range prefixes {
+			partprefix = partprefix + prefix
+		}
+		return GetClusterNamePrefix() + partprefix + types.OVNClusterRouter
+	}
+	return GetClusterNamePrefix() + types.OVNClusterRouter
+}
+
+func GetOVNJoinSwitchName() string {
+	return GetClusterNamePrefix() + types.OVNJoinSwitch
+}
+
+var ovnK8sMgmtIntfName string
+
+func GetK8sMgmtIntfName() string {
+	if ovnK8sMgmtIntfName != "" {
+		return ovnK8sMgmtIntfName
+	}
+	// first time call, setup var for faster return
+	if config.OvnKubeNode.MgmtPortIntfName != "" {
+		ovnK8sMgmtIntfName = config.OvnKubeNode.MgmtPortIntfName
+	} else {
+		// return default mgmt port name
+		ovnK8sMgmtIntfName = types.K8sMgmtIntfName
+	}
+	return ovnK8sMgmtIntfName
+}

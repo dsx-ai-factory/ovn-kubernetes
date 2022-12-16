@@ -1219,9 +1219,10 @@ func (oc *Controller) syncStaleEgressReroutePolicy(egressIPCache map[string]egre
 		return false
 	}
 
-	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.mc.nbClient, types.OVNClusterRouter, p)
+	ovnClusterRouter := util.GetOVNClusterRouterName()
+	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.mc.nbClient, ovnClusterRouter, p)
 	if err != nil {
-		return fmt.Errorf("error deleting stale logical router policies from router %s: %v", types.OVNClusterRouter, err)
+		return fmt.Errorf("error deleting stale logical router policies from router %s: %v", ovnClusterRouter, err)
 	}
 
 	// Update Logical Router Policies that have stale nexthops. Notice that we must do this separately
@@ -2010,9 +2011,10 @@ func (e *egressIPController) createEgressReroutePolicy(filterOption, egressIPNam
 	p := func(item *nbdb.LogicalRouterPolicy) bool {
 		return item.Match == lrp.Match && item.Priority == lrp.Priority && item.ExternalIDs["name"] == lrp.ExternalIDs["name"]
 	}
-	err := libovsdbops.CreateOrAddNextHopsToLogicalRouterPolicyWithPredicate(e.nbClient, types.OVNClusterRouter, &lrp, p)
+	ovnClusterRouter := util.GetOVNClusterRouterName()
+	err := libovsdbops.CreateOrAddNextHopsToLogicalRouterPolicyWithPredicate(e.nbClient, ovnClusterRouter, &lrp, p)
 	if err != nil {
-		return fmt.Errorf("error creating logical router policy %+v on router %s: %v", lrp, types.OVNClusterRouter, err)
+		return fmt.Errorf("error creating logical router policy %+v on router %s: %v", lrp, ovnClusterRouter, err)
 	}
 	return nil
 }
@@ -2028,10 +2030,11 @@ func (e *egressIPController) deleteEgressReroutePolicy(filterOption, egressIPNam
 	p := func(item *nbdb.LogicalRouterPolicy) bool {
 		return item.Match == filterOption && item.Priority == types.EgressIPReroutePriority && item.ExternalIDs["name"] == egressIPName
 	}
-	err := libovsdbops.DeleteNextHopFromLogicalRouterPoliciesWithPredicate(e.nbClient, types.OVNClusterRouter, p, gatewayRouterIP)
+	ovnClusterRouter := util.GetOVNClusterRouterName()
+	err := libovsdbops.DeleteNextHopFromLogicalRouterPoliciesWithPredicate(e.nbClient, ovnClusterRouter, p, gatewayRouterIP)
 	if err != nil {
 		return fmt.Errorf("error removing nexthop IP %s from egress ip %s policies on router %s: %v",
-			gatewayRouterIP, egressIPName, types.OVNClusterRouter, err)
+			gatewayRouterIP, egressIPName, ovnClusterRouter, err)
 	}
 
 	return nil
@@ -2067,10 +2070,11 @@ func (e *egressIPController) deleteEgressIPStatusSetup(name string, status egres
 			}
 			return item.Priority == types.EgressIPReroutePriority && item.ExternalIDs["name"] == name && hasGatewayRouterIPNexthop
 		}
-		ops, err = libovsdbops.DeleteNextHopFromLogicalRouterPoliciesWithPredicateOps(e.nbClient, nil, types.OVNClusterRouter, policyPred, gwIP)
+		ovnClusterRouter := util.GetOVNClusterRouterName()
+		ops, err = libovsdbops.DeleteNextHopFromLogicalRouterPoliciesWithPredicateOps(e.nbClient, nil, ovnClusterRouter, policyPred, gwIP)
 		if err != nil {
 			return fmt.Errorf("error removing nexthop IP %s from egress ip %s policies on router %s: %v",
-				gatewayRouterIP, name, types.OVNClusterRouter, err)
+				gatewayRouterIP, name, ovnClusterRouter, err)
 		}
 	}
 
@@ -2298,9 +2302,10 @@ func (oc *Controller) createLogicalRouterPolicy(match string, priority int) erro
 	p := func(item *nbdb.LogicalRouterPolicy) bool {
 		return item.Match == lrp.Match && item.Priority == lrp.Priority
 	}
-	err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(oc.mc.nbClient, types.OVNClusterRouter, &lrp, p)
+	ovnClusterRouter := util.GetOVNClusterRouterName()
+	err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(oc.mc.nbClient, ovnClusterRouter, &lrp, p)
 	if err != nil {
-		return fmt.Errorf("error creating logical router policy %+v on router %s: %v", lrp, types.OVNClusterRouter, err)
+		return fmt.Errorf("error creating logical router policy %+v on router %s: %v", lrp, ovnClusterRouter, err)
 	}
 	return nil
 }
@@ -2309,7 +2314,7 @@ func (oc *Controller) deleteLogicalRouterPolicy(match string, priority int) erro
 	p := func(item *nbdb.LogicalRouterPolicy) bool {
 		return item.Match == match && item.Priority == priority
 	}
-	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.mc.nbClient, types.OVNClusterRouter, p)
+	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.mc.nbClient, util.GetOVNClusterRouterName(), p)
 	if err != nil {
 		return fmt.Errorf("error deleting router policy with priotity %d and match %s: %v", priority, match, err)
 	}

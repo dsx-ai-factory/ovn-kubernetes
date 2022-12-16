@@ -192,6 +192,7 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 		ExternalIDs: map[string]string{
 			"physical_ip":  physicalIPs[0],
 			"physical_ips": strings.Join(physicalIPs, ","),
+			"cluster_name": config.Kubernetes.ClusterName,
 		},
 		Ports:             []string{gwRouterPort + "-UUID", externalRouterPort + "-UUID"},
 		StaticRoutes:      grStaticRoutes,
@@ -208,7 +209,7 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 
 		expectedNodeSwitch.ACLs = append(expectedNodeSwitch.ACLs, nodeACL.UUID)
 	}
-
+	expectedNodeSwitch.ExternalIDs = map[string]string{"cluster_name": config.Kubernetes.ClusterName}
 	testData = append(testData, expectedNodeSwitch)
 
 	externalLogicalSwitchPort := &nbdb.LogicalSwitchPort{
@@ -252,6 +253,7 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 		&nbdb.LogicalSwitch{
 			UUID:  externalSwitch + "-UUID",
 			Name:  externalSwitch,
+			ExternalIDs: map[string]string{"cluster_name": config.Kubernetes.ClusterName},
 			Ports: []string{l3GatewayConfig.InterfaceID + "-UUID", externalSwitchPortToRouter + "-UUID"},
 		},
 		&nbdb.LoadBalancerGroup{
@@ -296,8 +298,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				StaticRoutes: []string{routeUUID},
 			}
 			expectedNodeSwitch := &nbdb.LogicalSwitch{
-				UUID: nodeName + "-UUID",
-				Name: nodeName,
+				UUID:        nodeName + "-UUID",
+				Name:        nodeName,
+				ExternalIDs: map[string]string{"cluster_name": config.Kubernetes.ClusterName},
 			}
 			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
 				UUID: types.ClusterLBGroupName + "-UUID",
@@ -354,8 +357,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				Name: types.OVNClusterRouter,
 			}
 			expectedNodeSwitch := &nbdb.LogicalSwitch{
-				UUID: nodeName + "-UUID",
-				Name: nodeName,
+				UUID:        nodeName + "-UUID",
+				Name:        nodeName,
+				ExternalIDs: map[string]string{"cluster_name": config.Kubernetes.ClusterName},
 			}
 			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
 				UUID: types.ClusterLBGroupName + "-UUID",
@@ -410,8 +414,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				Name: types.OVNClusterRouter,
 			}
 			expectedNodeSwitch := &nbdb.LogicalSwitch{
-				UUID: nodeName + "-UUID",
-				Name: nodeName,
+				UUID:        nodeName + "-UUID",
+				Name:        nodeName,
+				ExternalIDs: map[string]string{"cluster_name": config.Kubernetes.ClusterName},
 			}
 			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
 				UUID: types.ClusterLBGroupName + "-UUID",
@@ -466,8 +471,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				Name: types.OVNClusterRouter,
 			}
 			expectedNodeSwitch := &nbdb.LogicalSwitch{
-				UUID: nodeName + "-UUID",
-				Name: nodeName,
+				UUID:        nodeName + "-UUID",
+				Name:        nodeName,
+				ExternalIDs: map[string]string{"cluster_name": config.Kubernetes.ClusterName},
 			}
 			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
 				UUID: types.ClusterLBGroupName + "-UUID",
@@ -546,8 +552,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				StaticRoutes: []string{routeUUID1, routeUUID2},
 			}
 			expectedNodeSwitch := &nbdb.LogicalSwitch{
-				UUID: nodeName + "-UUID",
-				Name: nodeName,
+				UUID:        nodeName + "-UUID",
+				Name:        nodeName,
+				ExternalIDs: map[string]string{"cluster_name": config.Kubernetes.ClusterName},
 			}
 			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
 				Name: types.ClusterLBGroupName,

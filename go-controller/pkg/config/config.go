@@ -321,6 +321,7 @@ type KubernetesConfig struct {
 	HostNetworkNamespace string `gcfg:"host-network-namespace"`
 	SkipRequestedChassis bool
 	PlatformType         string `gcfg:"platform-type"`
+	ClusterName          string `gcfg:"clusterName"`
 
 	// CompatMetricsBindAddress is overridden by the corresponding option in MetricsConfig
 	CompatMetricsBindAddress string `gcfg:"metrics-bind-address"`
@@ -439,6 +440,7 @@ type HybridOverlayConfig struct {
 // OvnKubeNodeConfig holds ovnkube-node configurations
 type OvnKubeNodeConfig struct {
 	Mode                 string `gcfg:"mode"`
+	MgmtPortIntfName     string `gcfg:"mgmt-port-netdev-intf-name"`
 	MgmtPortNetdev       string `gcfg:"mgmt-port-netdev"`
 	DisableOVNIfaceIdVer bool   `gcfg:"disable-ovn-iface-id-ver"`
 	IsPrimaryDPU         bool
@@ -1021,6 +1023,13 @@ var K8sFlags = []cli.Flag{
 		Destination: &cliConfig.Kubernetes.PlatformType,
 		Value:       Kubernetes.PlatformType,
 	},
+	&cli.StringFlag{
+		Name:        "cluster-name",
+		Usage:       "name of the cluster",
+		Destination: &cliConfig.Kubernetes.ClusterName,
+		Value:       Kubernetes.ClusterName,
+		Required:    false,
+	},
 }
 
 // MetricsFlags capture metrics-related options
@@ -1281,6 +1290,12 @@ var OvnKubeNodeFlags = []cli.Flag{
 		Usage:       "ovnkube-node operating mode full(default), dpu, dpu-host",
 		Value:       OvnKubeNode.Mode,
 		Destination: &cliConfig.OvnKubeNode.Mode,
+	},
+	&cli.StringFlag{
+		Name:        "ovnkube-node-mgmt-port-intf-name",
+		Usage:       "name of the interface to be used as the management port. Default is ovn-k8s-mp0",
+		Value:       OvnKubeNode.MgmtPortIntfName,
+		Destination: &cliConfig.OvnKubeNode.MgmtPortIntfName,
 	},
 	&cli.StringFlag{
 		Name: "ovnkube-node-mgmt-port-netdev",

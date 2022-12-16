@@ -403,6 +403,11 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 		fmt.Sprintf("external_ids:ip_addresses=%s", strings.Join(ipStrs, ",")),
 		fmt.Sprintf("external_ids:sandbox=%s", sandboxID),
 	}
+	if ifInfo.ClusterName != "" {
+		// We have cluster name, mark our OVS ports with cluster_name so that we can differentiate
+		// when searching for stale ports during healthcheck.
+		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:cluster_name=%s", ifInfo.ClusterName))
+	}
 
 	if ifInfo.IsSecondary {
 		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:network_name=%s", ifInfo.NadName))

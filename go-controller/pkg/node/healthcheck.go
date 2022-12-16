@@ -1,6 +1,7 @@
 package node
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"strings"
@@ -149,9 +150,9 @@ func checkForStaleOVSInternalPorts() {
 	staleInterfaceArgs := []string{}
 	values := strings.Split(stdout, "\n\n")
 	for _, val := range values {
-		if val == types.K8sMgmtIntfName {
-			klog.Errorf("The representor for the ovn-k8s-mp0 management port is missing on the DPU. " +
-				"Perhaps the host rebooted or SR-IOV VFs were disabled on the host.")
+		if val == util.GetK8sMgmtIntfName() {
+			klog.Errorf("The representor for the management port: %s is missing on the DPU. "+
+				"Perhaps the host rebooted or SR-IOV VFs were disabled on the host.", util.GetK8sMgmtIntfName())
 			continue
 		}
 		klog.Warningf("Found stale interface %s, so queuing it to be deleted", val)
@@ -175,6 +176,10 @@ func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCac
 	// Get all ovn-kubernetes Pod interfaces. these are OVS interfaces that have their external_ids:sandbox set.
 	ovsArgs := []string{"--columns=name,external_ids", "--data=bare", "--no-headings",
 		"--format=csv", "find", "Interface", "external_ids:sandbox!=\"\""}
+	// if clustername is present, select only ports belonging to this cluster.
+	if config.Kubernetes.ClusterName != "" {
+		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:cluster_name=%s", config.Kubernetes.ClusterName))
+	}
 	out, stderr, err := util.RunOVSVsctl(ovsArgs...)
 	if err != nil {
 		klog.Errorf("Failed to list ovn-k8s OVS interfaces, stderr: %q, error: %v", stderr, err)

@@ -677,10 +677,11 @@ func (oc *Controller) addHybridRoutePolicyForPod(podIP net.IP, node string) erro
 		p := func(item *nbdb.LogicalRouterPolicy) bool {
 			return item.Priority == logicalRouterPolicy.Priority && strings.Contains(item.Match, matchSrcAS)
 		}
-		err = libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(oc.mc.nbClient, types.OVNClusterRouter,
+		ovnClusterRouter := util.GetOVNClusterRouterName()
+		err = libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(oc.mc.nbClient, ovnClusterRouter,
 			&logicalRouterPolicy, p, &logicalRouterPolicy.Nexthops, &logicalRouterPolicy.Match, &logicalRouterPolicy.Action)
 		if err != nil {
-			return fmt.Errorf("failed to add policy route %+v to %s: %v", logicalRouterPolicy, types.OVNClusterRouter, err)
+			return fmt.Errorf("failed to add policy route %+v to %s: %v", logicalRouterPolicy, ovnClusterRouter, err)
 		}
 	}
 	return nil
@@ -739,9 +740,10 @@ func (oc *Controller) delHybridRoutePolicyForPod(podIP net.IP, node string) erro
 			p := func(item *nbdb.LogicalRouterPolicy) bool {
 				return item.Priority == types.HybridOverlayReroutePriority && item.Match == matchStr
 			}
-			err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.mc.nbClient, types.OVNClusterRouter, p)
+			ovnClusterRouter := util.GetOVNClusterRouterName()
+			err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.mc.nbClient, ovnClusterRouter, p)
 			if err != nil {
-				return fmt.Errorf("error deleting policy %s on router %s: %v", matchStr, types.OVNClusterRouter, err)
+				return fmt.Errorf("error deleting policy %s on router %s: %v", matchStr, ovnClusterRouter, err)
 			}
 		}
 		if len(ipv4PodIPs) == 0 && len(ipv6PodIPs) == 0 {
@@ -764,9 +766,10 @@ func (oc *Controller) delAllHybridRoutePolicies() error {
 	policyPred := func(item *nbdb.LogicalRouterPolicy) bool {
 		return item.Priority == types.HybridOverlayReroutePriority
 	}
-	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.mc.nbClient, types.OVNClusterRouter, policyPred)
+	ovnClusterRouter := util.GetOVNClusterRouterName()
+	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.mc.nbClient, ovnClusterRouter, policyPred)
 	if err != nil {
-		return fmt.Errorf("error deleting hybrid route policies on %s: %v", types.OVNClusterRouter, err)
+		return fmt.Errorf("error deleting hybrid route policies on %s: %v", ovnClusterRouter, err)
 	}
 
 	// nuke all the address-sets.
@@ -796,9 +799,10 @@ func (oc *Controller) delAllLegacyHybridRoutePolicies() error {
 		}
 		return true
 	}
-	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.mc.nbClient, types.OVNClusterRouter, p)
+	ovnClusterRouter := util.GetOVNClusterRouterName()
+	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.mc.nbClient, ovnClusterRouter, p)
 	if err != nil {
-		return fmt.Errorf("error deleting legacy hybrid route policies on %s: %v", types.OVNClusterRouter, err)
+		return fmt.Errorf("error deleting legacy hybrid route policies on %s: %v", ovnClusterRouter, err)
 	}
 
 	return nil

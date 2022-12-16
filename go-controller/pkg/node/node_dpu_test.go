@@ -154,6 +154,7 @@ var _ = Describe("Node DPU tests", func() {
 				PodUID:        "a-pod",
 				NetNameInfo:   util.NetNameInfo{types.DefaultNetworkName, "", false},
 				NadName:       types.DefaultNetworkName,
+				ClusterName:   "",
 			}
 
 			scd = util.DPUConnectionDetails{

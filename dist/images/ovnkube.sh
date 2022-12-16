@@ -84,6 +84,7 @@ BASEDIR=$(dirname $0)
 # OVN_EGRESSQOS_ENABLE - enable egress QoS for ovn-kubernetes
 # OVN_UNPRIVILEGED_MODE - execute CNI ovs/netns commands from host (default no)
 # OVNKUBE_NODE_MODE - ovnkube node mode of operation, one of: full, dpu, dpu-host (default: full)
+# OVNKUBE_NODE_MGMT_PORT_INTF_NAME - Name of interface to be used as ovnkubernetes mgmt port (default: ovn-k8s-mp0)
 # OVNKUBE_NODE_MGMT_PORT_NETDEV - ovnkube node management port netdev. valid when ovnkube node mode is: dpu, dpu-host
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node. mandatory in case ovnkube-node-mode=="dpu"
 # OVN_HOST_NETWORK_NAMESPACE - namespace to classify host network traffic for applying network policies
@@ -97,6 +98,7 @@ BASEDIR=$(dirname $0)
 # OVS_MAX_IDLE - The maximum time (in ms) that idle flows will remain cached in the datapath
 # OVN_NB_ENABLE_LEADER_XFER_FOR_SNAPSHOT - Transfer leader election when snapshotting ovn nb db
 # OVN_SB_ENABLE_LEADER_XFER_FOR_SNAPSHOT - Transfer leader election when snapshotting ovn sb db
+# K8S_CLUSTER_NAME - name of the kubernetes cluster
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -211,6 +213,9 @@ ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
 # namespace used for classifying host network traffic
 ovn_host_network_namespace=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
 
+# name of the kubernetes cluster.
+k8s_cluster_name=${K8S_CLUSTER_NAME:-""}
+
 # host on which OVN DB POD(s) are running
 ovn_db_host=${K8S_NODE_IP:-""}
 
@@ -226,7 +231,7 @@ ovn_sb_raft_port=${OVN_SB_RAFT_PORT:-6644}
 ovn_encap_port=${OVN_ENCAP_PORT:-6081}
 # OVN_ENCAP_TOS - TOS value for the outer/geneve header. Default is none
 ovn_encap_tos=${OVN_ENCAP_TOS:-"none"}
-# OVN_CTINV_FLOWS_DISABLE - Enable/Disable CT Inv flows 
+# OVN_CTINV_FLOWS_DISABLE - Enable/Disable CT Inv flows
 ovn_ctinv_flows_disable=${OVN_CTINV_FLOWS_DISABLE:-false}
 # OVN_NB_RAFT_ELECTION_TIMER - ovn north db election timer in ms (default 1000)
 ovn_nb_raft_election_timer=${OVN_NB_RAFT_ELECTION_TIMER:-1000}
@@ -236,7 +241,7 @@ ovn_sb_raft_election_timer=${OVN_SB_RAFT_ELECTION_TIMER:-1000}
 ovn_nb_raft_sched_priority=${OVN_NB_RAFT_SCHED_PRIORITY:--12}
 # OVN_SB_RAFT_SCHED_PRIORITY - ovn south db process priority niceness (default -11)
 ovn_sb_raft_sched_priority=${OVN_SB_RAFT_SCHED_PRIORITY:--11}
-# OVN_XDP_SFREP - XDP SF Rep 
+# OVN_XDP_SFREP - XDP SF Rep
 OVN_XDP_SFREP=${OVN_XDP_SFREP:-"xdp_sf"}
 # OVN_XDP_VETH - XDP Veth
 OVN_XDP_VETH=${OVN_XDP_VETH:-"xdp_veth"}
@@ -300,6 +305,8 @@ ovn_ipfix_cache_active_timeout=${OVN_IPFIX_CACHE_ACTIVE_TIMEOUT:-} \
 
 # OVNKUBE_NODE_MODE - is the mode which ovnkube node operates
 ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
+# OVNKUBE_NODE_MGMT_PORT_INTF_NAME - name of interface being used as management port
+ovnkube_node_mgmt_port_intf_name=${OVNKUBE_NODE_MGMT_PORT_INTF_NAME:-}
 # OVNKUBE_NODE_mgmt_PORT_NETDEV - is the net device to be used for management port
 ovnkube_node_mgmt_port_netdev=${OVNKUBE_NODE_MGMT_PORT_NETDEV:-}
 ovnkube_config_duration_enable=${OVNKUBE_CONFIG_DURATION_ENABLE:-false}
@@ -391,6 +398,14 @@ wait_for_event() {
 # The ovnkube-db kubernetes service must be populated with OVN DB service endpoints
 # before various OVN K8s containers can come up. This function checks for that.
 ready_to_start_node() {
+
+  #exit early if OVN_NORTH and OVN_SOUTH vars are set
+  if [[ -v OVN_NORTH && -v OVN_SOUTH ]] ; then
+    echo "OVN_NORTH: ${OVN_NORTH}  OVN_SOUTH:${OVN_SOUTH} . Skipping endpoint check"
+    get_ovn_db_vars
+    return 0
+  fi
+
   local svcs=("$@")
 
   if [[ ${#svcs[@]} == 0 ]]; then
@@ -613,6 +628,7 @@ display_env() {
   echo OVN_ENCAP_IP ${ovn_encap_ip}
   echo ovnkube.sh version ${ovnkube_version}
   echo OVN_HOST_NETWORK_NAMESPACE ${ovn_host_network_namespace}
+  echo K8S_CLUSTER_NAME ${k8s_cluster_name}
 }
 
 ovn_debug() {
@@ -889,7 +905,7 @@ ovn-dbchecker() {
   trap 'kill $(jobs -p); exit 0' TERM
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovn-dbchecker.pid
-  
+
   # wait for ready_to_start_node
   echo "=============== ovn-dbchecker - (wait for ready_to_start_node)"
   wait_for_event ready_to_start_node
@@ -916,18 +932,18 @@ ovn-dbchecker() {
         --sb-cert-common-name ${ovn_sb_cert_cname}
       "
   }
-  
+
   echo "=============== ovn-dbchecker ========== OVNKUBE_DB"
   /usr/bin/ovndbchecker \
     --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
-    ${ovn_db_ssl_opts} \  
+    ${ovn_db_ssl_opts} \
     --loglevel=${ovnkube_loglevel} \
     --logfile-maxsize=${ovnkube_logfile_maxsize} \
     --logfile-maxbackups=${ovnkube_logfile_maxbackups} \
     --logfile-maxage=${ovnkube_logfile_maxage} \
     --pidfile ${OVN_RUNDIR}/ovn-dbchecker.pid \
     --logfile /var/log/ovn-kubernetes/ovn-dbchecker.log &
-  
+
   echo "=============== ovn-dbchecker ========== running"
   wait_for_event attempts=3 process_ready ovn-dbchecker
 
@@ -1020,7 +1036,7 @@ ovn-master() {
   if [[ -n ${ovn_v4_join_subnet} ]]; then
       ovn_v4_join_subnet_opt="--gateway-v4-join-subnet=${ovn_v4_join_subnet}"
   fi
-  
+
   ovn_v6_join_subnet_opt=
   if [[ -n ${ovn_v6_join_subnet} ]]; then
       ovn_v6_join_subnet_opt="--gateway-v6-join-subnet=${ovn_v6_join_subnet}"
@@ -1104,6 +1120,16 @@ ovn-master() {
   fi
   echo "ovnkube_config_duration_enable_flag: ${ovnkube_config_duration_enable_flag}"
 
+  k8s_cluster_name_option=
+  if [[ ${K8S_CLUSTER_NAME} != "" ]]; then
+	  k8s_cluster_name_option="--cluster-name=${K8S_CLUSTER_NAME}"
+  fi
+
+  ovnkube_node_mgmt_port_intf_name_flag=
+  if [[ ${ovnkube_node_mgmt_port_intf_name} != "" ]]; then
+    ovnkube_node_mgmt_port_intf_name_flag="--ovnkube-node-mgmt-port-intf-name=${ovnkube_node_mgmt_port_intf_name}"
+  fi
+
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
     --init-master ${K8S_NODE} \
@@ -1137,7 +1163,9 @@ ovn-master() {
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} --metrics-enable-pprof \
     --host-network-namespace ${ovn_host_network_namespace} \
     ${ctinv_flows_disable_flag} \
-    ${ovn_master_ha_opts} &
+    ${ovn_master_ha_opts} \
+    ${ovnkube_node_mgmt_port_intf_name_flag} \
+    ${k8s_cluster_name_option} &
 
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master
@@ -1318,7 +1346,7 @@ ovn-node() {
   ovn_routable_mtu_flag=
   if [[ -n "${routable_mtu}" ]]; then
 	  routable_mtu_flag="--routable-mtu ${routable_mtu}"
-  fi  
+  fi
 
   hybrid_overlay_flags=
   if [[ ${ovn_hybrid_overlay_enable} == "true" ]]; then
@@ -1448,6 +1476,11 @@ ovn-node() {
   iptables -t raw -A PREROUTING -p udp --dport $ovn_encap_port -j NOTRACK
   iptables -t raw -A OUTPUT -p udp --dport $ovn_encap_port -j NOTRACK
 
+  ovnkube_node_mgmt_port_intf_name_flag=
+  if [[ ${ovnkube_node_mgmt_port_intf_name} != "" ]]; then
+    ovnkube_node_mgmt_port_intf_name_flag="--ovnkube-node-mgmt-port-intf-name=${ovnkube_node_mgmt_port_intf_name}"
+  fi
+
   ovnkube_node_mgmt_port_netdev_flag=
   if [[ ${ovnkube_node_mgmt_port_netdev} != "" ]]; then
     ovnkube_node_mgmt_port_netdev_flag="--ovnkube-node-mgmt-port-netdev=${ovnkube_node_mgmt_port_netdev}"
@@ -1476,6 +1509,11 @@ ovn-node() {
   ovn_unprivileged_flag="--unprivileged-mode"
   if test -z "${OVN_UNPRIVILEGED_MODE+x}" -o "x${OVN_UNPRIVILEGED_MODE}" = xno; then
     ovn_unprivileged_flag=""
+  fi
+
+  k8s_cluster_name_option=
+  if [[ ${K8S_CLUSTER_NAME} != "" ]]; then
+	  k8s_cluster_name_option="--cluster-name=${K8S_CLUSTER_NAME}"
   fi
 
   ovn_gateway_router_subnet_opt=
@@ -1585,9 +1623,11 @@ ovn-node() {
     ${ovnkube_node_mode_flag} \
     ${egress_interface} \
     --host-network-namespace ${ovn_host_network_namespace} \
-     ${ovnkube_node_mgmt_port_netdev_flag} \
-     ${ovn_xdp_opts} \
-     ${ovs_other_config_opts} &
+    ${ovnkube_node_mgmt_port_netdev_flag} \
+    ${ovn_xdp_opts} \
+    ${ovs_other_config_opts} \
+    ${ovnkube_node_mgmt_port_intf_name_flag} \
+    ${k8s_cluster_name_option} &
 
   wait_for_event attempts=3 process_ready ovnkube
   if [[ ${ovnkube_node_mode} != "dpu" ]]; then

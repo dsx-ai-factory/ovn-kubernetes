@@ -39,7 +39,7 @@ func (oc *Controller) gatewayCleanup(nodeName string) error {
 	// Remove the patch port that connects join switch to gateway router
 	portName := types.JoinSwitchToGWRouterPrefix + gatewayRouter
 	lsp := nbdb.LogicalSwitchPort{Name: portName}
-	sw := nbdb.LogicalSwitch{Name: types.OVNJoinSwitch}
+	sw := nbdb.LogicalSwitch{Name: util.GetOVNJoinSwitchName()}
 	err = libovsdbops.DeleteLogicalSwitchPorts(oc.mc.nbClient, &sw, &lsp)
 	if err != nil {
 		return fmt.Errorf("failed to delete logical switch port %s from switch %s: %v", portName, types.OVNJoinSwitch, err)
@@ -93,7 +93,7 @@ func (oc *Controller) delPbrAndNatRules(nodeName string, lrpTypes []string) {
 	mgmtPortName := types.K8sPrefix + nodeName
 	nat := libovsdbops.BuildDNATAndSNAT(nil, nil, mgmtPortName, "", nil)
 	logicalRouter := nbdb.LogicalRouter{
-		Name: types.OVNClusterRouter,
+		Name: util.GetOVNClusterRouterName(),
 	}
 	err := libovsdbops.DeleteNATs(oc.mc.nbClient, &logicalRouter, nat)
 	if err != nil {
@@ -135,7 +135,7 @@ func (oc *Controller) policyRouteCleanup(nextHops []net.IP) {
 			}
 			return false
 		}
-		err := libovsdbops.DeleteNextHopFromLogicalRouterPoliciesWithPredicate(oc.mc.nbClient, types.OVNClusterRouter, policyPred, gwIP)
+		err := libovsdbops.DeleteNextHopFromLogicalRouterPoliciesWithPredicate(oc.mc.nbClient, util.GetOVNClusterRouterName(), policyPred, gwIP)
 		if err != nil {
 			klog.Errorf("Failed to delete policy route for nexthop %+v: %v", nextHop, err)
 		}
@@ -158,7 +158,7 @@ func (oc *Controller) removeLRPolicies(nodeName string, priorities []string) {
 	p := func(item *nbdb.LogicalRouterPolicy) bool {
 		return strings.Contains(item.Match, fmt.Sprintf("%s ", nodeName)) && intPriorities.Has(item.Priority)
 	}
-	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.mc.nbClient, types.OVNClusterRouter, p)
+	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.mc.nbClient, util.GetOVNClusterRouterName(), p)
 	if err != nil {
 		klog.Errorf("Error deleting policies with priorities %v associated with the node %s: %v", priorities, nodeName, err)
 	}
@@ -191,7 +191,7 @@ func (oc *Controller) cleanupDGP(nodes []*kapi.Node) error {
 	}
 
 	// remove lrp on ovn_cluster_router. Will also remove gateway chassis.
-	logicalRouter := nbdb.LogicalRouter{Name: types.OVNClusterRouter}
+	logicalRouter := nbdb.LogicalRouter{Name: util.GetOVNClusterRouterName()}
 	logicalRouterPort := nbdb.LogicalRouterPort{
 		Name: types.RouterToSwitchPrefix + types.NodeLocalSwitch,
 	}

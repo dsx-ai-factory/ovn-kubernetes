@@ -51,6 +51,12 @@ func (_ ovnkubeMasterLeaderMetricsProvider) NewLeaderMetric() leaderelection.Swi
 
 // Start waits until this process is the leader before starting master functions
 func (mc *OvnMHController) Start(ctx context.Context, cancel context.CancelFunc) error {
+
+	// Setup clusterName prefix if config.Kubernetes.ClusterName exists
+	if config.Kubernetes.ClusterName != "" {
+		util.SetClusterName(config.Kubernetes.ClusterName)
+	}
+
 	// Set up leader election process first
 	rl, err := resourcelock.New(
 		// TODO (rravaiol)
@@ -316,13 +322,14 @@ func (oc *Controller) SetupMaster(ovnManagedNodeNames []string) error {
 		return fmt.Errorf("unable to create router control plane protection: %w", err)
 	}
 
-	clusterRouterName := oc.nadInfo.Prefix + types.OVNClusterRouter
+	clusterRouterName := util.GetOVNClusterRouterName(oc.nadInfo.Prefix)
 
 	// Create a single common distributed router for the cluster.
 	logicalRouter := nbdb.LogicalRouter{
 		Name: clusterRouterName,
 		ExternalIDs: map[string]string{
 			"k8s-cluster-router": "yes",
+			"cluster_name":       config.Kubernetes.ClusterName,
 		},
 		Options: map[string]string{
 			"always_learn_from_arp_request": "false",
@@ -415,12 +422,12 @@ func (oc *Controller) SetupMaster(ovnManagedNodeNames []string) error {
 	// allocate the first IPs in the join switch subnets
 	gwLRPIfAddrs, err := oc.joinSwIPManager.EnsureJoinLRPIPs(clusterRouterName)
 	if err != nil {
-		return fmt.Errorf("failed to allocate join switch IP address connected to %s: %v", types.OVNClusterRouter, err)
+		return fmt.Errorf("failed to allocate join switch IP address connected to %s: %v", clusterRouterName, err)
 	}
 
 	// Connect the distributed router to OVNJoinSwitch.
-	drSwitchPort := types.JoinSwitchToGWRouterPrefix + types.OVNClusterRouter
-	drRouterPort := types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter
+	drSwitchPort := types.JoinSwitchToGWRouterPrefix + clusterRouterName
+	drRouterPort := types.GWRouterToJoinSwitchPrefix + clusterRouterName
 
 	gwLRPMAC := util.IPAddrToHWAddr(gwLRPIfAddrs[0].IP)
 	gwLRPNetworks := []string{}
@@ -449,10 +456,13 @@ func (oc *Controller) SetupMaster(ovnManagedNodeNames []string) error {
 		},
 		Addresses: []string{"router"},
 	}
-	sw := nbdb.LogicalSwitch{Name: types.OVNJoinSwitch}
+	//ToDo(Hareesh): Check if nadInfo.Prefix is needed
+	//joinSwitchName := util.GetClusterNamePrefix() + oc.nadInfo.Prefix + types.OVNJoinSwitch
+	joinSwitchName = util.GetClusterNamePrefix() + types.OVNJoinSwitch
+	sw := nbdb.LogicalSwitch{Name: joinSwitchName}
 	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.mc.nbClient, &sw, &logicalSwitchPort)
 	if err != nil {
-		return fmt.Errorf("failed to create logical switch port %+v and switch %s: %v", logicalSwitchPort, types.OVNJoinSwitch, err)
+		return fmt.Errorf("failed to create logical switch port %+v and switch %s: %v", logicalSwitchPort, joinSwitchName, err)
 	}
 
 	return nil
@@ -475,7 +485,7 @@ func (oc *Controller) deleteMaster() {
 	}
 
 	// delete the single common distributed router for the cluster.
-	clusterRouter := oc.nadInfo.Prefix + types.OVNClusterRouter
+	clusterRouter := util.GetOVNClusterRouterName(oc.nadInfo.Prefix)
 	logicalRouter := nbdb.LogicalRouter{Name: clusterRouter}
 	err := libovsdbops.DeleteLogicalRouter(oc.mc.nbClient, &logicalRouter)
 	if err != nil {
@@ -488,6 +498,8 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 	if oc.nadInfo.IsSecondary {
 		return nil
 	}
+
+	ovnClusterRouter := util.GetOVNClusterRouterName()
 
 	macAddress, err := util.ParseNodeManagementPortMACAddress(node)
 	if err != nil {
@@ -524,10 +536,10 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 			p := func(item *nbdb.LogicalRouterStaticRoute) bool {
 				return item.IPPrefix == lrsr.IPPrefix && item.Nexthop == lrsr.Nexthop && item.Policy != nil && *item.Policy == *lrsr.Policy
 			}
-			err := libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(oc.mc.nbClient, types.OVNClusterRouter,
+			err := libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(oc.mc.nbClient, ovnClusterRouter,
 				&lrsr, p)
 			if err != nil {
-				return fmt.Errorf("error creating static route %+v on router %s: %v", lrsr, types.OVNClusterRouter, err)
+				return fmt.Errorf("error creating static route %+v on router %s: %v", lrsr, ovnClusterRouter, err)
 			}
 		}
 	}
@@ -567,6 +579,8 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		return nil
 	}
 
+	ovnClusterRouter := util.GetOVNClusterRouterName()
+
 	for _, clusterSubnet := range oc.clusterSubnets {
 		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR)
 	}
@@ -576,7 +590,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		return fmt.Errorf("failed to allocate join switch port IP address for node %s: %v", node.Name, err)
 	}
 
-	drLRPIPs, _ := oc.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
+	drLRPIPs, _ := oc.joinSwIPManager.EnsureJoinLRPIPs(ovnClusterRouter)
 	err = oc.gatewayInit(node.Name, clusterSubnets, hostSubnets, l3GatewayConfig, oc.SCTPSupport, gwLRPIPs, drLRPIPs)
 	if err != nil {
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
@@ -630,7 +644,7 @@ func (oc *Controller) syncNodeClusterRouterPort(node *kapi.Node, hostSubnets []*
 	}
 
 	switchName := oc.nadInfo.Prefix + node.Name
-	clusterRouterName := oc.nadInfo.Prefix + types.OVNClusterRouter
+	clusterRouterName := util.GetOVNClusterRouterName(oc.nadInfo.Prefix)
 	lrpName := types.RouterToSwitchPrefix + switchName
 	lrpNetworks := []string{}
 	for _, hostSubnet := range hostSubnets {
@@ -696,6 +710,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 	logicalSwitch := nbdb.LogicalSwitch{
 		Name: switchName,
 	}
+	logicalSwitch.ExternalIDs = map[string]string{"cluster_name": config.Kubernetes.ClusterName}
 	if oc.nadInfo.IsSecondary {
 		logicalSwitch.ExternalIDs = map[string]string{"network_name": oc.nadInfo.NetName}
 	}
@@ -1108,7 +1123,7 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 	}
 
 	// Remove the logical switch associated with the node
-	clusterRouterName := oc.nadInfo.Prefix + types.OVNClusterRouter
+	clusterRouterName := util.GetOVNClusterRouterName(oc.nadInfo.Prefix)
 	switchName := oc.nadInfo.Prefix + nodeName
 	logicalRouterPortName := types.RouterToSwitchPrefix + switchName
 
@@ -1236,7 +1251,14 @@ func (oc *Controller) syncNodesPeriodic() {
 		nodeNames = append(nodeNames, node.Name)
 	}
 
-	chassisList, err := libovsdbops.ListChassis(oc.mc.sbClient)
+	//ToDo(Hareesh): Review block below
+	var chassisList []*sbdb.Chassis
+	if config.Kubernetes.ClusterName != "" {
+		// Cluster name is set, find only chassis marked to this cluster.
+		chassisList, err = libovsdbops.ListChassisWithClusterName(oc.mc.sbClient, config.Kubernetes.ClusterName)
+	} else {
+		chassisList, err = libovsdbops.ListChassis(oc.mc.sbClient)
+	}
 	if err != nil {
 		klog.Errorf("Failed to get chassis list: error: %v", err)
 		return
@@ -1257,6 +1279,7 @@ func (oc *Controller) syncNodesPeriodic() {
 		staleChassis = append(staleChassis, v)
 	}
 
+	klog.Infof("SyncNodesPeriodic(): Deleting Stale Chassis: %v", chassisHostNameMap)
 	if err = libovsdbops.DeleteChassis(oc.mc.sbClient, staleChassis...); err != nil {
 		klog.Errorf("Failed Deleting chassis %v error: %v", chassisHostNameMap, err)
 		return

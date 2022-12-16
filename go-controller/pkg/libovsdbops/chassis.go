@@ -2,6 +2,7 @@ package libovsdbops
 
 import (
 	"context"
+	"fmt"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -26,6 +27,34 @@ func ListChassisPrivate(sbClient libovsdbclient.Client) ([]*sbdb.ChassisPrivate,
 	found := []*sbdb.ChassisPrivate{}
 	err := sbClient.List(ctx, &found)
 	return found, err
+}
+
+// ListChassisWithClusterName returns all the logical chassis that has the ovn-cms-option `cluster_name` set to the specified value
+func ListChassisWithClusterName(sbClient libovsdbclient.Client, clusterName string) ([]*sbdb.Chassis, error) {
+	ovnCmsOpts := fmt.Sprintf("cluster_name:%s", clusterName)
+	searchPredicate := func(item *sbdb.Chassis) bool {
+		return item.ExternalIDs["ovn-cms-options"] == ovnCmsOpts
+	}
+	searchedChassis, err := ListChassisByPredicate(sbClient, searchPredicate)
+	if err != nil {
+		return nil, err
+	}
+
+	return searchedChassis, nil
+}
+
+// ListChassisByPredicate returns all the logical chassis in the cache that matches the lookup function
+func ListChassisByPredicate(sbClient libovsdbclient.Client, lookupFunction func(item *sbdb.Chassis) bool) ([]*sbdb.Chassis, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	searchedChassis := []*sbdb.Chassis{}
+
+	err := sbClient.WhereCache(lookupFunction).List(ctx, &searchedChassis)
+	if err != nil {
+		return nil, fmt.Errorf("failed listing chassis err: %v", err)
+	}
+
+	return searchedChassis, nil
 }
 
 // DeleteChassis deletes the provided chassis and associated private chassis

@@ -15,6 +15,7 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/util/retry"
@@ -159,9 +160,9 @@ func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) error {
 	p := func(item *nbdb.LogicalRouterPolicy) bool {
 		return item.Priority <= types.EgressFirewallStartPriority && item.Priority >= types.MinimumReservedEgressFirewallPriority
 	}
-	err = libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.mc.nbClient, types.OVNClusterRouter, p)
+	err = libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.mc.nbClient, util.GetOVNClusterRouterName(), p)
 	if err != nil {
-		return fmt.Errorf("error deleting egress firewall policies on router %s: %v", types.OVNClusterRouter, err)
+		return fmt.Errorf("error deleting egress firewall policies on router %s: %v", util.GetOVNClusterRouterName(), err)
 	}
 
 	// sync the ovn and k8s egressFirewall states
@@ -351,7 +352,7 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 			logicalSwitches = append(logicalSwitches, nodeLocalSwitch.Name)
 		}
 	} else {
-		logicalSwitches = append(logicalSwitches, types.OVNJoinSwitch)
+		logicalSwitches = append(logicalSwitches, util.GetOVNJoinSwitchName())
 	}
 
 	// a name is needed for logging purposes - the name must be unique, so make it
@@ -496,7 +497,7 @@ func generateMatch(ipv4Source, ipv6Source string, destinations []matchTarget, ds
 	if config.Gateway.Mode == config.GatewayModeLocal {
 		extraMatch = getClusterSubnetsExclusion()
 	} else {
-		extraMatch = fmt.Sprintf("inport == \"%s%s\"", types.JoinSwitchToGWRouterPrefix, types.OVNClusterRouter)
+		extraMatch = fmt.Sprintf("inport == \"%s%s\"", types.JoinSwitchToGWRouterPrefix, util.GetOVNClusterRouterName())
 	}
 	return fmt.Sprintf("%s && %s", match, extraMatch)
 }
