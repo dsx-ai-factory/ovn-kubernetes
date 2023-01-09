@@ -1,3 +1,16 @@
+# ovnkube-master-pdb PodDisruptionBudget ensures that the number of replicas running is never brought
+# below the number needed for HA.
+apiVersion: policy/v1beta1
+kind: PodDisruptionBudget
+metadata:
+  name: ovnkube-master-pdb
+  namespace: ovn-kubernetes
+spec:
+  minAvailable: {{ ovnkube_master_minAvailable | default(1) }}
+  selector:
+    matchLabels:
+      name: ovnkube-master
+---
 # ovnkube-master Pod contains following two containers
 # 1. ovnkube-master running ovnkube in master mode
 # 2. ovn-nbctl daemon
@@ -211,4 +224,7 @@ spec:
             path: /etc/ovn
             type: DirectoryOrCreate
       tolerations:
-        - operator: "Exists"
+      # needed for dev cluster and cicd
+      - key: "node-role.kubernetes.io/master"
+        operator: "Exists"
+        effect: "NoSchedule"
