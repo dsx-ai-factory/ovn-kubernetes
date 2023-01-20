@@ -80,6 +80,9 @@ const (
 	// capacity for each node. It is set by
 	// openshift/cloud-network-config-controller
 	cloudEgressIPConfigAnnotationKey = "cloud.network.openshift.io/egress-ipconfig"
+
+	// ovnNodeNumPodsLabel is used to indicate the number of pods/IP addresses required on the node
+	ovnNodeNumPodsLabel = "k8s.ovn.org/num-pods"
 )
 
 type L3GatewayConfig struct {
@@ -547,6 +550,11 @@ func parseNodeEgressIPConfig(egressIPConfig *nodeEgressIPConfiguration) (*Parsed
 // GetNodeEgressLabel returns label annotation needed for marking nodes as egress assignable
 func GetNodeEgressLabel() string {
 	return ovnNodeEgressLabel
+}
+
+// GetNodeNumPodsLabel returns label needed for obtaining the required number of Pods/IP addresses on the node
+func GetNodeNumPodsLabel() string {
+	return ovnNodeNumPodsLabel
 }
 
 // parseOvnKubeLogLevelAnnotation returns the ovnkube(master/node) daemon loglevel

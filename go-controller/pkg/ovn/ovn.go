@@ -396,6 +396,9 @@ func (mc *OvnMHController) NewOvnController(nadInfo *util.NetAttachDefInfo,
 		return nil, fmt.Errorf("cluster subnet %s for network %s is invalid: %v", nadInfo.NetCidr, nadInfo.NetName, err)
 	}
 
+	// Sort the list of cluster subnets based on number of host IPs available
+	config.SortClusterSubnetEntries(clusterIPNet)
+
 	stopChan := mc.stopChan
 	if nadInfo.IsSecondary {
 		stopChan = make(chan struct{})

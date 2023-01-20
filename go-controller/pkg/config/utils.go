@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -32,6 +33,13 @@ func (hp *HostPort) String() string {
 type CIDRNetworkEntry struct {
 	CIDR             *net.IPNet
 	HostSubnetLength int
+}
+
+// Sort the list of cluster subnets in the ascending order of number of host IPs available
+func SortClusterSubnetEntries(cidrEntries []CIDRNetworkEntry) {
+	sort.Slice(cidrEntries, func(i, j int) bool {
+		return cidrEntries[i].HostSubnetLength > cidrEntries[j].HostSubnetLength
+	})
 }
 
 // ParseClusterSubnetEntries returns the parsed set of CIDRNetworkEntries passed by the user on the command line

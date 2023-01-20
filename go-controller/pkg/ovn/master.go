@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -924,8 +925,20 @@ func (oc *Controller) allocateNodeSubnets(node *kapi.Node) ([]*net.IPNet, []*net
 	// recreate hostSubnets with the valid subnets
 	hostSubnets = hostSubnets[:n]
 	// allocate new subnets if needed
+	nodeLabels := node.GetLabels()
+	ovnNodeNumPodsLabel := util.GetNodeNumPodsLabel()
+	ovnNodeNumPods, hasNumPodsLabel := nodeLabels[ovnNodeNumPodsLabel]
+	numPods := 0
+	if hasNumPodsLabel {
+		numPods, err = strconv.Atoi(ovnNodeNumPods)
+		if err != nil {
+			return nil, nil, fmt.Errorf("incorrect setting of label %s on node %s, %v", ovnNodeNumPodsLabel, node.Name, err)
+		}
+		klog.V(5).Infof("Node %s requests %d IP addresses", node.Name, numPods)
+	}
+
 	if config.IPv4Mode && !foundIPv4 {
-		allocatedHostSubnet, err := oc.masterSubnetAllocator.AllocateIPv4Network()
+		allocatedHostSubnet, err := oc.masterSubnetAllocator.AllocateIPv4Network(numPods)
 		if err != nil {
 			return nil, nil, fmt.Errorf("error allocating network for node %s: %v", node.Name, err)
 		}
