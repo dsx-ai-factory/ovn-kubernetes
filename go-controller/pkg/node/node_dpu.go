@@ -563,11 +563,12 @@ func (nc *ovnNodeController) checkPodForDoS(uid types.UID, connDetails map[strin
 			continue
 		}
 		prevDrop := dpuCD.ConnPrivateInfo.MissRateLimitDropInitial
-		klog.V(5).Infof("DoS: Drop VF representor %s: old (%v); current(%v)", vfRepName, prevDrop, newDrop)
 		// DoS Suspect, clampdown the VF. Alternatively, we can bring down the interface or
 		// do something more drastic, this is a simple first step, and we can improve on
 		// this as we have more experience.
 		if newDrop > prevDrop {
+			klog.V(5).Infof("DoS: Drop VF representor %s: old (%v); current(%v)", vfRepName, prevDrop, newDrop)
+
 			// Get the corresponding pod to update it's connection status; slightly inefficient, but
 			// this is an infrequent operation.
 			// In case of failure, just log an error, no point failing.
