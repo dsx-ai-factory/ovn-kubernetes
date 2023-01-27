@@ -15,6 +15,7 @@ type LogicalSwitchPort struct {
 	Enabled          *bool             `ovsdb:"enabled"`
 	ExternalIDs      map[string]string `ovsdb:"external_ids"`
 	HaChassisGroup   *string           `ovsdb:"ha_chassis_group"`
+	MirrorRules      []string          `ovsdb:"mirror_rules"`
 	Name             string            `ovsdb:"name"`
 	Options          map[string]string `ovsdb:"options"`
 	ParentName       *string           `ovsdb:"parent_name"`
@@ -165,6 +166,42 @@ func equalLogicalSwitchPortHaChassisGroup(a, b *string) bool {
 	return *a == *b
 }
 
+func (a *LogicalSwitchPort) GetMirrorRules() []string {
+	return a.MirrorRules
+}
+
+func copyLogicalSwitchPortMirrorRules(a []string) []string {
+	if a == nil {
+		return nil
+	}
+	b := make([]string, len(a))
+	copy(b, a)
+	return b
+}
+
+func equalLogicalSwitchPortMirrorRules(a, b []string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if b[i] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *LogicalSwitchPort) GetName() string {
+	return a.Name
+}
+
+func (a *LogicalSwitchPort) GetOptions() map[string]string {
+	return a.Options
+}
+
 func copyLogicalSwitchPortOptions(a map[string]string) map[string]string {
 	if a == nil {
 		return nil
@@ -296,6 +333,7 @@ func (a *LogicalSwitchPort) DeepCopyInto(b *LogicalSwitchPort) {
 	b.Enabled = copyLogicalSwitchPortEnabled(a.Enabled)
 	b.ExternalIDs = copyLogicalSwitchPortExternalIDs(a.ExternalIDs)
 	b.HaChassisGroup = copyLogicalSwitchPortHaChassisGroup(a.HaChassisGroup)
+	b.MirrorRules = copyLogicalSwitchPortMirrorRules(a.MirrorRules)
 	b.Options = copyLogicalSwitchPortOptions(a.Options)
 	b.ParentName = copyLogicalSwitchPortParentName(a.ParentName)
 	b.PortSecurity = copyLogicalSwitchPortPortSecurity(a.PortSecurity)
@@ -328,6 +366,7 @@ func (a *LogicalSwitchPort) Equals(b *LogicalSwitchPort) bool {
 		equalLogicalSwitchPortEnabled(a.Enabled, b.Enabled) &&
 		equalLogicalSwitchPortExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
 		equalLogicalSwitchPortHaChassisGroup(a.HaChassisGroup, b.HaChassisGroup) &&
+		equalLogicalSwitchPortMirrorRules(a.MirrorRules, b.MirrorRules) &&
 		a.Name == b.Name &&
 		equalLogicalSwitchPortOptions(a.Options, b.Options) &&
 		equalLogicalSwitchPortParentName(a.ParentName, b.ParentName) &&
