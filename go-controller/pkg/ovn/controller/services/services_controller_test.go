@@ -64,6 +64,7 @@ func newControllerWithDBSetup(dbSetup libovsdbtest.TestSetup) (*serviceControlle
 	}
 	controller.servicesSynced = alwaysReady
 	controller.endpointSlicesSynced = alwaysReady
+	controller.initTopLevelCache()
 	return &serviceController{
 		controller,
 		informerFactory.Core().V1().Services().Informer().GetStore(),
@@ -460,7 +461,7 @@ func TestSyncServices(t *testing.T) {
 
 			err = controller.syncService(ns + "/" + serviceName)
 			if err != nil {
-				t.Errorf("syncServices error: %v", err)
+				t.Fatalf("syncServices error: %v", err)
 			}
 
 			g.Expect(controller.nbClient).To(libovsdbtest.HaveData(tt.expectedDb))
