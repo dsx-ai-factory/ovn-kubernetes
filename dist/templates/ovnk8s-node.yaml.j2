@@ -234,7 +234,6 @@ spec:
 
       {% if ovnkube_app_name=="ovnkube-node-dpu-host" -%}
       nodeSelector:
-        kubernetes.io/arch: amd64
         k8s.ovn.org/dpu-host: ""
       {% else -%}
       nodeSelector:
