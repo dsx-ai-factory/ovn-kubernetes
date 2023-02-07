@@ -473,7 +473,7 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 func (oc *Controller) updatePodAnnotationWithRetry(origPod *kapi.Pod, podInfo *util.PodAnnotation, annoNadKeyName string) error {
 	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		// Informer cache should not be mutated, so get a copy of the object
-		pod, err := oc.mc.kube.GetPod(origPod.Namespace, origPod.Name)
+		pod, err := oc.mc.watchFactory.GetPod(origPod.Namespace, origPod.Name)
 		if err != nil {
 			return err
 		}

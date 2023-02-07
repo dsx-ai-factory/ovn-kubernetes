@@ -98,7 +98,7 @@ func MarshalPodDPUConnDetails(pannotations *map[string]string, dcd *DPUConnectio
 		// simple and local
 		if ok && dc.PfId == dcd.PfId && dc.VfId == dcd.VfId &&
 			dc.PfMAC == dcd.PfMAC && dc.SandboxId == dcd.SandboxId &&
-			dc.VfDevName == dcd.VfDevName {
+			dc.VfNetdevName == dcd.VfNetdevName {
 			return newAnnotationAlreadySetError("OVN pod %s annotation for nad %s already exists in %v",
 				DPUConnectionDetailsAnnot, annoNadKeyName, ovnAnnotation)
 		}

@@ -10,7 +10,6 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -155,7 +154,7 @@ func (oc *Controller) upgradeToNamespacedDenyPGOVNTopology() error {
 	return nil
 }
 
-func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
+func (oc *Controller) upgradeOVNTopology(existingNodes []*kapi.Node) error {
 	ver, err := oc.determineOVNTopoVersionFromOVN()
 	if err != nil {
 		return err
@@ -216,12 +215,12 @@ func (oc *Controller) StartClusterMaster() error {
 		return oc.setupLayer2Master()
 	}
 
-	existingNodes, err := oc.mc.kube.GetNodes()
+	existingNodes, err := oc.mc.watchFactory.GetNodes()
 	if err != nil {
 		klog.Errorf("Error in fetching nodes: %v", err)
 		return err
 	}
-	klog.V(5).Infof("Existing number of nodes: %d", len(existingNodes.Items))
+	klog.V(5).Infof("Existing number of nodes: %d", len(existingNodes))
 	err = oc.upgradeOVNTopology(existingNodes)
 	if err != nil {
 		klog.Errorf("Failed to upgrade OVN topology to version %d: %v", types.OvnCurrentTopologyVersion, err)
@@ -238,8 +237,8 @@ func (oc *Controller) StartClusterMaster() error {
 		util.CalculateHostSubnetsForClusterEntry(ipnet, &v4HostSubnetCount, &v6HostSubnetCount)
 	}
 	ovnManagedNodeNames := []string{}
-	for _, node := range existingNodes.Items {
-		if noHostSubnet(&node) {
+	for _, node := range existingNodes {
+		if noHostSubnet(node) {
 			continue
 		}
 		ovnManagedNodeNames = append(ovnManagedNodeNames, node.Name)
@@ -825,7 +824,7 @@ func (oc *Controller) updateNodeAnnotationWithRetry(nodeName string, hostSubnets
 	//// Retry if it fails because of potential conflict, or temporary API server down
 	resultErr := retry.OnError(retry.DefaultBackoff, isError, func() error {
 		// Informer cache should not be mutated, so get a copy of the object
-		node, err := oc.mc.kube.GetNode(nodeName)
+		node, err := oc.mc.watchFactory.GetNode(nodeName)
 		if err != nil {
 			return err
 		}
@@ -1183,7 +1182,7 @@ func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode *kapi
 	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		var err error
 
-		oldNode, err := oc.mc.kube.GetNode(origNode.Name)
+		oldNode, err := oc.mc.watchFactory.GetNode(origNode.Name)
 		if err != nil {
 			return err
 		}
@@ -1489,19 +1488,21 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 		}
 	}
 	if needAddPods {
-		options := metav1.ListOptions{FieldSelector: fields.OneTermEqualSelector("spec.nodeName", node.Name).String()}
-		pods, err := oc.mc.client.CoreV1().Pods(metav1.NamespaceAll).List(context.TODO(), options)
+		pods, err := oc.mc.watchFactory.GetAllPods()
 		if err != nil {
-			klog.Errorf("Unable to list existing pods on node: %s, existing pods on this node may not function")
+			klog.Errorf("Unable to get all pods: %v", err)
 		} else if nSyncs.syncNode || nSyncs.syncGw { // do this only if it is a new node add or a gateway sync happened
-			klog.V(5).Infof("When adding node %s, found %d pods to add to retryPods", node.Name, len(pods.Items))
-			for _, pod := range pods.Items {
-				pod := pod
-				if util.PodCompleted(&pod) {
+			klog.V(5).Infof("When adding node %s, found %d pods to add to retryPods", node.Name, len(pods))
+			for index := range pods {
+				pod := pods[index]
+				if pod.Spec.NodeName != node.Name {
+					continue
+				}
+				if util.PodCompleted(pod) {
 					continue
 				}
 				klog.V(5).Infof("Adding pod %s/%s/%s from node %s to retryPods for network %s", pod.UID, pod.Namespace, pod.Name, node.Name, oc.nadInfo.NetName)
-				oc.retryPods.addRetryObjWithAddNoBackoff(&pod)
+				oc.retryPods.addRetryObjWithAddNoBackoff(pod)
 			}
 			oc.retryPods.requestRetryObjs()
 		}
