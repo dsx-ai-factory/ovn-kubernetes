@@ -69,7 +69,7 @@ type DPUConnectionDetails struct {
 	SandboxId    string `json:"sandboxId"`
 	VfNetdevName string `json:"vfNetdevName,omitempty"`
 	// Private connection info.
-	ConnPrivateInfo DPUConnPrivateInfo
+	ConnPrivateInfo DPUConnPrivateInfo `json:"-"`
 }
 
 type DPUConnectionStatus struct {
@@ -94,7 +94,11 @@ func MarshalPodDPUConnDetails(pannotations *map[string]string, dcd *DPUConnectio
 	}
 	dc, ok := podDcds[annoNadKeyName]
 	if dcd != nil {
-		if ok && dc == *dcd {
+		// A bit inefficent way to compare, just to keep the changes
+		// simple and local
+		if ok && dc.PfId == dcd.PfId && dc.VfId == dcd.VfId &&
+			dc.PfMAC == dcd.PfMAC && dc.SandboxId == dcd.SandboxId &&
+			dc.VfDevName == dcd.VfDevName {
 			return newAnnotationAlreadySetError("OVN pod %s annotation for nad %s already exists in %v",
 				DPUConnectionDetailsAnnot, annoNadKeyName, ovnAnnotation)
 		}
