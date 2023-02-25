@@ -378,14 +378,14 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	extIds, err := ovsFind("Interface", "external_ids", "name="+hostIfaceName)
 	if err == nil && len(extIds) == 1 {
 		extId := extIds[0]
-		sandboxStr := util.GetDbValByKey(extId, "sandbox")
+		ifaceIDstr := util.GetDbValByKey(extId, "iface-id")
 		networkNameStr := util.GetDbValByKey(extId, "network_name")
 		// if network_name does not exists, it is default network
 		if networkNameStr == "" {
 			networkNameStr = types.DefaultNetworkName
 		}
-		if sandboxStr != sandboxID {
-			return fmt.Errorf("OVS port %s was added for sandbox (%s), now readding it for (%s)", hostIfaceName, sandboxStr, sandboxID)
+		if ifaceIDstr != ifaceID {
+			return fmt.Errorf("OVS port %s was added for iface-id (%s), now readding it for (%s)", hostIfaceName, ifaceIDstr, ifaceID)
 		}
 		if networkNameStr != annoNadKeyName {
 			return fmt.Errorf("OVS port %s was added for nad (%s), expect (%s)", hostIfaceName, networkNameStr, ifInfo.NadName)
