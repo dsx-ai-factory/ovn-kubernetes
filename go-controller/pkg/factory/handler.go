@@ -161,14 +161,14 @@ func (i *informer) removeHandler(handler *Handler) {
 	}()
 }
 
-func newQueueMap(numEventQueues uint32, wg *sync.WaitGroup) *queueMap {
+func newQueueMap(numEventQueues, queueLen uint32, wg *sync.WaitGroup) *queueMap {
 	qm := &queueMap{
 		entries: make(map[ktypes.NamespacedName]*queueMapEntry),
 		queues:  make([]chan *event, numEventQueues),
 		wg:      wg,
 	}
 	for j := 0; j < int(numEventQueues); j++ {
-		qm.queues[j] = make(chan *event, 10)
+		qm.queues[j] = make(chan *event, queueLen)
 	}
 	return qm
 }
@@ -470,12 +470,12 @@ func newInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer) (
 }
 
 func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer,
-	stopChan chan struct{}, numEventQueues uint32) (*informer, error) {
+	stopChan chan struct{}, numEventQueues, queueLen, numQeueusForInitialAdd, queueLenForIntitialAdd uint32) (*informer, error) {
 	i, err := newBaseInformer(oType, sharedInformer)
 	if err != nil {
 		return nil, err
 	}
-	i.queueMap = newQueueMap(numEventQueues, &i.shutdownWg)
+	i.queueMap = newQueueMap(numEventQueues, queueLen, &i.shutdownWg)
 	i.queueMap.start(stopChan)
 
 	i.initialAddFunc = func(h *Handler, items []interface{}) {
@@ -484,7 +484,7 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		// is added, only that handler should receive events for all
 		// existing objects.
 		addsWg := &sync.WaitGroup{}
-		addsMap := newQueueMap(numEventQueues, addsWg)
+		addsMap := newQueueMap(numQeueusForInitialAdd, queueLenForIntitialAdd, addsWg)
 		addsMap.start(stopChan)
 
 		// Distribute the existing items into the handler-specific
