@@ -2,7 +2,6 @@ package factory
 
 import (
 	"fmt"
-	kapi "k8s.io/api/core/v1"
 	"math/rand"
 	"reflect"
 	"sync"
@@ -238,14 +237,7 @@ func (i *informer) unrefQueueEntry(key ktypes.NamespacedName, entry *queueMapEnt
 }
 
 // enqueueEvent adds an event to the appropriate queue for the object
-func (i *informer) enqueueEvent(oldObj, obj interface{}, queueNum uint32, etype string, processFunc func(*event)) {
-	start := time.Now()
-	if reflect.TypeOf(obj) == PodType {
-		defer func() {
-			pod := obj.(*kapi.Pod)
-			klog.V(5).Infof("Enqueue %s event for pod %s/%s on queue %d took %v", etype, pod.Namespace, pod.Name, queueNum, time.Since(start))
-		}()
-	}
+func (i *informer) enqueueEvent(oldObj, obj interface{}, queueNum uint32, processFunc func(*event)) {
 	i.events[queueNum] <- &event{
 		obj:     obj,
 		oldObj:  oldObj,
@@ -274,33 +266,25 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			key, entry := i.refQueueEntry(i.oType, obj, numEventQueues)
-			i.enqueueEvent(nil, obj, entry.queue, "add", func(e *event) {
+			i.enqueueEvent(nil, obj, entry.queue, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "add").Inc()
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
 					h.OnAdd(e.obj)
 				})
 				metrics.MetricResourceAddLatency.Observe(time.Since(start).Seconds())
-				if reflect.TypeOf(e.obj) == PodType {
-					pod := e.obj.(*kapi.Pod)
-					klog.V(5).Infof("Process add event for Pod %s/%s on queue %d took %v", pod.Namespace, pod.Name, entry.queue, time.Since(start))
-				}
 				i.unrefQueueEntry(key, entry, false)
 			})
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
 			key, entry := i.refQueueEntry(i.oType, newObj, numEventQueues)
-			i.enqueueEvent(oldObj, newObj, entry.queue, "update", func(e *event) {
+			i.enqueueEvent(oldObj, newObj, entry.queue, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "update").Inc()
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
 					h.OnUpdate(e.oldObj, e.obj)
 				})
 				metrics.MetricResourceUpdateLatency.Observe(time.Since(start).Seconds())
-				if reflect.TypeOf(e.oldObj) == PodType {
-					pod := e.oldObj.(*kapi.Pod)
-					klog.V(5).Infof("Process update event for Pod %s/%s on queue %d took %v", pod.Namespace, pod.Name, entry.queue, time.Since(start))
-				}
 				i.unrefQueueEntry(key, entry, false)
 			})
 		},
@@ -311,17 +295,13 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 				return
 			}
 			key, entry := i.refQueueEntry(i.oType, realObj, numEventQueues)
-			i.enqueueEvent(nil, realObj, entry.queue, "delete", func(e *event) {
+			i.enqueueEvent(nil, realObj, entry.queue, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "delete").Inc()
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
 					h.OnDelete(e.obj)
 				})
 				metrics.MetricResourceDeleteLatency.Observe(time.Since(start).Seconds())
-				if reflect.TypeOf(e.obj) == PodType {
-					pod := e.obj.(*kapi.Pod)
-					klog.V(5).Infof("Process delete event for Pod %s/%s on queue %d took %v", pod.Namespace, pod.Name, entry.queue, time.Since(start))
-				}
 				i.unrefQueueEntry(key, entry, true)
 			})
 		},
