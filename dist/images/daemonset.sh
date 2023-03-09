@@ -385,9 +385,9 @@ ovn_loglevel_controller=${OVN_LOGLEVEL_CONTROLLER:-"-vconsole:info"}
 echo "ovn_loglevel_controller: ${ovn_loglevel_controller}"
 ovnkube_logfile_maxsize=${OVNKUBE_LOGFILE_MAXSIZE:-"100"}
 echo "ovnkube_logfile_maxsize: ${ovnkube_logfile_maxsize}"
-ovnkube_logfile_maxbackups=${OVNKUBE_LOGFILE_MAXBACKUPS:-"5"}
+ovnkube_logfile_maxbackups=${OVNKUBE_LOGFILE_MAXBACKUPS:-"20"}
 echo "ovnkube_logfile_maxbackups: ${ovnkube_logfile_maxbackups}"
-ovnkube_logfile_maxage=${OVNKUBE_LOGFILE_MAXAGE:-"5"}
+ovnkube_logfile_maxage=${OVNKUBE_LOGFILE_MAXAGE:-"20"}
 echo "ovnkube_logfile_maxage: ${ovnkube_logfile_maxage}"
 ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
 echo "ovn_acl_logging_rate_limit: ${ovn_acl_logging_rate_limit}"
