@@ -118,7 +118,7 @@ ovnkube_logfile_maxage=${OVNKUBE_LOGFILE_MAXAGE:-"5"}
 
 # ovnkube-master ha-election parameters (value in seconds)
 ovn_master_ha_election_lease_duration=${OVN_HA_LEASE_DURATION:-"30"}
-ovn_master_ha_election_renew_deadline=${OVN_HA_RENEW_DEADLINE:-"15"}
+ovn_master_ha_election_renew_deadline=${OVN_HA_RENEW_DEADLINE:-"20"}
 ovn_master_ha_election_retry_period=${OVN_HA_RETRY_PERIOD:-"2"}
 
 # ovnkube.sh version (update when API between daemonset and script changes - v.x.y)
