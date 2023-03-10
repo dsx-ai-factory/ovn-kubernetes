@@ -116,6 +116,11 @@ ovnkube_logfile_maxsize=${OVNKUBE_LOGFILE_MAXSIZE:-"100"}
 ovnkube_logfile_maxbackups=${OVNKUBE_LOGFILE_MAXBACKUPS:-"5"}
 ovnkube_logfile_maxage=${OVNKUBE_LOGFILE_MAXAGE:-"5"}
 
+# ovnkube-master ha-election parameters (value in seconds)
+ovn_master_ha_election_lease_duration=${OVN_HA_LEASE_DURATION:-"30"}
+ovn_master_ha_election_renew_deadline=${OVN_HA_RENEW_DEADLINE:-"15"}
+ovn_master_ha_election_retry_period=${OVN_HA_RETRY_PERIOD:-"2"}
+
 # ovnkube.sh version (update when API between daemonset and script changes - v.x.y)
 ovnkube_version="3"
 
@@ -1036,6 +1041,12 @@ ovn-master() {
       "
   }
 
+  ovn_master_ha_opts="
+      --ha-election-lease-duration ${ovn_master_ha_election_lease_duration}
+      --ha-election-renew-deadline ${ovn_master_ha_election_renew_deadline}
+      --ha-election-retry-period ${ovn_master_ha_election_retry_period}
+    "
+
   ovn_acl_logging_rate_limit_flag=
   if [[ -n ${ovn_acl_logging_rate_limit} ]]; then
       ovn_acl_logging_rate_limit_flag="--acl-logging-rate-limit ${ovn_acl_logging_rate_limit}"
@@ -1125,7 +1136,8 @@ ovn-master() {
     ${ovnkube_config_duration_enable_flag} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} --metrics-enable-pprof \
     --host-network-namespace ${ovn_host_network_namespace} \
-    ${ctinv_flows_disable_flag} &
+    ${ctinv_flows_disable_flag} \
+    ${ovn_master_ha_opts} &
 
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master
