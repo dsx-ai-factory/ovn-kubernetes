@@ -481,6 +481,9 @@ func (oc *Controller) updatePodAnnotationWithRetry(origPod *kapi.Pod, podInfo *u
 		cpod := pod.DeepCopy()
 		err = util.MarshalPodAnnotation(&cpod.Annotations, podInfo, annoNadKeyName)
 		if err != nil {
+			if util.IsAnnotationAlreadySetError(err) {
+				return nil
+			}
 			return err
 		}
 		err = oc.mc.kube.UpdatePod(cpod)
@@ -628,6 +631,11 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string
 		}
 	}
 
+	// It is possible that IPs have already been allocated for this pod and annotation has been updated, then the last
+	// addLogicalPort4Nad() failed afterwards. In the current retry attempt, if the input pod argument got from
+	// the informer cache still lags behind, we would fail to get the updated pod annotation. Just continue to allocate
+	// new IPs and this function will eventually fail in updatePodAnnotationWithRetry() with ErrOverridePodIPs
+	// when it tries to override the pod IP annotation. Newly allocated IPs will be released then.
 	if needsIP {
 		if existingLSP != nil {
 			// try to get the MAC and IPs from existing OVN port first
