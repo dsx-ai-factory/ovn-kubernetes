@@ -851,6 +851,9 @@ func (oc *Controller) updateNodeAnnotationWithRetry(nodeName string, hostSubnets
 		}
 		err = util.UpdateNodeHostSubnetAnnotation(cnode.Annotations, hostSubnets, oc.nadInfo.NetName)
 		if err != nil {
+			if util.IsAnnotationAlreadySetError(err) {
+				return nil
+			}
 			return fmt.Errorf("failed to update node %q annotation for network %s subnet %s",
 				node.Name, oc.nadInfo.NetName, util.JoinIPNets(hostSubnets, ","))
 		}

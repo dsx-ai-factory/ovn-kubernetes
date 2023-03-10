@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -573,4 +574,42 @@ func GetOVSPortPodInfo(hostIfName string) (bool, string, string, error) {
 		nadName = types.DefaultNetworkName
 	}
 	return true, sandbox, nadName, nil
+}
+
+func ArrayHasString(array []string, target string) bool {
+	for _, str := range array {
+		if str == target {
+			return true
+		}
+	}
+	return false
+}
+
+func IsStringListEqual(stringList1, stringList2 []string) bool {
+	if len(stringList1) != len(stringList2) {
+		return false
+	}
+	sort.Strings(stringList1)
+	sort.Strings(stringList2)
+	for i, s := range stringList1 {
+		if s != stringList2[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func IsIPNetListEqual(ipnets1, ipnets2 []*net.IPNet) bool {
+	if len(ipnets1) != len(ipnets2) {
+		return false
+	}
+	ipnetStringList1 := make([]string, len(ipnets1))
+	ipnetStringList2 := make([]string, len(ipnets2))
+	for index, ipnet := range ipnets1 {
+		ipnetStringList1[index] = ipnet.String()
+	}
+	for index, ipnet := range ipnets2 {
+		ipnetStringList2[index] = ipnet.String()
+	}
+	return IsStringListEqual(ipnetStringList1, ipnetStringList2)
 }
