@@ -1,25 +1,41 @@
-# service to expose the ovnkube-db pod
+# Northbound service to expose the ovn-nbdb pod
 apiVersion: v1
 kind: Service
 metadata:
-  name: ovnkube-db
+  name: ovn-nbdb
   namespace: ovn-kubernetes
+  annotations:
+    k8s.ovn.org/skip-firewalld: "true"
 spec:
   ports:
-  - name: north
-    port: {{ ovn_nb_port }}
-    protocol: TCP
-    targetPort: {{ ovn_nb_port }}
-  - name: south
-    port: {{ ovn_sb_port }}
-    protocol: TCP
-    targetPort: {{ ovn_sb_port }}
+    - name: north
+      port: {{ ovn_nb_port }}
+      protocol: TCP
+      targetPort: {{ ovn_nb_port }}
   sessionAffinity: None
   clusterIP: None
   type: ClusterIP
 
 ---
+# Southbound service to expose the ovn-sbdb pod
+apiVersion: v1
+kind: Service
+metadata:
+  name: ovn-sbdb
+  namespace: ovn-kubernetes
+  annotations:
+    k8s.ovn.org/skip-firewalld: "true"
+spec:
+  ports:
+    - name: south
+      port: {{ ovn_sb_port }}
+      protocol: TCP
+      targetPort: {{ ovn_sb_port }}
+  sessionAffinity: None
+  clusterIP: None
+  type: ClusterIP
 
+---
 # ovnkube-db
 # daemonset version 3
 # starts ovn NB/SB ovsdb daemons, each in a separate container
