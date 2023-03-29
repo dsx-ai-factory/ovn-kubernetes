@@ -828,7 +828,7 @@ func (oc *Controller) CleanStaleNetworkPolicy() {
 			nsName := staleACL.ExternalIDs[namespaceACLExtIdKey]
 			policyName := staleACL.ExternalIDs[policyACLExtIdKey]
 			pgName := fmt.Sprintf("%s_%s", nsName, policyName)
-			pgName = oc.nadInfo.NetNameInfo.Prefix + hashedPortGroup(pgName)
+			pgName = util.GetClusterScopedName(oc.nadInfo.NetNameInfo.Prefix + hashedPortGroup(pgName))
 			aclDesc := fmt.Sprintf("stale ACL %s/%s/%s in port group %s", staleACL.UUID, nsName, policyName, pgName)
 			klog.V(5).Infof("About to delete %s", aclDesc)
 			ops, err := libovsdbops.DeleteACLsFromPortGroupOps(oc.mc.nbClient, nil, pgName, staleACL)
@@ -1178,7 +1178,7 @@ func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.
 		// remove hostsubnet annoation for this network
 		for _, node := range existingNodes.Items {
 			if noHostSubnet(&node) {
-				oc.lsManager.DeleteNode(nadInfo.Prefix + node.Name)
+				oc.lsManager.DeleteNode(util.GetClusterScopedName(nadInfo.Prefix + node.Name))
 				continue
 			}
 			err := oc.deleteNodeLogicalNetwork(node.Name)
@@ -1186,7 +1186,7 @@ func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.
 				klog.Errorf("Failed to delete node %s for network %s: %v", node.Name, oc.nadInfo.NetName, err)
 			}
 			_ = oc.updateNodeAnnotationWithRetry(node.Name, []*net.IPNet{})
-			oc.lsManager.DeleteNode(nadInfo.Prefix + node.Name)
+			oc.lsManager.DeleteNode(util.GetClusterScopedName(nadInfo.Prefix + node.Name))
 		}
 	}
 	mc.allOvnControllers.Delete(netconf.Name)

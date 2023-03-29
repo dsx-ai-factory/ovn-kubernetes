@@ -33,7 +33,7 @@ const initialBackoff = 1
 const noBackoff = 0
 
 // retryObjEntry is a generic object caching with retry mechanism
-//that resources can use to eventually complete their intended operations.
+// that resources can use to eventually complete their intended operations.
 type retryObjEntry struct {
 	sync.Mutex
 	// newObj holds k8s resource failed during add operation
@@ -381,7 +381,7 @@ func (oc *Controller) areResourcesEqual(objType reflect.Type, obj1, obj2 interfa
 		if err != nil {
 			klog.Errorf(err.Error())
 		}
-		switchName := oc.nadInfo.Prefix + node1.Name
+		switchName := util.GetClusterScopedName(oc.nadInfo.Prefix + node1.Name)
 		if shouldUpdate && oc.lsManager.IsNonHostSubnetSwitch(switchName) {
 			// Node is managed now, need to reconfigure all logical elements
 			oc.lsManager.DeleteNode(switchName)

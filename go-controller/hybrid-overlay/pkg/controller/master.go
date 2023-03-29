@@ -355,7 +355,7 @@ func (m *MasterController) setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet,
 			}
 			drIP := util.GetNodeHybridOverlayIfAddr(nodeSubnet).IP
 			matchStr := fmt.Sprintf(`inport == "%s%s" && %s.dst == %s`,
-				ovntypes.RouterToSwitchPrefix, nodeName, L3Prefix, hybridCIDR)
+				ovntypes.RouterToSwitchPrefix, util.GetClusterScopedName(nodeName), L3Prefix, hybridCIDR)
 
 			// Logic route policy to steer packet from pod to hybrid overlay nodes
 			logicalRouterPolicy := nbdb.LogicalRouterPolicy{
@@ -376,13 +376,13 @@ func (m *MasterController) setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet,
 				return fmt.Errorf("failed to add policy route '%s' for host %q on %s , error: %v", matchStr, nodeName, ovnClusterRouter, err)
 			}
 
-			logicalPort := ovntypes.RouterToSwitchPrefix + nodeName
+			logicalPort := util.GetClusterScopedName(ovntypes.RouterToSwitchPrefix + nodeName)
 			if err := util.CreateMACBinding(m.sbClient, logicalPort, ovnClusterRouter, portMac, drIP); err != nil {
 				return fmt.Errorf("failed to create MAC Binding for hybrid overlay: %v", err)
 			}
 
 			// Logic route policy to steer packet from external to nodePort service backed by non-ovnkube pods to hybrid overlay nodes
-			gwLRPIfAddrs, err := util.GetLRPAddrs(m.nbClient, ovntypes.GWRouterToJoinSwitchPrefix+ovntypes.GWRouterPrefix+nodeName)
+			gwLRPIfAddrs, err := util.GetLRPAddrs(m.nbClient, ovntypes.GWRouterToJoinSwitchPrefix+util.GetClusterScopedName(ovntypes.GWRouterPrefix+nodeName))
 			if err != nil {
 				return err
 			}
@@ -428,7 +428,7 @@ func (m *MasterController) setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet,
 			klog.Infof("Created hybrid overlay logical route static route at cluster router for node %s", nodeName)
 
 			// Static route to steer packets from external to nodePort service backed by pods on hybrid overlay node to cluster router.
-			drLRPIfAddrs, err := util.GetLRPAddrs(m.nbClient, ovntypes.GWRouterToJoinSwitchPrefix+ovntypes.OVNClusterRouter)
+			drLRPIfAddrs, err := util.GetLRPAddrs(m.nbClient, ovntypes.GWRouterToJoinSwitchPrefix+util.GetClusterScopedName(ovntypes.OVNClusterRouter))
 			if err != nil {
 				return err
 			}

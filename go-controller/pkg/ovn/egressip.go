@@ -1617,7 +1617,7 @@ func (oc *Controller) addEgressNode(nodeName string) error {
 	// as to notify them the change. If this is not the case: packets will
 	// continue to be routed to the old node which hosted the egress IP before
 	// it was moved, and the connections will fail.
-	portName := types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName
+	portName := types.EXTSwitchToGWRouterPrefix + util.GetClusterScopedName(types.GWRouterPrefix+nodeName)
 	lsp := nbdb.LogicalSwitchPort{
 		Name: portName,
 		// Setting nat-addresses to router will send out GARPs for all externalIPs and LB VIPs
@@ -1665,7 +1665,7 @@ func (oc *Controller) deleteEgressNode(nodeName string) error {
 	// This will remove the option described in addEgressNode from the logical
 	// switch port, since this node will not be used for egress IP assignments
 	// from now on.
-	portName := types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName
+	portName := types.EXTSwitchToGWRouterPrefix + util.GetClusterScopedName(types.GWRouterPrefix+nodeName)
 	lsp := nbdb.LogicalSwitchPort{
 		Name:    portName,
 		Options: map[string]string{"nat-addresses": "", "exclude-lb-vips-from-garp": ""},
@@ -1947,7 +1947,7 @@ func (e *egressIPController) deletePerPodGRSNAT(pod *kapi.Pod, podIPs []*net.IPN
 }
 
 func (e *egressIPController) getGatewayRouterJoinIP(node string, wantsIPv6 bool) (net.IP, error) {
-	gatewayIPs, err := util.GetLRPAddrs(e.nbClient, types.GWRouterToJoinSwitchPrefix+types.GWRouterPrefix+node)
+	gatewayIPs, err := util.GetLRPAddrs(e.nbClient, types.GWRouterToJoinSwitchPrefix+util.GetClusterScopedName(types.GWRouterPrefix+node))
 	if err != nil {
 		return nil, fmt.Errorf("attempt at finding node gateway router network information failed, err: %w", err)
 	}

@@ -288,6 +288,10 @@ func (oc *Controller) createBFDStaticRoute(bfdEnabled bool, gw string, podIP, gr
 			*item.OutputPort == *lrsr.OutputPort &&
 			item.Policy == lrsr.Policy
 	}
+	// If cluster_name is present, set it in external_ids.
+	if config.Kubernetes.ClusterName != "" {
+		lrsr.ExternalIDs = map[string]string{"cluster_name": config.Kubernetes.ClusterName}
+	}
 	ops, err = libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(oc.mc.nbClient, ops, gr, &lrsr, p,
 		&lrsr.Options)
 	if err != nil {
@@ -572,7 +576,7 @@ func deletePerPodGRSNAT(nbClient libovsdbclient.Client, nodeName string, extIPs,
 		return err
 	}
 	logicalRouter := nbdb.LogicalRouter{
-		Name: types.GWRouterPrefix + nodeName,
+		Name: util.GetClusterScopedName(types.GWRouterPrefix + nodeName),
 	}
 	err = libovsdbops.DeleteNATs(nbClient, &logicalRouter, nats...)
 	if err != nil {
@@ -589,7 +593,7 @@ func addOrUpdatePerPodGRSNAT(nbClient libovsdbclient.Client, nodeName string, ex
 		return err
 	}
 	logicalRouter := nbdb.LogicalRouter{
-		Name: types.GWRouterPrefix + nodeName,
+		Name: util.GetClusterScopedName(types.GWRouterPrefix + nodeName),
 	}
 	if err := libovsdbops.CreateOrUpdateNATs(nbClient, &logicalRouter, nats...); err != nil {
 		return fmt.Errorf("failed to update SNAT for pods of router %s: %v", logicalRouter.Name, err)
@@ -601,7 +605,7 @@ func addOrUpdatePerPodGRSNAT(nbClient libovsdbclient.Client, nodeName string, ex
 // applied to the GR where the pod resides
 // used when disableSNATMultipleGWs=true
 func (oc *Controller) addOrUpdatePerPodGRSNATReturnOps(nodeName string, extIPs, podIfAddrs []*net.IPNet, ops []ovsdb.Operation) ([]ovsdb.Operation, error) {
-	gr := types.GWRouterPrefix + nodeName
+	gr := util.GetClusterScopedName(types.GWRouterPrefix + nodeName)
 	router := &nbdb.LogicalRouter{Name: gr}
 	nats, err := buildPerPodGRSNAT(extIPs, podIfAddrs)
 	if err != nil {
@@ -641,7 +645,7 @@ func (oc *Controller) addHybridRoutePolicyForPod(podIP net.IP, node string) erro
 		}
 
 		// get the GR to join switch ip address
-		grJoinIfAddrs, err := util.GetLRPAddrs(oc.mc.nbClient, types.GWRouterToJoinSwitchPrefix+types.GWRouterPrefix+node)
+		grJoinIfAddrs, err := util.GetLRPAddrs(oc.mc.nbClient, types.GWRouterToJoinSwitchPrefix+util.GetClusterScopedName(types.GWRouterPrefix+node))
 		if err != nil {
 			return fmt.Errorf("unable to find IP address for node: %s, %s port, err: %v", node, types.GWRouterToJoinSwitchPrefix, err)
 		}
@@ -665,7 +669,7 @@ func (oc *Controller) addHybridRoutePolicyForPod(podIP net.IP, node string) erro
 		}
 
 		// traffic destined outside of cluster subnet go to GR
-		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == $%s`, types.RouterToSwitchPrefix, node, l3Prefix, matchSrcAS)
+		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == $%s`, types.RouterToSwitchPrefix, util.GetClusterScopedName(node), l3Prefix, matchSrcAS)
 		matchStr += matchDst
 
 		logicalRouterPolicy := nbdb.LogicalRouterPolicy{
@@ -734,7 +738,7 @@ func (oc *Controller) delHybridRoutePolicyForPod(podIP net.IP, node string) erro
 				}
 				matchDst += fmt.Sprintf(" && %s.dst != %s", l3Prefix, clusterSubnet.CIDR)
 			}
-			matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == $%s`, types.RouterToSwitchPrefix, node, l3Prefix, matchSrcAS)
+			matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == $%s`, types.RouterToSwitchPrefix, util.GetClusterScopedName(node), l3Prefix, matchSrcAS)
 			matchStr += matchDst
 
 			p := func(item *nbdb.LogicalRouterPolicy) bool {

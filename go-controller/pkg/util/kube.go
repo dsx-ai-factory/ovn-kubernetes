@@ -424,11 +424,15 @@ func GetClusterNamePrefix() string {
 // GetOVNClusterRouterName returns the name of the `ovn cluster router`,
 // suitably extended with prefixes as necessary.
 // When called with no prefixes:
-//  a) If there is no cluster_name set, returns types.OVNClusterRouter
-//  b) If a cluster_name is set, returns <cluster_name>_<types.OVNClusterRouter>
+//
+//	a) If there is no cluster_name set, returns types.OVNClusterRouter
+//	b) If a cluster_name is set, returns <cluster_name>_<types.OVNClusterRouter>
+//
 // When called with at least one additional prefixes (like the NadInfo prefix)
-//  a) If there is no cluster_name set, returns <prefix>_<types.OVNClusterRouter>
-//  b) If a cluster_name is set, returns <cluster_name>_<prefix>_<types.OVNClusterRouter>
+//
+//	a) If there is no cluster_name set, returns <prefix>_<types.OVNClusterRouter>
+//	b) If a cluster_name is set, returns <cluster_name>_<prefix>_<types.OVNClusterRouter>
+//
 // When called with a prefix list (more than one prefix), the above logic
 // is extended for each prefix.
 // i.e. [cluster_name]_<prefix1>_<prefix2>....._<types.OVNClusterRouter>
@@ -450,6 +454,11 @@ func GetOVNClusterRouterName(prefixes ...string) string {
 
 func GetOVNJoinSwitchName() string {
 	return GetClusterNamePrefix() + types.OVNJoinSwitch
+}
+
+// Resource names will be prefixed with the cluster_name if available.
+func GetClusterScopedName(name string) string {
+	return fmt.Sprintf("%s%s", GetClusterNamePrefix(), name)
 }
 
 func GetPhysNetNameKey() string {

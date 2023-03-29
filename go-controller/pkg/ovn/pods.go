@@ -51,7 +51,7 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 		} else if oc.nadInfo.TopoType == ovntypes.Layer2AttachDefTopoType {
 			nodeName = ovntypes.OvnLayer2Switch
 		}
-		switchName := oc.nadInfo.Prefix + nodeName
+		switchName := util.GetClusterScopedName(oc.nadInfo.Prefix + nodeName)
 		// skip nodes that are not running ovnk (inferred from host subnets)
 		if oc.lsManager.IsNonHostSubnetSwitch(switchName) {
 			continue
@@ -84,9 +84,10 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 
 	var switches []string
 	if oc.nadInfo.TopoType == ovntypes.LocalnetAttachDefTopoType {
-		switches = []string{oc.nadInfo.Prefix + ovntypes.OVNLocalnetSwitch}
+		switches = []string{util.GetClusterScopedName(oc.nadInfo.Prefix + ovntypes.OVNLocalnetSwitch)}
 	} else if oc.nadInfo.TopoType == ovntypes.Layer2AttachDefTopoType {
-		switches = []string{oc.nadInfo.Prefix + ovntypes.OvnLayer2Switch}
+		switches = []string{util.GetClusterScopedName(oc.nadInfo.Prefix + ovntypes.OvnLayer2Switch)}
+
 	} else {
 		// get all the nodes from the watchFactory
 		nodes, err := oc.mc.watchFactory.GetNodes()
@@ -99,7 +100,7 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 				// skip those nodes that's not OVN managed
 				continue
 			}
-			switches = append(switches, oc.nadInfo.Prefix+n.Name)
+			switches = append(switches, util.GetClusterScopedName(oc.nadInfo.Prefix+n.Name))
 		}
 	}
 
@@ -211,7 +212,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfoMap map[string]*l
 func (oc *Controller) delLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string,
 	network *networkattachmentdefinitionapi.NetworkSelectionElement, portInfo *lpInfo) error {
 	var err error
-	switchName := oc.nadInfo.Prefix + nodeName
+	switchName := util.GetClusterScopedName(oc.nadInfo.Prefix + nodeName)
 	podDesc := pod.Namespace + "/" + pod.Name
 	klog.Infof("Deleting pod %s on nad: %s", podDesc, nadName)
 
@@ -508,7 +509,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		lsManagerNodeName = ovntypes.OvnLayer2Switch
 	}
 	// If a node does node have an assigned hostsubnet don't wait for the logical switch to appear
-	if oc.lsManager.IsNonHostSubnetSwitch(oc.nadInfo.Prefix + lsManagerNodeName) {
+	if oc.lsManager.IsNonHostSubnetSwitch(util.GetClusterScopedName(oc.nadInfo.Prefix + lsManagerNodeName)) {
 		return nil
 	}
 	podDesc := fmt.Sprintf("[%s/%s/%s]", pod.UID, pod.Namespace, pod.Name)
@@ -542,7 +543,7 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string
 			podDesc, nadName, time.Since(start), libovsdbExecuteTime, podAnnoTime, err)
 	}()
 
-	logicalSwitch := oc.nadInfo.Prefix + nodeName
+	logicalSwitch := util.GetClusterScopedName(oc.nadInfo.Prefix + nodeName)
 	ls, err := oc.waitForNodeLogicalSwitch(logicalSwitch)
 	if err != nil {
 		return err

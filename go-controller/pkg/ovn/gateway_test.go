@@ -36,10 +36,11 @@ func init() {
 func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClusterRouter *nbdb.LogicalRouter, expectedNodeSwitch *nbdb.LogicalSwitch, nodeName string, clusterIPSubnets []*net.IPNet, hostSubnets []*net.IPNet,
 	l3GatewayConfig *util.L3GatewayConfig, joinLRPIPs, defLRPIPs []*net.IPNet, skipSnat bool, nodeMgmtPortIP string) []libovsdb.TestData {
 
-	GRName := "GR_" + nodeName
+	GRName := util.GetClusterScopedName("GR_" + nodeName)
 	gwSwitchPort := types.JoinSwitchToGWRouterPrefix + GRName
 	gwRouterPort := types.GWRouterToJoinSwitchPrefix + GRName
 	externalSwitch := fmt.Sprintf("%s%s", types.ExternalSwitchPrefix, nodeName)
+	externalSwitch = util.GetClusterScopedName(externalSwitch)
 	externalRouterPort := types.GWRouterToExtSwitchPrefix + GRName
 	externalSwitchPortToRouter := types.EXTSwitchToGWRouterPrefix + GRName
 
@@ -646,8 +647,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPort{
-						Name:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName,
-						UUID:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName + "-UUID",
+						Name:     util.GetClusterScopedName(types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName),
+						UUID:     util.GetClusterScopedName(types.GWRouterToJoinSwitchPrefix+types.GWRouterPrefix+nodeName) + "-UUID",
 						Networks: []string{"100.64.0.1/16"},
 					},
 					&nbdb.LoadBalancer{
@@ -664,7 +665,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 						},
 					},
 					&nbdb.LogicalRouter{
-						Name: types.GWRouterPrefix + nodeName,
+						Name: util.GetClusterScopedName(util.GetClusterScopedName(util.GetClusterScopedName(util.GetClusterScopedName(types.GWRouterPrefix + nodeName)))),
 						UUID: types.GWRouterPrefix + nodeName + "-UUID",
 						LoadBalancer: []string{
 							"Service_default/kubernetes_TCP_node_router_ovn-control-plane",
@@ -704,12 +705,12 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 						Name: types.OVNJoinSwitch,
 					},
 					&nbdb.LogicalSwitch{
-						Name: types.ExternalSwitchPrefix + nodeName,
-						UUID: types.ExternalSwitchPrefix + nodeName + "-UUID ",
+						Name: util.GetClusterScopedName(types.ExternalSwitchPrefix + nodeName),
+						UUID: util.GetClusterScopedName(types.ExternalSwitchPrefix+nodeName) + "-UUID ",
 					},
 					&nbdb.LogicalSwitch{
-						Name: types.EgressGWSwitchPrefix + types.ExternalSwitchPrefix + nodeName,
-						UUID: types.EgressGWSwitchPrefix + types.ExternalSwitchPrefix + nodeName + "-UUID",
+						Name: types.EgressGWSwitchPrefix + util.GetClusterScopedName(types.ExternalSwitchPrefix+nodeName),
+						UUID: types.EgressGWSwitchPrefix + util.GetClusterScopedName(types.ExternalSwitchPrefix+nodeName) + "-UUID",
 					},
 				},
 			})
@@ -765,8 +766,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPort{
-						Name:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName,
-						UUID:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName + "-UUID",
+						Name:     util.GetClusterScopedName(types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName),
+						UUID:     util.GetClusterScopedName(types.GWRouterToJoinSwitchPrefix+types.GWRouterPrefix+nodeName) + "-UUID",
 						Networks: []string{"100.64.0.1/16", "fd98::1/64"},
 					},
 					&nbdb.LoadBalancer{
@@ -838,12 +839,12 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 						Name: types.OVNJoinSwitch,
 					},
 					&nbdb.LogicalSwitch{
-						Name: types.ExternalSwitchPrefix + nodeName,
-						UUID: types.ExternalSwitchPrefix + nodeName + "-UUID ",
+						Name: util.GetClusterScopedName(types.ExternalSwitchPrefix + nodeName),
+						UUID: util.GetClusterScopedName(types.ExternalSwitchPrefix+nodeName) + "-UUID ",
 					},
 					&nbdb.LogicalSwitch{
-						Name: types.EgressGWSwitchPrefix + types.ExternalSwitchPrefix + nodeName,
-						UUID: types.EgressGWSwitchPrefix + types.ExternalSwitchPrefix + nodeName + "-UUID",
+						Name: types.EgressGWSwitchPrefix + util.GetClusterScopedName(types.ExternalSwitchPrefix+nodeName),
+						UUID: types.EgressGWSwitchPrefix + util.GetClusterScopedName(types.ExternalSwitchPrefix+nodeName) + "-UUID",
 					},
 				},
 			})

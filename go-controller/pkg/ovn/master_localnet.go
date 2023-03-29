@@ -60,7 +60,7 @@ func (oc *Controller) setupLayer2Switch(switchName string) error {
 
 // SetupLocalnetMaster creates localnet switch for the network
 func (oc *Controller) setupLocalnetMaster() error {
-	switchName := oc.nadInfo.Prefix + types.OVNLocalnetSwitch
+	switchName := util.GetClusterScopedName(oc.nadInfo.Prefix + types.OVNLocalnetSwitch)
 	if err := oc.setupLayer2Switch(switchName); err != nil {
 		return err
 	}
@@ -74,7 +74,7 @@ func (oc *Controller) setupLocalnetMaster() error {
 		Options: map[string]string{
 			"network_name": oc.nadInfo.Prefix + types.LocalNetBridgeName,
 		},
-		Name: oc.nadInfo.Prefix + types.OVNLocalnetPort,
+		Name: util.GetClusterScopedName(oc.nadInfo.Prefix + types.OVNLocalnetPort),
 	}
 	if oc.nadInfo.VlanId != 0 {
 		intVlanID := int(oc.nadInfo.VlanId)
@@ -92,7 +92,7 @@ func (oc *Controller) setupLocalnetMaster() error {
 
 // deleteLocalnetMaster delete localnet switch for the network
 func (oc *Controller) deleteLocalnetMaster() {
-	switchName := oc.nadInfo.Prefix + types.OVNLocalnetSwitch
+	switchName := util.GetClusterScopedName(oc.nadInfo.Prefix + types.OVNLocalnetSwitch)
 	if err := libovsdbops.DeleteLogicalSwitch(oc.mc.nbClient, switchName); err != nil {
 		klog.Errorf("Failed to delete logical switch %s: %v", switchName, err)
 	}

@@ -30,7 +30,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 	}
 
 	// Create a gateway router.
-	gatewayRouter := types.GWRouterPrefix + nodeName
+	gatewayRouter := util.GetClusterScopedName(types.GWRouterPrefix + nodeName)
 	physicalIPs := make([]string, len(l3GatewayConfig.IPAddresses))
 	for i, ip := range l3GatewayConfig.IPAddresses {
 		physicalIPs[i] = ip.IP.String()
@@ -152,6 +152,10 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 		p := func(item *nbdb.LogicalRouterStaticRoute) bool {
 			return item.IPPrefix == lrsr.IPPrefix && util.SliceHasStringItem(updatedLogicalRouter.StaticRoutes, item.UUID)
 		}
+		// If cluster_name is present, set it in external_ids.
+		if config.Kubernetes.ClusterName != "" {
+			lrsr.ExternalIDs = map[string]string{"cluster_name": config.Kubernetes.ClusterName}
+		}
 		err = libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(oc.mc.nbClient, gatewayRouter, &lrsr, p,
 			&lrsr.Nexthop)
 		if err != nil {
@@ -211,6 +215,10 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 		p := func(item *nbdb.LogicalRouterStaticRoute) bool {
 			return item.OutputPort != nil && *item.OutputPort == *lrsr.OutputPort && item.IPPrefix == lrsr.IPPrefix
 		}
+		// If cluster_name is present, set it in external_ids.
+		if config.Kubernetes.ClusterName != "" {
+			lrsr.ExternalIDs = map[string]string{"cluster_name": config.Kubernetes.ClusterName}
+		}
 		err := libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(oc.mc.nbClient, gatewayRouter, &lrsr, p,
 			&lrsr.Nexthop)
 		if err != nil {
@@ -228,12 +236,12 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 			IPPrefix: gwLRPIP.String(),
 			Nexthop:  gwLRPIP.String(),
 		}
+		p := func(item *nbdb.LogicalRouterStaticRoute) bool {
+			return item.Nexthop == lrsr.Nexthop && item.IPPrefix == lrsr.IPPrefix
+		}
 		// If cluster_name is present, set it in external_ids.
 		if config.Kubernetes.ClusterName != "" {
 			lrsr.ExternalIDs = map[string]string{"cluster_name": config.Kubernetes.ClusterName}
-		}
-		p := func(item *nbdb.LogicalRouterStaticRoute) bool {
-			return item.Nexthop == lrsr.Nexthop && item.IPPrefix == lrsr.IPPrefix
 		}
 		err := libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(oc.mc.nbClient, ovnClusterRouter,
 			&lrsr, p)
@@ -256,6 +264,10 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 			Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
 			IPPrefix: hostSubnet.String(),
 			Nexthop:  gwLRPIP[0].String(),
+		}
+		// If cluster_name is present, set it in external_ids.
+		if config.Kubernetes.ClusterName != "" {
+			lrsr.ExternalIDs = map[string]string{"cluster_name": config.Kubernetes.ClusterName}
 		}
 		p := func(item *nbdb.LogicalRouterStaticRoute) bool {
 			return item.Nexthop == lrsr.Nexthop && item.IPPrefix == lrsr.IPPrefix && item.Policy != nil && *item.Policy == *lrsr.Policy
@@ -359,7 +371,8 @@ func (oc *Controller) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRo
 	// external interface and that IP address. In the case of `local` gateway
 	// mode, whenever ovnkube-node container restarts a new br-local bridge will
 	// be created with a new `nicMacAddress`.
-	externalRouterPort := prefix + types.GWRouterToExtSwitchPrefix + gatewayRouter
+	prefix = util.GetClusterScopedName(prefix)
+	externalRouterPort := types.GWRouterToExtSwitchPrefix + gatewayRouter
 
 	externalRouterPortNetworks := []string{}
 	for _, ip := range ipAddresses {
@@ -393,7 +406,7 @@ func (oc *Controller) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRo
 		Options: map[string]string{
 			"network_name": physNetworkName,
 		},
-		Name: interfaceID,
+		Name: util.GetClusterScopedName(interfaceID),
 	}
 	if vlanID != nil {
 		intVlanID := int(*vlanID)
@@ -401,7 +414,7 @@ func (oc *Controller) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRo
 	}
 
 	// Also add the port to connect the external_switch to the router.
-	externalSwitchPortToRouter := prefix + types.EXTSwitchToGWRouterPrefix + gatewayRouter
+	externalSwitchPortToRouter := types.EXTSwitchToGWRouterPrefix + gatewayRouter
 	externalLogicalSwitchPortToRouter := nbdb.LogicalSwitchPort{
 		Name: externalSwitchPortToRouter,
 		Type: "router",
@@ -435,7 +448,7 @@ func (oc *Controller) addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAd
 		// embed nodeName as comment so that it is easier to delete these rules later on.
 		// logical router policy doesn't support external_ids to stash metadata
 		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.dst == %s /* %s */`,
-			types.RouterToSwitchPrefix, nodeName, l3Prefix, hostIP, nodeName)
+			types.RouterToSwitchPrefix, util.GetClusterScopedName(nodeName), l3Prefix, hostIP, util.GetClusterScopedName(nodeName))
 		matches = matches.Insert(matchStr)
 	}
 	if err := oc.syncPolicyBasedRoutes(nodeName, matches, types.NodeSubnetPolicyPriority, mgmtPortIP); err != nil {
@@ -490,7 +503,7 @@ func (oc *Controller) syncPolicyBasedRoutes(nodeName string, matches sets.String
 		// sync and remove unknown policies for this node/priority
 		// also flag if desired policies are already found
 		for _, policy := range policies {
-			if strings.Contains(policy.Match, fmt.Sprintf("%s\"", nodeName)) {
+			if strings.Contains(policy.Match, fmt.Sprintf("%s\"", util.GetClusterScopedName(nodeName))) {
 				// if the policy is for this node and has the wrong mgmtPortIP as nexthop, remove it
 				// FIXME we currently assume that foundNexthops is a single ip, this may
 				// change in the future.

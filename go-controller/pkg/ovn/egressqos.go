@@ -621,7 +621,8 @@ func (oc *Controller) egressQoSSwitches() ([]string, error) {
 	// Find all node switches
 	p := func(item *nbdb.LogicalSwitch) bool {
 		// Ignore external and Join switches(both legacy and current)
-		return !(strings.HasPrefix(item.Name, types.JoinSwitchPrefix) || item.Name == "join" || strings.HasPrefix(item.Name, types.ExternalSwitchPrefix))
+		return !(strings.HasPrefix(item.Name, util.GetClusterScopedName(types.JoinSwitchPrefix)) ||
+			item.Name == util.GetClusterScopedName(types.OVNJoinSwitch) || strings.HasPrefix(item.Name, util.GetClusterScopedName(types.ExternalSwitchPrefix)))
 	}
 
 	nodeLocalSwitches, err := libovsdbops.FindLogicalSwitchesWithPredicate(oc.mc.nbClient, p)

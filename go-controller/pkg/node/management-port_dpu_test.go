@@ -19,7 +19,7 @@ import (
 
 func genOVSAddMgmtPortCmd(nodeName string) string {
 	return fmt.Sprintf("ovs-vsctl --timeout=15 -- --may-exist add-port br-int %s -- set interface %s external-ids:iface-id=%s",
-		types.K8sMgmtIntfName, types.K8sMgmtIntfName, types.K8sPrefix+nodeName)
+		types.K8sMgmtIntfName, types.K8sMgmtIntfName, util.GetClusterScopedName(types.K8sPrefix+nodeName))
 }
 
 var _ = Describe("Mananagement port DPU tests", func() {

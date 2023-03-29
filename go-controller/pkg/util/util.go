@@ -56,19 +56,19 @@ func StringArg(context *cli.Context, name string) (string, error) {
 // GetLegacyK8sMgmtIntfName returns legacy management ovs-port name
 func GetLegacyK8sMgmtIntfName(nodeName string) string {
 	if len(nodeName) > 11 {
-		return types.K8sPrefix + (nodeName[:11])
+		return GetClusterScopedName(types.K8sPrefix + (nodeName[:11]))
 	}
-	return types.K8sPrefix + nodeName
+	return GetClusterScopedName(types.K8sPrefix + nodeName)
 }
 
 // GetWorkerFromGatewayRouter determines a node's corresponding worker switch name from a gateway router name
 func GetWorkerFromGatewayRouter(gr string) string {
-	return strings.TrimPrefix(gr, types.GWRouterPrefix)
+	return strings.TrimPrefix(gr, GetClusterScopedName(types.GWRouterPrefix))
 }
 
 // GetGatewayRouterFromNode determines a node's corresponding gateway router name
 func GetGatewayRouterFromNode(node string) string {
-	return types.GWRouterPrefix + node
+	return GetClusterScopedName(types.GWRouterPrefix + node)
 }
 
 // GetNodeChassisID returns the machine's OVN chassis ID
@@ -508,7 +508,7 @@ func UpdateNodeSwitchExcludeIPs(nbClient libovsdbclient.Client, nodeName string,
 
 	// Only query the cache for mp0 and HO LSPs
 	haveManagementPort := true
-	managmentPort := &nbdb.LogicalSwitchPort{Name: types.K8sPrefix + nodeName}
+	managmentPort := &nbdb.LogicalSwitchPort{Name: GetClusterScopedName(types.K8sPrefix + nodeName)}
 	_, err := libovsdbops.GetLogicalSwitchPort(nbClient, managmentPort)
 	if err == libovsdbclient.ErrNotFound {
 		klog.V(5).Infof("Management port does not exist for node %s", nodeName)
@@ -518,7 +518,7 @@ func UpdateNodeSwitchExcludeIPs(nbClient libovsdbclient.Client, nodeName string,
 	}
 
 	haveHybridOverlayPort := true
-	HOPort := &nbdb.LogicalSwitchPort{Name: types.HybridOverlayPrefix + nodeName}
+	HOPort := &nbdb.LogicalSwitchPort{Name: GetClusterScopedName(types.HybridOverlayPrefix + nodeName)}
 	_, err = libovsdbops.GetLogicalSwitchPort(nbClient, HOPort)
 	if err == libovsdbclient.ErrNotFound {
 		klog.V(5).Infof("Hybridoverlay port does not exist for node %s", nodeName)
@@ -551,7 +551,7 @@ func UpdateNodeSwitchExcludeIPs(nbClient libovsdbclient.Client, nodeName string,
 	}
 
 	sw := nbdb.LogicalSwitch{
-		Name:        nodeName,
+		Name:        GetClusterScopedName(nodeName),
 		OtherConfig: map[string]string{"exclude_ips": excludeIPs},
 	}
 	err = libovsdbops.UpdateLogicalSwitchSetOtherConfig(nbClient, &sw)

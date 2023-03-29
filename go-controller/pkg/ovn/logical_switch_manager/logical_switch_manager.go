@@ -522,7 +522,7 @@ func (jsIPManager *JoinSwitchIPManager) EnsureJoinLRPIPs(nodeName string) (gwLRP
 func (jsIPManager *JoinSwitchIPManager) getJoinLRPAddresses(nodeName string) []*net.IPNet {
 	// try to get the IPs from the logical router port
 	gwLRPIPs := []*net.IPNet{}
-	gwLrpName := types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName
+	gwLrpName := types.GWRouterToJoinSwitchPrefix + util.GetClusterScopedName(types.GWRouterPrefix+nodeName)
 	joinSubnets := jsIPManager.lsm.GetSwitchSubnets(util.GetOVNJoinSwitchName())
 	ifAddrs, err := util.GetLRPAddrs(jsIPManager.nbClient, gwLrpName)
 	if err == nil {
@@ -535,7 +535,6 @@ func (jsIPManager *JoinSwitchIPManager) getJoinLRPAddresses(nodeName string) []*
 			}
 		}
 	}
-
 	if len(gwLRPIPs) != len(joinSubnets) {
 		var errStr string
 		if len(gwLRPIPs) == 0 {

@@ -96,7 +96,7 @@ func ensureOvnAddressSet(asf *ovnAddressSetFactory, name string) (*ovnAddressSet
 	as := &ovnAddressSet{
 		nbClient: asf.nbClient,
 		name:     name,
-		hashName: asf.Prefix + hashedAddressSet(name),
+		hashName: util.GetClusterScopedName(asf.Prefix + hashedAddressSet(name)),
 	}
 
 	addrSet := nbdb.AddressSet{
@@ -233,7 +233,7 @@ func (asf *ovnAddressSetFactory) DestroyAddressSetInBackingStore(name string) er
 
 func destroyAddressSet(netNameInfo util.NetNameInfo, nbClient libovsdbclient.Client, name string) error {
 	addrset := nbdb.AddressSet{
-		Name: netNameInfo.Prefix + hashedAddressSet(name),
+		Name: util.GetClusterScopedName(netNameInfo.Prefix + hashedAddressSet(name)),
 	}
 	err := libovsdbops.DeleteAddressSets(nbClient, &addrset)
 	if err != nil {
@@ -295,7 +295,7 @@ func newOvnAddressSet(asf *ovnAddressSetFactory, name string, ips []net.IP) (*ov
 	as := &ovnAddressSet{
 		nbClient: asf.nbClient,
 		name:     name,
-		hashName: asf.Prefix + hashedAddressSet(name),
+		hashName: util.GetClusterScopedName(asf.Prefix + hashedAddressSet(name)),
 	}
 
 	uniqIPs := ipsToStringUnique(ips)

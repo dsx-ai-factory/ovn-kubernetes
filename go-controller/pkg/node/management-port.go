@@ -77,7 +77,7 @@ func (mp *managementPort) Create(nodeAnnotator kube.Annotator, waiter *startupWa
 		"--", "--may-exist", "add-port", "br-int", k8sMgmtIntfName,
 		"--", "set", "interface", k8sMgmtIntfName,
 		"type=internal", "mtu_request="+fmt.Sprintf("%d", config.Default.MTU),
-		"external-ids:iface-id="+types.K8sPrefix+mp.nodeName)
+		"external-ids:iface-id="+util.GetClusterScopedName(types.K8sPrefix+mp.nodeName))
 	if err != nil {
 		klog.Errorf("Failed to add port to br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return nil, err

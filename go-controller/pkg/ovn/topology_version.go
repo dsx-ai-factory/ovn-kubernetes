@@ -47,6 +47,7 @@ func (oc *Controller) reportTopologyVersion(ctx context.Context) error {
 		} else {
 			switchName = oc.nadInfo.Prefix + ovntypes.OvnLayer2Switch
 		}
+		switchName = util.GetClusterScopedName(switchName)
 		logicalSwitch := nbdb.LogicalSwitch{
 			Name:        switchName,
 			ExternalIDs: map[string]string{"k8s-ovn-topo-version": currentTopologyVersion},
@@ -147,6 +148,7 @@ func (oc *Controller) determineOVNTopoVersionFromOVN() (int, error) {
 			// oc.nadInfo.TopoType == ovntypes.Layer2AttachDefTopoType
 			l2Switch = oc.nadInfo.Prefix + ovntypes.OvnLayer2Switch
 		}
+		l2Switch = util.GetClusterScopedName(l2Switch)
 		logicalSwitch := &nbdb.LogicalSwitch{Name: l2Switch}
 		logicalSwitch, err := libovsdbops.GetLogicalSwitch(oc.mc.nbClient, logicalSwitch)
 		if err != nil && err != libovsdbclient.ErrNotFound {

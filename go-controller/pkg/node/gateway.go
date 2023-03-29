@@ -375,7 +375,7 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 
 	// the name of the patch port created by ovn-controller is of the form
 	// patch-<logical_port_name_of_localnet_port>-to-br-int
-	res.patchPort = "patch-" + res.bridgeName + "_" + nodeName + "-to-br-int"
+	res.patchPort = "patch-" + util.GetClusterScopedName(res.bridgeName) + "_" + nodeName + "-to-br-int"
 
 	// for DPU we use the host MAC address for the Gateway configuration
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {

@@ -29,12 +29,12 @@ func TestGetLegacyK8sMgmtIntfName(t *testing.T) {
 		{
 			desc:        "node name less than 11 characters",
 			inpNodeName: "lesseleven",
-			expRetStr:   "k8s-lesseleven",
+			expRetStr:   GetClusterScopedName("k8s-lesseleven"),
 		},
 		{
 			desc:        "node name more than 11 characters",
 			inpNodeName: "morethaneleven",
-			expRetStr:   "k8s-morethanele",
+			expRetStr:   GetClusterScopedName("k8s-morethanele"),
 		},
 	}
 	for i, tc := range tests {
@@ -237,13 +237,13 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 	nodeName := "ovn-control-plane"
 
 	fakeManagementPort := &nbdb.LogicalSwitchPort{
-		Name: types.K8sPrefix + nodeName,
-		UUID: types.K8sPrefix + nodeName + "-uuid",
+		Name: GetClusterScopedName(types.K8sPrefix + nodeName),
+		UUID: GetClusterScopedName(types.K8sPrefix+nodeName) + "-uuid",
 	}
 
 	fakeHoPort := &nbdb.LogicalSwitchPort{
-		Name: types.HybridOverlayPrefix + nodeName,
-		UUID: types.HybridOverlayPrefix + nodeName + "-uuid",
+		Name: GetClusterScopedName(types.HybridOverlayPrefix + nodeName),
+		UUID: GetClusterScopedName(types.HybridOverlayPrefix+nodeName) + "-uuid",
 	}
 
 	tests := []struct {
@@ -258,8 +258,8 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 			initialNbdb: libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
-						Name:        nodeName,
-						UUID:        nodeName + "-uuid",
+						Name:        GetClusterScopedName(nodeName),
+						UUID:        GetClusterScopedName(nodeName) + "-uuid",
 						Ports:       []string{fakeManagementPort.UUID, fakeHoPort.UUID},
 						OtherConfig: map[string]string{"ipv6_prefix": "ipv6_prefix"},
 					},
@@ -270,8 +270,8 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 			expectedNbdb: libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
-						Name:        nodeName,
-						UUID:        nodeName + "-uuid",
+						Name:        GetClusterScopedName(nodeName),
+						UUID:        GetClusterScopedName(nodeName) + "-uuid",
 						Ports:       []string{fakeManagementPort.UUID, fakeHoPort.UUID},
 						OtherConfig: map[string]string{"ipv6_prefix": "ipv6_prefix"},
 					},
@@ -288,8 +288,8 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 			initialNbdb: libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
-						UUID:  nodeName + "-uuid",
-						Name:  nodeName,
+						UUID:  GetClusterScopedName(nodeName) + "-uuid",
+						Name:  GetClusterScopedName(nodeName),
 						Ports: []string{fakeManagementPort.UUID, fakeHoPort.UUID},
 						OtherConfig: map[string]string{
 							"subnet":      "subnet",
@@ -303,8 +303,8 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 			expectedNbdb: libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
-						UUID:  nodeName + "-uuid",
-						Name:  nodeName,
+						UUID:  GetClusterScopedName(nodeName) + "-uuid",
+						Name:  GetClusterScopedName(nodeName),
 						Ports: []string{fakeManagementPort.UUID, fakeHoPort.UUID},
 						OtherConfig: map[string]string{
 							"subnet": "subnet",
@@ -322,8 +322,8 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 			initialNbdb: libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
-						UUID:  nodeName + "-uuid",
-						Name:  nodeName,
+						UUID:  GetClusterScopedName(nodeName) + "-uuid",
+						Name:  GetClusterScopedName(nodeName),
 						Ports: []string{},
 						OtherConfig: map[string]string{
 							"subnet":      "subnet",
@@ -335,8 +335,8 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 			expectedNbdb: libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
-						UUID:  nodeName + "-uuid",
-						Name:  nodeName,
+						UUID:  GetClusterScopedName(nodeName) + "-uuid",
+						Name:  GetClusterScopedName(nodeName),
 						Ports: []string{},
 						OtherConfig: map[string]string{
 							"subnet":      "subnet",
@@ -353,8 +353,8 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 			initialNbdb: libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
-						UUID:  nodeName + "-uuid",
-						Name:  nodeName,
+						UUID:  GetClusterScopedName(nodeName) + "-uuid",
+						Name:  GetClusterScopedName(nodeName),
 						Ports: []string{fakeManagementPort.UUID},
 						OtherConfig: map[string]string{
 							"subnet":      "subnet",
@@ -367,8 +367,8 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 			expectedNbdb: libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
-						UUID:  nodeName + "-uuid",
-						Name:  nodeName,
+						UUID:  GetClusterScopedName(nodeName) + "-uuid",
+						Name:  GetClusterScopedName(nodeName),
 						Ports: []string{fakeManagementPort.UUID},
 						OtherConfig: map[string]string{
 							"subnet":      "subnet",
@@ -386,8 +386,8 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 			initialNbdb: libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
-						UUID:  nodeName + "-uuid",
-						Name:  nodeName,
+						UUID:  GetClusterScopedName(nodeName) + "-uuid",
+						Name:  GetClusterScopedName(nodeName),
 						Ports: []string{fakeManagementPort.UUID},
 						OtherConfig: map[string]string{
 							"subnet":      "subnet",
@@ -400,8 +400,8 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 			expectedNbdb: libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
-						UUID:  nodeName + "-uuid",
-						Name:  nodeName,
+						UUID:  GetClusterScopedName(nodeName) + "-uuid",
+						Name:  GetClusterScopedName(nodeName),
 						Ports: []string{fakeManagementPort.UUID},
 						OtherConfig: map[string]string{
 							"subnet":      "subnet",
@@ -419,8 +419,8 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 			initialNbdb: libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
-						UUID:  nodeName + "-uuid",
-						Name:  nodeName,
+						UUID:  GetClusterScopedName(nodeName) + "-uuid",
+						Name:  GetClusterScopedName(nodeName),
 						Ports: []string{fakeManagementPort.UUID},
 						OtherConfig: map[string]string{
 							"subnet":      "subnet",
@@ -433,8 +433,8 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 			expectedNbdb: libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
-						UUID:  nodeName + "-uuid",
-						Name:  nodeName,
+						UUID:  GetClusterScopedName(nodeName) + "-uuid",
+						Name:  GetClusterScopedName(nodeName),
 						Ports: []string{fakeManagementPort.UUID},
 						OtherConfig: map[string]string{
 							"subnet": "subnet",
@@ -451,8 +451,8 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 			initialNbdb: libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
-						UUID:  nodeName + "-uuid",
-						Name:  nodeName,
+						UUID:  GetClusterScopedName(nodeName) + "-uuid",
+						Name:  GetClusterScopedName(nodeName),
 						Ports: []string{fakeManagementPort.UUID},
 						OtherConfig: map[string]string{
 							"subnet":      "subnet",
@@ -464,8 +464,8 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 			expectedNbdb: libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
-						UUID:  nodeName + "-uuid",
-						Name:  nodeName,
+						UUID:  GetClusterScopedName(nodeName) + "-uuid",
+						Name:  GetClusterScopedName(nodeName),
 						Ports: []string{fakeManagementPort.UUID},
 						OtherConfig: map[string]string{
 							"subnet":      "subnet",

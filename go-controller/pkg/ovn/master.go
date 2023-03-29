@@ -151,8 +151,8 @@ func (mc *OvnMHController) Start(ctx context.Context, cancel context.CancelFunc)
 
 // cleanup obsolete *gressDefaultDeny port groups
 func (oc *Controller) upgradeToNamespacedDenyPGOVNTopology() error {
-	ingressPGName := oc.nadInfo.Prefix + "ingressDefaultDeny"
-	egressPGName := oc.nadInfo.Prefix + "egressDefaultDeny"
+	ingressPGName := util.GetClusterScopedName(oc.nadInfo.Prefix + "ingressDefaultDeny")
+	egressPGName := util.GetClusterScopedName(oc.nadInfo.Prefix + "egressDefaultDeny")
 	err := libovsdbops.DeletePortGroups(oc.mc.nbClient, ingressPGName, egressPGName)
 	if err != nil {
 		klog.Errorf("%v", err)
@@ -279,7 +279,7 @@ func (oc *Controller) StartClusterMaster() error {
 		klog.Warningf("Load Balancer Group support enabled, however version of OVN in use does not support Load Balancer Groups.")
 	} else {
 		loadBalancerGroup := nbdb.LoadBalancerGroup{
-			Name: util.GetClusterNamePrefix() + oc.nadInfo.Prefix + types.ClusterLBGroupName,
+			Name: util.GetClusterScopedName(oc.nadInfo.Prefix + types.ClusterLBGroupName),
 		}
 		err := libovsdbops.CreateOrUpdateLoadBalancerGroup(oc.mc.nbClient, &loadBalancerGroup)
 		if err != nil {
@@ -401,7 +401,7 @@ func (oc *Controller) SetupMaster(ovnManagedNodeNames []string) error {
 	}
 
 	// Create OVNJoinSwitch that will be used to connect gateway routers to the distributed router.
-	joinSwitchName := util.GetClusterNamePrefix() + oc.nadInfo.Prefix + types.OVNJoinSwitch
+	joinSwitchName := util.GetClusterScopedName(oc.nadInfo.Prefix + types.OVNJoinSwitch)
 	logicalSwitch := nbdb.LogicalSwitch{
 		Name: joinSwitchName,
 	}
@@ -456,7 +456,7 @@ func (oc *Controller) SetupMaster(ovnManagedNodeNames []string) error {
 		},
 		Addresses: []string{"router"},
 	}
-	joinSwitchName = util.GetClusterNamePrefix() + oc.nadInfo.Prefix + types.OVNJoinSwitch
+	joinSwitchName = util.GetClusterScopedName(oc.nadInfo.Prefix + types.OVNJoinSwitch)
 	sw := nbdb.LogicalSwitch{Name: joinSwitchName}
 	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.mc.nbClient, &sw, &logicalSwitchPort)
 	if err != nil {
@@ -517,7 +517,7 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
 		addresses += " " + mgmtIfAddr.IP.String()
 
-		if err := addAllowACLFromNode(node.Name, mgmtIfAddr.IP, oc.mc.nbClient); err != nil {
+		if err := addAllowACLFromNode(util.GetClusterScopedName(node.Name), mgmtIfAddr.IP, oc.mc.nbClient); err != nil {
 			return err
 		}
 
@@ -534,6 +534,10 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 			p := func(item *nbdb.LogicalRouterStaticRoute) bool {
 				return item.IPPrefix == lrsr.IPPrefix && item.Nexthop == lrsr.Nexthop && item.Policy != nil && *item.Policy == *lrsr.Policy
 			}
+			// If cluster_name is present, set it in external_ids.
+			if config.Kubernetes.ClusterName != "" {
+				lrsr.ExternalIDs = map[string]string{"cluster_name": config.Kubernetes.ClusterName}
+			}
 			err := libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(oc.mc.nbClient, ovnClusterRouter,
 				&lrsr, p)
 			if err != nil {
@@ -544,10 +548,10 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 
 	// Create this node's management logical port on the node switch
 	logicalSwitchPort := nbdb.LogicalSwitchPort{
-		Name:      types.K8sPrefix + node.Name,
+		Name:      util.GetClusterScopedName(types.K8sPrefix + node.Name),
 		Addresses: []string{addresses},
 	}
-	sw := nbdb.LogicalSwitch{Name: node.Name}
+	sw := nbdb.LogicalSwitch{Name: util.GetClusterScopedName(node.Name)}
 	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.mc.nbClient, &sw, &logicalSwitchPort)
 	if err != nil {
 		return err
@@ -641,7 +645,7 @@ func (oc *Controller) syncNodeClusterRouterPort(node *kapi.Node, hostSubnets []*
 		}
 	}
 
-	switchName := oc.nadInfo.Prefix + node.Name
+	switchName := util.GetClusterScopedName(oc.nadInfo.Prefix + node.Name)
 	clusterRouterName := util.GetOVNClusterRouterName(oc.nadInfo.Prefix)
 	lrpName := types.RouterToSwitchPrefix + switchName
 	lrpNetworks := []string{}
@@ -704,7 +708,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 		}
 	}
 
-	switchName := oc.nadInfo.Prefix + nodeName
+	switchName := util.GetClusterScopedName(oc.nadInfo.Prefix + nodeName)
 	logicalSwitch := nbdb.LogicalSwitch{
 		Name: switchName,
 	}
@@ -815,9 +819,10 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 	}
 
 	if !oc.nadInfo.IsSecondary {
-		err = libovsdbops.AddPortsToPortGroup(oc.mc.nbClient, types.ClusterRtrPortGroupName, logicalSwitchPort.UUID)
+		pgName := util.GetClusterScopedName(types.ClusterRtrPortGroupName)
+		err = libovsdbops.AddPortsToPortGroup(oc.mc.nbClient, pgName, logicalSwitchPort.UUID)
 		if err != nil {
-			klog.Errorf(err.Error())
+			klog.Errorf("Failed to add logical port %+v to portgroup %v: %v:", logicalSwitchPort, pgName, err.Error())
 			return err
 		}
 	}
@@ -1122,7 +1127,7 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 
 	// Remove the logical switch associated with the node
 	clusterRouterName := util.GetOVNClusterRouterName(oc.nadInfo.Prefix)
-	switchName := oc.nadInfo.Prefix + nodeName
+	switchName := util.GetClusterScopedName(oc.nadInfo.Prefix + nodeName)
 	logicalRouterPortName := types.RouterToSwitchPrefix + switchName
 
 	lbCache.RemoveSwitch(switchName)
@@ -1353,7 +1358,7 @@ func (oc *Controller) syncNodesRetriable(nodes []interface{}) error {
 	}
 
 	for _, nodeSwitch := range nodeSwitches {
-		nodeName := strings.TrimPrefix(nodeSwitch.Name, oc.nadInfo.Prefix)
+		nodeName := strings.TrimPrefix(nodeSwitch.Name, util.GetClusterScopedName(oc.nadInfo.Prefix))
 		if foundNodes.Has(nodeName) {
 			// node still exists, no cleanup to do
 			continue
@@ -1461,7 +1466,7 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 	var err error
 
 	if noHostSubnet := noHostSubnet(node); noHostSubnet {
-		err := oc.lsManager.AddNoHostSubnetNode(oc.nadInfo.Prefix + node.Name)
+		err := oc.lsManager.AddNoHostSubnetNode(util.GetClusterScopedName(oc.nadInfo.Prefix + node.Name))
 		if err != nil {
 			return fmt.Errorf("nodeAdd: error adding noHost subnet for node %s: %w", node.Name, err)
 		}
@@ -1561,14 +1566,14 @@ func (oc *Controller) deleteNodeEvent(node *kapi.Node) error {
 		"various caches", node.Name)
 
 	if noHostSubnet(node) {
-		oc.lsManager.DeleteNode(oc.nadInfo.Prefix + node.Name)
+		oc.lsManager.DeleteNode(util.GetClusterScopedName(oc.nadInfo.Prefix + node.Name))
 		return nil
 	}
 	nodeSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, oc.nadInfo.NetName)
 	if err := oc.deleteNode(node.Name, nodeSubnets); err != nil {
 		return err
 	}
-	oc.lsManager.DeleteNode(oc.nadInfo.Prefix + node.Name)
+	oc.lsManager.DeleteNode(util.GetClusterScopedName(oc.nadInfo.Prefix + node.Name))
 	oc.addNodeFailed.Delete(node.Name)
 	oc.mgmtPortFailed.Delete(node.Name)
 	oc.gatewaysFailed.Delete(node.Name)
