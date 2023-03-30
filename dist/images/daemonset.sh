@@ -674,6 +674,7 @@ ovn_image=${image} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
   coredns_cluster_ip=${coredns_cluster_ip} \
+  ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
   ovnkube_app_name=ovnkube-node \
   j2 ../templates/ovnk8s-node.yaml.j2 -o ${output_dir}/ovnk8s-node.yaml
 
