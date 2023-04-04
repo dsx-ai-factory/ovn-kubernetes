@@ -25,4 +25,11 @@ if [ $return_value != 0 ]; then
 	echo "$(< /root/health)"
 	exit $return_value
 fi
+coredns_cluster_ip=${COREDNS_CLUSTER_IP:-10.223.0.3}
+ncat -zv $coredns_cluster_ip 53 >/root/health 2>&1
+return_value=$?
+if [ $return_value != 0 ]; then
+	echo "$(< /root/health)"
+	exit $return_value
+fi
 exit 0

@@ -6,19 +6,20 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
+	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 )
 
 // updatePodDPUConnDetailsWithRetry update the pod annotation with the given connection details
-func (pr *PodRequest) updatePodDPUConnDetailsWithRetry(kube kube.Interface, dpuConnDetails *util.DPUConnectionDetails) error {
+func (pr *PodRequest) updatePodDPUConnDetailsWithRetry(kube kube.Interface, podLister corev1listers.PodLister, dpuConnDetails *util.DPUConnectionDetails) error {
 	klog.Infof("Updating pod %s/%s with connection details (%+v) for NAD %s", pr.PodNamespace, pr.PodName,
 		dpuConnDetails, pr.effectiveNADName)
 	annoNadKeyName := util.GetAnnotationKeyFromNadName(pr.effectiveNADName, !pr.isSecondary)
 
 	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		// Informer cache should not be mutated, so get a copy of the object
-		pod, err := kube.GetPod(pr.PodNamespace, pr.PodName)
+		pod, err := podLister.Pods(pr.PodNamespace).Get(pr.PodName)
 		if err != nil {
 			return err
 		}
@@ -40,7 +41,7 @@ func (pr *PodRequest) updatePodDPUConnDetailsWithRetry(kube kube.Interface, dpuC
 	return nil
 }
 
-func (pr *PodRequest) addDPUConnectionDetailsAnnot(k kube.Interface, vfNetDevice string) error {
+func (pr *PodRequest) addDPUConnectionDetailsAnnot(k kube.Interface, podLister corev1listers.PodLister, vfNetDevice string) error {
 	// 1. Verify there is a device id
 	if pr.CNIConf.DeviceID == "" {
 		return fmt.Errorf("DeviceID must be set for Pod request with DPU")
@@ -88,5 +89,5 @@ func (pr *PodRequest) addDPUConnectionDetailsAnnot(k kube.Interface, vfNetDevice
 		VfNetdevName: vfNetDevice,
 	}
 
-	return pr.updatePodDPUConnDetailsWithRetry(k, &dpuConnDetails)
+	return pr.updatePodDPUConnDetailsWithRetry(k, podLister, &dpuConnDetails)
 }

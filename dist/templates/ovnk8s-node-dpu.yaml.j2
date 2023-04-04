@@ -34,9 +34,7 @@ spec:
         kubernetes.io/arch: arm64
       imagePullSecrets:
       - name: ovncni-quay-ips
-      # Requires fairly broad permissions - ability to read all services and network functions as well
-      # as all pods.
-      serviceAccountName: ovn
+      serviceAccountName: ovn-node
       hostNetwork: true
       dnsPolicy: Default
 
@@ -182,7 +180,7 @@ spec:
         - name: OVN_MULTI_NETWORK_ENABLE
           value: "true"
         - name: OVN_DISABLE_OVN_IFACE_ID_VER
-          value: "true"
+          value: "{{ ovn_disable_ovn_iface_id_ver }}"
         - name: OVN_OFCTRL_WAIT_BEFORE_CLEAR
           value: "{{ ovn_ofctrl_wait_before_clear }}"
         - name: OVN_MONITOR_ALL

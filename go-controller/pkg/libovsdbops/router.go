@@ -132,35 +132,41 @@ func GetLogicalRouterPort(nbClient libovsdbclient.Client, lrp *nbdb.LogicalRoute
 	return found[0], nil
 }
 
-// CreateOrUpdateLogicalRouterPorts creates or updates the provided logical
-// router ports and adds them to the provided logical router
-func CreateOrUpdateLogicalRouterPorts(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter,
-	lrps []*nbdb.LogicalRouterPort, fields ...interface{}) error {
-	if len(fields) == 0 {
-		fields = onModelUpdatesAllNonDefault()
-	}
-	originalPorts := router.Ports
-	router.Ports = make([]string, 0, len(lrps))
-	opModels := make([]operationModel, 0, len(lrps)+1)
-	for i := range lrps {
-		lrp := lrps[i]
-		opModel := operationModel{
-			Model:          lrp,
-			OnModelUpdates: fields,
-			DoAfter:        func() { router.Ports = append(router.Ports, lrp.UUID) },
+// CreateOrUpdateLogicalRouterPort creates or updates the provided logical
+// router port together with the gateway chassis (if not nil), and adds it to the provided logical router
+func CreateOrUpdateLogicalRouterPort(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter,
+	lrp *nbdb.LogicalRouterPort, chassis *nbdb.GatewayChassis, fields ...interface{}) error {
+	opModels := []operationModel{}
+	if chassis != nil {
+		opModels = append(opModels, operationModel{
+			Model:          chassis,
+			OnModelUpdates: onModelUpdatesAllNonDefault(),
+			DoAfter:        func() { lrp.GatewayChassis = []string{chassis.UUID} },
 			ErrNotFound:    false,
 			BulkOp:         false,
-		}
-		opModels = append(opModels, opModel)
+		})
 	}
-	opModel := operationModel{
+	if len(fields) == 0 {
+		fields = onModelUpdatesAllNonDefault()
+	} else if chassis != nil {
+		fields = append(fields, &lrp.GatewayChassis)
+	}
+	originalPorts := router.Ports
+	router.Ports = []string{}
+	opModels = append(opModels, operationModel{
+		Model:          lrp,
+		OnModelUpdates: fields,
+		DoAfter:        func() { router.Ports = append(router.Ports, lrp.UUID) },
+		ErrNotFound:    false,
+		BulkOp:         false,
+	})
+	opModels = append(opModels, operationModel{
 		Model:            router,
 		ModelPredicate:   func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
 		OnModelMutations: []interface{}{&router.Ports},
 		ErrNotFound:      true,
 		BulkOp:           false,
-	}
-	opModels = append(opModels, opModel)
+	})
 
 	m := newModelClient(nbClient)
 	_, err := m.CreateOrUpdate(opModels...)
@@ -170,8 +176,8 @@ func CreateOrUpdateLogicalRouterPorts(nbClient libovsdbclient.Client, router *nb
 
 // DeleteLogicalRouterPorts deletes the provided logical router ports and
 // removes them from the provided logical router
-func DeleteLogicalRouterPorts(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter, lrps ...*nbdb.LogicalRouterPort) error {
-	originalPorts := router.Ports
+func DeleteLogicalRouterPortsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, router *nbdb.LogicalRouter,
+	lrps ...*nbdb.LogicalRouterPort) ([]libovsdb.Operation, error) {
 	router.Ports = make([]string, 0, len(lrps))
 	opModels := make([]operationModel, 0, len(lrps)+1)
 	for i := range lrps {
@@ -198,7 +204,19 @@ func DeleteLogicalRouterPorts(nbClient libovsdbclient.Client, router *nbdb.Logic
 	opModels = append(opModels, opModel)
 
 	m := newModelClient(nbClient)
-	err := m.Delete(opModels...)
+	return m.DeleteOps(ops, opModels...)
+}
+
+// DeleteLogicalRouterPorts deletes the provided logical router ports and
+// removes them from the provided logical router
+func DeleteLogicalRouterPorts(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter, lrps ...*nbdb.LogicalRouterPort) error {
+	originalPorts := router.Ports
+	ops, err := DeleteLogicalRouterPortsOps(nbClient, nil, router, lrps...)
+	if err != nil {
+		router.Ports = originalPorts
+		return err
+	}
+	_, err = TransactAndCheck(nbClient, ops)
 	router.Ports = originalPorts
 	return err
 }
@@ -1002,7 +1020,8 @@ type gatewayChassisPredicate func(*nbdb.GatewayChassis) bool
 
 // CreateOrUpdateGatewayChassis creates or updates the provided gateway chassis
 // and sets it to the provided logical router port
-func CreateOrUpdateGatewayChassis(nbClient libovsdbclient.Client, port *nbdb.LogicalRouterPort, chassis *nbdb.GatewayChassis, fields ...interface{}) error {
+func CreateOrUpdateGatewayChassis(nbClient libovsdbclient.Client,
+	port *nbdb.LogicalRouterPort, chassis *nbdb.GatewayChassis, fields ...interface{}) error {
 	if len(fields) == 0 {
 		fields = onModelUpdatesAllNonDefault()
 	}

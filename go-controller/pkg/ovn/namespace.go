@@ -86,7 +86,7 @@ func (oc *Controller) getHostNetworkPodIPs(node *kapi.Node, policyType string) (
 func (oc *Controller) addHostnetworkPodIPToAddressSet(nodeName, podName, policyType string, addressSet addressset.AddressSet,
 	nodeHostNetPodsCache map[string]map[string][]net.IP) error {
 
-	node, err := oc.mc.kube.GetNode(nodeName)
+	node, err := oc.mc.watchFactory.GetNode(nodeName)
 	if err != nil {
 		return fmt.Errorf("failed to get node %s: %v", nodeName, err)
 	}

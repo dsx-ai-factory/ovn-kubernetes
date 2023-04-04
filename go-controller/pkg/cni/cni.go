@@ -132,7 +132,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 		if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
 			// Add DPU connection-details annotation so ovnkube-node running on DPU
 			// performs the needed network plumbing.
-			if err = pr.addDPUConnectionDetailsAnnot(kubecli, vfNetdevName); err != nil {
+			if err = pr.addDPUConnectionDetailsAnnot(kubecli, podLister, vfNetdevName); err != nil {
 				return nil, err
 			}
 			annotCondFn = isDPUReady
@@ -212,7 +212,7 @@ func (pr *PodRequest) cmdDel(podLister corev1listers.PodLister, kclient kubernet
 			}
 
 			// Delete the DPU connection-details annotation
-			_ = pr.updatePodDPUConnDetailsWithRetry(kubecli, nil)
+			_ = pr.updatePodDPUConnDetailsWithRetry(kubecli, podLister, nil)
 
 			if pr.IsVFIO {
 				return response, nil

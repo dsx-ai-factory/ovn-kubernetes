@@ -116,6 +116,11 @@ ovnkube_logfile_maxsize=${OVNKUBE_LOGFILE_MAXSIZE:-"100"}
 ovnkube_logfile_maxbackups=${OVNKUBE_LOGFILE_MAXBACKUPS:-"5"}
 ovnkube_logfile_maxage=${OVNKUBE_LOGFILE_MAXAGE:-"5"}
 
+# ovnkube-master ha-election parameters (value in seconds)
+ovn_master_ha_election_lease_duration=${OVN_HA_LEASE_DURATION:-"30"}
+ovn_master_ha_election_renew_deadline=${OVN_HA_RENEW_DEADLINE:-"20"}
+ovn_master_ha_election_retry_period=${OVN_HA_RETRY_PERIOD:-"2"}
+
 # ovnkube.sh version (update when API between daemonset and script changes - v.x.y)
 ovnkube_version="3"
 
@@ -1036,6 +1041,12 @@ ovn-master() {
       "
   }
 
+  ovn_master_ha_opts="
+      --ha-election-lease-duration ${ovn_master_ha_election_lease_duration}
+      --ha-election-renew-deadline ${ovn_master_ha_election_renew_deadline}
+      --ha-election-retry-period ${ovn_master_ha_election_retry_period}
+    "
+
   ovn_acl_logging_rate_limit_flag=
   if [[ -n ${ovn_acl_logging_rate_limit} ]]; then
       ovn_acl_logging_rate_limit_flag="--acl-logging-rate-limit ${ovn_acl_logging_rate_limit}"
@@ -1125,7 +1136,8 @@ ovn-master() {
     ${ovnkube_config_duration_enable_flag} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} --metrics-enable-pprof \
     --host-network-namespace ${ovn_host_network_namespace} \
-    ${ctinv_flows_disable_flag} &
+    ${ctinv_flows_disable_flag} \
+    ${ovn_master_ha_opts} &
 
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master
@@ -1197,6 +1209,28 @@ check_firewall_state() {
   fi
 }
 
+
+remove_ovn_firewall_zone_db_ports() {
+  # remove ports 6641/tcp and 6642/tcp if present
+  ports=('6641/tcp' '6642/tcp')
+  for port in ${ports[@]}; do
+    port_enabled=$(firewall-cmd --query-port=$port --zone=ovn)
+    if [[ $port_enabled == "yes" ]]; then
+      echo "Removing port $port from ovn zone."
+      status=$(firewall-cmd --remove-port=$port --zone=ovn)
+      if [[ $status != "success" ]]; then
+        echo "Exiting, Could not remove port $port from ovn zone."
+        exit 1
+      fi
+      status=$(firewall-cmd --remove-port=$port --zone=ovn --permanent)
+      if [[ $status != "success" ]]; then
+        echo "Exiting, Could not remove port $port permanently from ovn zone."
+        exit 1
+      fi
+    fi
+  done
+}
+
 create_ovn_firewall_zone() {
   # if ovn zone is not present, create it and apply it by performing reload
   firewall-cmd --zone=ovn --list-ports >/dev/null
@@ -1214,6 +1248,8 @@ create_ovn_firewall_zone() {
       echo "Exiting, failed to reload the firewalld service"
       exit 1
     fi
+  else
+    remove_ovn_firewall_zone_db_ports
   fi
 
   # block icmp traffic in ovn zone

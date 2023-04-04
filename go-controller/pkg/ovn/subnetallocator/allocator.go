@@ -59,7 +59,7 @@ func (sna *SubnetAllocator) MarkAllocatedNetwork(subnet *net.IPNet) error {
 func (sna *SubnetAllocator) AllocateNetworks() ([]*net.IPNet, error) {
 	var networks []*net.IPNet
 	var err error
-	ipv4network, err := sna.AllocateIPv4Network()
+	ipv4network, err := sna.AllocateIPv4Network(0)
 	if err != nil {
 		return nil, err
 	}
@@ -77,17 +77,30 @@ func (sna *SubnetAllocator) AllocateNetworks() ([]*net.IPNet, error) {
 }
 
 // AllocateIPv4Network tries to allocate an IPv4 network if there are ranges available
-func (sna *SubnetAllocator) AllocateIPv4Network() (*net.IPNet, error) {
+func (sna *SubnetAllocator) AllocateIPv4Network(numIPs int) (*net.IPNet, error) {
 	sna.Lock()
 	defer sna.Unlock()
 	if len(sna.v4ranges) == 0 {
 		return nil, nil
 	}
+	var one uint64 = 1
+	var v4rangeSkipped = 0
 	for _, snr := range sna.v4ranges {
+		if numIPs != 0 {
+			// Factor in the few IPs in the range that may be used for
+			// miscellaneous purposes
+			if ((one << snr.hostBits) - 4) < uint64(numIPs) {
+				v4rangeSkipped = v4rangeSkipped + 1
+				continue
+			}
+		}
 		sn := snr.allocateNetwork()
 		if sn != nil {
 			return sn, nil
 		}
+	}
+	if v4rangeSkipped == len(sna.v4ranges) {
+		return nil, fmt.Errorf("no network ranges that can host %d IPs available", numIPs)
 	}
 	return nil, ErrSubnetAllocatorFull
 }

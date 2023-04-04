@@ -5,8 +5,10 @@ import "time"
 const (
 	DefaultNetworkName = "default"
 
-	// topology type defined in CNI netconf for localnet faced interface
-	LocalnetAttachDefTopoType = "localnet"
+	// topology type defineds in CNI netconf
+	Layer3AttachDefTopoType   = "layer3"   // layer 3 network
+	Layer2AttachDefTopoType   = "layer2"   // layer 2 network
+	LocalnetAttachDefTopoType = "localnet" // localnet faced layer 2 network
 
 	K8sPrefix           = "k8s-"
 	HybridOverlayPrefix = "int-"
@@ -32,6 +34,9 @@ const (
 	// types.OvnLocalnetSwitch is the name of localnet topology switch
 	OVNLocalnetSwitch = "ovn_localnet_switch"
 	OVNLocalnetPort   = "ovn_localnet_port"
+
+	// types.OvnLayer2Switch is the name of layer2 topology switch
+	OvnLayer2Switch = "ovn_layer2_switch"
 
 	// types.OVNClusterRouter is the name of the distributed router
 	OVNClusterRouter = "ovn_cluster_router"
@@ -134,6 +139,7 @@ const (
 	// Deprecated: we used to set topology version as an annotation on the node. We don't do this anymore.
 	OvnK8sTopoAnno         = OvnK8sPrefix + "/" + "topology-version"
 	OvnK8sSmallMTUTaintKey = OvnK8sPrefix + "/" + "mtu-too-small"
+	OvnK8sConnectToNad     = OvnK8sPrefix + "/" + "connect-to-nad"
 
 	// name of the configmap used to synchronize status (e.g. watch for topology changes)
 	OvnK8sStatusCMName         = "control-plane-status"

@@ -48,6 +48,8 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 		nodeName := pod.Spec.NodeName
 		if oc.nadInfo.TopoType == ovntypes.LocalnetAttachDefTopoType {
 			nodeName = ovntypes.OVNLocalnetSwitch
+		} else if oc.nadInfo.TopoType == ovntypes.Layer2AttachDefTopoType {
+			nodeName = ovntypes.OvnLayer2Switch
 		}
 		switchName := oc.nadInfo.Prefix + nodeName
 		// skip nodes that are not running ovnk (inferred from host subnets)
@@ -83,6 +85,8 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 	var switches []string
 	if oc.nadInfo.TopoType == ovntypes.LocalnetAttachDefTopoType {
 		switches = []string{oc.nadInfo.Prefix + ovntypes.OVNLocalnetSwitch}
+	} else if oc.nadInfo.TopoType == ovntypes.Layer2AttachDefTopoType {
+		switches = []string{oc.nadInfo.Prefix + ovntypes.OvnLayer2Switch}
 	} else {
 		// get all the nodes from the watchFactory
 		nodes, err := oc.mc.watchFactory.GetNodes()
@@ -191,6 +195,8 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfoMap map[string]*l
 	lsManagerNodeName := pod.Spec.NodeName
 	if oc.nadInfo.TopoType == ovntypes.LocalnetAttachDefTopoType {
 		lsManagerNodeName = ovntypes.OVNLocalnetSwitch
+	} else if oc.nadInfo.TopoType == ovntypes.Layer2AttachDefTopoType {
+		lsManagerNodeName = ovntypes.OvnLayer2Switch
 	}
 
 	for nadName, network := range networkMap {
@@ -467,7 +473,7 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 func (oc *Controller) updatePodAnnotationWithRetry(origPod *kapi.Pod, podInfo *util.PodAnnotation, annoNadKeyName string) error {
 	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		// Informer cache should not be mutated, so get a copy of the object
-		pod, err := oc.mc.kube.GetPod(origPod.Namespace, origPod.Name)
+		pod, err := oc.mc.watchFactory.GetPod(origPod.Namespace, origPod.Name)
 		if err != nil {
 			return err
 		}
@@ -475,6 +481,9 @@ func (oc *Controller) updatePodAnnotationWithRetry(origPod *kapi.Pod, podInfo *u
 		cpod := pod.DeepCopy()
 		err = util.MarshalPodAnnotation(&cpod.Annotations, podInfo, annoNadKeyName)
 		if err != nil {
+			if util.IsAnnotationAlreadySetError(err) {
+				return nil
+			}
 			return err
 		}
 		err = oc.mc.kube.UpdatePod(cpod)
@@ -495,6 +504,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	lsManagerNodeName := pod.Spec.NodeName
 	if oc.nadInfo.TopoType == ovntypes.LocalnetAttachDefTopoType {
 		lsManagerNodeName = ovntypes.OVNLocalnetSwitch
+	} else if oc.nadInfo.TopoType == ovntypes.Layer2AttachDefTopoType {
+		lsManagerNodeName = ovntypes.OvnLayer2Switch
 	}
 	// If a node does node have an assigned hostsubnet don't wait for the logical switch to appear
 	if oc.lsManager.IsNonHostSubnetSwitch(oc.nadInfo.Prefix + lsManagerNodeName) {
@@ -620,6 +631,11 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string
 		}
 	}
 
+	// It is possible that IPs have already been allocated for this pod and annotation has been updated, then the last
+	// addLogicalPort4Nad() failed afterwards. In the current retry attempt, if the input pod argument got from
+	// the informer cache still lags behind, we would fail to get the updated pod annotation. Just continue to allocate
+	// new IPs and this function will eventually fail in updatePodAnnotationWithRetry() with ErrOverridePodIPs
+	// when it tries to override the pod IP annotation. Newly allocated IPs will be released then.
 	if needsIP {
 		if existingLSP != nil {
 			// try to get the MAC and IPs from existing OVN port first

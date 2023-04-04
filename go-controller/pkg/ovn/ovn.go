@@ -121,8 +121,15 @@ type OvnMHController struct {
 
 	// default network controller
 	ovnController *Controller
-	// controller for non default networks, key is netName of net-attach-def, value is *Controller
-	nonDefaultOvnControllers sync.Map
+	// controller for all networks including default and non default networks,
+	// key is netName of net-attach-def, value is *Controller
+	allOvnControllers sync.Map
+
+	// key nadName to connect to, value is map[<layer2_controller>]<connected_logical_routername>,
+	// if connected_logical_routername is empty, it means they have  not yet been connected successfully
+	//
+	// access/update of this map is serialized as result of net-attach-def add/delete handling, no lock needed
+	nadConnInfoMap map[string]map[*Controller]string
 }
 
 // Controller structure is the object which holds the controls for starting
@@ -296,14 +303,15 @@ func NewOvnMHController(ovnClient *util.OVNClientset, identity string, wf *facto
 			EgressFirewallClient: ovnClient.EgressFirewallClient,
 			CloudNetworkClient:   ovnClient.CloudNetworkClient,
 		},
-		watchFactory: wf,
-		wg:           wg,
-		stopChan:     stopChan,
-		recorder:     recorder,
-		nbClient:     libovsdbOvnNBClient,
-		sbClient:     libovsdbOvnSBClient,
-		identity:     identity,
-		podRecorder:  metrics.NewPodRecorder(),
+		watchFactory:   wf,
+		wg:             wg,
+		stopChan:       stopChan,
+		recorder:       recorder,
+		nbClient:       libovsdbOvnNBClient,
+		sbClient:       libovsdbOvnSBClient,
+		identity:       identity,
+		podRecorder:    metrics.NewPodRecorder(),
+		nadConnInfoMap: map[string]map[*Controller]string{},
 		//addressSetFactory: addressSetFactory,
 	}
 }
@@ -319,6 +327,7 @@ func (mc *OvnMHController) Init(addressSetFactory addressset.AddressSetFactory) 
 		NetConf: ctypes.NetConf{
 			Name: ovntypes.DefaultNetworkName,
 		},
+		TopoType:    ovntypes.Layer3AttachDefTopoType,
 		NetCidr:     config.Default.RawClusterSubnets,
 		MTU:         config.Default.MTU,
 		IsSecondary: false,
@@ -381,17 +390,21 @@ func (mc *OvnMHController) NewOvnController(nadInfo *util.NetAttachDefInfo,
 		return nil, fmt.Errorf("netcidr: %s is not specified for network %s", nadInfo.NetCidr, nadInfo.NetName)
 	}
 
-	clusterIPNet, err := config.ParseClusterSubnetEntries(nadInfo.NetCidr, nadInfo.TopoType != ovntypes.LocalnetAttachDefTopoType)
+	checkHostSubnetLength := (nadInfo.TopoType == ovntypes.Layer3AttachDefTopoType)
+	clusterIPNet, err := config.ParseClusterSubnetEntries(nadInfo.NetCidr, checkHostSubnetLength)
 	if err != nil {
 		return nil, fmt.Errorf("cluster subnet %s for network %s is invalid: %v", nadInfo.NetCidr, nadInfo.NetName, err)
 	}
+
+	// Sort the list of cluster subnets based on number of host IPs available
+	config.SortClusterSubnetEntries(clusterIPNet)
 
 	stopChan := mc.stopChan
 	if nadInfo.IsSecondary {
 		stopChan = make(chan struct{})
 	}
 	var lsManager *lsm.LogicalSwitchManager
-	if nadInfo.TopoType != ovntypes.LocalnetAttachDefTopoType {
+	if checkHostSubnetLength {
 		lsManager = lsm.NewLogicalSwitchManager()
 	} else {
 		lsManager = lsm.NewLocalnetSwitchManager()
@@ -443,11 +456,12 @@ func (mc *OvnMHController) NewOvnController(nadInfo *util.NetAttachDefInfo,
 		oc.retryNetworkPolicies = NewRetryObjs(factory.PolicyType, "", nil, nil, nil)
 		mc.ovnController = oc
 		oc.svcController, oc.svcFactory = newServiceController(mc.client, mc.nbClient, mc.recorder)
+		mc.allOvnControllers.Store(nadInfo.NetName, oc)
 	} else {
 		oc.multicastSupport = false
 		oc.wg = &sync.WaitGroup{}
 		oc.retryNetworkPolicies = NewRetryObjs(factory.MultinetworkpolicyType, "", nil, nil, nil)
-		_, loaded := mc.nonDefaultOvnControllers.LoadOrStore(nadInfo.NetName, oc)
+		_, loaded := mc.allOvnControllers.LoadOrStore(nadInfo.NetName, oc)
 		if loaded {
 			return nil, fmt.Errorf("non default Network attachment definition %s already exists", nadInfo.NetName)
 		}
@@ -977,7 +991,7 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 // WatchNodes starts the watching of node resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNodes() (err error) {
-	if oc.nadInfo.TopoType == ovntypes.LocalnetAttachDefTopoType {
+	if oc.nadInfo.TopoType == ovntypes.LocalnetAttachDefTopoType || oc.nadInfo.TopoType == ovntypes.Layer2AttachDefTopoType {
 		return nil
 	}
 	oc.nodeHandler, err = oc.WatchResource(oc.retryNodes)
@@ -1044,17 +1058,13 @@ func (mc *OvnMHController) initOvnController(netattachdef *nettypes.NetworkAttac
 		return mc.ovnController, nil
 	}
 
-	if nadInfo.NetName == ovntypes.DefaultNetworkName {
-		return nil, fmt.Errorf("non-default Network attachment definition's name cannot be %s", ovntypes.DefaultNetworkName)
-	}
-
 	// Note that net-attach-def add/delete/update events are serialized, so we don't need locks here.
 	// Check if any Controller of the same netconf.Name already exists, if so, check its conf to see if they are the same.
-	v, ok := mc.nonDefaultOvnControllers.Load(nadInfo.NetName)
+	v, ok := mc.allOvnControllers.Load(nadInfo.NetName)
 	if ok {
 		oc := v.(*Controller)
 		if oc.nadInfo.NetCidr != nadInfo.NetCidr || oc.nadInfo.MTU != nadInfo.MTU || oc.nadInfo.TopoType != nadInfo.TopoType ||
-			oc.nadInfo.VlanId != nadInfo.VlanId {
+			oc.nadInfo.VlanId != nadInfo.VlanId || oc.nadInfo.ConnectToNad != nadInfo.ConnectToNad {
 			return nil, fmt.Errorf("network attachment definition %s/%s does not share the same CNI config of name %s",
 				netattachdef.Namespace, netattachdef.Name, nadInfo.NetName)
 		} else {
@@ -1078,16 +1088,13 @@ func (mc *OvnMHController) addNetworkAttachDefinition(netattachdef *nettypes.Net
 		return
 	}
 
-	// return if oc is nil, or nadInfo is for default network
-	if !oc.nadInfo.IsSecondary {
-		return
-	}
-
 	// run the cluster controller to init the master
 	err = oc.Init(context.TODO())
 	if err != nil {
 		klog.Errorf(err.Error())
+		return
 	}
+	oc.connectToLayer2Network(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name))
 }
 
 func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.NetworkAttachmentDefinition) {
@@ -1106,10 +1113,12 @@ func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.
 	}
 	nadName := util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name)
 	if !netconf.IsSecondary {
-		mc.ovnController.nadInfo.NetAttachDefs.Delete(nadName)
-		return
+		_, ok := mc.ovnController.nadInfo.NetAttachDefs.LoadAndDelete(nadName)
+		if ok {
+			mc.ovnController.disconnectFromLayer2Network(nadName)
+		}
 	}
-	v, ok := mc.nonDefaultOvnControllers.Load(netconf.Name)
+	v, ok := mc.allOvnControllers.Load(netconf.Name)
 	if !ok {
 		klog.Errorf("Failed to find network controller for network %s", netconf.Name)
 		return
@@ -1120,6 +1129,8 @@ func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.
 		klog.Errorf("Failed to find nad %s from network controller for network %s", nadName, netconf.Name)
 		return
 	}
+	oc.disconnectFromLayer2Network(nadName)
+
 	// check if there any net-attach-def sharing the same CNI conf name left, if yes, just return
 	netAttachDefLeft := false
 	oc.nadInfo.NetAttachDefs.Range(func(key, value interface{}) bool {
@@ -1157,7 +1168,7 @@ func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.
 
 	oc.deleteMaster()
 
-	if oc.nadInfo.TopoType != ovntypes.LocalnetAttachDefTopoType {
+	if oc.nadInfo.TopoType != ovntypes.LocalnetAttachDefTopoType && oc.nadInfo.TopoType != ovntypes.Layer2AttachDefTopoType {
 		existingNodes, err := oc.mc.kube.GetNodes()
 		if err != nil {
 			klog.Errorf("Error in initializing/fetching subnets: %v", err)
@@ -1178,7 +1189,7 @@ func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.
 			oc.lsManager.DeleteNode(nadInfo.Prefix + node.Name)
 		}
 	}
-	mc.nonDefaultOvnControllers.Delete(netconf.Name)
+	mc.allOvnControllers.Delete(netconf.Name)
 }
 
 // syncNetworkAttachDefinition() walk through all net-attach-def and add them into Controller.nadInfo.NetAttachDefs

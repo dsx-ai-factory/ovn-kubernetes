@@ -5,6 +5,8 @@ kind: Service
 metadata:
   name: ovn-nbdb
   namespace: ovn-kubernetes
+  annotations:
+    k8s.ovn.org/skip-firewalld: "true"
 spec:
   ports:
     - name: north
@@ -65,7 +67,7 @@ spec:
       terminationGracePeriodSeconds: 30
       imagePullSecrets:
         - name: ovncni-quay-ips
-      serviceAccountName: ovn
+      serviceAccountName: ovn-db
       hostNetwork: true
       dnsPolicy: Default
       priorityClassName: "system-cluster-critical"

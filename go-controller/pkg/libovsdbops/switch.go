@@ -63,8 +63,8 @@ func CreateOrUpdateLogicalSwitch(nbClient libovsdbclient.Client, sw *nbdb.Logica
 	return err
 }
 
-// DeleteLogicalSwitch deletes the provided logical switch
-func DeleteLogicalSwitch(nbClient libovsdbclient.Client, swName string) error {
+// DeleteLogicalSwitchOps return txn ops to delete the provided logical switch
+func DeleteLogicalSwitchOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, swName string) ([]libovsdb.Operation, error) {
 	sw := nbdb.LogicalSwitch{
 		Name: swName,
 	}
@@ -76,7 +76,17 @@ func DeleteLogicalSwitch(nbClient libovsdbclient.Client, swName string) error {
 	}
 
 	m := newModelClient(nbClient)
-	return m.Delete(opModel)
+	return m.DeleteOps(ops, opModel)
+}
+
+// DeleteLogicalSwitch deletes the provided logical switch
+func DeleteLogicalSwitch(nbClient libovsdbclient.Client, swName string) error {
+	ops, err := DeleteLogicalSwitchOps(nbClient, nil, swName)
+	if err != nil {
+		return err
+	}
+	_, err = TransactAndCheck(nbClient, ops)
+	return err
 }
 
 // UpdateLogicalSwitchSetExternalIDs sets external IDs on the provided logical

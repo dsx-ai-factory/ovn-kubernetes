@@ -55,10 +55,19 @@ func updateSubnetAnnotation(annotations map[string]string, annotationName, netNa
 		}
 	}
 
+	existingHostSubnets, ok := subnetsMap[netName]
 	// add or delete host subnet of the specified network
 	if len(hostSubnets) != 0 {
+		if ok && IsIPNetListEqual(existingHostSubnets, hostSubnets) {
+			return newAnnotationAlreadySetError("OVN %s annotation for network %s already exists",
+				annotationName, netName)
+		}
 		subnetsMap[netName] = hostSubnets
 	} else {
+		if !ok {
+			return newAnnotationAlreadySetError("OVN %s annotation for network %s already removed",
+				annotationName, netName)
+		}
 		delete(subnetsMap, netName)
 	}
 

@@ -11,14 +11,15 @@ import (
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/cni/pkg/version"
 
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
+	cnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // WriteCNIConfig writes a CNI JSON config file to directory given by global config
 // if the file doesn't already exist, or is different than the content that would
 // be written.
 func WriteCNIConfig() error {
-	netConf := &ovntypes.NetConf{
+	netConf := &cnitypes.NetConf{
 		NetConf: types.NetConf{
 			CNIVersion: "0.4.0",
 			Name:       "ovn-kubernetes",
@@ -67,8 +68,8 @@ func WriteCNIConfig() error {
 }
 
 // ReadCNIConfig unmarshals a CNI JSON config into an NetConf structure
-func ReadCNIConfig(bytes []byte) (*ovntypes.NetConf, error) {
-	conf := &ovntypes.NetConf{}
+func ReadCNIConfig(bytes []byte) (*cnitypes.NetConf, error) {
+	conf := &cnitypes.NetConf{MTU: Default.MTU, TopoType: ovntypes.Layer3AttachDefTopoType}
 	if err := json.Unmarshal(bytes, conf); err != nil {
 		return nil, err
 	}

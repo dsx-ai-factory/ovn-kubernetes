@@ -32,7 +32,8 @@ func isDPUReady(podAnnotation map[string]string, annoNadKeyName string) bool {
 	if isOvnReady(podAnnotation, annoNadKeyName) {
 		// check DPU connection status
 		if status, err := util.UnmarshalPodDPUConnStatus(podAnnotation, annoNadKeyName); err == nil {
-			if status.Status == util.DPUConnectionStatusReady {
+			// DPUConnectionStatusClampedDown is a special case of DPUConnectionStatusReady
+			if status.Status == util.DPUConnectionStatusReady || status.Status == util.DPUConnectionStatusClampedDown {
 				return true
 			}
 		}

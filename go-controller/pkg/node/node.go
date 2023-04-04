@@ -42,6 +42,13 @@ const (
 	ngnHostTypeAnnotationName      = "ngn2.nvidia.com/hosttype"
 )
 
+// Special reserved values for k8s.ovn.org/miss-rl-config.
+// Doesn't seem there is any valid reason to configure these values explicitly.
+const (
+	ClampdownDoSRate  uint = 1
+	ClampdownDoSBurst uint = 1
+)
+
 // OvnNode is the object holder for utilities meant for node management
 type OvnNode struct {
 	name         string
@@ -74,6 +81,12 @@ type ovnNodeController struct {
 	// we assume that Pod's Network Attachment Selection Annotation will not change over time.
 	// key is pod.UUID, value is networkMap of map[string]*util.PodNadInfo type
 	podNadCache sync.Map
+	// Count of NADs that needs to be checked for DoS.
+	// We could do this per nad, but it might be more efficient to do it on the controller.
+	sync.RWMutex
+	dosCheckEnabled bool
+	wGroup          *sync.WaitGroup
+	stopChan        chan struct{}
 }
 
 // NewNode creates a new controller for node management
@@ -359,10 +372,14 @@ func isOVNControllerReady() (bool, error) {
 }
 
 func (n *OvnNode) NewOvnNodeController(nadInfo *util.NetAttachDefInfo) (*ovnNodeController, error) {
+	sc := make(chan struct{})
+	wg := &sync.WaitGroup{}
 	nc := &ovnNodeController{
-		node:    n,
-		nadInfo: nadInfo,
-		added:   false,
+		node:     n,
+		nadInfo:  nadInfo,
+		added:    false,
+		stopChan: sc,
+		wGroup:   wg,
 	}
 	if !nadInfo.IsSecondary {
 		n.defaultNodeController = nc
@@ -649,6 +666,7 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 			NetCidr:     config.Default.RawClusterSubnets,
 			MTU:         config.Default.MTU,
 			IsSecondary: false,
+			TopoType:    types.Layer3AttachDefTopoType,
 		}
 		nadInfo, _ := util.NewNetAttachDefInfo(defaultNetConf)
 		// Default node controller should not fail, e.g for XDP
@@ -744,6 +762,40 @@ func (n *OvnNode) watchNetworkAttachmentDefinitions() error {
 	return err
 }
 
+// We'll start a checker when any nad on this controller has PPS limit > 0; but we don't
+// disable it when the limits get reset for all nads.. assuming it is possible for that NAD
+// to be  configured with the limits again. Primarily to keep the logic simple.
+func (nc *ovnNodeController) enableDoSChecker() {
+	// Only supported on DPU
+	klog.V(5).Infof("Enabling DoS checker for %s", nc.nadInfo.NetName)
+	if config.OvnKubeNode.Mode != types.NodeModeDPU {
+		return
+	}
+	// Check if we need to start the doscheck thread if this NAD has a limit configured
+	nc.Lock()
+	defer nc.Unlock()
+	if nc.dosCheckEnabled {
+		klog.V(5).Infof("DoS checker already enabled for %s", nc.nadInfo.NetName)
+		return
+	}
+	klog.Infof("Starting DoS checker for %s", nc.nadInfo.NetName)
+	nc.dosCheckEnabled = true
+	nc.wGroup.Add(1)
+	go func() {
+		defer nc.wGroup.Done()
+		timer := time.NewTicker(time.Duration(config.Default.DoSCheckInterval) * time.Millisecond)
+		defer timer.Stop()
+		for {
+			select {
+			case <-timer.C:
+				nc.checkforDoSSuspects()
+			case <-nc.stopChan:
+				return
+			}
+		}
+	}()
+}
+
 func (n *OvnNode) initOvnNodeController(netattachdef *nettypes.NetworkAttachmentDefinition) (*ovnNodeController, error) {
 	nadInfo, nadConf, err := util.ParseNADInfo(netattachdef)
 	if err != nil {
@@ -755,11 +807,12 @@ func (n *OvnNode) initOvnNodeController(netattachdef *nettypes.NetworkAttachment
 
 	if !nadInfo.IsSecondary {
 		n.defaultNodeController.nadInfo.NetAttachDefs.Store(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name), nadConf)
+		// Don't look for disabledoscheck etc. we'll assume this nad will need the checker at some point, else
+		// it becomes very complex.
+		if nadConf.MaxNewConnPPS > 0 {
+			n.defaultNodeController.enableDoSChecker()
+		}
 		return n.defaultNodeController, nil
-	}
-
-	if nadInfo.NetName == types.DefaultNetworkName {
-		return nil, fmt.Errorf("non-default Network attachment definition's name cannot be %s", types.DefaultNetworkName)
 	}
 
 	// Note that net-attach-def add/delete/update events are serialized, so we don't need locks here.
@@ -772,12 +825,19 @@ func (n *OvnNode) initOvnNodeController(netattachdef *nettypes.NetworkAttachment
 				netattachdef.Namespace, netattachdef.Name, nadInfo.NetName)
 		} else {
 			nc.nadInfo.NetAttachDefs.Store(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name), nadConf)
+			if nadConf.MaxNewConnPPS > 0 {
+				nc.enableDoSChecker()
+			}
 		}
 		return nc, nil
 	}
 
 	nadInfo.NetAttachDefs.Store(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name), nadConf)
-	return n.NewOvnNodeController(nadInfo)
+	nc, err := n.NewOvnNodeController(nadInfo)
+	if err == nil && nadConf.MaxNewConnPPS > 0 {
+		nc.enableDoSChecker()
+	}
+	return nc, err
 }
 
 // syncNetworkAttachDefinition() delete OVN logical entities of the obsoleted netNames.
@@ -1009,6 +1069,9 @@ func (n *OvnNode) deleteNetworkAttachDefinition(netattachdef *nettypes.NetworkAt
 			}
 			klog.Infof("Destroyed XDP config")
 		}
+		// We can do this regardless of dosCheckEnabled
+		close(nc.stopChan)
+		nc.wGroup.Wait()
 	}
 
 	n.nonDefaultNodeControllers.Delete(netName)
@@ -1491,7 +1554,7 @@ func (n *OvnNode) updateRateLimitingConfig(old, new *nettypes.NetworkAttachmentD
 	if err := nc.updateNADConfig(util.GetNadKeyName(new.Namespace, new.Name), nadConfig); err != nil {
 		klog.Errorf("Failed to update network config in controller: %v", err)
 	} else {
-		n.updateRateLimitingForPods(nc, util.GetNadName(new.Namespace, new.Name, true))
+		n.updateRateLimitingForPods(nc, util.GetNadName(new.Namespace, new.Name, false))
 	}
 }
 
