@@ -59,6 +59,14 @@ const (
 	// skipSpoofCheckAnnotationName skips setting Port security on Logical Switch Ports that are
 	// part of the specified networks
 	skipSpoofCheckAnnotationName = "k8s.ovn.org/skip-spoofchk-on-networks"
+	// OvnPodPolicyWarTimestamp is the annotation on the host network Pods representing the timestamp
+	// when gateway router port connected to Join switch is created. It is introduced to make network
+	// policies involves host network Pods can work correctly.
+	OvnPodPolicyWarTimestamp = "k8s.ovn.org/pod-policy-war-ts"
+	// skipIPOnNetworksAnnotation specifies the NADs that don't require IP allocation
+	skipIPOnNetworksAnnotation = "k8s.ovn.org/skip-ip-on-networks"
+	// portSecurityInfoAnnotation specifies custom port security config need to be applied in lsp
+	portSecurityInfoAnnotation = "k8s.ovn.org/port-security-info"
 )
 
 var ErrNoPodIPFound = errors.New("no pod IPs found")
@@ -212,6 +220,10 @@ func UnmarshalPodAnnotation(annotations map[string]string, netName string) (*Pod
 		}
 	}
 
+	if SkipIPAMForNAD(annotations, netName) {
+		// pod doesn't require IP for this network
+		return podAnnotation, nil
+	}
 	if len(a.IPs) == 0 {
 		if a.IP == "" {
 			return nil, fmt.Errorf("bad annotation data (neither ip_address nor ip_addresses is set)")
@@ -380,4 +392,46 @@ func SkipSpoofCheckForNAD(annotations map[string]string, annoNadKeyName string) 
 		}
 	}
 	return false
+}
+
+// SkipIPAMForNAD return true if nadName is part of value of skipIPOnNetworksAnnotation annotation
+func SkipIPAMForNAD(annotations map[string]string, nadName string) bool {
+	skipIPNetworks := annotations[skipIPOnNetworksAnnotation]
+	if skipIPNetworks == "" {
+		return false
+	}
+	for _, skipNadName := range strings.Split(skipIPNetworks, ",") {
+		if skipNadName == nadName {
+			return true
+		}
+	}
+	return false
+}
+
+type portSecurityInfo struct {
+	IPs []string `json:"ips"`
+}
+
+// Get allowed IPs from pod annotation, which will be set in lsp's port_security field
+func GetAllowedIPsForNetwork(nadName string, annotations map[string]string) ([]net.IP, error) {
+	assignedIPs := []net.IP{}
+	annotPortSecInfo := annotations[portSecurityInfoAnnotation]
+	if annotPortSecInfo == "" {
+		return assignedIPs, nil
+	}
+	portSecurityInfoMap := make(map[string]*portSecurityInfo)
+	if err := json.Unmarshal([]byte(annotPortSecInfo), &portSecurityInfoMap); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal port security info %q: %v", annotPortSecInfo, err)
+	}
+	if portSecInfo := portSecurityInfoMap[nadName]; portSecInfo != nil && len(portSecInfo.IPs) > 0 {
+		for _, str := range portSecInfo.IPs {
+			ip := net.ParseIP(str)
+			if ip != nil {
+				assignedIPs = append(assignedIPs, ip)
+			} else {
+				klog.Warningf("Unable to parse IP %s", str)
+			}
+		}
+	}
+	return assignedIPs, nil
 }

@@ -3,6 +3,7 @@ package node
 import (
 	"fmt"
 	"net"
+	"strings"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -33,9 +34,9 @@ func genOVSFindCmd(timeout, table, column, condition string) string {
 func genOVSAddPortCmd(hostIfaceName, ifaceID, mac, ip, sandboxID, podUID string) string {
 	return fmt.Sprintf("ovs-vsctl --timeout=30 --may-exist add-port br-int %s other_config:transient=true "+
 		"-- set interface %s external_ids:attached_mac=%s "+
-		"external_ids:iface-id=%s external_ids:iface-id-ver=%s external_ids:ip_addresses=%s external_ids:sandbox=%s "+
+		"external_ids:iface-id=%s external_ids:iface-id-ver=%s external_ids:sandbox=%s external_ids:ip_addresses=%s "+
 		"-- --if-exists remove interface %s external_ids network_name",
-		hostIfaceName, hostIfaceName, mac, ifaceID, podUID, ip, sandboxID, hostIfaceName)
+		hostIfaceName, hostIfaceName, mac, ifaceID, podUID, sandboxID, ip, hostIfaceName)
 }
 
 func genOVSDelPortCmd(portName string, timeout ...int) string {
@@ -89,6 +90,7 @@ var _ = Describe("Node DPU tests", func() {
 	var podLister v1mocks.PodLister
 	var podNamespaceLister v1mocks.PodNamespaceLister
 	var nc *ovnNodeController
+	fakeIP := "192.168.1.1/24"
 
 	origSriovnetOps := util.GetSriovnetOps()
 	origNetlinkOps := util.GetNetLinkOps()
@@ -146,8 +148,12 @@ var _ = Describe("Node DPU tests", func() {
 		BeforeEach(func() {
 			vfRep = "pf0vf9"
 			vfLink = &linkMock.Link{}
+			ip, ipnet, _ := net.ParseCIDR(fakeIP)
+			ipnet.IP = ip
 			ifInfo = &cni.PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{},
+				PodAnnotation: util.PodAnnotation{
+					IPs: []*net.IPNet{ipnet},
+				},
 				Ingress:       -1,
 				Egress:        -1,
 				IsDPUHostMode: true,
@@ -199,7 +205,7 @@ var _ = Describe("Node DPU tests", func() {
 			})
 			// add-port, fail, del & retry
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
+				Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", fakeIP, "a8d09931", string(pod.UID)),
 				Err: fmt.Errorf("failed to run ovs command"),
 			})
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -207,7 +213,7 @@ var _ = Describe("Node DPU tests", func() {
 				Output: "true",
 			})
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
+				Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", fakeIP, "a8d09931", string(pod.UID)),
 				Err: fmt.Errorf("failed to run ovs command"),
 			})
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -215,7 +221,7 @@ var _ = Describe("Node DPU tests", func() {
 				Output: "true",
 			})
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
+				Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", fakeIP, "a8d09931", string(pod.UID)),
 				Err: fmt.Errorf("failed to run ovs command"),
 			})
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -248,7 +254,7 @@ var _ = Describe("Node DPU tests", func() {
 					Output: "true",
 				})
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
+					Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", fakeIP, "a8d09931", string(pod.UID)),
 				})
 				// clearPodBandwidth
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -270,11 +276,15 @@ var _ = Describe("Node DPU tests", func() {
 					Output: genIfaceID(pod.Namespace, pod.Name),
 				})
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    genOfctlDumpFlowsCmd("table=9,dl_src="),
+					Cmd:    genOfctlDumpFlowsCmd("table=8,dl_src="),
 					Output: "non-empty-output",
 				})
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    genOfctlDumpFlowsCmd("table=0,in_port=1"),
+					Output: "non-empty-output",
+				})
+				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    genOfctlDumpFlowsCmd("table=48,ip,ip_dst=" + strings.Split(fakeIP, "/")[0]),
 					Output: "non-empty-output",
 				})
 				sriovnetOpsMock.On("SetRepresentorPeerMacAddress", vfRep, net.HardwareAddr(nil)).Return(nil)
@@ -298,14 +308,14 @@ var _ = Describe("Node DPU tests", func() {
 					})
 					// add-port, fail, del & retry
 					execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-						Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
+						Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", fakeIP, "a8d09931", string(pod.UID)),
 					})
 					execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 						Cmd:    genOVSDelPortCmd(vfRep, 30),
 						Output: "true",
 					})
 					execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-						Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
+						Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", fakeIP, "a8d09931", string(pod.UID)),
 						Err: fmt.Errorf("failed to run ovs command"),
 					})
 					execMock.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -313,7 +323,7 @@ var _ = Describe("Node DPU tests", func() {
 						Output: "true",
 					})
 					execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-						Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
+						Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", fakeIP, "a8d09931", string(pod.UID)),
 						Err: fmt.Errorf("failed to run ovs command"),
 					})
 					execMock.AddFakeCmd(&ovntest.ExpectedCmd{

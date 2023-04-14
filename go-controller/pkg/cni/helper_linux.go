@@ -389,7 +389,6 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 		fmt.Sprintf("external_ids:attached_mac=%s", ifInfo.MAC),
 		fmt.Sprintf("external_ids:iface-id=%s", ifaceID),
 		fmt.Sprintf("external_ids:iface-id-ver=%s", initialPodUID),
-		fmt.Sprintf("external_ids:ip_addresses=%s", strings.Join(ipStrs, ",")),
 		fmt.Sprintf("external_ids:sandbox=%s", sandboxID),
 	}
 	if ifInfo.ClusterName != "" {
@@ -406,6 +405,10 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 
 	if len(ifInfo.NetdevName) != 0 {
 		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:netdev-name=%s", ifInfo.NetdevName))
+	}
+	// IP address might be empty
+	if len(ipStrs) > 0 {
+		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:ip_addresses=%s", strings.Join(ipStrs, ",")))
 	}
 
 	if ifInfo.IsSecondary {

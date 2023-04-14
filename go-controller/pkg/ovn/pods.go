@@ -566,6 +566,7 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string
 	var releaseIPs bool
 	lspExist := false
 	needsIP := true
+	skipIPAM := util.SkipIPAMForNAD(pod.Annotations, nadName)
 
 	// Check if the pod's logical switch port already exists. If it
 	// does don't re-add the port to OVN as this will change its
@@ -661,18 +662,25 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string
 		// ensure we have reserved the IPs found in OVN
 		if len(podIfAddrs) == 0 {
 			needsNewAllocation = true
-		} else if err = oc.lsManager.AllocateIPs(logicalSwitch, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
-			klog.Warningf("Unable to allocate IPs found on existing OVN port: %s, for pod %s on switch: %s"+
-				" error: %v", util.JoinIPNetIPs(podIfAddrs, " "), portName, logicalSwitch, err)
-
-			needsNewAllocation = true
+		} else if !skipIPAM {
+			if err = oc.lsManager.AllocateIPs(logicalSwitch, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
+				klog.Warningf("Unable to allocate IPs found on existing OVN port: %s, for pod %s on switch: %s"+
+					" error: %v", util.JoinIPNetIPs(podIfAddrs, " "), portName, logicalSwitch, err)
+				needsNewAllocation = true
+			}
 		}
 		if needsNewAllocation {
 			// Previous attempts to use already configured IPs failed, need to assign new
-			podMac, podIfAddrs, err = oc.assignPodAddresses(logicalSwitch)
+			generatedPodMac, generatedPodIfAddrs, err := oc.assignPodAddresses(logicalSwitch, skipIPAM)
 			if err != nil {
 				return fmt.Errorf("failed to assign pod addresses for pod %s on switch: %s, err: %v",
 					portName, logicalSwitch, err)
+			}
+			if podMac == nil {
+				podMac = generatedPodMac
+			}
+			if len(generatedPodIfAddrs) > 0 {
+				podIfAddrs = generatedPodIfAddrs
 			}
 		}
 
@@ -779,10 +787,25 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string
 	// on the corresponding LSP so that it can provide high availability for the default gateway IP.
 	// TODO(gmoodalbail): need a correct way to disable portSecurity for default network
 	skipPortSecurity := util.SkipSpoofCheckForNAD(pod.Annotations, annoNadKeyName)
-	if !skipPortSecurity {
-		lsp.PortSecurity = addresses
-	} else {
+	if skipPortSecurity {
 		klog.Infof("Skip setting port security for port %s on NAD %s", portName, nadName)
+	} else {
+		if skipIPAM {
+			if allowedIPs, err := util.GetAllowedIPsForNetwork(nadName, pod.Annotations); err != nil {
+				return fmt.Errorf("failed to parse port security info for %s: %v", nadName, err)
+			} else if len(allowedIPs) > 0 {
+				allowedAddresses := []string{}
+				for _, ip := range allowedIPs {
+					allowedAddresses = append(allowedAddresses, fmt.Sprintf("%s %s", podMac.String(), ip))
+				}
+				lsp.PortSecurity = allowedAddresses
+			} else {
+				klog.V(5).Infof("No allowed IPs are specified for skip-ipam port %s, adding mac %s only", portName, podMac.String())
+				lsp.PortSecurity = []string{podMac.String()}
+			}
+		} else {
+			lsp.PortSecurity = addresses
+		}
 	}
 
 	ops, err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitchOps(oc.mc.nbClient, ops, ls, lsp)
@@ -846,14 +869,21 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string
 	return nil
 }
 
-// Given a node, gets the next set of addresses (from the IPAM) for each of the node's
-// subnets to assign to the new pod
-func (oc *Controller) assignPodAddresses(switchName string) (net.HardwareAddr, []*net.IPNet, error) {
+// Given a switch, gets the next set of addresses (from the IPAM) for each of the node's
+// subnets to assign to the new pod; if skipIPAM is true, return mac address only
+func (oc *Controller) assignPodAddresses(switchName string, skipIPAM bool) (net.HardwareAddr, []*net.IPNet, error) {
 	var (
 		podMAC   net.HardwareAddr
 		podCIDRs []*net.IPNet
 		err      error
 	)
+	if skipIPAM {
+		mac, err := util.GenerateRandMAC()
+		if err != nil {
+			return nil, nil, err
+		}
+		return mac, nil, nil
+	}
 	podCIDRs, err = oc.lsManager.AllocateNextIPs(switchName)
 	if err != nil {
 		return nil, nil, err
