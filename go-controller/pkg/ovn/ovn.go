@@ -695,6 +695,14 @@ func exGatewayAnnotationsChanged(oldPod, newPod *kapi.Pod) bool {
 		oldPod.Annotations[util.BfdAnnotation] != newPod.Annotations[util.BfdAnnotation]
 }
 
+func portSecurityAnnotationChanged(oldPod, newPod *kapi.Pod) bool {
+	if oldPod == nil {
+		// not an update event, creation flow will handle port_security
+		return false
+	}
+	return oldPod.Annotations[util.PortSecurityInfoAnnotation] != newPod.Annotations[util.PortSecurityInfoAnnotation]
+}
+
 func networkStatusAnnotationsChanged(oldPod, newPod *kapi.Pod) bool {
 	return oldPod.Annotations[nettypes.NetworkStatusAnnot] != newPod.Annotations[nettypes.NetworkStatusAnnot]
 }
@@ -759,6 +767,13 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) error {
 			return fmt.Errorf("addLogicalPort failed for %s/%s network %s: %w", pod.Namespace, pod.Name, oc.nadInfo.NetName, err)
 		}
 	} else {
+		if portSecurityAnnotationChanged(oldPod, pod) {
+			if err := oc.updatePortSecurity(oldPod, pod); err != nil {
+				klog.Errorf(err.Error())
+				oc.recordPodEvent("ErrorUpdatingPortSecurity", err, pod)
+				return err
+			}
+		}
 		if oc.nadInfo.IsSecondary {
 			return nil
 		}

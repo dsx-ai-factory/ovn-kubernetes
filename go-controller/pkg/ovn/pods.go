@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strings"
@@ -557,6 +558,7 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string
 		return err
 	}
 
+	annoNadKeyName := util.GetAnnotationKeyFromNadName(nadName, !oc.nadInfo.IsSecondary)
 	portName := util.GetLogicalPortName(pod.Namespace, pod.Name, nadName, !oc.nadInfo.IsSecondary)
 	klog.Infof("[%s] creating logical port for pod on switch %s for nad %s", podDesc, logicalSwitch, nadName)
 
@@ -566,7 +568,7 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string
 	var releaseIPs bool
 	lspExist := false
 	needsIP := true
-	skipIPAM := util.SkipIPAMForNAD(pod.Annotations, nadName)
+	skipIPAM := util.SkipIPAMForNAD(pod.Annotations, annoNadKeyName)
 
 	// Check if the pod's logical switch port already exists. If it
 	// does don't re-add the port to OVN as this will change its
@@ -604,7 +606,6 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string
 		lsp.Options["requested-chassis"] = pod.Spec.NodeName
 	}
 
-	annoNadKeyName := util.GetAnnotationKeyFromNadName(nadName, !oc.nadInfo.IsSecondary)
 	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations, annoNadKeyName)
 
 	// the IPs we allocate in this function need to be released back to the
@@ -635,11 +636,13 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string
 		lsp.DynamicAddresses = nil
 
 		// ensure we have reserved the IPs in the annotation
-		if err = oc.lsManager.AllocateIPs(logicalSwitch, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
-			return fmt.Errorf("unable to ensure IPs allocated for already annotated pod: %s, IPs: %s, error: %v",
-				pod.Name, util.JoinIPNetIPs(podIfAddrs, " "), err)
-		} else {
-			needsIP = false
+		if len(podIfAddrs) != 0 {
+			if err = oc.lsManager.AllocateIPs(logicalSwitch, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
+				return fmt.Errorf("unable to ensure IPs allocated for already annotated pod: %s, IPs: %s, error: %v",
+					pod.Name, util.JoinIPNetIPs(podIfAddrs, " "), err)
+			} else {
+				needsIP = false
+			}
 		}
 	}
 
@@ -676,9 +679,7 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string
 				return fmt.Errorf("failed to assign pod addresses for pod %s on switch: %s, err: %v",
 					portName, logicalSwitch, err)
 			}
-			if podMac == nil {
-				podMac = generatedPodMac
-			}
+			podMac = generatedPodMac
 			if len(generatedPodIfAddrs) > 0 {
 				podIfAddrs = generatedPodIfAddrs
 			}
@@ -791,11 +792,11 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string
 		klog.Infof("Skip setting port security for port %s on NAD %s", portName, nadName)
 	} else {
 		if skipIPAM {
-			if allowedIPs, err := util.GetAllowedIPsForNetwork(nadName, pod.Annotations); err != nil {
-				return fmt.Errorf("failed to parse port security info for %s: %v", nadName, err)
-			} else if len(allowedIPs) > 0 {
+			if portSecInfo, err := util.GetPortSecurityInfo(pod.Annotations); err != nil {
+				return err
+			} else if allowedIPs := portSecInfo[annoNadKeyName]; allowedIPs != nil && len(allowedIPs.IPs) > 0 {
 				allowedAddresses := []string{}
-				for _, ip := range allowedIPs {
+				for _, ip := range allowedIPs.IPs {
 					allowedAddresses = append(allowedAddresses, fmt.Sprintf("%s %s", podMac.String(), ip))
 				}
 				lsp.PortSecurity = allowedAddresses
@@ -940,4 +941,92 @@ func (oc *Controller) delLSPOps(logicalPort, logicalSwitch, lspUUID string) ([]o
 	}
 
 	return ops, nil
+}
+
+func (oc *Controller) updatePortSecurity(oldPod, newPod *kapi.Pod) (err error) {
+	if !util.PodWantsNetwork(newPod) {
+		return nil
+	}
+	podDesc := fmt.Sprintf("[%s/%s/%s]", newPod.UID, newPod.Namespace, newPod.Name)
+	on, networkMap, err := util.IsNetworkOnPod(newPod, oc.nadInfo)
+	if err != nil || !on {
+		// the pod is not attached to this specific network
+		klog.V(5).Infof("Pod %s is not attached on this overlay network controller %s error (%v) ", podDesc,
+			oc.nadInfo.NetName, err)
+		return nil
+	}
+	klog.V(5).Infof("Pod %s is attached on this network: %s", podDesc, oc.nadInfo.NetName)
+	for nadName := range networkMap {
+		annoNadKeyName := util.GetAnnotationKeyFromNadName(nadName, !oc.nadInfo.IsSecondary)
+		oldPortSecInfoMap, err := util.GetPortSecurityInfo(oldPod.Annotations)
+		if err != nil {
+			return err
+		}
+		newPortSecInfoMap, err := util.GetPortSecurityInfo(newPod.Annotations)
+		if err != nil {
+			return err
+		}
+		oldPortSecInfo, oldPortSecInfoExists := oldPortSecInfoMap[annoNadKeyName]
+		newPortSecInfo, newPortSecInfoExists := newPortSecInfoMap[annoNadKeyName]
+		if !oldPortSecInfoExists && !newPortSecInfoExists {
+			// port security info for this nad doesn't exist before and now
+			continue
+		}
+		// generate port name
+		portName := util.GetLogicalPortName(newPod.Namespace, newPod.Name, nadName, !oc.nadInfo.IsSecondary)
+		lsp := &nbdb.LogicalSwitchPort{Name: portName}
+		ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
+		err = oc.mc.nbClient.Get(ctx, lsp)
+		if err != nil {
+			cancel()
+			return fmt.Errorf("unable to get lsp %s for updating: %v", portName, err)
+		}
+		cancel()
+		// get allowed mac from port_security
+		allowedMac := getAllowedMacAddress(lsp)
+		if allowedMac == "" {
+			// get mac from addresses
+			if portMac, _, err := util.ExtractPortAddresses(lsp); err != nil {
+				return err
+			} else {
+				allowedMac = portMac.String()
+			}
+		}
+		addresses := []string{}
+		if newPortSecInfo != nil && len(newPortSecInfo.IPs) > 0 {
+			for _, ip := range newPortSecInfo.IPs {
+				addresses = append(addresses, fmt.Sprintf("%s %s", allowedMac, ip))
+			}
+		} else if oldPortSecInfo != nil && len(oldPortSecInfo.IPs) > 0 {
+			// lsp previously had allowed IPs in port_security but removed now,
+			// remove IPs from port security and retain mac only
+			addresses = append(addresses, allowedMac)
+		}
+		if len(addresses) == 0 {
+			// nothing to change
+			continue
+		}
+		klog.V(4).Infof("Updating lsp %s's port_security to %v", portName, strings.Join(addresses, ","))
+		lsp.PortSecurity = addresses
+		op, err := oc.mc.nbClient.Where(lsp).Update(lsp, &lsp.PortSecurity)
+		if err != nil {
+			return fmt.Errorf("could not create commands to update lsp %s: %v", portName, err)
+		}
+		if _, err = libovsdbops.TransactAndCheckAndSetUUIDs(oc.mc.nbClient, lsp, op); err != nil {
+			return fmt.Errorf("failed to update port_security for lsp %s: %v", portName, err)
+		}
+	}
+	return nil
+}
+
+func getAllowedMacAddress(lsp *nbdb.LogicalSwitchPort) string {
+	if len(lsp.PortSecurity) == 0 {
+		return ""
+	}
+	for _, str := range strings.Split(lsp.PortSecurity[0], " ") {
+		if _, err := net.ParseMAC(str); err == nil {
+			return str
+		}
+	}
+	return ""
 }
