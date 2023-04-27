@@ -30,7 +30,7 @@ spec:
         kubernetes.io/os: "linux"
     spec:
       imagePullSecrets:
-        - name: ovncni-quay-ips
+        - name: ovncni-nvcr-ips
       {%- if ovnkube_app_name=="ovnkube-node" %}
       serviceAccountName: ovn-node
       {%- elif ovnkube_app_name=="ovnkube-node-dpu-host" %}

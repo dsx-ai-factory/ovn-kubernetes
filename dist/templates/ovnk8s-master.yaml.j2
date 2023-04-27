@@ -45,7 +45,7 @@ spec:
         kubernetes.io/os: "linux"
     spec:
       imagePullSecrets:
-        - name: ovncni-quay-ips
+        - name: ovncni-nvcr-ips
       # Requires fairly broad permissions - ability to read all services and network functions as well
       # as all pods.
       serviceAccountName: ovn-master
