@@ -679,7 +679,9 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string
 				return fmt.Errorf("failed to assign pod addresses for pod %s on switch: %s, err: %v",
 					portName, logicalSwitch, err)
 			}
-			podMac = generatedPodMac
+			if podMac == nil {
+				podMac = generatedPodMac
+			}
 			if len(generatedPodIfAddrs) > 0 {
 				podIfAddrs = generatedPodIfAddrs
 			}

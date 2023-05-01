@@ -70,7 +70,7 @@ const (
 )
 
 var ErrNoPodIPFound = errors.New("no pod IPs found")
-var ErrOverridePodIPs = errors.New("overriding existing pod IPs with new IPs in pod annotation")
+var ErrOverridePodAddresses = errors.New("overriding existing pod IP or MAC addresses with new values in pod annotation")
 
 // PodAnnotation describes the assigned network details for a single pod network. (The
 // actual annotation may include the equivalent of multiple PodAnnotations.)
@@ -149,13 +149,14 @@ func MarshalPodAnnotation(pannotations *map[string]string, podInfo *PodAnnotatio
 	// check if the annotation already set, if so, do not update pod annotation to avoid leaking
 	existingPa, ok := podNetworks[annoNadKeyName]
 	if ok {
-		// it is ok to only check if pod IPs have changed. Other fields either should never change (MTU, GatewayRequested)
-		// or will not change if IPs remain the same (MAC, Gateways, Routes)
-		if IsStringListEqual(existingPa.IPs, pa.IPs) {
+		// check if pod IPs and MACs have changed. Other fields either should never change (MTU, GatewayRequested)
+		// or will not change if IPs remain the same (Gateways, Routes).
+		sameIPs := IsStringListEqual(existingPa.IPs, pa.IPs)
+		if sameIPs && existingPa.MAC == pa.MAC {
 			return newAnnotationAlreadySetError("OVN %s annotation for NAD %s already exists",
 				OvnPodAnnotationName, annoNadKeyName)
-		} else {
-			return ErrOverridePodIPs
+		} else if !sameIPs || existingPa.MAC != pa.MAC {
+			return ErrOverridePodAddresses
 		}
 	}
 	for _, gw := range podInfo.Gateways {
