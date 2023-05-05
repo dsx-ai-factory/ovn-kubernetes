@@ -51,6 +51,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	ref "k8s.io/client-go/tools/reference"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 )
@@ -1229,6 +1230,89 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 		}
 	}
 	return nil
+}
+
+// findNodeReadyCondition finds node ready condition in conditions array.
+// Returns a pointer within the given node.
+func findNodeReadyCondition(node *kapi.Node) *kapi.NodeCondition {
+	for i, condition := range node.Status.Conditions {
+		if condition.Type == kapi.NodeReady {
+			return &node.Status.Conditions[i]
+		}
+	}
+	return nil
+}
+
+// XXX should come from config
+const noSchedTaintKey = "ngn2.nvidia.com/ovn"
+const nodeDependentsAnnotationKey = "ngn2.nvidia.com/dpu-host-hostname"
+const depedentTypeLabelKey = "ngn2.nvidia.com/dpu-hosttype"
+
+var dependentTypesPropagated = map[string]bool{
+	"GS": true,
+}
+
+// dependentNodename returns (dependentNodename, true) if the node has an annotation to indicate is has dependents
+func dependentNodename(node *kapi.Node) (string, bool) {
+	dep, present := node.Annotations[nodeDependentsAnnotationKey]
+	return dep, present
+}
+
+// Return true if this node type must propagate not ready conditions to any dependent node.
+func nodePropagatesReadiness(node *kapi.Node) bool {
+	if hostTypeLabel, present := node.Labels[depedentTypeLabelKey]; present {
+		_, present = dependentTypesPropagated[hostTypeLabel]
+		return present
+	}
+	return false
+}
+
+// syncDependentNodeTaints syncs the taints on a dependent node with the ready condition of
+// the node subject to reconciliation. If the 'within' duration is nonzero then the last
+// transition time of the ready condition must be no older than that duration from now - within
+// should be non-zero for Update events, to avoid a GET on every reconciliation of a node
+// that has a dependent (e.g., within of 1m for updates).
+func (oc *Controller) syncDependentNodeTaints(node *kapi.Node, within time.Duration) error {
+	if !nodePropagatesReadiness(node) {
+		return nil
+	}
+
+	dependentNodeName, present := dependentNodename(node)
+	if !present {
+		return nil
+	}
+
+	ourReadyCondition := findNodeReadyCondition(node)
+	if ourReadyCondition == nil || within != 0 && time.Since(ourReadyCondition.LastTransitionTime.Time) > within {
+		return nil
+	}
+
+	noSchedTaint := &kapi.Taint{
+		Key:    noSchedTaintKey,
+		Value:  "dpuNotReady",
+		Effect: kapi.TaintEffectNoSchedule,
+	}
+	action := ""
+	var err error
+	switch ourReadyCondition.Status {
+	case kapi.ConditionTrue:
+		action = "removing taint"
+		err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			return oc.mc.kube.RemoveTaintFromNode(dependentNodeName, noSchedTaint)
+		})
+
+	case kapi.ConditionFalse, kapi.ConditionUnknown:
+		action = "adding taint"
+		err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			return oc.mc.kube.SetTaintOnNode(dependentNodeName, noSchedTaint)
+		})
+	}
+
+	if err != nil {
+		err = fmt.Errorf("syncDependentNodeTaints error syncing ready condition to dependent node taint, %s error: %v",
+			action, err)
+	}
+	return err
 }
 
 // WatchNodes starts the watching of node resource and calls

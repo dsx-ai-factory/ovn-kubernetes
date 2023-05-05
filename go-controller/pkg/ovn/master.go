@@ -1481,6 +1481,11 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 			return fmt.Errorf("nodeAdd: error adding noHost subnet for node %s: %w", node.Name, err)
 		}
 		if !oc.nadInfo.IsSecondary {
+			// DPU case, and we want to propagate DPU NotReady state
+			// as a NoSchedule taint to DPU's host
+			if err := oc.syncDependentNodeTaints(node, 5*time.Minute); err != nil {
+				klog.Warningf(err.Error())
+			}
 			oc.clearInitialNodeNetworkUnavailableCondition(node)
 		}
 		return nil
