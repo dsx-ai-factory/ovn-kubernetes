@@ -19,6 +19,7 @@ import (
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpbrapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
@@ -29,8 +30,10 @@ import (
 )
 
 const (
-	RoutePolicyPriorityAdminPBR = 80
-	messagePrefixAddressSet     = "AddressSet"
+	RoutePolicyPriorityNoRerouteJoinSubnet = 81
+	RoutePolicyPriorityAdminPBR            = 80
+	messagePrefixAddressSet                = "AddressSet"
+	addressSetClusterSubnets               = "cluster_subnets"
 )
 
 type action string
@@ -843,6 +846,44 @@ func (oc *Controller) deleteLogicalRouterPoliciesByPriority(priority int) error 
 	return libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.mc.nbClient, util.GetClusterScopedName(types.OVNClusterRouter), func(item *nbdb.LogicalRouterPolicy) bool {
 		return item.Priority == priority && util.HasExternalIDsForCluster(item.ExternalIDs)
 	})
+}
+
+// join subnet is used by OVN for its internal purposes and packets destined to it
+// should be kept within the cluster and shouldn't be subjected to AdminPBR rules
+// and forwarded to Internet.
+func (oc *Controller) noRerouteToJoinSubnet() error {
+	// ensure that cluster subnets are in address set
+	addrSet, err := oc.addressSetFactory.EnsureAddressSet(addressSetClusterSubnets)
+	if err != nil {
+		return fmt.Errorf("failed to create address set for cluster subnets: %v", err)
+	}
+	clusterSubnets := make([]*net.IPNet, 0, len(config.Default.ClusterSubnets))
+	for _, clusterEntry := range config.Default.ClusterSubnets {
+		clusterSubnets = append(clusterSubnets, clusterEntry.CIDR)
+	}
+	if err := addrSet.AddSubnets(clusterSubnets); err != nil {
+		return err
+	}
+	// create or update logical router policy
+	v4AddrSetName, _ := addrSet.GetASHashNames()
+	match := fmt.Sprintf("ip4.src == {$%s} && ip4.dst == %s ", v4AddrSetName, config.Gateway.V4JoinSubnet)
+	lrp := nbdb.LogicalRouterPolicy{
+		Priority:    RoutePolicyPriorityNoRerouteJoinSubnet,
+		Match:       match,
+		Action:      nbdb.LogicalRouterPolicyActionAllow,
+		ExternalIDs: util.CreateClusterScopedExternalIDs(),
+	}
+	p := func(item *nbdb.LogicalRouterPolicy) bool {
+		return item.Priority == RoutePolicyPriorityNoRerouteJoinSubnet && item.Match == match &&
+			util.HasExternalIDsForCluster(item.ExternalIDs)
+	}
+
+	if err = libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(oc.mc.nbClient,
+		util.GetClusterScopedName(types.OVNClusterRouter), &lrp, p,
+		&lrp.Match, &lrp.Action, &lrp.Priority, &lrp.ExternalIDs); err != nil {
+		return fmt.Errorf("unable to add logical router policy for join subnet %s: %v", config.Gateway.V4JoinSubnet, err)
+	}
+	return nil
 }
 
 func internalPolicyOf(ovnpbr *nbdb.LogicalRouterPolicy) *internalAdminPBRPolicy {

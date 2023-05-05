@@ -52,6 +52,20 @@ func (_m *AddressSet) AddIPsReturnOps(ip []net.IP) ([]ovsdb.Operation, error) {
 	return r0, r1
 }
 
+// AddSubnets provides a mock function with given fields: subnets
+func (_m *AddressSet) AddSubnets(subnets []*net.IPNet) error {
+	ret := _m.Called(subnets)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func([]*net.IPNet) error); ok {
+		r0 = rf(subnets)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // DeleteIPs provides a mock function with given fields: ip
 func (_m *AddressSet) DeleteIPs(ip []net.IP) error {
 	ret := _m.Called(ip)
@@ -87,6 +101,20 @@ func (_m *AddressSet) DeleteIPsReturnOps(ip []net.IP) ([]ovsdb.Operation, error)
 	}
 
 	return r0, r1
+}
+
+// DeleDeleteSubnetsteIPs provides a mock function with given fields: subnets
+func (_m *AddressSet) DeleteSubnets(subnets []*net.IPNet) error {
+	ret := _m.Called(subnets)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func([]*net.IPNet) error); ok {
+		r0 = rf(subnets)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
 }
 
 // Destroy provides a mock function with given fields:

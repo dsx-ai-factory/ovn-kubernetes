@@ -1006,6 +1006,9 @@ func (oc *Controller) WatchAdminPolicyBasedRoutes() error {
 		if err != nil && err != libovsdbclient.ErrNotFound {
 			return fmt.Errorf("failed to clean up egressip default noreroute policies: %v", err)
 		}
+		if err := oc.noRerouteToJoinSubnet(); err != nil {
+			return fmt.Errorf("failed to create router policy to skip AdminPBR rules for join switch subnet: %v", err)
+		}
 	}
 	oc.adminPBRRetryQueue = workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "adminpbr")
 	filterAdminPBR := func(obj interface{}) bool {

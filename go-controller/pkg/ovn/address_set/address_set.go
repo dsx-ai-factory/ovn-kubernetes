@@ -55,6 +55,8 @@ type AddressSet interface {
 	AddIPs(ip []net.IP) error
 	// AddIPsReturnOps returns the ops needed to add the array of IPs to the address set
 	AddIPsReturnOps(ip []net.IP) ([]ovsdb.Operation, error)
+	// AddSubnets adds an array of subnets to the address set
+	AddSubnets(subnets []*net.IPNet) error
 	// GetIPs gets the list of v4 & v6 IPs from the address set
 	GetIPs() ([]string, []string)
 	// SetIPs sets the address set to the given array of addresses
@@ -62,6 +64,7 @@ type AddressSet interface {
 	DeleteIPs(ip []net.IP) error
 	// DeleteIPsReturnOps returns the ops needed to delete the array of IPs from the address set
 	DeleteIPsReturnOps(ip []net.IP) ([]ovsdb.Operation, error)
+	DeleteSubnets(subnets []*net.IPNet) error
 	Destroy() error
 }
 
@@ -412,6 +415,55 @@ func (as *ovnAddressSets) AddIPsReturnOps(ips []net.IP) ([]ovsdb.Operation, erro
 	return ops, nil
 }
 
+func (as *ovnAddressSets) AddSubnets(subnets []*net.IPNet) error {
+	var ops []ovsdb.Operation
+	var err error
+	v4Subnets := []*net.IPNet{}
+	existingV4Addresses := []string{}
+	if as.ipv4 != nil {
+		if existing, err := as.ipv4.getIPs(); err != nil {
+			return fmt.Errorf("failed to get v4 IPs")
+		} else if len(existing) > 0 {
+			existingV4Addresses = append(existingV4Addresses, existing...)
+		}
+	}
+	v6Subnets := []*net.IPNet{}
+	existingV6Addresses := []string{}
+	if as.ipv6 != nil {
+		if existing, err := as.ipv6.getIPs(); err != nil {
+			return fmt.Errorf("failed to get v6 IPs")
+		} else if len(existing) > 0 {
+			existingV6Addresses = append(existingV6Addresses, existing...)
+		}
+	}
+	for _, subnet := range subnets {
+		if utilnet.IsIPv4CIDR(subnet) && !util.ArrayHasString(existingV4Addresses, subnet.String()) {
+			v4Subnets = append(v4Subnets, subnet)
+		} else if utilnet.IsIPv6CIDR(subnet) && !util.ArrayHasString(existingV6Addresses, subnet.String()) {
+			v6Subnets = append(v6Subnets, subnet)
+		}
+	}
+	var op []ovsdb.Operation
+	if as.ipv4 != nil && len(v4Subnets) > 0 {
+		if op, err = as.ipv4.addSubnets(v4Subnets); err != nil {
+			return fmt.Errorf("failed to add v4 subnets: %v", err)
+		}
+		ops = append(ops, op...)
+	}
+	if as.ipv6 != nil && len(v6Subnets) > 0 {
+		if op, err = as.ipv6.addSubnets(v6Subnets); err != nil {
+			return fmt.Errorf("failed to add v6 subnets: %v", err)
+		}
+		ops = append(ops, op...)
+	}
+	_, err = libovsdbops.TransactAndCheck(as.nbClient, ops)
+	if err != nil {
+		return fmt.Errorf("failed add subnets to address set %s (%v)",
+			as.name, err)
+	}
+	return nil
+}
+
 func (as *ovnAddressSets) DeleteIPs(ips []net.IP) error {
 	if len(ips) == 0 {
 		return nil
@@ -452,6 +504,40 @@ func (as *ovnAddressSets) DeleteIPsReturnOps(ips []net.IP) ([]ovsdb.Operation, e
 		ops = append(ops, op...)
 	}
 	return ops, nil
+}
+
+func (as *ovnAddressSets) DeleteSubnets(subnets []*net.IPNet) error {
+	var ops []ovsdb.Operation
+	var err error
+	v4Subnets := []*net.IPNet{}
+	v6Subnets := []*net.IPNet{}
+	for _, subnet := range subnets {
+		if utilnet.IsIPv4CIDR(subnet) {
+			v4Subnets = append(v4Subnets, subnet)
+		} else if utilnet.IsIPv6CIDR(subnet) {
+			v6Subnets = append(v6Subnets, subnet)
+		}
+	}
+	var op []ovsdb.Operation
+	if as.ipv4 != nil && len(v4Subnets) > 0 {
+		if op, err = as.ipv4.deleteSubnets(v4Subnets); err != nil {
+			return fmt.Errorf("failed to delete v4 subnets: %v", err)
+		}
+		ops = append(ops, op...)
+	}
+	if as.ipv6 != nil && len(v6Subnets) > 0 {
+		if op, err = as.ipv6.deleteSubnets(v6Subnets); err != nil {
+			return fmt.Errorf("failed to delete v6 subnets: %v", err)
+		}
+		ops = append(ops, op...)
+	}
+
+	_, err = libovsdbops.TransactAndCheck(as.nbClient, ops)
+	if err != nil {
+		return fmt.Errorf("failed to delete subnets from address set %s (%v)",
+			as.name, err)
+	}
+	return nil
 }
 
 func (as *ovnAddressSets) Destroy() error {
@@ -523,6 +609,27 @@ func (as *ovnAddressSet) addIPs(ips []net.IP) ([]ovsdb.Operation, error) {
 	return ops, nil
 }
 
+func (as *ovnAddressSet) addSubnets(subnets []*net.IPNet) ([]ovsdb.Operation, error) {
+	strSubnets := make([]string, 0, len(subnets))
+	for _, subnet := range subnets {
+		strSubnets = append(strSubnets, subnet.String())
+	}
+	if len(strSubnets) == 0 {
+		return nil, nil
+	}
+	klog.V(5).Infof("(%s) adding subnets (%s) to address set", asDetail(as), strings.Join(strSubnets, ","))
+	addrset := nbdb.AddressSet{
+		UUID: as.uuid,
+		Name: as.hashName,
+	}
+	ops, err := libovsdbops.AddIPsToAddressSetOps(as.nbClient, nil, &addrset, strSubnets...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to add subnets %v to address set %+v: %v", strSubnets, addrset, err)
+	}
+
+	return ops, nil
+}
+
 // deleteIPs removes selected IPs from the existing address_set
 func (as *ovnAddressSet) deleteIPs(ips []net.IP) ([]ovsdb.Operation, error) {
 	if len(ips) == 0 {
@@ -540,6 +647,28 @@ func (as *ovnAddressSet) deleteIPs(ips []net.IP) ([]ovsdb.Operation, error) {
 	ops, err := libovsdbops.DeleteIPsFromAddressSetOps(as.nbClient, nil, &addrset, uniqIPs...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to delete IPs %v to address set %+v: %v", uniqIPs, addrset, err)
+	}
+
+	return ops, nil
+}
+
+func (as *ovnAddressSet) deleteSubnets(subnets []*net.IPNet) ([]ovsdb.Operation, error) {
+	strSubnets := make([]string, 0, len(subnets))
+	for _, subnet := range subnets {
+		strSubnets = append(strSubnets, subnet.String())
+	}
+	if len(strSubnets) == 0 {
+		return nil, nil
+	}
+	klog.V(5).Infof("(%s) deleting subnets (%s) from address set", asDetail(as), strings.Join(strSubnets, ","))
+
+	addrset := nbdb.AddressSet{
+		UUID: as.uuid,
+		Name: as.hashName,
+	}
+	ops, err := libovsdbops.DeleteIPsFromAddressSetOps(as.nbClient, nil, &addrset, strSubnets...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to delete IPs %v to address set %+v: %v", strSubnets, addrset, err)
 	}
 
 	return ops, nil

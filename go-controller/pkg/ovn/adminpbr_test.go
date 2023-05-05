@@ -397,6 +397,8 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 						},
 					},
 				)
+				// set to secondary to bypass OVN operations which rely on logical router which is absent at this point
+				fakeOvn.controller.nadInfo.IsSecondary = true
 				fakeOvn.controller.nadInfo.TopoType = ovntypes.Layer3AttachDefTopoType
 				fakeOvn.controller.WatchAdminPolicyBasedRoutes()
 				gomega.Eventually(fakeOvn.controller).ShouldNot(gomega.BeNil())

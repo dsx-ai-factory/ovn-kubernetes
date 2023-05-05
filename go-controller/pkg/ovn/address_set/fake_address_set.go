@@ -208,6 +208,7 @@ type fakeAddressSet struct {
 	name      string
 	hashName  string
 	ips       map[string]net.IP
+	subnets   map[string]*net.IPNet
 	destroyed uint32
 	removeFn  removeFunc
 }
@@ -249,6 +250,7 @@ func newFakeAddressSet(name string, ips []net.IP, removeFn removeFunc) *fakeAddr
 		hashName: hashedAddressSet(name),
 		ips:      make(map[string]net.IP),
 		removeFn: removeFn,
+		subnets:  make(map[string]*net.IPNet),
 	}
 	for _, ip := range ips {
 		as.ips[ip.String()] = ip
@@ -400,6 +402,17 @@ func (as *fakeAddressSet) addIP(ip net.IP) ([]ovsdb.Operation, error) {
 	return nil, nil
 }
 
+func (as *fakeAddressSet) addSubnet(subnet *net.IPNet) error {
+	as.Lock()
+	defer as.Unlock()
+	gomega.Expect(atomic.LoadUint32(&as.destroyed)).To(gomega.Equal(uint32(0)))
+	subnetStr := subnet.String()
+	if _, ok := as.subnets[subnetStr]; !ok {
+		as.subnets[subnetStr] = subnet
+	}
+	return nil
+}
+
 func (as *fakeAddressSet) getIPs() ([]string, error) {
 	as.Lock()
 	defer as.Unlock()
@@ -419,9 +432,53 @@ func (as *fakeAddressSet) deleteIP(ip net.IP) ([]ovsdb.Operation, error) {
 	return nil, nil
 }
 
+func (as *fakeAddressSet) deleteSubnet(subnet *net.IPNet) error {
+	as.Lock()
+	defer as.Unlock()
+	gomega.Expect(atomic.LoadUint32(&as.destroyed)).To(gomega.Equal(uint32(0)))
+	delete(as.subnets, subnet.String())
+	return nil
+}
+
 func (as *fakeAddressSet) destroy() error {
 	gomega.Expect(atomic.LoadUint32(&as.destroyed)).To(gomega.Equal(uint32(0)))
 	atomic.StoreUint32(&as.destroyed, 1)
 	as.removeFn(as.name)
+	return nil
+}
+
+func (as *fakeAddressSets) AddSubnets(subnets []*net.IPNet) error {
+	var err error
+	as.Lock()
+	defer as.Unlock()
+
+	for _, subnet := range subnets {
+		if utilnet.IsIPv6CIDR(subnet) {
+			err = as.ipv6.addSubnet(subnet)
+		} else if utilnet.IsIPv4CIDR(subnet) {
+			err = as.ipv4.addSubnet(subnet)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (as *fakeAddressSets) DeleteSubnets(subnets []*net.IPNet) error {
+	var err error
+	as.Lock()
+	defer as.Unlock()
+
+	for _, subnet := range subnets {
+		if utilnet.IsIPv6CIDR(subnet) {
+			err = as.ipv6.deleteSubnet(subnet)
+		} else if utilnet.IsIPv4CIDR(subnet) {
+			err = as.ipv4.deleteSubnet(subnet)
+		}
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
