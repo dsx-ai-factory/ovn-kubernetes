@@ -295,6 +295,20 @@ func (_m *Interface) SetAnnotationsOnService(namespace string, serviceName strin
 	return r0
 }
 
+// SetLabelsOnNode provides a mock function with given fields: nodeName, labels
+func (_m *Interface) SetLabelsOnNode(nodeName string, labels map[string]interface{}) error {
+	ret := _m.Called(nodeName, labels)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, map[string]interface{}) error); ok {
+		r0 = rf(nodeName, labels)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // SetTaintOnNode provides a mock function with given fields: nodeName, taint
 func (_m *Interface) SetTaintOnNode(nodeName string, taint *apicorev1.Taint) error {
 	ret := _m.Called(nodeName, taint)
@@ -339,20 +353,6 @@ func (_m *Interface) UpdateNode(node *apicorev1.Node) error {
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*apicorev1.Node) error); ok {
 		r0 = rf(node)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// UpdateEgressServiceStatus provides a mock function with given fields: namespace, name, host
-func (_m *Interface) UpdateEgressServiceStatus(namespace string, name string, host string) error {
-	ret := _m.Called(namespace, name, host)
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(string, string, string) error); ok {
-		r0 = rf(namespace, name, host)
 	} else {
 		r0 = ret.Error(0)
 	}
