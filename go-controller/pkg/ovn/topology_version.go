@@ -130,7 +130,7 @@ func (oc *Controller) determineOVNTopoVersionFromOVN() (int, error) {
 	var v string
 	var exists bool
 	if oc.nadInfo.TopoType != ovntypes.LocalnetAttachDefTopoType && oc.nadInfo.TopoType != ovntypes.Layer2AttachDefTopoType {
-		logicalRouter := &nbdb.LogicalRouter{Name: util.GetOVNClusterRouterName(oc.nadInfo.Prefix + ovntypes.OVNClusterRouter)}
+		logicalRouter := &nbdb.LogicalRouter{Name: util.GetOVNClusterRouterName(oc.nadInfo.Prefix)}
 		logicalRouter, err := libovsdbops.GetLogicalRouter(oc.mc.nbClient, logicalRouter)
 		if err != nil && err != libovsdbclient.ErrNotFound {
 			return 0, fmt.Errorf("error getting router %s: %v", logicalRouter.Name, err)

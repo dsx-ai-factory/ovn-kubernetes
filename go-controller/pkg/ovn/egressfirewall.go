@@ -102,7 +102,9 @@ func newEgressFirewallRule(rawEgressFirewallRule egressfirewallapi.EgressFirewal
 func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) error {
 	// Lookup all ACLs used for egress Firewalls
 	aclPred := func(item *nbdb.ACL) bool {
-		return item.Priority >= types.MinimumReservedEgressFirewallPriority && item.Priority <= types.EgressFirewallStartPriority
+		return item.Priority >= types.MinimumReservedEgressFirewallPriority &&
+			item.Priority <= types.EgressFirewallStartPriority &&
+			util.HasExternalIDsForCluster(item.ExternalIDs)
 	}
 	egressFirewallACLs, err := libovsdbops.FindACLsWithPredicate(oc.mc.nbClient, aclPred)
 	if err != nil {
@@ -116,6 +118,9 @@ func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) error {
 				if _, ok := item.ExternalIDs["network_name"]; ok {
 					return false
 				}
+				if !util.HasExternalIDsForCluster(item.ExternalIDs) {
+					return false
+				}
 				// Ignore external and Join switches(both legacy and current)
 				return !(strings.HasPrefix(item.Name, util.GetClusterScopedName(types.JoinSwitchPrefix)) ||
 					item.Name == util.GetClusterScopedName(types.OVNJoinSwitch) || strings.HasPrefix(item.Name, util.GetClusterScopedName(types.ExternalSwitchPrefix)))
@@ -125,8 +130,11 @@ func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) error {
 				if _, ok := item.ExternalIDs["network_name"]; ok {
 					return false
 				}
+				if !util.HasExternalIDsForCluster(item.ExternalIDs) {
+					return false
+				}
 				// Return only join switch (the per node ones if its old topology & distributed one if its new topology)
-				return (strings.HasPrefix(item.Name, types.JoinSwitchPrefix) || item.Name == "join")
+				return strings.HasPrefix(item.Name, util.GetClusterScopedName(types.JoinSwitchPrefix)) || item.Name == util.GetClusterScopedName("join")
 			}
 		}
 		err = libovsdbops.RemoveACLsFromLogicalSwitchesWithPredicate(oc.mc.nbClient, p, egressFirewallACLs...)
@@ -238,7 +246,7 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 	if err != nil {
 		return fmt.Errorf("cannot Ensure that addressSet for namespace %s exists %v", egressFirewall.Namespace, err)
 	}
-	ipv4HashedAS, ipv6HashedAS := addressset.MakeAddressSetHashNames(egressFirewall.Namespace)
+	ipv4HashedAS, ipv6HashedAS := addressset.MakeAddressSetHashNames(util.GetClusterScopedName(egressFirewall.Namespace))
 	if err := oc.addEgressFirewallRules(ef, ipv4HashedAS, ipv6HashedAS, types.EgressFirewallStartPriority); err != nil {
 		return err
 	}
@@ -342,6 +350,9 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 			if _, ok := item.ExternalIDs["network_name"]; ok {
 				return false
 			}
+			if !util.HasExternalIDsForCluster(item.ExternalIDs) {
+				return false
+			}
 			// Ignore external and Join switches(both legacy and current)
 			return !(strings.HasPrefix(item.Name, util.GetClusterScopedName(types.JoinSwitchPrefix)) ||
 				item.Name == util.GetClusterScopedName(types.OVNJoinSwitch) || strings.HasPrefix(item.Name, util.GetClusterScopedName(types.ExternalSwitchPrefix)))
@@ -361,7 +372,8 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 	// egressFirewall_<namespace name>_<priority>
 	aclName := buildEgressFwAclName(externalID, priority)
 	log, meter, severity := oc.getLogMeterSeverity(externalID, action)
-
+	externalIds := map[string]string{"egressFirewall": externalID}
+	externalIds = util.ExternalIDsForCluster(externalIds)
 	egressFirewallACL := libovsdbops.BuildACL(
 		aclName,
 		nbdb.ACLDirectionToLport,
@@ -371,7 +383,7 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 		meter,
 		severity,
 		log,
-		map[string]string{"egressFirewall": externalID},
+		externalIds,
 		nil,
 	)
 	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.mc.nbClient, nil, egressFirewallACL)
@@ -398,7 +410,8 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 func (oc *Controller) deleteEgressFirewallRules(externalID string) error {
 	// Find ACLs for a given egressFirewall
 	pACL := func(item *nbdb.ACL) bool {
-		return item.ExternalIDs["egressFirewall"] == externalID
+		return item.ExternalIDs["egressFirewall"] == externalID &&
+			util.HasExternalIDsForCluster(item.ExternalIDs)
 	}
 	egressFirewallACLs, err := libovsdbops.FindACLsWithPredicate(oc.mc.nbClient, pACL)
 	if err != nil {
@@ -412,11 +425,11 @@ func (oc *Controller) deleteEgressFirewallRules(externalID string) error {
 
 	// delete egress firewall acls off any logical switch which has it,
 	// then manually remove the egressFirewall ACLs instead of relying on ovsdb garbage collection to do so
-	pSwitch := func(item *nbdb.LogicalSwitch) bool {
+	p := func(item *nbdb.LogicalSwitch) bool {
 		_, ok := item.ExternalIDs["network_name"]
-		return !ok
+		return !ok && util.HasExternalIDsForCluster(item.ExternalIDs)
 	}
-	err = libovsdbops.DeleteACLs(oc.mc.nbClient, nil, pSwitch, egressFirewallACLs...)
+	err = libovsdbops.DeleteACLs(oc.mc.nbClient, nil, p, egressFirewallACLs...)
 	if err != nil {
 		return fmt.Errorf("failed to delete egressFirewall ACLs %v: %v", egressFirewallACLs, err)
 	}
@@ -636,7 +649,8 @@ func (oc *Controller) refreshEgressFirewallLogging(egressFirewallNamespace strin
 
 	// Find ACLs for a given egressFirewall
 	p := func(item *nbdb.ACL) bool {
-		return item.ExternalIDs["egressFirewall"] == ef.namespace
+		return item.ExternalIDs["egressFirewall"] == ef.namespace &&
+			util.HasExternalIDsForCluster(item.ExternalIDs)
 	}
 	egressFirewallACLs, err := libovsdbops.FindACLsWithPredicate(oc.mc.nbClient, p)
 	if err != nil {
@@ -664,5 +678,5 @@ func (oc *Controller) refreshEgressFirewallLogging(egressFirewallNamespace strin
 }
 
 func buildEgressFwAclName(namespace string, priority int) string {
-	return fmt.Sprintf("egressFirewall_%s_%d", namespace, priority)
+	return fmt.Sprintf("egressFirewall_%s%s_%d", util.GetClusterNamePrefix(), namespace, priority)
 }

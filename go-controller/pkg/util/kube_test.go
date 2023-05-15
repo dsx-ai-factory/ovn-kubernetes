@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
@@ -694,7 +695,6 @@ func TestExternalIDsForObject(t *testing.T) {
 		map[string]string{
 			"k8s.ovn.org/kind":  "Service",
 			"k8s.ovn.org/owner": "ns/svc-ab23",
-			"cluster_name":      "",
 		})
 
 	assert.Equal(t,
@@ -709,7 +709,6 @@ func TestExternalIDsForObject(t *testing.T) {
 		map[string]string{
 			"k8s.ovn.org/kind":  "Service",
 			"k8s.ovn.org/owner": "ns/svc-ab23",
-			"cluster_name":      "",
 		})
 }
 
@@ -720,14 +719,17 @@ func TestGetOVNClusterRouterName(t *testing.T) {
 		want        string
 	}{
 		{"", nil, types.OVNClusterRouter},
-		{"A", nil, "A_" + types.OVNClusterRouter},
-		{"TenantA", nil, "TenantA_" + types.OVNClusterRouter},
-		{"TenantA", []string{""}, "TenantA_" + types.OVNClusterRouter},
-		{"TenantA", []string{"primary_"}, "TenantA_primary_" + types.OVNClusterRouter},
-		{"TenantA", []string{"primary_", "secondary_"}, "TenantA_primary_secondary_" + types.OVNClusterRouter},
+		{"A", nil, "CLUSTER_A_" + types.OVNClusterRouter},
+		{"TenantA", nil, "CLUSTER_TenantA_" + types.OVNClusterRouter},
+		{"TenantA", []string{""}, "CLUSTER_TenantA_" + types.OVNClusterRouter},
+		{"TenantA", []string{"primary_"}, "CLUSTER_TenantA_primary_" + types.OVNClusterRouter},
+		{"TenantA", []string{"primary_", "secondary_"}, "CLUSTER_TenantA_primary_secondary_" + types.OVNClusterRouter},
 	}
 	for _, test := range tests {
 		SetClusterName(test.clustername)
+		if GetClusterName() != test.clustername {
+			t.Errorf("Got: %s Want: %s ", GetClusterName(), test.clustername)
+		}
 		if got := GetOVNClusterRouterName(test.prefixes...); got != test.want {
 			t.Errorf("cluster_name: %s, GetOVNClusterRouterName(%q) = %v,  Want: %v", test.clustername, test.prefixes, got, test.want)
 		}

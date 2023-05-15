@@ -1228,7 +1228,7 @@ func (oc *Controller) syncStaleEgressReroutePolicy(egressIPCache map[string]egre
 	// Update Logical Router Policies that have stale nexthops. Notice that we must do this separately
 	// because logicalRouterPolicyStaleNexthops must be populated first
 	klog.Infof("syncStaleEgressReroutePolicy will remove stale nexthops: %+v", logicalRouterPolicyStaleNexthops)
-	err = libovsdbops.DeleteNextHopsFromLogicalRouterPolicies(oc.mc.nbClient, types.OVNClusterRouter, logicalRouterPolicyStaleNexthops...)
+	err = libovsdbops.DeleteNextHopsFromLogicalRouterPolicies(oc.mc.nbClient, ovnClusterRouter, logicalRouterPolicyStaleNexthops...)
 	if err != nil {
 		return fmt.Errorf("unable to remove stale next hops from logical router policies: %v", err)
 	}
@@ -1242,8 +1242,13 @@ func (oc *Controller) syncStaleEgressReroutePolicy(egressIPCache map[string]egre
 func (oc *Controller) syncStaleSNATRules(egressIPCache map[string]egressIPCacheEntry) error {
 	predicate := func(item *nbdb.NAT) bool {
 		egressIPName, exists := item.ExternalIDs["name"]
+
 		// Exclude rows that have no name or are not the right type
 		if !exists || item.Type != nbdb.NATTypeSNAT {
+			return false
+		}
+		// return false if the cluster has external_ids for cluster_name, and they do not match.
+		if !util.HasExternalIDsForCluster(item.ExternalIDs) {
 			return false
 		}
 		parsedLogicalIP := net.ParseIP(item.LogicalIP).String()
@@ -1274,7 +1279,7 @@ func (oc *Controller) syncStaleSNATRules(egressIPCache map[string]egressIPCacheE
 		natIds.Insert(nat.UUID)
 	}
 	p := func(item *nbdb.LogicalRouter) bool {
-		return natIds.HasAny(item.Nat...)
+		return natIds.HasAny(item.Nat...) && util.HasExternalIDsForCluster(item.ExternalIDs)
 	}
 	routers, err := libovsdbops.FindLogicalRoutersWithPredicate(oc.mc.nbClient, p)
 	if err != nil {
@@ -2080,7 +2085,9 @@ func (e *egressIPController) deleteEgressIPStatusSetup(name string, status egres
 
 	routerName := util.GetGatewayRouterFromNode(status.Node)
 	natPred := func(nat *nbdb.NAT) bool {
-		return nat.ExternalIDs["name"] == name && nat.ExternalIP == status.EgressIP
+		return nat.ExternalIDs["name"] == name &&
+			nat.ExternalIP == status.EgressIP &&
+			util.HasExternalIDsForCluster(nat.ExternalIDs)
 	}
 	ops, err = libovsdbops.DeleteNATsWithPredicateOps(e.nbClient, ops, natPred)
 	if err != nil {
@@ -2295,12 +2302,13 @@ func (oc *Controller) createDefaultNoRerouteNodePolicies(v4NodeAddr, v6NodeAddr 
 
 func (oc *Controller) createLogicalRouterPolicy(match string, priority int) error {
 	lrp := nbdb.LogicalRouterPolicy{
-		Priority: priority,
-		Action:   nbdb.LogicalRouterPolicyActionAllow,
-		Match:    match,
+		Priority:    priority,
+		Action:      nbdb.LogicalRouterPolicyActionAllow,
+		Match:       match,
+		ExternalIDs: util.CreateClusterScopedExternalIDs(),
 	}
 	p := func(item *nbdb.LogicalRouterPolicy) bool {
-		return item.Match == lrp.Match && item.Priority == lrp.Priority
+		return item.Match == lrp.Match && item.Priority == lrp.Priority && util.HasExternalIDsForCluster(item.ExternalIDs)
 	}
 	ovnClusterRouter := util.GetOVNClusterRouterName()
 	err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(oc.mc.nbClient, ovnClusterRouter, &lrp, p)
@@ -2312,7 +2320,7 @@ func (oc *Controller) createLogicalRouterPolicy(match string, priority int) erro
 
 func (oc *Controller) deleteLogicalRouterPolicy(match string, priority int) error {
 	p := func(item *nbdb.LogicalRouterPolicy) bool {
-		return item.Match == match && item.Priority == priority
+		return item.Match == match && item.Priority == priority && util.HasExternalIDsForCluster(item.ExternalIDs)
 	}
 	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.mc.nbClient, util.GetOVNClusterRouterName(), p)
 	if err != nil {
@@ -2350,7 +2358,7 @@ func buildSNATFromEgressIPStatus(podIP net.IP, status egressipv1.EgressIPStatusI
 		return nil, fmt.Errorf("failed to parse podIP: %s, error: %v", podIP.String(), err)
 	}
 	externalIP := net.ParseIP(status.EgressIP)
-	logicalPort := types.K8sPrefix + status.Node
+	logicalPort := util.GetClusterScopedName(types.K8sPrefix + status.Node)
 	externalIds := map[string]string{"name": egressIPName}
 	nat := libovsdbops.BuildSNAT(&externalIP, logicalIP, logicalPort, externalIds)
 	return nat, nil

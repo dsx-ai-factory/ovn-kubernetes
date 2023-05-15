@@ -52,6 +52,7 @@ type PodInterfaceInfo struct {
 	NadName              string `json:"nadName"` // nad's <namesapce/name>, when associated with a net-attach-def
 	SkipSpoofCheck       bool   `json:"skip-spoof-check"`
 	ClusterName          string `json:"clusterName"`
+	ClusterNamePrefix    string `json:"clusterNamePrefix"`
 	OvnKubeMode          string `json:"ovnKubeMode"`
 }
 

@@ -103,6 +103,7 @@ func ensureOvnAddressSet(asf *ovnAddressSetFactory, name string) (*ovnAddressSet
 		Name:        as.hashName,
 		ExternalIDs: map[string]string{"name": name},
 	}
+	addrSet.ExternalIDs = util.ExternalIDsForCluster(addrSet.ExternalIDs)
 	if asf.IsSecondary {
 		addrSet.ExternalIDs["network_name"] = asf.NetName
 	}
@@ -151,8 +152,9 @@ func forEachAddressSet(netNameInfo util.NetNameInfo, nbClient libovsdbclient.Cli
 			return false
 		}
 		_, exists = addrSet.ExternalIDs["name"]
-		return exists
+		return exists && util.HasExternalIDsForCluster(addrSet.ExternalIDs)
 	}
+
 	addrSetList, err := libovsdbops.FindAddressSetsWithPredicate(nbClient, p)
 	if err != nil {
 		return fmt.Errorf("error reading address sets: %+v", err)
@@ -304,6 +306,7 @@ func newOvnAddressSet(asf *ovnAddressSetFactory, name string, ips []net.IP) (*ov
 		ExternalIDs: map[string]string{"name": as.name},
 		Addresses:   uniqIPs,
 	}
+	addrSet.ExternalIDs = util.ExternalIDsForCluster(addrSet.ExternalIDs)
 	if asf.IsSecondary {
 		addrSet.ExternalIDs["network_name"] = asf.NetName
 	}

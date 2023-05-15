@@ -7,7 +7,7 @@ import (
 // NetConf is CNI NetConf with DeviceID
 type NetConf struct {
 	types.NetConf
-	// PciAddrs in case of using sriov or Auxiliry device name in case of SF
+	// PciAddrs in case of using sriov or auxiliary device name in case of SF
 	DeviceID string `json:"deviceID,omitempty"`
 	// Network Cidr
 	NetCidr string `json:"net_cidr,omitempty"`

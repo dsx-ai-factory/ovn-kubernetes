@@ -130,7 +130,8 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, po
 		NetdevName:           netdevice,
 		NadName:              nadName,
 		SkipSpoofCheck:       util.SkipSpoofCheckForNAD(podAnnotation, annoNadKeyName),
-		ClusterName:          config.Kubernetes.ClusterName,
+		ClusterName:          util.GetClusterName(),
+		ClusterNamePrefix:    util.GetClusterNamePrefix(),
 		OvnKubeMode:          config.OvnKubeNode.Mode,
 	}
 	return podInterfaceInfo, nil

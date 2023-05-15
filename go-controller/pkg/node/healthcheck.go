@@ -182,8 +182,8 @@ func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCac
 	ovsArgs := []string{"--columns=name,external_ids", "--data=bare", "--no-headings",
 		"--format=csv", "find", "Interface", "external_ids:sandbox!=\"\""}
 	// if clustername is present, select only ports belonging to this cluster.
-	if config.Kubernetes.ClusterName != "" {
-		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:cluster_name=%s", config.Kubernetes.ClusterName))
+	if util.IsClusterScoped() {
+		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:cluster_name=%s", util.GetClusterName()))
 	}
 	// check only for resources created by the current type of ovn-kube
 	ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:ovn_kube_mode=%s", config.OvnKubeNode.Mode))

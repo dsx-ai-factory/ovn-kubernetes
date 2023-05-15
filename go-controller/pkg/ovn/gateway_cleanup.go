@@ -42,7 +42,7 @@ func (oc *Controller) gatewayCleanup(nodeName string) error {
 	sw := nbdb.LogicalSwitch{Name: util.GetOVNJoinSwitchName()}
 	err = libovsdbops.DeleteLogicalSwitchPorts(oc.mc.nbClient, &sw, &lsp)
 	if err != nil {
-		return fmt.Errorf("failed to delete logical switch port %s from switch %s: %v", portName, types.OVNJoinSwitch, err)
+		return fmt.Errorf("failed to delete logical switch port %s from switch %s: %v", portName, util.GetOVNJoinSwitchName(), err)
 	}
 
 	// Remove the logical router port on the gateway router that connects to the join switch
@@ -110,7 +110,7 @@ func (oc *Controller) staticRouteCleanup(nextHops []net.IP) {
 		ips.Insert(nextHop.String())
 	}
 	p := func(item *nbdb.LogicalRouterStaticRoute) bool {
-		return ips.Has(item.Nexthop)
+		return ips.Has(item.Nexthop) && util.HasExternalIDsForCluster(item.ExternalIDs)
 	}
 	err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(oc.mc.nbClient, util.GetClusterScopedName(types.OVNClusterRouter), p)
 	if err != nil {
@@ -128,6 +128,9 @@ func (oc *Controller) policyRouteCleanup(nextHops []net.IP) {
 	for _, nextHop := range nextHops {
 		gwIP := nextHop.String()
 		policyPred := func(item *nbdb.LogicalRouterPolicy) bool {
+			if !util.HasExternalIDsForCluster(item.ExternalIDs) {
+				return false
+			}
 			for _, nexthop := range item.Nexthops {
 				if nexthop == gwIP {
 					return true
@@ -156,7 +159,8 @@ func (oc *Controller) removeLRPolicies(nodeName string, priorities []string) {
 	}
 
 	p := func(item *nbdb.LogicalRouterPolicy) bool {
-		return strings.Contains(item.Match, fmt.Sprintf("%s ", util.GetClusterScopedName(nodeName))) && intPriorities.Has(item.Priority)
+		return strings.Contains(item.Match, fmt.Sprintf("%s ", util.GetClusterScopedName(nodeName))) && intPriorities.Has(item.Priority) &&
+			util.HasExternalIDsForCluster(item.ExternalIDs)
 	}
 	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.mc.nbClient, util.GetOVNClusterRouterName(), p)
 	if err != nil {

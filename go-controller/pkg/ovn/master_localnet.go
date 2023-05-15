@@ -20,7 +20,10 @@ func (oc *Controller) setupLayer2Switch(switchName string) error {
 		Name: switchName,
 	}
 	if oc.nadInfo.IsSecondary {
-		logicalSwitch.ExternalIDs = map[string]string{"network_name": oc.nadInfo.NetName}
+		logicalSwitch.ExternalIDs = map[string]string{
+			"network_name": oc.nadInfo.NetName,
+		}
+		logicalSwitch.ExternalIDs = util.ExternalIDsForCluster(logicalSwitch.ExternalIDs)
 	}
 
 	var hostSubnets []*net.IPNet
@@ -74,7 +77,8 @@ func (oc *Controller) setupLocalnetMaster() error {
 		Options: map[string]string{
 			"network_name": oc.nadInfo.Prefix + types.LocalNetBridgeName,
 		},
-		Name: util.GetClusterScopedName(oc.nadInfo.Prefix + types.OVNLocalnetPort),
+		Name:        util.GetClusterScopedName(oc.nadInfo.Prefix + types.OVNLocalnetPort),
+		ExternalIDs: util.CreateClusterScopedExternalIDs(),
 	}
 	if oc.nadInfo.VlanId != 0 {
 		intVlanID := int(oc.nadInfo.VlanId)
@@ -115,9 +119,10 @@ func (oc *Controller) connectToLogicalRouter(logicalRouterName string) error {
 
 	logicalRouterPortName := types.RouterToSwitchPrefix + switchName
 	logicalRouterPort := nbdb.LogicalRouterPort{
-		Name:     logicalRouterPortName,
-		MAC:      nodeLRPMAC.String(),
-		Networks: logicalRouterPortNetwork,
+		Name:        logicalRouterPortName,
+		MAC:         nodeLRPMAC.String(),
+		Networks:    logicalRouterPortNetwork,
+		ExternalIDs: util.CreateClusterScopedExternalIDs(),
 	}
 	logicalRouter := nbdb.LogicalRouter{Name: logicalRouterName}
 
@@ -129,10 +134,11 @@ func (oc *Controller) connectToLogicalRouter(logicalRouterName string) error {
 
 	logicalSwitchPortName := types.SwitchToRouterPrefix + switchName
 	logicalSwitchPort := nbdb.LogicalSwitchPort{
-		Name:      logicalSwitchPortName,
-		Type:      "router",
-		Options:   map[string]string{"router-port": logicalRouterPortName},
-		Addresses: []string{"router"},
+		Name:        logicalSwitchPortName,
+		Type:        "router",
+		Options:     map[string]string{"router-port": logicalRouterPortName},
+		Addresses:   []string{"router"},
+		ExternalIDs: util.CreateClusterScopedExternalIDs(),
 	}
 	sw := nbdb.LogicalSwitch{Name: switchName}
 	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.mc.nbClient, &sw, &logicalSwitchPort)

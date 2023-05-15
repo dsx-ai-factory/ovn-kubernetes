@@ -204,7 +204,7 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	}
 
 	// Setup cluster name , if config.Kubernetes.ClusterName exists
-	if config.Kubernetes.ClusterName != "" {
+	if util.IsClusterScoped() {
 		util.SetClusterName(config.Kubernetes.ClusterName)
 	}
 

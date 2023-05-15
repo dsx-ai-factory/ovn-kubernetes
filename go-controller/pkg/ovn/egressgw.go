@@ -281,16 +281,15 @@ func (oc *Controller) createBFDStaticRoute(bfdEnabled bool, gw string, podIP, gr
 		lrsr.BFD = &bfd.UUID
 	}
 
+	lrsr.ExternalIDs = util.ExternalIDsForCluster(lrsr.ExternalIDs)
+
 	p := func(item *nbdb.LogicalRouterStaticRoute) bool {
 		return item.IPPrefix == lrsr.IPPrefix &&
 			item.Nexthop == lrsr.Nexthop &&
 			item.OutputPort != nil &&
 			*item.OutputPort == *lrsr.OutputPort &&
-			item.Policy == lrsr.Policy
-	}
-	// If cluster_name is present, set it in external_ids.
-	if config.Kubernetes.ClusterName != "" {
-		lrsr.ExternalIDs = map[string]string{"cluster_name": config.Kubernetes.ClusterName}
+			item.Policy == lrsr.Policy &&
+			util.HasExternalIDsForCluster(item.ExternalIDs)
 	}
 	ops, err = libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(oc.mc.nbClient, ops, gr, &lrsr, p,
 		&lrsr.Options)
@@ -779,7 +778,8 @@ func (oc *Controller) delAllHybridRoutePolicies() error {
 	// nuke all the address-sets.
 	// if we fail to remove LRP's above, we don't attempt to remove ASes due to dependency constraints.
 	asPred := func(item *nbdb.AddressSet) bool {
-		return strings.Contains(item.ExternalIDs["name"], types.HybridRoutePolicyPrefix)
+		return strings.Contains(item.ExternalIDs["name"], types.HybridRoutePolicyPrefix) &&
+			util.HasExternalIDsForCluster(item.ExternalIDs)
 	}
 	err = libovsdbops.DeleteAddressSetsWithPredicate(oc.mc.nbClient, asPred)
 	if err != nil {
@@ -1123,7 +1123,8 @@ func (oc *Controller) buildClusterECMPCacheFromPods(clusterRouteCache map[string
 
 func (oc *Controller) buildOVNECMPCache() map[string][]*ovnRoute {
 	p := func(item *nbdb.LogicalRouterStaticRoute) bool {
-		return item.Options["ecmp_symmetric_reply"] == "true"
+		return item.Options["ecmp_symmetric_reply"] == "true" &&
+			util.HasExternalIDsForCluster(item.ExternalIDs)
 	}
 	logicalRouterStaticRoutes, err := libovsdbops.FindLogicalRouterStaticRoutesWithPredicate(oc.mc.nbClient, p)
 	if err != nil {
@@ -1134,7 +1135,8 @@ func (oc *Controller) buildOVNECMPCache() map[string][]*ovnRoute {
 	ovnRouteCache := make(map[string][]*ovnRoute)
 	for _, logicalRouterStaticRoute := range logicalRouterStaticRoutes {
 		p := func(item *nbdb.LogicalRouter) bool {
-			return util.SliceHasStringItem(item.StaticRoutes, logicalRouterStaticRoute.UUID)
+			return util.SliceHasStringItem(item.StaticRoutes, logicalRouterStaticRoute.UUID) &&
+				util.HasExternalIDsForCluster(item.ExternalIDs)
 		}
 		logicalRouters, err := libovsdbops.FindLogicalRoutersWithPredicate(oc.mc.nbClient, p)
 		if err != nil {

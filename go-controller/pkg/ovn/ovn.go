@@ -796,6 +796,9 @@ func (oc *Controller) CleanStaleNetworkPolicy() {
 	// ACL entries from the database
 	// want ACLs configured that don't have l4fused key and that have l4Match set (but not to None)
 	pACL := func(item *nbdb.ACL) bool {
+		if !util.HasExternalIDsForCluster(item.ExternalIDs) {
+			return false
+		}
 		netName, ok := item.ExternalIDs["network_name"]
 		if oc.nadInfo.IsSecondary {
 			if !ok || netName != oc.nadInfo.NetName {

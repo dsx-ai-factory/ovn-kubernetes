@@ -235,8 +235,9 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 
 		// create / update lsps
 		lsp := nbdb.LogicalSwitchPort{
-			Name:      portName,
-			Addresses: []string{portMAC.String()},
+			Name:        portName,
+			Addresses:   []string{portMAC.String()},
+			ExternalIDs: util.CreateClusterScopedExternalIDs(),
 		}
 		sw := nbdb.LogicalSwitch{Name: node.Name}
 
@@ -371,7 +372,8 @@ func (m *MasterController) setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet,
 			var ovnClusterRouter = util.GetOVNClusterRouterName()
 			if err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(m.nbClient, ovnClusterRouter, &logicalRouterPolicy, func(item *nbdb.LogicalRouterPolicy) bool {
 				return item.Priority == logicalRouterPolicy.Priority &&
-					item.ExternalIDs["name"] == logicalRouterPolicy.ExternalIDs["name"]
+					item.ExternalIDs["name"] == logicalRouterPolicy.ExternalIDs["name"] &&
+					util.HasExternalIDsForCluster(item.ExternalIDs)
 			}, &logicalRouterPolicy.Nexthops, &logicalRouterPolicy.Match, &logicalRouterPolicy.Action); err != nil {
 				return fmt.Errorf("failed to add policy route '%s' for host %q on %s , error: %v", matchStr, nodeName, ovnClusterRouter, err)
 			}
@@ -404,7 +406,8 @@ func (m *MasterController) setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet,
 
 			if err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(m.nbClient, ovnClusterRouter, &grLogicalRouterPolicy, func(item *nbdb.LogicalRouterPolicy) bool {
 				return item.Priority == grLogicalRouterPolicy.Priority &&
-					item.ExternalIDs["name"] == grLogicalRouterPolicy.ExternalIDs["name"]
+					item.ExternalIDs["name"] == grLogicalRouterPolicy.ExternalIDs["name"] &&
+					util.HasExternalIDsForCluster(item.ExternalIDs)
 			}, &grLogicalRouterPolicy.Nexthops, &grLogicalRouterPolicy.Match, &grLogicalRouterPolicy.Action); err != nil {
 				return fmt.Errorf("failed to add policy route '%s' for host %q on %s , error: %v", matchStr, nodeName, ovntypes.OVNClusterRouter, err)
 			}
@@ -412,18 +415,21 @@ func (m *MasterController) setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet,
 
 			// Static route to steer packets from external to nodePort service backed by pods on hybrid overlay node.
 			// This route is to used for triggering above route policy
-			clutsterRouterStaticRoutes := nbdb.LogicalRouterStaticRoute{
+			clusterRouterStaticRoutes := nbdb.LogicalRouterStaticRoute{
 				IPPrefix: hybridCIDR.String(),
 				Nexthop:  drIP.String(),
 				ExternalIDs: map[string]string{
 					"name": ovntypes.HybridSubnetPrefix + nodeName,
 				},
 			}
-			if err := libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(m.nbClient, ovnClusterRouter, &clutsterRouterStaticRoutes, func(item *nbdb.LogicalRouterStaticRoute) bool {
-				return item.IPPrefix == clutsterRouterStaticRoutes.IPPrefix && item.Nexthop == clutsterRouterStaticRoutes.Nexthop &&
-					item.ExternalIDs["name"] == clutsterRouterStaticRoutes.ExternalIDs["name"]
+			clusterRouterStaticRoutes.ExternalIDs = util.ExternalIDsForCluster(clusterRouterStaticRoutes.ExternalIDs)
+			if err := libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(m.nbClient, ovnClusterRouter, &clusterRouterStaticRoutes, func(item *nbdb.LogicalRouterStaticRoute) bool {
+				return item.IPPrefix == clusterRouterStaticRoutes.IPPrefix &&
+					item.Nexthop == clusterRouterStaticRoutes.Nexthop &&
+					item.ExternalIDs["name"] == clusterRouterStaticRoutes.ExternalIDs["name"] &&
+					util.HasExternalIDsForCluster(item.ExternalIDs)
 			}); err != nil {
-				return fmt.Errorf("failed to add policy route static '%s %s' for on %s , error: %v", clutsterRouterStaticRoutes.IPPrefix, clutsterRouterStaticRoutes.Nexthop, ovntypes.GWRouterPrefix+nodeName, err)
+				return fmt.Errorf("failed to add policy route static '%s %s' for on %s , error: %v", clusterRouterStaticRoutes.IPPrefix, clusterRouterStaticRoutes.Nexthop, ovntypes.GWRouterPrefix+nodeName, err)
 			}
 			klog.Infof("Created hybrid overlay logical route static route at cluster router for node %s", nodeName)
 

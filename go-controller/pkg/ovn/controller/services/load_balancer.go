@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -151,8 +150,8 @@ func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.Endp
 // makeLBName creates the load balancer name - used to minimize churn
 func makeLBName(service *v1.Service, proto v1.Protocol, scope string) string {
 	var clustername string
-	if config.Kubernetes.ClusterName != "" {
-		clustername = config.Kubernetes.ClusterName + "/"
+	if util.IsClusterScoped() {
+		clustername = util.GetClusterName() + "/"
 	}
 	return fmt.Sprintf("%sService_%s/%s_%s_%s",
 		clustername,
@@ -174,7 +173,7 @@ func buildClusterLBs(service *v1.Service, configs []lbConfig, nodeInfos []nodeIn
 	if useLBGroup {
 		nodeSwitches = make([]string, 0)
 		nodeRouters = make([]string, 0)
-		groups = []string{util.GetClusterNamePrefix() + types.ClusterLBGroupName}
+		groups = []string{util.GetClusterScopedName(types.ClusterLBGroupName)}
 	} else {
 		nodeSwitches = make([]string, 0, len(nodeInfos))
 		nodeRouters = make([]string, 0, len(nodeInfos))

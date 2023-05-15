@@ -261,7 +261,7 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops 
 	l3GwConfig := util.L3GatewayConfig{
 		Mode:           config.Gateway.Mode,
 		ChassisID:      chassisID,
-		InterfaceID:    gatewayBridge.interfaceID,
+		InterfaceID:    util.GetClusterScopedName(gatewayBridge.interfaceID),
 		MACAddress:     gatewayBridge.macAddress,
 		IPAddresses:    gatewayBridge.ips,
 		NextHops:       gwNextHops,
@@ -269,7 +269,7 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops 
 		VLANID:         &config.Gateway.VLANID,
 	}
 	if egressGWBridge != nil {
-		l3GwConfig.EgressGWInterfaceID = egressGWBridge.interfaceID
+		l3GwConfig.EgressGWInterfaceID = util.GetClusterScopedName(egressGWBridge.interfaceID)
 		l3GwConfig.EgressGWMACAddress = egressGWBridge.macAddress
 		l3GwConfig.EgressGWIPAddresses = egressGWBridge.ips
 	}

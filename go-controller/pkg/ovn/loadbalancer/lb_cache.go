@@ -2,11 +2,11 @@ package loadbalancer
 
 import (
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"strings"
 	"sync"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 
@@ -172,7 +172,7 @@ func newCache(nbClient libovsdbclient.Client) (*LBCache, error) {
 	}
 
 	ps := func(item *nbdb.LogicalSwitch) bool {
-		return len(item.LoadBalancer) > 0
+		return len(item.LoadBalancer) > 0 && util.HasExternalIDsForCluster(item.ExternalIDs)
 	}
 	switches, err := libovsdbops.FindLogicalSwitchesWithPredicate(nbClient, ps)
 	if err != nil {
@@ -188,7 +188,7 @@ func newCache(nbClient libovsdbclient.Client) (*LBCache, error) {
 	}
 
 	pr := func(item *nbdb.LogicalRouter) bool {
-		return len(item.LoadBalancer) > 0
+		return len(item.LoadBalancer) > 0 && util.HasExternalIDsForCluster(item.ExternalIDs)
 	}
 	routers, err := libovsdbops.FindLogicalRoutersWithPredicate(nbClient, pr)
 	if err != nil {
@@ -227,9 +227,9 @@ func newCache(nbClient libovsdbclient.Client) (*LBCache, error) {
 func listLBs(nbClient libovsdbclient.Client) ([]CachedLB, error) {
 	var lbs []*nbdb.LoadBalancer
 	var err error
-	if config.Kubernetes.ClusterName != "" {
+	if util.IsClusterScoped() {
 		searchPredicate := func(item *nbdb.LoadBalancer) bool {
-			return item.ExternalIDs["cluster_name"] == config.Kubernetes.ClusterName
+			return util.HasExternalIDsForCluster(item.ExternalIDs)
 		}
 		lbs, err = libovsdbops.ListLoadBalancersByPredicate(nbClient, searchPredicate)
 	} else {

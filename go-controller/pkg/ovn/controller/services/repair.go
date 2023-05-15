@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -91,9 +92,6 @@ func (r *repair) runBeforeSync() {
 		klog.Errorf("Failed to get load_balancer cache: %v", err)
 	}
 	lbFilter := map[string]string{"k8s.ovn.org/kind": "Service"}
-	if globalconfig.Kubernetes.ClusterName != "" {
-		lbFilter["cluster_name"] = globalconfig.Kubernetes.ClusterName
-	}
 	existingLBs := lbCache.Find(lbFilter)
 	// Look for any load balancers whose Service no longer exists in the apiserver
 	staleLBs := []string{}
@@ -122,7 +120,7 @@ func (r *repair) runBeforeSync() {
 	// Remove existing reject rules. They are not used anymore
 	// given the introduction of idling loadbalancers
 	p := func(item *nbdb.ACL) bool {
-		return item.Action == nbdb.ACLActionReject
+		return item.Action == nbdb.ACLActionReject && util.HasExternalIDsForCluster(item.ExternalIDs)
 	}
 	acls, err := libovsdbops.FindACLsWithPredicate(r.nbClient, p)
 	if err != nil {

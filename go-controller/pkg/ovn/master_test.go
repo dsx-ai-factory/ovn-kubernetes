@@ -102,7 +102,7 @@ func (n tNode) logicalSwitch(loadBalancerGroupUUID string) *nbdb.LogicalSwitch {
 		Name:              n.Name,
 		OtherConfig:       map[string]string{"subnet": n.NodeSubnet},
 		LoadBalancerGroup: []string{loadBalancerGroupUUID},
-		ExternalIDs:       map[string]string{"cluster_name": config.Kubernetes.ClusterName},
+		ExternalIDs:       util.CreateClusterScopedExternalIDs(),
 	}
 }
 

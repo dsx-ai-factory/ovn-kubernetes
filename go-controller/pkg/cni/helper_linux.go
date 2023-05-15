@@ -342,24 +342,10 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 		ipStrs[i] = ip.String()
 	}
 
-	klog.Infof("ConfigureOVS: namespace: %s, podName: %s, network: %s, mode %s, SandboxID: %q, UID: %q, MAC: %s, IPs: %v, clusterName: %s, ovn_kube_mode: %s",
-		namespace, podName, ifInfo.NadName, config.OvnKubeNode.Mode, sandboxID, initialPodUID, ifInfo.MAC, ipStrs, ifInfo.ClusterName, ifInfo.OvnKubeMode)
+	ifaceID = ifInfo.ClusterNamePrefix + ifaceID
 
-	// ConfigureOVS should prefix ovs ports with cluster name to differentiate
-	// pods with same name belonging to multiple clusters.
-	// But both CNI CmdAdd and the ovnkube-node in dpu mode calls ConfigureOVS().
-	// But it in CNI mode, the cluster name config option is not available.
-	// Hence, if the clusterName is present in the PodInterfaceInfo
-	// but is not available as a config option, then we are in CNI mode.
-	// This means util.GetIfaceId() would have failed to set cluster name
-	// prefix (since it being not set). We double-check if cluster name
-	// prefix is not present and if so, prefix pod with cluster name
-	// so OVS creates the port correctly with cluster name as well.
-	if ifInfo.ClusterName != "" && config.Kubernetes.ClusterName == "" {
-		if !strings.HasPrefix(ifaceID, ifInfo.ClusterName) {
-			ifaceID = ifInfo.ClusterName + "_" + ifaceID
-		}
-	}
+	klog.Infof("ConfigureOVS: namespace: %s, podName: %s, network: %s, mode %s, SandboxID: %q, UID: %q, MAC: %s, IPs: %v, clusterName: %s, ifaceID: %s, ovn_kube_mode: %s",
+		namespace, podName, ifInfo.NadName, config.OvnKubeNode.Mode, sandboxID, initialPodUID, ifInfo.MAC, ipStrs, ifInfo.ClusterName, ifaceID, ifInfo.OvnKubeMode)
 
 	// Find and remove any existing OVS port with this iface-id. Pods can
 	// have multiple sandboxes if some are waiting for garbage collection,

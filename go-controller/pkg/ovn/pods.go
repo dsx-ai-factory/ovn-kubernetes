@@ -104,17 +104,26 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 		}
 	}
 
-	// for default network, logical_port name is in the form of podNamespace_podName, otherwise,
-	// logical_port name is in the form of prefix_podNamespace_podName. inddex to get podNamespace
-	// from logical_port name would be different in these two cases.
+	// for default network, logical_port name is in the form of podNamespace_podName, for secondary networks,
+	// logical_port name is in the form of <network_prefix>_podNamespace_podName.
+	// When cluster_name is set (i.e. cluster scoped), for default network, logical_port name will be in the form of
+	//<cluster_name>_podNamespace_podName and secondary networks in the form
+	//<cluster_name>_<network_prefix>_podNamespace_podName.
+	// index to get podNamespace from logical_port name would be different in these two cases and incremented accordingly.
 	nsIndex := 0
+	if util.IsClusterScoped() { // Increment to account for extra cluster_name prefix.
+		nsIndex++
+	}
 	if oc.nadInfo.IsSecondary {
-		nsIndex = 1
+		nsIndex++
 	}
 
 	var ops []ovsdb.Operation
 	for _, switchName := range switches {
 		p := func(item *nbdb.LogicalSwitchPort) bool {
+			if !util.HasExternalIDsForCluster(item.ExternalIDs) {
+				return false
+			}
 			netName, ok := item.ExternalIDs["network_name"]
 			if oc.nadInfo.IsSecondary {
 				return item.ExternalIDs["pod"] == "true" && ok && netName == oc.nadInfo.NetName && !expectedLogicalPorts[item.Name]
@@ -563,7 +572,9 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string
 	// does don't re-add the port to OVN as this will change its
 	// UUID and and the port cache, address sets, and port groups
 	// will still have the old UUID.
-	lsp := &nbdb.LogicalSwitchPort{Name: portName}
+	lsp := &nbdb.LogicalSwitchPort{
+		Name: portName,
+	}
 	existingLSP, err := libovsdbops.GetLogicalSwitchPort(oc.mc.nbClient, lsp)
 	if err != nil && err != libovsdbclient.ErrNotFound {
 		return fmt.Errorf("unable to get the lsp %s from the nbdb: %s", portName, err)
@@ -755,9 +766,11 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string
 
 	// add external ids
 	lsp.ExternalIDs = map[string]string{"namespace": pod.Namespace, "pod": "true"}
+	lsp.ExternalIDs = util.ExternalIDsForCluster(lsp.ExternalIDs)
 	if oc.nadInfo.IsSecondary {
 		lsp.ExternalIDs["network_name"] = oc.nadInfo.NetName
 		lsp.ExternalIDs["nad_name"] = nadName
+		lsp.ExternalIDs = util.ExternalIDsForCluster(lsp.ExternalIDs)
 	}
 
 	// CNI depends on the flows from port security, delay setting it until end

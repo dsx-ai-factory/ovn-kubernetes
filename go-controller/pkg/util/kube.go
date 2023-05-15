@@ -399,20 +399,27 @@ func ExternalIDsForObject(obj K8sObject) map[string]string {
 		gk = kinds[0].GroupKind()
 	}
 
-	return map[string]string{
+	externalIDs := map[string]string{
 		types.OvnK8sPrefix + "/owner": nsn.String(),
 		types.OvnK8sPrefix + "/kind":  gk.String(),
-		"cluster_name":                config.Kubernetes.ClusterName,
+	}
+	externalIDs = ExternalIDsForCluster(externalIDs)
+	return externalIDs
+}
+
+var clustername string
+var clusterNamePrefix string
+var prefixSeparator = "_"
+
+func SetClusterName(name string) {
+	if name != "" {
+		clustername = name
+		clusterNamePrefix = "CLUSTER_" + clustername + prefixSeparator
 	}
 }
 
-var clusterNamePrefix string
-var prefixSepartor = "_"
-
-func SetClusterName(clustername string) {
-	if clustername != "" {
-		clusterNamePrefix = clustername + prefixSepartor
-	}
+func GetClusterName() string {
+	return clustername
 }
 
 // GetClusterNamePrefix generates a prefix with cluster_name
@@ -456,9 +463,42 @@ func GetOVNJoinSwitchName() string {
 	return GetClusterNamePrefix() + types.OVNJoinSwitch
 }
 
+// IsClusterScoped returns true if this cluster has a cluster name set.
+func IsClusterScoped() bool {
+	return config.Kubernetes.ClusterName != ""
+}
+
 // Resource names will be prefixed with the cluster_name if available.
 func GetClusterScopedName(name string) string {
 	return fmt.Sprintf("%s%s", GetClusterNamePrefix(), name)
+}
+
+func CreateClusterScopedExternalIDs() map[string]string {
+	if config.Kubernetes.ClusterName != "" {
+		return map[string]string{types.OvnK8sClusterNameKey: config.Kubernetes.ClusterName}
+	}
+	return nil
+}
+
+func ExternalIDsForCluster(externalIDs map[string]string) map[string]string {
+	if len(externalIDs) == 0 || externalIDs == nil {
+		externalIDs = make(map[string]string)
+	}
+	if config.Kubernetes.ClusterName != "" {
+		externalIDs[types.OvnK8sClusterNameKey] = config.Kubernetes.ClusterName
+	}
+	return externalIDs
+}
+
+// HasExternalIDsForCluster returns true if the current item's `cluster_name` external_id
+// matches that of the current cluster. In case of non cluster scoped clusters (i.e no such external_id)
+// it defaults to true.
+func HasExternalIDsForCluster(externalIDs map[string]string) bool {
+	clusterNameExtID, ok := externalIDs[types.OvnK8sClusterNameKey]
+	if (config.Kubernetes.ClusterName == "" && !ok) || (config.Kubernetes.ClusterName != "" && config.Kubernetes.ClusterName == clusterNameExtID) {
+		return true
+	}
+	return false
 }
 
 func GetPhysNetNameKey() string {
@@ -470,7 +510,7 @@ func GetPhysNetNameKey() string {
 
 func GetPhysNetNameKeyForNode(nodeName string, labels map[string]string) string {
 	if config.Gateway.PhysNetNameKey != "" {
-		// XXX put a normal comment here
+		// If the node has the physnet-name-key label, use that.
 		if nodeName != "" {
 			if value, ok := labels["k8s.ovn.org/physnet-name-key"]; ok {
 				return value
