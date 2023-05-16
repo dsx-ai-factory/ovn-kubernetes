@@ -186,7 +186,7 @@ func MarshalPodAnnotation(pannotations *map[string]string, podInfo *PodAnnotatio
 }
 
 // UnmarshalPodAnnotation returns the specified network info from pod.Annotations
-func UnmarshalPodAnnotation(annotations map[string]string, netName string) (*PodAnnotation, error) {
+func UnmarshalPodAnnotation(annotations map[string]string, annoNadKeyName string) (*PodAnnotation, error) {
 	ovnAnnotation, ok := annotations[OvnPodAnnotationName]
 	if !ok {
 		return nil, newAnnotationNotSetError("could not find OVN pod annotation in %v", annotations)
@@ -197,10 +197,10 @@ func UnmarshalPodAnnotation(annotations map[string]string, netName string) (*Pod
 		return nil, fmt.Errorf("failed to unmarshal ovn pod annotation %q: %v",
 			ovnAnnotation, err)
 	}
-	tempA, ok := podNetworks[netName]
+	tempA, ok := podNetworks[annoNadKeyName]
 	if !ok {
 		return nil, fmt.Errorf("no ovn pod annotation for network %s: %q",
-			netName, ovnAnnotation)
+			annoNadKeyName, ovnAnnotation)
 	}
 	a := &tempA
 
@@ -221,7 +221,7 @@ func UnmarshalPodAnnotation(annotations map[string]string, netName string) (*Pod
 		}
 	}
 
-	if SkipIPAMForNAD(annotations, netName) {
+	if SkipIPAMForNAD(annotations, annoNadKeyName) {
 		// pod doesn't require IP for this network
 		return podAnnotation, nil
 	}
@@ -396,13 +396,13 @@ func SkipSpoofCheckForNAD(annotations map[string]string, annoNadKeyName string) 
 }
 
 // SkipIPAMForNAD return true if nadName is part of value of SkipIPOnNetworksAnnotation annotation
-func SkipIPAMForNAD(annotations map[string]string, nadName string) bool {
+func SkipIPAMForNAD(annotations map[string]string, annoNadKeyName string) bool {
 	skipIPNetworks := annotations[skipIPOnNetworksAnnotation]
 	if skipIPNetworks == "" {
 		return false
 	}
 	for _, skipNadName := range strings.Split(skipIPNetworks, ",") {
-		if skipNadName == nadName {
+		if skipNadName == annoNadKeyName {
 			return true
 		}
 	}
@@ -413,6 +413,7 @@ type portSecurityInfo struct {
 	IPs []string `json:"ips"`
 }
 
+// GetPortSecurityInfo returns portSecurityInfo map, key is annoNadKeyName
 func GetPortSecurityInfo(annotations map[string]string) (map[string]*portSecurityInfo, error) {
 	portSecurityInfoMap := make(map[string]*portSecurityInfo)
 	annotPortSecInfo := annotations[PortSecurityInfoAnnotation]

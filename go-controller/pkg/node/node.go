@@ -1588,7 +1588,7 @@ func (n *OvnNode) updateRateLimitingConfig(old, new *nettypes.NetworkAttachmentD
 		if err := n.defaultNodeController.updateNADConfig(util.GetNadKeyName(new.Namespace, new.Name), nadConfig); err != nil {
 			klog.Errorf("Failed to update network config in controller: %v", err)
 		} else {
-			n.updateRateLimitingForPods(n.defaultNodeController, util.GetNadName(new.Namespace, new.Name, true))
+			n.updateRateLimitingForPods(n.defaultNodeController, util.GetNadKeyName(new.Namespace, new.Name))
 		}
 		return
 	}
@@ -1602,12 +1602,12 @@ func (n *OvnNode) updateRateLimitingConfig(old, new *nettypes.NetworkAttachmentD
 	if err := nc.updateNADConfig(util.GetNadKeyName(new.Namespace, new.Name), nadConfig); err != nil {
 		klog.Errorf("Failed to update network config in controller: %v", err)
 	} else {
-		n.updateRateLimitingForPods(nc, util.GetNadName(new.Namespace, new.Name, false))
+		n.updateRateLimitingForPods(nc, util.GetNadKeyName(new.Namespace, new.Name))
 	}
 }
 
 // go through pods to update rate limit config
-func (n *OvnNode) updateRateLimitingForPods(controller *ovnNodeController, nadKey string) {
+func (n *OvnNode) updateRateLimitingForPods(controller *ovnNodeController, nadName string) {
 	// informer cache has pods filtered by node name
 	pods, err := n.watchFactory.GetAllPods()
 	if err != nil {
@@ -1616,7 +1616,7 @@ func (n *OvnNode) updateRateLimitingForPods(controller *ovnNodeController, nadKe
 	}
 	for _, pod := range pods {
 		klog.V(5).Infof("Updating rate limit config for pod %s/%s", pod.Namespace, pod.Name)
-		if err := controller.updateRateLimitingForPod(pod, nadKey); err != nil {
+		if err := controller.updateRateLimitingForPod(pod, nadName); err != nil {
 			klog.Error(err)
 		}
 	}

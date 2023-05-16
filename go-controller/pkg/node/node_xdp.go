@@ -79,10 +79,9 @@ const (
 //     if the XDP service doesn't exist (e.g. UDP)
 //
 
-func xdpToCookie(bridgeName, physPort, patchPort string) (string, error) {
-	id := fmt.Sprintf("%s-%s-%s", bridgeName, physPort, patchPort)
+func xdpToCookie(keyStr string) (string, error) {
 	h := fnv.New64a()
-	_, err := h.Write([]byte(id))
+	_, err := h.Write([]byte(keyStr))
 	if err != nil {
 		return "", err
 	}
@@ -90,18 +89,17 @@ func xdpToCookie(bridgeName, physPort, patchPort string) (string, error) {
 }
 
 // If the patchport OF port changes when in use, exit.
-func xdpCheckPatchPort(bridgeName, ofPortPhys, patchIntf, ofPortPatch, curOfportPatch string) {
-	oldcookie, err := xdpToCookie(bridgeName, ofPortPhys, ofPortPatch)
+func xdpCheckPatchPortOFFlows(bridgeName, ofPortPhys, patchIntf, ofPortPatch, curOfportPatch string) {
+	cookieKey := fmt.Sprintf("%s-%s-%s", bridgeName, ofPortPhys, ofPortPatch)
+	oldcookie, err := xdpToCookie(cookieKey)
 	if err != nil {
-		klog.Errorf("Fatal error: patch port %s ofport changed from %s to %s",
-			patchIntf, ofPortPatch, curOfportPatch)
+		klog.Errorf("Fatal error: error generating cookie to update XDP flows")
 		os.Exit(1)
 	}
 	oldCookieFilter := fmt.Sprintf("cookie=%s/-1", oldcookie)
 	stdout, _, err := util.RunOVSOfctl("dump-aggregate", bridgeName, oldCookieFilter)
 	if err != nil {
-		klog.Errorf("Fatal error: patch port %s ofport changed from %s to %s",
-			patchIntf, ofPortPatch, curOfportPatch)
+		klog.Errorf("Fatal error: error getting  XDP flows")
 		os.Exit(1)
 	}
 	hasFlowCountZero := strings.Contains(stdout, "flow_count=0")
@@ -112,7 +110,7 @@ func xdpCheckPatchPort(bridgeName, ofPortPhys, patchIntf, ofPortPatch, curOfport
 	}
 }
 
-func xdpSetupOFFlowsForInterface(podCIDR, bridgeName string, vlanID int, podMAC string, xdpSharedPatchGW,
+func xdpSetupOFFlowsForInterface(allowedIPs []string, bridgeName string, vlanID int, podMAC string, xdpSharedPatchGW,
 	xdpSharedOFGW *gateway, setup bool) error {
 	var xdpOFFLows []string
 	var cookie, key string
@@ -122,14 +120,23 @@ func xdpSetupOFFlowsForInterface(podCIDR, bridgeName string, vlanID int, podMAC 
 		op = "Tearing Down"
 	}
 	defaultBridge := xdpSharedPatchGW.openflowManager.defaultBridge
-	klog.Infof("%s XDP openflow rules for %s", op, podCIDR)
+	klog.Infof("%s XDP openflow rules for %v", op, allowedIPs)
 
-	key = strings.Join([]string{"xdp", podCIDR, bridgeName, fmt.Sprintf("%d", vlanID)}, "_")
+	// We could be smarter in using the hash of all the ips, or some such, that'll make deletion
+	// easier, but we can cheat a bit as getting a hash of the ips etc might be an overkill, so
+	// we use only the 1st ip for the key.
+	ipStr := strings.Join(allowedIPs[:], "-")
+	keyStr := strings.Join([]string{"xdp", ipStr, bridgeName, fmt.Sprintf("%d", vlanID)}, "_")
+	key, err := xdpToCookie(keyStr)
+	if err != nil {
+		klog.Errorf("Fatal error: error generating cookie to add XDP flows")
+		os.Exit(1)
+	}
 	if !setup {
 		xdpSharedOFGW.openflowManager.deleteFlowsByKey(key)
 		xdpSharedOFGW.openflowManager.requestFlowSync()
 
-		klog.Infof("Completed %s XDP openflow rules for %s", strings.ToLower(op), podCIDR)
+		klog.Infof("Completed %s XDP openflow rules for %v", strings.ToLower(op), allowedIPs)
 		return nil
 	}
 
@@ -154,87 +161,87 @@ func xdpSetupOFFlowsForInterface(podCIDR, bridgeName string, vlanID int, podMAC 
 	// Vlan modification action.
 	mod_vlan_id := fmt.Sprintf("mod_vlan_vid:%d,", vlanID)
 
-	cookie, err = xdpToCookie(bridgeName, defaultBridge.ofPortPhys, defaultBridge.ofPortPatch)
+	cookieKey := fmt.Sprintf("%s-%s-%s", bridgeName, defaultBridge.ofPortPhys, defaultBridge.ofPortPatch)
+	cookie, err = xdpToCookie(cookieKey)
 	if err != nil {
 		return fmt.Errorf("error generating OF cookie using %s-%s: %v", defaultBridge.ofPortPhys,
 			defaultBridge.ofPortPatch, err)
 	}
-	podIP := strings.Split(podCIDR, "/")
+	for _, allowedIP := range allowedIPs {
+		// From the wire to the pod/VM
+		// ---------------------------
 
-	// From the wire to the pod/VM
-	// ---------------------------
+		// Flow 1:
+		//	Add a rule to send TCP packets for the pod from the wire to the XDP CT zone to check if
+		//	we need to send this for XDP processing.
+		xdpOFFLows = append(xdpOFFLows,
+			fmt.Sprintf("cookie=%s, table=0, priority=%d, in_port=%s, dl_vlan=%d, nw_dst=%s/32, tcp,"+
+				"actions=ct(table=%d,zone=%d)", cookie, XDPOFHighPriority, defaultBridge.ofPortPhys,
+				vlanID, allowedIP, XDPOFLowCTTable, HostXDPCTZone))
 
-	// Flow 1:
-	//	Add a rule to send TCP packets for the pod from the wire to the XDP CT zone to check if
-	//	we need to send this for XDP processing.
-	xdpOFFLows = append(xdpOFFLows,
-		fmt.Sprintf("cookie=%s, table=0, priority=%d, in_port=%s, dl_vlan=%d, nw_dst=%s/32, tcp,"+
-			"actions=ct(table=%d,zone=%d)", cookie, XDPOFHighPriority, defaultBridge.ofPortPhys,
-			vlanID, podIP[0], XDPOFLowCTTable, HostXDPCTZone))
+		// Flow 2:
+		//	For est connections (i.e. initiated from the pod) send to the pod
+		xdpOFFLows = append(xdpOFFLows,
+			fmt.Sprintf("cookie=%s, table=%d, priority=%d, in_port=%s, dl_vlan=%d, nw_dst=%s/32, tcp, ct_state=+est+trk,"+
+				"actions=output:%s", cookie, XDPOFLowCTTable, XDPOFHighPriority, defaultBridge.ofPortPhys,
+				vlanID, allowedIP, defaultBridge.ofPortPatch))
 
-	// Flow 2:
-	//	For est connections (i.e. initiated from the pod) send to the pod
-	xdpOFFLows = append(xdpOFFLows,
-		fmt.Sprintf("cookie=%s, table=%d, priority=%d, in_port=%s, dl_vlan=%d, nw_dst=%s/32, tcp, ct_state=+est+trk,"+
-			"actions=output:%s", cookie, XDPOFLowCTTable, XDPOFHighPriority, defaultBridge.ofPortPhys,
-			vlanID, podIP[0], defaultBridge.ofPortPatch))
+		// Flow 3:
+		//	Send the others for XDP processing
+		xdpOFFLows = append(xdpOFFLows,
+			fmt.Sprintf("cookie=%s, table=%d, priority=%d, in_port=%s, dl_vlan=%d, nw_dst=%s/32, tcp,"+
+				"actions=strip_vlan,mod_dl_dst:%s,output:%s", cookie, XDPOFLowCTTable, XDPOFLowPriority,
+				defaultBridge.ofPortPhys, vlanID, allowedIP, xdpSFMAC, xdpSFPortOfPort))
 
-	// Flow 3:
-	//	Send the others for XDP processing
-	xdpOFFLows = append(xdpOFFLows,
-		fmt.Sprintf("cookie=%s, table=%d, priority=%d, in_port=%s, dl_vlan=%d, nw_dst=%s/32, tcp,"+
-			"actions=strip_vlan,mod_dl_dst:%s,output:%s", cookie, XDPOFLowCTTable, XDPOFLowPriority,
-			defaultBridge.ofPortPhys, vlanID, podIP[0], xdpSFMAC, xdpSFPortOfPort))
+		// Flow 4:
+		//    Add a rule to send packets from XDP SF port to uplink port after adding the VLAN
+		xdpOFFLows = append(xdpOFFLows,
+			fmt.Sprintf("cookie=%s, table=0, priority=%d, in_port=%s, nw_src=%s/32, ip, "+
+				"actions=%smod_dl_src:%s,output:%s", cookie, XDPOFHighPriority, xdpSFPortOfPort,
+				allowedIP, mod_vlan_id, podMAC, defaultBridge.ofPortPhys))
 
-	// Flow 4:
-	//    Add a rule to send packets from XDP SF port to uplink port after adding the VLAN
-	xdpOFFLows = append(xdpOFFLows,
-		fmt.Sprintf("cookie=%s, table=0, priority=%d, in_port=%s, nw_src=%s/32, ip, "+
-			"actions=%smod_dl_src:%s,output:%s", cookie, XDPOFHighPriority, xdpSFPortOfPort,
-			podIP[0], mod_vlan_id, podMAC, defaultBridge.ofPortPhys))
+		// From the pod/VM to wire
+		// ---------------------------
 
-	// From the pod/VM to wire
-	// ---------------------------
+		// Flow 1:
+		// 	Add a rule to track TCP initiated from the VM to bypass XDP processing
+		xdpOFFLows = append(xdpOFFLows,
+			fmt.Sprintf("cookie=%s, table=0, priority=%d, in_port=%s, dl_vlan=%d, nw_src=%s/32, tcp, "+
+				"actions=ct(table=%d,zone=%d)", cookie, XDPOFHighPriority, defaultBridge.ofPortPatch,
+				vlanID, allowedIP, XDPOFLowCTTable, HostXDPCTZone))
 
-	// Flow 1:
-	// 	Add a rule to track TCP initiated from the VM to bypass XDP processing
-	xdpOFFLows = append(xdpOFFLows,
-		fmt.Sprintf("cookie=%s, table=0, priority=%d, in_port=%s, dl_vlan=%d, nw_src=%s/32, tcp, "+
-			"actions=ct(table=%d,zone=%d)", cookie, XDPOFHighPriority, defaultBridge.ofPortPatch,
-			vlanID, podIP[0], XDPOFLowCTTable, HostXDPCTZone))
+		// Flow 2:
+		// 	IF it is a SYN, commit to match the return traffic and send it out, bypassing XDP/
+		xdpOFFLows = append(xdpOFFLows,
+			fmt.Sprintf("cookie=%s, table=%d, priority=%d, in_port=%s, dl_vlan=%d, nw_src=%s/32, tcp, tcp_flags=+syn-ack,"+
+				"actions=ct(commit,zone=%d),output:%s", cookie, XDPOFLowCTTable, XDPOFHighPriority,
+				defaultBridge.ofPortPatch, vlanID, allowedIP, HostXDPCTZone, defaultBridge.ofPortPhys))
 
-	// Flow 2:
-	// 	IF it is a SYN, commit to match the return traffic and send it out, bypassing XDP/
-	xdpOFFLows = append(xdpOFFLows,
-		fmt.Sprintf("cookie=%s, table=%d, priority=%d, in_port=%s, dl_vlan=%d, nw_src=%s/32, tcp, tcp_flags=+syn-ack,"+
-			"actions=ct(commit,zone=%d),output:%s", cookie, XDPOFLowCTTable, XDPOFHighPriority,
-			defaultBridge.ofPortPatch, vlanID, podIP[0], HostXDPCTZone, defaultBridge.ofPortPhys))
+		// Flow 3:
+		// 	IF it is est send it out, bypassing XDP
+		xdpOFFLows = append(xdpOFFLows,
+			fmt.Sprintf("cookie=%s, table=%d, priority=%d, in_port=%s, dl_vlan=%d, nw_src=%s/32, tcp, ct_state=+est+trk,"+
+				"actions=output:%s", cookie, XDPOFLowCTTable, XDPOFHighPriority, defaultBridge.ofPortPatch,
+				vlanID, allowedIP, defaultBridge.ofPortPhys))
 
-	// Flow 3:
-	// 	IF it is est send it out, bypassing XDP
-	xdpOFFLows = append(xdpOFFLows,
-		fmt.Sprintf("cookie=%s, table=%d, priority=%d, in_port=%s, dl_vlan=%d, nw_src=%s/32, tcp, ct_state=+est+trk,"+
-			"actions=output:%s", cookie, XDPOFLowCTTable, XDPOFHighPriority, defaultBridge.ofPortPatch,
-			vlanID, podIP[0], defaultBridge.ofPortPhys))
+		// Flow 4:
+		// 	Send everything else for XDP processing
+		xdpOFFLows = append(xdpOFFLows,
+			fmt.Sprintf("cookie=%s, table=%d, priority=%d, in_port=%s, dl_vlan=%d, nw_src=%s/32, tcp,"+
+				"actions=strip_vlan,mod_dl_dst:%s,output:%s", cookie, XDPOFLowCTTable, XDPOFLowPriority,
+				defaultBridge.ofPortPatch, vlanID, allowedIP, xdpVethMAC, xdpVethPortOfPort))
 
-	// Flow 4:
-	// 	Send everything else for XDP processing
-	xdpOFFLows = append(xdpOFFLows,
-		fmt.Sprintf("cookie=%s, table=%d, priority=%d, in_port=%s, dl_vlan=%d, nw_src=%s/32, tcp,"+
-			"actions=strip_vlan,mod_dl_dst:%s,output:%s", cookie, XDPOFLowCTTable, XDPOFLowPriority,
-			defaultBridge.ofPortPatch, vlanID, podIP[0], xdpVethMAC, xdpVethPortOfPort))
-
-	// Flow 5:
-	//    Add a rule to send packets from XDP veth port to patch port after adding the VLAN
-	xdpOFFLows = append(xdpOFFLows,
-		fmt.Sprintf("cookie=%s, table=0, priority=%d, in_port=%s, ip, nw_dst=%s/32,"+
-			"actions=%soutput:%s", cookie, XDPOFHighPriority, xdpVethPortOfPort,
-			podIP[0], mod_vlan_id, defaultBridge.ofPortPatch))
-
+		// Flow 5:
+		//    Add a rule to send packets from XDP veth port to patch port after adding the VLAN
+		xdpOFFLows = append(xdpOFFLows,
+			fmt.Sprintf("cookie=%s, table=0, priority=%d, in_port=%s, ip, nw_dst=%s/32,"+
+				"actions=%soutput:%s", cookie, XDPOFHighPriority, xdpVethPortOfPort,
+				allowedIP, mod_vlan_id, defaultBridge.ofPortPatch))
+	}
 	xdpSharedOFGW.openflowManager.updateFlowCacheEntry(key, xdpOFFLows)
 	xdpSharedOFGW.openflowManager.requestFlowSync()
 
-	klog.Infof("Completed %s XDP openflow rules for %s", strings.ToLower(op), podCIDR)
+	klog.Infof("Completed %s XDP openflow rules for %v", strings.ToLower(op), allowedIPs)
 	return nil
 }
 
@@ -370,13 +377,13 @@ func xdpSetupNSForNAD(defGWIP, defGWMAC, publicSubnet string, vlanID int, xdpNS 
 //
 // Additionally, set the ARP for the tenant public IP and also for the default gateway on
 // the SF route.
-func xdpSetupNSForInterface(podCIDR, podMAC string, vlanID int, xdpNS string, setup bool) error {
+func xdpSetupNSForInterface(allowedIPs []string, podMAC string, vlanID int, setup bool) error {
 
 	op := "Setting up"
 	if !setup {
 		op = "Tearing Down"
 	}
-	klog.Infof("%s XDP routes and MAC for %s", op, podCIDR)
+	klog.Infof("%s XDP routes and MAC for %v", op, allowedIPs)
 	netns, err := ns.GetNS(xdpNSPath)
 	if err != nil {
 		return fmt.Errorf("error opening XDP NS %s, error: %v", xdpNSPath, err)
@@ -401,56 +408,68 @@ func xdpSetupNSForInterface(podCIDR, podMAC string, vlanID int, xdpNS string, se
 		// Use the route table for this subnet/vlan.
 		table_no := vlanID
 
-		// And the public tenant IP via the veth.
-		pubSubnetStrs := strings.Split(podCIDR, "/")
-		tenantIP := net.ParseIP(pubSubnetStrs[0])
-		tenant_ip := &net.IPNet{
-			IP:   tenantIP,
-			Mask: net.CIDRMask(32, 32),
-		}
-		s_rule := netlink.NewRule()
-		s_rule.Table = table_no
-		s_rule.Src = tenant_ip
-		route := netlink.Route{LinkIndex: vethLink.Attrs().Index, Dst: tenant_ip}
 		if setup {
-			if err = netlink.RuleAdd(s_rule); err != nil && !os.IsExist(err) {
-				return fmt.Errorf("error adding rule for %s:%v", podCIDR, err)
+			// And the public tenant IP via the veth.
+			for _, allowedIP := range allowedIPs {
+				tenantIP := net.ParseIP(allowedIP)
+				tenant_ip := &net.IPNet{
+					IP:   tenantIP,
+					Mask: net.CIDRMask(32, 32),
+				}
+				s_rule := netlink.NewRule()
+				s_rule.Table = table_no
+				s_rule.Src = tenant_ip
+				route := netlink.Route{LinkIndex: vethLink.Attrs().Index, Dst: tenant_ip}
+
+				if err = netlink.RuleAdd(s_rule); err != nil && !os.IsExist(err) {
+					return fmt.Errorf("error adding rule for %s:%v", allowedIP, err)
+				}
+
+				if err = netlink.RouteAdd(&route); err != nil && !os.IsExist(err) {
+					return fmt.Errorf("error adding route cidr %s: %v", tenantIP, err)
+				}
+
+				// Set the ARP entries.
+
+				// Tenant IP on the host
+				cmd := exec.Command("arp", "-s", allowedIP, podMAC, "dev", xdpVethDev)
+				err = cmd.Run()
+				if err != nil {
+					return fmt.Errorf("xdp:Error adding arp for %s, %s:%v", allowedIP, podMAC, err)
+				}
 			}
-
-			if err = netlink.RouteAdd(&route); err != nil && !os.IsExist(err) {
-				return fmt.Errorf("error adding route cidr %s: %v", tenantIP, err)
-			}
-
-			// Set the ARP entries.
-
-			// Tenant IP on the host
-			cmd := exec.Command("arp", "-s", pubSubnetStrs[0], podMAC, "dev", xdpVethDev)
-			err = cmd.Run()
-			if err != nil {
-				return fmt.Errorf("xdp:Error adding arp for %s, %s:%v", pubSubnetStrs[0], podMAC, err)
-			}
-
-			klog.Infof("Set up XDP routes and MAC for %s", podCIDR)
+			klog.Infof("Set up XDP routes and MAC for %v", allowedIPs)
 			return nil
 		}
-		if err = netlink.RuleDel(s_rule); err != nil {
-			return fmt.Errorf("error deleting rule for %s:%v", podCIDR, err)
+		for _, allowedIP := range allowedIPs {
+			tenantIP := net.ParseIP(allowedIP)
+			tenant_ip := &net.IPNet{
+				IP:   tenantIP,
+				Mask: net.CIDRMask(32, 32),
+			}
+			s_rule := netlink.NewRule()
+			s_rule.Table = table_no
+			s_rule.Src = tenant_ip
+			route := netlink.Route{LinkIndex: vethLink.Attrs().Index, Dst: tenant_ip}
+
+			if err = netlink.RuleDel(s_rule); err != nil {
+				return fmt.Errorf("error deleting rule for %s:%v", allowedIP, err)
+			}
+
+			if err = netlink.RouteDel(&route); err != nil {
+				return fmt.Errorf("xdp:Error deleting route cidr %s: %v", tenantIP, err)
+			}
+
+			// Delete the ARP entries.
+
+			// Tenant IP on the host
+			cmd := exec.Command("arp", "-d", allowedIP, "dev", xdpVethDev)
+			err = cmd.Run()
+			if err != nil {
+				return fmt.Errorf("xdp:Error deleting arp for %s, %s:%v", allowedIP, podMAC, err)
+			}
 		}
-
-		if err = netlink.RouteDel(&route); err != nil {
-			return fmt.Errorf("xdp:Error deleting route cidr %s: %v", tenantIP, err)
-		}
-
-		// Delete the ARP entries.
-
-		// Tenant IP on the host
-		cmd := exec.Command("arp", "-d", pubSubnetStrs[0], "dev", xdpVethDev)
-		err = cmd.Run()
-		if err != nil {
-			return fmt.Errorf("xdp:Error deleting arp for %s, %s:%v", pubSubnetStrs[0], podMAC, err)
-		}
-
-		klog.Infof("Completed %s XDP routes and MAC for %s", strings.ToLower(op), podCIDR)
+		klog.Infof("Completed %s XDP routes and MAC for %v", strings.ToLower(op), allowedIPs)
 		return nil
 	})
 	return err
@@ -480,7 +499,7 @@ func initializeXDPServiceForNAD(nadInfo *util.NetAttachDefInfo, xdpNS string, se
 // Set up the XDP services, mainly
 // - Routing and ARP configuration in the XDP service namespace
 // - OF rules in the bridge to insert the XDP service for TCP.
-func setXDPServiceForInterface(podAnnotation *util.PodAnnotation, nadInfo *util.NetAttachDefInfo, xdpNS string,
+func setXDPServiceForInterface(podAnnotation *util.PodAnnotation, allowedIPs []string, nadInfo *util.NetAttachDefInfo, xdpNS string,
 	xdpSharedPatchGW, xdpSharedOFGW *gateway, setup bool) error {
 
 	op := "Setting up"
@@ -488,17 +507,17 @@ func setXDPServiceForInterface(podAnnotation *util.PodAnnotation, nadInfo *util.
 		op = "Tearing Down"
 	}
 	klog.Infof("%s XDP NS for %s", op, nadInfo.NetCidr)
-	err := xdpSetupNSForInterface(podAnnotation.IPs[0].String(), podAnnotation.MAC.String(),
-		nadInfo.VlanId, xdpNS, setup)
+	err := xdpSetupNSForInterface(allowedIPs, podAnnotation.MAC.String(),
+		nadInfo.VlanId, setup)
 	if err != nil {
-		klog.Errorf("Error %s NS %s, for %s, %s, %s, %s, %s:%v", xdpNS, strings.ToLower(op),
-			podAnnotation.IPs[0].String(), podAnnotation.MAC.String(),
+		klog.Errorf("Error %s NS %s, for %v, %s, %s, %s, %s:%v", xdpNS, strings.ToLower(op),
+			allowedIPs, podAnnotation.MAC.String(),
 			nadInfo.Gateway, nadInfo.GatewayMac, nadInfo.NetCidr, err)
 		return err
 	}
 
 	klog.Infof("%s XDP OF Flows", op)
-	err = xdpSetupOFFlowsForInterface(podAnnotation.IPs[0].String(), nadInfo.BridgeName,
+	err = xdpSetupOFFlowsForInterface(allowedIPs, nadInfo.BridgeName,
 		nadInfo.VlanId, podAnnotation.MAC.String(), xdpSharedPatchGW, xdpSharedOFGW, setup)
 	if err != nil {
 		klog.Errorf("Error %s OF flows for %s, %d on %s: %v", strings.ToLower(op),
@@ -520,16 +539,66 @@ func InitializeXDPServiceForNAD(nadInfo *util.NetAttachDefInfo) error {
 	return nil
 }
 
-func SetupXDPServiceForInterface(podAnnotation *util.PodAnnotation, nadInfo *util.NetAttachDefInfo, xdpSharedPatchGW,
+func SetupXDPServiceForInterface(podAnnotation *util.PodAnnotation, allowedIPs []string, nadInfo *util.NetAttachDefInfo, xdpSharedPatchGW,
 	xdpSharedOFGW *gateway) error {
 
 	klog.Infof("Setting up XDP service for pod")
-	err := setXDPServiceForInterface(podAnnotation, nadInfo, config.OvnKubeNode.XDPNamespace, xdpSharedPatchGW,
+	err := setXDPServiceForInterface(podAnnotation, allowedIPs, nadInfo, config.OvnKubeNode.XDPNamespace, xdpSharedPatchGW,
 		xdpSharedOFGW, true)
 	if err != nil {
 		return fmt.Errorf("error setting XDP: %v", err)
 	}
 	klog.Infof("XDP service set up")
+	return nil
+}
+
+func UpdateXDPServiceForInterface(podAnnotation *util.PodAnnotation, oldAllowedIPs, newAllowedIPs []string, nadInfo *util.NetAttachDefInfo, xdpSharedPatchGW,
+	xdpSharedOFGW *gateway) error {
+
+	klog.Infof("Updating XDP service for pod")
+	// We deal with the flows first so that there is no gap where xdp could be bypassed for this pod.
+	// It is ok, to do flows before updating the NS with the IPs, since connections might not proceed,
+	// and tcp will rexmit.
+
+	// Add new flows
+	err := xdpSetupOFFlowsForInterface(newAllowedIPs, nadInfo.BridgeName,
+		nadInfo.VlanId, podAnnotation.MAC.String(), xdpSharedPatchGW, xdpSharedOFGW, true)
+	if err != nil {
+		// This is problematic, maybe better to panic
+		klog.Errorf("Error adding new OF flows for %s, %d on %s: %v",
+			nadInfo.NetCidr, nadInfo.VlanId, nadInfo.BridgeName, err)
+		return err
+	}
+	// Remove old flows
+	err = xdpSetupOFFlowsForInterface(oldAllowedIPs, nadInfo.BridgeName,
+		nadInfo.VlanId, podAnnotation.MAC.String(), xdpSharedPatchGW, xdpSharedOFGW, false)
+	if err != nil {
+		// This is not problematic, per se, so the old flows could be left behind.
+		klog.Errorf("Error deleting new OF flows for %s, %d on %s: %v",
+			nadInfo.NetCidr, nadInfo.VlanId, nadInfo.BridgeName, err)
+	}
+
+	// Remove old IP info. We remove old before adding new, since there may be an overlap,
+	// so adding and then deleting, might delete the overlapping ips.
+	err = xdpSetupNSForInterface(oldAllowedIPs, podAnnotation.MAC.String(),
+		nadInfo.VlanId, false)
+	if err != nil {
+		klog.Errorf("Error deleting old IPs from NS %s for %v, %s, %s, %s, %s:%v",
+			config.OvnKubeNode.XDPNamespace, oldAllowedIPs, podAnnotation.MAC.String(),
+			nadInfo.Gateway, nadInfo.GatewayMac, nadInfo.NetCidr, err)
+		return err
+	}
+
+	// Add new IP info.
+	err = xdpSetupNSForInterface(newAllowedIPs, podAnnotation.MAC.String(),
+		nadInfo.VlanId, true)
+	if err != nil {
+		klog.Errorf("Error adding old IPs from NS %s for %v, %s, %s, %s, %s:%v",
+			config.OvnKubeNode.XDPNamespace, newAllowedIPs, podAnnotation.MAC.String(),
+			nadInfo.Gateway, nadInfo.GatewayMac, nadInfo.NetCidr, err)
+		return err
+	}
+	klog.Infof("XDP service updated")
 	return nil
 }
 
@@ -544,11 +613,11 @@ func DestroyXDPServiceForNAD(nadInfo *util.NetAttachDefInfo) error {
 	return nil
 }
 
-func TeardownXDPServiceForInterface(podAnnotation *util.PodAnnotation, nadInfo *util.NetAttachDefInfo, xdpSharedPatchGW,
+func TeardownXDPServiceForInterface(podAnnotation *util.PodAnnotation, allowedIPs []string, nadInfo *util.NetAttachDefInfo, xdpSharedPatchGW,
 	xdpSharedOFGW *gateway) error {
 
 	klog.Infof("Tearing down XDP service for pod")
-	err := setXDPServiceForInterface(podAnnotation, nadInfo, config.OvnKubeNode.XDPNamespace, xdpSharedPatchGW,
+	err := setXDPServiceForInterface(podAnnotation, allowedIPs, nadInfo, config.OvnKubeNode.XDPNamespace, xdpSharedPatchGW,
 		xdpSharedOFGW, false)
 	if err != nil {
 		return fmt.Errorf("error remving XDP: %v", err)
