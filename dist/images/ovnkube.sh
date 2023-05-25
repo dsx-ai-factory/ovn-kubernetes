@@ -1626,6 +1626,38 @@ ovn-node() {
     "
   fi
 
+  if [[ ${ovnkube_node_mode} == "full" ]]; then
+
+    if [[ ! ${ovn_gateway_opts} =~ "gateway-interface" ]]; then
+      # get the gateway interface for DPU cluster
+      dpu_gw_iface=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-dpu-gw-interface | tr -d \")
+      if [[ ${dpu_gw_iface} != "" ]]; then
+        echo "Setting OVN DPU Gateway Interface."
+        ovn_gateway_opts="${ovn_gateway_opts} --gateway-interface=${dpu_gw_iface}"
+      fi
+    fi
+
+    if [[ ! ${ovn_gateway_opts} =~ "gateway-nexthop" ]]; then
+      # get the gateway nexthop for DPU cluster
+      dpu_gw_nexthop=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-dpu-gw-nexthop | tr -d \")
+      if [[ ${dpu_gw_nexthop} != "" ]]; then
+        echo "Setting OVN DPU Gateway NextHop."
+        ovn_gateway_opts="${ovn_gateway_opts} --gateway-nexthop=${dpu_gw_nexthop}"
+      fi
+    fi
+
+    if  [[ ! ${ovn_gateway_opts} =~ "gateway-vlanid" ]]; then
+      # get the gateway vlanid for DPU cluster
+      dpu_gw_vlanid=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-dpu-gw-vlanid | tr -d \")
+      if [[ ${dpu_gw_vlanid} != "" ]]; then
+        echo "Setting OVN DPU Gateway VLAN ID."
+        ovn_gateway_opts="${ovn_gateway_opts} --gateway-vlanid=${dpu_gw_vlanid}"
+      fi
+    fi
+
+  fi
+
+
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
