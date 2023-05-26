@@ -246,8 +246,8 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 	if err != nil {
 		return fmt.Errorf("cannot Ensure that addressSet for namespace %s exists %v", egressFirewall.Namespace, err)
 	}
-	ipv4HashedAS, ipv6HashedAS := addressset.MakeAddressSetHashNames(util.GetClusterScopedName(egressFirewall.Namespace))
-	if err := oc.addEgressFirewallRules(ef, ipv4HashedAS, ipv6HashedAS, types.EgressFirewallStartPriority); err != nil {
+	ipv4HashedAS, ipv6HashedAS := addressset.MakeAddressSetHashNames(egressFirewall.Namespace)
+	if err := oc.addEgressFirewallRules(ef, util.GetClusterScopedName(ipv4HashedAS), util.GetClusterScopedName(ipv6HashedAS), types.EgressFirewallStartPriority); err != nil {
 		return err
 	}
 	oc.egressFirewalls.Store(egressFirewall.Namespace, ef)

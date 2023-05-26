@@ -84,7 +84,7 @@ func newInternalAdminPBRPolicy(controller *Controller, apbr *adminpbrapi.AdminPo
 		network:           apbr.Spec.NetworkAttachmentName,
 		nextHopIPs:        policy.NextHop.NextHopIPs,
 		to:                policy.To,
-		logicalRouterName: controller.nadInfo.Prefix + types.OVNClusterRouter,
+		logicalRouterName: util.GetClusterScopedName(controller.nadInfo.Prefix + types.OVNClusterRouter),
 		addressSetErrors:  make(map[string]string),
 	}
 
@@ -454,18 +454,19 @@ func (oc *Controller) applyAdminPBR(adminpbr *adminpbrapi.AdminPolicyBasedRoute,
 		Action:   nbdb.LogicalRouterPolicyActionReroute,
 	}
 	// add external IDs
-	lrp.ExternalIDs = map[string]string{
+	lrp.ExternalIDs = util.ExternalIDsForCluster(map[string]string{
 		types.ExternalIDK8sOwner:     ownerVal.String(),
 		types.OvnK8sPrefix + "/kind": util.GroupKindOf(adminpbr),
 		types.ExternalIDHash:         policy.hash,
 		types.ExternalIDNetAttachDef: adminpbr.Spec.NetworkAttachmentName,
 		types.ExternalIDRouter:       policy.logicalRouterName,
-	}
+	})
 
 	p := func(item *nbdb.LogicalRouterPolicy) bool {
 		return item.Priority == RoutePolicyPriorityAdminPBR && item.Match == match &&
 			item.ExternalIDs[types.ExternalIDK8sOwner] == ownerVal.String() &&
-			item.ExternalIDs[types.ExternalIDNetAttachDef] == adminpbr.Spec.NetworkAttachmentName
+			item.ExternalIDs[types.ExternalIDNetAttachDef] == adminpbr.Spec.NetworkAttachmentName &&
+			util.HasExternalIDsForCluster(item.ExternalIDs)
 	}
 
 	err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(oc.mc.nbClient, policy.logicalRouterName, &lrp, p,
@@ -824,7 +825,10 @@ func (oc *Controller) cleanupLogicalRouterPolicy(adminPBRName string, policy *in
 	}
 	// remove logical route policy
 	if err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.mc.nbClient, policy.logicalRouterName, func(item *nbdb.LogicalRouterPolicy) bool {
-		return item.Priority == RoutePolicyPriorityAdminPBR && item.ExternalIDs[types.ExternalIDK8sOwner] == prefixedAdminPBRName && item.ExternalIDs[types.ExternalIDHash] == policy.hash
+		return item.Priority == RoutePolicyPriorityAdminPBR &&
+			item.ExternalIDs[types.ExternalIDK8sOwner] == prefixedAdminPBRName &&
+			item.ExternalIDs[types.ExternalIDHash] == policy.hash &&
+			util.HasExternalIDsForCluster(item.ExternalIDs)
 	}); err != nil {
 		return fmt.Errorf("failed to delete adminpbr %s, err: %v", prefixedAdminPBRName, err)
 	}
@@ -836,8 +840,8 @@ func (oc *Controller) cleanupLogicalRouterPolicy(adminPBRName string, policy *in
 }
 
 func (oc *Controller) deleteLogicalRouterPoliciesByPriority(priority int) error {
-	return libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.mc.nbClient, types.OVNClusterRouter, func(item *nbdb.LogicalRouterPolicy) bool {
-		return item.Priority == priority
+	return libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.mc.nbClient, util.GetClusterScopedName(types.OVNClusterRouter), func(item *nbdb.LogicalRouterPolicy) bool {
+		return item.Priority == priority && util.HasExternalIDsForCluster(item.ExternalIDs)
 	})
 }
 

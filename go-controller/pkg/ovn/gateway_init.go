@@ -572,15 +572,10 @@ func (oc *Controller) createPolicyBasedRoutes(match, priority, nexthops string) 
 		Nexthops: []string{nexthops},
 		Action:   nbdb.LogicalRouterPolicyActionReroute,
 	}
-	if util.IsClusterScoped() {
-		lrp.ExternalIDs = util.CreateClusterScopedExternalIDs()
-	}
+	lrp.ExternalIDs = util.CreateClusterScopedExternalIDs()
 
 	p := func(item *nbdb.LogicalRouterPolicy) bool {
-		if util.IsClusterScoped() {
-			return item.Priority == lrp.Priority && item.Match == lrp.Match && util.HasExternalIDsForCluster(item.ExternalIDs)
-		}
-		return item.Priority == lrp.Priority && item.Match == lrp.Match
+		return item.Priority == lrp.Priority && item.Match == lrp.Match && util.HasExternalIDsForCluster(item.ExternalIDs)
 	}
 
 	err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(oc.mc.nbClient, util.GetOVNClusterRouterName(), &lrp, p,

@@ -98,7 +98,7 @@ func getVipKey(vip *virtualipv1beta1.VirtualIP) string {
 }
 
 func getVirtualPortName(namespace, name string) string {
-	return fmt.Sprintf("%s_%s_%s", ovntypes.VirtualPortPrefix, namespace, name)
+	return util.GetClusterScopedName(fmt.Sprintf("%s_%s_%s", ovntypes.VirtualPortPrefix, namespace, name))
 }
 
 func getVirtualIPLockKey(nadName, ipAddress string) string {
@@ -121,6 +121,9 @@ func (oc *Controller) recordVirtualIPEvent(reason string, err string, virtualIP 
 }
 
 func (oc *Controller) updateVIPActivePodInstance(pb *sbdb.PortBinding) error {
+	if !util.HasExternalIDsForCluster(pb.ExternalIDs) {
+		return nil
+	}
 	virtualIPNadName := pb.ExternalIDs[ovntypes.ExternalIDNetAttachDef]
 	virtualIPAddress := pb.Options[optionsVirtualIP]
 	unlock := util.LockByKey.Acquire(getVirtualIPLockKey(virtualIPNadName, virtualIPAddress))
@@ -638,7 +641,7 @@ func (oc *Controller) isVirtualIPAddressValid(vip *virtualIP) (bool, error) {
 }
 
 func (oc *Controller) createVIP(vip *virtualIP) error {
-	ls, err := oc.waitForNodeLogicalSwitch(oc.nadInfo.Prefix + ovntypes.OvnLayer2Switch)
+	ls, err := oc.waitForNodeLogicalSwitch(util.GetClusterScopedName(oc.nadInfo.Prefix + ovntypes.OvnLayer2Switch))
 	if err != nil {
 		return err
 	}
@@ -655,15 +658,17 @@ func (oc *Controller) createVIP(vip *virtualIP) error {
 		return nil
 	}
 
+	externalIDs := util.ExternalIDsForCluster(map[string]string{
+		ovntypes.ExternalIDNamespace:    vip.namespace,
+		ovntypes.ExternalIDName:         vip.name,
+		ovntypes.ExternalIDNetAttachDef: vip.nadName,
+	})
+
 	// port doesn't exist and need to create one
 	lsp = &nbdb.LogicalSwitchPort{
-		Name: vip.logicalPortName,
-		Type: ovntypes.VirtualPortType,
-		ExternalIDs: map[string]string{
-			ovntypes.ExternalIDNamespace:    vip.namespace,
-			ovntypes.ExternalIDName:         vip.name,
-			ovntypes.ExternalIDNetAttachDef: vip.nadName,
-		},
+		Name:        vip.logicalPortName,
+		Type:        ovntypes.VirtualPortType,
+		ExternalIDs: externalIDs,
 		// setting this intially as we are using lock based on (nadName/VipAddress)
 		Options: map[string]string{
 			optionsVirtualIP: vip.vipAddress,
@@ -791,7 +796,7 @@ func (oc *Controller) deleteVirtualIP(virtIP *virtualipv1beta1.VirtualIP) error 
 	// remove filtered namespace pod handler
 	oc.mc.watchFactory.RemovePodHandler(vip.podHandler)
 
-	switchName := oc.nadInfo.Prefix + ovntypes.OvnLayer2Switch
+	switchName := util.GetClusterScopedName(oc.nadInfo.Prefix + ovntypes.OvnLayer2Switch)
 	lsp := nbdb.LogicalSwitchPort{Name: vip.logicalPortName}
 	sw := nbdb.LogicalSwitch{Name: switchName}
 	err := libovsdbops.DeleteLogicalSwitchPorts(oc.mc.nbClient, &sw, &lsp)
@@ -855,7 +860,7 @@ func (oc *Controller) syncVirtualIPPods(vip *virtualIP, vipLSP *nbdb.LogicalSwit
 
 func (oc *Controller) syncVirtualIPsPeriodic() {
 	klog.Infof("Starting VirtualIP sync for network %s", oc.nadInfo.NetName)
-	switchName := oc.nadInfo.Prefix + ovntypes.OvnLayer2Switch
+	switchName := util.GetClusterScopedName(oc.nadInfo.Prefix + ovntypes.OvnLayer2Switch)
 	sw := &nbdb.LogicalSwitch{Name: switchName}
 	ls, err := libovsdbops.GetLogicalSwitch(oc.mc.nbClient, sw)
 	if err != nil {
@@ -864,7 +869,7 @@ func (oc *Controller) syncVirtualIPsPeriodic() {
 	}
 
 	lookupFunc := func(item *nbdb.LogicalSwitchPort) bool {
-		return item.Type == ovntypes.VirtualPortType
+		return item.Type == ovntypes.VirtualPortType && util.HasExternalIDsForCluster(item.ExternalIDs)
 	}
 	vipLSPList, err := libovsdbops.FindLogicalSwitchPortsWithPredicate(oc.mc.nbClient, sw, lookupFunc)
 	if err != nil {
