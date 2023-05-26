@@ -234,6 +234,7 @@ func (c *Controller) handleErr(err error, key interface{}) {
 // All Load_Balancer objects are tagged with their owner, so it's easy to find stale objects.
 func (c *Controller) syncService(key string) error {
 	startTime := time.Now()
+
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		return err
@@ -309,7 +310,7 @@ func (c *Controller) syncService(key string) error {
 	// Short-circuit if nothing has changed
 	c.alreadyAppliedLock.Lock()
 	existingLBs, ok := c.alreadyApplied[key]
-	c.alreadyAppliedLock.Unlock()
+
 	if ok && ovnlb.LoadBalancersEqualNoUUID(existingLBs, lbs) {
 		klog.V(3).Infof("Skipping no-op change for service %s", key)
 	} else {
@@ -319,14 +320,13 @@ func (c *Controller) syncService(key string) error {
 		// Note: this may fail if a node was deleted between listing nodes and applying.
 		// If so, this will fail and we will resync.
 		if err := ovnlb.EnsureLBs(c.nbClient, service, lbs); err != nil {
+			// We need to release lock before returning so a new syncService worker can grab the lock
+			c.alreadyAppliedLock.Unlock()
 			return fmt.Errorf("failed to ensure service %s load balancers: %w", key, err)
 		}
-
-		c.alreadyAppliedLock.Lock()
 		c.alreadyApplied[key] = lbs
-		c.alreadyAppliedLock.Unlock()
 	}
-
+	c.alreadyAppliedLock.Unlock()
 	if !c.repair.legacyLBsDeleted() {
 		if err := deleteServiceFromLegacyLBs(c.nbClient, service); err != nil {
 			klog.Warningf("Failed to delete legacy vips for service %s: %v", key)

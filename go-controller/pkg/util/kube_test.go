@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/core/v1"
@@ -708,4 +710,28 @@ func TestExternalIDsForObject(t *testing.T) {
 			"k8s.ovn.org/kind":  "Service",
 			"k8s.ovn.org/owner": "ns/svc-ab23",
 		})
+}
+
+func TestGetOVNClusterRouterName(t *testing.T) {
+	var tests = []struct {
+		clustername string
+		prefixes    []string
+		want        string
+	}{
+		{"", nil, types.OVNClusterRouter},
+		{"A", nil, "CLUSTER_A_" + types.OVNClusterRouter},
+		{"TenantA", nil, "CLUSTER_TenantA_" + types.OVNClusterRouter},
+		{"TenantA", []string{""}, "CLUSTER_TenantA_" + types.OVNClusterRouter},
+		{"TenantA", []string{"primary_"}, "CLUSTER_TenantA_primary_" + types.OVNClusterRouter},
+		{"TenantA", []string{"primary_", "secondary_"}, "CLUSTER_TenantA_primary_secondary_" + types.OVNClusterRouter},
+	}
+	for _, test := range tests {
+		SetClusterName(test.clustername)
+		if GetClusterName() != test.clustername {
+			t.Errorf("Got: %s Want: %s ", GetClusterName(), test.clustername)
+		}
+		if got := GetOVNClusterRouterName(test.prefixes...); got != test.want {
+			t.Errorf("cluster_name: %s, GetOVNClusterRouterName(%q) = %v,  Want: %v", test.clustername, test.prefixes, got, test.want)
+		}
+	}
 }

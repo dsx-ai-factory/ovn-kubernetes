@@ -3283,8 +3283,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 							UUID: ovntypes.GWRouterPrefix + node.Name + "-UUID",
 						},
 						&nbdb.LogicalSwitchPort{
-							UUID: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName + "UUID",
-							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName,
+							UUID: util.GetClusterScopedName(types.EXTSwitchToGWRouterPrefix+types.GWRouterPrefix+nodeName) + "UUID",
+							Name: util.GetClusterScopedName(types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName),
 							Type: "router",
 							Options: map[string]string{
 								"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + nodeName,
@@ -3364,8 +3364,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						UUID: ovntypes.GWRouterPrefix + node.Name + "-UUID",
 					},
 					&nbdb.LogicalSwitchPort{
-						UUID: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName + "UUID",
-						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName,
+						UUID: util.GetClusterScopedName(types.EXTSwitchToGWRouterPrefix+types.GWRouterPrefix+nodeName) + "UUID",
+						Name: util.GetClusterScopedName(types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName),
 						Type: "router",
 						Options: map[string]string{
 							"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + nodeName,

@@ -122,8 +122,14 @@ func hashedPortGroup(s string) string {
 // oldName: <namespace>_<policyname> (lucky winner will be first policy created in the namespace)
 // newName: <namespace>_egressDefaultDeny OR <namespace>_ingressDefaultDeny
 func (oc *Controller) updateStaleDefaultDenyACLNames(npType knet.PolicyType, gressSuffix string) error {
+	if util.IsClusterScoped() { // We return early if we cluster name is not empty.
+		return nil
+	}
 	cleanUpDefaultDeny := make(map[string][]*nbdb.ACL)
 	p := func(item *nbdb.ACL) bool {
+		if !util.HasExternalIDsForCluster(item.ExternalIDs) {
+			return false
+		}
 		netName, ok := item.ExternalIDs["network_name"]
 		if oc.nadInfo.IsSecondary {
 			if !ok || netName != oc.nadInfo.NetName {
@@ -151,8 +157,8 @@ func (oc *Controller) updateStaleDefaultDenyACLNames(npType knet.PolicyType, gre
 		newName := namespacePortGroupACLName(namespace, "", gressSuffix)
 		if len(aclList) > 1 {
 			// this should never be the case but delete everything except 1st ACL
-			ingressPGName := oc.nadInfo.Prefix + defaultDenyPortGroup(namespace, ingressDefaultDenySuffix)
-			egressPGName := oc.nadInfo.Prefix + defaultDenyPortGroup(namespace, egressDefaultDenySuffix)
+			ingressPGName := util.GetClusterScopedName(oc.nadInfo.Prefix + defaultDenyPortGroup(namespace, ingressDefaultDenySuffix))
+			egressPGName := util.GetClusterScopedName(oc.nadInfo.Prefix + defaultDenyPortGroup(namespace, egressDefaultDenySuffix))
 			err := libovsdbops.DeleteACLs(oc.mc.nbClient, []string{ingressPGName, egressPGName}, nil, aclList[1:]...)
 			if err != nil {
 				return fmt.Errorf("failed to delete stale default deny acls for namespace %s network %s: %v", namespace, oc.nadInfo.NetName, err)
@@ -192,7 +198,7 @@ func (oc *Controller) syncNetworkPoliciesRetriableCommon(expectedPolicies map[st
 		if policyName != "" && !expectedPolicies[namespaceName][policyName] {
 			// policy doesn't exist on k8s. Delete the port group
 			portGroupName := fmt.Sprintf("%s_%s", namespaceName, policyName)
-			hashedLocalPortGroup := oc.nadInfo.Prefix + hashedPortGroup(portGroupName)
+			hashedLocalPortGroup := util.GetClusterScopedName(oc.nadInfo.Prefix + hashedPortGroup(portGroupName))
 			stalePGs = append(stalePGs, hashedLocalPortGroup)
 			// delete the address sets for this old policy from OVN
 			if err := oc.addressSetFactory.DestroyAddressSetInBackingStore(addrSetName); err != nil {
@@ -218,6 +224,9 @@ func (oc *Controller) syncNetworkPoliciesRetriableCommon(expectedPolicies map[st
 	// we'd still need to update its apply-after-lb=true option, so that the ACL priorities can apply properly;
 	// If acl's option["apply-after-lb"] is already set to true, then its direction should be also correct.
 	p := func(item *nbdb.ACL) bool {
+		if !util.HasExternalIDsForCluster(item.ExternalIDs) {
+			return false
+		}
 		netName, ok := item.ExternalIDs["network_name"]
 		if oc.nadInfo.IsSecondary {
 			if !ok || netName != oc.nadInfo.NetName {
@@ -264,6 +273,9 @@ func (oc *Controller) syncNetworkPoliciesRetriableCommon(expectedPolicies map[st
 	// remove stale egress and ingress allow arp ACLs that were leftover as a result
 	// of ACL migration for "ARPallowPolicy" when the match changed from "arp" to "(arp || nd)"
 	p = func(item *nbdb.ACL) bool {
+		if !util.HasExternalIDsForCluster(item.ExternalIDs) {
+			return false
+		}
 		netName, ok := item.ExternalIDs["network_name"]
 		if oc.nadInfo.IsSecondary {
 			if !ok || netName != oc.nadInfo.NetName {
@@ -311,8 +323,8 @@ func addAllowACLFromNode(nodeName string, mgmtPortIP net.IP, nbClient libovsdbcl
 		ipFamily = "ip6"
 	}
 	match := fmt.Sprintf("%s.src==%s", ipFamily, mgmtPortIP.String())
-
-	nodeACL := libovsdbops.BuildACL("", nbdb.ACLDirectionToLport, types.DefaultAllowPriority, match, "allow-related", "", "", false, nil, nil)
+	externalIDs := util.CreateClusterScopedExternalIDs()
+	nodeACL := libovsdbops.BuildACL("", nbdb.ACLDirectionToLport, types.DefaultAllowPriority, match, "allow-related", "", "", false, externalIDs, nil)
 
 	ops, err := libovsdbops.CreateOrUpdateACLsOps(nbClient, nil, nodeACL)
 	if err != nil {
@@ -335,7 +347,7 @@ func addAllowACLFromNode(nodeName string, mgmtPortIP net.IP, nbClient libovsdbcl
 // portGroupName is the portGroupName without network prefix
 func getACLMatch(portGroupName, match string, policyType knet.PolicyType, netNameInfo util.NetNameInfo) string {
 	var aclMatch string
-	portGroupName = netNameInfo.Prefix + portGroupName
+	portGroupName = util.GetClusterScopedName(netNameInfo.Prefix + portGroupName)
 	if policyType == knet.PolicyTypeIngress {
 		aclMatch = "outport == @" + portGroupName
 	} else {
@@ -353,6 +365,7 @@ func namespacePortGroupACLName(namespace, portGroup, name string) string {
 	if policyNamespace == "" {
 		policyNamespace = portGroup
 	}
+	policyNamespace = util.GetClusterScopedName(policyNamespace)
 	if name == "" {
 		return policyNamespace
 
@@ -380,6 +393,7 @@ func buildACL(namespace, portGroup, name, direction string, priority int, match,
 			"apply-after-lb": "true",
 		}
 	}
+	externalIds = util.ExternalIDsForCluster(externalIds)
 
 	return libovsdbops.BuildACL(aclName, direction, priority, match, action, meter, severity, log, externalIds, options)
 }
@@ -387,11 +401,12 @@ func buildACL(namespace, portGroup, name, direction string, priority int, match,
 // hashName is the portGroupName without network prefix
 func buildPortGroup(hashName, name string, ports []*nbdb.LogicalSwitchPort, acls []*nbdb.ACL, netNameInfo util.NetNameInfo) *nbdb.PortGroup {
 	var externalIds map[string]string
-	pgName := netNameInfo.Prefix + hashName
+	pgName := util.GetClusterScopedName(netNameInfo.Prefix + hashName)
 	externalIds = map[string]string{"name": name}
 	if netNameInfo.IsSecondary {
 		externalIds["network_name"] = netNameInfo.NetName
 	}
+	externalIds = util.ExternalIDsForCluster(externalIds)
 	return libovsdbops.BuildPortGroup(pgName, name, ports, acls, externalIds)
 }
 
@@ -464,7 +479,7 @@ func (oc *Controller) deleteDefaultDenyPGAndACLs(namespace, policy string, nsInf
 	egressDenyACL, egressAllowACL := buildDenyACLs(namespace, policy, egressPGName, aclLogging, knet.PolicyTypeEgress, oc.nadInfo)
 	aclsToBeDeleted = append(aclsToBeDeleted, egressDenyACL, egressAllowACL)
 
-	ops, err := libovsdbops.DeletePortGroupsOps(oc.mc.nbClient, nil, oc.nadInfo.Prefix+ingressPGName, oc.nadInfo.Prefix+egressPGName)
+	ops, err := libovsdbops.DeletePortGroupsOps(oc.mc.nbClient, nil, util.GetClusterScopedName(oc.nadInfo.Prefix+ingressPGName), util.GetClusterScopedName(oc.nadInfo.Prefix+egressPGName))
 	if err != nil {
 		return err
 	}
@@ -612,12 +627,12 @@ func getMulticastACLEgrMatch() string {
 }
 
 // Creates a policy to allow multicast traffic within 'ns':
-// - a port group containing all logical ports associated with 'ns'
-// - one "from-lport" ACL allowing egress multicast traffic from the pods
-//   in 'ns'
-// - one "to-lport" ACL allowing ingress multicast traffic to pods in 'ns'.
-//   This matches only traffic originated by pods in 'ns' (based on the
-//   namespace address set).
+//   - a port group containing all logical ports associated with 'ns'
+//   - one "from-lport" ACL allowing egress multicast traffic from the pods
+//     in 'ns'
+//   - one "to-lport" ACL allowing ingress multicast traffic to pods in 'ns'.
+//     This matches only traffic originated by pods in 'ns' (based on the
+//     namespace address set).
 func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInfo) error {
 	portGroupName := hashedPortGroup(ns)
 
@@ -669,19 +684,20 @@ func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInf
 func deleteMulticastAllowPolicy(nbClient libovsdbclient.Client, ns string, nadInfo *util.NetAttachDefInfo) error {
 	portGroupName := hashedPortGroup(ns)
 	// ACLs referenced by the port group wil be deleted by db if there are no other references
-	err := libovsdbops.DeletePortGroups(nbClient, nadInfo.Prefix+portGroupName)
+	err := libovsdbops.DeletePortGroups(nbClient, util.GetClusterScopedName(nadInfo.Prefix+portGroupName))
 	if err != nil {
-		return fmt.Errorf("failed deleting port group %s: %v", nadInfo.Prefix+portGroupName, err)
+		return fmt.Errorf("failed deleting port group %s: %v", util.GetClusterScopedName(nadInfo.Prefix+portGroupName), err)
 	}
 
 	return nil
 }
 
 // Creates a global default deny multicast policy:
-// - one ACL dropping egress multicast traffic from all pods: this is to
-//   protect OVN controller from processing IP multicast reports from nodes
-//   that are not allowed to receive multicast raffic.
-// - one ACL dropping ingress multicast traffic to all pods.
+//   - one ACL dropping egress multicast traffic from all pods: this is to
+//     protect OVN controller from processing IP multicast reports from nodes
+//     that are not allowed to receive multicast raffic.
+//   - one ACL dropping ingress multicast traffic to all pods.
+//
 // Caller must hold the namespace's namespaceInfo object lock.
 func (oc *Controller) createDefaultDenyMulticastPolicy() error {
 	match := getMulticastACLMatch()
@@ -699,14 +715,14 @@ func (oc *Controller) createDefaultDenyMulticastPolicy() error {
 		return err
 	}
 
-	ops, err = libovsdbops.AddACLsToPortGroupOps(oc.mc.nbClient, ops, oc.nadInfo.Prefix+types.ClusterPortGroupName, egressACL, ingressACL)
+	ops, err = libovsdbops.AddACLsToPortGroupOps(oc.mc.nbClient, ops, util.GetClusterScopedName(oc.nadInfo.Prefix+types.ClusterPortGroupName), egressACL, ingressACL)
 	if err != nil {
 		return err
 	}
 
 	// Remove old multicastDefaultDeny port group now that all ports
 	// have been added to the clusterPortGroup by WatchPods()
-	ops, err = libovsdbops.DeletePortGroupsOps(oc.mc.nbClient, ops, oc.nadInfo.Prefix+legacyMulticastDefaultDenyPortGroup)
+	ops, err = libovsdbops.DeletePortGroupsOps(oc.mc.nbClient, ops, util.GetClusterScopedName(oc.nadInfo.Prefix+legacyMulticastDefaultDenyPortGroup))
 	if err != nil {
 		return err
 	}
@@ -737,7 +753,7 @@ func (oc *Controller) createDefaultAllowMulticastPolicy() error {
 		return err
 	}
 
-	ops, err = libovsdbops.AddACLsToPortGroupOps(oc.mc.nbClient, ops, oc.nadInfo.Prefix+types.ClusterRtrPortGroupName, egressACL, ingressACL)
+	ops, err = libovsdbops.AddACLsToPortGroupOps(oc.mc.nbClient, ops, util.GetClusterScopedName(oc.nadInfo.Prefix+types.ClusterRtrPortGroupName), egressACL, ingressACL)
 	if err != nil {
 		return err
 	}
@@ -754,7 +770,7 @@ func (oc *Controller) createDefaultAllowMulticastPolicy() error {
 // multicast port group. Caller must hold the namespace's namespaceInfo object
 // lock.
 func podAddAllowMulticastPolicy(nbClient libovsdbclient.Client, ns string, portInfo *lpInfo, netNameInfo util.NetNameInfo) error {
-	portGroupName := netNameInfo.Prefix + hashedPortGroup(ns)
+	portGroupName := util.GetClusterScopedName(netNameInfo.Prefix + hashedPortGroup(ns))
 	return libovsdbops.AddPortsToPortGroup(nbClient, portGroupName, portInfo.uuid)
 }
 
@@ -762,7 +778,7 @@ func podAddAllowMulticastPolicy(nbClient libovsdbclient.Client, ns string, portI
 // namespace's multicast port group. Caller must hold the namespace's
 // namespaceInfo object lock.
 func podDeleteAllowMulticastPolicy(nbClient libovsdbclient.Client, ns string, portUUID string, netNameInfo util.NetNameInfo) error {
-	portGroupName := netNameInfo.Prefix + hashedPortGroup(ns)
+	portGroupName := util.GetClusterScopedName(netNameInfo.Prefix + hashedPortGroup(ns))
 	return libovsdbops.DeletePortsFromPortGroup(nbClient, portGroupName, portUUID)
 }
 
@@ -1011,19 +1027,19 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(policy *knet.NetworkPolicy, 
 
 	var errs []error
 
-	ops, err := libovsdbops.AddPortsToPortGroupOps(oc.mc.nbClient, nil, oc.nadInfo.Prefix+portGroupIngressDenyName, ingressDenyPorts...)
+	ops, err := libovsdbops.AddPortsToPortGroupOps(oc.mc.nbClient, nil, util.GetClusterScopedName(oc.nadInfo.Prefix+portGroupIngressDenyName), ingressDenyPorts...)
 	if err != nil {
 		oc.processLocalPodSelectorDelPods(np, obj)
 		errs = append(errs, err)
 	}
 
-	ops, err = libovsdbops.AddPortsToPortGroupOps(oc.mc.nbClient, ops, oc.nadInfo.Prefix+portGroupEgressDenyName, egressDenyPorts...)
+	ops, err = libovsdbops.AddPortsToPortGroupOps(oc.mc.nbClient, ops, util.GetClusterScopedName(oc.nadInfo.Prefix+portGroupEgressDenyName), egressDenyPorts...)
 	if err != nil {
 		oc.processLocalPodSelectorDelPods(np, obj)
 		errs = append(errs, err)
 	}
 
-	ops, err = libovsdbops.AddPortsToPortGroupOps(oc.mc.nbClient, ops, oc.nadInfo.Prefix+np.portGroupName, policyPorts...)
+	ops, err = libovsdbops.AddPortsToPortGroupOps(oc.mc.nbClient, ops, util.GetClusterScopedName(oc.nadInfo.Prefix+np.portGroupName), policyPorts...)
 	if err != nil {
 		oc.processLocalPodSelectorDelPods(np, obj)
 		errs = append(errs, err)
@@ -1048,13 +1064,13 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(policy *knet.NetworkPolicy, 
 
 	policyPorts, ingressDenyPorts, egressDenyPorts := oc.processLocalPodSelectorDelPods(np, obj)
 
-	ops, err := libovsdbops.DeletePortsFromPortGroupOps(oc.mc.nbClient, nil, oc.nadInfo.Prefix+portGroupIngressDenyName, ingressDenyPorts...)
+	ops, err := libovsdbops.DeletePortsFromPortGroupOps(oc.mc.nbClient, nil, util.GetClusterScopedName(oc.nadInfo.Prefix+portGroupIngressDenyName), ingressDenyPorts...)
 	if err != nil {
 		oc.processLocalPodSelectorSetPods(policy, np, obj)
 		return err
 	}
 
-	ops, err = libovsdbops.DeletePortsFromPortGroupOps(oc.mc.nbClient, ops, oc.nadInfo.Prefix+portGroupEgressDenyName, egressDenyPorts...)
+	ops, err = libovsdbops.DeletePortsFromPortGroupOps(oc.mc.nbClient, ops, util.GetClusterScopedName(oc.nadInfo.Prefix+portGroupEgressDenyName), egressDenyPorts...)
 	if err != nil {
 		oc.processLocalPodSelectorSetPods(policy, np, obj)
 		return err
@@ -1062,7 +1078,7 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(policy *knet.NetworkPolicy, 
 
 	var errs []error
 
-	ops, err = libovsdbops.DeletePortsFromPortGroupOps(oc.mc.nbClient, ops, oc.nadInfo.Prefix+np.portGroupName, policyPorts...)
+	ops, err = libovsdbops.DeletePortsFromPortGroupOps(oc.mc.nbClient, ops, util.GetClusterScopedName(oc.nadInfo.Prefix+np.portGroupName), policyPorts...)
 	if err != nil {
 		oc.processLocalPodSelectorSetPods(policy, np, obj)
 		errs = append(errs, err)
@@ -1266,12 +1282,12 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 		selectedPods = objs
 		policyPorts, ingressDenyPorts, egressDenyPorts := oc.processLocalPodSelectorSetPods(policy, np, selectedPods...)
 		pg.Ports = append(pg.Ports, policyPorts...)
-		ops, err = libovsdbops.AddPortsToPortGroupOps(oc.mc.nbClient, ops, oc.nadInfo.Prefix+portGroupIngressDenyName, ingressDenyPorts...)
+		ops, err = libovsdbops.AddPortsToPortGroupOps(oc.mc.nbClient, ops, util.GetClusterScopedName(oc.nadInfo.Prefix+portGroupIngressDenyName), ingressDenyPorts...)
 		if err != nil {
 			oc.processLocalPodSelectorDelPods(np, selectedPods...)
 			errs = append(errs, err)
 		}
-		ops, err = libovsdbops.AddPortsToPortGroupOps(oc.mc.nbClient, ops, oc.nadInfo.Prefix+portGroupEgressDenyName, egressDenyPorts...)
+		ops, err = libovsdbops.AddPortsToPortGroupOps(oc.mc.nbClient, ops, util.GetClusterScopedName(oc.nadInfo.Prefix+portGroupEgressDenyName), egressDenyPorts...)
 		if err != nil {
 			oc.processLocalPodSelectorDelPods(np, selectedPods...)
 			errs = append(errs, err)
@@ -1513,34 +1529,34 @@ func (oc *Controller) destroyNetworkPolicy(np *networkPolicy, lastPolicy bool) e
 	// we haven't deleted our np from the namespace yet so there should be 1 policy
 	// if there are no more policies left on the namespace
 	if lastPolicy {
-		ops, err = libovsdbops.DeletePortGroupsOps(oc.mc.nbClient, ops, oc.nadInfo.Prefix+ingressPGName)
+		ops, err = libovsdbops.DeletePortGroupsOps(oc.mc.nbClient, ops, util.GetClusterScopedName(oc.nadInfo.Prefix+ingressPGName))
 		if err != nil {
 			return fmt.Errorf("failed to make ops for delete ingress port group: %s, for policy: %s/%s, error: %v",
-				oc.nadInfo.Prefix+ingressPGName, np.namespace, np.name, err)
+				util.GetClusterScopedName(oc.nadInfo.Prefix+ingressPGName), np.namespace, np.name, err)
 		}
-		ops, err = libovsdbops.DeletePortGroupsOps(oc.mc.nbClient, ops, oc.nadInfo.Prefix+egressPGName)
+		ops, err = libovsdbops.DeletePortGroupsOps(oc.mc.nbClient, ops, util.GetClusterScopedName(oc.nadInfo.Prefix+egressPGName))
 		if err != nil {
 			return fmt.Errorf("failed to make ops for delete egress port group: %s, for policy: %s/%s, error: %v",
-				oc.nadInfo.Prefix+egressPGName, np.namespace, np.name, err)
+				util.GetClusterScopedName(oc.nadInfo.Prefix+egressPGName), np.namespace, np.name, err)
 		}
 	} else {
-		ops, err = libovsdbops.DeletePortsFromPortGroupOps(oc.mc.nbClient, ops, oc.nadInfo.Prefix+ingressPGName, ingressDenyPorts...)
+		ops, err = libovsdbops.DeletePortsFromPortGroupOps(oc.mc.nbClient, ops, util.GetClusterScopedName(oc.nadInfo.Prefix+ingressPGName), ingressDenyPorts...)
 		if err != nil {
 			return fmt.Errorf("failed to make ops for ingress port group: %s, for policy: %s/%s, to remove ports: %#v,"+
-				" error: %v", ingressPGName, np.namespace, np.name, ingressDenyPorts, err)
+				" error: %v", util.GetClusterScopedName(oc.nadInfo.Prefix+ingressPGName), np.namespace, np.name, ingressDenyPorts, err)
 		}
-		ops, err = libovsdbops.DeletePortsFromPortGroupOps(oc.mc.nbClient, ops, oc.nadInfo.Prefix+egressPGName, egressDenyPorts...)
+		ops, err = libovsdbops.DeletePortsFromPortGroupOps(oc.mc.nbClient, ops, util.GetClusterScopedName(oc.nadInfo.Prefix+egressPGName), egressDenyPorts...)
 		if err != nil {
 			return fmt.Errorf("failed to make ops for egress port group: %s, for policy: %s/%s, to remove ports: %#v,"+
-				" error: %v", egressPGName, np.namespace, np.name, egressDenyPorts, err)
+				" error: %v", util.GetClusterScopedName(oc.nadInfo.Prefix+egressPGName), np.namespace, np.name, egressDenyPorts, err)
 		}
 	}
 
 	// Delete the port group
-	ops, err = libovsdbops.DeletePortGroupsOps(oc.mc.nbClient, ops, oc.nadInfo.Prefix+np.portGroupName)
+	ops, err = libovsdbops.DeletePortGroupsOps(oc.mc.nbClient, ops, util.GetClusterScopedName(oc.nadInfo.Prefix+np.portGroupName))
 	if err != nil {
 		return fmt.Errorf("failed to make delete network policy port group ops, policy: %s/%s, group name: %s,"+
-			" error: %v", np.namespace, np.name, np.portGroupName, err)
+			" error: %v", np.namespace, np.name, util.GetClusterScopedName(oc.nadInfo.Prefix+np.portGroupName), err)
 	}
 
 	recordOps, txOkCallBack, _, err := metrics.GetConfigDurationRecorder().AddOVN(oc.mc.nbClient, "networkpolicy",
@@ -1722,7 +1738,7 @@ func (oc *Controller) handlePeerNamespaceSelectorOnUpdate(np *networkPolicy, gp 
 		if err != nil {
 			return err
 		}
-		ops, err = libovsdbops.AddACLsToPortGroupOps(oc.mc.nbClient, ops, oc.nadInfo.Prefix+np.portGroupName, acls...)
+		ops, err = libovsdbops.AddACLsToPortGroupOps(oc.mc.nbClient, ops, util.GetClusterScopedName(oc.nadInfo.Prefix+np.portGroupName), acls...)
 		if err != nil {
 			return err
 		}

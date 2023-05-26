@@ -163,8 +163,9 @@ var (
 	MetricsScrapeInterval int
 	// OvnKubeNode holds ovnkube-node parsed config file parameters and command-line overrides
 	OvnKubeNode = OvnKubeNodeConfig{
-		Mode:         types.NodeModeFull,
-		IsPrimaryDPU: true,
+		Mode:             types.NodeModeFull,
+		IsPrimaryDPU:     true,
+		MgmtPortIntfName: types.K8sMgmtIntfName,
 	}
 )
 
@@ -321,9 +322,12 @@ type KubernetesConfig struct {
 	HostNetworkNamespace string `gcfg:"host-network-namespace"`
 	SkipRequestedChassis bool
 	PlatformType         string `gcfg:"platform-type"`
+	ClusterName          string `gcfg:"clusterName"`
 
 	// CompatMetricsBindAddress is overridden by the corresponding option in MetricsConfig
 	CompatMetricsBindAddress string `gcfg:"metrics-bind-address"`
+	// CompatMetricsPprofBindAddress is overridden by the corresponding option in MetricsConfig
+	CompatMetricsPprofBindAddress string `gcfg:"metrics-pprof-bind-address"`
 	// CompatMetricsEnablePprof is overridden by the corresponding option in MetricsConfig
 	CompatMetricsEnablePprof bool `gcfg:"metrics-enable-pprof"`
 	// CompatMetricsNodeServerPrivKey is overridden by the corresponding option in MetricsConfig
@@ -335,6 +339,7 @@ type KubernetesConfig struct {
 // MetricsConfig holds Prometheus metrics-related parameters.
 type MetricsConfig struct {
 	BindAddress       string `gcfg:"bind-address"`
+	PprofBindAddress  string `gcfg:"pprof-bind-address"`
 	ExportOVSMetrics  bool   `gcfg:"export-ovs-metrics"`
 	EnablePprof       bool   `gcfg:"enable-pprof"`
 	NodeServerPrivKey string `gcfg:"node-server-privkey"`
@@ -377,6 +382,12 @@ type GatewayConfig struct {
 	EgressGWInterface string `gcfg:"egw-interface"`
 	// NextHop is the gateway IP address of Interface; will be autodetected if not given
 	NextHop string `gcfg:"next-hop"`
+	// PhysNetNameKey is the key name used to map to an OVS bridge that provides
+	// access to physical/external network. Default is  "physnet".
+	PhysNetNameKey string `gcfg:"physnetname-key"`
+	// UplinkPort is the port used as the uplink on the gateway interface bridge.
+	// Used in scenarios when it cannot be auto detected.
+	UplinkPort string `gcfg:"uplink-port"`
 	// VLANID is the option VLAN tag to apply to gateway traffic for "shared" mode
 	VLANID uint `gcfg:"vlan-id"`
 	// NodeportEnable sets whether to provide Kubernetes NodePort service or not
@@ -439,8 +450,10 @@ type HybridOverlayConfig struct {
 // OvnKubeNodeConfig holds ovnkube-node configurations
 type OvnKubeNodeConfig struct {
 	Mode                 string `gcfg:"mode"`
+	MgmtPortIntfName     string `gcfg:"mgmt-port-netdev-intf-name"`
 	MgmtPortNetdev       string `gcfg:"mgmt-port-netdev"`
-	DisableOVNIfaceIdVer bool   `gcfg:"disable-ovn-iface-id-ver"`
+	MgmtPortRepresentor  string
+	DisableOVNIfaceIdVer bool `gcfg:"disable-ovn-iface-id-ver"`
 	IsPrimaryDPU         bool
 	XDPSFRep             string `gcfg:"ovn-xdp-sfrep"`
 	XDPVeth              string `gcfg:"ovn-xdp-veth"`
@@ -1021,6 +1034,14 @@ var K8sFlags = []cli.Flag{
 		Destination: &cliConfig.Kubernetes.PlatformType,
 		Value:       Kubernetes.PlatformType,
 	},
+	&cli.StringFlag{
+		Name: "cluster-name",
+		Usage: "name of the cluster, used to identify this cluster in multi cluster setup. " +
+			"should be unique in a multi cluster environment with shared OVN DB.",
+		Destination: &cliConfig.Kubernetes.ClusterName,
+		Value:       Kubernetes.ClusterName,
+		Required:    false,
+	},
 }
 
 // MetricsFlags capture metrics-related options
@@ -1029,6 +1050,11 @@ var MetricsFlags = []cli.Flag{
 		Name:        "metrics-bind-address",
 		Usage:       "The IP address and port for the OVN K8s metrics server to serve on (set to 0.0.0.0 for all IPv4 interfaces)",
 		Destination: &cliConfig.Metrics.BindAddress,
+	},
+	&cli.StringFlag{
+		Name:        "metrics-pprof-bind-address",
+		Usage:       "The IP address and port for the OVN K8s pprof server to serve on (set to 0.0.0.0 for all IPv4 interfaces)",
+		Destination: &cliConfig.Metrics.PprofBindAddress,
 	},
 	&cli.BoolFlag{
 		Name:        "export-ovs-metrics",
@@ -1172,6 +1198,18 @@ var OVNGatewayFlags = []cli.Flag{
 			"\"init-gateways\"",
 		Destination: &cliConfig.Gateway.NextHop,
 	},
+	&cli.StringFlag{
+		Name: "gateway-physnetname-key",
+		Usage: "The key name used to map to an OVS bridge that provides " +
+			"access to physical/external network. Default is  `physnet`",
+		Destination: &cliConfig.Gateway.PhysNetNameKey,
+	},
+	&cli.StringFlag{
+		Name: "gateway-uplink-port",
+		Usage: "The port to be used as the uplink on the gateway interface bridge." +
+			"Used in scenarios when it cannot be auto detected.",
+		Destination: &cliConfig.Gateway.UplinkPort,
+	},
 	&cli.UintFlag{
 		Name: "gateway-vlanid",
 		Usage: "The VLAN on which the external network is available. " +
@@ -1281,6 +1319,12 @@ var OvnKubeNodeFlags = []cli.Flag{
 		Usage:       "ovnkube-node operating mode full(default), dpu, dpu-host",
 		Value:       OvnKubeNode.Mode,
 		Destination: &cliConfig.OvnKubeNode.Mode,
+	},
+	&cli.StringFlag{
+		Name:        "ovnkube-node-mgmt-port-intf-name",
+		Usage:       "name of the interface to be used as the management port. Default is ovn-k8s-mp0",
+		Value:       OvnKubeNode.MgmtPortIntfName,
+		Destination: &cliConfig.OvnKubeNode.MgmtPortIntfName,
 	},
 	&cli.StringFlag{
 		Name: "ovnkube-node-mgmt-port-netdev",
@@ -1548,6 +1592,9 @@ func buildMetricsConfig(cli, file *config) error {
 	}
 	if Kubernetes.CompatMetricsNodeServerCert != "" {
 		Metrics.NodeServerCert = Kubernetes.CompatMetricsNodeServerCert
+	}
+	if Kubernetes.CompatMetricsPprofBindAddress != "" {
+		Metrics.PprofBindAddress = Kubernetes.CompatMetricsPprofBindAddress
 	}
 
 	Metrics.EnablePprof = Kubernetes.CompatMetricsEnablePprof
@@ -2273,11 +2320,6 @@ func buildOvnKubeNodeConfig(ctx *cli.Context, cli, file *config) error {
 	if OvnKubeNode.Mode == types.NodeModeDPU || OvnKubeNode.Mode == types.NodeModeDPUHost {
 		if OvnKubeNode.MgmtPortNetdev == "" {
 			return fmt.Errorf("ovnkube-node-mgmt-port-netdev must be provided")
-		}
-	} else {
-		if OvnKubeNode.MgmtPortNetdev != "" {
-			return fmt.Errorf("ovnkube-node-mgmt-port-netdev is not supported with ovnkube-node mode %s",
-				OvnKubeNode.Mode)
 		}
 	}
 

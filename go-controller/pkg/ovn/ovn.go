@@ -796,6 +796,9 @@ func (oc *Controller) CleanStaleNetworkPolicy() {
 	// ACL entries from the database
 	// want ACLs configured that don't have l4fused key and that have l4Match set (but not to None)
 	pACL := func(item *nbdb.ACL) bool {
+		if !util.HasExternalIDsForCluster(item.ExternalIDs) {
+			return false
+		}
 		netName, ok := item.ExternalIDs["network_name"]
 		if oc.nadInfo.IsSecondary {
 			if !ok || netName != oc.nadInfo.NetName {
@@ -828,7 +831,7 @@ func (oc *Controller) CleanStaleNetworkPolicy() {
 			nsName := staleACL.ExternalIDs[namespaceACLExtIdKey]
 			policyName := staleACL.ExternalIDs[policyACLExtIdKey]
 			pgName := fmt.Sprintf("%s_%s", nsName, policyName)
-			pgName = oc.nadInfo.NetNameInfo.Prefix + hashedPortGroup(pgName)
+			pgName = util.GetClusterScopedName(oc.nadInfo.NetNameInfo.Prefix + hashedPortGroup(pgName))
 			aclDesc := fmt.Sprintf("stale ACL %s/%s/%s in port group %s", staleACL.UUID, nsName, policyName, pgName)
 			klog.V(5).Infof("About to delete %s", aclDesc)
 			ops, err := libovsdbops.DeleteACLsFromPortGroupOps(oc.mc.nbClient, nil, pgName, staleACL)
@@ -1178,7 +1181,7 @@ func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.
 		// remove hostsubnet annoation for this network
 		for _, node := range existingNodes.Items {
 			if noHostSubnet(&node) {
-				oc.lsManager.DeleteNode(nadInfo.Prefix + node.Name)
+				oc.lsManager.DeleteNode(util.GetClusterScopedName(nadInfo.Prefix + node.Name))
 				continue
 			}
 			err := oc.deleteNodeLogicalNetwork(node.Name)
@@ -1186,7 +1189,7 @@ func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.
 				klog.Errorf("Failed to delete node %s for network %s: %v", node.Name, oc.nadInfo.NetName, err)
 			}
 			_ = oc.updateNodeAnnotationWithRetry(node.Name, []*net.IPNet{})
-			oc.lsManager.DeleteNode(nadInfo.Prefix + node.Name)
+			oc.lsManager.DeleteNode(util.GetClusterScopedName(nadInfo.Prefix + node.Name))
 		}
 	}
 	mc.allOvnControllers.Delete(netconf.Name)
@@ -1355,17 +1358,37 @@ func noHostSubnet(node *kapi.Node) bool {
 	return nodeSelector.Matches(labels.Set(node.Labels))
 }
 
+// nonHostNetworkPodsExists verifies if node has pods non host network IP
+func nonHostNetworkPodsExists(kube kube.Interface, node *kapi.Node) bool {
+	nodeName := node.ObjectMeta.Name
+	pods, err := kube.GetPodsFiltered("", "spec.nodeName="+nodeName)
+	if err != nil {
+		klog.Errorf("nonHostNetworkPodsExists: failed to get pods for Node '%s': %+v", nodeName, err)
+		return true
+	}
+	for _, pod := range pods.Items {
+		if !pod.Spec.HostNetwork {
+			return true
+		}
+	}
+	return false
+}
+
 // shouldUpdate() determines if the ovn-kubernetes plugin should update the state of the node.
 // ovn-kube should not perform an update if it does not assign a hostsubnet, or if you want to change
 // whether or not ovn-kubernetes assigns a hostsubnet
-func shouldUpdate(node, oldNode *kapi.Node) (bool, error) {
+func shouldUpdate(kube kube.Interface, node, oldNode *kapi.Node) (bool, error) {
 	newNoHostSubnet := noHostSubnet(node)
 	oldNoHostSubnet := noHostSubnet(oldNode)
 
 	if oldNoHostSubnet && newNoHostSubnet {
 		return false, nil
 	} else if oldNoHostSubnet && !newNoHostSubnet {
-		return false, fmt.Errorf("error updating node %s, cannot remove assigned hostsubnet, please delete node and recreate.", node.Name)
+		if nonHostNetworkPodsExists(kube, node) {
+			// if node has pods with non host network IP, then updating such node will be non-trivial task,
+			// hence, return error
+			return false, fmt.Errorf("error updating node %s, cannot remove assigned hostsubnet, please delete node and recreate.", node.Name)
+		}
 	} else if !oldNoHostSubnet && newNoHostSubnet {
 		return false, fmt.Errorf("error updating node %s, cannot assign a hostsubnet to already created node, please delete node and recreate.", node.Name)
 	}

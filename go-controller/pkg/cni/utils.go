@@ -102,7 +102,7 @@ func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, k
 
 // PodAnnotation2PodInfo creates PodInterfaceInfo from Pod annotations and additional attributes
 func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, podUID string,
-	vfNetdevice, nadName string, netNameInfo util.NetNameInfo) (*PodInterfaceInfo, error) {
+	netdevice, nadName string, netNameInfo util.NetNameInfo) (*PodInterfaceInfo, error) {
 	annoNadKeyName := util.GetAnnotationKeyFromNadName(nadName, !netNameInfo.IsSecondary)
 	podAnnotSt, err := util.UnmarshalPodAnnotation(podAnnotation, annoNadKeyName)
 	if err != nil {
@@ -127,9 +127,12 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, po
 		PodUID:               podUID,
 		EnableUDPAggregation: config.Default.EnableUDPAggregation,
 		NetNameInfo:          netNameInfo,
-		VfNetdevName:         vfNetdevice,
+		NetdevName:           netdevice,
 		NadName:              nadName,
 		SkipSpoofCheck:       util.SkipSpoofCheckForNAD(podAnnotation, annoNadKeyName),
+		ClusterName:          util.GetClusterName(),
+		ClusterNamePrefix:    util.GetClusterNamePrefix(),
+		OvnKubeMode:          config.OvnKubeNode.Mode,
 	}
 	return podInterfaceInfo, nil
 }

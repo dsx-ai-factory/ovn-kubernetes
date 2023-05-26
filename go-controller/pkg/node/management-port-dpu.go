@@ -14,52 +14,64 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-type managementPortDPU struct {
+type managementPortRepresentor struct {
 	nodeName    string
 	hostSubnets []*net.IPNet
-	vfRepName   string
+	repName     string
 }
 
-// newManagementPortDPU creates a new managementPortDPU
-func newManagementPortDPU(nodeName string, hostSubnets []*net.IPNet) ManagementPort {
-	return &managementPortDPU{
+// newManagementPortRepresentor creates a new managementPortRepresentor
+func newManagementPortRepresentor(nodeName string, hostSubnets []*net.IPNet) ManagementPort {
+	var repName string
+
+	// In ovnkube-node mode DPU representor name stored in MgmtPortNetdev variable
+	if config.OvnKubeNode.MgmtPortRepresentor == "" {
+		repName = config.OvnKubeNode.MgmtPortNetdev
+	} else {
+		repName = config.OvnKubeNode.MgmtPortRepresentor
+	}
+	return &managementPortRepresentor{
 		nodeName:    nodeName,
 		hostSubnets: hostSubnets,
-		vfRepName:   config.OvnKubeNode.MgmtPortNetdev,
+		repName:     repName,
 	}
 }
 
-func (mp *managementPortDPU) Create(nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
+func (mp *managementPortRepresentor) Create(nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
+	k8sMgmtIntfName := config.OvnKubeNode.MgmtPortIntfName
+	if config.OvnKubeNode.MgmtPortRepresentor != "" {
+		k8sMgmtIntfName += "_0"
+	}
 	if !config.OvnKubeNode.IsPrimaryDPU {
 		return &managementPortConfig{}, nil
 	}
-	// Get management port representor name
-	link, err := util.GetNetLinkOps().LinkByName(mp.vfRepName)
+	// Get management port representor by name
+	link, err := util.GetNetLinkOps().LinkByName(mp.repName)
 	if err != nil {
 		// It may fail in case this is not the first run after reboot and management port has already been renamed.
-		link, err = util.GetNetLinkOps().LinkByName(types.K8sMgmtIntfName)
+		link, err = util.GetNetLinkOps().LinkByName(k8sMgmtIntfName)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get link device for %s. %v", mp.vfRepName, err)
+			return nil, fmt.Errorf("failed to get link device for %s. %v", mp.repName, err)
 		}
 	}
 
 	// configure management port: rename, set MTU and set link up and connect representor port to br-int
-	klog.Infof("Create management port dpu: %s", link.Attrs().Name)
-	setName := link.Attrs().Name != types.K8sMgmtIntfName
+	klog.Infof("Create representor management port: %s", link.Attrs().Name)
+	setName := link.Attrs().Name != k8sMgmtIntfName
 	setMTU := link.Attrs().MTU != config.Default.MTU
 
 	if setName || setMTU {
 		if err = util.GetNetLinkOps().LinkSetDown(link); err != nil {
-			return nil, fmt.Errorf("failed to set link down for device %s. %v", mp.vfRepName, err)
+			return nil, fmt.Errorf("failed to set link down for device %s. %v", mp.repName, err)
 		}
 
 		if setName {
-			if err = util.GetNetLinkOps().LinkSetName(link, types.K8sMgmtIntfName); err != nil {
+			if err = util.GetNetLinkOps().LinkSetName(link, k8sMgmtIntfName); err != nil {
 				// NOTE(adrianc): rename may fail with "file exists" in case an interface is already named
-				// ovn-k8s-mp0, this may happen if mgmt-port-netdev changes during deployment. ATM we are
+				// ovn-k8s-mp*, this may happen if mgmt-port-netdev changes during deployment. ATM we are
 				// not handling it.
 				// TODO: handle mgmt-port-netdev change.
-				return nil, fmt.Errorf("failed to set link name for device %s. %v", mp.vfRepName, err)
+				return nil, fmt.Errorf("failed to set link name for device %s. %v", mp.repName, err)
 			}
 		}
 
@@ -74,19 +86,19 @@ func (mp *managementPortDPU) Create(nodeAnnotator kube.Annotator, waiter *startu
 		return nil, fmt.Errorf("failed to set link up for device %s. %v", link.Attrs().Name, err)
 	}
 
-	// Plug management port VF representor to OVS.
+	// Plug management port representor to OVS.
 	stdout, stderr, err := util.RunOVSVsctl(
-		"--", "--may-exist", "add-port", "br-int", types.K8sMgmtIntfName,
-		"--", "set", "interface", types.K8sMgmtIntfName,
-		"external-ids:iface-id="+types.K8sPrefix+mp.nodeName)
+		"--", "--may-exist", "add-port", "br-int", k8sMgmtIntfName,
+		"--", "set", "interface", k8sMgmtIntfName,
+		"external-ids:iface-id="+util.GetClusterScopedName(types.K8sPrefix+mp.nodeName))
 	if err != nil {
 		klog.Errorf("Failed to add port %q to br-int, stdout: %q, stderr: %q, error: %v",
-			types.K8sMgmtIntfName, stdout, stderr, err)
+			k8sMgmtIntfName, stdout, stderr, err)
 		return nil, err
 	}
 
 	mpcfg := &managementPortConfig{
-		ifName: types.K8sMgmtIntfName,
+		ifName: k8sMgmtIntfName,
 		link:   link,
 	}
 
@@ -98,42 +110,43 @@ func (mp *managementPortDPU) Create(nodeAnnotator kube.Annotator, waiter *startu
 	return mpcfg, nil
 }
 
-func (mp *managementPortDPU) checkRepresentorPortHealth(cfg *managementPortConfig) {
+func (mp *managementPortRepresentor) checkRepresentorPortHealth(cfg *managementPortConfig) {
 	// After host reboot, management port link name changes back to default name.
-	link, err := util.GetNetLinkOps().LinkByName(types.K8sMgmtIntfName)
+	k8sMgmtIntfName := config.OvnKubeNode.MgmtPortIntfName
+	link, err := util.GetNetLinkOps().LinkByName(k8sMgmtIntfName)
 	if err != nil {
-		klog.Errorf("Failed to get link device %s, error: %v", types.K8sMgmtIntfName, err)
-		// Get management port representor name
-		link, err := util.GetNetLinkOps().LinkByName(mp.vfRepName)
+		klog.Errorf("Failed to get link device %s, error: %v", k8sMgmtIntfName, err)
+		// Get management port representor by name
+		link, err := util.GetNetLinkOps().LinkByName(mp.repName)
 		if err != nil {
-			klog.Errorf("Failed to get link device %s, error: %v", mp.vfRepName, err)
+			klog.Errorf("Failed to get link device %s, error: %v", mp.repName, err)
 			return
 		}
 		if err = util.GetNetLinkOps().LinkSetDown(link); err != nil {
-			klog.Errorf("Failed to set link down for device %s. %v", mp.vfRepName, err)
+			klog.Errorf("Failed to set link down for device %s. %v", mp.repName, err)
 			return
 		}
-		if err = util.GetNetLinkOps().LinkSetName(link, types.K8sMgmtIntfName); err != nil {
-			klog.Errorf("Rename link from %s to %s failed: %v", mp.vfRepName, types.K8sMgmtIntfName, err)
+		if err = util.GetNetLinkOps().LinkSetName(link, k8sMgmtIntfName); err != nil {
+			klog.Errorf("Rename link from %s to %s failed: %v", mp.repName, k8sMgmtIntfName, err)
 			return
 		}
 		if link.Attrs().MTU != config.Default.MTU {
 			if err = util.GetNetLinkOps().LinkSetMTU(link, config.Default.MTU); err != nil {
-				klog.Errorf("Failed to set link MTU for device %s. %v", types.K8sMgmtIntfName, err)
+				klog.Errorf("Failed to set link MTU for device %s. %v", k8sMgmtIntfName, err)
 			}
 		}
 		if err = util.GetNetLinkOps().LinkSetUp(link); err != nil {
-			klog.Errorf("Failed to set link up for device %s. %v", types.K8sMgmtIntfName, err)
+			klog.Errorf("Failed to set link up for device %s. %v", k8sMgmtIntfName, err)
 		}
 		cfg.link = link
 	} else if (link.Attrs().Flags & net.FlagUp) != net.FlagUp {
 		if err = util.GetNetLinkOps().LinkSetUp(link); err != nil {
-			klog.Errorf("Failed to set link up for device %s. %v", types.K8sMgmtIntfName, err)
+			klog.Errorf("Failed to set link up for device %s. %v", k8sMgmtIntfName, err)
 		}
 	}
 }
 
-func (mp *managementPortDPU) CheckManagementPortHealth(cfg *managementPortConfig, stopChan chan struct{}) {
+func (mp *managementPortRepresentor) CheckManagementPortHealth(cfg *managementPortConfig, stopChan chan struct{}) {
 	if config.OvnKubeNode.IsPrimaryDPU {
 		go wait.Until(
 			func() {
@@ -144,26 +157,27 @@ func (mp *managementPortDPU) CheckManagementPortHealth(cfg *managementPortConfig
 	}
 }
 
-type managementPortDPUHost struct {
+type managementPortNetdev struct {
 	hostSubnets []*net.IPNet
 	netdevName  string
 }
 
-// newManagementPortDPUHost creates a new managementPortDPUHost
-func newManagementPortDPUHost(hostSubnets []*net.IPNet) ManagementPort {
-	return &managementPortDPUHost{
+// newManagementPortNetdev creates a new managementPortNetdev
+func newManagementPortNetdev(hostSubnets []*net.IPNet) ManagementPort {
+	return &managementPortNetdev{
 		hostSubnets: hostSubnets,
 		netdevName:  config.OvnKubeNode.MgmtPortNetdev,
 	}
 }
 
-func (mp *managementPortDPUHost) Create(nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
+func (mp *managementPortNetdev) Create(nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
 	// get Netdev that is used for management port.
+	k8sMgmtIntfName := config.OvnKubeNode.MgmtPortIntfName
 	link, err := util.GetNetLinkOps().LinkByName(mp.netdevName)
 	if err != nil {
 		// this may not the first time invoked on the node after reboot
-		// netdev may have already been renamed to ovn-k8s-mp0.
-		link, err = util.GetNetLinkOps().LinkByName(types.K8sMgmtIntfName)
+		// netdev may have already been renamed to ovn-k8s-mp*.
+		link, err = util.GetNetLinkOps().LinkByName(k8sMgmtIntfName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get link device for %s. %v", mp.netdevName, err)
 		}
@@ -174,7 +188,7 @@ func (mp *managementPortDPUHost) Create(nodeAnnotator kube.Annotator, waiter *st
 	klog.Infof("Setup management port dpu host: %s", link.Attrs().Name)
 	mgmtPortMac := util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(mp.hostSubnets[0]).IP)
 	setMac := link.Attrs().HardwareAddr.String() != mgmtPortMac.String()
-	setName := link.Attrs().Name != types.K8sMgmtIntfName
+	setName := link.Attrs().Name != k8sMgmtIntfName
 	setMTU := link.Attrs().MTU != config.Default.MTU
 
 	if setMac || setName || setMTU {
@@ -191,7 +205,7 @@ func (mp *managementPortDPUHost) Create(nodeAnnotator kube.Annotator, waiter *st
 		}
 
 		if setName {
-			err := util.GetNetLinkOps().LinkSetName(link, types.K8sMgmtIntfName)
+			err := util.GetNetLinkOps().LinkSetName(link, k8sMgmtIntfName)
 			if err != nil {
 				// NOTE(adrianc): rename may fail with "file exists" in case an interface is already named
 				// ovn-k8s-mp0, this may happen if mgmt-port-netdev changes during deployment. ATM we are
@@ -212,18 +226,18 @@ func (mp *managementPortDPUHost) Create(nodeAnnotator kube.Annotator, waiter *st
 	// Set link up
 	err = util.GetNetLinkOps().LinkSetUp(link)
 	if err != nil {
-		return nil, fmt.Errorf("failed to set link up for %s. %v", types.K8sMgmtIntfName, err)
+		return nil, fmt.Errorf("failed to set link up for %s. %v", k8sMgmtIntfName, err)
 	}
 
 	// Setup Iptable and routes
-	cfg, err := createPlatformManagementPort(types.K8sMgmtIntfName, mp.hostSubnets)
+	cfg, err := createPlatformManagementPort(k8sMgmtIntfName, mp.hostSubnets)
 	if err != nil {
 		return nil, err
 	}
 	return cfg, nil
 }
 
-func (mp *managementPortDPUHost) CheckManagementPortHealth(cfg *managementPortConfig, stopChan chan struct{}) {
+func (mp *managementPortNetdev) CheckManagementPortHealth(cfg *managementPortConfig, stopChan chan struct{}) {
 	go wait.Until(
 		func() {
 			checkManagementPortHealth(cfg)

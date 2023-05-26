@@ -149,7 +149,12 @@ func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.Endp
 
 // makeLBName creates the load balancer name - used to minimize churn
 func makeLBName(service *v1.Service, proto v1.Protocol, scope string) string {
-	return fmt.Sprintf("Service_%s/%s_%s_%s",
+	var clustername string
+	if util.IsClusterScoped() {
+		clustername = util.GetClusterName() + "/"
+	}
+	return fmt.Sprintf("%sService_%s/%s_%s_%s",
+		clustername,
 		service.Namespace, service.Name,
 		proto, scope,
 	)
@@ -168,7 +173,7 @@ func buildClusterLBs(service *v1.Service, configs []lbConfig, nodeInfos []nodeIn
 	if useLBGroup {
 		nodeSwitches = make([]string, 0)
 		nodeRouters = make([]string, 0)
-		groups = []string{types.ClusterLBGroupName}
+		groups = []string{util.GetClusterScopedName(types.ClusterLBGroupName)}
 	} else {
 		nodeSwitches = make([]string, 0, len(nodeInfos))
 		nodeRouters = make([]string, 0, len(nodeInfos))

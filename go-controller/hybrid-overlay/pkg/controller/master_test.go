@@ -224,9 +224,9 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			}
 
 			ovnClusterRouterLRP := &nbdb.LogicalRouterPort{
-				Name:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter,
+				Name:     types.GWRouterToJoinSwitchPrefix + util.GetClusterScopedName(types.OVNClusterRouter),
 				Networks: []string{"100.64.0.1/16"},
-				UUID:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter + "-UUID",
+				UUID:     types.GWRouterToJoinSwitchPrefix + util.GetClusterScopedName(types.OVNClusterRouter) + "-UUID",
 			}
 			ovnClusterRouter.Ports = []string{ovnClusterRouterLRP.UUID}
 
@@ -236,9 +236,9 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			}
 
 			nodeGWLRP := &nbdb.LogicalRouterPort{
-				Name:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName,
+				Name:     types.GWRouterToJoinSwitchPrefix + util.GetClusterScopedName(types.GWRouterPrefix+nodeName),
 				Networks: []string{"100.64.0.2/16"},
-				UUID:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName + "-UUID",
+				UUID:     types.GWRouterToJoinSwitchPrefix + util.GetClusterScopedName(types.GWRouterPrefix+nodeName) + "-UUID",
 			}
 
 			nodeGWRouter.Ports = []string{nodeGWLRP.UUID}
@@ -504,8 +504,8 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			}
 
 			ovnClusterRouterLRP := &nbdb.LogicalRouterPort{
-				UUID:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter + "-UUID",
-				Name:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter,
+				UUID:     types.GWRouterToJoinSwitchPrefix + util.GetClusterScopedName(types.OVNClusterRouter) + "-UUID",
+				Name:     types.GWRouterToJoinSwitchPrefix + util.GetClusterScopedName(types.OVNClusterRouter),
 				Networks: []string{"100.64.0.1/16"},
 			}
 
@@ -519,7 +519,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			}
 			nodeGWLRP := &nbdb.LogicalRouterPort{
 				UUID:     nodeName + "-LRP-UUID",
-				Name:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName,
+				Name:     types.GWRouterToJoinSwitchPrefix + util.GetClusterScopedName(types.GWRouterPrefix+nodeName),
 				Networks: []string{"100.64.0.2/16"},
 			}
 
@@ -662,9 +662,9 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			}
 
 			ovnClusterRouterLRP := &nbdb.LogicalRouterPort{
-				Name:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter,
+				Name:     types.GWRouterToJoinSwitchPrefix + util.GetClusterScopedName(types.OVNClusterRouter),
 				Networks: []string{"100.64.0.1/16"},
-				UUID:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter + "-UUID",
+				UUID:     types.GWRouterToJoinSwitchPrefix + util.GetClusterScopedName(types.OVNClusterRouter) + "-UUID",
 			}
 			ovnClusterRouter.Ports = []string{ovnClusterRouterLRP.UUID}
 
@@ -674,9 +674,9 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			}
 
 			nodeGWLRP := &nbdb.LogicalRouterPort{
-				Name:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + linNodeName,
+				Name:     types.GWRouterToJoinSwitchPrefix + util.GetClusterScopedName(types.GWRouterPrefix+linNodeName),
 				Networks: []string{"100.64.0.2/16"},
-				UUID:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + linNodeName + "-UUID",
+				UUID:     types.GWRouterToJoinSwitchPrefix + util.GetClusterScopedName(types.GWRouterPrefix+linNodeName) + "-UUID",
 			}
 
 			nodeGWRouter.Ports = []string{nodeGWLRP.UUID}

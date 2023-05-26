@@ -3,7 +3,7 @@ module github.com/ovn-org/ovn-kubernetes/go-controller
 go 1.17
 
 require (
-	github.com/Mellanox/sriovnet v1.0.3
+	github.com/Mellanox/sriovnet v1.1.0
 	github.com/Microsoft/hcsshim v0.8.10-0.20200715222032-5eafd1556990
 	github.com/alexflint/go-filemutex v0.0.0-20171022225611-72bdc8eae2ae
 	github.com/asaskevich/govalidator v0.0.0-20210307081110-f21760c49a8d
@@ -32,7 +32,7 @@ require (
 	github.com/spf13/afero v1.4.1
 	github.com/stretchr/testify v1.7.0
 	github.com/urfave/cli/v2 v2.2.0
-	github.com/vishvananda/netlink v1.1.1-0.20210518155637-4cb3795f2ccb
+	github.com/vishvananda/netlink v1.1.1-0.20211101163509-b10eb8fe5cf6
 	golang.org/x/net v0.0.0-20220526153639-5463443f8c37
 	golang.org/x/sys v0.0.0-20220520151302-bc2c85ada10a
 	golang.org/x/time v0.0.0-20220210224613-90d013bbcef8

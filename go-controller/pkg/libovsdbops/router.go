@@ -3,6 +3,7 @@ package libovsdbops
 import (
 	"context"
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"net"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -723,6 +724,14 @@ func buildNAT(
 		LogicalIP:   logicalIP,
 		Options:     map[string]string{"stateless": "false"},
 		ExternalIDs: externalIDs,
+	}
+
+	// We cannot use util.ExternalIDsForCluster() helper since it would introduce an import cycle
+	if config.Kubernetes.ClusterName != "" {
+		if len(nat.ExternalIDs) == 0 || nat.ExternalIDs == nil {
+			nat.ExternalIDs = make(map[string]string)
+		}
+		nat.ExternalIDs[types.OvnK8sClusterNameKey] = config.Kubernetes.ClusterName
 	}
 
 	if logicalPort != "" {

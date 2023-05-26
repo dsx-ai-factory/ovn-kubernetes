@@ -102,6 +102,7 @@ func (n tNode) logicalSwitch(loadBalancerGroupUUID string) *nbdb.LogicalSwitch {
 		Name:              n.Name,
 		OtherConfig:       map[string]string{"subnet": n.NodeSubnet},
 		LoadBalancerGroup: []string{loadBalancerGroupUUID},
+		ExternalIDs:       util.CreateClusterScopedExternalIDs(),
 	}
 }
 
@@ -113,7 +114,7 @@ func cleanupGateway(fexec *ovntest.FakeExec, nodeName string, nodeSubnet string,
 	)
 
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --if-exist get logical_router_port " + types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName + " networks",
+		Cmd:    "ovn-nbctl --timeout=15 --if-exist get logical_router_port " + util.GetClusterScopedName(types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName) + " networks",
 		Output: "[\"100.64.0.3/16\"]",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -126,7 +127,7 @@ func cleanupGateway(fexec *ovntest.FakeExec, nodeName string, nodeSubnet string,
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --if-exist lsp-del " + types.JoinSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName,
 		"ovn-nbctl --timeout=15 --if-exist lr-del " + types.GWRouterPrefix + nodeName,
-		"ovn-nbctl --timeout=15 --if-exist ls-del " + types.ExternalSwitchPrefix + nodeName,
+		"ovn-nbctl --timeout=15 --if-exist ls-del " + util.GetClusterScopedName(types.ExternalSwitchPrefix + nodeName),
 	})
 }
 

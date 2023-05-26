@@ -18,6 +18,8 @@ import (
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -34,10 +36,11 @@ func init() {
 func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClusterRouter *nbdb.LogicalRouter, expectedNodeSwitch *nbdb.LogicalSwitch, nodeName string, clusterIPSubnets []*net.IPNet, hostSubnets []*net.IPNet,
 	l3GatewayConfig *util.L3GatewayConfig, joinLRPIPs, defLRPIPs []*net.IPNet, skipSnat bool, nodeMgmtPortIP string) []libovsdb.TestData {
 
-	GRName := "GR_" + nodeName
+	GRName := util.GetClusterScopedName("GR_" + nodeName)
 	gwSwitchPort := types.JoinSwitchToGWRouterPrefix + GRName
 	gwRouterPort := types.GWRouterToJoinSwitchPrefix + GRName
 	externalSwitch := fmt.Sprintf("%s%s", types.ExternalSwitchPrefix, nodeName)
+	externalSwitch = util.GetClusterScopedName(externalSwitch)
 	externalRouterPort := types.GWRouterToExtSwitchPrefix + GRName
 	externalSwitchPortToRouter := types.EXTSwitchToGWRouterPrefix + GRName
 
@@ -208,7 +211,6 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 
 		expectedNodeSwitch.ACLs = append(expectedNodeSwitch.ACLs, nodeACL.UUID)
 	}
-
 	testData = append(testData, expectedNodeSwitch)
 
 	externalLogicalSwitchPort := &nbdb.LogicalSwitchPort{
@@ -216,7 +218,7 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 		Addresses: []string{"unknown"},
 		Type:      "localnet",
 		Options: map[string]string{
-			"network_name": types.PhysicalNetworkName,
+			"network_name": util.GetPhysNetNameKey(),
 		},
 		Name: l3GatewayConfig.InterfaceID,
 	}
@@ -263,7 +265,8 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 
 var _ = ginkgo.Describe("Gateway Init Operations", func() {
 	var (
-		fakeOvn *FakeOVN
+		fakeOvn  *FakeOVN
+		testNode v1.Node
 	)
 
 	ginkgo.BeforeEach(func() {
@@ -273,6 +276,11 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		ovnlb.TestOnlySetCache(nil)
 
 		fakeOvn = NewFakeOVN()
+		testNode = v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+			},
+		}
 	})
 
 	ginkgo.AfterEach(func() {
@@ -314,6 +322,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedOVNClusterRouter,
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
+				},
+			}, &v1.NodeList{
+				Items: []v1.Node{
+					testNode,
 				},
 			})
 
@@ -371,13 +383,16 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
 				},
+			}, &v1.NodeList{
+				Items: []v1.Node{
+					testNode,
+				},
 			})
 
 			clusterIPSubnets := ovntest.MustParseIPNets("fd01::/48")
 			hostSubnets := ovntest.MustParseIPNets("fd01:0:0:2::/64")
 			joinLRPIPs := ovntest.MustParseIPNets("fd98::3/64")
 			defLRPIPs := ovntest.MustParseIPNets("fd98::1/64")
-			nodeName := "test-node"
 			l3GatewayConfig := &util.L3GatewayConfig{
 				Mode:           config.GatewayModeLocal,
 				ChassisID:      "SYSTEM-ID",
@@ -427,13 +442,16 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
 				},
+			}, &v1.NodeList{
+				Items: []v1.Node{
+					testNode,
+				},
 			})
 
 			clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14", "fd01::/48")
 			hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23", "fd01:0:0:2::/64")
 			joinLRPIPs := ovntest.MustParseIPNets("100.64.0.3/16", "fd98::3/64")
 			defLRPIPs := ovntest.MustParseIPNets("100.64.0.1/16", "fd98::1/64")
-			nodeName := "test-node"
 			l3GatewayConfig := &util.L3GatewayConfig{
 				Mode:           config.GatewayModeLocal,
 				ChassisID:      "SYSTEM-ID",
@@ -483,13 +501,16 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
 				},
+			}, &v1.NodeList{
+				Items: []v1.Node{
+					testNode,
+				},
 			})
 
 			clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14")
 			hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23")
 			joinLRPIPs := ovntest.MustParseIPNets("100.64.0.3/16")
 			defLRPIPs := ovntest.MustParseIPNets("100.64.0.1/16")
-			nodeName := "test-node"
 			l3GatewayConfig := &util.L3GatewayConfig{
 				Mode:           config.GatewayModeLocal,
 				ChassisID:      "SYSTEM-ID",
@@ -566,13 +587,16 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedNodeSwitch,
 					expectedClusterLBGroup,
 				},
+			}, &v1.NodeList{
+				Items: []v1.Node{
+					testNode,
+				},
 			})
 
 			clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14", "fd01::/48")
 			hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23", "fd01:0:0:2::/64")
 			joinLRPIPs := ovntest.MustParseIPNets("100.64.0.3/16", "fd98::3/64")
 			defLRPIPs := ovntest.MustParseIPNets("100.64.0.1/16", "fd98::1/64")
-			nodeName := "test-node"
 			l3GatewayConfig := &util.L3GatewayConfig{
 				Mode:           config.GatewayModeLocal,
 				ChassisID:      "SYSTEM-ID",
@@ -605,7 +629,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 	ginkgo.Context("Gateway Cleanup Operations", func() {
 
 		ginkgo.It("cleans up a single-stack gateway in OVN", func() {
-			nodeName := "test-node"
 
 			nodeSubnetPriority, _ := strconv.Atoi(types.NodeSubnetPolicyPriority)
 
@@ -616,8 +639,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPort{
-						Name:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName,
-						UUID:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName + "-UUID",
+						Name:     util.GetClusterScopedName(types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName),
+						UUID:     util.GetClusterScopedName(types.GWRouterToJoinSwitchPrefix+types.GWRouterPrefix+nodeName) + "-UUID",
 						Networks: []string{"100.64.0.1/16"},
 					},
 					&nbdb.LoadBalancer{
@@ -634,7 +657,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 						},
 					},
 					&nbdb.LogicalRouter{
-						Name: types.GWRouterPrefix + nodeName,
+						Name: util.GetClusterScopedName(util.GetClusterScopedName(util.GetClusterScopedName(util.GetClusterScopedName(types.GWRouterPrefix + nodeName)))),
 						UUID: types.GWRouterPrefix + nodeName + "-UUID",
 						LoadBalancer: []string{
 							"Service_default/kubernetes_TCP_node_router_ovn-control-plane",
@@ -674,12 +697,12 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 						Name: types.OVNJoinSwitch,
 					},
 					&nbdb.LogicalSwitch{
-						Name: types.ExternalSwitchPrefix + nodeName,
-						UUID: types.ExternalSwitchPrefix + nodeName + "-UUID ",
+						Name: util.GetClusterScopedName(types.ExternalSwitchPrefix + nodeName),
+						UUID: util.GetClusterScopedName(types.ExternalSwitchPrefix+nodeName) + "-UUID ",
 					},
 					&nbdb.LogicalSwitch{
-						Name: types.EgressGWSwitchPrefix + types.ExternalSwitchPrefix + nodeName,
-						UUID: types.EgressGWSwitchPrefix + types.ExternalSwitchPrefix + nodeName + "-UUID",
+						Name: types.EgressGWSwitchPrefix + util.GetClusterScopedName(types.ExternalSwitchPrefix+nodeName),
+						UUID: types.EgressGWSwitchPrefix + util.GetClusterScopedName(types.ExternalSwitchPrefix+nodeName) + "-UUID",
 					},
 				},
 			})
@@ -725,7 +748,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		})
 
 		ginkgo.It("cleans up a dual-stack gateway in OVN", func() {
-			nodeName := "test-node"
 
 			nodeSubnetPriority, _ := strconv.Atoi(types.NodeSubnetPolicyPriority)
 
@@ -736,8 +758,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPort{
-						Name:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName,
-						UUID:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName + "-UUID",
+						Name:     util.GetClusterScopedName(types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName),
+						UUID:     util.GetClusterScopedName(types.GWRouterToJoinSwitchPrefix+types.GWRouterPrefix+nodeName) + "-UUID",
 						Networks: []string{"100.64.0.1/16", "fd98::1/64"},
 					},
 					&nbdb.LoadBalancer{
@@ -809,12 +831,12 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 						Name: types.OVNJoinSwitch,
 					},
 					&nbdb.LogicalSwitch{
-						Name: types.ExternalSwitchPrefix + nodeName,
-						UUID: types.ExternalSwitchPrefix + nodeName + "-UUID ",
+						Name: util.GetClusterScopedName(types.ExternalSwitchPrefix + nodeName),
+						UUID: util.GetClusterScopedName(types.ExternalSwitchPrefix+nodeName) + "-UUID ",
 					},
 					&nbdb.LogicalSwitch{
-						Name: types.EgressGWSwitchPrefix + types.ExternalSwitchPrefix + nodeName,
-						UUID: types.EgressGWSwitchPrefix + types.ExternalSwitchPrefix + nodeName + "-UUID",
+						Name: types.EgressGWSwitchPrefix + util.GetClusterScopedName(types.ExternalSwitchPrefix+nodeName),
+						UUID: types.EgressGWSwitchPrefix + util.GetClusterScopedName(types.ExternalSwitchPrefix+nodeName) + "-UUID",
 					},
 				},
 			})

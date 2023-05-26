@@ -44,8 +44,11 @@ BASEDIR=$(dirname $0)
 # K8S_NODE_IP - IP address of of the node
 #
 # OVN_METRICS_ENDPOINT_IP - metrics endpoint ip
+# OVN_METRICS_PPROF_ENDPOINT_IP - metrics endpoint ip
 # OVN_METRICS_MASTER_PORT - metrics master port
 # OVN_METRICS_WORKER_PORT - metrics worker port
+# OVN_METRICS_PPROF_MASTER_PORT - metrics pprof master port
+# OVN_METRICS_PPROF_WORKER_PORT - metrics pprof worker port
 # OVN_DAEMONSET_VERSION - version match daemonset and image - v3
 # K8S_TOKEN - the apiserver token. Automatically detected when running in a pod - v3
 # K8S_CACERT - the apiserver CA. Automatically detected when running in a pod - v3
@@ -74,6 +77,7 @@ BASEDIR=$(dirname $0)
 # OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
 # OVN_METRICS_SCRAPE_INTERVAL - ovn & ovnkube metrics scrape interval in sec (default 30)
 # OVS_METRICS_SCRAPE_INTERVAL - ovs metrics scrape interval in sec (default 30)
+# OVN_METRICS_ENABLE_PPROF - Enable/Disable pprof server
 # OVN_MONITOR_ALL - ovn-controller monitor all data in SB DB
 # OVN_OFCTRL_WAIT_BEFORE_CLEAR - ovn-controller wait time in ms before clearing OpenFlow rules during start up
 # OVN_ENABLE_LFLOW_CACHE - enable ovn-controller lflow-cache
@@ -84,7 +88,8 @@ BASEDIR=$(dirname $0)
 # OVN_EGRESSQOS_ENABLE - enable egress QoS for ovn-kubernetes
 # OVN_UNPRIVILEGED_MODE - execute CNI ovs/netns commands from host (default no)
 # OVNKUBE_NODE_MODE - ovnkube node mode of operation, one of: full, dpu, dpu-host (default: full)
-# OVNKUBE_NODE_MGMT_PORT_NETDEV - ovnkube node management port netdev. valid when ovnkube node mode is: dpu, dpu-host
+# OVNKUBE_NODE_MGMT_PORT_INTF_NAME - Name of interface to be used as ovnkubernetes mgmt port (default: ovn-k8s-mp0)
+# OVNKUBE_NODE_MGMT_PORT_NETDEV - ovnkube node management port netdev.
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node. mandatory in case ovnkube-node-mode=="dpu"
 # OVN_HOST_NETWORK_NAMESPACE - namespace to classify host network traffic for applying network policies
 # OVN_ENCAP_TOS - set a TOS value for the outer header
@@ -97,6 +102,9 @@ BASEDIR=$(dirname $0)
 # OVS_MAX_IDLE - The maximum time (in ms) that idle flows will remain cached in the datapath
 # OVN_NB_ENABLE_LEADER_XFER_FOR_SNAPSHOT - Transfer leader election when snapshotting ovn nb db
 # OVN_SB_ENABLE_LEADER_XFER_FOR_SNAPSHOT - Transfer leader election when snapshotting ovn sb db
+# K8S_CLUSTER_NAME - name of the kubernetes cluster
+# OVN_CONNTRACK_ZONE - Conntrack zone number used for openflow rules (default 64000)
+
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -195,10 +203,23 @@ if [[ -z ${metrics_endpoint_ip} ]]; then
 fi
 metrics_endpoint_ip=$(bracketify $metrics_endpoint_ip)
 
+# set metrics pprof endpoint bind to 127.0.0.1
+metrics_pprof_endpoint_ip=${OVN_METRICS_PPROF_ENDPOINT_IP}
+if [[ -z ${metrics_pprof_endpoint_ip} ]]; then
+  metrics_pprof_endpoint_ip=127.0.0.1
+fi
+metrics_pprof_endpoint_ip=$(bracketify $metrics_pprof_endpoint_ip)
+
 # set metrics endpoint master port bind to K8S_NODE_IP
 metrics_master_port=${OVN_METRICS_MASTER_PORT}
 if [[ -z ${metrics_master_port} ]]; then
   metrics_master_port=9409
+fi
+
+# set metrics endpoint pprof master port bind to K8S_NODE_IP
+metrics_pprof_master_port=${OVN_METRICS_PPROF_MASTER_PORT}
+if [[ -z ${metrics_pprof_master_port} ]]; then
+  metrics_pprof_master_port=19409
 fi
 
 # set metrics endpoint worker port bind to K8S_NODE_IP
@@ -207,9 +228,18 @@ if [[ -z ${metrics_worker_port} ]]; then
   metrics_worker_port=9410
 fi
 
+# set metrics endpoint pprof worker port bind to K8S_NODE_IP
+metrics_pprof_worker_port=${OVN_METRICS_PPROF_WORKER_PORT}
+if [[ -z ${metrics_pprof_worker_port} ]]; then
+  metrics_pprof_worker_port=19410
+fi
+
 ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
 # namespace used for classifying host network traffic
 ovn_host_network_namespace=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
+
+# name of the kubernetes cluster.
+k8s_cluster_name=${K8S_CLUSTER_NAME:-""}
 
 # host on which OVN DB POD(s) are running
 ovn_db_host=${K8S_NODE_IP:-""}
@@ -226,7 +256,7 @@ ovn_sb_raft_port=${OVN_SB_RAFT_PORT:-6644}
 ovn_encap_port=${OVN_ENCAP_PORT:-6081}
 # OVN_ENCAP_TOS - TOS value for the outer/geneve header. Default is none
 ovn_encap_tos=${OVN_ENCAP_TOS:-"none"}
-# OVN_CTINV_FLOWS_DISABLE - Enable/Disable CT Inv flows 
+# OVN_CTINV_FLOWS_DISABLE - Enable/Disable CT Inv flows
 ovn_ctinv_flows_disable=${OVN_CTINV_FLOWS_DISABLE:-false}
 # OVN_NB_RAFT_ELECTION_TIMER - ovn north db election timer in ms (default 1000)
 ovn_nb_raft_election_timer=${OVN_NB_RAFT_ELECTION_TIMER:-1000}
@@ -236,7 +266,7 @@ ovn_sb_raft_election_timer=${OVN_SB_RAFT_ELECTION_TIMER:-1000}
 ovn_nb_raft_sched_priority=${OVN_NB_RAFT_SCHED_PRIORITY:--12}
 # OVN_SB_RAFT_SCHED_PRIORITY - ovn south db process priority niceness (default -11)
 ovn_sb_raft_sched_priority=${OVN_SB_RAFT_SCHED_PRIORITY:--11}
-# OVN_XDP_SFREP - XDP SF Rep 
+# OVN_XDP_SFREP - XDP SF Rep
 OVN_XDP_SFREP=${OVN_XDP_SFREP:-"xdp_sf"}
 # OVN_XDP_VETH - XDP Veth
 OVN_XDP_VETH=${OVN_XDP_VETH:-"xdp_veth"}
@@ -277,6 +307,12 @@ ovn_multicast_enable=${OVN_MULTICAST_ENABLE:-}
 ovn_metrics_scrape_interval=${OVN_METRICS_SCRAPE_INTERVAL:-30}
 # OVS_METRICS_SCRAPE_INTERVAL - metrics scrape interval in sec (default 30)
 ovs_metrics_scrape_interval=${OVS_METRICS_SCRAPE_INTERVAL:-30}
+# OVN_METRICS_ENABLE_PPROF - Enable/Disable pprof server
+ovn_metrics_enable_pprof=${OVN_METRICS_ENABLE_PPROF:-true}
+echo "ovn_metrics_enable_pprof=${ovn_metrics_enable_pprof}"
+if [[ ${ovn_metrics_enable_pprof} == "true" ]]; then
+  ovn_metrics_enable_pprof_flag="--metrics-enable-pprof"
+fi
 ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-}
 #OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 ovn_egressip_enable=${OVN_EGRESSIP_ENABLE:-false}
@@ -300,11 +336,15 @@ ovn_ipfix_cache_active_timeout=${OVN_IPFIX_CACHE_ACTIVE_TIMEOUT:-} \
 
 # OVNKUBE_NODE_MODE - is the mode which ovnkube node operates
 ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
-# OVNKUBE_NODE_mgmt_PORT_NETDEV - is the net device to be used for management port
+# OVNKUBE_NODE_MGMT_PORT_INTF_NAME - name of interface being used as management port
+ovnkube_node_mgmt_port_intf_name=${OVNKUBE_NODE_MGMT_PORT_INTF_NAME:-}
+# OVNKUBE_NODE_MGMT_PORT_NETDEV - is the net device to be used for management port
 ovnkube_node_mgmt_port_netdev=${OVNKUBE_NODE_MGMT_PORT_NETDEV:-}
 ovnkube_config_duration_enable=${OVNKUBE_CONFIG_DURATION_ENABLE:-false}
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node
 ovn_encap_ip=${OVN_ENCAP_IP:-}
+# OVN_CONNTRACK_ZONE - conntrack zone number used for openflow rules (default 64000)
+ovn_conntrack_zone=${OVN_CONNTRACK_ZONE:-}
 
 ovn_ex_gw_network_interface=${OVN_EX_GW_NETWORK_INTERFACE:-}
 
@@ -391,6 +431,14 @@ wait_for_event() {
 # The ovnkube-db kubernetes service must be populated with OVN DB service endpoints
 # before various OVN K8s containers can come up. This function checks for that.
 ready_to_start_node() {
+
+  #exit early if OVN_NORTH and OVN_SOUTH vars are set
+  if [[ -v OVN_NORTH && -v OVN_SOUTH ]] ; then
+    echo "OVN_NORTH: ${OVN_NORTH}  OVN_SOUTH:${OVN_SOUTH} . Skipping endpoint check"
+    get_ovn_db_vars
+    return 0
+  fi
+
   local svcs=("$@")
 
   if [[ ${#svcs[@]} == 0 ]]; then
@@ -611,8 +659,10 @@ display_env() {
   echo OVN_DAEMONSET_VERSION ${ovn_daemonset_version}
   echo OVNKUBE_NODE_MODE ${ovnkube_node_mode}
   echo OVN_ENCAP_IP ${ovn_encap_ip}
+  echo OVN_CONNTRACK_ZONE ${ovn_conntrack_zone}
   echo ovnkube.sh version ${ovnkube_version}
   echo OVN_HOST_NETWORK_NAMESPACE ${ovn_host_network_namespace}
+  echo K8S_CLUSTER_NAME ${k8s_cluster_name}
 }
 
 ovn_debug() {
@@ -889,7 +939,7 @@ ovn-dbchecker() {
   trap 'kill $(jobs -p); exit 0' TERM
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovn-dbchecker.pid
-  
+
   # wait for ready_to_start_node
   echo "=============== ovn-dbchecker - (wait for ready_to_start_node)"
   wait_for_event ready_to_start_node
@@ -916,18 +966,18 @@ ovn-dbchecker() {
         --sb-cert-common-name ${ovn_sb_cert_cname}
       "
   }
-  
+
   echo "=============== ovn-dbchecker ========== OVNKUBE_DB"
   /usr/bin/ovndbchecker \
     --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
-    ${ovn_db_ssl_opts} \  
+    ${ovn_db_ssl_opts} \
     --loglevel=${ovnkube_loglevel} \
     --logfile-maxsize=${ovnkube_logfile_maxsize} \
     --logfile-maxbackups=${ovnkube_logfile_maxbackups} \
     --logfile-maxage=${ovnkube_logfile_maxage} \
     --pidfile ${OVN_RUNDIR}/ovn-dbchecker.pid \
     --logfile /var/log/ovn-kubernetes/ovn-dbchecker.log &
-  
+
   echo "=============== ovn-dbchecker ========== running"
   wait_for_event attempts=3 process_ready ovn-dbchecker
 
@@ -1020,7 +1070,7 @@ ovn-master() {
   if [[ -n ${ovn_v4_join_subnet} ]]; then
       ovn_v4_join_subnet_opt="--gateway-v4-join-subnet=${ovn_v4_join_subnet}"
   fi
-  
+
   ovn_v6_join_subnet_opt=
   if [[ -n ${ovn_v6_join_subnet} ]]; then
       ovn_v6_join_subnet_opt="--gateway-v6-join-subnet=${ovn_v6_join_subnet}"
@@ -1090,6 +1140,7 @@ ovn-master() {
   fi
 
   ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:${metrics_master_port}"
+  ovnkube_master_metrics_pprof_bind_address="${metrics_pprof_endpoint_ip}:${metrics_pprof_master_port}"
   local ovnkube_metrics_tls_opts=""
   #if [[ ${OVNKUBE_METRICS_PK} != "" && ${OVNKUBE_METRICS_CERT} != "" ]]; then
   #  ovnkube_metrics_tls_opts="
@@ -1104,13 +1155,23 @@ ovn-master() {
   fi
   echo "ovnkube_config_duration_enable_flag: ${ovnkube_config_duration_enable_flag}"
 
+  k8s_cluster_name_option=
+  if [[ ${K8S_CLUSTER_NAME} != "" ]]; then
+	  k8s_cluster_name_option="--cluster-name=${K8S_CLUSTER_NAME}"
+  fi
+
+  ovnkube_node_mgmt_port_intf_name_flag=
+  if [[ ${ovnkube_node_mgmt_port_intf_name} != "" ]]; then
+    ovnkube_node_mgmt_port_intf_name_flag="--ovnkube-node-mgmt-port-intf-name=${ovnkube_node_mgmt_port_intf_name}"
+  fi
+
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
     --init-master ${K8S_NODE} \
     --mtu=${mtu} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
-    --gateway-mode=${ovn_gateway_mode} \
+    --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
     --loglevel=${ovnkube_loglevel} \
     --logfile-maxsize=${ovnkube_logfile_maxsize} \
     --logfile-maxbackups=${ovnkube_logfile_maxbackups} \
@@ -1134,10 +1195,13 @@ ovn-master() {
     ${multi_networkpolicy_enabled_flag} \
     --metrics-interval ${ovn_metrics_scrape_interval} \
     ${ovnkube_config_duration_enable_flag} \
-    --metrics-bind-address ${ovnkube_master_metrics_bind_address} --metrics-enable-pprof \
+    --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
+    --metrics-pprof-bind-address ${ovnkube_master_metrics_pprof_bind_address} ${ovn_metrics_enable_pprof_flag} \
     --host-network-namespace ${ovn_host_network_namespace} \
     ${ctinv_flows_disable_flag} \
-    ${ovn_master_ha_opts} &
+    ${ovn_master_ha_opts} \
+    ${ovnkube_node_mgmt_port_intf_name_flag} \
+    ${k8s_cluster_name_option} &
 
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master
@@ -1272,7 +1336,11 @@ ovn-node() {
   trap 'kill $(jobs -p) ; exit 0' TERM
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovnkube.pid
-  rm -f /etc/cni/net.d/10-ovn-kubernetes.conf
+
+  if [[ ${ovnkube_node_mode} != "dpu" ]]; then
+    echo "removing OVN CNI conf"
+    rm -vf /etc/cni/net.d/10-ovn-kubernetes.conf
+  fi
 
   if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
     echo "=============== ovn-node - (wait for ovs)"
@@ -1318,7 +1386,7 @@ ovn-node() {
   ovn_routable_mtu_flag=
   if [[ -n "${routable_mtu}" ]]; then
 	  routable_mtu_flag="--routable-mtu ${routable_mtu}"
-  fi  
+  fi
 
   hybrid_overlay_flags=
   if [[ ${ovn_hybrid_overlay_enable} == "true" ]]; then
@@ -1432,6 +1500,11 @@ ovn-node() {
     fi
   fi
 
+  ovn_conntrack_zone_flag=
+  if [[ ${ovn_conntrack_zone} != "" ]]; then
+     ovn_conntrack_zone_flag="--conntrack-zone=${ovn_conntrack_zone}"
+  fi
+
   ovnkube_node_mode_flag=
   if [[ ${ovnkube_node_mode} != "" ]]; then
     ovnkube_node_mode_flag="--ovnkube-node-mode=${ovnkube_node_mode}"
@@ -1447,6 +1520,11 @@ ovn-node() {
   echo "=============== ovn-node - disable conntrack on geneve port $ovn_encap_port"
   iptables -t raw -A PREROUTING -p udp --dport $ovn_encap_port -j NOTRACK
   iptables -t raw -A OUTPUT -p udp --dport $ovn_encap_port -j NOTRACK
+
+  ovnkube_node_mgmt_port_intf_name_flag=
+  if [[ ${ovnkube_node_mgmt_port_intf_name} != "" ]]; then
+    ovnkube_node_mgmt_port_intf_name_flag="--ovnkube-node-mgmt-port-intf-name=${ovnkube_node_mgmt_port_intf_name}"
+  fi
 
   ovnkube_node_mgmt_port_netdev_flag=
   if [[ ${ovnkube_node_mgmt_port_netdev} != "" ]]; then
@@ -1472,10 +1550,16 @@ ovn-node() {
   fi
 
   ovnkube_node_metrics_bind_address="${metrics_endpoint_ip}:${metrics_worker_port}"
+  ovnkube_node_metrics_pprof_bind_address="${metrics_pprof_endpoint_ip}:${metrics_pprof_worker_port}"
 
   ovn_unprivileged_flag="--unprivileged-mode"
   if test -z "${OVN_UNPRIVILEGED_MODE+x}" -o "x${OVN_UNPRIVILEGED_MODE}" = xno; then
     ovn_unprivileged_flag=""
+  fi
+
+  k8s_cluster_name_option=
+  if [[ ${K8S_CLUSTER_NAME} != "" ]]; then
+	  k8s_cluster_name_option="--cluster-name=${K8S_CLUSTER_NAME}"
   fi
 
   ovn_gateway_router_subnet_opt=
@@ -1542,6 +1626,38 @@ ovn-node() {
     "
   fi
 
+  if [[ ${ovnkube_node_mode} == "full" ]]; then
+
+    if [[ ! ${ovn_gateway_opts} =~ "gateway-interface" ]]; then
+      # get the gateway interface for DPU cluster
+      dpu_gw_iface=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-dpu-gw-interface | tr -d \")
+      if [[ ${dpu_gw_iface} != "" ]]; then
+        echo "Setting OVN DPU Gateway Interface."
+        ovn_gateway_opts="${ovn_gateway_opts} --gateway-interface=${dpu_gw_iface}"
+      fi
+    fi
+
+    if [[ ! ${ovn_gateway_opts} =~ "gateway-nexthop" ]]; then
+      # get the gateway nexthop for DPU cluster
+      dpu_gw_nexthop=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-dpu-gw-nexthop | tr -d \")
+      if [[ ${dpu_gw_nexthop} != "" ]]; then
+        echo "Setting OVN DPU Gateway NextHop."
+        ovn_gateway_opts="${ovn_gateway_opts} --gateway-nexthop=${dpu_gw_nexthop}"
+      fi
+    fi
+
+    if  [[ ! ${ovn_gateway_opts} =~ "gateway-vlanid" ]]; then
+      # get the gateway vlanid for DPU cluster
+      dpu_gw_vlanid=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-dpu-gw-vlanid | tr -d \")
+      if [[ ${dpu_gw_vlanid} != "" ]]; then
+        echo "Setting OVN DPU Gateway VLAN ID."
+        ovn_gateway_opts="${ovn_gateway_opts} --gateway-vlanid=${dpu_gw_vlanid}"
+      fi
+    fi
+
+  fi
+
+
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
@@ -1551,6 +1667,7 @@ ovn-node() {
     --mtu=${mtu} \
     ${routable_mtu_flag} \
     ${ovn_encap_ip_flag} \
+    ${ovn_conntrack_zone_flag} \
     --ovn-encap-tos=${ovn_encap_tos} \
     --loglevel=${ovnkube_loglevel} \
     --logfile-maxsize=${ovnkube_logfile_maxsize} \
@@ -1580,14 +1697,17 @@ ovn-node() {
     ${ipfix_targets} \
     ${ipfix_config} \
     --metrics-interval ${ovn_metrics_scrape_interval} \
-    --metrics-bind-address ${ovnkube_node_metrics_bind_address} --metrics-enable-pprof \
+    --metrics-bind-address ${ovnkube_node_metrics_bind_address} \
+    --metrics-pprof-bind-address ${ovnkube_node_metrics_pprof_bind_address} ${ovn_metrics_enable_pprof_flag} \
     ${export_ovs_metrics_opts} \
     ${ovnkube_node_mode_flag} \
     ${egress_interface} \
     --host-network-namespace ${ovn_host_network_namespace} \
-     ${ovnkube_node_mgmt_port_netdev_flag} \
-     ${ovn_xdp_opts} \
-     ${ovs_other_config_opts} &
+    ${ovnkube_node_mgmt_port_netdev_flag} \
+    ${ovn_xdp_opts} \
+    ${ovs_other_config_opts} \
+    ${ovnkube_node_mgmt_port_intf_name_flag} \
+    ${k8s_cluster_name_option} &
 
   wait_for_event attempts=3 process_ready ovnkube
   if [[ ${ovnkube_node_mode} != "dpu" ]]; then

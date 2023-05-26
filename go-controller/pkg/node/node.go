@@ -406,14 +406,60 @@ func getOVNIfUpCheckMode() (bool, error) {
 	return true, nil
 }
 
+type managementPortEntry struct {
+	port   ManagementPort
+	config *managementPortConfig
+}
+
+func createNodeManagementPorts(name string, nodeAnnotator kube.Annotator, waiter *startupWaiter,
+	subnets []*net.IPNet) ([]managementPortEntry, *managementPortConfig, error) {
+	if config.OvnKubeNode.Mode == types.NodeModeFull {
+		// If netdevice name is not provided in the full mode then management port backed by OVS internal port.
+		// If it is provided then it is backed by VF or SF and need to determine its representor name to plug
+		// into OVS integrational bridge
+		if config.OvnKubeNode.MgmtPortNetdev != "" {
+			deviceID, err := util.GetDeviceIDFromNetdevice(config.OvnKubeNode.MgmtPortNetdev)
+			if err != nil {
+				// Device might already had been renamed to config.OvnKubeNode.MgmtPortIntfName
+				if deviceID, err = util.GetDeviceIDFromNetdevice(config.OvnKubeNode.MgmtPortIntfName); err != nil {
+					return nil, nil, fmt.Errorf("failed to get device id for %s or %s: %v",
+						config.OvnKubeNode.MgmtPortNetdev, config.OvnKubeNode.MgmtPortIntfName, err)
+				}
+			}
+			rep, err := util.GetFunctionRepresentorName(deviceID)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to get representor for %s management port: %v",
+					config.OvnKubeNode.MgmtPortNetdev, err)
+			}
+			config.OvnKubeNode.MgmtPortRepresentor = rep
+		}
+	}
+	ports := NewManagementPorts(name, subnets)
+
+	var mgmtPortConfig *managementPortConfig
+	mgmtPorts := make([]managementPortEntry, 0)
+	for _, port := range ports {
+		config, err := port.Create(nodeAnnotator, waiter)
+		if err != nil {
+			return nil, nil, err
+		}
+		mgmtPorts = append(mgmtPorts, managementPortEntry{port: port, config: config})
+		// Save this management port config for later usage.
+		// Since only one OVS internal port / Representor config may exist it is fine just to overwrite it
+		if _, ok := port.(*managementPortNetdev); !ok {
+			mgmtPortConfig = config
+		}
+	}
+
+	return mgmtPorts, mgmtPortConfig, nil
+}
+
 // Start learns the subnets assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
 func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 	var err error
 	var node *kapi.Node
 	var subnets []*net.IPNet
-	var mgmtPort ManagementPort
-	var mgmtPortConfig *managementPortConfig
 	var cniServer *cni.Server
 
 	klog.Infof("OVN Kube Node initialization, Mode: %s", config.OvnKubeNode.Mode)
@@ -494,12 +540,11 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 		}
 	}
 
-	// Setup Management port and gateway
-	mgmtPort = NewManagementPort(n.name, subnets)
 	nodeAnnotator := kube.NewNodeAnnotator(n.Kube, node.Name)
 	waiter := newStartupWaiter()
 
-	mgmtPortConfig, err = mgmtPort.Create(nodeAnnotator, waiter)
+	// Setup management ports
+	mgmtPorts, mgmtPortConfig, err := createNodeManagementPorts(n.name, nodeAnnotator, waiter, subnets)
 	if err != nil {
 		return err
 	}
@@ -511,6 +556,7 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 			return err
 		}
 	} else {
+		// Initialize gateway for OVS internal port or representor management port
 		if err := n.initGateway(subnets, nodeAnnotator, waiter, mgmtPortConfig, nodeAddr); err != nil {
 			return err
 		}
@@ -556,11 +602,11 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 		// Determine if we need to run upgrade checks
 		if initialTopoVersion != types.OvnCurrentTopologyVersion {
 			if needLegacySvcRoute {
-				klog.Info("System may be upgrading, falling back to to legacy K8S Service via mp0")
-				// add back legacy route for service via mp0
-				link, err := util.LinkSetUp(types.K8sMgmtIntfName)
+				klog.Info("System may be upgrading, falling back to legacy K8S Service via management port")
+				// add back legacy route for service via management port
+				link, err := util.LinkSetUp(config.OvnKubeNode.MgmtPortIntfName)
 				if err != nil {
-					return fmt.Errorf("unable to get link for %s, error: %v", types.K8sMgmtIntfName, err)
+					return fmt.Errorf("unable to get link for %s, error: %v", config.OvnKubeNode.MgmtPortIntfName, err)
 				}
 				var gwIP net.IP
 				for _, subnet := range config.Kubernetes.ServiceCIDRs {
@@ -628,7 +674,9 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 	}
 
 	// start management port health check
-	mgmtPort.CheckManagementPortHealth(mgmtPortConfig, n.stopChan)
+	for _, mgmtPort := range mgmtPorts {
+		mgmtPort.port.CheckManagementPortHealth(mgmtPort.config, n.stopChan)
+	}
 
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		// start health check to ensure there are no stale OVS internal ports
@@ -958,7 +1006,7 @@ func (nc *ovnNodeController) updateLocalnetOvnBridgeMapping(toAdd bool) error {
 	// that provides connectivity to that network. It is in the form of physnet1:br1,physnet2:br2.
 	// Note that there may be multiple ovs bridge mappings, be sure not to override
 	// the mappings for the other physical network
-	networkName := nc.nadInfo.Prefix + types.LocalNetBridgeName
+	networkName := util.GetClusterScopedName(nc.nadInfo.Prefix + types.LocalNetBridgeName)
 	stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
 		"external_ids:ovn-bridge-mappings")
 	if err != nil {
@@ -1433,10 +1481,10 @@ func updateEndpointSlice(nodeIP string, skipFirewalldAnnotation bool,
 }
 
 func syncEndpointSlices(obj []interface{}) error {
-	err := addInterfaceToFirewallZone(types.K8sMgmtIntfName, ovnFirewallZone)
+	err := addInterfaceToFirewallZone(config.OvnKubeNode.MgmtPortIntfName, ovnFirewallZone)
 	if err != nil {
 		klog.Errorf("Failed to add interface %s to ovn firewall zone: (%v)",
-			types.K8sMgmtIntfName, err)
+			config.OvnKubeNode.MgmtPortIntfName, err)
 	}
 	// TODO(gmoodalbail): we need to clean up any stale ports in ovn and ngn-admin zone
 	return err
@@ -1453,9 +1501,9 @@ func configureSvcRouteViaBridge(bridge string) error {
 func upgradeServiceRoute(bridgeName string) error {
 	klog.Info("Updating K8S Service route")
 	// Flush old routes
-	link, err := util.LinkSetUp(types.K8sMgmtIntfName)
+	link, err := util.LinkSetUp(config.OvnKubeNode.MgmtPortIntfName)
 	if err != nil {
-		return fmt.Errorf("unable to get link: %s, error: %v", types.K8sMgmtIntfName, err)
+		return fmt.Errorf("unable to get link: %s, error: %v", config.OvnKubeNode.MgmtPortIntfName, err)
 	}
 	if err := util.LinkRoutesDel(link, config.Kubernetes.ServiceCIDRs); err != nil {
 		return fmt.Errorf("unable to delete routes on upgrade, error: %v", err)

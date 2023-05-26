@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -85,13 +86,13 @@ func (r *repair) runBeforeSync() {
 		r.unsyncedServices.Insert(key)
 	}
 
-	// Find all load-balancers associated with Services
+	// Find all load-balancers associated with Services, filtered on cluster_name
 	lbCache, err := ovnlb.GetLBCache(r.nbClient)
 	if err != nil {
 		klog.Errorf("Failed to get load_balancer cache: %v", err)
 	}
-	existingLBs := lbCache.Find(map[string]string{"k8s.ovn.org/kind": "Service"})
-
+	lbFilter := map[string]string{"k8s.ovn.org/kind": "Service"}
+	existingLBs := lbCache.Find(lbFilter)
 	// Look for any load balancers whose Service no longer exists in the apiserver
 	staleLBs := []string{}
 	for _, lb := range existingLBs {
@@ -114,12 +115,12 @@ func (r *repair) runBeforeSync() {
 	if err := ovnlb.DeleteLBs(r.nbClient, staleLBs); err != nil {
 		klog.Errorf("Failed to delete stale LBs: %v", err)
 	}
-	klog.V(2).Infof("Deleted %d stale service LBs", len(staleLBs))
+	klog.V(2).Infof("Deleted %d stale service LBs. StaleLB ids were:%v", len(staleLBs), staleLBs)
 
 	// Remove existing reject rules. They are not used anymore
 	// given the introduction of idling loadbalancers
 	p := func(item *nbdb.ACL) bool {
-		return item.Action == nbdb.ACLActionReject
+		return item.Action == nbdb.ACLActionReject && util.HasExternalIDsForCluster(item.ExternalIDs)
 	}
 	acls, err := libovsdbops.FindACLsWithPredicate(r.nbClient, p)
 	if err != nil {

@@ -1,6 +1,7 @@
 package node
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"strings"
@@ -149,9 +150,9 @@ func checkForStaleOVSInternalPorts() {
 	staleInterfaceArgs := []string{}
 	values := strings.Split(stdout, "\n\n")
 	for _, val := range values {
-		if val == types.K8sMgmtIntfName {
-			klog.Errorf("The representor for the ovn-k8s-mp0 management port is missing on the DPU. " +
-				"Perhaps the host rebooted or SR-IOV VFs were disabled on the host.")
+		if val == config.OvnKubeNode.MgmtPortIntfName || val == config.OvnKubeNode.MgmtPortIntfName+"_0" {
+			klog.Errorf("Management port %s is missing. Perhaps the host rebooted "+
+				"or SR-IOV VFs were disabled on the host.", val)
 			continue
 		}
 		klog.Warningf("Found stale interface %s, so queuing it to be deleted", val)
@@ -159,6 +160,11 @@ func checkForStaleOVSInternalPorts() {
 			staleInterfaceArgs = append(staleInterfaceArgs, "--")
 		}
 		staleInterfaceArgs = append(staleInterfaceArgs, "--if-exists", "--with-iface", "del-port", val)
+	}
+
+	// Don't call ovs if all interfaces were skipped in the loop above
+	if len(staleInterfaceArgs) == 0 {
+		return
 	}
 
 	_, stderr, err := util.RunOVSVsctl(staleInterfaceArgs...)
@@ -175,6 +181,13 @@ func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCac
 	// Get all ovn-kubernetes Pod interfaces. these are OVS interfaces that have their external_ids:sandbox set.
 	ovsArgs := []string{"--columns=name,external_ids", "--data=bare", "--no-headings",
 		"--format=csv", "find", "Interface", "external_ids:sandbox!=\"\""}
+	// if clustername is present, select only ports belonging to this cluster.
+	if util.IsClusterScoped() {
+		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:cluster_name=%s", util.GetClusterName()))
+	}
+	// check only for resources created by the current type of ovn-kube
+	ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:ovn_kube_mode=%s", config.OvnKubeNode.Mode))
+
 	out, stderr, err := util.RunOVSVsctl(ovsArgs...)
 	if err != nil {
 		klog.Errorf("Failed to list ovn-k8s OVS interfaces, stderr: %q, error: %v", stderr, err)

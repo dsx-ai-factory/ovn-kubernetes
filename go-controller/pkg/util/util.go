@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"net"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,6 +29,21 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
+var (
+	rePciDeviceName = regexp.MustCompile(`^[0-9a-f]{4}:[0-9a-f]{2}:[01][0-9a-f]\.[0-7]$`)
+	reAuxDeviceName = regexp.MustCompile(`^\w+.\w+.\d+$`)
+)
+
+// IsPCIDeviceName check if passed device id is a PCI device name
+func IsPCIDeviceName(deviceID string) bool {
+	return rePciDeviceName.MatchString(deviceID)
+}
+
+// IsAuxDeviceName check if passed device id is a Auxiliary device name
+func IsAuxDeviceName(deviceID string) bool {
+	return reAuxDeviceName.MatchString(deviceID)
+}
+
 // StringArg gets the named command-line argument or returns an error if it is empty
 func StringArg(context *cli.Context, name string) (string, error) {
 	val := context.String(name)
@@ -40,19 +56,19 @@ func StringArg(context *cli.Context, name string) (string, error) {
 // GetLegacyK8sMgmtIntfName returns legacy management ovs-port name
 func GetLegacyK8sMgmtIntfName(nodeName string) string {
 	if len(nodeName) > 11 {
-		return types.K8sPrefix + (nodeName[:11])
+		return GetClusterScopedName(types.K8sPrefix + (nodeName[:11]))
 	}
-	return types.K8sPrefix + nodeName
+	return GetClusterScopedName(types.K8sPrefix + nodeName)
 }
 
 // GetWorkerFromGatewayRouter determines a node's corresponding worker switch name from a gateway router name
 func GetWorkerFromGatewayRouter(gr string) string {
-	return strings.TrimPrefix(gr, types.GWRouterPrefix)
+	return strings.TrimPrefix(gr, GetClusterScopedName(types.GWRouterPrefix))
 }
 
 // GetGatewayRouterFromNode determines a node's corresponding gateway router name
 func GetGatewayRouterFromNode(node string) string {
-	return types.GWRouterPrefix + node
+	return GetClusterScopedName(types.GWRouterPrefix + node)
 }
 
 // GetNodeChassisID returns the machine's OVN chassis ID
@@ -446,7 +462,7 @@ func GetIfaceId(podNamespace, podName, nadName string, isDefault bool) string {
 // because hypervisors use external_ids:iface-id as a lookup key to
 // identify the network interface of that entity.
 func composePortName(podNamespace, podName, netPrefix string) string {
-	return netPrefix + podNamespace + "_" + podName
+	return GetClusterNamePrefix() + netPrefix + podNamespace + "_" + podName
 }
 
 // Get all possible logical ports name of this network
@@ -492,7 +508,7 @@ func UpdateNodeSwitchExcludeIPs(nbClient libovsdbclient.Client, nodeName string,
 
 	// Only query the cache for mp0 and HO LSPs
 	haveManagementPort := true
-	managmentPort := &nbdb.LogicalSwitchPort{Name: types.K8sPrefix + nodeName}
+	managmentPort := &nbdb.LogicalSwitchPort{Name: GetClusterScopedName(types.K8sPrefix + nodeName)}
 	_, err := libovsdbops.GetLogicalSwitchPort(nbClient, managmentPort)
 	if err == libovsdbclient.ErrNotFound {
 		klog.V(5).Infof("Management port does not exist for node %s", nodeName)
@@ -502,7 +518,7 @@ func UpdateNodeSwitchExcludeIPs(nbClient libovsdbclient.Client, nodeName string,
 	}
 
 	haveHybridOverlayPort := true
-	HOPort := &nbdb.LogicalSwitchPort{Name: types.HybridOverlayPrefix + nodeName}
+	HOPort := &nbdb.LogicalSwitchPort{Name: GetClusterScopedName(types.HybridOverlayPrefix + nodeName)}
 	_, err = libovsdbops.GetLogicalSwitchPort(nbClient, HOPort)
 	if err == libovsdbclient.ErrNotFound {
 		klog.V(5).Infof("Hybridoverlay port does not exist for node %s", nodeName)
@@ -535,7 +551,7 @@ func UpdateNodeSwitchExcludeIPs(nbClient libovsdbclient.Client, nodeName string,
 	}
 
 	sw := nbdb.LogicalSwitch{
-		Name:        nodeName,
+		Name:        GetClusterScopedName(nodeName),
 		OtherConfig: map[string]string{"exclude_ips": excludeIPs},
 	}
 	err = libovsdbops.UpdateLogicalSwitchSetOtherConfig(nbClient, &sw)

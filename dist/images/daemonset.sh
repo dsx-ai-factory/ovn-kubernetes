@@ -14,14 +14,14 @@ install_j2_renderer() {
 # The script renders j2 templates into yaml files in ../yaml/
 
 # ensure j2 renderer installed
-if ! command -v j2 >/dev/null 2>&1 ; then 
-  if ! command -v pip >/dev/null 2>&1 ; then 
+if ! command -v j2 >/dev/null 2>&1 ; then
+  if ! command -v pip >/dev/null 2>&1 ; then
     echo "Dependency not met: 'j2' not installed and cannot install with 'pip'"
     exit 1
   fi
   echo "'j2' not found, installing with 'pip'"
   install_j2_renderer
-fi 
+fi
 
 OVN_OUTPUT_DIR=""
 OVN_IMAGE=""
@@ -532,6 +532,7 @@ ovn_image=${image} \
   ovn_ipfix_cache_active_timeout=${ovn_ipfix_cache_active_timeout} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
+  ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
   ovnkube_app_name=ovnkube-node \
   j2 ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node.yaml
 
@@ -673,6 +674,7 @@ ovn_image=${image} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
   coredns_cluster_ip=${coredns_cluster_ip} \
+  ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
   ovnkube_app_name=ovnkube-node \
   j2 ../templates/ovnk8s-node.yaml.j2 -o ${output_dir}/ovnk8s-node.yaml
 

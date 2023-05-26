@@ -96,13 +96,14 @@ func ensureOvnAddressSet(asf *ovnAddressSetFactory, name string) (*ovnAddressSet
 	as := &ovnAddressSet{
 		nbClient: asf.nbClient,
 		name:     name,
-		hashName: asf.Prefix + hashedAddressSet(name),
+		hashName: util.GetClusterScopedName(asf.Prefix + hashedAddressSet(name)),
 	}
 
 	addrSet := nbdb.AddressSet{
 		Name:        as.hashName,
 		ExternalIDs: map[string]string{"name": name},
 	}
+	addrSet.ExternalIDs = util.ExternalIDsForCluster(addrSet.ExternalIDs)
 	if asf.IsSecondary {
 		addrSet.ExternalIDs["network_name"] = asf.NetName
 	}
@@ -151,8 +152,9 @@ func forEachAddressSet(netNameInfo util.NetNameInfo, nbClient libovsdbclient.Cli
 			return false
 		}
 		_, exists = addrSet.ExternalIDs["name"]
-		return exists
+		return exists && util.HasExternalIDsForCluster(addrSet.ExternalIDs)
 	}
+
 	addrSetList, err := libovsdbops.FindAddressSetsWithPredicate(nbClient, p)
 	if err != nil {
 		return fmt.Errorf("error reading address sets: %+v", err)
@@ -233,7 +235,7 @@ func (asf *ovnAddressSetFactory) DestroyAddressSetInBackingStore(name string) er
 
 func destroyAddressSet(netNameInfo util.NetNameInfo, nbClient libovsdbclient.Client, name string) error {
 	addrset := nbdb.AddressSet{
-		Name: netNameInfo.Prefix + hashedAddressSet(name),
+		Name: util.GetClusterScopedName(netNameInfo.Prefix + hashedAddressSet(name)),
 	}
 	err := libovsdbops.DeleteAddressSets(nbClient, &addrset)
 	if err != nil {
@@ -295,7 +297,7 @@ func newOvnAddressSet(asf *ovnAddressSetFactory, name string, ips []net.IP) (*ov
 	as := &ovnAddressSet{
 		nbClient: asf.nbClient,
 		name:     name,
-		hashName: asf.Prefix + hashedAddressSet(name),
+		hashName: util.GetClusterScopedName(asf.Prefix + hashedAddressSet(name)),
 	}
 
 	uniqIPs := ipsToStringUnique(ips)
@@ -304,6 +306,7 @@ func newOvnAddressSet(asf *ovnAddressSetFactory, name string, ips []net.IP) (*ov
 		ExternalIDs: map[string]string{"name": as.name},
 		Addresses:   uniqIPs,
 	}
+	addrSet.ExternalIDs = util.ExternalIDsForCluster(addrSet.ExternalIDs)
 	if asf.IsSecondary {
 		addrSet.ExternalIDs["network_name"] = asf.NetName
 	}

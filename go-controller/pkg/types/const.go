@@ -165,4 +165,6 @@ const (
 	OVSDBWaitTimeout = 0
 
 	ClusterLBGroupName = "clusterLBGroup"
+
+	OvnK8sClusterNameKey = OvnK8sPrefix + "/" + "cluster_name"
 )

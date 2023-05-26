@@ -47,10 +47,13 @@ type PodInterfaceInfo struct {
 	CheckExtIDs          bool   `json:"check-external-ids"`
 	IsDPUHostMode        bool   `json:"is-dpu-host-mode"`
 	PodUID               string `json:"pod-uid"`
-	VfNetdevName         string `json:"vf-netdev-name"`
+	NetdevName           string `json:"netdev-name"`
 	EnableUDPAggregation bool   `json:"enable-udp-aggregation"`
 	NadName              string `json:"nadName"` // nad's <namesapce/name>, when associated with a net-attach-def
 	SkipSpoofCheck       bool   `json:"skip-spoof-check"`
+	ClusterName          string `json:"clusterName"`
+	ClusterNamePrefix    string `json:"clusterNamePrefix"`
+	OvnKubeMode          string `json:"ovnKubeMode"`
 }
 
 // Explicit type for CNI commands the server handles

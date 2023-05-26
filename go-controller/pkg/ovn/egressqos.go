@@ -367,7 +367,7 @@ func (oc *Controller) repairEgressQoSes() error {
 			return false
 		}
 
-		return !nsWithQoS[ns]
+		return !nsWithQoS[ns] && util.HasExternalIDsForCluster(q.ExternalIDs)
 	}
 	existingQoSes, err := libovsdbops.FindQoSesWithPredicate(oc.mc.nbClient, p)
 	if err != nil {
@@ -402,6 +402,9 @@ func (oc *Controller) repairEgressQoSes() error {
 	}
 
 	asPredicate := func(as *nbdb.AddressSet) bool {
+		if !util.HasExternalIDsForCluster(as.ExternalIDs) {
+			return false
+		}
 		if !strings.HasPrefix(as.ExternalIDs["name"], types.EgressQoSRulePrefix) {
 			return false
 		}
@@ -475,7 +478,7 @@ func (oc *Controller) cleanEgressQoSNS(namespace string) error {
 		if !ok { // the QoS is not managed by an EgressQoS
 			return false
 		}
-		return eqNs == eq.namespace
+		return eqNs == eq.namespace && util.HasExternalIDsForCluster(q.ExternalIDs)
 	}
 	existingQoSes, err := libovsdbops.FindQoSesWithPredicate(oc.mc.nbClient, p)
 	if err != nil {
@@ -510,7 +513,8 @@ func (oc *Controller) cleanEgressQoSNS(namespace string) error {
 	}
 
 	asPredicate := func(as *nbdb.AddressSet) bool {
-		return strings.HasPrefix(as.ExternalIDs["name"], types.EgressQoSRulePrefix+eq.namespace)
+		return strings.HasPrefix(as.ExternalIDs["name"], types.EgressQoSRulePrefix+eq.namespace) &&
+			util.HasExternalIDsForCluster(as.ExternalIDs)
 	}
 	if err := libovsdbops.DeleteAddressSetsWithPredicate(oc.mc.nbClient, asPredicate); err != nil {
 		return fmt.Errorf("failed to remove egress qos address sets, err: %v", err)
@@ -566,6 +570,7 @@ func (oc *Controller) addEgressQoS(eqObj *egressqosapi.EgressQoS) error {
 			Action:      map[string]int{nbdb.QoSActionDSCP: r.dscp},
 			ExternalIDs: map[string]string{"EgressQoS": eq.namespace},
 		}
+		qos.ExternalIDs = util.ExternalIDsForCluster(qos.ExternalIDs)
 		qoses = append(qoses, qos)
 	}
 
@@ -621,7 +626,8 @@ func (oc *Controller) egressQoSSwitches() ([]string, error) {
 	// Find all node switches
 	p := func(item *nbdb.LogicalSwitch) bool {
 		// Ignore external and Join switches(both legacy and current)
-		return !(strings.HasPrefix(item.Name, types.JoinSwitchPrefix) || item.Name == "join" || strings.HasPrefix(item.Name, types.ExternalSwitchPrefix))
+		return !(strings.HasPrefix(item.Name, util.GetClusterScopedName(types.JoinSwitchPrefix)) ||
+			item.Name == util.GetClusterScopedName(types.OVNJoinSwitch) || strings.HasPrefix(item.Name, util.GetClusterScopedName(types.ExternalSwitchPrefix)))
 	}
 
 	nodeLocalSwitches, err := libovsdbops.FindLogicalSwitchesWithPredicate(oc.mc.nbClient, p)

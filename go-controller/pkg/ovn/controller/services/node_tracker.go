@@ -181,7 +181,7 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 		return
 	}
 
-	switchName := node.Name
+	switchName := util.GetClusterScopedName(node.Name)
 	grName := ""
 	ips := []string{}
 

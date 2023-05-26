@@ -399,8 +399,134 @@ func ExternalIDsForObject(obj K8sObject) map[string]string {
 		gk = kinds[0].GroupKind()
 	}
 
-	return map[string]string{
+	externalIDs := map[string]string{
 		types.OvnK8sPrefix + "/owner": nsn.String(),
 		types.OvnK8sPrefix + "/kind":  gk.String(),
 	}
+	externalIDs = ExternalIDsForCluster(externalIDs)
+	return externalIDs
+}
+
+var clustername string
+var clusterNamePrefix string
+var prefixSeparator = "_"
+
+func SetClusterName(name string) {
+	if name != "" {
+		clustername = name
+		clusterNamePrefix = "CLUSTER_" + clustername + prefixSeparator
+	}
+}
+
+func GetClusterName() string {
+	return clustername
+}
+
+// GetClusterNamePrefix generates a prefix with cluster_name
+// If there is no cluster_name specified, it returns empty
+func GetClusterNamePrefix() string {
+	return clusterNamePrefix
+}
+
+// GetOVNClusterRouterName returns the name of the `ovn cluster router`,
+// suitably extended with prefixes as necessary.
+// When called with no prefixes:
+//
+//	a) If there is no cluster_name set, returns types.OVNClusterRouter
+//	b) If a cluster_name is set, returns <cluster_name>_<types.OVNClusterRouter>
+//
+// When called with at least one additional prefixes (like the NadInfo prefix)
+//
+//	a) If there is no cluster_name set, returns <prefix>_<types.OVNClusterRouter>
+//	b) If a cluster_name is set, returns <cluster_name>_<prefix>_<types.OVNClusterRouter>
+//
+// When called with a prefix list (more than one prefix), the above logic
+// is extended for each prefix.
+// i.e. [cluster_name]_<prefix1>_<prefix2>....._<types.OVNClusterRouter>
+func GetOVNClusterRouterName(prefixes ...string) string {
+	if len(prefixes) == 1 { // typically the NadInfo prefix
+		return GetClusterNamePrefix() + prefixes[0] + types.OVNClusterRouter
+	}
+
+	if len(prefixes) > 1 {
+		var partprefix string
+		for _, prefix := range prefixes {
+			partprefix = partprefix + prefix
+		}
+		return GetClusterNamePrefix() + partprefix + types.OVNClusterRouter
+	}
+	// No prefix provided, just add cluster_name prefix if present.
+	return GetClusterNamePrefix() + types.OVNClusterRouter
+}
+
+func GetOVNJoinSwitchName() string {
+	return GetClusterNamePrefix() + types.OVNJoinSwitch
+}
+
+// IsClusterScoped returns true if this cluster has a cluster name set.
+func IsClusterScoped() bool {
+	return config.Kubernetes.ClusterName != ""
+}
+
+// Resource names will be prefixed with the cluster_name if available.
+func GetClusterScopedName(name string) string {
+	return fmt.Sprintf("%s%s", GetClusterNamePrefix(), name)
+}
+
+func CreateClusterScopedExternalIDs() map[string]string {
+	if config.Kubernetes.ClusterName != "" {
+		return map[string]string{types.OvnK8sClusterNameKey: config.Kubernetes.ClusterName}
+	}
+	return nil
+}
+
+func ExternalIDsForCluster(externalIDs map[string]string) map[string]string {
+	if len(externalIDs) == 0 || externalIDs == nil {
+		externalIDs = make(map[string]string)
+	}
+	if config.Kubernetes.ClusterName != "" {
+		externalIDs[types.OvnK8sClusterNameKey] = config.Kubernetes.ClusterName
+	}
+	return externalIDs
+}
+
+// HasExternalIDsForCluster returns true if the current item's `cluster_name` external_id
+// matches that of the current cluster. In case of non cluster scoped clusters (i.e no such external_id)
+// it defaults to true.
+func HasExternalIDsForCluster(externalIDs map[string]string) bool {
+	clusterNameExtID, ok := externalIDs[types.OvnK8sClusterNameKey]
+	if (config.Kubernetes.ClusterName == "" && !ok) || (config.Kubernetes.ClusterName != "" && config.Kubernetes.ClusterName == clusterNameExtID) {
+		return true
+	}
+	return false
+}
+
+func GetPhysNetNameKey() string {
+	if config.Gateway.PhysNetNameKey != "" {
+		return config.Gateway.PhysNetNameKey
+	}
+	return types.PhysicalNetworkName
+}
+
+func GetPhysNetNameKeyForNode(nodeName string, labels map[string]string) string {
+	if config.Gateway.PhysNetNameKey != "" {
+		// If the node has the physnet-name-key label, use that.
+		if nodeName != "" {
+			if value, ok := labels["k8s.ovn.org/physnet-name-key"]; ok {
+				return value
+			}
+		}
+		// Default behaviour
+		return config.Gateway.PhysNetNameKey
+	}
+	return types.PhysicalNetworkName
+}
+
+var conntrackzone int
+
+func GetConntrackZone() int {
+	if conntrackzone == 0 {
+		conntrackzone = config.Default.ConntrackZone
+	}
+	return conntrackzone
 }

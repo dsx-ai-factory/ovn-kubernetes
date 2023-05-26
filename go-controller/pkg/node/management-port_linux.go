@@ -200,7 +200,7 @@ func setupManagementPortIPFamilyConfig(mpcfg *managementPortConfig, cfg *managem
 	// source protocol address to be in the Logical Switch's subnet.
 	if exists, err = util.LinkNeighExists(mpcfg.link, cfg.gwIP, mpcfg.routerMAC); err == nil && !exists {
 		warnings = append(warnings, fmt.Sprintf("missing arp entry for MAC/IP binding (%s/%s) on link %s",
-			mpcfg.routerMAC.String(), cfg.gwIP, types.K8sMgmtIntfName))
+			mpcfg.routerMAC.String(), cfg.gwIP, mpcfg.ifName))
 		err = util.LinkNeighAdd(mpcfg.link, cfg.gwIP, mpcfg.routerMAC)
 	}
 	if err != nil {
@@ -291,7 +291,7 @@ func DelMgtPortIptRules() {
 	if err != nil {
 		return
 	}
-	rule := []string{"-o", types.K8sMgmtIntfName, "-j", iptableMgmPortChain}
+	rule := []string{"-o", config.OvnKubeNode.MgmtPortIntfName, "-j", iptableMgmPortChain}
 	_ = ipt.Delete("nat", "POSTROUTING", rule...)
 	_ = ipt6.Delete("nat", "POSTROUTING", rule...)
 	_ = ipt.ClearChain("nat", iptableMgmPortChain)
