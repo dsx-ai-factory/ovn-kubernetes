@@ -85,7 +85,7 @@ var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
 						Items: []v1.Pod{},
 					},
 				)
-				fakeOvn.controller.lsManager.AddNode(t.nodeName, []*net.IPNet{ovntest.MustParseIPNet(t.nodeSubnet)})
+				fakeOvn.controller.lsManager.AddNode(t.nodeName, t.nodeName+"-UUID", []*net.IPNet{ovntest.MustParseIPNet(t.nodeSubnet)})
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 				skipIPAMController, err := fakeOvn.mhController.NewOvnController(
@@ -100,7 +100,7 @@ var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				skipIPAMController.nadInfo.NetAttachDefs.Store("default/skip-ipam-nad", &util.NadConfig{MissRateLimitConfig: util.MissRateLimitConfig{MaxNewConnPPS: 10, MaxNewConnBurst: 100}})
 				skipIPAMController.WatchPods()
-				skipIPAMController.lsManager.AddNode(t.nodeName, []*net.IPNet{ovntest.MustParseIPNet(nodeSecondarySubnet)})
+				skipIPAMController.lsManager.AddNode(t.nodeName, t.nodeName+"-UUID", []*net.IPNet{ovntest.MustParseIPNet(nodeSecondarySubnet)})
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				// check nbdb data is added
@@ -148,7 +148,7 @@ var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
 						Items: []v1.Pod{},
 					},
 				)
-				fakeOvn.controller.lsManager.AddNode(t.nodeName, []*net.IPNet{ovntest.MustParseIPNet(t.nodeSubnet)})
+				fakeOvn.controller.lsManager.AddNode(t.nodeName, t.nodeName+"-UUID", []*net.IPNet{ovntest.MustParseIPNet(t.nodeSubnet)})
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 				skipIPAMController, err := fakeOvn.mhController.NewOvnController(
@@ -163,7 +163,7 @@ var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				skipIPAMController.nadInfo.NetAttachDefs.Store("default/skip-ipam-nad", &util.NadConfig{MissRateLimitConfig: util.MissRateLimitConfig{MaxNewConnPPS: 10, MaxNewConnBurst: 100}})
 				skipIPAMController.WatchPods()
-				skipIPAMController.lsManager.AddNode(t.nodeName, []*net.IPNet{ovntest.MustParseIPNet(nodeSecondarySubnet)})
+				skipIPAMController.lsManager.AddNode(t.nodeName, t.nodeName+"-UUID", []*net.IPNet{ovntest.MustParseIPNet(nodeSecondarySubnet)})
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				// check nbdb data is added
