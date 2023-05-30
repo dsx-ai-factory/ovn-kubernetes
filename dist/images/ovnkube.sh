@@ -125,6 +125,9 @@ ovnkube_logfile_maxsize=${OVNKUBE_LOGFILE_MAXSIZE:-"100"}
 ovnkube_logfile_maxbackups=${OVNKUBE_LOGFILE_MAXBACKUPS:-"5"}
 ovnkube_logfile_maxage=${OVNKUBE_LOGFILE_MAXAGE:-"5"}
 
+# logfile location
+ovnkube_logfile=${OVNKUBE_LOGFILE:""}
+
 # ovnkube-master ha-election parameters (value in seconds)
 ovn_master_ha_election_lease_duration=${OVN_HA_LEASE_DURATION:-"30"}
 ovn_master_ha_election_renew_deadline=${OVN_HA_RENEW_DEADLINE:-"20"}
@@ -1178,6 +1181,11 @@ ovn-master() {
     ovnkube_node_mgmt_port_intf_name_flag="--ovnkube-node-mgmt-port-intf-name=${ovnkube_node_mgmt_port_intf_name}"
   fi
 
+  ovnkube_logfile_flag="--logfile /var/log/ovn-kubernetes/ovnkube-master.log"
+  if [[ ${ovnkube_logfile} != "" ]]; then
+    ovnkube_logfile_flag="--logfile ${ovnkube_logfile}"
+  fi
+
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
     --init-master ${K8S_NODE} \
@@ -1195,7 +1203,7 @@ ovn-master() {
     ${ovn_v4_join_subnet_opt} \
     ${ovn_v6_join_subnet_opt} \
     --pidfile ${OVN_RUNDIR}/ovnkube-master.pid \
-    --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
+    ${ovnkube_logfile_flag} \
     ${nohostsubnet_label_option} \
     ${ovn_master_ssl_opts} \
     ${ovnkube_metrics_tls_opts} \
@@ -1672,6 +1680,10 @@ ovn-node() {
 
   fi
 
+  ovnkube_logfile_flag="--logfile /var/log/ovn-kubernetes/ovnkube.log"
+  if [[ ${ovnkube_logfile} != "" ]]; then
+    ovnkube_logfile_flag="--logfile ${ovnkube_logfile}"
+  fi
 
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
@@ -1694,7 +1706,7 @@ ovn-node() {
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
     ${ovn_gateway_router_subnet_opt} \
     --pidfile ${OVN_RUNDIR}/ovnkube.pid \
-    --logfile /var/log/ovn-kubernetes/ovnkube.log \
+    ${ovnkube_logfile_flag} \
     ${ovn_node_ssl_opts} \
     ${ovnkube_metrics_tls_opts} \
     --inactivity-probe=${ovn_remote_probe_interval} \

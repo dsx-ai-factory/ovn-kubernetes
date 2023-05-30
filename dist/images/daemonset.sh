@@ -99,6 +99,7 @@ OVNKUBE_CONFIG_DURATION_ENABLE=
 # it will render only the parts in ovn-setup.yaml related to RBAC permissions.
 IN_UPGRADE=
 COREDNS_CLUSTER_IP="10.96.0.10"
+OVNKUBE_LOGFILE=""
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -336,6 +337,9 @@ while [ "$1" != "" ]; do
   --in-upgrade)
     IN_UPGRADE=true
     ;;
+  --ovnkube-logfile)
+    OVNKUBE_LOGFILE=$VALUE
+    ;;
 
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
@@ -511,6 +515,8 @@ ovnkube_config_duration_enable=${OVNKUBE_CONFIG_DURATION_ENABLE}
 echo "ovnkube_config_duration_enable: ${ovnkube_config_duration_enable}"
 coredns_cluster_ip=${COREDNS_CLUSTER_IP}
 echo "coredns_cluster_ip: ${coredns_cluster_ip}"
+ovnkube_logfile=${OVNKUBE_LOGFILE}
+echo "ovnkube_logfile: ${ovnkube_logfile}"
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -522,6 +528,7 @@ ovn_image=${image} \
   ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
   ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
   ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
+  ovnkube_logfile=${ovnkube_logfile} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
@@ -561,6 +568,7 @@ ovn_image=${image} \
   ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
   ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
   ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
+  ovnkube_logfile=${ovnkube_logfile} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
@@ -586,6 +594,7 @@ ovn_image=${image} \
   ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
   ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
   ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
+  ovnkube_logfile=${ovnkube_logfile} \
   ovnkube_config_duration_enable=${ovnkube_config_duration_enable} \
   ovn_acl_logging_rate_limit=${ovn_acl_logging_rate_limit} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
@@ -627,6 +636,7 @@ ovn_image=${image} \
   ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
   ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
   ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
+  ovnkube_logfile=${ovnkube_logfile} \
   ovn_acl_logging_rate_limit=${ovn_acl_logging_rate_limit} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
@@ -664,6 +674,7 @@ ovn_image=${image} \
   ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
   ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
   ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
+  ovnkube_logfile=${ovnkube_logfile} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
@@ -703,6 +714,7 @@ ovn_image=${image} \
   ovnkube_node_loglevel=${node_loglevel} \
   ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
   ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
+  ovnkube_logfile=${ovnkube_logfile} \
   ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
@@ -731,6 +743,7 @@ ovn_image=${image_ubuntu} \
   ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
   ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
   ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
+  ovnkube_logfile=${ovnkube_logfile} \
   ovn_multicast_enable=${ovn_multicast_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
   ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
