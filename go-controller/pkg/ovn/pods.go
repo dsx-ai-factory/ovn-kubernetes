@@ -903,8 +903,6 @@ func (oc *Controller) getPortAddresses(switchName string, existingLSP *nbdb.Logi
 	podMac, podIPs, err := util.ExtractPortAddresses(existingLSP)
 	if err != nil {
 		return nil, nil, err
-	} else if podMac == nil || len(podIPs) == 0 {
-		return nil, nil, nil
 	}
 
 	var podIPNets []*net.IPNet
