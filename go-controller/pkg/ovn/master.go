@@ -1183,7 +1183,7 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 	}
 	err = libovsdbops.DeleteLogicalRouterPorts(oc.mc.nbClient, &logicalRouter, &logicalRouterPort)
 	if err != nil {
-		return fmt.Errorf("failed to delete router port %s: %v", logicalRouterPort.Name, err)
+		return fmt.Errorf("failed to delete router port %s: %w", logicalRouterPort.Name, err)
 	}
 
 	return nil
@@ -1207,7 +1207,7 @@ func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet) erro
 
 	if !oc.nadInfo.IsSecondary {
 		if err := oc.gatewayCleanup(nodeName); err != nil {
-			return fmt.Errorf("failed to clean up node %s gateway: (%v)", nodeName, err)
+			return fmt.Errorf("failed to clean up node %s gateway: (%w)", nodeName, err)
 		}
 
 		if err := oc.joinSwIPManager.ReleaseJoinLRPIPs(nodeName); err != nil {
