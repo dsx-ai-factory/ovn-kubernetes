@@ -69,6 +69,7 @@ OVN_MULTI_NETWORK_ENABLE="true"
 OVN_MULTI_NETWORKPOLICY_ENABLE="true"
 OVN_ADMIN_PBR_ENABLE="true"
 OVN_VIRTUALIP_ENABLE="true"
+OVN_IPRESERVATION_ENABLE="false"
 OVN_DISABLE_OVN_IFACE_ID_VER="true"
 OVN_V4_JOIN_SUBNET=""
 OVN_V6_JOIN_SUBNET=""
@@ -265,6 +266,9 @@ while [ "$1" != "" ]; do
   --virtual-ip-enable)
     OVN_VIRTUALIP_ENABLE=$VALUE
     ;;
+  --ip-reservation-enable)
+    OVN_IPRESERVATION_ENABLE=$VALUE
+    ;;
   --v4-join-subnet)
     OVN_V4_JOIN_SUBNET=$VALUE
     ;;
@@ -419,6 +423,8 @@ ovn_admin_pbr_enable=${OVN_ADMIN_PBR_ENABLE}
 echo "ovn_admin_pbr_enable: ${ovn_admin_pbr_enable}"
 ovn_virtual_ip_enable=${OVN_VIRTUALIP_ENABLE}
 echo "ovn_virtual_ip_enable: ${ovn_virtual_ip_enable}"
+ovn_ipreservation_enable=${OVN_IPRESERVATION_ENABLE}
+echo "ovn_ipreservation_enable: ${ovn_ipreservation_enable}"
 ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER}
 echo "ovn_disable_ovn_iface_id_ver: ${ovn_disable_ovn_iface_id_ver}"
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR}
@@ -612,6 +618,7 @@ ovn_image=${image} \
   ovn_egress_qos_enable=${ovn_egress_qos_enable} \
   ovn_admin_pbr_enable=${ovn_admin_pbr_enable} \
   ovn_virtual_ip_enable=${ovn_virtual_ip_enable} \
+  ovn_ipreservation_enable=${ovn_ipreservation_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_master_count=${ovn_master_count} \
   ovn_gateway_mode=${ovn_gateway_mode} \
@@ -653,6 +660,7 @@ ovn_image=${image} \
   ovn_egress_qos_enable=${ovn_egress_qos_enable} \
   ovn_admin_pbr_enable=${ovn_admin_pbr_enable} \
   ovn_virtual_ip_enable=${ovn_virtual_ip_enable} \
+  ovn_ipreservation_enable=${ovn_ipreservation_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_master_count=${ovn_master_count} \
   ovn_gateway_mode=${ovn_gateway_mode} \
@@ -846,6 +854,7 @@ cp ../templates/k8s.ovn.org_egressfirewalls.yaml.j2 ${output_dir}/k8s.ovn.org_eg
 cp ../templates/k8s.ovn.org_egressips.yaml.j2 ${output_dir}/k8s.ovn.org_egressips.yaml
 cp ../templates/k8s.ovn.org_adminpolicybasedroutes.yaml.j2 ${output_dir}/k8s.ovn.org_adminpolicybasedroutes.yaml
 cp ../templates/k8s.ovn.org_virtualips.yaml.j2 ${output_dir}/k8s.ovn.org_virtualips.yaml
+cp ../templates/k8s.ovn.org_ipreservations.yaml.j2 ${output_dir}/k8s.ovn.org_ipreservations.yaml
 cp ../templates/multinetworkpolicy.yaml.j2  ${output_dir}/multinetworkpolicy.yaml
 cp ../templates/k8s.ovn.org_egressqoses.yaml.j2 ${output_dir}/k8s.ovn.org_egressqoses.yaml
 

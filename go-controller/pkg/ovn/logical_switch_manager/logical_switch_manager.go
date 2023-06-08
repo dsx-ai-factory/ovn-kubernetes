@@ -13,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 )
 
 // logicalSwitchInfo contains information corresponding to the node. It holds the
@@ -242,6 +243,126 @@ func (manager *LogicalSwitchManager) AllocateIPs(switchName string, ipnets []*ne
 	return nil
 }
 
+func (manager *LogicalSwitchManager) AvailableIPsCount(switchName string, isIPv4 bool) (int64, error) {
+	if !isIPv4 {
+		// with IPv6, we will easily overflow if the prefixlength is > 63; add support for it later.
+		return 0, fmt.Errorf("determining available IPs count not supported for IPv6")
+	}
+	manager.RLock()
+	defer manager.RUnlock()
+
+	lsi, ok := manager.cache[switchName]
+	if !ok {
+		return 0, fmt.Errorf("switch %s not found in the logical switch manager cache", switchName)
+	}
+
+	var totalAvailableCount int64 = 0
+	for _, ipamMgr := range lsi.ipams {
+		cidr := ipamMgr.CIDR()
+		if (isIPv4 && utilnet.IsIPv6CIDR(&cidr)) || (!isIPv4 && utilnet.IsIPv4CIDR(&cidr)) {
+			continue
+		}
+		var usedIPCount int64 = 0
+		maxCount := utilnet.RangeSize(&cidr)
+		ipamMgr.ForEach(func(ip net.IP) { usedIPCount++ })
+		totalAvailableCount += maxCount - usedIPCount
+	}
+	// don't include the network address and broadcast address
+	return totalAvailableCount - 2, nil
+}
+
+// EnsureIPAMForIPFamily checks whether we have an IP allocator for the given IP Family
+func (manager *LogicalSwitchManager) EnsureIPAMForIPFamily(switchName string, isIPv4 bool) bool {
+	manager.RLock()
+	defer manager.RUnlock()
+	lsi, ok := manager.cache[switchName]
+	if !ok {
+		klog.Warningf("Switch %s not found in the logical switch manager cache", switchName)
+		return false
+	}
+
+	ipamFound := false
+	for _, ipamMgr := range lsi.ipams {
+		cidr := ipamMgr.CIDR()
+		if (isIPv4 && utilnet.IsIPv4CIDR(&cidr)) || (!isIPv4 && utilnet.IsIPv6CIDR(&cidr)) {
+			ipamFound = true
+			break
+		}
+	}
+	return ipamFound
+}
+
+func (manager *LogicalSwitchManager) AllocateIPsByCount(switchName string, isIPv4 bool, count int32) ([]*net.IPNet, error) {
+	manager.RLock()
+	defer manager.RUnlock()
+	var ipnets []*net.IPNet
+	var ip net.IP
+	var err error
+
+	lsi, ok := manager.cache[switchName]
+	if !ok {
+		return nil, fmt.Errorf("switch %s not found in the logical switch manager cache", switchName)
+	}
+
+	if len(lsi.ipams) == 0 {
+		return nil, fmt.Errorf("failed to allocate IPs for switch %s because there is no IPAM instance", switchName)
+	}
+
+	if len(lsi.ipams) != len(lsi.hostSubnets) {
+		return nil, fmt.Errorf("failed to allocate IPs for switch %s because host subnet instances: %d"+
+			" don't match ipamMgr instances: %d", switchName, len(lsi.hostSubnets), len(lsi.ipams))
+	}
+
+	defer func() {
+		if err == nil {
+			return
+		}
+		// iterate over range of already allocated indices and release
+		// ips allocated before the error occurred.
+		for _, relIPNet := range ipnets {
+			for _, ipamMgr := range lsi.ipams {
+				cidr := ipamMgr.CIDR()
+				if (isIPv4 && utilnet.IsIPv6CIDR(&cidr)) || (!isIPv4 && utilnet.IsIPv4CIDR(&cidr)) {
+					continue
+				}
+				if cidr.Contains(relIPNet.IP) {
+					ipamMgr.Release(relIPNet.IP)
+				}
+			}
+		}
+		klog.Warningf("Allocated IPs: %s were released", util.JoinIPNetIPs(ipnets, " "))
+	}()
+
+	// see if we have an IPAM for the given subnet,
+	for idx, ipamMgr := range lsi.ipams {
+		cidr := ipamMgr.CIDR()
+		if (isIPv4 && utilnet.IsIPv6CIDR(&cidr)) || (!isIPv4 && utilnet.IsIPv4CIDR(&cidr)) {
+			continue
+		}
+		for len(ipnets) != int(count) {
+			ip, err = ipamMgr.AllocateNext()
+			if err != nil {
+				if err != ipam.ErrFull {
+					return nil, err
+				}
+				break
+			}
+
+			ipnet := &net.IPNet{
+				IP:   ip,
+				Mask: lsi.hostSubnets[idx].Mask,
+			}
+			ipnets = append(ipnets, ipnet)
+		}
+	}
+	if len(ipnets) != int(count) {
+		klog.Errorf("Reservation failed. Was able to only allocate only %d IPs out of %d requested.")
+		err = ipam.ErrFull
+		return nil, ipam.ErrFull
+	}
+	return ipnets, nil
+}
+
 // AllocateNextIPs allocates IP addresses from each of the host subnets
 // for a given switch
 func (manager *LogicalSwitchManager) AllocateNextIPs(switchName string) ([]*net.IPNet, error) {
@@ -328,7 +449,7 @@ func (manager *LogicalSwitchManager) ConditionalIPRelease(switchName string, ipn
 	manager.RLock()
 	defer manager.RUnlock()
 	if ipnets == nil || switchName == "" {
-		klog.V(5).Infof("Node name is empty or ip slice to release is nil")
+		klog.V(5).Infof("Switch name is empty or ip slice to release is nil")
 		return false, nil
 	}
 	lsi, ok := manager.cache[switchName]

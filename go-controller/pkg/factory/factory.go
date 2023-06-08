@@ -46,6 +46,10 @@ import (
 	virtualipinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/informers/externalversions"
 	virtualiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/listers/virtualip/v1beta1"
 
+	ipreservationapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
+	ipreservationinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/informers/externalversions"
+	ipreservationlister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/listers/ipreservation/v1beta1"
+
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	knet "k8s.io/api/networking/v1"
@@ -81,6 +85,7 @@ type WatchFactory struct {
 	egressQoSFactory egressqosinformerfactory.SharedInformerFactory
 	adminPBRFactory  adminpbrinformerfactory.SharedInformerFactory
 	vipFactory       virtualipinformerfactory.SharedInformerFactory
+	ipresvFactory    ipreservationinformerfactory.SharedInformerFactory
 	informers        map[reflect.Type]*informer
 
 	stopChan chan struct{}
@@ -139,6 +144,7 @@ var (
 	MultinetworkpolicyType                reflect.Type = reflect.TypeOf(&multinetworkpolicyapi.MultiNetworkPolicy{})
 	AdminPBRType                          reflect.Type = reflect.TypeOf(&adminpbrapi.AdminPolicyBasedRoute{})
 	VirtualIPType                         reflect.Type = reflect.TypeOf(&virtualipapi.VirtualIP{})
+	IpReservationType                     reflect.Type = reflect.TypeOf(&ipreservationapi.IPReservation{})
 )
 
 // NewMasterWatchFactory initializes a new watch factory for the master or master+node processes.
@@ -159,6 +165,7 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 		mnpFactory:       multinetworkpolicyinformerfactory.NewSharedInformerFactory(ovnClientset.MultiNetworkPolicyClient, resyncInterval),
 		adminPBRFactory:  adminpbrinformerfactory.NewSharedInformerFactory(ovnClientset.AdminPBRClient, resyncInterval),
 		vipFactory:       virtualipinformerfactory.NewSharedInformerFactory(ovnClientset.VirtualIPClient, resyncInterval),
+		ipresvFactory:    ipreservationinformerfactory.NewSharedInformerFactory(ovnClientset.IPReservationClient, resyncInterval),
 		informers:        make(map[reflect.Type]*informer),
 		stopChan:         make(chan struct{}),
 	}
@@ -178,12 +185,16 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	if err := multinetworkpolicyapi.AddToScheme(multinetworkpolicyscheme.Scheme); err != nil {
 		return nil, err
 	}
+	if err := ipreservationapi.AddToScheme(scheme.Scheme); err != nil {
+		return nil, err
+	}
 	if err := adminpbrapi.AddToScheme(scheme.Scheme); err != nil {
 		return nil, err
 	}
 	if err := virtualipapi.AddToScheme(virtualipscheme.Scheme); err != nil {
 		return nil, err
 	}
+
 	// For Services, pre-populate the shared Informer with one that
 	// has a label selector excluding headless services.
 	wf.iFactory.InformerFor(&kapi.Service{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
@@ -282,6 +293,12 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 			return nil, err
 		}
 	}
+	if config.OVNKubernetesFeature.EnableIPReservation {
+		wf.informers[IpReservationType], err = newInformer(IpReservationType, wf.ipresvFactory.K8s().V1beta1().IPReservations().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
 	return wf, nil
 }
 
@@ -352,6 +369,14 @@ func (wf *WatchFactory) Start() error {
 	if config.OVNKubernetesFeature.EnableVirtualIP && wf.vipFactory != nil {
 		wf.vipFactory.Start(wf.stopChan)
 		for oType, synced := range wf.vipFactory.WaitForCacheSync(wf.stopChan) {
+			if !synced {
+				return fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
+		}
+	}
+	if config.OVNKubernetesFeature.EnableIPReservation && wf.ipresvFactory != nil {
+		wf.ipresvFactory.Start(wf.stopChan)
+		for oType, synced := range wf.ipresvFactory.WaitForCacheSync(wf.stopChan) {
 			if !synced {
 				return fmt.Errorf("error in syncing cache for %v informer", oType)
 			}
@@ -817,6 +842,10 @@ func (wf *WatchFactory) GetVirtualIPs() ([]*virtualipapi.VirtualIP, error) {
 func (wf *WatchFactory) GetVirtualIP(namespace string, name string) (*virtualipapi.VirtualIP, error) {
 	vipLister := wf.informers[VirtualIPType].lister.(virtualiplister.VirtualIPLister)
 	return vipLister.VirtualIPs(namespace).Get(name)
+}
+
+func (wf *WatchFactory) GetIPReservation(namespace string, name string) (*ipreservationapi.IPReservation, error) {
+	return wf.informers[IpReservationType].lister.(ipreservationlister.IPReservationLister).IPReservations(namespace).Get(name)
 }
 
 // AddNamespaceHandler adds a handler function that will be executed on Namespace object changes

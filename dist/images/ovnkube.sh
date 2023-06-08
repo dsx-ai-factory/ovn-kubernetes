@@ -332,6 +332,8 @@ ovn_egressqos_enable=${OVN_EGRESSQOS_ENABLE:-false}
 ovn_admin_pbr_enable=${OVN_ADMIN_PBR_ENABLE:-false}
 #OVN_VIRTUALIP_ENABLE - enable virtual ip for ovn-kubernetes
 ovn_virtualip_enable=${OVN_VIRTUALIP_ENABLE:-false}
+#OVN_IPRESERVATION_ENABLE - enable ipreservation for ovn-kubernetes
+ovn_ipreservation_enable=${OVN_IPRESERVATION_ENABLE:-false}
 #OVN_DISABLE_OVN_IFACE_ID_VER - disable usage of the OVN iface-id-ver option
 ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER:-false}
 ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
@@ -1144,6 +1146,10 @@ ovn-master() {
   if [[ ${ovn_virtualip_enable} == "true" ]]; then
 	  virtualip_enabled_flag="--enable-virtual-ip"
   fi
+  ipreservation_enabled_flag=
+  if [[ ${ovn_ipreservation_enable} == "true" ]]; then
+	  ipreservation_enabled_flag="--enable-ip-reservation"
+  fi
 
   nohostsubnet_label_option=
   if [[ ${OVN_NOHOSTSUBNET_LABEL} != "" ]]; then
@@ -1216,6 +1222,7 @@ ovn-master() {
     ${multi_networkpolicy_enabled_flag} \
     ${admin_pbr_enabled_flag} \
     ${virtualip_enabled_flag} \
+    ${ipreservation_enabled_flag} \
     --metrics-interval ${ovn_metrics_scrape_interval} \
     ${ovnkube_config_duration_enable_flag} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \

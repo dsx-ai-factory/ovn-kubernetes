@@ -18,6 +18,7 @@ import (
 
 	v1 "github.com/openshift/api/cloudnetwork/v1"
 
+	ipreservationv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
 	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
 )
 
@@ -567,6 +568,43 @@ func (_m *KubeInterface) UpdateVirtualIPStatus(vip *v1beta1.VirtualIP) error {
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*v1beta1.VirtualIP) error); ok {
 		r0 = rf(vip)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// GetVirtualIP provides a mock function with given fields: namespace, name
+func (_m *KubeInterface) GetIPReservation(namespace string, name string) (*ipreservationv1beta1.IPReservation, error) {
+	ret := _m.Called(namespace, name)
+
+	var r0 *ipreservationv1beta1.IPReservation
+	if rf, ok := ret.Get(0).(func(string, string) *ipreservationv1beta1.IPReservation); ok {
+		r0 = rf(namespace, name)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*ipreservationv1beta1.IPReservation)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, string) error); ok {
+		r1 = rf(namespace, name)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// UpdateIPReservationStatus provides a mock function with given fields: ipresv
+func (_m *KubeInterface) UpdateIPReservationStatus(ipresv *ipreservationv1beta1.IPReservation) error {
+	ret := _m.Called(ipresv)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(reservation *ipreservationv1beta1.IPReservation) error); ok {
+		r0 = rf(ipresv)
 	} else {
 		r0 = ret.Error(0)
 	}

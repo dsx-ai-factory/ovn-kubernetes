@@ -282,6 +282,9 @@ type Controller struct {
 	virtualIPHandler    *factory.Handler
 	virtualIPs          sync.Map
 	virtualIPRetryQueue workqueue.RateLimitingInterface
+
+	// workqueue for IPReserve operation
+	ipReserveRetryQueue workqueue.RateLimitingInterface
 }
 
 const (
@@ -321,6 +324,7 @@ func NewOvnMHController(ovnClient *util.OVNClientset, identity string, wf *facto
 			CloudNetworkClient:   ovnClient.CloudNetworkClient,
 			AdminPBRClient:       ovnClient.AdminPBRClient,
 			VIPClient:            ovnClient.VirtualIPClient,
+			IPReservationClient:  ovnClient.IPReservationClient,
 		},
 		watchFactory:   wf,
 		wg:             wg,
@@ -523,6 +527,14 @@ func (oc *Controller) Run(ctx context.Context) error {
 		}
 	}
 
+	// we need to start this before WatchPods so that we can reserve IPs before
+	// it gets assigned to the Pods
+	if config.OVNKubernetesFeature.EnableIPReservation {
+		if err := oc.WatchIPReservations(); err != nil {
+			return err
+		}
+	}
+
 	if err := oc.WatchPods(); err != nil {
 		return err
 	}
@@ -538,6 +550,7 @@ func (oc *Controller) Run(ctx context.Context) error {
 			return err
 		}
 	}
+
 	if !oc.nadInfo.IsSecondary {
 		// WatchNetworkPolicy depends on WatchPods and WatchNamespaces
 		if err := oc.WatchNetworkPolicy(); err != nil {

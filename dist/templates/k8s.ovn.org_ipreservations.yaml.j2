@@ -1,0 +1,111 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.10.0
+  creationTimestamp: null
+  name: ipreservations.k8s.ovn.org
+spec:
+  group: k8s.ovn.org
+  names:
+    kind: IPReservation
+    listKind: IPReservationList
+    plural: ipreservations
+    shortNames:
+    - ipreserve
+    singular: ipreservation
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.networkAttachmentName
+      name: NetworkName
+      type: string
+    - jsonPath: .spec.ipfamily
+      name: IPFamily
+      type: string
+    - jsonPath: .spec.count
+      name: Count
+      type: integer
+    - jsonPath: .status.status
+      name: Status
+      type: string
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        description: "IPReservation namespace-scoped resource provides a way to reserve
+          certain number of IPs in Layer-2 and Localnet type NADs. The OVN K8s CNI
+          will reserve specified number of IPs from the NAD's subnet and return the
+          list of IPs that were reserved in the status section of the resource. \n
+          The reservation is all or none. If the specified number of IPs are not available
+          to reserve, then this resource status would be failed."
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: IPReservationSpec defines the desired state of IPReservation
+            properties:
+              count:
+                description: "Specifies the total number of IPs to be reserved from
+                  the subnet that the networkAttachmentName represents. If the subnet
+                  has `count` number of IPs available, then the reservation will be
+                  successful. The controller will allocate those many IPs and populate
+                  the reservedIPs field in the status section with those IPs. \n The
+                  OVN K8s CNI will not use the reserved IPs for allocating to Pods
+                  connecting to the above NAD."
+                format: int32
+                maximum: 16
+                minimum: 1
+                type: integer
+              ipfamily:
+                description: IPFamily represents the IP Family (IPv4 or IPv6). This
+                  type is used to express the family of an IP that need to be reserved.
+                enum:
+                - IPv4
+                - IPv6
+                type: string
+              networkAttachmentName:
+                description: Selects the network-attachment-definition from whose
+                  subnets the IPs will be reserved. The NAD should be of type Layer-2
+                  or Localnet. Specifying anything else will be an invalid configuration.
+                pattern: ^[0-9a-zA-Z\-]+\/[0-9a-zA-Z\-]+$
+                type: string
+            required:
+            - count
+            - ipfamily
+            - networkAttachmentName
+            type: object
+          status:
+            description: IPReservationStatus defines the observed state of IPReservation
+            properties:
+              messages:
+                description: An array of Human-readable messages indicating details
+                  about the status of the object.
+                items:
+                  type: string
+                type: array
+              reservedIPs:
+                description: List of IPs that were reserved
+                items:
+                  type: string
+                type: array
+              status:
+                description: A concise indication of whether the IPReservation resource
+                  is applied or not
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

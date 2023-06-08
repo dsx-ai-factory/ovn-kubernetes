@@ -1,11 +1,11 @@
 package logicalswitchmanager
 
 import (
-	"github.com/urfave/cli/v2"
-	"k8s.io/klog/v2"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/urfave/cli/v2"
+	"k8s.io/klog/v2"
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
@@ -274,7 +274,202 @@ var _ = ginkgo.Describe("OVN Logical Switch Manager operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
+	})
 
+	ginkgo.Context("when reserving IP addresses", func() {
+		ginkgo.It("counts correctly available number of IPs for IPv4", func() {
+			app.Action = func(ctx *cli.Context) error {
+				_, err := config.InitConfig(ctx, fexec, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				testNode := testNodeSubnetData{
+					nodeName: ovntypes.OVNLocalnetSwitch,
+					subnets: []string{
+						"10.1.1.0/24",
+						"2000::/64",
+					},
+				}
+
+				allocatedIPs := []string{
+					"10.1.1.2/24",
+					"10.1.1.3/24",
+					"10.1.1.4/24",
+					"10.1.1.5/24",
+					"10.1.1.6/24",
+					"10.1.1.7/24",
+					"10.1.1.8/24",
+					"2000::2/64",
+				}
+				err = lsManager.AddNode(testNode.nodeName, "", ovntest.MustParseIPNets(testNode.subnets...))
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				for _, allocatedIP := range allocatedIPs {
+					allocatedIPNets := ovntest.MustParseIPNets(allocatedIP)
+					err = lsManager.AllocateIPs(testNode.nodeName, allocatedIPNets)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				}
+				gomega.Expect(lsManager.AvailableIPsCount(testNode.nodeName, true)).Should(gomega.Equal(int64(247)))
+
+				return nil
+			}
+			lsManager = NewLocalnetSwitchManager()
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("fails while counting available number of IPs for IPv6", func() {
+			app.Action = func(ctx *cli.Context) error {
+				_, err := config.InitConfig(ctx, fexec, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				testNode := testNodeSubnetData{
+					nodeName: ovntypes.OVNLocalnetSwitch,
+					subnets: []string{
+						"10.1.1.0/24",
+						"2000::/120",
+					},
+				}
+
+				err = lsManager.AddNode(testNode.nodeName, "", ovntest.MustParseIPNets(testNode.subnets...))
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				_, err = lsManager.AvailableIPsCount(testNode.nodeName, false)
+				gomega.Expect(err).To(gomega.HaveOccurred())
+				return nil
+			}
+			lsManager = NewLocalnetSwitchManager()
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("counts correctly when no IPs have been allocated", func() {
+			app.Action = func(ctx *cli.Context) error {
+				_, err := config.InitConfig(ctx, fexec, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				testNode := testNodeSubnetData{
+					nodeName: ovntypes.OVNLocalnetSwitch,
+					subnets: []string{
+						"10.1.1.0/24",
+					},
+				}
+
+				err = lsManager.AddNode(testNode.nodeName, "", ovntest.MustParseIPNets(testNode.subnets...))
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(lsManager.AvailableIPsCount(testNode.nodeName, true)).Should(gomega.Equal(int64(254)))
+
+				return nil
+			}
+			lsManager = NewLocalnetSwitchManager()
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("correctly reserve requested number of IPs", func() {
+			app.Action = func(ctx *cli.Context) error {
+				_, err := config.InitConfig(ctx, fexec, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				testNode := testNodeSubnetData{
+					nodeName: ovntypes.OVNLocalnetSwitch,
+					subnets: []string{
+						"10.1.1.0/24",
+					},
+				}
+
+				allocatedIPs := []string{
+					"10.1.1.1/24",
+					"10.1.1.2/24",
+					"10.1.1.3/24",
+					"10.1.1.4/24",
+					"10.1.1.5/24",
+					"10.1.1.6/24",
+					"10.1.1.7/24",
+					"10.1.1.8/24",
+				}
+
+				expectedIPs := []string{
+					"10.1.1.9/24",
+					"10.1.1.10/24",
+					"10.1.1.11/24",
+					"10.1.1.12/24",
+					"10.1.1.13/24",
+				}
+
+				err = lsManager.AddNode(testNode.nodeName, "", ovntest.MustParseIPNets(testNode.subnets...))
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				for _, allocatedIP := range allocatedIPs {
+					allocatedIPNets := ovntest.MustParseIPNets(allocatedIP)
+					err = lsManager.AllocateIPs(testNode.nodeName, allocatedIPNets)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				}
+
+				// count of available IP now should be 246; reserve 5 IPs
+				ipnets, err := lsManager.AllocateIPsByCount(testNode.nodeName, true, 5)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(len(ipnets)).Should(gomega.Equal(5))
+				for i, ipnet := range ipnets {
+					gomega.Expect(ipnet.String()).Should(gomega.Equal(expectedIPs[i]))
+				}
+				// check that the count now is 241
+				gomega.Expect(lsManager.AvailableIPsCount(testNode.nodeName, true)).Should(gomega.Equal(int64(241)))
+				return nil
+			}
+			lsManager = NewLocalnetSwitchManager()
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("correctly releases partially allocated IPs on failure", func() {
+			app.Action = func(ctx *cli.Context) error {
+				_, err := config.InitConfig(ctx, fexec, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				testNode := testNodeSubnetData{
+					nodeName: ovntypes.OVNLocalnetSwitch,
+					subnets: []string{
+						"10.1.1.0/29",
+					},
+				}
+
+				allocatedIPs := []string{
+					"10.1.1.1/29",
+					"10.1.1.2/29",
+					"10.1.1.3/29",
+				}
+
+				expectedIPs := []string{
+					"10.1.1.4/29",
+					"10.1.1.5/29",
+					"10.1.1.6/29",
+				}
+
+				err = lsManager.AddNode(testNode.nodeName, "", ovntest.MustParseIPNets(testNode.subnets...))
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				for _, allocatedIP := range allocatedIPs {
+					allocatedIPNets := ovntest.MustParseIPNets(allocatedIP)
+					err = lsManager.AllocateIPs(testNode.nodeName, allocatedIPNets)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				}
+
+				// count of available IP now should be 3;
+				gomega.Expect(lsManager.AvailableIPsCount(testNode.nodeName, true)).Should(gomega.Equal(int64(3)))
+
+				// reserve 5 IPs and it should fail and all the partially allocated IPs must be released
+				// total available IP to be 3
+				ipnets, err := lsManager.AllocateIPsByCount(testNode.nodeName, true, 5)
+				gomega.Expect(err).To(gomega.HaveOccurred())
+				gomega.Expect(ipnets).Should(gomega.BeNil())
+				gomega.Expect(lsManager.AvailableIPsCount(testNode.nodeName, true)).Should(gomega.Equal(int64(3)))
+
+				// reserve 3 IPs and it should pass
+				ipnets, err = lsManager.AllocateIPsByCount(testNode.nodeName, true, 3)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(len(ipnets)).Should(gomega.Equal(3))
+				for i, ipnet := range ipnets {
+					gomega.Expect(ipnet.String()).Should(gomega.Equal(expectedIPs[i]))
+				}
+				// check that the count now is 0
+				gomega.Expect(lsManager.AvailableIPsCount(testNode.nodeName, true)).Should(gomega.Equal(int64(0)))
+				return nil
+			}
+			lsManager = NewLocalnetSwitchManager()
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
 	})
 
 })

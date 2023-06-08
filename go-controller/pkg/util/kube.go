@@ -30,6 +30,7 @@ import (
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
 	egressqosclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned"
+	ipresvclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/clientset/versioned"
 	virtualipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/clientset/versioned"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
@@ -49,6 +50,7 @@ type OVNClientset struct {
 	MultiNetworkPolicyClient multinetworkpolicyclientset.Interface
 	AdminPBRClient           adminpbrclientset.Interface
 	VirtualIPClient          virtualipclientset.Interface
+	IPReservationClient      ipresvclientset.Interface
 }
 
 func adjustCommit() string {
@@ -168,6 +170,10 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 	if err != nil {
 		return nil, err
 	}
+	ipReservationClientset, err := ipresvclientset.NewForConfig(kconfig)
+	if err != nil {
+		return nil, err
+	}
 	return &OVNClientset{
 		KubeClient:               kclientset,
 		EgressIPClient:           egressIPClientset,
@@ -178,6 +184,7 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		MultiNetworkPolicyClient: multiNetworkPolicyClientset,
 		AdminPBRClient:           adminPBRClientset,
 		VirtualIPClient:          virtualIPClientset,
+		IPReservationClient:      ipReservationClientset,
 	}, nil
 }
 

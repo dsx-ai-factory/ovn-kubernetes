@@ -361,6 +361,7 @@ type OVNKubernetesFeatureConfig struct {
 	// EnableAdminPolicyBasedRouting allows admin to manage PBR rules
 	EnableAdminPolicyBasedRouting bool `gcfg:"enable-admin-pbr"`
 	EnableVirtualIP               bool `gcfg:"enable-virtual-ip"`
+	EnableIPReservation           bool `gcfg:"enable-ip-reservation"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -963,6 +964,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use VirtualIP CRD feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableVirtualIP,
 		Value:       OVNKubernetesFeature.EnableVirtualIP,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-ip-reservation",
+		Usage:       "Configure to use IPReservation CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableIPReservation,
+		Value:       OVNKubernetesFeature.EnableIPReservation,
 	},
 }
 

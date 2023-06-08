@@ -13,8 +13,11 @@ import (
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
+	ipreservationv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
+	ipreservationclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/clientset/versioned"
 	virtualipv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
 	virtualipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/clientset/versioned"
+
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -58,6 +61,7 @@ type Interface interface {
 	UpdatePod(pod *kapi.Pod) error
 	UpdateAdminPBRStatus(adminpbr *adminpbrv1beta1.AdminPolicyBasedRoute) (*adminpbrv1beta1.AdminPolicyBasedRoute, error)
 	GetVirtualIP(namespace, name string) (*virtualipv1beta1.VirtualIP, error)
+	UpdateIPReservationStatus(status *ipreservationv1beta1.IPReservation) error
 }
 
 // Kube is the structure object upon which the Interface is implemented
@@ -68,6 +72,7 @@ type Kube struct {
 	CloudNetworkClient   ocpcloudnetworkclientset.Interface
 	AdminPBRClient       adminpbrclientset.Interface
 	VIPClient            virtualipclientset.Interface
+	IPReservationClient  ipreservationclientset.Interface
 }
 
 // SetLabelsOnPod takes the pod object and map of key/value string pairs to set as labels
@@ -410,4 +415,11 @@ func (k *Kube) UpdateVirtualIPStatus(vip *virtualipv1beta1.VirtualIP) error {
 // GetVirtualIP returns virtualIP resource
 func (k *Kube) GetVirtualIP(namespace, name string) (*virtualipv1beta1.VirtualIP, error) {
 	return k.VIPClient.K8sV1beta1().VirtualIPs(namespace).Get(context.TODO(), name, metav1.GetOptions{})
+}
+
+// UpdateIPReservationStatus updates the IPReservation with the provided IPReservation data
+func (k *Kube) UpdateIPReservationStatus(ipresv *ipreservationv1beta1.IPReservation) error {
+	klog.Infof("Updating status of IPRseservation %s/%s", ipresv.Namespace, ipresv.Name)
+	_, err := k.IPReservationClient.K8sV1beta1().IPReservations(ipresv.Namespace).UpdateStatus(context.TODO(), ipresv, metav1.UpdateOptions{})
+	return err
 }

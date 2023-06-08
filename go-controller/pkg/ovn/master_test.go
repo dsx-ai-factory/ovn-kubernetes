@@ -18,7 +18,9 @@ import (
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
+	ipreservationfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/clientset/versioned/fake"
 	virtualipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/clientset/versioned/fake"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -923,6 +925,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			adminPBRFakeClient := &adminpbrfake.Clientset{}
 			networkAttchDefClient := &networkattachmentdefinitionfake.Clientset{}
 			virtualIPFakeClient := &virtualipfake.Clientset{}
+			ipReservationFakeClient := &ipreservationfake.Clientset{}
 			fakeClient := &util.OVNClientset{
 				KubeClient:            kubeFakeClient,
 				EgressIPClient:        egressIPFakeClient,
@@ -930,12 +933,13 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				EgressQoSClient:       egressQoSFakeClient,
 				NetworkAttchDefClient: networkAttchDefClient,
 				VirtualIPClient:       virtualIPFakeClient,
+				IPReservationClient:   ipReservationFakeClient,
 			}
 
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			config.Kubernetes.HostNetworkNamespace = ""
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient, nil, adminPBRFakeClient, virtualIPFakeClient}, testNode.Name)
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient, nil, adminPBRFakeClient, virtualIPFakeClient, ipReservationFakeClient}, testNode.Name)
 			l3Config := node1.gatewayConfig(config.GatewayModeLocal, uint(vlanID))
 			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
@@ -1072,6 +1076,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			adminPBRFakeClient := &adminpbrfake.Clientset{}
 			networkAttchDefClient := &networkattachmentdefinitionfake.Clientset{}
 			virtualIPFakeClient := &virtualipfake.Clientset{}
+			ipReservationFakeClient := &ipreservationfake.Clientset{}
 			fakeClient := &util.OVNClientset{
 				KubeClient:            kubeFakeClient,
 				EgressIPClient:        egressIPFakeClient,
@@ -1079,12 +1084,13 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				EgressQoSClient:       egressQoSFakeClient,
 				NetworkAttchDefClient: networkAttchDefClient,
 				VirtualIPClient:       virtualIPFakeClient,
+				IPReservationClient:   ipReservationFakeClient,
 			}
 
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			config.Kubernetes.HostNetworkNamespace = ""
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient, nil, adminPBRFakeClient, virtualIPFakeClient}, testNode.Name)
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient, nil, adminPBRFakeClient, virtualIPFakeClient, ipReservationFakeClient}, testNode.Name)
 			l3Config := node1.gatewayConfig(config.GatewayModeShared, uint(vlanID))
 			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
@@ -1216,7 +1222,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			config.Kubernetes.HostNetworkNamespace = ""
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient, nil, nil, nil}, testNode.Name)
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient, nil, nil, nil, nil}, testNode.Name)
 			l3Config := node1.gatewayConfig(config.GatewayModeShared, uint(vlanID))
 			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
@@ -1378,7 +1384,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			config.Kubernetes.HostNetworkNamespace = ""
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient, nil, nil, nil}, testNode.Name)
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient, nil, nil, nil, nil}, testNode.Name)
 			l3Config := node1.gatewayConfig(config.GatewayModeShared, uint(vlanID))
 			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
@@ -1524,7 +1530,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			config.Kubernetes.NoHostSubnetNodes = &metav1.LabelSelector{
 				MatchLabels: nodeNoHostSubnetAnnotation(),
 			}
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient, nil, nil, nil}, testNode.Name)
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient, nil, nil, nil, nil}, testNode.Name)
 			l3Config := node1.gatewayConfig(config.GatewayModeShared, uint(vlanID))
 			gomega.Expect(util.SetL3GatewayConfig(nodeAnnotator, l3Config)).To(gomega.Succeed())
 
