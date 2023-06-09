@@ -1001,7 +1001,7 @@ func (oc *Controller) WatchNamespaces() (err error) {
 			oc.deleteNamespace(ns)
 		},
 	}, oc.syncNamespaces)
-	klog.Infof("Bootstrapping existing namespaces and cleaning stale namespaces took %v", time.Since(start))
+	klog.Infof("Bootstrapping existing namespaces and cleaning stale namespaces for network %s took %v", oc.nadInfo.NetName, time.Since(start))
 	if err != nil {
 		klog.Errorf("Failed to watch namespaces err: %v", err)
 		return err
@@ -1098,7 +1098,7 @@ func (oc *Controller) WatchAdminPolicyBasedRoutes() error {
 		DeleteFunc: func(obj interface{}) {},
 	}, nil)
 
-	klog.Infof("Bootstrapping existing adminpbrs and cleaning stale adminpbrs took %v", time.Since(start))
+	klog.Infof("Bootstrapping existing adminpbrs and cleaning stale adminpbrs for network %s took %v", oc.nadInfo.NetName, time.Since(start))
 	if oc.nadInfo.TopoType != ovntypes.Layer3AttachDefTopoType {
 		klog.V(4).Infof("Skip periodical sync for non-L3 network %s(%s)", oc.nadInfo.NetName, oc.nadInfo.TopoType)
 		return nil
@@ -1203,14 +1203,14 @@ func (oc *Controller) WatchVirtualIPs() error {
 
 		return oc.watchPortBindingTable(client)
 	}
-	klog.Infof("Bootstrapping existing virtualIPs and cleaning stale virtualIPs took %v", time.Since(start))
+	klog.Infof("Bootstrapping existing virtualIPs and cleaning stale virtualIPs for network %s took %v", oc.nadInfo.NetName, time.Since(start))
 	return nil
 }
 
 // syncNodeGateway ensures a node's gateway router is configured
 func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet) error {
 	if oc.nadInfo.IsSecondary {
-		klog.Infof("WatchNamespaces for network %s is a no-op", oc.nadInfo.NetName)
+		klog.Infof("SyncNodeGateway for network %s is a no-op", oc.nadInfo.NetName)
 		return nil
 	}
 
