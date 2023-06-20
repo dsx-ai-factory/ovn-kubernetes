@@ -1034,13 +1034,6 @@ func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 		}
 	}()
 
-	if !oc.nadInfo.IsSecondary {
-		// delete stale chassis in SBDB if any
-		if err = oc.deleteStaleNodeChassis(node); err != nil {
-			return nil, err
-		}
-	}
-
 	// Set the HostSubnet annotation on the node object to signal
 	// to nodes that their logical infrastructure is set up and they can
 	// proceed with their initialization
@@ -1073,49 +1066,73 @@ func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 }
 
 // check if any existing chassis entries in the SBDB mismatches with node's chassisID annotation
-func (oc *Controller) checkNodeChassisMismatch(node *kapi.Node) (bool, error) {
+func (oc *Controller) checkNodeChassisMismatch(newNode *kapi.Node, oldNode *kapi.Node) (bool, string, error) {
 	if oc.nadInfo.IsSecondary {
-		return false, nil
+		return false, "", nil
 	}
-
-	chassisID, err := util.ParseNodeChassisIDAnnotation(node)
+	newChassisID, err := util.ParseNodeChassisIDAnnotation(newNode)
 	if err != nil {
-		return false, nil
+		return false, "", nil
+	}
+	oldChassisID := ""
+	if oldNode != nil {
+		// We can ignore if old node doesn't have chassisID annotation
+		oldChassisID, _ = util.ParseNodeChassisIDAnnotation(oldNode)
 	}
 
 	chassisList, err := libovsdbops.ListChassis(oc.mc.sbClient)
 	if err != nil {
-		return false, fmt.Errorf("failed to get chassis list for node %s: error: %v", node.Name, err)
+		return false, "", fmt.Errorf("failed to get chassis list for node %s: error: %v", newNode.Name, err)
 	}
 
+	mismatch := false
+	hostName := ""
+	err = nil
 	for _, chassis := range chassisList {
-		if chassis.Name == chassisID {
-			return false, nil
+		if chassis.Name == newChassisID {
+			// Node is being re-added with the same chassisID
+			// chassisID will be unique so we don't check whether hostname matches the entry
+			mismatch = false
+			break
+		}
+		if chassis.Name == oldChassisID {
+			// chassisID will stored in sbdb under DPU's hostname when ovs is offloaded to DPU
+			// We need to delete this stale entry
+			mismatch = true
+			hostName = chassis.Hostname
+			break
+		}
+		if chassis.Hostname == newNode.Name && chassis.Name != newChassisID {
+			// We need to delete this stale entry
+			mismatch = true
+			hostName = chassis.Hostname
+			break
 		}
 	}
-	return true, nil
+	return mismatch, hostName, err
 }
 
 // delete stale chassis in SBDB if system-id of the specific node has changed.
-func (oc *Controller) deleteStaleNodeChassis(node *kapi.Node) error {
+func (oc *Controller) deleteStaleNodeChassis(newNode *kapi.Node, oldNode *kapi.Node) error {
 	if oc.nadInfo.IsSecondary {
 		return nil
 	}
 
-	mismatch, err := oc.checkNodeChassisMismatch(node)
+	// hostName stored in sbdb will be that of primary DPU for nodes with DPUs
+	mismatch, hostName, err := oc.checkNodeChassisMismatch(newNode, oldNode)
 	if err != nil {
-		return fmt.Errorf("failed to check if there is any stale chassis for node %s in SBDB: %v", node.Name, err)
+		return fmt.Errorf("failed to check if there is any stale chassis for node %s in SBDB: %v", newNode.Name, err)
 	} else if mismatch {
-		klog.V(5).Infof("Node %s now has a new chassis ID, delete its stale chassis in SBDB", node.Name)
+		klog.V(5).Infof("Node %s now has a new chassis ID, delete its stale chassis in SBDB", newNode.Name)
 		p := func(item *sbdb.Chassis) bool {
-			return item.Hostname == node.Name
+			return item.Hostname == hostName
 		}
 		if err = libovsdbops.DeleteChassisWithPredicate(oc.mc.sbClient, p); err != nil {
 			// Send an event and Log on failure
-			oc.mc.recorder.Eventf(node, kapi.EventTypeWarning, "ErrorMismatchChassis",
+			oc.mc.recorder.Eventf(newNode, kapi.EventTypeWarning, "ErrorMismatchChassis",
 				"Node %s is now with a new chassis ID. Its stale chassis entry is still in the SBDB",
-				node.Name)
-			return fmt.Errorf("node %s is now with a new chassis ID. Its stale chassis entry is still in the SBDB", node.Name)
+				newNode.Name)
+			return fmt.Errorf("node %s is now with a new chassis ID. Its stale chassis entry is still in the SBDB", newNode.Name)
 		}
 	}
 	return nil
@@ -1470,68 +1487,73 @@ type nodeSyncs struct {
 	syncGw                bool
 }
 
-func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
+func (oc *Controller) addUpdateNodeEvent(oldNode, newNode *kapi.Node, nSyncs *nodeSyncs) error {
 	var hostSubnets []*net.IPNet
 	var errs []error
 	var err error
 
-	if noHostSubnet := noHostSubnet(node); noHostSubnet {
-		err := oc.lsManager.AddNoHostSubnetNode(util.GetClusterScopedName(oc.nadInfo.Prefix + node.Name))
+	if noHostSubnet := noHostSubnet(newNode); noHostSubnet {
+		err := oc.lsManager.AddNoHostSubnetNode(util.GetClusterScopedName(oc.nadInfo.Prefix + newNode.Name))
 		if err != nil {
-			return fmt.Errorf("nodeAdd: error adding noHost subnet for node %s: %w", node.Name, err)
+			return fmt.Errorf("nodeAdd: error adding noHost subnet for node %s: %w", newNode.Name, err)
 		}
 		if !oc.nadInfo.IsSecondary {
-			oc.clearInitialNodeNetworkUnavailableCondition(node)
+			// DPU case, and we want to propagate DPU NotReady state
+			// as a NoSchedule taint to DPU's host
+			if err := oc.syncDependentNodeTaints(newNode, 5*time.Minute); err != nil {
+				klog.Warningf(err.Error())
+			}
+			oc.clearInitialNodeNetworkUnavailableCondition(newNode)
 		}
 		return nil
 	}
 
-	klog.Infof("Adding or Updating Node %q for network %s", node.Name, oc.nadInfo.NetName)
+	klog.Infof("Adding or Updating Node %q for network %s", newNode.Name, oc.nadInfo.NetName)
 	if nSyncs.syncNode {
-		if hostSubnets, err = oc.addNode(node); err != nil {
-			oc.addNodeFailed.Store(node.Name, true)
-			oc.nodeClusterRouterPortFailed.Store(node.Name, true)
-			oc.mgmtPortFailed.Store(node.Name, true)
-			oc.gatewaysFailed.Store(node.Name, true)
-			return fmt.Errorf("nodeAdd: error creating subnet for node %s: %w", node.Name, err)
+		if hostSubnets, err = oc.addNode(newNode); err != nil {
+			oc.addNodeFailed.Store(newNode.Name, true)
+			oc.nodeClusterRouterPortFailed.Store(newNode.Name, true)
+			oc.mgmtPortFailed.Store(newNode.Name, true)
+			oc.gatewaysFailed.Store(newNode.Name, true)
+			return fmt.Errorf("nodeAdd: error creating subnet for node %s: %w", newNode.Name, err)
 		}
-		oc.addNodeFailed.Delete(node.Name)
+		oc.addNodeFailed.Delete(newNode.Name)
 	}
 
 	if nSyncs.syncClusterRouterPort {
-		if err = oc.syncNodeClusterRouterPort(node, hostSubnets); err != nil {
+		if err = oc.syncNodeClusterRouterPort(newNode, hostSubnets); err != nil {
 			errs = append(errs, err)
-			oc.nodeClusterRouterPortFailed.Store(node.Name, true)
+			oc.nodeClusterRouterPortFailed.Store(newNode.Name, true)
 		} else {
-			oc.nodeClusterRouterPortFailed.Delete(node.Name)
+			oc.nodeClusterRouterPortFailed.Delete(newNode.Name)
 		}
 	}
 
 	if !oc.nadInfo.IsSecondary {
 		if nSyncs.syncMgmtPort {
-			err := oc.syncNodeManagementPort(node, hostSubnets)
+			err := oc.syncNodeManagementPort(newNode, hostSubnets)
 			if err != nil {
 				errs = append(errs, err)
-				oc.mgmtPortFailed.Store(node.Name, true)
+				oc.mgmtPortFailed.Store(newNode.Name, true)
 			} else {
-				oc.mgmtPortFailed.Delete(node.Name)
+				oc.mgmtPortFailed.Delete(newNode.Name)
 			}
 		}
 
 		// delete stale chassis in SBDB if any
-		if err := oc.deleteStaleNodeChassis(node); err != nil {
+		if err := oc.deleteStaleNodeChassis(newNode, oldNode); err != nil {
 			errs = append(errs, err)
 		}
 
-		oc.clearInitialNodeNetworkUnavailableCondition(node)
+		oc.clearInitialNodeNetworkUnavailableCondition(newNode)
 
 		if nSyncs.syncGw {
-			err := oc.syncNodeGateway(node, hostSubnets)
+			err := oc.syncNodeGateway(newNode, hostSubnets)
 			if err != nil {
 				errs = append(errs, err)
-				oc.gatewaysFailed.Store(node.Name, true)
+				oc.gatewaysFailed.Store(newNode.Name, true)
 			} else {
-				oc.gatewaysFailed.Delete(node.Name)
+				oc.gatewaysFailed.Delete(newNode.Name)
 			}
 		}
 	}
@@ -1540,7 +1562,7 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 	needAddPods := true
 	if !oc.nadInfo.IsSecondary && config.Gateway.DisableSNATMultipleGWs {
 		// if per pod SNAT is being used, then l3 gateway config is required to be able to add pods
-		if _, gwFailed := oc.gatewaysFailed.Load(node.Name); gwFailed {
+		if _, gwFailed := oc.gatewaysFailed.Load(newNode.Name); gwFailed {
 			needAddPods = false
 		}
 	}
@@ -1549,16 +1571,16 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 		if err != nil {
 			klog.Errorf("Unable to get all pods: %v", err)
 		} else if nSyncs.syncNode || nSyncs.syncGw { // do this only if it is a new node add or a gateway sync happened
-			klog.V(5).Infof("When adding node %s, found %d pods to add to retryPods", node.Name, len(pods))
+			klog.V(5).Infof("When adding node %s, found %d pods to add to retryPods", newNode.Name, len(pods))
 			for index := range pods {
 				pod := pods[index]
-				if pod.Spec.NodeName != node.Name {
+				if pod.Spec.NodeName != newNode.Name {
 					continue
 				}
 				if util.PodCompleted(pod) {
 					continue
 				}
-				klog.V(5).Infof("Adding pod %s/%s/%s from node %s to retryPods for network %s", pod.UID, pod.Namespace, pod.Name, node.Name, oc.nadInfo.NetName)
+				klog.V(5).Infof("Adding pod %s/%s/%s from node %s to retryPods for network %s", pod.UID, pod.Namespace, pod.Name, newNode.Name, oc.nadInfo.NetName)
 				oc.retryPods.addRetryObjWithAddNoBackoff(pod)
 			}
 			oc.retryPods.requestRetryObjs()

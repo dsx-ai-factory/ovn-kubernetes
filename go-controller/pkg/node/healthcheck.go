@@ -419,7 +419,7 @@ func checkPorts(bridge *bridgeConfiguration) error {
 	if bridge.ofPortPatch != curOfportPatch {
 		// XXX- Maybe, use gateway type
 		if strings.Contains(bridge.patchPort, "localnet_port") {
-			xdpCheckPatchPort(bridge.bridgeName, bridge.ofPortPhys, bridge.patchPort, bridge.ofPortPatch, curOfportPatch)
+			xdpCheckPatchPortOFFlows(bridge.bridgeName, bridge.ofPortPhys, bridge.patchPort, bridge.ofPortPatch, curOfportPatch)
 		} else {
 			klog.Errorf("Fatal error: patch port %s ofport changed from %s to %s",
 				bridge.patchPort, bridge.ofPortPatch, curOfportPatch)

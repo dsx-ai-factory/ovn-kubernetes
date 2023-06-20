@@ -7,6 +7,8 @@ import (
 	networkattachmentdefinitionfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
 	"github.com/onsi/gomega"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	adminpbrapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
+	adminpbrfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/clientset/versioned/fake"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
@@ -68,6 +70,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 	egressIPObjects := []runtime.Object{}
 	egressFirewallObjects := []runtime.Object{}
 	egressQoSObjects := []runtime.Object{}
+	adminPBRObjects := []runtime.Object{}
 	v1Objects := []runtime.Object{}
 	for _, object := range objects {
 		if _, isEgressIPObject := object.(*egressip.EgressIPList); isEgressIPObject {
@@ -76,6 +79,8 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 			egressFirewallObjects = append(egressFirewallObjects, object)
 		} else if _, isEgressQoSObject := object.(*egressqos.EgressQoSList); isEgressQoSObject {
 			egressQoSObjects = append(egressQoSObjects, object)
+		} else if _, isAdminPBRObject := object.(*adminpbrapi.AdminPolicyBasedRouteList); isAdminPBRObject {
+			adminPBRObjects = append(adminPBRObjects, object)
 		} else {
 			v1Objects = append(v1Objects, object)
 		}
@@ -85,6 +90,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 		EgressIPClient:        egressipfake.NewSimpleClientset(egressIPObjects...),
 		EgressFirewallClient:  egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
 		EgressQoSClient:       egressqosfake.NewSimpleClientset(egressQoSObjects...),
+		AdminPBRClient:        adminpbrfake.NewSimpleClientset(adminPBRObjects...),
 		NetworkAttchDefClient: networkattachmentdefinitionfake.NewSimpleClientset(),
 	}
 	o.init()

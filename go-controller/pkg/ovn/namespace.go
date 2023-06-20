@@ -327,13 +327,13 @@ func (oc *Controller) configureNamespace(nsInfo *namespaceInfo, ns *kapi.Namespa
 				nsInfo.routingExternalGWs.bfdEnabled = true
 			}
 		}
-		annotation := ns.Annotations[util.AclLoggingAnnotation]
-		if annotation != "" {
-			if oc.aclLoggingCanEnable(annotation, nsInfo) {
-				klog.Infof("Namespace %s: ACL logging is set to deny=%s allow=%s", ns.Name, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
-			} else {
-				klog.Warningf("Namespace %s: ACL logging is not enabled due to malformed annotation", ns.Name)
-			}
+	}
+	annotation := ns.Annotations[util.AclLoggingAnnotation]
+	if annotation != "" {
+		if oc.aclLoggingCanEnable(annotation, nsInfo) {
+			klog.Infof("Namespace %s: ACL logging is set to deny=%s allow=%s", ns.Name, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
+		} else {
+			klog.Warningf("Namespace %s: ACL logging is not enabled due to malformed annotation", ns.Name)
 		}
 	}
 
@@ -356,6 +356,13 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 	}
 	defer nsUnlock()
 
+	needUpdateAclLogging := false
+	aclAnnotation := newer.Annotations[util.AclLoggingAnnotation]
+	oldACLAnnotation := old.Annotations[util.AclLoggingAnnotation]
+	// support for ACL logging update, if new annotation is empty, make sure we propagate new setting
+	if aclAnnotation != oldACLAnnotation && (oc.aclLoggingCanEnable(aclAnnotation, nsInfo) || aclAnnotation == "") {
+		needUpdateAclLogging = true
+	}
 	if !oc.nadInfo.IsSecondary {
 		gwAnnotation := newer.Annotations[util.RoutingExternalGWsAnnotation]
 		oldGWAnnotation := old.Annotations[util.RoutingExternalGWsAnnotation]
@@ -428,20 +435,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 				}
 			}
 		}
-
-		aclAnnotation := newer.Annotations[util.AclLoggingAnnotation]
-		oldACLAnnotation := old.Annotations[util.AclLoggingAnnotation]
-		// support for ACL logging update, if new annotation is empty, make sure we propagate new setting
-		if aclAnnotation != oldACLAnnotation && (oc.aclLoggingCanEnable(aclAnnotation, nsInfo) || aclAnnotation == "") {
-			if len(nsInfo.networkPolicies) > 0 {
-				// deny rules are all one per namespace
-				if err := oc.setNetworkPolicyACLLoggingForNamespace(old.Name, nsInfo); err != nil {
-					klog.Warningf(err.Error())
-				} else {
-					klog.Infof("Namespace %s: NetworkPolicy ACL logging setting updated to deny=%s allow=%s",
-						old.Name, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
-				}
-			}
+		if needUpdateAclLogging {
 			// Trigger an egress fw logging update - this will only happen if an egress firewall exists for the NS, otherwise
 			// this will not do anything.
 			updated, err := oc.refreshEgressFirewallLogging(old.Name)
@@ -451,6 +445,15 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 				klog.Infof("Namespace %s: EgressFirewall ACL logging setting updated to deny=%s allow=%s",
 					old.Name, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
 			}
+		}
+	}
+	if needUpdateAclLogging && len(nsInfo.networkPolicies) > 0 {
+		// deny rules are all one per namespace
+		if err := oc.setNetworkPolicyACLLoggingForNamespace(old.Name, nsInfo); err != nil {
+			klog.Warningf(err.Error())
+		} else {
+			klog.Infof("Namespace %s: ACL logging setting updated to deny=%s allow=%s",
+				old.Name, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
 		}
 	}
 

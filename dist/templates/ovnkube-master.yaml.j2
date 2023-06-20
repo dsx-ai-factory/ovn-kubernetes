@@ -164,6 +164,8 @@ spec:
           value: "{{ ovnkube_logfile_maxbackups }}"
         - name: OVNKUBE_LOGFILE_MAXAGE
           value: "{{ ovnkube_logfile_maxage }}"
+        - name: OVNKUBE_LOGFILE
+          value: "{{ ovnkube_logfile }}"
         - name: OVNKUBE_CONFIG_DURATION_ENABLE
           value: "{{ ovnkube_config_duration_enable }}"
         - name: OVN_NET_CIDR
@@ -210,6 +212,10 @@ spec:
           value: "{{ ovn_multi_networkpolicy_enable }}"
         - name: OVN_EGRESSQOS_ENABLE
           value: "{{ ovn_egress_qos_enable }}"
+        - name: OVN_ADMIN_PBR_ENABLE
+          value: "{{ ovn_admin_pbr_enable }}"
+        - name: OVN_VIRTUALIP_ENABLE
+          value: "{{ ovn_virtual_ip_enable }}"
         - name: OVN_HYBRID_OVERLAY_NET_CIDR
           value: "{{ ovn_hybrid_overlay_net_cidr }}"
         - name: OVN_DISABLE_SNAT_MULTIPLE_GWS

@@ -86,6 +86,7 @@ BASEDIR=$(dirname $0)
 # OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 # OVN_EGRESSFIREWALL_ENABLE - enable egressFirewall for ovn-kubernetes
 # OVN_EGRESSQOS_ENABLE - enable egress QoS for ovn-kubernetes
+# OVN_ADMIN_PBR_ENABLE - enable admin policy based route for ovn-kubernetes
 # OVN_UNPRIVILEGED_MODE - execute CNI ovs/netns commands from host (default no)
 # OVNKUBE_NODE_MODE - ovnkube node mode of operation, one of: full, dpu, dpu-host (default: full)
 # OVNKUBE_NODE_MGMT_PORT_INTF_NAME - Name of interface to be used as ovnkubernetes mgmt port (default: ovn-k8s-mp0)
@@ -123,6 +124,9 @@ ovnkubelogdir=/var/log/ovn-kubernetes
 ovnkube_logfile_maxsize=${OVNKUBE_LOGFILE_MAXSIZE:-"100"}
 ovnkube_logfile_maxbackups=${OVNKUBE_LOGFILE_MAXBACKUPS:-"5"}
 ovnkube_logfile_maxage=${OVNKUBE_LOGFILE_MAXAGE:-"5"}
+
+# logfile location
+ovnkube_logfile=${OVNKUBE_LOGFILE:""}
 
 # ovnkube-master ha-election parameters (value in seconds)
 ovn_master_ha_election_lease_duration=${OVN_HA_LEASE_DURATION:-"30"}
@@ -324,6 +328,10 @@ ovn_multi_network_enable=${OVN_MULTI_NETWORK_ENABLE:-false}
 ovn_multi_networkpolicy_enable=${OVN_MULTI_NETWORKPOLICY_ENABLE:-false}
 #OVN_EGRESSQOS_ENABLE - enable egress QoS for ovn-kubernetes
 ovn_egressqos_enable=${OVN_EGRESSQOS_ENABLE:-false}
+#OVN_ADMIN_PBR_ENABLE - enable admin policy based route for ovn-kubernetes
+ovn_admin_pbr_enable=${OVN_ADMIN_PBR_ENABLE:-false}
+#OVN_VIRTUALIP_ENABLE - enable virtual ip for ovn-kubernetes
+ovn_virtualip_enable=${OVN_VIRTUALIP_ENABLE:-false}
 #OVN_DISABLE_OVN_IFACE_ID_VER - disable usage of the OVN iface-id-ver option
 ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER:-false}
 ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
@@ -1128,6 +1136,14 @@ ovn-master() {
   if [[ ${ovn_egressqos_enable} == "true" ]]; then
 	  egressqos_enabled_flag="--enable-egress-qos"
   fi
+  admin_pbr_enabled_flag=
+  if [[ ${ovn_admin_pbr_enable} == "true" ]]; then
+      admin_pbr_enabled_flag="--enable-admin-pbr"
+  fi
+  virtualip_enabled_flag=
+  if [[ ${ovn_virtualip_enable} == "true" ]]; then
+	  virtualip_enabled_flag="--enable-virtual-ip"
+  fi
 
   nohostsubnet_label_option=
   if [[ ${OVN_NOHOSTSUBNET_LABEL} != "" ]]; then
@@ -1165,6 +1181,11 @@ ovn-master() {
     ovnkube_node_mgmt_port_intf_name_flag="--ovnkube-node-mgmt-port-intf-name=${ovnkube_node_mgmt_port_intf_name}"
   fi
 
+  ovnkube_logfile_flag="--logfile /var/log/ovn-kubernetes/ovnkube-master.log"
+  if [[ ${ovnkube_logfile} != "" ]]; then
+    ovnkube_logfile_flag="--logfile ${ovnkube_logfile}"
+  fi
+
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
     --init-master ${K8S_NODE} \
@@ -1182,7 +1203,7 @@ ovn-master() {
     ${ovn_v4_join_subnet_opt} \
     ${ovn_v6_join_subnet_opt} \
     --pidfile ${OVN_RUNDIR}/ovnkube-master.pid \
-    --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
+    ${ovnkube_logfile_flag} \
     ${nohostsubnet_label_option} \
     ${ovn_master_ssl_opts} \
     ${ovnkube_metrics_tls_opts} \
@@ -1193,6 +1214,8 @@ ovn-master() {
     ${egressqos_enabled_flag} \
     ${multi_network_enabled_flag} \
     ${multi_networkpolicy_enabled_flag} \
+    ${admin_pbr_enabled_flag} \
+    ${virtualip_enabled_flag} \
     --metrics-interval ${ovn_metrics_scrape_interval} \
     ${ovnkube_config_duration_enable_flag} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
@@ -1657,6 +1680,10 @@ ovn-node() {
 
   fi
 
+  ovnkube_logfile_flag="--logfile /var/log/ovn-kubernetes/ovnkube.log"
+  if [[ ${ovnkube_logfile} != "" ]]; then
+    ovnkube_logfile_flag="--logfile ${ovnkube_logfile}"
+  fi
 
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
@@ -1679,7 +1706,7 @@ ovn-node() {
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
     ${ovn_gateway_router_subnet_opt} \
     --pidfile ${OVN_RUNDIR}/ovnkube.pid \
-    --logfile /var/log/ovn-kubernetes/ovnkube.log \
+    ${ovnkube_logfile_flag} \
     ${ovn_node_ssl_opts} \
     ${ovnkube_metrics_tls_opts} \
     --inactivity-probe=${ovn_remote_probe_interval} \

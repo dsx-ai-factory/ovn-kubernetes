@@ -96,7 +96,7 @@ func setXDPBridgePatchOfPorts(bridge *bridgeConfiguration) error {
 	// case the new value will differ from bridge.ofPortPatch, but there should be no flows
 	// configured. We check just to make sure.
 	if bridge.ofPortPatch != "" && bridge.ofPortPatch != ofportPatch {
-		xdpCheckPatchPort(bridge.bridgeName, bridge.ofPortPhys, bridge.patchPort, bridge.ofPortPatch, ofportPatch)
+		xdpCheckPatchPortOFFlows(bridge.bridgeName, bridge.ofPortPhys, bridge.patchPort, bridge.ofPortPatch, ofportPatch)
 		klog.Infof("XDP patch port %q changing ofport from %s to %s", bridge.patchPort, bridge.ofPortPatch,
 			ofportPatch)
 	}

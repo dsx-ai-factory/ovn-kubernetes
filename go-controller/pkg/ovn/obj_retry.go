@@ -743,7 +743,7 @@ func (oc *Controller) addResource(objectsToRetry *retryObjs, obj interface{}, fr
 			nodeParams = &nodeSyncs{true, true, true, true}
 		}
 
-		if err = oc.addUpdateNodeEvent(node, nodeParams); err != nil {
+		if err = oc.addUpdateNodeEvent(nil, node, nodeParams); err != nil {
 			klog.Infof("Node add failed for %s, will try again later: %v",
 				node.Name, err)
 			return err
@@ -912,7 +912,7 @@ func (oc *Controller) updateResource(objectsToRetry *retryObjs, oldObj, newObj i
 		gwSync := (failed || oc.gatewayChanged(oldNode, newNode) ||
 			subnetChanged || hostAddressesChanged(oldNode, newNode))
 
-		return oc.addUpdateNodeEvent(newNode, &nodeSyncs{nodeSync, clusterRtrSync, mgmtSync, gwSync})
+		return oc.addUpdateNodeEvent(oldNode, newNode, &nodeSyncs{nodeSync, clusterRtrSync, mgmtSync, gwSync})
 
 	case factory.PeerPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)

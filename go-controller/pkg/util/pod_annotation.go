@@ -59,10 +59,18 @@ const (
 	// skipSpoofCheckAnnotationName skips setting Port security on Logical Switch Ports that are
 	// part of the specified networks
 	skipSpoofCheckAnnotationName = "k8s.ovn.org/skip-spoofchk-on-networks"
+	// OvnPodPolicyWarTimestamp is the annotation on the host network Pods representing the timestamp
+	// when gateway router port connected to Join switch is created. It is introduced to make network
+	// policies involves host network Pods can work correctly.
+	OvnPodPolicyWarTimestamp = "k8s.ovn.org/pod-policy-war-ts"
+	// skipIPOnNetworksAnnotation specifies the NADs that don't require IP allocation
+	skipIPOnNetworksAnnotation = "k8s.ovn.org/skip-ip-on-networks"
+	// PortSecurityInfoAnnotation specifies custom port security config need to be applied in lsp
+	PortSecurityInfoAnnotation = "k8s.ovn.org/port-security-info"
 )
 
 var ErrNoPodIPFound = errors.New("no pod IPs found")
-var ErrOverridePodIPs = errors.New("overriding existing pod IPs with new IPs in pod annotation")
+var ErrOverridePodAddresses = errors.New("overriding existing pod IP or MAC addresses with new values in pod annotation")
 
 // PodAnnotation describes the assigned network details for a single pod network. (The
 // actual annotation may include the equivalent of multiple PodAnnotations.)
@@ -141,13 +149,14 @@ func MarshalPodAnnotation(pannotations *map[string]string, podInfo *PodAnnotatio
 	// check if the annotation already set, if so, do not update pod annotation to avoid leaking
 	existingPa, ok := podNetworks[annoNadKeyName]
 	if ok {
-		// it is ok to only check if pod IPs have changed. Other fields either should never change (MTU, GatewayRequested)
-		// or will not change if IPs remain the same (MAC, Gateways, Routes)
-		if IsStringListEqual(existingPa.IPs, pa.IPs) {
+		// check if pod IPs and MACs have changed. Other fields either should never change (MTU, GatewayRequested)
+		// or will not change if IPs remain the same (Gateways, Routes).
+		sameIPs := IsStringListEqual(existingPa.IPs, pa.IPs)
+		if sameIPs && existingPa.MAC == pa.MAC {
 			return newAnnotationAlreadySetError("OVN %s annotation for NAD %s already exists",
 				OvnPodAnnotationName, annoNadKeyName)
-		} else {
-			return ErrOverridePodIPs
+		} else if !sameIPs || existingPa.MAC != pa.MAC {
+			return ErrOverridePodAddresses
 		}
 	}
 	for _, gw := range podInfo.Gateways {
@@ -177,7 +186,7 @@ func MarshalPodAnnotation(pannotations *map[string]string, podInfo *PodAnnotatio
 }
 
 // UnmarshalPodAnnotation returns the specified network info from pod.Annotations
-func UnmarshalPodAnnotation(annotations map[string]string, netName string) (*PodAnnotation, error) {
+func UnmarshalPodAnnotation(annotations map[string]string, annoNadKeyName string) (*PodAnnotation, error) {
 	ovnAnnotation, ok := annotations[OvnPodAnnotationName]
 	if !ok {
 		return nil, newAnnotationNotSetError("could not find OVN pod annotation in %v", annotations)
@@ -188,10 +197,10 @@ func UnmarshalPodAnnotation(annotations map[string]string, netName string) (*Pod
 		return nil, fmt.Errorf("failed to unmarshal ovn pod annotation %q: %v",
 			ovnAnnotation, err)
 	}
-	tempA, ok := podNetworks[netName]
+	tempA, ok := podNetworks[annoNadKeyName]
 	if !ok {
 		return nil, fmt.Errorf("no ovn pod annotation for network %s: %q",
-			netName, ovnAnnotation)
+			annoNadKeyName, ovnAnnotation)
 	}
 	a := &tempA
 
@@ -212,6 +221,10 @@ func UnmarshalPodAnnotation(annotations map[string]string, netName string) (*Pod
 		}
 	}
 
+	if SkipIPAMForNAD(annotations, annoNadKeyName) {
+		// pod doesn't require IP for this network
+		return podAnnotation, nil
+	}
 	if len(a.IPs) == 0 {
 		if a.IP == "" {
 			return nil, fmt.Errorf("bad annotation data (neither ip_address nor ip_addresses is set)")
@@ -380,4 +393,47 @@ func SkipSpoofCheckForNAD(annotations map[string]string, annoNadKeyName string) 
 		}
 	}
 	return false
+}
+
+// SkipIPAMForNAD return true if nadName is part of value of SkipIPOnNetworksAnnotation annotation
+func SkipIPAMForNAD(annotations map[string]string, annoNadKeyName string) bool {
+	skipIPNetworks := annotations[skipIPOnNetworksAnnotation]
+	if skipIPNetworks == "" {
+		return false
+	}
+	for _, skipNadName := range strings.Split(skipIPNetworks, ",") {
+		if skipNadName == annoNadKeyName {
+			return true
+		}
+	}
+	return false
+}
+
+type portSecurityInfo struct {
+	IPs []string `json:"ips"`
+}
+
+// GetPortSecurityInfo returns portSecurityInfo map, key is annoNadKeyName
+func GetPortSecurityInfo(annotations map[string]string) (map[string]*portSecurityInfo, error) {
+	portSecurityInfoMap := make(map[string]*portSecurityInfo)
+	annotPortSecInfo := annotations[PortSecurityInfoAnnotation]
+	if annotPortSecInfo == "" {
+		return portSecurityInfoMap, nil
+	}
+	if err := json.Unmarshal([]byte(annotPortSecInfo), &portSecurityInfoMap); err != nil {
+		return portSecurityInfoMap, fmt.Errorf("failed to unmarshal port security info %q: %v", annotPortSecInfo, err)
+	}
+	// validate IPs
+	for _, psi := range portSecurityInfoMap {
+		validIPs := []string{}
+		for _, strIP := range psi.IPs {
+			if ip := net.ParseIP(strIP); ip == nil {
+				klog.Warningf("The IP address provided in %s annotation is invalid: %s", PortSecurityInfoAnnotation, strIP)
+				continue
+			}
+			validIPs = append(validIPs, strIP)
+		}
+		psi.IPs = validIPs
+	}
+	return portSecurityInfoMap, nil
 }

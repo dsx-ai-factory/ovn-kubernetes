@@ -45,7 +45,8 @@ func (oc *Controller) setupLayer2Switch(switchName string) error {
 
 	err = oc.lsManager.AddNode(switchName, logicalSwitch.UUID, hostSubnets)
 	if err != nil {
-		return fmt.Errorf("failed to initialize localnet switch IP manager for network %s: %v", oc.nadInfo.NetName, err)
+		return fmt.Errorf("failed to initialize %s switch IP manager for network %s: %v",
+			oc.nadInfo.TopoType, oc.nadInfo.NetName, err)
 	}
 	for _, excludeIP := range oc.nadInfo.ExcludeIPs {
 		var ipMask net.IPMask
@@ -75,7 +76,7 @@ func (oc *Controller) setupLocalnetMaster() error {
 		Addresses: []string{"unknown"},
 		Type:      "localnet",
 		Options: map[string]string{
-			"network_name": oc.nadInfo.Prefix + types.LocalNetBridgeName,
+			"network_name": oc.nadInfo.Prefix + types.LocalNetBridgeName, // TBD needs change for multi-cluster support
 		},
 		Name:        util.GetClusterScopedName(oc.nadInfo.Prefix + types.OVNLocalnetPort),
 		ExternalIDs: util.CreateClusterScopedExternalIDs(),
@@ -104,7 +105,7 @@ func (oc *Controller) deleteLocalnetMaster() {
 
 // connectToLogicalRouter connect layer2 switch to the specified logicalRouter, oc is the layer2 controller
 func (oc *Controller) connectToLogicalRouter(logicalRouterName string) error {
-	switchName := oc.nadInfo.Prefix + types.OvnLayer2Switch
+	switchName := util.GetClusterScopedName(oc.nadInfo.Prefix + types.OvnLayer2Switch)
 
 	var nodeLRPMAC net.HardwareAddr
 	logicalRouterPortNetwork := []string{}
@@ -150,7 +151,7 @@ func (oc *Controller) connectToLogicalRouter(logicalRouterName string) error {
 
 // disconnectFromLogicalRouter disconnects layer2 switch from the specified logicalRouter, oc is the layer2 controller
 func (oc *Controller) disconnectFromLogicalRouterOps(logicalRouterName string) ([]ovsdb.Operation, error) {
-	switchName := oc.nadInfo.Prefix + types.OvnLayer2Switch
+	switchName := util.GetClusterScopedName(oc.nadInfo.Prefix + types.OvnLayer2Switch)
 	logicalRouterPortName := types.RouterToSwitchPrefix + switchName
 	logicalRouter := nbdb.LogicalRouter{Name: logicalRouterName}
 	nodeLogicalRouterPort := nbdb.LogicalRouterPort{
@@ -168,7 +169,7 @@ func (oc *Controller) disconnectFromLogicalRouterOps(logicalRouterName string) (
 
 // setupLayer2Master creates layer2 switch and connect to ovn_cluster_router of the specified nad if requested
 func (oc *Controller) setupLayer2Master() error {
-	switchName := oc.nadInfo.Prefix + types.OvnLayer2Switch
+	switchName := util.GetClusterScopedName(oc.nadInfo.Prefix + types.OvnLayer2Switch)
 	err := oc.setupLayer2Switch(switchName)
 	if err != nil {
 		return err
@@ -192,7 +193,7 @@ func (oc *Controller) setupLayer2Master() error {
 				l3Controller.startMutex.Lock()
 				// check if the specific logical router is created
 				if l3Controller.isStarted {
-					logicalRouterName = l3Controller.nadInfo.Prefix + types.OVNClusterRouter
+					logicalRouterName = util.GetClusterScopedName(l3Controller.nadInfo.Prefix + types.OVNClusterRouter)
 				}
 				l3Controller.startMutex.Unlock()
 				found = true
@@ -232,7 +233,7 @@ func (oc *Controller) setupLayer2Master() error {
 // deleteLayer2Master creates layer2 switch and connect to ovn_cluster_router of the specified nad if requested
 func (oc *Controller) deleteLayer2Master() {
 	var err error
-	switchName := oc.nadInfo.Prefix + types.OvnLayer2Switch
+	switchName := util.GetClusterScopedName(oc.nadInfo.Prefix + types.OvnLayer2Switch)
 	ops := []ovsdb.Operation{}
 	if oc.nadInfo.ConnectToNad != "" {
 		if connInfo, ok := oc.mc.nadConnInfoMap[oc.nadInfo.ConnectToNad]; ok {
@@ -270,19 +271,20 @@ func (l3Controller *Controller) connectToLayer2Network(nadKeyName string) {
 		return
 	}
 
+	logicalRouterName := util.GetClusterScopedName(l3Controller.nadInfo.Prefix + types.OVNClusterRouter)
 	if connInfo, ok := l3Controller.mc.nadConnInfoMap[nadKeyName]; ok {
-		for oc, logicalRouterName := range connInfo {
-			if logicalRouterName != "" {
+		for oc, lrName := range connInfo {
+			if lrName != "" {
 				klog.Errorf("Unexpected: layer2 network %s already connected to %s, but %s is just created",
-					oc.nadInfo.NetName, logicalRouterName, l3Controller.nadInfo.Prefix+types.OVNClusterRouter)
+					oc.nadInfo.NetName, lrName, logicalRouterName)
 				continue
 			}
-			if err := oc.connectToLogicalRouter(l3Controller.nadInfo.Prefix + types.OVNClusterRouter); err != nil {
+			if err := oc.connectToLogicalRouter(logicalRouterName); err != nil {
 				klog.Errorf("Failed to connect layer2 network %s to %s",
-					oc.nadInfo.NetName, l3Controller.nadInfo.Prefix+types.OVNClusterRouter)
+					oc.nadInfo.NetName, logicalRouterName)
 				continue
 			}
-			connInfo[oc] = l3Controller.nadInfo.Prefix + types.OVNClusterRouter
+			connInfo[oc] = logicalRouterName
 		}
 	}
 }
@@ -299,7 +301,7 @@ func (l3Controller *Controller) disconnectFromLayer2Network(nadKeyName string) {
 			if logicalRouterName == "" {
 				continue
 			}
-			ops, err := oc.disconnectFromLogicalRouterOps(l3Controller.nadInfo.Prefix + types.OVNClusterRouter)
+			ops, err := oc.disconnectFromLogicalRouterOps(util.GetClusterScopedName(l3Controller.nadInfo.Prefix + types.OVNClusterRouter))
 			if err != nil {
 				klog.Errorf("Failed to get txn ops to disconnect layer2 network %s from nad %s: %v", oc.nadInfo.NetName, nadKeyName, err)
 			}

@@ -9,6 +9,7 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	k8stypes "k8s.io/apimachinery/pkg/types"
@@ -25,9 +26,11 @@ import (
 
 	multinetworkpolicyclientset "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned"
 	networkattchmentdefclientset "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
+	adminpbrclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/clientset/versioned"
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
 	egressqosclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned"
+	virtualipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/clientset/versioned"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	ocpcloudnetworkclientset "github.com/openshift/client-go/cloudnetwork/clientset/versioned"
@@ -44,6 +47,8 @@ type OVNClientset struct {
 	EgressQoSClient          egressqosclientset.Interface
 	NetworkAttchDefClient    networkattchmentdefclientset.Interface
 	MultiNetworkPolicyClient multinetworkpolicyclientset.Interface
+	AdminPBRClient           adminpbrclientset.Interface
+	VirtualIPClient          virtualipclientset.Interface
 }
 
 func adjustCommit() string {
@@ -155,6 +160,14 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 	if err != nil {
 		return nil, err
 	}
+	adminPBRClientset, err := adminpbrclientset.NewForConfig(kconfig)
+	if err != nil {
+		return nil, err
+	}
+	virtualIPClientset, err := virtualipclientset.NewForConfig(kconfig)
+	if err != nil {
+		return nil, err
+	}
 	return &OVNClientset{
 		KubeClient:               kclientset,
 		EgressIPClient:           egressIPClientset,
@@ -163,6 +176,8 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		EgressQoSClient:          egressqosClientset,
 		NetworkAttchDefClient:    networkAttchmntDefClientset,
 		MultiNetworkPolicyClient: multiNetworkPolicyClientset,
+		AdminPBRClient:           adminPBRClientset,
+		VirtualIPClient:          virtualIPClientset,
 	}, nil
 }
 
@@ -529,4 +544,62 @@ func GetConntrackZone() int {
 		conntrackzone = config.Default.ConntrackZone
 	}
 	return conntrackzone
+}
+
+func GroupKindOf(obj k8sruntime.Object) string {
+	gk := obj.GetObjectKind().GroupVersionKind().GroupKind()
+	if gk.String() == "" {
+		kinds, _, err := scheme.Scheme.ObjectKinds(obj)
+		if err != nil || len(kinds) == 0 || len(kinds) > 1 {
+			klog.Warningf("BUG: object has no / ambiguous GVK: %#v, err", obj, err)
+		}
+		gk = kinds[0].GroupKind()
+	}
+	return gk.String()
+}
+
+func NamespacedName(obj k8sruntime.Object) string {
+	objMeta, _ := meta.Accessor(obj)
+	nsn := k8stypes.NamespacedName{
+		Namespace: objMeta.GetNamespace(),
+		Name:      objMeta.GetName(),
+	}
+	return nsn.String()
+}
+
+func IndexPodByIP(obj interface{}) ([]string, error) {
+	pod, ok := obj.(*kapi.Pod)
+	if !ok {
+		return nil, fmt.Errorf("not a pod")
+	}
+	if pod.Status.PodIP == "" || pod.DeletionTimestamp != nil {
+		return nil, nil
+	}
+	return []string{pod.Status.PodIP}, nil
+}
+
+func IndexPodByNodeIP(obj interface{}) ([]string, error) {
+	pod, ok := obj.(*kapi.Pod)
+	if !ok {
+		return nil, fmt.Errorf("not a pod")
+	}
+	if pod.Status.PodIP == "" || pod.Status.HostIP == "" || pod.DeletionTimestamp != nil {
+		return nil, nil
+	}
+	return []string{pod.Status.HostIP}, nil
+}
+
+func IndexPodByNamespace(obj interface{}) ([]string, error) {
+	pod, ok := obj.(*kapi.Pod)
+	if !ok {
+		return nil, fmt.Errorf("not a pod")
+	}
+	if pod.Status.PodIP == "" || pod.DeletionTimestamp != nil {
+		return nil, nil
+	}
+	return []string{pod.Namespace}, nil
+}
+
+func IsEmptySelector(ls *metav1.LabelSelector) bool {
+	return len(ls.MatchExpressions) == 0 && len(ls.MatchLabels) == 0
 }

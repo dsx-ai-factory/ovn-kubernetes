@@ -4,18 +4,42 @@ import (
 	"sync"
 )
 
+type lockInfo struct {
+	sync.Mutex
+	refCnt uint64
+}
+
 type lockByKey struct {
-	sync.Map
+	sync.Mutex
+	lockKeys map[string]*lockInfo
 }
 
-// create a mutex associate with the lock key
+// create a mutex associated with the lock key
 func (lbk *lockByKey) Acquire(lockKey string) func() {
-	m := &sync.Mutex{}
-	if obj, loaded := lbk.LoadOrStore(lockKey, m); loaded {
-		m = obj.(*sync.Mutex)
+	li := &lockInfo{refCnt: 0}
+	lbk.Lock()
+	val, ok := lbk.lockKeys[lockKey]
+	if ok {
+		li = val
+	} else {
+		lbk.lockKeys[lockKey] = li
 	}
-	m.Lock()
-	return func() { m.Unlock() }
+	li.refCnt++
+	lbk.Unlock()
+
+	// take the lock and then return function to unlock
+	li.Lock()
+	return func() {
+		li.Unlock()
+		lbk.Lock()
+		li.refCnt--
+		if li.refCnt == 0 {
+			delete(lbk.lockKeys, lockKey)
+		}
+		lbk.Unlock()
+	}
 }
 
-var LockByKey lockByKey
+var LockByKey = lockByKey{
+	lockKeys: make(map[string]*lockInfo),
+}

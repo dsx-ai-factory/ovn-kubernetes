@@ -6,10 +6,15 @@ import (
 
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 	ocpcloudnetworkclientset "github.com/openshift/client-go/cloudnetwork/clientset/versioned"
+
+	adminpbrv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
+	adminpbrclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/clientset/versioned"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
+	virtualipv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
+	virtualipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/clientset/versioned"
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -33,6 +38,7 @@ type Interface interface {
 	UpdateEgressFirewall(egressfirewall *egressfirewall.EgressFirewall) error
 	UpdateEgressIP(eIP *egressipv1.EgressIP) error
 	PatchEgressIP(name string, patchData []byte) error
+	UpdateVirtualIPStatus(vip *virtualipv1beta1.VirtualIP) error
 	UpdateNodeStatus(node *kapi.Node) error
 	UpdateNode(node *kapi.Node) error
 	GetAnnotationsOnPod(namespace, name string) (map[string]string, error)
@@ -50,6 +56,8 @@ type Interface interface {
 	DeleteCloudPrivateIPConfig(name string) error
 	Events() kv1core.EventInterface
 	UpdatePod(pod *kapi.Pod) error
+	UpdateAdminPBRStatus(adminpbr *adminpbrv1beta1.AdminPolicyBasedRoute) (*adminpbrv1beta1.AdminPolicyBasedRoute, error)
+	GetVirtualIP(namespace, name string) (*virtualipv1beta1.VirtualIP, error)
 }
 
 // Kube is the structure object upon which the Interface is implemented
@@ -58,6 +66,8 @@ type Kube struct {
 	EIPClient            egressipclientset.Interface
 	EgressFirewallClient egressfirewallclientset.Interface
 	CloudNetworkClient   ocpcloudnetworkclientset.Interface
+	AdminPBRClient       adminpbrclientset.Interface
+	VIPClient            virtualipclientset.Interface
 }
 
 // SetLabelsOnPod takes the pod object and map of key/value string pairs to set as labels
@@ -383,4 +393,21 @@ func (k *Kube) DeleteCloudPrivateIPConfig(name string) error {
 // Events returns events to use when creating an EventSinkImpl
 func (k *Kube) Events() kv1core.EventInterface {
 	return k.KClient.CoreV1().Events("")
+}
+
+func (k *Kube) UpdateAdminPBRStatus(adminpbr *adminpbrv1beta1.AdminPolicyBasedRoute) (*adminpbrv1beta1.AdminPolicyBasedRoute, error) {
+	klog.V(5).Infof("Updating status of AdminPolicyBasedRoute %s to %v", adminpbr.Name, adminpbr.Status)
+	return k.AdminPBRClient.K8sV1beta1().AdminPolicyBasedRoutes().UpdateStatus(context.TODO(), adminpbr, metav1.UpdateOptions{})
+}
+
+// UpdateVirtualIPStatus updates the VirtualIP with the provided VirtualIP data
+func (k *Kube) UpdateVirtualIPStatus(vip *virtualipv1beta1.VirtualIP) error {
+	klog.Infof("Updating status of VirtualIP %s/%s", vip.Namespace, vip.Name)
+	_, err := k.VIPClient.K8sV1beta1().VirtualIPs(vip.Namespace).UpdateStatus(context.TODO(), vip, metav1.UpdateOptions{})
+	return err
+}
+
+// GetVirtualIP returns virtualIP resource
+func (k *Kube) GetVirtualIP(namespace, name string) (*virtualipv1beta1.VirtualIP, error) {
+	return k.VIPClient.K8sV1beta1().VirtualIPs(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 }

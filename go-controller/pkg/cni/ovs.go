@@ -182,7 +182,7 @@ func doPodFlowsExist(mac string, ifAddrs []*net.IPNet, ofPort int) bool {
 	queries := []query{
 		{
 			match:  "dl_src=" + mac,
-			tables: []int{9},
+			tables: []int{8},
 		},
 		{
 			match:  fmt.Sprintf("in_port=%d", ofPort),

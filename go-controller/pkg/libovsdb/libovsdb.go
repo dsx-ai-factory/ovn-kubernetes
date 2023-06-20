@@ -24,10 +24,10 @@ import (
 	"k8s.io/klog/v2/klogr"
 )
 
-// newClient creates a new client object given the provided config
+// NewClient creates a new client object given the provided config
 // the stopCh is required to ensure the goroutine for ssl cert
 // update is not leaked
-func newClient(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, stopCh <-chan struct{}) (client.Client, error) {
+func NewClient(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, stopCh <-chan struct{}) (client.Client, error) {
 	const connectTimeout time.Duration = types.OVSDBTimeout * 2
 	logger := klogr.New()
 	options := []client.Option{
@@ -84,7 +84,7 @@ func NewSBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (cl
 	if err != nil {
 		return nil, err
 	}
-	c, err := newClient(cfg, dbModel, stopCh)
+	c, err := NewClient(cfg, dbModel, stopCh)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +136,7 @@ func NewNBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (cl
 		return nil, err
 	}
 
-	c, err := newClient(cfg, dbModel, stopCh)
+	c, err := NewClient(cfg, dbModel, stopCh)
 	if err != nil {
 		return nil, err
 	}

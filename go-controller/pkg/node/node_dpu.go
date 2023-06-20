@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	netattchdefapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -134,6 +135,7 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 			if ok {
 				servedCache = v.(map[string]*util.DPUConnectionDetails)
 			}
+			portSecInfoChanged := oldPod.Annotations[util.PortSecurityInfoAnnotation] != newPod.Annotations[util.PortSecurityInfoAnnotation]
 			for nadName := range networkMap {
 				podDesc := fmt.Sprintf("pod %s/%s for nad %s", newPod.Namespace, newPod.Name, nadName)
 				var oldDpuCD *util.DPUConnectionDetails
@@ -145,6 +147,9 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 				if oldDpuCD == nil && newDpuCD == nil {
 					continue
 				}
+				// if portSecInfoChanged and we need to del/add the VF for the pod, the del/add of the rep will
+				// also take care of updating the xdp config, if any. However, if we don't have any change in
+				// the connection info, and only the port security annotation changed, we'll need to do that.
 				if oldDpuCD != nil {
 					// VF already added, but new Pod has changed, we'd need to delete the old VF
 					if newDpuCD == nil || oldDpuCD.PfId != newDpuCD.PfId ||
@@ -179,6 +184,11 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 						if err == nil {
 							servedCache[nadName] = newDpuCD
 						}
+					} else if portSecInfoChanged && nc.nadInfo.XDPService {
+						err := nc.updateXDPInterfaceConfig(oldPod, newPod, nadName)
+						if err != nil {
+							klog.Errorf("Failed to update XDP config for Pod %s: %v", podDesc, err)
+						}
 					}
 				}
 			}
@@ -188,10 +198,7 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 			pod := obj.(*kapi.Pod)
 			// lock pod to avoid racing on `servedCache`
 			unlock := util.LockByKey.Acquire(string(pod.UID))
-			defer func() {
-				util.LockByKey.Delete(string(pod.UID))
-				unlock()
-			}()
+			defer unlock()
 			_, ok := nc.podNadCache.Load(pod.UID)
 			if !ok {
 				klog.V(5).Infof("Skipping delete for Pod %s/%s as it is not attached to network: %s",
@@ -253,8 +260,8 @@ func (nc *ovnNodeController) updatePodDPUConnStatusWithRetry(kube kube.Interface
 	return nil
 }
 
-func isNadForPodClampedDown(podAnnotation map[string]string, nadName string) bool {
-	if status, err := util.UnmarshalPodDPUConnStatus(podAnnotation, nadName); err == nil {
+func isNadForPodClampedDown(podAnnotation map[string]string, annoNadKeyName string) bool {
+	if status, err := util.UnmarshalPodDPUConnStatus(podAnnotation, annoNadKeyName); err == nil {
 		if status.Status == util.DPUConnectionStatusClampedDown {
 			return true
 		}
@@ -262,9 +269,67 @@ func isNadForPodClampedDown(podAnnotation map[string]string, nadName string) boo
 	return false
 }
 
+// get Pod IPs from the PortSecInfo or the Pod
+func getPortSecIPsforNAD(pod *kapi.Pod, annoNadKeyName string) ([]string, *util.PodAnnotation) {
+	var allowedIPs []string
+	netAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, annoNadKeyName)
+	if err != nil {
+		return allowedIPs, nil
+	}
+	if !util.SkipIPAMForNAD(pod.Annotations, annoNadKeyName) {
+		podIP := strings.Split(netAnnotation.IPs[0].String(), "/")
+		allowedIPs = append(allowedIPs, podIP[0])
+	} else {
+		if psInfo, err := util.GetPortSecurityInfo(pod.Annotations); err == nil {
+			if ipList := psInfo[annoNadKeyName]; ipList != nil && len(ipList.IPs) > 0 {
+				allowedIPs = append(allowedIPs, ipList.IPs...)
+			}
+		}
+	}
+	return allowedIPs, netAnnotation
+}
+
+// simple function instead of using deepequal
+func checkNADPortSecIPsAreDiff(oldIPs, newIPs []string) bool {
+	if len(oldIPs) != len(newIPs) {
+		return true
+	}
+	for i, v := range oldIPs {
+		if v != newIPs[i] {
+			return true
+		}
+	}
+	return false
+}
+
+// the portSecurity for the pod is updated, update the XDP configuration, if needed . Note, there is
+// a gap when we teardown old and add new; which might have a brief impact
+func (nc *ovnNodeController) updateXDPInterfaceConfig(oldPod, newPod *kapi.Pod, nadName string) error {
+	klog.Infof("Updating XDP service for pod %s/%s network %s", newPod.Namespace, newPod.Name, nadName)
+	annoNadKeyName := util.GetAnnotationKeyFromNadName(nadName, !nc.nadInfo.IsSecondary)
+	oldAllowedIPs, _ := getPortSecIPsforNAD(oldPod, annoNadKeyName)
+	newAllowedIPs, netAnnotation := getPortSecIPsforNAD(newPod, annoNadKeyName)
+	if len(oldAllowedIPs) == 0 || len(newAllowedIPs) == 0 {
+		return fmt.Errorf("failed to update XDP for pod %s/%s with oldIPs %v and new IPs %v", newPod.Namespace, newPod.Name, oldAllowedIPs, newAllowedIPs)
+
+	}
+	// Check if the IPs are different and call into XDP, if so.
+	if checkNADPortSecIPsAreDiff(oldAllowedIPs, newAllowedIPs) {
+		gw := nc.gateway.(*gateway)
+		if config.OvnKubeNode.IsPrimaryDPU {
+			gw = nc.node.gateway.(*gateway)
+		}
+		if err := UpdateXDPServiceForInterface(netAnnotation, oldAllowedIPs, newAllowedIPs, nc.nadInfo, nc.gateway.(*gateway), gw); err != nil {
+			return fmt.Errorf("failed to update XDP for pod %s/%s: %v", newPod.Namespace, newPod.Name, err)
+		}
+	}
+	return nil
+}
+
 // addRepPort adds the representor of the VF to the ovs bridge
 func (nc *ovnNodeController) addRepPort(pod *kapi.Pod, dpuCD *util.DPUConnectionDetails, ifInfo *cni.PodInterfaceInfo, podLister corev1listers.PodLister, kclient kubernetes.Interface) error {
 	nadName := ifInfo.NadName
+	annoNadKeyName := util.GetAnnotationKeyFromNadName(nadName, !nc.nadInfo.IsSecondary)
 	podDesc := fmt.Sprintf("pod %s/%s for nad %s", pod.Namespace, pod.Name, nadName)
 	vfRepName, err := util.GetSriovnetOps().GetVfRepresentorDPU(dpuCD.PfId, dpuCD.VfId)
 	if err != nil {
@@ -325,7 +390,7 @@ func (nc *ovnNodeController) addRepPort(pod *kapi.Pod, dpuCD *util.DPUConnection
 		// We use the Pod annotation to see if it is clamped down for this NAD instead of checking the existing
 		// value on the VF. Reason being if the DPU reboots, we'll lose the VF configuration so we can't rely
 		// on that.
-		nadClampedDown := isNadForPodClampedDown(pod.Annotations, ifInfo.NadName)
+		nadClampedDown := isNadForPodClampedDown(pod.Annotations, annoNadKeyName)
 		if nadClampedDown {
 			maxNewConnPPS = ClampdownDoSRate
 			maxNewConnBurst = ClampdownDoSBurst
@@ -350,6 +415,11 @@ func (nc *ovnNodeController) addRepPort(pod *kapi.Pod, dpuCD *util.DPUConnection
 	// Configure XDP for this network
 	if nc.nadInfo.XDPService {
 		klog.Infof("Setting up XDP service for pod %s/%s network %s", pod.Namespace, pod.Name, ifInfo.NadName)
+		allowedIPs, _ := getPortSecIPsforNAD(pod, annoNadKeyName)
+		if len(allowedIPs) == 0 {
+			_ = nc.delRepPort(pod, dpuCD, vfRepName, nadName, podDesc)
+			return fmt.Errorf("failed geting IP info for NAD %s from pod annotation", ifInfo.NadName)
+		}
 		gw := nc.gateway.(*gateway)
 		// Check if the (localnet) patch port is in place
 		gwReady, _ := gw.readyFunc()
@@ -362,7 +432,7 @@ func (nc *ovnNodeController) addRepPort(pod *kapi.Pod, dpuCD *util.DPUConnection
 		}
 		// If this pod needs Syn-Flooding mitigation on the DPU (to protect DPU cores)
 		// by adding a bump-in-the-path kind of service before signalling that pod as ready.
-		if err = SetupXDPServiceForInterface(&ifInfo.PodAnnotation, nc.nadInfo, nc.gateway.(*gateway), gw); err != nil {
+		if err = SetupXDPServiceForInterface(&ifInfo.PodAnnotation, allowedIPs, nc.nadInfo, nc.gateway.(*gateway), gw); err != nil {
 			_ = nc.delRepPort(pod, dpuCD, vfRepName, nadName, podDesc)
 			return fmt.Errorf("failed to setup XDP for network: %v", err)
 		}
@@ -383,7 +453,7 @@ func (nc *ovnNodeController) delRepPort(pod *kapi.Pod, dpuCD *util.DPUConnection
 	//TODO(adrianc): handle: clearPodBandwidth(pr.SandboxID), pr.deletePodConntrack()
 	klog.Infof("Deleting VF representor %s for %s", vfRepName, podDesc)
 	annoNadKeyName := util.GetAnnotationKeyFromNadName(nadName, !nc.nadInfo.IsSecondary)
-	ifExists, sandbox, networkName, err := util.GetOVSPortPodInfo(vfRepName)
+	ifExists, sandbox, expectedAnnoNadKeyName, err := util.GetOVSPortPodInfo(vfRepName)
 	if err != nil {
 		return fmt.Errorf(err.Error())
 	}
@@ -394,25 +464,26 @@ func (nc *ovnNodeController) delRepPort(pod *kapi.Pod, dpuCD *util.DPUConnection
 	if sandbox != dpuCD.SandboxId {
 		return fmt.Errorf("OVS port %s was added for sandbox (%s), expecting (%s)", vfRepName, sandbox, dpuCD.SandboxId)
 	}
-	if networkName != annoNadKeyName {
-		return fmt.Errorf("OVS port %s was added for nad (%s), expecting (%s)", vfRepName, networkName, annoNadKeyName)
+	if expectedAnnoNadKeyName != annoNadKeyName {
+		return fmt.Errorf("OVS port %s was added for nad (%s), expecting (%s)", vfRepName, expectedAnnoNadKeyName, annoNadKeyName)
 	}
 	// Remove XDP xonfigurationfor this network
 	if nc.nadInfo.XDPService {
 		klog.Infof("Removing XDP service for pod %s/%s network %s", pod.Namespace, pod.Name, nadName)
-		gw := nc.gateway.(*gateway)
-		if config.OvnKubeNode.IsPrimaryDPU {
-			gw = nc.node.gateway.(*gateway)
-		}
-		netAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, annoNadKeyName)
-		if err == nil {
-			// If this pod needs Syn-Flooding mitigation on the DPU (to protect DPU cores)
-			// by adding a bump-in-the-path kind of service before signalling that pod as ready.
-			if err = TeardownXDPServiceForInterface(netAnnotation, nc.nadInfo, nc.gateway.(*gateway), gw); err != nil {
+		allowedIPs, netAnnotation := getPortSecIPsforNAD(pod, annoNadKeyName)
+		if len(allowedIPs) > 0 {
+			gw := nc.gateway.(*gateway)
+			if config.OvnKubeNode.IsPrimaryDPU {
+				gw = nc.node.gateway.(*gateway)
+			}
+			// If this pod used Syn-Flooding mitigation on the DPU (to protect DPU cores)
+			// delete it.
+			if err = TeardownXDPServiceForInterface(netAnnotation, allowedIPs, nc.nadInfo, nc.gateway.(*gateway), gw); err != nil {
 				return fmt.Errorf("failed to tear down XDP: %v", err)
 			}
 		} else {
-			klog.Infof("Failed to get pod annotation for %s[%s] (%v): %v", nc.nadInfo.NetName, annoNadKeyName, pod.Annotations, err)
+			klog.Infof("Failed getting IP addresses for pod %s/%s network %s for deleting XDP",
+				pod.Namespace, pod.Name, nadName)
 		}
 	} else {
 		klog.Infof("XDP service not used for pod %s/%s network %s", pod.Namespace, pod.Name, annoNadKeyName)
@@ -469,7 +540,7 @@ func (nc *ovnNodeController) updateNADConfig(key string, newConfig *util.NadConf
 	return nil
 }
 
-func (nc *ovnNodeController) updateRateLimitingForPod(pod *kapi.Pod, nadKey string) error {
+func (nc *ovnNodeController) updateRateLimitingForPod(pod *kapi.Pod, nadName string) error {
 	// acquire a lock per pod to avoid racing on `servedCache` in pod watcher
 	unlock := util.LockByKey.Acquire(string(pod.UID))
 	defer unlock()
@@ -479,22 +550,22 @@ func (nc *ovnNodeController) updateRateLimitingForPod(pod *kapi.Pod, nadKey stri
 		return nil
 	}
 	connDetails := val.(map[string]*util.DPUConnectionDetails)
-	connDetail, ok := connDetails[nadKey]
+	connDetail, ok := connDetails[nadName]
 	if !ok {
-		klog.V(5).Infof("DPUConnectionDetails for pod %s/%s, net-attach-def %s not found in cache, skip", pod.Namespace, pod.Name, nadKey)
+		klog.V(5).Infof("DPUConnectionDetails for pod %s/%s, net-attach-def %s not found in cache, skip", pod.Namespace, pod.Name, nadName)
 		return nil
 	}
 	var nadConfig *util.NadConfig
-	if v, ok := nc.nadInfo.NetAttachDefs.Load(nadKey); ok {
+	if v, ok := nc.nadInfo.NetAttachDefs.Load(nadName); ok {
 		nadConfig = v.(*util.NadConfig)
 	} else {
 		// Failed to find the per nad configuration
-		return fmt.Errorf("failed to find nad configuration for %s", nadKey)
+		return fmt.Errorf("failed to find nad configuration for %s", nadName)
 	}
 	vfRepName := connDetail.ConnPrivateInfo.ConnVFRepName
 	maxNewConnPPS, maxNewConnBurst, disableDoSCheck := nadConfig.GetMissRateLimitConfig(nc.node.hostType)
 	if !disableDoSCheck && connDetail.ConnPrivateInfo.ConnClampedDown {
-		klog.V(5).Infof("Skip setting limit for VF representor %s/%s/%s on NAD %s since it is clamped down", pod.Namespace, pod.Name, vfRepName, nadKey)
+		klog.V(5).Infof("Skip setting limit for VF representor %s/%s/%s on NAD %s since it is clamped down", pod.Namespace, pod.Name, vfRepName, nadName)
 		return nil
 	}
 	err := util.GetSriovnetOps().SetRepresentorVFMissPktRate(vfRepName, maxNewConnPPS, maxNewConnBurst)
@@ -507,7 +578,7 @@ func (nc *ovnNodeController) updateRateLimitingForPod(pod *kapi.Pod, nadKey stri
 		if connDetail.ConnPrivateInfo.ConnClampedDown {
 			connDetail.ConnPrivateInfo.ConnClampedDown = false
 			connStatus := util.DPUConnectionStatus{Status: util.DPUConnectionStatusReady, Reason: ""}
-			err = nc.updatePodDPUConnStatusWithRetry(nc.node.Kube, pod, &connStatus, nadKey)
+			err = nc.updatePodDPUConnStatusWithRetry(nc.node.Kube, pod, &connStatus, nadName)
 			if err != nil {
 				klog.Errorf("Failed to update connection status annotation the pod %s/%s: %v", pod.Namespace, pod.Name, err)
 			}
@@ -527,7 +598,7 @@ func (nc *ovnNodeController) updateRateLimitingForPod(pod *kapi.Pod, nadKey stri
 			klog.Infof("DoS: Initial Drop limit for VF representor %s for %s/%s: %v", vfRepName, pod.Namespace, pod.Name, connDetail.ConnPrivateInfo.MissRateLimitDropInitial)
 		}
 	}
-	klog.V(4).Infof("Rate limit of %s/%s/%s updated to %v/%v based on NAD %s", pod.Namespace, pod.Name, vfRepName, maxNewConnPPS, maxNewConnBurst, nadKey)
+	klog.V(4).Infof("Rate limit of %s/%s/%s updated to %v/%v based on NAD %s", pod.Namespace, pod.Name, vfRepName, maxNewConnPPS, maxNewConnBurst, nadName)
 	return nil
 }
 
