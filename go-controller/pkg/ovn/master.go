@@ -1508,7 +1508,7 @@ func (oc *Controller) addUpdateNodeEvent(oldNode, newNode *kapi.Node, nSyncs *no
 		return nil
 	}
 
-	klog.Infof("Adding or Updating Node %q for network %s", newNode.Name, oc.nadInfo.NetName)
+	klog.V(6).Infof("Adding or Updating Node %q for network %s", newNode.Name, oc.nadInfo.NetName)
 	if nSyncs.syncNode {
 		if hostSubnets, err = oc.addNode(newNode); err != nil {
 			oc.addNodeFailed.Store(newNode.Name, true)

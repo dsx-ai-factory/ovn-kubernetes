@@ -1184,11 +1184,11 @@ func (n *OvnNode) WatchEndpointSlices(nodeIP string) error {
 				reflect.DeepEqual(oldEpAddr, newEpAddr) {
 				return
 			}
-			klog.Infof("Processing update for endpoint slice %s on namespace %s",
+			klog.V(6).Infof("Processing update for endpoint slice %s on namespace %s",
 				newEndpointSlice.Name, newEndpointSlice.Namespace)
 			startTime := time.Now()
 			updateEndpointSlice(nodeIP, skipFirewalldAnnotation, oldEndpointSlice, newEndpointSlice)
-			klog.Infof("Took %v to update endpoint slice %s/%s",
+			klog.V(6).Infof("Took %v to update endpoint slice %s/%s",
 				time.Since(startTime), newEndpointSlice.Namespace, newEndpointSlice.Name)
 		},
 		DeleteFunc: func(obj interface{}) {
@@ -1542,11 +1542,11 @@ func (n *OvnNode) WatchEndpointSlicesOnDPU() error {
 				reflect.DeepEqual(oldEpAddr, newEpAddr) {
 				return
 			}
-			klog.Infof("Processing update for endpoint slice %s on namespace %s",
+			klog.V(6).Infof("Processing update for endpoint slice %s on namespace %s",
 				newEndpointSlice.Name, newEndpointSlice.Namespace)
 			startTime := time.Now()
 			deleteConntrackEntries(newEndpointSlice, oldEndpointSlice)
-			klog.Infof("Took %v to complete update for endpoint slice %s/%s",
+			klog.V(6).Infof("Took %v to complete update for endpoint slice %s/%s",
 				time.Since(startTime), newEndpointSlice.Namespace, newEndpointSlice.Name)
 		},
 		DeleteFunc: func(obj interface{}) {

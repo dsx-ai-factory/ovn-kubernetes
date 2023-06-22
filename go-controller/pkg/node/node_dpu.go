@@ -122,7 +122,7 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool, pfMACs []string) 
 			defer unlock()
 			v, ok := nc.podNadCache.Load(newPod.UID)
 			if !ok {
-				klog.V(5).Infof("Skipping update for Pod %s/%s as it is not attached to network: %s",
+				klog.V(6).Infof("Skipping update for Pod %s/%s as it is not attached to network: %s",
 					newPod.Namespace, newPod.Name, nc.nadInfo.NetName)
 				return
 			}
