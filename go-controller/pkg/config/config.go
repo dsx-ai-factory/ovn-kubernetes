@@ -955,7 +955,7 @@ var OVNK8sFeatureFlags = []cli.Flag{
 	},
 	&cli.BoolFlag{
 		Name:        "enable-admin-pbr",
-		Usage:       "Configure to enable policy based route feature.",
+		Usage:       "Configure to enable admin policy based route feature.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableAdminPolicyBasedRouting,
 		Value:       OVNKubernetesFeature.EnableAdminPolicyBasedRouting,
 	},

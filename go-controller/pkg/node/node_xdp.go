@@ -125,6 +125,7 @@ func xdpSetupOFFlowsForInterface(allowedIPs []string, bridgeName string, vlanID 
 	// We could be smarter in using the hash of all the ips, or some such, that'll make deletion
 	// easier, but we can cheat a bit as getting a hash of the ips etc might be an overkill, so
 	// we use only the 1st ip for the key.
+	// TODO: generate key string by hashing all the IPs, brdige name and vlan ID
 	ipStr := strings.Join(allowedIPs[:], "-")
 	keyStr := strings.Join([]string{"xdp", ipStr, bridgeName, fmt.Sprintf("%d", vlanID)}, "_")
 	key, err := xdpToCookie(keyStr)

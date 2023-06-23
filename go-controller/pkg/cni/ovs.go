@@ -181,7 +181,9 @@ func doPodFlowsExist(mac string, ifAddrs []*net.IPNet, ofPort int) bool {
 	// Query the flows by mac address for in_port_security and OF port
 	queries := []query{
 		{
-			match:  "dl_src=" + mac,
+			match: "dl_src=" + mac,
+			// ingress pipeline starts with table 8, if mac shows up here,
+			// it means the ovn-controller has claimed port
 			tables: []int{8},
 		},
 		{

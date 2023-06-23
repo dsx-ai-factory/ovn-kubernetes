@@ -32,10 +32,11 @@ spec:
           originating from and/or -- kubernetes nodes, namespaces, pods -- and forward
           them to different destination for further processing. \n This API leverages
           OVN's Logical Router Policy feature. The AdminPolicyBasedRoute policies
-          or translated to OVN policies and these policies override OVN's static routing
-          decision. The priority of the policy rules is set to 100 (priority in range
-          of 0 to 32,767, with numerically higher priority taking precedence over
-          those with lower), and it processed after all the OVN K8s' pre-defined rules."
+          are translated to OVN route policies and these policies override OVN's static
+          routing decision. OVN route policies have priorities (higher takes precedence)
+          with values from 0-32767, while those derived from AdminPolicyBasedRoute
+          are insterted with a priority of 80, and they are processed after all the
+          OVN K8s' pre-defined rules."
         properties:
           apiVersion:
             description: 'APIVersion defines the versioned schema of this representation
