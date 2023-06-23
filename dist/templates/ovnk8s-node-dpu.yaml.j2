@@ -212,6 +212,8 @@ spec:
           value: "{{ ovs_min_revalidate_pps }}"
         - name: OVS_MAX_IDLE
           value: "{{ ovs_max_idle }}"
+        - name: OVNKUBE_DISABLE_OVS_METRICS
+          value: "{{ disable_ovs_metrics }}"
 
       volumes:
       - name: sysfs

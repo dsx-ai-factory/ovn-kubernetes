@@ -185,6 +185,8 @@ spec:
         - name: OVN_EX_GW_NETWORK_INTERFACE
           value: "{{ ovn_ex_gw_networking_interface }}"
         {% if ovnkube_app_name=="ovnkube-node" -%}
+        - name: OVNKUBE_DISABLE_OVS_METRICS
+          value: "{{ disable_ovs_metrics }}"         
         - name: OVN_SSL_ENABLE
           value: "{{ ovn_ssl_en }}"
         - name: OVN_MULTI_NETWORK_ENABLE

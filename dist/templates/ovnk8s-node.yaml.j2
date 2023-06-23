@@ -199,6 +199,8 @@ spec:
             - name: COREDNS_CLUSTER_IP
               value: "{{ coredns_cluster_ip }}"
             {% if ovnkube_app_name=="ovnkube-node" -%}
+            - name: OVNKUBE_DISABLE_OVS_METRICS
+              value: "{{ disable_ovs_metrics }}"            
             - name: OVN_NB_CERT_CNAME
               value: "{{ ovn_nb_cert_cname }}"
             - name: OVN_SB_CERT_CNAME

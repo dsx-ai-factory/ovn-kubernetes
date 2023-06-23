@@ -238,6 +238,8 @@ if [[ -z ${metrics_pprof_worker_port} ]]; then
   metrics_pprof_worker_port=19410
 fi
 
+disable_ovs_metrics=${OVNKUBE_DISABLE_OVS_METRICS:-false}
+
 ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
 # namespace used for classifying host network traffic
 ovn_host_network_namespace=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
@@ -1576,7 +1578,9 @@ ovn-node() {
             --sb-cert-common-name ${ovn_sb_cert_cname}
           "
       }
-      export_ovs_metrics_opts="--export-ovs-metrics"
+      if [[ ${disable_ovs_metrics} == "false" ]]; then
+        export_ovs_metrics_opts="--export-ovs-metrics"
+      fi
   fi
 
   ovnkube_node_metrics_bind_address="${metrics_endpoint_ip}:${metrics_worker_port}"

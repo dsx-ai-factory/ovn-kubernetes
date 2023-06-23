@@ -101,6 +101,7 @@ OVNKUBE_CONFIG_DURATION_ENABLE=
 IN_UPGRADE=
 COREDNS_CLUSTER_IP="10.96.0.10"
 OVNKUBE_LOGFILE=""
+OVNKUBE_DISABLE_OVS_METRICS=""
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -344,6 +345,9 @@ while [ "$1" != "" ]; do
   --ovnkube-logfile)
     OVNKUBE_LOGFILE=$VALUE
     ;;
+  --disable-ovs-metrics)
+    OVNKUBE_DISABLE_OVS_METRICS=$VALUE
+    ;;
 
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
@@ -523,6 +527,8 @@ coredns_cluster_ip=${COREDNS_CLUSTER_IP}
 echo "coredns_cluster_ip: ${coredns_cluster_ip}"
 ovnkube_logfile=${OVNKUBE_LOGFILE}
 echo "ovnkube_logfile: ${ovnkube_logfile}"
+disable_ovs_metrics=${OVNKUBE_DISABLE_OVS_METRICS:-false}
+echo "disable_ovs_metrics=${disable_ovs_metrics}"
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -558,6 +564,7 @@ ovn_image=${image} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
+  disable_ovs_metrics=${disable_ovs_metrics} \
   ovnkube_app_name=ovnkube-node \
   j2 ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node.yaml
 
@@ -710,6 +717,7 @@ ovn_image=${image} \
   ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
   coredns_cluster_ip=${coredns_cluster_ip} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
+  disable_ovs_metrics=${disable_ovs_metrics} \
   ovnkube_app_name=ovnkube-node \
   j2 ../templates/ovnk8s-node.yaml.j2 -o ${output_dir}/ovnk8s-node.yaml
 
@@ -778,6 +786,7 @@ ovn_image=${image_ubuntu} \
   ovs_max_revalidator=${ovs_max_revalidator} \
   ovs_min_revalidate_pps=${ovs_min_revalidate_pps} \
   ovs_max_idle=${ovs_max_idle} \
+  disable_ovs_metrics=${disable_ovs_metrics} \
   j2 ../templates/ovnk8s-node-dpu.yaml.j2 -o ${output_dir}/ovnk8s-node-dpu.yaml
 
 ovn_image=${imagec} \
