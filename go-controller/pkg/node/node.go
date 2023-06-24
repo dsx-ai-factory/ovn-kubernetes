@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -668,9 +669,8 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 		}()
 	}
 
-	err = util.SetOvnKubeLogLevel(n.Kube, n.name, "ovnkube-node")
-	if err != nil {
-		klog.Errorf("Reset of klog \"loglevel\" failed, err: %v", err)
+	if err := level.Set(strconv.Itoa(config.Logging.Level)); err != nil {
+		klog.Errorf("Reset of initial klog \"loglevel\" failed, err: %v", err)
 	}
 
 	// start management port health check
