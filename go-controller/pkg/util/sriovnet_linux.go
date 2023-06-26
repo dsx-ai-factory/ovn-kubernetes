@@ -238,3 +238,26 @@ func GetFunctionRepresentorName(deviceID string) (string, error) {
 	}
 	return rep, nil
 }
+
+// SetVFHardwreAddress sets mac address for a VF interface
+func SetVFHardwreAddress(deviceID string, mac net.HardwareAddr) error {
+	// get uplink netdevice name and its netlink object
+	uplink, err := GetSriovnetOps().GetUplinkRepresentor(deviceID)
+	if err != nil {
+		return err
+	}
+	uplinkObj, err := GetNetLinkOps().LinkByName(uplink)
+	if err != nil {
+		return err
+	}
+	// get VF index from PCI
+	vfIndex, err := GetSriovnetOps().GetVfIndexByPciAddress(deviceID)
+	if err != nil {
+		return err
+	}
+	// set MAC address through VF representor
+	if err := GetNetLinkOps().LinkSetVfHardwareAddr(uplinkObj, vfIndex, mac); err != nil {
+		return err
+	}
+	return nil
+}

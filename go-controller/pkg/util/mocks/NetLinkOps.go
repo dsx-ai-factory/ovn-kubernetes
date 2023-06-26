@@ -397,3 +397,29 @@ func (_m *NetLinkOps) RouteListFiltered(family int, filter *netlink.Route, filte
 func (_m *NetLinkOps) CountIngressFilters(link netlink.Link) (uint, error) {
 	return 1, nil
 }
+
+// LinkSetAlias provides a mock function with given fields: link, alias
+func (_m *NetLinkOps) LinkSetAlias(link netlink.Link, alias string) error {
+	ret := _m.Called(link, alias)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(netlink.Link, string) error); ok {
+		r0 = rf(link, alias)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+func (_m *NetLinkOps) LinkSetVfHardwareAddr(pfLink netlink.Link, vfIndex int, hwaddr net.HardwareAddr) error {
+	ret := _m.Called(pfLink, vfIndex, hwaddr)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(netlink.Link, int, net.HardwareAddr) error); ok {
+		r0 = rf(pfLink, vfIndex, hwaddr)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}

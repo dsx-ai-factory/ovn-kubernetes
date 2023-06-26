@@ -143,9 +143,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 			}
 			annotCondFn = isDPUReady
 		}
-		// Todo(gmoodalbail): For the CX5 ASAP2 VF case we need to store the VF name somewhere
-		// In the case of SmartNIC (CX5), we store the netdevname in the representor's
-		// OVS interface's external_id column. This is done in ConfigureInterface().
+		// For CX5 ASAP2 VF case we rely on udev rules to restore the VF name, so skip storing the original VF name
 	}
 	// Get the IP address and MAC address of the pod
 	// for DPU, ensure connection-details is present
@@ -193,10 +191,6 @@ func (pr *PodRequest) cmdDel(podLister corev1listers.PodLister, kclient kubernet
 
 	netdevName := ""
 	if pr.CNIConf.DeviceID != "" {
-		kubecli := &kube.Kube{KClient: kclient}
-		if pr.IsVFIO && config.OvnKubeNode.Mode != types.NodeModeDPUHost {
-			return response, nil
-		}
 		if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
 			pod, err := getPod(podLister, kclient, namespace, podName)
 			if err != nil {
@@ -218,12 +212,11 @@ func (pr *PodRequest) cmdDel(podLister corev1listers.PodLister, kclient kubernet
 			}
 
 			// Delete the DPU connection-details annotation
-			_ = pr.updatePodDPUConnDetailsWithRetry(kubecli, podLister, nil)
+			_ = pr.updatePodDPUConnDetailsWithRetry(&kube.Kube{KClient: kclient}, podLister, nil)
 
 			if pr.IsVFIO {
 				return response, nil
 			}
-
 			netdevName = dpuCD.VfNetdevName
 		} else {
 			// Find the the hostInterface name
