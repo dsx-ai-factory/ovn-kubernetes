@@ -39,9 +39,9 @@ type gressPolicy struct {
 	nodeHostNetPodsCacheLock sync.Mutex
 
 	// peerV4AddressSets has Address sets for all namespaces and pod selectors for IPv4
-	peerV4AddressSets sets.String
+	peerV4AddressSets sets.Set[string]
 	// peerV6AddressSets has Address sets for all namespaces and pod selectors for IPv6
-	peerV6AddressSets sets.String
+	peerV6AddressSets sets.Set[string]
 
 	// portPolicies represents all the protocol filters which allow traffic
 	// for the rule in question.
@@ -128,8 +128,8 @@ func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name string,
 		policyName:           name,
 		policyType:           policyType,
 		idx:                  idx,
-		peerV4AddressSets:    sets.String{},
-		peerV6AddressSets:    sets.String{},
+		peerV4AddressSets:    sets.Set[string]{},
+		peerV6AddressSets:    sets.Set[string]{},
 		portPolicies:         make([]*portPolicy, 0),
 		nodeHostNetPodsCache: make(map[string]map[string][]net.IP),
 		isAclStateless:       aclState,
@@ -266,7 +266,7 @@ func (gp *gressPolicy) getL3MatchFromAddressSet() string {
 	} else {
 		// List() method on the set will return the sorted strings
 		// Hence we'll be constructing the sorted adress set string here
-		l3Match = gp.constructMatchString(gp.peerV4AddressSets.List(), gp.peerV6AddressSets.List())
+		l3Match = gp.constructMatchString(sets.List(gp.peerV4AddressSets), sets.List(gp.peerV6AddressSets))
 	}
 	return l3Match
 }

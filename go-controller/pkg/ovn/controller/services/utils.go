@@ -20,7 +20,7 @@ import (
 // This misses cleaning up NodePort services, but those will be caught
 // when the repair PostSync is done.
 func deleteServiceFromLegacyLBs(nbClient libovsdbclient.Client, service *v1.Service) error {
-	vipPortsPerProtocol := map[v1.Protocol]sets.String{}
+	vipPortsPerProtocol := map[v1.Protocol]sets.Set[string]{}
 
 	// Generate list of vip:port by proto
 	ips := append([]string{}, service.Spec.ClusterIPs...)
@@ -39,7 +39,7 @@ func deleteServiceFromLegacyLBs(nbClient libovsdbclient.Client, service *v1.Serv
 		}
 
 		if _, ok := vipPortsPerProtocol[proto]; !ok {
-			vipPortsPerProtocol[proto] = sets.NewString(ipPorts...)
+			vipPortsPerProtocol[proto] = sets.New[string](ipPorts...)
 		} else {
 			vipPortsPerProtocol[proto].Insert(ipPorts...)
 		}
@@ -62,7 +62,7 @@ func deleteServiceFromLegacyLBs(nbClient libovsdbclient.Client, service *v1.Serv
 		}
 
 		proto := v1.Protocol(strings.ToUpper(lb.Protocol))
-		for _, vip := range vipPortsPerProtocol[proto].List() {
+		for _, vip := range sets.List(vipPortsPerProtocol[proto]) {
 			if _, ok := lb.VIPs[vip]; ok {
 				r.VIPs = append(r.VIPs, vip)
 			}

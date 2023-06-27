@@ -88,7 +88,7 @@ var _ = Describe("Informer Event Handler Tests", func() {
 
 		f := informers.NewSharedInformerFactory(k, 0)
 
-		e := NewDefaultEventHandler(
+		e, err := NewDefaultEventHandler(
 			"test",
 			f.Core().V1().Pods().Informer(),
 			func(obj interface{}) error {
@@ -101,6 +101,7 @@ var _ = Describe("Informer Event Handler Tests", func() {
 			},
 			ReceiveAllUpdates,
 		)
+		Expect(err).NotTo(HaveOccurred())
 
 		f.Start(stopChan)
 		wg.Add(1)
@@ -126,7 +127,7 @@ var _ = Describe("Informer Event Handler Tests", func() {
 		}, 2).Should(BeTrue())
 
 		pod := newPod("foo", namespace)
-		_, err := k.CoreV1().Pods(namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
+		_, err = k.CoreV1().Pods(namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 
 		Consistently(func() int32 { return atomic.LoadInt32(&deletes) }).Should(Equal(int32(0)), "deletes")
@@ -150,7 +151,7 @@ var _ = Describe("Informer Event Handler Tests", func() {
 
 		f := informers.NewSharedInformerFactory(k, 0)
 
-		e := NewDefaultEventHandler(
+		e, err := NewDefaultEventHandler(
 			"test",
 			f.Core().V1().Pods().Informer(),
 			func(obj interface{}) error {
@@ -163,6 +164,7 @@ var _ = Describe("Informer Event Handler Tests", func() {
 			},
 			ReceiveAllUpdates,
 		)
+		Expect(err).NotTo(HaveOccurred())
 
 		f.Start(stopChan)
 		wg.Add(1)
@@ -191,7 +193,7 @@ var _ = Describe("Informer Event Handler Tests", func() {
 		now := metav1.Now()
 		pod.SetDeletionTimestamp(&now)
 
-		_, err := k.CoreV1().Pods(namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
+		_, err = k.CoreV1().Pods(namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 
 		Consistently(func() int32 { return atomic.LoadInt32(&deletes) }).Should(Equal(int32(0)), "deletes")
@@ -219,7 +221,7 @@ var _ = Describe("Informer Event Handler Tests", func() {
 
 		f := informers.NewSharedInformerFactory(k, 0)
 
-		e := NewDefaultEventHandler(
+		e, err := NewDefaultEventHandler(
 			"test",
 			f.Core().V1().Pods().Informer(),
 			func(obj interface{}) error {
@@ -232,6 +234,7 @@ var _ = Describe("Informer Event Handler Tests", func() {
 			},
 			ReceiveAllUpdates,
 		)
+		Expect(err).NotTo(HaveOccurred())
 
 		f.Start(stopChan)
 		wg.Add(1)
@@ -259,7 +262,7 @@ var _ = Describe("Informer Event Handler Tests", func() {
 		pod.Annotations = map[string]string{"bar": "baz"}
 		pod.ResourceVersion = "11"
 
-		_, err := k.CoreV1().Pods(namespace).Update(context.TODO(), pod, metav1.UpdateOptions{})
+		_, err = k.CoreV1().Pods(namespace).Update(context.TODO(), pod, metav1.UpdateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(func() (bool, error) {
@@ -297,7 +300,7 @@ var _ = Describe("Informer Event Handler Tests", func() {
 
 		f := informers.NewSharedInformerFactory(k, 0)
 
-		e := NewDefaultEventHandler(
+		e, err := NewDefaultEventHandler(
 			"test",
 			f.Core().V1().Pods().Informer(),
 			func(obj interface{}) error {
@@ -310,6 +313,7 @@ var _ = Describe("Informer Event Handler Tests", func() {
 			},
 			ReceiveAllUpdates,
 		)
+		Expect(err).NotTo(HaveOccurred())
 
 		f.Start(stopChan)
 		wg.Add(1)
@@ -339,7 +343,7 @@ var _ = Describe("Informer Event Handler Tests", func() {
 		now := metav1.Now()
 		pod.SetDeletionTimestamp(&now)
 
-		_, err := k.CoreV1().Pods(namespace).Update(context.TODO(), pod, metav1.UpdateOptions{})
+		_, err = k.CoreV1().Pods(namespace).Update(context.TODO(), pod, metav1.UpdateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		// no deletes
 		Consistently(func() int32 { return atomic.LoadInt32(&deletes) }).Should(Equal(int32(0)), "deletes")
@@ -367,7 +371,7 @@ var _ = Describe("Informer Event Handler Tests", func() {
 
 		f := informers.NewSharedInformerFactory(k, 0)
 
-		e := NewDefaultEventHandler(
+		e, err := NewDefaultEventHandler(
 			"test",
 			f.Core().V1().Pods().Informer(),
 			func(obj interface{}) error {
@@ -380,6 +384,7 @@ var _ = Describe("Informer Event Handler Tests", func() {
 			},
 			ReceiveAllUpdates,
 		)
+		Expect(err).NotTo(HaveOccurred())
 
 		f.Start(stopChan)
 		wg.Add(1)
@@ -407,7 +412,7 @@ var _ = Describe("Informer Event Handler Tests", func() {
 		// initial add from the cache
 		Eventually(func() int32 { return atomic.LoadInt32(&adds) }).Should(Equal(int32(1)), "adds")
 
-		err := k.CoreV1().Pods(namespace).Delete(context.TODO(), "foo", *metav1.NewDeleteOptions(0))
+		err = k.CoreV1().Pods(namespace).Delete(context.TODO(), "foo", *metav1.NewDeleteOptions(0))
 		Expect(err).NotTo(HaveOccurred())
 
 		// we stay at 1
@@ -437,7 +442,7 @@ var _ = Describe("Informer Event Handler Tests", func() {
 
 		f := informers.NewSharedInformerFactory(k, 0)
 
-		e := NewDefaultEventHandler(
+		e, err := NewDefaultEventHandler(
 			"test",
 			f.Core().V1().Pods().Informer(),
 			func(obj interface{}) error {
@@ -450,6 +455,7 @@ var _ = Describe("Informer Event Handler Tests", func() {
 			},
 			DiscardAllUpdates,
 		)
+		Expect(err).NotTo(HaveOccurred())
 
 		f.Start(stopChan)
 		wg.Add(1)
@@ -476,7 +482,7 @@ var _ = Describe("Informer Event Handler Tests", func() {
 
 		pod.Annotations = map[string]string{"bar": "baz"}
 		pod.ResourceVersion = "1"
-		_, err := k.CoreV1().Pods(namespace).Update(context.TODO(), pod, metav1.UpdateOptions{})
+		_, err = k.CoreV1().Pods(namespace).Update(context.TODO(), pod, metav1.UpdateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 
 		// no deletes

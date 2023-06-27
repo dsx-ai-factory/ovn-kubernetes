@@ -65,12 +65,12 @@ func (ni *nodeInfo) nodeSubnets() []net.IPNet {
 	return out
 }
 
-func newNodeTracker(nodeInformer coreinformers.NodeInformer) *nodeTracker {
+func newNodeTracker(nodeInformer coreinformers.NodeInformer) (*nodeTracker, error) {
 	nt := &nodeTracker{
 		nodes: map[string]nodeInfo{},
 	}
 
-	nodeInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, err := nodeInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node, ok := obj.(*v1.Node)
 			if !ok {
@@ -116,8 +116,10 @@ func newNodeTracker(nodeInformer coreinformers.NodeInformer) *nodeTracker {
 			nt.removeNodeWithServiceReSync(node.Name)
 		},
 	})
-
-	return nt
+	if err != nil {
+		return nil, err
+	}
+	return nt, nil
 
 }
 

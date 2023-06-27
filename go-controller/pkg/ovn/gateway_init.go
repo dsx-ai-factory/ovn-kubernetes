@@ -445,7 +445,7 @@ func (oc *Controller) addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAd
 		l3Prefix = "ip4"
 	}
 
-	matches := sets.NewString()
+	matches := sets.New[string]()
 	for _, hostIP := range append(otherHostAddrs, hostIfAddr.IP.String()) {
 		// embed nodeName as comment so that it is easier to delete these rules later on.
 		// logical router policy doesn't support external_ids to stash metadata
@@ -491,9 +491,9 @@ func (oc *Controller) addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAd
 // the external_id, but since ovn-kubernetes isn't versioned, we won't ever
 // know which version someone is running of this and when the switch to version
 // N+2 is fully made.
-func (oc *Controller) syncPolicyBasedRoutes(nodeName string, matches sets.String, priority, nexthop string) error {
+func (oc *Controller) syncPolicyBasedRoutes(nodeName string, matches sets.Set[string], priority, nexthop string) error {
 	// create a map to track matches found
-	matchTracker := sets.NewString(matches.List()...)
+	matchTracker := sets.New[string](sets.List(matches)...)
 
 	ovnClusterRouter := util.GetOVNClusterRouterName()
 	if priority == types.NodeSubnetPolicyPriority {

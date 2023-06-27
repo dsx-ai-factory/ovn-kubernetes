@@ -43,7 +43,7 @@ func NewMaster(kube kube.Interface,
 	libovsdbSBClient libovsdbclient.Client,
 	eventHandlerCreateFunction informer.EventHandlerCreateFunction,
 ) (*MasterController, error) {
-
+	var err error
 	m := &MasterController{
 		kube:      kube,
 		allocator: subnetallocator.NewSubnetAllocator(),
@@ -51,7 +51,7 @@ func NewMaster(kube kube.Interface,
 		sbClient:  libovsdbSBClient,
 	}
 
-	m.nodeEventHandler = eventHandlerCreateFunction("node", nodeInformer,
+	m.nodeEventHandler, err = eventHandlerCreateFunction("node", nodeInformer,
 		func(obj interface{}) error {
 			node, ok := obj.(*kapi.Node)
 			if !ok {
@@ -68,6 +68,9 @@ func NewMaster(kube kube.Interface,
 		},
 		informer.ReceiveAllUpdates,
 	)
+	if err != nil {
+		return nil, err
+	}
 
 	// Add our hybrid overlay CIDRs to the subnetallocator
 	for _, clusterEntry := range config.HybridOverlay.ClusterSubnets {

@@ -23,7 +23,7 @@ import (
 type addressManager struct {
 	nodeName       string
 	watchFactory   factory.NodeWatchFactory
-	addresses      sets.String
+	addresses      sets.Set[string]
 	nodeAnnotator  kube.Annotator
 	mgmtPortConfig *managementPortConfig
 
@@ -36,7 +36,7 @@ func newAddressManager(nodeName string, k kube.Interface, config *managementPort
 	mgr := &addressManager{
 		nodeName:       nodeName,
 		watchFactory:   watchFactory,
-		addresses:      sets.NewString(),
+		addresses:      sets.New[string](),
 		mgmtPortConfig: config,
 		OnChanged:      func() {},
 	}
@@ -83,7 +83,7 @@ func (c *addressManager) delAddr(ip net.IP) bool {
 func (c *addressManager) ListAddresses() []net.IP {
 	c.Lock()
 	defer c.Unlock()
-	addrs := c.addresses.List()
+	addrs := sets.List(c.addresses)
 	out := make([]net.IP, 0, len(addrs))
 	for _, addr := range addrs {
 		ip := net.ParseIP(addr)
@@ -174,7 +174,7 @@ func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
 	klog.Info("Node IP manager is running")
 }
 
-func (c *addressManager) assignAddresses(nodeHostAddresses sets.String) bool {
+func (c *addressManager) assignAddresses(nodeHostAddresses sets.Set[string]) bool {
 	c.Lock()
 	defer c.Unlock()
 
@@ -241,7 +241,7 @@ func (c *addressManager) sync() {
 		return
 	}
 
-	currAddresses := sets.NewString()
+	currAddresses := sets.New[string]()
 	for _, addr := range addrs {
 		ip, _, err := net.ParseCIDR(addr.String())
 		if err != nil {

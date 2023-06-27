@@ -31,7 +31,7 @@ import (
 )
 
 type gatewayInfo struct {
-	gws        sets.String
+	gws        sets.Set[string]
 	bfdEnabled bool
 }
 
@@ -410,7 +410,7 @@ func (oc *Controller) deletePodGWRoutesForNamespace(pod *kapi.Pod, namespace str
 // deleteGwRoutesForNamespace handles deleting routes to gateways for a pod on a specific GR.
 // If a set of gateways is given, only routes for that gateway are deleted. If no gateways
 // are given, all routes for the namespace are deleted.
-func (oc *Controller) deleteGWRoutesForNamespace(namespace string, matchGWs sets.String) error {
+func (oc *Controller) deleteGWRoutesForNamespace(namespace string, matchGWs sets.Set[string]) error {
 	deleteAll := (matchGWs == nil || matchGWs.Len() == 0)
 	for _, routeInfo := range oc.getRouteInfosForNamespace(namespace) {
 		routeInfo.Lock()
@@ -990,8 +990,8 @@ func (oc *Controller) cleanExGwECMPRoutes() {
 	}
 }
 
-func getExGwPodIPs(gatewayPod *kapi.Pod) (sets.String, error) {
-	foundGws := sets.NewString()
+func getExGwPodIPs(gatewayPod *kapi.Pod) (sets.Set[string], error) {
+	foundGws := sets.New[string]()
 	if gatewayPod.Annotations[util.RoutingNetworkAnnotation] != "" {
 		var multusNetworks []nettypes.NetworkStatus
 		err := json.Unmarshal([]byte(gatewayPod.ObjectMeta.Annotations[nettypes.NetworkStatusAnnot]), &multusNetworks)

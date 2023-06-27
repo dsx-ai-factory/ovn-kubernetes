@@ -67,7 +67,7 @@ type EventHandlerCreateFunction func(
 	informer cache.SharedIndexInformer,
 	addFunc, deleteFunc func(obj interface{}) error,
 	updateFilterFunc UpdateFilterFunction,
-) EventHandler
+) (EventHandler, error)
 
 // NewDefaultEventHandler returns a new default event handler
 // The default event handler
@@ -83,7 +83,7 @@ func NewDefaultEventHandler(
 	informer cache.SharedIndexInformer,
 	addFunc, deleteFunc func(obj interface{}) error,
 	updateFilterFunc UpdateFilterFunction,
-) EventHandler {
+) (EventHandler, error) {
 	e := &eventHandler{
 		name:           name,
 		informer:       informer,
@@ -93,7 +93,7 @@ func NewDefaultEventHandler(
 		delete:         deleteFunc,
 		updateFilter:   updateFilterFunc,
 	}
-	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, err := informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			// always enqueue adds
 			e.enqueue(obj)
@@ -116,7 +116,10 @@ func NewDefaultEventHandler(
 			e.enqueueDelete(obj)
 		},
 	})
-	return e
+	if err != nil {
+		return nil, err
+	}
+	return e, nil
 }
 
 // NewTestEventHandler returns an event handler similar to NewEventHandler.
@@ -126,7 +129,7 @@ func NewTestEventHandler(
 	informer cache.SharedIndexInformer,
 	addFunc, deleteFunc func(obj interface{}) error,
 	updateFilterFunc UpdateFilterFunction,
-) EventHandler {
+) (EventHandler, error) {
 	e := &eventHandler{
 		name:           name,
 		informer:       informer,
@@ -136,7 +139,7 @@ func NewTestEventHandler(
 		delete:         deleteFunc,
 		updateFilter:   updateFilterFunc,
 	}
-	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, err := informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			// always enqueue adds
 			e.enqueue(obj)
@@ -154,7 +157,10 @@ func NewTestEventHandler(
 			e.enqueueDelete(obj)
 		},
 	})
-	return e
+	if err != nil {
+		return nil, err
+	}
+	return e, nil
 }
 
 // GetIndexer returns the indexer that is associated with

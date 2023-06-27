@@ -607,10 +607,13 @@ func (oc *Controller) Run(ctx context.Context) error {
 		}
 
 		if config.OVNKubernetesFeature.EnableEgressQoS {
-			oc.initEgressQoSController(
+			err := oc.initEgressQoSController(
 				oc.mc.watchFactory.EgressQoSInformer(),
 				oc.mc.watchFactory.PodCoreInformer(),
 				oc.mc.watchFactory.NodeCoreInformer())
+			if err != nil {
+				return err
+			}
 			oc.wg.Add(1)
 			go func() {
 				defer oc.wg.Done()
@@ -1234,7 +1237,7 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 			return err
 		}
 	} else if hostSubnets != nil {
-		var hostAddrs sets.String
+		var hostAddrs sets.Set[string]
 		if config.Gateway.Mode == config.GatewayModeShared {
 			hostAddrs, err = util.ParseNodeHostAddresses(node)
 			if err != nil && !util.IsAnnotationNotSetError(err) {
@@ -1770,7 +1773,7 @@ func newServiceController(client clientset.Interface, nbClient libovsdbclient.Cl
 			options.LabelSelector = labelSelector.String()
 		}))
 
-	controller := svccontroller.NewController(
+	controller, err := svccontroller.NewController(
 		client,
 		nbClient,
 		svcFactory.Core().V1().Services(),
@@ -1778,6 +1781,9 @@ func newServiceController(client clientset.Interface, nbClient libovsdbclient.Cl
 		svcFactory.Core().V1().Nodes(),
 		recorder,
 	)
+	if err != nil {
+		panic(err)
+	}
 
 	return controller, svcFactory
 }

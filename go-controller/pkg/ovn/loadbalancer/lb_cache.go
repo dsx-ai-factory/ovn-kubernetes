@@ -48,11 +48,11 @@ type CachedLB struct {
 	Protocol    string
 	UUID        string
 	ExternalIDs map[string]string
-	VIPs        sets.String // don't care about backend IPs, just the vips
+	VIPs        sets.Set[string] // don't care about backend IPs, just the vips
 
-	Switches sets.String
-	Routers  sets.String
-	Groups   sets.String
+	Switches sets.Set[string]
+	Routers  sets.Set[string]
+	Groups   sets.Set[string]
 }
 
 // update the database with any existing LBs, along with any
@@ -75,9 +75,9 @@ func (c *LBCache) update(existing []LB, toDelete []string) {
 			ExternalIDs: lb.ExternalIDs,
 			VIPs:        getVips(&lb),
 
-			Switches: sets.NewString(lb.Switches...),
-			Routers:  sets.NewString(lb.Routers...),
-			Groups:   sets.NewString(lb.Groups...),
+			Switches: sets.New[string](lb.Switches...),
+			Routers:  sets.New[string](lb.Routers...),
+			Groups:   sets.New[string](lb.Groups...),
 		}
 	}
 }
@@ -116,8 +116,8 @@ func (c *LBCache) RemoveRouter(routername string) {
 	}
 }
 
-func getVips(lb *LB) sets.String {
-	out := sets.NewString()
+func getVips(lb *LB) sets.Set[string] {
+	out := sets.New[string]()
 	for _, rule := range lb.Rules {
 		out.Insert(rule.Source.String())
 	}
@@ -245,10 +245,10 @@ func listLBs(nbClient libovsdbclient.Client) ([]CachedLB, error) {
 			UUID:        lb.UUID,
 			Name:        lb.Name,
 			ExternalIDs: lb.ExternalIDs,
-			VIPs:        sets.String{},
-			Switches:    sets.String{},
-			Routers:     sets.String{},
-			Groups:      sets.String{},
+			VIPs:        sets.Set[string]{},
+			Switches:    sets.Set[string]{},
+			Routers:     sets.Set[string]{},
+			Groups:      sets.Set[string]{},
 		}
 
 		if lb.Protocol != nil {

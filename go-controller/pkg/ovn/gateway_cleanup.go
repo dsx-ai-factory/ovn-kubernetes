@@ -105,7 +105,7 @@ func (oc *Controller) delPbrAndNatRules(nodeName string, lrpTypes []string) {
 }
 
 func (oc *Controller) staticRouteCleanup(nextHops []net.IP) {
-	ips := sets.String{}
+	ips := sets.Set[string]{}
 	for _, nextHop := range nextHops {
 		ips.Insert(nextHop.String())
 	}
@@ -152,7 +152,7 @@ func (oc *Controller) removeLRPolicies(nodeName string, priorities []string) {
 		priorities = []string{types.NodeSubnetPolicyPriority}
 	}
 
-	intPriorities := sets.Int{}
+	intPriorities := sets.Set[int]{}
 	for _, priority := range priorities {
 		intPriority, _ := strconv.Atoi(priority)
 		intPriorities.Insert(intPriority)

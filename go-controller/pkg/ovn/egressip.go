@@ -73,7 +73,7 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 	// empty selectors, matching everything, whereas we would mean the inverse
 	newNamespaceSelector, _ := metav1.LabelSelectorAsSelector(nil)
 	oldNamespaceSelector, _ := metav1.LabelSelectorAsSelector(nil)
-	// Initialize a sets.String which holds egress IPs that were not fully assigned
+	// Initialize a sets.Set[string] which holds egress IPs that were not fully assigned
 	// but are allocated and they are meant to be removed.
 	staleEgressIPs := sets.NewString()
 	if old != nil {
@@ -141,7 +141,7 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 	// Add only the diff between what is requested and valid and that which
 	// isn't already assigned.
 	ipsToAssign := validSpecIPs
-	ipsToRemove := sets.NewString()
+	ipsToRemove := sets.New[string]()
 	statusToAdd := make([]egressipv1.EgressIPStatusItem, 0, len(ipsToAssign))
 	statusToKeep := make([]egressipv1.EgressIPStatusItem, 0, len(validStatus))
 	for status := range validStatus {
@@ -850,8 +850,8 @@ func (oc *Controller) executeCloudPrivateIPConfigOps(egressIPName string, ops ma
 	return nil
 }
 
-func (oc *Controller) validateEgressIPSpec(name string, egressIPs []string) (sets.String, error) {
-	validatedEgressIPs := sets.NewString()
+func (oc *Controller) validateEgressIPSpec(name string, egressIPs []string) (sets.Set[string], error) {
+	validatedEgressIPs := sets.New[string]()
 	for _, egressIP := range egressIPs {
 		ip := net.ParseIP(egressIP)
 		if ip == nil {
@@ -1156,9 +1156,9 @@ func (oc *Controller) isEgressNodeReachable(egressNode *kapi.Node) bool {
 }
 
 type egressIPCacheEntry struct {
-	podIPs           sets.String
-	gatewayRouterIPs sets.String
-	egressIPs        sets.String
+	podIPs           sets.Set[string]
+	gatewayRouterIPs sets.Set[string]
+	egressIPs        sets.Set[string]
 }
 
 func (oc *Controller) syncEgressIPs(eIPs []interface{}) error {
@@ -1274,7 +1274,7 @@ func (oc *Controller) syncStaleSNATRules(egressIPCache map[string]egressIPCacheE
 		return nil
 	}
 
-	natIds := sets.String{}
+	natIds := sets.Set[string]{}
 	for _, nat := range nats {
 		natIds.Insert(nat.UUID)
 	}
@@ -1319,9 +1319,9 @@ func (oc *Controller) generateCacheForEgressIP(eIPs []interface{}) (map[string]e
 			continue
 		}
 		egressIPCache[egressIP.Name] = egressIPCacheEntry{
-			podIPs:           sets.NewString(),
-			gatewayRouterIPs: sets.NewString(),
-			egressIPs:        sets.NewString(),
+			podIPs:           sets.New[string](),
+			gatewayRouterIPs: sets.New[string](),
+			egressIPs:        sets.New[string](),
 		}
 		for _, status := range egressIP.Status.Items {
 			isEgressIPv6 := utilnet.IsIPv6String(status.EgressIP)

@@ -74,7 +74,7 @@ func (f *FakeAddressSetFactory) EnsureAddressSet(name string) (AddressSet, error
 func (f *FakeAddressSetFactory) ProcessEachAddressSet(iteratorFn AddressSetIterFunc) error {
 	f.Lock()
 	defer f.Unlock()
-	asNames := sets.String{}
+	asNames := sets.Set[string]{}
 	for _, set := range f.sets {
 		asName := truncateSuffixFromAddressSet(set.getName())
 		if asNames.Has(asName) {

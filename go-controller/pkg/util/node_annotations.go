@@ -566,8 +566,8 @@ func GetNodeMgmtIPs(node *kapi.Node) ([]net.IP, error) {
 	return ips, nil
 }
 
-func SetNodeHostAddresses(nodeAnnotator kube.Annotator, addresses sets.String) error {
-	return nodeAnnotator.Set(ovnNodeHostAddresses, addresses.List())
+func SetNodeHostAddresses(nodeAnnotator kube.Annotator, addresses sets.Set[string]) error {
+	return nodeAnnotator.Set(ovnNodeHostAddresses, sets.List(addresses))
 }
 
 func DelNodeHostAddresses(nodeAnnotator kube.Annotator) {
@@ -575,7 +575,7 @@ func DelNodeHostAddresses(nodeAnnotator kube.Annotator) {
 }
 
 // ParseNodeHostAddresses returns the parsed host addresses living on a node
-func ParseNodeHostAddresses(node *kapi.Node) (sets.String, error) {
+func ParseNodeHostAddresses(node *kapi.Node) (sets.Set[string], error) {
 	addrAnnotation, ok := node.Annotations[ovnNodeHostAddresses]
 	if !ok {
 		return nil, newAnnotationNotSetError("%s annotation not found for node %q", ovnNodeHostAddresses, node.Name)
@@ -587,5 +587,5 @@ func ParseNodeHostAddresses(node *kapi.Node) (sets.String, error) {
 			addrAnnotation, node.Name, err)
 	}
 
-	return sets.NewString(cfg...), nil
+	return sets.New[string](cfg...), nil
 }

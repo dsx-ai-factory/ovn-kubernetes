@@ -47,7 +47,7 @@ func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, LBs []LB
 
 	existing := lbCache.Find(externalIDs)
 	existingByName := make(map[string]*CachedLB, len(existing))
-	toDelete := sets.NewString()
+	toDelete := sets.New[string]()
 
 	for _, lb := range existing {
 		existingByName[lb.Name] = lb
@@ -69,9 +69,9 @@ func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, LBs []LB
 		blb := buildLB(&lb)
 		lbs = append(lbs, blb)
 		existingLB := existingByName[lb.Name]
-		existingRouters := sets.String{}
-		existingSwitches := sets.String{}
-		existingGroups := sets.String{}
+		existingRouters := sets.Set[string]{}
+		existingSwitches := sets.Set[string]{}
+		existingGroups := sets.Set[string]{}
 		if existingLB != nil {
 			blb.UUID = existingLB.UUID
 			existinglbs = append(existinglbs, blb)
@@ -82,9 +82,9 @@ func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, LBs []LB
 		} else {
 			newlbs = append(newlbs, blb)
 		}
-		wantRouters := sets.NewString(lb.Routers...)
-		wantSwitches := sets.NewString(lb.Switches...)
-		wantGroups := sets.NewString(lb.Groups...)
+		wantRouters := sets.New[string](lb.Routers...)
+		wantSwitches := sets.New[string](lb.Switches...)
+		wantGroups := sets.New[string](lb.Groups...)
 		mapLBDifferenceByKey(addLBsToSwitch, wantSwitches, existingSwitches, blb)
 		mapLBDifferenceByKey(removeLBsFromSwitch, existingSwitches, wantSwitches, blb)
 		mapLBDifferenceByKey(addLBsToRouter, wantRouters, existingRouters, blb)
@@ -226,7 +226,7 @@ func LoadBalancersEqualNoUUID(lbs1, lbs2 []LB) bool {
 	return reflect.DeepEqual(new1, new2)
 }
 
-func mapLBDifferenceByKey(keyMap map[string][]*nbdb.LoadBalancer, keyIn sets.String, keyNotIn sets.String, lb *nbdb.LoadBalancer) {
+func mapLBDifferenceByKey(keyMap map[string][]*nbdb.LoadBalancer, keyIn sets.Set[string], keyNotIn sets.Set[string], lb *nbdb.LoadBalancer) {
 	for _, k := range keyIn.Difference(keyNotIn).UnsortedList() {
 		l := keyMap[k]
 		if l == nil {

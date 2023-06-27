@@ -181,7 +181,7 @@ func forEachAddressSet(netNameInfo util.NetNameInfo, nbClient libovsdbclient.Cli
 // and the first suffix in the name to the 'iteratorFn' for every address_set in
 // OVN. (Unhashed address set names are of the form namespaceName[.suffix1.suffix2. .suffixN])
 func (asf *ovnAddressSetFactory) ProcessEachAddressSet(iteratorFn AddressSetIterFunc) error {
-	processedAddressSets := sets.String{}
+	processedAddressSets := sets.Set[string]{}
 	return forEachAddressSet(asf.NetNameInfo, asf.nbClient, func(name string) error {
 		// Remove the suffix from the address set name and normalize
 		addrSetName := truncateSuffixFromAddressSet(name)

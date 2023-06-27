@@ -163,7 +163,7 @@ func (oc *Controller) getRoutingExternalGWs(nsInfo *namespaceInfo) *gatewayInfo 
 	// return a copy of the object so it can be handled without the
 	// namespace locked
 	res.bfdEnabled = nsInfo.routingExternalGWs.bfdEnabled
-	res.gws = sets.NewString(nsInfo.routingExternalGWs.gws.UnsortedList()...)
+	res.gws = sets.New(nsInfo.routingExternalGWs.gws.UnsortedList()...)
 	return &res
 }
 
@@ -190,7 +190,7 @@ func (oc *Controller) getRoutingPodGWs(nsInfo *namespaceInfo) map[string]gateway
 	for k, v := range nsInfo.routingExternalPodGWs {
 		item := gatewayInfo{
 			bfdEnabled: v.bfdEnabled,
-			gws:        sets.NewString(v.gws.UnsortedList()...),
+			gws:        sets.New(v.gws.UnsortedList()...),
 		}
 		res[k] = item
 	}
@@ -538,7 +538,7 @@ func (oc *Controller) ensureNamespaceLocked(ns string, readOnly bool, namespace 
 			networkPolicies:       make(map[string]*networkPolicy),
 			multicastEnabled:      false,
 			routingExternalPodGWs: make(map[string]gatewayInfo),
-			routingExternalGWs:    gatewayInfo{gws: sets.NewString(), bfdEnabled: false},
+			routingExternalGWs:    gatewayInfo{gws: sets.New[string](), bfdEnabled: false},
 			nodeHostNetPodsCache:  make(map[string]map[string][]net.IP),
 		}
 		// we are creating nsInfo and going to set it in namespaces map

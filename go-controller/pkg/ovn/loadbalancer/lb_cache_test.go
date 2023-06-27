@@ -88,14 +88,14 @@ func TestNewCache(t *testing.T) {
 				"k8s.ovn.org/kind":  "Service",
 				"k8s.ovn.org/owner": "default/kubernetes",
 			},
-			VIPs: sets.NewString("192.168.0.1:6443", "[fe::1]:1"),
-			Switches: sets.String{
+			VIPs: sets.New[string]("192.168.0.1:6443", "[fe::1]:1"),
+			Switches: sets.Set[string]{
 				"ovn-worker2": {},
 			},
-			Routers: sets.String{
+			Routers: sets.Set[string]{
 				"GR_ovn-control-plane": {},
 			},
-			Groups: sets.String{},
+			Groups: sets.Set[string]{},
 		},
 		"7dc190c4-c615-467f-af83-9856d832c9a0": {
 			UUID:     "7dc190c4-c615-467f-af83-9856d832c9a0",
@@ -105,30 +105,30 @@ func TestNewCache(t *testing.T) {
 				"k8s.ovn.org/kind":  "Service",
 				"k8s.ovn.org/owner": "default/kubernetes",
 			},
-			VIPs: sets.NewString("192.168.0.1:6443", "[ff::1]:1"),
-			Switches: sets.String{
+			VIPs: sets.New[string]("192.168.0.1:6443", "[ff::1]:1"),
+			Switches: sets.Set[string]{
 				"ovn-worker":        {},
 				"ovn-control-plane": {},
 			},
-			Routers: sets.String{
+			Routers: sets.Set[string]{
 				"GR_ovn-worker":  {},
 				"GR_ovn-worker2": {},
 			},
-			Groups: sets.String{},
+			Groups: sets.Set[string]{},
 		},
 	}, c.existing)
 
 	c.RemoveRouter("GR_ovn-worker")
-	assert.Equal(t, c.existing["7dc190c4-c615-467f-af83-9856d832c9a0"].Routers, sets.String{
+	assert.Equal(t, c.existing["7dc190c4-c615-467f-af83-9856d832c9a0"].Routers, sets.Set[string]{
 		"GR_ovn-worker2": {},
 	})
 
 	c.RemoveSwitch("ovn-worker")
-	assert.Equal(t, c.existing["7dc190c4-c615-467f-af83-9856d832c9a0"].Switches, sets.String{
+	assert.Equal(t, c.existing["7dc190c4-c615-467f-af83-9856d832c9a0"].Switches, sets.Set[string]{
 		"ovn-control-plane": {},
 	})
 	// nothing changed
-	assert.Equal(t, c.existing["cb6ebcb0-c12d-4404-ada7-5aa2b898f06b"].Switches, sets.String{
+	assert.Equal(t, c.existing["cb6ebcb0-c12d-4404-ada7-5aa2b898f06b"].Switches, sets.Set[string]{
 		"ovn-worker2": {},
 	})
 }

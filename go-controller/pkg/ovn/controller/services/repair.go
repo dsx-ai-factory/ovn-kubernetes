@@ -41,7 +41,7 @@ type repair struct {
 	// We want to run some functions after every service is successfully synced, so populate this
 	// list with every service that should be in the informer queue before we start the ServiceController
 	// workers.
-	unsyncedServices sets.String
+	unsyncedServices sets.Set[string]
 
 	// Really a boolean, but an int32 for atomicity purposes
 	semLegacyLBsDeleted uint32
@@ -53,7 +53,7 @@ type repair struct {
 func newRepair(serviceLister corelisters.ServiceLister, nbClient libovsdbclient.Client) *repair {
 	return &repair{
 		serviceLister:    serviceLister,
-		unsyncedServices: sets.String{},
+		unsyncedServices: sets.Set[string]{},
 		nbClient:         nbClient,
 	}
 }

@@ -52,13 +52,16 @@ func newControllerWithDBSetup(dbSetup libovsdbtest.TestSetup) (*serviceControlle
 
 	recorder := record.NewFakeRecorder(10)
 
-	controller := NewController(client,
+	controller, err := NewController(client,
 		nbClient,
 		informerFactory.Core().V1().Services(),
 		informerFactory.Discovery().V1().EndpointSlices(),
 		informerFactory.Core().V1().Nodes(),
 		recorder,
 	)
+	if err != nil {
+		return nil, err
+	}
 	controller.servicesSynced = alwaysReady
 	controller.endpointSlicesSynced = alwaysReady
 	return &serviceController{
