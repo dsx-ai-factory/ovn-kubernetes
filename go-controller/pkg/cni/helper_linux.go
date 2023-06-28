@@ -339,15 +339,13 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	kclient kubernetes.Interface) error {
 
 	annoNadKeyName := util.GetAnnotationKeyFromNadName(ifInfo.NadName, !ifInfo.IsSecondary)
-	ifaceID := util.GetIfaceId(namespace, podName, annoNadKeyName, !ifInfo.IsSecondary)
+	ifaceID := util.GetIfaceId(namespace, podName, annoNadKeyName, !ifInfo.IsSecondary, ifInfo.ClusterNamePrefix)
 	initialPodUID := ifInfo.PodUID
 
 	ipStrs := make([]string, len(ifInfo.IPs))
 	for i, ip := range ifInfo.IPs {
 		ipStrs[i] = ip.String()
 	}
-
-	ifaceID = ifInfo.ClusterNamePrefix + ifaceID
 
 	klog.Infof("ConfigureOVS: namespace: %s, podName: %s, network: %s, mode %s, SandboxID: %q, UID: %q, MAC: %s, IPs: %v, clusterName: %s, ifaceID: %s, ovn_kube_mode: %s",
 		namespace, podName, ifInfo.NadName, config.OvnKubeNode.Mode, sandboxID, initialPodUID, ifInfo.MAC, ipStrs, ifInfo.ClusterName, ifaceID, ifInfo.OvnKubeMode)
