@@ -107,7 +107,9 @@ var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
 				gomega.Eventually(func() bool {
 					lsp := &nbdb.LogicalSwitchPort{Name: "default.skip.ipam.nad_namespace1_myPod"}
 					err = fakeOvn.nbClient.Get(context.TODO(), lsp)
-					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					if err != nil && err.Error() == "object not found" {
+						return false
+					}
 					gomega.Expect(len(lsp.PortSecurity)).To(gomega.Equal(1))
 					strs := strings.Split(lsp.PortSecurity[0], " ")
 					gomega.Expect(len(strs)).To(gomega.Equal(2))
@@ -170,7 +172,9 @@ var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
 				gomega.Eventually(func() bool {
 					lsp := &nbdb.LogicalSwitchPort{Name: "default.skip.ipam.nad_namespace1_myPod"}
 					err = fakeOvn.nbClient.Get(context.TODO(), lsp)
-					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					if err != nil && err.Error() == "object not found" {
+						return false
+					}
 					gomega.Expect(len(lsp.PortSecurity)).To(gomega.Equal(1))
 					strs := strings.Split(lsp.PortSecurity[0], " ")
 					gomega.Expect(len(strs)).To(gomega.Equal(1))

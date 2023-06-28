@@ -228,9 +228,7 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 				nodeDelta := newNodeWithLabels(node1Name, node1IP, map[string]string{"ngn2.nvidia.com/igw_vip": "H"})
 				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), nodeDelta, metav1.UpdateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				gomega.Eventually(func() {
-					fakeOvn.asf.ExpectAddressSetWithIPs(addressSetName, nil)
-				}, time.Minute).Should(gomega.Succeed())
+				fakeOvn.asf.EventuallyExpectAddressSetWithIPs(addressSetName, nil)
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -295,9 +293,7 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 				})
 				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), nsDelta, metav1.UpdateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				gomega.Eventually(func() {
-					fakeOvn.asf.ExpectAddressSetWithIPs(addressSetName, nil)
-				}, time.Minute).Should(gomega.Succeed())
+				fakeOvn.asf.EventuallyExpectAddressSetWithIPs(addressSetName, nil)
 				return nil
 			}
 			err := app.Run([]string{app.Name})
