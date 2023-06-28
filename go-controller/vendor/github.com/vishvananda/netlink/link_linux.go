@@ -345,6 +345,16 @@ func (h *Handle) BridgeSetVlanFiltering(link Link, on bool) error {
 	return h.linkModify(bridge, unix.NLM_F_ACK)
 }
 
+func BridgeSetVlanDefaultPVID(link Link, pvid uint16) error {
+	return pkgHandle.BridgeSetVlanDefaultPVID(link, pvid)
+}
+
+func (h *Handle) BridgeSetVlanDefaultPVID(link Link, pvid uint16) error {
+	bridge := link.(*Bridge)
+	bridge.VlanDefaultPVID = &pvid
+	return h.linkModify(bridge, unix.NLM_F_ACK)
+}
+
 func SetPromiscOn(link Link) error {
 	return pkgHandle.SetPromiscOn(link)
 }
@@ -946,6 +956,60 @@ func LinkSetXdpFdWithFlags(link Link, fd, flags int) error {
 	return err
 }
 
+// LinkSetGSOMaxSize sets the GSO maximum size of the link device.
+// Equivalent to: `ip link set $link gso_max_size $maxSize`
+func LinkSetGSOMaxSize(link Link, maxSize int) error {
+	return pkgHandle.LinkSetGSOMaxSize(link, maxSize)
+}
+
+// LinkSetGSOMaxSize sets the GSO maximum size of the link device.
+// Equivalent to: `ip link set $link gso_max_size $maxSize`
+func (h *Handle) LinkSetGSOMaxSize(link Link, maxSize int) error {
+	base := link.Attrs()
+	h.ensureIndex(base)
+	req := h.newNetlinkRequest(unix.RTM_SETLINK, unix.NLM_F_ACK)
+
+	msg := nl.NewIfInfomsg(unix.AF_UNSPEC)
+	msg.Index = int32(base.Index)
+	req.AddData(msg)
+
+	b := make([]byte, 4)
+	native.PutUint32(b, uint32(maxSize))
+
+	data := nl.NewRtAttr(unix.IFLA_GSO_MAX_SIZE, b)
+	req.AddData(data)
+
+	_, err := req.Execute(unix.NETLINK_ROUTE, 0)
+	return err
+}
+
+// LinkSetGROMaxSize sets the GRO maximum size of the link device.
+// Equivalent to: `ip link set $link gro_max_size $maxSize`
+func LinkSetGROMaxSize(link Link, maxSize int) error {
+	return pkgHandle.LinkSetGROMaxSize(link, maxSize)
+}
+
+// LinkSetGROMaxSize sets the GRO maximum size of the link device.
+// Equivalent to: `ip link set $link gro_max_size $maxSize`
+func (h *Handle) LinkSetGROMaxSize(link Link, maxSize int) error {
+	base := link.Attrs()
+	h.ensureIndex(base)
+	req := h.newNetlinkRequest(unix.RTM_SETLINK, unix.NLM_F_ACK)
+
+	msg := nl.NewIfInfomsg(unix.AF_UNSPEC)
+	msg.Index = int32(base.Index)
+	req.AddData(msg)
+
+	b := make([]byte, 4)
+	native.PutUint32(b, uint32(maxSize))
+
+	data := nl.NewRtAttr(unix.IFLA_GRO_MAX_SIZE, b)
+	req.AddData(data)
+
+	_, err := req.Execute(unix.NETLINK_ROUTE, 0)
+	return err
+}
+
 func boolAttr(val bool) []byte {
 	var v uint8
 	if val {
@@ -1144,6 +1208,10 @@ func LinkAdd(link Link) error {
 // Equivalent to: `ip link add $link`
 func (h *Handle) LinkAdd(link Link) error {
 	return h.linkModify(link, unix.NLM_F_CREATE|unix.NLM_F_EXCL|unix.NLM_F_ACK)
+}
+
+func LinkModify(link Link) error {
+	return pkgHandle.LinkModify(link)
 }
 
 func (h *Handle) LinkModify(link Link) error {
@@ -1395,6 +1463,11 @@ func (h *Handle) linkModify(link Link, flags int) error {
 	if base.GSOMaxSize > 0 {
 		gsoAttr := nl.NewRtAttr(unix.IFLA_GSO_MAX_SIZE, nl.Uint32Attr(base.GSOMaxSize))
 		req.AddData(gsoAttr)
+	}
+
+	if base.GROMaxSize > 0 {
+		groAttr := nl.NewRtAttr(unix.IFLA_GRO_MAX_SIZE, nl.Uint32Attr(base.GROMaxSize))
+		req.AddData(groAttr)
 	}
 
 	if base.Group > 0 {
@@ -1937,6 +2010,8 @@ func LinkDeserialize(hdr *unix.NlMsghdr, m []byte) (Link, error) {
 			base.GSOMaxSize = native.Uint32(attr.Value[0:4])
 		case unix.IFLA_GSO_MAX_SEGS:
 			base.GSOMaxSegs = native.Uint32(attr.Value[0:4])
+		case unix.IFLA_GRO_MAX_SIZE:
+			base.GROMaxSize = native.Uint32(attr.Value[0:4])
 		case unix.IFLA_VFINFO_LIST:
 			data, err := nl.ParseRouteAttr(attr.Value)
 			if err != nil {
@@ -2649,7 +2724,7 @@ func addGretapAttrs(gretap *Gretap, linkInfo *nl.RtAttr) {
 
 	if gretap.FlowBased {
 		// In flow based mode, no other attributes need to be configured
-		data.AddRtAttr(nl.IFLA_GRE_COLLECT_METADATA, boolAttr(gretap.FlowBased))
+		data.AddRtAttr(nl.IFLA_GRE_COLLECT_METADATA, []byte{})
 		return
 	}
 
@@ -2732,6 +2807,12 @@ func parseGretapData(link Link, data []syscall.NetlinkRouteAttr) {
 func addGretunAttrs(gre *Gretun, linkInfo *nl.RtAttr) {
 	data := linkInfo.AddRtAttr(nl.IFLA_INFO_DATA, nil)
 
+	if gre.FlowBased {
+		// In flow based mode, no other attributes need to be configured
+		data.AddRtAttr(nl.IFLA_GRE_COLLECT_METADATA, []byte{})
+		return
+	}
+
 	if ip := gre.Local; ip != nil {
 		if ip.To4() != nil {
 			ip = ip.To4()
@@ -2802,6 +2883,8 @@ func parseGretunData(link Link, data []syscall.NetlinkRouteAttr) {
 			gre.EncapSport = ntohs(datum.Value[0:2])
 		case nl.IFLA_GRE_ENCAP_DPORT:
 			gre.EncapDport = ntohs(datum.Value[0:2])
+		case nl.IFLA_GRE_COLLECT_METADATA:
+			gre.FlowBased = true
 		}
 	}
 }
@@ -2870,6 +2953,7 @@ func addIptunAttrs(iptun *Iptun, linkInfo *nl.RtAttr) {
 	data.AddRtAttr(nl.IFLA_IPTUN_ENCAP_FLAGS, nl.Uint16Attr(iptun.EncapFlags))
 	data.AddRtAttr(nl.IFLA_IPTUN_ENCAP_SPORT, htons(iptun.EncapSport))
 	data.AddRtAttr(nl.IFLA_IPTUN_ENCAP_DPORT, htons(iptun.EncapDport))
+	data.AddRtAttr(nl.IFLA_IPTUN_PROTO, nl.Uint8Attr(iptun.Proto))
 }
 
 func parseIptunData(link Link, data []syscall.NetlinkRouteAttr) {
@@ -2900,6 +2984,8 @@ func parseIptunData(link Link, data []syscall.NetlinkRouteAttr) {
 			iptun.EncapFlags = native.Uint16(datum.Value[0:2])
 		case nl.IFLA_IPTUN_COLLECT_METADATA:
 			iptun.FlowBased = true
+		case nl.IFLA_IPTUN_PROTO:
+			iptun.Proto = datum.Value[0]
 		}
 	}
 }
@@ -3108,6 +3194,9 @@ func addBridgeAttrs(bridge *Bridge, linkInfo *nl.RtAttr) {
 	if bridge.VlanFiltering != nil {
 		data.AddRtAttr(nl.IFLA_BR_VLAN_FILTERING, boolToByte(*bridge.VlanFiltering))
 	}
+	if bridge.VlanDefaultPVID != nil {
+		data.AddRtAttr(nl.IFLA_BR_VLAN_DEFAULT_PVID, nl.Uint16Attr(*bridge.VlanDefaultPVID))
+	}
 }
 
 func parseBridgeData(bridge Link, data []syscall.NetlinkRouteAttr) {
@@ -3126,6 +3215,9 @@ func parseBridgeData(bridge Link, data []syscall.NetlinkRouteAttr) {
 		case nl.IFLA_BR_VLAN_FILTERING:
 			vlanFiltering := datum.Value[0] == 1
 			br.VlanFiltering = &vlanFiltering
+		case nl.IFLA_BR_VLAN_DEFAULT_PVID:
+			vlanDefaultPVID := native.Uint16(datum.Value[0:2])
+			br.VlanDefaultPVID = &vlanDefaultPVID
 		}
 	}
 }
@@ -3222,8 +3314,9 @@ func parseVfInfo(data []syscall.NetlinkRouteAttr, id int) VfInfo {
 func addXfrmiAttrs(xfrmi *Xfrmi, linkInfo *nl.RtAttr) {
 	data := linkInfo.AddRtAttr(nl.IFLA_INFO_DATA, nil)
 	data.AddRtAttr(nl.IFLA_XFRM_LINK, nl.Uint32Attr(uint32(xfrmi.ParentIndex)))
-	data.AddRtAttr(nl.IFLA_XFRM_IF_ID, nl.Uint32Attr(xfrmi.Ifid))
-
+	if xfrmi.Ifid != 0 {
+		data.AddRtAttr(nl.IFLA_XFRM_IF_ID, nl.Uint32Attr(xfrmi.Ifid))
+	}
 }
 
 func parseXfrmiData(link Link, data []syscall.NetlinkRouteAttr) {

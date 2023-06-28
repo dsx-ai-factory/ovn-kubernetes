@@ -159,15 +159,15 @@ func (s *ConntrackFlow) String() string {
 	start := time.Unix(0, int64(s.TimeStart))
 	stop := time.Unix(0, int64(s.TimeStop))
 	timeout := int32(s.TimeOut)
-	res := fmt.Sprintf("%s\t%d src=%s dst=%s sport=%d dport=%d packets=%d bytes=%d\tsrc=%s dst=%s sport=%d dport=%d packets=%d bytes=%d mark=0x%x",
+	res := fmt.Sprintf("%s\t%d src=%s dst=%s sport=%d dport=%d packets=%d bytes=%d\tsrc=%s dst=%s sport=%d dport=%d packets=%d bytes=%d mark=0x%x ",
 		nl.L4ProtoMap[s.Forward.Protocol], s.Forward.Protocol,
 		s.Forward.SrcIP.String(), s.Forward.DstIP.String(), s.Forward.SrcPort, s.Forward.DstPort, s.Forward.Packets, s.Forward.Bytes,
 		s.Reverse.SrcIP.String(), s.Reverse.DstIP.String(), s.Reverse.SrcPort, s.Reverse.DstPort, s.Reverse.Packets, s.Reverse.Bytes,
 		s.Mark)
 	if len(s.Labels) > 0 {
-		res += fmt.Sprintf(" labels=0x%x", s.Labels)
+		res += fmt.Sprintf("labels=0x%x ", s.Labels)
 	}
-	res += fmt.Sprintf(" start=%v stop=%v timeout=%d(sec)", start, stop, timeout)
+	res += fmt.Sprintf("start=%v stop=%v timeout=%d(sec)", start, stop, timeout)
 	return res
 }
 
@@ -363,12 +363,12 @@ func parseRawData(data []byte) *ConntrackFlow {
 			switch t {
 			case nl.CTA_MARK:
 				s.Mark = parseConnectionMark(reader)
+			case nl.CTA_LABELS:
+				s.Labels = parseConnectionLabels(reader)
 			case nl.CTA_TIMEOUT:
 				s.TimeOut = parseTimeOut(reader)
 			case nl.CTA_STATUS, nl.CTA_USE, nl.CTA_ID:
 				skipNfAttrValue(reader, l)
-			case nl.CTA_LABELS:
-				s.Labels = parseConnectionLabels(reader)
 			default:
 				skipNfAttrValue(reader, l)
 			}
@@ -413,18 +413,18 @@ func parseRawData(data []byte) *ConntrackFlow {
 type ConntrackFilterType uint8
 
 const (
-	ConntrackOrigSrcIP     = iota                // -orig-src ip    Source address from original direction
-	ConntrackOrigDstIP                           // -orig-dst ip    Destination address from original direction
-	ConntrackReplySrcIP                          // --reply-src ip  Reply Source IP
-	ConntrackReplyDstIP                          // --reply-dst ip  Reply Destination IP
-	ConntrackReplyAnyIP                          // Match source or destination reply IP
-	ConntrackOrigSrcPort                         // --orig-port-src port    Source port in original direction
-	ConntrackOrigDstPort                         // --orig-port-dst port    Destination port in original direction
-	ConntrackMatchLabels                         // --label label1,label2   Labels used in entry
-	ConntrackUnmatchLabels                       // --label label1,label2   Labels not used in entry
-	ConntrackNatSrcIP      = ConntrackReplySrcIP // deprecated use instead ConntrackReplySrcIP
-	ConntrackNatDstIP      = ConntrackReplyDstIP // deprecated use instead ConntrackReplyDstIP
-	ConntrackNatAnyIP      = ConntrackReplyAnyIP // deprecated use instead ConntrackReplyAnyIP
+	ConntrackOrigSrcIP   = iota                // -orig-src ip    Source address from original direction
+	ConntrackOrigDstIP                         // -orig-dst ip    Destination address from original direction
+	ConntrackReplySrcIP                        // --reply-src ip  Reply Source IP
+	ConntrackReplyDstIP                        // --reply-dst ip  Reply Destination IP
+	ConntrackReplyAnyIP                        // Match source or destination reply IP
+	ConntrackOrigSrcPort                       // --orig-port-src port    Source port in original direction
+	ConntrackOrigDstPort                       // --orig-port-dst port    Destination port in original direction
+	ConntrackMatchLabels                       // --label label1,label2   Labels used in entry
+	ConntrackUnmatchLabels                     // --label label1,label2   Labels not used in entry
+	ConntrackNatSrcIP    = ConntrackReplySrcIP // deprecated use instead ConntrackReplySrcIP
+	ConntrackNatDstIP    = ConntrackReplyDstIP // deprecated use instead ConntrackReplyDstIP
+	ConntrackNatAnyIP    = ConntrackReplyAnyIP // deprecated use instead ConntrackReplyAnyIP
 )
 
 type CustomConntrackFilter interface {
