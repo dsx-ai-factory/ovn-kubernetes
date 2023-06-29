@@ -1512,7 +1512,7 @@ func (oc *Controller) updateResourceHandler(old, newer interface{}, objectsToRet
 			objectsToRetry.oType, err)
 		return
 	}
-	klog.V(5).Infof("Update event received for resource %s, old object is equal to new: %t",
+	klog.V(6).Infof("Update event received for resource %s, old object is equal to new: %t",
 		objectsToRetry.oType, areEqual)
 	if areEqual {
 		return
@@ -1541,7 +1541,7 @@ func (oc *Controller) updateResourceHandler(old, newer interface{}, objectsToRet
 		return
 	}
 
-	klog.V(5).Infof("Update event received for resource %v, oldKey=%s, newKey=%s",
+	klog.V(6).Infof("Update event received for resource %v, oldKey=%s, newKey=%s",
 		objectsToRetry.oType, oldKey, newKey)
 
 	objectsToRetry.skipRetryObj(newKey)

@@ -880,7 +880,7 @@ func (oc *Controller) localPodDelDefaultDeny(
 
 func (oc *Controller) processLocalPodSelectorSetPods(policy *knet.NetworkPolicy,
 	np *networkPolicy, objs ...interface{}) (policyPorts, ingressDenyPorts, egressDenyPorts []string) {
-	klog.Infof("Processing NetworkPolicy %s/%s to have %d local pods...", np.namespace, np.name, len(objs))
+	klog.V(6).Infof("Processing NetworkPolicy %s/%s to have %d local pods...", np.namespace, np.name, len(objs))
 
 	// get list of pods and their logical ports to add
 	// theoretically this should never filter any pods but it's always good to be

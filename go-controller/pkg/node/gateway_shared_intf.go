@@ -753,7 +753,7 @@ func (npwipt *nodePortWatcherIptables) AddService(service *kapi.Service) {
 
 func (npwipt *nodePortWatcherIptables) UpdateService(old, new *kapi.Service) {
 	if serviceUpdateNotNeeded(old, new) {
-		klog.V(5).Infof("Skipping service update for: %s as change does not apply to any of .Spec.Ports, "+
+		klog.V(6).Infof("Skipping service update for: %s as change does not apply to any of .Spec.Ports, "+
 			".Spec.ExternalIP, .Spec.ClusterIP, .Spec.ClusterIPs, .Spec.Type, .Status.LoadBalancer.Ingress", new.Name)
 		return
 	}
