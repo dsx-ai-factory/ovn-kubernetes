@@ -167,6 +167,7 @@ func (f *FakeAddressSetFactory) expectAddressSetWithIPs(g gomega.Gomega, name st
 	}
 	g.Expect(lenAddressSet).To(gomega.Equal(len(ips)))
 }
+
 func (f *FakeAddressSetFactory) ExpectAddressSetWithIPs(name string, ips []string) {
 	g := gomega.Default
 	f.expectAddressSetWithIPs(g, name, ips)
