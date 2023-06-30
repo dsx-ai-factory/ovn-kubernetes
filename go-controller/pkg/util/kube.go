@@ -305,6 +305,11 @@ func PodReady(pod *kapi.Pod) bool {
 	return false
 }
 
+// PodTerminating checks if the pod has been deleted via API but still in the process of terminating
+func PodTerminating(pod *kapi.Pod) bool {
+	return pod.DeletionTimestamp != nil
+}
+
 const (
 	// DefNetworkAnnotation is the pod annotation for the cluster-wide default network
 	DefNetworkAnnotation = "v1.multus-cni.io/default-network"

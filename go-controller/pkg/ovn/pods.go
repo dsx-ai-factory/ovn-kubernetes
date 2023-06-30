@@ -866,7 +866,7 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string
 		}
 	}
 	// observe the pod creation latency metric, default network for now
-	if !oc.nadInfo.IsSecondary && !util.PodReady(pod) {
+	if !oc.nadInfo.IsSecondary && !util.PodReady(pod) && !util.PodTerminating(pod) {
 		metrics.RecordPodCreated(pod)
 	}
 	return nil
