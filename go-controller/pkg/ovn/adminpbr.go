@@ -250,8 +250,7 @@ func (pol *internalAdminPBRPolicy) addPodToAddressSet(obj interface{}) {
 		return
 	}
 	// check if pod exists or not for retry path
-	var err error
-	if pod, err = pol.controller.mc.watchFactory.GetPod(pod.Namespace, pod.Name); err != nil {
+	if _, err := pol.controller.mc.watchFactory.GetPod(pod.Namespace, pod.Name); err != nil {
 		if errors.IsNotFound(err) {
 			klog.Infof("Stop handling pod %s/%s as it does not exist", pod.Namespace, pod.Name)
 		} else {
