@@ -485,7 +485,7 @@ func (oc *Controller) handleVIPPodAdd(vip *virtualIP, pod *kapi.Pod) error {
 		oc.clearErrorMessage(vip, podKey)
 
 		// check whether this pod exists when this pod addition to virtualIP is retried
-		if pod, err := oc.mc.watchFactory.GetPod(pod.Namespace, pod.Name); err != nil {
+		if _, err := oc.mc.watchFactory.GetPod(pod.Namespace, pod.Name); err != nil {
 			if errors.IsNotFound(err) {
 				klog.Infof("Stop retrying pod addition %s/%s as it does not exist", pod.Namespace, pod.Name)
 				return nil
