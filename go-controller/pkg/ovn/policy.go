@@ -929,7 +929,7 @@ func (oc *Controller) processLocalPodSelectorSetPods(policy *knet.NetworkPolicy,
 		})
 		if retryErr != nil {
 			// Failed to get an up to date version of the LSP from the cache
-			klog.Warning("Failed to get LSP after multiple retries for %s for networkPolicy %s err: %v",
+			klog.Warningf("Failed to get LSP after multiple retries for %s for networkPolicy %s err: %v",
 				logicalPort, policy.Name, retryErr)
 			return
 		}
