@@ -36,7 +36,8 @@ func genDeleteStaleRepPortCmd(iface string) string {
 
 func genFindInterfaceWithSandboxCmd() string {
 	return fmt.Sprintf("ovs-vsctl --timeout=15 --columns=name,external_ids --data=bare --no-headings " +
-		"--format=csv find Interface external_ids:sandbox!=\"\" external_ids:ovn_kube_mode=full")
+		"--format=csv find Interface external_ids:sandbox!=\"\" external_ids:netdev-name!=\"\" " +
+		"external_ids:cluster_name{=}[] external_ids:ovn_kube_mode=full")
 }
 
 var _ = Describe("Healthcheck tests", func() {
@@ -93,6 +94,7 @@ var _ = Describe("Healthcheck tests", func() {
 					Name:        "a-pod",
 					Namespace:   "a-ns",
 					Annotations: map[string]string{},
+					UID:         "pod-a-uuid-1",
 				},
 				Spec: v1.PodSpec{
 					NodeName: nodeName,
@@ -103,6 +105,7 @@ var _ = Describe("Healthcheck tests", func() {
 					Name:        "b-pod",
 					Namespace:   "b-ns",
 					Annotations: map[string]string{},
+					UID:         "pod-b-uuid-2",
 				},
 				Spec: v1.PodSpec{
 					NodeName: nodeName,
@@ -120,9 +123,9 @@ var _ = Describe("Healthcheck tests", func() {
 				// mock call to find OVS interfaces with non-empty external_ids:sandbox
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: genFindInterfaceWithSandboxCmd(),
-					Output: "pod-a-ifc,sandbox=123abcfaa iface-id=a-ns_a-pod vf-netdev-name=blah\n" +
-						"pod-b-ifc,sandbox=123abcfaa iface-id=b-ns_b-pod vf-netdev-name=blah\n" +
-						"stale-pod-ifc,sandbox=123abcfaa iface-id=stale-ns_stale-pod vf-netdev-name=blah\n",
+					Output: "pod-a-ifc,sandbox=123abcfaa iface-id=a-ns_a-pod iface-id-ver=pod-a-uuid-1 netdev-name=blah\n" +
+						"pod-b-ifc,sandbox=123abcfaa iface-id=b-ns_b-pod iface-id-ver=pod-b-uuid-2 netdev-name=blah\n" +
+						"stale-pod-ifc,sandbox=123abcfaa iface-id=stale-ns_stale-pod iface-id-ver=pod-stale-uuid-3 netdev-name=blah\n",
 					Err: nil,
 				})
 
@@ -143,8 +146,8 @@ var _ = Describe("Healthcheck tests", func() {
 				// ports in br-int
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: genFindInterfaceWithSandboxCmd(),
-					Output: "pod-a-ifc,sandbox=123abcfaa iface-id=a-ns_a-pod\n" +
-						"pod-b-ifc,sandbox=123abcfaa iface-id=b-ns_b-pod\n",
+					Output: "pod-a-ifc,sandbox=123abcfaa iface-id=a-ns_a-pod iface-id-ver=pod-a-uuid-1\n" +
+						"pod-b-ifc,sandbox=123abcfaa iface-id=b-ns_b-pod iface-id-ver=pod-b-uuid-2\n",
 					Err: nil,
 				})
 				config.OvnKubeNode.Mode = "full"
