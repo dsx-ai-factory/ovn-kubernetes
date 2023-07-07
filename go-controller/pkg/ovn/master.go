@@ -1571,7 +1571,6 @@ func (oc *Controller) addUpdateNodeEvent(oldNode, newNode *kapi.Node, nSyncs *no
 		if err != nil {
 			klog.Errorf("Unable to get all pods: %v", err)
 		} else if nSyncs.syncNode || nSyncs.syncGw { // do this only if it is a new node add or a gateway sync happened
-			klog.V(5).Infof("When adding node %s, found %d pods to add to retryPods", newNode.Name, len(pods))
 			for index := range pods {
 				pod := pods[index]
 				if pod.Spec.NodeName != newNode.Name {
@@ -1580,7 +1579,8 @@ func (oc *Controller) addUpdateNodeEvent(oldNode, newNode *kapi.Node, nSyncs *no
 				if util.PodCompleted(pod) {
 					continue
 				}
-				klog.V(5).Infof("Adding pod %s/%s/%s from node %s to retryPods for network %s", pod.UID, pod.Namespace, pod.Name, newNode.Name, oc.nadInfo.NetName)
+				klog.V(5).Infof("When adding node %s, adding pod %s/%s/%s to retryPods for network %s", newNode.Name,
+					pod.UID, pod.Namespace, pod.Name, oc.nadInfo.NetName)
 				oc.retryPods.addRetryObjWithAddNoBackoff(pod)
 			}
 			oc.retryPods.requestRetryObjs()
