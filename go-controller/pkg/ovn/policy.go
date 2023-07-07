@@ -949,6 +949,11 @@ func (oc *Controller) processLocalPodSelectorSetPods(policy *knet.NetworkPolicy,
 			continue
 		}
 
+		if pod.Spec.HostNetwork {
+			// there is no LSP for a host-network pod
+			continue
+		}
+
 		if util.PodCompleted(pod) {
 			// if pod is completed, do not add it to NP port group
 			continue
