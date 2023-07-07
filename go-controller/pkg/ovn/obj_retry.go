@@ -608,12 +608,10 @@ func (oc *Controller) getResourceFromInformerCache(objType reflect.Type, key str
 func (oc *Controller) recordAddEvent(objType reflect.Type, obj interface{}) {
 	switch objType {
 	case factory.PodType:
-		klog.V(5).Infof("Recording add event on pod")
 		pod := obj.(*kapi.Pod)
 		oc.mc.podRecorder.AddPod(pod.UID, oc.nadInfo.NetNameInfo)
 		metrics.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name, oc.nadInfo.NetNameInfo)
 	case factory.PolicyType:
-		klog.V(5).Infof("Recording add event on network policy")
 		np := obj.(*knet.NetworkPolicy)
 		metrics.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name, oc.nadInfo.NetNameInfo)
 	}
@@ -623,11 +621,9 @@ func (oc *Controller) recordAddEvent(objType reflect.Type, obj interface{}) {
 func (oc *Controller) recordUpdateEvent(objType reflect.Type, obj interface{}) {
 	switch objType {
 	case factory.PodType:
-		klog.V(5).Infof("Recording update event on pod")
 		pod := obj.(*kapi.Pod)
 		metrics.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name, oc.nadInfo.NetNameInfo)
 	case factory.PolicyType:
-		klog.V(5).Infof("Recording update event on network policy")
 		np := obj.(*knet.NetworkPolicy)
 		metrics.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name, oc.nadInfo.NetNameInfo)
 	}
@@ -637,12 +633,10 @@ func (oc *Controller) recordUpdateEvent(objType reflect.Type, obj interface{}) {
 func (oc *Controller) recordDeleteEvent(objType reflect.Type, obj interface{}) {
 	switch objType {
 	case factory.PodType:
-		klog.V(5).Infof("Recording delete event on pod")
 		pod := obj.(*kapi.Pod)
 		oc.mc.podRecorder.CleanPod(pod.UID, oc.nadInfo.NetNameInfo)
 		metrics.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name, oc.nadInfo.NetNameInfo)
 	case factory.PolicyType:
-		klog.V(5).Infof("Recording delete event on network policy")
 		np := obj.(*knet.NetworkPolicy)
 		metrics.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name, oc.nadInfo.NetNameInfo)
 	}
@@ -651,11 +645,9 @@ func (oc *Controller) recordDeleteEvent(objType reflect.Type, obj interface{}) {
 func (oc *Controller) recordSuccessEvent(objType reflect.Type, obj interface{}) {
 	switch objType {
 	case factory.PodType:
-		klog.V(5).Infof("Recording success event on pod")
 		pod := obj.(*kapi.Pod)
 		metrics.GetConfigDurationRecorder().End("pod", pod.Namespace, pod.Name, oc.nadInfo.NetNameInfo)
 	case factory.PolicyType:
-		klog.V(5).Infof("Recording success event on network policy")
 		np := obj.(*knet.NetworkPolicy)
 		metrics.GetConfigDurationRecorder().End("networkpolicy", np.Namespace, np.Name, oc.nadInfo.NetNameInfo)
 	}
@@ -666,7 +658,6 @@ func (oc *Controller) recordSuccessEvent(objType reflect.Type, obj interface{}) 
 func (oc *Controller) recordErrorEvent(objType reflect.Type, obj interface{}, reason string, err error) {
 	switch objType {
 	case factory.PodType:
-		klog.V(5).Infof("Recording error event on pod")
 		pod := obj.(*kapi.Pod)
 		oc.recordPodEvent(reason, err, pod)
 	}
