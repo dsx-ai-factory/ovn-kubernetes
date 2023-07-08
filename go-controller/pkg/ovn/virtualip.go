@@ -223,11 +223,11 @@ func (oc *Controller) watchPortBindingTable(sbClient libovsdbclient.Client) erro
 	pb := &sbdb.PortBinding{}
 	_, err := sbClient.Monitor(ctx,
 		sbClient.NewMonitor(
-			client.WithConditionalTable(pb, model.Condition{
+			client.WithConditionalTable(pb, []model.Condition{{
 				Field:    &pb.Type,
 				Function: ovsdb.ConditionEqual,
 				Value:    ovntypes.VirtualPortType,
-			}),
+			}}),
 		),
 	)
 
