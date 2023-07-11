@@ -126,7 +126,7 @@ ovnkube_logfile_maxbackups=${OVNKUBE_LOGFILE_MAXBACKUPS:-"5"}
 ovnkube_logfile_maxage=${OVNKUBE_LOGFILE_MAXAGE:-"5"}
 
 # logfile location
-ovnkube_logfile=${OVNKUBE_LOGFILE:""}
+ovnkube_logfile=${OVNKUBE_LOGFILE:-""}
 
 # ovnkube-master ha-election parameters (value in seconds)
 ovn_master_ha_election_lease_duration=${OVN_HA_LEASE_DURATION:-"30"}
