@@ -21,7 +21,7 @@ spec:
 # ovn-sbdb-raft-pdb PodDisruptionBudget ensures that the number of replicas running is never brought
 # below the number needed for a quorum, by default 2 for a cluster of size 3. So, it ensures that we
 # keep a raft quorum.
-apiVersion: policy/v1beta1
+apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: ovn-sbdb-raft-pdb
