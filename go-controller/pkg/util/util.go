@@ -432,7 +432,7 @@ ipLoop:
 
 func GetLogicalPortName(podNamespace, podName, nadName string, isDefault bool) string {
 	netPrefix := GetNetworkPrefix(nadName, isDefault)
-	return composePortName(podNamespace, podName, netPrefix)
+	return GetClusterNamePrefix() + composePortName(podNamespace, podName, netPrefix)
 }
 
 // IsClusterIP checks if the provided IP is a clusterIP
@@ -450,9 +450,9 @@ func IsClusterIP(svcVIP string) bool {
 	return false
 }
 
-func GetIfaceId(podNamespace, podName, nadName string, isDefault bool) string {
+func GetIfaceId(podNamespace, podName, nadName string, isDefault bool, clusterPrefix string) string {
 	netPrefix := GetNetworkPrefix(nadName, isDefault)
-	return composePortName(podNamespace, podName, netPrefix)
+	return clusterPrefix + composePortName(podNamespace, podName, netPrefix)
 }
 
 // composePortName should be called both for LogicalPortName and iface-id
@@ -462,7 +462,7 @@ func GetIfaceId(podNamespace, podName, nadName string, isDefault bool) string {
 // because hypervisors use external_ids:iface-id as a lookup key to
 // identify the network interface of that entity.
 func composePortName(podNamespace, podName, netPrefix string) string {
-	return GetClusterNamePrefix() + netPrefix + podNamespace + "_" + podName
+	return netPrefix + podNamespace + "_" + podName
 }
 
 // Get all possible logical ports name of this network
