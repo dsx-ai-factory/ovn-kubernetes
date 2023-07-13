@@ -322,10 +322,8 @@ func upgradeOVSInterfaceExternalIDs(nodeName string, wf factory.ObjectCacheInter
 				"--may-exist", "set", "interface", ifName,
 				fmt.Sprintf("external_ids:ovn_kube_mode=%s", config.OvnKubeNode.Mode),
 			}
-			// in order to participate in the healthcheck, add its netdev-name external-ids, as it wasn't added for DPU mode
-			if config.OvnKubeNode.Mode == types.NodeModeDPU {
-				ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:netdev-name=%s", ifName))
-			}
+			// in order to participate in the healthcheck, add its netdev-name external-ids
+			ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:netdev-name=%s", ifName))
 			klog.Warningf("Found OVS Interface %s with iface-id-ver %s, upgrade its ovn_kube_mode/netdev-name external-ids", ifName, podUID)
 			_, stderr, err := util.RunOVSVsctl(ovsArgs...)
 			if err != nil {
