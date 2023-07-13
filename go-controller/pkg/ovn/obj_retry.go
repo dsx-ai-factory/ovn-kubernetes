@@ -606,50 +606,62 @@ func (oc *Controller) getResourceFromInformerCache(objType reflect.Type, key str
 
 // Given an object and its type, recordAddEvent records the add event on this object.
 func (oc *Controller) recordAddEvent(objType reflect.Type, obj interface{}) {
+	if oc.nadInfo.IsSecondary {
+		return
+	}
 	switch objType {
 	case factory.PodType:
 		pod := obj.(*kapi.Pod)
-		oc.mc.podRecorder.AddPod(pod.UID, oc.nadInfo.NetNameInfo)
-		metrics.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name, oc.nadInfo.NetNameInfo)
+		oc.mc.podRecorder.AddPod(pod.UID)
+		metrics.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name)
 	case factory.PolicyType:
 		np := obj.(*knet.NetworkPolicy)
-		metrics.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name, oc.nadInfo.NetNameInfo)
+		metrics.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name)
 	}
 }
 
 // Given an object and its type, recordUpdateEvent records the update event on this object.
 func (oc *Controller) recordUpdateEvent(objType reflect.Type, obj interface{}) {
+	if oc.nadInfo.IsSecondary {
+		return
+	}
 	switch objType {
 	case factory.PodType:
 		pod := obj.(*kapi.Pod)
-		metrics.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name, oc.nadInfo.NetNameInfo)
+		metrics.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name)
 	case factory.PolicyType:
 		np := obj.(*knet.NetworkPolicy)
-		metrics.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name, oc.nadInfo.NetNameInfo)
+		metrics.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name)
 	}
 }
 
 // Given an object and its type, recordDeleteEvent records the delete event on this object. Only used for pods now.
 func (oc *Controller) recordDeleteEvent(objType reflect.Type, obj interface{}) {
+	if oc.nadInfo.IsSecondary {
+		return
+	}
 	switch objType {
 	case factory.PodType:
 		pod := obj.(*kapi.Pod)
-		oc.mc.podRecorder.CleanPod(pod.UID, oc.nadInfo.NetNameInfo)
-		metrics.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name, oc.nadInfo.NetNameInfo)
+		oc.mc.podRecorder.CleanPod(pod.UID)
+		metrics.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name)
 	case factory.PolicyType:
 		np := obj.(*knet.NetworkPolicy)
-		metrics.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name, oc.nadInfo.NetNameInfo)
+		metrics.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name)
 	}
 }
 
 func (oc *Controller) recordSuccessEvent(objType reflect.Type, obj interface{}) {
+	if oc.nadInfo.IsSecondary {
+		return
+	}
 	switch objType {
 	case factory.PodType:
 		pod := obj.(*kapi.Pod)
-		metrics.GetConfigDurationRecorder().End("pod", pod.Namespace, pod.Name, oc.nadInfo.NetNameInfo)
+		metrics.GetConfigDurationRecorder().End("pod", pod.Namespace, pod.Name)
 	case factory.PolicyType:
 		np := obj.(*knet.NetworkPolicy)
-		metrics.GetConfigDurationRecorder().End("networkpolicy", np.Namespace, np.Name, oc.nadInfo.NetNameInfo)
+		metrics.GetConfigDurationRecorder().End("networkpolicy", np.Namespace, np.Name)
 	}
 }
 

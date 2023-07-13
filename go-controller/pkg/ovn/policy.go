@@ -448,12 +448,16 @@ func (oc *Controller) createDefaultDenyPGAndACLs(namespace, policy string, nsInf
 		return err
 	}
 
-	recordOps, txOkCallBack, _, err := metrics.GetConfigDurationRecorder().AddOVN(oc.mc.nbClient, "networkpolicy",
-		namespace, policy, oc.nadInfo.NetNameInfo)
-	if err != nil {
-		klog.Errorf("Failed to record config duration: %v", err)
+	txOkCallBack := func() {}
+	if !oc.nadInfo.IsSecondary {
+		var recordOps []ovsdb.Operation
+		recordOps, txOkCallBack, _, err = metrics.GetConfigDurationRecorder().AddOVN(oc.mc.nbClient, "networkpolicy",
+			namespace, policy)
+		if err != nil {
+			klog.Errorf("Failed to record config duration: %v", err)
+		}
+		ops = append(ops, recordOps...)
 	}
-	ops = append(ops, recordOps...)
 	_, err = libovsdbops.TransactAndCheck(oc.mc.nbClient, ops)
 	if err != nil {
 		return err
@@ -1289,12 +1293,16 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 		return fmt.Errorf("failed to create ops to add port to a port group: %v", err)
 	}
 
-	recordOps, txOkCallBack, _, err := metrics.GetConfigDurationRecorder().AddOVN(oc.mc.nbClient, "networkpolicy",
-		policy.Namespace, policy.Name, oc.nadInfo.NetNameInfo)
-	if err != nil {
-		klog.Errorf("Failed to record config duration: %v", err)
+	txOkCallBack := func() {}
+	if !oc.nadInfo.IsSecondary {
+		var recordOps []ovsdb.Operation
+		recordOps, txOkCallBack, _, err = metrics.GetConfigDurationRecorder().AddOVN(oc.mc.nbClient, "networkpolicy",
+			policy.Namespace, policy.Name)
+		if err != nil {
+			klog.Errorf("Failed to record config duration: %v", err)
+		}
+		ops = append(ops, recordOps...)
 	}
-	ops = append(ops, recordOps...)
 
 	_, err = libovsdbops.TransactAndCheck(oc.mc.nbClient, ops)
 	if err != nil {
@@ -1536,12 +1544,16 @@ func (oc *Controller) destroyNetworkPolicy(np *networkPolicy, lastPolicy bool) e
 			" error: %v", np.namespace, np.name, util.GetClusterScopedName(oc.nadInfo.Prefix+np.portGroupName), err)
 	}
 
-	recordOps, txOkCallBack, _, err := metrics.GetConfigDurationRecorder().AddOVN(oc.mc.nbClient, "networkpolicy",
-		np.policy.Namespace, np.policy.Name, oc.nadInfo.NetNameInfo)
-	if err != nil {
-		klog.Errorf("Failed to record config duration: %v", err)
+	txOkCallBack := func() {}
+	if !oc.nadInfo.IsSecondary {
+		var recordOps []ovsdb.Operation
+		recordOps, txOkCallBack, _, err = metrics.GetConfigDurationRecorder().AddOVN(oc.mc.nbClient, "networkpolicy",
+			np.policy.Namespace, np.policy.Name)
+		if err != nil {
+			klog.Errorf("Failed to record config duration: %v", err)
+		}
+		ops = append(ops, recordOps...)
 	}
-	ops = append(ops, recordOps...)
 
 	_, err = libovsdbops.TransactAndCheck(oc.mc.nbClient, ops)
 	if err != nil {

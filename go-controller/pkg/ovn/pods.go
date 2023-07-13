@@ -303,12 +303,15 @@ func (oc *Controller) delLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string
 	}
 	allOps = append(allOps, ops...)
 
-	recordOps, txOkCallBack, _, err := metrics.GetConfigDurationRecorder().AddOVN(oc.mc.nbClient, "pod", pod.Namespace,
-		pod.Name, oc.nadInfo.NetNameInfo)
-	if err != nil {
-		klog.Errorf("Failed to record config duration: %v", err)
+	txOkCallBack := func() {}
+	if !oc.nadInfo.IsSecondary {
+		var recordOps []ovsdb.Operation
+		recordOps, txOkCallBack, _, err = metrics.GetConfigDurationRecorder().AddOVN(oc.mc.nbClient, "pod", pod.Namespace, pod.Name)
+		if err != nil {
+			klog.Errorf("Failed to record config duration: %v", err)
+		}
+		allOps = append(allOps, recordOps...)
 	}
-	allOps = append(allOps, recordOps...)
 	_, err = libovsdbops.TransactAndCheck(oc.mc.nbClient, allOps)
 	if err != nil {
 		return fmt.Errorf("cannot delete logical switch port %s, %v", logicalPort, err)
@@ -826,12 +829,15 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string
 		return fmt.Errorf("error creating logical switch port %+v on switch %+v: %+v", *lsp, *ls, err)
 	}
 
-	recordOps, txOkCallBack, _, err := metrics.GetConfigDurationRecorder().AddOVN(oc.mc.nbClient, "pod", pod.Namespace,
-		pod.Name, oc.nadInfo.NetNameInfo)
-	if err != nil {
-		klog.Errorf("Config duration recorder: %v", err)
+	txOkCallBack := func() {}
+	if !oc.nadInfo.IsSecondary {
+		var recordOps []ovsdb.Operation
+		recordOps, txOkCallBack, _, err = metrics.GetConfigDurationRecorder().AddOVN(oc.mc.nbClient, "pod", pod.Namespace, pod.Name)
+		if err != nil {
+			klog.Errorf("Config duration recorder: %v", err)
+		}
+		ops = append(ops, recordOps...)
 	}
-	ops = append(ops, recordOps...)
 
 	transactStart := time.Now()
 	_, err = libovsdbops.TransactAndCheckAndSetUUIDs(oc.mc.nbClient, lsp, ops)
@@ -841,10 +847,8 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string
 	}
 	txOkCallBack()
 	// primary network lsp does not set nadName external_ids so set its nadName to be empty
-	if oc.nadInfo.IsSecondary {
-		oc.mc.podRecorder.AddLSP(pod.UID, oc.nadInfo.NetNameInfo, nadName)
-	} else {
-		oc.mc.podRecorder.AddLSP(pod.UID, oc.nadInfo.NetNameInfo, "")
+	if !oc.nadInfo.IsSecondary {
+		oc.mc.podRecorder.AddLSP(pod.UID)
 	}
 
 	if !oc.nadInfo.IsSecondary {

@@ -216,7 +216,7 @@ func (c *Controller) handleErr(err error, key interface{}) {
 		klog.ErrorS(err, "Failed to split meta namespace cache key", "key", key)
 	}
 	if err == nil {
-		metrics.GetConfigDurationRecorder().End("service", ns, name, util.NetNameInfo{NetName: "", Prefix: "", IsSecondary: false})
+		metrics.GetConfigDurationRecorder().End("service", ns, name)
 		c.queue.Forget(key)
 		return
 	}
@@ -230,7 +230,7 @@ func (c *Controller) handleErr(err error, key interface{}) {
 	}
 
 	klog.Warningf("Dropping service %q out of the queue: %v", key, err)
-	metrics.GetConfigDurationRecorder().End("service", ns, name, util.NetNameInfo{NetName: "", Prefix: "", IsSecondary: false})
+	metrics.GetConfigDurationRecorder().End("service", ns, name)
 	c.queue.Forget(key)
 	utilruntime.HandleError(err)
 }
@@ -372,7 +372,7 @@ func (c *Controller) onServiceAdd(obj interface{}) {
 	}
 	klog.V(4).Infof("Adding service %s", key)
 	service := obj.(*v1.Service)
-	metrics.GetConfigDurationRecorder().Start("service", service.Namespace, service.Name, util.NetNameInfo{NetName: "", Prefix: "", IsSecondary: false})
+	metrics.GetConfigDurationRecorder().Start("service", service.Namespace, service.Name)
 	c.queue.Add(key)
 }
 
@@ -389,7 +389,7 @@ func (c *Controller) onServiceUpdate(oldObj, newObj interface{}) {
 
 	key, err := cache.MetaNamespaceKeyFunc(newObj)
 	if err == nil {
-		metrics.GetConfigDurationRecorder().Start("service", newService.Namespace, newService.Name, util.NetNameInfo{NetName: "", Prefix: "", IsSecondary: false})
+		metrics.GetConfigDurationRecorder().Start("service", newService.Namespace, newService.Name)
 		c.queue.Add(key)
 	}
 }
@@ -403,7 +403,7 @@ func (c *Controller) onServiceDelete(obj interface{}) {
 	}
 	klog.V(4).Infof("Deleting service %s", key)
 	service := obj.(*v1.Service)
-	metrics.GetConfigDurationRecorder().Start("service", service.Namespace, service.Name, util.NetNameInfo{NetName: "", Prefix: "", IsSecondary: false})
+	metrics.GetConfigDurationRecorder().Start("service", service.Namespace, service.Name)
 	c.queue.Add(key)
 }
 
