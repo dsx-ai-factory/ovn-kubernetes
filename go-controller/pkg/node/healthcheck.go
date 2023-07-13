@@ -174,60 +174,73 @@ func checkForStaleOVSInternalPorts() {
 	}
 }
 
-// checkForStaleOVSRepresentorInterfaces checks for stale OVS ports backed by Representor interfaces,
-// derive iface-id from pod name and namespace then remove any interfaces associated with a sandbox that are
-// not scheduled to the node.
-func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCacheInterface) {
-	// Get all ovn-kubernetes Pod interfaces. these are OVS interfaces that have their external_ids:sandbox set.
-	ovsArgs := []string{"--columns=name,external_ids", "--data=bare", "--no-headings",
-		"--format=csv", "find", "Interface", "external_ids:sandbox!=\"\""}
-	// if clustername is present, select only ports belonging to this cluster.
-	if util.IsClusterScoped() {
-		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:cluster_name=%s", util.GetClusterName()))
-	}
-	// check only for resources created by the current type of ovn-kube
-	ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:ovn_kube_mode=%s", config.OvnKubeNode.Mode))
-
+// GetOVSInterfaceToPodUIDMapFiltered gets OVS interface name to its associated PodUID mapping, for all OVS interfaces listed
+// with the specified ovs argument
+func GetOVSInterfaceToPodUIDMapFiltered(ovsArgs []string) (map[string]string, error) {
 	out, stderr, err := util.RunOVSVsctl(ovsArgs...)
 	if err != nil {
-		klog.Errorf("Failed to list ovn-k8s OVS interfaces, stderr: %q, error: %v", stderr, err)
-		return
+		return nil, fmt.Errorf("failed to list ovn-k8s OVS interfaces:, stderr: %q, error: %v", stderr, err)
 	}
 
-	// parse this data into local struct
-	type interfaceInfo struct {
-		Name       string
-		Attributes map[string]string
+	if out == "" {
+		return nil, nil
 	}
 
+	ovsIntefaceToPodUIDMap := map[string]string{}
 	lines := strings.Split(out, "\n")
-	interfaceInfos := make([]*interfaceInfo, 0, len(lines))
 	for _, line := range lines {
 		cols := strings.Split(line, ",")
 		// Note: There are exactly 2 column entries as requested in the ovs query
 		// Col 0: interface name
 		// Col 1: space separated key=val pairs of external_ids attributes
 		if len(cols) < 2 {
-			// unlikely to happen
+			// should never happen
+			klog.Errorf("Unexpected output: %s, expect \"<name>,<external_ids>\"", line)
 			continue
 		}
-		ifcInfo := interfaceInfo{Name: strings.TrimSpace(cols[0]), Attributes: make(map[string]string)}
-		for _, attr := range strings.Split(cols[1], " ") {
-			keyVal := strings.SplitN(attr, "=", 2)
-			if len(keyVal) != 2 {
-				// unlikely to happen
-				continue
-			}
-			ifcInfo.Attributes[keyVal[0]] = keyVal[1]
-		}
-		interfaceInfos = append(interfaceInfos, &ifcInfo)
-	}
 
-	if len(interfaceInfos) == 0 {
+		if cols[1] != "" {
+			for _, attr := range strings.Split(cols[1], " ") {
+				keyVal := strings.SplitN(attr, "=", 2)
+				if len(keyVal) != 2 {
+					// should never happen
+					klog.Errorf("Unexpected output: %s, expect \"<key>=<value>\"", attr)
+					continue
+				} else if keyVal[0] == "iface-id-ver" {
+					ovsIntefaceToPodUIDMap[strings.TrimSpace(cols[0])] = keyVal[1]
+					break
+				}
+			}
+		}
+	}
+	return ovsIntefaceToPodUIDMap, nil
+}
+
+// checkForStaleOVSRepresentorInterfaces checks for stale OVS ports backed by Representor interfaces,
+// derive iface-id-ver from pod name and namespace then remove any interfaces associated with a sandbox that are
+// not scheduled to the node.
+func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCacheInterface) {
+	// Get all OVN-K8S OVS interfaces. these are OVS interfaces that have their external_ids:sandbox and netdev-name set.
+	ovsArgs := []string{"--columns=name,external_ids", "--data=bare", "--no-headings",
+		"--format=csv", "find", "Interface", "external_ids:sandbox!=\"\"", "external_ids:netdev-name!=\"\""}
+	if util.IsClusterScoped() {
+		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:cluster_name=%s", util.GetClusterName()))
+	} else {
+		ovsArgs = append(ovsArgs, "external_ids:cluster_name{=}[]")
+	}
+	// check only for resources created by the current type of ovn-kube
+	ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:ovn_kube_mode=%s", config.OvnKubeNode.Mode))
+
+	ovsIntefaceToPodUIDMap, err := GetOVSInterfaceToPodUIDMapFiltered(ovsArgs)
+	if err != nil {
+		klog.Errorf(err.Error())
+		return
+	}
+	if len(ovsIntefaceToPodUIDMap) == 0 {
 		return
 	}
 
-	// list Pods and calculate the expected iface-ids.
+	// list Pods and get expected list of Pod UIDs.
 	// Note: we do this after scanning ovs interfaces to avoid deleting ports of pods that where just scheduled
 	// on the node.
 	pods, err := wf.GetPods("")
@@ -235,53 +248,24 @@ func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCac
 		klog.Errorf("Failed to list pods. %v", err)
 		return
 	}
-	expectedIfaceIdsWithoutPrefix := make(map[string]bool)
+	expectedPodUIDs := make(map[string]struct{})
 	for _, pod := range pods {
 		if pod.Spec.NodeName == nodeName && util.PodWantsNetwork(pod) {
 			// Note: wf (WatchFactory) *usually* returns pods assigned to this node, however we dont rely on it
 			// and add this check to filter out pods assigned to other nodes. (e.g when ovnkube master and node
 			// share the same process)
-			expectedIfaceIdsWithoutPrefix[util.GetIfaceId(pod.Namespace, pod.Name, types.DefaultNetworkName, true, util.GetClusterNamePrefix())] = true
+			expectedPodUIDs[string(pod.UID)] = struct{}{}
 		}
 	}
 
 	// Remove any stale representor ports
-	for _, ifaceInfo := range interfaceInfos {
-		// TBD, upgrde path? ignore non-vf representor ports
-		//if _, ok := ifaceInfo.Attributes["vf-netdev-name"]; !ok {
-		//	continue
-		//}
-		ifaceId, ok := ifaceInfo.Attributes["iface-id"]
-		if !ok {
-			// interface with external-ids:sandbox set but no iface-id, delete it
-			klog.Warningf("iface-id attribute was not found for OVS interface %s. "+
-				"deleting OVS port with interface %s", ifaceInfo.Name)
-			_, stderr, err := util.RunOVSVsctl("--if-exists", "--with-iface", "del-port", ifaceInfo.Name)
+	for ifName, podUID := range ovsIntefaceToPodUIDMap {
+		if _, ok := expectedPodUIDs[podUID]; !ok {
+			klog.Warningf("Found stale OVS Interface %s with iface-id-ver %s, deleting it", ifName, podUID)
+			_, stderr, err := util.RunOVSVsctl("--if-exists", "--with-iface", "del-port", ifName)
 			if err != nil {
 				klog.Errorf("Failed to delete interface %q . stderr: %q, error: %v",
-					ifaceInfo.Name, stderr, err)
-			}
-			continue
-		}
-		prefix := ""
-		nadName, ok := ifaceInfo.Attributes["network_name"]
-		if ok {
-			prefix = util.GetNetworkPrefix(nadName, false)
-			if !strings.HasPrefix(ifaceId, prefix) {
-				klog.Warningf("iface-id of OVS interface %s for network %s is invalid: %s", ifaceInfo.Name,
-					nadName, ifaceId)
-				continue
-			}
-			ifaceId = strings.TrimPrefix(ifaceId, prefix)
-		}
-
-		if _, ok := expectedIfaceIdsWithoutPrefix[ifaceId]; !ok {
-			klog.Warningf("Found stale OVS Interface, deleting OVS Port with interface %s", ifaceInfo.Name)
-			_, stderr, err := util.RunOVSVsctl("--if-exists", "--with-iface", "del-port", ifaceInfo.Name)
-			if err != nil {
-				klog.Errorf("Failed to delete interface %q, stderr: %q, error: %v",
-					ifaceInfo.Name, stderr, err)
-				continue
+					ifName, stderr, err)
 			}
 		}
 	}
@@ -293,6 +277,64 @@ func checkForStaleOVSInterfaces(nodeName string, wf factory.ObjectCacheInterface
 		checkForStaleOVSInternalPorts()
 	}
 	checkForStaleOVSRepresentorInterfaces(nodeName, wf)
+}
+
+// upgrade and fill in OVS interface's ovn_kube_mode and netdev-name external-ids
+func upgradeOVSInterfaceExternalIDs(nodeName string, wf factory.ObjectCacheInterface) error {
+	// Find all OVN-K8S OVS interfaces without ovn_kube_mode external-ids.
+	ovsArgs := []string{"--columns=name,external_ids", "--data=bare", "--no-headings",
+		"--format=csv", "find", "Interface", "external_ids:sandbox!=\"\""}
+	if util.IsClusterScoped() {
+		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:cluster_name=%s", util.GetClusterName()))
+	} else {
+		ovsArgs = append(ovsArgs, "external_ids:cluster_name{=}[]")
+	}
+	ovsArgs = append(ovsArgs, "external_ids:ovn_kube_mode{=}[]")
+
+	ovsIntefaceToPodUIDMap, err := GetOVSInterfaceToPodUIDMapFiltered(ovsArgs)
+	if err != nil {
+		return err
+	}
+	if len(ovsIntefaceToPodUIDMap) == 0 {
+		return nil
+	}
+	// list Pods and calculate the expected iface-ids.
+	// Note: we do this after scanning ovs interfaces to avoid deleting ports of pods that where just scheduled
+	// on the node.
+	pods, err := wf.GetPods("")
+	if err != nil {
+		return fmt.Errorf("failed to get all existing pods %v", err)
+	}
+	expectedPodUIDs := make(map[string]struct{})
+	for _, pod := range pods {
+		if pod.Spec.NodeName == nodeName && util.PodWantsNetwork(pod) {
+			// Note: wf (WatchFactory) *usually* returns pods assigned to this node, however we dont rely on it
+			// and add this check to filter out pods assigned to other nodes. (e.g when ovnkube master and node
+			// share the same process)
+			expectedPodUIDs[string(pod.UID)] = struct{}{}
+		}
+	}
+
+	for ifName, podUID := range ovsIntefaceToPodUIDMap {
+		if _, ok := expectedPodUIDs[podUID]; ok {
+			// Set the missing external-ids to the OVS port
+			ovsArgs = []string{
+				"--may-exist", "set", "interface", ifName,
+				fmt.Sprintf("external_ids:ovn_kube_mode=%s", config.OvnKubeNode.Mode),
+			}
+			// in order to participate in the healthcheck, add its netdev-name external-ids, as it wasn't added for DPU mode
+			if config.OvnKubeNode.Mode == types.NodeModeDPU {
+				ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:netdev-name=%s", ifName))
+			}
+			klog.Warningf("Found OVS Interface %s with iface-id-ver %s, upgrade its ovn_kube_mode/netdev-name external-ids", ifName, podUID)
+			_, stderr, err := util.RunOVSVsctl(ovsArgs...)
+			if err != nil {
+				return fmt.Errorf("failed to run OVS command %v. stderr: %q, error: %v",
+					ovsArgs, stderr, err)
+			}
+		}
+	}
+	return nil
 }
 
 type openflowManager struct {

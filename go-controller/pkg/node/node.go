@@ -523,6 +523,11 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 	klog.Infof("Node %s ready for ovn initialization with subnet %s", n.name, util.JoinIPNets(subnets, ","))
 
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+		// upgrade OVS interface external-ids
+		if err = upgradeOVSInterfaceExternalIDs(n.name, n.watchFactory.(*factory.WatchFactory)); err != nil {
+			return fmt.Errorf("failed to upgrade OVS interface external-ids: %v", err)
+		}
+
 		n.ovnUpEnabled, err = getOVNIfUpCheckMode()
 		if err != nil {
 			return err
