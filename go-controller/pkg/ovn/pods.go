@@ -532,6 +532,16 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 	klog.V(5).Infof("Pod %s is attached on this network: %s", podDesc, oc.nadInfo.NetName)
 	for nadName, network := range networkMap {
+		skipIPAM := util.SkipIPAMForNAD(pod.Annotations, nadName)
+		if skipIPAM {
+			if !oc.nadInfo.IsSecondary {
+				// skip-ipam not allowed on default network
+				return fmt.Errorf("skip-ipam annotation can't be applied on default network")
+			} else if oc.nadInfo.TopoType != ovntypes.Layer2AttachDefTopoType {
+				// skip-ipam only allowed for L2 network
+				return fmt.Errorf("skip-ipam annotation can only be applied on L2 network")
+			}
+		}
 		err1 := oc.addLogicalPort4Nad(pod, nadName, lsManagerNodeName, network)
 		if err1 != nil {
 			err = err1
