@@ -319,7 +319,7 @@ func upgradeOVSInterfaceExternalIDs(nodeName string, wf factory.ObjectCacheInter
 		if _, ok := expectedPodUIDs[podUID]; ok {
 			// Set the missing external-ids to the OVS port
 			ovsArgs = []string{
-				"--may-exist", "set", "interface", ifName,
+				"--if-exists", "set", "interface", ifName,
 				fmt.Sprintf("external_ids:ovn_kube_mode=%s", config.OvnKubeNode.Mode),
 			}
 			// in order to participate in the healthcheck, add its netdev-name external-ids
