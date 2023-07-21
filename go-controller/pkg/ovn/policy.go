@@ -879,7 +879,7 @@ func (oc *Controller) localPodDelDefaultDeny(
 }
 
 func (oc *Controller) processLocalPodSelectorSetPods(policy *knet.NetworkPolicy,
-	np *networkPolicy, objs ...interface{}) (policyPorts, ingressDenyPorts, egressDenyPorts []string) {
+	np *networkPolicy, objs ...interface{}) (policyPorts, ingressDenyPorts, egressDenyPorts []string, retErr error) {
 	klog.V(6).Infof("Processing NetworkPolicy %s/%s to have %d local pods...", np.namespace, np.name, len(objs))
 
 	// get list of pods and their logical ports to add
@@ -887,60 +887,7 @@ func (oc *Controller) processLocalPodSelectorSetPods(policy *knet.NetworkPolicy,
 	// paranoid.
 	policyPorts = make([]string, 0, len(objs))
 	policyPortsInfo := make([]*lpInfo, 0, len(objs))
-
-	// thread safe helper vars used by the `getPortInfo` go-routine
-	getPortsInfoMap := sync.Map{}
-	getPolicyPortsWg := &sync.WaitGroup{}
-
-	getPortInfo := func(logicalPort string) {
-		defer getPolicyPortsWg.Done()
-
-		var portInfo *lpInfo
-
-		// Get the logical port info from the cache, if that fails, retry
-		// if the gotten LSP is Scheduled for removal, retry (stateful-sets)
-		//
-		// 24ms is chosen because gomega.Eventually default timeout is 50ms
-		// libovsdb transactions take less than 50ms usually as well so pod create
-		// should be done within a couple iterations
-		retryErr := wait.PollImmediate(24*time.Millisecond, 1*time.Second, func() (bool, error) {
-			var err error
-
-			// Retry if getting pod LSP from the cache fails
-			portInfo, err = oc.logicalPortCache.get(logicalPort)
-			if err != nil {
-				klog.Warningf("Failed to get LSP %s for networkPolicy %s refetching err: %v",
-					logicalPort, policy.Name, err)
-				return false, nil
-			}
-
-			// Retry if LSP is scheduled for deletion
-			if !portInfo.expires.IsZero() {
-				klog.Warningf("Stale LSP %s for network policy %s found in cache refetching",
-					portInfo.name, policy.Name)
-				return false, nil
-			}
-
-			// LSP get succeeded and LSP is up to fresh, exit and continue
-			klog.V(5).Infof("Fresh LSP %s for network policy %s found in cache",
-				portInfo.name, policy.Name)
-			return true, nil
-
-		})
-		if retryErr != nil {
-			// Failed to get an up to date version of the LSP from the cache
-			klog.Warningf("Failed to get LSP after multiple retries for %s for networkPolicy %s err: %v",
-				logicalPort, policy.Name, retryErr)
-			return
-		}
-
-		// if this pod is somehow already added to this policy, then skip
-		if _, ok := np.localPods.LoadOrStore(portInfo.name, portInfo); ok {
-			return
-		}
-
-		getPortsInfoMap.Store(portInfo.uuid, portInfo)
-	}
+	errors := []error{}
 
 	for _, obj := range objs {
 		pod := obj.(*kapi.Pod)
@@ -962,20 +909,35 @@ func (oc *Controller) processLocalPodSelectorSetPods(policy *knet.NetworkPolicy,
 		// Get the logical port info
 		logicalPorts := util.GetAllLogicalPortNames(pod, oc.nadInfo)
 		for _, logicalPort := range logicalPorts {
-			getPolicyPortsWg.Add(1)
-			go getPortInfo(logicalPort)
+			portInfo, err := oc.logicalPortCache.get(logicalPort)
+			if err != nil {
+				errors = append(errors, fmt.Errorf("processLocalPodSelectorSetPods: failed to get LSP %s from lpCache for networkPolicy %s, err: %v",
+					logicalPort, policy.Name, err))
+				continue
+			}
+
+			// Retry if LSP is scheduled for deletion
+			if !portInfo.expires.IsZero() {
+				errors = append(errors, fmt.Errorf("stale LSP %s for networkPolicy %s found in lpCache",
+					logicalPort, policy.Name))
+				continue
+			}
+
+			klog.V(6).Infof("Fresh LSP %s for network policy %s found in lpCache",
+				portInfo.name, policy.Name)
+
+			// if this pod is somehow already added to this policy, then skip
+			if _, ok := np.localPods.LoadOrStore(portInfo.name, portInfo); ok {
+				continue
+			}
+			policyPorts = append(policyPorts, portInfo.uuid)
+			policyPortsInfo = append(policyPortsInfo, portInfo)
 		}
 	}
 
-	getPolicyPortsWg.Wait()
-
-	// build usable atomic structures from the sync.Map() populated by the getPortInfo threads
-	// add to backup policyPorts array
-	getPortsInfoMap.Range(func(key interface{}, value interface{}) bool {
-		policyPorts = append(policyPorts, key.(string))
-		policyPortsInfo = append(policyPortsInfo, value.(*lpInfo))
-		return true
-	})
+	if len(errors) > 0 {
+		retErr = kerrorsutil.NewAggregate(errors)
+	}
 
 	ingressDenyPorts, egressDenyPorts = oc.localPodAddDefaultDeny(policy, policyPortsInfo...)
 
@@ -988,6 +950,7 @@ func (oc *Controller) processLocalPodSelectorDelPods(np *networkPolicy,
 
 	policyPorts = make([]string, 0, len(objs))
 	policyPortsInfo := make([]*lpInfo, 0, len(objs))
+	errors := []error{}
 	for _, obj := range objs {
 		pod := obj.(*kapi.Pod)
 
@@ -999,8 +962,9 @@ func (oc *Controller) processLocalPodSelectorDelPods(np *networkPolicy,
 		for _, logicalPort := range logicalPorts {
 			portInfo, err := oc.logicalPortCache.get(logicalPort)
 			if err != nil {
-				klog.Errorf(err.Error())
-				return
+				errors = append(errors, fmt.Errorf("processLocalPodSelectorDelPods: failed to get LSP %s from lpCache for networkPolicy %s, err: %v",
+					logicalPort, np.name, err))
+				continue
 			}
 
 			// If we never saw this pod, short-circuit
@@ -1011,6 +975,10 @@ func (oc *Controller) processLocalPodSelectorDelPods(np *networkPolicy,
 			policyPortsInfo = append(policyPortsInfo, portInfo)
 			policyPorts = append(policyPorts, portInfo.uuid)
 		}
+	}
+
+	if len(errors) > 0 {
+		klog.Errorf(kerrorsutil.NewAggregate(errors).Error())
 	}
 
 	ingressDenyPorts, egressDenyPorts = oc.localPodDelDefaultDeny(np, policyPortsInfo...)
@@ -1028,9 +996,12 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(policy *knet.NetworkPolicy, 
 		return nil
 	}
 
-	policyPorts, ingressDenyPorts, egressDenyPorts := oc.processLocalPodSelectorSetPods(policy, np, obj)
-
 	var errs []error
+
+	policyPorts, ingressDenyPorts, egressDenyPorts, err := oc.processLocalPodSelectorSetPods(policy, np, obj)
+	if err != nil {
+		errs = append(errs, err)
+	}
 
 	ops, err := libovsdbops.AddPortsToPortGroupOps(oc.mc.nbClient, nil, util.GetClusterScopedName(oc.nadInfo.Prefix+portGroupIngressDenyName), ingressDenyPorts...)
 	if err != nil {
@@ -1071,13 +1042,13 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(policy *knet.NetworkPolicy, 
 
 	ops, err := libovsdbops.DeletePortsFromPortGroupOps(oc.mc.nbClient, nil, util.GetClusterScopedName(oc.nadInfo.Prefix+portGroupIngressDenyName), ingressDenyPorts...)
 	if err != nil {
-		oc.processLocalPodSelectorSetPods(policy, np, obj)
+		_, _, _, _ = oc.processLocalPodSelectorSetPods(policy, np, obj)
 		return err
 	}
 
 	ops, err = libovsdbops.DeletePortsFromPortGroupOps(oc.mc.nbClient, ops, util.GetClusterScopedName(oc.nadInfo.Prefix+portGroupEgressDenyName), egressDenyPorts...)
 	if err != nil {
-		oc.processLocalPodSelectorSetPods(policy, np, obj)
+		_, _, _, _ = oc.processLocalPodSelectorSetPods(policy, np, obj)
 		return err
 	}
 
@@ -1085,13 +1056,13 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(policy *knet.NetworkPolicy, 
 
 	ops, err = libovsdbops.DeletePortsFromPortGroupOps(oc.mc.nbClient, ops, util.GetClusterScopedName(oc.nadInfo.Prefix+np.portGroupName), policyPorts...)
 	if err != nil {
-		oc.processLocalPodSelectorSetPods(policy, np, obj)
+		_, _, _, _ = oc.processLocalPodSelectorSetPods(policy, np, obj)
 		errs = append(errs, err)
 	}
 
 	_, err = libovsdbops.TransactAndCheck(oc.mc.nbClient, ops)
 	if err != nil {
-		oc.processLocalPodSelectorSetPods(policy, np, obj)
+		_, _, _, _ = oc.processLocalPodSelectorSetPods(policy, np, obj)
 		errs = append(errs, err)
 	}
 
@@ -1285,7 +1256,8 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 	handleInitialSelectedPods := func(objs []interface{}) error {
 		var errs []error
 		selectedPods = objs
-		policyPorts, ingressDenyPorts, egressDenyPorts := oc.processLocalPodSelectorSetPods(policy, np, selectedPods...)
+		// it is ok to ignore errors here, as all initial set of pods will be handled again in Pod add handler
+		policyPorts, ingressDenyPorts, egressDenyPorts, _ := oc.processLocalPodSelectorSetPods(policy, np, selectedPods...)
 		pg.Ports = append(pg.Ports, policyPorts...)
 		ops, err = libovsdbops.AddPortsToPortGroupOps(oc.mc.nbClient, ops, util.GetClusterScopedName(oc.nadInfo.Prefix+portGroupIngressDenyName), ingressDenyPorts...)
 		if err != nil {
