@@ -286,6 +286,9 @@ func waitForPodInterface(ctx context.Context, ifInfo *PodInterfaceInfo,
 		if err != nil {
 			return err
 		}
+		if ofPort == -1 {
+			return fmt.Errorf("the OF port number for the interface %s is not vaild %d", ifaceName, ofPort)
+		}
 	}
 	for {
 		select {
