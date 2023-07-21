@@ -208,6 +208,9 @@ type NetAttachDefInfo struct {
 
 	// layer 2 network only
 	ConnectToNad string
+
+	// additional NAD routes for this network
+	NADRoutes []*net.IPNet
 }
 
 func NewNetAttachDefInfo(netconf *cnitypes.NetConf) (*NetAttachDefInfo, error) {
@@ -299,6 +302,10 @@ func ParseNADInfo(netattachdef *nettypes.NetworkAttachmentDefinition) (*NetAttac
 		if nad, ok := netattachdef.Annotations[types.OvnK8sConnectToNad]; ok {
 			nadInfo.ConnectToNad = nad
 		}
+	}
+	err = GetNADNetConfig(netattachdef, nadInfo)
+	if err != nil {
+		return nil, nil, err
 	}
 	nadConfig, err := GetNadConfig(netattachdef, nadInfo.IsSecondary)
 	if err != nil {

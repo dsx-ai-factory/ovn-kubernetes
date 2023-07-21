@@ -3,6 +3,8 @@ package util
 import (
 	"encoding/json"
 	"fmt"
+	"net"
+	"strings"
 	"sync"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -10,6 +12,7 @@ import (
 
 const (
 	MissRateLimitConfigAnnot = "k8s.ovn.org/miss-rl-config"
+	NADRoutesAnnot           = "k8s.ovn.org/nad-routes"
 )
 
 type MissRateLimitConfig struct {
@@ -63,4 +66,46 @@ func GetNadConfig(netattachdef *nettypes.NetworkAttachmentDefinition, isSecondar
 	}
 
 	return &NadConfig{MissRateLimitConfig: pktRateLimitCfg}, nil
+}
+
+// GetNADNetConfig returns the network specific configuration obtained from the net-attach-def annotation
+func GetNADNetConfig(netattachdef *nettypes.NetworkAttachmentDefinition, nadInfo *NetAttachDefInfo) error {
+	nadRoutesAnnot, ok := netattachdef.Annotations[NADRoutesAnnot]
+	if !ok {
+		return nil
+	}
+
+	routeStrings := []string{}
+	if err := json.Unmarshal([]byte(nadRoutesAnnot), &routeStrings); err != nil {
+		return fmt.Errorf("failed to unmarshal %s annotation %q of NAD %s/%s: %v",
+			NADRoutesAnnot, nadRoutesAnnot, netattachdef.Namespace, netattachdef.Name, err)
+	}
+
+	routes := make([]*net.IPNet, len(routeStrings))
+	for i, routeString := range routeStrings {
+		routeString = strings.TrimSpace(routeString)
+		_, route, err := net.ParseCIDR(routeString)
+		if err != nil {
+			return fmt.Errorf("invalid NAD routes %s in %s annotation %q of NAD %s/%s: %v",
+				routeString, NADRoutesAnnot, nadRoutesAnnot, netattachdef.Namespace, netattachdef.Name, err)
+		}
+		routes[i] = route
+	}
+
+	nadInfo.NADRoutes = routes
+	return nil
+}
+
+func AreNADRoutesSame(routes1, routes2 []*net.IPNet) bool {
+	if len(routes1) != len(routes2) {
+		return false
+	}
+	routeStrings1 := make([]string, len(routes1))
+	routeStrings2 := make([]string, len(routes2))
+
+	for i := 0; i < len(routes1); i++ {
+		routeStrings1[i] = routes1[i].String()
+		routeStrings2[i] = routes2[i].String()
+	}
+	return IsStringListEqual(routeStrings1, routeStrings2)
 }

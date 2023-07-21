@@ -411,6 +411,14 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 					})
 				}
 			}
+			for _, subnet := range oc.nadInfo.NADRoutes {
+				if isIPv6 == utilnet.IsIPv6CIDR(subnet) {
+					podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
+						Dest:    subnet,
+						NextHop: gatewayIPnet.IP,
+					})
+				}
+			}
 		}
 		return nil
 	}
@@ -463,6 +471,14 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 				if isIPv6 == utilnet.IsIPv6CIDR(serviceSubnet) {
 					podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
 						Dest:    serviceSubnet,
+						NextHop: gatewayIPnet.IP,
+					})
+				}
+			}
+			for _, subnet := range oc.nadInfo.NADRoutes {
+				if isIPv6 == utilnet.IsIPv6CIDR(subnet) {
+					podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
+						Dest:    subnet,
 						NextHop: gatewayIPnet.IP,
 					})
 				}
