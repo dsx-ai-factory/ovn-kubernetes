@@ -322,13 +322,23 @@ func upgradeOVSInterfaceExternalIDs(nodeName string, wf factory.ObjectCacheInter
 				"--if-exists", "set", "interface", ifName,
 				fmt.Sprintf("external_ids:ovn_kube_mode=%s", config.OvnKubeNode.Mode),
 			}
-			// in order to participate in the healthcheck, add its netdev-name external-ids
-			ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:netdev-name=%s", ifName))
+			if config.OvnKubeNode.Mode == types.NodeModeDPU {
+				// in order for VFRep interfaces to participate in the healthcheck, add its netdev-name external-ids
+				ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:netdev-name=%s", ifName))
+			}
 			klog.Warningf("Found OVS Interface %s with iface-id-ver %s, upgrade its ovn_kube_mode/netdev-name external-ids", ifName, podUID)
 			_, stderr, err := util.RunOVSVsctl(ovsArgs...)
 			if err != nil {
 				return fmt.Errorf("failed to run OVS command %v. stderr: %q, error: %v",
 					ovsArgs, stderr, err)
+			}
+		} else {
+			// Corresponding Pod might be deleted during ovnkube-node shutdown, delete this stale OVS interface.
+			klog.Warningf("Found stale OVS Interface %s with iface-id-ver %s, deleting it", ifName, podUID)
+			_, stderr, err := util.RunOVSVsctl("--if-exists", "--with-iface", "del-port", ifName)
+			if err != nil {
+				return fmt.Errorf("failed to delete interface %s. stderr: %q, error: %v",
+					ifName, stderr, err)
 			}
 		}
 	}
