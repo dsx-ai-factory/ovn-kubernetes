@@ -25,6 +25,7 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
@@ -1715,14 +1716,18 @@ func noHostSubnet(node *kapi.Node) bool {
 }
 
 // nonHostNetworkPodsExists verifies if node has pods non host network IP
-func nonHostNetworkPodsExists(kube kube.Interface, node *kapi.Node) bool {
-	nodeName := node.ObjectMeta.Name
-	pods, err := kube.GetPodsFiltered("", "spec.nodeName="+nodeName)
+func nonHostNetworkPodsExists(mc *OvnMHController, node *kapi.Node) bool {
+	podIndexer := mc.watchFactory.PodInformer().GetIndexer()
+	pods, err := podIndexer.ByIndex(types.CacheIndexPodByNodeName, node.ObjectMeta.Name)
 	if err != nil {
-		klog.Errorf("nonHostNetworkPodsExists: failed to get pods for Node '%s': %+v", nodeName, err)
+		klog.Errorf("nonHostNetworkPodsExists: failed to get pods for Node '%s': %+v", node.ObjectMeta.Name, err)
 		return true
 	}
-	for _, pod := range pods.Items {
+	for _, obj := range pods {
+		pod, ok := obj.(*kapi.Pod)
+		if !ok {
+			continue
+		}
 		if !pod.Spec.HostNetwork {
 			return true
 		}
@@ -1733,14 +1738,14 @@ func nonHostNetworkPodsExists(kube kube.Interface, node *kapi.Node) bool {
 // shouldUpdate() determines if the ovn-kubernetes plugin should update the state of the node.
 // ovn-kube should not perform an update if it does not assign a hostsubnet, or if you want to change
 // whether or not ovn-kubernetes assigns a hostsubnet
-func shouldUpdate(kube kube.Interface, node, oldNode *kapi.Node) (bool, error) {
+func shouldUpdate(mc *OvnMHController, node, oldNode *kapi.Node) (bool, error) {
 	newNoHostSubnet := noHostSubnet(node)
 	oldNoHostSubnet := noHostSubnet(oldNode)
 
 	if oldNoHostSubnet && newNoHostSubnet {
 		return false, nil
 	} else if oldNoHostSubnet && !newNoHostSubnet {
-		if nonHostNetworkPodsExists(kube, node) {
+		if nonHostNetworkPodsExists(mc, node) {
 			// if node has pods with non host network IP, then updating such node will be non-trivial task,
 			// hence, return error
 			return false, fmt.Errorf("error updating node %s, cannot remove assigned hostsubnet, please delete node and recreate.", node.Name)

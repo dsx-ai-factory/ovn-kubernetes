@@ -40,6 +40,8 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 func TestFactory(t *testing.T) {
@@ -698,6 +700,9 @@ var _ = Describe("Watch Factory Operations", func() {
 	It("responds to multiple pod add/update/delete events", func() {
 		wf, err = NewMasterWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
+		// remove index-pod-by-node-name indexer as it will cause data race in test
+		indexers := wf.PodInformer().GetIndexer().GetIndexers()
+		delete(indexers, ovntypes.CacheIndexPodByNodeName)
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 

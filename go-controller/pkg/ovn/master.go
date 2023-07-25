@@ -1568,13 +1568,14 @@ func (oc *Controller) addUpdateNodeEvent(oldNode, newNode *kapi.Node, nSyncs *no
 		}
 	}
 	if needAddPods {
-		pods, err := oc.mc.watchFactory.GetAllPods()
+		podIndexer := oc.mc.watchFactory.PodInformer().GetIndexer()
+		pods, err := podIndexer.ByIndex(types.CacheIndexPodByNodeName, newNode.Name)
 		if err != nil {
-			klog.Errorf("Unable to get all pods: %v", err)
+			klog.Errorf("Failed to get pods by node name %s: %v", newNode.Name, err)
 		} else if nSyncs.syncNode || nSyncs.syncGw { // do this only if it is a new node add or a gateway sync happened
-			for index := range pods {
-				pod := pods[index]
-				if pod.Spec.NodeName != newNode.Name {
+			for _, obj := range pods {
+				pod, ok := obj.(*kapi.Pod)
+				if !ok {
 					continue
 				}
 				if util.PodCompleted(pod) {

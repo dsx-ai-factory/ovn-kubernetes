@@ -170,6 +170,7 @@ const (
 
 	CacheIndexPodByIP        = "index-pod-by-ip"
 	CacheIndexPodByNodeIP    = "index-pod-by-node-ip"
+	CacheIndexPodByNodeName  = "index-pod-by-node-name"
 	CacheIndexPodByNamespace = "index-pod-by-ns"
 
 	ExternalIDK8sOwner     = OvnK8sPrefix + "/" + "owner"

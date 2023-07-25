@@ -11,6 +11,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
@@ -255,14 +256,19 @@ func (oc *Controller) delLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string
 	// check to make sure no other pods are using this IP before we try to release it if this is a completed pod.
 	if util.PodCompleted(pod) {
 		if shouldRelease, err = oc.lsManager.ConditionalIPRelease(switchName, podIfAddrs, func() (bool, error) {
-			pods, err := oc.mc.watchFactory.GetAllPods()
+			podIndexer := oc.mc.watchFactory.PodInformer().GetIndexer()
+			pods, err := podIndexer.ByIndex(types.CacheIndexPodByNodeName, pod.Spec.NodeName)
 			if err != nil {
 				return false, fmt.Errorf("unable to get pods to determine if completed pod IP is in use by another pod. "+
 					"Will not release pod %s/%s IP: %#v from allocator", pod.Namespace, pod.Name, podIfAddrs)
 			}
 			// iterate through all pods, ignore pods on other nodes
-			for _, p := range pods {
-				if util.PodCompleted(p) || !util.PodWantsNetwork(p) || !util.PodScheduled(p) || p.Spec.NodeName != pod.Spec.NodeName {
+			for _, obj := range pods {
+				p, ok := obj.(*kapi.Pod)
+				if !ok {
+					continue
+				}
+				if util.PodCompleted(p) || !util.PodWantsNetwork(p) || !util.PodScheduled(p) {
 					continue
 				}
 				// check if the pod addresses match in the OVN annotation

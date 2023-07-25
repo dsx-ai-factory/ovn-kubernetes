@@ -213,6 +213,18 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	if err != nil {
 		return nil, err
 	}
+	// index pods by ip, node & ns
+	if err := wf.informers[PodType].inf.AddIndexers(
+		cache.Indexers{
+			types.CacheIndexPodByIP:        util.IndexPodByIP,
+			types.CacheIndexPodByNamespace: util.IndexPodByNamespace,
+			types.CacheIndexPodByNodeIP:    util.IndexPodByNodeIP,
+			types.CacheIndexPodByNodeName:  util.IndexPodByNodeName,
+		},
+	); err != nil {
+		return nil, fmt.Errorf("failed to add pod indexers: %v", err)
+	}
+
 	wf.informers[ServiceType], err = newInformer(ServiceType, wf.iFactory.Core().V1().Services().Informer())
 	if err != nil {
 		return nil, err
@@ -275,16 +287,6 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 			wf.adminPBRFactory.K8s().V1beta1().AdminPolicyBasedRoutes().Informer())
 		if err != nil {
 			return nil, err
-		}
-		// index pods by ip, node & ns
-		if err := wf.informers[PodType].inf.AddIndexers(
-			cache.Indexers{
-				types.CacheIndexPodByIP:        util.IndexPodByIP,
-				types.CacheIndexPodByNamespace: util.IndexPodByNamespace,
-				types.CacheIndexPodByNodeIP:    util.IndexPodByNodeIP,
-			},
-		); err != nil {
-			return nil, fmt.Errorf("failed to add pod indexers: %v", err)
 		}
 	}
 	if config.OVNKubernetesFeature.EnableVirtualIP {

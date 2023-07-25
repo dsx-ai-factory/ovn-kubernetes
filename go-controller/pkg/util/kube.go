@@ -601,6 +601,17 @@ func IndexPodByNodeIP(obj interface{}) ([]string, error) {
 	return []string{pod.Status.HostIP}, nil
 }
 
+func IndexPodByNodeName(obj interface{}) ([]string, error) {
+	pod, ok := obj.(*kapi.Pod)
+	if !ok {
+		return nil, fmt.Errorf("not a pod")
+	}
+	if pod.Spec.NodeName == "" {
+		return nil, nil
+	}
+	return []string{pod.Spec.NodeName}, nil
+}
+
 func IndexPodByNamespace(obj interface{}) ([]string, error) {
 	pod, ok := obj.(*kapi.Pod)
 	if !ok {

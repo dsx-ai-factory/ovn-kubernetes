@@ -377,7 +377,7 @@ func (oc *Controller) areResourcesEqual(objType reflect.Type, obj1, obj2 interfa
 		}
 
 		// when shouldUpdate is false, the hostsubnet is not assigned by ovn-kubernetes
-		shouldUpdate, err := shouldUpdate(oc.mc.kube, node2, node1)
+		shouldUpdate, err := shouldUpdate(oc.mc, node2, node1)
 		if err != nil {
 			klog.Errorf(err.Error())
 		}
