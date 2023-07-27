@@ -1,7 +1,6 @@
 package ovn
 
 import (
-	"fmt"
 	"strings"
 
 	multinetworkpolicy "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta2"
@@ -18,7 +17,8 @@ func (oc *Controller) syncMultiNetworkPolicies(multiPolicies []interface{}) erro
 	for _, npInterface := range multiPolicies {
 		policy, ok := npInterface.(*multinetworkpolicy.MultiNetworkPolicy)
 		if !ok {
-			return fmt.Errorf("spurious object in syncMultiNetworkPolicies: %v", npInterface)
+			klog.Errorf("Spurious object in syncMultiNetworkPolicies: %v", npInterface)
+			continue
 		}
 		if !oc.shouldApplyMultiPolicy(policy) {
 			klog.V(5).Infof("[controller(%s)] skipping syncing policy %s/%s",

@@ -26,7 +26,8 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) error {
 	for _, nsInterface := range namespaces {
 		ns, ok := nsInterface.(*kapi.Namespace)
 		if !ok {
-			return fmt.Errorf("spurious object in syncNamespaces: %v", nsInterface)
+			klog.Errorf("Spurious object in syncNamespaces: %v", nsInterface)
+			continue
 		}
 		expectedNs[ns.Name] = true
 	}

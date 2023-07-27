@@ -709,7 +709,8 @@ func (oc *Controller) addResource(objectsToRetry *retryObjs, obj interface{}, fr
 	case factory.PodType:
 		pod, ok := obj.(*kapi.Pod)
 		if !ok {
-			return fmt.Errorf("could not cast %T object to *knet.Pod", obj)
+			klog.Errorf("Spurious object, could not cast %T object to *knet.Pod", obj)
+			return nil
 		}
 		return oc.ensurePod(nil, pod, true)
 
@@ -717,7 +718,8 @@ func (oc *Controller) addResource(objectsToRetry *retryObjs, obj interface{}, fr
 		factory.MultinetworkpolicyType:
 		np, ok := obj.(*knet.NetworkPolicy)
 		if !ok {
-			return fmt.Errorf("could not cast %T object to *knet.NetworkPolicy", obj)
+			klog.Errorf("Spurious object, could not cast %T object to *knet.NetworkPolicy", obj)
+			return nil
 		}
 
 		if err = oc.addNetworkPolicy(np); err != nil {
@@ -729,7 +731,8 @@ func (oc *Controller) addResource(objectsToRetry *retryObjs, obj interface{}, fr
 	case factory.NodeType:
 		node, ok := obj.(*kapi.Node)
 		if !ok {
-			return fmt.Errorf("could not cast %T object to *kapi.Node", obj)
+			klog.Errorf("Spurious object, could not cast %T object to *kapi.Node", obj)
+			return nil
 		}
 		var nodeParams *nodeSyncs
 		if fromRetryLoop {
@@ -755,7 +758,8 @@ func (oc *Controller) addResource(objectsToRetry *retryObjs, obj interface{}, fr
 	case factory.PeerServiceType:
 		service, ok := obj.(*kapi.Service)
 		if !ok {
-			return fmt.Errorf("could not cast peer service of type %T to *kapi.Service", obj)
+			klog.Errorf("Spurious object, could not cast peer service of type %T to *kapi.Service", obj)
+			return nil
 		}
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
 		return oc.handlePeerServiceAdd(extraParameters.gp, service)
@@ -897,11 +901,13 @@ func (oc *Controller) updateResource(objectsToRetry *retryObjs, oldObj, newObj i
 	case factory.NodeType:
 		newNode, ok := newObj.(*kapi.Node)
 		if !ok {
-			return fmt.Errorf("could not cast newObj of type %T to *kapi.Node", newObj)
+			klog.Errorf("Spurious object, could not cast newObj of type %T to *kapi.Node", newObj)
+			return nil
 		}
 		oldNode, ok := oldObj.(*kapi.Node)
 		if !ok {
-			return fmt.Errorf("could not cast oldObj of type %T to *kapi.Node", oldObj)
+			klog.Errorf("Spurious object, could not cast oldObj of type %T to *kapi.Node", oldObj)
+			return nil
 		}
 		// determine what actually changed in this update
 		_, nodeSync := oc.addNodeFailed.Load(newNode.Name)

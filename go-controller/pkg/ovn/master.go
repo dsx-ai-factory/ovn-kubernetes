@@ -1327,7 +1327,8 @@ func (oc *Controller) syncNodesRetriable(nodes []interface{}) error {
 	for _, tmp := range nodes {
 		node, ok := tmp.(*kapi.Node)
 		if !ok {
-			return fmt.Errorf("spurious object in syncNodes: %v", tmp)
+			klog.Errorf("Spurious object in syncNodes: %v", tmp)
+			continue
 		}
 		foundNodes.Insert(node.Name)
 

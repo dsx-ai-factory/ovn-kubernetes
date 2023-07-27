@@ -37,7 +37,8 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 	for _, podInterface := range pods {
 		pod, ok := podInterface.(*kapi.Pod)
 		if !ok {
-			return fmt.Errorf("spurious object in syncPods: %v", podInterface)
+			klog.Errorf("Spurious object in syncPods: %v", podInterface)
+			continue
 		}
 		if !util.PodScheduled(pod) || !util.PodWantsNetwork(pod) || util.PodCompleted(pod) {
 			continue
@@ -172,7 +173,7 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 		if nsInfo.addressSet != nil {
 			err := nsInfo.addressSet.DeleteIPs(ips)
 			if err != nil {
-				klog.Errorf("Unable to delete stale IPs %v from namespace %s address_set, "+
+				return fmt.Errorf("unable to delete stale IPs %v from namespace %s address_set, "+
 					"error: %v", ips, ns, err)
 			}
 		}

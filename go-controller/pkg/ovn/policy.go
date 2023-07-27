@@ -178,7 +178,8 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) error {
 	for _, npInterface := range networkPolicies {
 		policy, ok := npInterface.(*knet.NetworkPolicy)
 		if !ok {
-			return fmt.Errorf("spurious object in syncNetworkPolicies: %v", npInterface)
+			klog.Errorf("Spurious object in syncNetworkPolicies: %v", npInterface)
+			continue
 		}
 		if nsMap, ok := expectedPolicies[policy.Namespace]; ok {
 			nsMap[policy.Name] = true
