@@ -169,14 +169,15 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 		if nsInfo == nil {
 			continue
 		}
-		defer nsUnlock()
 		if nsInfo.addressSet != nil {
 			err := nsInfo.addressSet.DeleteIPs(ips)
 			if err != nil {
+				nsUnlock()
 				return fmt.Errorf("unable to delete stale IPs %v from namespace %s address_set, "+
 					"error: %v", ips, ns, err)
 			}
 		}
+		nsUnlock()
 	}
 
 	return nil
