@@ -1489,8 +1489,8 @@ func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.
 	}
 	klog.Infof("The last Network Attachment Definition %s/%s is deleted from nad %s, delete associated logical entities",
 		netattachdef.Namespace, netattachdef.Name, netconf.Name)
-	oc.wg.Wait()
 	close(oc.stopChan)
+	oc.wg.Wait()
 
 	if oc.multiNetworkPolicyHandler != nil {
 		oc.mc.watchFactory.RemoveMultiNetworkPolicyHandler(oc.multiNetworkPolicyHandler)

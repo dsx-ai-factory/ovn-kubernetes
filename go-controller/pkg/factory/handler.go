@@ -99,6 +99,8 @@ type informer struct {
 
 	// queueMap handles distributing events across a queued handler's queues
 	queueMap *queueMap
+	// queued informer only stopChan; enqueue will be unblocked when stopChan is closed
+	stopChan chan struct{}
 }
 
 func (i *informer) forEachQueuedHandler(f func(h *Handler)) {
@@ -293,15 +295,19 @@ func (qm *queueMap) releaseQueueMapEntry(key ktypes.NamespacedName, entry *queue
 }
 
 // enqueueEvent adds an event to the appropriate queue for the object
-func (qm *queueMap) enqueueEvent(oldObj, obj interface{}, oType reflect.Type, isDel bool, processFunc func(*event)) {
+func (qm *queueMap) enqueueEvent(oldObj, obj interface{}, oType reflect.Type, isDel bool, stopChan chan struct{}, processFunc func(*event)) {
 	key, entry := qm.getQueueMapEntry(oType, obj)
-	qm.queues[entry.queue] <- &event{
+	select {
+	case qm.queues[entry.queue] <- &event{
 		obj:    obj,
 		oldObj: oldObj,
 		process: func(e *event) {
 			processFunc(e)
 			qm.releaseQueueMapEntry(key, entry, isDel)
 		},
+	}:
+		// event queued
+	case <-stopChan:
 	}
 }
 
@@ -325,7 +331,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 	name := i.oType.Elem().Name()
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			i.queueMap.enqueueEvent(nil, obj, i.oType, false, func(e *event) {
+			i.queueMap.enqueueEvent(nil, obj, i.oType, false, i.stopChan, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "add").Inc()
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
@@ -335,7 +341,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 			})
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
-			i.queueMap.enqueueEvent(oldObj, newObj, i.oType, false, func(e *event) {
+			i.queueMap.enqueueEvent(oldObj, newObj, i.oType, false, i.stopChan, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "update").Inc()
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
@@ -350,7 +356,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 				klog.Errorf(err.Error())
 				return
 			}
-			i.queueMap.enqueueEvent(nil, realObj, i.oType, true, func(e *event) {
+			i.queueMap.enqueueEvent(nil, realObj, i.oType, true, i.stopChan, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "delete").Inc()
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
@@ -487,6 +493,7 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 	if err != nil {
 		return nil, err
 	}
+	i.stopChan = stopChan
 	i.queueMap = newQueueMap(numEventQueues, queueLen, &i.shutdownWg)
 	i.queueMap.start(stopChan)
 
@@ -502,7 +509,7 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		// Distribute the existing items into the handler-specific
 		// channel array.
 		for _, obj := range items {
-			addsMap.enqueueEvent(nil, obj, i.oType, false, func(e *event) {
+			addsMap.enqueueEvent(nil, obj, i.oType, false, i.stopChan, func(e *event) {
 				h.OnAdd(e.obj)
 			})
 		}
