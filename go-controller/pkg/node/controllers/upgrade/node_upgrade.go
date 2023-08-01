@@ -12,6 +12,8 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
@@ -77,66 +79,47 @@ func (uc *upgradeController) GetTopologyVersion(ctx context.Context) (int, error
 				ovntypes.OvnK8sStatusKeyTopoVersion, ns, name, tv, err)
 		}
 	}
-	return -1, fmt.Errorf("no %s value in ConfigMap %s/%s: %s %v",
-		ovntypes.OvnK8sStatusKeyTopoVersion, ns, name, tv, err)
 
-	//// Masters not yet upgraded, check Node objects
-	//klog.Infof("Could not determine TopologyVersion via configmap, falling back to Nodes")
-	//
-	//// node-role.kubernetes.io/master label was renamed node-role.kubernetes.io/control-plane
-	//// in kubernetes 1.24, so a KIND cluster will show the new label; however, Openshift 4.11
-	//// still uses the old label. Let's check for both until we fully migrate.
-	//masterNode, err := labels.NewRequirement("node-role.kubernetes.io/master", selection.Exists, nil)
-	//if err != nil {
-	//	klog.Fatalf("Unable to create labels.NewRequirement: %v", err)
-	//}
-	//nodes, err := uc.wf.ListNodes(labels.NewSelector().Add(*masterNode))
-	//if err != nil {
-	//	return -1, fmt.Errorf("unable to get nodes for checking topo version: %v", err)
-	//}
-	//if len(nodes) == 0 {
-	//	klog.Infof("No nodes found with old label node-role.kubernetes.io/master, " +
-	//		"now checking node-role.kubernetes.io/control-plane")
-	//	masterNode, err = labels.NewRequirement("node-role.kubernetes.io/control-plane",
-	//		selection.Exists, nil)
-	//	if err != nil {
-	//		klog.Fatalf("Unable to create labels.NewRequirement: %v", err)
-	//	}
-	//	nodes, err = uc.wf.ListNodes(labels.NewSelector().Add(*masterNode))
-	//	if err != nil {
-	//		return -1, fmt.Errorf("unable to get nodes for checking topo version: %v", err)
-	//	}
-	//	klog.Infof("%d nodes found with node-role.kubernetes.io/control-plane",
-	//		len(nodes))
-	//}
+	// Masters not yet upgraded, check Node objects
+	klog.Infof("Could not determine TopologyVersion via configmap, falling back to Nodes")
 
-	//ver := -1
-	//nodeName := ""
-	//// say, we have three ovnkube-master Pods. on rolling update, one of the Pods will
-	//// perform the topology/master upgrade and set the topology-version annotation for
-	//// that node. other ovnkube-master Pods will be in standby mode and wouldn't have
-	//// updated the annotation. so, we need to get the topology-version from all the
-	//// nodes and pick the maximum value.
-	//for _, node := range nodes {
-	//	topoVer, ok := node.Annotations[ovntypes.OvnK8sTopoAnno] //nolint:staticcheck
-	//	if ok && len(topoVer) > 0 {
-	//		v, err := strconv.Atoi(topoVer)
-	//		if err != nil {
-	//			klog.Warningf("Illegal value detected for %s, on node: %s, value: %s, error: %v",
-	//				ovntypes.OvnK8sTopoAnno, node.Name, topoVer, err) //nolint:staticcheck
-	//		} else {
-	//			if v > ver {
-	//				nodeName = node.Name
-	//				ver = v
-	//			}
-	//		}
-	//	}
-	//}
-	//
-	//if ver == -1 {
-	//	return -1, fmt.Errorf("could not find the topology annotation on Nodes")
-	//}
-	//
-	//klog.Infof("Detected cluster topology version %d from Node %s", ver, nodeName)
-	//return ver, nil
+	// ovnkube-master pods run on nodes that are labelled with `ngn2.nvidia.com/hosttype=NGN-MASTER`
+	masterNode, err := labels.NewRequirement("ngn2.nvidia.com/hosttype", selection.Equals, []string{"NGN-MASTER"})
+	if err != nil {
+		klog.Fatalf("Unable to create labels.NewRequirement: %v", err)
+	}
+	nodes, err := uc.wf.ListNodes(labels.NewSelector().Add(*masterNode))
+	if err != nil {
+		return -1, fmt.Errorf("unable to get nodes for checking topo version: %v", err)
+	}
+
+	ver := -1
+	nodeName := ""
+	// say, we have three ovnkube-master Pods. on rolling update, one of the Pods will
+	// perform the topology/master upgrade and set the topology-version annotation for
+	// that node. other ovnkube-master Pods will be in standby mode and wouldn't have
+	// updated the annotation. so, we need to get the topology-version from all the
+	// nodes and pick the maximum value.
+	for _, node := range nodes {
+		topoVer, ok := node.Annotations[ovntypes.OvnK8sTopoAnno] //nolint:staticcheck
+		if ok && len(topoVer) > 0 {
+			v, err := strconv.Atoi(topoVer)
+			if err != nil {
+				klog.Warningf("Illegal value detected for %s, on node: %s, value: %s, error: %v",
+					ovntypes.OvnK8sTopoAnno, node.Name, topoVer, err) //nolint:staticcheck
+			} else {
+				if v > ver {
+					nodeName = node.Name
+					ver = v
+				}
+			}
+		}
+	}
+
+	if ver == -1 {
+		return -1, fmt.Errorf("could not find the topology annotation on Nodes")
+	}
+
+	klog.Infof("Detected cluster topology version %d from Node %s", ver, nodeName)
+	return ver, nil
 }
