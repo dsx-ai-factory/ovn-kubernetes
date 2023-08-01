@@ -17,6 +17,7 @@ var (
 	ACLActionAllowStateless ACLAction    = "allow-stateless"
 	ACLActionDrop           ACLAction    = "drop"
 	ACLActionReject         ACLAction    = "reject"
+	ACLActionPass           ACLAction    = "pass"
 	ACLDirectionFromLport   ACLDirection = "from-lport"
 	ACLDirectionToLport     ACLDirection = "to-lport"
 	ACLSeverityAlert        ACLSeverity  = "alert"
@@ -40,6 +41,7 @@ type ACL struct {
 	Options     map[string]string `ovsdb:"options"`
 	Priority    int               `ovsdb:"priority"`
 	Severity    *ACLSeverity      `ovsdb:"severity"`
+	Tier        int               `ovsdb:"tier"`
 }
 
 func copyACLExternalIDs(a map[string]string) map[string]string {
@@ -148,6 +150,10 @@ func equalACLSeverity(a, b *ACLSeverity) bool {
 	return *a == *b
 }
 
+func (a *ACL) GetTier() int {
+	return a.Tier
+}
+
 func (a *ACL) DeepCopyInto(b *ACL) {
 	*b = *a
 	b.ExternalIDs = copyACLExternalIDs(a.ExternalIDs)
@@ -184,7 +190,8 @@ func (a *ACL) Equals(b *ACL) bool {
 		equalACLName(a.Name, b.Name) &&
 		equalACLOptions(a.Options, b.Options) &&
 		a.Priority == b.Priority &&
-		equalACLSeverity(a.Severity, b.Severity)
+		equalACLSeverity(a.Severity, b.Severity) &&
+		a.Tier == b.Tier
 }
 
 func (a *ACL) EqualsModel(b model.Model) bool {
