@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"strings"
 	"sync"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -644,6 +645,9 @@ func (jsIPManager *JoinSwitchIPManager) getJoinLRPAddresses(nodeName string) []*
 	// try to get the IPs from the logical router port
 	gwLRPIPs := []*net.IPNet{}
 	gwLrpName := types.GWRouterToJoinSwitchPrefix + util.GetClusterScopedName(types.GWRouterPrefix+nodeName)
+	if strings.HasSuffix(nodeName, types.OVNClusterRouter) {
+		gwLrpName = types.GWRouterToJoinSwitchPrefix + util.GetClusterScopedName(nodeName)
+	}
 	joinSubnets := jsIPManager.lsm.GetSwitchSubnets(util.GetOVNJoinSwitchName())
 	ifAddrs, err := util.GetLRPAddrs(jsIPManager.nbClient, gwLrpName)
 	if err == nil {
