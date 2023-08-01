@@ -1290,8 +1290,13 @@ func (oc *Controller) iterateRetryResources(r *retryObjs) {
 	}
 	r.retryMutex.Unlock()
 
+	if len(localRetryEntries) == 0 {
+		klog.V(6).Infof("No %s resources to retry", r.oType)
+		return
+	}
+
 	// Now process the above list of pods that need re-try by holding the lock for each one of them.
-	klog.V(5).Infof("Going to retry resource setup for %d number of resource", len(localRetryEntries))
+	klog.V(5).Infof("Going to retry resource setup for %d number of %s resource(s)", len(localRetryEntries), r.oType)
 
 	wg := &sync.WaitGroup{}
 	for _, objKey := range localRetryEntries {
@@ -1303,7 +1308,7 @@ func (oc *Controller) iterateRetryResources(r *retryObjs) {
 	}
 	klog.V(5).Infof("Waiting for all the %s retry setup to complete in iterateRetryResources", r.oType)
 	wg.Wait()
-	klog.V(5).Infof("Function iterateRetryResources ended (in %v)", time.Since(now))
+	klog.V(5).Infof("Function iterateRetryResources ended (in %v) for resource %s", time.Since(now), r.oType)
 }
 
 // periodicallyRetryResources tracks retryObjs and checks if any object needs to be retried for add or delete every
