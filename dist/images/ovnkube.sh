@@ -1052,10 +1052,6 @@ ovn-master() {
   wait_for_event ready_to_start_node
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
 
-  # wait for ovs-servers to start since ovn-master sets some fields in OVS DB
-  echo "=============== ovn-master - (wait for ovs)"
-  wait_for_event ovs_ready
-
   hybrid_overlay_flags=
   if [[ ${ovn_hybrid_overlay_enable} == "true" ]]; then
     hybrid_overlay_flags="--enable-hybrid-overlay"
