@@ -48,6 +48,20 @@ func (oc *Controller) setupLayer2Switch(switchName string) error {
 		return fmt.Errorf("failed to initialize %s switch IP manager for network %s: %v",
 			oc.nadInfo.TopoType, oc.nadInfo.NetName, err)
 	}
+	if oc.nadInfo.TopoType == types.Layer2AttachDefTopoType {
+		// for layer 2 network which is to be connected to a layer3 network, reserve its first IP in the subnet
+		// as gatewayIP
+		if oc.nadInfo.ConnectToNad != "" {
+			for _, hostSubnet := range hostSubnets {
+				gatewayIPnet := util.GetNodeGatewayIfAddr(hostSubnet)
+				// this IP may already be in the list of excluded subnets configured in the NAD.
+				// ErrAllocated will be returned when the list of ExcludeIPs are pre-reserved later,
+				// and that error needs to be ignored.
+				oc.nadInfo.ExcludeIPs = append(oc.nadInfo.ExcludeIPs, gatewayIPnet.IP)
+			}
+		}
+	}
+
 	for _, excludeIP := range oc.nadInfo.ExcludeIPs {
 		var ipMask net.IPMask
 		if excludeIP.To4() != nil {

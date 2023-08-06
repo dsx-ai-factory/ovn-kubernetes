@@ -396,18 +396,29 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 		// If present, then we need to add default route for it
 		podAnnotation.Gateways = append(podAnnotation.Gateways, network.GatewayRequest...)
 		for _, podIfAddr := range podAnnotation.IPs {
+			var gatewayIP net.IP
+
 			isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
-			// TBD localnet type does need this only for a temp workaround, to be removed.
-			nodeSubnet, err := util.MatchIPNetFamily(isIPv6, nodeSubnets)
-			if err != nil {
-				return err
+			if oc.nadInfo.TopoType == ovntypes.LocalnetAttachDefTopoType {
+				gatewayIP = net.ParseIP(oc.nadInfo.Gateway)
+				if utilnet.IsIPv6(gatewayIP) != isIPv6 {
+					return fmt.Errorf("no %s gateway IP value available for NAD %s", util.IPFamilyName(isIPv6),
+						oc.nadInfo.NetName)
+				}
 			}
-			gatewayIPnet := util.GetNodeGatewayIfAddr(nodeSubnet)
+			if gatewayIP == nil {
+				nodeSubnet, err := util.MatchIPNetFamily(isIPv6, nodeSubnets)
+				if err != nil {
+					return err
+				}
+				gatewayIPnet := util.GetNodeGatewayIfAddr(nodeSubnet)
+				gatewayIP = gatewayIPnet.IP
+			}
 			for _, clusterSubnet := range oc.clusterSubnets {
 				if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
 					podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
 						Dest:    clusterSubnet.CIDR,
-						NextHop: gatewayIPnet.IP,
+						NextHop: gatewayIP,
 					})
 				}
 			}
@@ -415,7 +426,7 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 				if isIPv6 == utilnet.IsIPv6CIDR(subnet) {
 					podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
 						Dest:    subnet,
-						NextHop: gatewayIPnet.IP,
+						NextHop: gatewayIP,
 					})
 				}
 			}

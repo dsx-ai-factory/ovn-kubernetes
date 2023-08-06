@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 const (
@@ -73,6 +74,14 @@ func GetNADNetConfig(netattachdef *nettypes.NetworkAttachmentDefinition, nadInfo
 	nadRoutesAnnot, ok := netattachdef.Annotations[NADRoutesAnnot]
 	if !ok {
 		return nil
+	}
+
+	if nadInfo.TopoType == types.LocalnetAttachDefTopoType && nadInfo.Gateway == "" {
+		return fmt.Errorf("missing Gateway config in the localnet NAD %s/%s", netattachdef.Namespace, netattachdef.Name)
+	}
+
+	if nadInfo.TopoType == types.Layer2AttachDefTopoType && nadInfo.ConnectToNad == "" {
+		return fmt.Errorf("missing connectToNAD config in the layer2 NAD %s/%s", netattachdef.Namespace, netattachdef.Name)
 	}
 
 	routeStrings := []string{}
