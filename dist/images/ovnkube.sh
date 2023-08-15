@@ -91,6 +91,7 @@ BASEDIR=$(dirname $0)
 # OVNKUBE_NODE_MODE - ovnkube node mode of operation, one of: full, dpu, dpu-host (default: full)
 # OVNKUBE_NODE_MGMT_PORT_INTF_NAME - Name of interface to be used as ovnkubernetes mgmt port (default: ovn-k8s-mp0)
 # OVNKUBE_NODE_MGMT_PORT_NETDEV - ovnkube node management port netdev.
+# REPRESENTOR_METERING_NODES - label key of nodes to determine if representor metering should be applied or not
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node. mandatory in case ovnkube-node-mode=="dpu"
 # OVN_HOST_NETWORK_NAMESPACE - namespace to classify host network traffic for applying network policies
 # OVN_ENCAP_TOS - set a TOS value for the outer header
@@ -352,6 +353,8 @@ ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
 ovnkube_node_mgmt_port_intf_name=${OVNKUBE_NODE_MGMT_PORT_INTF_NAME:-}
 # OVNKUBE_NODE_MGMT_PORT_NETDEV - is the net device to be used for management port
 ovnkube_node_mgmt_port_netdev=${OVNKUBE_NODE_MGMT_PORT_NETDEV:-}
+# REPRESENTOR_METERING_NODES - label key of nodes to determine if representor metering should be applied or not
+representor_metering_nodes=${REPRESENTOR_METERING_NODES:-"ngn2.nvidia.com/hosttype"}
 ovnkube_config_duration_enable=${OVNKUBE_CONFIG_DURATION_ENABLE:-false}
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node
 ovn_encap_ip=${OVN_ENCAP_IP:-}
@@ -1592,6 +1595,7 @@ ovn-node() {
 	  k8s_cluster_name_option="--cluster-name=${K8S_CLUSTER_NAME}"
   fi
 
+  representor_metering_nodes_flag=
   ovn_gateway_router_subnet_opt=
   ovn_xdp_opts=
   ovs_other_config_opts=
@@ -1654,6 +1658,10 @@ ovn-node() {
       --ovs-min-revalidate-pps=${OVS_MIN_REVALIDATE_PPS}
       --ovs-max-idle=${OVS_MAX_IDLE}
     "
+
+    if [[ ${representor_metering_nodes} != "" ]]; then
+      representor_metering_nodes_flag="--representor-metering-nodes=${representor_metering_nodes}"
+    fi
   fi
 
   if [[ ${ovnkube_node_mode} == "full" ]]; then
@@ -1738,6 +1746,7 @@ ovn-node() {
     ${egress_interface} \
     --host-network-namespace ${ovn_host_network_namespace} \
     ${ovnkube_node_mgmt_port_netdev_flag} \
+    ${representor_metering_nodes_flag} \
     ${ovn_xdp_opts} \
     ${ovs_other_config_opts} \
     ${ovnkube_node_mgmt_port_intf_name_flag} \

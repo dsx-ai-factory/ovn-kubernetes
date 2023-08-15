@@ -465,6 +465,9 @@ type OvnKubeNodeConfig struct {
 	MaxRevalidator       uint   `gcfg:"ovs-max-revalidator"`
 	MinRevalidatePPS     uint   `gcfg:"ovs-min-revalidate-pps"`
 	MaxIdle              uint   `gcfg:"ovs-max-idle"`
+	// RepresentorMeteringNodes is the node label whose value will be used
+	// to determine if representor metering feature will be applied or not
+	RepresentorMeteringNodes string `gcfg:"representor-metering-nodes"`
 }
 
 // OvnDBScheme describes the OVN database connection transport method
@@ -1398,6 +1401,11 @@ var OvnKubeNodeFlags = []cli.Flag{
 		Usage:       "the maximum time (in ms) that idle flows will remain cached in the datapath",
 		Value:       OvnKubeNode.MaxIdle,
 		Destination: &cliConfig.OvnKubeNode.MaxIdle,
+	},
+	&cli.StringFlag{
+		Name:        "representor-metering-nodes",
+		Usage:       "Specifies a label on nodes whose value will be used to determine if representor metering will be applied or not",
+		Destination: &cliConfig.OvnKubeNode.RepresentorMeteringNodes,
 	},
 }
 

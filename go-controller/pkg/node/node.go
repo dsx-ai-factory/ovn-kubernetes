@@ -41,7 +41,6 @@ import (
 
 const (
 	ovnSkipFirewalldAnnotationName = "k8s.ovn.org/skip-firewalld"
-	ngnHostTypeAnnotationName      = "ngn2.nvidia.com/hosttype"
 )
 
 // Special reserved values for k8s.ovn.org/miss-rl-config.
@@ -490,11 +489,8 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 	if nodeAddr == nil {
 		return fmt.Errorf("failed to parse kubernetes node IP address. %v", err)
 	}
-	if config.OvnKubeNode.Mode == types.NodeModeDPU {
-		if hostType, exists := node.Labels[ngnHostTypeAnnotationName]; !exists {
-			klog.Errorf("%s: annotation \"%s\" is required for dpu node", n.name, ngnHostTypeAnnotationName)
-			return fmt.Errorf("%s: annotation \"%s\" is required for dpu node", n.name, ngnHostTypeAnnotationName)
-		} else {
+	if config.OvnKubeNode.Mode == types.NodeModeDPU && config.OvnKubeNode.RepresentorMeteringNodes != "" {
+		if hostType, exists := node.Labels[config.OvnKubeNode.RepresentorMeteringNodes]; exists {
 			n.hostType = hostType
 		}
 	}
