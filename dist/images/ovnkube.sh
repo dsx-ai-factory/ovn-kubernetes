@@ -1548,9 +1548,18 @@ ovn-node() {
     fi
   fi
 
-  echo "=============== ovn-node - disable conntrack on geneve port $ovn_encap_port"
-  iptables -t raw -A PREROUTING -p udp --dport $ovn_encap_port -j NOTRACK
-  iptables -t raw -A OUTPUT -p udp --dport $ovn_encap_port -j NOTRACK
+  if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
+    # dpu-host mode doesn't require NOTRACK
+    echo "=============== ovn-node - disable conntrack on geneve port $ovn_encap_port"
+    iptables -t raw -C PREROUTING -p udp --dport $ovn_encap_port -j NOTRACK
+    if [[ $? != 0 ]]; then
+      iptables -t raw -A PREROUTING -p udp --dport $ovn_encap_port -j NOTRACK
+    fi
+    iptables -t raw -C OUTPUT -p udp --dport $ovn_encap_port -j NOTRACK
+    if [[ $? != 0 ]]; then
+      iptables -t raw -A OUTPUT -p udp --dport $ovn_encap_port -j NOTRACK
+    fi
+  fi
 
   ovnkube_node_mgmt_port_intf_name_flag=
   if [[ ${ovnkube_node_mgmt_port_intf_name} != "" ]]; then
