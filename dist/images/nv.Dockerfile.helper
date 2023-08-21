@@ -1,5 +1,5 @@
-OVS_VER=3.1.1.latest
-OVN_VER=23.06.latest
+OVS_VER=3.1.2.latest
+OVN_VER=23.06.0.latest
 # These vars hints the CICD to use the latest OVS/OVN versions 
 # To use a specific version state that specificaly, for example:
 #OVS_VER=3.1.1.fa9bdb3c.d7423ea2
