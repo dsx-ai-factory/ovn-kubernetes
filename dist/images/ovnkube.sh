@@ -354,7 +354,7 @@ ovnkube_node_mgmt_port_intf_name=${OVNKUBE_NODE_MGMT_PORT_INTF_NAME:-}
 # OVNKUBE_NODE_MGMT_PORT_NETDEV - is the net device to be used for management port
 ovnkube_node_mgmt_port_netdev=${OVNKUBE_NODE_MGMT_PORT_NETDEV:-}
 # REPRESENTOR_METERING_NODES - label key of nodes to determine if representor metering should be applied or not
-representor_metering_nodes=${REPRESENTOR_METERING_NODES:-"ngn2.nvidia.com/hosttype"}
+representor_metering_nodes=${REPRESENTOR_METERING_NODES}
 ovnkube_config_duration_enable=${OVNKUBE_CONFIG_DURATION_ENABLE:-false}
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node
 ovn_encap_ip=${OVN_ENCAP_IP:-}

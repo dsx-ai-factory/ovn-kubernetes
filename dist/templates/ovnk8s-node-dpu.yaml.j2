@@ -214,6 +214,8 @@ spec:
           value: "{{ ovs_max_idle }}"
         - name: OVNKUBE_DISABLE_OVS_METRICS
           value: "{{ disable_ovs_metrics }}"
+        - name: REPRESENTOR_METERING_NODES
+          value: ngn2.nvidia.com/hosttype
 
       volumes:
       - name: sysfs
