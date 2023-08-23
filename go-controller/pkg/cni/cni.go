@@ -3,8 +3,10 @@ package cni
 import (
 	"fmt"
 	"net"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
@@ -21,6 +23,9 @@ var (
 	minRsrc           = resource.MustParse("1k")
 	maxRsrc           = resource.MustParse("1P")
 	BandwidthNotFound = &notFoundError{}
+
+	netDevPollTimeout  = 5 * time.Second
+	netDevPollInterval = 200 * time.Millisecond
 )
 
 type direction int
@@ -101,11 +106,15 @@ func (pr *PodRequest) getNetdevName() (string, error) {
 	var netdevices []string
 	var err error
 	deviceID := pr.CNIConf.DeviceID
-	if util.IsPCIDeviceName(deviceID) {
-		netdevices, err = util.GetSriovnetOps().GetNetDevicesFromPci(deviceID)
-	} else {
-		netdevices, err = util.GetSriovnetOps().GetNetDevicesFromAux(deviceID)
-	}
+	err = wait.PollImmediate(netDevPollInterval, netDevPollTimeout, func() (bool, error) {
+		var localError error
+		if util.IsPCIDeviceName(deviceID) {
+			netdevices, localError = util.GetSriovnetOps().GetNetDevicesFromPci(deviceID)
+		} else {
+			netdevices, localError = util.GetSriovnetOps().GetNetDevicesFromAux(deviceID)
+		}
+		return len(netdevices) != 0, localError
+	})
 	if err != nil {
 		return "", err
 	}
