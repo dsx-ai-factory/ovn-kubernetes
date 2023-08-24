@@ -180,7 +180,7 @@ func doPodFlowsExist(mac string, ifAddrs []*net.IPNet, ofPort int) bool {
 			match: "dl_src=" + mac,
 			// ingress pipeline starts with table 8, if mac shows up here,
 			// it means the ovn-controller has claimed port
-			tables: []int{8},
+			tables: []int{8, 73},
 		},
 		{
 			match:  fmt.Sprintf("in_port=%d", ofPort),
@@ -197,8 +197,9 @@ func doPodFlowsExist(mac string, ifAddrs []*net.IPNet, ofPort int) bool {
 		// add queries for out_port_security
 		// note we need to support table 48 for 20.06 OVN backwards compatibility. Table 49 is now
 		// where out_port_security lives
+		// OVN 23.06, table number is 75.
 		queries = append(queries,
-			query{fmt.Sprintf("%s=%s", ipMatch, ifAddr.IP), []int{48, 49}},
+			query{fmt.Sprintf("%s=%s", ipMatch, ifAddr.IP), []int{48, 49, 75}},
 		)
 	}
 
