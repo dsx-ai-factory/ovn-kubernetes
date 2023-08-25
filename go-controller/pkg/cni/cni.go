@@ -105,6 +105,7 @@ func (pr *PodRequest) getNetdevName() (string, error) {
 
 	var netdevices []string
 	var err error
+	retries := 0
 	deviceID := pr.CNIConf.DeviceID
 	err = wait.PollImmediate(netDevPollInterval, netDevPollTimeout, func() (bool, error) {
 		var localError error
@@ -113,6 +114,7 @@ func (pr *PodRequest) getNetdevName() (string, error) {
 		} else {
 			netdevices, localError = util.GetSriovnetOps().GetNetDevicesFromAux(deviceID)
 		}
+		retries++
 		return len(netdevices) != 0, localError
 	})
 	if err != nil {
@@ -121,8 +123,9 @@ func (pr *PodRequest) getNetdevName() (string, error) {
 
 	// Make sure we have 1 netdevice per pci address
 	if len(netdevices) != 1 {
-		return "", fmt.Errorf("failed to get one netdevice interface per %s", pr.CNIConf.DeviceID)
+		return "", fmt.Errorf("failed to get one netdevice interface for %s after %d retries", pr.CNIConf.DeviceID, retries)
 	}
+	klog.V(6).Infof("Found netdev %s after %d retries", netdevices[0], retries)
 	return netdevices[0], nil
 }
 
