@@ -2302,14 +2302,6 @@ func (a *OvnAuthConfig) updateIP(newIPs []string, port string) {
 	a.Address = strings.Join(newAddresses, ",")
 }
 
-// UpdateOVNNodeAuth updates the host and URL in ClientAuth
-// for both OvnNorth and OvnSouth. It updates them with the new masterIP.
-func UpdateOVNNodeAuth(masterIP []string, southboundDBPort, northboundDBPort string) {
-	klog.V(5).Infof("Update OVN node auth with new master ip: %s", masterIP)
-	OvnNorth.updateIP(masterIP, northboundDBPort)
-	OvnSouth.updateIP(masterIP, southboundDBPort)
-}
-
 // ovnKubeNodeModeSupported validates the provided mode is supported by ovnkube node
 func ovnKubeNodeModeSupported(mode string) error {
 	found := false
