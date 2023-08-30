@@ -2294,14 +2294,6 @@ func (a *OvnAuthConfig) SetDBAuth() error {
 	return nil
 }
 
-func (a *OvnAuthConfig) updateIP(newIPs []string, port string) {
-	newAddresses := make([]string, 0, len(newIPs))
-	for _, ipAddress := range newIPs {
-		newAddresses = append(newAddresses, fmt.Sprintf("%v:%s", a.Scheme, net.JoinHostPort(ipAddress, port)))
-	}
-	a.Address = strings.Join(newAddresses, ",")
-}
-
 // ovnKubeNodeModeSupported validates the provided mode is supported by ovnkube node
 func ovnKubeNodeModeSupported(mode string) error {
 	found := false
