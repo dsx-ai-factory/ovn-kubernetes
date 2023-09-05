@@ -907,3 +907,24 @@ spec:
       annotations:
        message: |
          sdn-mutator/ {{ $labels.pod }} pod vault-agent container is in not running state
+         
+    - alert: SdnMutatorContainerNotReady
+      expr: |
+        kube_pod_container_status_ready{namespace="sdn-mutator", container="mutator"} and
+        (kube_pod_container_status_ready{namespace="sdn-mutator", container="mutator"} ! = 1)
+      for: 5m
+      labels:
+       severity: major
+      annotations:
+       message: |
+         sdn-mutator/ {{ $labels.pod }} pod mutator container is in not ready state
+
+    - alert: AllSdnMutatorContainersNotReady
+      expr: |
+        sum(kube_pod_container_status_ready{namespace="sdn-mutator", container="mutator"}) == 0
+      for: 5m
+      labels:
+       severity: critical
+      annotations:
+       message: |
+         All sdn-mutator pods are in not ready state
