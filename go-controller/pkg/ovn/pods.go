@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -301,7 +302,7 @@ func (oc *Controller) delLogicalPort4Nad(pod *kapi.Pod, nadName, expectedswitchN
 		// Since portInfo is not available, use ovn to locate the logical switch (named after the node name) for the logical port.
 		portUUID, switchName, err = oc.lookupPortUUIDAndSwitchName(logicalPort)
 		if err != nil {
-			if err != libovsdbclient.ErrNotFound {
+			if !errors.Is(err, libovsdbclient.ErrNotFound) {
 				return fmt.Errorf("unable to locate portUUID+nodeName for pod %s/%s: %w", pod.Namespace, pod.Name, err)
 			}
 			// The logical port no longer exists in OVN. The caller expects this function to be idem-potent,
@@ -726,10 +727,10 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, logicalSwitch s
 		Name: portName,
 	}
 	existingLSP, err := libovsdbops.GetLogicalSwitchPort(oc.mc.nbClient, lsp)
-	if err != nil && err != libovsdbclient.ErrNotFound {
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return fmt.Errorf("unable to get the lsp %s from the nbdb: %s", portName, err)
 	}
-	lspExist = err != libovsdbclient.ErrNotFound
+	lspExist = !errors.Is(err, libovsdbclient.ErrNotFound)
 
 	// Sanity check. If port exists, it should be in the logical switch obtained from the pod spec.
 	if lspExist {

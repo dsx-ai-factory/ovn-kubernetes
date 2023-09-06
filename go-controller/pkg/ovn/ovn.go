@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"reflect"
@@ -1022,7 +1023,7 @@ func (oc *Controller) WatchAdminPolicyBasedRoutes() error {
 	if !oc.nadInfo.IsSecondary {
 		// delete logical router policies created by egressip since they would block rerouting between pods
 		err := oc.deleteLogicalRouterPoliciesByPriority(ovntypes.DefaultNoRereoutePriority)
-		if err != nil && err != libovsdbclient.ErrNotFound {
+		if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 			return fmt.Errorf("failed to clean up egressip default noreroute policies: %v", err)
 		}
 		if err := oc.noRerouteToJoinSubnet(); err != nil {

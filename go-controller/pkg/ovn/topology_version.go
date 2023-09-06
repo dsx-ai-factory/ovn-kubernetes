@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -132,10 +133,10 @@ func (oc *Controller) determineOVNTopoVersionFromOVN() (int, error) {
 	if oc.nadInfo.TopoType != ovntypes.LocalnetAttachDefTopoType && oc.nadInfo.TopoType != ovntypes.Layer2AttachDefTopoType {
 		logicalRouter := &nbdb.LogicalRouter{Name: util.GetOVNClusterRouterName(oc.nadInfo.Prefix)}
 		logicalRouter, err := libovsdbops.GetLogicalRouter(oc.mc.nbClient, logicalRouter)
-		if err != nil && err != libovsdbclient.ErrNotFound {
+		if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 			return 0, fmt.Errorf("error getting router %s: %v", logicalRouter.Name, err)
 		}
-		if err == libovsdbclient.ErrNotFound {
+		if errors.Is(err, libovsdbclient.ErrNotFound) {
 			// no OVNClusterRouter exists, DB is empty, nothing to upgrade
 			return math.MaxInt32, nil
 		}
@@ -151,10 +152,10 @@ func (oc *Controller) determineOVNTopoVersionFromOVN() (int, error) {
 		l2Switch = util.GetClusterScopedName(l2Switch)
 		logicalSwitch := &nbdb.LogicalSwitch{Name: l2Switch}
 		logicalSwitch, err := libovsdbops.GetLogicalSwitch(oc.mc.nbClient, logicalSwitch)
-		if err != nil && err != libovsdbclient.ErrNotFound {
+		if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 			return 0, fmt.Errorf("error getting switch %s: %v", logicalSwitch.Name, err)
 		}
-		if err == libovsdbclient.ErrNotFound {
+		if errors.Is(err, libovsdbclient.ErrNotFound) {
 			// no localnetSwitch exists, DB is empty, nothing to upgrade
 			return math.MaxInt32, nil
 		}

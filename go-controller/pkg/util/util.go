@@ -517,7 +517,7 @@ func UpdateNodeSwitchExcludeIPs(nbClient libovsdbclient.Client, nodeName string,
 	haveManagementPort := true
 	managmentPort := &nbdb.LogicalSwitchPort{Name: GetClusterScopedName(types.K8sPrefix + nodeName)}
 	_, err := libovsdbops.GetLogicalSwitchPort(nbClient, managmentPort)
-	if err == libovsdbclient.ErrNotFound {
+	if errors.Is(err, libovsdbclient.ErrNotFound) {
 		klog.V(5).Infof("Management port does not exist for node %s", nodeName)
 		haveManagementPort = false
 	} else if err != nil {
@@ -527,7 +527,7 @@ func UpdateNodeSwitchExcludeIPs(nbClient libovsdbclient.Client, nodeName string,
 	haveHybridOverlayPort := true
 	HOPort := &nbdb.LogicalSwitchPort{Name: GetClusterScopedName(types.HybridOverlayPrefix + nodeName)}
 	_, err = libovsdbops.GetLogicalSwitchPort(nbClient, HOPort)
-	if err == libovsdbclient.ErrNotFound {
+	if errors.Is(err, libovsdbclient.ErrNotFound) {
 		klog.V(5).Infof("Hybridoverlay port does not exist for node %s", nodeName)
 		haveHybridOverlayPort = false
 	} else if err != nil {

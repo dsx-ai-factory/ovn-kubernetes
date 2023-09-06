@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -24,7 +25,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	corev1 "k8s.io/api/core/v1"
 	kapi "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/cache"
 	ref "k8s.io/client-go/tools/reference"
@@ -362,11 +363,11 @@ func (oc *Controller) removeVirtualIPFromPodPortSecurity(vipAddress string, port
 
 	lsp := &nbdb.LogicalSwitchPort{Name: portName}
 	podLSP, err := libovsdbops.GetLogicalSwitchPort(oc.mc.nbClient, lsp)
-	if err != nil && err != libovsdbclient.ErrNotFound {
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return fmt.Errorf("failed to get logical switch port %s info from NB DB (%v)", portName, err)
 	}
 	// if we don't find the lsp it means it might have deleted before so just return
-	if err == libovsdbclient.ErrNotFound {
+	if errors.Is(err, libovsdbclient.ErrNotFound) {
 		return nil
 	}
 
@@ -486,7 +487,7 @@ func (oc *Controller) handleVIPPodAdd(vip *virtualIP, pod *kapi.Pod) error {
 
 		// check whether this pod exists when this pod addition to virtualIP is retried
 		if _, err := oc.mc.watchFactory.GetPod(pod.Namespace, pod.Name); err != nil {
-			if errors.IsNotFound(err) {
+			if apierrors.IsNotFound(err) {
 				klog.Infof("Stop retrying pod addition %s/%s as it does not exist", pod.Namespace, pod.Name)
 				return nil
 			} else {
@@ -648,7 +649,7 @@ func (oc *Controller) createVIP(vip *virtualIP) error {
 	vip.logicalPortName = getVirtualPortName(vip.namespace, vip.name)
 	lsp := &nbdb.LogicalSwitchPort{Name: vip.logicalPortName}
 	_, err = libovsdbops.GetLogicalSwitchPort(oc.mc.nbClient, lsp)
-	if err != nil && err != libovsdbclient.ErrNotFound {
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return fmt.Errorf("failed while checking for existence of virtual port %s in the NB DB: (%v)",
 			vip.logicalPortName, err)
 	}
@@ -700,7 +701,7 @@ func (oc *Controller) addVirtualIP(virtIP *virtualipv1beta1.VirtualIP) error {
 		// check if the virtualIP exists when virtualIP creation in OVN is retried
 		if _, err := oc.mc.watchFactory.GetVirtualIP(virtIP.Namespace, virtIP.Name); err != nil {
 			var updatedErr error
-			if errors.IsNotFound(err) {
+			if apierrors.IsNotFound(err) {
 				klog.Infof("Stop retrying virtualIP %s/%s as it does not exist", virtIP.Namespace, virtIP.Name)
 			} else {
 				errMsg := fmt.Sprintf("Failed to retrieve virtualIP %s from cache", virtualIPKey)
@@ -885,7 +886,7 @@ func (oc *Controller) syncVirtualIPsPeriodic() {
 		unlock := util.LockByKey.Acquire(getVirtualIPLockKey(nadName, vipAddress))
 
 		virtIP, err := oc.mc.watchFactory.GetVirtualIP(vipNamespace, vipName)
-		if err != nil && !errors.IsNotFound(err) {
+		if err != nil && !apierrors.IsNotFound(err) {
 			// skip this virtualIP sync in this round
 			klog.Errorf("Failed to get virtualIP %s/%s from informer cache: (%v)",
 				virtIP.Namespace, virtIP.Name, err)

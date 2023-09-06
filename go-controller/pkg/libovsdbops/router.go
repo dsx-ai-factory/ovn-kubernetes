@@ -2,6 +2,7 @@ package libovsdbops
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"net"
@@ -412,7 +413,7 @@ func DeleteNextHopsFromLogicalRouterPolicies(nbClient libovsdbclient.Client, rou
 	for _, lrp := range lrps {
 		nextHops := lrp.Nexthops
 		lrp, err := GetLogicalRouterPolicy(nbClient, lrp)
-		if err == libovsdbclient.ErrNotFound {
+		if errors.Is(err, libovsdbclient.ErrNotFound) {
 			continue
 		}
 		if err != nil {
@@ -941,7 +942,7 @@ func CreateOrUpdateNATs(nbClient libovsdbclient.Client, router *nbdb.LogicalRout
 // logical router and returns the corresponding ops
 func DeleteNATsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, router *nbdb.LogicalRouter, nats ...*nbdb.NAT) ([]libovsdb.Operation, error) {
 	routerNats, err := getRouterNATs(nbClient, router)
-	if err == libovsdbclient.ErrNotFound {
+	if errors.Is(err, libovsdbclient.ErrNotFound) {
 		return ops, nil
 	}
 	if err != nil {

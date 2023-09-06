@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -65,7 +66,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 	// so let's save the old value before we update the router for later use
 	var oldExtIPs []net.IP
 	oldLogicalRouter, err := libovsdbops.GetLogicalRouter(oc.mc.nbClient, &logicalRouter)
-	if err != nil && err != libovsdbclient.ErrNotFound {
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return fmt.Errorf("failed in retrieving %s, error: %v", gatewayRouter, err)
 	}
 

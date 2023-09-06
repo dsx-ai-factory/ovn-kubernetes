@@ -274,8 +274,8 @@ func (m *modelClient) buildOps(ops []ovsdb.Operation, doWhenFound opModelToOpMap
 	for _, opModel := range opModels {
 		// do lookup
 		err := m.lookup(&opModel)
-		if err != nil && err != client.ErrNotFound {
-			return nil, nil, fmt.Errorf("unable to lookup model %+v: %v", opModel, err)
+		if err != nil && !errors.Is(err, client.ErrNotFound) {
+			return nil, nil, fmt.Errorf("unable to lookup model %+v: %w", opModel, err)
 		}
 
 		// do updates
@@ -339,7 +339,7 @@ func (m *modelClient) create(opModel *operationModel) ([]ovsdb.Operation, error)
 
 	ops, err := m.client.Create(opModel.Model)
 	if err != nil {
-		return nil, fmt.Errorf("unable to create model, err: %v", err)
+		return nil, fmt.Errorf("unable to create model, err: %w", err)
 	}
 
 	klog.V(5).Infof("Create operations generated as: %+v", ops)
@@ -349,7 +349,7 @@ func (m *modelClient) create(opModel *operationModel) ([]ovsdb.Operation, error)
 func (m *modelClient) update(lookUpModel interface{}, opModel *operationModel) (o []ovsdb.Operation, err error) {
 	o, err = m.client.Where(lookUpModel).Update(opModel.Model, opModel.OnModelUpdates...)
 	if err != nil {
-		return nil, fmt.Errorf("unable to update model, err: %v", err)
+		return nil, fmt.Errorf("unable to update model, err: %w", err)
 	}
 	klog.V(5).Infof("Update operations generated as: %+v", o)
 	return o, nil
@@ -365,7 +365,7 @@ func (m *modelClient) mutate(lookUpModel interface{}, opModel *operationModel, m
 	}
 	o, err = m.client.Where(lookUpModel).Mutate(opModel.Model, modelMutations...)
 	if err != nil {
-		return nil, fmt.Errorf("unable to mutate model, err: %v", err)
+		return nil, fmt.Errorf("unable to mutate model, err: %w", err)
 	}
 	klog.V(5).Infof("Mutate operations generated as: %+v", o)
 	return o, nil
@@ -374,7 +374,7 @@ func (m *modelClient) mutate(lookUpModel interface{}, opModel *operationModel, m
 func (m *modelClient) delete(lookUpModel interface{}, opModel *operationModel) (o []ovsdb.Operation, err error) {
 	o, err = m.client.Where(lookUpModel).Delete()
 	if err != nil {
-		return nil, fmt.Errorf("unable to delete model, err: %v", err)
+		return nil, fmt.Errorf("unable to delete model, err: %w", err)
 	}
 	klog.V(5).Infof("Delete operations generated as: %+v", o)
 	return o, nil
