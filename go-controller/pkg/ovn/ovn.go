@@ -782,7 +782,9 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) error {
 
 	if util.PodWantsNetwork(pod) && addPort {
 		if err := oc.addLogicalPort(pod); err != nil {
-			return fmt.Errorf("addLogicalPort failed for %s/%s network %s: %w", pod.Namespace, pod.Name, oc.nadInfo.NetName, err)
+			failure := fmt.Errorf("addLogicalPort failed for %s/%s network %s: %w", pod.Namespace, pod.Name, oc.nadInfo.NetName, err)
+			oc.recordPodEvent("ErrorAddLogicalPort", failure, pod)
+			return failure
 		}
 	} else {
 		if portSecurityAnnotationChanged(oldPod, pod) {
