@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"reflect"
-	"strings"
 	"time"
 
 	ipreservation "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
@@ -273,20 +272,6 @@ func (oc *Controller) WatchIPReservations() error {
 					return
 				}
 
-				// ensure that the namespace of the IPReservation object is same as that of the networkAttachmentDefinition name.
-				// this is to ensure that an user cannot reserve IPs in an another namespace to which she/he doesn't have access
-				// to
-				if resvIPObj.Namespace != strings.Split(resvIPObj.Spec.NetworkAttachmentName, "/")[0] {
-					err := fmt.Errorf("the namespace of the Network Attachment Definition should be same as that of the IPreservation " +
-						"object for security purposes")
-					klog.Errorf(err.Error())
-					tmpErr := oc.updateIPReservationStatusWithRetry(resvIPObj.Namespace, resvIPObj.Name, ovntypes.OvnK8sStatusFailed,
-						[]string{err.Error()}, nil)
-					if tmpErr != nil {
-						klog.Errorf(tmpErr.Error())
-					}
-					return
-				}
 				unlock := util.LockByKey.Acquire(getIPReservationLockKey(resvIPObj))
 				defer unlock()
 				err := oc.addIPReservation(resvIPObj)
