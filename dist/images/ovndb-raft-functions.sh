@@ -267,6 +267,68 @@ ovsdb_cleanup() {
   exit 0
 }
 
+ovsdb_ensure_schema() {
+  local db=${1}
+  local election_timer=$(( ${2} / 1000 ))
+  local DB_SOCK=unix:${OVN_RUNDIR}/ovn${db}_db.sock
+  local DB_SCHEMA=/usr/share/ovn/ovn-${db}.ovsschema
+  local schema_need_upgrade="true"
+  local database
+  local retries=0
+  if [[ ${db} == "nb" ]]; then
+    database="OVN_Northbound"
+  else
+    database="OVN_Southbound"
+  fi
+
+  while [[ "${schema_need_upgrade}" == "true" ]]; do
+    db_version=$(ovsdb-client get-schema-version ${DB_SOCK} ${database} 2>&1)
+    if [[ -z "${db_version}" ]]; then
+      echo "Failed to get ${database} current schema version. Will retry..."
+      sleep 1
+      continue
+    fi
+    target_version=$(ovsdb-tool schema-version "${DB_SCHEMA}" 2>&1)
+    if [[ -z "${target_version}" ]]; then
+      echo "Failed to get ${database} target schema version. exiting..."
+      exit 1
+    fi
+    if ovsdb-tool compare-versions "$db_version" "<" "$target_version"; then
+      current_raft_role=$(ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl cluster/status ${database} 2>&1 | grep "^Role: ")
+      if [[ -z "${current_raft_role}" ]]; then
+        echo "Failed to get current raft role value. Will retry..."
+        sleep 1
+        continue
+      fi
+      if echo "${current_raft_role}" | grep -q -i leader; then
+        start_time=$(date +%s)
+        error_message=$(ovsdb-client convert ${DB_SOCK} ${DB_SCHEMA} 2>&1)
+        return_value=$?
+        end_time=$(date +%s)
+        elapsed_time=$((end_time - start_time))
+        if [ $return_value -eq 0 ]; then
+          schema_need_upgrade="false"
+          echo "$(date +'%Y-%m-%dT%H:%M:%SZ') Upgrading database ${database} from schema version ${db_version} to ${target_version} took ${elapsed_time} seconds"
+        else
+          ((retries += 1))
+          echo "error: Upgrading database ${database} from schema version ${db_version} to ${target_version} failed, took ${elapsed_time} seconds"
+          echo "${error_message}"
+          if [ "$retries" -eq 10 ]; then
+            echo "failed to upgrade database in 10 times. exiting..."
+            exit 1
+          fi
+          sleep 1
+        fi
+      else
+        echo "Waiting leader to upgrade database ${database} from schema version ${db_version} to ${target_version}"
+        sleep ${election_timer}
+      fi
+    else
+      schema_need_upgrade="false"
+    fi
+  done
+}
+
 # v3 - create nb_ovsdb/sb_ovsdb cluster in a separate container
 ovsdb-raft() {
   local db=${1}
@@ -435,6 +497,12 @@ ovsdb-raft() {
   else
     set_leader_xfer_for_snapshot ${db} ${OVN_SB_ENABLE_LEADER_XFER_FOR_SNAPSHOT}
   fi
+
+  # ensure ovsdb schema match
+  # wait for rolling update finish and all client reconnect
+  sleep 300
+  echo "=============== ensure ${db}_ovsdb-raft schema match =========="
+  ovsdb_ensure_schema ${db} ${election_timer}
 
   tail --follow=name ${OVN_LOGDIR}/ovsdb-server-${db}.log &
   ovn_tail_pid=$!
