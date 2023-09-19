@@ -66,6 +66,16 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 			if err == nil {
 				logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name, nadName, !oc.nadInfo.IsSecondary)
 				expectedLogicalPorts[logicalPort] = true
+				if len(annotations.IPs) == 0 {
+					if skipIPAM := util.SkipIPAMForNAD(pod.Annotations, annoNadKeyName); skipIPAM {
+						klog.Infof("skip-ipam annotation is applied for pod: %s/%s, IP allocation is not needed",
+							pod.Namespace, pod.Name)
+						continue
+					} else {
+						// unknown condition how we are getting Pod annotation with no IPs
+						return fmt.Errorf("no IP in pod annotation for pod %s/%s", pod.Namespace, pod.Name)
+					}
+				}
 				// it is possible to try to add a pod here that has no node. For example if a pod was deleted with
 				// a finalizer, and then the node was removed. In this case the pod will still exist in a running state.
 				// Terminating pods should still have network connectivity for pre-stop hooks or termination grace period
