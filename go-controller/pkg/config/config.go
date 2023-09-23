@@ -2036,10 +2036,6 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
-	if err := validateMgmtPortConfig(); err != nil {
-		return "", fmt.Errorf("management device/interface configuration error: %v", err)
-	}
-
 	tmpAuth, err := buildOvnAuth(exec, true, &cliConfig.OvnNorth, &cfg.OvnNorth, defaults.OvnNorthAddress)
 	if err != nil {
 		return "", err
