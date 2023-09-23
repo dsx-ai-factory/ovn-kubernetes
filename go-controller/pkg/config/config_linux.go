@@ -11,11 +11,12 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
-// validateMgmtPortConfig validates the existence of MgmtPortNetdev for:
-//	 - primary DPU node
-//	 - DPU-host node
-//	 - full mode node when MgmtPortNetdev is configured
-func validateMgmtPortConfig() error {
+// ValidateConfig validates the configuration
+func ValidateConfig() error {
+	// validates existence of MgmtPortNetdev for:
+	//	 - primary DPU node
+	//	 - DPU-host node
+	//	 - full mode node when MgmtPortNetdev is configured
 	if (OvnKubeNode.Mode == types.NodeModeDPU && OvnKubeNode.IsPrimaryDPU) ||
 		(OvnKubeNode.Mode != types.NodeModeDPU && OvnKubeNode.MgmtPortNetdev != "") {
 		// management port device may already be renamed to sepcifiec interface name

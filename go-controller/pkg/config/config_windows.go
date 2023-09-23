@@ -3,10 +3,7 @@
 
 package config
 
-// validateMgmtPortConfig validates the existence of MgmtPortNetdev for:
-//	 - primary DPU node
-//	 - DPU-host node
-//	 - full mode node when MgmtPortNetdev is configured
-func validateMgmtPortConfig() error {
+// ValidateConfig validates the configuration
+func ValidateConfig() error {
 	return nil
 }
