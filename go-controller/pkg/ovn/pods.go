@@ -479,10 +479,12 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 
 			isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
 			if oc.nadInfo.TopoType == ovntypes.LocalnetAttachDefTopoType {
-				gatewayIP = net.ParseIP(oc.nadInfo.Gateway)
-				if utilnet.IsIPv6(gatewayIP) != isIPv6 {
-					return fmt.Errorf("no %s gateway IP value available for NAD %s", util.IPFamilyName(isIPv6),
-						oc.nadInfo.NetName)
+				if oc.nadInfo.Gateway != "" {
+					gatewayIP = net.ParseIP(oc.nadInfo.Gateway)
+					if utilnet.IsIPv6(gatewayIP) != isIPv6 {
+						return fmt.Errorf("no %s gateway IP value available for NAD %s", util.IPFamilyName(isIPv6),
+							oc.nadInfo.NetName)
+					}
 				}
 			}
 			if gatewayIP == nil {
