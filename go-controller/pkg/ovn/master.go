@@ -204,7 +204,8 @@ func (mc *OvnMHController) disableOVNCTInvalidFlows() error {
 // Upon deletion of a node, the switch will be deleted
 //
 // TODO: Verify that the cluster was not already called with a different global subnet
-//  If true, then either quit or perform a complete reconfiguration of the cluster (recreate switches/routers with new subnet values)
+//
+//	If true, then either quit or perform a complete reconfiguration of the cluster (recreate switches/routers with new subnet values)
 func (oc *Controller) StartClusterMaster() error {
 	klog.Infof("Starting cluster master for network %s", oc.nadInfo.NetName)
 
@@ -860,6 +861,7 @@ func (oc *Controller) updateNodeAnnotationWithRetry(nodeName string, hostSubnets
 			return err
 		}
 
+		updateNodeAnno := false
 		cnode := node.DeepCopy()
 		if !oc.nadInfo.IsSecondary {
 			gwLRPIPs, err := oc.joinSwIPManager.EnsureJoinLRPIPs(nodeName)
@@ -879,16 +881,21 @@ func (oc *Controller) updateNodeAnnotationWithRetry(nodeName string, hostSubnets
 				return fmt.Errorf("failed to marshal node %q annotation for Gateway LRP IP %v",
 					node.Name, gwLRPIPs)
 			}
+			updateNodeAnno = true
 		}
 		err = util.UpdateNodeHostSubnetAnnotation(cnode.Annotations, hostSubnets, oc.nadInfo.NetName)
-		if err != nil {
-			if util.IsAnnotationAlreadySetError(err) {
-				return nil
+		if err == nil {
+			updateNodeAnno = true
+		} else {
+			if !util.IsAnnotationAlreadySetError(err) {
+				return fmt.Errorf("failed to update node %q annotation for network %s subnet %s",
+					node.Name, oc.nadInfo.NetName, util.JoinIPNets(hostSubnets, ","))
 			}
-			return fmt.Errorf("failed to update node %q annotation for network %s subnet %s",
-				node.Name, oc.nadInfo.NetName, util.JoinIPNets(hostSubnets, ","))
 		}
-		return oc.mc.kube.UpdateNode(cnode)
+		if updateNodeAnno {
+			return oc.mc.kube.UpdateNode(cnode)
+		}
+		return nil
 	})
 	if resultErr != nil {
 		return fmt.Errorf("failed to update node %s annotation for network %s", nodeName, oc.nadInfo.NetName)
