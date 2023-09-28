@@ -413,7 +413,6 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 				gomega.Expect(err).To(gomega.BeNil())
 				_, err = fakeOvn.nbClient.Transact(context.TODO(), ops...)
 				gomega.Expect(err).To(gomega.BeNil())
-				ginkgo.By(fmt.Sprintf("Cathy expect 1 LogicalRouterPolicy of %s external-ids to be %s", ovntypes.ExternalIDK8sOwner, util.NamespacedName(pbr)))
 				gomega.Eventually(func() []nbdb.LogicalRouterPolicy {
 					policies := []nbdb.LogicalRouterPolicy{}
 					err := fakeOvn.controller.mc.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {

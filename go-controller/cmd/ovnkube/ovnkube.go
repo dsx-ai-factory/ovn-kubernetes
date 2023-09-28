@@ -14,6 +14,7 @@ import (
 	"text/template"
 	"time"
 
+	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 
@@ -330,9 +331,10 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 					metrics.RegisterOvsMetricsWithOvnMetrics(node, ovsDBClient, config.MetricsScrapeInterval, stopChan)
 				}
 			}
-			if config.OvnKubeNode.Mode != types.NodeModeDPU {
+			if config.OvnKubeNode.Mode == types.NodeModeFull {
 				// serve OVN ^ovn_db, ^ovn_northd metrics from the ovnkube-node pod that is matching labels accordingly
-				metrics.RegisterOvnCentralMetrics(ovnClientset.KubeClient, node, config.MetricsScrapeInterval, stopChan)
+				podLister := corev1listers.NewPodLister(nodeWatchFactory.LocalPodInformer().GetIndexer())
+				metrics.RegisterOvnCentralMetrics(podLister, node, config.MetricsScrapeInterval, stopChan)
 			}
 			pprofBindAddress := ""
 			if config.Metrics.EnablePprof {
