@@ -452,12 +452,12 @@ func TestParseNodeGatewayRouterLRPAddr(t *testing.T) {
 		expOutput   bool
 	}{
 		{
-			desc:      "Gateway router LPR IP address annotation not found for node, however, does not return error",
+			desc:      "Gateway router LRP IP address annotation not found for node, however, does not return error",
 			inpNode:   v1.Node{},
 			expOutput: false,
 		},
 		{
-			desc: "success: Gateway router parse LPR IP address",
+			desc: "success: Gateway router parse LRP IP address",
 			inpNode: v1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{"k8s.ovn.org/node-gateway-router-lrp-ifaddr": `{"ipv4":"100.64.0.5/16"}`},
@@ -466,7 +466,7 @@ func TestParseNodeGatewayRouterLRPAddr(t *testing.T) {
 			expOutput: true,
 		},
 		{
-			desc: "success: Gateway router parse LPR IP address dual stack",
+			desc: "success: Gateway router parse LRP IP address dual stack",
 			inpNode: v1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{"k8s.ovn.org/node-gateway-router-lrp-ifaddr": `{"ipv4":"100.64.0.5/16", "ipv6":"fd:98::/64"}`},
@@ -475,7 +475,7 @@ func TestParseNodeGatewayRouterLRPAddr(t *testing.T) {
 			expOutput: true,
 		},
 		{
-			desc: "error: Gateway router parse LPR IP address error",
+			desc: "error: Gateway router parse LRP IP address error",
 			inpNode: v1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{"k8s.ovn.org/node-gateway-router-lrp-ifaddr": `{"ipv4":"100.64.0.5"}`},
@@ -496,6 +496,60 @@ func TestParseNodeGatewayRouterLRPAddr(t *testing.T) {
 			if tc.expOutput {
 				assert.NotNil(t, cfg)
 			}
+		})
+	}
+}
+
+func TestUpdateNodeGatewayRouterLRPAddrAnnotation(t *testing.T) {
+	tests := []struct {
+		desc        string
+		inpNode     v1.Node
+		v4Addr      *net.IPNet
+		v6Addr      *net.IPNet
+		errExpected bool
+	}{
+		{
+			desc: "success: Gateway router LRP IP address annotation not found for node, new annotation is set",
+			inpNode: v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{},
+				},
+			},
+			v4Addr:      ovntest.MustParseIPNet("100.64.0.5/16"),
+			errExpected: false,
+		},
+		{
+			desc: "success: Gateway router LRP IP address annotation for same IP(s) already exists",
+			inpNode: v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{"k8s.ovn.org/node-gateway-router-lrp-ifaddr": `{"ipv4":"100.64.0.5/16"}`},
+				},
+			},
+			v4Addr:      ovntest.MustParseIPNet("100.64.0.5/16"),
+			errExpected: true,
+		},
+		{
+			desc: "success: Gateway router LRP IP address annotation exists with different IP(s)",
+			inpNode: v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{"k8s.ovn.org/node-gateway-router-lrp-ifaddr": `{"ipv4":"100.64.2.5/16"}`},
+				},
+			},
+			v4Addr:      ovntest.MustParseIPNet("100.64.0.5/16"),
+			errExpected: false,
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			e := UpdateNodeGatewayRouterLRPAddrAnnotation(tc.inpNode.Annotations, tc.v4Addr, tc.v6Addr)
+			if tc.errExpected {
+				t.Log(e)
+				assert.Error(t, e)
+			}
+			// In all test cases, we expect the node annotations to be set/updated to requested IP(s)
+			ip, _ := ParseNodeGatewayRouterLRPAddr(&tc.inpNode)
+			assert.NotNil(t, ip)
+			assert.Equal(t, tc.v4Addr.IP, ip)
 		})
 	}
 }
