@@ -106,6 +106,7 @@ BASEDIR=$(dirname $0)
 # OVN_SB_ENABLE_LEADER_XFER_FOR_SNAPSHOT - Transfer leader election when snapshotting ovn sb db
 # K8S_CLUSTER_NAME - name of the kubernetes cluster
 # OVN_CONNTRACK_ZONE - Conntrack zone number used for openflow rules (default 64000)
+# OVN_DB_UPGRADE_SCHEMA_INLINE - use ovn-ctl to upgrade DB schema
 
 
 # The argument to the command is the operation to be performed
@@ -173,6 +174,7 @@ ovn_controller_cert=${OVN_DBCLIENT_CERT:-/ovn-cert/ovncontroller-cert.pem}
 ovn_nb_cert_cname=${OVN_NB_CERT_CNAME:-"ovncontroller"}
 ovn_sb_cert_cname=${OVN_SB_CERT_CNAME:-"ovncontroller"}
 OVN_SSL_ENABLE=${OVN_SSL_ENABLE:-"no"}
+OVN_DB_UPGRADE_SCHEMA_INLINE=${OVN_DB_UPGRADE_SCHEMA_INLINE:-"yes"}
 
 transport="tcp"
 ovndb_ctl_ssl_opts=""
