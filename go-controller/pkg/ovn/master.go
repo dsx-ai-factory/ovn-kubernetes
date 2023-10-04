@@ -1213,13 +1213,6 @@ func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet) erro
 		if err := oc.joinSwIPManager.ReleaseJoinLRPIPs(nodeName); err != nil {
 			return fmt.Errorf("failed to clean up GR LRP IPs for node %s: %v", nodeName, err)
 		}
-
-		p := func(item *sbdb.Chassis) bool {
-			return item.Hostname == nodeName
-		}
-		if err := libovsdbops.DeleteChassisWithPredicate(oc.mc.sbClient, p); err != nil {
-			return fmt.Errorf("failed to remove the chassis associated with node %s in the OVN SB Chassis table: %v", nodeName, err)
-		}
 	}
 	return nil
 }
@@ -1275,6 +1268,86 @@ func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode *kapi
 	}
 }
 
+// syncChassis deletes stale chassis and chassis_private tables from sbdb
+func (oc *Controller) syncChassis(nodes []*kapi.Node) error {
+	var chassisList []*sbdb.Chassis
+	var err error
+	if util.IsClusterScoped() {
+		// Cluster name is set, find only chassis marked to this cluster.
+		chassisList, err = libovsdbops.ListChassisWithClusterName(oc.mc.sbClient, util.GetClusterName())
+	} else {
+		chassisList, err = libovsdbops.ListChassis(oc.mc.sbClient)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to get chassis list: %v", err)
+	}
+
+	// cleanup stale chassis private with no corresponding chassis
+	var chassisPrivateList []*sbdb.ChassisPrivate
+	if util.IsClusterScoped() {
+		chassisPrivateList, err = libovsdbops.ListChassisPrivateWithClusterName(oc.mc.sbClient, util.GetClusterName())
+	} else {
+		chassisPrivateList, err = libovsdbops.ListChassisPrivate(oc.mc.sbClient)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to get chassis private list: %v", err)
+	}
+
+	chassisHostNameMap := map[string]*sbdb.Chassis{}
+	chassisNameMap := map[string]*sbdb.Chassis{}
+
+	for _, chassis := range chassisList {
+		chassisHostNameMap[chassis.Hostname] = chassis
+		chassisNameMap[chassis.Name] = chassis
+	}
+
+	for _, chassisPrivate := range chassisPrivateList {
+		// Skip chassis private that has a corresponding chassis
+		if _, ok := chassisNameMap[chassisPrivate.Name]; ok {
+			continue
+		}
+		// We add to the map what would be the corresponding Chassis. Even if
+		// the Chassis does not exist in SBDB, DeleteChassis will remove the
+		// ChassisPrivate.
+		chassisNameMap[chassisPrivate.Name] = &sbdb.Chassis{Name: chassisPrivate.Name}
+	}
+
+	// Remove chassis of existing nodes from the chassis map.
+	// Chassis of dpus that are removed or are not part of cluster should be deleted only
+	// if the corresponding host is removed from the cluster.
+	reqDPUs := sets.New[string]()
+	for _, node := range nodes {
+		// Get DPU list if the active node has dpus
+		// dpu hosts don't have chassis entry
+		if util.IsDPUHost(node) {
+			if dpus, err := util.GetNodeDPUs(node); err == nil {
+				reqDPUs.Insert(dpus...)
+			}
+			continue
+		}
+		if chassis, exists := chassisHostNameMap[node.Name]; exists {
+			delete(chassisNameMap, chassis.Name)
+			delete(chassisHostNameMap, chassis.Hostname)
+		}
+	}
+
+	// Don't add chassis of dpus that should be retained to stalechassis list
+	staleChassis := make([]*sbdb.Chassis, 0, len(chassisNameMap))
+	for _, chassis := range chassisNameMap {
+		if len(reqDPUs) != 0 && reqDPUs.Has(chassis.Hostname) {
+			continue
+		}
+		staleChassis = append(staleChassis, chassis)
+	}
+
+	// Delete stale chassis and associated chassis private
+	klog.V(5).Infof("syncChassis(): Deleting Stale Chassis: %v", chassisNameMap)
+	if err := libovsdbops.DeleteChassis(oc.mc.sbClient, staleChassis...); err != nil {
+		return fmt.Errorf("failed deleting chassis %v error: %v", chassisNameMap, err)
+	}
+	return nil
+}
+
 // this is the worker function that does the periodic sync of nodes from kube API
 // and sbdb and deletes chassis that are stale
 func (oc *Controller) syncNodesPeriodic() {
@@ -1283,49 +1356,15 @@ func (oc *Controller) syncNodesPeriodic() {
 	}
 
 	//node names is a slice of all node names
-	nodes, err := oc.mc.kube.GetNodes()
+	nodes, err := oc.mc.watchFactory.GetNodes()
 	if err != nil {
-		klog.Errorf("Error getting existing nodes from kube API: %v", err)
+		klog.Errorf("Error getting existing nodes from watcher: %v", err)
 		return
 	}
 
-	nodeNames := make([]string, 0, len(nodes.Items))
-
-	for _, node := range nodes.Items {
-		nodeNames = append(nodeNames, node.Name)
-	}
-
-	var chassisList []*sbdb.Chassis
-	if util.IsClusterScoped() {
-		// Cluster name is set, find only chassis marked to this cluster.
-		chassisList, err = libovsdbops.ListChassisWithClusterName(oc.mc.sbClient, util.GetClusterName())
-	} else {
-		chassisList, err = libovsdbops.ListChassis(oc.mc.sbClient)
-	}
+	err = oc.syncChassis(nodes)
 	if err != nil {
-		klog.Errorf("Failed to get chassis list: error: %v", err)
-		return
-	}
-
-	chassisHostNameMap := map[string]*sbdb.Chassis{}
-	for _, chassis := range chassisList {
-		chassisHostNameMap[chassis.Hostname] = chassis
-	}
-
-	//delete existing nodes from the chassis map.
-	for _, nodeName := range nodeNames {
-		delete(chassisHostNameMap, nodeName)
-	}
-
-	staleChassis := []*sbdb.Chassis{}
-	for _, v := range chassisHostNameMap {
-		staleChassis = append(staleChassis, v)
-	}
-
-	klog.Infof("SyncNodesPeriodic(): Deleting Stale Chassis: %v", chassisHostNameMap)
-	if err = libovsdbops.DeleteChassis(oc.mc.sbClient, staleChassis...); err != nil {
-		klog.Errorf("Failed Deleting chassis %v error: %v", chassisHostNameMap, err)
-		return
+		klog.Errorf(err.Error())
 	}
 }
 
@@ -1433,60 +1472,6 @@ func (oc *Controller) syncNodesRetriable(nodes []interface{}) error {
 		}
 	}
 
-	if oc.nadInfo.IsSecondary {
-		return nil
-	}
-
-	// cleanup stale chassis with no corresponding nodes
-	var chassisList []*sbdb.Chassis
-	if util.IsClusterScoped() {
-		// Cluster name is set, find only chassis marked to this cluster.
-		chassisList, err = libovsdbops.ListChassisWithClusterName(oc.mc.sbClient, util.GetClusterName())
-	} else {
-		chassisList, err = libovsdbops.ListChassis(oc.mc.sbClient)
-	}
-	if err != nil {
-		return fmt.Errorf("failed to get chassis list: %v", err)
-	}
-
-	knownChassisNames := sets.NewString()
-	chassisDeleteList := []*sbdb.Chassis{}
-	for _, chassis := range chassisList {
-		knownChassisNames.Insert(chassis.Name)
-		// skip chassis that have a corresponding node
-		if foundNodes.Has(chassis.Hostname) {
-			continue
-		}
-		chassisDeleteList = append(chassisDeleteList, chassis)
-	}
-
-	// cleanup stale chassis private with no corresponding chassis
-	var chassisPrivateList []*sbdb.ChassisPrivate
-	if util.IsClusterScoped() {
-		chassisPrivateList, err = libovsdbops.ListChassisPrivateWithClusterName(oc.mc.sbClient, util.GetClusterName())
-	} else {
-		chassisPrivateList, err = libovsdbops.ListChassisPrivate(oc.mc.sbClient)
-	}
-	if err != nil {
-		return fmt.Errorf("failed to get chassis private list: %v", err)
-	}
-
-	for _, chassis := range chassisPrivateList {
-		// skip chassis private that have a corresponding chassis
-		if knownChassisNames.Has(chassis.Name) {
-			continue
-		}
-		// we add to the list what would be the corresponding Chassis. Even if
-		// the Chassis does not exist in SBDB, DeleteChassis will remove the
-		// ChassisPrivate.
-		chassisDeleteList = append(chassisDeleteList, &sbdb.Chassis{Name: chassis.Name})
-	}
-
-	// Delete stale chassis and associated chassis private
-	klog.Infof("syncNodesRetriable(): Deleting Stale Chassis: %v", chassisDeleteList)
-	if err := libovsdbops.DeleteChassis(oc.mc.sbClient, chassisDeleteList...); err != nil {
-		return fmt.Errorf("failed deleting chassis %v: %v", chassisDeleteList, err)
-	}
 	return nil
 }
 
