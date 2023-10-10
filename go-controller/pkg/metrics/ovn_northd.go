@@ -7,7 +7,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/kubernetes"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 )
 
@@ -110,14 +110,14 @@ var ovnNorthdStopwatchShowMetricsMap = map[string]*stopwatchMetricDetails{
 	"ovnsb_db_run":     {},
 }
 
-func RegisterOvnNorthdMetrics(clientset kubernetes.Interface, k8sNodeName string,
+func RegisterOvnNorthdMetrics(podLister corev1listers.PodLister, k8sNodeName string,
 	metricsScrapeInterval int, stopChan <-chan struct{}) {
 	err := wait.PollImmediate(1*time.Second, 300*time.Second, func() (bool, error) {
-		return checkPodRunsOnGivenNode(clientset, []string{"name=ovn-north"}, k8sNodeName, true)
+		return checkPodRunsOnGivenNode(podLister, []string{"name=ovn-north"}, k8sNodeName, true)
 	})
 	if err != nil {
 		klog.Infof("Not registering OVN North Metrics because OVNKube North Pod was not found running on this "+
-			"node (%s)", k8sNodeName)
+			"node (%s): %v", k8sNodeName, err)
 		return
 	}
 	klog.Info("Found OVN North Pod running on this node. Registering OVN North Metrics")

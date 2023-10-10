@@ -10,7 +10,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/kubernetes"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 )
 
@@ -444,17 +444,17 @@ func getOvnDbVersionInfo() {
 	}
 }
 
-func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string,
+func RegisterOvnDBMetrics(podLister corev1listers.PodLister, k8sNodeName string,
 	metricsScrapeInterval int, stopChan <-chan struct{}) {
 	err := wait.PollImmediate(1*time.Second, 300*time.Second, func() (bool, error) {
-		return checkPodRunsOnGivenNode(clientset, []string{"name in (ovn-nbdb, ovn-sbdb, ovnkube-db)"}, k8sNodeName, false)
+		return checkPodRunsOnGivenNode(podLister, []string{"name in (ovn-nbdb, ovn-sbdb, ovnkube-db)"}, k8sNodeName, false)
 	})
 	if err != nil {
 		if err == wait.ErrWaitTimeout {
 			klog.Errorf("Timed out while checking if OVN DB Pod runs on this %q K8s Node: %v. "+
 				"Not registering OVN DB Metrics on this Node.", k8sNodeName, err)
 		} else {
-			klog.Infof("Not registering OVN DB Metrics on this Node since OVN DBs are not running on this node.")
+			klog.Infof("Not registering OVN DB Metrics on this Node since OVN DBs are not running on this node (%s): %v", k8sNodeName, err)
 		}
 		return
 	}

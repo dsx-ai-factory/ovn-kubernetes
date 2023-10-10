@@ -22,7 +22,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/kubernetes"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 )
 
@@ -405,17 +405,26 @@ func stopwatchShowMetricsUpdater(component string, stopChan <-chan struct{}) {
 
 // The `keepTrying` boolean when set to true will not return an error if we can't find pods with one of the given labels.
 // This is so that the caller can re-try again to see if the pods have appeared in the k8s cluster.
-func checkPodRunsOnGivenNode(clientset kubernetes.Interface, labels []string, k8sNodeName string,
+func checkPodRunsOnGivenNode(podLister corev1listers.PodLister, labels []string, k8sNodeName string,
 	keepTrying bool) (bool, error) {
 	for _, label := range labels {
-		pods, err := clientset.CoreV1().Pods(config.Kubernetes.OVNConfigNamespace).List(context.TODO(), metav1.ListOptions{
-			LabelSelector: label,
-		})
+		podSelector, err := metav1.ParseToLabelSelector(label)
+		if err != nil {
+			return false, fmt.Errorf("failed to check Pods with invalid label %s: %v", label, err)
+		}
+		selector, err := metav1.LabelSelectorAsSelector(podSelector)
+		if err != nil {
+			return false, fmt.Errorf("failed to check Pods with invalid label %s: %v", label, err)
+		}
+		pods, err := podLister.Pods(config.Kubernetes.OVNConfigNamespace).List(selector)
 		if err != nil {
 			klog.V(5).Infof("Failed to list Pods with label %q: %v. Retrying..", label, err)
 			return false, nil
 		}
-		for _, pod := range pods.Items {
+		for _, pod := range pods {
+			// Note: wf (WatchFactory) *usually* returns pods assigned to this node, however we dont rely on it
+			// and add this check to filter out pods assigned to other nodes. (e.g when ovnkube master and node
+			// share the same process)
 			if pod.Spec.NodeName == k8sNodeName {
 				return true, nil
 			}
@@ -580,10 +589,10 @@ func RegisterOvnNodeMetrics(ovsDBClient *util.OvsdbClient, metricsScrapeInterval
 	go RegisterOvnControllerMetrics(ovsDBClient, metricsScrapeInterval, stopChan)
 }
 
-func RegisterOvnCentralMetrics(clientset kubernetes.Interface, k8sNodeName string,
+func RegisterOvnCentralMetrics(podLister corev1listers.PodLister, k8sNodeName string,
 	metricsScrapeInterval int, stopChan chan struct{}) {
-	go RegisterOvnDBMetrics(clientset, k8sNodeName, metricsScrapeInterval, stopChan)
-	go RegisterOvnNorthdMetrics(clientset, k8sNodeName, metricsScrapeInterval, stopChan)
+	go RegisterOvnDBMetrics(podLister, k8sNodeName, metricsScrapeInterval, stopChan)
+	go RegisterOvnNorthdMetrics(podLister, k8sNodeName, metricsScrapeInterval, stopChan)
 }
 
 func SetupOvsDBClient() (*util.OvsdbClient, error) {
