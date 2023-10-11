@@ -76,6 +76,9 @@ const (
 
 	// ovnNodeNumPodsLabel is used to indicate the number of pods/IP addresses required on the node
 	ovnNodeNumPodsLabel = "k8s.ovn.org/num-pods"
+
+	// ovnNodeHostTypeLabel used by ngn
+	ovnNodeHostTypeLabel = "ngn2.nvidia.com/hosttype"
 )
 
 type L3GatewayConfig struct {
@@ -358,8 +361,8 @@ func SetNodePrimaryIfAddr(nodeAnnotator kube.Annotator, nodeIPNetv4, nodeIPNetv6
 	return nodeAnnotator.Set(ovnNodeIfAddr, primaryIfAddrAnnotation)
 }
 
-// CreateNodeGateRouterLRPAddrAnnotation sets the IPv4 / IPv6 values of the node's Gatewary Router LRP to join switch.
-func CreateNodeGateRouterLRPAddrAnnotation(nodeAnnotation map[string]string, nodeIPNetv4, nodeIPNetv6 *net.IPNet) error {
+// CreateNodeGatewayRouterLRPAddrAnnotation sets the IPv4 / IPv6 values of the node's Gatewary Router LRP to join switch.
+func CreateNodeGatewayRouterLRPAddrAnnotation(nodeAnnotation map[string]string, nodeIPNetv4, nodeIPNetv6 *net.IPNet) error {
 	primaryIfAddrAnnotation := primaryIfAddrAnnotation{}
 	if nodeIPNetv4 != nil {
 		primaryIfAddrAnnotation.IPv4 = nodeIPNetv4.String()
@@ -372,6 +375,26 @@ func CreateNodeGateRouterLRPAddrAnnotation(nodeAnnotation map[string]string, nod
 		return err
 	}
 	nodeAnnotation[ovnNodeGRLRPAddr] = string(bytes)
+	return nil
+}
+
+// UpdateNodeGatewayRouterLRPAddrAnnotation creates a new node annotation and checks whether correct Gateway Router LRP
+// annotation is already present
+func UpdateNodeGatewayRouterLRPAddrAnnotation(nodeAnnotation map[string]string, nodeIPNetv4, nodeIPNetv6 *net.IPNet) error {
+	// Store previous annotation value, if any
+	prevGRLRPAddr, exists := nodeAnnotation[ovnNodeGRLRPAddr]
+
+	// Create new annotation
+	if err := CreateNodeGatewayRouterLRPAddrAnnotation(nodeAnnotation, nodeIPNetv4, nodeIPNetv6); err != nil {
+		return err
+	}
+
+	// If annotation value hasn't changed, return newAnnotationAlreadySetError
+	if exists {
+		if prevGRLRPAddr == nodeAnnotation[ovnNodeGRLRPAddr] {
+			return newAnnotationAlreadySetError("%s annotation already exists", ovnNodeGRLRPAddr)
+		}
+	}
 	return nil
 }
 
@@ -588,4 +611,11 @@ func ParseNodeHostAddresses(node *kapi.Node) (sets.Set[string], error) {
 	}
 
 	return sets.New[string](cfg...), nil
+}
+
+func IsDPU(node *kapi.Node) bool {
+	if label, exists := node.Labels[ovnNodeHostTypeLabel]; exists && label == "DPU" {
+		return true
+	}
+	return false
 }

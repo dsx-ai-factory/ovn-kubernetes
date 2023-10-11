@@ -876,13 +876,17 @@ func (oc *Controller) updateNodeAnnotationWithRetry(nodeName string, hostSubnets
 					v6Addr = ip
 				}
 			}
-			err = util.CreateNodeGateRouterLRPAddrAnnotation(cnode.Annotations, v4Addr, v6Addr)
-			if err != nil {
-				return fmt.Errorf("failed to marshal node %q annotation for Gateway LRP IP %v",
-					node.Name, gwLRPIPs)
+			err = util.UpdateNodeGatewayRouterLRPAddrAnnotation(cnode.Annotations, v4Addr, v6Addr)
+			if err == nil {
+				updateNodeAnno = true
+			} else {
+				if !util.IsAnnotationAlreadySetError(err) {
+					return fmt.Errorf("failed to marshal node %q annotation for Gateway LRP IP %v",
+						node.Name, gwLRPIPs)
+				}
 			}
-			updateNodeAnno = true
 		}
+
 		err = util.UpdateNodeHostSubnetAnnotation(cnode.Annotations, hostSubnets, oc.nadInfo.NetName)
 		if err == nil {
 			updateNodeAnno = true
@@ -1500,17 +1504,19 @@ func (oc *Controller) addUpdateNodeEvent(oldNode, newNode *kapi.Node, nSyncs *no
 	var errs []error
 	var err error
 
+	// For DPU case we might want to propagate DPU NotReady state as a NoSchedule taint to DPU's host
+	if !oc.nadInfo.IsSecondary && util.IsDPU(newNode) {
+		if err := oc.syncDependentNodeTaints(newNode, 5*time.Minute); err != nil {
+			klog.Warningf(err.Error())
+		}
+	}
+
 	if noHostSubnet := noHostSubnet(newNode); noHostSubnet {
 		err := oc.lsManager.AddNoHostSubnetNode(util.GetClusterScopedName(oc.nadInfo.Prefix + newNode.Name))
 		if err != nil {
 			return fmt.Errorf("nodeAdd: error adding noHost subnet for node %s: %w", newNode.Name, err)
 		}
 		if !oc.nadInfo.IsSecondary {
-			// DPU case, and we want to propagate DPU NotReady state
-			// as a NoSchedule taint to DPU's host
-			if err := oc.syncDependentNodeTaints(newNode, 5*time.Minute); err != nil {
-				klog.Warningf(err.Error())
-			}
 			oc.clearInitialNodeNetworkUnavailableCondition(newNode)
 		}
 		return nil
