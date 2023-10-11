@@ -928,7 +928,7 @@ func (oc *Controller) processLocalPodSelectorSetPods(policy *knet.NetworkPolicy,
 				continue
 			}
 
-			klog.V(6).Infof("Fresh LSP %s for network policy %s found in lpCache",
+			klog.V(5).Infof("Fresh LSP %s for network policy %s found in lpCache",
 				portInfo.name, policy.Name)
 
 			// if this pod is somehow already added to this policy, then skip
