@@ -47,6 +47,7 @@ spec:
 
           command: ["/root/ovnkube.sh", "ovn-node"]
           # ovnkube-node-liveness-check.sh checks
+          # - 10-ovn-kubernetes.conf is present
           # - ovn-cni-server.sock is serving cni requests
           livenessProbe:
             exec:
