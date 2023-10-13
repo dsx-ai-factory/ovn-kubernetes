@@ -559,13 +559,11 @@ func (oc *Controller) getResourceFromInformerCache(objType reflect.Type, key str
 
 	case factory.MultinetworkpolicyType:
 		namespace, name := splitNamespacedName(key)
-		mpObj, err := oc.mc.watchFactory.GetMultiNetworkPolicy(namespace, name)
-		if err != nil {
+		var mpObj *multinetworkpolicy.MultiNetworkPolicy
+		mpObj, err = oc.mc.watchFactory.GetMultiNetworkPolicy(namespace, name)
+		if err == nil {
 			obj = convertMultiNetPolicyToNetPolicy(mpObj)
-		} else {
-			obj = nil
 		}
-
 	case factory.NodeType,
 		factory.EgressNodeType:
 		obj, err = oc.mc.watchFactory.GetNode(key)
