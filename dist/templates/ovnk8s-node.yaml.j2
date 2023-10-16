@@ -46,8 +46,20 @@ spec:
           imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
 
           command: ["/root/ovnkube.sh", "ovn-node"]
-
-          # ovnkube-node-probe.sh checks
+          # ovnkube-node-liveness-check.sh checks
+          # - 10-ovn-kubernetes.conf is present
+          # - ovn-cni-server.sock is serving cni requests
+          livenessProbe:
+            exec:
+              command:
+                - /bin/bash
+                - /root/ovnkube-node-liveness-check.sh
+            failureThreshold: 3
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            successThreshold: 1
+            timeoutSeconds: 5
+          # ovnkube-node-readiness-check.sh checks
           # - whether the metrics server is running since it is one of the last things we do,
           # - also checks if we can access KUBERNETES_SERVICE_HOST:KUBERNETES_SERVICE_PORT
           # - also checks if we can access coredns service
@@ -55,7 +67,7 @@ spec:
             exec:
               command:
               - /bin/bash
-              - /root/ovnkube-node-probe.sh
+              - /root/ovnkube-node-readiness-check.sh
             initialDelaySeconds: 30
             timeoutSeconds: 5
             periodSeconds: 30
