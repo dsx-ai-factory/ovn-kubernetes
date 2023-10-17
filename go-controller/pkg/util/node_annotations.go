@@ -79,6 +79,12 @@ const (
 
 	// ovnNodeHostTypeLabel used by ngn
 	ovnNodeHostTypeLabel = "ngn2.nvidia.com/hosttype"
+
+	// ovnNodeDPUHostLabel is used to indicate that node is of type dpu-host
+	ovnNodeDPUHostLabel = "k8s.ovn.org/dpu-host"
+
+	// ovnNodeDPUList is used to list the dpus attached to the node
+	ovnNodeDPUList = "ngn2.nvidia.com/dpus"
 )
 
 type L3GatewayConfig struct {
@@ -618,4 +624,26 @@ func IsDPU(node *kapi.Node) bool {
 		return true
 	}
 	return false
+}
+
+func IsDPUHost(node *kapi.Node) bool {
+	if _, exists := node.Labels[ovnNodeDPUHostLabel]; exists {
+		return true
+	}
+	return false
+}
+
+func GetNodeDPUs(node *kapi.Node) ([]string, error) {
+	dpuList, ok := node.Annotations[ovnNodeDPUList]
+	if !ok {
+		return nil, newAnnotationNotSetError("%s annotation not found for node %q", ovnNodeDPUList, node.Name)
+	}
+
+	var dpus []string
+	if err := json.Unmarshal([]byte(dpuList), &dpus); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal annotation %s for node %q: %v",
+			ovnNodeDPUList, node.Name, err)
+	}
+
+	return dpus, nil
 }

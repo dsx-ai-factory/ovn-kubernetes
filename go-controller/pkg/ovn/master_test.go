@@ -1950,39 +1950,72 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 	}
 }
 
-func TestController_syncNodesRetriable(t *testing.T) {
+func TestController_syncChassis(t *testing.T) {
+	gomega.RegisterFailHandler(ginkgo.Fail)
 	tests := []struct {
 		name         string
+		nodes        []v1.Node
 		initialSBDB  []libovsdbtest.TestData
 		expectedSBDB []libovsdbtest.TestData
 	}{
 		{
-			name: "removes stale chassis and chassis private",
+			nodes: []v1.Node{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node1",
+					},
+				},
+				// dpu-host node with list of dpus that are
+				// removed from cluster
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "dpuhostnode1",
+						Annotations: map[string]string{
+							"ngn2.nvidia.com/dpus": "[\"dpu1\",\"dpu2\"]",
+						},
+						Labels: map[string]string{
+							"k8s.ovn.org/dpu-host": "",
+						},
+					},
+				},
+			},
+			name: "removes stale chassis and chassis private, excluding dpus whose host is still part of the cluster",
 			initialSBDB: []libovsdbtest.TestData{
 				&sbdb.Chassis{Name: "chassis-node1", Hostname: "node1"},
 				&sbdb.ChassisPrivate{Name: "chassis-node1"},
 				&sbdb.Chassis{Name: "chassis-node2", Hostname: "node2"},
 				&sbdb.ChassisPrivate{Name: "chassis-node2"},
+				&sbdb.Chassis{Name: "chassis-node3", Hostname: "node3"},
 				&sbdb.ChassisPrivate{Name: "chassis-node3"},
+				&sbdb.Chassis{Name: "chassis-dpu1", Hostname: "dpu1"},
+				&sbdb.ChassisPrivate{Name: "chassis-dpu1"},
+				&sbdb.Chassis{Name: "chassis-dpu2", Hostname: "dpu2"},
+				&sbdb.ChassisPrivate{Name: "chassis-dpu2"},
+				&sbdb.Chassis{Name: "chassis-dpu3", Hostname: "dpu3"},
+				&sbdb.ChassisPrivate{Name: "chassis-dpu3"},
+				&sbdb.ChassisPrivate{Name: "chassis-priv-node4"},
 			},
 			expectedSBDB: []libovsdbtest.TestData{
 				&sbdb.Chassis{Name: "chassis-node1", Hostname: "node1"},
 				&sbdb.ChassisPrivate{Name: "chassis-node1"},
+				&sbdb.Chassis{Name: "chassis-dpu1", Hostname: "dpu1"},
+				&sbdb.ChassisPrivate{Name: "chassis-dpu1"},
+				&sbdb.Chassis{Name: "chassis-dpu2", Hostname: "dpu2"},
+				&sbdb.ChassisPrivate{Name: "chassis-dpu2"},
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			stopChan := make(chan struct{})
-			defer close(stopChan)
-
-			testNode := v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "node1",
-				},
-			}
-
-			kubeFakeClient := fake.NewSimpleClientset()
+			wg := &sync.WaitGroup{}
+			defer func() {
+				close(stopChan)
+				wg.Wait()
+			}()
+			kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
+				Items: tt.nodes,
+			})
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
 			fakeClient := &util.OVNClientset{
@@ -1994,7 +2027,9 @@ func TestController_syncNodesRetriable(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s: Error creating master watch factory: %v", tt.name, err)
 			}
-
+			defer f.Shutdown()
+			err = f.Start()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			dbSetup := libovsdbtest.TestSetup{
 				SBData: tt.initialSBDB,
 			}
@@ -2006,19 +2041,18 @@ func TestController_syncNodesRetriable(t *testing.T) {
 
 			ovnMHController := NewOvnMHController(fakeClient, "", f,
 				stopChan, nbClient, sbClient,
-				record.NewFakeRecorder(0), nil)
+				record.NewFakeRecorder(0), wg)
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+
 			_ = ovnMHController.Init(addressset.NewFakeAddressSetFactory())
-			controller := ovnMHController.ovnController
-
-			controller.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(nbClient, "", []string{})
+			clusterController := ovnMHController.ovnController
+			gomega.Expect(clusterController).NotTo(gomega.BeNil())
+			nodes, err := clusterController.mc.watchFactory.GetNodes()
 			if err != nil {
-				t.Fatalf("%s: Error creating joinSwIPManager: %v", tt.name, err)
+				t.Fatalf("%s: Error getting node list from master watch factory: %v", tt.name, err)
 			}
 
-			err = controller.syncNodesRetriable([]interface{}{&testNode})
-			if err != nil {
-				t.Fatalf("%s: Error on syncNodesRetriable: %v", tt.name, err)
-			}
+			clusterController.syncChassis(nodes)
 
 			matcher := libovsdbtest.HaveDataIgnoringUUIDs(tt.expectedSBDB)
 			match, err := matcher.Match(sbClient)
