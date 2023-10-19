@@ -351,6 +351,7 @@ var _ = Describe("Node DPU tests", func() {
 					// Mock netlink/ovs calls for cleanup
 					checkOVSPortPodInfo(execMock, vfRep, true, "15", scd.SandboxId, types.DefaultNetworkName)
 					netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
+					netlinkOpsMock.On("LinkSetMTU", vfLink, 1500).Return(nil)
 					execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 						Cmd: genOVSDelPortCmd("pf0vf9"),
 					})
@@ -370,6 +371,7 @@ var _ = Describe("Node DPU tests", func() {
 					// Mock netlink/ovs calls for cleanup
 					checkOVSPortPodInfo(execMock, vfRep, true, "15", scd.SandboxId, types.DefaultNetworkName)
 					netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
+					netlinkOpsMock.On("LinkSetMTU", vfLink, 1500).Return(nil)
 					execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 						Cmd: genOVSDelPortCmd("pf0vf9"),
 					})
@@ -418,6 +420,7 @@ var _ = Describe("Node DPU tests", func() {
 				// Mock netlink/ovs calls for cleanup
 				checkOVSPortPodInfo(execMock, vfRep, true, "15", scd.SandboxId, types.DefaultNetworkName)
 				netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
+				netlinkOpsMock.On("LinkSetMTU", vfLink, 1500).Return(nil)
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: genOVSDelPortCmd("pf0vf9"),
 				})
@@ -467,6 +470,7 @@ var _ = Describe("Node DPU tests", func() {
 			checkOVSPortPodInfo(execMock, vfRep, true, "15", scd.SandboxId, types.DefaultNetworkName)
 			netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
 			netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
+			netlinkOpsMock.On("LinkSetMTU", vfLink, 1500).Return(nil)
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 --if-exists del-port br-int %s", "pf0vf9"),
 			})
@@ -490,6 +494,7 @@ var _ = Describe("Node DPU tests", func() {
 			checkOVSPortPodInfo(execMock, vfRep, true, "15", scd.SandboxId, types.DefaultNetworkName)
 			netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
 			netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
+			netlinkOpsMock.On("LinkSetMTU", vfLink, 1500).Return(nil)
 			// fail on first try
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: genOVSDelPortCmd("pf0vf9"),
