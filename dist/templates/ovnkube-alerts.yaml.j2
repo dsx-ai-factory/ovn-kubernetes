@@ -67,6 +67,32 @@ spec:
          All K8s nodes should be running OVN K8s Agent pods, 
          but OVN K8s Agent pod is not running on {{ $labels.node }} node.  
 
+    - alert: K8sCriticalNodeWithoutOvnKubeRunning
+      expr: |
+        (kube_pod_status_phase{namespace="ovn-kubernetes", phase="Running", pod=~"ovnkube-node-.*|ovn-host-.*"} * on(pod) group_left(node)
+         kube_pod_info{namespace="ovn-kubernetes", pod=~"ovnkube-node-.*|ovn-host-.*", node=~".*k8s-supervisor-.*|.*nid-core-.*|.*k8s-ovn-.*|.*-cs-.*|.*-ss-.*"}) == 0
+      for: 20m
+      labels:
+       severity: major
+       pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/960e_tDMk/k8s-control-panel-kube-agent
+      annotations:
+       message: |
+         OvnKube/Host K8s pod {{ $labels.pod }} is in not Running on critical infrastructure node {{ $labels.node }} for longer than 20min
+
+    - alert: K8sCriticalNodeWithoutOvnKubeReady
+      expr: |
+        (kube_pod_status_ready{namespace="ovn-kubernetes", condition="true", pod=~"ovnkube-node-.*|ovn-host-.*"} * on(pod) group_left(node)
+         kube_pod_info{namespace="ovn-kubernetes", pod=~"ovnkube-node-.*|ovn-host-.*", node=~".*k8s-supervisor-.*|.*nid-core-.*|.*k8s-ovn-.*|.*-cs-.*|.*-ss-.*"}) == 0
+      for: 20m
+      labels:
+       severity: major
+       pduuid: P2AR7UQ
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/960e_tDMk/k8s-control-panel-kube-agent
+      annotations:
+       message: |
+         OvnKube/Host K8s pod {{ $labels.pod }} is in not Ready state on critical infrastructure node {{ $labels.node }} for longer than 20min
+
     - alert: K8sNodesWithoutOvnNBDBPod
       expr: |
         kube_node_info{node=~"k8s-ovn-0.*"} unless on(node) 
