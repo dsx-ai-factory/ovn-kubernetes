@@ -495,8 +495,11 @@ func (nc *ovnNodeController) delRepPort(pod *kapi.Pod, dpuCD *util.DPUConnection
 	if err != nil {
 		klog.Warningf("Failed to get link device for representor port %s. %v", vfRepName, err)
 	} else {
-		if linkDownErr := util.GetNetLinkOps().LinkSetDown(link); linkDownErr != nil {
-			klog.Warningf("Failed to set link down for representor port %s. %v", vfRepName, linkDownErr)
+		if err = util.GetNetLinkOps().LinkSetDown(link); err != nil {
+			klog.Warningf("Failed to set link down for representor port %s. %v", vfRepName, err)
+		}
+		if err = util.GetNetLinkOps().LinkSetMTU(link, config.DefaultVFMTU); err != nil {
+			klog.Warningf("Failed to reset the link MTU for representor port %s. %v", vfRepName, err)
 		}
 	}
 	// reset the VF rate limit configured so that it doesn't get carried over to other users of this VF.

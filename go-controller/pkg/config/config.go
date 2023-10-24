@@ -34,6 +34,9 @@ const DefaultAPIServer = "http://localhost:8443"
 // Default IANA-assigned UDP port number for VXLAN
 const DefaultVXLANPort = 4789
 
+// Default VF MTU
+const DefaultVFMTU = 1500
+
 // The following are global config parameters that other modules may access directly
 var (
 	// Build information. Populated at build-time.
