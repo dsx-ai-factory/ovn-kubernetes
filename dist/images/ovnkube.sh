@@ -107,6 +107,7 @@ BASEDIR=$(dirname $0)
 # K8S_CLUSTER_NAME - name of the kubernetes cluster
 # OVN_CONNTRACK_ZONE - Conntrack zone number used for openflow rules (default 64000)
 # OVN_DB_UPGRADE_SCHEMA_INLINE - use ovn-ctl to upgrade DB schema
+# OVN_CLUSTER_SUBNETS_MAC_BINDING_AGING - MAC binding aging threshold for cluster subnets (in seconds)
 
 
 # The argument to the command is the operation to be performed
@@ -249,6 +250,9 @@ ovn_host_network_namespace=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
 
 # name of the kubernetes cluster.
 k8s_cluster_name=${K8S_CLUSTER_NAME:-""}
+
+# OVN_CLUSTER_SUBNETS_MAC_BINDING_AGING
+cluster_subnets_mac_binding_aging=${OVN_CLUSTER_SUBNETS_MAC_BINDING_AGING:-}
 
 # host on which OVN DB POD(s) are running
 ovn_db_host=${K8S_NODE_IP:-""}
@@ -1195,6 +1199,11 @@ ovn-master() {
     ovnkube_logfile_flag="--logfile ${ovnkube_logfile}"
   fi
 
+  cluster_subnets_mac_binding_aging_option=
+  if [[ ${cluster_subnets_mac_binding_aging} != "" ]]; then
+      cluster_subnets_mac_binding_aging_option="--cluster-subnets-mac-binding-aging=${cluster_subnets_mac_binding_aging}"
+  fi
+
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
     --init-master ${K8S_NODE} \
@@ -1234,7 +1243,8 @@ ovn-master() {
     ${ctinv_flows_disable_flag} \
     ${ovn_master_ha_opts} \
     ${ovnkube_node_mgmt_port_intf_name_flag} \
-    ${k8s_cluster_name_option} &
+    ${k8s_cluster_name_option} \
+    ${cluster_subnets_mac_binding_aging_option} &
 
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master

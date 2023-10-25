@@ -687,6 +687,7 @@ var _ = Describe("Config Operations", func() {
 			}))
 			gomega.Expect(Default.MonitorAll).To(gomega.BeFalse())
 			gomega.Expect(Default.OfctrlWaitBeforeClear).To(gomega.Equal(5000))
+			gomega.Expect(Default.ClusterSubnetsMacBindingAging).To(gomega.Equal(300))
 
 			return nil
 		}
@@ -734,6 +735,7 @@ var _ = Describe("Config Operations", func() {
 			"-export-ovs-metrics=false",
 			"-metrics-enable-pprof=false",
 			"-ofctrl-wait-before-clear=5000",
+			"-cluster-subnets-mac-binding-aging=300",
 			"-metrics-enable-config-duration=true",
 			"-egressip-reachability-total-timeout=5",
 		}
