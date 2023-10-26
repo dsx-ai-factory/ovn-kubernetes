@@ -160,6 +160,7 @@ export NUM_WORKER_NODES=3
 ginkgo --nodes=${NUM_NODES} \
 	--focus=${FOCUS} \
 	--skip=${SKIPPED_TESTS} \
+	--timeout=3h \
 	--flakeAttempts=${FLAKE_ATTEMPTS} \
 	/usr/local/bin/e2e.test \
 	-- \

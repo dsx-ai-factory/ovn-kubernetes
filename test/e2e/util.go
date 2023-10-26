@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/onsi/ginkgo"
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -22,6 +22,7 @@ import (
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
+	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	testutils "k8s.io/kubernetes/test/utils"
 	admissionapi "k8s.io/pod-security-admission/api"
 	utilnet "k8s.io/utils/net"
@@ -662,7 +663,8 @@ func waitForDaemonSetUpdate(c clientset.Interface, ns string, dsName string, all
 }
 
 func pokePod(fr *framework.Framework, srcPodName string, dstPodIP string) error {
-	stdout, stderr, err := fr.ExecShellInPodWithFullOutput(
+	stdout, stderr, err := e2epod.ExecShellInPodWithFullOutput(
+		fr,
 		srcPodName,
 		fmt.Sprintf("curl --output /dev/stdout -m 1 -I %s:8000 | head -n1", dstPodIP))
 	if err == nil && stdout == "HTTP/1.1 200 OK" {
@@ -690,7 +692,7 @@ func ExecShellInPodWithFullOutput(f *framework.Framework, namespace, podName str
 
 // execCommandInPodWithFullOutput is a shameless copy/paste from the framework methods so that we can specify the pod namespace.
 func execCommandInPodWithFullOutput(f *framework.Framework, namespace, podName string, cmd ...string) (string, string, error) {
-	pod, err := f.PodClientNS(namespace).Get(context.TODO(), podName, metav1.GetOptions{})
+	pod, err := e2epod.PodClientNS(f, namespace).Get(context.TODO(), podName, metav1.GetOptions{})
 	framework.ExpectNoError(err, "failed to get pod %v", podName)
 	gomega.Expect(pod.Spec.Containers).NotTo(gomega.BeEmpty())
 	return ExecCommandInContainerWithFullOutput(f, namespace, podName, pod.Spec.Containers[0].Name, cmd...)
@@ -698,7 +700,7 @@ func execCommandInPodWithFullOutput(f *framework.Framework, namespace, podName s
 
 // ExecCommandInContainerWithFullOutput is a shameless copy/paste from the framework methods so that we can specify the pod namespace.
 func ExecCommandInContainerWithFullOutput(f *framework.Framework, namespace, podName, containerName string, cmd ...string) (string, string, error) {
-	options := framework.ExecOptions{
+	options := e2epod.ExecOptions{
 		Command:            cmd,
 		Namespace:          namespace,
 		PodName:            podName,
@@ -708,7 +710,7 @@ func ExecCommandInContainerWithFullOutput(f *framework.Framework, namespace, pod
 		CaptureStderr:      true,
 		PreserveWhitespace: false,
 	}
-	return f.ExecWithOptions(options)
+	return e2epod.ExecWithOptions(f, options)
 }
 
 func assertAclLogs(targetNodeName string, policyNameRegex string, expectedAclVerdict string, expectedAclSeverity string) (bool, error) {
