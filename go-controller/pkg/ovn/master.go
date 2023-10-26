@@ -326,6 +326,11 @@ func (oc *Controller) SetupMaster(ovnManagedNodeNames []string) error {
 	clusterRouterName := util.GetOVNClusterRouterName(oc.nadInfo.Prefix)
 
 	// Create a single common distributed router for the cluster.
+	macBindingAgeThreshold := "0"
+	for _, ipnet := range oc.clusterSubnets {
+		macBindingAgeThreshold += ";" + ipnet.CIDR.String() + ":" + strconv.Itoa(config.Default.ClusterSubnetsMacBindingAging)
+	}
+
 	logicalRouter := nbdb.LogicalRouter{
 		Name: clusterRouterName,
 		ExternalIDs: map[string]string{
@@ -333,6 +338,7 @@ func (oc *Controller) SetupMaster(ovnManagedNodeNames []string) error {
 		},
 		Options: map[string]string{
 			"always_learn_from_arp_request": "false",
+			"mac_binding_age_threshold":     macBindingAgeThreshold,
 		},
 		Copp: &oc.defaultCOPPUUID,
 	}

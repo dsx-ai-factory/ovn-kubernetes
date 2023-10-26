@@ -60,20 +60,21 @@ var (
 
 	// Default holds parsed config file parameters and command-line overrides
 	Default = DefaultConfig{
-		MTU:                   1400,
-		ConntrackZone:         64000,
-		EncapType:             "geneve",
-		EncapIP:               "",
-		EncapPort:             DefaultEncapPort,
-		InactivityProbe:       100000, // in Milliseconds
-		OpenFlowProbe:         0,      // in Seconds
-		OfctrlWaitBeforeClear: 0,      // in Milliseconds
-		MonitorAll:            true,
-		LFlowCacheEnable:      true,
-		RawClusterSubnets:     "10.128.0.0/14/23",
-		EncapToSValue:         "none",
-		DisableCTInvFlows:     false,
-		DoSCheckInterval:      100, // in Milliseconds
+		MTU:                           1400,
+		ConntrackZone:                 64000,
+		EncapType:                     "geneve",
+		EncapIP:                       "",
+		EncapPort:                     DefaultEncapPort,
+		InactivityProbe:               100000, // in Milliseconds
+		OpenFlowProbe:                 0,      // in Seconds
+		OfctrlWaitBeforeClear:         0,      // in Milliseconds
+		MonitorAll:                    true,
+		LFlowCacheEnable:              true,
+		RawClusterSubnets:             "10.128.0.0/14/23",
+		EncapToSValue:                 "none",
+		DisableCTInvFlows:             false,
+		DoSCheckInterval:              100,   // in Milliseconds
+		ClusterSubnetsMacBindingAging: 36000, // in Seconds
 	}
 
 	// Logging holds logging-related parsed config file parameters and command-line overrides
@@ -244,6 +245,12 @@ type DefaultConfig struct {
 	EnableUDPAggregation bool `gcfg:"enable-udp-aggregation"`
 	// Periodic checks to see if a Pod is potentially source of DoS attack
 	DoSCheckInterval int `gcfg:"dos-check-interval"`
+	// MAC binding aging threshold (in seconds) for cluster subnets.
+	// IPs in cluster subnets shouldn't generate MAC bindings in normal cases, but it
+	// can happen occasionally due to SB DB notification latency during pod deletion
+	// in large scale environments. The aging configuration is to avoid such MAC binding
+	// entries accumulation over time.
+	ClusterSubnetsMacBindingAging int `gcfg:"cluster-subnets-mac-binding-aging"`
 }
 
 // LoggingConfig holds logging-related parsed config file parameters and command-line overrides
@@ -854,6 +861,12 @@ var CommonFlags = []cli.Flag{
 		Usage:       "Interval in milliseconds to check if any Pod is a source of DoS attack",
 		Destination: &cliConfig.Default.DoSCheckInterval,
 		Value:       Default.DoSCheckInterval,
+	},
+	&cli.IntFlag{
+		Name:        "cluster-subnets-mac-binding-aging",
+		Usage:       "MAC binding aging threshold (in seconds) for cluster subnets",
+		Destination: &cliConfig.Default.ClusterSubnetsMacBindingAging,
+		Value:       Default.ClusterSubnetsMacBindingAging,
 	},
 }
 

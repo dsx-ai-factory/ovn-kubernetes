@@ -95,6 +95,7 @@ OVS_MIN_REVALIDATE_PPS="1"
 OVS_MAX_IDLE="20000"
 OVN_NB_ENABLE_LEADER_XFER_FOR_SNAPSHOT="false"
 OVN_SB_ENABLE_LEADER_XFER_FOR_SNAPSHOT="false"
+OVN_CLUSTER_SUBNETS_MAC_BINDING_AGING=""
 OVNKUBE_CONFIG_DURATION_ENABLE=
 # IN_UPGRADE is true only if called by upgrade-ovn.sh during the upgrade test,
 # it will render only the parts in ovn-setup.yaml related to RBAC permissions.
@@ -336,6 +337,9 @@ while [ "$1" != "" ]; do
   --enable-ovn-sb-leader-xfer-for-snapshot)
     OVN_SB_ENABLE_LEADER_XFER_FOR_SNAPSHOT=$VALUE
     ;;
+  --cluster-subnets-mac-binding-aging)
+    OVN_CLUSTER_SUBNETS_MAC_BINDING_AGING=$VALUE
+    ;;
   --ovnkube-config-duration-enable)
     OVNKUBE_CONFIG_DURATION_ENABLE=$VALUE
     ;;
@@ -521,6 +525,8 @@ ovn_nb_enable_leader_xfer_for_snapshot=${OVN_NB_ENABLE_LEADER_XFER_FOR_SNAPSHOT}
 echo "ovn_nb_enable_leader_xfer_for_snapshot: ${ovn_nb_enable_leader_xfer_for_snapshot}"
 ovn_sb_enable_leader_xfer_for_snapshot=${OVN_SB_ENABLE_LEADER_XFER_FOR_SNAPSHOT}
 echo "ovn_sb_enable_leader_xfer_for_snapshot: ${ovn_sb_enable_leader_xfer_for_snapshot}"
+ovn_cluster_subnets_mac_binding_aging=${OVN_CLUSTER_SUBNETS_MAC_BINDING_AGING}
+echo "ovn_cluster_subnets_mac_binding_aging: ${ovn_cluster_subnets_mac_binding_aging}"
 ovnkube_config_duration_enable=${OVNKUBE_CONFIG_DURATION_ENABLE}
 echo "ovnkube_config_duration_enable: ${ovnkube_config_duration_enable}"
 coredns_cluster_ip=${COREDNS_CLUSTER_IP}
@@ -632,6 +638,7 @@ ovn_image=${image} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovn_nohostsubnet_label=${ovn_nohostsubnet_label} \
   ovn_ctinv_flows_disable=${ovn_ctinv_flows_disable} \
+  ovn_cluster_subnets_mac_binding_aging=${ovn_cluster_subnets_mac_binding_aging} \
   j2 ../templates/ovnkube-master.yaml.j2 -o ${output_dir}/ovnkube-master.yaml
 
 ovn_image=${imagec} \
@@ -677,6 +684,7 @@ ovn_image=${image} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovn_nohostsubnet_label=${ovn_nohostsubnet_label} \
   ovn_ctinv_flows_disable=${ovn_ctinv_flows_disable} \
+  ovn_cluster_subnets_mac_binding_aging=${ovn_cluster_subnets_mac_binding_aging} \
   j2 ../templates/ovnk8s-master.yaml.j2 -o ${output_dir}/ovnk8s-master.yaml
 
 ovn_image=${image} \
