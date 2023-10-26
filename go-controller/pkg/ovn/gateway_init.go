@@ -574,11 +574,39 @@ func (oc *DefaultNetworkController) addExternalSwitch(prefix, interfaceID, nodeN
 		return fmt.Errorf("failed to add logical router port %+v to router %s: %v", externalLogicalRouterPort, gatewayRouter, err)
 	}
 
+	// check if localnet port is already present on externalswitch.
+	// if present, delete the localnet port if the portname is different from interfaceID.
+	externalSwitch := externalSwitchName(prefix, nodeName)
+	lsw, err := libovsdbops.GetLogicalSwitch(oc.nbClient, &nbdb.LogicalSwitch{Name: externalSwitch})
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		return fmt.Errorf("failed while checking of existence of logicalswitch %s: (%v)", externalSwitch, err)
+	}
+
+	// externalswitch is already present, check for localnet ports
+	if err == nil {
+		localNetLogicalSwitchPorts := []*nbdb.LogicalSwitchPort{}
+		for _, port := range lsw.Ports {
+			lsp := &nbdb.LogicalSwitchPort{UUID: port}
+			lsp, err := libovsdbops.GetLogicalSwitchPort(oc.nbClient, lsp)
+			if err != nil {
+				return fmt.Errorf("error getting port %+v on switch %+v: %v", lsp, lsw, err)
+			}
+			if lsp.Type == "localnet" && lsp.Name != interfaceID {
+				localNetLogicalSwitchPorts = append(localNetLogicalSwitchPorts, lsp)
+			}
+		}
+		if len(localNetLogicalSwitchPorts) > 0 {
+			err := libovsdbops.DeleteLogicalSwitchPorts(oc.nbClient, lsw, localNetLogicalSwitchPorts...)
+			if err != nil {
+				return fmt.Errorf("failed to delete localnet logicalswitch ports %+v: %v", localNetLogicalSwitchPorts, err)
+			}
+		}
+	}
+
 	// Create the external switch for the physical interface to connect to
 	// and add external interface as a logical port to external_switch.
 	// This is a learning switch port with "unknown" address. The external
 	// world is accessed via this port.
-	externalSwitch := externalSwitchName(prefix, nodeName)
 	externalLogicalSwitchPort := nbdb.LogicalSwitchPort{
 		Addresses: []string{"unknown"},
 		Type:      "localnet",
