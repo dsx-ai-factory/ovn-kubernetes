@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/onsi/ginkgo"
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -19,6 +19,7 @@ import (
 
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
+	e2epodoutput "k8s.io/kubernetes/test/e2e/framework/pod/output"
 	e2eservice "k8s.io/kubernetes/test/e2e/framework/service"
 )
 
@@ -67,7 +68,7 @@ var _ = ginkgo.Describe("Services", func() {
 		serverPod.Labels = jig.Labels
 		serverPod.Spec.HostNetwork = true
 
-		serverPod = f.PodClient().CreateSync(serverPod)
+		serverPod = e2epod.NewPodClient(f).CreateSync(serverPod)
 		nodeName := serverPod.Spec.NodeName
 
 		ginkgo.By("Connecting to the service from another host-network pod on node " + nodeName)
@@ -84,7 +85,7 @@ var _ = ginkgo.Describe("Services", func() {
 			net.JoinHostPort(service.Spec.ClusterIP, "80"))
 
 		err = wait.PollImmediate(framework.Poll, 30*time.Second, func() (bool, error) {
-			stdout, err := framework.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
+			stdout, err := e2epodoutput.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
 			if err != nil {
 				return false, err
 			}
@@ -139,11 +140,11 @@ var _ = ginkgo.Describe("Services", func() {
 		}
 
 		cmd := fmt.Sprintf(`ip -br addr; ip addr del %s dev lo; ip addr add %s dev lo; ip -br addr`, extraCIDR, extraCIDR)
-		_, err = framework.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
+		_, err = e2epodoutput.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
 		framework.ExpectNoError(err)
 		cleanupFn = func() {
 			cmd := fmt.Sprintf(`ip addr del %s dev lo || true`, extraCIDR)
-			_, err = framework.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
+			_, err = e2epodoutput.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
 		}
 
 		ginkgo.By("Starting a UDP server listening on the additional IP")
@@ -155,7 +156,7 @@ var _ = ginkgo.Describe("Services", func() {
 		serverPod.Spec.NodeName = nodeName
 		serverPod.Spec.HostNetwork = true
 		serverPod.Spec.Containers[0].TerminationMessagePolicy = v1.TerminationMessageFallbackToLogsOnError
-		f.PodClient().CreateSync(serverPod)
+		e2epod.NewPodClient(f).CreateSync(serverPod)
 
 		ginkgo.By("Ensuring the server is listening on the additional IP")
 		// Connect from host -> additional IP. This shouldn't touch OVN at all, just acting as a basic
@@ -163,7 +164,7 @@ var _ = ginkgo.Describe("Services", func() {
 		err = wait.PollImmediate(framework.Poll, 30*time.Second, func() (bool, error) {
 			cmd = fmt.Sprintf(`echo hostname | /usr/bin/socat -t 5 - "udp:%s"`,
 				net.JoinHostPort(extraIP, udpPortS))
-			stdout, err := framework.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
+			stdout, err := e2epodoutput.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
 			if err != nil {
 				return false, err
 			}
@@ -200,7 +201,7 @@ var _ = ginkgo.Describe("Services", func() {
 		err = wait.PollImmediate(framework.Poll, 30*time.Second, func() (bool, error) {
 			cmd = fmt.Sprintf(`/bin/sh -c 'echo hostname | /usr/bin/socat -t 5 - "udp:%s"'`,
 				net.JoinHostPort(service.Spec.ClusterIP, "80"))
-			stdout, err := framework.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
+			stdout, err := e2epodoutput.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
 			if err != nil {
 				return false, err
 			}
@@ -213,8 +214,9 @@ var _ = ginkgo.Describe("Services", func() {
 		clientServerPod := e2epod.NewAgnhostPod(namespace, "client", nil, nil, []v1.ContainerPort{{ContainerPort: (udpPort)}, {ContainerPort: (udpPort), Protocol: "UDP"}},
 			"netexec")
 		clientServerPod.Spec.NodeName = nodeName
-		f.PodClient().CreateSync(clientServerPod)
-		clientServerPod, err = f.PodClient().Get(context.TODO(), clientServerPod.Name, metav1.GetOptions{})
+		podClient := e2epod.NewPodClient(f)
+		podClient.CreateSync(clientServerPod)
+		clientServerPod, err = podClient.Get(context.TODO(), clientServerPod.Name, metav1.GetOptions{})
 		framework.ExpectNoError(err)
 
 		// annoying: need to issue a curl to the test pod to tell it to connect to the service
@@ -225,7 +227,7 @@ var _ = ginkgo.Describe("Services", func() {
 				"udp",
 				service.Spec.ClusterIP,
 				80)
-			stdout, err := framework.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
+			stdout, err := e2epodoutput.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
 			if err != nil {
 				return false, err
 			}

@@ -10,13 +10,13 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/onsi/ginkgo"
-	ginkgotable "github.com/onsi/ginkgo/extensions/table"
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
+	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	"k8s.io/kubernetes/test/e2e/framework/skipper"
 )
@@ -113,7 +113,7 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway through a gateway pod", 
 		deletePodSyncNS(clientSet, defaultNamespace, gatewayPodName2)
 	})
 
-	ginkgotable.DescribeTable("Should validate ICMP connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled",
+	ginkgo.DescribeTable("Should validate ICMP connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled",
 		func(addresses *gatewayTestIPs, icmpCommand string) {
 			if addresses.srcPodIP == "" || addresses.nodeIP == "" {
 				skipper.Skipf("Skipping as pod ip / node ip are not set pod ip %s node ip %s", addresses.srcPodIP, addresses.nodeIP)
@@ -148,17 +148,17 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway through a gateway pod", 
 				go func(target string) {
 					defer ginkgo.GinkgoRecover()
 					defer pingSync.Done()
-					_, err := framework.RunKubectl(f.Namespace.Name, "exec", srcPingPodName, "--", "ping", "-c", testTimeout, target)
+					_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPingPodName, "--", "ping", "-c", testTimeout, target)
 					framework.ExpectNoError(err, "Failed to ping remote gateway %s from pod %s", target, srcPingPodName)
 				}(t)
 			}
 			pingSync.Wait()
 			tcpDumpSync.Wait()
 		},
-		ginkgotable.Entry("ipv4", &addressesv4, "icmp"),
-		ginkgotable.Entry("ipv6", &addressesv6, "icmp6"))
+		ginkgo.Entry("ipv4", &addressesv4, "icmp"),
+		ginkgo.Entry("ipv6", &addressesv6, "icmp6"))
 
-	ginkgotable.DescribeTable("Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled",
+	ginkgo.DescribeTable("Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled",
 		func(protocol string, addresses *gatewayTestIPs, destPort, destPortOnPod int) {
 			if addresses.srcPodIP == "" || addresses.nodeIP == "" {
 				skipper.Skipf("Skipping as pod ip / node ip are not set pod ip %s node ip %s", addresses.srcPodIP, addresses.nodeIP)
@@ -189,7 +189,7 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway through a gateway pod", 
 				} else {
 					args = append(args, "bash", "-c", fmt.Sprintf("echo | nc -w 1 -u %s %d", target, destPort))
 				}
-				res, err := framework.RunKubectl(f.Namespace.Name, args...)
+				res, err := e2ekubectl.RunKubectl(f.Namespace.Name, args...)
 				framework.ExpectNoError(err, "failed to reach %s (%s)", target, protocol)
 				hostname := strings.TrimSuffix(res, "\n")
 				if hostname != "" {
@@ -208,10 +208,10 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway through a gateway pod", 
 			}
 
 		},
-		ginkgotable.Entry("UDP ipv4", "udp", &addressesv4, externalUDPPort, srcUDPPort),
-		ginkgotable.Entry("TCP ipv4", "tcp", &addressesv4, externalTCPPort, srcHTTPPort),
-		ginkgotable.Entry("UDP ipv6", "udp", &addressesv6, externalUDPPort, srcUDPPort),
-		ginkgotable.Entry("TCP ipv6", "tcp", &addressesv6, externalTCPPort, srcHTTPPort))
+		ginkgo.Entry("UDP ipv4", "udp", &addressesv4, externalUDPPort, srcUDPPort),
+		ginkgo.Entry("TCP ipv4", "tcp", &addressesv4, externalTCPPort, srcHTTPPort),
+		ginkgo.Entry("UDP ipv6", "udp", &addressesv6, externalUDPPort, srcUDPPort),
+		ginkgo.Entry("TCP ipv6", "tcp", &addressesv6, externalTCPPort, srcHTTPPort))
 })
 
 // Validate pods can reach a network running in multiple container's loopback
@@ -258,7 +258,7 @@ var _ = ginkgo.Describe("e2e multiple external gateway validation", func() {
 			"k8s.ovn.org/routing-external-gws-",
 		}
 		ginkgo.By("Resetting the gw annotation")
-		framework.RunKubectlOrDie(f.Namespace.Name, annotateArgs...)
+		e2ekubectl.RunKubectlOrDie(f.Namespace.Name, annotateArgs...)
 	})
 
 	ginkgo.AfterEach(func() {
@@ -267,7 +267,7 @@ var _ = ginkgo.Describe("e2e multiple external gateway validation", func() {
 		deleteClusterExternalContainer(gwContainer2)
 	})
 
-	ginkgotable.DescribeTable("Should validate ICMP connectivity to multiple external gateways for an ECMP scenario", func(addresses *gatewayTestIPs, icmpToDump string) {
+	ginkgo.DescribeTable("Should validate ICMP connectivity to multiple external gateways for an ECMP scenario", func(addresses *gatewayTestIPs, icmpToDump string) {
 		if addresses.srcPodIP == "" || addresses.nodeIP == "" {
 			skipper.Skipf("Skipping as pod ip / node ip are not set pod ip %s node ip %s", addresses.srcPodIP, addresses.nodeIP)
 		}
@@ -321,7 +321,7 @@ var _ = ginkgo.Describe("e2e multiple external gateway validation", func() {
 			go func(target string) {
 				defer ginkgo.GinkgoRecover()
 				defer pingSync.Done()
-				_, err := framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, "--", "ping", "-c", testTimeout, target)
+				_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, "--", "ping", "-c", testTimeout, target)
 				if err != nil {
 					framework.Logf("error generating a ping from the test pod %s: %v", srcPodName, err)
 				}
@@ -330,12 +330,12 @@ var _ = ginkgo.Describe("e2e multiple external gateway validation", func() {
 		pingSync.Wait()
 		tcpDumpSync.Wait()
 
-	}, ginkgotable.Entry("IPV4", &addressesv4, "icmp"),
-		ginkgotable.Entry("IPV6", &addressesv6, "icmp6"))
+	}, ginkgo.Entry("IPV4", &addressesv4, "icmp"),
+		ginkgo.Entry("IPV6", &addressesv6, "icmp6"))
 
 	// This test runs a listener on the external container, returning the host name both on tcp and udp.
 	// The src pod tries to hit the remote address until both the containers are hit.
-	ginkgotable.DescribeTable("Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario", func(addresses *gatewayTestIPs, protocol string, destPort, destPortOnPod int) {
+	ginkgo.DescribeTable("Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario", func(addresses *gatewayTestIPs, protocol string, destPort, destPortOnPod int) {
 		if addresses.srcPodIP == "" || addresses.nodeIP == "" {
 			skipper.Skipf("Skipping as pod ip / node ip are not set pod ip %s node ip %s", addresses.srcPodIP, addresses.nodeIP)
 		}
@@ -371,10 +371,10 @@ var _ = ginkgo.Describe("e2e multiple external gateway validation", func() {
 			framework.Failf("Failed to hit all the external gateways via for protocol %s, diff %s", protocol, cmp.Diff(expectedHostNames, returnedHostNames))
 		}
 
-	}, ginkgotable.Entry("IPV4 udp", &addressesv4, "udp", externalUDPPort, srcUDPPort),
-		ginkgotable.Entry("IPV4 tcp", &addressesv4, "tcp", externalTCPPort, srcHTTPPort),
-		ginkgotable.Entry("IPV6 udp", &addressesv6, "udp", externalUDPPort, srcUDPPort),
-		ginkgotable.Entry("IPV6 tcp", &addressesv6, "tcp", externalTCPPort, srcHTTPPort))
+	}, ginkgo.Entry("IPV4 udp", &addressesv4, "udp", externalUDPPort, srcUDPPort),
+		ginkgo.Entry("IPV4 tcp", &addressesv4, "tcp", externalTCPPort, srcHTTPPort),
+		ginkgo.Entry("IPV6 udp", &addressesv6, "udp", externalUDPPort, srcUDPPort),
+		ginkgo.Entry("IPV6 tcp", &addressesv6, "tcp", externalTCPPort, srcHTTPPort))
 })
 
 var _ = ginkgo.Describe("e2e multiple external gateway stale conntrack entry deletion validation", func() {
@@ -424,7 +424,7 @@ var _ = ginkgo.Describe("e2e multiple external gateway stale conntrack entry del
 			"k8s.ovn.org/routing-external-gws-",
 		}
 		ginkgo.By("Resetting the gw annotation")
-		framework.RunKubectlOrDie(f.Namespace.Name, annotateArgs...)
+		e2ekubectl.RunKubectlOrDie(f.Namespace.Name, annotateArgs...)
 	})
 
 	ginkgo.AfterEach(func() {
@@ -437,7 +437,7 @@ var _ = ginkgo.Describe("e2e multiple external gateway stale conntrack entry del
 		deletePodSyncNS(clientSet, defaultNamespace, gatewayPodName2)
 	})
 
-	ginkgotable.DescribeTable("Namespace annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes", func(addresses *gatewayTestIPs, protocol string) {
+	ginkgo.DescribeTable("Namespace annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes", func(addresses *gatewayTestIPs, protocol string) {
 		if addresses.srcPodIP == "" || addresses.nodeIP == "" {
 			skipper.Skipf("Skipping as pod ip / node ip are not set pod ip %s node ip %s", addresses.srcPodIP, addresses.nodeIP)
 		}
@@ -497,12 +497,12 @@ var _ = ginkgo.Describe("e2e multiple external gateway stale conntrack entry del
 		}
 
 	},
-		ginkgotable.Entry("IPV4 udp", &addressesv4, "udp"),
-		ginkgotable.Entry("IPV4 tcp", &addressesv4, "tcp"),
-		ginkgotable.Entry("IPV6 udp", &addressesv6, "udp"),
-		ginkgotable.Entry("IPV6 tcp", &addressesv6, "tcp"))
+		ginkgo.Entry("IPV4 udp", &addressesv4, "udp"),
+		ginkgo.Entry("IPV4 tcp", &addressesv4, "tcp"),
+		ginkgo.Entry("IPV6 udp", &addressesv6, "udp"),
+		ginkgo.Entry("IPV6 tcp", &addressesv6, "tcp"))
 
-	ginkgotable.DescribeTable("ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes", func(addresses *gatewayTestIPs, protocol string) {
+	ginkgo.DescribeTable("ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes", func(addresses *gatewayTestIPs, protocol string) {
 		if addresses.srcPodIP == "" || addresses.nodeIP == "" {
 			skipper.Skipf("Skipping as pod ip / node ip are not set pod ip %s node ip %s", addresses.srcPodIP, addresses.nodeIP)
 		}
@@ -592,10 +592,10 @@ var _ = ginkgo.Describe("e2e multiple external gateway stale conntrack entry del
 		}
 
 	},
-		ginkgotable.Entry("IPV4 udp", &addressesv4, "udp"),
-		ginkgotable.Entry("IPV4 tcp", &addressesv4, "tcp"),
-		ginkgotable.Entry("IPV6 udp", &addressesv6, "udp"),
-		ginkgotable.Entry("IPV6 tcp", &addressesv6, "tcp"))
+		ginkgo.Entry("IPV4 udp", &addressesv4, "udp"),
+		ginkgo.Entry("IPV4 tcp", &addressesv4, "tcp"),
+		ginkgo.Entry("IPV6 udp", &addressesv6, "udp"),
+		ginkgo.Entry("IPV6 tcp", &addressesv6, "tcp"))
 })
 
 // BFD Tests are dual of external gateway. The only difference is that they enable BFD on ovn and
@@ -663,7 +663,7 @@ var _ = ginkgo.Context("BFD", func() {
 			deletePodSyncNS(clientSet, defaultNamespace, gatewayPodName2)
 		})
 
-		ginkgotable.DescribeTable("Should validate ICMP connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled",
+		ginkgo.DescribeTable("Should validate ICMP connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled",
 			func(addresses *gatewayTestIPs, icmpCommand string) {
 				if addresses.srcPodIP == "" || addresses.nodeIP == "" {
 					skipper.Skipf("Skipping as pod ip / node ip are not set pod ip %s node ip %s", addresses.srcPodIP, addresses.nodeIP)
@@ -707,7 +707,7 @@ var _ = ginkgo.Context("BFD", func() {
 					go func(target string) {
 						defer ginkgo.GinkgoRecover()
 						defer pingSync.Done()
-						_, err := framework.RunKubectl(f.Namespace.Name, "exec", srcPingPodName, "--", "ping", "-c", testTimeout, target)
+						_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPingPodName, "--", "ping", "-c", testTimeout, target)
 						if err != nil {
 							framework.Logf("error generating a ping from the test pod %s: %v", srcPingPodName, err)
 						}
@@ -735,17 +735,17 @@ var _ = ginkgo.Context("BFD", func() {
 					go func(target string) {
 						defer ginkgo.GinkgoRecover()
 						defer pingSync.Done()
-						_, err := framework.RunKubectl(f.Namespace.Name, "exec", srcPingPodName, "--", "ping", "-c", testTimeout, target)
+						_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPingPodName, "--", "ping", "-c", testTimeout, target)
 						framework.ExpectNoError(err, "Failed to ping remote gateway %s from pod %s", target, srcPingPodName)
 					}(t)
 				}
 				pingSync.Wait()
 				tcpDumpSync.Wait()
 			},
-			ginkgotable.Entry("ipv4", &addressesv4, "icmp"),
-			ginkgotable.Entry("ipv6", &addressesv6, "icmp6"))
+			ginkgo.Entry("ipv4", &addressesv4, "icmp"),
+			ginkgo.Entry("ipv6", &addressesv6, "icmp6"))
 
-		ginkgotable.DescribeTable("Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled",
+		ginkgo.DescribeTable("Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled",
 			func(protocol string, addresses *gatewayTestIPs, destPort int) {
 				if addresses.srcPodIP == "" || addresses.nodeIP == "" {
 					skipper.Skipf("Skipping as pod ip / node ip are not set pod ip %s node ip %s", addresses.srcPodIP, addresses.nodeIP)
@@ -797,10 +797,10 @@ var _ = ginkgo.Context("BFD", func() {
 				}
 
 			},
-			ginkgotable.Entry("UDP ipv4", "udp", &addressesv4, externalUDPPort),
-			ginkgotable.Entry("TCP ipv4", "tcp", &addressesv4, externalTCPPort),
-			ginkgotable.Entry("UDP ipv6", "udp", &addressesv6, externalUDPPort),
-			ginkgotable.Entry("TCP ipv6", "tcp", &addressesv6, externalTCPPort))
+			ginkgo.Entry("UDP ipv4", "udp", &addressesv4, externalUDPPort),
+			ginkgo.Entry("TCP ipv4", "tcp", &addressesv4, externalTCPPort),
+			ginkgo.Entry("UDP ipv6", "udp", &addressesv6, externalUDPPort),
+			ginkgo.Entry("TCP ipv6", "tcp", &addressesv6, externalTCPPort))
 	})
 
 	// Validate pods can reach a network running in multiple container's loopback
@@ -851,7 +851,7 @@ var _ = ginkgo.Context("BFD", func() {
 				"k8s.ovn.org/routing-external-gws-",
 			}
 			ginkgo.By("Resetting the gw annotation")
-			framework.RunKubectlOrDie(f.Namespace.Name, annotateArgs...)
+			e2ekubectl.RunKubectlOrDie(f.Namespace.Name, annotateArgs...)
 		})
 
 		ginkgo.AfterEach(func() {
@@ -860,7 +860,7 @@ var _ = ginkgo.Context("BFD", func() {
 			deleteClusterExternalContainer(gwContainer2)
 		})
 
-		ginkgotable.DescribeTable("Should validate ICMP connectivity to multiple external gateways for an ECMP scenario", func(addresses *gatewayTestIPs, icmpToDump string) {
+		ginkgo.DescribeTable("Should validate ICMP connectivity to multiple external gateways for an ECMP scenario", func(addresses *gatewayTestIPs, icmpToDump string) {
 			if addresses.srcPodIP == "" || addresses.nodeIP == "" {
 				skipper.Skipf("Skipping as pod ip / node ip are not set pod ip %s node ip %s", addresses.srcPodIP, addresses.nodeIP)
 			}
@@ -914,7 +914,7 @@ var _ = ginkgo.Context("BFD", func() {
 				go func(target string) {
 					defer ginkgo.GinkgoRecover()
 					defer pingSync.Done()
-					_, err := framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "ping", "-c", testTimeout, target)
+					_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "ping", "-c", testTimeout, target)
 					if err != nil {
 						framework.Logf("error generating a ping from the test pod %s: %v", srcPodName, err)
 					}
@@ -941,7 +941,7 @@ var _ = ginkgo.Context("BFD", func() {
 				go func(target string) {
 					defer ginkgo.GinkgoRecover()
 					defer pingSync.Done()
-					_, err := framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "ping", "-c", testTimeout, target)
+					_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "ping", "-c", testTimeout, target)
 					if err != nil {
 						framework.Logf("error generating a ping from the test pod %s: %v", srcPodName, err)
 					}
@@ -950,12 +950,12 @@ var _ = ginkgo.Context("BFD", func() {
 
 			pingSync.Wait()
 			tcpDumpSync.Wait()
-		}, ginkgotable.Entry("IPV4", &addressesv4, "icmp"),
-			ginkgotable.Entry("IPV6", &addressesv6, "icmp6"))
+		}, ginkgo.Entry("IPV4", &addressesv4, "icmp"),
+			ginkgo.Entry("IPV6", &addressesv6, "icmp6"))
 
 		// This test runs a listener on the external container, returning the host name both on tcp and udp.
 		// The src pod tries to hit the remote address until both the containers are hit.
-		ginkgotable.DescribeTable("Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario", func(addresses *gatewayTestIPs, protocol string, destPort int) {
+		ginkgo.DescribeTable("Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario", func(addresses *gatewayTestIPs, protocol string, destPort int) {
 			if addresses.srcPodIP == "" || addresses.nodeIP == "" {
 				skipper.Skipf("Skipping as pod ip / node ip are not set pod ip %s node ip %s", addresses.srcPodIP, addresses.nodeIP)
 			}
@@ -1012,10 +1012,10 @@ var _ = ginkgo.Context("BFD", func() {
 				framework.ExpectEqual(expectedHostName, hostname, "Hostname returned by nc not as expected")
 			}
 
-		}, ginkgotable.Entry("IPV4 udp", &addressesv4, "udp", externalUDPPort),
-			ginkgotable.Entry("IPV4 tcp", &addressesv4, "tcp", externalTCPPort),
-			ginkgotable.Entry("IPV6 udp", &addressesv6, "udp", externalUDPPort),
-			ginkgotable.Entry("IPV6 tcp", &addressesv6, "tcp", externalTCPPort))
+		}, ginkgo.Entry("IPV4 udp", &addressesv4, "udp", externalUDPPort),
+			ginkgo.Entry("IPV4 tcp", &addressesv4, "tcp", externalTCPPort),
+			ginkgo.Entry("IPV6 udp", &addressesv6, "udp", externalUDPPort),
+			ginkgo.Entry("IPV6 tcp", &addressesv6, "tcp", externalTCPPort))
 	})
 })
 
@@ -1150,11 +1150,11 @@ func setupGatewayContainersForConntrackTest(f *framework.Framework, nodes *v1.No
 
 	// start iperf3 servers at ports 5201 and 5202 on the src app pod
 	args := []string{"exec", srcPodName, "--", "iperf3", "-s", "--daemon", "-V", fmt.Sprintf("-p %d", 5201)}
-	_, err = framework.RunKubectl(f.Namespace.Name, args...)
+	_, err = e2ekubectl.RunKubectl(f.Namespace.Name, args...)
 	framework.ExpectNoError(err, "failed to start iperf3 server on pod %s at port 5201", srcPodName)
 
 	args = []string{"exec", srcPodName, "--", "iperf3", "-s", "--daemon", "-V", fmt.Sprintf("-p %d", 5202)}
-	_, err = framework.RunKubectl(f.Namespace.Name, args...)
+	_, err = e2ekubectl.RunKubectl(f.Namespace.Name, args...)
 	framework.ExpectNoError(err, "failed to start iperf3 server on pod %s at port 5202", srcPodName)
 
 	addressesv4.srcPodIP, addressesv6.srcPodIP = getPodAddresses(clientPod)
@@ -1224,7 +1224,7 @@ func annotatePodForGateway(podName, namespace, networkIPs string, bfd bool) {
 		annotateArgs = append(annotateArgs, "k8s.ovn.org/bfd-enabled=\"\"")
 	}
 	framework.Logf("Annotating the external gateway pod with annotation %s", annotateArgs)
-	framework.RunKubectlOrDie("default", annotateArgs...)
+	e2ekubectl.RunKubectlOrDie("default", annotateArgs...)
 }
 
 func annotateNamespaceForGateway(namespace string, bfd bool, gateways ...string) {
@@ -1242,7 +1242,7 @@ func annotateNamespaceForGateway(namespace string, bfd bool, gateways ...string)
 		annotateArgs = append(annotateArgs, "k8s.ovn.org/bfd-enabled=\"\"")
 	}
 	framework.Logf("Annotating the external gateway test namespace to container gateways: %s", externalGateways)
-	framework.RunKubectlOrDie(namespace, annotateArgs...)
+	e2ekubectl.RunKubectlOrDie(namespace, annotateArgs...)
 }
 
 func hostNamesForContainers(containers []string) map[string]struct{} {
@@ -1268,7 +1268,7 @@ func pokeHostnameViaNC(podName, namespace, protocol, target string, port int) st
 	} else {
 		args = append(args, "bash", "-c", fmt.Sprintf("echo | nc -w 1 -u %s %d", target, port))
 	}
-	res, err := framework.RunKubectl(namespace, args...)
+	res, err := e2ekubectl.RunKubectl(namespace, args...)
 	framework.ExpectNoError(err, "failed to reach %s (%s)", target, protocol)
 	hostname := strings.TrimSuffix(res, "\n")
 	return hostname
@@ -1277,10 +1277,10 @@ func pokeHostnameViaNC(podName, namespace, protocol, target string, port int) st
 // pokeConntrackEntries returns the number of conntrack entries that match the provided pattern, protocol and podIP
 func pokeConntrackEntries(nodeName, podIP, protocol string, patterns []string) int {
 	args := []string{"get", "pods", "--selector=app=ovs-node", "--field-selector", fmt.Sprintf("spec.nodeName=%s", nodeName), "-o", "jsonpath={.items..metadata.name}"}
-	ovsPodName, err := framework.RunKubectl("ovn-kubernetes", args...)
+	ovsPodName, err := e2ekubectl.RunKubectl("ovn-kubernetes", args...)
 	framework.ExpectNoError(err, "failed to get the ovs pod on node %s", nodeName)
 	args = []string{"exec", ovsPodName, "--", "ovs-dpctl", "dump-conntrack"}
-	conntrackEntries, err := framework.RunKubectl("ovn-kubernetes", args...)
+	conntrackEntries, err := e2ekubectl.RunKubectl("ovn-kubernetes", args...)
 	framework.ExpectNoError(err, "failed to get the conntrack entries from node %s", nodeName)
 	numOfConnEntries := 0
 	for _, connEntry := range strings.Split(conntrackEntries, "\n") {
