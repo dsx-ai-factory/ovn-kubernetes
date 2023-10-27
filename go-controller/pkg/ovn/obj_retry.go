@@ -1406,7 +1406,7 @@ func (oc *Controller) getSyncResourcesFunc(r *retryObjs) (func([]interface{}) er
 	return syncFunc, nil
 }
 
-// IsObjectInTerminalState returns true if the object is in a terminal state.
+// Given an object and its type, isObjectInTerminalState returns true if the object is a in terminal state.
 // This is used now for pods that are either in a PodSucceeded or in a PodFailed state.
 func (oc *Controller) isObjectInTerminalState(objType reflect.Type, obj interface{}) bool {
 	switch objType {

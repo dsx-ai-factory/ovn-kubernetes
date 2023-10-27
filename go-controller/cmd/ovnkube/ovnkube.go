@@ -278,10 +278,22 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	if node != "" {
 		var nodeWatchFactory factory.NodeWatchFactory
 		var nodeEventRecorder record.EventRecorder
+		dpuName := ""
+		nodeNames := []string{node}
+		if config.OvnKubeNode.Mode == types.NodeModeDPU {
+			stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
+				"external_ids:hostname")
+			if err != nil || stdout == "" {
+				return fmt.Errorf("dpu node name not found in external_ids: %v (%q)", err, stderr)
+			}
+			dpuName = strings.Split(stdout, "\n")[0]
+			klog.Infof("Initializing K8s DPU node: %v", dpuName)
+			nodeNames = append(nodeNames, dpuName)
+		}
 
 		if masterWatchFactory == nil {
 			var err error
-			nodeWatchFactory, err = factory.NewNodeWatchFactory(ovnClientset, node)
+			nodeWatchFactory, err = factory.NewNodeWatchFactory(ovnClientset, nodeNames)
 			if err != nil {
 				return err
 			}
@@ -289,6 +301,7 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 		} else {
 			nodeWatchFactory = masterWatchFactory
 		}
+		klog.Infof("Initializing K8s nodes: %v", nodeNames)
 
 		if masterEventRecorder == nil {
 			nodeEventRecorder = util.EventRecorder(ovnClientset.KubeClient)
@@ -302,7 +315,7 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 		// register ovnkube node specific prometheus metrics exported by the node
 		metrics.RegisterNodeMetrics(config.MetricsScrapeInterval, stopChan)
 		start := time.Now()
-		n := ovnnode.NewNode(ovnClientset.KubeClient, nodeWatchFactory, node, stopChan, nodeEventRecorder, wg)
+		n := ovnnode.NewNode(ovnClientset, nodeWatchFactory, node, dpuName, stopChan, nodeEventRecorder, wg)
 		if err := n.Start(ctx.Context, wg); err != nil {
 			// exit gracefully.
 			close(stopChan)

@@ -15,6 +15,8 @@ import (
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	egressqos "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
 	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
+	portmirror "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
+	portmirrorfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -71,6 +73,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 	egressFirewallObjects := []runtime.Object{}
 	egressQoSObjects := []runtime.Object{}
 	adminPBRObjects := []runtime.Object{}
+	portMirrorObjects := []runtime.Object{}
 	v1Objects := []runtime.Object{}
 	for _, object := range objects {
 		if _, isEgressIPObject := object.(*egressip.EgressIPList); isEgressIPObject {
@@ -81,6 +84,8 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 			egressQoSObjects = append(egressQoSObjects, object)
 		} else if _, isAdminPBRObject := object.(*adminpbrapi.AdminPolicyBasedRouteList); isAdminPBRObject {
 			adminPBRObjects = append(adminPBRObjects, object)
+		} else if _, isPortMirrorObject := object.(*portmirror.PortMirrorList); isPortMirrorObject {
+			portMirrorObjects = append(portMirrorObjects, object)
 		} else {
 			v1Objects = append(v1Objects, object)
 		}
@@ -92,6 +97,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 		EgressQoSClient:       egressqosfake.NewSimpleClientset(egressQoSObjects...),
 		AdminPBRClient:        adminpbrfake.NewSimpleClientset(adminPBRObjects...),
 		NetworkAttchDefClient: networkattachmentdefinitionfake.NewSimpleClientset(),
+		PortMirrorClient:      portmirrorfake.NewSimpleClientset(portMirrorObjects...),
 	}
 	o.init()
 }

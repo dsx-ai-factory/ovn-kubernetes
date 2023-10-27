@@ -40,6 +40,8 @@ func getUUID(model model.Model) string {
 		return t.UUID
 	case *nbdb.LogicalSwitchPort:
 		return t.UUID
+	case *nbdb.Mirror:
+		return t.UUID
 	case *nbdb.NAT:
 		return t.UUID
 	case *nbdb.PortGroup:
@@ -92,6 +94,8 @@ func setUUID(model model.Model, uuid string) {
 	case *nbdb.LogicalSwitch:
 		t.UUID = uuid
 	case *nbdb.LogicalSwitchPort:
+		t.UUID = uuid
+	case *nbdb.Mirror:
 		t.UUID = uuid
 	case *nbdb.NAT:
 		t.UUID = uuid
@@ -180,6 +184,10 @@ func copyIndexes(model model.Model) model.Model {
 			UUID: t.UUID,
 			Name: t.Name,
 		}
+	case *nbdb.Mirror:
+		return &nbdb.Mirror{
+			UUID: t.UUID,
+		}
 	case *nbdb.NAT:
 		return &nbdb.NAT{
 			UUID: t.UUID,
@@ -259,6 +267,8 @@ func getListFromModel(model model.Model) interface{} {
 		return &[]*nbdb.LogicalSwitch{}
 	case *nbdb.LogicalSwitchPort:
 		return &[]*nbdb.LogicalSwitchPort{}
+	case *nbdb.Mirror:
+		return &[]*nbdb.Mirror{}
 	case *nbdb.NAT:
 		return &[]*nbdb.NAT{}
 	case *nbdb.PortGroup:

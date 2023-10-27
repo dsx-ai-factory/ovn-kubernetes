@@ -67,9 +67,10 @@ func (o *FakeOVNNode) init() {
 
 	o.stopChan = make(chan struct{})
 
-	o.watcher, err = factory.NewNodeWatchFactory(o.fakeClient, fakeNodeName)
+	fakeNodeNames := []string{fakeNodeName}
+	o.watcher, err = factory.NewNodeWatchFactory(o.fakeClient, fakeNodeNames)
 	Expect(err).NotTo(HaveOccurred())
 
-	o.node = NewNode(o.fakeClient.KubeClient, o.watcher, fakeNodeName, o.stopChan, o.recorder, o.wg)
+	o.node = NewNode(o.fakeClient, o.watcher, fakeNodeName, "", o.stopChan, o.recorder, o.wg)
 	o.node.Start(context.TODO(), o.wg)
 }

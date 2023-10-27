@@ -31,6 +31,7 @@ import (
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
 	egressqosclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned"
 	ipresvclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/clientset/versioned"
+	portmirrorclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned"
 	virtualipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/clientset/versioned"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
@@ -51,6 +52,7 @@ type OVNClientset struct {
 	AdminPBRClient           adminpbrclientset.Interface
 	VirtualIPClient          virtualipclientset.Interface
 	IPReservationClient      ipresvclientset.Interface
+	PortMirrorClient         portmirrorclientset.Interface
 }
 
 func adjustCommit() string {
@@ -174,6 +176,10 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 	if err != nil {
 		return nil, err
 	}
+	portMirrorClientset, err := portmirrorclientset.NewForConfig(kconfig)
+	if err != nil {
+		return nil, err
+	}
 	return &OVNClientset{
 		KubeClient:               kclientset,
 		EgressIPClient:           egressIPClientset,
@@ -185,6 +191,7 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		AdminPBRClient:           adminPBRClientset,
 		VirtualIPClient:          virtualIPClientset,
 		IPReservationClient:      ipReservationClientset,
+		PortMirrorClient:         portMirrorClientset,
 	}, nil
 }
 
@@ -563,7 +570,10 @@ func GroupKindOf(obj k8sruntime.Object) string {
 	if gk.String() == "" {
 		kinds, _, err := scheme.Scheme.ObjectKinds(obj)
 		if err != nil || len(kinds) == 0 || len(kinds) > 1 {
-			klog.Warningf("BUG: object has no / ambiguous GVK: %#v, err", obj, err)
+			klog.Errorf("BUG: object %#v has no kind or ambiguous GVK: %#v, ", obj, err)
+		}
+		if len(kinds) == 0 {
+			return ""
 		}
 		gk = kinds[0].GroupKind()
 	}

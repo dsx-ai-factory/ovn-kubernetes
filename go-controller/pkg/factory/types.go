@@ -5,6 +5,8 @@ import (
 	discovery "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/tools/cache"
+
+	portmirrorapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
 )
 
 // ObjectCacheInterface represents the exported methods for getting
@@ -39,6 +41,7 @@ type NodeWatchFactory interface {
 	RemoveEndpointSliceHandler(handler *Handler)
 
 	AddPodHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error)
+	AddFilteredPodHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error)
 	RemovePodHandler(handler *Handler)
 
 	AddNetworkattachmentdefinitionHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error)
@@ -60,6 +63,11 @@ type NodeWatchFactory interface {
 	GetEndpointSlices(namespace, svcName string) ([]*discovery.EndpointSlice, error)
 
 	GetAllPods() ([]*kapi.Pod, error)
+	GetPod(namespace, name string) (*kapi.Pod, error)
+	AddPortMirrorHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error)
+	RemovePortMirrorHandler(handler *Handler)
+	GetPortMirrors() ([]*portmirrorapi.PortMirror, error)
+	GetPortMirror(namespace, name string) (*portmirrorapi.PortMirror, error)
 }
 
 type Shutdownable interface {

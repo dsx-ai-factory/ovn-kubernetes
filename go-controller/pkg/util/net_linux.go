@@ -599,3 +599,22 @@ func GetAllDPUHostPFMACAddress() ([]string, error) {
 
 	return pfMACs, nil
 }
+
+func RenameLink(curName, newName string) error {
+	link, err := netLinkOps.LinkByName(curName)
+	if err != nil {
+		return err
+	}
+
+	if err := netLinkOps.LinkSetDown(link); err != nil {
+		return err
+	}
+	if err := netLinkOps.LinkSetName(link, newName); err != nil {
+		return err
+	}
+	if err := netLinkOps.LinkSetUp(link); err != nil {
+		return err
+	}
+
+	return nil
+}
