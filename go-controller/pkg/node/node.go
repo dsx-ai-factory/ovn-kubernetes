@@ -20,6 +20,7 @@ import (
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	kexec "k8s.io/utils/exec"
 	utilnet "k8s.io/utils/net"
@@ -62,10 +63,25 @@ type OvnNode struct {
 	recorder     record.EventRecorder
 	gateway      Gateway
 	ovnUpEnabled bool
+	dpuName      string
 
 	defaultNodeController     *ovnNodeController
 	nonDefaultNodeControllers sync.Map
 	svcAnnotationMap          sync.Map
+	// Mirroring configuration information.
+	portMirrorMap sync.Map
+	// mirrorIDToPortMirrorMap maps list of portmirrors
+	// that uses same mirrorID
+	mirrorIDToPortMirrorMap sync.Map
+	// sf map w.r.t portmirror created
+	portMirrorIDToSFMap sync.Map
+	// portmirror retry queue
+	portMirrorRetryQueueDPU workqueue.RateLimitingInterface
+	// for sf operations
+	sfPortNumberMutex sync.Mutex
+	// usedSFMap contains the list of
+	// sf numbers that are in use.
+	usedSFPortNumMap map[uint32]bool
 }
 
 type ovnNodeController struct {
@@ -91,16 +107,21 @@ type ovnNodeController struct {
 }
 
 // NewNode creates a new controller for node management
-func NewNode(kubeClient clientset.Interface, wf factory.NodeWatchFactory, name string, stopChan chan struct{}, eventRecorder record.EventRecorder, wg *sync.WaitGroup) *OvnNode {
+func NewNode(ovnClient *util.OVNClientset, wf factory.NodeWatchFactory, name, dpuName string, stopChan chan struct{}, eventRecorder record.EventRecorder, wg *sync.WaitGroup) *OvnNode {
 	return &OvnNode{
-		name:             name,
-		client:           kubeClient,
-		Kube:             &kube.Kube{KClient: kubeClient},
+		name:    name,
+		dpuName: dpuName,
+		client:  ovnClient.KubeClient,
+		Kube: &kube.Kube{
+			KClient:          ovnClient.KubeClient,
+			PortMirrorClient: ovnClient.PortMirrorClient,
+		},
 		watchFactory:     wf,
 		stopChan:         stopChan,
 		recorder:         eventRecorder,
 		svcAnnotationMap: sync.Map{},
 		wg:               wg,
+		usedSFPortNumMap: make(map[uint32]bool),
 	}
 }
 
@@ -751,6 +772,19 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 			}
 			if err = nc.watchPodsDPU(n.ovnUpEnabled, pfMACs); err != nil {
 				return err
+			}
+
+			// Start watching for PortMirror configurations.
+			// currently supported on the primary DPU. non-primary DPU could use one of the 2 uplink
+			// ports; so we need to check the source pod's interface to look for the corresponding
+			// uplink to create SF (to work with offloads till we have multi-port eswitch support -
+			// OFED 5.9). Additionally, there are some limitation today with services such
+			// as FlowInspector, which doesn't support multiple SFs.
+			if config.OvnKubeNode.IsPrimaryDPU && config.OVNKubernetesFeature.EnablePortMirror {
+				err = n.watchPortMirrorDPU()
+				if err != nil {
+					return fmt.Errorf("failed to watch port mirror definitions: %w", err)
+				}
 			}
 		}
 

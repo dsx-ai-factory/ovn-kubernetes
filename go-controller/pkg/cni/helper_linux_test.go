@@ -92,7 +92,7 @@ func TestRenameLink(t *testing.T) {
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.netLinkOpsMockHelper)
-			err := renameLink(tc.inpCurrName, tc.inpNewName)
+			err := util.RenameLink(tc.inpCurrName, tc.inpNewName)
 			t.Log(err)
 			if tc.errExp {
 				assert.Error(t, err)

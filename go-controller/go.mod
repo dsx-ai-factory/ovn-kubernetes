@@ -3,6 +3,7 @@ module github.com/ovn-org/ovn-kubernetes/go-controller
 go 1.18
 
 require (
+	github.com/Mellanox/mlxdevm-go v0.3.0
 	github.com/Mellanox/sriovnet v1.1.0
 	github.com/Microsoft/hcsshim v0.8.10-0.20200715222032-5eafd1556990
 	github.com/alexflint/go-filemutex v0.0.0-20171022225611-72bdc8eae2ae
@@ -30,7 +31,7 @@ require (
 	github.com/prometheus/client_model v0.2.0
 	github.com/safchain/ethtool v0.1.1-0.20220308210147-8cbc1a9536b0
 	github.com/spf13/afero v1.4.1
-	github.com/stretchr/testify v1.8.0
+	github.com/stretchr/testify v1.8.2
 	github.com/urfave/cli/v2 v2.2.0
 	github.com/vishvananda/netlink v1.2.1-beta.2.0.20230420174744-55c8b9515a01
 	golang.org/x/net v0.3.1-0.20221206200815-1e63c2f08a10
@@ -90,8 +91,8 @@ require (
 	github.com/shurcooL/sanitized_anchor_name v1.0.0 // indirect
 	github.com/sirupsen/logrus v1.9.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
-	github.com/stretchr/objx v0.4.0 // indirect
-	github.com/vishvananda/netns v0.0.0-20200728191858-db3c7e526aae // indirect
+	github.com/stretchr/objx v0.5.0 // indirect
+	github.com/vishvananda/netns v0.0.1 // indirect
 	go.opencensus.io v0.23.0 // indirect
 	golang.org/x/crypto v0.1.0 // indirect
 	golang.org/x/oauth2 v0.0.0-20220411215720-9780585627b5 // indirect

@@ -109,7 +109,6 @@ BASEDIR=$(dirname $0)
 # OVN_DB_UPGRADE_SCHEMA_INLINE - use ovn-ctl to upgrade DB schema
 # OVN_CLUSTER_SUBNETS_MAC_BINDING_AGING - MAC binding aging threshold for cluster subnets (in seconds)
 
-
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
 # a cmd must be provided, there is no default
@@ -343,6 +342,8 @@ ovn_admin_pbr_enable=${OVN_ADMIN_PBR_ENABLE:-false}
 ovn_virtualip_enable=${OVN_VIRTUALIP_ENABLE:-false}
 #OVN_IPRESERVATION_ENABLE - enable ipreservation for ovn-kubernetes
 ovn_ipreservation_enable=${OVN_IPRESERVATION_ENABLE:-false}
+#OVN_PORT_MIRROR_ENABLE - enable port mirror for ovn-kubernetes
+ovn_port_mirror_enable=${OVN_PORT_MIRROR_ENABLE:-false}
 #OVN_DISABLE_OVN_IFACE_ID_VER - disable usage of the OVN iface-id-ver option
 ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER:-false}
 ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
@@ -1158,6 +1159,11 @@ ovn-master() {
 	  ipreservation_enabled_flag="--enable-ip-reservation"
   fi
 
+  port_mirror_enabled_flag=
+  if [[ ${ovn_port_mirror_enable} == "true" ]]; then
+	  port_mirror_enabled_flag="--enable-port-mirror"
+  fi
+
   nohostsubnet_label_option=
   if [[ ${OVN_NOHOSTSUBNET_LABEL} != "" ]]; then
 	  nohostsubnet_label_option="--no-hostsubnet-nodes=${OVN_NOHOSTSUBNET_LABEL}"
@@ -1235,6 +1241,7 @@ ovn-master() {
     ${admin_pbr_enabled_flag} \
     ${virtualip_enabled_flag} \
     ${ipreservation_enabled_flag} \
+    ${port_mirror_enabled_flag} \
     --metrics-interval ${ovn_metrics_scrape_interval} \
     ${ovnkube_config_duration_enable_flag} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
@@ -1462,6 +1469,11 @@ ovn-node() {
   egressip_enabled_flag=
   if [[ ${ovn_egressip_enable} == "true" ]]; then
       egressip_enabled_flag="--enable-egress-ip"
+  fi
+
+  port_mirror_enabled_flag=
+  if [[ ${ovn_port_mirror_enable} == "true" ]]; then
+	  port_mirror_enabled_flag="--enable-port-mirror"
   fi
 
   multi_network_enabled_flag=
@@ -1754,6 +1766,7 @@ ovn-node() {
     ${multicast_enabled_flag} \
     ${egressip_enabled_flag} \
     ${multi_network_enabled_flag} \
+    ${port_mirror_enabled_flag} \
     ${disable_ovn_iface_id_ver_flag} \
     ${netflow_targets} \
     ${sflow_targets} \

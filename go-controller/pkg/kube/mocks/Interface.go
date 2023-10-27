@@ -19,6 +19,7 @@ import (
 	v1 "github.com/openshift/api/cloudnetwork/v1"
 
 	ipreservationv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
+	portmirrorv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
 	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
 )
 
@@ -605,6 +606,43 @@ func (_m *KubeInterface) UpdateIPReservationStatus(ipresv *ipreservationv1beta1.
 	var r0 error
 	if rf, ok := ret.Get(0).(func(reservation *ipreservationv1beta1.IPReservation) error); ok {
 		r0 = rf(ipresv)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// GetPortMirror provides a mock function with given fields: namespace, name
+func (_m *KubeInterface) GetPortMirror(namespace string, name string) (*portmirrorv1beta1.PortMirror, error) {
+	ret := _m.Called(namespace, name)
+
+	var r0 *portmirrorv1beta1.PortMirror
+	if rf, ok := ret.Get(0).(func(string, string) *portmirrorv1beta1.PortMirror); ok {
+		r0 = rf(namespace, name)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*portmirrorv1beta1.PortMirror)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, string) error); ok {
+		r1 = rf(namespace, name)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// UpdatePortMirrorStatus provides a mock function with given fields: pm
+func (_m *KubeInterface) UpdatePortMirrorStatus(pm *portmirrorv1beta1.PortMirror) error {
+	ret := _m.Called(pm)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*portmirrorv1beta1.PortMirror) error); ok {
+		r0 = rf(pm)
 	} else {
 		r0 = ret.Error(0)
 	}

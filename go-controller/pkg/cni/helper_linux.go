@@ -114,25 +114,6 @@ func setupVethUDPAggregationContainer(ifname string) error {
 	return nil
 }
 
-func renameLink(curName, newName string) error {
-	link, err := util.GetNetLinkOps().LinkByName(curName)
-	if err != nil {
-		return err
-	}
-
-	if err := util.GetNetLinkOps().LinkSetDown(link); err != nil {
-		return err
-	}
-	if err := util.GetNetLinkOps().LinkSetName(link, newName); err != nil {
-		return err
-	}
-	if err := util.GetNetLinkOps().LinkSetUp(link); err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func setSysctl(sysctl string, newVal int) error {
 	return ioutil.WriteFile(sysctl, []byte(strconv.Itoa(newVal)), 0o640)
 }
@@ -234,7 +215,7 @@ func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInter
 
 	// rename the host end of veth pair
 	hostIface.Name = containerID[:(15-len(ifnameSuffix))] + ifnameSuffix
-	if err := renameLink(oldHostVethName, hostIface.Name); err != nil {
+	if err := util.RenameLink(oldHostVethName, hostIface.Name); err != nil {
 		return nil, nil, fmt.Errorf("failed to rename %s to %s: %v", oldHostVethName, hostIface.Name, err)
 	}
 
@@ -274,7 +255,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 
 		err = netns.Do(func(hostNS ns.NetNS) error {
 			contIface.Name = ifName
-			err = renameLink(netdevice, contIface.Name)
+			err = util.RenameLink(netdevice, contIface.Name)
 			if err != nil {
 				return err
 			}

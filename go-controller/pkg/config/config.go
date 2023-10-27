@@ -372,6 +372,7 @@ type OVNKubernetesFeatureConfig struct {
 	EnableAdminPolicyBasedRouting bool `gcfg:"enable-admin-pbr"`
 	EnableVirtualIP               bool `gcfg:"enable-virtual-ip"`
 	EnableIPReservation           bool `gcfg:"enable-ip-reservation"`
+	EnablePortMirror              bool `gcfg:"enable-port-mirror"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -989,6 +990,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use IPReservation CRD feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableIPReservation,
 		Value:       OVNKubernetesFeature.EnableIPReservation,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-port-mirror",
+		Usage:       "Configure to use PortMirror CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnablePortMirror,
+		Value:       OVNKubernetesFeature.EnablePortMirror,
 	},
 }
 

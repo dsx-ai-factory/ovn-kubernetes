@@ -34,6 +34,7 @@ import (
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
+	portmirrorfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned/fake"
 	virtualipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/clientset/versioned/fake"
 
 	. "github.com/onsi/ginkgo"
@@ -177,6 +178,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		egressIPFakeClient := &egressipfake.Clientset{}
 		egressQoSFakeClient := &egressqosfake.Clientset{}
 		virtualIPFakeClient := &virtualipfake.Clientset{}
+		portMirrorFakeClient := &portmirrorfake.Clientset{}
 		fakeClient := &util.OVNClientset{
 			KubeClient:           kubeFakeClient,
 			EgressFirewallClient: egressFirewallFakeClient,
@@ -184,7 +186,8 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		}
 
 		stop := make(chan struct{})
-		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
+		nodeNames := []string{nodeName}
+		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeNames)
 		Expect(err).NotTo(HaveOccurred())
 		wg := &sync.WaitGroup{}
 		defer func() {
@@ -196,7 +199,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		k := &kube.Kube{fakeClient.KubeClient, egressIPFakeClient, egressFirewallFakeClient, nil, nil, virtualIPFakeClient, nil}
+		k := &kube.Kube{fakeClient.KubeClient, egressIPFakeClient, egressFirewallFakeClient, nil, nil, virtualIPFakeClient, nil, portMirrorFakeClient}
 
 		iptV4, iptV6 := util.SetFakeIPTablesHelpers()
 
@@ -443,6 +446,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		egressIPFakeClient := &egressipfake.Clientset{}
 		egressQoSFakeClient := &egressqosfake.Clientset{}
 		virtualIPFakeClient := &virtualipfake.Clientset{}
+		portMirrorFakeClient := &portmirrorfake.Clientset{}
 		fakeClient := &util.OVNClientset{
 			KubeClient:           kubeFakeClient,
 			EgressFirewallClient: egressFirewallFakeClient,
@@ -469,7 +473,8 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		}
 
 		stop := make(chan struct{})
-		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
+		nodeNames := []string{nodeName}
+		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeNames)
 		Expect(err).NotTo(HaveOccurred())
 		wg := &sync.WaitGroup{}
 		defer func() {
@@ -481,7 +486,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		k := &kube.Kube{fakeClient.KubeClient, egressIPFakeClient, egressFirewallFakeClient, nil, nil, virtualIPFakeClient, nil}
+		k := &kube.Kube{fakeClient.KubeClient, egressIPFakeClient, egressFirewallFakeClient, nil, nil, virtualIPFakeClient, nil, portMirrorFakeClient}
 
 		nodeAnnotator := kube.NewNodeAnnotator(k, existingNode.Name)
 
@@ -564,7 +569,8 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		}
 
 		stop := make(chan struct{})
-		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
+		nodeNames := []string{nodeName}
+		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeNames)
 		Expect(err).NotTo(HaveOccurred())
 		defer func() {
 			close(stop)
@@ -792,6 +798,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 		egressIPFakeClient := &egressipfake.Clientset{}
 		egressQoSFakeClient := &egressqosfake.Clientset{}
 		virtualIPFakeClient := &virtualipfake.Clientset{}
+		portMirrorFakeClient := &portmirrorfake.Clientset{}
 		fakeClient := &util.OVNClientset{
 			KubeClient:           kubeFakeClient,
 			EgressFirewallClient: egressFirewallFakeClient,
@@ -799,7 +806,8 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 		}
 
 		stop := make(chan struct{})
-		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
+		nodeNames := []string{nodeName}
+		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeNames)
 		Expect(err).NotTo(HaveOccurred())
 		wg := &sync.WaitGroup{}
 		defer func() {
@@ -811,7 +819,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		k := &kube.Kube{fakeClient.KubeClient, egressIPFakeClient, egressFirewallFakeClient, nil, nil, virtualIPFakeClient, nil}
+		k := &kube.Kube{fakeClient.KubeClient, egressIPFakeClient, egressFirewallFakeClient, nil, nil, virtualIPFakeClient, nil, portMirrorFakeClient}
 
 		iptV4, iptV6 := util.SetFakeIPTablesHelpers()
 

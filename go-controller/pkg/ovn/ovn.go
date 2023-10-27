@@ -37,6 +37,7 @@ import (
 
 	adminpbrapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
 
+	portmirror "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
 	virtualip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
 	utilnet "k8s.io/utils/net"
 
@@ -287,6 +288,10 @@ type Controller struct {
 
 	// workqueue for IPReserve operation
 	ipReserveRetryQueue workqueue.RateLimitingInterface
+
+	// map & workqueue for portmirror operations
+	portMirrors          sync.Map
+	portMirrorRetryQueue workqueue.RateLimitingInterface
 }
 
 const (
@@ -327,6 +332,7 @@ func NewOvnMHController(ovnClient *util.OVNClientset, identity string, wf *facto
 			AdminPBRClient:       ovnClient.AdminPBRClient,
 			VIPClient:            ovnClient.VirtualIPClient,
 			IPReservationClient:  ovnClient.IPReservationClient,
+			PortMirrorClient:     ovnClient.PortMirrorClient,
 		},
 		watchFactory:   wf,
 		wg:             wg,
@@ -549,6 +555,12 @@ func (oc *Controller) Run(ctx context.Context) error {
 	}
 	if config.OVNKubernetesFeature.EnableAdminPolicyBasedRouting {
 		if err := oc.WatchAdminPolicyBasedRoutes(); err != nil {
+			return err
+		}
+	}
+	if config.OVNKubernetesFeature.EnablePortMirror {
+		err := oc.WatchPortMirrors()
+		if err != nil {
 			return err
 		}
 	}
@@ -1211,6 +1223,74 @@ func (oc *Controller) WatchVirtualIPs() error {
 		return oc.watchPortBindingTable(client)
 	}
 	klog.Infof("Bootstrapping existing virtualIPs and cleaning stale virtualIPs for network %s took %v", oc.nadInfo.NetName, time.Since(start))
+	return nil
+}
+
+// WatchPortMirrors starts the watching of portMirror resources and calls
+// back the appropriate handler logic
+func (oc *Controller) WatchPortMirrors() error {
+	start := time.Now()
+	oc.portMirrorRetryQueue = workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "portMirror")
+	// creates corresponding add/update/delete handlers
+	_, err := oc.mc.watchFactory.AddPortMirrorHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			portMirror := obj.(*portmirror.PortMirror)
+			err := oc.addPortMirror(portMirror)
+			if err != nil {
+				klog.Errorf(err.Error())
+			}
+		},
+		UpdateFunc: func(old, newer interface{}) {
+			oldPortMirror := old.(*portmirror.PortMirror)
+			newPortMirror := newer.(*portmirror.PortMirror)
+			// only compare spec changes as we constantly do updates for
+			// portMirror status.
+			if !reflect.DeepEqual(oldPortMirror.Spec, newPortMirror.Spec) {
+				if err := oc.deletePortMirror(oldPortMirror); err != nil {
+					klog.Errorf(err.Error())
+				}
+				if err := oc.addPortMirror(newPortMirror); err != nil {
+					klog.Errorf(err.Error())
+				}
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			portMirror := obj.(*portmirror.PortMirror)
+			if err := oc.deletePortMirror(portMirror); err != nil {
+				klog.Error(err)
+			}
+		},
+	}, nil)
+
+	if err != nil {
+		return err
+	}
+	go func() {
+		ticker := time.NewTicker(ovntypes.PortMirrorResyncInterval)
+		for {
+			select {
+			case <-ticker.C:
+				// run syncPortMirrorsPeriodic for only primary controller,
+				// as the operations performed in syncPortMirrorsPeriodic
+				// will be repititive for other controllers
+				if !oc.nadInfo.IsSecondary {
+					oc.syncPortMirrorsPeriodic()
+				}
+			case <-oc.stopChan:
+				ticker.Stop()
+				oc.portMirrorRetryQueue.ShutDown()
+				return
+			}
+		}
+	}()
+
+	// for portmirror retry operations
+	go func() {
+		for oc.retryPortMirrorOperations() {
+		}
+	}()
+
+	klog.Infof("Bootstrapping existing portMirrors and cleaning stale portMirrors for network %s took %v", oc.nadInfo.NetName, time.Since(start))
 	return nil
 }
 

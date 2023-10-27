@@ -50,11 +50,15 @@ import (
 	ipreservationinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/informers/externalversions"
 	ipreservationlister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/listers/ipreservation/v1beta1"
 
+	portmirrorapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
+	portmirrorscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned/scheme"
+	portmirrorinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/informers/externalversions"
+	portmirrorlister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/listers/portmirror/v1beta1"
+
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
@@ -76,17 +80,18 @@ type WatchFactory struct {
 	// requirements with atomic accesses
 	handlerCounter uint64
 
-	iFactory         informerfactory.SharedInformerFactory
-	eipFactory       egressipinformerfactory.SharedInformerFactory
-	efFactory        egressfirewallinformerfactory.SharedInformerFactory
-	cpipcFactory     ocpcloudnetworkinformerfactory.SharedInformerFactory
-	nadFactory       networkattachmentdefinitioninformerfactory.SharedInformerFactory
-	mnpFactory       multinetworkpolicyinformerfactory.SharedInformerFactory
-	egressQoSFactory egressqosinformerfactory.SharedInformerFactory
-	adminPBRFactory  adminpbrinformerfactory.SharedInformerFactory
-	vipFactory       virtualipinformerfactory.SharedInformerFactory
-	ipresvFactory    ipreservationinformerfactory.SharedInformerFactory
-	informers        map[reflect.Type]*informer
+	iFactory          informerfactory.SharedInformerFactory
+	eipFactory        egressipinformerfactory.SharedInformerFactory
+	efFactory         egressfirewallinformerfactory.SharedInformerFactory
+	cpipcFactory      ocpcloudnetworkinformerfactory.SharedInformerFactory
+	nadFactory        networkattachmentdefinitioninformerfactory.SharedInformerFactory
+	mnpFactory        multinetworkpolicyinformerfactory.SharedInformerFactory
+	egressQoSFactory  egressqosinformerfactory.SharedInformerFactory
+	adminPBRFactory   adminpbrinformerfactory.SharedInformerFactory
+	vipFactory        virtualipinformerfactory.SharedInformerFactory
+	ipresvFactory     ipreservationinformerfactory.SharedInformerFactory
+	portMirrorFactory portmirrorinformerfactory.SharedInformerFactory
+	informers         map[reflect.Type]*informer
 
 	stopChan chan struct{}
 }
@@ -145,6 +150,7 @@ var (
 	AdminPBRType                          reflect.Type = reflect.TypeOf(&adminpbrapi.AdminPolicyBasedRoute{})
 	VirtualIPType                         reflect.Type = reflect.TypeOf(&virtualipapi.VirtualIP{})
 	IpReservationType                     reflect.Type = reflect.TypeOf(&ipreservationapi.IPReservation{})
+	PortMirrorType                        reflect.Type = reflect.TypeOf(&portmirrorapi.PortMirror{})
 )
 
 // NewMasterWatchFactory initializes a new watch factory for the master or master+node processes.
@@ -156,18 +162,19 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	// the downside of making it tight (like 10 minutes) is needless spinning on all resources
 	// However, AddEventHandlerWithResyncPeriod can specify a per handler resync period
 	wf := &WatchFactory{
-		iFactory:         informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
-		eipFactory:       egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
-		efFactory:        egressfirewallinformerfactory.NewSharedInformerFactory(ovnClientset.EgressFirewallClient, resyncInterval),
-		cpipcFactory:     ocpcloudnetworkinformerfactory.NewSharedInformerFactory(ovnClientset.CloudNetworkClient, resyncInterval),
-		egressQoSFactory: egressqosinformerfactory.NewSharedInformerFactory(ovnClientset.EgressQoSClient, resyncInterval),
-		nadFactory:       networkattachmentdefinitioninformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval),
-		mnpFactory:       multinetworkpolicyinformerfactory.NewSharedInformerFactory(ovnClientset.MultiNetworkPolicyClient, resyncInterval),
-		adminPBRFactory:  adminpbrinformerfactory.NewSharedInformerFactory(ovnClientset.AdminPBRClient, resyncInterval),
-		vipFactory:       virtualipinformerfactory.NewSharedInformerFactory(ovnClientset.VirtualIPClient, resyncInterval),
-		ipresvFactory:    ipreservationinformerfactory.NewSharedInformerFactory(ovnClientset.IPReservationClient, resyncInterval),
-		informers:        make(map[reflect.Type]*informer),
-		stopChan:         make(chan struct{}),
+		iFactory:          informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
+		eipFactory:        egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
+		efFactory:         egressfirewallinformerfactory.NewSharedInformerFactory(ovnClientset.EgressFirewallClient, resyncInterval),
+		cpipcFactory:      ocpcloudnetworkinformerfactory.NewSharedInformerFactory(ovnClientset.CloudNetworkClient, resyncInterval),
+		egressQoSFactory:  egressqosinformerfactory.NewSharedInformerFactory(ovnClientset.EgressQoSClient, resyncInterval),
+		nadFactory:        networkattachmentdefinitioninformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval),
+		mnpFactory:        multinetworkpolicyinformerfactory.NewSharedInformerFactory(ovnClientset.MultiNetworkPolicyClient, resyncInterval),
+		adminPBRFactory:   adminpbrinformerfactory.NewSharedInformerFactory(ovnClientset.AdminPBRClient, resyncInterval),
+		vipFactory:        virtualipinformerfactory.NewSharedInformerFactory(ovnClientset.VirtualIPClient, resyncInterval),
+		ipresvFactory:     ipreservationinformerfactory.NewSharedInformerFactory(ovnClientset.IPReservationClient, resyncInterval),
+		portMirrorFactory: portmirrorinformerfactory.NewSharedInformerFactory(ovnClientset.PortMirrorClient, resyncInterval),
+		informers:         make(map[reflect.Type]*informer),
+		stopChan:          make(chan struct{}),
 	}
 
 	if err := egressipapi.AddToScheme(egressipscheme.Scheme); err != nil {
@@ -194,6 +201,9 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	if err := virtualipapi.AddToScheme(virtualipscheme.Scheme); err != nil {
 		return nil, err
 	}
+	if err := portmirrorapi.AddToScheme(scheme.Scheme); err != nil {
+		return nil, err
+	}
 
 	// For Services, pre-populate the shared Informer with one that
 	// has a label selector excluding headless services.
@@ -206,8 +216,8 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 			noAlternateProxySelector())
 	})
 
-	var err error
 	// Create our informer-wrapper informer (and underlying shared informer) for types we need
+	var err error
 	wf.informers[PodType], err = newQueuedInformer(PodType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
 		defaultNumEventQueues, 10, 30, 50)
 	if err != nil {
@@ -301,6 +311,12 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 			return nil, err
 		}
 	}
+	if config.OVNKubernetesFeature.EnablePortMirror {
+		wf.informers[PortMirrorType], err = newInformer(PortMirrorType, wf.portMirrorFactory.K8s().V1beta1().PortMirrors().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
 	return wf, nil
 }
 
@@ -384,13 +400,21 @@ func (wf *WatchFactory) Start() error {
 			}
 		}
 	}
+	if config.OVNKubernetesFeature.EnablePortMirror && wf.portMirrorFactory != nil {
+		wf.portMirrorFactory.Start(wf.stopChan)
+		for oType, synced := range wf.portMirrorFactory.WaitForCacheSync(wf.stopChan) {
+			if !synced {
+				return fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
+		}
+	}
 
 	return nil
 }
 
 // NewNodeWatchFactory initializes a watch factory with significantly fewer
 // informers to save memory + bandwidth. It is to be used by the node-only process.
-func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*WatchFactory, error) {
+func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeNames []string) (*WatchFactory, error) {
 	wf := &WatchFactory{
 		iFactory:  informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
 		informers: make(map[reflect.Type]*informer),
@@ -399,6 +423,13 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost && config.OVNKubernetesFeature.EnableMultiNetwork {
 		wf.nadFactory = networkattachmentdefinitioninformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval)
 		if err := networkattachmentdefinitionapi.AddToScheme(networkattachmentdefinitionscheme.Scheme); err != nil {
+			return nil, err
+		}
+	}
+
+	if config.OvnKubeNode.Mode == types.NodeModeDPU && config.OVNKubernetesFeature.EnablePortMirror {
+		wf.portMirrorFactory = portmirrorinformerfactory.NewSharedInformerFactory(ovnClientset.PortMirrorClient, resyncInterval)
+		if err := portmirrorapi.AddToScheme(portmirrorscheme.Scheme); err != nil {
 			return nil, err
 		}
 	}
@@ -414,7 +445,13 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 			noAlternateProxySelector())
 	})
 
-	// For Pods, only select pods scheduled to this node
+	// For Pods, only select pods scheduled to these nodes
+	req, err := labels.NewRequirement("k8s.ovn.org/nodeName", selection.In, nodeNames)
+	if err != nil {
+		return nil, fmt.Errorf("error composing label filter  k8s.ovn.org/nodeName to select nodes in \"%v\":%v", nodeNames, err)
+	}
+	selector := labels.NewSelector()
+	selector = selector.Add(*req)
 	wf.iFactory.InformerFor(&kapi.Pod{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
 		return v1coreinformers.NewFilteredPodInformer(
 			c,
@@ -422,7 +459,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 			resyncPeriod,
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 			func(opts *metav1.ListOptions) {
-				opts.FieldSelector = fields.OneTermEqualSelector("spec.nodeName", nodeName).String()
+				opts.LabelSelector = selector.String()
 			})
 	})
 
@@ -443,7 +480,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 				resyncPeriod,
 				cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 				func(opts *metav1.ListOptions) {
-					opts.LabelSelector = fmt.Sprintf("kubernetes.io/hostname=%s", nodeName)
+					opts.LabelSelector = fmt.Sprintf("kubernetes.io/hostname=%s", nodeNames[0])
 				})
 		})
 	}
@@ -456,7 +493,6 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
 	})
 
-	var err error
 	wf.informers[NamespaceType], err = newInformer(NamespaceType, wf.iFactory.Core().V1().Namespaces().Informer())
 	if err != nil {
 		return nil, err
@@ -486,6 +522,13 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost && config.OVNKubernetesFeature.EnableMultiNetwork {
 		wf.informers[NetworkattachmentdefinitionType], err = newInformer(NetworkattachmentdefinitionType,
 			wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if config.OvnKubeNode.Mode == types.NodeModeDPU && config.OVNKubernetesFeature.EnablePortMirror {
+		wf.informers[PortMirrorType], err = newInformer(PortMirrorType, wf.portMirrorFactory.K8s().V1beta1().PortMirrors().Informer())
 		if err != nil {
 			return nil, err
 		}
@@ -1014,6 +1057,26 @@ func (wf *WatchFactory) GetMultiNetworkPolicy(namespace, name string) (*multinet
 func (wf *WatchFactory) GetEgressFirewall(namespace, name string) (*egressfirewallapi.EgressFirewall, error) {
 	egressFirewallLister := wf.informers[EgressFirewallType].lister.(egressfirewalllister.EgressFirewallLister)
 	return egressFirewallLister.EgressFirewalls(namespace).Get(name)
+}
+
+// AddPortMirrorHandler adds a handler function that will be executed on PortMirror object changes
+func (wf *WatchFactory) AddPortMirrorHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+	return wf.addHandler(PortMirrorType, "", nil, handlerFuncs, processExisting)
+}
+
+// RemovePortMirrorHandler removes an PortMirror object event handler function
+func (wf *WatchFactory) RemovePortMirrorHandler(handler *Handler) {
+	wf.removeHandler(PortMirrorType, handler)
+}
+
+func (wf *WatchFactory) GetPortMirrors() ([]*portmirrorapi.PortMirror, error) {
+	portMirrorLister := wf.informers[PortMirrorType].lister.(portmirrorlister.PortMirrorLister)
+	return portMirrorLister.List(labels.Everything())
+}
+
+func (wf *WatchFactory) GetPortMirror(namespace string, name string) (*portmirrorapi.PortMirror, error) {
+	portMirrorLister := wf.informers[PortMirrorType].lister.(portmirrorlister.PortMirrorLister)
+	return portMirrorLister.PortMirrors(namespace).Get(name)
 }
 
 func (wf *WatchFactory) NodeInformer() cache.SharedIndexInformer {

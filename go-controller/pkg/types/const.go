@@ -179,6 +179,7 @@ const (
 	ExternalIDRouter       = "logical_router_name"
 	ExternalIDName         = "name"
 	ExternalIDNamespace    = "namespace"
+	ExternalIDUID          = "uid"
 
 	// virtual port constants
 	VirtualIPResyncInterval = 30 * time.Second
@@ -188,6 +189,13 @@ const (
 	VirtualPortPrefix = "ovn_k8s_vport"
 
 	OvnK8sClusterNameKey = OvnK8sPrefix + "/" + "cluster_name"
+)
+
+// portMirror constants
+type PortMirrorType string
+
+const (
+	PortMirrorResyncInterval = 30 * time.Second
 )
 
 type OvnK8sStatus string

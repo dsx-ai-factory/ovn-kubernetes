@@ -1,0 +1,223 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.11.3
+  name: portmirrors.k8s.ovn.org
+spec:
+  group: k8s.ovn.org
+  names:
+    kind: PortMirror
+    listKind: PortMirrorList
+    plural: portmirrors
+    singular: portmirror
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.status
+      name: Status
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    - jsonPath: .spec.sinkLocal.mirrorID
+      name: MirrorID
+      type: string
+    - jsonPath: .spec.sinkLocal.deviceInfo.deviceType
+      name: SinkDeviceType
+      type: string
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        description: PortMirror API ...
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: PortMirrorSpec defines the desired state of PortMirror
+            properties:
+              mirrorDirection:
+                default: Both
+                description: Selects the direction for the selected source for mirroring.
+                  This could be In, Out or Both, i.e. mirror packets coming "In" for
+                  the selected source, going "Out" or "Both" directions. If unspecified,
+                  the default is "Both" directions
+                pattern: ^In|Out|Both
+                type: string
+              sinkLocal:
+                description: Selects the pods to mirror packets to.
+                properties:
+                  deviceInfo:
+                    default:
+                      deviceType: ScalableFunction
+                      sfNum: -1
+                    description: Sink Interface info
+                    properties:
+                      deviceType:
+                        description: Device type; ScalableFunction, VirtualFunction
+                          etc. Only ScalableFunction supported
+                        pattern: ^ScalableFunction
+                        type: string
+                      sfNum:
+                        description: ScalableFunction device number
+                        maximum: 5
+                        minimum: -1
+                        type: integer
+                    required:
+                    - deviceType
+                    - sfNum
+                    type: object
+                  mirrorID:
+                    description: Specific mirror-id to select target. This will be
+                      used when defining multiple PortMirror spec that uses the same
+                      target.
+                    pattern: ^[0-9a-zA-Z\-]+$
+                    type: string
+                  netDevName:
+                    description: the netdev name to be used in the sink pod.
+                    type: string
+                  podSelector:
+                    description: An empty podSelector matches all pods in this namespace.
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector
+                          requirements. The requirements are ANDed.
+                        items:
+                          description: A label selector requirement is a selector
+                            that contains values, a key, and an operator that relates
+                            the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector
+                                applies to.
+                              type: string
+                            operator:
+                              description: operator represents a key's relationship
+                                to a set of values. Valid operators are In, NotIn,
+                                Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: values is an array of string values. If
+                                the operator is In or NotIn, the values array must
+                                be non-empty. If the operator is Exists or DoesNotExist,
+                                the values array must be empty. This array is replaced
+                                during a strategic merge patch.
+                              items:
+                                type: string
+                              type: array
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: matchLabels is a map of {key,value} pairs. A
+                          single {key,value} in the matchLabels map is equivalent
+                          to an element of matchExpressions, whose key field is "key",
+                          the operator is "In", and the values array contains only
+                          "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                    x-kubernetes-map-type: atomic
+                required:
+                - podSelector
+                type: object
+              sources:
+                description: Selects the pods, and their networks, to mirror from.
+                items:
+                  properties:
+                    networkAttachmentNames:
+                      description: Selects the specific network-attachment-definition
+                        for mirroring.
+                      items:
+                        pattern: ^[0-9a-zA-Z\-]+\/[0-9a-zA-Z\-]+$
+                        type: string
+                      type: array
+                    podSelector:
+                      description: A label selector is a label query over a set of
+                        resources. The result of matchLabels and matchExpressions
+                        are ANDed. An empty label selector matches all objects. A
+                        null label selector matches no objects.
+                      properties:
+                        matchExpressions:
+                          description: matchExpressions is a list of label selector
+                            requirements. The requirements are ANDed.
+                          items:
+                            description: A label selector requirement is a selector
+                              that contains values, a key, and an operator that relates
+                              the key and values.
+                            properties:
+                              key:
+                                description: key is the label key that the selector
+                                  applies to.
+                                type: string
+                              operator:
+                                description: operator represents a key's relationship
+                                  to a set of values. Valid operators are In, NotIn,
+                                  Exists and DoesNotExist.
+                                type: string
+                              values:
+                                description: values is an array of string values.
+                                  If the operator is In or NotIn, the values array
+                                  must be non-empty. If the operator is Exists or
+                                  DoesNotExist, the values array must be empty. This
+                                  array is replaced during a strategic merge patch.
+                                items:
+                                  type: string
+                                type: array
+                            required:
+                            - key
+                            - operator
+                            type: object
+                          type: array
+                        matchLabels:
+                          additionalProperties:
+                            type: string
+                          description: matchLabels is a map of {key,value} pairs.
+                            A single {key,value} in the matchLabels map is equivalent
+                            to an element of matchExpressions, whose key field is
+                            "key", the operator is "In", and the values array contains
+                            only "value". The requirements are ANDed.
+                          type: object
+                      type: object
+                      x-kubernetes-map-type: atomic
+                  required:
+                  - podSelector
+                  type: object
+                type: array
+            required:
+            - sinkLocal
+            - sources
+            type: object
+          status:
+            description: PortMirrorStatus describes the current status of the PortMirror.
+            properties:
+              messages:
+                description: An human-readable messages indicating details about the
+                  status of the object.
+                items:
+                  type: string
+                type: array
+              status:
+                description: A concise indication of whether the PortMirror resource
+                  is applied or not
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
