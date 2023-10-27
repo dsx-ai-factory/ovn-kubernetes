@@ -117,7 +117,7 @@ func registerCoverageShowMetrics(target string, metricNamespace string, metricSu
 			Help:        metricInfo.help,
 			ConstLabels: constLabels,
 		})
-		ovnRegistry.MustRegister(metricInfo.metric)
+		prometheus.MustRegister(metricInfo.metric)
 	}
 }
 
@@ -268,12 +268,12 @@ func registerStopwatchShowMetrics(component string, metricNamespace string, metr
 			Name:      fmt.Sprintf("%s_long_term_avg", metricName),
 		})
 
-		ovnRegistry.MustRegister(metricInfo.metrics.totalSamples)
-		ovnRegistry.MustRegister(metricInfo.metrics.min)
-		ovnRegistry.MustRegister(metricInfo.metrics.max)
-		ovnRegistry.MustRegister(metricInfo.metrics.percentile95th)
-		ovnRegistry.MustRegister(metricInfo.metrics.shortTermAvg)
-		ovnRegistry.MustRegister(metricInfo.metrics.longTermAvg)
+		prometheus.MustRegister(metricInfo.metrics.totalSamples)
+		prometheus.MustRegister(metricInfo.metrics.min)
+		prometheus.MustRegister(metricInfo.metrics.max)
+		prometheus.MustRegister(metricInfo.metrics.percentile95th)
+		prometheus.MustRegister(metricInfo.metrics.shortTermAvg)
+		prometheus.MustRegister(metricInfo.metrics.longTermAvg)
 	}
 }
 
@@ -575,14 +575,10 @@ func StartMetricsServer(bindAddress string, pprofBindAddress string, certFile st
 	StartMetricsServerCommon(bindAddress, pprofBindAddress, certFile, keyFile, promhttp.Handler(), stopChan, wg)
 }
 
-var ovnRegistry = prometheus.NewRegistry()
-
 // StartOVNMetricsServer runs the prometheus listener so that OVN metrics can be collected
 func StartOVNMetricsServer(bindAddress string, pprofBindAddress string, certFile, keyFile string,
 	stopChan <-chan struct{}, wg *sync.WaitGroup) {
-	handler := promhttp.InstrumentMetricHandler(ovnRegistry,
-		promhttp.HandlerFor(ovnRegistry, promhttp.HandlerOpts{}))
-	StartMetricsServerCommon(bindAddress, pprofBindAddress, certFile, keyFile, handler, stopChan, wg)
+	StartMetricsServerCommon(bindAddress, pprofBindAddress, certFile, keyFile, promhttp.Handler(), stopChan, wg)
 }
 
 func RegisterOvnNodeMetrics(ovsDBClient *util.OvsdbClient, metricsScrapeInterval int, stopChan chan struct{}) {

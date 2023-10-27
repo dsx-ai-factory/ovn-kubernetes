@@ -341,7 +341,7 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 				metrics.RegisterOvnNodeMetrics(ovsDBClient, config.MetricsScrapeInterval, stopChan)
 				if config.Metrics.ExportOVSMetrics {
 					// serve OVS ^ovs metrics
-					metrics.RegisterOvsMetricsWithOvnMetrics(node, ovsDBClient, config.MetricsScrapeInterval, stopChan)
+					metrics.RegisterOvsMetrics(node, ovsDBClient, config.MetricsScrapeInterval, stopChan)
 				}
 			}
 			if config.OvnKubeNode.Mode == types.NodeModeFull {

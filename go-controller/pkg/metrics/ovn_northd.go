@@ -124,7 +124,7 @@ func RegisterOvnNorthdMetrics(podLister corev1listers.PodLister, k8sNodeName str
 
 	// ovn-northd metrics
 	getOvnNorthdVersionInfo()
-	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
+	prometheus.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemNorthd,
@@ -138,7 +138,7 @@ func RegisterOvnNorthdMetrics(podLister corev1listers.PodLister, k8sNodeName str
 		},
 		func() float64 { return 1 },
 	))
-	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
+	prometheus.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemNorthd,
@@ -165,7 +165,7 @@ func RegisterOvnNorthdMetrics(podLister corev1listers.PodLister, k8sNodeName str
 			return -1
 		},
 	))
-	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
+	prometheus.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemNorthd,
@@ -175,7 +175,7 @@ func RegisterOvnNorthdMetrics(podLister corev1listers.PodLister, k8sNodeName str
 			return getOvnNorthdConnectionStatusInfo(nbConnectionStatus)
 		},
 	))
-	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
+	prometheus.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemNorthd,
