@@ -19,8 +19,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
 	"github.com/prometheus/client_golang/prometheus"
 	kapi "k8s.io/api/core/v1"
 	kapimtypes "k8s.io/apimachinery/pkg/types"
@@ -60,18 +58,6 @@ var metricPodCreationLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 	Help:      "The latency between pod creation and setting the OVN annotations",
 	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15),
 })
-
-// metricOvnCliLatency is the time between a pod being scheduled and the
-// ovn controller setting the network annotations.
-var metricOvnCliLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemMaster,
-	Name:      "ovn_cli_latency_seconds",
-	Help:      "The latency of various OVN commands. Currently, ovn-nbctl and ovn-sbctl",
-	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
-	// labels
-	[]string{"command"},
-)
 
 // MetricResourceUpdateCount is the number of times a particular resource's UpdateFunc has been called.
 var MetricResourceUpdateCount = prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -354,9 +340,6 @@ func RegisterMasterPerformance(nbClient libovsdbclient.Client) {
 	prometheus.MustRegister(MetricRequeueServiceCount)
 	prometheus.MustRegister(MetricSyncServiceCount)
 	prometheus.MustRegister(MetricSyncServiceLatency)
-	prometheus.MustRegister(metricOvnCliLatency)
-	// This is set to not create circular import between metrics and util package
-	util.MetricOvnCliLatency = metricOvnCliLatency
 	registerWorkqueueMetrics(MetricOvnkubeNamespace, MetricOvnkubeSubsystemMaster)
 	prometheus.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
