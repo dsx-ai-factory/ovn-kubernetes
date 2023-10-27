@@ -39,7 +39,7 @@ define docker_build_args
 endef
 
 define docker_build_ver_args
-       --build-arg OVS_VER=-2.17.1.e8c89baa.06871943 --build-arg OVN_VER=-22.03.0.d7cd4eeb.06871943
+       --build-arg OVS_VER=-3.1.2.0f9272b6.18a441f6 --build-arg OVN_VER=-23.06.0.0fe26713.36b0b8ca
 endef
 
 centos: bld
