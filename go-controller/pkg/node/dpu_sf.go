@@ -368,7 +368,7 @@ func (n *OvnNode) getSFInfo(sfUplinkPort string, sfUplinkPortNum uint16, reqSFNu
 		var errRet error
 		repName, errRet = getSFRepPort(sfUplinkPortNum, int32(mirrorSFNum))
 		if errRet != nil {
-			klog.Infof("Interation at %fs; failed to get SF representor name for SF with pfnumber %d and sfnumber %d: %v",
+			klog.Infof("Iteration at %fs; failed to get SF representor name for SF with pfnumber %d and sfnumber %d: %v",
 				sfUplinkPortNum, mirrorSFNum, errRet)
 			return false, nil
 		}

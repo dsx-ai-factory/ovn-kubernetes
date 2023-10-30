@@ -171,7 +171,7 @@ func (oc *Controller) addMirrorToPod(pm *util.PortMirror, portName string) error
 
 func (oc *Controller) isNadToBeMirrored(nadName string, podNadInfo map[string]bool) bool {
 	// if no network-attach-def's are mentioned in the portmirror spec for this pod(podSelector),
-	// default behaviour is to mirror interfaces on default/primaty nad for the pods selected by a source podSelector.
+	// default behaviour is to mirror interfaces on default/primary nad for the pods selected by a source podSelector.
 	// currently, only default controller will be registered when no network-attach-def are defined in portmirror spec,
 	// so no need to check whether it's primary network controller
 	if len(podNadInfo) == 0 {
@@ -271,7 +271,7 @@ func (oc *Controller) handlePortMirrorSourcePodAdd(pm *util.PortMirror, pod *kap
 				continue
 			}
 
-			// check if this nad is in the list of nad's to be mirrored for the pod.
+			// check if this nad is in the list of nads to be mirrored for the pod.
 			if !oc.isNadToBeMirrored(nadName, sInfo.PodNetAttachDefMirrorInfo) {
 				continue
 			}
@@ -335,7 +335,7 @@ func (oc *Controller) handlePortMirrorSourcePodAdd(pm *util.PortMirror, pod *kap
 func (oc *Controller) handleSourcePodSelectors(pm *util.PortMirror) {
 	for _, sInfo := range pm.SourceDetails.SourceNetInfo {
 		// if no network-attachment-def's are mentioned in the portmirror spec for this source,
-		// default behaviour is to mirror interfaces on default/primaty nad for the pods selected by this source podSelector.
+		// default behaviour is to mirror interfaces on default/primary nad for the pods selected by this source podSelector.
 		// so, pod handler should be registered for only default network controller.
 		var foundNad = false
 		if len(sInfo.PodNetAttachDefMirrorInfo) == 0 && !oc.nadInfo.IsSecondary {

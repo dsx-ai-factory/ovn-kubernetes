@@ -166,8 +166,8 @@ func GetLockByPMLogicalPortName(portName string) func() {
 	return LockByKey.Acquire(logicalPortNameKey)
 }
 
-// DoesPortMirrorSinkDetailsMatch checks if the new portmirorr sinkLocalDetails
-// matches with existing portmirorr sinkLocalDetails with same mirrorID
+// DoesPortMirrorSinkDetailsMatch checks if the new portmirror sinkLocalDetails
+// matches with existing portmirror sinkLocalDetails with same mirrorID
 func DoesPortMirrorSinkDetailsMatch(pMirror *PortMirror, pmList []*PortMirror) (bool, error) {
 	if pMirror.SinkLocalDetails.SinkIfName == "" &&
 		pMirror.SinkLocalDetails.SinkSFNum == -1 && pMirror.SinkLocalDetails.SinkDeviceType == "" {

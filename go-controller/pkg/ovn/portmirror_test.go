@@ -86,7 +86,7 @@ var _ = ginkgo.Describe("PortMirror", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		ginkgo.It("can create/delete mirrorID to pod LSP in ovn when portmirror's are created/deleted", func() {
+		ginkgo.It("can create/delete mirrorID to pod LSP in ovn when portmirrors are created/deleted", func() {
 			pm := newPortMirror(portMirrorName, portMirrorNamespace, portmirror.PortMirrorDirectionBoth)
 			app.Action = func(ctx *cli.Context) error {
 				fakeOvn.startWithDBSetup(

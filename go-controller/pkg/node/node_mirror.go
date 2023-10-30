@@ -155,8 +155,8 @@ func (n *OvnNode) watchPortMirrorDPU() error {
 	n.portMirrorRetryQueueDPU = workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "portMirror")
 	_, err := n.watchFactory.AddPortMirrorHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			portmirror := obj.(*portmirror.PortMirror)
-			err := n.addDPUPortMirror(portmirror)
+			pm := obj.(*portmirror.PortMirror)
+			err := n.addDPUPortMirror(pm)
 			if err != nil {
 				klog.Errorf(err.Error())
 			}
@@ -175,8 +175,8 @@ func (n *OvnNode) watchPortMirrorDPU() error {
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
-			portmirror := obj.(*portmirror.PortMirror)
-			err := n.deleteDPUPortMirror(portmirror)
+			pm := obj.(*portmirror.PortMirror)
+			err := n.deleteDPUPortMirror(pm)
 			if err != nil {
 				klog.Errorf(err.Error())
 			}
@@ -518,7 +518,7 @@ func (n *OvnNode) deleteDPUPortMirror(portMirror *portmirror.PortMirror) error {
 	klog.Infof("Deleting portmirror %s/%s", portMirror.Namespace, portMirror.Name)
 	p, ok := n.portMirrorMap.LoadAndDelete(portMirrorKey)
 	if !ok {
-		klog.Errorf("Deleting portmirror %s/%s which was not created succesfully", portMirror.Namespace, portMirror.Name)
+		klog.Errorf("Deleting portmirror %s/%s which was not created successfully", portMirror.Namespace, portMirror.Name)
 		return nil
 	}
 
@@ -534,7 +534,7 @@ func (n *OvnNode) deleteDPUPortMirror(portMirror *portmirror.PortMirror) error {
 	// delete the portmirror form mirrorIDToPortMirrorMap
 	pList, ok := n.mirrorIDToPortMirrorMap.Load(pm.SinkLocalDetails.PortMirrorId)
 	if !ok {
-		klog.Errorf("Deleting portmirror %s/%s which was not created succesfully", portMirror.Namespace, portMirror.Name)
+		klog.Errorf("Deleting portmirror %s/%s which was not created successfully", portMirror.Namespace, portMirror.Name)
 		return nil
 	}
 	pmList := pList.([]*util.PortMirror)
@@ -616,7 +616,7 @@ func (n *OvnNode) syncPortMirrorsDPUPeriodic() {
 			klog.Errorf("Failed to get Interface %s external_ids mirror-id :(%v)", sfInterface, err)
 			continue
 		}
-		// if correspodning mirrorID is not found in portMirrorIDMap,
+		// if corresponding mirrorID is not found in portMirrorIDMap,
 		// its a stale SF interface and delete it.
 		portMirrorIDUnlock := util.GetLockByPMId(mirrorID)
 		if _, ok := portMirrorIDMap[mirrorID]; !ok {
