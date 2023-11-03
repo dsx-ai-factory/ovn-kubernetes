@@ -849,7 +849,7 @@ ovn_image=${imagec_ubuntu} \
   ovn_ssl_en=${ovn_ssl_en} \
   j2 ../templates/ovn-host-dpu.yaml.j2 -o ${output_dir}/ovn-host-dpu.yaml
 
-ovn_image=${image} \
+ovn_image=${imagec} \
   ovn_image_pull_policy=${image_pull_policy} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
   j2 ../templates/ovs-node.yaml.j2 -o ${output_dir}/ovs-node.yaml
