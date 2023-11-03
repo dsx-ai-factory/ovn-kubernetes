@@ -18,28 +18,29 @@ import (
 // -- to send packets from the XDP service to the K8s pod/VMI  to OVN
 // -- to send outgoing from the K8s pod/VMI to the XDP service
 // -- to send outgoing from the XDP service to external on the wire.
-func newXDPSharedGatewayOpenFlowManager(gwBridge *bridgeConfiguration, ofFlowManager bool) (*openflowManager, error) {
+func newXDPSharedGatewayOpenFlowManager(gwBridge *bridgeConfiguration, ofFlowManager, patchPortManager bool) (*openflowManager, error) {
 
-	// We need health checks only for the patch ports of the gateway.
-	if !ofFlowManager {
-		klog.Info("Creating new XDP shared gateway for primary DPU ")
+	ofm := &openflowManager{}
+	// We need Openflow manager to manage the flow cache
+	if ofFlowManager {
+		klog.Info("Creating new XDP shared gateway for non-primary DPU")
+		// add health check function to check default OpenFlow flows are on the shared gateway bridge
 		ofm := &openflowManager{
 			defaultBridge: gwBridge,
+			flowCache:     make(map[string][]string),
+			flowMutex:     sync.Mutex{},
+			flowChan:      make(chan struct{}, 1),
 		}
-		return ofm, nil
+		// Assume the shared gw will have no rules managed outside ovn-k8s
+		ofm.updateFlowCacheEntry("NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
 	}
-
-	klog.Info("Creating new XDP shared gateway for non-primary DPU")
-	// add health check function to check default OpenFlow flows are on the shared gateway bridge
-	ofm := &openflowManager{
-		defaultBridge: gwBridge,
-		flowCache:     make(map[string][]string),
-		flowMutex:     sync.Mutex{},
-		flowChan:      make(chan struct{}, 1),
+	if patchPortManager {
+		// We need health checks for the patch ports of the gateway.
+		klog.Info("Creating new XDP shared gateway for primary DPU ")
+		ofm = &openflowManager{
+			defaultBridge: gwBridge,
+		}
 	}
-
-	// Assume the shared gw will have no rules managed outside ovn-k8s
-	ofm.updateFlowCacheEntry("NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
 	return ofm, nil
 }
 
@@ -104,8 +105,40 @@ func setXDPBridgePatchOfPorts(bridge *bridgeConfiguration) error {
 	return nil
 }
 
+func newXDPSharedOFGateway(nadInfo *util.NetAttachDefInfo, gw *gateway) error {
+	klog.Infof("Initializing XDP OF shared gateway for %s", nadInfo.NetName)
+	gwBridge := &bridgeConfiguration{}
+
+	uplinkName, err := getIntfName(nadInfo.BridgeName)
+	if err != nil {
+		return errors.Wrapf(err, "failed to find uplink for %s: %v", nadInfo.BridgeName, err)
+	}
+	gwBridge.bridgeName = nadInfo.BridgeName
+	gwBridge.uplinkName = uplinkName
+
+	gw.initFunc = func() error {
+		klog.Info("Setting phys ports for XDP Shared OF Gateway Openflow Manager")
+		err := setXDPBridgePhysOfPorts(gwBridge)
+		if err != nil {
+			klog.Infof("Failed setting up  XDP Shared OF Gateway: %v", err)
+			return err
+		}
+
+		gw.openflowManager, err = newXDPSharedGatewayOpenFlowManager(gwBridge, true, false)
+		if err != nil {
+			klog.Infof("Failed Creating XDP Shared OF Gateway Openflow Manager: %v", err)
+			return err
+		}
+
+		return nil
+	}
+
+	klog.Info("Shared XDP OF Gateway Creation Complete")
+	return nil
+}
+
 func newXDPSharedGateway(nadInfo *util.NetAttachDefInfo, isPrimaryDPU bool) (*gateway, error) {
-	klog.Infof("Creating new XDP shared gateway for %s", nadInfo.NetName)
+	klog.Infof("Creating new XDP shared OF gateway for %s", nadInfo.NetName)
 	gw := &gateway{}
 
 	gwBridge, err := bridgeForXDPInterface(nadInfo)
@@ -133,7 +166,7 @@ func newXDPSharedGateway(nadInfo *util.NetAttachDefInfo, isPrimaryDPU bool) (*ga
 			return err
 		}
 
-		gw.openflowManager, err = newXDPSharedGatewayOpenFlowManager(gwBridge, !isPrimaryDPU)
+		gw.openflowManager, err = newXDPSharedGatewayOpenFlowManager(gwBridge, false, true)
 		if err != nil {
 			klog.Infof("Failed Creating XDP Shared Gateway Openflow Manager: %v", err)
 			return err
@@ -160,16 +193,11 @@ func (n *OvnNode) initGatewayDPUXDP(nadInfo *util.NetAttachDefInfo) (*gateway, e
 	// the N-S gateway for that purpose is not very clean.
 	gw, err := newXDPSharedGateway(nadInfo, config.OvnKubeNode.IsPrimaryDPU)
 	if err != nil {
-		return nil, fmt.Errorf("failed to setup Shared gatway for XDP: %v", err)
+		return nil, fmt.Errorf("failed to setup Shared gateway for XDP: %v", err)
 	}
 
 	// the localnet patch port will be created when we create a logical port in that
-	// network, so we can't make gw.readyFunc a prereq, i.e.
-	//	waiter.AddWait(readyGwFunc, initGwFunc)
-	//
-	//	if err := waiter.Wait(); err != nil {
-	//		return nil, fmt.Errorf("failed waiting for XDP bridge to  be ready: %v", err)
-	//	}
+	// network, so we can't make gw.readyFunc a prereq
 
 	// Don't need to call gw.Init since we are not going to set up watchers etc. on this gw
 	err = gw.initFunc()
@@ -189,6 +217,30 @@ func (n *OvnNode) initGatewayDPUXDP(nadInfo *util.NetAttachDefInfo) (*gateway, e
 	return gw, nil
 }
 
+// initialize the OF manager on the shared gateway. This is for the non-primary DPU;
+// for the primary we use the shared  gw's  manager.
+func (n *OvnNode) initOFGatewayDPUXDP(nadInfo *util.NetAttachDefInfo, gw *gateway) error {
+	klog.Infof("Initializing XDP OF Gateway Functionality on DPU for %s", nadInfo.NetName)
+	var err error
+
+	start := time.Now()
+	err = newXDPSharedOFGateway(nadInfo, gw)
+	if err != nil {
+		return fmt.Errorf("failed to setup Shared gatway for XDP: %v", err)
+	}
+
+	// Don't need to call gw.Init since we are not going to set up watchers etc. on this gw
+	err = gw.initFunc()
+	if err != nil {
+		return fmt.Errorf("error initializing XDP shared gateway: %v", err)
+	}
+
+	go gw.openflowManager.Run(n.stopChan, &sync.WaitGroup{})
+
+	klog.Infof("Initializing XDP OF gw for NAD %s took %v", nadInfo.NetName, time.Since(start))
+
+	return nil
+}
 func (n *OvnNode) cleanGatewayDPUXDP(nadInfo *util.NetAttachDefInfo, gw *gateway) error {
 
 	klog.Infof("Destroying XDP for NAD %s", nadInfo.NetName)

@@ -315,11 +315,7 @@ func (nc *ovnNodeController) updateXDPInterfaceConfig(oldPod, newPod *kapi.Pod, 
 	}
 	// Check if the IPs are different and call into XDP, if so.
 	if checkNADPortSecIPsAreDiff(oldAllowedIPs, newAllowedIPs) {
-		gw := nc.gateway.(*gateway)
-		if config.OvnKubeNode.IsPrimaryDPU {
-			gw = nc.node.gateway.(*gateway)
-		}
-		if err := UpdateXDPServiceForInterface(netAnnotation, oldAllowedIPs, newAllowedIPs, nc.nadInfo, nc.gateway.(*gateway), gw); err != nil {
+		if err := UpdateXDPServiceForInterface(netAnnotation, oldAllowedIPs, newAllowedIPs, nc.nadInfo, nc.gateway.(*gateway), nc.node.gateway.(*gateway)); err != nil {
 			return fmt.Errorf("failed to update XDP for pod %s/%s: %v", newPod.Namespace, newPod.Name, err)
 		}
 	}
@@ -428,12 +424,9 @@ func (nc *ovnNodeController) addRepPort(pod *kapi.Pod, dpuCD *util.DPUConnection
 			_ = nc.delRepPort(pod, dpuCD, vfRepName, nadName, podDesc)
 			return fmt.Errorf("failed to setup XDP, gateway not ready: %v", err)
 		}
-		if config.OvnKubeNode.IsPrimaryDPU {
-			gw = nc.node.gateway.(*gateway)
-		}
 		// If this pod needs Syn-Flooding mitigation on the DPU (to protect DPU cores)
 		// by adding a bump-in-the-path kind of service before signalling that pod as ready.
-		if err = SetupXDPServiceForInterface(&ifInfo.PodAnnotation, allowedIPs, nc.nadInfo, nc.gateway.(*gateway), gw); err != nil {
+		if err = SetupXDPServiceForInterface(&ifInfo.PodAnnotation, allowedIPs, nc.nadInfo, nc.gateway.(*gateway), nc.node.gateway.(*gateway)); err != nil {
 			_ = nc.delRepPort(pod, dpuCD, vfRepName, nadName, podDesc)
 			return fmt.Errorf("failed to setup XDP for network: %v", err)
 		}
@@ -473,13 +466,9 @@ func (nc *ovnNodeController) delRepPort(pod *kapi.Pod, dpuCD *util.DPUConnection
 		klog.Infof("Removing XDP service for pod %s/%s network %s", pod.Namespace, pod.Name, nadName)
 		allowedIPs, netAnnotation := getPortSecIPsforNAD(pod, annoNadKeyName)
 		if len(allowedIPs) > 0 {
-			gw := nc.gateway.(*gateway)
-			if config.OvnKubeNode.IsPrimaryDPU {
-				gw = nc.node.gateway.(*gateway)
-			}
 			// If this pod used Syn-Flooding mitigation on the DPU (to protect DPU cores)
 			// delete it.
-			if err = TeardownXDPServiceForInterface(netAnnotation, allowedIPs, nc.nadInfo, nc.gateway.(*gateway), gw); err != nil {
+			if err = TeardownXDPServiceForInterface(netAnnotation, allowedIPs, nc.nadInfo, nc.gateway.(*gateway), nc.node.gateway.(*gateway)); err != nil {
 				return fmt.Errorf("failed to tear down XDP: %v", err)
 			}
 		} else {

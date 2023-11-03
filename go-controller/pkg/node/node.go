@@ -996,6 +996,22 @@ func (n *OvnNode) addNetworkAttachDefinition(netattachdef *nettypes.NetworkAttac
 			if nc.gateway != nil {
 				klog.Infof("Gateway already configured for %s", nc.nadInfo.NetName)
 			} else {
+				// For primary DPU; we'll have the shared N/S and we'll use the flowcache
+				// mgr. on that bridge; in the non-primary we'll create one just to manage
+				// the flowcache on the bridge across all ncs (this assumes there'll be one bridge
+				// that is shared among all NCs - which is true for xdp) nc.node.gateway
+				// is not null, check if the openflowmanager is initialized
+				gw := nc.node.gateway.(*gateway)
+				if !config.OvnKubeNode.IsPrimaryDPU && gw.openflowManager == nil {
+					err := n.initOFGatewayDPUXDP(nc.nadInfo, gw)
+					if err != nil {
+						klog.Errorf("Failed initializing XDP for NAD %s: %v", nc.nadInfo.NetName, err)
+						return
+					}
+					klog.Infof("Initialized shared OF XDP gateway for NAD %s", nc.nadInfo.NetName)
+				} else if !config.OvnKubeNode.IsPrimaryDPU {
+					klog.Infof("Shared XDP OF gw already configured for non-primary DPU node")
+				}
 				gw, err := n.initGatewayDPUXDP(nc.nadInfo)
 				if err != nil {
 					klog.Errorf("Failed initializing XDP for NAD %s: %v", nc.nadInfo.NetName, err)
