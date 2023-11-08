@@ -86,27 +86,16 @@ func (mp *managementPort) Create(routeManager *routemanager.Controller, nodeAnno
 
 	// Create a OVS internal interface.
 	legacyMgmtIntfName := util.GetLegacyK8sMgmtIntfName(mp.nodeName)
+	macAddress := util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(mp.hostSubnets[0]).IP)
 	stdout, stderr, err := util.RunOVSVsctl(
 		"--", "--if-exists", "del-port", "br-int", legacyMgmtIntfName,
 		"--", "--may-exist", "add-port", "br-int", k8sMgmtIntfName,
 		"--", "set", "interface", k8sMgmtIntfName,
 		"type=internal", "mtu_request="+fmt.Sprintf("%d", config.Default.MTU),
+		"mac="+strings.ReplaceAll(macAddress.String(), ":", "\\:"),
 		"external-ids:iface-id="+util.GetClusterScopedName(types.K8sPrefix+mp.nodeName))
 	if err != nil {
 		klog.Errorf("Failed to add port to br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
-		return nil, err
-	}
-	macAddress, err := util.GetOVSPortMACAddress(k8sMgmtIntfName)
-	if err != nil {
-		klog.Errorf("Failed to get management port MAC address: %v", err)
-		return nil, err
-	}
-	// persist the MAC address so that upon node reboot we get back the same mac address.
-	_, stderr, err = util.RunOVSVsctl("set", "interface", k8sMgmtIntfName,
-		fmt.Sprintf("mac=%s", strings.ReplaceAll(macAddress.String(), ":", "\\:")))
-	if err != nil {
-		klog.Errorf("Failed to persist MAC address %q for %q: stderr:%s (%v)", macAddress.String(),
-			k8sMgmtIntfName, stderr, err)
 		return nil, err
 	}
 
