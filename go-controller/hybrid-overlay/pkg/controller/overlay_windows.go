@@ -9,7 +9,6 @@ import (
 	"k8s.io/klog/v2"
 
 	ps "github.com/bhendo/go-powershell"
-	psBackend "github.com/bhendo/go-powershell/backend"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
 
@@ -241,7 +240,7 @@ func GetGatewayAddress(subnet *hcn.Subnet) string {
 	return ""
 }
 
-//EnsureExistingNetworkIsValid returns the existing network defined by the given network name is valid, if there is a network with the
+// EnsureExistingNetworkIsValid returns the existing network defined by the given network name is valid, if there is a network with the
 // given name that is invalid the network is deleted
 func EnsureExistingNetworkIsValid(networkName string, expectedAddressPrefix string, expectedGW string) *hcn.HostComputeNetwork {
 	existingNetwork, err := hcn.GetNetworkByName(networkName)
@@ -266,29 +265,26 @@ func EnsureExistingNetworkIsValid(networkName string, expectedAddressPrefix stri
 	return nil
 }
 
-func DuplicatePersistentIPRoutes() error {
-	shell, err := ps.New(&psBackend.Local{})
-	if err != nil {
-		return err
-	}
-	defer shell.Exit()
-
+// duplicateIPv4Routes duplicates all the IPv4 network routes associated with the physical interface to the host vNIC,
+// where parameters policyStore and destinationPrefix are optional and could be used as filtering criteria.
+// Otherwise, all IPv4 routes will be forwarded from the physical interface to the host vNIC.
+func DuplicateIPv4Routes(shell ps.Shell) error {
 	script := `
 	# Find physical adapters whose interfaces are bound to a vswitch (i.e. the MAC addresses match)
 	$boundAdapters = (Get-NetAdapter -Physical | where { (Get-NetAdapter -Name "*vEthernet*").MacAddress -eq $_.MacAddress })
 
-	# Forward all the persistent routes associated with the physical interface to the associated vNIC
+	# Forward all the matching routes associated with the physical interface to the associated vNIC
 	foreach ($boundAdapter in $boundAdapters) {
 		$associatedVNic = Get-NetAdapter -Name "*vEthernet*" | where { $_.MacAddress -eq $boundAdapter.MacAddress }
-		$routes = Get-NetRoute -PolicyStore PersistentStore -InterfaceIndex $boundAdapter.IfIndex -ErrorAction SilentlyContinue
 		foreach ($route in $routes) {
-			netsh.exe int ipv4 add route interface=$($associatedVNic.ifIndex) prefix=$($route.DestinationPrefix) nexthop=$($route.NextHop) metric=$($route.RouteMetric) store=persistent
+			 if ($route.InterfaceIndex -eq $boundAdapter.IfIndex) {
+        		New-NetRoute -InterfaceIndex $associatedVNic.ifIndex -DestinationPrefix $route.DestinationPrefix -NextHop $route.NextHop -RouteMetric $route.RouteMetric -ErrorAction SilentlyContinue
+			 }
 		}
 	}
 	`
-
 	if _, stderr, err := shell.Execute(script + "\r\n\r\n"); err != nil {
-		return fmt.Errorf("falied to refresh the network persistent routes, %v: %v", stderr, err)
+		return fmt.Errorf("failed to duplicate network routes to the associated vNIC, %v: %v", stderr, err)
 	}
 
 	return nil

@@ -3,15 +3,11 @@ package types
 import "time"
 
 const (
-	DefaultNetworkName = "default"
-
-	// topology type defineds in CNI netconf
-	Layer3AttachDefTopoType   = "layer3"   // layer 3 network
-	Layer2AttachDefTopoType   = "layer2"   // layer 2 network
-	LocalnetAttachDefTopoType = "localnet" // localnet faced layer 2 network
-
+	// Default network name
+	DefaultNetworkName  = "default"
 	K8sPrefix           = "k8s-"
 	HybridOverlayPrefix = "int-"
+
 	// K8sMgmtIntfName name to be used as an OVS internal port on the node
 	K8sMgmtIntfName = "ovn-k8s-mp0"
 
@@ -28,16 +24,6 @@ const (
 	LocalBridgeName            = "br-local"
 	LocalnetGatewayNextHopPort = "ovn-k8s-gw0"
 
-	// Local Bridge used for localnet topology network access
-	LocalNetBridgeName = "br-localnet"
-
-	// types.OvnLocalnetSwitch is the name of localnet topology switch
-	OVNLocalnetSwitch = "ovn_localnet_switch"
-	OVNLocalnetPort   = "ovn_localnet_port"
-
-	// types.OvnLayer2Switch is the name of layer2 topology switch
-	OvnLayer2Switch = "ovn_layer2_switch"
-
 	// types.OVNClusterRouter is the name of the distributed router
 	OVNClusterRouter = "ovn_cluster_router"
 	OVNJoinSwitch    = "join"
@@ -48,7 +34,7 @@ const (
 	GWRouterLocalLBPostfix       = "_local"
 	RouterToSwitchPrefix         = "rtos-"
 	InterPrefix                  = "inter-"
-	HybridSubnetPrefix           = "hybrid-subnet-"
+	HybridSubnetPrefix           = "hybrid-subnet-" // used in logical router policy and Logical route static route, no cluster prefix
 	SwitchToRouterPrefix         = "stor-"
 	JoinSwitchToGWRouterPrefix   = "jtor-"
 	GWRouterToJoinSwitchPrefix   = "rtoj-"
@@ -59,6 +45,19 @@ const (
 	EgressGWSwitchPrefix         = "exgw-"
 
 	NodeLocalSwitch = "node_local_switch"
+
+	// types.OVNLayer2Switch is the name of layer2 topology switch
+	OVNLayer2Switch = "ovn_layer2_switch"
+	// types.OVNLocalnetSwitch is the name of localnet topology switch
+	OVNLocalnetSwitch = "ovn_localnet_switch"
+	// types.OVNLocalnetPort is the name of localnet topology localnet port
+	OVNLocalnetPort = "ovn_localnet_port"
+	// Local Bridge used for localnet topology network access
+	LocalNetBridgeName = "br-localnet"
+
+	TransitSwitch               = "transit_switch"
+	TransitSwitchToRouterPrefix = "tstor-"
+	RouterToTransitSwitchPrefix = "rtots-"
 
 	// ACL Priorities
 
@@ -73,6 +72,18 @@ const (
 	// Default deny acl rule priority
 	DefaultDenyPriority = 1000
 
+	// ACL Tiers
+	// Tier 0 is currently un-used and is a placeholder tier for future use cases (can be renamed when we have a use for it).
+	// NOTE: When we upgrade from an OVN version without tiers to the new version with
+	// tiers, all values in the new ACL.Tier column will be set to 0 a.k.a placeholder tier
+	PlaceHolderACLTier = 0
+	// Default Tier for all ACLs
+	DefaultACLTier = 2
+	// Default Tier for all ACLs belonging to Admin Network Policy
+	DefaultANPACLTier = 1
+	// Default Tier for all ACLs belonging to Baseline Admin Network Policy
+	DefaultBANPACLTier = 3
+
 	// priority of logical router policies on the OVNClusterRouter
 	EgressFirewallStartPriority           = 10000
 	MinimumReservedEgressFirewallPriority = 2000
@@ -81,8 +92,12 @@ const (
 	InterNodePolicyPriority               = "1003"
 	HybridOverlaySubnetPriority           = 1002
 	HybridOverlayReroutePriority          = 501
-	DefaultNoRereoutePriority             = 101
+	DefaultNoRereoutePriority             = 102
+	EgressSVCReroutePriority              = 101
 	EgressIPReroutePriority               = 100
+	AminPBRReroutePriority                = 80
+	NoRerouteJoinSubnetPriority           = 81
+	EgressLiveMigrationReroutePiority     = 10
 
 	V6NodeLocalNATSubnet           = "fd99::/64"
 	V6NodeLocalNATSubnetPrefix     = 64
@@ -94,14 +109,6 @@ const (
 	V4NodeLocalNATSubnetNextHop    = "169.254.0.1"
 	V4NodeLocalDistributedGWPortIP = "169.254.0.2"
 
-	V4MasqueradeSubnet         = "169.254.169.0/30"
-	V4HostMasqueradeIP         = "169.254.169.2"
-	V6HostMasqueradeIP         = "fd69::2"
-	V4OVNMasqueradeIP          = "169.254.169.1"
-	V6OVNMasqueradeIP          = "fd69::1"
-	V4HostETPLocalMasqueradeIP = "169.254.169.3"
-	V6HostETPLocalMasqueradeIP = "fd69::3"
-
 	// OpenFlow and Networking constants
 	RouteAdvertisementICMPType    = 134
 	NeighborAdvertisementICMPType = 136
@@ -111,20 +118,6 @@ const (
 	OvnRateLimitingMeter = "rate-limiter"
 	PacketsPerSecond     = "pktps"
 	MeterAction          = "drop"
-
-	// Default Meters created on GRs.
-	OVNARPRateLimiter              = "arp"
-	OVNARPResolveRateLimiter       = "arp-resolve"
-	OVNBFDRateLimiter              = "bfd"
-	OVNControllerEventsRateLimiter = "event-elb"
-	OVNICMPV4ErrorsRateLimiter     = "icmp4-error"
-	OVNICMPV6ErrorsRateLimiter     = "icmp6-error"
-	OVNRejectRateLimiter           = "reject"
-	OVNTCPRSTRateLimiter           = "tcp-reset"
-
-	// OVN-K8S Address Sets Names
-	HybridRoutePolicyPrefix = "hybrid-route-pods-"
-	EgressQoSRulePrefix     = "egress-qos-pods-"
 
 	// OVN-K8S Topology Versions
 	OvnSingleJoinSwitchTopoVersion = 1
@@ -158,13 +151,53 @@ const (
 	// Geneve header length for IPv6 (https://github.com/openshift/cluster-network-operator/pull/720#issuecomment-664020823)
 	GeneveHeaderLengthIPv6 = GeneveHeaderLengthIPv4 + 20
 
-	ClusterPortGroupName    = "clusterPortGroup"
-	ClusterRtrPortGroupName = "clusterRtrPortGroup"
+	ClusterPortGroupNameBase    = "clusterPortGroup"
+	ClusterRtrPortGroupNameBase = "clusterRtrPortGroup"
 
 	OVSDBTimeout     = 10 * time.Second
 	OVSDBWaitTimeout = 0
 
-	ClusterLBGroupName = "clusterLBGroup"
+	ClusterLBGroupName       = "clusterLBGroup"
+	ClusterSwitchLBGroupName = "clusterSwitchLBGroup"
+	ClusterRouterLBGroupName = "clusterRouterLBGroup"
+
+	// key for network name external-id
+	LegacyNetworkExternalID = "network_name"
+	NetworkExternalID       = OvnK8sPrefix + "/" + "network"
+	// key for NAD name external-id, only used for secondary logical switch port of a pod
+	NADExternalID = OvnK8sPrefix + "/" + "nad"
+	// key for topology type external-id, only used for secondary network logical entities
+	TopologyExternalID = OvnK8sPrefix + "/" + "topology"
+	// key for topology version external-id
+	TopologyVersionExternalID = "k8s-ovn-topo-version"
+	// key for load_balancer kind external-id
+	LoadBalancerKindExternalID = OvnK8sPrefix + "/" + "kind"
+	// key for load_balancer service external-id
+	LoadBalancerOwnerExternalID = OvnK8sPrefix + "/" + "owner"
+
+	// different secondary network topology type defined in CNI netconf
+	Layer3Topology   = "layer3"
+	Layer2Topology   = "layer2"
+	LocalnetTopology = "localnet"
+
+	// db index keys
+	// PrimaryIDKey is used as a primary client index
+	PrimaryIDKey = OvnK8sPrefix + "/id"
+
+	OvnDefaultZone = "global"
+
+	// EgressService "reserved" hosts - when set on an EgressService they have a special meaning
+
+	EgressServiceNoHost     = ""    // set on services with no allocated node
+	EgressServiceNoSNATHost = "ALL" // set on services with sourceIPBy=Network
+
+	// MaxLogicalPortTunnelKey is maximum tunnel key that can be requested for a
+	// Logical Switch or Router Port
+	MaxLogicalPortTunnelKey = 32767
+
+	// InformerSyncTimeout is used to wait from the initial informer cache sync.
+	// It allows ~4 list() retries with the default reflector exponential backoff config
+	InformerSyncTimeout = 20 * time.Second
 
 	AdminPBRResyncInterval = 30 * time.Second
 
@@ -179,7 +212,8 @@ const (
 	ExternalIDRouter       = "logical_router_name"
 	ExternalIDName         = "name"
 	ExternalIDNamespace    = "namespace"
-	ExternalIDUID          = "uid"
+
+	OvnK8sClusterNameKey = OvnK8sPrefix + "/" + "cluster_name"
 
 	// virtual port constants
 	VirtualIPResyncInterval = 30 * time.Second
@@ -187,15 +221,6 @@ const (
 	VirtualPortType   = "virtual"
 	TablePortBinding  = "Port_Binding"
 	VirtualPortPrefix = "ovn_k8s_vport"
-
-	OvnK8sClusterNameKey = OvnK8sPrefix + "/" + "cluster_name"
-)
-
-// portMirror constants
-type PortMirrorType string
-
-const (
-	PortMirrorResyncInterval = 30 * time.Second
 )
 
 type OvnK8sStatus string

@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -15,12 +17,15 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
+	"k8s.io/kubernetes/test/e2e/framework/debug"
+	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	testutils "k8s.io/kubernetes/test/utils"
@@ -31,7 +36,18 @@ import (
 const (
 	ovnNamespace   = "ovn-kubernetes"
 	ovnNodeSubnets = "k8s.ovn.org/node-subnets"
+	// ovnNodeZoneNameAnnotation is the node annotation name to store the node zone name.
+	ovnNodeZoneNameAnnotation = "k8s.ovn.org/zone-name"
 )
+
+var containerRuntime = "docker"
+var singleNodePerZoneResult *bool
+
+func init() {
+	if cr, found := os.LookupEnv("CONTAINER_RUNTIME"); found {
+		containerRuntime = cr
+	}
+}
 
 type IpNeighbor struct {
 	Dst    string `dst`
@@ -90,6 +106,28 @@ func newAgnhostPod(namespace, name string, command ...string) *v1.Pod {
 			Namespace: namespace,
 		},
 		Spec: v1.PodSpec{
+			Containers: []v1.Container{
+				{
+					Name:    name,
+					Image:   agnhostImage,
+					Command: command,
+				},
+			},
+			RestartPolicy: v1.RestartPolicyNever,
+		},
+	}
+}
+
+// newAgnhostPod returns a pod that uses the agnhost image. The image's binary supports various subcommands
+// that behave the same, no matter the underlying OS.
+func newAgnhostPodOnNode(name, nodeName string, labels map[string]string, command ...string) *v1.Pod {
+	return &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   name,
+			Labels: labels,
+		},
+		Spec: v1.PodSpec{
+			NodeName: nodeName,
 			Containers: []v1.Container{
 				{
 					Name:    name,
@@ -243,40 +281,53 @@ func externalIPServiceSpecFrom(svcName string, httpPort, updPort, clusterHTTPPor
 	return res
 }
 
-// pokeEndpointHostname leverages a container running the netexec command to send a "hostname" request to a target running
+// pokeEndpoint leverages a container running the netexec command to send a "request" to a target running
 // netexec on the given target host / protocol / port.
-// Returns the name of backend pod.
-func pokeEndpointHostname(clientContainer, protocol, targetHost string, targetPort int32) string {
+// Returns the response based on the provided "request".
+func pokeEndpoint(namespace, clientContainer, protocol, targetHost string, targetPort int32, request string) string {
 	ipPort := net.JoinHostPort("localhost", "80")
-	cmd := []string{"docker", "exec", clientContainer}
+	cmd := []string{containerRuntime, "exec", clientContainer}
+	if len(namespace) != 0 {
+		// command is to be run inside a pod, not containerRuntime
+		cmd = []string{"exec", clientContainer, "--"}
+	}
 
 	// we leverage the dial command from netexec, that is already supporting multiple protocols
-	curlCommand := strings.Split(fmt.Sprintf("curl -g -q -s http://%s/dial?request=hostname&protocol=%s&host=%s&port=%d&tries=1",
+	curlCommand := strings.Split(fmt.Sprintf("curl -g -q -s http://%s/dial?request=%s&protocol=%s&host=%s&port=%d&tries=1",
 		ipPort,
+		request,
 		protocol,
 		targetHost,
 		targetPort), " ")
 
 	cmd = append(cmd, curlCommand...)
-	res, err := runCommand(cmd...)
+	var res string
+	var err error
+	if len(namespace) != 0 {
+		res, err = e2ekubectl.RunKubectl(namespace, cmd...)
+	} else {
+		// command is to be run inside runtime container
+		res, err = runCommand(cmd...)
+	}
 	framework.ExpectNoError(err, "failed to run command on external container")
-	hostName, err := parseNetexecResponse(res)
+	response, err := parseNetexecResponse(res)
 	if err != nil {
 		framework.Logf("FAILED Command was %s", curlCommand)
 		framework.Logf("FAILED Response was %v", res)
+		return ""
 	}
 	framework.ExpectNoError(err)
 
-	return hostName
+	return response
 }
 
-// wrapper logic around pokeEndpointHostname
+// wrapper logic around pokeEndpoint
 // contact the ExternalIP service until each endpoint returns its hostname and return true, or false otherwise
 func pokeExternalIpService(clientContainerName, protocol, externalAddress string, externalPort int32, maxTries int, nodesHostnames sets.String) bool {
 	responses := sets.NewString()
 
 	for i := 0; i < maxTries; i++ {
-		epHostname := pokeEndpointHostname(clientContainerName, protocol, externalAddress, externalPort)
+		epHostname := pokeEndpoint("", clientContainerName, protocol, externalAddress, externalPort, "hostname")
 		responses.Insert(epHostname)
 
 		// each endpoint returns its hostname. By doing this, we validate that each ep was reached at least once.
@@ -292,7 +343,7 @@ func pokeExternalIpService(clientContainerName, protocol, externalAddress string
 // we will always run iterations + 1 in the loop to make sure that we have values
 // to compare
 func isNeighborEntryStable(clientContainer, targetHost string, iterations int) bool {
-	cmd := []string{"docker", "exec", clientContainer}
+	cmd := []string{containerRuntime, "exec", clientContainer}
 	var hwAddrOld string
 	var hwAddrNew string
 	// used for reporting only
@@ -376,46 +427,17 @@ func isNeighborEntryStable(clientContainer, targetHost string, iterations int) b
 	return true
 }
 
-// pokeEndpointClientIP leverages a container running the netexec command to send a "clientip" request to a target running
-// netexec on the given target host / protocol / port.
-// Returns the src ip of the packet.
-func pokeEndpointClientIP(clientContainer, protocol, targetHost string, targetPort int32) string {
-	ipPort := net.JoinHostPort("localhost", "80")
-	cmd := []string{"docker", "exec", clientContainer}
-
-	// we leverage the dial command from netexec, that is already supporting multiple protocols
-	curlCommand := strings.Split(fmt.Sprintf("curl -g -q -s http://%s/dial?request=clientip&protocol=%s&host=%s&port=%d&tries=1",
-		ipPort,
-		protocol,
-		targetHost,
-		targetPort), " ")
-
-	cmd = append(cmd, curlCommand...)
-	res, err := runCommand(cmd...)
-	framework.ExpectNoError(err, "failed to run command on external container")
-	clientIP, err := parseNetexecResponse(res)
-	framework.ExpectNoError(err)
-	ip, _, err := net.SplitHostPort(clientIP)
-	if err != nil {
-		framework.Logf("FAILED Command was %s", curlCommand)
-		framework.Logf("FAILED Response was %v", res)
-	}
-	framework.ExpectNoError(err, "failed to parse client ip:port")
-
-	return ip
-}
-
 // curlInContainer leverages a container running the netexec command to send a request to a target running
 // netexec on the given target host / protocol / port.
 // Returns a pair of either result, nil or "", error in case of an error.
-func curlInContainer(clientContainer, protocol, targetHost string, targetPort int32, endPoint string, maxTime int) (string, error) {
-	cmd := []string{"docker", "exec", clientContainer}
+func curlInContainer(clientContainer, targetHost string, targetPort int32, endPoint string, maxTime int) (string, error) {
+	cmd := []string{containerRuntime, "exec", clientContainer}
 	if utilnet.IsIPv6String(targetHost) {
 		targetHost = fmt.Sprintf("[%s]", targetHost)
 	}
 
 	// we leverage the dial command from netexec, that is already supporting multiple protocols
-	curlCommand := strings.Split(fmt.Sprintf("curl -g -q -s --max-time %d http://%s:%d/%s",
+	curlCommand := strings.Split(fmt.Sprintf("curl --max-time %d http://%s:%d/%s",
 		maxTime,
 		targetHost,
 		targetPort,
@@ -515,17 +537,25 @@ func getNodeAddresses(node *v1.Node) (string, string) {
 	return ipv4Res, ipv6Res
 }
 
+func getNodeStatus(node string) string {
+	status, err := e2ekubectl.RunKubectl("default", "get", "node", "-o", "jsonpath={.status.conditions[?(@.type==\"Ready\")].status}", node)
+	if err != nil {
+		framework.Failf("Unable to retrieve the status for node: %s %v", node, err)
+	}
+	return status
+}
+
 // Returns the container's ipv4 and ipv6 addresses IN ORDER
 // related to the given network.
 func getContainerAddressesForNetwork(container, network string) (string, string) {
 	ipv4Format := fmt.Sprintf("{{.NetworkSettings.Networks.%s.IPAddress}}", network)
 	ipv6Format := fmt.Sprintf("{{.NetworkSettings.Networks.%s.GlobalIPv6Address}}", network)
 
-	ipv4, err := runCommand("docker", "inspect", "-f", ipv4Format, container)
+	ipv4, err := runCommand(containerRuntime, "inspect", "-f", ipv4Format, container)
 	if err != nil {
 		framework.Failf("failed to inspect external test container for its IPv4: %v", err)
 	}
-	ipv6, err := runCommand("docker", "inspect", "-f", ipv6Format, container)
+	ipv6, err := runCommand(containerRuntime, "inspect", "-f", ipv6Format, container)
 	if err != nil {
 		framework.Failf("failed to inspect external test container for its IPv4: %v", err)
 	}
@@ -537,7 +567,7 @@ func getContainerAddressesForNetwork(container, network string) (string, string)
 func getMACAddressesForNetwork(container, network string) string {
 	mac := fmt.Sprintf("{{.NetworkSettings.Networks.%s.MacAddress}}", network)
 
-	macAddr, err := runCommand("docker", "inspect", "-f", mac, container)
+	macAddr, err := runCommand(containerRuntime, "inspect", "-f", mac, container)
 	if err != nil {
 		framework.Failf("failed to inspect external test container for its MAC: %v", err)
 	}
@@ -558,7 +588,7 @@ func deletePodSyncNS(clientSet kubernetes.Interface, namespace, podName string) 
 
 // waitClusterHealthy ensures we have a given number of ovn-k worker and master nodes,
 // as well as all nodes are healthy
-func waitClusterHealthy(f *framework.Framework, numMasters int) error {
+func waitClusterHealthy(f *framework.Framework, numControlPlanePods int, controlPlanePodName string) error {
 	return wait.PollImmediate(2*time.Second, 120*time.Second, func() (bool, error) {
 		nodes, err := f.ClientSet.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
 		if err != nil {
@@ -601,13 +631,13 @@ func waitClusterHealthy(f *framework.Framework, numMasters int) error {
 		}
 
 		podList, err = podClient.List(context.Background(), metav1.ListOptions{
-			LabelSelector: "name=ovnkube-master",
+			LabelSelector: "name=" + controlPlanePodName,
 		})
 		if err != nil {
-			return false, fmt.Errorf("failed to list ovn-kube node pods: %w", err)
+			return false, fmt.Errorf("failed to list ovn-kube master pods: %w", err)
 		}
-		if len(podList.Items) != numMasters {
-			framework.Logf("Not enough running ovnkube-master pods, want %d, have %d", numMasters, len(podList.Items))
+		if len(podList.Items) != numControlPlanePods {
+			framework.Logf("Not enough running %s pods, want %d, have %d", numControlPlanePods, numControlPlanePods, len(podList.Items))
 			return false, nil
 		}
 
@@ -622,55 +652,106 @@ func waitClusterHealthy(f *framework.Framework, numMasters int) error {
 	})
 }
 
-// waitForDaemonSetUpdate waits for the daemon set in a given namespace to be
+// waitForRollout waits for the daemon set in a given namespace to be
 // successfully rolled out following an update.
 //
 // If allowedNotReadyNodes is -1, this method returns immediately without waiting.
-func waitForDaemonSetUpdate(c clientset.Interface, ns string, dsName string, allowedNotReadyNodes int32, timeout time.Duration) error {
+func waitForRollout(c clientset.Interface, ns string, resource string, allowedNotReadyNodes int32, timeout time.Duration) error {
 	if allowedNotReadyNodes == -1 {
 		return nil
 	}
 
+	resourceAtoms := strings.Split(resource, "/")
+	if len(resourceAtoms) != 2 {
+		return fmt.Errorf("invalid resource format, expected <type>/<name>, got %s", resource)
+	}
+	resourceType := resourceAtoms[0]
+	resourceName := resourceAtoms[1]
+
 	start := time.Now()
 	framework.Logf("Waiting up to %v for daemonset %s in namespace %s to update",
-		timeout, dsName, ns)
+		timeout, resource, ns)
 
 	return wait.Poll(framework.Poll, timeout, func() (bool, error) {
-		ds, err := c.AppsV1().DaemonSets(ns).Get(context.TODO(), dsName, metav1.GetOptions{})
-		if err != nil {
-			framework.Logf("Error getting daemonset: %s in namespace: %s: %v", dsName, ns, err)
-			return false, err
+		var generation, observedGeneration int64
+		var updated, desired, available int32
+		switch resourceType {
+		case "daemonset", "daemonsets", "ds":
+			ds, err := c.AppsV1().DaemonSets(ns).Get(context.TODO(), resourceName, metav1.GetOptions{})
+			if err != nil {
+				framework.Logf("Error getting resource %s in namespace: %s: %v", resource, ns, err)
+				return false, err
+			}
+			generation = ds.Generation
+			observedGeneration = ds.Status.ObservedGeneration
+			updated = ds.Status.UpdatedNumberScheduled
+			desired = ds.Status.DesiredNumberScheduled
+			available = ds.Status.NumberAvailable
+
+		case "deployment", "deployments", "deploy":
+			dp, err := c.AppsV1().Deployments(ns).Get(context.TODO(), resourceName, metav1.GetOptions{})
+			if err != nil {
+				framework.Logf("Error getting resource %s in namespace: %s: %v", resource, ns, err)
+				return false, err
+			}
+			generation = dp.Generation
+			observedGeneration = dp.Status.ObservedGeneration
+			updated = dp.Status.UpdatedReplicas
+			desired = dp.Status.Replicas
+			available = dp.Status.AvailableReplicas
+
+		default:
+			return false, fmt.Errorf("unsupported resource type %s", resourceType)
 		}
 
-		if ds.Generation <= ds.Status.ObservedGeneration {
-			if ds.Status.UpdatedNumberScheduled < ds.Status.DesiredNumberScheduled {
-				framework.Logf("Waiting for daemon set %q rollout to finish: %d out of %d new pods have been updated (%d seconds elapsed)", ds.Name,
-					ds.Status.UpdatedNumberScheduled, ds.Status.DesiredNumberScheduled, int(time.Since(start).Seconds()))
+		if generation <= observedGeneration {
+			if updated < desired {
+				framework.Logf("Waiting for %s rollout to finish: %d out of %d new pods have been updated (%d seconds elapsed)", resource,
+					updated, desired, int(time.Since(start).Seconds()))
 				return false, nil
 			}
-			if ds.Status.NumberAvailable < ds.Status.DesiredNumberScheduled {
-				framework.Logf("Waiting for daemon set %q rollout to finish: %d of %d updated pods are available (%d seconds elapsed)", ds.Name,
-					ds.Status.NumberAvailable, ds.Status.DesiredNumberScheduled, int(time.Since(start).Seconds()))
+			if available < desired {
+				framework.Logf("Waiting for %s rollout to finish: %d of %d updated pods are available (%d seconds elapsed)", resource,
+					available, desired, int(time.Since(start).Seconds()))
 				return false, nil
 			}
-			framework.Logf("daemon set %q successfully rolled out", ds.Name)
+			framework.Logf("resource %q successfully rolled out", resource)
 			return true, nil
 		}
 
-		framework.Logf("Waiting for daemon set: %s spec update to be observed...", dsName)
+		framework.Logf("Waiting for %s spec update to be observed...", resource)
 		return false, nil
 	})
 }
 
 func pokePod(fr *framework.Framework, srcPodName string, dstPodIP string) error {
+	targetIP := dstPodIP
+	if utilnet.IsIPv6String(dstPodIP) {
+		targetIP = fmt.Sprintf("[%s]", dstPodIP)
+	}
 	stdout, stderr, err := e2epod.ExecShellInPodWithFullOutput(
 		fr,
 		srcPodName,
-		fmt.Sprintf("curl --output /dev/stdout -m 1 -I %s:8000 | head -n1", dstPodIP))
+		fmt.Sprintf("curl --output /dev/stdout -m 1 -I %s:8000 | head -n1", targetIP))
 	if err == nil && stdout == "HTTP/1.1 200 OK" {
 		return nil
 	}
 	return fmt.Errorf("http request failed; stdout: %s, err: %v", stdout+stderr, err)
+}
+
+// pokeAllPodIPs will either poke the single dstPod's PodIP or all IPs in the pod's PodIPs list. The returned error
+// will be an aggregate of the errors encountered poking all destination IPs.
+func pokeAllPodIPs(fr *framework.Framework, srcPodName string, dstPod *v1.Pod) error {
+	var errors []error
+	if len(dstPod.Status.PodIPs) > 0 {
+		for _, podIP := range dstPod.Status.PodIPs {
+			if err := pokePod(fr, srcPodName, podIP.IP); err != nil {
+				errors = append(errors, err)
+			}
+		}
+		return utilerrors.NewAggregate(errors)
+	}
+	return pokePod(fr, srcPodName, dstPod.Status.PodIP)
 }
 
 func pokeExternalHostFromPod(fr *framework.Framework, namespace string, srcPodName, dstIp string, dstPort int) error {
@@ -692,7 +773,7 @@ func ExecShellInPodWithFullOutput(f *framework.Framework, namespace, podName str
 
 // execCommandInPodWithFullOutput is a shameless copy/paste from the framework methods so that we can specify the pod namespace.
 func execCommandInPodWithFullOutput(f *framework.Framework, namespace, podName string, cmd ...string) (string, string, error) {
-	pod, err := e2epod.PodClientNS(f, namespace).Get(context.TODO(), podName, metav1.GetOptions{})
+	pod, err := f.ClientSet.CoreV1().Pods(namespace).Get(context.TODO(), podName, metav1.GetOptions{})
 	framework.ExpectNoError(err, "failed to get pod %v", podName)
 	gomega.Expect(pod.Spec.Containers).NotTo(gomega.BeEmpty())
 	return ExecCommandInContainerWithFullOutput(f, namespace, podName, pod.Spec.Containers[0].Name, cmd...)
@@ -713,30 +794,30 @@ func ExecCommandInContainerWithFullOutput(f *framework.Framework, namespace, pod
 	return e2epod.ExecWithOptions(f, options)
 }
 
-func assertAclLogs(targetNodeName string, policyNameRegex string, expectedAclVerdict string, expectedAclSeverity string) (bool, error) {
+func assertACLLogs(targetNodeName string, policyNameRegex string, expectedACLVerdict string, expectedACLSeverity string) (bool, error) {
 	framework.Logf("collecting the ovn-controller logs for node: %s", targetNodeName)
-	targetNodeLog, err := runCommand([]string{"docker", "exec", targetNodeName, "grep", "acl_log", ovnControllerLogPath}...)
+	targetNodeLog, err := runCommand([]string{containerRuntime, "exec", targetNodeName, "grep", "acl_log", ovnControllerLogPath}...)
 	if err != nil {
 		return false, fmt.Errorf("error accessing logs in node %s: %v", targetNodeName, err)
 	}
 
-	framework.Logf("Ensuring the audit log contains: 'name=\"%s\"', 'verdict=%s' AND 'severity=%s'", policyNameRegex, expectedAclVerdict, expectedAclSeverity)
+	framework.Logf("Ensuring the audit log contains: 'name=\"%s\"', 'verdict=%s' AND 'severity=%s'", policyNameRegex, expectedACLVerdict, expectedACLSeverity)
 	for _, logLine := range strings.Split(targetNodeLog, "\n") {
 		matched, err := regexp.MatchString(fmt.Sprintf("name=\"%s\"", policyNameRegex), logLine)
 		if err != nil {
 			return false, err
 		}
 		if matched &&
-			strings.Contains(logLine, fmt.Sprintf("verdict=%s", expectedAclVerdict)) &&
-			strings.Contains(logLine, fmt.Sprintf("severity=%s", expectedAclSeverity)) {
+			strings.Contains(logLine, fmt.Sprintf("verdict=%s", expectedACLVerdict)) &&
+			strings.Contains(logLine, fmt.Sprintf("severity=%s", expectedACLSeverity)) {
 			return true, nil
 		}
 	}
 	return false, nil
 }
 
-// patchService patches service serviceName in namespace serviceNamespace.
-func patchService(c kubernetes.Interface, serviceName, serviceNamespace, jsonPath, value string) error {
+// patchServiceStringValue patches service serviceName in namespace serviceNamespace with provided string value.
+func patchServiceStringValue(c kubernetes.Interface, serviceName, serviceNamespace, jsonPath, value string) error {
 	patch := []struct {
 		Op    string `json:"op"`
 		Path  string `json:"path"`
@@ -748,6 +829,27 @@ func patchService(c kubernetes.Interface, serviceName, serviceNamespace, jsonPat
 	}}
 	patchBytes, _ := json.Marshal(patch)
 
+	return patchService(c, serviceName, serviceNamespace, jsonPath, patchBytes)
+}
+
+// patchServiceBoolValue patches service serviceName in namespace serviceNamespace with provided bool value.
+func patchServiceBoolValue(c kubernetes.Interface, serviceName, serviceNamespace, jsonPath string, value bool) error {
+	patch := []struct {
+		Op    string `json:"op"`
+		Path  string `json:"path"`
+		Value bool   `json:"value"`
+	}{{
+		Op:    "replace",
+		Path:  jsonPath,
+		Value: value,
+	}}
+	patchBytes, _ := json.Marshal(patch)
+
+	return patchService(c, serviceName, serviceNamespace, jsonPath, patchBytes)
+}
+
+// patchService patches service serviceName in namespace serviceNamespace.
+func patchService(c kubernetes.Interface, serviceName, serviceNamespace, jsonPath string, patchBytes []byte) error {
 	_, err := c.CoreV1().Services(serviceNamespace).Patch(
 		context.TODO(),
 		serviceName,
@@ -761,8 +863,27 @@ func patchService(c kubernetes.Interface, serviceName, serviceNamespace, jsonPat
 	return nil
 }
 
+// pokeIPTableRules returns the number of iptable rules that match the provided pattern
+func pokeIPTableRules(clientContainer, pattern string) int {
+	cmd := []string{containerRuntime, "exec", clientContainer}
+	ipTCommand := strings.Split("iptables-save -c", " ")
+
+	cmd = append(cmd, ipTCommand...)
+	iptRules, err := runCommand(cmd...)
+	framework.ExpectNoError(err, "failed to get iptable rules from node %s", clientContainer)
+	framework.Logf("DEBUG: Dumping IPTRules %v", iptRules)
+	numOfMatchRules := 0
+	for _, iptRule := range strings.Split(iptRules, "\n") {
+		match := strings.Contains(iptRule, pattern)
+		if match {
+			framework.Logf("DEBUG: Matched rule %s for pattern %s", iptRule, pattern)
+			numOfMatchRules++
+		}
+	}
+	return numOfMatchRules
+}
+
 // isDualStackCluster returns 'true' if at least one of the nodes has more than one node subnet.
-// This can reliably be determined by checking that Annotations["k8s.ovn.org/node-subnets"] parses into map[string][]string.
 func isDualStackCluster(nodes *v1.NodeList) bool {
 	for _, node := range nodes.Items {
 		annotation, ok := node.Annotations[ovnNodeSubnets]
@@ -770,9 +891,11 @@ func isDualStackCluster(nodes *v1.NodeList) bool {
 			continue
 		}
 
-		subnetsDual := make(map[string][]string)
-		if err := json.Unmarshal([]byte(annotation), &subnetsDual); err == nil {
-			return true
+		subnets := make(map[string][]string)
+		if err := json.Unmarshal([]byte(annotation), &subnets); err == nil {
+			if len(subnets["default"]) > 1 {
+				return true
+			}
 		}
 	}
 	return false
@@ -787,8 +910,6 @@ func wrappedTestFramework(basename string) *framework.Framework {
 			return
 		}
 
-		ovnDocker := "ovn-control-plane"
-
 		logLocation := "/var/log"
 		dbLocation := "/var/lib/openvswitch"
 		ovsdbLocation := "/etc/origin/openvswitch"
@@ -800,32 +921,32 @@ func wrappedTestFramework(basename string) *framework.Framework {
 
 		var args []string
 
-		// grab all OVS dbs
+		// grab all OVS and OVN dbs
 		nodes, err := f.ClientSet.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
 		framework.ExpectNoError(err)
 		for _, node := range nodes.Items {
 			// ensure e2e-dbs directory with test case exists
-			args = []string{"docker", "exec", node.Name, "mkdir", "-p", logDir}
+			args = []string{containerRuntime, "exec", node.Name, "mkdir", "-p", logDir}
 			_, err = runCommand(args...)
 			framework.ExpectNoError(err)
 
 			// node name is the same in kapi and docker
-			args = []string{"docker", "exec", node.Name, "cp", "-f", fmt.Sprintf("%s/%s", ovsdbLocation, ovsdb),
+			args = []string{containerRuntime, "exec", node.Name, "cp", "-f", fmt.Sprintf("%s/%s", ovsdbLocation, ovsdb),
 				fmt.Sprintf("%s/%s", logDir, fmt.Sprintf("%s-%s", node.Name, ovsdb))}
 			_, err = runCommand(args...)
 			framework.ExpectNoError(err)
-		}
 
-		args = []string{"docker", "exec", ovnDocker, "stat", fmt.Sprintf("%s/%s", dbLocation, dbs[0])}
-		_, err = runCommand(args...)
-		framework.ExpectNoError(err)
-
-		// grab the OVN dbs
-		for _, db := range dbs {
-			args = []string{"docker", "exec", ovnDocker, "cp", "-f", fmt.Sprintf("%s/%s", dbLocation, db),
-				fmt.Sprintf("%s/%s", logDir, db)}
+			// IC will have dbs on every node, but legacy mode wont, check if they exist
+			args = []string{containerRuntime, "exec", node.Name, "stat", fmt.Sprintf("%s/%s", dbLocation, dbs[0])}
 			_, err = runCommand(args...)
-			framework.ExpectNoError(err)
+			if err == nil {
+				for _, db := range dbs {
+					args = []string{containerRuntime, "exec", node.Name, "cp", "-f", fmt.Sprintf("%s/%s", dbLocation, db),
+						fmt.Sprintf("%s/%s", logDir, db)}
+					_, err = runCommand(args...)
+					framework.ExpectNoError(err)
+				}
+			}
 		}
 	})
 
@@ -835,17 +956,20 @@ func wrappedTestFramework(basename string) *framework.Framework {
 func newPrivelegedTestFramework(basename string) *framework.Framework {
 	f := framework.NewDefaultFramework(basename)
 	f.NamespacePodSecurityEnforceLevel = admissionapi.LevelPrivileged
+	f.DumpAllNamespaceInfo = func(f *framework.Framework, namespace string) {
+		debug.DumpAllNamespaceInfo(f.ClientSet, namespace)
+	}
 	return f
 }
 
-// countAclLogs connects to <targetNodeName> (ovn-control-plane, ovn-worker or ovn-worker2 in kind environments) via the docker exec
+// countACLLogs connects to <targetNodeName> (ovn-control-plane, ovn-worker or ovn-worker2 in kind environments) via the docker exec
 // command and it greps for the string "acl_log" inside the OVN controller logs. It then checks if the line contains name=<policyNameRegex>
 // and if it does, it increases the counter if both the verdict and the severity for this line match what's expected.
-func countAclLogs(targetNodeName string, policyNameRegex string, expectedAclVerdict string, expectedAclSeverity string) (int, error) {
+func countACLLogs(targetNodeName string, policyNameRegex string, expectedACLVerdict string, expectedACLSeverity string) (int, error) {
 	count := 0
 
 	framework.Logf("collecting the ovn-controller logs for node: %s", targetNodeName)
-	targetNodeLog, err := runCommand([]string{"docker", "exec", targetNodeName, "cat", ovnControllerLogPath}...)
+	targetNodeLog, err := runCommand([]string{containerRuntime, "exec", targetNodeName, "cat", ovnControllerLogPath}...)
 	if err != nil {
 		return 0, fmt.Errorf("error accessing logs in node %s: %v", targetNodeName, err)
 	}
@@ -853,8 +977,8 @@ func countAclLogs(targetNodeName string, policyNameRegex string, expectedAclVerd
 	stringToMatch := fmt.Sprintf(
 		".*acl_log.*name=\"%s\".*verdict=%s.*severity=%s.*",
 		policyNameRegex,
-		expectedAclVerdict,
-		expectedAclSeverity)
+		expectedACLVerdict,
+		expectedACLSeverity)
 
 	for _, logLine := range strings.Split(targetNodeLog, "\n") {
 		matched, err := regexp.MatchString(stringToMatch, logLine)
@@ -868,4 +992,121 @@ func countAclLogs(targetNodeName string, policyNameRegex string, expectedAclVerd
 
 	framework.Logf("The audit log contains %d occurrences of: '%s'", count, stringToMatch)
 	return count, nil
+}
+
+// getTemplateContainerEnv gets the value of an environment variable in a container template
+func getTemplateContainerEnv(namespace, resource, container, key string) string {
+	args := []string{"get", resource,
+		"-o=jsonpath='{.spec.template.spec.containers[?(@.name==\"" + container + "\")].env[?(@.name==\"" + key + "\")].value}'"}
+	value := e2ekubectl.RunKubectlOrDie(ovnNamespace, args...)
+	return strings.Trim(value, "'")
+}
+
+// setUnsetTemplateContainerEnv sets and unsets environment variables in a container
+// template and waits for the rollout
+func setUnsetTemplateContainerEnv(c kubernetes.Interface, namespace, resource, container string, set map[string]string, unset ...string) {
+	args := []string{"set", "env", resource, "-c", container}
+	env := make([]string, 0, len(set)+len(unset))
+	for k, v := range set {
+		env = append(env, fmt.Sprintf("%s=%s", k, v))
+	}
+	for _, k := range unset {
+		env = append(env, fmt.Sprintf("%s-", k))
+	}
+	framework.Logf("Setting environment in %s container %s of namespace %s to %v", resource, container, namespace, env)
+	e2ekubectl.RunKubectlOrDie(namespace, append(args, env...)...)
+
+	// Make sure the change has rolled out
+	// TODO (Change this to use the exported upstream function)
+	err := waitForRollout(c, namespace, resource, 0, rolloutTimeout)
+	framework.ExpectNoError(err)
+}
+
+// allowOrDropNodeInputTrafficOnPort ensures or deletes a drop iptables
+// input rule for the specified node, protocol and port
+func allowOrDropNodeInputTrafficOnPort(op, nodeName, protocol, port string) {
+	switch op {
+	case "Allow":
+		op = "delete"
+	case "Drop":
+		op = "insert"
+	default:
+		framework.Failf("unsupported op %s", op)
+	}
+
+	args := []string{"get", "pods", "--selector=app=ovnkube-node", "--field-selector", fmt.Sprintf("spec.nodeName=%s", nodeName), "-o", "jsonpath={.items..metadata.name}"}
+	ovnKubePodName := e2ekubectl.RunKubectlOrDie(ovnNamespace, args...)
+
+	ipTablesArgs := []string{"INPUT", "-p", protocol, "--dport", port, "-j", "DROP"}
+
+	args = []string{"exec", ovnKubePodName, "-c", getNodeContainerName(), "--", "iptables", "--check"}
+	_, err := e2ekubectl.RunKubectl(ovnNamespace, append(args, ipTablesArgs...)...)
+
+	// errors known to be equivalent to not found
+	notFound1 := "No chain/target/match by that name"
+	notFound2 := "does a matching rule exist in that chain?"
+	notFound := err != nil && (strings.Contains(err.Error(), notFound1) || strings.Contains(err.Error(), notFound2))
+	if err != nil && !notFound {
+		framework.Failf("failed to check existance of iptables rule on node %s: %v", nodeName, err)
+	}
+
+	if op == "delete" && notFound {
+		// rule is not there
+		return
+	} else if op == "append" && err == nil {
+		// rule is already there
+		return
+	}
+
+	args = []string{"exec", ovnKubePodName, "-c", getNodeContainerName(), "--", "iptables", "--" + op}
+	framework.Logf("%s iptables input rule for protocol %s port %s action DROP on node %s", op, protocol, port, nodeName)
+	e2ekubectl.RunKubectlOrDie(ovnNamespace, append(args, ipTablesArgs...)...)
+}
+
+func randStr(n int) string {
+	rand.Seed(time.Now().UnixNano())
+	b := make([]byte, n)
+	for i := range b {
+		// randomly select 1 character from given charset
+		b[i] = charset[rand.Intn(len(charset))]
+	}
+	return string(b)
+}
+
+func isInterconnectEnabled() bool {
+	val, present := os.LookupEnv("OVN_ENABLE_INTERCONNECT")
+	return present && val == "true"
+}
+
+func singleNodePerZone() bool {
+	if singleNodePerZoneResult == nil {
+		args := []string{"get", "pods", "--selector=app=ovnkube-node", "-o", "jsonpath={.items[0].spec.containers[*].name}"}
+		containerNames := e2ekubectl.RunKubectlOrDie(ovnNamespace, args...)
+		result := true
+		for _, containerName := range strings.Split(containerNames, " ") {
+			if containerName == "ovnkube-node" {
+				result = false
+				break
+			}
+		}
+		singleNodePerZoneResult = &result
+	}
+	return *singleNodePerZoneResult
+}
+
+func getNodeContainerName() string {
+	if singleNodePerZone() {
+		return "ovnkube-controller"
+	}
+	return "ovnkube-node"
+}
+
+// getNodeZone returns the node's zone
+func getNodeZone(node *v1.Node) (string, error) {
+	nodeZone, ok := node.Annotations[ovnNodeZoneNameAnnotation]
+	if !ok {
+		return "", fmt.Errorf("zone for the node %s not set in the annotation %s", node.Name, ovnNodeZoneNameAnnotation)
+	}
+
+	return nodeZone, nil
 }

@@ -73,6 +73,11 @@ func RegisterNodeMetrics(metricsScrapeInterval int, stopChan chan struct{}) {
 			func() float64 { return 1 },
 		))
 		registerWorkqueueMetrics(MetricOvnkubeNamespace, MetricOvnkubeSubsystemNode)
+		if err := prometheus.Register(MetricResourceRetryFailuresCount); err != nil {
+			if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
+				panic(err)
+			}
+		}
 		go ovnKubeLogFileSizeMetricsUpdater(metricOvnKubeNodeLogFileSize, metricsScrapeInterval, stopChan)
 	})
 }

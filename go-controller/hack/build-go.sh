@@ -1,6 +1,7 @@
 #!/bin/bash
 set -e
 
+GO=${GO:-go}
 source "$(dirname "${BASH_SOURCE}")/init.sh"
 
 # Input:
@@ -8,6 +9,7 @@ source "$(dirname "${BASH_SOURCE}")/init.sh"
 build_binaries() {
     # Check for `go` binary and set ${GOPATH}.
     setup_env
+    echo ${OVN_KUBE_ROOT}
     cd "${OVN_KUBE_ROOT}"
 
     mkdir -p "${OVN_KUBE_OUTPUT_BINPATH}"
@@ -18,12 +20,12 @@ build_binaries() {
     GIT_BRANCH=$(git rev-parse --symbolic-full-name --abbrev-ref HEAD)
     BUILD_USER=$(whoami)
     BUILD_DATE=$(date +"%Y-%m-%d")
-    K8S_CLIENT_VERSION=$(grep 'k8s.io/client-go' ${OVN_KUBE_GO_PACKAGE}/go.sum | head -1 |cut -f2 -d' ')
+    K8S_CLIENT_VERSION=$(grep 'k8s.io/client-go' ${OVN_KUBE_ROOT}/go.mod | head -1 |cut -f2 -d' ')
 
     set -x
     for bin in "$@"; do
         binbase=$(basename ${bin})
-        env CGO_ENABLED=0 GOPRIVATE=gitlab-master.nvidia.com go build -v \
+        env CGO_ENABLED=0 GOPRIVATE=gitlab-master.nvidia.com "$GO" build -v \
             -mod vendor \
             -gcflags "${GCFLAGS}" \
             -ldflags "-B ${BUILDID} \
@@ -31,7 +33,8 @@ build_binaries() {
                 -X ${OVN_KUBE_GO_PACKAGE}/pkg/config.Branch=${GIT_BRANCH} \
                 -X ${OVN_KUBE_GO_PACKAGE}/pkg/config.BuildUser=${BUILD_USER} \
                 -X ${OVN_KUBE_GO_PACKAGE}/pkg/config.BuildDate=${BUILD_DATE} \
-                -X k8s.io/client-go/pkg/version.gitVersion=${K8S_CLIENT_VERSION}" \
+                -X k8s.io/client-go/pkg/version.gitVersion=${K8S_CLIENT_VERSION} \
+		`if [ "$binbase" != "ovnkube" ]; then echo ${LDFLAGS}; fi`" \
             -o "${OVN_KUBE_OUTPUT_BINPATH}/${binbase}"\
             "./${bin}"
     done
@@ -50,7 +53,8 @@ build_windows_binaries() {
         GOOS=windows GOARCH=amd64 go build -v \
             -mod vendor \
             -gcflags "${GCFLAGS}" \
-            -ldflags "-B ${BUILDID}" \
+            -ldflags "-B ${BUILDID} \
+		`if [ "$binbase" != "ovnkube" ]; then echo ${LDFLAGS}; fi`" \
             -o "${OVN_KUBE_OUTPUT_BINPATH_WINDOWS}/${binbase}.exe"\
             "./${bin}"
     done

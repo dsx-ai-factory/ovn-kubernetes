@@ -14,7 +14,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/go-logr/stdr"
 	"github.com/google/uuid"
-	"github.com/ovn-org/libovsdb/cache"
+	"github.com/ovn-org/libovsdb/database"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
 )
@@ -24,8 +24,9 @@ type OvsdbServer struct {
 	srv          *rpc2.Server
 	listener     net.Listener
 	done         chan struct{}
-	db           Database
+	db           database.Database
 	ready        bool
+	doEcho       bool
 	readyMutex   sync.RWMutex
 	models       map[string]model.DatabaseModel
 	modelsMutex  sync.RWMutex
@@ -35,12 +36,16 @@ type OvsdbServer struct {
 	txnMutex     sync.Mutex
 }
 
-// NewOvsdbServer returns a new OvsdbServer
-func NewOvsdbServer(db Database, models ...model.DatabaseModel) (*OvsdbServer, error) {
-	l := stdr.NewWithOptions(log.New(os.Stderr, "", log.LstdFlags), stdr.Options{LogCaller: stdr.All}).WithName("server")
+func init() {
 	stdr.SetVerbosity(5)
+}
+
+// NewOvsdbServer returns a new OvsdbServer
+func NewOvsdbServer(db database.Database, models ...model.DatabaseModel) (*OvsdbServer, error) {
+	l := stdr.NewWithOptions(log.New(os.Stderr, "", log.LstdFlags), stdr.Options{LogCaller: stdr.All}).WithName("server")
 	o := &OvsdbServer{
 		done:         make(chan struct{}, 1),
+		doEcho:       true,
 		db:           db,
 		models:       make(map[string]model.DatabaseModel),
 		modelsMutex:  sync.RWMutex{},
@@ -76,6 +81,17 @@ func NewOvsdbServer(db Database, models ...model.DatabaseModel) (*OvsdbServer, e
 // OnConnect registers a function to run when a client connects.
 func (o *OvsdbServer) OnConnect(f func(*rpc2.Client)) {
 	o.srv.OnConnect(f)
+}
+
+// OnDisConnect registers a function to run when a client disconnects.
+func (o *OvsdbServer) OnDisConnect(f func(*rpc2.Client)) {
+	o.srv.OnDisconnect(f)
+}
+
+func (o *OvsdbServer) DoEcho(ok bool) {
+	o.readyMutex.Lock()
+	o.doEcho = ok
+	o.readyMutex.Unlock()
 }
 
 // Serve starts the OVSDB server on the given path and protocol
@@ -163,32 +179,8 @@ func (o *OvsdbServer) GetSchema(client *rpc2.Client, args []interface{}, reply *
 	return nil
 }
 
-type Transaction struct {
-	ID          uuid.UUID
-	Cache       *cache.TableCache
-	DeletedRows map[string]struct{}
-	Model       model.DatabaseModel
-	DbName      string
-	Database    Database
-}
-
-func (o *OvsdbServer) NewTransaction(model model.DatabaseModel, dbName string, database Database) Transaction {
-	cache, err := cache.NewTableCache(model, nil, &o.logger)
-	if err != nil {
-		panic(err)
-	}
-	return Transaction{
-		ID:          uuid.New(),
-		Cache:       cache,
-		DeletedRows: make(map[string]struct{}),
-		Model:       model,
-		DbName:      dbName,
-		Database:    database,
-	}
-}
-
 // Transact issues a new database transaction and returns the results
-func (o *OvsdbServer) Transact(client *rpc2.Client, args []json.RawMessage, reply *[]ovsdb.OperationResult) error {
+func (o *OvsdbServer) Transact(client *rpc2.Client, args []json.RawMessage, reply *[]*ovsdb.OperationResult) error {
 	// While allowing other rpc handlers to run in parallel, this ovsdb server expects transactions
 	// to be serialized. The following mutex ensures that.
 	// Ref: https://github.com/cenkalti/rpc2/blob/c1acbc6ec984b7ae6830b6a36b62f008d5aefc4c/client.go#L187
@@ -203,43 +195,20 @@ func (o *OvsdbServer) Transact(client *rpc2.Client, args []json.RawMessage, repl
 	if err != nil {
 		return fmt.Errorf("database %v is not a string", args[0])
 	}
-	if !o.db.Exists(db) {
-		return fmt.Errorf("db does not exist")
-	}
 	var ops []ovsdb.Operation
-	namedUUID := make(map[string]ovsdb.UUID)
 	for i := 1; i < len(args); i++ {
 		var op ovsdb.Operation
 		err = json.Unmarshal(args[i], &op)
 		if err != nil {
 			return err
 		}
-		if op.UUIDName != "" {
-			newUUID := uuid.NewString()
-			namedUUID[op.UUIDName] = ovsdb.UUID{GoUUID: newUUID}
-			op.UUIDName = newUUID
-		}
-		for i, condition := range op.Where {
-			op.Where[i].Value = expandNamedUUID(condition.Value, namedUUID)
-		}
-		for i, mutation := range op.Mutations {
-			op.Mutations[i].Value = expandNamedUUID(mutation.Value, namedUUID)
-		}
-		for _, row := range op.Rows {
-			for k, v := range row {
-				row[k] = expandNamedUUID(v, namedUUID)
-			}
-		}
-		for k, v := range op.Row {
-			op.Row[k] = expandNamedUUID(v, namedUUID)
-		}
 		ops = append(ops, op)
 	}
 	response, updates := o.transact(db, ops)
 	*reply = response
-	for i, operResult := range response {
+	for _, operResult := range response {
 		if operResult.Error != "" {
-			o.logger.Error(errors.New("failed to process operation"), "Skipping transaction DB commit due to error", "operations", ops, "failed operation", ops[i], "operation error", operResult.Error)
+			o.logger.Error(errors.New("failed to process operation"), "Skipping transaction DB commit due to error", "operations", ops, "results", response, "operation error", operResult.Error)
 			return nil
 		}
 	}
@@ -248,24 +217,12 @@ func (o *OvsdbServer) Transact(client *rpc2.Client, args []json.RawMessage, repl
 	return o.db.Commit(db, transactionID, updates)
 }
 
-func deepCopy(a ovsdb.TableUpdates) (ovsdb.TableUpdates, error) {
-	var b ovsdb.TableUpdates
-	raw, err := json.Marshal(a)
-	if err != nil {
-		return b, err
-	}
-	err = json.Unmarshal(raw, &b)
-	return b, err
-}
-
-func deepCopy2(a ovsdb.TableUpdates2) (ovsdb.TableUpdates2, error) {
-	var b ovsdb.TableUpdates2
-	raw, err := json.Marshal(a)
-	if err != nil {
-		return b, err
-	}
-	err = json.Unmarshal(raw, &b)
-	return b, err
+func (o *OvsdbServer) transact(name string, operations []ovsdb.Operation) ([]*ovsdb.OperationResult, database.Update) {
+	o.modelsMutex.Lock()
+	dbModel := o.models[name]
+	o.modelsMutex.Unlock()
+	transaction := database.NewTransaction(dbModel, name, o.db, &o.logger)
+	return transaction.Transact(operations)
 }
 
 // Cancel cancels the last transaction
@@ -301,18 +258,18 @@ func (o *OvsdbServer) Monitor(client *rpc2.Client, args []json.RawMessage, reply
 	o.modelsMutex.Lock()
 	dbModel := o.models[db]
 	o.modelsMutex.Unlock()
-	transaction := o.NewTransaction(dbModel, db, o.db)
+	transaction := database.NewTransaction(dbModel, db, o.db, &o.logger)
 
 	tableUpdates := make(ovsdb.TableUpdates)
 	for t, request := range request {
 		rows := transaction.Select(t, nil, request.Columns)
+		if len(rows.Rows) == 0 {
+			continue
+		}
+		tableUpdates[t] = make(ovsdb.TableUpdate, len(rows.Rows))
 		for i := range rows.Rows {
-			tu := make(ovsdb.TableUpdate)
 			uuid := rows.Rows[i]["_uuid"].(ovsdb.UUID).GoUUID
-			tu[uuid] = &ovsdb.RowUpdate{
-				New: &rows.Rows[i],
-			}
-			tableUpdates.AddTableUpdate(t, tu)
+			tableUpdates[t][uuid] = &ovsdb.RowUpdate{New: &rows.Rows[i]}
 		}
 	}
 	*reply = tableUpdates
@@ -348,16 +305,18 @@ func (o *OvsdbServer) MonitorCond(client *rpc2.Client, args []json.RawMessage, r
 	o.modelsMutex.Lock()
 	dbModel := o.models[db]
 	o.modelsMutex.Unlock()
-	transaction := o.NewTransaction(dbModel, db, o.db)
+	transaction := database.NewTransaction(dbModel, db, o.db, &o.logger)
 
 	tableUpdates := make(ovsdb.TableUpdates2)
 	for t, request := range request {
 		rows := transaction.Select(t, nil, request.Columns)
+		if len(rows.Rows) == 0 {
+			continue
+		}
+		tableUpdates[t] = make(ovsdb.TableUpdate2, len(rows.Rows))
 		for i := range rows.Rows {
-			tu := make(ovsdb.TableUpdate2)
 			uuid := rows.Rows[i]["_uuid"].(ovsdb.UUID).GoUUID
-			tu[uuid] = &ovsdb.RowUpdate2{Initial: &rows.Rows[i]}
-			tableUpdates.AddTableUpdate(t, tu)
+			tableUpdates[t][uuid] = &ovsdb.RowUpdate2{Initial: &rows.Rows[i]}
 		}
 	}
 	*reply = tableUpdates
@@ -393,16 +352,18 @@ func (o *OvsdbServer) MonitorCondSince(client *rpc2.Client, args []json.RawMessa
 	o.modelsMutex.Lock()
 	dbModel := o.models[db]
 	o.modelsMutex.Unlock()
-	transaction := o.NewTransaction(dbModel, db, o.db)
+	transaction := database.NewTransaction(dbModel, db, o.db, &o.logger)
 
 	tableUpdates := make(ovsdb.TableUpdates2)
 	for t, request := range request {
 		rows := transaction.Select(t, nil, request.Columns)
+		if len(rows.Rows) == 0 {
+			continue
+		}
+		tableUpdates[t] = make(ovsdb.TableUpdate2, len(rows.Rows))
 		for i := range rows.Rows {
-			tu := make(ovsdb.TableUpdate2)
 			uuid := rows.Rows[i]["_uuid"].(ovsdb.UUID).GoUUID
-			tu[uuid] = &ovsdb.RowUpdate2{Initial: &rows.Rows[i]}
-			tableUpdates.AddTableUpdate(t, tu)
+			tableUpdates[t][uuid] = &ovsdb.RowUpdate2{Initial: &rows.Rows[i]}
 		}
 	}
 	*reply = ovsdb.MonitorCondSinceReply{Found: false, LastTransactionID: "00000000-0000-0000-000000000000", Updates: tableUpdates}
@@ -432,68 +393,30 @@ func (o *OvsdbServer) Unlock(client *rpc2.Client, args []interface{}, reply *[]i
 
 // Echo tests the liveness of the connection
 func (o *OvsdbServer) Echo(client *rpc2.Client, args []interface{}, reply *[]interface{}) error {
+	o.readyMutex.Lock()
+	defer o.readyMutex.Unlock()
+	if !o.doEcho {
+		return fmt.Errorf("no echo reply")
+	}
 	echoReply := make([]interface{}, len(args))
 	copy(echoReply, args)
 	*reply = echoReply
 	return nil
 }
 
-func (o *OvsdbServer) processMonitors(id uuid.UUID, update ovsdb.TableUpdates2) {
+func (o *OvsdbServer) processMonitors(id uuid.UUID, update database.Update) {
 	o.monitorMutex.RLock()
 	for _, c := range o.monitors {
 		for _, m := range c.monitors {
 			switch m.kind {
 			case monitorKindOriginal:
-				var updates ovsdb.TableUpdates
-				updates.FromTableUpdates2(update)
-				// Deep copy for every monitor since each one filters
-				// the update for relevant tables and removes items
-				// from the update array
-				dbUpdates, _ := deepCopy(updates)
-				m.Send(dbUpdates)
+				m.Send(update)
 			case monitorKindConditional:
-				dbUpdates, _ := deepCopy2(update)
-				m.Send2(dbUpdates)
+				m.Send2(update)
 			case monitorKindConditionalSince:
-				dbUpdates, _ := deepCopy2(update)
-				m.Send3(id, dbUpdates)
+				m.Send3(id, update)
 			}
 		}
 	}
 	o.monitorMutex.RUnlock()
-}
-
-func expandNamedUUID(value interface{}, namedUUID map[string]ovsdb.UUID) interface{} {
-	if uuid, ok := value.(ovsdb.UUID); ok {
-		if newUUID, ok := namedUUID[uuid.GoUUID]; ok {
-			return newUUID
-		}
-	}
-	if set, ok := value.(ovsdb.OvsSet); ok {
-		for i, s := range set.GoSet {
-			if _, ok := s.(ovsdb.UUID); !ok {
-				return value
-			}
-			uuid := s.(ovsdb.UUID)
-			if newUUID, ok := namedUUID[uuid.GoUUID]; ok {
-				set.GoSet[i] = newUUID
-			}
-		}
-	}
-	if m, ok := value.(ovsdb.OvsMap); ok {
-		for k, v := range m.GoMap {
-			if uuid, ok := v.(ovsdb.UUID); ok {
-				if newUUID, ok := namedUUID[uuid.GoUUID]; ok {
-					m.GoMap[k] = newUUID
-				}
-			}
-			if uuid, ok := k.(ovsdb.UUID); ok {
-				if newUUID, ok := namedUUID[uuid.GoUUID]; ok {
-					m.GoMap[newUUID] = m.GoMap[k]
-					delete(m.GoMap, uuid)
-				}
-			}
-		}
-	}
-	return value
 }

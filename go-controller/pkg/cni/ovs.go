@@ -9,14 +9,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/client-go/kubernetes"
-	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 	kexec "k8s.io/utils/exec"
 	utilnet "k8s.io/utils/net"
-
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 var runner kexec.Interface
@@ -229,20 +228,17 @@ func doPodFlowsExist(mac string, ifAddrs []*net.IPNet, ofPort int) bool {
 // have a 1:1 relationship determined by pod UID. If we detect that the pod
 // has changed either UID or MAC terminate this sandbox request early instead
 // of waiting for OVN to set up flows that will never exist.
-func checkCancelSandbox(mac string, podLister corev1listers.PodLister, kclient kubernetes.Interface,
-	namespace, name, annoNadKeyName, initialPodUID string) error {
-	pod, err := getPod(podLister, kclient, namespace, name)
+func checkCancelSandbox(mac string, getter PodInfoGetter, namespace, name, nadName, initialPodUID string) error {
+	// Not all node CNI modes may have access to kube api, those will pass nil as getter.
+	if getter == nil {
+		return nil
+	}
+	pod, err := getter.getPod(namespace, name)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return fmt.Errorf("pod deleted")
 		}
 		klog.Warningf("[%s/%s] failed to get pod while waiting for OVS port binding: %v", namespace, name, err)
-		return nil
-	}
-
-	if pod == nil {
-		// Not all node CNI modes can pass non-nil podLister or kclient in which
-		// case pod will be nil
 		return nil
 	}
 
@@ -252,7 +248,7 @@ func checkCancelSandbox(mac string, podLister corev1listers.PodLister, kclient k
 		return fmt.Errorf("canceled old pod sandbox")
 	}
 
-	ovnAnnot, err := util.UnmarshalPodAnnotation(pod.Annotations, annoNadKeyName)
+	ovnAnnot, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
 	if err != nil {
 		return fmt.Errorf("pod OVN annotations deleted or invalid")
 	}
@@ -268,18 +264,15 @@ func checkCancelSandbox(mac string, podLister corev1listers.PodLister, kclient k
 }
 
 func waitForPodInterface(ctx context.Context, ifInfo *PodInterfaceInfo,
-	ifaceName, ifaceID string, podLister corev1listers.PodLister, kclient kubernetes.Interface,
+	ifaceName, ifaceID string, getter PodInfoGetter,
 	namespace, name, initialPodUID string) error {
 	var detail string
 	var ofPort int
 	var err error
 
-	mac := ifInfo.MAC.String()
-	ifAddrs := ifInfo.IPs
-	checkExternalIDs := ifInfo.CheckExtIDs
-	skipSpoofCheck := ifInfo.SkipSpoofCheck
-	nadName := ifInfo.NadName
-	annoNadKeyName := util.GetAnnotationKeyFromNadName(nadName, !ifInfo.IsSecondary)
+	// DPUHost mode can't use OVS external IDs for port-up detection because
+	// there is no ovn-controller running in DPUHost mode to set port-up
+	checkExternalIDs := !ifInfo.IsDPUHostMode
 	if checkExternalIDs {
 		detail = " (ovn-installed)"
 	} else {
@@ -291,6 +284,10 @@ func waitForPodInterface(ctx context.Context, ifInfo *PodInterfaceInfo,
 			return fmt.Errorf("the OF port number for the interface %s is not vaild %d", ifaceName, ofPort)
 		}
 	}
+
+	skipSpoofCheck := ifInfo.SkipSpoofCheck
+	mac := ifInfo.MAC.String()
+	ifAddrs := ifInfo.IPs
 	for {
 		select {
 		case <-ctx.Done():
@@ -327,12 +324,14 @@ func waitForPodInterface(ctx context.Context, ifInfo *PodInterfaceInfo,
 				return nil
 			}
 
-			if err := checkCancelSandbox(mac, podLister, kclient, namespace, name, annoNadKeyName, initialPodUID); err != nil {
-				return fmt.Errorf("%v waiting for OVS port binding%s for %s %v", err, detail, mac, ifAddrs)
+			if err := checkCancelSandbox(mac, getter, namespace, name, ifInfo.NADName, initialPodUID); err != nil {
+				return fmt.Errorf("%v waiting for OVS port binding for %s %v", err, mac, ifAddrs)
 			}
 
 			// try again later
-			time.Sleep(200 * time.Millisecond)
+			waitTime := 200 * time.Millisecond
+			time.Sleep(waitTime)
+			metrics.MetricOvsInterfaceUpWait.Add(waitTime.Seconds())
 		}
 	}
 }

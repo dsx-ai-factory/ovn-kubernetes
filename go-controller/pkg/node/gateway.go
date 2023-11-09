@@ -15,7 +15,7 @@ import (
 	"github.com/safchain/ethtool"
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
-	"k8s.io/client-go/tools/cache"
+	apierrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
 )
 
@@ -25,8 +25,8 @@ import (
 // are kept in sync
 type Gateway interface {
 	informer.ServiceAndEndpointsEventHandler
-	Init(factory.NodeWatchFactory) error
-	Start(<-chan struct{}, *sync.WaitGroup)
+	Init(factory.NodeWatchFactory, <-chan struct{}, *sync.WaitGroup) error
+	Start()
 	GetGatewayBridgeIface() string
 }
 
@@ -43,51 +43,91 @@ type gateway struct {
 	nodeIPManager   *addressManager
 	initFunc        func() error
 	readyFunc       func() (bool, error)
+
+	watchFactory *factory.WatchFactory // used for retry
+	stopChan     <-chan struct{}
+	wg           *sync.WaitGroup
 }
 
-func (g *gateway) AddService(svc *kapi.Service) {
+func (g *gateway) AddService(svc *kapi.Service) error {
+	var err error
+	var errors []error
+
 	if g.portClaimWatcher != nil {
-		g.portClaimWatcher.AddService(svc)
+		if err = g.portClaimWatcher.AddService(svc); err != nil {
+			errors = append(errors, err)
+		}
 	}
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.AddService(svc)
+		if err = g.loadBalancerHealthChecker.AddService(svc); err != nil {
+			errors = append(errors, err)
+		}
 	}
 	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.AddService(svc)
+		if err = g.nodePortWatcher.AddService(svc); err != nil {
+			errors = append(errors, err)
+		}
 	}
 	if g.nodePortWatcherIptables != nil {
-		g.nodePortWatcherIptables.AddService(svc)
+		if err = g.nodePortWatcherIptables.AddService(svc); err != nil {
+			errors = append(errors, err)
+		}
 	}
+	return apierrors.NewAggregate(errors)
 }
 
-func (g *gateway) UpdateService(old, new *kapi.Service) {
+func (g *gateway) UpdateService(old, new *kapi.Service) error {
+	var err error
+	var errors []error
+
 	if g.portClaimWatcher != nil {
-		g.portClaimWatcher.UpdateService(old, new)
+		if err = g.portClaimWatcher.UpdateService(old, new); err != nil {
+			errors = append(errors, err)
+		}
 	}
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.UpdateService(old, new)
+		if err = g.loadBalancerHealthChecker.UpdateService(old, new); err != nil {
+			errors = append(errors, err)
+		}
 	}
 	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.UpdateService(old, new)
+		if err = g.nodePortWatcher.UpdateService(old, new); err != nil {
+			errors = append(errors, err)
+		}
 	}
 	if g.nodePortWatcherIptables != nil {
-		g.nodePortWatcherIptables.UpdateService(old, new)
+		if err = g.nodePortWatcherIptables.UpdateService(old, new); err != nil {
+			errors = append(errors, err)
+		}
 	}
+	return apierrors.NewAggregate(errors)
 }
 
-func (g *gateway) DeleteService(svc *kapi.Service) {
+func (g *gateway) DeleteService(svc *kapi.Service) error {
+	var err error
+	var errors []error
+
 	if g.portClaimWatcher != nil {
-		g.portClaimWatcher.DeleteService(svc)
+		if err = g.portClaimWatcher.DeleteService(svc); err != nil {
+			errors = append(errors, err)
+		}
 	}
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.DeleteService(svc)
+		if err = g.loadBalancerHealthChecker.DeleteService(svc); err != nil {
+			errors = append(errors, err)
+		}
 	}
 	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.DeleteService(svc)
+		if err = g.nodePortWatcher.DeleteService(svc); err != nil {
+			errors = append(errors, err)
+		}
 	}
 	if g.nodePortWatcherIptables != nil {
-		g.nodePortWatcherIptables.DeleteService(svc)
+		if err = g.nodePortWatcherIptables.DeleteService(svc); err != nil {
+			errors = append(errors, err)
+		}
 	}
+	return apierrors.NewAggregate(errors)
 }
 
 func (g *gateway) SyncServices(objs []interface{}) error {
@@ -110,88 +150,88 @@ func (g *gateway) SyncServices(objs []interface{}) error {
 	return nil
 }
 
-func (g *gateway) AddEndpointSlice(epSlice *discovery.EndpointSlice) {
+func (g *gateway) AddEndpointSlice(epSlice *discovery.EndpointSlice) error {
+	var err error
+	var errors []error
+
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.AddEndpointSlice(epSlice)
+		if err = g.loadBalancerHealthChecker.AddEndpointSlice(epSlice); err != nil {
+			errors = append(errors, err)
+		}
 	}
 	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.AddEndpointSlice(epSlice)
+		if err = g.nodePortWatcher.AddEndpointSlice(epSlice); err != nil {
+			errors = append(errors, err)
+		}
 	}
+	return apierrors.NewAggregate(errors)
+
 }
 
-func (g *gateway) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.EndpointSlice) {
+func (g *gateway) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.EndpointSlice) error {
+	var err error
+	var errors []error
+
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.UpdateEndpointSlice(oldEpSlice, newEpSlice)
+		if err = g.loadBalancerHealthChecker.UpdateEndpointSlice(oldEpSlice, newEpSlice); err != nil {
+			errors = append(errors, err)
+		}
 	}
 	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.UpdateEndpointSlice(oldEpSlice, newEpSlice)
+		if err = g.nodePortWatcher.UpdateEndpointSlice(oldEpSlice, newEpSlice); err != nil {
+			errors = append(errors, err)
+		}
 	}
+	return apierrors.NewAggregate(errors)
+
 }
 
-func (g *gateway) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) {
+func (g *gateway) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) error {
+	var err error
+	var errors []error
+
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.DeleteEndpointSlice(epSlice)
+		if err = g.loadBalancerHealthChecker.DeleteEndpointSlice(epSlice); err != nil {
+			errors = append(errors, err)
+		}
 	}
 	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.DeleteEndpointSlice(epSlice)
+		if err = g.nodePortWatcher.DeleteEndpointSlice(epSlice); err != nil {
+			errors = append(errors, err)
+		}
 	}
+	return apierrors.NewAggregate(errors)
+
 }
 
-func (g *gateway) Init(wf factory.NodeWatchFactory) error {
-	err := g.initFunc()
-	if err != nil {
+func (g *gateway) Init(wf factory.NodeWatchFactory, stopChan <-chan struct{}, wg *sync.WaitGroup) error {
+	g.stopChan = stopChan
+	g.wg = wg
+
+	var err error
+	if err = g.initFunc(); err != nil {
 		return err
 	}
-	_, err = wf.AddServiceHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			svc := obj.(*kapi.Service)
-			g.AddService(svc)
-		},
-		UpdateFunc: func(old, new interface{}) {
-			oldSvc := old.(*kapi.Service)
-			newSvc := new.(*kapi.Service)
-			g.UpdateService(oldSvc, newSvc)
-		},
-		DeleteFunc: func(obj interface{}) {
-			svc := obj.(*kapi.Service)
-			g.DeleteService(svc)
-		},
-	}, g.SyncServices)
-	if err != nil {
-		klog.Errorf("Gateway init failed to add service handler: %v", err)
-		return err
+	servicesRetryFramework := g.newRetryFrameworkNode(factory.ServiceForGatewayType)
+	if _, err = servicesRetryFramework.WatchResource(); err != nil {
+		return fmt.Errorf("gateway init failed to start watching services: %v", err)
 	}
 
-	_, err = wf.AddEndpointSliceHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			epSlice := obj.(*discovery.EndpointSlice)
-			g.AddEndpointSlice(epSlice)
-		},
-		UpdateFunc: func(old, new interface{}) {
-			oldEpSlice := old.(*discovery.EndpointSlice)
-			newEpSlice := new.(*discovery.EndpointSlice)
-			g.UpdateEndpointSlice(oldEpSlice, newEpSlice)
-		},
-		DeleteFunc: func(obj interface{}) {
-			epSlice := obj.(*discovery.EndpointSlice)
-			g.DeleteEndpointSlice(epSlice)
-		},
-	}, nil)
-	if err != nil {
-		klog.Errorf("Gateway init failed to add endpoints handler: %v", err)
-		return err
+	endpointSlicesRetryFramework := g.newRetryFrameworkNode(factory.EndpointSliceForGatewayType)
+	if _, err = endpointSlicesRetryFramework.WatchResource(); err != nil {
+		return fmt.Errorf("gateway init failed to start watching endpointslices: %v", err)
 	}
 	return nil
 }
 
-func (g *gateway) Start(stopChan <-chan struct{}, wg *sync.WaitGroup) {
+func (g *gateway) Start() {
 	if g.nodeIPManager != nil {
-		g.nodeIPManager.Run(stopChan, wg)
+		g.nodeIPManager.Run(g.stopChan, g.wg)
 	}
 
 	if g.openflowManager != nil {
 		klog.Info("Spawning Conntrack Rule Check Thread")
-		g.openflowManager.Run(stopChan, wg)
+		g.openflowManager.Run(g.stopChan, g.wg)
 	}
 }
 
@@ -233,18 +273,45 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops 
 		return nil, nil, err
 	}
 
-	if !config.Gateway.DisablePacketMTUCheck {
+	// Set annotation that determines if options:gateway_mtu shall be set for this node.
+	enableGatewayMTU := true
+	if config.Gateway.DisablePacketMTUCheck {
+		klog.Warningf("Config option disable-pkt-mtu-check is set to true. " +
+			"options:gateway_mtu will be disabled on gateway routers. " +
+			"IP fragmentation or large TCP/UDP payloads may not be forwarded correctly.")
+		enableGatewayMTU = false
+	} else {
 		chkPktLengthSupported, err := util.DetectCheckPktLengthSupport(gatewayBridge.bridgeName)
 		if err != nil {
 			return nil, nil, err
 		}
-
 		if !chkPktLengthSupported {
-			klog.Warningf("OVS on this node does not support check packet length action in kernel datapath. This "+
-				"will cause incoming packets destined to OVN and larger than pod MTU: %d to the node, being dropped "+
-				"without sending fragmentation needed", config.Default.MTU)
-			config.Gateway.DisablePacketMTUCheck = true
+			klog.Warningf("OVS does not support check_packet_length action. " +
+				"options:gateway_mtu will be disabled on gateway routers. " +
+				"IP fragmentation or large TCP/UDP payloads may not be forwarded correctly.")
+			enableGatewayMTU = false
+		} else {
+			/* This is a work around. In order to have the most optimal performance, the packet MTU check should be
+			 * disabled when OVS HW Offload is enabled on the node. The reason is that OVS HW Offload does not support
+			 * packet MTU checks properly without the offload support for sFlow.
+			 * The patches for sFlow in OvS: https://patchwork.ozlabs.org/project/openvswitch/list/?series=290804
+			 * As of writing these offload support patches for sFlow are in review.
+			 * TODO: This workaround should be removed once the offload support for sFlow patches are merged upstream OvS.
+			 */
+			ovsHardwareOffloadEnabled, err := util.IsOvsHwOffloadEnabled()
+			if err != nil {
+				return nil, nil, err
+			}
+			if ovsHardwareOffloadEnabled {
+				klog.Warningf("OVS hardware offloading is enabled. " +
+					"options:gateway_mtu will be disabled on gateway routers for performance reasons. " +
+					"IP fragmentation or large TCP/UDP payloads may not be forwarded correctly.")
+				enableGatewayMTU = false
+			}
 		}
+	}
+	if err := util.SetGatewayMTUSupport(nodeAnnotator, enableGatewayMTU); err != nil {
+		return nil, nil, err
 	}
 
 	if config.Default.EnableUDPAggregation {
@@ -292,12 +359,8 @@ func (g *gateway) GetGatewayBridgeIface() string {
 	return g.openflowManager.defaultBridge.bridgeName
 }
 
-// getMaxFrameLength returns the maximum frame size (ignoring VLAN header) that a gateway can handle
-func getMaxFrameLength() int {
-	return config.Default.MTU + 14
-}
-
 type bridgeConfiguration struct {
+	sync.Mutex
 	bridgeName  string
 	uplinkName  string
 	hostRepName string // empty in case of non-DPU mode
@@ -308,6 +371,36 @@ type bridgeConfiguration struct {
 	ofPortPatch string
 	ofPortPhys  string
 	ofPortHost  string
+}
+
+// updateInterfaceIPAddresses sets and returns the bridge's current ips
+func (b *bridgeConfiguration) updateInterfaceIPAddresses(node *kapi.Node) ([]*net.IPNet, error) {
+	b.Lock()
+	defer b.Unlock()
+	ifAddrs, err := getNetworkInterfaceIPAddresses(b.bridgeName)
+	if err != nil {
+		return nil, err
+	}
+
+	// For DPU, here we need to use the DPU host's IP address which is the tenant cluster's
+	// host internal IP address instead of the DPU's external bridge IP address.
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		nodeAddrStr, err := util.GetNodePrimaryIP(node)
+		if err != nil {
+			return nil, err
+		}
+		nodeAddr := net.ParseIP(nodeAddrStr)
+		if nodeAddr == nil {
+			return nil, fmt.Errorf("failed to parse node IP address. %v", nodeAddrStr)
+		}
+		ifAddrs, err = getDPUHostPrimaryIPAddresses(nodeAddr, ifAddrs)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	b.ips = ifAddrs
+	return ifAddrs, nil
 }
 
 func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []*net.IPNet) (*bridgeConfiguration, error) {
@@ -333,6 +426,7 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 		}
 		res.bridgeName = bridgeName
 		res.uplinkName = uplinkName
+		gwIntf = bridgeName
 	} else if _, _, err := util.RunOVSVsctl("br-exists", intfName); err != nil {
 		// This is not a OVS bridge. We need to create a OVS bridge
 		// and add cluster.GatewayIntf as a port of that bridge.
@@ -348,10 +442,15 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 		// gateway interface is an OVS bridge
 		uplinkName, err := getIntfName(intfName)
 		if err != nil {
-			return nil, errors.Wrapf(err, "Failed to find intfName for %s", intfName)
+			if config.Gateway.Mode == config.GatewayModeLocal && config.Gateway.AllowNoUplink {
+				klog.Infof("Could not find uplink for %s, setup gateway bridge with no uplink port, egress IP and egress GW will not work", intfName)
+			} else {
+				return nil, errors.Wrapf(err, "Failed to find intfName for %s", intfName)
+			}
+		} else {
+			res.uplinkName = uplinkName
 		}
 		res.bridgeName = intfName
-		res.uplinkName = uplinkName
 	}
 	var err error
 	// Now, we get IP addresses for the bridge

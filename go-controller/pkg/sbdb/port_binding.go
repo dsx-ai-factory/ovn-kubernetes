@@ -5,6 +5,8 @@ package sbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const PortBindingTable = "Port_Binding"
+
 // PortBinding defines an object in Port_Binding table
 type PortBinding struct {
 	UUID                       string            `ovsdb:"_uuid"`
@@ -114,6 +116,14 @@ func equalPortBindingChassis(a, b *string) bool {
 	return *a == *b
 }
 
+func (a *PortBinding) GetDatapath() string {
+	return a.Datapath
+}
+
+func (a *PortBinding) GetEncap() *string {
+	return a.Encap
+}
+
 func copyPortBindingEncap(a *string) *string {
 	if a == nil {
 		return nil
@@ -130,6 +140,10 @@ func equalPortBindingEncap(a, b *string) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *PortBinding) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
 }
 
 func copyPortBindingExternalIDs(a map[string]string) map[string]string {
@@ -158,6 +172,10 @@ func equalPortBindingExternalIDs(a, b map[string]string) bool {
 	return true
 }
 
+func (a *PortBinding) GetGatewayChassis() []string {
+	return a.GatewayChassis
+}
+
 func copyPortBindingGatewayChassis(a []string) []string {
 	if a == nil {
 		return nil
@@ -182,6 +200,10 @@ func equalPortBindingGatewayChassis(a, b []string) bool {
 	return true
 }
 
+func (a *PortBinding) GetHaChassisGroup() *string {
+	return a.HaChassisGroup
+}
+
 func copyPortBindingHaChassisGroup(a *string) *string {
 	if a == nil {
 		return nil
@@ -198,6 +220,14 @@ func equalPortBindingHaChassisGroup(a, b *string) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *PortBinding) GetLogicalPort() string {
+	return a.LogicalPort
+}
+
+func (a *PortBinding) GetMAC() []string {
+	return a.MAC
 }
 
 func copyPortBindingMAC(a []string) []string {
@@ -280,6 +310,10 @@ func equalPortBindingNatAddresses(a, b []string) bool {
 	return true
 }
 
+func (a *PortBinding) GetOptions() map[string]string {
+	return a.Options
+}
+
 func copyPortBindingOptions(a map[string]string) map[string]string {
 	if a == nil {
 		return nil
@@ -304,6 +338,10 @@ func equalPortBindingOptions(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *PortBinding) GetParentPort() *string {
+	return a.ParentPort
 }
 
 func copyPortBindingParentPort(a *string) *string {
@@ -402,6 +440,10 @@ func equalPortBindingRequestedChassis(a, b *string) bool {
 	return *a == *b
 }
 
+func (a *PortBinding) GetTag() *int {
+	return a.Tag
+}
+
 func copyPortBindingTag(a *int) *int {
 	if a == nil {
 		return nil
@@ -420,6 +462,18 @@ func equalPortBindingTag(a, b *int) bool {
 	return *a == *b
 }
 
+func (a *PortBinding) GetTunnelKey() int {
+	return a.TunnelKey
+}
+
+func (a *PortBinding) GetType() string {
+	return a.Type
+}
+
+func (a *PortBinding) GetUp() *bool {
+	return a.Up
+}
+
 func copyPortBindingUp(a *bool) *bool {
 	if a == nil {
 		return nil
@@ -436,6 +490,10 @@ func equalPortBindingUp(a, b *bool) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *PortBinding) GetVirtualParent() *string {
+	return a.VirtualParent
 }
 
 func copyPortBindingVirtualParent(a *string) *string {

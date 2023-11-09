@@ -7,12 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/urfave/cli/v2"
-	kexec "k8s.io/utils/exec"
+	"time"
 
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/urfave/cli/v2"
+	kexec "k8s.io/utils/exec"
 
 	. "github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
@@ -139,9 +139,12 @@ conntrack-zone=64321
 cluster-subnets=10.132.0.0/14/23
 lflow-cache-limit=1000
 lflow-cache-limit-kb=100000
+zone=global
 
 [kubernetes]
 kubeconfig=/path/to/kubeconfig
+bootstrap-kubeconfig=
+cert-dir=
 apiserver=https://1.2.3.4:6443
 token=TG9yZW0gaXBzdW0gZ
 tokenFile=/path/to/token
@@ -150,6 +153,9 @@ service-cidrs=172.18.0.0/24
 no-hostsubnet-nodes=label=another-test-label
 metrics-node-server-privkey=/path/to/node-metrics-private.key
 metrics-node-server-cert=/path/to/node-metrics.crt
+healthz-bind-address=0.0.0.0:1234
+dns-service-namespace=kube-system-f
+dns-service-name=kube-dns-f
 
 [metrics]
 bind-address=1.1.1.1:8080
@@ -158,6 +164,7 @@ enable-pprof=true
 node-server-privkey=/path/to/node-metrics-private.key
 node-server-cert=/path/to/node-metrics.crt
 enable-config-duration=true
+enable-scale-metrics=true
 
 [logging]
 loglevel=5
@@ -199,7 +206,12 @@ vlan-id=10
 nodeport=false
 v4-join-subnet=100.65.0.0/16
 v6-join-subnet=fd90::/64
+v4-masquerade-subnet=169.254.169.0/29
+v6-masquerade-subnet=fd69::/125
 router-subnet=10.50.0.0/16
+single-node=false
+disable-forwarding=true
+allow-no-uplink=false
 
 [hybridoverlay]
 enabled=true
@@ -210,6 +222,12 @@ mode=full
 
 [ovnkubernetesfeature]
 egressip-reachability-total-timeout=3
+egressip-node-healthcheck-port=1234
+enable-multi-network=false
+enable-multi-networkpolicy=false
+enable-interconnect=false
+enable-multi-external-gateway=false
+enable-admin-network-policy=false
 `
 
 	var newData string
@@ -279,6 +297,9 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(CNI.ConfDir).To(gomega.Equal("/etc/cni/net.d"))
 			gomega.Expect(CNI.Plugin).To(gomega.Equal("ovn-k8s-cni-overlay"))
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(""))
+			gomega.Expect(Kubernetes.BootstrapKubeconfig).To(gomega.Equal(""))
+			gomega.Expect(Kubernetes.CertDir).To(gomega.Equal(""))
+			gomega.Expect(Kubernetes.CertDuration).To(gomega.Equal(Kubernetes.CertDuration))
 			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(""))
 			gomega.Expect(Kubernetes.CAData).To(gomega.Equal([]byte{}))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal(""))
@@ -286,19 +307,32 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Kubernetes.APIServer).To(gomega.Equal(DefaultAPIServer))
 			gomega.Expect(Kubernetes.RawServiceCIDRs).To(gomega.Equal("172.16.1.0/24"))
 			gomega.Expect(Kubernetes.RawNoHostSubnetNodes).To(gomega.Equal(""))
+			gomega.Expect(Kubernetes.HealthzBindAddress).To(gomega.Equal(""))
+			gomega.Expect(Kubernetes.DNSServiceNamespace).To(gomega.Equal("kube-system"))
+			gomega.Expect(Kubernetes.DNSServiceName).To(gomega.Equal("kube-dns"))
 			gomega.Expect(Metrics.NodeServerPrivKey).To(gomega.Equal(""))
 			gomega.Expect(Metrics.NodeServerCert).To(gomega.Equal(""))
 			gomega.Expect(Default.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("10.128.0.0/14"), 23},
 			}))
+			gomega.Expect(Default.Zone).To(gomega.Equal("global"))
 			gomega.Expect(IPv4Mode).To(gomega.Equal(true))
 			gomega.Expect(IPv6Mode).To(gomega.Equal(false))
 			gomega.Expect(HybridOverlay.Enabled).To(gomega.Equal(false))
 			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeFull))
 			gomega.Expect(OvnKubeNode.MgmtPortNetdev).To(gomega.Equal(""))
-			gomega.Expect(OvnKubeNode.MgmtPortRepresentor).To(gomega.Equal(""))
+			gomega.Expect(OvnKubeNode.MgmtPortDPResourceName).To(gomega.Equal(""))
 			gomega.Expect(Gateway.RouterSubnet).To(gomega.Equal(""))
+			gomega.Expect(Gateway.SingleNode).To(gomega.BeFalse())
+			gomega.Expect(Gateway.DisableForwarding).To(gomega.BeFalse())
+			gomega.Expect(Gateway.AllowNoUplink).To(gomega.BeFalse())
 			gomega.Expect(OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout).To(gomega.Equal(1))
+			gomega.Expect(OVNKubernetesFeature.EgressIPNodeHealthCheckPort).To(gomega.Equal(0))
+			gomega.Expect(OVNKubernetesFeature.EnableMultiNetwork).To(gomega.BeFalse())
+			gomega.Expect(OVNKubernetesFeature.EnableMultiNetworkPolicy).To(gomega.BeFalse())
+			gomega.Expect(OVNKubernetesFeature.EnableInterconnect).To(gomega.BeFalse())
+			gomega.Expect(OVNKubernetesFeature.EnableMultiExternalGateway).To(gomega.BeFalse())
+			gomega.Expect(OVNKubernetesFeature.EnableAdminNetworkPolicy).To(gomega.BeFalse())
 
 			for _, a := range []OvnAuthConfig{OvnNorth, OvnSouth} {
 				gomega.Expect(a.Scheme).To(gomega.Equal(OvnDBSchemeUnix))
@@ -495,6 +529,15 @@ var _ = Describe("Config Operations", func() {
 		os.Setenv("K8S_TOKEN_FILE", "/new/path/to/token")
 		defer os.Setenv("K8S_TOKEN_FILE", "")
 
+		os.Setenv("BOOTSTRAP_KUBECONFIG", "/new/path/to/bootstrap-kubeconfig")
+		defer os.Setenv("BOOTSTRAP_KUBECONFIG", "")
+
+		os.Setenv("CERT_DIR", "/new/path/to/cert-dir")
+		defer os.Setenv("CERT_DIR", "")
+
+		os.Setenv("CERT_PREFIX", "ovnkube-node")
+		defer os.Setenv("CERT_PREFIX", "")
+
 		os.Setenv("K8S_APISERVER", "https://9.2.3.4:6443")
 		defer os.Setenv("K8S_APISERVER", "")
 
@@ -509,8 +552,9 @@ var _ = Describe("Config Operations", func() {
 			cfgPath, err = InitConfigSa(ctx, kexec.New(), tmpDir, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(cfgPath).To(gomega.Equal(cfgFile.Name()))
-
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(kubeconfigEnvFile))
+			gomega.Expect(Kubernetes.BootstrapKubeconfig).To(gomega.Equal("/new/path/to/bootstrap-kubeconfig"))
+			gomega.Expect(Kubernetes.CertDir).To(gomega.Equal("/new/path/to/cert-dir"))
 			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(kubeCAFile))
 			gomega.Expect(Kubernetes.CAData).To(gomega.Equal(kubeCAData))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal("this is the  token test"))
@@ -529,11 +573,23 @@ var _ = Describe("Config Operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeconfigFile)
 
+		bootstrapKubeconfigFile := "/new/path/to/bootstrap-kubeconfig"
+		certDir := "/new/path/to/cert-dir"
+
 		kubeCAFile, kubeCAData, err := createTempFile("kube-ca.crt")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeCAFile)
 
-		err = writeTestConfigFile(cfgFile.Name(), "kubeconfig="+kubeconfigFile, "cacert="+kubeCAFile)
+		err = writeTestConfigFile(cfgFile.Name(), "kubeconfig="+kubeconfigFile, "cacert="+kubeCAFile,
+			"bootstrap-kubeconfig="+bootstrapKubeconfigFile,
+			"cert-dir="+certDir,
+			"enable-multi-network=true",
+			"enable-multi-networkpolicy=true",
+			"enable-interconnect=true",
+			"enable-multi-external-gateway=true",
+			"enable-admin-network-policy=true",
+			"zone=foo",
+		)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		app.Action = func(ctx *cli.Context) error {
@@ -559,15 +615,21 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(CNI.ConfDir).To(gomega.Equal("/etc/cni/net.d22"))
 			gomega.Expect(CNI.Plugin).To(gomega.Equal("ovn-k8s-cni-overlay22"))
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(kubeconfigFile))
+			gomega.Expect(Kubernetes.BootstrapKubeconfig).To(gomega.Equal(bootstrapKubeconfigFile))
+			gomega.Expect(Kubernetes.CertDir).To(gomega.Equal(certDir))
 			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(kubeCAFile))
 			gomega.Expect(Kubernetes.CAData).To(gomega.Equal(kubeCAData))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal("TG9yZW0gaXBzdW0gZ"))
 			gomega.Expect(Kubernetes.TokenFile).To(gomega.Equal("/path/to/token"))
 			gomega.Expect(Kubernetes.APIServer).To(gomega.Equal("https://1.2.3.4:6443"))
 			gomega.Expect(Kubernetes.RawServiceCIDRs).To(gomega.Equal("172.18.0.0/24"))
+			gomega.Expect(Kubernetes.HealthzBindAddress).To(gomega.Equal("0.0.0.0:1234"))
+			gomega.Expect(Kubernetes.DNSServiceNamespace).To(gomega.Equal("kube-system-f"))
+			gomega.Expect(Kubernetes.DNSServiceName).To(gomega.Equal("kube-dns-f"))
 			gomega.Expect(Default.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("10.132.0.0/14"), 23},
 			}))
+			gomega.Expect(Default.Zone).To(gomega.Equal("foo"))
 
 			gomega.Expect(Metrics.BindAddress).To(gomega.Equal("1.1.1.1:8080"))
 			gomega.Expect(Metrics.NodeServerPrivKey).To(gomega.Equal("/path/to/node-metrics-private.key"))
@@ -577,6 +639,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Metrics.NodeServerPrivKey).To(gomega.Equal("/path/to/node-metrics-private.key"))
 			gomega.Expect(Metrics.NodeServerCert).To(gomega.Equal("/path/to/node-metrics.crt"))
 			gomega.Expect(Metrics.EnableConfigDuration).To(gomega.Equal(true))
+			gomega.Expect(Metrics.EnableScaleMetrics).To(gomega.Equal(true))
 
 			gomega.Expect(OvnNorth.Scheme).To(gomega.Equal(OvnDBSchemeSSL))
 			gomega.Expect(OvnNorth.PrivKey).To(gomega.Equal("/path/to/nb-client-private.key"))
@@ -599,10 +662,20 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Gateway.NodeportEnable).To(gomega.BeFalse())
 			gomega.Expect(Gateway.V4JoinSubnet).To(gomega.Equal("100.65.0.0/16"))
 			gomega.Expect(Gateway.V6JoinSubnet).To(gomega.Equal("fd90::/64"))
+			gomega.Expect(Gateway.V4MasqueradeSubnet).To(gomega.Equal("169.254.169.0/29"))
+			gomega.Expect(Gateway.V6MasqueradeSubnet).To(gomega.Equal("fd69::/125"))
 			gomega.Expect(Gateway.RouterSubnet).To(gomega.Equal("10.50.0.0/16"))
+			gomega.Expect(Gateway.SingleNode).To(gomega.BeFalse())
+			gomega.Expect(Gateway.DisableForwarding).To(gomega.BeTrue())
+			gomega.Expect(Gateway.AllowNoUplink).To(gomega.BeFalse())
 
 			gomega.Expect(HybridOverlay.Enabled).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout).To(gomega.Equal(3))
+			gomega.Expect(OVNKubernetesFeature.EgressIPNodeHealthCheckPort).To(gomega.Equal(1234))
+			gomega.Expect(OVNKubernetesFeature.EnableMultiNetwork).To(gomega.BeTrue())
+			gomega.Expect(OVNKubernetesFeature.EnableInterconnect).To(gomega.BeTrue())
+			gomega.Expect(OVNKubernetesFeature.EnableMultiExternalGateway).To(gomega.BeTrue())
+			gomega.Expect(OVNKubernetesFeature.EnableAdminNetworkPolicy).To(gomega.BeTrue())
 			gomega.Expect(HybridOverlay.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("11.132.0.0/14"), 23},
 			}))
@@ -617,6 +690,9 @@ var _ = Describe("Config Operations", func() {
 		kubeconfigFile, _, err := createTempFile("kubeconfig")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeconfigFile)
+
+		bootstrapKubeconfigFile := "/new/path/to/bootstrap-kubeconfig"
+		certDir := "/new/path/to/cert-dir"
 
 		kubeCAFile, kubeCAData, err := createTempFile("kube-ca.crt")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -642,6 +718,9 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(CNI.ConfDir).To(gomega.Equal("/some/cni/dir"))
 			gomega.Expect(CNI.Plugin).To(gomega.Equal("a-plugin"))
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(kubeconfigFile))
+			gomega.Expect(Kubernetes.BootstrapKubeconfig).To(gomega.Equal(bootstrapKubeconfigFile))
+			gomega.Expect(Kubernetes.CertDir).To(gomega.Equal(certDir))
+			gomega.Expect(Kubernetes.CertDuration).To(gomega.Equal(time.Second * 999))
 			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(kubeCAFile))
 			gomega.Expect(Kubernetes.CAData).To(gomega.Equal(kubeCAData))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal("asdfasdfasdfasfd"))
@@ -649,9 +728,13 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Kubernetes.APIServer).To(gomega.Equal("https://4.4.3.2:8080"))
 			gomega.Expect(Kubernetes.RawServiceCIDRs).To(gomega.Equal("172.15.0.0/24"))
 			gomega.Expect(Kubernetes.RawNoHostSubnetNodes).To(gomega.Equal("test=pass"))
+			gomega.Expect(Kubernetes.HealthzBindAddress).To(gomega.Equal("0.0.0.0:4321"))
+			gomega.Expect(Kubernetes.DNSServiceNamespace).To(gomega.Equal("kube-system-2"))
+			gomega.Expect(Kubernetes.DNSServiceName).To(gomega.Equal("kube-dns-2"))
 			gomega.Expect(Default.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("10.130.0.0/15"), 24},
 			}))
+			gomega.Expect(Default.Zone).To(gomega.Equal("bar"))
 
 			gomega.Expect(Metrics.BindAddress).To(gomega.Equal("2.2.2.2:8080"))
 			gomega.Expect(Metrics.ExportOVSMetrics).To(gomega.Equal(true))
@@ -659,6 +742,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Metrics.NodeServerPrivKey).To(gomega.Equal("/tls/nodeprivkey"))
 			gomega.Expect(Metrics.NodeServerCert).To(gomega.Equal("/tls/nodecert"))
 			gomega.Expect(Metrics.EnableConfigDuration).To(gomega.Equal(true))
+			gomega.Expect(Metrics.EnableScaleMetrics).To(gomega.Equal(true))
 
 			gomega.Expect(OvnNorth.Scheme).To(gomega.Equal(OvnDBSchemeSSL))
 			gomega.Expect(OvnNorth.PrivKey).To(gomega.Equal("/client/privkey"))
@@ -678,10 +762,21 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Gateway.NodeportEnable).To(gomega.BeTrue())
 			gomega.Expect(Gateway.V4JoinSubnet).To(gomega.Equal("100.63.0.0/16"))
 			gomega.Expect(Gateway.V6JoinSubnet).To(gomega.Equal("fd99::/48"))
+			gomega.Expect(Gateway.V4MasqueradeSubnet).To(gomega.Equal("169.253.169.0/29"))
+			gomega.Expect(Gateway.V6MasqueradeSubnet).To(gomega.Equal("fd68::/125"))
 			gomega.Expect(Gateway.RouterSubnet).To(gomega.Equal("10.55.0.0/16"))
+			gomega.Expect(Gateway.SingleNode).To(gomega.BeTrue())
+			gomega.Expect(Gateway.DisableForwarding).To(gomega.BeTrue())
+			gomega.Expect(Gateway.AllowNoUplink).To(gomega.BeTrue())
 
 			gomega.Expect(HybridOverlay.Enabled).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout).To(gomega.Equal(5))
+			gomega.Expect(OVNKubernetesFeature.EgressIPNodeHealthCheckPort).To(gomega.Equal(4321))
+			gomega.Expect(OVNKubernetesFeature.EnableMultiNetwork).To(gomega.BeTrue())
+			gomega.Expect(OVNKubernetesFeature.EnableMultiNetworkPolicy).To(gomega.BeTrue())
+			gomega.Expect(OVNKubernetesFeature.EnableInterconnect).To(gomega.BeTrue())
+			gomega.Expect(OVNKubernetesFeature.EnableMultiExternalGateway).To(gomega.BeTrue())
+			gomega.Expect(OVNKubernetesFeature.EnableAdminNetworkPolicy).To(gomega.BeTrue())
 			gomega.Expect(HybridOverlay.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("11.132.0.0/14"), 23},
 			}))
@@ -705,6 +800,9 @@ var _ = Describe("Config Operations", func() {
 			"-cni-plugin=a-plugin",
 			"-cluster-subnets=10.130.0.0/15/24",
 			"-k8s-kubeconfig=" + kubeconfigFile,
+			"-bootstrap-kubeconfig=" + bootstrapKubeconfigFile,
+			"-cert-dir=" + certDir,
+			"-cert-duration=999s",
 			"-k8s-apiserver=https://4.4.3.2:8080",
 			"-k8s-cacert=" + kubeCAFile,
 			"-k8s-token=asdfasdfasdfasfd",
@@ -727,7 +825,12 @@ var _ = Describe("Config Operations", func() {
 			"-nodeport",
 			"-gateway-v4-join-subnet=100.63.0.0/16",
 			"-gateway-v6-join-subnet=fd99::/48",
+			"-gateway-v4-masquerade-subnet=169.253.169.0/29",
+			"-gateway-v6-masquerade-subnet=fd68::/125",
 			"-gateway-router-subnet=10.55.0.0/16",
+			"-single-node",
+			"-disable-forwarding",
+			"-allow-no-uplink",
 			"-enable-hybrid-overlay",
 			"-hybrid-overlay-cluster-subnets=11.132.0.0/14/23",
 			"-monitor-all=false",
@@ -738,6 +841,16 @@ var _ = Describe("Config Operations", func() {
 			"-cluster-subnets-mac-binding-aging=300",
 			"-metrics-enable-config-duration=true",
 			"-egressip-reachability-total-timeout=5",
+			"-egressip-node-healthcheck-port=4321",
+			"-enable-multi-network=true",
+			"-enable-multi-networkpolicy=true",
+			"-enable-interconnect=true",
+			"-enable-multi-external-gateway=true",
+			"-enable-admin-network-policy=true",
+			"-healthz-bind-address=0.0.0.0:4321",
+			"-zone=bar",
+			"-dns-service-namespace=kube-system-2",
+			"-dns-service-name=kube-dns-2",
 		}
 		err = app.Run(cliArgs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1011,10 +1124,58 @@ enable-pprof=true
 		err := app.Run(cliArgs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
+	It("returns an error when the v4 masquerade subnet specified is invalid", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			gomega.Expect(err).To(gomega.MatchError("invalid gateway v4 masquerade subnet specified, subnet: foobar: error: invalid CIDR address: foobar"))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-gateway-v4-masquerade-subnet=foobar",
+		}
+		err := app.Run(cliArgs)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+	It("returns an error when the v6 masquerade subnet specified is invalid", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			gomega.Expect(err).To(gomega.MatchError("invalid gateway v6 masquerade subnet specified, subnet: 192.168.0.0/16: error: <nil>"))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-gateway-v6-masquerade-subnet=192.168.0.0/16",
+		}
+		err := app.Run(cliArgs)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+	It("successfully overrides the default masquerade subnets", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-gateway-v4-masquerade-subnet=169.254.168.0/29",
+			"-gateway-v6-masquerade-subnet=fd68::/125",
+		}
+		err := app.Run(cliArgs)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(Gateway.V4MasqueradeSubnet).To(gomega.Equal("169.254.168.0/29"))
+		gomega.Expect(Gateway.V6MasqueradeSubnet).To(gomega.Equal("fd68::/125"))
+		gomega.Expect(Gateway.MasqueradeIPs.V4OVNMasqueradeIP.String()).To(gomega.Equal("169.254.168.1"))
+		gomega.Expect(Gateway.MasqueradeIPs.V6OVNMasqueradeIP.String()).To(gomega.Equal("fd68::1"))
+
+	})
 	It("overrides config file and defaults with CLI options (multi-master)", func() {
 		kubeconfigFile, _, err := createTempFile("kubeconfig")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeconfigFile)
+
+		bootstrapKubeconfigFile := "/new/path/to/bootstrap-kubeconfig"
+		certDir := "/new/path/to/cert-dir"
 
 		kubeCAFile, kubeCAData, err := createTempFile("kube-ca.crt")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1045,6 +1206,9 @@ enable-pprof=true
 			gomega.Expect(CNI.ConfDir).To(gomega.Equal("/some/cni/dir"))
 			gomega.Expect(CNI.Plugin).To(gomega.Equal("a-plugin"))
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(kubeconfigFile))
+			gomega.Expect(Kubernetes.BootstrapKubeconfig).To(gomega.Equal(bootstrapKubeconfigFile))
+			gomega.Expect(Kubernetes.CertDir).To(gomega.Equal(certDir))
+			gomega.Expect(Kubernetes.CertDuration).To(gomega.Equal(time.Second * 999))
 			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(kubeCAFile))
 			gomega.Expect(Kubernetes.CAData).To(gomega.Equal(kubeCAData))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal("asdfasdfasdfasfd"))
@@ -1069,6 +1233,7 @@ enable-pprof=true
 				gomega.Equal("ssl:6.5.4.1:6652,ssl:6.5.4.2:6652,ssl:6.5.4.3:6652"))
 			gomega.Expect(OvnSouth.CertCommonName).To(gomega.Equal("testsbcommonname"))
 			gomega.Expect(OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout).To(gomega.Equal(3))
+			gomega.Expect(OVNKubernetesFeature.EgressIPNodeHealthCheckPort).To(gomega.Equal(12345))
 			return nil
 		}
 		cliArgs := []string{
@@ -1089,6 +1254,9 @@ enable-pprof=true
 			"-cni-conf-dir=/some/cni/dir",
 			"-cni-plugin=a-plugin",
 			"-k8s-kubeconfig=" + kubeconfigFile,
+			"-bootstrap-kubeconfig=" + bootstrapKubeconfigFile,
+			"-cert-dir=" + certDir,
+			"-cert-duration=999s",
 			"-k8s-apiserver=https://4.4.3.2:8080",
 			"-k8s-cacert=" + kubeCAFile,
 			"-k8s-token=asdfasdfasdfasfd",
@@ -1105,6 +1273,7 @@ enable-pprof=true
 			"-sb-client-cacert=/client/cacert2",
 			"-sb-cert-common-name=testsbcommonname",
 			"-egressip-reachability-total-timeout=3",
+			"-egressip-node-healthcheck-port=12345",
 		}
 		err = app.Run(cliArgs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1114,6 +1283,9 @@ enable-pprof=true
 		kubeconfigFile, _, err := createTempFile("kubeconfig")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeconfigFile)
+
+		bootstrapKubeconfigFile := "/new/path/to/bootstrap-kubeconfig"
+		certDir := "/new/path/to/cert-dir"
 
 		kubeCAFile, kubeCAData, err := createTempFile("kube-ca.crt")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1142,6 +1314,8 @@ enable-pprof=true
 			gomega.Expect(CNI.ConfDir).To(gomega.Equal("/etc/cni/net.d22"))
 			gomega.Expect(CNI.Plugin).To(gomega.Equal("ovn-k8s-cni-overlay22"))
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(kubeconfigFile))
+			gomega.Expect(Kubernetes.BootstrapKubeconfig).To(gomega.Equal(bootstrapKubeconfigFile))
+			gomega.Expect(Kubernetes.CertDir).To(gomega.Equal(certDir))
 			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(kubeCAFile))
 			gomega.Expect(Kubernetes.CAData).To(gomega.Equal(kubeCAData))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal("TG9yZW0gaXBzdW0gZ"))
@@ -1155,6 +1329,8 @@ enable-pprof=true
 			app.Name,
 			"-config-file=" + cfgFile.Name(),
 			"-k8s-kubeconfig=" + kubeconfigFile,
+			"-bootstrap-kubeconfig=" + bootstrapKubeconfigFile,
+			"-cert-dir=" + certDir,
 			"-k8s-cacert=" + kubeCAFile,
 		}
 		err = app.Run(cliArgs)
@@ -1610,27 +1786,27 @@ foo=bar
 			}
 			file := config{
 				OvnKubeNode: OvnKubeNodeConfig{
-					Mode:           types.NodeModeDPU,
-					MgmtPortNetdev: "enp1s0f0v0",
+					Mode: types.NodeModeDPU,
 				},
 			}
 			err := buildOvnKubeNodeConfig(nil, &cliConfig, &file)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeDPU))
-			gomega.Expect(OvnKubeNode.MgmtPortNetdev).To(gomega.Equal("enp1s0f0v0"))
 		})
 
 		It("Overrides value from CLI", func() {
 			cliConfig := config{
 				OvnKubeNode: OvnKubeNodeConfig{
-					Mode:           types.NodeModeDPU,
-					MgmtPortNetdev: "enp1s0f0v0",
+					Mode:                   types.NodeModeDPUHost,
+					MgmtPortNetdev:         "enp1s0f0v0",
+					MgmtPortDPResourceName: "openshift.io/mgmtvf",
 				},
 			}
 			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
-			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeDPU))
+			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeDPUHost))
 			gomega.Expect(OvnKubeNode.MgmtPortNetdev).To(gomega.Equal("enp1s0f0v0"))
+			gomega.Expect(OvnKubeNode.MgmtPortDPResourceName).To(gomega.Equal("openshift.io/mgmtvf"))
 		})
 
 		It("Fails with unsupported mode", func() {
@@ -1657,16 +1833,18 @@ foo=bar
 				"hybrid overlay is not supported with ovnkube-node mode"))
 		})
 
-		It("Fails if management port is not provided and ovnkube node mode is dpu", func() {
-			cliConfig := config{
-				OvnKubeNode: OvnKubeNodeConfig{
-					Mode: types.NodeModeDPU,
-				},
-			}
-			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
-			gomega.Expect(err).To(gomega.HaveOccurred())
-			gomega.Expect(err.Error()).To(gomega.ContainSubstring("ovnkube-node-mgmt-port-netdev must be provided"))
-		})
+		// in downstream, allow backward compatibility which configures ovnkube-node-mgmt-port-netdev
+		//It("Fails if management port is provided and ovnkube node mode is dpu", func() {
+		//	cliConfig := config{
+		//		OvnKubeNode: OvnKubeNodeConfig{
+		//			Mode:           types.NodeModeDPU,
+		//			MgmtPortNetdev: "enp1s0f0v0",
+		//		},
+		//	}
+		//	err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
+		//	gomega.Expect(err).To(gomega.HaveOccurred())
+		//	gomega.Expect(err.Error()).To(gomega.ContainSubstring("ovnkube-node-mgmt-port-netdev or ovnkube-node-mgmt-port-dp-resource-name must not be provided"))
+		//})
 
 		It("Fails if management port is not provided and ovnkube node mode is dpu-host", func() {
 			cliConfig := config{
@@ -1676,7 +1854,7 @@ foo=bar
 			}
 			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
 			gomega.Expect(err).To(gomega.HaveOccurred())
-			gomega.Expect(err.Error()).To(gomega.ContainSubstring("ovnkube-node-mgmt-port-netdev must be provided"))
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("ovnkube-node-mgmt-port-netdev or ovnkube-node-mgmt-port-dp-resource-name must be provided"))
 		})
 
 		It("Succeeds if management netdev provided in the full mode", func() {
@@ -1684,6 +1862,22 @@ foo=bar
 				OvnKubeNode: OvnKubeNodeConfig{
 					Mode:           types.NodeModeFull,
 					MgmtPortNetdev: "ens1f0v0",
+				},
+			}
+			file := config{
+				OvnKubeNode: OvnKubeNodeConfig{
+					Mode: types.NodeModeFull,
+				},
+			}
+			err := buildOvnKubeNodeConfig(nil, &cliConfig, &file)
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+		})
+
+		It("Succeeds if management port device plugin resource name provided in the full mode", func() {
+			cliConfig := config{
+				OvnKubeNode: OvnKubeNodeConfig{
+					Mode:                   types.NodeModeFull,
+					MgmtPortDPResourceName: "openshift.io/mgmtvf",
 				},
 			}
 			file := config{

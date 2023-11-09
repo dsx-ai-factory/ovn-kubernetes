@@ -7,8 +7,10 @@ import (
 	"reflect"
 	"testing"
 
+	cnitypes "github.com/containernetworking/cni/pkg/types"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/stretchr/testify/assert"
@@ -105,8 +107,9 @@ func TestMarshalPodAnnotation(t *testing.T) {
 
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			var e error
 			res := map[string]string{}
-			e := MarshalPodAnnotation(&res, &tc.inpPodAnnot, types.DefaultNetworkName)
+			res, e = MarshalPodAnnotation(res, &tc.inpPodAnnot, types.DefaultNetworkName)
 			t.Log(res, e)
 			if tc.errAssert {
 				assert.Error(t, e)
@@ -140,11 +143,6 @@ func TestUnmarshalPodAnnotation(t *testing.T) {
 			desc:        "verify MAC error parse error",
 			inpAnnotMap: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":""}}`},
 			errMatch:    fmt.Errorf("failed to parse pod MAC"),
-		},
-		{
-			desc:        "verify error thrown when neither ip_addresses nor ip_address is set",
-			inpAnnotMap: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"0a:58:fd:98:00:01"}}`},
-			errMatch:    fmt.Errorf("bad annotation data (neither ip_address nor ip_addresses is set)"),
 		},
 		{
 			desc:        "test path when ip_addresses is empty and ip_address is set",
@@ -198,6 +196,10 @@ func TestUnmarshalPodAnnotation(t *testing.T) {
 			desc:        "verify successful unmarshal of pod annotation",
 			inpAnnotMap: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:fd:98:00:01","gateway_ips":["192.168.0.1"],"routes":[{"dest":"192.168.1.0/24","nextHop":"192.168.1.1"}],"mtu":"1500","ip_address":"192.168.0.5/24","gateway_ip":"192.168.0.1"}}`},
 		},
+		{
+			desc:        "verify successful unmarshal of pod annotation when *only* the MAC address is present",
+			inpAnnotMap: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"mac_address":"0a:58:fd:98:00:01"}}`},
+		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
@@ -215,13 +217,19 @@ func TestUnmarshalPodAnnotation(t *testing.T) {
 	}
 }
 
-func TestGetAllPodIPs(t *testing.T) {
+func TestGetPodIPsOfNetwork(t *testing.T) {
+	const (
+		secondaryNetworkIPAddr = "200.200.200.200"
+		namespace              = "ns1"
+		secondaryNetworkName   = "bluetenant"
+	)
 	tests := []struct {
-		desc      string
-		inpPod    *v1.Pod
-		errAssert bool
-		errMatch  error
-		outExp    []net.IP
+		desc        string
+		inpPod      *v1.Pod
+		networkInfo NetInfo
+		errAssert   bool
+		errMatch    error
+		outExp      []net.IP
 	}{
 		// TODO: The function body may need to check that pod input is non-nil to avoid panic ?
 		/*{
@@ -230,18 +238,20 @@ func TestGetAllPodIPs(t *testing.T) {
 			errExp: true,
 		},*/
 		{
-			desc: "test when pod annotation is non-nil",
+			desc: "test when pod annotation is non-nil for the default cluster network",
 			inpPod: &v1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.1/24"],"mac_address":"0a:58:fd:98:00:01"}}`},
 				},
 			},
-			outExp: []net.IP{ovntest.MustParseIP("192.168.0.1")},
+			networkInfo: &DefaultNetInfo{},
+			outExp:      []net.IP{ovntest.MustParseIP("192.168.0.1")},
 		},
 		{
-			desc:     "test when pod.status.PodIP is empty",
-			inpPod:   &v1.Pod{},
-			errMatch: ErrNoPodIPFound,
+			desc:        "test when pod.status.PodIP is empty",
+			inpPod:      &v1.Pod{},
+			networkInfo: &DefaultNetInfo{},
+			errMatch:    ErrNoPodIPFound,
 		},
 		{
 			desc: "test when pod.status.PodIP is non-empty",
@@ -250,7 +260,8 @@ func TestGetAllPodIPs(t *testing.T) {
 					PodIP: "192.168.1.15",
 				},
 			},
-			outExp: []net.IP{ovntest.MustParseIP("192.168.1.15")},
+			networkInfo: &DefaultNetInfo{},
+			outExp:      []net.IP{ovntest.MustParseIP("192.168.1.15")},
 		},
 		{
 			desc: "test when pod.status.PodIPs is non-empty",
@@ -261,7 +272,8 @@ func TestGetAllPodIPs(t *testing.T) {
 					},
 				},
 			},
-			outExp: []net.IP{ovntest.MustParseIP("192.168.1.15")},
+			networkInfo: &DefaultNetInfo{},
+			outExp:      []net.IP{ovntest.MustParseIP("192.168.1.15")},
 		},
 		{
 			desc: "test path when an entry in pod.status.PodIPs is malformed",
@@ -272,15 +284,40 @@ func TestGetAllPodIPs(t *testing.T) {
 					},
 				},
 			},
-			errMatch: ErrNoPodIPFound,
+			networkInfo: &DefaultNetInfo{},
+			errMatch:    ErrNoPodIPFound,
+		},
+		{
+			desc: "test when pod annotation is non-nil for a secondary network",
+			inpPod: &v1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(`[{"name": %q, "namespace": %q}]`, secondaryNetworkName, namespace),
+						"k8s.ovn.org/pod-networks":    fmt.Sprintf(`{%q:{"ip_addresses":["%s/24"],"mac_address":"0a:58:fd:98:00:01"}}`, GetNADName(namespace, secondaryNetworkName), secondaryNetworkIPAddr),
+					},
+				},
+			},
+			networkInfo: newDummyNetInfo(namespace, secondaryNetworkName),
+			outExp:      []net.IP{ovntest.MustParseIP(secondaryNetworkIPAddr)},
+		},
+		{
+			desc: "test when pod annotation is non-nil for a secondary network",
+			inpPod: &v1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(`[{"name": %q, "namespace": %q}]`, secondaryNetworkName, namespace),
+						"k8s.ovn.org/pod-networks":    "{}",
+					},
+				},
+			},
+			networkInfo: newDummyNetInfo(namespace, secondaryNetworkName),
+			outExp:      []net.IP{},
 		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			netAttachInfo := &NetAttachDefInfo{NetNameInfo: NetNameInfo{NetName: types.DefaultNetworkName, Prefix: "", IsSecondary: false}}
-			netAttachInfo.NetAttachDefs.Store("default/ovn-primary", &NadConfig{MissRateLimitConfig: MissRateLimitConfig{MaxNewConnPPS: 10, MaxNewConnBurst: 100}})
-			res, e := GetAllPodIPs(tc.inpPod, netAttachInfo)
-			t.Log(res, e)
+			res1, e := GetPodIPsOfNetwork(tc.inpPod, tc.networkInfo)
+			t.Log(res1, e)
 			if tc.errAssert {
 				assert.Error(t, e)
 			} else if tc.errMatch != nil {
@@ -290,8 +327,36 @@ func TestGetAllPodIPs(t *testing.T) {
 					assert.Contains(t, e.Error(), tc.errMatch.Error())
 				}
 			} else {
-				assert.Equal(t, tc.outExp, res)
+				assert.Equal(t, tc.outExp, res1)
+			}
+			if len(tc.outExp) > 0 {
+				res2, e := GetPodCIDRsWithFullMask(tc.inpPod, tc.networkInfo)
+				t.Log(res2, e)
+				if tc.errAssert {
+					assert.Error(t, e)
+				} else if tc.errMatch != nil {
+					if errors.Is(tc.errMatch, ErrNoPodIPFound) {
+						assert.ErrorIs(t, e, ErrNoPodIPFound)
+					} else {
+						assert.Contains(t, e.Error(), tc.errMatch.Error())
+					}
+				} else {
+					expectedIP := tc.outExp[0]
+					ipNet := net.IPNet{
+						IP:   expectedIP,
+						Mask: GetIPFullMask(expectedIP),
+					}
+					assert.Equal(t, []*net.IPNet{&ipNet}, res2)
+				}
 			}
 		})
 	}
+}
+
+func newDummyNetInfo(namespace, networkName string) NetInfo {
+	netInfo, _ := newLayer2NetConfInfo(&ovncnitypes.NetConf{
+		NetConf: cnitypes.NetConf{Name: networkName},
+	}, nil)
+	netInfo.AddNAD(GetNADName(namespace, networkName), nil)
+	return netInfo
 }

@@ -11,8 +11,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Mellanox/sriovnet"
-	utilfs "github.com/Mellanox/sriovnet/pkg/utils/filesystem"
+	"github.com/k8snetworkplumbingwg/govdpa/pkg/kvdpa"
+	"github.com/k8snetworkplumbingwg/sriovnet"
+	utilfs "github.com/k8snetworkplumbingwg/sriovnet/pkg/utils/filesystem"
 )
 
 // Copied from vendor/github.com/Mellanox/sriovnet/sriovnet_switchdev.go
@@ -28,6 +29,7 @@ type SriovnetOps interface {
 	GetUplinkRepresentor(vfPciAddress string) (string, error)
 	GetUplinkRepresentorFromAux(auxDev string) (string, error)
 	GetVfIndexByPciAddress(vfPciAddress string) (int, error)
+	GetPfIndexByVfPciAddress(vfPciAddress string) (int, error)
 	GetSfIndexByAuxDev(auxDev string) (int, error)
 	GetVfRepresentor(uplink string, vfIndex int) (string, error)
 	GetSfRepresentor(uplink string, sfIndex int) (string, error)
@@ -78,6 +80,10 @@ func (defaultSriovnetOps) GetVfIndexByPciAddress(vfPciAddress string) (int, erro
 	return sriovnet.GetVfIndexByPciAddress(vfPciAddress)
 }
 
+func (defaultSriovnetOps) GetPfIndexByVfPciAddress(vfPciAddress string) (int, error) {
+	return sriovnet.GetPfIndexByVfPciAddress(vfPciAddress)
+}
+
 func (defaultSriovnetOps) GetSfIndexByAuxDev(auxDev string) (int, error) {
 	return sriovnet.GetSfIndexByAuxDev(auxDev)
 }
@@ -112,6 +118,72 @@ func (defaultSriovnetOps) SetRepresentorPeerMacAddress(netdev string, mac net.Ha
 
 func (defaultSriovnetOps) GetRepresentorPortFlavour(netdev string) (sriovnet.PortFlavour, error) {
 	return sriovnet.GetRepresentorPortFlavour(netdev)
+}
+
+// GetFunctionRepresentorName returns representor name for passed device ID. Supported devices are Virtual Function
+// or Scalable Function
+func GetFunctionRepresentorName(deviceID string) (string, error) {
+	var rep, uplink string
+	var err error
+	var index int
+
+	if IsPCIDeviceName(deviceID) { // PCI device
+		uplink, err = GetSriovnetOps().GetUplinkRepresentor(deviceID)
+		if err != nil {
+			return "", err
+		}
+		index, err = GetSriovnetOps().GetVfIndexByPciAddress(deviceID)
+		if err != nil {
+			return "", err
+		}
+		rep, err = GetSriovnetOps().GetVfRepresentor(uplink, index)
+	} else if IsAuxDeviceName(deviceID) { // Auxiliary device
+		uplink, err = GetSriovnetOps().GetUplinkRepresentorFromAux(deviceID)
+		if err != nil {
+			return "", err
+		}
+		index, err = GetSriovnetOps().GetSfIndexByAuxDev(deviceID)
+		if err != nil {
+			return "", err
+		}
+		rep, err = GetSriovnetOps().GetSfRepresentor(uplink, index)
+	} else {
+		return "", fmt.Errorf("cannot determine device type for id '%s'", deviceID)
+	}
+	if err != nil {
+		return "", err
+	}
+	return rep, nil
+}
+
+// GetNetdevsNameFromDeviceId returns the all netdevice names from the passed device ID.
+func GetNetdevsNameFromDeviceId(deviceId string) ([]string, error) {
+	if IsPCIDeviceName(deviceId) {
+		// If a vDPA device exists, it takes preference over the vendor device, steering-wize
+		vdpaDevice, err := GetVdpaOps().GetVdpaDeviceByPci(deviceId)
+		if err == nil && vdpaDevice.Driver() == kvdpa.VirtioVdpaDriver {
+			return []string{vdpaDevice.VirtioNet().NetDev()}, nil
+		}
+
+		return GetSriovnetOps().GetNetDevicesFromPci(deviceId)
+	} else { // Auxiliary network device
+		return GetSriovnetOps().GetNetDevicesFromAux(deviceId)
+	}
+}
+
+// GetNetdevNameFromDeviceId returns the netdevice name from the passed device ID.
+func GetNetdevNameFromDeviceId(deviceId string) (string, error) {
+	netdevices, err := GetNetdevsNameFromDeviceId(deviceId)
+	if err != nil {
+		return "", err
+	}
+
+	// Make sure we have 1 netdevice per pci address
+	numNetDevices := len(netdevices)
+	if numNetDevices != 1 {
+		return "", fmt.Errorf("failed to get one netdevice interface (count %d) per Device ID %s", numNetDevices, deviceId)
+	}
+	return netdevices[0], nil
 }
 
 func (defaultSriovnetOps) IsVfPciVfioBound(pciAddr string) bool {
@@ -201,42 +273,6 @@ func (defaultSriovnetOps) GetRepresentorVFMissPktDrops(netdev string) (uint64, e
 	}
 
 	return packetsDropped, nil
-}
-
-// GetFunctionRepresentorName returns representor name for passed device ID. Supported devices are Virtual Function
-// or Scalable Function
-func GetFunctionRepresentorName(deviceID string) (string, error) {
-	var rep, uplink string
-	var err error
-	var index int
-
-	if IsPCIDeviceName(deviceID) { // PCI device
-		uplink, err = GetSriovnetOps().GetUplinkRepresentor(deviceID)
-		if err != nil {
-			return "", err
-		}
-		index, err = GetSriovnetOps().GetVfIndexByPciAddress(deviceID)
-		if err != nil {
-			return "", err
-		}
-		rep, err = GetSriovnetOps().GetVfRepresentor(uplink, index)
-	} else if IsAuxDeviceName(deviceID) { // Auxiliary device
-		uplink, err = GetSriovnetOps().GetUplinkRepresentorFromAux(deviceID)
-		if err != nil {
-			return "", err
-		}
-		index, err = GetSriovnetOps().GetSfIndexByAuxDev(deviceID)
-		if err != nil {
-			return "", err
-		}
-		rep, err = GetSriovnetOps().GetSfRepresentor(uplink, index)
-	} else {
-		return "", fmt.Errorf("cannot determine device type for id '%s'", deviceID)
-	}
-	if err != nil {
-		return "", err
-	}
-	return rep, nil
 }
 
 // SetVFHardwreAddress sets mac address for a VF interface

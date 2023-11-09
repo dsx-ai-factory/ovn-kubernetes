@@ -6,6 +6,7 @@ import (
 	"net"
 
 	kapi "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -18,19 +19,18 @@ import (
 //   annotations:
 //     k8s.ovn.org/node-subnets: |
 //       {
-//         "default": "10.130.0.0/23",
-//         "nw1":     "10.132.0.0/23"
+//         "default": "10.130.0.0/23"
 //       }
 //
-// (This allows for specifying multiple network attachments
+// (This allows for specifying multiple network attachments, but currently only "default"
+// is used.)
 //
 // In a dual-stack cluster, the values are lists:
 //
 //   annotations:
 //     k8s.ovn.org/node-subnets: |
 //       {
-//         "default": ["10.130.0.0/23", "fd01:0:0:2::/64"],
-//         "nw1":     ["10.132.0.0/23", "fd03:0:0:2::/64"],
+//         "default": ["10.130.0.0/23", "fd01:0:0:2::/64"]
 //       }
 
 const (
@@ -39,20 +39,20 @@ const (
 )
 
 // updateSubnetAnnotation add the hostSubnets of the given network to the input node annotations;
-// if hostSubnets is empty, it delete the existing subnet annotation for given network from the input node annotations.
+// input annotations is not nil
+// if hostSubnets is empty, deletes the existing subnet annotation for given network from the input node annotations.
 func updateSubnetAnnotation(annotations map[string]string, annotationName, netName string, hostSubnets []*net.IPNet) error {
 	var bytes []byte
-	var err error
 
 	// First get the all host subnets for all existing networks
-	subnetsMap := map[string][]*net.IPNet{}
-	_, ok := annotations[annotationName]
-	if ok {
-		subnetsMap, err = parseSubnetAnnotation(annotations, annotationName)
-		if err != nil {
+	subnetsMap, err := parseSubnetAnnotation(annotations, annotationName)
+	if err != nil {
+		if !IsAnnotationNotSetError(err) {
 			return fmt.Errorf("failed to parse node subnet annotation %q: %v",
 				annotations, err)
 		}
+		// in the case that the annotation does not exist
+		subnetsMap = map[string][]*net.IPNet{}
 	}
 
 	existingHostSubnets, ok := subnetsMap[netName]
@@ -77,7 +77,7 @@ func updateSubnetAnnotation(annotations map[string]string, annotationName, netNa
 		return nil
 	}
 
-	// Marshall all host subnets of all networks back to annotations.
+	// Marshal all host subnets of all networks back to annotations.
 	subnetsStrMap := make(map[string][]string)
 	for n, subnets := range subnetsMap {
 		subnetsStr := make([]string, len(subnets))
@@ -94,33 +94,9 @@ func updateSubnetAnnotation(annotations map[string]string, annotationName, netNa
 	return nil
 }
 
-func createSubnetAnnotation(annotationName string, defaultSubnets []*net.IPNet) (map[string]interface{}, error) {
-	var bytes []byte
-	var err error
-
-	if len(defaultSubnets) == 1 {
-		bytes, err = json.Marshal(map[string]string{
-			types.DefaultNetworkName: defaultSubnets[0].String(),
-		})
-	} else {
-		defaultSubnetStrs := make([]string, len(defaultSubnets))
-		for i := range defaultSubnets {
-			defaultSubnetStrs[i] = defaultSubnets[i].String()
-		}
-		bytes, err = json.Marshal(map[string][]string{
-			types.DefaultNetworkName: defaultSubnetStrs,
-		})
-	}
-	if err != nil {
-		return nil, err
-	}
-	return map[string]interface{}{
-		annotationName: string(bytes),
-	}, nil
-}
-
 func setSubnetAnnotation(nodeAnnotator kube.Annotator, annotationName string, defaultSubnets []*net.IPNet) error {
-	annotation, err := createSubnetAnnotation(annotationName, defaultSubnets)
+	annotation := map[string]string{}
+	err := updateSubnetAnnotation(annotation, annotationName, types.DefaultNetworkName, defaultSubnets)
 	if err != nil {
 		return err
 	}
@@ -128,7 +104,10 @@ func setSubnetAnnotation(nodeAnnotator kube.Annotator, annotationName string, de
 }
 
 func parseSubnetAnnotation(nodeAnnotations map[string]string, annotationName string) (map[string][]*net.IPNet, error) {
-	annotation := nodeAnnotations[annotationName]
+	annotation, ok := nodeAnnotations[annotationName]
+	if !ok {
+		return nil, newAnnotationNotSetError("could not find %q annotation", annotationName)
+	}
 	subnetsStrMap := map[string][]string{}
 	subnetsDual := make(map[string][]string)
 	if err := json.Unmarshal([]byte(annotation), &subnetsDual); err == nil {
@@ -165,37 +144,39 @@ func parseSubnetAnnotation(nodeAnnotations map[string]string, annotationName str
 	return subnetMap, nil
 }
 
-func NodeSubnetAnnotationChanged(oldNode, newNode *kapi.Node) bool {
+func NodeSubnetAnnotationChanged(oldNode, newNode *v1.Node) bool {
 	return oldNode.Annotations[ovnNodeSubnets] != newNode.Annotations[ovnNodeSubnets]
 }
 
-// UpdateNodeHostSubnetAnnotation update a "k8s.ovn.org/node-subnets" annotation for network "netName",
+// UpdateNodeHostSubnetAnnotation updates a "k8s.ovn.org/node-subnets" annotation for network "netName",
 // with the specified network, suitable for passing to kube.SetAnnotationsOnNode. If hostSubnets is empty,
 // it deleted the "k8s.ovn.org/node-subnets" annotation for network "netName"
-func UpdateNodeHostSubnetAnnotation(annotations map[string]string, hostSubnets []*net.IPNet, netName string) error {
-	return updateSubnetAnnotation(annotations, ovnNodeSubnets, netName, hostSubnets)
+func UpdateNodeHostSubnetAnnotation(annotations map[string]string, hostSubnets []*net.IPNet, netName string) (map[string]string, error) {
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	err := updateSubnetAnnotation(annotations, ovnNodeSubnets, netName, hostSubnets)
+	if err != nil {
+		return nil, err
+	}
+	return annotations, nil
 }
 
-// SetNodeHostSubnetAnnotation sets a "k8s.ovn.org/[netName_]node-subnets" annotation
+// SetNodeHostSubnetAnnotation sets a "k8s.ovn.org/node-subnets" annotation
 // using a kube.Annotator
 func SetNodeHostSubnetAnnotation(nodeAnnotator kube.Annotator, defaultSubnets []*net.IPNet) error {
 	return setSubnetAnnotation(nodeAnnotator, ovnNodeSubnets, defaultSubnets)
 }
 
-// DeleteNodeHostSubnetAnnotation removes a "k8s.ovn.org/[netName_]node-subnets" annotation
+// DeleteNodeHostSubnetAnnotation removes a "k8s.ovn.org/node-subnets" annotation
 // using a kube.Annotator
-func DeleteNodeHostSubnetAnnotation(nodeAnnotator kube.Annotator, netName string) {
+func DeleteNodeHostSubnetAnnotation(nodeAnnotator kube.Annotator) {
 	nodeAnnotator.Delete(ovnNodeSubnets)
 }
 
 // ParseNodeHostSubnetAnnotation parses the "k8s.ovn.org/node-subnets" annotation
 // on a node and returns the host subnet for the given network.
 func ParseNodeHostSubnetAnnotation(node *kapi.Node, netName string) ([]*net.IPNet, error) {
-	_, ok := node.Annotations[ovnNodeSubnets]
-	if !ok {
-		return nil, newAnnotationNotSetError("node %q has no %q annotation", node.Name, ovnNodeSubnets)
-	}
-
 	subnetsMap, err := parseSubnetAnnotation(node.Annotations, ovnNodeSubnets)
 	if err != nil {
 		return nil, err
@@ -206,4 +187,20 @@ func ParseNodeHostSubnetAnnotation(node *kapi.Node, netName string) ([]*net.IPNe
 	}
 
 	return subnets, nil
+}
+
+// GetNodeSubnetAnnotationNetworkNames parses the "k8s.ovn.org/node-subnets" annotation
+// on a node and returns the list of network names set.
+func GetNodeSubnetAnnotationNetworkNames(node *kapi.Node) ([]string, error) {
+	nodeNetworks := []string{}
+	subnetsMap, err := parseSubnetAnnotation(node.Annotations, ovnNodeSubnets)
+	if err != nil {
+		return nodeNetworks, err
+	}
+
+	for network := range subnetsMap {
+		nodeNetworks = append(nodeNetworks, network)
+	}
+
+	return nodeNetworks, nil
 }

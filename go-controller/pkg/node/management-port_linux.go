@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/vishvananda/netlink"
@@ -55,13 +57,13 @@ func newManagementPortIPFamilyConfig(hostSubnet *net.IPNet, isIPv6 bool) (*manag
 	// add the .3 masqueradeIP to add the route via mp0 for ETP=local case
 	// used only in LGW but we create it in SGW as well to maintain parity.
 	if isIPv6 {
-		_, masqueradeSubnet, err := net.ParseCIDR(types.V6HostETPLocalMasqueradeIP + "/128")
+		_, masqueradeSubnet, err := net.ParseCIDR(config.Gateway.MasqueradeIPs.V6HostETPLocalMasqueradeIP.String() + "/128")
 		if err != nil {
 			return nil, err
 		}
 		cfg.allSubnets = append(cfg.allSubnets, masqueradeSubnet)
 	} else {
-		_, masqueradeSubnet, err := net.ParseCIDR(types.V4HostETPLocalMasqueradeIP + "/32")
+		_, masqueradeSubnet, err := net.ParseCIDR(config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String() + "/32")
 		if err != nil {
 			return nil, err
 		}
@@ -135,25 +137,22 @@ func newManagementPortConfig(interfaceName string, hostSubnets []*net.IPNet) (*m
 	return mpcfg, nil
 }
 
-func tearDownManagementPortConfig(mpcfg *managementPortConfig) error {
-	// for the initial setup we need to start from the clean slate, so flush
-	// all (non-LL) addresses on this link, routes through this link, and
-	// finally any IPtable rules for this link.
-	if err := util.LinkAddrFlush(mpcfg.link); err != nil {
+func tearDownInterfaceIPConfig(link netlink.Link, ipt4, ipt6 util.IPTablesHelper) error {
+	if err := util.LinkAddrFlush(link); err != nil {
 		return err
 	}
 
-	if err := util.LinkRoutesDel(mpcfg.link, nil); err != nil {
+	if err := util.LinkRoutesDel(link, nil); err != nil {
 		return err
 	}
-	if mpcfg.ipv4 != nil {
-		if err := mpcfg.ipv4.ipt.ClearChain("nat", iptableMgmPortChain); err != nil {
+	if ipt4 != nil {
+		if err := ipt4.ClearChain("nat", iptableMgmPortChain); err != nil {
 			return fmt.Errorf("could not clear the iptables chain for management port: %v", err)
 		}
 	}
 
-	if mpcfg.ipv6 != nil {
-		if err := mpcfg.ipv6.ipt.ClearChain("nat", iptableMgmPortChain); err != nil {
+	if ipt6 != nil {
+		if err := ipt6.ClearChain("nat", iptableMgmPortChain); err != nil {
 			return fmt.Errorf("could not clear the iptables chain for management port: %v", err)
 		}
 	}
@@ -161,7 +160,22 @@ func tearDownManagementPortConfig(mpcfg *managementPortConfig) error {
 	return nil
 }
 
-func setupManagementPortIPFamilyConfig(mpcfg *managementPortConfig, cfg *managementPortIPFamilyConfig) ([]string, error) {
+func tearDownManagementPortConfig(mpcfg *managementPortConfig) error {
+	// for the initial setup we need to start from the clean slate, so flush
+	// all (non-LL) addresses on this link, routes through this link, and
+	// finally any IPtable rules for this link.
+	var ipt4, ipt6 util.IPTablesHelper
+
+	if mpcfg.ipv4 != nil {
+		ipt4 = mpcfg.ipv4.ipt
+	}
+	if mpcfg.ipv6 != nil {
+		ipt6 = mpcfg.ipv6.ipt
+	}
+	return tearDownInterfaceIPConfig(mpcfg.link, ipt4, ipt6)
+}
+
+func setupManagementPortIPFamilyConfig(routeManager *routemanager.Controller, mpcfg *managementPortConfig, cfg *managementPortIPFamilyConfig) ([]string, error) {
 	var warnings []string
 	var err error
 	var exists bool
@@ -171,26 +185,34 @@ func setupManagementPortIPFamilyConfig(mpcfg *managementPortConfig, cfg *managem
 		// disappearing
 		warnings = append(warnings, fmt.Sprintf("missing IP address %s on the interface %s, adding it...",
 			cfg.ifAddr, mpcfg.ifName))
-		err = util.LinkAddrAdd(mpcfg.link, cfg.ifAddr)
+		err = util.LinkAddrAdd(mpcfg.link, cfg.ifAddr, 0)
 	}
 	if err != nil {
 		return warnings, err
 	}
 
+	var routes []routemanager.Route
 	for _, subnet := range cfg.allSubnets {
-		if exists, err = util.LinkRouteExists(mpcfg.link, cfg.gwIP, subnet); err == nil && !exists {
-			// we need to warn so that it can be debugged as to why routes are disappearing
-			warnings = append(warnings, fmt.Sprintf("missing route entry for subnet %s via gateway %s on link %v",
-				subnet, cfg.gwIP, mpcfg.ifName))
-		}
+		exists, err = util.LinkRouteExists(mpcfg.link, cfg.gwIP, subnet)
 		if err != nil {
 			return warnings, err
 		}
-
-		err = util.LinkRoutesAddOrUpdateMTU(mpcfg.link, cfg.gwIP, []*net.IPNet{subnet}, config.Default.RoutableMTU)
-		if err != nil {
-			return warnings, err
+		if exists {
+			continue
 		}
+		// we need to warn so that it can be debugged as to why routes are disappearing
+		warnings = append(warnings, fmt.Sprintf("missing route entry for subnet %s via gateway %s on link %v",
+			subnet, cfg.gwIP, mpcfg.ifName))
+		subnetCopy := *subnet
+		routes = append(routes, routemanager.Route{
+			GwIP:   cfg.gwIP,
+			Subnet: &subnetCopy,
+			MTU:    config.Default.RoutableMTU,
+			SrcIP:  nil,
+		})
+	}
+	if len(routes) > 0 {
+		routeManager.Add(routemanager.RoutesPerLink{Link: mpcfg.link, Routes: routes})
 	}
 
 	// Add a neighbour entry on the K8s node to map routerIP with routerMAC. This is
@@ -205,6 +227,32 @@ func setupManagementPortIPFamilyConfig(mpcfg *managementPortConfig, cfg *managem
 	}
 	if err != nil {
 		return warnings, err
+	}
+
+	createForwardingRule := func(family string) error {
+		var stdout, stderr string
+		var err error
+		stdout, _, err = util.RunSysctl(fmt.Sprintf("net.%s.conf.%s.forwarding", family, config.OvnKubeNode.MgmtPortIntfName))
+		if err == nil && stdout == fmt.Sprintf("net.%s.conf.%s.forwarding = 1", family, config.OvnKubeNode.MgmtPortIntfName) {
+			return nil
+		}
+		stdout, stderr, err = util.RunSysctl("-w", fmt.Sprintf("net.%s.conf.%s.forwarding=1", family, config.OvnKubeNode.MgmtPortIntfName))
+		if err != nil || stdout != fmt.Sprintf("net.%s.conf.%s.forwarding = 1", family, config.OvnKubeNode.MgmtPortIntfName) {
+			return fmt.Errorf("could not set the correct forwarding value for interface %s: stdout: %v, stderr: %v, err: %v",
+				config.OvnKubeNode.MgmtPortIntfName, stdout, stderr, err)
+		}
+		return nil
+	}
+
+	if mpcfg.ipv4 != nil && cfg == mpcfg.ipv4 {
+		if err := createForwardingRule("ipv4"); err != nil {
+			return warnings, fmt.Errorf("could not add IPv4 forwarding rule: %v", err)
+		}
+	}
+	if mpcfg.ipv6 != nil && cfg == mpcfg.ipv6 {
+		if err := createForwardingRule("ipv6"); err != nil {
+			return warnings, fmt.Errorf("could not add IPv6 forwarding rule: %v", err)
+		}
 	}
 
 	if _, err = cfg.ipt.List("nat", iptableMgmPortChain); err != nil {
@@ -242,16 +290,16 @@ func setupManagementPortIPFamilyConfig(mpcfg *managementPortConfig, cfg *managem
 	return warnings, nil
 }
 
-func setupManagementPortConfig(cfg *managementPortConfig) ([]string, error) {
+func setupManagementPortConfig(routeManager *routemanager.Controller, cfg *managementPortConfig) ([]string, error) {
 	var warnings, allWarnings []string
 	var err error
 
 	if cfg.ipv4 != nil {
-		warnings, err = setupManagementPortIPFamilyConfig(cfg, cfg.ipv4)
+		warnings, err = setupManagementPortIPFamilyConfig(routeManager, cfg, cfg.ipv4)
 		allWarnings = append(allWarnings, warnings...)
 	}
 	if cfg.ipv6 != nil && err == nil {
-		warnings, err = setupManagementPortIPFamilyConfig(cfg, cfg.ipv6)
+		warnings, err = setupManagementPortIPFamilyConfig(routeManager, cfg, cfg.ipv6)
 		allWarnings = append(allWarnings, warnings...)
 	}
 
@@ -261,7 +309,7 @@ func setupManagementPortConfig(cfg *managementPortConfig) ([]string, error) {
 // createPlatformManagementPort creates a management port attached to the node switch
 // that lets the node access its pods via their private IP address. This is used
 // for health checking and other management tasks.
-func createPlatformManagementPort(interfaceName string, localSubnets []*net.IPNet) (*managementPortConfig, error) {
+func createPlatformManagementPort(routeManager *routemanager.Controller, interfaceName string, localSubnets []*net.IPNet) (*managementPortConfig, error) {
 	var cfg *managementPortConfig
 	var err error
 
@@ -273,14 +321,153 @@ func createPlatformManagementPort(interfaceName string, localSubnets []*net.IPNe
 		return nil, err
 	}
 
-	if _, err = setupManagementPortConfig(cfg); err != nil {
+	if _, err = setupManagementPortConfig(routeManager, cfg); err != nil {
 		return nil, err
 	}
 
 	return cfg, nil
 }
 
-//DelMgtPortIptRules delete all the iptable rules for the management port.
+func getIPTablesForHostSubnets(hostSubnets []*net.IPNet) (util.IPTablesHelper, util.IPTablesHelper, error) {
+	var ipt4, ipt6 util.IPTablesHelper
+	var err error
+
+	for _, hostSubnet := range hostSubnets {
+		if utilnet.IsIPv6CIDR(hostSubnet) {
+			if ipt6 != nil {
+				continue
+			}
+			ipt6, err = util.GetIPTablesHelper(iptables.ProtocolIPv6)
+		} else {
+			if ipt4 != nil {
+				continue
+			}
+			ipt4, err = util.GetIPTablesHelper(iptables.ProtocolIPv4)
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	return ipt4, ipt6, nil
+}
+
+// syncMgmtPortInterface verifies if no other interface configured as management port. This may happen if another
+// interface had been used as management port or Node was running in different mode.
+// If old management port is found, its IP configuration is flushed and interface renamed.
+func syncMgmtPortInterface(hostSubnets []*net.IPNet, mgmtPortName string, isExpectedToBeInternal bool) error {
+	// Query both type and name, because with type only stdout will be empty for both non-existing port and representor netdevice
+	stdout, _, _ := util.RunOVSVsctl("--no-headings",
+		"--data", "bare",
+		"--format", "csv",
+		"--columns", "type,name",
+		"find", "Interface", "name="+mgmtPortName)
+	if stdout == "" {
+		// Not found on the bridge. But could be that interface with the same name exists
+		return unconfigureMgmtNetdevicePort(hostSubnets, mgmtPortName)
+	}
+
+	// Found existing port. Check its type
+	if stdout == "internal,"+mgmtPortName {
+		if isExpectedToBeInternal {
+			// Do nothing
+			return nil
+		}
+
+		klog.Infof("Found OVS internal port. Removing it")
+		_, stderr, err := util.RunOVSVsctl("del-port", "br-int", mgmtPortName)
+		if err != nil {
+			return fmt.Errorf("failed to remove OVS internal port: %s", stderr)
+		}
+		return nil
+	}
+
+	// It is representor which was used as management port.
+	// Remove it from the bridge and rename.
+	klog.Infof("Found existing representor management port. Removing it")
+	return unconfigureMgmtRepresentorPort(mgmtPortName)
+}
+
+func unconfigureMgmtRepresentorPort(mgmtPortName string) error {
+	// Get saved port name
+	savedName, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Interface", mgmtPortName, "external-ids:ovn-orig-mgmt-port-rep-name")
+	if err != nil {
+		klog.Warningf("Failed to get external-ds:ovn-orig-mgmt-port-rep-name: %s", stderr)
+	}
+
+	if savedName == "" {
+		// rename to "rep" + "ddmmyyHHMMSS"
+		savedName = time.Now().Format("rep010206150405")
+		klog.Warningf("No saved management port representor name for %s, renaming to %s", mgmtPortName, savedName)
+	}
+
+	_, stderr, err = util.RunOVSVsctl("--if-exists", "del-port", "br-int", mgmtPortName)
+	if err != nil {
+		return fmt.Errorf("failed to remove OVS port: %s", stderr)
+	}
+
+	link, err := util.GetNetLinkOps().LinkByName(mgmtPortName)
+	if err != nil {
+		return fmt.Errorf("failed to lookup %s link: %v", mgmtPortName, err)
+	}
+
+	if err := util.GetNetLinkOps().LinkSetDown(link); err != nil {
+		return fmt.Errorf("failed to set link down: %v", err)
+	}
+
+	if err := util.GetNetLinkOps().LinkSetName(link, savedName); err != nil {
+		return fmt.Errorf("failed to rename %s link to %s: %v", mgmtPortName, savedName, err)
+	}
+	return nil
+}
+
+func unconfigureMgmtNetdevicePort(hostSubnets []*net.IPNet, mgmtPortName string) error {
+	link, err := util.GetNetLinkOps().LinkByName(mgmtPortName)
+	if err != nil {
+		if !util.GetNetLinkOps().IsLinkNotFoundError(err) {
+			return fmt.Errorf("failed to lookup %s link: %v", mgmtPortName, err)
+		}
+		// Nothing to unconfigure. Return.
+		return nil
+	}
+
+	klog.Infof("Found existing management interface. Unconfiguring it")
+	ipt4, ipt6, err := getIPTablesForHostSubnets(hostSubnets)
+	if err != nil {
+		return fmt.Errorf("failed to get iptables: %v", err)
+	}
+
+	if err := tearDownInterfaceIPConfig(link, ipt4, ipt6); err != nil {
+		return fmt.Errorf("teardown failed: %v", err)
+	}
+
+	if err := util.GetNetLinkOps().LinkSetDown(link); err != nil {
+		return fmt.Errorf("failed to set %s link down: %v", mgmtPortName, err)
+	}
+
+	savedName := ""
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+		// Get original interface name saved at OVS database
+		stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".", "external-ids:ovn-orig-mgmt-port-netdev-name")
+		if err != nil {
+			klog.Warningf("Failed to get external-ds:ovn-orig-mgmt-port-netdev-name: %s", stderr)
+		}
+		savedName = stdout
+	}
+
+	if savedName == "" {
+		// rename to "net" + "ddmmyyHHMMSS"
+		savedName = time.Now().Format("net010206150405")
+		klog.Warningf("No saved management port netdevice name for %s, renaming to %s", mgmtPortName, savedName)
+	}
+
+	// rename to PortName + "-ddmmyyHHMMSS"
+	if err := util.GetNetLinkOps().LinkSetName(link, savedName); err != nil {
+		return fmt.Errorf("failed to rename %s link to %s: %v", mgmtPortName, savedName, err)
+	}
+	return nil
+}
+
+// DelMgtPortIptRules delete all the iptable rules for the management port.
 func DelMgtPortIptRules() {
 	// Clean up all iptables and ip6tables remnants that may be left around
 	ipt, err := util.GetIPTablesHelper(iptables.ProtocolIPv4)
@@ -304,8 +491,8 @@ func DelMgtPortIptRules() {
 // 1. route entries to cluster CIDR and service CIDR through management port
 // 2. ARP entry for the node subnet's gateway ip
 // 3. IPtables chain and rule for SNATing packets entering the logical topology
-func checkManagementPortHealth(cfg *managementPortConfig) {
-	warnings, err := setupManagementPortConfig(cfg)
+func checkManagementPortHealth(routeManager *routemanager.Controller, cfg *managementPortConfig) {
+	warnings, err := setupManagementPortConfig(routeManager, cfg)
 	for _, warning := range warnings {
 		klog.Warningf(warning)
 	}

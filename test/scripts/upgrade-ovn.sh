@@ -47,6 +47,7 @@ kubectl_wait_daemonset(){
     ((retries += 1))
     if [[ "${retries}" -gt ${attempts} ]]; then
       echo "error: daemonset did not succeed, failing"
+      kubectl describe po -A
       exit 1
     fi
   done
@@ -73,6 +74,7 @@ kubectl_wait_deployment(){
     ((retries += 1))
     if [[ "${retries}" -gt ${attempts} ]]; then
       echo "error: deployment did not succeed, failing"
+      kubectl describe po -A
       exit 1
     fi
   done
@@ -124,6 +126,7 @@ create_ovn_kube_manifests() {
     --gateway-mode="${OVN_GATEWAY_MODE}" \
     --hybrid-enabled="${OVN_HYBRID_OVERLAY_ENABLE}" \
     --disable-snat-multiple-gws="${OVN_DISABLE_SNAT_MULTIPLE_GWS}" \
+    --disable-forwarding="${OVN_DISABLE_FORWARDING}" \
     --disable-pkt-mtu-check="${OVN_DISABLE_PKT_MTU_CHECK}" \
     --ovn-empty-lb-events="${OVN_EMPTY_LB_EVENTS}" \
     --multicast-enabled="${OVN_MULTICAST_ENABLE}" \
@@ -152,10 +155,12 @@ set_default_ovn_manifest_params() {
   KIND_IPV4_SUPPORT=${KIND_IPV4_SUPPORT:-true}
   KIND_IPV6_SUPPORT=${KIND_IPV6_SUPPORT:-false}
   OVN_HA=${OVN_HA:-false}
+  OVN_ENABLE_OVNKUBE_IDENTITY=${OVN_ENABLE_OVNKUBE_IDENTITY:-true}
   # ovn configs 
   OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-shared}
   OVN_HYBRID_OVERLAY_ENABLE=${OVN_HYBRID_OVERLAY_ENABLE:-false}
   OVN_DISABLE_SNAT_MULTIPLE_GWS=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-false}
+  OVN_DISABLE_FORWARDING=${OVN_DISABLE_FORWARDING:-false}
   OVN_DISABLE_PKT_MTU_CHECK=${OVN_DISABLE_PKT_MTU_CHECK:-false}
   OVN_EMPTY_LB_EVENTS=${OVN_EMPTY_LB_EVENTS:-false}
   OVN_MULTICAST_ENABLE=${OVN_MULTICAST_ENABLE:-false}
@@ -204,6 +209,7 @@ print_ovn_manifest_params() {
      echo "OVN_GATEWAY_MODE = $OVN_GATEWAY_MODE"
      echo "OVN_HYBRID_OVERLAY_ENABLE = $OVN_HYBRID_OVERLAY_ENABLE"
      echo "OVN_DISABLE_SNAT_MULTIPLE_GWS = $OVN_DISABLE_SNAT_MULTIPLE_GWS"
+     echo "OVN_DISABLE_FORWARDING = $OVN_DISABLE_FORWARDING"
      echo "OVN_DISABLE_PKT_MTU_CHECK = $OVN_DISABLE_PKT_MTU_CHECK"
      echo "OVN_NETFLOW_TARGETS = $OVN_NETFLOW_TARGETS"
      echo "OVN_SFLOW_TARGETS = $OVN_SFLOW_TARGETS"
@@ -221,6 +227,7 @@ print_ovn_manifest_params() {
      echo "OVN_HOST_NETWORK_NAMESPACE = $OVN_HOST_NETWORK_NAMESPACE"
      echo "OVN_ENABLE_EX_GW_NETWORK_BRIDGE = $OVN_ENABLE_EX_GW_NETWORK_BRIDGE"
      echo "OVN_EX_GW_NETWORK_INTERFACE = $OVN_EX_GW_NETWORK_INTERFACE"
+     echo "OVN_ENABLE_OVNKUBE_IDENTITY =  $OVN_ENABLE_OVNKUBE_IDENTITY"
      echo ""
 }
 
@@ -266,6 +273,17 @@ pushd ../dist/yaml
 
 # install updated k8s configuration for ovn-k (useful in case of ClusterRole updates)
 run_kubectl apply -f ovn-setup.yaml
+run_kubectl apply -f rbac-ovnkube-identity.yaml
+run_kubectl apply -f rbac-ovnkube-cluster-manager.yaml
+run_kubectl apply -f rbac-ovnkube-master.yaml
+run_kubectl apply -f rbac-ovnkube-node.yaml
+run_kubectl apply -f rbac-ovnkube-db.yaml
+
+if [ "${OVN_ENABLE_OVNKUBE_IDENTITY}" == true ]; then
+  run_kubectl apply -f ovnkube-identity.yaml
+  kubectl_wait_deployment ovnkube-identity
+fi
+
 
 # install updated ovnkube-node daemonset
 run_kubectl apply -f ovnkube-node.yaml

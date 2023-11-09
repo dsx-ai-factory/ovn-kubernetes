@@ -3,7 +3,6 @@ package config
 import (
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"net/url"
 	"os"
@@ -12,6 +11,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -73,7 +73,8 @@ var (
 		RawClusterSubnets:             "10.128.0.0/14/23",
 		EncapToSValue:                 "none",
 		DisableCTInvFlows:             false,
-		DoSCheckInterval:              100,   // in Milliseconds
+		DoSCheckInterval:              100, // in Milliseconds
+		Zone:                          types.OvnDefaultZone,
 		ClusterSubnetsMacBindingAging: 36000, // in Seconds
 	}
 
@@ -81,6 +82,7 @@ var (
 	Logging = LoggingConfig{
 		File:                "", // do not log to a file by default
 		CNIFile:             "",
+		LibovsdbFile:        "",
 		Level:               4,
 		LogFileMaxSize:      100, // Size in Megabytes
 		LogFileMaxBackups:   5,
@@ -117,6 +119,11 @@ var (
 		HostNetworkNamespace: "",
 		SkipRequestedChassis: true,
 		PlatformType:         "",
+		DNSServiceNamespace:  "kube-system",
+		DNSServiceName:       "kube-dns",
+		// By default, use a short lifetime length for certificates to ensure that the automatic rotation works well,
+		// might revisit in the future to use a more sensible value
+		CertDuration: 10 * time.Minute,
 	}
 
 	// Metrics holds Prometheus metrics-related parameters.
@@ -135,12 +142,33 @@ var (
 
 	// Gateway holds node gateway-related parsed config file parameters and command-line overrides
 	Gateway = GatewayConfig{
-		V4JoinSubnet: "100.64.0.0/16",
-		V6JoinSubnet: "fd98::/64",
+		V4JoinSubnet:       "100.64.0.0/16",
+		V6JoinSubnet:       "fd98::/64",
+		V4MasqueradeSubnet: "169.254.169.0/29",
+		V6MasqueradeSubnet: "fd69::/125",
+		MasqueradeIPs: MasqueradeIPsConfig{
+			V4OVNMasqueradeIP:               net.ParseIP("169.254.169.1"),
+			V6OVNMasqueradeIP:               net.ParseIP("fd69::1"),
+			V4HostMasqueradeIP:              net.ParseIP("169.254.169.2"),
+			V6HostMasqueradeIP:              net.ParseIP("fd69::2"),
+			V4HostETPLocalMasqueradeIP:      net.ParseIP("169.254.169.3"),
+			V6HostETPLocalMasqueradeIP:      net.ParseIP("fd69::3"),
+			V4DummyNextHopMasqueradeIP:      net.ParseIP("169.254.169.4"),
+			V6DummyNextHopMasqueradeIP:      net.ParseIP("fd69::4"),
+			V4OVNServiceHairpinMasqueradeIP: net.ParseIP("169.254.169.5"),
+			V6OVNServiceHairpinMasqueradeIP: net.ParseIP("fd69::5"),
+		},
 	}
 
 	// MasterHA holds master HA related config options.
-	MasterHA = MasterHAConfig{
+	MasterHA = HAConfig{
+		ElectionLeaseDuration: 60,
+		ElectionRenewDeadline: 30,
+		ElectionRetryPeriod:   20,
+	}
+
+	// ClusterMgrHA holds cluster manager HA related config options.
+	ClusterMgrHA = HAConfig{
 		ElectionLeaseDuration: 60,
 		ElectionRenewDeadline: 30,
 		ElectionRetryPeriod:   20,
@@ -170,6 +198,11 @@ var (
 		Mode:             types.NodeModeFull,
 		IsPrimaryDPU:     true,
 		MgmtPortIntfName: types.K8sMgmtIntfName,
+	}
+
+	ClusterManager = ClusterManagerConfig{
+		V4TransitSwitchSubnet: "168.254.0.0/16",
+		V6TransitSwitchSubnet: "fd97::/64",
 	}
 )
 
@@ -251,6 +284,9 @@ type DefaultConfig struct {
 	// in large scale environments. The aging configuration is to avoid such MAC binding
 	// entries accumulation over time.
 	ClusterSubnetsMacBindingAging int `gcfg:"cluster-subnets-mac-binding-aging"`
+
+	// Zone name to which ovnkube-node/ovnkube-controller belongs to
+	Zone string `gcfg:"zone"`
 }
 
 // LoggingConfig holds logging-related parsed config file parameters and command-line overrides
@@ -259,9 +295,11 @@ type LoggingConfig struct {
 	File string `gcfg:"logfile"`
 	// CNIFile is the path of the file for the CNI shim to log to
 	CNIFile string `gcfg:"cnilogfile"`
+	// LibovsdbFile is the path of the file for the libovsdb client to log to
+	LibovsdbFile string `gcfg:"libovsdblogfile"`
 	// Level is the logging verbosity level
 	Level int `gcfg:"loglevel"`
-	// LogFileMaxSize is the maximum size in bytes of the logfile
+	// LogFileMaxSize is the maximum size in megabytes of the logfile
 	// before it gets rolled.
 	LogFileMaxSize int `gcfg:"logfile-maxsize"`
 	// LogFileMaxBackups represents the the maximum number of old log files to retain
@@ -315,8 +353,11 @@ type CNIConfig struct {
 
 // KubernetesConfig holds Kubernetes-related parsed config file parameters and command-line overrides
 type KubernetesConfig struct {
-	Kubeconfig           string `gcfg:"kubeconfig"`
-	CACert               string `gcfg:"cacert"`
+	BootstrapKubeconfig  string        `gcfg:"bootstrap-kubeconfig"`
+	CertDir              string        `gcfg:"cert-dir"`
+	CertDuration         time.Duration `gcfg:"cert-duration"`
+	Kubeconfig           string        `gcfg:"kubeconfig"`
+	CACert               string        `gcfg:"cacert"`
 	CAData               []byte
 	APIServer            string `gcfg:"apiserver"`
 	Token                string `gcfg:"token"`
@@ -332,6 +373,7 @@ type KubernetesConfig struct {
 	HostNetworkNamespace string `gcfg:"host-network-namespace"`
 	SkipRequestedChassis bool
 	PlatformType         string `gcfg:"platform-type"`
+	HealthzBindAddress   string `gcfg:"healthz-bind-address"`
 	ClusterName          string `gcfg:"clusterName"`
 
 	// CompatMetricsBindAddress is overridden by the corresponding option in MetricsConfig
@@ -344,6 +386,9 @@ type KubernetesConfig struct {
 	CompatMetricsNodeServerPrivKey string `gcfg:"metrics-node-server-privkey"`
 	// CompatMetricsNodeServerCert is overridden by the corresponding option in MetricsConfig
 	CompatMetricsNodeServerCert string `gcfg:"metrics-node-server-cert"`
+
+	DNSServiceNamespace string `gcfg:"dns-service-namespace"`
+	DNSServiceName      string `gcfg:"dns-service-name"`
 }
 
 // MetricsConfig holds Prometheus metrics-related parameters.
@@ -357,22 +402,30 @@ type MetricsConfig struct {
 	// EnableConfigDuration holds the boolean flag to enable OVN-Kubernetes master to monitor OVN-Kubernetes master
 	// configuration duration and optionally, its application to all nodes
 	EnableConfigDuration bool `gcfg:"enable-config-duration"`
+	EnableScaleMetrics   bool `gcfg:"enable-scale-metrics"`
 }
 
 // OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
 type OVNKubernetesFeatureConfig struct {
+	// Admin Network Policy feature is enabled
+	EnableAdminNetworkPolicy bool `gcfg:"enable-admin-network-policy"`
+	// EgressIP feature is enabled
 	EnableEgressIP bool `gcfg:"enable-egress-ip"`
 	// EgressIP node reachability total timeout in seconds
 	EgressIPReachabiltyTotalTimeout int  `gcfg:"egressip-reachability-total-timeout"`
 	EnableEgressFirewall            bool `gcfg:"enable-egress-firewall"`
 	EnableEgressQoS                 bool `gcfg:"enable-egress-qos"`
+	EnableEgressService             bool `gcfg:"enable-egress-service"`
+	EgressIPNodeHealthCheckPort     int  `gcfg:"egressip-node-healthcheck-port"`
 	EnableMultiNetwork              bool `gcfg:"enable-multi-network"`
 	EnableMultiNetworkPolicy        bool `gcfg:"enable-multi-networkpolicy"`
+	EnableStatelessNetPol           bool `gcfg:"enable-stateless-netpol"`
+	EnableInterconnect              bool `gcfg:"enable-interconnect"`
 	// EnableAdminPolicyBasedRouting allows admin to manage PBR rules
 	EnableAdminPolicyBasedRouting bool `gcfg:"enable-admin-pbr"`
 	EnableVirtualIP               bool `gcfg:"enable-virtual-ip"`
 	EnableIPReservation           bool `gcfg:"enable-ip-reservation"`
-	EnablePortMirror              bool `gcfg:"enable-port-mirror"`
+	EnableMultiExternalGateway    bool `gcfg:"enable-multi-external-gateway"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -413,6 +466,13 @@ type GatewayConfig struct {
 	V4JoinSubnet string `gcfg:"v4-join-subnet"`
 	// V6JoinSubnet to be used in the cluster
 	V6JoinSubnet string `gcfg:"v6-join-subnet"`
+	// V4MasqueradeSubnet to be used in the cluster
+	V4MasqueradeSubnet string `gcfg:"v4-masquerade-subnet"`
+	// V6MasqueradeSubnet to be used in the cluster
+	V6MasqueradeSubnet string `gcfg:"v6-masquerade-subnet"`
+	// MasqueradeIps to be allocated from the masquerade subnets to enable host to service traffic
+	MasqueradeIPs MasqueradeIPsConfig
+
 	// DisablePacketMTUCheck disables adding openflow flows to check packets too large to be
 	// delivered to OVN due to pod MTU being lower than NIC MTU. Disabling this check will result in southbound packets
 	// exceeding pod MTU to be dropped by OVN. With this check enabled, ICMP needs frag/packet too big will be sent
@@ -421,6 +481,12 @@ type GatewayConfig struct {
 	// RouterSubnet is the subnet to be used for the GR external port. auto-detected if not given.
 	// Must match the the kube node IP address. Currently valid for DPU only.
 	RouterSubnet string `gcfg:"router-subnet"`
+	// SingeNode indicates the cluster has only one node
+	SingleNode bool `gcfg:"single-node"`
+	// DisableForwarding (enabled by default) controls if forwarding is allowed on OVNK controlled interfaces
+	DisableForwarding bool `gcfg:"disable-forwarding"`
+	// AllowNoUplink (disabled by default) controls if the external gateway bridge without an uplink port is allowed in local gateway mode.
+	AllowNoUplink bool `gcfg:"allow-no-uplink"`
 }
 
 // OvnAuthConfig holds client authentication and location details for
@@ -439,9 +505,9 @@ type OvnAuthConfig struct {
 	exec kexec.Interface
 }
 
-// MasterHAConfig holds configuration for master HA
+// HAConfig holds configuration for HA
 // configuration.
-type MasterHAConfig struct {
+type HAConfig struct {
 	ElectionLeaseDuration int `gcfg:"election-lease-duration"`
 	ElectionRenewDeadline int `gcfg:"election-renew-deadline"`
 	ElectionRetryPeriod   int `gcfg:"election-retry-period"`
@@ -464,21 +530,29 @@ type HybridOverlayConfig struct {
 
 // OvnKubeNodeConfig holds ovnkube-node configurations
 type OvnKubeNodeConfig struct {
-	Mode                 string `gcfg:"mode"`
-	MgmtPortIntfName     string `gcfg:"mgmt-port-netdev-intf-name"`
-	MgmtPortNetdev       string `gcfg:"mgmt-port-netdev"`
-	MgmtPortRepresentor  string
-	DisableOVNIfaceIdVer bool `gcfg:"disable-ovn-iface-id-ver"`
-	IsPrimaryDPU         bool
-	XDPSFRep             string `gcfg:"ovn-xdp-sfrep"`
-	XDPVeth              string `gcfg:"ovn-xdp-veth"`
-	XDPNamespace         string `gcfg:"ovn-xdp-ns"`
-	MaxRevalidator       uint   `gcfg:"ovs-max-revalidator"`
-	MinRevalidatePPS     uint   `gcfg:"ovs-min-revalidate-pps"`
-	MaxIdle              uint   `gcfg:"ovs-max-idle"`
+	Mode                   string `gcfg:"mode"`
+	DPResourceDeviceIdsMap map[string][]string
+	MgmtPortNetdev         string `gcfg:"mgmt-port-netdev"`
+	MgmtPortDPResourceName string `gcfg:"mgmt-port-dp-resource-name"`
+	MgmtPortIntfName       string `gcfg:"mgmt-port-netdev-intf-name"`
+	IsPrimaryDPU           bool
+	XDPSFRep               string `gcfg:"ovn-xdp-sfrep"`
+	XDPVeth                string `gcfg:"ovn-xdp-veth"`
+	XDPNamespace           string `gcfg:"ovn-xdp-ns"`
+	MaxRevalidator         uint   `gcfg:"ovs-max-revalidator"`
+	MinRevalidatePPS       uint   `gcfg:"ovs-min-revalidate-pps"`
+	MaxIdle                uint   `gcfg:"ovs-max-idle"`
 	// RepresentorMeteringNodes is the node label whose value will be used
 	// to determine if representor metering feature will be applied or not
 	RepresentorMeteringNodes string `gcfg:"representor-metering-nodes"`
+}
+
+// ClusterManagerConfig holds configuration for ovnkube-cluster-manager
+type ClusterManagerConfig struct {
+	// V4TransitSwitchSubnet to be used in the cluster for interconnecting multiple zones
+	V4TransitSwitchSubnet string `gcfg:"v4-transit-switch-subnet"`
+	// V6TransitSwitchSubnet to be used in the cluster for interconnecting multiple zones
+	V6TransitSwitchSubnet string `gcfg:"v6-transit-switch-subnet"`
 }
 
 // OvnDBScheme describes the OVN database connection transport method
@@ -506,9 +580,11 @@ type config struct {
 	OvnNorth             OvnAuthConfig
 	OvnSouth             OvnAuthConfig
 	Gateway              GatewayConfig
-	MasterHA             MasterHAConfig
+	MasterHA             HAConfig
+	ClusterMgrHA         HAConfig
 	HybridOverlay        HybridOverlayConfig
 	OvnKubeNode          OvnKubeNodeConfig
+	ClusterManager       ClusterManagerConfig
 }
 
 var (
@@ -523,9 +599,12 @@ var (
 	savedOvnNorth             OvnAuthConfig
 	savedOvnSouth             OvnAuthConfig
 	savedGateway              GatewayConfig
-	savedMasterHA             MasterHAConfig
+	savedMasterHA             HAConfig
+	savedClusterMgrHA         HAConfig
 	savedHybridOverlay        HybridOverlayConfig
 	savedOvnKubeNode          OvnKubeNodeConfig
+	savedClusterManager       ClusterManagerConfig
+
 	// legacy service-cluster-ip-range CLI option
 	serviceClusterIPRange string
 	// legacy cluster-subnet CLI option
@@ -534,6 +613,8 @@ var (
 	initGateways bool
 	// legacy gateway-local CLI option
 	gatewayLocal bool
+	// legacy disable-ovn-iface-id-ver CLI option
+	disableOVNIfaceIDVer bool
 )
 
 func init() {
@@ -552,6 +633,7 @@ func init() {
 	savedMasterHA = MasterHA
 	savedHybridOverlay = HybridOverlay
 	savedOvnKubeNode = OvnKubeNode
+	savedClusterManager = ClusterManager
 	cli.VersionPrinter = func(c *cli.Context) {
 		fmt.Printf("Version: %s\n", Version)
 		fmt.Printf("Git commit: %s\n", Commit)
@@ -582,6 +664,7 @@ func PrepareTestConfig() error {
 	HybridOverlay = savedHybridOverlay
 	OvnKubeNode = savedOvnKubeNode
 	Kubernetes.SkipRequestedChassis = false
+	ClusterManager = savedClusterManager
 
 	if err := completeConfig(); err != nil {
 		return err
@@ -660,7 +743,15 @@ var CommonFlags = []cli.Flag{
 	// Mode flags
 	&cli.StringFlag{
 		Name:  "init-master",
-		Usage: "initialize master, requires the hostname as argument",
+		Usage: "initialize master (both cluster-manager and ovnkube-controller), requires the hostname as argument",
+	},
+	&cli.StringFlag{
+		Name:  "init-cluster-manager",
+		Usage: "initialize cluster manager (but not ovnkube-controller), requires the hostname as argument",
+	},
+	&cli.StringFlag{
+		Name:  "init-ovnkube-controller",
+		Usage: "initialize ovnkube-controller (but not cluster-manager), requires the hostname as argument",
 	},
 	&cli.StringFlag{
 		Name:  "init-node",
@@ -820,6 +911,11 @@ var CommonFlags = []cli.Flag{
 		Destination: &cliConfig.Logging.CNIFile,
 		Value:       "/var/log/ovn-kubernetes/ovn-k8s-cni-overlay.log",
 	},
+	&cli.StringFlag{
+		Name:        "libovsdblogfile",
+		Usage:       "path of a file to direct log from libovsdb client to output to (default is to use same as --logfile)",
+		Destination: &cliConfig.Logging.LibovsdbFile,
+	},
 	// Logfile rotation parameters
 	&cli.IntFlag{
 		Name:        "logfile-maxsize",
@@ -862,6 +958,12 @@ var CommonFlags = []cli.Flag{
 		Usage:       "Interval in milliseconds to check if any Pod is a source of DoS attack",
 		Destination: &cliConfig.Default.DoSCheckInterval,
 		Value:       Default.DoSCheckInterval,
+	},
+	&cli.StringFlag{
+		Name:        "zone",
+		Usage:       "zone name to which ovnkube-node/ovnkube-controller belongs to",
+		Value:       Default.Zone,
+		Destination: &cliConfig.Default.Zone,
 	},
 	&cli.IntFlag{
 		Name:        "cluster-subnets-mac-binding-aging",
@@ -938,6 +1040,12 @@ var CNIFlags = []cli.Flag{
 // OVNK8sFeatureFlags capture OVN-Kubernetes feature related options
 var OVNK8sFeatureFlags = []cli.Flag{
 	&cli.BoolFlag{
+		Name:        "enable-admin-network-policy",
+		Usage:       "Configure to use Admin Network Policy CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableAdminNetworkPolicy,
+		Value:       OVNKubernetesFeature.EnableAdminNetworkPolicy,
+	},
+	&cli.BoolFlag{
 		Name:        "enable-egress-ip",
 		Usage:       "Configure to use EgressIP CRD feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableEgressIP,
@@ -961,15 +1069,20 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Destination: &cliConfig.OVNKubernetesFeature.EnableEgressQoS,
 		Value:       OVNKubernetesFeature.EnableEgressQoS,
 	},
+	&cli.IntFlag{
+		Name:        "egressip-node-healthcheck-port",
+		Usage:       "Configure EgressIP node reachability using gRPC on this TCP port.",
+		Destination: &cliConfig.OVNKubernetesFeature.EgressIPNodeHealthCheckPort,
+	},
 	&cli.BoolFlag{
 		Name:        "enable-multi-network",
-		Usage:       "Configure to use multiple networkAttachmentDefinition CRD feature with ovn-kubernetes.",
+		Usage:       "Configure to use multiple NetworkAttachmentDefinition CRD feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableMultiNetwork,
 		Value:       OVNKubernetesFeature.EnableMultiNetwork,
 	},
 	&cli.BoolFlag{
 		Name:        "enable-multi-networkpolicy",
-		Usage:       "Configure to use multiple networkAttachmentDefinition CRD feature with ovn-kubernetes.",
+		Usage:       "Configure to use MultiNetworkPolicy CRD feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableMultiNetworkPolicy,
 		Value:       OVNKubernetesFeature.EnableMultiNetworkPolicy,
 	},
@@ -986,16 +1099,34 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Value:       OVNKubernetesFeature.EnableVirtualIP,
 	},
 	&cli.BoolFlag{
+		Name:        "enable-stateless-netpol",
+		Usage:       "Configure to use stateless network policy feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableStatelessNetPol,
+		Value:       OVNKubernetesFeature.EnableStatelessNetPol,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-interconnect",
+		Usage:       "Configure to enable interconnecting multiple zones.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableInterconnect,
+		Value:       OVNKubernetesFeature.EnableInterconnect,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-egress-service",
+		Usage:       "Configure to use EgressService CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableEgressService,
+		Value:       OVNKubernetesFeature.EnableEgressService,
+	},
+	&cli.BoolFlag{
 		Name:        "enable-ip-reservation",
 		Usage:       "Configure to use IPReservation CRD feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableIPReservation,
 		Value:       OVNKubernetesFeature.EnableIPReservation,
 	},
 	&cli.BoolFlag{
-		Name:        "enable-port-mirror",
-		Usage:       "Configure to use PortMirror CRD feature with ovn-kubernetes.",
-		Destination: &cliConfig.OVNKubernetesFeature.EnablePortMirror,
-		Value:       OVNKubernetesFeature.EnablePortMirror,
+		Name:        "enable-multi-external-gateway",
+		Usage:       "Configure to use AdminPolicyBasedExternalRoute CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableMultiExternalGateway,
+		Value:       OVNKubernetesFeature.EnableMultiExternalGateway,
 	},
 }
 
@@ -1026,10 +1157,26 @@ var K8sFlags = []cli.Flag{
 		Destination: &cliConfig.Kubernetes.Kubeconfig,
 	},
 	&cli.StringFlag{
+		Name:        "bootstrap-kubeconfig",
+		Usage:       "absolute path to the Kubernetes kubeconfig file that is used to create the initial, per node, client certificates (should only be used together with 'cert-dir')",
+		Destination: &cliConfig.Kubernetes.BootstrapKubeconfig,
+	},
+	&cli.StringFlag{
 		Name:        "k8s-apiserver",
 		Usage:       "URL of the Kubernetes API server (not required if --k8s-kubeconfig is given) (default: http://localhost:8443)",
 		Destination: &cliConfig.Kubernetes.APIServer,
 		Value:       Kubernetes.APIServer,
+	},
+	&cli.StringFlag{
+		Name:        "cert-dir",
+		Usage:       "absolute path to the directory of the client key and certificate (not required if --k8s-kubeconfig or --k8s-apiserver, --k8s-ca-cert, and --k8s-token are given)",
+		Destination: &cliConfig.Kubernetes.CertDir,
+	},
+	&cli.DurationFlag{
+		Name:        "cert-duration",
+		Usage:       "requested certificate duration, default: 10min",
+		Destination: &cliConfig.Kubernetes.CertDuration,
+		Value:       Kubernetes.CertDuration,
 	},
 	&cli.StringFlag{
 		Name:        "k8s-cacert",
@@ -1083,12 +1230,28 @@ var K8sFlags = []cli.Flag{
 		Value:       Kubernetes.PlatformType,
 	},
 	&cli.StringFlag{
-		Name: "cluster-name",
-		Usage: "name of the cluster, used to identify this cluster in multi cluster setup. " +
-			"should be unique in a multi cluster environment with shared OVN DB.",
+		Name:        "healthz-bind-address",
+		Usage:       "The IP address and port for the node proxy healthz server to serve on (set to '0.0.0.0:10256' or '[::]:10256' for listening in all interfaces and IP families). Disabled by default.",
+		Destination: &cliConfig.Kubernetes.HealthzBindAddress,
+	},
+	&cli.StringFlag{
+		Name:        "cluster-name",
+		Usage:       "name of the cluster, used to identify this cluster in multi cluster setup. should be unique in a multi cluster environment with shared OVN DB.",
 		Destination: &cliConfig.Kubernetes.ClusterName,
 		Value:       Kubernetes.ClusterName,
 		Required:    false,
+	},
+	&cli.StringFlag{
+		Name:        "dns-service-namespace",
+		Usage:       "DNS kubernetes service namespace used to expose name resolving to live migratable vms.",
+		Destination: &cliConfig.Kubernetes.DNSServiceNamespace,
+		Value:       Kubernetes.DNSServiceNamespace,
+	},
+	&cli.StringFlag{
+		Name:        "dns-service-name",
+		Usage:       "DNS kubernetes service name used to expose name resolving to live migratable vms.",
+		Destination: &cliConfig.Kubernetes.DNSServiceName,
+		Value:       Kubernetes.DNSServiceName,
 	},
 }
 
@@ -1129,6 +1292,11 @@ var MetricsFlags = []cli.Flag{
 		Name:        "metrics-enable-config-duration",
 		Usage:       "Enables monitoring OVN-Kubernetes master and OVN configuration duration",
 		Destination: &cliConfig.Metrics.EnableConfigDuration,
+	},
+	&cli.BoolFlag{
+		Name:        "metrics-enable-scale",
+		Usage:       "Enables metrics related to scaling",
+		Destination: &cliConfig.Metrics.EnableScaleMetrics,
 	},
 }
 
@@ -1274,6 +1442,11 @@ var OVNGatewayFlags = []cli.Flag{
 		Usage:       "Disable SNAT for egress traffic with multiple gateways.",
 		Destination: &cliConfig.Gateway.DisableSNATMultipleGWs,
 	},
+	&cli.BoolFlag{
+		Name:        "disable-forwarding",
+		Usage:       "Disable forwarding on OVNK controlled interfaces.",
+		Destination: &cliConfig.Gateway.DisableForwarding,
+	},
 	&cli.StringFlag{
 		Name:        "gateway-v4-join-subnet",
 		Usage:       "The v4 join subnet used for assigning join switch IPv4 addresses",
@@ -1285,6 +1458,18 @@ var OVNGatewayFlags = []cli.Flag{
 		Usage:       "The v6 join subnet used for assigning join switch IPv6 addresses",
 		Destination: &cliConfig.Gateway.V6JoinSubnet,
 		Value:       Gateway.V6JoinSubnet,
+	},
+	&cli.StringFlag{
+		Name:        "gateway-v4-masquerade-subnet",
+		Usage:       "The v4 masquerade subnet used for assigning masquerade IPv4 addresses",
+		Destination: &cliConfig.Gateway.V4MasqueradeSubnet,
+		Value:       Gateway.V4MasqueradeSubnet,
+	},
+	&cli.StringFlag{
+		Name:        "gateway-v6-masquerade-subnet",
+		Usage:       "The v6 masquerade subnet used for assigning masquerade IPv6 addresses",
+		Destination: &cliConfig.Gateway.V6MasqueradeSubnet,
+		Value:       Gateway.V6MasqueradeSubnet,
 	},
 	&cli.BoolFlag{
 		Name:        "disable-pkt-mtu-check",
@@ -1299,6 +1484,17 @@ var OVNGatewayFlags = []cli.Flag{
 		Destination: &cliConfig.Gateway.RouterSubnet,
 		Value:       Gateway.RouterSubnet,
 	},
+	&cli.BoolFlag{
+		Name: "single-node",
+		Usage: "Enable single node optimizations. " +
+			"Single node indicates a one node cluster and allows to simplify ovn-kubernetes gateway logic",
+		Destination: &cliConfig.Gateway.SingleNode,
+	},
+	&cli.BoolFlag{
+		Name:        "allow-no-uplink",
+		Usage:       "Allow the external gateway bridge without an uplink port in local gateway mode",
+		Destination: &cliConfig.Gateway.AllowNoUplink,
+	},
 	// Deprecated CLI options
 	&cli.BoolFlag{
 		Name:        "init-gateways",
@@ -1312,7 +1508,7 @@ var OVNGatewayFlags = []cli.Flag{
 	},
 }
 
-// MasterHAFlags capture OVN northbound database options
+// MasterHAFlags capture leader election flags for master
 var MasterHAFlags = []cli.Flag{
 	&cli.IntFlag{
 		Name:        "ha-election-lease-duration",
@@ -1322,19 +1518,41 @@ var MasterHAFlags = []cli.Flag{
 	},
 	&cli.IntFlag{
 		Name:        "ha-election-renew-deadline",
-		Usage:       "Leader election renew deadline (in secs) (default: 35)",
+		Usage:       "Leader election renew deadline (in secs) (default: 30)",
 		Destination: &cliConfig.MasterHA.ElectionRenewDeadline,
 		Value:       MasterHA.ElectionRenewDeadline,
 	},
 	&cli.IntFlag{
 		Name:        "ha-election-retry-period",
-		Usage:       "Leader election retry period (in secs) (default: 10)",
+		Usage:       "Leader election retry period (in secs) (default: 20)",
 		Destination: &cliConfig.MasterHA.ElectionRetryPeriod,
 		Value:       MasterHA.ElectionRetryPeriod,
 	},
 }
 
-// HybridOverlayFlats capture hybrid overlay feature options
+// ClusterMgrHAFlags capture leader election flags for cluster manager
+var ClusterMgrHAFlags = []cli.Flag{
+	&cli.IntFlag{
+		Name:        "cluster-manager-ha-election-lease-duration",
+		Usage:       "Leader election lease duration (in secs) (default: 60)",
+		Destination: &cliConfig.ClusterMgrHA.ElectionLeaseDuration,
+		Value:       ClusterMgrHA.ElectionLeaseDuration,
+	},
+	&cli.IntFlag{
+		Name:        "cluster-manager-ha-election-renew-deadline",
+		Usage:       "Leader election renew deadline (in secs) (default: 30)",
+		Destination: &cliConfig.ClusterMgrHA.ElectionRenewDeadline,
+		Value:       ClusterMgrHA.ElectionRenewDeadline,
+	},
+	&cli.IntFlag{
+		Name:        "cluster-manager-ha-election-retry-period",
+		Usage:       "Leader election retry period (in secs) (default: 20)",
+		Destination: &cliConfig.ClusterMgrHA.ElectionRetryPeriod,
+		Value:       ClusterMgrHA.ElectionRetryPeriod,
+	},
+}
+
+// HybridOverlayFlags capture hybrid overlay feature options
 var HybridOverlayFlags = []cli.Flag{
 	&cli.BoolFlag{
 		Name:        "enable-hybrid-overlay",
@@ -1376,18 +1594,23 @@ var OvnKubeNodeFlags = []cli.Flag{
 	},
 	&cli.StringFlag{
 		Name: "ovnkube-node-mgmt-port-netdev",
-		Usage: "valid only when ovnkube-node-mode is either dpu or dpu-host. " +
-			"when provided, use this netdev as management port. it will be renamed to ovn-k8s-mp0 " +
+		Usage: "When provided, use this netdev as management port. It will be renamed to ovn-k8s-mp0 " +
 			"and used to allow host network services and pods to access k8s pod and service networks. ",
 		Value:       OvnKubeNode.MgmtPortNetdev,
 		Destination: &cliConfig.OvnKubeNode.MgmtPortNetdev,
 	},
+	&cli.StringFlag{
+		Name: "ovnkube-node-mgmt-port-dp-resource-name",
+		Usage: "When provided, use this device plugin resource name to find the allocated resource as management port. " +
+			"The interface chosen from this resource will be renamed to ovn-k8s-mp0 " +
+			"and used to allow host network services and pods to access k8s pod and service networks. ",
+		Value:       OvnKubeNode.MgmtPortDPResourceName,
+		Destination: &cliConfig.OvnKubeNode.MgmtPortDPResourceName,
+	},
 	&cli.BoolFlag{
-		Name: "disable-ovn-iface-id-ver",
-		Usage: "if iface-id-ver option is not enabled in ovn, set this flag to True " +
-			"(depends on ovn version, minimal required is 21.09)",
-		Value:       OvnKubeNode.DisableOVNIfaceIdVer,
-		Destination: &cliConfig.OvnKubeNode.DisableOVNIfaceIdVer,
+		Name:        "disable-ovn-iface-id-ver",
+		Usage:       "Deprecated; iface-id-ver is always enabled",
+		Destination: &disableOVNIfaceIDVer,
 	},
 	&cli.StringFlag{
 		Name:        "ovn-xdp-sfrep",
@@ -1432,6 +1655,22 @@ var OvnKubeNodeFlags = []cli.Flag{
 	},
 }
 
+// ClusterManagerFlags captures ovnkube-cluster-manager specific configurations
+var ClusterManagerFlags = []cli.Flag{
+	&cli.StringFlag{
+		Name:        "cluster-manager-v4-transit-switch-subnet",
+		Usage:       "The v4 transit switch subnet used for assigning transit switch IPv4 addresses for interconnect",
+		Destination: &cliConfig.ClusterManager.V4TransitSwitchSubnet,
+		Value:       ClusterManager.V4TransitSwitchSubnet,
+	},
+	&cli.StringFlag{
+		Name:        "cluster-manager-v6-transit-switch-subnet",
+		Usage:       "The v6 transit switch subnet used for assigning transit switch IPv6 addresses for interconnect",
+		Destination: &cliConfig.ClusterManager.V6TransitSwitchSubnet,
+		Value:       ClusterManager.V6TransitSwitchSubnet,
+	},
+}
+
 // Flags are general command-line flags. Apps should add these flags to their
 // own urfave/cli flags and call InitConfig() early in the application.
 var Flags []cli.Flag
@@ -1448,10 +1687,12 @@ func GetFlags(customFlags []cli.Flag) []cli.Flag {
 	flags = append(flags, OvnSBFlags...)
 	flags = append(flags, OVNGatewayFlags...)
 	flags = append(flags, MasterHAFlags...)
+	flags = append(flags, ClusterMgrHAFlags...)
 	flags = append(flags, HybridOverlayFlags...)
 	flags = append(flags, MonitoringFlags...)
 	flags = append(flags, IPFIXFlags...)
 	flags = append(flags, OvnKubeNodeFlags...)
+	flags = append(flags, ClusterManagerFlags...)
 	flags = append(flags, customFlags...)
 	return flags
 }
@@ -1514,7 +1755,7 @@ func getOVSExternalID(exec kexec.Interface, name string) string {
 func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath string, defaults *Defaults) error {
 	// token adn ca.crt may be from files mounted in container.
 	saConfig := savedKubernetes
-	if data, err := ioutil.ReadFile(filepath.Join(saPath, kubeServiceAccountFileToken)); err == nil {
+	if data, err := os.ReadFile(filepath.Join(saPath, kubeServiceAccountFileToken)); err == nil {
 		saConfig.Token = string(data)
 		saConfig.TokenFile = filepath.Join(saPath, kubeServiceAccountFileToken)
 	}
@@ -1533,6 +1774,8 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 	envConfig := savedKubernetes
 	envVarsMap := map[string]string{
 		"Kubeconfig":           "KUBECONFIG",
+		"BootstrapKubeconfig":  "BOOTSTRAP_KUBECONFIG",
+		"CertDir":              "CERT_DIR",
 		"CACert":               "K8S_CACERT",
 		"APIServer":            "K8S_APISERVER",
 		"Token":                "K8S_TOKEN",
@@ -1579,7 +1822,7 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 	}
 
 	if Kubernetes.CACert != "" {
-		bytes, err := ioutil.ReadFile(Kubernetes.CACert)
+		bytes, err := os.ReadFile(Kubernetes.CACert)
 		if err != nil {
 			return err
 		}
@@ -1717,7 +1960,7 @@ func buildGatewayConfig(ctx *cli.Context, cli, file *config) error {
 	return nil
 }
 
-func completeGatewayConfig(allSubnets *configSubnets) error {
+func completeGatewayConfig(allSubnets *configSubnets, masqueradeIPs *MasqueradeIPsConfig) error {
 	// Validate v4 and v6 join subnets
 	v4IP, v4JoinCIDR, err := net.ParseCIDR(Gateway.V4JoinSubnet)
 	if err != nil || utilnet.IsIPv6(v4IP) {
@@ -1728,9 +1971,28 @@ func completeGatewayConfig(allSubnets *configSubnets) error {
 	if err != nil || !utilnet.IsIPv6(v6IP) {
 		return fmt.Errorf("invalid gateway v6 join subnet specified, subnet: %s: error: %v", Gateway.V6JoinSubnet, err)
 	}
-
 	allSubnets.append(configSubnetJoin, v4JoinCIDR)
 	allSubnets.append(configSubnetJoin, v6JoinCIDR)
+
+	//validate v4 and v6 masquerade subnets
+	v4MasqueradeIP, v4MasqueradeCIDR, err := net.ParseCIDR(Gateway.V4MasqueradeSubnet)
+	if err != nil || utilnet.IsIPv6(v4MasqueradeCIDR.IP) {
+		return fmt.Errorf("invalid gateway v4 masquerade subnet specified, subnet: %s: error: %v", Gateway.V4MasqueradeSubnet, err)
+	}
+	if err = allocateV4MasqueradeIPs(v4MasqueradeIP, masqueradeIPs); err != nil {
+		return fmt.Errorf("unable to allocate V4MasqueradeIPs: %s", err)
+	}
+
+	v6MasqueradeIP, v6MasqueradeCIDR, err := net.ParseCIDR(Gateway.V6MasqueradeSubnet)
+	if err != nil || !utilnet.IsIPv6(v6MasqueradeCIDR.IP) {
+		return fmt.Errorf("invalid gateway v6 masquerade subnet specified, subnet: %s: error: %v", Gateway.V6MasqueradeSubnet, err)
+	}
+	if err = allocateV6MasqueradeIPs(v6MasqueradeIP, masqueradeIPs); err != nil {
+		return fmt.Errorf("unable to allocate V6MasqueradeIPs: %s", err)
+	}
+
+	allSubnets.append(configSubnetMasquerade, v4MasqueradeCIDR)
+	allSubnets.append(configSubnetMasquerade, v6MasqueradeCIDR)
 
 	return nil
 }
@@ -1768,6 +2030,31 @@ func buildMasterHAConfig(ctx *cli.Context, cli, file *config) error {
 		return fmt.Errorf("invalid HA election renew deadline duration '%d'. "+
 			"It should be greater than HA election retry period '%d'",
 			MasterHA.ElectionRenewDeadline, MasterHA.ElectionRetryPeriod)
+	}
+	return nil
+}
+
+func buildClusterMgrHAConfig(ctx *cli.Context, cli, file *config) error {
+	// Copy config file values over default values
+	if err := overrideFields(&ClusterMgrHA, &file.ClusterMgrHA, &savedClusterMgrHA); err != nil {
+		return err
+	}
+
+	// And CLI overrides over config file and default values
+	if err := overrideFields(&ClusterMgrHA, &cli.ClusterMgrHA, &savedClusterMgrHA); err != nil {
+		return err
+	}
+
+	if ClusterMgrHA.ElectionLeaseDuration <= ClusterMgrHA.ElectionRenewDeadline {
+		return fmt.Errorf("invalid HA election lease duration '%d'. "+
+			"It should be greater than HA election renew deadline '%d'",
+			ClusterMgrHA.ElectionLeaseDuration, ClusterMgrHA.ElectionRenewDeadline)
+	}
+
+	if ClusterMgrHA.ElectionRenewDeadline <= ClusterMgrHA.ElectionRetryPeriod {
+		return fmt.Errorf("invalid HA election renew deadline duration '%d'. "+
+			"It should be greater than HA election retry period '%d'",
+			ClusterMgrHA.ElectionRenewDeadline, ClusterMgrHA.ElectionRetryPeriod)
 	}
 	return nil
 }
@@ -1841,12 +2128,43 @@ func completeHybridOverlayConfig(allSubnets *configSubnets) error {
 	}
 
 	var err error
-	HybridOverlay.ClusterSubnets, err = ParseClusterSubnetEntries(HybridOverlay.RawClusterSubnets, true)
+	HybridOverlay.ClusterSubnets, err = ParseClusterSubnetEntries(HybridOverlay.RawClusterSubnets)
 	if err != nil {
 		return fmt.Errorf("hybrid overlay cluster subnet invalid: %v", err)
 	}
 	for _, subnet := range HybridOverlay.ClusterSubnets {
 		allSubnets.append(configSubnetHybrid, subnet.CIDR)
+	}
+
+	return nil
+}
+
+func buildClusterManagerConfig(ctx *cli.Context, cli, file *config) error {
+	// Copy config file values over default values
+	if err := overrideFields(&ClusterManager, &file.ClusterManager, &savedClusterManager); err != nil {
+		return err
+	}
+
+	// And CLI overrides over config file and default values
+	if err := overrideFields(&ClusterManager, &cli.ClusterManager, &savedClusterManager); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// completeClusterManagerConfig completes the ClusterManager config by parsing raw values
+// into their final form.
+func completeClusterManagerConfig() error {
+	// Validate v4 and v6 transit switch subnets
+	v4IP, _, err := net.ParseCIDR(ClusterManager.V4TransitSwitchSubnet)
+	if err != nil || utilnet.IsIPv6(v4IP) {
+		return fmt.Errorf("invalid transit switch v4 subnet specified, subnet: %s: error: %v", ClusterManager.V4TransitSwitchSubnet, err)
+	}
+
+	v6IP, _, err := net.ParseCIDR(ClusterManager.V6TransitSwitchSubnet)
+	if err != nil || !utilnet.IsIPv6(v6IP) {
+		return fmt.Errorf("invalid transit switch v4 join subnet specified, subnet: %s: error: %v", ClusterManager.V6TransitSwitchSubnet, err)
 	}
 
 	return nil
@@ -1869,6 +2187,9 @@ func buildDefaultConfig(cli, file *config) error {
 		return fmt.Errorf("cluster subnet is required")
 	}
 
+	if Default.Zone == "" {
+		Default.Zone = types.OvnDefaultZone
+	}
 	return nil
 }
 
@@ -1876,10 +2197,11 @@ func buildDefaultConfig(cli, file *config) error {
 // into their final form.
 func completeDefaultConfig(allSubnets *configSubnets) error {
 	var err error
-	Default.ClusterSubnets, err = ParseClusterSubnetEntries(Default.RawClusterSubnets, true)
+	Default.ClusterSubnets, err = ParseClusterSubnetEntries(Default.RawClusterSubnets)
 	if err != nil {
 		return fmt.Errorf("cluster subnet invalid: %v", err)
 	}
+	SortClusterSubnetEntries(Default.ClusterSubnets)
 	for _, subnet := range Default.ClusterSubnets {
 		allSubnets.append(configSubnetCluster, subnet.CIDR)
 	}
@@ -1946,6 +2268,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		MasterHA:             savedMasterHA,
 		HybridOverlay:        savedHybridOverlay,
 		OvnKubeNode:          savedOvnKubeNode,
+		ClusterManager:       savedClusterManager,
 	}
 
 	configFile, configFileIsDefault = getConfigFilePath(ctx)
@@ -2043,6 +2366,10 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
+	if err = buildClusterMgrHAConfig(ctx, &cliConfig, &cfg); err != nil {
+		return "", err
+	}
+
 	if err = buildMonitoringConfig(ctx, &cliConfig, &cfg); err != nil {
 		return "", err
 	}
@@ -2056,6 +2383,10 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	}
 
 	if err = buildOvnKubeNodeConfig(ctx, &cliConfig, &cfg); err != nil {
+		return "", err
+	}
+
+	if err = buildClusterManagerConfig(ctx, &cliConfig, &cfg); err != nil {
 		return "", err
 	}
 
@@ -2088,6 +2419,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	klog.V(5).Infof("Hybrid Overlay config: %+v", HybridOverlay)
 	klog.V(5).Infof("Ovnkube Node config: %+v", OvnKubeNode)
 	klog.V(5).Infof("Ovnkube Feature config: %+v", OVNKubernetesFeature)
+	klog.V(5).Infof("Ovnkube Cluster Manager config: %+v", ClusterManager)
 
 	return retConfigFile, nil
 }
@@ -2101,13 +2433,18 @@ func completeConfig() error {
 	if err := completeDefaultConfig(allSubnets); err != nil {
 		return err
 	}
-	if err := completeGatewayConfig(allSubnets); err != nil {
+
+	if err := completeGatewayConfig(allSubnets, &Gateway.MasqueradeIPs); err != nil {
 		return err
 	}
 	if err := completeMonitoringConfig(); err != nil {
 		return err
 	}
 	if err := completeHybridOverlayConfig(allSubnets); err != nil {
+		return err
+	}
+
+	if err := completeClusterManagerConfig(); err != nil {
 		return err
 	}
 
@@ -2354,11 +2691,24 @@ func buildOvnKubeNodeConfig(ctx *cli.Context, cli, file *config) error {
 	if OvnKubeNode.Mode != types.NodeModeFull && HybridOverlay.Enabled {
 		return fmt.Errorf("hybrid overlay is not supported with ovnkube-node mode %s", OvnKubeNode.Mode)
 	}
-	// when DPU is used, management port is backed by a VF. get management port VF information
-	if OvnKubeNode.Mode == types.NodeModeDPU || OvnKubeNode.Mode == types.NodeModeDPUHost {
-		if OvnKubeNode.MgmtPortNetdev == "" {
-			return fmt.Errorf("ovnkube-node-mgmt-port-netdev must be provided")
-		}
+
+	// Warn the user if both MgmtPortNetdev and MgmtPortDPResourceName are specified since they
+	// configure the management port.
+	if OvnKubeNode.MgmtPortNetdev != "" && OvnKubeNode.MgmtPortDPResourceName != "" {
+		klog.Warningf("ovnkube-node-mgmt-port-netdev (%s) and ovnkube-node-mgmt-port-dp-resource-name (%s) "+
+			"both specified. The provided netdev in ovnkube-node-mgmt-port-netdev will be overriden by a netdev "+
+			"chosen by the resource provided by ovnkube-node-mgmt-port-dp-resource-name.",
+			OvnKubeNode.MgmtPortNetdev, OvnKubeNode.MgmtPortDPResourceName)
+	}
+
+	// when DPU is used, management port is always backed by a representor. On the
+	// host side, it needs to be provided through --ovnkube-node-mgmt-port-netdev.
+	// On the DPU, it is derrived from the annotation exposed on the host side.
+	if OvnKubeNode.Mode == types.NodeModeDPU && (OvnKubeNode.MgmtPortDPResourceName != "") {
+		return fmt.Errorf("ovnkube-node-mgmt-port-netdev may be provided, and ovnkube-node-mgmt-port-dp-resource-name must not be provided")
+	}
+	if OvnKubeNode.Mode == types.NodeModeDPUHost && OvnKubeNode.MgmtPortNetdev == "" && OvnKubeNode.MgmtPortDPResourceName == "" {
+		return fmt.Errorf("ovnkube-node-mgmt-port-netdev or ovnkube-node-mgmt-port-dp-resource-name must be provided")
 	}
 
 	// if we are running on the DPU, determine if this DPU is primary or not

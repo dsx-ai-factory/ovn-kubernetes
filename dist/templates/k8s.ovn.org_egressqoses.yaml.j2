@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.8.0
+    controller-gen.kubebuilder.io/version: v0.11.3
   creationTimestamp: null
   name: egressqoses.k8s.ovn.org
 spec:
@@ -57,6 +57,7 @@ spec:
                         traffic heading to this CIDR will be marked with the DSCP
                         value. This field is optional, and in case it is not set the
                         rule is applied to all egress traffic regardless of the destination.
+                      format: cidr
                       type: string
                     podSelector:
                       description: PodSelector applies the QoS rule only to the pods
@@ -105,6 +106,7 @@ spec:
                             only "value". The requirements are ANDed.
                           type: object
                       type: object
+                      x-kubernetes-map-type: atomic
                   required:
                   - dscp
                   type: object
@@ -120,9 +122,3 @@ spec:
     storage: true
     subresources:
       status: {}
-status:
-  acceptedNames:
-    kind: ""
-    plural: ""
-  conditions: []
-  storedVersions: []

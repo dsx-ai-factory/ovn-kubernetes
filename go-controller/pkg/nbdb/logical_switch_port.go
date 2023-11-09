@@ -5,6 +5,8 @@ package nbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const LogicalSwitchPortTable = "Logical_Switch_Port"
+
 // LogicalSwitchPort defines an object in Logical_Switch_Port table
 type LogicalSwitchPort struct {
 	UUID             string            `ovsdb:"_uuid"`
@@ -24,6 +26,14 @@ type LogicalSwitchPort struct {
 	TagRequest       *int              `ovsdb:"tag_request"`
 	Type             string            `ovsdb:"type"`
 	Up               *bool             `ovsdb:"up"`
+}
+
+func (a *LogicalSwitchPort) GetUUID() string {
+	return a.UUID
+}
+
+func (a *LogicalSwitchPort) GetAddresses() []string {
+	return a.Addresses
 }
 
 func copyLogicalSwitchPortAddresses(a []string) []string {
@@ -50,6 +60,10 @@ func equalLogicalSwitchPortAddresses(a, b []string) bool {
 	return true
 }
 
+func (a *LogicalSwitchPort) GetDhcpv4Options() *string {
+	return a.Dhcpv4Options
+}
+
 func copyLogicalSwitchPortDhcpv4Options(a *string) *string {
 	if a == nil {
 		return nil
@@ -66,6 +80,10 @@ func equalLogicalSwitchPortDhcpv4Options(a, b *string) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *LogicalSwitchPort) GetDhcpv6Options() *string {
+	return a.Dhcpv6Options
 }
 
 func copyLogicalSwitchPortDhcpv6Options(a *string) *string {
@@ -86,6 +104,10 @@ func equalLogicalSwitchPortDhcpv6Options(a, b *string) bool {
 	return *a == *b
 }
 
+func (a *LogicalSwitchPort) GetDynamicAddresses() *string {
+	return a.DynamicAddresses
+}
+
 func copyLogicalSwitchPortDynamicAddresses(a *string) *string {
 	if a == nil {
 		return nil
@@ -104,6 +126,10 @@ func equalLogicalSwitchPortDynamicAddresses(a, b *string) bool {
 	return *a == *b
 }
 
+func (a *LogicalSwitchPort) GetEnabled() *bool {
+	return a.Enabled
+}
+
 func copyLogicalSwitchPortEnabled(a *bool) *bool {
 	if a == nil {
 		return nil
@@ -120,6 +146,10 @@ func equalLogicalSwitchPortEnabled(a, b *bool) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *LogicalSwitchPort) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
 }
 
 func copyLogicalSwitchPortExternalIDs(a map[string]string) map[string]string {
@@ -146,6 +176,10 @@ func equalLogicalSwitchPortExternalIDs(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *LogicalSwitchPort) GetHaChassisGroup() *string {
+	return a.HaChassisGroup
 }
 
 func copyLogicalSwitchPortHaChassisGroup(a *string) *string {
@@ -228,6 +262,10 @@ func equalLogicalSwitchPortOptions(a, b map[string]string) bool {
 	return true
 }
 
+func (a *LogicalSwitchPort) GetParentName() *string {
+	return a.ParentName
+}
+
 func copyLogicalSwitchPortParentName(a *string) *string {
 	if a == nil {
 		return nil
@@ -244,6 +282,10 @@ func equalLogicalSwitchPortParentName(a, b *string) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *LogicalSwitchPort) GetPortSecurity() []string {
+	return a.PortSecurity
 }
 
 func copyLogicalSwitchPortPortSecurity(a []string) []string {
@@ -270,6 +312,10 @@ func equalLogicalSwitchPortPortSecurity(a, b []string) bool {
 	return true
 }
 
+func (a *LogicalSwitchPort) GetTag() *int {
+	return a.Tag
+}
+
 func copyLogicalSwitchPortTag(a *int) *int {
 	if a == nil {
 		return nil
@@ -288,6 +334,10 @@ func equalLogicalSwitchPortTag(a, b *int) bool {
 	return *a == *b
 }
 
+func (a *LogicalSwitchPort) GetTagRequest() *int {
+	return a.TagRequest
+}
+
 func copyLogicalSwitchPortTagRequest(a *int) *int {
 	if a == nil {
 		return nil
@@ -304,6 +354,14 @@ func equalLogicalSwitchPortTagRequest(a, b *int) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *LogicalSwitchPort) GetType() string {
+	return a.Type
+}
+
+func (a *LogicalSwitchPort) GetUp() *bool {
+	return a.Up
 }
 
 func copyLogicalSwitchPortUp(a *bool) *bool {

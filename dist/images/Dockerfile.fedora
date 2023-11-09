@@ -9,13 +9,13 @@
 # are built locally and included in the image (instead of the rpm)
 #
 
-FROM fedora:35
+FROM fedora:37
 
 USER root
 
 ENV PYTHONDONTWRITEBYTECODE yes
 
-ARG ovnver=ovn-22.06.0-2.fc35
+ARG ovnver=ovn-23.06.0-0.fc37
 # Automatically populated when using docker buildx
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
@@ -24,13 +24,15 @@ RUN echo "Running on $BUILDPLATFORM, building for $TARGETPLATFORM"
 
 # install needed rpms - openvswitch must be 2.10.4 or higher
 RUN INSTALL_PKGS=" \
-	python3-pyyaml bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
-	libpcap hostname kubernetes-client \
+	python3-pip python3-pyyaml bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
+	libpcap hostname kubernetes-client util-linux \
         ovn ovn-central ovn-host python3-openvswitch tcpdump openvswitch-test python3-pyOpenSSL \
 	iptables iproute iputils strace socat koji \
+        libreswan openvswitch-ipsec \
         " && \
 	dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
 	dnf clean all && rm -rf /var/cache/dnf/*
+RUN ln -s /usr/bin/python3 /usr/libexec/platform-python
 
 RUN mkdir -p /var/run/openvswitch
 
@@ -42,7 +44,7 @@ RUN rpm -Uhv --nodeps --force *.rpm
 # Built in ../../go_controller, then the binaries are copied here.
 # put things where they are in the pkg
 RUN mkdir -p /usr/libexec/cni/
-COPY ovnkube ovn-kube-util ovndbchecker /usr/bin/
+COPY ovnkube ovn-kube-util ovndbchecker hybrid-overlay-node ovnkube-identity /usr/bin/
 COPY ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
 
 # ovnkube.sh is the entry point. This script examines environment

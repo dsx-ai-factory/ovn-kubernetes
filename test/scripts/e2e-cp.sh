@@ -59,6 +59,61 @@ if [ "$OVN_DISABLE_SNAT_MULTIPLE_GWS" == false ]; then
   SKIPPED_TESTS+="e2e multiple external gateway stale conntrack entry deletion validation"
 fi
 
+if [ "$OVN_GATEWAY_MODE" == "shared" ]; then
+  if [ "$SKIPPED_TESTS" != "" ]; then
+    SKIPPED_TESTS+="|"
+  fi
+  SKIPPED_TESTS+="Should ensure load balancer service|LGW"
+fi
+
+# skipping the egress ip legacy health check test because it requires two
+# sequenced rollouts of both ovnkube-node and ovnkube-master that take a lot of
+# time.
+SKIPPED_TESTS+="${SKIPPED_TESTS:+|}disabling egress nodes impeding Legacy health check"
+
+if [ "$ENABLE_MULTI_NET" != "true" ]; then
+  if [ "$SKIPPED_TESTS" != "" ]; then
+    SKIPPED_TESTS+="|"
+  fi
+  SKIPPED_TESTS+="Multi Homing"
+fi
+
+# Only run Node IP address migration tests if they are explicitly requested
+IP_MIGRATION_TESTS="Node IP address migration"
+if [ "${WHAT}" != "${IP_MIGRATION_TESTS}" ]; then
+  if [ "$SKIPPED_TESTS" != "" ]; then
+	SKIPPED_TESTS+="|"
+  fi
+  SKIPPED_TESTS+="Node IP address migration"
+fi
+
+# Only run Multi node zones interconnect tests if they are explicitly requested
+MULTI_NODE_ZONES_TESTS="Multi node zones interconnect"
+if [ "${WHAT}" != "${MULTI_NODE_ZONES_TESTS}" ]; then
+  if [ "$SKIPPED_TESTS" != "" ]; then
+	SKIPPED_TESTS+="|"
+  fi
+  SKIPPED_TESTS+="Multi node zones interconnect"
+fi
+
+# Only run external gateway tests if they are explicitly requested
+EXTERNAL_GATEWAY_TESTS="External Gateway"
+if [[ "${WHAT}" != "${EXTERNAL_GATEWAY_TESTS}"* ]]; then
+  if [ "$SKIPPED_TESTS" != "" ]; then
+	SKIPPED_TESTS+="|"
+  fi
+  SKIPPED_TESTS+="External Gateway"
+fi
+
+# Only run kubevirt virtual machines tests if they are explicitly requested
+KV_LIVE_MIGRATION_TESTS="Kubevirt Virtual Machines"
+if [ "${WHAT}" != "${KV_LIVE_MIGRATION_TESTS}" ]; then
+  if [ "$SKIPPED_TESTS" != "" ]; then
+	SKIPPED_TESTS+="|"
+  fi
+  SKIPPED_TESTS+=$KV_LIVE_MIGRATION_TESTS
+fi
+
 # setting these is required to make RuntimeClass tests work ... :/
 export KUBE_CONTAINER_RUNTIME=remote
 export KUBE_CONTAINER_RUNTIME_ENDPOINT=unix:///run/containerd/containerd.sock
@@ -73,15 +128,14 @@ FOCUS=$(echo ${@:1} | sed 's/ /\\s/g')
 pushd e2e
 
 go mod download
-go test -timeout=0 -v . \
+go test -test.timeout 180m -v . \
         -ginkgo.v \
         -ginkgo.focus ${FOCUS:-.} \
         -ginkgo.timeout 3h \
-        -ginkgo.flakeAttempts ${FLAKE_ATTEMPTS:-2} \
+        -ginkgo.flake-attempts ${FLAKE_ATTEMPTS:-2} \
         -ginkgo.skip="${SKIPPED_TESTS}" \
         -provider skeleton \
         -kubeconfig ${KUBECONFIG} \
-        ${CONTAINER_RUNTIME:+"--container-runtime=${CONTAINER_RUNTIME}"} \
         ${NUM_NODES:+"--num-nodes=${NUM_NODES}"} \
         ${E2E_REPORT_DIR:+"--report-dir=${E2E_REPORT_DIR}"} \
         ${E2E_REPORT_PREFIX:+"--report-prefix=${E2E_REPORT_PREFIX}"}

@@ -6,6 +6,9 @@ import (
 
 	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	adminpolicybasedrouteclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
+	egressserviceapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
+	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -18,11 +21,11 @@ import (
 var fakeNodeName = "node"
 
 type FakeOVNNode struct {
-	node       *OvnNode
+	nc         *DefaultNodeNetworkController
 	watcher    factory.NodeWatchFactory
 	stopChan   chan struct{}
 	recorder   *record.FakeRecorder
-	fakeClient *util.OVNClientset
+	fakeClient *util.OVNNodeClientset
 	fakeExec   *ovntest.FakeExec
 	wg         *sync.WaitGroup
 }
@@ -34,22 +37,29 @@ func NewFakeOVNNode(fexec *ovntest.FakeExec) *FakeOVNNode {
 	return &FakeOVNNode{
 		fakeExec: fexec,
 		recorder: record.NewFakeRecorder(1),
-		wg:       &sync.WaitGroup{},
 	}
 }
 
 func (o *FakeOVNNode) start(ctx *cli.Context, objects ...runtime.Object) {
+	egressServiceObjects := []runtime.Object{}
 	v1Objects := []runtime.Object{}
 	for _, object := range objects {
-		v1Objects = append(v1Objects, object)
+		if _, isEgressServiceObject := object.(*egressserviceapi.EgressServiceList); isEgressServiceObject {
+			egressServiceObjects = append(egressServiceObjects, object)
+		} else {
+			v1Objects = append(v1Objects, object)
+		}
 	}
+
 	_, err := config.InitConfig(ctx, o.fakeExec, nil)
 	Expect(err).NotTo(HaveOccurred())
 
-	o.fakeClient = &util.OVNClientset{
-		KubeClient: fake.NewSimpleClientset(v1Objects...),
+	o.fakeClient = &util.OVNNodeClientset{
+		KubeClient:             fake.NewSimpleClientset(v1Objects...),
+		EgressServiceClient:    egressservicefake.NewSimpleClientset(egressServiceObjects...),
+		AdminPolicyRouteClient: adminpolicybasedrouteclient.NewSimpleClientset(),
 	}
-	o.init()
+	o.init() // initializes the node
 }
 
 func (o *FakeOVNNode) restart() {
@@ -66,11 +76,14 @@ func (o *FakeOVNNode) init() {
 	var err error
 
 	o.stopChan = make(chan struct{})
+	o.wg = &sync.WaitGroup{}
 
-	fakeNodeNames := []string{fakeNodeName}
-	o.watcher, err = factory.NewNodeWatchFactory(o.fakeClient, fakeNodeNames)
+	o.watcher, err = factory.NewNodeWatchFactory(o.fakeClient, fakeNodeName)
 	Expect(err).NotTo(HaveOccurred())
 
-	o.node = NewNode(o.fakeClient, o.watcher, fakeNodeName, "", o.stopChan, o.recorder, o.wg)
-	o.node.Start(context.TODO(), o.wg)
+	cnnci := NewCommonNodeNetworkControllerInfo(o.fakeClient.KubeClient, o.fakeClient.AdminPolicyRouteClient, o.watcher, o.recorder, fakeNodeName, "", []string{})
+	o.nc = newDefaultNodeNetworkController(cnnci, &util.DefaultNetInfo{}, o.stopChan, o.wg)
+	// watcher is started by nodeNetworkControllerManager, not by nodeNetworkcontroller, so start it here.
+	o.watcher.Start()
+	o.nc.Start(context.TODO())
 }

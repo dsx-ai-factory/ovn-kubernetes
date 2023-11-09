@@ -26,7 +26,8 @@ For OVN kubernetes KIND deployment, use the `kind.sh` script.
 First Download and build the OVN-Kubernetes repo: 
 
 ```
-$ go get github.com/ovn-org/ovn-kubernetes; cd GOPATH/src/github.com/ovn-org/ovn-kubernetes
+$ go env -w GO111MODULE=auto
+$ go get github.com/ovn-org/ovn-kubernetes; cd $(go env GOPATH)/src/github.com/ovn-org/ovn-kubernetes
 ```
 
 The `kind.sh` script builds OVN-Kubernetes into a container image. To verify
@@ -70,7 +71,7 @@ kube-system          kube-controller-manager-ovn-control-plane   1/1     Running
 kube-system          kube-scheduler-ovn-control-plane            1/1     Running   0          5h11m
 local-path-storage   local-path-provisioner-7745554f7f-9r8dz     1/1     Running   0          5h13m
 ovn-kubernetes       ovnkube-db-5588bd699c-kb8h7                 2/2     Running   0          5h11m
-ovn-kubernetes       ovnkube-master-6f44d456df-bv2x8             3/3     Running   0          5h11m
+ovn-kubernetes       ovnkube-master-6f44d456df-bv2x8             2/2     Running   0          5h11m
 ovn-kubernetes       ovnkube-node-2t6m2                          3/3     Running   0          5h11m
 ovn-kubernetes       ovnkube-node-hhsmk                          3/3     Running   0          5h11m
 ovn-kubernetes       ovnkube-node-xvqh4                          3/3     Running   0          5h11m
@@ -84,7 +85,7 @@ configuration options when deploying. Use `./kind.sh -h` to see the latest optio
 usage: kind.sh [[[-cf |--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]
                  [-ho |--hybrid-enabled] [-ii|--install-ingress] [-n4|--no-ipv4]
                  [-i6 |--ipv6] [-wk|--num-workers <num>] [-ds|--disable-snat-multiple-gws]
-                 [-dp |--disable-pkt-mtu-check]
+                 [-dp |--disable-pkt-mtu-check] [-df|--disable-forwarding]
                  [-nf |--netflow-targets <targets>] [sf|--sflow-targets <targets>]
                  [-if |--ipfix-targets <targets>] [-ifs|--ipfix-sampling <num>]
                  [-ifm|--ipfix-cache-max-flows <num>] [-ifa|--ipfix-cache-active-timeout <num>]
@@ -92,7 +93,7 @@ usage: kind.sh [[[-cf |--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]
                  [-nl |--node-loglevel <num>] [-ml|--master-loglevel <num>]
                  [-dbl|--dbchecker-loglevel <num>] [-ndl|--ovn-loglevel-northd <loglevel>]
                  [-nbl|--ovn-loglevel-nb <loglevel>] [-sbl|--ovn-loglevel-sb <loglevel>]
-                 [-cl |--ovn-loglevel-controller <loglevel>]
+                 [-cl |--ovn-loglevel-controller <loglevel>] [-me|--multicast-enabled]
                  [-ep |--experimental-provider <name>] |
                  [-eb |--egress-gw-separate-bridge]
                  [-h]]
@@ -102,9 +103,12 @@ usage: kind.sh [[[-cf |--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]
 -kt  | --keep-taint                 Do not remove taint components.
                                     DEFAULT: Remove taint components.
 -ha  | --ha-enabled                 Enable high availability. DEFAULT: HA Disabled.
+-me  | --multicast-enabled          Enable multicast. DEFAULT: Disabled.
+-scm | --separate-cluster-manager   Separate cluster manager from ovnkube-master and run as a separate container within ovnkube-master deployment.
 -ho  | --hybrid-enabled             Enable hybrid overlay. DEFAULT: Disabled.
 -ds  | --disable-snat-multiple-gws  Disable SNAT for multiple gws. DEFAULT: Disabled.
 -dp  | --disable-pkt-mtu-check      Disable checking packet size greater than MTU. Default: Disabled
+-df  | --disable-forwarding         Disable forwarding on OVNK controlled interfaces. Default: Enabled
 -nf  | --netflow-targets            Comma delimited list of ip:port or :port (using node IP) netflow collectors. DEFAULT: Disabled.
 -sf  | --sflow-targets              Comma delimited list of ip:port or :port (using node IP) sflow collectors. DEFAULT: Disabled.
 -if  | --ipfix-targets              Comma delimited list of ip:port or :port (using node IP) ipfix collectors. DEFAULT: Disabled.
@@ -133,7 +137,9 @@ usage: kind.sh [[[-cf |--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]
 -cl  | --ovn-loglevel-controller    Log config for ovn-controller DEFAULT: '-vconsole:info'.
 -ep  | --experimental-provider      Use an experimental OCI provider such as podman, instead of docker. DEFAULT: Disabled.
 -eb  | --egress-gw-separate-bridge  The external gateway traffic uses a separate bridge.
+-lr  |--local-kind-registry         Will start and connect a kind local registry to push/retrieve images
 --delete                      	    Delete current cluster
+--deploy                      	    Deploy ovn kubernetes without restarting kind
 ```
 
 As seen above, if you do not specify any options the script will assume the default values.
@@ -350,12 +356,12 @@ sudo ln -s /usr/bin/kubectl-v1.17.3 /usr/bin/kubectl
 Download and install latest version of `kubectl`:
 
 ```
-$ K8S_VERSION=v1.24.0
+$ K8S_VERSION=v1.26.0
 $ curl -LO https://storage.googleapis.com/kubernetes-release/release/$K8S_VERSION/bin/linux/amd64/kubectl
 $ chmod +x kubectl
-$ sudo mv kubectl /usr/bin/kubectl-v1.18.0
+$ sudo mv kubectl /usr/bin/kubectl-$K8S_VERSION
 $ sudo rm /usr/bin/kubectl
-$ sudo ln -s /usr/bin/kubectl-v1.18.0 /usr/bin/kubectl
+$ sudo ln -s /usr/bin/kubectl-$K8S_VERSION /usr/bin/kubectl
 $ kubectl version --client
 Client Version: version.Info{Major:"1", Minor:"18", GitVersion:"v1.18.0", GitCommit:"9e991415386e4cf155a24b1da15becaa390438d8", GitTreeState:"clean", BuildDate:"2020-03-25T14:58:59Z", GoVersion:"go1.13.8", Compiler:"gc", Platform:"linux/amd64"}
 ```
@@ -405,7 +411,7 @@ $ cd ../dist/images/
 $ make fedora
 
 $ cd ../../contrib/
-$ KIND_IPV4_SUPPORT=true KIND_IPV6_SUPPORT=true K8S_VERSION=v1.24.0 ./kind.sh
+$ KIND_IPV4_SUPPORT=true KIND_IPV6_SUPPORT=true K8S_VERSION=v1.26.0 ./kind.sh
 ```
 
 Once `kind.sh` completes, setup kube config file:
@@ -431,7 +437,32 @@ one (or both of) the following variables:
 
 ```
 $ cd ../../contrib/
-$ KIND_IMAGE=example.com/kindest/node K8S_VERSION=v1.24.0 ./kind.sh
+$ KIND_IMAGE=example.com/kindest/node K8S_VERSION=v1.26.0 ./kind.sh
+```
+
+### Using kind local registry to deploy non ovn-k containers
+
+A local registry can be made available to the cluster if started with:
+```
+./kind.sh --local-kind-registry
+```
+This is useful if you want to make your own local images available to the 
+cluster. These images can be pushed, fetched or used 
+in manifests using the prefix `localhost:5000`.
+
+### Loading ovn-kubernetes changes without restarting kind
+
+Sometimes it is useful to update ovn-kubernetes without redeploying the whole 
+cluster all over again. For example, when testing the update itself. 
+This can be achieve with the "--deploy" flag:
+
+```bash
+# Default options will use kind mechanism to push images directly to the
+./kind.sh --deploy
+
+# Using a local registry is an alternative to deploy ovn-kubernetes updates 
+# while also being useful to deploy other local images
+./kind.sh --deploy --local-kind-registry
 ```
 
 ### Current Status
@@ -460,7 +491,7 @@ kube-system        kube-controller-manager-ovn-control-plane 1/1   Running  0   
 kube-system        kube-scheduler-ovn-control-plane          1/1   Running  0        2m56s  172.17.0.2  ovn-control-plane
 local-path-storage local-path-provisioner-774f7f8fdb-msmd2   0/1   Pending  0        2m45s  <none>      <none>
 ovn-kubernetes     ovnkube-db-cf4cc89b7-8d4xq                2/2   Running  0        107s   172.17.0.2  ovn-control-plane
-ovn-kubernetes     ovnkube-master-87fb56d6d-7qmnb            3/3   Running  0        107s   172.17.0.2  ovn-control-plane
+ovn-kubernetes     ovnkube-master-87fb56d6d-7qmnb            2/2   Running  0        107s   172.17.0.2  ovn-control-plane
 ovn-kubernetes     ovnkube-node-278l9                        2/3   Running  0        107s   172.17.0.3  ovn-worker2
 ovn-kubernetes     ovnkube-node-bm7v6                        2/3   Running  0        107s   172.17.0.2  ovn-control-plane
 ovn-kubernetes     ovnkube-node-p4k4t                        2/3   Running  0        107s   172.17.0.4  ovn-worker

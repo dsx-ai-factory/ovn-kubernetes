@@ -11,6 +11,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -19,7 +20,8 @@ import (
 )
 
 func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string, gwIPs []*net.IPNet,
-	nodeAnnotator kube.Annotator, cfg *managementPortConfig, kube kube.Interface, watchFactory factory.NodeWatchFactory) (*gateway, error) {
+	nodeAnnotator kube.Annotator, cfg *managementPortConfig, kube kube.Interface, watchFactory factory.NodeWatchFactory,
+	routeManager *routemanager.Controller) (*gateway, error) {
 	klog.Info("Creating new local gateway")
 	gw := &gateway{}
 
@@ -45,14 +47,6 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 		nodeName, gwIntf, egressGWIntf, gwNextHops, gwIPs, nodeAnnotator)
 	if err != nil {
 		return nil, err
-	}
-
-	if config.OvnKubeNode.Mode == types.NodeModeFull {
-		// add masquerade subnet route to avoid zeroconf routes
-		err = addMasqueradeRoute(gwBridge.bridgeName, gwNextHops)
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	if exGwBridge != nil {
@@ -84,21 +78,40 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 			if err != nil {
 				return err
 			}
+			if config.Gateway.DisableForwarding {
+				if err := initExternalBridgeDropForwardingRules(exGwBridge.bridgeName); err != nil {
+					return fmt.Errorf("failed to add forwarding block rules for bridge %s: err %v", exGwBridge.bridgeName, err)
+				}
+			}
 		}
 
-		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory)
+		gw.nodeIPManager, err = newAddressManager(nodeName, kube, cfg, watchFactory, gwBridge)
+		if err != nil {
+			return fmt.Errorf("failed to initialize address manager: %v", err)
+		}
 
-		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, gw.nodeIPManager.ListAddresses())
+		if err := setNodeMasqueradeIPOnExtBridge(gwBridge.bridgeName); err != nil {
+			return fmt.Errorf("failed to set the node masquerade IP on the ext bridge %s: %v", gwBridge.bridgeName, err)
+		}
+
+		if err := addMasqueradeRoute(routeManager, gwBridge.bridgeName, nodeName, gwIPs, watchFactory); err != nil {
+			return fmt.Errorf("failed to set the node masquerade route to OVN: %v", err)
+		}
+
+		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, hostSubnets, gw.nodeIPManager.ListAddresses())
 		if err != nil {
 			return err
 		}
 		// resync flows on IP change
 		gw.nodeIPManager.OnChanged = func() {
 			klog.V(5).Info("Node addresses changed, re-syncing bridge flows")
-			if err := gw.openflowManager.updateBridgeFlowCache(gw.nodeIPManager.ListAddresses()); err != nil {
+			if err := gw.openflowManager.updateBridgeFlowCache(hostSubnets, gw.nodeIPManager.ListAddresses()); err != nil {
 				// very unlikely - somehow node has lost its IP address
 				klog.Errorf("Failed to re-generate gateway flows after address change: %v", err)
 			}
+			// update gateway IPs for service openflows programmed by nodePortWatcher interface
+			npw, _ := gw.nodePortWatcher.(*nodePortWatcher)
+			npw.updateGatewayIPs(gw.nodeIPManager)
 			gw.openflowManager.requestFlowSync()
 		}
 
@@ -109,7 +122,7 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 					return err
 				}
 			}
-			gw.nodePortWatcher, err = newNodePortWatcher(gwBridge.patchPort, gwBridge.bridgeName, gwBridge.uplinkName, gwBridge.ips, gw.openflowManager, gw.nodeIPManager, watchFactory)
+			gw.nodePortWatcher, err = newNodePortWatcher(gwBridge, gw.openflowManager, gw.nodeIPManager, watchFactory)
 			if err != nil {
 				return err
 			}
@@ -117,9 +130,14 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 			// no service OpenFlows, request to sync flows now.
 			gw.openflowManager.requestFlowSync()
 		}
+
+		if err := addHostMACBindings(gwBridge.bridgeName); err != nil {
+			return fmt.Errorf("failed to add MAC bindings for service routing")
+		}
+
 		return nil
 	}
-
+	gw.watchFactory = watchFactory.(*factory.WatchFactory)
 	klog.Info("Local Gateway Creation Complete")
 	return gw, nil
 }

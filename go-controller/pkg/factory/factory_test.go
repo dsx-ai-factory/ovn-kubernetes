@@ -20,6 +20,9 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/utils/pointer"
 
+	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
+	anpapifake "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned/fake"
+
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -28,11 +31,11 @@ import (
 	egressip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 
-	networkattachmentdefinitionapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	networkattachmentdefinitionfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
-
 	egressqos "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
 	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
+
+	egressservice "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
+	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
 
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 	ocpconfigapi "github.com/openshift/api/config/v1"
@@ -132,7 +135,7 @@ func newEgressFirewall(name, namespace string) *egressfirewall.EgressFirewall {
 	return &egressfirewall.EgressFirewall{
 		ObjectMeta: newObjectMeta(name, namespace),
 		Spec: egressfirewall.EgressFirewallSpec{
-			[]egressfirewall.EgressFirewallRule{
+			Egress: []egressfirewall.EgressFirewallRule{
 				{
 					Type: egressfirewall.EgressFirewallRuleAllow,
 					To: egressfirewall.EgressFirewallDestination{
@@ -156,15 +159,6 @@ func newEgressIP(name, namespace string) *egressip.EgressIP {
 
 }
 
-func newNetworkAttchDef(name, namespace string) *networkattachmentdefinitionapi.NetworkAttachmentDefinition {
-	return &networkattachmentdefinitionapi.NetworkAttachmentDefinition{
-		ObjectMeta: newObjectMeta(name, namespace),
-		Spec: networkattachmentdefinitionapi.NetworkAttachmentDefinitionSpec{
-			Config: "{\"cniVersion\": \"0.3.0\", \"type\": \"macvlan\"}",
-		},
-	}
-}
-
 func newCloudPrivateIPConfig(name string) *ocpcloudnetworkapi.CloudPrivateIPConfig {
 	return &ocpcloudnetworkapi.CloudPrivateIPConfig{
 		ObjectMeta: newObjectMeta(name, ""),
@@ -183,6 +177,43 @@ func newEgressQoS(name, namespace string) *egressqos.EgressQoS {
 					DSCP:    50,
 					DstCIDR: pointer.String("1.2.3.4/32"),
 				},
+			},
+		},
+	}
+}
+
+func newEgressService(name, namespace string) *egressservice.EgressService {
+	return &egressservice.EgressService{
+		ObjectMeta: newObjectMeta(name, namespace),
+		Spec: egressservice.EgressServiceSpec{
+			SourceIPBy: egressservice.SourceIPLoadBalancer,
+			NodeSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"kubernetes.io/hostname": "node",
+				},
+			},
+		},
+	}
+}
+
+func newAdminNetworkPolicy(name string, priority int32) *anpapi.AdminNetworkPolicy {
+	return &anpapi.AdminNetworkPolicy{
+		ObjectMeta: newObjectMeta(name, ""),
+		Spec: anpapi.AdminNetworkPolicySpec{
+			Priority: priority,
+			Subject: anpapi.AdminNetworkPolicySubject{
+				Namespaces: &metav1.LabelSelector{},
+			},
+		},
+	}
+}
+
+func newBaselineAdminNetworkPolicy(name string) *anpapi.BaselineAdminNetworkPolicy {
+	return &anpapi.BaselineAdminNetworkPolicy{
+		ObjectMeta: newObjectMeta(name, ""),
+		Spec: anpapi.BaselineAdminNetworkPolicySpec{
+			Subject: anpapi.AdminNetworkPolicySubject{
+				Namespaces: &metav1.LabelSelector{},
 			},
 		},
 	}
@@ -209,13 +240,6 @@ func egressIPObjSetup(c *egressipfake.Clientset, objType string, listFn func(cor
 	return w
 }
 
-func networkAttchDefObjSetup(c *networkattachmentdefinitionfake.Clientset, objType string, listFn func(core.Action) (bool, runtime.Object, error)) *watch.FakeWatcher {
-	w := watch.NewFake()
-	c.AddWatchReactor(objType, core.DefaultWatchReactor(w, nil))
-	c.AddReactor("list", objType, listFn)
-	return w
-}
-
 func cloudPrivateIPConfigObjSetup(c *ocpcloudnetworkclientsetfake.Clientset, objType string, listFn func(core.Action) (bool, runtime.Object, error)) *watch.FakeWatcher {
 	w := watch.NewFake()
 	c.AddWatchReactor(objType, core.DefaultWatchReactor(w, nil))
@@ -224,6 +248,20 @@ func cloudPrivateIPConfigObjSetup(c *ocpcloudnetworkclientsetfake.Clientset, obj
 }
 
 func egressQoSObjSetup(c *egressqosfake.Clientset, objType string, listFn func(core.Action) (bool, runtime.Object, error)) *watch.FakeWatcher {
+	w := watch.NewFake()
+	c.AddWatchReactor(objType, core.DefaultWatchReactor(w, nil))
+	c.AddReactor("list", objType, listFn)
+	return w
+}
+
+func egressServiceObjSetup(c *egressservicefake.Clientset, objType string, listFn func(core.Action) (bool, runtime.Object, error)) *watch.FakeWatcher {
+	w := watch.NewFake()
+	c.AddWatchReactor(objType, core.DefaultWatchReactor(w, nil))
+	c.AddReactor("list", objType, listFn)
+	return w
+}
+
+func adminNetworkPolicyObjSetup(c *anpapifake.Clientset, objType string, listFn func(core.Action) (bool, runtime.Object, error)) *watch.FakeWatcher {
 	w := watch.NewFake()
 	c.AddWatchReactor(objType, core.DefaultWatchReactor(w, nil))
 	c.AddReactor("list", objType, listFn)
@@ -250,21 +288,25 @@ func (c *handlerCalls) getDeleted() int {
 
 var _ = Describe("Watch Factory Operations", func() {
 	var (
-		ovnClientset                        *util.OVNClientset
+		ovnClientset                        *util.OVNMasterClientset
+		ovnCMClientset                      *util.OVNClusterManagerClientset
 		fakeClient                          *fake.Clientset
 		egressIPFakeClient                  *egressipfake.Clientset
 		egressFirewallFakeClient            *egressfirewallfake.Clientset
 		cloudNetworkFakeClient              *ocpcloudnetworkclientsetfake.Clientset
 		egressQoSFakeClient                 *egressqosfake.Clientset
-		networkAttchDefClient               *networkattachmentdefinitionfake.Clientset
+		egressServiceFakeClient             *egressservicefake.Clientset
+		adminNetworkPolicyFakeClient        *anpapifake.Clientset
 		podWatch, namespaceWatch, nodeWatch *watch.FakeWatcher
 		policyWatch, serviceWatch           *watch.FakeWatcher
+		endpointSliceWatch                  *watch.FakeWatcher
 		egressFirewallWatch                 *watch.FakeWatcher
 		egressIPWatch                       *watch.FakeWatcher
 		cloudPrivateIPConfigWatch           *watch.FakeWatcher
 		egressQoSWatch                      *watch.FakeWatcher
-		endpointSliceWatch                  *watch.FakeWatcher
-		networkAttchDefWatch                *watch.FakeWatcher
+		egressServiceWatch                  *watch.FakeWatcher
+		adminNetPolWatch                    *watch.FakeWatcher
+		baselineAdminNetPolWatch            *watch.FakeWatcher
 		pods                                []*v1.Pod
 		namespaces                          []*v1.Namespace
 		nodes                               []*v1.Node
@@ -273,10 +315,12 @@ var _ = Describe("Watch Factory Operations", func() {
 		services                            []*v1.Service
 		egressIPs                           []*egressip.EgressIP
 		cloudPrivateIPConfigs               []*ocpcloudnetworkapi.CloudPrivateIPConfig
-		netAttchDefs                        []*networkattachmentdefinitionapi.NetworkAttachmentDefinition
 		wf                                  *WatchFactory
 		egressFirewalls                     []*egressfirewall.EgressFirewall
 		egressQoSes                         []*egressqos.EgressQoS
+		egressServices                      []*egressservice.EgressService
+		adminNetworkPolicies                []*anpapi.AdminNetworkPolicy
+		baselineAdminNetworkPolicies        []*anpapi.BaselineAdminNetworkPolicy
 		err                                 error
 	)
 
@@ -291,23 +335,32 @@ var _ = Describe("Watch Factory Operations", func() {
 		config.OVNKubernetesFeature.EnableEgressIP = true
 		config.OVNKubernetesFeature.EnableEgressFirewall = true
 		config.OVNKubernetesFeature.EnableEgressQoS = true
-		config.OVNKubernetesFeature.EnableMultiNetwork = true
+		config.OVNKubernetesFeature.EnableEgressService = true
+		config.OVNKubernetesFeature.EnableAdminNetworkPolicy = true
 		config.Kubernetes.PlatformType = string(ocpconfigapi.AWSPlatformType)
 
 		fakeClient = &fake.Clientset{}
 		egressFirewallFakeClient = &egressfirewallfake.Clientset{}
 		egressIPFakeClient = &egressipfake.Clientset{}
-		networkAttchDefClient = &networkattachmentdefinitionfake.Clientset{}
 		cloudNetworkFakeClient = &ocpcloudnetworkclientsetfake.Clientset{}
 		egressQoSFakeClient = &egressqosfake.Clientset{}
+		egressServiceFakeClient = &egressservicefake.Clientset{}
+		adminNetworkPolicyFakeClient = &anpapifake.Clientset{}
 
-		ovnClientset = &util.OVNClientset{
-			KubeClient:            fakeClient,
-			EgressIPClient:        egressIPFakeClient,
-			EgressFirewallClient:  egressFirewallFakeClient,
-			CloudNetworkClient:    cloudNetworkFakeClient,
-			EgressQoSClient:       egressQoSFakeClient,
-			NetworkAttchDefClient: networkAttchDefClient,
+		ovnClientset = &util.OVNMasterClientset{
+			KubeClient:           fakeClient,
+			ANPClient:            adminNetworkPolicyFakeClient,
+			EgressIPClient:       egressIPFakeClient,
+			CloudNetworkClient:   cloudNetworkFakeClient,
+			EgressFirewallClient: egressFirewallFakeClient,
+			EgressQoSClient:      egressQoSFakeClient,
+			EgressServiceClient:  egressServiceFakeClient,
+		}
+		ovnCMClientset = &util.OVNClusterManagerClientset{
+			KubeClient:          fakeClient,
+			EgressIPClient:      egressIPFakeClient,
+			CloudNetworkClient:  cloudNetworkFakeClient,
+			EgressServiceClient: egressServiceFakeClient,
 		}
 
 		pods = make([]*v1.Pod, 0)
@@ -400,10 +453,28 @@ var _ = Describe("Watch Factory Operations", func() {
 			return true, obj, nil
 		})
 
-		netAttchDefs = make([]*networkattachmentdefinitionapi.NetworkAttachmentDefinition, 0)
-		networkAttchDefWatch = networkAttchDefObjSetup(networkAttchDefClient, "network-attachment-definitions", func(core.Action) (bool, runtime.Object, error) {
-			obj := &networkattachmentdefinitionapi.NetworkAttachmentDefinitionList{}
-			for _, p := range netAttchDefs {
+		egressServices = make([]*egressservice.EgressService, 0)
+		egressServiceWatch = egressServiceObjSetup(egressServiceFakeClient, "egressservices", func(core.Action) (bool, runtime.Object, error) {
+			obj := &egressservice.EgressServiceList{}
+			for _, p := range egressServices {
+				obj.Items = append(obj.Items, *p)
+			}
+			return true, obj, nil
+		})
+
+		adminNetworkPolicies = make([]*anpapi.AdminNetworkPolicy, 0)
+		adminNetPolWatch = adminNetworkPolicyObjSetup(adminNetworkPolicyFakeClient, "adminnetworkpolicies", func(core.Action) (bool, runtime.Object, error) {
+			obj := &anpapi.AdminNetworkPolicyList{}
+			for _, p := range adminNetworkPolicies {
+				obj.Items = append(obj.Items, *p)
+			}
+			return true, obj, nil
+		})
+
+		baselineAdminNetworkPolicies = make([]*anpapi.BaselineAdminNetworkPolicy, 0)
+		baselineAdminNetPolWatch = adminNetworkPolicyObjSetup(adminNetworkPolicyFakeClient, "baselineadminnetworkpolicies", func(core.Action) (bool, runtime.Object, error) {
+			obj := &anpapi.BaselineAdminNetworkPolicyList{}
+			for _, p := range baselineAdminNetworkPolicies {
 				obj.Items = append(obj.Items, *p)
 			}
 			return true, obj, nil
@@ -415,10 +486,11 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	Context("when a processExisting is given", func() {
-		testExisting := func(objType reflect.Type, namespace string, sel labels.Selector) {
-			nodeNames := []string{nodeName}
+		testExisting := func(objType reflect.Type, namespace string, sel labels.Selector, priority int) {
 			if objType == EndpointSliceType {
-				wf, err = NewNodeWatchFactory(ovnClientset, nodeNames)
+				wf, err = NewNodeWatchFactory(ovnClientset.GetNodeClientset(), nodeName)
+			} else if objType == CloudPrivateIPConfigType {
+				wf, err = NewClusterManagerWatchFactory(ovnCMClientset)
 			} else {
 				wf, err = NewMasterWatchFactory(ovnClientset)
 			}
@@ -431,64 +503,134 @@ var _ = Describe("Watch Factory Operations", func() {
 					defer GinkgoRecover()
 					Expect(len(objs)).To(Equal(1))
 					return nil
-				})
+				}, wf.GetHandlerPriority(objType))
 			Expect(h).NotTo(BeNil())
 			Expect(err).NotTo(HaveOccurred())
+			Expect(h.priority).To(Equal(priority))
+			wf.removeHandler(objType, h)
+		}
+
+		testExistingFilteredHandler := func(objType reflect.Type, realObj reflect.Type, namespace string, sel labels.Selector, priority int) {
+			if objType == EndpointSliceType {
+				wf, err = NewNodeWatchFactory(ovnClientset.GetNodeClientset(), nodeName)
+			} else if objType == CloudPrivateIPConfigType {
+				wf, err = NewClusterManagerWatchFactory(ovnCMClientset)
+			} else {
+				wf, err = NewMasterWatchFactory(ovnClientset)
+			}
+			Expect(err).NotTo(HaveOccurred())
+			err = wf.Start()
+			Expect(err).NotTo(HaveOccurred())
+			h, err := wf.AddFilteredPodHandler(namespace, sel,
+				cache.ResourceEventHandlerFuncs{},
+				func(objs []interface{}) error {
+					defer GinkgoRecover()
+					Expect(len(objs)).To(Equal(1))
+					return nil
+				}, wf.GetHandlerPriority(realObj))
+			Expect(h).NotTo(BeNil())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(h.priority).To(Equal(priority))
 			wf.removeHandler(objType, h)
 		}
 
 		It("is called for each existing pod", func() {
 			pods = append(pods, newPod("pod1", "default"))
-			testExisting(PodType, "", nil)
+			testExisting(PodType, "", nil, defaultHandlerPriority)
 		})
 
 		It("is called for each existing namespace", func() {
 			namespaces = append(namespaces, newNamespace("default"))
-			testExisting(NamespaceType, "", nil)
+			testExisting(NamespaceType, "", nil, defaultHandlerPriority)
 		})
 
 		It("is called for each existing node", func() {
 			nodes = append(nodes, newNode("default"))
-			testExisting(NodeType, "", nil)
+			testExisting(NodeType, "", nil, defaultHandlerPriority)
 		})
 
 		It("is called for each existing policy", func() {
 			policies = append(policies, newPolicy("denyall", "default"))
-			testExisting(PolicyType, "", nil)
+			pods = append(pods, newPod("pod1", "default"))
+			testExisting(PolicyType, "", nil, defaultHandlerPriority)
+		})
+
+		It("is called for each existing policy: AddressSetPodSelectorType", func() {
+			policies = append(policies, newPolicy("denyall", "default"))
+			pods = append(pods, newPod("pod1", "default"))
+			testExistingFilteredHandler(PodType, AddressSetPodSelectorType, "default", nil, 2)
+		})
+
+		It("is called for each existing policy: LocalPodSelectorType", func() {
+			policies = append(policies, newPolicy("denyall", "default"))
+			pods = append(pods, newPod("pod1", "default"))
+			testExistingFilteredHandler(PodType, LocalPodSelectorType, "default", nil, 3)
+		})
+
+		It("is called for each existing policy: AddressSetNamespaceAndPodSelectorType", func() {
+			policies = append(policies, newPolicy("denyall", "default"))
+			pods = append(pods, newPod("pod1", "default"))
+			testExistingFilteredHandler(NamespaceType, AddressSetNamespaceAndPodSelectorType, "default", nil, 3)
+		})
+
+		It("is called for each existing policy: PeerNamespaceSelectorType", func() {
+			policies = append(policies, newPolicy("denyall", "default"))
+			pods = append(pods, newPod("pod1", "default"))
+			testExistingFilteredHandler(NamespaceType, PeerNamespaceSelectorType, "default", nil, 2)
 		})
 
 		It("is called for each existing endpointSlice", func() {
-			endpointSlices = append(endpointSlices, newEndpointSlice("myendpointSlice", "default", "myService"))
-			testExisting(EndpointSliceType, "", nil)
+			endpointSlices = append(endpointSlices, newEndpointSlice("myEndpointSlice", "default", "myService"))
+			testExisting(EndpointSliceType, "", nil, defaultHandlerPriority)
 		})
 
 		It("is called for each existing service", func() {
 			services = append(services, newService("myservice", "default"))
-			testExisting(ServiceType, "", nil)
+			testExisting(ServiceType, "", nil, defaultHandlerPriority)
 		})
 
 		It("is called for each existing egressFirewall", func() {
 			egressFirewalls = append(egressFirewalls, newEgressFirewall("myEgressFirewall", "default"))
-			testExisting(EgressFirewallType, "", nil)
+			testExisting(EgressFirewallType, "", nil, defaultHandlerPriority)
 		})
 
 		It("is called for each existing egressIP", func() {
 			egressIPs = append(egressIPs, newEgressIP("myEgressIP", "default"))
-			testExisting(EgressIPType, "", nil)
+			pods = append(pods, newPod("pod1", "default"))
+			testExisting(EgressIPType, "", nil, defaultHandlerPriority)
+		})
+
+		It("is called for each existing egressIP: EgressIPPodType", func() {
+			egressIPs = append(egressIPs, newEgressIP("myEgressIP", "default"))
+			pods = append(pods, newPod("pod1", "default"))
+			testExistingFilteredHandler(PodType, EgressIPPodType, "default", nil, 1)
+		})
+
+		It("is called for each existing egressIP: EgressIPNamespaceType", func() {
+			egressIPs = append(egressIPs, newEgressIP("myEgressIP", "default"))
+			pods = append(pods, newPod("pod1", "default"))
+			testExistingFilteredHandler(NamespaceType, EgressIPNamespaceType, "default", nil, 1)
 		})
 
 		It("is called for each existing cloudPrivateIPConfig", func() {
 			cloudPrivateIPConfigs = append(cloudPrivateIPConfigs, newCloudPrivateIPConfig("192.168.176.25"))
-			testExisting(CloudPrivateIPConfigType, "", nil)
+			testExisting(CloudPrivateIPConfigType, "", nil, defaultHandlerPriority)
 		})
 		It("is called for each existing egressQoS", func() {
 			egressQoSes = append(egressQoSes, newEgressQoS("myEgressQoS", "default"))
-			testExisting(EgressQoSType, "", nil)
+			testExisting(EgressQoSType, "", nil, defaultHandlerPriority)
 		})
-
-		It("is called for each existing net-attach-def", func() {
-			netAttchDefs = append(netAttchDefs, newNetworkAttchDef("myNetworkAttachmentDefinition", "default"))
-			testExisting(NetworkattachmentdefinitionType, "", nil)
+		It("is called for each existing egressService", func() {
+			egressServices = append(egressServices, newEgressService("myEgressService", "default"))
+			testExisting(EgressServiceType, "", nil, defaultHandlerPriority)
+		})
+		It("is called for each existing admin network policy", func() {
+			adminNetworkPolicies = append(adminNetworkPolicies, newAdminNetworkPolicy("myANP", 3))
+			testExisting(AdminNetworkPolicyType, "", nil, defaultHandlerPriority)
+		})
+		It("is called for each existing baseline admin network policy", func() {
+			baselineAdminNetworkPolicies = append(baselineAdminNetworkPolicies, newBaselineAdminNetworkPolicy("myBANP"))
+			testExisting(BaselineAdminNetworkPolicyType, "", nil, defaultHandlerPriority)
 		})
 
 		It("is called for each existing pod that matches a given namespace and label", func() {
@@ -503,15 +645,16 @@ var _ = Describe("Watch Factory Operations", func() {
 			)
 			Expect(err).NotTo(HaveOccurred())
 
-			testExisting(PodType, "default", sel)
+			testExisting(PodType, "default", sel, defaultHandlerPriority)
 		})
 	})
 
 	Context("when existing items are known to the informer", func() {
 		testExisting := func(objType reflect.Type) {
-			nodeNames := []string{nodeName}
 			if objType == EndpointSliceType {
-				wf, err = NewNodeWatchFactory(ovnClientset, nodeNames)
+				wf, err = NewNodeWatchFactory(ovnClientset.GetNodeClientset(), nodeName)
+			} else if objType == CloudPrivateIPConfigType {
+				wf, err = NewClusterManagerWatchFactory(ovnCMClientset)
 			} else {
 				wf, err = NewMasterWatchFactory(ovnClientset)
 			}
@@ -526,7 +669,7 @@ var _ = Describe("Watch Factory Operations", func() {
 					},
 					UpdateFunc: func(old, new interface{}) {},
 					DeleteFunc: func(obj interface{}) {},
-				}, nil)
+				}, nil, wf.GetHandlerPriority(objType))
 			Expect(int(addCalls)).To(Equal(2))
 			Expect(err).NotTo(HaveOccurred())
 			wf.removeHandler(objType, h)
@@ -557,8 +700,8 @@ var _ = Describe("Watch Factory Operations", func() {
 		})
 
 		It("calls ADD for each existing endpointSlices", func() {
-			endpointSlices = append(endpointSlices, newEndpointSlice("myendpointSlice", "default", "myService"))
-			endpointSlices = append(endpointSlices, newEndpointSlice("myendpointSlie2", "default", "myService"))
+			endpointSlices = append(endpointSlices, newEndpointSlice("myEndpointSlice", "default", "myService"))
+			endpointSlices = append(endpointSlices, newEndpointSlice("myEndpointSlice2", "default", "myService"))
 			testExisting(EndpointSliceType)
 		})
 
@@ -588,10 +731,20 @@ var _ = Describe("Watch Factory Operations", func() {
 			egressQoSes = append(egressQoSes, newEgressQoS("myEgressQoS1", "default"))
 			testExisting(EgressQoSType)
 		})
-		It("calls ADD for each existing net-attach-def", func() {
-			netAttchDefs = append(netAttchDefs, newNetworkAttchDef("myNetAttachDef", "default"))
-			netAttchDefs = append(netAttchDefs, newNetworkAttchDef("myNetAttachDef1", "default"))
-			testExisting(NetworkattachmentdefinitionType)
+		It("calls ADD for each existing egressService", func() {
+			egressServices = append(egressServices, newEgressService("myEgressService", "default"))
+			egressServices = append(egressServices, newEgressService("myEgressService1", "default"))
+			testExisting(EgressServiceType)
+		})
+		It("calls ADD for each existing Admin Network Policy", func() {
+			adminNetworkPolicies = append(adminNetworkPolicies, newAdminNetworkPolicy("myANP1", 10))
+			adminNetworkPolicies = append(adminNetworkPolicies, newAdminNetworkPolicy("myANP2", 20))
+			testExisting(AdminNetworkPolicyType)
+		})
+		It("calls ADD for each existing Baseline Admin Network Policy", func() {
+			baselineAdminNetworkPolicies = append(baselineAdminNetworkPolicies, newBaselineAdminNetworkPolicy("myBANP"))
+			baselineAdminNetworkPolicies = append(baselineAdminNetworkPolicies, newBaselineAdminNetworkPolicy("myBANP2"))
+			testExisting(BaselineAdminNetworkPolicyType)
 		})
 	})
 
@@ -634,8 +787,38 @@ var _ = Describe("Watch Factory Operations", func() {
 			testExisting(EgressQoSType)
 		})
 	})
+	Context("when EgressService is disabled", func() {
+		testExisting := func(objType reflect.Type) {
+			wf, err = NewMasterWatchFactory(ovnClientset)
+			Expect(err).NotTo(HaveOccurred())
+			err = wf.Start()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(wf.informers).NotTo(HaveKey(objType))
+		}
+		It("does not contain EgressService informer", func() {
+			config.OVNKubernetesFeature.EnableEgressService = false
+			testExisting(EgressServiceType)
+		})
+	})
+	Context("when Admin Network Policy is disabled", func() {
+		testExisting := func(objType reflect.Type) {
+			wf, err = NewMasterWatchFactory(ovnClientset)
+			Expect(err).NotTo(HaveOccurred())
+			err = wf.Start()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(wf.informers).NotTo(HaveKey(objType))
+		}
+		It("does not contain Admin Network Policy informer", func() {
+			config.OVNKubernetesFeature.EnableAdminNetworkPolicy = false
+			testExisting(AdminNetworkPolicyType)
+		})
+		It("does not contain Baseline Admin Network Policy informer", func() {
+			config.OVNKubernetesFeature.EnableAdminNetworkPolicy = false
+			testExisting(BaselineAdminNetworkPolicyType)
+		})
+	})
 
-	addFilteredHandler := func(wf *WatchFactory, objType reflect.Type, namespace string, sel labels.Selector, funcs cache.ResourceEventHandlerFuncs) (*Handler, *handlerCalls) {
+	addFilteredHandler := func(wf *WatchFactory, objType reflect.Type, realObjType reflect.Type, namespace string, sel labels.Selector, funcs cache.ResourceEventHandlerFuncs) (*Handler, *handlerCalls) {
 		calls := handlerCalls{}
 		h, err := wf.addHandler(objType, namespace, sel, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
@@ -653,14 +836,18 @@ var _ = Describe("Watch Factory Operations", func() {
 				atomic.AddInt32(&calls.deleted, 1)
 				funcs.DeleteFunc(obj)
 			},
-		}, nil)
+		}, nil, wf.GetHandlerPriority(realObjType))
 		Expect(h).NotTo(BeNil())
 		Expect(err).NotTo(HaveOccurred())
 		return h, &calls
 	}
 
 	addHandler := func(wf *WatchFactory, objType reflect.Type, funcs cache.ResourceEventHandlerFuncs) (*Handler, *handlerCalls) {
-		return addFilteredHandler(wf, objType, "", nil, funcs)
+		return addFilteredHandler(wf, objType, objType, "", nil, funcs)
+	}
+
+	addPriorityHandler := func(wf *WatchFactory, objType reflect.Type, realObjType reflect.Type, funcs cache.ResourceEventHandlerFuncs) (*Handler, *handlerCalls) {
+		return addFilteredHandler(wf, objType, realObjType, "", nil, funcs)
 	}
 
 	It("responds to pod add/update/delete events", func() {
@@ -1145,6 +1332,254 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf.RemoveNamespaceHandler(h)
 	})
 
+	It("correctly orders add events across prioritized handlers sharing the same object type", func() {
+		type opTest struct {
+			mu        sync.Mutex
+			namespace *v1.Namespace
+			added     int
+			updated   int
+			deleted   int
+		}
+		testNamespaces := make(map[string]*opTest)
+
+		for i := 0; i < 998; i++ {
+			name := fmt.Sprintf("mynamespace-%d", i)
+			namespace := newNamespace(name)
+			namespace.Status.Phase = ""
+			testNamespaces[name] = &opTest{namespace: namespace}
+			// Add all namespaces to the initial list
+			namespaces = append(namespaces, namespace)
+		}
+
+		wf, err = NewMasterWatchFactory(ovnClientset)
+		Expect(err).NotTo(HaveOccurred())
+		err = wf.Start()
+		Expect(err).NotTo(HaveOccurred())
+
+		nsh, c1 := addPriorityHandler(wf, NamespaceType, NamespaceType, cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				defer GinkgoRecover()
+				namespace := obj.(*v1.Namespace)
+				ot, ok := testNamespaces[namespace.Name]
+				Expect(ok).To(BeTrue())
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
+				Expect(ot.added).To(Equal(0))
+				ot.added++
+				Expect(namespace.Status.Phase).To(BeEmpty())
+			},
+			UpdateFunc: func(old, new interface{}) {
+				defer GinkgoRecover()
+				newNamespace := new.(*v1.Namespace)
+				ot, ok := testNamespaces[newNamespace.Name]
+				Expect(ok).To(BeTrue())
+				// Expect updates to be processed after Add
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
+				Expect(ot.added).To(Equal(4), "update for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
+				Expect(ot.updated).To(Equal(0))
+				ot.updated++
+				Expect(newNamespace.Status.Phase).To(Equal(v1.NamespaceActive))
+			},
+			DeleteFunc: func(obj interface{}) {
+				defer GinkgoRecover()
+				newNamespace := obj.(*v1.Namespace)
+				ot, ok := testNamespaces[newNamespace.Name]
+				Expect(ok).To(BeTrue())
+				// Verify that deletes were processed after the updates and adds
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
+				Expect(ot.added).To(Equal(4), "delete for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
+				Expect(ot.updated).To(Equal(4), "delete for EIP namespace %s processed before update was processed in all handlers!", newNamespace.Name)
+				Expect(ot.deleted).To(Equal(8))
+				ot.deleted = ot.deleted / 2
+				Expect(newNamespace.Status.Phase).To(Equal(v1.NamespaceTerminating))
+			},
+		})
+
+		eipnsh, c2 := addPriorityHandler(wf, NamespaceType, EgressIPNamespaceType, cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				defer GinkgoRecover()
+				namespace := obj.(*v1.Namespace)
+				ot, ok := testNamespaces[namespace.Name]
+				Expect(ok).To(BeTrue())
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
+				Expect(ot.added).To(Equal(1), "add for EIP namespace %s processed before initial namespace add!", namespace.Name)
+				ot.added = ot.added * 10
+				Expect(namespace.Status.Phase).To(BeEmpty())
+			},
+			UpdateFunc: func(old, new interface{}) {
+				defer GinkgoRecover()
+				newNamespace := new.(*v1.Namespace)
+				ot, ok := testNamespaces[newNamespace.Name]
+				Expect(ok).To(BeTrue())
+				// Expect updates to be processed after Add
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
+				Expect(ot.added).To(Equal(4), "update for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
+				Expect(ot.updated).To(Equal(1), "update for EIP namespace %s processed before initial namespace update!", newNamespace.Name)
+				ot.updated = ot.updated * 10
+				Expect(newNamespace.Status.Phase).To(Equal(v1.NamespaceActive))
+			},
+			DeleteFunc: func(obj interface{}) {
+				defer GinkgoRecover()
+				newNamespace := obj.(*v1.Namespace)
+				ot, ok := testNamespaces[newNamespace.Name]
+				Expect(ok).To(BeTrue())
+				// Verify that deletes were processed after the updates and adds
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
+				Expect(ot.added).To(Equal(4), "delete for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
+				Expect(ot.updated).To(Equal(4), "delete for EIP namespace %s processed before update was processed in all handlers!", newNamespace.Name)
+				Expect(ot.deleted).To(Equal(10))
+				ot.deleted = ot.deleted - 2
+				Expect(newNamespace.Status.Phase).To(Equal(v1.NamespaceTerminating))
+			},
+		})
+		peernsh, c3 := addPriorityHandler(wf, NamespaceType, PeerNamespaceSelectorType, cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				defer GinkgoRecover()
+				namespace := obj.(*v1.Namespace)
+				ot, ok := testNamespaces[namespace.Name]
+				Expect(ok).To(BeTrue())
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
+				Expect(ot.added).To(Equal(10), "add for peer namespace %s processed before EIP namespace add!", namespace.Name)
+				ot.added = ot.added - 2
+				Expect(namespace.Status.Phase).To(BeEmpty())
+			},
+			UpdateFunc: func(old, new interface{}) {
+				defer GinkgoRecover()
+				newNamespace := new.(*v1.Namespace)
+				ot, ok := testNamespaces[newNamespace.Name]
+				Expect(ok).To(BeTrue())
+				// Expect updates to be processed after Add
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
+				Expect(ot.added).To(Equal(4), "update for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
+				Expect(ot.updated).To(Equal(10), "update for peer namespace %s processed before EIP namespace update!", newNamespace.Name)
+				ot.updated = ot.updated - 2
+				Expect(newNamespace.Status.Phase).To(Equal(v1.NamespaceActive))
+			},
+			DeleteFunc: func(obj interface{}) {
+				defer GinkgoRecover()
+				newNamespace := obj.(*v1.Namespace)
+				ot, ok := testNamespaces[newNamespace.Name]
+				Expect(ok).To(BeTrue())
+				// Verify that deletes were processed after the updates and adds
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
+				Expect(ot.added).To(Equal(4), "delete for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
+				Expect(ot.updated).To(Equal(4), "delete for EIP namespace %s processed before update was processed in all handlers!", newNamespace.Name)
+				Expect(ot.deleted).To(Equal(1))
+				ot.deleted = ot.deleted * 10
+				Expect(newNamespace.Status.Phase).To(Equal(v1.NamespaceTerminating))
+			},
+		})
+		peerpodnsh, c4 := addPriorityHandler(wf, NamespaceType, AddressSetNamespaceAndPodSelectorType, cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				defer GinkgoRecover()
+				namespace := obj.(*v1.Namespace)
+				ot, ok := testNamespaces[namespace.Name]
+				Expect(ok).To(BeTrue())
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
+				Expect(ot.added).To(Equal(8), "add for peerPod namespace %s processed before peer namespace add!", namespace.Name)
+				ot.added = ot.added / 2
+				Expect(namespace.Status.Phase).To(BeEmpty())
+			},
+			UpdateFunc: func(old, new interface{}) {
+				defer GinkgoRecover()
+				newNamespace := new.(*v1.Namespace)
+				ot, ok := testNamespaces[newNamespace.Name]
+				Expect(ok).To(BeTrue())
+				// Expect updates to be processed after Add
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
+				Expect(ot.added).To(Equal(4), "update for peerPod namespace %s processed before peerPod namespace add!", newNamespace.Name)
+				Expect(ot.updated).To(Equal(8), "update for peerPod namespace %s processed before peer namespace update!", newNamespace.Name)
+				ot.updated = ot.updated / 2
+				Expect(newNamespace.Status.Phase).To(Equal(v1.NamespaceActive))
+			},
+			DeleteFunc: func(obj interface{}) {
+				defer GinkgoRecover()
+				newNamespace := obj.(*v1.Namespace)
+				ot, ok := testNamespaces[newNamespace.Name]
+				Expect(ok).To(BeTrue())
+				// Verify that deletes were processed after the updates and adds
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
+				Expect(ot.added).To(Equal(4), "delete for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
+				Expect(ot.updated).To(Equal(4), "delete for EIP namespace %s processed before update was processed in all handlers!", newNamespace.Name)
+				Expect(ot.deleted).To(Equal(0))
+				ot.deleted++
+				Expect(newNamespace.Status.Phase).To(Equal(v1.NamespaceTerminating))
+			},
+		})
+		done := make(chan bool)
+		go func() {
+			// Send an update event for each namespace
+			for _, n := range namespaces {
+				n.Status.Phase = v1.NamespaceActive
+				namespaceWatch.Modify(n)
+			}
+			done <- true
+		}()
+
+		// Adds are done synchronously at handler addition time
+		for _, ot := range testNamespaces {
+			ot.mu.Lock()
+			// ((((0 + 1) * 10) - 2) / 2) = 4
+			Expect(ot.added).To(Equal(4), "missing add for namespace %s", ot.namespace.Name)
+			ot.mu.Unlock()
+		}
+		Expect(c1.getAdded()).To(Equal(len(testNamespaces)))
+		Expect(c2.getAdded()).To(Equal(len(testNamespaces)))
+		Expect(c3.getAdded()).To(Equal(len(testNamespaces)))
+		Expect(c4.getAdded()).To(Equal(len(testNamespaces)))
+		<-done
+		// Updates are async and may take a bit longer to finish
+		Eventually(c1.getUpdated, 10).Should(Equal(len(testNamespaces)))
+		Eventually(c2.getUpdated, 10).Should(Equal(len(testNamespaces)))
+		Eventually(c3.getUpdated, 10).Should(Equal(len(testNamespaces)))
+		Eventually(c4.getUpdated, 10).Should(Equal(len(testNamespaces)))
+
+		for _, ot := range testNamespaces {
+			ot.mu.Lock()
+			// ((((0 + 1) * 10) - 2) / 2) = 4
+			Expect(ot.updated).To(Equal(4), "missing update for namespace %s", ot.namespace.Name)
+			ot.mu.Unlock()
+		}
+
+		go func() {
+			// Send a delete event for each namespace
+			for _, n := range namespaces {
+				n.Status.Phase = v1.NamespaceTerminating
+				namespaceWatch.Delete(n)
+			}
+			done <- true
+		}()
+		<-done
+		// Deletes are async and may take a bit longer to finish
+		Eventually(c1.getDeleted, 10).Should(Equal(len(testNamespaces)))
+		Eventually(c2.getDeleted, 10).Should(Equal(len(testNamespaces)))
+		Eventually(c3.getDeleted, 10).Should(Equal(len(testNamespaces)))
+		Eventually(c4.getDeleted, 10).Should(Equal(len(testNamespaces)))
+
+		for _, ot := range testNamespaces {
+			ot.mu.Lock()
+			// ((((0 + 1) * 10) - 2) / 2) = 4
+			Expect(ot.deleted).To(Equal(4), "missing delete for namespace %s", ot.namespace.Name)
+			ot.mu.Unlock()
+		}
+
+		wf.RemoveNamespaceHandler(nsh)
+		wf.RemoveNamespaceHandler(eipnsh)
+		wf.RemoveNamespaceHandler(peernsh)
+		wf.RemoveNamespaceHandler(peerpodnsh)
+	})
+
 	It("responds to policy add/update/delete events", func() {
 		wf, err = NewMasterWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
@@ -1182,13 +1617,12 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to endpointslices add/update/delete events", func() {
-		nodeNames := []string{nodeName}
-		wf, err = NewNodeWatchFactory(ovnClientset, nodeNames)
+		wf, err = NewNodeWatchFactory(ovnClientset.GetNodeClientset(), nodeName)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		added := newEndpointSlice("myendpointSlice", "default", "myService")
+		added := newEndpointSlice("myEndpointSlice", "default", "myService")
 		h, c := addHandler(wf, EndpointSliceType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				epSlice := obj.(*discovery.EndpointSlice)
@@ -1291,7 +1725,6 @@ var _ = Describe("Watch Factory Operations", func() {
 
 		wf.RemoveEgressFirewallHandler(h)
 	})
-
 	It("responds to egressIP add/update/delete events", func() {
 		wf, err = NewMasterWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
@@ -1328,7 +1761,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf.RemoveEgressIPHandler(h)
 	})
 	It("responds to cloudPrivateIPConfig add/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewClusterManagerWatchFactory(ovnCMClientset)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1362,7 +1795,6 @@ var _ = Describe("Watch Factory Operations", func() {
 
 		wf.RemoveCloudPrivateIPConfigHandler(h)
 	})
-
 	It("responds to egressQoS add/update/delete events", func() {
 		wf, err = NewMasterWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
@@ -1398,43 +1830,128 @@ var _ = Describe("Watch Factory Operations", func() {
 
 		wf.RemoveEgressQoSHandler(h)
 	})
-
-	It("responds to networkAttachmentDefinition add/update/delete events", func() {
+	It("responds to egressService add/update/delete events", func() {
 		wf, err = NewMasterWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		added := newNetworkAttchDef("myNetworkAttachmentDefinition", "default")
-		h, c := addHandler(wf, NetworkattachmentdefinitionType, cache.ResourceEventHandlerFuncs{
+		added := newEgressService("myEgressService", "default")
+		h, c := addHandler(wf, EgressServiceType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
-				netAttchDef := obj.(*networkattachmentdefinitionapi.NetworkAttachmentDefinition)
-				Expect(reflect.DeepEqual(netAttchDef, added)).To(BeTrue())
+				egressService := obj.(*egressservice.EgressService)
+				Expect(reflect.DeepEqual(egressService, added)).To(BeTrue())
 			},
 			UpdateFunc: func(old, new interface{}) {
-				newNetAttchDef := new.(*networkattachmentdefinitionapi.NetworkAttachmentDefinition)
-				Expect(reflect.DeepEqual(newNetAttchDef, added)).To(BeTrue())
-				Expect(newNetAttchDef.Spec.Config).To(Equal("{\"cniVersion\": \"0.3.0\", \"type\": \"macvlan\"}"))
+				newEgressService := new.(*egressservice.EgressService)
+				Expect(reflect.DeepEqual(newEgressService, added)).To(BeTrue())
+				Expect(newEgressService.Spec.NodeSelector).To(Equal(metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"kubernetes.io/hostname": "node2",
+					},
+				}))
 			},
 			DeleteFunc: func(obj interface{}) {
-				newNetAttchDef := obj.(*networkattachmentdefinitionapi.NetworkAttachmentDefinition)
-				Expect(reflect.DeepEqual(newNetAttchDef, added)).To(BeTrue())
+				egressService := obj.(*egressservice.EgressService)
+				Expect(reflect.DeepEqual(egressService, added)).To(BeTrue())
 			},
 		})
 
-		netAttchDefs = append(netAttchDefs, added)
-		networkAttchDefWatch.Add(added)
+		egressServices = append(egressServices, added)
+		egressServiceWatch.Add(added)
 		Eventually(c.getAdded, 2).Should(Equal(1))
-		added.Spec.Config = "{\"cniVersion\": \"0.3.0\", \"type\": \"macvlan\"}"
-		networkAttchDefWatch.Modify(added)
+		added.Spec.NodeSelector = metav1.LabelSelector{
+			MatchLabels: map[string]string{
+				"kubernetes.io/hostname": "node2",
+			},
+		}
+		egressServiceWatch.Modify(added)
 		Eventually(c.getUpdated, 2).Should(Equal(1))
-		netAttchDefs = netAttchDefs[:0]
-		networkAttchDefWatch.Delete(added)
+		egressServices = egressServices[:0]
+		egressServiceWatch.Delete(added)
 		Eventually(c.getDeleted, 2).Should(Equal(1))
 
-		wf.RemoveNetworkattachmentdefinitionHandler(h)
+		wf.RemoveEgressServiceHandler(h)
 	})
+	It("responds to admin network policy add/update/delete events", func() {
+		wf, err = NewMasterWatchFactory(ovnClientset)
+		Expect(err).NotTo(HaveOccurred())
+		err = wf.Start()
+		Expect(err).NotTo(HaveOccurred())
 
+		added := newAdminNetworkPolicy("myANP", 2)
+		h, c := addHandler(wf, AdminNetworkPolicyType, cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				anp := obj.(*anpapi.AdminNetworkPolicy)
+				Expect(reflect.DeepEqual(anp, added)).To(BeTrue())
+			},
+			UpdateFunc: func(old, new interface{}) {
+				newANP := new.(*anpapi.AdminNetworkPolicy)
+				Expect(reflect.DeepEqual(newANP, added)).To(BeTrue())
+				Expect(newANP.Spec.Priority).To(Equal(int32(3)))
+			},
+			DeleteFunc: func(obj interface{}) {
+				anp := obj.(*anpapi.AdminNetworkPolicy)
+				Expect(reflect.DeepEqual(anp, added)).To(BeTrue())
+			},
+		})
+
+		adminNetworkPolicies = append(adminNetworkPolicies, added)
+		adminNetPolWatch.Add(added)
+		Eventually(c.getAdded, 2).Should(Equal(1))
+		added.Spec.Priority = 3
+		adminNetPolWatch.Modify(added)
+		Eventually(c.getUpdated, 2).Should(Equal(1))
+		adminNetworkPolicies = adminNetworkPolicies[:0]
+		adminNetPolWatch.Delete(added)
+		Eventually(c.getDeleted, 2).Should(Equal(1))
+
+		wf.RemoveAdminNetworkPolicyHandler(h)
+	})
+	It("responds to baseline admin network policy add/update/delete events", func() {
+		wf, err = NewMasterWatchFactory(ovnClientset)
+		Expect(err).NotTo(HaveOccurred())
+		err = wf.Start()
+		Expect(err).NotTo(HaveOccurred())
+
+		added := newBaselineAdminNetworkPolicy("myBANP")
+		h, c := addHandler(wf, BaselineAdminNetworkPolicyType, cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				banp := obj.(*anpapi.BaselineAdminNetworkPolicy)
+				Expect(reflect.DeepEqual(banp, added)).To(BeTrue())
+			},
+			UpdateFunc: func(old, new interface{}) {
+				newBANP := new.(*anpapi.BaselineAdminNetworkPolicy)
+				Expect(reflect.DeepEqual(newBANP, added)).To(BeTrue())
+				labelSelect := &metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"kubernetes.io/metadata.name": "default",
+					},
+				}
+				Expect(newBANP.Spec.Subject.Namespaces).To(Equal(labelSelect))
+			},
+			DeleteFunc: func(obj interface{}) {
+				anp := obj.(*anpapi.BaselineAdminNetworkPolicy)
+				Expect(reflect.DeepEqual(anp, added)).To(BeTrue())
+			},
+		})
+
+		baselineAdminNetworkPolicies = append(baselineAdminNetworkPolicies, added)
+		baselineAdminNetPolWatch.Add(added)
+		Eventually(c.getAdded, 2).Should(Equal(1))
+		added.Spec.Subject.Namespaces = &metav1.LabelSelector{
+			MatchLabels: map[string]string{
+				"kubernetes.io/metadata.name": "default",
+			},
+		}
+		baselineAdminNetPolWatch.Modify(added)
+		Eventually(c.getUpdated, 2).Should(Equal(1))
+		baselineAdminNetworkPolicies = baselineAdminNetworkPolicies[:0]
+		baselineAdminNetPolWatch.Delete(added)
+		Eventually(c.getDeleted, 2).Should(Equal(1))
+
+		wf.RemoveBaselineAdminNetworkPolicyHandler(h)
+	})
 	It("stops processing events after the handler is removed", func() {
 		wf, err = NewMasterWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
@@ -1487,6 +2004,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		_, c := addFilteredHandler(wf,
+			PodType,
 			PodType,
 			"default",
 			sel,
@@ -1555,6 +2073,7 @@ var _ = Describe("Watch Factory Operations", func() {
 
 		equalPod := pod
 		h, c := addFilteredHandler(wf,
+			PodType,
 			PodType,
 			"default",
 			sel,

@@ -3,23 +3,26 @@ package config
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/cni/pkg/version"
 
-	cnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
+	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
+
+var ErrorAttachDefNotOvnManaged = errors.New("net-attach-def not managed by OVN")
 
 // WriteCNIConfig writes a CNI JSON config file to directory given by global config
 // if the file doesn't already exist, or is different than the content that would
 // be written.
 func WriteCNIConfig() error {
-	netConf := &cnitypes.NetConf{
+	netConf := &ovncnitypes.NetConf{
 		NetConf: types.NetConf{
 			CNIVersion: "0.4.0",
 			Name:       "ovn-kubernetes",
@@ -52,7 +55,7 @@ func WriteCNIConfig() error {
 	}
 
 	var f *os.File
-	f, err = ioutil.TempFile(CNI.ConfDir, "ovnkube-")
+	f, err = os.CreateTemp(CNI.ConfDir, "ovnkube-")
 	if err != nil {
 		return err
 	}
@@ -67,20 +70,61 @@ func WriteCNIConfig() error {
 	return os.Rename(f.Name(), confFile)
 }
 
+// ParseNetConf parses config in NAD spec
+func ParseNetConf(bytes []byte) (*ovncnitypes.NetConf, error) {
+	netconf := &ovncnitypes.NetConf{MTU: Default.MTU, NotDefault: false, IsSecondary: false}
+	err := json.Unmarshal(bytes, &netconf)
+	if err != nil {
+		return nil, err
+	}
+	// skip non-OVN NAD
+	if netconf.Type != "ovn-k8s-cni-overlay" {
+		return nil, ErrorAttachDefNotOvnManaged
+	}
+	if netconf.NotDefault {
+		netconf.IsSecondary = true
+	}
+	if netconf.Topology == "" && !netconf.IsSecondary {
+		// NAD of default network
+		netconf.Name = ovntypes.DefaultNetworkName
+	} else {
+		if netconf.LegacyNADName != "" {
+			netconf.NADName = netconf.LegacyNADName
+		}
+		if netconf.NADName == "" {
+			return nil, fmt.Errorf("missing NADName in secondary network netconf %s", netconf.Name)
+		}
+		// "ovn-kubernetes" network name is reserved for later
+		if netconf.Name == "" || netconf.Name == ovntypes.DefaultNetworkName || netconf.Name == "ovn-kubernetes" {
+			return nil, fmt.Errorf("invalid name in in secondary network netconf (%s)", netconf.Name)
+		}
+		if netconf.IsSecondary && netconf.Topology == "" {
+			netconf.Topology = ovntypes.Layer3Topology
+		}
+		if netconf.LegacyVLANID != 0 {
+			netconf.VLANID = netconf.LegacyVLANID
+		}
+		if len(netconf.LegacySubnets) != 0 {
+			netconf.Subnets = netconf.LegacySubnets
+		}
+		if len(netconf.ExcludeCIDRs) != 0 {
+			netconf.ExcludeSubnets = strings.Join(netconf.ExcludeCIDRs, ",")
+		}
+	}
+
+	return netconf, nil
+}
+
 // ReadCNIConfig unmarshals a CNI JSON config into an NetConf structure
-func ReadCNIConfig(bytes []byte) (*cnitypes.NetConf, error) {
-	conf := &cnitypes.NetConf{MTU: Default.MTU, TopoType: ovntypes.Layer3AttachDefTopoType}
-	if err := json.Unmarshal(bytes, conf); err != nil {
+func ReadCNIConfig(bytes []byte) (*ovncnitypes.NetConf, error) {
+	conf, err := ParseNetConf(bytes)
+	if err != nil {
 		return nil, err
 	}
 	if conf.RawPrevResult != nil {
 		if err := version.ParsePrevResult(&conf.NetConf); err != nil {
 			return nil, err
 		}
-	}
-	// if not_default is set to be true, override IsSecondary
-	if conf.NotDefault {
-		conf.IsSecondary = true
 	}
 	return conf, nil
 }

@@ -6,14 +6,14 @@ import (
 	"net"
 	"testing"
 
-	nbdb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	iputils "github.com/containernetworking/plugins/pkg/ip"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	mock_k8s_io_utils_exec "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/utils/exec"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNextIP(t *testing.T) {
+func TestNextSloppyIP(t *testing.T) {
 	tests := []struct {
 		desc      string
 		input     string
@@ -41,6 +41,11 @@ func TestNextIP(t *testing.T) {
 			expOutput: "255.0.0.0",
 		},
 		{
+			desc:      "IPv6: test increment of leading zeros",
+			input:     "10:100:200:2::",
+			expOutput: "10:100:200:2::1",
+		},
+		{
 			desc:      "IPv6: test increment of eight hextet",
 			input:     "2001:db8::ffff",
 			expOutput: "2001:db8::1:0",
@@ -53,99 +58,9 @@ func TestNextIP(t *testing.T) {
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			res := NextIP(ovntest.MustParseIP(tc.input))
+			res := iputils.NextIP(ovntest.MustParseIP(tc.input))
 			t.Log(res.String())
 			assert.Equal(t, tc.expOutput, res.String())
-		})
-	}
-}
-
-func stringPtr(str string) *string {
-	return &str
-}
-
-const (
-	hwAddr    string = "06:c6:d4:fb:fb:ba"
-	badHWAddr string = "NotMAC"
-	badIPAddr string = "NOTIP"
-	ipAddr    string = "10.244.2.2"
-	portName  string = "test-pod"
-)
-
-func TestExtractPortAddresses(t *testing.T) {
-	tests := []struct {
-		desc       string
-		lsp        *nbdb.LogicalSwitchPort
-		errMatch   error
-		isNotFound bool
-		hasNoIP    bool
-	}{
-		{
-			desc: "test path where lsp.DynamicAddresses is a zero length string and len(addresses)==0",
-			lsp: &nbdb.LogicalSwitchPort{
-				Name:             "test-pod",
-				DynamicAddresses: stringPtr(hwAddr + " " + ipAddr),
-			},
-		},
-		{
-			desc: "test path where lsp.DynamicAddresses is non-zero length string and value of first address in addresses list is set to dynamic",
-			lsp: &nbdb.LogicalSwitchPort{
-				Name:             portName,
-				DynamicAddresses: stringPtr(hwAddr + " " + ipAddr),
-				Addresses:        []string{"dynamic"},
-			},
-		},
-		{
-			desc: "test code path where port has MAC but no IPs",
-			lsp: &nbdb.LogicalSwitchPort{
-				Name:             "test-pod",
-				DynamicAddresses: stringPtr(hwAddr),
-			},
-			hasNoIP: true,
-		},
-		{
-			desc: "test the code path where ParseMAC fails",
-			lsp: &nbdb.LogicalSwitchPort{
-				Name:             portName,
-				DynamicAddresses: stringPtr(badHWAddr),
-			},
-			errMatch: fmt.Errorf("failed to parse logical switch port \"%s\" MAC \"%s\": address %s: invalid MAC address", portName, badHWAddr, badHWAddr),
-		},
-		{
-			desc: "test code path where IP address parsing fails",
-			lsp: &nbdb.LogicalSwitchPort{
-				Name:      portName,
-				Addresses: []string{fmt.Sprintf("%s %s", hwAddr, badIPAddr)},
-			},
-			errMatch: fmt.Errorf("failed to parse logical switch port \"%s\" IP \"%s\" is not a valid ip address", portName, badIPAddr),
-		},
-		{
-			desc: "test success path with len(lsp.Addresses) > 0 and lsp.DynamicAddresses = nil",
-			lsp: &nbdb.LogicalSwitchPort{
-				Name:      portName,
-				Addresses: []string{fmt.Sprintf("%s %s", hwAddr, ipAddr)},
-			},
-		},
-	}
-
-	for i, tc := range tests {
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			hardwareAddr, ips, err := ExtractPortAddresses(tc.lsp)
-			if tc.isNotFound {
-				assert.Nil(t, hardwareAddr)
-				assert.Nil(t, ips)
-				assert.Nil(t, err)
-
-			} else if tc.hasNoIP {
-				assert.Equal(t, hardwareAddr.String(), hwAddr)
-				assert.Nil(t, ips)
-			} else if tc.errMatch != nil {
-				assert.Equal(t, err, tc.errMatch)
-			} else {
-				assert.Equal(t, hardwareAddr.String(), hwAddr)
-				assert.Equal(t, len(ips), 1)
-				assert.Equal(t, ips[0].String(), ipAddr)
-			}
 		})
 	}
 }
@@ -281,7 +196,7 @@ func TestMatchIPFamily(t *testing.T) {
 	}
 }
 
-func TestMatchIPNetFamily(t *testing.T) {
+func TestMatchFirstIPNetFamily(t *testing.T) {
 	tests := []struct {
 		desc       string
 		inpIsIPv6  bool // true matches with IPv6 and false with IPv4
@@ -321,7 +236,7 @@ func TestMatchIPNetFamily(t *testing.T) {
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			res, err := MatchIPNetFamily(tc.inpIsIPv6, ovntest.MustParseIPNets(tc.inpSubnets...))
+			res, err := MatchFirstIPNetFamily(tc.inpIsIPv6, ovntest.MustParseIPNets(tc.inpSubnets...))
 			t.Log(res, err)
 			if tc.expected == "" {
 				assert.Error(t, err)
@@ -495,6 +410,59 @@ func TestJoinIPNetIPs(t *testing.T) {
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
 			res := JoinIPNetIPs(tc.inpIPNetList, tc.inpSeparator)
+			t.Log(res)
+			assert.Equal(t, res, tc.outExp)
+		})
+	}
+}
+
+func TestContainsCIDR(t *testing.T) {
+	tests := []struct {
+		desc      string
+		inpIPNet1 *net.IPNet
+		inpIPNet2 *net.IPNet
+		outExp    bool
+	}{
+		{
+			desc:      "positive case, ipnet1 contains ipnet2",
+			inpIPNet1: ovntest.MustParseIPNet("192.168.1.1/24"),
+			inpIPNet2: ovntest.MustParseIPNet("192.168.1.16/28"),
+			outExp:    true,
+		},
+		{
+			desc:      "positive case, ipnet1 is the same as ipnet2",
+			inpIPNet1: ovntest.MustParseIPNet("192.168.1.1/24"),
+			inpIPNet2: ovntest.MustParseIPNet("192.168.1.1/24"),
+			outExp:    true,
+		},
+		{
+			desc:      "negative case, ipnet1 does not contain ipnet2",
+			inpIPNet1: ovntest.MustParseIPNet("192.168.1.1/25"),
+			inpIPNet2: ovntest.MustParseIPNet("192.168.1.1/24"),
+			outExp:    false,
+		},
+		{
+			desc:      "negative case, ipnet1 and ipnet2 does not overlap",
+			inpIPNet1: ovntest.MustParseIPNet("192.168.1.1/24"),
+			inpIPNet2: ovntest.MustParseIPNet("192.168.2.1/24"),
+			outExp:    false,
+		},
+		{
+			desc:      "positive case, ipnet1 contains ipnet2, IPv6 case",
+			inpIPNet1: ovntest.MustParseIPNet("2001:db8:3c4d::/48"),
+			inpIPNet2: ovntest.MustParseIPNet("2001:db8:3c4d:15::/64"),
+			outExp:    true,
+		},
+		{
+			desc:      "negative case, ipv4 compare with ipv6",
+			inpIPNet1: ovntest.MustParseIPNet("2001:db8:3c4d::/48"),
+			inpIPNet2: ovntest.MustParseIPNet("192.168.2.1/24"),
+			outExp:    false,
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			res := ContainsCIDR(tc.inpIPNet1, tc.inpIPNet2)
 			t.Log(res)
 			assert.Equal(t, res, tc.outExp)
 		})

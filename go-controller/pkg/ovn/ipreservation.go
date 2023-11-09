@@ -6,9 +6,9 @@ import (
 	"reflect"
 	"time"
 
+	ipallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	ipreservation "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
 	ipreservationscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/clientset/versioned/scheme"
-	ipam "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -35,22 +35,22 @@ func getIPReservationLockKey(resvIPObj *ipreservation.IPReservation) string {
 	return fmt.Sprintf("IPReservation/%s/%s", resvIPObj.Namespace, resvIPObj.Name)
 }
 
-func (oc *Controller) recordIPReservationEvent(reason string, err string, resvIP *ipreservation.IPReservation) {
+func (bnc *BaseNetworkController) recordIPReservationEvent(reason string, err string, resvIP *ipreservation.IPReservation) {
 	resvIPRef, refErr := reference.GetReference(ipreservationscheme.Scheme, resvIP)
 	if refErr != nil {
 		klog.Errorf("Couldn't get a reference to IPReservation %s/%s to post an event: '%v'",
 			resvIP.Namespace, resvIP.Name, refErr)
 	} else {
 		klog.V(5).Infof("Posting a %s event for IPReservation %s/%s", kapi.EventTypeWarning, resvIP.Namespace, resvIP.Name)
-		oc.mc.recorder.Eventf(resvIPRef, kapi.EventTypeWarning, reason, err)
+		bnc.recorder.Eventf(resvIPRef, kapi.EventTypeWarning, reason, err)
 	}
 }
 
-func (oc *Controller) updateIPReservationStatusWithRetry(namespace, name string, status ovntypes.OvnK8sStatus,
+func (bnc *BaseNetworkController) updateIPReservationStatusWithRetry(namespace, name string, status ovntypes.OvnK8sStatus,
 	messages []string, resvIPs []string) error {
 	retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		// Get the latest version of IPReservation object to modify it
-		latestResvIP, err := oc.mc.watchFactory.GetIPReservation(namespace, name)
+		latestResvIP, err := bnc.watchFactory.GetIPReservation(namespace, name)
 		if err != nil {
 			klog.Errorf("Unable to get IPReservation %s/%s for updating status, most likely it would be deleted",
 				namespace, name)
@@ -67,7 +67,7 @@ func (oc *Controller) updateIPReservationStatusWithRetry(namespace, name string,
 		if resvIPs != nil {
 			latestResvIP.Status.ReservedIPs = resvIPs
 		}
-		return oc.mc.kube.UpdateIPReservationStatus(latestResvIP)
+		return bnc.kube.UpdateIPReservationStatus(latestResvIP)
 	})
 	if retryErr != nil {
 		return fmt.Errorf("error in updating status on IPReservation %s/%s: %v", namespace, name, retryErr)
@@ -75,7 +75,7 @@ func (oc *Controller) updateIPReservationStatusWithRetry(namespace, name string,
 	return nil
 }
 
-func (oc *Controller) addIPReservation(resvIPObj *ipreservation.IPReservation) error {
+func (oc *BaseSecondaryLayer2NetworkController) addIPReservation(resvIPObj *ipreservation.IPReservation) error {
 	klog.Infof("Adding IPReservation %s/%s for network %s", resvIPObj.Namespace, resvIPObj.Name,
 		resvIPObj.Spec.NetworkAttachmentName)
 	// first check if we have already reserved IPs, and we are adding the object as part of ovnkube-master start
@@ -86,10 +86,10 @@ func (oc *Controller) addIPReservation(resvIPObj *ipreservation.IPReservation) e
 	}
 
 	var switchName string
-	if oc.nadInfo.TopoType == ovntypes.LocalnetAttachDefTopoType {
-		switchName = util.GetClusterScopedName(oc.nadInfo.Prefix + ovntypes.OVNLocalnetSwitch)
+	if oc.TopologyType() == ovntypes.LocalnetTopology {
+		switchName = util.GetClusterScopedName(oc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch))
 	} else {
-		switchName = util.GetClusterScopedName(oc.nadInfo.Prefix + ovntypes.OvnLayer2Switch)
+		switchName = util.GetClusterScopedName(oc.GetNetworkScopedName(ovntypes.OVNLayer2Switch))
 	}
 
 	isIPv4 := resvIPObj.Spec.IPFamily == ipreservation.IPv4Protocol
@@ -134,7 +134,7 @@ func (oc *Controller) addIPReservation(resvIPObj *ipreservation.IPReservation) e
 		if tmpErr != nil {
 			klog.Errorf(tmpErr.Error())
 		}
-		if err != ipam.ErrFull {
+		if err != ipallocator.ErrFull {
 			// there is no point in retrying if the IPAM is full, it is better for the user to free up the IPs and
 			// recreate the CR
 			oc.requeueIPReservation(actionAddIPReservation, resvIPObj)
@@ -162,19 +162,14 @@ func (oc *Controller) addIPReservation(resvIPObj *ipreservation.IPReservation) e
 	return err
 }
 
-func (oc *Controller) deleteIPReservation(resvIPObj *ipreservation.IPReservation) error {
+func (oc *BaseSecondaryLayer2NetworkController) deleteIPReservation(resvIPObj *ipreservation.IPReservation) error {
 	klog.Infof("Deleting IPReservation %s/%s for network %s", resvIPObj.Namespace, resvIPObj.Name, resvIPObj.Spec.NetworkAttachmentName)
 
-	if oc.nadInfo.TopoType != ovntypes.Layer2AttachDefTopoType && oc.nadInfo.TopoType != ovntypes.LocalnetAttachDefTopoType {
-		// nothing to do here, maybe user is deleting the incorrectly added IPReservation CR
-		return nil
-	}
-
 	var switchName string
-	if oc.nadInfo.TopoType == ovntypes.LocalnetAttachDefTopoType {
-		switchName = util.GetClusterScopedName(oc.nadInfo.Prefix + ovntypes.OVNLocalnetSwitch)
+	if oc.TopologyType() == ovntypes.LocalnetTopology {
+		switchName = util.GetClusterScopedName(oc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch))
 	} else {
-		switchName = util.GetClusterScopedName(oc.nadInfo.Prefix + ovntypes.OvnLayer2Switch)
+		switchName = util.GetClusterScopedName(oc.GetNetworkScopedName(ovntypes.OVNLayer2Switch))
 	}
 
 	resvIPNets := make([]*net.IPNet, 0, len(resvIPObj.Status.ReservedIPs))
@@ -197,7 +192,7 @@ func (oc *Controller) deleteIPReservation(resvIPObj *ipreservation.IPReservation
 // Todo(gmoodalbail): if a NAD CR and IPReservation CR is applied at the same time, are there
 // chances for race??
 
-func (oc *Controller) syncIPReservationObjects(resvIPObjs []interface{}) error {
+func (oc *BaseSecondaryLayer2NetworkController) syncIPReservationObjects(resvIPObjs []interface{}) error {
 	for _, resvIPObjInterface := range resvIPObjs {
 		resvIPObj, ok := resvIPObjInterface.(*ipreservation.IPReservation)
 		if !ok {
@@ -209,17 +204,17 @@ func (oc *Controller) syncIPReservationObjects(resvIPObjs []interface{}) error {
 			continue
 		}
 		var switchName string
-		if oc.nadInfo.TopoType == ovntypes.LocalnetAttachDefTopoType {
-			switchName = util.GetClusterScopedName(oc.nadInfo.Prefix + ovntypes.OVNLocalnetSwitch)
+		if oc.TopologyType() == ovntypes.LocalnetTopology {
+			switchName = util.GetClusterScopedName(oc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch))
 		} else {
-			switchName = util.GetClusterScopedName(oc.nadInfo.Prefix + ovntypes.OvnLayer2Switch)
+			switchName = util.GetClusterScopedName(oc.GetNetworkScopedName(ovntypes.OVNLayer2Switch))
 		}
 		for _, resvIP := range resvIPObj.Status.ReservedIPs {
 			ip, ipnet, _ := net.ParseCIDR(resvIP)
 			ipnet.IP = ip
 			err := oc.lsManager.AllocateIPs(switchName, []*net.IPNet{ipnet})
 			if err != nil {
-				if err == ipam.ErrAllocated {
+				if err == ipallocator.ErrAllocated {
 					// This should not happen ever!! if it does, then something else - a Pod or another IPReservation
 					// object took the IP from us!
 					err = fmt.Errorf("failed to reserve the IP %s for IPReservation object %s/%s while syncing. "+
@@ -241,37 +236,39 @@ func (oc *Controller) syncIPReservationObjects(resvIPObjs []interface{}) error {
 
 // WatchIPReservations starts the watching of ipreservation resources and calls
 // back the appropriate handler logic
-func (oc *Controller) WatchIPReservations() error {
-	start := time.Now()
-	if oc.nadInfo.TopoType == ovntypes.Layer2AttachDefTopoType || oc.nadInfo.TopoType == ovntypes.LocalnetAttachDefTopoType {
-		oc.ipReserveRetryQueue = workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "ipReserve")
+func (oc *BaseSecondaryLayer2NetworkController) WatchIPReservations() (err error) {
+	if oc.ipReserveHandler != nil {
+		// WatchIPReservations has succeeded and this is from retry, nothing to do
+		return nil
 	}
+	start := time.Now()
 
+	defer func() {
+		if err != nil {
+			if oc.ipReserveRetryQueue != nil {
+				oc.ipReserveRetryQueue.ShutDown()
+			}
+			if oc.ipReserveHandler != nil {
+				oc.watchFactory.RemoveIPReservationHandler(oc.ipReserveHandler)
+			}
+			oc.ipReserveRetryQueue = nil
+			oc.ipReserveHandler = nil
+		}
+	}()
+
+	oc.ipReserveRetryQueue = workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "ipReserve")
 	// filterIPReservation checks if the ipReservation's NAD belongs to this controller
 	filterIPReservation := func(obj interface{}) bool {
 		ipResv, ok := obj.(*ipreservation.IPReservation)
 		if !ok {
 			return false
 		}
-		_, ok = oc.nadInfo.NetAttachDefs.Load(ipResv.Spec.NetworkAttachmentName)
-		return ok
+		return oc.HasNAD(ipResv.Spec.NetworkAttachmentName)
 	}
-	_, err := oc.mc.watchFactory.AddHandlerWithFilterFunc(reflect.TypeOf(&ipreservation.IPReservation{}), filterIPReservation,
+	oc.ipReserveHandler, err = oc.watchFactory.AddHandlerWithFilterFunc(reflect.TypeOf(&ipreservation.IPReservation{}), filterIPReservation,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				resvIPObj := obj.(*ipreservation.IPReservation)
-				if oc.nadInfo.TopoType != ovntypes.Layer2AttachDefTopoType && oc.nadInfo.TopoType != ovntypes.LocalnetAttachDefTopoType {
-					err := fmt.Errorf("the networkAttachmentName, %s, of IPReservation %s/%s object is not a L2 or Localnet network type",
-						resvIPObj.Spec.NetworkAttachmentName, resvIPObj.Namespace, resvIPObj.Name)
-					klog.Errorf(err.Error())
-					tmpErr := oc.updateIPReservationStatusWithRetry(resvIPObj.Namespace, resvIPObj.Name, ovntypes.OvnK8sStatusFailed,
-						[]string{err.Error()}, nil)
-					if tmpErr != nil {
-						klog.Errorf(tmpErr.Error())
-					}
-					return
-				}
-
 				unlock := util.LockByKey.Acquire(getIPReservationLockKey(resvIPObj))
 				defer unlock()
 				err := oc.addIPReservation(resvIPObj)
@@ -298,29 +295,26 @@ func (oc *Controller) WatchIPReservations() error {
 					oc.recordIPReservationEvent("IPReservationDeleteError", err.Error(), resvIPObj)
 				}
 			},
-		}, oc.syncIPReservationObjects)
+		}, oc.syncIPReservationObjects, 1 /* TBD: set priority */)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to watch for IPReservations CRD for network %s", oc.GetNetworkName())
 	}
 
-	// run this only for l2 and localnet networks
-	if oc.nadInfo.TopoType == ovntypes.Layer2AttachDefTopoType || oc.nadInfo.TopoType == ovntypes.LocalnetAttachDefTopoType {
-		go func() {
-			<-oc.stopChan
-			oc.ipReserveRetryQueue.ShutDown()
-		}()
-		go func() {
-			for oc.retryIPReservationOperations() {
-			}
-		}()
-	}
+	go func() {
+		<-oc.stopChan
+		oc.ipReserveRetryQueue.ShutDown()
+	}()
+	go func() {
+		for oc.retryIPReservationOperations() {
+		}
+	}()
 
 	klog.Infof("Bootstrapping existing ipreservations and cleaning stale ipreservations for network %s took %v",
-		oc.nadInfo.NetName, time.Since(start))
+		oc.GetNetworkName(), time.Since(start))
 	return nil
 }
 
-func (oc *Controller) retryIPReservationOperations() bool {
+func (oc *BaseSecondaryLayer2NetworkController) retryIPReservationOperations() bool {
 	item, quit := oc.ipReserveRetryQueue.Get()
 	if quit {
 		return false
@@ -336,7 +330,7 @@ func (oc *Controller) retryIPReservationOperations() bool {
 	defer unlock()
 	// it could be that the object has been removed from K8s while we were waiting on queue, so check
 	// for existence of the object
-	_, err := oc.mc.watchFactory.GetIPReservation(retryEvent.resvIPObj.Namespace, retryEvent.resvIPObj.Name)
+	_, err := oc.watchFactory.GetIPReservation(retryEvent.resvIPObj.Namespace, retryEvent.resvIPObj.Name)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			klog.Infof("Stop retrying IPReservation event %v for  %s/%s as it does not exist", retryEvent,
@@ -364,7 +358,7 @@ func (oc *Controller) retryIPReservationOperations() bool {
 	return true
 }
 
-func (oc *Controller) requeueIPReservation(ra action, resvIPObj *ipreservation.IPReservation) {
+func (oc *BaseSecondaryLayer2NetworkController) requeueIPReservation(ra action, resvIPObj *ipreservation.IPReservation) {
 	req := &ipReservationRetryRequest{
 		action:    ra,
 		resvIPObj: resvIPObj,

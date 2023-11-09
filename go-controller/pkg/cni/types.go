@@ -6,20 +6,22 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/containernetworking/cni/pkg/types/current"
+	current "github.com/containernetworking/cni/pkg/types/100"
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
+	kapi "k8s.io/api/core/v1"
 )
 
-// serverRunDir is the default directory for CNIServer runtime files
-const serverRunDir string = "/var/run/ovn-kubernetes/cni/"
+// ServerRunDir is the default directory for CNIServer runtime files
+const ServerRunDir string = "/var/run/ovn-kubernetes/cni/"
 
 const serverSocketName string = "ovn-cni-server.sock"
-const serverSocketPath string = serverRunDir + "/" + serverSocketName
+const serverSocketPath string = ServerRunDir + "/" + serverSocketName
 
 // KubeAPIAuth contains information necessary to create a Kube API client
 type KubeAPIAuth struct {
@@ -39,21 +41,26 @@ type KubeAPIAuth struct {
 // PodInterfaceInfo consists of interface info result from cni server if cni client configure's interface
 type PodInterfaceInfo struct {
 	util.PodAnnotation
-	util.NetNameInfo
 
 	RoutableMTU          int    `json:"routable-mtu"`
 	Ingress              int64  `json:"ingress"`
 	Egress               int64  `json:"egress"`
-	CheckExtIDs          bool   `json:"check-external-ids"`
 	IsDPUHostMode        bool   `json:"is-dpu-host-mode"`
+	SkipIPConfig         bool   `json:"skip-ip-config"`
 	PodUID               string `json:"pod-uid"`
 	NetdevName           string `json:"netdev-name"`
 	EnableUDPAggregation bool   `json:"enable-udp-aggregation"`
-	NadName              string `json:"nadName"` // nad's <namesapce/name>, when associated with a net-attach-def
 	SkipSpoofCheck       bool   `json:"skip-spoof-check"`
-	ClusterName          string `json:"clusterName"`
-	ClusterNamePrefix    string `json:"clusterNamePrefix"`
-	OvnKubeMode          string `json:"ovnKubeMode"`
+
+	// network name, for default network, it is "default", otherwise it is net-attach-def's netconf spec name
+	NetName string `json:"netName"`
+	// NADName, for default network, it is "default", otherwise, in the form of net-attach-def's <Namespace>/<Name>
+	NADName string `json:"nadName"`
+
+	// for multi cluster support
+	ClusterName       string `json:"clusterName"`
+	ClusterNamePrefix string `json:"clusterNamePrefix"`
+	OvnKubeMode       string `json:"ovnKubeMode"`
 }
 
 // Explicit type for CNI commands the server handles
@@ -149,24 +156,40 @@ type PodRequest struct {
 	cancel context.CancelFunc
 	// if CNIConf.DeviceID is present, then captures if the VF is of type VFIO or not
 	IsVFIO bool
-	// Since the default network to the Pod is always named `default`, we will need
-	// effective names for both the NetConf and Name. Following two fields
-	// captures the same.
-	effectiveNetName string
-	effectiveNADName string
-	isSecondary      bool
+
+	// network name, for default network, this will be types.DefaultNetworkName
+	netName string
+
+	// for ovs interfaces plumbed for secondary networks, their iface-id's prefix is derived from the specific nadName;
+	// also, need to find the pod annotation, dpu pod connection/status annotations of the given NAD ("default"
+	// for default network).
+	nadName string
 }
 
-type cniRequestFunc func(request *PodRequest, podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface, kubeAuth *KubeAPIAuth) ([]byte, error)
+type podRequestFunc func(request *PodRequest, clientset *ClientSet, kubeAuth *KubeAPIAuth) ([]byte, error)
+
+type PodInfoGetter interface {
+	getPod(namespace, name string) (*kapi.Pod, error)
+}
+
+type ClientSet struct {
+	PodInfoGetter
+	kclient   kubernetes.Interface
+	podLister corev1listers.PodLister
+}
+
+func NewClientSet(kclient kubernetes.Interface, podLister corev1listers.PodLister) *ClientSet {
+	return &ClientSet{
+		kclient:   kclient,
+		podLister: podLister,
+	}
+}
 
 // Server object that listens for JSON-marshaled Request objects
 // on a private root-only Unix domain socket.
 type Server struct {
 	http.Server
-	requestFunc       cniRequestFunc
-	rundir            string
-	useOVSExternalIDs int32
-	kclient           kubernetes.Interface
-	podLister         corev1listers.PodLister
-	kubeAuth          *KubeAPIAuth
+	handlePodRequestFunc podRequestFunc
+	clientSet            *ClientSet
+	kubeAuth             *KubeAPIAuth
 }

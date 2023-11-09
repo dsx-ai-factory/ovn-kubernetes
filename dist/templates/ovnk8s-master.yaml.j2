@@ -125,6 +125,12 @@ spec:
               value: "{{ ovnkube_logfile_maxbackups }}"
             - name: OVNKUBE_LOGFILE_MAXAGE
               value: "{{ ovnkube_logfile_maxage }}"
+            - name: OVNKUBE_LIBOVSDB_CLIENT_LOGFILE
+              value: "{{ ovnkube_libovsdb_client_logfile }}"
+            - name: OVNKUBE_CONFIG_DURATION_ENABLE
+              value: "{{ ovnkube_config_duration_enable }}"
+            - name: OVNKUBE_METRICS_SCALE_ENABLE
+              value: "{{ ovnkube_metrics_scale_enable }}"
             - name: OVNKUBE_LOGFILE
               value: "{{ ovnkube_logfile }}"
             - name: OVN_METRICS_SCRAPE_INTERVAL
@@ -163,40 +169,54 @@ spec:
                   fieldPath: metadata.namespace
             - name: OVN_HYBRID_OVERLAY_ENABLE
               value: "{{ ovn_hybrid_overlay_enable }}"
+            - name: OVN_ADMIN_NETWORK_POLICY_ENABLE
+              value: "{{ ovn_admin_network_policy_enable }}"
             - name: OVN_HYBRID_OVERLAY_NET_CIDR
               value: "{{ ovn_hybrid_overlay_net_cidr }}"
             - name: OVN_EGRESSIP_ENABLE
               value: "{{ ovn_egress_ip_enable }}"
+            - name: OVN_EGRESSIP_HEALTHCHECK_PORT
+              value: "{{ ovn_egress_ip_healthcheck_port }}"
+            - name: OVN_EGRESSIP_REACHABILITY_TIMEOUT
+              value: "{{ ovn_egress_ip_reachability_timeout }}"
             - name: OVN_EGRESSFIREWALL_ENABLE
               value: "{{ ovn_egress_firewall_enable }}"
             - name: OVN_MULTI_NETWORK_ENABLE
               value: "{{ ovn_multi_network_enable }}"
-            - name: OVN_MULTI_NETWORKPOLICY_ENABLE
-              value: "{{ ovn_multi_networkpolicy_enable }}"
             - name: OVN_EGRESSQOS_ENABLE
               value: "{{ ovn_egress_qos_enable }}"
+            - name: OVN_EGRESSSERVICE_ENABLE
+              value: "{{ ovn_egress_service_enable }}"
             - name: OVN_ADMIN_PBR_ENABLE
               value: "{{ ovn_admin_pbr_enable }}"
             - name: OVN_VIRTUALIP_ENABLE
               value: "{{ ovn_virtual_ip_enable }}"
             - name: OVN_IPRESERVATION_ENABLE
               value: "{{ ovn_ipreservation_enable }}"
-            - name: OVN_PORT_MIRROR_ENABLE
-              value: "{{ ovn_port_mirror_enable }}"
             - name: OVN_DISABLE_SNAT_MULTIPLE_GWS
               value: "{{ ovn_disable_snat_multiple_gws }}"
+            - name: OVN_DISABLE_FORWARDING
+              value: "{{ ovn_disable_forwarding }}"
+            - name: OVN_ENCAP_PORT
+              value: "{{ ovn_encap_port }}"
             - name: OVN_EMPTY_LB_EVENTS
               value: "{{ ovn_empty_lb_events }}"
             - name: OVN_V4_JOIN_SUBNET
               value: "{{ ovn_v4_join_subnet }}"
             - name: OVN_V6_JOIN_SUBNET
               value: "{{ ovn_v6_join_subnet }}"
+            - name: OVN_V4_MASQUERADE_SUBNET
+              value: "{{ ovn_v4_masquerade_subnet }}"
+            - name: OVN_V6_MASQUERADE_SUBNET
+              value: "{{ ovn_v6_masquerade_subnet }}"
             - name: OVN_ACL_LOGGING_RATE_LIMIT
               value: "{{ ovn_acl_logging_rate_limit }}"
             - name: OVN_SSL_ENABLE
               value: "{{ ovn_ssl_en }}"
             - name: OVN_GATEWAY_MODE
               value: "{{ ovn_gateway_mode }}"
+            - name: OVN_GATEWAY_OPTS
+              value: "{{ ovn_gateway_opts }}"
             - name: OVN_MULTICAST_ENABLE
               value: "{{ ovn_multicast_enable }}"
             - name: OVN_NB_CERT_CNAME
@@ -205,6 +225,10 @@ spec:
               value: "{{ ovn_sb_cert_cname }}"
             - name: OVN_NOHOSTSUBNET_LABEL
               value: "{{ ovn_nohostsubnet_label }}"
+            - name: OVN_STATELESS_NETPOL_ENABLE
+              value: "{{ ovn_stateless_netpol_enable }}"
+            - name: OVN_ENABLE_MULTI_EXTERNAL_GATEWAY
+              value: "{{ ovn_enable_multi_external_gateway }}"
             - name: OVN_HOST_NETWORK_NAMESPACE
               valueFrom:
                 configMapKeyRef:

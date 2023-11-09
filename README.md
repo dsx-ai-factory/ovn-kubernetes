@@ -69,11 +69,14 @@ kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovn
 kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/k8s.ovn.org_egressips.yaml
 # create egressfirewalls.k8s.ovn.org CRD
 kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/k8s.ovn.org_egressfirewalls.yaml
+# create adminpolicybasedexternalroute.k8s.ovn.org CRD
+kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/k8s.ovn.org_adminpolicybasedexternalroutes.yaml
 
 # Run ovnkube-db deployment.
 kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovnkube-db.yaml
 
-# Run ovnkube-master deployment.
+# Run ovnkube-master deployment
+# To run ovnkube-master deployment with both cluster manager and ovnkube controller as one container)
 kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovnkube-master.yaml
 
 # Run ovnkube daemonset for nodes
@@ -136,6 +139,8 @@ that can be brought up locally and within a few minutes.
 
 [Debugging OVN](./docs/debugging.md)
 
+[Exposed metrics](./docs/metrics.md)
+
 The golang based [ovn kubernetes go-controller](./go-controller/README.md) is a reliable way to
 deploy the OVN SDN using kubernetes clients and watchers based on golang. Contains `ovnkube` and
 `ovn-k8s-cni-overlay` build and usage instructions.
@@ -160,6 +165,12 @@ how to override the default values for some config options.
 [Egress Firewall](./docs/egress-firewall.md) The EgressFirewall feature enables a cluster
 administrator to limit the external hosts that a pod in a project can access. 
 The EgressFirewall object rules apply to all pods that share the namespace with the egressfirewall object.
+
+[Egress QoS](./docs/egress-qos.md) The EgressQoS feature enables marking pods egress traffic
+with a valid QoS Differentiated Services Code Point (DSCP) value.
+
+[Egress Service](./docs/egress-service.md) The Egress Service feature enables the egress traffic
+of pods backing a LoadBalancer service to exit the cluster using its ingress IP.
 
 [Hybrid Overlay](./docs/hybrid-overlay.md) feature creates VXLAN tunnels to nodes in the cluster that
 have been excluded from the ovn-kubernetes overlay using the no-hostsubnet-nodes config option.
@@ -187,11 +198,17 @@ OVN Kubernetes implements both External IPs and LoadBalancer Ingress IPs in the 
 OVN load balancers. It is the administrator's responsibility to route traffic to the Kubernetes nodes for
 both of these VIP types.
 
+[Egress IP](./docs/egress-ip.md). The egress IP address feature allows you to ensure that the traffic
+from one or more pods in one or more namespaces has a consistent source IP address for services outside the
+cluster network.
+
 ## Other
 [Unit test mocks](./docs/mocks-ut-faq.md)
 
 [ovnkube-trace](./docs/ovnkube-trace.md) a tool to trace packet simulations between points in an 
 ovn-kubernetes driven cluster.
+
+[ACLs used by ovn-k and their priorities](./docs/acls.md)
 
 # OVN Kubernetes Basics
 A good resource to get started with understanding `ovn-kubernetes` is the following recording and slides, which run through the basic architecture and functionality of the system.

@@ -4,3 +4,4 @@ OVN_VER=23.06.0.latest
 # To use a specific version state that specificaly, for example:
 #OVS_VER=3.1.1.fa9bdb3c.d7423ea2
 #OVN_VER=23.06.0.7c229b5c.d7423ea3
+skip_port_mirror_test=yes

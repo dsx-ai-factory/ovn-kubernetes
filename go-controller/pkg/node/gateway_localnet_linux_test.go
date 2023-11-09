@@ -1,17 +1,24 @@
 package node
 
 import (
+	"context"
 	"fmt"
 	"net"
+	"sync"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	OFManager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/openflow-manager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 	"github.com/urfave/cli/v2"
+	"github.com/vishvananda/netlink"
+
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
@@ -40,7 +47,9 @@ func initFakeNodePortWatcher(iptV4, iptV6 util.IPTablesHelper) *nodePortWatcher 
 	f6 := iptV6.(*util.FakeIPTables)
 	err = f6.MatchState(initIPTable)
 	Expect(err).NotTo(HaveOccurred())
+	bridgeName := "brp0"
 
+	id := OFManager.OpenFlowCacheManager.CreateFlowCache(bridgeName)
 	fNPW := nodePortWatcher{
 		ofportPhys:  "eth0",
 		ofportPatch: "patch-breth0_ov",
@@ -48,24 +57,31 @@ func initFakeNodePortWatcher(iptV4, iptV6 util.IPTablesHelper) *nodePortWatcher 
 		gatewayIPv6: v6localnetGatewayIP,
 		serviceInfo: make(map[k8stypes.NamespacedName]*serviceConfig),
 		ofm: &openflowManager{
-			flowCache: map[string][]string{},
+			defaultBridgeFlowID: id,
 		},
 	}
 	return &fNPW
 }
 
-func startNodePortWatcher(n *nodePortWatcher, fakeClient *util.OVNClientset, fakeMgmtPortConfig *managementPortConfig) error {
-	if err := initLocalGatewayIPTables(); err != nil {
+func startNodePortWatcher(n *nodePortWatcher, fakeClient *util.OVNNodeClientset, fakeMgmtPortConfig *managementPortConfig) error {
+	err := initLocalGatewayIPTables()
+	if err != nil {
 		return err
 	}
 
-	k := &kube.Kube{fakeClient.KubeClient, nil, nil, nil, nil, nil, nil, nil}
-	n.nodeIPManager = newAddressManager(fakeNodeName, k, fakeMgmtPortConfig, n.watchFactory)
-	localHostNetEp := "192.168.18.15/32"
-	ip, _, _ := net.ParseCIDR(localHostNetEp)
-	n.nodeIPManager.addAddr(ip)
+	k := &kube.Kube{KClient: fakeClient.KubeClient}
+	n.nodeIPManager, err = newAddressManagerInternal(fakeNodeName, k, fakeMgmtPortConfig, n.watchFactory, nil, false)
+	if err != nil {
+		return err
+	}
 
-	n.watchFactory.AddServiceHandler(cache.ResourceEventHandlerFuncs{
+	localHostNetEp := "192.168.18.15/32"
+	ip, ipnet, _ := net.ParseCIDR(localHostNetEp)
+	n.nodeIPManager.addAddr(net.IPNet{IP: ip, Mask: ipnet.Mask})
+
+	// set up a controller to handle events on services to mock the nodeportwatcher bits
+	// in gateway.go and trigger code in gateway_shared_intf.go
+	_, err = n.watchFactory.AddServiceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			svc := obj.(*kapi.Service)
 			n.AddService(svc)
@@ -80,7 +96,31 @@ func startNodePortWatcher(n *nodePortWatcher, fakeClient *util.OVNClientset, fak
 			n.DeleteService(svc)
 		},
 	}, n.SyncServices)
-	return nil
+
+	return err
+}
+
+func startNodePortWatcherWithRetry(n *nodePortWatcher, fakeClient *util.OVNNodeClientset, fakeMgmtPortConfig *managementPortConfig, stopChan chan struct{}, wg *sync.WaitGroup) (*retry.RetryFramework, error) {
+	err := initLocalGatewayIPTables()
+	if err != nil {
+		return nil, err
+	}
+
+	k := &kube.Kube{KClient: fakeClient.KubeClient}
+	n.nodeIPManager, err = newAddressManagerInternal(fakeNodeName, k, fakeMgmtPortConfig, n.watchFactory, nil, false)
+	if err != nil {
+		return nil, err
+	}
+
+	localHostNetEp := "192.168.18.15/32"
+	ip, ipnet, _ := net.ParseCIDR(localHostNetEp)
+	n.nodeIPManager.addAddr(net.IPNet{IP: ip, Mask: ipnet.Mask})
+
+	nodePortWatcherRetry := n.newRetryFrameworkForTests(factory.ServiceForFakeNodePortWatcherType, stopChan, wg)
+	if _, err := nodePortWatcherRetry.WatchResource(); err != nil {
+		return nil, fmt.Errorf("failed to start watching services with retry framework: %v", err)
+	}
+	return nodePortWatcherRetry, nil
 }
 
 func newObjectMeta(name, namespace string) metav1.ObjectMeta {
@@ -91,6 +131,7 @@ func newObjectMeta(name, namespace string) metav1.ObjectMeta {
 		Labels: map[string]string{
 			"name": name,
 		},
+		Annotations: map[string]string{},
 	}
 }
 
@@ -108,6 +149,7 @@ func newService(name, namespace, ip string, ports []v1.ServicePort, serviceType 
 		ObjectMeta: newObjectMeta(name, namespace),
 		Spec: v1.ServiceSpec{
 			ClusterIP:             ip,
+			ClusterIPs:            []string{ip},
 			Ports:                 ports,
 			Type:                  serviceType,
 			ExternalIPs:           externalIPs,
@@ -118,21 +160,71 @@ func newService(name, namespace, ip string, ports []v1.ServicePort, serviceType 
 	}
 }
 
-func newEndpoints(name, namespace string, eps []v1.EndpointSubset) *v1.Endpoints {
-	return &v1.Endpoints{
-		ObjectMeta: newObjectMeta(name, namespace),
-		Subsets:    eps,
+func newServiceWithoutNodePortAllocation(name, namespace, ip string, ports []v1.ServicePort, serviceType v1.ServiceType,
+	externalIPs []string, serviceStatus v1.ServiceStatus, isETPLocal, isITPLocal bool) *v1.Service {
+	doNotAllocateNodePorts := false
+	service := newService(name, namespace, ip, ports, serviceType, externalIPs, serviceStatus, isETPLocal, isITPLocal)
+	service.Spec.AllocateLoadBalancerNodePorts = &doNotAllocateNodePorts
+	return service
+}
+
+func newEndpointSlice(svcName, namespace string, endpoints []discovery.Endpoint, endpointPort []discovery.EndpointPort) *discovery.EndpointSlice {
+	return &discovery.EndpointSlice{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      svcName + "ab23",
+			Namespace: namespace,
+			Labels:    map[string]string{discovery.LabelServiceName: svcName},
+		},
+		Ports:       endpointPort,
+		AddressType: discovery.AddressTypeIPv4,
+		Endpoints:   endpoints,
 	}
 }
 
-func newEndpointSlice(name, namespace string, adresses []string) *discovery.EndpointSlice {
-	ep := discovery.Endpoint{Addresses: adresses}
-	eps := &discovery.EndpointSlice{
-		ObjectMeta: newObjectMeta(name, namespace),
+func makeConntrackFilter(ip string, port int, protocol kapi.Protocol) *netlink.ConntrackFilter {
+	filter := &netlink.ConntrackFilter{}
+
+	var err error
+	if protocol == kapi.ProtocolUDP {
+		err = filter.AddProtocol(17)
+	} else if protocol == kapi.ProtocolTCP {
+		err = filter.AddProtocol(6)
+	} else if protocol == kapi.ProtocolSCTP {
+		err = filter.AddProtocol(132)
 	}
-	eps.ObjectMeta.Labels[discovery.LabelServiceName] = name
-	eps.Endpoints = append(eps.Endpoints, ep)
-	return eps
+	Expect(err).NotTo(HaveOccurred())
+
+	if port > 0 {
+		err = filter.AddPort(netlink.ConntrackOrigDstPort, uint16(port))
+		Expect(err).NotTo(HaveOccurred())
+	}
+	ipAddress := net.ParseIP(ip)
+	Expect(ipAddress).NotTo(BeNil())
+	err = filter.AddIP(netlink.ConntrackOrigDstIP, ipAddress)
+	Expect(err).NotTo(HaveOccurred())
+
+	return filter
+}
+
+type ctFilterDesc struct {
+	ip   string
+	port int
+}
+
+func addConntrackMocks(nlMock *mocks.NetLinkOps, filterDescs []ctFilterDesc) {
+	ctMocks := make([]ovntest.TestifyMockHelper, 0, len(filterDescs))
+	for _, ctf := range filterDescs {
+		ctMocks = append(ctMocks, ovntest.TestifyMockHelper{
+			OnCallMethodName: "ConntrackDeleteFilter",
+			OnCallMethodArgs: []interface{}{
+				netlink.ConntrackTableType(netlink.ConntrackTable),
+				netlink.InetFamily(netlink.FAMILY_V4),
+				makeConntrackFilter(ctf.ip, ctf.port, kapi.ProtocolTCP),
+			},
+			RetArgList: []interface{}{uint(1), nil},
+		})
+	}
+	ovntest.ProcessMockFnList(&nlMock.Mock, ctMocks)
 }
 
 var _ = Describe("Node Operations", func() {
@@ -143,11 +235,16 @@ var _ = Describe("Node Operations", func() {
 		iptV4, iptV6       util.IPTablesHelper
 		fNPW               *nodePortWatcher
 		fakeMgmtPortConfig managementPortConfig
+		netlinkMock        *mocks.NetLinkOps
 	)
+
+	origNetlinkInst := util.GetNetLinkOps()
 
 	BeforeEach(func() {
 		// Restore global default values before each testcase
-		config.PrepareTestConfig()
+		Expect(config.PrepareTestConfig()).To(Succeed())
+		netlinkMock = &mocks.NetLinkOps{}
+		util.SetNetLinkOpMockInst(netlinkMock)
 
 		app = cli.NewApp()
 		app.Name = "test"
@@ -172,7 +269,13 @@ var _ = Describe("Node Operations", func() {
 			ipv4:      &fakeMgmtPortIPFamilyConfig,
 			ipv6:      nil,
 		}
+		OFManager.NewOpenFlowCacheManager(&sync.WaitGroup{}, make(chan struct{}))
 		fNPW = initFakeNodePortWatcher(iptV4, iptV6)
+	})
+
+	AfterEach(func() {
+		fakeOvnNode.shutdown()
+		util.SetNetLinkOpMockInst(origNetlinkInst)
 	})
 
 	Context("on startup", func() {
@@ -198,7 +301,7 @@ var _ = Describe("Node Operations", func() {
 				)
 
 				fakeRules := getExternalIPTRules(service.Spec.Ports[0], externalIP, service.Spec.ClusterIP, false, false)
-				addIptRules(fakeRules)
+				Expect(insertIptRules(fakeRules)).To(Succeed())
 				fakeRules = getExternalIPTRules(
 					v1.ServicePort{
 						Port:     27000,
@@ -210,7 +313,7 @@ var _ = Describe("Node Operations", func() {
 					false,
 					false,
 				)
-				addIptRules(fakeRules)
+				Expect(insertIptRules(fakeRules)).To(Succeed())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -236,7 +339,7 @@ var _ = Describe("Node Operations", func() {
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables = map[string]util.FakeTable{
@@ -251,6 +354,9 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
 						"OVN-KUBE-NODEPORT": []string{},
 						"OVN-KUBE-EXTERNALIP": []string{
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
@@ -258,6 +364,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
+						"OVN-KUBE-EGRESS-SVC":    []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -272,7 +379,6 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -309,8 +415,9 @@ var _ = Describe("Node Operations", func() {
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
-				fNPW.AddService(&service)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -324,6 +431,9 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
 						"OVN-KUBE-NODEPORT": []string{},
 						"OVN-KUBE-EXTERNALIP": []string{
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
@@ -331,6 +441,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
+						"OVN-KUBE-EGRESS-SVC":    []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -342,9 +453,8 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -367,7 +477,11 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceStatus{},
 					false, false,
 				)
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{})
+				endpointSlice := *newEndpointSlice(
+					"service1",
+					"namespace1",
+					[]discovery.Endpoint{},
+					[]discovery.EndpointPort{})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -375,12 +489,13 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
-				fNPW.AddService(&service)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables := map[string]util.FakeTable{
@@ -395,6 +510,9 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
@@ -402,6 +520,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
+						"OVN-KUBE-EGRESS-SVC":    []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -413,9 +532,8 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -425,6 +543,8 @@ var _ = Describe("Node Operations", func() {
 		It("inits iptables rules and openflows with NodePort where ETP=local, LGW", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.Gateway.Mode = config.GatewayModeLocal
+				epPortName := "https"
+				epPortValue := int32(443)
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
 						{
@@ -438,23 +558,20 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceStatus{},
 					true, false,
 				)
-				addr := v1.EndpointAddress{
-					IP: "10.244.0.3",
+				ep1 := discovery.Endpoint{
+					Addresses: []string{"10.244.0.3"},
 				}
-				port := v1.EndpointPort{
-					Name: "https",
-					Port: int32(443),
+				epPort1 := discovery.EndpointPort{
+					Name: &epPortName,
+					Port: &epPortValue,
 				}
-				ep := v1.EndpointSubset{
-					Addresses: []v1.EndpointAddress{
-						addr,
-					},
-					Ports: []v1.EndpointPort{
-						port,
-					},
-				}
-				// endpoints.Subset is ovn-networked so this will come under !hasLocalHostNetEp case
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{ep})
+				// endpointSlice.Endpoints is ovn-networked so this will
+				// come under !hasLocalHostNetEp case
+				endpointSlice := *newEndpointSlice(
+					"service1",
+					"namespace1",
+					[]discovery.Endpoint{ep1},
+					[]discovery.EndpointPort{epPort1})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -462,12 +579,13 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
-				fNPW.AddService(&service)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -481,6 +599,9 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
@@ -489,9 +610,10 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p TCP --dport %v -j RETURN", service.Spec.Ports[0].NodePort),
 						},
 						"OVN-KUBE-ETP": []string{
-							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
+							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String(), service.Spec.Ports[0].NodePort),
 						},
-						"OVN-KUBE-ITP": []string{},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -503,11 +625,10 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
-				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
+				flows := fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(BeNil())
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -542,7 +663,11 @@ var _ = Describe("Node Operations", func() {
 					},
 					false, false,
 				)
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{})
+				endpointSlice := *newEndpointSlice(
+					"service1",
+					"namespace1",
+					[]discovery.Endpoint{},
+					[]discovery.EndpointPort{})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -550,12 +675,13 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
-				fNPW.AddService(&service)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables := map[string]util.FakeTable{
@@ -570,6 +696,9 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
@@ -580,6 +709,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
+						"OVN-KUBE-EGRESS-SVC":    []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -591,9 +721,8 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -631,8 +760,13 @@ var _ = Describe("Node Operations", func() {
 					},
 					true, false,
 				)
-				// endpoints.Subset is empty and yet this will come under !hasLocalHostNetEp case
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{})
+				// endpointSlice.Endpoints is empty and yet this will come under
+				// !hasLocalHostNetEp case
+				endpointSlice := *newEndpointSlice(
+					"service1",
+					"namespace1",
+					[]discovery.Endpoint{},
+					[]discovery.EndpointPort{})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -640,12 +774,13 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
-				fNPW.AddService(&service)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -659,6 +794,9 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
@@ -670,11 +808,12 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
 						"OVN-KUBE-ETP": []string{
-							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Status.LoadBalancer.Ingress[0].IP, service.Spec.Ports[0].Port, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
-							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
-							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
+							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Status.LoadBalancer.Ingress[0].IP, service.Spec.Ports[0].Port, config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String(), service.Spec.Ports[0].NodePort),
+							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String(), service.Spec.Ports[0].NodePort),
+							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String(), service.Spec.Ports[0].NodePort),
 						},
-						"OVN-KUBE-ITP": []string{},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -692,20 +831,147 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
-				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
+				flows := fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(BeNil())
-				flows = fNPW.ofm.flowCache["Ingress_namespace1_service1_5.5.5.5_8080"]
+				flows = fNPW.ofm.getFlowCacheEntry("Ingress_namespace1_service1_5.5.5.5_8080")
 				Expect(flows).To(Equal(expectedLBIngressFlows))
-				flows = fNPW.ofm.flowCache["External_namespace1_service1_1.1.1.1_8080"]
+				flows = fNPW.ofm.getFlowCacheEntry("External_namespace1_service1_1.1.1.1_8080")
 				Expect(flows).To(Equal(expectedLBExternalIPFlows))
 
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
 			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("inits iptables rules and openflows with LoadBalancer where AllocateLoadBalancerNodePorts=False, ETP=local, LGW mode", func() {
+			app.Action = func(ctx *cli.Context) error {
+				externalIP := "1.1.1.1"
+				config.Gateway.Mode = config.GatewayModeLocal
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-ofctl show ",
+					Err: fmt.Errorf("deliberate error to fall back to output:LOCAL"),
+				})
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-ofctl show ",
+					Err: fmt.Errorf("deliberate error to fall back to output:LOCAL"),
+				})
+				service := *newServiceWithoutNodePortAllocation("service1", "namespace1", "10.129.0.2",
+					[]v1.ServicePort{
+						{
+							Protocol:   v1.ProtocolTCP,
+							Port:       int32(80),
+							TargetPort: intstr.FromInt(int(int32(8080))),
+						},
+					},
+					v1.ServiceTypeLoadBalancer,
+					[]string{externalIP},
+					v1.ServiceStatus{
+						LoadBalancer: v1.LoadBalancerStatus{
+							Ingress: []v1.LoadBalancerIngress{{
+								IP: "5.5.5.5",
+							}},
+						},
+					},
+					true, false,
+				)
+				ep1 := discovery.Endpoint{
+					Addresses: []string{"10.244.0.3"},
+					NodeName:  &fakeNodeName,
+				}
+				otherNodeName := "node2"
+				nonLocalEndpoint := discovery.Endpoint{
+					Addresses: []string{"10.244.1.3"}, // is not picked since its not local to the node
+					NodeName:  &otherNodeName,
+				}
+				ep2 := discovery.Endpoint{
+					Addresses: []string{"10.244.0.4"},
+					NodeName:  &fakeNodeName,
+				}
+				epPortName := "http"
+				epPortValue := int32(8080)
+				epPort1 := discovery.EndpointPort{
+					Name: &epPortName,
+					Port: &epPortValue,
+				}
+				// endpointSlice.Endpoints is ovn-networked so this will
+				// come under !hasLocalHostNetEp case
+				endpointSlice := *newEndpointSlice(
+					"service1",
+					"namespace1",
+					[]discovery.Endpoint{ep1, ep2, nonLocalEndpoint},
+					[]discovery.EndpointPort{epPort1})
+
+				fakeOvnNode.start(ctx,
+					&v1.ServiceList{
+						Items: []v1.Service{
+							service,
+						},
+					},
+					&endpointSlice,
+				)
+
+				fNPW.watchFactory = fakeOvnNode.watcher
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				fNPW.AddService(&service)
+
+				expectedTables := map[string]util.FakeTable{
+					"nat": {
+						"PREROUTING": []string{
+							"-j OVN-KUBE-ETP",
+							"-j OVN-KUBE-EXTERNALIP",
+							"-j OVN-KUBE-NODEPORT",
+						},
+						"OUTPUT": []string{
+							"-j OVN-KUBE-EXTERNALIP",
+							"-j OVN-KUBE-NODEPORT",
+							"-j OVN-KUBE-ITP",
+						},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
+						"OVN-KUBE-NODEPORT": []string{},
+						"OVN-KUBE-SNAT-MGMTPORT": []string{
+							fmt.Sprintf("-p TCP -d %s --dport %d -j RETURN", ep1.Addresses[0], int32(service.Spec.Ports[0].TargetPort.IntValue())),
+							fmt.Sprintf("-p TCP -d %s --dport %d -j RETURN", ep2.Addresses[0], int32(service.Spec.Ports[0].TargetPort.IntValue())),
+						},
+						"OVN-KUBE-EXTERNALIP": []string{
+							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Status.LoadBalancer.Ingress[0].IP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
+							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
+						},
+						"OVN-KUBE-ETP": []string{
+							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%d -m statistic --mode random --probability 0.5000000000", service.Spec.Ports[0].Protocol, service.Status.LoadBalancer.Ingress[0].IP, service.Spec.Ports[0].Port, ep1.Addresses[0], int32(service.Spec.Ports[0].TargetPort.IntValue())),
+							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%d -m statistic --mode random --probability 1.0000000000", service.Spec.Ports[0].Protocol, service.Status.LoadBalancer.Ingress[0].IP, service.Spec.Ports[0].Port, ep2.Addresses[0], int32(service.Spec.Ports[0].TargetPort.IntValue())),
+							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%d -m statistic --mode random --probability 0.5000000000", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, ep1.Addresses[0], int32(service.Spec.Ports[0].TargetPort.IntValue())),
+							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%d -m statistic --mode random --probability 1.0000000000", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, ep2.Addresses[0], int32(service.Spec.Ports[0].TargetPort.IntValue())),
+						},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
+					},
+					"filter": {},
+					"mangle": {
+						"OUTPUT": []string{
+							"-j OVN-KUBE-ITP",
+						},
+						"OVN-KUBE-ITP": []string{},
+					},
+				}
+				expectedLBIngressFlows := []string{
+					"cookie=0xd8c1fe514f305bc1, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=5.5.5.5, actions=output:LOCAL",
+				}
+				expectedLBExternalIPFlows := []string{
+					"cookie=0x799e0efe5404e9a1, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=1.1.1.1, actions=output:LOCAL",
+				}
+
+				f4 := iptV4.(*util.FakeIPTables)
+				Expect(f4.MatchState(expectedTables)).To(Succeed())
+				Expect(fNPW.ofm.getFlowCacheEntry("Ingress_namespace1_service1_5.5.5.5_80")).To(Equal(expectedLBIngressFlows))
+				Expect(fNPW.ofm.getFlowCacheEntry("External_namespace1_service1_1.1.1.1_80")).To(Equal(expectedLBExternalIPFlows))
+				return nil
+			}
+			Expect(app.Run([]string{app.Name})).To(Succeed())
 		})
 
 		It("inits iptables rules and openflows with LoadBalancer where ETP=cluster, LGW mode", func() {
@@ -739,8 +1005,13 @@ var _ = Describe("Node Operations", func() {
 					},
 					false, false, // ETP=cluster
 				)
-				// endpoints.Subset is empty and yet this will come under !hasLocalHostNetEp case
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{})
+				// endpointSlice.Endpoints is empty and yet this will come under
+				// !hasLocalHostNetEp case
+				endpointSlice := *newEndpointSlice(
+					"service1",
+					"namespace1",
+					[]discovery.Endpoint{},
+					[]discovery.EndpointPort{})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -748,12 +1019,13 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
-				fNPW.AddService(&service)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -767,6 +1039,9 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
@@ -775,8 +1050,9 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Status.LoadBalancer.Ingress[0].IP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
-						"OVN-KUBE-ETP": []string{},
-						"OVN-KUBE-ITP": []string{},
+						"OVN-KUBE-ETP":        []string{},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -795,16 +1071,15 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
-				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
+				flows := fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(BeNil())
-				flows = fNPW.ofm.flowCache["Ingress_namespace1_service1_5.5.5.5_8080"]
+				flows = fNPW.ofm.getFlowCacheEntry("Ingress_namespace1_service1_5.5.5.5_8080")
 				Expect(flows).To(Equal(expectedLBIngressFlows))
-				flows = fNPW.ofm.flowCache["External_namespace1_service1_1.1.1.1_8080"]
+				flows = fNPW.ofm.getFlowCacheEntry("External_namespace1_service1_1.1.1.1_8080")
 				Expect(flows).To(Equal(expectedLBExternalIPFlows))
 
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -842,8 +1117,13 @@ var _ = Describe("Node Operations", func() {
 					},
 					true, false,
 				)
-				// endpoints.Subset is empty and yet this will come under !hasLocalHostNetEp case
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{})
+				// endpointSlice.Endpoints is empty and yet this will come
+				// under !hasLocalHostNetEp case
+				endpointSlice := *newEndpointSlice(
+					"service1",
+					"namespace1",
+					[]discovery.Endpoint{},
+					[]discovery.EndpointPort{})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -851,12 +1131,13 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
-				fNPW.AddService(&service)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -870,6 +1151,9 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
@@ -881,11 +1165,11 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
 						"OVN-KUBE-ETP": []string{
-							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Status.LoadBalancer.Ingress[0].IP, service.Spec.Ports[0].Port, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
-							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
-							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
+							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Status.LoadBalancer.Ingress[0].IP, service.Spec.Ports[0].Port, config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String(), service.Spec.Ports[0].NodePort),
+							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String(), service.Spec.Ports[0].NodePort),
 						},
-						"OVN-KUBE-ITP": []string{},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -896,31 +1180,32 @@ var _ = Describe("Node Operations", func() {
 					},
 				}
 				expectedNodePortFlows := []string{
-					"cookie=0x453ae29bcbbc08bd, priority=110, in_port=eth0, tcp, tp_dst=31111, actions=check_pkt_larger(1414)->reg0[0],resubmit(,11)",
+					"cookie=0x453ae29bcbbc08bd, priority=110, in_port=eth0, tcp, tp_dst=31111, actions=output:patch-breth0_ov",
 					"cookie=0x453ae29bcbbc08bd, priority=110, in_port=patch-breth0_ov, tcp, tp_src=31111, actions=output:eth0",
 				}
 				expectedLBIngressFlows := []string{
 					"cookie=0x10c6b89e483ea111, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=5.5.5.5, actions=output:LOCAL",
-					"cookie=0x10c6b89e483ea111, priority=110, in_port=eth0, tcp, nw_dst=5.5.5.5, tp_dst=8080, actions=check_pkt_larger(1414)->reg0[0],resubmit(,11)",
+					"cookie=0x10c6b89e483ea111, priority=110, in_port=eth0, icmp, nw_dst=5.5.5.5, icmp_type=3, icmp_code=4, actions=output:patch-breth0_ov",
+					"cookie=0x10c6b89e483ea111, priority=110, in_port=eth0, tcp, nw_dst=5.5.5.5, tp_dst=8080, actions=output:patch-breth0_ov",
 					"cookie=0x10c6b89e483ea111, priority=110, in_port=patch-breth0_ov, tcp, nw_src=5.5.5.5, tp_src=8080, actions=output:eth0",
 				}
 				expectedLBExternalIPFlows := []string{
 					"cookie=0x71765945a31dc2f1, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=1.1.1.1, actions=output:LOCAL",
-					"cookie=0x71765945a31dc2f1, priority=110, in_port=eth0, tcp, nw_dst=1.1.1.1, tp_dst=8080, actions=check_pkt_larger(1414)->reg0[0],resubmit(,11)",
+					"cookie=0x71765945a31dc2f1, priority=110, in_port=eth0, icmp, nw_dst=1.1.1.1, icmp_type=3, icmp_code=4, actions=output:patch-breth0_ov",
+					"cookie=0x71765945a31dc2f1, priority=110, in_port=eth0, tcp, nw_dst=1.1.1.1, tp_dst=8080, actions=output:patch-breth0_ov",
 					"cookie=0x71765945a31dc2f1, priority=110, in_port=patch-breth0_ov, tcp, nw_src=1.1.1.1, tp_src=8080, actions=output:eth0",
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
-				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
+				flows := fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(Equal(expectedNodePortFlows))
-				flows = fNPW.ofm.flowCache["Ingress_namespace1_service1_5.5.5.5_8080"]
+				flows = fNPW.ofm.getFlowCacheEntry("Ingress_namespace1_service1_5.5.5.5_8080")
 				Expect(flows).To(Equal(expectedLBIngressFlows))
-				flows = fNPW.ofm.flowCache["External_namespace1_service1_1.1.1.1_8080"]
+				flows = fNPW.ofm.getFlowCacheEntry("External_namespace1_service1_1.1.1.1_8080")
 				Expect(flows).To(Equal(expectedLBExternalIPFlows))
 
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -947,7 +1232,11 @@ var _ = Describe("Node Operations", func() {
 					false, false,
 				)
 				service.Spec.ClusterIPs = []string{"10.129.0.2", "fd00:10:96::10"}
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{})
+				endpointSlice := *newEndpointSlice(
+					"service1",
+					"namespace1",
+					[]discovery.Endpoint{},
+					[]discovery.EndpointPort{})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -955,12 +1244,13 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
-				fNPW.AddService(&service)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables4 := map[string]util.FakeTable{
@@ -975,6 +1265,9 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIPs[0], service.Spec.Ports[0].Port),
 						},
@@ -982,6 +1275,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
+						"OVN-KUBE-EGRESS-SVC":    []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -993,7 +1287,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables4)
+				err = f4.MatchState(expectedTables4)
 				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables6 := map[string]util.FakeTable{
@@ -1008,7 +1302,6 @@ var _ = Describe("Node Operations", func() {
 				f6 := iptV6.(*util.FakeIPTables)
 				err = f6.MatchState(expectedTables6)
 				Expect(err).NotTo(HaveOccurred())
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -1052,8 +1345,9 @@ var _ = Describe("Node Operations", func() {
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
-				fNPW.AddService(&service)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables4 := map[string]util.FakeTable{
@@ -1068,6 +1362,9 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
 						"OVN-KUBE-EXTERNALIP": []string{
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIPv4, service.Spec.Ports[0].Port, clusterIPv4, service.Spec.Ports[0].Port),
 						},
@@ -1075,6 +1372,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
+						"OVN-KUBE-EGRESS-SVC":    []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1086,7 +1384,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables4)
+				err = f4.MatchState(expectedTables4)
 				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables6 := map[string]util.FakeTable{
@@ -1102,7 +1400,6 @@ var _ = Describe("Node Operations", func() {
 				f6 := iptV6.(*util.FakeIPTables)
 				err = f6.MatchState(expectedTables6)
 				Expect(err).NotTo(HaveOccurred())
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -1140,8 +1437,11 @@ var _ = Describe("Node Operations", func() {
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
-				fNPW.DeleteService(&service)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+
+				addConntrackMocks(netlinkMock, []ctFilterDesc{{"1.1.1.1", 8032}, {"10.129.0.2", 8032}})
+				err := fNPW.DeleteService(&service)
+				Expect(err).NotTo(HaveOccurred())
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables := map[string]util.FakeTable{
@@ -1156,11 +1456,15 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
 						"OVN-KUBE-NODEPORT":      []string{},
 						"OVN-KUBE-EXTERNALIP":    []string{},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
+						"OVN-KUBE-EGRESS-SVC":    []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1172,7 +1476,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 				expectedTables = map[string]util.FakeTable{
 					"nat":    {},
@@ -1182,7 +1486,6 @@ var _ = Describe("Node Operations", func() {
 				f6 := iptV6.(*util.FakeIPTables)
 				err = f6.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -1215,8 +1518,11 @@ var _ = Describe("Node Operations", func() {
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
-				fNPW.DeleteService(&service)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+
+				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 0}, {"192.168.18.15", 31111}})
+				err := fNPW.DeleteService(&service)
+				Expect(err).NotTo(HaveOccurred())
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables := map[string]util.FakeTable{
@@ -1231,11 +1537,15 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
 						"OVN-KUBE-NODEPORT":      []string{},
 						"OVN-KUBE-EXTERNALIP":    []string{},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
+						"OVN-KUBE-EGRESS-SVC":    []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1247,7 +1557,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables = map[string]util.FakeTable{
@@ -1259,7 +1569,6 @@ var _ = Describe("Node Operations", func() {
 				f6 := iptV6.(*util.FakeIPTables)
 				err = f6.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -1287,7 +1596,6 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceStatus{},
 					false, false,
 				)
-
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
 						Items: []v1.Service{
@@ -1296,8 +1604,9 @@ var _ = Describe("Node Operations", func() {
 					},
 				)
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
-				fNPW.AddService(&service)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables := map[string]util.FakeTable{
@@ -1312,13 +1621,19 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
 						"OVN-KUBE-EXTERNALIP": []string{
-							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
+							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v",
+								service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port,
+								service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
 						"OVN-KUBE-NODEPORT":      []string{},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
+						"OVN-KUBE-EGRESS-SVC":    []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1330,10 +1645,12 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 
-				fNPW.DeleteService(&service)
+				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.10.10.1", 8034}, {"10.129.0.2", 8034}})
+				err = fNPW.DeleteService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables = map[string]util.FakeTable{
 					"nat": {
@@ -1349,9 +1666,13 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
+						"OVN-KUBE-EGRESS-SVC":    []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1365,7 +1686,122 @@ var _ = Describe("Node Operations", func() {
 				f4 = iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
-				fakeOvnNode.shutdown()
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+
+		})
+
+		It("manages iptables rules with ExternalIP through retry logic", func() {
+			app.Action = func(ctx *cli.Context) error {
+				var nodePortWatcherRetry *retry.RetryFramework
+				var err error
+				badExternalIP := "10.10.10.aa"
+				goodExternalIP := "10.10.10.1"
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-ofctl show ",
+				})
+
+				externalIPPort := int32(8034)
+				service_ns := "namespace1"
+				service_name := "service1"
+				service := *newService(service_name, service_ns, "10.129.0.2",
+					[]v1.ServicePort{
+						{
+							Port:     externalIPPort,
+							Protocol: v1.ProtocolTCP,
+						},
+					},
+					v1.ServiceTypeClusterIP,
+					[]string{badExternalIP}, // first use an incorrect IP
+					v1.ServiceStatus{},
+					false, false,
+				)
+
+				fakeOvnNode.start(ctx)
+
+				By("starting node port watcher retry framework")
+				fNPW.watchFactory = fakeOvnNode.watcher
+				nodePortWatcherRetry, err = startNodePortWatcherWithRetry(
+					fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig, fakeOvnNode.stopChan, fakeOvnNode.wg)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(nodePortWatcherRetry).NotTo(BeNil())
+
+				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeFalse(), fExec.ErrorDesc) // no command is executed
+
+				By("add service with incorrect external IP")
+				_, err = fakeOvnNode.fakeClient.KubeClient.CoreV1().Services(service_ns).Create(
+					context.TODO(), &service, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				// expected ip tables with no external IP set
+				expectedTables := map[string]util.FakeTable{
+					"nat": {
+						"PREROUTING": []string{
+							"-j OVN-KUBE-ETP",
+							"-j OVN-KUBE-EXTERNALIP",
+							"-j OVN-KUBE-NODEPORT",
+						},
+						"OUTPUT": []string{
+							"-j OVN-KUBE-EXTERNALIP",
+							"-j OVN-KUBE-NODEPORT",
+							"-j OVN-KUBE-ITP",
+						},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
+						"OVN-KUBE-EXTERNALIP": []string{},
+						"OVN-KUBE-NODEPORT":   []string{},
+						"OVN-KUBE-ETP":        []string{},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
+					},
+					"filter": {},
+					"mangle": {
+						"OUTPUT": []string{
+							"-j OVN-KUBE-ITP",
+						},
+						"OVN-KUBE-ITP": []string{},
+					},
+				}
+				By("verify that a new retry entry for this service exists")
+				key, err := retry.GetResourceKey(&service)
+				Expect(err).NotTo(HaveOccurred())
+				retry.CheckRetryObjectEventually(key, true, nodePortWatcherRetry)
+
+				// check iptables
+				f4 := iptV4.(*util.FakeIPTables)
+				err = f4.MatchState(expectedTables)
+				Expect(err).NotTo(HaveOccurred())
+
+				// HACK: Fix the service by setting a correct external IP address in newObj field
+				// of the retry entry
+				newObj := retry.GetNewObjFieldFromRetryObj(key, nodePortWatcherRetry)
+				Expect(newObj).ToNot(BeNil())
+				svc := newObj.(*v1.Service)
+				svc.Spec.ExternalIPs = []string{goodExternalIP}
+				ok := retry.SetNewObjFieldInRetryObj(key, nodePortWatcherRetry, svc)
+				Expect(ok).To(BeTrue())
+
+				By("trigger immediate retry")
+				retry.SetRetryObjWithNoBackoff(key, nodePortWatcherRetry)
+				nodePortWatcherRetry.RequestRetryObjs()
+				retry.CheckRetryObjectEventually(key, false, nodePortWatcherRetry) // entry should be gone
+
+				// now expect ip tables to show the external IP
+				ovn_kube_external_ip_field := []string{
+					fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v",
+						service.Spec.Ports[0].Protocol, goodExternalIP, service.Spec.Ports[0].Port,
+						service.Spec.ClusterIP, service.Spec.Ports[0].Port)}
+				expectedTables["nat"]["OVN-KUBE-EXTERNALIP"] = ovn_kube_external_ip_field
+				Eventually(func(g Gomega) {
+					f4 := iptV4.(*util.FakeIPTables)
+					err = f4.MatchState(expectedTables)
+					g.Expect(err).NotTo(HaveOccurred())
+				})
+
+				// TODO Make delete operation fail, check retry entry, run a successful delete
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -1398,8 +1834,9 @@ var _ = Describe("Node Operations", func() {
 					},
 				)
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
-				fNPW.AddService(&service)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables := map[string]util.FakeTable{
@@ -1414,6 +1851,9 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, nodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
@@ -1421,6 +1861,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
+						"OVN-KUBE-EGRESS-SVC":    []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1432,10 +1873,12 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 
-				fNPW.DeleteService(&service)
+				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 38034}})
+				err = fNPW.DeleteService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables = map[string]util.FakeTable{
 					"nat": {
@@ -1451,9 +1894,13 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
+						"OVN-KUBE-EGRESS-SVC":    []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1477,6 +1924,8 @@ var _ = Describe("Node Operations", func() {
 		It("manages iptables rules and openflows for NodePort backed by ovn-k pods where ETP=local, LGW", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.Gateway.Mode = config.GatewayModeLocal
+				epPortName := "https"
+				epPortValue := int32(443)
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
 						{
@@ -1490,23 +1939,20 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceStatus{},
 					true, false,
 				)
-				addr := v1.EndpointAddress{
-					IP: "10.244.0.3",
+				ep1 := discovery.Endpoint{
+					Addresses: []string{"10.244.0.3"},
 				}
-				port := v1.EndpointPort{
-					Name: "https",
-					Port: int32(443),
+				epPort1 := discovery.EndpointPort{
+					Name: &epPortName,
+					Port: &epPortValue,
 				}
-				ep := v1.EndpointSubset{
-					Addresses: []v1.EndpointAddress{
-						addr,
-					},
-					Ports: []v1.EndpointPort{
-						port,
-					},
-				}
-				// endpoints.Subset is ovn-networked so this will come under !hasLocalHostNetEp case
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{ep})
+				// endpointSlice.Endpoints is ovn-networked so this will come
+				// under !hasLocalHostNetEp case
+				endpointSlice := *newEndpointSlice(
+					"service1",
+					"namespace1",
+					[]discovery.Endpoint{ep1},
+					[]discovery.EndpointPort{epPort1})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -1514,12 +1960,13 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
-				fNPW.AddService(&service)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -1533,6 +1980,9 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
@@ -1541,9 +1991,10 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p TCP --dport %v -j RETURN", service.Spec.Ports[0].NodePort),
 						},
 						"OVN-KUBE-ETP": []string{
-							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
+							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String(), service.Spec.Ports[0].NodePort),
 						},
-						"OVN-KUBE-ITP": []string{},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1555,12 +2006,14 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
-				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
+				flows := fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(BeNil())
 
-				fNPW.DeleteService(&service)
+				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 31111}})
+				err = fNPW.DeleteService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables = map[string]util.FakeTable{
 					"nat": {
@@ -1576,9 +2029,13 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
+						"OVN-KUBE-EGRESS-SVC":    []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1593,10 +2050,9 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 
-				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
+				flows = fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(BeNil())
 
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -1606,6 +2062,8 @@ var _ = Describe("Node Operations", func() {
 		It("manages iptables rules and openflows for NodePort backed by ovn-k pods where ETP=local, SGW", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.Gateway.Mode = config.GatewayModeShared
+				epPortName := "https"
+				epPortValue := int32(443)
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
 						{
@@ -1619,23 +2077,21 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceStatus{},
 					true, false,
 				)
-				addr := v1.EndpointAddress{
-					IP: "10.244.0.3",
+
+				ep1 := discovery.Endpoint{
+					Addresses: []string{"10.244.0.3"},
 				}
-				port := v1.EndpointPort{
-					Name: "https",
-					Port: int32(443),
+				epPort1 := discovery.EndpointPort{
+					Name: &epPortName,
+					Port: &epPortValue,
 				}
-				ep := v1.EndpointSubset{
-					Addresses: []v1.EndpointAddress{
-						addr,
-					},
-					Ports: []v1.EndpointPort{
-						port,
-					},
-				}
-				// endpoints.Subset is ovn-networked so this will come under !hasLocalHostNetEp case
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{ep})
+				// endpointSlice.Endpoints is ovn-networked so this will come
+				// under !hasLocalHostNetEp case
+				endpointSlice := *newEndpointSlice(
+					"service1",
+					"namespace1",
+					[]discovery.Endpoint{ep1},
+					[]discovery.EndpointPort{epPort1})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -1643,12 +2099,13 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
-				fNPW.AddService(&service)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -1662,6 +2119,9 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
@@ -1669,10 +2129,9 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-SNAT-MGMTPORT": []string{
 							fmt.Sprintf("-p TCP --dport %v -j RETURN", service.Spec.Ports[0].NodePort),
 						},
-						"OVN-KUBE-ETP": []string{
-							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
-						},
-						"OVN-KUBE-ITP": []string{},
+						"OVN-KUBE-ETP":        []string{},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1684,17 +2143,19 @@ var _ = Describe("Node Operations", func() {
 				}
 				expectedFlows := []string{
 					// default
-					"cookie=0x453ae29bcbbc08bd, priority=110, in_port=eth0, tcp, tp_dst=31111, actions=check_pkt_larger(1414)->reg0[0],resubmit(,11)",
+					"cookie=0x453ae29bcbbc08bd, priority=110, in_port=eth0, tcp, tp_dst=31111, actions=output:patch-breth0_ov",
 					"cookie=0x453ae29bcbbc08bd, priority=110, in_port=patch-breth0_ov, tcp, tp_src=31111, actions=output:eth0",
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
-				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
+				flows := fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(Equal(expectedFlows))
 
-				fNPW.DeleteService(&service)
+				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 31111}})
+				err = fNPW.DeleteService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables = map[string]util.FakeTable{
 					"nat": {
@@ -1710,9 +2171,13 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
+						"OVN-KUBE-EGRESS-SVC":    []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1727,10 +2192,9 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 
-				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
+				flows = fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(BeNil())
 
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -1741,6 +2205,8 @@ var _ = Describe("Node Operations", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.Gateway.Mode = config.GatewayModeLocal
 				outport := int32(443)
+				epPortName := "https"
+				epPortValue := int32(443)
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
 						{
@@ -1755,23 +2221,22 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceStatus{},
 					true, false,
 				)
-				addr := v1.EndpointAddress{
-					IP: "192.168.18.15", // host-networked endpoint local to this node
+
+				ep1 := discovery.Endpoint{
+					Addresses: []string{"192.168.18.15"}, // host-networked endpoint local to this node
+					NodeName:  &fakeNodeName,
 				}
-				port := v1.EndpointPort{
-					Name: "https",
-					Port: int32(443),
+				epPort1 := discovery.EndpointPort{
+					Name: &epPortName,
+					Port: &epPortValue,
 				}
-				ep := v1.EndpointSubset{
-					Addresses: []v1.EndpointAddress{
-						addr,
-					},
-					Ports: []v1.EndpointPort{
-						port,
-					},
-				}
-				// endpointsSlices.Endpoint is ovn-networked so this will come under !hasLocalHostNetEp case
-				endpointsSlices := *newEndpointSlice("service1", "namespace1", []string{addr.IP})
+				// endpointSlice.Endpoints is ovn-networked so this will
+				// come under !hasLocalHostNetEp case
+				endpointSlice := *newEndpointSlice(
+					"service1",
+					"namespace1",
+					[]discovery.Endpoint{ep1},
+					[]discovery.EndpointPort{epPort1})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -1779,19 +2244,16 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&discovery.EndpointSliceList{
-						Items: []discovery.EndpointSlice{
-							endpointsSlices,
-						},
-					},
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
 				// to ensure the endpoint is local-host-networked
-				res := fNPW.nodeIPManager.addresses.Has(ep.Addresses[0].IP)
+				res := fNPW.nodeIPManager.cidrs.Has(fmt.Sprintf("%s/32", ep1.Addresses[0]))
 				Expect(res).To(BeTrue())
-				fNPW.AddService(&service)
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -1805,6 +2267,9 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
@@ -1812,6 +2277,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
 						"OVN-KUBE-ITP":           []string{},
+						"OVN-KUBE-EGRESS-SVC":    []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1829,12 +2295,14 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
-				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
+				flows := fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(Equal(expectedFlows))
 
-				fNPW.DeleteService(&service)
+				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 31111}})
+				err = fNPW.DeleteService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables = map[string]util.FakeTable{
 					"nat": {
@@ -1850,9 +2318,13 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ITP":           []string{},
 						"OVN-KUBE-ETP":           []string{},
+						"OVN-KUBE-EGRESS-SVC":    []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1867,10 +2339,9 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 
-				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
+				flows = fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(BeNil())
 
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -1880,6 +2351,8 @@ var _ = Describe("Node Operations", func() {
 		It("manages iptables rules and openflows for NodePort backed by ovn-k pods where ITP=local and ETP=local", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.Gateway.Mode = config.GatewayModeShared
+				epPortName := "https"
+				epPortValue := int32(443)
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
 						{
@@ -1893,23 +2366,20 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceStatus{},
 					true, true,
 				)
-				addr := v1.EndpointAddress{
-					IP: "10.244.0.3",
+				ep1 := discovery.Endpoint{
+					Addresses: []string{"10.244.0.3"},
 				}
-				port := v1.EndpointPort{
-					Name: "https",
-					Port: int32(443),
+				epPort1 := discovery.EndpointPort{
+					Name: &epPortName,
+					Port: &epPortValue,
 				}
-				ep := v1.EndpointSubset{
-					Addresses: []v1.EndpointAddress{
-						addr,
-					},
-					Ports: []v1.EndpointPort{
-						port,
-					},
-				}
-				// endpoints.Subset is ovn-networked so this will come under !hasLocalHostNetEp case
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{ep})
+				// endpointSlice.Endpoints is ovn-networked so this will
+				// come under !hasLocalHostNetEp case
+				endpointSlice := *newEndpointSlice(
+					"service1",
+					"namespace1",
+					[]discovery.Endpoint{ep1},
+					[]discovery.EndpointPort{epPort1})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -1917,12 +2387,13 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
-				fNPW.AddService(&service)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -1936,6 +2407,9 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
@@ -1943,10 +2417,9 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-SNAT-MGMTPORT": []string{
 							fmt.Sprintf("-p TCP --dport %v -j RETURN", service.Spec.Ports[0].NodePort),
 						},
-						"OVN-KUBE-ITP": []string{},
-						"OVN-KUBE-ETP": []string{
-							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, types.V4HostETPLocalMasqueradeIP, service.Spec.Ports[0].NodePort),
-						},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-ETP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -1960,17 +2433,19 @@ var _ = Describe("Node Operations", func() {
 				}
 				expectedFlows := []string{
 					// default
-					"cookie=0x453ae29bcbbc08bd, priority=110, in_port=eth0, tcp, tp_dst=31111, actions=check_pkt_larger(1414)->reg0[0],resubmit(,11)",
+					"cookie=0x453ae29bcbbc08bd, priority=110, in_port=eth0, tcp, tp_dst=31111, actions=output:patch-breth0_ov",
 					"cookie=0x453ae29bcbbc08bd, priority=110, in_port=patch-breth0_ov, tcp, tp_src=31111, actions=output:eth0",
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
-				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
+				flows := fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(Equal(expectedFlows))
 
-				fNPW.DeleteService(&service)
+				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 31111}})
+				err = fNPW.DeleteService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables = map[string]util.FakeTable{
 					"nat": {
@@ -1987,8 +2462,12 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ETP":           []string{},
+						"OVN-KUBE-EGRESS-SVC":    []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -2003,10 +2482,9 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 
-				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
+				flows = fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(BeNil())
 
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -2016,6 +2494,7 @@ var _ = Describe("Node Operations", func() {
 		It("manages iptables rules and openflows for NodePort backed by local-host-networked pods where ETP=local and ITP=local", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.Gateway.Mode = config.GatewayModeLocal
+				epPortName := "https"
 				outport := int32(443)
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
@@ -2031,23 +2510,21 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceStatus{},
 					true, true,
 				)
-				addr := v1.EndpointAddress{
-					IP: "192.168.18.15", // host-networked endpoint local to this node
+				ep1 := discovery.Endpoint{
+					Addresses: []string{"192.168.18.15"}, // host-networked endpoint local to this node
+					NodeName:  &fakeNodeName,
 				}
-				port := v1.EndpointPort{
-					Name: "https",
-					Port: int32(443),
+				epPort1 := discovery.EndpointPort{
+					Name: &epPortName,
+					Port: &outport,
 				}
-				ep := v1.EndpointSubset{
-					Addresses: []v1.EndpointAddress{
-						addr,
-					},
-					Ports: []v1.EndpointPort{
-						port,
-					},
-				}
-				// endpointsSlices.Endpoint is ovn-networked so this will come under !hasLocalHostNetEp case
-				endpointsSlices := *newEndpointSlice("service1", "namespace1", []string{addr.IP})
+				// endpointSlice.Endpoints is ovn-networked so this will
+				// come under !hasLocalHostNetEp case
+				endpointSlice := *newEndpointSlice(
+					"service1",
+					"namespace1",
+					[]discovery.Endpoint{ep1},
+					[]discovery.EndpointPort{epPort1})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -2055,19 +2532,16 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&discovery.EndpointSliceList{
-						Items: []discovery.EndpointSlice{
-							endpointsSlices,
-						},
-					},
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
 				// to ensure the endpoint is local-host-networked
-				res := fNPW.nodeIPManager.addresses.Has(ep.Addresses[0].IP)
+				res := fNPW.nodeIPManager.cidrs.Has(fmt.Sprintf("%s/32", endpointSlice.Endpoints[0].Addresses[0]))
 				Expect(res).To(BeTrue())
-				fNPW.AddService(&service)
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
 						"PREROUTING": []string{
@@ -2080,6 +2554,9 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
@@ -2088,7 +2565,8 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-ITP": []string{
 							fmt.Sprintf("-p %s -d %s --dport %d -j REDIRECT --to-port %d", service.Spec.Ports[0].Protocol, service.Spec.ClusterIP, service.Spec.Ports[0].Port, int32(service.Spec.Ports[0].TargetPort.IntValue())),
 						},
-						"OVN-KUBE-ETP": []string{},
+						"OVN-KUBE-ETP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -2106,12 +2584,14 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
-				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
+				flows := fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(Equal(expectedFlows))
 
-				fNPW.DeleteService(&service)
+				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 31111}})
+				err = fNPW.DeleteService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables = map[string]util.FakeTable{
 					"nat": {
@@ -2127,9 +2607,13 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 							"-j OVN-KUBE-ITP",
 						},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
 						"OVN-KUBE-ITP":           []string{},
 						"OVN-KUBE-ETP":           []string{},
+						"OVN-KUBE-EGRESS-SVC":    []string{},
 					},
 					"filter": {},
 					"mangle": {
@@ -2144,10 +2628,9 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 
-				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
+				flows = fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(BeNil())
 
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})

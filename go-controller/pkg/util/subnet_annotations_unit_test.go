@@ -55,7 +55,8 @@ func TestCreateSubnetAnnotation(t *testing.T) {
 				}
 				defSubList = append(defSubList, ipnet)
 			}
-			mapRes, e := createSubnetAnnotation(tc.inpAnnotName, defSubList)
+			mapRes := map[string]string{}
+			e := updateSubnetAnnotation(mapRes, tc.inpAnnotName, types.DefaultNetworkName, defSubList)
 			if tc.expectedErr {
 				assert.Error(t, e)
 			}
@@ -166,11 +167,12 @@ func TestParseSubnetAnnotation(t *testing.T) {
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			ipList, e := parseSubnetAnnotation(tc.inpNode.Annotations, tc.annName)
+			ipListMap, e := parseSubnetAnnotation(tc.inpNode.Annotations, tc.annName)
 			if tc.errExpected {
 				t.Log(e)
 				assert.Error(t, e)
 			} else {
+				ipList := ipListMap[types.DefaultNetworkName]
 				t.Log(ipList)
 				assert.Greater(t, len(ipList), 0)
 			}
@@ -261,14 +263,14 @@ func TestCreateNodeHostSubnetAnnotation(t *testing.T) {
 			},
 		},
 		{
-			desc:   "success path, inpDefSubnetIps is nil",
+			desc:   "failure path, inpDefSubnetIps is nil",
 			outExp: map[string]string{},
+			errExp: true,
 		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			res := map[string]string{}
-			err := UpdateNodeHostSubnetAnnotation(res, tc.inpDefSubnetIps, types.DefaultNetworkName)
+			res, err := UpdateNodeHostSubnetAnnotation(nil, tc.inpDefSubnetIps, types.DefaultNetworkName)
 			t.Log(res, err)
 			if tc.errExp {
 				assert.NotNil(t, err)
@@ -323,7 +325,7 @@ func TestDeleteNodeHostSubnetAnnotation(t *testing.T) {
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			DeleteNodeHostSubnetAnnotation(tc.inpNodeAnnotator, types.DefaultNetworkName)
+			DeleteNodeHostSubnetAnnotation(tc.inpNodeAnnotator)
 		})
 	}
 }

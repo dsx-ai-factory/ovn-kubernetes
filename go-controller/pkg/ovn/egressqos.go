@@ -12,7 +12,7 @@ import (
 	egressqosapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
 	egressqosinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions/egressqos/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -35,7 +35,6 @@ const (
 	maxEgressQoSRetries        = 10
 	defaultEgressQoSName       = "default"
 	EgressQoSFlowStartPriority = 1000
-	rulePriorityDelimeter      = "-"
 )
 
 type egressQoS struct {
@@ -55,8 +54,16 @@ type egressQoSRule struct {
 	podSelector metav1.LabelSelector
 }
 
+func getEgressQosAddrSetDbIDs(namespace, priority, controller string) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetEgressQoS, controller, map[libovsdbops.ExternalIDKey]string{
+		libovsdbops.ObjectNameKey: namespace,
+		// priority is the unique id for address set within given namespace
+		libovsdbops.PriorityKey: priority,
+	})
+}
+
 // shallow copies the EgressQoS object provided.
-func (oc *Controller) cloneEgressQoS(raw *egressqosapi.EgressQoS) (*egressQoS, error) {
+func (oc *DefaultNetworkController) cloneEgressQoS(raw *egressqosapi.EgressQoS) (*egressQoS, error) {
 	eq := &egressQoS{
 		name:      raw.Name,
 		namespace: raw.Namespace,
@@ -90,7 +97,7 @@ func (oc *Controller) cloneEgressQoS(raw *egressqosapi.EgressQoS) (*egressQoS, e
 }
 
 // shallow copies the EgressQoSRule object provided.
-func (oc *Controller) cloneEgressQoSRule(raw egressqosapi.EgressQoSRule, priority int) (*egressQoSRule, error) {
+func (oc *DefaultNetworkController) cloneEgressQoSRule(raw egressqosapi.EgressQoSRule, priority int) (*egressQoSRule, error) {
 	dst := ""
 	if raw.DstCIDR != nil {
 		_, _, err := net.ParseCIDR(*raw.DstCIDR)
@@ -115,12 +122,13 @@ func (oc *Controller) cloneEgressQoSRule(raw egressqosapi.EgressQoSRule, priorit
 	return eqr, nil
 }
 
-func (oc *Controller) createASForEgressQoSRule(podSelector metav1.LabelSelector, namespace string, priority int) (addressset.AddressSet, *sync.Map, error) {
+func (oc *DefaultNetworkController) createASForEgressQoSRule(podSelector metav1.LabelSelector, namespace string, priority int) (addressset.AddressSet, *sync.Map, error) {
 	var addrSet addressset.AddressSet
 
 	selector, _ := metav1.LabelSelectorAsSelector(&podSelector)
 	if selector.Empty() { // empty selector means that the rule applies to all pods in the namespace
-		addrSet, err := oc.addressSetFactory.EnsureAddressSet(namespace)
+		asIndex := getNamespaceAddrSetDbIDs(namespace, oc.controllerName)
+		addrSet, err := oc.addressSetFactory.EnsureAddressSet(asIndex)
 		if err != nil {
 			return nil, nil, fmt.Errorf("cannot ensure that addressSet for namespace %s exists %v", namespace, err)
 		}
@@ -129,22 +137,21 @@ func (oc *Controller) createASForEgressQoSRule(podSelector metav1.LabelSelector,
 
 	podsCache := sync.Map{}
 
-	pods, err := oc.mc.watchFactory.GetPodsBySelector(namespace, podSelector)
+	pods, err := oc.watchFactory.GetPodsBySelector(namespace, podSelector)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	addrSet, err = oc.addressSetFactory.EnsureAddressSet(fmt.Sprintf("%s%s%s%d", types.EgressQoSRulePrefix, namespace, rulePriorityDelimeter, priority))
+	asIndex := getEgressQosAddrSetDbIDs(namespace, fmt.Sprintf("%d", priority), oc.controllerName)
+	addrSet, err = oc.addressSetFactory.EnsureAddressSet(asIndex)
 	if err != nil {
 		return nil, nil, err
 	}
-
 	podsIps := []net.IP{}
 	for _, pod := range pods {
-		// we don't handle HostNetworked or completed pods
-		if util.PodWantsNetwork(pod) && !util.PodCompleted(pod) {
-			podIPs, err := util.GetAllPodIPs(pod, oc.nadInfo)
-			if err != nil {
+		// we don't handle HostNetworked or completed pods or not-scheduled pods or remote-zone pods
+		if !util.PodWantsHostNetwork(pod) && !util.PodCompleted(pod) && util.PodScheduled(pod) && oc.isPodScheduledinLocalZone(pod) {
+			podIPs, err := util.GetPodIPsOfNetwork(pod, oc.NetInfo)
+			if err != nil && !errors.Is(err, util.ErrNoPodIPFound) {
 				return nil, nil, err
 			}
 			podsCache.Store(pod.Name, podIPs)
@@ -160,7 +167,7 @@ func (oc *Controller) createASForEgressQoSRule(podSelector metav1.LabelSelector,
 }
 
 // initEgressQoSController initializes the EgressQoS controller.
-func (oc *Controller) initEgressQoSController(
+func (oc *DefaultNetworkController) initEgressQoSController(
 	eqInformer egressqosinformer.EgressQoSInformer,
 	podInformer v1coreinformers.PodInformer,
 	nodeInformer v1coreinformers.NodeInformer) error {
@@ -178,6 +185,7 @@ func (oc *Controller) initEgressQoSController(
 	}))
 	if err != nil {
 		return fmt.Errorf("could not add Event Handler for eqInformer during egressqosController initialization, %w", err)
+
 	}
 
 	oc.egressQoSPodLister = podInformer.Lister()
@@ -202,8 +210,8 @@ func (oc *Controller) initEgressQoSController(
 		"egressqosnodes",
 	)
 	_, err = nodeInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    oc.onEgressQoSNodeAdd, // we only care about new logical switches being added
-		UpdateFunc: func(o, n interface{}) {},
+		AddFunc:    oc.onEgressQoSNodeAdd,    // we only care about new logical switches being added
+		UpdateFunc: oc.onEgressQoSNodeUpdate, // we care about node's zone changes so that if add event didn't do anything update can take care of it
 		DeleteFunc: func(obj interface{}) {},
 	})
 	if err != nil {
@@ -212,36 +220,29 @@ func (oc *Controller) initEgressQoSController(
 	return nil
 }
 
-func (oc *Controller) runEgressQoSController(threadiness int, stopCh <-chan struct{}) {
+func (oc *DefaultNetworkController) runEgressQoSController(wg *sync.WaitGroup, threadiness int, stopCh <-chan struct{}) error {
 	defer utilruntime.HandleCrash()
 
 	klog.Infof("Starting EgressQoS Controller")
 
-	if !cache.WaitForNamedCacheSync("egressqosnodes", stopCh, oc.egressQoSNodeSynced) {
-		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
-		klog.Infof("Synchronization failed")
-		return
+	if !util.WaitForNamedCacheSyncWithTimeout("egressqosnodes", stopCh, oc.egressQoSNodeSynced) {
+		return fmt.Errorf("timed out waiting for caches to sync")
 	}
 
-	if !cache.WaitForNamedCacheSync("egressqospods", stopCh, oc.egressQoSPodSynced) {
-		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
-		klog.Infof("Synchronization failed")
-		return
+	if !util.WaitForNamedCacheSyncWithTimeout("egressqospods", stopCh, oc.egressQoSPodSynced) {
+		return fmt.Errorf("timed out waiting for caches to sync")
 	}
 
-	if !cache.WaitForNamedCacheSync("egressqos", stopCh, oc.egressQoSSynced) {
-		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
-		klog.Infof("Synchronization failed")
-		return
+	if !util.WaitForNamedCacheSyncWithTimeout("egressqos", stopCh, oc.egressQoSSynced) {
+		return fmt.Errorf("timed out waiting for caches to sync")
 	}
 
 	klog.Infof("Repairing EgressQoSes")
 	err := oc.repairEgressQoSes()
 	if err != nil {
-		klog.Errorf("Failed to delete stale EgressQoS entries: %v", err)
+		return fmt.Errorf("failed to delete stale EgressQoS entries: %v", err)
 	}
 
-	wg := &sync.WaitGroup{}
 	for i := 0; i < threadiness; i++ {
 		wg.Add(1)
 		go func() {
@@ -272,19 +273,24 @@ func (oc *Controller) runEgressQoSController(threadiness int, stopCh <-chan stru
 		}()
 	}
 
-	// wait until we're told to stop
-	<-stopCh
+	// add shutdown goroutine waiting for stopCh
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// wait until we're told to stop
+		<-stopCh
 
-	klog.Infof("Shutting down EgressQoS controller")
-	oc.egressQoSQueue.ShutDown()
-	oc.egressQoSPodQueue.ShutDown()
-	oc.egressQoSNodeQueue.ShutDown()
+		klog.Infof("Shutting down EgressQoS controller")
+		oc.egressQoSQueue.ShutDown()
+		oc.egressQoSPodQueue.ShutDown()
+		oc.egressQoSNodeQueue.ShutDown()
+	}()
 
-	wg.Wait()
+	return nil
 }
 
 // onEgressQoSAdd queues the EgressQoS for processing.
-func (oc *Controller) onEgressQoSAdd(obj interface{}) {
+func (oc *DefaultNetworkController) onEgressQoSAdd(obj interface{}) {
 	key, err := cache.MetaNamespaceKeyFunc(obj)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
@@ -294,7 +300,7 @@ func (oc *Controller) onEgressQoSAdd(obj interface{}) {
 }
 
 // onEgressQoSUpdate queues the EgressQoS for processing.
-func (oc *Controller) onEgressQoSUpdate(oldObj, newObj interface{}) {
+func (oc *DefaultNetworkController) onEgressQoSUpdate(oldObj, newObj interface{}) {
 	oldEQ := oldObj.(*egressqosapi.EgressQoS)
 	newEQ := newObj.(*egressqosapi.EgressQoS)
 
@@ -310,7 +316,7 @@ func (oc *Controller) onEgressQoSUpdate(oldObj, newObj interface{}) {
 }
 
 // onEgressQoSDelete queues the EgressQoS for processing.
-func (oc *Controller) onEgressQoSDelete(obj interface{}) {
+func (oc *DefaultNetworkController) onEgressQoSDelete(obj interface{}) {
 	key, err := cache.MetaNamespaceKeyFunc(obj)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
@@ -319,12 +325,12 @@ func (oc *Controller) onEgressQoSDelete(obj interface{}) {
 	oc.egressQoSQueue.Add(key)
 }
 
-func (oc *Controller) runEgressQoSWorker(wg *sync.WaitGroup) {
+func (oc *DefaultNetworkController) runEgressQoSWorker(wg *sync.WaitGroup) {
 	for oc.processNextEgressQoSWorkItem(wg) {
 	}
 }
 
-func (oc *Controller) processNextEgressQoSWorkItem(wg *sync.WaitGroup) bool {
+func (oc *DefaultNetworkController) processNextEgressQoSWorkItem(wg *sync.WaitGroup) bool {
 	wg.Add(1)
 	defer wg.Done()
 
@@ -355,7 +361,7 @@ func (oc *Controller) processNextEgressQoSWorkItem(wg *sync.WaitGroup) bool {
 // This takes care of syncing stale data which we might have in OVN if
 // there's no ovnkube-master running for a while.
 // It deletes all QoSes and Address Sets from OVN that belong to deleted EgressQoSes.
-func (oc *Controller) repairEgressQoSes() error {
+func (oc *DefaultNetworkController) repairEgressQoSes() error {
 	startTime := time.Now()
 	klog.V(4).Infof("Starting repairing loop for egressqos")
 	defer func() {
@@ -380,7 +386,7 @@ func (oc *Controller) repairEgressQoSes() error {
 
 		return !nsWithQoS[ns] && util.HasExternalIDsForCluster(q.ExternalIDs)
 	}
-	existingQoSes, err := libovsdbops.FindQoSesWithPredicate(oc.mc.nbClient, p)
+	existingQoSes, err := libovsdbops.FindQoSesWithPredicate(oc.nbClient, p)
 	if err != nil {
 		return err
 	}
@@ -388,7 +394,7 @@ func (oc *Controller) repairEgressQoSes() error {
 	if len(existingQoSes) > 0 {
 		allOps := []ovsdb.Operation{}
 
-		ops, err := libovsdbops.DeleteQoSesOps(oc.mc.nbClient, nil, existingQoSes...)
+		ops, err := libovsdbops.DeleteQoSesOps(oc.nbClient, nil, existingQoSes...)
 		if err != nil {
 			return err
 		}
@@ -400,40 +406,31 @@ func (oc *Controller) repairEgressQoSes() error {
 		}
 
 		for _, sw := range logicalSwitches {
-			ops, err := libovsdbops.RemoveQoSesFromLogicalSwitchOps(oc.mc.nbClient, nil, sw, existingQoSes...)
+			ops, err := libovsdbops.RemoveQoSesFromLogicalSwitchOps(oc.nbClient, nil, sw, existingQoSes...)
 			if err != nil {
 				return err
 			}
 			allOps = append(allOps, ops...)
 		}
 
-		if _, err := libovsdbops.TransactAndCheck(oc.mc.nbClient, allOps); err != nil {
+		if _, err := libovsdbops.TransactAndCheck(oc.nbClient, allOps); err != nil {
 			return fmt.Errorf("unable to remove stale qoses, err: %v", err)
 		}
 	}
-
-	asPredicate := func(as *nbdb.AddressSet) bool {
-		if !util.HasExternalIDsForCluster(as.ExternalIDs) {
-			return false
-		}
-		if !strings.HasPrefix(as.ExternalIDs["name"], types.EgressQoSRulePrefix) {
-			return false
-		}
-
-		// we extract the namespace from the id by removing the prefix and the priority suffix
-		// egress-qos-pods-my-namespace-123 -> my-namespace
-		ns := strings.TrimPrefix(as.ExternalIDs["name"], types.EgressQoSRulePrefix)
-		ns = ns[:strings.LastIndex(ns, rulePriorityDelimeter)]
-		return !nsWithQoS[ns]
+	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetEgressQoS, oc.controllerName, nil)
+	predicateFunc := func(as *nbdb.AddressSet) bool {
+		// ObjectNameKey is namespace
+		return !nsWithQoS[as.ExternalIDs[libovsdbops.ObjectNameKey.String()]]
 	}
-	if err := libovsdbops.DeleteAddressSetsWithPredicate(oc.mc.nbClient, asPredicate); err != nil {
+	asPredicate := libovsdbops.GetPredicate[*nbdb.AddressSet](predicateIDs, predicateFunc)
+	if err := libovsdbops.DeleteAddressSetsWithPredicate(oc.nbClient, asPredicate); err != nil {
 		return fmt.Errorf("failed to remove stale egress qos address sets, err: %v", err)
 	}
 
 	return nil
 }
 
-func (oc *Controller) syncEgressQoS(key string) error {
+func (oc *DefaultNetworkController) syncEgressQoS(key string) error {
 	startTime := time.Now()
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
@@ -471,7 +468,7 @@ func (oc *Controller) syncEgressQoS(key string) error {
 	return oc.addEgressQoS(eq)
 }
 
-func (oc *Controller) cleanEgressQoSNS(namespace string) error {
+func (oc *DefaultNetworkController) cleanEgressQoSNS(namespace string) error {
 	obj, loaded := oc.egressQoSCache.Load(namespace)
 	if !loaded {
 		// the namespace is clean
@@ -491,7 +488,7 @@ func (oc *Controller) cleanEgressQoSNS(namespace string) error {
 		}
 		return eqNs == eq.namespace && util.HasExternalIDsForCluster(q.ExternalIDs)
 	}
-	existingQoSes, err := libovsdbops.FindQoSesWithPredicate(oc.mc.nbClient, p)
+	existingQoSes, err := libovsdbops.FindQoSesWithPredicate(oc.nbClient, p)
 	if err != nil {
 		return err
 	}
@@ -499,7 +496,7 @@ func (oc *Controller) cleanEgressQoSNS(namespace string) error {
 	if len(existingQoSes) > 0 {
 		allOps := []ovsdb.Operation{}
 
-		ops, err := libovsdbops.DeleteQoSesOps(oc.mc.nbClient, nil, existingQoSes...)
+		ops, err := libovsdbops.DeleteQoSesOps(oc.nbClient, nil, existingQoSes...)
 		if err != nil {
 			return err
 		}
@@ -511,23 +508,23 @@ func (oc *Controller) cleanEgressQoSNS(namespace string) error {
 		}
 
 		for _, sw := range logicalSwitches {
-			ops, err := libovsdbops.RemoveQoSesFromLogicalSwitchOps(oc.mc.nbClient, nil, sw, existingQoSes...)
+			ops, err := libovsdbops.RemoveQoSesFromLogicalSwitchOps(oc.nbClient, nil, sw, existingQoSes...)
 			if err != nil {
 				return err
 			}
 			allOps = append(allOps, ops...)
 		}
 
-		if _, err := libovsdbops.TransactAndCheck(oc.mc.nbClient, allOps); err != nil {
+		if _, err := libovsdbops.TransactAndCheck(oc.nbClient, allOps); err != nil {
 			return fmt.Errorf("failed to delete qos, err: %s", err)
 		}
 	}
-
-	asPredicate := func(as *nbdb.AddressSet) bool {
-		return strings.HasPrefix(as.ExternalIDs["name"], types.EgressQoSRulePrefix+eq.namespace) &&
-			util.HasExternalIDsForCluster(as.ExternalIDs)
-	}
-	if err := libovsdbops.DeleteAddressSetsWithPredicate(oc.mc.nbClient, asPredicate); err != nil {
+	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetEgressQoS, oc.controllerName,
+		map[libovsdbops.ExternalIDKey]string{
+			libovsdbops.ObjectNameKey: eq.namespace,
+		})
+	asPredicate := libovsdbops.GetPredicate[*nbdb.AddressSet](predicateIDs, nil)
+	if err := libovsdbops.DeleteAddressSetsWithPredicate(oc.nbClient, asPredicate); err != nil {
 		return fmt.Errorf("failed to remove egress qos address sets, err: %v", err)
 	}
 
@@ -540,7 +537,7 @@ func (oc *Controller) cleanEgressQoSNS(namespace string) error {
 	return nil
 }
 
-func (oc *Controller) addEgressQoS(eqObj *egressqosapi.EgressQoS) error {
+func (oc *DefaultNetworkController) addEgressQoS(eqObj *egressqosapi.EgressQoS) error {
 	eq, err := oc.cloneEgressQoS(eqObj)
 	if err != nil {
 		return err
@@ -579,27 +576,26 @@ func (oc *Controller) addEgressQoS(eqObj *egressqosapi.EgressQoS) error {
 			Match:       match,
 			Priority:    r.priority,
 			Action:      map[string]int{nbdb.QoSActionDSCP: r.dscp},
-			ExternalIDs: map[string]string{"EgressQoS": eq.namespace},
+			ExternalIDs: util.ExternalIDsForCluster(map[string]string{"EgressQoS": eq.namespace}),
 		}
-		qos.ExternalIDs = util.ExternalIDsForCluster(qos.ExternalIDs)
 		qoses = append(qoses, qos)
 	}
 
-	ops, err := libovsdbops.CreateOrUpdateQoSesOps(oc.mc.nbClient, nil, qoses...)
+	ops, err := libovsdbops.CreateOrUpdateQoSesOps(oc.nbClient, nil, qoses...)
 	if err != nil {
 		return err
 	}
 	allOps = append(allOps, ops...)
 
 	for _, sw := range logicalSwitches {
-		ops, err := libovsdbops.AddQoSesToLogicalSwitchOps(oc.mc.nbClient, nil, sw, qoses...)
+		ops, err := libovsdbops.AddQoSesToLogicalSwitchOps(oc.nbClient, nil, sw, qoses...)
 		if err != nil {
 			return err
 		}
 		allOps = append(allOps, ops...)
 	}
 
-	if _, err := libovsdbops.TransactAndCheck(oc.mc.nbClient, allOps); err != nil {
+	if _, err := libovsdbops.TransactAndCheck(oc.nbClient, allOps); err != nil {
 		return fmt.Errorf("failed to create qos, err: %s", err)
 	}
 
@@ -631,17 +627,20 @@ func generateEgressQoSMatch(eq *egressQoSRule, hashedAddressSetNameIPv4, hashedA
 	return fmt.Sprintf("(%s) && %s", dst, src)
 }
 
-func (oc *Controller) egressQoSSwitches() ([]string, error) {
+func (oc *DefaultNetworkController) egressQoSSwitches() ([]string, error) {
 	logicalSwitches := []string{}
 
 	// Find all node switches
 	p := func(item *nbdb.LogicalSwitch) bool {
 		// Ignore external and Join switches(both legacy and current)
 		return !(strings.HasPrefix(item.Name, util.GetClusterScopedName(types.JoinSwitchPrefix)) ||
-			item.Name == util.GetClusterScopedName(types.OVNJoinSwitch) || strings.HasPrefix(item.Name, util.GetClusterScopedName(types.ExternalSwitchPrefix)))
+			item.Name == util.GetClusterScopedName(types.OVNJoinSwitch) ||
+			item.Name == util.GetClusterScopedName(types.TransitSwitch) ||
+			strings.HasPrefix(item.Name, util.GetClusterScopedName(types.ExternalSwitchPrefix))) &&
+			util.HasExternalIDsForCluster(item.ExternalIDs)
 	}
 
-	nodeLocalSwitches, err := libovsdbops.FindLogicalSwitchesWithPredicate(oc.mc.nbClient, p)
+	nodeLocalSwitches, err := libovsdbops.FindLogicalSwitchesWithPredicate(oc.nbClient, p)
 	if err != nil {
 		return nil, fmt.Errorf("unable to fetch local switches for EgressQoS, err: %v", err)
 	}
@@ -665,7 +664,7 @@ type mapAndOp struct {
 	op mapOp
 }
 
-func (oc *Controller) syncEgressQoSPod(key string) error {
+func (oc *DefaultNetworkController) syncEgressQoSPod(key string) error {
 	startTime := time.Now()
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
@@ -713,7 +712,7 @@ func (oc *Controller) syncEgressQoSPod(key string) error {
 			podsCaches = append(podsCaches, rule.pods)
 			allOps = append(allOps, ops...)
 		}
-		_, err = libovsdbops.TransactAndCheck(oc.mc.nbClient, allOps)
+		_, err = libovsdbops.TransactAndCheck(oc.nbClient, allOps)
 		if err != nil {
 			return err
 		}
@@ -727,11 +726,11 @@ func (oc *Controller) syncEgressQoSPod(key string) error {
 
 	klog.V(5).Infof("Pod %s retrieved from lister: %v", pod.Name, pod)
 
-	if !util.PodWantsNetwork(pod) { // we don't handle HostNetworked pods
+	if util.PodWantsHostNetwork(pod) { // we don't handle HostNetworked pods
 		return nil
 	}
 
-	podIPs, err := util.GetAllPodIPs(pod, oc.nadInfo)
+	podIPs, err := util.GetPodIPsOfNetwork(pod, oc.NetInfo)
 	if errors.Is(err, util.ErrNoPodIPFound) {
 		return nil // reprocess it when it is updated with an IP
 	}
@@ -765,7 +764,7 @@ func (oc *Controller) syncEgressQoSPod(key string) error {
 		}
 	}
 
-	_, err = libovsdbops.TransactAndCheck(oc.mc.nbClient, allOps)
+	_, err = libovsdbops.TransactAndCheck(oc.nbClient, allOps)
 	if err != nil {
 		return err
 	}
@@ -783,17 +782,32 @@ func (oc *Controller) syncEgressQoSPod(key string) error {
 }
 
 // onEgressQoSPodAdd queues the pod for processing.
-func (oc *Controller) onEgressQoSPodAdd(obj interface{}) {
+func (oc *DefaultNetworkController) onEgressQoSPodAdd(obj interface{}) {
 	key, err := cache.MetaNamespaceKeyFunc(obj)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
+	pod := obj.(*kapi.Pod)
+	// only process this pod if it is local to this zone
+	if !oc.isPodScheduledinLocalZone(pod) {
+		// NOTE: This means we don't handle the case where pod goes from
+		// being local to remote. So far there is no use case for this to happen.
+		// Also when we think about a pod going from local to remote - what does that mean?
+		// It means the node on which the pod lived suddenly stopped being local to this zone
+		// That either means node changed zones - which will involve a full delete and recreate
+		// the OVN objects in a new zone's DB and/or node is gone etc. All those scenarios don't
+		// need this controller to take any action.
+		// NOTE2: During upgrades when the legacy ovnkube-master is still running it will detect
+		// nodes have gone remote which for this feature means deleting the switches totally and
+		// based on OVN db schema this will remove all referenced QoS rules created on the switch
+		return // not local to this zone, nothing to do; no-op
+	}
 	oc.egressQoSPodQueue.Add(key)
 }
 
 // onEgressQoSPodUpdate queues the pod for processing.
-func (oc *Controller) onEgressQoSPodUpdate(oldObj, newObj interface{}) {
+func (oc *DefaultNetworkController) onEgressQoSPodUpdate(oldObj, newObj interface{}) {
 	oldPod := oldObj.(*kapi.Pod)
 	newPod := newObj.(*kapi.Pod)
 
@@ -804,10 +818,17 @@ func (oc *Controller) onEgressQoSPodUpdate(oldObj, newObj interface{}) {
 
 	oldPodLabels := labels.Set(oldPod.Labels)
 	newPodLabels := labels.Set(newPod.Labels)
-	oldPodIPs, _ := util.GetAllPodIPs(oldPod, oc.nadInfo)
-	newPodIPs, _ := util.GetAllPodIPs(newPod, oc.nadInfo)
+	oldPodIPs, _ := util.GetPodIPsOfNetwork(oldPod, oc.NetInfo)
+	newPodIPs, _ := util.GetPodIPsOfNetwork(newPod, oc.NetInfo)
+	isOldPodLocal := oc.isPodScheduledinLocalZone(oldPod)
+	isNewPodLocal := oc.isPodScheduledinLocalZone(newPod)
+	oldPodCompleted := util.PodCompleted(oldPod)
+	newPodCompleted := util.PodCompleted(newPod)
 	if labels.Equals(oldPodLabels, newPodLabels) &&
-		len(oldPodIPs) == len(newPodIPs) {
+		len(oldPodIPs) == len(newPodIPs) &&
+		// NOTE: We only expect remote pods to become local when they are scheduled; not vice versa
+		isOldPodLocal == isNewPodLocal &&
+		oldPodCompleted == newPodCompleted {
 		return
 	}
 
@@ -820,21 +841,36 @@ func (oc *Controller) onEgressQoSPodUpdate(oldObj, newObj interface{}) {
 	oc.egressQoSPodQueue.Add(key)
 }
 
-func (oc *Controller) onEgressQoSPodDelete(obj interface{}) {
+func (oc *DefaultNetworkController) onEgressQoSPodDelete(obj interface{}) {
 	key, err := cache.MetaNamespaceKeyFunc(obj)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
+	pod := obj.(*kapi.Pod)
+	// only process this pod if it is local to this zone
+	if !oc.isPodScheduledinLocalZone(pod) {
+		// NOTE: This means we don't handle the case where pod goes from
+		// being local to remote. So far there is no use case for this to happen.
+		// Also when we think about a pod going from local to remote - what does that mean?
+		// It means the node on which the pod lived suddenly stopped being local to this zone
+		// That either means node changed zones - which will involve a full delete and recreate
+		// the OVN objects in a new zone's DB and/or node is gone etc. All those scenarios don't
+		// need this controller to take any action.
+		// NOTE2: During upgrades when the legacy ovnkube-master is still running it will detect
+		// nodes have gone remote which for this feature means deleting the switches totally and
+		// based on OVN db schema this will remove all referenced QoS rules created on the switch
+		return // not local to this zone, nothing to do; no-op
+	}
 	oc.egressQoSPodQueue.Add(key)
 }
 
-func (oc *Controller) runEgressQoSPodWorker(wg *sync.WaitGroup) {
+func (oc *DefaultNetworkController) runEgressQoSPodWorker(wg *sync.WaitGroup) {
 	for oc.processNextEgressQoSPodWorkItem(wg) {
 	}
 }
 
-func (oc *Controller) processNextEgressQoSPodWorkItem(wg *sync.WaitGroup) bool {
+func (oc *DefaultNetworkController) processNextEgressQoSPodWorkItem(wg *sync.WaitGroup) bool {
 	wg.Add(1)
 	defer wg.Done()
 	key, quit := oc.egressQoSPodQueue.Get()
@@ -861,21 +897,54 @@ func (oc *Controller) processNextEgressQoSPodWorkItem(wg *sync.WaitGroup) bool {
 }
 
 // onEgressQoSAdd queues the node for processing.
-func (oc *Controller) onEgressQoSNodeAdd(obj interface{}) {
+func (oc *DefaultNetworkController) onEgressQoSNodeAdd(obj interface{}) {
 	key, err := cache.MetaNamespaceKeyFunc(obj)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
+	node := obj.(*kapi.Node)
+	if util.GetNodeZone(node) != oc.zone {
+		return
+	}
 	oc.egressQoSNodeQueue.Add(key)
 }
 
-func (oc *Controller) runEgressQoSNodeWorker(wg *sync.WaitGroup) {
+// onEgressQoSNodeUpdate queues the node for processing if it changed zones
+func (oc *DefaultNetworkController) onEgressQoSNodeUpdate(oldObj, newObj interface{}) {
+	oldNode := oldObj.(*kapi.Node)
+	newNode := newObj.(*kapi.Node)
+	if oldNode.ResourceVersion == newNode.ResourceVersion ||
+		!newNode.GetDeletionTimestamp().IsZero() {
+		return
+	}
+	// During a nodeAdd event, the ovnkube-node can take some time to add the zone
+	// annotation to the node, during that interim time we might consider the node
+	// as remote and hence the addNode event might not do anything. So we need to
+	// watch for node updates. We also ensure we only process local node zones by
+	// comparing to the controller's zone. That will cover the remote->local case.
+	// The local->remote case is not covered or handled here because in that
+	// scenario the addUpdateRemoteNodeEvent function which calls the cleanupNodeResources
+	// will just cleanup the switch resource for the node.
+	oldNodeZone := util.GetNodeZone(oldNode)
+	newNodeZone := util.GetNodeZone(newNode)
+	if oldNodeZone == newNodeZone || newNodeZone != oc.zone {
+		return
+	}
+	key, err := cache.MetaNamespaceKeyFunc(newObj)
+	if err != nil {
+		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", newObj, err))
+		return
+	}
+	oc.egressQoSNodeQueue.Add(key)
+}
+
+func (oc *DefaultNetworkController) runEgressQoSNodeWorker(wg *sync.WaitGroup) {
 	for oc.processNextEgressQoSNodeWorkItem(wg) {
 	}
 }
 
-func (oc *Controller) processNextEgressQoSNodeWorkItem(wg *sync.WaitGroup) bool {
+func (oc *DefaultNetworkController) processNextEgressQoSNodeWorkItem(wg *sync.WaitGroup) bool {
 	wg.Add(1)
 	defer wg.Done()
 	key, quit := oc.egressQoSNodeQueue.Get()
@@ -890,7 +959,7 @@ func (oc *Controller) processNextEgressQoSNodeWorkItem(wg *sync.WaitGroup) bool 
 		return true
 	}
 
-	utilruntime.HandleError(fmt.Errorf("%v failed with : %v", key, err))
+	utilruntime.HandleError(fmt.Errorf("%v failed with: %v", key, err))
 
 	if oc.egressQoSNodeQueue.NumRequeues(key) < maxEgressQoSRetries {
 		oc.egressQoSNodeQueue.AddRateLimited(key)
@@ -901,7 +970,7 @@ func (oc *Controller) processNextEgressQoSNodeWorkItem(wg *sync.WaitGroup) bool 
 	return true
 }
 
-func (oc *Controller) syncEgressQoSNode(key string) error {
+func (oc *DefaultNetworkController) syncEgressQoSNode(key string) error {
 	startTime := time.Now()
 	_, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
@@ -925,18 +994,18 @@ func (oc *Controller) syncEgressQoSNode(key string) error {
 	klog.V(5).Infof("EgressQoS %s node retrieved from lister: %v", n.Name, n)
 
 	nodeSw := &nbdb.LogicalSwitch{
-		Name: n.Name,
+		Name: util.GetClusterScopedName(n.Name),
 	}
-	nodeSw, err = libovsdbops.GetLogicalSwitch(oc.mc.nbClient, nodeSw)
+	nodeSw, err = libovsdbops.GetLogicalSwitch(oc.nbClient, nodeSw)
 	if err != nil {
 		return err
 	}
 
 	p := func(q *nbdb.QoS) bool {
 		_, ok := q.ExternalIDs["EgressQoS"]
-		return ok
+		return ok && util.HasExternalIDsForCluster(q.ExternalIDs)
 	}
-	existingQoSes, err := libovsdbops.FindQoSesWithPredicate(oc.mc.nbClient, p)
+	existingQoSes, err := libovsdbops.FindQoSesWithPredicate(oc.nbClient, p)
 	if err != nil {
 		return err
 	}
@@ -945,12 +1014,12 @@ func (oc *Controller) syncEgressQoSNode(key string) error {
 		return nil
 	}
 
-	ops, err := libovsdbops.AddQoSesToLogicalSwitchOps(oc.mc.nbClient, nil, nodeSw.Name, existingQoSes...)
+	ops, err := libovsdbops.AddQoSesToLogicalSwitchOps(oc.nbClient, nil, nodeSw.Name, existingQoSes...)
 	if err != nil {
 		return err
 	}
 
-	if _, err := libovsdbops.TransactAndCheck(oc.mc.nbClient, ops); err != nil {
+	if _, err := libovsdbops.TransactAndCheck(oc.nbClient, ops); err != nil {
 		return fmt.Errorf("unable to add existing qoses to new node, err: %v", err)
 	}
 

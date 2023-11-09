@@ -2,7 +2,6 @@ package ovn
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -10,7 +9,6 @@ import (
 	"time"
 
 	ovsDBCache "github.com/ovn-org/libovsdb/cache"
-	"github.com/ovn-org/libovsdb/client"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
@@ -18,14 +16,15 @@ import (
 	virtualipv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
 	virtualipscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/clientset/versioned/scheme"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	corev1 "k8s.io/api/core/v1"
 	kapi "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/cache"
 	ref "k8s.io/client-go/tools/reference"
@@ -76,8 +75,9 @@ type virtualIP struct {
 }
 
 type backingPodInfo struct {
-	portName string
-	podRef   corev1.ObjectReference
+	backingPodNamespace string
+	backingPodName      string
+	podRef              corev1.ObjectReference
 }
 
 func NewVirtualIP(virtIP *virtualipv1beta1.VirtualIP) *virtualIP {
@@ -110,18 +110,25 @@ func getVirtualIPPodLockKey(portName string) string {
 	return fmt.Sprintf("virtualip/%s", portName)
 }
 
-func (oc *Controller) recordVirtualIPEvent(reason string, err string, virtualIP *virtualipv1beta1.VirtualIP) {
+func (bnc *BaseNetworkController) recordVirtualIPEvent(reason string, err string, virtualIP *virtualipv1beta1.VirtualIP) {
 	virtIPRef, refErr := ref.GetReference(virtualipscheme.Scheme, virtualIP)
 	if refErr != nil {
 		klog.Errorf("Couldn't get a reference to virtualIP %s/%s to post an event: '%v'",
 			virtualIP.Namespace, virtualIP.Name, refErr)
 	} else {
 		klog.V(5).Infof("Posting a %s event for virtualIP %s/%s", kapi.EventTypeWarning, virtualIP.Namespace, virtualIP.Name)
-		oc.mc.recorder.Eventf(virtIPRef, kapi.EventTypeWarning, reason, err)
+		bnc.recorder.Eventf(virtIPRef, kapi.EventTypeWarning, reason, err)
 	}
 }
 
-func (oc *Controller) updateVIPActivePodInstance(pb *sbdb.PortBinding) error {
+func (podInfo *backingPodInfo) GetLogicalPortName(nadName string) string {
+	if podInfo.backingPodNamespace == "" {
+		return ""
+	}
+	return util.GetSecondaryNetworkLogicalPortName(podInfo.backingPodNamespace, podInfo.backingPodName, nadName)
+}
+
+func (bnc *BaseNetworkController) updateVIPActivePodInstance(pb *sbdb.PortBinding) error {
 	if !util.HasExternalIDsForCluster(pb.ExternalIDs) {
 		return nil
 	}
@@ -131,7 +138,7 @@ func (oc *Controller) updateVIPActivePodInstance(pb *sbdb.PortBinding) error {
 	defer unlock()
 
 	vipKey := pb.ExternalIDs[ovntypes.ExternalIDNamespace] + "/" + pb.ExternalIDs[ovntypes.ExternalIDName]
-	v, ok := oc.virtualIPs.Load(vipKey)
+	v, ok := bnc.virtualIPs.Load(vipKey)
 	if !ok {
 		// perhaps, we got called much before the VIP object got added by the oc controller.
 		return nil
@@ -143,14 +150,14 @@ func (oc *Controller) updateVIPActivePodInstance(pb *sbdb.PortBinding) error {
 	// so active pod info of virtualIP need to be reset
 	if pb.VirtualParent == nil {
 		// no need to update if active podInfo is not set
-		if vip.activePodInfo.portName == "" {
+		if vip.activePodInfo.GetLogicalPortName(vip.nadName) == "" {
 			return nil
 		}
 		vip.activePodInfo = &backingPodInfo{}
-	} else if vip.activePodInfo.portName == *(pb.VirtualParent) {
+	} else if vip.activePodInfo.GetLogicalPortName(vip.nadName) == *(pb.VirtualParent) {
 		// if the port_binding's virtual_parent is same as current active pod and if the current active pod is still
 		// one of the backing pods, then there is nothing to do
-		if strings.Contains(pb.Options[optionsVirtualIPParents], vip.activePodInfo.portName) {
+		if strings.Contains(pb.Options[optionsVirtualIPParents], vip.activePodInfo.GetLogicalPortName(vip.nadName)) {
 			return nil
 		}
 		vip.activePodInfo = &backingPodInfo{}
@@ -158,7 +165,7 @@ func (oc *Controller) updateVIPActivePodInstance(pb *sbdb.PortBinding) error {
 	} else {
 		vip.backingPods.Range(func(k, v interface{}) bool {
 			podInfo := v.(*backingPodInfo)
-			if podInfo.portName == *(pb.VirtualParent) {
+			if podInfo.GetLogicalPortName(vip.nadName) == *(pb.VirtualParent) {
 				vip.activePodInfo = podInfo
 				return false
 			}
@@ -170,23 +177,32 @@ func (oc *Controller) updateVIPActivePodInstance(pb *sbdb.PortBinding) error {
 	}
 
 	klog.V(5).Infof("Updating active pod status for virtualIP %s/%s to (%s)", vip.namespace, vip.name,
-		vip.activePodInfo.portName)
-	return oc.updateVirtualIPStatusWithRetry(vip.namespace, vip.name, "", nil, nil, vip.activePodInfo, vip.lastTransitionTime)
+		vip.activePodInfo.GetLogicalPortName(vip.nadName))
+	return bnc.updateVirtualIPStatusWithRetry(vip.namespace, vip.name, "", nil, nil, vip.activePodInfo, vip.lastTransitionTime)
 }
 
 // watchPortBindingTable registers a event handler on SBDB updates
 // and updates the virtualIP status active pod info on virtual port parent change.
-func (oc *Controller) watchPortBindingTable(sbClient libovsdbclient.Client) error {
+func (bnc *BaseNetworkController) watchPortBindingTable() error {
+	var err error
+	dbModel, err := sbdb.FullDatabaseModel()
+	if err != nil {
+		return fmt.Errorf("failed to create sdbdb model: (%v)", err)
+	}
+	bnc.vipSBClient, err = libovsdb.NewClient(config.OvnSouth, dbModel, bnc.stopChan)
+	if err != nil {
+		return err
+	}
 
 	// register Event handler to lookout for port_binding table Updates
-	sbClient.Cache().AddEventHandler(&ovsDBCache.EventHandlerFuncs{
+	bnc.vipSBClient.Cache().AddEventHandler(&ovsDBCache.EventHandlerFuncs{
 		AddFunc: func(table string, model model.Model) {
 			if table != ovntypes.TablePortBinding {
 				return
 			}
 			pb := model.(*sbdb.PortBinding)
 			if pb.Type == ovntypes.VirtualPortType {
-				err := oc.updateVIPActivePodInstance(pb)
+				err := bnc.updateVIPActivePodInstance(pb)
 				if err != nil {
 					klog.Errorf(err.Error())
 				}
@@ -207,7 +223,7 @@ func (oc *Controller) watchPortBindingTable(sbClient libovsdbclient.Client) erro
 			if oldPortBinding.VirtualParent == nil && newPortBinding.VirtualParent == nil {
 				return
 			}
-			err := oc.updateVIPActivePodInstance(newPortBinding)
+			err := bnc.updateVIPActivePodInstance(newPortBinding)
 			if err != nil {
 				klog.Errorf(err.Error())
 			}
@@ -216,15 +232,15 @@ func (oc *Controller) watchPortBindingTable(sbClient libovsdbclient.Client) erro
 
 	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
 	go func() {
-		<-oc.mc.stopChan
+		<-bnc.stopChan
 		cancel()
 	}()
 
 	// monitor only port_binding table for logical switch ports of type virtual
 	pb := &sbdb.PortBinding{}
-	_, err := sbClient.Monitor(ctx,
-		sbClient.NewMonitor(
-			client.WithConditionalTable(pb, []model.Condition{{
+	_, err = bnc.vipSBClient.Monitor(ctx,
+		bnc.vipSBClient.NewMonitor(
+			libovsdbclient.WithConditionalTable(pb, []model.Condition{{
 				Field:    &pb.Type,
 				Function: ovsdb.ConditionEqual,
 				Value:    ovntypes.VirtualPortType,
@@ -233,7 +249,8 @@ func (oc *Controller) watchPortBindingTable(sbClient libovsdbclient.Client) erro
 	)
 
 	if err != nil {
-		sbClient.Close()
+		bnc.vipSBClient.Close()
+		bnc.vipSBClient = nil
 		return err
 	}
 	return nil
@@ -244,14 +261,14 @@ func (vip *virtualIP) getAllBackingPodPortandPodRef() (string, []corev1.ObjectRe
 	var backingPodsRef = make([]corev1.ObjectReference, 0)
 	vip.backingPods.Range(func(k, v interface{}) bool {
 		value := v.(*backingPodInfo)
-		portsList = append(portsList, value.portName)
+		portsList = append(portsList, value.GetLogicalPortName(vip.nadName))
 		backingPodsRef = append(backingPodsRef, value.podRef)
 		return true
 	})
 	return strings.Join(portsList, ","), backingPodsRef
 }
 
-func (oc *Controller) updateVirtualPortOptions(vip *virtualIP, portsList string) error {
+func (bnc *BaseNetworkController) updateVirtualPortOptions(vip *virtualIP, portsList string) error {
 	var ops []ovsdb.Operation
 	var err error
 	lsp := &nbdb.LogicalSwitchPort{
@@ -261,11 +278,11 @@ func (oc *Controller) updateVirtualPortOptions(vip *virtualIP, portsList string)
 			optionsVirtualIPParents: portsList,
 		},
 	}
-	ops, err = oc.mc.nbClient.Where(lsp).Update(lsp, &lsp.Options)
+	ops, err = bnc.nbClient.Where(lsp).Update(lsp, &lsp.Options)
 	if err != nil {
 		return fmt.Errorf("could not create commands to update logical switch port %s - %+v", lsp.Name, err)
 	}
-	_, err = libovsdbops.TransactAndCheckAndSetUUIDs(oc.mc.nbClient, lsp, ops)
+	_, err = libovsdbops.TransactAndCheckAndSetUUIDs(bnc.nbClient, lsp, ops)
 	if err != nil {
 		return fmt.Errorf("error transacting operations for virtualIP %s/%s is %+v err:(%v)",
 			vip.namespace, vip.name, ops, err)
@@ -278,11 +295,11 @@ func (vip *virtualIP) needsRetry(pod *kapi.Pod) bool {
 	return boolVal
 }
 
-func (oc *Controller) updateVirtualIPStatusWithRetry(namespace, name string, status ovntypes.OvnK8sStatus, messages []string,
+func (bnc *BaseNetworkController) updateVirtualIPStatusWithRetry(namespace, name string, status ovntypes.OvnK8sStatus, messages []string,
 	backingPodsRef []corev1.ObjectReference, activePodInfo *backingPodInfo, lastTransitionTime *metav1.Time) error {
 	retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		// Get the latest version of virtual IP object to modify it
-		latestVIP, err := oc.mc.kube.GetVirtualIP(namespace, name)
+		latestVIP, err := bnc.kube.GetVirtualIP(namespace, name)
 		if err != nil {
 			klog.Errorf("Unable to get virtualIP %s/%s for updating status, most likely it would be deleted",
 				namespace, name)
@@ -306,7 +323,7 @@ func (oc *Controller) updateVirtualIPStatusWithRetry(namespace, name string, sta
 		if !lastTransitionTime.IsZero() {
 			latestVIP.Status.LastTransitionTime = lastTransitionTime
 		}
-		return oc.mc.kube.UpdateVirtualIPStatus(latestVIP)
+		return bnc.kube.UpdateVirtualIPStatus(latestVIP)
 	})
 	if retryErr != nil {
 		return fmt.Errorf("error in updating status on virtualIP %s/%s: %v", namespace, name, retryErr)
@@ -316,23 +333,23 @@ func (oc *Controller) updateVirtualIPStatusWithRetry(namespace, name string, sta
 
 // updateVirtualIPStatusOnPodError sets the virtualIP status object to failed state
 // and updates messages field with error message
-func (oc *Controller) updateVirtualIPStatusOnError(vip *virtualIP, errMsg string) {
+func (bnc *BaseNetworkController) updateVirtualIPStatusOnError(vip *virtualIP, errMsg string) {
 	vip.status = ovntypes.OvnK8sStatusFailed
 	vip.messages = append(vip.messages, errMsg)
-	err := oc.updateVirtualIPStatusWithRetry(vip.namespace, vip.name, vip.status, vip.messages, nil, nil, nil)
+	err := bnc.updateVirtualIPStatusWithRetry(vip.namespace, vip.name, vip.status, vip.messages, nil, nil, nil)
 	if err != nil {
 		klog.Errorf(err.Error())
 	}
 }
 
-func (oc *Controller) setErrorMessage(vip *virtualIP, errMsg, failedOpsKey string) {
+func (oc *BaseNetworkController) setErrorMessage(vip *virtualIP, errMsg, failedOpsKey string) {
 	vip.failedVirtualIPOps[failedOpsKey] = true
 	oc.updateVirtualIPStatusOnError(vip, errMsg)
 }
 
 // clearErrorMessage removes the corresponding podAdd failure or
 // virtualIP creation failure from errorMessages list
-func (oc *Controller) clearErrorMessage(vip *virtualIP, failedOpsKey string) {
+func (oc *BaseNetworkController) clearErrorMessage(vip *virtualIP, failedOpsKey string) {
 	delete(vip.failedVirtualIPOps, failedOpsKey)
 	errMessages := make([]string, 0)
 	for _, errMsg := range vip.messages {
@@ -343,14 +360,15 @@ func (oc *Controller) clearErrorMessage(vip *virtualIP, failedOpsKey string) {
 	vip.messages = errMessages
 }
 
-func (oc *Controller) removeVirtualIPFromPodPortSecurity(vipAddress string, portName string) error {
+func (bnc *BaseNetworkController) removeVirtualIPFromPodPortSecurity(vipAddress string, podNamespace, podName, nadName string) error {
 	// lock using (virtualIP/portName) as key, as same pod may be added to
 	// multiple virtualIP's as backend.
+	portName := util.GetSecondaryNetworkLogicalPortName(podNamespace, podName, nadName)
 	unlock := util.LockByKey.Acquire(getVirtualIPPodLockKey(portName))
 	defer unlock()
 
 	klog.Infof("Deleting virtualIP address %s from logical switch port %s port security", vipAddress, portName)
-	portInfo, err := oc.logicalPortCache.get(portName)
+	portInfo, err := bnc.logicalPortCache.get(podNamespace, podName, nadName)
 	if err != nil {
 		klog.V(5).Infof("Port %s not found in logical port cache: (%v)", portName, err)
 		return nil
@@ -362,12 +380,12 @@ func (oc *Controller) removeVirtualIPFromPodPortSecurity(vipAddress string, port
 	}
 
 	lsp := &nbdb.LogicalSwitchPort{Name: portName}
-	podLSP, err := libovsdbops.GetLogicalSwitchPort(oc.mc.nbClient, lsp)
-	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+	podLSP, err := libovsdbops.GetLogicalSwitchPort(bnc.nbClient, lsp)
+	if err != nil && err != libovsdbclient.ErrNotFound {
 		return fmt.Errorf("failed to get logical switch port %s info from NB DB (%v)", portName, err)
 	}
 	// if we don't find the lsp it means it might have deleted before so just return
-	if errors.Is(err, libovsdbclient.ErrNotFound) {
+	if err == libovsdbclient.ErrNotFound {
 		return nil
 	}
 
@@ -380,12 +398,12 @@ func (oc *Controller) removeVirtualIPFromPodPortSecurity(vipAddress string, port
 	}
 
 	podLSP.PortSecurity = addrList
-	ops, err := oc.mc.nbClient.Where(podLSP).Update(podLSP, &podLSP.PortSecurity)
+	ops, err := bnc.nbClient.Where(podLSP).Update(podLSP, &podLSP.PortSecurity)
 	if err != nil {
 		return fmt.Errorf("could not create commands to update logical switch port %s - %+v", portName, err)
 	}
 
-	_, err = libovsdbops.TransactAndCheckAndSetUUIDs(oc.mc.nbClient, podLSP, ops)
+	_, err = libovsdbops.TransactAndCheckAndSetUUIDs(bnc.nbClient, podLSP, ops)
 	if err != nil {
 		return fmt.Errorf("could not perform update of logical switch port %s - %+v", portName, err)
 	}
@@ -393,7 +411,7 @@ func (oc *Controller) removeVirtualIPFromPodPortSecurity(vipAddress string, port
 	return nil
 }
 
-func (oc *Controller) handleVIPPodDelete(vip *virtualIP, pod *kapi.Pod) error {
+func (bnc *BaseNetworkController) handleVIPPodDelete(vip *virtualIP, pod *kapi.Pod) error {
 	unlock := util.LockByKey.Acquire(getVirtualIPLockKey(vip.nadName, vip.vipAddress))
 	defer unlock()
 
@@ -410,7 +428,7 @@ func (oc *Controller) handleVIPPodDelete(vip *virtualIP, pod *kapi.Pod) error {
 	klog.V(5).Infof("Parent ports for virtualIP %s/%s on pod %s/%s delete event are %s", vip.namespace, vip.name,
 		pod.Namespace, pod.Name, portsList)
 
-	err := oc.updateVirtualPortOptions(vip, portsList)
+	err := bnc.updateVirtualPortOptions(vip, portsList)
 	if err != nil {
 		return err
 	}
@@ -420,14 +438,15 @@ func (oc *Controller) handleVIPPodDelete(vip *virtualIP, pod *kapi.Pod) error {
 	skipPortSecurity := util.SkipSpoofCheckForNAD(pod.Annotations, vip.nadName)
 	if !skipPortSecurity {
 		podInfo := val.(*backingPodInfo)
-		err = oc.removeVirtualIPFromPodPortSecurity(vip.vipAddress, podInfo.portName)
+		err = bnc.removeVirtualIPFromPodPortSecurity(vip.vipAddress, podInfo.backingPodNamespace, podInfo.backingPodName, vip.nadName)
 		if err != nil {
-			return fmt.Errorf("failed to remove virtualIP address %s from lsp %s port-security (%v)", vip.vipAddress, podInfo.portName, err)
+			return fmt.Errorf("failed to remove virtualIP address %s from lsp %s port-security (%v)", vip.vipAddress,
+				podInfo.GetLogicalPortName(vip.nadName), err)
 		}
 	}
 	// update the status of virtualIP object with updated list of backing pods
 	vip.backingPodsRef = backingPodsReference
-	err = oc.updateVirtualIPStatusWithRetry(vip.namespace, vip.name, "", nil, vip.backingPodsRef, nil, nil)
+	err = bnc.updateVirtualIPStatusWithRetry(vip.namespace, vip.name, "", nil, vip.backingPodsRef, nil, nil)
 	if err != nil {
 		return fmt.Errorf("failed to update virtualIP %s/%s status", vip.namespace, vip.name)
 	}
@@ -435,14 +454,14 @@ func (oc *Controller) handleVIPPodDelete(vip *virtualIP, pod *kapi.Pod) error {
 	return err
 }
 
-func (oc *Controller) addVirtualIPToPodPortSecurity(vipAddress, portName, portMacAddr string) error {
+func (bnc *BaseNetworkController) addVirtualIPToPodPortSecurity(vipAddress, portName, portMacAddr string) error {
 	// lock using (virtualIP/portName) as key, as same pod may be added to
 	// multiple virtualIP's as backend.
 	unlock := util.LockByKey.Acquire(getVirtualIPPodLockKey(portName))
 	defer unlock()
 
 	lsp := &nbdb.LogicalSwitchPort{Name: portName}
-	podLSP, err := libovsdbops.GetLogicalSwitchPort(oc.mc.nbClient, lsp)
+	podLSP, err := libovsdbops.GetLogicalSwitchPort(bnc.nbClient, lsp)
 	if err != nil {
 		return fmt.Errorf("unable to get the lsp %s from the nbdb: %s", portName, err)
 	}
@@ -463,19 +482,19 @@ func (oc *Controller) addVirtualIPToPodPortSecurity(vipAddress, portName, portMa
 	addresses := portMacAddr + " " + vipAddress
 	podLSP.PortSecurity = append(podLSP.PortSecurity, addresses)
 
-	ops, err := oc.mc.nbClient.Where(podLSP).Update(podLSP, &podLSP.PortSecurity)
+	ops, err := bnc.nbClient.Where(podLSP).Update(podLSP, &podLSP.PortSecurity)
 	if err != nil {
 		return fmt.Errorf("could not create commands to update logical switch port %s - %+v", portName, err)
 	}
 
-	_, err = libovsdbops.TransactAndCheckAndSetUUIDs(oc.mc.nbClient, podLSP, ops)
+	_, err = libovsdbops.TransactAndCheckAndSetUUIDs(bnc.nbClient, podLSP, ops)
 	if err != nil {
 		return fmt.Errorf("could not perform update of logical switch port %s - %+v", portName, err)
 	}
 	return nil
 }
 
-func (oc *Controller) handleVIPPodAdd(vip *virtualIP, pod *kapi.Pod) error {
+func (bnc *BaseNetworkController) handleVIPPodAdd(vip *virtualIP, pod *kapi.Pod) error {
 	unlock := util.LockByKey.Acquire(getVirtualIPLockKey(vip.nadName, vip.vipAddress))
 	defer unlock()
 
@@ -483,18 +502,18 @@ func (oc *Controller) handleVIPPodAdd(vip *virtualIP, pod *kapi.Pod) error {
 	// this pod addition to virtualIP was failed before
 	podKey := getPodKey(pod)
 	if _, ok := vip.failedVirtualIPOps[podKey]; ok {
-		oc.clearErrorMessage(vip, podKey)
+		bnc.clearErrorMessage(vip, podKey)
 
 		// check whether this pod exists when this pod addition to virtualIP is retried
-		if _, err := oc.mc.watchFactory.GetPod(pod.Namespace, pod.Name); err != nil {
-			if apierrors.IsNotFound(err) {
+		if _, err := bnc.watchFactory.GetPod(pod.Namespace, pod.Name); err != nil {
+			if errors.IsNotFound(err) {
 				klog.Infof("Stop retrying pod addition %s/%s as it does not exist", pod.Namespace, pod.Name)
 				return nil
 			} else {
 				errMsg := fmt.Sprintf("Failed to get pod %s from informer cache", podKey)
-				oc.setErrorMessage(vip, errMsg, podKey)
+				bnc.setErrorMessage(vip, errMsg, podKey)
 				// add this pod to retryQueue
-				oc.requeuePodAdd4VirtualIP(actionAddVirtualIPod, vip, pod)
+				bnc.requeuePodAdd4VirtualIP(actionAddVirtualIPod, vip, pod)
 				return fmt.Errorf("failed to retrieve pod %s/%s from informer cache: (%v)", pod.Namespace, pod.Name, err)
 			}
 		}
@@ -506,17 +525,16 @@ func (oc *Controller) handleVIPPodAdd(vip *virtualIP, pod *kapi.Pod) error {
 		return nil
 	}
 
-	on, _, err := util.IsNetworkOnPod(pod, oc.nadInfo)
+	on, _, err := util.GetPodNADToNetworkMapping(pod, bnc.NetInfo)
 	if err != nil || !on {
 		// pod is not attached to this specific network
-		klog.Errorf("Pod %s is not attached to network %s error (%v)", pod.Name, oc.nadInfo.NetName, err)
+		klog.Errorf("Pod %s is not attached to network %s error (%v)", pod.Name, bnc.GetNetworkName(), err)
 		return nil
 	}
-
 	klog.Infof("Adding pod: %s/%s to VirtualIP: %s/%s", pod.Namespace, pod.Name, vip.namespace, vip.name)
-	portName := util.GetLogicalPortName(pod.Namespace, pod.Name, vip.nadName, !oc.nadInfo.IsSecondary)
+	portName := util.GetSecondaryNetworkLogicalPortName(pod.Namespace, pod.Name, vip.nadName)
 	// check if the network for pod is established
-	portInfo, err := oc.logicalPortCache.get(portName)
+	portInfo, err := bnc.logicalPortCache.get(pod.Namespace, pod.Name, vip.nadName)
 	if err != nil {
 		klog.Errorf("%s/%s pod networking is not set yet : (%v)", pod.Namespace, pod.Name, err)
 		vip.podRetry.Store(podKey, true)
@@ -542,12 +560,12 @@ func (oc *Controller) handleVIPPodAdd(vip *virtualIP, pod *kapi.Pod) error {
 	// then don't add this virtualIP address to pod lsp port security
 	skipPortSecurity := util.SkipSpoofCheckForNAD(pod.Annotations, vip.nadName)
 	if !skipPortSecurity {
-		err = oc.addVirtualIPToPodPortSecurity(vip.vipAddress, portName, portInfo.mac.String())
+		err = bnc.addVirtualIPToPodPortSecurity(vip.vipAddress, portName, portInfo.mac.String())
 		if err != nil {
 			errMsg := fmt.Sprintf("Failed to add virtualIP address to pod %s port security", podKey)
-			oc.setErrorMessage(vip, errMsg, podKey)
+			bnc.setErrorMessage(vip, errMsg, podKey)
 			// add this pod to retryQueue
-			oc.requeuePodAdd4VirtualIP(actionAddVirtualIPod, vip, pod)
+			bnc.requeuePodAdd4VirtualIP(actionAddVirtualIPod, vip, pod)
 			return fmt.Errorf("failed to add virtualIP address %s to lsp %s port-security (%v)", vip.vipAddress, portName, err)
 		}
 	} else {
@@ -555,7 +573,8 @@ func (oc *Controller) handleVIPPodAdd(vip *virtualIP, pod *kapi.Pod) error {
 	}
 
 	podInfo := &backingPodInfo{
-		portName: portName,
+		backingPodNamespace: pod.Namespace,
+		backingPodName:      pod.Name,
 		podRef: corev1.ObjectReference{
 			Name: pod.ObjectMeta.Name,
 		},
@@ -564,15 +583,15 @@ func (oc *Controller) handleVIPPodAdd(vip *virtualIP, pod *kapi.Pod) error {
 	portsList, backingPodsReference := vip.getAllBackingPodPortandPodRef()
 	klog.V(5).Infof("Parent ports for virtualIP %s/%s after pod %s/%s add event are %s", vip.namespace, vip.name,
 		pod.Namespace, pod.Name, portsList)
-	err = oc.updateVirtualPortOptions(vip, portsList)
+	err = bnc.updateVirtualPortOptions(vip, portsList)
 	if err != nil {
 		// delete this pod from backingPods list as there was a failure
 		// in updating virtual parents options with pod addition.
 		vip.backingPods.Delete(podKey)
 		errMsg := fmt.Sprintf("Failed to add pod %s as virtual parent to virtualIP", podKey)
-		oc.setErrorMessage(vip, errMsg, podKey)
+		bnc.setErrorMessage(vip, errMsg, podKey)
 		// add this pod to retryQueue
-		oc.requeuePodAdd4VirtualIP(actionAddVirtualIPod, vip, pod)
+		bnc.requeuePodAdd4VirtualIP(actionAddVirtualIPod, vip, pod)
 		return err
 	}
 
@@ -583,49 +602,46 @@ func (oc *Controller) handleVIPPodAdd(vip *virtualIP, pod *kapi.Pod) error {
 
 	// update the virtual ip status with updated backing pod info
 	vip.backingPodsRef = backingPodsReference
-	return oc.updateVirtualIPStatusWithRetry(vip.namespace, vip.name, vip.status, vip.messages, vip.backingPodsRef, nil, nil)
+	return bnc.updateVirtualIPStatusWithRetry(vip.namespace, vip.name, vip.status, vip.messages, vip.backingPodsRef, nil, nil)
 }
 
 // isVirtualIPAddressValid checks if vipAddress is contained in
 // networkAttachmentDefinition netCIDRs & exclude_cidrs range
 // and also checks if it is duplicate of already existing virtualIP's ipaddress
-func (oc *Controller) isVirtualIPAddressValid(vip *virtualIP) (bool, error) {
+func (bnc *BaseNetworkController) isVirtualIPAddressValid(vip *virtualIP) (bool, error) {
 	// vipAddr will never be a invalid one(nil) as it
 	// will be validated while creation of virtualIP
 	vipAddr := net.ParseIP(vip.vipAddress)
-	// this will be validated while creation of network-attachment-definition
-	// so no need to recheck for error here.
-	netCIDRs, _ := config.ParseClusterSubnetEntries(oc.nadInfo.NetCidr, false)
 	var inNetCIDRRange bool
 	// check if virtualIP networkAttachmentDefinition netCIDRs contain vipAddress
-	for _, netCIDR := range netCIDRs {
-		if netCIDR.CIDR.Contains(vipAddr) {
+	for _, subnet := range bnc.Subnets() {
+		if subnet.CIDR.Contains(vipAddr) {
 			inNetCIDRRange = true
 			break
 		}
 	}
 	if !inNetCIDRRange {
 		return false, fmt.Errorf("VirtualIP (%s/%s)'s address %s must belong to network-attachment-definiton (%s)'s "+
-			"CIDR range", vip.namespace, vip.name, vip.vipAddress, oc.nadInfo.NetName)
+			"CIDR range", vip.namespace, vip.name, vip.vipAddress, bnc.GetNetworkName())
 	}
 
 	// virtualIP must be in networkAttachmentDefinition's excludeIP range
 	var inExcludeIPRange bool
-	for _, excludeIP := range oc.nadInfo.ExcludeIPs {
-		if excludeIP.Equal(vipAddr) {
+	for _, excludeSubnet := range bnc.ExcludeSubnets() {
+		if excludeSubnet.Contains(vipAddr) {
 			inExcludeIPRange = true
 			break
 		}
 	}
 	if !inExcludeIPRange {
 		return false, fmt.Errorf("VirtualIP (%s/%s)'s address %s must be inside network-attachment-definiton (%s)'s) "+
-			"exclude_cidr range", vip.namespace, vip.name, vip.vipAddress, oc.nadInfo.NetName)
+			"exclude_cidr range", vip.namespace, vip.name, vip.vipAddress, bnc.GetNetworkName())
 	}
 
 	// check if virtualIP adddress is duplicate of already existing virtualIP's ipaddress
 	var isDuplicate bool
 	var virtIP *virtualIP
-	oc.virtualIPs.Range(func(k, v interface{}) bool {
+	bnc.virtualIPs.Range(func(k, v interface{}) bool {
 		virtIP = v.(*virtualIP)
 		if vip.vipAddress == virtIP.vipAddress {
 			isDuplicate = true
@@ -641,15 +657,15 @@ func (oc *Controller) isVirtualIPAddressValid(vip *virtualIP) (bool, error) {
 	return true, nil
 }
 
-func (oc *Controller) createVIP(vip *virtualIP) error {
-	ls, err := oc.waitForNodeLogicalSwitch(util.GetClusterScopedName(oc.nadInfo.Prefix + ovntypes.OvnLayer2Switch))
+func (bnc *BaseNetworkController) createVIP(vip *virtualIP) error {
+	ls, err := bnc.waitForNodeLogicalSwitch(util.GetClusterScopedName(bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch)))
 	if err != nil {
 		return err
 	}
 	vip.logicalPortName = getVirtualPortName(vip.namespace, vip.name)
 	lsp := &nbdb.LogicalSwitchPort{Name: vip.logicalPortName}
-	_, err = libovsdbops.GetLogicalSwitchPort(oc.mc.nbClient, lsp)
-	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+	_, err = libovsdbops.GetLogicalSwitchPort(bnc.nbClient, lsp)
+	if err != nil && err != libovsdbclient.ErrNotFound {
 		return fmt.Errorf("failed while checking for existence of virtual port %s in the NB DB: (%v)",
 			vip.logicalPortName, err)
 	}
@@ -659,24 +675,22 @@ func (oc *Controller) createVIP(vip *virtualIP) error {
 		return nil
 	}
 
-	externalIDs := util.ExternalIDsForCluster(map[string]string{
-		ovntypes.ExternalIDNamespace:    vip.namespace,
-		ovntypes.ExternalIDName:         vip.name,
-		ovntypes.ExternalIDNetAttachDef: vip.nadName,
-	})
-
 	// port doesn't exist and need to create one
 	lsp = &nbdb.LogicalSwitchPort{
-		Name:        vip.logicalPortName,
-		Type:        ovntypes.VirtualPortType,
-		ExternalIDs: externalIDs,
+		Name: vip.logicalPortName,
+		Type: ovntypes.VirtualPortType,
+		ExternalIDs: util.ExternalIDsForCluster(map[string]string{
+			ovntypes.ExternalIDNamespace:    vip.namespace,
+			ovntypes.ExternalIDName:         vip.name,
+			ovntypes.ExternalIDNetAttachDef: vip.nadName,
+		}),
 		// setting this intially as we are using lock based on (nadName/VipAddress)
 		Options: map[string]string{
 			optionsVirtualIP: vip.vipAddress,
 		},
 	}
 
-	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.mc.nbClient, ls, lsp)
+	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(bnc.nbClient, ls, lsp)
 	if err != nil {
 		return fmt.Errorf("error creating logical switch port %+v on switch %+v: %+v", *lsp, *ls, err)
 	}
@@ -684,8 +698,8 @@ func (oc *Controller) createVIP(vip *virtualIP) error {
 	return nil
 }
 
-func (oc *Controller) addVirtualIP(virtIP *virtualipv1beta1.VirtualIP) error {
-	klog.Infof("Adding virtualIP %s/%s on network %s", virtIP.Namespace, virtIP.Name, oc.nadInfo.NetName)
+func (bnc *BaseNetworkController) addVirtualIP(virtIP *virtualipv1beta1.VirtualIP) error {
+	klog.Infof("Adding virtualIP %s/%s on network %s", virtIP.Namespace, virtIP.Name, bnc.GetNetworkName())
 	// lock using (virtualIPNadName/virtualIPAddress) to handle
 	// virtualIP with duplicate IP addresses
 	virtIPLockKey := getVirtualIPLockKey(virtIP.Spec.NetworkAttachmentName, virtIP.Spec.VirtualIP)
@@ -696,18 +710,18 @@ func (oc *Controller) addVirtualIP(virtIP *virtualipv1beta1.VirtualIP) error {
 	// if there were any errors during virtual port creation in OVN
 	virtualIPKey := getVipKey(virtIP)
 	if _, ok := vip.failedVirtualIPOps[virtualIPKey]; ok {
-		oc.clearErrorMessage(vip, virtualIPKey)
+		bnc.clearErrorMessage(vip, virtualIPKey)
 
 		// check if the virtualIP exists when virtualIP creation in OVN is retried
-		if _, err := oc.mc.watchFactory.GetVirtualIP(virtIP.Namespace, virtIP.Name); err != nil {
+		if _, err := bnc.watchFactory.GetVirtualIP(virtIP.Namespace, virtIP.Name); err != nil {
 			var updatedErr error
-			if apierrors.IsNotFound(err) {
+			if errors.IsNotFound(err) {
 				klog.Infof("Stop retrying virtualIP %s/%s as it does not exist", virtIP.Namespace, virtIP.Name)
 			} else {
 				errMsg := fmt.Sprintf("Failed to retrieve virtualIP %s from cache", virtualIPKey)
-				oc.setErrorMessage(vip, errMsg, virtualIPKey)
+				bnc.setErrorMessage(vip, errMsg, virtualIPKey)
 				// add this operation to virtualIPRetryQueue
-				oc.requeueVirtualIP(actionAddVirtualIP, virtIP)
+				bnc.requeueVirtualIP(actionAddVirtualIP, virtIP)
 				updatedErr = fmt.Errorf("failed in retrieving virtualIP %s/%s from cache: %v", virtIP.Namespace, virtIP.Name, err)
 			}
 			unlock()
@@ -715,26 +729,18 @@ func (oc *Controller) addVirtualIP(virtIP *virtualipv1beta1.VirtualIP) error {
 		}
 	}
 
-	if oc.nadInfo.TopoType != ovntypes.Layer2AttachDefTopoType {
-		err := fmt.Errorf("VirtualIP (%s/%s)'s network-attachment-defintion %s is not a L2 network type",
-			vip.namespace, vip.name, oc.nadInfo.NetName)
-		oc.updateVirtualIPStatusOnError(vip, err.Error())
+	if isVIPAddressValid, err := bnc.isVirtualIPAddressValid(vip); !isVIPAddressValid {
+		bnc.updateVirtualIPStatusOnError(vip, err.Error())
 		unlock()
 		return err
 	}
 
-	if isVIPAddressValid, err := oc.isVirtualIPAddressValid(vip); !isVIPAddressValid {
-		oc.updateVirtualIPStatusOnError(vip, err.Error())
-		unlock()
-		return err
-	}
-
-	err := oc.createVIP(vip)
+	err := bnc.createVIP(vip)
 	if err != nil {
 		errMsg := fmt.Sprintf("Failed to create virtual port for %s in OVN", virtualIPKey)
-		oc.setErrorMessage(vip, errMsg, virtualIPKey)
+		bnc.setErrorMessage(vip, errMsg, virtualIPKey)
 		// add this operation to virtualIPRetryQueue
-		oc.requeueVirtualIP(actionAddVirtualIP, virtIP)
+		bnc.requeueVirtualIP(actionAddVirtualIP, virtIP)
 
 		unlock()
 		return fmt.Errorf("failed to create virtualIP (%s/%s) - %v", virtIP.Namespace, virtIP.Name, err)
@@ -743,64 +749,64 @@ func (oc *Controller) addVirtualIP(virtIP *virtualipv1beta1.VirtualIP) error {
 	vip.status = ovntypes.OvnK8sStatusSucceeded
 	vip.messages = append(vip.messages, "Created virtual port in OVN")
 	// Store in cache only if virtualIP port creation is successful
-	oc.virtualIPs.Store(virtualIPKey, vip)
-	err = oc.updateVirtualIPStatusWithRetry(vip.namespace, vip.name, vip.status, vip.messages, nil, nil, nil)
+	bnc.virtualIPs.Store(virtualIPKey, vip)
+	err = bnc.updateVirtualIPStatusWithRetry(vip.namespace, vip.name, vip.status, vip.messages, nil, nil, nil)
 	if err != nil {
 		klog.Errorf(err.Error())
 	}
 	unlock()
 
 	sel, _ := metav1.LabelSelectorAsSelector(&virtIP.Spec.PodSelector)
-	vip.podHandler, _ = oc.mc.watchFactory.AddFilteredPodHandler(vip.namespace, sel,
+	vip.podHandler, _ = bnc.watchFactory.AddFilteredPodHandler(vip.namespace, sel,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				pod := obj.(*kapi.Pod)
-				if err := oc.handleVIPPodAdd(vip, pod); err != nil {
+				if err := bnc.handleVIPPodAdd(vip, pod); err != nil {
 					klog.Errorf(err.Error())
-					oc.recordVirtualIPEvent("VirtualIPPodAddError", err.Error(), virtIP)
+					bnc.recordVirtualIPEvent("VirtualIPPodAddError", err.Error(), virtIP)
 				}
 			},
 			DeleteFunc: func(obj interface{}) {
 				pod := obj.(*kapi.Pod)
-				if err := oc.handleVIPPodDelete(vip, pod); err != nil {
+				if err := bnc.handleVIPPodDelete(vip, pod); err != nil {
 					klog.Errorf(err.Error())
-					oc.recordVirtualIPEvent("VirtualIPPodDelError", err.Error(), virtIP)
+					bnc.recordVirtualIPEvent("VirtualIPPodDelError", err.Error(), virtIP)
 				}
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
 				newPod := newObj.(*kapi.Pod)
 				if vip.needsRetry(newPod) {
-					if err := oc.handleVIPPodAdd(vip, newPod); err != nil {
+					if err := bnc.handleVIPPodAdd(vip, newPod); err != nil {
 						klog.Errorf(err.Error())
-						oc.recordVirtualIPEvent("VirtualIPPodAddError", err.Error(), virtIP)
+						bnc.recordVirtualIPEvent("VirtualIPPodAddError", err.Error(), virtIP)
 					}
 				}
-			}}, nil)
+			}}, nil, 1 /* TBD: set priority */)
 	return nil
 }
 
-func (oc *Controller) deleteVirtualIP(virtIP *virtualipv1beta1.VirtualIP) error {
+func (bnc *BaseNetworkController) deleteVirtualIP(virtIP *virtualipv1beta1.VirtualIP) error {
 	// lock using (virtualIPNadName/virtualIPAddress) to handle
 	// virtualIP with duplicate IP addresses
 	virtIPLockKey := getVirtualIPLockKey(virtIP.Spec.NetworkAttachmentName, virtIP.Spec.VirtualIP)
 	unlock := util.LockByKey.Acquire(virtIPLockKey)
 	defer unlock()
 
-	v, ok := oc.virtualIPs.LoadAndDelete(getVipKey(virtIP))
+	v, ok := bnc.virtualIPs.LoadAndDelete(getVipKey(virtIP))
 	if !ok {
 		klog.Errorf("Deleting virtualIP %s/%s which was not created successfully", virtIP.Namespace, virtIP.Name)
 		return nil
 	}
 
-	klog.Infof("Deleting virtualIP %s/%s on network %s", virtIP.Namespace, virtIP.Name, oc.nadInfo.NetName)
+	klog.Infof("Deleting virtualIP %s/%s on network %s", virtIP.Namespace, virtIP.Name, bnc.GetNetworkName())
 	vip := v.(*virtualIP)
 	// remove filtered namespace pod handler
-	oc.mc.watchFactory.RemovePodHandler(vip.podHandler)
+	bnc.watchFactory.RemovePodHandler(vip.podHandler)
 
-	switchName := util.GetClusterScopedName(oc.nadInfo.Prefix + ovntypes.OvnLayer2Switch)
+	switchName := util.GetClusterScopedName(bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch))
 	lsp := nbdb.LogicalSwitchPort{Name: vip.logicalPortName}
 	sw := nbdb.LogicalSwitch{Name: switchName}
-	err := libovsdbops.DeleteLogicalSwitchPorts(oc.mc.nbClient, &sw, &lsp)
+	err := libovsdbops.DeleteLogicalSwitchPorts(bnc.nbClient, &sw, &lsp)
 	if err != nil {
 		klog.Errorf("Failed to delete virtual port %s from logical switch %s: %v",
 			vip.logicalPortName, switchName, err)
@@ -809,10 +815,10 @@ func (oc *Controller) deleteVirtualIP(virtIP *virtualipv1beta1.VirtualIP) error 
 	// delete the virtual-ip address from pod port security list backed by this virtual ip
 	vip.backingPods.Range(func(k, v interface{}) bool {
 		value := v.(*backingPodInfo)
-		err := oc.removeVirtualIPFromPodPortSecurity(vip.vipAddress, value.portName)
+		err := bnc.removeVirtualIPFromPodPortSecurity(vip.vipAddress, value.backingPodNamespace, value.backingPodName, vip.nadName)
 		if err != nil {
-			klog.Errorf("Failed to remove virtualIP address %s from logical switch port %s's port-security (%v)",
-				vip.vipAddress, value.portName, err)
+			klog.Errorf("Failed to remove virtualIP address %s from logical switch port %s's port-security (%v)", vip.vipAddress,
+				value.GetLogicalPortName(vip.nadName), err)
 		}
 		return true
 	})
@@ -820,7 +826,7 @@ func (oc *Controller) deleteVirtualIP(virtIP *virtualipv1beta1.VirtualIP) error 
 }
 
 // syncVirtualIPPods checks for any stale pod logical port names from virtualport parent options
-func (oc *Controller) syncVirtualIPPods(vip *virtualIP, vipLSP *nbdb.LogicalSwitchPort, podSelectorLabels metav1.LabelSelector) {
+func (bnc *BaseNetworkController) syncVirtualIPPods(vip *virtualIP, vipLSP *nbdb.LogicalSwitchPort, podSelectorLabels metav1.LabelSelector) {
 	// Delete stale pod logical port names from virtual port parent options
 	parentPorts := vipLSP.Options[optionsVirtualIPParents]
 	if parentPorts == "" {
@@ -829,7 +835,7 @@ func (oc *Controller) syncVirtualIPPods(vip *virtualIP, vipLSP *nbdb.LogicalSwit
 	}
 
 	// get all the pods backed by this virtualIP
-	pods, err := oc.mc.watchFactory.GetPodsBySelector(vip.namespace, podSelectorLabels)
+	pods, err := bnc.watchFactory.GetPodsBySelector(vip.namespace, podSelectorLabels)
 	if err != nil {
 		klog.Errorf("Failed to get pods backed for virtualIP %s/%s: (%v)", vip.namespace, vip.name, err)
 		return
@@ -839,7 +845,7 @@ func (oc *Controller) syncVirtualIPPods(vip *virtualIP, vipLSP *nbdb.LogicalSwit
 	for _, parentPortName := range strings.Split(parentPorts, ",") {
 		for _, pod := range pods {
 			// Get pod logical port name
-			PodPortName := util.GetLogicalPortName(pod.Namespace, pod.Name, vip.nadName, !oc.nadInfo.IsSecondary)
+			PodPortName := util.GetSecondaryNetworkLogicalPortName(pod.Namespace, pod.Name, vip.nadName)
 			if parentPortName == PodPortName {
 				updatedVirtualParentPortsList = append(updatedVirtualParentPortsList, parentPortName)
 				break
@@ -852,18 +858,18 @@ func (oc *Controller) syncVirtualIPPods(vip *virtualIP, vipLSP *nbdb.LogicalSwit
 	if updatedVIPParentPorts != parentPorts {
 		klog.V(5).Infof("Updating virtualIP %s/%s virtual-parent port options from %s to %s",
 			vip.namespace, vip.name, parentPorts, updatedVIPParentPorts)
-		err = oc.updateVirtualPortOptions(vip, updatedVIPParentPorts)
+		err = bnc.updateVirtualPortOptions(vip, updatedVIPParentPorts)
 		if err != nil {
 			klog.Errorf(err.Error())
 		}
 	}
 }
 
-func (oc *Controller) syncVirtualIPsPeriodic() {
-	klog.Infof("Starting VirtualIP sync for network %s", oc.nadInfo.NetName)
-	switchName := util.GetClusterScopedName(oc.nadInfo.Prefix + ovntypes.OvnLayer2Switch)
+func (bnc *BaseNetworkController) syncVirtualIPsPeriodic() {
+	klog.Infof("Starting VirtualIP sync for network %s", bnc.GetNetworkName())
+	switchName := util.GetClusterScopedName(bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch))
 	sw := &nbdb.LogicalSwitch{Name: switchName}
-	ls, err := libovsdbops.GetLogicalSwitch(oc.mc.nbClient, sw)
+	ls, err := libovsdbops.GetLogicalSwitch(bnc.nbClient, sw)
 	if err != nil {
 		klog.Errorf("Failed to get logical switch %s from OVN (%v)", switchName, err)
 		return
@@ -872,7 +878,7 @@ func (oc *Controller) syncVirtualIPsPeriodic() {
 	lookupFunc := func(item *nbdb.LogicalSwitchPort) bool {
 		return item.Type == ovntypes.VirtualPortType && util.HasExternalIDsForCluster(item.ExternalIDs)
 	}
-	vipLSPList, err := libovsdbops.FindLogicalSwitchPortsWithPredicate(oc.mc.nbClient, sw, lookupFunc)
+	vipLSPList, err := libovsdbops.FindLogicalSwitchPortsWithPredicate(bnc.nbClient, sw, lookupFunc)
 	if err != nil {
 		klog.Errorf("Failed to get list of virtual ports from logical switch %s (%v)", switchName, err)
 		return
@@ -885,8 +891,8 @@ func (oc *Controller) syncVirtualIPsPeriodic() {
 		vipNamespace := lsp.ExternalIDs[ovntypes.ExternalIDNamespace]
 		unlock := util.LockByKey.Acquire(getVirtualIPLockKey(nadName, vipAddress))
 
-		virtIP, err := oc.mc.watchFactory.GetVirtualIP(vipNamespace, vipName)
-		if err != nil && !apierrors.IsNotFound(err) {
+		virtIP, err := bnc.watchFactory.GetVirtualIP(vipNamespace, vipName)
+		if err != nil && !errors.IsNotFound(err) {
 			// skip this virtualIP sync in this round
 			klog.Errorf("Failed to get virtualIP %s/%s from informer cache: (%v)",
 				virtIP.Namespace, virtIP.Name, err)
@@ -903,7 +909,7 @@ func (oc *Controller) syncVirtualIPsPeriodic() {
 		if vipFoundInK8s {
 			// this means port is present and we need to check for any
 			// stale pod logical port names from virtualport parent options
-			v, ok := oc.virtualIPs.Load(getVipKey(virtIP))
+			v, ok := bnc.virtualIPs.Load(getVipKey(virtIP))
 			if !ok {
 				// this virtual port backed virtaulIP is not present in controller,
 				// this might happen if the virtualIP addition wasn't successful and
@@ -912,12 +918,12 @@ func (oc *Controller) syncVirtualIPsPeriodic() {
 				continue
 			}
 			vip := v.(*virtualIP)
-			oc.syncVirtualIPPods(vip, lsp, virtIP.Spec.PodSelector)
+			bnc.syncVirtualIPPods(vip, lsp, virtIP.Spec.PodSelector)
 		} else {
 			// if the virtual port is not backed by any virtualIP,
 			// then its a stale port and needs to be removed from OVN
 			klog.V(5).Infof("Removing stale virtual port %s from NBDB", lsp.Name)
-			ops, err := oc.mc.nbClient.Where(ls).Mutate(ls, model.Mutation{
+			ops, err := bnc.nbClient.Where(ls).Mutate(ls, model.Mutation{
 				Field:   &ls.Ports,
 				Mutator: ovsdb.MutateOperationDelete,
 				Value:   []string{lsp.UUID},
@@ -928,7 +934,7 @@ func (oc *Controller) syncVirtualIPsPeriodic() {
 				continue
 			}
 
-			_, err = libovsdbops.TransactAndCheck(oc.mc.nbClient, ops)
+			_, err = libovsdbops.TransactAndCheck(bnc.nbClient, ops)
 			if err != nil {
 				klog.Errorf("Could not remove stale logical port (%s) of type virtual for logical switch %s (%+v)",
 					lsp.Name, switchName, err)
@@ -936,18 +942,18 @@ func (oc *Controller) syncVirtualIPsPeriodic() {
 		}
 		unlock()
 	}
-	klog.Infof("VirtualIP sync complete for network %s", oc.nadInfo.NetName)
+	klog.Infof("VirtualIP sync complete for network %s", bnc.GetNetworkName())
 }
 
 // retryVirtualIPOperations retries the failed virtualIP operations.
 // currently, retrying only add operations during virtualIP creation
 // & adding a backing pod to virtualIP
-func (oc *Controller) retryVirtualIPOperations() bool {
-	item, quit := oc.virtualIPRetryQueue.Get()
+func (bnc *BaseNetworkController) retryVirtualIPOperations() bool {
+	item, quit := bnc.virtualIPRetryQueue.Get()
 	if quit {
 		return false
 	}
-	oc.virtualIPRetryQueue.Done(item)
+	bnc.virtualIPRetryQueue.Done(item)
 	retry, ok := item.(*virtualIPRetryRequest)
 	if !ok {
 		return true
@@ -955,12 +961,12 @@ func (oc *Controller) retryVirtualIPOperations() bool {
 	klog.V(4).Infof("Retrying virtualIP event: %v", retry)
 	switch retry.action {
 	case actionAddVirtualIP:
-		err := oc.addVirtualIP(retry.virtIP)
+		err := bnc.addVirtualIP(retry.virtIP)
 		if err != nil {
 			klog.Errorf("Failed creating virtualIP %s during retry", getVipKey(retry.virtIP))
 		}
 	case actionAddVirtualIPod:
-		err := oc.handleVIPPodAdd(retry.vip, retry.pod)
+		err := bnc.handleVIPPodAdd(retry.vip, retry.pod)
 		if err != nil {
 			klog.Errorf("Failed adding pod %s to virtualIP (%s) during retry",
 				getPodKey(retry.pod), getVipKey(retry.virtIP))
@@ -969,21 +975,21 @@ func (oc *Controller) retryVirtualIPOperations() bool {
 	return true
 }
 
-func (oc *Controller) requeueVirtualIP(ra action, virtualIP *virtualipv1beta1.VirtualIP) {
+func (bnc *BaseNetworkController) requeueVirtualIP(ra action, virtualIP *virtualipv1beta1.VirtualIP) {
 	req := &virtualIPRetryRequest{
 		action: ra,
 		virtIP: virtualIP,
 	}
 	klog.V(4).Infof("Requeue VirtualIP %s/%s Add event to retry: %v", virtualIP.Namespace, virtualIP.Name)
-	oc.virtualIPRetryQueue.AddAfter(req, time.Duration(3*time.Second))
+	bnc.virtualIPRetryQueue.AddAfter(req, time.Duration(3*time.Second))
 }
 
-func (oc *Controller) requeuePodAdd4VirtualIP(ra action, vip *virtualIP, pod *corev1.Pod) {
+func (bnc *BaseNetworkController) requeuePodAdd4VirtualIP(ra action, vip *virtualIP, pod *corev1.Pod) {
 	req := &virtualIPRetryRequest{
 		action: ra,
 		vip:    vip,
 		pod:    pod,
 	}
 	klog.V(4).Infof("Requeue virtualIP %s/%s pod Add event to retry", vip.namespace, vip.name)
-	oc.virtualIPRetryQueue.AddAfter(req, time.Duration(3*time.Second))
+	bnc.virtualIPRetryQueue.AddAfter(req, time.Duration(3*time.Second))
 }

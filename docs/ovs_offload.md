@@ -210,3 +210,69 @@ tcpdump: verbose output suppressed, use -v or -vv for full protocol decode
 17:12:56.106705 IP 0.0.0.0.68 > 255.255.255.255.67: BOOTP/DHCP, Request from 62:21:f0:89:40:73, length 30
 ```
 
+## OVS hardware offload DPU support
+
+[Data Processing Units](https://blogs.nvidia.com/blog/2020/05/20/whats-a-dpu-data-processing-unit/) (DPU) combine the advanced capabilities
+of a Smart-NIC (such as Mellanox ConnectX-6DX NIC) with a general purpose embedded CPU and a high-speed memory controller.
+
+Similarly to Smart-NICs, a DPU follows the kernel switchdev model.
+In this model, every VF/PF net-device on the host has a corresponding representor net-device existing on
+the embedded CPU.
+
+### Supported DPUs
+
+The following manufacturers are known to work:
+
+- [Mellanox Bluefield-2](https://www.mellanox.com/products/bluefield2-overview)
+
+Deployment guide can be found [here](https://docs.google.com/document/d/1hRke0cOCY84Ef8OU283iPg_PHiJ6O17aUkb9Vv-fWPQ/edit?usp=sharing).
+
+## vDPA
+
+vDPA (Virtio DataPath Acceleration) is a technology that enables the acceleration of virtIO devices while
+allowing the implementations of such devices (e.g: NIC vendors) to use their own control plane.
+
+vDPA can be combined with the SR-IOV OVS Hardware offloading setup to expose the workload to an
+open standard interface such as virtio-net.
+
+### Additional Prerequisites:
+* Linux Kernel >= 5.12
+* iproute >= 5.14
+
+### Supported Hardware:
+- Mellanox ConnectX-6DX NIC
+
+### Additional configuration
+In addition to all the steps listed above, insert the virtio-vdpa driver and the mlx-vdpa driver:
+
+    $ modprobe vdpa
+    $ modprobe virtio-vdpa
+    $ modprobe mlx5-vdpa
+
+The the `vdpa` tool (part of iproute package) is used to create a vdpa device on top
+of an existing VF:
+
+    $ vdpa mgmtdev show
+    pci/0000:65:00.2:
+      supported_classes net
+    $ vdpa dev add name vdpa2 mgmtdev pci/0000:65:00.2
+    $ vdpa dev list
+    vdpa2: type network mgmtdev pci/0000:65:00.2 vendor_id 5555 max_vqs 16 max_vq_size 256
+
+After a device has been created, the SR-IOV Device Plugin plugin configuration has to be modified for it
+to select and expose the vdpa device:
+
+```json
+{
+    "resourceList": [
+         {
+            "resourceName": "cx6_sriov_vpda_virtio",
+            "selectors": {
+               "vendors": ["15b3"],
+               "devices": ["101e"],
+               "vdpaType": "virtio"
+            }
+        }
+    ]
+}
+```

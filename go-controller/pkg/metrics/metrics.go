@@ -4,7 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -27,17 +27,18 @@ import (
 )
 
 const (
-	MetricOvnkubeNamespace       = "ovnkube"
-	MetricOvnkubeSubsystemMaster = "master"
-	MetricOvnkubeSubsystemNode   = "node"
-	MetricOvnNamespace           = "ovn"
-	MetricOvnSubsystemDB         = "db"
-	MetricOvnSubsystemNorthd     = "northd"
-	MetricOvnSubsystemController = "controller"
-	MetricOvsNamespace           = "ovs"
-	MetricOvsSubsystemVswitchd   = "vswitchd"
-	MetricOvsSubsystemOvsDB      = "ovsdb"
-	MetricOvsSubsystemDB         = "db"
+	MetricOvnkubeNamespace               = "ovnkube"
+	MetricOvnkubeSubsystemController     = "controller"
+	MetricOvnkubeSubsystemClusterManager = "clustermanager"
+	MetricOvnkubeSubsystemNode           = "node"
+	MetricOvnNamespace                   = "ovn"
+	MetricOvnSubsystemDB                 = "db"
+	MetricOvnSubsystemNorthd             = "northd"
+	MetricOvnSubsystemController         = "controller"
+	MetricOvsNamespace                   = "ovs"
+	MetricOvsSubsystemVswitchd           = "vswitchd"
+	MetricOvsSubsystemDB                 = "db"
+	MetricOvsSubsystemOvsDB              = "ovsdb"
 
 	ovnNorthd     = "ovn-northd"
 	ovnController = "ovn-controller"
@@ -76,6 +77,15 @@ type stopwatchStatistics struct {
 	shortTermAvg   string
 	longTermAvg    string
 }
+
+// MetricResourceRetryFailuresCount is the number of times retrying to reconcile a Kubernetes
+// resource reached the maximum retry limit and will not be retried. This metric doesn't
+// need Subsystem string since it is applicable for both master and node.
+var MetricResourceRetryFailuresCount = prometheus.NewCounter(prometheus.CounterOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Name:      "resource_retry_failures_total",
+	Help:      "The total number of times processing a Kubernetes resource reached the maximum retry limit and was no longer processed",
+})
 
 // OVN/OVS components, namely ovn-northd, ovn-controller, and ovs-vswitchd provide various
 // metrics through the 'coverage/show' command. The following data structure holds all the
@@ -167,7 +177,7 @@ func getCoverageShowOutputMap(component string) (map[string]string, error) {
 // ovnKubeLogFileSizeMetricsUpdater updates the metrics that obtains the
 // size of ovnkube.log & ovnkube-master.log
 func ovnKubeLogFileSizeMetricsUpdater(ovnKubeLogFileMetric *prometheus.GaugeVec,
-	metricsScrapeInterval int, stopChan chan struct{}) {
+	metricsScrapeInterval int, stopChan <-chan struct{}) {
 	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
 	defer ticker.Stop()
 
@@ -391,11 +401,11 @@ func stopwatchShowMetricsUpdater(component string, stopChan <-chan struct{}) {
 				}
 
 				metricInfo.metrics.totalSamples.Set(totalSamplesMetricValue)
-				metricInfo.metrics.min.Set(minMetricValue)
-				metricInfo.metrics.max.Set(maxMetricValue)
-				metricInfo.metrics.percentile95th.Set(percentile95thMetricValue)
-				metricInfo.metrics.shortTermAvg.Set(shortTermAvgMetricValue)
-				metricInfo.metrics.longTermAvg.Set(longTermAvgMetricValue)
+				metricInfo.metrics.min.Set(minMetricValue / 1000)
+				metricInfo.metrics.max.Set(maxMetricValue / 1000)
+				metricInfo.metrics.percentile95th.Set(percentile95thMetricValue / 1000)
+				metricInfo.metrics.shortTermAvg.Set(shortTermAvgMetricValue / 1000)
+				metricInfo.metrics.longTermAvg.Set(longTermAvgMetricValue / 1000)
 			}
 		case <-stopChan:
 			return
@@ -474,7 +484,7 @@ func stringFlagPutHandler(setter stringFlagSetterFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch {
 		case req.Method == "PUT":
-			body, err := ioutil.ReadAll(req.Body)
+			body, err := io.ReadAll(req.Body)
 			if err != nil {
 				writePlainText(http.StatusBadRequest, "error reading request body: "+err.Error(), w)
 				return
@@ -535,13 +545,13 @@ func StartMetricsServerCommon(bindAddress string, pprofBindAddress string, certF
 				klog.Errorf("Error stopping profile server: %v", err)
 			}
 		}()
-
 	}
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		go utilwait.Until(func() {
+			klog.Infof("Starting metrics server to serve at address %q", bindAddress)
 			var err error
 			if certFile != "" && keyFile != "" {
 				server = getTLSServer(bindAddress, certFile, keyFile, mux)
@@ -554,8 +564,9 @@ func StartMetricsServerCommon(bindAddress string, pprofBindAddress string, certF
 				err = server.ListenAndServe()
 			}
 			if err != nil && err != http.ErrServerClosed {
-				utilruntime.HandleError(fmt.Errorf("starting metrics server failed for address %s: %v", bindAddress, err))
+				utilruntime.HandleError(fmt.Errorf("starting metrics server to serve at address %q failed: %v", bindAddress, err))
 			}
+			klog.Infof("Metrics server has stopped serving at address %q", bindAddress)
 		}, 5*time.Second, stopChan)
 
 		<-stopChan

@@ -5,10 +5,9 @@ import (
 	"time"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -23,7 +22,8 @@ import (
 // It has two phases:
 //
 // Pre-Sync: Delete any ovn Load_Balancer rows that are "owned" by a Kubernetes Service
-//   that doesn't exist anymore
+//
+//	that doesn't exist anymore
 //
 // Post-sync: After every service has been synced at least once, delete any legacy load-balancers
 //
@@ -51,7 +51,7 @@ func newRepair(serviceLister corelisters.ServiceLister, nbClient libovsdbclient.
 }
 
 // runBeforeSync performs some cleanup of stale LBs and other miscellaneous setup.
-func (r *repair) runBeforeSync() {
+func (r *repair) runBeforeSync(useTemplates bool) {
 	// no need to lock, single-threaded.
 
 	startTime := time.Now()
@@ -59,16 +59,6 @@ func (r *repair) runBeforeSync() {
 	defer func() {
 		klog.V(4).Infof("Finished repairing loop for services: %v", time.Since(startTime))
 	}()
-
-	// Ensure unidling is enabled
-	nbGlobal := nbdb.NBGlobal{
-		Options: map[string]string{"controller_event": "true"},
-	}
-	if globalconfig.Kubernetes.OVNEmptyLbEvents {
-		if err := libovsdbops.UpdateNBGlobalSetOptions(r.nbClient, &nbGlobal); err != nil {
-			klog.Errorf("Unable to enable controller events, unidling not possible: %v", err)
-		}
-	}
 
 	// Build a list of every service existing
 	// After every service has been synced, then we'll execute runAfterSync
@@ -78,36 +68,71 @@ func (r *repair) runBeforeSync() {
 		r.unsyncedServices.Insert(key)
 	}
 
-	// Find all load-balancers associated with Services, filtered on cluster_name
-	lbCache, err := ovnlb.GetLBCache(r.nbClient)
-	if err != nil {
-		klog.Errorf("Failed to get load_balancer cache: %v", err)
+	// Find all templates.
+	allTemplates := TemplateMap{}
+
+	if useTemplates {
+		var err error
+
+		allTemplates, err = listSvcTemplates(r.nbClient)
+		if err != nil {
+			klog.Errorf("Unable to get templates for repair: %v", err)
+		}
 	}
-	lbFilter := map[string]string{"k8s.ovn.org/kind": "Service"}
-	existingLBs := lbCache.Find(lbFilter)
+
+	// Find all load-balancers associated with Services
+	existingLBs, err := getLBs(r.nbClient, allTemplates)
+	if err != nil {
+		klog.Errorf("Unable to get service lbs for repair: %v", err)
+	}
+
 	// Look for any load balancers whose Service no longer exists in the apiserver
+	// and for any chassis template vars whose Service no longer exists.
+	staleTemplateNames := sets.Set[string]{}
+	for templateName := range allTemplates {
+		// NodeIP templates are always valid, skip those.
+		if isLBNodeIPTemplateName(templateName) {
+			continue
+		}
+
+		// All others are potentially stale.
+		staleTemplateNames.Insert(templateName)
+	}
 	staleLBs := []string{}
 	for _, lb := range existingLBs {
 		// Extract namespace + name, look to see if it exists
-		owner := lb.ExternalIDs["k8s.ovn.org/owner"]
+		owner := lb.ExternalIDs[types.LoadBalancerOwnerExternalID]
 		namespace, name, err := cache.SplitMetaNamespaceKey(owner)
 		if err != nil || namespace == "" {
 			klog.Warningf("Service LB %#v has unreadable owner, deleting", lb)
 			staleLBs = append(staleLBs, lb.UUID)
+			continue
 		}
 
 		_, err = r.serviceLister.Services(namespace).Get(name)
 		if apierrors.IsNotFound(err) {
 			klog.V(5).Infof("Found stale service LB %#v", lb)
 			staleLBs = append(staleLBs, lb.UUID)
+			continue
+		}
+
+		// All of the LB's template vars are still useful.
+		for _, t := range lb.Templates {
+			staleTemplateNames.Delete(t.Name)
 		}
 	}
 
 	// Delete those stale load balancers
-	if err := ovnlb.DeleteLBs(r.nbClient, staleLBs); err != nil {
+	if err := DeleteLBs(r.nbClient, staleLBs); err != nil {
 		klog.Errorf("Failed to delete stale LBs: %v", err)
 	}
 	klog.V(2).Infof("Deleted %d stale service LBs. StaleLB ids were:%v", len(staleLBs), staleLBs)
+
+	// Delete those stale template vars
+	if err := libovsdbops.DeleteAllChassisTemplateVarVariables(r.nbClient, staleTemplateNames.UnsortedList()); err != nil {
+		klog.Errorf("Failed to delete stale Chassis Template Vars: %v", err)
+	}
+	klog.V(2).Infof("Deleted %d stale Chassis Template Vars", len(staleTemplateNames))
 
 	// Remove existing reject rules. They are not used anymore
 	// given the introduction of idling loadbalancers

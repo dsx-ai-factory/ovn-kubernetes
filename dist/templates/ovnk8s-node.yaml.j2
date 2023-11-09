@@ -44,6 +44,18 @@ spec:
         - name: ovnkube-node
           image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
           imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
+          {% if ovn_dummy_gateway_bridge=="true" %}
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                - /bin/bash
+                - -c
+                - |
+                  #!/bin/bash
+                  ovs-vsctl --may-exist add-br br-ex
+                  ip a a dev br-ex 10.44.0.1/32 || /bin/true
+          {% endif %}
 
           command: ["/root/ovnkube.sh", "ovn-node"]
           # ovnkube-node-liveness-check.sh checks
@@ -168,6 +180,12 @@ spec:
                 configMapKeyRef:
                   name: ovn-config
                   key: mtu
+            - name: OVN_ROUTABLE_MTU
+              valueFrom:
+                configMapKeyRef:
+                  name: ovn-config
+                  key: routable_mtu
+                  optional: true
             - name: K8S_NODE
               valueFrom:
                 fieldRef:
@@ -180,14 +198,24 @@ spec:
               value: "{{ ovn_gateway_mode }}"
             - name: OVN_GATEWAY_OPTS
               value: "{{ ovn_gateway_opts }}"
-            - name: OVN_HYBRID_OVERLAY_ENABLE
-              value: "{{ ovn_hybrid_overlay_enable }}"
+            - name: OVN_ADMIN_NETWORK_POLICY_ENABLE
+              value: "{{ ovn_admin_network_policy_enable }}"
             - name: OVN_HYBRID_OVERLAY_NET_CIDR
               value: "{{ ovn_hybrid_overlay_net_cidr }}"
             - name: OVN_EGRESSIP_ENABLE
               value: "{{ ovn_egress_ip_enable }}"
+            - name: OVN_EGRESSIP_HEALTHCHECK_PORT
+              value: "{{ ovn_egress_ip_healthcheck_port }}"
+            - name: OVN_EGRESSSERVICE_ENABLE
+              value: "{{ ovn_egress_service_enable }}"
+            - name: OVN_HYBRID_OVERLAY_ENABLE
+              value: "{{ ovn_hybrid_overlay_enable }}"
             - name: OVN_DISABLE_SNAT_MULTIPLE_GWS
               value: "{{ ovn_disable_snat_multiple_gws }}"
+            - name: OVN_DISABLE_FORWARDING
+              value: "{{ ovn_disable_forwarding }}"
+            - name: OVN_ENCAP_PORT
+              value: "{{ ovn_encap_port }}"
             - name: OVN_DISABLE_PKT_MTU_CHECK
               value: "{{ ovn_disable_pkt_mtu_check }}"
             - name: OVN_NETFLOW_TARGETS
@@ -202,6 +230,10 @@ spec:
               value: "{{ ovn_ipfix_cache_max_flows }}"
             - name: OVN_IPFIX_CACHE_ACTIVE_TIMEOUT
               value: "{{ ovn_ipfix_cache_active_timeout }}"
+            - name: OVN_V4_MASQUERADE_SUBNET
+              value: "{{ ovn_v4_masquerade_subnet }}"
+            - name: OVN_V6_MASQUERADE_SUBNET
+              value: "{{ ovn_v6_masquerade_subnet }}"
             - name: OVN_MULTICAST_ENABLE
               value: "{{ ovn_multicast_enable }}"
             - name: OVN_UNPRIVILEGED_MODE
@@ -210,6 +242,10 @@ spec:
               value: "{{ ovn_ex_gw_networking_interface }}"
             - name: COREDNS_CLUSTER_IP
               value: "{{ coredns_cluster_ip }}"
+            - name: OVN_ENABLE_OVNKUBE_IDENTITY
+              value: "{{ ovn_enable_ovnkube_identity }}"
+            - name: OVN_MULTI_NETWORK_ENABLE
+              value: "{{ ovn_multi_network_enable }}"
             {% if ovnkube_app_name=="ovnkube-node" -%}
             - name: OVNKUBE_DISABLE_OVS_METRICS
               value: "{{ disable_ovs_metrics }}"            
@@ -217,8 +253,6 @@ spec:
               value: "{{ ovn_nb_cert_cname }}"
             - name: OVN_SB_CERT_CNAME
               value: "{{ ovn_sb_cert_cname }}"
-            - name: OVN_MULTI_NETWORK_ENABLE
-              value: "{{ ovn_multi_network_enable }}"
             - name: OVN_DISABLE_OVN_IFACE_ID_VER
               value: "{{ ovn_disable_ovn_iface_id_ver }}"
             - name: OVN_OFCTRL_WAIT_BEFORE_CLEAR
@@ -231,23 +265,31 @@ spec:
               value: "{{ ovn_lflow_cache_limit }}"
             - name: OVN_LFLOW_CACHE_LIMIT_KB
               value: "{{ ovn_lflow_cache_limit_kb }}"
+            - name: OVN_ENABLE_INTERCONNECT
+              value: "{{ ovn_enable_interconnect }}"
+            - name: OVN_ENABLE_MULTI_EXTERNAL_GATEWAY
+              value: "{{ ovn_enable_multi_external_gateway }}"
             - name: OVN_REMOTE_PROBE_INTERVAL
               value: "{{ ovn_remote_probe_interval }}"
+            - name: OVNKUBE_NODE_MGMT_PORT_NETDEV
+              value: ""
             {% endif -%}
             {% if ovnkube_app_name=="ovnkube-node-dpu-host" -%}
             - name: OVNKUBE_NODE_MODE
               value: "dpu-host"
             - name: OVNKUBE_NODE_MGMT_PORT_NETDEV
               value: "{{ ovnkube_node_mgmt_port_netdev }}"
-            {% else -%}
-            - name: OVNKUBE_NODE_MGMT_PORT_NETDEV
-              value: ""
             {% endif -%}
             - name: OVN_HOST_NETWORK_NAMESPACE
               valueFrom:
                 configMapKeyRef:
                   name: ovn-config
                   key: host_network_namespace
+            - name: POD_NAME
+              valueFrom:
+               fieldRef:
+                 apiVersion: v1
+                 fieldPath: metadata.name
 
         # end of container
 

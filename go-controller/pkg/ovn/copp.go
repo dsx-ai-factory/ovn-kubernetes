@@ -5,7 +5,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -21,6 +21,7 @@ const (
 	OVNICMPV6ErrorsRateLimiter     = "icmp6-error"
 	OVNRejectRateLimiter           = "reject"
 	OVNTCPRSTRateLimiter           = "tcp-reset"
+	OVNServiceMonitorLimiter       = "svc-monitor"
 
 	// Default COPP object name
 	defaultCOPPName = "ovnkube-default"
@@ -35,6 +36,7 @@ var defaultProtocolNames = [...]string{
 	OVNICMPV6ErrorsRateLimiter,
 	OVNRejectRateLimiter,
 	OVNTCPRSTRateLimiter,
+	OVNServiceMonitorLimiter,
 }
 
 func getMeterNameForProtocol(protocol string) string {
@@ -56,7 +58,7 @@ func EnsureDefaultCOPP(nbClient libovsdbclient.Client) (string, error) {
 	band := &nbdb.MeterBand{
 		Action:      types.MeterAction,
 		Rate:        int(25), // hard-coding for now. TODO(tssurya): make this configurable if needed
-		ExternalIDs: util.CreateClusterScopedExternalIDs(),
+		ExternalIDs: util.ExternalIDsForCluster(nil),
 	}
 	ops, err = libovsdbops.CreateMeterBandOps(nbClient, ops, band)
 	if err != nil {
@@ -74,7 +76,7 @@ func EnsureDefaultCOPP(nbClient libovsdbclient.Client) (string, error) {
 			Name:        meterName,
 			Fair:        &meterFairness,
 			Unit:        types.PacketsPerSecond,
-			ExternalIDs: util.CreateClusterScopedExternalIDs(),
+			ExternalIDs: util.ExternalIDsForCluster(nil),
 		}
 
 		ops, err = libovsdbops.CreateOrUpdateMeterOps(nbClient, ops, meter, []*nbdb.MeterBand{band},
@@ -87,7 +89,7 @@ func EnsureDefaultCOPP(nbClient libovsdbclient.Client) (string, error) {
 	defaultCOPP := &nbdb.Copp{
 		Name:        util.GetClusterScopedName(defaultCOPPName),
 		Meters:      meterNames,
-		ExternalIDs: util.CreateClusterScopedExternalIDs(),
+		ExternalIDs: util.ExternalIDsForCluster(nil),
 	}
 	ops, err = libovsdbops.CreateOrUpdateCOPPsOps(nbClient, ops, defaultCOPP)
 	if err != nil {

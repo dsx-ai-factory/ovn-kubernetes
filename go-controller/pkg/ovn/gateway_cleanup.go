@@ -1,17 +1,16 @@
 package ovn
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
 	"strings"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/pkg/errors"
-
-	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -21,13 +20,13 @@ import (
 )
 
 // gatewayCleanup removes all the NB DB objects created for a node's gateway
-func (oc *Controller) gatewayCleanup(nodeName string) error {
+func (oc *DefaultNetworkController) gatewayCleanup(nodeName string) error {
 	gatewayRouter := util.GetClusterScopedName(types.GWRouterPrefix + nodeName)
 
 	// Get the gateway router port's IP address (connected to join switch)
 	var nextHops []net.IP
 
-	gwIPAddrs, err := util.GetLRPAddrs(oc.mc.nbClient, types.GWRouterToJoinSwitchPrefix+gatewayRouter)
+	gwIPAddrs, err := libovsdbutil.GetLRPAddrs(oc.nbClient, types.GWRouterToJoinSwitchPrefix+gatewayRouter)
 	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return err
 	}
@@ -41,10 +40,10 @@ func (oc *Controller) gatewayCleanup(nodeName string) error {
 	// Remove the patch port that connects join switch to gateway router
 	portName := types.JoinSwitchToGWRouterPrefix + gatewayRouter
 	lsp := nbdb.LogicalSwitchPort{Name: portName}
-	sw := nbdb.LogicalSwitch{Name: util.GetOVNJoinSwitchName()}
-	err = libovsdbops.DeleteLogicalSwitchPorts(oc.mc.nbClient, &sw, &lsp)
+	sw := nbdb.LogicalSwitch{Name: util.GetClusterScopedName(types.OVNJoinSwitch)}
+	err = libovsdbops.DeleteLogicalSwitchPorts(oc.nbClient, &sw, &lsp)
 	if err != nil {
-		return fmt.Errorf("failed to delete logical switch port %s from switch %s: %v", portName, util.GetOVNJoinSwitchName(), err)
+		return fmt.Errorf("failed to delete logical switch port %s from switch %s: %v", portName, util.GetClusterScopedName(types.OVNJoinSwitch), err)
 	}
 
 	// Remove the logical router port on the gateway router that connects to the join switch
@@ -52,33 +51,26 @@ func (oc *Controller) gatewayCleanup(nodeName string) error {
 	logicalRouterPort := nbdb.LogicalRouterPort{
 		Name: types.GWRouterToJoinSwitchPrefix + gatewayRouter,
 	}
-	err = libovsdbops.DeleteLogicalRouterPorts(oc.mc.nbClient, &logicalRouter, &logicalRouterPort)
+	err = libovsdbops.DeleteLogicalRouterPorts(oc.nbClient, &logicalRouter, &logicalRouterPort)
 	if err != nil {
 		return fmt.Errorf("failed to delete port %s on router %s: %v", logicalRouterPort.Name, gatewayRouter, err)
 	}
 
-	// Remove router to lb associations from the LBCache before removing the router
-	lbCache, err := ovnlb.GetLBCache(oc.mc.nbClient)
-	if err != nil {
-		return fmt.Errorf("failed to get load_balancer cache for router %s: %v", gatewayRouter, err)
-	}
-	lbCache.RemoveRouter(gatewayRouter)
-
 	// Remove the gateway router associated with nodeName
-	err = libovsdbops.DeleteLogicalRouter(oc.mc.nbClient, &logicalRouter)
+	err = libovsdbops.DeleteLogicalRouter(oc.nbClient, &logicalRouter)
 	if err != nil {
 		return fmt.Errorf("failed to delete gateway router %s: %v", gatewayRouter, err)
 	}
 
 	// Remove external switch
 	externalSwitch := util.GetClusterScopedName(types.ExternalSwitchPrefix + nodeName)
-	err = libovsdbops.DeleteLogicalSwitch(oc.mc.nbClient, externalSwitch)
+	err = libovsdbops.DeleteLogicalSwitch(oc.nbClient, externalSwitch)
 	if err != nil {
 		return fmt.Errorf("failed to delete external switch %s: %v", externalSwitch, err)
 	}
 
 	exGWexternalSwitch := util.GetClusterScopedName(types.EgressGWSwitchPrefix + types.ExternalSwitchPrefix + nodeName)
-	err = libovsdbops.DeleteLogicalSwitch(oc.mc.nbClient, exGWexternalSwitch)
+	err = libovsdbops.DeleteLogicalSwitch(oc.nbClient, exGWexternalSwitch)
 	if err != nil {
 		return fmt.Errorf("failed to delete external switch %s: %v", exGWexternalSwitch, err)
 	}
@@ -88,16 +80,16 @@ func (oc *Controller) gatewayCleanup(nodeName string) error {
 	return nil
 }
 
-func (oc *Controller) delPbrAndNatRules(nodeName string, lrpTypes []string) {
+func (oc *DefaultNetworkController) delPbrAndNatRules(nodeName string, lrpTypes []string) {
 	// delete the dnat_and_snat entry that we added for the management port IP
 	// Note: we don't need to delete any MAC bindings that are dynamically learned from OVN SB DB
 	// because there will be none since this NAT is only for outbound traffic and not for inbound
 	mgmtPortName := util.GetClusterScopedName(types.K8sPrefix + nodeName)
-	nat := libovsdbops.BuildDNATAndSNAT(nil, nil, mgmtPortName, "", nil)
+	nat := libovsdbops.BuildDNATAndSNAT(nil, nil, mgmtPortName, "", util.ExternalIDsForCluster(nil))
 	logicalRouter := nbdb.LogicalRouter{
-		Name: util.GetOVNClusterRouterName(),
+		Name: util.GetClusterScopedName(types.OVNClusterRouter),
 	}
-	err := libovsdbops.DeleteNATs(oc.mc.nbClient, &logicalRouter, nat)
+	err := libovsdbops.DeleteNATs(oc.nbClient, &logicalRouter, nat)
 	if err != nil {
 		klog.Errorf("Failed to delete the dnat_and_snat associated with the management port %s: %v", mgmtPortName, err)
 	}
@@ -106,7 +98,7 @@ func (oc *Controller) delPbrAndNatRules(nodeName string, lrpTypes []string) {
 	oc.removeLRPolicies(nodeName, lrpTypes)
 }
 
-func (oc *Controller) staticRouteCleanup(nextHops []net.IP) {
+func (oc *DefaultNetworkController) staticRouteCleanup(nextHops []net.IP) {
 	ips := sets.Set[string]{}
 	for _, nextHop := range nextHops {
 		ips.Insert(nextHop.String())
@@ -114,7 +106,7 @@ func (oc *Controller) staticRouteCleanup(nextHops []net.IP) {
 	p := func(item *nbdb.LogicalRouterStaticRoute) bool {
 		return ips.Has(item.Nexthop) && util.HasExternalIDsForCluster(item.ExternalIDs)
 	}
-	err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(oc.mc.nbClient, util.GetClusterScopedName(types.OVNClusterRouter), p)
+	err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(oc.nbClient, util.GetClusterScopedName(types.OVNClusterRouter), p)
 	if err != nil {
 		klog.Errorf("Failed to delete static route for nexthops %+v: %v", ips.UnsortedList(), err)
 	}
@@ -126,7 +118,7 @@ func (oc *Controller) staticRouteCleanup(nextHops []net.IP) {
 // the specified gatewayRouterIP from nexthops
 // - if the LRP exists and has the len(nexthops) == 1: it removes
 // the LRP completely
-func (oc *Controller) policyRouteCleanup(nextHops []net.IP) {
+func (oc *DefaultNetworkController) policyRouteCleanup(nextHops []net.IP) {
 	for _, nextHop := range nextHops {
 		gwIP := nextHop.String()
 		policyPred := func(item *nbdb.LogicalRouterPolicy) bool {
@@ -140,7 +132,7 @@ func (oc *Controller) policyRouteCleanup(nextHops []net.IP) {
 			}
 			return false
 		}
-		err := libovsdbops.DeleteNextHopFromLogicalRouterPoliciesWithPredicate(oc.mc.nbClient, util.GetOVNClusterRouterName(), policyPred, gwIP)
+		err := libovsdbops.DeleteNextHopFromLogicalRouterPoliciesWithPredicate(oc.nbClient, util.GetClusterScopedName(types.OVNClusterRouter), policyPred, gwIP)
 		if err != nil {
 			klog.Errorf("Failed to delete policy route for nexthop %+v: %v", nextHop, err)
 		}
@@ -149,7 +141,7 @@ func (oc *Controller) policyRouteCleanup(nextHops []net.IP) {
 
 // remove Logical Router Policy on ovn_cluster_router for a specific node.
 // Specify priorities to only delete specific types
-func (oc *Controller) removeLRPolicies(nodeName string, priorities []string) {
+func (oc *DefaultNetworkController) removeLRPolicies(nodeName string, priorities []string) {
 	if len(priorities) == 0 {
 		priorities = []string{types.NodeSubnetPolicyPriority}
 	}
@@ -164,18 +156,18 @@ func (oc *Controller) removeLRPolicies(nodeName string, priorities []string) {
 		return strings.Contains(item.Match, fmt.Sprintf("%s ", util.GetClusterScopedName(nodeName))) && intPriorities.Has(item.Priority) &&
 			util.HasExternalIDsForCluster(item.ExternalIDs)
 	}
-	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.mc.nbClient, util.GetOVNClusterRouterName(), p)
+	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, util.GetClusterScopedName(types.OVNClusterRouter), p)
 	if err != nil {
 		klog.Errorf("Error deleting policies with priorities %v associated with the node %s: %v", priorities, nodeName, err)
 	}
 }
 
 // removes DGP, snat_and_dnat entries, and LRPs
-func (oc *Controller) cleanupDGP(nodes []*kapi.Node) error {
+func (oc *DefaultNetworkController) cleanupDGP(nodes []*kapi.Node) error {
 	klog.Infof("Removing DGP %v", nodes)
 	// remove dnat_snat entries as well as LRPs
 	for _, node := range nodes {
-		if noHostSubnet(node) {
+		if util.NoHostSubnet(node) {
 			continue
 		}
 		oc.delPbrAndNatRules(node.Name, []string{types.InterNodePolicyPriority, types.MGMTPortPolicyPriority})
@@ -185,23 +177,23 @@ func (oc *Controller) cleanupDGP(nodes []*kapi.Node) error {
 	//p := func(item *sbdb.MACBinding) bool {
 	//	return item.IP == types.V4NodeLocalNATSubnetNextHop || item.IP == types.V6NodeLocalNATSubnetNextHop
 	//}
-	//err := libovsdbops.DeleteMacBindingWithPredicate(oc.mc.sbClient, p)
+	//err := libovsdbops.DeleteMacBindingWithPredicate(oc.sbClient, p)
 	//if err != nil {
 	//	return fmt.Errorf("unable to remove mac_binding for DGP: %v", err)
 	//}
 
 	// remove node local switch
-	err := libovsdbops.DeleteLogicalSwitch(oc.mc.nbClient, util.GetClusterScopedName(types.NodeLocalSwitch))
+	err := libovsdbops.DeleteLogicalSwitch(oc.nbClient, util.GetClusterScopedName(types.NodeLocalSwitch))
 	if err != nil {
-		return fmt.Errorf("unable to remove node local switch %s, err: %v", types.NodeLocalSwitch, err)
+		return fmt.Errorf("unable to remove node local switch %s, err: %v", util.GetClusterScopedName(types.NodeLocalSwitch), err)
 	}
 
 	// remove lrp on ovn_cluster_router. Will also remove gateway chassis.
-	logicalRouter := nbdb.LogicalRouter{Name: util.GetOVNClusterRouterName()}
+	logicalRouter := nbdb.LogicalRouter{Name: util.GetClusterScopedName(types.OVNClusterRouter)}
 	logicalRouterPort := nbdb.LogicalRouterPort{
 		Name: types.RouterToSwitchPrefix + util.GetClusterScopedName(types.NodeLocalSwitch),
 	}
-	err = libovsdbops.DeleteLogicalRouterPorts(oc.mc.nbClient, &logicalRouter, &logicalRouterPort)
+	err = libovsdbops.DeleteLogicalRouterPorts(oc.nbClient, &logicalRouter, &logicalRouterPort)
 	if err != nil {
 		return fmt.Errorf("unable to delete router port %s: %v", logicalRouterPort.Name, err)
 	}

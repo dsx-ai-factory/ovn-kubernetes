@@ -2,7 +2,6 @@ package ovn
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/onsi/ginkgo"
@@ -12,10 +11,13 @@ import (
 	netv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	cnitypes "github.com/containernetworking/cni/pkg/types"
+	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpbrapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	addrset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -41,6 +43,7 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 	var (
 		app     *cli.App
 		fakeOvn *FakeOVN
+		nad     *nettypes.NetworkAttachmentDefinition
 	)
 
 	ginkgo.BeforeEach(func() {
@@ -52,9 +55,27 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 		app = cli.NewApp()
 		app.Name = "adminpbr"
 		app.Flags = config.Flags
-		fakeOvn = NewFakeOVN()
+		fakeOvn = NewFakeOVN(true)
+
+		var err error
+		nad, err = newNetworkAttachmentDefinition(
+			"default",
+			"ovn-primary",
+			ovncnitypes.NetConf{
+				NetConf: cnitypes.NetConf{
+					Name: "ovn-primary",
+					Type: "ovn-k8s-cni-overlay",
+				},
+				NADName:  util.GetNADName("default", "ovn-primary"),
+				Topology: ovntypes.Layer3Topology,
+				Subnets:  "10.193.0.0/16/26",
+			},
+		)
+		gomega.Expect(err).To(gomega.BeNil())
 	})
 	ginkgo.AfterEach(func() {
+		ocInfo := fakeOvn.secondaryControllers["ovn-primary"]
+		gomega.Expect(ocInfo).ToNot(gomega.BeNil())
 		fakeOvn.shutdown()
 	})
 
@@ -66,10 +87,13 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouter{
-								Name: ovntypes.OVNClusterRouter,
-								UUID: ovntypes.OVNClusterRouter + "-UUID",
+								Name: "ovn.primary_" + ovntypes.OVNClusterRouter,
+								UUID: "ovn.primary_" + ovntypes.OVNClusterRouter + "-UUID",
 							},
 						},
+					},
+					&nettypes.NetworkAttachmentDefinitionList{
+						Items: []nettypes.NetworkAttachmentDefinition{*nad},
 					},
 					&adminpbrapi.AdminPolicyBasedRouteList{
 						Items: []adminpbrapi.AdminPolicyBasedRoute{
@@ -77,28 +101,27 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 						},
 					},
 				)
-				fakeOvn.controller.nadInfo.TopoType = ovntypes.Layer3AttachDefTopoType
-				fakeOvn.controller.WatchAdminPolicyBasedRoutes()
-				gomega.Eventually(fakeOvn.controller).ShouldNot(gomega.BeNil())
-				addressSetName := ""
+				ocInfo := fakeOvn.secondaryControllers["ovn-primary"]
+				gomega.Expect(ocInfo).ToNot(gomega.BeNil())
+				err := ocInfo.bnc.WatchAdminPolicyBasedRoutes()
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				var asIndex *libovsdbops.DbObjectIDs
 				gomega.Eventually(func() []string {
 					policies := []nbdb.LogicalRouterPolicy{}
-					err := fakeOvn.controller.mc.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
+					err := fakeOvn.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
 						return lrp.ExternalIDs[ovntypes.ExternalIDK8sOwner] == util.NamespacedName(pbr)
 					}).List(context.TODO(), &policies)
 					gomega.Expect(err).To(gomega.BeNil())
 					gomega.Expect(len(policies)).To(gomega.Equal(1))
-					addressSetName = fmt.Sprintf("%s-%s", pbr.Name, policies[0].ExternalIDs[ovntypes.ExternalIDHash])
+					asIndex = getAdminPBRAddrSetDbIDs(pbr.Name, policies[0].ExternalIDs[ovntypes.ExternalIDHash], ocInfo.bnc.controllerName)
 					return policies[0].Nexthops
 				}).Should(gomega.ContainElement(nextHop))
-				gomega.Expect(addressSetName).NotTo(gomega.BeEmpty())
-				v4AddressSetName, _ := addrset.MakeAddressSetName(addressSetName)
-				fakeOvn.asf.ExpectAddressSetExist(v4AddressSetName)
-				err := fakeOvn.fakeClient.AdminPBRClient.K8sV1beta1().AdminPolicyBasedRoutes().Delete(context.TODO(), policyName, metav1.DeleteOptions{})
+				ocInfo.asf.EventuallyExpectAddressSet(asIndex)
+				err = fakeOvn.fakeClient.AdminPBRClient.K8sV1beta1().AdminPolicyBasedRoutes().Delete(context.TODO(), policyName, metav1.DeleteOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				gomega.Eventually(func() []nbdb.LogicalRouterPolicy {
 					policies := []nbdb.LogicalRouterPolicy{}
-					err := fakeOvn.controller.mc.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
+					err := fakeOvn.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
 						return lrp.ExternalIDs[ovntypes.ExternalIDK8sOwner] == util.NamespacedName(pbr)
 					}).List(context.TODO(), &policies)
 					gomega.Expect(err).To(gomega.BeNil())
@@ -117,10 +140,13 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouter{
-								Name: ovntypes.OVNClusterRouter,
-								UUID: ovntypes.OVNClusterRouter + "-UUID",
+								Name: "ovn.primary_" + ovntypes.OVNClusterRouter,
+								UUID: "ovn.primary_" + ovntypes.OVNClusterRouter + "-UUID",
 							},
 						},
+					},
+					&nettypes.NetworkAttachmentDefinitionList{
+						Items: []nettypes.NetworkAttachmentDefinition{*nad},
 					},
 					&adminpbrapi.AdminPolicyBasedRouteList{
 						Items: []adminpbrapi.AdminPolicyBasedRoute{
@@ -145,27 +171,26 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 						},
 					},
 				)
-				fakeOvn.controller.nadInfo.TopoType = ovntypes.Layer3AttachDefTopoType
-				fakeOvn.controller.WatchAdminPolicyBasedRoutes()
-				gomega.Eventually(fakeOvn.controller).ShouldNot(gomega.BeNil())
-				addressSetName := ""
+				ocInfo := fakeOvn.secondaryControllers["ovn-primary"]
+				gomega.Expect(ocInfo).ToNot(gomega.BeNil())
+				err := ocInfo.bnc.WatchAdminPolicyBasedRoutes()
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				var asIndex *libovsdbops.DbObjectIDs
 				gomega.Eventually(func() []string {
 					policies := []nbdb.LogicalRouterPolicy{}
-					err := fakeOvn.controller.mc.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
+					err := fakeOvn.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
 						return lrp.ExternalIDs[ovntypes.ExternalIDK8sOwner] == util.NamespacedName(pbr)
 					}).List(context.TODO(), &policies)
 					gomega.Expect(err).To(gomega.BeNil())
 					gomega.Expect(len(policies)).To(gomega.Equal(1))
-					addressSetName = fmt.Sprintf("%s-%s", pbr.Name, policies[0].ExternalIDs[ovntypes.ExternalIDHash])
+					asIndex = getAdminPBRAddrSetDbIDs(pbr.Name, policies[0].ExternalIDs[ovntypes.ExternalIDHash], ocInfo.bnc.controllerName)
 					return policies[0].Nexthops
 				}).Should(gomega.ContainElement(nextHop))
-				gomega.Expect(addressSetName).NotTo(gomega.BeEmpty())
-				v4AddressSetName, _ := addrset.MakeAddressSetName(addressSetName)
-				fakeOvn.asf.ExpectAddressSetExist(v4AddressSetName)
-				fakeOvn.asf.ExpectAddressSetWithIPs(addressSetName, []string{pod1IP})
-				err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(adminPBRNamespace).Delete(context.TODO(), pod1Name, metav1.DeleteOptions{})
+				ocInfo.asf.EventuallyExpectAddressSet(asIndex)
+				ocInfo.asf.ExpectAddressSetWithIPs(asIndex, []string{pod1IP})
+				err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(adminPBRNamespace).Delete(context.TODO(), pod1Name, metav1.DeleteOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				fakeOvn.asf.EventuallyExpectEmptyAddressSetExist(addressSetName)
+				ocInfo.asf.EventuallyExpectEmptyAddressSetExist(asIndex)
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -179,10 +204,13 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouter{
-								Name: ovntypes.OVNClusterRouter,
-								UUID: ovntypes.OVNClusterRouter + "-UUID",
+								Name: "ovn.primary_" + ovntypes.OVNClusterRouter,
+								UUID: "ovn.primary_" + ovntypes.OVNClusterRouter + "-UUID",
 							},
 						},
+					},
+					&nettypes.NetworkAttachmentDefinitionList{
+						Items: []nettypes.NetworkAttachmentDefinition{*nad},
 					},
 					&adminpbrapi.AdminPolicyBasedRouteList{
 						Items: []adminpbrapi.AdminPolicyBasedRoute{
@@ -207,28 +235,27 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 						},
 					},
 				)
-				fakeOvn.controller.nadInfo.TopoType = ovntypes.Layer3AttachDefTopoType
-				fakeOvn.controller.WatchAdminPolicyBasedRoutes()
-				gomega.Eventually(fakeOvn.controller).ShouldNot(gomega.BeNil())
-				addressSetName := ""
+				ocInfo := fakeOvn.secondaryControllers["ovn-primary"]
+				gomega.Expect(ocInfo).ToNot(gomega.BeNil())
+				err := ocInfo.bnc.WatchAdminPolicyBasedRoutes()
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				var asIndex *libovsdbops.DbObjectIDs
 				gomega.Eventually(func() []string {
 					policies := []nbdb.LogicalRouterPolicy{}
-					err := fakeOvn.controller.mc.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
+					err := fakeOvn.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
 						return lrp.ExternalIDs[ovntypes.ExternalIDK8sOwner] == util.NamespacedName(pbr)
 					}).List(context.TODO(), &policies)
 					gomega.Expect(err).To(gomega.BeNil())
 					gomega.Expect(len(policies)).To(gomega.Equal(1))
-					addressSetName = fmt.Sprintf("%s-%s", pbr.Name, policies[0].ExternalIDs[ovntypes.ExternalIDHash])
+					asIndex = getAdminPBRAddrSetDbIDs(pbr.Name, policies[0].ExternalIDs[ovntypes.ExternalIDHash], ocInfo.bnc.controllerName)
 					return policies[0].Nexthops
 				}).Should(gomega.ContainElement(nextHop))
-				gomega.Expect(addressSetName).NotTo(gomega.BeEmpty())
-				v4AddressSetName, _ := addrset.MakeAddressSetName(addressSetName)
-				fakeOvn.asf.ExpectAddressSetExist(v4AddressSetName)
-				fakeOvn.asf.ExpectAddressSetWithIPs(addressSetName, []string{pod1IP})
+				ocInfo.asf.EventuallyExpectAddressSet(asIndex)
+				ocInfo.asf.ExpectAddressSetWithIPs(asIndex, []string{pod1IP})
 				nodeDelta := newNodeWithLabels(node1Name, node1IP, map[string]string{"ngn2.nvidia.com/igw_vip": "H"})
-				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), nodeDelta, metav1.UpdateOptions{})
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), nodeDelta, metav1.UpdateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				fakeOvn.asf.EventuallyExpectAddressSetWithIPs(addressSetName, nil)
+				ocInfo.asf.EventuallyExpectAddressSetWithIPs(asIndex, nil)
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -242,10 +269,13 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouter{
-								Name: ovntypes.OVNClusterRouter,
-								UUID: ovntypes.OVNClusterRouter + "-UUID",
+								Name: "ovn.primary_" + ovntypes.OVNClusterRouter,
+								UUID: "ovn.primary_" + ovntypes.OVNClusterRouter + "-UUID",
 							},
 						},
+					},
+					&nettypes.NetworkAttachmentDefinitionList{
+						Items: []nettypes.NetworkAttachmentDefinition{*nad},
 					},
 					&adminpbrapi.AdminPolicyBasedRouteList{
 						Items: []adminpbrapi.AdminPolicyBasedRoute{
@@ -270,30 +300,29 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 						},
 					},
 				)
-				fakeOvn.controller.nadInfo.TopoType = ovntypes.Layer3AttachDefTopoType
-				fakeOvn.controller.WatchAdminPolicyBasedRoutes()
-				gomega.Eventually(fakeOvn.controller).ShouldNot(gomega.BeNil())
-				addressSetName := ""
+				ocInfo := fakeOvn.secondaryControllers["ovn-primary"]
+				gomega.Expect(ocInfo).ToNot(gomega.BeNil())
+				err := ocInfo.bnc.WatchAdminPolicyBasedRoutes()
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				var asIndex *libovsdbops.DbObjectIDs
 				gomega.Eventually(func() []string {
 					policies := []nbdb.LogicalRouterPolicy{}
-					err := fakeOvn.controller.mc.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
+					err := fakeOvn.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
 						return lrp.ExternalIDs[ovntypes.ExternalIDK8sOwner] == util.NamespacedName(pbr)
 					}).List(context.TODO(), &policies)
 					gomega.Expect(err).To(gomega.BeNil())
 					gomega.Expect(len(policies)).To(gomega.Equal(1))
-					addressSetName = fmt.Sprintf("%s-%s", pbr.Name, policies[0].ExternalIDs[ovntypes.ExternalIDHash])
+					asIndex = getAdminPBRAddrSetDbIDs(pbr.Name, policies[0].ExternalIDs[ovntypes.ExternalIDHash], ocInfo.bnc.controllerName)
 					return policies[0].Nexthops
 				}).Should(gomega.ContainElement(nextHop))
-				gomega.Expect(addressSetName).NotTo(gomega.BeEmpty())
-				v4AddressSetName, _ := addrset.MakeAddressSetName(addressSetName)
-				fakeOvn.asf.ExpectAddressSetExist(v4AddressSetName)
-				fakeOvn.asf.ExpectAddressSetWithIPs(addressSetName, []string{pod1IP})
+				ocInfo.asf.EventuallyExpectAddressSet(asIndex)
+				ocInfo.asf.ExpectAddressSetWithIPs(asIndex, []string{pod1IP})
 				nsDelta := newNamespaceWithLabels(adminPBRNamespace, map[string]string{
 					"ngn.nvidia.com/infrastructure": "",
 				})
-				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), nsDelta, metav1.UpdateOptions{})
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), nsDelta, metav1.UpdateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				fakeOvn.asf.EventuallyExpectAddressSetWithIPs(addressSetName, nil)
+				ocInfo.asf.EventuallyExpectAddressSetWithIPs(asIndex, nil)
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -307,10 +336,13 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouter{
-								Name: ovntypes.OVNClusterRouter,
-								UUID: ovntypes.OVNClusterRouter + "-UUID",
+								Name: "ovn.primary_" + ovntypes.OVNClusterRouter,
+								UUID: "ovn.primary_" + ovntypes.OVNClusterRouter + "-UUID",
 							},
 						},
+					},
+					&nettypes.NetworkAttachmentDefinitionList{
+						Items: []nettypes.NetworkAttachmentDefinition{*nad},
 					},
 					&adminpbrapi.AdminPolicyBasedRouteList{
 						Items: []adminpbrapi.AdminPolicyBasedRoute{
@@ -335,31 +367,30 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 						},
 					},
 				)
-				fakeOvn.controller.nadInfo.TopoType = ovntypes.Layer3AttachDefTopoType
-				fakeOvn.controller.WatchAdminPolicyBasedRoutes()
-				gomega.Eventually(fakeOvn.controller).ShouldNot(gomega.BeNil())
-				addressSetName := ""
+				ocInfo := fakeOvn.secondaryControllers["ovn-primary"]
+				gomega.Expect(ocInfo).ToNot(gomega.BeNil())
+				err := ocInfo.bnc.WatchAdminPolicyBasedRoutes()
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				var asIndex *libovsdbops.DbObjectIDs
 				gomega.Eventually(func() []string {
 					policies := []nbdb.LogicalRouterPolicy{}
-					err := fakeOvn.controller.mc.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
+					err := fakeOvn.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
 						return lrp.ExternalIDs[ovntypes.ExternalIDK8sOwner] == util.NamespacedName(pbr)
 					}).List(context.TODO(), &policies)
 					gomega.Expect(err).To(gomega.BeNil())
 					gomega.Expect(len(policies)).To(gomega.Equal(1))
-					addressSetName = fmt.Sprintf("%s-%s", pbr.Name, policies[0].ExternalIDs[ovntypes.ExternalIDHash])
+					asIndex = getAdminPBRAddrSetDbIDs(pbr.Name, policies[0].ExternalIDs[ovntypes.ExternalIDHash], ocInfo.bnc.controllerName)
 					return policies[0].Nexthops
 				}).Should(gomega.ContainElement(nextHop))
-				gomega.Expect(addressSetName).NotTo(gomega.BeEmpty())
-				v4AddressSetName, _ := addrset.MakeAddressSetName(addressSetName)
-				fakeOvn.asf.ExpectAddressSetExist(v4AddressSetName)
-				fakeOvn.asf.ExpectAddressSetWithIPs(addressSetName, []string{pod1IP})
+				ocInfo.asf.EventuallyExpectAddressSet(asIndex)
+				ocInfo.asf.ExpectAddressSetWithIPs(asIndex, []string{pod1IP})
 				podDelta := newPodWithLabels(adminPBRNamespace, pod1Name, node1Name, pod1IP, map[string]string{"k8s.io/app": "something_else"}, node1IP)
-				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(adminPBRNamespace).Update(context.TODO(), podDelta, metav1.UpdateOptions{})
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(adminPBRNamespace).Update(context.TODO(), podDelta, metav1.UpdateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				podDelta = newPodWithLabels(adminPBRNamespace, pod2Name, node2Name, pod2IP, map[string]string{"k8s.io/app": app1Name}, node2IP)
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(adminPBRNamespace).Update(context.TODO(), podDelta, metav1.UpdateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				fakeOvn.asf.EventuallyExpectAddressSetWithIPs(addressSetName, []string{pod2IP})
+				ocInfo.asf.EventuallyExpectAddressSetWithIPs(asIndex, []string{pod2IP})
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -370,6 +401,9 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 			pbr := newAdminPBR(policyName, nextHop)
 			app.Action = func(ctx *cli.Context) error {
 				fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{},
+					&nettypes.NetworkAttachmentDefinitionList{
+						Items: []nettypes.NetworkAttachmentDefinition{*nad},
+					},
 					&adminpbrapi.AdminPolicyBasedRouteList{
 						Items: []adminpbrapi.AdminPolicyBasedRoute{
 							*pbr,
@@ -393,29 +427,28 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 						},
 					},
 				)
-				// set to secondary to bypass OVN operations which rely on logical router which is absent at this point
-				fakeOvn.controller.nadInfo.IsSecondary = true
-				fakeOvn.controller.nadInfo.TopoType = ovntypes.Layer3AttachDefTopoType
-				fakeOvn.controller.WatchAdminPolicyBasedRoutes()
-				gomega.Eventually(fakeOvn.controller).ShouldNot(gomega.BeNil())
+				ocInfo := fakeOvn.secondaryControllers["ovn-primary"]
+				gomega.Expect(ocInfo).ToNot(gomega.BeNil())
+				err := ocInfo.bnc.WatchAdminPolicyBasedRoutes()
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				gomega.Eventually(func() []nbdb.LogicalRouterPolicy {
 					policies := []nbdb.LogicalRouterPolicy{}
-					err := fakeOvn.controller.mc.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
+					err := fakeOvn.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
 						return lrp.ExternalIDs[ovntypes.ExternalIDK8sOwner] == util.NamespacedName(pbr)
 					}).List(context.TODO(), &policies)
 					gomega.Expect(err).To(gomega.BeNil())
 					return policies
 				}, 15*time.Second).Should(gomega.BeEmpty())
 				ops, err := fakeOvn.nbClient.Create(&nbdb.LogicalRouter{
-					Name: ovntypes.OVNClusterRouter,
-					UUID: ovntypes.OVNClusterRouter + "-UUID",
+					Name: "ovn.primary_" + ovntypes.OVNClusterRouter,
+					UUID: "ovn.primary_" + ovntypes.OVNClusterRouter + "-UUID",
 				})
 				gomega.Expect(err).To(gomega.BeNil())
 				_, err = fakeOvn.nbClient.Transact(context.TODO(), ops...)
 				gomega.Expect(err).To(gomega.BeNil())
 				gomega.Eventually(func() []nbdb.LogicalRouterPolicy {
 					policies := []nbdb.LogicalRouterPolicy{}
-					err := fakeOvn.controller.mc.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
+					err := fakeOvn.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
 						return lrp.ExternalIDs[ovntypes.ExternalIDK8sOwner] == util.NamespacedName(pbr)
 					}).List(context.TODO(), &policies)
 					gomega.Expect(err).To(gomega.BeNil())

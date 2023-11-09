@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"os/signal"
 	"strings"
@@ -14,17 +13,23 @@ import (
 	"text/template"
 	"time"
 
+	"k8s.io/apimachinery/pkg/util/sets"
 	corev1listers "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/tools/leaderelection"
+	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	controllerManager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-controller-manager"
 	ovnnode "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
+	OFManager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/openflow-manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli/v2"
@@ -105,7 +110,7 @@ func main() {
 	ctx := context.Background()
 	ctx, cancel := context.WithCancel(ctx)
 	c.Action = func(ctx *cli.Context) error {
-		return runOvnKube(ctx, cancel)
+		return startOvnKube(ctx, cancel)
 	}
 
 	// trap SIGHUP, SIGINT, SIGTERM, SIGQUIT and
@@ -150,19 +155,19 @@ func setupPIDFile(pidfile string) error {
 
 	// Create if it doesn't exist, else exit with error
 	if os.IsNotExist(err) {
-		if err := ioutil.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644); err != nil {
+		if err := os.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644); err != nil {
 			klog.Errorf("Failed to write pidfile %s (%v). Ignoring..", pidfile, err)
 		}
 	} else {
 		// get the pid and see if it exists
-		pid, err := ioutil.ReadFile(pidfile)
+		pid, err := os.ReadFile(pidfile)
 		if err != nil {
 			return fmt.Errorf("pidfile %s exists but can't be read: %v", pidfile, err)
 		}
 		_, err1 := os.Stat("/proc/" + string(pid[:]) + "/cmdline")
 		if os.IsNotExist(err1) {
 			// Left over pid from dead process
-			if err := ioutil.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644); err != nil {
+			if err := os.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644); err != nil {
 				klog.Errorf("Failed to write pidfile %s (%v). Ignoring..", pidfile, err)
 			}
 		} else {
@@ -173,7 +178,82 @@ func setupPIDFile(pidfile string) error {
 	return nil
 }
 
-func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
+// ovnkubeRunMode object stores the run mode of the ovnkube
+type ovnkubeRunMode struct {
+	ovnkubeController bool // ovnkube controller (--init-ovnkube-controller or --init-master) is enabled
+	clusterManager    bool // cluster manager (--init-cluster-manager or --init-master) is enabled
+	node              bool // node (--init-node) is enabled
+	cleanupNode       bool // cleanup (--cleanup-node) is enabled
+
+	// Along with the run mode, an identity is provided that uniquely identifies
+	// this instance vs other instances that might be running in the cluster.
+	// The identity is usually the node name. It's used for leader election
+	// among other things.
+	identity string
+}
+
+// determineOvnkubeRunMode determines the run modes of ovnkube
+// based on the init flags set.  It is possible to run ovnkube in
+// multiple modes.  Allowed multiple modes are:
+//   - master (ovnkube controller + cluster manager) + node
+//   - ovnkube controller + cluster manager
+//   - ovnkube controller + node
+func determineOvnkubeRunMode(ctx *cli.Context) (*ovnkubeRunMode, error) {
+	mode := &ovnkubeRunMode{}
+
+	master := ctx.String("init-master")
+	cm := ctx.String("init-cluster-manager")
+	ovnkController := ctx.String("init-ovnkube-controller")
+	node := ctx.String("init-node")
+	cleanup := ctx.String("cleanup-node")
+
+	if master != "" {
+		// If init-master is set, then both ovnkube controller and cluster manager
+		// are enabled
+		mode.ovnkubeController = true
+		mode.clusterManager = true
+	}
+
+	if cm != "" {
+		mode.clusterManager = true
+	}
+
+	if ovnkController != "" {
+		mode.ovnkubeController = true
+	}
+
+	if node != "" {
+		mode.node = true
+	}
+
+	if cleanup != "" {
+		mode.cleanupNode = true
+	}
+
+	if mode.cleanupNode && (mode.clusterManager || mode.ovnkubeController || mode.node) {
+		return nil, fmt.Errorf("cannot run cleanup-node mode along with any other mode")
+	}
+
+	if !mode.clusterManager && !mode.ovnkubeController && !mode.node && !mode.cleanupNode {
+		return nil, fmt.Errorf("need to specify a mode for ovnkube")
+	}
+
+	if !mode.ovnkubeController && mode.clusterManager && mode.node {
+		return nil, fmt.Errorf("cannot run in both cluster manager and node mode")
+	}
+
+	identities := sets.NewString(master, cm, ovnkController, node, cleanup)
+	identities.Delete("")
+	if identities.Len() != 1 {
+		return nil, fmt.Errorf("provided no identity or different identities for different modes")
+	}
+
+	mode.identity, _ = identities.PopAny()
+
+	return mode, nil
+}
+
+func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	pidfile := ctx.String("pidfile")
 	if pidfile != "" {
 		defer delPidfile(pidfile)
@@ -197,48 +277,223 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 		return fmt.Errorf("failed to initialize exec helper: %v", err)
 	}
 
-	// Setup cluster name , if config.Kubernetes.ClusterName exists
-	if util.IsClusterScoped() {
-		util.SetClusterName(config.Kubernetes.ClusterName)
-	}
+	ovnKubeStartWg := &sync.WaitGroup{}
+	defer func() {
+		// make sure everything stops and wait
+		cancel()
+		ovnKubeStartWg.Wait()
+	}()
 
+	if config.Kubernetes.BootstrapKubeconfig != "" {
+		if err := util.StartNodeCertificateManager(ctx.Context, ovnKubeStartWg, &config.Kubernetes); err != nil {
+			return fmt.Errorf("failed to start the node certificate manager: %w", err)
+		}
+	}
 	ovnClientset, err := util.NewOVNClientset(&config.Kubernetes)
 	if err != nil {
 		return err
 	}
 
-	master := ctx.String("init-master")
-	node := ctx.String("init-node")
-
-	cleanupNode := ctx.String("cleanup-node")
-	if cleanupNode != "" {
-		if master != "" || node != "" {
-			return fmt.Errorf("cannot specify cleanup-node together with 'init-node or 'init-master'")
-		}
-
-		if err := ovnnode.CleanupClusterNode(cleanupNode); err != nil {
-			return err
-		}
-		return nil
+	runMode, err := determineOvnkubeRunMode(ctx)
+	if err != nil {
+		return err
 	}
 
-	if master == "" && node == "" {
-		return fmt.Errorf("need to run ovnkube in either master and/or node mode")
+	eventRecorder := util.EventRecorder(ovnClientset.KubeClient)
+
+	// Start metric server for master and node. Expose the metrics HTTP endpoint if configured.
+	// Non LE master instances also are required to expose the metrics server.
+	if config.Metrics.BindAddress != "" {
+		pprofBindAddress := ""
+		if config.Metrics.EnablePprof {
+			pprofBindAddress = config.Metrics.PprofBindAddress
+		}
+		if runMode.node {
+			// ovnk8s node mode
+			metrics.StartOVNMetricsServer(config.Metrics.BindAddress, pprofBindAddress,
+				config.Metrics.NodeServerCert, config.Metrics.NodeServerPrivKey, ctx.Done(), ovnKubeStartWg)
+		} else {
+			// serve ovnkube controller metrics
+			metrics.StartMetricsServer(config.Metrics.BindAddress, pprofBindAddress,
+				config.OvnNorth.Cert, config.OvnNorth.PrivKey, ctx.Done(), ovnKubeStartWg)
+		}
+	}
+
+	// no need for leader election in node mode
+	// only node mode
+	if !runMode.clusterManager && !runMode.ovnkubeController {
+		return runOvnKube(ctx.Context, runMode, ovnClientset, eventRecorder)
+	}
+
+	// ovnkube-controller with node
+	if runMode.node && runMode.ovnkubeController {
+		metrics.RegisterOVNKubeControllerBase()
+		return runOvnKube(ctx.Context, runMode, ovnClientset, eventRecorder)
+	}
+
+	// Register prometheus metrics that do not depend on becoming ovnkube-controller
+	// leader and get the proper HA config depending on the mode. For ovnkube
+	// controller mode or combined cluster manager and ovnkube-controller modes (the classic
+	// master mode), the master HA config applies. For cluster manager
+	// standalone mode, the cluster manager HA config applies.
+	var haConfig *config.HAConfig
+	var name string
+	switch {
+	case runMode.ovnkubeController && runMode.clusterManager:
+		metrics.RegisterClusterManagerBase()
+		fallthrough
+	case runMode.ovnkubeController:
+		metrics.RegisterOVNKubeControllerBase()
+		haConfig = &config.MasterHA
+		name = networkControllerManagerLockName()
+	case runMode.clusterManager:
+		metrics.RegisterClusterManagerBase()
+		haConfig = &config.ClusterMgrHA
+		name = "ovn-kubernetes-master"
+	}
+
+	// Set up leader election process. Use lease resource lock as configmap and
+	// endpoint lock support has been removed from leader election library.
+	rl, err := resourcelock.New(
+		resourcelock.LeasesResourceLock,
+		config.Kubernetes.OVNConfigNamespace,
+		name,
+		ovnClientset.KubeClient.CoreV1(),
+		ovnClientset.KubeClient.CoordinationV1(),
+		resourcelock.ResourceLockConfig{
+			Identity:      runMode.identity,
+			EventRecorder: eventRecorder,
+		},
+	)
+	if err != nil {
+		return err
+	}
+
+	ovnKubeStopped := false
+	ovnKubeStopLock := sync.Mutex{}
+	lec := leaderelection.LeaderElectionConfig{
+		Lock:            rl,
+		LeaseDuration:   time.Duration(haConfig.ElectionLeaseDuration) * time.Second,
+		RenewDeadline:   time.Duration(haConfig.ElectionRenewDeadline) * time.Second,
+		RetryPeriod:     time.Duration(haConfig.ElectionRetryPeriod) * time.Second,
+		ReleaseOnCancel: true,
+		Callbacks: leaderelection.LeaderCallbacks{
+			OnStartedLeading: func(ctx context.Context) {
+				// Looking at the leader elector implementation,
+				// OnStartedLeading is called asynchronously with respect
+				// OnStoppedLeading and there seems to be no guarantee that
+				// OnStartedLeading won't run after OnStoppedLeading, so take
+				// some additional precautions to ensure we don't start when we
+				// shouldn't.
+				ovnKubeStopLock.Lock()
+				if ovnKubeStopped {
+					ovnKubeStopLock.Unlock()
+					return
+				}
+				ovnKubeStartWg.Add(1)
+				defer ovnKubeStartWg.Done()
+				ovnKubeStopLock.Unlock()
+				klog.Infof("Won leader election; in active mode")
+				if err := runOvnKube(ctx, runMode, ovnClientset, eventRecorder); err != nil {
+					klog.Error(err)
+					cancel()
+				}
+			},
+			OnStoppedLeading: func() {
+				ovnKubeStopLock.Lock()
+				defer ovnKubeStopLock.Unlock()
+				klog.Infof("No longer leader; exiting")
+				ovnKubeStopped = true
+				cancel()
+			},
+			OnNewLeader: func(newLeaderName string) {
+				if newLeaderName != runMode.identity {
+					klog.Infof("Lost the election to %s; in standby mode", newLeaderName)
+				}
+			},
+		},
+	}
+
+	leaderelection.SetProvider(ovnkubeMetricsProvider{runMode})
+	leaderElector, err := leaderelection.NewLeaderElector(lec)
+	if err != nil {
+		return err
+	}
+
+	leaderElector.Run(ctx.Context)
+	// Looking at the leader election implementation, OnStoppedLeading is called
+	// synchronously before Run exits. But the callbacks are documented as
+	// asynchronous so again out of precaution we make sure we don't start when
+	// we shouldn't.
+	ovnKubeStopLock.Lock()
+	ovnKubeStopped = true
+	ovnKubeStopLock.Unlock()
+
+	return nil
+}
+
+func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util.OVNClientset, eventRecorder record.EventRecorder) error {
+	startTime := time.Now()
+
+	if runMode.cleanupNode {
+		return ovnnode.CleanupClusterNode(runMode.identity)
 	}
 
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
-	var watchFactory factory.Shutdownable
+	defer func() {
+		close(stopChan)
+		wg.Wait()
+	}()
+
 	var masterWatchFactory *factory.WatchFactory
-	var masterEventRecorder record.EventRecorder
-	if master != "" {
-		var err error
+	var err error
+
+	if runMode.ovnkubeController {
 		// create factory and start the controllers asked for
-		masterWatchFactory, err = factory.NewMasterWatchFactory(ovnClientset)
+		masterWatchFactory, err = factory.NewOVNKubeControllerWatchFactory(ovnClientset.GetOVNKubeControllerClientset())
 		if err != nil {
 			return err
 		}
-		watchFactory = masterWatchFactory
+		defer masterWatchFactory.Shutdown()
+	}
+
+	if runMode.clusterManager {
+		var clusterManagerWatchFactory *factory.WatchFactory
+		if runMode.ovnkubeController {
+			// if CM and NCM modes are enabled, then we should call the combo mode - NewMasterWatchFactory
+			masterWatchFactory, err = factory.NewMasterWatchFactory(ovnClientset.GetMasterClientset())
+			if err != nil {
+				return err
+			}
+			clusterManagerWatchFactory = masterWatchFactory
+		} else {
+			clusterManagerWatchFactory, err = factory.NewClusterManagerWatchFactory(ovnClientset.GetClusterManagerClientset())
+			if err != nil {
+				return err
+			}
+			defer clusterManagerWatchFactory.Shutdown()
+		}
+
+		cm, err := clustermanager.NewClusterManager(ovnClientset.GetClusterManagerClientset(), clusterManagerWatchFactory,
+			runMode.identity, wg, eventRecorder)
+		if err != nil {
+			return fmt.Errorf("failed to create new cluster manager: %w", err)
+		}
+		metrics.RegisterClusterManagerFunctional()
+		err = cm.Start(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to start cluster manager: %w", err)
+		}
+		defer cm.Stop()
+
+		// record delay until ready
+		metrics.MetricClusterManagerReadyDuration.Set(time.Since(startTime).Seconds())
+	}
+
+	var ovnkubeControllerStartErr error
+	ovnkubeControllerWG := sync.WaitGroup{}
+	if runMode.ovnkubeController {
 		var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
 
 		if libovsdbOvnNBClient, err = libovsdb.NewNBClient(stopChan); err != nil {
@@ -249,64 +504,46 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 			return fmt.Errorf("error when trying to initialize libovsdb SB client: %v", err)
 		}
 
-		// register prometheus metrics exported by the master
-		// this must be done prior to calling controller start
-		// since we capture some metrics in Start()
-		metrics.RegisterMasterMetrics(libovsdbOvnNBClient, libovsdbOvnSBClient, config.MetricsScrapeInterval, stopChan)
-
-		masterEventRecorder = util.EventRecorder(ovnClientset.KubeClient)
-		ovnMHController := ovn.NewOvnMHController(ovnClientset, master, masterWatchFactory,
-			stopChan, libovsdbOvnNBClient, libovsdbOvnSBClient, masterEventRecorder, wg)
-		err = ovnMHController.Start(ctx.Context, cancel)
+		cm, err := controllerManager.NewNetworkControllerManager(ovnClientset, masterWatchFactory, libovsdbOvnNBClient, libovsdbOvnSBClient, eventRecorder, wg)
 		if err != nil {
 			return err
 		}
 
-		// now that ovnkube master is running, lets expose the metrics HTTPs endpoint if configured
-		// start the prometheus server to serve OVN K8s Metrics (default master port: 9409)
-		if config.Metrics.BindAddress != "" {
-			pprofBindAddress := ""
-			if config.Metrics.EnablePprof {
-				pprofBindAddress = config.Metrics.PprofBindAddress
+		// start NetworkControllerManager in a separate goroutine to allow parallel startup for NodeNetworkControllerManager.
+		// NetworkControllerManager during startup waits for ovnkube-node to set ovnNodeZoneName annotation, therefore
+		// they can't run sequentially (unless we use default "global" zone).
+		// Another advantage of running startup in parallel is reducing the startup time.
+		ovnkubeControllerWG.Add(1)
+		go func() {
+			defer ovnkubeControllerWG.Done()
+			err = cm.Start(ctx)
+			if err != nil {
+				ovnkubeControllerStartErr = fmt.Errorf("failed to start ovnkube controller: %w", err)
+				return
 			}
-			// serve ovnkube_master metrics
-			metrics.StartMetricsServer(config.Metrics.BindAddress, pprofBindAddress,
-				config.OvnNorth.Cert, config.OvnNorth.PrivKey, stopChan, wg)
-		}
+			// record delay until ready
+			metrics.MetricOVNKubeControllerReadyDuration.Set(time.Since(startTime).Seconds())
+		}()
+		defer func() {
+			if ovnkubeControllerStartErr != nil {
+				cm.Stop()
+			}
+		}()
 	}
 
-	if node != "" {
+	if runMode.node {
 		var nodeWatchFactory factory.NodeWatchFactory
-		var nodeEventRecorder record.EventRecorder
-		dpuName := ""
-		nodeNames := []string{node}
-		if config.OvnKubeNode.Mode == types.NodeModeDPU {
-			stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
-				"external_ids:hostname")
-			if err != nil || stdout == "" {
-				return fmt.Errorf("dpu node name not found in external_ids: %v (%q)", err, stderr)
-			}
-			dpuName = strings.Split(stdout, "\n")[0]
-			klog.Infof("Initializing K8s DPU node: %v", dpuName)
-			nodeNames = append(nodeNames, dpuName)
-		}
 
-		if masterWatchFactory == nil {
+		if runMode.ovnkubeController {
+			// masterWatchFactory would be initialized as NewOVNKubeControllerWatchFactory already, let's use that
+			nodeWatchFactory = masterWatchFactory
+		} else {
 			var err error
-			nodeWatchFactory, err = factory.NewNodeWatchFactory(ovnClientset, nodeNames)
+			nodeWatchFactory, err = factory.NewNodeWatchFactory(ovnClientset.GetNodeClientset(), runMode.identity)
 			if err != nil {
 				return err
 			}
-			watchFactory = nodeWatchFactory
-		} else {
-			nodeWatchFactory = masterWatchFactory
-		}
-		klog.Infof("Initializing K8s nodes: %v", nodeNames)
-
-		if masterEventRecorder == nil {
-			nodeEventRecorder = util.EventRecorder(ovnClientset.KubeClient)
-		} else {
-			nodeEventRecorder = masterEventRecorder
+			defer nodeWatchFactory.Shutdown()
 		}
 
 		if config.Kubernetes.Token == "" {
@@ -314,17 +551,22 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 		}
 		// register ovnkube node specific prometheus metrics exported by the node
 		metrics.RegisterNodeMetrics(config.MetricsScrapeInterval, stopChan)
-		start := time.Now()
-		n := ovnnode.NewNode(ovnClientset, nodeWatchFactory, node, dpuName, stopChan, nodeEventRecorder, wg)
-		if err := n.Start(ctx.Context, wg); err != nil {
-			// exit gracefully.
-			close(stopChan)
-			wg.Wait()
-			watchFactory.Shutdown()
-			return err
+
+		// initialization the global open flow manager
+		OFManager.NewOpenFlowCacheManager(wg, stopChan)
+
+		ncm, err := controllerManager.NewNodeNetworkControllerManager(ovnClientset, nodeWatchFactory, runMode.identity, eventRecorder)
+		if err != nil {
+			return fmt.Errorf("failed to create ovnkube node ovnkube controller: %w", err)
 		}
-		end := time.Since(start)
-		metrics.MetricNodeReadyDuration.Set(end.Seconds())
+		err = ncm.Start(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to start node network manager: %w", err)
+		}
+		defer ncm.Stop()
+
+		// record delay until ready
+		metrics.MetricNodeReadyDuration.Set(time.Since(startTime).Seconds())
 
 		// start the prometheus server to serve OVS and OVN Node Metrics (default port: 9410)
 		if config.Metrics.BindAddress != "" {
@@ -332,36 +574,70 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 				ovsDBClient, err := metrics.SetupOvsDBClient()
 				if err != nil {
 					// exit gracefully.
-					close(stopChan)
-					wg.Wait()
-					watchFactory.Shutdown()
 					return fmt.Errorf("error when trying to initialize ovsdb client: %v", err)
 				}
 				// serve OVN ^ovn_controller metrics
 				metrics.RegisterOvnNodeMetrics(ovsDBClient, config.MetricsScrapeInterval, stopChan)
 				if config.Metrics.ExportOVSMetrics {
 					// serve OVS ^ovs metrics
-					metrics.RegisterOvsMetrics(node, ovsDBClient, config.MetricsScrapeInterval, stopChan)
+					metrics.RegisterOvsMetrics(runMode.identity, ovsDBClient, config.MetricsScrapeInterval, stopChan)
 				}
 			}
 			if config.OvnKubeNode.Mode == types.NodeModeFull {
 				// serve OVN ^ovn_db, ^ovn_northd metrics from the ovnkube-node pod that is matching labels accordingly
 				podLister := corev1listers.NewPodLister(nodeWatchFactory.LocalPodInformer().GetIndexer())
-				metrics.RegisterOvnCentralMetrics(podLister, node, config.MetricsScrapeInterval, stopChan)
+				metrics.RegisterOvnCentralMetrics(podLister, runMode.identity, config.MetricsScrapeInterval, stopChan)
 			}
-			pprofBindAddress := ""
-			if config.Metrics.EnablePprof {
-				pprofBindAddress = config.Metrics.PprofBindAddress
-			}
-			metrics.StartOVNMetricsServer(config.Metrics.BindAddress, pprofBindAddress,
-				config.Metrics.NodeServerCert, config.Metrics.NodeServerPrivKey, stopChan, wg)
+		}
+	}
+
+	if runMode.ovnkubeController {
+		ovnkubeControllerWG.Wait()
+		if ovnkubeControllerStartErr != nil {
+			return ovnkubeControllerStartErr
 		}
 	}
 
 	// run until cancelled
-	<-ctx.Context.Done()
-	close(stopChan)
-	watchFactory.Shutdown()
-	wg.Wait()
+	<-ctx.Done()
 	return nil
+}
+
+type leaderMetrics struct {
+	runMode *ovnkubeRunMode
+}
+
+func (m leaderMetrics) On(string) {
+	if m.runMode.ovnkubeController {
+		metrics.MetricOVNKubeControllerLeader.Set(1)
+	}
+	if m.runMode.clusterManager {
+		metrics.MetricClusterManagerLeader.Set(1)
+	}
+}
+
+func (m leaderMetrics) Off(string) {
+	if m.runMode.ovnkubeController {
+		metrics.MetricOVNKubeControllerLeader.Set(0)
+	}
+	if m.runMode.clusterManager {
+		metrics.MetricClusterManagerLeader.Set(0)
+	}
+}
+
+type ovnkubeMetricsProvider struct {
+	runMode *ovnkubeRunMode
+}
+
+func (p ovnkubeMetricsProvider) NewLeaderMetric() leaderelection.SwitchMetric {
+	return &leaderMetrics{p.runMode}
+}
+
+func networkControllerManagerLockName() string {
+	// keep the same old lock name unless we are owners of a specific zone
+	name := "ovn-kubernetes-master"
+	if config.Default.Zone != types.OvnDefaultZone {
+		name = name + "-" + config.Default.Zone
+	}
+	return name
 }

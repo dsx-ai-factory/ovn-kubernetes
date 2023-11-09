@@ -1,6 +1,7 @@
 package node
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -9,7 +10,9 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -19,6 +22,31 @@ import (
 // created from the bridge name and the node name
 func bridgedGatewayNodeSetup(nodeName, bridgeName, bridgeInterface, physicalNetworkName string,
 	syncBridgeMAC bool) (string, net.HardwareAddr, error) {
+	// enable forwarding on bridge interface always
+	createForwardingRule := func(family string) error {
+		var stdout, stderr string
+		var err error
+		stdout, _, err = util.RunSysctl(fmt.Sprintf("net.%s.conf.%s.forwarding", family, bridgeName))
+		if err == nil && stdout == fmt.Sprintf("net.%s.conf.%s.forwarding = 1", family, bridgeName) {
+			return nil
+		}
+		stdout, stderr, err = util.RunSysctl("-w", fmt.Sprintf("net.%s.conf.%s.forwarding=1", family, bridgeName))
+		if err != nil || stdout != fmt.Sprintf("net.%s.conf.%s.forwarding = 1", family, bridgeName) {
+			return fmt.Errorf("could not set the correct forwarding value for interface %s: stdout: %v, stderr: %v, err: %v",
+				bridgeName, stdout, stderr, err)
+		}
+		return nil
+	}
+	if config.IPv4Mode {
+		if err := createForwardingRule("ipv4"); err != nil {
+			return "", nil, fmt.Errorf("could not add IPv4 forwarding rule: %v", err)
+		}
+	}
+	if config.IPv6Mode {
+		if err := createForwardingRule("ipv6"); err != nil {
+			return "", nil, fmt.Errorf("could not add IPv6 forwarding rule: %v", err)
+		}
+	}
 	// A OVS bridge's mac address can change when ports are added to it.
 	// We cannot let that happen, so make the bridge mac address permanent.
 	macAddress, err := util.GetOVSPortMACAddress(bridgeInterface)
@@ -124,56 +152,98 @@ func getGatewayNextHops() ([]net.IP, string, error) {
 		needIPv6NextHop = true
 	}
 
-	// FIXME DUAL-STACK: config.Gateway.NextHop should be a slice of nexthops
 	if config.Gateway.NextHop != "" {
-		// Parse NextHop to make sure it is valid before using. Return error if not valid.
-		nextHop := net.ParseIP(config.Gateway.NextHop)
-		if nextHop == nil {
-			return nil, "", fmt.Errorf("failed to parse configured next-hop: %s", config.Gateway.NextHop)
+		nextHopsRaw := strings.Split(config.Gateway.NextHop, ",")
+		if len(nextHopsRaw) > 2 {
+			return nil, "", fmt.Errorf("unexpected next-hops are provided, more than 2 next-hops is not allowed: %s", config.Gateway.NextHop)
 		}
-		if config.IPv4Mode && !utilnet.IsIPv6(nextHop) {
-			gatewayNextHops = append(gatewayNextHops, nextHop)
-			needIPv4NextHop = false
-		}
-		if config.IPv6Mode && utilnet.IsIPv6(nextHop) {
-			gatewayNextHops = append(gatewayNextHops, nextHop)
-			needIPv6NextHop = false
+		for _, nh := range nextHopsRaw {
+			// Parse NextHop to make sure it is valid before using. Return error if not valid.
+			nextHop := net.ParseIP(nh)
+			if nextHop == nil {
+				return nil, "", fmt.Errorf("failed to parse configured next-hop: %s", config.Gateway.NextHop)
+			}
+			if config.IPv4Mode {
+				if needIPv4NextHop {
+					if !utilnet.IsIPv6(nextHop) {
+						gatewayNextHops = append(gatewayNextHops, nextHop)
+						needIPv4NextHop = false
+					}
+				} else {
+					if !utilnet.IsIPv6(nextHop) {
+						return nil, "", fmt.Errorf("only one IPv4 next-hop is allowed: %s", config.Gateway.NextHop)
+					}
+				}
+			}
+
+			if config.IPv6Mode {
+				if needIPv6NextHop {
+					if utilnet.IsIPv6(nextHop) {
+						gatewayNextHops = append(gatewayNextHops, nextHop)
+						needIPv6NextHop = false
+					}
+				} else {
+					if utilnet.IsIPv6(nextHop) {
+						return nil, "", fmt.Errorf("only one IPv6 next-hop is allowed: %s", config.Gateway.NextHop)
+					}
+				}
+			}
 		}
 	}
 	gatewayIntf := config.Gateway.Interface
+	if gatewayIntf != "" && config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+		if bridgeName, _, err := util.RunOVSVsctl("port-to-br", gatewayIntf); err == nil {
+			// This is an OVS bridge's internal port
+			gatewayIntf = bridgeName
+		}
+	}
+
 	if needIPv4NextHop || needIPv6NextHop || gatewayIntf == "" {
-		defaultGatewayIntf, defaultGatewayNextHops, err := getDefaultGatewayInterfaceDetails(gatewayIntf)
+		defaultGatewayIntf, defaultGatewayNextHops, err := getDefaultGatewayInterfaceDetails(gatewayIntf, config.IPv4Mode, config.IPv6Mode)
 		if err != nil {
-			return nil, "", err
+			if !(errors.As(err, new(*GatewayInterfaceMismatchError)) && config.Gateway.Mode == config.GatewayModeLocal && config.Gateway.AllowNoUplink) {
+				return nil, "", err
+			}
+		}
+		if gatewayIntf == "" {
+			if defaultGatewayIntf == "" {
+				return nil, "", fmt.Errorf("unable to find default gateway and none provided via config")
+			}
+			gatewayIntf = defaultGatewayIntf
+		} else {
+			if gatewayIntf != defaultGatewayIntf || len(defaultGatewayNextHops) == 0 {
+				if config.Gateway.Mode == config.GatewayModeLocal && config.Gateway.AllowNoUplink {
+					// For local gw, if not default gateway is available or the provide gateway interface is not the host gateway interface
+					// use nexthop masquerade IP as GR default gw to steer traffic to the gateway bridge
+					if needIPv4NextHop {
+						nexthop := config.Gateway.MasqueradeIPs.V4DummyNextHopMasqueradeIP
+						gatewayNextHops = append(gatewayNextHops, nexthop)
+						needIPv4NextHop = false
+					}
+					if needIPv6NextHop {
+						nexthop := config.Gateway.MasqueradeIPs.V6DummyNextHopMasqueradeIP
+						gatewayNextHops = append(gatewayNextHops, nexthop)
+						needIPv6NextHop = false
+					}
+				}
+			}
 		}
 		if needIPv4NextHop || needIPv6NextHop {
 			for _, defaultGatewayNextHop := range defaultGatewayNextHops {
 				if needIPv4NextHop && !utilnet.IsIPv6(defaultGatewayNextHop) {
 					gatewayNextHops = append(gatewayNextHops, defaultGatewayNextHop)
-					needIPv4NextHop = false
 				} else if needIPv6NextHop && utilnet.IsIPv6(defaultGatewayNextHop) {
 					gatewayNextHops = append(gatewayNextHops, defaultGatewayNextHop)
-					needIPv6NextHop = false
 				}
 			}
-			if needIPv4NextHop || needIPv6NextHop {
-				return nil, "", fmt.Errorf("failed to get next-hop: IPv4=%v IPv6=%v", needIPv4NextHop, needIPv6NextHop)
-			}
-		}
-		if gatewayIntf == "" {
-			gatewayIntf = defaultGatewayIntf
 		}
 	}
 	return gatewayNextHops, gatewayIntf, nil
 }
 
-// getPrimaryIPAddresses returns primary IP addresses of the node
-// In case of DPU host IP/Network based on K8s Node IP and DPU IP subnet overriden by config config.Gateway.RouterSubnet
-func getPrimaryIPAddresses(gatewayIntf string, k8sNodeIP net.IP) ([]*net.IPNet, error) {
-	if config.OvnKubeNode.Mode != types.NodeModeDPU {
-		return getNetworkInterfaceIPAddresses(gatewayIntf)
-	}
-
+// getDPUHostPrimaryIPAddresses returns the DPU host IP/Network based on K8s Node IP
+// and DPU IP subnet overriden by config config.Gateway.RouterSubnet
+func getDPUHostPrimaryIPAddresses(k8sNodeIP net.IP, ifAddrs []*net.IPNet) ([]*net.IPNet, error) {
 	// Note(adrianc): No Dual-Stack support at this point as we rely on k8s node IP to derive gateway information
 	// for each node.
 	var gwIps []*net.IPNet
@@ -196,11 +266,6 @@ func getPrimaryIPAddresses(gatewayIntf string, k8sNodeIP net.IP) ([]*net.IPNet, 
 		addr.IP = k8sNodeIP
 		gwIps = append(gwIps, addr)
 	} else {
-		ifAddrs, err := getNetworkInterfaceIPAddresses(gatewayIntf)
-		if err != nil {
-			return nil, err
-		}
-
 		// Assume Host and DPU share the same subnet
 		// in this case just update the matching IPNet with the Host's IP address
 		for _, addr := range ifAddrs {
@@ -244,32 +309,40 @@ func getInterfaceByIP(ip net.IP) (string, error) {
 }
 
 // configureSvcRouteViaInterface routes svc traffic through the provided interface
-func configureSvcRouteViaInterface(iface string, gwIPs []net.IP) error {
+func configureSvcRouteViaInterface(routeManager *routemanager.Controller, iface string, gwIPs []net.IP) error {
 	link, err := util.LinkSetUp(iface)
 	if err != nil {
 		return fmt.Errorf("unable to get link for %s, error: %v", iface, err)
 	}
 
+	var routes []routemanager.Route
 	for _, subnet := range config.Kubernetes.ServiceCIDRs {
 		gwIP, err := util.MatchIPFamily(utilnet.IsIPv6CIDR(subnet), gwIPs)
 		if err != nil {
 			return fmt.Errorf("unable to find gateway IP for subnet: %v, found IPs: %v", subnet, gwIPs)
 		}
 
+		// Remove MTU from service route once https://bugzilla.redhat.com/show_bug.cgi?id=2169839 is fixed.
 		mtu := config.Default.MTU
 		if config.Default.RoutableMTU != 0 {
 			mtu = config.Default.RoutableMTU
 		}
-
-		err = util.LinkRoutesAddOrUpdateMTU(link, gwIP[0], []*net.IPNet{subnet}, mtu)
-		if err != nil {
-			return fmt.Errorf("unable to add/update route for service via %s, error: %v", iface, err)
-		}
+		subnetCopy := *subnet
+		gwIPCopy := gwIP[0]
+		routes = append(routes, routemanager.Route{
+			GwIP:   gwIPCopy,
+			Subnet: &subnetCopy,
+			MTU:    mtu,
+			SrcIP:  nil,
+		})
+	}
+	if len(routes) > 0 {
+		routeManager.Add(routemanager.RoutesPerLink{Link: link, Routes: routes})
 	}
 	return nil
 }
 
-func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator,
+func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator,
 	waiter *startupWaiter, managementPortConfig *managementPortConfig, kubeNodeIP net.IP) error {
 	var err error
 	var gw *gateway
@@ -277,8 +350,8 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	// we need to setup gateway configuration only on the 1st BF2 adapter
 	if config.OvnKubeNode.Mode == types.NodeModeDPU && !config.OvnKubeNode.IsPrimaryDPU {
 		klog.Info("Skipping Gateway functionally on this DPU since it is not a primary DPU")
-		n.gateway = &gateway{}
-		return n.validateVTEPInterfaceMTU()
+		nc.gateway = &gateway{}
+		return nc.validateVTEPInterfaceMTU()
 	}
 
 	klog.Info("Initializing Gateway Functionality")
@@ -286,8 +359,8 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	var portClaimWatcher *portClaimWatcher
 
 	if config.Gateway.NodeportEnable && config.OvnKubeNode.Mode == types.NodeModeFull {
-		loadBalancerHealthChecker = newLoadBalancerHealthChecker(n.name)
-		portClaimWatcher, err = newPortClaimWatcher(n.recorder)
+		loadBalancerHealthChecker = newLoadBalancerHealthChecker(nc.name, nc.watchFactory)
+		portClaimWatcher, err = newPortClaimWatcher(nc.recorder)
 		if err != nil {
 			return err
 		}
@@ -303,33 +376,40 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 		egressGWInterface = interfaceForEXGW(config.Gateway.EgressGWInterface)
 	}
 
-	ifAddrs, err := getPrimaryIPAddresses(gatewayIntf, kubeNodeIP)
+	ifAddrs, err := getNetworkInterfaceIPAddresses(gatewayIntf)
 	if err != nil {
 		return err
 	}
 
-	v4IfAddr, _ := util.MatchIPNetFamily(false, ifAddrs)
-	v6IfAddr, _ := util.MatchIPNetFamily(true, ifAddrs)
+	// For DPU need to use the host IP addr which currently is assumed to be K8s Node cluster
+	// internal IP address.
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		ifAddrs, err = getDPUHostPrimaryIPAddresses(kubeNodeIP, ifAddrs)
+		if err != nil {
+			return err
+		}
+	}
 
-	if err := util.SetNodePrimaryIfAddr(nodeAnnotator, v4IfAddr, v6IfAddr); err != nil {
+	if err := util.SetNodePrimaryIfAddrs(nodeAnnotator, ifAddrs); err != nil {
 		klog.Errorf("Unable to set primary IP net label on node, err: %v", err)
 	}
 
 	switch config.Gateway.Mode {
 	case config.GatewayModeLocal:
 		klog.Info("Preparing Local Gateway")
-		gw, err = newLocalGateway(n.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator,
-			managementPortConfig, n.Kube, n.watchFactory)
+		gw, err = newLocalGateway(nc.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator,
+			managementPortConfig, nc.Kube, nc.watchFactory, nc.routeManager)
 	case config.GatewayModeShared:
 		klog.Info("Preparing Shared Gateway")
-		gw, err = newSharedGateway(n.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator, n.Kube,
-			managementPortConfig, n.watchFactory)
+		gw, err = newSharedGateway(nc.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator, nc.Kube,
+			managementPortConfig, nc.watchFactory, nc.routeManager)
 	case config.GatewayModeDisabled:
 		var chassisID string
 		klog.Info("Gateway Mode is disabled")
 		gw = &gateway{
-			initFunc:  func() error { return nil },
-			readyFunc: func() (bool, error) { return true, nil },
+			initFunc:     func() error { return nil },
+			readyFunc:    func() (bool, error) { return true, nil },
+			watchFactory: nc.watchFactory.(*factory.WatchFactory),
 		}
 		chassisID, err = util.GetNodeChassisID()
 		if err != nil {
@@ -356,7 +436,7 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	}
 
 	initGwFunc := func() error {
-		return gw.Init(n.watchFactory)
+		return gw.Init(nc.watchFactory, nc.stopChan, nc.wg)
 	}
 
 	readyGwFunc := func() (bool, error) {
@@ -369,9 +449,9 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	}
 
 	waiter.AddWait(readyGwFunc, initGwFunc)
-	n.gateway = gw
+	nc.gateway = gw
 
-	return n.validateVTEPInterfaceMTU()
+	return nc.validateVTEPInterfaceMTU()
 }
 
 // interfaceForEXGW takes the interface requested to act as exgw bridge
@@ -392,7 +472,7 @@ func interfaceForEXGW(intfName string) string {
 	return intfName
 }
 
-func (n *OvnNode) initGatewayDPUHost(kubeNodeIP net.IP) error {
+func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) error {
 	// A DPU host gateway is complementary to the shared gateway running
 	// on the DPU embedded CPU. it performs some initializations and
 	// watch on services for iptable rule updates and run a loadBalancerHealth checker
@@ -412,19 +492,28 @@ func (n *OvnNode) initGatewayDPUHost(kubeNodeIP net.IP) error {
 		return err
 	}
 
-	err = addMasqueradeRoute(gatewayIntf, gatewayNextHops)
+	ifAddrs, err := getNetworkInterfaceIPAddresses(gatewayIntf)
 	if err != nil {
 		return err
 	}
 
-	err = configureSvcRouteViaInterface(gatewayIntf, gatewayNextHops)
+	if err := setNodeMasqueradeIPOnExtBridge(gwIntf); err != nil {
+		return fmt.Errorf("failed to set the node masquerade IP on the ext bridge %s: %v", gwIntf, err)
+	}
+
+	if err := addMasqueradeRoute(nc.routeManager, gwIntf, nc.name, ifAddrs, nc.watchFactory); err != nil {
+		return fmt.Errorf("failed to set the node masquerade route to OVN: %v", err)
+	}
+
+	err = configureSvcRouteViaInterface(nc.routeManager, gatewayIntf, gatewayNextHops)
 	if err != nil {
 		return err
 	}
 
 	gw := &gateway{
-		initFunc:  func() error { return nil },
-		readyFunc: func() (bool, error) { return true, nil },
+		initFunc:     func() error { return nil },
+		readyFunc:    func() (bool, error) { return true, nil },
+		watchFactory: nc.watchFactory.(*factory.WatchFactory),
 	}
 
 	// TODO(adrianc): revisit if support for nodeIPManager is needed.
@@ -434,16 +523,20 @@ func (n *OvnNode) initGatewayDPUHost(kubeNodeIP net.IP) error {
 			return err
 		}
 		gw.nodePortWatcherIptables = newNodePortWatcherIptables()
-		gw.loadBalancerHealthChecker = newLoadBalancerHealthChecker(n.name)
-		portClaimWatcher, err := newPortClaimWatcher(n.recorder)
+		gw.loadBalancerHealthChecker = newLoadBalancerHealthChecker(nc.name, nc.watchFactory)
+		portClaimWatcher, err := newPortClaimWatcher(nc.recorder)
 		if err != nil {
 			return err
 		}
 		gw.portClaimWatcher = portClaimWatcher
 	}
 
-	err = gw.Init(n.watchFactory)
-	n.gateway = gw
+	if err := addHostMACBindings(gwIntf); err != nil {
+		return fmt.Errorf("failed to add MAC bindings for service routing")
+	}
+
+	err = gw.Init(nc.watchFactory, nc.stopChan, nc.wg)
+	nc.gateway = gw
 	return err
 }
 

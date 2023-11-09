@@ -7,18 +7,20 @@ import (
 	"bytes"
 	"fmt"
 	"net"
-	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"time"
 
-	kapi "k8s.io/api/core/v1"
-
-	"github.com/Mellanox/sriovnet"
-	utilfs "github.com/Mellanox/sriovnet/pkg/utils/filesystem"
 	"github.com/j-keck/arping"
+	"github.com/k8snetworkplumbingwg/sriovnet"
+	utilfs "github.com/k8snetworkplumbingwg/sriovnet/pkg/utils/filesystem"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 
+	kapi "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -34,6 +36,7 @@ type NetLinkOps interface {
 	LinkSetHardwareAddr(link netlink.Link, hwaddr net.HardwareAddr) error
 	LinkSetMTU(link netlink.Link, mtu int) error
 	LinkSetTxQLen(link netlink.Link, qlen int) error
+	IsLinkNotFoundError(err error) bool
 	AddrList(link netlink.Link, family int) ([]netlink.Addr, error)
 	AddrDel(link netlink.Link, addr *netlink.Addr) error
 	AddrAdd(link netlink.Link, addr *netlink.Addr) error
@@ -42,11 +45,12 @@ type NetLinkOps interface {
 	RouteAdd(route *netlink.Route) error
 	RouteReplace(route *netlink.Route) error
 	RouteListFiltered(family int, filter *netlink.Route, filterMask uint64) ([]netlink.Route, error)
+	RuleListFiltered(family int, filter *netlink.Rule, filterMask uint64) ([]netlink.Rule, error)
 	NeighAdd(neigh *netlink.Neigh) error
+	NeighDel(neigh *netlink.Neigh) error
 	NeighList(linkIndex, family int) ([]netlink.Neigh, error)
 	ConntrackDeleteFilter(table netlink.ConntrackTableType, family netlink.InetFamily, filter netlink.CustomConntrackFilter) (uint, error)
 	CountIngressFilters(link netlink.Link) (uint, error)
-	LinkSetAlias(link netlink.Link, alias string) error
 	LinkSetVfHardwareAddr(pfLink netlink.Link, vfIndex int, hwaddr net.HardwareAddr) error
 }
 
@@ -114,6 +118,10 @@ func (defaultNetLinkOps) LinkSetTxQLen(link netlink.Link, qlen int) error {
 	return netlink.LinkSetTxQLen(link, qlen)
 }
 
+func (defaultNetLinkOps) IsLinkNotFoundError(err error) bool {
+	return reflect.TypeOf(err) == reflect.TypeOf(netlink.LinkNotFoundError{})
+}
+
 func (defaultNetLinkOps) AddrList(link netlink.Link, family int) ([]netlink.Addr, error) {
 	return netlink.AddrList(link, family)
 }
@@ -146,8 +154,16 @@ func (defaultNetLinkOps) RouteListFiltered(family int, filter *netlink.Route, fi
 	return netlink.RouteListFiltered(family, filter, filterMask)
 }
 
+func (defaultNetLinkOps) RuleListFiltered(family int, filter *netlink.Rule, filterMask uint64) ([]netlink.Rule, error) {
+	return netlink.RuleListFiltered(family, filter, filterMask)
+}
+
 func (defaultNetLinkOps) NeighAdd(neigh *netlink.Neigh) error {
 	return netlink.NeighAdd(neigh)
+}
+
+func (defaultNetLinkOps) NeighDel(neigh *netlink.Neigh) error {
+	return netlink.NeighDel(neigh)
 }
 
 func (defaultNetLinkOps) NeighList(linkIndex, family int) ([]netlink.Neigh, error) {
@@ -170,10 +186,6 @@ func (defaultNetLinkOps) CountIngressFilters(link netlink.Link) (uint, error) {
 		}
 	}
 	return ingressCounter, nil
-}
-
-func (defaultNetLinkOps) LinkSetAlias(link netlink.Link, alias string) error {
-	return netlink.LinkSetAlias(link, alias)
 }
 
 func (defaultNetLinkOps) LinkSetVfHardwareAddr(pfLink netlink.Link, vfIndex int, hwaddr net.HardwareAddr) error {
@@ -249,8 +261,8 @@ func LinkAddrExist(link netlink.Link, address *net.IPNet) (bool, error) {
 }
 
 // LinkAddrAdd removes existing addresses on the link and adds the new address
-func LinkAddrAdd(link netlink.Link, address *net.IPNet) error {
-	err := netLinkOps.AddrAdd(link, &netlink.Addr{IPNet: address})
+func LinkAddrAdd(link netlink.Link, address *net.IPNet, flags int) error {
+	err := netLinkOps.AddrAdd(link, &netlink.Addr{IPNet: address, Flags: flags})
 	if err != nil {
 		return fmt.Errorf("failed to add address %s on link %s: %v", address, link.Attrs().Name, err)
 	}
@@ -302,7 +314,7 @@ func LinkRoutesDel(link netlink.Link, subnets []*net.IPNet) error {
 }
 
 // LinkRoutesAdd adds a new route for given subnets through the gwIPstr
-func LinkRoutesAdd(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int) error {
+func LinkRoutesAdd(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int, src net.IP) error {
 	for _, subnet := range subnets {
 		route := &netlink.Route{
 			Dst:       subnet,
@@ -310,64 +322,53 @@ func LinkRoutesAdd(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int
 			Scope:     netlink.SCOPE_UNIVERSE,
 			Gw:        gwIP,
 		}
+		if len(src) > 0 {
+			route.Src = src
+		}
 		if mtu != 0 {
 			route.MTU = mtu
 		}
 		err := netLinkOps.RouteAdd(route)
 		if err != nil {
-			if os.IsExist(err) {
-				return err
-			}
-			return fmt.Errorf("failed to add route for subnet %s via gateway %s with mtu %d: %v",
-				subnet.String(), gwIP.String(), mtu, err)
+			return fmt.Errorf("failed to add route for subnet %s via gateway %s with mtu %d and src: %s: %v",
+				subnet.String(), gwIP.String(), mtu, src, err)
 		}
 	}
 	return nil
 }
 
-func LinkRoutesAddOrUpdateMTU(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int) error {
-	for _, subnet := range subnets {
-		route, err := LinkRouteGet(link, gwIP, subnet)
-		if err != nil {
-			return err
-		}
-		if route != nil {
-			if route.MTU == mtu {
-				return nil
-			}
-			route.MTU = mtu
-			err = netLinkOps.RouteReplace(route)
-			if err != nil {
-				return fmt.Errorf("failed to replace route for subnet %s via gateway %s with mtu %d: %v", subnet.String(), gwIP.String(), mtu, err)
-			}
-		} else {
-			return LinkRoutesAdd(link, gwIP, []*net.IPNet{subnet}, mtu)
-		}
-	}
-	return nil
-}
-
-// LinkRouteGet gets a route for the given subnet with the specified gwIPStr
+// LinkRouteGetFilteredRoute gets a route for the given route filter.
 // returns nil if route is not found
-func LinkRouteGet(link netlink.Link, gwIP net.IP, subnet *net.IPNet) (*netlink.Route, error) {
-	routeFilter := &netlink.Route{Dst: subnet, LinkIndex: link.Attrs().Index}
-	filterMask := netlink.RT_FILTER_DST | netlink.RT_FILTER_OIF
-	routes, err := netLinkOps.RouteListFiltered(getFamily(gwIP), routeFilter, filterMask)
+func LinkRouteGetFilteredRoute(routeFilter *netlink.Route, filterMask uint64) (*netlink.Route, error) {
+	routes, err := netLinkOps.RouteListFiltered(getFamily(routeFilter.Dst.IP), routeFilter, filterMask)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get routes for subnet %s", subnet.String())
+		return nil, fmt.Errorf(
+			"failed to get routes for filter %v with mask %d: %v", *routeFilter, filterMask, err)
 	}
-	for _, route := range routes {
-		if route.Gw.Equal(gwIP) {
-			return &route, nil
-		}
+	if len(routes) == 0 {
+		return nil, nil
 	}
-	return nil, nil
+	return &routes[0], nil
 }
 
 // LinkRouteExists checks for existence of routes for the given subnet through gwIPStr
 func LinkRouteExists(link netlink.Link, gwIP net.IP, subnet *net.IPNet) (bool, error) {
-	route, err := LinkRouteGet(link, gwIP, subnet)
+	route, err := LinkRouteGetFilteredRoute(filterRouteByDstAndGw(link, subnet, gwIP))
 	return route != nil, err
+}
+
+// LinkNeighDel deletes an ip binding for a given link
+func LinkNeighDel(link netlink.Link, neighIP net.IP) error {
+	neigh := &netlink.Neigh{
+		LinkIndex: link.Attrs().Index,
+		Family:    getFamily(neighIP),
+		IP:        neighIP,
+	}
+	err := netLinkOps.NeighDel(neigh)
+	if err != nil {
+		return fmt.Errorf("failed to delete neighbour entry %+v: %v", neigh, err)
+	}
+	return nil
 }
 
 // LinkNeighAdd adds MAC/IP bindings for the given link
@@ -455,7 +456,6 @@ func DeleteConntrack(ip string, port int32, protocol kapi.Protocol, ipFilterType
 			return fmt.Errorf("could not add label %s to conntrack filter: %v", labels, err)
 		}
 	}
-
 	if ipAddress.To4() != nil {
 		if _, err := netLinkOps.ConntrackDeleteFilter(netlink.ConntrackTable, netlink.FAMILY_V4, filter); err != nil {
 			return err
@@ -468,7 +468,21 @@ func DeleteConntrack(ip string, port int32, protocol kapi.Protocol, ipFilterType
 	return nil
 }
 
+// DeleteConntrackServicePort is a wrapper around DeleteConntrack for the purpose of deleting conntrack entries that
+// belong to ServicePorts. Before deleting any conntrack entry, it makes sure that the port is valid. If the port is
+// invalid, it will log a level 5 info message and simply return.
+func DeleteConntrackServicePort(ip string, port int32, protocol kapi.Protocol, ipFilterType netlink.ConntrackFilterType,
+	labels [][]byte) error {
+	if err := ValidatePort(protocol, port); err != nil {
+		klog.V(5).Infof("Skipping conntrack deletion for IP %q, protocol %q, port \"%d\", err: %q",
+			ip, protocol, port, err)
+		return nil
+	}
+	return DeleteConntrack(ip, port, protocol, ipFilterType, labels)
+}
+
 // GetNetworkInterfaceIPs returns the IP addresses for the network interface 'iface'.
+// We filter out addresses that are link local, reserved for internal use or added by keepalived.
 func GetNetworkInterfaceIPs(iface string) ([]*net.IPNet, error) {
 	link, err := netLinkOps.LinkByName(iface)
 	if err != nil {
@@ -482,7 +496,7 @@ func GetNetworkInterfaceIPs(iface string) ([]*net.IPNet, error) {
 
 	var ips []*net.IPNet
 	for _, addr := range addrs {
-		if addr.IP.IsLinkLocalUnicast() {
+		if addr.IP.IsLinkLocalUnicast() || IsAddressReservedForInternalUse(addr.IP) || IsAddressAddedByKeepAlived(addr) {
 			continue
 		}
 		// Ignore addresses marked as secondary or deprecated since they may
@@ -495,6 +509,29 @@ func GetNetworkInterfaceIPs(iface string) ([]*net.IPNet, error) {
 		ips = append(ips, addr.IPNet)
 	}
 	return ips, nil
+}
+
+func IsAddressReservedForInternalUse(addr net.IP) bool {
+	var subnetStr string
+	if addr.To4() != nil {
+		subnetStr = config.Gateway.V4MasqueradeSubnet
+	} else {
+		subnetStr = config.Gateway.V6MasqueradeSubnet
+	}
+	_, subnet, err := net.ParseCIDR(subnetStr)
+	if err != nil {
+		klog.Errorf("Could not determine if %s is in reserved subnet %v: %v",
+			addr, subnetStr, err)
+		return false
+	}
+	return subnet.Contains(addr)
+}
+
+// IsAddressAddedByKeepAlived returns true if the input interface address obtained
+// through netlink has a label that ends with ":vip", which is how keepalived
+// marks the IP addresses it adds (https://github.com/openshift/machine-config-operator/pull/3683)
+func IsAddressAddedByKeepAlived(addr netlink.Addr) bool {
+	return strings.HasSuffix(addr.Label, ":vip")
 }
 
 // GetIPv6OnSubnet when given an IPv6 address with a 128 prefix for an interface,
@@ -600,21 +637,11 @@ func GetAllDPUHostPFMACAddress() ([]string, error) {
 	return pfMACs, nil
 }
 
-func RenameLink(curName, newName string) error {
-	link, err := netLinkOps.LinkByName(curName)
-	if err != nil {
-		return err
-	}
-
-	if err := netLinkOps.LinkSetDown(link); err != nil {
-		return err
-	}
-	if err := netLinkOps.LinkSetName(link, newName); err != nil {
-		return err
-	}
-	if err := netLinkOps.LinkSetUp(link); err != nil {
-		return err
-	}
-
-	return nil
+func filterRouteByDstAndGw(link netlink.Link, subnet *net.IPNet, gw net.IP) (*netlink.Route, uint64) {
+	return &netlink.Route{
+			Dst:       subnet,
+			LinkIndex: link.Attrs().Index,
+			Gw:        gw,
+		},
+		netlink.RT_FILTER_DST | netlink.RT_FILTER_OIF | netlink.RT_FILTER_GW
 }

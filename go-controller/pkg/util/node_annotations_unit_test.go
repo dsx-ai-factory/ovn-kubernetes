@@ -141,6 +141,16 @@ func TestL3GatewayConfig_UnmarshalJSON(t *testing.T) {
 			errMatch:   fmt.Errorf("bad 'ip-address' value"),
 		},
 		{
+			desc:       "test valid 'IP address' value",
+			inputParam: []byte(`{"mode":"local","mac-address":"11:22:33:44:55:66","ip-address":"192.168.1.5/24"}`),
+			expOut: L3GatewayConfig{
+				Mode:        "local",
+				MACAddress:  ovntest.MustParseMAC("11:22:33:44:55:66"),
+				IPAddresses: ovntest.MustParseIPNets("192.168.1.5/24"),
+				NextHops:    []net.IP{},
+			},
+		},
+		{
 			desc:       "test bad 'IP addresses' value",
 			inputParam: []byte(`{"mode":"local","mac-address":"11:22:33:44:55:66","ip-addresses":["192.168.1/24","fd01::1234/64"]}`),
 			errMatch:   fmt.Errorf("bad 'ip-addresses' value"),
@@ -149,29 +159,33 @@ func TestL3GatewayConfig_UnmarshalJSON(t *testing.T) {
 			desc:       "test valid 'IP addresses' value",
 			inputParam: []byte(`{"mode":"local","mac-address":"11:22:33:44:55:66","ip-addresses":["192.168.1.5/24","fd01::1234/64"]}`),
 			expOut: L3GatewayConfig{
-				Mode:           "local",
-				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
-				NodePortEnable: false,
-				IPAddresses:    ovntest.MustParseIPNets("192.168.1.5/24", "fd01::1234/64"),
-				NextHops:       []net.IP{nil},
+				Mode:        "local",
+				MACAddress:  ovntest.MustParseMAC("11:22:33:44:55:66"),
+				IPAddresses: ovntest.MustParseIPNets("192.168.1.5/24", "fd01::1234/64"),
+				NextHops:    []net.IP{},
 			},
-		},
-		{
-			desc:       "test bad 'next-hop' value",
-			inputParam: []byte(`{"mode":"local","mac-address":"11:22:33:44:55:66","ip-address":"192.168.1.5/24","next-hop":"192.168.11"}`),
-			errMatch:   fmt.Errorf("bad 'next-hop' value"),
 		},
 		{
 			desc:       "test bad 'next-hops' value",
 			inputParam: []byte(`{"mode":"local","mac-address":"11:22:33:44:55:66","ip-address":"192.168.1.5/24", "next-hops":["192.168.1.","fd01::1"]}`),
 			errMatch:   fmt.Errorf("bad 'next-hops' value"),
 		},
+		{
+			desc:       "test valid 'next-hops' value",
+			inputParam: []byte(`{"mode":"local","mac-address":"11:22:33:44:55:66","ip-address":"192.168.1.5/24", "next-hops":["192.168.1.1","fd01::1"]}`),
+			expOut: L3GatewayConfig{
+				Mode:        "local",
+				MACAddress:  ovntest.MustParseMAC("11:22:33:44:55:66"),
+				IPAddresses: ovntest.MustParseIPNets("192.168.1.5/24"),
+				NextHops: []net.IP{
+					ovntest.MustParseIP("192.168.1.1"),
+					ovntest.MustParseIP("fd01::1"),
+				},
+			},
+		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			if tc.desc != "success: test host gateway bridge parsing" {
-				return
-			}
 			l3GwCfg := L3GatewayConfig{}
 			e := l3GwCfg.UnmarshalJSON(tc.inputParam)
 			if tc.errAssert {
@@ -270,7 +284,7 @@ func TestParseNodeL3GatewayAnnotation(t *testing.T) {
 			desc:      "error: annotation not found for node",
 			inpNode:   &v1.Node{},
 			errAssert: true,
-			errMatch:  fmt.Errorf("%s annotation not found for node", ovnNodeL3GatewayConfig),
+			errMatch:  fmt.Errorf("%s annotation not found for node", OvnNodeL3GatewayConfig),
 		},
 		{
 			desc: "error: fail to unmarshal l3 gateway config annotations",
@@ -290,7 +304,7 @@ func TestParseNodeL3GatewayAnnotation(t *testing.T) {
 				},
 			},
 			errAssert: true,
-			errMatch:  fmt.Errorf("%s annotation not found", ovnNodeL3GatewayConfig),
+			errMatch:  fmt.Errorf("%s annotation not found", OvnNodeL3GatewayConfig),
 		},
 		{
 			desc: "error: nod chassis ID annotation not found",
@@ -300,7 +314,7 @@ func TestParseNodeL3GatewayAnnotation(t *testing.T) {
 				},
 			},
 			errAssert: true,
-			errMatch:  fmt.Errorf("%s annotation not found", ovnNodeChassisID),
+			errMatch:  fmt.Errorf("%s annotation not found", OvnNodeChassisID),
 		},
 		{
 			desc: "success: parse completed",
@@ -452,12 +466,12 @@ func TestParseNodeGatewayRouterLRPAddr(t *testing.T) {
 		expOutput   bool
 	}{
 		{
-			desc:      "Gateway router LRP IP address annotation not found for node, however, does not return error",
+			desc:      "Gateway router LPR IP address annotation not found for node, however, does not return error",
 			inpNode:   v1.Node{},
 			expOutput: false,
 		},
 		{
-			desc: "success: Gateway router parse LRP IP address",
+			desc: "success: Gateway router parse LPR IP address",
 			inpNode: v1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{"k8s.ovn.org/node-gateway-router-lrp-ifaddr": `{"ipv4":"100.64.0.5/16"}`},
@@ -466,7 +480,7 @@ func TestParseNodeGatewayRouterLRPAddr(t *testing.T) {
 			expOutput: true,
 		},
 		{
-			desc: "success: Gateway router parse LRP IP address dual stack",
+			desc: "success: Gateway router parse LPR IP address dual stack",
 			inpNode: v1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{"k8s.ovn.org/node-gateway-router-lrp-ifaddr": `{"ipv4":"100.64.0.5/16", "ipv6":"fd:98::/64"}`},
@@ -475,7 +489,7 @@ func TestParseNodeGatewayRouterLRPAddr(t *testing.T) {
 			expOutput: true,
 		},
 		{
-			desc: "error: Gateway router parse LRP IP address error",
+			desc: "error: Gateway router parse LPR IP address error",
 			inpNode: v1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{"k8s.ovn.org/node-gateway-router-lrp-ifaddr": `{"ipv4":"100.64.0.5"}`},
@@ -500,56 +514,105 @@ func TestParseNodeGatewayRouterLRPAddr(t *testing.T) {
 	}
 }
 
-func TestUpdateNodeGatewayRouterLRPAddrAnnotation(t *testing.T) {
+func TestSetGatewayMTUSupport(t *testing.T) {
+	mockAnnotator := new(annotatorMock.Annotator)
+
 	tests := []struct {
-		desc        string
-		inpNode     v1.Node
-		v4Addr      *net.IPNet
-		v6Addr      *net.IPNet
-		errExpected bool
+		desc                   string
+		inpNodeAnnotator       kube.Annotator
+		inputSet               bool
+		errExpected            bool
+		onRetArgsAnnotatorList []ovntest.TestifyMockHelper
 	}{
 		{
-			desc: "success: Gateway router LRP IP address annotation not found for node, new annotation is set",
-			inpNode: v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{},
-				},
+			desc:             "success: set true should delete annotation on node",
+			inpNodeAnnotator: mockAnnotator,
+			inputSet:         true,
+			onRetArgsAnnotatorList: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Delete", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{nil}},
 			},
-			v4Addr:      ovntest.MustParseIPNet("100.64.0.5/16"),
-			errExpected: false,
 		},
 		{
-			desc: "success: Gateway router LRP IP address annotation for same IP(s) already exists",
-			inpNode: v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{"k8s.ovn.org/node-gateway-router-lrp-ifaddr": `{"ipv4":"100.64.0.5/16"}`},
-				},
+			desc:             "success: set false should create annotation with value 'false'",
+			inpNodeAnnotator: mockAnnotator,
+			inputSet:         false,
+			onRetArgsAnnotatorList: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Set", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{nil}},
 			},
-			v4Addr:      ovntest.MustParseIPNet("100.64.0.5/16"),
-			errExpected: true,
-		},
-		{
-			desc: "success: Gateway router LRP IP address annotation exists with different IP(s)",
-			inpNode: v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{"k8s.ovn.org/node-gateway-router-lrp-ifaddr": `{"ipv4":"100.64.2.5/16"}`},
-				},
-			},
-			v4Addr:      ovntest.MustParseIPNet("100.64.0.5/16"),
-			errExpected: false,
 		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			e := UpdateNodeGatewayRouterLRPAddrAnnotation(tc.inpNode.Annotations, tc.v4Addr, tc.v6Addr)
+			for _, item := range tc.onRetArgsAnnotatorList {
+				call := mockAnnotator.On(item.OnCallMethodName)
+				for range item.OnCallMethodArgType {
+					call.Arguments = append(call.Arguments, mock.Anything)
+				}
+
+				for _, e := range item.RetArgList {
+					call.ReturnArguments = append(call.ReturnArguments, e)
+				}
+				call.Once()
+			}
+			e := SetGatewayMTUSupport(tc.inpNodeAnnotator, tc.inputSet)
 			if tc.errExpected {
 				t.Log(e)
 				assert.Error(t, e)
 			}
-			// In all test cases, we expect the node annotations to be set/updated to requested IP(s)
-			ip, _ := ParseNodeGatewayRouterLRPAddr(&tc.inpNode)
-			assert.NotNil(t, ip)
-			assert.Equal(t, tc.v4Addr.IP, ip)
+			mockAnnotator.AssertExpectations(t)
+		})
+	}
+}
+
+func TestParseNodeGatewayMTUSupport(t *testing.T) {
+	tests := []struct {
+		desc    string
+		inpNode *v1.Node
+		res     bool
+	}{
+		{
+			desc:    "annotation not found for node and true",
+			inpNode: &v1.Node{},
+			res:     true,
+		},
+		{
+			desc: "parse completed and true",
+			inpNode: &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.ovn.org/gateway-mtu-support": "true",
+					},
+				},
+			},
+			res: true,
+		},
+		{
+			desc: "parse completed and false",
+			inpNode: &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.ovn.org/gateway-mtu-support": "false",
+					},
+				},
+			},
+			res: false,
+		},
+		{
+			desc: "parse invalid value completed and true",
+			inpNode: &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.ovn.org/gateway-mtu-support": "tru",
+					},
+				},
+			},
+			res: true,
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			res := ParseNodeGatewayMTUSupport(tc.inpNode)
+			assert.Equal(t, tc.res, res)
 		})
 	}
 }

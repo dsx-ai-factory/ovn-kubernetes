@@ -7,28 +7,36 @@ import (
 
 var _ = Describe("DPU Annotations test", func() {
 	Describe("DPUConnectionDetails", func() {
-		var cd DPUConnectionDetails
+		var defaultCD, secondCD DPUConnectionDetails
 		var annot map[string]string
-		//t := GinkgoT()
+		var legacyAnnot string
+		var err error
 
 		BeforeEach(func() {
-			cd = DPUConnectionDetails{}
+			defaultCD = DPUConnectionDetails{PfId: "1", VfId: "4", SandboxId: "35b82dbe2c3976"}
+			secondCD = DPUConnectionDetails{PfId: "0", VfId: "3", SandboxId: "35b82dbe2c3973"}
+			legacyAnnot = `{"pfId": "1", "vfId": "4", "sandboxId": "35b82dbe2c3976"}`
 			annot = make(map[string]string)
 		})
 
 		Context("Default network", func() {
+			It("Get correct Pod annotation for the legacy default network pod annotation", func() {
+				annot[DPUConnectionDetailsAnnot] = legacyAnnot
+				pcd, err := UnmarshalPodDPUConnDetails(annot, "default")
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				gomega.Expect(pcd.PfId).To(gomega.Equal(defaultCD.PfId))
+				gomega.Expect(pcd.VfId).To(gomega.Equal(defaultCD.VfId))
+				gomega.Expect(pcd.SandboxId).To(gomega.Equal(defaultCD.SandboxId))
+			})
+
 			It("Get correct Pod annotation for default network", func() {
-				cd.PfId = "1"
-				cd.VfId = "4"
-				cd.SandboxId = "35b82dbe2c3976"
-				err := MarshalPodDPUConnDetails(&annot, &cd, "default")
+				annot, err = MarshalPodDPUConnDetails(annot, &defaultCD, "default")
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				pcd, err := UnmarshalPodDPUConnDetails(annot, "default")
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				gomega.Expect(pcd.PfId).To(gomega.Equal("1"))
-				gomega.Expect(pcd.VfId).To(gomega.Equal("4"))
-				gomega.Expect(pcd.SandboxId).To(gomega.Equal(
-					"35b82dbe2c3976"))
+				gomega.Expect(pcd.PfId).To(gomega.Equal(defaultCD.PfId))
+				gomega.Expect(pcd.VfId).To(gomega.Equal(defaultCD.VfId))
+				gomega.Expect(pcd.SandboxId).To(gomega.Equal(defaultCD.SandboxId))
 			})
 
 			It("Fails to populate on missing annotations", func() {
@@ -37,55 +45,71 @@ var _ = Describe("DPU Annotations test", func() {
 			})
 		})
 
-		Context("Non-default network", func() {
-			BeforeEach(func() {
-				cd.PfId = "1"
-				cd.VfId = "4"
-				cd.SandboxId = "35b82dbe2c3976"
-				err := MarshalPodDPUConnDetails(&annot, &cd, "default")
+		Context("Second network", func() {
+			It("Get correct Pod annotation for Second network with legacy default network annoation", func() {
+				annot[DPUConnectionDetailsAnnot] = legacyAnnot
+				annot, err = MarshalPodDPUConnDetails(annot, &secondCD, "second")
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				pcd, err := UnmarshalPodDPUConnDetails(annot, "default")
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				gomega.Expect(pcd.PfId).To(gomega.Equal(defaultCD.PfId))
+				gomega.Expect(pcd.VfId).To(gomega.Equal(defaultCD.VfId))
+				gomega.Expect(pcd.SandboxId).To(gomega.Equal(defaultCD.SandboxId))
+				pcd, err = UnmarshalPodDPUConnDetails(annot, "second")
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				gomega.Expect(pcd.PfId).To(gomega.Equal(secondCD.PfId))
+				gomega.Expect(pcd.VfId).To(gomega.Equal(secondCD.VfId))
+				gomega.Expect(pcd.SandboxId).To(gomega.Equal(secondCD.SandboxId))
 			})
 
-			It("Get correct Pod annotation for non-default network", func() {
-				cd.PfId = "0"
-				cd.VfId = "3"
-				cd.SandboxId = "35b82dbe2c3973"
-				err := MarshalPodDPUConnDetails(&annot, &cd, "non-default")
+			It("Get correct Pod annotation for second network", func() {
+				annot, err = MarshalPodDPUConnDetails(annot, &defaultCD, "default")
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				pcd, err := UnmarshalPodDPUConnDetails(annot, "non-default")
+				annot, err = MarshalPodDPUConnDetails(annot, &secondCD, "second")
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				gomega.Expect(pcd.PfId).To(gomega.Equal("0"))
-				gomega.Expect(pcd.VfId).To(gomega.Equal("3"))
-				gomega.Expect(pcd.SandboxId).To(gomega.Equal(
-					"35b82dbe2c3973"))
+				pcd, err := UnmarshalPodDPUConnDetails(annot, "second")
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				gomega.Expect(pcd.PfId).To(gomega.Equal(secondCD.PfId))
+				gomega.Expect(pcd.VfId).To(gomega.Equal(secondCD.VfId))
+				gomega.Expect(pcd.SandboxId).To(gomega.Equal(secondCD.SandboxId))
 			})
 
 			It("Fails to populate on missing annotations", func() {
-				_, err := UnmarshalPodDPUConnDetails(annot, "non-default")
+				annot, err = MarshalPodDPUConnDetails(annot, &defaultCD, "default")
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				_, err = UnmarshalPodDPUConnDetails(annot, "second")
 				gomega.Expect(err).To(gomega.HaveOccurred())
 			})
 		})
 	})
 
 	Describe("DPUConnectionStatus", func() {
-		var cs DPUConnectionStatus
+		var defaultCS, secondCS DPUConnectionStatus
 		var annot map[string]string
-		//t := GinkgoT()
+		var legacyAnnot string
+		var err error
 
 		BeforeEach(func() {
-			cs = DPUConnectionStatus{}
+			defaultCS = DPUConnectionStatus{Status: "Ready"}
+			secondCS = DPUConnectionStatus{Status: "NotReady"}
+			legacyAnnot = `{"Status": "Ready"}`
 			annot = make(map[string]string)
 		})
 
 		Context("Default network", func() {
+			It("Get correct Pod annotation for the legacy default network pod annotation", func() {
+				annot[DPUConnectionStatusAnnot] = legacyAnnot
+				pcs, err := UnmarshalPodDPUConnStatus(annot, "default")
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				gomega.Expect(pcs.Status).To(gomega.Equal(defaultCS.Status))
+			})
+
 			It("Get correct Pod annotation for default network", func() {
-				cs.Status = "Ready"
-				err := MarshalPodDPUConnStatus(&annot, &cs, "default")
+				annot, err = MarshalPodDPUConnStatus(annot, &defaultCS, "default")
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				pcs, err := UnmarshalPodDPUConnStatus(annot, "default")
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				gomega.Expect(pcs.Status).To(gomega.Equal("Ready"))
-				gomega.Expect(pcs.Reason).To(gomega.Equal(""))
+				gomega.Expect(pcs.Status).To(gomega.Equal(defaultCS.Status))
 			})
 
 			It("Fails to populate on missing annotations", func() {
@@ -94,25 +118,33 @@ var _ = Describe("DPU Annotations test", func() {
 			})
 		})
 
-		Context("Non-default network", func() {
-			BeforeEach(func() {
-				cs.Status = "Ready"
-				err := MarshalPodDPUConnStatus(&annot, &cs, "default")
+		Context("Second network", func() {
+			It("Get correct Pod annotation for Second network with legacy default network annoation", func() {
+				annot[DPUConnectionStatusAnnot] = legacyAnnot
+				annot, err = MarshalPodDPUConnStatus(annot, &secondCS, "second")
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				pcd, err := UnmarshalPodDPUConnStatus(annot, "default")
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				gomega.Expect(pcd.Status).To(gomega.Equal(defaultCS.Status))
+				pcd, err = UnmarshalPodDPUConnStatus(annot, "second")
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				gomega.Expect(pcd.Status).To(gomega.Equal(secondCS.Status))
 			})
 
-			It("Get correct Pod annotation for non-default network", func() {
-				cs.Status = "Ready"
-				err := MarshalPodDPUConnStatus(&annot, &cs, "non-default")
+			It("Get correct Pod annotation for second network", func() {
+				annot, err = MarshalPodDPUConnStatus(annot, &defaultCS, "default")
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				pcs, err := UnmarshalPodDPUConnStatus(annot, "non-default")
+				annot, err = MarshalPodDPUConnStatus(annot, &secondCS, "second")
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				gomega.Expect(pcs.Status).To(gomega.Equal("Ready"))
-				gomega.Expect(pcs.Reason).To(gomega.Equal(""))
+				pcd, err := UnmarshalPodDPUConnStatus(annot, "second")
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				gomega.Expect(pcd.Status).To(gomega.Equal(secondCS.Status))
 			})
 
 			It("Fails to populate on missing annotations", func() {
-				_, err := UnmarshalPodDPUConnStatus(annot, "non-default")
+				annot, err = MarshalPodDPUConnStatus(annot, &defaultCS, "default")
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				_, err = UnmarshalPodDPUConnStatus(annot, "second")
 				gomega.Expect(err).To(gomega.HaveOccurred())
 			})
 		})

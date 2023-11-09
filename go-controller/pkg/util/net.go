@@ -5,90 +5,16 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"math/big"
 	"net"
 	"strconv"
 	"strings"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	iputils "github.com/containernetworking/plugins/pkg/ip"
 
-	"github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	utilnet "k8s.io/utils/net"
 )
 
-var NoIPError = errors.New("no IP available")
-
-// NextIP returns IP incremented by 1
-func NextIP(ip net.IP) net.IP {
-	i := ipToInt(ip)
-	return intToIP(i.Add(i, big.NewInt(1)))
-}
-
-func ipToInt(ip net.IP) *big.Int {
-	if v := ip.To4(); v != nil {
-		return big.NewInt(0).SetBytes(v)
-	}
-	return big.NewInt(0).SetBytes(ip.To16())
-}
-
-func intToIP(i *big.Int) net.IP {
-	return net.IP(i.Bytes())
-}
-
-// ExtractPortAddresses returns the MAC and IPs of the given logical switch port
-func ExtractPortAddresses(lsp *nbdb.LogicalSwitchPort) (net.HardwareAddr, []net.IP, error) {
-	var addresses []string
-
-	if lsp.DynamicAddresses == nil {
-		if len(lsp.Addresses) > 0 {
-			addresses = strings.Split(lsp.Addresses[0], " ")
-		}
-	} else {
-		// dynamic addresses have format "0a:00:00:00:00:01 192.168.1.3"
-		// static addresses have format ["0a:00:00:00:00:01", "192.168.1.3"]
-		addresses = strings.Split(*lsp.DynamicAddresses, " ")
-	}
-
-	if len(addresses) == 0 || addresses[0] == "dynamic" {
-		return nil, nil, nil
-	}
-
-	mac, err := net.ParseMAC(addresses[0])
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to parse logical switch port %q MAC %q: %v", lsp.Name, addresses[0], err)
-	}
-	var ips []net.IP
-	for _, addr := range addresses[1:] {
-		ip := net.ParseIP(addr)
-		if ip == nil {
-			return nil, nil, fmt.Errorf("failed to parse logical switch port %q IP %q is not a valid ip address", lsp.Name, addr)
-		}
-		ips = append(ips, ip)
-	}
-	return mac, ips, nil
-}
-
-// GetLRPAddrs returns the addresses for the given logical router port
-func GetLRPAddrs(nbClient client.Client, portName string) ([]*net.IPNet, error) {
-	lrp := &nbdb.LogicalRouterPort{Name: portName}
-	lrp, err := libovsdbops.GetLogicalRouterPort(nbClient, lrp)
-	if err != nil {
-		return nil, fmt.Errorf("unable to find router port %s: %w", portName, err)
-	}
-	gwLRPIPs := []*net.IPNet{}
-	for _, network := range lrp.Networks {
-		ip, network, err := net.ParseCIDR(network)
-		if err != nil {
-			return nil, fmt.Errorf("unable to parse network CIDR: %s for router port: %s, err: %v ", network, portName, err)
-		}
-		gwLRPIPs = append(gwLRPIPs, &net.IPNet{
-			IP:   ip,
-			Mask: network.Mask,
-		})
-	}
-	return gwLRPIPs, nil
-}
+var ErrorNoIP = errors.New("no IP available")
 
 // GetOVSPortMACAddress returns the MAC address of a given OVS port
 func GetOVSPortMACAddress(portName string) (net.HardwareAddr, error) {
@@ -105,23 +31,47 @@ func GetOVSPortMACAddress(portName string) (net.HardwareAddr, error) {
 }
 
 // GetNodeGatewayIfAddr returns the node logical switch gateway address
-// (the ".1" address)
+// (the ".1" address), return nil if the subnet is invalid
 func GetNodeGatewayIfAddr(subnet *net.IPNet) *net.IPNet {
-	return &net.IPNet{IP: NextIP(subnet.IP), Mask: subnet.Mask}
+	if subnet == nil {
+		return nil
+	}
+	ip := iputils.NextIP(subnet.IP)
+	if ip == nil {
+		return nil
+	}
+	return &net.IPNet{IP: ip, Mask: subnet.Mask}
 }
 
 // GetNodeManagementIfAddr returns the node logical switch management port address
-// (the ".2" address)
+// (the ".2" address), return nil if the subnet is invalid
 func GetNodeManagementIfAddr(subnet *net.IPNet) *net.IPNet {
 	gwIfAddr := GetNodeGatewayIfAddr(subnet)
-	return &net.IPNet{IP: NextIP(gwIfAddr.IP), Mask: subnet.Mask}
+	if gwIfAddr == nil {
+		return nil
+	}
+	return &net.IPNet{IP: iputils.NextIP(gwIfAddr.IP), Mask: subnet.Mask}
 }
 
 // GetNodeHybridOverlayIfAddr returns the node logical switch hybrid overlay
-// port address (the ".3" address)
+// port address (the ".3" address), return nil if the subnet is invalid
 func GetNodeHybridOverlayIfAddr(subnet *net.IPNet) *net.IPNet {
 	mgmtIfAddr := GetNodeManagementIfAddr(subnet)
-	return &net.IPNet{IP: NextIP(mgmtIfAddr.IP), Mask: subnet.Mask}
+	if mgmtIfAddr == nil {
+		return nil
+	}
+	return &net.IPNet{IP: iputils.NextIP(mgmtIfAddr.IP), Mask: subnet.Mask}
+}
+
+// IsNodeHybridOverlayIfAddr returns whether the provided IP is a node hybrid
+// overlay address on any of the provided subnets
+func IsNodeHybridOverlayIfAddr(ip net.IP, subnets []*net.IPNet) bool {
+	for _, subnet := range subnets {
+		if ip.Equal(GetNodeHybridOverlayIfAddr(subnet).IP) {
+			return true
+		}
+	}
+	return false
 }
 
 // JoinHostPortInt32 is like net.JoinHostPort(), but with an int32 for the port
@@ -241,15 +191,38 @@ func MatchIPFamily(isIPv6 bool, ips []net.IP) ([]net.IP, error) {
 	return nil, fmt.Errorf("no %s IP available", IPFamilyName(isIPv6))
 }
 
-// MatchIPNetFamily loops through the array of *net.IPNet and returns the
+// MatchFirstIPFamily loops through the array of net.IP and returns the first
+// entry in the list in the same IP Family, based on input flag isIPv6.
+func MatchFirstIPFamily(isIPv6 bool, ips []net.IP) (net.IP, error) {
+	for _, ip := range ips {
+		if utilnet.IsIPv6(ip) == isIPv6 {
+			return ip, nil
+		}
+	}
+	return nil, fmt.Errorf("no %s IP available", IPFamilyName(isIPv6))
+}
+
+// MatchFirstIPNetFamily loops through the array of ipnets and returns the
 // first entry in the list in the same IP Family, based on input flag isIPv6.
-func MatchIPNetFamily(isIPv6 bool, ipnets []*net.IPNet) (*net.IPNet, error) {
+func MatchFirstIPNetFamily(isIPv6 bool, ipnets []*net.IPNet) (*net.IPNet, error) {
 	for _, ipnet := range ipnets {
 		if utilnet.IsIPv6CIDR(ipnet) == isIPv6 {
 			return ipnet, nil
 		}
 	}
 	return nil, fmt.Errorf("no %s value available", IPFamilyName(isIPv6))
+}
+
+// MatchAllIPNetFamily loops through the array of *net.IPNet and returns a
+// slice of ipnets with the same IP Family, based on input flag isIPv6.
+func MatchAllIPNetFamily(isIPv6 bool, ipnets []*net.IPNet) []*net.IPNet {
+	var ret []*net.IPNet
+	for _, ipnet := range ipnets {
+		if utilnet.IsIPv6CIDR(ipnet) == isIPv6 {
+			ret = append(ret, ipnet)
+		}
+	}
+	return ret
 }
 
 // MatchIPStringFamily loops through the array of string and returns the
@@ -263,7 +236,7 @@ func MatchIPStringFamily(isIPv6 bool, ipStrings []string) (string, error) {
 	return "", fmt.Errorf("no %s string available", IPFamilyName(isIPv6))
 }
 
-// MatchAllIPStringFamily loops through the array of string and returns a
+// MatchAllIPStringFamily loops through the array of string and returns a slice
 // of addresses in the same IP Family, based on input flag isIPv6.
 func MatchAllIPStringFamily(isIPv6 bool, ipStrings []string) ([]string, error) {
 	var ipAddrs []string
@@ -275,7 +248,38 @@ func MatchAllIPStringFamily(isIPv6 bool, ipStrings []string) ([]string, error) {
 	if len(ipAddrs) > 0 {
 		return ipAddrs, nil
 	}
-	return nil, NoIPError
+	return nil, ErrorNoIP
+}
+
+// IsContainedInAnyCIDR returns true if ipnet is contained in any of ipnets
+func IsContainedInAnyCIDR(ipnet *net.IPNet, ipnets ...*net.IPNet) bool {
+	for _, container := range ipnets {
+		if ContainsCIDR(container, ipnet) {
+			return true
+		}
+	}
+	return false
+}
+
+// ContainsCIDR returns true if ipnet1 contains ipnet2
+func ContainsCIDR(ipnet1, ipnet2 *net.IPNet) bool {
+	mask1, _ := ipnet1.Mask.Size()
+	mask2, _ := ipnet2.Mask.Size()
+	return mask1 <= mask2 && ipnet1.Contains(ipnet2.IP)
+}
+
+// ParseIPNets parses the provided string formatted CIDRs
+func ParseIPNets(strs []string) ([]*net.IPNet, error) {
+	ipnets := make([]*net.IPNet, len(strs))
+	for i := range strs {
+		ip, ipnet, err := utilnet.ParseCIDRSloppy(strs[i])
+		if err != nil {
+			return nil, err
+		}
+		ipnet.IP = ip
+		ipnets[i] = ipnet
+	}
+	return ipnets, nil
 }
 
 // GenerateRandMAC generates a random unicast and locally administered MAC address.
@@ -290,4 +294,35 @@ func GenerateRandMAC() (net.HardwareAddr, error) {
 	buf[0] = (buf[0] | 0x02) & 0xfe
 
 	return buf, nil
+}
+
+// CopyIPNets copies the provided slice of IPNet
+func CopyIPNets(ipnets []*net.IPNet) []*net.IPNet {
+	copy := make([]*net.IPNet, len(ipnets))
+	for i := range ipnets {
+		ipnet := *ipnets[i]
+		copy[i] = &ipnet
+	}
+	return copy
+}
+
+// IPsToNetworkIPs returns the network CIDRs of the provided IP CIDRs
+func IPsToNetworkIPs(ips ...*net.IPNet) []*net.IPNet {
+	nets := make([]*net.IPNet, len(ips))
+	for i := range ips {
+		nets[i] = &net.IPNet{
+			IP:   ips[i].IP.Mask(ips[i].Mask),
+			Mask: ips[i].Mask,
+		}
+	}
+	return nets
+}
+
+// StringsToIPs takes a slice of strings and returns a slice of net.IPs
+func StringsToIPs(ips []string) []net.IP {
+	s := make([]net.IP, len(ips))
+	for i := range ips {
+		s[i] = net.ParseIP(ips[i])
+	}
+	return s
 }

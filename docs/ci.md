@@ -56,6 +56,12 @@ All local tests are run by `make control-plane`. The local tests are controlled 
 and the actual tests are defined in the directory
 [ovn-kubernetes/test/e2e/](https://github.com/ovn-org/ovn-kubernetes/tree/master/test/e2e).
 
+#### Node IP migration tests
+
+The node IP migration tests are part of the control-plane tests but due to their impact they cannot be run concurrently
+with other tests and they are disabled when running `make control-plane`.
+Instead, they must explicitly be requested with `make -C test control-plane WHAT="Node IP address migration"`.
+
 ### Github CI integration through Github Actions Matrix
 
 Each of these shards and control-plane tests can then be run in a [Github Actions matrix](https://docs.github.com/en/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix) of:
@@ -103,7 +109,7 @@ Determine which version of Kubernetes is currently used in CI (See
 and set the environmental variable `K8S_VERSION` to the same value. Also make sure to export a GOPATH which points to your go directory with `export GOPATH=(...)`.
 
 ```
-K8S_VERSION=v1.24.0
+K8S_VERSION=v1.26.0
 git clone --single-branch --branch $K8S_VERSION https://github.com/kubernetes/kubernetes.git $GOPATH/src/k8s.io/kubernetes/
 pushd $GOPATH/src/k8s.io/kubernetes/
 make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
@@ -212,6 +218,8 @@ $ make shard-network
 $ make shard-conformance
 # or
 $ GITHUB_WORKSPACE="$REPO" make control-plane
+# or
+$ make conformance
 $ popd
 ```
 
@@ -348,3 +356,12 @@ skipped. To run those tests locally, comment out the following line from
 # Github CI doesn´t offer IPv6 connectivity, so always skip IPv6 only tests.
 SKIPPED_TESTS=$SKIPPED_TESTS$IPV6_ONLY_TESTS
 ```
+
+# Conformance Tests
+
+We have a conformance test suit that can be invoked using the `make conformance` command.
+Currently we run the `TestNetworkPolicyV2Conformance` tests there. The actual tests are
+defined in https://github.com/kubernetes-sigs/network-policy-api/tree/master/conformance
+and then invoked from this repo. Any changes to the tests first have to be submitted
+upstream to `network-policy-api` repo and then brought downstream into the ovn-kubernetes repo
+through version bump.

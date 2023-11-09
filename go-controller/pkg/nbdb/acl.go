@@ -5,6 +5,8 @@ package nbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const ACLTable = "ACL"
+
 type (
 	ACLAction    = string
 	ACLDirection = string
@@ -44,6 +46,22 @@ type ACL struct {
 	Tier        int               `ovsdb:"tier"`
 }
 
+func (a *ACL) GetUUID() string {
+	return a.UUID
+}
+
+func (a *ACL) GetAction() ACLAction {
+	return a.Action
+}
+
+func (a *ACL) GetDirection() ACLDirection {
+	return a.Direction
+}
+
+func (a *ACL) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
+}
+
 func copyACLExternalIDs(a map[string]string) map[string]string {
 	if a == nil {
 		return nil
@@ -70,6 +88,22 @@ func equalACLExternalIDs(a, b map[string]string) bool {
 	return true
 }
 
+func (a *ACL) GetLabel() int {
+	return a.Label
+}
+
+func (a *ACL) GetLog() bool {
+	return a.Log
+}
+
+func (a *ACL) GetMatch() string {
+	return a.Match
+}
+
+func (a *ACL) GetMeter() *string {
+	return a.Meter
+}
+
 func copyACLMeter(a *string) *string {
 	if a == nil {
 		return nil
@@ -88,6 +122,10 @@ func equalACLMeter(a, b *string) bool {
 	return *a == *b
 }
 
+func (a *ACL) GetName() *string {
+	return a.Name
+}
+
 func copyACLName(a *string) *string {
 	if a == nil {
 		return nil
@@ -104,6 +142,10 @@ func equalACLName(a, b *string) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *ACL) GetOptions() map[string]string {
+	return a.Options
 }
 
 func copyACLOptions(a map[string]string) map[string]string {
@@ -130,6 +172,14 @@ func equalACLOptions(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *ACL) GetPriority() int {
+	return a.Priority
+}
+
+func (a *ACL) GetSeverity() *ACLSeverity {
+	return a.Severity
 }
 
 func copyACLSeverity(a *ACLSeverity) *ACLSeverity {

@@ -7,21 +7,21 @@ import (
 	"strings"
 	"time"
 
-	"github.com/urfave/cli/v2"
-
+	cnitypes "github.com/containernetworking/cni/pkg/types"
+	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/urfave/cli/v2"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
-
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 )
 
 var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
@@ -29,6 +29,8 @@ var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
 		app       *cli.App
 		fakeOvn   *FakeOVN
 		initialDB libovsdbtest.TestSetup
+		nad       *nettypes.NetworkAttachmentDefinition
+		err       error
 	)
 
 	ginkgo.BeforeEach(func() {
@@ -39,18 +41,31 @@ var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
 		app.Name = "test"
 		app.Flags = config.Flags
 
-		fakeOvn = NewFakeOVN()
+		fakeOvn = NewFakeOVN(false)
 		initialDB = libovsdbtest.TestSetup{
 			NBData: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
 					Name: "node1",
 				},
 				&nbdb.LogicalSwitch{
-					Name: ovntypes.OvnLayer2Switch,
+					Name: "skip.ipam.nad_ovn_layer2_switch",
 				},
 			},
 		}
-
+		nad, err = newNetworkAttachmentDefinition(
+			"default",
+			"skip-ipam-nad",
+			ovncnitypes.NetConf{
+				NetConf: cnitypes.NetConf{
+					Name: "skip-ipam-nad",
+					Type: "ovn-k8s-cni-overlay",
+				},
+				Topology: ovntypes.Layer2Topology,
+				NADName:  util.GetNADName("default", "skip-ipam-nad"),
+				Subnets:  "10.193.0.0/16",
+			},
+		)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
 	ginkgo.AfterEach(func() {
@@ -61,7 +76,7 @@ var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
 		ginkgo.It("reconciles a pod with skip ipam annotation and floating ip", func() {
 			app.Action = func(ctx *cli.Context) error {
 				floatingIP := "10.193.13.5"
-				nodeSecondarySubnet := "10.193.0.0/26"
+				//nodeSecondarySubnet := "10.193.0.0/26"
 				namespaceT := *newNamespace("namespace1")
 				t := newTPod(
 					"node1",
@@ -85,28 +100,28 @@ var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
 							namespaceT,
 						},
 					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode(t.nodeName, "192.168.126.202/24"),
+						},
+					},
 					&v1.PodList{
 						Items: []v1.Pod{},
 					},
+					&nettypes.NetworkAttachmentDefinitionList{
+						Items: []nettypes.NetworkAttachmentDefinition{*nad},
+					},
 				)
-				fakeOvn.controller.lsManager.AddNode(t.nodeName, t.nodeName+"-UUID", []*net.IPNet{ovntest.MustParseIPNet(t.nodeSubnet)})
-				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
-				skipIPAMController, err := fakeOvn.mhController.NewOvnController(
-					&util.NetAttachDefInfo{
-						NetNameInfo: util.NetNameInfo{
-							NetName:     "default/skip-ipam-nad",
-							IsSecondary: true,
-						},
-						NetCidr:  "10.193.0.0/16",
-						MTU:      1400,
-						TopoType: ovntypes.Layer2AttachDefTopoType,
-					}, fakeOvn.asf)
+				ocInfo := fakeOvn.secondaryControllers["skip-ipam-nad"]
+				subnet := ocInfo.bnc.Subnets()[0]
+				err = ocInfo.bnc.lsManager.AddOrUpdateSwitch(ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch), []*net.IPNet{subnet.CIDR})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				skipIPAMController.nadInfo.NetAttachDefs.Store("default/skip-ipam-nad", &util.NadConfig{MissRateLimitConfig: util.MissRateLimitConfig{MaxNewConnPPS: 10, MaxNewConnBurst: 100}})
-				skipIPAMController.WatchPods()
-				skipIPAMController.lsManager.AddNode(t.nodeName, t.nodeName+"-UUID", []*net.IPNet{ovntest.MustParseIPNet(nodeSecondarySubnet)})
-				skipIPAMController.lsManager.AddNode(ovntypes.OvnLayer2Switch, ovntypes.OvnLayer2Switch+"-UUID", []*net.IPNet{ovntest.MustParseIPNet("10.193.0.0/16")})
+				err = ocInfo.bnc.WatchNamespaces()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = ocInfo.bnc.WatchNodes()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = ocInfo.bnc.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				// check nbdb data is added
@@ -129,7 +144,6 @@ var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
 		})
 		ginkgo.It("reconciles a pod with skip ipam annotation but no floating ip", func() {
 			app.Action = func(ctx *cli.Context) error {
-				nodeSecondarySubnet := "10.193.0.0/26"
 				namespaceT := *newNamespace("namespace1")
 				t := newTPod(
 					"node1",
@@ -152,28 +166,28 @@ var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
 							namespaceT,
 						},
 					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode(t.nodeName, "192.168.126.202/24"),
+						},
+					},
 					&v1.PodList{
 						Items: []v1.Pod{},
 					},
+					&nettypes.NetworkAttachmentDefinitionList{
+						Items: []nettypes.NetworkAttachmentDefinition{*nad},
+					},
 				)
-				fakeOvn.controller.lsManager.AddNode(t.nodeName, t.nodeName+"-UUID", []*net.IPNet{ovntest.MustParseIPNet(t.nodeSubnet)})
-				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
-				skipIPAMController, err := fakeOvn.mhController.NewOvnController(
-					&util.NetAttachDefInfo{
-						NetNameInfo: util.NetNameInfo{
-							NetName:     "default/skip-ipam-nad",
-							IsSecondary: true,
-						},
-						NetCidr:  "10.193.0.0/16",
-						MTU:      1400,
-						TopoType: ovntypes.Layer2AttachDefTopoType,
-					}, fakeOvn.asf)
+				ocInfo := fakeOvn.secondaryControllers["skip-ipam-nad"]
+				subnet := ocInfo.bnc.Subnets()[0]
+				err = ocInfo.bnc.lsManager.AddOrUpdateSwitch(ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch), []*net.IPNet{subnet.CIDR})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				skipIPAMController.nadInfo.NetAttachDefs.Store("default/skip-ipam-nad", &util.NadConfig{MissRateLimitConfig: util.MissRateLimitConfig{MaxNewConnPPS: 10, MaxNewConnBurst: 100}})
-				skipIPAMController.WatchPods()
-				skipIPAMController.lsManager.AddNode(t.nodeName, t.nodeName+"-UUID", []*net.IPNet{ovntest.MustParseIPNet(nodeSecondarySubnet)})
-				skipIPAMController.lsManager.AddNode(ovntypes.OvnLayer2Switch, ovntypes.OvnLayer2Switch+"-UUID", []*net.IPNet{ovntest.MustParseIPNet("10.193.0.0/16")})
+				err = ocInfo.bnc.WatchNamespaces()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = ocInfo.bnc.WatchNodes()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = ocInfo.bnc.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				// check nbdb data is added

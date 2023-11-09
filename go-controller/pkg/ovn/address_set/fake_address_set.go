@@ -1,117 +1,170 @@
 package addressset
 
 import (
-	"k8s.io/klog/v2"
+	"fmt"
 	"net"
-	"strings"
 	"sync"
 	"sync/atomic"
 
+	"github.com/onsi/gomega"
+
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 
-	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
-
-	"github.com/onsi/gomega"
 )
 
-func NewFakeAddressSetFactory() *FakeAddressSetFactory {
+func NewFakeAddressSetFactory(controllerName string) *FakeAddressSetFactory {
 	return &FakeAddressSetFactory{
-		sets: make(map[string]*fakeAddressSet),
+		ControllerName: controllerName,
+		asf:            &ovnAddressSetFactory{},
+		sets:           make(map[string]*fakeAddressSets),
 	}
 }
 
 type FakeAddressSetFactory struct {
+	// ControllerName is stored here for convenience, it is used to build dbIDs for fake-only methods like
+	// AddressSetExists, EventuallyExpectAddressSet, etc.
+	ControllerName string
+	asf            *ovnAddressSetFactory
 	sync.Mutex
 	// maps address set name to object
-	sets map[string]*fakeAddressSet
+	sets                map[string]*fakeAddressSets
+	errOnNextNewAddrSet bool
 }
 
 // fakeFactory implements the AddressSetFactory interface
 var _ AddressSetFactory = &FakeAddressSetFactory{}
 
+const FakeASFError = "fake asf error"
+
+// ErrOnNextNewASCall will make FakeAddressSetFactory return FakeASFError on the next NewAddressSet call
+func (f *FakeAddressSetFactory) ErrOnNextNewASCall() {
+	f.errOnNextNewAddrSet = true
+}
+
 // NewAddressSet returns a new address set object
-func (f *FakeAddressSetFactory) NewAddressSet(name string, ips []net.IP) (AddressSet, error) {
+func (f *FakeAddressSetFactory) NewAddressSet(dbIDs *libovsdbops.DbObjectIDs, ips []net.IP) (AddressSet, error) {
+	if f.errOnNextNewAddrSet {
+		f.errOnNextNewAddrSet = false
+		return nil, fmt.Errorf(FakeASFError)
+	}
+	if err := f.asf.validateDbIDs(dbIDs); err != nil {
+		return nil, fmt.Errorf("failed to create address set: %w", err)
+	}
 	f.Lock()
 	defer f.Unlock()
+	name := getOvnAddressSetsName(dbIDs)
+
 	_, ok := f.sets[name]
-	gomega.Expect(ok).To(gomega.BeFalse())
-	set, err := newFakeAddressSets(name, ips, f.removeAddressSet)
+	gomega.Expect(ok).To(gomega.BeFalse(), fmt.Sprintf("new address set %s already exists", name))
+	set, err := f.newFakeAddressSets(ips, dbIDs, f.removeAddressSet)
 	if err != nil {
 		return nil, err
 	}
-	ip4ASName, ip6ASName := MakeAddressSetName(name)
-	if set.ipv4 != nil {
-		f.sets[ip4ASName] = set.ipv4
-	}
-	if set.ipv6 != nil {
-		f.sets[ip6ASName] = set.ipv6
-	}
+	f.sets[name] = set
 	return set, nil
+}
+
+// NewAddressSetOps returns a new address set object
+func (f *FakeAddressSetFactory) NewAddressSetOps(dbIDs *libovsdbops.DbObjectIDs, ips []net.IP) (AddressSet, []ovsdb.Operation, error) {
+	if f.errOnNextNewAddrSet {
+		f.errOnNextNewAddrSet = false
+		return nil, nil, fmt.Errorf(FakeASFError)
+	}
+	if err := f.asf.validateDbIDs(dbIDs); err != nil {
+		return nil, nil, fmt.Errorf("failed to create address set: %w", err)
+	}
+	f.Lock()
+	defer f.Unlock()
+	name := getOvnAddressSetsName(dbIDs)
+
+	_, ok := f.sets[name]
+	gomega.Expect(ok).To(gomega.BeFalse(), fmt.Sprintf("new address set %s already exists", name))
+	set, err := f.newFakeAddressSets(ips, dbIDs, f.removeAddressSet)
+	if err != nil {
+		return nil, nil, err
+	}
+	f.sets[name] = set
+	return set, nil, nil
 }
 
 // EnsureAddressSet returns set object
-func (f *FakeAddressSetFactory) EnsureAddressSet(name string) (AddressSet, error) {
+func (f *FakeAddressSetFactory) EnsureAddressSet(dbIDs *libovsdbops.DbObjectIDs) (AddressSet, error) {
+	if err := f.asf.validateDbIDs(dbIDs); err != nil {
+		return nil, fmt.Errorf("failed to ensure address set: %w", err)
+	}
 	f.Lock()
 	defer f.Unlock()
-	_, ok := f.sets[name]
-	gomega.Expect(ok).To(gomega.BeFalse())
-	set, err := newFakeAddressSets(name, []net.IP{}, f.removeAddressSet)
+	name := getOvnAddressSetsName(dbIDs)
+	set, ok := f.sets[name]
+	if ok {
+		return set, nil
+	}
+	set, err := f.newFakeAddressSets([]net.IP{}, dbIDs, f.removeAddressSet)
 	if err != nil {
 		return nil, err
 	}
-	ip4ASName, ip6ASName := MakeAddressSetName(name)
-	if set.ipv4 != nil {
-		f.sets[ip4ASName] = set.ipv4
-	}
-	if set.ipv6 != nil {
-		f.sets[ip6ASName] = set.ipv6
-	}
+	f.sets[name] = set
 	return set, nil
 }
 
-func (f *FakeAddressSetFactory) ProcessEachAddressSet(iteratorFn AddressSetIterFunc) error {
+// GetAddressSet returns set object
+func (f *FakeAddressSetFactory) GetAddressSet(dbIDs *libovsdbops.DbObjectIDs) (AddressSet, error) {
+	if err := f.asf.validateDbIDs(dbIDs); err != nil {
+		return nil, fmt.Errorf("failed to get address set: %w", err)
+	}
 	f.Lock()
 	defer f.Unlock()
-	asNames := sets.Set[string]{}
+	name := getOvnAddressSetsName(dbIDs)
+	set, ok := f.sets[name]
+	if ok {
+		return set, nil
+	}
+	return nil, fmt.Errorf("error fetching address set")
+}
+
+func (f *FakeAddressSetFactory) ProcessEachAddressSet(ownerController string, indexT *libovsdbops.ObjectIDsType, iteratorFn AddressSetIterFunc) error {
+	f.Lock()
+	asNames := map[string]*libovsdbops.DbObjectIDs{}
 	for _, set := range f.sets {
-		asName := truncateSuffixFromAddressSet(set.getName())
-		if asNames.Has(asName) {
+		if !set.dbIDs.HasSameOwner(ownerController, indexT) {
 			continue
 		}
-		asNames.Insert(asName)
-		parts := strings.Split(asName, ".")
-		addrSetNamespace := parts[0]
-		nameSuffix := ""
-		if len(parts) >= 2 {
-			nameSuffix = parts[1]
+		// set.dbIDs doesn't have ip family
+		addrSetName := getOvnAddressSetsName(set.dbIDs)
+		if _, ok := asNames[addrSetName]; ok {
+			continue
 		}
-		if err := iteratorFn(asName, addrSetNamespace, nameSuffix); err != nil {
+		asNames[addrSetName] = set.dbIDs
+	}
+	f.Unlock()
+	for _, dbIDs := range asNames {
+		if err := iteratorFn(dbIDs); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (f *FakeAddressSetFactory) DestroyAddressSetInBackingStore(name string) error {
+func (f *FakeAddressSetFactory) DestroyAddressSet(dbIDs *libovsdbops.DbObjectIDs) error {
+	if err := f.asf.validateDbIDs(dbIDs); err != nil {
+		return fmt.Errorf("failed to destroy address set: %w", err)
+	}
+	name := getOvnAddressSetsName(dbIDs)
 	if _, ok := f.sets[name]; ok {
 		f.removeAddressSet(name)
 		return nil
 	}
-	ip4ASName, ip6ASName := MakeAddressSetName(name)
-	if config.IPv4Mode {
-		f.removeAddressSet(ip4ASName)
-	}
-	if config.IPv6Mode {
-		f.removeAddressSet(ip6ASName)
-	}
 	return nil
 }
 
-func (f *FakeAddressSetFactory) getAddressSet(name string) *fakeAddressSet {
+func (f *FakeAddressSetFactory) getAddressSet(dbIDs *libovsdbops.DbObjectIDs) *fakeAddressSets {
 	f.Lock()
 	defer f.Unlock()
+	name := getOvnAddressSetsName(dbIDs)
 	if as, ok := f.sets[name]; ok {
 		as.Lock()
 		return as
@@ -127,17 +180,17 @@ func (f *FakeAddressSetFactory) removeAddressSet(name string) {
 }
 
 // ExpectAddressSetWithIPs ensures the named address set exists with the given set of IPs
-func (f *FakeAddressSetFactory) expectAddressSetWithIPs(g gomega.Gomega, name string, ips []string) {
+func (f *FakeAddressSetFactory) expectAddressSetWithIPs(g gomega.Gomega, dbIDs *libovsdbops.DbObjectIDs, ips []string) {
 	var lenAddressSet int
-	name4, name6 := MakeAddressSetName(name)
-	as4 := f.getAddressSet(name4)
+	as := f.getAddressSet(dbIDs)
+	gomega.Expect(as).ToNot(gomega.BeNil(), fmt.Sprintf("expected address set %s to exist", dbIDs.String()))
+	defer as.Unlock()
+	as4 := as.ipv4
 	if as4 != nil {
-		defer as4.Unlock()
 		lenAddressSet = lenAddressSet + len(as4.ips)
 	}
-	as6 := f.getAddressSet(name6)
+	as6 := as.ipv6
 	if as6 != nil {
-		defer as6.Unlock()
 		lenAddressSet = lenAddressSet + len(as6.ips)
 	}
 
@@ -165,61 +218,89 @@ func (f *FakeAddressSetFactory) expectAddressSetWithIPs(g gomega.Gomega, name st
 
 		klog.Errorf("IPv4 addresses mismatch in cache: %#v, expected: %#v", addrs, ips)
 	}
+
 	g.Expect(lenAddressSet).To(gomega.Equal(len(ips)))
 }
 
-func (f *FakeAddressSetFactory) ExpectAddressSetWithIPs(name string, ips []string) {
-	g := gomega.Default
-	f.expectAddressSetWithIPs(g, name, ips)
+func (f *FakeAddressSetFactory) getDbIDsFromNsNameOrDbIDs(dbIDsOrNsName any) *libovsdbops.DbObjectIDs {
+	var dbIDs *libovsdbops.DbObjectIDs
+	if nsName, ok := dbIDsOrNsName.(string); ok {
+		dbIDs = libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetNamespace, f.ControllerName, map[libovsdbops.ExternalIDKey]string{
+			libovsdbops.ObjectNameKey: nsName,
+		})
+	} else if dbIDs, ok = dbIDsOrNsName.(*libovsdbops.DbObjectIDs); !ok {
+		panic("unexpected type of argument passed to ExpectAddressSetWithIPs")
+	}
+	return dbIDs
 }
 
-func (f *FakeAddressSetFactory) EventuallyExpectAddressSetWithIPs(name string, ips []string) {
+// ExpectAddressSetWithIPs ensure address set exists with the given set of ips.
+// Address set is identified by dbIDsOrNsName, which may be a namespace name (string) or a *libovsdbops.DbObjectIDs.
+func (f *FakeAddressSetFactory) ExpectAddressSetWithIPs(dbIDsOrNsName any, ips []string) {
+	dbIDs := f.getDbIDsFromNsNameOrDbIDs(dbIDsOrNsName)
+	g := gomega.Default
+	f.expectAddressSetWithIPs(g, dbIDs, ips)
+}
+
+func (f *FakeAddressSetFactory) EventuallyExpectAddressSetWithIPs(dbIDsOrNsName any, ips []string) {
+	dbIDs := f.getDbIDsFromNsNameOrDbIDs(dbIDsOrNsName)
 	gomega.Eventually(func(g gomega.Gomega) {
-		f.expectAddressSetWithIPs(g, name, ips)
+		f.expectAddressSetWithIPs(g, dbIDs, ips)
 	}).Should(gomega.Succeed())
 }
 
-// ExpectEmptyAddressSet ensures the named address set exists with no IPs
-func (f *FakeAddressSetFactory) ExpectEmptyAddressSet(name string) {
-	f.ExpectAddressSetWithIPs(name, nil)
+// ExpectEmptyAddressSet ensures the address set owned by dbIDsOrNsName exists with no IPs
+func (f *FakeAddressSetFactory) ExpectEmptyAddressSet(dbIDsOrNsName any) {
+	dbIDs := f.getDbIDsFromNsNameOrDbIDs(dbIDsOrNsName)
+	f.ExpectAddressSetWithIPs(dbIDs, nil)
 }
 
 // EventuallyExpectEmptyAddressSetExist ensures the named address set eventually exists with no IPs
-func (f *FakeAddressSetFactory) EventuallyExpectEmptyAddressSetExist(name string) {
-	f.EventuallyExpectAddressSetWithIPs(name, nil)
+func (f *FakeAddressSetFactory) EventuallyExpectEmptyAddressSetExist(dbIDsOrNsName any) {
+	dbIDs := f.getDbIDsFromNsNameOrDbIDs(dbIDsOrNsName)
+	f.EventuallyExpectAddressSetWithIPs(dbIDs, nil)
 }
 
-func (f *FakeAddressSetFactory) addressSetExists(name string) bool {
+func (f *FakeAddressSetFactory) AddressSetExists(dbIDsOrNsName any) bool {
+	dbIDs := f.getDbIDsFromNsNameOrDbIDs(dbIDsOrNsName)
+	name := getOvnAddressSetsName(dbIDs)
 	f.Lock()
 	defer f.Unlock()
 	_, ok := f.sets[name]
 	return ok
 }
 
-// ExpectAddressSetExist ensures the named address set eventually exiss
-func (f *FakeAddressSetFactory) ExpectAddressSetExist(name string) {
+// EventuallyExpectAddressSet ensures the named address set eventually exists
+func (f *FakeAddressSetFactory) EventuallyExpectAddressSet(dbIDsOrNsName any) {
+	dbIDs := f.getDbIDsFromNsNameOrDbIDs(dbIDsOrNsName)
 	gomega.Eventually(func() bool {
-		return f.addressSetExists(name)
+		return f.AddressSetExists(dbIDs)
 	}).Should(gomega.BeTrue())
 }
 
 // EventuallyExpectNoAddressSet ensures the named address set eventually does not exist
-func (f *FakeAddressSetFactory) EventuallyExpectNoAddressSet(name string) {
+// For namespaces address set deletion is delayed by 20 seconds, it is only tested once in namespace_test
+// to not slow down tests. Don't use for namespace-owned address sets
+func (f *FakeAddressSetFactory) EventuallyExpectNoAddressSet(dbIDsOrNsName any) {
+	dbIDs := f.getDbIDsFromNsNameOrDbIDs(dbIDsOrNsName)
 	gomega.Eventually(func() bool {
-		return f.addressSetExists(name)
+		return f.AddressSetExists(dbIDs)
 	}).Should(gomega.BeFalse())
+}
+
+// ExpectNumberOfAddressSets ensures the number of created address sets equals given number
+func (f *FakeAddressSetFactory) ExpectNumberOfAddressSets(n int) {
+	gomega.Expect(len(f.sets)).To(gomega.Equal(n))
 }
 
 type removeFunc func(string)
 
 type fakeAddressSet struct {
-	sync.Mutex
 	name      string
 	hashName  string
 	ips       map[string]net.IP
 	subnets   map[string]*net.IPNet
 	destroyed uint32
-	removeFn  removeFunc
 }
 
 // fakeAddressSets implements the AddressSet interface
@@ -227,12 +308,15 @@ var _ AddressSet = &fakeAddressSets{}
 
 type fakeAddressSets struct {
 	sync.Mutex
-	name string
-	ipv4 *fakeAddressSet
-	ipv6 *fakeAddressSet
+	// name without ip family
+	name     string
+	ipv4     *fakeAddressSet
+	ipv6     *fakeAddressSet
+	dbIDs    *libovsdbops.DbObjectIDs
+	removeFn removeFunc
 }
 
-func newFakeAddressSets(name string, ips []net.IP, removeFn removeFunc) (*fakeAddressSets, error) {
+func (f *FakeAddressSetFactory) newFakeAddressSets(ips []net.IP, dbIDs *libovsdbops.DbObjectIDs, removeFn removeFunc) (*fakeAddressSets, error) {
 	var v4set, v6set *fakeAddressSet
 	v4Ips := make([]net.IP, 0)
 	v6Ips := make([]net.IP, 0)
@@ -243,22 +327,23 @@ func newFakeAddressSets(name string, ips []net.IP, removeFn removeFunc) (*fakeAd
 			v4Ips = append(v4Ips, ip)
 		}
 	}
-	ip4ASName, ip6ASName := MakeAddressSetName(name)
 	if config.IPv4Mode {
-		v4set = newFakeAddressSet(ip4ASName, v4Ips, removeFn)
+		v4set = f.newFakeAddressSet(v4Ips, dbIDs, ipv4InternalID)
 	}
 	if config.IPv6Mode {
-		v6set = newFakeAddressSet(ip6ASName, v6Ips, removeFn)
+		v6set = f.newFakeAddressSet(v6Ips, dbIDs, ipv6InternalID)
 	}
-	return &fakeAddressSets{name: name, ipv4: v4set, ipv6: v6set}, nil
+	name := getOvnAddressSetsName(dbIDs)
+	return &fakeAddressSets{name: name, ipv4: v4set, ipv6: v6set, dbIDs: dbIDs, removeFn: removeFn}, nil
 }
 
-func newFakeAddressSet(name string, ips []net.IP, removeFn removeFunc) *fakeAddressSet {
+func (f *FakeAddressSetFactory) newFakeAddressSet(ips []net.IP, dbIDs *libovsdbops.DbObjectIDs, ipFamily string) *fakeAddressSet {
+	name := getDbIDsWithIPFamily(dbIDs, ipFamily).String()
+
 	as := &fakeAddressSet{
 		name:     name,
 		hashName: hashedAddressSet(name),
 		ips:      make(map[string]net.IP),
-		removeFn: removeFn,
 		subnets:  make(map[string]*net.IPNet),
 	}
 	for _, ip := range ips {
@@ -284,22 +369,19 @@ func (as *fakeAddressSets) GetName() string {
 }
 
 func (as *fakeAddressSets) AddIPs(ips []net.IP) error {
-	var err error
-	as.Lock()
-	defer as.Unlock()
-
-	_, err = as.AddIPsReturnOps(ips)
+	_, err := as.AddIPsReturnOps(ips)
 	return err
 }
 
 func (as *fakeAddressSets) AddIPsReturnOps(ips []net.IP) ([]ovsdb.Operation, error) {
 	var ops []ovsdb.Operation
 	var err error
-
+	as.Lock()
+	defer as.Unlock()
 	for _, ip := range ips {
-		if utilnet.IsIPv6(ip) {
+		if as.ipv6 != nil && utilnet.IsIPv6(ip) {
 			ops, err = as.ipv6.addIP(ip)
-		} else {
+		} else if as.ipv4 != nil && !utilnet.IsIPv6(ip) {
 			ops, err = as.ipv4.addIP(ip)
 		}
 		if err != nil {
@@ -349,22 +431,20 @@ func (as *fakeAddressSets) SetIPs(ips []net.IP) error {
 }
 
 func (as *fakeAddressSets) DeleteIPs(ips []net.IP) error {
-	var err error
-	as.Lock()
-	defer as.Unlock()
-
-	_, err = as.DeleteIPsReturnOps(ips)
+	_, err := as.DeleteIPsReturnOps(ips)
 	return err
 }
 
 func (as *fakeAddressSets) DeleteIPsReturnOps(ips []net.IP) ([]ovsdb.Operation, error) {
 	var ops []ovsdb.Operation
 	var err error
+	as.Lock()
+	defer as.Unlock()
 
 	for _, ip := range ips {
-		if utilnet.IsIPv6(ip) {
+		if as.ipv6 != nil && utilnet.IsIPv6(ip) {
 			ops, err = as.ipv6.deleteIP(ip)
-		} else {
+		} else if as.ipv4 != nil && !utilnet.IsIPv6(ip) {
 			ops, err = as.ipv4.deleteIP(ip)
 		}
 		if err != nil {
@@ -376,7 +456,10 @@ func (as *fakeAddressSets) DeleteIPsReturnOps(ips []net.IP) ([]ovsdb.Operation, 
 
 func (as *fakeAddressSets) Destroy() error {
 	as.Lock()
-	defer as.Unlock()
+	defer func() {
+		as.Unlock()
+		as.removeFn(as.name)
+	}()
 
 	if as.ipv4 != nil {
 		err := as.ipv4.destroy()
@@ -395,14 +478,7 @@ func (as *fakeAddressSet) getHashName() string {
 	return as.hashName
 }
 
-func (as *fakeAddressSet) getName() string {
-	gomega.Expect(atomic.LoadUint32(&as.destroyed)).To(gomega.Equal(uint32(0)))
-	return as.name
-}
-
 func (as *fakeAddressSet) addIP(ip net.IP) ([]ovsdb.Operation, error) {
-	as.Lock()
-	defer as.Unlock()
 	gomega.Expect(atomic.LoadUint32(&as.destroyed)).To(gomega.Equal(uint32(0)))
 	ipStr := ip.String()
 	if _, ok := as.ips[ipStr]; !ok {
@@ -412,8 +488,6 @@ func (as *fakeAddressSet) addIP(ip net.IP) ([]ovsdb.Operation, error) {
 }
 
 func (as *fakeAddressSet) addSubnet(subnet *net.IPNet) error {
-	as.Lock()
-	defer as.Unlock()
 	gomega.Expect(atomic.LoadUint32(&as.destroyed)).To(gomega.Equal(uint32(0)))
 	subnetStr := subnet.String()
 	if _, ok := as.subnets[subnetStr]; !ok {
@@ -423,8 +497,6 @@ func (as *fakeAddressSet) addSubnet(subnet *net.IPNet) error {
 }
 
 func (as *fakeAddressSet) getIPs() ([]string, error) {
-	as.Lock()
-	defer as.Unlock()
 	gomega.Expect(atomic.LoadUint32(&as.destroyed)).To(gomega.Equal(uint32(0)))
 	uniqIPs := make([]string, 0, len(as.ips))
 	for _, ip := range as.ips {
@@ -434,25 +506,21 @@ func (as *fakeAddressSet) getIPs() ([]string, error) {
 }
 
 func (as *fakeAddressSet) deleteIP(ip net.IP) ([]ovsdb.Operation, error) {
-	as.Lock()
-	defer as.Unlock()
 	gomega.Expect(atomic.LoadUint32(&as.destroyed)).To(gomega.Equal(uint32(0)))
 	delete(as.ips, ip.String())
 	return nil, nil
 }
 
 func (as *fakeAddressSet) deleteSubnet(subnet *net.IPNet) error {
-	as.Lock()
-	defer as.Unlock()
 	gomega.Expect(atomic.LoadUint32(&as.destroyed)).To(gomega.Equal(uint32(0)))
 	delete(as.subnets, subnet.String())
 	return nil
 }
 
 func (as *fakeAddressSet) destroy() error {
-	gomega.Expect(atomic.LoadUint32(&as.destroyed)).To(gomega.Equal(uint32(0)))
+	// Don't check here if the address set was already destroyed as it should be
+	// a thread safe, idempotent operation anyway.
 	atomic.StoreUint32(&as.destroyed, 1)
-	as.removeFn(as.name)
 	return nil
 }
 

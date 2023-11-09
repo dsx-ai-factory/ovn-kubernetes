@@ -6,21 +6,29 @@ package node
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net"
+	"runtime"
+	"strings"
 	"sync"
 	"syscall"
+	"time"
 
-	"github.com/Mellanox/sriovnet"
+	"github.com/k8snetworkplumbingwg/sriovnet"
 	"github.com/stretchr/testify/mock"
 	"github.com/urfave/cli/v2"
 	v1 "k8s.io/api/core/v1"
+	discovery "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	adminpolicybasedrouteclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
+	OFManager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/openflow-manager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	linkMock "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -31,20 +39,31 @@ import (
 	"github.com/containernetworking/plugins/pkg/testutils"
 	"github.com/vishvananda/netlink"
 
-	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
-	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
-	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
-	portmirrorfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned/fake"
-	virtualipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/clientset/versioned/fake"
-
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
 
 func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
-	eth0Name, eth0MAC, eth0IP, eth0GWIP, eth0CIDR string, gatewayVLANID uint) {
+	eth0Name, eth0MAC, eth0GWIP, eth0CIDR string, gatewayVLANID uint, l netlink.Link, hwOffload, setNodeIP bool) {
 	const mtu string = "1234"
 	const clusterCIDR string = "10.1.0.0/16"
+	config.Gateway.DisableForwarding = false
+
+	var err error
+	if len(eth0GWIP) > 0 {
+		// And a default route
+		err := testNS.Do(func(ns.NetNS) error {
+			defRoute := &netlink.Route{
+				LinkIndex: l.Attrs().Index,
+				Scope:     netlink.SCOPE_UNIVERSE,
+				Dst:       ovntest.MustParseIPNet("0.0.0.0/0"),
+				Gw:        ovntest.MustParseIP(eth0GWIP),
+			}
+			return netlink.RouteAdd(defRoute)
+		})
+		Expect(err).NotTo(HaveOccurred())
+	}
+
 	app.Action = func(ctx *cli.Context) error {
 		const (
 			nodeName   string = "node1"
@@ -53,6 +72,10 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		)
 
 		fexec := ovntest.NewLooseCompareFakeExec()
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd: "ovs-vsctl --timeout=15 port-to-br eth0",
+			Err: fmt.Errorf(""),
+		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-vsctl --timeout=15 port-to-br eth0",
 			Err: fmt.Errorf(""),
@@ -81,6 +104,18 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 				})
 			},
 		})
+		if config.IPv4Mode {
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "sysctl net.ipv4.conf.breth0.forwarding",
+				Output: "net.ipv4.conf.breth0.forwarding = 1",
+			})
+		}
+		if config.IPv6Mode {
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "sysctl -w net.ipv6.conf.breth0.forwarding",
+				Output: "net.ipv6.conf.breth0.forwarding = 1",
+			})
+		}
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface breth0 mac_in_use",
 			Output: eth0MAC,
@@ -105,6 +140,10 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Output: "Check pkt length action: Yes",
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . other_config:hw-offload",
+			Output: fmt.Sprintf("%t", hwOffload),
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 get Interface patch-breth0_node1-to-br-int ofport",
 			Output: "5",
 		})
@@ -112,6 +151,17 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Cmd:    "ovs-vsctl --timeout=15 get interface eth0 ofport",
 			Output: "7",
 		})
+		if setNodeIP {
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovs-vsctl --timeout=15 get Open_vSwitch . external_ids:ovn-encap-ip",
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-encap-ip=192.168.1.10",
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-appctl --timeout=5 -t ovn-controller exit --restart",
+			})
+		}
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ip route replace table 7 172.16.1.0/24 via 10.1.1.1 dev ovn-k8s-mp0",
 			Output: "0",
@@ -124,10 +174,10 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Cmd:    "ip -4 rule add fwmark 0x1745ec lookup 7 prio 30",
 			Output: "0",
 		})
-		//fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		//	Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.rp_filter=2",
-		//	Output: "net.ipv4.conf.ovn-k8s-mp0.rp_filter = 2",
-		//})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "sysctl net.ipv4.conf.ovn-k8s-mp0.rp_filter",
+			Output: "net.ipv4.conf.ovn-k8s-mp0.rp_filter = 2",
+		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovs-ofctl -O OpenFlow13 --bundle replace-flows breth0 -",
 		})
@@ -148,9 +198,18 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		_, err = config.InitConfig(ctx, fexec, nil)
 		Expect(err).NotTo(HaveOccurred())
 
-		existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
-			Name: nodeName,
-		}}
+		existingNode := v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   nodeName,
+				Labels: map[string]string{"kubernetes.io/hostname": nodeName},
+			},
+		}
+		if setNodeIP {
+			expectedAddr, err := netlink.ParseAddr(eth0CIDR)
+			Expect(err).NotTo(HaveOccurred())
+			nodeAddr := v1.NodeAddress{Type: v1.NodeInternalIP, Address: expectedAddr.IP.String()}
+			existingNode.Status = v1.NodeStatus{Addresses: []v1.NodeAddress{nodeAddr}}
+		}
 
 		_, nodeNet, err := net.ParseCIDR(nodeSubnet)
 		Expect(err).NotTo(HaveOccurred())
@@ -174,32 +233,23 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
 			Items: []v1.Node{existingNode},
 		})
-		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
-		egressIPFakeClient := &egressipfake.Clientset{}
-		egressQoSFakeClient := &egressqosfake.Clientset{}
-		virtualIPFakeClient := &virtualipfake.Clientset{}
-		portMirrorFakeClient := &portmirrorfake.Clientset{}
-		fakeClient := &util.OVNClientset{
-			KubeClient:           kubeFakeClient,
-			EgressFirewallClient: egressFirewallFakeClient,
-			EgressQoSClient:      egressQoSFakeClient,
+		fakeClient := &util.OVNNodeClientset{
+			KubeClient: kubeFakeClient,
 		}
 
 		stop := make(chan struct{})
-		nodeNames := []string{nodeName}
-		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeNames)
+		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 		Expect(err).NotTo(HaveOccurred())
 		wg := &sync.WaitGroup{}
 		defer func() {
 			close(stop)
 			wg.Wait()
 			wf.Shutdown()
-			wg.Wait()
 		}()
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		k := &kube.Kube{fakeClient.KubeClient, egressIPFakeClient, egressFirewallFakeClient, nil, nil, virtualIPFakeClient, nil, portMirrorFakeClient}
+		k := &kube.Kube{KClient: kubeFakeClient}
 
 		iptV4, iptV6 := util.SetFakeIPTablesHelpers()
 
@@ -209,22 +259,37 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		Expect(err).NotTo(HaveOccurred())
 		err = nodeAnnotator.Run()
 		Expect(err).NotTo(HaveOccurred())
-
+		rm := routemanager.NewController()
+		wg.Add(1)
+		go testNS.Do(func(netNS ns.NetNS) error {
+			defer GinkgoRecover()
+			rm.Run(stop, 10*time.Second)
+			wg.Done()
+			return nil
+		})
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
-			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", nil, nodeAnnotator, k,
-				&fakeMgmtPortConfig, wf)
 			Expect(err).NotTo(HaveOccurred())
-			err = sharedGw.Init(wf)
+			OFManager.NewOpenFlowCacheManager(wg, stop)
+			ifAddrs := ovntest.MustParseIPNets(eth0CIDR)
+			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", ifAddrs, nodeAnnotator, k,
+				&fakeMgmtPortConfig, wf, rm)
 			Expect(err).NotTo(HaveOccurred())
-
+			err = sharedGw.Init(wf, stop, wg)
+			Expect(err).NotTo(HaveOccurred())
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
-			sharedGw.Start(stop, wg)
-
+			// we cannot start the shared gw directly because it will spawn a goroutine that may not be bound to the test netns
+			// Start does two things, starts nodeIPManager which spawns a go routine and also starts openflow manager by spawning a go routine
+			//sharedGw.Start()
+			sharedGw.nodeIPManager.sync()
+			// we cannot start openflow manager directly because it spawns a go routine
+			// FIXME: extract openflow manager func from the spawning of a go routine so it can be called directly below.
+			OFManager.OpenFlowCacheManager.SyncFlows(sharedGw.openflowManager.defaultBridgeFlowID)
+			OFManager.OpenFlowCacheManager.SyncFlows(sharedGw.openflowManager.extGWBridgeFlowID)
 			// Verify the code moved eth0's IP address, MAC, and routes
 			// over to breth0
 			l, err := netlink.LinkByName("breth0")
@@ -243,10 +308,51 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Expect(found).To(BeTrue())
 
 			Expect(l.Attrs().HardwareAddr.String()).To(Equal(eth0MAC))
+
+			// check that the masquerade route was added
+			expRoute := &netlink.Route{
+				Dst:       ovntest.MustParseIPNet(fmt.Sprintf("%s/32", config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP.String())),
+				LinkIndex: l.Attrs().Index,
+				Src:       ifAddrs[0].IP,
+			}
+			Eventually(func() error {
+				r, err := util.LinkRouteGetFilteredRoute(
+					expRoute,
+					netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF|netlink.RT_FILTER_SRC,
+				)
+				if err != nil {
+					return err
+				}
+				if r == nil {
+					return fmt.Errorf("failed to find route")
+				}
+				return nil
+			}, 1*time.Second).ShouldNot(HaveOccurred())
 			return nil
 		})
+		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(fexec.CalledMatchesExpected, 5).Should(BeTrue(), fexec.ErrorDesc)
+		// Make sure that annotation 'k8s.ovn.org/gateway-mtu-support' is set to "false" (because hw-offload is true).
+		if hwOffload {
+			Eventually(func() bool {
+				node, err := kubeFakeClient.CoreV1().Nodes().Get(context.TODO(), existingNode.Name, metav1.GetOptions{})
+				if err != nil {
+					return false
+				}
+				return node.Annotations["k8s.ovn.org/gateway-mtu-support"] == "false"
+			}, 5).Should(BeTrue(), "invalid annotation, hw-offload is enabled but annotation "+
+				"'k8s.ovn.org/gateway-mtu-support' != \"false\"")
+		} else {
+			Consistently(func() bool {
+				node, err := kubeFakeClient.CoreV1().Nodes().Get(context.TODO(), existingNode.Name, metav1.GetOptions{})
+				if err != nil {
+					return false
+				}
+				return node.Annotations["k8s.ovn.org/gateway-mtu-support"] != "false"
+			}, 5).Should(BeTrue(), "invalid annotation, hw-offload is disabled but found annotation "+
+				"'k8s.ovn.org/gateway-mtu-support' with value == \"false\"")
+		}
 
 		expectedTables := map[string]util.FakeTable{
 			"nat": {
@@ -260,11 +366,15 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 					"-j OVN-KUBE-NODEPORT",
 					"-j OVN-KUBE-ITP",
 				},
+				"POSTROUTING": []string{
+					"-j OVN-KUBE-EGRESS-SVC",
+				},
 				"OVN-KUBE-NODEPORT":      []string{},
 				"OVN-KUBE-EXTERNALIP":    []string{},
 				"OVN-KUBE-SNAT-MGMTPORT": []string{},
 				"OVN-KUBE-ETP":           []string{},
 				"OVN-KUBE-ITP":           []string{},
+				"OVN-KUBE-EGRESS-SVC":    []string{},
 			},
 			"filter": {},
 			"mangle": {
@@ -289,7 +399,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		return nil
 	}
 
-	err := app.Run([]string{
+	err = app.Run([]string{
 		app.Name,
 		"--cluster-subnets=" + clusterCIDR,
 		"--init-gateways",
@@ -302,7 +412,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 }
 
 func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
-	brphys, hostMAC, hostCIDR string) {
+	brphys, hostMAC, hostCIDR, dpuIP string) {
 	const mtu string = "1400"
 	const clusterCIDR string = "10.1.0.0/16"
 	app.Action = func(ctx *cli.Context) error {
@@ -320,7 +430,6 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		util.SetSriovnetOpsInst(sriovnetMock)
 		sriovnetMock.On("GetRepresentorPortFlavour", hostRep).Return(sriovnet.PortFlavour(sriovnet.PORT_FLAVOUR_PCI_PF), nil)
 		sriovnetMock.On("GetRepresentorPeerMacAddress", hostRep).Return(ovntest.MustParseMAC(hostMAC), nil)
-
 		// exec Mocks
 		fexec := ovntest.NewLooseCompareFakeExec()
 		// gatewayInitInternal
@@ -328,6 +437,11 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-vsctl --timeout=15 port-to-br " + brphys,
 			Err: fmt.Errorf(""),
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 port-to-br " + brphys,
+			Err:    fmt.Errorf(""),
+			Output: brphys,
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-vsctl --timeout=15 br-exists " + brphys,
@@ -351,6 +465,18 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-vsctl --timeout=15 get interface p0 ofport",
 		})
+		if config.IPv4Mode {
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "sysctl net.ipv4.conf.brp0.forwarding",
+				Output: "net.ipv4.conf.brp0.forwarding = 1",
+			})
+		}
+		if config.IPv6Mode {
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "sysctl net.ipv6.conf.brp0.forwarding",
+				Output: "net.ipv6.conf.brp0.forwarding = 1",
+			})
+		}
 		// bridgedGatewayNodeSetup
 		// GetOVSPortMACAddress
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -373,6 +499,11 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-appctl --timeout=15 dpif/show-dp-features " + brphys,
 			Output: "Check pkt length action: Yes",
+		})
+		// IsOvsHwOffloadEnabled
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . other_config:hw-offload",
+			Output: "false",
 		})
 		// GetDPUHostInterface
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -428,29 +559,25 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			Output: "7",
 		})
 		// syncServices()
-
 		err := util.SetExec(fexec)
 		Expect(err).NotTo(HaveOccurred())
 
 		_, err = config.InitConfig(ctx, fexec, nil)
 		Expect(err).NotTo(HaveOccurred())
 
+		nodeAddr := v1.NodeAddress{Type: v1.NodeInternalIP, Address: dpuIP}
 		existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
-			Name: nodeName,
-		}}
+			Name:   nodeName,
+			Labels: map[string]string{"kubernetes.io/hostname": nodeName},
+		},
+			Status: v1.NodeStatus{Addresses: []v1.NodeAddress{nodeAddr}},
+		}
 
 		kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
 			Items: []v1.Node{existingNode},
 		})
-		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
-		egressIPFakeClient := &egressipfake.Clientset{}
-		egressQoSFakeClient := &egressqosfake.Clientset{}
-		virtualIPFakeClient := &virtualipfake.Clientset{}
-		portMirrorFakeClient := &portmirrorfake.Clientset{}
-		fakeClient := &util.OVNClientset{
-			KubeClient:           kubeFakeClient,
-			EgressFirewallClient: egressFirewallFakeClient,
-			EgressQoSClient:      egressQoSFakeClient,
+		fakeClient := &util.OVNNodeClientset{
+			KubeClient: kubeFakeClient,
 		}
 
 		_, nodeNet, err := net.ParseCIDR(nodeSubnet)
@@ -473,20 +600,18 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		}
 
 		stop := make(chan struct{})
-		nodeNames := []string{nodeName}
-		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeNames)
+		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 		Expect(err).NotTo(HaveOccurred())
 		wg := &sync.WaitGroup{}
 		defer func() {
 			close(stop)
 			wg.Wait()
 			wf.Shutdown()
-			wg.Wait()
 		}()
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		k := &kube.Kube{fakeClient.KubeClient, egressIPFakeClient, egressFirewallFakeClient, nil, nil, virtualIPFakeClient, nil, portMirrorFakeClient}
+		k := &kube.Kube{KClient: kubeFakeClient}
 
 		nodeAnnotator := kube.NewNodeAnnotator(k, existingNode.Name)
 
@@ -495,25 +620,62 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		err = nodeAnnotator.Run()
 		Expect(err).NotTo(HaveOccurred())
 
+		ifAddrs := ovntest.MustParseIPNets(hostCIDR)
+		ifAddrs[0].IP = ovntest.MustParseIP(dpuIP)
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+		rm := routemanager.NewController()
+		wg.Add(1)
+		go testNS.Do(func(netNS ns.NetNS) error {
+			defer GinkgoRecover()
+			rm.Run(stop, 10*time.Second)
+			wg.Done()
+			return nil
+		})
+		// FIXME(mk): starting the gateaway causing go routines to be spawned within sub functions and therefore they escape the
+		// netns we wanted to set it to originally here. Refactor test cases to not spawn a go routine or just fake out everything
+		// and remove need to create netns
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
-			// provide host IP as GR IP
-			gwIPs := []*net.IPNet{ovntest.MustParseIPNet(hostCIDR)}
-			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops,
-				gatewayIntf, "", gwIPs, nodeAnnotator, k, &fakeMgmtPortConfig, wf)
-
 			Expect(err).NotTo(HaveOccurred())
-			err = sharedGw.Init(wf)
+			OFManager.NewOpenFlowCacheManager(wg, stop)
+			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops,
+				gatewayIntf, "", ifAddrs, nodeAnnotator, k, &fakeMgmtPortConfig, wf, rm)
+			Expect(err).NotTo(HaveOccurred())
+			err = sharedGw.Init(wf, stop, wg)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
-			sharedGw.Start(stop, wg)
+			// we cannot start the shared gw directly because it will spawn a goroutine that may not be bound to the test netns
+			// Start does two things, starts nodeIPManager which spawns a go routine and also starts openflow manager by spawning a go routine
+			//sharedGw.Start()
+			sharedGw.nodeIPManager.sync()
+			// we cannot start openflow manager directly because it spawns a go routine
+			// FIXME: extract openflow manager func from the spawning of a go routine so it can be called directly below.
+			OFManager.OpenFlowCacheManager.SyncFlows(sharedGw.openflowManager.defaultBridgeFlowID)
+			OFManager.OpenFlowCacheManager.SyncFlows(sharedGw.openflowManager.extGWBridgeFlowID)
+
+			// check that the masquerade route was not added
+			l, err := netlink.LinkByName(brphys)
+			expRoute := &netlink.Route{
+				Dst:       ovntest.MustParseIPNet(fmt.Sprintf("%s/32", config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP.String())),
+				LinkIndex: l.Attrs().Index,
+				Src:       ifAddrs[0].IP,
+			}
+			route, err := util.LinkRouteGetFilteredRoute(
+				expRoute,
+				netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF|netlink.RT_FILTER_SRC,
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(route).To(BeNil())
+
 			return nil
 		})
+		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(fexec.CalledMatchesExpected, 5).Should(BeTrue(), fexec.ErrorDesc)
 
@@ -523,7 +685,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		l3gwConfig, err := util.ParseNodeL3GatewayAnnotation(updatedNode)
 		Expect(err).To(Not(HaveOccurred()))
 		Expect(l3gwConfig.MACAddress.String()).To(Equal(hostMAC))
-		Expect(l3gwConfig.IPAddresses[0]).To(Equal(ovntest.MustParseIPNet(hostCIDR)))
+		Expect(l3gwConfig.IPAddresses[0].String()).To(Equal(ifAddrs[0].String()))
 		return nil
 	}
 
@@ -535,7 +697,6 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		"--nodeport",
 		"--mtu=" + mtu,
 		"--ovnkube-node-mode=" + types.NodeModeDPU,
-		"--ovnkube-node-mgmt-port-netdev=pf0vf0",
 	})
 	Expect(err).NotTo(HaveOccurred())
 }
@@ -555,56 +716,97 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		_, err = config.InitConfig(ctx, fexec, nil)
 		Expect(err).NotTo(HaveOccurred())
 
+		nodeAddr := v1.NodeAddress{Type: v1.NodeInternalIP, Address: hostIP}
 		existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
-			Name: nodeName,
-		}}
+			Name:   nodeName,
+			Labels: map[string]string{"kubernetes.io/hostname": nodeName},
+		},
+			Status: v1.NodeStatus{Addresses: []v1.NodeAddress{nodeAddr}},
+		}
 
 		kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
 			Items: []v1.Node{existingNode},
 		})
-		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
-		fakeClient := &util.OVNClientset{
-			KubeClient:           kubeFakeClient,
-			EgressFirewallClient: egressFirewallFakeClient,
+		fakeClient := &util.OVNNodeClientset{
+			KubeClient:             kubeFakeClient,
+			AdminPolicyRouteClient: adminpolicybasedrouteclient.NewSimpleClientset(),
 		}
 
 		stop := make(chan struct{})
-		nodeNames := []string{nodeName}
-		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeNames)
+		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 		Expect(err).NotTo(HaveOccurred())
+		wg := &sync.WaitGroup{}
 		defer func() {
 			close(stop)
+			wg.Wait()
 			wf.Shutdown()
 		}()
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
-
-		n := OvnNode{watchFactory: wf}
+		ip, ipnet, err := net.ParseCIDR(hostIP + "/24")
+		ipnet.IP = ip
+		cnnci := NewCommonNodeNetworkControllerInfo(nil, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, "", []string{})
+		nc := newDefaultNodeNetworkController(cnnci, &util.DefaultNetInfo{}, stop, wg)
+		// must run route manager manually which is usually started with nc.Start()
+		wg.Add(1)
+		go testNS.Do(func(netNS ns.NetNS) error {
+			defer GinkgoRecover()
+			nc.routeManager.Run(stop, 10*time.Second)
+			wg.Done()
+			return nil
+		})
 
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
-			err := n.initGatewayDPUHost(net.ParseIP(hostIP))
+			err := nc.initGatewayDPUHost(net.ParseIP(hostIP))
 			Expect(err).NotTo(HaveOccurred())
 
-			// Check svc and masquerade routes added towards eth0GWIP
-			expectedRoutes := []string{svcCIDR, types.V4MasqueradeSubnet}
 			link, err := netlink.LinkByName(uplinkName)
 			Expect(err).NotTo(HaveOccurred())
-			routes, err := netlink.RouteList(link, netlink.FAMILY_ALL)
-			for _, expRoute := range expectedRoutes {
-				found := false
-				for _, route := range routes {
-					if route.Dst != nil {
-						if route.Dst.String() == expRoute && route.Gw.String() == gwIP {
-							found = true
-						}
-					}
-				}
-				Expect(found).To(BeTrue(), fmt.Sprintf("Expected route %s was not found", expRoute))
+
+			// check that the service route was added
+			expRoute := &netlink.Route{
+				Dst:       ovntest.MustParseIPNet(svcCIDR),
+				LinkIndex: link.Attrs().Index,
+				Gw:        ovntest.MustParseIP(gwIP),
 			}
+			Eventually(func() error {
+				r, err := util.LinkRouteGetFilteredRoute(
+					expRoute,
+					netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF|netlink.RT_FILTER_GW,
+				)
+				if err != nil {
+					return err
+				}
+				if r == nil {
+					return fmt.Errorf("failed to find route")
+				}
+				return nil
+			}, 1*time.Second).ShouldNot(HaveOccurred())
+
+			// check that the masquerade route was added
+			expRoute = &netlink.Route{
+				Dst:       ovntest.MustParseIPNet(fmt.Sprintf("%s/32", config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP.String())),
+				LinkIndex: link.Attrs().Index,
+				Src:       ovntest.MustParseIP(hostIP),
+			}
+			Eventually(func() error {
+				r, err := util.LinkRouteGetFilteredRoute(
+					expRoute,
+					netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF|netlink.RT_FILTER_GW,
+				)
+				if err != nil {
+					return err
+				}
+				if r == nil {
+					return fmt.Errorf("failed to find route")
+				}
+				return nil
+			}, 1*time.Second).ShouldNot(HaveOccurred())
 			return nil
 		})
+		Expect(err).NotTo(HaveOccurred())
 		return nil
 	}
 
@@ -621,9 +823,25 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 }
 
 func localGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
-	eth0Name, eth0MAC, eth0IP, eth0GWIP, eth0CIDR string) {
+	eth0Name, eth0MAC, eth0GWIP, eth0CIDR string, l netlink.Link) {
 	const mtu string = "1234"
 	const clusterCIDR string = "10.1.0.0/16"
+	config.Gateway.DisableForwarding = true
+
+	if len(eth0GWIP) > 0 {
+		// And a default route
+		err := testNS.Do(func(ns.NetNS) error {
+			defRoute := &netlink.Route{
+				LinkIndex: l.Attrs().Index,
+				Scope:     netlink.SCOPE_UNIVERSE,
+				Dst:       ovntest.MustParseIPNet("0.0.0.0/0"),
+				Gw:        ovntest.MustParseIP(eth0GWIP),
+			}
+			return netlink.RouteAdd(defRoute)
+		})
+		Expect(err).NotTo(HaveOccurred())
+	}
+
 	app.Action = func(ctx *cli.Context) error {
 		const (
 			nodeName   string = "node1"
@@ -632,6 +850,10 @@ func localGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		)
 
 		fexec := ovntest.NewLooseCompareFakeExec()
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd: "ovs-vsctl --timeout=15 port-to-br eth0",
+			Err: fmt.Errorf(""),
+		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-vsctl --timeout=15 port-to-br eth0",
 			Err: fmt.Errorf(""),
@@ -660,6 +882,18 @@ func localGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 				})
 			},
 		})
+		if config.IPv4Mode {
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "sysctl net.ipv4.conf.breth0.forwarding",
+				Output: "net.ipv4.conf.breth0.forwarding = 1",
+			})
+		}
+		if config.IPv6Mode {
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "sysctl net.ipv6.conf.breth0.forwarding",
+				Output: "net.ipv6.conf.breth0.forwarding = 1",
+			})
+		}
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface breth0 mac_in_use",
 			Output: eth0MAC,
@@ -684,6 +918,10 @@ func localGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Output: "Check pkt length action: Yes",
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . other_config:hw-offload",
+			Output: "false",
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 get Interface patch-breth0_node1-to-br-int ofport",
 			Output: "5",
 		})
@@ -703,10 +941,10 @@ func localGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Cmd:    "ip -4 rule add fwmark 0x1745ec lookup 7 prio 30",
 			Output: "0",
 		})
-		//fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		//	Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.rp_filter=2",
-		//	Output: "net.ipv4.conf.ovn-k8s-mp0.rp_filter = 2",
-		//})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "sysctl net.ipv4.conf.ovn-k8s-mp0.rp_filter",
+			Output: "net.ipv4.conf.ovn-k8s-mp0.rp_filter = 2",
+		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-ofctl show breth0",
 			Output: `
@@ -749,9 +987,15 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 		_, err = config.InitConfig(ctx, fexec, nil)
 		Expect(err).NotTo(HaveOccurred())
 
+		expectedAddr, err := netlink.ParseAddr(eth0CIDR)
+		Expect(err).NotTo(HaveOccurred())
+		nodeAddr := v1.NodeAddress{Type: v1.NodeInternalIP, Address: expectedAddr.IP.String()}
 		existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
-			Name: nodeName,
-		}}
+			Name:   nodeName,
+			Labels: map[string]string{"kubernetes.io/hostname": nodeName},
+		},
+			Status: v1.NodeStatus{Addresses: []v1.NodeAddress{nodeAddr}},
+		}
 		externalIP := "1.1.1.1"
 		externalIPPort := int32(8032)
 		service := *newService("service1", "namespace1", "10.129.0.2",
@@ -766,7 +1010,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 			v1.ServiceStatus{},
 			false, false,
 		)
-		endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{})
+		endpointSlice := *newEndpointSlice("service1", "namespace1", []discovery.Endpoint{}, []discovery.EndpointPort{})
 
 		_, nodeNet, err := net.ParseCIDR(nodeSubnet)
 		Expect(err).NotTo(HaveOccurred())
@@ -792,35 +1036,25 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 				Items: []v1.Node{existingNode},
 			},
 			&service,
-			&endpoints,
+			&endpointSlice,
 		)
-		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
-		egressIPFakeClient := &egressipfake.Clientset{}
-		egressQoSFakeClient := &egressqosfake.Clientset{}
-		virtualIPFakeClient := &virtualipfake.Clientset{}
-		portMirrorFakeClient := &portmirrorfake.Clientset{}
-		fakeClient := &util.OVNClientset{
-			KubeClient:           kubeFakeClient,
-			EgressFirewallClient: egressFirewallFakeClient,
-			EgressQoSClient:      egressQoSFakeClient,
+		fakeClient := &util.OVNNodeClientset{
+			KubeClient: kubeFakeClient,
 		}
 
 		stop := make(chan struct{})
-		nodeNames := []string{nodeName}
-		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeNames)
+		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 		Expect(err).NotTo(HaveOccurred())
 		wg := &sync.WaitGroup{}
 		defer func() {
 			close(stop)
-			wg.Wait()
 			wf.Shutdown()
 			wg.Wait()
 		}()
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		k := &kube.Kube{fakeClient.KubeClient, egressIPFakeClient, egressFirewallFakeClient, nil, nil, virtualIPFakeClient, nil, portMirrorFakeClient}
-
+		k := &kube.Kube{KClient: kubeFakeClient}
 		iptV4, iptV6 := util.SetFakeIPTablesHelpers()
 
 		nodeAnnotator := kube.NewNodeAnnotator(k, existingNode.Name)
@@ -829,21 +1063,37 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 		Expect(err).NotTo(HaveOccurred())
 		err = nodeAnnotator.Run()
 		Expect(err).NotTo(HaveOccurred())
-
+		ip, ipNet, _ := net.ParseCIDR(eth0CIDR)
+		ipNet.IP = ip
+		rm := routemanager.NewController()
+		go testNS.Do(func(netNS ns.NetNS) error {
+			defer GinkgoRecover()
+			rm.Run(stop, 10*time.Second)
+			return nil
+		})
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
-
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
-			localGw, err := newLocalGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", nil,
-				nodeAnnotator, &fakeMgmtPortConfig, k, wf)
 			Expect(err).NotTo(HaveOccurred())
-			err = localGw.Init(wf)
+			OFManager.NewOpenFlowCacheManager(wg, stop)
+			ifAddrs := ovntest.MustParseIPNets(eth0CIDR)
+			localGw, err := newLocalGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", ifAddrs,
+				nodeAnnotator, &fakeMgmtPortConfig, k, wf, rm)
+			Expect(err).NotTo(HaveOccurred())
+			err = localGw.Init(wf, stop, wg)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
-			localGw.Start(stop, wg)
+			// we cannot start the shared gw directly because it will spawn a goroutine that may not be bound to the test netns
+			// Start does two things, starts nodeIPManager which spawns a go routine and also starts openflow manager by spawning a go routine
+			// localGw.Start()
+			localGw.nodeIPManager.sync()
+			// we cannot start openflow manager directly because it spawns a go routine
+			// FIXME: extract openflow manager func from the spawning of a go routine so it can be called directly below.
+			OFManager.OpenFlowCacheManager.SyncFlows(localGw.openflowManager.defaultBridgeFlowID)
+			OFManager.OpenFlowCacheManager.SyncFlows(localGw.openflowManager.extGWBridgeFlowID)
 
 			// Verify the code moved eth0's IP address, MAC, and routes
 			// over to breth0
@@ -863,8 +1113,29 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 			Expect(found).To(BeTrue())
 
 			Expect(l.Attrs().HardwareAddr.String()).To(Equal(eth0MAC))
+
+			// check that the masquerade route was added
+			expRoute := &netlink.Route{
+				Dst:       ovntest.MustParseIPNet(fmt.Sprintf("%s/32", config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP.String())),
+				LinkIndex: l.Attrs().Index,
+				Src:       ifAddrs[0].IP,
+			}
+			Eventually(func() error {
+				r, err := util.LinkRouteGetFilteredRoute(
+					expRoute,
+					netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF|netlink.RT_FILTER_SRC,
+				)
+				if err != nil {
+					return err
+				}
+				if r == nil {
+					return fmt.Errorf("failed to find route")
+				}
+				return nil
+			}, 1*time.Second).ShouldNot(HaveOccurred())
 			return nil
 		})
+		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(fexec.CalledMatchesExpected, 5).Should(BeTrue(), fexec.ErrorDesc)
 
@@ -885,16 +1156,25 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 					fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 				},
 				"POSTROUTING": []string{
+					"-j OVN-KUBE-EGRESS-SVC",
+					"-s 169.254.169.1 -j MASQUERADE",
 					"-s 10.1.1.0/24 -j MASQUERADE",
 				},
 				"OVN-KUBE-SNAT-MGMTPORT": []string{},
 				"OVN-KUBE-ETP":           []string{},
 				"OVN-KUBE-ITP":           []string{},
+				"OVN-KUBE-EGRESS-SVC":    []string{},
 			},
 			"filter": {
 				"FORWARD": []string{
-					"-o ovn-k8s-mp0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
+					"-d 169.254.169.1 -j ACCEPT",
+					"-s 169.254.169.1 -j ACCEPT",
+					"-d 172.16.1.0/24 -j ACCEPT",
+					"-s 172.16.1.0/24 -j ACCEPT",
 					"-i ovn-k8s-mp0 -j ACCEPT",
+					"-o ovn-k8s-mp0 -j ACCEPT",
+					"-i breth0 -j DROP",
+					"-o breth0 -j DROP",
 				},
 				"INPUT": []string{
 					"-i ovn-k8s-mp0 -m comment --comment from OVN to localhost -j ACCEPT",
@@ -942,13 +1222,14 @@ var _ = Describe("Gateway Init Operations", func() {
 
 	BeforeEach(func() {
 		// Restore global default values before each testcase
-		config.PrepareTestConfig()
+		Expect(config.PrepareTestConfig()).To(Succeed())
 
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
 
 		var err error
+		runtime.LockOSThread()
 		testNS, err = testutils.NewNS()
 		Expect(err).NotTo(HaveOccurred())
 	})
@@ -956,8 +1237,10 @@ var _ = Describe("Gateway Init Operations", func() {
 	AfterEach(func() {
 		Expect(testNS.Close()).To(Succeed())
 		Expect(testutils.UnmountNS(testNS)).To(Succeed())
+		runtime.UnlockOSThread()
 	})
-	Context("Setting up gateway bridge", func() {
+
+	Context("Setting up the gateway bridge", func() {
 		const (
 			eth0Name string = "eth0"
 			eth0IP   string = "192.168.1.10"
@@ -965,6 +1248,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			eth0GWIP string = "192.168.1.1"
 		)
 		var eth0MAC string
+		var link netlink.Link
 
 		BeforeEach(func() {
 			// Set up a fake eth0
@@ -973,97 +1257,62 @@ var _ = Describe("Gateway Init Operations", func() {
 
 				ovntest.AddLink(eth0Name)
 
-				l, err := netlink.LinkByName(eth0Name)
+				var err error
+				link, err = netlink.LinkByName(eth0Name)
 				Expect(err).NotTo(HaveOccurred())
-				err = netlink.LinkSetUp(l)
+				err = netlink.LinkSetUp(link)
 				Expect(err).NotTo(HaveOccurred())
 
 				// Add an IP address
 				addr, err := netlink.ParseAddr(eth0CIDR)
 				Expect(err).NotTo(HaveOccurred())
-				err = netlink.AddrAdd(l, addr)
+				err = netlink.AddrAdd(link, addr)
 				Expect(err).NotTo(HaveOccurred())
 
-				eth0MAC = l.Attrs().HardwareAddr.String()
-
-				// And a default route
-				err = netlink.RouteAdd(&netlink.Route{
-					LinkIndex: l.Attrs().Index,
-					Scope:     netlink.SCOPE_UNIVERSE,
-					Dst:       ovntest.MustParseIPNet("0.0.0.0/0"),
-					Gw:        ovntest.MustParseIP(eth0GWIP),
-				})
-				Expect(err).NotTo(HaveOccurred())
+				eth0MAC = link.Attrs().HardwareAddr.String()
 
 				return nil
 			})
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		ovntest.OnSupportedPlatformsIt("newLocalGateway sets up a local interface gateway", func() {
-			localGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0IP, eth0GWIP, eth0CIDR)
+		ovntest.OnSupportedPlatformsIt("sets up a local gateway with predetermined interface", func() {
+			localGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, link)
 		})
 
-	})
-
-	Context("for NIC-based operations", func() {
-		const (
-			eth0Name string = "eth0"
-			eth0IP   string = "192.168.1.10"
-			eth0CIDR string = eth0IP + "/24"
-			eth0GWIP string = "192.168.1.1"
-		)
-		var eth0MAC string
-
-		BeforeEach(func() {
-			// Set up a fake eth0
-			err := testNS.Do(func(ns.NetNS) error {
-				defer GinkgoRecover()
-
-				ovntest.AddLink(eth0Name)
-
-				l, err := netlink.LinkByName(eth0Name)
-				Expect(err).NotTo(HaveOccurred())
-				err = netlink.LinkSetUp(l)
-				Expect(err).NotTo(HaveOccurred())
-
-				// Add an IP address
-				addr, err := netlink.ParseAddr(eth0CIDR)
-				Expect(err).NotTo(HaveOccurred())
-				err = netlink.AddrAdd(l, addr)
-				Expect(err).NotTo(HaveOccurred())
-
-				eth0MAC = l.Attrs().HardwareAddr.String()
-
-				// And a default route
-				err = netlink.RouteAdd(&netlink.Route{
-					LinkIndex: l.Attrs().Index,
-					Scope:     netlink.SCOPE_UNIVERSE,
-					Dst:       ovntest.MustParseIPNet("0.0.0.0/0"),
-					Gw:        ovntest.MustParseIP(eth0GWIP),
-				})
-				Expect(err).NotTo(HaveOccurred())
-
-				return nil
-			})
-			Expect(err).NotTo(HaveOccurred())
+		ovntest.OnSupportedPlatformsIt("sets up a local gateway with predetermined interface and no default route", func() {
+			localGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, "", eth0CIDR, link)
 		})
 
 		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway", func() {
-			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0IP, eth0GWIP, eth0CIDR, 0)
+			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, 0, link, false, false)
+		})
+
+		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway with hw-offloading", func() {
+			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, 0, link, true, false)
 		})
 
 		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway with tagged VLAN", func() {
-			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0IP, eth0GWIP, eth0CIDR, 3000)
+			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, 3000, link, false, false)
 		})
 
 		config.Gateway.Interface = eth0Name
 		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway with predetermined gateway interface", func() {
-			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0IP, eth0GWIP, eth0CIDR, 0)
+			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, 0, link, false, false)
 		})
 
 		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway with tagged VLAN + predetermined gateway interface", func() {
-			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0IP, eth0GWIP, eth0CIDR, 3000)
+			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, 3000, link, false, false)
+		})
+
+		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway with predetermined gateway interface and no default route", func() {
+			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, "", eth0CIDR, 0, link, false, false)
+		})
+
+		// don't set the node status internal IP, addMasqueradeRoute will
+		// fallback to the provided interface IP
+		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway with node status internal IPs unset", func() {
+			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, 0, link, false, false)
 		})
 	})
 })
@@ -1080,7 +1329,7 @@ var _ = Describe("Gateway Operations DPU", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		// Restore global default values before each testcase
-		config.PrepareTestConfig()
+		Expect(config.PrepareTestConfig()).To(Succeed())
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
@@ -1134,7 +1383,7 @@ var _ = Describe("Gateway Operations DPU", func() {
 		})
 
 		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway DPU", func() {
-			shareGatewayInterfaceDPUTest(app, testNS, brphys, hostMAC, hostCIDR)
+			shareGatewayInterfaceDPUTest(app, testNS, brphys, hostMAC, hostCIDR, dpuIP)
 		})
 	})
 
@@ -1184,12 +1433,10 @@ var _ = Describe("Gateway Operations DPU", func() {
 
 var _ = Describe("Gateway unit tests", func() {
 	var netlinkMock *utilMock.NetLinkOps
-	var lnk *linkMock.Link
 	origNetlinkInst := util.GetNetLinkOps()
 
 	BeforeEach(func() {
-		config.PrepareTestConfig()
-		lnk = &linkMock.Link{}
+		Expect(config.PrepareTestConfig()).To(Succeed())
 		netlinkMock = &utilMock.NetLinkOps{}
 		util.SetNetLinkOpMockInst(netlinkMock)
 	})
@@ -1198,58 +1445,43 @@ var _ = Describe("Gateway unit tests", func() {
 		util.SetNetLinkOpMockInst(origNetlinkInst)
 	})
 
-	Context("getPrimaryIPAddresses", func() {
+	Context("getDPUHostPrimaryIPAddresses", func() {
 
 		It("returns Gateway IP/Subnet for kubernetes node IP", func() {
+			_, dpuSubnet, _ := net.ParseCIDR("10.0.0.101/24")
 			nodeIP := net.ParseIP("10.0.0.11")
 			expectedGwSubnet := []*net.IPNet{
 				{IP: nodeIP, Mask: net.CIDRMask(24, 32)},
 			}
-			addrs := []netlink.Addr{{IPNet: expectedGwSubnet[0]}}
-			netlinkMock.On("LinkByName", mock.AnythingOfType("string")).Return(lnk, nil)
-			netlinkMock.On("AddrList", lnk, mock.Anything).Return(addrs, nil)
-
-			gwSubnet, err := getPrimaryIPAddresses("breth0", nodeIP)
+			gwSubnet, err := getDPUHostPrimaryIPAddresses(nodeIP, []*net.IPNet{dpuSubnet})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(gwSubnet).To(Equal(expectedGwSubnet))
 		})
 
 		It("Fails if node IP is not in host subnets", func() {
-			config.OvnKubeNode.Mode = types.NodeModeDPU
+			_, dpuSubnet, _ := net.ParseCIDR("10.0.0.101/24")
 			nodeIP := net.ParseIP("10.0.1.11")
-			lnkIpnet1 := &net.IPNet{
-				IP:   net.ParseIP("10.0.0.11"),
-				Mask: net.CIDRMask(24, 32),
-			}
-			lnkIpnet2 := &net.IPNet{
-				IP:   net.ParseIP("10.0.0.12"),
-				Mask: net.CIDRMask(24, 32),
-			}
-			addrs := []netlink.Addr{{IPNet: lnkIpnet1}, {IPNet: lnkIpnet2}}
-			netlinkMock.On("LinkByName", mock.AnythingOfType("string")).Return(lnk, nil)
-			netlinkMock.On("AddrList", lnk, mock.Anything).Return(addrs, nil)
-			_, err := getPrimaryIPAddresses("breth0", nodeIP)
+			_, err := getDPUHostPrimaryIPAddresses(nodeIP, []*net.IPNet{dpuSubnet})
 			Expect(err).To(HaveOccurred())
 		})
 
 		It("returns node IP with config.Gateway.RouterSubnet subnet", func() {
-			config.OvnKubeNode.Mode = types.NodeModeDPU
 			config.Gateway.RouterSubnet = "10.1.0.0/16"
+			_, dpuSubnet, _ := net.ParseCIDR("10.0.0.101/24")
 			nodeIP := net.ParseIP("10.1.0.11")
 			expectedGwSubnet := []*net.IPNet{
 				{IP: nodeIP, Mask: net.CIDRMask(16, 32)},
 			}
-			netlinkMock.On("LinkByName", mock.AnythingOfType("string")).Return(lnk, nil)
-			gwSubnet, err := getPrimaryIPAddresses("breth0", nodeIP)
+			gwSubnet, err := getDPUHostPrimaryIPAddresses(nodeIP, []*net.IPNet{dpuSubnet})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(gwSubnet).To(Equal(expectedGwSubnet))
 		})
 
 		It("Fails if node IP is not in config.Gateway.RouterSubnet subnet", func() {
-			config.OvnKubeNode.Mode = types.NodeModeDPU
 			config.Gateway.RouterSubnet = "10.1.0.0/16"
+			_, dpuSubnet, _ := net.ParseCIDR("10.0.0.101/24")
 			nodeIP := net.ParseIP("10.0.0.11")
-			_, err := getPrimaryIPAddresses("breth0", nodeIP)
+			_, err := getDPUHostPrimaryIPAddresses(nodeIP, []*net.IPNet{dpuSubnet})
 			Expect(err).To(HaveOccurred())
 		})
 	})
@@ -1322,20 +1554,25 @@ var _ = Describe("Gateway unit tests", func() {
 				Name:  "ens1f0",
 				Index: 5,
 			}
-			expectedRoute := &netlink.Route{
-				Dst:       ipnet,
-				LinkIndex: 5,
-				Scope:     netlink.SCOPE_UNIVERSE,
-				Gw:        gwIPs[0],
-				MTU:       config.Default.MTU,
-			}
 			lnk.On("Attrs").Return(lnkAttr)
 			netlinkMock.On("LinkByName", mock.Anything).Return(lnk, nil)
 			netlinkMock.On("LinkSetUp", mock.Anything).Return(nil)
 			netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
-			netlinkMock.On("RouteAdd", expectedRoute).Return(nil)
-
-			err = configureSvcRouteViaInterface("ens1f0", gwIPs)
+			netlinkMock.On("RouteAdd", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+			wg := &sync.WaitGroup{}
+			rm := routemanager.NewController()
+			rm.SetNetLinkOpMockInst(netlinkMock)
+			stopCh := make(chan struct{})
+			wg.Add(1)
+			go func() {
+				rm.Run(stopCh, 10*time.Second)
+				wg.Done()
+			}()
+			defer func() {
+				close(stopCh)
+				wg.Wait()
+			}()
+			err = configureSvcRouteViaInterface(rm, "ens1f0", gwIPs)
 			Expect(err).ToNot(HaveOccurred())
 		})
 
@@ -1370,87 +1607,42 @@ var _ = Describe("Gateway unit tests", func() {
 			netlinkMock.On("LinkSetUp", mock.Anything).Return(nil)
 			netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return([]netlink.Route{*previousRoute}, nil)
 			netlinkMock.On("RouteReplace", expectedRoute).Return(nil)
+			wg := &sync.WaitGroup{}
+			rm := routemanager.NewController()
+			rm.SetNetLinkOpMockInst(netlinkMock)
+			stopCh := make(chan struct{})
+			wg.Add(1)
+			go func() {
+				rm.Run(stopCh, 10*time.Second)
+				wg.Done()
+			}()
 
-			err = configureSvcRouteViaInterface("ens1f0", gwIPs)
+			defer func() {
+				close(stopCh)
+				wg.Wait()
+			}()
+
+			err = configureSvcRouteViaInterface(rm, "ens1f0", gwIPs)
 			Expect(err).ToNot(HaveOccurred())
-		})
-
-		It("Fails if link route list fails", func() {
-			_, ipnet, err := net.ParseCIDR("10.96.0.0/16")
-			Expect(err).ToNot(HaveOccurred())
-			config.Kubernetes.ServiceCIDRs = []*net.IPNet{ipnet}
-			gwIPs := []net.IP{net.ParseIP("10.0.0.11")}
-
-			lnk := &linkMock.Link{}
-			lnkAttr := &netlink.LinkAttrs{
-				Name:  "ens1f0",
-				Index: 5,
-			}
-			lnk.On("Attrs").Return(lnkAttr)
-
-			netlinkMock.On("LinkByName", mock.Anything).Return(lnk, nil)
-			netlinkMock.On("LinkSetUp", mock.Anything).Return(nil)
-			netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return(nil, fmt.Errorf("failed to list routes"))
-
-			err = configureSvcRouteViaInterface("ens1f0", gwIPs)
-			Expect(err).To(HaveOccurred())
-		})
-
-		It("Fails if link route add fails", func() {
-			_, ipnet, err := net.ParseCIDR("10.96.0.0/16")
-			Expect(err).ToNot(HaveOccurred())
-			config.Kubernetes.ServiceCIDRs = []*net.IPNet{ipnet}
-			gwIPs := []net.IP{net.ParseIP("10.0.0.11")}
-
-			lnk := &linkMock.Link{}
-			lnkAttr := &netlink.LinkAttrs{
-				Name:  "ens1f0",
-				Index: 5,
-			}
-
-			lnk.On("Attrs").Return(lnkAttr)
-			netlinkMock.On("LinkByName", mock.Anything).Return(lnk, nil)
-			netlinkMock.On("LinkSetUp", mock.Anything).Return(nil)
-			netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
-			netlinkMock.On("RouteAdd", mock.Anything).Return(fmt.Errorf("failed to replace route"))
-
-			err = configureSvcRouteViaInterface("ens1f0", gwIPs)
-			Expect(err).To(HaveOccurred())
-		})
-
-		It("Fails if link route replace fails", func() {
-			_, ipnet, err := net.ParseCIDR("10.96.0.0/16")
-			Expect(err).ToNot(HaveOccurred())
-			config.Kubernetes.ServiceCIDRs = []*net.IPNet{ipnet}
-			gwIPs := []net.IP{net.ParseIP("10.0.0.11")}
-
-			lnk := &linkMock.Link{}
-			lnkAttr := &netlink.LinkAttrs{
-				Name:  "ens1f0",
-				Index: 5,
-			}
-			previousRoute := &netlink.Route{
-				Dst:       ipnet,
-				LinkIndex: 5,
-				Scope:     netlink.SCOPE_UNIVERSE,
-				Gw:        gwIPs[0],
-				MTU:       config.Default.MTU - 100,
-			}
-
-			lnk.On("Attrs").Return(lnkAttr)
-			netlinkMock.On("LinkByName", mock.Anything).Return(lnk, nil)
-			netlinkMock.On("LinkSetUp", mock.Anything).Return(nil)
-			netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return([]netlink.Route{*previousRoute}, nil)
-			netlinkMock.On("RouteReplace", mock.Anything).Return(fmt.Errorf("failed to replace route"))
-
-			err = configureSvcRouteViaInterface("ens1f0", gwIPs)
-			Expect(err).To(HaveOccurred())
 		})
 
 		It("Fails if link set up fails", func() {
 			netlinkMock.On("LinkByName", mock.Anything).Return(nil, fmt.Errorf("failed to find interface"))
 			gwIPs := []net.IP{net.ParseIP("10.0.0.11")}
-			err := configureSvcRouteViaInterface("ens1f0", gwIPs)
+			wg := &sync.WaitGroup{}
+			rm := routemanager.NewController()
+			rm.SetNetLinkOpMockInst(netlinkMock)
+			stopCh := make(chan struct{})
+			wg.Add(1)
+			go func() {
+				rm.Run(stopCh, 10*time.Second)
+				wg.Done()
+			}()
+			defer func() {
+				close(stopCh)
+				wg.Wait()
+			}()
+			err := configureSvcRouteViaInterface(rm, "ens1f0", gwIPs)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -1462,9 +1654,241 @@ var _ = Describe("Gateway unit tests", func() {
 			gwIPs := []net.IP{net.ParseIP("10.0.0.11")}
 			netlinkMock.On("LinkByName", mock.Anything).Return(nil, nil)
 			netlinkMock.On("LinkSetUp", mock.Anything).Return(nil)
-
-			err = configureSvcRouteViaInterface("ens1f0", gwIPs)
+			wg := &sync.WaitGroup{}
+			rm := routemanager.NewController()
+			rm.SetNetLinkOpMockInst(netlinkMock)
+			stopCh := make(chan struct{})
+			wg.Add(1)
+			go func() {
+				rm.Run(stopCh, 10*time.Second)
+				wg.Done()
+			}()
+			defer func() {
+				close(stopCh)
+				wg.Wait()
+			}()
+			err = configureSvcRouteViaInterface(rm, "ens1f0", gwIPs)
 			Expect(err).To(HaveOccurred())
+		})
+	})
+
+	Context("getGatewayNextHops", func() {
+
+		It("Finds correct gateway interface and nexthops without configuration", func() {
+			_, ipnet, err := net.ParseCIDR("0.0.0.0/0")
+			Expect(err).ToNot(HaveOccurred())
+			config.Kubernetes.ServiceCIDRs = []*net.IPNet{ipnet}
+			gwIPs := []net.IP{net.ParseIP("10.0.0.11")}
+			lnk := &linkMock.Link{}
+			lnkAttr := &netlink.LinkAttrs{
+				Name:  "ens1f0",
+				Index: 5,
+			}
+			defaultRoute := &netlink.Route{
+				Dst:       ipnet,
+				LinkIndex: 5,
+				Scope:     netlink.SCOPE_UNIVERSE,
+				Gw:        gwIPs[0],
+				MTU:       config.Default.MTU,
+			}
+			lnk.On("Attrs").Return(lnkAttr)
+			netlinkMock.On("LinkByName", mock.Anything).Return(lnk, nil)
+			netlinkMock.On("LinkByIndex", mock.Anything).Return(lnk, nil)
+			netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return([]netlink.Route{*defaultRoute}, nil)
+			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(gatewayIntf).To(Equal(lnkAttr.Name))
+			Expect(gatewayNextHops[0]).To(Equal(gwIPs[0]))
+		})
+
+		It("Finds correct gateway interface and nexthops with single stack configuration", func() {
+			ifName := "enf1f0"
+			nextHopCfg := "10.0.0.11"
+
+			fexec := ovntest.NewLooseCompareFakeExec()
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 port-to-br %s", ifName),
+				Err: fmt.Errorf(""),
+			})
+			err := util.SetExec(fexec)
+			Expect(err).NotTo(HaveOccurred())
+
+			gwIPs := []net.IP{net.ParseIP(nextHopCfg)}
+			config.Gateway.Interface = ifName
+			config.Gateway.NextHop = nextHopCfg
+
+			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(gatewayIntf).To(Equal(ifName))
+			Expect(gatewayNextHops[0]).To(Equal(gwIPs[0]))
+		})
+
+		It("Finds correct gateway interface and nexthops with dual stack configuration", func() {
+			ifName := "enf1f0"
+			nextHopCfg := "10.0.0.11,fc00:f853:ccd:e793::1"
+
+			fexec := ovntest.NewLooseCompareFakeExec()
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 port-to-br %s", ifName),
+				Err: fmt.Errorf(""),
+			})
+			err := util.SetExec(fexec)
+			Expect(err).NotTo(HaveOccurred())
+
+			nextHops := strings.Split(nextHopCfg, ",")
+			gwIPs := []net.IP{net.ParseIP(nextHops[0]), net.ParseIP(nextHops[1])}
+			config.Gateway.Interface = ifName
+			config.Gateway.NextHop = nextHopCfg
+			config.IPv4Mode = true
+			config.IPv6Mode = true
+
+			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(gatewayIntf).To(Equal(ifName))
+			Expect(gatewayNextHops).To(Equal(gwIPs))
+		})
+
+		ovntest.OnSupportedPlatformsIt("Finds correct gateway interface and nexthops when gateway bridge is created", func() {
+			ifName := "enf1f0"
+			nextHopCfg := "10.0.0.11"
+
+			fexec := ovntest.NewLooseCompareFakeExec()
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    fmt.Sprintf("ovs-vsctl --timeout=15 port-to-br %s", ifName),
+				Err:    fmt.Errorf(""),
+				Output: "br" + ifName,
+			})
+			err := util.SetExec(fexec)
+			Expect(err).NotTo(HaveOccurred())
+
+			gwIPs := []net.IP{net.ParseIP(nextHopCfg)}
+			config.Gateway.Interface = ifName
+			config.Gateway.NextHop = nextHopCfg
+
+			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(gatewayIntf).To(Equal(ifName))
+			Expect(gatewayNextHops[0]).To(Equal(gwIPs[0]))
+		})
+
+		Context("In Local GW mode", func() {
+			ovntest.OnSupportedPlatformsIt("Finds correct gateway interface and nexthops when dummy gateway bridge is created", func() {
+				ifName := "enf1f0"
+				dummyBridgeName := "br-ex"
+				_, ipnet, err := net.ParseCIDR("0.0.0.0/0")
+				Expect(err).ToNot(HaveOccurred())
+				hostGwIPs := []net.IP{net.ParseIP("10.0.0.11")}
+				lnk := &linkMock.Link{}
+				lnkAttr := &netlink.LinkAttrs{
+					Name:  ifName,
+					Index: 5,
+				}
+				defaultRoute := &netlink.Route{
+					Dst:       ipnet,
+					LinkIndex: 5,
+					Scope:     netlink.SCOPE_UNIVERSE,
+					Gw:        hostGwIPs[0],
+					MTU:       config.Default.MTU,
+				}
+				lnk.On("Attrs").Return(lnkAttr)
+				netlinkMock.On("LinkByName", mock.Anything).Return(lnk, nil)
+				netlinkMock.On("LinkByIndex", mock.Anything).Return(lnk, nil)
+				netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return([]netlink.Route{*defaultRoute}, nil)
+
+				fexec := ovntest.NewLooseCompareFakeExec()
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    fmt.Sprintf("ovs-vsctl --timeout=15 port-to-br %s", dummyBridgeName),
+					Err:    fmt.Errorf(""),
+					Output: "",
+				})
+				err = util.SetExec(fexec)
+				Expect(err).NotTo(HaveOccurred())
+
+				gwIPs := []net.IP{config.Gateway.MasqueradeIPs.V4DummyNextHopMasqueradeIP}
+				config.Gateway.Interface = dummyBridgeName
+				config.Gateway.Mode = config.GatewayModeLocal
+				config.Gateway.AllowNoUplink = true
+
+				gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+				Expect(err).NotTo(HaveOccurred())
+				Expect(gatewayIntf).To(Equal(dummyBridgeName))
+				Expect(gatewayNextHops[0]).To(Equal(gwIPs[0]))
+			})
+
+			ovntest.OnSupportedPlatformsIt("Finds correct gateway interface and nexthops when dummy gateway bridge is created and no default route", func() {
+				ifName := "enf1f0"
+				dummyBridgeName := "br-ex"
+				lnk := &linkMock.Link{}
+				lnkAttr := &netlink.LinkAttrs{
+					Name:  ifName,
+					Index: 5,
+				}
+
+				lnk.On("Attrs").Return(lnkAttr)
+				netlinkMock.On("LinkByName", mock.Anything).Return(lnk, nil)
+				netlinkMock.On("LinkByIndex", mock.Anything).Return(lnk, nil)
+				netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return([]netlink.Route{}, nil)
+
+				fexec := ovntest.NewLooseCompareFakeExec()
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    fmt.Sprintf("ovs-vsctl --timeout=15 port-to-br %s", dummyBridgeName),
+					Err:    fmt.Errorf(""),
+					Output: "",
+				})
+				err := util.SetExec(fexec)
+				Expect(err).NotTo(HaveOccurred())
+
+				gwIPs := []net.IP{config.Gateway.MasqueradeIPs.V4DummyNextHopMasqueradeIP}
+				config.Gateway.Interface = dummyBridgeName
+				config.Gateway.Mode = config.GatewayModeLocal
+				config.Gateway.AllowNoUplink = true
+
+				gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+				Expect(err).NotTo(HaveOccurred())
+				Expect(gatewayIntf).To(Equal(dummyBridgeName))
+				Expect(gatewayNextHops[0]).To(Equal(gwIPs[0]))
+			})
+
+			ovntest.OnSupportedPlatformsIt("Returns error when dummy gateway bridge is created without allow-no-uplink flag", func() {
+				ifName := "enf1f0"
+				dummyBridgeName := "br-ex"
+				_, ipnet, err := net.ParseCIDR("0.0.0.0/0")
+				Expect(err).ToNot(HaveOccurred())
+				hostGwIPs := []net.IP{net.ParseIP("10.0.0.11")}
+				lnk := &linkMock.Link{}
+				lnkAttr := &netlink.LinkAttrs{
+					Name:  ifName,
+					Index: 5,
+				}
+				defaultRoute := &netlink.Route{
+					Dst:       ipnet,
+					LinkIndex: 5,
+					Scope:     netlink.SCOPE_UNIVERSE,
+					Gw:        hostGwIPs[0],
+					MTU:       config.Default.MTU,
+				}
+				lnk.On("Attrs").Return(lnkAttr)
+				netlinkMock.On("LinkByName", mock.Anything).Return(lnk, nil)
+				netlinkMock.On("LinkByIndex", mock.Anything).Return(lnk, nil)
+				netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return([]netlink.Route{*defaultRoute}, nil)
+
+				fexec := ovntest.NewLooseCompareFakeExec()
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    fmt.Sprintf("ovs-vsctl --timeout=15 port-to-br %s", dummyBridgeName),
+					Err:    fmt.Errorf(""),
+					Output: "",
+				})
+				err = util.SetExec(fexec)
+				Expect(err).NotTo(HaveOccurred())
+
+				config.Gateway.Interface = dummyBridgeName
+				config.Gateway.Mode = config.GatewayModeLocal
+
+				gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+				Expect(errors.As(err, new(*GatewayInterfaceMismatchError))).To(BeTrue())
+				Expect(gatewayIntf).To(Equal(""))
+				Expect(len(gatewayNextHops)).To(Equal(0))
+			})
 		})
 	})
 })

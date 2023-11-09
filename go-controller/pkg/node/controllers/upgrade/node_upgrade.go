@@ -39,7 +39,7 @@ func NewController(client kubernetes.Interface, wf factory.NodeWatchFactory) *up
 // WaitForTopologyVerions polls continuously until the running master has reported a topology of
 // at least the minimum requested.
 func (uc *upgradeController) WaitForTopologyVersion(ctx context.Context, minVersion int, timeout time.Duration) error {
-	return wait.PollWithContext(ctx, 10*time.Second, timeout, func(ctx context.Context) (bool, error) {
+	return wait.PollUntilContextTimeout(ctx, 10*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		ver, err := uc.GetTopologyVersion(ctx)
 		if err == nil {
 			if ver >= minVersion {
@@ -62,21 +62,21 @@ func (uc *upgradeController) GetTopologyVersion(ctx context.Context) (int, error
 	ns := globalconfig.Kubernetes.OVNConfigNamespace
 	name := ovntypes.OvnK8sStatusCMName
 	cm, err := uc.client.CoreV1().ConfigMaps(ns).Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		if !apierrors.IsNotFound(err) {
-			klog.Warningf("Error retrieving ConfigMap %s/%s: %v", ns, name, err)
-		}
+	if err != nil && !apierrors.IsNotFound(err) {
+		klog.Warningf("Error retrieving ConfigMap %s/%s: %v", ns, name, err)
 		return -1, err
 	}
-	tv, ok := cm.Data[ovntypes.OvnK8sStatusKeyTopoVersion]
-	if ok {
-		out, err := strconv.Atoi(tv)
-		if err == nil {
-			klog.Infof("Detected cluster topology version %d from ConfigMap %s/%s", out, ns, name)
-			return out, nil
-		} else {
-			return -1, fmt.Errorf("invalid %s value in ConfigMap %s/%s: %s %v",
-				ovntypes.OvnK8sStatusKeyTopoVersion, ns, name, tv, err)
+	if err == nil {
+		tv, ok := cm.Data[ovntypes.OvnK8sStatusKeyTopoVersion]
+		if ok {
+			out, err := strconv.Atoi(tv)
+			if err == nil {
+				klog.Infof("Detected cluster topology version %d from ConfigMap %s/%s", out, ns, name)
+				return out, nil
+			} else {
+				return -1, fmt.Errorf("invalid %s value in ConfigMap %s/%s: %s %v",
+					ovntypes.OvnK8sStatusKeyTopoVersion, ns, name, tv, err)
+			}
 		}
 	}
 

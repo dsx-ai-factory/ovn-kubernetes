@@ -21,7 +21,7 @@ spec:
        message: There is no running ovnkube-manager
 
     - alert: OvnKubeManagerMultipleLeaders
-      expr: sum(ovnkube_master_leader) > 1
+      expr: sum(ovnkube_controller_leader) > 1
       for: 4m
       labels:
        severity: critical
@@ -31,7 +31,7 @@ spec:
        message: There are multiple ovnkube-manager leaders
 
     - alert: OvnKubeManagerNoLeader
-      expr: max(ovnkube_master_leader) == 0
+      expr: max(ovnkube_controller_leader) == 0
       for: 4m
       labels:
         severity: critical
@@ -155,7 +155,7 @@ spec:
       expr: |
         histogram_quantile(0.99,
          sum by (le) (
-           rate(ovnkube_master_pod_creation_latency_seconds_bucket[2m])
+           rate(ovnkube_controller_pod_creation_latency_seconds_bucket[2m])
          ) 
         ) > 20
       for: 30m
@@ -172,14 +172,14 @@ spec:
       expr: |
         histogram_quantile(0.99,
          sum by (le) ( 
-          rate(ovnkube_master_pod_creation_latency_seconds_bucket[2m] 
+          rate(ovnkube_controller_pod_creation_latency_seconds_bucket[2m] 
           offset 15m)
          )
         )
         -
         histogram_quantile(0.99,
          sum by (le) (
-          rate(ovnkube_master_pod_creation_latency_seconds_bucket[2m])
+          rate(ovnkube_controller_pod_creation_latency_seconds_bucket[2m])
          )
         ) > 20 
       for: 30m
@@ -196,7 +196,7 @@ spec:
       expr: |
         histogram_quantile(0.99,
           sum by (le) (
-            rate(ovnkube_master_ovn_cli_latency_seconds_bucket{
+            rate(ovnkube_controller_ovn_cli_latency_seconds_bucket{
               command="ovn-nbctl"}[15m])
           )
         ) > 3 
@@ -214,7 +214,7 @@ spec:
       expr: |
         histogram_quantile(0.99,
           sum by (le) (
-            rate(ovnkube_master_ovn_cli_latency_seconds_bucket{
+            rate(ovnkube_controller_ovn_cli_latency_seconds_bucket{
               command="ovn-sbctl"}[15m])
           )
         ) > 3
@@ -232,7 +232,7 @@ spec:
       expr: |
         histogram_quantile(0.99,
           sum by (le) (
-            rate(ovnkube_master_resource_update_latency_seconds_bucket{
+            rate(ovnkube_controller_resource_update_latency_seconds_bucket{
               name="NetworkPolicy"}[15m])
           )
         ) > 1
@@ -250,7 +250,7 @@ spec:
       expr: |
         histogram_quantile(0.99,
           sum by (le) (
-            rate(ovnkube_master_resource_update_latency_seconds_bucket{
+            rate(ovnkube_controller_resource_update_latency_seconds_bucket{
               name="Namespace"}[15m])
           )
         ) > 1
@@ -268,7 +268,7 @@ spec:
       expr: |
         histogram_quantile(0.99,
           sum by (le) (
-            rate(ovnkube_master_resource_update_latency_seconds_bucket{
+            rate(ovnkube_controller_resource_update_latency_seconds_bucket{
               name="Service"}[15m])
           )
         ) > 1
@@ -286,7 +286,7 @@ spec:
       expr: |
         histogram_quantile(0.99,
           sum by (le) (
-            rate(ovnkube_master_resource_update_latency_seconds_bucket{
+            rate(ovnkube_controller_resource_update_latency_seconds_bucket{
               name="Endpoint"}[15m])
           )
         ) > 1
@@ -327,7 +327,7 @@ spec:
          increasing {{ printf "%.2f" $value }} Mb / 5 minutes
 
     - alert: OvnKubeManagerStale
-      expr: time() - max(ovnkube_master_nb_e2e_timestamp) > 120
+      expr: time() - max(ovnkube_controller_nb_e2e_timestamp) > 120
       for: 4m
       labels:
        severity: major
@@ -337,7 +337,7 @@ spec:
          ovn-kubernetes has not written anything to the northbound database for too long
 
     - alert: OvnNorthdStale
-      expr: max(ovnkube_master_nb_e2e_timestamp) - max(ovnkube_master_sb_e2e_timestamp) > 120
+      expr: max(ovnkube_controller_nb_e2e_timestamp) - max(ovnkube_controller_sb_e2e_timestamp) > 120
       for: 4m
       labels:
        severity: critical

@@ -4,22 +4,6 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-# generate ovsdb bindings
-if  ! ( command -v modelgen > /dev/null ); then
-  echo "modelgen not found, installing github.com/ovn-org/libovsdb/cmd/modelgen"
-  olddir="${PWD}"
-  builddir="$(mktemp -d)"
-  cd "${builddir}"
-  GO111MODULE=on go install github.com/ovn-org/libovsdb/cmd/modelgen@2cbe2d093e1247d42050306dd5c9a2d6c11f2460
-  cd "${olddir}"
-  if [[ "${builddir}" == /tmp/* ]]; then #paranoia
-      rm -rf "${builddir}"
-  fi
-fi
-
-go generate ./pkg/nbdb
-go generate ./pkg/sbdb
-
 crds=$(ls pkg/crd 2> /dev/null)
 if [ -z "${crds}" ]; then
   exit
@@ -54,6 +38,7 @@ for crd in ${crds}; do
     --input-base "" \
     --input github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers \
     --output-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers/apis/clientset \
+    --plural-exceptions="EgressQoS:EgressQoSes" \
     "$@"
 
   echo "Generating listers for $crd"
@@ -61,6 +46,7 @@ for crd in ${crds}; do
     --go-header-file hack/boilerplate.go.txt \
     --input-dirs github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers \
     --output-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers/apis/listers \
+    --plural-exceptions="EgressQoS:EgressQoSes" \
     "$@"
 
   echo "Generating informers for $crd"
@@ -70,6 +56,7 @@ for crd in ${crds}; do
     --versioned-clientset-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers/apis/clientset/versioned \
     --listers-package  github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers/apis/listers \
     --output-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers/apis/informers \
+    --plural-exceptions="EgressQoS:EgressQoSes" \
     "$@"
 done
 
@@ -82,13 +69,21 @@ echo "Editing egressFirewall CRD"
 ## metav1.ObjectMeta it is required that we add it after the generation of the CRD.
 sed -i -e':begin;$!N;s/.*metadata:\n.*type: object/&\n            properties:\n              name:\n                type: string\n                pattern: ^default$/;P;D' \
 	$(pwd)/_output/crds/k8s.ovn.org_egressfirewalls.yaml
-## It is also required that we restrict the number of properties on the 'to' section of the egressfirewall
-## so that either 'dnsName' or 'cidrSelector is set in the crd and currently kubebuilder does not support
-## adding validation to objects only to the fields
-sed -i -e ':begin;$!N;s/                          type: string\n.*type: object/&\n                      minProperties: 1\n                      maxProperties: 1/;P;D' \
-	$(pwd)/_output/crds/k8s.ovn.org_egressfirewalls.yaml
 
 echo "Editing EgressQoS CRD"
 ## We desire that only EgressQoS with the name "default" are accepted by the apiserver.
 sed -i -e':begin;$!N;s/.*metadata:\n.*type: object/&\n            properties:\n              name:\n                type: string\n                pattern: ^default$/;P;D' \
 	$(pwd)/_output/crds/k8s.ovn.org_egressqoses.yaml
+
+echo "Copying the CRDs to dist/templates as j2 files... Add them to your commit..."
+echo "Copying egressFirewall CRD"
+cp $(pwd)/_output/crds/k8s.ovn.org_egressfirewalls.yaml ../dist/templates/k8s.ovn.org_egressfirewalls.yaml.j2
+echo "Copying egressIP CRD"
+cp _$(pwd)/output/crds/k8s.ovn.org_egressips.yaml ../dist/templates/k8s.ovn.org_egressips.yaml.j2
+echo "Copying egressQoS CRD"
+cp $(pwd)/_output/crds/k8s.ovn.org_egressqoses.yaml ../dist/templates/k8s.ovn.org_egressqoses.yaml.j2
+# NOTE: When you update vendoring versions for the ANP & BANP APIs, we must update the version of the CRD we pull from in the below URL
+echo "Copying Admin Network Policy CRD"
+curl -sSL https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.0/config/crd/policy.networking.k8s.io_adminnetworkpolicies.yaml -o ../dist/templates/policy.networking.k8s.io_adminnetworkpolicies.yaml
+echo "Copying Baseline Admin Network Policy CRD"
+curl -sSL https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.0/config/crd/policy.networking.k8s.io_baselineadminnetworkpolicies.yaml -o ../dist/templates/policy.networking.k8s.io_baselineadminnetworkpolicies.yaml

@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/gob"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -19,6 +18,7 @@ import (
 	"github.com/ovn-org/libovsdb/mapper"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/libovsdb/updates"
 )
 
 const (
@@ -57,14 +57,14 @@ type ErrIndexExists struct {
 	Value    interface{}
 	Index    string
 	New      string
-	Existing string
+	Existing []string
 }
 
 func (e *ErrIndexExists) Error() string {
 	return fmt.Sprintf("cannot insert %s in the %s table. item %s has identical indexes. index: %s, value: %v", e.New, e.Table, e.Existing, e.Index, e.Value)
 }
 
-func NewIndexExistsError(table string, value interface{}, index string, new, existing string) *ErrIndexExists {
+func NewIndexExistsError(table string, value interface{}, index string, new string, existing []string) *ErrIndexExists {
 	return &ErrIndexExists{
 		table, value, index, new, existing,
 	}
@@ -167,6 +167,13 @@ func (r *RowCache) Row(uuid string) model.Model {
 	return r.rowByUUID(uuid)
 }
 
+func (r *RowCache) HasRow(uuid string) bool {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+	_, found := r.cache[uuid]
+	return found
+}
+
 // rowsByModels searches the cache to find all rows matching any of the provided
 // models, either by UUID or indexes. An error is returned if the model schema
 // has no UUID field, or if the provided models are not all the same type.
@@ -264,7 +271,7 @@ func (r *RowCache) Create(uuid string, m model.Model, checkIndexes bool) error {
 	if err != nil {
 		return err
 	}
-	newIndexes := r.newIndexes()
+	addIndexes := r.newIndexes()
 	for _, indexSpec := range r.indexSpecs {
 		index := indexSpec.index
 		val, err := valueFromIndex(info, indexSpec.columns)
@@ -272,25 +279,29 @@ func (r *RowCache) Create(uuid string, m model.Model, checkIndexes bool) error {
 			return err
 		}
 
+		uuidset := newUUIDSet(uuid)
+
 		vals := r.indexes[index]
-		if existing, ok := vals[val]; ok && !existing.empty() && checkIndexes && indexSpec.isSchemaIndex() {
-			return NewIndexExistsError(r.name, val, string(index), uuid, existing.getAny())
+		existing := vals[val]
+		if checkIndexes && indexSpec.isSchemaIndex() && !existing.empty() && !existing.equals(uuidset) {
+			return NewIndexExistsError(r.name, val, string(index), uuid, existing.list())
 		}
 
-		uuidset := newUUIDSet(uuid)
-		if indexSpec.isSchemaIndex() {
-			newIndexes[index][val] = uuidset
-		} else {
-			newIndexes[index][val] = addUUIDSet(r.indexes[index][val], uuidset)
-		}
+		addIndexes[index][val] = uuidset
 	}
 
 	// write indexes
-	for k1, v1 := range newIndexes {
-		for k2, v2 := range v1 {
-			r.indexes[k1][k2] = v2
+	for _, indexSpec := range r.indexSpecs {
+		index := indexSpec.index
+		for k, v := range addIndexes[index] {
+			if indexSpec.isSchemaIndex() {
+				r.indexes[index][k] = v
+			} else {
+				r.indexes[index][k] = addUUIDSet(r.indexes[index][k], v)
+			}
 		}
 	}
+
 	r.cache[uuid] = model.Clone(m)
 	return nil
 }
@@ -311,7 +322,9 @@ func (r *RowCache) Update(uuid string, m model.Model, checkIndexes bool) (model.
 	if err != nil {
 		return nil, err
 	}
-	newIndexes := r.newIndexes()
+
+	addIndexes := r.newIndexes()
+	removeIndexes := r.newIndexes()
 	var errs []error
 	for _, indexSpec := range r.indexSpecs {
 		index := indexSpec.index
@@ -331,44 +344,51 @@ func (r *RowCache) Update(uuid string, m model.Model, checkIndexes bool) (model.
 		}
 		// old and new values are NOT the same
 
+		uuidset := newUUIDSet(uuid)
+
 		// check that there are no conflicts
 		vals := r.indexes[index]
-		if existing, ok := vals[newVal]; ok && indexSpec.isSchemaIndex() && checkIndexes && !existing.empty() && !existing.has(uuid) {
+		existing := vals[newVal]
+		if checkIndexes && indexSpec.isSchemaIndex() && !existing.empty() && !existing.equals(uuidset) {
 			errs = append(errs, NewIndexExistsError(
 				r.name,
 				newVal,
 				string(index),
 				uuid,
-				existing.getAny(),
+				existing.list(),
 			))
 		}
 
-		uuidset := newUUIDSet(uuid)
-		if indexSpec.isSchemaIndex() {
-			newIndexes[index][newVal] = uuidset
-			newIndexes[index][oldVal] = nil
-		} else {
-			newIndexes[index][newVal] = addUUIDSet(r.indexes[index][newVal], uuidset)
-			newIndexes[index][oldVal] = substractUUIDSet(r.indexes[index][oldVal], uuidset)
-		}
+		addIndexes[index][newVal] = uuidset
+		removeIndexes[index][oldVal] = uuidset
 	}
 	if len(errs) > 0 {
 		return nil, fmt.Errorf("%+v", errs)
 	}
+
 	// write indexes
-	for k1, v1 := range newIndexes {
-		for k2, v2 := range v1 {
-			if len(v2) == 0 {
-				delete(r.indexes[k1], k2)
+	for _, indexSpec := range r.indexSpecs {
+		index := indexSpec.index
+		for k, v := range addIndexes[index] {
+			if indexSpec.isSchemaIndex() {
+				r.indexes[index][k] = v
 			} else {
-				r.indexes[k1][k2] = v2
+				r.indexes[index][k] = addUUIDSet(r.indexes[index][k], v)
+			}
+		}
+		for k, v := range removeIndexes[index] {
+			if indexSpec.isSchemaIndex() || substractUUIDSet(r.indexes[index][k], v).empty() {
+				delete(r.indexes[index], k)
 			}
 		}
 	}
+
 	r.cache[uuid] = model.Clone(m)
 	return oldRow, nil
 }
 
+// IndexExists checks if any of the schema indexes of the provided model is
+// already in the cache under a different UUID.
 func (r *RowCache) IndexExists(row model.Model) error {
 	info, err := r.dbModel.NewModelInfo(row)
 	if err != nil {
@@ -391,13 +411,14 @@ func (r *RowCache) IndexExists(row model.Model) error {
 			continue
 		}
 		vals := r.indexes[index]
-		if existing := vals[val]; !existing.empty() && !existing.has(uuid) {
+		existing := vals[val]
+		if !existing.empty() && !existing.equals(newUUIDSet(uuid)) {
 			return NewIndexExistsError(
 				r.name,
 				val,
 				string(index),
 				uuid,
-				existing.getAny(),
+				existing.list(),
 			)
 		}
 	}
@@ -416,24 +437,31 @@ func (r *RowCache) Delete(uuid string) error {
 	if err != nil {
 		return err
 	}
+
+	removeIndexes := r.newIndexes()
 	for _, indexSpec := range r.indexSpecs {
 		index := indexSpec.index
 		oldVal, err := valueFromIndex(oldInfo, indexSpec.columns)
 		if err != nil {
 			return err
 		}
-		// only remove the index if it is pointing to this uuid
-		// otherwise we can cause a consistency issue if we've processed
-		// updates out of order
-		vals := r.indexes[index]
-		existing, ok := vals[oldVal]
-		if ok {
-			existing.remove(uuid)
-			if len(existing) == 0 {
-				delete(vals, oldVal)
+
+		removeIndexes[index][oldVal] = newUUIDSet(uuid)
+	}
+
+	// write indexes
+	for _, indexSpec := range r.indexSpecs {
+		index := indexSpec.index
+		for k, v := range removeIndexes[index] {
+			// only remove the index if it is pointing to this uuid
+			// otherwise we can cause a consistency issue if we've processed
+			// updates out of order
+			if substractUUIDSet(r.indexes[index][k], v).empty() {
+				delete(r.indexes[index], k)
 			}
 		}
 	}
+
 	delete(r.cache, uuid)
 	return nil
 }
@@ -473,6 +501,7 @@ func (r *RowCache) RowsShallow() map[string]model.Model {
 // quick as possible, via indexes, a reduced list of candidate models that might
 // match all conditions, which should be better than just evaluating all
 // conditions against all rows of a table.
+//
 //nolint:gocyclo // warns overall function is complex but ignores inner functions
 func (r *RowCache) uuidsByConditionsAsIndexes(conditions []ovsdb.Condition, nativeValues []interface{}) (uuidset, error) {
 	type indexableCondition struct {
@@ -931,53 +960,22 @@ func (t *TableCache) Populate(tableUpdates ovsdb.TableUpdates) error {
 	defer t.mutex.Unlock()
 
 	for table := range t.dbModel.Types() {
-		updates, ok := tableUpdates[table]
+		tu, ok := tableUpdates[table]
 		if !ok {
 			continue
 		}
 		tCache := t.cache[table]
-		for uuid, row := range updates {
-			dbgLogger := t.logger.WithValues("uuid", uuid, "table", table).V(5)
-			dbgLogger.Info("processing update")
-			if row.New != nil {
-				newModel, err := t.CreateModel(table, row.New, uuid)
-				if err != nil {
-					return err
-				}
-				if existing := tCache.Row(uuid); existing != nil {
-					if !model.Equal(newModel, existing) {
-						if _, err := tCache.Update(uuid, newModel, false); err != nil {
-							return err
-						}
-						if dbgLogger.Enabled() {
-							dbgLogger.Info("updated row", "old:", fmt.Sprintf("%+v", existing), "new", fmt.Sprintf("%+v", newModel))
-						}
-						t.eventProcessor.AddEvent(updateEvent, table, existing, newModel)
-					}
-					// no diff
-					continue
-				}
-				if dbgLogger.Enabled() {
-					dbgLogger.Info("creating row", "model", fmt.Sprintf("%+v", newModel))
-				}
-				if err := tCache.Create(uuid, newModel, false); err != nil {
-					return err
-				}
-				t.eventProcessor.AddEvent(addEvent, table, nil, newModel)
-				continue
-			} else {
-				oldModel, err := t.CreateModel(table, row.Old, uuid)
-				if err != nil {
-					return err
-				}
-				if dbgLogger.Enabled() {
-					dbgLogger.Info("deleting row", "model", fmt.Sprintf("%+v", oldModel))
-				}
-				if err := tCache.Delete(uuid); err != nil {
-					return err
-				}
-				t.eventProcessor.AddEvent(deleteEvent, table, oldModel, nil)
-				continue
+		for uuid, row := range tu {
+			t.logger.V(5).Info("processing update", "table", table, "uuid", uuid)
+			update := updates.ModelUpdates{}
+			current := tCache.cache[uuid]
+			err := update.AddRowUpdate(t.dbModel, table, uuid, current, *row)
+			if err != nil {
+				return err
+			}
+			err = t.ApplyCacheUpdate(update)
+			if err != nil {
+				return err
 			}
 		}
 	}
@@ -989,74 +987,25 @@ func (t *TableCache) Populate2(tableUpdates ovsdb.TableUpdates2) error {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	for table := range t.dbModel.Types() {
-		updates, ok := tableUpdates[table]
+		tu, ok := tableUpdates[table]
 		if !ok {
 			continue
 		}
 		tCache := t.cache[table]
-		for uuid, row := range updates {
-			dbgLogger := t.logger.WithValues("uuid", uuid, "table", table).V(5)
-			dbgLogger.Info("processing update")
-			switch {
-			case row.Initial != nil:
-				m, err := t.CreateModel(table, row.Initial, uuid)
-				if err != nil {
-					return err
-				}
-				if dbgLogger.Enabled() {
-					dbgLogger.Info("creating row", "model", fmt.Sprintf("%+v", m))
-				}
-				if err := tCache.Create(uuid, m, false); err != nil {
-					return err
-				}
-				t.eventProcessor.AddEvent(addEvent, table, nil, m)
-			case row.Insert != nil:
-				m, err := t.CreateModel(table, row.Insert, uuid)
-				if err != nil {
-					return err
-				}
-				if dbgLogger.Enabled() {
-					dbgLogger.Info("inserting row", "model", fmt.Sprintf("%+v", m))
-				}
-				if err := tCache.Create(uuid, m, false); err != nil {
-					return err
-				}
-				t.eventProcessor.AddEvent(addEvent, table, nil, m)
-			case row.Modify != nil:
-				modified := tCache.Row(uuid)
-				if modified == nil {
-					return NewErrCacheInconsistent(fmt.Sprintf("row with uuid %s does not exist", uuid))
-				}
-				changed, err := t.ApplyModifications(table, modified, *row.Modify)
-				if err != nil {
-					return fmt.Errorf("unable to apply row modifications: %w", err)
-				}
-				if changed {
-					existing, err := tCache.Update(uuid, modified, false)
-					if err != nil {
-						return err
-					}
-					if dbgLogger.Enabled() {
-						dbgLogger.Info("updated row", "old", fmt.Sprintf("%+v", existing), "new", fmt.Sprintf("%+v", modified))
-					}
-					t.eventProcessor.AddEvent(updateEvent, table, existing, modified)
-				}
-			case row.Delete != nil:
-				fallthrough
-			default:
-				// If everything else is nil (including Delete because it's a key with
-				// no value on the wire), then process a delete
-				m := tCache.Row(uuid)
-				if m == nil {
-					return NewErrCacheInconsistent(fmt.Sprintf("row with uuid %s does not exist", uuid))
-				}
-				if dbgLogger.Enabled() {
-					dbgLogger.Info("deleting row", "model", fmt.Sprintf("%+v", m))
-				}
-				if err := tCache.Delete(uuid); err != nil {
-					return err
-				}
-				t.eventProcessor.AddEvent(deleteEvent, table, m, nil)
+		for uuid, row := range tu {
+			t.logger.V(5).Info("processing update", "table", table, "uuid", uuid)
+			update := updates.ModelUpdates{}
+			current := tCache.cache[uuid]
+			if row.Initial == nil && row.Insert == nil && current == nil {
+				return NewErrCacheInconsistent(fmt.Sprintf("row with uuid %s does not exist", uuid))
+			}
+			err := update.AddRowUpdate2(t.dbModel, table, uuid, current, *row)
+			if err != nil {
+				return err
+			}
+			err = t.ApplyCacheUpdate(update)
+			if err != nil {
+				return err
 			}
 		}
 	}
@@ -1225,203 +1174,46 @@ func (e *eventProcessor) Run(stopCh <-chan struct{}) {
 	}
 }
 
-// CreateModel creates a new Model instance based on the Row information
-func (t *TableCache) CreateModel(tableName string, row *ovsdb.Row, uuid string) (model.Model, error) {
-	if !t.dbModel.Valid() {
-		return nil, fmt.Errorf("database model not valid")
-	}
-
-	table := t.dbModel.Schema.Table(tableName)
-	if table == nil {
-		return nil, fmt.Errorf("table %s not found", tableName)
-	}
-	model, err := t.dbModel.NewModel(tableName)
-	if err != nil {
-		return nil, err
-	}
-	info, err := t.dbModel.NewModelInfo(model)
-	if err != nil {
-		return nil, err
-	}
-	err = t.dbModel.Mapper.GetRowData(row, info)
-	if err != nil {
-		return nil, err
-	}
-
-	if uuid != "" {
-		if err := info.SetField("_uuid", uuid); err != nil {
-			return nil, err
-		}
-	}
-
-	return model, nil
+type cacheUpdate interface {
+	GetUpdatedTables() []string
+	ForEachModelUpdate(table string, do func(uuid string, old, new model.Model) error) error
 }
 
-// ApplyModifications applies the contents of a RowUpdate2.Modify to a model.
-// It returns true if any changes were actually applied.
-// nolint: gocyclo
-func (t *TableCache) ApplyModifications(tableName string, base model.Model, update ovsdb.Row) (bool, error) {
-	if !t.dbModel.Valid() {
-		return false, fmt.Errorf("database model not valid")
-	}
-	table := t.dbModel.Schema.Table(tableName)
-	if table == nil {
-		return false, fmt.Errorf("table %s not found", tableName)
-	}
-	schema := t.dbModel.Schema.Table(tableName)
-	if schema == nil {
-		return false, fmt.Errorf("no schema for table %s", tableName)
-	}
-	info, err := t.dbModel.NewModelInfo(base)
-	if err != nil {
-		return false, err
-	}
-	modified := false
-	var uuid string
-	for k, v := range update {
-		if k == "_uuid" {
-			uuid = v.(string)
-			continue
-		}
-
-		current, err := info.FieldByColumn(k)
-		var colNotFoundErr *mapper.ErrColumnNotFound
-		if errors.As(err, &colNotFoundErr) {
-			// Ignore missing columns
-			t.logger.V(2).Info("OVSDB row modification received with missing column", "name", k)
-			continue
-		} else if err != nil {
-			return modified, err
-		}
-
-		var value interface{}
-		value, err = ovsdb.OvsToNative(schema.Column(k), v)
-		// we can overflow the max of a set with min: 0, max: 1 here because of the update2/update3 notation
-		// which to replace "foo" with "bar" would send a set with ["foo", "bar"]
-		if err != nil && schema.Column(k).Type == ovsdb.TypeSet && schema.Column(k).TypeObj.Max() == 1 {
-			value, err = ovsdb.OvsToNativeSlice(schema.Column(k).TypeObj.Key.Type, v)
-		}
+func (t *TableCache) ApplyCacheUpdate(update cacheUpdate) error {
+	tables := update.GetUpdatedTables()
+	for _, table := range tables {
+		tCache := t.cache[table]
+		err := update.ForEachModelUpdate(table, func(uuid string, old, new model.Model) error {
+			switch {
+			case old == nil && new != nil:
+				t.logger.V(5).Info("inserting model", "table", table, "uuid", uuid, "model", new)
+				err := tCache.Create(uuid, new, false)
+				if err != nil {
+					return err
+				}
+				t.eventProcessor.AddEvent(addEvent, table, nil, new)
+			case old != nil && new != nil:
+				t.logger.V(5).Info("updating model", "table", table, "uuid", uuid, "old", old, "new", new)
+				_, err := tCache.Update(uuid, new, false)
+				if err != nil {
+					return err
+				}
+				t.eventProcessor.AddEvent(updateEvent, table, old, new)
+			case new == nil:
+				t.logger.V(5).Info("deleting model", "table", table, "uuid", uuid, "model", old)
+				err := tCache.Delete(uuid)
+				if err != nil {
+					return err
+				}
+				t.eventProcessor.AddEvent(deleteEvent, table, old, nil)
+			}
+			return nil
+		})
 		if err != nil {
-			return modified, err
-		}
-		nv := reflect.ValueOf(value)
-
-		switch reflect.ValueOf(current).Kind() {
-		case reflect.Slice, reflect.Array:
-			// The difference between two sets are all elements that only belong to one of the sets.
-			// If a value in the update set exists in the set, it will be removed from the base set.
-			// If a value in the update set does not exist in the set, it will be added to the base set.
-			for i := 0; i < nv.Len(); i++ {
-				// search for match in base values
-				baseValue, err := info.FieldByColumn(k)
-				if err != nil {
-					return modified, err
-				}
-				bv := reflect.ValueOf(baseValue)
-				var found bool
-				newVal := nv.Index(i).Interface()
-				for j := 0; j < bv.Len(); j++ {
-					if bv.Index(j).Interface() == newVal {
-						// found a match, delete from slice
-						found = true
-						newValue := reflect.AppendSlice(bv.Slice(0, j), bv.Slice(j+1, bv.Len()))
-						err = info.SetField(k, newValue.Interface())
-						if err != nil {
-							return modified, err
-						}
-						modified = true
-						break
-					}
-				}
-				if !found {
-					newValue := reflect.Append(bv, nv.Index(i))
-					err = info.SetField(k, newValue.Interface())
-					if err != nil {
-						return modified, err
-					}
-					modified = true
-				}
-			}
-		case reflect.Ptr:
-			// if NativeToOVS was successful, then simply assign
-			bv := reflect.ValueOf(current)
-			if nv.Type() == bv.Type() {
-				if !reflect.DeepEqual(nv.Interface(), bv.Interface()) {
-					// If we get an update, and it's an empty set, value of the column will be set to nil
-					err = info.SetField(k, nv.Interface())
-					if err != nil {
-						return modified, err
-					}
-				} else {
-					// should not happen (at least client side) where we receive the same value we already have
-					t.logger.Error(nil, fmt.Sprintf("modification recevied with value already stored in cache!"+
-						" table: %s, uuid: %s, column: %s, row: %#v", tableName, uuid, k, update))
-					continue
-				}
-				modified = true
-				break
-			}
-
-			// catch all for unexpected values/cases
-			return modified, fmt.Errorf("unable to handle row modification for optional value: "+
-				"table: %s, uuid: %s, column: %s, row: %#v", tableName, uuid, k, update)
-
-		case reflect.Map:
-			// The difference between two maps are all key-value pairs whose keys appears in only one of the maps,
-			// plus the key-value pairs whose keys appear in both maps but with different values.
-			// For the latter elements, <row> includes the value from the new column.
-			iter := nv.MapRange()
-
-			baseValue, err := info.FieldByColumn(k)
-			if err != nil {
-				return modified, err
-			}
-			bv := reflect.ValueOf(baseValue)
-			if bv.IsNil() {
-				bv = reflect.MakeMap(nv.Type())
-			}
-
-			for iter.Next() {
-				mk := iter.Key()
-				mv := iter.Value()
-
-				existingValue := bv.MapIndex(mk)
-
-				// key does not exist, add it
-				if !existingValue.IsValid() {
-					bv.SetMapIndex(mk, mv)
-					modified = true
-				} else if reflect.DeepEqual(mv.Interface(), existingValue.Interface()) {
-					// delete it
-					bv.SetMapIndex(mk, reflect.Value{})
-					modified = true
-				} else {
-					// set new value
-					bv.SetMapIndex(mk, mv)
-					modified = true
-				}
-			}
-			if len(bv.MapKeys()) == 0 {
-				bv = reflect.Zero(nv.Type())
-			}
-			err = info.SetField(k, bv.Interface())
-			if err != nil {
-				return modified, err
-			}
-
-		default:
-			// For columns with single value, the difference is the value of the new column.
-			bv := reflect.ValueOf(current)
-			if !reflect.DeepEqual(nv.Interface(), bv.Interface()) {
-				err = info.SetField(k, value)
-				if err != nil {
-					return modified, err
-				}
-				modified = true
-			}
+			return err
 		}
 	}
-	return modified, nil
+	return nil
 }
 
 func valueFromIndex(info *mapper.Info, columnKeys []model.ColumnKey) (interface{}, error) {
@@ -1432,6 +1224,15 @@ func valueFromIndex(info *mapper.Info, columnKeys []model.ColumnKey) (interface{
 			val, err := valueFromColumnKey(info, columnKey)
 			if err != nil {
 				return "", err
+			}
+			// if object is nil dont try to encode it
+			value := reflect.ValueOf(val)
+			if value.Kind() == reflect.Invalid {
+				continue
+			}
+			// if object is a nil pointer dont try to encode it
+			if value.Kind() == reflect.Pointer && value.IsNil() {
+				continue
 			}
 			err = enc.Encode(val)
 			if err != nil {

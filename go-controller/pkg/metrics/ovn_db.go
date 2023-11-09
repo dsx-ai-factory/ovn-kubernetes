@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strconv"
@@ -446,11 +447,11 @@ func getOvnDbVersionInfo() {
 
 func RegisterOvnDBMetrics(podLister corev1listers.PodLister, k8sNodeName string,
 	metricsScrapeInterval int, stopChan <-chan struct{}) {
-	err := wait.PollImmediate(1*time.Second, 300*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 300*time.Second, true, func(ctx context.Context) (bool, error) {
 		return checkPodRunsOnGivenNode(podLister, []string{"name in (ovn-nbdb, ovn-sbdb, ovnkube-db)"}, k8sNodeName, false)
 	})
 	if err != nil {
-		if err == wait.ErrWaitTimeout {
+		if wait.Interrupted(err) {
 			klog.Errorf("Timed out while checking if OVN DB Pod runs on this %q K8s Node: %v. "+
 				"Not registering OVN DB Metrics on this Node.", k8sNodeName, err)
 		} else {

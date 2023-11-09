@@ -7,7 +7,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func TestAddressSet(t *testing.T) {
+func TestLogicalSwitchManager(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Logial Switch Manager Operations Suite")
+	RunSpecs(t, "Logical Switch Manager Operations Suite")
 }

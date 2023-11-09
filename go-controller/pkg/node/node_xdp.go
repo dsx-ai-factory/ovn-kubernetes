@@ -110,8 +110,8 @@ func xdpCheckPatchPortOFFlows(bridgeName, ofPortPhys, patchIntf, ofPortPatch, cu
 	}
 }
 
-func xdpSetupOFFlowsForInterface(allowedIPs []string, bridgeName string, vlanID int, podMAC string, xdpSharedPatchGW,
-	xdpSharedOFGW *gateway, setup bool) error {
+func xdpSetupOFFlowsForInterface(allowedIPs []string, bridgeName string, vlanID uint, podMAC string,
+	xdpSharedPatchGW *gateway, setup bool) error {
 	var xdpOFFLows []string
 	var cookie, key string
 
@@ -134,8 +134,8 @@ func xdpSetupOFFlowsForInterface(allowedIPs []string, bridgeName string, vlanID 
 		os.Exit(1)
 	}
 	if !setup {
-		xdpSharedOFGW.openflowManager.deleteFlowsByKey(key)
-		xdpSharedOFGW.openflowManager.requestFlowSync()
+		xdpSharedPatchGW.openflowManager.deleteFlowsByKey(key)
+		xdpSharedPatchGW.openflowManager.requestFlowSync()
 
 		klog.Infof("Completed %s XDP openflow rules for %v", strings.ToLower(op), allowedIPs)
 		return nil
@@ -239,15 +239,16 @@ func xdpSetupOFFlowsForInterface(allowedIPs []string, bridgeName string, vlanID 
 				"actions=%soutput:%s", cookie, XDPOFHighPriority, xdpVethPortOfPort,
 				allowedIP, mod_vlan_id, defaultBridge.ofPortPatch))
 	}
-	xdpSharedOFGW.openflowManager.updateFlowCacheEntry(key, xdpOFFLows)
-	xdpSharedOFGW.openflowManager.requestFlowSync()
+	xdpSharedPatchGW.openflowManager.updateFlowCacheEntry(key, xdpOFFLows)
+	xdpSharedPatchGW.openflowManager.requestFlowSync()
 
 	klog.Infof("Completed %s XDP openflow rules for %v", strings.ToLower(op), allowedIPs)
 	return nil
 }
 
 // Initialize routing within the XDP service so that
-//   All packet go via the SF interface by default.
+//
+//	All packet go via the SF interface by default.
 //
 // Additionally, routing table for this NAD with the default gateway and
 // set the ARP for also for the default gateway
@@ -256,8 +257,10 @@ func xdpSetupOFFlowsForInterface(allowedIPs []string, bridgeName string, vlanID 
 // is less (more likely via some admin error etc.), so we don't currently have a sync that
 // makes sure all the routes etc. are around (till deleted), need to add a sync so that we
 // can make sure that is  the case.
-//
-func xdpSetupNSForNAD(defGWIP, defGWMAC, publicSubnet string, vlanID int, xdpNS string, setup bool) error {
+func (nc *SecondaryLocalnetNodeNetworkController) xdpSetupNSForNAD(xdpNS string, setup bool) error {
+	defGWIP := nc.Gateway()
+	defGWMAC := nc.GatewayMAC()
+	vlanID := nc.Vlan()
 
 	op := "Setting up"
 	if !setup {
@@ -265,11 +268,12 @@ func xdpSetupNSForNAD(defGWIP, defGWMAC, publicSubnet string, vlanID int, xdpNS 
 	}
 	// Maybe move it to some generic XDP initialization.
 	xdpNSPath = XDPNSPath + xdpNS
-	klog.Infof("%s XDP NS %s for %s/%s/%s/%d", op, xdpNSPath, defGWIP, defGWMAC, publicSubnet, vlanID)
+	xdpDesc := fmt.Sprintf("%s/%s/%v/%d", defGWIP, defGWMAC, nc.Subnets(), vlanID)
+	klog.Infof("%s XDP NS %s for %s", op, xdpNSPath, xdpDesc)
 
 	netns, err := ns.GetNS(xdpNSPath)
 	if err != nil {
-		return fmt.Errorf("error opening XDP NS %s, error: %v", xdpNSPath, err)
+		return fmt.Errorf("error opening XDP NS %s for %s, error: %v", xdpNSPath, xdpDesc, err)
 	}
 	defer netns.Close()
 
@@ -292,22 +296,22 @@ func xdpSetupNSForNAD(defGWIP, defGWMAC, publicSubnet string, vlanID int, xdpNS 
 		}
 
 		if xdpVethDev == "" {
-			return fmt.Errorf("error getting veth interface for XDP")
+			return fmt.Errorf("error getting veth interface for XDP %s", xdpDesc)
 		}
 		if xdpSFDev == "" {
-			return fmt.Errorf("error getting SF interface for XDP")
+			return fmt.Errorf("error getting SF interface for XDP %s", xdpDesc)
 		}
 
 		// Get SF link
 		sfLink, err := netlink.LinkByName(xdpSFDev)
 		if err != nil {
-			return fmt.Errorf("error getting link for %s:%v", xdpSFDev, err)
+			return fmt.Errorf("error getting link %s for %s:%v", xdpSFDev, xdpDesc, err)
 		}
 
 		// Since this NS is shared by multiple tenants, we'll manage multiple
 		// routing tables. We'll use the Vlan ID as the table index since the
 		// gateway etc. should be based on the vlan/subnet.
-		table_no := vlanID
+		table_no := int(vlanID)
 
 		// Default Gateway IP via SF
 		gwIP := net.ParseIP(defGWIP)
@@ -326,11 +330,11 @@ func xdpSetupNSForNAD(defGWIP, defGWMAC, publicSubnet string, vlanID int, xdpNS 
 
 		if setup {
 			if err = netlink.RouteAdd(&defGW); err != nil && !os.IsExist(err) {
-				return fmt.Errorf("error adding route %v for %s:%v", defGW, xdpSFDev, err)
+				return fmt.Errorf("error adding route %v on %s for %s:%v", defGW, xdpSFDev, xdpDesc, err)
 			}
 
 			if err = netlink.RouteAdd(&defRoute); err != nil && !os.IsExist(err) {
-				return fmt.Errorf("error adding route %v for %s:%v", defRoute, xdpSFDev, err)
+				return fmt.Errorf("error adding route %v on %s for %s:%v", defRoute, xdpSFDev, xdpDesc, err)
 			}
 
 			// Set the ARP entries.
@@ -339,10 +343,10 @@ func xdpSetupNSForNAD(defGWIP, defGWMAC, publicSubnet string, vlanID int, xdpNS 
 			cmd := exec.Command("arp", "-s", defGWIP, defGWMAC, "dev", xdpSFDev)
 			err = cmd.Run()
 			if err != nil {
-				return fmt.Errorf("error adding arp for %s, %s:%v", defGWIP, defGWMAC, err)
+				return fmt.Errorf("error adding arp for %s, %s for %s:%v", defGWIP, defGWMAC, xdpDesc, err)
 			}
 
-			klog.Infof("Completed %s XDP routes and MAC for %s/%s/%s/%d", strings.ToLower(op), defGWIP, defGWMAC, publicSubnet, vlanID)
+			klog.Infof("Completed %s XDP routes and MAC for %s", strings.ToLower(op), xdpDesc)
 			return nil
 		}
 
@@ -350,11 +354,11 @@ func xdpSetupNSForNAD(defGWIP, defGWMAC, publicSubnet string, vlanID int, xdpNS 
 		// XXX Route table?
 		// XXX-We can delete the route table instead, if two NADs won't have the same subnet configured
 		if err = netlink.RouteDel(&defGW); err != nil {
-			return fmt.Errorf("error removing route %v for %s:%v", defGW, xdpSFDev, err)
+			return fmt.Errorf("error removing route %v on %s for %s:%v", defGW, xdpSFDev, xdpDesc, err)
 		}
 
 		if err = netlink.RouteDel(&defRoute); err != nil {
-			return fmt.Errorf("error removing route %v for %s:%v", defRoute, xdpSFDev, err)
+			return fmt.Errorf("error removing route %v on %s for %s:%v", defRoute, xdpSFDev, xdpDesc, err)
 		}
 
 		// Delete the ARP entries.
@@ -363,9 +367,9 @@ func xdpSetupNSForNAD(defGWIP, defGWMAC, publicSubnet string, vlanID int, xdpNS 
 		cmd := exec.Command("arp", "-d", defGWIP, "dev", xdpSFDev)
 		err = cmd.Run()
 		if err != nil {
-			return fmt.Errorf("error deleting arp for %s, %s:%v", defGWIP, defGWMAC, err)
+			return fmt.Errorf("error deleting arp for %s, %s for %s:%v", defGWIP, defGWMAC, xdpDesc, err)
 		}
-		klog.Infof("Completed %s XDP routes and MAC for %s/%s/%s/%d", strings.ToLower(op), defGWIP, defGWMAC, publicSubnet, vlanID)
+		klog.Infof("Completed %s XDP routes and MAC for %s", strings.ToLower(op), xdpDesc)
 
 		return nil
 	})
@@ -373,12 +377,13 @@ func xdpSetupNSForNAD(defGWIP, defGWMAC, publicSubnet string, vlanID int, xdpNS 
 }
 
 // Set up the routing within the XDP service so that
-//   All packets to the public IP of the tenant service on the host is via the veth interface
-//   All other packet go via the SF interface.
+//
+//	All packets to the public IP of the tenant service on the host is via the veth interface
+//	All other packet go via the SF interface.
 //
 // Additionally, set the ARP for the tenant public IP and also for the default gateway on
 // the SF route.
-func xdpSetupNSForInterface(allowedIPs []string, podMAC string, vlanID int, setup bool) error {
+func xdpSetupNSForInterface(allowedIPs []string, podMAC string, vlanID uint, setup bool) error {
 
 	op := "Setting up"
 	if !setup {
@@ -407,7 +412,7 @@ func xdpSetupNSForInterface(allowedIPs []string, podMAC string, vlanID int, setu
 		}
 
 		// Use the route table for this subnet/vlan.
-		table_no := vlanID
+		table_no := int(vlanID)
 
 		if setup {
 			// And the public tenant IP via the veth.
@@ -479,17 +484,16 @@ func xdpSetupNSForInterface(allowedIPs []string, podMAC string, vlanID int, setu
 // Initialize XDP services, mainly
 // - Routing table for the subnet/VLAN and ARP configuration for the def gateway
 // - OF rules on the network side
-func initializeXDPServiceForNAD(nadInfo *util.NetAttachDefInfo, xdpNS string, setup bool) error {
+func (nc *SecondaryLocalnetNodeNetworkController) initializeXDPServiceForNAD(xdpNS string, setup bool) error {
 
 	op := "Setting up"
 	if !setup {
 		op = "Tearing Down"
 	}
-	klog.Infof("%s XDP NS configuration for %s", op, nadInfo.NetName)
-	err := xdpSetupNSForNAD(nadInfo.Gateway, nadInfo.GatewayMac, nadInfo.NetCidr, nadInfo.VlanId, xdpNS, setup)
+	klog.Infof("%s XDP NS configuration for %s", op, nc.GetNetworkName())
+	err := nc.xdpSetupNSForNAD(xdpNS, setup)
 	if err != nil {
-		klog.Errorf("Error %s NS %s, for %s, %s, %s:%v", xdpNS, strings.ToLower(op),
-			nadInfo.Gateway, nadInfo.GatewayMac, nadInfo.NetCidr, err)
+		klog.Errorf(err.Error())
 		return err
 	}
 
@@ -500,39 +504,37 @@ func initializeXDPServiceForNAD(nadInfo *util.NetAttachDefInfo, xdpNS string, se
 // Set up the XDP services, mainly
 // - Routing and ARP configuration in the XDP service namespace
 // - OF rules in the bridge to insert the XDP service for TCP.
-func setXDPServiceForInterface(podAnnotation *util.PodAnnotation, allowedIPs []string, nadInfo *util.NetAttachDefInfo, xdpNS string,
-	xdpSharedPatchGW, xdpSharedOFGW *gateway, setup bool) error {
-
+func (nc *SecondaryLocalnetNodeNetworkController) setXDPServiceForInterface(xdpInfo *XDPInfo, setup bool) error {
 	op := "Setting up"
 	if !setup {
 		op = "Tearing Down"
 	}
-	klog.Infof("%s XDP NS for %s", op, nadInfo.NetCidr)
-	err := xdpSetupNSForInterface(allowedIPs, podAnnotation.MAC.String(),
-		nadInfo.VlanId, setup)
+	xdpNS := config.OvnKubeNode.XDPNamespace
+	klog.Infof("%s XDP NS for %v", op, nc.Subnets())
+	err := xdpSetupNSForInterface(xdpInfo.allowedIPs, xdpInfo.mac, nc.Vlan(), setup)
 	if err != nil {
-		klog.Errorf("Error %s NS %s, for %v, %s, %s, %s, %s:%v", xdpNS, strings.ToLower(op),
-			allowedIPs, podAnnotation.MAC.String(),
-			nadInfo.Gateway, nadInfo.GatewayMac, nadInfo.NetCidr, err)
+		klog.Errorf("Error %s NS %s, for %v, %s, %s, %s, %v:%v", xdpNS, strings.ToLower(op),
+			xdpInfo.allowedIPs, xdpInfo.mac,
+			nc.Gateway(), nc.GatewayMAC(), nc.Subnets(), err)
 		return err
 	}
 
 	klog.Infof("%s XDP OF Flows", op)
-	err = xdpSetupOFFlowsForInterface(allowedIPs, nadInfo.BridgeName,
-		nadInfo.VlanId, podAnnotation.MAC.String(), xdpSharedPatchGW, xdpSharedOFGW, setup)
+	err = xdpSetupOFFlowsForInterface(xdpInfo.allowedIPs, nc.bridgeName,
+		nc.Vlan(), xdpInfo.mac, nc.gateway.(*gateway), setup)
 	if err != nil {
-		klog.Errorf("Error %s OF flows for %s, %d on %s: %v", strings.ToLower(op),
-			nadInfo.NetCidr, nadInfo.VlanId, nadInfo.BridgeName, err)
+		klog.Errorf("Error %s OF flows for %v, %d on %s: %v", strings.ToLower(op),
+			nc.Subnets(), nc.Vlan(), nc.bridgeName, err)
 		return err
 	}
 	klog.Infof("Completed %s XDP routes/OF Flows", strings.ToLower(op))
 	return nil
 }
 
-func InitializeXDPServiceForNAD(nadInfo *util.NetAttachDefInfo) error {
+func (nc *SecondaryLocalnetNodeNetworkController) InitializeXDPServiceForNAD() error {
 
-	klog.Infof("Initializing XDP service for network %s", nadInfo.NetName)
-	err := initializeXDPServiceForNAD(nadInfo, config.OvnKubeNode.XDPNamespace, true)
+	klog.Infof("Initializing XDP service for network %s", nc.GetNetworkName())
+	err := nc.initializeXDPServiceForNAD(config.OvnKubeNode.XDPNamespace, true)
 	if err != nil {
 		return fmt.Errorf("error initializing XDP:%v", err)
 	}
@@ -540,89 +542,58 @@ func InitializeXDPServiceForNAD(nadInfo *util.NetAttachDefInfo) error {
 	return nil
 }
 
-func SetupXDPServiceForInterface(podAnnotation *util.PodAnnotation, allowedIPs []string, nadInfo *util.NetAttachDefInfo, xdpSharedPatchGW,
-	xdpSharedOFGW *gateway) error {
+func (nc *SecondaryLocalnetNodeNetworkController) UpdateXDPServiceForInterface(oldXDPInfo, newXDPInfo *XDPInfo) error {
 
-	klog.Infof("Setting up XDP service for pod")
-	err := setXDPServiceForInterface(podAnnotation, allowedIPs, nadInfo, config.OvnKubeNode.XDPNamespace, xdpSharedPatchGW,
-		xdpSharedOFGW, true)
-	if err != nil {
-		return fmt.Errorf("error setting XDP: %v", err)
-	}
-	klog.Infof("XDP service set up")
-	return nil
-}
-
-func UpdateXDPServiceForInterface(podAnnotation *util.PodAnnotation, oldAllowedIPs, newAllowedIPs []string, nadInfo *util.NetAttachDefInfo, xdpSharedPatchGW,
-	xdpSharedOFGW *gateway) error {
-
-	klog.Infof("Updating XDP service for pod")
 	// We deal with the flows first so that there is no gap where xdp could be bypassed for this pod.
 	// It is ok, to do flows before updating the NS with the IPs, since connections might not proceed,
 	// and tcp will rexmit.
 
 	// Add new flows
-	err := xdpSetupOFFlowsForInterface(newAllowedIPs, nadInfo.BridgeName,
-		nadInfo.VlanId, podAnnotation.MAC.String(), xdpSharedPatchGW, xdpSharedOFGW, true)
+	err := xdpSetupOFFlowsForInterface(newXDPInfo.allowedIPs, nc.bridgeName,
+		nc.Vlan(), newXDPInfo.mac, nc.gateway.(*gateway), true)
 	if err != nil {
 		// This is problematic, maybe better to panic
-		klog.Errorf("Error adding new OF flows for %s, %d on %s: %v",
-			nadInfo.NetCidr, nadInfo.VlanId, nadInfo.BridgeName, err)
+		klog.Errorf("Error adding new OF flows for %v, %v on %s: %v",
+			nc.Subnets(), nc.Vlan(), nc.bridgeName, err)
 		return err
 	}
 	// Remove old flows
-	err = xdpSetupOFFlowsForInterface(oldAllowedIPs, nadInfo.BridgeName,
-		nadInfo.VlanId, podAnnotation.MAC.String(), xdpSharedPatchGW, xdpSharedOFGW, false)
+	err = xdpSetupOFFlowsForInterface(oldXDPInfo.allowedIPs, nc.bridgeName,
+		nc.Vlan(), oldXDPInfo.mac, nc.gateway.(*gateway), false)
 	if err != nil {
 		// This is not problematic, per se, so the old flows could be left behind.
 		klog.Errorf("Error deleting new OF flows for %s, %d on %s: %v",
-			nadInfo.NetCidr, nadInfo.VlanId, nadInfo.BridgeName, err)
+			nc.Subnets(), nc.Vlan(), nc.bridgeName, err)
 	}
 
 	// Remove old IP info. We remove old before adding new, since there may be an overlap,
 	// so adding and then deleting, might delete the overlapping ips.
-	err = xdpSetupNSForInterface(oldAllowedIPs, podAnnotation.MAC.String(),
-		nadInfo.VlanId, false)
+	err = xdpSetupNSForInterface(oldXDPInfo.allowedIPs, oldXDPInfo.mac, nc.Vlan(), false)
 	if err != nil {
-		klog.Errorf("Error deleting old IPs from NS %s for %v, %s, %s, %s, %s:%v",
-			config.OvnKubeNode.XDPNamespace, oldAllowedIPs, podAnnotation.MAC.String(),
-			nadInfo.Gateway, nadInfo.GatewayMac, nadInfo.NetCidr, err)
+		klog.Errorf("Error deleting old IPs from NS %s for %v, %s, %v:%v",
+			config.OvnKubeNode.XDPNamespace, oldXDPInfo.allowedIPs, oldXDPInfo.mac,
+			nc.Subnets(), err)
 		return err
 	}
 
 	// Add new IP info.
-	err = xdpSetupNSForInterface(newAllowedIPs, podAnnotation.MAC.String(),
-		nadInfo.VlanId, true)
+	err = xdpSetupNSForInterface(newXDPInfo.allowedIPs, newXDPInfo.mac, nc.Vlan(), true)
 	if err != nil {
-		klog.Errorf("Error adding old IPs from NS %s for %v, %s, %s, %s, %s:%v",
-			config.OvnKubeNode.XDPNamespace, newAllowedIPs, podAnnotation.MAC.String(),
-			nadInfo.Gateway, nadInfo.GatewayMac, nadInfo.NetCidr, err)
+		klog.Errorf("Error adding old IPs from NS %s for %v, %s, %v:%v",
+			config.OvnKubeNode.XDPNamespace, newXDPInfo.allowedIPs, newXDPInfo.mac,
+			nc.Subnets(), err)
 		return err
 	}
 	klog.Infof("XDP service updated")
 	return nil
 }
 
-func DestroyXDPServiceForNAD(nadInfo *util.NetAttachDefInfo) error {
-
-	klog.Infof("Destroying up XDP service for network %s", nadInfo.NetName)
-	err := initializeXDPServiceForNAD(nadInfo, config.OvnKubeNode.XDPNamespace, false)
+func (nc *SecondaryLocalnetNodeNetworkController) DestroyXDPServiceForNAD() error {
+	klog.Infof("Destroying up XDP service for network %s", nc.GetNetworkName())
+	err := nc.initializeXDPServiceForNAD(config.OvnKubeNode.XDPNamespace, false)
 	if err != nil {
 		return fmt.Errorf("error destroying XDP: %v", err)
 	}
 	klog.Infof("XDP service destroyed")
-	return nil
-}
-
-func TeardownXDPServiceForInterface(podAnnotation *util.PodAnnotation, allowedIPs []string, nadInfo *util.NetAttachDefInfo, xdpSharedPatchGW,
-	xdpSharedOFGW *gateway) error {
-
-	klog.Infof("Tearing down XDP service for pod")
-	err := setXDPServiceForInterface(podAnnotation, allowedIPs, nadInfo, config.OvnKubeNode.XDPNamespace, xdpSharedPatchGW,
-		xdpSharedOFGW, false)
-	if err != nil {
-		return fmt.Errorf("error remving XDP: %v", err)
-	}
-	klog.Infof("XDP service torn down")
 	return nil
 }

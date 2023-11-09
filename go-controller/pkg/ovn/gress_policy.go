@@ -2,58 +2,65 @@ package ovn
 
 import (
 	"fmt"
-	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 
-	"github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
 
+const (
+	noneMatch = "None"
+	// emptyIdx is used to create ACL for gressPolicy that doesn't have ipBlocks
+	emptyIdx = -1
+	// emptyProtocol is used to create ACL for gressPolicy that doesn't have port policies hence no protocols
+	emptyProtocol = "None"
+)
+
 type gressPolicy struct {
-	netAttachInfo   *util.NetAttachDefInfo
+	controllerName  string
 	policyNamespace string
 	policyName      string
 	policyType      knet.PolicyType
+	aclPipeline     libovsdbutil.ACLPipelineType
 	idx             int
 
-	// peerAddressSet points to the addressSet that holds all peer pod
-	// IP addresess.
-	peerAddressSet addressset.AddressSet
-	// captures all the hostNetworkPods for a given node
-	nodeHostNetPodsCache map[string]map[string][]net.IP
-	// a mutex for the above cache
-	nodeHostNetPodsCacheLock sync.Mutex
-
+	// peerVxAddressSets include PodSelectorAddressSet names, and address sets for selected namespaces
 	// peerV4AddressSets has Address sets for all namespaces and pod selectors for IPv4
-	peerV4AddressSets sets.Set[string]
+	peerV4AddressSets *sync.Map
 	// peerV6AddressSets has Address sets for all namespaces and pod selectors for IPv6
-	peerV6AddressSets sets.Set[string]
+	peerV6AddressSets *sync.Map
+	// if gressPolicy has at least 1 rule with selector, set this field to true.
+	// This is required to distinguish gress that doesn't have any peerAddressSets added yet
+	// (e.g. because there are no namespaces matching label selector) and should allow nothing,
+	// from empty gress, which should allow all.
+	hasPeerSelector bool
 
-	// portPolicies represents all the protocol filters which allow traffic
-	// for the rule in question.
+	// portPolicies represents all the ports to which traffic is allowed for
+	// the rule in question.
 	portPolicies []*portPolicy
 
-	ipBlock []*knet.IPBlock
+	ipBlocks []*knet.IPBlock
 
-	// set to true for stateless acls otherwise set to false
-	isAclStateless bool
+	// set to true for stateless network policies (stateless acls), otherwise set to false
+	isNetPolStateless bool
+
+	// supported IP mode
+	ipv4Mode bool
+	ipv6Mode bool
 }
 
-// Supports TCP/UDP/SCTP ports
 type portPolicy struct {
 	protocol string
 	port     int32
@@ -62,31 +69,25 @@ type portPolicy struct {
 
 // for a given ingress/egress rule, captures all the provided port ranges and
 // individual ports
-type gresssPolicyPorts struct {
+type gressPolicyPorts struct {
 	portList  []string // list of provided ports as string
-	portRange []string // list of provided port range in OVN ACL format
+	portRange []string // list of provided port ranges in OVN ACL format
 }
 
-func (gp *gressPolicy) getProtocolPortsMap() map[string]*gresssPolicyPorts {
-	var supportedProtocols = []string{TCP, UDP, SCTP}
-	gressProtoPortsMap := make(map[string]*gresssPolicyPorts)
+var supportedProtocols = sets.NewString(TCP, UDP, SCTP)
+
+func (gp *gressPolicy) getProtocolPortsMap() map[string]*gressPolicyPorts {
+	gressProtoPortsMap := make(map[string]*gressPolicyPorts)
 	for _, pp := range gp.portPolicies {
-		var found bool
-		for _, protocol := range supportedProtocols {
-			if protocol == pp.protocol {
-				found = true
-				break
-			}
-		}
-		if !found {
-			klog.Warningf("Unknown protocol %v, while processing network policy %s/%s for network %s",
-				pp.protocol, gp.policyNamespace, gp.policyName, gp.netAttachInfo.NetName)
+		if found := supportedProtocols.Has(pp.protocol); !found {
+			klog.Warningf("Unknown protocol %v, while processing network policy %s/%s",
+				pp.protocol, gp.policyNamespace, gp.policyName)
 			continue
 		}
 		protocol := strings.ToLower(pp.protocol)
 		gpp, ok := gressProtoPortsMap[protocol]
 		if !ok {
-			gpp = &gresssPolicyPorts{portList: []string{}, portRange: []string{}}
+			gpp = &gressPolicyPorts{portList: []string{}, portRange: []string{}}
 			gressProtoPortsMap[protocol] = gpp
 		}
 		if pp.endPort != 0 && pp.endPort != pp.port {
@@ -98,10 +99,10 @@ func (gp *gressPolicy) getProtocolPortsMap() map[string]*gresssPolicyPorts {
 	return gressProtoPortsMap
 }
 
-func getL4Match(protocol string, ports *gresssPolicyPorts) string {
+func getL4Match(protocol string, ports *gressPolicyPorts) string {
 	allL4Matches := []string{}
 	if len(ports.portList) > 0 {
-		// if there is just one port, then don't use `{}` to simplify merge with upstream
+		// if there is just one port, then don't use `{}`
 		template := "%s.dst==%s"
 		if len(ports.portList) > 1 {
 			template = "%s.dst=={%s}"
@@ -120,124 +121,47 @@ func getL4Match(protocol string, ports *gresssPolicyPorts) string {
 	return l4Match
 }
 
-func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name string,
-	netAttachInfo *util.NetAttachDefInfo, aclState bool) *gressPolicy {
+func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name, controllerName string, isNetPolStateless bool, netInfo util.BasicNetInfo) *gressPolicy {
+	ipv4Mode, ipv6Mode := netInfo.IPMode()
 	return &gressPolicy{
-		netAttachInfo:        netAttachInfo,
-		policyNamespace:      namespace,
-		policyName:           name,
-		policyType:           policyType,
-		idx:                  idx,
-		peerV4AddressSets:    sets.Set[string]{},
-		peerV6AddressSets:    sets.Set[string]{},
-		portPolicies:         make([]*portPolicy, 0),
-		nodeHostNetPodsCache: make(map[string]map[string][]net.IP),
-		isAclStateless:       aclState,
+		controllerName:    controllerName,
+		policyNamespace:   namespace,
+		policyName:        name,
+		policyType:        policyType,
+		aclPipeline:       libovsdbutil.PolicyTypeToAclPipeline(policyType),
+		idx:               idx,
+		peerV4AddressSets: &sync.Map{},
+		peerV6AddressSets: &sync.Map{},
+		portPolicies:      make([]*portPolicy, 0),
+		isNetPolStateless: isNetPolStateless,
+		ipv4Mode:          ipv4Mode,
+		ipv6Mode:          ipv6Mode,
 	}
 }
 
-func (gp *gressPolicy) ensurePeerAddressSet(factory addressset.AddressSetFactory) error {
-	if gp.peerAddressSet != nil {
-		return nil
-	}
+type sortableSlice []string
 
-	direction := strings.ToLower(string(gp.policyType))
-	asName := fmt.Sprintf("%s.%s.%s.%d", gp.policyNamespace, gp.policyName, direction, gp.idx)
-	as, err := factory.NewAddressSet(asName, nil)
-	if err != nil {
-		return err
-	}
+func (s sortableSlice) Len() int           { return len(s) }
+func (s sortableSlice) Less(i, j int) bool { return s[i] < s[j] }
+func (s sortableSlice) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
-	gp.peerAddressSet = as
-	ipv4HashedAS, ipv6HashedAS := as.GetASHashNames()
-	if ipv4HashedAS != "" {
-		gp.peerV4AddressSets.Insert("$" + ipv4HashedAS)
-	}
-	if ipv6HashedAS != "" {
-		gp.peerV6AddressSets.Insert("$" + ipv6HashedAS)
-	}
-	return nil
+func syncMapToSortedList(m *sync.Map) []string {
+	result := sortableSlice{}
+	m.Range(func(key, _ interface{}) bool {
+		result = append(result, key.(string))
+		return true
+	})
+	sort.Sort(result)
+	return result
 }
 
-func (gp *gressPolicy) addPeerSvcVip(nbClient client.Client, service *v1.Service) error {
-	if gp.peerAddressSet == nil {
-		return fmt.Errorf("peer AddressSet is nil, cannot add peer Service: %s for gressPolicy: %s",
-			service.ObjectMeta.Name, gp.policyName)
+func (gp *gressPolicy) addPeerAddressSets(asHashNameV4, asHashNameV6 string) {
+	if gp.ipv4Mode && asHashNameV4 != "" {
+		gp.peerV4AddressSets.Store("$"+asHashNameV4, true)
 	}
-
-	klog.V(5).Infof("Service %s is applied to same namespace as network Policy, finding Service VIPs", service.Name)
-	ips := getSvcVips(nbClient, service)
-
-	klog.V(5).Infof("Adding SVC clusterIP to gressPolicy's Address Set: %v", ips)
-	return gp.peerAddressSet.AddIPs(ips)
-}
-
-func (gp *gressPolicy) deletePeerSvcVip(nbClient client.Client, service *v1.Service) error {
-	if gp.peerAddressSet == nil {
-		return fmt.Errorf("peer AddressSet is nil, cannot add peer Service: %s for gressPolicy: %s",
-			service.ObjectMeta.Name, gp.policyName)
+	if gp.ipv6Mode && asHashNameV6 != "" {
+		gp.peerV6AddressSets.Store("$"+asHashNameV6, true)
 	}
-
-	klog.V(5).Infof("Service %s is applied to same namespace as network Policy, finding cluster IPs", service.Name)
-	ips := getSvcVips(nbClient, service)
-
-	klog.Infof("Deleting service %s, possible VIPs: %v from gressPolicy's %s Address Set", service.Name, ips, gp.policyName)
-	return gp.peerAddressSet.DeleteIPs(ips)
-}
-
-func (gp *gressPolicy) addPeerPods(oc *Controller, pods ...*v1.Pod) error {
-	if gp.peerAddressSet == nil {
-		return fmt.Errorf("peer AddressSet is nil, cannot add peer pod(s): for gressPolicy: %s",
-			gp.policyName)
-	}
-
-	podIPFactor := 1
-	if config.IPv4Mode && config.IPv6Mode {
-		podIPFactor = 2
-	}
-	ips := make([]net.IP, 0, len(pods)*podIPFactor)
-	for _, pod := range pods {
-		if pod.Spec.HostNetwork {
-			// the NAD should be the default network since we don't allow Multi-homed networks
-			// for host network pods
-			if oc.nadInfo.IsSecondary {
-				continue
-			}
-			gp.nodeHostNetPodsCacheLock.Lock()
-			err := oc.addHostnetworkPodIPToAddressSet(pod.Spec.NodeName, fmt.Sprintf("%s/%s", pod.Namespace, pod.Name),
-				string(gp.policyType), gp.peerAddressSet, gp.nodeHostNetPodsCache)
-			gp.nodeHostNetPodsCacheLock.Unlock()
-			if err != nil {
-				klog.Errorf("Failed while adding Hostnetwrok IP for pod %s/%s on node (%s) to address_set: %v",
-					pod.Namespace, pod.Name, pod.Spec.NodeName, err)
-			}
-			return err
-		} else {
-			podIPs, err := util.GetAllPodIPs(pod, gp.netAttachInfo)
-			if err != nil {
-				klog.Errorf("Failed to get all Pod IPs for pod %s/%s on network %s: err: %v", pod.Namespace, pod.Name, gp.netAttachInfo.NetName, err)
-			} else {
-				ips = append(ips, podIPs...)
-			}
-		}
-	}
-
-	return gp.peerAddressSet.AddIPs(ips)
-}
-
-func (gp *gressPolicy) deletePeerPod(oc *Controller, pod *v1.Pod) error {
-	if pod.Spec.HostNetwork && !oc.nadInfo.IsSecondary {
-		gp.nodeHostNetPodsCacheLock.Lock()
-		defer gp.nodeHostNetPodsCacheLock.Unlock()
-		return oc.delHostnetworkPodIPFromAddressSet(pod.Spec.NodeName, fmt.Sprintf("%s/%s", pod.Namespace, pod.Name),
-			gp.peerAddressSet, gp.nodeHostNetPodsCache)
-	}
-
-	ips, err := util.GetAllPodIPs(pod, gp.netAttachInfo)
-	if err != nil {
-		return err
-	}
-	return gp.peerAddressSet.DeleteIPs(ips)
 }
 
 // If the port is not specified, it implies all ports for that protocol
@@ -256,34 +180,18 @@ func (gp *gressPolicy) addPortPolicy(portJSON *knet.NetworkPolicyPort) {
 }
 
 func (gp *gressPolicy) addIPBlock(ipblockJSON *knet.IPBlock) {
-	gp.ipBlock = append(gp.ipBlock, ipblockJSON)
+	gp.ipBlocks = append(gp.ipBlocks, ipblockJSON)
 }
 
+// getL3MatchFromAddressSet may return empty string, which means that there are no address sets selected for giver
+// gressPolicy at the time, and acl should not be created.
 func (gp *gressPolicy) getL3MatchFromAddressSet() string {
-	var l3Match string
-	if len(gp.peerV4AddressSets) == 0 && len(gp.peerV6AddressSets) == 0 {
-		l3Match = constructEmptyMatchString()
-	} else {
-		// List() method on the set will return the sorted strings
-		// Hence we'll be constructing the sorted adress set string here
-		l3Match = gp.constructMatchString(sets.List(gp.peerV4AddressSets), sets.List(gp.peerV6AddressSets))
-	}
-	return l3Match
-}
+	v4AddressSets := syncMapToSortedList(gp.peerV4AddressSets)
+	v6AddressSets := syncMapToSortedList(gp.peerV6AddressSets)
 
-func constructEmptyMatchString() string {
-	switch {
-	case config.IPv4Mode && config.IPv6Mode:
-		return "(ip4 || ip6)"
-	case config.IPv6Mode:
-		return "ip6"
-	default:
-		return "ip4"
-	}
-}
-
-func (gp *gressPolicy) constructMatchString(v4AddressSets, v6AddressSets []string) string {
-	var direction, v4MatchStr, v6MatchStr, matchStr string
+	// We sort address slice,
+	// Hence we'll be constructing the sorted address set string here
+	var direction, v4Match, v6Match, match string
 	if gp.policyType == knet.PolicyTypeIngress {
 		direction = "src"
 	} else {
@@ -293,203 +201,44 @@ func (gp *gressPolicy) constructMatchString(v4AddressSets, v6AddressSets []strin
 	//  At this point there will be address sets in one or both of them.
 	//  Contents in both address sets mean dual stack, else one will be empty because we will only populate
 	//  entries for enabled stacks
-	if len(v4AddressSets) > 0 {
+	if gp.ipv4Mode && len(v4AddressSets) > 0 {
 		v4AddressSetStr := strings.Join(v4AddressSets, ", ")
-		v4MatchStr = fmt.Sprintf("%s.%s == {%s}", "ip4", direction, v4AddressSetStr)
-		matchStr = v4MatchStr
+		v4Match = fmt.Sprintf("%s.%s == {%s}", "ip4", direction, v4AddressSetStr)
+		match = v4Match
 	}
-	if len(v6AddressSets) > 0 {
+	if gp.ipv6Mode && len(v6AddressSets) > 0 {
 		v6AddressSetStr := strings.Join(v6AddressSets, ", ")
-		v6MatchStr = fmt.Sprintf("%s.%s == {%s}", "ip6", direction, v6AddressSetStr)
-		matchStr = v6MatchStr
+		v6Match = fmt.Sprintf("%s.%s == {%s}", "ip6", direction, v6AddressSetStr)
+		match = v6Match
 	}
-	if len(v4AddressSets) > 0 && len(v6AddressSets) > 0 {
-		matchStr = fmt.Sprintf("(%s || %s)", v4MatchStr, v6MatchStr)
+	// if at least one match is empty in dualstack mode, the non-empty one will be assigned to match
+	if gp.ipv4Mode && gp.ipv6Mode && v4Match != "" && v6Match != "" {
+		match = fmt.Sprintf("(%s || %s)", v4Match, v6Match)
 	}
-	return matchStr
+	return match
 }
 
-func (gp *gressPolicy) sizeOfAddressSet() int {
-	return gp.peerV4AddressSets.Len() + gp.peerV6AddressSets.Len()
+func (gp *gressPolicy) allIPsMatch() string {
+	switch {
+	case gp.ipv4Mode && gp.ipv6Mode:
+		return "(ip4 || ip6)"
+	case gp.ipv6Mode:
+		return "ip6"
+	default:
+		return "ip4"
+	}
 }
 
 func (gp *gressPolicy) getMatchFromIPBlock(lportMatch, l4Match string) []string {
-	var ipBlockMatches []string
+	var direction string
 	if gp.policyType == knet.PolicyTypeIngress {
-		ipBlockMatches = constructIPBlockStringsForACL("src", gp.ipBlock, lportMatch, l4Match)
+		direction = "src"
 	} else {
-		ipBlockMatches = constructIPBlockStringsForACL("dst", gp.ipBlock, lportMatch, l4Match)
+		direction = "dst"
 	}
-	return ipBlockMatches
-}
-
-// addNamespaceAddressSet adds a namespace address set to the gress policy
-// if the address set does not exist and returns `true`;  if the address set already exists,
-// it returns `false`.
-func (gp *gressPolicy) addNamespaceAddressSet(name string) bool {
-	v4HashName, v6HashName := addressset.MakeAddressSetHashNames(name)
-	v4HashName = "$" + util.GetClusterNamePrefix() + gp.netAttachInfo.Prefix + v4HashName
-	v6HashName = "$" + util.GetClusterNamePrefix() + gp.netAttachInfo.Prefix + v6HashName
-
-	if gp.peerV4AddressSets.Has(v4HashName) || gp.peerV6AddressSets.Has(v6HashName) {
-		return false
-	}
-	if config.IPv4Mode {
-		gp.peerV4AddressSets.Insert(v4HashName)
-	}
-	if config.IPv6Mode {
-		gp.peerV6AddressSets.Insert(v6HashName)
-	}
-
-	return true
-}
-
-// addNamespaceAddressSets adds namespace address sets to the gress policy.
-func (gp *gressPolicy) addNamespaceAddressSets(namespaces []interface{}) {
-	if len(namespaces) <= 0 {
-		return
-	}
-	for _, nsInterface := range namespaces {
-		namespace, ok := nsInterface.(*v1.Namespace)
-		if !ok {
-			klog.Errorf("Spurious object in addNamespaceAddressSets: %v", nsInterface)
-			continue
-		}
-		gp.addNamespaceAddressSet(namespace.Name)
-	}
-}
-
-// delNamespaceAddressSet removes a namespace address set from the gress policy
-// and returns whether the address set was in the policy or not.
-func (gp *gressPolicy) delNamespaceAddressSet(name string) bool {
-	v4HashName, v6HashName := addressset.MakeAddressSetHashNames(name)
-	v4HashName = "$" + util.GetClusterNamePrefix() + gp.netAttachInfo.Prefix + v4HashName
-	v6HashName = "$" + util.GetClusterNamePrefix() + gp.netAttachInfo.Prefix + v6HashName
-
-	if !gp.peerV4AddressSets.Has(v4HashName) && !gp.peerV6AddressSets.Has(v6HashName) {
-		return false
-	}
-	if config.IPv4Mode {
-		gp.peerV4AddressSets.Delete(v4HashName)
-	}
-	if config.IPv6Mode {
-		gp.peerV6AddressSets.Delete(v6HashName)
-	}
-
-	return true
-}
-
-// buildLocalPodACLs builds the ACLs that implement the gress policy's rules to the
-// given Port Group (which should contain all pod logical switch ports selected
-// by the parent NetworkPolicy)
-// portGroupName is portGroupName without network prefix
-func (gp *gressPolicy) buildLocalPodACLs(portGroupName, aclLogging string) []*nbdb.ACL {
-	l3Match := gp.getL3MatchFromAddressSet()
-	var lportMatch string
-	var cidrMatches []string
-	portGroupName = gp.netAttachInfo.Prefix + portGroupName
-	if gp.policyType == knet.PolicyTypeIngress {
-		lportMatch = fmt.Sprintf("outport == @%s", portGroupName)
-	} else {
-		lportMatch = fmt.Sprintf("inport == @%s", portGroupName)
-	}
-
-	acls := []*nbdb.ACL{}
-	if len(gp.portPolicies) == 0 {
-		match := fmt.Sprintf("%s && %s", l3Match, lportMatch)
-		l4Match := noneMatch
-
-		if len(gp.ipBlock) > 0 {
-			// Add ACL allow rule for IPBlock CIDR
-			cidrMatches = gp.getMatchFromIPBlock(lportMatch, l4Match)
-			for i, cidrMatch := range cidrMatches {
-				acl := gp.buildACLAllow(cidrMatch, l4Match, i+1, aclLogging)
-				acls = append(acls, acl)
-			}
-		}
-		// if there are pod/namespace selector, then allow packets from/to that address_set or
-		// if the NetworkPolicyPeer is empty, then allow from all sources or to all destinations.
-		if gp.sizeOfAddressSet() > 0 || len(gp.ipBlock) == 0 {
-			acl := gp.buildACLAllow(match, l4Match, 0, aclLogging)
-			acls = append(acls, acl)
-		}
-	}
-	for protocol, ports := range gp.getProtocolPortsMap() {
-		l4Match := getL4Match(protocol, ports)
-		match := fmt.Sprintf("%s && %s && %s", l3Match, l4Match, lportMatch)
-		if len(gp.ipBlock) > 0 {
-			// Add ACL allow rule for IPBlock CIDR
-			cidrMatches = gp.getMatchFromIPBlock(lportMatch, l4Match)
-			for i, cidrMatch := range cidrMatches {
-				acl := gp.buildACLAllow(cidrMatch, l4Match, i+1, aclLogging)
-				acls = append(acls, acl)
-			}
-		}
-		if gp.sizeOfAddressSet() > 0 || len(gp.ipBlock) == 0 {
-			acl := gp.buildACLAllow(match, l4Match, 0, aclLogging)
-			acls = append(acls, acl)
-		}
-	}
-
-	return acls
-}
-
-// buildACLAllow builds an allow-related ACL for a given given match
-func (gp *gressPolicy) buildACLAllow(match, l4Match string, ipBlockCIDR int, aclLogging string) *nbdb.ACL {
-	var direction, action, ipBlockCIDRString string
-	var options map[string]string
-	if gp.policyType == knet.PolicyTypeIngress {
-		direction = nbdb.ACLDirectionToLport
-	} else {
-		direction = nbdb.ACLDirectionFromLport
-		options = map[string]string{"apply-after-lb": "true"}
-	}
-	priority := types.DefaultAllowPriority
-	if gp.isAclStateless {
-		action = nbdb.ACLActionAllowStateless
-	} else {
-		action = nbdb.ACLActionAllowRelated
-	}
-	aclName := fmt.Sprintf("%s_%s_%v", gp.policyNamespace, gp.policyName, gp.idx)
-
-	// For backward compatibility with existing ACLs, we use "ipblock_cidr=false" for
-	// non-ipblock ACLs and "ipblock_cidr=true" for the first ipblock ACL in a policy,
-	// but then number them after that.
-	switch ipBlockCIDR {
-	case 0:
-		ipBlockCIDRString = "false"
-	case 1:
-		ipBlockCIDRString = "true"
-	default:
-		ipBlockCIDRString = strconv.FormatInt(int64(ipBlockCIDR), 10)
-	}
-
-	policyTypeNum := fmt.Sprintf(policyTypeNumACLExtIdKey, gp.policyType)
-	policyTypeIndex := strconv.FormatInt(int64(gp.idx), 10)
-
-	externalIds := map[string]string{
-		l4MatchACLExtIdKey:     l4Match,
-		ipBlockCIDRACLExtIdKey: ipBlockCIDRString,
-		namespaceACLExtIdKey:   gp.policyNamespace,
-		policyACLExtIdKey:      gp.policyName,
-		policyTypeACLExtIdKey:  string(gp.policyType),
-		policyTypeNum:          policyTypeIndex,
-	}
-	if l4Match != noneMatch {
-		externalIds[l4MatchFusedExtIdKey] = "true"
-	}
-	if gp.netAttachInfo.IsSecondary {
-		externalIds["network_name"] = gp.netAttachInfo.NetName
-	}
-
-	acl := libovsdbops.BuildACL(aclName, direction, priority, match, action, types.OvnACLLoggingMeter, getACLLoggingSeverity(aclLogging), aclLogging != "", externalIds, options)
-	return acl
-}
-
-func constructIPBlockStringsForACL(direction string, ipBlocks []*knet.IPBlock, lportMatch, l4Match string) []string {
 	var matchStrings []string
 	var matchStr, ipVersion string
-	for _, ipBlock := range ipBlocks {
+	for _, ipBlock := range gp.ipBlocks {
 		if utilnet.IsIPv6CIDRString(ipBlock.CIDR) {
 			ipVersion = "ip6"
 		} else {
@@ -497,7 +246,6 @@ func constructIPBlockStringsForACL(direction string, ipBlocks []*knet.IPBlock, l
 		}
 		if len(ipBlock.Except) == 0 {
 			matchStr = fmt.Sprintf("%s.%s == %s", ipVersion, direction, ipBlock.CIDR)
-
 		} else {
 			matchStr = fmt.Sprintf("%s.%s == %s && %s.%s != {%s}", ipVersion, direction, ipBlock.CIDR,
 				ipVersion, direction, strings.Join(ipBlock.Except, ", "))
@@ -512,60 +260,167 @@ func constructIPBlockStringsForACL(direction string, ipBlocks []*knet.IPBlock, l
 	return matchStrings
 }
 
-func (gp *gressPolicy) destroy() error {
-	if gp.peerAddressSet != nil {
-		if err := gp.peerAddressSet.Destroy(); err != nil {
-			return err
-		}
-		gp.peerAddressSet = nil
+// addNamespaceAddressSet adds a namespace address set to the gress policy.
+// If the address set is not found in the db, return error.
+// If the address set is already added for this policy, return false, otherwise returns true.
+// This function is safe for concurrent use, doesn't require additional synchronization
+func (gp *gressPolicy) addNamespaceAddressSet(name string, asf addressset.AddressSetFactory) (bool, error) {
+	dbIDs := getNamespaceAddrSetDbIDs(name, gp.controllerName)
+	as, err := asf.GetAddressSet(dbIDs)
+	if err != nil {
+		return false, fmt.Errorf("cannot add peer namespace %s: failed to get address set: %v", name, err)
 	}
-	return nil
+	v4HashName, v6HashName := as.GetASHashNames()
+	v4HashName = "$" + v4HashName
+	v6HashName = "$" + v6HashName
+
+	v4NoUpdate := true
+	v6NoUpdate := true
+	// only update vXNoUpdate if value was stored and not loaded
+	if gp.ipv4Mode {
+		_, v4NoUpdate = gp.peerV4AddressSets.LoadOrStore(v4HashName, true)
+	}
+	if gp.ipv6Mode {
+		_, v6NoUpdate = gp.peerV6AddressSets.LoadOrStore(v6HashName, true)
+	}
+	if v4NoUpdate && v6NoUpdate {
+		// no changes were applied, return false
+		return false, nil
+	}
+	return true, nil
 }
 
-// SVC can be of types 1. clusterIP, 2. NodePort, 3. LoadBalancer,
-// or 4.ExternalIP
-// NOTE: For NGN usecase we don't support hair-pin through NodePort
-// TODO adjust for upstream patch when it lands:
-// https://bugzilla.redhat.com/show_bug.cgi?id=1908540
-func getSvcVips(nbClient client.Client, service *v1.Service) []net.IP {
-	ips := make([]net.IP, 0)
+// delNamespaceAddressSet removes a namespace address set from the gress policy.
+// If the address set is already deleted for this policy, return false, otherwise returns true.
+// This function is safe for concurrent use, doesn't require additional synchronization
+func (gp *gressPolicy) delNamespaceAddressSet(name string) bool {
+	dbIDs := getNamespaceAddrSetDbIDs(name, gp.controllerName)
+	v4HashName, v6HashName := addressset.GetHashNamesForAS(dbIDs)
+	v4HashName = "$" + v4HashName
+	v6HashName = "$" + v6HashName
 
-	if util.ServiceTypeHasClusterIP(service) {
-		ipStrs := util.GetClusterIPs(service)
-		for _, ipStr := range ipStrs {
-			ip := net.ParseIP(ipStr)
-			if ip == nil {
-				// the clusterIP could be either set to None or empty.
-				continue
-			}
-			klog.V(5).Infof("Adding cluster IP: %s, from Service: %s to VIP set", ip, service.Name)
-			ips = append(ips, ip)
+	v4Update := false
+	v6Update := false
+	// only update vXUpdate if value was loaded
+	if gp.ipv4Mode {
+		_, v4Update = gp.peerV4AddressSets.LoadAndDelete(v4HashName)
+	}
+	if gp.ipv6Mode {
+		_, v6Update = gp.peerV6AddressSets.LoadAndDelete(v6HashName)
+	}
+	if v4Update || v6Update {
+		// at least 1 address set was updated, return true
+		return true
+	}
+	return false
+}
+
+func (gp *gressPolicy) isEmpty() bool {
+	// empty gress allows all, it is empty if there are no ipBlocks and no peerSelectors
+	return !gp.hasPeerSelector && len(gp.ipBlocks) == 0
+}
+
+// buildLocalPodACLs builds the ACLs that implement the gress policy's rules to the
+// given Port Group (which should contain all pod logical switch ports selected
+// by the parent NetworkPolicy)
+// buildLocalPodACLs is safe for concurrent use, since it only uses gressPolicy fields that don't change
+// since creation, or are safe for concurrent use like peerVXAddressSets
+func (gp *gressPolicy) buildLocalPodACLs(portGroupName string, aclLogging *libovsdbutil.ACLLoggingLevels) (createdACLs []*nbdb.ACL,
+	skippedACLs []*nbdb.ACL) {
+	var lportMatch string
+	if gp.policyType == knet.PolicyTypeIngress {
+		lportMatch = fmt.Sprintf("outport == @%s", portGroupName)
+	} else {
+		lportMatch = fmt.Sprintf("inport == @%s", portGroupName)
+	}
+	var l4Match string
+	action := nbdb.ACLActionAllowRelated
+	if gp.isNetPolStateless {
+		action = nbdb.ACLActionAllowStateless
+	}
+	protocolPortsMap := gp.getProtocolPortsMap()
+	if len(protocolPortsMap) == 0 {
+		protocolPortsMap[emptyProtocol] = nil
+	}
+	for protocol, ports := range protocolPortsMap {
+		l4Match = noneMatch
+		if ports != nil {
+			l4Match = getL4Match(protocol, ports)
 		}
 
-		for _, ing := range service.Status.LoadBalancer.Ingress {
-			if ing.IP != "" {
-				klog.V(5).Infof("Adding ingress IPs: %s, from Service: %s to VIP set", ing.IP, service.Name)
-				ips = append(ips, net.ParseIP(ing.IP))
+		if len(gp.ipBlocks) > 0 {
+			// Add ACL allow rule for IPBlock CIDR
+			ipBlockMatches := gp.getMatchFromIPBlock(lportMatch, l4Match)
+			for ipBlockIdx, ipBlockMatch := range ipBlockMatches {
+				aclIDs := gp.getNetpolACLDbIDs(ipBlockIdx, protocol)
+				acl := libovsdbutil.BuildACL(aclIDs, types.DefaultAllowPriority, ipBlockMatch, action,
+					aclLogging, gp.aclPipeline)
+				createdACLs = append(createdACLs, acl)
 			}
 		}
+		// if there are pod/namespace selector, then allow packets from/to that address_set or
+		// if the NetworkPolicyPeer is empty, then allow from all sources or to all destinations.
+		if gp.hasPeerSelector || gp.isEmpty() {
+			var l3Match, addrSetMatch string
+			if gp.isEmpty() {
+				l3Match = gp.allIPsMatch()
+			} else {
+				l3Match = gp.getL3MatchFromAddressSet()
+			}
 
-		if len(service.Spec.ExternalIPs) > 0 {
-			for _, extIP := range service.Spec.ExternalIPs {
-				ip := net.ParseIP(extIP)
-				if ip == nil {
-					klog.Errorf("Failed to parse external IP %q", extIP)
-					continue
-				}
-				klog.V(5).Infof("Adding external IP: %s, from Service: %s to VIP set",
-					ip, service.Name)
-				ips = append(ips, ip)
+			if l4Match == noneMatch {
+				addrSetMatch = fmt.Sprintf("%s && %s", l3Match, lportMatch)
+			} else {
+				addrSetMatch = fmt.Sprintf("%s && %s && %s", l3Match, l4Match, lportMatch)
+			}
+			aclIDs := gp.getNetpolACLDbIDs(emptyIdx, protocol)
+			acl := libovsdbutil.BuildACL(aclIDs, types.DefaultAllowPriority, addrSetMatch, action,
+				aclLogging, gp.aclPipeline)
+			if l3Match == "" {
+				// if l3Match is empty, then no address sets are selected for a given gressPolicy.
+				// fortunately l3 match is not a part of externalIDs, that means that we can find
+				// the deleted acl without knowing the previous match.
+				skippedACLs = append(skippedACLs, acl)
+			} else {
+				createdACLs = append(createdACLs, acl)
 			}
 		}
 	}
-	if len(ips) == 0 {
-		klog.V(5).Infof("Service has no VIPs")
-		return nil
-	}
+	return
+}
 
-	return ips
+func getACLPolicyKey(policyNamespace, policyName string) string {
+	return policyNamespace + ":" + policyName
+}
+
+func parseACLPolicyKey(aclPolicyKey string) (string, string, error) {
+	s := strings.Split(aclPolicyKey, ":")
+	if len(s) != 2 {
+		return "", "", fmt.Errorf("failed to parse network policy acl key %s, "+
+			"expected format <policyNamespace>:<policyName>", aclPolicyKey)
+	}
+	return s[0], s[1], nil
+}
+
+func (gp *gressPolicy) getNetpolACLDbIDs(ipBlockIdx int, protocol string) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLNetworkPolicy, gp.controllerName,
+		map[libovsdbops.ExternalIDKey]string{
+			// policy namespace+name
+			libovsdbops.ObjectNameKey: getACLPolicyKey(gp.policyNamespace, gp.policyName),
+			// egress or ingress
+			libovsdbops.PolicyDirectionKey: string(gp.policyType),
+			// gress rule index
+			libovsdbops.GressIdxKey: strconv.Itoa(gp.idx),
+			// acls are created for every gp.portPolicies which are grouped by protocol:
+			// - for empty policy (no selectors and no ip blocks) - empty ACL
+			// OR
+			// - all selector-based peers ACL
+			// - for every IPBlock +1 ACL
+			// Therefore unique id for a given gressPolicy is protocol name + IPBlock idx
+			// (protocol will be "None" if no port policy is defined, and empty policy and all
+			// selector-based peers ACLs will have idx=-1)
+			libovsdbops.IpBlockIndexKey: strconv.Itoa(ipBlockIdx),
+			// protocol key
+			libovsdbops.PortPolicyProtocolKey: protocol,
+		})
 }

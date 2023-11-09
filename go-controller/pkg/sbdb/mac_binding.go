@@ -5,6 +5,8 @@ package sbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const MACBindingTable = "MAC_Binding"
+
 // MACBinding defines an object in MAC_Binding table
 type MACBinding struct {
 	UUID        string `ovsdb:"_uuid"`

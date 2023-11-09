@@ -5,49 +5,51 @@ import (
 	"net"
 	"strings"
 
+	"github.com/pkg/errors"
+
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
-	"github.com/pkg/errors"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
-
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 const (
-	ipv4AddressSetSuffix = "_v4"
-	ipv6AddressSetSuffix = "_v6"
+	ipv4InternalID = "v4"
+	ipv6InternalID = "v6"
 )
 
-type AddressSetIterFunc func(hashedName, namespace, suffix string) error
-type AddressSetDoFunc func(as AddressSet) error
+type AddressSetIterFunc func(dbIDs *libovsdbops.DbObjectIDs) error
 
-// AddressSetFactory is an interface for managing address set objects
+// AddressSetFactory is an interface for managing address set objects.
 type AddressSetFactory interface {
 	// NewAddressSet returns a new object that implements AddressSet
 	// and contains the given IPs, or an error. Internally it creates
 	// an address set for IPv4 and IPv6 each.
-	NewAddressSet(name string, ips []net.IP) (AddressSet, error)
+	NewAddressSet(dbIDs *libovsdbops.DbObjectIDs, ips []net.IP) (AddressSet, error)
+	// NewAddressSetOps returns a new object that implements AddressSet
+	// and contains the given IPs, or an error. Internally it creates
+	// ops to create an address set for IPv4 and IPv6 each.
+	NewAddressSetOps(dbIDs *libovsdbops.DbObjectIDs, ips []net.IP) (AddressSet, []ovsdb.Operation, error)
 	// EnsureAddressSet makes sure that an address set object exists in ovn
-	// with the given name
-	EnsureAddressSet(name string) (AddressSet, error)
-	// ProcessEachAddressSet calls the given function for each address set
-	// known to the factory
-	ProcessEachAddressSet(iteratorFn AddressSetIterFunc) error
-	// DestroyAddressSetInBackingStore deletes the named address set from the
-	// factory's backing store. SHOULD NOT BE CALLED for any address set
-	// for which an AddressSet object has been created.
-	DestroyAddressSetInBackingStore(name string) error
+	// with the given dbIDs.
+	EnsureAddressSet(dbIDs *libovsdbops.DbObjectIDs) (AddressSet, error)
+	// ProcessEachAddressSet calls the given function for each address set of type dbIDsType owned by given ownerController.
+	ProcessEachAddressSet(ownerController string, dbIDsType *libovsdbops.ObjectIDsType, iteratorFn AddressSetIterFunc) error
+	// DestroyAddressSet deletes the address sets with given dbIDs.
+	DestroyAddressSet(dbIDs *libovsdbops.DbObjectIDs) error
+	// GetAddressSet returns the address-set that matches the given dbIDs
+	GetAddressSet(dbIDs *libovsdbops.DbObjectIDs) (AddressSet, error)
 }
 
 // AddressSet is an interface for address set objects
 type AddressSet interface {
-	// GetASHashName returns the hashed name for ipv6 and ipv4 addressSets
+	// GetASHashNames returns the hashed name for ipv6 and ipv4 addressSets
 	GetASHashNames() (string, string)
 	// GetName returns the descriptive name of the address set
 	GetName() string
@@ -69,200 +71,304 @@ type AddressSet interface {
 }
 
 type ovnAddressSetFactory struct {
-	util.NetNameInfo
 	nbClient libovsdbclient.Client
+	ipv4Mode bool
+	ipv6Mode bool
 }
 
 // NewOvnAddressSetFactory creates a new AddressSetFactory backed by
 // address set objects that execute OVN commands
-func NewOvnAddressSetFactory(netNameInfo util.NetNameInfo, nbClient libovsdbclient.Client) AddressSetFactory {
+func NewOvnAddressSetFactory(nbClient libovsdbclient.Client, ipv4Mode, ipv6Mode bool) AddressSetFactory {
 	return &ovnAddressSetFactory{
-		NetNameInfo: netNameInfo,
-		nbClient:    nbClient,
+		nbClient: nbClient,
+		ipv4Mode: ipv4Mode,
+		ipv6Mode: ipv6Mode,
 	}
 }
 
 // ovnAddressSetFactory implements the AddressSetFactory interface
-//var _ AddressSetFactory = &ovnAddressSetFactory{}
+var _ AddressSetFactory = &ovnAddressSetFactory{}
 
-// NewAddressSet returns a new address set object
-func (asf *ovnAddressSetFactory) NewAddressSet(name string, ips []net.IP) (AddressSet, error) {
-	res, err := newOvnAddressSets(asf, name, ips)
+// NewAddressSet returns a new object that implements AddressSet
+// and contains the given IPs, or an error. Internally it creates
+// an address set for IPv4 and IPv6 each.
+func (asf *ovnAddressSetFactory) NewAddressSet(dbIDs *libovsdbops.DbObjectIDs, ips []net.IP) (AddressSet, error) {
+	as, ops, err := asf.NewAddressSetOps(dbIDs, ips)
 	if err != nil {
 		return nil, err
 	}
-	return res, nil
-}
-
-// ensureAddressSet ensures the address_set with the given name exists and if it does not creates an empty addressSet
-func ensureOvnAddressSet(asf *ovnAddressSetFactory, name string) (*ovnAddressSet, error) {
-	as := &ovnAddressSet{
-		nbClient: asf.nbClient,
-		name:     name,
-		hashName: util.GetClusterScopedName(asf.Prefix + hashedAddressSet(name)),
+	_, err = libovsdbops.TransactAndCheck(asf.nbClient, ops)
+	if err != nil {
+		return nil, err
 	}
-
-	addrSet := nbdb.AddressSet{
-		Name:        as.hashName,
-		ExternalIDs: map[string]string{"name": name},
-	}
-	addrSet.ExternalIDs = util.ExternalIDsForCluster(addrSet.ExternalIDs)
-	if asf.IsSecondary {
-		addrSet.ExternalIDs["network_name"] = asf.NetName
-	}
-
-	err := libovsdbops.CreateAddressSets(asf.nbClient, &addrSet)
-	// UUID should always be set if no error, check anyway
-	if err != nil || addrSet.UUID == "" {
-		return nil, fmt.Errorf("failed to create address set %+v: %v", addrSet, err)
-	}
-
 	return as, nil
 }
 
-// EnsureAddressSet ensures the address_set with the given name exists. If it exists it returns the set
-// and if it does not exist, creates an empty addressSet and returns it.
-func (asf *ovnAddressSetFactory) EnsureAddressSet(name string) (AddressSet, error) {
-	var (
-		v4set, v6set *ovnAddressSet
-		err          error
-	)
-	ip4ASName, ip6ASName := MakeAddressSetName(name)
-	if config.IPv4Mode {
-		v4set, err = ensureOvnAddressSet(asf, ip4ASName)
-		if err != nil {
-			return nil, err
-		}
+// NewAddressSetOps returns a new object that implements AddressSet
+// and contains the given IPs, or an error. Internally it creates
+// address set ops for IPv4 and IPv6 each.
+func (asf *ovnAddressSetFactory) NewAddressSetOps(dbIDs *libovsdbops.DbObjectIDs, ips []net.IP) (AddressSet, []ovsdb.Operation, error) {
+	if err := asf.validateDbIDs(dbIDs); err != nil {
+		return nil, nil, fmt.Errorf("failed to create address set ops: %w", err)
 	}
-	if config.IPv6Mode {
-		v6set, err = ensureOvnAddressSet(asf, ip6ASName)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return &ovnAddressSets{nbClient: asf.nbClient, name: name, ipv4: v4set, ipv6: v6set}, nil
+	return asf.ensureOvnAddressSetsOps(ips, dbIDs, true)
 }
 
-func forEachAddressSet(netNameInfo util.NetNameInfo, nbClient libovsdbclient.Client, do func(string) error) error {
-	p := func(addrSet *nbdb.AddressSet) bool {
-		netName, exists := addrSet.ExternalIDs["network_name"]
-		if netNameInfo.IsSecondary {
-			if !exists || netName != netNameInfo.NetName {
-				return false
-			}
-		} else if exists {
-			return false
-		}
-		_, exists = addrSet.ExternalIDs["name"]
-		return exists && util.HasExternalIDsForCluster(addrSet.ExternalIDs)
+// EnsureAddressSet makes sure that an address set object exists in ovn
+// with the given dbIDs.
+func (asf *ovnAddressSetFactory) EnsureAddressSet(dbIDs *libovsdbops.DbObjectIDs) (AddressSet, error) {
+	if err := asf.validateDbIDs(dbIDs); err != nil {
+		return nil, fmt.Errorf("failed to ensure address set: %w", err)
 	}
+	as, ops, err := asf.ensureOvnAddressSetsOps(nil, dbIDs, false)
+	if err != nil {
+		return nil, err
+	}
+	_, err = libovsdbops.TransactAndCheck(asf.nbClient, ops)
+	if err != nil {
+		return nil, err
+	}
+	return as, nil
+}
 
-	addrSetList, err := libovsdbops.FindAddressSetsWithPredicate(nbClient, p)
+func getDbIDsWithIPFamily(dbIDs *libovsdbops.DbObjectIDs, ipFamily string) *libovsdbops.DbObjectIDs {
+	return dbIDs.AddIDs(map[libovsdbops.ExternalIDKey]string{libovsdbops.AddressSetIPFamilyKey: ipFamily})
+}
+
+// GetAddressSet returns the address-set that matches the given dbIDs
+func (asf *ovnAddressSetFactory) GetAddressSet(dbIDs *libovsdbops.DbObjectIDs) (AddressSet, error) {
+	if err := asf.validateDbIDs(dbIDs); err != nil {
+		return nil, fmt.Errorf("failed to get address set: %w", err)
+	}
+	var (
+		v4set, v6set *ovnAddressSet
+	)
+	p := libovsdbops.GetPredicate[*nbdb.AddressSet](dbIDs, nil)
+	addrSetList, err := libovsdbops.FindAddressSetsWithPredicate(asf.nbClient, p)
+	if err != nil {
+		return nil, fmt.Errorf("error getting address sets: %w", err)
+	}
+	for i := range addrSetList {
+		addrSet := addrSetList[i]
+		if addrSet.ExternalIDs[libovsdbops.AddressSetIPFamilyKey.String()] == ipv4InternalID {
+			v4set = asf.newOvnAddressSet(addrSet)
+		}
+		if addrSet.ExternalIDs[libovsdbops.AddressSetIPFamilyKey.String()] == ipv6InternalID {
+			v6set = asf.newOvnAddressSet(addrSet)
+		}
+	}
+	return asf.newOvnAddressSets(v4set, v6set, dbIDs), nil
+}
+
+// forEachAddressSet executes a do function on each address set owned by ovnAddressSetFactory.ControllerName
+func (asf *ovnAddressSetFactory) forEachAddressSet(ownerController string, dbIDsType *libovsdbops.ObjectIDsType,
+	do func(*nbdb.AddressSet) error) error {
+	predIDs := libovsdbops.NewDbObjectIDs(dbIDsType, ownerController, nil)
+	p := libovsdbops.GetPredicate[*nbdb.AddressSet](predIDs, nil)
+	addrSetList, err := libovsdbops.FindAddressSetsWithPredicate(asf.nbClient, p)
 	if err != nil {
 		return fmt.Errorf("error reading address sets: %+v", err)
 	}
 
-	var errors []error
+	var errs []error
 	for _, addrSet := range addrSetList {
-		if err := do(addrSet.ExternalIDs["name"]); err != nil {
-			errors = append(errors, err)
+		if err = do(addrSet); err != nil {
+			errs = append(errs, err)
 		}
 	}
 
-	if len(errors) > 0 {
-		return fmt.Errorf("failed to iterate address sets: %v", utilerrors.NewAggregate(errors))
+	if len(errs) > 0 {
+		return fmt.Errorf("failed to iterate address sets: %v", utilerrors.NewAggregate(errs))
 	}
 
 	return nil
 }
 
-// ProcessEachAddressSet will pass the unhashed address set name, namespace name
-// and the first suffix in the name to the 'iteratorFn' for every address_set in
-// OVN. (Unhashed address set names are of the form namespaceName[.suffix1.suffix2. .suffixN])
-func (asf *ovnAddressSetFactory) ProcessEachAddressSet(iteratorFn AddressSetIterFunc) error {
+// ProcessEachAddressSet calls the given function for each address set of type dbIDsType owned by given ownerController.
+func (asf *ovnAddressSetFactory) ProcessEachAddressSet(ownerController string, dbIDsType *libovsdbops.ObjectIDsType,
+	iteratorFn AddressSetIterFunc) error {
 	processedAddressSets := sets.Set[string]{}
-	return forEachAddressSet(asf.NetNameInfo, asf.nbClient, func(name string) error {
-		// Remove the suffix from the address set name and normalize
-		addrSetName := truncateSuffixFromAddressSet(name)
-		if processedAddressSets.Has(addrSetName) {
+	return asf.forEachAddressSet(ownerController, dbIDsType, func(as *nbdb.AddressSet) error {
+		dbIDs, err := libovsdbops.NewDbObjectIDsFromExternalIDs(dbIDsType, as.ExternalIDs)
+		if err != nil {
+			return fmt.Errorf("failed to get objectIDs for %+v address set from ExternalIDs: %w", as, err)
+		}
+		// remove ipFamily to process address set only once
+		dbIDsWithoutIPFam := dbIDs.RemoveIDs(libovsdbops.AddressSetIPFamilyKey)
+		nameWithoutIPFam := getOvnAddressSetsName(dbIDsWithoutIPFam)
+		if processedAddressSets.Has(nameWithoutIPFam) {
 			// We have already processed the address set. In case of dual stack we will have _v4 and _v6
 			// suffixes for address sets. Since we are normalizing these two address sets through this API
 			// we will process only one normalized address set name.
 			return nil
 		}
-		processedAddressSets.Insert(addrSetName)
-		names := strings.Split(addrSetName, ".")
-		addrSetNamespace := names[0]
-		nameSuffix := ""
-		if len(names) >= 2 {
-			nameSuffix = names[1]
-		}
-		return iteratorFn(addrSetName, addrSetNamespace, nameSuffix)
+		processedAddressSets.Insert(nameWithoutIPFam)
+		return iteratorFn(dbIDsWithoutIPFam)
 	})
 }
 
-func truncateSuffixFromAddressSet(asName string) string {
-	// Legacy address set names will not have v4 or v6 suffixes.
-	// truncate them for the new ones
-	if strings.HasSuffix(asName, ipv4AddressSetSuffix) {
-		return strings.TrimSuffix(asName, ipv4AddressSetSuffix)
+// DestroyAddressSet deletes the address sets with given dbIDs.
+func (asf *ovnAddressSetFactory) DestroyAddressSet(dbIDs *libovsdbops.DbObjectIDs) error {
+	if err := asf.validateDbIDs(dbIDs); err != nil {
+		return fmt.Errorf("failed to destroy address set: %w", err)
 	}
-	if strings.HasSuffix(asName, ipv6AddressSetSuffix) {
-		return strings.TrimSuffix(asName, ipv6AddressSetSuffix)
+	asv4 := &nbdb.AddressSet{
+		Name: buildAddressSet(dbIDs, ipv4InternalID).Name,
 	}
-	return asName
-}
-
-// DestroyAddressSetInBackingStore ensures an address set is deleted
-func (asf *ovnAddressSetFactory) DestroyAddressSetInBackingStore(name string) error {
-	// We need to handle both legacy and new address sets in this method. Legacy names
-	// will not have v4 and v6 suffix as they were same as namespace name. Hence we will always try to destroy
-	// the address set with raw name(namespace name), v4 name and v6 name.  The method destroyAddressSet uses
-	// --if-exists parameter which will take care of deleting the address set only if it exists.
-	err := destroyAddressSet(asf.NetNameInfo, asf.nbClient, name)
+	asv6 := &nbdb.AddressSet{
+		Name: buildAddressSet(dbIDs, ipv6InternalID).Name,
+	}
+	err := libovsdbops.DeleteAddressSets(asf.nbClient, asv4, asv6)
 	if err != nil {
-		return err
-	}
-	ip4ASName, ip6ASName := MakeAddressSetName(name)
-	err = destroyAddressSet(asf.NetNameInfo, asf.nbClient, ip4ASName)
-	if err != nil {
-		return err
-	}
-	err = destroyAddressSet(asf.NetNameInfo, asf.nbClient, ip6ASName)
-	if err != nil {
-		return err
+		return fmt.Errorf("failed to delete address sets %s: %v", getOvnAddressSetsName(dbIDs), err)
 	}
 	return nil
 }
 
-func destroyAddressSet(netNameInfo util.NetNameInfo, nbClient libovsdbclient.Client, name string) error {
-	addrset := nbdb.AddressSet{
-		Name: util.GetClusterScopedName(netNameInfo.Prefix + hashedAddressSet(name)),
+// if updateAS is false, ips will be ignored, only empty address sets will be created or existing address sets will
+// be returned
+func (asf *ovnAddressSetFactory) ensureOvnAddressSetsOps(ips []net.IP, dbIDs *libovsdbops.DbObjectIDs,
+	updateAS bool) (*ovnAddressSets, []ovsdb.Operation, error) {
+	var (
+		v4set, v6set *ovnAddressSet
+		v4IPs, v6IPs []net.IP
+		err          error
+	)
+	if ips != nil {
+		v4IPs, v6IPs = splitIPsByFamily(ips)
 	}
-	err := libovsdbops.DeleteAddressSets(nbClient, &addrset)
-	if err != nil {
-		return fmt.Errorf("failed to delete address set %s: %v", name, err)
+	var ops []ovsdb.Operation
+	if asf.ipv4Mode {
+		v4set, ops, err = asf.ensureOvnAddressSetOps(v4IPs, dbIDs, ipv4InternalID, updateAS, ops)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
-	return nil
+	if asf.ipv6Mode {
+		v6set, ops, err = asf.ensureOvnAddressSetOps(v6IPs, dbIDs, ipv6InternalID, updateAS, ops)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	return asf.newOvnAddressSets(v4set, v6set, dbIDs), ops, nil
 }
 
+func buildAddressSet(dbIDs *libovsdbops.DbObjectIDs, ipFamily string) *nbdb.AddressSet {
+	dbIDsWithIPFam := getDbIDsWithIPFamily(dbIDs, ipFamily)
+	externalIDs := dbIDsWithIPFam.GetExternalIDs()
+	name := externalIDs[libovsdbops.PrimaryIDKey.String()]
+	as := &nbdb.AddressSet{
+		Name:        hashedAddressSet(name),
+		ExternalIDs: externalIDs,
+	}
+	return as
+}
+
+func (asf *ovnAddressSetFactory) newOvnAddressSet(addrSet *nbdb.AddressSet) *ovnAddressSet {
+	return &ovnAddressSet{
+		nbClient: asf.nbClient,
+		name:     addrSet.ExternalIDs[libovsdbops.PrimaryIDKey.String()],
+		hashName: addrSet.Name,
+		uuid:     addrSet.UUID,
+	}
+}
+
+func (asf *ovnAddressSetFactory) ensureOvnAddressSetOps(ips []net.IP, dbIDs *libovsdbops.DbObjectIDs,
+	ipFamily string, updateAS bool, ops []ovsdb.Operation) (*ovnAddressSet, []ovsdb.Operation, error) {
+	addrSet := buildAddressSet(dbIDs, ipFamily)
+	var err error
+	if updateAS {
+		// overwrite ips, EnsureAddressSet doesn't do that
+		uniqIPs := ipsToStringUnique(ips)
+		addrSet.Addresses = uniqIPs
+		ops, err = libovsdbops.CreateOrUpdateAddressSetsOps(asf.nbClient, ops, addrSet)
+	} else {
+		ops, err = libovsdbops.CreateAddressSetsOps(asf.nbClient, ops, addrSet)
+	}
+
+	// UUID should always be set if no error, check anyway
+	if err != nil {
+		// NOTE: While ovsdb transactions get serialized by libovsdb, the decision to create vs. update
+		// the address set takes place before that serialization is done. Because of that, it is feasible
+		// that one of the go threads attempting to call this routine at the same time will fail.
+		// This is described in https://bugzilla.redhat.com/show_bug.cgi?id=2108026 . While we could
+		// handle that failure here by retrying, a higher level retry (see retry_obj.go) is already
+		// present in the codepath, so no additional handling for that condition has been added here.
+		return nil, nil, fmt.Errorf("failed to create or update address set ops %+v: %w", addrSet, err)
+	}
+	as := asf.newOvnAddressSet(addrSet)
+	klog.V(5).Infof("New(%s) with %v", asDetail(as), ips)
+	return as, ops, nil
+}
+
+func (asf *ovnAddressSetFactory) validateDbIDs(dbIDs *libovsdbops.DbObjectIDs) error {
+	unsetKeys := dbIDs.GetUnsetKeys()
+	if len(unsetKeys) == 1 && unsetKeys[0] == libovsdbops.AddressSetIPFamilyKey {
+		return nil
+	}
+	return fmt.Errorf("wrong set of keys is unset %v", unsetKeys)
+}
+
+// GetHashNamesForAS returns hashed address set names for given dbIDs for both ip families.
+// Can be used to cleanup e.g. address set references if the address set was deleted.
+func GetHashNamesForAS(dbIDs *libovsdbops.DbObjectIDs) (string, string) {
+	return buildAddressSet(dbIDs, ipv4InternalID).Name,
+		buildAddressSet(dbIDs, ipv6InternalID).Name
+}
+
+// GetTestDbAddrSets returns nbdb.AddressSet objects both for ipv4 and ipv6, regardless of current config.
+// May only be used for testing.
+func GetTestDbAddrSets(dbIDs *libovsdbops.DbObjectIDs, ips []net.IP) (*nbdb.AddressSet, *nbdb.AddressSet) {
+	var v4set, v6set *nbdb.AddressSet
+	v4IPs, v6IPs := splitIPsByFamily(ips)
+	// v4 address set
+	v4set = buildAddressSet(dbIDs, ipv4InternalID)
+	uniqIPs := ipsToStringUnique(v4IPs)
+	v4set.Addresses = uniqIPs
+	v4set.UUID = v4set.Name + "-UUID"
+	// v6 address set
+	v6set = buildAddressSet(dbIDs, ipv6InternalID)
+	uniqIPs = ipsToStringUnique(v6IPs)
+	v6set.Addresses = uniqIPs
+	v6set.UUID = v6set.Name + "-UUID"
+	return v4set, v6set
+}
+
+// ovnAddressSet is ipFamily-specific address set
 type ovnAddressSet struct {
 	nbClient libovsdbclient.Client
-	name     string
+	// name is based on dbIDs and ipFamily
+	name string
+	// hashName = hashedAddressSet(name) and is set to AddressSet.Name
 	hashName string
 	uuid     string
 }
 
+// getOvnAddressSetsName returns the name for ovnAddressSets, that contains both ipv4 and ipv6 address sets,
+// therefore the name should not include ipFamily information. DbObjectIDs without ipFamily is what is used by
+// the AddressSetFactory functions.
+func getOvnAddressSetsName(dbIDs *libovsdbops.DbObjectIDs) string {
+	if dbIDs.GetObjectID(libovsdbops.AddressSetIPFamilyKey) != "" {
+		dbIDs = dbIDs.RemoveIDs(libovsdbops.AddressSetIPFamilyKey)
+	}
+	return dbIDs.String()
+}
+
+// ovnAddressSets is an abstraction for ipv4 and ipv6 address sets
 type ovnAddressSets struct {
 	nbClient libovsdbclient.Client
-	name     string
-	ipv4     *ovnAddressSet
-	ipv6     *ovnAddressSet
+	// name is based on dbIDs without ipFamily
+	name string
+	ipv4 *ovnAddressSet
+	ipv6 *ovnAddressSet
 }
 
 // ovnAddressSets implements the AddressSet interface
 var _ AddressSet = &ovnAddressSets{}
+
+func (asf *ovnAddressSetFactory) newOvnAddressSets(v4set, v6set *ovnAddressSet, dbIDs *libovsdbops.DbObjectIDs) *ovnAddressSets {
+	return &ovnAddressSets{nbClient: asf.nbClient, name: getOvnAddressSetsName(dbIDs), ipv4: v4set, ipv6: v6set}
+}
 
 // hash the provided input to make it a valid ovnAddressSet name.
 func hashedAddressSet(s string) string {
@@ -271,58 +377,6 @@ func hashedAddressSet(s string) string {
 
 func asDetail(as *ovnAddressSet) string {
 	return fmt.Sprintf("%s/%s/%s", as.uuid, as.name, as.hashName)
-}
-
-func newOvnAddressSets(asf *ovnAddressSetFactory, name string, ips []net.IP) (*ovnAddressSets, error) {
-	var (
-		v4set, v6set *ovnAddressSet
-		err          error
-	)
-	v4IPs, v6IPs := splitIPsByFamily(ips)
-
-	ip4ASName, ip6ASName := MakeAddressSetName(name)
-	if config.IPv4Mode {
-		v4set, err = newOvnAddressSet(asf, ip4ASName, v4IPs)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if config.IPv6Mode {
-		v6set, err = newOvnAddressSet(asf, ip6ASName, v6IPs)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return &ovnAddressSets{nbClient: asf.nbClient, name: name, ipv4: v4set, ipv6: v6set}, nil
-}
-
-func newOvnAddressSet(asf *ovnAddressSetFactory, name string, ips []net.IP) (*ovnAddressSet, error) {
-	as := &ovnAddressSet{
-		nbClient: asf.nbClient,
-		name:     name,
-		hashName: util.GetClusterScopedName(asf.Prefix + hashedAddressSet(name)),
-	}
-
-	uniqIPs := ipsToStringUnique(ips)
-	addrSet := nbdb.AddressSet{
-		Name:        as.hashName,
-		ExternalIDs: map[string]string{"name": as.name},
-		Addresses:   uniqIPs,
-	}
-	addrSet.ExternalIDs = util.ExternalIDsForCluster(addrSet.ExternalIDs)
-	if asf.IsSecondary {
-		addrSet.ExternalIDs["network_name"] = asf.NetName
-	}
-
-	err := libovsdbops.CreateOrUpdateAddressSets(asf.nbClient, &addrSet)
-	// UUID should always be set if no error, check anyway
-	if err != nil || addrSet.UUID == "" {
-		return nil, fmt.Errorf("failed to create or update address set %+v: %v", addrSet, err)
-	}
-
-	as.uuid = addrSet.UUID
-	klog.V(5).Infof("New(%s) with %v", asDetail(as), ips)
-	return as, nil
 }
 
 func (as *ovnAddressSets) GetASHashNames() (string, string) {
@@ -437,9 +491,9 @@ func (as *ovnAddressSets) AddSubnets(subnets []*net.IPNet) error {
 		}
 	}
 	for _, subnet := range subnets {
-		if utilnet.IsIPv4CIDR(subnet) && !util.ArrayHasString(existingV4Addresses, subnet.String()) {
+		if utilnet.IsIPv4CIDR(subnet) && !util.SliceHasStringItem(existingV4Addresses, subnet.String()) {
 			v4Subnets = append(v4Subnets, subnet)
-		} else if utilnet.IsIPv6CIDR(subnet) && !util.ArrayHasString(existingV6Addresses, subnet.String()) {
+		} else if utilnet.IsIPv6CIDR(subnet) && !util.SliceHasStringItem(existingV6Addresses, subnet.String()) {
 			v6Subnets = append(v6Subnets, subnet)
 		}
 	}
@@ -595,6 +649,10 @@ func (as *ovnAddressSet) addIPs(ips []net.IP) ([]ovsdb.Operation, error) {
 
 	uniqIPs := ipsToStringUnique(ips)
 
+	if as.hasIPs(uniqIPs...) {
+		return nil, nil
+	}
+
 	klog.V(5).Infof("(%s) adding IPs (%s) to address set", asDetail(as), uniqIPs)
 
 	addrset := nbdb.AddressSet{
@@ -607,6 +665,20 @@ func (as *ovnAddressSet) addIPs(ips []net.IP) ([]ovsdb.Operation, error) {
 	}
 
 	return ops, nil
+}
+
+// hasIPs returns true if an address set contains all given IPs
+func (as *ovnAddressSet) hasIPs(ips ...string) bool {
+	existingIPs, err := as.getIPs()
+	if err != nil {
+		return false
+	}
+
+	if len(existingIPs) == 0 {
+		return false
+	}
+
+	return sets.NewString(existingIPs...).HasAll(ips...)
 }
 
 func (as *ovnAddressSet) addSubnets(subnets []*net.IPNet) ([]ovsdb.Operation, error) {
@@ -688,15 +760,6 @@ func (as *ovnAddressSet) destroy() error {
 	return nil
 }
 
-func MakeAddressSetName(name string) (string, string) {
-	return name + ipv4AddressSetSuffix, name + ipv6AddressSetSuffix
-}
-
-func MakeAddressSetHashNames(name string) (string, string) {
-	ipv4AddressSetName, ipv6AddressSetName := MakeAddressSetName(name)
-	return hashedAddressSet(ipv4AddressSetName), hashedAddressSet(ipv6AddressSetName)
-}
-
 // splitIPsByFamily takes a slice of IPs and returns two slices, with
 // v4 and v6 addresses collated accordingly.
 func splitIPsByFamily(ips []net.IP) (v4 []net.IP, v6 []net.IP) {
@@ -712,7 +775,7 @@ func splitIPsByFamily(ips []net.IP) (v4 []net.IP, v6 []net.IP) {
 
 // Takes a slice of IPs and returns a slice with unique IPs
 func ipsToStringUnique(ips []net.IP) []string {
-	s := sets.NewString()
+	s := sets.New[string]()
 	for _, ip := range ips {
 		s.Insert(ip.String())
 	}

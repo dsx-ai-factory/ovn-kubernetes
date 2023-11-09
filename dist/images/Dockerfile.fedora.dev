@@ -15,7 +15,7 @@
 # this image in any production environment.
 #
 
-FROM fedora:34 AS ovnbuilder
+FROM fedora:37 AS ovnbuilder
 
 USER root
 
@@ -23,11 +23,12 @@ ENV PYTHONDONTWRITEBYTECODE yes
 
 # Install tools that are required for building ovs/ovn.
 RUN INSTALL_PKGS=" \
-    python3-pyyaml bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
-    libpcap hostname \
+    python3-pip python3-pyyaml bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
+    libpcap hostname util-linux\
     python3-openvswitch python3-pyOpenSSL \
     autoconf automake libtool g++ gcc fedora-packager rpmdevtools \
     unbound unbound-devel groff python3-sphinx graphviz openssl openssl-devel \
+    libbpf-devel libxdp-devel numactl-devel \
     checkpolicy libcap-ng-devel selinux-policy-devel" && \
     dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
     dnf clean all && rm -rf /var/cache/dnf/*
@@ -63,7 +64,7 @@ RUN rm rpm/rpmbuild/RPMS/x86_64/*docker*
 RUN git log -n 1
 
 # Build the final image
-FROM fedora:34
+FROM fedora:37
 
 # Install needed dependencies.
 RUN INSTALL_PKGS=" \
@@ -84,6 +85,8 @@ RUN mkdir -p /usr/libexec/cni/
 COPY ovnkube /usr/bin/
 COPY ovn-kube-util /usr/bin/
 COPY ovndbchecker /usr/bin/
+COPY hybrid-overlay-node /usr/bin
+COPY ovnkube-identity /usr/bin/
 COPY ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
 
 # ovnkube.sh is the entry point. This script examines environment

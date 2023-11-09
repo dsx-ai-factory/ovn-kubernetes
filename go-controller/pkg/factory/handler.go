@@ -2,25 +2,27 @@ package factory
 
 import (
 	"fmt"
-	"math/rand"
 	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cryptorand"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 
 	multinetworkpolicylister "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/listers/k8s.cni.cncf.io/v1beta2"
 	networkattachmentdefinitionlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	apbrlister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/listers/adminpbr/v1beta1"
+
 	egressfirewalllister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
 	egressiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
 	egressqoslister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
+	egressservicelister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/listers/egressservice/v1"
 	ipreservationlister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/listers/ipreservation/v1beta1"
-	portmirrorlister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/listers/portmirror/v1beta1"
 	virtualiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/listers/virtualip/v1beta1"
 
 	cloudprivateipconfiglister "github.com/openshift/client-go/cloudnetwork/listers/cloudnetwork/v1"
+	anplister "sigs.k8s.io/network-policy-api/pkg/client/listers/apis/v1alpha1"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
@@ -42,11 +44,15 @@ type Handler struct {
 	// tombstone should only be set using atomic operations since it is
 	// used from multiple goroutines.
 	tombstone uint32
+	// priority is used to track the handler's priority of being invoked.
+	// example: a handler with priority 0 will process the received event first
+	// before a handler with priority 1.
+	priority int
 }
 
-func (h *Handler) OnAdd(obj interface{}) {
+func (h *Handler) OnAdd(obj interface{}, isInInitialList bool) {
 	if atomic.LoadUint32(&h.tombstone) == handlerAlive {
-		h.base.OnAdd(obj)
+		h.base.OnAdd(obj, isInInitialList)
 	}
 }
 
@@ -90,9 +96,14 @@ type queueMapEntry struct {
 
 type informer struct {
 	sync.RWMutex
-	oType    reflect.Type
-	inf      cache.SharedIndexInformer
-	handlers map[uint64]*Handler
+	oType reflect.Type
+	inf   cache.SharedIndexInformer
+	// keyed by priority - used to track the handler's priority of being invoked.
+	// example: a handler with priority 0 will process the received event first
+	// before a handler with priority 1, 0 being the higest priority.
+	// NOTE: we can have multiple handlers with the same priority hence the value
+	// is a map of handlers keyed by its unique id.
+	handlers map[int]map[uint64]*Handler
 	lister   listerInterface
 	// initialAddFunc will be called to deliver the initial list of objects
 	// when a handler is added
@@ -108,8 +119,22 @@ type informer struct {
 func (i *informer) forEachQueuedHandler(f func(h *Handler)) {
 	i.RLock()
 	defer i.RUnlock()
-	for _, handler := range i.handlers {
-		f(handler)
+
+	for priority := 0; priority <= minHandlerPriority; priority++ { // loop over priority higest to lowest
+		for _, handler := range i.handlers[priority] {
+			f(handler)
+		}
+	}
+}
+
+func (i *informer) forEachQueuedHandlerReversed(f func(h *Handler)) {
+	i.RLock()
+	defer i.RUnlock()
+
+	for priority := minHandlerPriority; priority >= 0; priority-- { // loop over priority lowest to highest
+		for _, handler := range i.handlers[priority] {
+			f(handler)
+		}
 	}
 }
 
@@ -123,12 +148,31 @@ func (i *informer) forEachHandler(obj interface{}, f func(h *Handler)) {
 		return
 	}
 
-	for _, handler := range i.handlers {
-		f(handler)
+	for priority := 0; priority <= minHandlerPriority; priority++ { // loop over priority higest to lowest
+		for _, handler := range i.handlers[priority] {
+			f(handler)
+		}
 	}
 }
 
-func (i *informer) addHandler(id uint64, filterFunc func(obj interface{}) bool, funcs cache.ResourceEventHandler, existingItems []interface{}) *Handler {
+func (i *informer) forEachHandlerReversed(obj interface{}, f func(h *Handler)) {
+	i.RLock()
+	defer i.RUnlock()
+
+	objType := reflect.TypeOf(obj)
+	if objType != i.oType {
+		klog.Errorf("Object type %v did not match expected %v", objType, i.oType)
+		return
+	}
+
+	for priority := minHandlerPriority; priority >= 0; priority-- { // loop over priority lowest to highest
+		for _, handler := range i.handlers[priority] {
+			f(handler)
+		}
+	}
+}
+
+func (i *informer) addHandler(id uint64, priority int, filterFunc func(obj interface{}) bool, funcs cache.ResourceEventHandler, existingItems []interface{}) *Handler {
 	handler := &Handler{
 		cache.FilteringResourceEventHandler{
 			FilterFunc: filterFunc,
@@ -136,6 +180,7 @@ func (i *informer) addHandler(id uint64, filterFunc func(obj interface{}) bool, 
 		},
 		id,
 		handlerAlive,
+		priority,
 	}
 
 	// Send existing items to the handler's add function; informers usually
@@ -143,7 +188,12 @@ func (i *informer) addHandler(id uint64, filterFunc func(obj interface{}) bool, 
 	// we must emulate that here
 	i.initialAddFunc(handler, existingItems)
 
-	i.handlers[id] = handler
+	_, ok := i.handlers[priority]
+	if !ok {
+		i.handlers[priority] = make(map[uint64]*Handler)
+	}
+	i.handlers[priority][id] = handler
+
 	return handler
 }
 
@@ -158,11 +208,19 @@ func (i *informer) removeHandler(handler *Handler) {
 	go func() {
 		i.Lock()
 		defer i.Unlock()
-		if _, ok := i.handlers[handler.id]; ok {
-			// Remove the handler
-			delete(i.handlers, handler.id)
-			klog.V(5).Infof("Removed %v event handler %d", i.oType, handler.id)
-		} else {
+		removed := 0
+		for priority := range i.handlers { // loop over priority
+			if _, ok := i.handlers[priority]; !ok {
+				continue // protection against nil map as value
+			}
+			if _, ok := i.handlers[priority][handler.id]; ok {
+				// Remove the handler
+				delete(i.handlers[priority], handler.id)
+				removed = 1
+				klog.V(5).Infof("Removed %v event handler %d", i.oType, handler.id)
+			}
+		}
+		if removed == 0 {
 			klog.Warningf("Tried to remove unknown object type %v event handler %d", i.oType, handler.id)
 		}
 	}()
@@ -214,7 +272,7 @@ func (qm *queueMap) shutdown() {
 func (qm *queueMap) getNewQueueNum() uint32 {
 	var j, startIdx, queueIdx uint32
 	numEventQueues := uint32(len(qm.queues))
-	startIdx = uint32(rand.Intn(int(numEventQueues - 1)))
+	startIdx = uint32(cryptorand.Intn(int64(numEventQueues - 1)))
 	queueIdx = startIdx
 	lowestNum := len(qm.queues[startIdx])
 	for j = 0; j < numEventQueues; j++ {
@@ -337,7 +395,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "add").Inc()
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
-					h.OnAdd(e.obj)
+					h.OnAdd(e.obj, false)
 				})
 				metrics.MetricResourceAddLatency.Observe(time.Since(start).Seconds())
 			})
@@ -353,7 +411,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 						// This occurs not so often, so log this occurance.
 						klog.Infof("Object %s/%s is replaced, invoking delete followed by add handler", new.GetNamespace(), new.GetName())
 						h.OnDelete(e.oldObj)
-						h.OnAdd(e.obj)
+						h.OnAdd(e.obj, false)
 					} else {
 						h.OnUpdate(e.oldObj, e.obj)
 					}
@@ -370,7 +428,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 			i.queueMap.enqueueEvent(nil, realObj, i.oType, true, i.stopChan, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "delete").Inc()
 				start := time.Now()
-				i.forEachQueuedHandler(func(h *Handler) {
+				i.forEachQueuedHandlerReversed(func(h *Handler) {
 					h.OnDelete(e.obj)
 				})
 				metrics.MetricResourceDeleteLatency.Observe(time.Since(start).Seconds())
@@ -386,7 +444,7 @@ func (i *informer) newFederatedHandler() cache.ResourceEventHandlerFuncs {
 			metrics.MetricResourceUpdateCount.WithLabelValues(name, "add").Inc()
 			start := time.Now()
 			i.forEachHandler(obj, func(h *Handler) {
-				h.OnAdd(obj)
+				h.OnAdd(obj, false)
 			})
 			metrics.MetricResourceAddLatency.Observe(time.Since(start).Seconds())
 		},
@@ -400,7 +458,7 @@ func (i *informer) newFederatedHandler() cache.ResourceEventHandlerFuncs {
 					// This occurs not so often, so log this occurance.
 					klog.Infof("Object %s/%s is replaced, invoking delete followed by add handler", new.GetNamespace(), new.GetName())
 					h.OnDelete(oldObj)
-					h.OnAdd(newObj)
+					h.OnAdd(newObj, false)
 				} else {
 					h.OnUpdate(oldObj, newObj)
 				}
@@ -415,7 +473,7 @@ func (i *informer) newFederatedHandler() cache.ResourceEventHandlerFuncs {
 			}
 			metrics.MetricResourceUpdateCount.WithLabelValues(name, "delete").Inc()
 			start := time.Now()
-			i.forEachHandler(realObj, func(h *Handler) {
+			i.forEachHandlerReversed(realObj, func(h *Handler) {
 				h.OnDelete(realObj)
 			})
 			metrics.MetricResourceDeleteLatency.Observe(time.Since(start).Seconds())
@@ -426,8 +484,10 @@ func (i *informer) newFederatedHandler() cache.ResourceEventHandlerFuncs {
 func (i *informer) removeAllHandlers() {
 	i.Lock()
 	defer i.Unlock()
-	for _, handler := range i.handlers {
-		i.removeHandler(handler)
+	for _, handlers := range i.handlers {
+		for _, handler := range handlers {
+			i.removeHandler(handler)
+		}
 	}
 }
 
@@ -452,26 +512,30 @@ func newInformerLister(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		return netlisters.NewNetworkPolicyLister(sharedInformer.GetIndexer()), nil
 	case EgressFirewallType:
 		return egressfirewalllister.NewEgressFirewallLister(sharedInformer.GetIndexer()), nil
+	case AdminNetworkPolicyType:
+		return anplister.NewAdminNetworkPolicyLister(sharedInformer.GetIndexer()), nil
+	case BaselineAdminNetworkPolicyType:
+		return anplister.NewBaselineAdminNetworkPolicyLister(sharedInformer.GetIndexer()), nil
 	case EgressIPType:
 		return egressiplister.NewEgressIPLister(sharedInformer.GetIndexer()), nil
 	case CloudPrivateIPConfigType:
 		return cloudprivateipconfiglister.NewCloudPrivateIPConfigLister(sharedInformer.GetIndexer()), nil
 	case EndpointSliceType:
 		return discoverylisters.NewEndpointSliceLister(sharedInformer.GetIndexer()), nil
-	case NetworkattachmentdefinitionType:
-		return networkattachmentdefinitionlister.NewNetworkAttachmentDefinitionLister(sharedInformer.GetIndexer()), nil
-	case MultinetworkpolicyType:
-		return multinetworkpolicylister.NewMultiNetworkPolicyLister(sharedInformer.GetIndexer()), nil
 	case EgressQoSType:
 		return egressqoslister.NewEgressQoSLister(sharedInformer.GetIndexer()), nil
 	case AdminPBRType:
 		return apbrlister.NewAdminPolicyBasedRouteLister(sharedInformer.GetIndexer()), nil
 	case VirtualIPType:
 		return virtualiplister.NewVirtualIPLister(sharedInformer.GetIndexer()), nil
-	case IpReservationType:
+	case NetworkAttachmentDefinitionType:
+		return networkattachmentdefinitionlister.NewNetworkAttachmentDefinitionLister(sharedInformer.GetIndexer()), nil
+	case MultiNetworkPolicyType:
+		return multinetworkpolicylister.NewMultiNetworkPolicyLister(sharedInformer.GetIndexer()), nil
+	case EgressServiceType:
+		return egressservicelister.NewEgressServiceLister(sharedInformer.GetIndexer()), nil
+	case IPReservationType:
 		return ipreservationlister.NewIPReservationLister(sharedInformer.GetIndexer()), nil
-	case PortMirrorType:
-		return portmirrorlister.NewPortMirrorLister(sharedInformer.GetIndexer()), nil
 	}
 
 	return nil, fmt.Errorf("cannot create lister from type %v", oType)
@@ -488,7 +552,7 @@ func newBaseInformer(oType reflect.Type, sharedInformer cache.SharedIndexInforme
 		oType:    oType,
 		inf:      sharedInformer,
 		lister:   lister,
-		handlers: make(map[uint64]*Handler),
+		handlers: make(map[int]map[uint64]*Handler),
 	}, nil
 }
 
@@ -499,7 +563,7 @@ func newInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer) (
 	}
 	i.initialAddFunc = func(h *Handler, items []interface{}) {
 		for _, item := range items {
-			h.OnAdd(item)
+			h.OnAdd(item, false)
 		}
 	}
 	_, err = i.inf.AddEventHandler(i.newFederatedHandler())
@@ -507,6 +571,7 @@ func newInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer) (
 		return nil, err
 	}
 	return i, nil
+
 }
 
 func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer,
@@ -532,7 +597,7 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		// channel array.
 		for _, obj := range items {
 			addsMap.enqueueEvent(nil, obj, i.oType, false, i.stopChan, func(e *event) {
-				h.OnAdd(e.obj)
+				h.OnAdd(e.obj, false)
 			})
 		}
 
@@ -545,5 +610,7 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 	if err != nil {
 		return nil, err
 	}
+
 	return i, nil
+
 }

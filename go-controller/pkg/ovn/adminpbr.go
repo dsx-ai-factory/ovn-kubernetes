@@ -22,7 +22,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpbrapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -30,10 +30,7 @@ import (
 )
 
 const (
-	RoutePolicyPriorityNoRerouteJoinSubnet = 81
-	RoutePolicyPriorityAdminPBR            = 80
-	messagePrefixAddressSet                = "AddressSet"
-	addressSetClusterSubnets               = "cluster_subnets"
+	messagePrefixAddressSet = "AddressSet"
 )
 
 type action string
@@ -64,7 +61,7 @@ type internalAdminPBRPolicy struct {
 	sync.Mutex
 	hash              string
 	name              string
-	controller        *Controller
+	controller        *BaseNetworkController
 	podHandler        *factory.Handler
 	addressSet        addressset.AddressSet
 	network           string
@@ -77,7 +74,7 @@ type internalAdminPBRPolicy struct {
 	addressSetErrors  map[string]string
 }
 
-func newInternalAdminPBRPolicy(controller *Controller, apbr *adminpbrapi.AdminPolicyBasedRoute, policy *adminpbrapi.RoutingPolicyRule) (*internalAdminPBRPolicy, error) {
+func newInternalAdminPBRPolicy(controller *BaseNetworkController, apbr *adminpbrapi.AdminPolicyBasedRoute, policy *adminpbrapi.RoutingPolicyRule) (*internalAdminPBRPolicy, error) {
 	if util.IsEmptySelector(&policy.From.PodSelector) && util.IsEmptySelector(&policy.From.NamespaceSelector) && util.IsEmptySelector(&policy.From.NodeSelector) {
 		return nil, fmt.Errorf("%s: at least 1 selector is required", apbr.Name)
 	}
@@ -87,7 +84,7 @@ func newInternalAdminPBRPolicy(controller *Controller, apbr *adminpbrapi.AdminPo
 		network:           apbr.Spec.NetworkAttachmentName,
 		nextHopIPs:        policy.NextHop.NextHopIPs,
 		to:                policy.To,
-		logicalRouterName: util.GetClusterScopedName(controller.nadInfo.Prefix + types.OVNClusterRouter),
+		logicalRouterName: util.GetClusterScopedName(controller.GetNetworkScopedName(types.OVNClusterRouter)),
 		addressSetErrors:  make(map[string]string),
 	}
 
@@ -136,24 +133,25 @@ func (pol *internalAdminPBRPolicy) attachPodHandler() {
 	if pol.podHandler != nil {
 		return
 	}
-	pol.podHandler, _ = pol.controller.mc.watchFactory.AddHandlerWithFilterFunc(reflect.TypeOf(&corev1.Pod{}), pol.filterPodsByAllSelectors, cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			pol.addPodToAddressSet(obj)
-		},
-		UpdateFunc: func(oldObj, newObj interface{}) {
-			pol.addPodToAddressSet(newObj)
-		},
-		DeleteFunc: func(obj interface{}) {
-			pol.removePodFromAddressSet(obj)
-		},
-	}, nil)
+	pol.podHandler, _ = pol.controller.watchFactory.AddHandlerWithFilterFunc(reflect.TypeOf(&corev1.Pod{}),
+		pol.filterPodsByAllSelectors, cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				pol.addPodToAddressSet(obj)
+			},
+			UpdateFunc: func(oldObj, newObj interface{}) {
+				pol.addPodToAddressSet(newObj)
+			},
+			DeleteFunc: func(obj interface{}) {
+				pol.removePodFromAddressSet(obj)
+			},
+		}, nil, 1 /* TBD: set priority */)
 }
 
 func (pol *internalAdminPBRPolicy) detachPodHandler() {
 	if pol.podHandler == nil {
 		return
 	}
-	pol.controller.mc.watchFactory.RemovePodHandler(pol.podHandler)
+	pol.controller.watchFactory.RemovePodHandler(pol.podHandler)
 	pol.podHandler = nil
 }
 
@@ -166,7 +164,7 @@ func (pol *internalAdminPBRPolicy) filterPodsByFlags(obj interface{}, filterFlag
 	if !ok {
 		return false
 	}
-	if pod.Spec.NodeName == "" || pod.Status.PodIP == "" || !util.PodWantsNetwork(pod) {
+	if pod.Spec.NodeName == "" || pod.Status.PodIP == "" || util.PodWantsHostNetwork(pod) {
 		// ignore
 		return false
 	}
@@ -181,7 +179,7 @@ func (pol *internalAdminPBRPolicy) filterPodsByFlags(obj interface{}, filterFlag
 			}
 		case APBR_MATCH_NSSEL:
 			if pol.namespaceSelector != nil {
-				ns, err := pol.controller.mc.watchFactory.GetNamespace(pod.Namespace)
+				ns, err := pol.controller.watchFactory.GetNamespace(pod.Namespace)
 				if err != nil {
 					klog.Errorf("Failed to get namespace %s: %v", pod.Namespace, err)
 					return false
@@ -193,7 +191,7 @@ func (pol *internalAdminPBRPolicy) filterPodsByFlags(obj interface{}, filterFlag
 			}
 		case APBR_MATCH_NODESEL:
 			if pol.nodeSelector != nil {
-				node, err := pol.controller.mc.watchFactory.GetNode(pod.Spec.NodeName)
+				node, err := pol.controller.watchFactory.GetNode(pod.Spec.NodeName)
 				if err != nil {
 					klog.Errorf("Failed to get node %s: %v", pod.Spec.NodeName, err)
 					return false
@@ -208,17 +206,25 @@ func (pol *internalAdminPBRPolicy) filterPodsByFlags(obj interface{}, filterFlag
 	return true
 }
 
-func (pol *internalAdminPBRPolicy) ensureAddressSet(oc *Controller) error {
+func getAdminPBRAddrSetDbIDs(pbrName, hash, controller string) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetAdminPBR, controller, map[libovsdbops.ExternalIDKey]string{
+		libovsdbops.ObjectNameKey: pbrName,
+		libovsdbops.PBRHashKey:    hash,
+	})
+}
+
+func (pol *internalAdminPBRPolicy) ensureAddressSet(bnc *BaseNetworkController) error {
 	pol.Lock()
 	defer pol.Unlock()
 	if pol.addressSet != nil {
 		return nil
 	}
-	if addressSet, err := oc.addressSetFactory.EnsureAddressSet(pol.addressSetName()); err != nil {
+	asIndex := getAdminPBRAddrSetDbIDs(pol.name, pol.hash, bnc.controllerName)
+	addressSet, err := bnc.addressSetFactory.EnsureAddressSet(asIndex)
+	if err != nil {
 		return err
-	} else {
-		pol.addressSet = addressSet
 	}
+	pol.addressSet = addressSet
 	return nil
 }
 
@@ -240,7 +246,7 @@ func (pol *internalAdminPBRPolicy) addPodToAddressSet(obj interface{}) {
 	if !ok {
 		return
 	}
-	if pod.Status.PodIP == "" || !pod.DeletionTimestamp.IsZero() || !util.PodWantsNetwork(pod) {
+	if pod.Status.PodIP == "" || !pod.DeletionTimestamp.IsZero() || util.PodWantsHostNetwork(pod) {
 		klog.V(5).Infof("Skipping pod %s/%s for AdminPBR policy %s", pod.Namespace, pod.Name, pol.name)
 		return
 	}
@@ -250,7 +256,7 @@ func (pol *internalAdminPBRPolicy) addPodToAddressSet(obj interface{}) {
 		return
 	}
 	// check if pod exists or not for retry path
-	if _, err := pol.controller.mc.watchFactory.GetPod(pod.Namespace, pod.Name); err != nil {
+	if _, err := pol.controller.watchFactory.GetPod(pod.Namespace, pod.Name); err != nil {
 		if errors.IsNotFound(err) {
 			klog.Infof("Stop handling pod %s/%s as it does not exist", pod.Namespace, pod.Name)
 		} else {
@@ -261,7 +267,7 @@ func (pol *internalAdminPBRPolicy) addPodToAddressSet(obj interface{}) {
 		return
 	}
 	ipv4Set, _ := pol.addressSet.GetIPs()
-	if util.ArrayHasString(ipv4Set, pod.Status.PodIP) {
+	if util.SliceHasStringItem(ipv4Set, pod.Status.PodIP) {
 		pol.clearErrorMessage(pod)
 		return
 	}
@@ -291,7 +297,7 @@ func (pol *internalAdminPBRPolicy) removePodFromAddressSet(obj interface{}) {
 		return
 	}
 	ipv4Set, _ := pol.addressSet.GetIPs()
-	if !util.ArrayHasString(ipv4Set, pod.Status.PodIP) {
+	if !util.SliceHasStringItem(ipv4Set, pod.Status.PodIP) {
 		pol.clearErrorMessage(pod)
 		return
 	}
@@ -346,7 +352,7 @@ func (pol *internalAdminPBRPolicy) clearErrorMessage(pod *corev1.Pod) {
 }
 
 func (pol *internalAdminPBRPolicy) updateAddressSetStatus(status types.OvnK8sStatus) {
-	adminpbr, err := pol.controller.mc.watchFactory.GetAdminPBR(pol.name)
+	adminpbr, err := pol.controller.watchFactory.GetAdminPBR(pol.name)
 	if err != nil {
 		if !errors.IsNotFound(err) {
 			klog.Errorf("Error retrieving adminpbr %s from cache: %v", pol.name, err)
@@ -358,7 +364,7 @@ func (pol *internalAdminPBRPolicy) updateAddressSetStatus(status types.OvnK8sSta
 	}
 }
 
-func (oc *Controller) onAdminPBRAddOrUpdate(adminpbr *adminpbrapi.AdminPolicyBasedRoute) {
+func (bnc *BaseNetworkController) onAdminPBRAddOrUpdate(adminpbr *adminpbrapi.AdminPolicyBasedRoute) {
 	if adminpbr == nil {
 		return
 	}
@@ -366,23 +372,24 @@ func (oc *Controller) onAdminPBRAddOrUpdate(adminpbr *adminpbrapi.AdminPolicyBas
 	unlock := util.LockByKey.Acquire(lockNameOfAdminPBR(adminpbr.Name))
 	defer unlock()
 	// check topo type
-	if oc.nadInfo.TopoType != types.Layer3AttachDefTopoType {
-		setErrorForAdminPBR(oc, adminpbr, fmt.Sprintf("Skipping AdminPBR %s since the network topology of %s is not L3", adminpbr.Name, oc.nadInfo.NetName))
+	if bnc.IsSecondary() && bnc.TopologyType() != types.Layer3Topology {
+		setErrorForAdminPBR(bnc, adminpbr, fmt.Sprintf("Skipping AdminPBR %s for network %s of topology type %s",
+			adminpbr.Name, bnc.GetNetworkName(), bnc.TopologyType()))
 		return
 	}
 	// check if adminpbr exists or not for retry path
 	var err error
-	if adminpbr, err = oc.mc.watchFactory.GetAdminPBR(adminpbr.Name); err != nil {
+	if adminpbr, err = bnc.watchFactory.GetAdminPBR(adminpbr.Name); err != nil {
 		if errors.IsNotFound(err) {
 			klog.Infof("Stop handling adminpbr %s as it does not exist", adminpbr.Name)
 		} else {
 			klog.Errorf("Error retrieving adminpbr %s from cache: %v", adminpbr.Name, err)
-			oc.requeueAdminPBR(actionAddAdminPBR, adminpbr)
+			bnc.requeueAdminPBR(actionAddAdminPBR, adminpbr)
 		}
 		return
 	}
 	policies := map[string]*internalAdminPBRPolicy{}
-	val, ok := oc.adminPBRStore.Load(util.NamespacedName(adminpbr))
+	val, ok := bnc.adminPBRStore.Load(util.NamespacedName(adminpbr))
 	if ok {
 		policies = val.(map[string]*internalAdminPBRPolicy)
 	}
@@ -398,59 +405,59 @@ func (oc *Controller) onAdminPBRAddOrUpdate(adminpbr *adminpbrapi.AdminPolicyBas
 			delete(stalePolicyHashes, hash)
 			continue
 		}
-		internalPol, err := newInternalAdminPBRPolicy(oc, adminpbr, &policy)
+		internalPol, err := newInternalAdminPBRPolicy(bnc, adminpbr, &policy)
 		if err != nil {
-			setErrorForAdminPBR(oc, adminpbr, fmt.Sprintf("Failed parsing policy at #%d: %v", index, err))
+			setErrorForAdminPBR(bnc, adminpbr, fmt.Sprintf("Failed parsing policy at #%d: %v", index, err))
 			return
 		}
 		internalPol.hash = hash
 
 		// create address set
-		if err := internalPol.ensureAddressSet(oc); err != nil {
+		if err := internalPol.ensureAddressSet(bnc); err != nil {
 			msg := fmt.Sprintf("Error creating address set %s: %v", internalPol.addressSetName(), err)
-			setErrorForAdminPBR(oc, adminpbr, msg)
-			oc.requeueAdminPBR(actionAddAdminPBR, adminpbr)
+			setErrorForAdminPBR(bnc, adminpbr, msg)
+			bnc.requeueAdminPBR(actionAddAdminPBR, adminpbr)
 			return
 		}
-		oc.mc.recorder.Eventf(adminpbr, corev1.EventTypeNormal, "AddressSet", "address set created for rule #%d", index)
+		bnc.recorder.Eventf(adminpbr, corev1.EventTypeNormal, "AddressSet", "address set created for rule #%d", index)
 		// add logical router policy
-		if err := oc.applyAdminPBR(adminpbr, internalPol); err != nil {
-			setErrorForAdminPBR(oc, adminpbr, fmt.Sprintf("Error saving ovn route policy %s: %v", adminpbr.Name, err))
-			oc.requeueAdminPBR(actionAddAdminPBR, adminpbr)
+		if err := bnc.applyAdminPBR(adminpbr, internalPol); err != nil {
+			setErrorForAdminPBR(bnc, adminpbr, fmt.Sprintf("Error saving ovn route policy %s: %v", adminpbr.Name, err))
+			bnc.requeueAdminPBR(actionAddAdminPBR, adminpbr)
 			return
 		}
-		oc.mc.recorder.Eventf(adminpbr, corev1.EventTypeNormal, "LogicalRoutePolicy", "logical route policy created for rule #%d", index)
+		bnc.recorder.Eventf(adminpbr, corev1.EventTypeNormal, "LogicalRoutePolicy", "logical route policy created for rule #%d", index)
 		// set up handlers
 		internalPol.attachPodHandler()
 		policies[internalPol.hash] = internalPol
 	}
 	// clean up stale rules
-	oc.cleanupStalePolicies(adminpbr, policies, stalePolicyHashes)
-	oc.adminPBRStore.Store(util.NamespacedName(adminpbr), policies)
-	if err := oc.updateAdminPBRStatus(adminpbr, "Route policy applied in OVN", types.OvnK8sStatusSucceeded); err != nil {
+	bnc.cleanupStalePolicies(adminpbr, policies, stalePolicyHashes)
+	bnc.adminPBRStore.Store(util.NamespacedName(adminpbr), policies)
+	if err := bnc.updateAdminPBRStatus(adminpbr, "Route policy applied in OVN", types.OvnK8sStatusSucceeded); err != nil {
 		klog.Errorf("Failed to update adminpbr %s: %v", adminpbr.Name, err)
 	}
 }
 
-func (oc *Controller) onAdminPBRDelete(apbr *adminpbrapi.AdminPolicyBasedRoute) {
+func (bnc *BaseNetworkController) onAdminPBRDelete(apbr *adminpbrapi.AdminPolicyBasedRoute) {
 	unlock := util.LockByKey.Acquire(lockNameOfAdminPBR(apbr.Name))
 	defer unlock()
 	policies := map[string]*internalAdminPBRPolicy{}
-	if val, _ := oc.adminPBRStore.LoadAndDelete(util.NamespacedName(apbr)); val != nil {
+	if val, _ := bnc.adminPBRStore.LoadAndDelete(util.NamespacedName(apbr)); val != nil {
 		policies = val.(map[string]*internalAdminPBRPolicy)
 	}
 	for _, policy := range policies {
-		if err := oc.cleanupLogicalRouterPolicy(apbr.Name, policy); err != nil {
+		if err := bnc.cleanupLogicalRouterPolicy(apbr.Name, policy); err != nil {
 			klog.Error(err)
 		}
 	}
 }
 
-func (oc *Controller) applyAdminPBR(adminpbr *adminpbrapi.AdminPolicyBasedRoute, policy *internalAdminPBRPolicy) error {
+func (bnc *BaseNetworkController) applyAdminPBR(adminpbr *adminpbrapi.AdminPolicyBasedRoute, policy *internalAdminPBRPolicy) error {
 	ownerVal := k8stypes.NamespacedName{Name: adminpbr.Name}
 	match := policy.getMatchExpression()
 	lrp := nbdb.LogicalRouterPolicy{
-		Priority: RoutePolicyPriorityAdminPBR,
+		Priority: types.AminPBRReroutePriority,
 		Match:    match,
 		Nexthops: policy.nextHopIPs,
 		Action:   nbdb.LogicalRouterPolicyActionReroute,
@@ -465,13 +472,13 @@ func (oc *Controller) applyAdminPBR(adminpbr *adminpbrapi.AdminPolicyBasedRoute,
 	})
 
 	p := func(item *nbdb.LogicalRouterPolicy) bool {
-		return item.Priority == RoutePolicyPriorityAdminPBR && item.Match == match &&
+		return item.Priority == types.AminPBRReroutePriority && item.Match == match &&
 			item.ExternalIDs[types.ExternalIDK8sOwner] == ownerVal.String() &&
 			item.ExternalIDs[types.ExternalIDNetAttachDef] == adminpbr.Spec.NetworkAttachmentName &&
 			util.HasExternalIDsForCluster(item.ExternalIDs)
 	}
 
-	err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(oc.mc.nbClient, policy.logicalRouterName, &lrp, p,
+	err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(bnc.nbClient, policy.logicalRouterName, &lrp, p,
 		&lrp.Nexthops, &lrp.Match, &lrp.Action, &lrp.Priority, &lrp.ExternalIDs)
 	if err != nil {
 		return fmt.Errorf("unable to apply adminpbr %s, err: %v", ownerVal.String(), err)
@@ -479,9 +486,9 @@ func (oc *Controller) applyAdminPBR(adminpbr *adminpbrapi.AdminPolicyBasedRoute,
 	return nil
 }
 
-func (oc *Controller) updateAdminPBRStatus(adminpbr *adminpbrapi.AdminPolicyBasedRoute, message string, status types.OvnK8sStatus) error {
+func (bnc *BaseNetworkController) updateAdminPBRStatus(adminpbr *adminpbrapi.AdminPolicyBasedRoute, message string, status types.OvnK8sStatus) error {
 	update := adminpbr.DeepCopy()
-	errors := oc.getAddressSetErrors(adminpbr)
+	errors := bnc.getAddressSetErrors(adminpbr)
 	if message != "" {
 		update.Status.Messages = append(errors, message)
 	} else {
@@ -500,7 +507,7 @@ func (oc *Controller) updateAdminPBRStatus(adminpbr *adminpbrapi.AdminPolicyBase
 		update.Status.Status = status
 	}
 	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		_, err := oc.mc.kube.UpdateAdminPBRStatus(update)
+		_, err := bnc.kube.UpdateAdminPBRStatus(update)
 		return err
 	}); err != nil {
 		return err
@@ -508,20 +515,20 @@ func (oc *Controller) updateAdminPBRStatus(adminpbr *adminpbrapi.AdminPolicyBase
 	return nil
 }
 
-func (oc *Controller) cleanupStalePolicies(apbr *adminpbrapi.AdminPolicyBasedRoute, allPolicies map[string]*internalAdminPBRPolicy, stalePolicies map[string]bool) {
+func (bnc *BaseNetworkController) cleanupStalePolicies(apbr *adminpbrapi.AdminPolicyBasedRoute, allPolicies map[string]*internalAdminPBRPolicy, stalePolicies map[string]bool) {
 	// get existing policies from ovn by apbr name
 	for hash := range stalePolicies {
 		policy := allPolicies[hash]
 		klog.V(4).Infof("Cleaning up stale rule %s", policy.hash)
 		delete(allPolicies, hash)
-		if err := oc.cleanupLogicalRouterPolicy(apbr.Name, policy); err != nil {
+		if err := bnc.cleanupLogicalRouterPolicy(apbr.Name, policy); err != nil {
 			klog.Error(err)
 		}
 	}
 }
 
 // check if node's change qualifies/disqualifies the route policies, add/remove ovn records accordingly
-func (oc *Controller) syncAdminPBROnNodeChange(old, new interface{}) {
+func (bnc *BaseNetworkController) syncAdminPBROnNodeChange(old, new interface{}) {
 	newNode, ok := new.(*corev1.Node)
 	if !ok {
 		klog.Errorf("Not a node: %v", new)
@@ -548,13 +555,13 @@ func (oc *Controller) syncAdminPBROnNodeChange(old, new interface{}) {
 	if oldNode != nil && reflect.DeepEqual(oldNode.Labels, newNode.Labels) {
 		return
 	}
-	podIndexer := oc.mc.watchFactory.PodInformer().GetIndexer()
+	podIndexer := bnc.watchFactory.PodInformer().GetIndexer()
 	pods, err := podIndexer.ByIndex(types.CacheIndexPodByNodeIP, nodeIP)
 	if err != nil {
 		klog.Errorf("Failed to get pods by node ip %s: %v", nodeIP, err)
 		return
 	}
-	oc.adminPBRStore.Range(func(key interface{}, value interface{}) bool {
+	bnc.adminPBRStore.Range(func(key interface{}, value interface{}) bool {
 		policyMap := value.(map[string]*internalAdminPBRPolicy)
 		for _, policy := range policyMap {
 			if policy.nodeSelector == nil {
@@ -581,7 +588,7 @@ func (oc *Controller) syncAdminPBROnNodeChange(old, new interface{}) {
 	})
 }
 
-func (oc *Controller) syncAdminPBROnNamespaceChange(old, new interface{}) {
+func (bnc *BaseNetworkController) syncAdminPBROnNamespaceChange(old, new interface{}) {
 	newNs, ok := new.(*corev1.Namespace)
 	if !ok {
 		klog.Errorf("Not a namespace: %v", new)
@@ -601,13 +608,13 @@ func (oc *Controller) syncAdminPBROnNamespaceChange(old, new interface{}) {
 	if oldNs != nil && reflect.DeepEqual(oldNs.Labels, newNs.Labels) {
 		return
 	}
-	podIndexer := oc.mc.watchFactory.PodInformer().GetIndexer()
+	podIndexer := bnc.watchFactory.PodInformer().GetIndexer()
 	pods, err := podIndexer.ByIndex(types.CacheIndexPodByNamespace, newNs.Name)
 	if err != nil {
 		klog.Errorf("Failed to get pods by namespace %s: %v", newNs.Name, err)
 		return
 	}
-	oc.adminPBRStore.Range(func(key interface{}, value interface{}) bool {
+	bnc.adminPBRStore.Range(func(key interface{}, value interface{}) bool {
 		policyMap := value.(map[string]*internalAdminPBRPolicy)
 		for _, policy := range policyMap {
 			if policy.namespaceSelector == nil {
@@ -635,20 +642,20 @@ func (oc *Controller) syncAdminPBROnNamespaceChange(old, new interface{}) {
 }
 
 // delete ovn route policy if owning k8s object doesn't exist
-func (oc *Controller) syncAdminPBRPeriodic() {
-	klog.V(4).Infof("Start adminpbr sync for network %s", oc.nadInfo.NetName)
+func (bnc *BaseNetworkController) syncAdminPBRPeriodic() {
+	klog.V(4).Infof("Start adminpbr sync for network %s", bnc.GetNetworkName())
 	// get all adminpbr policies from ovn
-	ovnPolicies, err := oc.findPolicyBasedRoutes(strconv.Itoa(RoutePolicyPriorityAdminPBR))
+	ovnPolicies, err := bnc.findPolicyBasedRoutes(strconv.Itoa(types.AminPBRReroutePriority))
 	if err != nil {
-		klog.Errorf("[%s] Failed to retrieve logical router policies from OVN: %v", oc.nadInfo.NetName, err)
+		klog.Errorf("[%s] Failed to retrieve logical router policies from OVN: %v", bnc.GetNetworkName(), err)
 		return
 	}
 	// group ovn policies by adminpbr name to avoid interleaving
 	policyMapByAdminPBR := make(map[string][]*nbdb.LogicalRouterPolicy)
 	for index := range ovnPolicies {
 		policy := ovnPolicies[index]
-		network := policy.ExternalIDs[types.ExternalIDNetAttachDef]
-		if _, found := oc.nadInfo.NetAttachDefs.Load(network); !found {
+		nad := policy.ExternalIDs[types.ExternalIDNetAttachDef]
+		if !bnc.HasNAD(nad) {
 			// not managed by this controller
 			continue
 		}
@@ -668,10 +675,10 @@ func (oc *Controller) syncAdminPBRPeriodic() {
 	for key, ovnPolicies := range policyMapByAdminPBR {
 		apbrName := key[1:]                                            // remove leading "/"
 		unlock := util.LockByKey.Acquire(lockNameOfAdminPBR(apbrName)) // acquire lock to avoid racing against handler
-		adminpbr, err := oc.mc.watchFactory.GetAdminPBR(apbrName)
+		adminpbr, err := bnc.watchFactory.GetAdminPBR(apbrName)
 		if err != nil && !errors.IsNotFound(err) {
 			// error happened, skip this round
-			klog.Error("Failed to get adminpbr %s: %v", apbrName, err)
+			klog.Errorf("Failed to get adminpbr %s: %v", apbrName, err)
 			unlock()
 			continue
 		}
@@ -682,32 +689,32 @@ func (oc *Controller) syncAdminPBRPeriodic() {
 		for _, ovnPolicy := range ovnPolicies {
 			hash := ovnPolicy.ExternalIDs[types.ExternalIDHash]
 			var hashFoundInController bool
-			value, _ := oc.adminPBRStore.Load(k8stypes.NamespacedName{Name: apbrName}.String())
+			value, _ := bnc.adminPBRStore.Load(k8stypes.NamespacedName{Name: apbrName}.String())
 			if value == nil {
 				hashFoundInController = false
 			} else {
 				policyMap := value.(map[string]*internalAdminPBRPolicy)
 				_, hashFoundInController = policyMap[hash]
 			}
-			klog.V(5).Infof("[%s] hash=%s, adminpbr not found: %v, hash found: %v", oc.nadInfo.NetName, hash, pbrNotFoundInK8s, hashFoundInController)
+			klog.V(5).Infof("[%s] hash=%s, adminpbr not found: %v, hash found: %v", bnc.GetNetworkName(), hash, pbrNotFoundInK8s, hashFoundInController)
 			if pbrNotFoundInK8s || !hashFoundInController {
-				klog.V(4).Infof("[%s] Deleting stale logical router policy %s (%s)", oc.nadInfo.NetName, apbrName, hash)
-				if err := oc.cleanupLogicalRouterPolicy(apbrName, internalPolicyOf(ovnPolicy)); err != nil {
-					klog.Errorf("[%s] Failed to clean up stale logical router policy %s (%s): %v", oc.nadInfo.NetName, apbrName, hash, err)
+				klog.V(4).Infof("[%s] Deleting stale logical router policy %s (%s)", bnc.GetNetworkName(), apbrName, hash)
+				if err := bnc.cleanupLogicalRouterPolicy(apbrName, internalPolicyOf(ovnPolicy)); err != nil {
+					klog.Errorf("[%s] Failed to clean up stale logical router policy %s (%s): %v", bnc.GetNetworkName(), apbrName, hash, err)
 				}
 			}
 		}
 		unlock()
 	}
-	klog.V(4).Infof("Adminpbr sync completed for network %s", oc.nadInfo.NetName)
+	klog.V(4).Infof("Adminpbr sync completed for network %s", bnc.GetNetworkName())
 }
 
 // if address set's member IP is not in k8s anymore, delete it from the set
-func (oc *Controller) syncAddressSetPeriodic() {
-	klog.V(4).Infof("Cleaning up IPs from all AdminPBR's address set for network %s", oc.nadInfo.NetName)
-	oc.adminPBRStore.Range(func(key interface{}, value interface{}) bool {
+func (bnc *BaseNetworkController) syncAddressSetPeriodic() {
+	klog.V(4).Infof("Cleaning up IPs from all AdminPBR's address set for network %s", bnc.GetNetworkName())
+	bnc.adminPBRStore.Range(func(key interface{}, value interface{}) bool {
 		policyMap := value.(map[string]*internalAdminPBRPolicy)
-		podIndexer := oc.mc.watchFactory.PodInformer().GetIndexer()
+		podIndexer := bnc.watchFactory.PodInformer().GetIndexer()
 		for _, pol := range policyMap {
 			pol.Lock()
 			v4IPs, _ := pol.addressSet.GetIPs()
@@ -726,31 +733,31 @@ func (oc *Controller) syncAddressSetPeriodic() {
 				}
 			}
 			if len(stalev4IPs) != 0 {
-				klog.V(4).Infof("[%s] Removing stale IPs (%s) from address set for policy %s", oc.nadInfo.NetName, stalev4IPs, pol.name)
+				klog.V(4).Infof("[%s] Removing stale IPs (%s) from address set for policy %s", bnc.GetNetworkName(), stalev4IPs, pol.name)
 				if err := pol.addressSet.DeleteIPs(stalev4IPs); err != nil {
-					klog.V(4).Infof("[%s] Failed removing stale IPs for policy %s", oc.nadInfo.NetName, pol.name)
+					klog.V(4).Infof("[%s] Failed removing stale IPs for policy %s", bnc.GetNetworkName(), pol.name)
 				}
 			}
 			pol.Unlock()
 		}
 		return true
 	})
-	klog.V(4).Infof("Address set cleanup completed for network %s", oc.nadInfo.NetName)
+	klog.V(4).Infof("Address set cleanup completed for network %s", bnc.GetNetworkName())
 }
 
-func setErrorForAdminPBR(oc *Controller, adminpbr *adminpbrapi.AdminPolicyBasedRoute, msg string) {
+func setErrorForAdminPBR(bnc *BaseNetworkController, adminpbr *adminpbrapi.AdminPolicyBasedRoute, msg string) {
 	klog.Errorf(msg)
-	if err := oc.updateAdminPBRStatus(adminpbr, msg, types.OvnK8sStatusFailed); err != nil {
+	if err := bnc.updateAdminPBRStatus(adminpbr, msg, types.OvnK8sStatusFailed); err != nil {
 		klog.Errorf("Failed to set error for adminpbr %s: %v", adminpbr.Name, err)
 	}
 }
 
-func (oc *Controller) retryAdminPBROperations() bool {
-	item, quit := oc.adminPBRRetryQueue.Get()
+func (bnc *BaseNetworkController) retryAdminPBROperations() bool {
+	item, quit := bnc.adminPBRRetryQueue.Get()
 	if quit {
 		return false
 	}
-	oc.adminPBRRetryQueue.Done(item)
+	bnc.adminPBRRetryQueue.Done(item)
 	retry, ok := item.(*retryRequest)
 	if !ok {
 		return true
@@ -758,7 +765,7 @@ func (oc *Controller) retryAdminPBROperations() bool {
 	klog.V(4).Infof("Retrying event: %v", retry)
 	switch retry.action {
 	case actionAddAdminPBR, actionUpdateAdminPBR:
-		oc.onAdminPBRAddOrUpdate(retry.adminpbr)
+		bnc.onAdminPBRAddOrUpdate(retry.adminpbr)
 	case actionAddPod4AdminPBR, actionUpdatePod4AdminPBR:
 		// TODO: perhaps we need to get the retry.pod from the informer.
 		if retry.policy.filterPodsByAllSelectors(retry.pod) {
@@ -769,7 +776,7 @@ func (oc *Controller) retryAdminPBROperations() bool {
 	return true
 }
 
-func (oc *Controller) requeueAdminPBR(ra action, adminpbr *adminpbrapi.AdminPolicyBasedRoute) {
+func (bnc *BaseNetworkController) requeueAdminPBR(ra action, adminpbr *adminpbrapi.AdminPolicyBasedRoute) {
 	if adminpbr == nil {
 		klog.Errorf("Missing argument for retry")
 		return
@@ -779,10 +786,10 @@ func (oc *Controller) requeueAdminPBR(ra action, adminpbr *adminpbrapi.AdminPoli
 		adminpbr: adminpbr,
 	}
 	klog.V(4).Infof("Requeue adminpbr event to retry: %v", req)
-	oc.adminPBRRetryQueue.AddAfter(req, time.Duration(3*time.Second))
+	bnc.adminPBRRetryQueue.AddAfter(req, time.Duration(3*time.Second))
 }
 
-func (oc *Controller) requeuePod4AdminPBR(ra action, policy *internalAdminPBRPolicy, pod *corev1.Pod) {
+func (bnc *BaseNetworkController) requeuePod4AdminPBR(ra action, policy *internalAdminPBRPolicy, pod *corev1.Pod) {
 	if policy == nil || pod == nil {
 		klog.Errorf("Missing argument for retry")
 		return
@@ -793,12 +800,12 @@ func (oc *Controller) requeuePod4AdminPBR(ra action, policy *internalAdminPBRPol
 		pod:    pod,
 	}
 	klog.V(4).Infof("Requeue pod event for adminpbr to retry: %v", req)
-	oc.adminPBRRetryQueue.AddAfter(req, time.Duration(3*time.Second))
+	bnc.adminPBRRetryQueue.AddAfter(req, time.Duration(3*time.Second))
 }
 
-func (oc *Controller) getAddressSetErrors(adminpbr *adminpbrapi.AdminPolicyBasedRoute) []string {
+func (bnc *BaseNetworkController) getAddressSetErrors(adminpbr *adminpbrapi.AdminPolicyBasedRoute) []string {
 	policies := map[string]*internalAdminPBRPolicy{}
-	if val, _ := oc.adminPBRStore.Load(util.NamespacedName(adminpbr)); val != nil {
+	if val, _ := bnc.adminPBRStore.Load(util.NamespacedName(adminpbr)); val != nil {
 		policies = val.(map[string]*internalAdminPBRPolicy)
 	}
 	errors := []string{}
@@ -810,13 +817,13 @@ func (oc *Controller) getAddressSetErrors(adminpbr *adminpbrapi.AdminPolicyBased
 	return errors
 }
 
-func (oc *Controller) cleanupLogicalRouterPolicy(adminPBRName string, policy *internalAdminPBRPolicy) error {
+func (bnc *BaseNetworkController) cleanupLogicalRouterPolicy(adminPBRName string, policy *internalAdminPBRPolicy) error {
 	policy.detachPodHandler()
 	prefixedAdminPBRName := adminPBRName
 	if !strings.HasPrefix(adminPBRName, "/") {
 		prefixedAdminPBRName = k8stypes.NamespacedName{Name: adminPBRName}.String()
 	}
-	if val, _ := oc.adminPBRStore.Load(prefixedAdminPBRName); val != nil {
+	if val, _ := bnc.adminPBRStore.Load(prefixedAdminPBRName); val != nil {
 		// adminpbr with same name created again
 		policies := val.(map[string]*internalAdminPBRPolicy)
 		if _, found := policies[policy.hash]; found {
@@ -826,8 +833,8 @@ func (oc *Controller) cleanupLogicalRouterPolicy(adminPBRName string, policy *in
 		// although adminpbr spec has the same name, rule is different, continue ovn cleanup
 	}
 	// remove logical route policy
-	if err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.mc.nbClient, policy.logicalRouterName, func(item *nbdb.LogicalRouterPolicy) bool {
-		return item.Priority == RoutePolicyPriorityAdminPBR &&
+	if err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(bnc.nbClient, policy.logicalRouterName, func(item *nbdb.LogicalRouterPolicy) bool {
+		return item.Priority == types.AminPBRReroutePriority &&
 			item.ExternalIDs[types.ExternalIDK8sOwner] == prefixedAdminPBRName &&
 			item.ExternalIDs[types.ExternalIDHash] == policy.hash &&
 			util.HasExternalIDsForCluster(item.ExternalIDs)
@@ -841,44 +848,52 @@ func (oc *Controller) cleanupLogicalRouterPolicy(adminPBRName string, policy *in
 	return nil
 }
 
-func (oc *Controller) deleteLogicalRouterPoliciesByPriority(priority int) error {
-	return libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.mc.nbClient, util.GetClusterScopedName(types.OVNClusterRouter), func(item *nbdb.LogicalRouterPolicy) bool {
+func (bnc *BaseNetworkController) deleteLogicalRouterPoliciesByPriority(priority int) error {
+	return libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(bnc.nbClient, util.GetClusterScopedName(bnc.GetNetworkScopedName(types.OVNClusterRouter)), func(item *nbdb.LogicalRouterPolicy) bool {
 		return item.Priority == priority && util.HasExternalIDsForCluster(item.ExternalIDs)
+	})
+}
+
+func getClusterSubnetAddrSetDbIDs(netName, controller string) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetClusterSubnet, controller, map[libovsdbops.ExternalIDKey]string{
+		libovsdbops.ObjectNameKey: netName,
 	})
 }
 
 // join subnet is used by OVN for its internal purposes and packets destined to it
 // should be kept within the cluster and shouldn't be subjected to AdminPBR rules
 // and forwarded to Internet.
-func (oc *Controller) noRerouteToJoinSubnet() error {
+func (bnc *BaseNetworkController) noRerouteToJoinSubnet() error {
 	// ensure that cluster subnets are in address set
-	addrSet, err := oc.addressSetFactory.EnsureAddressSet(addressSetClusterSubnets)
+	asIndex := getClusterSubnetAddrSetDbIDs(bnc.controllerName, bnc.GetNetworkName())
+	addrSet, err := bnc.addressSetFactory.EnsureAddressSet(asIndex)
 	if err != nil {
 		return fmt.Errorf("failed to create address set for cluster subnets: %v", err)
 	}
-	clusterSubnets := make([]*net.IPNet, 0, len(config.Default.ClusterSubnets))
-	for _, clusterEntry := range config.Default.ClusterSubnets {
+	clusterSubnets := make([]*net.IPNet, 0, len(bnc.Subnets()))
+	for _, clusterEntry := range bnc.Subnets() {
 		clusterSubnets = append(clusterSubnets, clusterEntry.CIDR)
 	}
 	if err := addrSet.AddSubnets(clusterSubnets); err != nil {
 		return err
 	}
 	// create or update logical router policy
+	// TBD: IPv4 only for now
 	v4AddrSetName, _ := addrSet.GetASHashNames()
 	match := fmt.Sprintf("ip4.src == {$%s} && ip4.dst == %s ", v4AddrSetName, config.Gateway.V4JoinSubnet)
 	lrp := nbdb.LogicalRouterPolicy{
-		Priority:    RoutePolicyPriorityNoRerouteJoinSubnet,
+		Priority:    types.NoRerouteJoinSubnetPriority,
 		Match:       match,
 		Action:      nbdb.LogicalRouterPolicyActionAllow,
-		ExternalIDs: util.CreateClusterScopedExternalIDs(),
+		ExternalIDs: util.ExternalIDsForCluster(nil),
 	}
 	p := func(item *nbdb.LogicalRouterPolicy) bool {
-		return item.Priority == RoutePolicyPriorityNoRerouteJoinSubnet && item.Match == match &&
+		return item.Priority == types.NoRerouteJoinSubnetPriority && item.Match == match &&
 			util.HasExternalIDsForCluster(item.ExternalIDs)
 	}
 
-	if err = libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(oc.mc.nbClient,
-		util.GetClusterScopedName(types.OVNClusterRouter), &lrp, p,
+	if err = libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(bnc.nbClient,
+		util.GetClusterScopedName(bnc.GetNetworkScopedName(types.OVNClusterRouter)), &lrp, p,
 		&lrp.Match, &lrp.Action, &lrp.Priority, &lrp.ExternalIDs); err != nil {
 		return fmt.Errorf("unable to add logical router policy for join subnet %s: %v", config.Gateway.V4JoinSubnet, err)
 	}

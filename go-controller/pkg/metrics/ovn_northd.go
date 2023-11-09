@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -112,7 +113,7 @@ var ovnNorthdStopwatchShowMetricsMap = map[string]*stopwatchMetricDetails{
 
 func RegisterOvnNorthdMetrics(podLister corev1listers.PodLister, k8sNodeName string,
 	metricsScrapeInterval int, stopChan <-chan struct{}) {
-	err := wait.PollImmediate(1*time.Second, 300*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 300*time.Second, true, func(ctx context.Context) (bool, error) {
 		return checkPodRunsOnGivenNode(podLister, []string{"name=ovn-north"}, k8sNodeName, true)
 	})
 	if err != nil {

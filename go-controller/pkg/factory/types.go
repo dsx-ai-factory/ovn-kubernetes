@@ -1,12 +1,14 @@
 package factory
 
 import (
+	adminpolicybasedrouteinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions/adminpolicybasedroute/v1"
+	egressipinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions/egressip/v1"
+
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	coreinformers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/tools/cache"
-
-	portmirrorapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
 )
 
 // ObjectCacheInterface represents the exported methods for getting
@@ -28,6 +30,8 @@ type ObjectCacheInterface interface {
 //
 // If you add a new method here, make sure the underlying informer is started
 // in factory.go NewNodeWatchFactory
+//
+//go:generate mockery --name NodeWatchFactory
 type NodeWatchFactory interface {
 	Shutdownable
 
@@ -41,33 +45,32 @@ type NodeWatchFactory interface {
 	RemoveEndpointSliceHandler(handler *Handler)
 
 	AddPodHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error)
-	AddFilteredPodHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error)
 	RemovePodHandler(handler *Handler)
-
-	AddNetworkattachmentdefinitionHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error)
-	RemoveNetworkattachmentdefinitionHandler(handler *Handler)
 
 	AddNamespaceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error)
 	RemoveNamespaceHandler(handler *Handler)
 
 	NodeInformer() cache.SharedIndexInformer
 	LocalPodInformer() cache.SharedIndexInformer
+	NamespaceInformer() coreinformers.NamespaceInformer
+	PodCoreInformer() coreinformers.PodInformer
+	APBRouteInformer() adminpolicybasedrouteinformer.AdminPolicyBasedExternalRouteInformer
+	EgressIPInformer() egressipinformer.EgressIPInformer
 
 	GetPods(namespace string) ([]*kapi.Pod, error)
+	GetPod(namespace, name string) (*kapi.Pod, error)
+	GetAllPods() ([]*kapi.Pod, error)
 	GetNamespaces() ([]*kapi.Namespace, error)
 	GetNode(name string) (*kapi.Node, error)
 	GetNodes() ([]*kapi.Node, error)
 	ListNodes(selector labels.Selector) ([]*kapi.Node, error)
 
 	GetService(namespace, name string) (*kapi.Service, error)
+	GetServices() ([]*kapi.Service, error)
 	GetEndpointSlices(namespace, svcName string) ([]*discovery.EndpointSlice, error)
+	GetEndpointSlice(namespace, name string) (*discovery.EndpointSlice, error)
 
-	GetAllPods() ([]*kapi.Pod, error)
-	GetPod(namespace, name string) (*kapi.Pod, error)
-	AddPortMirrorHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error)
-	RemovePortMirrorHandler(handler *Handler)
-	GetPortMirrors() ([]*portmirrorapi.PortMirror, error)
-	GetPortMirror(namespace, name string) (*portmirrorapi.PortMirror, error)
+	GetNamespace(name string) (*kapi.Namespace, error)
 }
 
 type Shutdownable interface {

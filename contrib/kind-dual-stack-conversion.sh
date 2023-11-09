@@ -32,8 +32,15 @@ convert_cni() {
   printf '%s' "${FIXED_OVNCONFIG}" | kubectl apply -f -
   # restart ovnkube-master
   # FIXME: kubectl rollout restart deployment leaves the old pod hanging 
-  # as workaround we delete the master directly
-  kubectl -n ovn-kubernetes delete pod -l name=ovnkube-master
+  # as workaround we delete the master directly. When deployed with
+  # OVN_INTERCONNECT_ENABLE=true, the db and ncm pods need that too.
+  # Depending on how kind was deployed, the pods have different labels.
+  kubectl -n ovn-kubernetes delete pod -l name=ovnkube-db ||:
+  kubectl -n ovn-kubernetes delete pod -l name=ovnkube-zone-controller ||:
+  kubectl -n ovn-kubernetes delete pod -l name=ovnkube-master ||:
+  kubectl -n ovn-kubernetes delete pod -l name=ovnkube-control-plane ||:
+  kubectl -n ovn-kubernetes delete pod -l name=ovnkube-identity ||:
+
   # restart ovnkube-node
   kubectl -n ovn-kubernetes rollout restart daemonset ovnkube-node
   kubectl -n ovn-kubernetes rollout status daemonset ovnkube-node
@@ -103,12 +110,18 @@ SECONDARY_SERVICE_SUBNET=${SECONDARY_SERVICE_SUBNET:-"fd00:10:96::/112"}
 SECONDARY_CLUSTER_SUBNET=${SECONDARY_CLUSTER_SUBNET:-"fd00:10:244::/56"}
 
 # NOTE: ovn only
-export KUBECONFIG=${HOME}/ovn.conf
+export KUBECONFIG=${KUBECONFIG:-${HOME}/ovn.conf}
 
 # KIND nodes
 NODES=$(kind get nodes --name ${CLUSTER_NAME})
 CONTROL_PLANE_NODES=$(kind get nodes --name ${CLUSTER_NAME} | grep control)
 WORKER_NODES=$(kind get nodes --name ${CLUSTER_NAME} | grep worker)
+
+# Warm up images into KIND
+for IMG in registry.k8s.io/e2e-test-images/agnhost:2.21 httpd:2.4 ; do \
+  docker pull $IMG
+  kind load docker-image $IMG --name ovn
+done
 
 # Create a deployment with 2 pods
 cat <<EOF | kubectl apply -f -
@@ -130,7 +143,7 @@ spec:
     spec:
       containers:
       - name: agnhost
-        image: k8s.gcr.io/e2e-test-images/agnhost:2.21
+        image: registry.k8s.io/e2e-test-images/agnhost:2.21
         args:
           - netexec
           - --http-port=80
@@ -283,3 +296,6 @@ for n in $NODES; do
     docker exec $n curl --connect-timeout 5 $ip
   done
 done
+
+# Give some time for everything to settle
+sleep 60

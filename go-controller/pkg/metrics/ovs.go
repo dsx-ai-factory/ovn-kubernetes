@@ -327,6 +327,16 @@ var metricOvsDbSize = prometheus.NewGauge(prometheus.GaugeOpts{
 	Help:      "The size of the database file associated with the OVS DB on each node.",
 })
 
+var MetricOvsInterfaceUpWait = prometheus.NewCounter(prometheus.CounterOpts{
+	Namespace: MetricOvsNamespace,
+	Subsystem: MetricOvsSubsystemVswitchd,
+	Name:      "interface_up_wait_seconds_total",
+	Help: "The total number of seconds that is required to wait for pod " +
+		"Open vSwitch interface until its available",
+})
+
+type ovsClient func(args ...string) (string, string, error)
+
 func getOvsVersionInfo() {
 	stdout, _, err := util.RunOvsVswitchdAppCtl("version")
 	if err != nil {
@@ -1508,6 +1518,7 @@ func RegisterOvsMetrics(nodeName string, ovsDBClient *util.OvsdbClient,
 		prometheus.MustRegister(metricInterafceDriverVersion)
 		prometheus.MustRegister(metricInterafceFirmwareVersion)
 		prometheus.MustRegister(metricOvsDbSize)
+		prometheus.MustRegister(MetricOvsInterfaceUpWait)
 		// Register the OVS coverage/show metrics
 		componentCoverageShowMetricsMap[ovsVswitchd] = ovsVswitchdCoverageShowMetricsMap
 		registerCoverageShowMetrics(ovsVswitchd, MetricOvsNamespace, MetricOvsSubsystemVswitchd)

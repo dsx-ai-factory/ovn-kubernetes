@@ -43,7 +43,18 @@ spec:
       - name: ovnkube-node
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
-
+        {% if ovn_dummy_gateway_bridge=="true" %}
+        lifecycle:
+          postStart:
+            exec:
+              command:
+              - /bin/bash
+              - -c
+              - |
+                #!/bin/bash
+                ovs-vsctl --may-exist add-br br-ex
+                ip a a dev br-ex 10.44.0.1/32 || /bin/true
+        {% endif %}
         command: ["/root/ovnkube.sh", "ovn-node"]
 
         # starting the metrics server is one of the last things we do,
@@ -103,10 +114,6 @@ spec:
           readOnly: true
         - mountPath: /var/run/netns
           name: host-var-run-netns
-        - mountPath: /opt/mellanox
-          name: host-opt-mlnx
-
-
 
         resources:
           requests:
@@ -147,18 +154,34 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: mtu
+        - name: OVN_ROUTABLE_MTU
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: routable_mtu
+              optional: true
         - name: OVN_GATEWAY_MODE
           value: "shared"
         - name: OVN_GATEWAY_OPTS
-          value: ""
+          value: "{{ ovn_gateway_opts }}"
         - name: OVN_HYBRID_OVERLAY_ENABLE
-          value: ""
+          value: "{{ ovn_hybrid_overlay_enable }}"
+        - name: OVN_ADMIN_NETWORK_POLICY_ENABLE
+          value: "{{ ovn_admin_network_policy_enable }}"
         - name: OVN_HYBRID_OVERLAY_NET_CIDR
-          value: ""
+          value: "{{ ovn_hybrid_overlay_net_cidr }}"
         - name: OVN_EGRESSIP_ENABLE
-          value: "{{ ovn_egress_ip_enable }}"
+          value: "false"
+        - name: OVN_EGRESSIP_HEALTHCHECK_PORT
+          value: "0"
+        - name: OVN_EGRESSSERVICE_ENABLE
+          value: "{{ ovn_egress_service_enable }}"
         - name: OVN_DISABLE_SNAT_MULTIPLE_GWS
           value: "{{ ovn_disable_snat_multiple_gws }}"
+        - name: OVN_DISABLE_FORWARDING
+          value: "{{ ovn_disable_forwarding }}"
+        - name: OVN_ENCAP_PORT
+          value: "{{ ovn_encap_port }}"
         - name: OVN_DISABLE_PKT_MTU_CHECK
           value: "true"
         - name: OVN_NETFLOW_TARGETS
@@ -171,6 +194,10 @@ spec:
           value: "{{ ovn_remote_probe_interval }}"
         - name: OVN_MULTICAST_ENABLE
           value: "{{ ovn_multicast_enable }}"
+        - name: OVN_V4_MASQUERADE_SUBNET
+          value: "{{ ovn_v4_masquerade_subnet }}"
+        - name: OVN_V6_MASQUERADE_SUBNET
+          value: "{{ ovn_v6_masquerade_subnet }}"
         - name: OVN_UNPRIVILEGED_MODE
           value: "yes"
         - name: OVN_EX_GW_NETWORK_INTERFACE
@@ -179,10 +206,16 @@ spec:
           value: "dpu"
         - name: OVN_GATEWAY_ROUTER_SUBNET
           value: ""
-        - name: OVNKUBE_NODE_MGMT_PORT_NETDEV
-          value: "pf0vf0"
         - name: OVN_MULTI_NETWORK_ENABLE
           value: "true"
+        - name: OVN_ENABLE_INTERCONNECT
+          value: "{{ ovn_enable_interconnect }}"
+        - name: OVN_ENABLE_MULTI_EXTERNAL_GATEWAY
+          value: "{{ ovn_enable_multi_external_gateway }}"
+        - name: OVN_ENABLE_OVNKUBE_IDENTITY
+          value: "{{ ovn_enable_ovnkube_identity }}"
+        - name: OVNKUBE_NODE_MGMT_PORT_NETDEV
+          value: "pf0vf0"
         - name: OVN_DISABLE_OVN_IFACE_ID_VER
           value: "{{ ovn_disable_ovn_iface_id_ver }}"
         - name: OVN_OFCTRL_WAIT_BEFORE_CLEAR
@@ -195,6 +228,8 @@ spec:
           value: "{{ ovn_lflow_cache_limit }}"
         - name: OVN_LFLOW_CACHE_LIMIT_KB
           value: "{{ ovn_lflow_cache_limit_kb }}"
+        - name: OVN_ENABLE_OVNKUBE_IDENTITY
+          value: "{{ ovn_enable_ovnkube_identity }}"
         - name: OVN_HOST_NETWORK_NAMESPACE
           valueFrom:
             configMapKeyRef:
@@ -214,8 +249,6 @@ spec:
           value: "{{ ovs_min_revalidate_pps }}"
         - name: OVS_MAX_IDLE
           value: "{{ ovs_max_idle }}"
-        - name: OVN_PORT_MIRROR_ENABLE
-          value: "{{ ovn_port_mirror_enable }}"
         - name: OVNKUBE_DISABLE_OVS_METRICS
           value: "{{ disable_ovs_metrics }}"
         - name: REPRESENTOR_METERING_NODES
@@ -256,9 +289,6 @@ spec:
       - name: host-var-run-netns
         hostPath:
           path: /var/run/netns
-      - name: host-opt-mlnx
-        hostPath:
-          path: /opt/mellanox
 
 
       tolerations:

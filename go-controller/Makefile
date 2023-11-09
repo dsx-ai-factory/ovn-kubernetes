@@ -5,11 +5,13 @@ BINDIR ?= ${PREFIX}/bin
 CNIBINDIR ?= ${DESTDIR}/opt/cni/bin
 GCFLAGS ?=
 export GCFLAGS
+LDFLAGS ?=
+export LDFLAGS
 PKGS ?=
 GOPATH ?= $(shell go env GOPATH)
 TEST_REPORT_DIR?=$(CURDIR)/_artifacts
 export TEST_REPORT_DIR
-GO_VERSION ?= 1.18.4
+GO_VERSION ?= 1.19.6
 GO_DOCKER_IMG = quay.io/giantswarm/golang:${GO_VERSION}
 # CONTAINER_RUNNABLE determines if the tests can be run inside a container. It checks to see if
 # podman/docker is installed on the system.
@@ -20,7 +22,6 @@ else
 CONTAINER_RUNTIME=docker
 endif
 CONTAINER_RUNNABLE ?= $(shell $(CONTAINER_RUNTIME) -v > /dev/null 2>&1; echo $$?)
-OVN_VERSION ?= v23.06.0
 OVN_SCHEMA_VERSION ?= v23.06.0
 ifeq ($(NOROOT),TRUE)
 C_ARGS = -e NOROOT=TRUE
@@ -37,9 +38,11 @@ export NOROOT
 #   make all GCFLAGS=all="-N -l"
 #       (disables compiler optimization and inlining to aid source debugging tools
 #        like delve)
+#   make all LDFLAGS="-w -s"
+#       (disables symbol table and DWARF generation when building ovnk binaries)
 
 all build:
-	hack/build-go.sh cmd/ovnkube cmd/ovn-k8s-cni-overlay cmd/ovn-kube-util hybrid-overlay/cmd/hybrid-overlay-node cmd/ovndbchecker cmd/ovnkube-trace
+	hack/build-go.sh cmd/ovnkube cmd/ovn-k8s-cni-overlay cmd/ovn-kube-util hybrid-overlay/cmd/hybrid-overlay-node cmd/ovndbchecker cmd/ovnkube-trace cmd/ovnkube-identity
 
 windows:
 	WINDOWS_BUILD="yes" hack/build-go.sh hybrid-overlay/cmd/hybrid-overlay-node
@@ -53,7 +56,10 @@ else
 	RACE=1 hack/test-go.sh
 endif
 
-codegen: pkg/nbdb/ovn-nb.ovsschema pkg/sbdb/ovn-sb.ovsschema
+modelgen: pkg/nbdb/ovn-nb.ovsschema pkg/sbdb/ovn-sb.ovsschema
+	hack/update-modelgen.sh
+
+codegen:
 	hack/update-codegen.sh
 
 install:
@@ -85,7 +91,7 @@ else
 endif
 
 pkg/nbdb/ovn-nb.ovsschema:
-	curl -sSL https://raw.githubusercontent.com/ovn-org/ovn/$(OVN_VERSION)/ovn-nb.ovsschema -o $@
+	curl -sSL https://raw.githubusercontent.com/ovn-org/ovn/$(OVN_SCHEMA_VERSION)/ovn-nb.ovsschema -o $@
 
 pkg/sbdb/ovn-sb.ovsschema:
-	curl -sSL https://raw.githubusercontent.com/ovn-org/ovn/$(OVN_VERSION)/ovn-sb.ovsschema -o $@
+	curl -sSL https://raw.githubusercontent.com/ovn-org/ovn/$(OVN_SCHEMA_VERSION)/ovn-sb.ovsschema -o $@

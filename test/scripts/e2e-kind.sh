@@ -26,9 +26,6 @@ kube-proxy
 should set TCP CLOSE_WAIT timeout
 \[Feature:ProxyTerminatingEndpoints\]
 
-# not implemented - OVN doesn't support time
-should have session affinity timeout work
-
 # NOT IMPLEMENTED; SEE DISCUSSION IN https://github.com/ovn-org/ovn-kubernetes/pull/1225
 named port.+\[Feature:NetworkPolicy\]
 
@@ -99,6 +96,10 @@ DUALSTACK_ONLY_TESTS="
 \[Feature:.*DualStack.*\]
 "
 
+DUALSTACK_CONVERSION_TESTS="
+should function for service endpoints using hostNetwork
+"
+
 # Github CI doesn´t offer IPv6 connectivity, so always skip IPv6 only tests.
 #  See: https://github.com/ovn-org/ovn-kubernetes/issues/1522
 SKIPPED_TESTS=$SKIPPED_TESTS$IPV6_ONLY_TESTS
@@ -117,6 +118,11 @@ fi
 # If not DualStack, skip DualStack tests
 if [ "$KIND_IPV4_SUPPORT" == false ] || [ "$KIND_IPV6_SUPPORT" == false ]; then
 	SKIPPED_TESTS=$SKIPPED_TESTS$DUALSTACK_ONLY_TESTS
+fi
+
+# If dulastack conversion, skip certain tests due to unknown flakes upstream (FIXME)
+if [ "$DUALSTACK_CONVERSION" == true ]; then
+  SKIPPED_TESTS=$SKIPPED_TESTS$DUALSTACK_CONVERSION_TESTS
 fi
 
 SKIPPED_TESTS="$(groomTestList "${SKIPPED_TESTS}")"
@@ -157,6 +163,9 @@ export FLAKE_ATTEMPTS=5
 export NUM_NODES=10  # number of parallel (ginkgo) test nodes to run
 # Kind clusters are three node clusters
 export NUM_WORKER_NODES=3
+if [ "$SINGLE_NODE_CLUSTER" == true ]; then
+	export NUM_WORKER_NODES=1
+fi
 ginkgo --nodes=${NUM_NODES} \
 	--focus=${FOCUS} \
 	--skip=${SKIPPED_TESTS} \

@@ -4,16 +4,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"reflect"
 	"strings"
-	"sync"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 const (
-	MissRateLimitConfigAnnot = "k8s.ovn.org/miss-rl-config"
-	NADRoutesAnnot           = "k8s.ovn.org/nad-routes"
+	MissRateLimitConfigAnnot = types.OvnK8sPrefix + "/" + "miss-rl-config"
+	OvnK8sNADRoutes          = types.OvnK8sPrefix + "/" + "nad-routes"
 )
 
 type MissRateLimitConfig struct {
@@ -29,14 +29,11 @@ type MissRateLimitConfig struct {
 }
 
 // per nad configuration, currently only rate limit config
-type NadConfig struct {
-	sync.RWMutex
+type NADConfig struct {
 	MissRateLimitConfig
 }
 
-func (nc *NadConfig) GetMissRateLimitConfig(hostType string) (uint, uint, bool) {
-	nc.RLock()
-	defer nc.RUnlock()
+func (nc *NADConfig) GetMissRateLimitConfig(hostType string) (uint, uint, bool) {
 	if len(nc.HostTypes) == 0 {
 		// if HostType is not specified, consider it's applicable to all types
 		return nc.MaxNewConnPPS, nc.MaxNewConnBurst, nc.DisableDoSCheck
@@ -49,8 +46,8 @@ func (nc *NadConfig) GetMissRateLimitConfig(hostType string) (uint, uint, bool) 
 	return 0, 0, false
 }
 
-// GetNadConfig returns the nad specific configuration obtained from the net-attach-def annotation
-func GetNadConfig(netattachdef *nettypes.NetworkAttachmentDefinition, isSecondary bool) (*NadConfig, error) {
+// GetNADConfig returns the nad specific configuration obtained from the net-attach-def annotation
+func GetNADConfig(netattachdef *nettypes.NetworkAttachmentDefinition) (*NADConfig, error) {
 	// if pkt rate limit annotation does not exist, the configuration for primary network comes from the cli; otherwise,
 	// it is the default {0, 0} which means no rate limiting unless pkt rate limit annotation is explicitly specified.
 	// DisableDoSCheck is false  by default. Note, if it is 0,0 then dsabledoscheck being false is redundant, but
@@ -58,7 +55,7 @@ func GetNadConfig(netattachdef *nettypes.NetworkAttachmentDefinition, isSecondar
 	pktRateLimitCfg := MissRateLimitConfig{0, 0, false, []string{}}
 	prlConfAnnotation, ok := netattachdef.Annotations[MissRateLimitConfigAnnot]
 	if !ok {
-		return &NadConfig{MissRateLimitConfig: pktRateLimitCfg}, nil
+		return &NADConfig{MissRateLimitConfig: pktRateLimitCfg}, nil
 	}
 
 	if err := json.Unmarshal([]byte(prlConfAnnotation), &pktRateLimitCfg); err != nil {
@@ -66,28 +63,29 @@ func GetNadConfig(netattachdef *nettypes.NetworkAttachmentDefinition, isSecondar
 			MissRateLimitConfigAnnot, netattachdef.Namespace, netattachdef.Name, err)
 	}
 
-	return &NadConfig{MissRateLimitConfig: pktRateLimitCfg}, nil
+	return &NADConfig{MissRateLimitConfig: pktRateLimitCfg}, nil
 }
 
-// GetNADNetConfig returns the network specific configuration obtained from the net-attach-def annotation
-func GetNADNetConfig(netattachdef *nettypes.NetworkAttachmentDefinition, nadInfo *NetAttachDefInfo) error {
-	nadRoutesAnnot, ok := netattachdef.Annotations[NADRoutesAnnot]
+// IsNADConfSame compares the given two NADConfig and returns true if they are the same
+func IsNADConfSame(nadConf1 *NADConfig, nadConf2 *NADConfig) bool {
+	if nadConf1 == nil || nadConf2 == nil {
+		return true
+	}
+	if nadConf1 != nil || nadConf2 != nil {
+		return reflect.DeepEqual(*nadConf1, *nadConf2)
+	}
+	return false
+}
+
+func getNADRoutesConfig(annotations map[string]string) ([]*net.IPNet, error) {
+	nadRoutesAnnot, ok := annotations[OvnK8sNADRoutes]
 	if !ok {
-		return nil
-	}
-
-	if nadInfo.TopoType == types.LocalnetAttachDefTopoType && nadInfo.Gateway == "" {
-		return fmt.Errorf("missing Gateway config in the localnet NAD %s/%s", netattachdef.Namespace, netattachdef.Name)
-	}
-
-	if nadInfo.TopoType == types.Layer2AttachDefTopoType && nadInfo.ConnectToNad == "" {
-		return fmt.Errorf("missing connectToNAD config in the layer2 NAD %s/%s", netattachdef.Namespace, netattachdef.Name)
+		return nil, nil
 	}
 
 	routeStrings := []string{}
 	if err := json.Unmarshal([]byte(nadRoutesAnnot), &routeStrings); err != nil {
-		return fmt.Errorf("failed to unmarshal %s annotation %q of NAD %s/%s: %v",
-			NADRoutesAnnot, nadRoutesAnnot, netattachdef.Namespace, netattachdef.Name, err)
+		return nil, fmt.Errorf("failed to unmarshal %s annotation %q: %v", OvnK8sNADRoutes, nadRoutesAnnot, err)
 	}
 
 	routes := make([]*net.IPNet, len(routeStrings))
@@ -95,26 +93,10 @@ func GetNADNetConfig(netattachdef *nettypes.NetworkAttachmentDefinition, nadInfo
 		routeString = strings.TrimSpace(routeString)
 		_, route, err := net.ParseCIDR(routeString)
 		if err != nil {
-			return fmt.Errorf("invalid NAD routes %s in %s annotation %q of NAD %s/%s: %v",
-				routeString, NADRoutesAnnot, nadRoutesAnnot, netattachdef.Namespace, netattachdef.Name, err)
+			return nil, fmt.Errorf("invalid NAD routes %s in %s annotation %q: %v", routeString, OvnK8sNADRoutes, nadRoutesAnnot, err)
 		}
 		routes[i] = route
 	}
 
-	nadInfo.NADRoutes = routes
-	return nil
-}
-
-func AreNADRoutesSame(routes1, routes2 []*net.IPNet) bool {
-	if len(routes1) != len(routes2) {
-		return false
-	}
-	routeStrings1 := make([]string, len(routes1))
-	routeStrings2 := make([]string, len(routes2))
-
-	for i := 0; i < len(routes1); i++ {
-		routeStrings1[i] = routes1[i].String()
-		routeStrings2[i] = routes2[i].String()
-	}
-	return IsStringListEqual(routeStrings1, routeStrings2)
+	return routes, nil
 }

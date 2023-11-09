@@ -7,7 +7,7 @@ set -e
 install_j2_renderer() {
   # ensure j2 renderer installed
   pip install wheel --user
-  pip freeze | grep j2cli || pip install j2cli[yaml] --user
+  pip freeze | grep j2cli || pip install "j2cli[yaml]" --user
   export PATH=~/.local/bin:$PATH
 }
 
@@ -32,6 +32,7 @@ OVN_SVC_CIDR=""
 OVN_K8S_APISERVER=""
 OVN_GATEWAY_MODE=""
 OVN_GATEWAY_OPTS=""
+OVN_DUMMY_GATEWAY_BRIDGE="false"
 OVN_DB_REPLICAS=""
 OVN_MTU=""
 OVN_SSL_ENABLE=""
@@ -47,6 +48,7 @@ OVN_LOGLEVEL_NBCTLD=""
 OVNKUBE_LOGFILE_MAXSIZE=""
 OVNKUBE_LOGFILE_MAXBACKUPS=""
 OVNKUBE_LOGFILE_MAXAGE=""
+OVNKUBE_LIBOVSDB_CLIENT_LOGFILE=""
 OVN_ACL_LOGGING_RATE_LIMIT=""
 OVN_MASTER_COUNT=""
 OVN_REMOTE_PROBE_INTERVAL=""
@@ -55,25 +57,30 @@ OVN_OFCTRL_WAIT_BEFORE_CLEAR=""
 OVN_ENABLE_LFLOW_CACHE="false"
 OVN_LFLOW_CACHE_LIMIT=""
 OVN_LFLOW_CACHE_LIMIT_KB=""
-OVN_HYBRID_OVERLAY_ENABLE=""
-OVN_DISABLE_SNAT_MULTIPLE_GWS=""
+OVN_HYBRID_OVERLAY_ENABLE="false"
+OVN_DISABLE_SNAT_MULTIPLE_GWS="false"
+OVN_DISABLE_FORWARDING="false"
 OVN_DISABLE_PKT_MTU_CHECK="true"
 OVN_EMPTY_LB_EVENTS=""
 OVN_MULTICAST_ENABLE=""
 OVN_METRICS_SCRAPE_INTERVAL=""
 OVS_METRICS_SCRAPE_INTERVAL=""
+OVN_ADMIN_NETWORK_POLICY_ENABLE=""
 OVN_EGRESSIP_ENABLE="true"
+OVN_EGRESSIP_HEALTHCHECK_PORT="0"
+OVN_EGRESSIP_REACHABILITY_TIMEOUT=
 OVN_EGRESSFIREWALL_ENABLE="true"
-OVN_EGRESSQOS_ENABLE=
+OVN_EGRESSQOS_ENABLE="false"
+OVN_EGRESSSERVICE_ENABLE="false"
 OVN_MULTI_NETWORK_ENABLE="true"
-OVN_MULTI_NETWORKPOLICY_ENABLE="true"
 OVN_ADMIN_PBR_ENABLE="true"
 OVN_VIRTUALIP_ENABLE="true"
 OVN_IPRESERVATION_ENABLE="true"
-OVN_PORT_MIRROR_ENABLE="true"
 OVN_DISABLE_OVN_IFACE_ID_VER="false"
 OVN_V4_JOIN_SUBNET=""
 OVN_V6_JOIN_SUBNET=""
+OVN_V4_MASQUERADE_SUBNET=""
+OVN_V6_MASQUERADE_SUBNET=""
 OVN_NETFLOW_TARGETS=""
 OVN_SFLOW_TARGETS=""
 OVN_IPFIX_TARGETS=""
@@ -98,6 +105,10 @@ OVN_NB_ENABLE_LEADER_XFER_FOR_SNAPSHOT="false"
 OVN_SB_ENABLE_LEADER_XFER_FOR_SNAPSHOT="false"
 OVN_CLUSTER_SUBNETS_MAC_BINDING_AGING=""
 OVNKUBE_CONFIG_DURATION_ENABLE=
+OVNKUBE_METRICS_SCALE_ENABLE=
+OVN_STATELESS_NETPOL_ENABLE="true"
+OVN_ENABLE_INTERCONNECT="false"
+OVN_ENABLE_OVNKUBE_IDENTITY="false"
 # IN_UPGRADE is true only if called by upgrade-ovn.sh during the upgrade test,
 # it will render only the parts in ovn-setup.yaml related to RBAC permissions.
 IN_UPGRADE=
@@ -110,7 +121,7 @@ while [ "$1" != "" ]; do
   PARAM=$(echo $1 | awk -F= '{print $1}')
   VALUE=$(echo $1 | cut -d= -f2-)
   case $PARAM in
-  --output-directory) 
+  --output-directory)
     OVN_OUTPUT_DIR=$VALUE
     ;;
   --image)
@@ -127,6 +138,12 @@ while [ "$1" != "" ]; do
     ;;
   --gateway-options)
     OVN_GATEWAY_OPTS=$VALUE
+    ;;
+  --dummy-gateway-bridge)
+    OVN_DUMMY_GATEWAY_BRIDGE=$VALUE
+    ;;
+  --enable-ipsec)
+    ENABLE_IPSEC=$VALUE
     ;;
   --ovn-monitor-all)
     OVN_MONITOR_ALL=$VALUE
@@ -191,6 +208,9 @@ while [ "$1" != "" ]; do
   --ovnkube-logfile-maxage)
     OVNKUBE_LOGFILE_MAXAGE=$VALUE
     ;;
+  --ovnkube-libovsdb-client-logfile)
+    OVNKUBE_LIBOVSDB_CLIENT_LOGFILE=$VALUE
+    ;;
   --acl-logging-rate-limit)
     OVN_ACL_LOGGING_RATE_LIMIT=$VALUE
     ;;
@@ -224,6 +244,12 @@ while [ "$1" != "" ]; do
   --disable-snat-multiple-gws)
     OVN_DISABLE_SNAT_MULTIPLE_GWS=$VALUE
     ;;
+  --disable-forwarding)
+    OVN_DISABLE_FORWARDING=$VALUE
+    ;;
+  --ovn-encap-port)
+    OVN_ENCAP_PORT=$VALUE
+    ;;
   --disable-pkt-mtu-check)
     OVN_DISABLE_PKT_MTU_CHECK=$VALUE
     ;;
@@ -232,6 +258,9 @@ while [ "$1" != "" ]; do
     ;;
   --multicast-enabled)
     OVN_MULTICAST_ENABLE=$VALUE
+    ;;
+  --admin-network-policy-enable)
+    OVN_ADMIN_NETWORK_POLICY_ENABLE=$VALUE
     ;;
   --ovn-metrics-interval)
     OVN_METRICS_SCRAPE_INTERVAL=$VALUE
@@ -242,11 +271,16 @@ while [ "$1" != "" ]; do
   --egress-ip-enable)
     OVN_EGRESSIP_ENABLE=$VALUE
     ;;
+  --egress-ip-healthcheck-port)
+    OVN_EGRESSIP_HEALTHCHECK_PORT=$VALUE
+    ;;
+  --egress-ip-reachability-timeout)
+    OVN_EGRESSIP_REACHABILITY_TIMEOUT=$VALUE
+    ;;
   --multi-network-enable)
     OVN_MULTI_NETWORK_ENABLE=$VALUE
     ;;
   --multi-networkpolicy-enable)
-    OVN_MULTI_NETWORKPOLICY_ENABLE=$VALUE
     ;;
   --disable-ovn-iface-id-ver)
     OVN_DISABLE_OVN_IFACE_ID_VER=$VALUE
@@ -269,17 +303,23 @@ while [ "$1" != "" ]; do
   --virtual-ip-enable)
     OVN_VIRTUALIP_ENABLE=$VALUE
     ;;
+  --egress-service-enable)
+    OVN_EGRESSSERVICE_ENABLE=$VALUE
+    ;;
   --ip-reservation-enable)
     OVN_IPRESERVATION_ENABLE=$VALUE
-    ;;
-  --port-mirror-enable)
-    OVN_PORT_MIRROR_ENABLE=$VALUE
     ;;
   --v4-join-subnet)
     OVN_V4_JOIN_SUBNET=$VALUE
     ;;
   --v6-join-subnet)
     OVN_V6_JOIN_SUBNET=$VALUE
+    ;;
+  --v4-masquerade-subnet)
+    OVN_V4_MASQUERADE_SUBNET=$VALUE
+    ;;
+  --v6-masquerade-subnet)
+    OVN_V6_MASQUERADE_SUBNET=$VALUE
     ;;
   --netflow-targets)
     OVN_NETFLOW_TARGETS=$VALUE
@@ -341,14 +381,35 @@ while [ "$1" != "" ]; do
   --enable-ovn-sb-leader-xfer-for-snapshot)
     OVN_SB_ENABLE_LEADER_XFER_FOR_SNAPSHOT=$VALUE
     ;;
+  --ovnkube-node-mgmt-port-dp-resource-name)
+    OVNKUBE_NODE_MGMT_PORT_DP_RESOURCE_NAME=$VALUE
+    ;;
   --cluster-subnets-mac-binding-aging)
     OVN_CLUSTER_SUBNETS_MAC_BINDING_AGING=$VALUE
     ;;
   --ovnkube-config-duration-enable)
     OVNKUBE_CONFIG_DURATION_ENABLE=$VALUE
     ;;
+  --ovnkube-metrics-scale-enable)
+    OVNKUBE_METRICS_SCALE_ENABLE=$VALUE
+    ;;
   --in-upgrade)
     IN_UPGRADE=true
+    ;;
+  --stateless-netpol-enable)
+    OVN_STATELESS_NETPOL_ENABLE=$VALUE
+    ;;
+  --compact-mode)
+    COMPACT_MODE=$VALUE
+    ;;
+  --enable-interconnect)
+    OVN_ENABLE_INTERCONNECT=$VALUE
+    ;;
+  --enable-multi-external-gateway)
+    OVN_ENABLE_MULTI_EXTERNAL_GATEWAY=$VALUE
+    ;;
+  --enable-ovnkube-identity)
+    OVN_ENABLE_OVNKUBE_IDENTITY=$VALUE
     ;;
   --ovnkube-logfile)
     OVNKUBE_LOGFILE=$VALUE
@@ -356,7 +417,6 @@ while [ "$1" != "" ]; do
   --disable-ovs-metrics)
     OVNKUBE_DISABLE_OVS_METRICS=$VALUE
     ;;
-
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -368,14 +428,14 @@ done
 # Create the daemonsets with the desired image
 # They are expanded into daemonsets in the specified
 # output directory.
-if [ -z ${OVN_OUTPUT_DIR} ] ; then 
+if [ -z ${OVN_OUTPUT_DIR} ] ; then
   output_dir="../yaml"
-else 
+else
   output_dir=${OVN_OUTPUT_DIR}
   if [ ! -d ${OVN_OUTPUT_DIR} ]; then
     mkdir $output_dir
-  fi 
-fi 
+  fi
+fi
 echo "output_dir: $output_dir"
 
 image=${OVN_IMAGE:-"docker.io/ovnkube/ovn-daemonset:latest"}
@@ -392,6 +452,12 @@ echo "ovn_gateway_mode: ${ovn_gateway_mode}"
 
 ovn_gateway_opts=${OVN_GATEWAY_OPTS}
 echo "ovn_gateway_opts: ${ovn_gateway_opts}"
+
+ovn_dummy_gateway_bridge=${OVN_DUMMY_GATEWAY_BRIDGE}
+echo "ovn_dummy_gateway_bridge: ${ovn_dummy_gateway_bridge}"
+
+enable_ipsec=${ENABLE_IPSEC:-false}
+echo "enable_ipsec: ${enable_ipsec}"
 
 ovn_db_replicas=${OVN_DB_REPLICAS:-3}
 echo "ovn_db_replicas: ${ovn_db_replicas}"
@@ -417,34 +483,46 @@ ovnkube_logfile_maxbackups=${OVNKUBE_LOGFILE_MAXBACKUPS:-"20"}
 echo "ovnkube_logfile_maxbackups: ${ovnkube_logfile_maxbackups}"
 ovnkube_logfile_maxage=${OVNKUBE_LOGFILE_MAXAGE:-"20"}
 echo "ovnkube_logfile_maxage: ${ovnkube_logfile_maxage}"
+ovnkube_libovsdb_client_logfile=${OVNKUBE_LIBOVSDB_CLIENT_LOGFILE}
+echo "ovnkube_libovsdb_client_logfile: ${ovnkube_libovsdb_client_logfile}"
 ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
 echo "ovn_acl_logging_rate_limit: ${ovn_acl_logging_rate_limit}"
 ovn_hybrid_overlay_enable=${OVN_HYBRID_OVERLAY_ENABLE}
 echo "ovn_hybrid_overlay_enable: ${ovn_hybrid_overlay_enable}"
+ovn_admin_network_policy_enable=${OVN_ADMIN_NETWORK_POLICY_ENABLE}
+echo "ovn_admin_network_policy_enable: ${ovn_admin_network_policy_enable}"
 ovn_egress_ip_enable=${OVN_EGRESSIP_ENABLE}
 echo "ovn_egress_ip_enable: ${ovn_egress_ip_enable}"
+ovn_egress_ip_healthcheck_port=${OVN_EGRESSIP_HEALTHCHECK_PORT}
+echo "ovn_egress_ip_healthcheck_port: ${ovn_egress_ip_healthcheck_port}"
+ovn_egress_ip_reachability_timeout=${OVN_EGRESSIP_REACHABILITY_TIMEOUT}
+echo "ovn_egress_ip_reachability_timeout: ${ovn_egress_ip_reachability_timeout}"
 ovn_egress_firewall_enable=${OVN_EGRESSFIREWALL_ENABLE}
 echo "ovn_egress_firewall_enable: ${ovn_egress_firewall_enable}"
 ovn_multi_network_enable=${OVN_MULTI_NETWORK_ENABLE}
 echo "ovn_multi_network_enable: ${ovn_multi_network_enable}"
-ovn_multi_networkpolicy_enable=${OVN_MULTI_NETWORKPOLICY_ENABLE}
-echo "ovn_multi_networkpolicy_enable: ${ovn_multi_networkpolicy_enable}"
 ovn_egress_qos_enable=${OVN_EGRESSQOS_ENABLE}
 echo "ovn_egress_qos_enable: ${ovn_egress_qos_enable}"
+ovn_egress_service_enable=${OVN_EGRESSSERVICE_ENABLE}
+echo "ovn_egress_service_enable: ${ovn_egress_service_enable}"
 ovn_admin_pbr_enable=${OVN_ADMIN_PBR_ENABLE}
 echo "ovn_admin_pbr_enable: ${ovn_admin_pbr_enable}"
 ovn_virtual_ip_enable=${OVN_VIRTUALIP_ENABLE}
 echo "ovn_virtual_ip_enable: ${ovn_virtual_ip_enable}"
 ovn_ipreservation_enable=${OVN_IPRESERVATION_ENABLE}
 echo "ovn_ipreservation_enable: ${ovn_ipreservation_enable}"
-ovn_port_mirror_enable=${OVN_PORT_MIRROR_ENABLE}
-echo "ovn_port_mirror_enable: ${ovn_port_mirror_enable}"
 ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER}
 echo "ovn_disable_ovn_iface_id_ver: ${ovn_disable_ovn_iface_id_ver}"
+ovn_multi_network_enable=${OVN_MULTI_NETWORK_ENABLE}
+echo "ovn_multi_network_enable: ${ovn_multi_network_enable}"
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR}
 echo "ovn_hybrid_overlay_net_cidr: ${ovn_hybrid_overlay_net_cidr}"
 ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS}
 echo "ovn_disable_snat_multiple_gws: ${ovn_disable_snat_multiple_gws}"
+ovn_disable_forwarding=${OVN_DISABLE_FORWARDING}
+echo "ovn_disable_forwarding: ${ovn_disable_forwarding}"
+ovn_encap_port=${OVN_ENCAP_PORT}
+echo "ovn_encap_port: ${ovn_encap_port}"
 ovn_disable_pkt_mtu_check=${OVN_DISABLE_PKT_MTU_CHECK}
 echo "ovn_disable_pkt_mtu_check: ${ovn_disable_pkt_mtu_check}"
 ovn_empty_lb_events=${OVN_EMPTY_LB_EVENTS}
@@ -493,6 +571,10 @@ ovn_v4_join_subnet=${OVN_V4_JOIN_SUBNET}
 echo "ovn_v4_join_subnet: ${ovn_v4_join_subnet}"
 ovn_v6_join_subnet=${OVN_V6_JOIN_SUBNET}
 echo "ovn_v6_join_subnet: ${ovn_v6_join_subnet}"
+ovn_v4_masquerade_subnet=${OVN_V4_MASQUERADE_SUBNET}
+echo "ovn_v4_masquerade_subnet: ${ovn_v4_masquerade_subnet}"
+ovn_v6_masquerade_subnet=${OVN_V6_MASQUERADE_SUBNET}
+echo "ovn_v6_masquerade_subnet: ${ovn_v6_masquerade_subnet}"
 ovn_netflow_targets=${OVN_NETFLOW_TARGETS}
 echo "ovn_netflow_targets: ${ovn_netflow_targets}"
 ovn_sflow_targets=${OVN_SFLOW_TARGETS}
@@ -537,16 +619,31 @@ ovnkube_config_duration_enable=${OVNKUBE_CONFIG_DURATION_ENABLE}
 echo "ovnkube_config_duration_enable: ${ovnkube_config_duration_enable}"
 coredns_cluster_ip=${COREDNS_CLUSTER_IP}
 echo "coredns_cluster_ip: ${coredns_cluster_ip}"
+ovnkube_metrics_scale_enable=${OVNKUBE_METRICS_SCALE_ENABLE}
+echo "ovnkube_metrics_scale_enable: ${ovnkube_metrics_scale_enable}"
+ovn_stateless_netpol_enable=${OVN_STATELESS_NETPOL_ENABLE}
+echo "ovn_stateless_netpol_enable: ${ovn_stateless_netpol_enable}"
+ovnkube_compact_mode_enable=${COMPACT_MODE:-"false"}
+echo "ovnkube_compact_mode_enable: ${ovnkube_compact_mode_enable}"
+ovn_enable_interconnect=${OVN_ENABLE_INTERCONNECT}
+echo "ovn_enable_interconnect: ${ovn_enable_interconnect}"
+ovn_enable_multi_external_gateway=${OVN_ENABLE_MULTI_EXTERNAL_GATEWAY}
+echo "ovn_enable_multi_external_gateway: ${ovn_enable_multi_external_gateway}"
+
+ovn_enable_ovnkube_identity=${OVN_ENABLE_OVNKUBE_IDENTITY}
+echo "ovn_enable_ovnkube_identity: ${ovn_enable_ovnkube_identity}"
 ovnkube_logfile=${OVNKUBE_LOGFILE}
 echo "ovnkube_logfile: ${ovnkube_logfile}"
 disable_ovs_metrics=${OVNKUBE_DISABLE_OVS_METRICS:-false}
 echo "disable_ovs_metrics=${disable_ovs_metrics}"
 
 ovn_image=${image} \
+  ovnkube_compact_mode_enable=${ovnkube_compact_mode_enable} \
   ovn_image_pull_policy=${image_pull_policy} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
   ovn_gateway_mode=${ovn_gateway_mode} \
   ovn_gateway_opts=${ovn_gateway_opts} \
+  ovn_dummy_gateway_bridge=${ovn_dummy_gateway_bridge} \
   ovnkube_node_loglevel=${node_loglevel} \
   ovn_loglevel_controller=${ovn_loglevel_controller} \
   ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
@@ -556,10 +653,17 @@ ovn_image=${image} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
+  ovn_disable_forwarding=${ovn_disable_forwarding} \
+  ovn_encap_port=${ovn_encap_port} \
   ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
+  ovn_v4_masquerade_subnet=${ovn_v4_masquerade_subnet} \
+  ovn_v6_masquerade_subnet=${ovn_v6_masquerade_subnet} \
   ovn_multicast_enable=${ovn_multicast_enable} \
+  ovn_admin_network_policy_enable=${ovn_admin_network_policy_enable} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
+  ovn_egress_ip_healthcheck_port=${ovn_egress_ip_healthcheck_port} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
+  ovn_egress_service_enable=${ovn_egress_service_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
   ovn_monitor_all=${ovn_monitor_all} \
@@ -577,17 +681,22 @@ ovn_image=${image} \
   ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
   disable_ovs_metrics=${disable_ovs_metrics} \
+  ovn_enable_interconnect=${ovn_enable_interconnect} \
+  ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
+  ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   ovnkube_app_name=ovnkube-node \
   j2 ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node.yaml
 
 # ovnkube node for dpu-host daemonset
 # TODO: we probably dont need all of these when running on dpu host
 ovn_image=${image} \
+  ovnkube_compact_mode_enable=${ovnkube_compact_mode_enable} \
   ovn_image_pull_policy=${image_pull_policy} \
   kind=${KIND} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
   ovn_gateway_mode=${ovn_gateway_mode} \
   ovn_gateway_opts=${ovn_gateway_opts} \
+  ovn_dummy_gateway_bridge=${ovn_dummy_gateway_bridge} \
   ovnkube_node_loglevel=${node_loglevel} \
   ovn_loglevel_controller=${ovn_loglevel_controller} \
   ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
@@ -597,9 +706,17 @@ ovn_image=${image} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
+  ovn_disable_forwarding=${ovn_disable_forwarding} \
+  ovn_encap_port=${ovn_encap_port} \
   ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
+  ovn_v4_masquerade_subnet=${ovn_v4_masquerade_subnet} \
+  ovn_v6_masquerade_subnet=${ovn_v6_masquerade_subnet} \
   ovn_multicast_enable=${ovn_multicast_enable} \
+  ovn_admin_network_policy_enable=${ovn_admin_network_policy_enable} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
+  ovn_egress_ip_healthcheck_port=${ovn_egress_ip_healthcheck_port} \
+  ovn_egress_service_enable=${ovn_egress_service_enable} \
+  ovn_ssl_en=${ovn_ssl_en} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovn_netflow_targets=${ovn_netflow_targets} \
   ovn_sflow_targets=${ovn_sflow_targets} \
@@ -620,7 +737,58 @@ ovn_image=${image} \
   ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
   ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
   ovnkube_logfile=${ovnkube_logfile} \
+  ovnkube_libovsdb_client_logfile=${ovnkube_libovsdb_client_logfile} \
   ovnkube_config_duration_enable=${ovnkube_config_duration_enable} \
+  ovnkube_metrics_scale_enable=${ovnkube_metrics_scale_enable} \
+  ovn_acl_logging_rate_limit=${ovn_acl_logging_rate_limit} \
+  ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
+  ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
+  ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
+  ovn_disable_forwarding=${ovn_disable_forwarding} \
+  ovn_encap_port=${ovn_encap_port} \
+  ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
+  ovn_empty_lb_events=${ovn_empty_lb_events} \
+  ovn_v4_join_subnet=${ovn_v4_join_subnet} \
+  ovn_v6_join_subnet=${ovn_v6_join_subnet} \
+  ovn_v4_masquerade_subnet=${ovn_v4_masquerade_subnet} \
+  ovn_v6_masquerade_subnet=${ovn_v6_masquerade_subnet} \
+  ovn_multicast_enable=${ovn_multicast_enable} \
+  ovn_admin_network_policy_enable=${ovn_admin_network_policy_enable} \
+  ovn_egress_ip_enable=${ovn_egress_ip_enable} \
+  ovn_egress_ip_healthcheck_port=${ovn_egress_ip_healthcheck_port} \
+  ovn_egress_ip_reachability_timeout=${ovn_egress_ip_reachability_timeout} \
+  ovn_egress_firewall_enable=${ovn_egress_firewall_enable} \
+  ovn_egress_qos_enable=${ovn_egress_qos_enable} \
+  ovn_egress_service_enable=${ovn_egress_service_enable} \
+  ovn_multi_network_enable=${ovn_multi_network_enable} \
+  ovn_admin_pbr_enable=${ovn_admin_pbr_enable} \
+  ovn_virtual_ip_enable=${ovn_virtual_ip_enable} \
+  ovn_ipreservation_enable=${ovn_ipreservation_enable} \
+  ovn_ssl_en=${ovn_ssl_en} \
+  ovn_master_count=${ovn_master_count} \
+  ovn_gateway_mode=${ovn_gateway_mode} \
+  ovn_gateway_opts=${ovn_gateway_opts} \
+  ovn_dummy_gateway_bridge=${ovn_dummy_gateway_bridge} \
+  ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
+  ovn_nohostsubnet_label=${ovn_nohostsubnet_label} \
+  ovn_ctinv_flows_disable=${ovn_ctinv_flows_disable} \
+  ovn_stateless_netpol_enable=${ovn_netpol_acl_enable} \
+  ovnkube_compact_mode_enable=${ovnkube_compact_mode_enable} \
+  ovn_unprivileged_mode=${ovn_unprivileged_mode} \
+  ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
+  ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
+  ovn_cluster_subnets_mac_binding_aging=${ovn_cluster_subnets_mac_binding_aging} \
+  j2 ../templates/ovnkube-master.yaml.j2 -o ${output_dir}/ovnkube-master.yaml
+
+ovn_image=${image} \
+  ovn_image_pull_policy=${image_pull_policy} \
+  ovnkube_master_loglevel=${master_loglevel} \
+  ovn_loglevel_northd=${ovn_loglevel_northd} \
+  ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
+  ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
+  ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
+  ovnkube_config_duration_enable=${ovnkube_config_duration_enable} \
+  ovnkube_metrics_scale_enable=${ovnkube_metrics_scale_enable} \
   ovn_acl_logging_rate_limit=${ovn_acl_logging_rate_limit} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
@@ -629,32 +797,33 @@ ovn_image=${image} \
   ovn_empty_lb_events=${ovn_empty_lb_events} \
   ovn_v4_join_subnet=${ovn_v4_join_subnet} \
   ovn_v6_join_subnet=${ovn_v6_join_subnet} \
+  ovn_v4_masquerade_subnet=${ovn_v4_masquerade_subnet} \
+  ovn_v6_masquerade_subnet=${ovn_v6_masquerade_subnet} \
   ovn_multicast_enable=${ovn_multicast_enable} \
+  ovn_admin_network_policy_enable=${ovn_admin_network_policy_enable} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
+  ovn_egress_ip_healthcheck_port=${ovn_egress_ip_healthcheck_port} \
   ovn_egress_firewall_enable=${ovn_egress_firewall_enable} \
-  ovn_multi_network_enable=${ovn_multi_network_enable} \
-  ovn_multi_networkpolicy_enable=${ovn_multi_networkpolicy_enable} \
   ovn_egress_qos_enable=${ovn_egress_qos_enable} \
-  ovn_admin_pbr_enable=${ovn_admin_pbr_enable} \
-  ovn_virtual_ip_enable=${ovn_virtual_ip_enable} \
-  ovn_ipreservation_enable=${ovn_ipreservation_enable} \
-  ovn_port_mirror_enable=${ovn_port_mirror_enable} \
+  ovn_multi_network_enable=${ovn_multi_network_enable} \
+  ovn_egress_service_enable=${ovn_egress_service_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_master_count=${ovn_master_count} \
   ovn_gateway_mode=${ovn_gateway_mode} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
-  ovn_nohostsubnet_label=${ovn_nohostsubnet_label} \
-  ovn_ctinv_flows_disable=${ovn_ctinv_flows_disable} \
-  ovn_cluster_subnets_mac_binding_aging=${ovn_cluster_subnets_mac_binding_aging} \
-  j2 ../templates/ovnkube-master.yaml.j2 -o ${output_dir}/ovnkube-master.yaml
+  ovn_enable_interconnect=${ovn_enable_interconnect} \
+  ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
+  ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
+  j2 ../templates/ovnkube-control-plane.yaml.j2 -o ${output_dir}/ovnkube-control-plane.yaml
 
-ovn_image=${imagec} \
+ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
   ovn_loglevel_nb=${ovn_loglevel_nb} \
   ovn_loglevel_sb=${ovn_loglevel_sb} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_nb_port=${ovn_nb_port} \
   ovn_sb_port=${ovn_sb_port} \
+  enable_ipsec=${enable_ipsec} \
   j2 ../templates/ovnkube-db.yaml.j2 -o ${output_dir}/ovnkube-db.yaml
 
 ovn_image=${image} \
@@ -665,33 +834,47 @@ ovn_image=${image} \
   ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
   ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
   ovnkube_logfile=${ovnkube_logfile} \
+  ovnkube_libovsdb_client_logfile=${ovnkube_libovsdb_client_logfile} \
+  ovnkube_config_duration_enable=${ovnkube_config_duration_enable} \
+  ovnkube_metrics_scale_enable=${ovnkube_metrics_scale_enable} \
   ovn_acl_logging_rate_limit=${ovn_acl_logging_rate_limit} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
+  ovn_disable_forwarding=${ovn_disable_forwarding} \
+  ovn_encap_port=${ovn_encap_port} \
   ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
   ovn_empty_lb_events=${ovn_empty_lb_events} \
   ovn_v4_join_subnet=${ovn_v4_join_subnet} \
   ovn_v6_join_subnet=${ovn_v6_join_subnet} \
+  ovn_v4_masquerade_subnet=${ovn_v4_masquerade_subnet} \
+  ovn_v6_masquerade_subnet=${ovn_v6_masquerade_subnet} \
   ovn_multicast_enable=${ovn_multicast_enable} \
+  ovn_admin_network_policy_enable=${ovn_admin_network_policy_enable} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
+  ovn_egress_ip_healthcheck_port=${ovn_egress_ip_healthcheck_port} \
+  ovn_egress_ip_reachability_timeout=${ovn_egress_ip_reachability_timeout} \
   ovn_egress_firewall_enable=${ovn_egress_firewall_enable} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
-  ovn_multi_networkpolicy_enable=${ovn_multi_networkpolicy_enable} \
   ovn_egress_qos_enable=${ovn_egress_qos_enable} \
+  ovn_egress_service_enable=${ovn_egress_service_enable} \
   ovn_admin_pbr_enable=${ovn_admin_pbr_enable} \
   ovn_virtual_ip_enable=${ovn_virtual_ip_enable} \
   ovn_ipreservation_enable=${ovn_ipreservation_enable} \
-  ovn_port_mirror_enable=${ovn_port_mirror_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_master_count=${ovn_master_count} \
   ovn_gateway_mode=${ovn_gateway_mode} \
+  ovn_gateway_opts=${ovn_gateway_opts} \
   ovn_metrics_scrape_interval=${ovn_metrics_scrape_interval} \
   ovn_nb_cert_cname=${ovn_nb_cert_cname} \
   ovn_sb_cert_cname=${ovn_sb_cert_cname} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovn_nohostsubnet_label=${ovn_nohostsubnet_label} \
   ovn_ctinv_flows_disable=${ovn_ctinv_flows_disable} \
+  ovn_stateless_netpol_enable=${ovn_netpol_acl_enable} \
+  ovnkube_compact_mode_enable=${ovnkube_compact_mode_enable} \
+  ovn_unprivileged_mode=${ovn_unprivileged_mode} \
+  ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   ovn_cluster_subnets_mac_binding_aging=${ovn_cluster_subnets_mac_binding_aging} \
   j2 ../templates/ovnk8s-master.yaml.j2 -o ${output_dir}/ovnk8s-master.yaml
 
@@ -701,6 +884,7 @@ ovn_image=${image} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
   ovn_gateway_mode=${ovn_gateway_mode} \
   ovn_gateway_opts=${ovn_gateway_opts} \
+  ovn_dummy_gateway_bridge=${ovn_dummy_gateway_bridge} \
   ovnkube_node_loglevel=${node_loglevel} \
   ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
   ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
@@ -709,10 +893,17 @@ ovn_image=${image} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
+  ovn_disable_forwarding=${ovn_disable_forwarding} \
+  ovn_encap_port=${ovn_encap_port} \
   ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
+  ovn_v4_masquerade_subnet=${ovn_v4_masquerade_subnet} \
+  ovn_v6_masquerade_subnet=${ovn_v6_masquerade_subnet} \
   ovn_multicast_enable=${ovn_multicast_enable} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
+  ovn_egress_ip_healthcheck_port=${ovn_egress_ip_healthcheck_port} \
+  ovn_ssl_en=${ovn_ssl_en} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
+  ovn_admin_network_policy_enable=${ovn_admin_network_policy_enable} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
   ovn_metrics_scrape_interval=${ovn_metrics_scrape_interval} \
   ovs_metrics_scrape_interval=${ovs_metrics_scrape_interval} \
@@ -722,6 +913,7 @@ ovn_image=${image} \
   ovn_monitor_all=${ovn_monitor_all} \
   ovn_enable_lflow_cache=${ovn_enable_lflow_cache} \
   ovn_lflow_cache_limit=${ovn_lflow_cache_limit} \
+  ovn_egress_service_enable=${ovn_egress_service_enable} \
   ovn_lflow_cache_limit_kb=${ovn_lflow_cache_limit_kb} \
   ovn_netflow_targets=${ovn_netflow_targets} \
   ovn_sflow_targets=${ovn_sflow_targets} \
@@ -733,6 +925,9 @@ ovn_image=${image} \
   ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
   coredns_cluster_ip=${coredns_cluster_ip} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
+  ovn_enable_interconnect=${ovn_enable_interconnect} \
+  ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
+  ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   disable_ovs_metrics=${disable_ovs_metrics} \
   ovnkube_app_name=ovnkube-node \
   j2 ../templates/ovnk8s-node.yaml.j2 -o ${output_dir}/ovnk8s-node.yaml
@@ -743,6 +938,7 @@ ovn_image=${image} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
   ovn_gateway_mode=${ovn_gateway_mode} \
   ovn_gateway_opts=${ovn_gateway_opts} \
+  ovn_dummy_gateway_bridge=${ovn_dummy_gateway_bridge} \
   ovnkube_node_loglevel=${node_loglevel} \
   ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
   ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
@@ -751,9 +947,17 @@ ovn_image=${image} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
+  ovn_disable_forwarding=${ovn_disable_forwarding} \
+  ovn_encap_port=${ovn_encap_port} \
   ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
+  ovn_v4_masquerade_subnet=${ovn_v4_masquerade_subnet} \
+  ovn_v6_masquerade_subnet=${ovn_v6_masquerade_subnet} \
   ovn_multicast_enable=${ovn_multicast_enable} \
+  ovn_admin_network_policy_enable=${ovn_admin_network_policy_enable} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
+  ovn_egress_ip_healthcheck_port=${ovn_egress_ip_healthcheck_port} \
+  ovn_egress_service_enable=${ovn_egress_service_enable} \
+  ovn_ssl_en=${ovn_ssl_en} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovs_metrics_scrape_interval=${ovs_metrics_scrape_interval} \
   ovn_metrics_scrape_interval=${ovn_metrics_scrape_interval} \
@@ -765,23 +969,36 @@ ovn_image=${image} \
   ovn_ipfix_cache_active_timeout=${ovn_ipfix_cache_active_timeout} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
+  ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   coredns_cluster_ip=${coredns_cluster_ip} \
   ovnkube_app_name=ovnkube-node-dpu-host \
   j2 ../templates/ovnk8s-node.yaml.j2 -o ${output_dir}/ovnk8s-node-dpu-host.yaml
 
 ovn_image=${image_ubuntu} \
   ovn_image_pull_policy=${image_pull_policy} \
+  ovn_gateway_mode=${ovn_gateway_mode} \
+  ovn_gateway_opts=${ovn_gateway_opts} \
+  ovn_dummy_gateway_bridge=${ovn_dummy_gateway_bridge} \
   ovnkube_node_loglevel=${node_loglevel} \
   ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
   ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
   ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
   ovnkube_logfile=${ovnkube_logfile} \
+  ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
+  ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_multicast_enable=${ovn_multicast_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
+  ovn_disable_forwarding=${ovn_disable_forwarding} \
+  ovn_encap_port=${ovn_encap_port} \
   ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
+  ovn_v4_masquerade_subnet=${ovn_v4_masquerade_subnet} \
+  ovn_v6_masquerade_subnet=${ovn_v6_masquerade_subnet} \
   ovn_multicast_enable=${ovn_multicast_enable} \
+  ovn_admin_network_policy_enable=${ovn_admin_network_policy_enable} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
+  ovn_egress_ip_healthcheck_port=${ovn_egress_ip_healthcheck_port} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
+  ovn_egress_service_enable=${ovn_egress_service_enable} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
   ovn_metrics_scrape_interval=${ovn_metrics_scrape_interval} \
   ovs_metrics_scrape_interval=${ovs_metrics_scrape_interval} \
@@ -802,8 +1019,11 @@ ovn_image=${image_ubuntu} \
   ovs_max_revalidator=${ovs_max_revalidator} \
   ovs_min_revalidate_pps=${ovs_min_revalidate_pps} \
   ovs_max_idle=${ovs_max_idle} \
+  ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
+  ovn_enable_interconnect=${ovn_enable_interconnect} \
+  ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
+  ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   disable_ovs_metrics=${disable_ovs_metrics} \
-  ovn_port_mirror_enable=${ovn_port_mirror_enable} \
   j2 ../templates/ovnk8s-node-dpu.yaml.j2 -o ${output_dir}/ovnk8s-node-dpu.yaml
 
 ovn_image=${imagec} \
@@ -823,6 +1043,7 @@ ovn_image=${imagec} \
   ovn_nb_port=${ovn_nb_port} \
   ovn_nb_raft_port=${ovn_nb_raft_port} \
   ovn_nb_enable_leader_xfer_for_snapshot=${ovn_nb_enable_leader_xfer_for_snapshot} \
+  enable_ipsec=${enable_ipsec} \
   j2 ../templates/ovn-nbdb-raft.yaml.j2 -o ${output_dir}/ovn-nbdb-raft.yaml
 
 ovn_image=${imagec} \
@@ -835,6 +1056,7 @@ ovn_image=${imagec} \
   ovn_sb_port=${ovn_sb_port} \
   ovn_sb_raft_port=${ovn_sb_raft_port} \
   ovn_sb_enable_leader_xfer_for_snapshot=${ovn_sb_enable_leader_xfer_for_snapshot} \
+  enable_ipsec=${enable_ipsec} \
   j2 ../templates/ovn-sbdb-raft.yaml.j2 -o ${output_dir}/ovn-sbdb-raft.yaml
 
 ovn_image=${imagec} \
@@ -849,10 +1071,152 @@ ovn_image=${imagec_ubuntu} \
   ovn_ssl_en=${ovn_ssl_en} \
   j2 ../templates/ovn-host-dpu.yaml.j2 -o ${output_dir}/ovn-host-dpu.yaml
 
+ovn_image=${image} \
+  ovn_image_pull_policy=${image_pull_policy} \
+  ovn_unprivileged_mode=${ovn_unprivileged_mode} \
+  ovn_gateway_mode=${ovn_gateway_mode} \
+  ovn_gateway_opts=${ovn_gateway_opts} \
+  ovnkube_node_loglevel=${node_loglevel} \
+  ovnkube_local_loglevel=${node_loglevel} \
+  ovn_loglevel_controller=${ovn_loglevel_controller} \
+  ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
+  ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
+  ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
+  ovnkube_libovsdb_client_logfile=${ovnkube_libovsdb_client_logfile} \
+  ovnkube_config_duration_enable=${ovnkube_config_duration_enable} \
+  ovnkube_metrics_scale_enable=${ovnkube_metrics_scale_enable} \
+  ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
+  ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
+  ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
+  ovn_encap_port=${ovn_encap_port} \
+  ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
+  ovn_v4_join_subnet=${ovn_v4_join_subnet} \
+  ovn_v6_join_subnet=${ovn_v6_join_subnet} \
+  ovn_multicast_enable=${ovn_multicast_enable} \
+  ovn_admin_network_policy_enable=${ovn_admin_network_policy_enable} \
+  ovn_egress_ip_enable=${ovn_egress_ip_enable} \
+  ovn_egress_ip_healthcheck_port=${ovn_egress_ip_healthcheck_port} \
+  ovn_egress_firewall_enable=${ovn_egress_firewall_enable} \
+  ovn_egress_qos_enable=${ovn_egress_qos_enable} \
+  ovn_multi_network_enable=${ovn_multi_network_enable} \
+  ovn_egress_service_enable=${ovn_egress_service_enable} \
+  ovn_ssl_en=${ovn_ssl_en} \
+  ovn_remote_probe_interval=${ovn_remote_probe_interval} \
+  ovn_monitor_all=${ovn_monitor_all} \
+  ovn_ofctrl_wait_before_clear=${ovn_ofctrl_wait_before_clear} \
+  ovn_enable_lflow_cache=${ovn_enable_lflow_cache} \
+  ovn_lflow_cache_limit=${ovn_lflow_cache_limit} \
+  ovn_lflow_cache_limit_kb=${ovn_lflow_cache_limit_kb} \
+  ovn_netflow_targets=${ovn_netflow_targets} \
+  ovn_sflow_targets=${ovn_sflow_targets} \
+  ovn_ipfix_targets=${ovn_ipfix_targets} \
+  ovn_ipfix_sampling=${ovn_ipfix_sampling} \
+  ovn_ipfix_cache_max_flows=${ovn_ipfix_cache_max_flows} \
+  ovn_ipfix_cache_active_timeout=${ovn_ipfix_cache_active_timeout} \
+  ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
+  ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
+  ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
+  ovnkube_master_loglevel=${master_loglevel} \
+  ovn_loglevel_northd=${ovn_loglevel_northd} \
+  ovn_loglevel_nbctld=${ovn_loglevel_nbctld} \
+  ovn_acl_logging_rate_limit=${ovn_acl_logging_rate_limit} \
+  ovn_empty_lb_events=${ovn_empty_lb_events} \
+  ovn_loglevel_nb=${ovn_loglevel_nb} ovn_loglevel_sb=${ovn_loglevel_sb} \
+  ovn_enable_interconnect=${ovn_enable_interconnect} \
+  ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
+  ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
+  j2 ../templates/ovnkube-single-node-zone.yaml.j2 -o ${output_dir}/ovnkube-single-node-zone.yaml
+
+ovn_image=${image} \
+  ovn_image_pull_policy=${image_pull_policy} \
+  ovn_unprivileged_mode=${ovn_unprivileged_mode} \
+  ovn_gateway_mode=${ovn_gateway_mode} \
+  ovn_gateway_opts=${ovn_gateway_opts} \
+  ovnkube_node_loglevel=${node_loglevel} \
+  ovnkube_local_loglevel=${node_loglevel} \
+  ovn_loglevel_controller=${ovn_loglevel_controller} \
+  ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
+  ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
+  ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
+  ovnkube_libovsdb_client_logfile=${ovnkube_libovsdb_client_logfile} \
+  ovnkube_config_duration_enable=${ovnkube_config_duration_enable} \
+  ovnkube_metrics_scale_enable=${ovnkube_metrics_scale_enable} \
+  ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
+  ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
+  ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
+  ovn_encap_port=${ovn_encap_port} \
+  ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
+  ovn_v4_join_subnet=${ovn_v4_join_subnet} \
+  ovn_v6_join_subnet=${ovn_v6_join_subnet} \
+  ovn_multicast_enable=${ovn_multicast_enable} \
+  ovn_admin_network_policy_enable=${ovn_admin_network_policy_enable} \
+  ovn_egress_ip_enable=${ovn_egress_ip_enable} \
+  ovn_egress_ip_healthcheck_port=${ovn_egress_ip_healthcheck_port} \
+  ovn_egress_service_enable=${ovn_egress_service_enable} \
+  ovn_egress_firewall_enable=${ovn_egress_firewall_enable} \
+  ovn_egress_qos_enable=${ovn_egress_qos_enable} \
+  ovn_multi_network_enable=${ovn_multi_network_enable} \
+  ovn_ssl_en=${ovn_ssl_en} \
+  ovn_remote_probe_interval=${ovn_remote_probe_interval} \
+  ovn_monitor_all=${ovn_monitor_all} \
+  ovn_ofctrl_wait_before_clear=${ovn_ofctrl_wait_before_clear} \
+  ovn_enable_lflow_cache=${ovn_enable_lflow_cache} \
+  ovn_lflow_cache_limit=${ovn_lflow_cache_limit} \
+  ovn_lflow_cache_limit_kb=${ovn_lflow_cache_limit_kb} \
+  ovn_netflow_targets=${ovn_netflow_targets} \
+  ovn_sflow_targets=${ovn_sflow_targets} \
+  ovn_ipfix_targets=${ovn_ipfix_targets} \
+  ovn_ipfix_sampling=${ovn_ipfix_sampling} \
+  ovn_ipfix_cache_max_flows=${ovn_ipfix_cache_max_flows} \
+  ovn_ipfix_cache_active_timeout=${ovn_ipfix_cache_active_timeout} \
+  ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
+  ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
+  ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
+  ovnkube_master_loglevel=${master_loglevel} \
+  ovn_loglevel_northd=${ovn_loglevel_northd} \
+  ovn_loglevel_nbctld=${ovn_loglevel_nbctld} \
+  ovn_acl_logging_rate_limit=${ovn_acl_logging_rate_limit} \
+  ovn_empty_lb_events=${ovn_empty_lb_events} \
+  ovn_loglevel_nb=${ovn_loglevel_nb} ovn_loglevel_sb=${ovn_loglevel_sb} \
+  ovn_enable_interconnect=${ovn_enable_interconnect} \
+  ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
+  ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
+  j2 ../templates/ovnkube-zone-controller.yaml.j2 -o ${output_dir}/ovnkube-zone-controller.yaml
+
 ovn_image=${imagec} \
   ovn_image_pull_policy=${image_pull_policy} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
   j2 ../templates/ovs-node.yaml.j2 -o ${output_dir}/ovs-node.yaml
+
+ovnkube_certs_dir="/tmp/ovnkube-certs"
+ovnkube_webhook_name="ovnkube-webhook"
+mkdir -p ${ovnkube_certs_dir}
+path_prefix="${ovnkube_certs_dir}/${ovnkube_webhook_name}"
+
+if [ "${ovn_enable_ovnkube_identity}" = "true" ]; then
+  # Create self signed CA and webhook cert
+  # NOTE: The CA and certificate are not renewed after they expire, this should only be used in development environments
+  openssl req -x509 -newkey rsa:4096 -nodes -keyout "${path_prefix}-ca.key" -out "${path_prefix}-ca.crt" -days 400 -subj "/CN=self-signed-ca"
+  openssl req -newkey rsa:4096 -nodes -keyout "${path_prefix}.key" -out "${path_prefix}.csr" -subj "/CN=localhost"
+  openssl x509 -req -in "${path_prefix}.csr" -CA "${path_prefix}-ca.crt" -CAkey "${path_prefix}-ca.key" -extfile <(printf "subjectAltName=DNS:localhost") -CAcreateserial -out "${path_prefix}.crt" -days 365
+
+ovn_image=${image} \
+  ovn_image_pull_policy=${image_pull_policy} \
+  ovn_master_count=${ovn_master_count} \
+  ovnkube_master_loglevel=${master_loglevel} \
+  ovn_enable_interconnect=${ovn_enable_interconnect} \
+  webhook_ca_bundle=$(cat "${path_prefix}-ca.crt" | base64 -w0) \
+  webhook_key=$(cat "${path_prefix}.key" | base64 -w0) \
+  webhook_cert=$(cat "${path_prefix}.crt" | base64 -w0) \
+  ovn_enable_multi_node_zone=${ovn_enable_multi_node_zone} \
+  ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
+  j2 ../templates/ovnkube-identity.yaml.j2 -o ${output_dir}/ovnkube-identity.yaml
+fi
+
+if ${enable_ipsec}; then
+  ovn_image=${image} \
+    j2 ../templates/ovn-ipsec.yaml.j2 -o ${output_dir}/ovn-ipsec.yaml
+fi
 
 # ovn-setup.yaml
 net_cidr=${OVN_NET_CIDR:-"10.128.0.0/14/23"}
@@ -874,15 +1238,26 @@ net_cidr=${net_cidr} svc_cidr=${svc_cidr} \
   in_upgrade=${in_upgrade} \
   j2 ../templates/ovn-setup.yaml.j2 -o ${output_dir}/ovn-setup.yaml
 
+#ovn_enable_interconnect=${ovn_enable_interconnect} \
+#ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
+#  j2 ../templates/rbac-ovnkube-node.yaml.j2 -o ${output_dir}/rbac-ovnkube-node.yaml
+
+#cp ../templates/rbac-ovnkube-identity.yaml.j2 ${output_dir}/rbac-ovnkube-identity.yaml
+#cp ../templates/rbac-ovnkube-master.yaml.j2 ${output_dir}/rbac-ovnkube-master.yaml
+#cp ../templates/rbac-ovnkube-db.yaml.j2 ${output_dir}/rbac-ovnkube-db.yaml
+#cp ../templates/rbac-ovnkube-cluster-manager.yaml.j2 ${output_dir}/rbac-ovnkube-cluster-manager.yaml
 cp ../templates/ovnkube-monitor.yaml.j2 ${output_dir}/ovnkube-monitor.yaml
 cp ../templates/ovnkube-alerts.yaml.j2 ${output_dir}/ovnkube-alerts.yaml
 cp ../templates/k8s.ovn.org_egressfirewalls.yaml.j2 ${output_dir}/k8s.ovn.org_egressfirewalls.yaml
 cp ../templates/k8s.ovn.org_egressips.yaml.j2 ${output_dir}/k8s.ovn.org_egressips.yaml
 cp ../templates/k8s.ovn.org_adminpolicybasedroutes.yaml.j2 ${output_dir}/k8s.ovn.org_adminpolicybasedroutes.yaml
 cp ../templates/k8s.ovn.org_virtualips.yaml.j2 ${output_dir}/k8s.ovn.org_virtualips.yaml
-cp ../templates/k8s.ovn.org_ipreservations.yaml.j2 ${output_dir}/k8s.ovn.org_ipreservations.yaml
-cp ../templates/k8s.ovn.org_portmirrors.yaml.j2 ../yaml/k8s.ovn.org_portmirrors.yaml
 cp ../templates/multinetworkpolicy.yaml.j2  ${output_dir}/multinetworkpolicy.yaml
 cp ../templates/k8s.ovn.org_egressqoses.yaml.j2 ${output_dir}/k8s.ovn.org_egressqoses.yaml
+cp ../templates/k8s.ovn.org_egressservices.yaml.j2 ${output_dir}/k8s.ovn.org_egressservices.yaml
+cp ../templates/k8s.ovn.org_ipreservations.yaml.j2 ${output_dir}/k8s.ovn.org_ipreservations.yaml
+cp ../templates/k8s.ovn.org_adminpolicybasedexternalroutes.yaml.j2 ${output_dir}/k8s.ovn.org_adminpolicybasedexternalroutes.yaml
+cp ../templates/policy.networking.k8s.io_adminnetworkpolicies.yaml ${output_dir}/policy.networking.k8s.io_adminnetworkpolicies.yaml
+cp ../templates/policy.networking.k8s.io_baselineadminnetworkpolicies.yaml ${output_dir}/policy.networking.k8s.io_baselineadminnetworkpolicies.yaml
 
 exit 0

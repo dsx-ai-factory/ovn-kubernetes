@@ -12,7 +12,6 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	kapi "k8s.io/api/core/v1"
-	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -30,7 +29,7 @@ func TestEventHandler(t *testing.T) {
 func newPod(name, namespace string) *kapi.Pod {
 	return &kapi.Pod{
 		Status: kapi.PodStatus{
-			Phase: v1.PodRunning,
+			Phase: kapi.PodRunning,
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -41,7 +40,7 @@ func newPod(name, namespace string) *kapi.Pod {
 			},
 		},
 		Spec: kapi.PodSpec{
-			Containers: []v1.Container{
+			Containers: []kapi.Container{
 				{
 					Name:  "containerName",
 					Image: "containerImage",
@@ -76,13 +75,13 @@ var _ = Describe("Informer Event Handler Tests", func() {
 		deletes := int32(0)
 
 		k := fake.NewSimpleClientset(
-			&v1.Namespace{
+			&kapi.Namespace{
 				ObjectMeta: metav1.ObjectMeta{
 					UID:  types.UID(namespace),
 					Name: namespace,
 				},
-				Spec:   v1.NamespaceSpec{},
-				Status: v1.NamespaceStatus{},
+				Spec:   kapi.NamespaceSpec{},
+				Status: kapi.NamespaceStatus{},
 			},
 		)
 
@@ -139,13 +138,13 @@ var _ = Describe("Informer Event Handler Tests", func() {
 		deletes := int32(0)
 
 		k := fake.NewSimpleClientset(
-			&v1.Namespace{
+			&kapi.Namespace{
 				ObjectMeta: metav1.ObjectMeta{
 					UID:  types.UID(namespace),
 					Name: namespace,
 				},
-				Spec:   v1.NamespaceSpec{},
-				Status: v1.NamespaceStatus{},
+				Spec:   kapi.NamespaceSpec{},
+				Status: kapi.NamespaceStatus{},
 			},
 		)
 
@@ -207,13 +206,13 @@ var _ = Describe("Informer Event Handler Tests", func() {
 		pod := newPod("foo", namespace)
 		k := fake.NewSimpleClientset(
 			[]runtime.Object{
-				&v1.Namespace{
+				&kapi.Namespace{
 					ObjectMeta: metav1.ObjectMeta{
 						UID:  types.UID(namespace),
 						Name: namespace,
 					},
-					Spec:   v1.NamespaceSpec{},
-					Status: v1.NamespaceStatus{},
+					Spec:   kapi.NamespaceSpec{},
+					Status: kapi.NamespaceStatus{},
 				},
 				pod,
 			}...,
@@ -243,13 +242,16 @@ var _ = Describe("Informer Event Handler Tests", func() {
 			e.Run(1, stopChan)
 		}()
 
-		wait.PollImmediate(
+		err = wait.PollUntilContextTimeout(
+			context.Background(),
 			500*time.Millisecond,
 			5*time.Second,
-			func() (bool, error) {
+			true,
+			func(context.Context) (done bool, err error) {
 				return e.Synced(), nil
 			},
 		)
+		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(func() (bool, error) {
 			pod, err := k.CoreV1().Pods(namespace).Get(context.TODO(), "foo", metav1.GetOptions{})
@@ -286,13 +288,13 @@ var _ = Describe("Informer Event Handler Tests", func() {
 		pod := newPod("foo", namespace)
 		k := fake.NewSimpleClientset(
 			[]runtime.Object{
-				&v1.Namespace{
+				&kapi.Namespace{
 					ObjectMeta: metav1.ObjectMeta{
 						UID:  types.UID(namespace),
 						Name: namespace,
 					},
-					Spec:   v1.NamespaceSpec{},
-					Status: v1.NamespaceStatus{},
+					Spec:   kapi.NamespaceSpec{},
+					Status: kapi.NamespaceStatus{},
 				},
 				pod,
 			}...,
@@ -357,13 +359,13 @@ var _ = Describe("Informer Event Handler Tests", func() {
 
 		k := fake.NewSimpleClientset(
 			[]runtime.Object{
-				&v1.Namespace{
+				&kapi.Namespace{
 					ObjectMeta: metav1.ObjectMeta{
 						UID:  types.UID(namespace),
 						Name: namespace,
 					},
-					Spec:   v1.NamespaceSpec{},
-					Status: v1.NamespaceStatus{},
+					Spec:   kapi.NamespaceSpec{},
+					Status: kapi.NamespaceStatus{},
 				},
 				newPod("foo", namespace),
 			}...,
@@ -428,13 +430,13 @@ var _ = Describe("Informer Event Handler Tests", func() {
 		pod := newPod("foo", namespace)
 		k := fake.NewSimpleClientset(
 			[]runtime.Object{
-				&v1.Namespace{
+				&kapi.Namespace{
 					ObjectMeta: metav1.ObjectMeta{
 						UID:  types.UID(namespace),
 						Name: namespace,
 					},
-					Spec:   v1.NamespaceSpec{},
-					Status: v1.NamespaceStatus{},
+					Spec:   kapi.NamespaceSpec{},
+					Status: kapi.NamespaceStatus{},
 				},
 				pod,
 			}...,

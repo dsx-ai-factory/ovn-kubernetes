@@ -1,14 +1,18 @@
 package gateway
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
-	"github.com/ovn-org/libovsdb/client"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/pkg/errors"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 const (
@@ -23,9 +27,9 @@ var (
 )
 
 // GetOvnGateways return all created gateways.
-func GetOvnGateways(nbClient client.Client) ([]string, error) {
+func GetOvnGateways(nbClient libovsdbclient.Client) ([]string, error) {
 	p := func(item *nbdb.LogicalRouter) bool {
-		return item.Options["chassis"] != "null"
+		return item.Options["chassis"] != "null" && util.HasExternalIDsForCluster(item.ExternalIDs)
 	}
 	logicalRouters, err := libovsdbops.FindLogicalRoutersWithPredicate(nbClient, p)
 	if err != nil {
@@ -40,7 +44,7 @@ func GetOvnGateways(nbClient client.Client) ([]string, error) {
 }
 
 // GetGatewayPhysicalIPs return gateway physical IPs
-func GetGatewayPhysicalIPs(nbClient client.Client, gatewayRouter string) ([]string, error) {
+func GetGatewayPhysicalIPs(nbClient libovsdbclient.Client, gatewayRouter string) ([]string, error) {
 	logicalRouter := &nbdb.LogicalRouter{Name: gatewayRouter}
 	logicalRouter, err := libovsdbops.GetLogicalRouter(nbClient, logicalRouter)
 	if err != nil {
@@ -56,4 +60,28 @@ func GetGatewayPhysicalIPs(nbClient client.Client, gatewayRouter string) ([]stri
 	}
 
 	return nil, fmt.Errorf("no physical IPs found for gateway %s", gatewayRouter)
+}
+
+// CreateDummyGWMacBindings creates mac bindings (ipv4 and ipv6) for a fake next hops
+// used by host->service traffic
+func CreateDummyGWMacBindings(sbClient libovsdbclient.Client, nodeName string) error {
+	for _, nextHop := range node.DummyNextHopIPs() {
+		dummyNextHopMAC := util.IPAddrToHWAddr(nextHop)
+		nodeGWRouter := util.GetGatewayRouterFromNode(nodeName)
+		logicalPort := ovntypes.GWRouterToExtSwitchPrefix + nodeGWRouter
+		if err := libovsdbutil.CreateMACBinding(
+			sbClient,
+			logicalPort,
+			nodeGWRouter,
+			dummyNextHopMAC,
+			nextHop,
+		); err != nil {
+			return fmt.Errorf(
+				"failed to create MAC Binding for dummy nexthop %s: %v",
+				nodeName,
+				err)
+		}
+	}
+
+	return nil
 }

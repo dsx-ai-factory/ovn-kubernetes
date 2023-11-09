@@ -85,7 +85,6 @@ func NewController(recorder record.EventRecorder, serviceInformer cache.SharedIn
 		DeleteFunc: uc.onServiceDelete,
 	})
 	if err != nil {
-		klog.Fatalf("Unable to add service event handler: %v", err)
 		return nil, err
 	}
 	return uc, nil
@@ -173,6 +172,7 @@ func (uc *unidlingController) Run(stopCh <-chan struct{}) {
 }
 
 func (uc *unidlingController) handleLbEmptyBackendsEvent(event sbdb.ControllerEvent) error {
+	// TBD: Multi-Cluster support?
 	op, err := uc.sbClient.Where(
 		&event,
 	).Delete()
@@ -189,6 +189,7 @@ func (uc *unidlingController) handleLbEmptyBackendsEvent(event sbdb.ControllerEv
 	if err != nil {
 		return err
 	}
+
 	vip, ok := event.EventInfo["vip"]
 	if !ok {
 		return err
@@ -202,14 +203,20 @@ func (uc *unidlingController) handleLbEmptyBackendsEvent(event sbdb.ControllerEv
 	} else {
 		protocol = kapi.ProtocolTCP
 	}
-	if serviceName, ok := uc.GetServiceVIPToName(vip, protocol); ok {
-		serviceRef := kapi.ObjectReference{
-			Kind:      "Service",
-			Namespace: serviceName.Namespace,
-			Name:      serviceName.Name,
-		}
-		klog.V(5).Infof("Sending a NeedPods event for service %s in namespace %s.", serviceName.Name, serviceName.Namespace)
-		uc.eventRecorder.Eventf(&serviceRef, kapi.EventTypeNormal, "NeedPods", "The service %s needs pods", serviceName.Name)
+
+	serviceName, ok := uc.GetServiceVIPToName(vip, protocol)
+
+	if !ok {
+		return fmt.Errorf("can't find service for vip %s:%s", protocol, vip)
 	}
+
+	serviceRef := kapi.ObjectReference{
+		Kind:      "Service",
+		Namespace: serviceName.Namespace,
+		Name:      serviceName.Name,
+	}
+	klog.V(5).Infof("Sending a NeedPods event for service %s in namespace %s.", serviceName.Name, serviceName.Namespace)
+	uc.eventRecorder.Eventf(&serviceRef, kapi.EventTypeNormal, "NeedPods", "The service %s needs pods", serviceName.Name)
+
 	return nil
 }

@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -22,6 +24,7 @@ type EgressDNS struct {
 	dnsEntries map[string]*dnsEntry
 	// allows for the creation of addresssets
 	addressSetFactory addressset.AddressSetFactory
+	controllerName    string
 
 	// Report change when Add operation is done
 	added          chan struct{}
@@ -40,7 +43,16 @@ type dnsEntry struct {
 	dnsAddressSet addressset.AddressSet
 }
 
-func NewEgressDNS(addressSetFactory addressset.AddressSetFactory, controllerStop <-chan struct{}) (*EgressDNS, error) {
+func getEgressFirewallDNSAddrSetDbIDs(dnsName, controller string) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetEgressFirewallDNS, controller,
+		map[libovsdbops.ExternalIDKey]string{
+			// dns address sets are cluster-wide objects, they have unique names
+			libovsdbops.ObjectNameKey: dnsName,
+		})
+}
+
+func NewEgressDNS(addressSetFactory addressset.AddressSetFactory, controllerName string,
+	controllerStop <-chan struct{}) (*EgressDNS, error) {
 	dnsInfo, err := util.NewDNS("/etc/resolv.conf")
 	if err != nil {
 		return nil, err
@@ -50,8 +62,9 @@ func NewEgressDNS(addressSetFactory addressset.AddressSetFactory, controllerStop
 		dns:               dnsInfo,
 		dnsEntries:        make(map[string]*dnsEntry),
 		addressSetFactory: addressSetFactory,
+		controllerName:    controllerName,
 
-		added:          make(chan struct{}),
+		added:          make(chan struct{}, 1),
 		deleted:        make(chan string, 1),
 		stopChan:       make(chan struct{}),
 		controllerStop: controllerStop,
@@ -72,7 +85,8 @@ func (e *EgressDNS) Add(namespace, dnsName string) (addressset.AddressSet, error
 		if e.addressSetFactory == nil {
 			return nil, fmt.Errorf("error adding EgressFirewall DNS rule for host %s, in namespace %s: addressSetFactory is nil", dnsName, namespace)
 		}
-		dnsEntry.dnsAddressSet, err = e.addressSetFactory.NewAddressSet(dnsName, nil)
+		asIndex := getEgressFirewallDNSAddrSetDbIDs(dnsName, e.controllerName)
+		dnsEntry.dnsAddressSet, err = e.addressSetFactory.NewAddressSet(asIndex, nil)
 		if err != nil {
 			return nil, fmt.Errorf("cannot create addressSet for %s: %v", dnsName, err)
 		}
@@ -128,7 +142,22 @@ func (e *EgressDNS) updateEntryForName(dnsName string) error {
 	}
 	e.dnsEntries[dnsName].dnsResolves = ips
 
-	if err := e.dnsEntries[dnsName].dnsAddressSet.SetIPs(ips); err != nil {
+	// ignore ips from clusterSubnet, since this subnet shouldn't be affected by egress firewall
+	ipsNoClusterSubnet := []net.IP{}
+	for _, ip := range ips {
+		fromClusterSubnet := false
+		for _, clusterSubnet := range config.Default.ClusterSubnets {
+			if clusterSubnet.CIDR.Contains(ip) {
+				fromClusterSubnet = true
+				break
+			}
+		}
+		if !fromClusterSubnet {
+			// no intersection, add ip
+			ipsNoClusterSubnet = append(ipsNoClusterSubnet, ip)
+		}
+	}
+	if err := e.dnsEntries[dnsName].dnsAddressSet.SetIPs(ipsNoClusterSubnet); err != nil {
 		return fmt.Errorf("cannot add IPs from EgressFirewall AddressSet %s: %v", dnsName, err)
 	}
 	return nil
@@ -156,10 +185,10 @@ func (e *EgressDNS) addToDNS(dnsName string) {
 
 // Run spawns a goroutine that handles updates to the dns entries for domain names used in
 // EgressFirewalls. The loop runs after receiving one of three signals:
-// 1. time.NewTicker(durationTillNextQuery) times out and the dnsName with the lowest ttl is checked
-//    and the durationTillNextQuery is updated
-// 2. e.added is received and durationTillNextQuery is recomputed
-// 3. e.deleted is received and coincides with dnsName
+//  1. time.NewTicker(durationTillNextQuery) times out and the dnsName with the lowest ttl is checked
+//     and the durationTillNextQuery is updated
+//  2. e.added is received and durationTillNextQuery is recomputed
+//  3. e.deleted is received and coincides with dnsName
 func (e *EgressDNS) Run(defaultInterval time.Duration) {
 	var domainNameExpiringNext, domainNameDeleted string
 	var ttl time.Time
@@ -200,10 +229,14 @@ func (e *EgressDNS) Run(defaultInterval time.Duration) {
 			// find the domain name whose DNS entry will expire first and calculate when it will expire,
 			// set timer to what's sooner: default update interval or next expiration time
 			ttl, domainNameExpiringNext, timeSet = e.dns.GetNextQueryTime()
-			if time.Until(ttl) > defaultInterval || !timeSet {
+			ttlDuration := time.Until(ttl)
+			if ttlDuration > defaultInterval || !timeSet {
 				durationTillNextQuery = defaultInterval
+			} else if ttlDuration.Seconds() > 0 {
+				durationTillNextQuery = ttlDuration
 			} else {
-				durationTillNextQuery = time.Until(ttl)
+				// DNS entry is already expired, so trigger tick as soon as possible.
+				durationTillNextQuery = 1 * time.Millisecond
 			}
 			timer.Reset(durationTillNextQuery)
 		}

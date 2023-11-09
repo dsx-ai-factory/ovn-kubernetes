@@ -14,25 +14,25 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 	"github.com/vishvananda/netlink"
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 var _ = Describe("cni_dpu tests", func() {
-	var fakeKubeInterface kubeMocks.KubeInterface
+	var fakeKubeInterface kubeMocks.Interface
 	var fakeSriovnetOps utilMocks.SriovnetOps
 	var mockNetLinkOps *utilMocks.NetLinkOps
 	var existingMockLink *netlink_mocks.Link
-	var podLister v1mocks.PodLister
 	var pr PodRequest
 	var pod *v1.Pod
+	var podLister v1mocks.PodLister
 	var podNamespaceLister v1mocks.PodNamespaceLister
 
 	BeforeEach(func() {
-		fakeKubeInterface = kubeMocks.KubeInterface{}
+		fakeKubeInterface = kubeMocks.Interface{}
 		fakeSriovnetOps = utilMocks.SriovnetOps{}
 		mockNetLinkOps = new(utilMocks.NetLinkOps)
 		existingMockLink = new(netlink_mocks.Link)
@@ -51,10 +51,10 @@ var _ = Describe("cni_dpu tests", func() {
 				NetConf:  cnitypes.NetConf{},
 				DeviceID: "",
 			},
-			timestamp:        time.Time{},
-			IsVFIO:           false,
-			effectiveNetName: ovntypes.DefaultNetworkName,
-			effectiveNADName: ovntypes.DefaultNetworkName,
+			timestamp: time.Time{},
+			IsVFIO:    false,
+			netName:   ovntypes.DefaultNetworkName,
+			nadName:   ovntypes.DefaultNetworkName,
 		}
 		pod = &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
@@ -68,9 +68,11 @@ var _ = Describe("cni_dpu tests", func() {
 	})
 	Context("addDPUConnectionDetailsAnnot", func() {
 		It("Sets dpu.connection-details pod annotation", func() {
+			var err error
 			pr.CNIConf.DeviceID = "0000:05:00.4"
-			fakeSriovnetOps.On("GetPfPciFromVfPci", pr.CNIConf.DeviceID).Return("0000:05:00.0", nil)
 			fakeSriovnetOps.On("GetVfIndexByPciAddress", pr.CNIConf.DeviceID).Return(2, nil)
+			fakeSriovnetOps.On("GetPfIndexByVfPciAddress", pr.CNIConf.DeviceID).Return(0, nil)
+			fakeSriovnetOps.On("GetPfPciFromVfPci", pr.CNIConf.DeviceID).Return("0000:05:00.0", nil)
 			fakeSriovnetOps.On("GetNetDevicesFromPci", "0000:05:00.0").Return([]string{"enp1s0f0"}, nil)
 			mockNetLinkOps.On("LinkByName", "enp1s0f0").Return(existingMockLink, nil)
 			dpuCd := util.DPUConnectionDetails{
@@ -82,10 +84,9 @@ var _ = Describe("cni_dpu tests", func() {
 			podLister.On("Pods", pr.PodNamespace).Return(&podNamespaceLister)
 			podNamespaceLister.On("Get", pr.PodName).Return(pod, nil)
 			cpod := pod.DeepCopy()
-			err := util.MarshalPodDPUConnDetails(&cpod.Annotations, &dpuCd, ovntypes.DefaultNetworkName)
+			cpod.Annotations, err = util.MarshalPodDPUConnDetails(cpod.Annotations, &dpuCd, ovntypes.DefaultNetworkName)
 			Expect(err).ToNot(HaveOccurred())
-			fakeKubeInterface.On("UpdatePod", cpod).Return(nil)
-
+			fakeKubeInterface.On("UpdatePodStatus", cpod).Return(nil)
 			err = pr.addDPUConnectionDetailsAnnot(&fakeKubeInterface, &podLister, "")
 			Expect(err).ToNot(HaveOccurred())
 		})
@@ -95,38 +96,40 @@ var _ = Describe("cni_dpu tests", func() {
 			Expect(err).To(HaveOccurred())
 		})
 
-		It("Fails if srionvet fails to get PF PCI from VF PCI", func() {
+		It("Fails if srionvet fails to get PF Index from VF PCI", func() {
 			pr.CNIConf.DeviceID = "0000:05:00.4"
-			fakeSriovnetOps.On("GetPfPciFromVfPci", pr.CNIConf.DeviceID).Return(
-				"", fmt.Errorf("failed to get PF address"))
+			fakeSriovnetOps.On("GetVfIndexByPciAddress", pr.CNIConf.DeviceID).Return(2, nil)
+			fakeSriovnetOps.On("GetPfIndexByVfPciAddress", pr.CNIConf.DeviceID).Return(
+				-1, fmt.Errorf("failed to get PF Index"))
 			err := pr.addDPUConnectionDetailsAnnot(&fakeKubeInterface, &podLister, "")
 			Expect(err).To(HaveOccurred())
 		})
 
 		It("Fails if srionvet fails to get VF index from PF PCI address", func() {
 			pr.CNIConf.DeviceID = "0000:05:00.4"
-			fakeSriovnetOps.On("GetPfPciFromVfPci", pr.CNIConf.DeviceID).Return("0000:05:00.0", nil)
 			fakeSriovnetOps.On("GetVfIndexByPciAddress", pr.CNIConf.DeviceID).Return(
 				-1, fmt.Errorf("failed to get VF index"))
+			fakeSriovnetOps.On("GetPfIndexByVfPciAddress", pr.CNIConf.DeviceID).Return(0, nil)
 			err := pr.addDPUConnectionDetailsAnnot(&fakeKubeInterface, &podLister, "")
 			Expect(err).To(HaveOccurred())
 		})
 
 		It("Fails if PF PCI address fails to parse", func() {
 			pr.CNIConf.DeviceID = "0000:05:00.4"
-			fakeSriovnetOps.On("GetPfPciFromVfPci", pr.CNIConf.DeviceID).Return("05:00.0", nil)
 			fakeSriovnetOps.On("GetVfIndexByPciAddress", pr.CNIConf.DeviceID).Return(2, nil)
-			fakeSriovnetOps.On("GetNetDevicesFromPci", "05:00.0").Return([]string{"enp1s0f0"}, nil)
-			mockNetLinkOps.On("LinkByName", "enp1s0f0").Return(existingMockLink, nil)
+			fakeSriovnetOps.On("GetPfIndexByVfPciAddress", pr.CNIConf.DeviceID).Return(
+				-1, fmt.Errorf("failed to parse PF PCI address"))
 			err := pr.addDPUConnectionDetailsAnnot(&fakeKubeInterface, &podLister, "")
 			Expect(err).To(HaveOccurred())
 		})
 
 		It("Fails if Set annotation on Pod fails", func() {
+			var err error
 			pod.Annotations = map[string]string{}
 			pr.CNIConf.DeviceID = "0000:05:00.4"
-			fakeSriovnetOps.On("GetPfPciFromVfPci", pr.CNIConf.DeviceID).Return("0000:05:00.0", nil)
 			fakeSriovnetOps.On("GetVfIndexByPciAddress", pr.CNIConf.DeviceID).Return(2, nil)
+			fakeSriovnetOps.On("GetPfIndexByVfPciAddress", pr.CNIConf.DeviceID).Return(0, nil)
+			fakeSriovnetOps.On("GetPfPciFromVfPci", pr.CNIConf.DeviceID).Return("0000:05:00.0", nil)
 			fakeSriovnetOps.On("GetNetDevicesFromPci", "0000:05:00.0").Return([]string{"enp1s0f0"}, nil)
 			mockNetLinkOps.On("LinkByName", "enp1s0f0").Return(existingMockLink, nil)
 			dpuCd := util.DPUConnectionDetails{
@@ -138,9 +141,9 @@ var _ = Describe("cni_dpu tests", func() {
 			podLister.On("Pods", pr.PodNamespace).Return(&podNamespaceLister)
 			podNamespaceLister.On("Get", pr.PodName).Return(pod, nil)
 			cpod := pod.DeepCopy()
-			err := util.MarshalPodDPUConnDetails(&cpod.Annotations, &dpuCd, ovntypes.DefaultNetworkName)
+			cpod.Annotations, err = util.MarshalPodDPUConnDetails(cpod.Annotations, &dpuCd, ovntypes.DefaultNetworkName)
 			Expect(err).ToNot(HaveOccurred())
-			fakeKubeInterface.On("UpdatePod", cpod).Return(fmt.Errorf("failed to set annotation"))
+			fakeKubeInterface.On("UpdatePodStatus", cpod).Return(fmt.Errorf("failed to set annotation"))
 			err = pr.addDPUConnectionDetailsAnnot(&fakeKubeInterface, &podLister, "")
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to set annotation"))
