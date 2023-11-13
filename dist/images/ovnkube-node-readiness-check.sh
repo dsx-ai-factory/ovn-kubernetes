@@ -20,7 +20,7 @@ if [ $return_value != 0 ]; then
 	echo "$(< /root/health)"
 	exit $return_value
 fi
-ncat -zv $KUBERNETES_SERVICE_HOST $KUBERNETES_SERVICE_PORT >/root/health 2>&1
+curl -k https://$KUBERNETES_SERVICE_HOST:$KUBERNETES_SERVICE_PORT/readyz >/root/health 2>&1
 return_value=$?
 if [ $return_value != 0 ]; then
 	echo "connectivity check on k8s svc endpoint $KUBERNETES_SERVICE_HOST:$KUBERNETES_SERVICE_PORT failed"
@@ -28,7 +28,7 @@ if [ $return_value != 0 ]; then
 	exit $return_value
 fi
 coredns_cluster_ip=${COREDNS_CLUSTER_IP:-10.223.0.3}
-ncat -zv $coredns_cluster_ip 53 >/root/health 2>&1
+nslookup google.com $coredns_cluster_ip >/root/health 2>&1
 return_value=$?
 if [ $return_value != 0 ]; then
 	echo "connectivity check on cluster endpoint $coredns_cluster_ip:53 failed"

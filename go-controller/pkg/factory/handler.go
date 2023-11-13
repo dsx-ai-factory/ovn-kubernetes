@@ -203,7 +203,7 @@ func (i *informer) removeHandler(handler *Handler) {
 		return
 	}
 
-	klog.V(5).Infof("Sending %v event handler %d for removal", i.oType, handler.id)
+	klog.V(6).Infof("Sending %v event handler %d for removal", i.oType, handler.id)
 
 	go func() {
 		i.Lock()
@@ -217,7 +217,7 @@ func (i *informer) removeHandler(handler *Handler) {
 				// Remove the handler
 				delete(i.handlers[priority], handler.id)
 				removed = 1
-				klog.V(5).Infof("Removed %v event handler %d", i.oType, handler.id)
+				klog.V(6).Infof("Removed %v event handler %d", i.oType, handler.id)
 			}
 		}
 		if removed == 0 {

@@ -5,6 +5,7 @@ import (
 	"net"
 	"reflect"
 	"strconv"
+	"time"
 
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta2"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -262,6 +263,9 @@ func (oc *BaseSecondaryLayer2NetworkController) cleanup(topotype, netName string
 }
 
 func (oc *BaseSecondaryLayer2NetworkController) run() error {
+	klog.Infof("Starting all the Watchers for network %s ...", oc.GetNetworkName())
+	start := time.Now()
+
 	// WatchNamespaces() should be started first because it has no other
 	// dependencies, and WatchNodes() depends on it
 	if err := oc.WatchNamespaces(); err != nil {
@@ -298,6 +302,8 @@ func (oc *BaseSecondaryLayer2NetworkController) run() error {
 	if err := oc.WatchMultiNetworkPolicy(); err != nil {
 		return err
 	}
+
+	klog.Infof("Completing all the Watchers for network %s took %v", oc.GetNetworkName(), time.Since(start))
 
 	// controller is fully running and resource handlers have synced, update Topology version in OVN
 	if err := oc.updateL2TopologyVersion(); err != nil {

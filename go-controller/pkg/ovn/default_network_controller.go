@@ -563,7 +563,7 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 	}
 
 	end := time.Since(start)
-	klog.Infof("Completing all the Watchers took %v", end)
+	klog.Infof("Completing all the Watchers for network default took %v", end)
 	metrics.MetricOVNKubeControllerSyncDuration.WithLabelValues("all watchers").Set(end.Seconds())
 
 	if config.Kubernetes.OVNEmptyLbEvents {
