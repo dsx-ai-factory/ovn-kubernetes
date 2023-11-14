@@ -552,7 +552,7 @@ func (oc *DefaultNetworkController) addExternalSwitch(prefix, interfaceID, nodeN
 		Addresses: []string{"unknown"},
 		Type:      "localnet",
 		Options: map[string]string{
-			"network_name": physNetworkName,
+			"network_name": physNetworkName, // TBD need different value for multi-cluster?
 		},
 		Name:        interfaceID,
 		ExternalIDs: util.ExternalIDsForCluster(nil),

@@ -50,11 +50,11 @@ func CreateDefaultRouteToExternal(nbClient libovsdbclient.Client, nodeName strin
 			if err != nil {
 				return false
 			}
-			return util.ContainsCIDR(subnet, itemCIDR) &&
+			return util.HasExternalIDsForCluster(lrsr.ExternalIDs) && util.ContainsCIDR(subnet, itemCIDR) &&
 				lrsr.Nexthop == gatewayIP.IP.String() &&
 				lrsr.Policy != nil && *lrsr.Policy == nbdb.LogicalRouterStaticRoutePolicySrcIP
 		}
-		if err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient, types.OVNClusterRouter, &lrsr, p); err != nil {
+		if err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient, util.GetClusterScopedName(types.OVNClusterRouter), &lrsr, p); err != nil {
 			return fmt.Errorf("unable to create pod to external catch-all reroute for node %s, err: %v", nodeName, err)
 		}
 	}

@@ -1,6 +1,7 @@
 package kubevirt
 
 import (
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"strings"
 
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -52,5 +53,5 @@ func ownsItAndIsOrphanOrWrongZone(externalIDs map[string]string, vms map[ktypes.
 	vmIsLocal, vmFound := vms[*vm]
 	resourceOvnZone := externalIDs[OvnZoneExternalIDKey]
 	// There is no VM that owns it or is at the wrong zone
-	return !vmFound || (vmIsLocal && resourceOvnZone != OvnLocalZone)
+	return util.HasExternalIDsForCluster(externalIDs) && !vmFound || (vmIsLocal && resourceOvnZone != OvnLocalZone)
 }
