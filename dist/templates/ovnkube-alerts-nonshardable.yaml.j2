@@ -257,13 +257,3 @@ spec:
          {{ range query "ovn_controller_integration_bridge_geneve_ports_total{job='ovnkube-node', namespace='ovn-kubernetes'} !=  scalar(count(kube_node_info)) - 1" }}
          {{ .Labels.instance }}: {{ .Value }}
          {{ end }}.
-
-    - alert: AllSdnMutatorContainersNotReady
-      expr: |
-        sum(kube_pod_container_status_ready{namespace="sdn-mutator", container="mutator"}) == 0
-      for: 5m
-      labels:
-       severity: critical
-      annotations:
-       message: |
-         All sdn-mutator pods are in not ready state

@@ -183,6 +183,16 @@ spec:
          Pod ovn-kubernetes/ {{ $labels.pod }} nbdb container is 
          restarting {{ printf "%.2f" $value }} times / 5 minutes
 
+    - alert: OvnNBDBRaftTermChange
+      expr: rate(ovn_db_cluster_term{db_name="OVN_Northbound"}[5m]) != 0
+      for: 1m
+      labels:
+        severity: warning
+        pduuid: P2AR7UQ
+        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UUPXlpvGk/central-northbound-db
+      annotations:
+       message: NBDB RAFT term change detected
+
     - alert: OvnSBDBContainerRestarts
       expr: |
         rate(kube_pod_container_status_restarts_total{namespace="ovn-kubernetes", container="sbdb"}[15m]) * 60 * 5 > 0
@@ -537,6 +547,32 @@ spec:
          Pod ovn-kubernetes/ {{ $labels.pod }} ovs-db size is increasing
          {{ printf "%.2f" $value }} Mb / 5 minutes
 
+    - alert: OvsVswitchdDPFlowsLookupLostUnusuallyHigh
+      expr: |
+        rate(ovs_vswitchd_dp_flows_lookup_lost{namespace="ovn-kubernetes",job="ovnkube-node"}[5m]) > 0
+      for: 5m
+      labels:
+       severity: warning
+       pduuid: P10A23N
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
+      annotations:
+       message: |
+         Noticed unusually high rate of slow-path {{ $value }} packets flows lookup lost per second on the host with
+         pod ovn-kubernetes/ {{ $labels.pod }} instance {{ $labels.instance }} for longer than 5m
+
+    - alert: OvsVswitchdDPFlowsLookupLostTooHigh
+      expr: |
+        rate(ovs_vswitchd_dp_flows_lookup_lost{namespace="ovn-kubernetes",job="ovnkube-node"}[5m]) > 50
+      for: 5m
+      labels:
+       severity: major
+       pduuid: P10A23N
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
+      annotations:
+       message: |
+         Noticed too high rate of slow-path {{ $value }} packets flows lookup lost per second on the host with
+         pod ovn-kubernetes/ {{ $labels.pod }} instance {{ $labels.instance }} for longer than 5m
+
     - alert: OvsVswitchdDPFlowsLookupLost
       expr: |
         rate(ovs_vswitchd_dp_flows_lookup_lost{namespace="ovn-kubernetes",job="ovnkube-node"}[5m]) > 0
@@ -655,36 +691,3 @@ spec:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that
          vtep0 interface MTU value is {{ $value }}
-
-    - alert: SdnMutatorContainerNotRunning
-      expr: |
-        kube_pod_container_status_running{namespace="sdn-mutator", container="mutator"} and
-        (kube_pod_container_status_running{namespace="sdn-mutator", container="mutator"} != 1)
-      for: 5m
-      labels:
-       severity: warning
-      annotations:
-       message: |
-         sdn-mutator/ {{ $labels.pod }} pod mutator container is in not running state
-
-    - alert: SdnMutatorVaultAgentContainerNotRunning
-      expr: |
-        kube_pod_container_status_running{namespace="sdn-mutator", container="vault-agent"} and
-        (kube_pod_container_status_running{namespace="sdn-mutator", container="vault-agent"} != 1)
-      for: 5m
-      labels:
-       severity: warning
-      annotations:
-       message: |
-         sdn-mutator/ {{ $labels.pod }} pod vault-agent container is in not running state
-         
-    - alert: SdnMutatorContainerNotReady
-      expr: |
-        kube_pod_container_status_ready{namespace="sdn-mutator", container="mutator"} and
-        (kube_pod_container_status_ready{namespace="sdn-mutator", container="mutator"} != 1)
-      for: 5m
-      labels:
-       severity: major
-      annotations:
-       message: |
-         sdn-mutator/ {{ $labels.pod }} pod mutator container is in not ready state
