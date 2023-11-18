@@ -706,7 +706,7 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 						nodeByName[t.replaceNode].subnetIPv6,
 					))
 
-					Expect(fakeOvn.controller.addUpdateLocalNodeEvent(newNode, nil, &nodeSyncs{syncMigratablePods: true})).To(Succeed())
+					Expect(fakeOvn.controller.addUpdateLocalNodeEvent(newNode, &nodeSyncs{syncMigratablePods: true})).To(Succeed())
 
 					podToCreate, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), podToCreate.Name, metav1.GetOptions{})
 					Expect(err).ToNot(HaveOccurred())

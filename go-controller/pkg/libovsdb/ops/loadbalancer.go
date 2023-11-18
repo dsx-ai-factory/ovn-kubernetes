@@ -2,8 +2,6 @@ package ops
 
 import (
 	"context"
-	"fmt"
-
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 
@@ -136,18 +134,4 @@ func ListLoadBalancers(nbClient libovsdbclient.Client) ([]*nbdb.LoadBalancer, er
 	defer cancel()
 	err := nbClient.List(ctx, &lbs)
 	return lbs, err
-}
-
-// ListLoadBalancersByPredicate returns all the loadbalancers in the cache that matches the lookup function
-func ListLoadBalancersByPredicate(sbClient libovsdbclient.Client, lookupFunction func(item *nbdb.LoadBalancer) bool) ([]*nbdb.LoadBalancer, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-	defer cancel()
-	searchedLBs := []*nbdb.LoadBalancer{}
-
-	err := sbClient.WhereCache(lookupFunction).List(ctx, &searchedLBs)
-	if err != nil {
-		return nil, fmt.Errorf("failed listing loadbalancers err: %v", err)
-	}
-
-	return searchedLBs, nil
 }

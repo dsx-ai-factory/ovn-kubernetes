@@ -279,7 +279,7 @@ func (bnnc *BaseNodeNetworkController) addRepPort(pod *kapi.Pod, dpuCD *util.DPU
 	ifInfo.NetdevName = vfRepName
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	klog.Infof("Adding VF representor %s for %s and cluster [%s]", vfRepName, podDesc, config.Kubernetes.ClusterName)
+	klog.Infof("Adding VF representor %s for %s", vfRepName, podDesc)
 	defer cancel()
 	err = cni.ConfigureOVS(ctx, pod.Namespace, pod.Name, vfRepName, ifInfo, dpuCD.SandboxId, getter)
 	if err != nil {

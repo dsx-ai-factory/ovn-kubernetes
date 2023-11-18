@@ -24,12 +24,12 @@ func TestGetLegacyK8sMgmtIntfName(t *testing.T) {
 		{
 			desc:        "node name less than 11 characters",
 			inpNodeName: "lesseleven",
-			expRetStr:   GetClusterScopedName("k8s-lesseleven"),
+			expRetStr:   "k8s-lesseleven",
 		},
 		{
 			desc:        "node name more than 11 characters",
 			inpNodeName: "morethaneleven",
-			expRetStr:   GetClusterScopedName("k8s-morethanele"),
+			expRetStr:   "k8s-morethanele",
 		},
 	}
 	for i, tc := range tests {

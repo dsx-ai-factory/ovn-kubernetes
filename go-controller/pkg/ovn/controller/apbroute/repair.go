@@ -357,14 +357,13 @@ type ovnRoute struct {
 	nextHop     string
 	uuid        string
 	router      string
-	outport     string /* portPrefix + types.GWRouterToExtSwitchPrefix + gr, gr is string with ClusterScopePrefix */
+	outport     string
 	shouldExist bool
 }
 
 func (c *ExternalGatewayMasterController) buildOVNECMPCache() (map[string][]*ovnRoute, error) {
 	p := func(item *nbdb.LogicalRouterStaticRoute) bool {
-		return item.Options["ecmp_symmetric_reply"] == "true" &&
-			util.HasExternalIDsForCluster(item.ExternalIDs)
+		return item.Options["ecmp_symmetric_reply"] == "true"
 	}
 	logicalRouterStaticRoutes, err := c.nbClient.findLogicalRouterStaticRoutesWithPredicate(p)
 	if err != nil {
@@ -374,8 +373,7 @@ func (c *ExternalGatewayMasterController) buildOVNECMPCache() (map[string][]*ovn
 	ovnRouteCache := make(map[string][]*ovnRoute)
 	for _, logicalRouterStaticRoute := range logicalRouterStaticRoutes {
 		p := func(item *nbdb.LogicalRouter) bool {
-			return util.SliceHasStringItem(item.StaticRoutes, logicalRouterStaticRoute.UUID) &&
-				util.HasExternalIDsForCluster(item.ExternalIDs)
+			return util.SliceHasStringItem(item.StaticRoutes, logicalRouterStaticRoute.UUID)
 		}
 		logicalRouters, err := c.nbClient.findLogicalRoutersWithPredicate(p)
 		if err != nil {

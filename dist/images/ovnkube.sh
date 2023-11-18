@@ -45,11 +45,8 @@ BASEDIR=$(dirname $0)
 # K8S_NODE_IP - IP address of of the node
 #
 # OVN_METRICS_ENDPOINT_IP - metrics endpoint ip
-# OVN_METRICS_PPROF_ENDPOINT_IP - metrics endpoint ip
 # OVN_METRICS_MASTER_PORT - metrics master port
 # OVN_METRICS_WORKER_PORT - metrics worker port
-# OVN_METRICS_PPROF_MASTER_PORT - metrics pprof master port
-# OVN_METRICS_PPROF_WORKER_PORT - metrics pprof worker port
 # OVN_DAEMONSET_VERSION - version match daemonset and image - v3
 # K8S_TOKEN - the apiserver token. Automatically detected when running in a pod - v3
 # K8S_CACERT - the apiserver CA. Automatically detected when running in a pod - v3
@@ -94,7 +91,6 @@ BASEDIR=$(dirname $0)
 # OVN_ADMIN_PBR_ENABLE - enable admin policy based route for ovn-kubernetes
 # OVN_UNPRIVILEGED_MODE - execute CNI ovs/netns commands from host (default no)
 # OVNKUBE_NODE_MODE - ovnkube node mode of operation, one of: full, dpu, dpu-host (default: full)
-# OVNKUBE_NODE_MGMT_PORT_INTF_NAME - Name of interface to be used as ovnkubernetes mgmt port (default: ovn-k8s-mp0)
 # OVNKUBE_NODE_MGMT_PORT_NETDEV - ovnkube node management port netdev.
 # REPRESENTOR_METERING_NODES - label key of nodes to determine if representor metering should be applied or not
 # OVNKUBE_NODE_MGMT_PORT_DP_RESOURCE_NAME - ovnkube node management port device plugin resource
@@ -113,7 +109,6 @@ BASEDIR=$(dirname $0)
 # OVN_DISABLE_FORWARDING - disable forwarding on OVNK controlled interfaces
 # OVN_ENABLE_MULTI_EXTERNAL_GATEWAY - enable multi external gateway for ovn-kubernetes
 # OVN_ENABLE_OVNKUBE_IDENTITY - enable per node certificate ovn-kubernetes
-# K8S_CLUSTER_NAME - name of the kubernetes cluster
 # OVN_CONNTRACK_ZONE - Conntrack zone number used for openflow rules (default 64000)
 # OVN_DB_UPGRADE_SCHEMA_INLINE - use ovn-ctl to upgrade DB schema
 # OVN_CLUSTER_SUBNETS_MAC_BINDING_AGING - MAC binding aging threshold for cluster subnets (in seconds)
@@ -223,23 +218,10 @@ if [[ -z ${metrics_endpoint_ip} ]]; then
 fi
 metrics_endpoint_ip=$(bracketify $metrics_endpoint_ip)
 
-# set metrics pprof endpoint bind to 127.0.0.1
-metrics_pprof_endpoint_ip=${OVN_METRICS_PPROF_ENDPOINT_IP}
-if [[ -z ${metrics_pprof_endpoint_ip} ]]; then
-  metrics_pprof_endpoint_ip=127.0.0.1
-fi
-metrics_pprof_endpoint_ip=$(bracketify $metrics_pprof_endpoint_ip)
-
 # set metrics endpoint master port bind to K8S_NODE_IP
 metrics_master_port=${OVN_METRICS_MASTER_PORT}
 if [[ -z ${metrics_master_port} ]]; then
   metrics_master_port=9409
-fi
-
-# set metrics endpoint pprof master port bind to K8S_NODE_IP
-metrics_pprof_master_port=${OVN_METRICS_PPROF_MASTER_PORT}
-if [[ -z ${metrics_pprof_master_port} ]]; then
-  metrics_pprof_master_port=19409
 fi
 
 # set metrics endpoint worker port bind to K8S_NODE_IP
@@ -248,20 +230,11 @@ if [[ -z ${metrics_worker_port} ]]; then
   metrics_worker_port=9410
 fi
 
-# set metrics endpoint pprof worker port bind to K8S_NODE_IP
-metrics_pprof_worker_port=${OVN_METRICS_PPROF_WORKER_PORT}
-if [[ -z ${metrics_pprof_worker_port} ]]; then
-  metrics_pprof_worker_port=19410
-fi
-
 disable_ovs_metrics=${OVNKUBE_DISABLE_OVS_METRICS:-false}
 
 ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
 # namespace used for classifying host network traffic
 ovn_host_network_namespace=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
-
-# name of the kubernetes cluster.
-k8s_cluster_name=${K8S_CLUSTER_NAME:-""}
 
 # OVN_CLUSTER_SUBNETS_MAC_BINDING_AGING
 cluster_subnets_mac_binding_aging=${OVN_CLUSTER_SUBNETS_MAC_BINDING_AGING:-}
@@ -387,8 +360,6 @@ ovn_enable_ovnkube_identity=${OVN_ENABLE_OVNKUBE_IDENTITY:-true}
 
 # OVNKUBE_NODE_MODE - is the mode which ovnkube node operates
 ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
-# OVNKUBE_NODE_MGMT_PORT_INTF_NAME - name of interface being used as management port
-ovnkube_node_mgmt_port_intf_name=${OVNKUBE_NODE_MGMT_PORT_INTF_NAME:-}
 # OVNKUBE_NODE_MGMT_PORT_NETDEV - is the net device to be used for management port
 ovnkube_node_mgmt_port_netdev=${OVNKUBE_NODE_MGMT_PORT_NETDEV:-}
 # REPRESENTOR_METERING_NODES - label key of nodes to determine if representor metering should be applied or not
@@ -724,7 +695,6 @@ display_env() {
   echo OVN_CONNTRACK_ZONE ${ovn_conntrack_zone}
   echo ovnkube.sh version ${ovnkube_version}
   echo OVN_HOST_NETWORK_NAMESPACE ${ovn_host_network_namespace}
-  echo K8S_CLUSTER_NAME ${k8s_cluster_name}
 }
 
 ovn_debug() {
@@ -1371,7 +1341,6 @@ ovn-master() {
   fi
 
   ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:${metrics_master_port}"
-  ovnkube_master_metrics_pprof_bind_address="${metrics_pprof_endpoint_ip}:${metrics_pprof_master_port}"
   local ovnkube_metrics_tls_opts=""
   #if [[ ${OVNKUBE_METRICS_PK} != "" && ${OVNKUBE_METRICS_CERT} != "" ]]; then
   #  ovnkube_metrics_tls_opts="
@@ -1403,11 +1372,6 @@ ovn-master() {
 	  ovnkube_enable_multi_external_gateway_flag="--enable-multi-external-gateway"
   fi
   echo "ovnkube_enable_multi_external_gateway_flag=${ovnkube_enable_multi_external_gateway_flag}"
-
-  k8s_cluster_name_option=
-  if [[ ${K8S_CLUSTER_NAME} != "" ]]; then
-	  k8s_cluster_name_option="--cluster-name=${K8S_CLUSTER_NAME}"
-  fi
 
   ovnkube_logfile_flag="--logfile /var/log/ovn-kubernetes/ovnkube-master.log"
   if [[ ${ovnkube_logfile} != "" ]]; then
@@ -1445,7 +1409,6 @@ ovn-master() {
     ${hybrid_overlay_flags} \
     ${init_node_flags} \
     ${ipreservation_enabled_flag} \
-    ${k8s_cluster_name_option} \
     ${libovsdb_client_logfile_flag} \
     ${multicast_enabled_flag} \
     ${multi_network_enabled_flag} \
@@ -1473,7 +1436,7 @@ ovn-master() {
     --loglevel=${ovnkube_loglevel} \
     --metrics-interval ${ovn_metrics_scrape_interval} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
-    --metrics-pprof-bind-address ${ovnkube_master_metrics_pprof_bind_address} ${ovn_metrics_enable_pprof_flag} \
+    ${ovn_metrics_enable_pprof_flag} \
     --mtu=${mtu} \
     --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
     --pidfile ${OVN_RUNDIR}/ovnkube-master.pid &
@@ -2630,11 +2593,6 @@ ovn-node() {
     fi
   fi
 
-  ovnkube_node_mgmt_port_intf_name_flag=
-  if [[ ${ovnkube_node_mgmt_port_intf_name} != "" ]]; then
-    ovnkube_node_mgmt_port_intf_name_flag="--ovnkube-node-mgmt-port-intf-name=${ovnkube_node_mgmt_port_intf_name}"
-  fi
-
   ovnkube_node_mgmt_port_netdev_flag=
   if [[ ${ovnkube_node_mgmt_port_netdev} != "" ]]; then
     ovnkube_node_mgmt_port_netdev_flag="--ovnkube-node-mgmt-port-netdev=${ovnkube_node_mgmt_port_netdev}"
@@ -2665,16 +2623,10 @@ ovn-node() {
   fi
 
   ovnkube_node_metrics_bind_address="${metrics_endpoint_ip}:${metrics_worker_port}"
-  ovnkube_node_metrics_pprof_bind_address="${metrics_pprof_endpoint_ip}:${metrics_pprof_worker_port}"
 
   ovn_unprivileged_flag="--unprivileged-mode"
   if test -z "${OVN_UNPRIVILEGED_MODE+x}" -o "x${OVN_UNPRIVILEGED_MODE}" = xno; then
     ovn_unprivileged_flag=""
-  fi
-
-  k8s_cluster_name_option=
-  if [[ ${K8S_CLUSTER_NAME} != "" ]]; then
-	  k8s_cluster_name_option="--cluster-name=${K8S_CLUSTER_NAME}"
   fi
 
   representor_metering_nodes_flag=
@@ -2829,7 +2781,6 @@ ovn-node() {
         ${hybrid_overlay_flags} \
         ${ipfix_config} \
         ${ipfix_targets} \
-        ${k8s_cluster_name_option} \
         ${lflow_cache_limit} \
         ${lflow_cache_limit_kb} \
         ${monitor_all} \
@@ -2848,7 +2799,6 @@ ovn-node() {
         ${ovnkube_logfile_flag} \
         ${ovnkube_metrics_tls_opts} \
         ${ovnkube_node_certs_flags} \
-        ${ovnkube_node_mgmt_port_intf_name_flag} \
         ${ovnkube_node_mgmt_port_netdev_flag} \
         ${ovnkube_node_mode_flag} \
         ${ovn_node_ssl_opts} \
@@ -2868,7 +2818,7 @@ ovn-node() {
         --loglevel=${ovnkube_loglevel} \
         --metrics-bind-address ${ovnkube_node_metrics_bind_address} \
         --metrics-interval ${ovn_metrics_scrape_interval} \
-        --metrics-pprof-bind-address ${ovnkube_node_metrics_pprof_bind_address} ${ovn_metrics_enable_pprof_flag} \
+        ${ovn_metrics_enable_pprof_flag} \
         --mtu=${mtu} \
         --ovn-encap-tos=${ovn_encap_tos} \
         --pidfile ${OVN_RUNDIR}/ovnkube.pid \

@@ -313,7 +313,7 @@ func (bnc *BaseNetworkController) getDefaultDenyPolicyACLIDs(ns string, aclDir l
 }
 
 func (bnc *BaseNetworkController) defaultDenyPortGroupName(namespace, gressSuffix string) string {
-	return libovsdbutil.HashedPortGroup(util.GetClusterScopedName(bnc.GetNetworkScopedName(namespace))) + "_" + gressSuffix
+	return libovsdbutil.HashedPortGroup(bnc.GetNetworkScopedName(namespace)) + "_" + gressSuffix
 }
 
 func (bnc *BaseNetworkController) buildDenyACLs(namespace, pg string, aclLogging *libovsdbutil.ACLLoggingLevels,
@@ -848,7 +848,7 @@ func (bnc *BaseNetworkController) addLocalPodHandler(policy *knet.NetworkPolicy,
 
 func (bnc *BaseNetworkController) getNetworkPolicyPGName(namespace, name string) (pgName, readablePGName string) {
 	readableGroupName := fmt.Sprintf("%s_%s", namespace, name)
-	return libovsdbutil.HashedPortGroup(util.GetClusterScopedName(bnc.GetNetworkScopedName(readableGroupName))), readableGroupName
+	return libovsdbutil.HashedPortGroup(bnc.GetNetworkScopedName(readableGroupName)), readableGroupName
 }
 
 type policyHandler struct {

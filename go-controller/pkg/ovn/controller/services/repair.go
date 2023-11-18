@@ -8,7 +8,6 @@ import (
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
@@ -126,7 +125,7 @@ func (r *repair) runBeforeSync(useTemplates bool) {
 	if err := DeleteLBs(r.nbClient, staleLBs); err != nil {
 		klog.Errorf("Failed to delete stale LBs: %v", err)
 	}
-	klog.V(2).Infof("Deleted %d stale service LBs. StaleLB ids were:%v", len(staleLBs), staleLBs)
+	klog.V(2).Infof("Deleted %d stale service LBs. StaleLB ids were: %v", len(staleLBs), staleLBs)
 
 	// Delete those stale template vars
 	if err := libovsdbops.DeleteAllChassisTemplateVarVariables(r.nbClient, staleTemplateNames.UnsortedList()); err != nil {
@@ -137,7 +136,7 @@ func (r *repair) runBeforeSync(useTemplates bool) {
 	// Remove existing reject rules. They are not used anymore
 	// given the introduction of idling loadbalancers
 	p := func(item *nbdb.ACL) bool {
-		return item.Action == nbdb.ACLActionReject && util.HasExternalIDsForCluster(item.ExternalIDs)
+		return item.Action == nbdb.ACLActionReject
 	}
 	acls, err := libovsdbops.FindACLsWithPredicate(r.nbClient, p)
 	if err != nil {

@@ -188,7 +188,7 @@ func (syncer *addressSetsSyncer) getReferencingObjsAndNewDbIDs(oldHash, oldName 
 	qoses []*nbdb.QoS, lrps []*nbdb.LogicalRouterPolicy, dbIDs *libovsdbops.DbObjectIDs, err error) {
 	// find all referencing objects
 	aclPred := func(acl *nbdb.ACL) bool {
-		return util.HasExternalIDsForCluster(acl.ExternalIDs) && strings.Contains(acl.Match, "$"+oldHash)
+		return strings.Contains(acl.Match, "$"+oldHash)
 	}
 	acls, err = libovsdbops.FindACLsWithPredicate(syncer.nbClient, aclPred)
 	if err != nil {
@@ -196,7 +196,7 @@ func (syncer *addressSetsSyncer) getReferencingObjsAndNewDbIDs(oldHash, oldName 
 		return
 	}
 	qosPred := func(qos *nbdb.QoS) bool {
-		return util.HasExternalIDsForCluster(qos.ExternalIDs) && strings.Contains(qos.Match, "$"+oldHash)
+		return strings.Contains(qos.Match, "$"+oldHash)
 	}
 	qoses, err = libovsdbops.FindQoSesWithPredicate(syncer.nbClient, qosPred)
 	if err != nil {
@@ -204,7 +204,7 @@ func (syncer *addressSetsSyncer) getReferencingObjsAndNewDbIDs(oldHash, oldName 
 		return
 	}
 	lrpPred := func(lrp *nbdb.LogicalRouterPolicy) bool {
-		return util.HasExternalIDsForCluster(lrp.ExternalIDs) && strings.Contains(lrp.Match, "$"+oldHash)
+		return strings.Contains(lrp.Match, "$"+oldHash)
 	}
 	lrps, err = libovsdbops.FindLogicalRouterPoliciesWithPredicate(syncer.nbClient, lrpPred)
 	if err != nil {
@@ -396,8 +396,7 @@ func (syncer *addressSetsSyncer) SyncAddressSets() error {
 	// stale address sets don't have controller ID
 	p := func(item *nbdb.AddressSet) bool {
 		return item.ExternalIDs[libovsdbops.OwnerControllerKey.String()] == "" &&
-			util.NetworkNameExternalIDExists(item.ExternalIDs, syncer.netName) &&
-			util.HasExternalIDsForCluster(item.ExternalIDs)
+			util.NetworkNameExternalIDExists(item.ExternalIDs, syncer.netName)
 	}
 	addrSetList, err := libovsdbops.FindAddressSetsWithPredicate(syncer.nbClient, p)
 	if err != nil {

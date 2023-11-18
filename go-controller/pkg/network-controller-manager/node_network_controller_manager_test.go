@@ -38,7 +38,7 @@ func genDeleteStaleRepPortCmd(iface string) string {
 
 func genFindInterfaceWithSandboxCmd() string {
 	return fmt.Sprintf("ovs-vsctl --timeout=15 --columns=name,external_ids --data=bare --no-headings " +
-		"--format=csv find Interface external_ids:sandbox!=\"\" external_ids:netdev-name!=\"\" external_ids:ovn_kube_mode=full external_ids:cluster_name{=}[]")
+		"--format=csv find Interface external_ids:sandbox!=\"\" external_ids:netdev-name!=\"\" external_ids:ovn_kube_mode=full")
 }
 
 var _ = Describe("Healthcheck tests", func() {

@@ -95,19 +95,19 @@ func GetIPFullMask(ip net.IP) net.IPMask {
 // GetLegacyK8sMgmtIntfName returns legacy management ovs-port name
 func GetLegacyK8sMgmtIntfName(nodeName string) string {
 	if len(nodeName) > 11 {
-		return GetClusterScopedName(types.K8sPrefix + (nodeName[:11]))
+		return types.K8sPrefix + (nodeName[:11])
 	}
-	return GetClusterScopedName(types.K8sPrefix + nodeName)
+	return types.K8sPrefix + nodeName
 }
 
 // GetWorkerFromGatewayRouter determines a node's corresponding worker switch name from a gateway router name
 func GetWorkerFromGatewayRouter(gr string) string {
-	return strings.TrimPrefix(gr, GetClusterScopedName(types.GWRouterPrefix))
+	return strings.TrimPrefix(gr, types.GWRouterPrefix)
 }
 
 // GetGatewayRouterFromNode determines a node's corresponding gateway router name
 func GetGatewayRouterFromNode(node string) string {
-	return GetClusterScopedName(types.GWRouterPrefix + node)
+	return types.GWRouterPrefix + node
 }
 
 // GetNodeInternalAddrs returns the first IPv4 and/or IPv6 InternalIP defined
@@ -178,7 +178,7 @@ func GetNodeChassisID() (string, error) {
 // GetHybridOverlayPortName returns the name of the hybrid overlay switch port
 // for a given node
 func GetHybridOverlayPortName(nodeName string) string {
-	return GetClusterScopedName("int-" + nodeName)
+	return "int-" + nodeName
 }
 
 type annotationNotSetError struct {
@@ -314,19 +314,19 @@ func IsClusterIP(svcVIP string) bool {
 }
 
 func GetSecondaryNetworkLogicalPortName(podNamespace, podName, nadName string) string {
-	return GetClusterScopedName(GetSecondaryNetworkPrefix(nadName) + composePortName(podNamespace, podName))
+	return GetSecondaryNetworkPrefix(nadName) + composePortName(podNamespace, podName)
 }
 
 func GetLogicalPortName(podNamespace, podName string) string {
-	return GetClusterScopedName(composePortName(podNamespace, podName))
+	return composePortName(podNamespace, podName)
 }
 
-func GetSecondaryNetworkIfaceId(podNamespace, podName, nadName, clusterPrefix string) string {
-	return clusterPrefix + GetSecondaryNetworkPrefix(nadName) + composePortName(podNamespace, podName)
+func GetSecondaryNetworkIfaceId(podNamespace, podName, nadName string) string {
+	return GetSecondaryNetworkPrefix(nadName) + composePortName(podNamespace, podName)
 }
 
-func GetIfaceId(podNamespace, podName, clusterPrefix string) string {
-	return clusterPrefix + composePortName(podNamespace, podName)
+func GetIfaceId(podNamespace, podName string) string {
+	return composePortName(podNamespace, podName)
 }
 
 // composePortName should be called both for LogicalPortName and iface-id

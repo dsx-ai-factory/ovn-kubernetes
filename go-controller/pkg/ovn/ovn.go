@@ -10,6 +10,7 @@ import (
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
@@ -448,6 +449,24 @@ func nodeGatewayMTUSupportChanged(oldNode, node *kapi.Node) bool {
 	return util.ParseNodeGatewayMTUSupport(oldNode) != util.ParseNodeGatewayMTUSupport(node)
 }
 
+// shouldUpdateNode() determines if the ovn-kubernetes plugin should update the state of the node.
+// ovn-kube should not perform an update if it does not assign a hostsubnet, or if you want to change
+// whether or not ovn-kubernetes assigns a hostsubnet
+func shouldUpdateNode(node, oldNode *kapi.Node) (bool, error) {
+	newNoHostSubnet := util.NoHostSubnet(node)
+	oldNoHostSubnet := util.NoHostSubnet(oldNode)
+
+	if oldNoHostSubnet && newNoHostSubnet {
+		return false, nil
+	} else if oldNoHostSubnet && !newNoHostSubnet {
+		return false, fmt.Errorf("error updating node %s, cannot remove assigned hostsubnet, please delete node and recreate.", node.Name)
+	} else if !oldNoHostSubnet && newNoHostSubnet {
+		return false, fmt.Errorf("error updating node %s, cannot assign a hostsubnet to already created node, please delete node and recreate.", node.Name)
+	}
+
+	return true, nil
+}
+
 func (oc *DefaultNetworkController) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
 	klog.Infof("Starting OVN Service Controller: Using Endpoint Slices")
 	wg.Add(1)
@@ -482,7 +501,7 @@ func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssv
 		createDefaultNodeRouteToExternal = libovsdbutil.CreateDefaultRouteToExternal
 	}
 
-	return egresssvc_zone.NewController(oc.controllerName, oc.client, oc.nbClient, oc.addressSetFactory,
+	return egresssvc_zone.NewController(DefaultNetworkControllerName, oc.client, oc.nbClient, oc.addressSetFactory,
 		initClusterEgressPolicies, ensureNodeNoReroutePolicies, deleteLegacyDefaultNoRerouteNodePolicies,
 		createDefaultNodeRouteToExternal,
 		oc.stopChan, oc.watchFactory.EgressServiceInformer(), oc.watchFactory.ServiceCoreInformer(),
@@ -493,7 +512,7 @@ func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssv
 func (oc *DefaultNetworkController) newANPController() error {
 	var err error
 	oc.anpController, err = anpcontroller.NewController(
-		oc.controllerName,
+		DefaultNetworkControllerName,
 		oc.nbClient,
 		oc.kube.ANPClient,
 		oc.watchFactory.ANPInformer(),

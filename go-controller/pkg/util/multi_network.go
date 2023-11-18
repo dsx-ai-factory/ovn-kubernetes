@@ -183,7 +183,7 @@ func (nInfo *DefaultNetInfo) NADToInterConnect() string {
 // InterConnectInfo returns the information used by inter-connection
 func (nInfo *DefaultNetInfo) GetInterConnectInfo() *InterConnectInfo {
 	logicalRouter := &nbdb.LogicalRouter{
-		Name: GetClusterScopedName(types.OVNClusterRouter),
+		Name: types.OVNClusterRouter,
 	}
 
 	return &InterConnectInfo{
@@ -326,13 +326,13 @@ func (nInfo *secondaryNetInfo) GetInterConnectInfo() *InterConnectInfo {
 	case types.Layer3Topology:
 		return &InterConnectInfo{
 			NetName:                nInfo.GetNetworkName(),
-			LogicalEntityToConnect: &nbdb.LogicalRouter{Name: GetClusterScopedName(nInfo.GetNetworkScopedName(types.OVNClusterRouter))},
+			LogicalEntityToConnect: &nbdb.LogicalRouter{Name: nInfo.GetNetworkScopedName(types.OVNClusterRouter)},
 			Subnets:                nInfo.Subnets(),
 		}
 	case types.Layer2Topology:
 		return &InterConnectInfo{
 			NetName:                nInfo.GetNetworkName(),
-			LogicalEntityToConnect: &nbdb.LogicalSwitch{Name: GetClusterScopedName(nInfo.GetNetworkScopedName(types.OVNLayer2Switch))},
+			LogicalEntityToConnect: &nbdb.LogicalSwitch{Name: nInfo.GetNetworkScopedName(types.OVNLayer2Switch)},
 			Subnets:                nInfo.Subnets(),
 		}
 	}

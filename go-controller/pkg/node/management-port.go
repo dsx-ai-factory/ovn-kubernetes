@@ -77,8 +77,7 @@ func newManagementPort(nodeName string, hostSubnets []*net.IPNet) ManagementPort
 }
 
 func (mp *managementPort) Create(routeManager *routemanager.Controller, nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
-	k8sMgmtIntfName := config.OvnKubeNode.MgmtPortIntfName
-	for _, mgmtPortName := range []string{k8sMgmtIntfName, k8sMgmtIntfName + "_0"} {
+	for _, mgmtPortName := range []string{types.K8sMgmtIntfName, types.K8sMgmtIntfName + "_0"} {
 		if err := syncMgmtPortInterface(mp.hostSubnets, mgmtPortName, true); err != nil {
 			return nil, fmt.Errorf("failed to sync management port: %v", err)
 		}
@@ -89,17 +88,17 @@ func (mp *managementPort) Create(routeManager *routemanager.Controller, nodeAnno
 	macAddress := util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(mp.hostSubnets[0]).IP)
 	stdout, stderr, err := util.RunOVSVsctl(
 		"--", "--if-exists", "del-port", "br-int", legacyMgmtIntfName,
-		"--", "--may-exist", "add-port", "br-int", k8sMgmtIntfName,
-		"--", "set", "interface", k8sMgmtIntfName,
+		"--", "--may-exist", "add-port", "br-int", types.K8sMgmtIntfName,
+		"--", "set", "interface", types.K8sMgmtIntfName,
 		"type=internal", "mtu_request="+fmt.Sprintf("%d", config.Default.MTU),
 		"mac="+strings.ReplaceAll(macAddress.String(), ":", "\\:"),
-		"external-ids:iface-id="+util.GetClusterScopedName(types.K8sPrefix+mp.nodeName))
+		"external-ids:iface-id="+types.K8sPrefix+mp.nodeName)
 	if err != nil {
 		klog.Errorf("Failed to add port to br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return nil, err
 	}
 
-	cfg, err := createPlatformManagementPort(routeManager, k8sMgmtIntfName, mp.hostSubnets)
+	cfg, err := createPlatformManagementPort(routeManager, types.K8sMgmtIntfName, mp.hostSubnets)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +126,7 @@ func (mp *managementPort) HasIpAddr() bool {
 }
 
 func managementPortReady() (bool, error) {
-	k8sMgmtIntfName := config.OvnKubeNode.MgmtPortIntfName
+	k8sMgmtIntfName := types.K8sMgmtIntfName
 	if config.OvnKubeNode.MgmtPortNetdev != "" && config.OvnKubeNode.Mode != types.NodeModeDPU {
 		k8sMgmtIntfName += "_0"
 	}

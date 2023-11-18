@@ -56,14 +56,12 @@ const (
 	ovnKubeNodeSNATMark = "0x3f0"
 )
 
-var HostMasqCTZone, OVNMasqCTZone, HostNodePortCTZone, HostXDPCTZone int
-
-func initCTZones() {
-	HostMasqCTZone = util.GetConntrackZone() + 1
-	OVNMasqCTZone = HostMasqCTZone + 1
-	HostNodePortCTZone = util.GetConntrackZone() + 3
-	HostXDPCTZone = util.GetConntrackZone() + 4
-}
+var (
+	HostMasqCTZone     = config.Default.ConntrackZone + 1 //64001
+	OVNMasqCTZone      = HostMasqCTZone + 1               //64002
+	HostNodePortCTZone = config.Default.ConntrackZone + 3 //64003
+	HostXDPCTZone      = config.Default.ConntrackZone + 4 //64004
+)
 
 // nodePortWatcherIptables manages iptables rules for shared gateway
 // to ensure that services using NodePorts are accessible.
@@ -722,7 +720,6 @@ func (npw *nodePortWatcher) DeleteService(service *kapi.Service) error {
 func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 	var err error
 	var errors []error
-	initCTZones()
 	keepIPTRules := []nodeipt.Rule{}
 	for _, serviceInterface := range services {
 		name := ktypes.NamespacedName{Namespace: serviceInterface.(*kapi.Service).Namespace, Name: serviceInterface.(*kapi.Service).Name}
@@ -1108,7 +1105,6 @@ func (ofm *openflowManager) updateBridgeFlowCache(subnets []*net.IPNet, extraIPs
 }
 
 func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]string, error) {
-	initCTZones()
 	ofPortPhys := bridge.ofPortPhys
 	bridgeMacAddress := bridge.macAddress.String()
 	ofPortPatch := bridge.ofPortPatch
@@ -1652,7 +1648,7 @@ func initSvcViaMgmPortRoutingRules(hostSubnets []*net.IPNet) error {
 		gatewayIP := util.GetNodeGatewayIfAddr(hostSubnet).IP.String()
 		for _, svcCIDR := range config.Kubernetes.ServiceCIDRs {
 			if isIPv6 == utilnet.IsIPv6CIDR(svcCIDR) {
-				if stdout, stderr, err := util.RunIP("route", "replace", "table", ovnkubeSvcViaMgmPortRT, svcCIDR.String(), "via", gatewayIP, "dev", config.OvnKubeNode.MgmtPortIntfName); err != nil {
+				if stdout, stderr, err := util.RunIP("route", "replace", "table", ovnkubeSvcViaMgmPortRT, svcCIDR.String(), "via", gatewayIP, "dev", types.K8sMgmtIntfName); err != nil {
 					return fmt.Errorf("error adding routing table entry into custom routing table: %s: stdout: %s, stderr: %s, err: %v", ovnkubeSvcViaMgmPortRT, stdout, stderr, err)
 				}
 				klog.V(5).Infof("Successfully added route into custom routing table: %s", ovnkubeSvcViaMgmPortRT)
@@ -1689,15 +1685,15 @@ func initSvcViaMgmPortRoutingRules(hostSubnets []*net.IPNet) error {
 	// NOTE: v6 doesn't have rp_filter strict mode block
 	rpFilterLooseMode := "2"
 	// TODO: Convert testing framework to mock golang module utilities. Example:
-	// result, err := sysctl.Sysctl(fmt.Sprintf("net/ipv4/conf/%s/rp_filter", config.OvnKubeNode.MgmtPortIntfName), rpFilterLooseMode)
+	// result, err := sysctl.Sysctl(fmt.Sprintf("net/ipv4/conf/%s/rp_filter", types.K8sMgmtIntfName), rpFilterLooseMode)
 	var stdout, stderr string
 	var err error
-	stdout, _, err = util.RunSysctl(fmt.Sprintf("net.ipv4.conf.%s.rp_filter", config.OvnKubeNode.MgmtPortIntfName))
-	if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.rp_filter = %s", config.OvnKubeNode.MgmtPortIntfName, rpFilterLooseMode) {
-		stdout, stderr, err = util.RunSysctl("-w", fmt.Sprintf("net.ipv4.conf.%s.rp_filter=%s", config.OvnKubeNode.MgmtPortIntfName, rpFilterLooseMode))
-		if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.rp_filter = %s", config.OvnKubeNode.MgmtPortIntfName, rpFilterLooseMode) {
+	stdout, _, err = util.RunSysctl(fmt.Sprintf("net.ipv4.conf.%s.rp_filter", types.K8sMgmtIntfName))
+	if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.rp_filter = %s", types.K8sMgmtIntfName, rpFilterLooseMode) {
+		stdout, stderr, err = util.RunSysctl("-w", fmt.Sprintf("net.ipv4.conf.%s.rp_filter=%s", types.K8sMgmtIntfName, rpFilterLooseMode))
+		if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.rp_filter = %s", types.K8sMgmtIntfName, rpFilterLooseMode) {
 			klog.Errorf("Could not set the correct rp_filter value for interface %s: stdout: %v, stderr: %v, err: %v",
-				config.OvnKubeNode.MgmtPortIntfName, stdout, stderr, err)
+				types.K8sMgmtIntfName, stdout, stderr, err)
 		}
 	}
 
@@ -1913,7 +1909,7 @@ func cleanupSharedGateway() error {
 	bridgeMappings := strings.Split(stdout, ",")
 	for _, bridgeMapping := range bridgeMappings {
 		m := strings.Split(bridgeMapping, ":")
-		if network := m[0]; network == util.GetPhysNetNameKey() {
+		if network := m[0]; network == types.PhysicalNetworkName {
 			bridgeName = m[1]
 			break
 		}

@@ -126,8 +126,6 @@ func composeDHCPOptions(controllerName string, vmKey ktypes.NamespacedName, dhcp
 		})
 	dhcpOptions.ExternalIDs = dhcpvOptionsDbObjectID.GetExternalIDs()
 	dhcpOptions.ExternalIDs[OvnZoneExternalIDKey] = OvnLocalZone
-	dhcpOptions.ExternalIDs = util.ExternalIDsForCluster(dhcpOptions.ExternalIDs)
-
 	return dhcpOptions
 }
 
@@ -137,7 +135,7 @@ func DeleteDHCPOptions(nbClient libovsdbclient.Client, pod *corev1.Pod) error {
 		return nil
 	}
 	if err := libovsdbops.DeleteDHCPOptionsWithPredicate(nbClient, func(item *nbdb.DHCPOptions) bool {
-		return item.ExternalIDs[string(libovsdbops.ObjectNameKey)] == vmKey.String() && util.HasExternalIDsForCluster(item.ExternalIDs)
+		return item.ExternalIDs[string(libovsdbops.ObjectNameKey)] == vmKey.String()
 	}); err != nil {
 		return err
 	}

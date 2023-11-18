@@ -63,8 +63,7 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 		// delete the outdated hybrid overlay subnet route if it exists
 		newRoutes := []util.PodRoute{}
 		// HO is IPv4 only
-		switchName := util.GetClusterScopedName(pod.Spec.NodeName)
-		ipv4Subnets := util.MatchAllIPNetFamily(false, oc.lsManager.GetSwitchSubnets(switchName))
+		ipv4Subnets := util.MatchAllIPNetFamily(false, oc.lsManager.GetSwitchSubnets(pod.Spec.NodeName))
 		for _, route := range annotations.Routes {
 			if !util.IsNodeHybridOverlayIfAddr(route.NextHop, ipv4Subnets) {
 				newRoutes = append(newRoutes, route)
@@ -110,7 +109,7 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 
 func (oc *DefaultNetworkController) deleteLogicalPort(pod *kapi.Pod, portInfo *lpInfo) (err error) {
 	podDesc := pod.Namespace + "/" + pod.Name
-	klog.Infof("Deleting pod %s", podDesc)
+	klog.Infof("Deleting pod: %s", podDesc)
 
 	if err = oc.deletePodExternalGW(pod); err != nil {
 		return fmt.Errorf("unable to delete external gateway routes for pod %s: %w", podDesc, err)
@@ -130,8 +129,7 @@ func (oc *DefaultNetworkController) deleteLogicalPort(pod *kapi.Pod, portInfo *l
 	}
 
 	if config.Gateway.DisableSNATMultipleGWs {
-		nodeName := util.RemoveMultiClusterScopeFromName(pInfo.logicalSwitch)
-		if err := oc.deletePodSNAT(nodeName, []*net.IPNet{}, pInfo.ips); err != nil {
+		if err := oc.deletePodSNAT(pInfo.logicalSwitch, []*net.IPNet{}, pInfo.ips); err != nil {
 			return fmt.Errorf("cannot delete GR SNAT for pod %s: %w", podDesc, err)
 		}
 	}
@@ -152,7 +150,7 @@ func (oc *DefaultNetworkController) deleteLogicalPort(pod *kapi.Pod, portInfo *l
 
 func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 	// If a node does node have an assigned hostsubnet don't wait for the logical switch to appear
-	switchName := util.GetClusterScopedName(pod.Spec.NodeName)
+	switchName := pod.Spec.NodeName
 	if oc.lsManager.IsNonHostSubnetSwitch(switchName) {
 		return nil
 	}

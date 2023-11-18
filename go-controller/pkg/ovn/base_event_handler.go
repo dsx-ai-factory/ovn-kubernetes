@@ -16,9 +16,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-type baseNetworkControllerEventHandler struct {
-	watchFactory *factory.WatchFactory
-}
+type baseNetworkControllerEventHandler struct{}
 
 // hasResourceAnUpdateFunc returns true if the given resource type has a dedicated update function.
 // It returns false if, upon an update event on this resource type, we instead need to first delete the old
@@ -68,7 +66,7 @@ func (h *baseNetworkControllerEventHandler) areResourcesEqual(objType reflect.Ty
 		}
 
 		// when shouldUpdateNode is false, the hostsubnet is not assigned by ovn-kubernetes
-		shouldUpdate, err := shouldUpdateNode(h.watchFactory, node2, node1)
+		shouldUpdate, err := shouldUpdateNode(node2, node1)
 		if err != nil {
 			klog.Errorf(err.Error())
 		}

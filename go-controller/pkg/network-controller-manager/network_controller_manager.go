@@ -131,7 +131,7 @@ func (cm *NetworkControllerManager) cleanupDeletedNetworksWithLegacyNetworkExter
 		// first delete logical switches
 		ops, err = libovsdbops.DeleteLogicalSwitchesWithPredicateOps(cm.nbClient, ops,
 			func(item *nbdb.LogicalSwitch) bool {
-				return item.ExternalIDs[ovntypes.LegacyNetworkExternalID] == netName && util.HasExternalIDsForCluster(item.ExternalIDs)
+				return item.ExternalIDs[ovntypes.LegacyNetworkExternalID] == netName
 			})
 		if err != nil {
 			return fmt.Errorf("failed to get ops for deleting switches of network %s: %v", netName, err)
@@ -140,14 +140,14 @@ func (cm *NetworkControllerManager) cleanupDeletedNetworksWithLegacyNetworkExter
 		// now delete cluster router
 		ops, err = libovsdbops.DeleteLogicalRoutersWithPredicateOps(cm.nbClient, ops,
 			func(item *nbdb.LogicalRouter) bool {
-				return item.ExternalIDs[ovntypes.LegacyNetworkExternalID] == netName && util.HasExternalIDsForCluster(item.ExternalIDs)
+				return item.ExternalIDs[ovntypes.LegacyNetworkExternalID] == netName
 			})
 		if err != nil {
 			return fmt.Errorf("failed to get ops for deleting routers of network %s: %v", netName, err)
 		}
 
 		portGroupPredicate := func(item *nbdb.PortGroup) bool {
-			return item.ExternalIDs[ovntypes.LegacyNetworkExternalID] == netName && util.HasExternalIDsForCluster(item.ExternalIDs)
+			return item.ExternalIDs[ovntypes.LegacyNetworkExternalID] == netName
 		}
 		ops, err = libovsdbops.DeletePortGroupsWithPredicateOps(cm.nbClient, ops, portGroupPredicate)
 		if err != nil {
@@ -155,7 +155,7 @@ func (cm *NetworkControllerManager) cleanupDeletedNetworksWithLegacyNetworkExter
 		}
 
 		asPredicate := func(item *nbdb.AddressSet) bool {
-			return item.ExternalIDs[ovntypes.LegacyNetworkExternalID] == netName && util.HasExternalIDsForCluster(item.ExternalIDs)
+			return item.ExternalIDs[ovntypes.LegacyNetworkExternalID] == netName
 		}
 		ops, err = libovsdbops.DeleteAddressSetsWithPredicateOps(cm.nbClient, ops, asPredicate)
 		if err != nil {
@@ -175,7 +175,7 @@ func findAllSecondaryNetworkLogicalEntities(nbClient libovsdbclient.Client, netw
 	[]*nbdb.LogicalRouter, error) {
 	p1 := func(item *nbdb.LogicalSwitch) bool {
 		_, ok := item.ExternalIDs[networkNameExtIDKey]
-		return ok && util.HasExternalIDsForCluster(item.ExternalIDs)
+		return ok
 	}
 	nodeSwitches, err := libovsdbops.FindLogicalSwitchesWithPredicate(nbClient, p1)
 	if err != nil {
@@ -184,7 +184,7 @@ func findAllSecondaryNetworkLogicalEntities(nbClient libovsdbclient.Client, netw
 	}
 	p2 := func(item *nbdb.LogicalRouter) bool {
 		_, ok := item.ExternalIDs[networkNameExtIDKey]
-		return ok && util.HasExternalIDsForCluster(item.ExternalIDs)
+		return ok
 	}
 	clusterRouters, err := libovsdbops.FindLogicalRoutersWithPredicate(nbClient, p2)
 	if err != nil {
@@ -343,9 +343,8 @@ func (cm *NetworkControllerManager) configureMetrics(stopChan <-chan struct{}) {
 
 func (cm *NetworkControllerManager) createACLLoggingMeter() error {
 	band := &nbdb.MeterBand{
-		Action:      ovntypes.MeterAction,
-		Rate:        config.Logging.ACLLoggingRateLimit,
-		ExternalIDs: util.ExternalIDsForCluster(nil),
+		Action: ovntypes.MeterAction,
+		Rate:   config.Logging.ACLLoggingRateLimit,
 	}
 	ops, err := libovsdbops.CreateMeterBandOps(cm.nbClient, nil, band)
 	if err != nil {
@@ -354,10 +353,9 @@ func (cm *NetworkControllerManager) createACLLoggingMeter() error {
 
 	meterFairness := true
 	meter := &nbdb.Meter{
-		Name:        util.GetClusterScopedName(ovntypes.OvnACLLoggingMeter),
-		Fair:        &meterFairness,
-		Unit:        ovntypes.PacketsPerSecond,
-		ExternalIDs: util.ExternalIDsForCluster(nil),
+		Name: ovntypes.OvnACLLoggingMeter,
+		Fair: &meterFairness,
+		Unit: ovntypes.PacketsPerSecond,
 	}
 	ops, err = libovsdbops.CreateOrUpdateMeterOps(cm.nbClient, ops, meter, []*nbdb.MeterBand{band},
 		&meter.Bands, &meter.Fair, &meter.Unit)

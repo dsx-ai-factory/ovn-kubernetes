@@ -384,7 +384,7 @@ func (c *Controller) repair() error {
 	}
 
 	lrpPredicate := func(item *nbdb.LogicalRouterPolicy) bool {
-		if item.Priority != ovntypes.EgressSVCReroutePriority || !util.HasExternalIDsForCluster(item.ExternalIDs) {
+		if item.Priority != ovntypes.EgressSVCReroutePriority {
 			return false
 		}
 
@@ -456,15 +456,15 @@ func (c *Controller) repair() error {
 
 	errorList := []error{}
 	ops := []libovsdb.Operation{}
-	ops, err = libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(c.nbClient, ops, util.GetClusterScopedName(ovntypes.OVNClusterRouter), lrpPredicate)
+	ops, err = libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(c.nbClient, ops, ovntypes.OVNClusterRouter, lrpPredicate)
 	if err != nil {
 		errorList = append(errorList,
-			fmt.Errorf("failed to create ops for deleting stale logical router policies from router %s: %v", util.GetClusterScopedName(ovntypes.OVNClusterRouter), err))
+			fmt.Errorf("failed to create ops for deleting stale logical router policies from router %s: %v", ovntypes.OVNClusterRouter, err))
 	}
 
 	if config.OVNKubernetesFeature.EnableInterconnect {
 		lrpICPredicate := func(item *nbdb.LogicalRouterPolicy) bool {
-			if item.Priority != ovntypes.EgressSVCReroutePriority || !util.HasExternalIDsForCluster(item.ExternalIDs) {
+			if item.Priority != ovntypes.EgressSVCReroutePriority {
 				return false
 			}
 			svcKey, found := item.ExternalIDs[svcExternalIDKey]
@@ -527,10 +527,10 @@ func (c *Controller) repair() error {
 			svcKeyToRemoteConfiguredV6Endpoints[svcKey] = append(svcKeyToLocalConfiguredV6Endpoints[svcKey], logicalIP)
 			return false
 		}
-		ops, err = libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(c.nbClient, ops, util.GetClusterScopedName(ovntypes.OVNClusterRouter), lrpICPredicate)
+		ops, err = libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(c.nbClient, ops, ovntypes.OVNClusterRouter, lrpICPredicate)
 		if err != nil {
 			errorList = append(errorList,
-				fmt.Errorf("failed to create ops for deleting stale logical router policies from router %s: %v", util.GetClusterScopedName(ovntypes.OVNClusterRouter), err))
+				fmt.Errorf("failed to create ops for deleting stale logical router policies from router %s: %v", ovntypes.OVNClusterRouter, err))
 		}
 	}
 

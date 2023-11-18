@@ -258,7 +258,6 @@ func (oc *DefaultNetworkController) createBFDStaticRoute(bfdEnabled bool, gw str
 		bfd := nbdb.BFD{
 			DstIP:       gw,
 			LogicalPort: port,
-			ExternalIDs: util.ExternalIDsForCluster(nil),
 		}
 		ops, err = libovsdbops.CreateOrUpdateBFDOps(oc.nbClient, ops, &bfd)
 		if err != nil {
@@ -267,15 +266,12 @@ func (oc *DefaultNetworkController) createBFDStaticRoute(bfdEnabled bool, gw str
 		lrsr.BFD = &bfd.UUID
 	}
 
-	lrsr.ExternalIDs = util.ExternalIDsForCluster(lrsr.ExternalIDs)
-
 	p := func(item *nbdb.LogicalRouterStaticRoute) bool {
 		return item.IPPrefix == lrsr.IPPrefix &&
 			item.Nexthop == lrsr.Nexthop &&
 			item.OutputPort != nil &&
 			*item.OutputPort == *lrsr.OutputPort &&
-			item.Policy == lrsr.Policy &&
-			util.HasExternalIDsForCluster(item.ExternalIDs)
+			item.Policy == lrsr.Policy
 	}
 	ops, err = libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(oc.nbClient, ops, gr, &lrsr, p,
 		&lrsr.Options)
@@ -296,8 +292,7 @@ func (oc *DefaultNetworkController) deleteLogicalRouterStaticRoute(podIP, mask, 
 		return item.Policy != nil &&
 			*item.Policy == nbdb.LogicalRouterStaticRoutePolicySrcIP &&
 			item.IPPrefix == podIP+mask &&
-			item.Nexthop == gw &&
-			util.HasExternalIDsForCluster(item.ExternalIDs)
+			item.Nexthop == gw
 	}
 	err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(oc.nbClient, gr, p)
 	if err != nil {
@@ -595,7 +590,7 @@ func (oc *DefaultNetworkController) deletePodSNAT(nodeName string, extIPs, podIP
 
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
 	if err != nil {
-		return fmt.Errorf("failed to delete SNAT rule for pod on gateway router %s: %w", util.GetClusterScopedName(types.GWRouterPrefix+nodeName), err)
+		return fmt.Errorf("failed to delete SNAT rule for pod on gateway router %s: %w", types.GWRouterPrefix+nodeName, err)
 	}
 	return nil
 }
@@ -611,13 +606,13 @@ func buildPodSNAT(extIPs, podIPNets []*net.IPNet) ([]*nbdb.NAT, error) {
 			Mask: util.GetIPFullMask(podIPNet.IP),
 		}
 		if len(extIPs) == 0 {
-			nat = libovsdbops.BuildSNAT(nil, fullMaskPodNet, "", util.ExternalIDsForCluster(nil))
+			nat = libovsdbops.BuildSNAT(nil, fullMaskPodNet, "", nil)
 		} else {
 			for _, gwIPNet := range extIPs {
 				if utilnet.IsIPv6CIDR(gwIPNet) != utilnet.IsIPv6CIDR(podIPNet) {
 					continue
 				}
-				nat = libovsdbops.BuildSNAT(&gwIPNet.IP, fullMaskPodNet, "", util.ExternalIDsForCluster(nil))
+				nat = libovsdbops.BuildSNAT(&gwIPNet.IP, fullMaskPodNet, "", nil)
 			}
 		}
 		nats = append(nats, nat)
@@ -647,7 +642,7 @@ func deletePodSNATOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, nod
 		return nil, err
 	}
 	logicalRouter := nbdb.LogicalRouter{
-		Name: util.GetClusterScopedName(types.GWRouterPrefix + nodeName),
+		Name: types.GWRouterPrefix + nodeName,
 	}
 	ops, err = libovsdbops.DeleteNATsOps(nbClient, ops, &logicalRouter, nats...)
 	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
@@ -664,7 +659,7 @@ func addOrUpdatePodSNAT(nbClient libovsdbclient.Client, nodeName string, extIPs,
 		return err
 	}
 	logicalRouter := nbdb.LogicalRouter{
-		Name: util.GetClusterScopedName(types.GWRouterPrefix + nodeName),
+		Name: types.GWRouterPrefix + nodeName,
 	}
 	if err := libovsdbops.CreateOrUpdateNATs(nbClient, &logicalRouter, nats...); err != nil {
 		return fmt.Errorf("failed to update SNAT for pods of router %s: %v", logicalRouter.Name, err)
@@ -676,7 +671,7 @@ func addOrUpdatePodSNAT(nbClient libovsdbclient.Client, nodeName string, extIPs,
 // applied to the GR where the pod resides
 // used when disableSNATMultipleGWs=true
 func addOrUpdatePodSNATOps(nbClient libovsdbclient.Client, nodeName string, extIPs, podIfAddrs []*net.IPNet, ops []ovsdb.Operation) ([]ovsdb.Operation, error) {
-	gr := util.GetClusterScopedName(types.GWRouterPrefix + nodeName)
+	gr := types.GWRouterPrefix + nodeName
 	router := &nbdb.LogicalRouter{Name: gr}
 	nats, err := buildPodSNAT(extIPs, podIfAddrs)
 	if err != nil {
@@ -719,7 +714,7 @@ func (oc *DefaultNetworkController) addHybridRoutePolicyForPod(podIP net.IP, nod
 		}
 
 		// get the GR to join switch ip address
-		grJoinIfAddrs, err := libovsdbutil.GetLRPAddrs(oc.nbClient, types.GWRouterToJoinSwitchPrefix+util.GetClusterScopedName(types.GWRouterPrefix+node))
+		grJoinIfAddrs, err := libovsdbutil.GetLRPAddrs(oc.nbClient, types.GWRouterToJoinSwitchPrefix+types.GWRouterPrefix+node)
 		if err != nil {
 			return fmt.Errorf("unable to find IP address for node: %s, %s port, err: %v", node, types.GWRouterToJoinSwitchPrefix, err)
 		}
@@ -743,24 +738,22 @@ func (oc *DefaultNetworkController) addHybridRoutePolicyForPod(podIP net.IP, nod
 		}
 
 		// traffic destined outside of cluster subnet go to GR
-		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == $%s`, types.RouterToSwitchPrefix, util.GetClusterScopedName(node), l3Prefix, matchSrcAS)
+		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == $%s`, types.RouterToSwitchPrefix, node, l3Prefix, matchSrcAS)
 		matchStr += matchDst
 
 		logicalRouterPolicy := nbdb.LogicalRouterPolicy{
-			Priority:    types.HybridOverlayReroutePriority,
-			Action:      nbdb.LogicalRouterPolicyActionReroute,
-			Nexthops:    []string{grJoinIfAddr.IP.String()},
-			Match:       matchStr,
-			ExternalIDs: util.ExternalIDsForCluster(nil),
+			Priority: types.HybridOverlayReroutePriority,
+			Action:   nbdb.LogicalRouterPolicyActionReroute,
+			Nexthops: []string{grJoinIfAddr.IP.String()},
+			Match:    matchStr,
 		}
 		p := func(item *nbdb.LogicalRouterPolicy) bool {
-			return item.Priority == logicalRouterPolicy.Priority && strings.Contains(item.Match, matchSrcAS) &&
-				util.HasExternalIDsForCluster(item.ExternalIDs)
+			return item.Priority == logicalRouterPolicy.Priority && strings.Contains(item.Match, matchSrcAS)
 		}
-		err = libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(oc.nbClient, util.GetClusterScopedName(types.OVNClusterRouter),
+		err = libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(oc.nbClient, types.OVNClusterRouter,
 			&logicalRouterPolicy, p, &logicalRouterPolicy.Nexthops, &logicalRouterPolicy.Match, &logicalRouterPolicy.Action)
 		if err != nil {
-			return fmt.Errorf("failed to add policy route %+v to %s: %v", logicalRouterPolicy, util.GetClusterScopedName(types.OVNClusterRouter), err)
+			return fmt.Errorf("failed to add policy route %+v to %s: %v", logicalRouterPolicy, types.OVNClusterRouter, err)
 		}
 	}
 	return nil
@@ -816,16 +809,15 @@ func (oc *DefaultNetworkController) delHybridRoutePolicyForPod(podIP net.IP, nod
 				}
 				matchDst += fmt.Sprintf(" && %s.dst != %s", l3Prefix, clusterSubnet.CIDR)
 			}
-			matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == $%s`, types.RouterToSwitchPrefix, util.GetClusterScopedName(node), l3Prefix, matchSrcAS)
+			matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == $%s`, types.RouterToSwitchPrefix, node, l3Prefix, matchSrcAS)
 			matchStr += matchDst
 
 			p := func(item *nbdb.LogicalRouterPolicy) bool {
-				return item.Priority == types.HybridOverlayReroutePriority && item.Match == matchStr &&
-					util.HasExternalIDsForCluster(item.ExternalIDs)
+				return item.Priority == types.HybridOverlayReroutePriority && item.Match == matchStr
 			}
-			err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, util.GetClusterScopedName(types.OVNClusterRouter), p)
+			err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, types.OVNClusterRouter, p)
 			if err != nil {
-				return fmt.Errorf("error deleting policy %s on router %s: %v", matchStr, util.GetClusterScopedName(types.OVNClusterRouter), err)
+				return fmt.Errorf("error deleting policy %s on router %s: %v", matchStr, types.OVNClusterRouter, err)
 			}
 		}
 		if len(ipv4PodIPs) == 0 && len(ipv6PodIPs) == 0 {
@@ -846,11 +838,11 @@ func (oc *DefaultNetworkController) delHybridRoutePolicyForPod(podIP net.IP, nod
 func (oc *DefaultNetworkController) delAllHybridRoutePolicies() error {
 	// nuke all the policies
 	policyPred := func(item *nbdb.LogicalRouterPolicy) bool {
-		return item.Priority == types.HybridOverlayReroutePriority && util.HasExternalIDsForCluster(item.ExternalIDs)
+		return item.Priority == types.HybridOverlayReroutePriority
 	}
-	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, util.GetClusterScopedName(types.OVNClusterRouter), policyPred)
+	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, types.OVNClusterRouter, policyPred)
 	if err != nil {
-		return fmt.Errorf("error deleting hybrid route policies on %s: %v", util.GetClusterScopedName(types.OVNClusterRouter), err)
+		return fmt.Errorf("error deleting hybrid route policies on %s: %v", types.OVNClusterRouter, err)
 	}
 
 	// nuke all the address-sets.
@@ -871,7 +863,7 @@ func (oc *DefaultNetworkController) delAllHybridRoutePolicies() error {
 func (oc *DefaultNetworkController) delAllLegacyHybridRoutePolicies() error {
 	// nuke all the policies
 	p := func(item *nbdb.LogicalRouterPolicy) bool {
-		if item.Priority != types.HybridOverlayReroutePriority || !util.HasExternalIDsForCluster(item.ExternalIDs) {
+		if item.Priority != types.HybridOverlayReroutePriority {
 			return false
 		}
 		if isNewVer, err := regexp.MatchString(`src\s*==\s*\$`, item.Match); err == nil && isNewVer {
@@ -879,9 +871,9 @@ func (oc *DefaultNetworkController) delAllLegacyHybridRoutePolicies() error {
 		}
 		return true
 	}
-	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, util.GetClusterScopedName(types.OVNClusterRouter), p)
+	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, types.OVNClusterRouter, p)
 	if err != nil {
-		return fmt.Errorf("error deleting legacy hybrid route policies on %s: %v", util.GetClusterScopedName(types.OVNClusterRouter), err)
+		return fmt.Errorf("error deleting legacy hybrid route policies on %s: %v", types.OVNClusterRouter, err)
 	}
 
 	return nil
@@ -893,8 +885,7 @@ func (oc *DefaultNetworkController) delAllLegacyHybridRoutePolicies() error {
 func (oc *DefaultNetworkController) cleanUpBFDEntry(gatewayIP, gatewayRouter, prefix string) error {
 	portName := prefix + types.GWRouterToExtSwitchPrefix + gatewayRouter
 	p := func(item *nbdb.LogicalRouterStaticRoute) bool {
-		return item.OutputPort != nil && *item.OutputPort == portName && item.Nexthop == gatewayIP &&
-			item.BFD != nil && *item.BFD != "" && util.HasExternalIDsForCluster(item.ExternalIDs)
+		return item.OutputPort != nil && *item.OutputPort == portName && item.Nexthop == gatewayIP && item.BFD != nil && *item.BFD != ""
 	}
 	logicalRouterStaticRoutes, err := libovsdbops.FindLogicalRouterStaticRoutesWithPredicate(oc.nbClient, p)
 	if err != nil {
@@ -908,7 +899,6 @@ func (oc *DefaultNetworkController) cleanUpBFDEntry(gatewayIP, gatewayRouter, pr
 	bfd := nbdb.BFD{
 		LogicalPort: portName,
 		DstIP:       gatewayIP,
-		ExternalIDs: util.ExternalIDsForCluster(nil),
 	}
 
 	err = libovsdbops.DeleteBFDs(oc.nbClient, &bfd)
@@ -922,7 +912,6 @@ func (oc *DefaultNetworkController) cleanUpBFDEntry(gatewayIP, gatewayRouter, pr
 // extSwitchPrefix returns the prefix of the external switch to use for
 // external gateway routes. In case no second bridge is configured, we
 // use the default one and the prefix is empty.
-// return prefix without cluster prefix
 func (oc *DefaultNetworkController) extSwitchPrefix(nodeName string) (string, error) {
 	node, err := oc.watchFactory.GetNode(nodeName)
 	if err != nil {

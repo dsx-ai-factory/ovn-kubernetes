@@ -32,8 +32,7 @@ func NeOVNEntitySyncer(nbClient libovsdbclient.Client, netInfo util.NetInfo, txn
 func (syncer *ovnEntitySyncer) SyncLogicalSwitches() error {
 	var err error
 	p := func(item *nbdb.LogicalSwitch) bool {
-		return item.ExternalIDs[types.LegacyNetworkExternalID] == syncer.GetNetworkName() &&
-			util.HasExternalIDsForCluster(item.ExternalIDs)
+		return item.ExternalIDs[types.LegacyNetworkExternalID] == syncer.GetNetworkName()
 	}
 	legacyLogicalSwitches, err := libovsdbops.FindLogicalSwitchesWithPredicate(syncer.nbClient, p)
 	if err != nil {
@@ -79,8 +78,7 @@ func (syncer *ovnEntitySyncer) SyncLogicalSwitches() error {
 func (syncer *ovnEntitySyncer) SyncLogicalRouters() error {
 	var err error
 	p := func(item *nbdb.LogicalRouter) bool {
-		return item.ExternalIDs[types.LegacyNetworkExternalID] == syncer.GetNetworkName() &&
-			util.HasExternalIDsForCluster(item.ExternalIDs)
+		return item.ExternalIDs[types.LegacyNetworkExternalID] == syncer.GetNetworkName()
 	}
 	legacyLogicalRouters, err := libovsdbops.FindLogicalRoutersWithPredicate(syncer.nbClient, p)
 	if err != nil {
@@ -127,8 +125,7 @@ func (syncer *ovnEntitySyncer) SyncLogicalRouters() error {
 func (syncer *ovnEntitySyncer) SyncLogicalSwitchPorts() error {
 	var err error
 	p := func(item *nbdb.LogicalSwitchPort) bool {
-		return item.ExternalIDs[types.LegacyNetworkExternalID] == syncer.GetNetworkName() &&
-			item.ExternalIDs["pod"] == "true" && util.HasExternalIDsForCluster(item.ExternalIDs)
+		return item.ExternalIDs[types.LegacyNetworkExternalID] == syncer.GetNetworkName() && item.ExternalIDs["pod"] == "true"
 	}
 	legacyLogicalSwitchPorts, err := libovsdbops.FindAllLogicalSwitchPortsWithPredicate(syncer.nbClient, p)
 	if err != nil {

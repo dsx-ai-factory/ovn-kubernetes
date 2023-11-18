@@ -26,10 +26,11 @@ import (
 // method/structure shared by all layer 2 network controller, including localnet and layer2 network controllres.
 
 type baseSecondaryLayer2NetworkControllerEventHandler struct {
-	baseHandler baseNetworkControllerEventHandler
-	objType     reflect.Type
-	oc          *BaseSecondaryLayer2NetworkController
-	syncFunc    func([]interface{}) error
+	baseHandler  baseNetworkControllerEventHandler
+	watchFactory *factory.WatchFactory
+	objType      reflect.Type
+	oc           *BaseSecondaryLayer2NetworkController
+	syncFunc     func([]interface{}) error
 }
 
 // AreResourcesEqual returns true if, given two objects of a known resource type, the update logic for this resource
@@ -49,7 +50,7 @@ func (h *baseSecondaryLayer2NetworkControllerEventHandler) GetInternalCacheEntry
 // GetResourceFromInformerCache returns the latest state of the object, given an object key and its type.
 // from the informers cache.
 func (h *baseSecondaryLayer2NetworkControllerEventHandler) GetResourceFromInformerCache(key string) (interface{}, error) {
-	return h.baseHandler.getResourceFromInformerCache(h.objType, h.baseHandler.watchFactory, key)
+	return h.baseHandler.getResourceFromInformerCache(h.objType, h.watchFactory, key)
 }
 
 // RecordAddEvent records the add event on this given object.
@@ -195,12 +196,11 @@ func (oc *BaseSecondaryLayer2NetworkController) initRetryFramework() {
 func (oc *BaseSecondaryLayer2NetworkController) newRetryFramework(
 	objectType reflect.Type) *retry.RetryFramework {
 	eventHandler := &baseSecondaryLayer2NetworkControllerEventHandler{
-		baseHandler: baseNetworkControllerEventHandler{
-			watchFactory: oc.watchFactory,
-		},
-		objType:  objectType,
-		oc:       oc,
-		syncFunc: nil,
+		baseHandler:  baseNetworkControllerEventHandler{},
+		objType:      objectType,
+		watchFactory: oc.watchFactory,
+		oc:           oc,
+		syncFunc:     nil,
 	}
 	resourceHandler := &retry.ResourceHandler{
 		HasUpdateFunc:          hasResourceAnUpdateFunc(objectType),
@@ -243,7 +243,7 @@ func (oc *BaseSecondaryLayer2NetworkController) cleanup(topotype, netName string
 	// delete layer 2 logical switches
 	ops, err := libovsdbops.DeleteLogicalSwitchesWithPredicateOps(oc.nbClient, nil,
 		func(item *nbdb.LogicalSwitch) bool {
-			return item.ExternalIDs[types.NetworkExternalID] == netName && util.HasExternalIDsForCluster(item.ExternalIDs)
+			return item.ExternalIDs[types.NetworkExternalID] == netName
 		})
 	if err != nil {
 		return fmt.Errorf("failed to get ops for deleting switches of network %s: %v", netName, err)
@@ -317,7 +317,7 @@ func (oc *BaseSecondaryLayer2NetworkController) initializeLogicalSwitch(switchNa
 	excludeSubnets []*net.IPNet) (*nbdb.LogicalSwitch, error) {
 	logicalSwitch := nbdb.LogicalSwitch{
 		Name:        switchName,
-		ExternalIDs: util.ExternalIDsForCluster(nil),
+		ExternalIDs: map[string]string{},
 	}
 	logicalSwitch.ExternalIDs[types.NetworkExternalID] = oc.GetNetworkName()
 	logicalSwitch.ExternalIDs[types.TopologyExternalID] = oc.TopologyType()

@@ -65,11 +65,6 @@ func (ncm *nodeNetworkControllerManager) CleanupDeletedNetworks(allControllers [
 	klog.V(5).Infof("Upgrade OVS interface's external-ids and delete stale ones")
 	// Get all OVN-K8S OVS interfaces
 	ovsArgs := []string{"external_ids:sandbox!=\"\""}
-	if util.IsClusterScoped() {
-		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:cluster_name=%s", config.Kubernetes.ClusterName))
-	} else {
-		ovsArgs = append(ovsArgs, "external_ids:cluster_name{=}[]")
-	}
 	ovsIntefaceToExternalIDMap, err := util.GetOVSInterfaceToExternalIDMapFiltered(ovsArgs)
 	if err != nil {
 		return err
@@ -299,11 +294,6 @@ func (ncm *nodeNetworkControllerManager) checkForStaleOVSRepresentorInterfaces()
 	// and ovn_kube_mode set.
 	ovsArgs := []string{"external_ids:sandbox!=\"\"", "external_ids:netdev-name!=\"\"",
 		fmt.Sprintf("external_ids:ovn_kube_mode=%s", config.OvnKubeNode.Mode)}
-	if util.IsClusterScoped() {
-		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:cluster_name=%s", config.Kubernetes.ClusterName))
-	} else {
-		ovsArgs = append(ovsArgs, "external_ids:cluster_name{=}[]")
-	}
 	ovsIntefaceToExternalIDMap, err := util.GetOVSInterfaceToExternalIDMapFiltered(ovsArgs)
 	if err != nil {
 		klog.Errorf(err.Error())
@@ -373,7 +363,7 @@ func checkForStaleOVSInternalPorts() {
 	staleInterfaceArgs := []string{}
 	values := strings.Split(stdout, "\n\n")
 	for _, val := range values {
-		if val == config.OvnKubeNode.MgmtPortIntfName || val == config.OvnKubeNode.MgmtPortIntfName+"_0" {
+		if val == ovntypes.K8sMgmtIntfName || val == ovntypes.K8sMgmtIntfName+"_0" {
 			klog.Errorf("Management port %s is missing. Perhaps the host rebooted "+
 				"or SR-IOV VFs were disabled on the host.", val)
 			continue

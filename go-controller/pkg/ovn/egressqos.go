@@ -384,7 +384,7 @@ func (oc *DefaultNetworkController) repairEgressQoSes() error {
 			return false
 		}
 
-		return !nsWithQoS[ns] && util.HasExternalIDsForCluster(q.ExternalIDs)
+		return !nsWithQoS[ns]
 	}
 	existingQoSes, err := libovsdbops.FindQoSesWithPredicate(oc.nbClient, p)
 	if err != nil {
@@ -486,7 +486,7 @@ func (oc *DefaultNetworkController) cleanEgressQoSNS(namespace string) error {
 		if !ok { // the QoS is not managed by an EgressQoS
 			return false
 		}
-		return eqNs == eq.namespace && util.HasExternalIDsForCluster(q.ExternalIDs)
+		return eqNs == eq.namespace
 	}
 	existingQoSes, err := libovsdbops.FindQoSesWithPredicate(oc.nbClient, p)
 	if err != nil {
@@ -576,7 +576,7 @@ func (oc *DefaultNetworkController) addEgressQoS(eqObj *egressqosapi.EgressQoS) 
 			Match:       match,
 			Priority:    r.priority,
 			Action:      map[string]int{nbdb.QoSActionDSCP: r.dscp},
-			ExternalIDs: util.ExternalIDsForCluster(map[string]string{"EgressQoS": eq.namespace}),
+			ExternalIDs: map[string]string{"EgressQoS": eq.namespace},
 		}
 		qoses = append(qoses, qos)
 	}
@@ -633,11 +633,7 @@ func (oc *DefaultNetworkController) egressQoSSwitches() ([]string, error) {
 	// Find all node switches
 	p := func(item *nbdb.LogicalSwitch) bool {
 		// Ignore external and Join switches(both legacy and current)
-		return !(strings.HasPrefix(item.Name, util.GetClusterScopedName(types.JoinSwitchPrefix)) ||
-			item.Name == util.GetClusterScopedName(types.OVNJoinSwitch) ||
-			item.Name == util.GetClusterScopedName(types.TransitSwitch) ||
-			strings.HasPrefix(item.Name, util.GetClusterScopedName(types.ExternalSwitchPrefix))) &&
-			util.HasExternalIDsForCluster(item.ExternalIDs)
+		return !(strings.HasPrefix(item.Name, types.JoinSwitchPrefix) || item.Name == types.OVNJoinSwitch || item.Name == types.TransitSwitch || strings.HasPrefix(item.Name, types.ExternalSwitchPrefix))
 	}
 
 	nodeLocalSwitches, err := libovsdbops.FindLogicalSwitchesWithPredicate(oc.nbClient, p)
@@ -994,7 +990,7 @@ func (oc *DefaultNetworkController) syncEgressQoSNode(key string) error {
 	klog.V(5).Infof("EgressQoS %s node retrieved from lister: %v", n.Name, n)
 
 	nodeSw := &nbdb.LogicalSwitch{
-		Name: util.GetClusterScopedName(n.Name),
+		Name: n.Name,
 	}
 	nodeSw, err = libovsdbops.GetLogicalSwitch(oc.nbClient, nodeSw)
 	if err != nil {
@@ -1003,7 +999,7 @@ func (oc *DefaultNetworkController) syncEgressQoSNode(key string) error {
 
 	p := func(q *nbdb.QoS) bool {
 		_, ok := q.ExternalIDs["EgressQoS"]
-		return ok && util.HasExternalIDsForCluster(q.ExternalIDs)
+		return ok
 	}
 	existingQoSes, err := libovsdbops.FindQoSesWithPredicate(oc.nbClient, p)
 	if err != nil {

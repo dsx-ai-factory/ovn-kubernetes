@@ -190,7 +190,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo, netInf
 	oc := &DefaultNetworkController{
 		BaseNetworkController: BaseNetworkController{
 			CommonNetworkControllerInfo: *cnci,
-			controllerName:              util.GetClusterScopedName(DefaultNetworkControllerName),
+			controllerName:              DefaultNetworkControllerName,
 			NetInfo:                     netInfo,
 			lsManager:                   lsm.NewLogicalSwitchManager(),
 			logicalPortCache:            newPortCache(defaultStopChan),
@@ -229,7 +229,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo, netInf
 	// allocate the first IPs in the join switch subnets.
 	gwLRPIfAddrs, err := oc.getOVNClusterRouterPortToJoinSwitchIfAddrs()
 	if err != nil {
-		return nil, fmt.Errorf("failed to allocate join switch IP address connected to %s: %v", util.GetClusterScopedName(types.OVNClusterRouter), err)
+		return nil, fmt.Errorf("failed to allocate join switch IP address connected to %s: %v", types.OVNClusterRouter, err)
 	}
 
 	oc.ovnClusterLRPToJoinIfAddrs = gwLRPIfAddrs
@@ -260,10 +260,9 @@ func (oc *DefaultNetworkController) initRetryFramework() {
 func (oc *DefaultNetworkController) newRetryFramework(
 	objectType reflect.Type) *retry.RetryFramework {
 	eventHandler := &defaultNetworkControllerEventHandler{
-		baseHandler: baseNetworkControllerEventHandler{
-			watchFactory: oc.watchFactory,
-		},
+		baseHandler:     baseNetworkControllerEventHandler{},
 		objType:         objectType,
+		watchFactory:    oc.watchFactory,
 		oc:              oc,
 		extraParameters: nil, // in use by network policy dynamic watchers
 		syncFunc:        nil,
@@ -365,31 +364,31 @@ func (oc *DefaultNetworkController) Init(ctx context.Context) error {
 		klog.Warningf("Load Balancer Group support enabled, however version of OVN in use does not support Load Balancer Groups.")
 	} else {
 		loadBalancerGroup := nbdb.LoadBalancerGroup{
-			Name: util.GetClusterScopedName(ovntypes.ClusterLBGroupName),
+			Name: ovntypes.ClusterLBGroupName,
 		}
 		err := libovsdbops.CreateOrUpdateLoadBalancerGroup(oc.nbClient, &loadBalancerGroup)
 		if err != nil {
-			klog.Errorf("Error creating cluster-wide load balancer group %s: %v", util.GetClusterScopedName(ovntypes.ClusterLBGroupName), err)
+			klog.Errorf("Error creating cluster-wide load balancer group %s: %v", ovntypes.ClusterLBGroupName, err)
 			return err
 		}
 		oc.clusterLoadBalancerGroupUUID = loadBalancerGroup.UUID
 
 		loadBalancerGroup = nbdb.LoadBalancerGroup{
-			Name: util.GetClusterScopedName(ovntypes.ClusterSwitchLBGroupName),
+			Name: ovntypes.ClusterSwitchLBGroupName,
 		}
 		err = libovsdbops.CreateOrUpdateLoadBalancerGroup(oc.nbClient, &loadBalancerGroup)
 		if err != nil {
-			klog.Errorf("Error creating cluster-wide switch load balancer group %s: %v", util.GetClusterScopedName(ovntypes.ClusterSwitchLBGroupName), err)
+			klog.Errorf("Error creating cluster-wide switch load balancer group %s: %v", ovntypes.ClusterSwitchLBGroupName, err)
 			return err
 		}
 		oc.switchLoadBalancerGroupUUID = loadBalancerGroup.UUID
 
 		loadBalancerGroup = nbdb.LoadBalancerGroup{
-			Name: util.GetClusterScopedName(ovntypes.ClusterRouterLBGroupName),
+			Name: ovntypes.ClusterRouterLBGroupName,
 		}
 		err = libovsdbops.CreateOrUpdateLoadBalancerGroup(oc.nbClient, &loadBalancerGroup)
 		if err != nil {
-			klog.Errorf("Error creating cluster-wide router load balancer group %s: %v", util.GetClusterScopedName(ovntypes.ClusterRouterLBGroupName), err)
+			klog.Errorf("Error creating cluster-wide router load balancer group %s: %v", ovntypes.ClusterRouterLBGroupName, err)
 			return err
 		}
 		oc.routerLoadBalancerGroupUUID = loadBalancerGroup.UUID
@@ -617,7 +616,7 @@ func (oc *DefaultNetworkController) StartInterConnect(icInfo *util.InterConnectI
 		klog.Errorf("Inter-connect error: network %s can only connect to layer 2 network", oc.GetNetworkName())
 		return nil
 	}
-	routerName := util.GetClusterScopedName(ovntypes.OVNClusterRouter)
+	routerName := ovntypes.OVNClusterRouter
 	logicalRouter := &nbdb.LogicalRouter{Name: routerName}
 	return oc.ConnectToNetworks(logicalSwitch, logicalRouter, icInfo.Subnets)
 }
@@ -629,13 +628,14 @@ func (oc *DefaultNetworkController) StopInterConnect(icInfo *util.InterConnectIn
 		klog.Errorf("Inter-connect error: network %s can only connect to layer 2 network", oc.GetNetworkName())
 		return nil
 	}
-	routerName := util.GetClusterScopedName(ovntypes.OVNClusterRouter)
+	routerName := ovntypes.OVNClusterRouter
 	logicalRouter := &nbdb.LogicalRouter{Name: routerName}
 	return oc.DisconnectFromNetworks(logicalSwitch, logicalRouter)
 }
 
 type defaultNetworkControllerEventHandler struct {
 	baseHandler     baseNetworkControllerEventHandler
+	watchFactory    *factory.WatchFactory
 	objType         reflect.Type
 	oc              *DefaultNetworkController
 	extraParameters interface{}
@@ -665,7 +665,7 @@ func (h *defaultNetworkControllerEventHandler) GetInternalCacheEntry(obj interfa
 // GetResourceFromInformerCache returns the latest state of the object, given an object key and its type.
 // from the informers cache.
 func (h *defaultNetworkControllerEventHandler) GetResourceFromInformerCache(key string) (interface{}, error) {
-	return h.baseHandler.getResourceFromInformerCache(h.objType, h.baseHandler.watchFactory, key)
+	return h.baseHandler.getResourceFromInformerCache(h.objType, h.watchFactory, key)
 }
 
 // RecordAddEvent records the add event on this given object.
@@ -792,7 +792,7 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 				nodeParams = &nodeSyncs{true, true, true, true, config.HybridOverlay.Enabled, config.OVNKubernetesFeature.EnableInterconnect, syncMigratablePods}
 			}
 
-			if err = h.oc.addUpdateLocalNodeEvent(node, nil, nodeParams); err != nil {
+			if err = h.oc.addUpdateLocalNodeEvent(node, nodeParams); err != nil {
 				klog.Infof("Node add failed for %s, will try again later: %v",
 					node.Name, err)
 				return err
@@ -920,38 +920,29 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 		if newNodeIsLocalZoneNode {
 			var nodeSyncsParam *nodeSyncs
 			if h.oc.isLocalZoneNode(oldNode) {
-				newNoHostSubnet := util.NoHostSubnet(newNode)
-				oldNoHostSubnet := util.NoHostSubnet(oldNode)
-				if oldNoHostSubnet && !newNoHostSubnet {
-					nodeHostSubnets, _ := util.ParseNodeHostSubnetAnnotation(newNode, ovntypes.DefaultNetworkName)
-					syncMigratablePods := nodeHostSubnets != nil
-					// Node is from not managed to managed now, need to reconfigure all logical elements
-					nodeSyncsParam = &nodeSyncs{true, true, true, true, config.HybridOverlay.Enabled, config.OVNKubernetesFeature.EnableInterconnect, syncMigratablePods}
-				} else {
-					// determine what actually changed in this update
-					_, nodeSync := h.oc.addNodeFailed.Load(newNode.Name)
-					_, failed := h.oc.nodeClusterRouterPortFailed.Load(newNode.Name)
-					clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChanged || h.oc.skipPinnedLSChanged(oldNode, newNode)
-					_, failed = h.oc.mgmtPortFailed.Load(newNode.Name)
-					mgmtSync := failed || macAddressChanged(oldNode, newNode) || nodeSubnetChanged
-					_, failed = h.oc.gatewaysFailed.Load(newNode.Name)
-					gwSync := (failed || gatewayChanged(oldNode, newNode) ||
-						nodeSubnetChanged || hostCIDRsChanged(oldNode, newNode) ||
-						nodeGatewayMTUSupportChanged(oldNode, newNode))
-					_, hoSync := h.oc.hybridOverlayFailed.Load(newNode.Name)
-					_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
-					syncZoneIC = syncZoneIC || zoneClusterChanged || primaryAddrChanged(oldNode, newNode)
-					_, failed = h.oc.syncMigratablePodsFailed.Load(newNode.Name)
-					syncMigratablePods := failed || nodeSubnetChanged
-					nodeSyncsParam = &nodeSyncs{
-						nodeSync,
-						clusterRtrSync,
-						mgmtSync,
-						gwSync,
-						hoSync,
-						syncZoneIC,
-						syncMigratablePods}
-				}
+				// determine what actually changed in this update
+				_, nodeSync := h.oc.addNodeFailed.Load(newNode.Name)
+				_, failed := h.oc.nodeClusterRouterPortFailed.Load(newNode.Name)
+				clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChanged || h.oc.skipPinnedLSChanged(oldNode, newNode)
+				_, failed = h.oc.mgmtPortFailed.Load(newNode.Name)
+				mgmtSync := failed || macAddressChanged(oldNode, newNode) || nodeSubnetChanged
+				_, failed = h.oc.gatewaysFailed.Load(newNode.Name)
+				gwSync := (failed || gatewayChanged(oldNode, newNode) ||
+					nodeSubnetChanged || hostCIDRsChanged(oldNode, newNode) ||
+					nodeGatewayMTUSupportChanged(oldNode, newNode))
+				_, hoSync := h.oc.hybridOverlayFailed.Load(newNode.Name)
+				_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
+				syncZoneIC = syncZoneIC || zoneClusterChanged || primaryAddrChanged(oldNode, newNode)
+				_, failed = h.oc.syncMigratablePodsFailed.Load(newNode.Name)
+				syncMigratablePods := failed || nodeSubnetChanged
+				nodeSyncsParam = &nodeSyncs{
+					nodeSync,
+					clusterRtrSync,
+					mgmtSync,
+					gwSync,
+					hoSync,
+					syncZoneIC,
+					syncMigratablePods}
 			} else {
 				klog.Infof("Node %s moved from the remote zone %s to local zone.",
 					newNode.Name, util.GetNodeZone(oldNode), util.GetNodeZone(newNode))
@@ -959,7 +950,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 				nodeSyncsParam = &nodeSyncs{true, true, true, true, true, config.OVNKubernetesFeature.EnableInterconnect, true}
 			}
 
-			return h.oc.addUpdateLocalNodeEvent(newNode, oldNode, nodeSyncsParam)
+			return h.oc.addUpdateLocalNodeEvent(newNode, nodeSyncsParam)
 		} else {
 			_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
 

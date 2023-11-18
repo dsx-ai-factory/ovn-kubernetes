@@ -252,16 +252,15 @@ func (c *Controller) createOrUpdateLogicalRouterPoliciesOps(key, v4MgmtIP, v6Mgm
 			Priority: ovntypes.EgressSVCReroutePriority,
 			Nexthops: []string{v4MgmtIP},
 			Action:   nbdb.LogicalRouterPolicyActionReroute,
-			ExternalIDs: util.ExternalIDsForCluster(map[string]string{
+			ExternalIDs: map[string]string{
 				svcExternalIDKey: key,
-			}),
+			},
 		}
 		p := func(item *nbdb.LogicalRouterPolicy) bool {
-			return item.Match == lrp.Match && item.Priority == lrp.Priority && item.ExternalIDs[svcExternalIDKey] == key &&
-				util.HasExternalIDsForCluster(item.ExternalIDs)
+			return item.Match == lrp.Match && item.Priority == lrp.Priority && item.ExternalIDs[svcExternalIDKey] == key
 		}
 
-		allOps, err = libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicateOps(c.nbClient, allOps, util.GetClusterScopedName(ovntypes.OVNClusterRouter), lrp, p)
+		allOps, err = libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicateOps(c.nbClient, allOps, ovntypes.OVNClusterRouter, lrp, p)
 		if err != nil {
 			return nil, err
 		}
@@ -273,16 +272,15 @@ func (c *Controller) createOrUpdateLogicalRouterPoliciesOps(key, v4MgmtIP, v6Mgm
 			Priority: ovntypes.EgressSVCReroutePriority,
 			Nexthops: []string{v6MgmtIP},
 			Action:   nbdb.LogicalRouterPolicyActionReroute,
-			ExternalIDs: util.ExternalIDsForCluster(map[string]string{
+			ExternalIDs: map[string]string{
 				svcExternalIDKey: key,
-			}),
+			},
 		}
 		p := func(item *nbdb.LogicalRouterPolicy) bool {
-			return item.Match == lrp.Match && item.Priority == lrp.Priority && item.ExternalIDs[svcExternalIDKey] == key &&
-				util.HasExternalIDsForCluster(item.ExternalIDs)
+			return item.Match == lrp.Match && item.Priority == lrp.Priority && item.ExternalIDs[svcExternalIDKey] == key
 		}
 
-		allOps, err = libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicateOps(c.nbClient, allOps, util.GetClusterScopedName(ovntypes.OVNClusterRouter), lrp, p)
+		allOps, err = libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicateOps(c.nbClient, allOps, ovntypes.OVNClusterRouter, lrp, p)
 		if err != nil {
 			return nil, err
 		}
@@ -300,11 +298,10 @@ func (c *Controller) deleteLogicalRouterPoliciesOps(key string, v4Endpoints, v6E
 	for _, addr := range v4Endpoints {
 		match := fmt.Sprintf("ip4.src == %s", addr)
 		p := func(item *nbdb.LogicalRouterPolicy) bool {
-			return item.Match == match && item.Priority == ovntypes.EgressSVCReroutePriority && item.ExternalIDs[svcExternalIDKey] == key &&
-				util.HasExternalIDsForCluster(item.ExternalIDs)
+			return item.Match == match && item.Priority == ovntypes.EgressSVCReroutePriority && item.ExternalIDs[svcExternalIDKey] == key
 		}
 
-		allOps, err = libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(c.nbClient, allOps, util.GetClusterScopedName(ovntypes.OVNClusterRouter), p)
+		allOps, err = libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(c.nbClient, allOps, ovntypes.OVNClusterRouter, p)
 		if err != nil {
 			return nil, err
 		}
@@ -313,11 +310,10 @@ func (c *Controller) deleteLogicalRouterPoliciesOps(key string, v4Endpoints, v6E
 	for _, addr := range v6Endpoints {
 		match := fmt.Sprintf("ip6.src == %s", addr)
 		p := func(item *nbdb.LogicalRouterPolicy) bool {
-			return item.Match == match && item.Priority == ovntypes.EgressSVCReroutePriority && item.ExternalIDs[svcExternalIDKey] == key &&
-				util.HasExternalIDsForCluster(item.ExternalIDs)
+			return item.Match == match && item.Priority == ovntypes.EgressSVCReroutePriority && item.ExternalIDs[svcExternalIDKey] == key
 		}
 
-		allOps, err = libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(c.nbClient, allOps, util.GetClusterScopedName(ovntypes.OVNClusterRouter), p)
+		allOps, err = libovsdbops.DeleteLogicalRouterPolicyWithPredicateOps(c.nbClient, allOps, ovntypes.OVNClusterRouter, p)
 		if err != nil {
 			return nil, err
 		}

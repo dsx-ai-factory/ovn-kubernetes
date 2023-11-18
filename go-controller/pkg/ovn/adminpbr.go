@@ -84,7 +84,7 @@ func newInternalAdminPBRPolicy(controller *BaseNetworkController, apbr *adminpbr
 		network:           apbr.Spec.NetworkAttachmentName,
 		nextHopIPs:        policy.NextHop.NextHopIPs,
 		to:                policy.To,
-		logicalRouterName: util.GetClusterScopedName(controller.GetNetworkScopedName(types.OVNClusterRouter)),
+		logicalRouterName: controller.GetNetworkScopedName(types.OVNClusterRouter),
 		addressSetErrors:  make(map[string]string),
 	}
 
@@ -463,19 +463,18 @@ func (bnc *BaseNetworkController) applyAdminPBR(adminpbr *adminpbrapi.AdminPolic
 		Action:   nbdb.LogicalRouterPolicyActionReroute,
 	}
 	// add external IDs
-	lrp.ExternalIDs = util.ExternalIDsForCluster(map[string]string{
+	lrp.ExternalIDs = map[string]string{
 		types.ExternalIDK8sOwner:     ownerVal.String(),
 		types.OvnK8sPrefix + "/kind": util.GroupKindOf(adminpbr),
 		types.ExternalIDHash:         policy.hash,
 		types.ExternalIDNetAttachDef: adminpbr.Spec.NetworkAttachmentName,
 		types.ExternalIDRouter:       policy.logicalRouterName,
-	})
+	}
 
 	p := func(item *nbdb.LogicalRouterPolicy) bool {
 		return item.Priority == types.AminPBRReroutePriority && item.Match == match &&
 			item.ExternalIDs[types.ExternalIDK8sOwner] == ownerVal.String() &&
-			item.ExternalIDs[types.ExternalIDNetAttachDef] == adminpbr.Spec.NetworkAttachmentName &&
-			util.HasExternalIDsForCluster(item.ExternalIDs)
+			item.ExternalIDs[types.ExternalIDNetAttachDef] == adminpbr.Spec.NetworkAttachmentName
 	}
 
 	err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(bnc.nbClient, policy.logicalRouterName, &lrp, p,
@@ -836,8 +835,7 @@ func (bnc *BaseNetworkController) cleanupLogicalRouterPolicy(adminPBRName string
 	if err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(bnc.nbClient, policy.logicalRouterName, func(item *nbdb.LogicalRouterPolicy) bool {
 		return item.Priority == types.AminPBRReroutePriority &&
 			item.ExternalIDs[types.ExternalIDK8sOwner] == prefixedAdminPBRName &&
-			item.ExternalIDs[types.ExternalIDHash] == policy.hash &&
-			util.HasExternalIDsForCluster(item.ExternalIDs)
+			item.ExternalIDs[types.ExternalIDHash] == policy.hash
 	}); err != nil {
 		return fmt.Errorf("failed to delete adminpbr %s, err: %v", prefixedAdminPBRName, err)
 	}
@@ -849,8 +847,8 @@ func (bnc *BaseNetworkController) cleanupLogicalRouterPolicy(adminPBRName string
 }
 
 func (bnc *BaseNetworkController) deleteLogicalRouterPoliciesByPriority(priority int) error {
-	return libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(bnc.nbClient, util.GetClusterScopedName(bnc.GetNetworkScopedName(types.OVNClusterRouter)), func(item *nbdb.LogicalRouterPolicy) bool {
-		return item.Priority == priority && util.HasExternalIDsForCluster(item.ExternalIDs)
+	return libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(bnc.nbClient, bnc.GetNetworkScopedName(types.OVNClusterRouter), func(item *nbdb.LogicalRouterPolicy) bool {
+		return item.Priority == priority
 	})
 }
 
@@ -882,18 +880,16 @@ func (bnc *BaseNetworkController) noRerouteToJoinSubnet() error {
 	v4AddrSetName, _ := addrSet.GetASHashNames()
 	match := fmt.Sprintf("ip4.src == {$%s} && ip4.dst == %s ", v4AddrSetName, config.Gateway.V4JoinSubnet)
 	lrp := nbdb.LogicalRouterPolicy{
-		Priority:    types.NoRerouteJoinSubnetPriority,
-		Match:       match,
-		Action:      nbdb.LogicalRouterPolicyActionAllow,
-		ExternalIDs: util.ExternalIDsForCluster(nil),
+		Priority: types.NoRerouteJoinSubnetPriority,
+		Match:    match,
+		Action:   nbdb.LogicalRouterPolicyActionAllow,
 	}
 	p := func(item *nbdb.LogicalRouterPolicy) bool {
-		return item.Priority == types.NoRerouteJoinSubnetPriority && item.Match == match &&
-			util.HasExternalIDsForCluster(item.ExternalIDs)
+		return item.Priority == types.NoRerouteJoinSubnetPriority && item.Match == match
 	}
 
 	if err = libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(bnc.nbClient,
-		util.GetClusterScopedName(bnc.GetNetworkScopedName(types.OVNClusterRouter)), &lrp, p,
+		bnc.GetNetworkScopedName(types.OVNClusterRouter), &lrp, p,
 		&lrp.Match, &lrp.Action, &lrp.Priority, &lrp.ExternalIDs); err != nil {
 		return fmt.Errorf("unable to add logical router policy for join subnet %s: %v", config.Gateway.V4JoinSubnet, err)
 	}

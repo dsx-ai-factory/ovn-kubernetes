@@ -112,16 +112,16 @@ func (bnc *BaseNetworkController) deleteStaleLogicalSwitchPorts(expectedLogicalP
 		switchNames = make([]string, 0, len(nodes))
 		for _, n := range nodes {
 			// skip nodes that are not running ovnk (inferred from host subnets)
-			switchName := util.GetClusterScopedName(bnc.GetNetworkScopedName(n.Name))
+			switchName := bnc.GetNetworkScopedName(n.Name)
 			if bnc.lsManager.IsNonHostSubnetSwitch(switchName) {
 				continue
 			}
 			switchNames = append(switchNames, switchName)
 		}
 	} else if topoType == ovntypes.Layer2Topology {
-		switchNames = []string{util.GetClusterScopedName(bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch))}
+		switchNames = []string{bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch)}
 	} else if topoType == ovntypes.LocalnetTopology {
-		switchNames = []string{util.GetClusterScopedName(bnc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch))}
+		switchNames = []string{bnc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch)}
 	} else {
 		return fmt.Errorf("topology type %s not supported", topoType)
 	}
@@ -138,8 +138,7 @@ func (bnc *BaseNetworkController) deleteStaleLogicalSwitchPortsOnSwitches(switch
 	nsNeedUpdate := make(map[string][]*net.IPNet)
 	for _, switchName := range switchNames {
 		p := func(item *nbdb.LogicalSwitchPort) bool {
-			return item.ExternalIDs["pod"] == "true" && !expectedLogicalPorts[item.Name] &&
-				util.HasExternalIDsForCluster(item.ExternalIDs)
+			return item.ExternalIDs["pod"] == "true" && !expectedLogicalPorts[item.Name]
 		}
 		sw := nbdb.LogicalSwitch{
 			Name: switchName,
@@ -445,16 +444,16 @@ func (bnc *BaseNetworkController) podExpectedInLogicalCache(pod *kapi.Pod) bool 
 }
 
 func (bnc *BaseNetworkController) getExpectedSwitchName(pod *kapi.Pod) (string, error) {
-	switchName := util.GetClusterScopedName(pod.Spec.NodeName)
+	switchName := pod.Spec.NodeName
 	if bnc.IsSecondary() {
 		topoType := bnc.TopologyType()
 		switch topoType {
 		case ovntypes.Layer3Topology:
-			switchName = util.GetClusterScopedName(bnc.GetNetworkScopedName(pod.Spec.NodeName))
+			switchName = bnc.GetNetworkScopedName(pod.Spec.NodeName)
 		case ovntypes.Layer2Topology:
-			switchName = util.GetClusterScopedName(bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch))
+			switchName = bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch)
 		case ovntypes.LocalnetTopology:
-			switchName = util.GetClusterScopedName(bnc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch))
+			switchName = bnc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch)
 		default:
 			return "", fmt.Errorf("topology type %s not supported", topoType)
 		}
@@ -611,7 +610,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 	lsp.Addresses = addresses
 
 	// add external ids
-	lsp.ExternalIDs = util.ExternalIDsForCluster(map[string]string{"namespace": pod.Namespace, "pod": "true"})
+	lsp.ExternalIDs = map[string]string{"namespace": pod.Namespace, "pod": "true"}
 	if bnc.IsSecondary() {
 		lsp.ExternalIDs[ovntypes.NetworkExternalID] = bnc.GetNetworkName()
 		lsp.ExternalIDs[ovntypes.NADExternalID] = nadName
@@ -916,7 +915,7 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *kapi.Pod, skipIPAM 
 	var podMac net.HardwareAddr
 	var podIfAddrs []*net.IPNet
 
-	switchName := util.GetClusterScopedName(pod.Spec.NodeName)
+	switchName := pod.Spec.NodeName
 
 	podAnnotation, zoneContainsPodSubnet, err := bnc.ensurePodAnnotation(pod, nadName)
 	if err != nil {

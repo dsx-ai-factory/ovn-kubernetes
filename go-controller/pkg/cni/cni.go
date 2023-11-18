@@ -290,9 +290,9 @@ func HandlePodRequest(request *PodRequest, clientset *ClientSet, kubeAuth *KubeA
 	var response *Response
 	var err, err1 error
 
-	klog.Infof("%s %s starting CNI request (%+v) DeviceID(%q) for pod %s/%s network %s NAD %s cluster_name %s and ovnkubemode %s",
+	klog.Infof("%s %s starting CNI request (%+v) DeviceID(%q) for pod %s/%s network %s NAD %s and ovnkubemode %s",
 		request, request.Command, request, request.CNIConf.DeviceID, request.PodNamespace, request.PodName, request.netName,
-		request.nadName, config.Kubernetes.ClusterName, config.OvnKubeNode.Mode)
+		request.nadName, config.OvnKubeNode.Mode)
 	switch request.Command {
 	case CNIAdd:
 		response, err = request.cmdAdd(kubeAuth, clientset)

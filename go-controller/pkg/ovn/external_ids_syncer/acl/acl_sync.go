@@ -133,8 +133,7 @@ func (syncer *baseAclSyncer) SyncACLs(getUpdatedACLs func([]*nbdb.ACL) ([]*nbdb.
 	// stale acls don't have controller ID
 	legacyAclPred := func(item *nbdb.ACL) bool {
 		return item.ExternalIDs[libovsdbops.OwnerControllerKey.String()] == "" &&
-			util.NetworkNameExternalIDExists(item.ExternalIDs, syncer.GetNetworkName()) &&
-			util.HasExternalIDsForCluster(item.ExternalIDs)
+			util.NetworkNameExternalIDExists(item.ExternalIDs, syncer.GetNetworkName())
 	}
 	legacyACLs, err := libovsdbops.FindACLsWithPredicate(syncer.nbClient, legacyAclPred)
 	if err != nil {
@@ -260,31 +259,27 @@ func (syncer *aclSyncer) updateStaleMulticastACLsDbIDs(legacyACLs []*nbdb.ACL) [
 			if acl.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] == string(knet.PolicyTypeIngress) {
 				// ingress allow acl
 				// either default of namespaced
-				if strings.Contains(acl.Match, util.GetClusterScopedName(types.ClusterRtrPortGroupNameBase)) {
+				if strings.Contains(acl.Match, types.ClusterRtrPortGroupNameBase) {
 					// default allow ingress
 					dbIDs = syncer.getDefaultMcastACLDbIDs(mcastAllowInterNodeID, string(knet.PolicyTypeIngress))
 				} else {
 					// namespace allow ingress
 					// acl Name can be truncated (max length 64), but k8s namespace is limited to 63 symbols,
 					// therefore it is safe to extract it from the name
-					aclName := libovsdbops.GetACLName(acl)
-					aclName = util.RemoveMultiClusterScopeFromName(aclName)
-					ns := strings.Split(aclName, "_")[0]
+					ns := strings.Split(libovsdbops.GetACLName(acl), "_")[0]
 					dbIDs = syncer.getNamespaceMcastACLDbIDs(ns, string(knet.PolicyTypeIngress))
 				}
 			} else if acl.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] == string(knet.PolicyTypeEgress) {
 				// egress allow acl
 				// either default of namespaced
-				if strings.Contains(acl.Match, util.GetClusterScopedName(types.ClusterRtrPortGroupNameBase)) {
+				if strings.Contains(acl.Match, types.ClusterRtrPortGroupNameBase) {
 					// default allow egress
 					dbIDs = syncer.getDefaultMcastACLDbIDs(mcastAllowInterNodeID, string(knet.PolicyTypeEgress))
 				} else {
 					// namespace allow egress
 					// acl Name can be truncated (max length 64), but k8s namespace is limited to 63 symbols,
 					// therefore it is safe to extract it from the name
-					aclName := libovsdbops.GetACLName(acl)
-					aclName = util.RemoveMultiClusterScopeFromName(aclName)
-					ns := strings.Split(aclName, "_")[0]
+					ns := strings.Split(libovsdbops.GetACLName(acl), "_")[0]
 					dbIDs = syncer.getNamespaceMcastACLDbIDs(ns, string(knet.PolicyTypeEgress))
 				}
 			} else {
@@ -486,9 +481,7 @@ func (syncer *baseAclSyncer) updateStaleDefaultDenyNetpolACLs(legacyACLs []*nbdb
 		// works for both older name <namespace>_<policyname> and newer
 		// <namespace>_egressDefaultDeny OR <namespace>_ingressDefaultDeny
 		// note that acl name does not have the network prefix
-		aclName := libovsdbops.GetACLName(acl)
-		aclName = util.RemoveMultiClusterScopeFromName(aclName)
-		ns := strings.Split(aclName, "_")[0]
+		ns := strings.Split(libovsdbops.GetACLName(acl), "_")[0]
 
 		// distinguish ARPAllowACL from DefaultDeny
 		var defaultDenyACLType string

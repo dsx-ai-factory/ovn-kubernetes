@@ -27,18 +27,18 @@ func DeleteRoutingForMigratedPodWithZone(nbClient libovsdbclient.Client, pod *co
 		if zone != "" {
 			containsZone = itemExternalIDs[OvnZoneExternalIDKey] == zone
 		}
-		return containsZone && externalIDsContainsVM(itemExternalIDs, vm) && util.HasExternalIDsForCluster(itemExternalIDs)
+		return containsZone && externalIDsContainsVM(itemExternalIDs, vm)
 	}
 	routePredicate := func(item *nbdb.LogicalRouterStaticRoute) bool {
 		return predicate(item.ExternalIDs)
 	}
-	if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(nbClient, util.GetClusterScopedName(types.OVNClusterRouter), routePredicate); err != nil {
+	if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(nbClient, types.OVNClusterRouter, routePredicate); err != nil {
 		return fmt.Errorf("failed deleting pod routing when deleting the LR static routes: %v", err)
 	}
 	policyPredicate := func(item *nbdb.LogicalRouterPolicy) bool {
 		return predicate(item.ExternalIDs)
 	}
-	if err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(nbClient, util.GetClusterScopedName(types.OVNClusterRouter), policyPredicate); err != nil {
+	if err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(nbClient, types.OVNClusterRouter, policyPredicate); err != nil {
 		return fmt.Errorf("failed deleting pod routing when deleting the LR policies: %v", err)
 	}
 	return nil
@@ -99,7 +99,7 @@ func EnsureLocalZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory, 
 		}
 	}
 
-	lrpName := types.GWRouterToJoinSwitchPrefix + util.GetClusterScopedName(types.GWRouterPrefix+pod.Spec.NodeName)
+	lrpName := types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + pod.Spec.NodeName
 	lrpAddresses, err := libovsdbutil.GetLRPAddrs(nbClient, lrpName)
 	if err != nil {
 		return fmt.Errorf("failed configuring pod routing when reading LRP %s addresses: %v", lrpName, err)
@@ -123,34 +123,34 @@ func EnsureLocalZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory, 
 				Action:   nbdb.LogicalRouterPolicyActionReroute,
 				Nexthops: []string{nodeGRAddress.IP.String()},
 				Priority: types.EgressLiveMigrationReroutePiority,
-				ExternalIDs: util.ExternalIDsForCluster(map[string]string{
+				ExternalIDs: map[string]string{
 					OvnZoneExternalIDKey:         OvnLocalZone,
 					VirtualMachineExternalIDsKey: pod.Labels[kubevirtv1.VirtualMachineNameLabel],
 					NamespaceExternalIDsKey:      pod.Namespace,
-				}),
+				},
 			}
-			if err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(nbClient, util.GetClusterScopedName(types.OVNClusterRouter), &egressPolicy, func(item *nbdb.LogicalRouterPolicy) bool {
-				return item.Priority == egressPolicy.Priority && item.Match == egressPolicy.Match && item.Action == egressPolicy.Action && util.HasExternalIDsForCluster(item.ExternalIDs)
+			if err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(nbClient, types.OVNClusterRouter, &egressPolicy, func(item *nbdb.LogicalRouterPolicy) bool {
+				return item.Priority == egressPolicy.Priority && item.Match == egressPolicy.Match && item.Action == egressPolicy.Action
 			}); err != nil {
 				return fmt.Errorf("failed adding point to point policy for pod %s/%s : %v", pod.Namespace, pod.Name, err)
 			}
 		}
 		// Add a route for reroute ingress traffic to the VM port since
 		// the subnet is alien to ovn_cluster_router
-		outputPort := types.RouterToSwitchPrefix + util.GetClusterScopedName(pod.Spec.NodeName)
+		outputPort := types.RouterToSwitchPrefix + pod.Spec.NodeName
 		ingressRoute := nbdb.LogicalRouterStaticRoute{
 			IPPrefix:   podAddress,
 			Nexthop:    podAddress,
 			Policy:     &nbdb.LogicalRouterStaticRoutePolicyDstIP,
 			OutputPort: &outputPort,
-			ExternalIDs: util.ExternalIDsForCluster(map[string]string{
+			ExternalIDs: map[string]string{
 				OvnZoneExternalIDKey:         OvnLocalZone,
 				VirtualMachineExternalIDsKey: pod.Labels[kubevirtv1.VirtualMachineNameLabel],
 				NamespaceExternalIDsKey:      pod.Namespace,
-			}),
+			},
 		}
-		if err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient, util.GetClusterScopedName(types.OVNClusterRouter), &ingressRoute, func(item *nbdb.LogicalRouterStaticRoute) bool {
-			matches := item.IPPrefix == ingressRoute.IPPrefix && item.Nexthop == ingressRoute.Nexthop && item.Policy != nil && *item.Policy == *ingressRoute.Policy && util.HasExternalIDsForCluster(item.ExternalIDs)
+		if err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient, types.OVNClusterRouter, &ingressRoute, func(item *nbdb.LogicalRouterStaticRoute) bool {
+			matches := item.IPPrefix == ingressRoute.IPPrefix && item.Nexthop == ingressRoute.Nexthop && item.Policy != nil && *item.Policy == *ingressRoute.Policy
 			return matches
 		}); err != nil {
 			return fmt.Errorf("failed adding static route: %v", err)
@@ -220,14 +220,14 @@ func EnsureRemoteZonePodAddressesToNodeRoute(controllerName string, watchFactory
 			IPPrefix: podIP.IP.String(),
 			Nexthop:  transitSwitchPortAddr.IP.String(),
 			Policy:   &nbdb.LogicalRouterStaticRoutePolicyDstIP,
-			ExternalIDs: util.ExternalIDsForCluster(map[string]string{
+			ExternalIDs: map[string]string{
 				OvnZoneExternalIDKey:         OvnRemoteZone,
 				VirtualMachineExternalIDsKey: pod.Labels[kubevirtv1.VirtualMachineNameLabel],
 				NamespaceExternalIDsKey:      pod.Namespace,
-			}),
+			},
 		}
-		if err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient, util.GetClusterScopedName(types.OVNClusterRouter), &route, func(item *nbdb.LogicalRouterStaticRoute) bool {
-			matches := item.IPPrefix == route.IPPrefix && item.Nexthop == route.Nexthop && item.Policy != nil && *item.Policy == *route.Policy && util.HasExternalIDsForCluster(item.ExternalIDs)
+		if err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient, types.OVNClusterRouter, &route, func(item *nbdb.LogicalRouterStaticRoute) bool {
+			matches := item.IPPrefix == route.IPPrefix && item.Nexthop == route.Nexthop && item.Policy != nil && *item.Policy == *route.Policy
 			return matches
 		}); err != nil {
 			return fmt.Errorf("failed adding static route at remote zone: %v", err)

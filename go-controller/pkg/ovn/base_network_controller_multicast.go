@@ -108,7 +108,7 @@ func getNamespaceMcastACLDbIDs(ns string, aclDir libovsdbutil.ACLDirection, cont
 }
 
 func (bnc *BaseNetworkController) getMulticastPortGroupName(namespace string) string {
-	return libovsdbutil.HashedPortGroup(util.GetClusterScopedName(bnc.GetNetworkScopedName(namespace)))
+	return libovsdbutil.HashedPortGroup(bnc.GetNetworkScopedName(namespace))
 }
 
 // Creates a policy to allow multicast traffic within 'ns':
@@ -322,9 +322,6 @@ func (bnc *BaseNetworkController) syncNsMulticast(k8sNamespaces map[string]bool)
 
 	// pg.ExternalIDs["name"] contains namespace (and pg.Name has hashed namespace)
 	pgPred := func(item *nbdb.PortGroup) bool {
-		if !util.HasExternalIDsForCluster(item.ExternalIDs) {
-			return false
-		}
 		for _, aclUUID := range item.ACLs {
 			if mcastAclUUIDs.Has(aclUUID) {
 				// add namespace to the stale list

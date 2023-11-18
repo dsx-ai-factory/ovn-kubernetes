@@ -305,14 +305,17 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	// Non LE master instances also are required to expose the metrics server.
 	if config.Metrics.BindAddress != "" {
 		pprofBindAddress := ""
-		if config.Metrics.EnablePprof {
-			pprofBindAddress = config.Metrics.PprofBindAddress
-		}
 		if runMode.node {
 			// ovnk8s node mode
+			if config.Metrics.EnablePprof {
+				pprofBindAddress = "127.0.0.1:19410"
+			}
 			metrics.StartOVNMetricsServer(config.Metrics.BindAddress, pprofBindAddress,
 				config.Metrics.NodeServerCert, config.Metrics.NodeServerPrivKey, ctx.Done(), ovnKubeStartWg)
 		} else {
+			if config.Metrics.EnablePprof {
+				pprofBindAddress = "127.0.0.1:19409"
+			}
 			// serve ovnkube controller metrics
 			metrics.StartMetricsServer(config.Metrics.BindAddress, pprofBindAddress,
 				config.OvnNorth.Cert, config.OvnNorth.PrivKey, ctx.Done(), ovnKubeStartWg)

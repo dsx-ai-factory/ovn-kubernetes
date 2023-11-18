@@ -29,10 +29,11 @@ import (
 )
 
 type secondaryLayer3NetworkControllerEventHandler struct {
-	baseHandler baseNetworkControllerEventHandler
-	objType     reflect.Type
-	oc          *SecondaryLayer3NetworkController
-	syncFunc    func([]interface{}) error
+	baseHandler  baseNetworkControllerEventHandler
+	watchFactory *factory.WatchFactory
+	objType      reflect.Type
+	oc           *SecondaryLayer3NetworkController
+	syncFunc     func([]interface{}) error
 }
 
 // AreResourcesEqual returns true if, given two objects of a known resource type, the update logic for this resource
@@ -52,7 +53,7 @@ func (h *secondaryLayer3NetworkControllerEventHandler) GetInternalCacheEntry(obj
 // GetResourceFromInformerCache returns the latest state of the object, given an object key and its type.
 // from the informers cache.
 func (h *secondaryLayer3NetworkControllerEventHandler) GetResourceFromInformerCache(key string) (interface{}, error) {
-	return h.baseHandler.getResourceFromInformerCache(h.objType, h.baseHandler.watchFactory, key)
+	return h.baseHandler.getResourceFromInformerCache(h.objType, h.watchFactory, key)
 }
 
 // RecordAddEvent records the add event on this given object.
@@ -255,7 +256,7 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 		BaseSecondaryNetworkController: BaseSecondaryNetworkController{
 			BaseNetworkController: BaseNetworkController{
 				CommonNetworkControllerInfo: *cnci,
-				controllerName:              util.GetClusterScopedName(netInfo.GetNetworkName() + "-network-controller"),
+				controllerName:              netInfo.GetNetworkName() + "-network-controller",
 				NetInfo:                     netInfo,
 				lsManager:                   lsm.NewLogicalSwitchManager(),
 				logicalPortCache:            newPortCache(stopChan),
@@ -309,12 +310,11 @@ func (oc *SecondaryLayer3NetworkController) initRetryFramework() {
 func (oc *SecondaryLayer3NetworkController) newRetryFramework(
 	objectType reflect.Type) *retry.RetryFramework {
 	eventHandler := &secondaryLayer3NetworkControllerEventHandler{
-		baseHandler: baseNetworkControllerEventHandler{
-			watchFactory: oc.watchFactory,
-		},
-		objType:  objectType,
-		oc:       oc,
-		syncFunc: nil,
+		baseHandler:  baseNetworkControllerEventHandler{},
+		objType:      objectType,
+		watchFactory: oc.watchFactory,
+		oc:           oc,
+		syncFunc:     nil,
 	}
 	resourceHandler := &retry.ResourceHandler{
 		HasUpdateFunc:          hasResourceAnUpdateFunc(objectType),
@@ -378,7 +378,7 @@ func (oc *SecondaryLayer3NetworkController) Cleanup(netName string) error {
 	// first delete node logical switches
 	ops, err = libovsdbops.DeleteLogicalSwitchesWithPredicateOps(oc.nbClient, ops,
 		func(item *nbdb.LogicalSwitch) bool {
-			return item.ExternalIDs[types.NetworkExternalID] == netName && util.HasExternalIDsForCluster(item.ExternalIDs)
+			return item.ExternalIDs[types.NetworkExternalID] == netName
 		})
 	if err != nil {
 		return fmt.Errorf("failed to get ops for deleting switches of network %s: %v", netName, err)
@@ -387,7 +387,7 @@ func (oc *SecondaryLayer3NetworkController) Cleanup(netName string) error {
 	// now delete cluster router
 	ops, err = libovsdbops.DeleteLogicalRoutersWithPredicateOps(oc.nbClient, ops,
 		func(item *nbdb.LogicalRouter) bool {
-			return item.ExternalIDs[types.NetworkExternalID] == netName && util.HasExternalIDsForCluster(item.ExternalIDs)
+			return item.ExternalIDs[types.NetworkExternalID] == netName
 		})
 	if err != nil {
 		return fmt.Errorf("failed to get ops for deleting routers of network %s: %v", netName, err)
@@ -478,11 +478,7 @@ func (oc *SecondaryLayer3NetworkController) WatchNodes() error {
 
 func (oc *SecondaryLayer3NetworkController) Init(ctx context.Context) error {
 	_, err := oc.createOvnClusterRouter()
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return err
 }
 
 func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
@@ -493,7 +489,7 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *kapi.N
 	_, _ = oc.localZoneNodes.LoadOrStore(node.Name, true)
 
 	if noHostSubnet := util.NoHostSubnet(node); noHostSubnet {
-		err := oc.lsManager.AddNoHostSubnetSwitch(util.GetClusterScopedName(oc.GetNetworkScopedName(node.Name)))
+		err := oc.lsManager.AddNoHostSubnetSwitch(oc.GetNetworkScopedName(node.Name))
 		if err != nil {
 			return fmt.Errorf("nodeAdd: error adding noHost subnet for switch %s: %w", oc.GetNetworkScopedName(node.Name), err)
 		}
@@ -591,7 +587,7 @@ func (oc *SecondaryLayer3NetworkController) deleteNodeEvent(node *kapi.Node) err
 
 	oc.localZoneNodes.Delete(node.Name)
 
-	oc.lsManager.DeleteSwitch(util.GetClusterScopedName(oc.GetNetworkScopedName(node.Name)))
+	oc.lsManager.DeleteSwitch(oc.GetNetworkScopedName(node.Name))
 	if util.NoHostSubnet(node) {
 		return nil
 	}
@@ -638,15 +634,14 @@ func (oc *SecondaryLayer3NetworkController) syncNodes(nodes []interface{}) error
 	}
 
 	p := func(item *nbdb.LogicalSwitch) bool {
-		return len(item.OtherConfig) > 0 && item.ExternalIDs[types.NetworkExternalID] == oc.GetNetworkName() &&
-			util.HasExternalIDsForCluster(item.ExternalIDs)
+		return len(item.OtherConfig) > 0 && item.ExternalIDs[types.NetworkExternalID] == oc.GetNetworkName()
 	}
 	nodeSwitches, err := libovsdbops.FindLogicalSwitchesWithPredicate(oc.nbClient, p)
 	if err != nil {
 		return fmt.Errorf("failed to get node logical switches which have other-config set for network %s: %v", oc.GetNetworkName(), err)
 	}
 	for _, nodeSwitch := range nodeSwitches {
-		nodeName := oc.RemoveNetworkScopeFromName(util.RemoveMultiClusterScopeFromName(nodeSwitch.Name))
+		nodeName := oc.RemoveNetworkScopeFromName(nodeSwitch.Name)
 		if !foundNodes.Has(nodeName) {
 			if err := oc.deleteNode(nodeName); err != nil {
 				return fmt.Errorf("failed to delete node:%s, err:%v", nodeName, err)
@@ -670,7 +665,7 @@ func (oc *SecondaryLayer3NetworkController) StartInterConnect(icInfo *util.Inter
 		klog.Errorf("Inter-connect error: network %s can only connect to layer 2 network", oc.GetNetworkName())
 		return nil
 	}
-	routerName := util.GetClusterScopedName(oc.GetNetworkScopedName(types.OVNClusterRouter))
+	routerName := oc.GetNetworkScopedName(types.OVNClusterRouter)
 	logicalRouter := &nbdb.LogicalRouter{Name: routerName}
 	return oc.ConnectToNetworks(logicalSwitch, logicalRouter, icInfo.Subnets)
 }
@@ -682,7 +677,7 @@ func (oc *SecondaryLayer3NetworkController) StopInterConnect(icInfo *util.InterC
 		klog.Errorf("Inter-connect error: network %s can only connect to layer 2 network", oc.GetNetworkName())
 		return nil
 	}
-	routerName := util.GetClusterScopedName(oc.GetNetworkScopedName(types.OVNClusterRouter))
+	routerName := oc.GetNetworkScopedName(types.OVNClusterRouter)
 	logicalRouter := &nbdb.LogicalRouter{Name: routerName}
 	return oc.DisconnectFromNetworks(logicalSwitch, logicalRouter)
 }

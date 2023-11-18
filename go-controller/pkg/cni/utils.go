@@ -130,8 +130,6 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, podNADAnnotation *ut
 		NADName:              nadName,
 		EnableUDPAggregation: config.Default.EnableUDPAggregation,
 		SkipSpoofCheck:       util.SkipSpoofCheckForNAD(podAnnotation, nadName),
-		ClusterName:          config.Kubernetes.ClusterName,
-		ClusterNamePrefix:    util.GetClusterPrefix(),
 		OvnKubeMode:          config.OvnKubeNode.Mode,
 	}
 	return podInterfaceInfo, nil

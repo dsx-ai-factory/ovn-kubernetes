@@ -245,13 +245,13 @@ func (bnc *BaseNetworkController) createOvnClusterRouter() (*nbdb.LogicalRouter,
 		macBindingAgeThreshold += ";" + ipnet.CIDR.String() + ":" + strconv.Itoa(config.Default.ClusterSubnetsMacBindingAging)
 	}
 
-	logicalRouterName := util.GetClusterScopedName(bnc.GetNetworkScopedName(types.OVNClusterRouter))
+	logicalRouterName := bnc.GetNetworkScopedName(types.OVNClusterRouter)
 	logicalRouter := nbdb.LogicalRouter{
 		Name: logicalRouterName,
-		ExternalIDs: util.ExternalIDsForCluster(map[string]string{
+		ExternalIDs: map[string]string{
 			"k8s-cluster-router":            "yes",
 			types.TopologyVersionExternalID: strconv.Itoa(bnc.topologyVersion),
-		}),
+		},
 		Options: map[string]string{
 			"always_learn_from_arp_request": "false",
 			"mac_binding_age_threshold":     macBindingAgeThreshold,
@@ -307,8 +307,8 @@ func (bnc *BaseNetworkController) syncNodeClusterRouterPort(node *kapi.Node, hos
 		}
 	}
 
-	switchName := util.GetClusterScopedName(bnc.GetNetworkScopedName(node.Name))
-	logicalRouterName := util.GetClusterScopedName(bnc.GetNetworkScopedName(types.OVNClusterRouter))
+	switchName := bnc.GetNetworkScopedName(node.Name)
+	logicalRouterName := bnc.GetNetworkScopedName(types.OVNClusterRouter)
 	lrpName := types.RouterToSwitchPrefix + switchName
 	lrpNetworks := []string{}
 	for _, hostSubnet := range hostSubnets {
@@ -316,10 +316,9 @@ func (bnc *BaseNetworkController) syncNodeClusterRouterPort(node *kapi.Node, hos
 		lrpNetworks = append(lrpNetworks, gwIfAddr.String())
 	}
 	logicalRouterPort := nbdb.LogicalRouterPort{
-		Name:        lrpName,
-		MAC:         nodeLRPMAC.String(),
-		Networks:    lrpNetworks,
-		ExternalIDs: util.ExternalIDsForCluster(nil),
+		Name:     lrpName,
+		MAC:      nodeLRPMAC.String(),
+		Networks: lrpNetworks,
 	}
 	logicalRouter := nbdb.LogicalRouter{Name: logicalRouterName}
 
@@ -337,11 +336,10 @@ func (bnc *BaseNetworkController) syncNodeClusterRouterPort(node *kapi.Node, hos
 			Name:        lrpName + "-" + chassisID,
 			ChassisName: chassisID,
 			Priority:    1,
-			ExternalIDs: util.ExternalIDsForCluster(nil),
 		}
 	}
 	err = libovsdbops.CreateOrUpdateLogicalRouterPort(bnc.nbClient, &logicalRouter, &logicalRouterPort,
-		gatewayChassis, &logicalRouterPort.MAC, &logicalRouterPort.Networks, &logicalRouterPort.ExternalIDs)
+		gatewayChassis, &logicalRouterPort.MAC, &logicalRouterPort.Networks)
 	if err != nil {
 		klog.Errorf("Failed to add gateway chassis %s to logical router port %s, error: %v", chassisID, lrpName, err)
 		return err
@@ -350,7 +348,7 @@ func (bnc *BaseNetworkController) syncNodeClusterRouterPort(node *kapi.Node, hos
 	if skipPinnedLS {
 		// TBD: Can we do it in CreateOrUpdateLogicalRouterPort?
 		p := func(item *nbdb.GatewayChassis) bool {
-			return item.Name == lrpName+"-"+chassisID && util.HasExternalIDsForCluster(item.ExternalIDs)
+			return item.Name == lrpName+"-"+chassisID
 		}
 		if err = libovsdbops.DeleteGatewayChassisWithPredicate(bnc.nbClient, logicalRouterPort.Name, p); err != nil {
 			klog.Errorf("Failed to delete gateway chassis %s from logical router port %s, error: %v", chassisID, lrpName, err)
@@ -365,7 +363,7 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 	clusterLoadBalancerGroupUUID, switchLoadBalancerGroupUUID string) error {
 	// logical router port MAC is based on IPv4 subnet if there is one, else IPv6
 	var nodeLRPMAC net.HardwareAddr
-	switchName := util.GetClusterScopedName(bnc.GetNetworkScopedName(nodeName))
+	switchName := bnc.GetNetworkScopedName(nodeName)
 	for _, hostSubnet := range hostSubnets {
 		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
 		nodeLRPMAC = util.IPAddrToHWAddr(gwIfAddr.IP)
@@ -383,7 +381,6 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 			types.TopologyExternalID: bnc.TopologyType(),
 		}
 	}
-	logicalSwitch.ExternalIDs = util.ExternalIDsForCluster(logicalSwitch.ExternalIDs)
 
 	var v4Gateway, v6Gateway net.IP
 	logicalSwitch.OtherConfig = map[string]string{}
@@ -440,10 +437,9 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 
 	// Connect the switch to the router.
 	logicalSwitchPort := nbdb.LogicalSwitchPort{
-		Name:        types.SwitchToRouterPrefix + switchName,
-		Type:        "router",
-		Addresses:   []string{"router"},
-		ExternalIDs: util.ExternalIDsForCluster(nil),
+		Name:      types.SwitchToRouterPrefix + switchName,
+		Type:      "router",
+		Addresses: []string{"router"},
 		Options: map[string]string{
 			"router-port": types.RouterToSwitchPrefix + switchName,
 			"arp_proxy":   kubevirt.ComposeARPProxyLSPOption(),
@@ -497,7 +493,7 @@ func (cnci *CommonNetworkControllerInfo) UpdateNodeAnnotationWithRetry(nodeName 
 
 // deleteNodeLogicalNetwork removes the logical switch and logical router port associated with the node
 func (bnc *BaseNetworkController) deleteNodeLogicalNetwork(nodeName string) error {
-	switchName := util.GetClusterScopedName(bnc.GetNetworkScopedName(nodeName))
+	switchName := bnc.GetNetworkScopedName(nodeName)
 
 	// Remove the logical switch associated with the node
 	err := libovsdbops.DeleteLogicalSwitch(bnc.nbClient, switchName)
@@ -505,7 +501,7 @@ func (bnc *BaseNetworkController) deleteNodeLogicalNetwork(nodeName string) erro
 		return fmt.Errorf("failed to delete logical switch %s: %v", switchName, err)
 	}
 
-	logicalRouterName := util.GetClusterScopedName(bnc.GetNetworkScopedName(types.OVNClusterRouter))
+	logicalRouterName := bnc.GetNetworkScopedName(types.OVNClusterRouter)
 	logicalRouter := nbdb.LogicalRouter{Name: logicalRouterName}
 	logicalRouterPort := nbdb.LogicalRouterPort{
 		Name: types.RouterToSwitchPrefix + switchName,
@@ -550,7 +546,7 @@ func (bnc *BaseNetworkController) addAllPodsOnNode(nodeName string) []error {
 
 func (bnc *BaseNetworkController) updateL3TopologyVersion() error {
 	currentTopologyVersion := strconv.Itoa(types.OvnCurrentTopologyVersion)
-	clusterRouterName := util.GetClusterScopedName(bnc.GetNetworkScopedName(types.OVNClusterRouter))
+	clusterRouterName := bnc.GetNetworkScopedName(types.OVNClusterRouter)
 	logicalRouter := nbdb.LogicalRouter{
 		Name:        clusterRouterName,
 		ExternalIDs: map[string]string{types.TopologyVersionExternalID: currentTopologyVersion},
@@ -571,9 +567,9 @@ func (bnc *BaseNetworkController) updateL2TopologyVersion() error {
 	topoType := bnc.TopologyType()
 	switch topoType {
 	case types.Layer2Topology:
-		switchName = util.GetClusterScopedName(bnc.GetNetworkScopedName(types.OVNLayer2Switch))
+		switchName = bnc.GetNetworkScopedName(types.OVNLayer2Switch)
 	case types.LocalnetTopology:
-		switchName = util.GetClusterScopedName(bnc.GetNetworkScopedName(types.OVNLocalnetSwitch))
+		switchName = bnc.GetNetworkScopedName(types.OVNLocalnetSwitch)
 	default:
 		return fmt.Errorf("topology type %s is not supported", topoType)
 	}
@@ -598,16 +594,16 @@ func (bnc *BaseNetworkController) determineOVNTopoVersionFromOVN() error {
 	var err error
 
 	if !bnc.IsSecondary() {
-		topologyVersion, err = bnc.getOVNTopoVersionFromLogicalRouter(util.GetClusterScopedName(types.OVNClusterRouter))
+		topologyVersion, err = bnc.getOVNTopoVersionFromLogicalRouter(types.OVNClusterRouter)
 	} else {
 		topoType := bnc.TopologyType()
 		switch topoType {
 		case types.Layer3Topology:
-			topologyVersion, err = bnc.getOVNTopoVersionFromLogicalRouter(util.GetClusterScopedName(bnc.GetNetworkScopedName(types.OVNClusterRouter)))
+			topologyVersion, err = bnc.getOVNTopoVersionFromLogicalRouter(bnc.GetNetworkScopedName(types.OVNClusterRouter))
 		case types.Layer2Topology:
-			topologyVersion, err = bnc.getOVNTopoVersionFromLogicalSwitch(util.GetClusterScopedName(bnc.GetNetworkScopedName(types.OVNLayer2Switch)))
+			topologyVersion, err = bnc.getOVNTopoVersionFromLogicalSwitch(bnc.GetNetworkScopedName(types.OVNLayer2Switch))
 		case types.LocalnetTopology:
-			topologyVersion, err = bnc.getOVNTopoVersionFromLogicalSwitch(util.GetClusterScopedName(bnc.GetNetworkScopedName(types.OVNLocalnetSwitch)))
+			topologyVersion, err = bnc.getOVNTopoVersionFromLogicalSwitch(bnc.GetNetworkScopedName(types.OVNLocalnetSwitch))
 		default:
 			return fmt.Errorf("topology type %s not supported", topoType)
 		}
@@ -778,7 +774,7 @@ func (bnc *BaseNetworkController) doesNetworkRequireIPAM() bool {
 }
 
 func (bnc *BaseNetworkController) buildPortGroup(hashName, name string, ports []*nbdb.LogicalSwitchPort, acls []*nbdb.ACL) *nbdb.PortGroup {
-	externalIds := util.ExternalIDsForCluster(map[string]string{"name": name})
+	externalIds := map[string]string{"name": name}
 	if bnc.IsSecondary() {
 		externalIds[types.NetworkExternalID] = bnc.GetNetworkName()
 	}
@@ -796,8 +792,8 @@ func (bnc *BaseNetworkController) getPodNADNames(pod *kapi.Pod) []string {
 // getClusterPortGroupName gets network scoped port group hash name; base is either
 // ClusterPortGroupNameBase or ClusterRtrPortGroupNameBase.
 func (bnc *BaseNetworkController) getClusterPortGroupName(base string) string {
-	if bnc.IsSecondary() || util.IsClusterScoped() {
-		return libovsdbutil.HashedPortGroup(util.GetClusterScopedName(bnc.GetNetworkName())) + "_" + base
+	if bnc.IsSecondary() {
+		return libovsdbutil.HashedPortGroup(bnc.GetNetworkName()) + "_" + base
 	}
 	return base
 }
@@ -1226,11 +1222,10 @@ func (bnc *BaseNetworkController) ConnectToNetworks(logicalSwitch *nbdb.LogicalS
 
 	// Connect the switch to the router
 	logicalSwitchPort := nbdb.LogicalSwitchPort{
-		Name:        types.SwitchToRouterPrefix + logicalSwitch.Name,
-		Type:        "router",
-		Addresses:   []string{"router"},
-		Options:     map[string]string{"router-port": types.RouterToSwitchPrefix + logicalSwitch.Name},
-		ExternalIDs: util.ExternalIDsForCluster(nil),
+		Name:      types.SwitchToRouterPrefix + logicalSwitch.Name,
+		Type:      "router",
+		Addresses: []string{"router"},
+		Options:   map[string]string{"router-port": types.RouterToSwitchPrefix + logicalSwitch.Name},
 	}
 	err := libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(bnc.nbClient, logicalSwitch, &logicalSwitchPort)
 	if err != nil {
@@ -1239,10 +1234,9 @@ func (bnc *BaseNetworkController) ConnectToNetworks(logicalSwitch *nbdb.LogicalS
 
 	lrpName := types.RouterToSwitchPrefix + logicalSwitch.Name
 	logicalRouterPort := nbdb.LogicalRouterPort{
-		Name:        lrpName,
-		MAC:         nodeLRPMAC.String(),
-		Networks:    lrpNetworks,
-		ExternalIDs: util.ExternalIDsForCluster(nil),
+		Name:     lrpName,
+		MAC:      nodeLRPMAC.String(),
+		Networks: lrpNetworks,
 	}
 	err = libovsdbops.CreateOrUpdateLogicalRouterPort(bnc.nbClient, logicalRouter, &logicalRouterPort, nil,
 		&logicalRouterPort.MAC, &logicalRouterPort.Networks)
@@ -1270,47 +1264,4 @@ func (bnc *BaseNetworkController) DisconnectFromNetworks(logicalSwitch *nbdb.Log
 		return fmt.Errorf("failed to delete logical switch port %s from switch %s: %v", logicalSwitchPort.Name, logicalSwitch.Name, err)
 	}
 	return err
-}
-
-// nonHostNetworkPodsExists verifies if node has pods non host network IP
-func nonHostNetworkPodsExists(wf *factory.WatchFactory, nodeName string) bool {
-	podIndexer := wf.PodInformer().GetIndexer()
-	pods, err := podIndexer.ByIndex(types.CacheIndexPodByNodeName, nodeName)
-	if err != nil {
-		klog.Errorf("Unable to get all pods on node %s: %v", nodeName, err)
-		return true
-	}
-
-	for _, obj := range pods {
-		pod, ok := obj.(*kapi.Pod)
-		if !ok {
-			continue
-		}
-		if !pod.Spec.HostNetwork {
-			return true
-		}
-	}
-	return false
-}
-
-// shouldUpdateNode() determines if the ovn-kubernetes plugin should update the state of the node.
-// ovn-kube should not perform an update if it does not assign a hostsubnet, or if you want to change
-// whether or not ovn-kubernetes assigns a hostsubnet
-func shouldUpdateNode(wf *factory.WatchFactory, node, oldNode *kapi.Node) (bool, error) {
-	newNoHostSubnet := util.NoHostSubnet(node)
-	oldNoHostSubnet := util.NoHostSubnet(oldNode)
-
-	if oldNoHostSubnet && newNoHostSubnet {
-		return false, nil
-	} else if oldNoHostSubnet && !newNoHostSubnet {
-		if nonHostNetworkPodsExists(wf, node.Name) {
-			// if node has pods with non host network IP, then updating such node will be non-trivial task,
-			// hence, return error
-			return false, fmt.Errorf("error updating node %s, cannot remove assigned hostsubnet, please delete node and recreate.", node.Name)
-		}
-	} else if !oldNoHostSubnet && newNoHostSubnet {
-		return false, fmt.Errorf("error updating node %s, cannot assign a hostsubnet to already created node, please delete node and recreate.", node.Name)
-	}
-
-	return true, nil
 }

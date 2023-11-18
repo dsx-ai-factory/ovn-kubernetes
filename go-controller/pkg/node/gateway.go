@@ -256,7 +256,7 @@ func setupUDPAggregationUplink(ifname string) error {
 
 func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops []net.IP, gwIPs []*net.IPNet, nodeAnnotator kube.Annotator) (
 	*bridgeConfiguration, *bridgeConfiguration, error) {
-	gatewayBridge, err := bridgeForInterface(gwIntf, nodeName, util.GetPhysNetNameKey(), gwIPs)
+	gatewayBridge, err := bridgeForInterface(gwIntf, nodeName, types.PhysicalNetworkName, gwIPs)
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "Bridge for interface failed for %s", gwIntf)
 	}
@@ -328,7 +328,7 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops 
 	l3GwConfig := util.L3GatewayConfig{
 		Mode:           config.Gateway.Mode,
 		ChassisID:      chassisID,
-		InterfaceID:    util.GetClusterScopedName(gatewayBridge.interfaceID),
+		InterfaceID:    gatewayBridge.interfaceID,
 		MACAddress:     gatewayBridge.macAddress,
 		IPAddresses:    gatewayBridge.ips,
 		NextHops:       gwNextHops,
@@ -336,7 +336,7 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops 
 		VLANID:         &config.Gateway.VLANID,
 	}
 	if egressGWBridge != nil {
-		l3GwConfig.EgressGWInterfaceID = util.GetClusterScopedName(egressGWBridge.interfaceID)
+		l3GwConfig.EgressGWInterfaceID = egressGWBridge.interfaceID
 		l3GwConfig.EgressGWMACAddress = egressGWBridge.macAddress
 		l3GwConfig.EgressGWIPAddresses = egressGWBridge.ips
 	}
@@ -407,18 +407,8 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 	res := bridgeConfiguration{}
 	gwIntf := intfName
 	bridgeCreated := false
-	uplinkName := config.Gateway.UplinkPort
 
-	if uplinkName != "" { // Uplink name is explicitly set
-		bridgeName, _, err := util.RunOVSVsctl("port-to-br", uplinkName)
-		if err != nil {
-			return nil, errors.Wrapf(err, "Failed to find bridge that has port %s", uplinkName)
-		}
-		if intfName == bridgeName {
-			res.bridgeName = intfName
-			res.uplinkName = uplinkName
-		}
-	} else if bridgeName, _, err := util.RunOVSVsctl("port-to-br", intfName); err == nil {
+	if bridgeName, _, err := util.RunOVSVsctl("port-to-br", intfName); err == nil {
 		// This is an OVS bridge's internal port
 		uplinkName, err := util.GetNicName(bridgeName)
 		if err != nil {
@@ -474,7 +464,7 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 
 	// the name of the patch port created by ovn-controller is of the form
 	// patch-<logical_port_name_of_localnet_port>-to-br-int
-	res.patchPort = "patch-" + util.GetClusterScopedName(res.bridgeName) + "_" + nodeName + "-to-br-int"
+	res.patchPort = "patch-" + res.bridgeName + "_" + nodeName + "-to-br-int"
 
 	// for DPU we use the host MAC address for the Gateway configuration
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {

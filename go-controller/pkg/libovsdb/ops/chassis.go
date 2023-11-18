@@ -2,8 +2,6 @@ package ops
 
 import (
 	"context"
-	"fmt"
-
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -47,63 +45,6 @@ func GetChassis(sbClient libovsdbclient.Client, chassis *sbdb.Chassis) (*sbdb.Ch
 	}
 
 	return found[0], nil
-}
-
-func ListChassisPrivateWithClusterName(sbClient libovsdbclient.Client, clusterName string) ([]*sbdb.ChassisPrivate, error) {
-	// cluster_name set is not set in the external_ids of Chassis_Private entries unlike Chassis entries.
-	// So we cannot filter based on that. So instead we get list of ChassisPrivate entries as well a list of
-	// chassis entries filtered by cluster name. We prepare a final list with only items of the chassis Private
-	// present in the chassis List (which is already filtered for cluster name)
-
-	chassisPrivate, err := ListChassisPrivate(sbClient)
-	if err != nil {
-		return nil, err
-	}
-	knownChassisNames := sets.NewString()
-	chassisList, err := ListChassisWithClusterName(sbClient, clusterName)
-	if err != nil {
-		return nil, err
-	}
-	for _, chassis := range chassisList {
-		knownChassisNames.Insert(chassis.Name)
-	}
-	chassisPrivateResultList := []*sbdb.ChassisPrivate{}
-
-	for _, chassisPrivateItem := range chassisPrivate {
-		if knownChassisNames.Has(chassisPrivateItem.Name) {
-			chassisPrivateResultList = append(chassisPrivateResultList, chassisPrivateItem)
-		}
-	}
-
-	return chassisPrivateResultList, err
-}
-
-// ListChassisWithClusterName returns all the logical chassis that has the ovn-cms-option `cluster_name` set to the specified value
-func ListChassisWithClusterName(sbClient libovsdbclient.Client, clusterName string) ([]*sbdb.Chassis, error) {
-	ovnCmsOpts := fmt.Sprintf("cluster_name:%s", clusterName)
-	searchPredicate := func(item *sbdb.Chassis) bool {
-		return item.ExternalIDs["ovn-cms-options"] == ovnCmsOpts
-	}
-	searchedChassis, err := ListChassisByPredicate(sbClient, searchPredicate)
-	if err != nil {
-		return nil, err
-	}
-
-	return searchedChassis, nil
-}
-
-// ListChassisByPredicate returns all the logical chassis in the cache that matches the lookup function
-func ListChassisByPredicate(sbClient libovsdbclient.Client, lookupFunction func(item *sbdb.Chassis) bool) ([]*sbdb.Chassis, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-	defer cancel()
-	searchedChassis := []*sbdb.Chassis{}
-
-	err := sbClient.WhereCache(lookupFunction).List(ctx, &searchedChassis)
-	if err != nil {
-		return nil, fmt.Errorf("failed listing chassis err: %v", err)
-	}
-
-	return searchedChassis, nil
 }
 
 // DeleteChassis deletes the provided chassis and associated private chassis

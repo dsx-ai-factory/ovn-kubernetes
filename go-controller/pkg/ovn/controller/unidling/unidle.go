@@ -172,7 +172,6 @@ func (uc *unidlingController) Run(stopCh <-chan struct{}) {
 }
 
 func (uc *unidlingController) handleLbEmptyBackendsEvent(event sbdb.ControllerEvent) error {
-	// TBD: Multi-Cluster support?
 	op, err := uc.sbClient.Where(
 		&event,
 	).Delete()

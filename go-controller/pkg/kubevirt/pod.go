@@ -205,12 +205,12 @@ func CleanUpLiveMigratablePod(nbClient libovsdbclient.Client, watchFactory *fact
 }
 
 func SyncVirtualMachines(nbClient libovsdbclient.Client, vms map[ktypes.NamespacedName]bool) error {
-	if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(nbClient, util.GetClusterScopedName(ovntypes.OVNClusterRouter), func(item *nbdb.LogicalRouterStaticRoute) bool {
+	if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(nbClient, ovntypes.OVNClusterRouter, func(item *nbdb.LogicalRouterStaticRoute) bool {
 		return ownsItAndIsOrphanOrWrongZone(item.ExternalIDs, vms)
 	}); err != nil {
 		return fmt.Errorf("failed deleting stale vm static routes: %v", err)
 	}
-	if err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(nbClient, util.GetClusterScopedName(ovntypes.OVNClusterRouter), func(item *nbdb.LogicalRouterPolicy) bool {
+	if err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(nbClient, ovntypes.OVNClusterRouter, func(item *nbdb.LogicalRouterPolicy) bool {
 		return ownsItAndIsOrphanOrWrongZone(item.ExternalIDs, vms)
 	}); err != nil {
 		return fmt.Errorf("failed deleting stale vm policies: %v", err)

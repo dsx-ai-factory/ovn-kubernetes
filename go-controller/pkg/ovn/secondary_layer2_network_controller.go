@@ -39,7 +39,7 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 			BaseSecondaryNetworkController: BaseSecondaryNetworkController{
 				BaseNetworkController: BaseNetworkController{
 					CommonNetworkControllerInfo: *cnci,
-					controllerName:              util.GetClusterScopedName(netInfo.GetNetworkName() + "-network-controller"),
+					controllerName:              netInfo.GetNetworkName() + "-network-controller",
 					NetInfo:                     netInfo,
 					lsManager:                   lsm.NewL2SwitchManager(),
 					logicalPortCache:            newPortCache(stopChan),
@@ -111,7 +111,7 @@ func (oc *SecondaryLayer2NetworkController) Cleanup(netName string) error {
 }
 
 func (oc *SecondaryLayer2NetworkController) Init() error {
-	switchName := util.GetClusterScopedName(oc.GetNetworkScopedName(types.OVNLayer2Switch))
+	switchName := oc.GetNetworkScopedName(types.OVNLayer2Switch)
 
 	_, err := oc.initializeLogicalSwitch(switchName, oc.Subnets(), oc.ExcludeSubnets())
 	if err != nil {
@@ -138,7 +138,7 @@ func (oc *SecondaryLayer2NetworkController) Init() error {
 
 func (oc *SecondaryLayer2NetworkController) StartInterConnect(icInfo *util.InterConnectInfo) error {
 	layer2ClusterSubnets := oc.Subnets()
-	switchName := util.GetClusterScopedName(oc.GetNetworkScopedName(types.OVNLayer2Switch))
+	switchName := oc.GetNetworkScopedName(types.OVNLayer2Switch)
 	logicalSwitch := &nbdb.LogicalSwitch{Name: switchName}
 	logicalRouter, ok := icInfo.LogicalEntityToConnect.(*nbdb.LogicalRouter)
 	if !ok {
@@ -156,7 +156,7 @@ func (oc *SecondaryLayer2NetworkController) StopInterConnect(icInfo *util.InterC
 		klog.Errorf("Inter-connect error: network %s can only connect to layer 3 network", oc.GetNetworkName())
 		return nil
 	}
-	switchName := util.GetClusterScopedName(oc.GetNetworkScopedName(types.OVNLayer2Switch))
+	switchName := oc.GetNetworkScopedName(types.OVNLayer2Switch)
 	logicalSwitch := &nbdb.LogicalSwitch{Name: switchName}
 	return oc.DisconnectFromNetworks(logicalSwitch, logicalRouter)
 }

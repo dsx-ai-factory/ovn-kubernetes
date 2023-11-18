@@ -271,7 +271,7 @@ func (nc *SecondaryLocalnetNodeNetworkController) updateLocalnetOvnBridgeMapping
 	// that provides connectivity to that network. It is in the form of physnet1:br1,physnet2:br2.
 	// Note that there may be multiple ovs bridge mappings, be sure not to override
 	// the mappings for the other physical network
-	networkName := util.GetClusterScopedName(nc.GetNetworkScopedName(types.LocalNetBridgeName))
+	networkName := nc.GetNetworkScopedName(types.LocalNetBridgeName)
 	stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
 		"external_ids:ovn-bridge-mappings")
 	if err != nil {

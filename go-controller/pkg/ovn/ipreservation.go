@@ -87,9 +87,9 @@ func (oc *BaseSecondaryLayer2NetworkController) addIPReservation(resvIPObj *ipre
 
 	var switchName string
 	if oc.TopologyType() == ovntypes.LocalnetTopology {
-		switchName = util.GetClusterScopedName(oc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch))
+		switchName = oc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch)
 	} else {
-		switchName = util.GetClusterScopedName(oc.GetNetworkScopedName(ovntypes.OVNLayer2Switch))
+		switchName = oc.GetNetworkScopedName(ovntypes.OVNLayer2Switch)
 	}
 
 	isIPv4 := resvIPObj.Spec.IPFamily == ipreservation.IPv4Protocol
@@ -167,9 +167,9 @@ func (oc *BaseSecondaryLayer2NetworkController) deleteIPReservation(resvIPObj *i
 
 	var switchName string
 	if oc.TopologyType() == ovntypes.LocalnetTopology {
-		switchName = util.GetClusterScopedName(oc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch))
+		switchName = oc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch)
 	} else {
-		switchName = util.GetClusterScopedName(oc.GetNetworkScopedName(ovntypes.OVNLayer2Switch))
+		switchName = oc.GetNetworkScopedName(ovntypes.OVNLayer2Switch)
 	}
 
 	resvIPNets := make([]*net.IPNet, 0, len(resvIPObj.Status.ReservedIPs))
@@ -205,9 +205,9 @@ func (oc *BaseSecondaryLayer2NetworkController) syncIPReservationObjects(resvIPO
 		}
 		var switchName string
 		if oc.TopologyType() == ovntypes.LocalnetTopology {
-			switchName = util.GetClusterScopedName(oc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch))
+			switchName = oc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch)
 		} else {
-			switchName = util.GetClusterScopedName(oc.GetNetworkScopedName(ovntypes.OVNLayer2Switch))
+			switchName = oc.GetNetworkScopedName(ovntypes.OVNLayer2Switch)
 		}
 		for _, resvIP := range resvIPObj.Status.ReservedIPs {
 			ip, ipnet, _ := net.ParseCIDR(resvIP)

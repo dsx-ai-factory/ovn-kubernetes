@@ -255,9 +255,9 @@ func (h *nodeEventHandler) DeleteResource(obj, cachedObj interface{}) error {
 }
 
 func (nc *DefaultNodeNetworkController) syncFirewallZoneForEndpointSlices(obj []interface{}) error {
-	if err := addInterfaceToFirewallZone(config.OvnKubeNode.MgmtPortIntfName, ovnFirewallZone); err != nil {
+	if err := addInterfaceToFirewallZone(types.K8sMgmtIntfName, ovnFirewallZone); err != nil {
 		return fmt.Errorf("failed to add interface %s to ovn firewall zone: (%v)",
-			config.OvnKubeNode.MgmtPortIntfName, err)
+			types.K8sMgmtIntfName, err)
 	}
 	return nil
 	// TODO(gmoodalbail): we need to clean up any stale ports in ovn and ngn-admin zone

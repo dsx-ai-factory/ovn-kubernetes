@@ -197,13 +197,8 @@ func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.Endp
 
 // makeLBName creates the load balancer name - used to minimize churn
 func makeLBName(service *v1.Service, proto v1.Protocol, scope string) string {
-	var clusterPrefix string
-	if util.IsClusterScoped() {
-		clusterPrefix = "CLUSTER_" + config.Kubernetes.ClusterName + "/"
-	}
-
-	return fmt.Sprintf("%sService_%s/%s_%s_%s",
-		clusterPrefix, service.Namespace, service.Name,
+	return fmt.Sprintf("Service_%s/%s_%s_%s",
+		service.Namespace, service.Name,
 		proto, scope,
 	)
 }
@@ -221,7 +216,7 @@ func buildClusterLBs(service *v1.Service, configs []lbConfig, nodeInfos []nodeIn
 	if useLBGroup {
 		nodeSwitches = make([]string, 0)
 		nodeRouters = make([]string, 0)
-		groups = []string{util.GetClusterScopedName(types.ClusterLBGroupName)}
+		groups = []string{types.ClusterLBGroupName}
 	} else {
 		nodeSwitches = make([]string, 0, len(nodeInfos))
 		nodeRouters = make([]string, 0, len(nodeInfos))
@@ -475,7 +470,7 @@ func buildTemplateLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo,
 					Protocol:    string(proto),
 					ExternalIDs: eids,
 					Opts:        optsV4,
-					Groups:      []string{util.GetClusterScopedName(types.ClusterSwitchLBGroupName)},
+					Groups:      []string{types.ClusterSwitchLBGroupName},
 					Rules:       switchV4Rules,
 					Templates:   getTemplatesFromRulesTargets(switchV4Rules),
 				})
@@ -486,7 +481,7 @@ func buildTemplateLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo,
 					Protocol:    string(proto),
 					ExternalIDs: eids,
 					Opts:        optsV4,
-					Groups:      []string{util.GetClusterScopedName(types.ClusterRouterLBGroupName)},
+					Groups:      []string{types.ClusterRouterLBGroupName},
 					Rules:       routerV4Rules,
 					Templates:   getTemplatesFromRulesTargets(routerV4Rules),
 				})
@@ -500,7 +495,7 @@ func buildTemplateLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo,
 					Protocol:    string(proto),
 					ExternalIDs: eids,
 					Opts:        optsV6,
-					Groups:      []string{util.GetClusterScopedName(types.ClusterSwitchLBGroupName)},
+					Groups:      []string{types.ClusterSwitchLBGroupName},
 					Rules:       switchV6Rules,
 					Templates:   getTemplatesFromRulesTargets(switchV6Rules),
 				})
@@ -511,7 +506,7 @@ func buildTemplateLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo,
 					Protocol:    string(proto),
 					ExternalIDs: eids,
 					Opts:        optsV6,
-					Groups:      []string{util.GetClusterScopedName(types.ClusterRouterLBGroupName)},
+					Groups:      []string{types.ClusterRouterLBGroupName},
 					Rules:       routerV6Rules,
 					Templates:   getTemplatesFromRulesTargets(routerV6Rules),
 				})

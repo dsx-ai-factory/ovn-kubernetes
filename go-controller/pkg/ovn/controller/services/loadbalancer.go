@@ -428,10 +428,7 @@ func getServiceLBs(nbClient libovsdbclient.Client, allTemplates TemplateMap) (se
 }
 
 func _getLBsCommon(nbClient libovsdbclient.Client, allTemplates TemplateMap, withServiceOwner bool) (sets.Set[string], []*LB, error) {
-	pl := func(item *nbdb.LoadBalancer) bool {
-		return util.HasExternalIDsForCluster(item.ExternalIDs)
-	}
-	lbs, err := libovsdbops.ListLoadBalancersByPredicate(nbClient, pl)
+	lbs, err := libovsdbops.ListLoadBalancers(nbClient)
 	if err != nil {
 		return nil, nil, fmt.Errorf("could not list load_balancer: %w", err)
 	}
@@ -475,7 +472,7 @@ func _getLBsCommon(nbClient libovsdbclient.Client, allTemplates TemplateMap, wit
 
 	// Switches
 	ps := func(item *nbdb.LogicalSwitch) bool {
-		return len(item.LoadBalancer) > 0 && util.HasExternalIDsForCluster(item.ExternalIDs)
+		return len(item.LoadBalancer) > 0
 	}
 	switches, err := libovsdbops.FindLogicalSwitchesWithPredicate(nbClient, ps)
 	if err != nil {
@@ -491,7 +488,7 @@ func _getLBsCommon(nbClient libovsdbclient.Client, allTemplates TemplateMap, wit
 
 	// Routers
 	pr := func(item *nbdb.LogicalRouter) bool {
-		return len(item.LoadBalancer) > 0 && util.HasExternalIDsForCluster(item.ExternalIDs)
+		return len(item.LoadBalancer) > 0
 	}
 	routers, err := libovsdbops.FindLogicalRoutersWithPredicate(nbClient, pr)
 	if err != nil {
@@ -507,9 +504,7 @@ func _getLBsCommon(nbClient libovsdbclient.Client, allTemplates TemplateMap, wit
 
 	// Groups
 	pg := func(item *nbdb.LoadBalancerGroup) bool {
-		return len(item.LoadBalancer) > 0 &&
-			((util.IsClusterScoped() && strings.HasPrefix(item.Name, util.GetClusterPrefix())) ||
-				(!util.IsClusterScoped() && !strings.HasPrefix(item.Name, "CLUSTER")))
+		return len(item.LoadBalancer) > 0
 	}
 	groups, err := libovsdbops.FindLoadBalancerGroupsWithPredicate(nbClient, pg)
 	if err != nil {

@@ -39,47 +39,46 @@ const (
 )
 
 func (syncer *portGroupSyncer) oldDefaultDenyPortGroupName(namespace, gressSuffix string) string {
-	return util.GetClusterScopedName(syncer.GetNetworkScopedName(util.HashForOVN(namespace))) + "_" + gressSuffix
+	return syncer.GetNetworkScopedName(util.HashForOVN(namespace)) + "_" + gressSuffix
 }
 
 func (syncer *portGroupSyncer) newDefaultDenyPortGroupName(namespace, gressSuffix string) string {
-	return util.HashForOVN(util.GetClusterScopedName(syncer.GetNetworkScopedName(namespace))) + "_" + gressSuffix
+	return util.HashForOVN(syncer.GetNetworkScopedName(namespace)) + "_" + gressSuffix
 }
 
 func (syncer *portGroupSyncer) oldNetworkPolicyPGName(namespace, name string) string {
 	readableGroupName := fmt.Sprintf("%s_%s", namespace, name)
-	return util.GetClusterScopedName(syncer.GetNetworkScopedName(util.HashForOVN(readableGroupName)))
+	return syncer.GetNetworkScopedName(util.HashForOVN(readableGroupName))
 }
 
 func (syncer *portGroupSyncer) newNetworkPolicyPGName(namespace, name string) string {
 	readableGroupName := fmt.Sprintf("%s_%s", namespace, name)
-	return util.HashForOVN(util.GetClusterScopedName(syncer.GetNetworkScopedName(readableGroupName)))
+	return util.HashForOVN(syncer.GetNetworkScopedName(readableGroupName))
 }
 
 func (syncer *portGroupSyncer) oldClusterPortGroupNameBaseName(baseName string) string {
-	return util.GetClusterScopedName(syncer.GetNetworkScopedName(baseName))
+	return syncer.GetNetworkScopedName(baseName)
 }
 
 func (syncer *portGroupSyncer) newClusterPortGroupNameBaseName(baseName string) string {
-	if util.IsClusterScoped() || syncer.IsSecondary() {
-		return util.HashForOVN(util.GetClusterScopedName(syncer.GetNetworkName())) + "_" + baseName
+	if syncer.IsSecondary() {
+		return util.HashForOVN(syncer.GetNetworkName()) + "_" + baseName
 	}
 	return baseName
 }
 
 func (syncer *portGroupSyncer) oldMulticastPortGroupName(namespace string) string {
-	return util.GetClusterScopedName(syncer.GetNetworkScopedName(util.HashForOVN(namespace)))
+	return syncer.GetNetworkScopedName(util.HashForOVN(namespace))
 }
 
 func (syncer *portGroupSyncer) newMulticastPortGroupName(namespace string) string {
-	return util.HashForOVN(util.GetClusterScopedName(syncer.GetNetworkScopedName(namespace)))
+	return util.HashForOVN(syncer.GetNetworkScopedName(namespace))
 }
 
 func (syncer *portGroupSyncer) SyncPortGroups(expectedPolicies map[string]map[string]bool) error {
 	var err error
 	p := func(item *nbdb.PortGroup) bool {
-		return item.ExternalIDs[types.LegacyNetworkExternalID] == syncer.GetNetworkName() &&
-			util.HasExternalIDsForCluster(item.ExternalIDs)
+		return item.ExternalIDs[types.LegacyNetworkExternalID] == syncer.GetNetworkName()
 	}
 	legacyPortGroups, err := libovsdbops.FindPortGroupsWithPredicate(syncer.nbClient, p)
 	if err != nil {
@@ -142,7 +141,7 @@ func (syncer *portGroupSyncer) SyncPortGroups(expectedPolicies map[string]map[st
 				continue
 			}
 			aclPred := func(acl *nbdb.ACL) bool {
-				return util.HasExternalIDsForCluster(acl.ExternalIDs) && strings.Contains(acl.Match, "@"+oldPortGroupName)
+				return strings.Contains(acl.Match, "@"+oldPortGroupName)
 			}
 			acls, err := libovsdbops.FindACLsWithPredicate(syncer.nbClient, aclPred)
 			if err != nil {

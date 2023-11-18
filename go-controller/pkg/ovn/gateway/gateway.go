@@ -29,7 +29,7 @@ var (
 // GetOvnGateways return all created gateways.
 func GetOvnGateways(nbClient libovsdbclient.Client) ([]string, error) {
 	p := func(item *nbdb.LogicalRouter) bool {
-		return item.Options["chassis"] != "null" && util.HasExternalIDsForCluster(item.ExternalIDs)
+		return item.Options["chassis"] != "null"
 	}
 	logicalRouters, err := libovsdbops.FindLogicalRoutersWithPredicate(nbClient, p)
 	if err != nil {

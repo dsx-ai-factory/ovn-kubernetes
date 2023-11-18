@@ -710,10 +710,10 @@ func ExternalIDsForObject(obj K8sObject) map[string]string {
 		gk = kinds[0].GroupKind()
 	}
 
-	return ExternalIDsForCluster(map[string]string{
+	return map[string]string{
 		types.LoadBalancerOwnerExternalID: nsn.String(),
 		types.LoadBalancerKindExternalID:  gk.String(),
-	})
+	}
 }
 
 // IsEndpointReady takes as input an endpoint from an endpoint slice and returns true if the endpoint is

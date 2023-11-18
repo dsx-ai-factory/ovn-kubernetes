@@ -35,7 +35,7 @@ func getHostNetworkPodIPs(nbClient libovsdbclient.Client, node *kapi.Node, polic
 
 		// the packets from the host towards the Cluster IP will have the source IP of the
 		// Gateway Router to Join Switch port's IP address
-		grJoinIfAddrs, err := libovsdbutil.GetLRPAddrs(nbClient, types.GWRouterToJoinSwitchPrefix+util.GetClusterScopedName(types.GWRouterPrefix+node.Name))
+		grJoinIfAddrs, err := libovsdbutil.GetLRPAddrs(nbClient, types.GWRouterToJoinSwitchPrefix+types.GWRouterPrefix+node.Name)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get node %s's gateway router to join switch IP: %v", node.Name, err)
 		}

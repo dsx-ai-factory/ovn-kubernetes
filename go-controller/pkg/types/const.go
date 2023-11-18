@@ -34,7 +34,7 @@ const (
 	GWRouterLocalLBPostfix       = "_local"
 	RouterToSwitchPrefix         = "rtos-"
 	InterPrefix                  = "inter-"
-	HybridSubnetPrefix           = "hybrid-subnet-" // used in logical router policy and Logical route static route, no cluster prefix
+	HybridSubnetPrefix           = "hybrid-subnet-"
 	SwitchToRouterPrefix         = "stor-"
 	JoinSwitchToGWRouterPrefix   = "jtor-"
 	GWRouterToJoinSwitchPrefix   = "rtoj-"
@@ -212,8 +212,6 @@ const (
 	ExternalIDRouter       = "logical_router_name"
 	ExternalIDName         = "name"
 	ExternalIDNamespace    = "namespace"
-
-	OvnK8sClusterNameKey = OvnK8sPrefix + "/" + "cluster_name"
 
 	// virtual port constants
 	VirtualIPResyncInterval = 30 * time.Second

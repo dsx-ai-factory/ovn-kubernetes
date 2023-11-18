@@ -585,14 +585,14 @@ func (bsnc *BaseSecondaryNetworkController) WatchMultiNetworkPolicy() error {
 func cleanupPolicyLogicalEntities(nbClient libovsdbclient.Client, ops []ovsdb.Operation, netName string) ([]ovsdb.Operation, error) {
 	var err error
 	portGroupPredicate := func(item *nbdb.PortGroup) bool {
-		return item.ExternalIDs[types.NetworkExternalID] == netName && util.HasExternalIDsForCluster(item.ExternalIDs)
+		return item.ExternalIDs[types.NetworkExternalID] == netName
 	}
 	ops, err = libovsdbops.DeletePortGroupsWithPredicateOps(nbClient, ops, portGroupPredicate)
 	if err != nil {
 		return ops, fmt.Errorf("failed to get ops to delete port group of network %s", netName)
 	}
 
-	controllerName := util.GetClusterScopedName(netName + "-network-controller")
+	controllerName := netName + "-network-controller"
 	asPredicate := func(item *nbdb.AddressSet) bool {
 		return item.ExternalIDs[libovsdbops.OwnerControllerKey.String()] == controllerName
 	}

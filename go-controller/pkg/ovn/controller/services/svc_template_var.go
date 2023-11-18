@@ -8,10 +8,8 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -126,11 +124,6 @@ func listSvcTemplates(nbClient libovsdbclient.Client) (templatesByName TemplateM
 
 	for _, nbTemplate := range templatesList {
 		for name, perChassisValue := range nbTemplate.Variables {
-			if (util.IsClusterScoped() && !strings.HasPrefix(name, util.GetClusterPrefix())) ||
-				(!util.IsClusterScoped() && strings.HasPrefix(name, "CLUSTER_")) {
-				// does not belong to this cluster
-				continue
-			}
 			tv, found := templatesByName[name]
 			if !found {
 				tv = makeTemplate(name)
@@ -183,11 +176,7 @@ func svcCreateOrUpdateTemplateVar(nbClient libovsdbclient.Client, templateVars [
 
 // makeLBNodeIPTemplateNamePrefix creates a template name prefix for the node IP (per family)
 func makeLBNodeIPTemplateNamePrefix(family corev1.IPFamily) string {
-	var clusterPrefix string
-	if util.IsClusterScoped() {
-		clusterPrefix = config.Kubernetes.ClusterName + "/"
-	}
-	return fmt.Sprintf("%s%s_%v_", clusterPrefix, LBVipNodeTemplate, family)
+	return fmt.Sprintf("%s_%v_", LBVipNodeTemplate, family)
 }
 
 // isLBNodeIPTemplateName returns true if 'name' is a node IP template name

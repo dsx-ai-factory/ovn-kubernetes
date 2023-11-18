@@ -35,7 +35,7 @@ func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, ne
 			BaseSecondaryNetworkController: BaseSecondaryNetworkController{
 				BaseNetworkController: BaseNetworkController{
 					CommonNetworkControllerInfo: *cnci,
-					controllerName:              util.GetClusterScopedName(netInfo.GetNetworkName() + "-network-controller"),
+					controllerName:              netInfo.GetNetworkName() + "-network-controller",
 					NetInfo:                     netInfo,
 					lsManager:                   lsm.NewL2SwitchManager(),
 					logicalPortCache:            newPortCache(stopChan),
@@ -102,7 +102,7 @@ func (oc *SecondaryLocalnetNetworkController) Cleanup(netName string) error {
 }
 
 func (oc *SecondaryLocalnetNetworkController) Init() error {
-	switchName := util.GetClusterScopedName(oc.GetNetworkScopedName(types.OVNLocalnetSwitch))
+	switchName := oc.GetNetworkScopedName(types.OVNLocalnetSwitch)
 
 	logicalSwitch, err := oc.initializeLogicalSwitch(switchName, oc.Subnets(), oc.ExcludeSubnets())
 	if err != nil {
@@ -113,13 +113,12 @@ func (oc *SecondaryLocalnetNetworkController) Init() error {
 	// This is a learning switch port with "unknown" address. The external
 	// world is accessed via this port.
 	logicalSwitchPort := nbdb.LogicalSwitchPort{
-		Name:      util.GetClusterScopedName(oc.GetNetworkScopedName(types.OVNLocalnetPort)),
+		Name:      oc.GetNetworkScopedName(types.OVNLocalnetPort),
 		Addresses: []string{"unknown"},
 		Type:      "localnet",
 		Options: map[string]string{
-			"network_name": oc.GetNetworkScopedName(types.LocalNetBridgeName), // TBD need different value for multi-cluster?
+			"network_name": oc.GetNetworkScopedName(types.LocalNetBridgeName),
 		},
-		ExternalIDs: util.ExternalIDsForCluster(nil),
 	}
 	intVlanID := int(oc.Vlan())
 	if intVlanID != 0 {

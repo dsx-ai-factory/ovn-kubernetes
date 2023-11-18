@@ -232,14 +232,14 @@ func setupManagementPortIPFamilyConfig(routeManager *routemanager.Controller, mp
 	createForwardingRule := func(family string) error {
 		var stdout, stderr string
 		var err error
-		stdout, _, err = util.RunSysctl(fmt.Sprintf("net.%s.conf.%s.forwarding", family, config.OvnKubeNode.MgmtPortIntfName))
-		if err == nil && stdout == fmt.Sprintf("net.%s.conf.%s.forwarding = 1", family, config.OvnKubeNode.MgmtPortIntfName) {
+		stdout, _, err = util.RunSysctl(fmt.Sprintf("net.%s.conf.%s.forwarding", family, types.K8sMgmtIntfName))
+		if err == nil && stdout == fmt.Sprintf("net.%s.conf.%s.forwarding = 1", family, types.K8sMgmtIntfName) {
 			return nil
 		}
-		stdout, stderr, err = util.RunSysctl("-w", fmt.Sprintf("net.%s.conf.%s.forwarding=1", family, config.OvnKubeNode.MgmtPortIntfName))
-		if err != nil || stdout != fmt.Sprintf("net.%s.conf.%s.forwarding = 1", family, config.OvnKubeNode.MgmtPortIntfName) {
+		stdout, stderr, err = util.RunSysctl("-w", fmt.Sprintf("net.%s.conf.%s.forwarding=1", family, types.K8sMgmtIntfName))
+		if err != nil || stdout != fmt.Sprintf("net.%s.conf.%s.forwarding = 1", family, types.K8sMgmtIntfName) {
 			return fmt.Errorf("could not set the correct forwarding value for interface %s: stdout: %v, stderr: %v, err: %v",
-				config.OvnKubeNode.MgmtPortIntfName, stdout, stderr, err)
+				types.K8sMgmtIntfName, stdout, stderr, err)
 		}
 		return nil
 	}
@@ -478,7 +478,7 @@ func DelMgtPortIptRules() {
 	if err != nil {
 		return
 	}
-	rule := []string{"-o", config.OvnKubeNode.MgmtPortIntfName, "-j", iptableMgmPortChain}
+	rule := []string{"-o", types.K8sMgmtIntfName, "-j", iptableMgmPortChain}
 	_ = ipt.Delete("nat", "POSTROUTING", rule...)
 	_ = ipt6.Delete("nat", "POSTROUTING", rule...)
 	_ = ipt.ClearChain("nat", iptableMgmPortChain)

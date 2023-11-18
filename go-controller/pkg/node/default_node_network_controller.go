@@ -584,7 +584,7 @@ func importManagementPortAnnotation(node *kapi.Node) (string, error) {
 
 // Take care of alternative names for the netdevName by making sure we
 // use the link attribute name as well as handle the case when netdevName
-// was renamed to config.OvnKubeNode.MgmtPortIntfName
+// was renamed to types.K8sMgmtIntfName
 func getManagementPortNetDev(netdevName string) (string, error) {
 	link, err := util.GetNetLinkOps().LinkByName(netdevName)
 	if err != nil {
@@ -592,8 +592,8 @@ func getManagementPortNetDev(netdevName string) (string, error) {
 			return "", fmt.Errorf("failed to lookup %s link: %v", netdevName, err)
 		}
 		// this may not the first time invoked on the node after reboot
-		// netdev may have already been renamed to config.OvnKubeNode.MgmtPortIntfName
-		link, err = util.GetNetLinkOps().LinkByName(config.OvnKubeNode.MgmtPortIntfName)
+		// netdev may have already been renamed to types.K8sMgmtIntfName
+		link, err = util.GetNetLinkOps().LinkByName(types.K8sMgmtIntfName)
 		if err != nil {
 			return "", fmt.Errorf("failed to get link device for %s. %v", netdevName, err)
 		}
@@ -1079,9 +1079,9 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 				if needLegacySvcRoute {
 					klog.Info("System may be upgrading, falling back to legacy K8S Service via management port")
 					// add back legacy route for service via management port
-					link, err := util.LinkSetUp(config.OvnKubeNode.MgmtPortIntfName)
+					link, err := util.LinkSetUp(types.K8sMgmtIntfName)
 					if err != nil {
-						return fmt.Errorf("unable to get link for %s, error: %v", config.OvnKubeNode.MgmtPortIntfName, err)
+						return fmt.Errorf("unable to get link for %s, error: %v", types.K8sMgmtIntfName, err)
 					}
 					var gwIP net.IP
 					var routes []routemanager.Route
@@ -1502,9 +1502,9 @@ func configureSvcRouteViaBridge(routeManager *routemanager.Controller, bridge st
 func upgradeServiceRoute(routeManager *routemanager.Controller, bridgeName string) error {
 	klog.Info("Updating K8S Service route")
 	// Flush old routes
-	link, err := util.LinkSetUp(config.OvnKubeNode.MgmtPortIntfName)
+	link, err := util.LinkSetUp(types.K8sMgmtIntfName)
 	if err != nil {
-		return fmt.Errorf("unable to get link: %s, error: %v", config.OvnKubeNode.MgmtPortIntfName, err)
+		return fmt.Errorf("unable to get link: %s, error: %v", types.K8sMgmtIntfName, err)
 	}
 	for _, serviceCIDR := range config.Kubernetes.ServiceCIDRs {
 		serviceCIDR := *serviceCIDR

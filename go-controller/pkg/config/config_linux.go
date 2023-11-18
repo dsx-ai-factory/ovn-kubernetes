@@ -19,9 +19,9 @@ func ValidateConfig() error {
 	//	 - full mode node when MgmtPortNetdev
 	if OvnKubeNode.MgmtPortNetdev != "" && (OvnKubeNode.Mode != types.NodeModeDPU || OvnKubeNode.IsPrimaryDPU) {
 		// management port device may already be renamed to specific interface name
-		_, err := netlink.LinkByName(OvnKubeNode.MgmtPortIntfName)
+		_, err := netlink.LinkByName(types.K8sMgmtIntfName)
 		if err != nil {
-			klog.V(5).Infof("Couldn't find %s device, so going to find %s device", OvnKubeNode.MgmtPortIntfName, OvnKubeNode.MgmtPortNetdev)
+			klog.V(5).Infof("Couldn't find %s device, so going to find %s device", types.K8sMgmtIntfName, OvnKubeNode.MgmtPortNetdev)
 			// management port device may not be renamed to specified mgmtIntfName yet, check it directly
 			_, err = netlink.LinkByName(OvnKubeNode.MgmtPortNetdev)
 			if err != nil {

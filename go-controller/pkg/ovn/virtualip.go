@@ -99,7 +99,7 @@ func getVipKey(vip *virtualipv1beta1.VirtualIP) string {
 }
 
 func getVirtualPortName(namespace, name string) string {
-	return util.GetClusterScopedName(fmt.Sprintf("%s_%s_%s", ovntypes.VirtualPortPrefix, namespace, name))
+	return fmt.Sprintf("%s_%s_%s", ovntypes.VirtualPortPrefix, namespace, name)
 }
 
 func getVirtualIPLockKey(nadName, ipAddress string) string {
@@ -129,9 +129,6 @@ func (podInfo *backingPodInfo) GetLogicalPortName(nadName string) string {
 }
 
 func (bnc *BaseNetworkController) updateVIPActivePodInstance(pb *sbdb.PortBinding) error {
-	if !util.HasExternalIDsForCluster(pb.ExternalIDs) {
-		return nil
-	}
 	virtualIPNadName := pb.ExternalIDs[ovntypes.ExternalIDNetAttachDef]
 	virtualIPAddress := pb.Options[optionsVirtualIP]
 	unlock := util.LockByKey.Acquire(getVirtualIPLockKey(virtualIPNadName, virtualIPAddress))
@@ -658,7 +655,7 @@ func (bnc *BaseNetworkController) isVirtualIPAddressValid(vip *virtualIP) (bool,
 }
 
 func (bnc *BaseNetworkController) createVIP(vip *virtualIP) error {
-	ls, err := bnc.waitForNodeLogicalSwitch(util.GetClusterScopedName(bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch)))
+	ls, err := bnc.waitForNodeLogicalSwitch(bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch))
 	if err != nil {
 		return err
 	}
@@ -679,11 +676,11 @@ func (bnc *BaseNetworkController) createVIP(vip *virtualIP) error {
 	lsp = &nbdb.LogicalSwitchPort{
 		Name: vip.logicalPortName,
 		Type: ovntypes.VirtualPortType,
-		ExternalIDs: util.ExternalIDsForCluster(map[string]string{
+		ExternalIDs: map[string]string{
 			ovntypes.ExternalIDNamespace:    vip.namespace,
 			ovntypes.ExternalIDName:         vip.name,
 			ovntypes.ExternalIDNetAttachDef: vip.nadName,
-		}),
+		},
 		// setting this intially as we are using lock based on (nadName/VipAddress)
 		Options: map[string]string{
 			optionsVirtualIP: vip.vipAddress,
@@ -803,7 +800,7 @@ func (bnc *BaseNetworkController) deleteVirtualIP(virtIP *virtualipv1beta1.Virtu
 	// remove filtered namespace pod handler
 	bnc.watchFactory.RemovePodHandler(vip.podHandler)
 
-	switchName := util.GetClusterScopedName(bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch))
+	switchName := bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch)
 	lsp := nbdb.LogicalSwitchPort{Name: vip.logicalPortName}
 	sw := nbdb.LogicalSwitch{Name: switchName}
 	err := libovsdbops.DeleteLogicalSwitchPorts(bnc.nbClient, &sw, &lsp)
@@ -867,7 +864,7 @@ func (bnc *BaseNetworkController) syncVirtualIPPods(vip *virtualIP, vipLSP *nbdb
 
 func (bnc *BaseNetworkController) syncVirtualIPsPeriodic() {
 	klog.Infof("Starting VirtualIP sync for network %s", bnc.GetNetworkName())
-	switchName := util.GetClusterScopedName(bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch))
+	switchName := bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch)
 	sw := &nbdb.LogicalSwitch{Name: switchName}
 	ls, err := libovsdbops.GetLogicalSwitch(bnc.nbClient, sw)
 	if err != nil {
@@ -876,7 +873,7 @@ func (bnc *BaseNetworkController) syncVirtualIPsPeriodic() {
 	}
 
 	lookupFunc := func(item *nbdb.LogicalSwitchPort) bool {
-		return item.Type == ovntypes.VirtualPortType && util.HasExternalIDsForCluster(item.ExternalIDs)
+		return item.Type == ovntypes.VirtualPortType
 	}
 	vipLSPList, err := libovsdbops.FindLogicalSwitchPortsWithPredicate(bnc.nbClient, sw, lookupFunc)
 	if err != nil {

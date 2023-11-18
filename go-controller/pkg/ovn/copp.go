@@ -2,8 +2,6 @@ package ovn
 
 import (
 	"fmt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -48,7 +46,7 @@ func getMeterNameForProtocol(protocol string) string {
 // if not already present. Also cleans up old COPP entries if required.
 func EnsureDefaultCOPP(nbClient libovsdbclient.Client) (string, error) {
 	p := func(item *nbdb.Copp) bool {
-		return item.Name == "" && util.HasExternalIDsForCluster(item.ExternalIDs)
+		return item.Name == ""
 	}
 	ops, err := libovsdbops.DeleteCOPPsWithPredicateOps(nbClient, nil, p)
 	if err != nil {
@@ -56,9 +54,8 @@ func EnsureDefaultCOPP(nbClient libovsdbclient.Client) (string, error) {
 	}
 
 	band := &nbdb.MeterBand{
-		Action:      types.MeterAction,
-		Rate:        int(25), // hard-coding for now. TODO(tssurya): make this configurable if needed
-		ExternalIDs: util.ExternalIDsForCluster(nil),
+		Action: types.MeterAction,
+		Rate:   int(25), // hard-coding for now. TODO(tssurya): make this configurable if needed
 	}
 	ops, err = libovsdbops.CreateMeterBandOps(nbClient, ops, band)
 	if err != nil {
@@ -69,14 +66,13 @@ func EnsureDefaultCOPP(nbClient libovsdbclient.Client) (string, error) {
 	meterFairness := true
 	for _, protocol := range defaultProtocolNames {
 		// format: <OVNSupportedProtocolName>-rate-limiter
-		meterName := util.GetClusterScopedName(getMeterNameForProtocol(protocol))
+		meterName := getMeterNameForProtocol(protocol)
 		meterNames[protocol] = meterName
 
 		meter := &nbdb.Meter{
-			Name:        meterName,
-			Fair:        &meterFairness,
-			Unit:        types.PacketsPerSecond,
-			ExternalIDs: util.ExternalIDsForCluster(nil),
+			Name: meterName,
+			Fair: &meterFairness,
+			Unit: types.PacketsPerSecond,
 		}
 
 		ops, err = libovsdbops.CreateOrUpdateMeterOps(nbClient, ops, meter, []*nbdb.MeterBand{band},
@@ -87,9 +83,8 @@ func EnsureDefaultCOPP(nbClient libovsdbclient.Client) (string, error) {
 	}
 
 	defaultCOPP := &nbdb.Copp{
-		Name:        util.GetClusterScopedName(defaultCOPPName),
-		Meters:      meterNames,
-		ExternalIDs: util.ExternalIDsForCluster(nil),
+		Name:   defaultCOPPName,
+		Meters: meterNames,
 	}
 	ops, err = libovsdbops.CreateOrUpdateCOPPsOps(nbClient, ops, defaultCOPP)
 	if err != nil {

@@ -133,20 +133,17 @@ func (oc *DefaultNetworkController) newEgressFirewallRule(rawEgressFirewallRule 
 func (oc *DefaultNetworkController) syncEgressFirewall(egressFirewalls []interface{}) error {
 	// In any gateway mode, make sure to delete all LRPs on ovn_cluster_router.
 	p := func(item *nbdb.LogicalRouterPolicy) bool {
-		return item.Priority <= types.EgressFirewallStartPriority && item.Priority >= types.MinimumReservedEgressFirewallPriority &&
-			util.HasExternalIDsForCluster(item.ExternalIDs)
+		return item.Priority <= types.EgressFirewallStartPriority && item.Priority >= types.MinimumReservedEgressFirewallPriority
 	}
-	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, util.GetClusterScopedName(types.OVNClusterRouter), p)
+	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, types.OVNClusterRouter, p)
 	if err != nil {
-		return fmt.Errorf("error deleting egress firewall policies on router %s: %v", util.GetClusterScopedName(types.OVNClusterRouter), err)
+		return fmt.Errorf("error deleting egress firewall policies on router %s: %v", types.OVNClusterRouter, err)
 	}
 
 	// delete acls from all switches, they reside on the port group now
 	// Lookup all ACLs used for egress Firewalls
 	aclPred := func(item *nbdb.ACL) bool {
-		return item.Priority >= types.MinimumReservedEgressFirewallPriority &&
-			item.Priority <= types.EgressFirewallStartPriority &&
-			util.HasExternalIDsForCluster(item.ExternalIDs)
+		return item.Priority >= types.MinimumReservedEgressFirewallPriority && item.Priority <= types.EgressFirewallStartPriority
 	}
 	egressFirewallACLs, err := libovsdbops.FindACLsWithPredicate(oc.nbClient, aclPred)
 	if err != nil {
@@ -160,7 +157,7 @@ func (oc *DefaultNetworkController) syncEgressFirewall(egressFirewalls []interfa
 				aclsToDelete.Insert(acl.UUID)
 			}
 			swWithACLsPred := func(sw *nbdb.LogicalSwitch) bool {
-				return util.HasExternalIDsForCluster(sw.ExternalIDs) && aclsToDelete.HasAny(sw.ACLs...)
+				return aclsToDelete.HasAny(sw.ACLs...)
 			}
 			return libovsdbops.RemoveACLsFromLogicalSwitchesWithPredicate(oc.nbClient, swWithACLsPred, batchACLs...)
 		})
@@ -193,7 +190,7 @@ func (oc *DefaultNetworkController) syncEgressFirewall(egressFirewalls []interfa
 		}
 	}
 
-	err = libovsdbops.DeleteACLsFromPortGroups(oc.nbClient, []string{oc.getClusterPortGroupName(types.ClusterPortGroupNameBase)}, deleteACLs...)
+	err = libovsdbops.DeleteACLsFromPortGroups(oc.nbClient, []string{types.ClusterPortGroupNameBase}, deleteACLs...)
 	if err != nil {
 		return err
 	}
@@ -406,10 +403,10 @@ func (oc *DefaultNetworkController) createEgressFirewallACLOps(ops []libovsdb.Op
 
 	// Applying ACLs on types.ClusterPortGroupName is equivalent to applying on every node switch, since
 	// types.ClusterPortGroupName contains management port from every switch.
-	ops, err = libovsdbops.AddACLsToPortGroupOps(oc.nbClient, ops, oc.getClusterPortGroupName(types.ClusterPortGroupNameBase), egressFirewallACL)
+	ops, err = libovsdbops.AddACLsToPortGroupOps(oc.nbClient, ops, types.ClusterPortGroupNameBase, egressFirewallACL)
 	if err != nil {
 		return ops, fmt.Errorf("failed to add egressFirewall ACL %v to port group %s: %v",
-			egressFirewallACL, oc.getClusterPortGroupName(types.ClusterPortGroupNameBase), err)
+			egressFirewallACL, types.ClusterPortGroupNameBase, err)
 	}
 
 	return ops, nil
@@ -432,7 +429,7 @@ func (oc *DefaultNetworkController) deleteEgressFirewallRule(namespace string, r
 		klog.Errorf("Duplicate ACL found for egress firewall %s, ruleIdx: %d", namespace, ruleIdx)
 	}
 
-	err = libovsdbops.DeleteACLsFromPortGroups(oc.nbClient, []string{oc.getClusterPortGroupName(types.ClusterPortGroupNameBase)}, egressFirewallACLs...)
+	err = libovsdbops.DeleteACLsFromPortGroups(oc.nbClient, []string{types.ClusterPortGroupNameBase}, egressFirewallACLs...)
 	return err
 }
 
@@ -454,7 +451,7 @@ func (oc *DefaultNetworkController) deleteEgressFirewallRules(namespace string) 
 		return nil
 	}
 
-	err = libovsdbops.DeleteACLsFromPortGroups(oc.nbClient, []string{oc.getClusterPortGroupName(types.ClusterPortGroupNameBase)}, egressFirewallACLs...)
+	err = libovsdbops.DeleteACLsFromPortGroups(oc.nbClient, []string{types.ClusterPortGroupNameBase}, egressFirewallACLs...)
 	if err != nil {
 		return err
 	}

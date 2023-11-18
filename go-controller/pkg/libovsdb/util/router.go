@@ -30,7 +30,7 @@ import (
 // NOTE: This route is exactly the same as what is added by pod-live-migration feature and we keep the route exactly
 // same across the 3 features so that if the route already exists on the node, this is just a no-op
 func CreateDefaultRouteToExternal(nbClient libovsdbclient.Client, nodeName string) error {
-	gatewayIPs, err := GetLRPAddrs(nbClient, types.GWRouterToJoinSwitchPrefix+util.GetClusterScopedName(types.GWRouterPrefix+nodeName))
+	gatewayIPs, err := GetLRPAddrs(nbClient, types.GWRouterToJoinSwitchPrefix+types.GWRouterPrefix+nodeName)
 	if err != nil {
 		return fmt.Errorf("attempt at finding node gateway router %s network information failed, err: %w", nodeName, err)
 	}
@@ -50,11 +50,11 @@ func CreateDefaultRouteToExternal(nbClient libovsdbclient.Client, nodeName strin
 			if err != nil {
 				return false
 			}
-			return util.HasExternalIDsForCluster(lrsr.ExternalIDs) && util.ContainsCIDR(subnet, itemCIDR) &&
+			return util.ContainsCIDR(subnet, itemCIDR) &&
 				lrsr.Nexthop == gatewayIP.IP.String() &&
 				lrsr.Policy != nil && *lrsr.Policy == nbdb.LogicalRouterStaticRoutePolicySrcIP
 		}
-		if err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient, util.GetClusterScopedName(types.OVNClusterRouter), &lrsr, p); err != nil {
+		if err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient, types.OVNClusterRouter, &lrsr, p); err != nil {
 			return fmt.Errorf("unable to create pod to external catch-all reroute for node %s, err: %v", nodeName, err)
 		}
 	}

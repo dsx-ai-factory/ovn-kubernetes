@@ -230,7 +230,7 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 		return
 	}
 
-	switchName := util.GetClusterScopedName(node.Name)
+	switchName := node.Name
 	grName := ""
 	l3gatewayAddresses := []net.IP{}
 	chassisID := ""
