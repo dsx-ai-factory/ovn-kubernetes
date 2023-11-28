@@ -258,21 +258,12 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 		}
 	}
 
-	node, err := oc.watchFactory.GetNode(nodeName)
-	if err != nil {
-		klog.Errorf("Unable to get node:%s from informer", nodeName)
-		return err
-	}
-
-	physnetNameKey := util.GetPhysNetNameKeyForNode(nodeName, node.Labels)
-	klog.V(5).Infof("AddExternalSwitch NodeName: %s  PhysnetNameKey: %s InterfaceID: %s", nodeName, physnetNameKey, l3GatewayConfig.InterfaceID)
-
 	if err := oc.addExternalSwitch("",
 		l3GatewayConfig.InterfaceID,
 		nodeName,
 		gatewayRouter,
 		l3GatewayConfig.MACAddress.String(),
-		physnetNameKey,
+		types.PhysicalNetworkName,
 		l3GatewayConfig.IPAddresses,
 		l3GatewayConfig.VLANID,
 		enableGatewayMTU); err != nil {
