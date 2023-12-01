@@ -171,8 +171,10 @@ spec:
               value: "{{ ovn_nb_port }}"
             - name: OVN_NB_RAFT_PORT
               value: "{{ ovn_nb_raft_port }}"
+            {% if ovn_nb_enable_leader_xfer_for_snapshot != "false" %}
             - name: OVN_NB_ENABLE_LEADER_XFER_FOR_SNAPSHOT
               value: "{{ ovn_nb_enable_leader_xfer_for_snapshot }}"
+            {% endif %}
       # end of container
 
       volumes:
