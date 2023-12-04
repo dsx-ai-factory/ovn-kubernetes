@@ -10,6 +10,8 @@ import (
 
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions/egressip/v1"
 
+	portmirrorapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
+
 	factory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 
 	informerscorev1 "k8s.io/client-go/informers/core/v1"
@@ -139,6 +141,32 @@ func (_m *NodeWatchFactory) AddPodHandler(handlerFuncs cache.ResourceEventHandle
 
 	if rf, ok := ret.Get(1).(func(cache.ResourceEventHandler, func([]interface{}) error) error); ok {
 		r1 = rf(handlerFuncs, processExisting)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// AddFilteredPodHandler provides a mock function with given fields: namespace, handlerFuncs, processExisting
+func (_m *NodeWatchFactory) AddFilteredPodHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error, prority int) (*factory.Handler, error) {
+	ret := _m.Called(namespace, handlerFuncs, processExisting)
+
+	var r0 *factory.Handler
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, cache.ResourceEventHandler, func([]interface{}) error) (*factory.Handler, error)); ok {
+		return rf(namespace, handlerFuncs, processExisting)
+	}
+	if rf, ok := ret.Get(0).(func(string, cache.ResourceEventHandler, func([]interface{}) error) *factory.Handler); ok {
+		r0 = rf(namespace, handlerFuncs, processExisting)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*factory.Handler)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string, cache.ResourceEventHandler, func([]interface{}) error) error); ok {
+		r1 = rf(namespace, handlerFuncs, processExisting)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -582,6 +610,89 @@ func (_m *NodeWatchFactory) RemovePodHandler(handler *factory.Handler) {
 // RemoveServiceHandler provides a mock function with given fields: handler
 func (_m *NodeWatchFactory) RemoveServiceHandler(handler *factory.Handler) {
 	_m.Called(handler)
+}
+
+// AddPortMirrorHandler provides a mock function with given fields: handlerFuncs, processExisting
+func (_m *NodeWatchFactory) AddPortMirrorHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*factory.Handler, error) {
+	ret := _m.Called(handlerFuncs, processExisting)
+
+	var r0 *factory.Handler
+	var r1 error
+	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func([]interface{}) error) (*factory.Handler, error)); ok {
+		return rf(handlerFuncs, processExisting)
+	}
+	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func([]interface{}) error) *factory.Handler); ok {
+		r0 = rf(handlerFuncs, processExisting)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*factory.Handler)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(cache.ResourceEventHandler, func([]interface{}) error) error); ok {
+		r1 = rf(handlerFuncs, processExisting)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RemovePortMirrorHandler provides a mock function with given fields: handler
+func (_m *NodeWatchFactory) RemovePortMirrorHandler(handler *factory.Handler) {
+	_m.Called(handler)
+}
+
+// GetPortMirror provides a mock function with given fields: namespace, name
+func (_m *NodeWatchFactory) GetPortMirror(namespace string, name string) (*portmirrorapi.PortMirror, error) {
+	ret := _m.Called(namespace, name)
+
+	var r0 *portmirrorapi.PortMirror
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, string) (*portmirrorapi.PortMirror, error)); ok {
+		return rf(namespace, name)
+	}
+	if rf, ok := ret.Get(0).(func(string, string) *portmirrorapi.PortMirror); ok {
+		r0 = rf(namespace, name)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*portmirrorapi.PortMirror)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string, string) error); ok {
+		r1 = rf(namespace, name)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetPortMirrors provides a mock function with given fields:
+func (_m *NodeWatchFactory) GetPortMirrors() ([]*portmirrorapi.PortMirror, error) {
+	ret := _m.Called()
+
+	var r0 []*portmirrorapi.PortMirror
+	var r1 error
+	if rf, ok := ret.Get(0).(func() ([]*portmirrorapi.PortMirror, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() []*portmirrorapi.PortMirror); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*portmirrorapi.PortMirror)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // Shutdown provides a mock function with given fields:

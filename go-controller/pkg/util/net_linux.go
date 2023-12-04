@@ -645,3 +645,22 @@ func filterRouteByDstAndGw(link netlink.Link, subnet *net.IPNet, gw net.IP) (*ne
 		},
 		netlink.RT_FILTER_DST | netlink.RT_FILTER_OIF | netlink.RT_FILTER_GW
 }
+
+func RenameLink(curName, newName string) error {
+	link, err := netLinkOps.LinkByName(curName)
+	if err != nil {
+		return err
+	}
+
+	if err := netLinkOps.LinkSetDown(link); err != nil {
+		return err
+	}
+	if err := netLinkOps.LinkSetName(link, newName); err != nil {
+		return err
+	}
+	if err := netLinkOps.LinkSetUp(link); err != nil {
+		return err
+	}
+
+	return nil
+}

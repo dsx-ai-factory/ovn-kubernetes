@@ -338,6 +338,8 @@ ovn_admin_pbr_enable=${OVN_ADMIN_PBR_ENABLE:-false}
 ovn_virtualip_enable=${OVN_VIRTUALIP_ENABLE:-false}
 #OVN_IPRESERVATION_ENABLE - enable ipreservation for ovn-kubernetes
 ovn_ipreservation_enable=${OVN_IPRESERVATION_ENABLE:-false}
+#OVN_PORT_MIRROR_ENABLE - enable port mirror for ovn-kubernetes
+ovn_port_mirror_enable=${OVN_PORT_MIRROR_ENABLE:-false}
 #OVN_DISABLE_OVN_IFACE_ID_VER - disable usage of the OVN iface-id-ver option
 ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER:-false}
 #OVN_MULTI_NETWORK_ENABLE - enable multiple network support for ovn-kubernetes
@@ -1330,6 +1332,11 @@ ovn-master() {
 	  ipreservation_enabled_flag="--enable-ip-reservation"
   fi
 
+  port_mirror_enabled_flag=
+  if [[ ${ovn_port_mirror_enable} == "true" ]]; then
+	  port_mirror_enabled_flag="--enable-port-mirror"
+  fi
+
   nohostsubnet_label_option=
   if [[ ${OVN_NOHOSTSUBNET_LABEL} != "" ]]; then
 	  nohostsubnet_label_option="--no-hostsubnet-nodes=${OVN_NOHOSTSUBNET_LABEL}"
@@ -1426,6 +1433,7 @@ ovn-master() {
     ${ovn_v4_masquerade_subnet_opt} \
     ${ovn_v6_join_subnet_opt} \
     ${ovn_v6_masquerade_subnet_opt} \
+    ${port_mirror_enabled_flag} \
     ${virtualip_enabled_flag} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
@@ -2484,6 +2492,11 @@ ovn-node() {
 	  egressservice_enabled_flag="--enable-egress-service"
   fi
 
+  port_mirror_enabled_flag=
+  if [[ ${ovn_port_mirror_enable} == "true" ]]; then
+	  port_mirror_enabled_flag="--enable-port-mirror"
+  fi
+
   disable_ovn_iface_id_ver_flag=
   if [[ ${ovn_disable_ovn_iface_id_ver} == "true" ]]; then
       disable_ovn_iface_id_ver_flag="--disable-ovn-iface-id-ver"
@@ -2755,6 +2768,7 @@ ovn-node() {
         ${monitor_all} \
         ${multicast_enabled_flag} \
         ${multi_network_enabled_flag} \
+        ${port_mirror_enabled_flag} \
         ${netflow_targets} \
         ${ofctrl_wait_before_clear} \
         ${ovn_conntrack_zone_flag} \

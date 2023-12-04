@@ -19,6 +19,9 @@ import (
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
 	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
+	portmirrorfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned/fake"
+	virtualipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/clientset/versioned/fake"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
@@ -1425,6 +1428,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				nodeHostAddrs.Insert(ip.String())
 			}
 			err = oc.syncGatewayLogicalNetwork(&testNode, l3GatewayConfig, []*net.IPNet{subnet}, nodeHostAddrs)
+
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			// inject transient problem, nbdb is down
@@ -1903,10 +1907,16 @@ func TestController_syncNodes(t *testing.T) {
 			kubeFakeClient := fake.NewSimpleClientset()
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
+			egressQoSFakeClient := &egressqosfake.Clientset{}
+			virtualIPFakeClient := &virtualipfake.Clientset{}
+			portMirrorFakeClient := &portmirrorfake.Clientset{}
 			fakeClient := &util.OVNMasterClientset{
 				KubeClient:           kubeFakeClient,
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
+				EgressQoSClient:      egressQoSFakeClient,
+				VirtualIPClient:      virtualIPFakeClient,
+				PortMirrorClient:     portMirrorFakeClient,
 			}
 			f, err := factory.NewMasterWatchFactory(fakeClient)
 			if err != nil {

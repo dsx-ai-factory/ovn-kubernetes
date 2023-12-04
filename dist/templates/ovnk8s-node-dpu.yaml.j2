@@ -122,6 +122,8 @@ spec:
           readOnly: true
         - mountPath: /var/run/netns
           name: host-var-run-netns
+        - mountPath: /opt/mellanox
+          name: host-opt-mlnx
 
         resources:
           requests:
@@ -257,6 +259,8 @@ spec:
           value: "{{ ovs_min_revalidate_pps }}"
         - name: OVS_MAX_IDLE
           value: "{{ ovs_max_idle }}"
+        - name: OVN_PORT_MIRROR_ENABLE
+          value: "{{ ovn_port_mirror_enable }}"
         - name: OVNKUBE_DISABLE_OVS_METRICS
           value: "{{ disable_ovs_metrics }}"
         - name: REPRESENTOR_METERING_NODES
@@ -297,6 +301,9 @@ spec:
       - name: host-var-run-netns
         hostPath:
           path: /var/run/netns
+      - name: host-opt-mlnx
+        hostPath:
+          path: /opt/mellanox
 
 
       tolerations:

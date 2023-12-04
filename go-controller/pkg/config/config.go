@@ -421,6 +421,7 @@ type OVNKubernetesFeatureConfig struct {
 	EnableVirtualIP               bool `gcfg:"enable-virtual-ip"`
 	EnableIPReservation           bool `gcfg:"enable-ip-reservation"`
 	EnableMultiExternalGateway    bool `gcfg:"enable-multi-external-gateway"`
+	EnablePortMirror              bool `gcfg:"enable-port-mirror"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -1115,6 +1116,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use AdminPolicyBasedExternalRoute CRD feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableMultiExternalGateway,
 		Value:       OVNKubernetesFeature.EnableMultiExternalGateway,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-port-mirror",
+		Usage:       "Configure to use PortMirror CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnablePortMirror,
+		Value:       OVNKubernetesFeature.EnablePortMirror,
 	},
 }
 

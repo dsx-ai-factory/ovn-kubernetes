@@ -89,7 +89,7 @@ var _ = Describe("Node DPU tests", func() {
 	var sriovnetOpsMock utilMocks.SriovnetOps
 	var netlinkOpsMock utilMocks.NetLinkOps
 	var execMock *ovntest.FakeExec
-	var kubeMock kubemocks.Interface
+	var kubeOVNMock kubemocks.InterfaceOVN
 	var factoryMock factorymocks.NodeWatchFactory
 	var pod v1.Pod
 	var dnnc *DefaultNodeNetworkController
@@ -105,6 +105,7 @@ var _ = Describe("Node DPU tests", func() {
 	BeforeEach(func() {
 		sriovnetOpsMock = utilMocks.SriovnetOps{}
 		netlinkOpsMock = utilMocks.NetLinkOps{}
+		kubeOVNMock = kubemocks.InterfaceOVN{}
 		execMock = ovntest.NewFakeExec()
 
 		util.SetSriovnetOpsInst(&sriovnetOpsMock)
@@ -114,10 +115,9 @@ var _ = Describe("Node DPU tests", func() {
 		err = cni.SetExec(execMock)
 		Expect(err).NotTo(HaveOccurred())
 
-		kubeMock = kubemocks.Interface{}
 		apbExternalRouteClient := adminpolicybasedrouteclient.NewSimpleClientset()
 		factoryMock = factorymocks.NodeWatchFactory{}
-		cnnci := newCommonNodeNetworkControllerInfo(nil, &kubeMock, apbExternalRouteClient, &factoryMock, nil, "", "", []string{"00:00:00:01:02:03"})
+		cnnci := newCommonNodeNetworkControllerInfo(nil, &kubeOVNMock, apbExternalRouteClient, &factoryMock, nil, "", "", "", []string{"00:00:00:01:02:03"})
 		dnnc = newDefaultNodeNetworkController(cnnci, &util.DefaultNetInfo{}, nil, nil)
 
 		podInformer = coreinformermocks.PodInformer{}
@@ -416,7 +416,7 @@ var _ = Describe("Node DPU tests", func() {
 				podInformer.On("Lister").Return(&podLister)
 				podLister.On("Pods", mock.AnythingOfType("string")).Return(&podNamespaceLister)
 				podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
-				kubeMock.On("UpdatePodStatus", cpod).Return(nil)
+				kubeOVNMock.On("UpdatePodStatus", cpod).Return(nil)
 
 				_, err = dnnc.addRepPort(&pod, &scd, types.DefaultNetworkName, ifInfo, clientset, nil, nil)
 				Expect(err).ToNot(HaveOccurred())
@@ -446,7 +446,7 @@ var _ = Describe("Node DPU tests", func() {
 				podInformer.On("Lister").Return(&podLister)
 				podLister.On("Pods", mock.AnythingOfType("string")).Return(&podNamespaceLister)
 				podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
-				kubeMock.On("UpdatePodStatus", cpod).Return(fmt.Errorf("failed to set pod annotations"))
+				kubeOVNMock.On("UpdatePodStatus", cpod).Return(fmt.Errorf("failed to set pod annotations"))
 
 				_, err = dnnc.addRepPort(&pod, &scd, types.DefaultNetworkName, ifInfo, clientset, nil, nil)
 				Expect(err).To(HaveOccurred())

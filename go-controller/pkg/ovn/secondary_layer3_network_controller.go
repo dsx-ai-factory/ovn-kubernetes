@@ -453,6 +453,13 @@ func (oc *SecondaryLayer3NetworkController) Run() error {
 		return err
 	}
 
+	if config.OVNKubernetesFeature.EnablePortMirror {
+		err := oc.WatchPortMirrors()
+		if err != nil {
+			return err
+		}
+	}
+
 	klog.Infof("Completing all the Watchers for network %s took %v", oc.GetNetworkName(), time.Since(start))
 
 	// controller is fully running and resource handlers have synced, update Topology version in OVN

@@ -195,7 +195,7 @@ func initController(namespaces []corev1.Namespace, pods []corev1.Pod, egressIPs 
 	ovnNodeClient := &util.OVNNodeClientset{KubeClient: kubeClient, EgressIPClient: egressIPClient}
 	rm := routemanager.NewController()
 	ovnconfig.OVNKubernetesFeature.EnableEgressIP = true
-	watchFactory, err := factory.NewNodeWatchFactory(ovnNodeClient, node1Name)
+	watchFactory, err := factory.NewNodeWatchFactory(ovnNodeClient, []string{node1Name})
 	if err != nil {
 		return nil, err
 	}

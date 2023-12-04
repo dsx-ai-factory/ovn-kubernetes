@@ -67,11 +67,15 @@ import (
 	adminbasedpolicyinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions"
 	adminpolicybasedrouteinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions/adminpolicybasedroute/v1"
 
+	portmirrorapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
+	portmirrorscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned/scheme"
+	portmirrorinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/informers/externalversions"
+	portmirrorlister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/listers/portmirror/v1beta1"
+
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
@@ -106,6 +110,7 @@ type WatchFactory struct {
 	vipFactory           virtualipinformerfactory.SharedInformerFactory
 	ipresvFactory        ipreservationinformerfactory.SharedInformerFactory
 	apbRouteFactory      adminbasedpolicyinformerfactory.SharedInformerFactory
+	portMirrorFactory    portmirrorinformerfactory.SharedInformerFactory
 	informers            map[reflect.Type]*informer
 
 	stopChan chan struct{}
@@ -183,6 +188,7 @@ var (
 	NetworkAttachmentDefinitionType       reflect.Type = reflect.TypeOf(&nadapi.NetworkAttachmentDefinition{})
 	MultiNetworkPolicyType                reflect.Type = reflect.TypeOf(&mnpapi.MultiNetworkPolicy{})
 	IPReservationType                     reflect.Type = reflect.TypeOf(&ipreservationapi.IPReservation{})
+	PortMirrorType                        reflect.Type = reflect.TypeOf(&portmirrorapi.PortMirror{})
 
 	// Resource types used in ovnk node
 	NamespaceExGwType                         reflect.Type = reflect.TypeOf(&namespaceExGw{})
@@ -232,6 +238,7 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		vipFactory:           virtualipinformerfactory.NewSharedInformerFactory(ovnClientset.VirtualIPClient, resyncInterval),
 		ipresvFactory:        ipreservationinformerfactory.NewSharedInformerFactory(ovnClientset.IPReservationClient, resyncInterval),
 		apbRouteFactory:      adminbasedpolicyinformerfactory.NewSharedInformerFactory(ovnClientset.AdminPolicyRouteClient, resyncInterval),
+		portMirrorFactory:    portmirrorinformerfactory.NewSharedInformerFactory(ovnClientset.PortMirrorClient, resyncInterval),
 		informers:            make(map[reflect.Type]*informer),
 		stopChan:             make(chan struct{}),
 	}
@@ -262,6 +269,9 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		return nil, err
 	}
 	if err := adminbasedpolicyapi.AddToScheme(adminbasedpolicyscheme.Scheme); err != nil {
+		return nil, err
+	}
+	if err := portmirrorapi.AddToScheme(scheme.Scheme); err != nil {
 		return nil, err
 	}
 
@@ -402,6 +412,12 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		wf.apbRouteFactory.K8s().V1().AdminPolicyBasedExternalRoutes().Informer()
 	}
 
+	if config.OVNKubernetesFeature.EnablePortMirror {
+		wf.informers[PortMirrorType], err = newInformer(PortMirrorType, wf.portMirrorFactory.K8s().V1beta1().PortMirrors().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
 	return wf, nil
 }
 
@@ -505,6 +521,14 @@ func (wf *WatchFactory) Start() error {
 			}
 		}
 	}
+	if config.OVNKubernetesFeature.EnablePortMirror && wf.portMirrorFactory != nil {
+		wf.portMirrorFactory.Start(wf.stopChan)
+		for oType, synced := range wf.portMirrorFactory.WaitForCacheSync(wf.stopChan) {
+			if !synced {
+				return fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
+		}
+	}
 
 	return nil
 }
@@ -515,7 +539,7 @@ func (wf *WatchFactory) Start() error {
 // TODO(jtanenba) originally the pod selector was only supposed to select pods local to the node
 // commit 91046e889... changed that and pod selector selects all pods in the cluster fix the naming
 // of the localPodSelector or figure out how to deal with selecting all pods everywhere.
-func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (*WatchFactory, error) {
+func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeNames []string) (*WatchFactory, error) {
 	wf := &WatchFactory{
 		iFactory:             informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
 		egressServiceFactory: egressserviceinformerfactory.NewSharedInformerFactory(ovnClientset.EgressServiceClient, resyncInterval),
@@ -542,6 +566,12 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 	//if err != nil {
 	//	return nil, err
 	//}
+	if config.OvnKubeNode.Mode == types.NodeModeDPU && config.OVNKubernetesFeature.EnablePortMirror {
+		wf.portMirrorFactory = portmirrorinformerfactory.NewSharedInformerFactory(ovnClientset.PortMirrorClient, resyncInterval)
+		if err := portmirrorapi.AddToScheme(portmirrorscheme.Scheme); err != nil {
+			return nil, err
+		}
+	}
 
 	// For Services and Endpoints, pre-populate the shared Informer with one that
 	// has a label selector excluding headless services.
@@ -554,7 +584,13 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 			noAlternateProxySelector())
 	})
 
-	// For Pods, only select pods scheduled to this node
+	// For Pods, only select pods scheduled to these nodes
+	req, err := labels.NewRequirement("k8s.ovn.org/nodeName", selection.In, nodeNames)
+	if err != nil {
+		return nil, fmt.Errorf("error composing label filter  k8s.ovn.org/nodeName to select nodes in \"%v\":%v", nodeNames, err)
+	}
+	selector := labels.NewSelector()
+	selector = selector.Add(*req)
 	wf.iFactory.InformerFor(&kapi.Pod{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
 		return v1coreinformers.NewFilteredPodInformer(
 			c,
@@ -562,7 +598,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 			resyncPeriod,
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 			func(opts *metav1.ListOptions) {
-				opts.FieldSelector = fields.OneTermEqualSelector("spec.nodeName", nodeName).String()
+				opts.LabelSelector = selector.String()
 			})
 	})
 
@@ -574,7 +610,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 				resyncPeriod,
 				cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 				func(opts *metav1.ListOptions) {
-					opts.LabelSelector = fmt.Sprintf("kubernetes.io/hostname=%s", nodeName)
+					opts.LabelSelector = fmt.Sprintf("kubernetes.io/hostname=%s", nodeNames[0])
 				})
 		})
 	}
@@ -596,7 +632,6 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 			noServiceNameSelector())
 	})
 
-	var err error
 	wf.informers[NamespaceType], err = newInformer(NamespaceType, wf.iFactory.Core().V1().Namespaces().Informer())
 	if err != nil {
 		return nil, err
@@ -640,6 +675,13 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 	if config.OVNKubernetesFeature.EnableMultiExternalGateway {
 		// make sure shared informer is created for a factory, so on wf.apbRouteFactory.Start() it is initialized and caches are synced.
 		wf.apbRouteFactory.K8s().V1().AdminPolicyBasedExternalRoutes().Informer()
+	}
+
+	if config.OvnKubeNode.Mode == types.NodeModeDPU && config.OVNKubernetesFeature.EnablePortMirror {
+		wf.informers[PortMirrorType], err = newInformer(PortMirrorType, wf.portMirrorFactory.K8s().V1beta1().PortMirrors().Informer())
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return wf, nil
@@ -1373,6 +1415,26 @@ func (wf *WatchFactory) GetEgressFirewall(namespace, name string) (*egressfirewa
 
 func (wf *WatchFactory) CertificateSigningRequestInformer() certificatesinformers.CertificateSigningRequestInformer {
 	return wf.iFactory.Certificates().V1().CertificateSigningRequests()
+}
+
+// AddPortMirrorHandler adds a handler function that will be executed on PortMirror object changes
+func (wf *WatchFactory) AddPortMirrorHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+	return wf.addHandler(PortMirrorType, "", nil, handlerFuncs, processExisting, wf.GetHandlerPriority(PortMirrorType))
+}
+
+// RemovePortMirrorHandler removes an PortMirror object event handler function
+func (wf *WatchFactory) RemovePortMirrorHandler(handler *Handler) {
+	wf.removeHandler(PortMirrorType, handler)
+}
+
+func (wf *WatchFactory) GetPortMirrors() ([]*portmirrorapi.PortMirror, error) {
+	portMirrorLister := wf.informers[PortMirrorType].lister.(portmirrorlister.PortMirrorLister)
+	return portMirrorLister.List(labels.Everything())
+}
+
+func (wf *WatchFactory) GetPortMirror(namespace string, name string) (*portmirrorapi.PortMirror, error) {
+	portMirrorLister := wf.informers[PortMirrorType].lister.(portmirrorlister.PortMirrorLister)
+	return portMirrorLister.PortMirrors(namespace).Get(name)
 }
 
 func (wf *WatchFactory) NodeInformer() cache.SharedIndexInformer {

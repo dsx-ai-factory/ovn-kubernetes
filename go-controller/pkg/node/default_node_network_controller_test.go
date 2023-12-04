@@ -26,7 +26,7 @@ var _ = Describe("Node", func() {
 
 	Describe("validateMTU", func() {
 		var (
-			kubeMock        *mocks.Interface
+			kubeOVNMock     *mocks.InterfaceOVN
 			netlinkOpsMock  *utilMocks.NetLinkOps
 			netlinkLinkMock *netlink_mocks.Link
 
@@ -48,7 +48,7 @@ var _ = Describe("Node", func() {
 		)
 
 		BeforeEach(func() {
-			kubeMock = new(mocks.Interface)
+			kubeOVNMock = new(mocks.InterfaceOVN)
 			netlinkOpsMock = new(utilMocks.NetLinkOps)
 			netlinkLinkMock = new(netlink_mocks.Link)
 
@@ -61,7 +61,7 @@ var _ = Describe("Node", func() {
 				BaseNodeNetworkController: BaseNodeNetworkController{
 					CommonNodeNetworkControllerInfo: CommonNodeNetworkControllerInfo{
 						name: nodeName,
-						Kube: kubeMock,
+						Kube: kubeOVNMock,
 					},
 					NetInfo: &util.DefaultNetInfo{},
 				},
