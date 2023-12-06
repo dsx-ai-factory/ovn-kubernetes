@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"strconv"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -154,7 +153,7 @@ func (na *NodeAllocator) HandleAddUpdateNodeEvent(node *corev1.Node) error {
 
 	// For DPU case we might want to propagate DPU NotReady state as a NoSchedule taint to DPU's host
 	if !na.netInfo.IsSecondary() && util.IsDPU(node) {
-		if err := util.SyncDependentNodeTaints(na.kube, node, 5*time.Minute); err != nil {
+		if err := util.SyncDependentNodeTaints(na.kube, na.nodeLister, node); err != nil {
 			return err
 		}
 	}

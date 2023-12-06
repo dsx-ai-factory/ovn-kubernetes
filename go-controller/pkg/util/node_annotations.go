@@ -16,7 +16,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	kapi "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/util/retry"
 )
 
@@ -1213,7 +1215,7 @@ func nodePropagatesReadiness(node *kapi.Node) bool {
 // transition time of the ready condition must be no older than that duration from now - within
 // should be non-zero for Update events, to avoid a GET on every reconciliation of a node
 // that has a dependent (e.g., within of 1m for updates).
-func SyncDependentNodeTaints(kube kube.Interface, node *kapi.Node, within time.Duration) error {
+func SyncDependentNodeTaints(kube kube.Interface, nodeLister listers.NodeLister, node *kapi.Node) error {
 	if !nodePropagatesReadiness(node) {
 		return nil
 	}
@@ -1224,29 +1226,52 @@ func SyncDependentNodeTaints(kube kube.Interface, node *kapi.Node, within time.D
 	}
 
 	ourReadyCondition := findNodeReadyCondition(node)
-	if ourReadyCondition == nil || within != 0 && time.Since(ourReadyCondition.LastTransitionTime.Time) > within {
+	// if DPU is in this condition for more than 3 minutes, then try to add/remove the taint.
+	// this is so that we don't act on dpu node flapping between Ready/NotReady state.
+	if ourReadyCondition == nil || time.Since(ourReadyCondition.LastTransitionTime.Time) < 3*time.Minute {
 		return nil
 	}
 
 	noSchedTaint := &kapi.Taint{
-		Key:    noSchedTaintKey,
-		Value:  "dpuNotReady",
-		Effect: kapi.TaintEffectNoSchedule,
+		Key:       noSchedTaintKey,
+		Value:     "dpuNotReady",
+		Effect:    kapi.TaintEffectNoSchedule,
+		TimeAdded: &metav1.Time{Time: time.Now()},
+	}
+	// Verify if the above taint is already present or not on the dependentNodeName.
+	// This call is inexpensive since we are checking from the informer cache. It is
+	// fine if the informer cache is stale, since NodeUpdate events happen every few
+	// seconds, and we will reconcile in the next update.
+	dependentNode, err := nodeLister.Get(dependentNodeName)
+	if err != nil {
+		return fmt.Errorf("SyncDependentNodeTaints error while determining if taint is present or not on node %q "+
+			"error: %v", dependentNodeName, err)
+	}
+	taintAlreadyPresent := false
+	nodeTaints := dependentNode.Spec.Taints
+	for i := range nodeTaints {
+		if noSchedTaint.MatchTaint(&nodeTaints[i]) {
+			taintAlreadyPresent = true
+			break
+		}
 	}
 	action := ""
-	var err error
 	switch ourReadyCondition.Status {
 	case kapi.ConditionTrue:
-		action = "removing taint"
-		err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			return kube.RemoveTaintFromNode(dependentNodeName, noSchedTaint)
-		})
+		if taintAlreadyPresent {
+			action = "removing taint"
+			err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				return kube.RemoveTaintFromNode(dependentNodeName, noSchedTaint)
+			})
+		}
 
 	case kapi.ConditionFalse, kapi.ConditionUnknown:
-		action = "adding taint"
-		err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			return kube.SetTaintOnNode(dependentNodeName, noSchedTaint)
-		})
+		if !taintAlreadyPresent {
+			action = "adding taint"
+			err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				return kube.SetTaintOnNode(dependentNodeName, noSchedTaint)
+			})
+		}
 	}
 
 	if err != nil {
