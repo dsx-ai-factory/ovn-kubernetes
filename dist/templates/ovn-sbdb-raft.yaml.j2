@@ -167,8 +167,10 @@ spec:
               value: "{{ ovn_sb_port }}"
             - name: OVN_SB_RAFT_PORT
               value: "{{ ovn_sb_raft_port }}"
+            {% if ovn_sb_enable_leader_xfer_for_snapshot != "false" %}
             - name: OVN_SB_ENABLE_LEADER_XFER_FOR_SNAPSHOT
               value: "{{ ovn_sb_enable_leader_xfer_for_snapshot }}"
+            {% endif %}
             - name: OVN_DB_UPGRADE_SCHEMA_INLINE
               value: "no"
         # end of container

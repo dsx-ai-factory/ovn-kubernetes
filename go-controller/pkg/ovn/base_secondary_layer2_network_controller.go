@@ -289,6 +289,9 @@ func (oc *BaseSecondaryLayer2NetworkController) run() error {
 	}
 
 	if config.OVNKubernetesFeature.EnableVirtualIP {
+		if err := oc.watchPortBindingTable(); err != nil {
+			return err
+		}
 		if err := oc.WatchVirtualIPs(); err != nil {
 			return err
 		}

@@ -28,6 +28,8 @@ import (
 	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
 	egressservice "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
 	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
+	virtualip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
+	virtualipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
@@ -113,6 +115,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 	egressServiceObjects := []runtime.Object{}
 	apbExternalRouteObjects := []runtime.Object{}
 	anpObjects := []runtime.Object{}
+	virtualIPObjects := []runtime.Object{}
 	v1Objects := []runtime.Object{}
 	nads := []nettypes.NetworkAttachmentDefinition{}
 	for _, object := range objects {
@@ -135,6 +138,8 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 			apbExternalRouteObjects = append(apbExternalRouteObjects, object)
 		case *anpapi.AdminNetworkPolicyList:
 			anpObjects = append(anpObjects, object)
+		case *virtualip.VirtualIPList:
+			virtualIPObjects = append(virtualIPObjects, object)
 		default:
 			v1Objects = append(v1Objects, object)
 		}
@@ -149,6 +154,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 		MultiNetworkPolicyClient: mnpfake.NewSimpleClientset(multiNetworkPolicyObjects...),
 		EgressServiceClient:      egressservicefake.NewSimpleClientset(egressServiceObjects...),
 		AdminPolicyRouteClient:   adminpolicybasedroutefake.NewSimpleClientset(apbExternalRouteObjects...),
+		VirtualIPClient:          virtualipfake.NewSimpleClientset(virtualIPObjects...),
 	}
 	o.init(nads)
 }
@@ -387,6 +393,7 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 				CloudNetworkClient:   o.fakeClient.CloudNetworkClient,
 				EgressServiceClient:  o.fakeClient.EgressServiceClient,
 				AdminPBRClient:       o.fakeClient.AdminPBRClient,
+				VIPClient:            o.fakeClient.VirtualIPClient,
 			},
 			o.watcher,
 			o.fakeRecorder,

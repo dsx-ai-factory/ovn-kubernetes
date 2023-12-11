@@ -1018,7 +1018,7 @@ func (bnc *BaseNetworkController) WatchAdminPolicyBasedRoutes() (err error) {
 // WatchVirtualIPs starts the watching of virtual-ip resources and calls
 // back the appropriate handler logic
 func (bnc *BaseNetworkController) WatchVirtualIPs() (err error) {
-	if bnc.virtualIPHandler != nil && (bnc.TopologyType() != types.Layer2Topology || bnc.vipSBClient != nil) {
+	if bnc.virtualIPHandler != nil {
 		// WatchVirtualIPs has succeeded and this is from retry
 		return nil
 	}
@@ -1097,10 +1097,6 @@ func (bnc *BaseNetworkController) WatchVirtualIPs() (err error) {
 	}
 
 	if bnc.TopologyType() == types.Layer2Topology {
-		if err = bnc.watchPortBindingTable(); err != nil {
-			return err
-		}
-
 		go func() {
 			ticker := time.NewTicker(types.VirtualIPResyncInterval)
 			for {

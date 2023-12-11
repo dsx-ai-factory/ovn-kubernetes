@@ -182,6 +182,10 @@ func (bnc *BaseNetworkController) updateVIPActivePodInstance(pb *sbdb.PortBindin
 // and updates the virtualIP status active pod info on virtual port parent change.
 func (bnc *BaseNetworkController) watchPortBindingTable() error {
 	var err error
+
+	if bnc.TopologyType() != ovntypes.Layer2Topology || bnc.vipSBClient != nil {
+		return nil
+	}
 	dbModel, err := sbdb.FullDatabaseModel()
 	if err != nil {
 		return fmt.Errorf("failed to create sdbdb model: (%v)", err)

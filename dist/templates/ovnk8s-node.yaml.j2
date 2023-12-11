@@ -28,6 +28,7 @@ spec:
         component: network
         type: infra
         kubernetes.io/os: "linux"
+        metrics: ovnkube-node
     spec:
       imagePullSecrets:
         - name: ovncni-nvcr-ips
@@ -295,6 +296,7 @@ spec:
 
       {% if ovnkube_app_name=="ovnkube-node-dpu-host" -%}
       nodeSelector:
+        kubernetes.io/arch: amd64
         k8s.ovn.org/dpu-host: ""
       {% else -%}
       nodeSelector:

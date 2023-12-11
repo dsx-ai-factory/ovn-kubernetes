@@ -53,7 +53,7 @@ OVN_ACL_LOGGING_RATE_LIMIT=""
 OVN_MASTER_COUNT=""
 OVN_REMOTE_PROBE_INTERVAL=""
 OVN_MONITOR_ALL="false"
-OVN_OFCTRL_WAIT_BEFORE_CLEAR=""
+OVN_OFCTRL_WAIT_BEFORE_CLEAR="10000"
 OVN_ENABLE_LFLOW_CACHE="false"
 OVN_LFLOW_CACHE_LIMIT=""
 OVN_LFLOW_CACHE_LIMIT_KB=""
@@ -76,7 +76,7 @@ OVN_MULTI_NETWORK_ENABLE="true"
 OVN_ADMIN_PBR_ENABLE="true"
 OVN_VIRTUALIP_ENABLE="true"
 OVN_IPRESERVATION_ENABLE="true"
-OVN_DISABLE_OVN_IFACE_ID_VER="false"
+OVN_DISABLE_OVN_IFACE_ID_VER="true"
 OVN_V4_JOIN_SUBNET=""
 OVN_V6_JOIN_SUBNET=""
 OVN_V4_MASQUERADE_SUBNET=""
@@ -99,7 +99,7 @@ OVN_XDP_VETH="xdp_veth"
 OVN_XDP_NS="xdp_ns"
 # ovs "other-config"
 OVS_MAX_REVALIDATOR="5000"
-OVS_MIN_REVALIDATE_PPS="1"
+OVS_MIN_REVALIDATE_PPS="0"
 OVS_MAX_IDLE="20000"
 OVN_NB_ENABLE_LEADER_XFER_FOR_SNAPSHOT="false"
 OVN_SB_ENABLE_LEADER_XFER_FOR_SNAPSHOT="false"
@@ -463,9 +463,9 @@ ovn_db_replicas=${OVN_DB_REPLICAS:-3}
 echo "ovn_db_replicas: ${ovn_db_replicas}"
 ovn_db_minAvailable=$(((${ovn_db_replicas} + 1) / 2))
 echo "ovn_db_minAvailable: ${ovn_db_minAvailable}"
-master_loglevel=${MASTER_LOGLEVEL:-"4"}
+master_loglevel=${MASTER_LOGLEVEL:-"5"}
 echo "master_loglevel: ${master_loglevel}"
-node_loglevel=${NODE_LOGLEVEL:-"4"}
+node_loglevel=${NODE_LOGLEVEL:-"5"}
 echo "node_loglevel: ${node_loglevel}"
 db_checker_loglevel=${DBCHECKER_LOGLEVEL:-"4"}
 echo "db_checker_loglevel: ${db_checker_loglevel}"

@@ -32,6 +32,14 @@ spec:
     spec:
       nodeSelector:
         kubernetes.io/arch: arm64
+        ngn2.nvidia.com/hosttype: DPU
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: k8s.ovn.org/dpu-host
+                operator: DoesNotExist
       imagePullSecrets:
       - name: ovncni-nvcr-ips
       serviceAccountName: ovn-node
@@ -131,7 +139,7 @@ spec:
         - name: OVNKUBE_LOGFILE_MAXAGE
           value: "{{ ovnkube_logfile_maxage }}"
         - name: OVNKUBE_LOGFILE
-          value: "{{ ovnkube_logfile }}"
+          value: /var/log/ovn-kubernetes/ovnkube-node-dpu.log
         - name: OVN_METRICS_SCRAPE_INTERVAL
           value: "{{ ovn_metrics_scrape_interval }}"
         - name: OVN_NET_CIDR
