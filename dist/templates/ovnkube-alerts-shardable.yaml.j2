@@ -64,9 +64,23 @@ spec:
        message: |
          OvnKube/Host K8s pod {{ $labels.pod }} is in not Ready state on critical infrastructure node {{ $labels.node }} for longer than 20min
 
-    - alert: K8sNodesWithoutOvnNBDBPod
+    - alert: K8sNodeWithoutOvnKubeReady
       expr: |
-        kube_node_info{node=~"k8s-ovn-0.*"} unless on(node) 
+        (kube_pod_status_ready{namespace="ovn-kubernetes", condition="true", pod=~"ovnkube-node-.*|ovn-host-.*"} * on(pod) group_left(node)
+         kube_pod_info{namespace="ovn-kubernetes", pod=~"ovnkube-node-.*|ovn-host-.*", node=~".*-br2-.*"}) == 0
+      for: 20m
+      labels:
+       severity: minor
+       priority: p0
+       pduuid: P10A23N
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/960e_tDMk/k8s-control-panel-kube-agent
+      annotations:
+       message: |
+         OvnKube/Host K8s pod {{ $labels.pod }} is in not Ready state on worker node {{ $labels.node }} for longer than 20min
+
+    - alert: K8sNodeWithoutOvnNBDBPod
+      expr: |
+        kube_node_info{node=~".*k8s-ovn-0.*"} unless on(node)
         (kube_pod_info{namespace="ovn-kubernetes", pod=~"ovn-nbdb-.*"}) > 0
       for: 10m
       labels:
@@ -78,9 +92,23 @@ spec:
          The OVN DB nodes k8s-ovn-01, k8s-ovn-02, and k8s-ovn-03 should be running OVN NB DB Pods,
          but OVN NB DB Pod is not running on {{ $labels.node }} node.
 
-    - alert: K8sNodesWithoutOvnSBDBPod
+    - alert: K8sNodeWithoutOvnNBDBPodReady
       expr: |
-        kube_node_info{node=~"k8s-ovn-0.*"} unless on(node) 
+        (kube_pod_status_ready{namespace="ovn-kubernetes", condition="true", pod=~"ovn-nbdb-.*"} * on(pod) group_left(node)
+         kube_pod_info{namespace="ovn-kubernetes", pod=~"ovn-nbdb-.*", node=~".*k8s-ovn-0.*"}) == 0
+      for: 10m
+      labels:
+       severity: major
+       pduuid: P10A23N
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UUPXlpvGk/central-northbound-db
+      annotations:
+       message: |
+         The OVN DB nodes k8s-ovn-01, k8s-ovn-02, and k8s-ovn-03 should have OVN NBDB Pods in ready state,
+         but OVN NBDB {{ $labels.pod }} Pod is not ready on {{ $labels.node }} node.
+
+    - alert: K8sNodeWithoutOvnSBDBPod
+      expr: |
+        kube_node_info{node=~".*k8s-ovn-0.*"} unless on(node)
         (kube_pod_info{namespace="ovn-kubernetes", pod=~"ovn-sbdb-.*"}) > 0
       for: 10m
       labels:
@@ -92,9 +120,23 @@ spec:
          The OVN DB nodes k8s-ovn-01, k8s-ovn-02, and k8s-ovn-03 should be running OVN NB DB Pods, 
          but OVN SB DB Pod is not running on {{ $labels.node }} node.
 
+    - alert: K8sNodeWithoutOvnSBDBPodReady
+      expr: |
+        (kube_pod_status_ready{namespace="ovn-kubernetes", condition="true", pod=~"ovn-sbdb-.*"} * on(pod) group_left(node)
+         kube_pod_info{namespace="ovn-kubernetes", pod=~"ovn-sbdb-.*", node=~".*k8s-ovn-0.*"}) == 0
+      for: 10m
+      labels:
+       severity: major
+       pduuid: P10A23N
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/sihGi2DGz/central-southbound-db
+      annotations:
+       message: |
+         The OVN DB nodes k8s-ovn-01, k8s-ovn-02, and k8s-ovn-03 should have OVN SBDB Pods in ready state,
+         but OVN SBDB {{ $labels.pod }} Pod is not ready on {{ $labels.node }} node.
+
     - alert: K8sNodeWithoutOvnNorthPod
       expr: |
-        kube_node_info{node=~"ngn-master-.*"} unless on(node) 
+        kube_node_info{node=~".*nid-core-0.*"} unless on(node)
         (kube_pod_info{namespace="ovn-kubernetes", pod=~"ovn-north-.*"}) > 0
       for: 10m
       labels:
@@ -103,13 +145,26 @@ spec:
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/rjQLlpvMk/central-north-daemon
       annotations:
        message: |
-         The NGN master nodes ngn-master-01, ngn-master-02, and ngn-master-03 
-         should be running ovn-north pods, but ovn-north pod is not running on 
+         The NID core nodes all should be running ovn-north pods, but ovn-north pod is not running on
          {{ $labels.node }} node.
+
+    - alert: K8sNodeWithoutOvnNorthPodReady
+      expr: |
+        (kube_pod_status_ready{namespace="ovn-kubernetes", condition="true", pod=~"ovn-north-.*"} * on(pod) group_left(node)
+         kube_pod_info{namespace="ovn-kubernetes", pod=~"ovn-north-.*", node=~".*nid-core-0.*"}) == 0
+      for: 10m
+      labels:
+       severity: major
+       pduuid: P10A23N
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/rjQLlpvMk/central-north-daemon
+      annotations:
+       message: |
+         The NID core nodes all should have ovn-north pods in ready state, but ovn-north {{ $labels.pod }} pod
+         is not ready on {{ $labels.node }} node.
 
     - alert: K8sNodeWithoutOvnKubeManagerPod
       expr: |
-        kube_node_info{node=~"ngn-master-.*"} unless on(node) 
+        kube_node_info{node=~".*nid-core-0.*"} unless on(node)
         (kube_pod_info{namespace="ovn-kubernetes", pod=~"ovnkube-master-.*"}) > 0
       for: 10m
       labels:
@@ -118,9 +173,22 @@ spec:
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/PHqwgBHMz/k8s-control-panel-kube-manager
       annotations:
        message: |
-         The NGN master nodes ngn-master-01, ngn-master-02, and ngn-master-03 
-         should be running ovnkube-manager pod, but ovnkube-manager pod is not 
+         The NID core nodes should be all running ovnkube-manager pod, but ovnkube-manager pod is not
          running on {{ $labels.node }} node.
+
+    - alert: K8sNodeWithoutOvnKubeManagerPodReady
+      expr: |
+        (kube_pod_status_ready{namespace="ovn-kubernetes", condition="true", pod=~"ovnkube-master-.*"} * on(pod) group_left(node)
+         kube_pod_info{namespace="ovn-kubernetes", pod=~"ovnkube-master-.*", node=~".*nid-core-0.*"}) == 0
+      for: 10m
+      labels:
+       severity: minor
+       pduuid: P10A23N
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/PHqwgBHMz/k8s-control-panel-kube-manager
+      annotations:
+       message: |
+         The NID core nodes should all have ovnkube-manager pod in ready state, but ovnkube-manager
+         {{ $labels.pod }} pod is not ready on {{ $labels.node }} node.
 
     - alert: OvnKubeNodeLogFileSize
       expr: |
@@ -359,7 +427,8 @@ spec:
         container="ovn-controller"}[15m]) * 60 * 5 > 0
       for: 30m
       labels:
-       severity: major
+       severity: minor
+       priority: p0
        pduuid: P10A23N
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/9dlp8fSGk/host-controller
       annotations:
@@ -412,7 +481,7 @@ spec:
         container="vault-agent"}[15m]) * 60 * 5 > 0
       for: 30m
       labels:
-        severity: major
+        severity: warning
       annotations:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} vault-agent container
@@ -549,8 +618,8 @@ spec:
 
     - alert: OvsVswitchdDPFlowsLookupLostUnusuallyHigh
       expr: |
-        rate(ovs_vswitchd_dp_flows_lookup_lost{namespace="ovn-kubernetes",job="ovnkube-node"}[5m]) > 0
-      for: 5m
+        rate(ovs_vswitchd_dp_flows_lookup_lost{namespace="ovn-kubernetes",job="ovnkube-node"}[5m]) > 10
+      for: 10m
       labels:
        severity: warning
        pduuid: P10A23N
@@ -558,12 +627,12 @@ spec:
       annotations:
        message: |
          Noticed unusually high rate of slow-path {{ $value }} packets flows lookup lost per second on the host with
-         pod ovn-kubernetes/ {{ $labels.pod }} instance {{ $labels.instance }} for longer than 5m
+         pod ovn-kubernetes/ {{ $labels.pod }} instance {{ $labels.instance }} for longer than 10m
 
     - alert: OvsVswitchdDPFlowsLookupLostTooHigh
       expr: |
         rate(ovs_vswitchd_dp_flows_lookup_lost{namespace="ovn-kubernetes",job="ovnkube-node"}[5m]) > 50
-      for: 5m
+      for: 10m
       labels:
        severity: major
        pduuid: P10A23N
@@ -571,12 +640,12 @@ spec:
       annotations:
        message: |
          Noticed too high rate of slow-path {{ $value }} packets flows lookup lost per second on the host with
-         pod ovn-kubernetes/ {{ $labels.pod }} instance {{ $labels.instance }} for longer than 5m
+         pod ovn-kubernetes/ {{ $labels.pod }} instance {{ $labels.instance }} for longer than 10m
 
     - alert: OvsVswitchdDPFlowsLookupMissed
       expr: |
-        rate(ovs_vswitchd_dp_flows_lookup_missed{namespace="ovn-kubernetes",job="ovnkube-node"}[5m]) > 200
-      for: 5m
+        rate(ovs_vswitchd_dp_flows_lookup_missed{namespace="ovn-kubernetes",job="ovnkube-node"}[5m]) > 1000
+      for: 10m
       labels:
        severity: warning
        pduuid: P10A23N
@@ -584,7 +653,7 @@ spec:
       annotations:
        message: |
          Noticed unusually high rate of slow-path {{ $value }} packets flows lookup misses per second on the host with
-         pod ovn-kubernetes/ {{ $labels.pod }} instance {{ $labels.instance }} for longer than 5m
+         pod ovn-kubernetes/ {{ $labels.pod }} instance {{ $labels.instance }} for longer than 10m
 
     - alert: OvsVswitchdInterfaceRxErrors
       expr: |
