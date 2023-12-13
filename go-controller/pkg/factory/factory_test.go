@@ -487,8 +487,9 @@ var _ = Describe("Watch Factory Operations", func() {
 
 	Context("when a processExisting is given", func() {
 		testExisting := func(objType reflect.Type, namespace string, sel labels.Selector, priority int) {
+			nodeNames := []string{nodeName}
 			if objType == EndpointSliceType {
-				wf, err = NewNodeWatchFactory(ovnClientset.GetNodeClientset(), nodeName)
+				wf, err = NewNodeWatchFactory(ovnClientset.GetNodeClientset(), nodeNames)
 			} else if objType == CloudPrivateIPConfigType {
 				wf, err = NewClusterManagerWatchFactory(ovnCMClientset)
 			} else {
@@ -512,7 +513,7 @@ var _ = Describe("Watch Factory Operations", func() {
 
 		testExistingFilteredHandler := func(objType reflect.Type, realObj reflect.Type, namespace string, sel labels.Selector, priority int) {
 			if objType == EndpointSliceType {
-				wf, err = NewNodeWatchFactory(ovnClientset.GetNodeClientset(), nodeName)
+				wf, err = NewNodeWatchFactory(ovnClientset.GetNodeClientset(), []string{nodeName})
 			} else if objType == CloudPrivateIPConfigType {
 				wf, err = NewClusterManagerWatchFactory(ovnCMClientset)
 			} else {
@@ -651,8 +652,9 @@ var _ = Describe("Watch Factory Operations", func() {
 
 	Context("when existing items are known to the informer", func() {
 		testExisting := func(objType reflect.Type) {
+			nodeNames := []string{nodeName}
 			if objType == EndpointSliceType {
-				wf, err = NewNodeWatchFactory(ovnClientset.GetNodeClientset(), nodeName)
+				wf, err = NewNodeWatchFactory(ovnClientset.GetNodeClientset(), nodeNames)
 			} else if objType == CloudPrivateIPConfigType {
 				wf, err = NewClusterManagerWatchFactory(ovnCMClientset)
 			} else {
@@ -1617,7 +1619,8 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to endpointslices add/update/delete events", func() {
-		wf, err = NewNodeWatchFactory(ovnClientset.GetNodeClientset(), nodeName)
+		nodeNames := []string{nodeName}
+		wf, err = NewNodeWatchFactory(ovnClientset.GetNodeClientset(), nodeNames)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())

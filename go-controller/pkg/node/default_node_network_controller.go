@@ -20,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
@@ -56,10 +57,11 @@ const (
 
 type CommonNodeNetworkControllerInfo struct {
 	client                 clientset.Interface
-	Kube                   kube.Interface
+	Kube                   kube.InterfaceOVN
 	watchFactory           factory.NodeWatchFactory
 	recorder               record.EventRecorder
 	name                   string
+	dpuName                string
 	apbExternalRouteClient adminpolicybasedrouteclientset.Interface
 	hostType               string
 	pfMACs                 []string
@@ -71,6 +73,23 @@ type podNADInfo struct {
 	dpuCD *util.DPUConnectionDetails
 	// topology specific opaque info of specific NAD
 	anyInfo any
+}
+
+type portMirrorInfo struct {
+	// Mirroring configuration information.
+	portMirrorMap sync.Map
+	// mirrorIDToPortMirrorMap maps list of portmirrors
+	// that uses same mirrorID
+	mirrorIDToPortMirrorMap sync.Map
+	// sf map w.r.t portmirror created
+	portMirrorIDToSFMap sync.Map
+	// portmirror retry queue
+	portMirrorRetryQueueDPU workqueue.RateLimitingInterface
+	// for sf operations
+	sfPortNumberMutex sync.Mutex
+	// usedSFMap contains the list of
+	// sf numbers that are in use.
+	usedSFPortNumMap map[uint32]bool
 }
 
 // BaseNodeNetworkController structure per-network fields and network specific configuration
@@ -102,10 +121,11 @@ type BaseNodeNetworkController struct {
 	// stopChan and WaitGroup per controller
 	stopChan chan struct{}
 	wg       *sync.WaitGroup
+
+	portMirrorInfo
 }
 
-func newCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, kube kube.Interface, apbExternalRouteClient adminpolicybasedrouteclientset.Interface,
-	wf factory.NodeWatchFactory, eventRecorder record.EventRecorder, name, hostType string, pfMACs []string) *CommonNodeNetworkControllerInfo {
+func newCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, kube kube.InterfaceOVN, apbExternalRouteClient adminpolicybasedrouteclientset.Interface, wf factory.NodeWatchFactory, eventRecorder record.EventRecorder, name, dpuName, hostType string, pfMACs []string) *CommonNodeNetworkControllerInfo {
 
 	return &CommonNodeNetworkControllerInfo{
 		client:                 kubeClient,
@@ -113,6 +133,7 @@ func newCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, kube kub
 		apbExternalRouteClient: apbExternalRouteClient,
 		watchFactory:           wf,
 		name:                   name,
+		dpuName:                dpuName,
 		recorder:               eventRecorder,
 		hostType:               hostType,
 		pfMACs:                 pfMACs,
@@ -120,9 +141,14 @@ func newCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, kube kub
 }
 
 // NewCommonNodeNetworkControllerInfo creates and returns the base node network controller info
-func NewCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, apbExternalRouteClient adminpolicybasedrouteclientset.Interface, wf factory.NodeWatchFactory,
-	eventRecorder record.EventRecorder, name, hostType string, pfMACs []string) *CommonNodeNetworkControllerInfo {
-	return newCommonNodeNetworkControllerInfo(kubeClient, &kube.Kube{KClient: kubeClient}, apbExternalRouteClient, wf, eventRecorder, name, hostType, pfMACs)
+func NewCommonNodeNetworkControllerInfo(ovnNodeClient *util.OVNNodeClientset, apbExternalRouteClient adminpolicybasedrouteclientset.Interface, wf factory.NodeWatchFactory, eventRecorder record.EventRecorder, name, dpuName, hostType string, pfMACs []string) *CommonNodeNetworkControllerInfo {
+	k := &kube.KubeOVN{
+		Kube: kube.Kube{
+			KClient: ovnNodeClient.KubeClient,
+		},
+		PortMirrorClient: ovnNodeClient.PortMirrorClient,
+	}
+	return newCommonNodeNetworkControllerInfo(ovnNodeClient.KubeClient, k, apbExternalRouteClient, wf, eventRecorder, name, dpuName, hostType, pfMACs)
 }
 
 // DefaultNodeNetworkController is the object holder for utilities meant for node management of default network
@@ -157,6 +183,9 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, net
 			stopChan:                        stopChan,
 			wg:                              wg,
 			DoSCheckStopChan:                nil,
+			portMirrorInfo: portMirrorInfo{
+				usedSFPortNumMap: make(map[uint32]bool),
+			},
 		},
 		svcAnnotationMap: sync.Map{},
 		routeManager:     routemanager.NewController(),
@@ -855,11 +884,11 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 
 	// Create CNI Server
 	if config.OvnKubeNode.Mode != types.NodeModeDPU {
-		kclient, ok := nc.Kube.(*kube.Kube)
+		kube, ok := nc.Kube.(*kube.KubeOVN)
 		if !ok {
-			return fmt.Errorf("cannot get kubeclient for starting CNI server")
+			return fmt.Errorf("cannot get kubeOVNClient for starting CNI server")
 		}
-		cniServer, err = cni.NewCNIServer(nc.watchFactory, kclient.KClient)
+		cniServer, err = cni.NewCNIServer(nc.watchFactory, kube.KClient)
 		if err != nil {
 			return err
 		}
@@ -1196,6 +1225,19 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		_, err := nc.watchPodsDPU(nil, nil, nil)
 		if err != nil {
 			return err
+		}
+
+		// Start watching for PortMirror configurations.
+		// currently supported on the primary DPU. non-primary DPU could use one of the 2 uplink
+		// ports; so we need to check the source pod's interface to look for the corresponding
+		// uplink to create SF (to work with offloads till we have multi-port eswitch support -
+		// OFED 5.9). Additionally, there are some limitation today with services such
+		// as FlowInspector, which doesn't support multiple SFs.
+		if config.OvnKubeNode.IsPrimaryDPU && config.OVNKubernetesFeature.EnablePortMirror {
+			err = nc.watchPortMirrorDPU()
+			if err != nil {
+				return fmt.Errorf("failed to watch port mirror definitions: %w", err)
+			}
 		}
 	} else {
 		// start the cni server

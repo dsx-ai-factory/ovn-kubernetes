@@ -466,6 +466,14 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 			return err
 		}
 	}
+
+	if config.OVNKubernetesFeature.EnablePortMirror {
+		err := oc.WatchPortMirrors()
+		if err != nil {
+			return err
+		}
+	}
+
 	if config.OVNKubernetesFeature.EnableAdminPolicyBasedRouting {
 		if err := oc.WatchAdminPolicyBasedRoutes(); err != nil {
 			return err

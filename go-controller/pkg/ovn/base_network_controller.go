@@ -18,6 +18,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpbrapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
 	ipreservation "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
+	portmirror "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
 	virtualip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -181,6 +182,10 @@ type BaseNetworkController struct {
 	// workqueue for IPReserve operation
 	ipReserveRetryQueue workqueue.RateLimitingInterface
 	ipReserveHandler    *factory.Handler
+
+	// map & workqueue for portmirror operations
+	portMirrors          sync.Map
+	portMirrorRetryQueue workqueue.RateLimitingInterface
 }
 
 // BaseSecondaryNetworkController structure holds per-network fields and network specific
@@ -1118,6 +1123,74 @@ func (bnc *BaseNetworkController) WatchVirtualIPs() (err error) {
 	}
 
 	klog.Infof("Bootstrapping existing virtualIPs and cleaning stale virtualIPs for network %s took %v", bnc.GetNetworkName(), time.Since(start))
+	return nil
+}
+
+// WatchPortMirrors starts the watching of portMirror resources and calls
+// back the appropriate handler logic
+func (bnc *BaseNetworkController) WatchPortMirrors() error {
+	start := time.Now()
+	bnc.portMirrorRetryQueue = workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "portMirror")
+	// creates corresponding add/update/delete handlers
+	_, err := bnc.watchFactory.AddPortMirrorHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			portMirror := obj.(*portmirror.PortMirror)
+			err := bnc.addPortMirror(portMirror)
+			if err != nil {
+				klog.Errorf(err.Error())
+			}
+		},
+		UpdateFunc: func(old, newer interface{}) {
+			oldPortMirror := old.(*portmirror.PortMirror)
+			newPortMirror := newer.(*portmirror.PortMirror)
+			// only compare spec changes as we constantly do updates for
+			// portMirror status.
+			if !reflect.DeepEqual(oldPortMirror.Spec, newPortMirror.Spec) {
+				if err := bnc.deletePortMirror(oldPortMirror); err != nil {
+					klog.Errorf(err.Error())
+				}
+				if err := bnc.addPortMirror(newPortMirror); err != nil {
+					klog.Errorf(err.Error())
+				}
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			portMirror := obj.(*portmirror.PortMirror)
+			if err := bnc.deletePortMirror(portMirror); err != nil {
+				klog.Error(err)
+			}
+		},
+	}, nil)
+
+	if err != nil {
+		return err
+	}
+	go func() {
+		ticker := time.NewTicker(types.PortMirrorResyncInterval)
+		for {
+			select {
+			case <-ticker.C:
+				// run syncPortMirrorsPeriodic for only primary controller,
+				// as the operations performed in syncPortMirrorsPeriodic
+				// will be repititive for other controllers
+				if !bnc.IsSecondary() {
+					bnc.syncPortMirrorsPeriodic()
+				}
+			case <-bnc.stopChan:
+				ticker.Stop()
+				bnc.portMirrorRetryQueue.ShutDown()
+				return
+			}
+		}
+	}()
+
+	// for portmirror retry operations
+	go func() {
+		for bnc.retryPortMirrorOperations() {
+		}
+	}()
+
+	klog.Infof("Bootstrapping existing portMirrors and cleaning stale portMirrors for network %s took %v", bnc.GetNetworkName(), time.Since(start))
 	return nil
 }
 

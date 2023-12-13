@@ -33,6 +33,9 @@ func newFakeOvnkNodePod(deletionTimestamp *metav1.Time) *v1.Pod {
 			UID:               types.UID(ovnkNodePodName),
 			Namespace:         config.Kubernetes.OVNConfigNamespace,
 			DeletionTimestamp: deletionTimestamp,
+			Labels: map[string]string{
+				"k8s.ovn.org/nodeName": nodeName,
+			},
 		},
 		Spec: v1.PodSpec{
 			Containers: []v1.Container{
@@ -55,7 +58,7 @@ func initWatchFactoryWithObjects(objects ...runtime.Object) *factory.WatchFactor
 		KubeClient: fake.NewSimpleClientset(v1Objects...),
 	}
 
-	watcher, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
+	watcher, err := factory.NewNodeWatchFactory(fakeClient, []string{nodeName})
 	Expect(err).NotTo(HaveOccurred())
 	watcher.Start()
 	return watcher

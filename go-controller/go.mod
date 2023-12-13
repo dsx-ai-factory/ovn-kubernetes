@@ -3,6 +3,8 @@ module github.com/ovn-org/ovn-kubernetes/go-controller
 go 1.19
 
 require (
+	github.com/Mellanox/mlxdevm-go v0.3.0
+	github.com/Mellanox/sriovnet v1.1.0
 	github.com/Microsoft/hcsshim v0.9.6
 	github.com/alexflint/go-filemutex v1.2.0
 	github.com/asaskevich/govalidator v0.0.0-20210307081110-f21760c49a8d
@@ -36,7 +38,7 @@ require (
 	github.com/prometheus/client_model v0.4.0
 	github.com/safchain/ethtool v0.3.0
 	github.com/spf13/afero v1.9.5
-	github.com/stretchr/testify v1.8.1
+	github.com/stretchr/testify v1.8.2
 	github.com/urfave/cli/v2 v2.2.0
 	github.com/vishvananda/netlink v1.2.1-beta.2.0.20230420174744-55c8b9515a01
 	golang.org/x/exp v0.0.0-20230811145659-89c5cff77bcb

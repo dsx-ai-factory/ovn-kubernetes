@@ -24,6 +24,7 @@ import (
 // nodeNetworkControllerManager structure is the object manages all controllers for all networks for ovnkube-node
 type nodeNetworkControllerManager struct {
 	name          string
+	dpuName       string
 	ovnNodeClient *util.OVNNodeClientset
 	Kube          kube.Interface
 	watchFactory  factory.NodeWatchFactory
@@ -152,19 +153,24 @@ func (ncm *nodeNetworkControllerManager) CleanupDeletedNetworks(allControllers [
 
 // newCommonNetworkControllerInfo creates and returns the base node network controller info
 func (ncm *nodeNetworkControllerManager) newCommonNetworkControllerInfo() *node.CommonNodeNetworkControllerInfo {
-	return node.NewCommonNodeNetworkControllerInfo(ncm.ovnNodeClient.KubeClient, ncm.ovnNodeClient.AdminPolicyRouteClient, ncm.watchFactory, ncm.recorder, ncm.name, ncm.hostType, ncm.pfMACs)
+	return node.NewCommonNodeNetworkControllerInfo(ncm.ovnNodeClient, ncm.ovnNodeClient.AdminPolicyRouteClient, ncm.watchFactory, ncm.recorder, ncm.name, ncm.dpuName, ncm.hostType, ncm.pfMACs)
 }
 
 // NewNodeNetworkControllerManager creates a new OVN controller manager to manage all the controller for all networks
-func NewNodeNetworkControllerManager(ovnClient *util.OVNClientset, wf factory.NodeWatchFactory, name string,
+func NewNodeNetworkControllerManager(ovnClient *util.OVNClientset, wf factory.NodeWatchFactory, name string, dpuName string,
 	eventRecorder record.EventRecorder) (*nodeNetworkControllerManager, error) {
 	ncm := &nodeNetworkControllerManager{
-		name:          name,
-		ovnNodeClient: &util.OVNNodeClientset{KubeClient: ovnClient.KubeClient, AdminPolicyRouteClient: ovnClient.AdminPolicyRouteClient},
-		Kube:          &kube.Kube{KClient: ovnClient.KubeClient},
-		watchFactory:  wf,
-		stopChan:      make(chan struct{}),
-		recorder:      eventRecorder,
+		name:    name,
+		dpuName: dpuName,
+		ovnNodeClient: &util.OVNNodeClientset{
+			KubeClient:             ovnClient.KubeClient,
+			AdminPolicyRouteClient: ovnClient.AdminPolicyRouteClient,
+			PortMirrorClient:       ovnClient.PortMirrorClient,
+		},
+		Kube:         &kube.Kube{KClient: ovnClient.KubeClient},
+		watchFactory: wf,
+		stopChan:     make(chan struct{}),
+		recorder:     eventRecorder,
 	}
 
 	// need to configure OVS interfaces for Pods on secondary networks in the DPU mode

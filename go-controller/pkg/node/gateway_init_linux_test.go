@@ -25,6 +25,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedrouteclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
+	portmirrorclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
@@ -238,7 +239,8 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		}
 
 		stop := make(chan struct{})
-		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
+		nodeNames := []string{nodeName}
+		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeNames)
 		Expect(err).NotTo(HaveOccurred())
 		wg := &sync.WaitGroup{}
 		defer func() {
@@ -600,7 +602,8 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		}
 
 		stop := make(chan struct{})
-		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
+		nodeNames := []string{nodeName}
+		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeNames)
 		Expect(err).NotTo(HaveOccurred())
 		wg := &sync.WaitGroup{}
 		defer func() {
@@ -730,10 +733,12 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		fakeClient := &util.OVNNodeClientset{
 			KubeClient:             kubeFakeClient,
 			AdminPolicyRouteClient: adminpolicybasedrouteclient.NewSimpleClientset(),
+			PortMirrorClient:       portmirrorclient.NewSimpleClientset(),
 		}
 
 		stop := make(chan struct{})
-		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
+		nodeNames := []string{nodeName}
+		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeNames)
 		Expect(err).NotTo(HaveOccurred())
 		wg := &sync.WaitGroup{}
 		defer func() {
@@ -745,7 +750,7 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		Expect(err).NotTo(HaveOccurred())
 		ip, ipnet, err := net.ParseCIDR(hostIP + "/24")
 		ipnet.IP = ip
-		cnnci := NewCommonNodeNetworkControllerInfo(nil, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, "", []string{})
+		cnnci := NewCommonNodeNetworkControllerInfo(fakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, "", "", []string{})
 		nc := newDefaultNodeNetworkController(cnnci, &util.DefaultNetInfo{}, stop, wg)
 		// must run route manager manually which is usually started with nc.Start()
 		wg.Add(1)
@@ -1043,7 +1048,8 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 		}
 
 		stop := make(chan struct{})
-		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
+		nodeNames := []string{nodeName}
+		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeNames)
 		Expect(err).NotTo(HaveOccurred())
 		wg := &sync.WaitGroup{}
 		defer func() {

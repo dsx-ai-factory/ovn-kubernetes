@@ -90,7 +90,7 @@ var _ = Describe("Node IP Handler tests", func() {
 		fakeClientset := &util.OVNNodeClientset{
 			KubeClient: tc.fakeClient,
 		}
-		tc.watchFactory, err = factory.NewNodeWatchFactory(fakeClientset, nodeName)
+		tc.watchFactory, err = factory.NewNodeWatchFactory(fakeClientset, []string{nodeName})
 		Expect(err).NotTo(HaveOccurred())
 		err = tc.watchFactory.Start()
 		Expect(err).NotTo(HaveOccurred())

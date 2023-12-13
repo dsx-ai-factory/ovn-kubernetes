@@ -52,6 +52,8 @@ const (
 
 	DPUConnectionStatusReady = "Ready"
 	DPUConnectionStatusError = "Error"
+	DPUMirrorStatusMirrored  = "Mirrored"
+	DPUMirrorStatusFailed    = "Failed"
 	// maybe use uint so we can check status > some state
 	DPUConnectionStatusClampedDown = "ClampedDown"
 )
@@ -81,6 +83,12 @@ type DPUConnectionDetails struct {
 type DPUConnectionStatus struct {
 	Status string `json:"Status"`
 	Reason string `json:"Reason,omitempty"`
+}
+
+type DPUMirrorStatus struct {
+	Status  string `json:"Status"`
+	SinkPod string `json:"SinkPod,omitempty"`
+	Reason  string `json:"Reason,omitempty"`
 }
 
 // UnmarshalPodDPUConnDetailsAllNetworks returns the DPUConnectionDetails map of all networks from the given Pod annotation

@@ -536,18 +536,32 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 
 	if runMode.node {
 		var nodeWatchFactory factory.NodeWatchFactory
+		dpuName := ""
+		nodeNames := []string{runMode.identity}
+		if config.OvnKubeNode.Mode == types.NodeModeDPU {
+			stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
+				"external_ids:hostname")
+			if err != nil || stdout == "" {
+				return fmt.Errorf("dpu node name not found in external_ids: %v (%q)", err, stderr)
+			}
+			dpuName = strings.Split(stdout, "\n")[0]
+			klog.Infof("Initializing K8s DPU node: %v", dpuName)
+			nodeNames = append(nodeNames, dpuName)
+		}
 
 		if runMode.ovnkubeController {
 			// masterWatchFactory would be initialized as NewOVNKubeControllerWatchFactory already, let's use that
 			nodeWatchFactory = masterWatchFactory
 		} else {
 			var err error
-			nodeWatchFactory, err = factory.NewNodeWatchFactory(ovnClientset.GetNodeClientset(), runMode.identity)
+			nodeWatchFactory, err = factory.NewNodeWatchFactory(ovnClientset.GetNodeClientset(), nodeNames)
 			if err != nil {
 				return err
 			}
 			defer nodeWatchFactory.Shutdown()
 		}
+
+		klog.Infof("Initializing K8s nodes: %v", nodeNames)
 
 		if config.Kubernetes.Token == "" {
 			return fmt.Errorf("cannot initialize node without service account 'token'. Please provide one with --k8s-token argument")
@@ -558,7 +572,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 		// initialization the global open flow manager
 		OFManager.NewOpenFlowCacheManager(wg, stopChan)
 
-		ncm, err := controllerManager.NewNodeNetworkControllerManager(ovnClientset, nodeWatchFactory, runMode.identity, eventRecorder)
+		ncm, err := controllerManager.NewNodeNetworkControllerManager(ovnClientset, nodeWatchFactory, runMode.identity, dpuName, eventRecorder)
 		if err != nil {
 			return fmt.Errorf("failed to create ovnkube node ovnkube controller: %w", err)
 		}

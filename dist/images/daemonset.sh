@@ -77,6 +77,7 @@ OVN_ADMIN_PBR_ENABLE="true"
 OVN_VIRTUALIP_ENABLE="true"
 OVN_IPRESERVATION_ENABLE="true"
 OVN_DISABLE_OVN_IFACE_ID_VER="true"
+OVN_PORT_MIRROR_ENABLE="true"
 OVN_V4_JOIN_SUBNET=""
 OVN_V6_JOIN_SUBNET=""
 OVN_V4_MASQUERADE_SUBNET=""
@@ -309,6 +310,9 @@ while [ "$1" != "" ]; do
   --ip-reservation-enable)
     OVN_IPRESERVATION_ENABLE=$VALUE
     ;;
+  --port-mirror-enable)
+    OVN_PORT_MIRROR_ENABLE=$VALUE
+    ;;
   --v4-join-subnet)
     OVN_V4_JOIN_SUBNET=$VALUE
     ;;
@@ -511,6 +515,8 @@ ovn_virtual_ip_enable=${OVN_VIRTUALIP_ENABLE}
 echo "ovn_virtual_ip_enable: ${ovn_virtual_ip_enable}"
 ovn_ipreservation_enable=${OVN_IPRESERVATION_ENABLE}
 echo "ovn_ipreservation_enable: ${ovn_ipreservation_enable}"
+ovn_port_mirror_enable=${OVN_PORT_MIRROR_ENABLE}
+echo "ovn_port_mirror_enable: ${ovn_port_mirror_enable}"
 ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER}
 echo "ovn_disable_ovn_iface_id_ver: ${ovn_disable_ovn_iface_id_ver}"
 ovn_multi_network_enable=${OVN_MULTI_NETWORK_ENABLE}
@@ -764,6 +770,7 @@ ovn_image=${image} \
   ovn_admin_pbr_enable=${ovn_admin_pbr_enable} \
   ovn_virtual_ip_enable=${ovn_virtual_ip_enable} \
   ovn_ipreservation_enable=${ovn_ipreservation_enable} \
+  ovn_port_mirror_enable=${ovn_port_mirror_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_master_count=${ovn_master_count} \
   ovn_gateway_mode=${ovn_gateway_mode} \
@@ -861,6 +868,7 @@ ovn_image=${image} \
   ovn_admin_pbr_enable=${ovn_admin_pbr_enable} \
   ovn_virtual_ip_enable=${ovn_virtual_ip_enable} \
   ovn_ipreservation_enable=${ovn_ipreservation_enable} \
+  ovn_port_mirror_enable=${ovn_port_mirror_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_master_count=${ovn_master_count} \
   ovn_gateway_mode=${ovn_gateway_mode} \
@@ -1024,6 +1032,7 @@ ovn_image=${image_ubuntu} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   disable_ovs_metrics=${disable_ovs_metrics} \
+  ovn_port_mirror_enable=${ovn_port_mirror_enable} \
   j2 ../templates/ovnk8s-node-dpu.yaml.j2 -o ${output_dir}/ovnk8s-node-dpu.yaml
 
 ovn_image=${imagec} \
@@ -1253,6 +1262,7 @@ cp ../templates/k8s.ovn.org_egressfirewalls.yaml.j2 ${output_dir}/k8s.ovn.org_eg
 cp ../templates/k8s.ovn.org_egressips.yaml.j2 ${output_dir}/k8s.ovn.org_egressips.yaml
 cp ../templates/k8s.ovn.org_adminpolicybasedroutes.yaml.j2 ${output_dir}/k8s.ovn.org_adminpolicybasedroutes.yaml
 cp ../templates/k8s.ovn.org_virtualips.yaml.j2 ${output_dir}/k8s.ovn.org_virtualips.yaml
+cp ../templates/k8s.ovn.org_portmirrors.yaml.j2 ../yaml/k8s.ovn.org_portmirrors.yaml
 cp ../templates/multinetworkpolicy.yaml.j2  ${output_dir}/multinetworkpolicy.yaml
 cp ../templates/k8s.ovn.org_egressqoses.yaml.j2 ${output_dir}/k8s.ovn.org_egressqoses.yaml
 cp ../templates/k8s.ovn.org_egressservices.yaml.j2 ${output_dir}/k8s.ovn.org_egressservices.yaml

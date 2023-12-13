@@ -28,6 +28,8 @@ import (
 	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
 	egressservice "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
 	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
+	portmirror "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
+	portmirrorfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned/fake"
 	virtualip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
 	virtualipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -116,6 +118,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 	apbExternalRouteObjects := []runtime.Object{}
 	anpObjects := []runtime.Object{}
 	virtualIPObjects := []runtime.Object{}
+	portMirrorObjects := []runtime.Object{}
 	v1Objects := []runtime.Object{}
 	nads := []nettypes.NetworkAttachmentDefinition{}
 	for _, object := range objects {
@@ -140,6 +143,8 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 			anpObjects = append(anpObjects, object)
 		case *virtualip.VirtualIPList:
 			virtualIPObjects = append(virtualIPObjects, object)
+		case *portmirror.PortMirrorList:
+			portMirrorObjects = append(portMirrorObjects, object)
 		default:
 			v1Objects = append(v1Objects, object)
 		}
@@ -155,6 +160,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 		EgressServiceClient:      egressservicefake.NewSimpleClientset(egressServiceObjects...),
 		AdminPolicyRouteClient:   adminpolicybasedroutefake.NewSimpleClientset(apbExternalRouteObjects...),
 		VirtualIPClient:          virtualipfake.NewSimpleClientset(virtualIPObjects...),
+		PortMirrorClient:         portmirrorfake.NewSimpleClientset(portMirrorObjects...),
 	}
 	o.init(nads)
 }
@@ -269,6 +275,7 @@ func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFacto
 			EgressServiceClient:  ovnClient.EgressServiceClient,
 			AdminPBRClient:       ovnClient.AdminPBRClient,
 			APBRouteClient:       ovnClient.AdminPolicyRouteClient,
+			PortMirrorClient:     ovnClient.PortMirrorClient,
 		},
 		wf,
 		recorder,
@@ -394,6 +401,7 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 				EgressServiceClient:  o.fakeClient.EgressServiceClient,
 				AdminPBRClient:       o.fakeClient.AdminPBRClient,
 				VIPClient:            o.fakeClient.VirtualIPClient,
+				PortMirrorClient:     o.fakeClient.PortMirrorClient,
 			},
 			o.watcher,
 			o.fakeRecorder,

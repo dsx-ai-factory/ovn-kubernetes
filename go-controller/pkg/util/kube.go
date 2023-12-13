@@ -50,6 +50,7 @@ import (
 	egressqosclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned"
 	egressserviceclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned"
 	ipresvclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/clientset/versioned"
+	portmirrorclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned"
 	virtualipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/clientset/versioned"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	anpclientset "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned"
@@ -70,6 +71,7 @@ type OVNClientset struct {
 	AdminPBRClient           adminpbrclientset.Interface
 	VirtualIPClient          virtualipclientset.Interface
 	IPReservationClient      ipresvclientset.Interface
+	PortMirrorClient         portmirrorclientset.Interface
 }
 
 // OVNMasterClientset
@@ -86,6 +88,7 @@ type OVNMasterClientset struct {
 	AdminPBRClient           adminpbrclientset.Interface
 	VirtualIPClient          virtualipclientset.Interface
 	IPReservationClient      ipresvclientset.Interface
+	PortMirrorClient         portmirrorclientset.Interface
 }
 
 // OVNNetworkControllerManagerClientset
@@ -101,6 +104,7 @@ type OVNKubeControllerClientset struct {
 	AdminPBRClient           adminpbrclientset.Interface
 	VirtualIPClient          virtualipclientset.Interface
 	IPReservationClient      ipresvclientset.Interface
+	PortMirrorClient         portmirrorclientset.Interface
 }
 
 type OVNNodeClientset struct {
@@ -108,6 +112,7 @@ type OVNNodeClientset struct {
 	EgressServiceClient    egressserviceclientset.Interface
 	EgressIPClient         egressipclientset.Interface
 	AdminPolicyRouteClient adminpolicybasedrouteclientset.Interface
+	PortMirrorClient       portmirrorclientset.Interface
 }
 
 type OVNClusterManagerClientset struct {
@@ -142,6 +147,7 @@ func (cs *OVNClientset) GetMasterClientset() *OVNMasterClientset {
 		AdminPBRClient:           cs.AdminPBRClient,
 		VirtualIPClient:          cs.VirtualIPClient,
 		IPReservationClient:      cs.IPReservationClient,
+		PortMirrorClient:         cs.PortMirrorClient,
 	}
 }
 
@@ -158,6 +164,7 @@ func (cs *OVNMasterClientset) GetOVNKubeControllerClientset() *OVNKubeController
 		AdminPBRClient:           cs.AdminPBRClient,
 		VirtualIPClient:          cs.VirtualIPClient,
 		IPReservationClient:      cs.IPReservationClient,
+		PortMirrorClient:         cs.PortMirrorClient,
 	}
 }
 
@@ -174,6 +181,7 @@ func (cs *OVNClientset) GetOVNKubeControllerClientset() *OVNKubeControllerClient
 		AdminPBRClient:           cs.AdminPBRClient,
 		VirtualIPClient:          cs.VirtualIPClient,
 		IPReservationClient:      cs.IPReservationClient,
+		PortMirrorClient:         cs.PortMirrorClient,
 	}
 }
 
@@ -193,6 +201,7 @@ func (cs *OVNClientset) GetNodeClientset() *OVNNodeClientset {
 		EgressServiceClient:    cs.EgressServiceClient,
 		EgressIPClient:         cs.EgressIPClient,
 		AdminPolicyRouteClient: cs.AdminPolicyRouteClient,
+		PortMirrorClient:       cs.PortMirrorClient,
 	}
 }
 
@@ -426,7 +435,10 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 	if err != nil {
 		return nil, err
 	}
-
+	portMirrorClientset, err := portmirrorclientset.NewForConfig(kconfig)
+	if err != nil {
+		return nil, err
+	}
 	return &OVNClientset{
 		KubeClient:               kclientset,
 		ANPClient:                anpClientset,
@@ -441,6 +453,7 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		AdminPBRClient:           adminPBRClientset,
 		VirtualIPClient:          virtualIPClientset,
 		IPReservationClient:      ipReservationClientset,
+		PortMirrorClient:         portMirrorClientset,
 	}, nil
 }
 
@@ -867,7 +880,10 @@ func GroupKindOf(obj k8sruntime.Object) string {
 	if gk.String() == "" {
 		kinds, _, err := scheme.Scheme.ObjectKinds(obj)
 		if err != nil || len(kinds) == 0 || len(kinds) > 1 {
-			klog.Warningf("BUG: object has no / ambiguous GVK: %#v, err", obj, err)
+			klog.Errorf("BUG: object %#v has no kind or ambiguous GVK: %#v, ", obj, err)
+		}
+		if len(kinds) == 0 {
+			return ""
 		}
 		gk = kinds[0].GroupKind()
 	}
