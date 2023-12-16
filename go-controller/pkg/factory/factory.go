@@ -620,7 +620,8 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeNames []string
 			})
 	})
 
-	// only the given node is needed if HybridOverlay is not enabled (required by addressManager and addMasqueradeRoute)
+	// only the given node is needed if HybridOverlay is not enabled (required by addressManager, addMasqueradeRoute and checking
+	// NorthdNodeSelectorLabel in order to collect northd metrics)
 	if !config.HybridOverlay.Enabled {
 		wf.iFactory.InformerFor(&kapi.Node{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
 			return v1coreinformers.NewFilteredNodeInformer(

@@ -600,10 +600,11 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 					metrics.RegisterOvsMetrics(runMode.identity, ovsDBClient, config.MetricsScrapeInterval, stopChan)
 				}
 			}
-			if config.OvnKubeNode.Mode == types.NodeModeFull {
+			if config.OvnKubeNode.Mode != types.NodeModeDPU {
 				// serve OVN ^ovn_db, ^ovn_northd metrics from the ovnkube-node pod that is matching labels accordingly
 				podLister := corev1listers.NewPodLister(nodeWatchFactory.LocalPodInformer().GetIndexer())
-				metrics.RegisterOvnCentralMetrics(podLister, runMode.identity, config.MetricsScrapeInterval, stopChan)
+				nodeLister := corev1listers.NewNodeLister(nodeWatchFactory.NodeInformer().GetIndexer())
+				metrics.RegisterOvnCentralMetrics(podLister, nodeLister, runMode.identity, config.MetricsScrapeInterval, stopChan)
 			}
 		}
 	}
