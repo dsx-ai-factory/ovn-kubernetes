@@ -489,7 +489,7 @@ spec:
 
     - alert: OvsVfRepInterfaceDown
       expr: |
-        ovs_vswitchd_interface_link_state{interface=~"pf.*", port!=""} != 2
+        ovs_vswitchd_interface_link_state{interface=~"pf.*", port!=""} != 2 and ovs_vswitchd_interface_of_port{interface=~"pf.*"} != -1
       for: 10m
       labels:
        severity: major
