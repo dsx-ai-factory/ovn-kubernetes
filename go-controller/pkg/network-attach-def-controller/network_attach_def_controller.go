@@ -89,7 +89,7 @@ type nadNetInfo struct {
 	nadConf *util.NADConfig
 }
 
-type passiveNADControllerInfo struct {
+type interConnectInfo struct {
 	// list of active NADs request to connect the passive NAD
 	activeNADList map[string]struct{}
 	activeICInfo  *util.InterConnectInfo
@@ -117,7 +117,8 @@ type NetAttachDefinitionController struct {
 	perNetworkNADInfo *syncmap.SyncMap[*networkNADInfo]
 
 	passiveNADControllerInfoMutex sync.RWMutex
-	passiveNADControllerInfoMap   map[string]*passiveNADControllerInfo
+	// key is passive NAD name, entry is its associated inter-connection info
+	passiveNADControllerInfoMap map[string]*interConnectInfo
 }
 
 func NewNetAttachDefinitionController(name string, ncm NetworkControllerManager, networkAttchDefClient nadclientset.Interface,
@@ -132,19 +133,18 @@ func NewNetAttachDefinitionController(name string, ncm NetworkControllerManager,
 		&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(qps), qps*5)})
 
 	nadController := &NetAttachDefinitionController{
-		name:               name,
-		recorder:           recorder,
-		ncm:                ncm,
-		nadFactory:         nadFactory,
-		netAttachDefLister: netAttachDefInformer.Lister(),
-		netAttachDefSynced: netAttachDefInformer.Informer().HasSynced,
-		queue:              workqueue.NewNamedRateLimitingQueue(rateLimiter, "net-attach-def"),
-		loopPeriod:         time.Second,
-		stopChan:           make(chan struct{}),
-		perNADNetInfo:      syncmap.NewSyncMap[*nadNetInfo](),
-		perNetworkNADInfo:  syncmap.NewSyncMap[*networkNADInfo](),
-
-		passiveNADControllerInfoMap: map[string]*passiveNADControllerInfo{},
+		name:                        name,
+		recorder:                    recorder,
+		ncm:                         ncm,
+		nadFactory:                  nadFactory,
+		netAttachDefLister:          netAttachDefInformer.Lister(),
+		netAttachDefSynced:          netAttachDefInformer.Informer().HasSynced,
+		queue:                       workqueue.NewNamedRateLimitingQueue(rateLimiter, "net-attach-def"),
+		loopPeriod:                  time.Second,
+		stopChan:                    make(chan struct{}),
+		perNADNetInfo:               syncmap.NewSyncMap[*nadNetInfo](),
+		perNetworkNADInfo:           syncmap.NewSyncMap[*networkNADInfo](),
+		passiveNADControllerInfoMap: map[string]*interConnectInfo{},
 	}
 	_, err := netAttachDefInformer.Informer().AddEventHandler(
 		cache.ResourceEventHandlerFuncs{
@@ -590,34 +590,30 @@ func (nadController *NetAttachDefinitionController) addNADToController(ncm Netwo
 		if nadToConnect := oc.NADToInterConnect(); nadToConnect != "" {
 			// active side
 			if nadToConnect == nadName {
-				klog.Warningf("Failed to inter-connect NAD %s to network %s: belongs to the same network",
-					nadToConnect, oc.GetNetworkName())
+				klog.Errorf("Error: NAD %s is requested to inter-connect itself", nadName)
+				return nil
+			} else if nInfo.GetInterConnectInfo() == nil {
+				klog.Errorf("Error: NAD %s does not support inter-connect", nadName)
 				return nil
 			}
 			_ = nadController.perNADNetInfo.DoWithLock(nadToConnect, func(passiveNADName string) error {
-				passiveNnci, passiveNADAdded := nadController.perNADNetInfo.Load(passiveNADName)
-				if passiveNADAdded {
-					if passiveNnci.GetNetworkName() == netName {
-						klog.Warningf("Failed to inter-connect NAD %s to network %s: belongs to the same network",
-							passiveNADName, oc.GetNetworkName())
-						return nil
-					}
-				}
+				passiveNADNetInfo, passiveNADAdded := nadController.perNADNetInfo.Load(passiveNADName)
+				klog.V(5).Infof("Active NAD %s is requested to connect to passive NAD %s, passive NAD found :%v",
+					nadName, passiveNADName, passiveNADAdded)
 				nadController.passiveNADControllerInfoMutex.Lock()
 				defer nadController.passiveNADControllerInfoMutex.Unlock()
-				activeInterConnectInfo := nInfo.GetInterConnectInfo()
-				passiveInterConnectInfo, isConnected := nadController.AddActive(passiveNADName, nadName, activeInterConnectInfo)
-				if !isConnected {
-					if passiveInterConnectInfo == nil && passiveNADAdded {
-						passiveInterConnectInfo = passiveNnci.GetInterConnectInfo()
+				icInfo, err := nadController.AddActive(passiveNADName, nadName, nInfo.GetInterConnectInfo(), passiveNADNetInfo)
+				if err != nil {
+					klog.Errorf("Error in inter-connect NAD %s to NAD %s: %v", nadName, passiveNADName, err)
+					return nil
+				}
+				if !icInfo.isConnected && icInfo.passiveICInfo != nil {
+					klog.V(5).Infof("Active NAD %s connects to passive NAD %s", nadName, passiveNADName)
+					err = oc.StartInterConnect(icInfo.passiveICInfo)
+					if err != nil {
+						klog.Warningf("Network %s connect to %s failed: %v", oc.GetNetworkName(), passiveNADName)
 					}
-					if passiveInterConnectInfo != nil {
-						err = oc.StartInterConnect(passiveInterConnectInfo)
-						if err != nil {
-							klog.Warningf("Network %s connect to %s failed: %v", oc.GetNetworkName(), passiveNADName)
-						}
-						nadController.SetConnected(passiveNADName, err == nil, passiveInterConnectInfo)
-					}
+					icInfo.isConnected = (err == nil)
 				}
 				return nil
 			})
@@ -625,20 +621,23 @@ func (nadController *NetAttachDefinitionController) addNADToController(ncm Netwo
 			// passive side
 			nadController.passiveNADControllerInfoMutex.Lock()
 			defer nadController.passiveNADControllerInfoMutex.Unlock()
-			activeInterConnectInfo, _, isConnected := nadController.GetICInfo(nadName)
-			if activeInterConnectInfo != nil && nInfo.GetInterConnectInfo() == nil {
-				// passive side does not support does not support interconnection
-				klog.Errorf("NAD/network (%s)/%s is requested to inter-connect to network %s which it does not support", nadName, oc.GetNetworkName(), activeInterConnectInfo.NetName)
+			icInfo := nadController.passiveNADControllerInfoMap[nadName]
+			if icInfo == nil || icInfo.isConnected {
 				return nil
 			}
-			if !isConnected && activeInterConnectInfo != nil {
-				err = oc.StartInterConnect(activeInterConnectInfo)
-				if err != nil {
-					klog.Warningf("NAD %s connect to network %s failed: %v", nadName, activeInterConnectInfo.NetName, err)
-				}
-				passiveInterConnectInfo := nInfo.GetInterConnectInfo()
-				nadController.SetConnected(nadName, err == nil, passiveInterConnectInfo)
+			if nInfo.GetInterConnectInfo() == nil {
+				// passive side does not support does not support interconnection
+				klog.Errorf("NAD/network (%s)/%s is requested to inter-connect to network %s which it does not support", nadName, oc.GetNetworkName(), icInfo.activeICInfo.NetName)
+				return nil
 			}
+			klog.V(5).Infof("Passive NAD %s is up and is to connect to active network %s",
+				nadName, icInfo.activeICInfo.NetName)
+			icInfo.passiveICInfo = nInfo.GetInterConnectInfo()
+			err = oc.StartInterConnect(icInfo.activeICInfo)
+			if err != nil {
+				klog.Warningf("NAD %s connect to network %s failed: %v", nadName, icInfo.activeICInfo.NetName, err)
+			}
+			icInfo.isConnected = (err == nil)
 		}
 		return nil
 	})
@@ -661,37 +660,43 @@ func (nadController *NetAttachDefinitionController) deleteNADFromController(nadN
 		}
 
 		oc := nni.nc
-		delete(nni.nadNames, nadName)
 		nadController.passiveNADControllerInfoMutex.Lock()
 		if peerNADName := nadNci.NADToInterConnect(); peerNADName != "" {
 			// active side
-			// TBD: lock based on peerNAD
-			_, passiveInterConnectInfo, isConnected := nadController.GetICInfo(peerNADName)
-			if passiveInterConnectInfo != nil && isConnected && len(nni.nadNames) == 0 {
-				err := oc.StopInterConnect(passiveInterConnectInfo)
-				if err == nil {
-					nadController.SetConnected(peerNADName, false, passiveInterConnectInfo)
-					nadController.RemoveActive(peerNADName, nadName)
-				} else {
-					nni.nadNames[nadName] = struct{}{}
-					return fmt.Errorf("failed to inter-disconnect network controller %s with NAD %s: %v", networkName, peerNADName, err)
+			icInfo := nadController.passiveNADControllerInfoMap[peerNADName]
+			if icInfo != nil {
+				if _, ok := icInfo.activeNADList[nadName]; ok {
+					if len(icInfo.activeNADList) == 1 {
+						// the last NAD of the active network connect to nadName
+						if icInfo.isConnected {
+							if err := oc.StopInterConnect(icInfo.passiveICInfo); err != nil {
+								nadController.passiveNADControllerInfoMutex.Unlock()
+								return fmt.Errorf("failed to inter-disconnect network controller %s with NAD %s: %v", networkName, peerNADName, err)
+							}
+						}
+						delete(nadController.passiveNADControllerInfoMap, peerNADName)
+					} else {
+						delete(icInfo.activeNADList, nadName)
+					}
 				}
 			}
 		} else {
 			// passive side
-			activeInterConnectInfo, _, isConnected := nadController.GetICInfo(nadName)
-			if isConnected {
-				err := oc.StopInterConnect(activeInterConnectInfo)
-				if err == nil {
-					nadController.SetConnected(nadName, false, nil)
-				} else {
-					nni.nadNames[nadName] = struct{}{}
-					return fmt.Errorf("failed to inter-disconnect NAD %s with network %s: %v", nadName, activeInterConnectInfo.NetName, err)
+			icInfo := nadController.passiveNADControllerInfoMap[nadName]
+			if icInfo != nil {
+				if icInfo.isConnected {
+					if err := oc.StopInterConnect(icInfo.activeICInfo); err != nil {
+						nadController.passiveNADControllerInfoMutex.Unlock()
+						return fmt.Errorf("failed to inter-disconnect network controller %s with NAD %s: %v", networkName, peerNADName, err)
+					}
+					icInfo.isConnected = false
 				}
+				icInfo.passiveICInfo = nil
 			}
 		}
-		defer nadController.passiveNADControllerInfoMutex.Unlock()
+		nadController.passiveNADControllerInfoMutex.Unlock()
 
+		delete(nni.nadNames, nadName)
 		if len(nni.nadNames) == 0 {
 			klog.V(5).Infof("%s: The last NAD: %s of network %s has been deleted, stopping network controller", nadController.name, nadName, networkName)
 			oc.Stop()
@@ -712,51 +717,38 @@ func (nadController *NetAttachDefinitionController) deleteNADFromController(nadN
 	})
 }
 
-func (nadController *NetAttachDefinitionController) AddActive(passiveNADName, nadName string, activeInterConnectInfo *util.InterConnectInfo) (*util.InterConnectInfo, bool) {
+// AddActive() update per-passiveNAD interConnectInfo map, where activeInterConnectInfo is always valid, but
+// passiveNADNetInfo may be nil or invalid (passive NAD not handled yet)
+func (nadController *NetAttachDefinitionController) AddActive(passiveNADName, activeNADName string,
+	activeInterConnectInfo *util.InterConnectInfo, passiveNADNetInfo *nadNetInfo) (*interConnectInfo, error) {
+	var passiveInterConnectInfo *util.InterConnectInfo
+	activeNetName := activeInterConnectInfo.NetName
+	if passiveNADNetInfo != nil {
+		passiveInterConnectInfo = passiveNADNetInfo.GetInterConnectInfo()
+		if passiveInterConnectInfo == nil {
+			return nil, fmt.Errorf("NAD %s does not support inter-connect", passiveNADName)
+		}
+		if activeNetName == passiveInterConnectInfo.NetName {
+			return nil, fmt.Errorf("NAD %s to NAD %s belongs to the same network %s",
+				activeNADName, passiveNADName, activeNetName)
+		}
+	}
 	info, ok := nadController.passiveNADControllerInfoMap[passiveNADName]
 	if !ok {
-		info = &passiveNADControllerInfo{
+		info = &interConnectInfo{
 			activeNADList: map[string]struct{}{},
-			activeICInfo:  nil,
-			passiveICInfo: nil,
+			activeICInfo:  activeInterConnectInfo,
+			passiveICInfo: passiveInterConnectInfo,
 			isConnected:   false,
 		}
 		nadController.passiveNADControllerInfoMap[passiveNADName] = info
-	}
-	info.activeNADList[nadName] = struct{}{}
-	info.activeICInfo = activeInterConnectInfo
-	return info.passiveICInfo, info.isConnected
-}
-
-func (nadController *NetAttachDefinitionController) RemoveActive(passiveNADName, nadName string) {
-	info, ok := nadController.passiveNADControllerInfoMap[passiveNADName]
-	if ok {
-		delete(info.activeNADList, nadName)
-		if len(info.activeNADList) == 0 {
-			delete(nadController.passiveNADControllerInfoMap, passiveNADName)
+	} else {
+		if info.activeICInfo.NetName != activeInterConnectInfo.NetName {
+			return nil, fmt.Errorf("NAD %s is requested to connect to two different networks %s and %s",
+				passiveNADName, info.activeICInfo.NetName, activeInterConnectInfo.NetName)
 		}
+		info.passiveICInfo = passiveInterConnectInfo
 	}
-}
-
-func (nadController *NetAttachDefinitionController) SetConnected(passiveNADName string, isConnected bool, passiveInterConnectInfo *util.InterConnectInfo) {
-	info, ok := nadController.passiveNADControllerInfoMap[passiveNADName]
-	if !ok {
-		info = &passiveNADControllerInfo{
-			activeNADList: map[string]struct{}{},
-			activeICInfo:  nil,
-			passiveICInfo: nil,
-			isConnected:   false,
-		}
-		nadController.passiveNADControllerInfoMap[passiveNADName] = info
-	}
-	info.isConnected = isConnected
-	info.passiveICInfo = passiveInterConnectInfo
-}
-
-func (nadController *NetAttachDefinitionController) GetICInfo(passiveNADName string) (*util.InterConnectInfo, *util.InterConnectInfo, bool) {
-	info, ok := nadController.passiveNADControllerInfoMap[passiveNADName]
-	if ok {
-		return info.activeICInfo, info.passiveICInfo, info.isConnected
-	}
-	return nil, nil, false
+	info.activeNADList[activeNADName] = struct{}{}
+	return info, nil
 }
