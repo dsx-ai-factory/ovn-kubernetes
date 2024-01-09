@@ -3,13 +3,14 @@ package node
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	mlxdevm "github.com/Mellanox/mlxdevm-go"
 	utilfs "github.com/Mellanox/sriovnet/pkg/utils/filesystem"
@@ -153,7 +154,7 @@ func bindAndUnbindSF(auxDev string) error {
 }
 
 func (bnnc *BaseNodeNetworkController) deleteSF(sfUplinkPort string, portIndex, sfNum uint32) error {
-	uplinkPCIAddress, err := getPCIFromDeviceName(sfUplinkPort)
+	uplinkPCIAddress, err := util.GetSriovnetOps().GetPCIFromDeviceName(sfUplinkPort)
 	if err != nil {
 		return fmt.Errorf("failed to get PCI address for SF's uplink port %s: (%v)",
 			sfUplinkPort, err)
@@ -230,26 +231,6 @@ func getSFNetDeviceName(pfPort uint16, sfnum uint32) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("error getting net dev for SF %d", sfnum)
-}
-
-// From sriovnet, ideally should export from the lib and use it here.
-func readPCIsymbolicLink(symbolicLink string) (string, error) {
-	pciDevDir, err := os.Readlink(symbolicLink)
-	//nolint:gomnd
-	if len(pciDevDir) <= 3 {
-		return "", fmt.Errorf("could not find PCI Address")
-	}
-
-	return pciDevDir[9:], err
-}
-
-func getPCIFromDeviceName(netdevName string) (string, error) {
-	symbolicLink := filepath.Join(NetSysDir, netdevName, PcidevPrefix)
-	pciAddress, err := readPCIsymbolicLink(symbolicLink)
-	if err != nil {
-		err = fmt.Errorf("%v for netdevice %s", err, netdevName)
-	}
-	return pciAddress, err
 }
 
 func getNetDevPhysPortName(netDev string) (string, error) {
@@ -329,7 +310,7 @@ func (bnnc *BaseNodeNetworkController) createSFWithRetry(uplinkPCIAddress string
 // getSFInfo creates a SF and does the binding and unbinding stuff and
 // populates the sfInfo struct with corresponding sfdetails
 func (bnnc *BaseNodeNetworkController) getSFInfo(sfUplinkPort string, sfUplinkPortNum uint16, reqSFNum int) (*sfDetails, error) {
-	uplinkPCIAddress, err := getPCIFromDeviceName(sfUplinkPort)
+	uplinkPCIAddress, err := util.GetSriovnetOps().GetPCIFromDeviceName(sfUplinkPort)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get PCI address for SF's uplink port %s: (%v)",
 			sfUplinkPort, err)

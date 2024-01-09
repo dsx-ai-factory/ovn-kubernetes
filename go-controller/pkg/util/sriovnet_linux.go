@@ -19,6 +19,8 @@ import (
 // Copied from vendor/github.com/Mellanox/sriovnet/sriovnet_switchdev.go
 // can be removed once SetRepresentorVFMissPktRate moves to the same location.
 const (
+	PcidevPrefix = "device"
+
 	NetSysDir = "/sys/class/net"
 	PciSysDir = "/sys/bus/pci/devices"
 )
@@ -43,6 +45,7 @@ type SriovnetOps interface {
 	SetRepresentorVFMissPktRate(netdev string, maxPPS, maxBurst uint) error
 	GetRepresentorVFMissPktRate(netdev string) (uint64, uint64, error)
 	GetRepresentorVFMissPktDrops(netdev string) (uint64, error)
+	GetPCIFromDeviceName(netdevName string) (string, error)
 }
 
 type defaultSriovnetOps struct {
@@ -296,4 +299,39 @@ func SetVFHardwreAddress(deviceID string, mac net.HardwareAddr) error {
 		return err
 	}
 	return nil
+}
+
+// From sriovnet, ideally should export from the lib and use it here.
+func readPCIsymbolicLink(symbolicLink string) (string, error) {
+	pciDevDir, err := os.Readlink(symbolicLink)
+	//nolint:gomnd
+	if len(pciDevDir) <= 3 {
+		return "", fmt.Errorf("could not find PCI Address")
+	}
+
+	return pciDevDir[9:], err
+}
+
+func (defaultSriovnetOps) GetPCIFromDeviceName(netdevName string) (string, error) {
+	symbolicLink := filepath.Join(NetSysDir, netdevName, PcidevPrefix)
+	pciAddress, err := readPCIsymbolicLink(symbolicLink)
+	if err != nil {
+		err = fmt.Errorf("%v for netdevice %s", err, netdevName)
+	}
+	return pciAddress, err
+}
+
+// GetUplinkRepresentorName returns uplink representor name for passed device ID.
+// Supported devices are Virtual Function or Scalable Function
+func GetUplinkRepresentorName(deviceID string) (string, error) {
+	var uplink string
+	var err error
+
+	if IsPCIDeviceName(deviceID) { // PCI device
+		uplink, err = GetSriovnetOps().GetUplinkRepresentor(deviceID)
+	} else if IsAuxDeviceName(deviceID) { // Auxiliary device
+		uplink, err = GetSriovnetOps().GetUplinkRepresentorFromAux(deviceID)
+	}
+
+	return uplink, err
 }
