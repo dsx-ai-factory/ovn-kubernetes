@@ -1186,21 +1186,21 @@ func (t *TableCache) ApplyCacheUpdate(update cacheUpdate) error {
 		err := update.ForEachModelUpdate(table, func(uuid string, old, new model.Model) error {
 			switch {
 			case old == nil && new != nil:
-				t.logger.V(5).Info("inserting model", "table", table, "uuid", uuid, "model", new)
+				t.logger.V(6).Info("inserting model", "table", table, "uuid", uuid, "model", new)
 				err := tCache.Create(uuid, new, false)
 				if err != nil {
 					return err
 				}
 				t.eventProcessor.AddEvent(addEvent, table, nil, new)
 			case old != nil && new != nil:
-				t.logger.V(5).Info("updating model", "table", table, "uuid", uuid, "old", old, "new", new)
+				t.logger.V(6).Info("updating model", "table", table, "uuid", uuid, "old", old, "new", new)
 				_, err := tCache.Update(uuid, new, false)
 				if err != nil {
 					return err
 				}
 				t.eventProcessor.AddEvent(updateEvent, table, old, new)
 			case new == nil:
-				t.logger.V(5).Info("deleting model", "table", table, "uuid", uuid, "model", old)
+				t.logger.V(6).Info("deleting model", "table", table, "uuid", uuid, "model", old)
 				err := tCache.Delete(uuid)
 				if err != nil {
 					return err

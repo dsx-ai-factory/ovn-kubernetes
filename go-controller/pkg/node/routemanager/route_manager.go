@@ -58,7 +58,7 @@ func (c *Controller) Run(stopCh <-chan struct{}, syncPeriod time.Duration) {
 			if err = c.processNetlinkEvent(newRouteEvent); err != nil {
 				// TODO: make util.GetNetLinkOps().IsLinkNotFoundError(err) smarter to unwrap error
 				// and use it here to log errors that are not IsLinkNotFoundError
-				klog.V(5).Info("Route Manager: failed to process route update event (%s): %v", newRouteEvent.String(), err)
+				klog.V(5).Infof("Route Manager: failed to process route update event (%s): %v", newRouteEvent.String(), err)
 			}
 		case <-ticker.C:
 			if !subscribed {
