@@ -179,7 +179,7 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU(addFunc func(*kapi.Pod, stri
 				newDPUCD := bnnc.podReadyToAddDPU(newPod, bnnc.GetAnnotationKey(nadName))
 				if !dpuConnectionDetailChanged(oldDPUCD, newDPUCD) {
 					// no change in connection Details, but may need to update something else
-					if updateFunc != nil {
+					if newDPUCD != nil && updateFunc != nil {
 						var err error
 						info.anyInfo, err = updateFunc(newPod, nadName, info.anyInfo)
 						if err != nil {

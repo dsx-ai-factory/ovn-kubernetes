@@ -456,7 +456,7 @@ func (bsnc *BaseSecondaryNetworkController) syncPodsForSecondaryNetwork(pods []i
 			annotations, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
 			if err != nil {
 				if !util.IsAnnotationNotSetError(err) {
-					klog.Errorf("Failed to get pod annotation of pod %s/%s for NAD %s", pod.Namespace, pod.Name, nadName)
+					klog.Errorf("Failed to get pod annotation of pod %s/%s for NAD %s: %v", pod.Namespace, pod.Name, nadName, err)
 				}
 				continue
 			}

@@ -116,6 +116,7 @@ IN_UPGRADE=
 COREDNS_CLUSTER_IP="10.96.0.10"
 OVNKUBE_LOGFILE=""
 OVNKUBE_DISABLE_OVS_METRICS=""
+OVN_NORTHD_NODE_SELECTOR_LABEL="ngn2.nvidia.com/hosttype=NGN-MASTER"
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -421,6 +422,10 @@ while [ "$1" != "" ]; do
   --disable-ovs-metrics)
     OVNKUBE_DISABLE_OVS_METRICS=$VALUE
     ;;
+  --northd-node-selector-label)
+    OVN_NORTHD_NODE_SELECTOR_LABEL=$VALUE
+    ;;
+
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -642,6 +647,8 @@ ovnkube_logfile=${OVNKUBE_LOGFILE}
 echo "ovnkube_logfile: ${ovnkube_logfile}"
 disable_ovs_metrics=${OVNKUBE_DISABLE_OVS_METRICS:-false}
 echo "disable_ovs_metrics=${disable_ovs_metrics}"
+ovn_northd_node_selector_label=${OVN_NORTHD_NODE_SELECTOR_LABEL}
+echo "ovn_northd_node_selector_label: ${ovn_northd_node_selector_label}"
 
 ovn_image=${image} \
   ovnkube_compact_mode_enable=${ovnkube_compact_mode_enable} \
@@ -937,6 +944,7 @@ ovn_image=${image} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   disable_ovs_metrics=${disable_ovs_metrics} \
+  ovn_northd_node_selector_label=${ovn_northd_node_selector_label} \
   ovnkube_app_name=ovnkube-node \
   j2 ../templates/ovnk8s-node.yaml.j2 -o ${output_dir}/ovnk8s-node.yaml
 
@@ -979,6 +987,7 @@ ovn_image=${image} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   coredns_cluster_ip=${coredns_cluster_ip} \
+  ovn_northd_node_selector_label=${ovn_northd_node_selector_label} \
   ovnkube_app_name=ovnkube-node-dpu-host \
   j2 ../templates/ovnk8s-node.yaml.j2 -o ${output_dir}/ovnk8s-node-dpu-host.yaml
 

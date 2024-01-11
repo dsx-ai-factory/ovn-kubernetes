@@ -20,6 +20,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	corev1listers "k8s.io/client-go/listers/core/v1"
@@ -447,6 +448,24 @@ func checkPodRunsOnGivenNode(podLister corev1listers.PodLister, labels []string,
 		strings.Join(labels, ","), k8sNodeName)
 }
 
+// checkNodeLabel checks if the give node matches the given labelSelector.
+func checkNodeLabel(nodeLister corev1listers.NodeLister, nodeName, selector string) (bool, error) {
+	node, err := nodeLister.Get(nodeName)
+	if err != nil {
+		return false, fmt.Errorf("failed to get node %s", nodeName)
+	}
+
+	nodeSelector, err := metav1.ParseToLabelSelector(selector)
+	if err != nil {
+		return false, fmt.Errorf("failed to check node with invalid label selector %s: %v", selector, err)
+	}
+	ls, err := metav1.LabelSelectorAsSelector(nodeSelector)
+	if err != nil {
+		return false, fmt.Errorf("failed to check node with invalid label selector %s: %v", selector, err)
+	}
+	return ls.Matches(labels.Set(node.Labels)), nil
+}
+
 // using the cyrpto/tls module's GetCertificate() callback function helps in picking up
 // the latest certificate (due to cert rotation on cert expiry)
 func getTLSServer(addr, certFile, privKeyFile string, handler http.Handler) *http.Server {
@@ -596,10 +615,10 @@ func RegisterOvnNodeMetrics(ovsDBClient *util.OvsdbClient, metricsScrapeInterval
 	go RegisterOvnControllerMetrics(ovsDBClient, metricsScrapeInterval, stopChan)
 }
 
-func RegisterOvnCentralMetrics(podLister corev1listers.PodLister, k8sNodeName string,
-	metricsScrapeInterval int, stopChan chan struct{}) {
+func RegisterOvnCentralMetrics(podLister corev1listers.PodLister, nodeLister corev1listers.NodeLister,
+	k8sNodeName string, metricsScrapeInterval int, stopChan chan struct{}) {
 	go RegisterOvnDBMetrics(podLister, k8sNodeName, metricsScrapeInterval, stopChan)
-	go RegisterOvnNorthdMetrics(podLister, k8sNodeName, metricsScrapeInterval, stopChan)
+	go RegisterOvnNorthdMetrics(nodeLister, k8sNodeName, metricsScrapeInterval, stopChan)
 }
 
 func SetupOvsDBClient() (*util.OvsdbClient, error) {

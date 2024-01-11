@@ -374,6 +374,9 @@ type KubernetesConfig struct {
 	PlatformType         string `gcfg:"platform-type"`
 	HealthzBindAddress   string `gcfg:"healthz-bind-address"`
 
+	// NorthdNodeSelectorLabel is the label selector string of the nodes which ovn-northd is running on
+	NorthdNodeSelectorLabel string `gcfg:"ovn-northd-node-selector-label"`
+
 	// CompatMetricsBindAddress is overridden by the corresponding option in MetricsConfig
 	CompatMetricsBindAddress string `gcfg:"metrics-bind-address"`
 	// CompatMetricsEnablePprof is overridden by the corresponding option in MetricsConfig
@@ -1240,6 +1243,11 @@ var K8sFlags = []cli.Flag{
 		Usage:       "DNS kubernetes service name used to expose name resolving to live migratable vms.",
 		Destination: &cliConfig.Kubernetes.DNSServiceName,
 		Value:       Kubernetes.DNSServiceName,
+	},
+	&cli.StringFlag{
+		Name:        "ovn-northd-node-selector-label",
+		Usage:       "Specify a label selector for nodes that ovn-northd is running on",
+		Destination: &cliConfig.Kubernetes.NorthdNodeSelectorLabel,
 	},
 }
 

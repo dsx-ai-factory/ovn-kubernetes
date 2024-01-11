@@ -247,6 +247,8 @@ spec:
               value: "{{ ovn_enable_ovnkube_identity }}"
             - name: OVN_MULTI_NETWORK_ENABLE
               value: "{{ ovn_multi_network_enable }}"
+            - name: OVN_NORTHD_NODE_SELECTOR_LABEL
+              value: "{{ ovn_northd_node_selector_label }}"
             {% if ovnkube_app_name=="ovnkube-node" -%}
             - name: OVNKUBE_DISABLE_OVS_METRICS
               value: "{{ disable_ovs_metrics }}"            

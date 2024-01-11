@@ -2382,6 +2382,11 @@ ovn-node() {
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovnkube.pid
 
+  northd_node_selector_label_flag=
+  if [[ ${ovnkube_node_mode} != "dpu" ]]; then
+    northd_node_selector_label_flag="--ovn-northd-node-selector-label=${OVN_NORTHD_NODE_SELECTOR_LABEL}"
+  fi
+
   if [[ ${ovnkube_node_mode} != "dpu" ]]; then
     echo "removing OVN CNI conf"
     rm -vf /etc/cni/net.d/10-ovn-kubernetes.conf
@@ -2770,6 +2775,7 @@ ovn-node() {
         ${multi_network_enabled_flag} \
         ${port_mirror_enabled_flag} \
         ${netflow_targets} \
+        ${northd_node_selector_label_flag} \
         ${ofctrl_wait_before_clear} \
         ${ovn_conntrack_zone_flag} \
         ${ovn_dbs} \
@@ -2784,6 +2790,7 @@ ovn-node() {
         ${ovnkube_node_certs_flags} \
         ${ovnkube_node_mgmt_port_netdev_flag} \
         ${ovnkube_node_mode_flag} \
+        ${ovn_metrics_enable_pprof_flag} \
         ${ovn_node_ssl_opts} \
         ${ovn_unprivileged_flag} \
         ${ovn_xdp_opts} \
@@ -2801,7 +2808,6 @@ ovn-node() {
         --loglevel=${ovnkube_loglevel} \
         --metrics-bind-address ${ovnkube_node_metrics_bind_address} \
         --metrics-interval ${ovn_metrics_scrape_interval} \
-        ${ovn_metrics_enable_pprof_flag} \
         --mtu=${mtu} \
         --ovn-encap-tos=${ovn_encap_tos} \
         --pidfile ${OVN_RUNDIR}/ovnkube.pid \
