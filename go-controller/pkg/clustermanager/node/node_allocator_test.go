@@ -37,13 +37,15 @@ type existingAllocation struct {
 
 func TestController_allocateNodeSubnets(t *testing.T) {
 	tests := []struct {
-		name          string
-		networkRanges []string
-		networkLens   []int
-		configIPv4    bool
-		configIPv6    bool
-		existingNets  []*net.IPNet
-		alreadyOwned  *existingAllocation
+		name                 string
+		nodeLabels           map[string]string
+		networkRanges        []string
+		multipleSubnetRanges string
+		networkLens          []int
+		configIPv4           bool
+		configIPv6           bool
+		existingNets         []*net.IPNet
+		alreadyOwned         *existingAllocation
 		// to be converted during the test to []*net.IPNet
 		wantStr   []string
 		allocated int
@@ -204,14 +206,51 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			wantStr:   []string{"172.16.0.0/24", "2001:db2:1:2::/64"},
 			allocated: 0,
 		},
+		{
+			name:                 "new node requesting 20 pods",
+			multipleSubnetRanges: "10.192.0.0/16/24,10.132.0.0/16/28,10.130.0.0/16/26",
+			configIPv4:           true,
+			configIPv6:           false,
+			nodeLabels:           map[string]string{"k8s.ovn.org/num-pods": "20"},
+			wantStr:              []string{"10.130.0.0/26"},
+			allocated:            1,
+			wantErr:              false,
+		},
+		{
+			name:                 "new node requesting 10 pods",
+			multipleSubnetRanges: "10.192.0.0/16/24,10.132.0.0/16/28,10.130.0.0/16/26",
+			configIPv4:           true,
+			configIPv6:           false,
+			nodeLabels:           map[string]string{"k8s.ovn.org/num-pods": "10"},
+			wantStr:              []string{"10.132.0.0/28"},
+			allocated:            1,
+			wantErr:              false,
+		},
+		{
+			name:                 "requested number of pods 300: no suitable network range",
+			multipleSubnetRanges: "10.192.0.0/16/24,10.132.0.0/16/28,10.130.0.0/16/26",
+			configIPv4:           true,
+			configIPv6:           false,
+			nodeLabels:           map[string]string{"k8s.ovn.org/num-pods": "300"},
+			wantStr:              nil,
+			allocated:            0,
+			wantErr:              true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ranges, err := rangesFromStrings(tt.networkRanges, tt.networkLens)
+			var ranges []config.CIDRNetworkEntry
+			var err error
+			if tt.multipleSubnetRanges != "" {
+				ranges, err = config.ParseClusterSubnetEntries(tt.multipleSubnetRanges)
+			} else {
+				ranges, err = rangesFromStrings(tt.networkRanges, tt.networkLens)
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
+			config.SortClusterSubnetEntries(ranges)
 			config.Default.ClusterSubnets = ranges
 
 			netInfo, err := util.NewNetInfo(
@@ -241,7 +280,7 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			}
 
 			// test network allocation works correctly
-			got, allocated, err := na.allocateNodeSubnets(na.clusterSubnetAllocator, "testnode", nil, tt.existingNets, tt.configIPv4, tt.configIPv6)
+			got, allocated, err := na.allocateNodeSubnets(na.clusterSubnetAllocator, "testnode", tt.nodeLabels, tt.existingNets, tt.configIPv4, tt.configIPv6)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("Controller.addNode() error = %v, wantErr %v", err, tt.wantErr)
 			}
