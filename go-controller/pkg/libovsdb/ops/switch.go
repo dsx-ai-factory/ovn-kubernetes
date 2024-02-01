@@ -508,7 +508,7 @@ func FindLogicalSwitchPortsWithPredicate(nbClient libovsdbclient.Client, sw *nbd
 		lsp := &nbdb.LogicalSwitchPort{UUID: port}
 		lsp, err := GetLogicalSwitchPort(nbClient, lsp)
 		if err != nil {
-			return nil, fmt.Errorf("error getting port %+v on switch %+v: %v", lsp, sw, err)
+			return nil, fmt.Errorf("error getting port %+v on switch %+v: %v", port, sw, err)
 		}
 		if p(lsp) {
 			lsps = append(lsps, lsp)
