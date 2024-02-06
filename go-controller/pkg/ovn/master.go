@@ -449,6 +449,13 @@ func (oc *DefaultNetworkController) syncNodesPeriodic() {
 	remoteZoneKNodes := make([]*kapi.Node, 0, len(kNodes))
 	for i := range kNodes {
 		if oc.isLocalZoneNode(kNodes[i]) {
+			// For DPU case we might want to propagate DPU NotReady state as a NoSchedule taint to DPU's host
+			if util.IsDPU(kNodes[i]) {
+				err := util.SyncDependentNodeTaints(oc.kube, oc.watchFactory.NodeCoreInformer().Lister(), kNodes[i])
+				if err != nil {
+					klog.Warningf(err.Error())
+				}
+			}
 			localZoneKNodes = append(localZoneKNodes, kNodes[i])
 		} else {
 			remoteZoneKNodes = append(remoteZoneKNodes, kNodes[i])

@@ -151,13 +151,6 @@ func (na *NodeAllocator) releaseHybridOverlayNodeSubnet(nodeName string) {
 func (na *NodeAllocator) HandleAddUpdateNodeEvent(node *corev1.Node) error {
 	defer na.recordSubnetCount()
 
-	// For DPU case we might want to propagate DPU NotReady state as a NoSchedule taint to DPU's host
-	if !na.netInfo.IsSecondary() && util.IsDPU(node) {
-		if err := util.SyncDependentNodeTaints(na.kube, na.nodeLister, node); err != nil {
-			return err
-		}
-	}
-
 	if util.NoHostSubnet(node) {
 		if na.hasHybridOverlayAllocation() && houtil.IsHybridOverlayNode(node) {
 			annotator := kube.NewNodeAnnotator(na.kube, node.Name)
