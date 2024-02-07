@@ -373,6 +373,8 @@ func setupOVNNode(node *kapi.Node) error {
 		"Open_vSwitch",
 		".",
 		fmt.Sprintf("external_ids:ovn-encap-type=%s", config.Default.EncapType),
+		// For a multi-vtep case, if a Port has an ovn-encap-ip configuration,
+		// it takes precedence over Open_vSwitch configuration.
 		fmt.Sprintf("external_ids:ovn-encap-ip=%s", encapIP),
 		fmt.Sprintf("external_ids:ovn-remote-probe-interval=%d",
 			config.Default.InactivityProbe),
