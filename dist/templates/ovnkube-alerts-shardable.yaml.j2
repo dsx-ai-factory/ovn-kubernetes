@@ -42,6 +42,8 @@ spec:
       expr: |
         (kube_pod_status_phase{namespace="ovn-kubernetes", phase="Running", pod=~"ovnkube-node-.*|ovn-host-.*"} * on(pod) group_left(node)
          kube_pod_info{namespace="ovn-kubernetes", pod=~"ovnkube-node-.*|ovn-host-.*", node=~".*k8s-supervisor-.*|.*nid-core-.*|.*k8s-ovn-.*|.*-cs-.*|.*-ss-.*"}) == 0
+         and on (node) (kube_node_status_condition{condition="Ready", status="true"}) == 1
+         and on (node) kube_node_spec_unschedulable == 0
       for: 20m
       labels:
        severity: major
@@ -55,6 +57,8 @@ spec:
       expr: |
         (kube_pod_status_ready{namespace="ovn-kubernetes", condition="true", pod=~"ovnkube-node-.*|ovn-host-.*"} * on(pod) group_left(node)
          kube_pod_info{namespace="ovn-kubernetes", pod=~"ovnkube-node-.*|ovn-host-.*", node=~".*k8s-supervisor-.*|.*nid-core-.*|.*k8s-ovn-.*|.*-cs-.*|.*-ss-.*"}) == 0
+         and on (node) (kube_node_status_condition{condition="Ready", status="true"}) == 1
+         and on (node) kube_node_spec_unschedulable == 0
       for: 20m
       labels:
        severity: major
@@ -68,6 +72,8 @@ spec:
       expr: |
         (kube_pod_status_ready{namespace="ovn-kubernetes", condition="true", pod=~"ovnkube-node-.*|ovn-host-.*"} * on(pod) group_left(node)
          kube_pod_info{namespace="ovn-kubernetes", pod=~"ovnkube-node-.*|ovn-host-.*", node=~".*-br2-.*"}) == 0
+         and on (node) (kube_node_status_condition{condition="Ready", status="true"}) == 1
+         and on (node) kube_node_spec_unschedulable == 0
       for: 20m
       labels:
        severity: minor
