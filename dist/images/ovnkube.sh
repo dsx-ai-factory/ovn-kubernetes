@@ -114,6 +114,8 @@ BASEDIR=$(dirname $0)
 # OVN_CONNTRACK_ZONE - Conntrack zone number used for openflow rules (default 64000)
 # OVN_DB_UPGRADE_SCHEMA_INLINE - use ovn-ctl to upgrade DB schema
 # OVN_CLUSTER_SUBNETS_MAC_BINDING_AGING - MAC binding aging threshold for cluster subnets (in seconds)
+# OVNKUBE_DISABLE_FIREWALLD - skip firewalld calls which open ports for service endpoints
+# OVNKUBE_ADMIN_FIREWALLD_ZONE - name of admin firewalld zone
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -381,6 +383,11 @@ ovn_conntrack_zone=${OVN_CONNTRACK_ZONE:-}
 ovn_ex_gw_network_interface=${OVN_EX_GW_NETWORK_INTERFACE:-}
 # OVNKUBE_COMPACT_MODE_ENABLE indicate if ovnkube run master and node in one process
 ovnkube_compact_mode_enable=${OVNKUBE_COMPACT_MODE_ENABLE:-false}
+
+# OVNKUBE_DISABLE_FIREWALLD - skip firewalld calls which open ports for service endpoints
+ovnkube_disable_firewalld=${OVNKUBE_DISABLE_FIREWALLD:-"false"}
+# OVNKUBE_ADMIN_FIREWALLD_ZONE - name of admin firewalld zone
+ovnkube_admin_firewalld_zone=${OVNKUBE_ADMIN_FIREWALLD_ZONE:-"ngn-admin"}
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
@@ -1403,7 +1410,7 @@ ovn-master() {
 
   init_node_flags=
   if [[ ${ovnkube_compact_mode_enable} == "true" ]]; then
-    init_node_flags="--init-node ${K8S_NODE} --nodeport"
+    init_node_flags="--init-node ${K8S_NODE} --nodeport ${ovnkube_firewalld_opts}"
     echo "init_node_flags: ${init_node_flags}"
     echo "=============== ovn-master ========== MASTER and NODE"
   else
@@ -2095,6 +2102,7 @@ ovnkube-controller-with-node() {
     ${ovn_encap_port_flag} \
     ${ovnkube_config_duration_enable_flag} \
     ${ovnkube_enable_interconnect_flag} \
+    ${ovnkube_firewalld_opts} \
     ${ovnkube_local_cert_flags} \
     ${ovnkube_enable_multi_external_gateway_flag} \
     ${ovnkube_metrics_scale_enable_flag} \
@@ -2454,11 +2462,17 @@ ovn-node() {
     wait_for_event attempts=20 files_exist ${ovn_controller_pk} ${ovn_controller_cert} ${ovn_ca_cert}
   }
 
+  ovnkube_firewalld_opts=
   if [[ ${ovnkube_node_mode} != "dpu" ]]; then
-    echo "=============== ovn-node - (check for firewall service status)"
-    check_firewall_state
-    echo "=============== ovn-node - (create ovn firewall zone)"
-    create_ovn_firewall_zone
+    if [[ ${ovnkube_disable_firewalld} == "true" ]]; then
+      ovnkube_firewalld_opts="--disable-firewalld"
+    elif [[ ${ovnkube_disable_firewalld} == "false" ]]; then
+      echo "=============== ovn-node - (check for firewall service status)"
+      check_firewall_state
+      echo "=============== ovn-node - (create ovn firewall zone)"
+      create_ovn_firewall_zone
+      ovnkube_firewalld_opts="--admin-firewalld-zonename=${ovnkube_admin_firewalld_zone}"
+    fi
   fi
 
   ovn_routable_mtu_flag=
@@ -2813,6 +2827,7 @@ ovn-node() {
         ${OVN_NODE_PORT} \
         ${ovnkube_enable_interconnect_flag} \
         ${ovnkube_enable_multi_external_gateway_flag} \
+        ${ovnkube_firewalld_opts} \
         ${ovnkube_logfile_flag} \
         ${ovnkube_metrics_tls_opts} \
         ${ovnkube_node_certs_flags} \

@@ -8,11 +8,10 @@ import (
 )
 
 const (
-	ovnFirewallZone      = "ovn"
-	ngnAdminFirewallZone = "ngn-admin"
-	addInterface         = "add interface"
-	addPort              = "add port"
-	removePort           = "remove port"
+	ovnFirewallZone = "ovn"
+	addInterface    = "add interface"
+	addPort         = "add port"
+	removePort      = "remove port"
 )
 
 func changeFirewallConfig(cmdArgs []string, action string) error {

@@ -290,6 +290,12 @@ spec:
                 configMapKeyRef:
                   name: ovn-config
                   key: host_network_namespace
+            - name: OVNKUBE_DISABLE_FIREWALLD
+              value: "{{ ovnkube_disable_firewalld }}"
+            {% if ovnkube_disable_firewalld=="false" -%}
+            - name: OVNKUBE_ADMIN_FIREWALLD_ZONE
+              value: "{{ ovnkube_admin_firewalld_zone }}
+            {% endif -%}
             - name: POD_NAME
               valueFrom:
                fieldRef:

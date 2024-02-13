@@ -117,6 +117,8 @@ COREDNS_CLUSTER_IP="10.96.0.10"
 OVNKUBE_LOGFILE=""
 OVNKUBE_DISABLE_OVS_METRICS=""
 OVN_NORTHD_NODE_SELECTOR_LABEL="ngn2.nvidia.com/hosttype=NGN-MASTER"
+OVNKUBE_DISABLE_FIREWALLD="false"
+OVNKUBE_ADMIN_FIREWALLD_ZONE="ngn-admin"
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -425,7 +427,12 @@ while [ "$1" != "" ]; do
   --northd-node-selector-label)
     OVN_NORTHD_NODE_SELECTOR_LABEL=$VALUE
     ;;
-
+  --ovnkube-disable-firewalld)
+    OVNKUBE_DISABLE_FIREWALLD=$VALUE
+    ;;
+  --ovnkube-admin-firewalld-zone)
+    OVNKUBE_ADMIN_FIREWALLD_ZONE=$VALUE
+    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -649,6 +656,10 @@ disable_ovs_metrics=${OVNKUBE_DISABLE_OVS_METRICS:-false}
 echo "disable_ovs_metrics=${disable_ovs_metrics}"
 ovn_northd_node_selector_label=${OVN_NORTHD_NODE_SELECTOR_LABEL}
 echo "ovn_northd_node_selector_label: ${ovn_northd_node_selector_label}"
+ovnkube_disable_firewalld=${OVNKUBE_DISABLE_FIREWALLD}
+echo "ovnkube_disable_firewalld: ${ovnkube_disable_firewalld}"
+ovnkube_admin_firewalld_zone=${OVNKUBE_ADMIN_FIREWALLD_ZONE}
+echo "ovnkube_admin_firewalld_zone: ${ovnkube_admin_firewalld_zone}"
 
 ovn_image=${image} \
   ovnkube_compact_mode_enable=${ovnkube_compact_mode_enable} \
@@ -697,6 +708,8 @@ ovn_image=${image} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
+  ovnkube_disable_firewalld=${ovnkube_disable_firewalld} \
+  ovnkube_admin_firewalld_zone=${ovnkube_admin_firewalld_zone} \
   ovnkube_app_name=ovnkube-node \
   jinjanate ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node.yaml
 
@@ -792,6 +805,8 @@ ovn_image=${image} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
+  ovnkube_disable_firewalld=${ovnkube_disable_firewalld} \
+  ovnkube_admin_firewalld_zone=${ovnkube_admin_firewalld_zone} \
   ovnkube_app_name=ovnkube-node-dpu-host \
   jinjanate ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node-dpu-host.yaml
 
@@ -998,6 +1013,8 @@ ovn_image=${image} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   disable_ovs_metrics=${disable_ovs_metrics} \
   ovn_northd_node_selector_label=${ovn_northd_node_selector_label} \
+  ovnkube_disable_firewalld=${ovnkube_disable_firewalld} \
+  ovnkube_admin_firewalld_zone=${ovnkube_admin_firewalld_zone} \
   ovnkube_app_name=ovnkube-node \
   jinjanate ../templates/ovnk8s-node.yaml.j2 -o ${output_dir}/ovnk8s-node.yaml
 
@@ -1041,6 +1058,8 @@ ovn_image=${image} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   coredns_cluster_ip=${coredns_cluster_ip} \
   ovn_northd_node_selector_label=${ovn_northd_node_selector_label} \
+  ovnkube_disable_firewalld=${ovnkube_disable_firewalld} \
+  ovnkube_admin_firewalld_zone=${ovnkube_admin_firewalld_zone} \
   ovnkube_app_name=ovnkube-node-dpu-host \
   jinjanate ../templates/ovnk8s-node.yaml.j2 -o ${output_dir}/ovnk8s-node-dpu-host.yaml
 

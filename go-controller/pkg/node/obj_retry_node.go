@@ -6,8 +6,10 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	cache "k8s.io/client-go/tools/cache"
+	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -151,21 +153,29 @@ func (h *nodeEventHandler) AddResource(obj interface{}, fromRetryLoop bool) erro
 		return nil
 	case factory.EndpointSliceForStaleConntrackRemovalType:
 		if config.OvnKubeNode.Mode != types.NodeModeDPU {
+			var skipFirewalldChecked bool
+			var svcNamespacedName *k8stypes.NamespacedName
+			var err error
+
 			endpointSlice := obj.(*discovery.EndpointSlice)
-			annotationMapKey := endpointSlice.Namespace + "/" + endpointSlice.Name
-			skipFirewalldAnnotation := false
-			if !fromRetryLoop {
-				skipFirewalldAnnotation = h.nc.checkForSkipFirewalldAnnotation(endpointSlice)
-				h.nc.svcAnnotationMap.Store(annotationMapKey, skipFirewalldAnnotation)
-			} else {
-				if val, ok := h.nc.svcAnnotationMap.Load(annotationMapKey); ok {
-					skipFirewalldAnnotation = val.(bool)
+			key := endpointSlice.Namespace + "/" + endpointSlice.Name
+			if fromRetryLoop {
+				// load previous skipFirewalld; it may not exist as previous skipFirewalld check might have failed.
+				val, ok := h.nc.skipFirewalldMap.Load(key)
+				if ok {
+					svcNamespacedName = val.(*k8stypes.NamespacedName)
+					skipFirewalldChecked = true
 				}
 			}
-			if !skipFirewalldAnnotation {
-				return h.nc.reconcileFirewallZoneForEndpointSlice(nil, endpointSlice)
+			if !skipFirewalldChecked {
+				svcNamespacedName, err = h.nc.skipFirewalld(endpointSlice)
+				if err != nil {
+					return err
+				}
 			}
-			return nil
+
+			h.nc.skipFirewalldMap.Store(key, svcNamespacedName)
+			return h.nc.reconcileFirewallZoneForEndpointSlice(nil, endpointSlice, svcNamespacedName)
 		}
 		return nil
 
@@ -207,14 +217,16 @@ func (h *nodeEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryCac
 				errors = append(errors, err)
 			}
 		}
-		annotationMapKey := oldEndpointSlice.Namespace + "/" + oldEndpointSlice.Name
-		skipFirewalldAnnotation := false
-		if val, ok := h.nc.svcAnnotationMap.Load(annotationMapKey); ok {
-			skipFirewalldAnnotation = val.(bool)
-		}
-		if config.OvnKubeNode.Mode != types.NodeModeDPU && !skipFirewalldAnnotation {
-			if err := h.nc.reconcileFirewallZoneForEndpointSlice(oldEndpointSlice, newEndpointSlice); err != nil {
-				errors = append(errors, err)
+		if config.OvnKubeNode.Mode != types.NodeModeDPU {
+			var svcNamespacedName *k8stypes.NamespacedName
+			if val, ok := h.nc.skipFirewalldMap.Load(newEndpointSlice.Namespace + "/" + newEndpointSlice.Name); ok {
+				svcNamespacedName = val.(*k8stypes.NamespacedName)
+				if err := h.nc.reconcileFirewallZoneForEndpointSlice(oldEndpointSlice, newEndpointSlice, svcNamespacedName); err != nil {
+					errors = append(errors, err)
+				}
+			} else {
+				// if check somehow wasn't done in add handler, log error and return
+				klog.Errorf("Endpoint %s/%s wasn't processed in add handler, skip", newEndpointSlice.Namespace, newEndpointSlice.Name)
 			}
 		}
 		if len(errors) != 0 {
@@ -246,15 +258,17 @@ func (h *nodeEventHandler) DeleteResource(obj, cachedObj interface{}) error {
 				errors = append(errors, err)
 			}
 		}
-		annotationMapKey := endpointslice.Namespace + "/" + endpointslice.Name
-		skipFirewalldAnnotation := false
-		if val, ok := h.nc.svcAnnotationMap.LoadAndDelete(annotationMapKey); ok {
-			skipFirewalldAnnotation = val.(bool)
-		}
-		if config.OvnKubeNode.Mode != types.NodeModeDPU && !skipFirewalldAnnotation {
-			endpointSlice := obj.(*discovery.EndpointSlice)
-			if err := h.nc.reconcileFirewallZoneForEndpointSlice(endpointSlice, nil); err != nil {
-				errors = append(errors, err)
+		if config.OvnKubeNode.Mode != types.NodeModeDPU {
+			var svcNamespacedName *k8stypes.NamespacedName
+			if val, ok := h.nc.skipFirewalldMap.Load(endpointslice.Namespace + "/" + endpointslice.Name); ok {
+				svcNamespacedName = val.(*k8stypes.NamespacedName)
+				endpointSlice := obj.(*discovery.EndpointSlice)
+				if err := h.nc.reconcileFirewallZoneForEndpointSlice(endpointSlice, nil, svcNamespacedName); err != nil {
+					errors = append(errors, err)
+				}
+			} else {
+				// if check somehow wasn't done in add handler, log error and return
+				klog.Errorf("Endpoint %s/%s wasn't processed in add handler, skip", endpointslice.Namespace, endpointslice.Name)
 			}
 		}
 		if len(errors) != 0 {
