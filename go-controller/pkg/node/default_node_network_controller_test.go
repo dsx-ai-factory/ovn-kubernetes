@@ -39,6 +39,9 @@ var _ = Describe("Node", func() {
 			linkIPNet = "10.1.0.40/32"
 			linkIndex = 4
 
+			linkIPNet2 = "10.2.0.50/32"
+			linkIndex2 = 5
+
 			configDefaultMTU               = 1500 //value for config.Default.MTU
 			mtuTooSmallForIPv4AndIPv6      = configDefaultMTU + types.GeneveHeaderLengthIPv4 - 1
 			mtuOkForIPv4ButTooSmallForIPv6 = configDefaultMTU + types.GeneveHeaderLengthIPv4
@@ -54,7 +57,9 @@ var _ = Describe("Node", func() {
 
 			util.SetNetLinkOpMockInst(netlinkOpsMock)
 			netlinkOpsMock.On("AddrList", nil, netlink.FAMILY_V4).
-				Return([]netlink.Addr{{LinkIndex: linkIndex, IPNet: ovntest.MustParseIPNet(linkIPNet)}}, nil)
+				Return([]netlink.Addr{
+					{LinkIndex: linkIndex, IPNet: ovntest.MustParseIPNet(linkIPNet)},
+					{LinkIndex: linkIndex2, IPNet: ovntest.MustParseIPNet(linkIPNet2)}}, nil)
 			netlinkOpsMock.On("LinkByIndex", 4).Return(netlinkLinkMock, nil)
 
 			nc = &DefaultNodeNetworkController{
@@ -207,6 +212,27 @@ var _ = Describe("Node", func() {
 				})
 			})
 		})
+
+		Context("with multiple ovn encap IPs", func() {
+
+			BeforeEach(func() {
+				config.IPv4Mode = true
+				config.IPv6Mode = false
+				config.Default.EncapIP = "10.1.0.40,10.2.0.50"
+				netlinkOpsMock.On("LinkByIndex", 5).Return(netlinkLinkMock, nil)
+			})
+
+			It("all interfaces have big enough MTU", func() {
+				netlinkLinkMock.On("Attrs").Return(&netlink.LinkAttrs{
+					MTU:  mtuOkForIPv4AndIPv6,
+					Name: linkName,
+				})
+
+				err := nc.validateVTEPInterfaceMTU()
+				Expect(err).NotTo(HaveOccurred())
+			})
+		})
+
 	})
 
 	Describe("Node Operations", func() {
@@ -617,6 +643,69 @@ var _ = Describe("Node", func() {
 				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 				return nil
 			}
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+		It("sets OVN encap IPs", func() {
+			app.Action = func(ctx *cli.Context) error {
+				const (
+					nodeIP   string = "1.2.5.6"
+					nodeName string = "cannot.be.resolv.ed"
+					interval int    = 100000
+					ofintval int    = 0
+					encapIPs string = "10.0.0.1,10.0.0.2,10.0.0.3"
+				)
+				node := kapi.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: nodeName,
+					},
+					Status: kapi.NodeStatus{
+						Addresses: []kapi.NodeAddress{
+							{
+								Type:    kapi.NodeExternalIP,
+								Address: nodeIP,
+							},
+						},
+					},
+				}
+
+				fexec := ovntest.NewFakeExec()
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
+						"external_ids:ovn-encap-type=geneve "+
+						"external_ids:ovn-encap-ip=%s "+
+						"external_ids:ovn-remote-probe-interval=%d "+
+						"external_ids:ovn-openflow-probe-interval=%d "+
+						"external_ids:ovn-encap-tos=none "+
+						"other_config:bundle-idle-timeout=%d "+
+						"external_ids:ovn-is-interconn=false "+
+						"external_ids:ovn-monitor-all=true "+
+						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
+						"external_ids:ovn-enable-lflow-cache=true "+
+						"external_ids:hostname=\"%s\"",
+						encapIPs, interval, ofintval, ofintval, nodeName),
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 -- clear bridge br-int netflow" +
+						" -- " +
+						"clear bridge br-int sflow" +
+						" -- " +
+						"clear bridge br-int ipfix",
+				})
+				err := util.SetExec(fexec)
+				Expect(err).NotTo(HaveOccurred())
+
+				_, err = config.InitConfig(ctx, fexec, nil)
+				Expect(err).NotTo(HaveOccurred())
+				config.OvnKubeNode.Mode = types.NodeModeFull
+				config.Default.EncapIP = encapIPs
+				err = setupOVNNode(&node)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+				return nil
+			}
+
 			err := app.Run([]string{app.Name})
 			Expect(err).NotTo(HaveOccurred())
 		})

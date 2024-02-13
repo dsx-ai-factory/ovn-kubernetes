@@ -308,7 +308,9 @@ func (nadController *NetAttachDefinitionController) handleErr(err error, key int
 		return
 	}
 
-	klog.Warningf("%s: Dropping net-attach-def %q out of the queue: %v", nadController.name, key, err)
+	// NAD failed to be added/deleted after maxRetries, it is a fatal error, exit the program.
+	klog.Fatalf("%s: Failed processing net-attach-def %q for %d times, drop it out of the queue: %v",
+		nadController.name, key, maxRetries, err)
 	nadController.queue.Forget(key)
 	utilruntime.HandleError(err)
 }
