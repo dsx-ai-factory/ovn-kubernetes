@@ -251,12 +251,25 @@ func (nc *SecondaryLocalnetNodeNetworkController) updateLocalnetOvnBridgeMapping
 			return nil
 		}
 
+		// find the entry that has a complete match. this is to disambiguate two entries that
+		// have the same prefix, but different OVS bridges.
 		bridgeMapConfs := strings.Split(stdout, ",")
 		for _, bridgeMapConf := range bridgeMapConfs {
 			maps := strings.Split(bridgeMapConf, ":")
-			if len(maps) == 2 && strings.HasPrefix(nc.GetNetworkName(), maps[0]) {
+			if len(maps) == 2 && nc.GetNetworkName() == maps[0] {
 				bridgeName = maps[1]
 				break
+			}
+		}
+
+		// now find partial match, if required
+		if bridgeName == "" {
+			for _, bridgeMapConf := range bridgeMapConfs {
+				maps := strings.Split(bridgeMapConf, ":")
+				if len(maps) == 2 && strings.HasPrefix(nc.GetNetworkName(), maps[0]) {
+					bridgeName = maps[1]
+					break
+				}
 			}
 		}
 
