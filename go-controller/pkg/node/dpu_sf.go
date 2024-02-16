@@ -23,6 +23,7 @@ const (
 	NetSysDir          = "/sys/class/net"
 	AuxDevDir          = "/sys/bus/auxiliary/devices"
 	NetdevPhysPortName = "phys_port_name"
+	NetlinkSocketType  = "mlxdevm"
 	// Needs to be in sync with the limit in the API spec
 	MaxSFNum = 5
 )
@@ -91,9 +92,24 @@ func setSFState(pciAddress string, portIndex uint32, setUnset uint8) error {
 
 	fnAttrs.StateValid = true
 	fnAttrs.FnAttrs = portFn
-	err := mlxdevm.DevlinkPortFnSet("devlink", "pci", pciAddress, portIndex, fnAttrs)
+	err := mlxdevm.DevlinkPortFnSet(NetlinkSocketType, "pci", pciAddress, portIndex, fnAttrs)
 	if err != nil {
 		return fmt.Errorf("error setting state to %d on %s/%d", setUnset, pciAddress, portIndex)
+	}
+	return nil
+}
+
+func setSFTrust(pciAddress string, portIndex uint32, setUnset uint8) error {
+	var portFn mlxdevm.DevlinkPortFn
+	var fnAttrs mlxdevm.DevlinkPortFnSetAttrs
+
+	portFn.Trust = setUnset
+
+	fnAttrs.TrustValid = true
+	fnAttrs.FnAttrs = portFn
+	err := mlxdevm.DevlinkPortFnSet(NetlinkSocketType, "pci", pciAddress, portIndex, fnAttrs)
+	if err != nil {
+		return fmt.Errorf("error setting trust to %d on %s/%d", setUnset, pciAddress, portIndex)
 	}
 	return nil
 }
@@ -107,7 +123,7 @@ func (bnnc *BaseNodeNetworkController) createSF(pciAddress string, pfNum uint16,
 	portAttr.SfNumberValid = true
 
 	// To use upstream devlink interface
-	dl_port, err := mlxdevm.DevlinkPortAdd("devlink", "pci", pciAddress, mlxdevm.DEVLINK_PORT_FLAVOUR_PCI_SF, portAttr)
+	dl_port, err := mlxdevm.DevlinkPortAdd(NetlinkSocketType, "pci", pciAddress, mlxdevm.DEVLINK_PORT_FLAVOUR_PCI_SF, portAttr)
 	if err != nil {
 		return nil, fmt.Errorf("error creating an SF for %s/%d/%d: (%v)", pciAddress, pfNum, sfNum, err)
 	}
@@ -119,10 +135,9 @@ func (bnnc *BaseNodeNetworkController) createSF(pciAddress string, pfNum uint16,
 		return nil, fmt.Errorf("error setting SF %s to inactive: (%v)", sfIndex, err)
 	}
 
-	cmd := exec.Command("/opt/mellanox/iproute2/sbin/mlxdevm", "port", "function", "set", sfIndex, "trust", "on")
-	err = cmd.Run()
+	err = setSFTrust(pciAddress, dl_port.PortIndex, 1)
 	if err != nil {
-		return nil, fmt.Errorf("error setting trust mode for SF %s: (%v)", sfIndex, err)
+		return nil, fmt.Errorf("error setting Trust on SF %s: (%v)", sfIndex, err)
 	}
 
 	err = setSFState(pciAddress, dl_port.PortIndex, 1)
@@ -159,7 +174,7 @@ func (bnnc *BaseNodeNetworkController) deleteSF(sfUplinkPort string, portIndex, 
 		return fmt.Errorf("failed to get PCI address for SF's uplink port %s: (%v)",
 			sfUplinkPort, err)
 	}
-	err = mlxdevm.DevlinkPortDel("devlink", "pci", uplinkPCIAddress, portIndex)
+	err = mlxdevm.DevlinkPortDel(NetlinkSocketType, "pci", uplinkPCIAddress, portIndex)
 	if err != nil {
 		return fmt.Errorf("failed to delete SF %d", portIndex)
 	}

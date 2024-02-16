@@ -122,8 +122,6 @@ spec:
           readOnly: true
         - mountPath: /var/run/netns
           name: host-var-run-netns
-        - mountPath: /opt/mellanox
-          name: host-opt-mlnx
 
         resources:
           requests:
@@ -301,9 +299,6 @@ spec:
       - name: host-var-run-netns
         hostPath:
           path: /var/run/netns
-      - name: host-opt-mlnx
-        hostPath:
-          path: /opt/mellanox
 
 
       tolerations:
