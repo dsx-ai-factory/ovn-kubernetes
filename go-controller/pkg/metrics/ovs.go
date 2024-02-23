@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -335,6 +336,20 @@ var MetricOvsInterfaceUpWait = prometheus.NewCounter(prometheus.CounterOpts{
 		"Open vSwitch interface until its available",
 })
 
+var metricOvsUpcallFlowLimitKill = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvsNamespace,
+	Subsystem: MetricOvsSubsystemVswitchd,
+	Name:      "upcall_flow_limit_kill",
+	Help:      "Counter is increased when a number of datapath flows twice as high as current dynamic flow limit.",
+})
+
+var metricOvsUpcallFlowLimitHit = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvsNamespace,
+	Subsystem: MetricOvsSubsystemVswitchd,
+	Name:      "upcall_flow_limit_hit",
+	Help:      "Counter is increased when datapath reaches the dynamic limit of flows.",
+})
+
 type ovsClient func(args ...string) (string, string, error)
 
 func getOvsVersionInfo() {
@@ -440,29 +455,37 @@ func getOvsDatapaths() (datapathsList []string, err error) {
 			return nil, fmt.Errorf("datapath %s is not of format Type@Name", output)
 		}
 		metricOvsDp.WithLabelValues(datapathName, datapathType).Set(1)
-		datapathsList = append(datapathsList, datapathName)
+		datapathsList = append(datapathsList, output)
 	}
 	metricOvsDpTotal.Set(float64(len(datapathsList)))
 	return datapathsList, nil
 }
 
 func setOvsDatapathMetrics(datapaths []string) (err error) {
-	var stdout, stderr, datapathName string
+	var stdout, stderr, datapath string
 
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("recovering from a panic while parsing the ovs-appctl dpctl/"+
-				"show %s output : %v", datapathName, r)
+				"show %s output : %v", datapath, r)
 		}
 	}()
 
 	metricOvsDpIf.Reset()
-	for _, datapathName = range datapaths {
-		stdout, stderr, err = util.RunOvsVswitchdAppCtl("dpctl/show", datapathName)
+	for _, datapath = range datapaths {
+		// For example, datapath is 'system@ovs-system' where 'system' denotes
+		// the datapath type and 'ovs-system' the datapath name. To uniquely
+		// identify a datapath, both are required when querying OVS. If type is
+		// omitted, OVS will assume 'system'.
+		stdout, stderr, err = util.RunOvsVswitchdAppCtl("dpctl/show", datapath)
 		if err != nil {
 			return fmt.Errorf("failed to get datapath stats for %s "+
-				"stderr(%s) :(%v)", datapathName, stderr, err)
+				"stderr(%s) :(%v)", datapath, stderr, err)
 		}
+
+		// For metrics, only a datapath name will be used to identify datapaths
+		// in order to keep backward compatibility with previous behaviour.
+		datapathName := strings.Split(datapath, "@")[1]
 		var datapathPortCount float64
 		for i, kvPair := range strings.Split(stdout, "\n") {
 			if i <= 0 {
@@ -1121,6 +1144,49 @@ func ovsHwOffloadMetricsUpdate(ovsDBClient *util.OvsdbClient, metricsScrapeInter
 	}
 }
 
+func setOvsUpcallMetrics() (err error) {
+	var stdout, stderr string
+
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("recovering from a panic while parsing the ovs-appctl coverage/"+
+				"read-counter output : %v", r)
+		}
+	}()
+
+	for counterName, metric := range ovsUpcallMetricsMap {
+		stdout, stderr, err = util.RunOvsVswitchdAppCtl("coverage/read-counter", counterName)
+		if err != nil {
+			return fmt.Errorf("failed to get counter for %s "+
+				"stderr(%s) :(%v)", counterName, stderr, err)
+		}
+		counterValue, err := strconv.Atoi(stdout)
+		if err != nil {
+			return fmt.Errorf("failed to convert counter for %s "+
+				"to int :(%v)", counterName, err)
+		}
+
+		metric.Set(float64(counterValue))
+	}
+	return nil
+}
+
+// ovsDatapathMetricsUpdater updates the ovs datapath metrics
+func ovsUpcallMetricsUpdater(tickPeriod time.Duration, stopChan <-chan struct{}) {
+	ticker := time.NewTicker(tickPeriod)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if err := setOvsUpcallMetrics(); err != nil {
+				klog.Errorf("Setting ovs upcall metrics failed: %s", err.Error())
+			}
+		case <-stopChan:
+			return
+		}
+	}
+}
+
 func ovsDbSizeMetricUpdater(metricsScrapeInterval int, stopChan chan struct{}) {
 	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
 	defer ticker.Stop()
@@ -1469,6 +1535,10 @@ var ovsVswitchdCoverageShowMetricsMap = map[string]*metricDetails{
 	},
 }
 var registerOvsMetricsOnce sync.Once
+var ovsUpcallMetricsMap = map[string]prometheus.Gauge{
+	"upcall_flow_limit_kill": metricOvsUpcallFlowLimitKill,
+	"upcall_flow_limit_hit":  metricOvsUpcallFlowLimitHit,
+}
 
 func RegisterOvsMetrics(nodeName string, ovsDBClient *util.OvsdbClient,
 	metricsScrapeInterval int, stopChan chan struct{}) {
@@ -1535,6 +1605,10 @@ func RegisterOvsMetrics(nodeName string, ovsDBClient *util.OvsdbClient,
 			Namespace: fmt.Sprintf("%s_%s", MetricOvsNamespace, MetricOvsSubsystemDB),
 		}))
 
+		for _, counterMetric := range ovsUpcallMetricsMap {
+			prometheus.MustRegister(counterMetric)
+		}
+
 		// OVS datapath metrics updater
 		go ovsDatapathMetricsUpdate(metricsScrapeInterval, stopChan)
 		// OVS bridge metrics updater
@@ -1549,5 +1623,7 @@ func RegisterOvsMetrics(nodeName string, ovsDBClient *util.OvsdbClient,
 		go coverageShowMetricsUpdater(ovsDB, metricsScrapeInterval, stopChan)
 		// OVSDB size metric uodater
 		go ovsDbSizeMetricUpdater(metricsScrapeInterval, stopChan)
+		// OVS upcall metrics updater.
+		go ovsUpcallMetricsUpdater(30*time.Second, stopChan)
 	})
 }

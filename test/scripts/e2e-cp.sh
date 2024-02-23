@@ -27,6 +27,10 @@ if [ "$KIND_IPV4_SUPPORT" == true ]; then
     fi
 fi
 
+if [ "$KIND_IPV4_SUPPORT" == false ]; then
+  SKIPPED_TESTS+="\[IPv4\]"
+fi
+
 if [ "$OVN_HA" == false ]; then
   if [ "$SKIPPED_TESTS" != "" ]; then
   	SKIPPED_TESTS+="|"
@@ -78,13 +82,13 @@ if [ "$ENABLE_MULTI_NET" != "true" ]; then
   SKIPPED_TESTS+="Multi Homing"
 fi
 
-# Only run Node IP address migration tests if they are explicitly requested
-IP_MIGRATION_TESTS="Node IP address migration"
+# Only run Node IP/MAC address migration tests if they are explicitly requested
+IP_MIGRATION_TESTS="Node IP and MAC address migration"
 if [ "${WHAT}" != "${IP_MIGRATION_TESTS}" ]; then
   if [ "$SKIPPED_TESTS" != "" ]; then
 	SKIPPED_TESTS+="|"
   fi
-  SKIPPED_TESTS+="Node IP address migration"
+  SKIPPED_TESTS+="Node IP and MAC address migration"
 fi
 
 # Only run Multi node zones interconnect tests if they are explicitly requested
@@ -120,7 +124,9 @@ export KUBE_CONTAINER_RUNTIME_ENDPOINT=unix:///run/containerd/containerd.sock
 export KUBE_CONTAINER_RUNTIME_NAME=containerd
 export NUM_NODES=2
 
-# make Ginkgo V2 to allow to use deprecated api's.
+# Silence deprecations warnings at the end of test result.
+# Custom Ginkgo test reporters which are deprecated in Ginkgo 2.0.
+# For a migration path https://onsi.github.io/ginkgo/MIGRATING_TO_V2#removed-custom-reporters.
 export ACK_GINKGO_DEPRECATIONS=2.4.0
 
 FOCUS=$(echo ${@:1} | sed 's/ /\\s/g')

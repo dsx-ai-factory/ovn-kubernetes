@@ -92,7 +92,8 @@ func (na *NodeAllocator) Init() error {
 }
 
 func (na *NodeAllocator) hasHybridOverlayAllocation() bool {
-	return config.HybridOverlay.Enabled && !na.netInfo.IsSecondary()
+	// When config.HybridOverlay.ClusterSubnets is empty, assume the subnet allocation will be managed by an external component.
+	return config.HybridOverlay.Enabled && !na.netInfo.IsSecondary() && len(config.HybridOverlay.ClusterSubnets) > 0
 }
 
 func (na *NodeAllocator) recordSubnetCount() {
@@ -152,7 +153,7 @@ func (na *NodeAllocator) HandleAddUpdateNodeEvent(node *corev1.Node) error {
 	defer na.recordSubnetCount()
 
 	if util.NoHostSubnet(node) {
-		if na.hasHybridOverlayAllocation() && houtil.IsHybridOverlayNode(node) {
+		if na.hasHybridOverlayAllocation() {
 			annotator := kube.NewNodeAnnotator(na.kube, node.Name)
 			allocatedSubnet, err := na.hybridOverlayNodeEnsureSubnet(node, annotator)
 			if err != nil {
@@ -259,7 +260,7 @@ func (na *NodeAllocator) Sync(nodes []interface{}) error {
 		}
 
 		if util.NoHostSubnet(node) {
-			if na.hasHybridOverlayAllocation() && houtil.IsHybridOverlayNode(node) {
+			if na.hasHybridOverlayAllocation() {
 				// this is a hybrid overlay node so mark as allocated from the hybrid overlay subnet allocator
 				hostSubnet, err := houtil.ParseHybridOverlayHostSubnet(node)
 				if err != nil {

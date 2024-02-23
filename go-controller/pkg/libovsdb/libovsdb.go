@@ -159,7 +159,7 @@ func NewSBClientWithConfig(cfg config.OvnAuthConfig, promRegistry prometheus.Reg
 		client.WithTable(&sbdb.ControllerEvent{}),
 		// used for gateway
 		// TBD: SDN-1535: MacBinding is not required in ngn 2.1
-		client.WithTable(&sbdb.MACBinding{}),
+		// client.WithTable(&sbdb.MACBinding{}),
 		// used by node sync
 		client.WithTable(&sbdb.Chassis{}),
 		// used by node sync, only interested in names
@@ -170,7 +170,7 @@ func NewSBClientWithConfig(cfg config.OvnAuthConfig, promRegistry prometheus.Reg
 		client.WithTable(&sbdb.SBGlobal{}),
 		// used for hybrid-overlay
 		// and by CreateDummyGWMacBindings(), error "error getting datapath GR_<node>"
-		client.WithTable(&sbdb.DatapathBinding{}),
+		// client.WithTable(&sbdb.DatapathBinding{}),
 	}
 	if forTesting {
 		// used by zone interconnect

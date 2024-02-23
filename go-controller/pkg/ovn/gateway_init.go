@@ -1,14 +1,11 @@
 package ovn
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"strconv"
 	"strings"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -30,6 +27,7 @@ import (
 // We don't have to worry about missing SNATs that should be added because addLogicalPort takes care of this for all pods
 // when RequestRetryObjs is called for each node add.
 // This is executed only when disableSNATMultipleGateways = true
+// SNATs configured for the join subnet are ignored.
 //
 // NOTE: On startup libovsdb adds back all the pods and this should normally update all existing SNATs
 // accordingly. Due to a stale egressIP cache bug https://issues.redhat.com/browse/OCPBUGS-1520 we ended up adding
@@ -41,11 +39,7 @@ func (oc *DefaultNetworkController) cleanupStalePodSNATs(nodeName string, nodeIP
 	if !config.Gateway.DisableSNATMultipleGWs {
 		return nil
 	}
-	options := metav1.ListOptions{
-		FieldSelector:   fields.OneTermEqualSelector("spec.nodeName", nodeName).String(),
-		ResourceVersion: "0",
-	}
-	pods, err := oc.client.CoreV1().Pods(metav1.NamespaceAll).List(context.TODO(), options)
+	pods, err := oc.watchFactory.GetAllPods()
 	if err != nil {
 		return fmt.Errorf("unable to list existing pods on node: %s, %w",
 			nodeName, err)
@@ -58,12 +52,11 @@ func (oc *DefaultNetworkController) cleanupStalePodSNATs(nodeName string, nodeIP
 		return fmt.Errorf("unable to get NAT entries for router on node %s: %w", nodeName, err)
 	}
 	podIPsOnNode := sets.NewString() // collects all podIPs on node
-	for _, pod := range pods.Items {
-		pod := pod
-		if !util.PodScheduled(&pod) { //if the pod is not scheduled we should not remove the nat
+	for _, pod := range pods {
+		if !util.PodScheduled(pod) && pod.Spec.NodeName == nodeName { //if the pod is not scheduled we should not remove the nat
 			continue
 		}
-		if util.PodCompleted(&pod) {
+		if util.PodCompleted(pod) {
 			collidingPod, err := oc.findPodWithIPAddresses([]net.IP{utilnet.ParseIPSloppy(pod.Status.PodIP)}, "") //even if a pod is completed we should still delete the nat if the ip is not in use anymore
 			if err != nil {
 				return fmt.Errorf("lookup for pods with same ip as %s %s failed: %w", pod.Namespace, pod.Name, err)
@@ -72,7 +65,7 @@ func (oc *DefaultNetworkController) cleanupStalePodSNATs(nodeName string, nodeIP
 				continue
 			}
 		}
-		podIPs, err := util.GetPodIPsOfNetwork(&pod, oc.NetInfo)
+		podIPs, err := util.GetPodIPsOfNetwork(pod, oc.NetInfo)
 		if err != nil && errors.Is(err, util.ErrNoPodIPFound) {
 			// It is possible that the pod is scheduled during this time, but the LSP add or
 			// IP Allocation has not happened and it is waiting for the WatchPods to start
@@ -95,7 +88,8 @@ func (oc *DefaultNetworkController) cleanupStalePodSNATs(nodeName string, nodeIP
 			continue
 		}
 		for _, nodeIP := range nodeIPs {
-			if routerNat.ExternalIP == nodeIP.IP.String() && !podIPsOnNode.Has(routerNat.LogicalIP) {
+			logicalIP := net.ParseIP(routerNat.LogicalIP)
+			if routerNat.ExternalIP == nodeIP.IP.String() && !config.ContainsJoinIP(logicalIP) && !podIPsOnNode.Has(routerNat.LogicalIP) {
 				natsToDelete = append(natsToDelete, routerNat)
 			}
 		}
@@ -133,6 +127,7 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 		"chassis":                       l3GatewayConfig.ChassisID,
 		"lb_force_snat_ip":              "router_ip",
 		"snat-ct-zone":                  "0",
+		"mac_binding_age_threshold":     types.GRMACBindingAgeThreshold,
 	}
 	logicalRouterExternalIDs := map[string]string{
 		"physical_ip":  physicalIPs[0],
@@ -265,8 +260,7 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 		l3GatewayConfig.MACAddress.String(),
 		types.PhysicalNetworkName,
 		l3GatewayConfig.IPAddresses,
-		l3GatewayConfig.VLANID,
-		enableGatewayMTU); err != nil {
+		l3GatewayConfig.VLANID); err != nil {
 		return err
 	}
 
@@ -278,8 +272,7 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 			l3GatewayConfig.EgressGWMACAddress.String(),
 			types.PhysicalNetworkExGwName,
 			l3GatewayConfig.EgressGWIPAddresses,
-			nil,
-			enableGatewayMTU); err != nil {
+			nil); err != nil {
 			return err
 		}
 	}
@@ -288,7 +281,7 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 
 	nextHops := l3GatewayConfig.NextHops
 
-	if err := gateway.CreateDummyGWMacBindings(oc.sbClient, nodeName); err != nil {
+	if err := gateway.CreateDummyGWMacBindings(oc.nbClient, nodeName); err != nil {
 		return err
 	}
 
@@ -344,6 +337,7 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 	// to the same gateway router
 	//
 	// This can be removed once https://bugzilla.redhat.com/show_bug.cgi?id=1891516 is fixed.
+	// FIXME(trozet): if LRP IP is changed, we do not remove stale instances of these routes
 	for _, gwLRPIP := range gwLRPIPs {
 		lrsr := nbdb.LogicalRouterStaticRoute{
 			IPPrefix: gwLRPIP.String(),
@@ -416,30 +410,87 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 	}
 	var natsToUpdate []*nbdb.NAT
 	// If l3gatewayAnnotation.IPAddresses changed, we need to update the SNATs on the GR
-	if len(oldExtIPs) > 0 {
+	oldNATs := []*nbdb.NAT{}
+	if oldLogicalRouter != nil {
+		oldNATs, err = libovsdbops.GetRouterNATs(oc.nbClient, oldLogicalRouter)
+		if err != nil && errors.Is(err, libovsdbclient.ErrNotFound) {
+			return fmt.Errorf("unable to get NAT entries for router on node %s: %w", nodeName, err)
+		}
+	}
+
+	for _, nat := range oldNATs {
+		nat := nat
+		natModified := false
+
+		// if not type snat, we don't need to update as we only configure snat types
+		if nat.Type != nbdb.NATTypeSNAT {
+			continue
+		}
+		// check external ip changed
 		for _, externalIP := range externalIPs {
-			oldExternalIP, err := util.MatchIPFamily(utilnet.IsIPv6(externalIP), oldExtIPs)
+			oldExternalIP, err := util.MatchFirstIPFamily(utilnet.IsIPv6(externalIP), oldExtIPs)
 			if err != nil {
 				return fmt.Errorf("failed to update GW SNAT rule for pods on router %s error: %v", gatewayRouter, err)
 			}
-			if externalIP.String() != oldExternalIP[0].String() {
-				predicate := func(item *nbdb.NAT) bool {
-					return item.ExternalIP == oldExternalIP[0].String() && item.Type == nbdb.NATTypeSNAT
-				}
-				natsToUpdate, err = libovsdbops.FindNATsWithPredicate(oc.nbClient, predicate)
-				if err != nil {
-					return fmt.Errorf("failed to update GW SNAT rule for pods on router %s error: %v", gatewayRouter, err)
-				}
-				for i := 0; i < len(natsToUpdate); i++ {
-					natsToUpdate[i].ExternalIP = externalIP.String()
-				}
+			if externalIP.String() == oldExternalIP.String() {
+				// no external ip change, skip
+				continue
+			}
+			if nat.ExternalIP == oldExternalIP.String() {
+				// needs to be updated
+				natModified = true
+				nat.ExternalIP = externalIP.String()
+			}
+
+		}
+		// note, nat.LogicalIP may be a CIDR or IP, we don't care unless it's an IP
+		parsedLogicalIP := net.ParseIP(nat.LogicalIP)
+		// check if join ip changed
+		if config.ContainsJoinIP(parsedLogicalIP) {
+			// is a join SNAT, check if IP needs updating
+			joinIP, err := util.MatchFirstIPFamily(utilnet.IsIPv6(parsedLogicalIP), gwLRPIPs)
+			if err != nil {
+				return fmt.Errorf("failed to find valid IP family match for join subnet IP: %s on "+
+					"gateway router: %s, provided IPs: %#v", parsedLogicalIP, gatewayRouter, gwLRPIPs)
+			}
+			if nat.LogicalIP != joinIP.String() {
+				// needs to be updated
+				natModified = true
+				nat.LogicalIP = joinIP.String()
 			}
 		}
-		err := libovsdbops.CreateOrUpdateNATs(oc.nbClient, &logicalRouter, natsToUpdate...)
+		if natModified {
+			natsToUpdate = append(natsToUpdate, nat)
+		}
+	}
+
+	if len(natsToUpdate) > 0 {
+		err = libovsdbops.CreateOrUpdateNATs(oc.nbClient, &logicalRouter, natsToUpdate...)
 		if err != nil {
 			return fmt.Errorf("failed to update GW SNAT rule for pod on router %s error: %v", gatewayRouter, err)
 		}
 	}
+
+	// REMOVEME(trozet) workaround - create join subnet SNAT to handle ICMP needs frag return
+	joinNATs := make([]*nbdb.NAT, 0, len(gwLRPIPs))
+	for _, gwLRPIP := range gwLRPIPs {
+		externalIP, err := util.MatchIPFamily(utilnet.IsIPv6(gwLRPIP), externalIPs)
+		if err != nil {
+			return fmt.Errorf("failed to find valid external IP family match for join subnet IP: %s on "+
+				"gateway router: %s", gwLRPIP, gatewayRouter)
+		}
+		joinIPNet, err := util.GetIPNetFullMask(gwLRPIP.String())
+		if err != nil {
+			return fmt.Errorf("failed to parse full CIDR mask for join subnet IP: %s", gwLRPIP)
+		}
+		nat := libovsdbops.BuildSNAT(&externalIP[0], joinIPNet, "", nil)
+		joinNATs = append(joinNATs, nat)
+	}
+	err = libovsdbops.CreateOrUpdateNATs(oc.nbClient, &logicalRouter, joinNATs...)
+	if err != nil {
+		return fmt.Errorf("failed to create SNAT rule for join subnet on router %s error: %v", gatewayRouter, err)
+	}
+
 	nats := make([]*nbdb.NAT, 0, len(clusterIPSubnet))
 	var nat *nbdb.NAT
 	if !config.Gateway.DisableSNATMultipleGWs {
@@ -482,10 +533,7 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 
 // addExternalSwitch creates a switch connected to the external bridge and connects it to
 // the gateway router
-// enableGatewayMTU enables options:gateway_mtu for gateway routers. Setting it on
-// the external ports of the GR will mimic the older behaviour of using br-ex flows
-func (oc *DefaultNetworkController) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRouter, macAddress, physNetworkName string,
-	ipAddresses []*net.IPNet, vlanID *uint, enableGatewayMTU bool) error {
+func (oc *DefaultNetworkController) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRouter, macAddress, physNetworkName string, ipAddresses []*net.IPNet, vlanID *uint) error {
 	// Create the GR port that connects to external_switch with mac address of
 	// external interface and that IP address. In the case of `local` gateway
 	// mode, whenever ovnkube-node container restarts a new br-local bridge will
@@ -496,12 +544,6 @@ func (oc *DefaultNetworkController) addExternalSwitch(prefix, interfaceID, nodeN
 	for _, ip := range ipAddresses {
 		externalRouterPortNetworks = append(externalRouterPortNetworks, ip.String())
 	}
-	var options map[string]string
-	if enableGatewayMTU {
-		options = map[string]string{
-			"gateway_mtu": strconv.Itoa(config.Default.MTU),
-		}
-	}
 	externalLogicalRouterPort := nbdb.LogicalRouterPort{
 		MAC: macAddress,
 		ExternalIDs: map[string]string{
@@ -509,7 +551,6 @@ func (oc *DefaultNetworkController) addExternalSwitch(prefix, interfaceID, nodeN
 		},
 		Networks: externalRouterPortNetworks,
 		Name:     externalRouterPort,
-		Options:  options,
 	}
 	logicalRouter := nbdb.LogicalRouter{Name: gatewayRouter}
 

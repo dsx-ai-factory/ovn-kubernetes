@@ -6,6 +6,7 @@ import (
 	"net"
 	"strings"
 
+	"github.com/vishvananda/netlink"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
@@ -17,11 +18,9 @@ import (
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-// bridgedGatewayNodeSetup makes the bridge's MAC address permanent (if needed), sets up
-// the physical network name mappings for the bridge, and returns an ifaceID
-// created from the bridge name and the node name
-func bridgedGatewayNodeSetup(nodeName, bridgeName, bridgeInterface, physicalNetworkName string,
-	syncBridgeMAC bool) (string, net.HardwareAddr, error) {
+// bridgedGatewayNodeSetup enables forwarding on bridge interface, sets up the physical network name mappings for the bridge,
+// and returns an ifaceID created from the bridge name and the node name
+func bridgedGatewayNodeSetup(nodeName, bridgeName, physicalNetworkName string) (string, error) {
 	// enable forwarding on bridge interface always
 	createForwardingRule := func(family string) error {
 		var stdout, stderr string
@@ -39,28 +38,12 @@ func bridgedGatewayNodeSetup(nodeName, bridgeName, bridgeInterface, physicalNetw
 	}
 	if config.IPv4Mode {
 		if err := createForwardingRule("ipv4"); err != nil {
-			return "", nil, fmt.Errorf("could not add IPv4 forwarding rule: %v", err)
+			return "", fmt.Errorf("could not add IPv4 forwarding rule: %v", err)
 		}
 	}
 	if config.IPv6Mode {
 		if err := createForwardingRule("ipv6"); err != nil {
-			return "", nil, fmt.Errorf("could not add IPv6 forwarding rule: %v", err)
-		}
-	}
-	// A OVS bridge's mac address can change when ports are added to it.
-	// We cannot let that happen, so make the bridge mac address permanent.
-	macAddress, err := util.GetOVSPortMACAddress(bridgeInterface)
-	if err != nil {
-		return "", nil, err
-	}
-	if syncBridgeMAC {
-		var err error
-
-		stdout, stderr, err := util.RunOVSVsctl("set", "bridge",
-			bridgeName, "other-config:hwaddr="+macAddress.String())
-		if err != nil {
-			return "", nil, fmt.Errorf("failed to set bridge, stdout: %q, stderr: %q, "+
-				"error: %v", stdout, stderr, err)
+			return "", fmt.Errorf("could not add IPv6 forwarding rule: %v", err)
 		}
 	}
 
@@ -71,7 +54,7 @@ func bridgedGatewayNodeSetup(nodeName, bridgeName, bridgeInterface, physicalNetw
 	stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
 		"external_ids:ovn-bridge-mappings")
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to get ovn-bridge-mappings stderr:%s (%v)", stderr, err)
+		return "", fmt.Errorf("failed to get ovn-bridge-mappings stderr:%s (%v)", stderr, err)
 	}
 
 	physNetBridgeMapping := physicalNetworkName + ":" + bridgeName
@@ -96,18 +79,18 @@ func bridgedGatewayNodeSetup(nodeName, bridgeName, bridgeInterface, physicalNetw
 		_, stderr, err = util.RunOVSVsctl("set", "Open_vSwitch", ".",
 			fmt.Sprintf("external_ids:ovn-bridge-mappings=%s", mapString))
 		if err != nil {
-			return "", nil, fmt.Errorf("failed to set ovn-bridge-mappings for ovs bridge %s"+
+			return "", fmt.Errorf("failed to set ovn-bridge-mappings for ovs bridge %s"+
 				", stderr:%s (%v)", bridgeName, stderr, err)
 		}
 	}
 
 	ifaceID := bridgeName + "_" + nodeName
-	return ifaceID, macAddress, nil
+	return ifaceID, nil
 }
 
 // getNetworkInterfaceIPAddresses returns the IP addresses for the network interface 'iface'.
 func getNetworkInterfaceIPAddresses(iface string) ([]*net.IPNet, error) {
-	allIPs, err := util.GetNetworkInterfaceIPs(iface)
+	allIPs, err := util.GetFilteredInterfaceV4V6IPs(iface)
 	if err != nil {
 		return nil, fmt.Errorf("could not find IP addresses: %v", err)
 	}
@@ -295,7 +278,7 @@ func getInterfaceByIP(ip net.IP) (string, error) {
 	}
 
 	for _, link := range links {
-		ips, err := util.GetNetworkInterfaceIPs(link.Attrs().Name)
+		ips, err := util.GetFilteredInterfaceV4V6IPs(link.Attrs().Name)
 		if err != nil {
 			return "", err
 		}
@@ -315,7 +298,6 @@ func configureSvcRouteViaInterface(routeManager *routemanager.Controller, iface 
 		return fmt.Errorf("unable to get link for %s, error: %v", iface, err)
 	}
 
-	var routes []routemanager.Route
 	for _, subnet := range config.Kubernetes.ServiceCIDRs {
 		gwIP, err := util.MatchIPFamily(utilnet.IsIPv6CIDR(subnet), gwIPs)
 		if err != nil {
@@ -329,15 +311,7 @@ func configureSvcRouteViaInterface(routeManager *routemanager.Controller, iface 
 		}
 		subnetCopy := *subnet
 		gwIPCopy := gwIP[0]
-		routes = append(routes, routemanager.Route{
-			GwIP:   gwIPCopy,
-			Subnet: &subnetCopy,
-			MTU:    mtu,
-			SrcIP:  nil,
-		})
-	}
-	if len(routes) > 0 {
-		routeManager.Add(routemanager.RoutesPerLink{Link: link, Routes: routes})
+		routeManager.Add(netlink.Route{LinkIndex: link.Attrs().Index, Gw: gwIPCopy, Dst: &subnetCopy, MTU: mtu})
 	}
 	return nil
 }
@@ -436,7 +410,7 @@ func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAn
 	}
 
 	initGwFunc := func() error {
-		return gw.Init(nc.watchFactory, nc.stopChan, nc.wg)
+		return gw.Init(nc.stopChan, nc.wg)
 	}
 
 	readyGwFunc := func() (bool, error) {
@@ -535,7 +509,7 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) er
 		return fmt.Errorf("failed to add MAC bindings for service routing")
 	}
 
-	err = gw.Init(nc.watchFactory, nc.stopChan, nc.wg)
+	err = gw.Init(nc.stopChan, nc.wg)
 	nc.gateway = gw
 	return err
 }
@@ -567,4 +541,39 @@ func CleanupClusterNode(name string) error {
 	DelMgtPortIptRules()
 
 	return nil
+}
+
+func (nc *DefaultNodeNetworkController) updateGatewayMAC(link netlink.Link) error {
+	if nc.gateway.GetGatewayBridgeIface() != link.Attrs().Name {
+		return nil
+	}
+
+	node, err := nc.watchFactory.GetNode(nc.name)
+	if err != nil {
+		return err
+	}
+	l3gwConf, err := util.ParseNodeL3GatewayAnnotation(node)
+	if err != nil {
+		return err
+	}
+
+	if l3gwConf == nil || l3gwConf.MACAddress.String() == link.Attrs().HardwareAddr.String() {
+		return nil
+	}
+	// MAC must have changed, update node
+	nc.gateway.SetDefaultGatewayBridgeMAC(link.Attrs().HardwareAddr)
+	if err := nc.gateway.Reconcile(); err != nil {
+		return fmt.Errorf("failed to reconcile gateway for MAC address update: %w", err)
+	}
+	nodeAnnotator := kube.NewNodeAnnotator(nc.Kube, node.Name)
+	l3gwConf.MACAddress = link.Attrs().HardwareAddr
+	if err := util.SetL3GatewayConfig(nodeAnnotator, l3gwConf); err != nil {
+		return fmt.Errorf("failed to update L3 gateway config annotation for node: %s, error: %w", node.Name, err)
+	}
+	if err := nodeAnnotator.Run(); err != nil {
+		return fmt.Errorf("failed to set node %s annotations: %w", nc.name, err)
+	}
+
+	return nil
+
 }

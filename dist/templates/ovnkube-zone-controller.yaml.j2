@@ -33,7 +33,9 @@ spec:
       serviceAccountName: ovnkube-node
       hostNetwork: true
       dnsPolicy: Default
-      {{ "hostPID: true" if ovn_unprivileged_mode=="no" }}
+      {% if ovn_unprivileged_mode=="no" %}
+      hostPID: true
+      {% endif %}
 
       # required to be scheduled on a linux node with node-role.kubernetes.io/zone-controller label
       affinity:

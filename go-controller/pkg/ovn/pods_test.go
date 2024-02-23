@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/urfave/cli/v2"
@@ -13,6 +14,7 @@ import (
 	ipallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -242,6 +244,10 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIPs, podMAC,
 
 	var routeSources []*net.IPNet
 	for _, podIP := range strings.Split(podIPs, " ") {
+		if podIP == "" {
+			continue
+		}
+
 		isIPv6 := ovntest.MustParseIP(podIP).To4() == nil
 
 		for _, subnet := range config.Default.ClusterSubnets {
@@ -378,6 +384,10 @@ func setPodAnnotations(podObj *v1.Pod, testPod testPod) {
 }
 
 func getExpectedDataPodsAndSwitches(pods []testPod, nodes []string) []libovsdbtest.TestData {
+	return getExpectedDataPodsSwitchesPortGroup(pods, nodes, "")
+}
+
+func getExpectedDataPodsSwitchesPortGroup(pods []testPod, nodes []string, namespacedPortGroup string) []libovsdbtest.TestData {
 	nodeslsps := make(map[string][]string)
 	var logicalSwitchPorts []*nbdb.LogicalSwitchPort
 	for _, pod := range pods {
@@ -425,6 +435,18 @@ func getExpectedDataPodsAndSwitches(pods []testPod, nodes []string) []libovsdbte
 	for _, ls := range logicalSwitches {
 		data = append(data, ls)
 	}
+	if namespacedPortGroup != "" {
+		// namespace port group is created
+		fakeController := getFakeController(DefaultNetworkControllerName)
+		pg := fakeController.buildPortGroup(
+			libovsdbutil.HashedPortGroup(namespacedPortGroup),
+			namespacedPortGroup,
+			logicalSwitchPorts,
+			nil,
+		)
+		pg.UUID = pg.Name + "-UUID"
+		data = append(data, pg)
+	}
 
 	return data
 }
@@ -468,7 +490,8 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 		ginkgo.It("reconciles an existing pod", func() {
 			app.Action = func(ctx *cli.Context) error {
-
+				// this flag will create namespaced port group
+				config.OVNKubernetesFeature.EnableEgressFirewall = true
 				namespaceT := *newNamespace("namespace1")
 				// Setup an unassigned pod, perform an update later on which assigns it.
 				t := newTPod(
@@ -534,7 +557,9 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Eventually(func() string {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
 				}, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
+
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(
+					getExpectedDataPodsSwitchesPortGroup([]testPod{t}, []string{"node1"}, namespaceT.Name)))
 
 				return nil
 			}
@@ -2315,6 +2340,177 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				return nil
 			}
 
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("won't release a completed pod IP if a running pod has the same IP", func() {
+			app.Action = func(ctx *cli.Context) error {
+				namespaceT := *newNamespace("namespace1")
+
+				completedTPod := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"",
+					"10.128.1.1",
+					"myCompletedPod",
+					"10.128.1.30",
+					"0a:58:0a:80:01:03",
+					namespaceT.Name,
+				)
+				completedPod := newPod(completedTPod.namespace, completedTPod.podName, completedTPod.nodeName, completedTPod.podIP)
+				setPodAnnotations(completedPod, completedTPod)
+				completedPod.UID = types.UID(completedPod.ObjectMeta.Name)
+				completedPod.Status.Phase = v1.PodSucceeded
+
+				runningTPod := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"",
+					"10.128.1.1 fd11::1",
+					"myRunningPod",
+					"10.128.1.30",
+					"0a:58:0a:80:01:03",
+					namespaceT.Name,
+				)
+				runningPod := newPod(runningTPod.namespace, runningTPod.podName, runningTPod.nodeName, runningTPod.podIP)
+				setPodAnnotations(runningPod, runningTPod)
+				runningPod.UID = types.UID(runningPod.ObjectMeta.Name)
+
+				fakeOvn.startWithDBSetup(initialDB,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode(node1Name, "192.168.126.202/24"),
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{
+							*runningPod,
+							*completedPod,
+						},
+					},
+				)
+				runningTPod.populateLogicalSwitchCache(fakeOvn)
+
+				err := fakeOvn.controller.WatchNamespaces()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOvn.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// use the namespace address set to verify that the IP was not
+				// released
+				fakeOvn.asf.ExpectAddressSetWithIPs(runningTPod.namespace, []string{runningTPod.podIP})
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("should handle a scheduled or failed remote pod with no IPs annotated", func() {
+			app.Action = func(ctx *cli.Context) error {
+				namespaceT := *newNamespace("namespace1")
+				t := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
+					namespaceT.Name,
+				)
+				myPod := newPod(t.namespace, t.podName, t.nodeName, t.podIP)
+
+				// testing how a scheduled non-annotated pod is handled is
+				// tricky, let's settle with a failed pod which should be
+				// handled in a similar way
+				myPod.Status.Phase = v1.PodFailed
+
+				fakeOvn.startWithDBSetup(initialDB,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode(node1Name, "192.168.126.202/24"),
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{*myPod},
+					},
+				)
+
+				// initialize the localZoneNodes empty so the controller thinks
+				// the node is on a remote zone
+				fakeOvn.controller.localZoneNodes = &sync.Map{}
+
+				err := fakeOvn.controller.WatchNamespaces()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOvn.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// check that the pod is not being retried, it should have been
+				// handled synchronously and succesfully in WatchPods
+				podKey, err := retry.GetResourceKey(myPod)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(retry.CheckRetryObj(podKey, fakeOvn.controller.retryPods)).To(gomega.BeFalse())
+
+				// check that the namespace AS is kept empty
+				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceT.Name, []string{})
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+		ginkgo.It("should correctly handle a pod running on no node", func() {
+			app.Action = func(ctx *cli.Context) error {
+				namespaceT := *newNamespace("namespace1")
+				t := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
+					namespaceT.Name,
+				)
+				myPod := newPod(t.namespace, t.podName, t.nodeName, t.podIP)
+				myPod.Status.Phase = v1.PodRunning
+				setPodAnnotations(myPod, t)
+				initialDB = libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{},
+				}
+				fakeOvn.startWithDBSetup(initialDB,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{*myPod},
+					},
+				)
+
+				fakeOvn.controller.localZoneNodes = nil
+				err := fakeOvn.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				return nil
+			}
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})

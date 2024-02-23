@@ -52,6 +52,8 @@ func getUUID(model model.Model) string {
 		return t.UUID
 	case *nbdb.Meter:
 		return t.UUID
+	case *nbdb.StaticMACBinding:
+		return t.UUID
 	case *sbdb.Chassis:
 		return t.UUID
 	case *sbdb.ChassisPrivate:
@@ -61,8 +63,6 @@ func getUUID(model model.Model) string {
 	case *sbdb.Encap:
 		return t.UUID
 	case *sbdb.PortBinding:
-		return t.UUID
-	case *sbdb.MACBinding:
 		return t.UUID
 	case *sbdb.SBGlobal:
 		return t.UUID
@@ -117,6 +117,8 @@ func setUUID(model model.Model, uuid string) {
 		t.UUID = uuid
 	case *nbdb.Meter:
 		t.UUID = uuid
+	case *nbdb.StaticMACBinding:
+		t.UUID = uuid
 	case *sbdb.Chassis:
 		t.UUID = uuid
 	case *sbdb.ChassisPrivate:
@@ -126,8 +128,6 @@ func setUUID(model model.Model, uuid string) {
 	case *sbdb.Encap:
 		t.UUID = uuid
 	case *sbdb.PortBinding:
-		t.UUID = uuid
-	case *sbdb.MACBinding:
 		t.UUID = uuid
 	case *sbdb.SBGlobal:
 		t.UUID = uuid
@@ -237,6 +237,12 @@ func copyIndexes(model model.Model) model.Model {
 			UUID: t.UUID,
 			Name: t.Name,
 		}
+	case *nbdb.StaticMACBinding:
+		return &nbdb.StaticMACBinding{
+			UUID:        t.UUID,
+			LogicalPort: t.LogicalPort,
+			IP:          t.IP,
+		}
 	case *sbdb.Chassis:
 		return &sbdb.Chassis{
 			UUID: t.UUID,
@@ -264,12 +270,6 @@ func copyIndexes(model model.Model) model.Model {
 			LogicalPort: t.LogicalPort,
 			Datapath:    t.Datapath,
 			TunnelKey:   t.TunnelKey,
-		}
-	case *sbdb.MACBinding:
-		return &sbdb.MACBinding{
-			UUID:        t.UUID,
-			LogicalPort: t.LogicalPort,
-			IP:          t.IP,
 		}
 	case *sbdb.SBGlobal:
 		return &sbdb.SBGlobal{
@@ -334,6 +334,8 @@ func getListFromModel(model model.Model) interface{} {
 		return &[]*nbdb.MeterBand{}
 	case *nbdb.Meter:
 		return &[]*nbdb.Meter{}
+	case *nbdb.StaticMACBinding:
+		return &[]*nbdb.StaticMACBinding{}
 	case *sbdb.Chassis:
 		return &[]*sbdb.Chassis{}
 	case *sbdb.ChassisPrivate:
@@ -344,8 +346,6 @@ func getListFromModel(model model.Model) interface{} {
 		return &[]*sbdb.Encap{}
 	case *sbdb.PortBinding:
 		return &[]*sbdb.PortBinding{}
-	case *sbdb.MACBinding:
-		return &[]*sbdb.MACBinding{}
 	case *nbdb.QoS:
 		return &[]nbdb.QoS{}
 	case *nbdb.ChassisTemplateVar:

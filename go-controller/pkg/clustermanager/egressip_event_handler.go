@@ -31,6 +31,11 @@ func (h *egressIPClusterControllerEventHandler) AddResource(obj interface{}, fro
 	switch h.objType {
 	case factory.EgressNodeType:
 		node := obj.(*v1.Node)
+		// EgressIP is not supported on hybrid overlay nodes
+		if util.NoHostSubnet(node) {
+			return nil
+		}
+
 		// Initialize the allocator on every update,
 		// ovnkube-node/cloud-network-config-controller will make sure to
 		// annotate the node with the egressIPConfig, but that might have
@@ -80,6 +85,12 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 	case factory.EgressNodeType:
 		oldNode := oldObj.(*v1.Node)
 		newNode := newObj.(*v1.Node)
+
+		// EgressIP is not supported on hybrid overlay nodes
+		if util.NoHostSubnet(newNode) {
+			return nil
+		}
+
 		// Initialize the allocator on every update,
 		// ovnkube-node/cloud-network-config-controller will make sure to
 		// annotate the node with the egressIPConfig, but that might have
@@ -139,8 +150,8 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 		}
 		if isHostCIDRsAltered {
 			// we only need to consider EIPs that are assigned to networks that aren't managed by OVN
-			if err := h.eIPC.reconcileNonOVNNetworkEIPs(newNode); err != nil {
-				return fmt.Errorf("failed to reconsider egress IPs that are host on non-OVN managed networks: %v", err)
+			if err := h.eIPC.reconcileSecondaryHostNetworkEIPs(newNode); err != nil {
+				return fmt.Errorf("failed to reconsider egress IPs that are secondary host networks: %v", err)
 			}
 		}
 		return nil
@@ -162,6 +173,10 @@ func (h *egressIPClusterControllerEventHandler) DeleteResource(obj, cachedObj in
 		return h.eIPC.reconcileEgressIP(eIP, nil)
 	case factory.EgressNodeType:
 		node := obj.(*v1.Node)
+		// EgressIP is not supported on hybrid overlay nodes
+		if util.NoHostSubnet(node) {
+			return nil
+		}
 		h.eIPC.deleteNodeForEgress(node)
 		nodeEgressLabel := util.GetNodeEgressLabel()
 		nodeLabels := node.GetLabels()

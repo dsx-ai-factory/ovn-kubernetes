@@ -81,6 +81,7 @@ const (
 	// ovnNodeGRLRPAddr is the CIDR form representation of Gate Router LRP IP address to join switch (i.e: 100.64.0.5/24)
 	ovnNodeGRLRPAddr     = "k8s.ovn.org/node-gateway-router-lrp-ifaddr"
 	ovnNodePrimaryIfAddr = "k8s.ovn.org/node-primary-ifaddr"
+	ovnNodeSubnets       = "k8s.ovn.org/node-subnets"
 )
 
 func (n tNode) k8sNode(nodeID string) v1.Node {
@@ -939,7 +940,6 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		expectedClusterRouterPortGroup *nbdb.PortGroup
 		expectedClusterPortGroup       *nbdb.PortGroup
 		expectedNBDatabaseState        []libovsdbtest.TestData
-		expectedSBDatabaseState        []libovsdbtest.TestData
 		l3GatewayConfig                *util.L3GatewayConfig
 		nodeHostCIDRs                  sets.Set[string]
 	)
@@ -1000,12 +1000,6 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		expectedClusterRouterPortGroup = newRouterPortGroup()
 		expectedClusterPortGroup = newClusterPortGroup()
 
-		gr := types.GWRouterPrefix + node1.Name
-		datapath := &sbdb.DatapathBinding{
-			UUID:        gr + "-UUID",
-			ExternalIDs: map[string]string{"logical-router": gr + "-UUID", "name": gr},
-		}
-		expectedSBDatabaseState = []libovsdbtest.TestData{datapath}
 		dbSetup = libovsdbtest.TestSetup{
 			NBData: []libovsdbtest.TestData{
 				newClusterJoinSwitch(),
@@ -1016,9 +1010,6 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				expectedClusterLBGroup,
 				expectedSwitchLBGroup,
 				expectedRouterLBGroup,
-			},
-			SBData: []libovsdbtest.TestData{
-				datapath,
 			},
 		}
 		testNode = node1.k8sNode("2")
@@ -1129,8 +1120,6 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				skipSnat, node1.NodeMgmtPortIP, "1400")
 			gomega.Eventually(oc.nbClient).Should(libovsdbtest.HaveData(expectedNBDatabaseState))
 
-			expectedSBDatabaseState := generateGatewayInitExpectedSB(expectedSBDatabaseState, node1.Name)
-			gomega.Eventually(oc.sbClient).Should(libovsdbtest.HaveData(expectedSBDatabaseState))
 			return nil
 		}
 
@@ -1207,8 +1196,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)},
 				skipSnat, node1.NodeMgmtPortIP, "1400")
 			gomega.Eventually(oc.nbClient).Should(libovsdbtest.HaveData(expectedNBDatabaseState))
-			expectedSBDatabaseState := generateGatewayInitExpectedSB(expectedSBDatabaseState, node1.Name)
-			gomega.Eventually(oc.sbClient).Should(libovsdbtest.HaveData(expectedSBDatabaseState))
+
 			return nil
 		}
 
@@ -1273,19 +1261,17 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			expectedNBDatabaseState = append(expectedNBDatabaseState,
 				newNodeSNAT("stale-nodeNAT-UUID-3", "10.0.0.3", externalIP.String()), // won't be deleted since pod exists on this node
 				newNodeSNAT("stale-nodeNAT-UUID-4", "10.0.0.3", "172.16.16.3"))       // won't be deleted on this node but will be deleted on the node whose IP is 172.16.16.3 since this pod belongs to this node
+			newNodeSNAT("nat-join-0-UUID", node1.LrpIP, externalIP.String()) // join subnet SNAT won't be affected by sync
 			for _, testObj := range expectedNBDatabaseState {
 				uuid := reflect.ValueOf(testObj).Elem().FieldByName("UUID").Interface().(string)
 				if uuid == types.GWRouterPrefix+node1.Name+"-UUID" {
 					GR := testObj.(*nbdb.LogicalRouter)
-					GR.Nat = []string{"stale-nodeNAT-UUID-3", "stale-nodeNAT-UUID-4"}
+					GR.Nat = []string{"stale-nodeNAT-UUID-3", "stale-nodeNAT-UUID-4", "nat-join-0-UUID"}
 					*testObj.(*nbdb.LogicalRouter) = *GR
 					break
 				}
 			}
 			gomega.Eventually(oc.nbClient).Should(libovsdbtest.HaveData(expectedNBDatabaseState))
-
-			expectedSBDatabaseState := generateGatewayInitExpectedSB(expectedSBDatabaseState, node1.Name)
-			gomega.Eventually(oc.sbClient).Should(libovsdbtest.HaveData(expectedSBDatabaseState))
 
 			return nil
 		}
@@ -1331,8 +1317,6 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				return atomic.LoadUint32(&podsWereListed)
 			}, 10).Should(gomega.Equal(uint32(0)))
 
-			expectedSBDatabaseState := generateGatewayInitExpectedSB(expectedSBDatabaseState, node1.Name)
-			gomega.Eventually(oc.sbClient).Should(libovsdbtest.HaveData(expectedSBDatabaseState))
 			return nil
 		}
 
@@ -1401,8 +1385,6 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			}
 			gomega.Eventually(oc.nbClient).Should(libovsdbtest.HaveData(expectedNBDatabaseState))
 
-			expectedSBDatabaseState := generateGatewayInitExpectedSB(expectedSBDatabaseState, node1.Name)
-			gomega.Eventually(oc.sbClient).Should(libovsdbtest.HaveData(expectedSBDatabaseState))
 			return nil
 		}
 
@@ -1539,15 +1521,17 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
-	ginkgo.It("use node retry for a node without a host subnet", func() {
+	ginkgo.It("use node retry for an unmanaged hybrid overlay node node", func() {
 		app.Action = func(ctx *cli.Context) error {
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			// Don't create clusterManager so that the node has not subnets allocated.
+			config.HybridOverlay.Enabled = true
 
-			config.Kubernetes.NoHostSubnetNodes = &metav1.LabelSelector{
+			config.Kubernetes.NoHostSubnetNodes, err = metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
 				MatchLabels: nodeNoHostSubnetAnnotation(),
-			}
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			gomega.Expect(
 				oc.retryNodes.ResourceHandler.AddResource(
@@ -1555,7 +1539,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				gomega.MatchError(
 					"nodeAdd: error adding node \"node1\": could not find \"k8s.ovn.org/node-subnets\" annotation"))
 
-			ginkgo.By("annotating the node with no host subnet")
+			ginkgo.By("labeling the node to a hybrid overlay node")
 			testNode.Labels = nodeNoHostSubnetAnnotation()
 			_, err = fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &testNode, metav1.UpdateOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())

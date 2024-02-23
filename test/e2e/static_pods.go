@@ -1,8 +1,8 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"time"
 
@@ -18,7 +18,7 @@ import (
 // pulled from https://github.com/kubernetes/kubernetes/blob/v1.26.2/test/e2e/framework/pod/wait.go#L468
 // had to modify function due to restart policy on static pods being set to always, which caused function to fail
 func waitForPodRunningInNamespaceTimeout(c clientset.Interface, podName, namespace string, timeout time.Duration) error {
-	return e2epod.WaitForPodCondition(c, namespace, podName, fmt.Sprintf("%s", v1.PodRunning), timeout, func(pod *v1.Pod) (bool, error) {
+	return e2epod.WaitForPodCondition(context.TODO(), c, namespace, podName, fmt.Sprintf("%s", v1.PodRunning), timeout, func(pod *v1.Pod) (bool, error) {
 		switch pod.Status.Phase {
 		case v1.PodRunning:
 			ginkgo.By("Saw pod running")
@@ -32,7 +32,7 @@ func waitForPodRunningInNamespaceTimeout(c clientset.Interface, podName, namespa
 func createStaticPod(f *framework.Framework, nodeName string, podYaml string) {
 	//create file
 	var podFile = "static-pod.yaml"
-	if err := ioutil.WriteFile(podFile, []byte(podYaml), 0644); err != nil {
+	if err := os.WriteFile(podFile, []byte(podYaml), 0644); err != nil {
 		framework.Failf("Unable to write static-pod.yaml  to disk: %v", err)
 	}
 	defer func() {
@@ -80,7 +80,7 @@ var _ = ginkgo.Describe("Creating a static pod on a node", func() {
 	})
 
 	ginkgo.It("Should successfully create then remove a static pod", func() {
-		nodes, err := e2enode.GetBoundedReadySchedulableNodes(cs, 3)
+		nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), cs, 3)
 		framework.ExpectNoError(err)
 		if len(nodes.Items) < 1 {
 			framework.Failf("Test requires 1 Ready node, but there are none")
@@ -107,7 +107,7 @@ spec:
 		ginkgo.By("Removing the pod file from the nodes /etc/kubernetes/manifests")
 		framework.Logf("Removing %s from %s", podName, nodeName)
 		removeStaticPodFile(nodeName, podFile)
-		err = e2epod.WaitForPodNotFoundInNamespace(f.ClientSet, podName, f.Namespace.Name, time.Second*30)
+		err = e2epod.WaitForPodNotFoundInNamespace(context.TODO(), f.ClientSet, podName, f.Namespace.Name, time.Second*30)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 })

@@ -115,6 +115,30 @@ func setSysctl(sysctl string, newVal int) error {
 	return os.WriteFile(sysctl, []byte(strconv.Itoa(newVal)), 0o640)
 }
 
+// safely move the netdev to the pod namespace, making sure to avoid name conflicts
+func safeMoveIfToNetns(ifname string, netns ns.NetNS, containerID string) (newNetdeviceName string, err error) {
+	newNetdeviceName = ifname
+	err = moveIfToNetns(ifname, netns)
+
+	if err != nil {
+		if strings.Contains(err.Error(), "file exists") {
+			// netdev with the same name exists in the pod
+			newNetdeviceName = generateIfName(containerID)
+			err = util.RenameLink(ifname, newNetdeviceName)
+			if err != nil {
+				return ifname, err
+			}
+			err = moveIfToNetns(newNetdeviceName, netns)
+			if err != nil {
+				return ifname, err
+			}
+		} else {
+			return ifname, err
+		}
+	}
+	return newNetdeviceName, nil
+}
+
 func moveIfToNetns(ifname string, netns ns.NetNS) error {
 	dev, err := util.GetNetLinkOps().LinkByName(ifname)
 	if err != nil {
@@ -235,6 +259,13 @@ func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInter
 	return hostIface, contIface, nil
 }
 
+// generate a unique interface name for the temporary netdev that will be moved to pod namespace
+func generateIfName(containerID string) string {
+	randomId := util.GenerateId(5) // random ID with 5 chars
+	// ifname max length is 15
+	return containerID[:(15-len(randomId))] + randomId
+}
+
 // Setup sriov interface in the pod
 func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInterfaceInfo, deviceID string, isVFIO bool) (*current.Interface, *current.Interface, error) {
 	hostIface := &current.Interface{}
@@ -252,16 +283,17 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 		contIface.Name = ifName
 		contIface.Mac = ifInfo.MAC.String()
 		contIface.Sandbox = netns.Path()
-	} else {
-		// 1. Move netdevice to Container namespace
-		err := moveIfToNetns(netdevice, netns)
+	}
+
+	// 1. Move netdevice to Container namespace
+	if len(netdevice) != 0 {
+		newNetdevName, err := safeMoveIfToNetns(netdevice, netns, containerID)
 		if err != nil {
 			return nil, nil, err
 		}
-
 		err = netns.Do(func(hostNS ns.NetNS) error {
 			contIface.Name = ifName
-			err = util.RenameLink(netdevice, contIface.Name)
+			err = util.RenameLink(newNetdevName, contIface.Name)
 			if err != nil {
 				return err
 			}
@@ -289,6 +321,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 
 			contIface.Mac = ifInfo.MAC.String()
 			contIface.Sandbox = netns.Path()
+
 			return nil
 		})
 		if err != nil {
@@ -298,11 +331,11 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 
 	if !ifInfo.IsDPUHostMode {
 		// 2. get device representor name
-		repName, err := util.GetFunctionRepresentorName(deviceID)
+		hostRepName, err := util.GetFunctionRepresentorName(deviceID)
 		if err != nil {
 			return nil, nil, err
 		}
-		hostIface.Name = repName
+		hostIface.Name = hostRepName
 
 		if isVFIO {
 			// 3. it's not possible to set mac address within container netns for VFIO case, hence set it through VF representor
@@ -310,6 +343,12 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 				return nil, nil, err
 			}
 		}
+		// 4. make sure it's not a port managed by OVS to avoid conflicts TBD merge
+		_, err = ovsExec("--if-exists", "del-port", hostRepName)
+		if err != nil {
+			return nil, nil, err
+		}
+
 		link, err := util.GetNetLinkOps().LinkByName(hostIface.Name)
 		if err != nil {
 			return nil, nil, err
@@ -320,7 +359,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 		if err = util.GetNetLinkOps().LinkSetMTU(link, ifInfo.MTU); err != nil {
 			return nil, nil, fmt.Errorf("failed to set MTU on %s: %v", hostIface.Name, err)
 		}
-		// 5. if the interface is not up, set it to up
+		// 6. if the interface is not up, set it to up
 		if link.Attrs().OperState != netlink.OperUp {
 			if err := util.GetNetLinkOps().LinkSetUp(link); err != nil {
 				return nil, nil, fmt.Errorf("failed to set link UP on %s: %v", hostIface.Name, err)

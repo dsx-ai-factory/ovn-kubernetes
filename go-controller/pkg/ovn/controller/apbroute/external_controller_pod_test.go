@@ -178,6 +178,32 @@ var _ = Describe("OVN External Gateway pod", func() {
 			eventuallyExpectNumberOfPolicies(1)
 			eventuallyExpectConfig(noMatchPolicy.Name, expectedPolicy, expectedRefs)
 		})
+		It("processes the pod that is in Pending phase and then changes to Running with an assigned IP", func() {
+
+			targetPodPending := newPodWithPhaseAndIP("pod_pending", namespaceTarget.Name, corev1.PodPending, "",
+				map[string]string{"key": "pod", "name": "pod_pending"})
+			namespaceTargetWithPendingPod := newNamespaceWithPods(namespaceTarget.Name, targetPodPending)
+
+			initController([]runtime.Object{namespaceGW, namespaceTarget, pod1, targetPodPending}, []runtime.Object{dynamicPolicyDiffTargetNS})
+
+			expectedPolicy, expectedRefs := expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTargetWithoutPod},
+				nil,
+				[]*namespaceWithPods{namespaceGWWithPod}, false)
+
+			eventuallyExpectNumberOfPolicies(1)
+			eventuallyExpectConfig(dynamicPolicyDiffTargetNS.Name, expectedPolicy, expectedRefs)
+			By("Updating the pod to be in Running phase")
+			updatePodStatus(targetPodPending, pod1.Status)
+			//  make sure pod event is handled
+			time.Sleep(100 * time.Millisecond)
+			expectedPolicy, expectedRefs = expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTargetWithPendingPod},
+				nil,
+				[]*namespaceWithPods{namespaceGWWithPod}, false)
+			eventuallyExpectNumberOfPolicies(1)
+			eventuallyExpectConfig(dynamicPolicyDiffTargetNS.Name, expectedPolicy, expectedRefs)
+		})
 	})
 
 	var _ = Context("When deleting a pod", func() {
@@ -279,6 +305,40 @@ var _ = Describe("OVN External Gateway pod", func() {
 			eventuallyExpectNumberOfPolicies(2)
 			eventuallyExpectConfig(dynamicPolicy.Name, expectedPolicy1, expectedRefs1)
 			eventuallyExpectConfig(dynamicPolicyDiffTargetNS.Name, expectedPolicy2, expectedRefs2)
+		})
+
+		It("deletes a target pod that matches a policy and creates it again", func() {
+			initController([]runtime.Object{namespaceGW, namespaceTarget2, targetPod2, pod1},
+				[]runtime.Object{dynamicPolicy})
+
+			expectedPolicy1, expectedRefs1 := expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTarget2WithPod},
+				nil,
+				[]*namespaceWithPods{namespaceGWWithPod}, false)
+
+			eventuallyExpectNumberOfPolicies(1)
+			eventuallyExpectConfig(dynamicPolicy.Name, expectedPolicy1, expectedRefs1)
+
+			By("delete one of the target pods")
+			deletePod(targetPod2, fakeClient)
+			expectedPolicy1, expectedRefs1 = expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{{nsName: targetNamespaceName2}},
+				nil,
+				[]*namespaceWithPods{namespaceGWWithPod}, false)
+
+			eventuallyExpectNumberOfPolicies(1)
+			eventuallyExpectConfig(dynamicPolicy.Name, expectedPolicy1, expectedRefs1)
+
+			By("create the deleted target pod")
+
+			createPod(targetPod2, fakeClient)
+			expectedPolicy1, expectedRefs1 = expectedPolicyStateAndRefs(
+				[]*namespaceWithPods{namespaceTarget2WithPod},
+				nil,
+				[]*namespaceWithPods{namespaceGWWithPod}, false)
+
+			eventuallyExpectNumberOfPolicies(1)
+			eventuallyExpectConfig(dynamicPolicy.Name, expectedPolicy1, expectedRefs1)
 		})
 	})
 
@@ -405,6 +465,15 @@ func updatePodLabels(pod *corev1.Pod, newLabels map[string]string, fakeClient *f
 	Expect(err).NotTo(HaveOccurred())
 	incrementResourceVersion(p)
 	p.Labels = newLabels
+	_, err = fakeClient.CoreV1().Pods(pod.Namespace).Update(context.Background(), p, v1.UpdateOptions{})
+	Expect(err).NotTo(HaveOccurred())
+}
+
+func updatePodStatus(pod *corev1.Pod, podStatus corev1.PodStatus) {
+	p, err := fakeClient.CoreV1().Pods(pod.Namespace).Get(context.TODO(), pod.Name, v1.GetOptions{})
+	Expect(err).NotTo(HaveOccurred())
+	incrementResourceVersion(p)
+	p.Status = podStatus
 	_, err = fakeClient.CoreV1().Pods(pod.Namespace).Update(context.Background(), p, v1.UpdateOptions{})
 	Expect(err).NotTo(HaveOccurred())
 }

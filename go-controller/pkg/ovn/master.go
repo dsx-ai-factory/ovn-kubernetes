@@ -15,12 +15,10 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/pkg/errors"
 
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
@@ -413,6 +411,10 @@ func (oc *DefaultNetworkController) deleteStaleNodeChassis(node *kapi.Node) erro
 			return fmt.Errorf("node %s is now with a new chassis ID. Its stale chassis template vars are still in the NBDB", node.Name)
 		}
 		if err = libovsdbops.DeleteChassisWithPredicate(oc.sbClient, p); err != nil {
+			if err == libovsdbclient.ErrNotFound {
+				klog.Infof("deleteStaleNodeChassis: chassis %s not found", node.Name)
+				return nil
+			}
 			// Send an event and Log on failure
 			oc.recorder.Eventf(node, kapi.EventTypeWarning, "ErrorMismatchChassis",
 				"Node %s is now with a new chassis ID. Its stale chassis entry %s is still in the SBDB",
@@ -485,7 +487,7 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 			continue
 		}
 
-		if config.HybridOverlay.Enabled && houtil.IsHybridOverlayNode(node) {
+		if config.HybridOverlay.Enabled && util.NoHostSubnet(node) {
 			continue
 		}
 
@@ -695,7 +697,6 @@ type nodeSyncs struct {
 	syncGw                bool
 	syncHo                bool
 	syncZoneIC            bool
-	syncMigratablePods    bool
 }
 
 func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
@@ -710,7 +711,7 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 		if err != nil {
 			return fmt.Errorf("nodeAdd: error adding noHost subnet for switch %s: %w", node.Name, err)
 		}
-		if config.HybridOverlay.Enabled && houtil.IsHybridOverlayNode(node) {
+		if config.HybridOverlay.Enabled {
 			// Parse the hybrid overlay host subnet for the node to
 			// make sure that cluster manager has allocated the subnet.
 			if _, err := houtil.ParseHybridOverlayHostSubnet(node); err != nil {
@@ -776,7 +777,11 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 			errs = append(errs, fmt.Errorf("failed to set up hybrid overlay logical switch port for %s: %v", node.Name, err))
 		}
 	} else {
-		// the node needs to cleanup Hybrid overlay annotations if it has them and hybrid overlay is not enabled
+		// the node needs to cleanup Hybrid overlay annotations LogicalRouterPolicies and Hybrid overlay port
+		// if it has them and hybrid overlay is not enabled
+		if err := oc.deleteHybridOverlayPort(node); err != nil {
+			errs = append(errs, err)
+		}
 		if _, exist := node.Annotations[hotypes.HybridOverlayDRMAC]; exist {
 			annotator.Delete(hotypes.HybridOverlayDRMAC)
 		}
@@ -826,20 +831,12 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 		}
 	}
 
-	if nSyncs.syncMigratablePods {
-		if err := oc.allocateSyncMigratablePodIPs(node); err != nil {
-			errs = append(errs, err)
-			oc.syncMigratablePodsFailed.Store(node.Name, true)
-		} else {
-			oc.syncMigratablePodsFailed.Delete(node.Name)
-		}
-	}
 	return kerrors.NewAggregate(errs)
 }
 
 func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node, syncZoneIC bool) error {
 	// nothing to do for hybrid nodes
-	if houtil.IsHybridOverlayNode(node) {
+	if util.NoHostSubnet(node) {
 		return nil
 	}
 	start := time.Now()
@@ -884,18 +881,18 @@ func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node, sy
 func (oc *DefaultNetworkController) deleteNodeEvent(node *kapi.Node) error {
 	klog.V(5).Infof("Deleting Node %q. Removing the node from "+
 		"various caches", node.Name)
-
-	if config.HybridOverlay.Enabled {
-		if noHostSubnet := util.NoHostSubnet(node); noHostSubnet {
-			// noHostSubnet nodes are different, only remove the switch
-			oc.lsManager.DeleteSwitch(node.Name)
-			return nil
-		}
-		if _, ok := node.Annotations[hotypes.HybridOverlayDRMAC]; ok && !houtil.IsHybridOverlayNode(node) {
-			oc.deleteHybridOverlayPort(node)
-		}
-		if err := oc.removeHybridLRPolicySharedGW(node.Name); err != nil {
+	if config.HybridOverlay.Enabled && util.NoHostSubnet(node) {
+		if err := oc.deleteHoNodeEvent(node); err != nil {
 			return err
+		}
+	}
+	return oc.deleteOVNNodeEvent(node)
+}
+
+func (oc *DefaultNetworkController) deleteOVNNodeEvent(node *kapi.Node) error {
+	if config.HybridOverlay.Enabled {
+		if err := oc.deleteHybridOverlayPort(node); err != nil {
+			return fmt.Errorf("failed to delete hybrid overlay switch port for node %s: %w", node.Name, err)
 		}
 	}
 
@@ -952,9 +949,59 @@ func (oc *DefaultNetworkController) getOVNClusterRouterPortToJoinSwitchIfAddrs()
 
 	return gwLRPIPs, nil
 }
-func (oc *DefaultNetworkController) allocateSyncMigratablePodIPs(node *kapi.Node) error {
-	allocatePodIPsOnSwitchWrapFn := func(liveMigratablePod *kapi.Pod, liveMigratablePodAnnotation *util.PodAnnotation, switchName, nadName string) (string, error) {
-		return oc.allocatePodIPsOnSwitch(liveMigratablePod, liveMigratablePodAnnotation, switchName, nadName)
+
+// addUpdateHoNodeEvent reconsile ovn nodes when a hybrid overlay node is added.
+func (oc *DefaultNetworkController) addUpdateHoNodeEvent(node *kapi.Node) error {
+	if subnets, _ := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName); len(subnets) > 0 {
+		klog.Infof("Node %q is used to be a OVN-K managed node, deleting it from OVN topology", node.Name)
+		if err := oc.deleteOVNNodeEvent(node); err != nil {
+			return err
+		}
 	}
-	return kubevirt.AllocateSyncMigratablePodsIPsOnNode(oc.watchFactory, oc.lsManager, node.Name, ovntypes.DefaultNetworkName, allocatePodIPsOnSwitchWrapFn)
+
+	err := oc.lsManager.AddNoHostSubnetSwitch(node.Name)
+	if err != nil {
+		return fmt.Errorf("nodeAdd: error adding no hostsubnet for switch %s: %w", node.Name, err)
+	}
+
+	// Parse the hybrid overlay host subnet annotation of the node to
+	// make sure that the subnet is allocated.
+	if _, err := houtil.ParseHybridOverlayHostSubnet(node); err != nil {
+		return err
+	}
+
+	nodes, err := oc.watchFactory.GetNodes()
+	if err != nil {
+		return err
+	}
+	annotator := kube.NewNodeAnnotator(oc.kube, node.Name)
+
+	for _, node := range nodes {
+		// reconcile hybrid overlay subnets for local zone nodes.
+		if !util.NoHostSubnet(node) && oc.isLocalZoneNode(node) {
+			if err := oc.handleHybridOverlayPort(node, annotator); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (oc *DefaultNetworkController) deleteHoNodeEvent(node *kapi.Node) error {
+	if oc.lsManager.IsNonHostSubnetSwitch(node.Name) {
+		klog.Infof("Delete hybrid overlay node switch %s", node.Name)
+		oc.lsManager.DeleteSwitch(node.Name)
+	}
+	if subnet, ok := node.Annotations[hotypes.HybridOverlayNodeSubnet]; ok {
+		// Delete the routes and policies for this HO node
+		_, nodeSubnet, err := net.ParseCIDR(subnet)
+		if err != nil {
+			return fmt.Errorf("failed to parse hybridOverlay node subnet for node %s: %w", node.Name, err)
+		}
+		err = oc.removeRoutesToHONodeSubnet(nodeSubnet)
+		if err != nil {
+			return fmt.Errorf("failed to remove hybrid overlay static routes and route policy: %w", err)
+		}
+	}
+	return nil
 }

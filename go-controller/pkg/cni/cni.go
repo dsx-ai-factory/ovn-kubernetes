@@ -3,6 +3,7 @@ package cni
 import (
 	"context"
 	"fmt"
+	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"net"
 	"time"
 
@@ -106,13 +107,13 @@ func (pr *PodRequest) checkOrUpdatePodUID(pod *kapi.Pod) error {
 }
 
 // getNetdevName returns the netdevice name from the passed device ID.
-func getNetdevName(deviceId string) (string, error) {
+func getNetdevName(deviceId string, deviceInfo nadapi.DeviceInfo) (string, error) {
 	var netdevices []string
 
 	retries := 0
 	err := wait.PollUntilContextTimeout(context.Background(), netDevPollInterval, netDevPollTimeout, true, func(ctx context.Context) (bool, error) {
 		var localError error
-		netdevices, localError = util.GetNetdevsNameFromDeviceId(deviceId)
+		netdevices, localError = util.GetNetdevsNameFromDeviceId(deviceId, deviceInfo)
 		retries++
 		return len(netdevices) != 0, localError
 	})
@@ -143,7 +144,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet) (*Resp
 		var err error
 
 		if !pr.IsVFIO {
-			netdevName, err = getNetdevName(pr.CNIConf.DeviceID)
+			netdevName, err = getNetdevName(pr.CNIConf.DeviceID, pr.deviceInfo)
 			if err != nil {
 				return nil, fmt.Errorf("failed in cmdAdd while getting Netdevice name: %v", err)
 			}
@@ -151,7 +152,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet) (*Resp
 		if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
 			// Add DPU connection-details annotation so ovnkube-node running on DPU
 			// performs the needed network plumbing.
-			if err = pr.addDPUConnectionDetailsAnnot(kubecli, clientset.podLister, netdevName); err != nil {
+			if err = pr.addDPUConnectionDetailsAnnot(kubecli, clientset.podLister, netdevName, pr.deviceInfo); err != nil {
 				return nil, err
 			}
 			annotCondFn = isDPUReady

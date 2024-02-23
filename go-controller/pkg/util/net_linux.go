@@ -291,7 +291,7 @@ func LinkRoutesDel(link netlink.Link, subnets []*net.IPNet) error {
 			deleteRoute := false
 
 			if subnet == nil {
-				deleteRoute = route.Dst == nil
+				deleteRoute = IsAnyNetwork(route.Dst)
 			} else if route.Dst != nil {
 				deleteRoute = route.Dst.String() == subnet.String()
 			}
@@ -335,6 +335,27 @@ func LinkRoutesAdd(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int
 		}
 	}
 	return nil
+}
+
+// IsAnyNetwork checks if the argument network is an any network for ipv4 or ipv6.
+func IsAnyNetwork(ipNet *net.IPNet) bool {
+	if ipNet == nil {
+		return false
+	}
+	ones, _ := ipNet.Mask.Size()
+	//v4
+	if ipNet.IP.To4() != nil {
+		v4Any := net.ParseIP("0.0.0.0")
+		if ipNet.IP.Equal(v4Any) && ones == 0 {
+			return true
+		}
+	} else {
+		v6Any := net.ParseIP("::")
+		if ipNet.IP.Equal(v6Any) && ones == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // LinkRouteGetFilteredRoute gets a route for the given route filter.
@@ -481,20 +502,38 @@ func DeleteConntrackServicePort(ip string, port int32, protocol kapi.Protocol, i
 	return DeleteConntrack(ip, port, protocol, ipFilterType, labels)
 }
 
-// GetNetworkInterfaceIPs returns the IP addresses for the network interface 'iface'.
-// We filter out addresses that are link local, reserved for internal use or added by keepalived.
-func GetNetworkInterfaceIPs(iface string) ([]*net.IPNet, error) {
+// GetFilteredInterfaceV4V6IPs returns the IP addresses for the network interface 'iface' for ipv4 and ipv6.
+// Filter out addresses that are link local, reserved for internal use or added by keepalived.
+func GetFilteredInterfaceV4V6IPs(iface string) ([]*net.IPNet, error) {
 	link, err := netLinkOps.LinkByName(iface)
 	if err != nil {
 		return nil, fmt.Errorf("failed to lookup link %s: %v", iface, err)
 	}
-
-	addrs, err := netLinkOps.AddrList(link, netlink.FAMILY_ALL)
+	netlinkAddrs, err := GetFilteredInterfaceAddrs(link, true, true)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list addresses for %q: %v", iface, err)
+		return nil, fmt.Errorf("failed get link %s addresses: %v", link.Attrs().Name, err)
 	}
+	ips := make([]*net.IPNet, 0, len(netlinkAddrs))
+	for _, netlinkAddr := range netlinkAddrs {
+		ips = append(ips, netlinkAddr.IPNet)
+	}
+	return ips, nil
+}
 
-	var ips []*net.IPNet
+// GetFilteredInterfaceAddrs returns addresses attached to a link and filters out link local addresses, OVN reserved IPs,
+// keepalived IPs and addresses marked as secondary or depreciated.
+func GetFilteredInterfaceAddrs(link netlink.Link, v4, v6 bool) ([]netlink.Addr, error) {
+	var ipFamily int // value of 0 means include both IP v4 and v6 addresses
+	if v4 && !v6 {
+		ipFamily = netlink.FAMILY_V4
+	} else if !v4 && v6 {
+		ipFamily = netlink.FAMILY_V6
+	}
+	addrs, err := netLinkOps.AddrList(link, ipFamily)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list addresses for %q: %v", link.Attrs().Name, err)
+	}
+	validAddrs := make([]netlink.Addr, 0)
 	for _, addr := range addrs {
 		if addr.IP.IsLinkLocalUnicast() || IsAddressReservedForInternalUse(addr.IP) || IsAddressAddedByKeepAlived(addr) {
 			continue
@@ -506,9 +545,9 @@ func GetNetworkInterfaceIPs(iface string) ([]*net.IPNet, error) {
 		if (addr.Flags & (unix.IFA_F_SECONDARY | unix.IFA_F_DEPRECATED)) != 0 {
 			continue
 		}
-		ips = append(ips, addr.IPNet)
+		validAddrs = append(validAddrs, addr)
 	}
-	return ips, nil
+	return validAddrs, nil
 }
 
 func IsAddressReservedForInternalUse(addr net.IP) bool {
@@ -528,10 +567,12 @@ func IsAddressReservedForInternalUse(addr net.IP) bool {
 }
 
 // IsAddressAddedByKeepAlived returns true if the input interface address obtained
-// through netlink has a label that ends with ":vip", which is how keepalived
-// marks the IP addresses it adds (https://github.com/openshift/machine-config-operator/pull/3683)
+// through netlink has a "vip" label which is how keepalived
+// marks the IP addresses it adds (https://github.com/openshift/machine-config-operator/pull/4040)
+// A previous implementation made the label end with ":vip", so for backwards compatibility
+// "HasSuffix" is used.
 func IsAddressAddedByKeepAlived(addr netlink.Addr) bool {
-	return strings.HasSuffix(addr.Label, ":vip")
+	return strings.HasSuffix(addr.Label, "vip")
 }
 
 // GetIPv6OnSubnet when given an IPv6 address with a 128 prefix for an interface,
@@ -637,6 +678,19 @@ func GetAllDPUHostPFMACAddress() ([]string, error) {
 	return pfMACs, nil
 }
 
+// IsIPNetEqual returns true if both IPNet are equal
+func IsIPNetEqual(ipn1 *net.IPNet, ipn2 *net.IPNet) bool {
+	if ipn1 == ipn2 {
+		return true
+	}
+	if ipn1 == nil || ipn2 == nil {
+		return false
+	}
+	m1, _ := ipn1.Mask.Size()
+	m2, _ := ipn2.Mask.Size()
+	return m1 == m2 && ipn1.IP.Equal(ipn2.IP)
+}
+
 func filterRouteByDstAndGw(link netlink.Link, subnet *net.IPNet, gw net.IP) (*netlink.Route, uint64) {
 	return &netlink.Route{
 			Dst:       subnet,
@@ -663,4 +717,11 @@ func RenameLink(curName, newName string) error {
 	}
 
 	return nil
+}
+
+func GetIPFamily(v6 bool) int {
+	if v6 {
+		return netlink.FAMILY_V6
+	}
+	return netlink.FAMILY_V4
 }

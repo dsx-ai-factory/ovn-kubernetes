@@ -11,12 +11,12 @@ import (
 	"github.com/onsi/ginkgo/v2/config"
 	"github.com/onsi/ginkgo/v2/reporters"
 	"github.com/onsi/gomega"
+	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2econfig "k8s.io/kubernetes/test/e2e/framework/config"
 	"k8s.io/kubernetes/test/e2e/framework/testfiles"
 	"k8s.io/kubernetes/test/utils/image"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
 // https://github.com/kubernetes/kubernetes/blob/v1.16.4/test/e2e/e2e_test.go#L62
@@ -49,11 +49,6 @@ var _ = ginkgo.BeforeSuite(func() {
 	_, err := framework.LoadClientset()
 	framework.ExpectNoError(err)
 	_, err = framework.LoadConfig()
-	framework.ExpectNoError(err)
-})
-
-var _ = ginkgo.AfterSuite(func() {
-	_, err := framework.LoadClientset()
 	framework.ExpectNoError(err)
 })
 

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/containernetworking/cni/libcni"
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/cni/pkg/version"
 
@@ -17,6 +18,7 @@ import (
 )
 
 var ErrorAttachDefNotOvnManaged = errors.New("net-attach-def not managed by OVN")
+var ErrorChainingNotSupported = errors.New("CNI plugin chaining is not supported")
 
 // WriteCNIConfig writes a CNI JSON config file to directory given by global config
 // if the file doesn't already exist, or is different than the content that would
@@ -72,31 +74,92 @@ func WriteCNIConfig() error {
 
 // ParseNetConf parses config in NAD spec
 func ParseNetConf(bytes []byte) (*ovncnitypes.NetConf, error) {
+	var netconf *ovncnitypes.NetConf
+
+	confList, err := libcni.ConfListFromBytes(bytes)
+	if err == nil {
+		netconf, err = parseNetConfList(confList)
+		if err == nil {
+			if _, singleErr := parseNetConfSingle(bytes); singleErr == nil {
+				return nil, fmt.Errorf("CNI config cannot have both a plugin list and a single config")
+			}
+		}
+	} else {
+		netconf, err = parseNetConfSingle(bytes)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	if netconf.Topology == "" {
+		// NAD of default network
+		netconf.Name = ovntypes.DefaultNetworkName
+	}
+
+	return netconf, nil
+}
+
+func parseNetConfSingle(bytes []byte) (*ovncnitypes.NetConf, error) {
 	netconf := &ovncnitypes.NetConf{MTU: Default.MTU, NotDefault: false, IsSecondary: false}
 	err := json.Unmarshal(bytes, &netconf)
 	if err != nil {
 		return nil, err
 	}
+
 	// skip non-OVN NAD
 	if netconf.Type != "ovn-k8s-cni-overlay" {
 		return nil, ErrorAttachDefNotOvnManaged
 	}
+
+	err = validateNetConfNameFields(netconf)
+	if err != nil {
+		return nil, err
+	}
+
+	return netconf, nil
+}
+
+func parseNetConfList(confList *libcni.NetworkConfigList) (*ovncnitypes.NetConf, error) {
+	if len(confList.Plugins) > 1 {
+		return nil, ErrorChainingNotSupported
+	}
+
+	netconf := &ovncnitypes.NetConf{MTU: Default.MTU, NotDefault: false, IsSecondary: false}
+	if err := json.Unmarshal(confList.Plugins[0].Bytes, netconf); err != nil {
+		return nil, err
+	}
+
+	// skip non-OVN NAD
+	if netconf.Type != "ovn-k8s-cni-overlay" {
+		return nil, ErrorAttachDefNotOvnManaged
+	}
+
+	netconf.Name = confList.Name
+	netconf.CNIVersion = confList.CNIVersion
+
+	if err := validateNetConfNameFields(netconf); err != nil {
+		return nil, err
+	}
+
+	return netconf, nil
+}
+
+func validateNetConfNameFields(netconf *ovncnitypes.NetConf) error {
 	if netconf.NotDefault {
 		netconf.IsSecondary = true
 	}
-	if netconf.Topology == "" && !netconf.IsSecondary {
-		// NAD of default network
-		netconf.Name = ovntypes.DefaultNetworkName
-	} else {
+	if netconf.Topology != "" || netconf.IsSecondary {
+		// secondary network
 		if netconf.LegacyNADName != "" {
 			netconf.NADName = netconf.LegacyNADName
 		}
 		if netconf.NADName == "" {
-			return nil, fmt.Errorf("missing NADName in secondary network netconf %s", netconf.Name)
+			return fmt.Errorf("missing NADName in secondary network netconf %s", netconf.Name)
 		}
 		// "ovn-kubernetes" network name is reserved for later
 		if netconf.Name == "" || netconf.Name == ovntypes.DefaultNetworkName || netconf.Name == "ovn-kubernetes" {
-			return nil, fmt.Errorf("invalid name in in secondary network netconf (%s)", netconf.Name)
+			return fmt.Errorf("invalid name in in secondary network netconf (%s)", netconf.Name)
 		}
 		if netconf.IsSecondary && netconf.Topology == "" {
 			netconf.Topology = ovntypes.Layer3Topology
@@ -111,8 +174,7 @@ func ParseNetConf(bytes []byte) (*ovncnitypes.NetConf, error) {
 			netconf.ExcludeSubnets = strings.Join(netconf.ExcludeCIDRs, ",")
 		}
 	}
-
-	return netconf, nil
+	return nil
 }
 
 // ReadCNIConfig unmarshals a CNI JSON config into an NetConf structure

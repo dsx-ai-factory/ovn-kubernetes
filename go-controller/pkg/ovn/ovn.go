@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net"
 	"reflect"
@@ -126,6 +127,12 @@ func podNodeNameLabelChanged(pod *kapi.Pod, nodeNameLabel map[string]string) boo
 func (oc *DefaultNetworkController) ensurePod(oldPod, pod *kapi.Pod, addPort bool) error {
 	// Try unscheduled pods later
 	if !util.PodScheduled(pod) {
+		return nil
+	}
+
+	// skip the pods on no host subnet nodes
+	switchName := pod.Spec.NodeName
+	if oc.lsManager.IsNonHostSubnetSwitch(switchName) {
 		return nil
 	}
 
@@ -263,7 +270,13 @@ func (oc *DefaultNetworkController) removePod(pod *kapi.Pod, portInfo *lpInfo) e
 		}
 	}
 
-	return kubevirt.CleanUpLiveMigratablePod(oc.nbClient, oc.watchFactory, pod)
+	err := kubevirt.CleanUpLiveMigratablePod(oc.nbClient, oc.watchFactory, pod)
+	if err != nil {
+		return err
+	}
+
+	oc.forgetPodReleasedBeforeStartup(string(pod.UID), ovntypes.DefaultNetworkName)
+	return nil
 }
 
 // removeLocalZonePod tries to tear down a local zone pod. It returns nil on success and error on failure;
@@ -303,10 +316,6 @@ func (oc *DefaultNetworkController) removeLocalZonePod(pod *kapi.Pod, portInfo *
 // It removes the remote pod ips from the namespace address set and if its an external gw pod, removes
 // its routes.
 func (oc *DefaultNetworkController) removeRemoteZonePod(pod *kapi.Pod) error {
-	if err := oc.removeRemoteZonePodFromNamespaceAddressSet(pod); err != nil {
-		return fmt.Errorf("failed to remove the remote zone pod : %w", err)
-	}
-
 	if util.PodWantsHostNetwork(pod) {
 		// Delete the routes in the namespace associated with this remote pod if it was acting as an external GW
 		if err := oc.deletePodExternalGW(pod); err != nil {
@@ -315,16 +324,28 @@ func (oc *DefaultNetworkController) removeRemoteZonePod(pod *kapi.Pod) error {
 		}
 	}
 
+	// while this check is only intended for local pods, we also need it for
+	// remote live migrated pods that might have been allocated from this zone
+	if oc.wasPodReleasedBeforeStartup(string(pod.UID), ovntypes.DefaultNetworkName) {
+		klog.Infof("Completed pod %s/%s was already released before startup",
+			pod.Namespace,
+			pod.Name,
+		)
+		return nil
+	}
+
+	if err := oc.removeRemoteZonePodFromNamespaceAddressSet(pod); err != nil {
+		return fmt.Errorf("failed to remove the remote zone pod: %w", err)
+	}
+
 	if kubevirt.IsPodLiveMigratable(pod) {
-		// After live migration to a different zone ip should be deallocated
-		// from remote zone if VM is gone.
-		podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, ovntypes.DefaultNetworkName)
-		if err != nil {
-			return fmt.Errorf("unable to unmarshal pod annotation to release IPs at removeRemoteZonePod: %v", err)
+		ips, err := util.GetPodCIDRsWithFullMask(pod, oc.NetInfo)
+		if err != nil && !errors.Is(err, util.ErrNoPodIPFound) {
+			return fmt.Errorf("failed to get pod ips for the pod %s/%s: %w", pod.Namespace, pod.Name, err)
 		}
-		switchName, zoneContainsPodSubnet := kubevirt.ZoneContainsPodSubnet(oc.lsManager, podAnnotation)
+		switchName, zoneContainsPodSubnet := kubevirt.ZoneContainsPodSubnet(oc.lsManager, ips)
 		if zoneContainsPodSubnet {
-			if err := oc.lsManager.ReleaseIPs(switchName, podAnnotation.IPs); err != nil {
+			if err := oc.lsManager.ReleaseIPs(switchName, ips); err != nil {
 				return err
 			}
 		}
@@ -458,10 +479,6 @@ func shouldUpdateNode(node, oldNode *kapi.Node) (bool, error) {
 
 	if oldNoHostSubnet && newNoHostSubnet {
 		return false, nil
-	} else if oldNoHostSubnet && !newNoHostSubnet {
-		return false, fmt.Errorf("error updating node %s, cannot remove assigned hostsubnet, please delete node and recreate.", node.Name)
-	} else if !oldNoHostSubnet && newNoHostSubnet {
-		return false, fmt.Errorf("error updating node %s, cannot assign a hostsubnet to already created node, please delete node and recreate.", node.Name)
 	}
 
 	return true, nil

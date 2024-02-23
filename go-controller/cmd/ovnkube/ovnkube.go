@@ -285,7 +285,7 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	}()
 
 	if config.Kubernetes.BootstrapKubeconfig != "" {
-		if err := util.StartNodeCertificateManager(ctx.Context, ovnKubeStartWg, &config.Kubernetes); err != nil {
+		if err := util.StartNodeCertificateManager(ctx.Context, ovnKubeStartWg, os.Getenv("K8S_NODE"), &config.Kubernetes); err != nil {
 			return fmt.Errorf("failed to start the node certificate manager: %w", err)
 		}
 	}
@@ -435,7 +435,12 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	return nil
 }
 
-func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util.OVNClientset, eventRecorder record.EventRecorder) error {
+func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util.OVNClientset, eventRecorder record.EventRecorder) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("recovering from a panic in runOvnKube: %v", r)
+		}
+	}()
 	startTime := time.Now()
 
 	if runMode.cleanupNode {
@@ -450,7 +455,6 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 	}()
 
 	var masterWatchFactory *factory.WatchFactory
-	var err error
 
 	if runMode.ovnkubeController {
 		// create factory and start the controllers asked for
@@ -522,13 +526,17 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 			err = cm.Start(ctx)
 			if err != nil {
 				ovnkubeControllerStartErr = fmt.Errorf("failed to start ovnkube controller: %w", err)
+				klog.Error(ovnkubeControllerStartErr)
 				return
 			}
 			// record delay until ready
 			metrics.MetricOVNKubeControllerReadyDuration.Set(time.Since(startTime).Seconds())
 		}()
+		// make sure ovnkubeController started in a separate goroutine will execute .Stop() on shutdown.
+		// Stop() only makes sense to call if Start() succeeded.
 		defer func() {
-			if ovnkubeControllerStartErr != nil {
+			ovnkubeControllerWG.Wait()
+			if ovnkubeControllerStartErr == nil {
 				cm.Stop()
 			}
 		}()
@@ -609,6 +617,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 		}
 	}
 
+	// wait for ovnkubeController to start and check error
 	if runMode.ovnkubeController {
 		ovnkubeControllerWG.Wait()
 		if ovnkubeControllerStartErr != nil {

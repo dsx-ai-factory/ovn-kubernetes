@@ -40,7 +40,9 @@ spec:
       hostNetwork: true
       dnsPolicy: Default
       priorityClassName: "system-node-critical"
-      {{ "hostPID: true" if ovn_unprivileged_mode=="no" }}
+      {% if ovn_unprivileged_mode=="no" %}
+      "hostPID: true"
+      {% endif %}
       containers:
         - name: ovnkube-node
           image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"

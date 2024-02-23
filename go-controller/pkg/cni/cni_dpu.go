@@ -3,6 +3,7 @@ package cni
 import (
 	"fmt"
 
+	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -33,7 +34,7 @@ func (pr *PodRequest) updatePodDPUConnDetailsWithRetry(kube kube.Interface, podL
 	return err
 }
 
-func (pr *PodRequest) addDPUConnectionDetailsAnnot(k kube.Interface, podLister corev1listers.PodLister, vfNetdevName string) error {
+func (pr *PodRequest) addDPUConnectionDetailsAnnot(k kube.Interface, podLister corev1listers.PodLister, vfNetdevName string, deviceInfo nadapi.DeviceInfo) error {
 	if pr.CNIConf.DeviceID == "" {
 		return fmt.Errorf("DeviceID must be set for Pod request with DPU")
 	}
@@ -54,7 +55,7 @@ func (pr *PodRequest) addDPUConnectionDetailsAnnot(k kube.Interface, podLister c
 		return err
 	}
 
-	pfNetdev, err := util.GetNetdevNameFromDeviceId(pfPciAddress)
+	pfNetdev, err := util.GetNetdevNameFromDeviceId(pfPciAddress, deviceInfo)
 	if err != nil {
 		return fmt.Errorf("failed to get the PF name from the PCI Address: %s, %v", pfPciAddress, err)
 	}

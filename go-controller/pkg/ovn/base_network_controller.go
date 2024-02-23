@@ -36,6 +36,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/cache"
@@ -161,6 +162,11 @@ type BaseNetworkController struct {
 	// Interconnect resources are Transit switch and logical ports connecting this transit switch
 	// to the cluster router. Please see zone_interconnect/interconnect_handler.go for more details.
 	zoneICHandler *zoneic.ZoneInterconnectHandler
+
+	// releasedPodsBeforeStartup tracks pods per NAD (map of NADs to pods UIDs)
+	// might have been already be released on startup
+	releasedPodsBeforeStartup  map[string]sets.Set[string]
+	releasedPodsOnStartupMutex sync.Mutex
 
 	// AdminPBR is only supported for default network and secondary layer3 network
 	adminPBRHandler          *factory.Handler
@@ -460,12 +466,16 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 		err = libovsdbops.AddPortsToPortGroup(bnc.nbClient, bnc.getClusterPortGroupName(types.ClusterRtrPortGroupNameBase), logicalSwitchPort.UUID)
 		if err != nil {
 			klog.Errorf(err.Error())
-			return err
+			return fmt.Errorf("failed adding port to portgroup for multicast: %v", err)
 		}
 	}
-
 	// Add the switch to the logical switch cache
-	return bnc.lsManager.AddOrUpdateSwitch(logicalSwitch.Name, hostSubnets)
+	migratableIPsByPod, err := bnc.findMigratablePodIPsForSubnets(hostSubnets)
+	if err != nil {
+		return fmt.Errorf("failed finding migratable pod IPs belonging to %s: %v", nodeName, err)
+	}
+
+	return bnc.lsManager.AddOrUpdateSwitch(logicalSwitch.Name, hostSubnets, migratableIPsByPod...)
 }
 
 // deleteNodeLogicalNetwork removes the logical switch and logical router port associated with the node
@@ -662,8 +672,8 @@ func (bnc *BaseNetworkController) getNamespaceLocked(ns string, readOnly bool) (
 }
 
 // deleteNamespaceLocked locks namespacesMutex, finds and deletes ns, and returns the
-// namespace, locked.
-func (bnc *BaseNetworkController) deleteNamespaceLocked(ns string) *namespaceInfo {
+// namespace, locked. If error != nil, namespaceInfo is nil.
+func (bnc *BaseNetworkController) deleteNamespaceLocked(ns string) (*namespaceInfo, error) {
 	// The locking here is the same as in getNamespaceLocked
 
 	bnc.namespacesMutex.Lock()
@@ -671,7 +681,7 @@ func (bnc *BaseNetworkController) deleteNamespaceLocked(ns string) *namespaceInf
 	bnc.namespacesMutex.Unlock()
 
 	if nsInfo == nil {
-		return nil
+		return nil, nil
 	}
 	nsInfo.Lock()
 
@@ -679,7 +689,7 @@ func (bnc *BaseNetworkController) deleteNamespaceLocked(ns string) *namespaceInf
 	defer bnc.namespacesMutex.Unlock()
 	if nsInfo != bnc.namespaces[ns] {
 		nsInfo.Unlock()
-		return nil
+		return nil, nil
 	}
 	if nsInfo.addressSet != nil {
 		// Empty the address set, then delete it after an interval.
@@ -713,9 +723,16 @@ func (bnc *BaseNetworkController) deleteNamespaceLocked(ns string) *namespaceInf
 			}
 		}()
 	}
+	if nsInfo.portGroupName != "" {
+		err := libovsdbops.DeletePortGroups(bnc.nbClient, nsInfo.portGroupName)
+		if err != nil {
+			nsInfo.Unlock()
+			return nil, err
+		}
+	}
 	delete(bnc.namespaces, ns)
 
-	return nsInfo
+	return nsInfo, nil
 }
 
 // WatchNodes starts the watching of the nodes resource and calls back the appropriate handler logic
@@ -819,7 +836,7 @@ func (bnc *BaseNetworkController) isLayer2Interconnect() bool {
 }
 
 func (bnc *BaseNetworkController) nodeZoneClusterChanged(oldNode, newNode *kapi.Node, newNodeIsLocalZone bool) bool {
-	// Check if the annotations have changed. Use network topology and local params to skip unecessary checks
+	// Check if the annotations have changed. Use network topology and local params to skip unnecessary checks
 
 	// NodeIDAnnotationChanged and NodeTransitSwitchPortAddrAnnotationChanged affects local and remote nodes
 	if util.NodeIDAnnotationChanged(oldNode, newNode) {
@@ -836,6 +853,46 @@ func (bnc *BaseNetworkController) nodeZoneClusterChanged(oldNode, newNode *kapi.
 	}
 
 	return false
+}
+
+func (bnc *BaseNetworkController) findMigratablePodIPsForSubnets(subnets []*net.IPNet) ([]*net.IPNet, error) {
+	ipSet := sets.New[string]()
+	ipList := []*net.IPNet{}
+	liveMigratablePods, err := kubevirt.FindLiveMigratablePods(bnc.watchFactory)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, liveMigratablePod := range liveMigratablePods {
+		if util.PodCompleted(liveMigratablePod) {
+			continue
+		}
+		isMigratedSourcePodStale, err := kubevirt.IsMigratedSourcePodStale(bnc.watchFactory, liveMigratablePod)
+		if err != nil {
+			return nil, err
+		}
+		if isMigratedSourcePodStale {
+			continue
+		}
+		podAnnotation, err := util.UnmarshalPodAnnotation(liveMigratablePod.Annotations, bnc.GetNetworkName())
+		if err != nil {
+			return nil, err
+		}
+		for _, podIP := range podAnnotation.IPs {
+			if util.IsContainedInAnyCIDR(podIP, subnets...) {
+				podIPString := podIP.String()
+				// Skip duplicate IPs
+				if !ipSet.Has(podIPString) {
+					ipSet = ipSet.Insert(podIPString)
+					ipList = append(ipList, &net.IPNet{
+						IP:   podIP.IP,
+						Mask: util.GetIPFullMask(podIP.IP),
+					})
+				}
+			}
+		}
+	}
+	return ipList, nil
 }
 
 // WatchAdminPolicyBasedRoutes starts the watching of adminpolicybasedroute resource and calls

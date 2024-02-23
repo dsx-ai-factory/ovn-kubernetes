@@ -9,10 +9,10 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -135,6 +135,8 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 		})
 
 		ginkgo.It("reconciles an existing namespace with pods", func() {
+			// this flag will create namespaced port group
+			config.OVNKubernetesFeature.EnableEgressFirewall = true
 			namespaceT := *newNamespace(namespaceName)
 			tP := newTPod(
 				"node1",
@@ -175,9 +177,21 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			fakeOvn.asf.EventuallyExpectAddressSetWithIPs(namespaceName, []string{tP.podIP})
+
+			// port group is empty, because it will be filled by pod add logic
+			pg := fakeOvn.controller.buildPortGroup(
+				libovsdbutil.HashedPortGroup(namespaceName),
+				namespaceName,
+				nil,
+				nil,
+			)
+			pg.UUID = pg.Name + "-UUID"
+			gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData([]libovsdb.TestData{pg}))
 		})
 
-		ginkgo.It("creates an empty address set for the namespace without pods", func() {
+		ginkgo.It("creates an empty address set and port group for the namespace without pods", func() {
+			// this flag will create namespaced port group
+			config.OVNKubernetesFeature.EnableEgressFirewall = true
 			fakeOvn.start(&v1.NamespaceList{
 				Items: []v1.Namespace{
 					*newNamespace(namespaceName),
@@ -190,6 +204,15 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			fakeOvn.asf.ExpectEmptyAddressSet(namespaceName)
+
+			pg := fakeOvn.controller.buildPortGroup(
+				libovsdbutil.HashedPortGroup(namespaceName),
+				namespaceName,
+				nil,
+				nil,
+			)
+			pg.UUID = pg.Name + "-UUID"
+			gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData([]libovsdb.TestData{pg}))
 		})
 
 		ginkgo.It("creates an address set for existing nodes when the host network traffic namespace is created", func() {
@@ -232,11 +255,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			expectedNodeSwitch := node1.logicalSwitch([]string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID})
 			expectedClusterRouterPortGroup := newRouterPortGroup()
 			expectedClusterPortGroup := newClusterPortGroup()
-			gr := ovntypes.GWRouterPrefix + node1.Name
-			datapath := &sbdb.DatapathBinding{
-				UUID:        gr + "-UUID",
-				ExternalIDs: map[string]string{"logical-router": gr + "-UUID", "name": gr},
-			}
+
 			fakeOvn.startWithDBSetup(
 				libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
@@ -248,9 +267,6 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 						expectedClusterLBGroup,
 						expectedSwitchLBGroup,
 						expectedRouterLBGroup,
-					},
-					SBData: []libovsdbtest.TestData{
-						datapath,
 					},
 				},
 				&v1.NamespaceList{
@@ -270,11 +286,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.KubeOVN{
-				Kube:                 kube.Kube{KClient: fakeOvn.fakeClient.KubeClient},
-				ANPClient:            fakeOvn.fakeClient.ANPClient,
-				EIPClient:            fakeOvn.fakeClient.EgressIPClient,
-				EgressFirewallClient: fakeOvn.fakeClient.EgressFirewallClient}, testNode.Name)
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{KClient: fakeOvn.fakeClient.KubeClient}, testNode.Name)
 
 			vlanID := uint(1024)
 			l3Config := node1.gatewayConfig(config.GatewayModeShared, vlanID)
@@ -334,6 +346,91 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				allowIPs = append(allowIPs, lrpIP.IP.String())
 			}
 			fakeOvn.asf.EventuallyExpectAddressSetWithIPs(hostNetworkNamespace, allowIPs)
+		})
+
+		ginkgo.It("reconciles an existing namespace port group, without updating it", func() {
+			// this flag will create namespaced port group
+			config.OVNKubernetesFeature.EnableEgressFirewall = true
+			namespaceT := *newNamespace(namespaceName)
+			pg := &nbdb.PortGroup{
+				Name:        libovsdbutil.HashedPortGroup(namespaceName),
+				ExternalIDs: map[string]string{"name": namespaceName},
+				ACLs:        []string{"test-UUID"},
+				Ports:       []string{"test-UUID"},
+			}
+			pg.UUID = pg.Name + "-UUID"
+			initialData := []libovsdb.TestData{pg}
+
+			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{NBData: initialData},
+				&v1.NamespaceList{
+					Items: []v1.Namespace{
+						namespaceT,
+					},
+				},
+				&v1.NodeList{
+					Items: []v1.Node{
+						*newNode("node1", "192.168.126.202/24"),
+					},
+				},
+			)
+
+			err := fakeOvn.controller.WatchNamespaces()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			fakeOvn.asf.EventuallyExpectAddressSetWithIPs(namespaceName, []string{})
+			gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(initialData))
+		})
+		ginkgo.It("deletes an existing namespace port group when egress firewall and multicast are disabled", func() {
+			namespaceT := *newNamespace(namespaceName)
+			pg := &nbdb.PortGroup{
+				Name:        libovsdbutil.HashedPortGroup(namespaceName),
+				ExternalIDs: nil,
+				ACLs:        []string{"test-UUID"},
+				Ports:       []string{"test-UUID"},
+			}
+			pg.UUID = pg.Name + "-UUID"
+			initialData := []libovsdb.TestData{pg}
+
+			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{NBData: initialData},
+				&v1.NamespaceList{
+					Items: []v1.Namespace{
+						namespaceT,
+					},
+				},
+				&v1.NodeList{
+					Items: []v1.Node{
+						*newNode("node1", "192.168.126.202/24"),
+					},
+				},
+			)
+
+			err := fakeOvn.controller.WatchNamespaces()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData([]libovsdb.TestData{}))
+		})
+		ginkgo.It("deletes an existing namespace port group when there are no namespaces", func() {
+			// this flag will create namespaced port group
+			config.OVNKubernetesFeature.EnableEgressFirewall = true
+			pg := &nbdb.PortGroup{
+				Name:        libovsdbutil.HashedPortGroup(namespaceName),
+				ExternalIDs: nil,
+				ACLs:        []string{"test-UUID"},
+				Ports:       []string{"test-UUID"},
+			}
+			pg.UUID = pg.Name + "-UUID"
+			initialData := []libovsdb.TestData{pg}
+
+			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{NBData: initialData},
+				&v1.NodeList{
+					Items: []v1.Node{
+						*newNode("node1", "192.168.126.202/24"),
+					},
+				},
+			)
+
+			err := fakeOvn.controller.WatchNamespaces()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData([]libovsdb.TestData{}))
 		})
 	})
 

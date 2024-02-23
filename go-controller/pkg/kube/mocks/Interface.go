@@ -57,15 +57,15 @@ func (_m *Interface) GetAnnotationsOnPod(namespace string, name string) (map[str
 }
 
 // GetNamespaces provides a mock function with given fields: labelSelector
-func (_m *Interface) GetNamespaces(labelSelector metav1.LabelSelector) (*corev1.NamespaceList, error) {
+func (_m *Interface) GetNamespaces(labelSelector metav1.LabelSelector) ([]*corev1.Namespace, error) {
 	ret := _m.Called(labelSelector)
 
-	var r0 *corev1.NamespaceList
-	if rf, ok := ret.Get(0).(func(metav1.LabelSelector) *corev1.NamespaceList); ok {
+	var r0 []*corev1.Namespace
+	if rf, ok := ret.Get(0).(func(metav1.LabelSelector) []*corev1.Namespace); ok {
 		r0 = rf(labelSelector)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*corev1.NamespaceList)
+			r0 = ret.Get(0).([]*corev1.Namespace)
 		}
 	}
 
@@ -103,15 +103,15 @@ func (_m *Interface) GetNode(name string) (*corev1.Node, error) {
 }
 
 // GetNodes provides a mock function with given fields:
-func (_m *Interface) GetNodes() (*corev1.NodeList, error) {
+func (_m *Interface) GetNodes() ([]*corev1.Node, error) {
 	ret := _m.Called()
 
-	var r0 *corev1.NodeList
-	if rf, ok := ret.Get(0).(func() *corev1.NodeList); ok {
+	var r0 []*corev1.Node
+	if rf, ok := ret.Get(0).(func() []*corev1.Node); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*corev1.NodeList)
+			r0 = ret.Get(0).([]*corev1.Node)
 		}
 	}
 
@@ -148,22 +148,22 @@ func (_m *Interface) GetPod(namespace string, name string) (*corev1.Pod, error) 
 	return r0, r1
 }
 
-// GetPods provides a mock function with given fields: namespace, labelSelector
-func (_m *Interface) GetPods(namespace string, labelSelector metav1.LabelSelector) (*corev1.PodList, error) {
-	ret := _m.Called(namespace, labelSelector)
+// GetPods provides a mock function with given fields: namespace, opts
+func (_m *Interface) GetPods(namespace string, opts metav1.ListOptions) ([]*corev1.Pod, error) {
+	ret := _m.Called(namespace, opts)
 
-	var r0 *corev1.PodList
-	if rf, ok := ret.Get(0).(func(string, metav1.LabelSelector) *corev1.PodList); ok {
-		r0 = rf(namespace, labelSelector)
+	var r0 []*corev1.Pod
+	if rf, ok := ret.Get(0).(func(string, metav1.ListOptions) []*corev1.Pod); ok {
+		r0 = rf(namespace, opts)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*corev1.PodList)
+			r0 = ret.Get(0).([]*corev1.Pod)
 		}
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(string, metav1.LabelSelector) error); ok {
-		r1 = rf(namespace, labelSelector)
+	if rf, ok := ret.Get(1).(func(string, metav1.ListOptions) error); ok {
+		r1 = rf(namespace, opts)
 	} else {
 		r1 = ret.Error(1)
 	}

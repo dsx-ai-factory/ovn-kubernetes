@@ -19,7 +19,7 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
-// podIPConfig holds pod specific info to implement egress IP for non-OVN managed networks for a single pod IP. A pod may
+// podIPConfig holds pod specific info to implement egress IP for secondary host networks for a single pod IP. A pod may
 // contain multiple IPs (one for single stack, 2 for dual stack).
 type podIPConfig struct {
 	failed      bool // used for retry
@@ -55,7 +55,7 @@ func newPodIPConfigList() *podIPConfigList {
 	return &podIPConfigList{elems: []*podIPConfig{}}
 }
 
-func (pICL *podIPConfigList) Len() int {
+func (pICL *podIPConfigList) len() int {
 	return len(pICL.elems)
 }
 
@@ -92,16 +92,16 @@ func (pICL *podIPConfigList) remove(idxs ...int) {
 	pICL.elems = newElems
 }
 
-// InsertOverwriteFailed should be used to add elements to the podIPConfigList that have failed to be applied.
-func (pICL *podIPConfigList) InsertOverwriteFailed(pICs ...podIPConfig) {
+// insertOverwriteFailed should be used to add elements to the podIPConfigList that have failed to be applied.
+func (pICL *podIPConfigList) insertOverwriteFailed(pICs ...podIPConfig) {
 	for _, pIC := range pICs {
 		pIC.failed = true
 		pICL.insertOverwrite(pIC)
 	}
 }
 
-// Insert should be used to add elements to the podIPConfigList
-func (pICL *podIPConfigList) Insert(pICs ...podIPConfig) {
+// insert should be used to add elements to the podIPConfigList
+func (pICL *podIPConfigList) insert(pICs ...podIPConfig) {
 	for _, pc := range pICs {
 		pICL.insertOverwrite(pc)
 	}
@@ -118,7 +118,7 @@ func (pICL *podIPConfigList) insertOverwrite(pIC podIPConfig) {
 	pICL.elems = append(pICL.elems, &pIC)
 }
 
-func (pICL *podIPConfigList) Delete(pICs ...podIPConfig) {
+func (pICL *podIPConfigList) delete(pICs ...podIPConfig) {
 	elems := make([]*podIPConfig, 0, len(pICL.elems))
 	for _, existingPIC := range pICL.elems {
 		removed := false
@@ -253,8 +253,14 @@ func (c *Controller) getEIPsForPodChange(pod *corev1.Pod) (sets.Set[string], err
 		return nil, err
 	}
 	for _, informerEIP := range informerEIPs {
-		eipNsSel, _ := metav1.LabelSelectorAsSelector(&informerEIP.Spec.NamespaceSelector)
-		eipPodSel, _ := metav1.LabelSelectorAsSelector(&informerEIP.Spec.PodSelector)
+		eipNsSel, err := metav1.LabelSelectorAsSelector(&informerEIP.Spec.NamespaceSelector)
+		if err != nil {
+			return nil, err
+		}
+		eipPodSel, err := metav1.LabelSelectorAsSelector(&informerEIP.Spec.PodSelector)
+		if err != nil {
+			return nil, err
+		}
 		if eipNsSel.Matches(labels.Set(podNs.Labels)) && eipPodSel.Matches(labels.Set(pod.Labels)) {
 			eipNames.Insert(informerEIP.Name)
 		}

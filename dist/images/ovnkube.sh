@@ -45,8 +45,10 @@ BASEDIR=$(dirname $0)
 # K8S_NODE_IP - IP address of of the node
 #
 # OVN_METRICS_ENDPOINT_IP - metrics endpoint ip
-# OVN_METRICS_MASTER_PORT - metrics master port
-# OVN_METRICS_WORKER_PORT - metrics worker port
+# OVN_METRICS_MASTER_PORT - metrics port which will be exposed by ovnkube-master (default 9409)
+# OVN_METRICS_WORKER_PORT - metrics port which will be exposed by ovnkube-node (default 9410)
+# OVN_METRICS_BIND_PORT - port for the OVN metrics server to serve on (default 9476)
+# OVN_METRICS_EXPORTER_PORT - ovs-metrics exporter port (default 9310)
 # OVN_DAEMONSET_VERSION - version match daemonset and image - v3
 # K8S_TOKEN - the apiserver token. Automatically detected when running in a pod - v3
 # K8S_CACERT - the apiserver CA. Automatically detected when running in a pod - v3
@@ -218,17 +220,17 @@ if [[ -z ${metrics_endpoint_ip} ]]; then
 fi
 metrics_endpoint_ip=$(bracketify $metrics_endpoint_ip)
 
-# set metrics endpoint master port bind to K8S_NODE_IP
-metrics_master_port=${OVN_METRICS_MASTER_PORT}
-if [[ -z ${metrics_master_port} ]]; then
-  metrics_master_port=9409
-fi
+# set metrics master port
+metrics_master_port=${OVN_METRICS_MASTER_PORT:-9409}
 
-# set metrics endpoint worker port bind to K8S_NODE_IP
-metrics_worker_port=${OVN_METRICS_WORKER_PORT}
-if [[ -z ${metrics_worker_port} ]]; then
-  metrics_worker_port=9410
-fi
+# set metrics worker port
+metrics_worker_port=${OVN_METRICS_WORKER_PORT:-9410}
+
+# set metrics bind port
+metrics_bind_port=${OVN_METRICS_BIND_PORT:-9476}
+
+# set metrics exporter port
+metrics_exporter_port=${OVN_METRICS_EXPORTER_PORT:-9310}
 
 disable_ovs_metrics=${OVNKUBE_DISABLE_OVS_METRICS:-false}
 
@@ -782,16 +784,17 @@ ovs-server() {
   /usr/share/openvswitch/scripts/ovs-ctl start --no-ovs-vswitchd \
     --system-id=random ${ovs_options} ${USER_ARGS} "$@"
 
-  # Restrict the number of pthreads ovs-vswitchd creates to reduce the
-  # amount of RSS it uses on hosts with many cores
-  # https://bugzilla.redhat.com/show_bug.cgi?id=1571379
-  # https://bugzilla.redhat.com/show_bug.cgi?id=1572797
-  if [[ $(nproc) -gt 12 ]]; then
-    ovs-vsctl --no-wait set Open_vSwitch . other_config:n-revalidator-threads=4
-    ovs-vsctl --no-wait set Open_vSwitch . other_config:n-handler-threads=10
-  fi
+  # Reduce stack size to 2M from default 8M as per below commit on Openvswitch
+  # https://github.com/openvswitch/ovs/commit/b82a90e266e1246fe2973db97c95df22558174ea
+  # added while troubleshooting on https://bugzilla.redhat.com/show_bug.cgi?id=1572797
+  ulimit -s 2048
+
   /usr/share/openvswitch/scripts/ovs-ctl start --no-ovsdb-server \
     --system-id=random ${ovs_options} ${USER_ARGS} "$@"
+
+  if [[ $(nproc) -gt 32 ]]; then
+    echo "Warning: Higher memory allocation by ovs-vswitchd is expected due to high number of n-handler-threads and n-revalidator-threads"
+  fi
 
   tail --follow=name ${OVS_LOGDIR}/ovs-vswitchd.log ${OVS_LOGDIR}/ovsdb-server.log &
   ovs_tail_pid=$!
@@ -932,6 +935,10 @@ nb-ovsdb() {
     echo "=============== nb-ovsdb ========== reconfigured for ipsec"
   }
 
+  # Let ovn-northd sleep and not use so much CPU
+  ovn-nbctl set NB_Global . options:northd-backoff-interval-ms=300
+  echo "=============== nb-ovsdb ========== reconfigured for northd backoff"
+
   ovn-nbctl set NB_Global . name=${ovn_zone}
   ovn-nbctl set NB_Global . options:name=${ovn_zone}
 
@@ -1066,6 +1073,10 @@ local-nb-ovsdb() {
 
   wait_for_event attempts=3 process_ready ovnnb_db
   echo "=============== nb-ovsdb (unix sockets only) ========== RUNNING"
+
+  # Let ovn-northd sleep and not use so much CPU
+  ovn-nbctl set NB_Global . options:northd-backoff-interval-ms=300
+  echo "=============== nb-ovsdb ========== reconfigured for northd backoff"
 
   ovn-nbctl set NB_Global . name=${K8S_NODE}
   ovn-nbctl set NB_Global . options:name=${K8S_NODE}
@@ -1607,7 +1618,7 @@ ovnkube-controller() {
   fi
   echo "egressservice_enabled_flag=${egressservice_enabled_flag}"
 
-  ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:9409"
+  ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:${metrics_master_port}"
   echo "ovnkube_master_metrics_bind_address=${ovnkube_master_metrics_bind_address}"
 
   local ovnkube_metrics_tls_opts=""
@@ -1706,6 +1717,7 @@ ovnkube-controller() {
     --logfile /var/log/ovn-kubernetes/ovnkube-controller.log \
     --loglevel=${ovnkube_loglevel} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
+    --metrics-enable-pprof \
     --pidfile ${OVN_RUNDIR}/ovnkube-controller.pid \
     --zone ${ovn_zone} &
 
@@ -1959,9 +1971,11 @@ ovnkube-controller-with-node() {
   if test -z "${OVN_UNPRIVILEGED_MODE+x}" -o "x${OVN_UNPRIVILEGED_MODE}" = xno; then
     ovn_unprivileged_flag=""
   fi
-  ovn_metrics_bind_address="${metrics_endpoint_ip}:9476"
-  metrics_bind_address="${metrics_endpoint_ip}:9410"
-  echo "ovnkube_master_metrics_bind_address=${ovnkube_master_metrics_bind_address}"
+  
+  ovn_metrics_bind_address="${metrics_endpoint_ip}:${metrics_bind_port}"
+  metrics_bind_address="${metrics_endpoint_ip}:${metrics_worker_port}"
+  echo "ovn_metrics_bind_address=${ovn_metrics_bind_address}"
+  echo "metrics_bind_address=${metrics_bind_address}"
 
   local ovnkube_metrics_tls_opts=""
   if [[ ${OVNKUBE_METRICS_PK} != "" && ${OVNKUBE_METRICS_CERT} != "" ]]; then
@@ -1971,6 +1985,11 @@ ovnkube-controller-with-node() {
       "
   fi
   echo "ovnkube_metrics_tls_opts=${ovnkube_metrics_tls_opts}"
+
+  local export_ovs_metrics_opts=""
+  if [[ ${disable_ovs_metrics} == "false" ]]; then
+    export_ovs_metrics_opts="--export-ovs-metrics"
+  fi
 
   ovnkube_config_duration_enable_flag=
   if [[ ${ovnkube_config_duration_enable} == "true" ]]; then
@@ -2059,6 +2078,7 @@ ovnkube-controller-with-node() {
     ${egressservice_enabled_flag} \
     ${empty_lb_events_flag} \
     ${enable_lflow_cache} \
+    ${export_ovs_metrics_opts} \
     ${hybrid_overlay_flags} \
     ${ipfix_config} \
     ${ipfix_targets} \
@@ -2101,6 +2121,7 @@ ovnkube-controller-with-node() {
     --logfile /var/log/ovn-kubernetes/ovnkube-controller-with-node.log \
     --loglevel=${ovnkube_loglevel} \
     --metrics-bind-address ${metrics_bind_address} \
+    --metrics-enable-pprof \
     --mtu=${mtu} \
     --nodeport \
     --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
@@ -2145,6 +2166,12 @@ ovn-cluster-manager() {
          egressservice_enabled_flag="--enable-egress-service"
   fi
   echo "egressservice_enabled_flag=${egressservice_enabled_flag}"
+
+  egressfirewall_enabled_flag=
+  if [[ ${ovn_egressfirewall_enable} == "true" ]]; then
+	  egressfirewall_enabled_flag="--enable-egress-firewall"
+  fi
+  echo "egressfirewall_enabled_flag=${egressfirewall_enabled_flag}"
 
   hybrid_overlay_flags=
   if [[ ${ovn_hybrid_overlay_enable} == "true" ]]; then
@@ -2223,6 +2250,7 @@ ovn-cluster-manager() {
 
   echo "=============== ovn-cluster-manager ========== MASTER ONLY"
   /usr/bin/ovnkube --init-cluster-manager ${K8S_NODE} \
+    ${egressfirewall_enabled_flag} \
     ${egressip_enabled_flag} \
     ${egressip_healthcheck_port_flag} \
     ${egressservice_enabled_flag} \
@@ -2246,6 +2274,7 @@ ovn-cluster-manager() {
     --logfile /var/log/ovn-kubernetes/ovnkube-cluster-manager.log \
     --loglevel=${ovnkube_loglevel} \
     --metrics-bind-address ${ovnkube_cluster_manager_metrics_bind_address} \
+    --metrics-enable-pprof \
     --pidfile ${OVN_RUNDIR}/ovnkube-cluster-manager.pid &
 
   echo "=============== ovn-cluster-manager ========== running"
@@ -2847,6 +2876,23 @@ cleanup-ovn-node() {
     --loglevel=${ovnkube_loglevel} \
     --logfile /var/log/ovn-kubernetes/ovnkube.log
 
+}
+
+# v3 - Runs ovn-kube-util in daemon mode to export prometheus metrics related to OVS.
+ovs-metrics() {
+  check_ovn_daemonset_version "3"
+
+  echo "=============== ovs-metrics - (wait for ovs_ready)"
+  wait_for_event ovs_ready
+
+  ovs_exporter_bind_address="${metrics_endpoint_ip}:${metrics_exporter_port}"
+  /usr/bin/ovn-kube-util \
+    --loglevel=${ovnkube_loglevel} \
+    ovs-exporter \
+    --metrics-bind-address ${ovs_exporter_bind_address}
+
+  echo "=============== ovs-metrics with pid ${?} terminated ========== "
+  exit 1
 }
 
 files_exist() {

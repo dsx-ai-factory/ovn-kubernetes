@@ -12,8 +12,10 @@ import (
 	"strings"
 
 	"github.com/k8snetworkplumbingwg/govdpa/pkg/kvdpa"
+	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/k8snetworkplumbingwg/sriovnet"
 	utilfs "github.com/k8snetworkplumbingwg/sriovnet/pkg/utils/filesystem"
+	"k8s.io/klog/v2"
 )
 
 // Copied from vendor/github.com/Mellanox/sriovnet/sriovnet_switchdev.go
@@ -160,12 +162,26 @@ func GetFunctionRepresentorName(deviceID string) (string, error) {
 }
 
 // GetNetdevsNameFromDeviceId returns the all netdevice names from the passed device ID.
-func GetNetdevsNameFromDeviceId(deviceId string) ([]string, error) {
+func GetNetdevsNameFromDeviceId(deviceId string, deviceInfo nadapi.DeviceInfo) ([]string, error) {
+	var err error
+
 	if IsPCIDeviceName(deviceId) {
-		// If a vDPA device exists, it takes preference over the vendor device, steering-wize
-		vdpaDevice, err := GetVdpaOps().GetVdpaDeviceByPci(deviceId)
-		if err == nil && vdpaDevice.Driver() == kvdpa.VirtioVdpaDriver {
+		if deviceInfo.Vdpa != nil {
+			if deviceInfo.Vdpa.Driver == "vhost" {
+				klog.V(2).Info("deviceInfo.Vdpa.Driver is vhost, returning empty netdev")
+				return []string{""}, nil
+			}
+		}
+
+		// If a virtio/vDPA device exists, it takes preference over the vendor device, steering-wize
+		var vdpaDevice kvdpa.VdpaDevice
+		vdpaDevice, err = GetVdpaOps().GetVdpaDeviceByPci(deviceId)
+		if err == nil && vdpaDevice != nil && vdpaDevice.Driver() == kvdpa.VirtioVdpaDriver {
+			klog.V(2).Infof("deviceInfo.Vdpa.Driver is virtio, returning netdev %s", vdpaDevice.VirtioNet().NetDev())
 			return []string{vdpaDevice.VirtioNet().NetDev()}, nil
+		}
+		if err != nil {
+			klog.Warningf("Error when searching for the virtio/vdpa netdev: ", err)
 		}
 
 		return GetSriovnetOps().GetNetDevicesFromPci(deviceId)
@@ -175,8 +191,8 @@ func GetNetdevsNameFromDeviceId(deviceId string) ([]string, error) {
 }
 
 // GetNetdevNameFromDeviceId returns the netdevice name from the passed device ID.
-func GetNetdevNameFromDeviceId(deviceId string) (string, error) {
-	netdevices, err := GetNetdevsNameFromDeviceId(deviceId)
+func GetNetdevNameFromDeviceId(deviceId string, deviceInfo nadapi.DeviceInfo) (string, error) {
+	netdevices, err := GetNetdevsNameFromDeviceId(deviceId, deviceInfo)
 	if err != nil {
 		return "", err
 	}

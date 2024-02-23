@@ -409,11 +409,8 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 		}
 
 		// do not release IP address unless we have validated no other pod is using it
-		if pInfo == nil {
-			continue
-		}
-
-		if len(pInfo.ips) == 0 {
+		if pInfo == nil || len(pInfo.ips) == 0 {
+			bsnc.forgetPodReleasedBeforeStartup(string(pod.UID), nadName)
 			continue
 		}
 
@@ -426,11 +423,14 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 		if err = bsnc.releasePodIPs(pInfo); err != nil {
 			return err
 		}
+
+		bsnc.forgetPodReleasedBeforeStartup(string(pod.UID), nadName)
 	}
 	return nil
 }
 
 func (bsnc *BaseSecondaryNetworkController) syncPodsForSecondaryNetwork(pods []interface{}) error {
+	annotatedLocalPods := map[*kapi.Pod]map[string]*util.PodAnnotation{}
 	// get the list of logical switch ports (equivalent to pods). Reserve all existing Pod IPs to
 	// avoid subsequent new Pods getting the same duplicate Pod IP.
 	expectedLogicalPorts := make(map[string]bool)
@@ -471,6 +471,11 @@ func (bsnc *BaseSecondaryNetworkController) syncPodsForSecondaryNetwork(pods []i
 				if expectedLogicalPortName != "" {
 					expectedLogicalPorts[expectedLogicalPortName] = true
 				}
+
+				if annotatedLocalPods[pod] == nil {
+					annotatedLocalPods[pod] = map[string]*util.PodAnnotation{}
+				}
+				annotatedLocalPods[pod][nadName] = annotations
 			} else if hasRemotePort {
 				// keep also track of remote ports created for layer2 on
 				// interconnect
@@ -478,6 +483,10 @@ func (bsnc *BaseSecondaryNetworkController) syncPodsForSecondaryNetwork(pods []i
 			}
 		}
 	}
+
+	// keep track of which pods might have already been released
+	bsnc.trackPodsReleasedBeforeStartup(annotatedLocalPods)
+
 	return bsnc.deleteStaleLogicalSwitchPorts(expectedLogicalPorts)
 }
 
@@ -552,7 +561,10 @@ func (bsnc *BaseSecondaryNetworkController) updateNamespaceForSecondaryNetwork(o
 func (bsnc *BaseSecondaryNetworkController) deleteNamespace4SecondaryNetwork(ns *kapi.Namespace) error {
 	klog.Infof("[%s] deleting namespace for network %s", ns.Name, bsnc.GetNetworkName())
 
-	nsInfo := bsnc.deleteNamespaceLocked(ns.Name)
+	nsInfo, err := bsnc.deleteNamespaceLocked(ns.Name)
+	if err != nil {
+		return err
+	}
 	if nsInfo == nil {
 		return nil
 	}

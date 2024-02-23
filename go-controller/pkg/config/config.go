@@ -14,6 +14,7 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 
 	"github.com/urfave/cli/v2"
 	gcfg "gopkg.in/gcfg.v1"
@@ -160,18 +161,21 @@ var (
 		},
 	}
 
+	// Set Leaderelection config values based on
+	// https://github.com/openshift/enhancements/blame/84e894ead7b188a1013556e0ba6973b8463995f1/CONVENTIONS.md#L183
+
 	// MasterHA holds master HA related config options.
 	MasterHA = HAConfig{
-		ElectionLeaseDuration: 60,
-		ElectionRenewDeadline: 30,
-		ElectionRetryPeriod:   20,
+		ElectionRetryPeriod:   26,
+		ElectionRenewDeadline: 107,
+		ElectionLeaseDuration: 137,
 	}
 
 	// ClusterMgrHA holds cluster manager HA related config options.
 	ClusterMgrHA = HAConfig{
-		ElectionLeaseDuration: 60,
-		ElectionRenewDeadline: 30,
-		ElectionRetryPeriod:   20,
+		ElectionRetryPeriod:   26,
+		ElectionRenewDeadline: 107,
+		ElectionLeaseDuration: 137,
 	}
 
 	// HybridOverlay holds hybrid overlay feature config options.
@@ -200,7 +204,7 @@ var (
 	}
 
 	ClusterManager = ClusterManagerConfig{
-		V4TransitSwitchSubnet: "168.254.0.0/16",
+		V4TransitSwitchSubnet: "100.88.0.0/16",
 		V6TransitSwitchSubnet: "fd97::/64",
 	}
 )
@@ -368,7 +372,7 @@ type KubernetesConfig struct {
 	OVNEmptyLbEvents     bool   `gcfg:"ovn-empty-lb-events"`
 	PodIP                string `gcfg:"pod-ip"` // UNUSED
 	RawNoHostSubnetNodes string `gcfg:"no-hostsubnet-nodes"`
-	NoHostSubnetNodes    *metav1.LabelSelector
+	NoHostSubnetNodes    labels.Selector
 	HostNetworkNamespace string `gcfg:"host-network-namespace"`
 	SkipRequestedChassis bool
 	PlatformType         string `gcfg:"platform-type"`
@@ -623,6 +627,7 @@ func init() {
 	savedOvnSouth = OvnSouth
 	savedGateway = Gateway
 	savedMasterHA = MasterHA
+	savedClusterMgrHA = ClusterMgrHA
 	savedHybridOverlay = HybridOverlay
 	savedOvnKubeNode = OvnKubeNode
 	savedClusterManager = ClusterManager
@@ -657,6 +662,7 @@ func PrepareTestConfig() error {
 	OvnKubeNode = savedOvnKubeNode
 	Kubernetes.SkipRequestedChassis = false
 	ClusterManager = savedClusterManager
+	EnableMulticast = false
 
 	if err := completeConfig(); err != nil {
 		return err
@@ -1841,11 +1847,15 @@ func completeKubernetesConfig(allSubnets *configSubnets) error {
 	}
 
 	if Kubernetes.RawNoHostSubnetNodes != "" {
-		if nodeSelector, err := metav1.ParseToLabelSelector(Kubernetes.RawNoHostSubnetNodes); err == nil {
-			Kubernetes.NoHostSubnetNodes = nodeSelector
-		} else {
+		nodeSelector, err := metav1.ParseToLabelSelector(Kubernetes.RawNoHostSubnetNodes)
+		if err != nil {
 			return fmt.Errorf("labelSelector \"%s\" is invalid: %v", Kubernetes.RawNoHostSubnetNodes, err)
 		}
+		selector, err := metav1.LabelSelectorAsSelector(nodeSelector)
+		if err != nil {
+			return fmt.Errorf("failed to convert %v into a labels.Selector: %v", nodeSelector, err)
+		}
+		Kubernetes.NoHostSubnetNodes = selector
 	}
 
 	return nil
@@ -2236,6 +2246,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		OvnSouth:             savedOvnSouth,
 		Gateway:              savedGateway,
 		MasterHA:             savedMasterHA,
+		ClusterMgrHA:         savedClusterMgrHA,
 		HybridOverlay:        savedHybridOverlay,
 		OvnKubeNode:          savedOvnKubeNode,
 		ClusterManager:       savedClusterManager,

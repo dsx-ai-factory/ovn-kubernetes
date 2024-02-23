@@ -45,7 +45,7 @@ const (
 
 type aclSyncer struct {
 	baseAclSyncer
-	existingNodes *v1.NodeList
+	existingNodes []*v1.Node
 }
 
 type baseAclSyncer struct {
@@ -57,7 +57,7 @@ type baseAclSyncer struct {
 	txnBatchSize int
 }
 
-func NewACLSyncer(nbClient libovsdbclient.Client, existingNodes *v1.NodeList,
+func NewACLSyncer(nbClient libovsdbclient.Client, existingNodes []*v1.Node,
 	controllerName string, netInfo util.NetInfo) *aclSyncer {
 	return &aclSyncer{
 		baseAclSyncer: baseAclSyncer{
@@ -92,7 +92,7 @@ func (syncer *aclSyncer) GetUpdatedACLs(legacyACLs []*nbdb.ACL) (updatedACLs []*
 	klog.Infof("Found %d stale multicast ACLs", len(multicastACLs))
 	updatedACLs = append(updatedACLs, multicastACLs...)
 
-	allowFromNodeACLs := syncer.updateStaleNetpolNodeACLs(legacyACLs, syncer.existingNodes.Items)
+	allowFromNodeACLs := syncer.updateStaleNetpolNodeACLs(legacyACLs, syncer.existingNodes)
 	klog.Infof("Found %d stale allow from node ACLs", len(allowFromNodeACLs))
 	updatedACLs = append(updatedACLs, allowFromNodeACLs...)
 
@@ -183,6 +183,23 @@ func (syncer *baseAclSyncer) SyncACLs(getUpdatedACLs func([]*nbdb.ACL) ([]*nbdb.
 		})
 		if err != nil {
 			return fmt.Errorf("cannot update stale ACLs: %v", err)
+		}
+
+		// There may be very old acls that are not selected by any of the syncers, delete them.
+		// One example is stale multicast ACLs with the old priority that was accidentally changed by
+		// https://github.com/ovn-org/ovn-kubernetes/commit/f68d302664e64093c867c0b9efe08d1d757d6780#diff-cc83e19af1c257d5a09b711d5977d8f8c20beb34b7b5d3eb37b2f2c53ded1bf7L537-R462
+		leftoverACLs, err := libovsdbops.FindACLsWithPredicate(syncer.nbClient, legacyAclPred)
+		if err != nil {
+			return fmt.Errorf("unable to find leftover ACLs, cannot update stale data: %v", err)
+		}
+		p := func(item *nbdb.LogicalSwitch) bool { return true }
+		err = libovsdbops.RemoveACLsFromLogicalSwitchesWithPredicate(syncer.nbClient, p, leftoverACLs...)
+		if err != nil {
+			return fmt.Errorf("unable delete leftover ACLs from switches: %v", err)
+		}
+		err = libovsdbops.DeleteACLsFromAllPortGroups(syncer.nbClient, leftoverACLs...)
+		if err != nil {
+			return fmt.Errorf("unable delete leftover ACLs from port groups: %v", err)
 		}
 	}
 
@@ -310,7 +327,7 @@ func (syncer *aclSyncer) getAllowFromNodeACLDbIDs(nodeName, mgmtPortIP string) *
 // updateStaleNetpolNodeACLs updates allow from node ACLs, that don't have new ExternalIDs based
 // on DbObjectIDs set. Allow from node acls are applied on the node switch, therefore the cleanup for deleted is not needed,
 // since acl will be deleted toegther with the node switch.
-func (syncer *aclSyncer) updateStaleNetpolNodeACLs(legacyACLs []*nbdb.ACL, existingNodes []v1.Node) []*nbdb.ACL {
+func (syncer *aclSyncer) updateStaleNetpolNodeACLs(legacyACLs []*nbdb.ACL, existingNodes []*v1.Node) []*nbdb.ACL {
 	// ACL to allow traffic from host via management port has no name or ExternalIDs
 	// The only way to find it is by exact match
 	type aclInfo struct {
@@ -319,7 +336,7 @@ func (syncer *aclSyncer) updateStaleNetpolNodeACLs(legacyACLs []*nbdb.ACL, exist
 	}
 	matchToNode := map[string]aclInfo{}
 	for _, node := range existingNodes {
-		hostSubnets, err := util.ParseNodeHostSubnetAnnotation(&node, types.DefaultNetworkName)
+		hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
 		if err != nil {
 			klog.Warningf("Couldn't parse hostSubnet annotation for node %s: %v", node.Name, err)
 			continue
@@ -450,8 +467,8 @@ func (syncer *baseAclSyncer) updateStaleDefaultDenyNetpolACLs(legacyACLs []*nbdb
 		// sync default Deny policies
 		// defaultDenyPolicyTypeACLExtIdKey ExternalID was used by default deny and multicast acls,
 		// but multicast acls have specific DefaultMcast priority, filter them out.
-		if acl.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] == "" || acl.Priority == types.DefaultMcastDenyPriority ||
-			acl.Priority == types.DefaultMcastAllowPriority {
+		if acl.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] == "" || (acl.Priority != types.DefaultAllowPriority &&
+			acl.Priority != types.DefaultDenyPriority) {
 			// not default deny policy
 			continue
 		}

@@ -224,6 +224,11 @@ func (eIPC *egressIPClusterController) executeCloudPrivateIPConfigOps(egressIPNa
 			// if the object already exists and the request is for a different node, that's an error
 		} else if op.toAdd != "" {
 			if err == nil {
+				// Do not add if object is being deleted; either retry the add (if this was an update) OR (if this was a perm-delete)
+				// we will retry till we exhaust our retry count
+				if cloudPrivateIPConfig.GetDeletionTimestamp() != nil && !cloudPrivateIPConfig.GetDeletionTimestamp().IsZero() {
+					return fmt.Errorf("cloud update request failed, CloudPrivateIPConfig: %s is being deleted", cloudPrivateIPConfigName)
+				}
 				if op.toAdd == cloudPrivateIPConfig.Spec.Node {
 					klog.Infof("CloudPrivateIPConfig: %s already assigned to node: %s", cloudPrivateIPConfigName, cloudPrivateIPConfig.Spec.Node)
 					continue
@@ -630,7 +635,10 @@ func checkEgressNodesReachabilityIterate(eIPC *egressIPClusterController) {
 			}
 		} else {
 			klog.Infof("Node: %s is detected as reachable and ready again, adding it to egress assignment", nodeName)
-			if err := eIPC.addEgressNode(nodeName); err != nil {
+			nodeToAdd, err := eIPC.watchFactory.GetNode(nodeName)
+			if err != nil {
+				klog.Errorf("Node: %s is detected as reachable and ready again, but could not re-assign egress IPs, err: %v", nodeName, err)
+			} else if err := eIPC.retryEgressNodes.AddRetryObjWithAddNoBackoff(nodeToAdd); err != nil {
 				klog.Errorf("Node: %s is detected as reachable and ready again, but could not re-assign egress IPs, err: %v", nodeName, err)
 			}
 		}
@@ -682,18 +690,19 @@ func (eIPC *egressIPClusterController) setNodeEgressReachable(nodeName string, i
 	}
 }
 
-// reconcileNonOVNNetworkEIPs is used to reconsider existing assigned EIPs that are assigned to non-OVN managed
+// reconcileSecondaryHostNetworkEIPs is used to reconsider existing assigned EIPs that are assigned to secondary host
 // networks and will send a 'synthetic' reconcile for any EIPs which are hosted by an invalid network which is determined
 // from the nodes host-cidrs annotation
-func (eIPC *egressIPClusterController) reconcileNonOVNNetworkEIPs(node *v1.Node) error {
+func (eIPC *egressIPClusterController) reconcileSecondaryHostNetworkEIPs(node *v1.Node) error {
 	var errorAggregate []error
 	egressIPs, err := eIPC.kube.GetEgressIPs()
 	if err != nil {
 		return fmt.Errorf("unable to list EgressIPs, err: %v", err)
 	}
-	reconcileEgressIPs := make([]*egressipv1.EgressIP, 0, len(egressIPs.Items))
+	reconcileEgressIPs := make([]*egressipv1.EgressIP, 0, len(egressIPs))
 	eIPC.allocator.Lock()
-	for _, egressIP := range egressIPs.Items {
+	for _, egressIP := range egressIPs {
+		egressIP := *egressIP
 		for _, status := range egressIP.Status.Items {
 			if status.Node == node.Name {
 				egressIPIP := net.ParseIP(status.EgressIP)
@@ -705,14 +714,14 @@ func (eIPC *egressIPClusterController) reconcileNonOVNNetworkEIPs(node *v1.Node)
 					reconcileEgressIPs = append(reconcileEgressIPs, egressIP.DeepCopy())
 					continue
 				}
-				// do not reconcile if EIP is hosted by OVN managed network or if network is what we expect
-				if util.IsOVNManagedNetwork(eNode.egressIPConfig, egressIPIP) {
+				// do not reconcile if EIP is hosted by OVN network or if network is what we expect
+				if util.IsOVNNetwork(eNode.egressIPConfig, egressIPIP) {
 					continue
 				}
-				network, err := util.GetNonOVNNetworkContainingIP(node, egressIPIP)
+				network, err := util.GetSecondaryHostNetworkContainingIP(node, egressIPIP)
 				if err != nil {
 					errorAggregate = append(errorAggregate, fmt.Errorf("failed to determine if egress IP %s IP %s "+
-						"is hosted by non-OVN managed network for node %s: %w", egressIP.Name, egressIPIP.String(), node.Name, err))
+						"is hosted by secondary host network for node %s: %w", egressIP.Name, egressIPIP.String(), node.Name, err))
 					continue
 				}
 				if network == "" {
@@ -725,7 +734,7 @@ func (eIPC *egressIPClusterController) reconcileNonOVNNetworkEIPs(node *v1.Node)
 	for _, egressIP := range reconcileEgressIPs {
 		if err := eIPC.reconcileEgressIP(nil, egressIP); err != nil {
 			errorAggregate = append(errorAggregate, fmt.Errorf("re-assignment for EgressIP %s hosted by a "+
-				"non-OVN managed network failed, unable to update object, err: %v", egressIP.Name, err))
+				"secondary host network failed, unable to update object, err: %v", egressIP.Name, err))
 		}
 	}
 	if len(errorAggregate) > 0 {
@@ -746,7 +755,8 @@ func (eIPC *egressIPClusterController) addEgressNode(nodeName string) error {
 	if err != nil {
 		return fmt.Errorf("unable to list EgressIPs, err: %v", err)
 	}
-	for _, egressIP := range egressIPs.Items {
+	for _, egressIP := range egressIPs {
+		egressIP := *egressIP
 		if len(egressIP.Spec.EgressIPs) != len(egressIP.Status.Items) {
 			// Send a "synthetic update" on all egress IPs which are not fully
 			// assigned, the reconciliation loop for WatchEgressIP will try to
@@ -787,7 +797,8 @@ func (eIPC *egressIPClusterController) deleteEgressNode(nodeName string) error {
 	if err != nil {
 		return fmt.Errorf("unable to list EgressIPs, err: %v", err)
 	}
-	for _, egressIP := range egressIPs.Items {
+	for _, egressIP := range egressIPs {
+		egressIP := *egressIP
 		for _, status := range egressIP.Status.Items {
 			if status.Node == nodeName {
 				// Send a "synthetic update" on all egress IPs which have an
@@ -1158,7 +1169,7 @@ func (eIPC *egressIPClusterController) getCloudPrivateIPConfigMap(objs []interfa
 // ascending order following their existing amount of allocations, and trying to
 // assign the egress IP to the node with the lowest amount of allocations every
 // time, this does not guarantee complete balance, but mostly complete.
-// For Egress IPs that are hosted by non-OVN managed networks, there must be at least
+// For Egress IPs that are hosted by secondary host networks, there must be at least
 // one node that hosts the network and exposed via the nodes host-cidrs annotation.
 func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []string) []egressipv1.EgressIPStatusItem {
 	eIPC.allocator.Lock()
@@ -1247,7 +1258,7 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 				return assignments
 			}
 		}
-		// Egress IP for non-OVN managed networks is only available on baremetal environments
+		// Egress IP for secondary host networks is only available on baremetal environments
 		if !util.PlatformTypeIsEgressIPCloudProvider() {
 			assignableNodesWithSecondaryNet := make([]*egressNode, 0)
 			for _, eNode := range assignableNodes {
@@ -1257,12 +1268,12 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 						name, eNode.name, eIP.String(), err)
 					continue
 				}
-				if util.IsOVNManagedNetwork(eNode.egressIPConfig, eIP) {
+				if util.IsOVNNetwork(eNode.egressIPConfig, eIP) {
 					continue
 				}
-				network, err := util.GetNonOVNNetworkContainingIP(node, eIP)
+				network, err := util.GetSecondaryHostNetworkContainingIP(node, eIP)
 				if err != nil {
-					klog.Warningf("Failed to determine if egress IP is hosted by a non-OVN managed networks for node %s: %v",
+					klog.Warningf("Failed to determine if egress IP is hosted by a secondary host network for node %s: %v",
 						eIP.String(), node.Name, err)
 					continue
 				}
@@ -1272,11 +1283,11 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 				assignableNodesWithSecondaryNet = append(assignableNodesWithSecondaryNet, eNode)
 
 			}
-			// if the EIP is hosted by a non OVN managed network, then restrict the assignable nodes to the set of nodes that
-			// may host the non-OVN managed network
+			// if the EIP is hosted by a secondary host network, then limit the assignable nodes to the set of nodes
+			// that connect to this network.
 			if len(assignableNodesWithSecondaryNet) > 0 {
 				klog.V(5).Infof("Restricting the number of assignable nodes from %d to %d because EgressIP %s IP %s "+
-					"is going to be hosted by a non-OVN managed network", len(assignableNodes), len(assignableNodesWithSecondaryNet), name, eIP.String())
+					"is going to be hosted by a secondary host network", len(assignableNodes), len(assignableNodesWithSecondaryNet), name, eIP.String())
 				assignableNodes = assignableNodesWithSecondaryNet
 			}
 		}
@@ -1389,6 +1400,10 @@ func (eIPC *egressIPClusterController) isEgressIPAddrConflict(egressIP net.IP) (
 	// iterate through the nodes and ensure no host IP address conflicts with EIP. Note that host-cidrs annotation
 	// does not contain EgressIPs that are assigned to interfaces.
 	for _, node := range nodes {
+		// EgressIP is not supported on hybrid overlay nodes, and OVNNodeHostCIDRs annotation is not present
+		if util.NoHostSubnet(node) {
+			continue
+		}
 		nodeHostAddrsSet, err := util.ParseNodeHostCIDRsDropNetMask(node)
 		if err != nil {
 			return false, "", fmt.Errorf("failed to parse node host cidrs for node %s: %v", node.Name, err)
@@ -1440,13 +1455,13 @@ func (eIPC *egressIPClusterController) validateEgressIPStatus(name string, items
 				klog.Errorf("Allocator error: failed to validate and will not consider node %s for egress IP %s: %v",
 					eNode.name, name, err)
 			}
-			isOVNManaged := util.IsOVNManagedNetwork(eNode.egressIPConfig, ip)
-			isSecondaryNetwork, err := util.IsNonOVNManagedNetworkContainingIP(node, ip)
+			isOVNNetwork := util.IsOVNNetwork(eNode.egressIPConfig, ip)
+			isSecondaryHostNetwork, err := util.IsSecondaryHostNetworkContainingIP(node, ip)
 			if err != nil {
-				klog.Errorf("Allocator error: failed to determine if Egress IP %q is to be hosted by a non-OVN managed "+
+				klog.Errorf("Allocator error: failed to determine if Egress IP %q is to be hosted by a secondary host "+
 					"network for egress IP %s: %v", eIPStatus.EgressIP, name, err)
 			}
-			if !isOVNManaged && !isSecondaryNetwork {
+			if !isOVNNetwork && !isSecondaryHostNetwork {
 				klog.Errorf("Allocator error: failed to assign Egress IP %s IP %q", name, eIPStatus.EgressIP)
 				validAssignment = false
 			}
@@ -1551,7 +1566,7 @@ func (eIPC *egressIPClusterController) reconcileCloudPrivateIPConfig(old, new *o
 			return err
 		}
 		for _, resyncEgressIP := range resyncEgressIPs {
-			if err := eIPC.reconcileEgressIP(nil, &resyncEgressIP); err != nil {
+			if err := eIPC.reconcileEgressIP(nil, resyncEgressIP); err != nil {
 				return fmt.Errorf("synthetic update for EgressIP: %s failed, err: %v", egressIP.Name, err)
 			}
 		}
@@ -1653,7 +1668,7 @@ func cloudPrivateIPConfigNameToIPString(name string) string {
 // removePendingOps removes the existing pending CloudPrivateIPConfig operations
 // from the cache and returns the EgressIP object which can be re-synced given
 // the new assignment possibilities.
-func (eIPC *egressIPClusterController) removePendingOpsAndGetResyncs(egressIPName, egressIP string) ([]egressipv1.EgressIP, error) {
+func (eIPC *egressIPClusterController) removePendingOpsAndGetResyncs(egressIPName, egressIP string) ([]*egressipv1.EgressIP, error) {
 	eIPC.pendingCloudPrivateIPConfigsMutex.Lock()
 	defer eIPC.pendingCloudPrivateIPConfigsMutex.Unlock()
 	ops, pending := eIPC.pendingCloudPrivateIPConfigsOps[egressIPName]
@@ -1682,8 +1697,9 @@ func (eIPC *egressIPClusterController) removePendingOpsAndGetResyncs(egressIPNam
 	if err != nil {
 		return nil, fmt.Errorf("unable to list EgressIPs, err: %v", err)
 	}
-	resyncs := make([]egressipv1.EgressIP, 0, len(egressIPs.Items))
-	for _, egressIP := range egressIPs.Items {
+	resyncs := make([]*egressipv1.EgressIP, 0, len(egressIPs))
+	for _, egressIP := range egressIPs {
+		egressIP := *egressIP
 		// Do not process the egress IP object which owns the
 		// CloudPrivateIPConfig for which we are currently processing the
 		// deletion for.
@@ -1695,14 +1711,14 @@ func (eIPC *egressIPClusterController) removePendingOpsAndGetResyncs(egressIPNam
 		// If the EgressIP was never added to the pending cache to begin
 		// with, but has un-assigned egress IPs, try it.
 		if !pending && unassigned > 0 {
-			resyncs = append(resyncs, egressIP)
+			resyncs = append(resyncs, &egressIP)
 			continue
 		}
 		// If the EgressIP has pending operations, have a look at if the
 		// unassigned operations superseed the pending ones. It could be
 		// that it could only execute a couple of assignments at one point.
 		if pending && unassigned > len(ops) {
-			resyncs = append(resyncs, egressIP)
+			resyncs = append(resyncs, &egressIP)
 		}
 	}
 	return resyncs, nil

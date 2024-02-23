@@ -121,9 +121,6 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface breth0 mac_in_use",
 			Output: eth0MAC,
 		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovs-vsctl --timeout=15 set bridge breth0 other-config:hwaddr=" + eth0MAC,
-		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:ovn-bridge-mappings",
 			Output: "",
@@ -279,7 +276,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", ifAddrs, nodeAnnotator, k,
 				&fakeMgmtPortConfig, wf, rm)
 			Expect(err).NotTo(HaveOccurred())
-			err = sharedGw.Init(wf, stop, wg)
+			err = sharedGw.Init(stop, wg)
 			Expect(err).NotTo(HaveOccurred())
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
@@ -647,7 +644,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops,
 				gatewayIntf, "", ifAddrs, nodeAnnotator, k, &fakeMgmtPortConfig, wf, rm)
 			Expect(err).NotTo(HaveOccurred())
-			err = sharedGw.Init(wf, stop, wg)
+			err = sharedGw.Init(stop, wg)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = nodeAnnotator.Run()
@@ -664,6 +661,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 
 			// check that the masquerade route was not added
 			l, err := netlink.LinkByName(brphys)
+			Expect(err).NotTo(HaveOccurred())
 			expRoute := &netlink.Route{
 				Dst:       ovntest.MustParseIPNet(fmt.Sprintf("%s/32", config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP.String())),
 				LinkIndex: l.Attrs().Index,
@@ -749,6 +747,7 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 		ip, ipnet, err := net.ParseCIDR(hostIP + "/24")
+		Expect(err).NotTo(HaveOccurred())
 		ipnet.IP = ip
 		cnnci := NewCommonNodeNetworkControllerInfo(fakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, "", "", []string{})
 		nc := newDefaultNodeNetworkController(cnnci, &util.DefaultNetInfo{}, stop, wg)
@@ -854,7 +853,28 @@ func localGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			nodeSubnet string = "10.1.1.0/24"
 		)
 
+		ovsOFOutput := `
+OFPT_FEATURES_REPLY (xid=0x2): dpid:00000242ac120002
+n_tables:254, n_buffers:0
+capabilities: FLOW_STATS TABLE_STATS PORT_STATS QUEUE_STATS ARP_MATCH_IP
+actions: output enqueue set_vlan_vid set_vlan_pcp strip_vlan mod_dl_src mod_dl_dst mod_nw_src mod_nw_dst mod_nw_tos mod_tp_src mod_tp_dst
+ 1(eth0): addr:02:42:ac:12:00:02
+     config:     0
+     state:      0
+     current:    10GB-FD COPPER
+     speed: 10000 Mbps now, 0 Mbps max
+ 2(patch-breth0_ov): addr:8e:8d:f4:cd:4f:76
+     config:     0
+     state:      0
+     speed: 0 Mbps now, 0 Mbps max
+ LOCAL(breth0): addr:02:42:ac:12:00:02
+     config:     0
+     state:      0
+     speed: 0 Mbps now, 0 Mbps max
+OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
+
 		fexec := ovntest.NewLooseCompareFakeExec()
+
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-vsctl --timeout=15 port-to-br eth0",
 			Err: fmt.Errorf(""),
@@ -903,9 +923,6 @@ func localGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface breth0 mac_in_use",
 			Output: eth0MAC,
 		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovs-vsctl --timeout=15 set bridge breth0 other-config:hwaddr=" + eth0MAC,
-		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:ovn-bridge-mappings",
 			Output: "",
@@ -951,31 +968,9 @@ func localGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Output: "net.ipv4.conf.ovn-k8s-mp0.rp_filter = 2",
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd: "ovs-ofctl show breth0",
-			Output: `
-OFPT_FEATURES_REPLY (xid=0x2): dpid:00000242ac120002
-n_tables:254, n_buffers:0
-capabilities: FLOW_STATS TABLE_STATS PORT_STATS QUEUE_STATS ARP_MATCH_IP
-actions: output enqueue set_vlan_vid set_vlan_pcp strip_vlan mod_dl_src mod_dl_dst mod_nw_src mod_nw_dst mod_nw_tos mod_tp_src mod_tp_dst
- 1(eth0): addr:02:42:ac:12:00:02
-     config:     0
-     state:      0
-     current:    10GB-FD COPPER
-     speed: 10000 Mbps now, 0 Mbps max
- 2(patch-breth0_ov): addr:8e:8d:f4:cd:4f:76
-     config:     0
-     state:      0
-     speed: 0 Mbps now, 0 Mbps max
- LOCAL(breth0): addr:02:42:ac:12:00:02
-     config:     0
-     state:      0
-     speed: 0 Mbps now, 0 Mbps max
-OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
+			Cmd:    "ovs-ofctl show breth0",
+			Output: ovsOFOutput,
 		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovs-ofctl -O OpenFlow13 --bundle replace-flows breth0 -",
-		})
-		// nodePortWatcher()
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface patch-breth0_" + nodeName + "-to-br-int ofport",
 			Output: "5",
@@ -983,6 +978,17 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface eth0 ofport",
 			Output: "7",
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-ofctl show breth0",
+			Output: ovsOFOutput,
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovs-ofctl -O OpenFlow13 --bundle replace-flows breth0 -",
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-ofctl show breth0",
+			Output: ovsOFOutput,
 		})
 		// syncServices()
 
@@ -1086,7 +1092,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 			localGw, err := newLocalGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", ifAddrs,
 				nodeAnnotator, &fakeMgmtPortConfig, k, wf, rm)
 			Expect(err).NotTo(HaveOccurred())
-			err = localGw.Init(wf, stop, wg)
+			err = localGw.Init(stop, wg)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = nodeAnnotator.Run()
@@ -1142,7 +1148,6 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
-
 		Eventually(fexec.CalledMatchesExpected, 5).Should(BeTrue(), fexec.ErrorDesc)
 
 		expectedTables := map[string]util.FakeTable{
@@ -1177,6 +1182,8 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 					"-s 169.254.169.1 -j ACCEPT",
 					"-d 172.16.1.0/24 -j ACCEPT",
 					"-s 172.16.1.0/24 -j ACCEPT",
+					"-d 10.1.0.0/16 -j ACCEPT",
+					"-s 10.1.0.0/16 -j ACCEPT",
 					"-i ovn-k8s-mp0 -j ACCEPT",
 					"-o ovn-k8s-mp0 -j ACCEPT",
 					"-i breth0 -j DROP",
@@ -1561,13 +1568,14 @@ var _ = Describe("Gateway unit tests", func() {
 				Index: 5,
 			}
 			lnk.On("Attrs").Return(lnkAttr)
-			netlinkMock.On("LinkByName", mock.Anything).Return(lnk, nil)
+			netlinkMock.On("LinkByName", lnkAttr.Name).Return(lnk, nil)
+			netlinkMock.On("LinkByIndex", lnkAttr.Index).Return(lnk, nil)
 			netlinkMock.On("LinkSetUp", mock.Anything).Return(nil)
 			netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 			netlinkMock.On("RouteAdd", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			wg := &sync.WaitGroup{}
 			rm := routemanager.NewController()
-			rm.SetNetLinkOpMockInst(netlinkMock)
+			util.SetNetLinkOpMockInst(netlinkMock)
 			stopCh := make(chan struct{})
 			wg.Add(1)
 			go func() {
@@ -1609,13 +1617,14 @@ var _ = Describe("Gateway unit tests", func() {
 			}
 
 			lnk.On("Attrs").Return(lnkAttr)
-			netlinkMock.On("LinkByName", mock.Anything).Return(lnk, nil)
+			netlinkMock.On("LinkByName", lnkAttr.Name).Return(lnk, nil)
+			netlinkMock.On("LinkByIndex", lnkAttr.Index).Return(lnk, nil)
 			netlinkMock.On("LinkSetUp", mock.Anything).Return(nil)
 			netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return([]netlink.Route{*previousRoute}, nil)
 			netlinkMock.On("RouteReplace", expectedRoute).Return(nil)
 			wg := &sync.WaitGroup{}
 			rm := routemanager.NewController()
-			rm.SetNetLinkOpMockInst(netlinkMock)
+			util.SetNetLinkOpMockInst(netlinkMock)
 			stopCh := make(chan struct{})
 			wg.Add(1)
 			go func() {
@@ -1634,10 +1643,11 @@ var _ = Describe("Gateway unit tests", func() {
 
 		It("Fails if link set up fails", func() {
 			netlinkMock.On("LinkByName", mock.Anything).Return(nil, fmt.Errorf("failed to find interface"))
+			netlinkMock.On("LinkByIndex", mock.Anything).Return(nil, fmt.Errorf("failed to find interface"))
 			gwIPs := []net.IP{net.ParseIP("10.0.0.11")}
 			wg := &sync.WaitGroup{}
 			rm := routemanager.NewController()
-			rm.SetNetLinkOpMockInst(netlinkMock)
+			util.SetNetLinkOpMockInst(netlinkMock)
 			stopCh := make(chan struct{})
 			wg.Add(1)
 			go func() {
@@ -1662,7 +1672,7 @@ var _ = Describe("Gateway unit tests", func() {
 			netlinkMock.On("LinkSetUp", mock.Anything).Return(nil)
 			wg := &sync.WaitGroup{}
 			rm := routemanager.NewController()
-			rm.SetNetLinkOpMockInst(netlinkMock)
+			util.SetNetLinkOpMockInst(netlinkMock)
 			stopCh := make(chan struct{})
 			wg.Add(1)
 			go func() {

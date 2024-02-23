@@ -53,14 +53,14 @@ const (
 	// OvnNodeL3GatewayConfig is the constant string representing the l3 gateway annotation key
 	OvnNodeL3GatewayConfig = "k8s.ovn.org/l3-gateway-config"
 
-	// ovnNodeGatewayMtuSupport determines if option:gateway_mtu shall be set for GR router ports.
-	ovnNodeGatewayMtuSupport = "k8s.ovn.org/gateway-mtu-support"
+	// OvnNodeGatewayMtuSupport determines if option:gateway_mtu shall be set for GR router ports.
+	OvnNodeGatewayMtuSupport = "k8s.ovn.org/gateway-mtu-support"
 
 	// OvnDefaultNetworkGateway captures L3 gateway config for default OVN network interface
 	ovnDefaultNetworkGateway = "default"
 
-	// ovnNodeManagementPort is the constant string representing the annotation key
-	ovnNodeManagementPort = "k8s.ovn.org/node-mgmt-port"
+	// OvnNodeManagementPort is the constant string representing the annotation key
+	OvnNodeManagementPort = "k8s.ovn.org/node-mgmt-port"
 
 	// OvnNodeManagementPortMacAddress is the constant string representing the annotation key
 	OvnNodeManagementPortMacAddress = "k8s.ovn.org/node-mgmt-port-mac-address"
@@ -83,6 +83,10 @@ const (
 
 	// OVNNodeHostCIDRs is used to track the different host IP addresses and subnet masks on the node
 	OVNNodeHostCIDRs = "k8s.ovn.org/host-cidrs"
+
+	// OVNNodeSecondaryHostEgressIPs contains EgressIP addresses that aren't managed by OVN. The EIP addresses are assigned to
+	// standard linux interfaces and not interfaces of type OVS.
+	OVNNodeSecondaryHostEgressIPs = "k8s.ovn.org/secondary-host-egress-ips"
 
 	// egressIPConfigAnnotationKey is used to indicate the cloud subnet and
 	// capacity for each node. It is set by
@@ -323,16 +327,16 @@ func SetL3GatewayConfig(nodeAnnotator kube.Annotator, cfg *L3GatewayConfig) erro
 // this node.
 func SetGatewayMTUSupport(nodeAnnotator kube.Annotator, set bool) error {
 	if set {
-		nodeAnnotator.Delete(ovnNodeGatewayMtuSupport)
+		nodeAnnotator.Delete(OvnNodeGatewayMtuSupport)
 		return nil
 	}
-	return nodeAnnotator.Set(ovnNodeGatewayMtuSupport, "false")
+	return nodeAnnotator.Set(OvnNodeGatewayMtuSupport, "false")
 }
 
 // ParseNodeGatewayMTUSupport parses annotation "k8s.ovn.org/gateway-mtu-support". The default behavior should be true,
 // therefore only an explicit string of "false" will make this function return false.
 func ParseNodeGatewayMTUSupport(node *kapi.Node) bool {
-	return node.Annotations[ovnNodeGatewayMtuSupport] != "false"
+	return node.Annotations[OvnNodeGatewayMtuSupport] != "false"
 }
 
 // ParseNodeL3GatewayAnnotation returns the parsed l3-gateway-config annotation
@@ -406,14 +410,14 @@ func SetNodeManagementPortAnnotation(nodeAnnotator kube.Annotator, PfId int, Fun
 	if err != nil {
 		return fmt.Errorf("failed to marshal mgmtPortDetails with PfId '%v', FuncId '%v'", PfId, FuncId)
 	}
-	return nodeAnnotator.Set(ovnNodeManagementPort, string(bytes))
+	return nodeAnnotator.Set(OvnNodeManagementPort, string(bytes))
 }
 
-// ParseNodeManagementPort returns the parsed host addresses living on a node
+// ParseNodeManagementPortAnnotation returns the parsed host addresses living on a node
 func ParseNodeManagementPortAnnotation(node *kapi.Node) (int, int, error) {
-	mgmtPortAnnotation, ok := node.Annotations[ovnNodeManagementPort]
+	mgmtPortAnnotation, ok := node.Annotations[OvnNodeManagementPort]
 	if !ok {
-		return -1, -1, newAnnotationNotSetError("%s annotation not found for node %q", ovnNodeManagementPort, node.Name)
+		return -1, -1, newAnnotationNotSetError("%s annotation not found for node %q", OvnNodeManagementPort, node.Name)
 	}
 
 	cfg := ManagementPortDetails{}
@@ -489,7 +493,7 @@ func createPrimaryIfAddrAnnotation(annotationName string, nodeAnnotation map[str
 	return nodeAnnotation, nil
 }
 
-// CreateNodeGatewayRouterLRPAddrAnnotation sets the IPv4 / IPv6 values of the node's Gatewary Router LRP to join switch.
+// CreateNodeGatewayRouterLRPAddrAnnotation sets the IPv4 / IPv6 values of the node's Gateway Router LRP to join switch.
 func CreateNodeGatewayRouterLRPAddrAnnotation(nodeAnnotation map[string]interface{}, nodeIPNetv4,
 	nodeIPNetv6 *net.IPNet) (map[string]interface{}, error) {
 	return createPrimaryIfAddrAnnotation(ovnNodeGRLRPAddr, nodeAnnotation, nodeIPNetv4, nodeIPNetv6)
@@ -834,14 +838,7 @@ func ParseNodeHostCIDRsDropNetMask(node *kapi.Node) (sets.Set[string], error) {
 	}
 
 	for i, cidr := range cfg {
-		var ip net.IP
-		var err error
-		// cidr is in the form of IP without prefix for DPU-host nodes
-		if index := strings.IndexByte(cidr, '/'); index == -1 {
-			ip = net.ParseIP(cidr)
-		} else {
-			ip, _, err = net.ParseCIDR(cidr)
-		}
+		ip, _, err := net.ParseCIDR(cidr)
 		if err != nil || ip == nil {
 			return nil, fmt.Errorf("failed to parse node host cidr %s: %v", cidr, err)
 		}
@@ -850,20 +847,20 @@ func ParseNodeHostCIDRsDropNetMask(node *kapi.Node) (sets.Set[string], error) {
 	return sets.New(cfg...), nil
 }
 
-func ParseNodeHostCIDRsExcludeOVNManagedNetworks(node *kapi.Node) ([]string, error) {
+func ParseNodeHostCIDRsExcludeOVNNetworks(node *kapi.Node) ([]string, error) {
 	networks, err := ParseNodeHostCIDRsList(node)
 	if err != nil {
 		return nil, err
 	}
-	ovnManagedNetworks, err := getNodeIfAddrAnnotation(node)
+	ovnNetworks, err := getNodeIfAddrAnnotation(node)
 	if err != nil {
 		return nil, err
 	}
-	if ovnManagedNetworks.IPv4 != "" {
-		networks = RemoveItemFromSliceUnstable(networks, ovnManagedNetworks.IPv4)
+	if ovnNetworks.IPv4 != "" {
+		networks = RemoveItemFromSliceUnstable(networks, ovnNetworks.IPv4)
 	}
-	if ovnManagedNetworks.IPv6 != "" {
-		networks = RemoveItemFromSliceUnstable(networks, ovnManagedNetworks.IPv6)
+	if ovnNetworks.IPv6 != "" {
+		networks = RemoveItemFromSliceUnstable(networks, ovnNetworks.IPv6)
 	}
 	return networks, nil
 }
@@ -882,18 +879,39 @@ func ParseNodeHostCIDRsList(node *kapi.Node) ([]string, error) {
 	return cfg, nil
 }
 
-// IsNonOVNManagedNetworkContainingIP attempts to find a non OVN managed network that will host the argument IP. If no network is
+// IsNodeSecondaryHostEgressIPsAnnotationSet returns true if an annotation that tracks assigned of egress IPs to interfaces OVN doesn't manage
+// is set
+func IsNodeSecondaryHostEgressIPsAnnotationSet(node *kapi.Node) bool {
+	_, ok := node.Annotations[OVNNodeSecondaryHostEgressIPs]
+	return ok
+}
+
+// ParseNodeSecondaryHostEgressIPsAnnotation returns secondary host egress IPs addresses for a node
+func ParseNodeSecondaryHostEgressIPsAnnotation(node *kapi.Node) (sets.Set[string], error) {
+	addrAnnotation, ok := node.Annotations[OVNNodeSecondaryHostEgressIPs]
+	if !ok {
+		return nil, newAnnotationNotSetError("%s annotation not found for node %q", OVNNodeSecondaryHostEgressIPs, node.Name)
+	}
+
+	var cfg []string
+	if err := json.Unmarshal([]byte(addrAnnotation), &cfg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal %s annotation %s for node %q: %v", OVNNodeSecondaryHostEgressIPs, addrAnnotation, node.Name, err)
+	}
+	return sets.New(cfg...), nil
+}
+
+// IsSecondaryHostNetworkContainingIP attempts to find a secondary host network that will host the argument IP. If no network is
 // found, false is returned
-func IsNonOVNManagedNetworkContainingIP(node *kapi.Node, ip net.IP) (bool, error) {
+func IsSecondaryHostNetworkContainingIP(node *kapi.Node, ip net.IP) (bool, error) {
 	if ip == nil {
 		return false, fmt.Errorf("empty IP is not valid")
 	}
 	if node == nil {
-		return false, fmt.Errorf("unable to determine if IP %s is a non OVN managed network because node argument is nil", ip.String())
+		return false, fmt.Errorf("unable to determine if IP %s is a secondary host network because node argument is nil", ip.String())
 	}
-	network, err := GetNonOVNNetworkContainingIP(node, ip)
+	network, err := GetSecondaryHostNetworkContainingIP(node, ip)
 	if err != nil {
-		return false, fmt.Errorf("failed to determine if IP %s is hosted by a non OVN managed network for node %s: %v",
+		return false, fmt.Errorf("failed to determine if IP %s is hosted by a secondary host network for node %s: %v",
 			ip.String(), node.Name, err)
 	}
 	if network == "" {
@@ -902,8 +920,8 @@ func IsNonOVNManagedNetworkContainingIP(node *kapi.Node, ip net.IP) (bool, error
 	return true, nil
 }
 
-// GetEgressIPNetwork attempts to retrieve a network that contains EgressIP. Check the OVN managed network first as
-// represented by parameter eIPConfig, and if no match is found, and if not in a cloud environment, check non-OVN managed networks.
+// GetEgressIPNetwork attempts to retrieve a network that contains EgressIP. Check the OVN network first as
+// represented by parameter eIPConfig, and if no match is found, and if not in a cloud environment, check secondary host networks.
 func GetEgressIPNetwork(node *kapi.Node, eIPConfig *ParsedNodeEgressIPConfiguration, eIP net.IP) (string, error) {
 	if eIPConfig.V4.Net != nil && eIPConfig.V4.Net.Contains(eIP) {
 		return eIPConfig.V4.Net.String(), nil
@@ -911,20 +929,20 @@ func GetEgressIPNetwork(node *kapi.Node, eIPConfig *ParsedNodeEgressIPConfigurat
 	if eIPConfig.V6.Net != nil && eIPConfig.V6.Net.Contains(eIP) {
 		return eIPConfig.V6.Net.String(), nil
 	}
-	// Do not attempt to check if a non-OVN managed network may host an EIP if we are in a cloud environment
+	// Do not attempt to check if a secondary host network may host an EIP if we are in a cloud environment
 	if PlatformTypeIsEgressIPCloudProvider() {
 		return "", nil
 	}
-	network, err := GetNonOVNNetworkContainingIP(node, eIP)
+	network, err := GetSecondaryHostNetworkContainingIP(node, eIP)
 	if err != nil {
 		return "", fmt.Errorf("failed to get Egress IP %s network for node %s: %v", eIP.String(), node.Name, err)
 	}
 	return network, nil
 }
 
-// IsOVNManagedNetwork attempts to detect if the argument IP can be hosted by a network managed by OVN. Currently, this is
+// IsOVNNetwork attempts to detect if the argument IP can be hosted by a network managed by OVN. Currently, this is
 // only the primary OVN network
-func IsOVNManagedNetwork(eIPConfig *ParsedNodeEgressIPConfiguration, ip net.IP) bool {
+func IsOVNNetwork(eIPConfig *ParsedNodeEgressIPConfiguration, ip net.IP) bool {
 	if eIPConfig.V4.Net != nil && eIPConfig.V4.Net.Contains(ip) {
 		return true
 	}
@@ -934,21 +952,32 @@ func IsOVNManagedNetwork(eIPConfig *ParsedNodeEgressIPConfiguration, ip net.IP) 
 	return false
 }
 
-// GetNonOVNNetworkContainingIP attempts to find a non OVN managed network to host the argument IP
-func GetNonOVNNetworkContainingIP(node *kapi.Node, ip net.IP) (string, error) {
-	networks, err := ParseNodeHostCIDRsExcludeOVNManagedNetworks(node)
+// GetSecondaryHostNetworkContainingIP attempts to find a secondary host network to host the argument IP
+// and includes only global unicast addresses.
+func GetSecondaryHostNetworkContainingIP(node *kapi.Node, ip net.IP) (string, error) {
+	networks, err := ParseNodeHostCIDRsExcludeOVNNetworks(node)
 	if err != nil {
-		return "", fmt.Errorf("failed to get host-cidrs annotation excluding OVN managed networks for node %s: %v",
+		return "", fmt.Errorf("failed to get host-cidrs annotation excluding OVN networks for node %s: %v",
 			node.Name, err)
 	}
 	cidrs, err := makeCIDRs(networks...)
 	if err != nil {
 		return "", err
 	}
+	if len(cidrs) == 0 {
+		return "", nil
+	}
+	isIPv6 := ip.To4() == nil
+	cidrs = filterIPVersion(cidrs, isIPv6)
 	lpmTree := cidrtree.New(cidrs...)
+	for _, prefix := range cidrs {
+		if !prefix.Addr().IsGlobalUnicast() {
+			lpmTree.Delete(prefix)
+		}
+	}
 	addr, err := netip.ParseAddr(ip.String())
 	if err != nil {
-		return "", fmt.Errorf("failed to parse IP %s: %v", ip.String(), err)
+		return "", fmt.Errorf("failed to convert IP %s to netip address: %v", ip.String(), err)
 	}
 	match, found := lpmTree.Lookup(addr)
 	if !found {
@@ -1173,6 +1202,20 @@ func makeCIDRs(s ...string) (cidrs []netip.Prefix, err error) {
 		cidrs = append(cidrs, prefix)
 	}
 	return cidrs, nil
+}
+
+func filterIPVersion(cidrs []netip.Prefix, v6 bool) []netip.Prefix {
+	validCIDRs := make([]netip.Prefix, 0, len(cidrs))
+	for _, cidr := range cidrs {
+		if cidr.Addr().Is4() && v6 {
+			continue
+		}
+		if cidr.Addr().Is6() && !v6 {
+			continue
+		}
+		validCIDRs = append(validCIDRs, cidr)
+	}
+	return validCIDRs
 }
 
 // findNodeReadyCondition finds node ready condition in conditions array.

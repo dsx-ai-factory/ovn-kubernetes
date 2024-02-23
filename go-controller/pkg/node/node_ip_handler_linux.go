@@ -12,7 +12,6 @@ import (
 	ovnconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -62,12 +61,21 @@ func newAddressManagerInternal(nodeName string, k kube.Interface, config *manage
 	}
 	mgr.nodeAnnotator = kube.NewNodeAnnotator(k, nodeName)
 	if ovnconfig.OvnKubeNode.Mode == types.NodeModeDPU {
+		var ifAddrs []*net.IPNet
+
 		// update k8s.ovn.org/host-cidrs
 		node, err := watchFactory.GetNode(nodeName)
 		if err != nil {
 			return nil, err
 		}
-		if err = mgr.updateHostCIDRs(node); err != nil {
+		if useNetlink {
+			// get updated interface IP addresses for the gateway bridge
+			ifAddrs, err = gwBridge.updateInterfaceIPAddresses(node)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if err = mgr.updateHostCIDRs(node, ifAddrs); err != nil {
 			return nil, err
 		}
 		if err = mgr.nodeAnnotator.Run(); err != nil {
@@ -224,6 +232,8 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, doneWg *sync.Wait
 
 // updates OVN's EncapIP if the node IP changed
 func (c *addressManager) handleNodePrimaryAddrChange() {
+	c.Lock()
+	defer c.Unlock()
 	nodePrimaryAddrChanged, err := c.nodePrimaryAddrChanged()
 	if err != nil {
 		klog.Errorf("Address Manager failed to check node primary address change: %v", err)
@@ -231,7 +241,7 @@ func (c *addressManager) handleNodePrimaryAddrChange() {
 	}
 	if nodePrimaryAddrChanged {
 		// klog.Infof("Node primary address changed to %v. Updating OVN encap IP.", c.nodePrimaryAddr)
-		// c.updateOVNEncapIPAndReconnect()
+		// updateOVNEncapIPAndReconnect(c.nodePrimaryAddr)
 		// In our setup, encap IP is different from node primary address
 		klog.Infof("Node primary address changed to %v", c.nodePrimaryAddr)
 	}
@@ -258,7 +268,7 @@ func (c *addressManager) updateNodeAddressAnnotations() error {
 	}
 
 	// update k8s.ovn.org/host-cidrs
-	if err = c.updateHostCIDRs(node); err != nil {
+	if err = c.updateHostCIDRs(node, ifAddrs); err != nil {
 		return err
 	}
 
@@ -288,15 +298,13 @@ func (c *addressManager) updateNodeAddressAnnotations() error {
 	return nil
 }
 
-func (c *addressManager) updateHostCIDRs(node *kapi.Node) error {
+func (c *addressManager) updateHostCIDRs(node *kapi.Node, ifAddrs []*net.IPNet) error {
 	if ovnconfig.OvnKubeNode.Mode == types.NodeModeDPU {
 		// For DPU mode, here we need to use the DPU host's IP address which is the tenant cluster's
 		// host internal IP address instead.
-		nodeAddrStr, err := util.GetNodePrimaryIP(node)
-		if err != nil {
-			return err
-		}
-		nodeAddrSet := sets.New[string](nodeAddrStr)
+		// Currently we are only intentionally supporting IPv4 for DPU here.
+		nodeIPNetv4, _ := util.MatchFirstIPNetFamily(false, ifAddrs)
+		nodeAddrSet := sets.New[string](nodeIPNetv4.String())
 		return util.SetNodeHostCIDRs(c.nodeAnnotator, nodeAddrSet)
 	}
 
@@ -352,7 +360,7 @@ func (c *addressManager) nodePrimaryAddrChanged() (bool, error) {
 	if nodePrimaryAddr == nil {
 		return false, fmt.Errorf("failed to parse the primary IP address string from kubernetes node status")
 	}
-	c.Lock()
+
 	var exists bool
 	for _, hostCIDR := range c.cidrs.UnsortedList() {
 		ip, _, err := net.ParseCIDR(hostCIDR)
@@ -366,7 +374,6 @@ func (c *addressManager) nodePrimaryAddrChanged() (bool, error) {
 			break
 		}
 	}
-	c.Unlock()
 
 	if !exists || c.nodePrimaryAddr.Equal(nodePrimaryAddr) {
 		return false, nil
@@ -376,50 +383,8 @@ func (c *addressManager) nodePrimaryAddrChanged() (bool, error) {
 	return true, nil
 }
 
-// updateOVNEncapIP updates encap IP to OVS when the node primary IP changed.
-//func (c *addressManager) updateOVNEncapIPAndReconnect() {
-//	checkCmd := []string{
-//		"get",
-//		"Open_vSwitch",
-//		".",
-//		"external_ids:ovn-encap-ip",
-//	}
-//	encapIP, stderr, err := util.RunOVSVsctl(checkCmd...)
-//	if err != nil {
-//		klog.Warningf("Unable to retrieve configured ovn-encap-ip from OVS: %v, %q", err, stderr)
-//	} else {
-//		encapIP = strings.TrimSuffix(encapIP, "\n")
-//		if len(encapIP) > 0 && c.nodePrimaryAddr.String() == encapIP {
-//			klog.V(4).Infof("Will not update encap IP, value: %s is the already configured", c.nodePrimaryAddr)
-//			return
-//		}
-//	}
-//
-//	confCmd := []string{
-//		"set",
-//		"Open_vSwitch",
-//		".",
-//		fmt.Sprintf("external_ids:ovn-encap-ip=%s", c.nodePrimaryAddr),
-//	}
-//
-//	_, stderr, err = util.RunOVSVsctl(confCmd...)
-//	if err != nil {
-//		klog.Errorf("Error setting OVS encap IP: %v  %q", err, stderr)
-//		return
-//	}
-//
-//	// force ovn-controller to reconnect SB with new encap IP immediately.
-//	// otherwise there will be a max delay of 200s due to the 100s
-//	// ovn-controller inactivity probe.
-//	_, stderr, err = util.RunOVNAppctlWithTimeout(5, "-t", "ovn-controller", "exit", "--restart")
-//	if err != nil {
-//		klog.Errorf("Failed to exit ovn-controller %v %q", err, stderr)
-//		return
-//	}
-//}
-
 // detects if the IP is valid for a node
-// excludes things like local IPs, mgmt port ip, special masquerade IP
+// excludes things like local IPs, mgmt port ip, special masquerade IP and Egress IPs for non-ovs type interfaces
 func (c *addressManager) isValidNodeIP(addr net.IP) bool {
 	if addr == nil {
 		return false
@@ -444,6 +409,16 @@ func (c *addressManager) isValidNodeIP(addr net.IP) bool {
 	if util.IsAddressReservedForInternalUse(addr) {
 		return false
 	}
+	if ovnconfig.OVNKubernetesFeature.EnableEgressIP && !util.PlatformTypeIsEgressIPCloudProvider() {
+		// IPs assigned to host interfaces to support the egress IP multi NIC feature must be excluded.
+		eipAddresses, err := c.getSecondaryHostEgressIPs()
+		if err != nil {
+			klog.Errorf("Failed to get secondary host assigned Egress IPs and ensure they are excluded: %v %v", err)
+		}
+		if eipAddresses.Has(addr.String()) {
+			return false
+		}
+	}
 
 	return true
 }
@@ -462,7 +437,7 @@ func (c *addressManager) sync() {
 			return
 		}
 		for _, link := range links {
-			foundAddrs, err := linkmanager.GetExternallyAvailableAddressesExcludeAssigned(link, ovnconfig.IPv4Mode, ovnconfig.IPv6Mode)
+			foundAddrs, err := util.GetFilteredInterfaceAddrs(link, ovnconfig.IPv4Mode, ovnconfig.IPv6Mode)
 			if err != nil {
 				klog.Errorf("Unable to retrieve addresses for link %s: %v", link.Attrs().Name, err)
 				return
@@ -492,3 +467,63 @@ func (c *addressManager) sync() {
 		c.OnChanged()
 	}
 }
+
+// getSecondaryHostEgressIPs returns the set of egress IPs that are assigned to standard linux interfaces (non ovs type). The
+// addresses are used to support Egress IP multi NIC feature. The addresses must not be included in address manager
+// because the addresses are only to support Egress IP multi NIC feature and must not be exposed via host-cidrs annot.
+func (c *addressManager) getSecondaryHostEgressIPs() (sets.Set[string], error) {
+	node, err := c.watchFactory.GetNode(c.nodeName)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get Node from informer: %v", err)
+	}
+	eipAddrs, err := util.ParseNodeSecondaryHostEgressIPsAnnotation(node)
+	if err != nil {
+		if util.IsAnnotationNotSetError(err) {
+			return sets.New[string](), nil
+		}
+		return nil, err
+	}
+	return eipAddrs, nil
+}
+
+//// updateOVNEncapIPAndReconnect updates encap IP to OVS when the node primary IP changed.
+//func updateOVNEncapIPAndReconnect(newIP net.IP) {
+//	checkCmd := []string{
+//		"get",
+//		"Open_vSwitch",
+//		".",
+//		"external_ids:ovn-encap-ip",
+//	}
+//	encapIP, stderr, err := util.RunOVSVsctl(checkCmd...)
+//	if err != nil {
+//		klog.Warningf("Unable to retrieve configured ovn-encap-ip from OVS: %v, %q", err, stderr)
+//	} else {
+//		encapIP = strings.TrimSuffix(encapIP, "\n")
+//		if len(encapIP) > 0 && newIP.String() == encapIP {
+//			klog.V(4).Infof("Will not update encap IP %s - it is already configured", newIP.String())
+//			return
+//		}
+//	}
+//
+//	confCmd := []string{
+//		"set",
+//		"Open_vSwitch",
+//		".",
+//		fmt.Sprintf("external_ids:ovn-encap-ip=%s", newIP),
+//	}
+//
+//	_, stderr, err = util.RunOVSVsctl(confCmd...)
+//	if err != nil {
+//		klog.Errorf("Error setting OVS encap IP %s: %v %q", newIP.String(), err, stderr)
+//		return
+//	}
+//
+//	// force ovn-controller to reconnect SB with new encap IP immediately.
+//	// otherwise there will be a max delay of 200s due to the 100s
+//	// ovn-controller inactivity probe.
+//	_, stderr, err = util.RunOVNAppctlWithTimeout(5, "-t", "ovn-controller", "exit", "--restart")
+//	if err != nil {
+//		klog.Errorf("Failed to exit ovn-controller %v %q", err, stderr)
+//		return
+//	}
+//}

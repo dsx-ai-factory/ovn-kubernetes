@@ -174,9 +174,9 @@ func (oc *DefaultNetworkController) getRoutingPodGWs(nsInfo *namespaceInfo) map[
 	return res
 }
 
-// addPodToNamespace returns pod's routing gateway info and the ops needed
-// to add pod's IP to the namespace's address set.
-func (oc *DefaultNetworkController) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayInfo, map[string]gatewayInfo, []ovsdb.Operation, error) {
+// addLocalPodToNamespace returns pod's routing gateway info and the ops needed
+// to add pod's IP to the namespace's address set and port group.
+func (oc *DefaultNetworkController) addLocalPodToNamespace(ns string, ips []*net.IPNet, portUUID string) (*gatewayInfo, map[string]gatewayInfo, []ovsdb.Operation, error) {
 	var ops []ovsdb.Operation
 	var err error
 	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(ns, true, nil)
@@ -190,19 +190,23 @@ func (oc *DefaultNetworkController) addPodToNamespace(ns string, ips []*net.IPNe
 		return nil, nil, nil, err
 	}
 
+	if nsInfo.portGroupName != "" {
+		if ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops, nsInfo.portGroupName, portUUID); err != nil {
+			return nil, nil, nil, err
+		}
+	}
+
 	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), ops, nil
 }
 
 func (oc *DefaultNetworkController) addRemotePodToNamespace(ns string, ips []*net.IPNet) error {
-	_, _, ops, err := oc.addPodToNamespace(ns, ips)
-
-	if err == nil {
-		_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
-		if err != nil {
-			return fmt.Errorf("could not add pod IPs to the namespace address set - %+v", err)
-		}
+	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(ns, true, nil)
+	if err != nil {
+		return fmt.Errorf("failed to ensure namespace locked: %v", err)
 	}
-	return err
+
+	defer nsUnlock()
+	return nsInfo.addressSet.AddIPs(createIPAddressSlice(ips))
 }
 
 func createIPAddressSlice(ips []*net.IPNet) []net.IP {
@@ -328,6 +332,26 @@ func (oc *DefaultNetworkController) updateNamespace(old, newer *kapi.Namespace) 
 				}
 			}
 		}
+		if config.OVNKubernetesFeature.EnableInterconnect && oc.zone != types.OvnDefaultZone {
+			// If interconnect is disabled OR interconnect is running in single-zone-mode,
+			// the ovnkube-master is responsible for patching ICNI managed namespaces with
+			// "k8s.ovn.org/external-gw-pod-ips". In that case, we need ovnkube-node to flush
+			// conntrack on every node. In multi-zone-interconnect case, we will handle the flushing
+			// directly on the ovnkube-controller code to avoid an extra namespace annotation
+			gatewayIPs, err := oc.apbExternalRouteController.GetAdminPolicyBasedExternalRouteIPsForTargetNamespace(old.Name)
+			if err != nil {
+				return fmt.Errorf("unable to retrieve gateway IPs for Admin Policy Based External Route objects for namespace %s: %w", old.Name, err)
+			}
+			for _, gwInfo := range nsInfo.routingExternalPodGWs {
+				gatewayIPs.Insert(gwInfo.gws.UnsortedList()...)
+			}
+			gatewayIPs.Insert(nsInfo.routingExternalGWs.gws.UnsortedList()...)
+			err = oc.syncConntrackForExternalGateways(old.Name, gatewayIPs) // best effort
+			if err != nil {
+				klog.Errorf("Syncing conntrack entries for egressGWs %+v serving the namespace %s failed: %v",
+					gatewayIPs, old.Name, err)
+			}
+		}
 		// if new annotation is empty, exgws were removed, may need to add SNAT per pod
 		// check if there are any pod gateways serving this namespace as well
 		if gwAnnotation == "" && len(nsInfo.routingExternalPodGWs) == 0 && config.Gateway.DisableSNATMultipleGWs {
@@ -379,7 +403,10 @@ func (oc *DefaultNetworkController) updateNamespace(old, newer *kapi.Namespace) 
 func (oc *DefaultNetworkController) deleteNamespace(ns *kapi.Namespace) error {
 	klog.Infof("[%s] deleting namespace", ns.Name)
 
-	nsInfo := oc.deleteNamespaceLocked(ns.Name)
+	nsInfo, err := oc.deleteNamespaceLocked(ns.Name)
+	if err != nil {
+		return err
+	}
 	if nsInfo == nil {
 		return nil
 	}
@@ -417,8 +444,8 @@ func (oc *DefaultNetworkController) getAllHostNamespaceAddresses() []net.IP {
 	} else {
 		ips = make([]net.IP, 0, len(existingNodes))
 		for _, node := range existingNodes {
-			if util.NoHostSubnet(node) {
-				// skip those nodes that's not OVN managed
+			if config.HybridOverlay.Enabled && util.NoHostSubnet(node) {
+				// skip hybrid overlay nodes
 				continue
 			}
 			hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)

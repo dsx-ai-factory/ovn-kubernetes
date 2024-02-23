@@ -2,11 +2,15 @@ package types
 
 import "time"
 
+type OvnK8sStatus string
+type PortMirrorType string
+
 const (
 	// Default network name
-	DefaultNetworkName  = "default"
-	K8sPrefix           = "k8s-"
-	HybridOverlayPrefix = "int-"
+	DefaultNetworkName    = "default"
+	K8sPrefix             = "k8s-"
+	HybridOverlayPrefix   = "int-"
+	HybridOverlayGRSubfix = "-gr"
 
 	// K8sMgmtIntfName name to be used as an OVS internal port on the node
 	K8sMgmtIntfName = "ovn-k8s-mp0"
@@ -199,8 +203,12 @@ const (
 	// It allows ~4 list() retries with the default reflector exponential backoff config
 	InformerSyncTimeout = 20 * time.Second
 
-	AdminPBRResyncInterval = 30 * time.Second
+	// GRMACBindingAgeThreshold is the lifetime in seconds of each MAC binding
+	// entry for the gateway routers. After this time, the entry is removed and
+	// may be refreshed with a new ARP request.
+	GRMACBindingAgeThreshold = "300"
 
+	AdminPBRResyncInterval   = 30 * time.Second
 	CacheIndexPodByIP        = "index-pod-by-ip"
 	CacheIndexPodByNodeIP    = "index-pod-by-node-ip"
 	CacheIndexPodByNodeName  = "index-pod-by-node-name"
@@ -214,24 +222,16 @@ const (
 	ExternalIDNamespace    = "namespace"
 	ExternalIDUID          = "uid"
 
+	// portMirror constants
+	PortMirrorResyncInterval = 30 * time.Second
+
 	// virtual port constants
 	VirtualIPResyncInterval = 30 * time.Second
 
 	VirtualPortType   = "virtual"
 	TablePortBinding  = "Port_Binding"
 	VirtualPortPrefix = "ovn_k8s_vport"
-)
 
-// portMirror constants
-type PortMirrorType string
-
-const (
-	PortMirrorResyncInterval = 30 * time.Second
-)
-
-type OvnK8sStatus string
-
-const (
 	OvnK8sStatusSucceeded OvnK8sStatus = "Succeeded"
 	OvnK8sStatusFailed    OvnK8sStatus = "Failed"
 )

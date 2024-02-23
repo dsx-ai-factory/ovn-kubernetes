@@ -14,6 +14,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	"k8s.io/klog/v2"
+	"k8s.io/kubernetes/pkg/apis/core"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -600,7 +601,7 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 						mvip := conf.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String()
 						targetsETP := joinHostsPort(switchV4targetips, config.eps.Port)
 						if isv6 {
-							mvip = conf.Gateway.MasqueradeIPs.V6HostMasqueradeIP.String()
+							mvip = conf.Gateway.MasqueradeIPs.V6HostETPLocalMasqueradeIP.String()
 							targetsETP = joinHostsPort(switchV6targetips, config.eps.Port)
 						}
 						switchRules = append(switchRules, LBRule{
@@ -721,14 +722,14 @@ func getSessionAffinityTimeOut(service *v1.Service) int32 {
 	if service.Spec.SessionAffinityConfig == nil ||
 		service.Spec.SessionAffinityConfig.ClientIP == nil ||
 		service.Spec.SessionAffinityConfig.ClientIP.TimeoutSeconds == nil {
-		return 10800 // default value
+		return core.DefaultClientIPServiceAffinitySeconds // default value
 	}
 	return *service.Spec.SessionAffinityConfig.ClientIP.TimeoutSeconds
 }
 
 func hasSessionAffinityTimeOut(service *v1.Service) bool {
 	return service.Spec.SessionAffinity == v1.ServiceAffinityClientIP &&
-		getSessionAffinityTimeOut(service) > 0
+		getSessionAffinityTimeOut(service) != core.MaxClientIPServiceAffinitySeconds
 }
 
 // lbOpts generates the OVN load balancer options from the kubernetes Service.

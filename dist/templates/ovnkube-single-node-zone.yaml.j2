@@ -31,7 +31,9 @@ spec:
       serviceAccountName: ovnkube-node
       hostNetwork: true
       dnsPolicy: Default
-      {{ "hostPID: true" if ovn_unprivileged_mode=="no" }}
+      {% if ovn_unprivileged_mode=="no" %}
+      hostPID: true
+      {% endif %}
       containers:
 
       # nb-ovsdb - v3
@@ -374,6 +376,8 @@ spec:
           value: "{{ ovn_hybrid_overlay_net_cidr }}"
         - name: OVN_DISABLE_SNAT_MULTIPLE_GWS
           value: "{{ ovn_disable_snat_multiple_gws }}"
+        - name: OVN_DISABLE_FORWARDING
+          value: "{{ ovn_disable_forwarding }}"
         - name: OVN_ENCAP_PORT
           value: "{{ ovn_encap_port }}"
         - name: OVN_DISABLE_PKT_MTU_CHECK
@@ -439,6 +443,8 @@ spec:
           value: "{{ ovn_enable_multi_external_gateway }}"
         - name: OVN_ENABLE_OVNKUBE_IDENTITY
           value: "{{ ovn_enable_ovnkube_identity }}"
+        - name: OVNKUBE_DISABLE_OVS_METRICS
+          value: "{{ disable_ovs_metrics }}"
 
         readinessProbe:
           exec:
