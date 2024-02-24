@@ -1544,6 +1544,18 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			_, err = fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &testNode, metav1.UpdateOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+			// wait for the NoHostSubnet label reflected in the watchFactory
+			gomega.Eventually(func() error {
+				node, err := oc.watchFactory.GetNode(testNode.Name)
+				if err != nil {
+					return err
+				}
+				if k := node.Labels["leave-alone"]; k != "true" {
+					return fmt.Errorf("NoHostSubnet label to reflected in the watchFactory yet")
+				}
+				return nil
+			}, 10).Should(gomega.BeNil())
+
 			ginkgo.By("adding the node becomes possible")
 			gomega.Expect(oc.retryNodes.ResourceHandler.AddResource(&testNode, false)).To(gomega.Succeed())
 
