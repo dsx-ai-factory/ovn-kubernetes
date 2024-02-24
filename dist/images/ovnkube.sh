@@ -1717,7 +1717,6 @@ ovnkube-controller() {
     --logfile /var/log/ovn-kubernetes/ovnkube-controller.log \
     --loglevel=${ovnkube_loglevel} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
-    --metrics-enable-pprof \
     --pidfile ${OVN_RUNDIR}/ovnkube-controller.pid \
     --zone ${ovn_zone} &
 

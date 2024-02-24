@@ -28,6 +28,15 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+func ptrInt32ToInt(p *int32) *int {
+	if p == nil {
+		return nil
+	}
+
+	ret := int(*p)
+	return &ret
+}
+
 func convertNetPolicyToMultiNetPolicy(policy *knet.NetworkPolicy) *mnpapi.MultiNetworkPolicy {
 	var mpolicy mnpapi.MultiNetworkPolicy
 	var ipb *mnpapi.IPBlock
@@ -44,7 +53,7 @@ func convertNetPolicyToMultiNetPolicy(policy *knet.NetworkPolicy) *mnpapi.MultiN
 			mingress.Ports[j] = mnpapi.MultiNetworkPolicyPort{
 				Protocol: port.Protocol,
 				Port:     port.Port,
-				EndPort:  port.EndPort,
+				EndPort:  ptrInt32ToInt(port.EndPort),
 			}
 		}
 		mingress.From = make([]mnpapi.MultiNetworkPolicyPeer, len(ingress.From))
@@ -69,7 +78,7 @@ func convertNetPolicyToMultiNetPolicy(policy *knet.NetworkPolicy) *mnpapi.MultiN
 			megress.Ports[j] = mnpapi.MultiNetworkPolicyPort{
 				Protocol: port.Protocol,
 				Port:     port.Port,
-				EndPort:  port.EndPort,
+				EndPort:  ptrInt32ToInt(port.EndPort),
 			}
 		}
 		megress.To = make([]mnpapi.MultiNetworkPolicyPeer, len(egress.To))

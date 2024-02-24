@@ -1,5 +1,5 @@
 /*
-Copyright 2020 The Kubernetes Authors
+Copyright 2022 The Kubernetes Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ import (
 
 var scheme = runtime.NewScheme()
 var codecs = serializer.NewCodecFactory(scheme)
-var parameterCodec = runtime.NewParameterCodec(scheme)
+
 var localSchemeBuilder = runtime.SchemeBuilder{
 	k8scnicncfiov1beta1.AddToScheme,
 	k8scnicncfiov1beta2.AddToScheme,

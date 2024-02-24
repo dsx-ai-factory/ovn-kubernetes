@@ -1,16 +1,11 @@
-<<<<<<< HEAD
 # github.com/Mellanox/mlxdevm-go v0.3.0
 ## explicit; go 1.19
 github.com/Mellanox/mlxdevm-go
 # github.com/Mellanox/sriovnet v1.1.0
 ## explicit; go 1.13
 github.com/Mellanox/sriovnet/pkg/utils/filesystem
-# github.com/Microsoft/go-winio v0.5.2
-## explicit; go 1.13
-=======
 # github.com/Microsoft/go-winio v0.6.0
 ## explicit; go 1.17
->>>>>>> a5ef4eeede2fc7ef1c32d6c200ad994d36dded85
 github.com/Microsoft/go-winio
 github.com/Microsoft/go-winio/internal/socket
 github.com/Microsoft/go-winio/pkg/guid
@@ -192,7 +187,7 @@ github.com/juju/errors
 # github.com/k8snetworkplumbingwg/govdpa v0.1.5-0.20230926073613-07c1031aea47
 ## explicit; go 1.17
 github.com/k8snetworkplumbingwg/govdpa/pkg/kvdpa
-# github.com/k8snetworkplumbingwg/multi-networkpolicy v0.0.0-20200914073308-0f33b9190170 => gitlab-master.nvidia.com/sdn/multi-networkpolicy v0.0.0-20220216192038-2cad3bdd98e5
+# github.com/k8snetworkplumbingwg/multi-networkpolicy v0.0.0-20230301165931-f1873dc329c6
 ## explicit; go 1.13
 github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io
 github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1
@@ -1188,4 +1183,3 @@ sigs.k8s.io/structured-merge-diff/v4/value
 sigs.k8s.io/yaml
 # github.com/Microsoft/hcsshim => github.com/Microsoft/hcsshim v0.8.20
 # github.com/gogo/protobuf => github.com/gogo/protobuf v1.3.2
-# github.com/k8snetworkplumbingwg/multi-networkpolicy => gitlab-master.nvidia.com/sdn/multi-networkpolicy v0.0.0-20220216192038-2cad3bdd98e5

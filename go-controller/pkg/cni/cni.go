@@ -3,7 +3,6 @@ package cni
 import (
 	"context"
 	"fmt"
-	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"net"
 	"time"
 
@@ -14,6 +13,7 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	current "github.com/containernetworking/cni/pkg/types/100"
+	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"

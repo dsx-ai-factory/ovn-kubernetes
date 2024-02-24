@@ -398,6 +398,7 @@ func (g *gateway) Reconcile() error {
 			return err
 		}
 	}
+	g.openflowManager.requestFlowSync()
 	return nil
 }
 

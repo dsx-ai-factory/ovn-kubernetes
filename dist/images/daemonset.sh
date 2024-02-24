@@ -1188,6 +1188,7 @@ ovn_image=${image} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
   ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
+  disable_ovs_metrics=${disable_ovs_metrics} \
   ovnkube_master_loglevel=${master_loglevel} \
   ovn_loglevel_northd=${ovn_loglevel_northd} \
   ovn_loglevel_nbctld=${ovn_loglevel_nbctld} \

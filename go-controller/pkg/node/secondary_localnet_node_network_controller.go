@@ -179,7 +179,8 @@ func (nc *SecondaryLocalnetNodeNetworkController) Start(ctx context.Context) err
 		if nc.XDPService() {
 			klog.Infof("XDP is configured on network %s", nc.GetNetworkName())
 			if nc.bridgeName == "" {
-				return fmt.Errorf("failed getting XDP bridge for network %s", nc.GetNetworkName())
+				klog.Warningf("XDP bridge for network %s is not configured, skip this node...", nc.GetNetworkName())
+				return nil
 			} else {
 				// need to get default bridge name for primary DPU, used to update XDP openflows
 				if config.OvnKubeNode.IsPrimaryDPU {

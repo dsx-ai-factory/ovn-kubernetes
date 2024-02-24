@@ -966,7 +966,7 @@ func (t *TableCache) Populate(tableUpdates ovsdb.TableUpdates) error {
 		}
 		tCache := t.cache[table]
 		for uuid, row := range tu {
-			t.logger.V(6).Info("processing update", "table", table, "uuid", uuid)
+			t.logger.V(5).Info("processing update", "table", table, "uuid", uuid)
 			update := updates.ModelUpdates{}
 			current := tCache.cache[uuid]
 			err := update.AddRowUpdate(t.dbModel, table, uuid, current, *row)
@@ -993,7 +993,7 @@ func (t *TableCache) Populate2(tableUpdates ovsdb.TableUpdates2) error {
 		}
 		tCache := t.cache[table]
 		for uuid, row := range tu {
-			t.logger.V(6).Info("processing update", "table", table, "uuid", uuid)
+			t.logger.V(5).Info("processing update", "table", table, "uuid", uuid)
 			update := updates.ModelUpdates{}
 			current := tCache.cache[uuid]
 			if row.Initial == nil && row.Insert == nil && current == nil {

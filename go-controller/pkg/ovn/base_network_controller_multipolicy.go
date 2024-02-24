@@ -68,6 +68,15 @@ func (bsnc *BaseSecondaryNetworkController) shouldApplyMultiPolicy(mpolicy *mnpa
 	return false
 }
 
+func ptrIntToInt32(p *int) *int32 {
+	if p == nil {
+		return nil
+	}
+
+	ret := int32(*p)
+	return &ret
+}
+
 func convertMultiNetPolicyToNetPolicy(mpolicy *mnpapi.MultiNetworkPolicy, allowPeerSelectors bool) (*knet.NetworkPolicy, error) {
 	var policy knet.NetworkPolicy
 	var ipb *knet.IPBlock
@@ -84,7 +93,7 @@ func convertMultiNetPolicyToNetPolicy(mpolicy *mnpapi.MultiNetworkPolicy, allowP
 			ingress.Ports[j] = knet.NetworkPolicyPort{
 				Protocol: mport.Protocol,
 				Port:     mport.Port,
-				EndPort:  mport.EndPort,
+				EndPort:  ptrIntToInt32(mport.EndPort),
 			}
 		}
 		ingress.From = make([]knet.NetworkPolicyPeer, len(mingress.From))
@@ -112,7 +121,7 @@ func convertMultiNetPolicyToNetPolicy(mpolicy *mnpapi.MultiNetworkPolicy, allowP
 			egress.Ports[j] = knet.NetworkPolicyPort{
 				Protocol: mport.Protocol,
 				Port:     mport.Port,
-				EndPort:  mport.EndPort,
+				EndPort:  ptrIntToInt32(mport.EndPort),
 			}
 		}
 		egress.To = make([]knet.NetworkPolicyPeer, len(megress.To))

@@ -17,7 +17,7 @@ limitations under the License.
 package v1beta2
 
 import (
-	v1 "k8s.io/api/core/v1"
+	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
@@ -100,7 +100,7 @@ type MultiNetworkPolicyPort struct {
 	Port *intstr.IntOrString `json:"port,omitempty"`
 
 	// +optional
-	EndPort *int32 `json:"endPort,omitempty"`
+	EndPort *int `json:"endPort,omitempty"`
 }
 
 // IPBlock ...

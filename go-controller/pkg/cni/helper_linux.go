@@ -283,10 +283,8 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 		contIface.Name = ifName
 		contIface.Mac = ifInfo.MAC.String()
 		contIface.Sandbox = netns.Path()
-	}
-
-	// 1. Move netdevice to Container namespace
-	if len(netdevice) != 0 {
+	} else if len(netdevice) != 0 {
+		// 1. Move netdevice to Container namespace
 		newNetdevName, err := safeMoveIfToNetns(netdevice, netns, containerID)
 		if err != nil {
 			return nil, nil, err
@@ -343,7 +341,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 				return nil, nil, err
 			}
 		}
-		// 4. make sure it's not a port managed by OVS to avoid conflicts TBD merge
+		// 4. make sure it's not a port managed by OVS to avoid conflicts TBD-merge
 		_, err = ovsExec("--if-exists", "del-port", hostRepName)
 		if err != nil {
 			return nil, nil, err
