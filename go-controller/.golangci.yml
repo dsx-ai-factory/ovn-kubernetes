@@ -20,3 +20,9 @@ linters:
     - typecheck
     - unused
     - exportloopref
+
+linters-settings:
+  staticcheck:
+    checks:
+      - all
+      - '-SA1019' # ignore "io/ioutil" has been deprecated since Go 1.19

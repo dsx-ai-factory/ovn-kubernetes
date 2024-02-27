@@ -12,6 +12,7 @@ find_files="find ${PKGS} -not \( \
         -o -wholename './pkg/crd/*/register.go' \
         -o -wholename './pkg/crd/*/factory.go' \
         -o -wholename '*/_output/*' \
+        -o -wholename '*/pkg/crd/*' \
       \) -prune \
     \) -name '*.go'"
 
