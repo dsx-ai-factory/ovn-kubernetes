@@ -1339,7 +1339,9 @@ net_cidr=${net_cidr} svc_cidr=${svc_cidr} \
 #cp ../templates/rbac-ovnkube-db.yaml.j2 ${output_dir}/rbac-ovnkube-db.yaml
 #cp ../templates/rbac-ovnkube-cluster-manager.yaml.j2 ${output_dir}/rbac-ovnkube-cluster-manager.yaml
 cp ../templates/ovnkube-monitor.yaml.j2 ${output_dir}/ovnkube-monitor.yaml
-cp ../templates/ovnkube-alerts-shardable.yaml.j2 ${output_dir}/ovnkube-alerts-shardable.yaml
+cp ../templates/ovnkube-alerts-shardable-common.yaml.j2 ${output_dir}/ovnkube-alerts-shardable-common.yaml
+cp ../templates/ovnkube-alerts-shardable-dpu.yaml.j2 ${output_dir}/ovnkube-alerts-shardable-dpu.yaml
+cp ../templates/ovnkube-alerts-shardable-cx.yaml.j2 ${output_dir}/ovnkube-alerts-shardable-cx.yaml
 cp ../templates/ovnkube-alerts-nonshardable.yaml.j2 ${output_dir}/ovnkube-alerts-nonshardable.yaml
 cp ../templates/k8s.ovn.org_egressfirewalls.yaml.j2 ${output_dir}/k8s.ovn.org_egressfirewalls.yaml
 cp ../templates/k8s.ovn.org_egressips.yaml.j2 ${output_dir}/k8s.ovn.org_egressips.yaml

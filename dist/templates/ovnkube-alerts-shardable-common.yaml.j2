@@ -5,7 +5,7 @@ metadata:
     prometheus: k8s
     shardable: "true"
     role: alert-rules
-  name: ovnkube-rules-shardable
+  name: ovnkube-rules-shardable-common
   namespace: ovn-kubernetes
 spec:
   groups:
@@ -493,96 +493,6 @@ spec:
          Pod ovn-kubernetes/ {{ $labels.pod }} vault-agent container
          is restarting {{ printf "%.2f" $value }} times / 5 minutes
 
-    - alert: OvsVfRepInterfaceDown
-      expr: |
-        ovs_vswitchd_interface_link_state{interface=~"pf.*", port!=""} != 2 and ovs_vswitchd_interface_of_port{interface=~"pf.*"} != -1
-      for: 10m
-      labels:
-       severity: major
-       pduuid: P10A23N
-       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
-      annotations:
-       message: |
-         Interface {{ $labels.interface }} on instance {{ $labels.instance }} is not up for longer than 10m
-
-    - alert: OvsTxNoOffloadBytesCriticallyHigh
-      expr: |
-        rate(ovs_vswitchd_interface_tx_sw_bytes{interface=~"pf.*"}[15m]) / 1024 / 1024 > 60
-      for: 10m
-      labels:
-       severity: critical
-       pduuid: P10A23N
-       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
-      annotations:
-       message: |
-         Noticed higher than 60MiB/s TX rates without offload on the host with pod ovn-kubernetes/ {{ $labels.pod }}
-         instance {{ $labels.instance }} port {{ $labels.port }} interface {{ $labels.interface }} for longer than 10m
-
-    - alert: OvsTxNoOffloadBytesTooHigh
-      expr: |
-        rate(ovs_vswitchd_interface_tx_sw_bytes{interface=~"pf.*"}[10m]) / 1024 / 1024 > 40
-      for: 5m
-      labels:
-       severity: minor
-       pduuid: P10A23N
-       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
-      annotations:
-       message: |
-         Noticed higher than 40MiB/s TX rates without offload on the host with pod ovn-kubernetes/ {{ $labels.pod }}
-         instance {{ $labels.instance }} port {{ $labels.port }} interface {{ $labels.interface }} for longer than 5m
-
-    - alert: OvsTxNoOffloadBytesUnusuallyHigh
-      expr: |
-        rate(ovs_vswitchd_interface_tx_sw_bytes{interface=~"pf.*"}[5m]) / 1024 / 1024 > 20
-      for: 5m
-      labels:
-       severity: warning
-       pduuid: P10A23N
-       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
-      annotations:
-       message: |
-         Noticed higher than 20MiB/s TX rates without offload on the host with pod ovn-kubernetes/ {{ $labels.pod }}
-         instance {{ $labels.instance }} port {{ $labels.port }} interface {{ $labels.interface }} for longer than 5m
-
-    - alert: OvsRxNoOffloadBytesCriticallyHigh
-      expr: |
-        rate(ovs_vswitchd_interface_rx_sw_bytes{interface=~"pf.*"}[15m]) / 1024 / 1024 > 60
-      for: 10m
-      labels:
-       severity: critical
-       pduuid: P10A23N
-       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
-      annotations:
-       message: |
-         Noticed higher than 60MiB/s RX rates without offload on the host with pod ovn-kubernetes/ {{ $labels.pod }}
-         instance {{ $labels.instance }} port {{ $labels.port }} interface {{ $labels.interface }} for longer than 10m
-
-    - alert: OvsRxNoOffloadBytesTooHigh
-      expr: |
-        rate(ovs_vswitchd_interface_rx_sw_bytes{interface=~"pf.*"}[10m]) / 1024 / 1024 > 40
-      for: 5m
-      labels:
-       severity: minor
-       pduuid: P10A23N
-       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
-      annotations:
-       message: |
-         Noticed higher than 40MiB/s RX rates without offload on the host with pod ovn-kubernetes/ {{ $labels.pod }}
-         instance {{ $labels.instance }} port {{ $labels.port }} interface {{ $labels.interface }} for longer than 5m
-
-    - alert: OvsRxNoOffloadBytesUnusuallyHigh
-      expr: |
-        rate(ovs_vswitchd_interface_rx_sw_bytes{interface=~"pf.*"}[5m]) / 1024 / 1024 > 20
-      for: 5m
-      labels:
-       severity: warning
-       pduuid: P10A23N
-       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
-      annotations:
-       message: |
-         Noticed higher than 20MiB/s RX rates without offload on the host with pod ovn-kubernetes/ {{ $labels.pod }}
-         instance {{ $labels.instance }} port {{ $labels.port }} interface {{ $labels.interface }} for longer than 5m
-
     - alert: OvsMegaFlowsTotalUnusuallyHigh
       expr: |
         (ovs_vswitchd_dp_offloaded_flows_total + ovs_vswitchd_dp_flows_total) > 10000
@@ -738,18 +648,3 @@ spec:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that
          number of handled flows is {{ printf "%.2f" $value }} per second for longer than 15 mins.
-
-    - alert: OvsVswitchdVtep0InterfaceMtu
-      expr: |
-        ovs_vswitchd_interface_mtu and
-        (ovs_vswitchd_interface_mtu{namespace="ovn-kubernetes",job="ovnkube-node",interface="vtep0"} != 1560)
-        and (ovs_vswitchd_interface_mtu{namespace="ovn-kubernetes",job="ovnkube-node",interface="vtep0"} != 9100)
-      for: 10m
-      labels:
-       severity: warning
-       pduuid: P10A23N
-       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
-      annotations:
-       message: |
-         Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that
-         vtep0 interface MTU value is {{ $value }}
