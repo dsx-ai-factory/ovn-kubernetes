@@ -532,6 +532,9 @@ ovsdb-raft() {
       echo "Failed to get current raft role value. Exiting..."
       exit 11
     fi
+    if [[ ${db} == "nb" ]]; then
+      ovn-nbctl --no-leader set NB_Global . options:northd-backoff-interval-ms=${ovn_northd_backoff_interval}
+    fi
     if echo $current_raft_role | grep -q -i leader; then
       # set the election timer value before other servers join the cluster
       set_election_timer ${db} ${election_timer}

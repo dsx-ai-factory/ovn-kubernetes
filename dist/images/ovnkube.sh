@@ -116,6 +116,7 @@ BASEDIR=$(dirname $0)
 # OVN_CLUSTER_SUBNETS_MAC_BINDING_AGING - MAC binding aging threshold for cluster subnets (in seconds)
 # OVNKUBE_DISABLE_FIREWALLD - skip firewalld calls which open ports for service endpoints
 # OVNKUBE_ADMIN_FIREWALLD_ZONE - name of admin firewalld zone
+# OVN_NORTHD_BACKOFF_INTERVAL - ovn northd backoff interval in ms (default 300)
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -383,6 +384,9 @@ ovn_conntrack_zone=${OVN_CONNTRACK_ZONE:-}
 ovn_ex_gw_network_interface=${OVN_EX_GW_NETWORK_INTERFACE:-}
 # OVNKUBE_COMPACT_MODE_ENABLE indicate if ovnkube run master and node in one process
 ovnkube_compact_mode_enable=${OVNKUBE_COMPACT_MODE_ENABLE:-false}
+# OVN_NORTHD_BACKOFF_INTERVAL - northd backoff interval in ms
+# defualt is 300; no backoff delay if set to 0
+ovn_northd_backoff_interval=${OVN_NORTHD_BACKOFF_INTERVAL:-"0"}
 
 # OVNKUBE_DISABLE_FIREWALLD - skip firewalld calls which open ports for service endpoints
 ovnkube_disable_firewalld=${OVNKUBE_DISABLE_FIREWALLD:-"false"}
@@ -943,7 +947,7 @@ nb-ovsdb() {
   }
 
   # Let ovn-northd sleep and not use so much CPU
-  ovn-nbctl set NB_Global . options:northd-backoff-interval-ms=300
+  ovn-nbctl set NB_Global . options:northd-backoff-interval-ms=${ovn_northd_backoff_interval}
   echo "=============== nb-ovsdb ========== reconfigured for northd backoff"
 
   ovn-nbctl set NB_Global . name=${ovn_zone}
@@ -1082,7 +1086,7 @@ local-nb-ovsdb() {
   echo "=============== nb-ovsdb (unix sockets only) ========== RUNNING"
 
   # Let ovn-northd sleep and not use so much CPU
-  ovn-nbctl set NB_Global . options:northd-backoff-interval-ms=300
+  ovn-nbctl set NB_Global . options:northd-backoff-interval-ms=${ovn_northd_backoff_interval}
   echo "=============== nb-ovsdb ========== reconfigured for northd backoff"
 
   ovn-nbctl set NB_Global . name=${K8S_NODE}
