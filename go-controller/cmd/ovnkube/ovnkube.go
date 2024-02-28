@@ -318,7 +318,7 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 			}
 			// serve ovnkube controller metrics
 			metrics.StartMetricsServer(config.Metrics.BindAddress, pprofBindAddress,
-				config.OvnNorth.Cert, config.OvnNorth.PrivKey, ctx.Done(), ovnKubeStartWg)
+				config.Metrics.NodeServerCert, config.Metrics.NodeServerPrivKey, ctx.Done(), ovnKubeStartWg)
 		}
 	}
 

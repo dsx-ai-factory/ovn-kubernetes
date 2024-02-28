@@ -1366,13 +1366,27 @@ ovn-master() {
   fi
 
   ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:${metrics_master_port}"
+
   local ovnkube_metrics_tls_opts=""
-  #if [[ ${OVNKUBE_METRICS_PK} != "" && ${OVNKUBE_METRICS_CERT} != "" ]]; then
-  #  ovnkube_metrics_tls_opts="
-  #      --node-server-privkey ${OVNKUBE_METRICS_PK}
-  #      --node-server-cert ${OVNKUBE_METRICS_CERT}
-  #    "
-  #fi
+  if [[ ${OVNKUBE_METRICS_PK} != "" && ${OVNKUBE_METRICS_CERT} != "" ]]; then
+   ovnkube_metrics_tls_opts="
+       --node-server-privkey ${OVNKUBE_METRICS_PK}
+       --node-server-cert ${OVNKUBE_METRICS_CERT}
+     "
+  else
+    local tls_dir="/root/tls_dir"
+    mkdir -p -m 0700 ${tls_dir}
+    chown root.root ${tls_dir}
+    openssl req -x509 -nodes -newkey rsa:4096 -keyout ${tls_dir}/key.pem -out ${tls_dir}/cert.pem -days 365 -subj '/CN=*.nvmetal.net' 2>&1 > /dev/null
+    if [[ $? != 0 ]]; then
+      echo "Exiting, failed to generate TLS cert/key"
+      exit 1
+    fi
+    ovnkube_metrics_tls_opts="
+      --node-server-privkey ${tls_dir}/key.pem
+      --node-server-cert ${tls_dir}/cert.pem
+        "
+  fi
 
   ovnkube_config_duration_enable_flag=
   if [[ ${ovnkube_config_duration_enable} == "true" ]]; then
@@ -1634,6 +1648,19 @@ ovnkube-controller() {
         --node-server-privkey ${OVNKUBE_METRICS_PK}
         --node-server-cert ${OVNKUBE_METRICS_CERT}
       "
+  else
+    local tls_dir="/root/tls_dir"
+    mkdir -p -m 0700 ${tls_dir}
+    chown root.root ${tls_dir}
+    openssl req -x509 -nodes -newkey rsa:4096 -keyout ${tls_dir}/key.pem -out ${tls_dir}/cert.pem -days 365 -subj '/CN=*.nvmetal.net' 2>&1 > /dev/null
+    if [[ $? != 0 ]]; then
+      echo "Exiting, failed to generate TLS cert/key"
+      exit 1
+    fi
+    ovnkube_metrics_tls_opts="
+      --node-server-privkey ${tls_dir}/key.pem
+      --node-server-cert ${tls_dir}/cert.pem
+        "
   fi
   echo "ovnkube_metrics_tls_opts=${ovnkube_metrics_tls_opts}"
 
@@ -1989,6 +2016,19 @@ ovnkube-controller-with-node() {
         --node-server-privkey ${OVNKUBE_METRICS_PK}
         --node-server-cert ${OVNKUBE_METRICS_CERT}
       "
+  else
+    local tls_dir="/root/tls_dir"
+    mkdir -p -m 0700 ${tls_dir}
+    chown root.root ${tls_dir}
+    openssl req -x509 -nodes -newkey rsa:4096 -keyout ${tls_dir}/key.pem -out ${tls_dir}/cert.pem -days 365 -subj '/CN=*.nvmetal.net' 2>&1 > /dev/null
+    if [[ $? != 0 ]]; then
+      echo "Exiting, failed to generate TLS cert/key"
+      exit 1
+    fi
+    ovnkube_metrics_tls_opts="
+      --node-server-privkey ${tls_dir}/key.pem
+      --node-server-cert ${tls_dir}/cert.pem
+        "
   fi
   echo "ovnkube_metrics_tls_opts=${ovnkube_metrics_tls_opts}"
 
@@ -2234,6 +2274,19 @@ ovn-cluster-manager() {
         --node-server-privkey ${OVNKUBE_METRICS_PK}
         --node-server-cert ${OVNKUBE_METRICS_CERT}
       "
+  else
+    local tls_dir="/root/tls_dir"
+    mkdir -p -m 0700 ${tls_dir}
+    chown root.root ${tls_dir}
+    openssl req -x509 -nodes -newkey rsa:4096 -keyout ${tls_dir}/key.pem -out ${tls_dir}/cert.pem -days 365 -subj '/CN=*.nvmetal.net' 2>&1 > /dev/null
+    if [[ $? != 0 ]]; then
+      echo "Exiting, failed to generate TLS cert/key"
+      exit 1
+    fi
+    ovnkube_metrics_tls_opts="
+      --node-server-privkey ${tls_dir}/key.pem
+      --node-server-cert ${tls_dir}/cert.pem
+        "
   fi
   echo "ovnkube_metrics_tls_opts: ${ovnkube_metrics_tls_opts}"
 
@@ -2443,20 +2496,26 @@ ovn-node() {
     wait_for_event process_ready ovn-controller
   fi
 
-  local tls_dir="/root/tls_dir"
-  mkdir -p -m 0700 ${tls_dir}
-  chown root.root ${tls_dir}
-  openssl req -x509 -nodes -newkey rsa:4096 -keyout ${tls_dir}/key.pem -out ${tls_dir}/cert.pem -days 365 -subj '/CN=*.nvmetal.net' 2>&1 > /dev/null
-  if [[ $? != 0 ]]; then
-    echo "Exiting, failed to generate TLS cert/key"
-    exit 1
-  fi
-
   local ovnkube_metrics_tls_opts=""
-  ovnkube_metrics_tls_opts="
-    --node-server-privkey ${tls_dir}/key.pem
-    --node-server-cert ${tls_dir}/cert.pem
-      "
+  if [[ ${OVNKUBE_METRICS_PK} != "" && ${OVNKUBE_METRICS_CERT} != "" ]]; then
+   ovnkube_metrics_tls_opts="
+       --node-server-privkey ${OVNKUBE_METRICS_PK}
+       --node-server-cert ${OVNKUBE_METRICS_CERT}
+     "
+  else
+    local tls_dir="/root/tls_dir"
+    mkdir -p -m 0700 ${tls_dir}
+    chown root.root ${tls_dir}
+    openssl req -x509 -nodes -newkey rsa:4096 -keyout ${tls_dir}/key.pem -out ${tls_dir}/cert.pem -days 365 -subj '/CN=*.nvmetal.net' 2>&1 > /dev/null
+    if [[ $? != 0 ]]; then
+      echo "Exiting, failed to generate TLS cert/key"
+      exit 1
+    fi
+    ovnkube_metrics_tls_opts="
+      --node-server-privkey ${tls_dir}/key.pem
+      --node-server-cert ${tls_dir}/cert.pem
+        "
+  fi
 
   [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
     wait_for_event attempts=20 files_exist ${ovn_controller_pk} ${ovn_controller_cert} ${ovn_ca_cert}
