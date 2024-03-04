@@ -35,6 +35,7 @@ type DevlinkPortFn struct {
 	HwAddr  net.HardwareAddr
 	State   uint8
 	OpState uint8
+	Trust   uint8
 }
 
 // DevlinkPortFnSetAttrs represents attributes to set
@@ -42,6 +43,7 @@ type DevlinkPortFnSetAttrs struct {
 	FnAttrs     DevlinkPortFn
 	HwAddrValid bool
 	StateValid  bool
+	TrustValid  bool
 }
 
 // DevlinkPortFnCap represents port function and its attributes
@@ -94,6 +96,169 @@ type DevlinkPortAddAttrs struct {
 var (
 	native = nl.NativeEndian()
 )
+
+// DevlinkResource represents a device resource
+type DevlinkResource struct {
+	Name            string
+	ID              uint64
+	Size            uint64
+	SizeNew         uint64
+	SizeMin         uint64
+	SizeMax         uint64
+	SizeGranularity uint64
+	PendingChange   bool
+	Unit            uint8
+	SizeValid       bool
+	OCCValid        bool
+	OCCSize         uint64
+	Parent          *DevlinkResource
+	Children        []DevlinkResource
+}
+
+// parseAttributes parses provided Netlink Attributes and populates DevlinkResource, returns error if occured
+func (dlr *DevlinkResource) parseAttributes(attrs map[uint16]syscall.NetlinkRouteAttr) error {
+	var attr syscall.NetlinkRouteAttr
+	var ok bool
+
+	// mandatory attributes
+	attr, ok = attrs[DEVLINK_ATTR_RESOURCE_ID]
+	if !ok {
+		return fmt.Errorf("missing resource id")
+	}
+	dlr.ID = native.Uint64(attr.Value)
+
+	attr, ok = attrs[DEVLINK_ATTR_RESOURCE_NAME]
+	if !ok {
+		return fmt.Errorf("missing resource name")
+	}
+	dlr.Name = nl.BytesToString(attr.Value)
+
+	attr, ok = attrs[DEVLINK_ATTR_RESOURCE_SIZE]
+	if !ok {
+		return fmt.Errorf("missing resource size")
+	}
+	dlr.Size = native.Uint64(attr.Value)
+
+	attr, ok = attrs[DEVLINK_ATTR_RESOURCE_SIZE_GRAN]
+	if !ok {
+		return fmt.Errorf("missing resource size granularity")
+	}
+	dlr.SizeGranularity = native.Uint64(attr.Value)
+
+	attr, ok = attrs[DEVLINK_ATTR_RESOURCE_UNIT]
+	if !ok {
+		return fmt.Errorf("missing resource unit")
+	}
+	dlr.Unit = uint8(attr.Value[0])
+
+	attr, ok = attrs[DEVLINK_ATTR_RESOURCE_SIZE_MIN]
+	if !ok {
+		return fmt.Errorf("missing resource size min")
+	}
+	dlr.SizeMin = native.Uint64(attr.Value)
+
+	attr, ok = attrs[DEVLINK_ATTR_RESOURCE_SIZE_MAX]
+	if !ok {
+		return fmt.Errorf("missing resource size max")
+	}
+	dlr.SizeMax = native.Uint64(attr.Value)
+
+	// optional attributes
+	attr, ok = attrs[DEVLINK_ATTR_RESOURCE_OCC]
+	if ok {
+		dlr.OCCSize = native.Uint64(attr.Value)
+		dlr.OCCValid = true
+	}
+
+	attr, ok = attrs[DEVLINK_ATTR_RESOURCE_SIZE_VALID]
+	if ok {
+		dlr.SizeValid = uint8(attr.Value[0]) != 0
+	}
+
+	attr, ok = attrs[DEVLINK_ATTR_RESOURCE_SIZE_NEW]
+	dlr.SizeNew = dlr.Size
+	if ok {
+		dlr.SizeNew = native.Uint64(attr.Value)
+	}
+
+	dlr.PendingChange = dlr.Size != dlr.SizeNew
+
+	attr, ok = attrs[DEVLINK_ATTR_RESOURCE_LIST]
+	if ok {
+		// handle nested resoruces recursively
+		subResources, err := nl.ParseRouteAttr(attr.Value)
+		if err != nil {
+			return err
+		}
+
+		for _, subresource := range subResources {
+			resource := DevlinkResource{Parent: dlr}
+			attrs, err := nl.ParseRouteAttrAsMap(subresource.Value)
+			if err != nil {
+				return err
+			}
+			err = resource.parseAttributes(attrs)
+			if err != nil {
+				return fmt.Errorf("failed to parse child resource, parent:%s. %w", dlr.Name, err)
+			}
+			dlr.Children = append(dlr.Children, resource)
+		}
+	}
+	return nil
+}
+
+// DevlinkResources represents all devlink resources of a devlink device
+type DevlinkResources struct {
+	Bus       string
+	Device    string
+	Resources []DevlinkResource
+}
+
+// parseAttributes parses provided Netlink Attributes and populates DevlinkResources, returns error if occured
+func (dlrs *DevlinkResources) parseAttributes(attrs map[uint16]syscall.NetlinkRouteAttr) error {
+	var attr syscall.NetlinkRouteAttr
+	var ok bool
+
+	// Bus
+	attr, ok = attrs[DEVLINK_ATTR_BUS_NAME]
+	if !ok {
+		return fmt.Errorf("missing bus name")
+	}
+	dlrs.Bus = nl.BytesToString(attr.Value)
+
+	// Device
+	attr, ok = attrs[DEVLINK_ATTR_DEV_NAME]
+	if !ok {
+		return fmt.Errorf("missing device name")
+	}
+	dlrs.Device = nl.BytesToString(attr.Value)
+
+	// Resource List
+	attr, ok = attrs[DEVLINK_ATTR_RESOURCE_LIST]
+	if !ok {
+		return fmt.Errorf("missing resource list")
+	}
+
+	resourceAttrs, err := nl.ParseRouteAttr(attr.Value)
+	if err != nil {
+		return err
+	}
+
+	for _, resourceAttr := range resourceAttrs {
+		resource := DevlinkResource{}
+		attrs, err := nl.ParseRouteAttrAsMap(resourceAttr.Value)
+		if err != nil {
+			return err
+		}
+		err = resource.parseAttributes(attrs)
+		if err != nil {
+			return fmt.Errorf("failed to parse root resoruces, %w", err)
+		}
+		dlrs.Resources = append(dlrs.Resources, resource)
+	}
+
+	return nil
+}
 
 func parseDevlinkDeviceList(msgs [][]byte) ([]*DevlinkDevice, error) {
 	devices := make([]*DevlinkDevice, 0, len(msgs))
@@ -341,7 +506,7 @@ func DevlinkSetEswitchMode(Socket string, Dev *DevlinkDevice, NewMode string) er
 	return pkgHandle.DevlinkSetEswitchMode(Socket, Dev, NewMode)
 }
 
-func (port *DevlinkPort) parseAttributes(attrs []syscall.NetlinkRouteAttr) error {
+func (port *DevlinkPort) parseAttributes(Socket string, attrs []syscall.NetlinkRouteAttr) error {
 	for _, a := range attrs {
 		switch a.Attr.Type {
 		case DEVLINK_ATTR_BUS_NAME:
@@ -384,6 +549,13 @@ func (port *DevlinkPort) parseAttributes(attrs []syscall.NetlinkRouteAttr) error
 						port.Fn = &DevlinkPortFn{}
 					}
 					port.Fn.OpState = uint8(nested.Value[0])
+				case MLXDEVM_PORT_FN_ATTR_TRUST:
+					if Socket == GENL_MLXDEVM_NAME {
+						if port.Fn == nil {
+							port.Fn = &DevlinkPortFn{}
+						}
+						port.Fn.Trust = uint8(nested.Value[0])
+					}
 				case DEVLINK_PORT_FN_ATTR_EXT_CAP_ROCE:
 					if port.PortCap == nil {
 						port.PortCap = &DevlinkPortFnCap{}
@@ -403,7 +575,7 @@ func (port *DevlinkPort) parseAttributes(attrs []syscall.NetlinkRouteAttr) error
 	return nil
 }
 
-func parseDevlinkAllPortList(msgs [][]byte) ([]*DevlinkPort, error) {
+func parseDevlinkAllPortList(Socket string, msgs [][]byte) ([]*DevlinkPort, error) {
 	ports := make([]*DevlinkPort, 0, len(msgs))
 	for _, m := range msgs {
 		attrs, err := nl.ParseRouteAttr(m[nl.SizeofGenlmsg:])
@@ -411,7 +583,7 @@ func parseDevlinkAllPortList(msgs [][]byte) ([]*DevlinkPort, error) {
 			return nil, err
 		}
 		port := &DevlinkPort{}
-		if err = port.parseAttributes(attrs); err != nil {
+		if err = port.parseAttributes(Socket, attrs); err != nil {
 			return nil, err
 		}
 		ports = append(ports, port)
@@ -437,7 +609,7 @@ func (h *Handle) DevlinkGetAllPortList(Socket string) ([]*DevlinkPort, error) {
 	if err != nil {
 		return nil, err
 	}
-	ports, err := parseDevlinkAllPortList(msgs)
+	ports, err := parseDevlinkAllPortList(Socket, msgs)
 	if err != nil {
 		return nil, err
 	}
@@ -450,14 +622,14 @@ func DevlinkGetAllPortList(Socket string) ([]*DevlinkPort, error) {
 	return pkgHandle.DevlinkGetAllPortList(Socket)
 }
 
-func parseDevlinkPortMsg(msgs [][]byte) (*DevlinkPort, error) {
+func parseDevlinkPortMsg(Socket string, msgs [][]byte) (*DevlinkPort, error) {
 	m := msgs[0]
 	attrs, err := nl.ParseRouteAttr(m[nl.SizeofGenlmsg:])
 	if err != nil {
 		return nil, err
 	}
 	port := &DevlinkPort{}
-	if err = port.parseAttributes(attrs); err != nil {
+	if err = port.parseAttributes(Socket, attrs); err != nil {
 		return nil, err
 	}
 	return port, nil
@@ -478,7 +650,7 @@ func (h *Handle) DevlinkGetPortByIndex(Socket string, Bus string, Device string,
 	if err != nil {
 		return nil, err
 	}
-	port, err := parseDevlinkPortMsg(respmsg)
+	port, err := parseDevlinkPortMsg(Socket, respmsg)
 	return port, err
 }
 
@@ -514,7 +686,7 @@ func (h *Handle) DevlinkPortAdd(Socket string, Bus string, Device string, Flavou
 	if err != nil {
 		return nil, err
 	}
-	port, err := parseDevlinkPortMsg(respmsg)
+	port, err := parseDevlinkPortMsg(Socket, respmsg)
 	return port, err
 }
 
@@ -544,6 +716,10 @@ func DevlinkPortDel(Socket string, Bus string, Device string, PortIndex uint32) 
 // DevlinkPortFnSet sets one or more port function attributes specified by the attribute mask.
 // It returns 0 on success or error code.
 func (h *Handle) DevlinkPortFnSet(Socket string, Bus string, Device string, PortIndex uint32, FnAttrs DevlinkPortFnSetAttrs) error {
+	if FnAttrs.TrustValid && Socket != GENL_MLXDEVM_NAME {
+		return fmt.Errorf("setting 'trust' mode is only supported by netlink family '%s'", GENL_MLXDEVM_NAME)
+	}
+
 	_, req, err := h.createCmdReq(Socket, DEVLINK_CMD_PORT_SET, Bus, Device)
 	if err != nil {
 		return err
@@ -560,6 +736,11 @@ func (h *Handle) DevlinkPortFnSet(Socket string, Bus string, Device string, Port
 	if FnAttrs.StateValid {
 		fnAttr.AddRtAttr(DEVLINK_PORT_FN_ATTR_STATE, nl.Uint8Attr(FnAttrs.FnAttrs.State))
 	}
+
+	if FnAttrs.TrustValid {
+		fnAttr.AddRtAttr(MLXDEVM_PORT_FN_ATTR_TRUST, nl.Uint8Attr(FnAttrs.FnAttrs.Trust))
+	}
+
 	req.AddData(fnAttr)
 
 	_, err = req.Execute(unix.NETLINK_GENERIC, 0)
@@ -767,4 +948,39 @@ func (h *Handle) DevlinkDevParamSet(Socket string, Bus string, Device string, Pa
 // Equivalent to: `mlxdevm dev param set $dev name disable_netdev value true cmode runtime`
 func DevlinkDevParamSet(Socket string, Bus string, Device string, ParamName string, NewValue string, NewCMode string) error {
 	return pkgHandle.DevlinkDevParamSet(Socket, Bus, Device, ParamName, NewValue, NewCMode)
+}
+
+// DevlinkGetDeviceResources returns devlink device resources from provided socket
+func DevlinkGetDeviceResources(socket string, bus string, device string) (*DevlinkResources, error) {
+	return pkgHandle.DevlinkGetDeviceResources(socket, bus, device)
+}
+
+// DevlinkGetDeviceResources returns devlink device resources from provided socket
+func (h *Handle) DevlinkGetDeviceResources(socket string, bus string, device string) (*DevlinkResources, error) {
+	_, req, err := h.createCmdReq(socket, DEVLINK_CMD_RESOURCE_DUMP, bus, device)
+	if err != nil {
+		return nil, err
+	}
+
+	respmsg, err := req.Execute(unix.NETLINK_GENERIC, 0)
+	if err != nil {
+		return nil, err
+	}
+	// expect just one msg
+	if len(respmsg) != 1 {
+		return nil, fmt.Errorf("expected only one nl response msg")
+	}
+
+	var resources DevlinkResources
+	attrs, err := nl.ParseRouteAttrAsMap(respmsg[0][nl.SizeofGenlmsg:])
+	if err != nil {
+		return nil, err
+	}
+
+	err = resources.parseAttributes(attrs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse resource attributes. %w", err)
+	}
+
+	return &resources, nil
 }

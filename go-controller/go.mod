@@ -3,7 +3,7 @@ module github.com/ovn-org/ovn-kubernetes/go-controller
 go 1.20
 
 require (
-	github.com/Mellanox/mlxdevm-go v0.3.0
+	github.com/Mellanox/mlxdevm-go v0.3.1-0.20240213073146-ea70276e64ba
 	github.com/Mellanox/sriovnet v1.1.0
 	github.com/Microsoft/hcsshim v0.9.6
 	github.com/alexflint/go-filemutex v1.2.0
@@ -40,11 +40,11 @@ require (
 	github.com/spf13/afero v1.9.5
 	github.com/stretchr/testify v1.8.2
 	github.com/urfave/cli/v2 v2.2.0
-	github.com/vishvananda/netlink v1.2.1-beta.2.0.20231024175852-77df5d35f725
+	github.com/vishvananda/netlink v1.2.1-beta.2.0.20240126170848-06219cde3e81
 	golang.org/x/exp v0.0.0-20230811145659-89c5cff77bcb
 	golang.org/x/net v0.17.0
 	golang.org/x/sync v0.2.0
-	golang.org/x/sys v0.13.0
+	golang.org/x/sys v0.16.0
 	golang.org/x/time v0.3.0
 	google.golang.org/grpc v1.56.3
 	google.golang.org/protobuf v1.30.0
