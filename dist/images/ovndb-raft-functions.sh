@@ -260,6 +260,28 @@ set_northd_probe_interval() {
   return 0
 }
 
+set_sb_inactivity_probe() {
+  # OVN_SB_INACTIVITY_PROBE - inactivity probe interval of SB DB connections in ms (default 100000)
+  # This is needed to avoid no active ovn-northd leader for a long time.
+  sb_inactivity_probe=${OVN_SB_INACTIVITY_PROBE:-100000}
+
+  echo "Setting SB inactivity probe interval to ${sb_inactivity_probe} ms"
+  output=$(ovn-sbctl --no-leader-only --data=bare --no-headings --columns=inactivity_probe list connection)
+  if [[ $? == 0 ]]; then
+    output=$(echo ${output} | tr -d '\"')
+    echo "Current value of inactivity probe interval is ${output} ms"
+    if [[ "${output}" != "${sb_inactivity_probe}" ]]; then
+      ovn-sbctl --no-leader-only set connection . inactivity_probe=${sb_inactivity_probe}
+      if [[ $? != 0 ]]; then
+        echo "Failed to set SB connection inactivity probe interval to ${sb_inactivity_probe}. Exiting....."
+        exit 13
+      fi
+      echo "Set connection inactivity probe interval to ${sb_inactivity_probe} ms successfully"
+    fi
+  fi
+  return 0
+}
+
 ovsdb_cleanup() {
   local db=${1}
   ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl exit >/dev/null 2>&1
@@ -551,6 +573,9 @@ ovsdb-raft() {
       # set the connection and disable inactivity probe, this deletes the old connection if any
       # this will unblock pod-1 and pod-2 waiters
       set_connection ${db} ${port}
+    fi
+    if [[ ${db} == "sb" ]]; then
+      set_sb_inactivity_probe
     fi
   fi
 
