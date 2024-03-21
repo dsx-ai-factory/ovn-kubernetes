@@ -40,8 +40,9 @@ func genOVSAddPortCmd(hostIfaceName, ifaceID, mac, ip, sandboxID, podUID string)
 		"-- set interface %s external_ids:attached_mac=%s external_ids:iface-id=%s external_ids:iface-id-ver=%s "+
 		"external_ids:sandbox=%s %sexternal_ids:netdev-name=%s "+
 		"-- --if-exists remove interface %s external_ids k8s.ovn.org/network "+
-		"-- --if-exists remove interface %s external_ids k8s.ovn.org/nad",
-		hostIfaceName, hostIfaceName, mac, ifaceID, podUID, sandboxID, ipAddrExtID, hostIfaceName, hostIfaceName, hostIfaceName)
+		"-- --if-exists remove interface %s external_ids k8s.ovn.org/nad "+
+		"-- --if-exists remove interface %s external_ids network_name",
+		hostIfaceName, hostIfaceName, mac, ifaceID, podUID, sandboxID, ipAddrExtID, hostIfaceName, hostIfaceName, hostIfaceName, hostIfaceName)
 }
 
 func genOVSDelPortCmd(portName string, timeout ...string) string {

@@ -137,9 +137,11 @@ func (ncm *nodeNetworkControllerManager) CleanupDeletedNetworks(allControllers [
 				}
 			}
 
+			// do not remove the legacyNetworkExternalID yet so in case of upgrade failure, we can
+			// still fallback to the old version.
+			// "--", "--if-exists", "remove", "interface", hostIfaceName, "external_ids", ovntypes.LegacyNetworkExternalID)
 			ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:%s=%s", ovntypes.NetworkExternalID, netName),
-				fmt.Sprintf("external_ids:%s=%s", ovntypes.NADExternalID, nadName),
-				"--", "--if-exists", "remove", "interface", hostIfaceName, "external_ids", ovntypes.LegacyNetworkExternalID)
+				fmt.Sprintf("external_ids:%s=%s", ovntypes.NADExternalID, nadName))
 		}
 		_, stderr, err := util.RunOVSVsctl(ovsArgs...)
 		if err != nil {

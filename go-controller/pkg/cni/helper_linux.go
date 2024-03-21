@@ -498,9 +498,12 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	if ifInfo.NetName != types.DefaultNetworkName {
 		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:%s=%s", types.NetworkExternalID, ifInfo.NetName))
 		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:%s=%s", types.NADExternalID, ifInfo.NADName))
+		// keep the lagacy external-ids for now to help with potential ovn-k8s downgrade
+		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:%s=%s", types.LegacyNetworkExternalID, ifInfo.NADName))
 	} else {
 		ovsArgs = append(ovsArgs, []string{"--", "--if-exists", "remove", "interface", hostIfaceName, "external_ids", types.NetworkExternalID}...)
 		ovsArgs = append(ovsArgs, []string{"--", "--if-exists", "remove", "interface", hostIfaceName, "external_ids", types.NADExternalID}...)
+		ovsArgs = append(ovsArgs, []string{"--", "--if-exists", "remove", "interface", hostIfaceName, "external_ids", types.LegacyNetworkExternalID}...)
 	}
 
 	// add ovs port with 3 retries every 100 ms

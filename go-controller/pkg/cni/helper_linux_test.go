@@ -1484,8 +1484,10 @@ func TestConfigureOVS(t *testing.T) {
 				ovsAddPortCmd += fmt.Sprintf("external_ids:encap-ip=%s ", tc.pfEncapIp)
 			}
 			ovsAddPortCmd += fmt.Sprintf("external_ids:ip_addresses=%s external_ids:netdev-name=%s "+
-				"-- --if-exists remove interface %s external_ids %s -- --if-exists remove interface %s external_ids %s",
-				fakeIP, tc.ifInfo.NetdevName, tc.vfRep, ovntypes.NetworkExternalID, tc.vfRep, ovntypes.NADExternalID)
+				"-- --if-exists remove interface %s external_ids %s -- --if-exists remove interface %s external_ids %s "+
+				"-- --if-exists remove interface %s external_ids %s",
+				fakeIP, tc.ifInfo.NetdevName, tc.vfRep, ovntypes.NetworkExternalID, tc.vfRep, ovntypes.NADExternalID,
+				tc.vfRep, ovntypes.LegacyNetworkExternalID)
 			tc.execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: ovsAddPortCmd,
 				Err: nil,
