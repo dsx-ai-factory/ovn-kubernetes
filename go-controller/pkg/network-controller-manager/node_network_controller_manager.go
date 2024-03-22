@@ -104,9 +104,18 @@ func (ncm *nodeNetworkControllerManager) CleanupDeletedNetworks(allControllers [
 			klog.Warningf("Found stale OVS Interface %s with iface-id-ver %s, deleting it", hostIfaceName, podUID)
 			netName = invalidNetworkName
 		} else {
-			nadName, ok = extMap[ovntypes.LegacyNetworkExternalID]
-			if !ok {
+			// Add both lagacy and new NAD external_ids to the ovs interfaces if either is missing
+			nadName1, ok1 := extMap[ovntypes.LegacyNetworkExternalID]
+			nadName2, ok2 := extMap[ovntypes.NADExternalID]
+			if (!ok1 && !ok2) || (ok1 && ok2) {
+				// it is either the OVS interface of the default network, or both external_ids exist, nothing to do
 				continue
+			}
+			// OVS interface have either LegacyNetworkExternalID or NADExternalID
+			if ok1 {
+				nadName = nadName1
+			} else {
+				nadName = nadName2
 			}
 			netName = nadToNetNameMap[nadName]
 			if netName == "" {
@@ -141,7 +150,8 @@ func (ncm *nodeNetworkControllerManager) CleanupDeletedNetworks(allControllers [
 			// still fallback to the old version.
 			// "--", "--if-exists", "remove", "interface", hostIfaceName, "external_ids", ovntypes.LegacyNetworkExternalID)
 			ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:%s=%s", ovntypes.NetworkExternalID, netName),
-				fmt.Sprintf("external_ids:%s=%s", ovntypes.NADExternalID, nadName))
+				fmt.Sprintf("external_ids:%s=%s", ovntypes.NADExternalID, nadName),
+				fmt.Sprintf("external_ids:%s=%s", ovntypes.LegacyNetworkExternalID, nadName))
 		}
 		_, stderr, err := util.RunOVSVsctl(ovsArgs...)
 		if err != nil {
