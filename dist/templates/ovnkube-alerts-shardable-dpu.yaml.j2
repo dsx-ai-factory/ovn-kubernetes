@@ -115,3 +115,31 @@ spec:
        message: |
          Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that
          vtep0 interface MTU value is {{ $value }}
+
+    - alert: IncorrectMTUOnDPUUplink
+      expr: |
+        ovs_vswitchd_interface_mtu and
+        (ovs_vswitchd_interface_mtu{namespace="ovn-kubernetes",job="ovnkube-node",interface=~"^p[0|1]$"} != 9100)
+      for: 10m
+      labels:
+       severity: warning
+       pduuid: P10A23N
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
+      annotations:
+       message: |
+         Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that
+         uplink interface {{ $labels.interface }} has MTU {{ $value }} while 9100 is expected
+
+    - alert: IncorrectMTUOnDPUBond
+      expr: |
+        ovs_vswitchd_interface_mtu and
+        (ovs_vswitchd_interface_mtu{namespace="ovn-kubernetes",job="ovnkube-node",interface="bond0"} != 9100)
+      for: 10m
+      labels:
+       severity: warning
+       pduuid: P10A23N
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
+      annotations:
+       message: |
+         Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that
+         bond interface {{ $labels.interface }} has MTU {{ $value }} while 9100 is expected
