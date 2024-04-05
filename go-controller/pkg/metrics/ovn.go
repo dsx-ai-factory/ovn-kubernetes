@@ -253,8 +253,8 @@ func setOvnControllerConfigurationMetrics(ovsDBClient *util.OvsdbClient) (err er
 
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("recovering from panic while retrieving "+
-				"openvswitch table external_ids fields :(%v)", r)
+			err = fmt.Errorf("recovering from panic while parsing the "+
+				"Open_vSwitch table's external_ids column - %v", r)
 		}
 	}()
 

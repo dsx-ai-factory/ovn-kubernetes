@@ -38,7 +38,6 @@ const (
 	MetricOvnSubsystemController         = "controller"
 	MetricOvsNamespace                   = "ovs"
 	MetricOvsSubsystemVswitchd           = "vswitchd"
-	MetricOvsSubsystemDB                 = "db"
 	MetricOvsSubsystemOvsDB              = "ovsdb"
 
 	ovnNorthd     = "ovn-northd"
@@ -593,7 +592,7 @@ func StartMetricsServerCommon(bindAddress string, pprofBindAddress string, certF
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdownCtx); err != nil {
-			klog.Errorf("Error stopping metrics server for address %s: %v", bindAddress, err)
+			klog.Errorf("Error stopping metrics server at address %q: %v", bindAddress, err)
 		}
 	}()
 }

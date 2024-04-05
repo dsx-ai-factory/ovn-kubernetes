@@ -33,7 +33,7 @@ func ovnControllerReadiness(target string) error {
 	}
 	result, _, err := util.RunOVSAppctlWithTimeout(5, "-t", target, "coverage/read-counter", "lflow_run")
 	if err != nil {
-		return fmt.Errorf("failed getting coverage/show of %q: (%v)", target, err)
+		return fmt.Errorf("failed getting coverage/read-counter of %q: (%v)", target, err)
 	} else if result == "0" {
 		return fmt.Errorf("%q has not completed logical flows processing yet", target)
 	}

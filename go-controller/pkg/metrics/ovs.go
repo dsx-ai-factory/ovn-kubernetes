@@ -1,4 +1,5 @@
 //go:build linux
+// +build linux
 
 package metrics
 
@@ -201,40 +202,7 @@ var metricOvsBridgeFlowsTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	},
 )
 
-// ovs memory metrics
-var metricOvsHandlersTotal = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
-	Name:      "handlers_total",
-	Help: "Represents the number of handlers thread. This thread reads upcalls from dpif, " +
-		"forwards each upcall's packet and possibly sets up a kernel flow as a cache.",
-})
-
-var metricOvsRevalidatorsTotal = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
-	Name:      "revalidators_total",
-	Help: "Represents the number of revalidators thread. This thread processes datapath flows, " +
-		"updates OpenFlow statistics, and updates or removes them if necessary.",
-})
-
-// ovs Hw offload metrics
-var metricOvsHwOffload = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
-	Name:      "hw_offload",
-	Help: "Represents whether netdev flow offload to hardware is enabled " +
-		"or not -- false(0) and true(1).",
-})
-
-var metricOvsTcPolicy = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
-	Name:      "tc_policy",
-	Help: "Represents the policy used with HW offloading " +
-		"-- none(0), skip_sw(1), and skip_hw(2).",
-})
-
+// ovs interface metrics
 var metricInterafceDriverName = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Namespace: MetricOvsNamespace,
 	Subsystem: MetricOvsSubsystemVswitchd,
@@ -283,6 +251,40 @@ var MetricOvsInterfaceUpWait = prometheus.NewCounter(prometheus.CounterOpts{
 	Name:      "interface_up_wait_seconds_total",
 	Help: "The total number of seconds that is required to wait for pod " +
 		"Open vSwitch interface until its available",
+})
+
+// ovs memory metrics
+var metricOvsHandlersTotal = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvsNamespace,
+	Subsystem: MetricOvsSubsystemVswitchd,
+	Name:      "handlers_total",
+	Help: "Represents the number of handlers thread. This thread reads upcalls from dpif, " +
+		"forwards each upcall's packet and possibly sets up a kernel flow as a cache.",
+})
+
+var metricOvsRevalidatorsTotal = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvsNamespace,
+	Subsystem: MetricOvsSubsystemVswitchd,
+	Name:      "revalidators_total",
+	Help: "Represents the number of revalidators thread. This thread processes datapath flows, " +
+		"updates OpenFlow statistics, and updates or removes them if necessary.",
+})
+
+// ovs Hw offload metrics
+var metricOvsHwOffload = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvsNamespace,
+	Subsystem: MetricOvsSubsystemVswitchd,
+	Name:      "hw_offload",
+	Help: "Represents whether netdev flow offload to hardware is enabled " +
+		"or not -- false(0) and true(1).",
+})
+
+var metricOvsTcPolicy = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvsNamespace,
+	Subsystem: MetricOvsSubsystemVswitchd,
+	Name:      "tc_policy",
+	Help: "Represents the policy used with HW offloading " +
+		"-- none(0), skip_sw(1), and skip_hw(2).",
 })
 
 var metricOvsUpcallFlowLimitKill = prometheus.NewGauge(prometheus.GaugeOpts{
@@ -484,8 +486,8 @@ func setOvsDatapathOffloadMetrics() error {
 	return nil
 }
 
-// ovsDatapathMetricsUpdate updates the ovs datapath metrics for every 30 sec
-func ovsDatapathMetricsUpdate(metricsScrapeInterval int, stopChan chan struct{}) {
+// ovsDatapathMetricsUpdater updates the ovs datapath metrics for every 30 sec
+func ovsDatapathMetricsUpdater(metricsScrapeInterval int, stopChan <-chan struct{}) {
 	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
 	defer ticker.Stop()
 
@@ -494,16 +496,48 @@ func ovsDatapathMetricsUpdate(metricsScrapeInterval int, stopChan chan struct{})
 		case <-ticker.C:
 			datapaths, err := getOvsDatapaths()
 			if err != nil {
-				klog.Errorf("%s", err.Error())
+				klog.Errorf("Getting ovs datapath list failed: %s", err.Error())
 				continue
 			}
 
-			err = setOvsDatapathMetrics(datapaths)
+			if err = setOvsDatapathMetrics(datapaths); err != nil {
+				klog.Errorf("Setting ovs datapath metrics failed: %s", err.Error())
+			}
+			if err = setOvsDatapathOffloadMetrics(); err != nil {
+				klog.Errorf("Setting ovs datapath offload metrics failed: %s", err.Error())
+			}
+		case <-stopChan:
+			return
+		}
+	}
+}
+
+// ovsBridgeMetricsUpdater updates bridgeMetrics &
+// ovsInterface metrics & geneveInterface metrics for every 30sec
+func ovsBridgeMetricsUpdater(ovsDBClient *util.OvsdbClient, metricsScrapeInterval int,
+	stopChan <-chan struct{}) {
+	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			// we need to reset metrics vectors prior to collecting new ones.
+			// this reset is local to prom client endpoint only and helps us
+			// improve performance by deleting non-actual stale metrics
+			metricInterafceDriverName.Reset()
+			metricInterafceDriverVersion.Reset()
+			metricInterafceFirmwareVersion.Reset()
+			for _, interfaceMetricInfo := range ovsInterfaceMetricsDataMap {
+				interfaceMetricInfo.metric.Reset()
+			}
+			// set geneve interface metrics
+			err := geneveInterfaceMetricsUpdate()
 			if err != nil {
 				klog.Errorf("%s", err.Error())
 			}
-
-			err = setOvsDatapathOffloadMetrics()
+			// update ovs bridge metrics
+			err = updateOvsBridgeMetrics(ovsDBClient)
 			if err != nil {
 				klog.Errorf("%s", err.Error())
 			}
@@ -513,33 +547,12 @@ func ovsDatapathMetricsUpdate(metricsScrapeInterval int, stopChan chan struct{})
 	}
 }
 
-// getOvsBridgeOpenFlowsCount returns the number of openflow flows
-// in an ovs-bridge
-func getOvsBridgeOpenFlowsCount(bridgeName string) float64 {
-	stdout, stderr, err := util.RunOVSOfctl("-t", "5", "dump-aggregate", bridgeName)
-	if err != nil {
-		klog.Errorf("Failed to get flow count for %s, stderr(%s): (%v)",
-			bridgeName, stderr, err)
-		return 0
-	}
-	for _, kvPair := range strings.Fields(stdout) {
-		if strings.HasPrefix(kvPair, "flow_count=") {
-			value := strings.Split(kvPair, "=")[1]
-			metricName := bridgeName + "flows_total"
-			return parseMetricToFloat(MetricOvsSubsystemVswitchd, metricName, value)
-		}
-	}
-	klog.Errorf("ovs-ofctl dump-aggregate %s output didn't contain "+
-		"flow_count field", bridgeName)
-	return 0
-}
-
 type interfaceDetails struct {
 	bridge string
 	port   string
 }
 
-func setOvsBridgeMetrics(ovsDBClient *util.OvsdbClient) (err error) {
+func updateOvsBridgeMetrics(ovsDBClient *util.OvsdbClient) (err error) {
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -567,7 +580,10 @@ func setOvsBridgeMetrics(ovsDBClient *util.OvsdbClient) (err error) {
 	for _, bridge := range bridgeList {
 		brName := bridge.Name
 		metricOvsBridge.WithLabelValues(brName).Set(1)
-		flowsCount := getOvsBridgeOpenFlowsCount(brName)
+		flowsCount, err := getOvsBridgeOpenFlowsCount(brName)
+		if err != nil {
+			klog.Errorf(err.Error())
+		}
 		metricOvsBridgeFlowsTotal.WithLabelValues(brName).Set(flowsCount)
 		metricOvsBridgePortsTotal.WithLabelValues(brName).Set(float64(len(bridge.Ports)))
 
@@ -583,46 +599,36 @@ func setOvsBridgeMetrics(ovsDBClient *util.OvsdbClient) (err error) {
 		}
 	}
 	// set the ovs interface metrics
-	err = ovsInterfaceMetricsUpdate(ovsDBClient, interfaceToPortToBridgeMap)
+	err = ovsInterfaceMetricsUpdater(ovsDBClient, interfaceToPortToBridgeMap)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-// ovsBridgeMetricsUpdate updates bridgeMetrics &
-// ovsInterface metrics & geneveInterface metrics for every 30sec
-func ovsBridgeMetricsUpdate(ovsDBClient *util.OvsdbClient, metricsScrapeInterval int,
-	stopChan chan struct{}) {
-	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			// we need to reset metrics vectors prior to collecting new ones.
-			// this reset is local to prom client endpoint only and helps us
-			// improve performance by deleting non-actual stale metrics
-			metricInterafceDriverName.Reset()
-			metricInterafceDriverVersion.Reset()
-			metricInterafceFirmwareVersion.Reset()
-			for _, interfaceMetricInfo := range ovsInterfaceMetricsDataMap {
-				interfaceMetricInfo.metric.Reset()
-			}
-			// set geneve interface metrics
-			err := geneveInterfaceMetricsUpdate()
-			if err != nil {
-				klog.Errorf("%s", err.Error())
-			}
-			// update ovs bridge metrics
-			err = setOvsBridgeMetrics(ovsDBClient)
-			if err != nil {
-				klog.Errorf("%s", err.Error())
-			}
-		case <-stopChan:
-			return
+// getOvsBridgeOpenFlowsCount returns the number of openflow flows
+// in an ovs-bridge
+func getOvsBridgeOpenFlowsCount(bridgeName string) (float64, error) {
+	stdout, stderr, err := util.RunOVSOfctl("-t", "5", "dump-aggregate", bridgeName)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get flow count for %s, stderr(%s): (%v)",
+			bridgeName, stderr, err)
+	}
+	if stderr != "" {
+		return 0, fmt.Errorf("failed to get OVS flow for %s due to stderr: %s", bridgeName, stderr)
+	}
+	if stdout == "" {
+		return 0, fmt.Errorf("unable to update OVS bridge open flow count metric because blank output received from OVS client")
+	}
+	for _, kvPair := range strings.Fields(stdout) {
+		if strings.HasPrefix(kvPair, "flow_count=") {
+			value := strings.Split(kvPair, "=")[1]
+			metricName := bridgeName + "flows_total"
+			return parseMetricToFloat(MetricOvsSubsystemVswitchd, metricName, value), nil
 		}
 	}
+	return 0, fmt.Errorf("ovs-ofctl dump-aggregate %s output didn't contain "+
+		"flow_count field", bridgeName)
 }
 
 func registerOvsInterfaceMetrics(metricNamespace, metricSubsystem string) {
@@ -899,9 +905,9 @@ func geneveInterfaceMetricsUpdate() error {
 	return nil
 }
 
-// ovsInterfaceMetricsUpdate updates the ovs interface metrics
+// ovsInterfaceMetricsUpdater updates the ovs interface metrics
 // through ovsdb-client from ovs-db Interface table updates.
-func ovsInterfaceMetricsUpdate(ovsDBClient *util.OvsdbClient,
+func ovsInterfaceMetricsUpdater(ovsDBClient *util.OvsdbClient,
 	interfaceInfoMap map[string]interfaceDetails) (err error) {
 
 	defer func() {
@@ -1017,16 +1023,14 @@ func setOvsMemoryMetrics() (err error) {
 	return nil
 }
 
-func ovsMemoryMetricsUpdate(metricsScrapeInterval int, stopChan chan struct{}) {
+func ovsMemoryMetricsUpdater(metricsScrapeInterval int, stopChan <-chan struct{}) {
 	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
 	defer ticker.Stop()
-
 	for {
 		select {
 		case <-ticker.C:
-			err := setOvsMemoryMetrics()
-			if err != nil {
-				klog.Errorf("%s", err.Error())
+			if err := setOvsMemoryMetrics(); err != nil {
+				klog.Errorf("Setting ovs memory metrics failed: %s", err.Error())
 			}
 		case <-stopChan:
 			return
@@ -1075,17 +1079,16 @@ func setOvsHwOffloadMetrics(ovsDBClient *util.OvsdbClient) (err error) {
 	return nil
 }
 
-func ovsHwOffloadMetricsUpdate(ovsDBClient *util.OvsdbClient, metricsScrapeInterval int,
-	stopChan chan struct{}) {
+func ovsHwOffloadMetricsUpdater(ovsDBClient *util.OvsdbClient, metricsScrapeInterval int,
+	stopChan <-chan struct{}) {
 	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			err := setOvsHwOffloadMetrics(ovsDBClient)
-			if err != nil {
-				klog.Errorf("%s", err.Error())
+			if err := setOvsHwOffloadMetrics(ovsDBClient); err != nil {
+				klog.Errorf("Setting ovs hardware offload metrics failed: %s", err.Error())
 			}
 		case <-stopChan:
 			return
@@ -1456,6 +1459,12 @@ var ovsVswitchdCoverageShowMetricsMap = map[string]*metricDetails{
 	"upcall_flow_del_purge": {
 		help: "Number of times flows were purged",
 	},
+	"upcall_flow_limit_kill": {
+		help: "Counter is increased when a number of datapath flows twice as high as current dynamic flow limit",
+	},
+	"upcall_flow_limit_hit": {
+		help: "Counter is increased when datapath reaches the dynamic limit of flows",
+	},
 }
 var registerOvsMetricsOnce sync.Once
 var ovsUpcallMetricsMap = map[string]prometheus.Gauge{
@@ -1464,7 +1473,7 @@ var ovsUpcallMetricsMap = map[string]prometheus.Gauge{
 }
 
 func RegisterOvsMetrics(nodeName string, ovsDBClient *util.OvsdbClient,
-	metricsScrapeInterval int, stopChan chan struct{}) {
+	metricsScrapeInterval int, stopChan <-chan struct{}) {
 	registerOvsMetricsOnce.Do(func() {
 		getOvsVersionInfo()
 		prometheus.MustRegister(prometheus.NewGaugeFunc(
@@ -1520,13 +1529,13 @@ func RegisterOvsMetrics(nodeName string, ovsDBClient *util.OvsdbClient,
 		}
 
 		// OVS datapath metrics updater
-		go ovsDatapathMetricsUpdate(metricsScrapeInterval, stopChan)
+		go ovsDatapathMetricsUpdater(metricsScrapeInterval, stopChan)
 		// OVS bridge metrics updater
-		go ovsBridgeMetricsUpdate(ovsDBClient, metricsScrapeInterval, stopChan)
+		go ovsBridgeMetricsUpdater(ovsDBClient, metricsScrapeInterval, stopChan)
 		// OVS memory metrics updater
-		go ovsMemoryMetricsUpdate(metricsScrapeInterval, stopChan)
+		go ovsMemoryMetricsUpdater(metricsScrapeInterval, stopChan)
 		// OVS hw Offload metrics updater
-		go ovsHwOffloadMetricsUpdate(ovsDBClient, metricsScrapeInterval, stopChan)
+		go ovsHwOffloadMetricsUpdater(ovsDBClient, metricsScrapeInterval, stopChan)
 		// OVS coverage/show metrics updater.
 		go coverageShowMetricsUpdater(ovsVswitchd, metricsScrapeInterval, stopChan)
 		// OVS upcall metrics updater.
