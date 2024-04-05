@@ -12,7 +12,6 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/safchain/ethtool"
 	"github.com/vishvananda/netlink"
 	"k8s.io/klog/v2"
@@ -1515,18 +1514,6 @@ func RegisterOvsMetrics(nodeName string, ovsDBClient *util.OvsdbClient,
 		// Register the OVS coverage/show metrics
 		componentCoverageShowMetricsMap[ovsVswitchd] = ovsVswitchdCoverageShowMetricsMap
 		registerCoverageShowMetrics(ovsVswitchd, MetricOvsNamespace, MetricOvsSubsystemVswitchd)
-		// Register OVSDB coverage/show metrics with prometheus
-		componentCoverageShowMetricsMap[ovsDB] = ovsDbCoverageShowMetricsMap
-		registerCoverageShowMetrics(ovsDB, MetricOvsNamespace, MetricOvsSubsystemOvsDB)
-
-		prometheus.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{
-			PidFn:     prometheus.NewPidFileFn("/var/run/openvswitch/ovs-vswitchd.pid"),
-			Namespace: fmt.Sprintf("%s_%s", MetricOvsNamespace, MetricOvsSubsystemVswitchd),
-		}))
-		prometheus.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{
-			PidFn:     prometheus.NewPidFileFn("/var/run/openvswitch/ovsdb-server.pid"),
-			Namespace: fmt.Sprintf("%s_%s", MetricOvsNamespace, MetricOvsSubsystemDB),
-		}))
 
 		for _, counterMetric := range ovsUpcallMetricsMap {
 			prometheus.MustRegister(counterMetric)
