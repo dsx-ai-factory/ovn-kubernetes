@@ -606,6 +606,8 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 				if config.Metrics.ExportOVSMetrics {
 					// serve OVS ^ovs metrics
 					metrics.RegisterOvsMetrics(runMode.identity, ovsDBClient, config.MetricsScrapeInterval, stopChan)
+					// register ovsDB metrics
+					metrics.RegisterOvsDBMetrics(config.MetricsScrapeInterval, stopChan)
 				}
 			}
 			if config.OvnKubeNode.Mode != types.NodeModeDPU {

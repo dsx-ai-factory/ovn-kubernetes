@@ -63,6 +63,8 @@ var OvsExporterCommand = cli.Command{
 		}
 		// register ovs metrics that will be served off of /metrics path
 		metrics.RegisterOvsMetrics(hostName, ovsDBClient, metricsScrapeInterval, stopChan)
+		// register ovsDB metrics
+		metrics.RegisterOvsDBMetrics(metricsScrapeInterval, stopChan)
 		// start the prometheus server to serve OVS Metrics (default port: 9310)
 		// use TLS if cert and key file were provided at the command line
 		metrics.StartMetricsServer(bindAddress, "", tlsCertFile, tlsKeyFile, stopChan, wg)
