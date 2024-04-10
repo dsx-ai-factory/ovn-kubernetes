@@ -6,6 +6,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/klog/v2"
 )
 
 func GetChildStopChanWithTimeout(parentStopChan <-chan struct{}, duration time.Duration) chan struct{} {
@@ -38,5 +39,9 @@ func WaitForInformerCacheSyncWithTimeout(controllerName string, stopCh <-chan st
 // watching. This corresponds to adding all existing objects. If that doesn't happen before the provided timeout,
 // WaitForInformerCacheSyncWithTimeout times out and returns false.
 func WaitForHandlerSyncWithTimeout(controllerName string, stopCh <-chan struct{}, timeout time.Duration, handlerSyncs ...cache.InformerSynced) bool {
+	start := time.Now()
+	defer func() {
+		klog.Infof("WaitForHandlerSyncWithTimeout for %s took %v", controllerName, time.Since(start))
+	}()
 	return cache.WaitForNamedCacheSync(controllerName, GetChildStopChanWithTimeout(stopCh, timeout), handlerSyncs...)
 }
