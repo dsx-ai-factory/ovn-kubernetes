@@ -635,12 +635,14 @@ func updateOvsBridgeMetrics(ovsDBClient *util.OvsdbClient) (err error) {
 		metricOvsBridgePortsTotal.WithLabelValues(brName).Set(float64(len(bridge.Ports)))
 
 		for _, portUUID := range bridge.Ports {
-			portName := portInfo[portUUID].Name
-			interfaces := portInfo[portUUID].Interfaces
-			for _, interfaceUUID := range interfaces {
-				interfaceToPortToBridgeMap[interfaceUUID] = interfaceDetails{
-					bridge: brName,
-					port:   portName,
+			if _, ok := portInfo[portUUID]; ok {
+				portName := portInfo[portUUID].Name
+				interfaces := portInfo[portUUID].Interfaces
+				for _, interfaceUUID := range interfaces {
+					interfaceToPortToBridgeMap[interfaceUUID] = interfaceDetails{
+						bridge: brName,
+						port:   portName,
+					}
 				}
 			}
 		}
