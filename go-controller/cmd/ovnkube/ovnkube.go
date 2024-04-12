@@ -25,6 +25,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	controllerManager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-controller-manager"
@@ -397,6 +398,11 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 				defer ovnKubeStartWg.Done()
 				ovnKubeStopLock.Unlock()
 				klog.Infof("Won leader election; in active mode")
+
+				// Delete the stale configmap used for leader election. It may arleady been deleted, ignore the error.
+				kube := &kube.Kube{KClient: ovnClientset.KubeClient}
+				_ = kube.DeleteConfigMap(config.Kubernetes.OVNConfigNamespace, "ovn-kubernetes-master")
+
 				if err := runOvnKube(ctx, runMode, ovnClientset, eventRecorder); err != nil {
 					klog.Error(err)
 					cancel()

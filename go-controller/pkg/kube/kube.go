@@ -78,6 +78,7 @@ type Interface interface {
 	GetPod(namespace, name string) (*kapi.Pod, error)
 	GetNode(name string) (*kapi.Node, error)
 	Events() kv1core.EventInterface
+	DeleteConfigMap(namespace, name string) error
 }
 
 // Kube works with kube client only
@@ -424,6 +425,11 @@ func (k *Kube) GetNode(name string) (*kapi.Node, error) {
 // Events returns events to use when creating an EventSinkImpl
 func (k *Kube) Events() kv1core.EventInterface {
 	return k.KClient.CoreV1().Events("")
+}
+
+// DeleteConfigMap deletes the specified configmap
+func (k *Kube) DeleteConfigMap(namespace, name string) error {
+	return k.KClient.CoreV1().ConfigMaps(namespace).Delete(context.TODO(), name, metav1.DeleteOptions{})
 }
 
 // UpdateEgressFirewall updates the EgressFirewall with the provided EgressFirewall data

@@ -67,6 +67,20 @@ func (_m *InterfaceOVN) DeleteCloudPrivateIPConfig(name string) error {
 	return r0
 }
 
+// DeleteConfigMap provides a mock function with given fields: namespace, name
+func (_m *InterfaceOVN) DeleteConfigMap(namespace string, name string) error {
+	ret := _m.Called(namespace, name)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, string) error); ok {
+		r0 = rf(namespace, name)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // Events provides a mock function with given fields:
 func (_m *InterfaceOVN) Events() corev1.EventInterface {
 	ret := _m.Called()

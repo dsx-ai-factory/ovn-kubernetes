@@ -17,6 +17,20 @@ type Interface struct {
 	mock.Mock
 }
 
+// DeleteConfigMap provides a mock function with given fields: namespace, name
+func (_m *Interface) DeleteConfigMap(namespace string, name string) error {
+	ret := _m.Called(namespace, name)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, string) error); ok {
+		r0 = rf(namespace, name)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // Events provides a mock function with given fields:
 func (_m *Interface) Events() v1.EventInterface {
 	ret := _m.Called()
