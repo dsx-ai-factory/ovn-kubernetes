@@ -135,6 +135,8 @@ spec:
               value: "{{ ovnkube_logfile }}"
             - name: OVN_METRICS_SCRAPE_INTERVAL
               value: "{{ ovn_metrics_scrape_interval }}"
+            - name: OVN_ENABLE_SVC_TEMPLATE_SUPPORT
+              value: "{{ ovn_enable_svc_template_support }}" 
             - name: OVN_NET_CIDR
               valueFrom:
                 configMapKeyRef:

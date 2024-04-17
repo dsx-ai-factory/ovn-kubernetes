@@ -430,6 +430,7 @@ type OVNKubernetesFeatureConfig struct {
 	EnableIPReservation           bool `gcfg:"enable-ip-reservation"`
 	EnableMultiExternalGateway    bool `gcfg:"enable-multi-external-gateway"`
 	EnablePortMirror              bool `gcfg:"enable-port-mirror"`
+	EnableServiceTemplateSupport  bool `gcfg:"enable-svc-template-support"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -1136,6 +1137,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use PortMirror CRD feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnablePortMirror,
 		Value:       OVNKubernetesFeature.EnablePortMirror,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-svc-template-support",
+		Usage:       "Configure to use svc-template with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableServiceTemplateSupport,
+		Value:       OVNKubernetesFeature.EnableServiceTemplateSupport,
 	},
 }
 

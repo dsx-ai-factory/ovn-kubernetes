@@ -110,6 +110,7 @@ OVNKUBE_METRICS_SCALE_ENABLE=
 OVN_STATELESS_NETPOL_ENABLE="true"
 OVN_ENABLE_INTERCONNECT="false"
 OVN_ENABLE_OVNKUBE_IDENTITY="false"
+OVN_ENABLE_SVC_TEMPLATE_SUPPORT="false"
 # IN_UPGRADE is true only if called by upgrade-ovn.sh during the upgrade test,
 # it will render only the parts in ovn-setup.yaml related to RBAC permissions.
 IN_UPGRADE=
@@ -420,6 +421,9 @@ while [ "$1" != "" ]; do
   --enable-ovnkube-identity)
     OVN_ENABLE_OVNKUBE_IDENTITY=$VALUE
     ;;
+  --enable-svc-template-support)
+    OVN_ENABLE_SVC_TEMPLATE_SUPPORT=$VALUE
+    ;;
   --ovnkube-logfile)
     OVNKUBE_LOGFILE=$VALUE
     ;;
@@ -655,6 +659,8 @@ echo "ovn_enable_multi_external_gateway: ${ovn_enable_multi_external_gateway}"
 
 ovn_enable_ovnkube_identity=${OVN_ENABLE_OVNKUBE_IDENTITY}
 echo "ovn_enable_ovnkube_identity: ${ovn_enable_ovnkube_identity}"
+ovn_enable_svc_template_support=${OVN_ENABLE_SVC_TEMPLATE_SUPPORT}
+echo "ovn_enable_svc_template_support: ${ovn_enable_svc_template_support}"
 ovnkube_logfile=${OVNKUBE_LOGFILE}
 echo "ovnkube_logfile: ${ovnkube_logfile}"
 disable_ovs_metrics=${OVNKUBE_DISABLE_OVS_METRICS:-false}
@@ -967,6 +973,7 @@ ovn_image=${image} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   ovn_cluster_subnets_mac_binding_aging=${ovn_cluster_subnets_mac_binding_aging} \
+  ovn_enable_svc_template_support=${ovn_enable_svc_template_support} \
   jinjanate ../templates/ovnk8s-master.yaml.j2 -o ${output_dir}/ovnk8s-master.yaml
 
 ovn_image=${image} \

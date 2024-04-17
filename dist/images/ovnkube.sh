@@ -117,6 +117,7 @@ BASEDIR=$(dirname $0)
 # OVNKUBE_DISABLE_FIREWALLD - skip firewalld calls which open ports for service endpoints
 # OVNKUBE_ADMIN_FIREWALLD_ZONE - name of admin firewalld zone
 # OVN_NORTHD_BACKOFF_INTERVAL - ovn northd backoff interval in ms (default 300)
+# OVN_ENABLE_SVC_TEMPLATE_SUPPORT - enable svc template support
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -392,6 +393,8 @@ ovn_northd_backoff_interval=${OVN_NORTHD_BACKOFF_INTERVAL:-"0"}
 ovnkube_disable_firewalld=${OVNKUBE_DISABLE_FIREWALLD:-"false"}
 # OVNKUBE_ADMIN_FIREWALLD_ZONE - name of admin firewalld zone
 ovnkube_admin_firewalld_zone=${OVNKUBE_ADMIN_FIREWALLD_ZONE:-"ngn-admin"}
+# OVN_ENABLE_SVC_TEMPLATE_SUPPORT - enable svc template support
+ovn_enable_svc_template_support=${OVN_ENABLE_SVC_TEMPLATE_SUPPORT:-false}
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
@@ -1426,6 +1429,12 @@ ovn-master() {
       cluster_subnets_mac_binding_aging_option="--cluster-subnets-mac-binding-aging=${cluster_subnets_mac_binding_aging}"
   fi
 
+  ovn_enable_svc_template_support_flag=
+  if [[ ${ovn_enable_svc_template_support} == "true" ]]; then
+	  ovn_enable_svc_template_support_flag="--enable-svc-template-support"
+  fi
+  echo "ovn_enable_svc_template_support_flag=${ovn_enable_svc_template_support_flag}"
+
   init_node_flags=
   if [[ ${ovnkube_compact_mode_enable} == "true" ]]; then
     init_node_flags="--init-node ${K8S_NODE} --nodeport ${ovnkube_firewalld_opts}"
@@ -1457,6 +1466,7 @@ ovn-master() {
     ${multi_network_enabled_flag} \
     ${nohostsubnet_label_option} \
     ${ovn_acl_logging_rate_limit_flag} \
+    ${ovn_enable_svc_template_support_flag} \
     ${ovnkube_config_duration_enable_flag} \
     ${ovnkube_enable_multi_external_gateway_flag} \
     ${ovnkube_logfile_flag} \
