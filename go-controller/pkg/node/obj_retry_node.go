@@ -282,6 +282,10 @@ func (h *nodeEventHandler) DeleteResource(obj, cachedObj interface{}) error {
 }
 
 func (nc *DefaultNodeNetworkController) syncFirewallZoneForEndpointSlices(obj []interface{}) error {
+	if config.OvnKubeNode.DisableFirewalld {
+		klog.V(6).Infof("Firewalld disabled, skip syncFirewallZoneForEndpointSlices")
+		return nil
+	}
 	if err := addInterfaceToFirewallZone(types.K8sMgmtIntfName, ovnFirewallZone); err != nil {
 		return fmt.Errorf("failed to add interface %s to ovn firewall zone: (%v)",
 			types.K8sMgmtIntfName, err)
