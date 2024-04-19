@@ -13,7 +13,7 @@ spec:
     rules:
     - alert: OvsVfRepInterfaceDown
       expr: |
-        ovs_vswitchd_interface_link_state{interface=~"^enp.*_[0-9]", port!=""} != 2 and ovs_vswitchd_interface_of_port{interface=~"^enp.*_[0-9]"} != -1
+        ovs_vswitchd_interface_link_state{interface=~"^enp.*_[0-9]+", port!=""} != 2 and ovs_vswitchd_interface_of_port{interface=~"^enp.*_[0-9]+"} != -1
       for: 10m
       labels:
        severity: major
@@ -25,7 +25,7 @@ spec:
 
     - alert: OvsTxNoOffloadBytesCriticallyHigh
       expr: |
-        rate(ovs_vswitchd_interface_tx_sw_bytes{interface=~"^enp.*_[0-9]"}[15m]) / 1024 / 1024 > 60
+        rate(ovs_vswitchd_interface_tx_sw_bytes{interface=~"^enp.*_[0-9]+"}[15m]) / 1024 / 1024 > 60
       for: 10m
       labels:
        severity: critical
@@ -38,7 +38,7 @@ spec:
 
     - alert: OvsTxNoOffloadBytesTooHigh
       expr: |
-        rate(ovs_vswitchd_interface_tx_sw_bytes{interface=~"^enp.*_[0-9]"}[10m]) / 1024 / 1024 > 40
+        rate(ovs_vswitchd_interface_tx_sw_bytes{interface=~"^enp.*_[0-9]+"}[10m]) / 1024 / 1024 > 40
       for: 5m
       labels:
        severity: minor
@@ -51,7 +51,7 @@ spec:
 
     - alert: OvsTxNoOffloadBytesUnusuallyHigh
       expr: |
-        rate(ovs_vswitchd_interface_tx_sw_bytes{interface=~"^enp.*_[0-9]"}[5m]) / 1024 / 1024 > 20
+        rate(ovs_vswitchd_interface_tx_sw_bytes{interface=~"^enp.*_[0-9]+"}[5m]) / 1024 / 1024 > 20
       for: 5m
       labels:
        severity: warning
@@ -64,7 +64,7 @@ spec:
 
     - alert: OvsRxNoOffloadBytesCriticallyHigh
       expr: |
-        rate(ovs_vswitchd_interface_rx_sw_bytes{interface=~"^enp.*_[0-9]"}[15m]) / 1024 / 1024 > 60
+        rate(ovs_vswitchd_interface_rx_sw_bytes{interface=~"^enp.*_[0-9]+"}[15m]) / 1024 / 1024 > 60
       for: 10m
       labels:
        severity: critical
@@ -77,7 +77,7 @@ spec:
 
     - alert: OvsRxNoOffloadBytesTooHigh
       expr: |
-        rate(ovs_vswitchd_interface_rx_sw_bytes{interface=~"^enp.*_[0-9]"}[10m]) / 1024 / 1024 > 40
+        rate(ovs_vswitchd_interface_rx_sw_bytes{interface=~"^enp.*_[0-9]+"}[10m]) / 1024 / 1024 > 40
       for: 5m
       labels:
        severity: minor
@@ -90,7 +90,7 @@ spec:
 
     - alert: OvsRxNoOffloadBytesUnusuallyHigh
       expr: |
-        rate(ovs_vswitchd_interface_rx_sw_bytes{interface=~"^enp.*_[0-9]"}[5m]) / 1024 / 1024 > 20
+        rate(ovs_vswitchd_interface_rx_sw_bytes{interface=~"^enp.*_[0-9]+"}[5m]) / 1024 / 1024 > 20
       for: 5m
       labels:
        severity: warning
