@@ -221,3 +221,16 @@ spec:
          {{ range query "ovn_controller_integration_bridge_geneve_ports_total{job='ovnkube-node', namespace='ovn-kubernetes'} !=  scalar(count(kube_node_info)) - 1" }}
          {{ .Labels.instance }}: {{ .Value }}
          {{ end }}.
+
+    - alert: OVNKubeAllocatedSubnetsDoNotMatch
+      expr: |
+        ovnkube_master_allocated_v4_host_subnets{job="ovnkube-master", namespace="ovn-kubernetes"} !=
+        scalar(sum(kube_node_info) - sum(kube_node_info{node=~".*-dpu.*"} OR on() vector(0)))
+      for: 10m
+      labels:
+       severity: major
+       pduuid: P10A23N
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/PHqwgBHMz/k8s-control-panel-kube-manager
+      annotations:
+       message: |
+         ovnkubeMaster allocated IPv4 host subnets value should be same as the number of K8s nodes excluding the DPU nodes
