@@ -4,6 +4,7 @@
 package metrics
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"strings"
@@ -14,11 +15,20 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/safchain/ethtool"
 	"github.com/vishvananda/netlink"
+	"gopkg.in/fsnotify/fsnotify.v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 )
 
-var (
-	ovsVersion string
+// ovs build info
+var metricOvsVersion = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Namespace: MetricOvsNamespace,
+	Name:      "build_info",
+	Help:      "A metric with a constant '1' value labeled by ovs version."},
+	[]string{
+		"version",
+		"nodename",
+	},
 )
 
 // ovs datapath Metrics
@@ -288,17 +298,67 @@ var metricOvsTcPolicy = prometheus.NewGauge(prometheus.GaugeOpts{
 
 type ovsClient func(args ...string) (string, string, error)
 
-func getOvsVersionInfo() {
+func getOvsVersionInfo(nodeName string) (err error) {
+	metricOvsVersion.Reset()
 	stdout, _, err := util.RunOvsVswitchdAppCtl("version")
 	if err != nil {
-		klog.Errorf("Failed to exec ovs-appctl cmd to get version: %s", err.Error())
-		return
+		return fmt.Errorf("failed to exec ovs-appctl cmd to get version: %s", err.Error())
 	}
 	if !strings.HasPrefix(stdout, "ovs-vswitchd (Open vSwitch)") {
-		klog.Errorf("Unexpected ovs-appctl version output: %s", stdout)
+		return fmt.Errorf("invalid ovs-appctl version output: %s", stdout)
+	}
+	ovsVersion := strings.Fields(stdout)[3]
+	metricOvsVersion.WithLabelValues(ovsVersion, nodeName).Set(1)
+	return nil
+}
+
+func OvsVersionInfoUpdater(nodeName string, stopChan <-chan struct{}) {
+	if err := getOvsVersionInfo(nodeName); err != nil {
+		klog.Errorf("Error getting ovs version: %v", err)
+	}
+
+	ovsDir := "/var/run/openvswitch"
+	ovsPidFile := "ovs-vswitchd.pid"
+
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		klog.Errorf("New fsnotify watcher failed for %s err: %v", ovsDir, err)
 		return
 	}
-	ovsVersion = strings.Fields(stdout)[3]
+	defer watcher.Close()
+
+	if err := watcher.Add(ovsDir); err != nil {
+		klog.Errorf("Watcher add failed for %s err: %v", ovsDir, err)
+		return
+	}
+	for {
+		select {
+		case event, ok := <-watcher.Events:
+			if ok && event.Op&(fsnotify.Write|fsnotify.Create) != 0 {
+				fileName, ok := strings.CutPrefix(event.Name, ovsDir+"/")
+				if ok && strings.Compare(fileName, ovsPidFile) == 0 {
+					// Wait upto 30 seconds for ovs to be up
+					if err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second,
+						30*time.Second, true, func(ctx context.Context) (bool, error) {
+							if errRet := getOvsVersionInfo(nodeName); errRet != nil {
+								klog.Errorf("%v", errRet)
+								return false, nil
+							}
+							return true, nil
+						}); err != nil {
+						klog.Errorf("Timedout waiting for ovs version info")
+					}
+				}
+			}
+		case err, ok := <-watcher.Errors:
+			if !ok {
+				return
+			}
+			klog.Errorf("Error watching for changes in %s: %v", ovsDir, err)
+		case <-stopChan:
+			return
+		}
+	}
 }
 
 // ovsDatapathLookupsMetrics obtains the ovs datapath
@@ -1438,21 +1498,8 @@ var registerOvsMetricsOnce sync.Once
 func RegisterOvsMetrics(nodeName string, ovsDBClient *util.OvsdbClient,
 	metricsScrapeInterval int, stopChan <-chan struct{}) {
 	registerOvsMetricsOnce.Do(func() {
-		getOvsVersionInfo()
-		prometheus.MustRegister(prometheus.NewGaugeFunc(
-			prometheus.GaugeOpts{
-				Namespace: MetricOvsNamespace,
-				Name:      "build_info",
-				Help:      "A metric with a constant '1' value labeled by ovs version.",
-				ConstLabels: prometheus.Labels{
-					"version":  ovsVersion,
-					"nodename": nodeName,
-				},
-			},
-			func() float64 { return 1 },
-		))
-
 		// Register OVS datapath metrics.
+		prometheus.MustRegister(metricOvsVersion)
 		prometheus.MustRegister(metricOvsDpTotal)
 		prometheus.MustRegister(metricOvsDp)
 		prometheus.MustRegister(metricOvsDpIfTotal)
@@ -1486,7 +1533,8 @@ func RegisterOvsMetrics(nodeName string, ovsDBClient *util.OvsdbClient,
 		// Register the OVS coverage/show metrics
 		componentCoverageShowMetricsMap[ovsVswitchd] = ovsVswitchdCoverageShowMetricsMap
 		registerCoverageShowMetrics(ovsVswitchd, MetricOvsNamespace, MetricOvsSubsystemVswitchd)
-
+		// OVS version updater
+		go OvsVersionInfoUpdater(nodeName, stopChan)
 		// OVS datapath metrics updater
 		go ovsDatapathMetricsUpdater(metricsScrapeInterval, stopChan)
 		// OVS bridge metrics updater
