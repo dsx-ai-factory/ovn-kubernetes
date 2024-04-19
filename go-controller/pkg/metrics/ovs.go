@@ -841,6 +841,26 @@ func setOvsPortMissPktsInfo(interfaceBridge, interfacePort, interfaceName, inter
 		interfaceBridge, interfacePort, interfaceName).Set(float64(dropPacktCount))
 }
 
+func setOvsInterfaceQdiscIngress(interfaceName string, bridgeName string, portName string,
+	link netlink.Link) {
+	var metricValue float64 = -1
+	var err error
+
+	if link == nil {
+		if link, err = util.GetNetLinkOps().LinkByName(interfaceName); err != nil {
+			klog.Errorf("Failed to find interface %s: %v", interfaceName, err)
+		}
+	}
+	if link != nil {
+		numOfIngress, err := util.GetNetLinkOps().CountIngressFilters(link)
+		if err == nil {
+			metricValue = float64(numOfIngress)
+		}
+	}
+	ovsInterfaceMetricsDataMap["interface_ingress_qdisc_total"].metric.WithLabelValues(
+		bridgeName, portName, interfaceName).Set(metricValue)
+}
+
 func setOvsInterfaceStatusFields(interfaceBridge, interfacePort, interfaceName string,
 	statusMap map[string]string) {
 
@@ -902,6 +922,7 @@ func geneveInterfaceMetricsUpdate() error {
 	ovsInterfaceMetricsDataMap["interface_ifindex"].metric.WithLabelValues(
 		"none", "none", geneveInterfaceName).Set(float64(link.Attrs().Index))
 	setGeneveInterfaceStatistics(geneveInterfaceName, link)
+	setOvsInterfaceQdiscIngress(geneveInterfaceName, "none", "none", link)
 	return nil
 }
 
@@ -974,6 +995,7 @@ func ovsInterfaceMetricsUpdater(ovsDBClient *util.OvsdbClient,
 			interfaceData.bridge, portName, interfaceName).Set(interfaceInfo.IngressPolicingBurst)
 		ovsInterfaceMetricsDataMap["interface_ingress_policing_rate"].metric.WithLabelValues(
 			interfaceData.bridge, portName, interfaceName).Set(interfaceInfo.IngressPolicingRate)
+		setOvsInterfaceQdiscIngress(interfaceName, interfaceData.bridge, portName, nil)
 		// set the ovs interface status fields
 		setOvsInterfaceStatusFields(interfaceData.bridge, portName, interfaceName, interfaceInfo.Status)
 		// set ovs interface stastics fields
@@ -1246,6 +1268,9 @@ var ovsInterfaceMetricsDataMap = map[string]*ovsInterfaceMetricsDetails{
 	"interface_tx_misspkts_burst": {
 		help: "Maximum burst size of allowed new connections on OVS interface, " +
 			"in pps.",
+	},
+	"interface_ingress_qdisc_total": {
+		help: "Denotes the total ingress filters on the device",
 	},
 	// next 4 metrics are here for backwards compatibilty, and will be removed later..
 	"interface_in_sw_bytes": {
