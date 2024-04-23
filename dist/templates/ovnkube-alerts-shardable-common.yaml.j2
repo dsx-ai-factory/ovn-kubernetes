@@ -664,7 +664,7 @@ spec:
          The uplink interface {{ $labels.interface }} in instance {{ $labels.instance }} reports
          the ingress filters count as {{ $value }} 
 
-    - alert: NoIngressFilterOnPodInterafce
+    - alert: NoIngressFilterOnPodInterface
       expr: |
         ovs_vswitchd_interface_ingress_qdisc_total and
             ovs_vswitchd_interface_of_port{interface=~"^enp.*_[0-9]+$|^pf[0|1]vf[0-9]+$"} != -1 and (
