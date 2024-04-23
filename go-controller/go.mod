@@ -1,6 +1,6 @@
 module github.com/ovn-org/ovn-kubernetes/go-controller
 
-go 1.20
+go 1.21
 
 require (
 	github.com/Mellanox/mlxdevm-go v0.3.1-0.20240213073146-ea70276e64ba

@@ -316,7 +316,6 @@ func DeletePortGroupsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operatio
 
 // DeletePortGroups deletes the provided port groups and returns the
 // corresponding ops
-// names are portGroup names with network prefix
 func DeletePortGroups(nbClient libovsdbclient.Client, names ...string) error {
 	ops, err := DeletePortGroupsOps(nbClient, nil, names...)
 	if err != nil {

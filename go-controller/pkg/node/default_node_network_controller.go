@@ -740,6 +740,7 @@ func createNodeManagementPorts(node *kapi.Node, nodeAnnotator kube.Annotator, wa
 
 // getOVNSBZone returns the zone name stored in the Southbound db.
 // It returns the default zone name if "options:name" is not set in the SB_Global row
+// TBD - IC support
 func getOVNSBZone() (string, error) {
 	//dbZone, stderr, err := util.RunOVNSbctl("get", "SB_Global", ".", "options:name")
 	//if err != nil {

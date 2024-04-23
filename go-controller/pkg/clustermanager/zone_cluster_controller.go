@@ -171,7 +171,7 @@ func (zcc *zoneClusterController) handleAddUpdateNodeEvent(node *corev1.Node) er
 	klog.V(5).Infof("Allocated id %d to the node %s", allocatedNodeID, node.Name)
 	nodeAnnotations, err := util.UpdateNodeIDAnnotation(nil, allocatedNodeID)
 	if err != nil {
-		if !util.IsAnnotationNotSetError(err) {
+		if !util.IsAnnotationAlreadySetError(err) {
 			return fmt.Errorf("failed to set annotation for node %s : err - %w", node.Name, err)
 		}
 	} else {
@@ -197,7 +197,7 @@ func (zcc *zoneClusterController) handleAddUpdateNodeEvent(node *corev1.Node) er
 
 	nodeAnnotations, err = util.CreateNodeGatewayRouterLRPAddrAnnotation(nodeAnnotations, v4Addr, v6Addr)
 	if err != nil {
-		if !util.IsAnnotationNotSetError(err) {
+		if !util.IsAnnotationAlreadySetError(err) {
 			return fmt.Errorf("failed to marshal node %q annotation for Gateway LRP IPs, err : %v",
 				node.Name, err)
 		}
@@ -224,7 +224,7 @@ func (zcc *zoneClusterController) handleAddUpdateNodeEvent(node *corev1.Node) er
 
 		nodeAnnotations, err = util.CreateNodeTransitSwitchPortAddrAnnotation(nodeAnnotations, v4Addr, v6Addr)
 		if err != nil {
-			if !util.IsAnnotationNotSetError(err) {
+			if !util.IsAnnotationAlreadySetError(err) {
 				return fmt.Errorf("failed to marshal node %q annotation for Gateway LRP IPs, err : %w",
 					node.Name, err)
 			} else {

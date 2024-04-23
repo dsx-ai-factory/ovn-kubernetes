@@ -120,7 +120,7 @@ func (sncm *secondaryNetworkClusterManager) isTopologyManaged(nInfo util.NetInfo
 	switch nInfo.TopologyType() {
 	case ovntypes.Layer3Topology:
 		// we need to allocate subnets to each node regardless of configuration
-		return true
+		return nInfo.IsSecondary()
 	case ovntypes.Layer2Topology:
 		// for IC, pod IPs and tunnel IDs need to be allocated
 		// in non IC config, this is done from ovnkube-master network controller

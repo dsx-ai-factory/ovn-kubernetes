@@ -323,7 +323,6 @@ echo "ovn_metrics_enable_pprof=${ovn_metrics_enable_pprof}"
 if [[ ${ovn_metrics_enable_pprof} == "true" ]]; then
   ovn_metrics_enable_pprof_flag="--metrics-enable-pprof"
 fi
-ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-}
 #OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 ovn_egressip_enable=${OVN_EGRESSIP_ENABLE:-false}
 #OVN_EGRESSIP_HEALTHCHECK_PORT - egress IP node check to use grpc on this port
