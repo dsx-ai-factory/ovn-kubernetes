@@ -2735,6 +2735,7 @@ ovn-node() {
 
   local ovn_node_ssl_opts=""
   local export_ovs_metrics_opts=""
+  local ovs_other_config_opts=
   if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
       [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
         # used by gRPC based egress node reachability healthcheck
@@ -2752,6 +2753,16 @@ ovn-node() {
       if [[ ${disable_ovs_metrics} == "false" ]]; then
         export_ovs_metrics_opts="--export-ovs-metrics"
       fi
+
+      virt_type=$(/usr/bin/systemd-detect-virt -v)
+      if [[ "${virt_type}" == "none" ]]; then
+        # "none" indicates baremetal
+        ovs_other_config_opts="
+          --ovs-max-revalidator=${OVS_MAX_REVALIDATOR}
+          --ovs-min-revalidate-pps=${OVS_MIN_REVALIDATE_PPS}
+          --ovs-max-idle=${OVS_MAX_IDLE}
+        "
+      fi
   fi
 
   ovnkube_node_metrics_bind_address="${metrics_endpoint_ip}:${metrics_worker_port}"
@@ -2764,7 +2775,6 @@ ovn-node() {
   representor_metering_nodes_flag=
   ovn_gateway_router_subnet_opt=
   ovn_xdp_opts=
-  ovs_other_config_opts=
   if [[ ${ovnkube_node_mode} == "dpu" ]]; then
     # in the case of dpu mode we want the host K8s Node Name and not the DPU K8s Node Name
     K8S_NODE=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:host-k8s-nodename | tr -d \")
@@ -2818,11 +2828,6 @@ ovn-node() {
       --ovn-xdp-sfrep=${OVN_XDP_SFREP}
       --ovn-xdp-veth=${OVN_XDP_VETH}
       --ovn-xdp-ns=${OVN_XDP_NS}
-    "
-    ovs_other_config_opts="
-      --ovs-max-revalidator=${OVS_MAX_REVALIDATOR}
-      --ovs-min-revalidate-pps=${OVS_MIN_REVALIDATE_PPS}
-      --ovs-max-idle=${OVS_MAX_IDLE}
     "
 
     if [[ ${representor_metering_nodes} != "" ]]; then

@@ -435,8 +435,8 @@ func setupOVNNode(node *kapi.Node) error {
 		return fmt.Errorf("error setting ovs flow targets: %q", err)
 	}
 
-	// set max-revalidator, min-revalidate-pps and max-idle for dpu node if the values are set
-	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+	// set max-revalidator, min-revalidate-pps and max-idle if the values are set
+	if config.OvnKubeNode.Mode == types.NodeModeDPU || config.OvnKubeNode.Mode == types.NodeModeFull {
 		var err error
 		if config.OvnKubeNode.MaxRevalidator == 0 {
 			// clear to use default
@@ -447,7 +447,11 @@ func setupOVNNode(node *kapi.Node) error {
 		if err != nil {
 			return err
 		}
-		err = updateOVSOtherConfig("min-revalidate-pps", config.OvnKubeNode.MinRevalidatePPS)
+		if config.OvnKubeNode.MinRevalidatePPS == -1 {
+			err = updateOVSOtherConfig("min-revalidate-pps", nil)
+		} else {
+			err = updateOVSOtherConfig("min-revalidate-pps", config.OvnKubeNode.MinRevalidatePPS)
+		}
 		if err != nil {
 			return err
 		}

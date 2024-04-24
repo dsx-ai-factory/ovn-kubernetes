@@ -1040,7 +1040,9 @@ func ovsInterfaceMetricsUpdater(ovsDBClient *util.OvsdbClient,
 			interfaceData.bridge, portName, interfaceName).Set(interfaceInfo.IngressPolicingBurst)
 		ovsInterfaceMetricsDataMap["interface_ingress_policing_rate"].metric.WithLabelValues(
 			interfaceData.bridge, portName, interfaceName).Set(interfaceInfo.IngressPolicingRate)
-		setOvsInterfaceQdiscIngress(interfaceName, interfaceData.bridge, portName, nil)
+		if interfaceTypeValue != 9 {
+			setOvsInterfaceQdiscIngress(interfaceName, interfaceData.bridge, portName, nil)
+		}
 		// set the ovs interface status fields
 		setOvsInterfaceStatusFields(interfaceData.bridge, portName, interfaceName, interfaceInfo.Status)
 		// set ovs interface stastics fields

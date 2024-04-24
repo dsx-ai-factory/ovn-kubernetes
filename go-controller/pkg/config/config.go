@@ -202,6 +202,7 @@ var (
 		Mode:             types.NodeModeFull,
 		IsPrimaryDPU:     true,
 		DisableFirewalld: false,
+		MinRevalidatePPS: -1,
 	}
 
 	ClusterManager = ClusterManagerConfig{
@@ -538,7 +539,7 @@ type OvnKubeNodeConfig struct {
 	XDPVeth                string `gcfg:"ovn-xdp-veth"`
 	XDPNamespace           string `gcfg:"ovn-xdp-ns"`
 	MaxRevalidator         uint   `gcfg:"ovs-max-revalidator"`
-	MinRevalidatePPS       uint   `gcfg:"ovs-min-revalidate-pps"`
+	MinRevalidatePPS       int    `gcfg:"ovs-min-revalidate-pps"`
 	MaxIdle                uint   `gcfg:"ovs-max-idle"`
 	// RepresentorMeteringNodes is the node label whose value will be used
 	// to determine if representor metering feature will be applied or not
@@ -1627,7 +1628,7 @@ var OvnKubeNodeFlags = []cli.Flag{
 		Value:       OvnKubeNode.MaxRevalidator,
 		Destination: &cliConfig.OvnKubeNode.MaxRevalidator,
 	},
-	&cli.UintFlag{
+	&cli.IntFlag{
 		Name:        "ovs-min-revalidate-pps",
 		Usage:       "the minimum pps that flow must have in order to be revalidated when revalidation duration exceeds half of max-revalidator config variable",
 		Value:       OvnKubeNode.MinRevalidatePPS,

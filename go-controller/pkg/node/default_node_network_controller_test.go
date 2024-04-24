@@ -293,6 +293,15 @@ var _ = Describe("Node", func() {
 						" -- " +
 						"clear bridge br-int ipfix",
 				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 remove Open_vSwitch . other_config max-revalidator",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 remove Open_vSwitch . other_config min-revalidate-pps",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 remove Open_vSwitch . other_config max-idle",
+				})
 				err := util.SetExec(fexec)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -396,6 +405,15 @@ var _ = Describe("Node", func() {
 						" -- " +
 						"clear bridge br-int ipfix",
 				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 remove Open_vSwitch . other_config max-revalidator",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 remove Open_vSwitch . other_config min-revalidate-pps",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 remove Open_vSwitch . other_config max-idle",
+				})
 				err := util.SetExec(fexec)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -473,6 +491,15 @@ var _ = Describe("Node", func() {
 						" -- "+
 						"set bridge br-int ipfix=@ipfix", ipfixIP, ipfixPort),
 				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 remove Open_vSwitch . other_config max-revalidator",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 remove Open_vSwitch . other_config min-revalidate-pps",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 remove Open_vSwitch . other_config max-idle",
+				})
 				err := util.SetExec(fexec)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -547,6 +574,15 @@ var _ = Describe("Node", func() {
 						"targets=[\"%s:%d\"] cache_active_timeout=123 cache_max_flows=456 sampling=789"+
 						" -- "+
 						"set bridge br-int ipfix=@ipfix", ipfixIP, ipfixPort),
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 remove Open_vSwitch . other_config max-revalidator",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 remove Open_vSwitch . other_config min-revalidate-pps",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 remove Open_vSwitch . other_config max-idle",
 				})
 				err := util.SetExec(fexec)
 				Expect(err).NotTo(HaveOccurred())
@@ -624,6 +660,15 @@ var _ = Describe("Node", func() {
 						" -- " +
 						"set bridge br-int ipfix=@ipfix",
 				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 remove Open_vSwitch . other_config max-revalidator",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 remove Open_vSwitch . other_config min-revalidate-pps",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 remove Open_vSwitch . other_config max-idle",
+				})
 				err := util.SetExec(fexec)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -691,6 +736,15 @@ var _ = Describe("Node", func() {
 						"clear bridge br-int sflow" +
 						" -- " +
 						"clear bridge br-int ipfix",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 remove Open_vSwitch . other_config max-revalidator",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 remove Open_vSwitch . other_config min-revalidate-pps",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 remove Open_vSwitch . other_config max-idle",
 				})
 				err := util.SetExec(fexec)
 				Expect(err).NotTo(HaveOccurred())

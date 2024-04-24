@@ -320,6 +320,12 @@ spec:
               value: "{{ ovn_remote_probe_interval }}"
             - name: OVNKUBE_NODE_MGMT_PORT_NETDEV
               value: ""
+            - name: OVS_MAX_REVALIDATOR
+              value: "{{ ovs_max_revalidator }}"
+            - name: OVS_MIN_REVALIDATE_PPS
+              value: "{{ ovs_min_revalidate_pps }}"
+            - name: OVS_MAX_IDLE
+              value: "{{ ovs_max_idle }}"
             {% endif -%}
             {% if ovnkube_app_name=="ovnkube-node-dpu-host" -%}
             - name: OVNKUBE_NODE_MODE
