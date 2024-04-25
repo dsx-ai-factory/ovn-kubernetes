@@ -233,4 +233,4 @@ spec:
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/PHqwgBHMz/k8s-control-panel-kube-manager
       annotations:
        message: |
-         ovnkubeMaster allocated IPv4 host subnets value should be same as the number of K8s nodes excluding the DPU nodes
+         ovnkubeMaster allocated IPv4 host subnets value for {{ $labels.network_name }} network should be same as the number of K8s nodes excluding the DPU nodes
