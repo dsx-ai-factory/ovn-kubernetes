@@ -74,7 +74,6 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 	if err != nil {
 		return err
 	}
-
 	oc.defaultCOPPUUID = *(logicalRouter.Copp)
 
 	pg := &nbdb.PortGroup{
@@ -434,6 +433,22 @@ func (oc *DefaultNetworkController) cleanupNodeResources(nodeName string) error 
 	if err := oc.gatewayCleanup(nodeName); err != nil {
 		return fmt.Errorf("failed to clean up node %s gateway: (%w)", nodeName, err)
 	}
+
+	// [SDN-2286]. Relying on syncNodesPeriodic() to delete Chassis when node is deleted or changed from local to remote
+	//chassisTemplateVars := make([]*nbdb.ChassisTemplateVar, 0)
+	//p := func(item *sbdb.Chassis) bool {
+	//	if item.Hostname == nodeName {
+	//		chassisTemplateVars = append(chassisTemplateVars, &nbdb.ChassisTemplateVar{Chassis: item.Name})
+	//		return true
+	//	}
+	//	return false
+	//}
+	//if err := libovsdbops.DeleteChassisWithPredicate(oc.sbClient, p); err != nil {
+	//	return fmt.Errorf("failed to remove the chassis associated with node %s in the OVN SB Chassis table: %v", nodeName, err)
+	//}
+	//if err := libovsdbops.DeleteChassisTemplateVar(oc.nbClient, chassisTemplateVars...); err != nil {
+	//	return fmt.Errorf("failed deleting chassis template variables for %s: %v", nodeName, err)
+	//}
 	return nil
 }
 
@@ -481,9 +496,6 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 		node, ok := tmp.(*kapi.Node)
 		if !ok {
 			klog.Errorf("Spurious object in syncNodes: %v", tmp)
-			continue
-		}
-		if util.NoHostSubnet(node) {
 			continue
 		}
 
@@ -574,16 +586,13 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 // Cleanup stale chassis and chassis template variables with no
 // corresponding nodes.
 func (oc *DefaultNetworkController) syncChassis(localZoneNodes, remoteZoneNodes []*kapi.Node) error {
-	var chassisList []*sbdb.Chassis
-	var err error
-	chassisList, err = libovsdbops.ListChassis(oc.sbClient)
+	chassisList, err := libovsdbops.ListChassis(oc.sbClient)
 	if err != nil {
-		return fmt.Errorf("failed to get chassis list: %v", err)
+		return fmt.Errorf("failed to get chassis list: error: %v", err)
 	}
 
-	// cleanup stale chassis private with no corresponding chassis
-	var chassisPrivateList []*sbdb.ChassisPrivate
-	chassisPrivateList, err = libovsdbops.ListChassisPrivate(oc.sbClient)
+	// Cleanup stale chassis private with no corresponding chassis
+	chassisPrivateList, err := libovsdbops.ListChassisPrivate(oc.sbClient)
 	if err != nil {
 		return fmt.Errorf("failed to get chassis private list: %v", err)
 	}
