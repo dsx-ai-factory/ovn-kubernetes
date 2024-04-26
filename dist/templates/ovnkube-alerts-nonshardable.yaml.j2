@@ -234,3 +234,28 @@ spec:
       annotations:
        message: |
          ovnkubeMaster allocated IPv4 host subnets value for {{ $labels.network_name }} network should be same as the number of K8s nodes excluding the DPU nodes
+
+    - alert: NoCarrierOnUplinkInterface
+      expr: |
+        label_replace(node_network_carrier{device=~"^enp.*s0f[0|1]$|^p[0|1]$|^pf[0|1]hpf$|^bond[0|1]$",job=~"node-exporter|node-exporter-dpu"} != 1, "node", "$0", "instance", ".*") *
+            on (node) group_left kube_node_spec_unschedulable == 0
+      for: 4m
+      labels:
+       severity: major
+       pduuid: P10A23N
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
+      annotations:
+       message: |
+         Carrier was not detected on uplink interface {{ $labels.device }} in instance {{ $labels.instance }}.
+
+    - alert: NoCarrierOnAdminServerUplinkInterface
+      expr: |
+        node_network_carrier{device=~"^enp.*s0f[0|1]$",job="admin-host-metrics"} != 1
+      for: 4m
+      labels:
+       severity: major
+       pduuid: P10A23N
+       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
+      annotations:
+       message: |
+         Carrier was not detected on uplink interface {{ $labels.device }} in instance {{ $labels.instance }}.
