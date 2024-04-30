@@ -36,6 +36,9 @@ func UpdatePodWithRetryOrRollback(podLister listers.PodLister, kube kube.Interfa
 		pod = pod.DeepCopy()
 		pod, rollback, err := allocate(pod)
 		if err != nil {
+			if IsAnnotationAlreadySetError(err) {
+				return nil
+			}
 			return err
 		}
 

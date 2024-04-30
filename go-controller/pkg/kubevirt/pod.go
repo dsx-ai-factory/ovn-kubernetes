@@ -111,6 +111,9 @@ func EnsurePodAnnotationForVM(watchFactory *factory.WatchFactory, kube *kube.Kub
 		modifiedPod = pod.DeepCopy()
 		if podAnnotation != nil {
 			modifiedPod.Annotations, err = util.MarshalPodAnnotation(modifiedPod.Annotations, podAnnotation, nadName)
+			if util.IsAnnotationAlreadySetError(err) {
+				return nil
+			}
 			if err != nil {
 				return err
 			}

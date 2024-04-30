@@ -157,6 +157,9 @@ func UpdateNodeHostSubnetAnnotation(annotations map[string]string, hostSubnets [
 	}
 	err := updateSubnetAnnotation(annotations, ovnNodeSubnets, netName, hostSubnets)
 	if err != nil {
+		if IsAnnotationAlreadySetError(err) {
+			return annotations, err
+		}
 		return nil, err
 	}
 	return annotations, nil

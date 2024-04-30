@@ -252,10 +252,6 @@ func (bnnc *BaseNodeNetworkController) updatePodDPUConnStatusWithRetry(origPod *
 		dpuConnStatus,
 		nadName,
 	)
-	if util.IsAnnotationAlreadySetError(err) {
-		return nil
-	}
-
 	return err
 }
 

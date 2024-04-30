@@ -1172,6 +1172,9 @@ func UpdateNetworkIDAnnotation(annotations map[string]string, netName string, ne
 	}
 	err := updateNetworkIDsAnnotation(annotations, netName, networkID)
 	if err != nil {
+		if IsAnnotationAlreadySetError(err) {
+			return annotations, err
+		}
 		return nil, err
 	}
 	return annotations, nil

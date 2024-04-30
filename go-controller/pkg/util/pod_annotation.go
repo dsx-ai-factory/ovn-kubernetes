@@ -167,7 +167,7 @@ func MarshalPodAnnotation(annotations map[string]string, podInfo *PodAnnotation,
 		// or will not change if IPs remain the same (MAC, Gateways, Routes)
 		ipSame := IsStringListEqual(existingPa.IPs, pa.IPs)
 		if ipSame && isPodRouteListEqual(existingPa.Routes, pa.Routes) && existingPa.MAC == pa.MAC && existingPa.TunnelID == pa.TunnelID {
-			return nil, newAnnotationAlreadySetError("OVN %s annotation for NAD %s already exists",
+			return annotations, newAnnotationAlreadySetError("OVN %s annotation for NAD %s already exists",
 				OvnPodAnnotationName, nadName)
 		} else if !ipSame || existingPa.MAC != pa.MAC {
 			return nil, ErrOverridePodAddresses

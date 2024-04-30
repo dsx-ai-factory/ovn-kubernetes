@@ -303,7 +303,7 @@ func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, 
 		updateNodeAnno := false
 		cnode := node.DeepCopy()
 		for netName, hostSubnets := range hostSubnetsMap {
-			newAnnotations, err := util.UpdateNodeHostSubnetAnnotation(cnode.Annotations, hostSubnets, netName)
+			cnode.Annotations, err = util.UpdateNodeHostSubnetAnnotation(cnode.Annotations, hostSubnets, netName)
 			if err != nil {
 				if !util.IsAnnotationAlreadySetError(err) {
 					return fmt.Errorf("failed to update node %q annotation subnet %s",
@@ -311,7 +311,6 @@ func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, 
 				}
 			} else {
 				updateNodeAnno = true
-				cnode.Annotations = newAnnotations
 			}
 		}
 

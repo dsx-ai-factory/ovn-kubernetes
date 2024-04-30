@@ -123,13 +123,13 @@ func MarshalPodDPUConnDetails(annotations map[string]string, dcd *DPUConnectionD
 	dc, ok := podDcds[nadName]
 	if dcd != nil {
 		if ok && dc == *dcd {
-			return nil, newAnnotationAlreadySetError("OVN pod %s annotation for NAD %s already exists in %v",
+			return annotations, newAnnotationAlreadySetError("OVN pod %s annotation for NAD %s already exists in %v",
 				DPUConnectionDetailsAnnot, nadName, annotations)
 		}
 		podDcds[nadName] = *dcd
 	} else {
 		if !ok {
-			return nil, newAnnotationAlreadySetError("OVN pod %s annotation for NAD %s already removed",
+			return annotations, newAnnotationAlreadySetError("OVN pod %s annotation for NAD %s already removed",
 				DPUConnectionDetailsAnnot, nadName)
 		}
 		delete(podDcds, nadName)
@@ -196,13 +196,13 @@ func MarshalPodDPUConnStatus(annotations map[string]string, scs *DPUConnectionSt
 	sc, ok := podScss[nadName]
 	if scs != nil {
 		if ok && sc == *scs {
-			return nil, newAnnotationAlreadySetError("OVN pod %s annotation for NAD %s already exists in %v",
+			return annotations, newAnnotationAlreadySetError("OVN pod %s annotation for NAD %s already exists in %v",
 				DPUConnectionStatusAnnot, nadName, annotations)
 		}
 		podScss[nadName] = *scs
 	} else {
 		if !ok {
-			return nil, newAnnotationAlreadySetError("OVN pod %s annotation for NAD %s already removed",
+			return annotations, newAnnotationAlreadySetError("OVN pod %s annotation for NAD %s already removed",
 				DPUConnectionStatusAnnot, nadName)
 		}
 		delete(podScss, nadName)
