@@ -127,7 +127,7 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU(addFunc func(*kapi.Pod, stri
 			defer unlock()
 			// add all the Pod's NADs into Pod's nadToDPUCDMap
 			// For default network, NAD name is DefaultNetworkName.
-			var nadToDPUCDMap map[string]*podNADInfo
+			nadToDPUCDMap := map[string]*podNADInfo{}
 			on, networkMap, err := util.GetPodNADToNetworkMapping(pod, bnnc.NetInfo)
 			if err != nil || !on {
 				if err != nil {
@@ -141,10 +141,10 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU(addFunc func(*kapi.Pod, stri
 				return
 			}
 			for nadName := range networkMap {
-				nadToDPUCDMap = map[string]*podNADInfo{nadName: {}}
+				nadToDPUCDMap[nadName] = &podNADInfo{}
 			}
 			if !bnnc.IsSecondary() && len(nadToDPUCDMap) == 0 {
-				nadToDPUCDMap = map[string]*podNADInfo{ovntypes.DefaultNetworkName: {}}
+				nadToDPUCDMap[ovntypes.DefaultNetworkName] = &podNADInfo{}
 			}
 
 			for nadName := range nadToDPUCDMap {
