@@ -2,7 +2,6 @@ package ovn
 
 import (
 	"fmt"
-	"math"
 	"net"
 	"reflect"
 	"strconv"
@@ -12,8 +11,6 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
-	"github.com/pkg/errors"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpbrapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
@@ -30,6 +27,7 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	zoneic "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
 	ovnretry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -96,6 +94,8 @@ type BaseNetworkController struct {
 	retryNamespaces *ovnretry.RetryFramework
 	// retry framework for network policies
 	retryNetworkPolicies *ovnretry.RetryFramework
+	// retry framework for IPAMClaims
+	retryIPAMClaims *ovnretry.RetryFramework
 
 	// pod events factory handler
 	podHandler *factory.Handler
@@ -103,12 +103,16 @@ type BaseNetworkController struct {
 	nodeHandler *factory.Handler
 	// namespace events factory Handler
 	namespaceHandler *factory.Handler
+	// ipam claims events factory Handler
+	ipamClaimsHandler *factory.Handler
 
 	// A cache of all logical switches seen by the watcher and their subnets
 	lsManager *lsm.LogicalSwitchManager
 
 	// An utility to allocate the PodAnnotation to pods
 	podAnnotationAllocator *pod.PodAnnotationAllocator
+
+	ipamClaimsReconciler *persistentips.IPAMClaimReconciler
 
 	// A cache of all logical ports known to the controller
 	logicalPortCache *portCache
@@ -122,10 +126,6 @@ type BaseNetworkController struct {
 
 	// An address set factory that creates address sets
 	addressSetFactory addressset.AddressSetFactory
-
-	// topology version of this network. It is first retrieved from network logical entities,
-	// and will eventually updated to latest version once topology upgrade is done.
-	topologyVersion int
 
 	// network policies map, key should be retrieved with getPolicyKey(policy *knet.NetworkPolicy).
 	// network policies that failed to be created will also be added here, and can be retried or cleaned up later.
@@ -201,6 +201,10 @@ type BaseSecondaryNetworkController struct {
 	policyHandler *factory.Handler
 }
 
+func getNetworkControllerName(netName string) string {
+	return netName + "-network-controller"
+}
+
 // NewCommonNetworkControllerInfo creates CommonNetworkControllerInfo shared by controllers
 func NewCommonNetworkControllerInfo(client clientset.Interface, kube *kube.KubeOVN, wf *factory.WatchFactory,
 	recorder record.EventRecorder, nbClient libovsdbclient.Client, sbClient libovsdbclient.Client,
@@ -259,8 +263,7 @@ func (bnc *BaseNetworkController) createOvnClusterRouter() (*nbdb.LogicalRouter,
 	logicalRouter := nbdb.LogicalRouter{
 		Name: logicalRouterName,
 		ExternalIDs: map[string]string{
-			"k8s-cluster-router":            "yes",
-			types.TopologyVersionExternalID: strconv.Itoa(bnc.topologyVersion),
+			"k8s-cluster-router": "yes",
 		},
 		Options: map[string]string{
 			"always_learn_from_arp_request": "false",
@@ -289,7 +292,7 @@ func (bnc *BaseNetworkController) createOvnClusterRouter() (*nbdb.LogicalRouter,
 }
 
 // syncNodeClusterRouterPort ensures a node's LS to the cluster router's LRP is created.
-// NOTE: We could have created the router port in ensureNodeLogicalNetwork() instead of here,
+// NOTE: We could have created the router port in createNodeLogicalSwitch() instead of here,
 // but chassis ID is not available at that moment. We need the chassis ID to set the
 // gateway-chassis, which in effect pins the logical switch to the current node in OVN.
 // Otherwise, ovn-controller will flood-fill unrelated datapaths unnecessarily, causing scale
@@ -531,114 +534,6 @@ func (bnc *BaseNetworkController) addAllPodsOnNode(nodeName string) []error {
 	return errs
 }
 
-func (bnc *BaseNetworkController) updateL3TopologyVersion() error {
-	currentTopologyVersion := strconv.Itoa(types.OvnCurrentTopologyVersion)
-	clusterRouterName := bnc.GetNetworkScopedName(types.OVNClusterRouter)
-	logicalRouter := nbdb.LogicalRouter{
-		Name:        clusterRouterName,
-		ExternalIDs: map[string]string{types.TopologyVersionExternalID: currentTopologyVersion},
-	}
-	err := libovsdbops.UpdateLogicalRouterSetExternalIDs(bnc.nbClient, &logicalRouter)
-	if err != nil {
-		return fmt.Errorf("failed to generate set topology version, err: %v", err)
-	}
-	bnc.topologyVersion = types.OvnCurrentTopologyVersion
-	klog.Infof("Updated Logical_Router %s topology version to %s", clusterRouterName, currentTopologyVersion)
-	return nil
-}
-
-func (bnc *BaseNetworkController) updateL2TopologyVersion() error {
-	var switchName string
-
-	currentTopologyVersion := strconv.Itoa(types.OvnCurrentTopologyVersion)
-	topoType := bnc.TopologyType()
-	switch topoType {
-	case types.Layer2Topology:
-		switchName = bnc.GetNetworkScopedName(types.OVNLayer2Switch)
-	case types.LocalnetTopology:
-		switchName = bnc.GetNetworkScopedName(types.OVNLocalnetSwitch)
-	default:
-		return fmt.Errorf("topology type %s is not supported", topoType)
-	}
-	logicalSwitch := nbdb.LogicalSwitch{
-		Name:        switchName,
-		ExternalIDs: map[string]string{types.TopologyVersionExternalID: currentTopologyVersion},
-	}
-	err := libovsdbops.UpdateLogicalSwitchSetExternalIDs(bnc.nbClient, &logicalSwitch)
-	if err != nil {
-		return fmt.Errorf("failed to generate set topology version, err: %v", err)
-	}
-	bnc.topologyVersion = types.OvnCurrentTopologyVersion
-	klog.Infof("Updated Logical_Switch %s topology version to %s", switchName, currentTopologyVersion)
-	return nil
-}
-
-// determineOVNTopoVersionFromOVN determines what OVN Topology version is being used.
-// If TopologyVersionExternalID key in external_ids column does not exist, it is prior to OVN topology versioning
-// and therefore set version number to OvnCurrentTopologyVersion
-func (bnc *BaseNetworkController) determineOVNTopoVersionFromOVN() error {
-	var topologyVersion int
-	var err error
-
-	if !bnc.IsSecondary() {
-		topologyVersion, err = bnc.getOVNTopoVersionFromLogicalRouter(types.OVNClusterRouter)
-	} else {
-		topoType := bnc.TopologyType()
-		switch topoType {
-		case types.Layer3Topology:
-			topologyVersion, err = bnc.getOVNTopoVersionFromLogicalRouter(bnc.GetNetworkScopedName(types.OVNClusterRouter))
-		case types.Layer2Topology:
-			topologyVersion, err = bnc.getOVNTopoVersionFromLogicalSwitch(bnc.GetNetworkScopedName(types.OVNLayer2Switch))
-		case types.LocalnetTopology:
-			topologyVersion, err = bnc.getOVNTopoVersionFromLogicalSwitch(bnc.GetNetworkScopedName(types.OVNLocalnetSwitch))
-		default:
-			return fmt.Errorf("topology type %s not supported", topoType)
-		}
-	}
-	bnc.topologyVersion = topologyVersion
-	return err
-}
-
-func (bnc *BaseNetworkController) getOVNTopoVersionFromLogicalRouter(clusterRouterName string) (int, error) {
-	logicalRouter := &nbdb.LogicalRouter{Name: clusterRouterName}
-	logicalRouter, err := libovsdbops.GetLogicalRouter(bnc.nbClient, logicalRouter)
-	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
-		return 0, fmt.Errorf("error getting router %s: %v", clusterRouterName, err)
-	}
-	if errors.Is(err, libovsdbclient.ErrNotFound) {
-		// no OVNClusterRouter exists, DB is empty, nothing to upgrade
-		return math.MaxInt32, nil
-	}
-	v, exists := logicalRouter.ExternalIDs[types.TopologyVersionExternalID]
-	if !exists {
-		klog.Infof("No version string found. The OVN topology is before versioning is introduced. Upgrade needed")
-		return 0, nil
-	}
-	ver, err := strconv.Atoi(v)
-	if err != nil {
-		return 0, fmt.Errorf("invalid OVN topology version string for network %s, err: %v", bnc.GetNetworkName(), err)
-	}
-	return ver, nil
-}
-
-func (bnc *BaseNetworkController) getOVNTopoVersionFromLogicalSwitch(switchName string) (int, error) {
-	logicalSwitch := &nbdb.LogicalSwitch{Name: switchName}
-	logicalSwitch, err := libovsdbops.GetLogicalSwitch(bnc.nbClient, logicalSwitch)
-	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
-		return 0, fmt.Errorf("error getting switch %s: %v", switchName, err)
-	}
-	if errors.Is(err, libovsdbclient.ErrNotFound) {
-		// no switch exists, DB is empty, nothing to upgrade
-		return math.MaxInt32, nil
-	}
-	v := logicalSwitch.ExternalIDs[types.TopologyVersionExternalID]
-	ver, err := strconv.Atoi(v)
-	if err != nil {
-		return 0, fmt.Errorf("invalid OVN topology version string for network %s, err: %v", bnc.GetNetworkName(), err)
-	}
-	return ver, nil
-}
-
 // getNamespaceLocked locks namespacesMutex, looks up ns, and (if found), returns it with
 // its mutex locked. If ns is not known, nil will be returned
 func (bnc *BaseNetworkController) getNamespaceLocked(ns string, readOnly bool) (*namespaceInfo, func()) {
@@ -693,7 +588,7 @@ func (bnc *BaseNetworkController) deleteNamespaceLocked(ns string) (*namespaceIn
 	}
 	if nsInfo.addressSet != nil {
 		// Empty the address set, then delete it after an interval.
-		if err := nsInfo.addressSet.SetIPs(nil); err != nil {
+		if err := nsInfo.addressSet.SetAddresses(nil); err != nil {
 			klog.Errorf("Warning: failed to empty address set for deleted NS %s: %v", ns, err)
 		}
 
@@ -767,14 +662,6 @@ func (bnc *BaseNetworkController) doesNetworkRequireIPAM() bool {
 	return util.DoesNetworkRequireIPAM(bnc.NetInfo)
 }
 
-func (bnc *BaseNetworkController) buildPortGroup(hashName, name string, ports []*nbdb.LogicalSwitchPort, acls []*nbdb.ACL) *nbdb.PortGroup {
-	externalIds := map[string]string{"name": name}
-	if bnc.IsSecondary() {
-		externalIds[types.NetworkExternalID] = bnc.GetNetworkName()
-	}
-	return libovsdbops.BuildPortGroup(hashName, ports, acls, externalIds)
-}
-
 func (bnc *BaseNetworkController) getPodNADNames(pod *kapi.Pod) []string {
 	if !bnc.IsSecondary() {
 		return []string{types.DefaultNetworkName}
@@ -783,13 +670,17 @@ func (bnc *BaseNetworkController) getPodNADNames(pod *kapi.Pod) []string {
 	return podNadNames
 }
 
+func (bnc *BaseNetworkController) getClusterPortGroupDbIDs(base string) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.PortGroupCluster, bnc.controllerName,
+		map[libovsdbops.ExternalIDKey]string{
+			libovsdbops.ObjectNameKey: base,
+		})
+}
+
 // getClusterPortGroupName gets network scoped port group hash name; base is either
 // ClusterPortGroupNameBase or ClusterRtrPortGroupNameBase.
 func (bnc *BaseNetworkController) getClusterPortGroupName(base string) string {
-	if bnc.IsSecondary() {
-		return libovsdbutil.HashedPortGroup(bnc.GetNetworkName()) + "_" + base
-	}
-	return base
+	return libovsdbutil.GetPortGroupName(bnc.getClusterPortGroupDbIDs(base))
 }
 
 // GetLocalZoneNodes returns the list of local zone nodes
@@ -856,6 +747,11 @@ func (bnc *BaseNetworkController) nodeZoneClusterChanged(oldNode, newNode *kapi.
 }
 
 func (bnc *BaseNetworkController) findMigratablePodIPsForSubnets(subnets []*net.IPNet) ([]*net.IPNet, error) {
+	// live migration is not supported in combination with secondary networks
+	if bnc.IsSecondary() {
+		return nil, nil
+	}
+
 	ipSet := sets.New[string]()
 	ipList := []*net.IPNet{}
 	liveMigratablePods, err := kubevirt.FindLiveMigratablePods(bnc.watchFactory)
@@ -876,7 +772,16 @@ func (bnc *BaseNetworkController) findMigratablePodIPsForSubnets(subnets []*net.
 		}
 		podAnnotation, err := util.UnmarshalPodAnnotation(liveMigratablePod.Annotations, bnc.GetNetworkName())
 		if err != nil {
-			return nil, err
+			// even though it can be normal to not have an annotation now, live
+			// migration is a sensible process that might be used when draining
+			// nodes on upgrades, so log a warning in every case to have the
+			// information available
+			klog.Warningf("Could not get pod annotation of pod %s/%s for network %s: %v",
+				liveMigratablePod.Namespace,
+				liveMigratablePod.Name,
+				bnc.GetNetworkName(),
+				err)
+			continue
 		}
 		for _, podIP := range podAnnotation.IPs {
 			if util.IsContainedInAnyCIDR(podIP, subnets...) {

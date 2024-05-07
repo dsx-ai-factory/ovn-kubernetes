@@ -272,6 +272,8 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, wf *factory.Watch
 			VIPClient:            ovnClient.VirtualIPClient,
 			IPReservationClient:  ovnClient.IPReservationClient,
 			APBRouteClient:       ovnClient.AdminPolicyRouteClient,
+			EgressQoSClient:      ovnClient.EgressQoSClient,
+			IPAMClaimsClient:     ovnClient.IPAMClaimsClient,
 			PortMirrorClient:     ovnClient.PortMirrorClient,
 		},
 		stopChan:     make(chan struct{}),

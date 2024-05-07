@@ -187,7 +187,7 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 					return policies[0].Nexthops
 				}).Should(gomega.ContainElement(nextHop))
 				ocInfo.asf.EventuallyExpectAddressSet(asIndex)
-				ocInfo.asf.ExpectAddressSetWithIPs(asIndex, []string{pod1IP})
+				ocInfo.asf.ExpectAddressSetWithAddresses(asIndex, []string{pod1IP})
 				err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(adminPBRNamespace).Delete(context.TODO(), pod1Name, metav1.DeleteOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				ocInfo.asf.EventuallyExpectEmptyAddressSetExist(asIndex)
@@ -251,11 +251,11 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 					return policies[0].Nexthops
 				}).Should(gomega.ContainElement(nextHop))
 				ocInfo.asf.EventuallyExpectAddressSet(asIndex)
-				ocInfo.asf.ExpectAddressSetWithIPs(asIndex, []string{pod1IP})
+				ocInfo.asf.ExpectAddressSetWithAddresses(asIndex, []string{pod1IP})
 				nodeDelta := newNodeWithLabels(node1Name, node1IP, map[string]string{"ngn2.nvidia.com/igw_vip": "H"})
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), nodeDelta, metav1.UpdateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				ocInfo.asf.EventuallyExpectAddressSetWithIPs(asIndex, nil)
+				ocInfo.asf.EventuallyExpectAddressSetWithAddresses(asIndex, nil)
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -316,13 +316,13 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 					return policies[0].Nexthops
 				}).Should(gomega.ContainElement(nextHop))
 				ocInfo.asf.EventuallyExpectAddressSet(asIndex)
-				ocInfo.asf.ExpectAddressSetWithIPs(asIndex, []string{pod1IP})
+				ocInfo.asf.ExpectAddressSetWithAddresses(asIndex, []string{pod1IP})
 				nsDelta := newNamespaceWithLabels(adminPBRNamespace, map[string]string{
 					"ngn.nvidia.com/infrastructure": "",
 				})
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), nsDelta, metav1.UpdateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				ocInfo.asf.EventuallyExpectAddressSetWithIPs(asIndex, nil)
+				ocInfo.asf.EventuallyExpectAddressSetWithAddresses(asIndex, nil)
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -383,14 +383,14 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 					return policies[0].Nexthops
 				}).Should(gomega.ContainElement(nextHop))
 				ocInfo.asf.EventuallyExpectAddressSet(asIndex)
-				ocInfo.asf.ExpectAddressSetWithIPs(asIndex, []string{pod1IP})
+				ocInfo.asf.ExpectAddressSetWithAddresses(asIndex, []string{pod1IP})
 				podDelta := newPodWithLabels(adminPBRNamespace, pod1Name, node1Name, pod1IP, map[string]string{"k8s.io/app": "something_else"}, node1IP)
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(adminPBRNamespace).Update(context.TODO(), podDelta, metav1.UpdateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				podDelta = newPodWithLabels(adminPBRNamespace, pod2Name, node2Name, pod2IP, map[string]string{"k8s.io/app": app1Name}, node2IP)
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(adminPBRNamespace).Update(context.TODO(), podDelta, metav1.UpdateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				ocInfo.asf.EventuallyExpectAddressSetWithIPs(asIndex, []string{pod2IP})
+				ocInfo.asf.EventuallyExpectAddressSetWithAddresses(asIndex, []string{pod2IP})
 				return nil
 			}
 			err := app.Run([]string{app.Name})

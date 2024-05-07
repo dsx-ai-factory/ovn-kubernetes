@@ -176,6 +176,9 @@ func (zic *ZoneInterconnectHandler) createOrUpdateTransitSwitch(networkID int) e
 // ensureTransitSwitch sets up the global transit switch required for interoperability with other zones
 // Must wait for network id to be annotated to any node by cluster manager
 func (zic *ZoneInterconnectHandler) ensureTransitSwitch(nodes []*corev1.Node) error {
+	if len(nodes) == 0 { // nothing to do
+		return nil
+	}
 	start := time.Now()
 
 	// first try to get the network ID from the current state of the nodes
@@ -314,7 +317,7 @@ func (zic *ZoneInterconnectHandler) SyncNodes(objs []interface{}) error {
 
 	for _, staleNodeName := range staleNodeNames {
 		if err := zic.cleanupNode(staleNodeName); err != nil {
-			klog.Errorf("Failed to cleanup the interconnect resources from OVN Northbound db for the stale node %s : %w", err)
+			klog.Errorf("Failed to cleanup the interconnect resources from OVN Northbound db for the stale node %s: %v", staleNodeName, err)
 		}
 	}
 

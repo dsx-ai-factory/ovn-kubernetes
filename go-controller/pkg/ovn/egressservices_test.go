@@ -293,7 +293,8 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				}
 
 				// Create the global EgressService address set containing a stale IP: 1.2.3.4
-				_, err := fakeOVN.asf.NewAddressSet(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), []net.IP{net.ParseIP("1.2.3.4"), net.ParseIP("10.128.1.5"), net.ParseIP("10.128.2.5")})
+				_, err := fakeOVN.asf.NewAddressSet(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName),
+					[]string{"1.2.3.4", "10.128.1.5", "10.128.2.5"})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				fakeOVN.startWithDBSetup(dbSetup,
@@ -349,7 +350,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				// Verify that the global EgressService address set does not contain the stale IP
-				fakeOVN.asf.ExpectAddressSetWithIPs(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), []string{"10.128.1.5", "10.128.2.5"})
+				fakeOVN.asf.ExpectAddressSetWithAddresses(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), []string{"10.128.1.5", "10.128.2.5"})
 				return nil
 			}
 
@@ -721,7 +722,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
-				fakeOVN.asf.ExpectAddressSetWithIPs(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), expectedEgressSvcAddrSet)
+				fakeOVN.asf.ExpectAddressSetWithAddresses(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), expectedEgressSvcAddrSet)
 
 				ginkgo.By("updating the EgressService's status to the second node so its setup will be updated")
 				esvc1.Status.Host = node2Name
@@ -772,7 +773,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
-				fakeOVN.asf.ExpectAddressSetWithIPs(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), []string{})
+				fakeOVN.asf.ExpectAddressSetWithAddresses(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), []string{})
 
 				return nil
 			}
@@ -925,7 +926,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
-				fakeOVN.asf.ExpectAddressSetWithIPs(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), expectedEgressSvcAddrSet)
+				fakeOVN.asf.ExpectAddressSetWithAddresses(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), expectedEgressSvcAddrSet)
 
 				ginkgo.By("setting the EgressService's host to ALL the resources should be removed")
 				esvc1.Status.Host = "ALL"
@@ -940,7 +941,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
-				fakeOVN.asf.ExpectAddressSetWithIPs(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), []string{})
+				fakeOVN.asf.ExpectAddressSetWithAddresses(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), []string{})
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -963,6 +964,11 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					Name: ovntypes.OVNClusterRouter,
 					UUID: ovntypes.OVNClusterRouter + "-UUID",
 				}
+				gwRouter := &nbdb.LogicalRouter{
+					Name:  ovntypes.GWRouterPrefix + node1.Name,
+					UUID:  ovntypes.GWRouterPrefix + node1.Name + "-UUID",
+					Ports: []string{ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name + "-UUID"},
+				}
 				node1LRP := &nbdb.LogicalRouterPort{
 					UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name + "-UUID",
 					Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name,
@@ -972,6 +978,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						clusterRouter,
+						gwRouter,
 						node1LRP,
 					},
 				}
@@ -1071,8 +1078,8 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				v4lrp1 := egressServiceRouterPolicy("v4lrp1-UUID", "testns/svc1", "10.128.1.5", "10.128.1.2")
 				v4lrp2 := egressServiceRouterPolicy("v4lrp2-UUID", "testns/svc1", "10.128.2.5", "10.128.1.2")
 				v4lrpic := egressServiceRouterPolicy("v4lrsr-UUID", "testns/svc1:ic", "10.128.2.5", "10.128.1.2")
-				expectedDatabaseState := []libovsdbtest.TestData{}
-				expectedEgressSvcAddrSet := []string{}
+				var expectedDatabaseState []libovsdbtest.TestData
+				var expectedEgressSvcAddrSet []string
 				v4DefaultReRoute := getReRouteStaticRoute("10.128.0.0/16", nodeLogicalRouterIPv4[0])
 				v6DefaultReRoute := getReRouteStaticRoute("fe00::/16", nodeLogicalRouterIPv6[0])
 				v6DefaultReRoute.UUID = "reroute-static-route-UUID-v6"
@@ -1080,6 +1087,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter.Policies = []string{"v4lrp1-UUID", "v4lrp2-UUID"}
 					expectedDatabaseState = []libovsdbtest.TestData{
 						clusterRouter,
+						gwRouter,
 						node1LRP,
 						v4lrp1,
 						v4lrp2,
@@ -1089,6 +1097,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter.Policies = []string{"v4lrp1-UUID", "v4lrsr-UUID"}
 					expectedDatabaseState = []libovsdbtest.TestData{
 						clusterRouter,
+						gwRouter,
 						node1LRP,
 						v4lrp1,
 						v4lrpic,
@@ -1104,7 +1113,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
-				fakeOVN.asf.ExpectAddressSetWithIPs(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), expectedEgressSvcAddrSet)
+				fakeOVN.asf.ExpectAddressSetWithAddresses(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), expectedEgressSvcAddrSet)
 
 				ginkgo.By("creating the v6 endpoints corresponding lrps will be added")
 				v6EpSlice, err := fakeOVN.fakeClient.KubeClient.DiscoveryV1().EndpointSlices("testns").Create(context.TODO(), v6EpSlice, metav1.CreateOptions{})
@@ -1118,6 +1127,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter.Policies = []string{"v4lrp1-UUID", "v4lrp2-UUID", "v6lrp1-UUID", "v6lrp2-UUID"}
 					expectedDatabaseState = []libovsdbtest.TestData{
 						clusterRouter,
+						gwRouter,
 						node1LRP,
 						v4lrp1,
 						v4lrp2,
@@ -1129,6 +1139,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter.Policies = []string{"v4lrp1-UUID", "v6lrp1-UUID", "v4lrsr-UUID", "v6lrsr-UUID"}
 					expectedDatabaseState = []libovsdbtest.TestData{
 						clusterRouter,
+						gwRouter,
 						node1LRP,
 						v4lrp1,
 						v4lrpic,
@@ -1145,7 +1156,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
-				fakeOVN.asf.ExpectAddressSetWithIPs(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), expectedEgressSvcAddrSet)
+				fakeOVN.asf.ExpectAddressSetWithAddresses(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), expectedEgressSvcAddrSet)
 
 				ginkgo.By("updating the v4 and v6 endpoints OVN will be updated accordingly")
 				v4EpSlice.Endpoints = append(v4EpSlice.Endpoints, discovery.Endpoint{Addresses: []string{"10.128.1.7"}, NodeName: &node1.Name})
@@ -1163,6 +1174,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter.Policies = []string{"v4lrp1-UUID", "v4lrp2-UUID", "v4lrp3-UUID", "v6lrp2-UUID"}
 					expectedDatabaseState = []libovsdbtest.TestData{
 						clusterRouter,
+						gwRouter,
 						node1LRP,
 						v4lrp1,
 						v4lrp2,
@@ -1174,6 +1186,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter.Policies = []string{"v4lrp1-UUID", "v4lrp3-UUID", "v4lrsr-UUID", "v6lrsr-UUID"}
 					expectedDatabaseState = []libovsdbtest.TestData{
 						clusterRouter,
+						gwRouter,
 						node1LRP,
 						v4lrp1,
 						v4lrpic,
@@ -1191,7 +1204,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
-				fakeOVN.asf.ExpectAddressSetWithIPs(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), expectedEgressSvcAddrSet)
+				fakeOVN.asf.ExpectAddressSetWithAddresses(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), expectedEgressSvcAddrSet)
 
 				ginkgo.By("deleting the v4 endpoints the corresponding entries will be deleted")
 				err = fakeOVN.fakeClient.KubeClient.DiscoveryV1().EndpointSlices("testns").Delete(context.TODO(), v4EpSlice.Name, metav1.DeleteOptions{})
@@ -1200,6 +1213,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter.Policies = []string{"v6lrp2-UUID"}
 					expectedDatabaseState = []libovsdbtest.TestData{
 						clusterRouter,
+						gwRouter,
 						node1LRP,
 						v6lrp2,
 					}
@@ -1208,6 +1222,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter.Policies = []string{"v6lrsr-UUID"}
 					expectedDatabaseState = []libovsdbtest.TestData{
 						clusterRouter,
+						gwRouter,
 						node1LRP,
 						v6lrpic,
 						v4DefaultReRoute,
@@ -1222,7 +1237,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
-				fakeOVN.asf.ExpectAddressSetWithIPs(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), expectedEgressSvcAddrSet)
+				fakeOVN.asf.ExpectAddressSetWithAddresses(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), expectedEgressSvcAddrSet)
 
 				ginkgo.By("deleting the v6 endpoints the corresponding lrps will be deleted")
 				err = fakeOVN.fakeClient.KubeClient.DiscoveryV1().EndpointSlices("testns").Delete(context.TODO(), v6EpSlice.Name, metav1.DeleteOptions{})
@@ -1230,6 +1245,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				clusterRouter.Policies = []string{}
 				expectedDatabaseState = []libovsdbtest.TestData{
 					clusterRouter,
+					gwRouter,
 					node1LRP,
 				}
 				if interconnectEnabled {
@@ -1429,7 +1445,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
-				fakeOVN.asf.ExpectAddressSetWithIPs(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), expectedEgressSvcAddrSet)
+				fakeOVN.asf.ExpectAddressSetWithAddresses(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), expectedEgressSvcAddrSet)
 
 				ginkgo.By("creating an additional egress service assigned to the second node")
 				esvc2 := egressserviceapi.EgressService{
@@ -1481,18 +1497,18 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
-				fakeOVN.asf.ExpectAddressSetWithIPs(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), expectedEgressSvcAddrSet)
+				fakeOVN.asf.ExpectAddressSetWithAddresses(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), expectedEgressSvcAddrSet)
 
 				ginkgo.By("updating the second node host cidr the node ip no re-route address set will be updated")
 				nodeIPsASdbIDs := getEgressIPAddrSetDbIDs(NodeIPAddrSetName, DefaultNetworkControllerName)
-				fakeOVN.asf.EventuallyExpectAddressSetWithIPs(nodeIPsASdbIDs, []string{node1IPv4, node2IPv4, node1IPv6, node2IPv6})
+				fakeOVN.asf.EventuallyExpectAddressSetWithAddresses(nodeIPsASdbIDs, []string{node1IPv4, node2IPv4, node1IPv6, node2IPv6})
 
 				node2.ObjectMeta.Annotations[util.OVNNodeHostCIDRs] = fmt.Sprintf("[\"%s\", \"%s\", \"%s\", \"%s\"]", node2IPv4+"/24", node2IPv6+"/64", vipIPv4+"/24", vipIPv6+"/64")
 				node2.ResourceVersion = "3"
 				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), node2, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				fakeOVN.asf.EventuallyExpectAddressSetWithIPs(nodeIPsASdbIDs, []string{node1IPv4, node2IPv4, node1IPv6, node2IPv6, vipIPv4, vipIPv6})
+				fakeOVN.asf.EventuallyExpectAddressSetWithAddresses(nodeIPsASdbIDs, []string{node1IPv4, node2IPv4, node1IPv6, node2IPv6, vipIPv4, vipIPv6})
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				node2.ObjectMeta.Annotations[util.OVNNodeHostCIDRs] = fmt.Sprintf("[\"%s\", \"%s\"]", node2IPv4+"/24", node2IPv6+"/64")
@@ -1500,14 +1516,14 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), node2, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				fakeOVN.asf.EventuallyExpectAddressSetWithIPs(nodeIPsASdbIDs, []string{node1IPv4, node2IPv4, node1IPv6, node2IPv6})
+				fakeOVN.asf.EventuallyExpectAddressSetWithAddresses(nodeIPsASdbIDs, []string{node1IPv4, node2IPv4, node1IPv6, node2IPv6})
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				ginkgo.By("deleting the first node, the node ip no re-route address set will be updated and service resources will be deleted")
 				err = fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Delete(context.TODO(), node1.Name, metav1.DeleteOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 
-				fakeOVN.asf.EventuallyExpectAddressSetWithIPs(nodeIPsASdbIDs, []string{node2IPv4, node2IPv6})
+				fakeOVN.asf.EventuallyExpectAddressSetWithAddresses(nodeIPsASdbIDs, []string{node2IPv4, node2IPv6})
 
 				if !interconnectEnabled {
 					clusterRouter.Policies = []string{"svc2v4lrp1-UUID", "svc2v6lrp1-UUID"}
@@ -1531,7 +1547,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
-				fakeOVN.asf.ExpectAddressSetWithIPs(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), expectedEgressSvcAddrSet)
+				fakeOVN.asf.ExpectAddressSetWithAddresses(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), expectedEgressSvcAddrSet)
 
 				ginkgo.By("deleting the second node the second service's resources will be deleted")
 				err = fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Delete(context.TODO(), node2.Name, metav1.DeleteOptions{})
@@ -1547,7 +1563,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				}
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				fakeOVN.asf.EventuallyExpectEmptyAddressSetExist(nodeIPsASdbIDs)
-				fakeOVN.asf.ExpectAddressSetWithIPs(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), []string{})
+				fakeOVN.asf.ExpectAddressSetWithAddresses(egresssvc.GetEgressServiceAddrSetDbIDs(controllerName), []string{})
 				return nil
 			}
 			err := app.Run([]string{app.Name})

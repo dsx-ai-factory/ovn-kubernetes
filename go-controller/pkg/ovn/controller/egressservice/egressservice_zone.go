@@ -337,7 +337,7 @@ func (c *Controller) repair() error {
 
 		node, found := allNodes[svcHost]
 		if !found {
-			klog.Errorf("Node %s not found", svcHost, err)
+			klog.Errorf("Node %s not found: %v", svcHost, err)
 			continue
 		}
 
@@ -559,7 +559,7 @@ func (c *Controller) repair() error {
 	}
 
 	// re-set the global egressservice address set
-	if err := c.setPodIPsInAddressSet(createIPAddressNetSlice(allLocalV4Eps, allLocalV6Eps)); err != nil {
+	if err := c.setPodIPsInAddressSet(createIPAddressStringSlice(allLocalV4Eps, allLocalV6Eps)); err != nil {
 		errorList = append(errorList, fmt.Errorf("failed to set pod IPs in the egressservice address set, err: %v", err))
 	}
 
@@ -706,7 +706,7 @@ func (c *Controller) syncEgressService(key string) error {
 	}
 
 	if len(svc.Status.LoadBalancer.Ingress) == 0 {
-		klog.Infof("EgressService %s/%s does not have an ingress IP")
+		klog.Infof("EgressService %s does not have an ingress IP", key)
 		if state == nil {
 			// The service object doesn't have an ingress IP, and the egress service was not configured, nothing to do.
 			return nil
@@ -823,7 +823,7 @@ func (c *Controller) syncEgressService(key string) error {
 	// update egresssvc-served-pods address set used to ensure egress service
 	// does not affect pod -> node ip traffic
 	// https://github.com/ovn-org/ovn-kubernetes/blob/master/docs/egress-ip.md#pod-to-node-ip-traffic
-	createOps, err = c.addPodIPsToAddressSetOps(createIPAddressNetSlice(v4LocalToAdd, v6LocalToAdd))
+	createOps, err = c.addPodIPsToAddressSetOps(createIPAddressStringSlice(v4LocalToAdd, v6LocalToAdd))
 	if err != nil {
 		return err
 	}
@@ -846,7 +846,7 @@ func (c *Controller) syncEgressService(key string) error {
 		allOps = append(allOps, deleteOps...)
 	}
 
-	deleteOps, err = c.deletePodIPsFromAddressSetOps(createIPAddressNetSlice(v4LocalToRemove, v6LocalToRemove))
+	deleteOps, err = c.deletePodIPsFromAddressSetOps(createIPAddressStringSlice(v4LocalToRemove, v6LocalToRemove))
 	if err != nil {
 		return err
 	}
@@ -886,7 +886,7 @@ func (c *Controller) clearServiceResourcesAndRequeue(key string, svcState *svcSt
 		return err
 	}
 
-	delAddrSetOps, err := c.deletePodIPsFromAddressSetOps(createIPAddressNetSlice(svcState.v4LocalEndpoints.UnsortedList(), svcState.v6LocalEndpoints.UnsortedList()))
+	delAddrSetOps, err := c.deletePodIPsFromAddressSetOps(createIPAddressStringSlice(svcState.v4LocalEndpoints.UnsortedList(), svcState.v6LocalEndpoints.UnsortedList()))
 	if err != nil {
 		return err
 	}

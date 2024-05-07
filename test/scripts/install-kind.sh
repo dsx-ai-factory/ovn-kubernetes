@@ -45,7 +45,7 @@ install_kind() {
 }
 
 pushd $TMP_DIR
-K8S_VERSION="v1.28.0"
+K8S_VERSION="v1.29.2"
 
 # Install kubectl for K8S_VERSION in use
 # (to get latest stable version: $(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt )
@@ -60,11 +60,26 @@ sudo mv kubernetes/test/bin/e2e.test /usr/local/bin/e2e.test
 sudo mv kubernetes/test/bin/ginkgo /usr/local/bin/ginkgo
 rm kubernetes-test-linux-${ARCH}.tar.gz
 
+if [ "$USE_HELM" == true ]; then
+    HELM_VERSION="v3.14.2"
+	# to get latest stable version: https://github.com/helm/helm/releases
+    curl -L  https://get.helm.sh/helm-${HELM_VERSION}-linux-${ARCH}.tar.gz -o helm-linux-${ARCH}.tar.gz
+	tar xvzf helm-linux-${ARCH}.tar.gz
+    chmod +x ./linux-${ARCH}/helm
+	sudo mv linux-${ARCH}/helm /usr/local/bin/
+	rm helm-linux-${ARCH}.tar.gz
+fi
+
 install_kind
 popd # go out of $TMP_DIR
 
 pushd $SCRIPT_DIR/../../contrib
-./kind.sh
+if [ "$USE_HELM" == true ]; then
+    ./kind-helm.sh
+else
+    ./kind.sh
+fi
+
 if [ "$KIND_INSTALL_KUBEVIRT" == true ]; then
     sudo mv ./bin/virtctl /usr/local/bin/virtctl
 fi

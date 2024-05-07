@@ -111,11 +111,11 @@ BASEDIR=$(dirname $0)
 # OVN_DISABLE_FORWARDING - disable forwarding on OVNK controlled interfaces
 # OVN_ENABLE_MULTI_EXTERNAL_GATEWAY - enable multi external gateway for ovn-kubernetes
 # OVN_ENABLE_OVNKUBE_IDENTITY - enable per node certificate ovn-kubernetes
-# OVN_CONNTRACK_ZONE - Conntrack zone number used for openflow rules (default 64000)
 # OVN_DB_UPGRADE_SCHEMA_INLINE - use ovn-ctl to upgrade DB schema
 # OVN_CLUSTER_SUBNETS_MAC_BINDING_AGING - MAC binding aging threshold for cluster subnets (in seconds)
 # OVNKUBE_DISABLE_FIREWALLD - skip firewalld calls which open ports for service endpoints
 # OVNKUBE_ADMIN_FIREWALLD_ZONE - name of admin firewalld zone
+# OVN_KUBERNETES_CONNTRACK_ZONE - Conntrack zone number used for openflow rules (default 64000)
 # OVN_NORTHD_BACKOFF_INTERVAL - ovn northd backoff interval in ms (default 300)
 # OVN_ENABLE_SVC_TEMPLATE_SUPPORT - enable svc template support
 
@@ -301,6 +301,10 @@ ovn_v6_join_subnet=${OVN_V6_JOIN_SUBNET:-}
 ovn_v4_masquerade_subnet=${OVN_V4_MASQUERADE_SUBNET:-}
 # OVN_V6_MASQUERADE_SUBNET - v6 masquerade subnet
 ovn_v6_masquerade_subnet=${OVN_V6_MASQUERADE_SUBNET:-}
+# OVN_V4_TRANSIT_SWITCH_SUBNET - v4 Transit switch subnet
+ovn_v4_transit_switch_subnet=${OVN_V4_TRANSIT_SWITCH_SUBNET:-}
+# OVN_V6_TRANSIT_SWITCH_SUBNET - v6 Transit switch subnet
+ovn_v6_transit_switch_subnet=${OVN_V6_TRANSIT_SWITCH_SUBNET:-}
 #OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
 ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-100000}
 #OVN_MONITOR_ALL - ovn-controller monitor all data in SB DB
@@ -364,6 +368,8 @@ ovn_enable_interconnect=${OVN_ENABLE_INTERCONNECT:-false}
 ovn_enable_multi_external_gateway=${OVN_ENABLE_MULTI_EXTERNAL_GATEWAY:-false}
 #OVN_ENABLE_OVNKUBE_IDENTITY - enable per node cert
 ovn_enable_ovnkube_identity=${OVN_ENABLE_OVNKUBE_IDENTITY:-true}
+#OVN_ENABLE_PERSISTENT_IPS - enable IPAM for virtualization workloads (KubeVirt persistent IPs)
+ovn_enable_persistent_ips=${OVN_ENABLE_PERSISTENT_IPS:-false}
 
 # OVNKUBE_NODE_MODE - is the mode which ovnkube node operates
 ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
@@ -378,14 +384,14 @@ ovnkube_config_duration_enable=${OVNKUBE_CONFIG_DURATION_ENABLE:-false}
 ovnkube_metrics_scale_enable=${OVNKUBE_METRICS_SCALE_ENABLE:-false}
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node
 ovn_encap_ip=${OVN_ENCAP_IP:-}
-# OVN_CONNTRACK_ZONE - conntrack zone number used for openflow rules (default 64000)
-ovn_conntrack_zone=${OVN_CONNTRACK_ZONE:-}
+# OVN_KUBERNETES_CONNTRACK_ZONE - conntrack zone number used for openflow rules (default 64000)
+ovn_conntrack_zone=${OVN_KUBERNETES_CONNTRACK_ZONE:-64000}
 
 ovn_ex_gw_network_interface=${OVN_EX_GW_NETWORK_INTERFACE:-}
 # OVNKUBE_COMPACT_MODE_ENABLE indicate if ovnkube run master and node in one process
 ovnkube_compact_mode_enable=${OVNKUBE_COMPACT_MODE_ENABLE:-false}
 # OVN_NORTHD_BACKOFF_INTERVAL - northd backoff interval in ms
-# defualt is 300; no backoff delay if set to 0
+# defualt is 0; no backoff delay
 ovn_northd_backoff_interval=${OVN_NORTHD_BACKOFF_INTERVAL:-"0"}
 
 # OVNKUBE_DISABLE_FIREWALLD - skip firewalld calls which open ports for service endpoints
@@ -709,7 +715,7 @@ display_env() {
   echo OVN_DAEMONSET_VERSION ${ovn_daemonset_version}
   echo OVNKUBE_NODE_MODE ${ovnkube_node_mode}
   echo OVN_ENCAP_IP ${ovn_encap_ip}
-  echo OVN_CONNTRACK_ZONE ${ovn_conntrack_zone}
+  echo OVN_KUBERNETES_CONNTRACK_ZONE ${ovn_conntrack_zone}
   echo ovnkube.sh version ${ovnkube_version}
   echo OVN_HOST_NETWORK_NAMESPACE ${ovn_host_network_namespace}
 }
@@ -1443,6 +1449,12 @@ ovn-master() {
     echo "=============== ovn-master ========== MASTER ONLY"
   fi
 
+  persistent_ips_enabled_flag=
+  if [[ ${ovn_enable_persistent_ips} == "true" ]]; then
+	  persistent_ips_enabled_flag="--enable-persistent-ips"
+  fi
+  echo "persistent_ips_enabled_flag: ${persistent_ips_enabled_flag}"
+
   /usr/bin/ovnkube --init-master ${K8S_NODE} \
     ${admin_pbr_enabled_flag} \
     ${anp_enabled_flag} \
@@ -1478,6 +1490,7 @@ ovn-master() {
     ${ovn_v4_masquerade_subnet_opt} \
     ${ovn_v6_join_subnet_opt} \
     ${ovn_v6_masquerade_subnet_opt} \
+    ${persistent_ips_enabled_flag} \
     ${port_mirror_enabled_flag} \
     ${virtualip_enabled_flag} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
@@ -2227,11 +2240,23 @@ ovn-cluster-manager() {
   fi
   echo "egressservice_enabled_flag=${egressservice_enabled_flag}"
 
+  anp_enabled_flag=
+  if [[ ${ovn_admin_network_policy_enable} == "true" ]]; then
+      anp_enabled_flag="--enable-admin-network-policy"
+  fi
+  echo "anp_enabled_flag=${anp_enabled_flag}"
+
   egressfirewall_enabled_flag=
   if [[ ${ovn_egressfirewall_enable} == "true" ]]; then
 	  egressfirewall_enabled_flag="--enable-egress-firewall"
   fi
   echo "egressfirewall_enabled_flag=${egressfirewall_enabled_flag}"
+
+  egressqos_enabled_flag=
+  if [[ ${ovn_egressqos_enable} == "true" ]]; then
+	  egressqos_enabled_flag="--enable-egress-qos"
+  fi
+  echo "egressqos_enabled_flag=${egressqos_enabled_flag}"
 
   hybrid_overlay_flags=
   if [[ ${ovn_hybrid_overlay_enable} == "true" ]]; then
@@ -2266,6 +2291,18 @@ ovn-cluster-manager() {
   fi
   echo "ovn_v6_masquerade_subnet_opt=${ovn_v6_masquerade_subnet_opt}"
 
+  ovn_v4_transit_switch_subnet_opt=
+  if [[ -n ${ovn_v4_transit_switch_subnet} ]]; then
+      ovn_v4_transit_switch_subnet_opt="--cluster-manager-v4-transit-switch-subnet=${ovn_v4_transit_switch_subnet}"
+  fi
+  echo "ovn_v4_transit_switch_subnet_opt=${ovn_v4_transit_switch_subnet}"
+
+  ovn_v6_transit_switch_subnet_opt=
+  if [[ -n ${ovn_v6_transit_switch_subnet} ]]; then
+      ovn_v6_transit_switch_subnet_opt="--cluster-manager-v6-transit-switch-subnet=${ovn_v6_transit_switch_subnet}"
+  fi
+  echo "ovn_v6_transit_switch_subnet_opt=${ovn_v6_transit_switch_subnet}"
+
   multicast_enabled_flag=
   if [[ ${ovn_multicast_enable} == "true" ]]; then
       multicast_enabled_flag="--enable-multicast"
@@ -2277,6 +2314,12 @@ ovn-cluster-manager() {
 	  multi_network_enabled_flag="--enable-multi-network --enable-multi-networkpolicy"
   fi
   echo "multi_network_enabled_flag: ${multi_network_enabled_flag}"
+
+  persistent_ips_enabled_flag=
+  if [[ ${ovn_enable_persistent_ips} == "true" ]]; then
+	  persistent_ips_enabled_flag="--enable-persistent-ips"
+  fi
+  echo "persistent_ips_enabled_flag: ${persistent_ips_enabled_flag}"
 
   ovnkube_cluster_manager_metrics_bind_address="${metrics_endpoint_ip}:9411"
   echo "ovnkube_cluster_manager_metrics_bind_address: ${ovnkube_cluster_manager_metrics_bind_address}"
@@ -2323,14 +2366,17 @@ ovn-cluster-manager() {
 
   echo "=============== ovn-cluster-manager ========== MASTER ONLY"
   /usr/bin/ovnkube --init-cluster-manager ${K8S_NODE} \
+    ${anp_enabled_flag} \
     ${egressfirewall_enabled_flag} \
     ${egressip_enabled_flag} \
     ${egressip_healthcheck_port_flag} \
+    ${egressqos_enabled_flag} \
     ${egressservice_enabled_flag} \
     ${empty_lb_events_flag} \
     ${hybrid_overlay_flags} \
     ${multicast_enabled_flag} \
     ${multi_network_enabled_flag} \
+    ${persistent_ips_enabled_flag} \
     ${ovnkube_enable_interconnect_flag} \
     ${ovnkube_enable_multi_external_gateway_flag} \
     ${ovnkube_metrics_tls_opts} \
@@ -2339,6 +2385,8 @@ ovn-cluster-manager() {
     ${ovn_v4_masquerade_subnet_opt} \
     ${ovn_v6_join_subnet_opt} \
     ${ovn_v6_masquerade_subnet_opt} \
+    ${ovn_v4_transit_switch_subnet_opt} \
+    ${ovn_v6_transit_switch_subnet_opt} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --host-network-namespace ${ovn_host_network_namespace} \
     --logfile-maxage=${ovnkube_logfile_maxage} \
@@ -2870,6 +2918,12 @@ ovn-node() {
      "
   fi
   echo "ovnkube_node_certs_flags=${ovnkube_node_certs_flags}"
+
+  ovn_conntrack_zone_flag=
+  if [[ ${ovn_conntrack_zone} != "" ]]; then
+     ovn_conntrack_zone_flag="--conntrack-zone=${ovn_conntrack_zone}"
+  fi
+  echo "ovn_conntrack_zone_flag=${ovn_conntrack_zone_flag}"
 
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \

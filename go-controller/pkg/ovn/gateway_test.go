@@ -1421,7 +1421,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			nodeSubnetPriority, _ := strconv.Atoi(types.NodeSubnetPolicyPriority)
 
 			matchstr2 := fmt.Sprintf(`inport == "rtos-%s" && ip4.dst == nodePhysicalIP /* %s */`, nodeName, nodeName)
-			matchstr3 := fmt.Sprintf("ip4.src == source && ip4.dst == nodePhysicalIP")
+			matchstr3 := "ip4.src == source && ip4.dst == nodePhysicalIP"
 			matchstr6 := fmt.Sprintf("ip4.src == NO DELETE && ip4.dst == nodePhysicalIP /* %s-no */", nodeName)
 
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
@@ -1449,8 +1449,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 						LogicalPort: types.GWRouterToExtSwitchPrefix + types.GWRouterPrefix + nodeName,
 					},
 					&nbdb.LogicalRouter{
-						Name: types.GWRouterPrefix + nodeName,
-						UUID: types.GWRouterPrefix + nodeName + "-UUID",
+						Name:  types.GWRouterPrefix + nodeName,
+						UUID:  types.GWRouterPrefix + nodeName + "-UUID",
+						Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName + "-UUID"},
 						LoadBalancer: []string{
 							"Service_default/kubernetes_TCP_node_router_ovn-control-plane",
 						},
@@ -1485,8 +1486,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 						UUID: types.JoinSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName + "-UUID",
 					},
 					&nbdb.LogicalSwitch{
-						UUID: types.OVNJoinSwitch + "-UUID",
-						Name: types.OVNJoinSwitch,
+						UUID:  types.OVNJoinSwitch + "-UUID",
+						Name:  types.OVNJoinSwitch,
+						Ports: []string{types.JoinSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName + "-UUID"},
 					},
 					&nbdb.LogicalSwitch{
 						Name: types.ExternalSwitchPrefix + nodeName,
@@ -1545,7 +1547,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			nodeSubnetPriority, _ := strconv.Atoi(types.NodeSubnetPolicyPriority)
 
 			matchstr2 := fmt.Sprintf(`inport == "rtos-%s" && ip4.dst == nodePhysicalIP /* %s */`, nodeName, nodeName)
-			matchstr3 := fmt.Sprintf("ip4.src == source && ip4.dst == nodePhysicalIP")
+			matchstr3 := "ip4.src == source && ip4.dst == nodePhysicalIP"
 			matchstr6 := fmt.Sprintf("ip4.src == NO DELETE && ip4.dst == nodePhysicalIP /* %s-no */", nodeName)
 
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
@@ -1569,8 +1571,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 						},
 					},
 					&nbdb.LogicalRouter{
-						Name: types.GWRouterPrefix + nodeName,
-						UUID: types.GWRouterPrefix + nodeName + "-UUID",
+						Name:  types.GWRouterPrefix + nodeName,
+						UUID:  types.GWRouterPrefix + nodeName + "-UUID",
+						Ports: []string{types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName + "-UUID"},
 						LoadBalancer: []string{
 							"Service_default/kubernetes_TCP_node_router_ovn-control-plane",
 						},
@@ -1593,7 +1596,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					// add a stale egressIP reroute policy with nexthop == node's joinIP
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.EgressIPReroutePriority,
-						Match:    fmt.Sprintf("ip4.src == 10.224.0.5"),
+						Match:    "ip4.src == 10.224.0.5",
 						Action:   nbdb.LogicalRouterPolicyActionReroute,
 						Nexthops: []string{"100.64.0.1"},
 						ExternalIDs: map[string]string{
@@ -1620,8 +1623,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 						UUID: types.JoinSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName + "-UUID",
 					},
 					&nbdb.LogicalSwitch{
-						UUID: types.OVNJoinSwitch + "-UUID",
-						Name: types.OVNJoinSwitch,
+						UUID:  types.OVNJoinSwitch + "-UUID",
+						Name:  types.OVNJoinSwitch,
+						Ports: []string{types.JoinSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName + "-UUID"},
 					},
 					&nbdb.LogicalSwitch{
 						Name: types.ExternalSwitchPrefix + nodeName,

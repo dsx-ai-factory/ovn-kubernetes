@@ -333,11 +333,11 @@ func isolateIPv6Networks(networkA, networkB string) error {
 	if len(bridgeInfNames) != 2 {
 		return fmt.Errorf("expected two bridge names but found %d", len(bridgeInfNames))
 	}
-	_, err := runCommand("ip6tables", "-t", "filter", "-A", "FORWARD", "-i", bridgeInfNames[0], "-o", bridgeInfNames[1], "-j", "DROP")
+	_, err := runCommand("sudo", "ip6tables", "-t", "filter", "-A", "FORWARD", "-i", bridgeInfNames[0], "-o", bridgeInfNames[1], "-j", "DROP")
 	if err != nil {
 		return err
 	}
-	_, err = runCommand("ip6tables", "-t", "filter", "-A", "FORWARD", "-i", bridgeInfNames[1], "-o", bridgeInfNames[0], "-j", "DROP")
+	_, err = runCommand("sudo", "ip6tables", "-t", "filter", "-A", "FORWARD", "-i", bridgeInfNames[1], "-o", bridgeInfNames[0], "-j", "DROP")
 	return err
 }
 
@@ -468,6 +468,11 @@ func createPod(f *framework.Framework, podName, nodeSelector, namespace string, 
 	err = e2epod.WaitForPodRunningInNamespace(context.TODO(), f.ClientSet, res)
 
 	if err != nil {
+		res, err = podClient.Get(context.Background(), pod.Name, metav1.GetOptions{})
+		if err != nil {
+			return nil, errors.Wrapf(err, "Failed to get pod %s %s", pod.Name, namespace)
+		}
+		framework.Logf("Warning: Failed to get pod running %v: %v", *res, err)
 		logs, logErr := e2epod.GetPodLogs(context.TODO(), f.ClientSet, namespace, pod.Name, contName)
 		if logErr != nil {
 			framework.Logf("Warning: Failed to get logs from pod %q: %v", pod.Name, logErr)
@@ -753,7 +758,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		framework.ExpectNoError(err, "one or more nodes failed to go back ready, schedulable, and untainted")
 	})
 
-	ginkgo.It("should provide Internet connection continuously when all pods are killed on node running master instance of ovnkube-control-plane.", func() {
+	ginkgo.It("should provide Internet connection continuously when all pods are killed on node running master instance of ovnkube-control-plane", func() {
 		ginkgo.By(fmt.Sprintf("Running container which tries to connect to %s in a loop", extDNSIP))
 
 		ovnKubeControlPlaneNode, err := findOvnKubeControlPlaneNode(controlPlanePodName, controlPlaneLeaseName)
@@ -794,7 +799,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		framework.ExpectNoError(<-errChan)
 	})
 
-	ginkgo.It("should provide Internet connection continuously when all ovnkube-control-plane pods are killed.", func() {
+	ginkgo.It("should provide Internet connection continuously when all ovnkube-control-plane pods are killed", func() {
 		ginkgo.By(fmt.Sprintf("Running container which tries to connect to %s in a loop", extDNSIP))
 
 		podChan, errChan := make(chan *v1.Pod), make(chan error)
@@ -1072,7 +1077,7 @@ var _ = ginkgo.Describe("e2e network policy hairpinning validation", func() {
 
 		ginkgo.By("verify hairpinned connection from a pod to its own service is allowed")
 		hostname := pokeEndpoint(namespaceName, pod1.Name, "http", svcIP, serviceHTTPPort, "hostname")
-		framework.ExpectEqual(hostname, pod1.Name, fmt.Sprintf("returned client: %v was not correct", hostname))
+		gomega.Expect(hostname).To(gomega.Equal(pod1.Name), fmt.Sprintf("returned client: %v was not correct", hostname))
 
 		ginkgo.By("verify connection to another pod is denied")
 		err = pokePod(f, pod1.Name, pod2.Status.PodIP)
@@ -1200,8 +1205,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 								break
 							}
 						}
-						framework.ExpectEqual(valid, true,
-							fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", node.Name, nodesHostnames, responses))
+						gomega.Expect(valid).To(gomega.Equal(true), fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", node.Name, nodesHostnames, responses))
 					}
 				}
 			}
@@ -1353,8 +1357,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 										break
 									}
 								}
-								framework.ExpectEqual(valid, true,
-									fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", nodeName, nodesHostnames, responses))
+								gomega.Expect(valid).To(gomega.Equal(true), fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", nodeName, nodesHostnames, responses))
 							}
 						}
 					}
@@ -1424,8 +1427,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							}
 
 						}
-						framework.ExpectEqual(valid, true,
-							fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", node.Name, expectedResponses, responses))
+						gomega.Expect(valid).To(gomega.Equal(true), fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", node.Name, expectedResponses, responses))
 					}
 				}
 			}
@@ -1472,7 +1474,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			for _, externalAddress := range addresses {
 				ginkgo.By(fmt.Sprintf("Making sure that the neighbor entry is stable for endpoint IP %s", externalAddress))
 				valid := isNeighborEntryStable(clientContainerName, externalAddress, 10)
-				framework.ExpectEqual(valid, true, "Validation failed for neighbor entry of external address: %s", externalAddress)
+				gomega.Expect(valid).To(gomega.Equal(true), "Validation failed for neighbor entry of external address: %s", externalAddress)
 
 				for _, protocol := range []string{"http", "udp"} {
 					externalPort := int32(clusterHTTPPort)
@@ -1485,7 +1487,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							protocol,
 							externalPort))
 					valid = pokeExternalIpService(clientContainerName, protocol, externalAddress, externalPort, maxTries, nodesHostnames)
-					framework.ExpectEqual(valid, true, "Validation failed for external address: %s", externalAddress)
+					gomega.Expect(valid).To(gomega.Equal(true), "Validation failed for external address: %s", externalAddress)
 				}
 			}
 
@@ -1497,7 +1499,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			for _, externalAddress := range addresses {
 				ginkgo.By(fmt.Sprintf("Making sure that the neighbor entry is stable for endpoint IP %s", externalAddress))
 				valid := isNeighborEntryStable(clientContainerName, externalAddress, 10)
-				framework.ExpectEqual(valid, true, "Validation failed for neighbor entry of external address: %s", externalAddress)
+				gomega.Expect(valid).To(gomega.Equal(true), "Validation failed for neighbor entry of external address: %s", externalAddress)
 
 				for _, protocol := range []string{"http", "udp"} {
 					externalPort := int32(clusterHTTPPort2)
@@ -1510,7 +1512,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							protocol,
 							externalPort))
 					valid = pokeExternalIpService(clientContainerName, protocol, externalAddress, externalPort, maxTries, nodesHostnames)
-					framework.ExpectEqual(valid, true, "Validation failed for external address: %s", externalAddress)
+					gomega.Expect(valid).To(gomega.Equal(true), "Validation failed for external address: %s", externalAddress)
 				}
 			}
 		})
@@ -1632,7 +1634,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							break
 						}
 					}
-					framework.ExpectEqual(valid, true, "Validation failed for external address: %s", externalAddress)
+					gomega.Expect(valid).To(gomega.Equal(true), "Validation failed for external address: %s", externalAddress)
 				}
 			}
 		})
@@ -1770,7 +1772,7 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 							}
 
 						}
-						framework.ExpectEqual(valid, true,
+						gomega.Expect(valid).To(gomega.Equal(true),
 							fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", node.Name, expectedResponses, responses))
 					}
 				}
@@ -1896,7 +1898,7 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 				if err != nil {
 					framework.Failf("could not lookup ovs %s targets: %v", protocolStr, stderr)
 				}
-				framework.ExpectEmpty(targets)
+				gomega.Expect(targets).To(gomega.BeEmpty())
 			}
 		},
 		// This is a long test (~5 minutes per run), so let's just validate netflow v5
@@ -2276,77 +2278,4 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		framework.Logf("test simple connectivity from new pod to API server,after recovery")
 		singlePodConnectivityTest(f, "after-delete-db-pods")
 	})
-})
-
-var _ = ginkgo.Describe("e2e IGMP validation", func() {
-	const (
-		svcname              string = "igmp-test"
-		ovnNs                string = "ovn-kubernetes"
-		port                 string = "8080"
-		ovnWorkerNode        string = "ovn-worker"
-		ovnWorkerNode2       string = "ovn-worker2"
-		mcastGroup           string = "224.1.1.1"
-		multicastListenerPod string = "multicast-listener-test-pod"
-		multicastSourcePod   string = "multicast-source-test-pod"
-		tcpdumpFileName      string = "tcpdump.txt"
-		retryTimeout                = 5 * time.Minute // polling timeout
-	)
-	var (
-		tcpDumpCommand = []string{"bash", "-c",
-			fmt.Sprintf("apk update; apk add tcpdump ; tcpdump multicast > %s", tcpdumpFileName)}
-		// Multicast group (-c 224.1.1.1), UDP (-u), TTL (-T 2), during (-t 3000) seconds, report every (-i 5) seconds
-		multicastSourceCommand = []string{"bash", "-c",
-			fmt.Sprintf("iperf -c %s -u -T 2 -t 3000 -i 5", mcastGroup)}
-	)
-	f := wrappedTestFramework(svcname)
-	ginkgo.It("can retrieve multicast IGMP query", func() {
-		// Enable multicast of the test namespace annotation
-		ginkgo.By(fmt.Sprintf("annotating namespace: %s to enable multicast", f.Namespace.Name))
-		annotateArgs := []string{
-			"annotate",
-			"namespace",
-			f.Namespace.Name,
-			fmt.Sprintf("k8s.ovn.org/multicast-enabled=%s", "true"),
-		}
-		e2ekubectl.RunKubectlOrDie(f.Namespace.Name, annotateArgs...)
-
-		// Create a multicast source pod
-		ginkgo.By("creating a multicast source pod in node " + ovnWorkerNode)
-		createGenericPod(f, multicastSourcePod, ovnWorkerNode, f.Namespace.Name, multicastSourceCommand)
-
-		// Create a multicast listener pod
-		ginkgo.By("creating a multicast listener pod in node " + ovnWorkerNode2)
-		createGenericPod(f, multicastListenerPod, ovnWorkerNode2, f.Namespace.Name, tcpDumpCommand)
-
-		// Wait for tcpdump on listener pod to be ready
-		err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-			kubectlOut, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", multicastListenerPod, "--", "/bin/bash", "-c", "ls")
-			if err != nil {
-				framework.Failf("failed to retrieve multicast IGMP query: " + err.Error())
-			}
-			if !strings.Contains(kubectlOut, tcpdumpFileName) {
-				return false, nil
-			}
-			return true, nil
-		})
-		if err != nil {
-			framework.Failf("failed to retrieve multicast IGMP query: " + err.Error())
-		}
-
-		// The multicast listener pod join multicast group (-B 224.1.1.1), UDP (-u), during (-t 30) seconds, report every (-i 5) seconds
-		ginkgo.By("multicast listener pod join multicast group")
-		e2ekubectl.RunKubectl(f.Namespace.Name, "exec", multicastListenerPod, "--", "/bin/bash", "-c", fmt.Sprintf("iperf -s -B %s -u -t 30 -i 5", mcastGroup))
-
-		ginkgo.By(fmt.Sprintf("verifying that the IGMP query has been received"))
-		kubectlOut, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", multicastListenerPod, "--", "/bin/bash", "-c", fmt.Sprintf("cat %s | grep igmp", tcpdumpFileName))
-		if err != nil {
-			framework.Failf("failed to retrieve multicast IGMP query: " + err.Error())
-		}
-		framework.Logf("output:")
-		framework.Logf(kubectlOut)
-		if kubectlOut == "" {
-			framework.Failf("failed to retrieve multicast IGMP query: igmp messages on the tcpdump logfile not found")
-		}
-	})
-
 })

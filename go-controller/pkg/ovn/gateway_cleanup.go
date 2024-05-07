@@ -13,9 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gateway"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 )
@@ -163,40 +161,4 @@ func (oc *DefaultNetworkController) removeLRPolicies(nodeName string, priorities
 	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		klog.Errorf("Error deleting policies with priorities %v associated with the node %s: %v", priorities, nodeName, err)
 	}
-}
-
-// removes DGP, snat_and_dnat entries, and LRPs
-func (oc *DefaultNetworkController) cleanupDGP(nodes []*kapi.Node) error {
-	klog.Infof("Removing DGP %v", nodes)
-	// remove dnat_snat entries as well as LRPs
-	for _, node := range nodes {
-		if util.NoHostSubnet(node) {
-			continue
-		}
-		oc.delPbrAndNatRules(node.Name, []string{types.InterNodePolicyPriority, types.MGMTPortPolicyPriority})
-	}
-	// SDN-1535: MacBinding deletion is not required in ngn 2.1
-	// remove SBDB MAC bindings for DGP
-	//err := libovsdbutil.DeleteSbdbMacBindingsWithIPs(oc.sbClient, types.V4NodeLocalNATSubnetNextHop, types.V6NodeLocalNATSubnetNextHop)
-	//if err != nil {
-	//	return fmt.Errorf("unable to remove mac_binding for DGP: %w", err)
-	//}
-
-	// remove node local switch
-	err := libovsdbops.DeleteLogicalSwitch(oc.nbClient, types.NodeLocalSwitch)
-	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
-		return fmt.Errorf("unable to remove node local switch %s, err: %w", types.NodeLocalSwitch, err)
-	}
-
-	// remove lrp on ovn_cluster_router. Will also remove gateway chassis.
-	logicalRouter := nbdb.LogicalRouter{Name: types.OVNClusterRouter}
-	logicalRouterPort := nbdb.LogicalRouterPort{
-		Name: types.RouterToSwitchPrefix + types.NodeLocalSwitch,
-	}
-	err = libovsdbops.DeleteLogicalRouterPorts(oc.nbClient, &logicalRouter, &logicalRouterPort)
-	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
-		return fmt.Errorf("unable to delete router port %s: %w", logicalRouterPort.Name, err)
-	}
-
-	return nil
 }

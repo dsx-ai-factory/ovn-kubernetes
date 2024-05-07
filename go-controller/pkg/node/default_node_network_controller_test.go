@@ -283,6 +283,7 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-monitor-all=true "+
 						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
 						"external_ids:ovn-enable-lflow-cache=true "+
+						"external_ids:ovn-set-local-ip=\"true\" "+
 						"external_ids:hostname=\"%s\"",
 						nodeIP, interval, ofintval, ofintval, nodeName),
 				})
@@ -393,6 +394,7 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-monitor-all=true "+
 						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
 						"external_ids:ovn-enable-lflow-cache=false "+
+						"external_ids:ovn-set-local-ip=\"true\" "+
 						"external_ids:ovn-limit-lflow-cache=1000 "+
 						"external_ids:ovn-memlimit-lflow-cache-kb=100000 "+
 						"external_ids:hostname=\"%s\"",
@@ -472,6 +474,7 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-monitor-all=true "+
 						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
 						"external_ids:ovn-enable-lflow-cache=true "+
+						"external_ids:ovn-set-local-ip=\"true\" "+
 						"external_ids:hostname=\"%s\"",
 						nodeIP, interval, ofintval, ofintval, nodeName),
 				})
@@ -556,6 +559,7 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-monitor-all=true "+
 						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
 						"external_ids:ovn-enable-lflow-cache=true "+
+						"external_ids:ovn-set-local-ip=\"true\" "+
 						"external_ids:hostname=\"%s\"",
 						nodeIP, interval, ofintval, ofintval, nodeName),
 				})
@@ -640,6 +644,7 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-monitor-all=true "+
 						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
 						"external_ids:ovn-enable-lflow-cache=true "+
+						"external_ids:ovn-set-local-ip=\"true\" "+
 						"external_ids:hostname=\"%s\"",
 						nodeIP, interval, ofintval, ofintval, nodeName),
 				})
@@ -727,6 +732,7 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-monitor-all=true "+
 						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
 						"external_ids:ovn-enable-lflow-cache=true "+
+						"external_ids:ovn-set-local-ip=\"true\" "+
 						"external_ids:hostname=\"%s\"",
 						encapIPs, interval, ofintval, ofintval, nodeName),
 				})

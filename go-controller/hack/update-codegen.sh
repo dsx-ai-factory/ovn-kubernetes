@@ -94,6 +94,7 @@ cp $(pwd)/_output/crds/k8s.ovn.org_egressfirewalls.yaml ../dist/templates/k8s.ov
 echo "Copying egressIP CRD"
 cp _$(pwd)/output/crds/k8s.ovn.org_egressips.yaml ../dist/templates/k8s.ovn.org_egressips.yaml.j2
 echo "Copying egressQoS CRD"
+cp _output/crds/k8s.ovn.org_egressqoses.yaml ../dist/templates/k8s.ovn.org_egressqoses.yaml.j2
 cp $(pwd)/_output/crds/k8s.ovn.org_egressqoses.yaml ../dist/templates/k8s.ovn.org_egressqoses.yaml.j2
 # NOTE: When you update vendoring versions for the ANP & BANP APIs, we must update the version of the CRD we pull from in the below URL
 echo "Copying Admin Network Policy CRD"
@@ -104,3 +105,5 @@ echo "Copying adminpolicybasedexternalroutes CRD"
 cp _output/crds/k8s.ovn.org_adminpolicybasedexternalroutes.yaml ../dist/templates/k8s.ovn.org_adminpolicybasedexternalroutes.yaml.j2
 echo "Copying egressService CRD"
 cp _output/crds/k8s.ovn.org_egressservices.yaml ../dist/templates/k8s.ovn.org_egressservices.yaml.j2
+echo "Copying IPAMClaim CRD"
+curl -sSL https://raw.githubusercontent.com/k8snetworkplumbingwg/ipamclaims/v0.4.0-alpha/artifacts/k8s.cni.cncf.io_ipamclaims.yaml -o ../dist/templates/k8s.cni.cncf.io_ipamclaims.yaml

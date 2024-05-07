@@ -77,9 +77,8 @@ func addHostnetworkPodIPToAddressSet(wf *factory.WatchFactory, nbClient libovsdb
 		return fmt.Errorf("failed to get %s policy IPs for host network pod %s schedued on node %s: %v",
 			policyType, podName, nodeName, err)
 	}
-
 	// it is ok to add the same addresses to the addressset multiple times. If they already exist, it would be no-op
-	if err := addressSet.AddIPs(ips); err != nil {
+	if err := addressSet.AddAddresses(util.StringSlice(ips)); err != nil {
 		return fmt.Errorf("failed to add host network Pod IPs %v to address_set %s", ips, addressSet.GetName())
 	}
 
@@ -100,7 +99,7 @@ func delHostnetworkPodIPFromAddressSet(nodeName, podName string, addressSet addr
 			// If no host network pods on this node, delete the node IPs from the network addressSet
 			if len(podMap) == 0 {
 				delete(nodeHostNetPodsCache, nodeName)
-				err := addressSet.DeleteIPs(ips)
+				err := addressSet.DeleteAddresses(util.StringSlice(ips))
 				if err != nil {
 					return fmt.Errorf("failed to delete host network Pod IPs %v from address_set %s",
 						ips, addressSet.GetName())
@@ -186,7 +185,7 @@ func (oc *DefaultNetworkController) addLocalPodToNamespace(ns string, ips []*net
 
 	defer nsUnlock()
 
-	if ops, err = nsInfo.addressSet.AddIPsReturnOps(createIPAddressSlice(ips)); err != nil {
+	if ops, err = nsInfo.addressSet.AddAddressesReturnOps(util.IPNetsIPToStringSlice(ips)); err != nil {
 		return nil, nil, nil, err
 	}
 
@@ -206,15 +205,7 @@ func (oc *DefaultNetworkController) addRemotePodToNamespace(ns string, ips []*ne
 	}
 
 	defer nsUnlock()
-	return nsInfo.addressSet.AddIPs(createIPAddressSlice(ips))
-}
-
-func createIPAddressSlice(ips []*net.IPNet) []net.IP {
-	ipAddrs := make([]net.IP, 0)
-	for _, ip := range ips {
-		ipAddrs = append(ipAddrs, ip.IP)
-	}
-	return ipAddrs
+	return nsInfo.addressSet.AddAddresses(util.IPNetsIPToStringSlice(ips))
 }
 
 func isNamespaceMulticastEnabled(annotations map[string]string) bool {
@@ -435,6 +426,8 @@ func (oc *DefaultNetworkController) ensureNamespaceLocked(ns string, readOnly bo
 	return oc.ensureNamespaceLockedCommon(ns, readOnly, namespace, ipsGetter, oc.configureNamespace)
 }
 
+// getAllHostNamespaceAddresses retrives management port and gateway router LRP
+// IP for all nodes in the cluster
 func (oc *DefaultNetworkController) getAllHostNamespaceAddresses() []net.IP {
 	var ips []net.IP
 	// add the mp0 interface addresses to this namespace.
@@ -448,26 +441,37 @@ func (oc *DefaultNetworkController) getAllHostNamespaceAddresses() []net.IP {
 				// skip hybrid overlay nodes
 				continue
 			}
-			hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
+			hostNetworkIPs, err := oc.getHostNamespaceAddressesForNode(node)
 			if err != nil {
-				klog.Warningf("Error parsing host subnet annotation for node %s (%v)",
-					node.Name, err)
+				klog.Errorf("Error parsing annotation for node %s: %v", node.Name, err)
 			}
-			for _, hostSubnet := range hostSubnets {
-				mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
-				ips = append(ips, mgmtIfAddr.IP)
-			}
-			// for shared gateway mode we will use LRP IPs to SNAT host network traffic
-			// so add these to the address set.
-			lrpIPs, err := util.ParseNodeGatewayRouterLRPAddrs(node)
-			if err != nil {
-				klog.Errorf("Failed to get join switch port IP address for node %s: %v", node.Name, err)
-			}
-
-			for _, lrpIP := range lrpIPs {
-				ips = append(ips, lrpIP.IP)
-			}
+			ips = append(ips, hostNetworkIPs...)
 		}
 	}
 	return ips
+}
+
+// getHostNamespaceAddressesForNode retrives management port and gateway router LRP
+// IP of a specific node
+func (oc *DefaultNetworkController) getHostNamespaceAddressesForNode(node *kapi.Node) ([]net.IP, error) {
+	var ips []net.IP
+	hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
+	if err != nil {
+		return nil, err
+	}
+	for _, hostSubnet := range hostSubnets {
+		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
+		ips = append(ips, mgmtIfAddr.IP)
+	}
+	// for shared gateway mode we will use LRP IPs to SNAT host network traffic
+	// so add these to the address set.
+	lrpIPs, err := util.ParseNodeGatewayRouterLRPAddrs(node)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, lrpIP := range lrpIPs {
+		ips = append(ips, lrpIP.IP)
+	}
+	return ips, nil
 }

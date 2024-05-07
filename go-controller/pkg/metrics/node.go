@@ -47,7 +47,7 @@ var metricOvnKubeNodeLogFileSize = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 
 var registerNodeMetricsOnce sync.Once
 
-func RegisterNodeMetrics(metricsScrapeInterval int, stopChan chan struct{}) {
+func RegisterNodeMetrics(metricsScrapeInterval int, stopChan <-chan struct{}) {
 	registerNodeMetricsOnce.Do(func() {
 		// ovnkube-node metrics
 		prometheus.MustRegister(MetricCNIRequestDuration)

@@ -522,7 +522,7 @@ set_default_params() {
   fi
   RUN_IN_CONTAINER=${RUN_IN_CONTAINER:-false}
   KIND_IMAGE=${KIND_IMAGE:-kindest/node}
-  K8S_VERSION=${K8S_VERSION:-v1.28.0}
+  K8S_VERSION=${K8S_VERSION:-v1.29.2}
   OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-shared}
   KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
   KIND_INSTALL_METALLB=${KIND_INSTALL_METALLB:-false}
@@ -575,6 +575,11 @@ set_default_params() {
   JOIN_SUBNET_IPV6=${JOIN_SUBNET_IPV6:-fd98::/64}
   MASQUERADE_SUBNET_IPV4=${MASQUERADE_SUBNET_IPV4:-169.254.169.0/29}
   MASQUERADE_SUBNET_IPV6=${MASQUERADE_SUBNET_IPV6:-fd69::/125}
+  TRANSIT_SWITCH_SUBNET_IPV4=${TRANSIT_SWITCH_SUBNET_IPV4:-100.88.0.0/16}
+  TRANSIT_SWITCH_SUBNET_IPV6=${TRANSIT_SWITCH_SUBNET_IPV6:-fd97::/64}
+  METALLB_CLIENT_NET_SUBNET_IPV4=${METALLB_CLIENT_NET_SUBNET_IPV4:-172.22.0.0/16}
+  METALLB_CLIENT_NET_SUBNET_IPV6=${METALLB_CLIENT_NET_SUBNET_IPV6:-fc00:f853:ccd:e792::/64}
+
   KIND_NUM_MASTER=1
   OVN_ENABLE_INTERCONNECT=${OVN_ENABLE_INTERCONNECT:-false}
   OVN_ENABLE_OVNKUBE_IDENTITY=${OVN_ENABLE_OVNKUBE_IDENTITY:-true}
@@ -901,13 +906,16 @@ create_ovn_kube_manifests() {
     --v6-join-subnet="${JOIN_SUBNET_IPV6}" \
     --v4-masquerade-subnet="${MASQUERADE_SUBNET_IPV4}" \
     --v6-masquerade-subnet="${MASQUERADE_SUBNET_IPV6}" \
+    --v4-transit-switch-subnet="${TRANSIT_SWITCH_SUBNET_IPV4}" \
+    --v6-transit-switch-subnet="${TRANSIT_SWITCH_SUBNET_IPV6}" \
     --ex-gw-network-interface="${OVN_EX_GW_NETWORK_INTERFACE}" \
     --multi-network-enable="${ENABLE_MULTI_NET}" \
     --ovnkube-metrics-scale-enable="${OVN_METRICS_SCALE_ENABLE}" \
     --compact-mode="${OVN_COMPACT_MODE}" \
     --enable-interconnect="${OVN_ENABLE_INTERCONNECT}" \
     --enable-multi-external-gateway=true \
-    --enable-ovnkube-identity="${OVN_ENABLE_OVNKUBE_IDENTITY}"
+    --enable-ovnkube-identity="${OVN_ENABLE_OVNKUBE_IDENTITY}" \
+    --enable-persistent-ips=true
   popd
 }
 
@@ -996,8 +1004,9 @@ install_ovn() {
   test -f k8s.ovn.org_icmpnetworkpolicies.yaml && run_kubectl apply -f k8s.ovn.org_icmpnetworkpolicies.yaml
   run_kubectl apply -f /root/git/k8s-yaml/multus/ovn-primary-crd.yaml
   run_kubectl apply -f k8s.ovn.org_adminpolicybasedexternalroutes.yaml
-  run_kubectl apply -f policy.networking.k8s.io_adminnetworkpolicies.yaml
-  run_kubectl apply -f policy.networking.k8s.io_baselineadminnetworkpolicies.yaml
+  # NOTE: When you update vendoring versions for the ANP & BANP APIs, we must update the version of the CRD we pull from in the below URL
+  run_kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.5/config/crd/experimental/policy.networking.k8s.io_adminnetworkpolicies.yaml
+  run_kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.5/config/crd/experimental/policy.networking.k8s.io_baselineadminnetworkpolicies.yaml
   run_kubectl apply -f ovn-setup.yaml
   run_kubectl apply -f rbac-ovnkube-identity.yaml
   run_kubectl apply -f rbac-ovnkube-cluster-manager.yaml
@@ -1094,11 +1103,34 @@ install_metallb() {
   pushd "${builddir}"
   git clone https://github.com/metallb/metallb.git
   cd metallb
+  # Use global IP next hops in IPv6
+  if  [ "$KIND_IPV6_SUPPORT" == true ]; then
+    sed -i '/address-family PROTOCOL unicast/a \
+  neighbor NODE0_IP route-map IPV6GLOBAL in\n  neighbor NODE1_IP route-map IPV6GLOBAL in\n  neighbor NODE2_IP route-map IPV6GLOBAL in' dev-env/bgp/frr/bgpd.conf.tmpl
+    printf "route-map IPV6GLOBAL permit 10\n set ipv6 next-hop prefer-global" >> dev-env/bgp/frr/bgpd.conf.tmpl
+  fi
   pip install -r dev-env/requirements.txt
+
+  local ip_family ipv6_network
+  if [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
+    ip_family="dual"
+    ipv6_network="--ipv6 --subnet=${METALLB_CLIENT_NET_SUBNET_IPV6}"
+  elif  [ "$KIND_IPV6_SUPPORT" == true ]; then
+    ip_family="ipv6"
+    ipv6_network="--ipv6 --subnet=${METALLB_CLIENT_NET_SUBNET_IPV6}"
+  else
+    ip_family="ipv4"
+    ipv6_network=""
+  fi
   # Override GOBIN until https://github.com/metallb/metallb/issues/2218 is fixed.
-  GOBIN="" inv dev-env -n ovn -b frr -p bgp
-  docker network create --driver bridge clientnet
+  GOBIN="" inv dev-env -n ovn -b frr -p bgp -i "${ip_family}"
+
+  docker network create --subnet="${METALLB_CLIENT_NET_SUBNET_IPV4}" ${ipv6_network} --driver bridge clientnet
   docker network connect clientnet frr
+  if  [ "$KIND_IPV6_SUPPORT" == true ]; then
+    # Enable IPv6 forwarding in FRR
+    docker exec frr sysctl -w net.ipv6.conf.all.forwarding=1
+  fi
   docker run  --cap-add NET_ADMIN --user 0  -d --network clientnet  --rm  --name lbclient  quay.io/itssurya/dev-images:metallb-lbservice
   popd
   delete_metallb_dir
@@ -1113,28 +1145,44 @@ install_metallb() {
     kubectl label node "$n" node.kubernetes.io/exclude-from-external-load-balancers-
   done
 
-  local frr_ips
-  frr_ips=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}#{{end}}' frr)
-  echo "${frr_ips}"
-  local kind_network
-  kind_network=$(echo "${frr_ips}" | cut -d '#' -f 2)
-  echo "${kind_network}"
-  local client_network
-  client_network=$(echo "${frr_ips}" | cut -d '#' -f 1)
-  echo "${client_network}"
-  # The following only works for single stack, to be modified if dualstack is to be supported:
-  local client_subnet
-  client_subnet=$(docker network inspect clientnet -f '{{range .IPAM.Config}}{{.Subnet}}{{end}}')
-  echo "${client_subnet}"
+  kind_network_v4=$(docker inspect -f '{{index .NetworkSettings.Networks "kind" "IPAddress"}}' frr)
+  echo "FRR kind network IPv4: ${kind_network_v4}"
+  kind_network_v6=$(docker inspect -f '{{index .NetworkSettings.Networks "kind" "GlobalIPv6Address"}}' frr)
+  echo "FRR kind network IPv6: ${kind_network_v6}"
+  local client_network_v4 client_network_v6
+  client_network_v4=$(docker inspect -f '{{index .NetworkSettings.Networks "clientnet" "IPAddress"}}' frr)
+  echo "FRR client network IPv4: ${client_network_v4}"
+  client_network_v6=$(docker inspect -f '{{index .NetworkSettings.Networks "clientnet" "GlobalIPv6Address"}}' frr)
+  echo "FRR client network IPv6: ${client_network_v6}"
+
+  local client_subnets
+  client_subnets=$(docker network inspect clientnet -f '{{range .IPAM.Config}}{{.Subnet}}#{{end}}')
+  echo "${client_subnets}"
+  local client_subnets_v4 client_subnets_v6
+  client_subnets_v4=$(echo "${client_subnets}" | cut -d '#' -f 1)
+  echo "client subnet IPv4: ${client_subnets_v4}"
+  client_subnets_v6=$(echo "${client_subnets}" | cut -d '#' -f 2)
+  echo "client subnet IPv6: ${client_subnets_v6}"
+
   KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
   for n in ${KIND_NODES}; do
-    docker exec "${n}" ip route add "${client_subnet}" via "${kind_network}"
+    if [ "$KIND_IPV4_SUPPORT" == true ]; then
+        docker exec "${n}" ip route add "${client_subnets_v4}" via "${kind_network_v4}"
+    fi
+    if [ "$KIND_IPV6_SUPPORT" == true ]; then
+        docker exec "${n}" ip -6 route add "${client_subnets_v6}" via "${kind_network_v6}"
+    fi
   done
-  # TODO(tssurya): expand this to be more dynamic in the future when needed.
+
   # for now, we only run one test with metalLB load balancer for which this
-  # one svcVIP (192.168.10.0) is more than enough since at a time we will only
+  # one svcVIP (192.168.10.0/fc00:f853:ccd:e799::) is more than enough since at a time we will only
   # have one load balancer service
-  docker exec lbclient ip route add 192.168.10.0 via "${client_network}" dev eth0
+  if [ "$KIND_IPV4_SUPPORT" == true ]; then
+    docker exec lbclient ip route add 192.168.10.0 via "${client_network_v4}" dev eth0
+  fi
+  if [ "$KIND_IPV6_SUPPORT" == true ]; then
+    docker exec lbclient ip -6 route add fc00:f853:ccd:e799:: via "${client_network_v6}" dev eth0
+  fi
   sleep 30
 }
 
@@ -1187,6 +1235,12 @@ install_mpolicy_crd() {
   echo "Installing multi-network-policy CRD ..."
   mpolicy_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/multi-networkpolicy/master/scheme.yml"
   run_kubectl apply -f "$mpolicy_manifest"
+}
+
+install_ipamclaim_crd() {
+  echo "Installing IPAMClaim CRD ..."
+  ipamclaims_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/ipamclaims/v0.4.0-alpha/artifacts/k8s.cni.cncf.io_ipamclaims.yaml"
+  run_kubectl apply -f "$ipamclaims_manifest"
 }
 
 # kubectl_wait_pods will set a total timeout of 300s for IPv4 and 480s for IPv6. It will first wait for all
@@ -1405,6 +1459,7 @@ function install_kubevirt() {
       if ! is_nested_virt_enabled; then
         kubectl -n kubevirt patch kubevirt kubevirt --type=merge --patch '{"spec":{"configuration":{"developerConfiguration":{"useEmulation":true}}}}'
       fi
+      kubectl -n kubevirt patch kubevirt kubevirt --type=merge --patch '{"spec":{"configuration":{"virtualMachineOptions":{"disableSerialConsoleLog":{}}}}}'
     fi
     if ! kubectl wait -n kubevirt kv kubevirt --for condition=Available --timeout 15m; then
         kubectl get pod -n kubevirt -l || true
@@ -1485,6 +1540,7 @@ fi
 if [ "$ENABLE_MULTI_NET" == true ]; then
   install_multus
   install_mpolicy_crd
+  install_ipamclaim_crd
   docker_create_second_disconnected_interface "underlay"  # localnet scenarios require an extra interface
 fi
 kubectl_wait_pods

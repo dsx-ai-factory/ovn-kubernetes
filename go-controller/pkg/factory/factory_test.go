@@ -23,6 +23,9 @@ import (
 	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
 	anpapifake "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned/fake"
 
+	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
+	ipamclaimsapifake "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/clientset/versioned/fake"
+
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -219,6 +222,13 @@ func newBaselineAdminNetworkPolicy(name string) *anpapi.BaselineAdminNetworkPoli
 	}
 }
 
+func newIPAMClaim(name string) *ipamclaimsapi.IPAMClaim {
+	return &ipamclaimsapi.IPAMClaim{
+		ObjectMeta: newObjectMeta(name, ""),
+		Spec:       ipamclaimsapi.IPAMClaimSpec{},
+	}
+}
+
 func objSetup(c *fake.Clientset, objType string, listFn func(core.Action) (bool, runtime.Object, error)) *watch.FakeWatcher {
 	w := watch.NewFake()
 	c.AddWatchReactor(objType, core.DefaultWatchReactor(w, nil))
@@ -268,6 +278,13 @@ func adminNetworkPolicyObjSetup(c *anpapifake.Clientset, objType string, listFn 
 	return w
 }
 
+func ipamClaimsObjSetup(c *ipamclaimsapifake.Clientset, objType string, listFn func(core.Action) (bool, runtime.Object, error)) *watch.FakeWatcher {
+	w := watch.NewFake()
+	c.AddWatchReactor(objType, core.DefaultWatchReactor(w, nil))
+	c.AddReactor("list", objType, listFn)
+	return w
+}
+
 type handlerCalls struct {
 	added   int32
 	updated int32
@@ -297,6 +314,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		egressQoSFakeClient                 *egressqosfake.Clientset
 		egressServiceFakeClient             *egressservicefake.Clientset
 		adminNetworkPolicyFakeClient        *anpapifake.Clientset
+		ipamClaimsFakeClient                *ipamclaimsapifake.Clientset
 		podWatch, namespaceWatch, nodeWatch *watch.FakeWatcher
 		policyWatch, serviceWatch           *watch.FakeWatcher
 		endpointSliceWatch                  *watch.FakeWatcher
@@ -307,6 +325,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		egressServiceWatch                  *watch.FakeWatcher
 		adminNetPolWatch                    *watch.FakeWatcher
 		baselineAdminNetPolWatch            *watch.FakeWatcher
+		ipamClaimsWatch                     *watch.FakeWatcher
 		pods                                []*v1.Pod
 		namespaces                          []*v1.Namespace
 		nodes                               []*v1.Node
@@ -321,7 +340,9 @@ var _ = Describe("Watch Factory Operations", func() {
 		egressServices                      []*egressservice.EgressService
 		adminNetworkPolicies                []*anpapi.AdminNetworkPolicy
 		baselineAdminNetworkPolicies        []*anpapi.BaselineAdminNetworkPolicy
+		ipamClaims                          []*ipamclaimsapi.IPAMClaim
 		err                                 error
+		shutdown                            bool
 	)
 
 	const (
@@ -337,6 +358,8 @@ var _ = Describe("Watch Factory Operations", func() {
 		config.OVNKubernetesFeature.EnableEgressQoS = true
 		config.OVNKubernetesFeature.EnableEgressService = true
 		config.OVNKubernetesFeature.EnableAdminNetworkPolicy = true
+		config.OVNKubernetesFeature.EnableMultiNetwork = true
+		config.OVNKubernetesFeature.EnablePersistentIPs = true
 		config.Kubernetes.PlatformType = string(ocpconfigapi.AWSPlatformType)
 
 		fakeClient = &fake.Clientset{}
@@ -346,6 +369,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		egressQoSFakeClient = &egressqosfake.Clientset{}
 		egressServiceFakeClient = &egressservicefake.Clientset{}
 		adminNetworkPolicyFakeClient = &anpapifake.Clientset{}
+		ipamClaimsFakeClient = &ipamclaimsapifake.Clientset{}
 
 		ovnClientset = &util.OVNMasterClientset{
 			KubeClient:           fakeClient,
@@ -355,6 +379,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			EgressFirewallClient: egressFirewallFakeClient,
 			EgressQoSClient:      egressQoSFakeClient,
 			EgressServiceClient:  egressServiceFakeClient,
+			IPAMClaimsClient:     ipamClaimsFakeClient,
 		}
 		ovnCMClientset = &util.OVNClusterManagerClientset{
 			KubeClient:           fakeClient,
@@ -362,6 +387,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			CloudNetworkClient:   cloudNetworkFakeClient,
 			EgressServiceClient:  egressServiceFakeClient,
 			EgressFirewallClient: egressFirewallFakeClient,
+			IPAMClaimsClient:     ipamClaimsFakeClient,
 		}
 
 		pods = make([]*v1.Pod, 0)
@@ -480,10 +506,22 @@ var _ = Describe("Watch Factory Operations", func() {
 			}
 			return true, obj, nil
 		})
+
+		ipamClaims = make([]*ipamclaimsapi.IPAMClaim, 0)
+		ipamClaimsWatch = ipamClaimsObjSetup(ipamClaimsFakeClient, "ipamclaims", func(action core.Action) (bool, runtime.Object, error) {
+			obj := &ipamclaimsapi.IPAMClaimList{}
+			for _, p := range ipamClaims {
+				obj.Items = append(obj.Items, *p)
+			}
+			return true, obj, nil
+		})
+		shutdown = false
 	})
 
 	AfterEach(func() {
-		wf.Shutdown()
+		if !shutdown {
+			wf.Shutdown()
+		}
 	})
 
 	Context("when a processExisting is given", func() {
@@ -634,6 +672,10 @@ var _ = Describe("Watch Factory Operations", func() {
 			baselineAdminNetworkPolicies = append(baselineAdminNetworkPolicies, newBaselineAdminNetworkPolicy("myBANP"))
 			testExisting(BaselineAdminNetworkPolicyType, "", nil, defaultHandlerPriority)
 		})
+		It("is called for each existing IPAMClaim", func() {
+			ipamClaims = append(ipamClaims, newIPAMClaim("claim!"))
+			testExisting(IPAMClaimsType, "", nil, defaultHandlerPriority)
+		})
 
 		It("is called for each existing pod that matches a given namespace and label", func() {
 			pod := newPod("pod1", "default")
@@ -749,6 +791,27 @@ var _ = Describe("Watch Factory Operations", func() {
 			baselineAdminNetworkPolicies = append(baselineAdminNetworkPolicies, newBaselineAdminNetworkPolicy("myBANP2"))
 			testExisting(BaselineAdminNetworkPolicyType)
 		})
+		It("doesn't deadlock when factory is shutdown", func() {
+			// every queue has length 10, but some events may be handled before the stop channel event is selected,
+			// so multiply by 15 instead of 10 to ensure overflow
+			for i := uint32(1); i <= defaultNumEventQueues*15; i++ {
+				pods = append(pods, newPod(fmt.Sprintf("pod%d", i), "default"))
+			}
+			wf, err = NewMasterWatchFactory(ovnClientset)
+			Expect(err).NotTo(HaveOccurred())
+			err = wf.Start()
+			Expect(err).NotTo(HaveOccurred())
+			wf.Shutdown()
+			shutdown = true
+			h, err := wf.addHandler(PodType, "", nil,
+				cache.ResourceEventHandlerFuncs{
+					AddFunc:    func(obj interface{}) {},
+					UpdateFunc: func(old, new interface{}) {},
+					DeleteFunc: func(obj interface{}) {},
+				}, nil, wf.GetHandlerPriority(PodType))
+			Expect(err).NotTo(HaveOccurred())
+			wf.removeHandler(PodType, h)
+		})
 	})
 
 	Context("when EgressIP is disabled", func() {
@@ -818,6 +881,20 @@ var _ = Describe("Watch Factory Operations", func() {
 		It("does not contain Baseline Admin Network Policy informer", func() {
 			config.OVNKubernetesFeature.EnableAdminNetworkPolicy = false
 			testExisting(BaselineAdminNetworkPolicyType)
+		})
+	})
+
+	Context("when Persistent IPs feature is disabled", func() {
+		testExisting := func(objType reflect.Type) {
+			wf, err = NewMasterWatchFactory(ovnClientset)
+			Expect(err).NotTo(HaveOccurred())
+			err = wf.Start()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(wf.informers).NotTo(HaveKey(objType))
+		}
+		It("does not contain IPAMClaims informer", func() {
+			config.OVNKubernetesFeature.EnablePersistentIPs = false
+			testExisting(IPAMClaimsType)
 		})
 	})
 
@@ -1955,6 +2032,43 @@ var _ = Describe("Watch Factory Operations", func() {
 		Eventually(c.getDeleted, 2).Should(Equal(1))
 
 		wf.RemoveBaselineAdminNetworkPolicyHandler(h)
+	})
+	It("responds to IPAMClaims add/update/delete events", func() {
+		wf, err = NewMasterWatchFactory(ovnClientset)
+		Expect(err).NotTo(HaveOccurred())
+		err = wf.Start()
+		Expect(err).NotTo(HaveOccurred())
+
+		added := newIPAMClaim("claiM!")
+		h, c := addHandler(wf, IPAMClaimsType, cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				claim := obj.(*ipamclaimsapi.IPAMClaim)
+				Expect(reflect.DeepEqual(claim, added)).To(BeTrue())
+			},
+			UpdateFunc: func(old, new interface{}) {
+				newClaim := new.(*ipamclaimsapi.IPAMClaim)
+				Expect(reflect.DeepEqual(newClaim, added)).To(BeTrue())
+			},
+			DeleteFunc: func(obj interface{}) {
+				claim := obj.(*ipamclaimsapi.IPAMClaim)
+				Expect(reflect.DeepEqual(claim, added)).To(BeTrue())
+			},
+		})
+
+		ipamClaims = append(ipamClaims, added)
+		ipamClaimsWatch.Add(added)
+
+		Eventually(c.getAdded, 2).Should(Equal(1))
+		added.Status.IPs = []string{"10.10.10.10/24"}
+		ipamClaimsWatch.Modify(added)
+
+		Eventually(c.getUpdated, 2).Should(Equal(1))
+
+		ipamClaims = ipamClaims[:0]
+		ipamClaimsWatch.Delete(added)
+		Eventually(c.getDeleted, 2).Should(Equal(1))
+
+		wf.RemoveIPAMClaimsHandler(h)
 	})
 	It("stops processing events after the handler is removed", func() {
 		wf, err = NewMasterWatchFactory(ovnClientset)

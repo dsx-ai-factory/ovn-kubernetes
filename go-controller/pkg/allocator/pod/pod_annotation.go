@@ -8,29 +8,38 @@ import (
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
+	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-// PodAnnotationAllocator is an utility to handle allocation of the PodAnnotation to Pods.
+// PodAnnotationAllocator is a utility to handle allocation of the PodAnnotation to Pods.
 type PodAnnotationAllocator struct {
 	podLister listers.PodLister
-	kube      kube.Interface
+	kube      kube.InterfaceOVN
 
-	netInfo util.NetInfo
+	netInfo              util.NetInfo
+	ipamClaimsReconciler persistentips.PersistentAllocations
 }
 
-func NewPodAnnotationAllocator(netInfo util.NetInfo, podLister listers.PodLister, kube kube.Interface) *PodAnnotationAllocator {
+func NewPodAnnotationAllocator(
+	netInfo util.NetInfo,
+	podLister listers.PodLister,
+	kube kube.InterfaceOVN,
+	claimsReconciler persistentips.PersistentAllocations,
+) *PodAnnotationAllocator {
 	return &PodAnnotationAllocator{
-		podLister: podLister,
-		kube:      kube,
-		netInfo:   netInfo,
+		podLister:            podLister,
+		kube:                 kube,
+		netInfo:              netInfo,
+		ipamClaimsReconciler: claimsReconciler,
 	}
 }
 
@@ -59,10 +68,10 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotation(
 		allocator.netInfo,
 		pod,
 		network,
+		allocator.ipamClaimsReconciler,
 		reallocateIP,
 		skipIPAM,
 	)
-
 }
 
 func allocatePodAnnotation(
@@ -72,6 +81,7 @@ func allocatePodAnnotation(
 	netInfo util.NetInfo,
 	pod *v1.Pod,
 	network *nadapi.NetworkSelectionElement,
+	claimsReconciler persistentips.PersistentAllocations,
 	reallocateIP, skipIPAM bool) (
 	updatedPod *v1.Pod,
 	podAnnotation *util.PodAnnotation,
@@ -88,6 +98,7 @@ func allocatePodAnnotation(
 			netInfo,
 			pod,
 			network,
+			claimsReconciler,
 			reallocateIP,
 			skipIPAM)
 		return pod, rollback, err
@@ -134,6 +145,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
 		allocator.netInfo,
 		pod,
 		network,
+		allocator.ipamClaimsReconciler,
 		reallocateIP,
 		skipIPAM,
 	)
@@ -147,6 +159,7 @@ func allocatePodAnnotationWithTunnelID(
 	netInfo util.NetInfo,
 	pod *v1.Pod,
 	network *nadapi.NetworkSelectionElement,
+	claimsReconciler persistentips.PersistentAllocations,
 	reallocateIP, skipIPAM bool) (
 	updatedPod *v1.Pod,
 	podAnnotation *util.PodAnnotation,
@@ -160,6 +173,7 @@ func allocatePodAnnotationWithTunnelID(
 			netInfo,
 			pod,
 			network,
+			claimsReconciler,
 			reallocateIP,
 			skipIPAM)
 		return pod, rollback, err
@@ -202,6 +216,7 @@ func allocatePodAnnotationWithRollback(
 	netInfo util.NetInfo,
 	pod *v1.Pod,
 	network *nadapi.NetworkSelectionElement,
+	claimsReconciler persistentips.PersistentAllocations,
 	reallocateIP, skipIPAM bool) (
 	updatedPod *v1.Pod,
 	podAnnotation *util.PodAnnotation,
@@ -231,7 +246,7 @@ func allocatePodAnnotationWithRollback(
 		}
 		err := ipAllocator.ReleaseIPs(releaseIPs)
 		if err != nil {
-			klog.Errorf("Error when releasing IPs %v: %w", util.StringSlice(releaseIPs), err)
+			klog.Errorf("Error when releasing IPs %v: %v", util.StringSlice(releaseIPs), err)
 			releaseIPs = nil
 			return
 		}
@@ -279,6 +294,26 @@ func allocatePodAnnotationWithRollback(
 	hasIPRequest := network != nil && len(network.IPRequest) > 0
 	hasStaticIPRequest := hasIPRequest && !reallocateIP
 
+	var ipamClaim *ipamclaimsapi.IPAMClaim
+	hasPersistentIPs := netInfo.AllowsPersistentIPs() && hasIPAM && claimsReconciler != nil
+	hasIPAMClaim := network != nil && network.IPAMClaimReference != ""
+	if hasIPAMClaim && !hasPersistentIPs {
+		klog.Errorf(
+			"Pod %s/%s referencing an IPAMClaim on network %q which does not honor it",
+			pod.GetNamespace(),
+			pod.GetName(),
+			netInfo.GetNetworkName(),
+		)
+		hasIPAMClaim = false
+	}
+	if hasIPAMClaim {
+		ipamClaim, err = claimsReconciler.FindIPAMClaim(network.IPAMClaimReference, network.Namespace)
+		if err != nil {
+			err = fmt.Errorf("error retrieving IPAMClaim for pod %s/%s: %w", pod.GetNamespace(), pod.GetName(), err)
+			return
+		}
+		hasIPAMClaim = ipamClaim != nil && len(ipamClaim.Status.IPs) > 0
+	}
 	if (hasIPAM && !skipIPAM) && hasStaticIPRequest {
 		// for now we can't tell apart already allocated IPs from IPs excluded
 		// from allocation so we can't really honor static IP requests when
@@ -299,6 +334,11 @@ func allocatePodAnnotationWithRollback(
 			if err != nil {
 				return
 			}
+		} else if hasIPAMClaim {
+			tentative.IPs, err = util.ParseIPNets(ipamClaim.Status.IPs)
+			if err != nil {
+				return
+			}
 		}
 	}
 
@@ -315,7 +355,7 @@ func allocatePodAnnotationWithRollback(
 				tentative.IPs = nil
 			}
 
-			if err == nil {
+			if err == nil && !hasIPAMClaim { // if we have persistentIPs, we should *not* release them on rollback
 				// copy the IPs that would need to be released
 				releaseIPs = util.CopyIPNets(tentative.IPs)
 			}
@@ -362,6 +402,12 @@ func allocatePodAnnotationWithRollback(
 		updatedPod = pod
 		updatedPod.Annotations, err = util.MarshalPodAnnotation(updatedPod.Annotations, tentative, nadName)
 		podAnnotation = tentative
+	}
+
+	if ipamClaim != nil && err == nil {
+		newIPAMClaim := ipamClaim.DeepCopy()
+		newIPAMClaim.Status.IPs = util.StringSlice(podAnnotation.IPs)
+		err = claimsReconciler.Reconcile(ipamClaim, newIPAMClaim, ipAllocator)
 	}
 
 	return

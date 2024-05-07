@@ -10,6 +10,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cryptorand"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 
+	ipamclaimslister "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/listers/ipamclaims/v1alpha1"
 	multinetworkpolicylister "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/listers/k8s.cni.cncf.io/v1beta2"
 	networkattachmentdefinitionlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	apbrlister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/listers/adminpbr/v1beta1"
@@ -85,9 +86,10 @@ type initialAddFn func(*Handler, []interface{})
 
 type queueMap struct {
 	sync.Mutex
-	entries map[ktypes.NamespacedName]*queueMapEntry
-	queues  []chan *event
-	wg      *sync.WaitGroup
+	entries  map[ktypes.NamespacedName]*queueMapEntry
+	queues   []chan *event
+	wg       *sync.WaitGroup
+	stopChan chan struct{}
 }
 
 type queueMapEntry struct {
@@ -113,8 +115,6 @@ type informer struct {
 
 	// queueMap handles distributing events across a queued handler's queues
 	queueMap *queueMap
-	// queued informer only stopChan; enqueue will be unblocked when stopChan is closed
-	stopChan chan struct{}
 }
 
 func (i *informer) forEachQueuedHandler(f func(h *Handler)) {
@@ -227,11 +227,12 @@ func (i *informer) removeHandler(handler *Handler) {
 	}()
 }
 
-func newQueueMap(numEventQueues, queueLen uint32, wg *sync.WaitGroup) *queueMap {
+func newQueueMap(numEventQueues, queueLen uint32, wg *sync.WaitGroup, stopChan chan struct{}) *queueMap {
 	qm := &queueMap{
-		entries: make(map[ktypes.NamespacedName]*queueMapEntry),
-		queues:  make([]chan *event, numEventQueues),
-		wg:      wg,
+		entries:  make(map[ktypes.NamespacedName]*queueMapEntry),
+		queues:   make([]chan *event, numEventQueues),
+		wg:       wg,
+		stopChan: stopChan,
 	}
 	for j := 0; j < int(numEventQueues); j++ {
 		qm.queues[j] = make(chan *event, queueLen)
@@ -239,7 +240,7 @@ func newQueueMap(numEventQueues, queueLen uint32, wg *sync.WaitGroup) *queueMap 
 	return qm
 }
 
-func (qm *queueMap) processEvents(queue chan *event, stopChan <-chan struct{}) {
+func (qm *queueMap) processEvents(queue chan *event) {
 	defer qm.wg.Done()
 	for {
 		select {
@@ -248,16 +249,16 @@ func (qm *queueMap) processEvents(queue chan *event, stopChan <-chan struct{}) {
 				return
 			}
 			e.process(e)
-		case <-stopChan:
+		case <-qm.stopChan:
 			return
 		}
 	}
 }
 
-func (qm *queueMap) start(stopChan chan struct{}) {
+func (qm *queueMap) start() {
 	qm.wg.Add(len(qm.queues))
 	for _, q := range qm.queues {
-		go qm.processEvents(q, stopChan)
+		go qm.processEvents(q)
 	}
 }
 
@@ -356,19 +357,20 @@ func (qm *queueMap) releaseQueueMapEntry(key ktypes.NamespacedName, entry *queue
 }
 
 // enqueueEvent adds an event to the appropriate queue for the object
-func (qm *queueMap) enqueueEvent(oldObj, obj interface{}, oType reflect.Type, isDel bool, stopChan chan struct{}, processFunc func(*event)) {
+func (qm *queueMap) enqueueEvent(oldObj, obj interface{}, oType reflect.Type, isDel bool, processFunc func(*event)) {
 	key, entry := qm.getQueueMapEntry(oType, obj)
-	select {
-	case qm.queues[entry.queue] <- &event{
+	event := &event{
 		obj:    obj,
 		oldObj: oldObj,
 		process: func(e *event) {
 			processFunc(e)
 			qm.releaseQueueMapEntry(key, entry, isDel)
 		},
-	}:
-		// event queued
-	case <-stopChan:
+	}
+	select {
+	case qm.queues[entry.queue] <- event:
+	case <-qm.stopChan:
+		return
 	}
 }
 
@@ -392,7 +394,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 	name := i.oType.Elem().Name()
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			i.queueMap.enqueueEvent(nil, obj, i.oType, false, i.stopChan, func(e *event) {
+			i.queueMap.enqueueEvent(nil, obj, i.oType, false, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "add").Inc()
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
@@ -402,7 +404,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 			})
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
-			i.queueMap.enqueueEvent(oldObj, newObj, i.oType, false, i.stopChan, func(e *event) {
+			i.queueMap.enqueueEvent(oldObj, newObj, i.oType, false, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "update").Inc()
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
@@ -426,7 +428,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 				klog.Errorf(err.Error())
 				return
 			}
-			i.queueMap.enqueueEvent(nil, realObj, i.oType, true, i.stopChan, func(e *event) {
+			i.queueMap.enqueueEvent(nil, realObj, i.oType, true, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "delete").Inc()
 				start := time.Now()
 				i.forEachQueuedHandlerReversed(func(h *Handler) {
@@ -539,6 +541,8 @@ func newInformerLister(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		return ipreservationlister.NewIPReservationLister(sharedInformer.GetIndexer()), nil
 	case PortMirrorType:
 		return portmirrorlister.NewPortMirrorLister(sharedInformer.GetIndexer()), nil
+	case IPAMClaimsType:
+		return ipamclaimslister.NewIPAMClaimLister(sharedInformer.GetIndexer()), nil
 	}
 
 	return nil, fmt.Errorf("cannot create lister from type %v", oType)
@@ -583,9 +587,8 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 	if err != nil {
 		return nil, err
 	}
-	i.stopChan = stopChan
-	i.queueMap = newQueueMap(numEventQueues, queueLen, &i.shutdownWg)
-	i.queueMap.start(stopChan)
+	i.queueMap = newQueueMap(numEventQueues, queueLen, &i.shutdownWg, stopChan)
+	i.queueMap.start()
 
 	i.initialAddFunc = func(h *Handler, items []interface{}) {
 		// Make a handler-specific channel array across which the
@@ -593,13 +596,13 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		// is added, only that handler should receive events for all
 		// existing objects.
 		addsWg := &sync.WaitGroup{}
-		addsMap := newQueueMap(numQeueusForInitialAdd, queueLenForIntitialAdd, addsWg)
-		addsMap.start(stopChan)
+		addsMap := newQueueMap(numQeueusForInitialAdd, queueLenForIntitialAdd, addsWg, stopChan)
+		addsMap.start()
 
 		// Distribute the existing items into the handler-specific
 		// channel array.
 		for _, obj := range items {
-			addsMap.enqueueEvent(nil, obj, i.oType, false, i.stopChan, func(e *event) {
+			addsMap.enqueueEvent(nil, obj, i.oType, false, func(e *event) {
 				h.OnAdd(e.obj, false)
 			})
 		}

@@ -9,6 +9,7 @@ import (
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
 
+	fakeipamclaimclient "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/clientset/versioned/fake"
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta2"
 	mnpfake "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/fake"
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -158,6 +159,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 		AdminPBRClient:           adminpbrfake.NewSimpleClientset(adminPBRObjects...),
 		MultiNetworkPolicyClient: mnpfake.NewSimpleClientset(multiNetworkPolicyObjects...),
 		EgressServiceClient:      egressservicefake.NewSimpleClientset(egressServiceObjects...),
+		IPAMClaimsClient:         fakeipamclaimclient.NewSimpleClientset(),
 		AdminPolicyRouteClient:   adminpolicybasedroutefake.NewSimpleClientset(apbExternalRouteObjects...),
 		VirtualIPClient:          virtualipfake.NewSimpleClientset(virtualIPObjects...),
 		PortMirrorClient:         portmirrorfake.NewSimpleClientset(portMirrorObjects...),
@@ -201,9 +203,9 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 		o.fakeRecorder, o.wg)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	o.controller.multicastSupport = config.EnableMulticast
-	o.controller.clusterLoadBalancerGroupUUID = types.ClusterLBGroupName + "-UUID"
-	o.controller.switchLoadBalancerGroupUUID = types.ClusterSwitchLBGroupName + "-UUID"
-	o.controller.routerLoadBalancerGroupUUID = types.ClusterRouterLBGroupName + "-UUID"
+
+	setupCOPP := false
+	setupClusterController(o.controller, setupCOPP)
 
 	err = o.watcher.Start()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -223,6 +225,31 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 				}
 			}
 		}
+	}
+}
+
+func setupClusterController(clusterController *DefaultNetworkController, setupCOPP bool) {
+	var err error
+	clusterController.SCTPSupport = true
+
+	clusterLBGroup := &nbdb.LoadBalancerGroup{Name: types.ClusterLBGroupName}
+	err = clusterController.nbClient.Get(context.Background(), clusterLBGroup)
+	gomega.Expect(err).To(gomega.SatisfyAny(gomega.BeNil(), gomega.MatchError(libovsdbclient.ErrNotFound)))
+	clusterController.clusterLoadBalancerGroupUUID = clusterLBGroup.UUID
+
+	clusterSwitchLBGroup := &nbdb.LoadBalancerGroup{Name: types.ClusterSwitchLBGroupName}
+	err = clusterController.nbClient.Get(context.Background(), clusterSwitchLBGroup)
+	gomega.Expect(err).To(gomega.SatisfyAny(gomega.BeNil(), gomega.MatchError(libovsdbclient.ErrNotFound)))
+	clusterController.switchLoadBalancerGroupUUID = clusterSwitchLBGroup.UUID
+
+	clusterRouterLBGroup := &nbdb.LoadBalancerGroup{Name: types.ClusterRouterLBGroupName}
+	err = clusterController.nbClient.Get(context.Background(), clusterRouterLBGroup)
+	gomega.Expect(err).To(gomega.SatisfyAny(gomega.BeNil(), gomega.MatchError(libovsdbclient.ErrNotFound)))
+	clusterController.routerLoadBalancerGroupUUID = clusterRouterLBGroup.UUID
+
+	if setupCOPP {
+		clusterController.defaultCOPPUUID, err = EnsureDefaultCOPP(clusterController.nbClient)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	}
 }
 
@@ -275,6 +302,7 @@ func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFacto
 			EgressServiceClient:  ovnClient.EgressServiceClient,
 			AdminPBRClient:       ovnClient.AdminPBRClient,
 			APBRouteClient:       ovnClient.AdminPolicyRouteClient,
+			EgressQoSClient:      ovnClient.EgressQoSClient,
 			PortMirrorClient:     ovnClient.PortMirrorClient,
 		},
 		wf,
@@ -415,7 +443,7 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 		if err != nil {
 			return err
 		}
-		asf := addressset.NewFakeAddressSetFactory(netName + "-network-controller")
+		asf := addressset.NewFakeAddressSetFactory(getNetworkControllerName(netName))
 
 		switch topoType {
 		case types.Layer3Topology:

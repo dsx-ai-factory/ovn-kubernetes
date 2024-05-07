@@ -563,7 +563,7 @@ func (bnnc *BaseNodeNetworkController) checkPodForDoS(uid types.UID, nadToDPUCDM
 		vfRepName := dpuCD.ConnPrivateInfo.ConnVFRepName
 		newDrop, err := util.GetSriovnetOps().GetRepresentorVFMissPktDrops(vfRepName)
 		if err != nil {
-			klog.Errorf("Failed to get drop Count for representor %s for dpuConnDetail %+v.", vfRepName, dpuCD, err)
+			klog.Errorf("Failed to get drop Count for representor %s for dpuConnDetail %+v: %v", vfRepName, dpuCD, err)
 			continue
 		}
 		prevDrop := dpuCD.ConnPrivateInfo.MissRateLimitDropInitial
@@ -588,7 +588,7 @@ func (bnnc *BaseNodeNetworkController) checkPodForDoS(uid types.UID, nadToDPUCDM
 			// be easier just to set it, regardless.
 			// set the VF rate limit configured for this network. This rate is for the allowed no. of new connections.
 			if err = util.GetSriovnetOps().SetRepresentorVFMissPktRate(vfRepName, ClampdownDoSRate, ClampdownDoSBurst); err != nil {
-				klog.Errorf("Failed to Clamp down rate for Representor %s for dpuConnDetail %+v.", vfRepName, dpuCD, err)
+				klog.Errorf("Failed to Clamp down rate for Representor %s for dpuConnDetail %+v: %v", vfRepName, dpuCD, err)
 				continue
 			}
 			dpuCD.ConnPrivateInfo.ConnClampedDown = true

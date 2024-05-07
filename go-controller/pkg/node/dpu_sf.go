@@ -366,7 +366,7 @@ func (bnnc *BaseNodeNetworkController) getSFInfo(sfUplinkPort string, sfUplinkPo
 		repName, errRet = getSFRepPort(sfUplinkPortNum, int32(mirrorSFNum))
 		if errRet != nil {
 			klog.Infof("Interation at %fs; failed to get SF representor name for SF with pfnumber %d and sfnumber %d: %v",
-				sfUplinkPortNum, mirrorSFNum, errRet)
+				time.Since(start).Seconds(), sfUplinkPortNum, mirrorSFNum, errRet)
 			return false, nil
 		}
 		return true, nil

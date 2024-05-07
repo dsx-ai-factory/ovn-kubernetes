@@ -38,6 +38,7 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
+	ipamclaimssclientset "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/clientset/versioned"
 	multinetworkpolicyclientset "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned"
 	networkattchmentdefclientset "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
 	ocpcloudnetworkclientset "github.com/openshift/client-go/cloudnetwork/clientset/versioned"
@@ -67,6 +68,7 @@ type OVNClientset struct {
 	MultiNetworkPolicyClient multinetworkpolicyclientset.Interface
 	EgressServiceClient      egressserviceclientset.Interface
 	AdminPolicyRouteClient   adminpolicybasedrouteclientset.Interface
+	IPAMClaimsClient         ipamclaimssclientset.Interface
 	AdminPBRClient           adminpbrclientset.Interface
 	VirtualIPClient          virtualipclientset.Interface
 	IPReservationClient      ipresvclientset.Interface
@@ -84,6 +86,7 @@ type OVNMasterClientset struct {
 	MultiNetworkPolicyClient multinetworkpolicyclientset.Interface
 	EgressServiceClient      egressserviceclientset.Interface
 	AdminPolicyRouteClient   adminpolicybasedrouteclientset.Interface
+	IPAMClaimsClient         ipamclaimssclientset.Interface
 	AdminPBRClient           adminpbrclientset.Interface
 	VirtualIPClient          virtualipclientset.Interface
 	IPReservationClient      ipresvclientset.Interface
@@ -100,6 +103,7 @@ type OVNKubeControllerClientset struct {
 	MultiNetworkPolicyClient multinetworkpolicyclientset.Interface
 	EgressServiceClient      egressserviceclientset.Interface
 	AdminPolicyRouteClient   adminpolicybasedrouteclientset.Interface
+	IPAMClaimsClient         ipamclaimssclientset.Interface
 	AdminPBRClient           adminpbrclientset.Interface
 	VirtualIPClient          virtualipclientset.Interface
 	IPReservationClient      ipresvclientset.Interface
@@ -116,12 +120,15 @@ type OVNNodeClientset struct {
 
 type OVNClusterManagerClientset struct {
 	KubeClient             kubernetes.Interface
+	ANPClient              anpclientset.Interface
 	EgressIPClient         egressipclientset.Interface
 	CloudNetworkClient     ocpcloudnetworkclientset.Interface
 	NetworkAttchDefClient  networkattchmentdefclientset.Interface
 	EgressServiceClient    egressserviceclientset.Interface
 	AdminPolicyRouteClient adminpolicybasedrouteclientset.Interface
 	EgressFirewallClient   egressfirewallclientset.Interface
+	EgressQoSClient        egressqosclientset.Interface
+	IPAMClaimsClient       ipamclaimssclientset.Interface
 }
 
 const (
@@ -145,6 +152,7 @@ func (cs *OVNClientset) GetMasterClientset() *OVNMasterClientset {
 		MultiNetworkPolicyClient: cs.MultiNetworkPolicyClient,
 		EgressServiceClient:      cs.EgressServiceClient,
 		AdminPolicyRouteClient:   cs.AdminPolicyRouteClient,
+		IPAMClaimsClient:         cs.IPAMClaimsClient,
 		AdminPBRClient:           cs.AdminPBRClient,
 		VirtualIPClient:          cs.VirtualIPClient,
 		IPReservationClient:      cs.IPReservationClient,
@@ -162,6 +170,7 @@ func (cs *OVNMasterClientset) GetOVNKubeControllerClientset() *OVNKubeController
 		MultiNetworkPolicyClient: cs.MultiNetworkPolicyClient,
 		EgressServiceClient:      cs.EgressServiceClient,
 		AdminPolicyRouteClient:   cs.AdminPolicyRouteClient,
+		IPAMClaimsClient:         cs.IPAMClaimsClient,
 		AdminPBRClient:           cs.AdminPBRClient,
 		VirtualIPClient:          cs.VirtualIPClient,
 		IPReservationClient:      cs.IPReservationClient,
@@ -179,6 +188,7 @@ func (cs *OVNClientset) GetOVNKubeControllerClientset() *OVNKubeControllerClient
 		MultiNetworkPolicyClient: cs.MultiNetworkPolicyClient,
 		EgressServiceClient:      cs.EgressServiceClient,
 		AdminPolicyRouteClient:   cs.AdminPolicyRouteClient,
+		IPAMClaimsClient:         cs.IPAMClaimsClient,
 		AdminPBRClient:           cs.AdminPBRClient,
 		VirtualIPClient:          cs.VirtualIPClient,
 		IPReservationClient:      cs.IPReservationClient,
@@ -189,12 +199,15 @@ func (cs *OVNClientset) GetOVNKubeControllerClientset() *OVNKubeControllerClient
 func (cs *OVNClientset) GetClusterManagerClientset() *OVNClusterManagerClientset {
 	return &OVNClusterManagerClientset{
 		KubeClient:             cs.KubeClient,
+		ANPClient:              cs.ANPClient,
 		EgressIPClient:         cs.EgressIPClient,
 		CloudNetworkClient:     cs.CloudNetworkClient,
 		NetworkAttchDefClient:  cs.NetworkAttchDefClient,
 		EgressServiceClient:    cs.EgressServiceClient,
 		AdminPolicyRouteClient: cs.AdminPolicyRouteClient,
 		EgressFirewallClient:   cs.EgressFirewallClient,
+		EgressQoSClient:        cs.EgressQoSClient,
+		IPAMClaimsClient:       cs.IPAMClaimsClient,
 	}
 }
 
@@ -242,7 +255,7 @@ func newKubernetesRestConfig(conf *config.KubernetesConfig) (*rest.Config, error
 		// uses the current context in kubeconfig
 		kconfig, err = clientcmd.BuildConfigFromFlags("", conf.Kubeconfig)
 	} else if strings.HasPrefix(conf.APIServer, "https") {
-		if (conf.Token == "" && conf.CertDir == "") || len(conf.CAData) == 0 {
+		if (conf.Token == "" && conf.TokenFile == "" && conf.CertDir == "") || len(conf.CAData) == 0 {
 			return nil, fmt.Errorf("TLS-secured apiservers require token/cert and CA certificate")
 		}
 		if _, err := cert.NewPoolFromBytes(conf.CAData); err != nil {
@@ -318,11 +331,27 @@ func StartNodeCertificateManager(ctx context.Context, wg *sync.WaitGroup, nodeNa
 	if err != nil {
 		return fmt.Errorf("failed to initialize the certificate store: %v", err)
 	}
+
+	// The CSR approver only accepts CSRs created by system:ovn-node:nodeName and system:node:nodeName.
+	// If the node name in the existing ovn-node certificate is different from the current node name,
+	// remove the certificate so the CSR will be created using the bootstrap kubeconfig using system:node:nodeName user.
+	certCommonName := fmt.Sprintf("%s:%s", certCommonNamePrefix, nodeName)
+	currentCertFromFile, err := certificateStore.Current()
+	if err == nil && currentCertFromFile.Leaf != nil {
+		if currentCertFromFile.Leaf.Subject.CommonName != certCommonName {
+			klog.Errorf("Unexpected common name found in the certificate, expected: %q, got: %q, removing %s",
+				certCommonName, currentCertFromFile.Leaf.Subject.CommonName, certificateStore.CurrentPath())
+			if err := os.Remove(certificateStore.CurrentPath()); err != nil {
+				return fmt.Errorf("failed to remove the current certificate file: %w", err)
+			}
+		}
+	}
+
 	certManager, err := certificate.NewManager(&certificate.Config{
 		ClientsetFn: newClientsetFn,
 		Template: &x509.CertificateRequest{
 			Subject: pkix.Name{
-				CommonName:   fmt.Sprintf("%s:%s", certCommonNamePrefix, nodeName),
+				CommonName:   certCommonName,
 				Organization: []string{certOrganization},
 			},
 		},
@@ -349,16 +378,28 @@ func StartNodeCertificateManager(ctx context.Context, wg *sync.WaitGroup, nodeNa
 	}()
 
 	klog.Infof("Waiting for certificate")
-	var storeErr error
 	err = wait.PollUntilContextTimeout(context.TODO(), time.Second, 2*time.Minute, true, func(_ context.Context) (bool, error) {
-		var currentCert *tls.Certificate
-		currentCert, storeErr = certificateStore.Current()
-		return currentCert != nil && storeErr == nil, nil
+		return certManager.Current() != nil, nil
 	})
 	if err != nil {
-		return fmt.Errorf("certificate was not signed, last cert store err: %v err: %v", storeErr, err)
+		return fmt.Errorf("certificate was not signed: %v", err)
 	}
 	klog.Infof("Certificate found")
+
+	// certManager is responsible for rotating the certificates; it determines when to rotate and sets up a timer.
+	// With this approach, a certificate may become invalid if the system time changes unexpectedly
+	// and the process is not restarted (which is common in suspended clusters).
+	// After retrieving the initial certificate, run a periodic check to ensure it is valid.
+	const retryInterval = time.Second * 10
+	go wait.Until(func() {
+		// certManager.Current() returns nil when the current cert has expired.
+		currentCert := certManager.Current()
+		if currentCert == nil || (currentCert.Leaf != nil && time.Now().Before(currentCert.Leaf.NotBefore)) {
+			klog.Errorf("The current certificate is invalid, exiting.")
+			os.Exit(1)
+		}
+
+	}, retryInterval, ctx.Done())
 	return nil
 }
 
@@ -425,6 +466,10 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 	if err != nil {
 		return nil, err
 	}
+	ipamClaimsClientset, err := ipamclaimssclientset.NewForConfig(kconfig)
+	if err != nil {
+		return nil, err
+	}
 	adminPBRClientset, err := adminpbrclientset.NewForConfig(kconfig)
 	if err != nil {
 		return nil, err
@@ -441,6 +486,7 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return &OVNClientset{
 		KubeClient:               kclientset,
 		ANPClient:                anpClientset,
@@ -452,6 +498,7 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		MultiNetworkPolicyClient: multiNetworkPolicyClientset,
 		EgressServiceClient:      egressserviceClientset,
 		AdminPolicyRouteClient:   adminPolicyBasedRouteClientset,
+		IPAMClaimsClient:         ipamClaimsClientset,
 		AdminPBRClient:           adminPBRClientset,
 		VirtualIPClient:          virtualIPClientset,
 		IPReservationClient:      ipReservationClientset,
@@ -642,86 +689,6 @@ func UseEndpointSlices(kubeClient kubernetes.Interface) bool {
 	return false
 }
 
-type LbEndpoints struct {
-	V4IPs []string
-	V6IPs []string
-	Port  int32
-}
-
-// GetLbEndpoints returns the IPv4 and IPv6 addresses of eligible endpoints from a
-// provided list of endpoint slices, for a given service and service port.
-func GetLbEndpoints(slices []*discovery.EndpointSlice, svcPort kapi.ServicePort, service *v1.Service) LbEndpoints {
-	var validSlices []*discovery.EndpointSlice
-	v4IPs := sets.NewString()
-	v6IPs := sets.NewString()
-	out := LbEndpoints{}
-
-	// return an empty object so the caller doesn't have to check for nil and can use it as an iterator
-	if len(slices) == 0 {
-		return out
-	}
-
-	for _, slice := range slices {
-		klog.V(5).Infof("Getting endpoints for slice %s/%s", slice.Namespace, slice.Name)
-
-		for _, slicePort := range slice.Ports {
-			// If Service port name is set, it must match the name field in the endpoint
-			// If Service port name is not set, we just use the endpoint port
-			if svcPort.Name != "" && svcPort.Name != *slicePort.Name {
-				klog.V(5).Infof("Slice %s with different Port name, requested: %s received: %s",
-					slice.Name, svcPort.Name, *slicePort.Name)
-				continue
-			}
-
-			// Skip ports that don't match the protocol
-			if *slicePort.Protocol != svcPort.Protocol {
-				klog.V(5).Infof("Slice %s with different Port protocol, requested: %s received: %s",
-					slice.Name, svcPort.Protocol, *slicePort.Protocol)
-				continue
-			}
-
-			out.Port = *slicePort.Port
-
-			if slice.AddressType == discovery.AddressTypeFQDN {
-				klog.V(5).Infof("Skipping FQDN slice %s/%s", slice.Namespace, slice.Name)
-			} else { // endpoints are here either IPv4 or IPv6
-				validSlices = append(validSlices, slice)
-			}
-		}
-	}
-
-	serviceStr := ""
-	if service != nil {
-		serviceStr = fmt.Sprintf(" for service %s/%s", service.Namespace, service.Name)
-	}
-	// separate IPv4 from IPv6 addresses for eligible endpoints
-	for _, endpoint := range getEligibleEndpoints(validSlices, service) {
-		for _, ip := range endpoint.Addresses {
-			if utilnet.IsIPv4String(ip) {
-				klog.V(5).Infof("Adding endpoint IPv4 address %s port %d%s",
-					ip, out.Port, serviceStr)
-				v4IPs.Insert(utilnet.ParseIPSloppy(ip).String())
-
-			} else if utilnet.IsIPv6String(ip) {
-				klog.V(5).Infof("Adding endpoint IPv6 address %s port %d%s",
-					ip, out.Port, serviceStr)
-				v6IPs.Insert(utilnet.ParseIPSloppy(ip).String())
-
-			} else {
-				klog.V(5).Infof("Skipping unrecognized address %s port %d%s",
-					ip, out.Port, serviceStr)
-			}
-		}
-	}
-
-	out.V4IPs = v4IPs.List()
-	out.V6IPs = v6IPs.List()
-	klog.V(5).Infof("LB Endpoints for %s/%s are: %v / %v on port: %d",
-		slices[0].Namespace, slices[0].Labels[discovery.LabelServiceName],
-		out.V4IPs, out.V6IPs, out.Port)
-	return out
-}
-
 type K8sObject interface {
 	metav1.Object
 	k8sruntime.Object
@@ -737,7 +704,7 @@ func ExternalIDsForObject(obj K8sObject) map[string]string {
 	if gk.String() == "" {
 		kinds, _, err := scheme.Scheme.ObjectKinds(obj)
 		if err != nil || len(kinds) == 0 || len(kinds) > 1 {
-			klog.Warningf("BUG: object has no / ambiguous GVK: %#v, err", obj, err)
+			klog.Warningf("Object %v either has no GroupVersionKind or has an ambiguous GroupVersionKind: %#v, err", obj, err)
 		}
 		gk = kinds[0].GroupKind()
 	}
@@ -795,64 +762,54 @@ func NoHostSubnet(node *v1.Node) bool {
 // are always published.
 // Note that condFn, when specified, is used by utility functions to filter out non-local endpoints.
 // It's important to run it /before/ the eligible endpoint selection, since the order impacts the output.
-func getSelectedEligibleEndpoints(endpointSlices []*discovery.EndpointSlice, service *kapi.Service, condFn func(ep discovery.Endpoint) bool) []discovery.Endpoint {
+func getSelectedEligibleEndpoints(endpoints []discovery.Endpoint, service *kapi.Service, condFn func(ep discovery.Endpoint) bool) []discovery.Endpoint {
 	var readySelectedEndpoints []discovery.Endpoint
 	var servingTerminatingSelectedEndpoints []discovery.Endpoint
 	var eligibleEndpoints []discovery.Endpoint
 
 	includeAllEndpoints := service != nil && service.Spec.PublishNotReadyAddresses
 
-	for _, slice := range endpointSlices {
-		for _, endpoint := range slice.Endpoints {
-			// Apply precondition on endpoints, if provided
-			if condFn == nil || condFn(endpoint) {
-				// Assign to the ready or the serving&terminating slice for a later decision
-				if includeAllEndpoints || IsEndpointReady(endpoint) {
-					readySelectedEndpoints = append(readySelectedEndpoints, endpoint)
-				} else if IsEndpointServing(endpoint) && IsEndpointTerminating(endpoint) {
-					servingTerminatingSelectedEndpoints = append(servingTerminatingSelectedEndpoints, endpoint)
-				}
+	for _, endpoint := range endpoints {
+		// Apply precondition on endpoints, if provided
+		if condFn == nil || condFn(endpoint) {
+			// Assign to the ready or the serving&terminating slice for a later decision
+			if includeAllEndpoints || IsEndpointReady(endpoint) {
+				readySelectedEndpoints = append(readySelectedEndpoints, endpoint)
+			} else if IsEndpointServing(endpoint) && IsEndpointTerminating(endpoint) {
+				servingTerminatingSelectedEndpoints = append(servingTerminatingSelectedEndpoints, endpoint)
 			}
 		}
 	}
-	serviceStr := ""
-	if service != nil {
-		serviceStr = fmt.Sprintf(" (service %s/%s)", service.Namespace, service.Name)
-	}
-	klog.V(5).Infof("Endpoint selection%s: found %d ready endpoints", serviceStr, len(readySelectedEndpoints))
-
 	// Select eligible endpoints based on readiness
 	eligibleEndpoints = readySelectedEndpoints
 	// Fallback to serving terminating endpoints (ready=false, serving=true, terminating=true) only if none are ready
 	if len(readySelectedEndpoints) == 0 {
 		eligibleEndpoints = servingTerminatingSelectedEndpoints
-		klog.V(5).Infof("Endpoint selection%s: fallback to %d serving & terminating endpoints",
-			serviceStr, len(servingTerminatingSelectedEndpoints))
 	}
 
 	return eligibleEndpoints
 }
 
-func getLocalEligibleEndpoints(endpointSlices []*discovery.EndpointSlice, service *kapi.Service, nodeName string) []discovery.Endpoint {
-	return getSelectedEligibleEndpoints(endpointSlices, service, func(endpoint discovery.Endpoint) bool {
+func getLocalEligibleEndpoints(endpoints []discovery.Endpoint, service *kapi.Service, nodeName string) []discovery.Endpoint {
+	return getSelectedEligibleEndpoints(endpoints, service, func(endpoint discovery.Endpoint) bool {
 		return endpoint.NodeName != nil && *endpoint.NodeName == nodeName
 	})
 }
 
-func getEligibleEndpoints(endpointSlices []*discovery.EndpointSlice, service *kapi.Service) []discovery.Endpoint {
-	return getSelectedEligibleEndpoints(endpointSlices, service, nil)
+func getEligibleEndpoints(endpoints []discovery.Endpoint, service *kapi.Service) []discovery.Endpoint {
+	return getSelectedEligibleEndpoints(endpoints, service, nil)
 }
 
-// getEligibleEndpointAddresses takes a list of endpointSlices, a service and, optionally, a nodeName
+// getEligibleEndpointAddresses takes a list of endpoints, a service and, optionally, a nodeName
 // and applies the endpoint selection logic. It returns the IP addresses of eligible endpoints.
-func getEligibleEndpointAddresses(endpointSlices []*discovery.EndpointSlice, service *kapi.Service, nodeName string) sets.Set[string] {
+func getEligibleEndpointAddresses(endpoints []discovery.Endpoint, service *kapi.Service, nodeName string) []string {
 	endpointsAddresses := sets.New[string]()
 	var eligibleEndpoints []discovery.Endpoint
 
 	if nodeName != "" {
-		eligibleEndpoints = getLocalEligibleEndpoints(endpointSlices, service, nodeName)
+		eligibleEndpoints = getLocalEligibleEndpoints(endpoints, service, nodeName)
 	} else {
-		eligibleEndpoints = getEligibleEndpoints(endpointSlices, service)
+		eligibleEndpoints = getEligibleEndpoints(endpoints, service)
 	}
 	for _, endpoint := range eligibleEndpoints {
 		for _, ip := range endpoint.Addresses {
@@ -860,25 +817,31 @@ func getEligibleEndpointAddresses(endpointSlices []*discovery.EndpointSlice, ser
 		}
 	}
 
-	return endpointsAddresses
+	return sets.List(endpointsAddresses)
 }
 
-// GetEligibleEndpointAddresses returns a list of IP addresses of all eligible endpoints from the given endpoint slices.
-func GetEligibleEndpointAddresses(endpointSlices []*discovery.EndpointSlice, service *kapi.Service) sets.Set[string] {
-	return getEligibleEndpointAddresses(endpointSlices, service, "")
+func GetEligibleEndpointAddresses(endpoints []discovery.Endpoint, service *kapi.Service) []string {
+	return getEligibleEndpointAddresses(endpoints, service, "")
 }
 
-// GetLocalEligibleEndpointAddresses returns a list of IP address of endpoints that are local to the specified node
+// GetEligibleEndpointAddressesFromSlices returns a list of IP addresses of all eligible endpoints from the given endpoint slices.
+func GetEligibleEndpointAddressesFromSlices(endpointSlices []*discovery.EndpointSlice, service *kapi.Service) []string {
+	return getEligibleEndpointAddresses(getEndpointsFromEndpointSlices(endpointSlices), service, "")
+}
+
+// GetLocalEligibleEndpointAddressesFromSlices returns a set of IP addresses of endpoints that are local to the specified node
 // and are eligible.
-func GetLocalEligibleEndpointAddresses(endpointSlices []*discovery.EndpointSlice, service *kapi.Service, nodeName string) sets.Set[string] {
-	return getEligibleEndpointAddresses(endpointSlices, service, nodeName)
+func GetLocalEligibleEndpointAddressesFromSlices(endpointSlices []*discovery.EndpointSlice, service *kapi.Service, nodeName string) sets.Set[string] {
+	endpoints := getEligibleEndpointAddresses(getEndpointsFromEndpointSlices(endpointSlices), service, nodeName)
+	return sets.New(endpoints...)
 }
 
 // DoesEndpointSliceContainEndpoint returns true if the endpointslice
 // contains an endpoint with the given IP, port and Protocol and if this endpoint is considered eligible.
 func DoesEndpointSliceContainEligibleEndpoint(endpointSlice *discovery.EndpointSlice,
 	epIP string, epPort int32, protocol kapi.Protocol, service *kapi.Service) bool {
-	for _, ep := range getEligibleEndpoints([]*discovery.EndpointSlice{endpointSlice}, service) {
+	endpoints := getEndpointsFromEndpointSlices([]*discovery.EndpointSlice{endpointSlice})
+	for _, ep := range getEligibleEndpoints(endpoints, service) {
 		for _, ip := range ep.Addresses {
 			for _, port := range endpointSlice.Ports {
 				if utilnet.ParseIPSloppy(ip).String() == epIP && *port.Port == epPort && *port.Protocol == protocol {
@@ -926,6 +889,14 @@ func IsHostEndpoint(endpointIPstr string) bool {
 		}
 	}
 	return true
+}
+
+func getEndpointsFromEndpointSlices(endpointSlices []*discovery.EndpointSlice) []discovery.Endpoint {
+	endpoints := []discovery.Endpoint{}
+	for _, slice := range endpointSlices {
+		endpoints = append(endpoints, slice.Endpoints...)
+	}
+	return endpoints
 }
 
 func GroupKindOf(obj k8sruntime.Object) string {

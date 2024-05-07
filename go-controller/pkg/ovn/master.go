@@ -35,38 +35,6 @@ const (
 	OvnNodeAnnotationRetryTimeout  = 1 * time.Second
 )
 
-// cleanup obsolete *gressDefaultDeny port groups
-func (oc *DefaultNetworkController) upgradeToNamespacedDenyPGOVNTopology(existingNodes []*kapi.Node) error {
-	err := libovsdbops.DeletePortGroups(oc.nbClient, "ingressDefaultDeny", "egressDefaultDeny")
-	if err != nil {
-		klog.Errorf("%v", err)
-	}
-	return nil
-}
-
-func (oc *DefaultNetworkController) upgradeOVNTopology(existingNodes []*kapi.Node) error {
-	err := oc.determineOVNTopoVersionFromOVN()
-	if err != nil {
-		return err
-	}
-
-	ver := oc.topologyVersion
-	// If current DB version is greater than OvnSingleJoinSwitchTopoVersion, no need to upgrade to single switch topology
-	if ver < types.OvnSingleJoinSwitchTopoVersion {
-		return fmt.Errorf("need to upgrading to Single Switch OVN Topology")
-	}
-	if err == nil && ver < types.OvnNamespacedDenyPGTopoVersion {
-		klog.Infof("Upgrading to Namespace Deny PortGroup OVN Topology")
-		err = oc.upgradeToNamespacedDenyPGOVNTopology(existingNodes)
-	}
-	// If version is less than Host -> Service with OpenFlow, we need to remove and cleanup DGP
-	if err == nil && ((ver < types.OvnHostToSvcOFTopoVersion && config.Gateway.Mode == config.GatewayModeShared) ||
-		(ver < types.OvnRoutingViaHostTopoVersion)) {
-		err = oc.cleanupDGP(existingNodes)
-	}
-	return err
-}
-
 // SetupMaster creates the central router and load-balancers for the network
 func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) error {
 	// Create default Control Plane Protection (COPP) entry for routers
@@ -76,8 +44,9 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 	}
 	oc.defaultCOPPUUID = *(logicalRouter.Copp)
 
+	pgIDs := oc.getClusterPortGroupDbIDs(types.ClusterPortGroupNameBase)
 	pg := &nbdb.PortGroup{
-		Name: types.ClusterPortGroupNameBase,
+		Name: libovsdbutil.GetPortGroupName(pgIDs),
 	}
 	pg, err = libovsdbops.GetPortGroup(oc.nbClient, pg)
 	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
@@ -86,7 +55,7 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 	if pg == nil {
 		// we didn't find an existing clusterPG, let's create a new empty PG (fresh cluster install)
 		// Create a cluster-wide port group that all logical switch ports are part of
-		pg := oc.buildPortGroup(types.ClusterPortGroupNameBase, types.ClusterPortGroupNameBase, nil, nil)
+		pg := libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
 		err = libovsdbops.CreateOrUpdatePortGroups(oc.nbClient, pg)
 		if err != nil {
 			klog.Errorf("Failed to create cluster port group: %v", err)
@@ -94,8 +63,9 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 		}
 	}
 
+	pgIDs = oc.getClusterPortGroupDbIDs(types.ClusterRtrPortGroupNameBase)
 	pg = &nbdb.PortGroup{
-		Name: types.ClusterRtrPortGroupNameBase,
+		Name: libovsdbutil.GetPortGroupName(pgIDs),
 	}
 	pg, err = libovsdbops.GetPortGroup(oc.nbClient, pg)
 	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
@@ -106,7 +76,7 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 		// Create a cluster-wide port group with all node-to-cluster router
 		// logical switch ports. Currently the only user is multicast but it might
 		// be used for other features in the future.
-		pg = oc.buildPortGroup(types.ClusterRtrPortGroupNameBase, types.ClusterRtrPortGroupNameBase, nil, nil)
+		pg = libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
 		err = libovsdbops.CreateOrUpdatePortGroups(oc.nbClient, pg)
 		if err != nil {
 			klog.Errorf("Failed to create cluster port group: %v", err)
@@ -240,7 +210,7 @@ func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, host
 		return err
 	}
 
-	err = libovsdbops.AddPortsToPortGroup(oc.nbClient, types.ClusterPortGroupNameBase, logicalSwitchPort.UUID)
+	err = libovsdbops.AddPortsToPortGroup(oc.nbClient, oc.getClusterPortGroupName(types.ClusterPortGroupNameBase), logicalSwitchPort.UUID)
 	if err != nil {
 		klog.Errorf(err.Error())
 		return err
@@ -256,7 +226,7 @@ func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, host
 }
 
 func (oc *DefaultNetworkController) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig *util.L3GatewayConfig,
-	hostSubnets []*net.IPNet, hostAddrs sets.Set[string]) error {
+	hostSubnets []*net.IPNet, hostAddrs []string) error {
 	var err error
 	var gwLRPIPs, clusterSubnets []*net.IPNet
 	for _, clusterSubnet := range config.Default.ClusterSubnets {
@@ -282,7 +252,7 @@ func (oc *DefaultNetworkController) syncGatewayLogicalNetwork(node *kapi.Node, l
 		if err != nil {
 			return err
 		}
-		relevantHostIPs, err := util.MatchAllIPStringFamily(utilnet.IsIPv6(hostIfAddr.IP), sets.List(hostAddrs))
+		relevantHostIPs, err := util.MatchAllIPStringFamily(utilnet.IsIPv6(hostIfAddr.IP), hostAddrs)
 		if err != nil && err != util.ErrorNoIP {
 			return err
 		}
@@ -292,47 +262,6 @@ func (oc *DefaultNetworkController) syncGatewayLogicalNetwork(node *kapi.Node, l
 	}
 
 	return err
-}
-
-func (oc *DefaultNetworkController) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*net.IPNet) error {
-	var hostNetworkPolicyIPs []net.IP
-
-	for _, hostSubnet := range hostSubnets {
-		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
-		hostNetworkPolicyIPs = append(hostNetworkPolicyIPs, mgmtIfAddr.IP)
-	}
-
-	// also add the join switch IPs for this node - needed in shared gateway mode
-	// Note: join switch IPs for each node are generated by cluster manager and
-	// stored in the node annotation
-	lrpIPs, err := util.ParseNodeGatewayRouterLRPAddrs(node)
-	if err != nil {
-		return fmt.Errorf("failed to get join switch port IP address for node %s: %v", node.Name, err)
-	}
-
-	for _, lrpIP := range lrpIPs {
-		hostNetworkPolicyIPs = append(hostNetworkPolicyIPs, lrpIP.IP)
-	}
-
-	// add the host network IPs for this node to host network namespace's address set
-	if err = func() error {
-		hostNetworkNamespace := config.Kubernetes.HostNetworkNamespace
-		if hostNetworkNamespace != "" {
-			nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(hostNetworkNamespace, true, nil)
-			if err != nil {
-				return fmt.Errorf("failed to ensure namespace locked: %v", err)
-			}
-			defer nsUnlock()
-			if err = nsInfo.addressSet.AddIPs(hostNetworkPolicyIPs); err != nil {
-				return err
-			}
-		}
-		return nil
-	}(); err != nil {
-		return err
-	}
-
-	return oc.createNodeLogicalSwitch(node.Name, hostSubnets, oc.clusterLoadBalancerGroupUUID, oc.switchLoadBalancerGroupUUID)
 }
 
 func (oc *DefaultNetworkController) addNode(node *kapi.Node) ([]*net.IPNet, error) {
@@ -363,7 +292,7 @@ func (oc *DefaultNetworkController) addNode(node *kapi.Node) ([]*net.IPNet, erro
 	// subsequent operation in addNode() fails, oc.lsManager.DeleteNode(node.Name)
 	// needs to be done, otherwise, this node's IPAM will be overwritten and the
 	// same IP could be allocated to multiple Pods scheduled on this node.
-	err = oc.ensureNodeLogicalNetwork(node, hostSubnets)
+	err = oc.createNodeLogicalSwitch(node.Name, hostSubnets, oc.clusterLoadBalancerGroupUUID, oc.switchLoadBalancerGroupUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -921,12 +850,20 @@ func (oc *DefaultNetworkController) deleteOVNNodeEvent(node *kapi.Node) error {
 		oc.syncZoneICFailed.Delete(node.Name)
 	}
 
+	// Remove management port IP and node's gateway-router-lrp-ifaddr
+	// from address_set specific to HostNetworkNamespace
+	if err := oc.delIPFromHostNetworkNamespaceAddrSet(node); err != nil {
+		return fmt.Errorf("failed to delete IPs from %s address_set: %v",
+			config.Kubernetes.HostNetworkNamespace, err)
+	}
+
 	oc.lsManager.DeleteSwitch(node.Name)
 	oc.addNodeFailed.Delete(node.Name)
 	oc.mgmtPortFailed.Delete(node.Name)
 	oc.gatewaysFailed.Delete(node.Name)
 	oc.nodeClusterRouterPortFailed.Delete(node.Name)
 	oc.localZoneNodes.Delete(node.Name)
+	oc.syncHostNetAddrSetFailed.Delete(node.Name)
 
 	return nil
 }
@@ -1011,6 +948,70 @@ func (oc *DefaultNetworkController) deleteHoNodeEvent(node *kapi.Node) error {
 		if err != nil {
 			return fmt.Errorf("failed to remove hybrid overlay static routes and route policy: %w", err)
 		}
+	}
+	return nil
+}
+
+// addIPToHostNetworkNamespaceAddrSet adds management port IP and node's
+// gateway-router-lrp-ifaddr to address_set created for HostNetworkNamespace.
+// This function gets called from both AddResource & UpdateResource to add IPs
+// to address_set for both local and remote zone nodes.
+func (oc *DefaultNetworkController) addIPToHostNetworkNamespaceAddrSet(node *kapi.Node) error {
+	var hostNetworkPolicyIPs []net.IP
+
+	hostNetworkPolicyIPs, err := oc.getHostNamespaceAddressesForNode(node)
+	if err != nil {
+		return fmt.Errorf("error parsing annotation for node %s: %v", node.Name, err)
+	}
+
+	// add the host network IPs for this node to host network namespace's address set
+	if err = func() error {
+		hostNetworkNamespace := config.Kubernetes.HostNetworkNamespace
+		if hostNetworkNamespace != "" {
+			nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(hostNetworkNamespace, true, nil)
+			if err != nil {
+				return fmt.Errorf("failed to ensure namespace locked: %v", err)
+			}
+			defer nsUnlock()
+			if err = nsInfo.addressSet.AddAddresses(util.StringSlice(hostNetworkPolicyIPs)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// delIPFromHostNetworkNamespaceAddrSet removes management port IP and node's
+// gateway-router-lrp-ifaddr from address_set created for HostNetworkNamespace.
+// This function gets called from deleteOVNNodeEvent to remove IPs from address_set
+// for both local and remote zone nodes
+func (oc *DefaultNetworkController) delIPFromHostNetworkNamespaceAddrSet(node *kapi.Node) error {
+	var hostNetworkPolicyIPs []net.IP
+
+	hostNetworkPolicyIPs, err := oc.getHostNamespaceAddressesForNode(node)
+	if err != nil {
+		return fmt.Errorf("error parsing annotation for node %s: %v", node.Name, err)
+	}
+
+	// delete host network IPs for this node from host network namespace's address set
+	if err = func() error {
+		hostNetworkNamespace := config.Kubernetes.HostNetworkNamespace
+		if hostNetworkNamespace != "" {
+			nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(hostNetworkNamespace, true, nil)
+			if err != nil {
+				return fmt.Errorf("failed to ensure namespace locked: %v", err)
+			}
+			defer nsUnlock()
+			if err = nsInfo.addressSet.DeleteAddresses(util.StringSlice(hostNetworkPolicyIPs)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return err
 	}
 	return nil
 }

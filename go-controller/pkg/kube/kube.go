@@ -3,7 +3,8 @@ package kube
 import (
 	"context"
 	"encoding/json"
-
+	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
+	ipamclaimssclientset "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/clientset/versioned"
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 	ocpcloudnetworkclientset "github.com/openshift/client-go/cloudnetwork/clientset/versioned"
 
@@ -14,6 +15,7 @@ import (
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
+	egressqosclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned"
 	egressserviceclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned"
 	ipreservationv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
 	ipreservationclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/clientset/versioned"
@@ -49,6 +51,7 @@ type InterfaceOVN interface {
 	UpdateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
 	DeleteCloudPrivateIPConfig(name string) error
 	UpdateEgressServiceStatus(namespace, name, host string) error
+	UpdateIPAMClaimIPs(updatedIPAMClaim *ipamclaimsapi.IPAMClaim) error
 	UpdateVirtualIPStatus(vip *virtualipv1beta1.VirtualIP) error
 	UpdateAdminPBRStatus(adminpbr *adminpbrv1beta1.AdminPolicyBasedRoute) (*adminpbrv1beta1.AdminPolicyBasedRoute, error)
 	GetVirtualIP(namespace, name string) (*virtualipv1beta1.VirtualIP, error)
@@ -96,6 +99,8 @@ type KubeOVN struct {
 	EgressFirewallClient egressfirewallclientset.Interface
 	CloudNetworkClient   ocpcloudnetworkclientset.Interface
 	EgressServiceClient  egressserviceclientset.Interface
+	EgressQoSClient      egressqosclientset.Interface
+	IPAMClaimsClient     ipamclaimssclientset.Interface
 	AdminPBRClient       adminpbrclientset.Interface
 	VIPClient            virtualipclientset.Interface
 	IPReservationClient  ipreservationclientset.Interface
@@ -505,6 +510,11 @@ func (k *KubeOVN) UpdateEgressServiceStatus(namespace, name, host string) error 
 	es.Status.Host = host
 
 	_, err = k.EgressServiceClient.K8sV1().EgressServices(es.Namespace).UpdateStatus(context.TODO(), es, metav1.UpdateOptions{})
+	return err
+}
+
+func (k *KubeOVN) UpdateIPAMClaimIPs(updatedIPAMClaim *ipamclaimsapi.IPAMClaim) error {
+	_, err := k.IPAMClaimsClient.K8sV1alpha1().IPAMClaims(updatedIPAMClaim.Namespace).UpdateStatus(context.TODO(), updatedIPAMClaim, metav1.UpdateOptions{})
 	return err
 }
 

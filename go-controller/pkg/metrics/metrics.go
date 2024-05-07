@@ -175,17 +175,17 @@ func getCoverageShowOutputMap(component string) (map[string]string, error) {
 }
 
 // ovnKubeLogFileSizeMetricsUpdater updates the metrics that obtains the
-// size of ovnkube.log & ovnkube-master.log
+// size of ovnkube process' logfile
 func ovnKubeLogFileSizeMetricsUpdater(ovnKubeLogFileMetric *prometheus.GaugeVec,
 	metricsScrapeInterval int, stopChan <-chan struct{}) {
 	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
 	defer ticker.Stop()
 
+	logfile := config.Logging.File
+	fileName := path.Base(logfile)
 	for {
 		select {
 		case <-ticker.C:
-			logfile := config.Logging.File
-			fileName := path.Base(logfile)
 			fileInfo, err := os.Stat(logfile)
 			if err != nil {
 				klog.Errorf("Failed to get the logfile size for %s: %v", fileName, err)
@@ -198,8 +198,11 @@ func ovnKubeLogFileSizeMetricsUpdater(ovnKubeLogFileMetric *prometheus.GaugeVec,
 	}
 }
 
-// coverageShowMetricsUpdater updates the metric
-// by obtaining values from getCoverageShowOutputMap for specified component.
+// coverageShowMetricsUpdater updates the metric by obtaining values from
+// getCoverageShowOutputMap for specified component. The counters displayed
+// by coverage/show output are called events. It could be that the event never
+// happened, and therefore there will be no counter for it in the output. In such
+// cases the default value of the counter will be 0.
 func coverageShowMetricsUpdater(component string, metricsScrapeInterval int, stopChan <-chan struct{}) {
 	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
 	defer ticker.Stop()
@@ -530,7 +533,30 @@ func writePlainText(statusCode int, text string, w http.ResponseWriter) {
 	fmt.Fprintln(w, text)
 }
 
-func StartMetricsServerCommon(bindAddress string, pprofBindAddress string, certFile string, keyFile string, handler http.Handler,
+// StartMetricsServer runs the prometheus listener so that OVN K8s metrics can be collected
+// It puts the endpoint behind TLS if certFile and keyFile are defined.
+func StartMetricsServer(bindAddress string, pprofBindAddress string, certFile string, keyFile string,
+	stopChan <-chan struct{}, wg *sync.WaitGroup) {
+	startMetricsServer(bindAddress, pprofBindAddress, certFile, keyFile, promhttp.Handler(), stopChan, wg)
+}
+
+// StartOVNMetricsServer runs the prometheus listener so that OVN metrics can be collected
+func StartOVNMetricsServer(bindAddress, pprofBindAddress, certFile, keyFile string,
+	stopChan <-chan struct{}, wg *sync.WaitGroup) {
+	startMetricsServer(bindAddress, pprofBindAddress, certFile, keyFile, promhttp.Handler(), stopChan, wg)
+}
+
+func RegisterOvnNodeMetrics(ovsDBClient *util.OvsdbClient, metricsScrapeInterval int, stopChan <-chan struct{}) {
+	go RegisterOvnControllerMetrics(ovsDBClient, metricsScrapeInterval, stopChan)
+}
+
+func RegisterOvnCentralMetrics(podLister corev1listers.PodLister, nodeLister corev1listers.NodeLister,
+	k8sNodeName string, metricsScrapeInterval int, stopChan <-chan struct{}) {
+	go RegisterOvnDBMetrics(podLister, k8sNodeName, metricsScrapeInterval, stopChan)
+	go RegisterOvnNorthdMetrics(nodeLister, k8sNodeName, metricsScrapeInterval, stopChan)
+}
+
+func startMetricsServer(bindAddress, pprofBindAddress, certFile, keyFile string, handler http.Handler,
 	stopChan <-chan struct{}, wg *sync.WaitGroup) {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", handler)
@@ -568,56 +594,36 @@ func StartMetricsServerCommon(bindAddress string, pprofBindAddress string, certF
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		go utilwait.Until(func() {
-			klog.Infof("Starting metrics server to serve at address %q", bindAddress)
-			var err error
+		utilwait.Until(func() {
+			klog.Infof("Starting metrics server at address %q", bindAddress)
+			var listenAndServe func() error
 			if certFile != "" && keyFile != "" {
 				server = getTLSServer(bindAddress, certFile, keyFile, mux)
-				err = server.ListenAndServeTLS("", "")
+				listenAndServe = func() error { return server.ListenAndServeTLS("", "") }
 			} else {
-				server = &http.Server{
-					Addr:    bindAddress,
-					Handler: mux,
+				server = &http.Server{Addr: bindAddress, Handler: mux}
+				listenAndServe = func() error { return server.ListenAndServe() }
+			}
+
+			errCh := make(chan error)
+			go func() {
+				errCh <- listenAndServe()
+			}()
+			var err error
+			select {
+			case err = <-errCh:
+				err = fmt.Errorf("failed while running metrics server at address %q: %w", bindAddress, err)
+				utilruntime.HandleError(err)
+			case <-stopChan:
+				klog.Infof("Stopping metrics server at address %q", bindAddress)
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := server.Shutdown(shutdownCtx); err != nil {
+					klog.Errorf("Error stopping metrics server at address %q: %v", bindAddress, err)
 				}
-				err = server.ListenAndServe()
 			}
-			if err != nil && err != http.ErrServerClosed {
-				utilruntime.HandleError(fmt.Errorf("starting metrics server to serve at address %q failed: %v", bindAddress, err))
-			}
-			klog.Infof("Metrics server has stopped serving at address %q", bindAddress)
 		}, 5*time.Second, stopChan)
-
-		<-stopChan
-		klog.Infof("Stopping metrics server %s", server.Addr)
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := server.Shutdown(shutdownCtx); err != nil {
-			klog.Errorf("Error stopping metrics server at address %q: %v", bindAddress, err)
-		}
 	}()
-}
-
-// StartMetricsServerTLS runs the prometheus listener so that OVN K8s metrics can be collected
-// It puts the endpoint behind TLS if certFile and keyFile are defined.
-func StartMetricsServer(bindAddress string, pprofBindAddress string, certFile string, keyFile string,
-	stopChan <-chan struct{}, wg *sync.WaitGroup) {
-	StartMetricsServerCommon(bindAddress, pprofBindAddress, certFile, keyFile, promhttp.Handler(), stopChan, wg)
-}
-
-// StartOVNMetricsServer runs the prometheus listener so that OVN metrics can be collected
-func StartOVNMetricsServer(bindAddress string, pprofBindAddress string, certFile, keyFile string,
-	stopChan <-chan struct{}, wg *sync.WaitGroup) {
-	StartMetricsServerCommon(bindAddress, pprofBindAddress, certFile, keyFile, promhttp.Handler(), stopChan, wg)
-}
-
-func RegisterOvnNodeMetrics(ovsDBClient *util.OvsdbClient, metricsScrapeInterval int, stopChan chan struct{}) {
-	go RegisterOvnControllerMetrics(ovsDBClient, metricsScrapeInterval, stopChan)
-}
-
-func RegisterOvnCentralMetrics(podLister corev1listers.PodLister, nodeLister corev1listers.NodeLister,
-	k8sNodeName string, metricsScrapeInterval int, stopChan chan struct{}) {
-	go RegisterOvnDBMetrics(podLister, k8sNodeName, metricsScrapeInterval, stopChan)
-	go RegisterOvnNorthdMetrics(nodeLister, k8sNodeName, metricsScrapeInterval, stopChan)
 }
 
 func SetupOvsDBClient() (*util.OvsdbClient, error) {

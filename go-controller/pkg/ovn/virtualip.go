@@ -930,7 +930,7 @@ func (bnc *BaseNetworkController) syncVirtualIPsPeriodic() {
 				Value:   []string{lsp.UUID},
 			})
 			if err != nil {
-				klog.Errorf("Could not generate ops to delete stale port from logical switch %s (%+v)", lsp.Name, switchName, err)
+				klog.Errorf("Could not generate ops to delete stale port %s from logical switch %s (%+v)", lsp.Name, switchName, err)
 				unlock()
 				continue
 			}
@@ -981,7 +981,7 @@ func (bnc *BaseNetworkController) requeueVirtualIP(ra action, virtualIP *virtual
 		action: ra,
 		virtIP: virtualIP,
 	}
-	klog.V(4).Infof("Requeue VirtualIP %s/%s Add event to retry: %v", virtualIP.Namespace, virtualIP.Name)
+	klog.V(4).Infof("Requeue VirtualIP %s/%s Add event to retry", virtualIP.Namespace, virtualIP.Name)
 	bnc.virtualIPRetryQueue.AddAfter(req, time.Duration(3*time.Second))
 }
 

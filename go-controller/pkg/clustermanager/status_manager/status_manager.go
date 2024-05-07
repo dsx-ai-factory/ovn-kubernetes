@@ -11,6 +11,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 	adminpolicybasedrouteapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+	egressqosapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -64,6 +65,7 @@ func newStatusManager[T any](name string, informer cache.SharedIndexInformer,
 		RateLimiter:    workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
 		ObjNeedsUpdate: m.needsUpdate,
 		Reconcile:      m.updateStatus,
+		Threadiness:    1,
 	}
 	m.objController = controller.NewController[T](name, controllerConfig)
 	return m
@@ -77,17 +79,17 @@ func (m *typedStatusManager[T]) needsUpdate(oldObj, newObj *T) bool {
 }
 
 func (m *typedStatusManager[T]) Start() error {
-	return m.objController.Start(1)
+	return controller.StartControllers(m.objController)
 }
 
 func (m *typedStatusManager[T]) Stop() {
-	m.objController.Stop()
+	controller.StopControllers(m.objController)
 }
 
 func (m *typedStatusManager[T]) updateStatus(key string) error {
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
-		klog.Errorf("StatusManager %s: failed to split meta namespace cache key %s for %s: %v", m.name, key, err)
+		klog.Errorf("StatusManager %s: failed to split meta namespace cache key %s: %v", m.name, key, err)
 		return nil
 	}
 	obj, err := m.resource.get(namespace, name)
@@ -152,6 +154,7 @@ type StatusManager struct {
 	zonesLock     sync.RWMutex
 	zones         sets.Set[string]
 	zoneTracker   *zone_tracker.ZoneTracker
+	ovnClient     *util.OVNClusterManagerClientset
 }
 
 type resourceReconciler interface {
@@ -165,6 +168,7 @@ func NewStatusManager(wf *factory.WatchFactory, ovnClient *util.OVNClusterManage
 		typedManagers: map[string]resourceReconciler{},
 		zonesLock:     sync.RWMutex{},
 		zones:         sets.New[string](),
+		ovnClient:     ovnClient,
 	}
 	zoneTracker := zone_tracker.NewZoneTracker(wf.NodeCoreInformer(), sm.onZoneUpdate)
 	sm.zoneTracker = zoneTracker
@@ -188,6 +192,16 @@ func NewStatusManager(wf *factory.WatchFactory, ovnClient *util.OVNClusterManage
 			sm.withZonesRLock,
 		)
 		sm.typedManagers["egressfirewalls"] = egressFirewallManager
+	}
+	if config.OVNKubernetesFeature.EnableEgressQoS {
+		egressQoSManager := newStatusManager[egressqosapi.EgressQoS](
+			"egressqoses_statusmanager",
+			wf.EgressQoSInformer().Informer(),
+			wf.EgressQoSInformer().Lister().List,
+			newEgressQoSManager(wf.EgressQoSInformer().Lister(), ovnClient.EgressQoSClient),
+			sm.withZonesRLock,
+		)
+		sm.typedManagers["egressqoses"] = egressQoSManager
 	}
 	return sm
 }
@@ -219,6 +233,7 @@ func (sm *StatusManager) Stop() {
 func (sm *StatusManager) onZoneUpdate(newZones sets.Set[string]) {
 	klog.Infof("StatusManager got zones update: %v", newZones)
 	sm.zonesLock.Lock()
+	deletedZones := sm.zones.Difference(newZones)
 	sm.zones = newZones
 	sm.zonesLock.Unlock()
 
@@ -228,6 +243,16 @@ func (sm *StatusManager) onZoneUpdate(newZones sets.Set[string]) {
 	}
 	for _, typedManager := range sm.typedManagers {
 		typedManager.ReconcileAll()
+	}
+	deletedZones.Delete(zone_tracker.UnknownZone) // delete the unknown zone, but proceed to cleanup for other known zones if any
+	if len(deletedZones) > 0 && config.OVNKubernetesFeature.EnableAdminNetworkPolicy {
+		klog.Infof("Zones that got deleted are %s", deletedZones.UnsortedList())
+		// there are zones that got deleted, this is expensive because we do a list from kapi server directly but
+		// we don't anticipate too many node deletes in an env, it should be a rare operation which is why we are
+		// not maintaining local caches for ANP/BANP
+		// we must try to clean up statuses across all ANPs that were managed by that zone
+		anpZoneDeleteCleanupManager := newANPManager(sm.ovnClient.ANPClient)
+		anpZoneDeleteCleanupManager.cleanupDeletedZoneStatuses(deletedZones)
 	}
 }
 

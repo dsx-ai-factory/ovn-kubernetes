@@ -33,6 +33,11 @@ type NetConf struct {
 	GatewayMAC string `json:"gatewayMAC,omitempty"`
 	// Enable XDP Service, valid in localnet topology network
 	XDPService bool `json:"xdpService,omitempty"`
+	// AllowPersistentIPs is valid on both localnet / layer topologies.
+	// It allows for having IP allocations that outlive the pod for which
+	// they are originally created - e.g. a KubeVirt VM's migration, or
+	// restart.
+	AllowPersistentIPs bool `json:"allowPersistentIPs,omitempty"`
 
 	// Network Cidr
 	LegacySubnets string `json:"net_cidr,omitempty"`

@@ -178,7 +178,7 @@ func xdpSetupOFFlowsForInterface(allowedIPs []string, bridgeName string, vlanID 
 		xdpOFFLows = append(xdpOFFLows,
 			fmt.Sprintf("cookie=%s, table=0, priority=%d, in_port=%s, dl_vlan=%d, nw_dst=%s/32, tcp,"+
 				"actions=ct(table=%d,zone=%d)", cookie, XDPOFHighPriority, defaultBridge.ofPortPhys,
-				vlanID, allowedIP, XDPOFLowCTTable, HostXDPCTZone))
+				vlanID, allowedIP, XDPOFLowCTTable, config.Default.HostXDPCTZone))
 
 		// Flow 2:
 		//	For est connections (i.e. initiated from the pod) send to the pod
@@ -209,14 +209,14 @@ func xdpSetupOFFlowsForInterface(allowedIPs []string, bridgeName string, vlanID 
 		xdpOFFLows = append(xdpOFFLows,
 			fmt.Sprintf("cookie=%s, table=0, priority=%d, in_port=%s, dl_vlan=%d, nw_src=%s/32, tcp, "+
 				"actions=ct(table=%d,zone=%d)", cookie, XDPOFHighPriority, defaultBridge.ofPortPatch,
-				vlanID, allowedIP, XDPOFLowCTTable, HostXDPCTZone))
+				vlanID, allowedIP, XDPOFLowCTTable, config.Default.HostXDPCTZone))
 
 		// Flow 2:
 		// 	IF it is a SYN, commit to match the return traffic and send it out, bypassing XDP/
 		xdpOFFLows = append(xdpOFFLows,
 			fmt.Sprintf("cookie=%s, table=%d, priority=%d, in_port=%s, dl_vlan=%d, nw_src=%s/32, tcp, tcp_flags=+syn-ack,"+
 				"actions=ct(commit,zone=%d),output:%s", cookie, XDPOFLowCTTable, XDPOFHighPriority,
-				defaultBridge.ofPortPatch, vlanID, allowedIP, HostXDPCTZone, defaultBridge.ofPortPhys))
+				defaultBridge.ofPortPatch, vlanID, allowedIP, config.Default.HostXDPCTZone, defaultBridge.ofPortPhys))
 
 		// Flow 3:
 		// 	IF it is est send it out, bypassing XDP

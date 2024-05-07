@@ -97,7 +97,7 @@ func (bnc *BaseNetworkController) allocatePodIPsOnSwitch(pod *kapi.Pod,
 	if err = bnc.lsManager.AllocateIPs(switchName, annotations.IPs); err != nil {
 		if err == ipallocator.ErrAllocated {
 			// already allocated: log a warning but not stop syncPod from continuing
-			klog.Warningf("Already allocated IPs: %s for pod: %s in phase: %s on switch: %s",
+			klog.Warningf("Already allocated IPs: %s for pod: %s in phase: %v on switch: %s",
 				util.JoinIPNetIPs(annotations.IPs, " "), expectedLogicalPortName,
 				&pod.Status.Phase, switchName)
 		} else {
@@ -399,7 +399,7 @@ func (bnc *BaseNetworkController) releasePodIPs(pInfo *lpInfo) error {
 		if !errors.Is(err, logicalswitchmanager.SwitchNotFound) {
 			return fmt.Errorf("cannot release IPs of port %s on switch %s: %w", pInfo.name, pInfo.logicalSwitch, err)
 		}
-		klog.Warningf("Ignoring release IPs failure of port %s on switch %s: %w", pInfo.name, pInfo.logicalSwitch, err)
+		klog.Warningf("Ignoring release IPs failure of port %s on switch %s: %v", pInfo.name, pInfo.logicalSwitch, err)
 	}
 	return nil
 }
@@ -761,7 +761,7 @@ func (bnc *BaseNetworkController) deletePodFromNamespace(ns string, podIfAddrs [
 	var ops []ovsdb.Operation
 	var err error
 	if nsInfo.addressSet != nil {
-		if ops, err = nsInfo.addressSet.DeleteIPsReturnOps(createIPAddressSlice(podIfAddrs)); err != nil {
+		if ops, err = nsInfo.addressSet.DeleteAddressesReturnOps(util.IPNetsIPToStringSlice(podIfAddrs)); err != nil {
 			return nil, err
 		}
 	}

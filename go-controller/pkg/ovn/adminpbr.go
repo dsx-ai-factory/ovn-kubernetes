@@ -266,12 +266,12 @@ func (pol *internalAdminPBRPolicy) addPodToAddressSet(obj interface{}) {
 		}
 		return
 	}
-	ipv4Set, _ := pol.addressSet.GetIPs()
+	ipv4Set, _ := pol.addressSet.GetAddresses()
 	if util.SliceHasStringItem(ipv4Set, pod.Status.PodIP) {
 		pol.clearErrorMessage(pod)
 		return
 	}
-	if err := pol.addressSet.AddIPs([]net.IP{net.ParseIP(pod.Status.PodIP)}); err != nil {
+	if err := pol.addressSet.AddAddresses([]string{pod.Status.PodIP}); err != nil {
 		klog.Errorf("Failed to update address set %s for policy %s: %v", pol.addressSetName(), pol.name, err)
 		pol.controller.requeuePod4AdminPBR(actionAddPod4AdminPBR, pol, pod)
 		pol.addErrorMessage(pod, fmt.Sprintf("Failed to add pod to address set: %v", err))
@@ -296,12 +296,12 @@ func (pol *internalAdminPBRPolicy) removePodFromAddressSet(obj interface{}) {
 		pol.clearErrorMessage(pod)
 		return
 	}
-	ipv4Set, _ := pol.addressSet.GetIPs()
+	ipv4Set, _ := pol.addressSet.GetAddresses()
 	if !util.SliceHasStringItem(ipv4Set, pod.Status.PodIP) {
 		pol.clearErrorMessage(pod)
 		return
 	}
-	if err := pol.addressSet.DeleteIPs([]net.IP{net.ParseIP(pod.Status.PodIP)}); err != nil {
+	if err := pol.addressSet.DeleteAddresses([]string{pod.Status.PodIP}); err != nil {
 		klog.Errorf("Failed to remove %s from address set %s for policy %s: %v", pod.Status.PodIP, pol.addressSetName(), pol.name, err)
 		pol.addErrorMessage(pod, fmt.Sprintf("Failed to remove pod from address set: %v", err))
 		return
@@ -716,8 +716,8 @@ func (bnc *BaseNetworkController) syncAddressSetPeriodic() {
 		podIndexer := bnc.watchFactory.PodInformer().GetIndexer()
 		for _, pol := range policyMap {
 			pol.Lock()
-			v4IPs, _ := pol.addressSet.GetIPs()
-			stalev4IPs := make([]net.IP, 0)
+			v4IPs, _ := pol.addressSet.GetAddresses()
+			stalev4IPs := make([]string, 0)
 			for _, ip := range v4IPs {
 				// get pod by ip
 				pods, err := podIndexer.ByIndex(types.CacheIndexPodByIP, ip)
@@ -726,14 +726,14 @@ func (bnc *BaseNetworkController) syncAddressSetPeriodic() {
 				}
 				// if pod doesn't exist or pod not qualified for the rule, remove ip from address set
 				if len(pods) == 0 {
-					stalev4IPs = append(stalev4IPs, net.ParseIP(ip))
+					stalev4IPs = append(stalev4IPs, ip)
 				} else if !pol.filterPodsByAllSelectors(pods[0]) {
-					stalev4IPs = append(stalev4IPs, net.ParseIP(ip))
+					stalev4IPs = append(stalev4IPs, ip)
 				}
 			}
 			if len(stalev4IPs) != 0 {
 				klog.V(4).Infof("[%s] Removing stale IPs (%s) from address set for policy %s", bnc.GetNetworkName(), stalev4IPs, pol.name)
-				if err := pol.addressSet.DeleteIPs(stalev4IPs); err != nil {
+				if err := pol.addressSet.DeleteAddresses(stalev4IPs); err != nil {
 					klog.V(4).Infof("[%s] Failed removing stale IPs for policy %s", bnc.GetNetworkName(), pol.name)
 				}
 			}
@@ -872,7 +872,7 @@ func (bnc *BaseNetworkController) noRerouteToJoinSubnet() error {
 	for _, clusterEntry := range bnc.Subnets() {
 		clusterSubnets = append(clusterSubnets, clusterEntry.CIDR)
 	}
-	if err := addrSet.AddSubnets(clusterSubnets); err != nil {
+	if err := addrSet.AddAddresses(util.StringSlice(clusterSubnets)); err != nil {
 		return err
 	}
 	// create or update logical router policy

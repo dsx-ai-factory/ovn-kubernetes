@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -737,6 +738,7 @@ func pokePod(fr *framework.Framework, srcPodName string, dstPodIP string) error 
 	if err == nil && stdout == "HTTP/1.1 200 OK" {
 		return nil
 	}
+	framework.Logf("HTTP request failed; stdout: %s, err: %v", stdout+stderr, err)
 	return fmt.Errorf("http request failed; stdout: %s, err: %v", stdout+stderr, err)
 }
 
@@ -756,6 +758,9 @@ func pokeAllPodIPs(fr *framework.Framework, srcPodName string, dstPod *v1.Pod) e
 }
 
 func pokeExternalHostFromPod(fr *framework.Framework, namespace string, srcPodName, dstIp string, dstPort int) error {
+	if utilnet.IsIPv6String(dstIp) {
+		dstIp = fmt.Sprintf("[%s]", dstIp)
+	}
 	stdout, stderr, err := ExecShellInPodWithFullOutput(
 		fr,
 		namespace,
@@ -864,14 +869,19 @@ func patchService(c kubernetes.Interface, serviceName, serviceNamespace, jsonPat
 	return nil
 }
 
-// pokeIPTableRules returns the number of iptable rules that match the provided pattern
+// pokeIPTableRules returns the number of iptables (both ipv6 and ipv4) rules that match the provided pattern
 func pokeIPTableRules(clientContainer, pattern string) int {
 	cmd := []string{containerRuntime, "exec", clientContainer}
-	ipTCommand := strings.Split("iptables-save -c", " ")
 
-	cmd = append(cmd, ipTCommand...)
-	iptRules, err := runCommand(cmd...)
-	framework.ExpectNoError(err, "failed to get iptable rules from node %s", clientContainer)
+	ipv4Cmd := append(cmd, strings.Split("iptables-save -c", " ")...)
+	ipt4Rules, err := runCommand(ipv4Cmd...)
+	framework.ExpectNoError(err, "failed to get iptables rules from node %s", clientContainer)
+
+	ipv6Cmd := append(cmd, strings.Split("ip6tables-save -c", " ")...)
+	ipt6Rules, err := runCommand(ipv6Cmd...)
+	framework.ExpectNoError(err, "failed to get ip6tables rules from node %s", clientContainer)
+
+	iptRules := ipt4Rules + ipt6Rules
 	framework.Logf("DEBUG: Dumping IPTRules %v", iptRules)
 	numOfMatchRules := 0
 	for _, iptRule := range strings.Split(iptRules, "\n") {
@@ -1074,6 +1084,16 @@ func randStr(n int) string {
 	return string(b)
 }
 
+func isIPv4Supported() bool {
+	val, present := os.LookupEnv("KIND_IPV4_SUPPORT")
+	return present && val == "true"
+}
+
+func isIPv6Supported() bool {
+	val, present := os.LookupEnv("KIND_IPV6_SUPPORT")
+	return present && val == "true"
+}
+
 func isInterconnectEnabled() bool {
 	val, present := os.LookupEnv("OVN_ENABLE_INTERCONNECT")
 	return present && val == "true"
@@ -1115,4 +1135,80 @@ func getNodeZone(node *v1.Node) (string, error) {
 	}
 
 	return nodeZone, nil
+}
+
+// adds route to a docker node with a full mask
+func addRouteToNode(nodeName string, ips []string, mtu int) error {
+	return routeToNode(nodeName, ips, mtu, true)
+}
+
+// removes a route on a docker node
+func delRouteToNode(nodeName string, ips []string) error {
+	return routeToNode(nodeName, ips, 0, false)
+}
+
+// executes route commands on a node, if add is true, the route is added
+// otherwise removed
+func routeToNode(nodeName string, ips []string, mtu int, add bool) error {
+	ipOp := "del"
+	if add {
+		ipOp = "add"
+	}
+	for _, ip := range ips {
+		mask := 32
+		ipCmd := []string{"ip"}
+		if utilnet.IsIPv6String(ip) {
+			mask = 128
+			ipCmd = []string{"ip", "-6"}
+		}
+		var err error
+		cmd := []string{"docker", "exec", nodeName}
+		cmd = append(cmd, ipCmd...)
+		cmd = append(cmd, "route", ipOp, fmt.Sprintf("%s/%d", ip, mask), "dev", "breth0")
+		if mtu != 0 {
+			cmd = append(cmd, "mtu", strconv.Itoa(mtu))
+		}
+		_, err = runCommand(cmd...)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// CaptureContainerOutput captures output of a container according to the
+// right-most match of the provided regex. Returns a map of subexpression name
+// to subexpression capture. A zero string name `""` maps to the full expression
+// capture.
+func CaptureContainerOutput(ctx context.Context, c clientset.Interface, namespace, pod, container, regexpr string) (map[string]string, error) {
+	regex, err := regexp.Compile(regexpr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compile regexp %q: %w", regexpr, err)
+	}
+
+	output, err := e2epod.GetPodLogs(ctx, c, namespace, pod, container)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get output for container %q of pod %q in namespace %q", container, pod, namespace)
+	}
+
+	matches := regex.FindAllStringSubmatch(output, -1)
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("failed to match regexp %q in output %q", regexpr, output)
+	}
+	match := matches[len(matches)-1]
+
+	numSubExp := regex.NumSubexp()
+	matchMap := make(map[string]string, numSubExp+1)
+	matchMap[""] = match[0]
+	if numSubExp == 0 {
+		return matchMap, nil
+	}
+
+	subExpNames := regex.SubexpNames()
+	for _, name := range subExpNames[1:] {
+		index := regex.SubexpIndex(name)
+		matchMap[name] = match[index]
+	}
+
+	return matchMap, nil
 }

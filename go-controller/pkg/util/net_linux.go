@@ -260,13 +260,48 @@ func LinkAddrExist(link netlink.Link, address *net.IPNet) (bool, error) {
 	return false, nil
 }
 
-// LinkAddrAdd removes existing addresses on the link and adds the new address
-func LinkAddrAdd(link netlink.Link, address *net.IPNet, flags int) error {
-	err := netLinkOps.AddrAdd(link, &netlink.Addr{IPNet: address, Flags: flags})
+// LinkAddrAdd adds a new address. If both preferredLifetime & validLifetime,
+// are zero, then they are not applied, but if either parameters are not zero, both are applied.
+func LinkAddrAdd(link netlink.Link, address *net.IPNet, flags, preferredLifetime, validLifetime int) error {
+	err := netLinkOps.AddrAdd(link, &netlink.Addr{IPNet: address, Flags: flags, PreferedLft: preferredLifetime, ValidLft: validLifetime})
 	if err != nil {
-		return fmt.Errorf("failed to add address %s on link %s: %v", address, link.Attrs().Name, err)
+		return fmt.Errorf("failed to add address %s on link %s: %v", address.String(), link.Attrs().Name, err)
 	}
 	return nil
+}
+
+// LinkAddrDel removes an existing address from a link. Expects address is present otherwise, an error is returned.
+func LinkAddrDel(link netlink.Link, address *net.IPNet) error {
+	err := netLinkOps.AddrDel(link, &netlink.Addr{IPNet: address})
+	if err != nil {
+		return fmt.Errorf("failed to delete address %s on link %s: %v", address.String(), link.Attrs().Name, err)
+	}
+	return nil
+}
+
+// IsDeprecatedAddr returns true if the address is deprecated. An address is deprecated when preferred lifetime is zero.
+func IsDeprecatedAddr(link netlink.Link, address *net.IPNet) (bool, error) {
+	if link == nil {
+		return false, fmt.Errorf("nil link is not allowed")
+	}
+	if address == nil {
+		return false, fmt.Errorf("nil address is not allowed")
+	}
+	existingAddrs, err := netLinkOps.AddrList(link, getFamily(address.IP))
+	if err != nil {
+		return false, fmt.Errorf("failed to detect if address %s is deprecated because unable to list addresses on link %s: %v",
+			address.IP.String(), link.Attrs().Name, err)
+	}
+	for _, existingAddr := range existingAddrs {
+		if existingAddr.IPNet.String() == address.String() {
+			// deprecated addresses have 0 preferred lifetime
+			if existingAddr.PreferedLft == 0 {
+				return true, nil
+			}
+			return false, nil
+		}
+	}
+	return false, fmt.Errorf("failed to detect if address %s is deprecated because it doesn't exist", address.IP.String())
 }
 
 // LinkRoutesDel deletes all the routes for the given subnets via the link
@@ -439,6 +474,22 @@ func LinkNeighExists(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAdd
 	return false, nil
 }
 
+// LinkNeighIPExists checks to see if the IP exists in IP neighbour cache
+func LinkNeighIPExists(link netlink.Link, neighIP net.IP) (bool, error) {
+	neighs, err := netLinkOps.NeighList(link.Attrs().Index, getFamily(neighIP))
+	if err != nil {
+		return false, fmt.Errorf("failed to get the list of neighbour entries for link %s",
+			link.Attrs().Name)
+	}
+
+	for _, neigh := range neighs {
+		if neigh.IP.Equal(neighIP) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func DeleteConntrack(ip string, port int32, protocol kapi.Protocol, ipFilterType netlink.ConntrackFilterType, labels [][]byte) error {
 	ipAddress := net.ParseIP(ip)
 	if ipAddress == nil {
@@ -521,7 +572,7 @@ func GetFilteredInterfaceV4V6IPs(iface string) ([]*net.IPNet, error) {
 }
 
 // GetFilteredInterfaceAddrs returns addresses attached to a link and filters out link local addresses, OVN reserved IPs,
-// keepalived IPs and addresses marked as secondary or depreciated.
+// keepalived IPs and addresses marked as secondary or deprecated.
 func GetFilteredInterfaceAddrs(link netlink.Link, v4, v6 bool) ([]netlink.Addr, error) {
 	var ipFamily int // value of 0 means include both IP v4 and v6 addresses
 	if v4 && !v6 {

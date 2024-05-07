@@ -70,17 +70,16 @@ func getEFExpectedDb(initialData []libovsdbtest.TestData, fakeOVN *FakeOVN, nsNa
 	acl.UUID = "acl-UUID"
 
 	// new ACL will be added to the port group
-	namespacePortGroup := libovsdbops.BuildPortGroup(pgName, nil, []*nbdb.ACL{acl}, map[string]string{"name": nsName})
+	pgIDs := getNamespacePortGroupDbIDs(nsName, DefaultNetworkControllerName)
+	namespacePortGroup := libovsdbutil.BuildPortGroup(pgIDs, nil, []*nbdb.ACL{acl})
 	namespacePortGroup.UUID = pgName + "-UUID"
 	return append(initialData, acl, namespacePortGroup)
 }
 
 func getEFExpectedDbAfterDelete(prevExpectedData []libovsdbtest.TestData) []libovsdbtest.TestData {
-	// de-referenced ACLs are not garbage-collected by the test server,
-	// therefore they will stay in the db
 	pg := prevExpectedData[len(prevExpectedData)-1].(*nbdb.PortGroup)
 	pg.ACLs = nil
-	return prevExpectedData
+	return append(prevExpectedData[:len(prevExpectedData)-2], pg)
 }
 
 var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
@@ -123,7 +122,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		for _, namespace := range namespaces {
-			namespaceASip4, namespaceASip6 := buildNamespaceAddressSets(namespace.Name, []net.IP{})
+			namespaceASip4, namespaceASip6 := buildNamespaceAddressSets(namespace.Name, []string{})
 			if config.IPv4Mode {
 				initialData = append(initialData, namespaceASip4)
 			}
@@ -213,7 +212,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					purgeACL2.UUID = "purgeACL2-UUID"
 
 					namespace1 := *newNamespace("namespace1")
-					namespace1ASip4, _ := buildNamespaceAddressSets(namespace1.Name, []net.IP{})
+					namespace1ASip4, _ := buildNamespaceAddressSets(namespace1.Name, []string{})
 
 					egressFirewall := newEgressFirewallObject("default", namespace1.Name, []egressfirewallapi.EgressFirewallRule{
 						{
@@ -291,14 +290,13 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					// check severity was reset from default to nil
 					updateACL.Severity = nil
 					// match shouldn't have cluster exclusion
-					pgName := fakeController.getNamespacePortGroupName(namespace1.Name)
-					namespacePG := libovsdbops.BuildPortGroup(pgName, nil, []*nbdb.ACL{updateACL}, map[string]string{"name": namespace1.Name})
-					namespacePG.UUID = pgName + "-UUID"
-					updateACL.Match = "(ip4.dst == 1.2.3.4/23) && inport == @" + pgName
+					pgIDs := getNamespacePortGroupDbIDs(namespace1.Name, DefaultNetworkControllerName)
+					namespacePG := libovsdbutil.BuildPortGroup(pgIDs, nil, []*nbdb.ACL{updateACL})
+					namespacePG.UUID = namespacePG.Name + "-UUID"
+					updateACL.Match = "(ip4.dst == 1.2.3.4/23) && inport == @" + namespacePG.Name
 					updateACL.Tier = t.DefaultACLTier // ensure the tier of the ACL is updated from 0 to 2
 
 					expectedDatabaseState := []libovsdb.TestData{
-						purgeACL,
 						purgeACL2,
 						ignoreACL,
 						updateACL,
@@ -518,6 +516,10 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 				var err error
 				nodeName := "node1"
 				nodeIP := "9.9.9.9"
+				nodeIP2 := "11.11.11.11"
+				nodeIP3 := "fc00:f853:ccd:e793::2"
+				config.IPv4Mode = true
+				config.IPv6Mode = true
 
 				app.Action = func(ctx *cli.Context) error {
 					namespace1 := *newNamespace("namespace1")
@@ -538,9 +540,9 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 							{
 								ObjectMeta: metav1.ObjectMeta{
 									Name: nodeName,
-								},
-								Status: v1.NodeStatus{
-									Addresses: []v1.NodeAddress{{Type: v1.NodeInternalIP, Address: nodeIP}},
+									Annotations: map[string]string{
+										util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s/24\",\"%s/24\",\"%s/64\"]", nodeIP, nodeIP2, nodeIP3),
+									},
 								},
 							},
 						})
@@ -562,11 +564,12 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					expectedDatabaseState := getEFExpectedDb(initialData,
-						fakeOVN, namespace1.Name, fmt.Sprintf("(ip4.dst == %s)", nodeIP), "", nbdb.ACLActionAllow)
+						fakeOVN, namespace1.Name,
+						fmt.Sprintf("(ip4.dst == %s || ip4.dst == %s || ip6.dst == %s)", nodeIP2, nodeIP, nodeIP3), "", nbdb.ACLActionAllow)
 					gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 					ginkgo.By("Updating a node to not match nodeSelector on Egress Firewall")
-					patch.Metadata = map[string]interface{}{"labels": map[string]string{labelKey: noneMatch}}
+					patch.Metadata = map[string]interface{}{"labels": map[string]string{labelKey: libovsdbutil.UnspecifiedL4Match}}
 					patchData, err = json.Marshal(&patch)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					// trigger update event
@@ -777,19 +780,21 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 			})
 			for _, ipMode := range []string{"IPv4", "IPv6"} {
 				ginkgo.It(fmt.Sprintf("configures egress firewall correctly with node selector, gateway mode: %s, IP mode: %s", gwMode, ipMode), func() {
-					nodeIP := "10.10.10.1"
-					nodeIP6 := "fc00:f853:ccd:e793::2"
+					nodeIP4CIDR := "10.10.10.1/24"
+					nodeIP, _, _ := net.ParseCIDR(nodeIP4CIDR)
+					nodeIP6CIDR := "fc00:f853:ccd:e793::2/64"
+					nodeIP6, _, _ := net.ParseCIDR(nodeIP6CIDR)
 					config.Gateway.Mode = gwMode
-					var nodeAddr v1.NodeAddress
+					var nodeCIDR string
 					if ipMode == "IPv4" {
 						config.IPv4Mode = true
 						config.IPv6Mode = false
-						nodeAddr = v1.NodeAddress{v1.NodeInternalIP, nodeIP}
+						nodeCIDR = nodeIP4CIDR
 
 					} else {
 						config.IPv4Mode = false
 						config.IPv6Mode = true
-						nodeAddr = v1.NodeAddress{v1.NodeInternalIP, nodeIP6}
+						nodeCIDR = nodeIP6CIDR
 					}
 					app.Action = func(ctx *cli.Context) error {
 						labelKey := "name"
@@ -806,14 +811,11 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 						})
 						mdata := newObjectMeta(node1Name, "")
 						mdata.Labels = map[string]string{labelKey: labelValue}
+						mdata.Annotations = map[string]string{util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s\"]", nodeCIDR)}
 
 						startOvnWithNodes(dbSetup, []v1.Namespace{namespace1}, []egressfirewallapi.EgressFirewall{*egressFirewall},
 							[]v1.Node{
 								{
-									Status: v1.NodeStatus{
-										Phase:     v1.NodeRunning,
-										Addresses: []v1.NodeAddress{nodeAddr},
-									},
 									ObjectMeta: mdata,
 								},
 							})
@@ -917,7 +919,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					// ACL should be removed from the port group egfw is deleted
-					pg.ACLs = []string{}
+					expectedDatabaseState = getEFExpectedDbAfterDelete(dbWith1ACL)
 					gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 					return nil
@@ -999,7 +1001,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					// check dns address set was created
 					addrSet, _ := addressset.GetTestDbAddrSets(
 						getEgressFirewallDNSAddrSetDbIDs(dnsName, fakeOVN.controller.controllerName),
-						[]net.IP{net.ParseIP(resolvedIP)})
+						[]string{resolvedIP})
 					expectedDatabaseState := append(initialData, addrSet)
 					gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
@@ -1051,19 +1053,16 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 		fakeOVN = NewFakeOVN(false)
 		a := newObjectMeta(node1Name, "")
 		a.Labels = nodeLabel
-		node1 := v1.Node{
-			Status: v1.NodeStatus{
-				Phase:     v1.NodeRunning,
-				Addresses: []v1.NodeAddress{{Type: v1.NodeInternalIP, Address: node1Addr}},
-			},
-			ObjectMeta: a,
+		a.Annotations = map[string]string{
+			util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s/24\"]", node1Addr),
+		}
+		node1 := v1.Node{ObjectMeta: a}
+		b := newObjectMeta(node2Name, "")
+		b.Annotations = map[string]string{
+			util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s/24\"]", node2Addr),
 		}
 		node2 := v1.Node{
-			Status: v1.NodeStatus{
-				Phase:     v1.NodeRunning,
-				Addresses: []v1.NodeAddress{{Type: v1.NodeInternalIP, Address: node2Addr}},
-			},
-			ObjectMeta: newObjectMeta(node2Name, ""),
+			ObjectMeta: b,
 		}
 		fakeOVN.startWithDBSetup(dbSetup, &v1.NodeList{Items: []v1.Node{node1, node2}})
 	})
@@ -1412,7 +1411,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				output: egressFirewallRule{
 					id:     1,
 					access: egressfirewallapi.EgressFirewallRuleAllow,
-					to:     destination{nodeAddrs: sets.New("9.9.9.9", "10.10.10.10"), nodeSelector: &metav1.LabelSelector{}},
+					to:     destination{nodeAddrs: sets.New("10.10.10.10", "9.9.9.9"), nodeSelector: &metav1.LabelSelector{}},
 				},
 			},
 			// match one node

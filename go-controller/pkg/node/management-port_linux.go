@@ -185,7 +185,7 @@ func setupManagementPortIPFamilyConfig(routeManager *routemanager.Controller, mp
 		// disappearing
 		warnings = append(warnings, fmt.Sprintf("missing IP address %s on the interface %s, adding it...",
 			cfg.ifAddr, mpcfg.ifName))
-		err = util.LinkAddrAdd(mpcfg.link, cfg.ifAddr, 0)
+		err = util.LinkAddrAdd(mpcfg.link, cfg.ifAddr, 0, 0, 0)
 	}
 	if err != nil {
 		return warnings, err
@@ -214,6 +214,19 @@ func setupManagementPortIPFamilyConfig(routeManager *routemanager.Controller, mp
 	if exists, err = util.LinkNeighExists(mpcfg.link, cfg.gwIP, mpcfg.routerMAC); err == nil && !exists {
 		warnings = append(warnings, fmt.Sprintf("missing arp entry for MAC/IP binding (%s/%s) on link %s",
 			mpcfg.routerMAC.String(), cfg.gwIP, mpcfg.ifName))
+		// LinkNeighExists checks if the mac also matches, but it is possible there is a stale entry
+		// still in the neighbor cache which would prevent add. Therefore execute a delete first if an IP entry exists.
+		if exists, err = util.LinkNeighIPExists(mpcfg.link, cfg.gwIP); err != nil {
+			return warnings, fmt.Errorf("failed to detect if stale IP neighbor entry exists for IP %s, on iface %s: %v",
+				cfg.gwIP.String(), mpcfg.ifName, err)
+		} else if exists {
+			warnings = append(warnings, fmt.Sprintf("found stale neighbor entry IP binding (%s) on link %s",
+				cfg.gwIP.String(), mpcfg.ifName))
+			if err = util.LinkNeighDel(mpcfg.link, cfg.gwIP); err != nil {
+				warnings = append(warnings, fmt.Sprintf("failed to remove stale IP neighbor entry for IP %s, on iface %s: %v",
+					cfg.gwIP.String(), mpcfg.ifName, err))
+			}
+		}
 		err = util.LinkNeighAdd(mpcfg.link, cfg.gwIP, mpcfg.routerMAC)
 	}
 	if err != nil {

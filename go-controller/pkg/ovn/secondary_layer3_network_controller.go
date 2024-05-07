@@ -152,7 +152,7 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 				syncZoneIC = syncZoneIC || zoneClusterChanged
 				nodeSyncsParam = &nodeSyncs{syncNode: nodeSync, syncClusterRouterPort: clusterRtrSync, syncZoneIC: syncZoneIC}
 			} else {
-				klog.Infof("Node %s moved from the remote zone %s to local zone.",
+				klog.Infof("Node %s moved from the remote zone %s to local zone %s.",
 					newNode.Name, util.GetNodeZone(oldNode), util.GetNodeZone(newNode))
 				// The node is now a local zone node. Trigger a full node sync.
 				nodeSyncsParam = &nodeSyncs{syncNode: true, syncClusterRouterPort: true, syncZoneIC: config.OVNKubernetesFeature.EnableInterconnect}
@@ -256,7 +256,7 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 		BaseSecondaryNetworkController: BaseSecondaryNetworkController{
 			BaseNetworkController: BaseNetworkController{
 				CommonNetworkControllerInfo: *cnci,
-				controllerName:              netInfo.GetNetworkName() + "-network-controller",
+				controllerName:              getNetworkControllerName(netInfo.GetNetworkName()),
 				NetInfo:                     netInfo,
 				lsManager:                   lsm.NewLogicalSwitchManager(),
 				logicalPortCache:            newPortCache(stopChan),
@@ -282,7 +282,8 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 		podAnnotationAllocator := pod.NewPodAnnotationAllocator(
 			netInfo,
 			cnci.watchFactory.PodCoreInformer().Lister(),
-			cnci.kube)
+			cnci.kube,
+			nil)
 		oc.podAnnotationAllocator = podAnnotationAllocator
 	}
 
@@ -393,7 +394,8 @@ func (oc *SecondaryLayer3NetworkController) Cleanup(netName string) error {
 		return fmt.Errorf("failed to get ops for deleting routers of network %s: %v", netName, err)
 	}
 
-	ops, err = cleanupPolicyLogicalEntities(oc.nbClient, ops, netName)
+	controllerName := getNetworkControllerName(netName)
+	ops, err = cleanupPolicyLogicalEntities(oc.nbClient, ops, controllerName)
 	if err != nil {
 		return err
 	}
@@ -461,11 +463,6 @@ func (oc *SecondaryLayer3NetworkController) Run() error {
 	}
 
 	klog.Infof("Completing all the Watchers for network %s took %v", oc.GetNetworkName(), time.Since(start))
-
-	// controller is fully running and resource handlers have synced, update Topology version in OVN
-	if err := oc.updateL3TopologyVersion(); err != nil {
-		return fmt.Errorf("failed to update topology version for network %s: %v", oc.GetNetworkName(), err)
-	}
 
 	return nil
 }

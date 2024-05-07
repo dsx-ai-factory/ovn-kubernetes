@@ -22,7 +22,7 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
-var _ = ginkgo.Describe("Egress Services", func() {
+var _ = ginkgo.Describe("EgressService", func() {
 	const (
 		egressServiceYAML         = "egress_service.yaml"
 		externalKindContainerName = "kind-external-container-for-egress-service"
@@ -383,6 +383,7 @@ spec:
 			if protocol == v1.IPv6Protocol {
 				otherDstIP = "fc00:f853:ccd:e793:ffff::1"
 			} else {
+				// TODO(mk): replace with non-repeating IP allocator
 				otherDstIP = "172.18.1.1"
 			}
 			_, err = runCommand(containerRuntime, "exec", dstNode.Name, "ip", "addr", "add", otherDstIP, "dev", "breth0")
@@ -478,8 +479,7 @@ spec:
 
 			ginkgo.By("Verifying the first node was picked for handling the service's egress traffic")
 			node, egressHostV4IP, egressHostV6IP := getEgressSVCHost(f.ClientSet, f.Namespace.Name, serviceName)
-			framework.ExpectEqual(node.Name, firstNode, "the wrong node got selected for egress service")
-
+			gomega.Expect(node.Name).To(gomega.Equal(firstNode), "the wrong node got selected for egress service")
 			ginkgo.By("Setting the static route on the external container for the service via the first node's ip")
 			setSVCRouteOnContainer(externalKindContainerName, svcIP, egressHostV4IP, egressHostV6IP)
 
@@ -524,10 +524,10 @@ spec:
 
 			ginkgo.By("Verifying the second node now handles the service's egress traffic")
 			node, egressHostV4IP, egressHostV6IP = getEgressSVCHost(f.ClientSet, f.Namespace.Name, serviceName)
-			framework.ExpectEqual(node.Name, secondNode, "the wrong node got selected for egress service")
+			gomega.Expect(node.Name).To(gomega.Equal(secondNode), "the wrong node got selected for egress service")
 			nodeList, err := f.ClientSet.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{LabelSelector: fmt.Sprintf("egress-service.k8s.ovn.org/%s-%s=", f.Namespace.Name, serviceName)})
 			framework.ExpectNoError(err, "failed to list nodes")
-			framework.ExpectEqual(len(nodeList.Items), 1, fmt.Sprintf("expected only one node labeled for the service, got %v", nodeList.Items))
+			gomega.Expect(len(nodeList.Items)).To(gomega.Equal(1), fmt.Sprintf("expected only one node labeled for the service, got %v", nodeList.Items))
 
 			ginkgo.By("Setting the static route on the external container for the service via the second node's ip")
 			setSVCRouteOnContainer(externalKindContainerName, svcIP, egressHostV4IP, egressHostV6IP)
@@ -619,10 +619,10 @@ spec:
 
 			ginkgo.By("Verifying the third node now handles the service's egress traffic")
 			node, egressHostV4IP, egressHostV6IP = getEgressSVCHost(f.ClientSet, f.Namespace.Name, serviceName)
-			framework.ExpectEqual(node.Name, thirdNode, "the wrong node got selected for egress service")
+			gomega.Expect(node.Name).To(gomega.Equal(thirdNode), "the wrong node got selected for egress service")
 			nodeList, err = f.ClientSet.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{LabelSelector: fmt.Sprintf("egress-service.k8s.ovn.org/%s-%s=", f.Namespace.Name, serviceName)})
 			framework.ExpectNoError(err, "failed to list nodes")
-			framework.ExpectEqual(len(nodeList.Items), 1, fmt.Sprintf("expected only one node labeled for the service, got %v", nodeList.Items))
+			gomega.Expect(len(nodeList.Items)).To(gomega.Equal(1), fmt.Sprintf("expected only one node labeled for the service, got %v", nodeList.Items))
 
 			ginkgo.By("Setting the static route on the external container for the service via the third node's ip")
 			setSVCRouteOnContainer(externalKindContainerName, svcIP, egressHostV4IP, egressHostV6IP)
@@ -864,7 +864,7 @@ spec:
 
 			ginkgo.By("Verifying the first node was selected for the service")
 			node, egressHostV4IP, egressHostV6IP := getEgressSVCHost(f.ClientSet, f.Namespace.Name, serviceName)
-			framework.ExpectEqual(node.Name, firstNode, "the wrong node got selected for egress service")
+			gomega.Expect(node.Name).To(gomega.Equal(firstNode), "the wrong node got selected for egress service")
 
 			ginkgo.By("Setting the static route on the external container for the service via the first node's ip")
 			setSVCRouteOnContainer(externalKindContainerName, svcIP, egressHostV4IP, egressHostV6IP)
@@ -1159,7 +1159,9 @@ spec:
 				gomega.Consistently(func() error {
 					for _, pod := range append(net1.createdPods, net2.createdPods...) {
 						err := curlAgnHostClientIPFromPod(f.Namespace.Name, pod, "", dst, podHTTPPort)
-						if err != nil && strings.Contains(err.Error(), "exit code 28") {
+						if err != nil && (strings.Contains(err.Error(), fmt.Sprintf("exit code 28")) ||
+							// github runners don't have any routes for IPv6, so we get CURLE_COULDNT_CONNECT
+							(protocol == v1.IPv6Protocol && strings.Contains(err.Error(), fmt.Sprintf("exit code 7")))) {
 							return nil
 						}
 
@@ -1355,7 +1357,7 @@ func reachAllServiceBackendsFromExternalContainer(container, svcIP string, svcPo
 		}
 	}
 
-	framework.ExpectEqual(len(backends), 0, fmt.Sprintf("did not reach all pods from outside, missed: %v", backends))
+	gomega.Expect(len(backends)).To(gomega.Equal(0), fmt.Sprintf("did not reach all pods from outside, missed: %v", backends))
 }
 
 // Sets the "dummy" custom routing table on all of the nodes (this heavily relies on the environment to be a kind cluster)

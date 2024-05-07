@@ -24,6 +24,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
 	aclsyncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/acl"
 	addrsetsyncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/address_set"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/port_group"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	zoneic "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
@@ -33,6 +34,7 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
+	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
@@ -121,6 +123,7 @@ type DefaultNetworkController struct {
 	nodeClusterRouterPortFailed sync.Map
 	hybridOverlayFailed         sync.Map
 	syncZoneICFailed            sync.Map
+	syncHostNetAddrSetFailed    sync.Map
 
 	// variable to determine if all pods present on the node during startup have been processed
 	// updated atomically
@@ -278,9 +281,10 @@ func (oc *DefaultNetworkController) newRetryFramework(
 	return r
 }
 
-func (oc *DefaultNetworkController) syncAddressSetsAndAcls() error {
-	// sync address sets, only required for network controller, since any old objects in the db without
+func (oc *DefaultNetworkController) syncDb() error {
+	// sync address sets and ACLs, only required for network controller, since any old objects in the db without
 	// Owner set are owned by the default network controller.
+	// The order of syncs is important, since the next syncer may rely on the data updated by the previous one.
 	addrSetSyncer := addrsetsyncer.NewAddressSetSyncer(oc.nbClient, oc.controllerName, oc.GetNetworkName())
 	err := addrSetSyncer.SyncAddressSets()
 	if err != nil {
@@ -297,6 +301,16 @@ func (oc *DefaultNetworkController) syncAddressSetsAndAcls() error {
 		return fmt.Errorf("failed to sync acls on controller init: %v", err)
 	}
 
+	// port groups should be synced only once across all controllers (as port groups were used by secondary network
+	// controllers before dbIDs, but SyncPortGroups knows how to get this info from the old ExternalIDs, that is also
+	// why it doesn't have controllerName as an argument).
+	// Do it here since DefaultNetworkController is always created, and this sync has dependencies with the other syncs
+	// in this function. It uses acl.ExternalIDs[libovsdbops.ObjectNameKey.String()] to fetch namespace name for a
+	// referenced port group (thus, SyncACLs should be called before).
+	portGroupSyncer := port_group.NewPortGroupSyncer(oc.nbClient, oc.NetInfo)
+	if err = portGroupSyncer.SyncPortGroups(); err != nil {
+		return fmt.Errorf("failed to sync port groups on controller init: %v", err)
+	}
 	// sync shared resources
 	// pod selector address sets
 	err = oc.cleanupPodSelectorAddressSets()
@@ -310,7 +324,7 @@ func (oc *DefaultNetworkController) syncAddressSetsAndAcls() error {
 func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 	klog.Infof("Starting the default network controller")
 
-	err := oc.syncAddressSetsAndAcls()
+	err := oc.syncDb()
 	if err != nil {
 		return err
 	}
@@ -348,11 +362,6 @@ func (oc *DefaultNetworkController) Init(ctx context.Context) error {
 		return err
 	}
 	klog.V(5).Infof("Existing number of nodes: %d", len(existingNodes))
-	err = oc.upgradeOVNTopology(existingNodes)
-	if err != nil {
-		klog.Errorf("Failed to upgrade OVN topology to version %d: %v", ovntypes.OvnCurrentTopologyVersion, err)
-		return err
-	}
 
 	// FIXME: When https://github.com/ovn-org/libovsdb/issues/235 is fixed,
 	// use IsTableSupported(nbdb.LoadBalancerGroup).
@@ -597,11 +606,7 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 		}()
 	}
 
-	// Master is fully running and resource handlers have synced, update Topology version in OVN and the ConfigMap
-	if err := oc.reportTopologyVersion(ctx); err != nil {
-		klog.Errorf("Failed to report topology version: %v", err)
-		return err
-	}
+	metrics.RunOVNKubeFeatureDBObjectsMetricsUpdater(oc.nbClient, oc.controllerName, 30*time.Second, oc.stopChan)
 
 	return nil
 }
@@ -793,6 +798,7 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 				}
 			}
 		}
+		var aggregatedErrors []error
 		if h.oc.isLocalZoneNode(node) {
 			var nodeParams *nodeSyncs
 			if fromRetryLoop {
@@ -816,13 +822,19 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 			if err = h.oc.addUpdateLocalNodeEvent(node, nodeParams); err != nil {
 				klog.Infof("Node add failed for %s, will try again later: %v",
 					node.Name, err)
-				return err
+				aggregatedErrors = append(aggregatedErrors, err)
 			}
 		} else {
 			if err = h.oc.addUpdateRemoteNodeEvent(node, config.OVNKubernetesFeature.EnableInterconnect); err != nil {
-				return err
+				aggregatedErrors = append(aggregatedErrors, err)
 			}
 		}
+		if err = h.oc.addIPToHostNetworkNamespaceAddrSet(node); err != nil {
+			klog.Errorf("Failed to add node IPs to %s address_set: %v", config.Kubernetes.HostNetworkNamespace, err)
+			h.oc.syncHostNetAddrSetFailed.Store(node.Name, true)
+			aggregatedErrors = append(aggregatedErrors, err)
+		}
+		return kerrors.NewAggregate(aggregatedErrors)
 
 	case factory.EgressFirewallType:
 		egressFirewall := obj.(*egressfirewall.EgressFirewall).DeepCopy()
@@ -944,6 +956,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 		newNodeIsLocalZoneNode := h.oc.isLocalZoneNode(newNode)
 		zoneClusterChanged := h.oc.nodeZoneClusterChanged(oldNode, newNode, newNodeIsLocalZoneNode)
 		nodeSubnetChanged := nodeSubnetChanged(oldNode, newNode)
+		var aggregatedErrors []error
 		if newNodeIsLocalZoneNode {
 			var nodeSyncsParam *nodeSyncs
 			if h.oc.isLocalZoneNode(oldNode) {
@@ -968,13 +981,15 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 					hoSync,
 					syncZoneIC}
 			} else {
-				klog.Infof("Node %s moved from the remote zone %s to local zone.",
+				klog.Infof("Node %s moved from the remote zone %s to local zone %s.",
 					newNode.Name, util.GetNodeZone(oldNode), util.GetNodeZone(newNode))
 				// The node is now a local zone node.  Trigger a full node sync.
 				nodeSyncsParam = &nodeSyncs{true, true, true, true, true, config.OVNKubernetesFeature.EnableInterconnect}
 			}
 
-			return h.oc.addUpdateLocalNodeEvent(newNode, nodeSyncsParam)
+			if err := h.oc.addUpdateLocalNodeEvent(newNode, nodeSyncsParam); err != nil {
+				aggregatedErrors = append(aggregatedErrors, err)
+			}
 		} else {
 			_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
 
@@ -986,8 +1001,20 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 				klog.Infof("Node %s in remote zone %s needs interconnect zone sync up. Zone cluster changed: %v",
 					newNode.Name, util.GetNodeZone(newNode), zoneClusterChanged)
 			}
-			return h.oc.addUpdateRemoteNodeEvent(newNode, syncZoneIC)
+			if err := h.oc.addUpdateRemoteNodeEvent(newNode, syncZoneIC); err != nil {
+				aggregatedErrors = append(aggregatedErrors, err)
+			}
 		}
+		_, syncHostNetAddrSet := h.oc.syncHostNetAddrSetFailed.Load(newNode.Name)
+		if syncHostNetAddrSet {
+			if err := h.oc.addIPToHostNetworkNamespaceAddrSet(newNode); err != nil {
+				klog.Errorf("Failed to add node IPs to %s address_set: %v", config.Kubernetes.HostNetworkNamespace, err)
+				aggregatedErrors = append(aggregatedErrors, err)
+			} else {
+				h.oc.syncHostNetAddrSetFailed.Delete(newNode.Name)
+			}
+		}
+		return kerrors.NewAggregate(aggregatedErrors)
 
 	case factory.EgressIPType:
 		oldEIP := oldObj.(*egressipv1.EgressIP)
@@ -1032,11 +1059,11 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 		if oldNoHostSubnet && newNoHostSubnet {
 			return nil
 		} else if oldNoHostSubnet && !newNoHostSubnet {
-			klog.Errorf("Node has been marked for OVN management at runtime. This is not supported,"+
+			klog.Errorf("Node %s has been marked for OVN management at runtime. This is not supported,"+
 				" so please delete node and add.", oldNode.Name)
 			return nil
 		} else if !oldNoHostSubnet && newNoHostSubnet {
-			klog.Errorf("Node has been marked for non-OVN management at runtime. This is not supported,"+
+			klog.Errorf("Node %s has been marked for non-OVN management at runtime. This is not supported,"+
 				" so please delete node and add.", oldNode.Name)
 			return nil
 		}

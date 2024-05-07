@@ -8,6 +8,7 @@ import (
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -32,13 +33,17 @@ type aclSync struct {
 func testSyncerWithData(data []aclSync, controllerName string, initialDbState, finalDbState []libovsdbtest.TestData,
 	existingNodes []*v1.Node) {
 	// create initial db setup
-	dbSetup := libovsdbtest.TestSetup{NBData: initialDbState}
+	pgBefore := &nbdb.PortGroup{
+		UUID: types.ClusterPortGroupNameBase,
+	}
+	dbSetup := libovsdbtest.TestSetup{NBData: append(initialDbState, pgBefore)}
 	for _, asSync := range data {
 		if asSync.after != nil {
 			asSync.before.UUID = asSync.after.String() + "-UUID"
 		} else {
 			asSync.before.UUID = asSync.before.Match
 		}
+		pgBefore.ACLs = append(pgBefore.ACLs, asSync.before.UUID)
 		dbSetup.NBData = append(dbSetup.NBData, asSync.before)
 	}
 	libovsdbOvnNBClient, _, libovsdbCleanup, err := libovsdbtest.NewNBSBTestHarness(dbSetup)
@@ -51,13 +56,18 @@ func testSyncerWithData(data []aclSync, controllerName string, initialDbState, f
 	} else {
 		expectedDbState = initialDbState
 	}
+	pgAfter := &nbdb.PortGroup{
+		UUID: types.ClusterPortGroupNameBase,
+	}
+	expectedDbState = append(expectedDbState, pgAfter)
 	for _, aclSync := range data {
-		acl := aclSync.before
 		if aclSync.after != nil {
+			acl := aclSync.before.DeepCopy()
 			acl.ExternalIDs = aclSync.after.GetExternalIDs()
+			acl.Tier = types.DefaultACLTier
+			pgAfter.ACLs = append(pgAfter.ACLs, acl.UUID)
+			expectedDbState = append(expectedDbState, acl)
 		}
-		acl.Tier = types.DefaultACLTier
-		expectedDbState = append(expectedDbState, acl)
 	}
 	// run sync
 	syncer := NewACLSyncer(libovsdbOvnNBClient, existingNodes, controllerName, &util.DefaultNetInfo{})
@@ -73,7 +83,25 @@ func joinACLName(substrings ...string) string {
 
 func buildPortGroup(hashName, name string, ports []*nbdb.LogicalSwitchPort, acls []*nbdb.ACL) *nbdb.PortGroup {
 	externalIds := map[string]string{"name": name}
-	return libovsdbops.BuildPortGroup(hashName, ports, acls, externalIds)
+	pg := nbdb.PortGroup{
+		Name:        hashName,
+		ExternalIDs: externalIds,
+	}
+
+	if len(acls) > 0 {
+		pg.ACLs = make([]string, 0, len(acls))
+		for _, acl := range acls {
+			pg.ACLs = append(pg.ACLs, acl.UUID)
+		}
+	}
+
+	if len(ports) > 0 {
+		pg.Ports = make([]string, 0, len(ports))
+		for _, port := range ports {
+			pg.Ports = append(pg.Ports, port.UUID)
+		}
+	}
+	return &pg
 }
 
 var _ = ginkgo.Describe("OVN ACL Syncer", func() {
@@ -81,8 +109,8 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 		controllerName = "fake-controller"
 		namespace1     = "namespace1"
 	)
-	var syncerToBuildData = aclSyncer{
-		baseAclSyncer: baseAclSyncer{
+	var syncerToBuildData = AclSyncer{
+		BaseAclSyncer: BaseAclSyncer{
 			controllerName: controllerName,
 		},
 	}
@@ -294,11 +322,14 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 		hostSubnets := map[string][]string{types.DefaultNetworkName: {"10.244.0.0/24", "fd02:0:0:2::2895/64"}}
 		bytes, err := json.Marshal(hostSubnets)
 		gomega.Expect(err).ToNot(gomega.HaveOccurred())
-		existingNodes := []*v1.Node{{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:        nodeName,
-				Annotations: map[string]string{"k8s.ovn.org/node-subnets": string(bytes)},
-			}}}
+		existingNodes := []*v1.Node{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        nodeName,
+					Annotations: map[string]string{"k8s.ovn.org/node-subnets": string(bytes)},
+				},
+			},
+		}
 		testSyncerWithData(testData, controllerName, []libovsdbtest.TestData{}, nil, existingNodes)
 	})
 	ginkgo.It("updates gress policy acls", func() {
@@ -412,7 +443,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 					"",
 					false,
 					map[string]string{
-						l4MatchACLExtIdKey:     noneMatch,
+						l4MatchACLExtIdKey:     libovsdbutil.UnspecifiedL4Match,
 						ipBlockCIDRACLExtIdKey: "false",
 						namespaceACLExtIdKey:   policyNamespace,
 						policyACLExtIdKey:      policyName,
@@ -497,8 +528,8 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 			nil,
 		)
 		finalIngressDenyPG.UUID = finalIngressDenyPG.Name + "-UUID"
-		// acls will stay since they are no garbage-collected by test server
-		finalDb := []libovsdbtest.TestData{staleARPEgressACL, finalEgressDenyPG, staleARPIngressACL, finalIngressDenyPG}
+		finalDb := []libovsdbtest.TestData{finalEgressDenyPG, finalIngressDenyPG}
+
 		testData := []aclSync{
 			// egress deny
 			{
@@ -534,7 +565,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 				),
 				after: syncerToBuildData.getDefaultDenyPolicyACLIDs(policyNamespace, string(knet.PolicyTypeEgress), arpAllowACL),
 			},
-			// egress deny
+			// ingress deny
 			{
 				before: libovsdbops.BuildACL(
 					policyNamespace+"_"+ingressDefaultDenySuffix,
@@ -551,7 +582,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 				),
 				after: syncerToBuildData.getDefaultDenyPolicyACLIDs(policyNamespace, string(knet.PolicyTypeIngress), defaultDenyACL),
 			},
-			// egress allow ARP
+			// ingress allow ARP
 			{
 				before: libovsdbops.BuildACL(
 					getStaleARPAllowACLName(policyNamespace),
@@ -639,8 +670,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 			nil,
 		)
 		finalIngressDenyPG.UUID = finalIngressDenyPG.Name + "-UUID"
-		// acls will stay since they are no garbage-collected by test server
-		finalDb := []libovsdbtest.TestData{staleARPEgressACL, finalEgressDenyPG, staleARPIngressACL, finalIngressDenyPG}
+		finalDb := []libovsdbtest.TestData{finalEgressDenyPG, finalIngressDenyPG}
 
 		testData := []aclSync{
 			// egress deny
@@ -793,7 +823,6 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 		)
 		clusterRtrPortGroup.UUID = clusterRtrPortGroup.Name + "-UUID"
 		initialDb := []libovsdbtest.TestData{clusterRtrPortGroup, egressACL, ingressACL}
-		// acls will stay since they are not garbage-collected by test server
 		finalClusterRtrPortGroup := buildPortGroup(
 			types.ClusterRtrPortGroupNameBase,
 			types.ClusterRtrPortGroupNameBase,
@@ -801,41 +830,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 			nil,
 		)
 		finalClusterRtrPortGroup.UUID = finalClusterRtrPortGroup.Name + "-UUID"
-		// ACLs will actually be deleted, but with the test db server it won't
-		// therefore tier wil be updated
-		finalEgressACL := libovsdbops.BuildACL(
-			"",
-			nbdb.ACLDirectionFromLport,
-			types.DefaultRoutedMcastAllowPriority,
-			"inport == @"+types.ClusterRtrPortGroupNameBase+" && (ip4.mcast || mldv1 || mldv2 || (ip6.dst[120..127] == 0xff && ip6.dst[116] == 1))",
-			nbdb.ACLActionAllow,
-			types.OvnACLLoggingMeter,
-			"",
-			false,
-			map[string]string{
-				defaultDenyPolicyTypeACLExtIdKey: "Egress",
-			},
-			nil,
-			types.DefaultACLTier,
-		)
-		finalEgressACL.UUID = "egress-multicast-UUID"
-		finalIngressACL := libovsdbops.BuildACL(
-			joinACLName(namespace1, "MulticastAllowIngress"),
-			nbdb.ACLDirectionToLport,
-			types.DefaultRoutedMcastAllowPriority,
-			"outport == @"+types.ClusterRtrPortGroupNameBase+" && (ip4.mcast || mldv1 || mldv2 || (ip6.dst[120..127] == 0xff && ip6.dst[116] == 1))",
-			nbdb.ACLActionAllow,
-			types.OvnACLLoggingMeter,
-			"",
-			false,
-			map[string]string{
-				defaultDenyPolicyTypeACLExtIdKey: "Ingress",
-			},
-			nil,
-			types.DefaultACLTier,
-		)
-		finalIngressACL.UUID = "ingress-multicast-UUID"
-		finalDb := []libovsdbtest.TestData{finalClusterRtrPortGroup, finalEgressACL, finalIngressACL}
+		finalDb := []libovsdbtest.TestData{finalClusterRtrPortGroup}
 		testSyncerWithData([]aclSync{}, controllerName, initialDb, finalDb, nil)
 	})
 })

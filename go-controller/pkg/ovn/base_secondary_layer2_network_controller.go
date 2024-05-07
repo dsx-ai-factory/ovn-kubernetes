@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"reflect"
-	"strconv"
 	"time"
 
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta2"
@@ -157,6 +156,9 @@ func (h *baseSecondaryLayer2NetworkControllerEventHandler) SyncFunc(objs []inter
 		case factory.MultiNetworkPolicyType:
 			syncFunc = h.oc.syncMultiNetworkPolicies
 
+		case factory.IPAMClaimsType:
+			syncFunc = h.oc.syncIPAMClaims
+
 		default:
 			return fmt.Errorf("no sync function for object type %s", h.objType)
 		}
@@ -182,6 +184,9 @@ type BaseSecondaryLayer2NetworkController struct {
 func (oc *BaseSecondaryLayer2NetworkController) initRetryFramework() {
 	oc.retryNodes = oc.newRetryFramework(factory.NodeType)
 	oc.retryPods = oc.newRetryFramework(factory.PodType)
+	if oc.allocatesPodAnnotation() && oc.NetInfo.AllowsPersistentIPs() {
+		oc.retryIPAMClaims = oc.newRetryFramework(factory.IPAMClaimsType)
+	}
 
 	// For secondary networks, we don't have to watch namespace events if
 	// multi-network policy support is not enabled. We don't support
@@ -223,6 +228,9 @@ func (oc *BaseSecondaryLayer2NetworkController) stop() {
 	oc.cancelableCtx.Cancel()
 	oc.wg.Wait()
 
+	if oc.ipamClaimsHandler != nil {
+		oc.watchFactory.RemoveIPAMClaimsHandler(oc.ipamClaimsHandler)
+	}
 	if oc.policyHandler != nil {
 		oc.watchFactory.RemoveMultiNetworkPolicyHandler(oc.policyHandler)
 	}
@@ -249,7 +257,8 @@ func (oc *BaseSecondaryLayer2NetworkController) cleanup(topotype, netName string
 		return fmt.Errorf("failed to get ops for deleting switches of network %s: %v", netName, err)
 	}
 
-	ops, err = cleanupPolicyLogicalEntities(oc.nbClient, ops, netName)
+	controllerName := getNetworkControllerName(netName)
+	ops, err = cleanupPolicyLogicalEntities(oc.nbClient, ops, controllerName)
 	if err != nil {
 		return err
 	}
@@ -284,6 +293,17 @@ func (oc *BaseSecondaryLayer2NetworkController) run() error {
 		return err
 	}
 
+	// when on IC, it will be the NetworkController that returns the IPAMClaims
+	// IPs back to the pool
+	if oc.allocatesPodAnnotation() && oc.allowPersistentIPs() {
+		// WatchIPAMClaims should be started before WatchPods to prevent OVN-K
+		// master assigning IPs to pods without taking into account the persistent
+		// IPs set aside for the IPAMClaims
+		if err := oc.WatchIPAMClaims(); err != nil {
+			return err
+		}
+	}
+
 	if err := oc.WatchPods(); err != nil {
 		return err
 	}
@@ -314,12 +334,6 @@ func (oc *BaseSecondaryLayer2NetworkController) run() error {
 	}
 
 	klog.Infof("Completing all the Watchers for network %s took %v", oc.GetNetworkName(), time.Since(start))
-
-	// controller is fully running and resource handlers have synced, update Topology version in OVN
-	if err := oc.updateL2TopologyVersion(); err != nil {
-		return fmt.Errorf("failed to update topology version for network %s: %v", oc.GetNetworkName(), err)
-	}
-
 	return nil
 }
 
@@ -331,7 +345,6 @@ func (oc *BaseSecondaryLayer2NetworkController) initializeLogicalSwitch(switchNa
 	}
 	logicalSwitch.ExternalIDs[types.NetworkExternalID] = oc.GetNetworkName()
 	logicalSwitch.ExternalIDs[types.TopologyExternalID] = oc.TopologyType()
-	logicalSwitch.ExternalIDs[types.TopologyVersionExternalID] = strconv.Itoa(oc.topologyVersion)
 
 	hostSubnets := make([]*net.IPNet, 0, len(clusterSubnets))
 	for _, clusterSubnet := range clusterSubnets {
@@ -424,4 +437,16 @@ func (oc *BaseSecondaryLayer2NetworkController) syncNodes(nodes []interface{}) e
 	}
 
 	return nil
+}
+
+func (oc *BaseSecondaryLayer2NetworkController) syncIPAMClaims(ipamClaims []interface{}) error {
+	switchName, err := oc.getExpectedSwitchName(dummyPod())
+	if err != nil {
+		return err
+	}
+	return oc.ipamClaimsReconciler.Sync(ipamClaims, oc.lsManager.ForSwitch(switchName))
+}
+
+func dummyPod() *corev1.Pod {
+	return &corev1.Pod{Spec: corev1.PodSpec{NodeName: ""}}
 }

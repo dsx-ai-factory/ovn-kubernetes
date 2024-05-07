@@ -620,7 +620,7 @@ func (nadController *NetAttachDefinitionController) addNADToController(ncm Netwo
 					klog.V(5).Infof("Active NAD %s connects to passive NAD %s", nadName, passiveNADName)
 					err = oc.StartInterConnect(icInfo.passiveICInfo)
 					if err != nil {
-						klog.Warningf("Network %s connect to %s failed: %v", oc.GetNetworkName(), passiveNADName)
+						klog.Warningf("Network %s connect to %s failed: %v", oc.GetNetworkName(), passiveNADName, err)
 					}
 					icInfo.isConnected = (err == nil)
 				}

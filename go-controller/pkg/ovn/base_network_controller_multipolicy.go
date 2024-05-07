@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta2"
-	syncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/port_group"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	knet "k8s.io/api/networking/v1"
@@ -34,12 +33,6 @@ func (bsnc *BaseSecondaryNetworkController) syncMultiNetworkPolicies(multiPolici
 				policy.Name: true,
 			}
 		}
-	}
-
-	portGroupSyncer := syncer.NewPortGroupSyncer(bsnc.nbClient, bsnc.NetInfo, 200)
-	err := portGroupSyncer.SyncPortGroups(expectedPolicies)
-	if err != nil {
-		return fmt.Errorf("failed to sync logical port groups for network %s: %v", bsnc.GetNetworkName(), err)
 	}
 
 	return bsnc.syncNetworkPoliciesCommon(expectedPolicies)

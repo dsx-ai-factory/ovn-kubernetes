@@ -82,6 +82,8 @@ OVN_V4_JOIN_SUBNET=""
 OVN_V6_JOIN_SUBNET=""
 OVN_V4_MASQUERADE_SUBNET=""
 OVN_V6_MASQUERADE_SUBNET=""
+OVN_V4_TRANSIT_SWITCH_SUBNET=""
+OVN_V6_TRANSIT_SWITCH_SUBNET=""
 OVN_NETFLOW_TARGETS=""
 OVN_SFLOW_TARGETS=""
 OVN_IPFIX_TARGETS=""
@@ -122,6 +124,7 @@ OVNKUBE_DISABLE_FIREWALLD="false"
 OVNKUBE_ADMIN_FIREWALLD_ZONE="ngn-admin"
 # northd-backoff-interval, in ms
 OVN_NORTHD_BACKOFF_INTERVAL=0
+OVN_ENABLE_PERSISTENT_IPS=
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -331,6 +334,12 @@ while [ "$1" != "" ]; do
   --v6-masquerade-subnet)
     OVN_V6_MASQUERADE_SUBNET=$VALUE
     ;;
+  --v4-transit-switch-subnet)
+    OVN_V4_TRANSIT_SWITCH_SUBNET=$VALUE
+    ;; 
+  --v6-transit-switch-subnet)
+    OVN_V6_TRANSIT_SWITCH_SUBNET=$VALUE
+    ;; 
   --netflow-targets)
     OVN_NETFLOW_TARGETS=$VALUE
     ;;
@@ -441,6 +450,9 @@ while [ "$1" != "" ]; do
     ;;
   --ovn-northd-backoff-interval)
     OVN_NORTHD_BACKOFF_INTERVAL=$VALUE
+    ;;
+  --enable-persistent-ips)
+    OVN_ENABLE_PERSISTENT_IPS=$VALUE
     ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
@@ -602,6 +614,10 @@ ovn_v4_masquerade_subnet=${OVN_V4_MASQUERADE_SUBNET}
 echo "ovn_v4_masquerade_subnet: ${ovn_v4_masquerade_subnet}"
 ovn_v6_masquerade_subnet=${OVN_V6_MASQUERADE_SUBNET}
 echo "ovn_v6_masquerade_subnet: ${ovn_v6_masquerade_subnet}"
+ovn_v4_transit_switch_subnet=${OVN_V4_TRANSIT_SWITCH_SUBNET}
+echo "ovn_v4_transit_switch_subnet: ${ovn_v4_transit_switch_subnet}"
+ovn_v6_transit_switch_subnet=${OVN_V6_TRANSIT_SWITCH_SUBNET}
+echo "ovn_v6_transit_switch_subnet: ${ovn_v6_transit_switch_subnet}"
 ovn_netflow_targets=${OVN_NETFLOW_TARGETS}
 echo "ovn_netflow_targets: ${ovn_netflow_targets}"
 ovn_sflow_targets=${OVN_SFLOW_TARGETS}
@@ -673,6 +689,8 @@ ovnkube_admin_firewalld_zone=${OVNKUBE_ADMIN_FIREWALLD_ZONE}
 echo "ovnkube_admin_firewalld_zone: ${ovnkube_admin_firewalld_zone}"
 ovn_northd_backoff_interval=${OVN_NORTHD_BACKOFF_INTERVAL}
 echo "ovn_northd_backoff_interval: ${ovn_northd_backoff_interval}"
+ovn_enable_persistent_ips=${OVN_ENABLE_PERSISTENT_IPS}
+echo "ovn_enable_persistent_ips: ${ovn_enable_persistent_ips}"
 
 ovn_image=${image} \
   ovnkube_compact_mode_enable=${ovnkube_compact_mode_enable} \
@@ -848,6 +866,7 @@ ovn_image=${image} \
   ovn_v6_masquerade_subnet=${ovn_v6_masquerade_subnet} \
   ovn_multicast_enable=${ovn_multicast_enable} \
   ovn_admin_network_policy_enable=${ovn_admin_network_policy_enable} \
+  ovn_cluster_subnets_mac_binding_aging=${ovn_cluster_subnets_mac_binding_aging} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
   ovn_egress_ip_healthcheck_port=${ovn_egress_ip_healthcheck_port} \
   ovn_egress_ip_reachability_timeout=${ovn_egress_ip_reachability_timeout} \
@@ -872,7 +891,7 @@ ovn_image=${image} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
-  ovn_cluster_subnets_mac_binding_aging=${ovn_cluster_subnets_mac_binding_aging} \
+  ovn_enable_persistent_ips=${ovn_enable_persistent_ips} \
   jinjanate ../templates/ovnkube-master.yaml.j2 -o ${output_dir}/ovnkube-master.yaml
 
 ovn_image=${image} \
@@ -909,6 +928,9 @@ ovn_image=${image} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
+  ovn_v4_transit_switch_subnet=${ovn_v4_transit_switch_subnet} \
+  ovn_v6_transit_switch_subnet=${ovn_v6_transit_switch_subnet} \
+  ovn_enable_persistent_ips=${ovn_enable_persistent_ips} \
   jinjanate ../templates/ovnkube-control-plane.yaml.j2 -o ${output_dir}/ovnkube-control-plane.yaml
 
 ovn_image=${image} \
@@ -955,6 +977,7 @@ ovn_image=${image} \
   ovn_egress_qos_enable=${ovn_egress_qos_enable} \
   ovn_egress_service_enable=${ovn_egress_service_enable} \
   ovn_admin_pbr_enable=${ovn_admin_pbr_enable} \
+  ovn_cluster_subnets_mac_binding_aging=${ovn_cluster_subnets_mac_binding_aging} \
   ovn_virtual_ip_enable=${ovn_virtual_ip_enable} \
   ovn_ipreservation_enable=${ovn_ipreservation_enable} \
   ovn_port_mirror_enable=${ovn_port_mirror_enable} \
@@ -972,7 +995,7 @@ ovn_image=${image} \
   ovnkube_compact_mode_enable=${ovnkube_compact_mode_enable} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
-  ovn_cluster_subnets_mac_binding_aging=${ovn_cluster_subnets_mac_binding_aging} \
+  ovn_enable_persistent_ips=${ovn_enable_persistent_ips} \
   ovn_enable_svc_template_support=${ovn_enable_svc_template_support} \
   jinjanate ../templates/ovnk8s-master.yaml.j2 -o ${output_dir}/ovnk8s-master.yaml
 
@@ -1234,6 +1257,7 @@ ovn_image=${image} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   ovn_northd_backoff_interval=${ovn_northd_backoff_interval} \
+  ovn_enable_persistent_ips=${ovn_enable_persistent_ips} \
   jinjanate ../templates/ovnkube-single-node-zone.yaml.j2 -o ${output_dir}/ovnkube-single-node-zone.yaml
 
 ovn_image=${image} \
@@ -1291,6 +1315,7 @@ ovn_image=${image} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   ovn_northd_backoff_interval=${ovn_enable_backoff_interval} \
+  ovn_enable_persistent_ips=${ovn_enable_persistent_ips} \
   jinjanate ../templates/ovnkube-zone-controller.yaml.j2 -o ${output_dir}/ovnkube-zone-controller.yaml
 
 ovn_image=${imagec} \
@@ -1371,7 +1396,5 @@ cp ../templates/k8s.ovn.org_egressqoses.yaml.j2 ${output_dir}/k8s.ovn.org_egress
 cp ../templates/k8s.ovn.org_egressservices.yaml.j2 ${output_dir}/k8s.ovn.org_egressservices.yaml
 cp ../templates/k8s.ovn.org_ipreservations.yaml.j2 ${output_dir}/k8s.ovn.org_ipreservations.yaml
 cp ../templates/k8s.ovn.org_adminpolicybasedexternalroutes.yaml.j2 ${output_dir}/k8s.ovn.org_adminpolicybasedexternalroutes.yaml
-cp ../templates/policy.networking.k8s.io_adminnetworkpolicies.yaml ${output_dir}/policy.networking.k8s.io_adminnetworkpolicies.yaml
-cp ../templates/policy.networking.k8s.io_baselineadminnetworkpolicies.yaml ${output_dir}/policy.networking.k8s.io_baselineadminnetworkpolicies.yaml
 
 exit 0

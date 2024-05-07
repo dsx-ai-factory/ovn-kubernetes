@@ -23,10 +23,6 @@ import (
 // We fetch PGs and AddressSets that are owned by ANP objectIDs based on
 // externalIDs match from the NBDB. Using predicate search we check if
 // the relevant ANP still exists for these objects and if not we delete them
-// TODO (tssurya): Handle cleaning up stale IPs in the address-sets by fetching all the relevant
-// peer pods that are being served by ANPs - pods could stop matching when ovnkube-controller is down
-// TODO2 (tssurya): Handle cleaning up stale ports from PGs by fetching all the relevant
-// subject pods that are being served by ANPs - pods could stop matching when ovnkube-controller is down
 func (c *Controller) repairAdminNetworkPolicies() error {
 	start := time.Now()
 	defer func() {
@@ -59,14 +55,12 @@ func (c *Controller) repairAdminNetworkPolicies() error {
 	// We grab all the port groups that belong to ANP controller using externalIDs
 	// and compare the value with the name of existing ANPs. If no match is found
 	// we delete that port group along with all the acls in it.
-	p := func(pg *nbdb.PortGroup) bool {
-		anpName, ok := pg.ExternalIDs[ANPExternalIDKey]
-		if !ok {
-			return false // we don't care about this PG as it doesn't belong to ANP controller
-		}
-		_, ok = existingANPs[anpName]
+	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.PortGroupAdminNetworkPolicy, c.controllerName, nil)
+	p := libovsdbops.GetPredicate[*nbdb.PortGroup](predicateIDs, func(pg *nbdb.PortGroup) bool {
+		_, ok := existingANPs[pg.ExternalIDs[libovsdbops.ObjectNameKey.String()]]
 		return !ok // return if it doesn't exist in the cache
-	}
+	})
+
 	stalePGs, err := libovsdbops.FindPortGroupsWithPredicate(c.nbClient, p)
 	if err != nil {
 		return fmt.Errorf("unable to fetch port groups by predicate, err: %v", err)
@@ -104,10 +98,6 @@ func (c *Controller) repairAdminNetworkPolicies() error {
 // We fetch PGs and AddressSets that are owned by BANP objectIDs based on
 // externalIDs match from the NBDB. Using predicate search we check if
 // the relevant BANP still exists for these objects and if not we delete them
-// TODO (tssurya): Handle cleaning up stale IPs in the address-sets by fetching all the relevant
-// peer pods that are being served by BANP - pods could stop matching when ovnkube-controller is down
-// TODO2 (tssurya): Handle cleaning up stale ports from PGs by fetching all the relevant
-// pods that are being served by BANP - pods could stop matching when ovnkube-controller is down
 func (c *Controller) repairBaselineAdminNetworkPolicy() error {
 	start := time.Now()
 	defer func() {
@@ -129,14 +119,11 @@ func (c *Controller) repairBaselineAdminNetworkPolicy() error {
 	// We grab all the port groups that belong to BANP controller using externalIDs
 	// and compare the value with the name of existing BANPs. If no match is found
 	// we delete that port group along with all the acls in it.
-	p := func(pg *nbdb.PortGroup) bool {
-		banpName, ok := pg.ExternalIDs[BANPExternalIDKey]
-		if !ok {
-			return false // we don't care about this PG as it doesn't belong to BANP controller
-		}
-		_, ok = existingBANPs[banpName]
+	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.PortGroupBaselineAdminNetworkPolicy, c.controllerName, nil)
+	p := libovsdbops.GetPredicate[*nbdb.PortGroup](predicateIDs, func(pg *nbdb.PortGroup) bool {
+		_, ok := existingBANPs[pg.ExternalIDs[libovsdbops.ObjectNameKey.String()]]
 		return !ok // return if it doesn't exist in the cache
-	}
+	})
 	stalePGs, err := libovsdbops.FindPortGroupsWithPredicate(c.nbClient, p)
 	if err != nil {
 		return fmt.Errorf("unable to fetch port groups by predicate, err: %v", err)

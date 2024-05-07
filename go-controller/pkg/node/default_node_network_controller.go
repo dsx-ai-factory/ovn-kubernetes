@@ -34,8 +34,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/upgrade"
-	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/ovspinning"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
@@ -399,6 +397,8 @@ func setupOVNNode(node *kapi.Node) error {
 		fmt.Sprintf("external_ids:ovn-monitor-all=%t", config.Default.MonitorAll),
 		fmt.Sprintf("external_ids:ovn-ofctrl-wait-before-clear=%d", config.Default.OfctrlWaitBeforeClear),
 		fmt.Sprintf("external_ids:ovn-enable-lflow-cache=%t", config.Default.LFlowCacheEnable),
+		// when creating tunnel ports set local_ip, helps ensures multiple interfaces and ipv6 will work
+		"external_ids:ovn-set-local-ip=\"true\"",
 	}
 
 	if config.Default.LFlowCacheLimit > 0 {
@@ -869,7 +869,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		// There is no SBDB to connect to in DPU Host mode, so we will just take the default input config zone
 		sbZone = config.Default.Zone
 	} else {
-		err = wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
+		err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
 			sbZone, err = getOVNSBZone()
 			if err != nil {
 				err1 = fmt.Errorf("failed to get the zone name from the OVN Southbound db server, err : %w", err)
@@ -902,7 +902,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	}
 
 	// First wait for the node logical switch to be created by the Master, timeout is 300s.
-	err = wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
+	err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
 		if node, err = nc.Kube.GetNode(nc.name); err != nil {
 			klog.Infof("Waiting to retrieve node %s: %v", nc.name, err)
 			return false, nil
@@ -1018,7 +1018,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		klog.Info("Upgrade Hack: Interconnect is enabled")
 		var err1 error
 		start := time.Now()
-		err = wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
+		err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
 			// we loop through all the nodes in the cluster and ensure ovnkube-controller has finished creating the LRSR required for pod2pod overlay communication
 			if !syncNodes {
 				nodes, err := nc.Kube.GetNodes()
@@ -1094,18 +1094,18 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 			return true, nil
 		})
 		if err != nil {
-			klog.Exitf("Upgrade hack: Timed out waiting for the remote ovnkube-controller to be ready even after 5 minutes, err : %v, %v", err, err1)
+			return fmt.Errorf("upgrade hack: failed while waiting for the remote ovnkube-controller to be ready: %v, %v", err, err1)
 		}
 		if err := util.SetNodeZoneMigrated(nodeAnnotator, sbZone); err != nil {
-			klog.Exitf("Upgrade hack: failed to set node zone annotation for node %s: %w", nc.name, err)
+			return fmt.Errorf("upgrade hack: failed to set node zone annotation for node %s: %w", nc.name, err)
 		}
 		if err := nodeAnnotator.Run(); err != nil {
-			klog.Exitf("Upgrade hack: failed to set node %s annotations: %w", nc.name, err)
+			return fmt.Errorf("upgrade hack: failed to set node %s annotations: %w", nc.name, err)
 		}
 		klog.Infof("ovnkube-node %s finished annotating node with remote-zone-migrated; took: %v", nc.name, time.Since(start))
 		for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
 			if err := auth.SetDBAuth(); err != nil {
-				klog.Exitf("Upgrade hack: Unable to set the authentication towards OVN local dbs")
+				return fmt.Errorf("upgrade hack: Unable to set the authentication towards OVN local dbs")
 			}
 		}
 		klog.Infof("Upgrade hack: ovnkube-node %s finished setting DB Auth; took: %v", nc.name, time.Since(start))
@@ -1124,74 +1124,16 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	// Note(adrianc): DPU deployments are expected to support the new shared gateway changes, upgrade flow
 	// is not needed. Future upgrade flows will need to take DPUs into account.
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
-		// Upgrade for Node. If we upgrade workers before masters, then we need to keep service routing via
-		// mgmt port until masters have been updated and modified OVN config. Run a goroutine to handle this case
-		upgradeController := upgrade.NewController(nc.client, nc.watchFactory)
-		initialTopoVersion, err := upgradeController.GetTopologyVersion(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to get initial topology version: %w", err)
-		}
-		klog.Infof("Current control-plane topology version is %d", initialTopoVersion)
-
 		bridgeName := ""
 		if config.OvnKubeNode.Mode == types.NodeModeFull {
 			bridgeName = nc.gateway.GetGatewayBridgeIface()
-
-			needLegacySvcRoute := true
-			if (initialTopoVersion >= types.OvnHostToSvcOFTopoVersion && config.GatewayModeShared == config.Gateway.Mode) ||
-				(initialTopoVersion >= types.OvnRoutingViaHostTopoVersion) {
-				// Configure route for svc towards shared gw bridge
-				// Have to have the route to bridge for multi-NIC mode, where the default gateway may go to a non-OVS interface
-				if err := configureSvcRouteViaBridge(nc.routeManager, bridgeName); err != nil {
-					return err
-				}
-				needLegacySvcRoute = false
-			}
-
-			// Determine if we need to run upgrade checks
-			if initialTopoVersion != types.OvnCurrentTopologyVersion {
-				if needLegacySvcRoute {
-					klog.Info("System may be upgrading, falling back to legacy K8S Service via management port")
-					// add back legacy route for service via management port
-					link, err := util.LinkSetUp(types.K8sMgmtIntfName)
-					if err != nil {
-						return fmt.Errorf("unable to get link for %s, error: %v", types.K8sMgmtIntfName, err)
-					}
-					var gwIP net.IP
-					for _, subnet := range config.Kubernetes.ServiceCIDRs {
-						if utilnet.IsIPv4CIDR(subnet) {
-							gwIP = mgmtPortConfig.ipv4.gwIP
-						} else {
-							gwIP = mgmtPortConfig.ipv6.gwIP
-						}
-						subnet := *subnet
-						nc.routeManager.Add(netlink.Route{
-							LinkIndex: link.Attrs().Index,
-							Gw:        gwIP,
-							Dst:       &subnet,
-							MTU:       config.Default.RoutableMTU,
-						})
-					}
-				}
+			// Configure route for svc towards shared gw bridge
+			// Have to have the route to bridge for multi-NIC mode, where the default gateway may go to a non-OVS interface
+			if err := configureSvcRouteViaBridge(nc.routeManager, bridgeName); err != nil {
+				return err
 			}
 		}
 
-		// need to run upgrade controller
-		go func() {
-			if err := upgradeController.WaitForTopologyVersion(ctx, types.OvnCurrentTopologyVersion, 30*time.Minute); err != nil {
-				klog.Fatalf("Error while waiting for Topology Version to be updated: %v", err)
-			}
-			// upgrade complete now see what needs upgrading
-			if config.OvnKubeNode.Mode == types.NodeModeFull {
-				// migrate service route from ovn-k8s-mp0 to shared gw bridge
-				if (initialTopoVersion < types.OvnHostToSvcOFTopoVersion && config.GatewayModeShared == config.Gateway.Mode) ||
-					(initialTopoVersion < types.OvnRoutingViaHostTopoVersion) {
-					if err := upgradeServiceRoute(nc.routeManager, bridgeName); err != nil {
-						klog.Fatalf("Failed to upgrade service route for node, error: %v", err)
-					}
-				}
-			}
-		}()
 	}
 
 	if config.HybridOverlay.Enabled {
@@ -1335,7 +1277,6 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to create egress IP controller: %v", err)
 		}
-		nc.wg.Add(1)
 		if err = c.Run(nc.stopChan, nc.wg, 1); err != nil {
 			return fmt.Errorf("failed to run egress IP controller: %v", err)
 		}
@@ -1488,67 +1429,10 @@ func (nc *DefaultNodeNetworkController) syncConntrackForExternalGateways(newNs *
 	// loop through all the IPs on the annotations; ARP for their MACs and form an allowlist
 	gatewayIPs = gatewayIPs.Insert(strings.Split(newNs.Annotations[util.ExternalGatewayPodIPsAnnotation], ",")...)
 	gatewayIPs = gatewayIPs.Insert(strings.Split(newNs.Annotations[util.RoutingExternalGWsAnnotation], ",")...)
-	var wg sync.WaitGroup
-	wg.Add(len(gatewayIPs))
-	validMACs := sync.Map{}
-	for gwIP := range gatewayIPs {
-		go func(gwIP string) {
-			defer wg.Done()
-			if len(gwIP) > 0 && !utilnet.IsIPv6String(gwIP) {
-				// TODO: Add support for IPv6 external gateways
-				if hwAddr, err := util.GetMACAddressFromARP(net.ParseIP(gwIP)); err != nil {
-					klog.Errorf("Failed to lookup hardware address for gatewayIP %s: %v", gwIP, err)
-				} else if len(hwAddr) > 0 {
-					// we need to reverse the mac before passing it to the conntrack filter since OVN saves the MAC in the following format
-					// +------------------------------------------------------------ +
-					// | 128 ...  112 ... 96 ... 80 ... 64 ... 48 ... 32 ... 16 ... 0|
-					// +------------------+-------+--------------------+-------------|
-					// |                  | UNUSED|    MAC ADDRESS     |   UNUSED    |
-					// +------------------+-------+--------------------+-------------+
-					for i, j := 0, len(hwAddr)-1; i < j; i, j = i+1, j-1 {
-						hwAddr[i], hwAddr[j] = hwAddr[j], hwAddr[i]
-					}
-					validMACs.Store(gwIP, []byte(hwAddr))
-				}
-			}
-		}(gwIP)
-	}
-	wg.Wait()
 
-	validNextHopMACs := [][]byte{}
-	validMACs.Range(func(key interface{}, value interface{}) bool {
-		validNextHopMACs = append(validNextHopMACs, value.([]byte))
-		return true
+	return util.SyncConntrackForExternalGateways(gatewayIPs, nil, func() ([]*kapi.Pod, error) {
+		return nc.watchFactory.GetPods(newNs.Name)
 	})
-	// Handle corner case where there are 0 IPs on the annotations OR none of the ARPs were successful; i.e allowMACList={empty}.
-	// This means we *need to* pass a label > 128 bits that will not match on any conntrack entry labels for these pods.
-	// That way any remaining entries with labels having MACs set will get purged.
-	if len(validNextHopMACs) == 0 {
-		validNextHopMACs = append(validNextHopMACs, []byte("does-not-contain-anything"))
-	}
-
-	pods, err := nc.watchFactory.GetPods(newNs.Name)
-	if err != nil {
-		return fmt.Errorf("unable to get pods from informer: %v", err)
-	}
-
-	var errs []error
-	for _, pod := range pods {
-		pod := pod
-		podIPs, err := util.GetPodIPsOfNetwork(pod, nc.NetInfo)
-		if err != nil && !errors.Is(err, util.ErrNoPodIPFound) {
-			errs = append(errs, fmt.Errorf("unable to fetch IP for pod %s/%s: %v", pod.Namespace, pod.Name, err))
-		}
-		for _, podIP := range podIPs { // flush conntrack only for UDP
-			// for this pod, we check if the conntrack entry has a label that is not in the provided allowlist of MACs
-			// only caveat here is we assume egressGW served pods shouldn't have conntrack entries with other labels set
-			err := util.DeleteConntrack(podIP.String(), 0, kapi.ProtocolUDP, netlink.ConntrackOrigDstIP, validNextHopMACs)
-			if err != nil {
-				errs = append(errs, fmt.Errorf("failed to delete conntrack entry for pod %s: %v", podIP.String(), err))
-			}
-		}
-	}
-	return apierrors.NewAggregate(errs)
 }
 
 func (nc *DefaultNodeNetworkController) WatchNamespaces() error {
@@ -1599,42 +1483,6 @@ func (nc *DefaultNodeNetworkController) validateVTEPInterfaceMTU() error {
 
 func configureSvcRouteViaBridge(routeManager *routemanager.Controller, bridge string) error {
 	return configureSvcRouteViaInterface(routeManager, bridge, DummyNextHopIPs())
-}
-
-func upgradeServiceRoute(routeManager *routemanager.Controller, bridgeName string) error {
-	klog.Info("Updating K8S Service route")
-	// Flush old routes
-	link, err := util.LinkSetUp(types.K8sMgmtIntfName)
-	if err != nil {
-		return fmt.Errorf("unable to get link: %s, error: %v", types.K8sMgmtIntfName, err)
-	}
-	for _, serviceCIDR := range config.Kubernetes.ServiceCIDRs {
-		serviceCIDR := *serviceCIDR
-		routeManager.Add(netlink.Route{LinkIndex: link.Attrs().Index, Dst: &serviceCIDR})
-	}
-
-	// add route via OVS bridge
-	if err := configureSvcRouteViaBridge(routeManager, bridgeName); err != nil {
-		return fmt.Errorf("unable to add svc route via OVS bridge interface, error: %v", err)
-	}
-	klog.Info("Successfully updated Kubernetes service route towards OVS")
-	// Clean up gw0 and local ovs bridge as best effort
-	if err := deleteLocalNodeAccessBridge(); err != nil {
-		klog.Warningf("Error while removing Local Node Access Bridge, error: %v", err)
-	}
-	// Clean up gw0 related IPTable rules as best effort.
-	for _, ip := range []string{types.V4NodeLocalNATSubnet, types.V6NodeLocalNATSubnet} {
-		_, IPNet, err := net.ParseCIDR(ip)
-		if err != nil {
-			klog.Errorf("Failed to LocalGatewayNATRules: %v", err)
-		}
-		rules := getLocalGatewayNATRules(types.LocalnetGatewayNextHopPort, IPNet)
-		rules = append(rules, getLocalGatewayFilterRules(types.LocalnetGatewayNextHopPort, IPNet)...)
-		if err := nodeipt.DelRules(rules); err != nil {
-			klog.Errorf("Failed to LocalGatewayNATRules: %v", err)
-		}
-	}
-	return nil
 }
 
 // DummyNextHopIPs returns the fake next hops used for service traffic routing.

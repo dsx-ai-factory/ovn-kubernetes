@@ -883,7 +883,7 @@ func (oc *DefaultNetworkController) syncStaleAddressSetIPs(egressIPCache map[str
 	}
 	// we replace all IPs in the address-set based on eIP cache constructed from kapi
 	// note that setIPs is not thread-safe
-	if err = as.SetIPs(allEIPServedPodIPs); err != nil {
+	if err = as.SetAddresses(util.StringSlice(allEIPServedPodIPs)); err != nil {
 		return fmt.Errorf("cannot reset egressPodIPs in address set %v: err: %v", EgressIPServedPodsAddrSetName, err)
 	}
 	return nil
@@ -1889,7 +1889,7 @@ func (e *egressIPZoneController) deleteEgressIPStatusSetup(name string, status e
 	if err == nil {
 		eIPIP := net.ParseIP(status.EgressIP)
 		if eIPConfig, err := util.GetNodeEIPConfig(eNode); err != nil {
-			klog.Warningf("Failed to get Egress IP config from node annotation: %v", name, eIPIP, err)
+			klog.Warningf("Failed to get Egress IP config from node annotation %s: %v", status.Node, err)
 		} else {
 			isOVNNetwork := util.IsOVNNetwork(eIPConfig, eIPIP)
 			nextHopIP, err = e.getNextHop(status.Node, status.EgressIP, name, isLocalZoneEgressNode, isOVNNetwork)
@@ -1957,7 +1957,7 @@ func (oc *DefaultNetworkController) addPodIPsToAddressSet(addrSetIPs []net.IP) e
 	if err != nil {
 		return fmt.Errorf("cannot ensure that addressSet %s exists %v", EgressIPServedPodsAddrSetName, err)
 	}
-	if err := as.AddIPs(addrSetIPs); err != nil {
+	if err := as.AddAddresses(util.StringSlice(addrSetIPs)); err != nil {
 		return fmt.Errorf("cannot add egressPodIPs %v from the address set %v: err: %v", addrSetIPs, EgressIPServedPodsAddrSetName, err)
 	}
 	return nil
@@ -1969,7 +1969,7 @@ func (oc *DefaultNetworkController) deletePodIPsFromAddressSet(addrSetIPs []net.
 	if err != nil {
 		return fmt.Errorf("cannot ensure that addressSet %s exists %v", EgressIPServedPodsAddrSetName, err)
 	}
-	if err := as.DeleteIPs(addrSetIPs); err != nil {
+	if err := as.DeleteAddresses(util.StringSlice(addrSetIPs)); err != nil {
 		return fmt.Errorf("cannot delete egressPodIPs %v from the address set %v: err: %v", addrSetIPs, EgressIPServedPodsAddrSetName, err)
 	}
 	return nil
@@ -2045,7 +2045,7 @@ func ensureDefaultNoRerouteNodePolicies(nbClient libovsdbclient.Client, addressS
 		return fmt.Errorf("cannot ensure that addressSet %s exists %v", NodeIPAddrSetName, err)
 	}
 
-	if err = as.SetIPs(allAddresses); err != nil {
+	if err = as.SetAddresses(util.StringSlice(allAddresses)); err != nil {
 		return fmt.Errorf("unable to set IPs to no re-route address set %s: %w", NodeIPAddrSetName, err)
 	}
 

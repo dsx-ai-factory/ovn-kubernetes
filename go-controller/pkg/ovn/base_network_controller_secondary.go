@@ -1,15 +1,19 @@
 package ovn
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"reflect"
 	"time"
 
+	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta2"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
@@ -17,10 +21,13 @@ import (
 	aclsyncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/acl"
 	addrsetsyncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/address_set"
 	syncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/ovnentity"
+	pgsyncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/port_group"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
 )
@@ -82,6 +89,8 @@ func (bsnc *BaseSecondaryNetworkController) AddSecondaryNetworkResourceCommon(ob
 				mp.Namespace, mp.Name, err)
 			return err
 		}
+	case factory.IPAMClaimsType:
+		return nil
 
 	default:
 		return fmt.Errorf("object type %s not supported", objType)
@@ -142,6 +151,8 @@ func (bsnc *BaseSecondaryNetworkController) UpdateSecondaryNetworkResourceCommon
 				return err
 			}
 		}
+	case factory.IPAMClaimsType:
+		return nil
 
 	default:
 		return fmt.Errorf("object type %s not supported", objType)
@@ -183,6 +194,25 @@ func (bsnc *BaseSecondaryNetworkController) DeleteSecondaryNetworkResourceCommon
 				mp.Namespace, mp.Name, err)
 			return err
 		}
+
+	case factory.IPAMClaimsType:
+		ipamClaim, ok := obj.(*ipamclaimsapi.IPAMClaim)
+		if !ok {
+			return fmt.Errorf("could not cast obj of type %T to *ipamclaimsapi.IPAMClaim", obj)
+		}
+
+		switchName, err := bsnc.getExpectedSwitchName(dummyPod())
+		if err != nil {
+			return err
+		}
+		ipAllocator := bsnc.lsManager.ForSwitch(switchName)
+		err = bsnc.ipamClaimsReconciler.Reconcile(ipamClaim, nil, ipAllocator)
+		if err != nil && !errors.Is(err, persistentips.ErrIgnoredIPAMClaim) {
+			return fmt.Errorf("error deleting IPAMClaim: %w", err)
+		} else if errors.Is(err, persistentips.ErrIgnoredIPAMClaim) {
+			return nil // let's avoid the log below, since nothing was released.
+		}
+		klog.Infof("Released IPs %q for network %q", ipamClaim.Status.IPs, ipamClaim.Spec.Network)
 
 	default:
 		return fmt.Errorf("object type %s not supported", objType)
@@ -397,6 +427,11 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 			continue
 		}
 
+		_, networkMap, err := util.GetPodNADToNetworkMapping(pod, bsnc.NetInfo)
+		if err != nil {
+			return err
+		}
+
 		bsnc.logicalPortCache.remove(pod, nadName)
 		pInfo, err := bsnc.deletePodLogicalPort(pod, portInfoMap[nadName], nadName)
 		if err != nil {
@@ -414,6 +449,32 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 			continue
 		}
 
+		network := networkMap[nadName]
+
+		hasPersistentIPs := bsnc.allowPersistentIPs()
+		hasIPAMClaim := network != nil && network.IPAMClaimReference != ""
+		if hasIPAMClaim && !hasPersistentIPs {
+			klog.Errorf(
+				"Pod %s/%s referencing an IPAMClaim on network %q which does not honor it",
+				pod.GetNamespace(),
+				pod.GetName(),
+				bsnc.NetInfo.GetNetworkName(),
+			)
+			hasIPAMClaim = false
+		}
+		if hasIPAMClaim {
+			ipamClaim, err := bsnc.ipamClaimsReconciler.FindIPAMClaim(network.IPAMClaimReference, network.Namespace)
+			hasIPAMClaim = ipamClaim != nil && len(ipamClaim.Status.IPs) > 0
+			if apierrors.IsNotFound(err) {
+				klog.Errorf("Failed to retrieve IPAMClaim %q but will release IPs: %v", network.IPAMClaimReference, err)
+			} else if err != nil {
+				return fmt.Errorf("failed to get IPAMClaim %s/%s: %w", network.Namespace, network.IPAMClaimReference, err)
+			}
+		}
+
+		if hasIPAMClaim {
+			continue
+		}
 		// Releasing IPs needs to happen last so that we can deterministically know that if delete failed that
 		// the IP of the pod needs to be released. Otherwise we could have a completed pod failed to be removed
 		// and we dont know if the IP was released or not, and subsequently could accidentally release the IP
@@ -501,7 +562,7 @@ func (bsnc *BaseSecondaryNetworkController) addPodToNamespaceForSecondaryNetwork
 
 	defer nsUnlock()
 
-	if ops, err = nsInfo.addressSet.AddIPsReturnOps(createIPAddressSlice(ips)); err != nil {
+	if ops, err = nsInfo.addressSet.AddAddressesReturnOps(util.IPNetsIPToStringSlice(ips)); err != nil {
 		return nil, err
 	}
 
@@ -593,24 +654,23 @@ func (bsnc *BaseSecondaryNetworkController) WatchMultiNetworkPolicy() error {
 	return err
 }
 
-// cleanupPolicyLogicalEntities cleans up all the port groups and addressset belongs to the given network
-func cleanupPolicyLogicalEntities(nbClient libovsdbclient.Client, ops []ovsdb.Operation, netName string) ([]ovsdb.Operation, error) {
+// cleanupPolicyLogicalEntities cleans up all the port groups and address sets that belong to the given controller
+func cleanupPolicyLogicalEntities(nbClient libovsdbclient.Client, ops []ovsdb.Operation, controllerName string) ([]ovsdb.Operation, error) {
 	var err error
 	portGroupPredicate := func(item *nbdb.PortGroup) bool {
-		return item.ExternalIDs[types.NetworkExternalID] == netName
+		return item.ExternalIDs[libovsdbops.OwnerControllerKey.String()] == controllerName
 	}
 	ops, err = libovsdbops.DeletePortGroupsWithPredicateOps(nbClient, ops, portGroupPredicate)
 	if err != nil {
-		return ops, fmt.Errorf("failed to get ops to delete port group of network %s", netName)
+		return ops, fmt.Errorf("failed to get ops to delete port groups owned by controller %s", controllerName)
 	}
 
-	controllerName := netName + "-network-controller"
 	asPredicate := func(item *nbdb.AddressSet) bool {
 		return item.ExternalIDs[libovsdbops.OwnerControllerKey.String()] == controllerName
 	}
 	ops, err = libovsdbops.DeleteAddressSetsWithPredicateOps(nbClient, ops, asPredicate)
 	if err != nil {
-		return ops, fmt.Errorf("failed to get ops to delete address set of network %s", netName)
+		return ops, fmt.Errorf("failed to get ops to delete address sets owned by controller %s", controllerName)
 	}
 	return ops, nil
 }
@@ -636,13 +696,19 @@ func (bsnc *BaseSecondaryNetworkController) syncOVNLogicalEntities() error {
 	addrSetSyncer := addrsetsyncer.NewAddressSetSyncer(bsnc.nbClient, bsnc.controllerName, bsnc.GetNetworkName())
 	err = addrSetSyncer.SyncAddressSets()
 	if err != nil {
-		return fmt.Errorf("failed to sync address sets on controller init: %v", err)
+		return fmt.Errorf("failed to sync address sets on controller init for network %s: %v", bsnc.GetNetworkName(), err)
 	}
 
 	aclSyncer := aclsyncer.NewBaseACLSyncer(bsnc.nbClient, bsnc.controllerName, bsnc.BaseNetworkController.NetInfo)
 	err = aclSyncer.SyncACLs(aclSyncer.GetUpdatedACLs)
 	if err != nil {
-		return fmt.Errorf("failed to sync acls on controller init: %v", err)
+		return fmt.Errorf("failed to sync acls on controller init for network %s: %v", bsnc.GetNetworkName(), err)
+	}
+
+	pgSyncer := pgsyncer.NewPortGroupSyncer(bsnc.nbClient, bsnc.NetInfo)
+	err = pgSyncer.SyncPortGroups()
+	if err != nil {
+		return fmt.Errorf("failed to sync port group on controller init for network %s: %v", bsnc.GetNetworkName(), err)
 	}
 
 	// sync shared resources
@@ -652,4 +718,24 @@ func (bsnc *BaseSecondaryNetworkController) syncOVNLogicalEntities() error {
 		return fmt.Errorf("cleaning up stale pod selector address sets for network %v failed : %w", bsnc.GetNetworkName(), err)
 	}
 	return nil
+}
+
+// WatchIPAMClaims starts the watching of IPAMClaim resources and calls
+// back the appropriate handler logic
+func (bsnc *BaseSecondaryNetworkController) WatchIPAMClaims() error {
+	if bsnc.ipamClaimsHandler != nil {
+		return nil
+	}
+	handler, err := bsnc.retryIPAMClaims.WatchResource()
+	if err != nil {
+		bsnc.ipamClaimsHandler = handler
+	}
+	return err
+}
+
+func (oc *BaseSecondaryNetworkController) allowPersistentIPs() bool {
+	return config.OVNKubernetesFeature.EnablePersistentIPs &&
+		oc.NetInfo.AllowsPersistentIPs() &&
+		util.DoesNetworkRequireIPAM(oc.NetInfo) &&
+		(oc.NetInfo.TopologyType() == types.Layer2Topology || oc.NetInfo.TopologyType() == types.LocalnetTopology)
 }

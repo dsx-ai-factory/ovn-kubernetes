@@ -58,6 +58,9 @@ should prevent Ingress creation if more than 1 IngressClass marked as default
 
 # TODO: Figure out why the below test is failing and if we need to add support in OVN-K for them
 validates that there is no conflict between pods with same hostPort but different hostIP and protocol
+
+# Skip ServiceCidr tests as we dont currenly support this v1alpha feature
+should create Services and servce on different Service CIDRs
 "
 
 IPV4_ONLY_TESTS="
@@ -125,9 +128,6 @@ if [ "$DUALSTACK_CONVERSION" == true ]; then
 fi
 
 if [ "$OVN_GATEWAY_MODE" == "local" ]; then
-  if [ "$SKIPPED_TESTS" != "" ]; then
-    SKIPPED_TESTS+="|"
-  fi
   SKIPPED_TESTS+="should fallback to local terminating endpoints when there are no ready endpoints with externalTrafficPolicy=Local"
 fi
 

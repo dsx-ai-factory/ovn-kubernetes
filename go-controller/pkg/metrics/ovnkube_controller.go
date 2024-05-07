@@ -17,6 +17,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -155,7 +156,7 @@ var MetricOVNKubeControllerLeader = prometheus.NewGauge(prometheus.GaugeOpts{
 })
 
 // metric to get the size of ovnkube-master.log files
-var metricOvnKubeMasterLogFileSize = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+var metricOvnKubeControllerLogFileSize = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemController,
 	Name:      "logfile_size",
@@ -273,16 +274,36 @@ var metricEgressFirewallCount = prometheus.NewGauge(prometheus.GaugeOpts{
 var metricANPCount = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemController,
-	Name:      "admin_network_policy_custom_resource_total",
+	Name:      "admin_network_policies",
 	Help:      "The total number of admin network policies in the cluster",
 })
 
 var metricBANPCount = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemController,
-	Name:      "baseline_admin_network_policy_custom_resource_total",
-	Help:      "The total number of baseline admin network policies (0 or 1) in the cluster",
+	Name:      "baseline_admin_network_policies",
+	Help:      "The total number of baseline admin network policies in the cluster",
 })
+
+var metricANPDBObjects = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemController,
+	Name:      "admin_network_policies_db_objects",
+	Help:      "The total number of OVN NBDB objects (table_name) owned by AdminNetworkPolicy controller in the cluster"},
+	[]string{
+		"table_name",
+	},
+)
+
+var metricBANPDBObjects = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemController,
+	Name:      "baseline_admin_network_policies_db_objects",
+	Help:      "The total number of OVN NBDB objects (table_name) owned by BaselineAdminNetworkPolicy controller in the cluster"},
+	[]string{
+		"table_name",
+	},
+)
 
 /** AdminNetworkPolicyMetrics End**/
 
@@ -439,8 +460,47 @@ func RegisterOVNKubeControllerFunctional(metricsScrapeInterval int, stopChan <-c
 		}
 	}
 	// ovnkube-controller logfile size metric
-	prometheus.MustRegister(metricOvnKubeMasterLogFileSize)
-	go ovnKubeLogFileSizeMetricsUpdater(metricOvnKubeMasterLogFileSize, metricsScrapeInterval, stopChan)
+	prometheus.MustRegister(metricOvnKubeControllerLogFileSize)
+	go ovnKubeLogFileSizeMetricsUpdater(metricOvnKubeControllerLogFileSize, metricsScrapeInterval, stopChan)
+}
+
+func registerOVNKubeFeatureDBObjectsMetrics() {
+	prometheus.MustRegister(metricANPDBObjects)
+	prometheus.MustRegister(metricBANPDBObjects)
+}
+
+func RunOVNKubeFeatureDBObjectsMetricsUpdater(ovnNBClient libovsdbclient.Client, controllerName string, tickPeriod time.Duration, stopChan <-chan struct{}) {
+	registerOVNKubeFeatureDBObjectsMetrics()
+	go func() {
+		ticker := time.NewTicker(tickPeriod)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				updateOVNKubeFeatureNBDBObjectMetrics(ovnNBClient, controllerName)
+			case <-stopChan:
+				return
+			}
+		}
+	}()
+}
+
+func updateOVNKubeFeatureNBDBObjectMetrics(ovnNBClient libovsdbclient.Client, controllerName string) {
+	if config.OVNKubernetesFeature.EnableAdminNetworkPolicy {
+		// ANP Feature
+		// 1. ACL 2. AddressSet (TODO: Add PG once indexing is done)
+		aclCount := libovsdbutil.GetACLCount(ovnNBClient, libovsdbops.ACLAdminNetworkPolicy, controllerName)
+		metricANPDBObjects.WithLabelValues(nbdb.ACLTable).Set(float64(aclCount))
+		addressSetCount := libovsdbutil.GetAddressSetCount(ovnNBClient, libovsdbops.AddressSetAdminNetworkPolicy, controllerName)
+		metricANPDBObjects.WithLabelValues(nbdb.AddressSetTable).Set(float64(addressSetCount))
+
+		// BANP Feature
+		// 1. ACL 2. AddressSet (TODO: Add PG once indexing is done)
+		aclCount = libovsdbutil.GetACLCount(ovnNBClient, libovsdbops.ACLBaselineAdminNetworkPolicy, controllerName)
+		metricBANPDBObjects.WithLabelValues(nbdb.ACLTable).Set(float64(aclCount))
+		addressSetCount = libovsdbutil.GetAddressSetCount(ovnNBClient, libovsdbops.AddressSetBaselineAdminNetworkPolicy, controllerName)
+		metricBANPDBObjects.WithLabelValues(nbdb.AddressSetTable).Set(float64(addressSetCount))
+	}
 }
 
 // RunTimestamp adds a goroutine that registers and updates timestamp metrics.

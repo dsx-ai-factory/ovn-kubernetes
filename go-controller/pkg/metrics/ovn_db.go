@@ -419,8 +419,7 @@ func getNBDBSockPath() (string, error) {
 }
 
 func getOvnDbVersionInfo() {
-	ctlPath := "/var/run/openvswitch/ovnnb_db.ctl"
-	stdout, _, err := util.RunOVSAppctl("-t", ctlPath, "version")
+	stdout, _, err := util.RunOVNNBAppCtl("version")
 	if err == nil && strings.HasPrefix(stdout, "ovsdb-server (Open vSwitch) ") {
 		ovnDbVersion = strings.Fields(stdout)[3]
 	}

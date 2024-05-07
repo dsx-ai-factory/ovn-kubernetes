@@ -45,6 +45,7 @@ type BasicNetInfo interface {
 	Subnets() []config.CIDRNetworkEntry
 	ExcludeSubnets() []*net.IPNet
 	Vlan() uint
+	AllowsPersistentIPs() bool
 	Gateway() string
 	GatewayMAC() string
 	XDPService() bool
@@ -155,6 +156,11 @@ func (nInfo *DefaultNetInfo) Vlan() uint {
 	return config.Gateway.VLANID
 }
 
+// AllowsPersistentIPs returns the defaultNetConfInfo's AllowPersistentIPs value
+func (nInfo *DefaultNetInfo) AllowsPersistentIPs() bool {
+	return false
+}
+
 // Gateway returns the defaultNetConfInfo's Gateway value
 func (nInfo *DefaultNetInfo) Gateway() string {
 	panic("unexpected call for default network")
@@ -195,14 +201,15 @@ func (nInfo *DefaultNetInfo) GetInterConnectInfo() *InterConnectInfo {
 
 // SecondaryNetInfo holds the network name information for secondary network if non-nil
 type secondaryNetInfo struct {
-	netName    string
-	topology   string
-	mtu        int
-	vlan       uint
-	gateway    string
-	gatewayMAC string
-	xdpService bool
-	nadRoutes  []*net.IPNet
+	netName            string
+	topology           string
+	mtu                int
+	vlan               uint
+	allowPersistentIPs bool
+	gateway            string
+	gatewayMAC         string
+	xdpService         bool
+	nadRoutes          []*net.IPNet
 
 	// layer2 topology only
 	connectToNAD string
@@ -280,6 +287,11 @@ func (nInfo *secondaryNetInfo) Vlan() uint {
 	return nInfo.vlan
 }
 
+// AllowsPersistentIPs returns the defaultNetConfInfo's AllowPersistentIPs value
+func (nInfo *secondaryNetInfo) AllowsPersistentIPs() bool {
+	return nInfo.allowPersistentIPs
+}
+
 // IPMode returns the ipv4/ipv6 mode
 func (nInfo *secondaryNetInfo) IPMode() (bool, bool) {
 	return nInfo.ipv4mode, nInfo.ipv6mode
@@ -353,6 +365,9 @@ func (nInfo *secondaryNetInfo) CompareNetInfo(other BasicNetInfo) bool {
 	if nInfo.vlan != other.Vlan() {
 		return false
 	}
+	if nInfo.allowPersistentIPs != other.AllowsPersistentIPs() {
+		return false
+	}
 	if nInfo.gateway != other.Gateway() {
 		return false
 	}
@@ -408,12 +423,13 @@ func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf, annotations map[string]s
 	nad := annotations[types.OvnK8sConnectToNad]
 
 	ni := &secondaryNetInfo{
-		netName:        netconf.Name,
-		topology:       types.Layer2Topology,
-		subnets:        subnets,
-		excludeSubnets: excludes,
-		mtu:            netconf.MTU,
-		connectToNAD:   nad,
+		netName:            netconf.Name,
+		topology:           types.Layer2Topology,
+		subnets:            subnets,
+		excludeSubnets:     excludes,
+		mtu:                netconf.MTU,
+		allowPersistentIPs: netconf.AllowPersistentIPs,
+		connectToNAD:       nad,
 	}
 	ni.nadRoutes, err = getNADRoutesConfig(annotations)
 	if err != nil {
@@ -434,15 +450,16 @@ func newLocalnetNetConfInfo(netconf *ovncnitypes.NetConf, annotations map[string
 	}
 
 	ni := &secondaryNetInfo{
-		netName:        netconf.Name,
-		topology:       types.LocalnetTopology,
-		subnets:        subnets,
-		excludeSubnets: excludes,
-		mtu:            netconf.MTU,
-		vlan:           uint(netconf.VLANID),
-		gateway:        netconf.Gateway,
-		gatewayMAC:     netconf.GatewayMAC,
-		xdpService:     netconf.XDPService,
+		netName:            netconf.Name,
+		topology:           types.LocalnetTopology,
+		subnets:            subnets,
+		excludeSubnets:     excludes,
+		mtu:                netconf.MTU,
+		vlan:               uint(netconf.VLANID),
+		allowPersistentIPs: netconf.AllowPersistentIPs,
+		gateway:            netconf.Gateway,
+		gatewayMAC:         netconf.GatewayMAC,
+		xdpService:         netconf.XDPService,
 	}
 	ni.nadRoutes, err = getNADRoutesConfig(annotations)
 	if err != nil {
@@ -589,6 +606,10 @@ func ParseNetConf(netattachdef *nettypes.NetworkAttachmentDefinition) (*ovncnity
 		if netconf.NADName != nadName {
 			return nil, fmt.Errorf("net-attach-def name (%s) is inconsistent with config (%s)", nadName, netconf.NADName)
 		}
+	}
+
+	if netconf.AllowPersistentIPs && netconf.Topology == types.Layer3Topology {
+		return nil, fmt.Errorf("layer3 topology does not allow persistent IPs")
 	}
 
 	if netconf.IPAM.Type != "" {

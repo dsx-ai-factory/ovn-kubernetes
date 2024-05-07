@@ -326,7 +326,7 @@ func (allocator *allocator) AllocateIPsByCount(name string, isIPv4 bool, count i
 		}
 	}
 	if len(ipnets) != int(count) {
-		klog.Errorf("Reservation failed. Was able to only allocate only %d IPs out of %d requested.")
+		klog.Errorf("Reservation failed. Was able to only allocate only %d IPs out of %d requested.", len(ipnets), count)
 		err = ipallocator.ErrFull
 		return nil, ipallocator.ErrFull
 	}

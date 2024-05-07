@@ -390,7 +390,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 		gomega.Expect(ok).To(gomega.BeTrue())
 		asf := ocInfo.asf
 		gomega.Expect(asf).NotTo(gomega.Equal(nil))
-		gomega.Expect(asf.ControllerName).To(gomega.Equal(secondaryNetworkName + "-network-controller"))
+		gomega.Expect(asf.ControllerName).To(gomega.Equal(getNetworkControllerName(secondaryNetworkName)))
 
 		for _, ocInfo := range fakeOvn.secondaryControllers {
 			// localnet topology can't watch for nodes
@@ -509,7 +509,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 				_, err = fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).
 					Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
+				fakeOvn.asf.ExpectAddressSetWithAddresses(namespaceName1, []string{nPodTest.podIP})
 
 				dataParams := newNetpolDataParams(networkPolicy).
 					withLocalPortUUIDs(nPodTest.portUUID).
@@ -536,7 +536,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 				ocInfo := fakeOvn.secondaryControllers[secondaryNetworkName]
 				portInfo := nPodTest.getNetworkPortInfo(secondaryNetworkName, nadNamespacedName)
 				gomega.Expect(portInfo).NotTo(gomega.Equal(nil))
-				ocInfo.asf.ExpectAddressSetWithIPs(namespaceName1, []string{portInfo.podIP})
+				ocInfo.asf.ExpectAddressSetWithAddresses(namespaceName1, []string{portInfo.podIP})
 
 				dataParams2 := newNetpolDataParams(networkPolicy).
 					withLocalPortUUIDs(portInfo.portUUID).
@@ -553,22 +553,14 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 				err = fakeOvn.fakeClient.MultiNetworkPolicyClient.K8sCniCncfIoV1beta2().MultiNetworkPolicies(mpolicy.Namespace).
 					Delete(context.TODO(), mpolicy.Name, metav1.DeleteOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				// TODO: test server does not garbage collect ACLs, so we just expect policy & deny portgroups to be removed
-				expectedData3 := append(expectedData1, gressPolicyExpectedData2[:len(gressPolicyExpectedData1)-1]...)
-				expectedData3 = append(expectedData3, defaultDenyExpectedData2[:len(defaultDenyExpectedData2)-2]...)
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData3))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData1))
 
 				ginkgo.By("Deleting the network policy")
 				err = fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).
 					Delete(context.TODO(), networkPolicy.Name, metav1.DeleteOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				// TODO: test server does not garbage collect ACLs, so we just expect policy & deny portgroups to be removed
-				expectedData4 := append(initData, gressPolicyExpectedData1[:len(gressPolicyExpectedData1)-1]...)
-				expectedData4 = append(expectedData4, gressPolicyExpectedData2[:len(gressPolicyExpectedData2)-1]...)
-				expectedData4 = append(expectedData4, defaultDenyExpectedData1[:len(defaultDenyExpectedData1)-2]...)
-				expectedData4 = append(expectedData4, defaultDenyExpectedData2[:len(defaultDenyExpectedData2)-2]...)
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData4))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(initData))
 				return nil
 			}
 
@@ -653,7 +645,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					}
 
-					ocInfo.asf.EventuallyExpectAddressSetWithIPs(namespaceName1, []string{"10.1.1.1"})
+					ocInfo.asf.EventuallyExpectAddressSetWithAddresses(namespaceName1, []string{"10.1.1.1"})
 
 					// Delete the pod
 					ginkgo.By("Deleting the pod")

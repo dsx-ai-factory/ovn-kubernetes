@@ -319,6 +319,8 @@ spec:
           value: "{{ ovn_ctinv_flows_disable }}"
         - name: OVN_CLUSTER_SUBNETS_MAC_BINDING_AGING
           value: "{{ ovn_cluster_subnets_mac_binding_aging }}"
+        - name: OVN_ENABLE_PERSISTENT_IPS
+          value: "{{ ovn_enable_persistent_ips }}"
       # end of container
 
       volumes:

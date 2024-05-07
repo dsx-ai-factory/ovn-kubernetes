@@ -27,13 +27,13 @@ type bridgeOpenflowCache struct {
 type OpenFlowManager struct {
 	flowCacheMap *syncmap.SyncMap[*bridgeOpenflowCache]
 	wg           *sync.WaitGroup
-	stopChan     chan struct{}
+	stopChan     <-chan struct{}
 }
 
 // OpenFlowCacheManager managers open-flows of all bridges across board
 var OpenFlowCacheManager *OpenFlowManager
 
-func NewOpenFlowCacheManager(wg *sync.WaitGroup, stopChan chan struct{}) {
+func NewOpenFlowCacheManager(wg *sync.WaitGroup, stopChan <-chan struct{}) {
 	OpenFlowCacheManager = &OpenFlowManager{
 		flowCacheMap: syncmap.NewSyncMap[*bridgeOpenflowCache](),
 		wg:           wg,

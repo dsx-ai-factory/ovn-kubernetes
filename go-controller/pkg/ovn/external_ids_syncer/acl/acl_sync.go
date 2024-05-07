@@ -10,6 +10,7 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -32,7 +33,6 @@ const (
 	policyACLExtIdKey                = "policy"
 	policyTypeACLExtIdKey            = "policy_type"
 	policyTypeNumACLExtIdKey         = "%s_num"
-	noneMatch                        = "None"
 	emptyIdx                         = -1
 	defaultDenyACL                   = "defaultDeny"
 	arpAllowACL                      = "arpAllow"
@@ -43,12 +43,12 @@ const (
 	egressFirewallACLExtIdKey = "egressFirewall"
 )
 
-type aclSyncer struct {
-	baseAclSyncer
+type AclSyncer struct {
+	BaseAclSyncer
 	existingNodes []*v1.Node
 }
 
-type baseAclSyncer struct {
+type BaseAclSyncer struct {
 	util.NetInfo
 	nbClient       libovsdbclient.Client
 	controllerName string
@@ -58,9 +58,9 @@ type baseAclSyncer struct {
 }
 
 func NewACLSyncer(nbClient libovsdbclient.Client, existingNodes []*v1.Node,
-	controllerName string, netInfo util.NetInfo) *aclSyncer {
-	return &aclSyncer{
-		baseAclSyncer: baseAclSyncer{
+	controllerName string, netInfo util.NetInfo) *AclSyncer {
+	return &AclSyncer{
+		BaseAclSyncer: BaseAclSyncer{
 			NetInfo:        netInfo,
 			nbClient:       nbClient,
 			controllerName: controllerName,
@@ -74,8 +74,8 @@ func NewACLSyncer(nbClient libovsdbclient.Client, existingNodes []*v1.Node,
 }
 
 // controllerName is the name of the new controller that should own all acls without controller
-func NewBaseACLSyncer(nbClient libovsdbclient.Client, controllerName string, netInfo util.NetInfo) *baseAclSyncer {
-	return &baseAclSyncer{
+func NewBaseACLSyncer(nbClient libovsdbclient.Client, controllerName string, netInfo util.NetInfo) *BaseAclSyncer {
+	return &BaseAclSyncer{
 		NetInfo:        netInfo,
 		nbClient:       nbClient,
 		controllerName: controllerName,
@@ -86,7 +86,7 @@ func NewBaseACLSyncer(nbClient libovsdbclient.Client, controllerName string, net
 	}
 }
 
-func (syncer *aclSyncer) GetUpdatedACLs(legacyACLs []*nbdb.ACL) (updatedACLs []*nbdb.ACL,
+func (syncer *AclSyncer) GetUpdatedACLs(legacyACLs []*nbdb.ACL) (updatedACLs []*nbdb.ACL,
 	deleteOps []libovsdb.Operation, err error) {
 	multicastACLs := syncer.updateStaleMulticastACLsDbIDs(legacyACLs)
 	klog.Infof("Found %d stale multicast ACLs", len(multicastACLs))
@@ -100,7 +100,7 @@ func (syncer *aclSyncer) GetUpdatedACLs(legacyACLs []*nbdb.ACL) (updatedACLs []*
 	klog.Infof("Found %d stale egress firewall ACLs", len(egressFirewallACLs))
 	updatedACLs = append(updatedACLs, egressFirewallACLs...)
 
-	newUpdatedACLs, deleteACLs, err := syncer.baseAclSyncer.GetUpdatedACLs(legacyACLs)
+	newUpdatedACLs, deleteACLs, err := syncer.BaseAclSyncer.GetUpdatedACLs(legacyACLs)
 	if err != nil {
 		return updatedACLs, deleteOps, nil
 	}
@@ -109,7 +109,7 @@ func (syncer *aclSyncer) GetUpdatedACLs(legacyACLs []*nbdb.ACL) (updatedACLs []*
 	return updatedACLs, deleteOps, nil
 }
 
-func (syncer *baseAclSyncer) GetUpdatedACLs(legacyACLs []*nbdb.ACL) (updatedACLs []*nbdb.ACL,
+func (syncer *BaseAclSyncer) GetUpdatedACLs(legacyACLs []*nbdb.ACL) (updatedACLs []*nbdb.ACL,
 	deleteOps []libovsdb.Operation, err error) {
 	defaultDenyACLs, deleteACLs, err := syncer.updateStaleDefaultDenyNetpolACLs(legacyACLs)
 	if err != nil {
@@ -128,7 +128,7 @@ func (syncer *baseAclSyncer) GetUpdatedACLs(legacyACLs []*nbdb.ACL) (updatedACLs
 	return updatedACLs, deleteOps, nil
 }
 
-func (syncer *baseAclSyncer) SyncACLs(getUpdatedACLs func([]*nbdb.ACL) ([]*nbdb.ACL,
+func (syncer *BaseAclSyncer) SyncACLs(getUpdatedACLs func([]*nbdb.ACL) ([]*nbdb.ACL,
 	[]libovsdb.Operation, error)) error {
 	// stale acls don't have controller ID
 	legacyAclPred := func(item *nbdb.ACL) bool {
@@ -241,7 +241,7 @@ func (syncer *baseAclSyncer) SyncACLs(getUpdatedACLs func([]*nbdb.ACL) ([]*nbdb.
 	return nil
 }
 
-func (syncer *aclSyncer) getDefaultMcastACLDbIDs(mcastType, policyDirection string) *libovsdbops.DbObjectIDs {
+func (syncer *AclSyncer) getDefaultMcastACLDbIDs(mcastType, policyDirection string) *libovsdbops.DbObjectIDs {
 	// there are 2 types of default multicast ACLs in every direction (Ingress/Egress)
 	// DefaultDeny = deny multicast by default
 	// AllowInterNode = allow inter-node multicast
@@ -252,7 +252,7 @@ func (syncer *aclSyncer) getDefaultMcastACLDbIDs(mcastType, policyDirection stri
 		})
 }
 
-func (syncer *aclSyncer) getNamespaceMcastACLDbIDs(ns, policyDirection string) *libovsdbops.DbObjectIDs {
+func (syncer *AclSyncer) getNamespaceMcastACLDbIDs(ns, policyDirection string) *libovsdbops.DbObjectIDs {
 	// namespaces ACL
 	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLMulticastNamespace, syncer.controllerName,
 		map[libovsdbops.ExternalIDKey]string{
@@ -264,7 +264,7 @@ func (syncer *aclSyncer) getNamespaceMcastACLDbIDs(ns, policyDirection string) *
 // updateStaleMulticastACLsDbIDs updates multicast ACLs that don't have new ExternalIDs set.
 // Must be run before WatchNamespace, since namespaceSync function uses syncNsMulticast, which relies on the new IDs.
 // Default network only
-func (syncer *aclSyncer) updateStaleMulticastACLsDbIDs(legacyACLs []*nbdb.ACL) []*nbdb.ACL {
+func (syncer *AclSyncer) updateStaleMulticastACLsDbIDs(legacyACLs []*nbdb.ACL) []*nbdb.ACL {
 	updatedACLs := []*nbdb.ACL{}
 	for _, acl := range legacyACLs {
 		var dbIDs *libovsdbops.DbObjectIDs
@@ -316,7 +316,7 @@ func (syncer *aclSyncer) updateStaleMulticastACLsDbIDs(legacyACLs []*nbdb.ACL) [
 	return updatedACLs
 }
 
-func (syncer *aclSyncer) getAllowFromNodeACLDbIDs(nodeName, mgmtPortIP string) *libovsdbops.DbObjectIDs {
+func (syncer *AclSyncer) getAllowFromNodeACLDbIDs(nodeName, mgmtPortIP string) *libovsdbops.DbObjectIDs {
 	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLNetpolNode, syncer.controllerName,
 		map[libovsdbops.ExternalIDKey]string{
 			libovsdbops.ObjectNameKey: nodeName,
@@ -327,7 +327,7 @@ func (syncer *aclSyncer) getAllowFromNodeACLDbIDs(nodeName, mgmtPortIP string) *
 // updateStaleNetpolNodeACLs updates allow from node ACLs, that don't have new ExternalIDs based
 // on DbObjectIDs set. Allow from node acls are applied on the node switch, therefore the cleanup for deleted is not needed,
 // since acl will be deleted toegther with the node switch.
-func (syncer *aclSyncer) updateStaleNetpolNodeACLs(legacyACLs []*nbdb.ACL, existingNodes []*v1.Node) []*nbdb.ACL {
+func (syncer *AclSyncer) updateStaleNetpolNodeACLs(legacyACLs []*nbdb.ACL, existingNodes []*v1.Node) []*nbdb.ACL {
 	// ACL to allow traffic from host via management port has no name or ExternalIDs
 	// The only way to find it is by exact match
 	type aclInfo struct {
@@ -367,7 +367,7 @@ func (syncer *aclSyncer) updateStaleNetpolNodeACLs(legacyACLs []*nbdb.ACL, exist
 	return updatedACLs
 }
 
-func (syncer *baseAclSyncer) getNetpolGressACLDbIDs(policyNamespace, policyName, policyType string,
+func (syncer *BaseAclSyncer) getNetpolGressACLDbIDs(policyNamespace, policyName, policyType string,
 	gressIdx, portPolicyIdx, ipBlockIdx int) *libovsdbops.DbObjectIDs {
 	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLNetworkPolicyPortIndex, syncer.controllerName,
 		map[libovsdbops.ExternalIDKey]string{
@@ -389,7 +389,7 @@ func (syncer *baseAclSyncer) getNetpolGressACLDbIDs(policyNamespace, policyName,
 		})
 }
 
-func (syncer *baseAclSyncer) updateStaleGressPolicies(legacyACLs []*nbdb.ACL) (updatedACLs []*nbdb.ACL, err error) {
+func (syncer *BaseAclSyncer) updateStaleGressPolicies(legacyACLs []*nbdb.ACL) (updatedACLs []*nbdb.ACL, err error) {
 	if len(legacyACLs) == 0 {
 		return
 	}
@@ -433,7 +433,7 @@ func (syncer *baseAclSyncer) updateStaleGressPolicies(legacyACLs []*nbdb.ACL) (u
 		}
 		var portIdx int
 		l4Match := acl.ExternalIDs[l4MatchACLExtIdKey]
-		if l4Match == noneMatch {
+		if l4Match == libovsdbutil.UnspecifiedL4Match {
 			portIdx = emptyIdx
 		} else {
 			if _, ok := gressPolicyPortCount[gressACLID][l4Match]; !ok {
@@ -450,7 +450,7 @@ func (syncer *baseAclSyncer) updateStaleGressPolicies(legacyACLs []*nbdb.ACL) (u
 	return
 }
 
-func (syncer *baseAclSyncer) getDefaultDenyPolicyACLIDs(ns, policyType, defaultACLType string) *libovsdbops.DbObjectIDs {
+func (syncer *BaseAclSyncer) getDefaultDenyPolicyACLIDs(ns, policyType, defaultACLType string) *libovsdbops.DbObjectIDs {
 	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLNetpolNamespace, syncer.controllerName,
 		map[libovsdbops.ExternalIDKey]string{
 			libovsdbops.ObjectNameKey: ns,
@@ -461,7 +461,7 @@ func (syncer *baseAclSyncer) getDefaultDenyPolicyACLIDs(ns, policyType, defaultA
 		})
 }
 
-func (syncer *baseAclSyncer) updateStaleDefaultDenyNetpolACLs(legacyACLs []*nbdb.ACL) (updatedACLs []*nbdb.ACL,
+func (syncer *BaseAclSyncer) updateStaleDefaultDenyNetpolACLs(legacyACLs []*nbdb.ACL) (updatedACLs []*nbdb.ACL,
 	deleteOps []libovsdb.Operation, err error) {
 	for _, acl := range legacyACLs {
 		// sync default Deny policies
@@ -514,7 +514,7 @@ func (syncer *baseAclSyncer) updateStaleDefaultDenyNetpolACLs(legacyACLs []*nbdb
 	return
 }
 
-func (syncer *aclSyncer) getEgressFirewallACLDbIDs(namespace string, ruleIdx int) *libovsdbops.DbObjectIDs {
+func (syncer *AclSyncer) getEgressFirewallACLDbIDs(namespace string, ruleIdx int) *libovsdbops.DbObjectIDs {
 	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLEgressFirewall, syncer.controllerName,
 		map[libovsdbops.ExternalIDKey]string{
 			libovsdbops.ObjectNameKey: namespace,
@@ -522,7 +522,7 @@ func (syncer *aclSyncer) getEgressFirewallACLDbIDs(namespace string, ruleIdx int
 		})
 }
 
-func (syncer *aclSyncer) updateStaleEgressFirewallACLs(legacyACLs []*nbdb.ACL) []*nbdb.ACL {
+func (syncer *AclSyncer) updateStaleEgressFirewallACLs(legacyACLs []*nbdb.ACL) []*nbdb.ACL {
 	updatedACLs := []*nbdb.ACL{}
 	for _, acl := range legacyACLs {
 		if acl.Priority < types.MinimumReservedEgressFirewallPriority || acl.Priority > types.EgressFirewallStartPriority {

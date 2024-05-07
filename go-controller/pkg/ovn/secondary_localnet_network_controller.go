@@ -10,6 +10,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -35,7 +36,7 @@ func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, ne
 			BaseSecondaryNetworkController: BaseSecondaryNetworkController{
 				BaseNetworkController: BaseNetworkController{
 					CommonNetworkControllerInfo: *cnci,
-					controllerName:              netInfo.GetNetworkName() + "-network-controller",
+					controllerName:              getNetworkControllerName(netInfo.GetNetworkName()),
 					NetInfo:                     netInfo,
 					lsManager:                   lsm.NewL2SwitchManager(),
 					logicalPortCache:            newPortCache(stopChan),
@@ -55,11 +56,21 @@ func NewSecondaryLocalnetNetworkController(cnci *CommonNetworkControllerInfo, ne
 	}
 
 	if oc.allocatesPodAnnotation() {
-		podAnnotationAllocator := pod.NewPodAnnotationAllocator(
+		var claimsReconciler persistentips.PersistentAllocations
+		if oc.allowPersistentIPs() {
+			ipamClaimsReconciler := persistentips.NewIPAMClaimReconciler(
+				oc.kube,
+				oc.NetInfo,
+				oc.watchFactory.IPAMClaimsInformer().Lister(),
+			)
+			oc.ipamClaimsReconciler = ipamClaimsReconciler
+			claimsReconciler = ipamClaimsReconciler
+		}
+		oc.podAnnotationAllocator = pod.NewPodAnnotationAllocator(
 			netInfo,
 			cnci.watchFactory.PodCoreInformer().Lister(),
-			cnci.kube)
-		oc.podAnnotationAllocator = podAnnotationAllocator
+			cnci.kube,
+			claimsReconciler)
 	}
 
 	// disable multicast support for secondary networks

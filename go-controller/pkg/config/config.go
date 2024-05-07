@@ -229,6 +229,16 @@ type DefaultConfig struct {
 	// that are initiated from the pods so that the reverse connections go back to the pods.
 	// This represents the conntrack zone used for the conntrack flow rules.
 	ConntrackZone int `gcfg:"conntrack-zone"`
+	// HostMasqConntrackZone is an unexposed config with the value of ConntrackZone+1
+	HostMasqConntrackZone int
+	// OVNMasqConntrackZone is an unexposed config with the value of ConntrackZone+2
+	OVNMasqConntrackZone int
+	// HostNodePortCTZone is an unexposed config with the value of ConntrackZone+3
+	HostNodePortConntrackZone int
+	// HostXDPCTZone is an unexposed config with the value of ConntrackZone+4
+	HostXDPCTZone int
+	// ReassemblyConntrackZone is an unexposed config with the value of ConntrackZone+5
+	ReassemblyConntrackZone int
 	// EncapType value defines the encapsulation protocol to use to transmit packets between
 	// hypervisors. By default the value is 'geneve'
 	EncapType string `gcfg:"encap-type"`
@@ -425,13 +435,14 @@ type OVNKubernetesFeatureConfig struct {
 	EnableMultiNetworkPolicy        bool `gcfg:"enable-multi-networkpolicy"`
 	EnableStatelessNetPol           bool `gcfg:"enable-stateless-netpol"`
 	EnableInterconnect              bool `gcfg:"enable-interconnect"`
+	EnableMultiExternalGateway      bool `gcfg:"enable-multi-external-gateway"`
+	EnablePersistentIPs             bool `gcfg:"enable-persistent-ips"`
+	EnableServiceTemplateSupport    bool `gcfg:"enable-svc-template-support"`
 	// EnableAdminPolicyBasedRouting allows admin to manage PBR rules
 	EnableAdminPolicyBasedRouting bool `gcfg:"enable-admin-pbr"`
 	EnableVirtualIP               bool `gcfg:"enable-virtual-ip"`
 	EnableIPReservation           bool `gcfg:"enable-ip-reservation"`
-	EnableMultiExternalGateway    bool `gcfg:"enable-multi-external-gateway"`
 	EnablePortMirror              bool `gcfg:"enable-port-mirror"`
-	EnableServiceTemplateSupport  bool `gcfg:"enable-svc-template-support"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -1122,16 +1133,22 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Value:       OVNKubernetesFeature.EnableEgressService,
 	},
 	&cli.BoolFlag{
-		Name:        "enable-ip-reservation",
-		Usage:       "Configure to use IPReservation CRD feature with ovn-kubernetes.",
-		Destination: &cliConfig.OVNKubernetesFeature.EnableIPReservation,
-		Value:       OVNKubernetesFeature.EnableIPReservation,
-	},
-	&cli.BoolFlag{
 		Name:        "enable-multi-external-gateway",
 		Usage:       "Configure to use AdminPolicyBasedExternalRoute CRD feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableMultiExternalGateway,
 		Value:       OVNKubernetesFeature.EnableMultiExternalGateway,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-persistent-ips",
+		Usage:       "Configure to use the persistent ips feature for virtualization with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnablePersistentIPs,
+		Value:       OVNKubernetesFeature.EnablePersistentIPs,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-ip-reservation",
+		Usage:       "Configure to use IPReservation CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableIPReservation,
+		Value:       OVNKubernetesFeature.EnableIPReservation,
 	},
 	&cli.BoolFlag{
 		Name:        "enable-port-mirror",
@@ -2168,7 +2185,7 @@ func completeClusterManagerConfig() error {
 
 	v6IP, _, err := net.ParseCIDR(ClusterManager.V6TransitSwitchSubnet)
 	if err != nil || !utilnet.IsIPv6(v6IP) {
-		return fmt.Errorf("invalid transit switch v4 join subnet specified, subnet: %s: error: %v", ClusterManager.V6TransitSwitchSubnet, err)
+		return fmt.Errorf("invalid transit switch v6 subnet specified, subnet: %s: error: %v", ClusterManager.V6TransitSwitchSubnet, err)
 	}
 
 	return nil
@@ -2210,6 +2227,11 @@ func completeDefaultConfig(allSubnets *configSubnets) error {
 		allSubnets.append(configSubnetCluster, subnet.CIDR)
 	}
 
+	Default.HostMasqConntrackZone = Default.ConntrackZone + 1
+	Default.OVNMasqConntrackZone = Default.ConntrackZone + 2
+	Default.HostNodePortConntrackZone = Default.ConntrackZone + 3
+	Default.HostXDPCTZone = Default.ConntrackZone + 4
+	Default.ReassemblyConntrackZone = Default.ConntrackZone + 5
 	return nil
 }
 
