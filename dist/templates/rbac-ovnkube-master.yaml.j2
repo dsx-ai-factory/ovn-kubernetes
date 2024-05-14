@@ -1,0 +1,136 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ovn-master
+  namespace: ovn-kubernetes
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ovn-master
+roleRef:
+  name: ovn-master
+  kind: ClusterRole
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+- kind: ServiceAccount
+  name: ovn-master
+  namespace: ovn-kubernetes
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  namespace: ovn-kubernetes
+  name: ovn-master-specific-rolebindings
+roleRef:
+  name: ovn-master-specific-roles
+  kind: Role
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+  - kind: ServiceAccount
+    namespace: ovn-kubernetes
+    name: ovn-master
+
+---
+# RBAC policies for ovnk8s-master
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ovn-master
+rules:
+- apiGroups: [""]
+  resources:
+  - namespaces
+  - nodes
+  - pods
+  - services
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["discovery.k8s.io"]
+  resources:
+  - endpointslices
+  verbs: ["get", "list", "watch"]
+- apiGroups:  ["networking.k8s.io"]
+  resources:
+  - networkpolicies
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["policy.networking.k8s.io"]
+  resources:
+  - adminnetworkpolicies
+  - baselineadminnetworkpolicies
+  verbs: ["list", "get", "watch"]
+- apiGroups: ["k8s.ovn.org"]
+  resources:
+  - egressfirewalls
+  - egressips
+  - egressqoses
+  - egressservices
+  - adminpolicybasedexternalroutes
+  - adminpolicybasedroutes
+  - virtualips
+  - ipreservations
+  - portmirrors
+  verbs: [ "get", "list", "watch" ]
+- apiGroups: ["k8s.cni.cncf.io"]
+  resources:
+  - ipamclaims
+  - network-attachment-definitions
+  - multi-networkpolicies
+  verbs: ["list", "get", "watch"]
+- apiGroups: [ "k8s.cni.cncf.io" ]
+  resources:
+  - ipamclaims/status
+  verbs: [ "patch", "update" ]
+- apiGroups: ["policy.networking.k8s.io"]
+  resources:
+  - adminnetworkpolicies/status
+  - baselineadminnetworkpolicies/status
+  verbs: [ "patch", "update" ]
+- apiGroups: ["k8s.ovn.org"]
+  resources:
+  - egressfirewalls/status
+  - egressips
+  - egressqoses
+  - egressservices/status
+  - adminpolicybasedexternalroutes/status
+  - egressqoses/status 
+  - adminpolicybasedroutes/status
+  - virtualips/status
+  - ipreservations/status
+  - portmirrors/status
+  verbs: [ "patch", "update" ]
+- apiGroups: [""]
+  resources:
+  - events
+  verbs: ["create", "patch", "update"]
+- apiGroups: [""]
+  resources:
+  - pods  # needed for set label on pods
+  - nodes # needed for set taint on nodes
+  - nodes/status
+  - pods/status
+  - services/status
+  verbs: [ "patch", "update" ]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: ovn-kubernetes
+  name: ovn-master-specific-roles
+rules:
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs: ["create", "get", "list", "update", "patch"]
+  - apiGroups: [""]
+    resources:
+      - configmaps
+    verbs: ["create", "patch", "update", "delete", "get", "list", "watch"]
+  - apiGroups: [""]
+    resources:
+      - endpoints
+    verbs: ["get"]

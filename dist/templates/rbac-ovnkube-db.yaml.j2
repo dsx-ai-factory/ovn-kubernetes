@@ -1,0 +1,50 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ovn-db
+  namespace: ovn-kubernetes
+
+---
+# RBAC role binding for ovnkube-db, ovn-sbdb-raft and ovn-nbdb-raft
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ovn-db
+  namespace: ovn-kubernetes
+roleRef:
+  name: ovn-db
+  kind: Role
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+- kind: ServiceAccount
+  name: ovn-db
+  namespace: ovn-kubernetes
+
+---
+# RBAC policies for ovnkube-db, ovn-nbdb-raft and ovn-sbdb-raft
+# ovnkube-db startup scripts create an endpoint:
+# https://github.com/ovn-org/ovn-kubernetes/blob/d3b10e87f7fffa38fdf4ad52f98bc8ba998df6c2/dist/images/ovnkube.sh#L699
+# in HA statefulsets/pods are inspected
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: ovn-kubernetes
+  name: ovn-db
+rules:
+    - apiGroups: [""]
+      resources:
+          - endpoints
+      verbs: [ "get", "create" ]
+    - apiGroups: [""]
+      resources:
+          - pods
+      verbs: [ "get", "list" ]
+    - apiGroups: ["apps"]
+      resources:
+          - statefulsets
+      verbs: [ "get" ]
+    - apiGroups: [""]
+      resources:
+          - configmaps
+      verbs: ["get", "watch", "list"]
