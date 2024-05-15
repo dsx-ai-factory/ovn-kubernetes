@@ -32,6 +32,7 @@ type Gateway interface {
 	GetGatewayBridgeIface() string
 	SetDefaultGatewayBridgeMAC(addr net.HardwareAddr)
 	Reconcile() error
+	GetGatewayIface() string
 }
 
 type gateway struct {
@@ -290,7 +291,7 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops 
 			"IP fragmentation or large TCP/UDP payloads may not be forwarded correctly.")
 		enableGatewayMTU = false
 	} else {
-		chkPktLengthSupported, err := util.DetectCheckPktLengthSupport(gatewayBridge.bridgeName)
+		chkPktLengthSupported, err := util.DetectCheckPktLengthSupport(gatewayBridge.gwIface)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -429,13 +430,18 @@ func (g *gateway) addAllServices() []error {
 	g.servicesRetryFramework.RequestRetryObjs()
 	return errs
 }
+func (g *gateway) GetGatewayIface() string {
+	return g.openflowManager.defaultBridge.gwIface
+}
 
 type bridgeConfiguration struct {
 	sync.Mutex
 	bridgeName         string
 	uplinkName         string
-	hostRepName        string // empty in case of non-DPU mode
+	dpuHostRepName     string // empty in case of non-DPU mode
+	hostRepName        string
 	ips                []*net.IPNet
+	gwIface            string
 	interfaceID        string
 	macAddress         net.HardwareAddr
 	patchPort          string
@@ -449,7 +455,7 @@ type bridgeConfiguration struct {
 func (b *bridgeConfiguration) updateInterfaceIPAddresses(node *kapi.Node) ([]*net.IPNet, error) {
 	b.Lock()
 	defer b.Unlock()
-	ifAddrs, err := getNetworkInterfaceIPAddresses(b.bridgeName)
+	ifAddrs, err := getNetworkInterfaceIPAddresses(b.gwIface)
 	if err != nil {
 		return nil, err
 	}
@@ -480,8 +486,32 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 		localnetPatchPorts: &sync.Map{},
 	}
 	gwIntf := intfName
+	switchdevMode := false
 
-	if bridgeName, _, err := util.RunOVSVsctl("port-to-br", intfName); err == nil {
+	// Check if gateway interface has corresponding representor
+	intfRep, err := getRepresentor(gwIntf)
+	if err == nil {
+		switchdevMode = true
+	}
+	if switchdevMode { // Switchdev mode with VF/SF as gateway interface
+		bridgeName, _, err := util.RunOVSVsctl("port-to-br", intfRep)
+		if err != nil {
+			return nil, fmt.Errorf("failed to find bridge that has port %s: %w", intfRep, err)
+		}
+		link, err := util.GetNetLinkOps().LinkByName(gwIntf)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get netdevice link for %s: %w", gwIntf, err)
+		}
+		uplink, err := getUplinkName(gwIntf)
+		if err != nil {
+			return nil, fmt.Errorf("failed to find uplink for %s: %w", gwIntf, err)
+		}
+		res.bridgeName = bridgeName
+		res.uplinkName = uplink
+		res.hostRepName = intfRep
+		res.gwIface = intfName
+		res.macAddress = link.Attrs().HardwareAddr
+	} else if bridgeName, _, err := util.RunOVSVsctl("port-to-br", intfName); err == nil {
 		// This is an OVS bridge's internal port
 		uplinkName, err := util.GetNicName(bridgeName)
 		if err != nil {
@@ -490,6 +520,7 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 		res.bridgeName = bridgeName
 		res.uplinkName = uplinkName
 		gwIntf = bridgeName
+		res.gwIface = bridgeName
 	} else if _, _, err := util.RunOVSVsctl("br-exists", intfName); err != nil {
 		// This is not a OVS bridge. We need to create a OVS bridge
 		// and add cluster.GatewayIntf as a port of that bridge.
@@ -498,6 +529,7 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 			return nil, fmt.Errorf("nicToBridge failed for %s: %w", intfName, err)
 		}
 		res.bridgeName = bridgeName
+		res.gwIface = bridgeName
 		res.uplinkName = intfName
 		gwIntf = bridgeName
 	} else {
@@ -513,8 +545,8 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 			res.uplinkName = uplinkName
 		}
 		res.bridgeName = intfName
+		res.gwIface = intfName
 	}
-	var err error
 	// Now, we get IP addresses for the bridge
 	if len(gwIPs) > 0 {
 		// use gwIPs if provided
@@ -528,11 +560,12 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 		}
 	}
 
-	res.macAddress, err = util.GetOVSPortMACAddress(gwIntf)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get MAC address for ovs port %s: %w", gwIntf, err)
+	if !switchdevMode {
+		res.macAddress, err = util.GetOVSPortMACAddress(gwIntf)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get MAC address for ovs port %s: %w", gwIntf, err)
+		}
 	}
-
 	res.interfaceID, err = bridgedGatewayNodeSetup(nodeName, res.bridgeName, physicalNetworkName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
@@ -555,4 +588,22 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 	}
 
 	return &res, nil
+}
+
+func getRepresentor(intfName string) (string, error) {
+	deviceID, err := util.GetDeviceIDFromNetdevice(intfName)
+	if err != nil {
+		return "", err
+	}
+
+	return util.GetFunctionRepresentorName(deviceID)
+}
+
+func getUplinkName(intfName string) (string, error) {
+	deviceID, err := util.GetDeviceIDFromNetdevice(intfName)
+	if err != nil {
+		return "", err
+	}
+
+	return util.GetUplinkRepresentorName(deviceID)
 }
