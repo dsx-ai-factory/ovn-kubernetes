@@ -1199,14 +1199,14 @@ ovnkube-identity() {
     fi
 
     # extra-allowed-user:
-    #   ovnkube-master service account - required for compact mode
-    #   ovnkube-cluster-manager service account - required for multi-homing
+    #   ovn-master service account - required for compact mode
+    #   ovn-cluster-manager service account - required for multi-homing
     exec /usr/bin/ovnkube-identity  --k8s-apiserver="${K8S_APISERVER}" \
     --webhook-cert-dir="/etc/webhook-cert" \
     ${ovnkube_enable_interconnect_flag} \
     ${ovnkube_enable_hybrid_overlay_flag} \
-    --extra-allowed-user="system:serviceaccount:ovn-kubernetes:ovnkube-cluster-manager" \
-    --extra-allowed-user="system:serviceaccount:ovn-kubernetes:ovnkube-master" \
+    --extra-allowed-user="system:serviceaccount:ovn-kubernetes:ovn-cluster-manager" \
+    --extra-allowed-user="system:serviceaccount:ovn-kubernetes:ovn-master" \
     --loglevel="${ovnkube_loglevel}"
 
     exit 9
