@@ -614,13 +614,16 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeNames []string
 		return nil, err
 	}
 
-	// TBD: this change selects all pods in the cluster, added by upstream commit 91046e889...
-	//var err error
-	//wf.informers[PodType], err = newQueuedInformer(PodType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
-	//	defaultNumEventQueues)
-	//if err != nil {
-	//	return nil, err
-	//}
+	// EgressIP support needs to watch for Pods that not scheduled on the specific node ovnkube-node is running on.
+	if config.OvnKubeNode.Mode != types.NodeModeDPU && config.OVNKubernetesFeature.EnableEgressIP {
+		var err error
+		wf.informers[PodType], err = newQueuedInformer(PodType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
+			defaultNumEventQueues, 10, 30, 50)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	if config.OvnKubeNode.Mode == types.NodeModeDPU && config.OVNKubernetesFeature.EnablePortMirror {
 		wf.portMirrorFactory = portmirrorinformerfactory.NewSharedInformerFactory(ovnClientset.PortMirrorClient, resyncInterval)
 		if err := portmirrorapi.AddToScheme(portmirrorscheme.Scheme); err != nil {
@@ -1405,6 +1408,24 @@ func (wf *WatchFactory) GetAllPodsBySelector(labelSelector metav1.LabelSelector)
 		return nil, err
 	}
 	return podLister.List(selector)
+}
+
+// GetPodsOnNode returns all the pods of the specified namespace scheduled on the given node
+func (wf *WatchFactory) GetPodsOnNode(namespace, nodeName string) ([]*kapi.Pod, error) {
+	podLister := wf.informers[PodType].lister.(listers.PodLister)
+	pods, err := podLister.Pods(namespace).List(labels.Everything())
+	if err != nil {
+		return []*kapi.Pod{}, err
+	}
+	ret := make([]*kapi.Pod, 0, len(pods))
+	for i := range pods {
+		pod := pods[i]
+		if pod.Spec.NodeName == nodeName {
+			ret = append(ret, pod)
+		}
+	}
+
+	return ret, nil
 }
 
 // GetNodes returns the node specs of all the nodes
