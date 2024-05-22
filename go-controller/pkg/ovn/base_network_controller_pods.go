@@ -781,6 +781,11 @@ func (bnc *BaseNetworkController) deletePodFromNamespace(ns string, podIfAddrs [
 //
 // false otherwise.
 func (bnc *BaseNetworkController) isPodScheduledinLocalZone(pod *kapi.Pod) bool {
+	if !config.OVNKubernetesFeature.EnableInterconnect {
+		// temporary workaround for non-IC case, this should always be true for scheduled Pods
+		return util.PodScheduled(pod)
+	}
+
 	isLocalZonePod := true
 
 	if bnc.localZoneNodes != nil {
