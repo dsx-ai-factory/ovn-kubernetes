@@ -131,18 +131,24 @@ func (mp *managementPortRepresentor) checkRepresentorPortHealth(cfg *managementP
 	link, err := util.GetNetLinkOps().LinkByName(cfg.ifName)
 	if err != nil {
 		klog.Errorf("Failed to get link device %s, error: %v", cfg.ifName, err)
-		// Get management port representor by name
-		link, err := util.GetNetLinkOps().LinkByName(mp.repName)
+		// Get original management port representor link name
+		if config.OvnKubeNode.MgmtPortNetdev == "" {
+			// The representor is identified by k8s.ovn.org/node-mgmt-port annotation
+			klog.Fatalf("Management port representor link name %s has changed, fatal error", cfg.ifName)
+			return
+		}
+		origName := config.OvnKubeNode.MgmtPortNetdev
+		link, err := util.GetNetLinkOps().LinkByName(origName)
 		if err != nil {
-			klog.Errorf("Failed to get link device %s, error: %v", mp.repName, err)
+			klog.Errorf("Failed to get link device %s, error: %v", origName, err)
 			return
 		}
 		if err = util.GetNetLinkOps().LinkSetDown(link); err != nil {
-			klog.Errorf("Failed to set link down for device %s. %v", mp.repName, err)
+			klog.Errorf("Failed to set link down for device %s. %v", origName, err)
 			return
 		}
 		if err = util.GetNetLinkOps().LinkSetName(link, cfg.ifName); err != nil {
-			klog.Errorf("Rename link from %s to %s failed: %v", mp.repName, cfg.ifName, err)
+			klog.Errorf("Rename link from %s to %s failed: %v", origName, cfg.ifName, err)
 			return
 		}
 		if link.Attrs().MTU != config.Default.MTU {
