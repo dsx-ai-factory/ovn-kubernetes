@@ -545,6 +545,7 @@ type OvnKubeNodeConfig struct {
 	DPResourceDeviceIdsMap map[string][]string
 	MgmtPortNetdev         string `gcfg:"mgmt-port-netdev"`
 	MgmtPortDPResourceName string `gcfg:"mgmt-port-dp-resource-name"`
+	WaitOnOVNInstallExtID  bool   `gcfg:"ovnkube-wait-on-ovn-install-extid"`
 	IsPrimaryDPU           bool
 	XDPSFRep               string `gcfg:"ovn-xdp-sfrep"`
 	XDPVeth                string `gcfg:"ovn-xdp-veth"`
@@ -1620,6 +1621,12 @@ var OvnKubeNodeFlags = []cli.Flag{
 		Name:        "disable-ovn-iface-id-ver",
 		Usage:       "Deprecated; iface-id-ver is always enabled",
 		Destination: &disableOVNIfaceIDVer,
+	},
+	&cli.BoolFlag{
+		Name:        "ovnkube-wait-on-ovn-install-extid",
+		Usage:       "check existence ovn-installed external-ids to determine if Pod's OVS interface is ready, default is false",
+		Value:       OvnKubeNode.WaitOnOVNInstallExtID,
+		Destination: &cliConfig.OvnKubeNode.WaitOnOVNInstallExtID,
 	},
 	&cli.StringFlag{
 		Name:        "ovn-xdp-sfrep",

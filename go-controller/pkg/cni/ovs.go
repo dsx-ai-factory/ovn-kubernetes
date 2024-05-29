@@ -271,10 +271,8 @@ func waitForPodInterface(ctx context.Context, ifInfo *PodInterfaceInfo,
 	var ofPort int
 	var err error
 
-	// DPUHost mode can't use OVS external IDs for port-up detection because
-	// there is no ovn-controller running in DPUHost mode to set port-up
-	checkExternalIDs := !ifInfo.IsDPUHostMode
-	if checkExternalIDs {
+	waitOnOVNInstallExtID := ifInfo.WaitOnOVNInstallExtID
+	if waitOnOVNInstallExtID {
 		detail = " (ovn-installed)"
 	} else {
 		ofPort, err = getIfaceOFPort(ifaceName)
@@ -299,7 +297,7 @@ func waitForPodInterface(ctx context.Context, ifInfo *PodInterfaceInfo,
 			return fmt.Errorf("%s waiting for OVS port binding%s for %s %v", errDetail, detail, mac, ifAddrs)
 		default:
 			columns := []string{"external-ids:iface-id"}
-			if checkExternalIDs {
+			if waitOnOVNInstallExtID {
 				// get ovn-installed flag in the same request
 				columns = append(columns, "external-ids:ovn-installed")
 			}
@@ -310,7 +308,7 @@ func waitForPodInterface(ctx context.Context, ifInfo *PodInterfaceInfo,
 				return fmt.Errorf("OVS sandbox port %s is no longer active (probably due to a subsequent "+
 					"CNI ADD)", ifaceName)
 			}
-			if checkExternalIDs {
+			if waitOnOVNInstallExtID {
 				if err == nil && len(output) == 2 && output[1] == "true" {
 					klog.V(5).Infof("Interface %s has ovn-installed=true", ifaceName)
 					return nil
