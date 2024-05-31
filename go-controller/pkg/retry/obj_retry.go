@@ -555,7 +555,7 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 				if areEqual {
 					return
 				}
-				klog.V(5).Infof("Update event received for resource %s, new object is different from old",
+				klog.V(6).Infof("Update event received for resource %s, new object is different from old",
 					r.ResourceHandler.ObjType)
 				r.ResourceHandler.RecordUpdateEvent(newer)
 
