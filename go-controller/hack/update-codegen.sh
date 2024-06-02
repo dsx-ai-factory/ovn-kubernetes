@@ -102,6 +102,8 @@ cp _$(pwd)/output/crds/k8s.ovn.org_egressips.yaml ../dist/templates/k8s.ovn.org_
 echo "Copying egressQoS CRD"
 cp _output/crds/k8s.ovn.org_egressqoses.yaml ../dist/templates/k8s.ovn.org_egressqoses.yaml.j2
 cp $(pwd)/_output/crds/k8s.ovn.org_egressqoses.yaml ../dist/templates/k8s.ovn.org_egressqoses.yaml.j2
+echo "Copying networkProbe CRD"
+cp $(pwd)/_output/crds/k8s.ovn.org_networkprobes.yaml ../dist/templates/k8s.ovn.org_networkprobes.yaml.j2
 # NOTE: When you update vendoring versions for the ANP & BANP APIs, we must update the version of the CRD we pull from in the below URL
 echo "Copying Admin Network Policy CRD"
 curl -sSL https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.2/config/crd/experimental/policy.networking.k8s.io_adminnetworkpolicies.yaml -o ../dist/templates/policy.networking.k8s.io_adminnetworkpolicies.yaml
