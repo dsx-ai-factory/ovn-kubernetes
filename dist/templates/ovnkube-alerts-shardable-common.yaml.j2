@@ -100,8 +100,8 @@ spec:
 
     - alert: K8sNodeWithoutOvnNBDBPodReady
       expr: |
-        (kube_pod_status_ready{namespace="ovn-kubernetes", condition="true", pod=~"ovn-nbdb-.*"} * on(pod) group_left(node)
-         kube_pod_info{namespace="ovn-kubernetes", pod=~"ovn-nbdb-.*", node=~".*k8s-ovn-0.*"}) == 0
+        sum by(node)(kube_pod_status_ready{namespace="ovn-kubernetes", condition="true", pod=~"ovn-nbdb-.*"} * on(pod) group_left(node)
+         kube_pod_info{namespace="ovn-kubernetes", pod=~"ovn-nbdb-.*"}) == 0
       for: 10m
       labels:
        severity: major
@@ -128,8 +128,8 @@ spec:
 
     - alert: K8sNodeWithoutOvnSBDBPodReady
       expr: |
-        (kube_pod_status_ready{namespace="ovn-kubernetes", condition="true", pod=~"ovn-sbdb-.*"} * on(pod) group_left(node)
-         kube_pod_info{namespace="ovn-kubernetes", pod=~"ovn-sbdb-.*", node=~".*k8s-ovn-0.*"}) == 0
+        sum by(node)(kube_pod_status_ready{namespace="ovn-kubernetes", condition="true", pod=~"ovn-sbdb-.*"} * on(pod) group_left(node)
+         kube_pod_info{namespace="ovn-kubernetes", pod=~"ovn-sbdb-.*"}) == 0
       for: 10m
       labels:
        severity: major
@@ -156,11 +156,11 @@ spec:
 
     - alert: K8sNodeWithoutOvnNorthPodReady
       expr: |
-        (kube_pod_status_ready{namespace="ovn-kubernetes", condition="true", pod=~"ovn-north-.*"} * on(pod) group_left(node)
-         kube_pod_info{namespace="ovn-kubernetes", pod=~"ovn-north-.*", node=~".*nid-core-0.*"}) == 0
+        sum by(node)(kube_pod_status_ready{namespace="ovn-kubernetes", condition="true", pod=~"ovn-north-.*"} * on(pod) group_left(node)
+         kube_pod_info{namespace="ovn-kubernetes", pod=~"ovn-north-.*"}) == 0
       for: 10m
       labels:
-       severity: major
+       severity: minor
        pduuid: P10A23N
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/rjQLlpvMk/central-north-daemon
       annotations:
@@ -184,8 +184,8 @@ spec:
 
     - alert: K8sNodeWithoutOvnKubeManagerPodReady
       expr: |
-        (kube_pod_status_ready{namespace="ovn-kubernetes", condition="true", pod=~"ovnkube-master-.*"} * on(pod) group_left(node)
-         kube_pod_info{namespace="ovn-kubernetes", pod=~"ovnkube-master-.*", node=~".*nid-core-0.*"}) == 0
+        sum by(node)(kube_pod_status_ready{namespace="ovn-kubernetes", condition="true", pod=~"ovnkube-master-.*"} * on(pod) group_left(node)
+         kube_pod_info{namespace="ovn-kubernetes", pod=~"ovnkube-master-.*"}) == 0
       for: 10m
       labels:
        severity: minor
