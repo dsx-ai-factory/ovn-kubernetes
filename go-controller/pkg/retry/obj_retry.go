@@ -555,8 +555,15 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 				if areEqual {
 					return
 				}
-				klog.V(6).Infof("Update event received for resource %s, new object is different from old",
-					r.ResourceHandler.ObjType)
+				if r.ResourceHandler.ObjType == factory.PodType ||
+					r.ResourceHandler.ObjType == factory.NodeType ||
+					r.ResourceHandler.ObjType == factory.LocalPodSelectorType {
+					klog.V(6).Infof("Update event received for resource %s, new object is different from old",
+						r.ResourceHandler.ObjType)
+				} else {
+					klog.V(5).Infof("Update event received for resource %s, new object is different from old",
+						r.ResourceHandler.ObjType)
+				}
 				r.ResourceHandler.RecordUpdateEvent(newer)
 
 				// get the object keys for newer and old (expected to be the same)
@@ -603,9 +610,13 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 					}
 					return
 				}
-
-				klog.V(5).Infof("Update event received for %s %s", r.ResourceHandler.ObjType, newKey)
-
+				if r.ResourceHandler.ObjType == factory.PodType ||
+					r.ResourceHandler.ObjType == factory.NodeType ||
+					r.ResourceHandler.ObjType == factory.LocalPodSelectorType {
+					klog.V(6).Infof("Update event received for %s %s", r.ResourceHandler.ObjType, newKey)
+				} else {
+					klog.V(5).Infof("Update event received for %s %s", r.ResourceHandler.ObjType, newKey)
+				}
 				r.DoWithLock(newKey, func(key string) {
 					// STEP 1:
 					// Delete existing (old) object if:

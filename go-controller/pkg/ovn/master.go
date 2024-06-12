@@ -659,7 +659,7 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 		return nil
 	}
 
-	klog.Infof("Adding or Updating Node %q", node.Name)
+	klog.V(6).Infof("Adding or Updating Node %q", node.Name)
 	if nSyncs.syncNode {
 		if hostSubnets, err = oc.addNode(node); err != nil {
 			oc.addNodeFailed.Store(node.Name, true)
