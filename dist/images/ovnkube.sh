@@ -126,6 +126,7 @@ BASEDIR=$(dirname $0)
 # OVS_DB_TRANSACTION_TIMEOUT - timeout for OVSDB transaction, in seconds
 # OVNKUBE_SKIP_CTMARK_HOSTPORTS - list of tcp/udp ports of host services that must not be subjected to CT-Marking
 # OVNKUBE_CLUSTER_DEFAULT_NAD - name of the default cluster wide net-attach-def
+# OVNKUBE_ENABLE_KATA_DAN - when true, enable Kata DAN config generation support
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -481,6 +482,10 @@ if [[ ${ovnkube_node_mode} == "dpu" ]]; then
     exit 1
   fi
 fi
+# OVNKUBE_ENABLE_KATA_DAN - enable Kata DAN config generation support
+ovnkube_enable_kata_dan=${OVNKUBE_ENABLE_KATA_DAN:-"false"}
+# Base directory of Kata Container's DAN(Directly Attachable Network) config
+kata_dan_conf_dir=/var/run/ovn-kubernetes/dans
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
@@ -3847,6 +3852,12 @@ ovn-node() {
     fi
   fi
   echo "enable_ovs_native_metrics_flag=${enable_ovs_native_metrics_flag}"
+  kata_dan_conf_dir_flag=
+  if [[ ${ovnkube_enable_kata_dan} == "true" ]]; then
+    mkdir -p -m 0700 ${kata_dan_conf_dir}
+    kata_dan_conf_dir_flag="--kata-dan-conf-dir=${kata_dan_conf_dir}"
+  fi
+  echo "kata_dan_conf_dir_flag=${kata_dan_conf_dir_flag}"
 
   dynamic_udn_allocation_flag=
   if [[ ${ovn_enable_dynamic_udn_allocation} == "true" ]]; then
@@ -3925,6 +3936,7 @@ ovn-node() {
         ${ovnkube_istio_ambient_snat_ipv6_flag} \
         ${ovnkube_cluster_default_nad_flag} \
         ${enable_ovs_native_metrics_flag} \
+        ${kata_dan_conf_dir_flag} \
         --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
         --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
         --host-network-namespace ${ovn_host_network_namespace} \

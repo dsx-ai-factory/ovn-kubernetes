@@ -5,9 +5,12 @@ package cni
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -24,6 +27,7 @@ import (
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/knftables"
 
+	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
@@ -751,6 +755,93 @@ type defaultPodRequestInterfaceOps struct{}
 
 var podRequestInterfaceOps PodRequestInterfaceOps = &defaultPodRequestInterfaceOps{}
 
+func getDanConfigPath(danConfigDir, sandboxId string) string {
+	return filepath.Join(danConfigDir, sandboxId+".json")
+}
+
+func writeDanConfig(danConfigPath string, dan *ovncnitypes.DanConfig) error {
+
+	var curDanConfig *ovncnitypes.DanConfig
+	if _, err := os.Stat(danConfigPath); errors.Is(err, os.ErrNotExist) {
+		curDanConfig = dan
+	} else {
+		curDanConfig = &ovncnitypes.DanConfig{}
+		data, err := os.ReadFile(danConfigPath)
+		if err != nil {
+			return fmt.Errorf("failed to read Kata DAN config: %s", danConfigPath)
+		}
+		if err = json.Unmarshal(data, curDanConfig); err != nil {
+			return fmt.Errorf("failed to parse Kata DAN config: %s", danConfigPath)
+		}
+
+		curDanConfig.Devices = append(curDanConfig.Devices, dan.Devices...)
+	}
+
+	jsonData, err := json.MarshalIndent(curDanConfig, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	err = os.WriteFile(danConfigPath, jsonData, 0600)
+	if err != nil {
+		return fmt.Errorf("failed to write DAN config file %s, error: %v", danConfigPath, err)
+	}
+
+	return nil
+}
+
+func (pr *PodRequest) generateDanConfig(ifInfo *PodInterfaceInfo, pciDeviceID string) error {
+	klog.V(5).Infof("Generate DAN config for pod %s/%s on network %s NAD %s",
+		pr.PodNamespace, pr.PodName, pr.netName, pr.nadName)
+
+	var ipAddrs []string
+	var routes []ovncnitypes.Route
+
+	for _, a := range ifInfo.IPs {
+		ipAddrs = append(ipAddrs, a.String())
+	}
+
+	if len(ifInfo.Gateways) > 0 {
+		// add default gateway route
+		routes = append(routes,
+			ovncnitypes.Route{
+				Gateway: ifInfo.Gateways[0].String(),
+			})
+	}
+
+	for _, r := range ifInfo.Routes {
+		routes = append(routes,
+			ovncnitypes.Route{
+				Dest:    r.Dest.String(),
+				Gateway: r.NextHop.String(),
+			})
+	}
+
+	var dan ovncnitypes.DanConfig
+	dan.Netns = &pr.Netns
+
+	danDev := ovncnitypes.DanDevice{
+		Name:     pr.IfName,
+		GuestMac: ifInfo.MAC.String(),
+		Device: ovncnitypes.Device{
+			Type:        ovncnitypes.VfioDanDeviceType,
+			PciDeviceID: pciDeviceID,
+		},
+		NetworkInfo: ovncnitypes.NetworkInfo{
+			Interface: ovncnitypes.Interface{
+				IPAddresses: ipAddrs,
+				MTU:         uint64(ifInfo.MTU),
+			},
+			Routes: routes,
+		},
+	}
+
+	dan.Devices = append(dan.Devices, danDev)
+	danConfigPath := getDanConfigPath(config.Default.KataDanConfDir, pr.SandboxID)
+
+	return writeDanConfig(danConfigPath, &dan)
+}
+
 func (*defaultPodRequestInterfaceOps) ConfigureInterface(pr *PodRequest, getter PodInfoGetter, ifInfo *PodInterfaceInfo) ([]*current.Interface, error) {
 	klog.V(5).Infof("Set up interface %+v with CNI Conf %v for pod %s/%s on network %s NAD %s",
 		*pr, pr.CNIConf, pr.PodNamespace, pr.PodName, pr.netName, pr.nadName)
@@ -826,6 +917,7 @@ func (*defaultPodRequestInterfaceOps) ConfigureInterface(pr *PodRequest, getter 
 func (*defaultPodRequestInterfaceOps) UnconfigureInterface(pr *PodRequest, ifInfo *PodInterfaceInfo) error {
 	podDesc := fmt.Sprintf("for pod %s/%s NAD %s", pr.PodNamespace, pr.PodName, pr.nadName)
 	klog.V(5).Infof("Tear down interface (%+v) with CNI conf %v %s", *pr, pr.CNIConf, podDesc)
+
 	if ifInfo.IsDPUHostMode {
 		if pr.CNIConf.DeviceID == "" {
 			klog.Warningf("Unexpected configuration %s, pod request on DPU host. device ID must be provided", podDesc)

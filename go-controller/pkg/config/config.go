@@ -110,6 +110,7 @@ var (
 		ClusterSubnetsMacBindingAging: 36000, // in Seconds
 		RawUDNAllowedDefaultServices:  "default/kubernetes,kube-system/kube-dns",
 		Transport:                     "",
+		KataDanConfDir:                "", // disable by default
 	}
 
 	// Logging holds logging-related parsed config file parameters and command-line overrides
@@ -393,6 +394,9 @@ type DefaultConfig struct {
 	// Accepts: "" (empty, uses OVN default overlay) or "no-overlay".
 	// Defaults to "" (empty).
 	Transport string `gcfg:"transport"`
+
+	// Base directory of DAN(Directly Attachable Network) config for Kata Container.
+	KataDanConfDir string `gcfg:"kata-dan-conf-dir"`
 }
 
 // LoggingConfig holds logging-related parsed config file parameters and command-line overrides
@@ -1223,6 +1227,12 @@ var CommonFlags = []cli.Flag{
 		Usage:       "the name of the default cluster wide net-attach-def, default to default/ovn-primary",
 		Value:       Default.ClusterDefaultNad,
 		Destination: &cliConfig.Default.ClusterDefaultNad,
+	},
+	&cli.StringFlag{
+		Name:        "kata-dan-conf-dir",
+		Usage:       "Base directory of DAN(Directly Attachable Network) config for Kata Container",
+		Destination: &cliConfig.Default.KataDanConfDir,
+		Value:       Default.KataDanConfDir,
 	},
 }
 
