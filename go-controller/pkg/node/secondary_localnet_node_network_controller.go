@@ -277,7 +277,7 @@ func (nc *SecondaryLocalnetNodeNetworkController) updateLocalnetOvnBridgeMapping
 			klog.V(5).Infof("Localnet network %s is not needed on this node %s", nc.GetNetworkName(), nc.name)
 			return nil
 		}
-		klog.V(5).Infof("Set bridge %s for localnet network %s", bridgeName, nc.name)
+		klog.V(5).Infof("Set bridge %s for localnet network %s", bridgeName, nc.GetNetworkName())
 		nc.bridgeName = bridgeName
 	}
 
