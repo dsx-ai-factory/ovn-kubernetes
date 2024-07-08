@@ -471,6 +471,7 @@ type OVNKubernetesFeatureConfig struct {
 	EnableIPReservation           bool `gcfg:"enable-ip-reservation"`
 	EnableNetworkProbe            bool `gcfg:"enable-network-probe"`
 	EnablePortMirror              bool `gcfg:"enable-port-mirror"`
+	EnableNetworkQoS              bool `gcfg:"enable-network-qos"`
 }
 
 // GatewayMode holds the node gateway mode
