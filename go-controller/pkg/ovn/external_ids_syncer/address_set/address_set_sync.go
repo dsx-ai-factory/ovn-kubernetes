@@ -259,7 +259,7 @@ func (syncer *AddressSetsSyncer) getReferencingObjsAndNewDbIDs(oldHash, oldName 
 				lrp := lrps[0]
 				if lrp.Priority == types.AminPBRReroutePriority {
 					hash := lrp.ExternalIDs[types.ExternalIDHash]
-					pbrName := strings.TrimSuffix(oldName, "_"+hash)
+					pbrName := strings.TrimSuffix(oldName, "-"+hash)
 					dbIDs = syncer.getAdminPBRAddrSetDbIDs(pbrName, hash)
 				}
 			}
