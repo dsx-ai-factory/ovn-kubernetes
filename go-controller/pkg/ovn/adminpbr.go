@@ -11,7 +11,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
-	errors "k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	k8stypes "k8s.io/apimachinery/pkg/types"
@@ -19,6 +19,7 @@ import (
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpbrapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -27,6 +28,8 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
+	"github.com/pkg/errors"
 )
 
 const (
@@ -257,7 +260,7 @@ func (pol *internalAdminPBRPolicy) addPodToAddressSet(obj interface{}) {
 	}
 	// check if pod exists or not for retry path
 	if _, err := pol.controller.watchFactory.GetPod(pod.Namespace, pod.Name); err != nil {
-		if errors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			klog.Infof("Stop handling pod %s/%s as it does not exist", pod.Namespace, pod.Name)
 		} else {
 			klog.Errorf("Error retrieving pod %s/%s from cache: %v", pod.Namespace, pod.Name, err)
@@ -354,7 +357,7 @@ func (pol *internalAdminPBRPolicy) clearErrorMessage(pod *corev1.Pod) {
 func (pol *internalAdminPBRPolicy) updateAddressSetStatus(status types.OvnK8sStatus) {
 	adminpbr, err := pol.controller.watchFactory.GetAdminPBR(pol.name)
 	if err != nil {
-		if !errors.IsNotFound(err) {
+		if !apierrors.IsNotFound(err) {
 			klog.Errorf("Error retrieving adminpbr %s from cache: %v", pol.name, err)
 		}
 		return
@@ -380,7 +383,7 @@ func (bnc *BaseNetworkController) onAdminPBRAddOrUpdate(adminpbr *adminpbrapi.Ad
 	// check if adminpbr exists or not for retry path
 	var err error
 	if adminpbr, err = bnc.watchFactory.GetAdminPBR(adminpbr.Name); err != nil {
-		if errors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			klog.Infof("Stop handling adminpbr %s as it does not exist", adminpbr.Name)
 		} else {
 			klog.Errorf("Error retrieving adminpbr %s from cache: %v", adminpbr.Name, err)
@@ -646,7 +649,9 @@ func (bnc *BaseNetworkController) syncAdminPBRPeriodic() {
 	// get all adminpbr policies from ovn
 	ovnPolicies, err := bnc.findPolicyBasedRoutes(strconv.Itoa(types.AminPBRReroutePriority))
 	if err != nil {
-		klog.Errorf("[%s] Failed to retrieve logical router policies from OVN: %v", bnc.GetNetworkName(), err)
+		if !errors.Is(err, libovsdbclient.ErrNotFound) {
+			klog.Errorf("[%s] Failed to retrieve logical router policies from OVN: %v", bnc.GetNetworkName(), err)
+		}
 		return
 	}
 	// group ovn policies by adminpbr name to avoid interleaving
@@ -675,7 +680,7 @@ func (bnc *BaseNetworkController) syncAdminPBRPeriodic() {
 		apbrName := key[1:]                                            // remove leading "/"
 		unlock := util.LockByKey.Acquire(lockNameOfAdminPBR(apbrName)) // acquire lock to avoid racing against handler
 		adminpbr, err := bnc.watchFactory.GetAdminPBR(apbrName)
-		if err != nil && !errors.IsNotFound(err) {
+		if err != nil && !apierrors.IsNotFound(err) {
 			// error happened, skip this round
 			klog.Errorf("Failed to get adminpbr %s: %v", apbrName, err)
 			unlock()
@@ -711,6 +716,41 @@ func (bnc *BaseNetworkController) syncAdminPBRPeriodic() {
 // if address set's member IP is not in k8s anymore, delete it from the set
 func (bnc *BaseNetworkController) syncAddressSetPeriodic() {
 	klog.V(4).Infof("Cleaning up IPs from all AdminPBR's address set for network %s", bnc.GetNetworkName())
+	err := bnc.addressSetFactory.ProcessEachAddressSet(bnc.controllerName, libovsdbops.AddressSetAdminPBR,
+		func(dbIDs *libovsdbops.DbObjectIDs) error {
+			apbrName := dbIDs.GetObjectID(libovsdbops.ObjectNameKey)
+			hash := dbIDs.GetObjectID(libovsdbops.PBRHashKey)
+			unlock := util.LockByKey.Acquire(lockNameOfAdminPBR(apbrName)) // acquire lock to avoid racing against handler
+			adminpbr, err := bnc.watchFactory.GetAdminPBR(apbrName)
+			if err != nil && !apierrors.IsNotFound(err) {
+				// error happened, skip this round
+				unlock()
+				return fmt.Errorf("failed to get adminpbr %s: %v", apbrName, err)
+			}
+			var pbrFound, hashFound bool
+			// see if there is any adminPBR and its selector hash associated with this address_set
+			if adminpbr != nil && adminpbr.DeletionTimestamp.IsZero() {
+				pbrFound = true
+				value, _ := bnc.adminPBRStore.Load(k8stypes.NamespacedName{Name: apbrName}.String())
+				if value != nil {
+					policyMap := value.(map[string]*internalAdminPBRPolicy)
+					_, hashFound = policyMap[hash]
+				}
+			}
+			klog.V(5).Infof("[%s] adminpbr=%s hash=%s, adminpbr found: %v, hash found: %v", bnc.GetNetworkName(), apbrName, hash, pbrFound, hashFound)
+			if !pbrFound || !hashFound {
+				if err := bnc.addressSetFactory.DestroyAddressSet(dbIDs); err != nil {
+					unlock()
+					return fmt.Errorf("failed to delete address_set of adminpbr %s hash %v: %v", apbrName, hash, err)
+				}
+			}
+			unlock()
+			return nil
+		})
+	if err != nil {
+		klog.Errorf("Error in clean up stale adminPBR address_set: %v", err)
+	}
+
 	bnc.adminPBRStore.Range(func(key interface{}, value interface{}) bool {
 		policyMap := value.(map[string]*internalAdminPBRPolicy)
 		podIndexer := bnc.watchFactory.PodInformer().GetIndexer()
