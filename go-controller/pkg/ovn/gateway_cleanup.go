@@ -61,6 +61,11 @@ func (oc *DefaultNetworkController) gatewayCleanup(nodeName string) error {
 		return fmt.Errorf("failed to delete GR dummy mac bindings for node %s: %w", nodeName, err)
 	}
 
+	// clean up custom snat rule
+	if err := oc.cleanStaleGwSnatRule(&logicalRouter, nil); err != nil {
+		return err
+	}
+
 	// Remove the gateway router associated with nodeName
 	err = libovsdbops.DeleteLogicalRouter(oc.nbClient, &logicalRouter)
 	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {

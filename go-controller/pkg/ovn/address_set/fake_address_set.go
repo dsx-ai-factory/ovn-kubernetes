@@ -451,6 +451,18 @@ func (as *fakeAddressSets) DeleteAddressesReturnOps(addresses []string) ([]ovsdb
 	return ops, nil
 }
 
+func (as *fakeAddressSets) GetUuids() (string, string) {
+	var ipv4AS string
+	var ipv6AS string
+	if as.ipv4 != nil {
+		ipv4AS = as.ipv4.getHashName()
+	}
+	if as.ipv6 != nil {
+		ipv6AS = as.ipv6.getHashName()
+	}
+	return ipv4AS, ipv6AS
+}
+
 func (as *fakeAddressSets) Destroy() error {
 	as.Lock()
 	defer func() {

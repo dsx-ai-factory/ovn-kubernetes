@@ -20,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/util/retry"
+	utilnet "k8s.io/utils/net"
 )
 
 // This handles the annotations used by the node to pass information about its local
@@ -146,6 +147,11 @@ const (
 	ovnNodeDPUList = "ngn2.nvidia.com/dpus"
 )
 
+type GWSNATRule struct {
+	ExternalIP   net.IP
+	Destinations []*net.IPNet
+}
+
 type L3GatewayConfig struct {
 	Mode                config.GatewayMode
 	ChassisID           string
@@ -158,6 +164,12 @@ type L3GatewayConfig struct {
 	NextHops            []net.IP
 	NodePortEnable      bool
 	VLANID              *uint
+	GWSNATRules         []*GWSNATRule
+}
+
+type gwSNATRuleJSON struct {
+	Destinations []string `json:"destinations"`
+	ExternalIP   string   `json:"external-ip"`
 }
 
 type l3GatewayConfigJSON struct {
@@ -174,6 +186,7 @@ type l3GatewayConfigJSON struct {
 	NextHop             string             `json:"next-hop,omitempty"`
 	NodePortEnable      string             `json:"node-port-enable,omitempty"`
 	VLANID              string             `json:"vlan-id,omitempty"`
+	GWSNATRules         []*gwSNATRuleJSON  `json:"gw-snat-rules,omitempty"`
 }
 
 func (cfg *L3GatewayConfig) MarshalJSON() ([]byte, error) {
@@ -213,6 +226,21 @@ func (cfg *L3GatewayConfig) MarshalJSON() ([]byte, error) {
 	}
 	if len(cfgjson.NextHops) == 1 {
 		cfgjson.NextHop = cfgjson.NextHops[0]
+	}
+
+	for _, snatRule := range cfg.GWSNATRules {
+		if len(snatRule.Destinations) == 0 || snatRule.ExternalIP == nil {
+			return nil, fmt.Errorf("invalid snat rule: %v", *snatRule)
+		}
+		destinations := []string{}
+		for _, ipnet := range snatRule.Destinations {
+			destinations = append(destinations, ipnet.String())
+		}
+		snatJson := &gwSNATRuleJSON{
+			Destinations: destinations,
+			ExternalIP:   snatRule.ExternalIP.String(),
+		}
+		cfgjson.GWSNATRules = append(cfgjson.GWSNATRules, snatJson)
 	}
 
 	return json.Marshal(&cfgjson)
@@ -307,6 +335,37 @@ func (cfg *L3GatewayConfig) UnmarshalJSON(bytes []byte) error {
 		}
 	}
 
+	for _, snatRule := range cfgjson.GWSNATRules {
+		if len(snatRule.Destinations) == 0 || snatRule.ExternalIP == "" {
+			return fmt.Errorf("invalid snat rule: %v", *snatRule)
+		}
+		destinations := []*net.IPNet{}
+		for _, dest := range snatRule.Destinations {
+			if !strings.Contains(dest, "/") {
+				if utilnet.IsIPv4String(dest) {
+					dest += "/32"
+				} else if utilnet.IsIPv6String(dest) {
+					dest += "/128"
+				} else {
+					return fmt.Errorf("invalid IP %v", dest)
+				}
+			}
+			if _, ipnet, err := net.ParseCIDR(dest); err != nil {
+				return fmt.Errorf("failed to parse %s: %v", dest, err)
+			} else {
+				destinations = append(destinations, ipnet)
+			}
+		}
+		ip := net.ParseIP(snatRule.ExternalIP)
+		if ip == nil {
+			return fmt.Errorf("failed to parse external ip %s", snatRule.ExternalIP)
+		}
+		snat := &GWSNATRule{
+			Destinations: destinations,
+			ExternalIP:   ip,
+		}
+		cfg.GWSNATRules = append(cfg.GWSNATRules, snat)
+	}
 	return nil
 }
 

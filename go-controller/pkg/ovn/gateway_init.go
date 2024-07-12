@@ -524,7 +524,15 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 	if err := oc.cleanupStalePodSNATs(nodeName, l3GatewayConfig.IPAddresses); err != nil {
 		return fmt.Errorf("failed to sync stale SNATs on node %s: %v", nodeName, err)
 	}
-
+	snatMap := map[string]bool{}
+	for _, rule := range l3GatewayConfig.GWSNATRules {
+		if err := oc.applyGWSnatRule(rule, &logicalRouter, hostSubnets, snatMap); err != nil {
+			return err
+		}
+	}
+	if err := oc.cleanStaleGwSnatRule(&logicalRouter, snatMap); err != nil {
+		return err
+	}
 	// recording gateway mode metrics here after gateway setup is done
 	metrics.RecordEgressRoutingViaHost()
 

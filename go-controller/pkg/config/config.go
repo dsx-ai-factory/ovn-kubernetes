@@ -498,6 +498,8 @@ type GatewayConfig struct {
 	DisableForwarding bool `gcfg:"disable-forwarding"`
 	// AllowNoUplink (disabled by default) controls if the external gateway bridge without an uplink port is allowed in local gateway mode.
 	AllowNoUplink bool `gcfg:"allow-no-uplink"`
+	// CustomSnatRules specifies which snat IP to use based on destinations, in the form of `"external_ip1=dest1,dest2;external_ip2=dest3,dest4"`
+	CustomSnatRules string `gcfg:"custom-gwsnat-rules"`
 }
 
 // OvnAuthConfig holds client authentication and location details for
@@ -1521,6 +1523,11 @@ var OVNGatewayFlags = []cli.Flag{
 		Name:        "gateway-local",
 		Usage:       "DEPRECATED; use --gateway-mode instead",
 		Destination: &gatewayLocal,
+	},
+	&cli.StringFlag{
+		Name:        "custom-gwsnat-rules",
+		Usage:       "Specifies which snat IP to use based on destinations in the form of \"external_ip1=dest1,dest2;external_ip2=dest3,dest4\"",
+		Destination: &cliConfig.Gateway.CustomSnatRules,
 	},
 }
 

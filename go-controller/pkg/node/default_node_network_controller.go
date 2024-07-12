@@ -1134,6 +1134,8 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 			}
 		}
 
+		// watch change in Open_vSwitch external_ids:custom-gwsnat-rules
+		go nc.pollCustomGatewaySnatRules(nodeAnnotator)
 	}
 
 	if config.HybridOverlay.Enabled {

@@ -2938,6 +2938,14 @@ ovn-node() {
   fi
   echo "ovn_conntrack_zone_flag=${ovn_conntrack_zone_flag}"
 
+  custom_gwsnat_rules_opts=""
+  if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
+    custom_gwsnat_rules=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:custom-gwsnat-rules | tr -d \")
+    if [[ -n ${custom_gwsnat_rules} ]]; then
+      custom_gwsnat_rules_opts="--custom-gwsnat-rules=\"${custom_gwsnat_rules}\""
+    fi
+  fi
+
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
         ${anp_enabled_flag} \
@@ -2986,6 +2994,7 @@ ovn-node() {
         ${routable_mtu_flag} \
         ${sflow_targets} \
         ${wait_on_ovn_install_extid_flag} \
+        ${custom_gwsnat_rules_opts} \
         --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
         --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
         --host-network-namespace ${ovn_host_network_namespace} \

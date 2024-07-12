@@ -32,6 +32,7 @@ const (
 	NetpolNamespaceOwnerType    ownerType = "NetpolNamespace"
 	AdminPBROwnerType           ownerType = "AdminPBR"
 	ClusterSubnetsOwnerType     ownerType = "ClusterSubnets"
+	GatewaySnatRuleType         ownerType = "GatewaySnatRule"
 	VirtualMachineOwnerType     ownerType = "VirtualMachine"
 	// NetworkPolicyPortIndexOwnerType is the old version of NetworkPolicyOwnerType, kept for sync only
 	NetworkPolicyPortIndexOwnerType ownerType = "NetworkPolicyPortIndexOwnerType"
@@ -139,6 +140,11 @@ var AddressSetAdminPBR = newObjectIDsType(addressSet, AdminPBROwnerType, []Exter
 
 var AddressSetClusterSubnet = newObjectIDsType(addressSet, ClusterSubnetsOwnerType, []ExternalIDKey{
 	// namespace
+	ObjectNameKey,
+	AddressSetIPFamilyKey,
+})
+
+var AddressSetSnatAllowedExtIPs = newObjectIDsType(addressSet, GatewaySnatRuleType, []ExternalIDKey{
 	ObjectNameKey,
 	AddressSetIPFamilyKey,
 })
