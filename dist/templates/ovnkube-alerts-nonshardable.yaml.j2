@@ -155,7 +155,7 @@ spec:
          across all masters for the last 15minutes is more than 1 seconds.
 
     - alert: OvnNBDBMultipleLeaders
-      expr: sum(ovn_db_cluster_server_role{db_name="OVN_Northbound",server_role="leader"}) > 1
+      expr: sum by(instance)(ovn_db_cluster_server_role{db_name="OVN_Northbound",server_role="leader"}) > 1
       for: 4m
       labels:
        severity: critical
@@ -175,7 +175,7 @@ spec:
        message: There is no running ovn-nbdb leader
 
     - alert: OvnSBDBMultipleLeaders
-      expr: sum(ovn_db_cluster_server_role{db_name="OVN_Southbound",server_role="leader"}) > 1
+      expr: sum by(instance)(ovn_db_cluster_server_role{db_name="OVN_Southbound",server_role="leader"}) > 1
       for: 4m
       labels:
        severity: critical
@@ -195,7 +195,7 @@ spec:
        message: There is no running ovn-sbdb leader
 
     - alert: OvnNorthdNotActive
-      expr: sum(ovn_northd_status) != 1
+      expr: max(ovn_northd_status) == 0
       for: 4m
       labels:
        severity: critical
