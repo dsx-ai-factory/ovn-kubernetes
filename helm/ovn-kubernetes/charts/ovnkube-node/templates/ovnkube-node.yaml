@@ -235,6 +235,8 @@ spec:
           value: {{ default "" .Values.global.nodeMgmtPortNetdev | quote }}
         - name: OVN_UDN_ALLOWED_DEFAULT_SERVICES
           value: {{ hasKey .Values.global "udnAllowedDefaultServices" | ternary .Values.global.udnAllowedDefaultServices "" | quote }}
+        - name: OVN_NETWORK_QOS_ENABLE
+          value: {{ hasKey .Values.global "enableNetworkQos" | ternary .Values.global.enableNetworkQos false | quote }}
         - name: OVN_HOST_NETWORK_NAMESPACE
           valueFrom:
             configMapKeyRef:
