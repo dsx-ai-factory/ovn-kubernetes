@@ -2868,7 +2868,7 @@ ovn-node() {
   fi
 
   ovnkube_node_mgmt_port_netdev_flag=
-  if [[ ${ovnkube_node_mgmt_port_netdev} != "" ]]; then
+  if [[ ${ovnkube_node_mgmt_port_netdev} != "" ]] && [[ "$(/usr/bin/systemd-detect-virt -v)" == "none" ]]; then
     ovnkube_node_mgmt_port_netdev_flag="--ovnkube-node-mgmt-port-netdev=${ovnkube_node_mgmt_port_netdev}"
   fi
   if [[ -n "${ovnkube_node_mgmt_port_dp_resource_name}" ]] ; then
