@@ -903,7 +903,7 @@ func getClusterSubnetAddrSetDbIDs(netName, controller string) *libovsdbops.DbObj
 // and forwarded to Internet.
 func (bnc *BaseNetworkController) noRerouteToJoinSubnet() error {
 	// ensure that cluster subnets are in address set
-	asIndex := getClusterSubnetAddrSetDbIDs(bnc.controllerName, bnc.GetNetworkName())
+	asIndex := getClusterSubnetAddrSetDbIDs(bnc.GetNetworkName(), bnc.controllerName)
 	addrSet, err := bnc.addressSetFactory.EnsureAddressSet(asIndex)
 	if err != nil {
 		return fmt.Errorf("failed to create address set for cluster subnets: %v", err)
