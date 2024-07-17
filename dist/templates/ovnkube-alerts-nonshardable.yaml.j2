@@ -13,7 +13,7 @@ spec:
     rules:
     - alert: OvnKubeNoRunningManager
       expr: absent(up{job="ovnkube-master", namespace="ovn-kubernetes"} == 1)
-      for: 4m
+      for: 6m
       labels:
        severity: critical
        pduuid: P10A23N
@@ -23,7 +23,7 @@ spec:
 
     - alert: OvnKubeManagerMultipleLeaders
       expr: sum(ovnkube_controller_leader) > 1
-      for: 4m
+      for: 6m
       labels:
        severity: critical
        pduuid: P10A23N
@@ -33,7 +33,7 @@ spec:
 
     - alert: OvnKubeManagerNoLeader
       expr: max(ovnkube_controller_leader) == 0
-      for: 4m
+      for: 6m
       labels:
         severity: critical
         pduuid: P10A23N
@@ -156,7 +156,7 @@ spec:
 
     - alert: OvnNBDBMultipleLeaders
       expr: sum by(instance)(ovn_db_cluster_server_role{db_name="OVN_Northbound",server_role="leader"}) > 1
-      for: 4m
+      for: 6m
       labels:
        severity: critical
        pduuid: P10A23N
@@ -166,7 +166,7 @@ spec:
 
     - alert: OvnNBDBNoLeader
       expr: max(ovn_db_cluster_server_role{db_name="OVN_Northbound",server_role="leader"}) == 0
-      for: 4m
+      for: 6m
       labels:
         severity: critical
         pduuid: P10A23N
@@ -176,7 +176,7 @@ spec:
 
     - alert: OvnSBDBMultipleLeaders
       expr: sum by(instance)(ovn_db_cluster_server_role{db_name="OVN_Southbound",server_role="leader"}) > 1
-      for: 4m
+      for: 6m
       labels:
        severity: critical
        pduuid: P10A23N
@@ -186,7 +186,7 @@ spec:
 
     - alert: OvnSBDBNoLeader
       expr: max(ovn_db_cluster_server_role{db_name="OVN_Southbound",server_role="leader"}) == 0
-      for: 4m
+      for: 6m
       labels:
         severity: critical
         pduuid: P10A23N
@@ -196,7 +196,7 @@ spec:
 
     - alert: OvnNorthdNotActive
       expr: max(ovn_northd_status) == 0
-      for: 4m
+      for: 6m
       labels:
        severity: critical
        pduuid: P10A23N

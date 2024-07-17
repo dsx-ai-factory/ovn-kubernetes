@@ -224,7 +224,7 @@ spec:
 
     - alert: OvnKubeManagerStale
       expr: time() - max(ovnkube_controller_nb_e2e_timestamp) > 120
-      for: 4m
+      for: 6m
       labels:
        severity: major
        pduuid: P10A23N
@@ -234,7 +234,7 @@ spec:
 
     - alert: OvnNorthdStale
       expr: max(ovnkube_controller_nb_e2e_timestamp) - max(ovnkube_controller_sb_e2e_timestamp) > 120
-      for: 4m
+      for: 6m
       labels:
        severity: critical
        pduuid: P10A23N
@@ -282,7 +282,7 @@ spec:
 
     - alert: OvnSBDBRaftTermChange
       expr: rate(ovn_db_cluster_term{db_name="OVN_Southbound"}[5m]) != 0
-      for: 4m
+      for: 6m
       labels:
         severity: warning
         pduuid: P10A23N
@@ -654,7 +654,7 @@ spec:
         ovs_vswitchd_interface_ingress_qdisc_total and
             ovs_vswitchd_interface_of_port{interface=~"^enp.*s0f[0|1]$|^p[0|1]$|^pf[0|1]hpf$|^bond[0|1]$"} != -1 and 
             ovs_vswitchd_interface_ingress_qdisc_total{interface=~"^enp.*s0f[0|1]$|^p[0|1]$|^pf[0|1]hpf$|^bond[0|1]$"} == 0
-      for: 4m
+      for: 6m
       labels:
        severity: major
        pduuid: P10A23N
@@ -670,7 +670,7 @@ spec:
             ovs_vswitchd_interface_of_port{interface=~"^enp.*_[0-9]+$|^pf[0|1]vf[0-9]+$"} != -1 and (
                 ovs_vswitchd_interface_ingress_qdisc_total{interface=~"^enp.*_[0-9]+$|^pf[0|1]vf[0-9]+$"} == 0 or
                 ovs_vswitchd_interface_ingress_qdisc_total{interface="geneve_sys_6081"} == 0 )
-      for: 4m
+      for: 6m
       labels:
        severity: major
        pduuid: P10A23N
