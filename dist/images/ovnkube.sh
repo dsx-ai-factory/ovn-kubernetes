@@ -401,7 +401,7 @@ ovnkube_admin_firewalld_zone=${OVNKUBE_ADMIN_FIREWALLD_ZONE:-"ngn-admin"}
 # OVN_ENABLE_SVC_TEMPLATE_SUPPORT - enable svc template support
 ovn_enable_svc_template_support=${OVN_ENABLE_SVC_TEMPLATE_SUPPORT:-false}
 # OVNKUBE_WAIT_ON_OVN_INSTALL_EXTID - check ovn-installed external-ids for pod OVS interface readiness
-ovnkube-wait-on-ovn-install-extid=${OVNKUBE_WAIT_ON_OVN_INSTALL_EXTID:-"false"}
+ovnkube_wait_on_ovn_install_extid=${OVNKUBE_WAIT_ON_OVN_INSTALL_EXTID:-"false"}
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
@@ -1940,7 +1940,7 @@ ovnkube-controller-with-node() {
   fi
 
   wait_on_ovn_install_extid_flag=
-  if [[ ${ovnkube-wait-on-ovn-install-extid} == "true" ]]; then
+  if [[ ${ovnkube_wait_on_ovn_install_extid} == "true" ]]; then
       wait_on_ovn_install_extid_flag="--ovnkube-wait-on-ovn-install-extid"
   fi
 
@@ -2678,7 +2678,7 @@ ovn-node() {
   fi
 
   wait_on_ovn_install_extid_flag=
-  if [[ ${ovnkube-wait-on-ovn-install-extid} == "true" ]]; then
+  if [[ ${ovnkube_wait_on_ovn_install_extid} == "true" ]]; then
       wait_on_ovn_install_extid_flag="--ovnkube-wait-on-ovn-install-extid"
   fi
 
