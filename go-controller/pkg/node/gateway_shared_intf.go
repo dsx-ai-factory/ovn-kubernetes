@@ -402,9 +402,19 @@ func (npw *nodePortWatcher) generateARPBypassFlow(ofPorts []string, ipAddr strin
 			}
 			arpPortsFiltered = append(arpPortsFiltered, port)
 		}
-		arpFlow = fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, "+
-			"actions=output:%s",
-			cookie, npw.ofportPhys, addrResProto, addrResDst, ipAddr, strings.Join(arpPortsFiltered, ","))
+
+		// If you get vlan tagged traffic from your physical interface, you will have to untag it before sending it to
+		// the access ports (which could be multiple ports).
+		if config.Gateway.VLANID != 0 {
+			match_vlan := fmt.Sprintf("dl_vlan=%d,", config.Gateway.VLANID)
+			arpFlow = fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s,%s, %s=%s, "+
+				"actions=strip_vlan,output:%s",
+				cookie, npw.ofportPhys, match_vlan, addrResProto, addrResDst, ipAddr, strings.Join(arpPortsFiltered, ","))
+		} else {
+			arpFlow = fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, "+
+				"actions=output:%s",
+				cookie, npw.ofportPhys, addrResProto, addrResDst, ipAddr, strings.Join(arpPortsFiltered, ","))
+		}
 	}
 
 	return arpFlow
