@@ -26,7 +26,7 @@ spec:
                 
     - alert: K8sNodeWithoutOvnKubeAgentRunning
       expr: |
-        kube_node_info unless on(node)
+        kube_node_info{node!~"liqo-.*"} unless on(node)
         (kube_pod_info{namespace="ovn-kubernetes", pod=~"ovnkube-node.*"}) > 0
       for: 10m
       labels:
@@ -211,7 +211,7 @@ spec:
 
     - alert: OvnKubeMasterLogFileSize
       expr: |
-        rate(ovnkube_controller_logfile_size{namespace="ovn-kubernetes", job="ovnkube-master"}[15m]) * 5 * 60 / 1024 / 1024 > 1
+        rate(ovnkube_master_logfile_size{namespace="ovn-kubernetes", job="ovnkube-master"}[15m]) * 5 * 60 / 1024 / 1024 > 1
       for: 10m
       labels:
        severity: warning
@@ -223,7 +223,7 @@ spec:
          increasing {{ printf "%.2f" $value }} Mb / 5 minutes
 
     - alert: OvnKubeManagerStale
-      expr: time() - max(ovnkube_controller_nb_e2e_timestamp) > 120
+      expr: time() - max(ovnkube_master_nb_e2e_timestamp) > 120
       for: 6m
       labels:
        severity: major
@@ -233,7 +233,7 @@ spec:
          ovn-kubernetes has not written anything to the northbound database for too long
 
     - alert: OvnNorthdStale
-      expr: max(ovnkube_controller_nb_e2e_timestamp) - max(ovnkube_controller_sb_e2e_timestamp) > 120
+      expr: max(ovnkube_master_nb_e2e_timestamp) - max(ovnkube_master_sb_e2e_timestamp) > 120
       for: 6m
       labels:
        severity: critical
