@@ -58,6 +58,8 @@ const udpPacketAggregationTimeout = 50 * time.Microsecond
 
 var udpPacketAggregationTimeoutBytes = []byte(fmt.Sprintf("%d\n", udpPacketAggregationTimeout.Nanoseconds()))
 
+var defaultVFHardwareAddress = make(net.HardwareAddr, 6)
+
 // sets up the host side of a veth for UDP packet aggregation
 func setupVethUDPAggregationHost(ifname string) error {
 	e, err := ethtool.NewEthtool()
@@ -747,6 +749,11 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 		// host side interface deletion
 		hostIfName := pr.SandboxID[:(15-len(ifnameSuffix))] + ifnameSuffix
 		if pr.CNIConf.DeviceID != "" {
+			if pr.IsVFIO {
+				if err := util.SetVFHardwreAddress(pr.CNIConf.DeviceID, defaultVFHardwareAddress); err != nil {
+					klog.Warningf("Failed to reset VF hardware address: %s", pr.CNIConf.DeviceID)
+				}
+			}
 			hostIfName, err = util.GetFunctionRepresentorName(pr.CNIConf.DeviceID)
 			if err != nil {
 				klog.Errorf("Failed to get the representor name for DeviceID %s for pod %s: %v",

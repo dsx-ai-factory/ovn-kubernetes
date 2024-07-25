@@ -239,7 +239,13 @@ func (nc *SecondaryLocalnetNodeNetworkController) Cleanup(netName string) error 
 	return nil
 }
 
+var ovsMutex = sync.Mutex{}
+
 func (nc *SecondaryLocalnetNodeNetworkController) updateLocalnetOvnBridgeMapping(toAdd bool) error {
+	// The NAD controller may have multiple workers that call this function concurrently.
+	// A mutex is required to prevent concurrent overwrites of external_ids:ovn-bridge-mappings.
+	ovsMutex.Lock()
+	defer ovsMutex.Unlock()
 	bridgeName := ""
 	if toAdd {
 		// ngn-localnet-bridge-mappings exernal_ids is in the form of "<network_prefix1>:<br1>,<network_prefix2>:<br2>...".
@@ -277,7 +283,7 @@ func (nc *SecondaryLocalnetNodeNetworkController) updateLocalnetOvnBridgeMapping
 			klog.V(5).Infof("Localnet network %s is not needed on this node %s", nc.GetNetworkName(), nc.name)
 			return nil
 		}
-		klog.V(5).Infof("Set bridge %s for localnet network %s", bridgeName, nc.name)
+		klog.V(5).Infof("Set bridge %s for localnet network %s", bridgeName, nc.GetNetworkName())
 		nc.bridgeName = bridgeName
 	}
 

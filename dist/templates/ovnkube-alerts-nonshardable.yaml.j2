@@ -13,7 +13,7 @@ spec:
     rules:
     - alert: OvnKubeNoRunningManager
       expr: absent(up{job="ovnkube-master", namespace="ovn-kubernetes"} == 1)
-      for: 4m
+      for: 6m
       labels:
        severity: critical
        pduuid: P10A23N
@@ -23,7 +23,7 @@ spec:
 
     - alert: OvnKubeManagerMultipleLeaders
       expr: sum(ovnkube_controller_leader) > 1
-      for: 4m
+      for: 6m
       labels:
        severity: critical
        pduuid: P10A23N
@@ -33,7 +33,7 @@ spec:
 
     - alert: OvnKubeManagerNoLeader
       expr: max(ovnkube_controller_leader) == 0
-      for: 4m
+      for: 6m
       labels:
         severity: critical
         pduuid: P10A23N
@@ -155,8 +155,8 @@ spec:
          across all masters for the last 15minutes is more than 1 seconds.
 
     - alert: OvnNBDBMultipleLeaders
-      expr: sum(ovn_db_cluster_server_role{db_name="OVN_Northbound",server_role="leader"}) > 1
-      for: 4m
+      expr: sum by(instance)(ovn_db_cluster_server_role{db_name="OVN_Northbound",server_role="leader"}) > 1
+      for: 6m
       labels:
        severity: critical
        pduuid: P10A23N
@@ -166,7 +166,7 @@ spec:
 
     - alert: OvnNBDBNoLeader
       expr: max(ovn_db_cluster_server_role{db_name="OVN_Northbound",server_role="leader"}) == 0
-      for: 4m
+      for: 6m
       labels:
         severity: critical
         pduuid: P10A23N
@@ -175,8 +175,8 @@ spec:
        message: There is no running ovn-nbdb leader
 
     - alert: OvnSBDBMultipleLeaders
-      expr: sum(ovn_db_cluster_server_role{db_name="OVN_Southbound",server_role="leader"}) > 1
-      for: 4m
+      expr: sum by(instance)(ovn_db_cluster_server_role{db_name="OVN_Southbound",server_role="leader"}) > 1
+      for: 6m
       labels:
        severity: critical
        pduuid: P10A23N
@@ -186,7 +186,7 @@ spec:
 
     - alert: OvnSBDBNoLeader
       expr: max(ovn_db_cluster_server_role{db_name="OVN_Southbound",server_role="leader"}) == 0
-      for: 4m
+      for: 6m
       labels:
         severity: critical
         pduuid: P10A23N
@@ -195,8 +195,8 @@ spec:
        message: There is no running ovn-sbdb leader
 
     - alert: OvnNorthdNotActive
-      expr: sum(ovn_northd_status) != 1
-      for: 4m
+      expr: max(ovn_northd_status) == 0
+      for: 6m
       labels:
        severity: critical
        pduuid: P10A23N
@@ -234,28 +234,3 @@ spec:
       annotations:
        message: |
          ovnkubeMaster allocated IPv4 host subnets value for {{ $labels.network_name }} network should be same as the number of K8s nodes excluding the DPU nodes
-
-    - alert: NoCarrierOnUplinkInterface
-      expr: |
-        label_replace(node_network_carrier{device=~"^enp.*s0f[0|1]$|^p[0|1]$|^pf[0|1]hpf$|^bond[0|1]$",job=~"node-exporter|node-exporter-dpu"} != 1, "node", "$0", "instance", ".*") *
-            on (node) group_left kube_node_spec_unschedulable == 0
-      for: 4m
-      labels:
-       severity: major
-       pduuid: P10A23N
-       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
-      annotations:
-       message: |
-         Carrier was not detected on uplink interface {{ $labels.device }} in instance {{ $labels.instance }}.
-
-    - alert: NoCarrierOnAdminServerUplinkInterface
-      expr: |
-        node_network_carrier{device=~"^enp.*s0f[0|1]$",job="admin-host-metrics"} != 1
-      for: 4m
-      labels:
-       severity: major
-       pduuid: P10A23N
-       dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
-      annotations:
-       message: |
-         Carrier was not detected on uplink interface {{ $labels.device }} in instance {{ $labels.instance }}.

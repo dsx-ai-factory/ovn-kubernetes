@@ -774,41 +774,6 @@ func setOvsInterfaceStatistics(interfaceBridge, interfacePort, interfaceName str
 	}
 }
 
-func setOvsInterfaceHwOffloadInfo(fd int, interfaceBridge, interfacePort, interfaceName,
-	interfaceDriverName string) {
-	// Check if this is Representor, skip anything else
-	if strings.Compare(interfaceDriverName, "mlx5e_rep") != 0 {
-		// Check if we need to explicitly set these to 0
-		return
-	}
-
-	info, err := util.NetlinkFilterGet(interfaceName, fd)
-	if err != nil {
-		klog.Errorf("Failed to get stats: %v", err)
-		return
-	}
-
-	var swBytes uint64 = 0
-	var swPackets uint32 = 0
-	var hwBytes uint64 = 0
-	var hwPackets uint32 = 0
-	for _, msg := range info {
-		swBytes += msg.SentSwBytes
-		swPackets += msg.SentSwPackets
-		hwBytes += msg.SentHwBytes
-		hwPackets += msg.SentHwPackets
-	}
-
-	ovsInterfaceMetricsDataMap["interface_in_sw_bytes"].metric.WithLabelValues(
-		interfaceBridge, interfacePort, interfaceName).Set(float64(swBytes))
-	ovsInterfaceMetricsDataMap["interface_in_hw_bytes"].metric.WithLabelValues(
-		interfaceBridge, interfacePort, interfaceName).Set(float64(hwBytes))
-	ovsInterfaceMetricsDataMap["interface_in_sw_packets"].metric.WithLabelValues(
-		interfaceBridge, interfacePort, interfaceName).Set(float64(swPackets))
-	ovsInterfaceMetricsDataMap["interface_in_hw_packets"].metric.WithLabelValues(
-		interfaceBridge, interfacePort, interfaceName).Set(float64(hwPackets))
-}
-
 func setHwOffloadInfoViaEthtool(etHandler *ethtool.Ethtool, interfaceBridge, interfacePort, interfaceName,
 	interfaceDriverName string) {
 	// Check if this is Representor, skip anything else
@@ -983,13 +948,6 @@ func ovsInterfaceMetricsUpdater(ovsDBClient *util.OvsdbClient,
 		}
 	}()
 
-	nlFd, err := util.NetlinkFilterOpen()
-	if err != nil {
-		nlFd = -1
-	} else {
-		defer util.NetlinkFilterClose(nlFd)
-	}
-
 	// it is ok to do it here since calling NewEthtool() is inexpensive.
 	// also, if we fail opening the handler, we will retry again in next attempt
 	etHandler, err := ethtool.NewEthtool()
@@ -1049,11 +1007,6 @@ func ovsInterfaceMetricsUpdater(ovsDBClient *util.OvsdbClient,
 		setOvsInterfaceStatistics(interfaceData.bridge, portName, interfaceName, interfaceInfo.Statistics)
 		// set interface limits, if any, on the number of new connections (i.e. missed packets)  initiated.
 		setOvsPortMissPktsInfo(interfaceData.bridge, portName, interfaceName, interfaceInfo.Status["driver_name"])
-		if nlFd != -1 {
-			// set interface hw-offload stats initiated.
-			setOvsInterfaceHwOffloadInfo(
-				nlFd, interfaceData.bridge, portName, interfaceName, interfaceInfo.Status["driver_name"])
-		}
 		// set interface hw-offload stats initiated.
 		setHwOffloadInfoViaEthtool(etHandler, interfaceData.bridge, portName, interfaceName, interfaceInfo.Status["driver_name"])
 	}
@@ -1275,19 +1228,6 @@ var ovsInterfaceMetricsDataMap = map[string]*ovsInterfaceMetricsDetails{
 	},
 	"interface_ingress_qdisc_total": {
 		help: "Denotes the total ingress filters on the device",
-	},
-	// next 4 metrics are here for backwards compatibilty, and will be removed later..
-	"interface_in_sw_bytes": {
-		help: "Sent bytes via software OVS path",
-	},
-	"interface_in_hw_bytes": {
-		help: "Sent bytes via hardware accelerated OVS path",
-	},
-	"interface_in_sw_packets": {
-		help: "Sent packets via software OVS path",
-	},
-	"interface_in_hw_packets": {
-		help: "Sent packets via hardware accelerated OVS path",
 	},
 	// Pod transmit metrics
 	"interface_tx_sw_bytes": {

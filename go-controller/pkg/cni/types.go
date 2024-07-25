@@ -43,15 +43,16 @@ type KubeAPIAuth struct {
 type PodInterfaceInfo struct {
 	util.PodAnnotation
 
-	RoutableMTU          int    `json:"routable-mtu"`
-	Ingress              int64  `json:"ingress"`
-	Egress               int64  `json:"egress"`
-	IsDPUHostMode        bool   `json:"is-dpu-host-mode"`
-	SkipIPConfig         bool   `json:"skip-ip-config"`
-	PodUID               string `json:"pod-uid"`
-	NetdevName           string `json:"netdev-name"`
-	EnableUDPAggregation bool   `json:"enable-udp-aggregation"`
-	SkipSpoofCheck       bool   `json:"skip-spoof-check"`
+	RoutableMTU           int    `json:"routable-mtu"`
+	Ingress               int64  `json:"ingress"`
+	Egress                int64  `json:"egress"`
+	WaitOnOVNInstallExtID bool   `json:"wait-on-ovn-install-extid"`
+	IsDPUHostMode         bool   `json:"is-dpu-host-mode"`
+	SkipIPConfig          bool   `json:"skip-ip-config"`
+	PodUID                string `json:"pod-uid"`
+	NetdevName            string `json:"netdev-name"`
+	EnableUDPAggregation  bool   `json:"enable-udp-aggregation"`
+	SkipSpoofCheck        bool   `json:"skip-spoof-check"`
 
 	// network name, for default network, it is "default", otherwise it is net-attach-def's netconf spec name
 	NetName string `json:"netName"`

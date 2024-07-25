@@ -18,6 +18,9 @@ import (
 )
 
 func TestL3GatewayConfig_MarshalJSON(t *testing.T) {
+	_, customSnatRuleDest, _ := net.ParseCIDR("128.116.0.0/17")
+	customSnatLogicIP := net.ParseIP("192.168.1.2")
+
 	vlanid := uint(1024)
 	tests := []struct {
 		desc       string
@@ -72,6 +75,30 @@ func TestL3GatewayConfig_MarshalJSON(t *testing.T) {
 			},
 			expOutput: []byte(`{"mode":"local","interface-id":"INTERFACE-ID","mac-address":"11:22:33:44:55:66","ip-addresses":["192.168.1.10/24","fd01::1234/64"],"next-hops":["192.168.1.1","fd01::1"],"node-port-enable":"false","vlan-id":"1024"}`),
 		},
+		{
+			desc: "test alternative egressip",
+			inpL3GwCfg: &L3GatewayConfig{
+				Mode:        config.GatewayModeLocal,
+				VLANID:      &vlanid,
+				InterfaceID: "INTERFACE-ID",
+				MACAddress:  ovntest.MustParseMAC("11:22:33:44:55:66"),
+				IPAddresses: []*net.IPNet{
+					ovntest.MustParseIPNet("192.168.1.10/24"),
+					ovntest.MustParseIPNet("fd01::1234/64"),
+				},
+				NextHops: []net.IP{
+					ovntest.MustParseIP("192.168.1.1"),
+					ovntest.MustParseIP("fd01::1"),
+				},
+				GWSNATRules: []*GWSNATRule{
+					{
+						Destinations: []*net.IPNet{customSnatRuleDest},
+						ExternalIP:   customSnatLogicIP,
+					},
+				},
+			},
+			expOutput: []byte(`{"mode":"local","interface-id":"INTERFACE-ID","mac-address":"11:22:33:44:55:66","ip-addresses":["192.168.1.10/24","fd01::1234/64"],"next-hops":["192.168.1.1","fd01::1"],"node-port-enable":"false","vlan-id":"1024","gw-snat-rules":[{"destinations":["128.116.0.0/17"],"external-ip":"192.168.1.2"}]}`),
+		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
@@ -83,6 +110,9 @@ func TestL3GatewayConfig_MarshalJSON(t *testing.T) {
 }
 
 func TestL3GatewayConfig_UnmarshalJSON(t *testing.T) {
+	_, gwSnatIPDest, _ := net.ParseCIDR("128.116.0.0/17")
+	gwSnatIP := net.ParseIP("192.168.1.2")
+
 	tests := []struct {
 		desc       string
 		expOut     L3GatewayConfig
@@ -180,6 +210,26 @@ func TestL3GatewayConfig_UnmarshalJSON(t *testing.T) {
 				NextHops: []net.IP{
 					ovntest.MustParseIP("192.168.1.1"),
 					ovntest.MustParseIP("fd01::1"),
+				},
+			},
+		},
+		{
+			desc:       "success: test gateway snat rules",
+			inputParam: []byte(`{"mode":"shared","mac-address":"11:22:33:44:55:66","ip-address":"192.168.1.5/24", "next-hops":["192.168.1.1","fd01::1"], "gw-snat-rules":[{"destinations":["128.116.0.0/17"],"external-ip":"192.168.1.2"}]}`),
+			expOut: L3GatewayConfig{
+				Mode:        "shared",
+				MACAddress:  ovntest.MustParseMAC("11:22:33:44:55:66"),
+				IPAddresses: ovntest.MustParseIPNets("192.168.1.5/24"),
+				NextHops: []net.IP{
+					ovntest.MustParseIP("192.168.1.1"),
+					ovntest.MustParseIP("fd01::1"),
+				},
+				NodePortEnable: false,
+				GWSNATRules: []*GWSNATRule{
+					{
+						Destinations: []*net.IPNet{gwSnatIPDest},
+						ExternalIP:   gwSnatIP,
+					},
 				},
 			},
 		},
@@ -322,6 +372,17 @@ func TestParseNodeL3GatewayAnnotation(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
 						"k8s.ovn.org/l3-gateway-config": `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"169.254.33.2/24", "next-hop":"169.254.33.1"}}`,
+						"k8s.ovn.org/node-chassis-id":   "79fdcfc4-6fe6-4cd3-8242-c0f85a4668ec",
+					},
+				},
+			},
+		},
+		{
+			desc: "success: parse completed with gateway snat rules",
+			inpNode: &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.ovn.org/l3-gateway-config": `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"169.254.33.2/24", "next-hop":"169.254.33.1","gw-snat-rules":[{"destinations":["128.116.0.0/17"],"external-ip":"192.168.1.2"}]}}`,
 						"k8s.ovn.org/node-chassis-id":   "79fdcfc4-6fe6-4cd3-8242-c0f85a4668ec",
 					},
 				},

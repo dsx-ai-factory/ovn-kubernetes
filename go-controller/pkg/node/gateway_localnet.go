@@ -140,7 +140,7 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 		}
 
 		if err := addHostMACBindings(gwBridge.bridgeName); err != nil {
-			return fmt.Errorf("failed to add MAC bindings for service routing")
+			return fmt.Errorf("failed to add MAC bindings for service routing: %v", err)
 		}
 
 		return nil

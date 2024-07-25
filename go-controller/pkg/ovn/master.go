@@ -659,7 +659,7 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 		return nil
 	}
 
-	klog.Infof("Adding or Updating Node %q", node.Name)
+	klog.V(6).Infof("Adding or Updating Node %q", node.Name)
 	if nSyncs.syncNode {
 		if hostSubnets, err = oc.addNode(node); err != nil {
 			oc.addNodeFailed.Store(node.Name, true)
@@ -692,6 +692,10 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 		} else {
 			oc.nodeClusterRouterPortFailed.Delete(node.Name)
 		}
+		// delete stale chassis in SBDB if any
+		if err := oc.deleteStaleNodeChassis(node); err != nil {
+			errs = append(errs, err)
+		}
 	}
 
 	if nSyncs.syncMgmtPort {
@@ -702,11 +706,6 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 		} else {
 			oc.mgmtPortFailed.Delete(node.Name)
 		}
-	}
-
-	// delete stale chassis in SBDB if any
-	if err := oc.deleteStaleNodeChassis(node); err != nil {
-		errs = append(errs, err)
 	}
 
 	annotator := kube.NewNodeAnnotator(oc.kube, node.Name)

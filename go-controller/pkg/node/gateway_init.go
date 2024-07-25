@@ -519,7 +519,7 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) er
 	}
 
 	if err := addHostMACBindings(gwIntf); err != nil {
-		return fmt.Errorf("failed to add MAC bindings for service routing")
+		return fmt.Errorf("failed to add MAC bindings for service routing: %v", err)
 	}
 
 	err = gw.Init(nc.stopChan, nc.wg)

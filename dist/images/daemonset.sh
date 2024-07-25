@@ -125,6 +125,7 @@ OVNKUBE_ADMIN_FIREWALLD_ZONE="ngn-admin"
 # northd-backoff-interval, in ms
 OVN_NORTHD_BACKOFF_INTERVAL=0
 OVN_ENABLE_PERSISTENT_IPS=
+OVNKUBE_WAIT_ON_OVN_INSTALL_EXTID="false"
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -294,6 +295,9 @@ while [ "$1" != "" ]; do
     ;;
   --disable-ovn-iface-id-ver)
     OVN_DISABLE_OVN_IFACE_ID_VER=$VALUE
+    ;;
+  --ovnkube-wait-on-ovn-install-extid)
+    OVNKUBE_WAIT_ON_OVN_INSTALL_EXTID=$VALUE
     ;;
   --ovn-nbcert-cname)
     OVN_NB_CERT_CNAME=$VALUE
@@ -552,6 +556,8 @@ ovn_port_mirror_enable=${OVN_PORT_MIRROR_ENABLE}
 echo "ovn_port_mirror_enable: ${ovn_port_mirror_enable}"
 ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER}
 echo "ovn_disable_ovn_iface_id_ver: ${ovn_disable_ovn_iface_id_ver}"
+ovnkube_wait_on_ovn_install_extid=${OVNKUBE_WAIT_ON_OVN_INSTALL_EXTID}
+echo "ovnkube_wait_on_ovn_install_extid: ${ovnkube_wait_on_ovn_install_extid}"
 ovn_multi_network_enable=${OVN_MULTI_NETWORK_ENABLE}
 echo "ovn_multi_network_enable: ${ovn_multi_network_enable}"
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR}
@@ -734,6 +740,7 @@ ovn_image=${image} \
   ovn_ipfix_cache_active_timeout=${ovn_ipfix_cache_active_timeout} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
+  ovnkube_wait_on_ovn_install_extid=${ovnkube_wait_on_ovn_install_extid} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
   disable_ovs_metrics=${disable_ovs_metrics} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \
@@ -789,6 +796,7 @@ ovn_image=${ovnkube_image} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
+  ovnkube_wait_on_ovn_install_extid=${ovnkube_wait_on_ovn_install_extid} \
   disable_ovs_metrics=${disable_ovs_metrics} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
@@ -1011,6 +1019,7 @@ ovn_image=${image} \
   ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
   ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
   ovnkube_logfile=${ovnkube_logfile} \
+  ovnkube_wait_on_ovn_install_extid=${ovnkube_wait_on_ovn_install_extid} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
@@ -1044,6 +1053,9 @@ ovn_image=${image} \
   ovn_ipfix_cache_active_timeout=${ovn_ipfix_cache_active_timeout} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
+  ovs_max_revalidator=${ovs_max_revalidator} \
+  ovs_min_revalidate_pps=${ovs_min_revalidate_pps} \
+  ovs_max_idle=${ovs_max_idle} \
   coredns_cluster_ip=${coredns_cluster_ip} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \
@@ -1111,6 +1123,7 @@ ovn_image=${image_ubuntu} \
   ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
   ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
   ovnkube_logfile=${ovnkube_logfile} \
+  ovnkube_wait_on_ovn_install_extid=${ovnkube_wait_on_ovn_install_extid} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_multicast_enable=${ovn_multicast_enable} \
@@ -1214,6 +1227,7 @@ ovn_image=${image} \
   ovnkube_libovsdb_client_logfile=${ovnkube_libovsdb_client_logfile} \
   ovnkube_config_duration_enable=${ovnkube_config_duration_enable} \
   ovnkube_metrics_scale_enable=${ovnkube_metrics_scale_enable} \
+  ovnkube_wait_on_ovn_install_extid=${ovnkube_wait_on_ovn_install_extid} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \

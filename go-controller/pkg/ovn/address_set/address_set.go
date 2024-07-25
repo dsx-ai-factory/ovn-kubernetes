@@ -72,6 +72,8 @@ type AddressSet interface {
 	DeleteAddressesReturnOps(addresses []string) ([]ovsdb.Operation, error)
 	// Destroy deletes the entire address set
 	Destroy() error
+	// GetUuids returns the uuids of ipv6 and ipv4 addressSets
+	GetUuids() (string, string)
 }
 
 type ovnAddressSetFactory struct {
@@ -513,6 +515,18 @@ func (as *ovnAddressSets) DeleteAddressesReturnOps(addresses []string) ([]ovsdb.
 		ops = append(ops, op...)
 	}
 	return ops, nil
+}
+
+func (as *ovnAddressSets) GetUuids() (string, string) {
+	var ipv4Uuid string
+	var ipv6Uuid string
+	if as.v4 != nil {
+		ipv4Uuid = as.v4.uuid
+	}
+	if as.v6 != nil {
+		ipv6Uuid = as.v6.uuid
+	}
+	return ipv4Uuid, ipv6Uuid
 }
 
 func (as *ovnAddressSets) Destroy() error {

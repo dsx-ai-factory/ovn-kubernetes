@@ -1134,6 +1134,8 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 			}
 		}
 
+		// watch change in Open_vSwitch external_ids:custom-gwsnat-rules
+		go nc.pollCustomGatewaySnatRules(nodeAnnotator)
 	}
 
 	if config.HybridOverlay.Enabled {
@@ -1408,7 +1410,7 @@ func (nc *DefaultNodeNetworkController) checkAndDeleteStaleConntrackEntries() {
 		_, foundRoutingExternalGWsAnnotation := namespace.Annotations[util.RoutingExternalGWsAnnotation]
 		_, foundExternalGatewayPodIPsAnnotation := namespace.Annotations[util.ExternalGatewayPodIPsAnnotation]
 		if foundRoutingExternalGWsAnnotation || foundExternalGatewayPodIPsAnnotation {
-			pods, err := nc.watchFactory.GetPods(namespace.Name)
+			pods, err := nc.watchFactory.GetPodsOnNode(namespace.Name, nc.name)
 			if err != nil {
 				klog.Warningf("Unable to get pods from informer for namespace %s: %v", namespace.Name, err)
 			}
@@ -1431,7 +1433,7 @@ func (nc *DefaultNodeNetworkController) syncConntrackForExternalGateways(newNs *
 	gatewayIPs = gatewayIPs.Insert(strings.Split(newNs.Annotations[util.RoutingExternalGWsAnnotation], ",")...)
 
 	return util.SyncConntrackForExternalGateways(gatewayIPs, nil, func() ([]*kapi.Pod, error) {
-		return nc.watchFactory.GetPods(newNs.Name)
+		return nc.watchFactory.GetPodsOnNode(newNs.Name, nc.name)
 	})
 }
 

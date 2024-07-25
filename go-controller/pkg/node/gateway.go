@@ -351,6 +351,12 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops 
 		l3GwConfig.EgressGWMACAddress = egressGWBridge.macAddress
 		l3GwConfig.EgressGWIPAddresses = egressGWBridge.ips
 	}
+	// set custom snat ip info
+	if snatRules, err := parseCustomSnatRules(config.Gateway.CustomSnatRules); err != nil {
+		return nil, nil, err
+	} else {
+		l3GwConfig.GWSNATRules = snatRules
+	}
 
 	err = util.SetL3GatewayConfig(nodeAnnotator, &l3GwConfig)
 	return gatewayBridge, egressGWBridge, err

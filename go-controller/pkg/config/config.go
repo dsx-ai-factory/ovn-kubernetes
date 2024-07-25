@@ -498,6 +498,8 @@ type GatewayConfig struct {
 	DisableForwarding bool `gcfg:"disable-forwarding"`
 	// AllowNoUplink (disabled by default) controls if the external gateway bridge without an uplink port is allowed in local gateway mode.
 	AllowNoUplink bool `gcfg:"allow-no-uplink"`
+	// CustomSnatRules specifies which snat IP to use based on destinations, in the form of `"external_ip1=dest1,dest2;external_ip2=dest3,dest4"`
+	CustomSnatRules string `gcfg:"custom-gwsnat-rules"`
 }
 
 // OvnAuthConfig holds client authentication and location details for
@@ -545,6 +547,7 @@ type OvnKubeNodeConfig struct {
 	DPResourceDeviceIdsMap map[string][]string
 	MgmtPortNetdev         string `gcfg:"mgmt-port-netdev"`
 	MgmtPortDPResourceName string `gcfg:"mgmt-port-dp-resource-name"`
+	WaitOnOVNInstallExtID  bool   `gcfg:"ovnkube-wait-on-ovn-install-extid"`
 	IsPrimaryDPU           bool
 	XDPSFRep               string `gcfg:"ovn-xdp-sfrep"`
 	XDPVeth                string `gcfg:"ovn-xdp-veth"`
@@ -1521,6 +1524,11 @@ var OVNGatewayFlags = []cli.Flag{
 		Usage:       "DEPRECATED; use --gateway-mode instead",
 		Destination: &gatewayLocal,
 	},
+	&cli.StringFlag{
+		Name:        "custom-gwsnat-rules",
+		Usage:       "Specifies which snat IP to use based on destinations in the form of \"external_ip1=dest1,dest2;external_ip2=dest3,dest4\"",
+		Destination: &cliConfig.Gateway.CustomSnatRules,
+	},
 }
 
 // MasterHAFlags capture leader election flags for master
@@ -1620,6 +1628,12 @@ var OvnKubeNodeFlags = []cli.Flag{
 		Name:        "disable-ovn-iface-id-ver",
 		Usage:       "Deprecated; iface-id-ver is always enabled",
 		Destination: &disableOVNIfaceIDVer,
+	},
+	&cli.BoolFlag{
+		Name:        "ovnkube-wait-on-ovn-install-extid",
+		Usage:       "check existence ovn-installed external-ids to determine if Pod's OVS interface is ready, default is false",
+		Value:       OvnKubeNode.WaitOnOVNInstallExtID,
+		Destination: &cliConfig.OvnKubeNode.WaitOnOVNInstallExtID,
 	},
 	&cli.StringFlag{
 		Name:        "ovn-xdp-sfrep",

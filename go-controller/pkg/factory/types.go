@@ -62,6 +62,7 @@ type NodeWatchFactory interface {
 
 	GetPods(namespace string) ([]*kapi.Pod, error)
 	GetPod(namespace, name string) (*kapi.Pod, error)
+	GetPodsOnNode(namespace, nodeName string) ([]*kapi.Pod, error)
 	GetAllPods() ([]*kapi.Pod, error)
 	GetNamespaces() ([]*kapi.Namespace, error)
 	GetNode(name string) (*kapi.Node, error)

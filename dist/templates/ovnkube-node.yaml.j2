@@ -281,6 +281,8 @@ spec:
           value: "{{ ovn_enable_interconnect }}"
         - name: OVN_ENABLE_MULTI_EXTERNAL_GATEWAY
           value: "{{ ovn_enable_multi_external_gateway }}"
+        - name: OVNKUBE_WAIT_ON_OVN_INSTALL_EXTID
+          value: "{{ ovnkube_wait_on_ovn_install_extid }}"
         {% endif -%}
         {% if ovnkube_app_name=="ovnkube-node-dpu-host" -%}
         - name: OVNKUBE_NODE_MODE

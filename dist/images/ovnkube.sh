@@ -400,6 +400,8 @@ ovnkube_disable_firewalld=${OVNKUBE_DISABLE_FIREWALLD:-"false"}
 ovnkube_admin_firewalld_zone=${OVNKUBE_ADMIN_FIREWALLD_ZONE:-"ngn-admin"}
 # OVN_ENABLE_SVC_TEMPLATE_SUPPORT - enable svc template support
 ovn_enable_svc_template_support=${OVN_ENABLE_SVC_TEMPLATE_SUPPORT:-false}
+# OVNKUBE_WAIT_ON_OVN_INSTALL_EXTID - check ovn-installed external-ids for pod OVS interface readiness
+ovnkube_wait_on_ovn_install_extid=${OVNKUBE_WAIT_ON_OVN_INSTALL_EXTID:-"false"}
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
@@ -1937,6 +1939,11 @@ ovnkube-controller-with-node() {
       disable_ovn_iface_id_ver_flag="--disable-ovn-iface-id-ver"
   fi
 
+  wait_on_ovn_install_extid_flag=
+  if [[ ${ovnkube_wait_on_ovn_install_extid} == "true" ]]; then
+      wait_on_ovn_install_extid_flag="--ovnkube-wait-on-ovn-install-extid"
+  fi
+
   netflow_targets=
   if [[ -n ${ovn_netflow_targets} ]]; then
       netflow_targets="--netflow-targets ${ovn_netflow_targets}"
@@ -2183,6 +2190,7 @@ ovnkube-controller-with-node() {
     ${routable_mtu_flag} \
     ${sflow_targets} \
     ${ssl_opts} \
+    ${wait_on_ovn_install_extid_flag} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --gateway-mode=${ovn_gateway_mode} \
     --gateway-router-subnet=${ovn_gateway_router_subnet} \
@@ -2669,6 +2677,11 @@ ovn-node() {
       disable_ovn_iface_id_ver_flag="--disable-ovn-iface-id-ver"
   fi
 
+  wait_on_ovn_install_extid_flag=
+  if [[ ${ovnkube_wait_on_ovn_install_extid} == "true" ]]; then
+      wait_on_ovn_install_extid_flag="--ovnkube-wait-on-ovn-install-extid"
+  fi
+
   multi_network_enabled_flag=
   if [[ ${ovn_multi_network_enable} == "true" ]]; then
 	  multi_network_enabled_flag="--enable-multi-network --enable-multi-networkpolicy"
@@ -2925,6 +2938,14 @@ ovn-node() {
   fi
   echo "ovn_conntrack_zone_flag=${ovn_conntrack_zone_flag}"
 
+  custom_gwsnat_rules_opts=""
+  if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
+    custom_gwsnat_rules=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:custom-gwsnat-rules | tr -d \")
+    if [[ -n ${custom_gwsnat_rules} ]]; then
+      custom_gwsnat_rules_opts="--custom-gwsnat-rules=\"${custom_gwsnat_rules}\""
+    fi
+  fi
+
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
         ${anp_enabled_flag} \
@@ -2972,6 +2993,8 @@ ovn-node() {
         ${representor_metering_nodes_flag} \
         ${routable_mtu_flag} \
         ${sflow_targets} \
+        ${wait_on_ovn_install_extid_flag} \
+        ${custom_gwsnat_rules_opts} \
         --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
         --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
         --host-network-namespace ${ovn_host_network_namespace} \
