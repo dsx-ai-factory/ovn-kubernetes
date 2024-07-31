@@ -530,7 +530,7 @@ ovsdb-raft() {
     --db-${db}-cluster-local-proto=${transport} \
     ${db_ssl_opts} \
     --ovn-${db}-log="${ovn_loglevel_db}" \
-    --db-schema-upgrade="${OVN_DB_UPGRADE_SCHEMA_INLINE}" &
+    --db-cluster-schema-upgrade="${OVN_DB_UPGRADE_SCHEMA_INLINE}" &
   fi
 
 
