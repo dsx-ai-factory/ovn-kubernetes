@@ -50,7 +50,7 @@ var (
 	// ovn-kubernetes build date
 	BuildDate = ""
 	// ovn-kubernetes version, to be changed with every release
-	Version = "0.3.0"
+	Version = "1.0.0"
 	// version of the go runtime used to compile ovn-kubernetes
 	GoVersion = runtime.Version()
 	// os and architecture used to build ovn-kubernetes
@@ -437,6 +437,7 @@ type OVNKubernetesFeatureConfig struct {
 	EnableInterconnect              bool `gcfg:"enable-interconnect"`
 	EnableMultiExternalGateway      bool `gcfg:"enable-multi-external-gateway"`
 	EnablePersistentIPs             bool `gcfg:"enable-persistent-ips"`
+	EnableDNSNameResolver           bool `gcfg:"enable-dns-name-resolver"`
 	EnableServiceTemplateSupport    bool `gcfg:"enable-svc-template-support"`
 	// EnableAdminPolicyBasedRouting allows admin to manage PBR rules
 	EnableAdminPolicyBasedRouting bool `gcfg:"enable-admin-pbr"`
@@ -1146,6 +1147,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use the persistent ips feature for virtualization with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnablePersistentIPs,
 		Value:       OVNKubernetesFeature.EnablePersistentIPs,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-dns-name-resolver",
+		Usage:       "Configure to use DNSNameResolver CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableDNSNameResolver,
+		Value:       OVNKubernetesFeature.EnableDNSNameResolver,
 	},
 	&cli.BoolFlag{
 		Name:        "enable-ip-reservation",

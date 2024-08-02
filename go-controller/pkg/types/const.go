@@ -28,6 +28,9 @@ const (
 	LocalBridgeName            = "br-local"
 	LocalnetGatewayNextHopPort = "ovn-k8s-gw0"
 
+	// OVS Bridge Datapath types
+	DatapathUserspace = "netdev"
+
 	// types.OVNClusterRouter is the name of the distributed router
 	OVNClusterRouter = "ovn_cluster_router"
 	OVNJoinSwitch    = "join"
@@ -101,7 +104,12 @@ const (
 	EgressIPReroutePriority               = 100
 	AminPBRReroutePriority                = 80
 	NoRerouteJoinSubnetPriority           = 81
+	EgressIPRerouteQoSRulePriority        = 103
 	EgressLiveMigrationReroutePiority     = 10
+
+	// Packet marking
+	EgressIPNodeConnectionMark         = "1008"
+	EgressIPReplyTrafficConnectionMark = 42
 
 	V6NodeLocalNATSubnet           = "fd99::/64"
 	V6NodeLocalNATSubnetPrefix     = 64

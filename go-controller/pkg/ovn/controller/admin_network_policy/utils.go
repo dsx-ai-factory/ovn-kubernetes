@@ -2,7 +2,15 @@ package adminnetworkpolicy
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
+	"sort"
+
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
+	utilnet "k8s.io/utils/net"
+	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -10,14 +18,12 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/pkg/errors"
-	apierrors "k8s.io/apimachinery/pkg/util/errors"
-	"k8s.io/apimachinery/pkg/util/sets"
-	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 var ErrorANPPriorityUnsupported = errors.New("OVNK only supports priority ranges 0-99")
-var ErrorANPWithDuplicatePriority = errors.New("exists with the same priority")
+var ANPWithDuplicatePriorityEvent = "ANPWithDuplicatePriority"
+var ANPWithUnsupportedPriorityEvent = "ANPWithUnsupportedPriority"
 
 func GetANPPortGroupDbIDs(anpName string, isBanp bool, controller string) *libovsdbops.DbObjectIDs {
 	idsType := libovsdbops.PortGroupAdminNetworkPolicy
@@ -94,15 +100,18 @@ func GetANPPeerAddrSetDbIDs(name, gressPrefix, gressIndex, controller string, is
 	})
 }
 
+func getDirectionFromGressPrefix(gressPrefix string) string {
+	if gressPrefix == string(libovsdbutil.ACLIngress) {
+		return "src"
+	}
+	return "dst"
+}
+
 // constructMatchFromAddressSet returns the L3Match for an ACL constructed from a gressRule
 func constructMatchFromAddressSet(gressPrefix string, addrSetIndex *libovsdbops.DbObjectIDs) string {
 	hashedAddressSetNameIPv4, hashedAddressSetNameIPv6 := addressset.GetHashNamesForAS(addrSetIndex)
-	var direction, match string
-	if gressPrefix == string(libovsdbutil.ACLIngress) {
-		direction = "src"
-	} else {
-		direction = "dst"
-	}
+	var match string
+	direction := getDirectionFromGressPrefix(gressPrefix)
 
 	switch {
 	case config.IPv4Mode && config.IPv6Mode:
@@ -144,27 +153,56 @@ func getACLLoggingLevelsForANP(annotations map[string]string) (*libovsdbutil.ACL
 	// Valid log levels are the various preestablished levels or the empty string.
 	validLogLevels := sets.NewString(nbdb.ACLSeverityAlert, nbdb.ACLSeverityWarning, nbdb.ACLSeverityNotice,
 		nbdb.ACLSeverityInfo, nbdb.ACLSeverityDebug, "")
-	var errors []error
+	var errs []error
 	// Ensure value parsed is valid
 	// Set Deny logging.
 	if !validLogLevels.Has(aclLogLevels.Deny) {
-		errors = append(errors, fmt.Errorf("disabling deny logging due to an invalid deny annotation. "+
+		errs = append(errs, fmt.Errorf("disabling deny logging due to an invalid deny annotation. "+
 			"%q is not a valid log severity", aclLogLevels.Deny))
 		aclLogLevels.Deny = ""
 	}
 
 	// Set Allow logging.
 	if !validLogLevels.Has(aclLogLevels.Allow) {
-		errors = append(errors, fmt.Errorf("disabling allow logging due to an invalid allow annotation. "+
+		errs = append(errs, fmt.Errorf("disabling allow logging due to an invalid allow annotation. "+
 			"%q is not a valid log severity", aclLogLevels.Allow))
 		aclLogLevels.Allow = ""
 	}
 
 	// Set Pass logging.
 	if !validLogLevels.Has(aclLogLevels.Pass) {
-		errors = append(errors, fmt.Errorf("disabling pass logging due to an invalid pass annotation. "+
+		errs = append(errs, fmt.Errorf("disabling pass logging due to an invalid pass annotation. "+
 			"%q is not a valid log severity", aclLogLevels.Pass))
 		aclLogLevels.Pass = ""
 	}
-	return aclLogLevels, apierrors.NewAggregate(errors)
+	return aclLogLevels, utilerrors.Join(errs...)
+}
+
+// convertPodIPContainerPortToNNPP converts the given pod container port and podIPs into a list (max 2 for dualstack)
+// of libovsdbutil.NamedNetworkPolicyPort (NNPP)
+func convertPodIPContainerPortToNNPP(cPort v1.ContainerPort, podIPs []net.IP) []libovsdbutil.NamedNetworkPolicyPort {
+	out := make([]libovsdbutil.NamedNetworkPolicyPort, 0)
+	namedPortRep := libovsdbutil.NamedNetworkPolicyPort{
+		L4Protocol: libovsdbutil.ConvertK8sProtocolToOVNProtocol(cPort.Protocol),
+		L4PodPort:  fmt.Sprintf("%d", cPort.ContainerPort),
+	}
+	for _, podIP := range podIPs {
+		family := ""
+		if utilnet.IsIPv4(podIP) {
+			family = "ip4"
+		} else {
+			family = "ip6"
+		}
+		namedPortRep.L3PodIP = podIP.String()
+		namedPortRep.L3PodIPFamily = family
+		out = append(out, namedPortRep)
+	}
+	return out
+}
+
+// sortNamedPorts does an in place sort where it arranges the NamedNetworkPolicyPort
+// in the provided array in a sorted fashion based on L3PodIP.
+// We can use the L3PodIP because it is guaranteed to be unique for a given named port
+func sortNamedPorts(namedPortList []libovsdbutil.NamedNetworkPolicyPort) {
+	sort.SliceStable(namedPortList, func(i, j int) bool { return namedPortList[i].L3PodIP < namedPortList[j].L3PodIP })
 }

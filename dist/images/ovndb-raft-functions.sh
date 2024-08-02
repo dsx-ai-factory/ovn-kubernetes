@@ -2,7 +2,7 @@
 #set -euo pipefail
 
 verify-ovsdb-raft() {
-  check_ovn_daemonset_version "3"
+  check_ovn_daemonset_version "1.0.0"
 
   if [[ ${ovn_db_host} == "" ]]; then
     echo "failed to retrieve the IP address of the host $(hostname). Exiting..."
@@ -530,7 +530,7 @@ ovsdb-raft() {
     --db-${db}-cluster-local-proto=${transport} \
     ${db_ssl_opts} \
     --ovn-${db}-log="${ovn_loglevel_db}" \
-    --db-schema-upgrade="${OVN_DB_UPGRADE_SCHEMA_INLINE}" &
+    --db-cluster-schema-upgrade="${OVN_DB_UPGRADE_SCHEMA_INLINE}" &
   fi
 
 

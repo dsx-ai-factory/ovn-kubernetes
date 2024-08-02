@@ -3,15 +3,13 @@ package addressset
 import (
 	"fmt"
 
-	"github.com/pkg/errors"
-
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
-	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -138,7 +136,7 @@ func (asf *ovnAddressSetFactory) EnsureAddressSet(dbIDs *libovsdbops.DbObjectIDs
 }
 
 func getDbIDsWithIPFamily(dbIDs *libovsdbops.DbObjectIDs, ipFamily string) *libovsdbops.DbObjectIDs {
-	return dbIDs.AddIDs(map[libovsdbops.ExternalIDKey]string{libovsdbops.AddressSetIPFamilyKey: ipFamily})
+	return dbIDs.AddIDs(map[libovsdbops.ExternalIDKey]string{libovsdbops.IPFamilyKey: ipFamily})
 }
 
 // GetAddressSet returns the address-set that matches the given dbIDs
@@ -156,10 +154,10 @@ func (asf *ovnAddressSetFactory) GetAddressSet(dbIDs *libovsdbops.DbObjectIDs) (
 	}
 	for i := range addrSetList {
 		addrSet := addrSetList[i]
-		if addrSet.ExternalIDs[libovsdbops.AddressSetIPFamilyKey.String()] == ipv4InternalID {
+		if addrSet.ExternalIDs[libovsdbops.IPFamilyKey.String()] == ipv4InternalID {
 			v4set = asf.newOvnAddressSet(addrSet)
 		}
-		if addrSet.ExternalIDs[libovsdbops.AddressSetIPFamilyKey.String()] == ipv6InternalID {
+		if addrSet.ExternalIDs[libovsdbops.IPFamilyKey.String()] == ipv6InternalID {
 			v6set = asf.newOvnAddressSet(addrSet)
 		}
 	}
@@ -184,7 +182,7 @@ func (asf *ovnAddressSetFactory) forEachAddressSet(ownerController string, dbIDs
 	}
 
 	if len(errs) > 0 {
-		return fmt.Errorf("failed to iterate address sets: %v", utilerrors.NewAggregate(errs))
+		return fmt.Errorf("failed to iterate address sets: %v", utilerrors.Join(errs...))
 	}
 
 	return nil
@@ -200,7 +198,7 @@ func (asf *ovnAddressSetFactory) ProcessEachAddressSet(ownerController string, d
 			return fmt.Errorf("failed to get objectIDs for %+v address set from ExternalIDs: %w", as, err)
 		}
 		// remove ipFamily to process address set only once
-		dbIDsWithoutIPFam := dbIDs.RemoveIDs(libovsdbops.AddressSetIPFamilyKey)
+		dbIDsWithoutIPFam := dbIDs.RemoveIDs(libovsdbops.IPFamilyKey)
 		nameWithoutIPFam := getOvnAddressSetsName(dbIDsWithoutIPFam)
 		if processedAddressSets.Has(nameWithoutIPFam) {
 			// We have already processed the address set. In case of dual stack we will have _v4 and _v6
@@ -309,7 +307,7 @@ func (asf *ovnAddressSetFactory) ensureOvnAddressSetOps(addresses []string, dbID
 
 func (asf *ovnAddressSetFactory) validateDbIDs(dbIDs *libovsdbops.DbObjectIDs) error {
 	unsetKeys := dbIDs.GetUnsetKeys()
-	if len(unsetKeys) == 1 && unsetKeys[0] == libovsdbops.AddressSetIPFamilyKey {
+	if len(unsetKeys) == 1 && unsetKeys[0] == libovsdbops.IPFamilyKey {
 		return nil
 	}
 	return fmt.Errorf("wrong set of keys is unset %v", unsetKeys)
@@ -354,8 +352,8 @@ type ovnAddressSet struct {
 // therefore the name should not include ipFamily information. DbObjectIDs without ipFamily is what is used by
 // the AddressSetFactory functions.
 func getOvnAddressSetsName(dbIDs *libovsdbops.DbObjectIDs) string {
-	if dbIDs.GetObjectID(libovsdbops.AddressSetIPFamilyKey) != "" {
-		dbIDs = dbIDs.RemoveIDs(libovsdbops.AddressSetIPFamilyKey)
+	if dbIDs.GetObjectID(libovsdbops.IPFamilyKey) != "" {
+		dbIDs = dbIDs.RemoveIDs(libovsdbops.IPFamilyKey)
 	}
 	return dbIDs.String()
 }
@@ -413,7 +411,7 @@ func (as *ovnAddressSets) SetAddresses(addresses []string) error {
 		err = as.v6.setAddresses(v6addresses)
 	}
 	if as.v4 != nil {
-		err = errors.Wrapf(err, "%v", as.v4.setAddresses(v4addresses))
+		err = utilerrors.Join(err, as.v4.setAddresses(v4addresses))
 	}
 
 	return err

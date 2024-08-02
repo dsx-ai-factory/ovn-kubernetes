@@ -245,7 +245,7 @@ func (cm *NetworkControllerManager) CleanupDeletedNetworks(allControllers []nad.
 
 	for netName, oc := range staleNetworkControllers {
 		klog.Infof("Cleanup entities for stale network %s", netName)
-		err = oc.Cleanup(netName)
+		err = oc.Cleanup()
 		if err != nil {
 			klog.Errorf("Failed to delete stale OVN logical entities for network %s: %v", netName, err)
 		}
@@ -312,16 +312,17 @@ func (cm *NetworkControllerManager) configureSCTPSupport() error {
 	return nil
 }
 
-func (cm *NetworkControllerManager) disableOVNCTInvalidFlows() error {
-	if !config.Default.DisableCTInvFlows {
-		return nil
+func (cm *NetworkControllerManager) setNBGlobalOptions() error {
+	options := map[string]string{"ignore_chassis_features": "true"}
+	if config.Default.DisableCTInvFlows {
+		options["use_ct_inv_match"] = "false"
 	}
 	nbGlobal := nbdb.NBGlobal{
-		Options: map[string]string{"use_ct_inv_match": "false"},
+		Options: options,
 	}
 	err := libovsdbops.UpdateNBGlobalSetOptions(cm.nbClient, &nbGlobal)
 	if err != nil {
-		err = fmt.Errorf("failed to disable NB global options use_ct_inv_match: %v", err)
+		err = fmt.Errorf("failed to set NB global options %v: %v", options, err)
 	}
 
 	return err
@@ -452,7 +453,7 @@ func (cm *NetworkControllerManager) Start(ctx context.Context) error {
 		return err
 	}
 
-	err = cm.disableOVNCTInvalidFlows()
+	err = cm.setNBGlobalOptions()
 	if err != nil {
 		return err
 	}

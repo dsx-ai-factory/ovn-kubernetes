@@ -22,6 +22,7 @@ import (
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egressservice"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
+	dnsnameresolver "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/dns_name_resolver"
 	aclsyncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/acl"
 	addrsetsyncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/port_group"
@@ -31,10 +32,10 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
-	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
@@ -100,7 +101,9 @@ type DefaultNetworkController struct {
 	// Controller used to handle the admin policy based external route resources
 	apbExternalRouteController *apbroutecontroller.ExternalGatewayMasterController
 
-	egressFirewallDNS *EgressDNS
+	// dnsNameResolver is used for resolving the IP addresses of DNS names
+	// used in egress firewall rules
+	dnsNameResolver dnsnameresolver.DNSNameResolver
 
 	// retry framework for egress firewall
 	retryEgressFirewalls *retry.RetryFramework
@@ -208,7 +211,7 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo, netInf
 		},
 		externalGatewayRouteInfo: apbExternalRouteController.ExternalGWRouteInfoCache,
 		eIPC: egressIPZoneController{
-			nodeIPUpdateMutex:  &sync.Mutex{},
+			nodeUpdateMutex:    &sync.Mutex{},
 			podAssignmentMutex: &sync.Mutex{},
 			podAssignment:      make(map[string]*podAssignmentState),
 			nbClient:           cnci.nbClient,
@@ -337,12 +340,13 @@ func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 
 // Stop gracefully stops the controller
 func (oc *DefaultNetworkController) Stop() {
+	oc.dnsNameResolver.Shutdown()
 	close(oc.stopChan)
 	oc.cancelableCtx.Cancel()
 	oc.wg.Wait()
 }
 
-func (oc *DefaultNetworkController) Cleanup(netName string) error {
+func (oc *DefaultNetworkController) Cleanup() error {
 	panic("unexpected call for default network")
 }
 
@@ -529,11 +533,22 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 
 	if config.OVNKubernetesFeature.EnableEgressFirewall {
 		var err error
-		oc.egressFirewallDNS, err = NewEgressDNS(oc.addressSetFactory, oc.controllerName, oc.stopChan)
+		// If DNSNameResolver is enabled, then initialize dnsNameResolver to ExternalEgressDNS
+		// for maintaining the address sets corresponding to the DNS names and start watching
+		// DNSNameResolver resources. Otherwise initialize dnsNameResolver to EgressDNS.
+		if config.OVNKubernetesFeature.EnableDNSNameResolver {
+			oc.dnsNameResolver, err = dnsnameresolver.NewExternalEgressDNS(oc.addressSetFactory, oc.controllerName, true,
+				oc.watchFactory.DNSNameResolverInformer().Informer(), oc.watchFactory.EgressFirewallInformer().Lister())
+		} else {
+			oc.dnsNameResolver, err = dnsnameresolver.NewEgressDNS(oc.addressSetFactory, oc.controllerName, oc.stopChan, egressFirewallDNSDefaultDuration)
+		}
 		if err != nil {
 			return err
 		}
-		oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
+		err = oc.dnsNameResolver.Run()
+		if err != nil {
+			return err
+		}
 		err = WithSyncDurationMetric("egress firewall", oc.WatchEgressFirewall)
 		if err != nil {
 			return err
@@ -834,7 +849,7 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 			h.oc.syncHostNetAddrSetFailed.Store(node.Name, true)
 			aggregatedErrors = append(aggregatedErrors, err)
 		}
-		return kerrors.NewAggregate(aggregatedErrors)
+		return utilerrors.Join(aggregatedErrors...)
 
 	case factory.EgressFirewallType:
 		egressFirewall := obj.(*egressfirewall.EgressFirewall).DeepCopy()
@@ -864,17 +879,20 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 		h.oc.eIPC.nodeZoneState.LockKey(node.Name)
 		h.oc.eIPC.nodeZoneState.Store(node.Name, h.oc.isLocalZoneNode(node))
 		h.oc.eIPC.nodeZoneState.UnlockKey(node.Name)
+		// add the 103 qos rule to new node's switch
+		// NOTE: We don't need to remove this on node delete since entire node switch will get cleaned up
+		if h.oc.isLocalZoneNode(node) {
+			if err := h.oc.ensureDefaultNoRerouteQoSRules(node.Name); err != nil {
+				return err
+			}
+		}
 		// add the nodeIP to the default LRP (102 priority) destination address-set
 		err := h.oc.ensureDefaultNoRerouteNodePolicies()
 		if err != nil {
 			return err
 		}
-		// add the GARP configuration for all the new nodes we get
-		// since we use the "exclude-lb-vips-from-garp": "true"
-		// we shouldn't have scale issues
-		// NOTE: Adding GARP needs to be done only during node add
-		// It is a one time operation and doesn't need to be done during
-		// node updates. It needs to be done only for nodes local to this zone
+		// Add routing specific to Egress IP NOTE: GARP configuration that
+		// Egress IP depends on is added from the gateway reconciliation logic
 		return h.oc.addEgressNode(node)
 
 	case factory.EgressFwNodeType:
@@ -1014,7 +1032,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 				h.oc.syncHostNetAddrSetFailed.Delete(newNode.Name)
 			}
 		}
-		return kerrors.NewAggregate(aggregatedErrors)
+		return utilerrors.Join(aggregatedErrors...)
 
 	case factory.EgressIPType:
 		oldEIP := oldObj.(*egressipv1.EgressIP)
@@ -1039,6 +1057,16 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 		h.oc.eIPC.nodeZoneState.LockKey(newNode.Name)
 		h.oc.eIPC.nodeZoneState.Store(newNode.Name, h.oc.isLocalZoneNode(newNode))
 		h.oc.eIPC.nodeZoneState.UnlockKey(newNode.Name)
+		// try to add the 103 qos rule to new node's switch if it doesn't exist
+		// The reason we call this from update is because in case the add node event
+		// did not succeed and we got an update node event which overrides the add event
+		// and removes the add event from retry cache, we'd need to ensure the qos rule exists
+		// NOTE: We don't need to remove this on node delete since entire node switch will get cleaned up
+		if h.oc.isLocalZoneNode(newNode) {
+			if err := h.oc.ensureDefaultNoRerouteQoSRules(newNode.Name); err != nil {
+				return err
+			}
+		}
 		// update the nodeIP in the defalt-reRoute (102 priority) destination address-set
 		if util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) {
 			klog.Infof("Egress IP detected IP address change for node %s. Updating no re-route policies", newNode.Name)
@@ -1127,10 +1155,6 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 
 	case factory.EgressNodeType:
 		node := obj.(*kapi.Node)
-		// remove the GARP setup for the node
-		if err := h.oc.deleteEgressNode(node); err != nil {
-			return err
-		}
 		// remove the IPs from the destination address-set of the default LRP (102)
 		err := h.oc.ensureDefaultNoRerouteNodePolicies()
 		if err != nil {

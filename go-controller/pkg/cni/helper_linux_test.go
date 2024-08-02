@@ -30,7 +30,6 @@ import (
 	"github.com/vishvananda/netlink"
 
 	v1 "k8s.io/api/core/v1"
-	//ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	kexec "k8s.io/utils/exec"
 )
@@ -1347,6 +1346,7 @@ func TestConfigureOVS(t *testing.T) {
 					IPs: []*net.IPNet{ipnet},
 				},
 				WaitOnOVNInstallExtID: true,
+				IsDPUHostMode:         false,
 				NetName:               ovntypes.DefaultNetworkName,
 				NetdevName:            "enp1s0f0v1",
 				PodUID:                "xyz",
@@ -1373,6 +1373,7 @@ func TestConfigureOVS(t *testing.T) {
 					IPs: []*net.IPNet{ipnet},
 				},
 				WaitOnOVNInstallExtID: true,
+				IsDPUHostMode:         false,
 				NetName:               ovntypes.DefaultNetworkName,
 				NetdevName:            "enp999s0f0v1",
 				PodUID:                "xyz",
@@ -1399,6 +1400,7 @@ func TestConfigureOVS(t *testing.T) {
 					IPs: []*net.IPNet{ipnet},
 				},
 				WaitOnOVNInstallExtID: true,
+				IsDPUHostMode:         false,
 				NetName:               ovntypes.DefaultNetworkName,
 				NetdevName:            "enp1s0f0v1",
 				PodUID:                "xyz",
@@ -1423,6 +1425,7 @@ func TestConfigureOVS(t *testing.T) {
 					IPs: []*net.IPNet{ipnet},
 				},
 				WaitOnOVNInstallExtID: true,
+				IsDPUHostMode:         false,
 				NetName:               ovntypes.DefaultNetworkName,
 				NetdevName:            "enp1s0f0v1",
 				PodUID:                "xyz",
@@ -1456,6 +1459,9 @@ func TestConfigureOVS(t *testing.T) {
 			err = SetExec(tc.execMock)
 			assert.Nil(t, err)
 
+			tc.execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: genOVSGetCmd("bridge", "br-int", "datapath_type", ""),
+			})
 			tc.execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: genOVSFindCmd("30", "Interface", "name",
 					"external-ids:iface-id=ns-foo_pod-bar"),
@@ -1511,15 +1517,39 @@ func TestConfigureOVS(t *testing.T) {
 
 			// waitForPodInterface()
 			tc.execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    genOVSGetMultiCmd("Interface", tc.vfRep, []string{"external-ids:iface-id", "external-ids:ovn-installed"}),
-				Output: fmt.Sprintf("%s\n\"true\"", genIfaceID(tc.podNs, tc.podName)),
+				Cmd:    genOVSGetCmd("Interface", tc.vfRep, "external-ids", "iface-id") + " " + "external-ids:ovn-installed",
+				Output: genIfaceID(tc.podNs, tc.podName) + "\n" + "true",
+			})
+			tc.execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    genOVSGetCmd("Interface", tc.vfRep, "external-ids", "iface-id"),
+				Output: genIfaceID(tc.podNs, tc.podName),
+			})
+			tc.execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    genOfctlDumpFlowsCmd("table=8,dl_src="),
+				Output: "non-empty-output",
+			})
+			tc.execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    genOfctlDumpFlowsCmd("table=0,in_port=1"),
+				Output: "non-empty-output",
+			})
+			tc.execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    genOfctlDumpFlowsCmd("table=48,ip,ip_dst=" + strings.Split(fakeIP, "/")[0]),
+				Output: "non-empty-output",
 			})
 
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 
+			var pod v1.Pod
+			pod.UID = "xyz"
+			podNamespaceLister := v1mocks.PodNamespaceLister{}
+			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
+			var podLister v1mocks.PodLister
+			podLister.On("Pods", mock.AnythingOfType("string")).Return(&podNamespaceLister)
+			fakeClient := fake.NewSimpleClientset(&v1.PodList{Items: []v1.Pod{pod}})
+			clientset := NewClientSet(fakeClient, &podLister)
 			err = ConfigureOVS(ctx, tc.podNs, tc.podName, tc.vfRep,
-				tc.ifInfo, sandboxID, vfPciAddress, nil)
+				tc.ifInfo, sandboxID, vfPciAddress, clientset)
 			if tc.errMatch != nil {
 				assert.Contains(t, err.Error(), tc.errMatch.Error())
 			} else {
@@ -1578,6 +1608,9 @@ func TestConfigureOVS_getPfEncapIpWithError(t *testing.T) {
 			pfEncapIp: "",
 			execMockCommands: []*ovntest.ExpectedCmd{
 				{
+					Cmd: genOVSGetCmd("bridge", "br-int", "datapath_type", ""),
+				},
+				{
 					Cmd: genOVSFindCmd("30", "Interface", "name",
 						"external-ids:iface-id=ns-foo_pod-bar"),
 				},
@@ -1608,6 +1641,9 @@ func TestConfigureOVS_getPfEncapIpWithError(t *testing.T) {
 			errMatch:  fmt.Errorf("bad ovn-pf-encap-ip-mapping config"),
 			pfEncapIp: "",
 			execMockCommands: []*ovntest.ExpectedCmd{
+				{
+					Cmd: genOVSGetCmd("bridge", "br-int", "datapath_type", ""),
+				},
 				{
 					Cmd: genOVSFindCmd("30", "Interface", "name",
 						"external-ids:iface-id=ns-foo_pod-bar"),
@@ -1648,10 +1684,8 @@ func TestConfigureOVS_getPfEncapIpWithError(t *testing.T) {
 			var podLister v1mocks.PodLister
 			podLister.On("Pods", mock.AnythingOfType("string")).Return(&podNamespaceLister)
 
-			fakeClient := fake.NewSimpleClientset(&v1.PodList{Items: []v1.Pod{pod}})
-			clientset := NewClientSet(fakeClient, &podLister)
 			err = ConfigureOVS(ctx, tc.podNs, tc.podName, tc.vfRep,
-				tc.ifInfo, sandboxID, vfPciAddress, clientset)
+				tc.ifInfo, sandboxID, vfPciAddress, nil)
 			if tc.errMatch != nil {
 				assert.Contains(t, err.Error(), tc.errMatch.Error())
 			} else {
@@ -1664,7 +1698,7 @@ func TestConfigureOVS_getPfEncapIpWithError(t *testing.T) {
 	}
 }
 
-// TODO(leih): Below functions are copied from pkg/node/node_dpu_test.go.
+// TODO(leih): Below functions are copied from pkg/node/base_node_network_controller_dpu_test.go.
 // Move them to a common place to elimate duplications.
 func genOVSFindCmd(timeout, table, column, condition string) string {
 	return fmt.Sprintf("ovs-vsctl --timeout=%s --no-heading --format=csv --data=bare --columns=%s find %s %s",
@@ -1680,14 +1714,6 @@ func genOVSGetCmd(table, record, column, key string, timeout ...int) string {
 		column = column + ":" + key
 	}
 	return fmt.Sprintf("ovs-vsctl --timeout=%d --if-exists get %s %s %s", _timeout, table, record, column)
-}
-
-func genOVSGetMultiCmd(table, record string, columns []string) string {
-	_timeout := 30
-
-	args := []string{"--if-exists", "get", table, record}
-	args = append(args, columns...)
-	return fmt.Sprintf("ovs-vsctl --timeout=%d %s", _timeout, strings.Join(args, " "))
 }
 
 func genIfaceID(podNamespace, podName string) string {

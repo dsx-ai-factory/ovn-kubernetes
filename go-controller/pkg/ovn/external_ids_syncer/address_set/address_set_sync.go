@@ -172,7 +172,7 @@ func (syncer *AddressSetsSyncer) getAdminPBRAddrSetDbIDs(pbrName, hash string) *
 }
 
 func buildNewAddressSet(dbIDs *libovsdbops.DbObjectIDs, ipFamily string) *nbdb.AddressSet {
-	dbIDsWithIPFam := dbIDs.AddIDs(map[libovsdbops.ExternalIDKey]string{libovsdbops.AddressSetIPFamilyKey: ipFamily})
+	dbIDsWithIPFam := dbIDs.AddIDs(map[libovsdbops.ExternalIDKey]string{libovsdbops.IPFamilyKey: ipFamily})
 	externalIDs := dbIDsWithIPFam.GetExternalIDs()
 	name := externalIDs[libovsdbops.PrimaryIDKey.String()]
 	as := &nbdb.AddressSet{

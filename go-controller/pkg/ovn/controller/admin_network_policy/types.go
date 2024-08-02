@@ -1,15 +1,17 @@
 package adminnetworkpolicy
 
 import (
+	"fmt"
 	"net"
 
-	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
-	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
+
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 // NOTE: Iteration v1 of ANP will only support upto 100 ANPs
@@ -67,6 +69,10 @@ type gressRule struct {
 	ports  []*libovsdbutil.NetworkPolicyPort
 	// all the peerAddresses of the peer entities (podIPs, nodeIPs, CIDR ranges) selected by this ANP Rule
 	peerAddresses sets.Set[string]
+	// saves NamedPort representation;
+	// key is the name of the Port
+	// value is an array of possible representations of this port (relevance wrt to rule, peers)
+	namedPorts map[string][]libovsdbutil.NamedNetworkPolicyPort
 }
 
 // adminNetworkPolicyState is the cache that keeps the state of a single
@@ -106,12 +112,12 @@ func newAdminNetworkPolicyState(raw *anpapi.AdminNetworkPolicy) (*adminNetworkPo
 		return nil, err
 	}
 
-	addErrors := errors.New("")
+	var errs []error
 	for i, rule := range raw.Spec.Ingress {
 		anpRule, err := newAdminNetworkPolicyIngressRule(rule, int32(i), anp.ovnPriority-int32(i))
 		if err != nil {
-			addErrors = errors.Wrapf(addErrors, "error: cannot create anp ingress Rule %d in ANP %s - %v",
-				i, raw.Name, err)
+			err = fmt.Errorf("cannot create anp ingress Rule %d in ANP %s: %w", i, raw.Name, err)
+			errs = append(errs, err)
 			continue
 		}
 		anp.ingressRules = append(anp.ingressRules, anpRule)
@@ -119,23 +125,20 @@ func newAdminNetworkPolicyState(raw *anpapi.AdminNetworkPolicy) (*adminNetworkPo
 	for i, rule := range raw.Spec.Egress {
 		anpRule, err := newAdminNetworkPolicyEgressRule(rule, int32(i), anp.ovnPriority-int32(i))
 		if err != nil {
-			addErrors = errors.Wrapf(addErrors, "error: cannot create anp egress Rule %d in ANP %s - %v",
-				i, raw.Name, err)
+			err = fmt.Errorf("cannot create anp egress Rule %d in ANP %s: %w", i, raw.Name, err)
+			errs = append(errs, err)
 			continue
 		}
 		anp.egressRules = append(anp.egressRules, anpRule)
 	}
 	anp.aclLoggingParams, err = getACLLoggingLevelsForANP(raw.Annotations)
 	if err != nil {
-		addErrors = errors.Wrapf(addErrors, "error: cannot parse ANP ACL logging annotation, disabling it for ANP %v - %v",
-			raw.Name, err)
+		err = fmt.Errorf("cannot parse ANP ACL logging annotation, disabling it for ANP %s: %w", raw.Name, err)
+		errs = append(errs, err)
 	}
 	klog.V(5).Infof("Logging parameters for ANP %s are Allow=%s/Deny=%s/Pass=%s", raw.Name,
 		anp.aclLoggingParams.Allow, anp.aclLoggingParams.Deny, anp.aclLoggingParams.Pass)
-	if addErrors.Error() == "" {
-		addErrors = nil
-	}
-	return anp, addErrors
+	return anp, utilerrors.Join(errs...)
 }
 
 // newAdminNetworkPolicySubject takes the provided ANP API Subject and creates a new corresponding
@@ -180,11 +183,9 @@ func newAdminNetworkPolicySubject(raw anpapi.AdminNetworkPolicySubject) (*adminN
 // newAdminNetworkPolicyPort takes the provided ANP API Port and creates a new corresponding
 // adminNetworkPolicyPort cache object for that Port.
 func newAdminNetworkPolicyPort(raw anpapi.AdminNetworkPolicyPort) *libovsdbutil.NetworkPolicyPort {
-	anpPort := &libovsdbutil.NetworkPolicyPort{}
+	var anpPort *libovsdbutil.NetworkPolicyPort
 	if raw.PortNumber != nil {
 		anpPort = libovsdbutil.GetNetworkPolicyPort(raw.PortNumber.Protocol, raw.PortNumber.Port, 0)
-	} else if raw.NamedPort != nil {
-		// TODO: Add support for this
 	} else {
 		anpPort = libovsdbutil.GetNetworkPolicyPort(raw.PortRange.Protocol, raw.PortRange.Start, raw.PortRange.End)
 	}
@@ -286,6 +287,7 @@ func newAdminNetworkPolicyIngressRule(raw anpapi.AdminNetworkPolicyIngressRule, 
 		gressPrefix:   string(libovsdbutil.ACLIngress),
 		peers:         make([]*adminNetworkPolicyPeer, 0),
 		ports:         make([]*libovsdbutil.NetworkPolicyPort, 0),
+		namedPorts:    make(map[string][]libovsdbutil.NamedNetworkPolicyPort, 0),
 		peerAddresses: sets.New[string](),
 	}
 	for _, peer := range raw.From {
@@ -297,8 +299,12 @@ func newAdminNetworkPolicyIngressRule(raw anpapi.AdminNetworkPolicyIngressRule, 
 	}
 	if raw.Ports != nil {
 		for _, port := range *raw.Ports {
-			anpPort := newAdminNetworkPolicyPort(port)
-			anpRule.ports = append(anpRule.ports, anpPort)
+			if port.NamedPort != nil {
+				anpRule.namedPorts[*port.NamedPort] = []libovsdbutil.NamedNetworkPolicyPort{}
+			} else {
+				anpPort := newAdminNetworkPolicyPort(port)
+				anpRule.ports = append(anpRule.ports, anpPort)
+			}
 		}
 	}
 
@@ -316,6 +322,7 @@ func newAdminNetworkPolicyEgressRule(raw anpapi.AdminNetworkPolicyEgressRule, in
 		gressPrefix:   string(libovsdbutil.ACLEgress),
 		peers:         make([]*adminNetworkPolicyPeer, 0),
 		ports:         make([]*libovsdbutil.NetworkPolicyPort, 0),
+		namedPorts:    make(map[string][]libovsdbutil.NamedNetworkPolicyPort, 0),
 		peerAddresses: sets.New[string](),
 	}
 	for _, peer := range raw.To {
@@ -336,8 +343,12 @@ func newAdminNetworkPolicyEgressRule(raw anpapi.AdminNetworkPolicyEgressRule, in
 	}
 	if raw.Ports != nil {
 		for _, port := range *raw.Ports {
-			anpPort := newAdminNetworkPolicyPort(port)
-			anpRule.ports = append(anpRule.ports, anpPort)
+			if port.NamedPort != nil {
+				anpRule.namedPorts[*port.NamedPort] = []libovsdbutil.NamedNetworkPolicyPort{}
+			} else {
+				anpPort := newAdminNetworkPolicyPort(port)
+				anpRule.ports = append(anpRule.ports, anpPort)
+			}
 		}
 	}
 	return anpRule, nil
@@ -358,12 +369,12 @@ func newBaselineAdminNetworkPolicyState(raw *anpapi.BaselineAdminNetworkPolicy) 
 	if err != nil {
 		return nil, err
 	}
-	addErrors := errors.New("")
+	var errs []error
 	for i, rule := range raw.Spec.Ingress {
 		banpRule, err := newBaselineAdminNetworkPolicyIngressRule(rule, int32(i), BANPFlowPriority-int32(i))
 		if err != nil {
-			addErrors = errors.Wrapf(addErrors, "error: cannot create banp ingress Rule %d in BANP %s - %v",
-				i, raw.Name, err)
+			err = fmt.Errorf("cannot create banp ingress Rule %d in BANP %s: %w", i, raw.Name, err)
+			errs = append(errs, err)
 			continue
 		}
 		banp.ingressRules = append(banp.ingressRules, banpRule)
@@ -371,23 +382,20 @@ func newBaselineAdminNetworkPolicyState(raw *anpapi.BaselineAdminNetworkPolicy) 
 	for i, rule := range raw.Spec.Egress {
 		banpRule, err := newBaselineAdminNetworkPolicyEgressRule(rule, int32(i), BANPFlowPriority-int32(i))
 		if err != nil {
-			addErrors = errors.Wrapf(addErrors, "error: cannot create banp egress Rule %d in BANP %s - %v",
-				i, raw.Name, err)
+			err = fmt.Errorf("cannot create banp egress Rule %d in BANP %s: %w", i, raw.Name, err)
+			errs = append(errs, err)
 			continue
 		}
 		banp.egressRules = append(banp.egressRules, banpRule)
 	}
 	banp.aclLoggingParams, err = getACLLoggingLevelsForANP(raw.Annotations)
 	if err != nil {
-		addErrors = errors.Wrapf(addErrors, "error: cannot parse BANP ACL logging annotation, disabling it for BANP %v - %v",
-			raw.Name, err)
+		err = fmt.Errorf("cannot parse BANP ACL logging annotation, disabling it for BANP %s: %w", raw.Name, err)
+		errs = append(errs, err)
 	}
 	klog.V(5).Infof("Logging parameters for BANP %s are Allow=%s/Deny=%s", raw.Name,
 		banp.aclLoggingParams.Allow, banp.aclLoggingParams.Deny)
-	if addErrors.Error() == "" {
-		addErrors = nil
-	}
-	return banp, addErrors
+	return banp, utilerrors.Join(errs...)
 }
 
 // newBaselineAdminNetworkPolicyIngressRule takes the provided BANP API Ingress Rule and creates a new corresponding
@@ -401,6 +409,7 @@ func newBaselineAdminNetworkPolicyIngressRule(raw anpapi.BaselineAdminNetworkPol
 		gressPrefix:   string(libovsdbutil.ACLIngress),
 		peers:         make([]*adminNetworkPolicyPeer, 0),
 		ports:         make([]*libovsdbutil.NetworkPolicyPort, 0),
+		namedPorts:    make(map[string][]libovsdbutil.NamedNetworkPolicyPort, 0),
 		peerAddresses: sets.New[string](),
 	}
 	for _, peer := range raw.From {
@@ -412,8 +421,12 @@ func newBaselineAdminNetworkPolicyIngressRule(raw anpapi.BaselineAdminNetworkPol
 	}
 	if raw.Ports != nil {
 		for _, port := range *raw.Ports {
-			anpPort := newAdminNetworkPolicyPort(port)
-			banpRule.ports = append(banpRule.ports, anpPort)
+			if port.NamedPort != nil {
+				banpRule.namedPorts[*port.NamedPort] = []libovsdbutil.NamedNetworkPolicyPort{}
+			} else {
+				anpPort := newAdminNetworkPolicyPort(port)
+				banpRule.ports = append(banpRule.ports, anpPort)
+			}
 		}
 	}
 
@@ -431,6 +444,7 @@ func newBaselineAdminNetworkPolicyEgressRule(raw anpapi.BaselineAdminNetworkPoli
 		gressPrefix:   string(libovsdbutil.ACLEgress),
 		peers:         make([]*adminNetworkPolicyPeer, 0),
 		ports:         make([]*libovsdbutil.NetworkPolicyPort, 0),
+		namedPorts:    make(map[string][]libovsdbutil.NamedNetworkPolicyPort, 0),
 		peerAddresses: sets.New[string](),
 	}
 	for _, peer := range raw.To {
@@ -451,8 +465,12 @@ func newBaselineAdminNetworkPolicyEgressRule(raw anpapi.BaselineAdminNetworkPoli
 	}
 	if raw.Ports != nil {
 		for _, port := range *raw.Ports {
-			banpPort := newAdminNetworkPolicyPort(port)
-			banpRule.ports = append(banpRule.ports, banpPort)
+			if port.NamedPort != nil {
+				banpRule.namedPorts[*port.NamedPort] = []libovsdbutil.NamedNetworkPolicyPort{}
+			} else {
+				anpPort := newAdminNetworkPolicyPort(port)
+				banpRule.ports = append(banpRule.ports, anpPort)
+			}
 		}
 	}
 	return banpRule, nil

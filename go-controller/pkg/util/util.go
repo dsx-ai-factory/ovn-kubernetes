@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/exp/constraints"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -387,6 +389,17 @@ func StringSlice[T fmt.Stringer](items []T) []string {
 		s[i] = items[i].String()
 	}
 	return s
+}
+
+func SortedKeys[K constraints.Ordered, V any](m map[K]V) []K {
+	keys := make([]K, len(m))
+	i := 0
+	for k := range m {
+		keys[i] = k
+		i++
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	return keys
 }
 
 var chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890-"

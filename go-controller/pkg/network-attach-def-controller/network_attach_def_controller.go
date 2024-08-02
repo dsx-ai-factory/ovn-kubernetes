@@ -57,9 +57,9 @@ type NetworkController interface {
 	AddNAD(string, *util.NADConfig)
 	DeleteNAD(nadName string)
 	HasNAD(nadName string) bool
-	// Cleanup cleans up the given network, it could be called to clean up network controllers that are deleted when
-	// ovn-k8s is down; so it's receiver could be a dummy network controller.
-	Cleanup(string) error
+	// Cleanup cleans up the NetworkController-owned resources, it could be called to clean up network controllers that are deleted when
+	// ovn-k8s is down; so it's receiver could be a dummy network controller, it just needs to know its network name.
+	Cleanup() error
 }
 
 type InterConnectible interface {
@@ -710,7 +710,7 @@ func (nadController *NetAttachDefinitionController) deleteNADFromController(nadN
 			klog.V(5).Infof("%s: The last NAD: %s of network %s has been deleted, stopping network controller", nadController.name, nadName, networkName)
 			oc.Stop()
 			nni.isStarted = false
-			err := oc.Cleanup(oc.GetNetworkName())
+			err := oc.Cleanup()
 			// set isStarted to false even stop failed, as the operation could be half-done.
 			// So if a new NAD with the same netconf comes in, it can restart the controller.
 			nni.isStarted = false

@@ -458,6 +458,9 @@ while [ "$1" != "" ]; do
   --enable-persistent-ips)
     OVN_ENABLE_PERSISTENT_IPS=$VALUE
     ;;
+  --enable-svc-template-support)
+    OVN_ENABLE_SVC_TEMPLATE_SUPPORT=$VALUE
+    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -900,6 +903,7 @@ ovn_image=${image} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   ovn_enable_persistent_ips=${ovn_enable_persistent_ips} \
+  ovn_enable_svc_template_support=${ovn_enable_svc_template_support} \
   jinjanate ../templates/ovnkube-master.yaml.j2 -o ${output_dir}/ovnkube-master.yaml
 
 ovn_image=${image} \
@@ -1272,6 +1276,7 @@ ovn_image=${image} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   ovn_northd_backoff_interval=${ovn_northd_backoff_interval} \
   ovn_enable_persistent_ips=${ovn_enable_persistent_ips} \
+  ovn_enable_svc_template_support=${ovn_enable_svc_template_support} \
   jinjanate ../templates/ovnkube-single-node-zone.yaml.j2 -o ${output_dir}/ovnkube-single-node-zone.yaml
 
 ovn_image=${image} \
@@ -1330,6 +1335,7 @@ ovn_image=${image} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   ovn_northd_backoff_interval=${ovn_enable_backoff_interval} \
   ovn_enable_persistent_ips=${ovn_enable_persistent_ips} \
+  ovn_enable_svc_template_support=${ovn_enable_svc_template_support} \
   jinjanate ../templates/ovnkube-zone-controller.yaml.j2 -o ${output_dir}/ovnkube-zone-controller.yaml
 
 ovn_image=${imagec} \

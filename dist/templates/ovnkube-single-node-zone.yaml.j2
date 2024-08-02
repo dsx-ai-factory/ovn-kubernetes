@@ -75,7 +75,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "3"
+          value: "1.0.0"
         - name: OVN_LOGLEVEL_NB
           value: "{{ ovn_loglevel_nb }}"
         - name: OVN_NORTHD_BACKOFF_INTERVAL
@@ -145,7 +145,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "3"
+          value: "1.0.0"
         - name: OVN_LOGLEVEL_SB
           value: "{{ ovn_loglevel_sb }}"
         - name: K8S_APISERVER
@@ -212,7 +212,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "3"
+          value: "1.0.0"
         - name: OVN_LOGLEVEL_NORTHD
           value: "{{ ovn_loglevel_northd }}"
         - name: K8S_APISERVER
@@ -305,7 +305,7 @@ spec:
         - name: OVN_EGRESSSERVICE_ENABLE
           value: "{{ ovn_egress_service_enable }}"
         - name: OVN_DAEMONSET_VERSION
-          value: "3"
+          value: "1.0.0"
         - name: OVNKUBE_LOGLEVEL
           value: "{{ ovnkube_node_loglevel }}"
         - name: OVNKUBE_LOGFILE_MAXSIZE
@@ -449,6 +449,8 @@ spec:
           value: "{{ ovn_enable_ovnkube_identity }}"
         - name: OVNKUBE_DISABLE_OVS_METRICS
           value: "{{ disable_ovs_metrics }}"
+        - name: OVN_ENABLE_SVC_TEMPLATE_SUPPORT
+          value: "{{ ovn_enable_svc_template_support }}"
 
         readinessProbe:
           exec:
@@ -491,7 +493,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "3"
+          value: "1.0.0"
         - name: OVN_LOGLEVEL_CONTROLLER
           value: "{{ ovn_loglevel_controller }}"
         - name: K8S_APISERVER
@@ -547,7 +549,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "3"
+          value: "1.0.0"
         - name: K8S_NODE_IP
           valueFrom:
             fieldRef:

@@ -22,6 +22,11 @@ import (
 	egressfirewallinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/informers/externalversions/egressfirewall/v1"
 	egressfirewalllister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
 
+	ocpnetworkapiv1alpha1 "github.com/openshift/api/network/v1alpha1"
+	ocpnetworkscheme "github.com/openshift/client-go/network/clientset/versioned/scheme"
+	ocpnetworkinformerfactory "github.com/openshift/client-go/network/informers/externalversions"
+	ocpnetworkinformerv1alpha1 "github.com/openshift/client-go/network/informers/externalversions/network/v1alpha1"
+
 	egressipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/scheme"
 	egressipinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions"
@@ -110,6 +115,7 @@ type WatchFactory struct {
 	anpFactory           anpinformerfactory.SharedInformerFactory
 	eipFactory           egressipinformerfactory.SharedInformerFactory
 	efFactory            egressfirewallinformerfactory.SharedInformerFactory
+	dnsFactory           ocpnetworkinformerfactory.SharedInformerFactory
 	cpipcFactory         ocpcloudnetworkinformerfactory.SharedInformerFactory
 	egressQoSFactory     egressqosinformerfactory.SharedInformerFactory
 	mnpFactory           mnpinformerfactory.SharedInformerFactory
@@ -258,6 +264,7 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		anpFactory:           anpinformerfactory.NewSharedInformerFactory(ovnClientset.ANPClient, resyncInterval),
 		eipFactory:           egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
 		efFactory:            egressfirewallinformerfactory.NewSharedInformerFactory(ovnClientset.EgressFirewallClient, resyncInterval),
+		dnsFactory:           ocpnetworkinformerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.OCPNetworkClient, resyncInterval, ocpnetworkinformerfactory.WithNamespace(config.Kubernetes.OVNConfigNamespace)),
 		egressQoSFactory:     egressqosinformerfactory.NewSharedInformerFactory(ovnClientset.EgressQoSClient, resyncInterval),
 		mnpFactory:           mnpinformerfactory.NewSharedInformerFactory(ovnClientset.MultiNetworkPolicyClient, resyncInterval),
 		egressServiceFactory: egressserviceinformerfactory.NewSharedInformerFactory(ovnClientset.EgressServiceClient, resyncInterval),
@@ -284,6 +291,9 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		return nil, err
 	}
 	if err := egressfirewallapi.AddToScheme(egressfirewallscheme.Scheme); err != nil {
+		return nil, err
+	}
+	if err := ocpnetworkapiv1alpha1.Install(ocpnetworkscheme.Scheme); err != nil {
 		return nil, err
 	}
 	if err := egressqosapi.AddToScheme(egressqosscheme.Scheme); err != nil {
@@ -401,6 +411,11 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		if err != nil {
 			return nil, err
 		}
+
+		if config.OVNKubernetesFeature.EnableDNSNameResolver {
+			// make sure shared informer is created for a factory, so on wf.dnsFactory.Start() it is initialized and caches are synced.
+			wf.dnsFactory.Network().V1alpha1().DNSNameResolvers().Informer()
+		}
 	}
 	if config.OVNKubernetesFeature.EnableEgressQoS {
 		wf.informers[EgressQoSType], err = newInformer(EgressQoSType, wf.egressQoSFactory.K8s().V1().EgressQoSes().Informer())
@@ -499,6 +514,15 @@ func (wf *WatchFactory) Start() error {
 				return fmt.Errorf("error in syncing cache for %v informer", oType)
 			}
 		}
+
+		if config.OVNKubernetesFeature.EnableDNSNameResolver && wf.dnsFactory != nil {
+			wf.dnsFactory.Start(wf.stopChan)
+			for oType, synced := range waitForCacheSyncWithTimeout(wf.dnsFactory, wf.stopChan) {
+				if !synced {
+					return fmt.Errorf("error in syncing cache for %v informer", oType)
+				}
+			}
+		}
 	}
 	if util.PlatformTypeIsEgressIPCloudProvider() && wf.cpipcFactory != nil {
 		wf.cpipcFactory.Start(wf.stopChan)
@@ -586,6 +610,41 @@ func (wf *WatchFactory) Start() error {
 	}
 
 	return nil
+}
+
+// Stop stops the factory informers, and waits for their handlers to stop
+func (wf *WatchFactory) Stop() {
+	klog.Info("Stopping watch factory")
+	wf.iFactory.Shutdown()
+	if wf.anpFactory != nil {
+		wf.anpFactory.Shutdown()
+	}
+	if wf.eipFactory != nil {
+		wf.eipFactory.Shutdown()
+	}
+	if wf.efFactory != nil {
+		wf.efFactory.Shutdown()
+	}
+	if wf.dnsFactory != nil {
+		wf.dnsFactory.Shutdown()
+	}
+	if wf.cpipcFactory != nil {
+		wf.cpipcFactory.Shutdown()
+	}
+	if wf.egressQoSFactory != nil {
+		wf.egressQoSFactory.Shutdown()
+	}
+	// FIXME(trozet) when https://github.com/k8snetworkplumbingwg/multi-networkpolicy/issues/22 is resolved
+	// wf.mnpFactory.Shutdown()
+	if wf.egressServiceFactory != nil {
+		wf.egressServiceFactory.Shutdown()
+	}
+	if wf.apbRouteFactory != nil {
+		wf.apbRouteFactory.Shutdown()
+	}
+	if wf.ipamClaimsFactory != nil {
+		wf.ipamClaimsFactory.Shutdown()
+	}
 }
 
 // NewNodeWatchFactory initializes a watch factory with significantly fewer
@@ -756,6 +815,7 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 		eipFactory:           egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
 		cpipcFactory:         ocpcloudnetworkinformerfactory.NewSharedInformerFactory(ovnClientset.CloudNetworkClient, resyncInterval),
 		egressServiceFactory: egressserviceinformerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.EgressServiceClient, resyncInterval),
+		dnsFactory:           ocpnetworkinformerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.OCPNetworkClient, resyncInterval, ocpnetworkinformerfactory.WithNamespace(config.Kubernetes.OVNConfigNamespace)),
 		apbRouteFactory:      adminbasedpolicyinformerfactory.NewSharedInformerFactory(ovnClientset.AdminPolicyRouteClient, resyncInterval),
 		egressQoSFactory:     egressqosinformerfactory.NewSharedInformerFactory(ovnClientset.EgressQoSClient, resyncInterval),
 		informers:            make(map[reflect.Type]*informer),
@@ -776,6 +836,12 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 		return nil, err
 	}
 	if err := ipamclaimsapi.AddToScheme(ipamclaimsscheme.Scheme); err != nil {
+		return nil, err
+	}
+	if err := egressfirewallapi.AddToScheme(egressfirewallscheme.Scheme); err != nil {
+		return nil, err
+	}
+	if err := ocpnetworkapiv1alpha1.Install(ocpnetworkscheme.Scheme); err != nil {
 		return nil, err
 	}
 
@@ -860,6 +926,11 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 	if config.OVNKubernetesFeature.EnableEgressFirewall {
 		// make sure shared informer is created for a factory, so on wf.efFactory.Start() it is initialized and caches are synced.
 		wf.efFactory.K8s().V1().EgressFirewalls().Informer()
+
+		if config.OVNKubernetesFeature.EnableDNSNameResolver {
+			// make sure shared informer is created for a factory, so on wf.dnsFactory.Start() it is initialized and caches are synced.
+			wf.dnsFactory.Network().V1alpha1().DNSNameResolvers().Informer()
+		}
 	}
 
 	return wf, nil
@@ -872,6 +943,8 @@ func (wf *WatchFactory) Shutdown() {
 	for _, inf := range wf.informers {
 		inf.shutdown()
 	}
+	// Stop all non-custom informers and wait (closing the above channel will not wait)
+	wf.Stop()
 }
 
 func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, error) {
@@ -1646,6 +1719,10 @@ func (wf *WatchFactory) EgressFirewallInformer() egressfirewallinformer.EgressFi
 
 func (wf *WatchFactory) IPAMClaimsInformer() v1alpha1.IPAMClaimInformer {
 	return wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims()
+}
+
+func (wf *WatchFactory) DNSNameResolverInformer() ocpnetworkinformerv1alpha1.DNSNameResolverInformer {
+	return wf.dnsFactory.Network().V1alpha1().DNSNameResolvers()
 }
 
 // noServiceNameSelector returns a LabelSelector (added to the

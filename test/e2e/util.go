@@ -39,6 +39,8 @@ const (
 	ovnNodeSubnets = "k8s.ovn.org/node-subnets"
 	// ovnNodeZoneNameAnnotation is the node annotation name to store the node zone name.
 	ovnNodeZoneNameAnnotation = "k8s.ovn.org/zone-name"
+	// ovnGatewayMTUSupport annotation determines if options:gateway_mtu shall be set for a node's gateway router
+	ovnGatewayMTUSupport = "k8s.ovn.org/gateway-mtu-support"
 )
 
 var containerRuntime = "docker"
@@ -923,7 +925,8 @@ func wrappedTestFramework(basename string) *framework.Framework {
 
 		logLocation := "/var/log"
 		dbLocation := "/var/lib/openvswitch"
-		ovsdbLocation := "/etc/origin/openvswitch"
+		// Potential database locations
+		ovsdbLocations := []string{"/etc/origin/openvswitch", "/etc/openvswitch"}
 		dbs := []string{"ovnnb_db.db", "ovnsb_db.db"}
 		ovsdb := "conf.db"
 
@@ -941,11 +944,19 @@ func wrappedTestFramework(basename string) *framework.Framework {
 			_, err = runCommand(args...)
 			framework.ExpectNoError(err)
 
-			// node name is the same in kapi and docker
-			args = []string{containerRuntime, "exec", node.Name, "cp", "-f", fmt.Sprintf("%s/%s", ovsdbLocation, ovsdb),
-				fmt.Sprintf("%s/%s", logDir, fmt.Sprintf("%s-%s", node.Name, ovsdb))}
-			_, err = runCommand(args...)
-			framework.ExpectNoError(err)
+			// Loop through potential OVSDB db locations
+			for _, ovsdbLocation := range ovsdbLocations {
+				args = []string{containerRuntime, "exec", node.Name, "stat", fmt.Sprintf("%s/%s", ovsdbLocation, ovsdb)}
+				_, err = runCommand(args...)
+				if err == nil {
+					// node name is the same in kapi and docker
+					args = []string{containerRuntime, "exec", node.Name, "cp", "-f", fmt.Sprintf("%s/%s", ovsdbLocation, ovsdb),
+						fmt.Sprintf("%s/%s", logDir, fmt.Sprintf("%s-%s", node.Name, ovsdb))}
+					_, err = runCommand(args...)
+					framework.ExpectNoError(err)
+					break // Stop the loop: the file is found and copied successfully
+				}
+			}
 
 			// IC will have dbs on every node, but legacy mode wont, check if they exist
 			args = []string{containerRuntime, "exec", node.Name, "stat", fmt.Sprintf("%s/%s", dbLocation, dbs[0])}
@@ -1211,4 +1222,21 @@ func CaptureContainerOutput(ctx context.Context, c clientset.Interface, namespac
 	}
 
 	return matchMap, nil
+}
+
+// It checks whether config.DisablePacketMTUCheck is set or not
+func isDisablePacketMTUCheckEnabled() bool {
+	val, present := os.LookupEnv("OVN_DISABLE_PKT_MTU_CHECK")
+	return present && val == "true"
+}
+
+// getGatewayMTUSupport returns true if gateway-mtu-support annotataion
+// is not set on the node, otherwise it returns false as the value of the
+// annotation also get set to false
+func getGatewayMTUSupport(node *v1.Node) bool {
+	_, ok := node.Annotations[ovnGatewayMTUSupport]
+	if !ok {
+		return true
+	}
+	return false
 }

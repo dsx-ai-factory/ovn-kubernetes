@@ -235,7 +235,7 @@ func (nc *SecondaryLocalnetNodeNetworkController) Stop() {
 }
 
 // Cleanup cleans up node entities for the given secondary network
-func (nc *SecondaryLocalnetNodeNetworkController) Cleanup(netName string) error {
+func (nc *SecondaryLocalnetNodeNetworkController) Cleanup() error {
 	return nil
 }
 

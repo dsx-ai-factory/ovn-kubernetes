@@ -4,7 +4,7 @@ set -ex
 
 # setting this env prevents ginkgo e2e from trying to run provider setup
 export KUBERNETES_CONFORMANCE_TEST=y
-export KUBECONFIG=${HOME}/ovn.conf
+export KUBECONFIG=${KUBECONFIG:-${HOME}/ovn.conf}
 
 # Skip tests which are not IPv6 ready yet (see description of https://github.com/ovn-org/ovn-kubernetes/pull/2276)
 # (Note that netflow v5 is IPv4 only)
@@ -18,7 +18,6 @@ export KUBECONFIG=${HOME}/ovn.conf
 # https://github.com/ovn-org/ovn-kubernetes/issues/4131 for details.
 # TODO: Fix EIP tests. See https://github.com/ovn-org/ovn-kubernetes/issues/4130 for details.
 # TODO: Fix EFW tests. See https://github.com/ovn-org/ovn-kubernetes/issues/4133 for details.
-# TODO: Fix CPU Pinning tests. See https://github.com/ovn-org/ovn-kubernetes/issues/4134 for details.
 # TODO: Fix MTU tests. See https://github.com/ovn-org/ovn-kubernetes/issues/4160 for details.
 IPV6_SKIPPED_TESTS="Should be allowed by externalip services|\
 should provide connection to external host by DNS name from a pod|\
@@ -38,14 +37,10 @@ can retrieve multicast IGMP query|\
 test node readiness according to its defaults interface MTU size|\
 egress IP validation|\
 e2e egress firewall policy validation|\
-OVS CPU affinity pinning|\
 Pod to pod TCP with low MTU|\
 queries to the hostNetworked server pod on another node shall work for TCP|\
 queries to the hostNetworked server pod on another node shall work for UDP|\
 ipv4 pod"
-
-METALLB_SKIPPED_TESTS="EgressService|\
-Load Balancer Service Tests with MetalLB"
 
 SKIPPED_TESTS=""
 
@@ -166,24 +161,11 @@ if [ "${WHAT}" != "${KV_LIVE_MIGRATION_TESTS}" ]; then
   SKIPPED_TESTS+=$KV_LIVE_MIGRATION_TESTS
 fi
 
-# Skip tests that require metal-lb, if such is not being installed
-if [ "${KIND_INSTALL_METALLB}" == "false" ];then
-  if [ "$SKIPPED_TESTS" != "" ]; then
-	SKIPPED_TESTS+="|"
-  fi
-  SKIPPED_TESTS+=$METALLB_SKIPPED_TESTS
-fi
-
 # setting these is required to make RuntimeClass tests work ... :/
 export KUBE_CONTAINER_RUNTIME=remote
 export KUBE_CONTAINER_RUNTIME_ENDPOINT=unix:///run/containerd/containerd.sock
 export KUBE_CONTAINER_RUNTIME_NAME=containerd
 export NUM_NODES=2
-
-# Silence deprecations warnings at the end of test result.
-# Custom Ginkgo test reporters which are deprecated in Ginkgo 2.0.
-# For a migration path https://onsi.github.io/ginkgo/MIGRATING_TO_V2#removed-custom-reporters.
-export ACK_GINKGO_DEPRECATIONS=2.4.0
 
 FOCUS=$(echo ${@:1} | sed 's/ /\\s/g')
 
@@ -196,9 +178,9 @@ go test -test.timeout 180m -v . \
         -ginkgo.timeout 3h \
         -ginkgo.flake-attempts ${FLAKE_ATTEMPTS:-2} \
         -ginkgo.skip="${SKIPPED_TESTS}" \
+        -ginkgo.junit-report=${E2E_REPORT_DIR}/junit_${E2E_REPORT_PREFIX}report.xml \
         -provider skeleton \
         -kubeconfig ${KUBECONFIG} \
         ${NUM_NODES:+"--num-nodes=${NUM_NODES}"} \
-        ${E2E_REPORT_DIR:+"--report-dir=${E2E_REPORT_DIR}"} \
-        ${E2E_REPORT_PREFIX:+"--report-prefix=${E2E_REPORT_PREFIX}"}
+        ${E2E_REPORT_DIR:+"--report-dir=${E2E_REPORT_DIR}"}
 popd
