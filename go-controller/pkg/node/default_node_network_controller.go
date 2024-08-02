@@ -16,7 +16,6 @@ import (
 	discovery "k8s.io/api/discovery/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	apierrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
@@ -42,6 +41,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	"github.com/containernetworking/plugins/pkg/ip"
 	"github.com/vishvananda/netlink"
@@ -1305,7 +1305,7 @@ func (nc *DefaultNodeNetworkController) Stop() {
 	nc.wg.Wait()
 }
 
-func (nc *DefaultNodeNetworkController) Cleanup(netName string) error {
+func (nc *DefaultNodeNetworkController) Cleanup() error {
 	panic("unexpected call for default network")
 }
 
@@ -1384,7 +1384,7 @@ func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvent
 			}
 		}
 	}
-	return apierrors.NewAggregate(errors)
+	return utilerrors.Join(errors...)
 
 }
 
@@ -1465,8 +1465,7 @@ func (nc *DefaultNodeNetworkController) validateVTEPInterfaceMTU() error {
 	for _, ip := range ovnEncapIps {
 		ovnEncapIP := net.ParseIP(strings.TrimSpace(ip))
 		if ovnEncapIP == nil {
-			return fmt.Errorf("invalid IP address %q in provided encap-ip setting %q", ovnEncapIP,
-				config.Default.EncapIP)
+			return fmt.Errorf("invalid IP address %q in provided encap-ip setting %q", ovnEncapIP, config.Default.EncapIP)
 		}
 		interfaceName, mtu, err := util.GetIFNameAndMTUForAddress(ovnEncapIP)
 		if err != nil {
@@ -1571,7 +1570,7 @@ func (nc *DefaultNodeNetworkController) reconcileFirewallZoneForEndpointSlice(ol
 			}
 		}
 	}
-	return apierrors.NewAggregate(errors)
+	return utilerrors.Join(errors...)
 }
 
 // skipFirewalld return nil to skip and service's NamespacedName if not to skip:

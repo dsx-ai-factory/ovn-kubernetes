@@ -212,6 +212,7 @@ func NewNBClientWithConfig(cfg config.OvnAuthConfig, promRegistry prometheus.Reg
 		nbdb.LoadBalancerTable:  {{Columns: []model.ColumnKey{{Column: "name"}}}},
 		nbdb.LogicalSwitchTable: {{Columns: []model.ColumnKey{{Column: "name"}}}},
 		nbdb.LogicalRouterTable: {{Columns: []model.ColumnKey{{Column: "name"}}}},
+		nbdb.QoSTable:           {{Columns: []model.ColumnKey{{Column: "external_ids", Key: types.PrimaryIDKey}}}},
 	})
 
 	c, err := NewClient(cfg, dbModel, stopCh, enableMetricsOption)

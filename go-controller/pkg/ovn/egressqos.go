@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -9,18 +10,6 @@ import (
 	"time"
 
 	"github.com/ovn-org/libovsdb/ovsdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	egressqosapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
-	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
-	egressqosapply "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/applyconfiguration/egressqos/v1"
-	egressqosinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions/egressqos/v1"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/pkg/errors"
 	kapi "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -33,6 +22,18 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	egressqosapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
+	egressqosapply "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/applyconfiguration/egressqos/v1"
+	egressqosinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions/egressqos/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 const (
@@ -71,6 +72,13 @@ func getEgressQosAddrSetDbIDs(namespace, priority, controller string) *libovsdbo
 	})
 }
 
+func getEgressQoSRuleDbIDs(namespace string, rulePriority int) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.QoSEgressQoS, DefaultNetworkControllerName, map[libovsdbops.ExternalIDKey]string{
+		libovsdbops.ObjectNameKey: namespace,
+		libovsdbops.PriorityKey:   fmt.Sprintf("%d", rulePriority),
+	})
+}
+
 // shallow copies the EgressQoS object provided.
 func (oc *DefaultNetworkController) cloneEgressQoS(raw *egressqosapi.EgressQoS) (*egressQoS, error) {
 	eq := &egressQoS{
@@ -83,7 +91,7 @@ func (oc *DefaultNetworkController) cloneEgressQoS(raw *egressqosapi.EgressQoS) 
 		return nil, fmt.Errorf("cannot create EgressQoS with %d rules - maximum is %d", len(raw.Spec.Egress), EgressQoSFlowStartPriority)
 	}
 
-	addErrors := errors.New("")
+	var errs []error
 	for i, rule := range raw.Spec.Egress {
 		eqr, err := oc.cloneEgressQoSRule(rule, EgressQoSFlowStartPriority-i)
 		if err != nil {
@@ -91,18 +99,14 @@ func (oc *DefaultNetworkController) cloneEgressQoS(raw *egressqosapi.EgressQoS) 
 			if rule.DstCIDR != nil {
 				dst = *rule.DstCIDR
 			}
-			addErrors = errors.Wrapf(addErrors, "error: cannot create egressqos Rule to destination %s for namespace %s - %v",
-				dst, eq.namespace, err)
+			err = fmt.Errorf("cannot create egressqos Rule to destination %s for namespace %s: %w", dst, eq.namespace, err)
+			errs = append(errs, err)
 			continue
 		}
 		eq.rules = append(eq.rules, eqr)
 	}
 
-	if addErrors.Error() == "" {
-		addErrors = nil
-	}
-
-	return eq, addErrors
+	return eq, utilerrors.Join(errs...)
 }
 
 // shallow copies the EgressQoSRule object provided.
@@ -404,16 +408,13 @@ func (oc *DefaultNetworkController) repairEgressQoSes() error {
 	for _, q := range existing {
 		nsWithQoS[q.Namespace] = true
 	}
-
-	p := func(q *nbdb.QoS) bool {
-		ns, ok := q.ExternalIDs["EgressQoS"]
-		if !ok {
-			return false
-		}
-
-		return !nsWithQoS[ns]
+	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.QoSEgressQoS, oc.controllerName, nil)
+	predicateQoSFunc := func(q *nbdb.QoS) bool {
+		// ObjectNameKey is namespace
+		return !nsWithQoS[q.ExternalIDs[libovsdbops.ObjectNameKey.String()]]
 	}
-	existingQoSes, err := libovsdbops.FindQoSesWithPredicate(oc.nbClient, p)
+	qPredicate := libovsdbops.GetPredicate[*nbdb.QoS](predicateIDs, predicateQoSFunc)
+	existingQoSes, err := libovsdbops.FindQoSesWithPredicate(oc.nbClient, qPredicate)
 	if err != nil {
 		return err
 	}
@@ -438,7 +439,7 @@ func (oc *DefaultNetworkController) repairEgressQoSes() error {
 			return fmt.Errorf("unable to remove stale qoses, err: %v", err)
 		}
 	}
-	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetEgressQoS, oc.controllerName, nil)
+	predicateIDs = libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetEgressQoS, oc.controllerName, nil)
 	predicateFunc := func(as *nbdb.AddressSet) bool {
 		// ObjectNameKey is namespace
 		return !nsWithQoS[as.ExternalIDs[libovsdbops.ObjectNameKey.String()]]
@@ -451,7 +452,7 @@ func (oc *DefaultNetworkController) repairEgressQoSes() error {
 	return nil
 }
 
-func (oc *DefaultNetworkController) syncEgressQoS(key string, eq *v1.EgressQoS) error {
+func (oc *DefaultNetworkController) syncEgressQoS(key string, eq *egressqosapi.EgressQoS) error {
 	startTime := time.Now()
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
@@ -484,12 +485,12 @@ func (oc *DefaultNetworkController) syncEgressQoS(key string, eq *v1.EgressQoS) 
 	return oc.addEgressQoS(eq)
 }
 
-func (oc *DefaultNetworkController) getEgressQoS(key string) (*v1.EgressQoS, error) {
+func (oc *DefaultNetworkController) getEgressQoS(key string) (*egressqosapi.EgressQoS, error) {
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		return nil, err
 	}
-	var eq *v1.EgressQoS
+	var eq *egressqosapi.EgressQoS
 	eq, err = oc.egressQoSLister.EgressQoSes(namespace).Get(name)
 	if err != nil && !apierrors.IsNotFound(err) {
 		return nil, err
@@ -509,15 +510,12 @@ func (oc *DefaultNetworkController) cleanEgressQoSNS(namespace string) error {
 
 	eq.Lock()
 	defer eq.Unlock()
-
-	p := func(q *nbdb.QoS) bool {
-		eqNs, ok := q.ExternalIDs["EgressQoS"]
-		if !ok { // the QoS is not managed by an EgressQoS
-			return false
-		}
-		return eqNs == eq.namespace
-	}
-	existingQoSes, err := libovsdbops.FindQoSesWithPredicate(oc.nbClient, p)
+	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.QoSEgressQoS, oc.controllerName,
+		map[libovsdbops.ExternalIDKey]string{
+			libovsdbops.ObjectNameKey: eq.namespace,
+		})
+	qPredicate := libovsdbops.GetPredicate[*nbdb.QoS](predicateIDs, nil)
+	existingQoSes, err := libovsdbops.FindQoSesWithPredicate(oc.nbClient, qPredicate)
 	if err != nil {
 		return err
 	}
@@ -548,7 +546,7 @@ func (oc *DefaultNetworkController) cleanEgressQoSNS(namespace string) error {
 			return fmt.Errorf("failed to delete qos, err: %s", err)
 		}
 	}
-	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetEgressQoS, oc.controllerName,
+	predicateIDs = libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetEgressQoS, oc.controllerName,
 		map[libovsdbops.ExternalIDKey]string{
 			libovsdbops.ObjectNameKey: eq.namespace,
 		})
@@ -605,7 +603,7 @@ func (oc *DefaultNetworkController) addEgressQoS(eqObj *egressqosapi.EgressQoS) 
 			Match:       match,
 			Priority:    r.priority,
 			Action:      map[string]int{nbdb.QoSActionDSCP: r.dscp},
-			ExternalIDs: map[string]string{"EgressQoS": eq.namespace},
+			ExternalIDs: getEgressQoSRuleDbIDs(eq.namespace, r.priority).GetExternalIDs(),
 		}
 		qoses = append(qoses, qos)
 	}
@@ -1028,12 +1026,9 @@ func (oc *DefaultNetworkController) syncEgressQoSNode(key string) error {
 	if err != nil {
 		return err
 	}
-
-	p := func(q *nbdb.QoS) bool {
-		_, ok := q.ExternalIDs["EgressQoS"]
-		return ok
-	}
-	existingQoSes, err := libovsdbops.FindQoSesWithPredicate(oc.nbClient, p)
+	predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.QoSEgressQoS, oc.controllerName, nil)
+	qPredicate := libovsdbops.GetPredicate[*nbdb.QoS](predicateIDs, nil)
+	existingQoSes, err := libovsdbops.FindQoSesWithPredicate(oc.nbClient, qPredicate)
 	if err != nil {
 		return err
 	}
@@ -1108,6 +1103,6 @@ func (oc *DefaultNetworkController) updateEgressQoSZoneStatusCondition(newCondit
 	applyObj := egressqosapply.EgressQoS(name, namespace).
 		WithStatus(egressqosapply.EgressQoSStatus().WithConditions(newCondition))
 	_, err = oc.kube.EgressQoSClient.K8sV1().EgressQoSes(namespace).ApplyStatus(context.TODO(),
-		applyObj, metav1.ApplyOptions{FieldManager: oc.zone})
+		applyObj, metav1.ApplyOptions{FieldManager: oc.zone, Force: true})
 	return err
 }

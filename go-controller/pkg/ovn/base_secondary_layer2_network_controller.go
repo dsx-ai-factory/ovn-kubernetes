@@ -15,9 +15,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	corev1 "k8s.io/api/core/v1"
-	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
@@ -247,7 +247,9 @@ func (oc *BaseSecondaryLayer2NetworkController) stop() {
 
 // cleanup cleans up logical entities for the given network, called from net-attach-def routine
 // could be called from a dummy Controller (only has CommonNetworkControllerInfo set)
-func (oc *BaseSecondaryLayer2NetworkController) cleanup(topotype, netName string) error {
+func (oc *BaseSecondaryLayer2NetworkController) cleanup() error {
+	netName := oc.GetNetworkName()
+	klog.Infof("Delete OVN logical entities for network %s", netName)
 	// delete layer 2 logical switches
 	ops, err := libovsdbops.DeleteLogicalSwitchesWithPredicateOps(oc.nbClient, nil,
 		func(item *nbdb.LogicalSwitch) bool {
@@ -257,8 +259,7 @@ func (oc *BaseSecondaryLayer2NetworkController) cleanup(topotype, netName string
 		return fmt.Errorf("failed to get ops for deleting switches of network %s: %v", netName, err)
 	}
 
-	controllerName := getNetworkControllerName(netName)
-	ops, err = cleanupPolicyLogicalEntities(oc.nbClient, ops, controllerName)
+	ops, err = cleanupPolicyLogicalEntities(oc.nbClient, ops, oc.controllerName)
 	if err != nil {
 		return err
 	}
@@ -390,7 +391,7 @@ func (oc *BaseSecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *co
 		// process all pods so they are reconfigured as local
 		errs := oc.addAllPodsOnNode(node.Name)
 		if errs != nil {
-			err := kerrors.NewAggregate(errs)
+			err := utilerrors.Join(errs...)
 			return err
 		}
 	}
@@ -410,7 +411,7 @@ func (oc *BaseSecondaryLayer2NetworkController) addUpdateRemoteNodeEvent(node *c
 		// process all pods so they are reconfigured as remote
 		errs := oc.addAllPodsOnNode(node.Name)
 		if errs != nil {
-			err = kerrors.NewAggregate(errs)
+			err = utilerrors.Join(errs...)
 			return err
 		}
 	}

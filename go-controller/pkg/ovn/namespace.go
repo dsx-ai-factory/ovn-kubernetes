@@ -14,10 +14,10 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
-	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 )
@@ -253,7 +253,7 @@ func (oc *DefaultNetworkController) configureNamespace(nsInfo *namespaceInfo, ns
 	if err := oc.configureNamespaceCommon(nsInfo, ns); err != nil {
 		errors = append(errors, err)
 	}
-	return kerrors.NewAggregate(errors)
+	return utilerrors.Join(errors...)
 }
 
 func (oc *DefaultNetworkController) updateNamespace(old, newer *kapi.Namespace) error {
@@ -388,7 +388,7 @@ func (oc *DefaultNetworkController) updateNamespace(old, newer *kapi.Namespace) 
 	if err := oc.multicastUpdateNamespace(newer, nsInfo); err != nil {
 		errors = append(errors, err)
 	}
-	return kerrors.NewAggregate(errors)
+	return utilerrors.Join(errors...)
 }
 
 func (oc *DefaultNetworkController) deleteNamespace(ns *kapi.Namespace) error {

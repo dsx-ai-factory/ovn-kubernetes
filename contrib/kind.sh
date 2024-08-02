@@ -2,29 +2,9 @@
 
 # Returns the full directory name of the script
 DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-ARCH=""
-case $(uname -m) in
-    x86_64)  ARCH="amd64" ;;
-    aarch64) ARCH="arm64"   ;;
-esac
 
-function if_error_exit {
-    ###########################################################################
-    # Description:                                                            #
-    # Validate if previous command failed and show an error msg (if provided) #
-    #                                                                         #
-    # Arguments:                                                              #
-    #   $1 - error message if not provided, it will just exit                 #
-    ###########################################################################
-    if [ "$?" != "0" ]; then
-        if [ -n "$1" ]; then
-            RED="\e[31m"
-            ENDCOLOR="\e[0m"
-            echo -e "[ ${RED}FAILED${ENDCOLOR} ] ${1}"
-        fi
-        exit 1
-    fi
-}
+# Source the kind-common file from the same directory where this script is located
+source "${DIR}/kind-common"
 
 function setup_kubectl_bin() {
     ###########################################################################
@@ -55,24 +35,6 @@ function setup_kubectl_bin() {
 
     chmod +x ./bin/kubectl
     export PATH=${PATH}:$(pwd)/bin
-}
-
-run_kubectl() {
-  local retries=0
-  local attempts=10
-  while true; do
-    if kubectl "$@"; then
-      break
-    fi
-
-    ((retries += 1))
-    if [[ "${retries}" -gt ${attempts} ]]; then
-      echo "error: 'kubectl $*' did not succeed, failing"
-      exit 1
-    fi
-    echo "info: waiting for 'kubectl $*' to succeed..."
-    sleep 1
-  done
 }
 
 # Some environments (Fedora32,31 on desktop), have problems when the cluster
@@ -172,9 +134,11 @@ usage() {
     echo "-ic  | --enable-interconnect        Enable interconnect with each node as a zone (only valid if OVN_HA is false)"
     echo "--disable-ovnkube-identity          Disable per-node cert and ovnkube-identity webhook"
     echo "-npz | --nodes-per-zone             If interconnect is enabled, number of nodes per zone (Default 1). If this value > 1, then (total k8s nodes (workers + 1) / num of nodes per zone) should be zero."
+    echo "-mtu                                Define the overlay mtu"
     echo "--isolated                          Deploy with an isolated environment (no default gateway)"
     echo "--delete                            Delete current cluster"
     echo "--deploy                            Deploy ovn kubernetes without restarting kind"
+    echo "--add-nodes                         Adds nodes to an existing cluster. The number of nodes to be added is specified by --num-workers. Also use -ic if the cluster is using interconnect."
     echo ""
 }
 
@@ -350,10 +314,16 @@ parse_args() {
                                                 ;;
             --disable-ovnkube-identity)         OVN_ENABLE_OVNKUBE_IDENTITY=false
                                                 ;;
+            -mtu  )                             shift
+                                                OVN_MTU=$1
+                                                ;;
             --delete )                          delete
                                                 exit
                                                 ;;
             --deploy)                           KIND_CREATE=false
+                                                ;;
+            --add-nodes)                        KIND_ADD_NODES=true
+                                                KIND_CREATE=false
                                                 ;;
             -h | --help )                       usage
                                                 exit
@@ -431,12 +401,8 @@ print_params() {
      fi
      echo "OVN_ENABLE_OVNKUBE_IDENTITY = $OVN_ENABLE_OVNKUBE_IDENTITY"
      echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
+     echo "OVN_MTU= $OVN_MTU"
      echo ""
-}
-
-command_exists() {
-  cmd="$1"
-  command -v ${cmd} >/dev/null 2>&1
 }
 
 install_jinjanator_renderer() {
@@ -509,6 +475,7 @@ set_default_params() {
   # Set default values
   # Used for multi cluster setups
   KIND_CREATE=${KIND_CREATE:-true}
+  KIND_ADD_NODES=${KIND_ADD_NODES:-false}
   KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}
   # Setup KUBECONFIG patch based on cluster-name
   export KUBECONFIG=${KUBECONFIG:-${HOME}/${KIND_CLUSTER_NAME}.conf}
@@ -626,17 +593,7 @@ set_default_params() {
   if [ "$OVN_COMPACT_MODE" == true ]; then
     KIND_NUM_WORKER=0
   fi
-}
-
-detect_apiserver_url() {
-  # Detect API_URL used for in-cluster communication
-  #
-  # Despite OVN run in pod they will only obtain the VIRTUAL apiserver address
-  # and since OVN has to provide the connectivity to service
-  # it can not be bootstrapped
-  #
-  # This is the address of the node with the control-plane
-  API_URL=$(kind get kubeconfig --internal --name "${KIND_CLUSTER_NAME}" | grep server | awk '{ print $2 }')
+  OVN_MTU=${OVN_MTU:-1400}
 }
 
 check_ipv6() {
@@ -729,6 +686,25 @@ EOF
 
 }
 
+scale_kind_cluster() {
+  echo "Scaling cluster to ${KIND_NUM_WORKER} workers..."
+  rm -rf /tmp/kindscaler
+  # change this to https://github.com/lobuhi/kindscaler once PR https://github.com/lobuhi/kindscaler/pull/1 is accepted
+  git clone https://github.com/trozet/kindscaler /tmp/kindscaler
+  /tmp/kindscaler/kindscaler.sh ${KIND_CLUSTER_NAME} -r worker -c ${KIND_NUM_WORKER}
+  if [ "$OVN_ENABLE_INTERCONNECT" == true ]; then
+      if [ "${KIND_NUM_NODES_PER_ZONE}" == "1" ]; then
+       label_ovn_single_node_zones
+      else
+        label_ovn_multiple_nodes_zones
+      fi
+  fi
+  if [ "$OVN_IMAGE" == local ]; then
+    set_ovn_image
+  fi
+  install_ovn_image
+}
+
 create_kind_cluster() {
   # Output of the jinjanate command
   KIND_CONFIG_LCL=${DIR}/kind-${KIND_CLUSTER_NAME}.yaml
@@ -760,55 +736,13 @@ create_kind_cluster() {
   cat "${KUBECONFIG}"
 }
 
-
-
-docker_disable_ipv6() {
-  # Docker disables IPv6 globally inside containers except in the eth0 interface.
-  # Kind enables IPv6 globally the containers ONLY for dual-stack and IPv6 deployments.
-  # Ovnkube-node tries to move all global addresses from the gateway interface to the
-  # bridge interface it creates. This breaks on KIND with IPv4 only deployments, because the new
-  # internal bridge has IPv6 disable and can't move the IPv6 from the eth0 interface.
-  # We can enable IPv6 always in the container, since the docker setup with IPv4 only
-  # is not very common.
-  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
-  for n in $KIND_NODES; do
-    $OCI_BIN exec "$n" sysctl --ignore net.ipv6.conf.all.disable_ipv6=0
-    $OCI_BIN exec "$n" sysctl --ignore net.ipv6.conf.all.forwarding=1
-  done
-}
-
-coredns_patch() {
-  dns_server="8.8.8.8"
-  # No need for ipv6 nameserver for dual stack, it will ask for 
-  # A and AAAA records
-  if [ "$IP_FAMILY" == "ipv6" ]; then
-    dns_server="2001:4860:4860::8888"
+set_ovn_image() {
+  # if we're using the local registry and still need to build, push to local registry
+  if [ "$KIND_LOCAL_REGISTRY" == true ];then
+    OVN_IMAGE="localhost:5000/ovn-daemonset-f:latest"
+  else
+    OVN_IMAGE="localhost/ovn-daemonset-f:dev"
   fi
-
-  # Patch CoreDNS to work
-  # 1. Github CI doesn´t offer IPv6 connectivity, so CoreDNS should be configured
-  # to work in an offline environment:
-  # https://github.com/coredns/coredns/issues/2494#issuecomment-457215452
-  # 2. Github CI adds following domains to resolv.conf search field:
-  # .net.
-  # CoreDNS should handle those domains and answer with NXDOMAIN instead of SERVFAIL
-  # otherwise pods stops trying to resolve the domain.
-  # Get the current config
-  original_coredns=$(kubectl get -oyaml -n=kube-system configmap/coredns)
-  echo "Original CoreDNS config:"
-  echo "${original_coredns}"
-  # Patch it
-  fixed_coredns=$(
-    printf '%s' "${original_coredns}" | sed \
-      -e 's/^.*kubernetes cluster\.local/& net/' \
-      -e '/^.*upstream$/d' \
-      -e '/^.*fallthrough.*$/d' \
-      -e 's/^\(.*forward \.\).*$/\1 '"$dns_server"' {/' \
-      -e '/^.*loop$/d' \
-  )
-  echo "Patched CoreDNS config:"
-  echo "${fixed_coredns}"
-  printf '%s' "${fixed_coredns}" | kubectl apply -f -
 }
 
 build_ovn_image() {
@@ -819,12 +753,7 @@ build_ovn_image() {
     sed -i "/check_firewall_state() {.*/a return 0" ../dist/images/ovnkube.sh
     sed -i "/create_ovn_firewall_zone() {.*/a return 0" ../dist/images/ovnkube.sh
 
-    # if we're using the local registry and still need to build, push to local registry
-    if [ "$KIND_LOCAL_REGISTRY" == true ];then
-      OVN_IMAGE="localhost:5000/ovn-daemonset-f:latest"
-    else
-      OVN_IMAGE="localhost/ovn-daemonset-f:dev"
-    fi
+    set_ovn_image
 
     # Build ovn image
     pushd ${DIR}/../go-controller
@@ -915,7 +844,8 @@ create_ovn_kube_manifests() {
     --enable-interconnect="${OVN_ENABLE_INTERCONNECT}" \
     --enable-multi-external-gateway=true \
     --enable-ovnkube-identity="${OVN_ENABLE_OVNKUBE_IDENTITY}" \
-    --enable-persistent-ips=true
+    --enable-persistent-ips=true \
+    --mtu="${OVN_MTU}"
   popd
 }
 
@@ -949,11 +879,15 @@ install_ovn_global_zone() {
   run_kubectl apply -f ovnkube-node.yaml
 }
 
-install_ovn_single_node_zones() {
+label_ovn_single_node_zones() {
   KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
   for n in $KIND_NODES; do
     kubectl label node "${n}" k8s.ovn.org/zone-name=${n} --overwrite
   done
+}
+
+install_ovn_single_node_zones() {
+  label_ovn_single_node_zones
 
   if [ "${OVN_ENABLE_OVNKUBE_IDENTITY}" == true ]; then
     run_kubectl apply -f ovnkube-identity.yaml
@@ -962,8 +896,7 @@ install_ovn_single_node_zones() {
   run_kubectl apply -f ovnkube-single-node-zone.yaml
 }
 
-
-install_ovn_multiple_nodes_zones() {
+label_ovn_multiple_nodes_zones() {
   KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sort)
   zone_idx=1
   n=1
@@ -982,6 +915,11 @@ install_ovn_multiple_nodes_zones() {
       n=$((n+1))
     fi
   done
+}
+
+
+install_ovn_multiple_nodes_zones() {
+  label_ovn_multiple_nodes_zones
 
   if [ "${OVN_ENABLE_OVNKUBE_IDENTITY}" == true ]; then
     run_kubectl apply -f ovnkube-identity.yaml
@@ -1089,142 +1027,6 @@ install_ovn() {
   fi
 }
 
-install_ingress() {
-  run_kubectl apply -f "${DIR}/ingress/mandatory.yaml"
-  run_kubectl apply -f "${DIR}/ingress/service-nodeport.yaml"
-}
-
-METALLB_DIR="/tmp/metallb"
-install_metallb() {
-  mkdir -p /tmp/metallb
-  local builddir
-  builddir=$(mktemp -d "${METALLB_DIR}/XXXXXX")
-
-  pushd "${builddir}"
-  git clone https://github.com/metallb/metallb.git
-  cd metallb
-  # Use global IP next hops in IPv6
-  if  [ "$KIND_IPV6_SUPPORT" == true ]; then
-    sed -i '/address-family PROTOCOL unicast/a \
-  neighbor NODE0_IP route-map IPV6GLOBAL in\n  neighbor NODE1_IP route-map IPV6GLOBAL in\n  neighbor NODE2_IP route-map IPV6GLOBAL in' dev-env/bgp/frr/bgpd.conf.tmpl
-    printf "route-map IPV6GLOBAL permit 10\n set ipv6 next-hop prefer-global" >> dev-env/bgp/frr/bgpd.conf.tmpl
-  fi
-  pip install -r dev-env/requirements.txt
-
-  local ip_family ipv6_network
-  if [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
-    ip_family="dual"
-    ipv6_network="--ipv6 --subnet=${METALLB_CLIENT_NET_SUBNET_IPV6}"
-  elif  [ "$KIND_IPV6_SUPPORT" == true ]; then
-    ip_family="ipv6"
-    ipv6_network="--ipv6 --subnet=${METALLB_CLIENT_NET_SUBNET_IPV6}"
-  else
-    ip_family="ipv4"
-    ipv6_network=""
-  fi
-  # Override GOBIN until https://github.com/metallb/metallb/issues/2218 is fixed.
-  GOBIN="" inv dev-env -n ovn -b frr -p bgp -i "${ip_family}"
-
-  docker network create --subnet="${METALLB_CLIENT_NET_SUBNET_IPV4}" ${ipv6_network} --driver bridge clientnet
-  docker network connect clientnet frr
-  if  [ "$KIND_IPV6_SUPPORT" == true ]; then
-    # Enable IPv6 forwarding in FRR
-    docker exec frr sysctl -w net.ipv6.conf.all.forwarding=1
-  fi
-  docker run  --cap-add NET_ADMIN --user 0  -d --network clientnet  --rm  --name lbclient  quay.io/itssurya/dev-images:metallb-lbservice
-  popd
-  delete_metallb_dir
-
-  # The metallb commit https://github.com/metallb/metallb/commit/1a8e52c393d40efd17f28491616f6f9f7790a522
-  # removes control plane node from acting as a bgp speaker for service routes.
-  # Hence remove node.kubernetes.io/exclude-from-external-load-balancers label from control-plane nodes
-  # so that they are also available for advertising bgp routes which are needed for ovnkube's service
-  # specific e2e tests.
-  MASTER_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sort | head -n "${KIND_NUM_MASTER}")
-  for n in $MASTER_NODES; do
-    kubectl label node "$n" node.kubernetes.io/exclude-from-external-load-balancers-
-  done
-
-  kind_network_v4=$(docker inspect -f '{{index .NetworkSettings.Networks "kind" "IPAddress"}}' frr)
-  echo "FRR kind network IPv4: ${kind_network_v4}"
-  kind_network_v6=$(docker inspect -f '{{index .NetworkSettings.Networks "kind" "GlobalIPv6Address"}}' frr)
-  echo "FRR kind network IPv6: ${kind_network_v6}"
-  local client_network_v4 client_network_v6
-  client_network_v4=$(docker inspect -f '{{index .NetworkSettings.Networks "clientnet" "IPAddress"}}' frr)
-  echo "FRR client network IPv4: ${client_network_v4}"
-  client_network_v6=$(docker inspect -f '{{index .NetworkSettings.Networks "clientnet" "GlobalIPv6Address"}}' frr)
-  echo "FRR client network IPv6: ${client_network_v6}"
-
-  local client_subnets
-  client_subnets=$(docker network inspect clientnet -f '{{range .IPAM.Config}}{{.Subnet}}#{{end}}')
-  echo "${client_subnets}"
-  local client_subnets_v4 client_subnets_v6
-  client_subnets_v4=$(echo "${client_subnets}" | cut -d '#' -f 1)
-  echo "client subnet IPv4: ${client_subnets_v4}"
-  client_subnets_v6=$(echo "${client_subnets}" | cut -d '#' -f 2)
-  echo "client subnet IPv6: ${client_subnets_v6}"
-
-  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
-  for n in ${KIND_NODES}; do
-    if [ "$KIND_IPV4_SUPPORT" == true ]; then
-        docker exec "${n}" ip route add "${client_subnets_v4}" via "${kind_network_v4}"
-    fi
-    if [ "$KIND_IPV6_SUPPORT" == true ]; then
-        docker exec "${n}" ip -6 route add "${client_subnets_v6}" via "${kind_network_v6}"
-    fi
-  done
-
-  # for now, we only run one test with metalLB load balancer for which this
-  # one svcVIP (192.168.10.0/fc00:f853:ccd:e799::) is more than enough since at a time we will only
-  # have one load balancer service
-  if [ "$KIND_IPV4_SUPPORT" == true ]; then
-    docker exec lbclient ip route add 192.168.10.0 via "${client_network_v4}" dev eth0
-  fi
-  if [ "$KIND_IPV6_SUPPORT" == true ]; then
-    docker exec lbclient ip -6 route add fc00:f853:ccd:e799:: via "${client_network_v6}" dev eth0
-  fi
-  sleep 30
-}
-
-install_plugins() {
-  git clone https://github.com/containernetworking/plugins.git
-  pushd plugins
-  CGO_ENABLED=0 ./build_linux.sh
-  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
-  # Opted for not overwritting the existing plugins
-  for node in $KIND_NODES; do
-    for plugin in bandwidth bridge dhcp dummy firewall host-device ipvlan macvlan sbr static tuning vlan vrf; do
-      $OCI_BIN cp ./bin/$plugin $node:/opt/cni/bin/
-    done
-  done
-  popd
-  rm -rf plugins
-}
-
-destroy_metallb() {
-  if docker ps --format '{{.Names}}' | grep -Eq '^lbclient$'; then
-      docker stop lbclient
-  fi
-  if docker ps --format '{{.Names}}' | grep -Eq '^frr$'; then
-      docker stop frr
-  fi
-  if docker network ls --format '{{.Name}}' | grep -q '^clientnet$'; then
-      docker network rm clientnet
-  fi
-  delete_metallb_dir
-}
-
-delete_metallb_dir() {
-  if ! [ -d "${METALLB_DIR}" ]; then
-      return
-  fi
-
-  # The build directory will contain read only directories after building. Files cannot be deleted, even by the owner.
-  # Therefore, set all dirs to u+rwx.
-  find "${METALLB_DIR}" -type d -exec chmod u+rwx "{}" \;
-  rm -rf "${METALLB_DIR}"
-}
-
 install_multus() {
   echo "Installing multus-cni daemonset ..."
   multus_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/master/deployments/multus-daemonset.yml"
@@ -1241,58 +1043,6 @@ install_ipamclaim_crd() {
   echo "Installing IPAMClaim CRD ..."
   ipamclaims_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/ipamclaims/v0.4.0-alpha/artifacts/k8s.cni.cncf.io_ipamclaims.yaml"
   run_kubectl apply -f "$ipamclaims_manifest"
-}
-
-# kubectl_wait_pods will set a total timeout of 300s for IPv4 and 480s for IPv6. It will first wait for all
-# DaemonSets to complete with kubectl rollout. This command will block until all pods of the DS are actually up.
-# Next, it iterates over all pods with name=ovnkube-db and ovnkube-master and waits for them to post "Ready".
-# Last, it will do the same with all pods in the kube-system namespace.
-kubectl_wait_pods() {
-  # IPv6 cluster seems to take a little longer to come up, so extend the wait time.
-  OVN_TIMEOUT=300
-  if [ "$KIND_IPV6_SUPPORT" == true ]; then
-    OVN_TIMEOUT=480
-  fi
-
-  # We will make sure that we timeout all commands at current seconds + the desired timeout.
-  endtime=$(( SECONDS + OVN_TIMEOUT ))
-
-  for ds in ovnkube-node ovs-node; do
-    timeout=$(calculate_timeout ${endtime})
-    echo "Waiting for k8s to launch all ${ds} pods (timeout ${timeout})..."
-    kubectl rollout status daemonset -n ovn-kubernetes ${ds} --timeout ${timeout}s
-  done
-
-  pods=""
-  if [ "$OVN_ENABLE_INTERCONNECT" == true ]; then
-    pods="ovnkube-control-plane"
-  else
-    pods="ovnkube-master ovnkube-db"
-  fi
-  for name in ${pods}; do
-    timeout=$(calculate_timeout ${endtime})
-    echo "Waiting for k8s to create ${name} pods (timeout ${timeout})..."
-    kubectl wait pods -n ovn-kubernetes -l name=${name} --for condition=Ready --timeout=${timeout}s
-  done
-
-  timeout=$(calculate_timeout ${endtime})
-  if ! kubectl wait -n kube-system --for=condition=ready pods --all --timeout=${timeout}s ; then
-    echo "some pods in the system are not running"
-    kubectl get pods -A -o wide || true
-    exit 1
-  fi
-}
-
-# calculate_timeout takes an absolute endtime in seconds (based on bash script runtime, see
-# variable $SECONDS) and calculates a relative timeout value. Should the calculated timeout
-# be <= 0, return one second.
-calculate_timeout() {
-  endtime=$1
-  timeout=$(( endtime - SECONDS ))
-  if [ ${timeout} -le 0 ]; then
-      timeout=1
-  fi
-  echo ${timeout}
 }
 
 # install_ipsec will apply the IPsec DaemonSet, create a CA that can be used by the IPsec pods. It will then add it to
@@ -1381,11 +1131,6 @@ docker_create_second_disconnected_interface() {
   done
 }
 
-sleep_until_pods_settle() {
-  echo "Pods are all up, allowing things settle for 30 seconds..."
-  sleep 30
-}
-
 # run_script_in_container should be used when kind.sh is run nested in a container
 # and makes sure the control-plane node is rechable by substituting 127.0.0.1
 # with the control-plane container's IP
@@ -1430,70 +1175,6 @@ add_dns_hostnames() {
   done
 }
 
-function is_nested_virt_enabled() {
-    local kvm_nested="unknown"
-    if [ -f "/sys/module/kvm_intel/parameters/nested" ]; then
-        kvm_nested=$( cat /sys/module/kvm_intel/parameters/nested )
-    elif [ -f "/sys/module/kvm_amd/parameters/nested" ]; then
-        kvm_nested=$( cat /sys/module/kvm_amd/parameters/nested )
-    fi
-    [ "$kvm_nested" == "1" ] || [ "$kvm_nested" == "Y" ] || [ "$kvm_nested" == "y" ]
-}
-
-function install_kubevirt() {
-    local kubevirt_version="$(curl -L https://storage.googleapis.com/kubevirt-prow/release/kubevirt/kubevirt/stable.txt)"
-    for node in $(kubectl get node --no-headers  -o custom-columns=":metadata.name"); do
-        $OCI_BIN exec -t $node bash -c "echo 'fs.inotify.max_user_watches=1048576' >> /etc/sysctl.conf"
-        $OCI_BIN exec -t $node bash -c "echo 'fs.inotify.max_user_instances=512' >> /etc/sysctl.conf"
-        $OCI_BIN exec -i $node bash -c "sysctl -p /etc/sysctl.conf"
-        if [[ "${node}" =~ worker ]]; then
-            kubectl label nodes $node node-role.kubernetes.io/worker="" --overwrite=true
-        fi
-    done
-    local kubevirt_release_url="https://github.com/kubevirt/kubevirt/releases/download/${kubevirt_version}"
-
-    echo "Deploy latest nighly build Kubevirt"
-    if [ "$(kubectl get kubevirts -n kubevirt kubevirt -ojsonpath='{.status.phase}')" != "Deployed" ]; then
-      kubectl apply -f "${kubevirt_release_url}/kubevirt-operator.yaml"
-      kubectl apply -f "${kubevirt_release_url}/kubevirt-cr.yaml"
-      if ! is_nested_virt_enabled; then
-        kubectl -n kubevirt patch kubevirt kubevirt --type=merge --patch '{"spec":{"configuration":{"developerConfiguration":{"useEmulation":true}}}}'
-      fi
-      kubectl -n kubevirt patch kubevirt kubevirt --type=merge --patch '{"spec":{"configuration":{"virtualMachineOptions":{"disableSerialConsoleLog":{}}}}}'
-    fi
-    if ! kubectl wait -n kubevirt kv kubevirt --for condition=Available --timeout 15m; then
-        kubectl get pod -n kubevirt -l || true
-        kubectl describe pod -n kubevirt -l || true
-        for p in $(kubectl get pod -n kubevirt -l -o name |sed "s#pod/##"); do
-            kubectl logs -p --all-containers=true -n kubevirt $p || true
-            kubectl logs --all-containers=true -n kubevirt $p || true
-        done
-    fi
-    
-    if [ ! -d "./bin" ]
-    then
-        mkdir -p ./bin
-        if_error_exit "Failed to create bin dir!"
-    fi
-
-    if [[ "$OSTYPE" == "linux-gnu" ]]; then
-        OS_TYPE="linux"
-    elif [[ "$OSTYPE" == "darwin"* ]]; then
-        OS_TYPE="darwin"
-    fi
-
-    pushd ./bin
-       if [ ! -f ./virtctl ]; then
-           cli_name="virtctl-${kubevirt_version}-${OS_TYPE}-${ARCH}"
-           curl -LO "${kubevirt_release_url}/${cli_name}"
-           mv ${cli_name} virtctl
-           if_error_exit "Failed to download virtctl!"
-       fi
-    popd
-
-    chmod +x ./bin/virtctl
-}
-
 check_dependencies
 # In order to allow providing arguments with spaces, e.g. "-vconsole:info -vfile:info"
 # the original command <parse_args $*> was replaced by <parse_args "$@">
@@ -1505,6 +1186,12 @@ if [ "${ENABLE_IPSEC}" == true ]; then
 fi
 
 set -euxo pipefail
+if [ "$KIND_ADD_NODES" == true ]; then
+  scale_kind_cluster
+  kubectl_wait_pods
+  exit 0
+fi
+
 check_ipv6
 set_cluster_cidr_ip_families
 if [ "$KIND_CREATE" == true ]; then
@@ -1559,4 +1246,5 @@ if [ "$KIND_INSTALL_PLUGINS" == true ]; then
 fi
 if [ "$KIND_INSTALL_KUBEVIRT" == true ]; then
   install_kubevirt
+  install_kubevirt_ipam_claims
 fi

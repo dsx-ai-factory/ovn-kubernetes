@@ -41,7 +41,7 @@ type Controller struct {
 	// name of the controller that starts the ANP controller
 	// (values are default-network-controller, secondary-network-controller etc..)
 	controllerName string
-	sync.Mutex
+	sync.RWMutex
 	anpClientSet anpclientset.Interface
 
 	// libovsdb northbound client interface
@@ -62,10 +62,13 @@ type Controller struct {
 
 	// anp name is key -> cloned value of ANP kapi is value
 	anpCache map[string]*adminNetworkPolicyState
-	// If more than one ANP is created at the same priority behaviour is undefined in k8s upsteam.
-	// If more than one ANP is created at the same priority OVNK will only create the first
-	// incoming ANP, rest of them will not be created.
-	// This map tracks anp.Spec.Priority->anp.Name
+	// If more than one ANP is created at the same priority behaviour is defined as long
+	// as both ANPs are not overlapping each other. If they are overlapping then we let OVN's
+	// randomness of choosing any one ACL at the same priority to take effect here.
+	// See https://github.com/kubernetes-sigs/network-policy-api/issues/216 for more details.
+	// If more than one ANP is created at the same priority OVNK will create both of them but
+	// emit an event warning the user that they have multiple ANPs at same priority.
+	// This map tracks anp.Spec.Priority->anp.Name which is used for emitting the event
 	anpPriorityMap map[int32]string
 
 	// banpCache contains the cloned value of BANP kapi
@@ -204,7 +207,6 @@ func NewController(
 		return nil, fmt.Errorf("could not add Event Handler for node Informer during admin network policy controller initialization, %w", err)
 	}
 
-	// TODO(tssurya): We don't use recorder now but will add events in future iterations
 	c.eventRecorder = recorder
 
 	return c, nil
@@ -292,6 +294,7 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) {
 			}, time.Second, stopCh)
 		}()
 	}
+	c.setupMetricsCollector()
 
 	<-stopCh
 
@@ -301,6 +304,7 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) {
 	c.anpNamespaceQueue.ShutDown()
 	c.anpPodQueue.ShutDown()
 	c.anpNodeQueue.ShutDown()
+	c.teardownMetricsCollector()
 	wg.Wait()
 }
 

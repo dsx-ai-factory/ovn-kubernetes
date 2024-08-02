@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -11,7 +12,6 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/pkg/errors"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -141,8 +141,12 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 		Copp:        &oc.defaultCOPPUUID,
 	}
 
-	if oc.clusterLoadBalancerGroupUUID != "" && oc.routerLoadBalancerGroupUUID != "" {
-		logicalRouter.LoadBalancerGroup = []string{oc.clusterLoadBalancerGroupUUID, oc.routerLoadBalancerGroupUUID}
+	if oc.clusterLoadBalancerGroupUUID != "" {
+		logicalRouter.LoadBalancerGroup = []string{oc.clusterLoadBalancerGroupUUID}
+		if l3GatewayConfig.NodePortEnable && oc.routerLoadBalancerGroupUUID != "" {
+			// add routerLoadBalancerGroupUUID to the gateway router only if nodePort is enabled
+			logicalRouter.LoadBalancerGroup = append(logicalRouter.LoadBalancerGroup, oc.routerLoadBalancerGroupUUID)
+		}
 	}
 
 	// If l3gatewayAnnotation.IPAddresses changed, we need to update the perPodSNATs,
@@ -232,7 +236,7 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 		// check for duplicate cluster IP subnets for which there would also be
 		// a better way to do it. Adding support for indirection in ModelClients
 		// opModel (being able to operate on thins pointed to from another model)
-		// would be agreat way to simplify this.
+		// would be a great way to simplify this.
 		updatedLogicalRouter, err := libovsdbops.GetLogicalRouter(oc.nbClient, &logicalRouter)
 		if err != nil {
 			return fmt.Errorf("unable to retrieve logical router %+v: %v", logicalRouter, err)
@@ -595,6 +599,20 @@ func (oc *DefaultNetworkController) addExternalSwitch(prefix, interfaceID, nodeN
 		Type: "router",
 		Options: map[string]string{
 			"router-port": externalRouterPort,
+
+			// This option will program OVN to start sending GARPs for all external IPS
+			// that the logical switch port has been configured to use. This is
+			// necessary for egress IP because if an egress IP is moved between two
+			// nodes, the nodes need to actively update the ARP cache of all neighbors
+			// as to notify them the change. If this is not the case: packets will
+			// continue to be routed to the old node which hosted the egress IP before
+			// it was moved, and the connections will fail.
+			"nat-addresses": "router",
+
+			// Setting nat-addresses to router will send out GARPs for all externalIPs and LB VIPs
+			// hosted on the GR. Setting exclude-lb-vips-from-garp to true will make sure GARPs for
+			// LB VIPs are not sent, thereby preventing GARP overload.
+			"exclude-lb-vips-from-garp": "true",
 		},
 		Addresses: []string{macAddress},
 	}

@@ -22,14 +22,13 @@ import (
 // can be removed once SetRepresentorVFMissPktRate moves to the same location.
 const (
 	PcidevPrefix = "device"
-
-	NetSysDir = "/sys/class/net"
-	PciSysDir = "/sys/bus/pci/devices"
+	NetSysDir    = "/sys/class/net"
 )
 
 type SriovnetOps interface {
 	GetNetDevicesFromPci(pciAddress string) ([]string, error)
 	GetNetDevicesFromAux(auxDev string) ([]string, error)
+	GetPciFromNetDevice(name string) (string, error)
 	GetUplinkRepresentor(vfPciAddress string) (string, error)
 	GetUplinkRepresentorFromAux(auxDev string) (string, error)
 	GetVfIndexByPciAddress(vfPciAddress string) (int, error)
@@ -40,14 +39,15 @@ type SriovnetOps interface {
 	GetPfPciFromVfPci(vfPciAddress string) (string, error)
 	GetPfPciFromAux(auxDev string) (string, error)
 	GetVfRepresentorDPU(pfID, vfIndex string) (string, error)
+	IsVfPciVfioBound(pciAddr string) bool
 	GetRepresentorPeerMacAddress(netdev string) (net.HardwareAddr, error)
 	SetRepresentorPeerMacAddress(netdev string, mac net.HardwareAddr) error
 	GetRepresentorPortFlavour(netdev string) (sriovnet.PortFlavour, error)
-	IsVfPciVfioBound(pciAddr string) bool
 	SetRepresentorVFMissPktRate(netdev string, maxPPS, maxBurst uint) error
 	GetRepresentorVFMissPktRate(netdev string) (uint64, uint64, error)
 	GetRepresentorVFMissPktDrops(netdev string) (uint64, error)
 	GetPCIFromDeviceName(netdevName string) (string, error)
+	GetPortIndexFromRepresentor(name string) (int, error)
 }
 
 type defaultSriovnetOps struct {
@@ -71,6 +71,10 @@ func (defaultSriovnetOps) GetNetDevicesFromPci(pciAddress string) ([]string, err
 
 func (defaultSriovnetOps) GetNetDevicesFromAux(auxDev string) ([]string, error) {
 	return sriovnet.GetNetDevicesFromAux(auxDev)
+}
+
+func (defaultSriovnetOps) GetPciFromNetDevice(name string) (string, error) {
+	return sriovnet.GetPciFromNetDevice(name)
 }
 
 func (defaultSriovnetOps) GetUplinkRepresentor(vfPciAddress string) (string, error) {
@@ -123,6 +127,10 @@ func (defaultSriovnetOps) SetRepresentorPeerMacAddress(netdev string, mac net.Ha
 
 func (defaultSriovnetOps) GetRepresentorPortFlavour(netdev string) (sriovnet.PortFlavour, error) {
 	return sriovnet.GetRepresentorPortFlavour(netdev)
+}
+
+func (defaultSriovnetOps) GetPortIndexFromRepresentor(name string) (int, error) {
+	return sriovnet.GetPortIndexFromRepresentor(name)
 }
 
 // GetFunctionRepresentorName returns representor name for passed device ID. Supported devices are Virtual Function
@@ -203,10 +211,6 @@ func GetNetdevNameFromDeviceId(deviceId string, deviceInfo nadapi.DeviceInfo) (s
 		return "", fmt.Errorf("failed to get one netdevice interface (count %d) per Device ID %s", numNetDevices, deviceId)
 	}
 	return netdevices[0], nil
-}
-
-func (defaultSriovnetOps) IsVfPciVfioBound(pciAddr string) bool {
-	return sriovnet.IsVfPciVfioBound(pciAddr)
 }
 
 // Temporary location - will be moved to
@@ -292,6 +296,10 @@ func (defaultSriovnetOps) GetRepresentorVFMissPktDrops(netdev string) (uint64, e
 	}
 
 	return packetsDropped, nil
+}
+
+func (defaultSriovnetOps) IsVfPciVfioBound(pciAddr string) bool {
+	return sriovnet.IsVfPciVfioBound(pciAddr)
 }
 
 // SetVFHardwreAddress sets mac address for a VF interface

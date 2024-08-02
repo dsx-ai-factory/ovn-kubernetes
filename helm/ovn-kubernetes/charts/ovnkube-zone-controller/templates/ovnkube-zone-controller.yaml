@@ -74,7 +74,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "3"
+          value: "1.0.0"
         - name: OVN_LOGLEVEL_NB
           value:  {{ default "-vconsole:info -vfile:info" .Values.nbLogLevel | quote }}
         - name: K8S_APISERVER
@@ -136,7 +136,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "3"
+          value: "1.0.0"
         - name: OVN_LOGLEVEL_SB
           value: {{ default "-vconsole:info -vfile:info" .Values.sbLogLevel | quote }}
         - name: K8S_APISERVER
@@ -197,7 +197,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "3"
+          value: "1.0.0"
         - name: OVN_LOGLEVEL_NORTHD
           value: {{ default "-vconsole:info -vfile:info" .Values.northdLogLevel | quote }}
         - name: K8S_APISERVER
@@ -250,7 +250,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "3"
+          value: "1.0.0"
         - name: OVNKUBE_LOGLEVEL
           value: {{ default 4 .Values.ovnkubeLocalLogLevel | quote }}
         - name: OVNKUBE_LOGFILE_MAXSIZE
@@ -330,6 +330,8 @@ spec:
           value: {{ hasKey .Values.global "enableInterconnect" | ternary .Values.global.enableInterconnect false | quote }}
         - name: OVN_ENABLE_MULTI_EXTERNAL_GATEWAY
           value: {{ hasKey .Values.global "enableMultiExternalGateway" | ternary .Values.global.enableMultiExternalGateway false | quote }}
+        - name: OVN_ENABLE_SVC_TEMPLATE_SUPPORT
+          value: {{ hasKey .Values.global "enableSvcTemplate" | ternary .Values.global.enableSvcTemplate true | quote }
         - name: OVN_HOST_NETWORK_NAMESPACE
           valueFrom:
             configMapKeyRef:

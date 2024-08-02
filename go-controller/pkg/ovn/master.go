@@ -1,30 +1,29 @@
 package ovn
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strings"
 	"time"
 
 	kapi "k8s.io/api/core/v1"
-	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
+	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
-	"github.com/pkg/errors"
-
-	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
-	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 const (
@@ -768,7 +767,7 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 		}
 	}
 
-	return kerrors.NewAggregate(errs)
+	return utilerrors.Join(errs...)
 }
 
 func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node, syncZoneIC bool) error {
@@ -963,7 +962,11 @@ func (oc *DefaultNetworkController) addIPToHostNetworkNamespaceAddrSet(node *kap
 	}
 	hostNetworkPolicyIPs, err := oc.getHostNamespaceAddressesForNode(node)
 	if err != nil {
-		return fmt.Errorf("error parsing annotation for node %s: %v", node.Name, err)
+		parsedErr := err
+		if !oc.isLocalZoneNode(node) {
+			parsedErr = types.NewSuppressedError(err)
+		}
+		return fmt.Errorf("error parsing annotation for node %s: %w", node.Name, parsedErr)
 	}
 
 	// add the host network IPs for this node to host network namespace's address set
@@ -998,6 +1001,11 @@ func (oc *DefaultNetworkController) delIPFromHostNetworkNamespaceAddrSet(node *k
 	}
 	hostNetworkPolicyIPs, err := oc.getHostNamespaceAddressesForNode(node)
 	if err != nil {
+		if util.IsAnnotationNotSetError(err) {
+			// if annotation is not set for node subnet or node GW router LRP IP address, we can assume nothing was added to the
+			// host network namespace address set. We depend on both annotations to be set before configuring the address set.
+			return nil
+		}
 		return fmt.Errorf("error parsing annotation for node %s: %v", node.Name, err)
 	}
 
