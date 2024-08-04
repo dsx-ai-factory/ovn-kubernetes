@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -34,6 +35,10 @@ const (
 	// defaultOpenFlowCookie identifies default open flow rules added to the host OVS bridge.
 	// The hex number 0xdeff105, aka defflos, is meant to sound like default flows.
 	defaultOpenFlowCookie = "0xdeff105"
+	// localnetOpenFlowCookie identifies open flow rules added to the host OVS bridge to
+	// steer traffic from loclanetports towards the HostMAC. To ease debugging, the
+	// hex number 0x10ca1f105, is meant to sound like local flows.
+	localnetOpenFlowCookie = "0x10ca1f105"
 	// etpSvcOpenFlowCookie identifies constant open flow rules added to the host OVS
 	// bridge to move packets between host and external for etp=local traffic.
 	// The hex number 0xe745ecf105, represents etp(e74)-service(5ec)-flows which makes it easier for debugging.
@@ -1643,6 +1648,78 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 	return dftFlows, nil
 }
 
+func manageOpenFlowsForLocalnetPorts(gw *gateway) {
+	klog.Info("Starting localnet port OpenFlow management routine")
+	timer := time.NewTicker(10 * time.Second)
+	defer timer.Stop()
+	gwBridge := gw.openflowManager.defaultBridge
+	for {
+		select {
+		case <-timer.C:
+			stdout, stderr, err := util.RunOVSVsctl("--no-headings", "--data=bare", "--format=csv",
+				"--columns=name,ofport", "find", "interface", "type=patch")
+			if err != nil || stdout == "" {
+				klog.Errorf("Failed to find interfaces of type patch %v, (%q)", err, stderr)
+				continue
+			}
+			curLclnetPortsMap := map[string]bool{}
+			flowSyncRequired := false
+			for _, output := range strings.Split(stdout, "\n") {
+				parts := strings.Split(output, ",")
+				if len(parts) != 2 {
+					klog.Warningf("Got invalid output %s while determining localnet patch port and its ofport mapping", output)
+					continue
+				}
+				// we are only interested in the patch port on the gateway bridge side
+				patchPortName := strings.TrimSpace(parts[0])
+				ofPort := strings.TrimSpace(parts[1])
+				if strings.Contains(parts[0], "ovn_localnet_port-to") {
+					_, exists := gwBridge.localnetPatchPorts.LoadOrStore(patchPortName, ofPort)
+					if !exists {
+						klog.V(6).Infof("Added a new localnet patch port %s for OpenFlow management", patchPortName)
+						flowSyncRequired = true
+					}
+					curLclnetPortsMap[patchPortName] = true
+				}
+			}
+			// find any stale localnet ports in the sync.Map and prepare to delete them,
+			var staleLclnetPorts []string
+			gwBridge.localnetPatchPorts.Range(func(key, _ any) bool {
+				name := key.(string)
+				if _, ok := curLclnetPortsMap[name]; !ok {
+					staleLclnetPorts = append(staleLclnetPorts, name)
+				}
+				return true
+			})
+			for _, staleLclnetPort := range staleLclnetPorts {
+				klog.V(6).Infof("Removing stale localnet patch port %s from OpenFlow management", staleLclnetPort)
+				gwBridge.localnetPatchPorts.Delete(staleLclnetPort)
+			}
+			if flowSyncRequired || len(staleLclnetPorts) != 0 {
+				var lclnetFlows []string
+				protoPrefix := "ip"
+				if config.IPv6Mode {
+					protoPrefix = "ipv6"
+				}
+				gwBridge.localnetPatchPorts.Range(func(_, value any) bool {
+					ofPortPatch := value.(string)
+					lclnetFlows = append(lclnetFlows,
+						fmt.Sprintf("cookie=%s, priority=50, in_port=%s, dl_dst=%s, %s, "+
+							"actions=ct(zone=%d, nat, table=1)", localnetOpenFlowCookie, ofPortPatch,
+							gwBridge.macAddress.String(), protoPrefix, config.Default.ConntrackZone))
+					return true
+				})
+				klog.V(6).Infof("Applying %s OpenFlow rules for localnet patch ports", lclnetFlows)
+				gw.openflowManager.updateFlowCacheEntry("LOCALNET", lclnetFlows)
+				gw.openflowManager.requestFlowSync()
+			}
+		case <-gw.stopChan:
+			klog.Info("Stopping localnet port OpenFlow management routine")
+			return
+		}
+	}
+}
+
 func setBridgeOfPorts(bridge *bridgeConfiguration) error {
 	// Get ofport of patchPort
 	ofportPatch, stderr, err := util.GetOVSOfPort("get", "Interface", bridge.patchPort, "ofport")
@@ -1678,7 +1755,6 @@ func setBridgeOfPorts(bridge *bridgeConfiguration) error {
 	} else {
 		bridge.ofPortHost = ovsLocalPort
 	}
-
 	return nil
 }
 
@@ -1858,6 +1934,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 			return fmt.Errorf("failed to add MAC bindings for service routing: %v", err)
 		}
 
+		go manageOpenFlowsForLocalnetPorts(gw)
 		return nil
 	}
 	gw.watchFactory = watchFactory.(*factory.WatchFactory)
