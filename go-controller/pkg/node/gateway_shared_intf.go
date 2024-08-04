@@ -1472,8 +1472,9 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 			// table 0, packets coming from external. Send it through conntrack and
 			// resubmit to table 1 to know the state and mark of the connection.
 			dftFlows = append(dftFlows,
-				fmt.Sprintf("cookie=%s, priority=50, in_port=%s, ip, "+
-					"actions=ct(zone=%d, nat, table=1)", defaultOpenFlowCookie, ofPortPhys, config.Default.ConntrackZone))
+				fmt.Sprintf("cookie=%s, priority=50, in_port=%s, dl_dst=%s, ip, "+
+					"actions=ct(zone=%d, nat, table=1)", defaultOpenFlowCookie, ofPortPhys, bridgeMacAddress,
+					config.Default.ConntrackZone))
 		}
 	}
 	if config.IPv6Mode {
@@ -1533,8 +1534,9 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 			// table 0, packets coming from external. Send it through conntrack and
 			// resubmit to table 1 to know the state and mark of the connection.
 			dftFlows = append(dftFlows,
-				fmt.Sprintf("cookie=%s, priority=50, in_port=%s, ipv6, "+
-					"actions=ct(zone=%d, nat, table=1)", defaultOpenFlowCookie, ofPortPhys, config.Default.ConntrackZone))
+				fmt.Sprintf("cookie=%s, priority=50, in_port=%s, dl_dst=%s, ipv6, "+
+					"actions=ct(zone=%d, nat, table=1)", defaultOpenFlowCookie, ofPortPhys, bridgeMacAddress,
+					config.Default.ConntrackZone))
 		}
 	}
 	// Egress IP is often configured on a node different from the one hosting the affected pod.
