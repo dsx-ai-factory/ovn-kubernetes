@@ -376,7 +376,7 @@ func configureKubeOVNContext(nodeName string, useNetlink bool) *testCtx {
 		},
 	}
 
-	fakeBridgeConfiguration := &bridgeConfiguration{bridgeName: "breth0"}
+	fakeBridgeConfiguration := &bridgeConfiguration{bridgeName: "breth0", localnetPatchPorts: &sync.Map{}}
 
 	k := &kube.Kube{KClient: tc.fakeClient}
 	tc.ipManager, _ = newAddressManagerInternal(nodeName, k, fakeMgmtPortConfig, tc.watchFactory, fakeBridgeConfiguration, useNetlink)

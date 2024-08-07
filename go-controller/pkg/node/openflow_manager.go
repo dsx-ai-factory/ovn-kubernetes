@@ -24,11 +24,12 @@ type openflowManager struct {
 	extGWBridgeFlowID     string
 }
 
-func (bridge *bridgeConfiguration) getBridgeInfo() (string, string, string, string, string, string, string) {
+func (bridge *bridgeConfiguration) getBridgeInfo() (string, string, string, string, string, string, string, *sync.Map) {
 	bridge.Lock()
 	defer bridge.Unlock()
 	return bridge.patchPort, bridge.ofPortPatch,
-		bridge.uplinkName, bridge.ofPortPhys, bridge.hostRepName, bridge.ofPortHost, bridge.bridgeName
+		bridge.uplinkName, bridge.ofPortPhys, bridge.hostRepName, bridge.ofPortHost,
+		bridge.bridgeName, bridge.localnetPatchPorts
 }
 
 func (c *openflowManager) getDefaultBridgeName() string {
@@ -180,7 +181,8 @@ func (c *openflowManager) updateBridgeFlowCache(subnets []*net.IPNet, extraIPs [
 // This assumes ofPortPhys doesn't change, which we'll still consider as fatal.
 // For the N/S gateway we should not have a situation where the patch's OF port changes,
 // so will make this check specific to localnet ports.
-func checkPorts(patchIntf, ofPortPatch, physIntf, ofPortPhys, hostRepName, ofPortHost, bridgeName string) error {
+func checkPorts(patchIntf, ofPortPatch, physIntf, ofPortPhys, hostRepName, ofPortHost, bridgeName string,
+	localnetPatchPorts *sync.Map) error {
 	// it could be that the ovn-controller recreated the patch between the host OVS bridge and
 	// the integration bridge, as a result the ofport number changed for that patch interface
 	curOfportPatch, stderr, err := util.GetOVSOfPort("--if-exists", "get", "Interface", patchIntf, "ofport")
@@ -222,7 +224,23 @@ func checkPorts(patchIntf, ofPortPatch, physIntf, ofPortPhys, hostRepName, ofPor
 			os.Exit(1)
 		}
 	}
-	return nil
+	// walk through all the localnet patch ports, if any, and check if the ofport has changed
+	localnetPatchPorts.Range(func(key, value any) bool {
+		patchPortName := key.(string)
+		ofPortPatch := value.(string)
+		curOfportPatch, stderr, err := util.GetOVSOfPort("--if-exists", "get", "interface", patchPortName, "ofport")
+		if err != nil {
+			klog.Warningf("Could not check port %s for change in ofport, err: %v stderr: %q", patchPortName, err, stderr)
+			return true
+		}
+		if curOfportPatch != ofPortPatch {
+			klog.Errorf("Fatal error: patch port %s ofport changed from %s to %s",
+				patchPortName, ofPortPatch, curOfportPatch)
+			os.Exit(1)
+		}
+		return true
+	})
+	return err
 }
 
 // bootstrapOVSFlows handles ensuring basic, required flows are in place. This is done before OpenFlow manager has

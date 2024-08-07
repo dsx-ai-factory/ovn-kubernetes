@@ -432,16 +432,17 @@ func (g *gateway) addAllServices() []error {
 
 type bridgeConfiguration struct {
 	sync.Mutex
-	bridgeName  string
-	uplinkName  string
-	hostRepName string // empty in case of non-DPU mode
-	ips         []*net.IPNet
-	interfaceID string
-	macAddress  net.HardwareAddr
-	patchPort   string
-	ofPortPatch string
-	ofPortPhys  string
-	ofPortHost  string
+	bridgeName         string
+	uplinkName         string
+	hostRepName        string // empty in case of non-DPU mode
+	ips                []*net.IPNet
+	interfaceID        string
+	macAddress         net.HardwareAddr
+	patchPort          string
+	ofPortPatch        string
+	ofPortPhys         string
+	ofPortHost         string
+	localnetPatchPorts *sync.Map
 }
 
 // updateInterfaceIPAddresses sets and returns the bridge's current ips
@@ -475,7 +476,9 @@ func (b *bridgeConfiguration) updateInterfaceIPAddresses(node *kapi.Node) ([]*ne
 }
 
 func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []*net.IPNet) (*bridgeConfiguration, error) {
-	res := bridgeConfiguration{}
+	res := bridgeConfiguration{
+		localnetPatchPorts: &sync.Map{},
+	}
 	gwIntf := intfName
 
 	if bridgeName, _, err := util.RunOVSVsctl("port-to-br", intfName); err == nil {

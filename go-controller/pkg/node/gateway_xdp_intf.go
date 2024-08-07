@@ -3,6 +3,7 @@ package node
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -51,7 +52,9 @@ func (nc *SecondaryLocalnetNodeNetworkController) bridgeForXDPInterface() (*brid
 		return nil, errors.Wrapf(err, "failed to find uplink for %s", bridgeName)
 	}
 
-	res := bridgeConfiguration{}
+	res := bridgeConfiguration{
+		localnetPatchPorts: &sync.Map{},
+	}
 	res.bridgeName = bridgeName
 	res.uplinkName = uplinkName
 
