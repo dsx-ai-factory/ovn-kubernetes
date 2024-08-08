@@ -117,7 +117,6 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU(addFunc func(*kapi.Pod, stri
 	return bnnc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
-			klog.V(5).Infof("Add for Pod: %s/%s for network %s", pod.Namespace, pod.Name, netName)
 			if util.PodWantsHostNetwork(pod) {
 				return
 			}
@@ -135,11 +134,12 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU(addFunc func(*kapi.Pod, stri
 					klog.Errorf("Error getting network-attachment for pod %s/%s network %s: %v",
 						pod.Namespace, pod.Name, bnnc.GetNetworkName(), err)
 				} else {
-					klog.V(5).Infof("Skipping Pod %s/%s as it is not attached to network: %s",
+					klog.V(6).Infof("Skipping Pod %s/%s as it is not attached to network: %s",
 						pod.Namespace, pod.Name, netName)
 				}
 				return
 			}
+			klog.V(5).Infof("Add for Pod: %s/%s for network %s", pod.Namespace, pod.Name, netName)
 			for nadName := range networkMap {
 				nadToDPUCDMap[nadName] = &podNADInfo{}
 			}
@@ -163,16 +163,19 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU(addFunc func(*kapi.Pod, stri
 		UpdateFunc: func(old, newer interface{}) {
 			oldPod := old.(*kapi.Pod)
 			newPod := newer.(*kapi.Pod)
+			if util.PodWantsHostNetwork(newPod) {
+				return
+			}
 			// lock pod to avoid racing on `servedCache`
 			unlock := util.LockByKey.Acquire(string(oldPod.UID))
 			defer unlock()
-			klog.V(5).Infof("Update for Pod: %s/%s for network %s", newPod.Namespace, newPod.Name, netName)
 			v, ok := bnnc.podNADToDPUCDMap.Load(newPod.UID)
 			if !ok {
 				klog.V(6).Infof("Skipping update for Pod %s/%s as it is not attached to network: %s",
 					newPod.Namespace, newPod.Name, netName)
 				return
 			}
+			klog.V(5).Infof("Update for Pod: %s/%s for network %s", newPod.Namespace, newPod.Name, netName)
 			nadToDPUCDMap := v.(map[string]*podNADInfo)
 			for nadName, info := range nadToDPUCDMap {
 				oldDPUCD := info.dpuCD
@@ -221,7 +224,7 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU(addFunc func(*kapi.Pod, stri
 			defer unlock()
 			v, ok := bnnc.podNADToDPUCDMap.Load(pod.UID)
 			if !ok {
-				klog.V(5).Infof("Skipping delete for Pod %s/%s as it is not attached to network: %s",
+				klog.V(6).Infof("Skipping delete for Pod %s/%s as it is not attached to network: %s",
 					pod.Namespace, pod.Name, netName)
 				return
 			}

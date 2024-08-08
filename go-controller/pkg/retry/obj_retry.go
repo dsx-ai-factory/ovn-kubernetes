@@ -557,7 +557,9 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 				}
 				if r.ResourceHandler.ObjType == factory.PodType ||
 					r.ResourceHandler.ObjType == factory.NodeType ||
-					r.ResourceHandler.ObjType == factory.LocalPodSelectorType {
+					r.ResourceHandler.ObjType == factory.LocalPodSelectorType ||
+					r.ResourceHandler.ObjType == factory.EndpointSliceForGatewayType ||
+					r.ResourceHandler.ObjType == factory.EndpointSliceForStaleConntrackRemovalType {
 					klog.V(6).Infof("Update event received for resource %s, new object is different from old",
 						r.ResourceHandler.ObjType)
 				} else {
@@ -612,7 +614,9 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 				}
 				if r.ResourceHandler.ObjType == factory.PodType ||
 					r.ResourceHandler.ObjType == factory.NodeType ||
-					r.ResourceHandler.ObjType == factory.LocalPodSelectorType {
+					r.ResourceHandler.ObjType == factory.LocalPodSelectorType ||
+					r.ResourceHandler.ObjType == factory.EndpointSliceForGatewayType ||
+					r.ResourceHandler.ObjType == factory.EndpointSliceForStaleConntrackRemovalType {
 					klog.V(6).Infof("Update event received for %s %s", r.ResourceHandler.ObjType, newKey)
 				} else {
 					klog.V(5).Infof("Update event received for %s %s", r.ResourceHandler.ObjType, newKey)
