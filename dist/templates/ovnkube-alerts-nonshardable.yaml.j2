@@ -12,7 +12,7 @@ spec:
   - name: general.rules
     rules:
     - alert: OvnKubeNoRunningManager
-      expr: absent(up{job="ovnkube-master", namespace="ovn-kubernetes"} == 1)
+      expr: absent(up{job="ovnkube-master", namespace="ovn-kubernetes"} == 1) and sum(up{job=~"prometheus-k8s-shard-.+"}) == 2
       for: 6m
       labels:
        severity: critical
@@ -195,7 +195,7 @@ spec:
        message: There is no running ovn-sbdb leader
 
     - alert: OvnNorthdNotActive
-      expr: max(ovn_northd_status) == 0
+      expr: max(ovn_northd_status) == 0 and sum(up{job=~"prometheus-k8s-shard-.+"}) == 2
       for: 6m
       labels:
        severity: critical
