@@ -414,13 +414,36 @@ ovsdb_ensure_schema() {
   fi
 }
 
-# v3 - create nb_ovsdb/sb_ovsdb cluster in a separate container
+upgrade_annotation_is_expected() {
+  expected_anno=${1}
+  anno=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+    get statefulset -n ${ovn_kubernetes_namespace} ${sts_name} -o=jsonpath='{.metadata.annotations.k8s\.ovn\.org/ovsdb-server-upgrade}')
+  if [[ ${anno} == ${expected_anno} ]]; then
+    return 0
+  fi
+  return 1
+}
+
+upgrade_annotation_all_pods_are_done() {
+  for ((i = 0; i < ${replicas}; i++)); do
+    anno=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+      get statefulset -n ${ovn_kubernetes_namespace} ${sts_name} -o=jsonpath="{.metadata.annotations.k8s\.ovn\.org/ovsdb-server-upgrade-${sts_name}-${i}}")
+    if [[ ${anno} != "done" ]]; then
+      return 1
+    fi
+  done
+  return 0
+}
+
+# v1.0.0 - create nb_ovsdb/sb_ovsdb cluster in a separate container
 ovsdb-raft() {
   local db=${1}
   local port=${2}
   local raft_port=${3}
   local election_timer=${4}
   local initialize="false"
+  local upgrade_annotation=""
+  local upgrade_argument=""
 
   ovn_db_pidfile=${OVN_RUNDIR}/ovn${db}_db.pid
   eval ovn_loglevel_db=\$ovn_loglevel_${db}
@@ -437,7 +460,24 @@ ovsdb-raft() {
 
   if [[ ! -e ${ovn_db_file} ]] || ovsdb-tool db-is-standalone ${ovn_db_file}; then
     initialize="true"
+    # fresh new cluster, set annotation k8s.ovn.org/ovsdb-server-upgrade=done
+    kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+      annotate statefulset -n ${ovn_kubernetes_namespace} ${sts_name} "k8s.ovn.org/ovsdb-server-upgrade"="done" --overwrite
+    if [[ $? != 0 ]]; then
+      echo "Failed to annotate k8s.ovn.org/ovsdb-server-upgrade=done"
+      exit 1
+    fi
+    upgrade_annotation="done"
+  else
+    # upgrade is only needed when there was already ovsdb raft cluster exists
+    upgrade_annotation=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+      get statefulset -n ${ovn_kubernetes_namespace} ${sts_name} -o=jsonpath='{.metadata.annotations.k8s\.ovn\.org/ovsdb-server-upgrade}')
+    if [[ $? != 0 ]]; then
+      echo "Failed to find out if upgrade if needed"
+      exit 1
+    fi
   fi
+  echo "ovsdb-server-upgrade annotation is currently ${upgrade_annotation}"
 
   local db_ssl_opts=""
   if [[ ${db} == "nb" ]]; then
@@ -523,6 +563,10 @@ ovsdb-raft() {
     #  a) we can't reliably know who the raft leader is
     #  b) we don't need to pass that information since it's already
     #     in the db
+    if [[ ${upgrade_annotation} == "" ]]; then
+      upgrade_argument="-- --disable-file-no-data-conversion"
+      echo "run ovsdb-server with extra argument ${upgrade_argument}"
+    fi
     run_as_ovs_user_if_needed nice -n ${sched_priority} \
     ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
     --db-${db}-cluster-local-addr=[${ovn_db_host}] \
@@ -530,7 +574,8 @@ ovsdb-raft() {
     --db-${db}-cluster-local-proto=${transport} \
     ${db_ssl_opts} \
     --ovn-${db}-log="${ovn_loglevel_db}" \
-    --db-cluster-schema-upgrade="${OVN_DB_UPGRADE_SCHEMA_INLINE}" &
+    --db-cluster-schema-upgrade="${OVN_DB_UPGRADE_SCHEMA_INLINE}" \
+    ${upgrade_argument} &
   fi
 
 
@@ -595,6 +640,74 @@ ovsdb-raft() {
 
   tail --follow=name ${OVN_LOGDIR}/ovsdb-server-${db}.log &
   ovn_tail_pid=$!
+
+  if [[ ${upgrade_annotation} == "" ]]; then
+    if [[ "${POD_NAME}" == ${sts_name}"-0" ]]; then
+      echo "update ovsdb-server-upgrade annotation to ready"
+      # during rolling upgrade, when the last pod ${sts_name}"-0" is upgraded, update ovsdb-server-upgrade to be ready
+      kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+        annotate statefulset -n ${ovn_kubernetes_namespace} ${sts_name} "k8s.ovn.org/ovsdb-server-upgrade"="ready" --overwrite
+      if [[ $? != 0 ]]; then
+        echo "Failed to annotate ovsdb-server-upgrade=ready"
+        exit 1
+      fi
+    else
+      echo "wait for ovsdb-server-upgrade annotation to be set to ready by ${sts_name}-0"
+      # other pods, wait for ${sts_name}"-0" pod to set ovsdb-server-upgrade=ready
+      wait_for_event upgrade_annotation_is_expected "ready"
+    fi
+    upgrade_annotation="ready"
+  fi
+  if [[ ${upgrade_annotation} == "ready" ]]; then
+    echo "ovsdb-server-upgrade annotation is now ready"
+    local upgrade_pod_annotation=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+      get statefulset -n ${ovn_kubernetes_namespace} ${sts_name} -o=jsonpath="{.metadata.annotations.k8s\.ovn\.org/ovsdb-server-upgrade-${POD_NAME}}")
+    if [[ $? != 0 ]]; then
+      echo "Failed to find out if upgrade if needed"
+      exit 1
+    fi
+    if [[ ${upgrade_pod_annotation} != "done" ]]; then
+      # if $upgrade_argument is empty, it means this pod restarted after it tried upgrade with --disable-file-no-data-conversion, directly set
+      # its k8s.ovn.org/ovsdb-server-upgrade-${POD_NAME} annotation to done to indicate its own upgrade is done
+      if [[ ${upgrade_argument} != "" ]]; then
+          echo "run ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl ovsdb/file/no-data-conversion-enable command"
+          ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl ovsdb/file/no-data-conversion-enable 2>&1
+          if [[ $? != 0 ]]; then
+            echo "Failed to run no-data-conversion-enable command"
+            exit 1
+          fi
+      fi
+      echo "update ovsdb-server-upgrade-${POD_NAME} annotation to done"
+      kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+        annotate statefulset -n ${ovn_kubernetes_namespace} ${sts_name} "k8s.ovn.org/ovsdb-server-upgrade-${POD_NAME}"="done" --overwrite
+      if [[ $? != 0 ]]; then
+        echo "Failed to annotate k8s.ovn.org/ovsdb-server-upgrade-${POD_NAME}=done"
+        exit 1
+      fi
+    fi
+
+    if [[ "${POD_NAME}" == ${sts_name}"-0" ]]; then
+      echo "wait_for all ovsdb-server-upgrade-${sts_name}-n annotation to be done"
+      # when all pods set k8s.ovn.org/ovsdb-server-upgrade-${POD_NAME}=done, upgrade completed, set k8s.ovn.org/ovsdb-server-upgrade=done
+      wait_for_event attempts=30 upgrade_annotation_all_pods_are_done
+      kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+        annotate statefulset -n ${ovn_kubernetes_namespace} ${sts_name} "k8s.ovn.org/ovsdb-server-upgrade"="done" --overwrite
+      if [[ $? != 0 ]]; then
+        echo "Failed to annotate ovsdb-server-upgrade=done"
+        exit 1
+      fi
+      # remove all k8s.ovn.org/ovsdb-server-upgrade-${POD_NAME} annotation, it is ok to fail here.
+      for ((i = 0; i < ${replicas}; i++)); do
+        kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+          annotate statefulset -n ${ovn_kubernetes_namespace} ${sts_name} "k8s.ovn.org/ovsdb-server-upgrade-${sts_name}-${i}"-
+      done
+    else
+      echo "wait for ovsdb-server-upgrade annotation to be set to done by ${sts_name}-0"
+      # other pods, wait for ${sts_name}"-0" pod to set ovsdb-server-upgrade=done
+      wait_for_event upgrade_annotation_is_expected "done"
+    fi
+    echo "ovsdb upgrade completed"
+  fi
 
   # ensure ovsdb schema match
   echo "=============== ensure ${db}_ovsdb-raft schema match =========="
