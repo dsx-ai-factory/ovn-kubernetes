@@ -228,9 +228,9 @@ spec:
         scalar(sum(kube_node_info) - sum(kube_node_info{node=~".*-dpu.*|liqo-.*"} OR on() vector(0)))
       for: 10m
       labels:
-       severity: major
+       severity: minor
        pduuid: P10A23N
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/PHqwgBHMz/k8s-control-panel-kube-manager
       annotations:
        message: |
-         ovnkubeMaster allocated IPv4 host subnets value for {{ $labels.network_name }} network should be same as the number of K8s nodes excluding the DPU nodes
+         ovnkube clustermanager allocated IPv4 host subnets value {{ $value }} for {{ $labels.network_name }} network should be same as the number of K8s nodes excluding the DPU nodes and liqo nodes
