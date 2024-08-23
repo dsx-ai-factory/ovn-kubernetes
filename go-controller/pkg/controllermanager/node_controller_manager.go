@@ -113,6 +113,7 @@ func NewNodeControllerManager(ovnClient *util.OVNClientset, wf factory.NodeWatch
 		ovnNodeClient: &util.OVNNodeClientset{
 			KubeClient:             ovnClient.KubeClient,
 			AdminPolicyRouteClient: ovnClient.AdminPolicyRouteClient,
+			NetworkProbeClient:     ovnClient.NetworkProbeClient,
 			PortMirrorClient:       ovnClient.PortMirrorClient,
 		},
 		Kube:         &kube.Kube{KClient: ovnClient.KubeClient},

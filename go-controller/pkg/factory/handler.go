@@ -28,6 +28,7 @@ import (
 	egressqoslister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
 	egressservicelister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/listers/egressservice/v1"
 	ipreservationlister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/listers/ipreservation/v1beta1"
+	networkprobelister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1/apis/listers/networkprobe/v1beta1"
 	portmirrorlister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/listers/portmirror/v1beta1"
 	userdefinednetworklister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/listers/userdefinednetwork/v1"
 	virtualiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/listers/virtualip/v1beta1"
@@ -480,6 +481,10 @@ func newInformerLister(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		return listers.NewNamespaceLister(sharedInformer.GetIndexer()), nil
 	case NodeType:
 		return listers.NewNodeLister(sharedInformer.GetIndexer()), nil
+	case ConfigMapType:
+		return listers.NewConfigMapLister(sharedInformer.GetIndexer()), nil
+	case SecretType:
+		return listers.NewSecretLister(sharedInformer.GetIndexer()), nil
 	case PolicyType:
 		return netlisters.NewNetworkPolicyLister(sharedInformer.GetIndexer()), nil
 	case EgressFirewallType:
@@ -508,6 +513,8 @@ func newInformerLister(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		return egressservicelister.NewEgressServiceLister(sharedInformer.GetIndexer()), nil
 	case IPReservationType:
 		return ipreservationlister.NewIPReservationLister(sharedInformer.GetIndexer()), nil
+	case NetworkProbeType:
+		return networkprobelister.NewNetworkProbeLister(sharedInformer.GetIndexer()), nil
 	case PortMirrorType:
 		return portmirrorlister.NewPortMirrorLister(sharedInformer.GetIndexer()), nil
 	case IPAMClaimsType:

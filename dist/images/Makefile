@@ -108,6 +108,9 @@ ubuntu-image-multi-arch:
 daemonsetyaml:
 	./daemonset.sh
 
+networkprobe-target: bld
+	${OCI_BIN} build -t ovnkube-networkprobe-target -f Dockerfile.networkprobe-target .
+
 .PHONY: ../../go-controller/_output/go/bin/ovnkube
 
 ../../go-controller/_output/go/bin/ovnkube:

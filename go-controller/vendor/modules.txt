@@ -286,8 +286,8 @@ github.com/metallb/frr-k8s/pkg/client/informers/externalversions/api
 github.com/metallb/frr-k8s/pkg/client/informers/externalversions/api/v1beta1
 github.com/metallb/frr-k8s/pkg/client/informers/externalversions/internalinterfaces
 github.com/metallb/frr-k8s/pkg/client/listers/api/v1beta1
-# github.com/miekg/dns v1.1.31
-## explicit; go 1.12
+# github.com/miekg/dns v1.1.57
+## explicit; go 1.19
 github.com/miekg/dns
 # github.com/mitchellh/copystructure v1.2.0
 ## explicit; go 1.15
@@ -416,6 +416,9 @@ github.com/prometheus/client_golang/prometheus
 github.com/prometheus/client_golang/prometheus/collectors
 github.com/prometheus/client_golang/prometheus/internal
 github.com/prometheus/client_golang/prometheus/promhttp
+github.com/prometheus/client_golang/prometheus/testutil
+github.com/prometheus/client_golang/prometheus/testutil/promlint
+github.com/prometheus/client_golang/prometheus/testutil/promlint/validations
 # github.com/prometheus/client_model v0.6.1
 ## explicit; go 1.19
 github.com/prometheus/client_model/go
@@ -480,7 +483,6 @@ go.opencensus.io/trace/tracestate
 ## explicit; go 1.18
 golang.org/x/crypto/cryptobyte
 golang.org/x/crypto/cryptobyte/asn1
-golang.org/x/crypto/ed25519
 # golang.org/x/exp v0.0.0-20240613232115-7f521ea00fb8
 ## explicit; go 1.20
 golang.org/x/exp/constraints

@@ -89,6 +89,9 @@ import (
 	ipreservationinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/informers/externalversions"
 	ipresvinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/informers/externalversions/ipreservation/v1beta1"
 	ipreservationlister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/listers/ipreservation/v1beta1"
+	networkprobeapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1"
+	networkprobeinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1/apis/informers/externalversions"
+	networkprobeinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1/apis/informers/externalversions/networkprobe/v1beta1"
 	portmirrorapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
 	portmirrorinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/informers/externalversions"
 	portmirrorlister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/listers/portmirror/v1beta1"
@@ -130,6 +133,7 @@ type WatchFactory struct {
 	adminPBRFactory      adminpbrinformerfactory.SharedInformerFactory
 	vipFactory           virtualipinformerfactory.SharedInformerFactory
 	ipresvFactory        ipreservationinformerfactory.SharedInformerFactory
+	networkprobeFactory  networkprobeinformerfactory.SharedInformerFactory
 	apbRouteFactory      adminbasedpolicyinformerfactory.SharedInformerFactory
 	portMirrorFactory    portmirrorinformerfactory.SharedInformerFactory
 	ipamClaimsFactory    ipamclaimsfactory.SharedInformerFactory
@@ -243,6 +247,8 @@ var (
 	PolicyType                            reflect.Type = reflect.TypeOf(&knet.NetworkPolicy{})
 	NamespaceType                         reflect.Type = reflect.TypeOf(&corev1.Namespace{})
 	NodeType                              reflect.Type = reflect.TypeOf(&corev1.Node{})
+	ConfigMapType                         reflect.Type = reflect.TypeOf(&corev1.ConfigMap{})
+	SecretType                            reflect.Type = reflect.TypeOf(&corev1.Secret{})
 	EgressFirewallType                    reflect.Type = reflect.TypeOf(&egressfirewallapi.EgressFirewall{})
 	EgressIPType                          reflect.Type = reflect.TypeOf(&egressipapi.EgressIP{})
 	EgressIPNamespaceType                 reflect.Type = reflect.TypeOf(&egressIPNamespace{})
@@ -262,6 +268,7 @@ var (
 	NetworkAttachmentDefinitionType       reflect.Type = reflect.TypeOf(&nadapi.NetworkAttachmentDefinition{})
 	MultiNetworkPolicyType                reflect.Type = reflect.TypeOf(&mnpapi.MultiNetworkPolicy{})
 	IPReservationType                     reflect.Type = reflect.TypeOf(&ipreservationapi.IPReservation{})
+	NetworkProbeType                      reflect.Type = reflect.TypeOf(&networkprobeapi.NetworkProbe{})
 	PortMirrorType                        reflect.Type = reflect.TypeOf(&portmirrorapi.PortMirror{})
 	IPAMClaimsType                        reflect.Type = reflect.TypeOf(&ipamclaimsapi.IPAMClaim{})
 	UserDefinedNetworkType                reflect.Type = reflect.TypeOf(&userdefinednetworkapi.UserDefinedNetwork{})
@@ -682,6 +689,15 @@ func (wf *WatchFactory) Start() error {
 		}
 	}
 
+	if config.OVNKubernetesFeature.EnableNetworkProbe && wf.networkprobeFactory != nil {
+		wf.networkprobeFactory.Start(wf.stopChan)
+		for oType, synced := range wf.networkprobeFactory.WaitForCacheSync(wf.stopChan) {
+			if !synced {
+				return fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
+		}
+	}
+
 	if util.IsMultiNetworkPoliciesSupportEnabled() && wf.mnpFactory != nil {
 		wf.mnpFactory.Start(wf.stopChan)
 		for oType, synced := range waitForCacheSyncWithTimeout(wf.mnpFactory, wf.stopChan) {
@@ -1033,6 +1049,55 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeNames []string
 		}
 	}
 
+	if config.OVNKubernetesFeature.EnableNetworkProbe && config.OvnKubeNode.Mode != types.NodeModeDPU {
+		wf.networkprobeFactory = networkprobeinformerfactory.NewSharedInformerFactoryWithOptions(
+			ovnClientset.NetworkProbeClient,
+			resyncInterval,
+			networkprobeinformerfactory.WithNamespace(config.Kubernetes.OVNConfigNamespace))
+
+		if err := networkprobeapi.AddToScheme(scheme.Scheme); err != nil {
+			return nil, err
+		}
+		wf.informers[NetworkProbeType], err = newQueuedInformer(NetworkProbeType,
+			wf.networkprobeFactory.K8s().V1beta1().NetworkProbes().Informer(),
+			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
+		if err != nil {
+			return nil, err
+		}
+
+		// currently, we need this only for network probe feature
+		// watch configmaps only in ovn-kubernetes namespace
+		wf.iFactory.InformerFor(&corev1.ConfigMap{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+			return v1coreinformers.NewConfigMapInformer(
+				c,
+				config.Kubernetes.OVNConfigNamespace,
+				resyncPeriod,
+				cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
+		})
+		wf.informers[ConfigMapType], err = newQueuedInformer(ConfigMapType,
+			wf.iFactory.Core().V1().ConfigMaps().Informer(),
+			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
+		if err != nil {
+			return nil, err
+		}
+
+		// watch secrets only in ovn-kubernetes namespace
+		wf.iFactory.InformerFor(&corev1.Secret{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+			return v1coreinformers.NewSecretInformer(
+				c,
+				config.Kubernetes.OVNConfigNamespace,
+				resyncPeriod,
+				cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
+		})
+
+		wf.informers[SecretType], err = newQueuedInformer(SecretType,
+			wf.iFactory.Core().V1().Secrets().Informer(),
+			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return wf, nil
 }
 
@@ -1292,6 +1357,14 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 		if node, ok := obj.(*corev1.Node); ok {
 			return &node.ObjectMeta, nil
 		}
+	case ConfigMapType:
+		if configMap, ok := obj.(*corev1.ConfigMap); ok {
+			return &configMap.ObjectMeta, nil
+		}
+	case SecretType:
+		if secret, ok := obj.(*corev1.Secret); ok {
+			return &secret.ObjectMeta, nil
+		}
 	case EgressFirewallType:
 		if egressFirewall, ok := obj.(*egressfirewallapi.EgressFirewall); ok {
 			return &egressFirewall.ObjectMeta, nil
@@ -1360,6 +1433,10 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 		if portMirrow, ok := obj.(*portmirrorapi.PortMirror); ok {
 			return &portMirrow.ObjectMeta, nil
 		}
+	case NetworkProbeType:
+		if networkProbe, ok := obj.(*networkprobeapi.NetworkProbe); ok {
+			return &networkProbe.ObjectMeta, nil
+		}
 	}
 
 	return nil, fmt.Errorf("cannot get ObjectMeta from type %v", objType)
@@ -1399,6 +1476,8 @@ func (wf *WatchFactory) GetHandlerPriority(objType reflect.Type) (priority int) 
 	case PortMirrorType:
 		return 1
 	case IPReservationType:
+		return 1
+	case NetworkProbeType:
 		return 1
 	default:
 		return defaultHandlerPriority
@@ -2065,6 +2144,14 @@ func (wf *WatchFactory) EndpointSliceCoreInformer() discoveryinformers.EndpointS
 	return wf.iFactory.Discovery().V1().EndpointSlices()
 }
 
+func (wf *WatchFactory) ConfigMapCoreInformer() v1coreinformers.ConfigMapInformer {
+	return wf.iFactory.Core().V1().ConfigMaps()
+}
+
+func (wf *WatchFactory) SecretCoreInformer() v1coreinformers.SecretInformer {
+	return wf.iFactory.Core().V1().Secrets()
+}
+
 func (wf *WatchFactory) EgressQoSInformer() egressqosinformer.EgressQoSInformer {
 	return wf.egressQoSFactory.K8s().V1().EgressQoSes()
 }
@@ -2075,6 +2162,10 @@ func (wf *WatchFactory) EgressServiceInformer() egressserviceinformer.EgressServ
 
 func (wf *WatchFactory) APBRouteInformer() adminpolicybasedrouteinformer.AdminPolicyBasedExternalRouteInformer {
 	return wf.apbRouteFactory.K8s().V1().AdminPolicyBasedExternalRoutes()
+}
+
+func (wf *WatchFactory) NetworkProbeInformer() networkprobeinformer.NetworkProbeInformer {
+	return wf.networkprobeFactory.K8s().V1beta1().NetworkProbes()
 }
 
 func (wf *WatchFactory) ANPInformer() anpinformer.AdminNetworkPolicyInformer {

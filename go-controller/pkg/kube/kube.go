@@ -33,6 +33,7 @@ import (
 	egressserviceclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned"
 	ipreservationv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
 	ipreservationclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/clientset/versioned"
+	networkprobeclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1/apis/clientset/versioned"
 	portmirrorv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
 	portmirrorclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned"
 	virtualipv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
@@ -107,6 +108,7 @@ type KubeOVN struct {
 	AdminPBRClient       adminpbrclientset.Interface
 	VIPClient            virtualipclientset.Interface
 	IPReservationClient  ipreservationclientset.Interface
+	NetworkProbeClient   networkprobeclientset.Interface
 	APBRouteClient       adminpolicybasedrouteclientset.Interface
 	PortMirrorClient     portmirrorclientset.Interface
 }

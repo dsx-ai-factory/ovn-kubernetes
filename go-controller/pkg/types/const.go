@@ -275,7 +275,8 @@ const (
 	// may be refreshed with a new ARP request.
 	GRMACBindingAgeThreshold = "0"
 
-	AdminPBRResyncInterval   = 30 * time.Second
+	AdminPBRResyncInterval = 30 * time.Second
+
 	CacheIndexPodByIP        = "index-pod-by-ip"
 	CacheIndexPodByNodeIP    = "index-pod-by-node-ip"
 	CacheIndexPodByNodeName  = "index-pod-by-node-name"

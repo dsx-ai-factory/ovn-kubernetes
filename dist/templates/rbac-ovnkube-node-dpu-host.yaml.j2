@@ -71,6 +71,7 @@ rules:
     - egressservices
     - adminpolicybasedexternalroutes
   verbs: ["get", "list", "watch"]
+  verbs: ["update"]
 - apiGroups: [""]
   resources:
       - nodes/status
@@ -93,9 +94,18 @@ rules:
   - apiGroups: [""]
     resources:
       - configmaps
+      - secrets
     verbs: ["get", "list", "watch"]
   # moved from only-ovnk8s-endpoints RoleBinding
   - apiGroups: [""]
     resources:
       - endpoints
     verbs: ["get"]
+  - apiGroups: ["k8s.ovn.org"]
+    resources:
+      - networkprobes
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["k8s.ovn.org"]
+    resources:
+      - networkprobes/status
+    verbs: ["update"]

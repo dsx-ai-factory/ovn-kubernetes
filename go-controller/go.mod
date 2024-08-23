@@ -30,7 +30,7 @@ require (
 	github.com/mdlayher/arp v0.0.0-20220512170110-6706a2966875
 	github.com/mdlayher/ndp v1.0.1
 	github.com/metallb/frr-k8s v0.0.15
-	github.com/miekg/dns v1.1.31
+	github.com/miekg/dns v1.1.57
 	github.com/mitchellh/copystructure v1.2.0
 	github.com/moby/sys/userns v0.1.0
 	github.com/onsi/ginkgo/v2 v2.19.0

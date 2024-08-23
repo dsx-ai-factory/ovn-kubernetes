@@ -44,6 +44,11 @@ const (
 	MetricOvsNamespace                   = "ovs"
 	MetricOvsSubsystemVswitchd           = "vswitchd"
 	MetricOvsSubsystemOvsDB              = "ovsdb"
+	MetricProbeNamespace                 = "network_probe"
+	MetricDNSSubsystem                   = "dns"
+	MetricHttpSubsystem                  = "http"
+	MetricTCPSubsystem                   = "tcp"
+	MetricUDPSubsystem                   = "udp"
 
 	ovnNorthd     = "ovn-northd"
 	ovnController = "ovn-controller"

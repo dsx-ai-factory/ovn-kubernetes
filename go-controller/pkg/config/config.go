@@ -469,6 +469,7 @@ type OVNKubernetesFeatureConfig struct {
 	EnableAdminPolicyBasedRouting bool `gcfg:"enable-admin-pbr"`
 	EnableVirtualIP               bool `gcfg:"enable-virtual-ip"`
 	EnableIPReservation           bool `gcfg:"enable-ip-reservation"`
+	EnableNetworkProbe            bool `gcfg:"enable-network-probe"`
 	EnablePortMirror              bool `gcfg:"enable-port-mirror"`
 }
 
@@ -1212,6 +1213,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use EgressService CRD feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableEgressService,
 		Value:       OVNKubernetesFeature.EnableEgressService,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-network-probe",
+		Usage:       "Configure to use NetworkProbe CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableNetworkProbe,
+		Value:       OVNKubernetesFeature.EnableNetworkProbe,
 	},
 	&cli.BoolFlag{
 		Name:        "enable-multi-external-gateway",

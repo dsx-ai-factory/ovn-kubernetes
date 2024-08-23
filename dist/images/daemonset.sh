@@ -72,6 +72,7 @@ OVN_EGRESSIP_REACHABILITY_TIMEOUT=
 OVN_EGRESSFIREWALL_ENABLE="true"
 OVN_EGRESSQOS_ENABLE="false"
 OVN_EGRESSSERVICE_ENABLE="false"
+OVN_NETWORKPROBE_ENABLE="true"
 OVN_DISABLE_OVN_IFACE_ID_VER="true"
 OVN_MULTI_NETWORK_ENABLE="true"
 OVN_ADMIN_PBR_ENABLE="true"
@@ -336,6 +337,9 @@ while [ "$1" != "" ]; do
   --ip-reservation-enable)
     OVN_IPRESERVATION_ENABLE=$VALUE
     ;;
+  --network-probe-enable)
+    OVN_NETWORKPROBE_ENABLE=$VALUE
+    ;;
   --port-mirror-enable)
     OVN_PORT_MIRROR_ENABLE=$VALUE
     ;;
@@ -586,6 +590,8 @@ ovn_virtual_ip_enable=${OVN_VIRTUALIP_ENABLE}
 echo "ovn_virtual_ip_enable: ${ovn_virtual_ip_enable}"
 ovn_ipreservation_enable=${OVN_IPRESERVATION_ENABLE}
 echo "ovn_ipreservation_enable: ${ovn_ipreservation_enable}"
+ovn_networkprobe_enable=${OVN_NETWORKPROBE_ENABLE}
+echo "ovn_networkprobe_enable: ${ovn_networkprobe_enable}"
 ovn_port_mirror_enable=${OVN_PORT_MIRROR_ENABLE}
 echo "ovn_port_mirror_enable: ${ovn_port_mirror_enable}"
 ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER}
@@ -904,6 +910,7 @@ ovn_image=${image} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   ovnkube_disable_firewalld=${ovnkube_disable_firewalld} \
   ovnkube_admin_firewalld_zone=${ovnkube_admin_firewalld_zone} \
+  ovn_networkprobe_enable=${ovn_networkprobe_enable} \
   ovnkube_app_name=ovnkube-node-dpu-host \
   jinjanate ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node-dpu-host.yaml
 
@@ -1140,6 +1147,7 @@ ovn_image=${image} \
   ovnkube_disable_firewalld=${ovnkube_disable_firewalld} \
   ovnkube_admin_firewalld_zone=${ovnkube_admin_firewalld_zone} \
   ovn_observ_enable=${ovn_observ_enable} \
+  ovn_networkprobe_enable=${ovn_networkprobe_enable} \
   ovnkube_app_name=ovnkube-node \
   jinjanate ../templates/ovnk8s-node.yaml.j2 -o ${output_dir}/ovnk8s-node.yaml
 
@@ -1185,6 +1193,7 @@ ovn_image=${image} \
   ovn_northd_node_selector_label=${ovn_northd_node_selector_label} \
   ovnkube_disable_firewalld=${ovnkube_disable_firewalld} \
   ovnkube_admin_firewalld_zone=${ovnkube_admin_firewalld_zone} \
+  ovn_networkprobe_enable=${ovn_networkprobe_enable} \
   ovnkube_app_name=ovnkube-node-dpu-host \
   jinjanate ../templates/ovnk8s-node.yaml.j2 -o ${output_dir}/ovnk8s-node-dpu-host.yaml
 
@@ -1513,6 +1522,7 @@ cp ../templates/multinetworkpolicy.yaml.j2  ${output_dir}/multinetworkpolicy.yam
 cp ../templates/k8s.ovn.org_egressqoses.yaml.j2 ${output_dir}/k8s.ovn.org_egressqoses.yaml
 cp ../templates/k8s.ovn.org_egressservices.yaml.j2 ${output_dir}/k8s.ovn.org_egressservices.yaml
 cp ../templates/k8s.ovn.org_ipreservations.yaml.j2 ${output_dir}/k8s.ovn.org_ipreservations.yaml
+cp ../templates/k8s.ovn.org_networkprobes.yaml.j2 ${output_dir}/k8s.ovn.org_networkprobes.yaml
 cp ../templates/k8s.ovn.org_adminpolicybasedexternalroutes.yaml.j2 ${output_dir}/k8s.ovn.org_adminpolicybasedexternalroutes.yaml
 cp ../templates/k8s.ovn.org_userdefinednetworks.yaml.j2 ${output_dir}/k8s.ovn.org_userdefinednetworks.yaml
 cp ../templates/k8s.ovn.org_clusteruserdefinednetworks.yaml.j2 ${output_dir}/k8s.ovn.org_clusteruserdefinednetworks.yaml
