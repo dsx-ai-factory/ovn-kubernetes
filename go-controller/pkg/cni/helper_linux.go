@@ -704,7 +704,10 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 	if !pr.IsVFIO {
 		netns, err := ns.GetNS(pr.Netns)
 		if err != nil {
-			return fmt.Errorf("failed to get container namespace %s: %v", podDesc, err)
+			// According to CNI Specification, DEL command should be completed without error
+			// even if netns is missing.
+			klog.V(5).Infof("Netns doesn't exist for %s: %v", podDesc, err)
+			return nil
 		}
 		defer netns.Close()
 
