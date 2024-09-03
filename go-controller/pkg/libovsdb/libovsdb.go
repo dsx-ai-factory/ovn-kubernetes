@@ -173,7 +173,8 @@ func NewSBClientWithConfig(cfg config.OvnAuthConfig, promRegistry prometheus.Reg
 		// and by CreateDummyGWMacBindings(), error "error getting datapath GR_<node>"
 		// client.WithTable(&sbdb.DatapathBinding{}),
 	}
-	if forTesting {
+	// Both zone interconnect and testing also need to monitor the encap and port binding tables
+	if forTesting || config.OVNKubernetesFeature.EnableInterconnect {
 		// used by zone interconnect
 		monitorOptionTable = append(monitorOptionTable, client.WithTable(&sbdb.Encap{}))
 		// used for metrics/zone interconnect

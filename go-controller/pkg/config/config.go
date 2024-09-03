@@ -395,6 +395,8 @@ type KubernetesConfig struct {
 
 	// CompatMetricsBindAddress is overridden by the corresponding option in MetricsConfig
 	CompatMetricsBindAddress string `gcfg:"metrics-bind-address"`
+	// CompatOVNMetricsBindAddress is overridden by the corresponding option in MetricsConfig
+	CompatOVNMetricsBindAddress string `gcfg:"ovn-metrics-bind-address"`
 	// CompatMetricsEnablePprof is overridden by the corresponding option in MetricsConfig
 	CompatMetricsEnablePprof bool `gcfg:"metrics-enable-pprof"`
 	// CompatMetricsNodeServerPrivKey is overridden by the corresponding option in MetricsConfig
@@ -408,11 +410,12 @@ type KubernetesConfig struct {
 
 // MetricsConfig holds Prometheus metrics-related parameters.
 type MetricsConfig struct {
-	BindAddress       string `gcfg:"bind-address"`
-	ExportOVSMetrics  bool   `gcfg:"export-ovs-metrics"`
-	EnablePprof       bool   `gcfg:"enable-pprof"`
-	NodeServerPrivKey string `gcfg:"node-server-privkey"`
-	NodeServerCert    string `gcfg:"node-server-cert"`
+	BindAddress           string `gcfg:"bind-address"`
+	OVNMetricsBindAddress string `gcfg:"ovn-metrics-bind-address"`
+	ExportOVSMetrics      bool   `gcfg:"export-ovs-metrics"`
+	EnablePprof           bool   `gcfg:"enable-pprof"`
+	NodeServerPrivKey     string `gcfg:"node-server-privkey"`
+	NodeServerCert        string `gcfg:"node-server-cert"`
 	// EnableConfigDuration holds the boolean flag to enable OVN-Kubernetes master to monitor OVN-Kubernetes master
 	// configuration duration and optionally, its application to all nodes
 	EnableConfigDuration bool `gcfg:"enable-config-duration"`
@@ -1304,6 +1307,11 @@ var MetricsFlags = []cli.Flag{
 		Usage:       "The IP address and port for the OVN K8s metrics server to serve on (set to 0.0.0.0 for all IPv4 interfaces)",
 		Destination: &cliConfig.Metrics.BindAddress,
 	},
+	&cli.StringFlag{
+		Name:        "ovn-metrics-bind-address",
+		Usage:       "The IP address and port for the OVN metrics server to serve on (set to 0.0.0.0 for all IPv4 interfaces)",
+		Destination: &cliConfig.Metrics.OVNMetricsBindAddress,
+	},
 	&cli.BoolFlag{
 		Name:        "export-ovs-metrics",
 		Usage:       "When true exports OVS metrics from the OVN metrics server",
@@ -1927,6 +1935,9 @@ func buildMetricsConfig(cli, file *config) error {
 	// Copy KubernetesConfig backwards-compat values over default values
 	if Kubernetes.CompatMetricsBindAddress != "" {
 		Metrics.BindAddress = Kubernetes.CompatMetricsBindAddress
+	}
+	if Kubernetes.CompatOVNMetricsBindAddress != "" {
+		Metrics.OVNMetricsBindAddress = Kubernetes.CompatOVNMetricsBindAddress
 	}
 	if Kubernetes.CompatMetricsNodeServerPrivKey != "" {
 		Metrics.NodeServerPrivKey = Kubernetes.CompatMetricsNodeServerPrivKey

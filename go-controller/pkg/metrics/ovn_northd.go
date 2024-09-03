@@ -120,6 +120,9 @@ func RegisterOvnNorthdMetrics(nodeLister corev1listers.NodeLister, k8sNodeName s
 				"node (%s): %v", k8sNodeName, err)
 			return
 		}
+	} else if config.OVNKubernetesFeature.EnableInterconnect {
+		// TBD need to revisit for multi-node zone support and for DPU/DPU-HOST setup
+		match = true
 	}
 	if !match {
 		klog.Infof("Not registering OVN North Metrics because OVNKube North Pods is not running on this "+
