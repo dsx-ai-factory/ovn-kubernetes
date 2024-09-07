@@ -67,7 +67,9 @@ import (
 	egressserviceinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/informers/externalversions/egressservice/v1"
 
 	ipreservationapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
+	ipreservationscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/clientset/versioned/scheme"
 	ipreservationinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/informers/externalversions"
+	ipresvinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/informers/externalversions/ipreservation/v1beta1"
 	ipreservationlister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/listers/ipreservation/v1beta1"
 
 	adminbasedpolicyapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
@@ -290,7 +292,6 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		egressServiceFactory: egressserviceinformerfactory.NewSharedInformerFactory(ovnClientset.EgressServiceClient, resyncInterval),
 		adminPBRFactory:      adminpbrinformerfactory.NewSharedInformerFactory(ovnClientset.AdminPBRClient, resyncInterval),
 		vipFactory:           virtualipinformerfactory.NewSharedInformerFactory(ovnClientset.VirtualIPClient, resyncInterval),
-		ipresvFactory:        ipreservationinformerfactory.NewSharedInformerFactory(ovnClientset.IPReservationClient, resyncInterval),
 		apbRouteFactory:      adminbasedpolicyinformerfactory.NewSharedInformerFactory(ovnClientset.AdminPolicyRouteClient, resyncInterval),
 		portMirrorFactory:    portmirrorinformerfactory.NewSharedInformerFactory(ovnClientset.PortMirrorClient, resyncInterval),
 		informers:            make(map[reflect.Type]*informer),
@@ -316,7 +317,7 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 	if err := egressserviceapi.AddToScheme(egressservicescheme.Scheme); err != nil {
 		return nil, err
 	}
-	if err := ipreservationapi.AddToScheme(scheme.Scheme); err != nil {
+	if err := ipreservationapi.AddToScheme(ipreservationscheme.Scheme); err != nil {
 		return nil, err
 	}
 	if err := adminpbrapi.AddToScheme(scheme.Scheme); err != nil {
@@ -465,6 +466,14 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		}
 	}
 
+	if config.OVNKubernetesFeature.EnableIPReservation {
+		wf.ipresvFactory = ipreservationinformerfactory.NewSharedInformerFactory(ovnClientset.IPReservationClient, resyncInterval)
+		wf.informers[IPReservationType], err = newInformer(IPReservationType, wf.ipresvFactory.K8s().V1beta1().IPReservations().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	if util.IsNetworkSegmentationSupportEnabled() {
 		wf.udnFactory = userdefinednetworkapiinformerfactory.NewSharedInformerFactory(ovnClientset.UserDefinedNetworkClient, resyncInterval)
 		wf.informers[UserDefinedNetworkType], err = newInformer(UserDefinedNetworkType, wf.udnFactory.K8s().V1().UserDefinedNetworks().Informer())
@@ -495,13 +504,6 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 
 	if config.OVNKubernetesFeature.EnableVirtualIP {
 		wf.informers[VirtualIPType], err = newInformer(VirtualIPType, wf.vipFactory.K8s().V1beta1().VirtualIPs().Informer())
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if config.OVNKubernetesFeature.EnableIPReservation {
-		wf.informers[IPReservationType], err = newInformer(IPReservationType, wf.ipresvFactory.K8s().V1beta1().IPReservations().Informer())
 		if err != nil {
 			return nil, err
 		}
@@ -980,6 +982,9 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 	if err := frrapi.AddToScheme(frrscheme.Scheme); err != nil {
 		return nil, err
 	}
+	if err := ipreservationapi.AddToScheme(ipreservationscheme.Scheme); err != nil {
+		return nil, err
+	}
 
 	// For Services and Endpoints, pre-populate the shared Informer with one that
 	// has a label selector excluding headless services.
@@ -1056,6 +1061,14 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 			if config.OVNKubernetesFeature.EnablePersistentIPs {
 				wf.ipamClaimsFactory = ipamclaimsfactory.NewSharedInformerFactory(ovnClientset.IPAMClaimsClient, resyncInterval)
 				wf.informers[IPAMClaimsType], err = newInformer(IPAMClaimsType, wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims().Informer())
+				if err != nil {
+					return nil, err
+				}
+			}
+
+			if config.OVNKubernetesFeature.EnableIPReservation {
+				wf.ipresvFactory = ipreservationinformerfactory.NewSharedInformerFactory(ovnClientset.IPReservationClient, resyncInterval)
+				wf.informers[IPReservationType], err = newInformer(IPReservationType, wf.ipresvFactory.K8s().V1beta1().IPReservations().Informer())
 				if err != nil {
 					return nil, err
 				}
@@ -1929,6 +1942,10 @@ func (wf *WatchFactory) RouteAdvertisementsInformer() routeadvertisementsinforme
 
 func (wf *WatchFactory) FRRConfigurationsInformer() frrinformer.FRRConfigurationInformer {
 	return wf.frrFactory.Api().V1beta1().FRRConfigurations()
+}
+
+func (wf *WatchFactory) IPReservationInformer() ipresvinformer.IPReservationInformer {
+	return wf.ipresvFactory.K8s().V1beta1().IPReservations()
 }
 
 // withServiceNameSelector returns a LabelSelector (added to the

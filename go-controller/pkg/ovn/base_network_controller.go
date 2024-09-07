@@ -15,7 +15,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpbrapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
-	ipreservation "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
 	portmirror "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
 	virtualip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -193,10 +192,6 @@ type BaseNetworkController struct {
 	// map & workqueue for virtualIP operations
 	virtualIPs          sync.Map
 	virtualIPRetryQueue workqueue.RateLimitingInterface
-
-	// workqueue for IPReserve operation
-	ipReserveRetryQueue workqueue.RateLimitingInterface
-	ipReserveHandler    *factory.Handler
 
 	// map & workqueue for portmirror operations
 	portMirrors          sync.Map
@@ -1378,56 +1373,6 @@ func (bnc *BaseNetworkController) skipPinnedLSChanged(oldNode, node *kapi.Node) 
 	oldSkipPinnedLS := bnc.shouldSkipPinnedLS(oldNode)
 	newSkipPinnedLS := bnc.shouldSkipPinnedLS(node)
 	return oldSkipPinnedLS != newSkipPinnedLS
-}
-
-// WatchIPReservations starts the watching of ipreservation resources and calls
-// back the appropriate handler logic, called by non-secondary-layer2/localnet networks
-func (bnc *BaseNetworkController) WatchIPReservations() (err error) {
-	if bnc.ipReserveHandler != nil {
-		// WatchIPReservations has succeeded and this is from retry, nothing to do
-		return nil
-	}
-	start := time.Now()
-
-	// filterIPReservation checks if the ipReservation's NAD belongs to this controller
-	filterIPReservation := func(obj interface{}) bool {
-		ipResv, ok := obj.(*ipreservation.IPReservation)
-		if !ok {
-			return false
-		}
-		return bnc.HasNAD(ipResv.Spec.NetworkAttachmentName)
-	}
-	bnc.ipReserveHandler, err = bnc.watchFactory.AddHandlerWithFilterFunc(reflect.TypeOf(&ipreservation.IPReservation{}), filterIPReservation,
-		cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj interface{}) {
-				resvIPObj := obj.(*ipreservation.IPReservation)
-				err := fmt.Errorf("the networkAttachmentName, %s, of IPReservation %s/%s object is not a L2 or Localnet network type",
-					resvIPObj.Spec.NetworkAttachmentName, resvIPObj.Namespace, resvIPObj.Name)
-				klog.Errorf(err.Error())
-				tmpErr := bnc.updateIPReservationStatusWithRetry(resvIPObj.Namespace, resvIPObj.Name, types.OvnK8sStatusFailed,
-					[]string{err.Error()}, nil)
-				if tmpErr != nil {
-					klog.Errorf(tmpErr.Error())
-				}
-			},
-			UpdateFunc: func(old, newer interface{}) {
-				oldResvIPObj := old.(*ipreservation.IPReservation)
-				newResvIPObj := newer.(*ipreservation.IPReservation)
-				if !reflect.DeepEqual(oldResvIPObj.Spec, newResvIPObj.Spec) {
-					bnc.recordIPReservationEvent("IPReservationUpdateError", "Updating IPReservation object is not supported",
-						oldResvIPObj)
-				}
-			},
-			DeleteFunc: func(obj interface{}) {
-			},
-		}, nil, 1 /* TBD: set priority */)
-	if err != nil {
-		return fmt.Errorf("failed to watch for IPReservations CRD for network %s", bnc.GetNetworkName())
-	}
-
-	klog.Infof("Bootstrapping existing ipreservations and cleaning stale ipreservations for network %s took %v",
-		bnc.GetNetworkName(), time.Since(start))
-	return nil
 }
 
 func (bnc *BaseNetworkController) ConnectToNetworks(logicalSwitch *nbdb.LogicalSwitch, logicalRouter *nbdb.LogicalRouter,

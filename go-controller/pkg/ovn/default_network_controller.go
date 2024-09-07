@@ -21,6 +21,7 @@ import (
 	anpcontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/admin_network_policy"
 	apbroutecontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egressservice"
+	ipreserv "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/ipreservation"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
 	dnsnameresolver "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/dns_name_resolver"
@@ -479,9 +480,16 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 	// we need to start this before WatchPods so that we can reserve IPs before
 	// it gets assigned to the Pods
 	if config.OVNKubernetesFeature.EnableIPReservation {
-		if err := oc.WatchIPReservations(); err != nil {
+		ipresvController, err := ipreserv.NewController(oc.ReconcilableNetInfo, oc.kube, oc.watchFactory, nil, oc.recorder, oc.stopChan)
+		if err != nil {
 			return err
 		}
+		oc.wg.Add(1)
+		go func() {
+			defer oc.wg.Done()
+			// Until we have scale issues in future let's spawn only one thread
+			ipresvController.Run(1, oc.stopChan)
+		}()
 	}
 
 	if err := WithSyncDurationMetric("pod", oc.WatchPods); err != nil {

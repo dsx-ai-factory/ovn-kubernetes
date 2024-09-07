@@ -19,6 +19,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	ipreserv "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/ipreservation"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/topology"
@@ -566,9 +567,16 @@ func (oc *SecondaryLayer3NetworkController) Run() error {
 	// we need to start this before WatchPods so that we can reserve IPs before
 	// it gets assigned to the Pods
 	if config.OVNKubernetesFeature.EnableIPReservation {
-		if err := oc.WatchIPReservations(); err != nil {
+		ipresvController, err := ipreserv.NewController(oc.ReconcilableNetInfo, oc.kube, oc.watchFactory, nil, oc.recorder, oc.stopChan)
+		if err != nil {
 			return err
 		}
+		oc.wg.Add(1)
+		go func() {
+			defer oc.wg.Done()
+			// Until we have scale issues in future let's spawn only one thread
+			ipresvController.Run(1, oc.stopChan)
+		}()
 	}
 
 	if oc.svcController != nil {

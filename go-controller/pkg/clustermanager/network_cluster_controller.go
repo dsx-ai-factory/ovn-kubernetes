@@ -26,6 +26,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
+	ipreserv "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/ipreservation"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
 	objretry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -93,7 +94,8 @@ func newNetworkClusterController(
 		Kube: kube.Kube{
 			KClient: ovnClient.KubeClient,
 		},
-		IPAMClaimsClient: ovnClient.IPAMClaimsClient,
+		IPAMClaimsClient:    ovnClient.IPAMClaimsClient,
+		IPReservationClient: ovnClient.IPReservationClient,
 	}
 
 	wg := &sync.WaitGroup{}
@@ -371,6 +373,21 @@ func (ncc *networkClusterController) Start(ctx context.Context) error {
 	}
 
 	if ncc.hasPodAllocation() {
+		// we need to start this before WatchPods so that we can reserve IPs before
+		// it gets assigned to the Pods
+		if config.OVNKubernetesFeature.EnableIPReservation {
+			allocator := ncc.subnetAllocator.ForSubnet(ncc.GetNetworkName())
+			ipresvController, err := ipreserv.NewController(ncc.ReconcilableNetInfo, ncc.kube, ncc.watchFactory, allocator, ncc.recorder, ncc.stopChan)
+			if err != nil {
+				return err
+			}
+			ncc.wg.Add(1)
+			go func() {
+				defer ncc.wg.Done()
+				// Until we have scale issues in future let's spawn only one thread
+				ipresvController.Run(1, ncc.stopChan)
+			}()
+		}
 		if ncc.allowPersistentIPs() {
 			// we need to start listening to IPAMClaim events before pod events, to
 			// ensure we don't start processing pod allocations before having the

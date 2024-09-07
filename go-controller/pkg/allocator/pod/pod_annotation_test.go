@@ -50,6 +50,18 @@ func (a *ipAllocatorStub) IsErrAllocated(err error) bool {
 	return errors.Is(err, ipam.ErrAllocated)
 }
 
+func (a *ipAllocatorStub) AllocateIPsByCount(isIPv4 bool, count int32) ([]*net.IPNet, error) {
+	return nil, a.allocateIPsError
+}
+
+func (a *ipAllocatorStub) EnsureIPAMForIPFamily(isIPv4 bool) bool {
+	return true
+}
+
+func (a *ipAllocatorStub) AvailableIPsCount(isIPv4 bool) (int64, error) {
+	return 0, a.allocateIPsError
+}
+
 type idAllocatorStub struct {
 	nextID         int
 	reserveIDError error

@@ -9,6 +9,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	ipreserv "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/ipreservation"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
@@ -92,10 +93,24 @@ func (oc *BaseSecondaryLayer2NetworkController) run() error {
 
 	// we need to start this before WatchPods so that we can reserve IPs before
 	// it gets assigned to the Pods
-	if config.OVNKubernetesFeature.EnableIPReservation {
-		if err := oc.WatchIPReservations(); err != nil {
+	if config.OVNKubernetesFeature.EnableIPReservation && oc.allocatesPodAnnotation() {
+		var switchName string
+		if oc.TopologyType() == types.LocalnetTopology {
+			switchName = types.OVNLocalnetSwitch
+		} else {
+			switchName = types.OVNLayer2Switch
+		}
+		ipresvController, err := ipreserv.NewController(oc.ReconcilableNetInfo, oc.kube, oc.watchFactory,
+			oc.lsManager.ForSwitch(oc.GetNetworkScopedName(switchName)), oc.recorder, oc.stopChan)
+		if err != nil {
 			return err
 		}
+		oc.wg.Add(1)
+		go func() {
+			defer oc.wg.Done()
+			// Until we have scale issues in future let's spawn only one thread
+			ipresvController.Run(1, oc.stopChan)
+		}()
 	}
 
 	if err := oc.WatchNodes(); err != nil {

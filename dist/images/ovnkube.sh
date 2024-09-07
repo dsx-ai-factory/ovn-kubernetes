@@ -2581,6 +2581,12 @@ ovn-cluster-manager() {
   fi
   echo "persistent_ips_enabled_flag: ${persistent_ips_enabled_flag}"
 
+  ipreservation_enabled_flag=
+  if [[ ${ovn_ipreservation_enable} == "true" ]]; then
+	  ipreservation_enabled_flag="--enable-ip-reservation"
+  fi
+  echo "ipreservation_enabled_flag: ${ipreservation_enabled_flag}"
+
   ovnkube_cluster_manager_metrics_bind_address="${metrics_endpoint_ip}:9411"
   echo "ovnkube_cluster_manager_metrics_bind_address: ${ovnkube_cluster_manager_metrics_bind_address}"
 
@@ -2640,6 +2646,7 @@ ovn-cluster-manager() {
     ${egressservice_enabled_flag} \
     ${empty_lb_events_flag} \
     ${hybrid_overlay_flags} \
+    ${ipreservation_enabled_flag} \
     ${multicast_enabled_flag} \
     ${multi_network_enabled_flag} \
     ${network_segmentation_enabled_flag} \

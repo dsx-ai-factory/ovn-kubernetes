@@ -38,6 +38,9 @@ type NamedAllocator interface {
 	AllocateIPs(ips []*net.IPNet) error
 	AllocateNextIPs() ([]*net.IPNet, error)
 	ReleaseIPs(ips []*net.IPNet) error
+	EnsureIPAMForIPFamily(isIPv4 bool) bool
+	AvailableIPsCount(isIPv4 bool) (int64, error)
+	AllocateIPsByCount(isIPv4 bool, count int32) ([]*net.IPNet, error)
 }
 
 // ErrSubnetNotFound is used to inform the subnet is not being managed
@@ -501,4 +504,17 @@ func (ipAllocator *IPAllocator) AllocateNextIPs() ([]*net.IPNet, error) {
 // ReleaseIPs release the provided IPs
 func (ipAllocator *IPAllocator) ReleaseIPs(ips []*net.IPNet) error {
 	return ipAllocator.allocator.ReleaseIPs(ipAllocator.name, ips)
+}
+
+// EnsureIPAMForIPFamily checks whether we have an IP allocator for the given IP Family
+func (ipAllocator *IPAllocator) EnsureIPAMForIPFamily(isIPv4 bool) bool {
+	return ipAllocator.allocator.EnsureIPAMForIPFamily(ipAllocator.name, isIPv4)
+}
+
+func (ipAllocator *IPAllocator) AllocateIPsByCount(isIPv4 bool, count int32) ([]*net.IPNet, error) {
+	return ipAllocator.allocator.AllocateIPsByCount(ipAllocator.name, isIPv4, count)
+}
+
+func (ipAllocator *IPAllocator) AvailableIPsCount(isIPv4 bool) (int64, error) {
+	return ipAllocator.allocator.AvailableIPsCount(ipAllocator.name, isIPv4)
 }

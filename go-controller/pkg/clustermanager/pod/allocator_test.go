@@ -174,6 +174,18 @@ func (nas *namedAllocatorStub) ReleaseIPs(ips []*net.IPNet) error {
 	return nil
 }
 
+func (nas *namedAllocatorStub) AllocateIPsByCount(isIPv4 bool, count int32) ([]*net.IPNet, error) {
+	return nil, nil
+}
+
+func (nas *namedAllocatorStub) EnsureIPAMForIPFamily(isIPv4 bool) bool {
+	return true
+}
+
+func (nas *namedAllocatorStub) AvailableIPsCount(isIPv4 bool) (int64, error) {
+	return 0, nil
+}
+
 func TestPodAllocator_reconcileForNAD(t *testing.T) {
 	type args struct {
 		old       *testPod

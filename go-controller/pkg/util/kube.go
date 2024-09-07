@@ -148,6 +148,7 @@ type OVNClusterManagerClientset struct {
 	EgressFirewallClient      egressfirewallclientset.Interface
 	EgressQoSClient           egressqosclientset.Interface
 	IPAMClaimsClient          ipamclaimssclientset.Interface
+	IPReservationClient       ipresvclientset.Interface
 	OCPNetworkClient          ocpnetworkclientset.Interface
 	UserDefinedNetworkClient  userdefinednetworkclientset.Interface
 	RouteAdvertisementsClient routeadvertisementsclientset.Interface
@@ -244,6 +245,7 @@ func (cs *OVNClientset) GetClusterManagerClientset() *OVNClusterManagerClientset
 		EgressFirewallClient:      cs.EgressFirewallClient,
 		EgressQoSClient:           cs.EgressQoSClient,
 		IPAMClaimsClient:          cs.IPAMClaimsClient,
+		IPReservationClient:       cs.IPReservationClient,
 		OCPNetworkClient:          cs.OCPNetworkClient,
 		UserDefinedNetworkClient:  cs.UserDefinedNetworkClient,
 		RouteAdvertisementsClient: cs.RouteAdvertisementsClient,
