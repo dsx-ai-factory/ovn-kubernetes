@@ -46,7 +46,6 @@ BASEDIR=$(dirname $0)
 # OVN_METRICS_ENDPOINT_IP - metrics endpoint ip
 # OVN_METRICS_MASTER_PORT - metrics port which will be exposed by ovnkube-master (default 9409)
 # OVN_METRICS_WORKER_PORT - metrics port which will be exposed by ovnkube-node (default 9410)
-# OVN_METRICS_BIND_PORT - port for the OVN metrics server to serve on (default 9476)
 # OVN_METRICS_EXPORTER_PORT - ovs-metrics exporter port (default 9310)
 # OVN_DAEMONSET_VERSION - version match daemonset and image - v1.0.0
 # K8S_TOKEN - the apiserver token. Automatically detected when running in a pod - v3
@@ -228,9 +227,6 @@ metrics_master_port=${OVN_METRICS_MASTER_PORT:-9409}
 
 # set metrics worker port
 metrics_worker_port=${OVN_METRICS_WORKER_PORT:-9410}
-
-# set metrics bind port
-metrics_bind_port=${OVN_METRICS_BIND_PORT:-9476}
 
 # set metrics exporter port
 metrics_exporter_port=${OVN_METRICS_EXPORTER_PORT:-9310}
@@ -898,13 +894,11 @@ function memory_trim_on_compaction_supported {
 }
 
 function get_node_zone() {
-  # TBD --subresource option is not supported yet
-  #zone=$(kubectl --subresource=status --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
-  #   get node ${K8S_NODE} -o=jsonpath={'.metadata.labels.k8s\.ovn\.org/zone-name'})
-  #if [ "$zone" == "" ]; then
-  #  zone="global"
-  #fi
-  zone="global"
+  zone=$(kubectl --subresource=status --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+     get node ${K8S_NODE} -o=jsonpath={'.metadata.labels.k8s\.ovn\.org/zone-name'})
+  if [ "$zone" == "" ]; then
+    zone="global"
+  fi
   echo "$zone"
 }
 
@@ -1201,12 +1195,12 @@ ovnkube-identity() {
 
     # extra-allowed-user:
     #   ovn-master service account - required for compact mode
-    #   ovn-cluster-manager service account - required for multi-homing
+    #   ovnkube-cluster-manager service account - required for multi-homing
     exec /usr/bin/ovnkube-identity  --k8s-apiserver="${K8S_APISERVER}" \
     --webhook-cert-dir="/etc/webhook-cert" \
     ${ovnkube_enable_interconnect_flag} \
     ${ovnkube_enable_hybrid_overlay_flag} \
-    --extra-allowed-user="system:serviceaccount:ovn-kubernetes:ovn-cluster-manager" \
+    --extra-allowed-user="system:serviceaccount:ovn-kubernetes:ovnkube-cluster-manager" \
     --extra-allowed-user="system:serviceaccount:ovn-kubernetes:ovn-master" \
     --loglevel="${ovnkube_loglevel}"
 
@@ -1812,13 +1806,22 @@ ovnkube-controller-with-node() {
   # wait for northd to start
   wait_for_event process_ready ovn-northd
 
-  # wait for ovs-servers to start since ovn-master sets some fields in OVS DB
-  echo "=============== ovnkube-controller-with-node - (wait for ovs)"
-  wait_for_event ovs_ready
-
   if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
     echo "=============== ovnkube-controller-with-node - (ovn-node  wait for ovn-controller.pid)"
     wait_for_event process_ready ovn-controller
+  fi
+
+  ovnkube_firewalld_opts=
+  if [[ ${ovnkube_node_mode} != "dpu" ]]; then
+    if [[ ${ovnkube_disable_firewalld} == "true" ]]; then
+      ovnkube_firewalld_opts="--disable-firewalld"
+    elif [[ ${ovnkube_disable_firewalld} == "false" ]]; then
+      echo "=============== ovn-node - (check for firewall service status)"
+      check_firewall_state
+      echo "=============== ovn-node - (create ovn firewall zone)"
+      create_ovn_firewall_zone
+      ovnkube_firewalld_opts="--admin-firewalld-zonename=${ovnkube_admin_firewalld_zone}"
+    fi
   fi
 
   ovn_routable_mtu_flag=
@@ -1834,6 +1837,13 @@ ovnkube-controller-with-node() {
     fi
   fi
   echo "hybrid_overlay_flags=${hybrid_overlay_flags}"
+
+  OVN_NODE_PORT="--nodeport"
+  ovn_node_port=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-k8s-node-port | tr -d '\"')
+  if [[ $? == 0 && "${ovn_node_port}" == "false" ]]; then
+    OVN_NODE_PORT=""
+  fi
+  echo "OVN_NODE_PORT=${OVN_NODE_PORT}"
 
   disable_snat_multiple_gws_flag=
   if [[ ${ovn_disable_snat_multiple_gws} == "true" ]]; then
@@ -2044,9 +2054,7 @@ ovnkube-controller-with-node() {
     ovn_unprivileged_flag=""
   fi
   
-  ovn_metrics_bind_address="${metrics_endpoint_ip}:${metrics_bind_port}"
   metrics_bind_address="${metrics_endpoint_ip}:${metrics_worker_port}"
-  echo "ovn_metrics_bind_address=${ovn_metrics_bind_address}"
   echo "metrics_bind_address=${metrics_bind_address}"
 
   local ovnkube_metrics_tls_opts=""
@@ -2133,6 +2141,7 @@ ovnkube-controller-with-node() {
     ovnkube_metrics_scale_enable_flag="--metrics-enable-scale --metrics-enable-pprof"
   fi
   echo "ovnkube_metrics_scale_enable_flag: ${ovnkube_metrics_scale_enable_flag}"
+
   ovnkube_local_cert_flags=
   if [[ ${ovn_enable_ovnkube_identity} == "true" ]]; then
     bootstrap_kubeconfig="/host-kubernetes/kubelet.conf"
@@ -2154,9 +2163,63 @@ ovnkube-controller-with-node() {
   fi
   echo "ovn_enable_svc_template_support_flag=${ovn_enable_svc_template_support_flag}"
 
+  ovn_stateless_netpol_enable_flag=
+  if [[ ${ovn_stateless_netpol_enable} == "true" ]]; then
+          ovn_stateless_netpol_enable_flag="--enable-stateless-netpol"
+  fi
+  echo "ovn_stateless_netpol_enable_flag: ${ovn_stateless_netpol_enable_flag}"
+
+  cluster_subnets_mac_binding_aging_option=
+  if [[ ${cluster_subnets_mac_binding_aging} != "" ]]; then
+      cluster_subnets_mac_binding_aging_option="--cluster-subnets-mac-binding-aging=${cluster_subnets_mac_binding_aging}"
+  fi
+  echo "cluster_subnets_mac_binding_aging_option: ${cluster_subnets_mac_binding_aging_option}"
+
+  admin_pbr_enabled_flag=
+  if [[ ${ovn_admin_pbr_enable} == "true" ]]; then
+      admin_pbr_enabled_flag="--enable-admin-pbr"
+  fi
+  echo "admin_pbr_enabled_flag: ${admin_pbr_enabled_flag}"
+
+  virtualip_enabled_flag=
+  if [[ ${ovn_virtualip_enable} == "true" ]]; then
+          virtualip_enabled_flag="--enable-virtual-ip"
+  fi
+  echo "virtualip_enabled_flag: ${virtualip_enabled_flag}"
+
+  ipreservation_enabled_flag=
+  if [[ ${ovn_ipreservation_enable} == "true" ]]; then
+          ipreservation_enabled_flag="--enable-ip-reservation"
+  fi
+  echo "ipreservation_enabled_flag: ${ipreservation_enabled_flag}"
+
+  port_mirror_enabled_flag=
+  if [[ ${ovn_port_mirror_enable} == "true" ]]; then
+	  port_mirror_enabled_flag="--enable-port-mirror"
+  fi
+  echo "port_mirror_enabled_flag: ${port_mirror_enabled_flag}"
+
+  ovn_conntrack_zone_flag=
+  if [[ ${ovn_conntrack_zone} != "" ]]; then
+     ovn_conntrack_zone_flag="--conntrack-zone=${ovn_conntrack_zone}"
+  fi
+  echo "ovn_conntrack_zone_flag: ${ovn_conntrack_zone_flag}"
+
+  custom_gwsnat_rules_opts=""
+  if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
+    custom_gwsnat_rules=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:custom-gwsnat-rules | tr -d \")
+    if [[ -n ${custom_gwsnat_rules} ]]; then
+      custom_gwsnat_rules_opts="--custom-gwsnat-rules=\"${custom_gwsnat_rules}\""
+    fi
+  fi
+  echo "custom_gwsnat_rules_opts: ${custom_gwsnat_rules_opts}"
+
   echo "=============== ovnkube-controller-with-node --init-ovnkube-controller-with-node=========="
   /usr/bin/ovnkube --init-ovnkube-controller ${K8S_NODE} --init-node ${K8S_NODE} \
+    ${admin_pbr_enabled_flag} \
     ${anp_enabled_flag} \
+    ${cluster_subnets_mac_binding_aging_option} \
+    ${custom_gwsnat_rules_opts} \
     ${disable_forwarding_flag} \
     ${disable_ovn_iface_id_ver_flag} \
     ${disable_pkt_mtu_check_flag} \
@@ -2173,6 +2236,7 @@ ovnkube-controller-with-node() {
     ${hybrid_overlay_flags} \
     ${ipfix_config} \
     ${ipfix_targets} \
+    ${ipreservation_enabled_flag} \
     ${libovsdb_client_logfile_flag} \
     ${lflow_cache_limit} \
     ${lflow_cache_limit_kb} \
@@ -2182,6 +2246,7 @@ ovnkube-controller-with-node() {
     ${netflow_targets} \
     ${ofctrl_wait_before_clear} \
     ${ovn_acl_logging_rate_limit_flag} \
+    ${ovn_conntrack_zone_flag} \
     ${ovn_dbs} \
     ${ovn_enable_svc_template_support_flag} \
     ${ovn_encap_ip_flag} \
@@ -2195,14 +2260,18 @@ ovnkube-controller-with-node() {
     ${ovnkube_metrics_tls_opts} \
     ${ovnkube_node_mgmt_port_netdev_flag} \
     ${ovnkube_node_mode_flag} \
+    ${OVN_NODE_PORT} \
+    ${ovn_stateless_netpol_enable_flag} \
     ${ovn_unprivileged_flag} \
     ${ovn_v4_join_subnet_opt} \
     ${ovn_v4_masquerade_subnet_opt} \
     ${ovn_v6_join_subnet_opt} \
     ${ovn_v6_masquerade_subnet_opt} \
+    ${port_mirror_enabled_flag} \
     ${routable_mtu_flag} \
     ${sflow_targets} \
     ${ssl_opts} \
+    ${virtualip_enabled_flag} \
     ${wait_on_ovn_install_extid_flag} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --gateway-mode=${ovn_gateway_mode} \
@@ -2218,7 +2287,6 @@ ovnkube-controller-with-node() {
     --metrics-enable-pprof \
     --mtu=${mtu} \
     --nodeport \
-    --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
     --pidfile ${OVN_RUNDIR}/ovnkube-controller-with-node.pid \
     --zone ${ovn_zone} &
 
@@ -2300,7 +2368,7 @@ ovn-cluster-manager() {
   fi
   echo "ovn_v6_join_subnet_opt: ${ovn_v6_join_subnet_opt}"
 
-   ovn_v4_masquerade_subnet_opt=
+  ovn_v4_masquerade_subnet_opt=
   if [[ -n ${ovn_v4_masquerade_subnet} ]]; then
       ovn_v4_masquerade_subnet_opt="--gateway-v4-masquerade-subnet=${ovn_v4_masquerade_subnet}"
   fi
@@ -2444,9 +2512,14 @@ ovn-controller() {
 
   # delete ssl table setting so the ssl command line takes precedence
   ovs-vsctl del-ssl >/dev/null 2>&1
-  ovs-vsctl set Open_vSwitch . external_ids:ovn-remote=${ovn_sbdb_conn}
+
+  local ovn_remote=${ovn_sbdb_conn}
+  if [[ "local" == ${ovn_sbdb_conn} ]]; then
+    ovn_remote="unix:${OVN_RUNDIR}/ovnsb_db.sock"
+  fi
+  ovs-vsctl set Open_vSwitch . external_ids:ovn-remote=\"${ovn_remote}\"
   if [[ $? != 0 ]]; then
-    echo "Exiting, failed to set OVS external ID ovn-remote=${ovn_nbdb_conn}"
+    echo "Exiting, failed to set OVS external ID ovn-remote=${ovn_remote}"
     exit 1
   fi
 
@@ -2767,11 +2840,6 @@ ovn-node() {
         ovn_encap_ip_flag="--encap-ip=${ovn_encap_ip}"
       fi
     fi
-  fi
-
-  ovn_conntrack_zone_flag=
-  if [[ ${ovn_conntrack_zone} != "" ]]; then
-     ovn_conntrack_zone_flag="--conntrack-zone=${ovn_conntrack_zone}"
   fi
 
   ovnkube_node_mode_flag=
