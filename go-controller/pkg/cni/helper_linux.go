@@ -562,6 +562,10 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 			klog.V(7).Info("Skip offload verification since hw-offload is not enabled")
 			return nil
 		}
+		if br_type == types.DatapathUserspace {
+			klog.V(7).Info("Skip offload verification since the link is on a 'netdev' datapath")
+			return nil
+		}
 		// to make sure offload is enabled for the interface, look for tc ingress
 		// filters for the link, return error if no rules are found
 		if link == nil {
