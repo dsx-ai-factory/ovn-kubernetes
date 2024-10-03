@@ -710,6 +710,7 @@ func getOvsInterfaceType(state string) float64 {
 		"lisp":     7,
 		"stt":      8,
 		"patch":    9,
+		"dpdk":     10,
 	}
 	if value, ok := interfaceTypeMap[state]; ok {
 		typeValue = value
@@ -779,7 +780,8 @@ func setOvsInterfaceStatistics(interfaceBridge, interfacePort, interfaceName str
 func setHwOffloadInfoViaEthtool(etHandler *ethtool.Ethtool, interfaceBridge, interfacePort, interfaceName,
 	interfaceDriverName string) {
 	// Check if this is Representor, skip anything else
-	if etHandler == nil || strings.Compare(interfaceDriverName, "mlx5e_rep") != 0 {
+	// For ovs-doca the driver_name is mlx5_pci whereas for ovs-kernel the driver_name is mxl5e_rep
+	if etHandler == nil || !strings.HasPrefix(interfaceDriverName, "mlx5") {
 		// Check if we need to explicitly set these to 0
 		return
 	}
