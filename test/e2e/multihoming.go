@@ -278,7 +278,7 @@ var _ = Describe("Multi Homing", func() {
 
 				if netConfig.topology == "localnet" {
 					By("setting up the localnet underlay")
-					nodes := ovsPods(cs)
+					_, nodes := ovsPods(cs)
 					Expect(nodes).NotTo(BeEmpty())
 					defer func() {
 						By("tearing down the localnet underlay")
@@ -669,7 +669,7 @@ var _ = Describe("Multi Homing", func() {
 						})
 
 					By("setting up the localnet underlay")
-					nodes = ovsPods(cs)
+					_, nodes = ovsPods(cs)
 					Expect(nodes).NotTo(BeEmpty())
 					Expect(setupUnderlay(nodes, secondaryInterfaceName, netConfig)).To(Succeed())
 				})
@@ -944,7 +944,7 @@ var _ = Describe("Multi Homing", func() {
 
 					if netConfig.topology == "localnet" {
 						By("setting up the localnet underlay")
-						nodes := ovsPods(cs)
+						_, nodes := ovsPods(cs)
 						Expect(nodes).NotTo(BeEmpty())
 						defer func() {
 							By("tearing down the localnet underlay")
@@ -1335,7 +1335,7 @@ var _ = Describe("Multi Homing", func() {
 					netConfig := newNetworkAttachmentConfig(netConfigParams)
 
 					By("setting up the localnet underlay")
-					nodes := ovsPods(cs)
+					_, nodes := ovsPods(cs)
 					Expect(nodes).NotTo(BeEmpty())
 					defer func() {
 						By("tearing down the localnet underlay")
@@ -1467,7 +1467,7 @@ var _ = Describe("Multi Homing", func() {
 					netConfig := newNetworkAttachmentConfig(netConfigParams)
 
 					By("setting up the localnet underlay")
-					nodes := ovsPods(cs)
+					_, nodes := ovsPods(cs)
 					Expect(nodes).NotTo(BeEmpty())
 					defer func() {
 						By("tearing down the localnet underlay")
