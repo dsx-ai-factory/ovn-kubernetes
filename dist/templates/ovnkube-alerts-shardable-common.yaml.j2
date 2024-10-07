@@ -196,6 +196,18 @@ spec:
          The NID core nodes should all have ovnkube-manager pod in ready state, but ovnkube-manager
          {{ $labels.pod }} pod is not ready on {{ $labels.node }} node.
 
+    - alert: OvnKubeManagerMemoryConsumptionUnusuallyHigh
+      expr: |
+        container_memory_working_set_bytes{job="kubelet", namespace="ovn-kubernetes", pod=~"^ovnkube-master-.*", container="ovnkube-master"} / 1024 / 1024 / 1024 > 10
+      for: 10m
+      labels:
+        severity: major
+        pduuid: P10A23N
+        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UXetG5wnz/ovn-k8s-cluster-manager
+      annotations:
+       message: |
+         Pod ovn-kubernetes/ {{ $labels.pod }}  memory consumption crossed normal threshold and now at {{ printf "%.2f" $value }} GB
+
     - alert: OvnKubeNodeLogFileSize
       expr: |
         rate(ovnkube_node_logfile_size{namespace="ovn-kubernetes", job="ovnkube-node"}[15m]) * 5 * 60 / 1024 / 1024 > 1
