@@ -562,7 +562,7 @@ spec:
         rate(ovs_vswitchd_dp_flows_lookup_lost{namespace="ovn-kubernetes",job="ovnkube-node"}[5m]) > 50
       for: 10m
       labels:
-       severity: major
+       severity: minor
        pduuid: P10A23N
        dashboard: https://ngn-grafana.thanos.nvidiangn.net/d/UVSzupDGz/host-ovs
       annotations:
