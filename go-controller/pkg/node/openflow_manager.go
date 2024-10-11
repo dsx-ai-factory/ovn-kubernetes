@@ -27,8 +27,12 @@ type openflowManager struct {
 func (bridge *bridgeConfiguration) getBridgeInfo() (string, string, string, string, string, string, string, *sync.Map) {
 	bridge.Lock()
 	defer bridge.Unlock()
+	hostRepName := bridge.hostRepName
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		hostRepName = bridge.dpuHostRepName
+	}
 	return bridge.patchPort, bridge.ofPortPatch,
-		bridge.uplinkName, bridge.ofPortPhys, bridge.hostRepName, bridge.ofPortHost,
+		bridge.uplinkName, bridge.ofPortPhys, hostRepName, bridge.ofPortHost,
 		bridge.bridgeName, bridge.localnetPatchPorts
 }
 
