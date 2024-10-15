@@ -408,6 +408,32 @@ func getPfEncapIP(deviceID string) (string, error) {
 	return encapIP, nil
 }
 
+// ValidateOVSInterfaceConfiguration checks if the OVS port is configured correctly
+func ValidateOVSInterfaceConfiguration(namespace, podName, hostIfaceName string, ifInfo *PodInterfaceInfo) error {
+	ifaceID := util.GetIfaceId(namespace, podName)
+	if ifInfo.NetName != types.DefaultNetworkName { // secondary network
+		ifaceID = util.GetSecondaryNetworkIfaceId(namespace, podName, ifInfo.NADName)
+	}
+	// if the specified port was created for other Pod/NAD, return error
+	extIds, err := ovsFind("Interface", "external_ids", "name="+hostIfaceName)
+	if err == nil && len(extIds) == 1 {
+		extId := extIds[0]
+		ifaceIDStr := util.GetExternalIDValByKey(extId, "iface-id")
+		nadNameString := util.GetExternalIDValByKey(extId, types.NADExternalID)
+		// if NADExternalID does not exists, it is default network
+		if nadNameString == "" {
+			nadNameString = types.DefaultNetworkName
+		}
+		if ifaceIDStr != ifaceID {
+			return fmt.Errorf("OVS port %s was added for iface-id (%s), now readding it for (%s)", hostIfaceName, ifaceIDStr, ifaceID)
+		}
+		if nadNameString != ifInfo.NADName {
+			return fmt.Errorf("OVS port %s was added for NAD (%s), expect (%s)", hostIfaceName, nadNameString, ifInfo.NADName)
+		}
+	}
+	return nil
+}
+
 // ConfigureOVS performs OVS configurations in order to set up Pod networking
 func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	ifInfo *PodInterfaceInfo, sandboxID, deviceID string, getter PodInfoGetter) error {
@@ -448,21 +474,9 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	}
 
 	// if the specified port was created for other Pod/NAD, return error
-	extIds, err := ovsFind("Interface", "external_ids", "name="+hostIfaceName)
-	if err == nil && len(extIds) == 1 {
-		extId := extIds[0]
-		ifaceIDStr := util.GetExternalIDValByKey(extId, "iface-id")
-		nadNameString := util.GetExternalIDValByKey(extId, types.NADExternalID)
-		// if NADExternalID does not exists, it is default network
-		if nadNameString == "" {
-			nadNameString = types.DefaultNetworkName
-		}
-		if ifaceIDStr != ifaceID {
-			return fmt.Errorf("OVS port %s was added for iface-id (%s), now readding it for (%s)", hostIfaceName, ifaceIDStr, ifaceID)
-		}
-		if nadNameString != ifInfo.NADName {
-			return fmt.Errorf("OVS port %s was added for NAD (%s), expect (%s)", hostIfaceName, nadNameString, ifInfo.NADName)
-		}
+	err = ValidateOVSInterfaceConfiguration(namespace, podName, hostIfaceName, ifInfo)
+	if err != nil {
+		return err
 	}
 
 	// Add the new sandbox's OVS port, tag the port as transient so stale
@@ -782,15 +796,21 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 		// host side interface deletion
 		hostIfName := pr.SandboxID[:(15-len(ifnameSuffix))] + ifnameSuffix
 		if pr.CNIConf.DeviceID != "" {
-			if pr.IsVFIO {
-				if err = util.SetVFHardwreAddress(pr.CNIConf.DeviceID, defaultVFHardwareAddress); err != nil {
-					klog.Warningf("Failed to reset VF hardware address: %s", pr.CNIConf.DeviceID)
-				}
-			}
 			hostIfName, err = util.GetFunctionRepresentorName(pr.CNIConf.DeviceID)
 			if err != nil {
 				klog.Errorf("Failed to get the representor name for DeviceID %s for pod %s: %v",
 					pr.CNIConf.DeviceID, podDesc, err)
+			}
+			// if the specified port was created for other Pod/NAD, return error
+			err := ValidateOVSInterfaceConfiguration(pr.PodNamespace, pr.PodName, hostIfName, ifInfo)
+			if err != nil {
+				klog.Errorf(err.Error())
+				return nil
+			}
+			if pr.IsVFIO {
+				if err := util.SetVFHardwreAddress(pr.CNIConf.DeviceID, defaultVFHardwareAddress); err != nil {
+					klog.Warningf("Failed to reset VF hardware address: %s", pr.CNIConf.DeviceID)
+				}
 			}
 		}
 		if hostIfName != "" {
