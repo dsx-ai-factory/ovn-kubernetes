@@ -244,9 +244,7 @@ func (c *OvsdbClient) rowToInterface(uuid string) (*Interface, error) {
 		if extIdMap, ok := externalIds.(libovsdb.OvsMap); ok {
 			for field, value := range extIdMap.GoMap {
 				if fi, ok := field.(string); ok {
-					if v, ok := value.(string); ok {
-						externalIdsMap[fi] = v
-					}
+					externalIdsMap[fi] = getFieldStringValue(value)
 				}
 			}
 		} else {
@@ -260,9 +258,7 @@ func (c *OvsdbClient) rowToInterface(uuid string) (*Interface, error) {
 		if stMap, ok := stats.(libovsdb.OvsMap); ok {
 			for field, value := range stMap.GoMap {
 				if fi, ok := field.(string); ok {
-					if v, ok := value.(float64); ok {
-						statsMap[fi] = v
-					}
+					statsMap[fi] = getFieldFloat64Value(value)
 				}
 			}
 		} else {
@@ -276,9 +272,7 @@ func (c *OvsdbClient) rowToInterface(uuid string) (*Interface, error) {
 		if sMap, ok := status.(libovsdb.OvsMap); ok {
 			for field, value := range sMap.GoMap {
 				if fi, ok := field.(string); ok {
-					if v, ok := value.(string); ok {
-						statusMap[fi] = v
-					}
+					statusMap[fi] = getFieldStringValue(value)
 				}
 			}
 		} else {
@@ -322,9 +316,7 @@ func (c *OvsdbClient) rowToOpenVswitch(uuid string) (*OpenVswitch, error) {
 		if extIdMap, ok := externalIds.(libovsdb.OvsMap); ok {
 			for field, value := range extIdMap.GoMap {
 				if fi, ok := field.(string); ok {
-					if v, ok := value.(string); ok {
-						externalIdsMap[fi] = v
-					}
+					externalIdsMap[fi] = getFieldStringValue(value)
 				}
 			}
 		} else {
@@ -338,9 +330,7 @@ func (c *OvsdbClient) rowToOpenVswitch(uuid string) (*OpenVswitch, error) {
 		if ocMap, ok := otherConfig.(libovsdb.OvsMap); ok {
 			for field, value := range ocMap.GoMap {
 				if fi, ok := field.(string); ok {
-					if v, ok := value.(string); ok {
-						otherConfigMap[fi] = v
-					}
+					otherConfigMap[fi] = getFieldStringValue(value)
 				}
 			}
 		} else {
@@ -349,6 +339,39 @@ func (c *OvsdbClient) rowToOpenVswitch(uuid string) (*OpenVswitch, error) {
 	}
 	openVswitchTable.OtherConfig = otherConfigMap
 	return openVswitchTable, nil
+}
+
+func getFieldStringValue(fv interface{}) string {
+	var value string
+
+	switch fieldValue := fv.(type) {
+	case string:
+		value = fieldValue
+	case libovsdb.OvsSet:
+		if len(fieldValue.GoSet) > 0 {
+			value = fieldValue.GoSet[0].(string)
+		}
+	}
+	return value
+}
+
+func getFieldFloat64Value(fv interface{}) float64 {
+	var value float64
+
+	switch fieldValue := fv.(type) {
+	case float64:
+		value = fieldValue
+	case libovsdb.OvsSet:
+		if len(fieldValue.GoSet) > 0 {
+			switch fv := fieldValue.GoSet[0].(type) {
+			case float64:
+				value = fv
+			case int64:
+				value = float64(fv)
+			}
+		}
+	}
+	return value
 }
 
 func getColumnFieldStringValue(row *libovsdb.Row, col string) string {
