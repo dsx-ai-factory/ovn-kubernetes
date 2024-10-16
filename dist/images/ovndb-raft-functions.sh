@@ -185,6 +185,22 @@ set_leader_xfer_for_snapshot() {
   return 0
 }
 
+# set SB transfer threshold for less memory consumption.
+set_sb_xfer_threshold() {
+  local threshold=${OVN_SB_XFER_THRESHOLD:-1000000000}
+  local pause_time=${OVN_SB_XFER_PAUSE_TIME:-500}
+  local result=""
+
+  echo "setting SB jsonrpc-server transfer threshold ${threshold} bytes pause time ${pause_time} ms"
+  result=$(ovs-appctl -t ${OVN_RUNDIR}/ovnsb_db.ctl jsonrpc-server/set-pause-args ${threshold} ${pause_time})
+  if [[ $? -ne 0 ]]; then
+    echo "Failed to set SB transfer threshold ${threshold} bytes pause time ${pause_time} ms: ${result}. Exiting..."
+    exit 11
+  fi
+  echo "setting SB jsonrpc-server transfer threshold ${threshold} bytes pause time ${pause_time} ms successfully"
+  return 0
+}
+
 # set_connection() will be called for first OVN DB statefulset Pod pod when :
 #    1. it is first started or
 #    2. it restarts after the initial start has failed or
@@ -239,7 +255,7 @@ set_ssl() {
 set_northd_probe_interval() {
   # OVN_NORTHD_PROBE_INTERVAL - probe interval of northd for NB and SB DB
   # connections in ms (default 5000)
-  northd_probe_interval=${OVN_NORTHD_PROBE_INTERVAL:-5000}
+  local northd_probe_interval=${1}
 
   echo "setting northd probe interval to ${northd_probe_interval} ms"
 
@@ -292,6 +308,7 @@ ovsdb_cleanup() {
 ovsdb_ensure_schema() {
   local db=${1}
   local election_timer=${2}
+  local northd_probe_interval=${3}
   local DB_SOCK=unix:${OVN_RUNDIR}/ovn${db}_db.sock
   local DB_SCHEMA=/usr/share/ovn/ovn-${db}.ovsschema
   local database
@@ -323,6 +340,8 @@ ovsdb_ensure_schema() {
     echo "database ${database} schema version match"
     return 0
   else
+    echo "Adjusting northd_probe_interval to 120s for schema upgrade"
+    set_northd_probe_interval 120000
     echo "Wait 300s for rolling update finish and all client reconnect"
     sleep 300s
   fi
@@ -412,6 +431,8 @@ ovsdb_ensure_schema() {
         fi
     done
   fi
+  echo "Adjusting northd_probe_interval back to ${northd_probe_interval} ms"
+  set_northd_probe_interval ${northd_probe_interval}
 }
 
 upgrade_annotation_is_expected() {
@@ -441,6 +462,7 @@ ovsdb-raft() {
   local port=${2}
   local raft_port=${3}
   local election_timer=${4}
+  local northd_probe_interval=${OVN_NORTHD_PROBE_INTERVAL:-5000}
   local initialize="false"
   local upgrade_annotation=""
   local upgrade_argument=""
@@ -606,7 +628,6 @@ ovsdb-raft() {
       # set the election timer value before other servers join the cluster
       set_election_timer ${db} ${election_timer}
       if [[ ${db} == "nb" ]]; then
-        set_northd_probe_interval
         [[ "true" == "${ENABLE_IPSEC}" ]] && {
           ovn-nbctl set nb_global . ipsec=true
         }
@@ -621,6 +642,7 @@ ovsdb-raft() {
     fi
     if [[ ${db} == "sb" ]]; then
       set_sb_inactivity_probe
+      set_northd_probe_interval ${northd_probe_interval}
     fi
   fi
 
@@ -636,6 +658,7 @@ ovsdb-raft() {
     set_leader_xfer_for_snapshot ${db} ${OVN_NB_ENABLE_LEADER_XFER_FOR_SNAPSHOT}
   else
     set_leader_xfer_for_snapshot ${db} ${OVN_SB_ENABLE_LEADER_XFER_FOR_SNAPSHOT}
+    set_sb_xfer_threshold
   fi
 
   tail --follow=name ${OVN_LOGDIR}/ovsdb-server-${db}.log &
@@ -711,7 +734,7 @@ ovsdb-raft() {
 
   # ensure ovsdb schema match
   echo "=============== ensure ${db}_ovsdb-raft schema match =========="
-  ovsdb_ensure_schema ${db} ${election_timer}
+  ovsdb_ensure_schema ${db} ${election_timer} ${northd_probe_interval}
 
   process_healthy ovn${db}_db ${ovn_tail_pid}
   echo "=============== run ${db}_ovsdb-raft ========== terminated"
