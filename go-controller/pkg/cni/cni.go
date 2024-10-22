@@ -259,6 +259,8 @@ func (pr *PodRequest) cmdDel(clientset *ClientSet) (*Response, error) {
 	podInterfaceInfo := &PodInterfaceInfo{
 		IsDPUHostMode: config.OvnKubeNode.Mode == types.NodeModeDPUHost,
 		NetdevName:    netdevName,
+		NetName:       pr.netName,
+		NADName:       pr.nadName,
 	}
 	if !config.UnprivilegedMode {
 		err := pr.UnconfigureInterface(podInterfaceInfo)
