@@ -871,6 +871,9 @@ func (pr *PodRequest) deletePorts(ifaceName, podNamespace, podName string) {
 			if err = util.GetNetLinkOps().LinkSetMTU(link, config.DefaultVFMTU); err != nil {
 				klog.Warningf("Failed to reset MTU of pod %q interface %s: %v", podDesc, ifaceName, err)
 			}
+			if err = util.GetNetLinkOps().LinkSetDown(link); err != nil {
+				klog.Warningf("Failed to bring down pod %q interface %s: %v", podDesc, ifaceName, err)
+			}
 		}
 	} else {
 		klog.Warningf("Failed to reset MTU and/or delete the host-side link %s: %v", ifaceName, err)
