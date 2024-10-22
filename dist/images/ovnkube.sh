@@ -938,8 +938,6 @@ nb-ovsdb() {
   wait_for_event attempts=3 process_ready ovnnb_db
   echo "=============== nb-ovsdb ========== RUNNING"
 
-  # setting northd probe interval
-  set_northd_probe_interval
   [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
     ovn-nbctl set-ssl ${ovn_nb_pk} ${ovn_nb_cert} ${ovn_ca_cert}
     echo "=============== nb-ovsdb ========== reconfigured for SSL"
@@ -986,6 +984,8 @@ sb-ovsdb() {
     exit 1
   fi
 
+  # setting northd probe interval
+  set_northd_probe_interval ${OVN_NORTHD_PROBE_INTERVAL:-5000}
   # if SSL is enabled, wait for the SSL cert files to be populated
   if [[ "yes" == ${OVN_SSL_ENABLE} ]]; then
     wait_for_event attempts=20 files_exist ${ovn_sb_pk} ${ovn_sb_cert} ${ovn_ca_cert}

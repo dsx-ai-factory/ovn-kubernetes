@@ -123,8 +123,6 @@ spec:
           value: "1.0.0"
         - name: OVN_LOGLEVEL_NB
           value: "{{ ovn_loglevel_nb }}"
-        - name: OVN_NORTHD_PROBE_INTERVAL
-          value: "50000"
         - name: K8S_APISERVER
           valueFrom:
             configMapKeyRef:
@@ -196,6 +194,8 @@ spec:
           value: "1.0.0"
         - name: OVN_LOGLEVEL_SB
           value: "{{ ovn_loglevel_sb }}"
+        - name: OVN_NORTHD_PROBE_INTERVAL
+          value: "50000"
         - name: K8S_APISERVER
           valueFrom:
             configMapKeyRef:
