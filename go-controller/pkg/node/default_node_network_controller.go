@@ -865,21 +865,25 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		// There is no SBDB to connect to in DPU Host mode, so we will just take the default input config zone
 		sbZone = config.Default.Zone
 	} else {
-		err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
-			sbZone, err = getOVNSBZone()
-			if err != nil {
-				err1 = fmt.Errorf("failed to get the zone name from the OVN Southbound db server, err : %w", err)
-				return false, nil
-			}
+		if config.OVNKubernetesFeature.EnableInterconnect {
+			err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true, func(ctx context.Context) (bool, error) {
+				sbZone, err = getOVNSBZone()
+				if err != nil {
+					err1 = fmt.Errorf("failed to get the zone name from the OVN Southbound db server, err : %w", err)
+					return false, nil
+				}
 
-			if config.Default.Zone != sbZone {
-				err1 = fmt.Errorf("node %s zone %s mismatch with the Southbound zone %s", nc.name, config.Default.Zone, sbZone)
-				return false, nil
+				if config.Default.Zone != sbZone {
+					err1 = fmt.Errorf("node %s zone %s mismatch with the Southbound zone %s", nc.name, config.Default.Zone, sbZone)
+					return false, nil
+				}
+				return true, nil
+			})
+			if err != nil {
+				return fmt.Errorf("timed out waiting for the node zone %s to match the OVN Southbound db zone, err: %v, err1: %v", config.Default.Zone, err, err1)
 			}
-			return true, nil
-		})
-		if err != nil {
-			return fmt.Errorf("timed out waiting for the node zone %s to match the OVN Southbound db zone, err: %v, err1: %v", config.Default.Zone, err, err1)
+		} else {
+			sbZone = config.Default.Zone
 		}
 
 		// if its nonIC OR IC=true and if its phase1 OR if its IC to IC upgrades
