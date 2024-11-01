@@ -502,12 +502,12 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 		if err != nil {
 			return nil, fmt.Errorf("failed to get netdevice link for %s: %w", gwIntf, err)
 		}
-		uplink, err := getUplinkName(gwIntf)
+		uplinkName, err := util.GetNicName(bridgeName)
 		if err != nil {
-			return nil, fmt.Errorf("failed to find uplink for %s: %w", gwIntf, err)
+			return nil, fmt.Errorf("failed to find nic name for bridge %s: %w", bridgeName, err)
 		}
 		res.bridgeName = bridgeName
-		res.uplinkName = uplink
+		res.uplinkName = uplinkName
 		res.hostRepName = intfRep
 		res.gwIface = intfName
 		res.macAddress = link.Attrs().HardwareAddr
@@ -597,13 +597,4 @@ func getRepresentor(intfName string) (string, error) {
 	}
 
 	return util.GetFunctionRepresentorName(deviceID)
-}
-
-func getUplinkName(intfName string) (string, error) {
-	deviceID, err := util.GetDeviceIDFromNetdevice(intfName)
-	if err != nil {
-		return "", err
-	}
-
-	return util.GetUplinkRepresentorName(deviceID)
 }
