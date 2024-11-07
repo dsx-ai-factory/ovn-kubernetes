@@ -394,7 +394,7 @@ func (c *Controller) syncService(key string) error {
 	//
 	// The Service exists in the cache: update it in OVN
 
-	klog.V(5).Infof("Service %s retrieved from lister: %v", service.Name, service)
+	klog.V(5).Infof("Service %s/%s retrieved from lister", service.Namespace, service.Name)
 
 	// Get the endpoint slices associated to the Service
 	esLabelSelector := labels.Set(map[string]string{
