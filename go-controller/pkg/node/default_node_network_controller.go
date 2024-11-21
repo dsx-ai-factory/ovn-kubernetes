@@ -857,8 +857,9 @@ func (nc *DefaultNodeNetworkController) PreStart(ctx context.Context) error {
 		}
 	}
 
-	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
-		// Bootstrap flows in OVS if just normal flow is present
+	if config.OvnKubeNode.Mode == types.NodeModeFull ||
+		(config.OvnKubeNode.Mode == types.NodeModeDPU && config.OvnKubeNode.IsPrimaryDPU) {
+		// Bootstrap flows in OVS if just normal flow is present. Should not do it on non-primary DPU
 		if err := bootstrapOVSFlows(nc.name); err != nil {
 			return fmt.Errorf("failed to bootstrap OVS flows: %w", err)
 		}

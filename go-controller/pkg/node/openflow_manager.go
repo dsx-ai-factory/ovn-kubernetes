@@ -362,6 +362,10 @@ func localnetPortInfo(nodeName string, portsOutput string) (string, string) {
 	// TODO: going forward, maybe it would preferable to just read the bridge name from the config.
 	r := regexp.MustCompile(fmt.Sprintf("^patch-([^_]*)_%s-to-br-int$", nodeName))
 	for _, line := range strings.Split(portsOutput, "\n") {
+		// skip the patch interface for localnet network
+		if strings.Contains(line, "ovn_localnet_port-to") {
+			continue
+		}
 		matches := r.FindStringSubmatch(line)
 		if len(matches) == 2 {
 			return matches[1], matches[0]
