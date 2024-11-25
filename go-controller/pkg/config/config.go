@@ -121,7 +121,7 @@ var (
 		RawServiceCIDRs:         "172.16.1.0/24",
 		OVNConfigNamespace:      "ovn-kubernetes",
 		HostNetworkNamespace:    "",
-		DisableRequestedChassis: true,
+		DisableRequestedChassis: false,
 		PlatformType:            "",
 		DNSServiceNamespace:     "kube-system",
 		DNSServiceName:          "kube-dns",
@@ -462,7 +462,7 @@ type OVNKubernetesFeatureConfig struct {
 	EnableVirtualIP               bool `gcfg:"enable-virtual-ip"`
 	EnableIPReservation           bool `gcfg:"enable-ip-reservation"`
 	EnablePortMirror              bool `gcfg:"enable-port-mirror"`
-	EnableObservability             bool `gcfg:"enable-observability"`
+	EnableObservability           bool `gcfg:"enable-observability"`
 }
 
 // GatewayMode holds the node gateway mode

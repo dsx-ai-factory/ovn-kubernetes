@@ -82,7 +82,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 				Expect(netInfo.setupOVNDependencies(&initialDB)).To(Succeed())
 
 				if netInfo.isPrimary {
-					networkConfig, err := util.NewNetInfo(netInfo.netconf())
+					networkConfig, err := util.NewNetInfo(netInfo.netconf(), nil)
 					Expect(err).NotTo(HaveOccurred())
 
 					initialDB.NBData = append(
@@ -128,7 +128,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 					_, ok := pod.Annotations[util.OvnPodAnnotationName]
 					Expect(ok).To(BeFalse())
 				}
-				Expect(fakeOvn.controller.nadController.Start()).NotTo(HaveOccurred())
+				Expect(fakeOvn.controller.nadController.Start(nil)).NotTo(HaveOccurred())
 
 				Expect(fakeOvn.controller.WatchNamespaces()).NotTo(HaveOccurred())
 				Expect(fakeOvn.controller.WatchPods()).NotTo(HaveOccurred())
@@ -233,7 +233,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer2 network", func() {
 			}
 			app.Action = func(ctx *cli.Context) error {
 				netConf := netInfo.netconf()
-				networkConfig, err := util.NewNetInfo(netConf)
+				networkConfig, err := util.NewNetInfo(netConf, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				nadController := &nad.FakeNADController{
@@ -348,6 +348,7 @@ func dummySecondaryLayer2UserDefinedNetwork(subnets string) secondaryNetInfo {
 		netName:        secondaryNetworkName,
 		nadName:        namespacedName(ns, nadName),
 		topology:       ovntypes.Layer2Topology,
+		mtu:            fmt.Sprintf("%d", config.Default.MTU),
 		clustersubnets: subnets,
 	}
 }
@@ -382,6 +383,7 @@ func dummyL2TestPod(nsName string, info secondaryNetInfo) testPod {
 			"100.200.0.1",
 			"100.200.0.3/16",
 			"0a:58:64:c8:00:03",
+			info.mtu,
 			"primary",
 			0,
 			[]util.PodRoute{
@@ -406,6 +408,7 @@ func dummyL2TestPod(nsName string, info secondaryNetInfo) testPod {
 		"",
 		"100.200.0.1/16",
 		"0a:58:64:c8:00:01",
+		info.mtu,
 		"secondary",
 		0,
 		[]util.PodRoute{},
@@ -538,6 +541,7 @@ func dummyLayer2SecondaryUserDefinedNetwork(subnets string) secondaryNetInfo {
 		netName:        secondaryNetworkName,
 		nadName:        namespacedName(ns, nadName),
 		topology:       ovntypes.Layer2Topology,
+		mtu:            fmt.Sprintf("%d", config.Default.MTU),
 		clustersubnets: subnets,
 	}
 }
@@ -553,7 +557,8 @@ func newSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 	layer2NetworkController, _ := NewSecondaryLayer2NetworkController(cnci, netInfo, nadController)
 	layer2NetworkController.gatewayManagers.Store(
 		nodeName,
-		newDummyGatewayManager(cnci.kube, cnci.nbClient, netInfo, cnci.watchFactory, nodeName),
+		newDummyGatewayManager(layer2NetworkController.controllerName, cnci.kube, cnci.nbClient,
+			netInfo, cnci.watchFactory, layer2NetworkController.addressSetFactory, nodeName),
 	)
 	return layer2NetworkController
 }

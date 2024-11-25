@@ -588,11 +588,15 @@ func addRPFilterLooseModeForManagementPort(mgmtPortName string) error {
 	// NOTE: v6 doesn't have rp_filter strict mode block
 	rpFilterLooseMode := "2"
 	// TODO: Convert testing framework to mock golang module utilities. Example:
-	// result, err := sysctl.Sysctl(fmt.Sprintf("net/ipv4/conf/%s/rp_filter", types.K8sMgmtIntfName), rpFilterLooseMode)
-	stdout, stderr, err := util.RunSysctl("-w", fmt.Sprintf("net.ipv4.conf.%s.rp_filter=%s", mgmtPortName, rpFilterLooseMode))
+	var stdout, stderr string
+	var err error
+	stdout, _, err = util.RunSysctl(fmt.Sprintf("net.ipv4.conf.%s.rp_filter", mgmtPortName))
 	if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.rp_filter = %s", mgmtPortName, rpFilterLooseMode) {
-		return fmt.Errorf("could not set the correct rp_filter value for interface %s: stdout: %v, stderr: %v, err: %v",
-			mgmtPortName, stdout, stderr, err)
+		stdout, stderr, err = util.RunSysctl("-w", fmt.Sprintf("net.ipv4.conf.%s.rp_filter=%s", mgmtPortName, rpFilterLooseMode))
+		if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.rp_filter = %s", mgmtPortName, rpFilterLooseMode) {
+			return fmt.Errorf("could not set the correct rp_filter value for interface %s: stdout: %v, stderr: %v, err: %v",
+				mgmtPortName, stdout, stderr, err)
+		}
 	}
 	return nil
 }

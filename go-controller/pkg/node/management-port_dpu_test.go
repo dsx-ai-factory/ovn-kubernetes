@@ -137,6 +137,9 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			node := &v1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "k8s-worker0",
+					Labels: map[string]string{
+						"kubernetes.io/hostname": "k8s-worker0",
+					},
 					Annotations: map[string]string{
 						"k8s.ovn.org/node-mgmt-port-mac-addresses": fmt.Sprintf(`{"default":"%s"}`, expectedMgmtPortMac.String()),
 					},
@@ -180,7 +183,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			fakeNodeClient := &util.OVNNodeClientset{
 				KubeClient: fakeClient,
 			}
-			watchFactory, err := factory.NewNodeWatchFactory(fakeNodeClient, node.Name)
+			watchFactory, err := factory.NewNodeWatchFactory(fakeNodeClient, []string{node.Name})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(watchFactory.Start()).To(Succeed())
 
@@ -199,6 +202,9 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			node := &v1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "k8s-worker0",
+					Labels: map[string]string{
+						"kubernetes.io/hostname": "k8s-worker0",
+					},
 					Annotations: map[string]string{
 						"k8s.ovn.org/node-mgmt-port-mac-addresses": fmt.Sprintf(`{"default":"%s"}`, expectedMgmtPortMac.String()),
 					},
@@ -236,7 +242,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			fakeNodeClient := &util.OVNNodeClientset{
 				KubeClient: fakeClient,
 			}
-			watchFactory, err := factory.NewNodeWatchFactory(fakeNodeClient, node.Name)
+			watchFactory, err := factory.NewNodeWatchFactory(fakeNodeClient, []string{node.Name})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(watchFactory.Start()).To(Succeed())
 

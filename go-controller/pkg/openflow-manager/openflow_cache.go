@@ -167,7 +167,13 @@ func (ofcm *OpenFlowManager) GetFlowsByKey(id, key string) (flows []string) {
 		if loaded {
 			bridgeFlowCache.Lock()
 			if flowCache, ok := bridgeFlowCache.flowCache[id]; ok {
-				flows = flowCache[key]
+				if key != "" {
+					flows = flowCache[key]
+				} else {
+					for key := range flowCache {
+						flows = append(flows, flowCache[key]...)
+					}
+				}
 			}
 			bridgeFlowCache.Unlock()
 		}

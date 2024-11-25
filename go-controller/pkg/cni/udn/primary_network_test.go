@@ -192,8 +192,8 @@ func TestWaitForPrimaryAnnotationFn(t *testing.T) {
 				PrimaryNetworks: map[string]util.NetInfo{},
 			}
 			for _, nad := range tt.nads {
-				nadNetwork, _ := util.ParseNADInfo(nad)
-				nadNetwork.SetNADs(util.GetNADName(nad.Namespace, nad.Name))
+				nadNetwork, _, _ := util.ParseNADInfo(nad)
+				nadNetwork.SetNADs(map[string]*util.NADConfig{util.GetNADName(nad.Namespace, nad.Name): nil})
 				if nadNetwork.IsPrimaryNetwork() {
 					if _, loaded := nadController.PrimaryNetworks[nad.Namespace]; !loaded {
 						nadController.PrimaryNetworks[nad.Namespace] = nadNetwork

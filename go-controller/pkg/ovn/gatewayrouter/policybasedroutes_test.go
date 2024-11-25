@@ -134,7 +134,7 @@ func TestAddSameNodeIPPolicy(t *testing.T) {
 			Topology:   types.Layer3Topology,
 			JoinSubnet: joinSubnetIPv4Str,    // not required, but adding so NewNetInfo doesn't fail
 			Subnets:    clusterSubnetIPv4Str, // not required, but adding so NewNetInfo doesn't fail
-		})
+		}, nil)
 		udnL3Network = network{
 			initialLRPs: nil,
 			info:        l3NetInfo,
@@ -538,7 +538,7 @@ func TestAddHostCIDRPolicy(t *testing.T) {
 			Topology:   types.Layer2Topology,
 			JoinSubnet: joinSubnetIPv4Str,                                 // not required, but adding so NewNetInfo doesn't fail
 			Subnets:    clusterSubnetIPv4Str + "," + clusterSubnetIPv6Str, // not required, but adding so NewNetInfo doesn't fail
-		})
+		}, nil)
 		udnL2Network = network{
 			initialLRPs: nil,
 			info:        l2NetInfo,

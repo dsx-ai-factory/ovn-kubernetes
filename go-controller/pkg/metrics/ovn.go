@@ -7,7 +7,10 @@ import (
 
 	"k8s.io/klog/v2"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	ovsops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/vswitchd"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -249,64 +252,55 @@ var ovnControllerStopwatchShowMetricsMap = map[string]*stopwatchMetricDetails{
 // setOvnControllerConfigurationMetrics updates ovn-controller configuration
 // values (ovn-openflow-probe-interval, ovn-remote-probe-interval, ovn-monitor-all,
 // ovn-encap-ip, ovn-encap-type, ovn-remote) through updates from Open_vSwitch table in OVS DB
-func setOvnControllerConfigurationMetrics(ovsDBClient *util.OvsdbClient) (err error) {
-
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("recovering from panic while parsing the "+
-				"Open_vSwitch table's external_ids column - %v", r)
-		}
-	}()
-
-	openVswitchTable, err := ovsDBClient.GetOvsOpenVswitchTable()
+func setOvnControllerConfigurationMetrics(ovsDBClient libovsdbclient.Client) (err error) {
+	openVswitch, err := ovsops.GetOpenvSwitch(ovsDBClient)
 	if err != nil {
 		return fmt.Errorf("failed to get ovsdb openvswitch table :(%v)", err)
 	}
-	openVswitchRow := openVswitchTable[0]
 
 	// set OpenFlowProbeInterval metric
-	openflowProbeField := openVswitchRow.ExternalIds["ovn-openflow-probe-interval"]
+	openflowProbeField := openVswitch.ExternalIDs["ovn-openflow-probe-interval"]
 	openflowProbeValue := parseMetricToFloat(MetricOvnSubsystemController, "ovn-openflow-probe-interval", openflowProbeField)
 	metricOpenFlowProbeInterval.Set(openflowProbeValue)
 	// set ovn-remote-probe-interval metric
-	remoteProbeField := openVswitchRow.ExternalIds["ovn-remote-probe-interval"]
+	remoteProbeField := openVswitch.ExternalIDs["ovn-remote-probe-interval"]
 	remoteProbeValue := parseMetricToFloat(MetricOvnSubsystemController, "ovn-remote-probe-interval", remoteProbeField)
 	metricRemoteProbeInterval.Set(remoteProbeValue / 1000)
 	// set ovn-monitor-all metric value
 	var ovnMonitorValue float64
-	ovnMonitorField := openVswitchRow.ExternalIds["ovn-monitor-all"]
+	ovnMonitorField := openVswitch.ExternalIDs["ovn-monitor-all"]
 	if ovnMonitorField == "true" {
 		ovnMonitorValue = 1
 	}
 	metricMonitorAll.Set(ovnMonitorValue)
 	// set ovn-encap-ip metric
-	encapIPValue := openVswitchRow.ExternalIds["ovn-encap-ip"]
+	encapIPValue := openVswitch.ExternalIDs["ovn-encap-ip"]
 	// To update not only values but also labels for metrics, we use Reset() to delete previous labels+value
 	metricEncapIP.Reset()
 	metricEncapIP.WithLabelValues(encapIPValue).Set(1)
 	// set ovn-remote metric
-	ovnRemoteValue := openVswitchRow.ExternalIds["ovn-remote"]
+	ovnRemoteValue := openVswitch.ExternalIDs["ovn-remote"]
 	metricSbConnectionMethod.Reset()
 	metricSbConnectionMethod.WithLabelValues(ovnRemoteValue).Set(1)
 	// set ovn-encap-type metric
-	encapTypeValue := openVswitchRow.ExternalIds["ovn-encap-type"]
+	encapTypeValue := openVswitch.ExternalIDs["ovn-encap-type"]
 	metricEncapType.Reset()
 	metricEncapType.WithLabelValues(encapTypeValue).Set(1)
 	// set ovn-k8s-node-port metric
 	var ovnNodePortValue = 1
-	nodePortField := openVswitchRow.ExternalIds["ovn-k8s-node-port"]
+	nodePortField := openVswitch.ExternalIDs["ovn-k8s-node-port"]
 	if nodePortField == "false" {
 		ovnNodePortValue = 0
 	}
 	metricOvnNodePortEnabled.Set(float64(ovnNodePortValue))
 	// set ovn-bridge-mappings metric
-	brdigeMappingValue := openVswitchRow.ExternalIds["ovn-bridge-mappings"]
+	bridgeMappingValue := openVswitch.ExternalIDs["ovn-bridge-mappings"]
 	metricBridgeMappings.Reset()
-	metricBridgeMappings.WithLabelValues(brdigeMappingValue).Set(1)
+	metricBridgeMappings.WithLabelValues(bridgeMappingValue).Set(1)
 	return nil
 }
 
-func ovnControllerConfigurationMetricsUpdater(ovsDBClient *util.OvsdbClient,
+func ovnControllerConfigurationMetricsUpdater(ovsDBClient libovsdbclient.Client,
 	metricsScrapeInterval int, stopChan <-chan struct{}) {
 	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
 	defer ticker.Stop()
@@ -324,24 +318,26 @@ func ovnControllerConfigurationMetricsUpdater(ovsDBClient *util.OvsdbClient,
 	}
 }
 
-func getPortCount(portType string) float64 {
+func getPortCount(ovsDBClient libovsdbclient.Client, portType string) float64 {
 	var portCount float64
-	stdout, stderr, err := util.RunOVSVsctl("--no-headings", "--data=bare", "--format=csv",
-		"--columns=name", "find", "interface", "type="+portType)
+	p := func(item *vswitchd.Interface) bool {
+		return item.Type == portType
+	}
+
+	intfList, err := ovsops.FindInterfacesWithPredicate(ovsDBClient, p)
 	if err != nil {
-		klog.Errorf("Failed to get %s interface count, stderr(%s): (%v)", portType, stderr, err)
+		klog.Errorf("Failed to get %s interface count: %v", portType, err)
 		return 0
 	}
-	portNames := strings.Split(stdout, "\n")
-	switch portType {
-	case "patch":
-		for _, portName := range portNames {
-			if strings.Contains(portName, "br-int") {
+	if portType == "patch" {
+		for _, intf := range intfList {
+			if strings.Contains(intf.Name, "br-int") {
 				portCount++
 			}
+
 		}
-	default:
-		portCount = float64(len(portNames))
+	} else {
+		portCount = float64(len(intfList))
 	}
 
 	return portCount
@@ -405,7 +401,7 @@ func updateSBDBConnectionMetric(ovsAppctl ovsClient, retry int, retrySleep time.
 	}
 }
 
-func RegisterOvnControllerMetrics(ovsDBClient *util.OvsdbClient, metricsScrapeInterval int,
+func RegisterOvnControllerMetrics(ovsDBClient libovsdbclient.Client, metricsScrapeInterval int,
 	stopChan <-chan struct{}) {
 	getOvnControllerVersionInfo()
 	prometheus.MustRegister(prometheus.NewGaugeFunc(
@@ -456,7 +452,7 @@ func RegisterOvnControllerMetrics(ovsDBClient *util.OvsdbClient, metricsScrapeIn
 				"bridge to physical OVS bridge and br-local OVS bridge.",
 		},
 		func() float64 {
-			return getPortCount("patch")
+			return getPortCount(ovsDBClient, "patch")
 		}))
 	prometheus.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
@@ -466,7 +462,7 @@ func RegisterOvnControllerMetrics(ovsDBClient *util.OvsdbClient, metricsScrapeIn
 			Help:      "Captures the number of geneve ports that are on br-int OVS bridge.",
 		},
 		func() float64 {
-			return getPortCount("geneve")
+			return getPortCount(ovsDBClient, "geneve")
 		}))
 
 	// register ovn-controller configuration metrics

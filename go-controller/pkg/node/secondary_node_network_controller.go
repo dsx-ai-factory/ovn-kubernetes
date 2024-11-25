@@ -89,10 +89,8 @@ func (nc *SecondaryNodeNetworkController) Stop() {
 	close(nc.stopChan)
 	nc.wg.Wait()
 
-	if config.OvnKubeNode.Mode == types.NodeModeDPU {
-		if nc.podHandler != nil {
-			nc.watchFactory.RemovePodHandler(nc.podHandler)
-		}
+	if nc.podHandler != nil {
+		nc.watchFactory.RemovePodHandler(nc.podHandler)
 	}
 }
 

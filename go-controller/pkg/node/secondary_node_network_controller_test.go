@@ -57,6 +57,9 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 			KubeClient: fake.NewSimpleClientset(&corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "worker1",
+					Labels: map[string]string{
+						"kubernetes.io/hostname": "worker1",
+					},
 					Annotations: map[string]string{
 						"k8s.ovn.org/network-ids": `{"bluenet": "3"}`,
 					},
@@ -65,11 +68,11 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		}
 		controller := SecondaryNodeNetworkController{}
 		var err error
-		controller.watchFactory, err = factory.NewNodeWatchFactory(fakeClient, "worker1")
+		controller.watchFactory, err = factory.NewNodeWatchFactory(fakeClient, []string{"worker1"})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(controller.watchFactory.Start()).To(Succeed())
 
-		controller.NetInfo, err = util.ParseNADInfo(nad)
+		controller.NetInfo, _, err = util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 
 		networkID, err := controller.getNetworkID()
@@ -82,6 +85,9 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 			KubeClient: fake.NewSimpleClientset(&corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "worker1",
+					Labels: map[string]string{
+						"kubernetes.io/hostname": "worker1",
+					},
 					Annotations: map[string]string{
 						"k8s.ovn.org/network-ids": `{"othernet": "3"}`,
 					},
@@ -90,11 +96,11 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		}
 		controller := SecondaryNodeNetworkController{}
 		var err error
-		controller.watchFactory, err = factory.NewNodeWatchFactory(fakeClient, "worker1")
+		controller.watchFactory, err = factory.NewNodeWatchFactory(fakeClient, []string{"worker1"})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(controller.watchFactory.Start()).To(Succeed())
 
-		controller.NetInfo, err = util.ParseNADInfo(nad)
+		controller.NetInfo, _, err = util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 
 		networkID, err := controller.getNetworkID()
@@ -109,6 +115,9 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 			{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "worker1",
+					Labels: map[string]string{
+						"kubernetes.io/hostname": "worker1",
+					},
 					Annotations: map[string]string{
 						"k8s.ovn.org/network-ids": `{"bluenet": "3"}`,
 					},
@@ -118,7 +127,7 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		cnnci := CommonNodeNetworkControllerInfo{name: "worker1", watchFactory: &factoryMock}
 		factoryMock.On("GetNode", "worker1").Return(nodeList[0], nil)
 		factoryMock.On("GetNodes").Return(nodeList, nil)
-		NetInfo, err := util.ParseNADInfo(nad)
+		NetInfo, _, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 		controller, err := NewSecondaryNodeNetworkController(&cnnci, NetInfo, nil, nil, &gateway{})
 		Expect(err).NotTo(HaveOccurred())
@@ -134,6 +143,9 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 			{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "worker1",
+					Labels: map[string]string{
+						"kubernetes.io/hostname": "worker1",
+					},
 					Annotations: map[string]string{
 						"k8s.ovn.org/network-ids": `{"bluenet": "3"}`,
 					},
@@ -147,7 +159,7 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		factoryMock.On("NodeCoreInformer").Return(&nodeInformer)
 		nodeLister := v1mocks.NodeLister{}
 		nodeInformer.On("Lister").Return(&nodeLister)
-		NetInfo, err := util.ParseNADInfo(nad)
+		NetInfo, _, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 		getCreationFakeCommands(fexec, "ovn-k8s-mp3", mgtPortMAC, NetInfo.GetNetworkName(), "worker1", NetInfo.MTU())
 		controller, err := NewSecondaryNodeNetworkController(&cnnci, NetInfo, nil, nil, &gateway{})
@@ -165,6 +177,9 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 			{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "worker1",
+					Labels: map[string]string{
+						"kubernetes.io/hostname": "worker1",
+					},
 					Annotations: map[string]string{
 						"k8s.ovn.org/network-ids": `{"bluenet": "3"}`,
 					},
@@ -176,7 +191,7 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		factoryMock.On("GetNodes").Return(nodeList, nil)
 		nad = ovntest.GenerateNAD("bluenet", "rednad", "greenamespace",
 			types.Layer3Topology, "100.128.0.0/16", types.NetworkRoleSecondary)
-		NetInfo, err := util.ParseNADInfo(nad)
+		NetInfo, _, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 		controller, err := NewSecondaryNodeNetworkController(&cnnci, NetInfo, nil, nil, &gateway{})
 		Expect(err).NotTo(HaveOccurred())
@@ -312,7 +327,7 @@ var _ = Describe("SecondaryNodeNetworkController: UserDefinedPrimaryNetwork Gate
 		By("creating NAD for primary UDN")
 		nad = ovntest.GenerateNAD("bluenet", "rednad", "greenamespace",
 			types.Layer3Topology, "100.128.0.0/16", types.NetworkRolePrimary)
-		NetInfo, err := util.ParseNADInfo(nad)
+		NetInfo, _, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 
 		By("creating secondary network controller for user defined primary network")

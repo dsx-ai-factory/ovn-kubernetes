@@ -209,7 +209,7 @@ var _ = Describe("Healthcheck tests", func() {
 			config.OVNKubernetesFeature.EnableMultiNetwork = true
 
 			factoryMock := factoryMocks.NodeWatchFactory{}
-			NetInfo, err := util.ParseNADInfo(nad)
+			NetInfo, _, err := util.ParseNADInfo(nad)
 			Expect(err).NotTo(HaveOccurred())
 			node := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
@@ -225,7 +225,7 @@ var _ = Describe("Healthcheck tests", func() {
 			factoryMock.On("NADInformer").Return(nil)
 			factoryMock.On("UserDefinedNetworkInformer").Return(nil)
 
-			ncm, err := NewNodeNetworkControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager)
+			ncm, err := NewNodeNetworkControllerManager(fakeClient, &factoryMock, nodeName, "", &sync.WaitGroup{}, nil, routeManager)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = testNS.Do(func(ns.NetNS) error {

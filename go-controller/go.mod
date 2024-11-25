@@ -13,7 +13,6 @@ require (
 	github.com/containernetworking/cni v1.1.2
 	github.com/containernetworking/plugins v1.2.0
 	github.com/coreos/go-iptables v0.6.0
-	github.com/ebay/libovsdb v0.2.0
 	github.com/fsnotify/fsnotify v1.7.0
 	github.com/gaissmai/cidrtree v0.1.4
 	github.com/go-logr/logr v1.4.2
@@ -31,7 +30,6 @@ require (
 	github.com/mdlayher/ndp v1.0.1
 	github.com/miekg/dns v1.1.31
 	github.com/mitchellh/copystructure v1.2.0
-	github.com/onsi/ginkgo v1.16.5
 	github.com/onsi/ginkgo/v2 v2.19.0
 	github.com/onsi/gomega v1.33.1
 	github.com/openshift/api v0.0.0-20231120222239-b86761094ee3
@@ -60,7 +58,6 @@ require (
 	k8s.io/apimachinery v0.31.1
 	k8s.io/client-go v0.31.1
 	k8s.io/component-helpers v0.31.1
-	k8s.io/klog v0.2.0
 	k8s.io/klog/v2 v2.130.1
 	k8s.io/kubernetes v1.31.1
 	k8s.io/utils v0.0.0-20240711033017-18e509b52bc8
@@ -110,7 +107,6 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/mxk/go-flowrate v0.0.0-20140419014527-cca7078d478f // indirect
-	github.com/nxadm/tail v1.4.8 // indirect
 	github.com/openshift/custom-resource-status v1.1.2 // indirect
 	github.com/pborman/uuid v1.2.0 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
@@ -134,7 +130,6 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240701130421-f6361c86f094 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
-	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect

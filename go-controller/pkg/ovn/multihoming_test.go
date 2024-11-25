@@ -25,7 +25,7 @@ import (
 )
 
 func (p testPod) addNetwork(
-	netName, nadName, nodeSubnet, nodeMgtIP, nodeGWIP, podIP, podMAC, role string,
+	netName, nadName, nodeSubnet, nodeMgtIP, nodeGWIP, podIP, podMAC, podMTU, role string,
 	tunnelID int,
 	routes []util.PodRoute,
 ) {
@@ -52,6 +52,7 @@ func (p testPod) addNetwork(
 		portName:  portName,
 		tunnelID:  tunnelID,
 		prefixLen: prefixLen,
+		podMTU:    podMTU,
 	}
 }
 
@@ -244,6 +245,7 @@ func (em *secondaryNetworkExpectationMachine) expectedLogicalSwitchesAndPorts(is
 				ExternalIDs: map[string]string{
 					ovntypes.NetworkExternalID:     ocInfo.bnc.GetNetworkName(),
 					ovntypes.NetworkRoleExternalID: util.GetUserDefinedNetworkRole(isPrimary),
+					ovntypes.TopologyExternalID:    ocInfo.bnc.TopologyType(),
 				},
 				OtherConfig: otherConfig,
 				ACLs:        acls[switchName],

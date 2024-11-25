@@ -36,8 +36,10 @@ type FakeNADController struct {
 	PrimaryNetworks map[string]util.NetInfo
 }
 
-func (nc *FakeNADController) Start() error { return nil }
-func (nc *FakeNADController) Stop()        {}
+func (nc *FakeNADController) Start(networkAttachDefController.BaseNetworkController) error {
+	return nil
+}
+func (nc *FakeNADController) Stop() {}
 func (nc *FakeNADController) GetActiveNetworkForNamespace(namespace string) (util.NetInfo, error) {
 	if primaryNetworks, ok := nc.PrimaryNetworks[namespace]; ok && primaryNetworks != nil {
 		return primaryNetworks, nil

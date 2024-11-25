@@ -987,7 +987,7 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 
 		if config.OVNKubernetesFeature.EnableInterconnect {
 			wf.informers[PodType], err = newQueuedInformer(PodType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan, defaultNumEventQueues,
-			10, defaultNumEventQueues, 10)
+				10, defaultNumEventQueues, 10)
 			if err != nil {
 				return nil, err
 			}

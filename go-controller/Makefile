@@ -65,7 +65,7 @@ else
 	RACE=1 hack/test-go.sh
 endif
 
-modelgen: pkg/nbdb/ovn-nb.ovsschema pkg/sbdb/ovn-sb.ovsschema
+modelgen: pkg/nbdb/ovn-nb.ovsschema pkg/sbdb/ovn-sb.ovsschema pkg/vswitchd/vswitch.ovsschema
 	hack/update-modelgen.sh
 
 codegen:
@@ -86,6 +86,7 @@ clean:
 	rm -rf ${TEST_REPORT_DIR}
 	rm -f ./pkg/nbdb/ovn-nb.ovsschema
 	rm -f ./pkg/sbdb/ovn-sb.ovsschema
+	rm -f ./pkg/vswitchd/vswitch.ovsschema
 
 .PHONY: lint gofmt
 
@@ -108,6 +109,9 @@ pkg/nbdb/ovn-nb.ovsschema:
 
 pkg/sbdb/ovn-sb.ovsschema:
 	curl -sSL https://raw.githubusercontent.com/ovn-org/ovn/$(OVN_SCHEMA_VERSION)/ovn-sb.ovsschema -o $@
+
+pkg/vswitchd/vswitch.ovsschema:
+	curl -sSL https://raw.githubusercontent.com/openvswitch/ovs/${OVS_VERSION}/vswitchd/vswitch.ovsschema -o $@
 
 ${TOOLS_OUTPUT_DIR}:
 	mkdir -p ${TOOLS_OUTPUT_DIR}

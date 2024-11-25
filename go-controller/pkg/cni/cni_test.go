@@ -231,7 +231,7 @@ var _ = Describe("Network Segmentation", func() {
 				nadNamespaceLister := &v1nadmocks.NetworkAttachmentDefinitionNamespaceLister{}
 				nadNamespaceLister.On("List", labels.Everything()).Return([]*nadv1.NetworkAttachmentDefinition{nad}, nil)
 				nadLister.On("NetworkAttachmentDefinitions", "foo-ns").Return(nadNamespaceLister)
-				nadNetwork, err := util.ParseNADInfo(nad)
+				nadNetwork, _, err := util.ParseNADInfo(nad)
 				Expect(err).NotTo(HaveOccurred())
 				nadController = &ovntest.FakeNADController{
 					PrimaryNetworks: make(map[string]util.NetInfo),

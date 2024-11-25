@@ -151,7 +151,7 @@ func getSampleUDNNetInfo(namespace string, topology string) (util.NetInfo, error
 		Subnets:    subnets,
 		NetConf:    cnitypes.NetConf{Name: fmt.Sprintf("net_%s", topology), Type: "ovn-k8s-cni-overlay"},
 		JoinSubnet: "100.66.0.0/16",
-	})
+	}, nil)
 	return netInfo, err
 }
 
@@ -1491,7 +1491,7 @@ func TestSyncServices(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Error creating controller: %v", err)
 				}
-				if err := controller.nadController.Start(); err != nil {
+				if err := controller.nadController.Start(nil); err != nil {
 					t.Fatalf("Error starting NAD controller: %v", err)
 				}
 				defer controller.nadController.Stop()

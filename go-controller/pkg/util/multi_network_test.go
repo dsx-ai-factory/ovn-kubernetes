@@ -587,7 +587,7 @@ func TestJoinSubnets(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.desc, func(t *testing.T) {
 			g := gomega.NewWithT(t)
-			netInfo, err := NewNetInfo(test.inputNetConf)
+			netInfo, err := NewNetInfo(test.inputNetConf, nil)
 			g.Expect(err).To(gomega.BeNil())
 			g.Expect(netInfo.JoinSubnets()).To(gomega.Equal(test.expectedSubnets))
 			if netInfo.TopologyType() != ovntypes.LocalnetTopology {
@@ -689,7 +689,7 @@ func TestIsPrimaryNetwork(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.desc, func(t *testing.T) {
 			g := gomega.NewWithT(t)
-			netInfo, err := NewNetInfo(test.inputNetConf)
+			netInfo, err := NewNetInfo(test.inputNetConf, nil)
 			g.Expect(err).To(gomega.BeNil())
 			g.Expect(netInfo.IsPrimaryNetwork()).To(gomega.Equal(test.expectedPrimary))
 		})
@@ -742,7 +742,7 @@ func TestIsDefault(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.desc, func(t *testing.T) {
 			g := gomega.NewWithT(t)
-			netInfo, err := NewNetInfo(test.inputNetConf)
+			netInfo, err := NewNetInfo(test.inputNetConf, nil)
 			g.Expect(err).To(gomega.BeNil())
 			g.Expect(netInfo.IsDefault()).To(gomega.Equal(test.expectedDefaultVal))
 		})
@@ -821,10 +821,10 @@ func TestGetPodNADToNetworkMapping(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.desc, func(t *testing.T) {
 			g := gomega.NewWithT(t)
-			netInfo, err := NewNetInfo(test.inputNetConf)
+			netInfo, err := NewNetInfo(test.inputNetConf, nil)
 			g.Expect(err).To(gomega.BeNil())
 			if test.inputNetConf.NADName != "" {
-				netInfo.AddNADs(test.inputNetConf.NADName)
+				netInfo.AddNADs(map[string]*NADConfig{test.inputNetConf.NADName: nil})
 			}
 
 			pod := &corev1.Pod{
@@ -1014,18 +1014,18 @@ func TestGetPodNADToNetworkMappingWithActiveNetwork(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.desc, func(t *testing.T) {
 			g := gomega.NewWithT(t)
-			netInfo, err := NewNetInfo(test.inputNetConf)
+			netInfo, err := NewNetInfo(test.inputNetConf, nil)
 			g.Expect(err).To(gomega.BeNil())
 			if test.inputNetConf.NADName != "" {
-				netInfo.AddNADs(test.inputNetConf.NADName)
+				netInfo.AddNADs(map[string]*NADConfig{test.inputNetConf.NADName: nil})
 			}
 
 			var primaryUDNNetInfo NetInfo
 			if test.inputPrimaryUDNConfig != nil {
-				primaryUDNNetInfo, err = NewNetInfo(test.inputPrimaryUDNConfig)
+				primaryUDNNetInfo, err = NewNetInfo(test.inputPrimaryUDNConfig, nil)
 				g.Expect(err).To(gomega.BeNil())
 				if test.inputPrimaryUDNConfig.NADName != "" {
-					primaryUDNNetInfo.AddNADs(test.inputPrimaryUDNConfig.NADName)
+					primaryUDNNetInfo.AddNADs(map[string]*NADConfig{test.inputPrimaryUDNConfig.NADName: nil})
 				}
 			}
 
@@ -1161,10 +1161,10 @@ func TestSubnetOverlapCheck(t *testing.T) {
 					},
 				})
 			if test.expectedError != nil {
-				_, err := ParseNADInfo(networkAttachmentDefinition)
+				_, _, err := ParseNADInfo(networkAttachmentDefinition)
 				g.Expect(err).To(gomega.MatchError(test.expectedError.Error()))
 			} else {
-				_, err := ParseNADInfo(networkAttachmentDefinition)
+				_, _, err := ParseNADInfo(networkAttachmentDefinition)
 				g.Expect(err).NotTo(gomega.HaveOccurred())
 			}
 		})
@@ -1245,7 +1245,7 @@ func TestNewNetInfo(t *testing.T) {
 			config.IPv4Mode = test.ipv4Cluster
 			config.IPv6Mode = test.ipv6Cluster
 			g := gomega.NewWithT(t)
-			_, err := NewNetInfo(inputNetConf)
+			_, err := NewNetInfo(inputNetConf, nil)
 			if test.expectedError == nil {
 				g.Expect(err).To(gomega.BeNil())
 			} else {

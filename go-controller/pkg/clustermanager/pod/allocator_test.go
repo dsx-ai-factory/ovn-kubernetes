@@ -570,7 +570,7 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Invalid netConf")
 			}
-			netInfo.AddNAD("namespace/nad", nil)
+			netInfo.AddNADs(map[string]*util.NADConfig{"namespace/nad": nil})
 
 			var ipamClaimsReconciler persistentips.PersistentAllocations
 			if tt.ipam && tt.args.ipamClaim != nil {
@@ -595,7 +595,7 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 			nadNetworks := map[string]util.NetInfo{}
 			for _, nad := range tt.args.nads {
 				if nad.Namespace == testNs {
-					nadNetwork, _ := util.ParseNADInfo(nad)
+					nadNetwork, _, _ := util.ParseNADInfo(nad)
 					if nadNetwork.IsPrimaryNetwork() {
 						if _, ok := nadNetworks[testNs]; !ok {
 							nadNetworks[testNs] = nadNetwork

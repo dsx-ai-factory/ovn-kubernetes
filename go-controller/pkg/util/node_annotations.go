@@ -654,6 +654,9 @@ func UpdateUDNLayer2NodeGRLRPTunnelIDs(annotations map[string]string, netName st
 		annotations = map[string]string{}
 	}
 	if err := updateNetworkAnnotation(annotations, netName, tunnelID, ovnUDNLayer2NodeGRLRPTunnelIDs); err != nil {
+		if IsAnnotationAlreadySetError(err) {
+			return annotations, err
+		}
 		return nil, err
 	}
 	return annotations, nil
@@ -723,7 +726,9 @@ func UpdateNodeGatewayRouterLRPAddrsAnnotation(annotations map[string]string, jo
 	}
 	err := updateJoinSubnetAnnotation(annotations, OVNNodeGRLRPAddrs, netName, joinSubnets)
 	if err != nil {
-		return nil, err
+		if !IsAnnotationAlreadySetError(err) {
+			return nil, err
+		}
 	}
 	return annotations, nil
 }
@@ -745,6 +750,7 @@ func updateJoinSubnetAnnotation(annotations map[string]string, annotationName, n
 		subnetsMap = map[string]primaryIfAddrAnnotation{}
 	}
 
+	oldSubnetVal, ok := subnetsMap[netName]
 	// add or delete host subnet of the specified network
 	if len(joinSubnets) != 0 {
 		subnetVal := primaryIfAddrAnnotation{}
@@ -755,8 +761,14 @@ func updateJoinSubnetAnnotation(annotations map[string]string, annotationName, n
 				subnetVal.IPv6 = net.String()
 			}
 		}
+		if ok && oldSubnetVal == subnetVal {
+			return newAnnotationAlreadySetError("%s annotation already set", annotationName)
+		}
 		subnetsMap[netName] = subnetVal
 	} else {
+		if !ok {
+			return newAnnotationAlreadySetError("%s annotation already unset", annotationName)
+		}
 		delete(subnetsMap, netName)
 	}
 
@@ -1526,7 +1538,7 @@ func ParseNetworkIDAnnotation(node *kapi.Node, netName string) (int, error) {
 // with the provided ID in 'annotationName's value.  If 'id' is InvalidID (-1)
 // it deletes the annotationName annotation from the map.
 // It is currently used for ovnNetworkIDs annotation updates
-// merge TBD check return error of updateNetworkAnnotation (alreadySet) 
+// merge TBD check return error of updateNetworkAnnotation (alreadySet)
 func updateNetworkAnnotation(annotations map[string]string, netName string, id int, annotationName string) error {
 	var bytes []byte
 

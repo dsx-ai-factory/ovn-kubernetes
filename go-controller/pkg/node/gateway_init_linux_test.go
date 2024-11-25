@@ -258,7 +258,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			testNCM := &nad.FakeNetworkControllerManager{}
 			nadController, err = networkAttachDefController.NewNetAttachDefinitionController("test", testNCM, wf, nil)
 			Expect(err).NotTo(HaveOccurred())
-			err = nadController.Start()
+			err = nadController.Start(nil)
 			Expect(err).NotTo(HaveOccurred())
 			defer nadController.Stop()
 		}
@@ -692,7 +692,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			testNCM := &nad.FakeNetworkControllerManager{}
 			nadController, err = networkAttachDefController.NewNetAttachDefinitionController("test", testNCM, wf, nil)
 			Expect(err).NotTo(HaveOccurred())
-			err = nadController.Start()
+			err = nadController.Start(nil)
 			Expect(err).NotTo(HaveOccurred())
 			defer nadController.Stop()
 		}
@@ -825,7 +825,7 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		ipnet.IP = ip
 		routeManager := routemanager.NewController()
 		cnnci := NewCommonNodeNetworkControllerInfo(fakeClient, wf, nil, nodeName, "", "", []string{}, routeManager)
-		nc := newDefaultNodeNetworkController(cnnci, &util.DefaultNetInfo{}, stop, wg, routeManager)
+		nc := newDefaultNodeNetworkController(cnnci, stop, wg, routeManager)
 		// must run route manager manually which is usually started with nc.Start()
 		wg.Add(1)
 		go testNS.Do(func(netNS ns.NetNS) error {
@@ -1151,7 +1151,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 			testNCM := &nad.FakeNetworkControllerManager{}
 			nadController, err = networkAttachDefController.NewNetAttachDefinitionController("test", testNCM, wf, nil)
 			Expect(err).NotTo(HaveOccurred())
-			err = nadController.Start()
+			err = nadController.Start(nil)
 			Expect(err).NotTo(HaveOccurred())
 			defer nadController.Stop()
 		}

@@ -2,6 +2,7 @@ package topology
 
 import (
 	"net"
+	"strconv"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -48,7 +49,7 @@ var _ = Describe("Topology factory", func() {
 			ovnDB = libovsdbCleanup
 			nbClient = libovsdbNBClient
 
-			netInfo, err = util.NewNetInfo(newLayer3PrimaryNetworkConf(networkName, networkSubnets))
+			netInfo, err = util.NewNetInfo(newLayer3PrimaryNetworkConf(networkName, networkSubnets), nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			factory = NewGatewayTopologyFactory(libovsdbNBClient)
@@ -69,6 +70,11 @@ var _ = Describe("Topology factory", func() {
 				"k8s-cluster-router":        "yes",
 			}
 			expectedOptions := map[string]string{"always_learn_from_arp_request": "false"}
+			macBindingAgeThreshold := "0"
+			for _, ipnet := range netInfo.Subnets() {
+				macBindingAgeThreshold += ";" + ipnet.CIDR.String() + ":" + strconv.Itoa(config.Default.ClusterSubnetsMacBindingAging)
+			}
+			expectedOptions["mac_binding_age_threshold"] = macBindingAgeThreshold
 			Expect(clusterRouter).To(
 				WithTransform(
 					removeUUID,
@@ -88,6 +94,11 @@ var _ = Describe("Topology factory", func() {
 				"k8s-cluster-router":        "yes",
 			}
 			expectedOptions := map[string]string{"mcast_relay": "true"}
+			macBindingAgeThreshold := "0"
+			for _, ipnet := range netInfo.Subnets() {
+				macBindingAgeThreshold += ";" + ipnet.CIDR.String() + ":" + strconv.Itoa(config.Default.ClusterSubnetsMacBindingAging)
+			}
+			expectedOptions["mac_binding_age_threshold"] = macBindingAgeThreshold
 			Expect(clusterRouter).To(
 				WithTransform(
 					removeUUID,
@@ -138,7 +149,7 @@ var _ = Describe("Topology factory", func() {
 			ovnDB = libovsdbCleanup
 			nbClient = libovsdbNBClient
 
-			netInfo, err = util.NewNetInfo(newLayer3PrimaryNetworkConf(networkName, networkSubnets))
+			netInfo, err = util.NewNetInfo(newLayer3PrimaryNetworkConf(networkName, networkSubnets), nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			factory = NewGatewayTopologyFactory(libovsdbNBClient)

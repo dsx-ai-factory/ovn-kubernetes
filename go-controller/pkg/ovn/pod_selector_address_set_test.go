@@ -25,16 +25,16 @@ func getPolicyKeyWithKind(policy *knet.NetworkPolicy) string {
 	return fmt.Sprintf("%v/%v/%v", "NetworkPolicy", policy.Namespace, policy.Name)
 }
 
-func eventuallyExpectAddressSetsWithIP(fakeOvn *FakeOVN, peer knet.NetworkPolicyPeer, namespace, ip string) {
+func eventuallyExpectAddressSetsWithIP(fakeOvn *FakeOVN, peer knet.NetworkPolicyPeer, namespace, ip, policyType string) {
 	if peer.PodSelector != nil {
-		dbIDs := getPodSelectorAddrSetDbIDs(getPodSelectorKey(peer.PodSelector, peer.NamespaceSelector, namespace), DefaultNetworkControllerName)
+		dbIDs := getPodSelectorAddrSetDbIDs(getPodSelectorKey(peer.PodSelector, peer.NamespaceSelector, namespace, policyType), DefaultNetworkControllerName)
 		fakeOvn.asf.EventuallyExpectAddressSetWithAddresses(dbIDs, []string{ip})
 	}
 }
 
-func eventuallyExpectEmptyAddressSetsExist(fakeOvn *FakeOVN, peer knet.NetworkPolicyPeer, namespace string) {
+func eventuallyExpectEmptyAddressSetsExist(fakeOvn *FakeOVN, peer knet.NetworkPolicyPeer, namespace, policyType string) {
 	if peer.PodSelector != nil {
-		dbIDs := getPodSelectorAddrSetDbIDs(getPodSelectorKey(peer.PodSelector, peer.NamespaceSelector, namespace), DefaultNetworkControllerName)
+		dbIDs := getPodSelectorAddrSetDbIDs(getPodSelectorKey(peer.PodSelector, peer.NamespaceSelector, namespace, policyType), DefaultNetworkControllerName)
 		fakeOvn.asf.EventuallyExpectEmptyAddressSetExist(dbIDs)
 	}
 }
@@ -413,7 +413,7 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 				metav1.CreateOptions{})
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		// pod should be added to the address set
-		eventuallyExpectAddressSetsWithIP(fakeOvn, peer, namespace1.Name, podIP, knet.PolicyTypeIngress)
+		eventuallyExpectAddressSetsWithIP(fakeOvn, peer, namespace1.Name, podIP, string(knet.PolicyTypeIngress))
 
 		// Spawn a pod with an IP address that collides with a completed pod (we don't watch pods in this test,
 		// therefore the same ip is allowed)
@@ -433,7 +433,7 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 		// make sure the delete event is handled and address set is not changed
 		time.Sleep(100 * time.Millisecond)
 		// Running pod policy should not be affected by pod deletions
-		eventuallyExpectAddressSetsWithIP(fakeOvn, peer, namespace1.Name, podIP, knet.PolicyTypeIngress)
+		eventuallyExpectAddressSetsWithIP(fakeOvn, peer, namespace1.Name, podIP, string(knet.PolicyTypeIngress))
 	})
 	ginkgo.It("reconciles a completed pod whose IP has been assigned to a running pod with non-matching namespace selector", func() {
 		namespace1 := *newNamespace(namespaceName1)
@@ -470,7 +470,7 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 				metav1.CreateOptions{})
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		// pod should be added to the address set
-		eventuallyExpectAddressSetsWithIP(fakeOvn, peer, namespace1.Name, podIP, knet.PolicyTypeIngress)
+		eventuallyExpectAddressSetsWithIP(fakeOvn, peer, namespace1.Name, podIP, string(knet.PolicyTypeIngress))
 
 		// Spawn a pod with an IP address that collides with a completed pod (we don't watch pods in this test,
 		// therefore the same ip is allowed). This pod has another namespace that is not matched by the address set
@@ -489,7 +489,7 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 
 		// IP should be deleted from the address set on delete event, since the new pod with the same ip
 		// should not be present in given address set
-		eventuallyExpectEmptyAddressSetsExist(fakeOvn, peer, namespace1.Name, knet.PolicyTypeIngress)
+		eventuallyExpectEmptyAddressSetsExist(fakeOvn, peer, namespace1.Name, string(knet.PolicyTypeIngress))
 	})
 	ginkgo.It("cleans up retryFramework resources", func() {
 		namespace1 := *newNamespace(namespaceName1)

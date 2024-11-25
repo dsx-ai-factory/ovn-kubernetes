@@ -5,6 +5,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli/v2"
@@ -53,16 +54,16 @@ var OvsExporterCommand = cli.Command{
 		wg := &sync.WaitGroup{}
 
 		// start the ovsdb client for ovs metrics monitoring
-		ovsDBClient, err := metrics.SetupOvsDBClient()
+		ovsClient, err := libovsdb.NewOVSClient(stopChan)
 		if err != nil {
-			return fmt.Errorf("error when trying to initialize ovsdb client: %v", err)
+			return fmt.Errorf("error when trying to initialize ovs client: %v", err)
 		}
 		hostName, err := os.Hostname()
 		if err != nil {
 			return fmt.Errorf("cannot get hostname: %v", err)
 		}
 		// register ovs metrics that will be served off of /metrics path
-		metrics.RegisterOvsMetrics(hostName, ovsDBClient, metricsScrapeInterval, stopChan)
+		metrics.RegisterOvsMetrics(hostName, ovsClient, metricsScrapeInterval, stopChan)
 		// register ovsDB metrics
 		metrics.RegisterOvsDBMetrics(metricsScrapeInterval, stopChan)
 		// start the prometheus server to serve OVS Metrics (default port: 9310)

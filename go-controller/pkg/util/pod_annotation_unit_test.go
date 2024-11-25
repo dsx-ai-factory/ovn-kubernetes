@@ -33,7 +33,7 @@ func TestMarshalPodAnnotation(t *testing.T) {
 		{
 			desc:           "PodAnnotation instance when role is set to primary",
 			inpPodAnnot:    PodAnnotation{Role: types.NetworkRolePrimary},
-			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"","role":"primary"}}`},
+			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"","mtu":"0","role":"primary"}}`},
 		},
 		{
 			desc: "single IP assigned to pod with MAC, Gateway, Routes NOT SPECIFIED",
@@ -61,11 +61,7 @@ func TestMarshalPodAnnotation(t *testing.T) {
 				},
 				Role: types.NetworkRoleSecondary,
 			},
-<<<<<<< HEAD
-			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"","gateway_ips":["192.168.0.1"],"mtu":"0","ip_address":"192.168.0.5/24","gateway_ip":"192.168.0.1"}}`},
-=======
-			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"","gateway_ips":["192.168.0.1"],"ip_address":"192.168.0.5/24","gateway_ip":"192.168.0.1","role":"secondary"}}`},
->>>>>>> ffddd06ec12e43af0397bca8e36adedf8df441b1
+			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"","gateway_ips":["192.168.0.1"],"mtu":"0","ip_address":"192.168.0.5/24","gateway_ip":"192.168.0.1","role":"secondary"}}`},
 		},
 		{
 			desc:     "verify error thrown when number of gateways greater than one for a single-stack network",
@@ -101,11 +97,7 @@ func TestMarshalPodAnnotation(t *testing.T) {
 				},
 				Role: types.NetworkRoleInfrastructure,
 			},
-<<<<<<< HEAD
-			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"","routes":[{"dest":"192.168.1.0/24","nextHop":"192.168.1.1"}],"mtu":"0"}}`},
-=======
-			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"","routes":[{"dest":"192.168.1.0/24","nextHop":"192.168.1.1"}],"role":"infrastructure-locked"}}`},
->>>>>>> ffddd06ec12e43af0397bca8e36adedf8df441b1
+			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"","routes":[{"dest":"192.168.1.0/24","nextHop":"192.168.1.1"}],"mtu":"0","role":"infrastructure-locked"}}`},
 		},
 		{
 			desc: "next hop not set for route",
@@ -375,13 +367,8 @@ func TestGetPodIPsOfNetwork(t *testing.T) {
 func newDummyNetInfo(namespace, networkName string) NetInfo {
 	netInfo, _ := newLayer2NetConfInfo(&ovncnitypes.NetConf{
 		NetConf: cnitypes.NetConf{Name: networkName},
-<<<<<<< HEAD
 	}, nil)
-	netInfo.AddNAD(GetNADName(namespace, networkName), nil)
-=======
-	})
-	netInfo.AddNADs(GetNADName(namespace, networkName))
->>>>>>> ffddd06ec12e43af0397bca8e36adedf8df441b1
+	netInfo.AddNADs(map[string]*NADConfig{GetNADName(namespace, networkName): nil})
 	return netInfo
 }
 

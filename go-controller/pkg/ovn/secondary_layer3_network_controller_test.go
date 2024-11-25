@@ -40,6 +40,7 @@ type secondaryNetInfo struct {
 	clustersubnets string
 	hostsubnets    string // not used in layer2 tests
 	topology       string
+	mtu            string
 	isPrimary      bool
 }
 
@@ -113,7 +114,7 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 				Expect(netInfo.setupOVNDependencies(&initialDB)).To(Succeed())
 
 				if netInfo.isPrimary {
-					networkConfig, err := util.NewNetInfo(netInfo.netconf())
+					networkConfig, err := util.NewNetInfo(netInfo.netconf(), nil)
 					Expect(err).NotTo(HaveOccurred())
 
 					initialDB.NBData = append(
@@ -162,7 +163,7 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 				_, ok := pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeFalse())
 
-				Expect(fakeOvn.controller.nadController.Start()).NotTo(HaveOccurred())
+				Expect(fakeOvn.controller.nadController.Start(nil)).NotTo(HaveOccurred())
 
 				Expect(fakeOvn.controller.WatchNamespaces()).NotTo(HaveOccurred())
 				Expect(fakeOvn.controller.WatchPods()).NotTo(HaveOccurred())
@@ -255,7 +256,7 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 			}
 			app.Action = func(ctx *cli.Context) error {
 				netConf := netInfo.netconf()
-				networkConfig, err := util.NewNetInfo(netConf)
+				networkConfig, err := util.NewNetInfo(netConf, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				nad, err := newNetworkAttachmentDefinition(
@@ -265,7 +266,7 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 				)
 				Expect(err).NotTo(HaveOccurred())
 
-				networkConfig.SetNADs(util.GetNADName(nad.Namespace, nad.Name))
+				networkConfig.SetNADs(map[string]*util.NADConfig{util.GetNADName(nad.Namespace, nad.Name): nil})
 				nadController := &fakenad.FakeNADController{
 					PrimaryNetworks: make(map[string]util.NetInfo),
 				}
@@ -324,7 +325,7 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 				_, ok := pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeFalse())
 
-				Expect(fakeOvn.controller.nadController.Start()).NotTo(HaveOccurred())
+				Expect(fakeOvn.controller.nadController.Start(nil)).NotTo(HaveOccurred())
 
 				Expect(fakeOvn.controller.WatchNamespaces()).To(Succeed())
 				Expect(fakeOvn.controller.WatchPods()).To(Succeed())
@@ -399,6 +400,7 @@ func newPodWithPrimaryUDN(
 		nodeGWIP,
 		"192.168.1.3/24",
 		"0a:58:c0:a8:01:03",
+		primaryUDNConfig.mtu,
 		"primary",
 		0,
 		[]util.PodRoute{
@@ -430,7 +432,7 @@ func getNetworkRole(netInfo util.NetInfo) string {
 }
 
 func (sni *secondaryNetInfo) setupOVNDependencies(dbData *libovsdbtest.TestSetup) error {
-	netInfo, err := util.NewNetInfo(sni.netconf())
+	netInfo, err := util.NewNetInfo(sni.netconf(), nil)
 	if err != nil {
 		return err
 	}
@@ -438,6 +440,7 @@ func (sni *secondaryNetInfo) setupOVNDependencies(dbData *libovsdbtest.TestSetup
 	externalIDs := map[string]string{
 		ovntypes.NetworkExternalID:     sni.netName,
 		ovntypes.NetworkRoleExternalID: sni.getNetworkRole(),
+		ovntypes.TopologyExternalID:    sni.topology,
 	}
 	switch sni.topology {
 	case ovntypes.Layer2Topology:
@@ -507,6 +510,7 @@ func dummyTestPod(nsName string, info secondaryNetInfo) testPod {
 		"",
 		"192.168.1.3/24",
 		"0a:58:c0:a8:01:03",
+		info.mtu,
 		"secondary",
 		0,
 		[]util.PodRoute{
@@ -530,6 +534,7 @@ func dummySecondaryLayer3UserDefinedNetwork(clustersubnets, hostsubnets string) 
 		nadName:        namespacedName(ns, nadName),
 		topology:       ovntypes.Layer3Topology,
 		clustersubnets: clustersubnets,
+		mtu:            fmt.Sprintf("%d", config.Default.MTU),
 		hostsubnets:    hostsubnets,
 	}
 }
@@ -958,7 +963,8 @@ func newSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 	Expect(err).NotTo(HaveOccurred())
 	layer3NetworkController.gatewayManagers.Store(
 		nodeName,
-		newDummyGatewayManager(cnci.kube, cnci.nbClient, netInfo, cnci.watchFactory, nodeName),
+		newDummyGatewayManager(layer3NetworkController.controllerName, cnci.kube, cnci.nbClient, netInfo,
+			cnci.watchFactory, layer3NetworkController.addressSetFactory, nodeName),
 	)
 	return layer3NetworkController
 }

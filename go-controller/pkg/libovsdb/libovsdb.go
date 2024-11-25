@@ -23,6 +23,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/vswitchd"
 	"github.com/prometheus/client_golang/prometheus"
 	"gopkg.in/fsnotify/fsnotify.v1"
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -158,9 +159,6 @@ func NewSBClientWithConfig(cfg config.OvnAuthConfig, promRegistry prometheus.Reg
 	monitorOptionTable := []client.MonitorOption{
 		// used by unidling controller
 		client.WithTable(&sbdb.ControllerEvent{}),
-		// used for gateway
-		// TBD: SDN-1535: MacBinding is not required in ngn 2.1
-		// client.WithTable(&sbdb.MACBinding{}),
 		// used by node sync
 		client.WithTable(&sbdb.Chassis{}),
 		// used by node sync, only interested in names
@@ -169,9 +167,6 @@ func NewSBClientWithConfig(cfg config.OvnAuthConfig, promRegistry prometheus.Reg
 		client.WithTable(&igmpGroup, &igmpGroup.Chassis),
 		// used for metrics
 		client.WithTable(&sbdb.SBGlobal{}),
-		// used for hybrid-overlay
-		// and by CreateDummyGWMacBindings(), error "error getting datapath GR_<node>"
-		// client.WithTable(&sbdb.DatapathBinding{}),
 	}
 	// Both zone interconnect and testing also need to monitor the encap and port binding tables
 	if forTesting || config.OVNKubernetesFeature.EnableInterconnect {
@@ -228,6 +223,47 @@ func NewNBClientWithConfig(cfg config.OvnAuthConfig, promRegistry prometheus.Reg
 	}()
 
 	_, err = c.MonitorAll(ctx)
+	if err != nil {
+		c.Close()
+		return nil, err
+	}
+
+	return c, nil
+}
+
+// NewOVSClient creates a new openvswitch Database client
+func NewOVSClient(stopCh <-chan struct{}) (client.Client, error) {
+	cfg := &config.OvnAuthConfig{
+		Scheme:  config.OvnDBSchemeUnix,
+		Address: "unix:/var/run/openvswitch/db.sock",
+	}
+
+	return NewOVSClientWithConfig(*cfg, stopCh)
+}
+
+func NewOVSClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (client.Client, error) {
+	dbModel, err := vswitchd.FullDatabaseModel()
+	if err != nil {
+		return nil, err
+	}
+	c, err := NewClient(cfg, dbModel, stopCh)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	go func() {
+		<-stopCh
+		cancel()
+	}()
+
+	_, err = c.Monitor(ctx,
+		c.NewMonitor(
+			client.WithTable(&vswitchd.OpenvSwitch{}),
+			client.WithTable(&vswitchd.Bridge{}),
+			client.WithTable(&vswitchd.Port{}),
+			client.WithTable(&vswitchd.Interface{}),
+		),
+	)
 	if err != nil {
 		c.Close()
 		return nil, err

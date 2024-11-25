@@ -30,8 +30,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	controllerManager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-controller-manager"
 	ovnnode "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
-	OFManager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/openflow-manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
+	OFManager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/openflow-manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
@@ -612,7 +612,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 		// start the prometheus server to serve OVS and OVN Node Metrics (default port: 9410)
 		if config.Metrics.BindAddress != "" {
 			if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
-				ovsDBClient, err := metrics.SetupOvsDBClient()
+				ovsDBClient, err := libovsdb.NewOVSClient(ctx.Done())
 				if err != nil {
 					// exit gracefully.
 					return fmt.Errorf("error when trying to initialize ovsdb client: %v", err)

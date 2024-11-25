@@ -247,6 +247,9 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 
 	existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 		Name: nodeName,
+		Labels: map[string]string{
+			"kubernetes.io/hostname": nodeName,
+		},
 	}}
 
 	fakeClient := fake.NewSimpleClientset(&v1.NodeList{
@@ -262,7 +265,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 		EIPClient: egressipv1fake.NewSimpleClientset(), EgressFirewallClient: &egressfirewallfake.Clientset{},
 		EgressServiceClient: &egressservicefake.Clientset{}}
 	nodeAnnotator := kube.NewNodeAnnotator(kubeInterface, existingNode.Name)
-	watchFactory, err := factory.NewNodeWatchFactory(fakeNodeClient, nodeName)
+	watchFactory, err := factory.NewNodeWatchFactory(fakeNodeClient, []string{nodeName})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(watchFactory.Start()).To(Succeed())
 	waiter := newStartupWaiter()
@@ -353,6 +356,9 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 
 	existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 		Name: nodeName,
+		Labels: map[string]string{
+			"kubernetes.io/hostname": nodeName,
+		},
 	}}
 
 	fakeClient := fake.NewSimpleClientset(&v1.NodeList{
@@ -367,7 +373,7 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 
 	kubeInterface := &kube.KubeOVN{Kube: kube.Kube{KClient: fakeClient}, ANPClient: anpfake.NewSimpleClientset(), EIPClient: egressipv1fake.NewSimpleClientset(), EgressFirewallClient: &egressfirewallfake.Clientset{}, EgressServiceClient: &egressservicefake.Clientset{}}
 	nodeAnnotator := kube.NewNodeAnnotator(kubeInterface, existingNode.Name)
-	watchFactory, err := factory.NewNodeWatchFactory(fakeNodeClient, nodeName)
+	watchFactory, err := factory.NewNodeWatchFactory(fakeNodeClient, []string{nodeName})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(watchFactory.Start()).To(Succeed())
 	waiter := newStartupWaiter()

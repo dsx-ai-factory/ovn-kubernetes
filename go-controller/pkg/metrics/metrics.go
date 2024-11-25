@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
@@ -546,7 +547,7 @@ func StartOVNMetricsServer(bindAddress, pprofBindAddress, certFile, keyFile stri
 	startMetricsServer(bindAddress, pprofBindAddress, certFile, keyFile, promhttp.Handler(), stopChan, wg)
 }
 
-func RegisterOvnNodeMetrics(ovsDBClient *util.OvsdbClient, metricsScrapeInterval int, stopChan <-chan struct{}) {
+func RegisterOvnNodeMetrics(ovsDBClient libovsdbclient.Client, metricsScrapeInterval int, stopChan <-chan struct{}) {
 	go RegisterOvnControllerMetrics(ovsDBClient, metricsScrapeInterval, stopChan)
 }
 
@@ -624,44 +625,4 @@ func startMetricsServer(bindAddress, pprofBindAddress, certFile, keyFile string,
 			}
 		}, 5*time.Second, stopChan)
 	}()
-}
-
-func SetupOvsDBClient() (*util.OvsdbClient, error) {
-	var ovsdbTableColumns = map[string][]string{
-		"Bridge": {
-			"name",
-			"ports",
-		},
-		"Port": {
-			"name",
-			"interfaces",
-		},
-		"Interface": {
-			"name",
-			"duplex",
-			"type",
-			"admin_state",
-			"link_state",
-			"statistics",
-			"ifindex",
-			"link_resets",
-			"link_speed",
-			"mtu",
-			"ofport",
-			"ingress_policing_burst",
-			"ingress_policing_rate",
-			"status",
-			"external_ids",
-		},
-		"Open_vSwitch": {
-			"other_config",
-			"external_ids",
-		},
-	}
-
-	cfg := &util.OvsdbConfig{
-		TableCols: ovsdbTableColumns,
-		Reconnect: true,
-	}
-	return util.NewOvsDbClient(cfg)
 }

@@ -461,7 +461,7 @@ func TestNetAttachDefinitionController(t *testing.T) {
 			meetsExpectations := func(g gomega.Gomega) {
 				var expectRunning []string
 				for _, expected := range tt.expected {
-					netInfo, err := util.NewNetInfo(expected.network)
+					netInfo, err := util.NewNetInfo(expected.network, nil)
 					g.Expect(err).ToNot(gomega.HaveOccurred())
 
 					name := netInfo.GetNetworkName()
@@ -473,12 +473,23 @@ func TestNetAttachDefinitionController(t *testing.T) {
 						g.Expect(tncm.controllers).To(gomega.HaveKey(testNetworkKey))
 						g.Expect(tncm.controllers[testNetworkKey].Equals(netInfo)).To(gomega.BeTrue(),
 							fmt.Sprintf("matching network config for network %s", name))
-						g.Expect(tncm.controllers[testNetworkKey].GetNADs()).To(gomega.ConsistOf(expected.nads),
+						nadConfigs := tncm.controllers[testNetworkKey].GetNADConfigs()
+						allNADs := make([]string, len(nadConfigs))
+						i := 0
+						for nad := range nadConfigs {
+							allNADs[i] = nad
+							i++
+						}
+						g.Expect(allNADs).To(gomega.ConsistOf(expected.nads),
 							fmt.Sprintf("matching NADs for network %s", name))
 					}()
 					expectRunning = append(expectRunning, testNetworkKey)
 					if netInfo.IsPrimaryNetwork() && !netInfo.IsDefault() {
-						netInfo.SetNADs(expected.nads...)
+						nadConfigs := map[string]*util.NADConfig{}
+						for _, nad := range expected.nads {
+							nadConfigs[nad] = nil
+						}
+						netInfo.SetNADs(nadConfigs)
 						key := expected.nads[0]
 						namespace, _, err := cache.SplitMetaNamespaceKey(key)
 						g.Expect(err).ToNot(gomega.HaveOccurred())
@@ -586,7 +597,7 @@ func TestSyncAll(t *testing.T) {
 				g.Expect(err).ToNot(gomega.HaveOccurred())
 				netInfo := expectedNetworks[testNAD.netconf.Name]
 				if netInfo == nil {
-					netInfo, err = util.NewNetInfo(testNAD.netconf)
+					netInfo, err = util.NewNetInfo(testNAD.netconf, nil)
 					g.Expect(err).ToNot(gomega.HaveOccurred())
 					expectedNetworks[testNAD.netconf.Name] = netInfo
 					if netInfo.IsPrimaryNetwork() && !netInfo.IsDefault() {
@@ -599,7 +610,7 @@ func TestSyncAll(t *testing.T) {
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 			defer wf.Shutdown()
 
-			err = nadController.Start()
+			err = nadController.Start(nil)
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 			// sync has already happened, stop
 			nadController.Stop()

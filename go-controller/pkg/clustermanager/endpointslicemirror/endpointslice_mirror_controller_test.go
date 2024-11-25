@@ -48,7 +48,7 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 		err = wf.Start()
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-		err = nadController.Start()
+		err = nadController.Start(nil)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		err = controller.Start(context.Background(), 1)

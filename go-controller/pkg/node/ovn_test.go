@@ -88,7 +88,7 @@ func (o *FakeOVNNode) init() {
 	Expect(err).NotTo(HaveOccurred())
 
 	cnnci := NewCommonNodeNetworkControllerInfo(o.fakeClient, o.watcher, o.recorder, fakeNodeName, "", "", []string{}, routemanager.NewController())
-	o.nc = newDefaultNodeNetworkController(cnnci, &util.DefaultNetInfo{}, o.stopChan, o.wg, routemanager.NewController())
+	o.nc = newDefaultNodeNetworkController(cnnci, o.stopChan, o.wg, routemanager.NewController())
 	// watcher is started by nodeNetworkControllerManager, not by nodeNetworkcontroller, so start it here.
 	o.watcher.Start()
 	o.nc.PreStart(context.TODO())

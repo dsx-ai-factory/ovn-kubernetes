@@ -434,7 +434,7 @@ func PodNadNames(pod *v1.Pod, netinfo NetInfo) ([]string, error) {
 }
 
 func GetPrimaryNetworkNADNamesForNamespaceFromNetInfo(namespace string, netinfo NetInfo) ([]string, error) {
-	for nadName, _ := range netinfo.GetNADConfigs() {
+	for nadName := range netinfo.GetNADConfigs() {
 		ns, _, err := cache.SplitMetaNamespaceKey(nadName)
 		if err != nil {
 			return nil, fmt.Errorf("error parsing nad name %s from network %s: %v", nadName, netinfo.GetNetworkName(), err)
@@ -669,10 +669,6 @@ func AddRoutesGatewayIP(
 		topoType := netinfo.TopologyType()
 		switch topoType {
 		case types.LocalnetTopology:
-			// no route needed for directly connected subnets
-			if !IsNetworkSegmentationSupportEnabled() || !netinfo.IsPrimaryNetwork() {
-				return nil
-			}
 			for _, podIfAddr := range podAnnotation.IPs {
 				var gatewayIP net.IP
 				isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
@@ -692,12 +688,22 @@ func AddRoutesGatewayIP(
 					gatewayIP = gatewayIPnet.IP
 				}
 				podAnnotation.Routes = append(podAnnotation.Routes, additionalSubnetsToRoutes(netinfo, isIPv6, gatewayIP)...)
+				if !IsNetworkSegmentationSupportEnabled() || !netinfo.IsPrimaryNetwork() {
+					continue
+				}
+				// no route needed for directly connected subnets
+				// TBD merge localnet type does need this only for a temp workaround, is it still needed?
+				//for _, clusterSubnet := range netinfo.Subnets() {
+				//	if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
+				//		podAnnotation.Routes = append(podAnnotation.Routes, PodRoute{
+				//			Dest:    clusterSubnet.CIDR,
+				//			NextHop: gatewayIP,
+				//		})
+				//	}
+				//}
 			}
 			return nil
 		case types.Layer2Topology:
-			if !IsNetworkSegmentationSupportEnabled() || !netinfo.IsPrimaryNetwork() {
-				return nil
-			}
 			for _, podIfAddr := range podAnnotation.IPs {
 				isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
 				nodeSubnet, err := MatchFirstIPNetFamily(isIPv6, nodeSubnets)
@@ -705,11 +711,24 @@ func AddRoutesGatewayIP(
 					return err
 				}
 				gatewayIPnet := GetNodeGatewayIfAddr(nodeSubnet)
+				podAnnotation.Routes = append(podAnnotation.Routes, additionalSubnetsToRoutes(netinfo, isIPv6, gatewayIPnet.IP)...)
+				if !IsNetworkSegmentationSupportEnabled() || !netinfo.IsPrimaryNetwork() {
+					continue
+				}
+				// no route needed for directly connected subnets
+				// TBD merge layer-2 type does need this only for a temp workaround, is it still needed?
+				//for _, clusterSubnet := range netinfo.Subnets() {
+				//	if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
+				//		podAnnotation.Routes = append(podAnnotation.Routes, PodRoute{
+				//			Dest:    clusterSubnet.CIDR,
+				//			NextHop: gatewayIPnet.IP,
+				//		})
+				//	}
+				//}
 				// Ensure default service network traffic always goes to OVN
 				podAnnotation.Routes = append(podAnnotation.Routes, serviceCIDRToRoute(isIPv6, gatewayIPnet.IP)...)
 				// Ensure UDN join subnet traffic always goes to UDN LSP
 				podAnnotation.Routes = append(podAnnotation.Routes, joinSubnetToRoute(netinfo, isIPv6, gatewayIPnet.IP))
-				podAnnotation.Routes = append(podAnnotation.Routes, additionalSubnetsToRoutes(netinfo, isIPv6, gatewayIPnet.IP)...)
 				if network != nil && len(network.GatewayRequest) == 0 { // if specific default route for pod was not requested then add gatewayIP
 					podAnnotation.Gateways = append(podAnnotation.Gateways, gatewayIPnet.IP)
 				}
@@ -717,8 +736,6 @@ func AddRoutesGatewayIP(
 			return nil
 		case types.Layer3Topology:
 			for _, podIfAddr := range podAnnotation.IPs {
-				var gatewayIP net.IP
-
 				isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
 				nodeSubnet, err := MatchFirstIPNetFamily(isIPv6, nodeSubnets)
 				if err != nil {
@@ -729,10 +746,11 @@ func AddRoutesGatewayIP(
 					if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
 						podAnnotation.Routes = append(podAnnotation.Routes, PodRoute{
 							Dest:    clusterSubnet.CIDR,
-							NextHop: gatewayIP,
+							NextHop: gatewayIPnet.IP,
 						})
 					}
 				}
+				podAnnotation.Routes = append(podAnnotation.Routes, additionalSubnetsToRoutes(netinfo, isIPv6, gatewayIPnet.IP)...)
 				if !IsNetworkSegmentationSupportEnabled() || !netinfo.IsPrimaryNetwork() {
 					continue
 				}
@@ -740,7 +758,6 @@ func AddRoutesGatewayIP(
 				podAnnotation.Routes = append(podAnnotation.Routes, serviceCIDRToRoute(isIPv6, gatewayIPnet.IP)...)
 				// Ensure UDN join subnet traffic always goes to UDN LSP
 				podAnnotation.Routes = append(podAnnotation.Routes, joinSubnetToRoute(netinfo, isIPv6, gatewayIPnet.IP))
-				podAnnotation.Routes = append(podAnnotation.Routes, additionalSubnetsToRoutes(netinfo, isIPv6, gatewayIPnet.IP)...)
 				if network != nil && len(network.GatewayRequest) == 0 { // if specific default route for pod was not requested then add gatewayIP
 					podAnnotation.Gateways = append(podAnnotation.Gateways, gatewayIPnet.IP)
 				}

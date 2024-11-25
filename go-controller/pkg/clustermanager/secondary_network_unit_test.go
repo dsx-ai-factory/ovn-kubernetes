@@ -92,7 +92,8 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						if err != nil {
 							return nil, err
 						}
-
+						ginkgo.By(fmt.Sprintf("try to find host subnet annotation %v for node %s for network blue",
+							updatedNode.Annotations, n.Name))
 						return util.ParseNodeHostSubnetAnnotation(updatedNode, "blue")
 					}, 2).Should(gomega.HaveLen(1))
 				}

@@ -416,7 +416,7 @@ func (nInfo *baseNetInfo) GetNADConfigs() map[string]*NADConfig {
 func (nInfo *baseNetInfo) GetFirstNAD() string {
 	nInfo.Lock()
 	defer nInfo.Unlock()
-	for nad, _ := range nInfo.nadNames {
+	for nad := range nInfo.nadNames {
 		return nad
 	}
 	return ""

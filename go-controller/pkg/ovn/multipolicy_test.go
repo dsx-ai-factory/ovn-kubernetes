@@ -262,6 +262,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 			Topology: topology,
 			NADName:  nadNamespacedName,
 			Subnets:  subnets,
+			MTU:      config.Default.MTU,
 		}
 
 		var err error
@@ -467,7 +468,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 
 				namespace1 := *newNamespace(namespaceName1)
 				nPodTest := getTestPod(namespace1.Name, nodeName)
-				nPodTest.addNetwork(secondaryNetworkName, nadNamespacedName, "", "", "", "10.1.1.1", "0a:58:0a:01:01:01", "secondary", 1, nil)
+				nPodTest.addNetwork(secondaryNetworkName, nadNamespacedName, "", "", "", "10.1.1.1", "0a:58:0a:01:01:01", fmt.Sprintf("%d", config.Default.MTU), "secondary", 1, nil)
 				networkPolicy := getPortNetworkPolicy(netPolicyName1, namespace1.Name, labelName, labelVal, portNum)
 
 				watchNodes := false
@@ -600,7 +601,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 					ocInfo.asf.EventuallyExpectEmptyAddressSetExist(namespaceName1)
 
 					nPodTest := getTestPod(namespace1.Name, nodeName)
-					nPodTest.addNetwork(secondaryNetworkName, nadNamespacedName, nodeSubnet, "", "", "10.1.1.1", "0a:58:0a:01:01:01", "secondary", 1, nil)
+					nPodTest.addNetwork(secondaryNetworkName, nadNamespacedName, nodeSubnet, "", "", "10.1.1.1", "0a:58:0a:01:01:01", fmt.Sprintf("%d", ocInfo.bnc.MTU()), "secondary", 1, nil)
 					knetPod := newPod(nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP)
 					addPodNetwork(knetPod, nPodTest.secondaryPodInfos)
 					setPodAnnotations(knetPod, nPodTest)

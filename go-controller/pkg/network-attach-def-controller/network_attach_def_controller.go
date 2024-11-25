@@ -227,6 +227,7 @@ func (nadController *NetAttachDefinitionController) syncNAD(key string, nad *net
 			klog.Errorf("%s: failed parsing NAD %s: %v", nadController.name, key, err)
 			return nil
 		}
+		nadNetworkName = nadNetwork.GetNetworkName()
 	}
 	return nadController.syncNADCommon(key, nadNetworkName, nadNetwork, newNADConfig)
 }

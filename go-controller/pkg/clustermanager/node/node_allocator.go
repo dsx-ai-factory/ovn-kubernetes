@@ -407,8 +407,12 @@ func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, 
 
 		cnode.Annotations, err = util.UpdateNodeGatewayRouterLRPAddrsAnnotation(cnode.Annotations, joinAddr, networkName)
 		if err != nil {
-			return fmt.Errorf("failed to update node %q annotation LRPAddrAnnotation %s: %w",
-				node.Name, util.JoinIPNets(joinAddr, ","), err)
+			if !util.IsAnnotationAlreadySetError(err) {
+				return fmt.Errorf("failed to update node %q annotation LRPAddrAnnotation %s: %w",
+					node.Name, util.JoinIPNets(joinAddr, ","), err)
+			}
+		} else {
+			updateNodeAnno = true
 		}
 		cnode.Annotations, err = util.UpdateNetworkIDAnnotation(cnode.Annotations, networkName, networkId)
 		if err != nil {
@@ -423,10 +427,13 @@ func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, 
 			// TBD IsAnnotationAlreadySetError?
 			cnode.Annotations, err = util.UpdateUDNLayer2NodeGRLRPTunnelIDs(cnode.Annotations, networkName, tunnelID)
 			if err != nil {
-				return fmt.Errorf("failed to update node %q tunnel id annotation %d for network %s: %w",
-					node.Name, tunnelID, networkName, err)
+				if !util.IsAnnotationAlreadySetError(err) {
+					return fmt.Errorf("failed to update node %q tunnel id annotation %d for network %s: %w",
+						node.Name, tunnelID, networkName, err)
+				}
+			} else {
+				updateNodeAnno = true
 			}
-			updateNodeAnno = true
 		}
 		if updateNodeAnno {
 			// It is possible to update the node annotations using status subresource

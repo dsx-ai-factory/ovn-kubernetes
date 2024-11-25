@@ -412,7 +412,7 @@ func (cm *NetworkControllerManager) Start(ctx context.Context) error {
 		metrics.GetConfigDurationRecorder().Run(cm.nbClient, cm.kube, 10, time.Second*5, cm.stopChan)
 	}
 	cm.podRecorder.Run(cm.sbClient, cm.stopChan)
-	
+
 	var observabilityManager *observability.Manager
 	if config.OVNKubernetesFeature.EnableObservability {
 		observabilityManager = observability.NewManager(cm.nbClient)
@@ -429,7 +429,7 @@ func (cm *NetworkControllerManager) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to init default network controller: %v", err)
 	}
-	
+
 	// nadController is nil if multi-network is disabled
 	if cm.nadController != nil {
 		if err = cm.nadController.Start(cm.defaultNetworkController); err != nil {

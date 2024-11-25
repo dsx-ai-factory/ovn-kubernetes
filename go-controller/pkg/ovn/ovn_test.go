@@ -35,9 +35,9 @@ import (
 	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
 	portmirror "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
 	portmirrorfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned/fake"
+	udnclientfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
 	virtualip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
 	virtualipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/clientset/versioned/fake"
-	udnclientfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
 	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	fakenad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/nad"
 
@@ -353,7 +353,7 @@ func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFacto
 			return nil, err
 		}
 	}
-	dnc, err := newDefaultNetworkControllerCommon(cnci, &util.DefaultNetInfo{}, stopChan, wg, addressSetFactory, nadController, nil)
+	dnc, err := newDefaultNetworkControllerCommon(cnci, stopChan, wg, addressSetFactory, nadController, nil)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	if nbZoneFailed {
@@ -433,7 +433,7 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 		return err
 	}
 	if !nInfo.IsSecondary() {
-		o.controller.AddNAD(nadName, nadConfig)
+		o.controller.AddNADs(map[string]*util.NADConfig{nadName: nadConfig})
 		ginkgo.By(fmt.Sprintf("OVN test init: add NAD %s to default network controller", nadName))
 		return nil
 	}
@@ -512,8 +512,7 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 	}
 
 	ginkgo.By(fmt.Sprintf("OVN test init: add NAD %s to secondary network controller of %s network %s", nadName, topoType, netName))
-	// secondaryController.AddNAD(nadName, nadConfig) TBD
-	secondaryController.AddNADs(nadName)
+	secondaryController.AddNADs(map[string]*util.NADConfig{nadName: nadConfig})
 	return nil
 }
 

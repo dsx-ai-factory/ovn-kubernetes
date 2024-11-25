@@ -450,15 +450,15 @@ func (g *gateway) GetGatewayIface() string {
 
 type bridgeConfiguration struct {
 	sync.Mutex
-	nodeName           string
-	bridgeName         string
-	uplinkName         string
-	dpuHostRepName     string // empty in case of non-DPU mode
-	hostRepName        string
-	ips                []*net.IPNet
-	gwIface            string
-	interfaceID        string
-	macAddress         net.HardwareAddr
+	nodeName       string
+	bridgeName     string
+	uplinkName     string
+	dpuHostRepName string // empty in case of non-DPU mode
+	hostRepName    string
+	ips            []*net.IPNet
+	gwIface        string
+	interfaceID    string
+	macAddress     net.HardwareAddr
 	//patchPort          string
 	//ofPortPatch        string  TBD deleted in upstream
 	ofPortPhys         string
@@ -504,7 +504,7 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 	res := bridgeConfiguration{
 		localnetPatchPorts: &sync.Map{},
 		nodeName:           nodeName,
-		netConfig:          map[string]*bridgeUDNConfiguration{
+		netConfig: map[string]*bridgeUDNConfiguration{
 			types.DefaultNetworkName: defaultNetConfig,
 		},
 	}

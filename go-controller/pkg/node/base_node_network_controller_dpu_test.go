@@ -98,11 +98,8 @@ var _ = Describe("Node DPU tests", func() {
 	var podLister v1mocks.PodLister
 	var podNamespaceLister v1mocks.PodNamespaceLister
 	var clientset *cni.ClientSet
-<<<<<<< HEAD
 	var fakeIP string
-=======
 	var routeManager *routemanager.Controller
->>>>>>> ffddd06ec12e43af0397bca8e36adedf8df441b1
 
 	origSriovnetOps := util.GetSriovnetOps()
 	origNetlinkOps := util.GetNetLinkOps()
@@ -123,13 +120,8 @@ var _ = Describe("Node DPU tests", func() {
 		Expect(routeManager).NotTo(BeNil())
 
 		factoryMock = factorymocks.NodeWatchFactory{}
-<<<<<<< HEAD
-		cnnci := newCommonNodeNetworkControllerInfo(nil, &kubeOVNMock, &factoryMock, nil, "", "", "", []string{"00:00:00:01:02:03"})
-		dnnc = newDefaultNodeNetworkController(cnnci, &util.DefaultNetInfo{}, nil, nil)
-=======
-		cnnci := newCommonNodeNetworkControllerInfo(nil, &kubeMock, &factoryMock, nil, "", routeManager)
+		cnnci := newCommonNodeNetworkControllerInfo(nil, &kubeOVNMock, &factoryMock, nil, "", "", "", []string{"00:00:00:01:02:03"}, routeManager)
 		dnnc = newDefaultNodeNetworkController(cnnci, nil, nil, routeManager)
->>>>>>> ffddd06ec12e43af0397bca8e36adedf8df441b1
 
 		podInformer = coreinformermocks.PodInformer{}
 		podNamespaceLister = v1mocks.PodNamespaceLister{}

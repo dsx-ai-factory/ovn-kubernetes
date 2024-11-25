@@ -425,7 +425,7 @@ func (c *Controller) syncService(key string) error {
 	}
 
 	// The Service exists in the cache: update it in OVN
-	klog.V(5).Infof("Service %s/%s retrieved from lister for network=%s", service.Namespace, service.Name, c.netInfo.GetNetworkName)
+	klog.V(5).Infof("Service %s/%s retrieved from lister for network=%s", service.Namespace, service.Name, c.netInfo.GetNetworkName())
 
 	endpointSlices, err := util.GetServiceEndpointSlices(namespace, service.Name, c.netInfo.GetNetworkName(), c.endpointSliceLister)
 	if err != nil {
