@@ -31,6 +31,7 @@ import (
 	controllerManager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-controller-manager"
 	ovnnode "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
 	OFManager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/openflow-manager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
@@ -286,7 +287,14 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	}()
 
 	if config.Kubernetes.BootstrapKubeconfig != "" {
-		if err := util.StartNodeCertificateManager(ctx.Context, ovnKubeStartWg, os.Getenv("K8S_NODE"), &config.Kubernetes); err != nil {
+		// In the case of dpus K8S_NODE will be set to dpu host's name
+		var csrNodeName string
+		if config.OvnKubeNode.Mode == types.NodeModeDPU {
+			csrNodeName = os.Getenv("K8S_NODE_DPU")
+		} else {
+			csrNodeName = os.Getenv("K8S_NODE")
+		}
+		if err := util.StartNodeCertificateManager(ctx.Context, ovnKubeStartWg, csrNodeName, &config.Kubernetes); err != nil {
 			return fmt.Errorf("failed to start the node certificate manager: %w", err)
 		}
 	}
@@ -580,7 +588,9 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 				watchFactory,
 				runMode.identity,
 				dpuName,
-				eventRecorder)
+				wg,
+				eventRecorder,
+				routemanager.NewController())
 			if err != nil {
 				nodeErr = fmt.Errorf("failed to create node network controller: %w", err)
 				return
@@ -681,11 +691,13 @@ func (m leaderMetrics) Off(string) {
 	}
 }
 
+func (m leaderMetrics) SlowpathExercised(string) {}
+
 type ovnkubeMetricsProvider struct {
 	runMode *ovnkubeRunMode
 }
 
-func (p ovnkubeMetricsProvider) NewLeaderMetric() leaderelection.SwitchMetric {
+func (p ovnkubeMetricsProvider) NewLeaderMetric() leaderelection.LeaderMetric {
 	return &leaderMetrics{p.runMode}
 }
 

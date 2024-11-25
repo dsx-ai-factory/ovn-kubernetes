@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"time"
 
+	utilnet "k8s.io/utils/net"
+
 	"github.com/k8snetworkplumbingwg/sriovnet"
 	"github.com/stretchr/testify/mock"
 	"github.com/urfave/cli/v2"
@@ -23,15 +25,20 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
+	nadfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedrouteclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
 	portmirrorclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned/fake"
+	udnfakeclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	OFManager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/openflow-manager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	linkMock "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/nad"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilMock "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
@@ -40,7 +47,7 @@ import (
 	"github.com/containernetworking/plugins/pkg/testutils"
 	"github.com/vishvananda/netlink"
 
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
 
@@ -90,15 +97,6 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Action: func() error {
 				return testNS.Do(func(ns.NetNS) error {
 					defer GinkgoRecover()
-
-					// Create breth0 as a dummy link
-					err := netlink.LinkAdd(&netlink.Dummy{
-						LinkAttrs: netlink.LinkAttrs{
-							Name:         "br" + eth0Name,
-							HardwareAddr: ovntest.MustParseMAC(eth0MAC),
-						},
-					})
-					Expect(err).NotTo(HaveOccurred())
 					_, err = netlink.LinkByName("br" + eth0Name)
 					Expect(err).NotTo(HaveOccurred())
 					return nil
@@ -111,12 +109,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 				Output: "net.ipv4.conf.breth0.forwarding = 1",
 			})
 		}
-		if config.IPv6Mode {
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl -w net.ipv6.conf.breth0.forwarding",
-				Output: "net.ipv6.conf.breth0.forwarding = 1",
-			})
-		}
+
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface breth0 mac_in_use",
 			Output: eth0MAC,
@@ -181,10 +174,6 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		})
 		// nodePortWatcher()
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface patch-breth0_" + nodeName + "-to-br-int ofport",
-			Output: "5",
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface eth0 ofport",
 			Output: "7",
 		})
@@ -200,6 +189,10 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			ObjectMeta: metav1.ObjectMeta{
 				Name:   nodeName,
 				Labels: map[string]string{"kubernetes.io/hostname": nodeName},
+				Annotations: map[string]string{
+					// add some fake previous subnets to force OVNK to try to clean it
+					util.OvnNodeMasqCIDR: "{\"ipv4\":\"170.254.0.0/16\",\"ipv6\":\"fa69::/112\"}",
+				},
 			},
 		}
 		if setNodeIP {
@@ -232,7 +225,8 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Items: []v1.Node{existingNode},
 		})
 		fakeClient := &util.OVNNodeClientset{
-			KubeClient: kubeFakeClient,
+			KubeClient:            kubeFakeClient,
+			NetworkAttchDefClient: nadfake.NewSimpleClientset(),
 		}
 
 		stop := make(chan struct{})
@@ -259,6 +253,16 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		err = nodeAnnotator.Run()
 		Expect(err).NotTo(HaveOccurred())
 		rm := routemanager.NewController()
+		var nadController *networkAttachDefController.NetAttachDefinitionController
+		if util.IsNetworkSegmentationSupportEnabled() {
+			testNCM := &nad.FakeNetworkControllerManager{}
+			nadController, err = networkAttachDefController.NewNetAttachDefinitionController("test", testNCM, wf, nil)
+			Expect(err).NotTo(HaveOccurred())
+			err = nadController.Start()
+			Expect(err).NotTo(HaveOccurred())
+			defer nadController.Stop()
+		}
+		Expect(err).NotTo(HaveOccurred())
 		wg.Add(1)
 		go testNS.Do(func(netNS ns.NetNS) error {
 			defer GinkgoRecover()
@@ -269,12 +273,47 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
+			// setup stale masquerade
+			// Create breth0 as a dummy link
+			err := netlink.LinkAdd(&netlink.Dummy{
+				LinkAttrs: netlink.LinkAttrs{
+					Name:         "br" + eth0Name,
+					HardwareAddr: ovntest.MustParseMAC(eth0MAC),
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			link, err := netlink.LinkByName("br" + eth0Name)
+			Expect(err).NotTo(HaveOccurred())
+			err = netlink.LinkSetUp(link)
+			Expect(err).NotTo(HaveOccurred())
+			staleAddr, err := netlink.ParseAddr("170.254.0.2/32")
+			Expect(err).NotTo(HaveOccurred())
+			err = netlink.AddrAdd(link, staleAddr)
+			Expect(err).NotTo(HaveOccurred())
+			_, gw, err := net.ParseCIDR("170.254.0.1/32")
+			Expect(err).NotTo(HaveOccurred())
+			staleRoute := &netlink.Route{
+				LinkIndex: link.Attrs().Index,
+				Dst:       gw,
+			}
+			err = netlink.RouteAdd(staleRoute)
+			Expect(err).NotTo(HaveOccurred())
+			// ensure stale route is present
+			r, err := util.LinkRouteGetFilteredRoute(
+				staleRoute,
+				netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF|netlink.RT_FILTER_SRC,
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(r).NotTo(BeNil())
+
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			Expect(err).NotTo(HaveOccurred())
 			OFManager.NewOpenFlowCacheManager(wg, stop)
 			ifAddrs := ovntest.MustParseIPNets(eth0CIDR)
-			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", ifAddrs, nodeAnnotator, k,
-				&fakeMgmtPortConfig, wf, rm)
+			sharedGw, err := newGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", ifAddrs, nodeAnnotator,
+				&fakeMgmtPortConfig, k, wf, rm, nadController, config.GatewayModeShared)
+			Expect(err).NotTo(HaveOccurred())
+			err = sharedGw.initFunc()
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.Init(stop, wg)
 			Expect(err).NotTo(HaveOccurred())
@@ -295,16 +334,21 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Expect(err).NotTo(HaveOccurred())
 			addrs, err := netlink.AddrList(l, syscall.AF_INET)
 			Expect(err).NotTo(HaveOccurred())
-			var found bool
+			var found, staleFound bool
 			expectedAddr, err := netlink.ParseAddr(eth0CIDR)
 			Expect(err).NotTo(HaveOccurred())
 			for _, a := range addrs {
+				// ensure stale masquerade IP was removed from the bridge
+				if a.IP.Equal(staleAddr.IP) && bytes.Equal(a.Mask, staleAddr.Mask) {
+					staleFound = true
+				}
+				// ensure code moved correct IP to bridge
 				if a.IP.Equal(expectedAddr.IP) && bytes.Equal(a.Mask, expectedAddr.Mask) {
 					found = true
-					break
 				}
 			}
 			Expect(found).To(BeTrue())
+			Expect(staleFound).To(BeFalse())
 
 			Expect(l.Attrs().HardwareAddr.String()).To(Equal(eth0MAC))
 
@@ -327,6 +371,13 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 				}
 				return nil
 			}, 1*time.Second).ShouldNot(HaveOccurred())
+			// ensure stale masquerade route is no longer present
+			r, err = util.LinkRouteGetFilteredRoute(
+				staleRoute,
+				netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF|netlink.RT_FILTER_SRC,
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(r).To(BeNil())
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -384,7 +435,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			},
 		}
 		f4 := iptV4.(*util.FakeIPTables)
-		err = f4.MatchState(expectedTables)
+		err = f4.MatchState(expectedTables, nil)
 		Expect(err).NotTo(HaveOccurred())
 
 		expectedTables = map[string]util.FakeTable{
@@ -393,8 +444,22 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			"mangle": {},
 		}
 		f6 := iptV6.(*util.FakeIPTables)
-		err = f6.MatchState(expectedTables)
+		err = f6.MatchState(expectedTables, nil)
 		Expect(err).NotTo(HaveOccurred())
+
+		// check that masquerade subnet annotation got updated
+		node, err := wf.GetNode(nodeName)
+		Expect(err).NotTo(HaveOccurred())
+		subnets, err := util.ParseNodeMasqueradeSubnet(node)
+		Expect(err).NotTo(HaveOccurred())
+		for _, subnet := range subnets {
+			if utilnet.IsIPv4CIDR(subnet) {
+				Expect(subnet.String()).To(Equal(config.Gateway.V4MasqueradeSubnet))
+			} else if utilnet.IsIPv6CIDR(subnet) {
+				Expect(subnet.String()).To(Equal(config.Gateway.V6MasqueradeSubnet))
+			}
+		}
+
 		return nil
 	}
 
@@ -550,10 +615,6 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		})
 		// nodePortWatcher()
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface patch-" + brphys + "_" + nodeName + "-to-br-int ofport",
-			Output: "5",
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface " + uplinkPort + " ofport",
 			Output: "7",
 		})
@@ -576,7 +637,8 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			Items: []v1.Node{existingNode},
 		})
 		fakeClient := &util.OVNNodeClientset{
-			KubeClient: kubeFakeClient,
+			KubeClient:            kubeFakeClient,
+			NetworkAttchDefClient: nadfake.NewSimpleClientset(),
 		}
 
 		_, nodeNet, err := net.ParseCIDR(nodeSubnet)
@@ -625,6 +687,15 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
 		rm := routemanager.NewController()
+		var nadController *networkAttachDefController.NetAttachDefinitionController
+		if util.IsNetworkSegmentationSupportEnabled() {
+			testNCM := &nad.FakeNetworkControllerManager{}
+			nadController, err = networkAttachDefController.NewNetAttachDefinitionController("test", testNCM, wf, nil)
+			Expect(err).NotTo(HaveOccurred())
+			err = nadController.Start()
+			Expect(err).NotTo(HaveOccurred())
+			defer nadController.Stop()
+		}
 		wg.Add(1)
 		go testNS.Do(func(netNS ns.NetNS) error {
 			defer GinkgoRecover()
@@ -632,7 +703,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			wg.Done()
 			return nil
 		})
-		// FIXME(mk): starting the gateaway causing go routines to be spawned within sub functions and therefore they escape the
+		// FIXME(mk): starting the gateway causing go routines to be spawned within sub functions and therefore they escape the
 		// netns we wanted to set it to originally here. Refactor test cases to not spawn a go routine or just fake out everything
 		// and remove need to create netns
 		err = testNS.Do(func(ns.NetNS) error {
@@ -641,8 +712,10 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			Expect(err).NotTo(HaveOccurred())
 			OFManager.NewOpenFlowCacheManager(wg, stop)
-			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops,
-				gatewayIntf, "", ifAddrs, nodeAnnotator, k, &fakeMgmtPortConfig, wf, rm)
+			sharedGw, err := newGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops,
+				gatewayIntf, "", ifAddrs, nodeAnnotator, &fakeMgmtPortConfig, k, wf, rm, nadController, config.GatewayModeShared)
+			Expect(err).NotTo(HaveOccurred())
+			err = sharedGw.initFunc()
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.Init(stop, wg)
 			Expect(err).NotTo(HaveOccurred())
@@ -731,6 +804,7 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		fakeClient := &util.OVNNodeClientset{
 			KubeClient:             kubeFakeClient,
 			AdminPolicyRouteClient: adminpolicybasedrouteclient.NewSimpleClientset(),
+			NetworkAttchDefClient:  nadfake.NewSimpleClientset(),
 			PortMirrorClient:       portmirrorclient.NewSimpleClientset(),
 		}
 
@@ -749,8 +823,9 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		ip, ipnet, err := net.ParseCIDR(hostIP + "/24")
 		Expect(err).NotTo(HaveOccurred())
 		ipnet.IP = ip
-		cnnci := NewCommonNodeNetworkControllerInfo(fakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, "", "", []string{})
-		nc := newDefaultNodeNetworkController(cnnci, &util.DefaultNetInfo{}, stop, wg)
+		routeManager := routemanager.NewController()
+		cnnci := NewCommonNodeNetworkControllerInfo(fakeClient, wf, nil, nodeName, "", "", []string{}, routeManager)
+		nc := newDefaultNodeNetworkController(cnnci, &util.DefaultNetInfo{}, stop, wg, routeManager)
 		// must run route manager manually which is usually started with nc.Start()
 		wg.Add(1)
 		go testNS.Do(func(netNS ns.NetNS) error {
@@ -913,12 +988,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 				Output: "net.ipv4.conf.breth0.forwarding = 1",
 			})
 		}
-		if config.IPv6Mode {
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl net.ipv6.conf.breth0.forwarding",
-				Output: "net.ipv6.conf.breth0.forwarding = 1",
-			})
-		}
+
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface breth0 mac_in_use",
 			Output: eth0MAC,
@@ -970,10 +1040,6 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-ofctl show breth0",
 			Output: ovsOFOutput,
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface patch-breth0_" + nodeName + "-to-br-int ofport",
-			Output: "5",
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface eth0 ofport",
@@ -1050,7 +1116,9 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 			&endpointSlice,
 		)
 		fakeClient := &util.OVNNodeClientset{
-			KubeClient: kubeFakeClient,
+			KubeClient:               kubeFakeClient,
+			NetworkAttchDefClient:    nadfake.NewSimpleClientset(),
+			UserDefinedNetworkClient: udnfakeclient.NewSimpleClientset(),
 		}
 
 		stop := make(chan struct{})
@@ -1078,6 +1146,15 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		ip, ipNet, _ := net.ParseCIDR(eth0CIDR)
 		ipNet.IP = ip
 		rm := routemanager.NewController()
+		var nadController *networkAttachDefController.NetAttachDefinitionController
+		if util.IsNetworkSegmentationSupportEnabled() {
+			testNCM := &nad.FakeNetworkControllerManager{}
+			nadController, err = networkAttachDefController.NewNetAttachDefinitionController("test", testNCM, wf, nil)
+			Expect(err).NotTo(HaveOccurred())
+			err = nadController.Start()
+			Expect(err).NotTo(HaveOccurred())
+			defer nadController.Stop()
+		}
 		go testNS.Do(func(netNS ns.NetNS) error {
 			defer GinkgoRecover()
 			rm.Run(stop, 10*time.Second)
@@ -1085,12 +1162,16 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		})
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
+
+			Expect(configureGlobalForwarding()).To(Succeed())
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			Expect(err).NotTo(HaveOccurred())
 			OFManager.NewOpenFlowCacheManager(wg, stop)
 			ifAddrs := ovntest.MustParseIPNets(eth0CIDR)
-			localGw, err := newLocalGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", ifAddrs,
-				nodeAnnotator, &fakeMgmtPortConfig, k, wf, rm)
+			localGw, err := newGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", ifAddrs,
+				nodeAnnotator, &fakeMgmtPortConfig, k, wf, rm, nadController, config.GatewayModeLocal)
+			Expect(err).NotTo(HaveOccurred())
+			err = localGw.initFunc()
 			Expect(err).NotTo(HaveOccurred())
 			err = localGw.Init(stop, wg)
 			Expect(err).NotTo(HaveOccurred())
@@ -1186,8 +1267,6 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 					"-s 10.1.0.0/16 -j ACCEPT",
 					"-i ovn-k8s-mp0 -j ACCEPT",
 					"-o ovn-k8s-mp0 -j ACCEPT",
-					"-i breth0 -j DROP",
-					"-o breth0 -j DROP",
 				},
 				"INPUT": []string{
 					"-i ovn-k8s-mp0 -m comment --comment from OVN to localhost -j ACCEPT",
@@ -1200,8 +1279,21 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 				"OVN-KUBE-ITP": []string{},
 			},
 		}
+		if util.IsNetworkSegmentationSupportEnabled() {
+			expectedTables["nat"]["POSTROUTING"] = append(expectedTables["nat"]["POSTROUTING"],
+				"-j OVN-KUBE-UDN-MASQUERADE",
+			)
+			expectedTables["nat"]["OVN-KUBE-UDN-MASQUERADE"] = append(expectedTables["nat"]["OVN-KUBE-UDN-MASQUERADE"],
+				"-s 169.254.169.2/29 -j RETURN",     // this guarantees we don't SNAT default network masqueradeIPs
+				"-d 172.16.1.0/24 -j RETURN",        // this guarantees we don't SNAT service traffic
+				"-s 169.254.169.0/29 -j MASQUERADE", // this guarantees we SNAT all UDN MasqueradeIPs traffic leaving the node
+			)
+		}
 		f4 := iptV4.(*util.FakeIPTables)
-		err = f4.MatchState(expectedTables)
+		err = f4.MatchState(expectedTables, map[util.FakePolicyKey]string{{
+			Table: "filter",
+			Chain: "FORWARD",
+		}: "DROP"})
 		Expect(err).NotTo(HaveOccurred())
 
 		expectedTables = map[string]util.FakeTable{
@@ -1210,7 +1302,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 			"mangle": {},
 		}
 		f6 := iptV6.(*util.FakeIPTables)
-		err = f6.MatchState(expectedTables)
+		err = f6.MatchState(expectedTables, nil)
 		Expect(err).NotTo(HaveOccurred())
 		return nil
 	}
@@ -1290,6 +1382,12 @@ var _ = Describe("Gateway Init Operations", func() {
 		})
 
 		ovntest.OnSupportedPlatformsIt("sets up a local gateway with predetermined interface", func() {
+			localGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, link)
+		})
+
+		ovntest.OnSupportedPlatformsIt("sets up a local gateway with predetermined interface when network-segmentation is enabled", func() {
+			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+			config.OVNKubernetesFeature.EnableMultiNetwork = true
 			localGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, link)
 		})
 

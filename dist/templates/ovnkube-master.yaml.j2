@@ -272,6 +272,8 @@ spec:
           value: "{{ ovn_admin_pbr_enable }}"
         - name: OVN_VIRTUALIP_ENABLE
           value: "{{ ovn_virtual_ip_enable }}"
+        - name: OVN_NETWORK_SEGMENTATION_ENABLE
+          value: "{{ ovn_network_segmentation_enable }}"
         - name: OVN_EGRESSSERVICE_ENABLE
           value: "{{ ovn_egress_service_enable }}"
         - name: OVN_IPRESERVATION_ENABLE
@@ -312,6 +314,10 @@ spec:
           value: "{{ ovn_enable_multi_external_gateway }}"
         - name: OVN_ENABLE_SVC_TEMPLATE_SUPPORT
           value: "{{ ovn_enable_svc_template_support }}"
+        - name: OVN_NOHOSTSUBNET_LABEL
+          value: "{{ ovn_nohostsubnet_label }}"
+        - name: OVN_DISABLE_REQUESTEDCHASSIS
+          value: "{{ ovn_disable_requestedchassis }}"
         - name: OVN_HOST_NETWORK_NAMESPACE
           valueFrom:
             configMapKeyRef:
@@ -323,6 +329,8 @@ spec:
           value: "{{ ovn_cluster_subnets_mac_binding_aging }}"
         - name: OVN_ENABLE_PERSISTENT_IPS
           value: "{{ ovn_enable_persistent_ips }}"
+        - name: OVN_ENABLE_DNSNAMERESOLVER
+          value: "{{ ovn_enable_dnsnameresolver }}"
       # end of container
 
       volumes:

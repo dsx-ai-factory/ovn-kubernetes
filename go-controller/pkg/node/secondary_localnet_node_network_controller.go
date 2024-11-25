@@ -339,15 +339,3 @@ func (nc *SecondaryLocalnetNodeNetworkController) updateLocalnetOvnBridgeMapping
 	}
 	return nil
 }
-
-func (nc *SecondaryLocalnetNodeNetworkController) NADToInterConnect() string {
-	return ""
-}
-
-func (nc *SecondaryLocalnetNodeNetworkController) StartInterConnect(icInfo *util.InterConnectInfo) error {
-	panic("unexpected call for secondary localnet Node Network Controller")
-}
-
-func (nc *SecondaryLocalnetNodeNetworkController) StopInterConnect(icInfo *util.InterConnectInfo) error {
-	panic("unexpected call for secondary localnet Node Network Controller")
-}

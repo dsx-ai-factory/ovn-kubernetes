@@ -6,8 +6,8 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/onsi/ginkgo"
-	"github.com/onsi/ginkgo/extensions/table"
+	"github.com/onsi/ginkgo/v2"
+
 	"github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -23,6 +23,20 @@ import (
 
 func getPolicyKeyWithKind(policy *knet.NetworkPolicy) string {
 	return fmt.Sprintf("%v/%v/%v", "NetworkPolicy", policy.Namespace, policy.Name)
+}
+
+func eventuallyExpectAddressSetsWithIP(fakeOvn *FakeOVN, peer knet.NetworkPolicyPeer, namespace, ip string) {
+	if peer.PodSelector != nil {
+		dbIDs := getPodSelectorAddrSetDbIDs(getPodSelectorKey(peer.PodSelector, peer.NamespaceSelector, namespace), DefaultNetworkControllerName)
+		fakeOvn.asf.EventuallyExpectAddressSetWithAddresses(dbIDs, []string{ip})
+	}
+}
+
+func eventuallyExpectEmptyAddressSetsExist(fakeOvn *FakeOVN, peer knet.NetworkPolicyPeer, namespace string) {
+	if peer.PodSelector != nil {
+		dbIDs := getPodSelectorAddrSetDbIDs(getPodSelectorKey(peer.PodSelector, peer.NamespaceSelector, namespace), DefaultNetworkControllerName)
+		fakeOvn.asf.EventuallyExpectEmptyAddressSetExist(dbIDs)
+	}
 }
 
 var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
@@ -160,7 +174,7 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 		// expect namespace and peer address sets only
 		fakeOvn.asf.ExpectNumberOfAddressSets(3)
 	})
-	table.DescribeTable("adds selected pod ips to the address set",
+	ginkgo.DescribeTable("adds selected pod ips to the address set",
 		func(peer knet.NetworkPolicyPeer, staticNamespace string, addrSetIPs []string) {
 			namespace1 := *newNamespace(namespaceName1)
 			namespace2 := *newNamespace(namespaceName2)
@@ -189,21 +203,21 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 			peerASIDs := getPodSelectorAddrSetDbIDs(peerASKey, DefaultNetworkControllerName)
 			fakeOvn.asf.ExpectAddressSetWithAddresses(peerASIDs, addrSetIPs)
 		},
-		table.Entry("all pods from a static namespace", knet.NetworkPolicyPeer{
+		ginkgo.Entry("all pods from a static namespace", knet.NetworkPolicyPeer{
 			PodSelector:       &metav1.LabelSelector{},
 			NamespaceSelector: nil,
 		}, namespaceName1, []string{ip1, ip2}),
-		table.Entry("selected pods from a static namespace", knet.NetworkPolicyPeer{
+		ginkgo.Entry("selected pods from a static namespace", knet.NetworkPolicyPeer{
 			PodSelector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{podLabelKey: "ns1pod1"},
 			},
 			NamespaceSelector: nil,
 		}, namespaceName1, []string{ip1}),
-		table.Entry("all pods from all namespaces", knet.NetworkPolicyPeer{
+		ginkgo.Entry("all pods from all namespaces", knet.NetworkPolicyPeer{
 			PodSelector:       &metav1.LabelSelector{},
 			NamespaceSelector: &metav1.LabelSelector{},
 		}, namespaceName1, []string{ip1, ip2, ip3, ip4}),
-		table.Entry("selected pods from all namespaces", knet.NetworkPolicyPeer{
+		ginkgo.Entry("selected pods from all namespaces", knet.NetworkPolicyPeer{
 			PodSelector: &metav1.LabelSelector{
 				MatchExpressions: []metav1.LabelSelectorRequirement{
 					{
@@ -215,7 +229,7 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 			},
 			NamespaceSelector: &metav1.LabelSelector{},
 		}, namespaceName1, []string{ip1, ip3}),
-		table.Entry("all pods from selected namespaces", knet.NetworkPolicyPeer{
+		ginkgo.Entry("all pods from selected namespaces", knet.NetworkPolicyPeer{
 			PodSelector: &metav1.LabelSelector{},
 			NamespaceSelector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{
@@ -223,7 +237,7 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 				},
 			},
 		}, namespaceName1, []string{ip3, ip4}),
-		table.Entry("selected pods from selected namespaces", knet.NetworkPolicyPeer{
+		ginkgo.Entry("selected pods from selected namespaces", knet.NetworkPolicyPeer{
 			PodSelector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{podLabelKey: "ns2pod1"},
 			},

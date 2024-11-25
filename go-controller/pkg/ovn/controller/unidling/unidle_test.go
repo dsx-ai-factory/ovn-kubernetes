@@ -9,7 +9,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"golang.org/x/net/context"
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -19,7 +18,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
 
@@ -100,7 +99,7 @@ var _ = Describe("Unidling Controller", func() {
 		// Controller_Event is deleted
 		Eventually(
 			func() int {
-				ctx, _ := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+				ctx, _ := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 				var events []sbdb.ControllerEvent
 				err = sbClient.List(ctx, &events)
 				Expect(err).NotTo(HaveOccurred())

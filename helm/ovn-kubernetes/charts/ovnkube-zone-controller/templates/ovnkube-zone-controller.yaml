@@ -24,9 +24,14 @@ spec:
         component: network
         type: infra
         kubernetes.io/os: "linux"
+        ovn-db-pod: "true"
       annotations:
         scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
+      {{- if .Values.global.imagePullSecretName }}
+      imagePullSecrets:
+      - name: {{ .Values.global.imagePullSecretName }}
+      {{- end }}
       # Requires fairly broad permissions - ability to read all services and network functions as well
       # as all pods.
       serviceAccountName: ovnkube-node
@@ -309,7 +314,7 @@ spec:
         - name: OVN_HYBRID_OVERLAY_NET_CIDR
           value: {{ default "" .Values.global.hybridOverlayNetCidr | quote }}
         - name: OVN_DISABLE_SNAT_MULTIPLE_GWS
-          value: {{ default "" .Values.disableSnatMultipleGws | quote }}
+          value: {{ default "" .Values.global.disableSnatMultipleGws | quote }}
         - name: OVN_ENCAP_PORT
           value: {{ default 6081 .Values.global.encapPort | quote }}
         - name: OVN_EMPTY_LB_EVENTS
@@ -318,6 +323,10 @@ spec:
           value: {{ default "" .Values.global.v4JoinSubnet | quote }}
         - name: OVN_V6_JOIN_SUBNET
           value: {{ default "" .Values.global.v6JoinSubnet | quote }}
+        - name: OVN_V4_MASQUERADE_SUBNET
+          value: {{ default "" .Values.global.v4MasqueradeSubnet | quote }}
+        - name: OVN_V6_MASQUERADE_SUBNET
+          value: {{ default "" .Values.global.v6MasqueradeSubnet | quote }}
         - name: OVN_SSL_ENABLE
           value: {{ include "isSslEnabled" . | quote }}
         - name: OVN_GATEWAY_MODE
@@ -331,7 +340,7 @@ spec:
         - name: OVN_ENABLE_MULTI_EXTERNAL_GATEWAY
           value: {{ hasKey .Values.global "enableMultiExternalGateway" | ternary .Values.global.enableMultiExternalGateway false | quote }}
         - name: OVN_ENABLE_SVC_TEMPLATE_SUPPORT
-          value: {{ hasKey .Values.global "enableSvcTemplate" | ternary .Values.global.enableSvcTemplate true | quote }
+          value: {{ hasKey .Values.global "enableSvcTemplate" | ternary .Values.global.enableSvcTemplate true | quote }}
         - name: OVN_HOST_NETWORK_NAMESPACE
           valueFrom:
             configMapKeyRef:
@@ -341,6 +350,10 @@ spec:
           value: "local"
         - name: OVN_SOUTH
           value: "local"
+        - name: OVN_ENABLE_DNSNAMERESOLVER
+          value: {{ hasKey .Values.global "enableDNSNameResolver" | ternary .Values.global.enableDNSNameResolver false | quote }}
+        - name: OVN_OBSERV_ENABLE
+          value: {{ hasKey .Values.global "enableObservability" | ternary .Values.global.enableObservability false | quote }}
       # end of container
       volumes:
       # Common volumes

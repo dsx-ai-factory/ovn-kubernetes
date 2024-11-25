@@ -30,7 +30,6 @@ func hasResourceAnUpdateFunc(objType reflect.Type) bool {
 		factory.EgressIPNamespaceType,
 		factory.EgressIPPodType,
 		factory.EgressNodeType,
-		factory.EgressFwNodeType,
 		factory.NamespaceType,
 		factory.MultiNetworkPolicyType,
 		factory.IPAMClaimsType:
@@ -97,21 +96,6 @@ func (h *baseNetworkControllerEventHandler) areResourcesEqual(objType reflect.Ty
 		// force update path for EgressIP resource.
 		return false, nil
 
-	case factory.EgressFwNodeType:
-		oldNode, ok := obj1.(*kapi.Node)
-		if !ok {
-			return false, fmt.Errorf("could not cast obj1 of type %T to *kapi.Node", obj1)
-		}
-		newNode, ok := obj2.(*kapi.Node)
-		if !ok {
-			return false, fmt.Errorf("could not cast obj2 of type %T to *kapi.Node", obj2)
-		}
-		if reflect.DeepEqual(oldNode.Labels, newNode.Labels) &&
-			!util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) {
-			return true, nil
-		}
-		return false, nil
-
 	case factory.NamespaceType:
 		// force update path for Namespace resource.
 		return false, nil
@@ -160,8 +144,7 @@ func (h *baseNetworkControllerEventHandler) getResourceFromInformerCache(objType
 		obj, err = watchFactory.GetNetworkPolicy(namespace, name)
 
 	case factory.NodeType,
-		factory.EgressNodeType,
-		factory.EgressFwNodeType:
+		factory.EgressNodeType:
 		obj, err = watchFactory.GetNode(name)
 
 	case factory.PodType,
@@ -206,7 +189,6 @@ func (h *baseNetworkControllerEventHandler) isResourceScheduled(objType reflect.
 func needsUpdateDuringRetry(objType reflect.Type) bool {
 	switch objType {
 	case factory.EgressNodeType,
-		factory.EgressFwNodeType,
 		factory.EgressIPType,
 		factory.EgressIPPodType,
 		factory.EgressIPNamespaceType,
@@ -231,6 +213,10 @@ func (h *baseNetworkControllerEventHandler) isObjectInTerminalState(objType refl
 
 func (h *baseNetworkControllerEventHandler) recordAddEvent(objType reflect.Type, obj interface{}) {
 	switch objType {
+	case factory.PolicyType:
+		np := obj.(*knet.NetworkPolicy)
+		klog.V(5).Infof("Recording add event on network policy %s/%s", np.Namespace, np.Name)
+		metrics.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name)
 	case factory.MultiNetworkPolicyType:
 		mnp := obj.(*mnpapi.MultiNetworkPolicy)
 		klog.V(5).Infof("Recording add event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)
@@ -241,6 +227,10 @@ func (h *baseNetworkControllerEventHandler) recordAddEvent(objType reflect.Type,
 // RecordUpdateEvent records the udpate event on this given object.
 func (h *baseNetworkControllerEventHandler) recordUpdateEvent(objType reflect.Type, obj interface{}) {
 	switch objType {
+	case factory.PolicyType:
+		np := obj.(*knet.NetworkPolicy)
+		klog.V(5).Infof("Recording update event on network policy %s/%s", np.Namespace, np.Name)
+		metrics.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name)
 	case factory.MultiNetworkPolicyType:
 		mnp := obj.(*mnpapi.MultiNetworkPolicy)
 		klog.V(5).Infof("Recording update event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)
@@ -251,6 +241,10 @@ func (h *baseNetworkControllerEventHandler) recordUpdateEvent(objType reflect.Ty
 // RecordDeleteEvent records the delete event on this given object.
 func (h *baseNetworkControllerEventHandler) recordDeleteEvent(objType reflect.Type, obj interface{}) {
 	switch objType {
+	case factory.PolicyType:
+		np := obj.(*knet.NetworkPolicy)
+		klog.V(5).Infof("Recording delete event on network policy %s/%s", np.Namespace, np.Name)
+		metrics.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name)
 	case factory.MultiNetworkPolicyType:
 		mnp := obj.(*mnpapi.MultiNetworkPolicy)
 		klog.V(5).Infof("Recording delete event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)
@@ -261,6 +255,10 @@ func (h *baseNetworkControllerEventHandler) recordDeleteEvent(objType reflect.Ty
 // RecordSuccessEvent records the success event on this given object.
 func (h *baseNetworkControllerEventHandler) recordSuccessEvent(objType reflect.Type, obj interface{}) {
 	switch objType {
+	case factory.PolicyType:
+		np := obj.(*knet.NetworkPolicy)
+		klog.V(5).Infof("Recording success event on network policy %s/%s", np.Namespace, np.Name)
+		metrics.GetConfigDurationRecorder().End("networkpolicy", np.Namespace, np.Name)
 	case factory.MultiNetworkPolicyType:
 		mnp := obj.(*mnpapi.MultiNetworkPolicy)
 		klog.V(5).Infof("Recording success event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)

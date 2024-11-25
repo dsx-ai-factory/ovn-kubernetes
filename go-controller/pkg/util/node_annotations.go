@@ -33,14 +33,14 @@ import (
 //           "mode": "local",
 //           "interface-id": "br-local_ip-10-0-129-64.us-east-2.compute.internal",
 //           "mac-address": "f2:20:a0:3c:26:4c",
-//           "ip-addresses": ["169.254.33.2/24"],
-//           "next-hops": ["169.254.33.1"],
+//           "ip-addresses": ["169.255.33.2/24"],
+//           "next-hops": ["169.255.33.1"],
 //           "node-port-enable": "true",
 //           "vlan-id": "0"
 //
 //           # backward-compat
-//           "ip-address": "169.254.33.2/24",
-//           "next-hop": "169.254.33.1",
+//           "ip-address": "169.255.33.2/24",
+//           "next-hop": "169.255.33.1",
 //         }
 //       }
 //     k8s.ovn.org/node-chassis-id: b1f96182-2bdd-42b6-88f9-9a1fc1c85ece
@@ -63,8 +63,13 @@ const (
 	// OvnNodeManagementPort is the constant string representing the annotation key
 	OvnNodeManagementPort = "k8s.ovn.org/node-mgmt-port"
 
-	// OvnNodeManagementPortMacAddress is the constant string representing the annotation key
-	OvnNodeManagementPortMacAddress = "k8s.ovn.org/node-mgmt-port-mac-address"
+	// OvnNodeManagementPortMacAddresses contains all mac addresses of the management ports
+	// on all networks keyed by the network-name
+	// k8s.ovn.org/node-mgmt-port-mac-addresses: {
+	// "default":"ca:53:88:23:bc:98",
+	// "l2-network":"5e:52:2a:c0:98:f4",
+	// "l3-network":"1a:2c:34:29:b7:be"}
+	OvnNodeManagementPortMacAddresses = "k8s.ovn.org/node-mgmt-port-mac-addresses"
 
 	// OvnNodeChassisID is the systemID of the node needed for creating L3 gateway
 	OvnNodeChassisID = "k8s.ovn.org/node-chassis-id"
@@ -77,7 +82,22 @@ const (
 	OvnNodeIfAddr = "k8s.ovn.org/node-primary-ifaddr"
 
 	// ovnNodeGRLRPAddr is the CIDR form representation of Gate Router LRP IP address to join switch (i.e: 100.64.0.5/24)
+	// DEPRECATED; use ovnNodeGRLRPAddrs moving forward
+	// FIXME(tssurya): Remove this a few months from now; needed for backwards
+	// compatbility during upgrades while updating to use the new annotation "ovnNodeGRLRPAddrs"
 	ovnNodeGRLRPAddr = "k8s.ovn.org/node-gateway-router-lrp-ifaddr"
+
+	// ovnNodeGRLRPAddrs is the CIDR form representation of Gate Router LRP IP address to join switch (i.e: 100.64.0.4/16)
+	// for all the networks keyed by the network-name and ipFamily.
+	// "k8s.ovn.org/node-gateway-router-lrp-ifaddrs": "{
+	//		\"default\":{\"ipv4\":\"100.64.0.4/16\",\"ipv6\":\"fd98::4/64\"},
+	//		\"l2-network\":{\"ipv4\":\"100.65.0.4/16\",\"ipv6\":\"fd99::4/64\"},
+	//		\"l3-network\":{\"ipv4\":\"100.65.0.4/16\",\"ipv6\":\"fd99::4/64\"}
+	// }",
+	OVNNodeGRLRPAddrs = "k8s.ovn.org/node-gateway-router-lrp-ifaddrs"
+
+	// OvnNodeMasqCIDR is the CIDR form representation of the masquerade subnet that is currently configured on this node (i.e. 169.254.169.0/29)
+	OvnNodeMasqCIDR = "k8s.ovn.org/node-masquerade-subnet"
 
 	// OvnNodeEgressLabel is a user assigned node label indicating to ovn-kubernetes that the node is to be used for egress IP assignment
 	ovnNodeEgressLabel = "k8s.ovn.org/egress-assignable"
@@ -134,9 +154,6 @@ const (
 	OvnSkipFirewalldAnnotationName = "k8s.ovn.org/skip-firewalld"
 	SkipPinnedLSNodeAnnotationName = "k8s.ovn.org/node-skip-pinned-ls-for-networks"
 
-	// invalidNetworkID signifies its an invalid network id
-	InvalidNetworkID = -1
-
 	// ovnNodeHostTypeLabel used by ngn
 	ovnNodeHostTypeLabel = "ngn2.nvidia.com/hosttype"
 
@@ -145,6 +162,21 @@ const (
 
 	// ovnNodeDPUList is used to list the dpus attached to the node
 	ovnNodeDPUList = "ngn2.nvidia.com/dpus"
+
+	// ovnUDNLayer2NodeGRLRPTunnelIDs is the constant string representing the tunnel id allocated for the
+	// UDN L2 network for this node's GR LRP by cluster manager. This is used to create the remote tunnel
+	// ports for each node.
+	// "k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids": "{
+	//		"l2-network-a":"5",
+	//		"l2-network-b":"10"}
+	// }",
+	ovnUDNLayer2NodeGRLRPTunnelIDs = "k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids"
+
+	// InvalidID signifies its an invalid network id or invalid tunnel id
+	InvalidID = -1
+
+	// NoID signifies its an empty tunnel id (its reserved as un-usable when the allocator is created)
+	NoID = 0
 )
 
 type GWSNATRule struct {
@@ -155,6 +187,7 @@ type GWSNATRule struct {
 type L3GatewayConfig struct {
 	Mode                config.GatewayMode
 	ChassisID           string
+	BridgeID            string
 	InterfaceID         string
 	MACAddress          net.HardwareAddr
 	IPAddresses         []*net.IPNet
@@ -174,6 +207,7 @@ type gwSNATRuleJSON struct {
 
 type l3GatewayConfigJSON struct {
 	Mode                config.GatewayMode `json:"mode"`
+	BridgeID            string             `json:"bridge-id,omitempty"`
 	InterfaceID         string             `json:"interface-id,omitempty"`
 	MACAddress          string             `json:"mac-address,omitempty"`
 	IPAddresses         []string           `json:"ip-addresses,omitempty"`
@@ -197,6 +231,7 @@ func (cfg *L3GatewayConfig) MarshalJSON() ([]byte, error) {
 		return json.Marshal(&cfgjson)
 	}
 
+	cfgjson.BridgeID = cfg.BridgeID
 	cfgjson.InterfaceID = cfg.InterfaceID
 	cfgjson.MACAddress = cfg.MACAddress.String()
 	cfgjson.EgressGWInterfaceID = cfg.EgressGWInterfaceID
@@ -259,6 +294,7 @@ func (cfg *L3GatewayConfig) UnmarshalJSON(bytes []byte) error {
 		return fmt.Errorf("bad 'mode' value %q", cfgjson.Mode)
 	}
 
+	cfg.BridgeID = cfgjson.BridgeID
 	cfg.InterfaceID = cfgjson.InterfaceID
 	cfg.EgressGWInterfaceID = cfgjson.EgressGWInterfaceID
 
@@ -488,17 +524,139 @@ func ParseNodeManagementPortAnnotation(node *kapi.Node) (int, int, error) {
 	return cfg.PfId, cfg.FuncId, nil
 }
 
-func SetNodeManagementPortMACAddress(nodeAnnotator kube.Annotator, macAddress net.HardwareAddr) error {
-	return nodeAnnotator.Set(OvnNodeManagementPortMacAddress, macAddress.String())
+// UpdateNodeManagementPortMACAddressesWithRetry will update the node's mac address annotation for the provided netName, macAddress values
+// Retry if it fails because of potential conflict which is transient. This function is called from both default network's controller and
+// user defined network's controller as it attempts to add mac addresses of management ports belonging to different networks.
+// Return error in the case of other errors (say temporary API server down), and it will be taken care of by the retry mechanism.
+func UpdateNodeManagementPortMACAddressesWithRetry(node *kapi.Node, nodeLister listers.NodeLister, kubeInterface kube.Interface, macAddress net.HardwareAddr, netName string) error {
+	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		// Informer cache should not be mutated, so get a copy of the object
+		node, err := nodeLister.Get(node.Name)
+		if err != nil {
+			return err
+		}
+
+		cnode := node.DeepCopy()
+
+		cnode.Annotations, err = UpdateManagementPortMACAddressesAnnotation(cnode.Annotations, netName, macAddress)
+		if err != nil {
+			return fmt.Errorf("failed to update node %q management port mac address annotation %s for network %s",
+				node.Name, macAddress.String(), netName)
+		}
+		// It is possible to update the node annotations using status subresource
+		// because changes to metadata via status subresource are not restricted for nodes.
+		return kubeInterface.UpdateNodeStatus(cnode)
+	})
+	if resultErr != nil {
+		return fmt.Errorf("failed to update node %s annotation: %w", node.Name, resultErr)
+	}
+	return nil
 }
 
-func ParseNodeManagementPortMACAddress(node *kapi.Node) (net.HardwareAddr, error) {
-	macAddress, ok := node.Annotations[OvnNodeManagementPortMacAddress]
-	if !ok {
-		return nil, newAnnotationNotSetError("macAddress annotation not found node %q ", node.Name)
+// UpdateManagementPortMACAddressesAnnotation updates the OvnNodeManagementPortMacAddresses annotation for the network name 'netName'
+// with the provided MAC Address
+func UpdateManagementPortMACAddressesAnnotation(annotations map[string]string, netName string, macAddress net.HardwareAddr) (map[string]string, error) {
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	err := updateNodeManagementPortMACAddressesAnnotation(annotations, netName, macAddress)
+	if err != nil {
+		return nil, err
+	}
+	return annotations, nil
+}
+
+// updateNodeManagementPortMACAddressesAnnotation updates the OvnNodeManagementPortMacAddresses annotation in
+// the 'annotations' map with the provided macAddress for the given netName.
+func updateNodeManagementPortMACAddressesAnnotation(annotations map[string]string, netName string, macAddress net.HardwareAddr) error {
+	var bytes []byte
+
+	// First get the all mac addresses for all existing networks
+	macAddressMap, err := parseNetworkMapAnnotation(annotations, OvnNodeManagementPortMacAddresses)
+	if err != nil {
+		if !IsAnnotationNotSetError(err) {
+			return fmt.Errorf("failed to parse node network management port annotation %q: %v",
+				annotations, err)
+		}
+		// in the case that the annotation does not exist
+		macAddressMap = map[string]string{}
+	}
+	if len(macAddress.String()) != 0 {
+		macAddressMap[netName] = macAddress.String()
+	} else {
+		delete(macAddressMap, netName)
 	}
 
+	// if no networks left, just delete the network ids annotation from node annotations.
+	if len(macAddressMap) == 0 {
+		delete(annotations, OvnNodeManagementPortMacAddresses)
+		return nil
+	}
+
+	// Marshal all network ids back to annotations.
+	bytes, err = json.Marshal(macAddressMap)
+	if err != nil {
+		return err
+	}
+	annotations[OvnNodeManagementPortMacAddresses] = string(bytes)
+	return nil
+}
+
+// UpdateNodeManagementPortMACAddresses used only from unit tests
+func UpdateNodeManagementPortMACAddresses(node *kapi.Node, nodeAnnotator kube.Annotator, macAddress net.HardwareAddr, netName string) error {
+	macAddressMap, err := parseNetworkMapAnnotation(node.Annotations, OvnNodeManagementPortMacAddresses)
+	if err != nil {
+		if !IsAnnotationNotSetError(err) {
+			return fmt.Errorf("failed to parse node network management port annotation %q: %v",
+				node.Annotations, err)
+		}
+		// in the case that the annotation does not exist
+		macAddressMap = map[string]string{}
+	}
+	macAddressMap[netName] = macAddress.String()
+	return nodeAnnotator.Set(OvnNodeManagementPortMacAddresses, macAddressMap)
+}
+
+// ParseNodeManagementPortMACAddresses parses the 'OvnNodeManagementPortMacAddresses' annotation
+// for the specified network in 'netName' and returns the mac address.
+func ParseNodeManagementPortMACAddresses(node *kapi.Node, netName string) (net.HardwareAddr, error) {
+	macAddressMap, err := parseNetworkMapAnnotation(node.Annotations, OvnNodeManagementPortMacAddresses)
+	if err != nil {
+		return nil, fmt.Errorf("macAddress annotation not found for node %s; error: %w", node.Name, err)
+	}
+	macAddress, ok := macAddressMap[netName]
+	if !ok {
+		return nil, newAnnotationNotSetError("node %q has no %q annotation for network %s", node.Name, OvnNodeManagementPortMacAddresses, netName)
+	}
 	return net.ParseMAC(macAddress)
+}
+
+// ParseUDNLayer2NodeGRLRPTunnelIDs parses the 'ovnUDNLayer2NodeGRLRPTunnelIDs' annotation
+// for the specified network in 'netName' and returns the tunnelID.
+func ParseUDNLayer2NodeGRLRPTunnelIDs(node *kapi.Node, netName string) (int, error) {
+	tunnelIDsMap, err := parseNetworkMapAnnotation(node.Annotations, ovnUDNLayer2NodeGRLRPTunnelIDs)
+	if err != nil {
+		return InvalidID, err
+	}
+
+	tunnelID, ok := tunnelIDsMap[netName]
+	if !ok {
+		return InvalidID, newAnnotationNotSetError("node %q has no %q annotation for network %s", node.Name, ovnUDNLayer2NodeGRLRPTunnelIDs, netName)
+	}
+
+	return strconv.Atoi(tunnelID)
+}
+
+// UpdateUDNLayer2NodeGRLRPTunnelIDs updates the ovnUDNLayer2NodeGRLRPTunnelIDs annotation for the network name 'netName' with the tunnel id 'tunnelID'.
+// If 'tunnelID' is invalid tunnel ID (-1), then it deletes that network from the tunnel ids annotation.
+func UpdateUDNLayer2NodeGRLRPTunnelIDs(annotations map[string]string, netName string, tunnelID int) (map[string]string, error) {
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	if err := updateNetworkAnnotation(annotations, netName, tunnelID, ovnUDNLayer2NodeGRLRPTunnelIDs); err != nil {
+		return nil, err
+	}
+	return annotations, nil
 }
 
 type primaryIfAddrAnnotation struct {
@@ -552,14 +710,112 @@ func createPrimaryIfAddrAnnotation(annotationName string, nodeAnnotation map[str
 	return nodeAnnotation, nil
 }
 
-// CreateNodeGatewayRouterLRPAddrAnnotation sets the IPv4 / IPv6 values of the node's Gateway Router LRP to join switch.
-func CreateNodeGatewayRouterLRPAddrAnnotation(nodeAnnotation map[string]interface{}, nodeIPNetv4,
-	nodeIPNetv6 *net.IPNet) (map[string]interface{}, error) {
-	return createPrimaryIfAddrAnnotation(ovnNodeGRLRPAddr, nodeAnnotation, nodeIPNetv4, nodeIPNetv6)
+func NodeGatewayRouterLRPAddrsAnnotationChanged(oldNode, newNode *kapi.Node) bool {
+	return oldNode.Annotations[OVNNodeGRLRPAddrs] != newNode.Annotations[OVNNodeGRLRPAddrs]
 }
 
-func NodeGatewayRouterLRPAddrAnnotationChanged(oldNode, newNode *kapi.Node) bool {
-	return oldNode.Annotations[ovnNodeGRLRPAddr] != newNode.Annotations[ovnNodeGRLRPAddr]
+// UpdateNodeGatewayRouterLRPAddrsAnnotation updates a "k8s.ovn.org/node-gateway-router-lrp-ifaddrs" annotation for network "netName",
+// with the specified network, suitable for passing to kube.SetAnnotationsOnNode. If joinSubnets is empty,
+// it deletes the "k8s.ovn.org/node-gateway-router-lrp-ifaddrs" annotation for network "netName"
+func UpdateNodeGatewayRouterLRPAddrsAnnotation(annotations map[string]string, joinSubnets []*net.IPNet, netName string) (map[string]string, error) {
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	err := updateJoinSubnetAnnotation(annotations, OVNNodeGRLRPAddrs, netName, joinSubnets)
+	if err != nil {
+		return nil, err
+	}
+	return annotations, nil
+}
+
+// updateJoinSubnetAnnotation add the joinSubnets of the given network to the input node annotations;
+// input annotations is not nil
+// if joinSubnets is empty, deletes the existing subnet annotation for given network from the input node annotations.
+func updateJoinSubnetAnnotation(annotations map[string]string, annotationName, netName string, joinSubnets []*net.IPNet) error {
+	var bytes []byte
+
+	// First get the all host subnets for all existing networks
+	subnetsMap, err := parseJoinSubnetAnnotation(annotations, annotationName)
+	if err != nil {
+		if !IsAnnotationNotSetError(err) {
+			return fmt.Errorf("failed to parse join subnet annotation %q: %w",
+				annotations, err)
+		}
+		// in the case that the annotation does not exist
+		subnetsMap = map[string]primaryIfAddrAnnotation{}
+	}
+
+	// add or delete host subnet of the specified network
+	if len(joinSubnets) != 0 {
+		subnetVal := primaryIfAddrAnnotation{}
+		for _, net := range joinSubnets {
+			if utilnet.IsIPv4CIDR(net) {
+				subnetVal.IPv4 = net.String()
+			} else {
+				subnetVal.IPv6 = net.String()
+			}
+		}
+		subnetsMap[netName] = subnetVal
+	} else {
+		delete(subnetsMap, netName)
+	}
+
+	// if no host subnet left, just delete the host subnet annotation from node annotations.
+	if len(subnetsMap) == 0 {
+		delete(annotations, annotationName)
+		return nil
+	}
+
+	// Marshal all host subnets of all networks back to annotations.
+	bytes, err = json.Marshal(subnetsMap)
+	if err != nil {
+		return err
+	}
+	annotations[annotationName] = string(bytes)
+	return nil
+}
+
+func parseJoinSubnetAnnotation(nodeAnnotations map[string]string, annotationName string) (map[string]primaryIfAddrAnnotation, error) {
+	annotation, ok := nodeAnnotations[annotationName]
+	if !ok {
+		return nil, newAnnotationNotSetError("could not find %q annotation", annotationName)
+	}
+	joinSubnetsNetworkMap := make(map[string]primaryIfAddrAnnotation)
+	if err := json.Unmarshal([]byte(annotation), &joinSubnetsNetworkMap); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal annotation: %s, err: %w", annotationName, err)
+	}
+
+	if len(joinSubnetsNetworkMap) == 0 {
+		return nil, fmt.Errorf("unexpected empty %s annotation", annotationName)
+	}
+
+	joinsubnetMap := make(map[string]primaryIfAddrAnnotation)
+	for netName, subnetsStr := range joinSubnetsNetworkMap {
+		subnetVal := primaryIfAddrAnnotation{}
+		if subnetsStr.IPv4 == "" && subnetsStr.IPv6 == "" {
+			return nil, fmt.Errorf("annotation: %s does not have any IP information set", annotationName)
+		}
+		if subnetsStr.IPv4 != "" && config.IPv4Mode {
+			ip, ipNet, err := net.ParseCIDR(subnetsStr.IPv4)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse IPv4 address %s from annotation: %s, err: %w",
+					subnetsStr.IPv4, annotationName, err)
+			}
+			joinIP := &net.IPNet{IP: ip, Mask: ipNet.Mask}
+			subnetVal.IPv4 = joinIP.String()
+		}
+		if subnetsStr.IPv6 != "" && config.IPv6Mode {
+			ip, ipNet, err := net.ParseCIDR(subnetsStr.IPv6)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse IPv6 address %s from annotation: %s, err: %w",
+					subnetsStr.IPv4, annotationName, err)
+			}
+			joinIP := &net.IPNet{IP: ip, Mask: ipNet.Mask}
+			subnetVal.IPv6 = joinIP.String()
+		}
+		joinsubnetMap[netName] = subnetVal
+	}
+	return joinsubnetMap, nil
 }
 
 // CreateNodeTransitSwitchPortAddrAnnotation creates the node annotation for the node's Transit switch port addresses.
@@ -570,6 +826,12 @@ func CreateNodeTransitSwitchPortAddrAnnotation(nodeAnnotation map[string]interfa
 
 func NodeTransitSwitchPortAddrAnnotationChanged(oldNode, newNode *kapi.Node) bool {
 	return oldNode.Annotations[ovnTransitSwitchPortAddr] != newNode.Annotations[ovnTransitSwitchPortAddr]
+}
+
+// CreateNodeMasqueradeSubnetAnnotation sets the IPv4 / IPv6 values of the node's Masquerade subnet.
+func CreateNodeMasqueradeSubnetAnnotation(nodeAnnotation map[string]interface{}, nodeIPNetv4,
+	nodeIPNetv6 *net.IPNet) (map[string]interface{}, error) {
+	return createPrimaryIfAddrAnnotation(OvnNodeMasqCIDR, nodeAnnotation, nodeIPNetv4, nodeIPNetv6)
 }
 
 const UnlimitedNodeCapacity = math.MaxInt32
@@ -602,7 +864,7 @@ type ParsedNodeEgressIPConfiguration struct {
 	Capacity Capacity
 }
 
-func getNodeIfAddrAnnotation(node *kapi.Node) (*primaryIfAddrAnnotation, error) {
+func GetNodeIfAddrAnnotation(node *kapi.Node) (*primaryIfAddrAnnotation, error) {
 	nodeIfAddrAnnotation, ok := node.Annotations[OvnNodeIfAddr]
 	if !ok {
 		return nil, newAnnotationNotSetError("%s annotation not found for node %q", OvnNodeIfAddr, node.Name)
@@ -619,7 +881,7 @@ func getNodeIfAddrAnnotation(node *kapi.Node) (*primaryIfAddrAnnotation, error) 
 
 // ParseNodePrimaryIfAddr returns the IPv4 / IPv6 values for the node's primary network interface
 func ParseNodePrimaryIfAddr(node *kapi.Node) (*ParsedNodeEgressIPConfiguration, error) {
-	nodeIfAddr, err := getNodeIfAddrAnnotation(node)
+	nodeIfAddr, err := GetNodeIfAddrAnnotation(node)
 	if err != nil {
 		return nil, err
 	}
@@ -639,6 +901,7 @@ func ParseNodePrimaryIfAddr(node *kapi.Node) (*ParsedNodeEgressIPConfiguration, 
 }
 
 // ParseNodeGatewayRouterLRPAddr returns the IPv4 / IPv6 values for the node's gateway router
+// DEPRECATED; kept for backwards compatibility
 func ParseNodeGatewayRouterLRPAddr(node *kapi.Node) (net.IP, error) {
 	nodeIfAddrAnnotation, ok := node.Annotations[ovnNodeGRLRPAddr]
 	if !ok {
@@ -673,23 +936,30 @@ func parsePrimaryIfAddrAnnotation(node *kapi.Node, annotationName string) ([]*ne
 	if nodeIfAddr.IPv4 == "" && nodeIfAddr.IPv6 == "" {
 		return nil, fmt.Errorf("node: %q does not have any IP information set", node.Name)
 	}
+	ipAddrs, err := convertPrimaryIfAddrAnnotationToIPNet(nodeIfAddr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse annotation: %s for node %q, err: %w", annotationName, node.Name, err)
+	}
+	return ipAddrs, nil
+}
+
+func convertPrimaryIfAddrAnnotationToIPNet(ifAddr primaryIfAddrAnnotation) ([]*net.IPNet, error) {
 	var ipAddrs []*net.IPNet
-	if nodeIfAddr.IPv4 != "" {
-		ip, ipNet, err := net.ParseCIDR(nodeIfAddr.IPv4)
+	if ifAddr.IPv4 != "" {
+		ip, ipNet, err := net.ParseCIDR(ifAddr.IPv4)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse IPv4 address %s from annotation: %s for node %q, err: %w", nodeIfAddr.IPv4, annotationName, node.Name, err)
+			return nil, fmt.Errorf("failed to parse IPv4 address %s, err: %w", ifAddr.IPv4, err)
 		}
 		ipAddrs = append(ipAddrs, &net.IPNet{IP: ip, Mask: ipNet.Mask})
 	}
 
-	if nodeIfAddr.IPv6 != "" {
-		ip, ipNet, err := net.ParseCIDR(nodeIfAddr.IPv6)
+	if ifAddr.IPv6 != "" {
+		ip, ipNet, err := net.ParseCIDR(ifAddr.IPv6)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse IPv6 address %s from annotation: %s for node %q, err: %w", nodeIfAddr.IPv6, annotationName, node.Name, err)
+			return nil, fmt.Errorf("failed to parse IPv6 address %s, err: %w", ifAddr.IPv6, err)
 		}
 		ipAddrs = append(ipAddrs, &net.IPNet{IP: ip, Mask: ipNet.Mask})
 	}
-
 	return ipAddrs, nil
 }
 
@@ -699,10 +969,60 @@ func ParseNodeGatewayRouterLRPAddrs(node *kapi.Node) ([]*net.IPNet, error) {
 	return parsePrimaryIfAddrAnnotation(node, ovnNodeGRLRPAddr)
 }
 
+func ParseNodeGatewayRouterJoinNetwork(node *kapi.Node, netName string) (primaryIfAddrAnnotation, error) {
+	var val primaryIfAddrAnnotation
+	joinSubnetMap, err := parseJoinSubnetAnnotation(node.Annotations, OVNNodeGRLRPAddrs)
+	if err != nil {
+		return val, fmt.Errorf("unable to parse annotation %s on node %s: err %w",
+			OVNNodeGRLRPAddrs, node.Name, err)
+	}
+	val, ok := joinSubnetMap[netName]
+	if !ok {
+		return val, newAnnotationNotSetError("unable to fetch annotation value on node %s for network %s",
+			node.Name, netName)
+	}
+	return val, nil
+}
+
+// ParseNodeGatewayRouterJoinIPv4 returns the IPv4 address for the node's gateway router port
+// stored in the 'OVNNodeGRLRPAddrs' annotation
+func ParseNodeGatewayRouterJoinIPv4(node *kapi.Node, netName string) (net.IP, error) {
+	primaryIfAddr, err := ParseNodeGatewayRouterJoinNetwork(node, netName)
+	if err != nil {
+		return nil, err
+	}
+	if primaryIfAddr.IPv4 == "" {
+		return nil, fmt.Errorf("failed to find an IPv4 address for gateway route interface in node: %s, net: %s, "+
+			"annotation values: %+v", node, netName, primaryIfAddr)
+	}
+
+	ip, _, err := net.ParseCIDR(primaryIfAddr.IPv4)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse gateway router IPv4 address %s, err: %w", primaryIfAddr.IPv4, err)
+	}
+	return ip, nil
+}
+
+// ParseNodeGatewayRouterJoinAddrs returns the IPv4 and/or IPv6 addresses for the node's gateway router port
+// stored in the 'OVNNodeGRLRPAddrs' annotation
+func ParseNodeGatewayRouterJoinAddrs(node *kapi.Node, netName string) ([]*net.IPNet, error) {
+	primaryIfAddr, err := ParseNodeGatewayRouterJoinNetwork(node, netName)
+	if err != nil {
+		return nil, err
+	}
+	return convertPrimaryIfAddrAnnotationToIPNet(primaryIfAddr)
+}
+
 // ParseNodeTransitSwitchPortAddrs returns the IPv4 and/or IPv6 addresses for the node's transit switch port
 // stored in the 'ovnTransitSwitchPortAddr' annotation
 func ParseNodeTransitSwitchPortAddrs(node *kapi.Node) ([]*net.IPNet, error) {
 	return parsePrimaryIfAddrAnnotation(node, ovnTransitSwitchPortAddr)
+}
+
+// ParseNodeMasqueradeSubnet returns the IPv4 and/or IPv6 networks for the node's gateway router port
+// stored in the 'OvnNodeMasqCIDR' annotation
+func ParseNodeMasqueradeSubnet(node *kapi.Node) ([]*net.IPNet, error) {
+	return parsePrimaryIfAddrAnnotation(node, OvnNodeMasqCIDR)
 }
 
 // GetNodeEIPConfig attempts to generate EIP configuration from a nodes annotations.
@@ -751,7 +1071,7 @@ func ParseCloudEgressIPConfig(node *kapi.Node) (*ParsedNodeEgressIPConfiguration
 
 	// ParsedNodeEgressIPConfiguration.V[4|6].IP is used to verify if an egress IP matches node IP to disable its creation
 	// use node IP instead of the value assigned from cloud egress CIDR config
-	nodeIfAddr, err := getNodeIfAddrAnnotation(node)
+	nodeIfAddr, err := GetNodeIfAddrAnnotation(node)
 	if err != nil {
 		return nil, err
 	}
@@ -879,8 +1199,36 @@ func ParseNodeHostCIDRs(node *kapi.Node) (sets.Set[string], error) {
 	return sets.New(cfg...), nil
 }
 
-func DelNodeHostCIDRs(nodeAnnotator kube.Annotator) {
-	nodeAnnotator.Delete(OVNNodeHostCIDRs)
+// ParseNodeHostIPDropNetMask returns the parsed host IP addresses found on a node's host CIDR annotation. Removes the mask.
+func ParseNodeHostIPDropNetMask(node *kapi.Node) (sets.Set[string], error) {
+	nodeIfAddrAnnotation, ok := node.Annotations[OvnNodeIfAddr]
+	if !ok {
+		return nil, newAnnotationNotSetError("%s annotation not found for node %q", OvnNodeIfAddr, node.Name)
+	}
+	nodeIfAddr := &primaryIfAddrAnnotation{}
+	if err := json.Unmarshal([]byte(nodeIfAddrAnnotation), nodeIfAddr); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal annotation: %s for node %q, err: %v", OvnNodeIfAddr, node.Name, err)
+	}
+
+	var cfg []string
+	if nodeIfAddr.IPv4 != "" {
+		cfg = append(cfg, nodeIfAddr.IPv4)
+	}
+	if nodeIfAddr.IPv6 != "" {
+		cfg = append(cfg, nodeIfAddr.IPv6)
+	}
+	if len(cfg) == 0 {
+		return nil, fmt.Errorf("node: %q does not have any IP information set", node.Name)
+	}
+
+	for i, cidr := range cfg {
+		ip, _, err := net.ParseCIDR(cidr)
+		if err != nil || ip == nil {
+			return nil, fmt.Errorf("failed to parse node host cidr: %v", err)
+		}
+		cfg[i] = ip.String()
+	}
+	return sets.New(cfg...), nil
 }
 
 // ParseNodeHostCIDRsDropNetMask returns the parsed host IP addresses found on a node's host CIDR annotation. Removes the mask.
@@ -913,7 +1261,7 @@ func GetNodeHostAddrs(node *kapi.Node) ([]string, error) {
 	if err != nil && !IsAnnotationNotSetError(err) {
 		return nil, fmt.Errorf("failed to get node host CIDRs for %s: %s", node.Name, err.Error())
 	}
-	return hostAddresses.UnsortedList(), nil
+	return sets.List(hostAddresses), nil
 }
 
 func ParseNodeHostCIDRsExcludeOVNNetworks(node *kapi.Node) ([]string, error) {
@@ -921,7 +1269,7 @@ func ParseNodeHostCIDRsExcludeOVNNetworks(node *kapi.Node) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	ovnNetworks, err := getNodeIfAddrAnnotation(node)
+	ovnNetworks, err := GetNodeIfAddrAnnotation(node)
 	if err != nil {
 		return nil, err
 	}
@@ -1133,93 +1481,97 @@ func NodeZoneAnnotationChanged(oldNode, newNode *kapi.Node) bool {
 	return oldNode.Annotations[OvnNodeZoneName] != newNode.Annotations[OvnNodeZoneName]
 }
 
-func parseNetworkIDsAnnotation(nodeAnnotations map[string]string, annotationName string) (map[string]string, error) {
+// parseNetworkMapAnnotation parses the provided network aware annotation  which is in map format
+// and returns the corresponding value.
+func parseNetworkMapAnnotation(nodeAnnotations map[string]string, annotationName string) (map[string]string, error) {
 	annotation, ok := nodeAnnotations[annotationName]
 	if !ok {
 		return nil, newAnnotationNotSetError("could not find %q annotation", annotationName)
 	}
 
-	networkIdsStrMap := map[string]string{}
-	networkIds := make(map[string]string)
-	if err := json.Unmarshal([]byte(annotation), &networkIds); err != nil {
+	idsStrMap := map[string]string{}
+	ids := make(map[string]string)
+	if err := json.Unmarshal([]byte(annotation), &ids); err != nil {
 		return nil, fmt.Errorf("could not parse %q annotation %q : %v",
 			annotationName, annotation, err)
 	}
-	for netName, v := range networkIds {
-		networkIdsStrMap[netName] = v
+	for netName, v := range ids {
+		idsStrMap[netName] = v
 	}
 
-	if len(networkIdsStrMap) == 0 {
+	if len(idsStrMap) == 0 {
 		return nil, fmt.Errorf("unexpected empty %s annotation", annotationName)
 	}
 
-	return networkIdsStrMap, nil
+	return idsStrMap, nil
 }
 
 // ParseNetworkIDAnnotation parses the 'ovnNetworkIDs' annotation for the specified
 // network in 'netName' and returns the network id.
 func ParseNetworkIDAnnotation(node *kapi.Node, netName string) (int, error) {
-	networkIDsMap, err := parseNetworkIDsAnnotation(node.Annotations, ovnNetworkIDs)
+	networkIDsMap, err := parseNetworkMapAnnotation(node.Annotations, ovnNetworkIDs)
 	if err != nil {
-		return InvalidNetworkID, err
+		return InvalidID, err
 	}
 
 	networkID, ok := networkIDsMap[netName]
 	if !ok {
-		return InvalidNetworkID, newAnnotationNotSetError("node %q has no %q annotation for network %s", node.Name, ovnNetworkIDs, netName)
+		return InvalidID, newAnnotationNotSetError("node %q has no %q annotation for network %s", node.Name, ovnNetworkIDs, netName)
 	}
 
 	return strconv.Atoi(networkID)
 }
 
-// updateNetworkIDsAnnotation updates the ovnNetworkIDs annotation in the 'annotations' map
-// with the provided network id in 'networkID'.  If 'networkID' is InvalidNetworkID (-1)
-// it deletes the ovnNetworkIDs annotation from the map.
-func updateNetworkIDsAnnotation(annotations map[string]string, netName string, networkID int) error {
+// updateNetworkAnnotation updates the provided annotationName in the 'annotations' map
+// with the provided ID in 'annotationName's value.  If 'id' is InvalidID (-1)
+// it deletes the annotationName annotation from the map.
+// It is currently used for ovnNetworkIDs annotation updates
+// merge TBD check return error of updateNetworkAnnotation (alreadySet) 
+func updateNetworkAnnotation(annotations map[string]string, netName string, id int, annotationName string) error {
 	var bytes []byte
 
-	// First get the all network ids for all existing networks
-	networkIDsMap, err := parseNetworkIDsAnnotation(annotations, ovnNetworkIDs)
+	// First get the all ids for all existing networks
+	idsMap, err := parseNetworkMapAnnotation(annotations, annotationName)
 	if err != nil {
 		if !IsAnnotationNotSetError(err) {
 			return fmt.Errorf("failed to parse node network id annotation %q: %v",
 				annotations, err)
 		}
 		// in the case that the annotation does not exist
-		networkIDsMap = map[string]string{}
+		idsMap = map[string]string{}
 	}
 
 	// add or delete network id of the specified network
-	oldNetworkIDString, ok := networkIDsMap[netName]
-	if networkID == InvalidNetworkID {
+	oldIDString, ok := idsMap[netName]
+	if id == InvalidID {
 		if !ok {
-			return newAnnotationAlreadySetError("%s annotation already unset", ovnNetworkIDs)
+			return newAnnotationAlreadySetError("%s annotation already unset", annotationName)
 		}
-		delete(networkIDsMap, netName)
+		delete(idsMap, netName)
 	} else {
-		newNetworkIDString := strconv.Itoa(networkID)
-		if ok && oldNetworkIDString == newNetworkIDString {
-			return newAnnotationAlreadySetError("%s annotation already set", ovnNetworkIDs)
+		newIDString := strconv.Itoa(id)
+		if ok && oldIDString == newIDString {
+			return newAnnotationAlreadySetError("%s annotation already set", annotationName)
 		}
-		networkIDsMap[netName] = strconv.Itoa(networkID)
+		idsMap[netName] = newIDString
 	}
 
-	// if no networks left, just delete the network ids annotation from node annotations.
-	if len(networkIDsMap) == 0 {
-		delete(annotations, ovnNetworkIDs)
+	// if no networks left, just delete the annotation from node annotations.
+	if len(idsMap) == 0 {
+		delete(annotations, annotationName)
 		return nil
 	}
 
 	// Marshal all network ids back to annotations.
-	networkIdsStrMap := make(map[string]string)
-	for n, id := range networkIDsMap {
-		networkIdsStrMap[n] = id
+	idsStrMap := make(map[string]string)
+	for n, id := range idsMap {
+		idsStrMap[n] = id
 	}
-	bytes, err = json.Marshal(networkIdsStrMap)
+	bytes, err = json.Marshal(idsStrMap)
 	if err != nil {
 		return err
 	}
-	annotations[ovnNetworkIDs] = string(bytes)
+	annotations[annotationName] = string(bytes)
 	return nil
 }
 
@@ -1229,7 +1581,7 @@ func UpdateNetworkIDAnnotation(annotations map[string]string, netName string, ne
 	if annotations == nil {
 		annotations = map[string]string{}
 	}
-	err := updateNetworkIDsAnnotation(annotations, netName, networkID)
+	err := updateNetworkAnnotation(annotations, netName, networkID, ovnNetworkIDs)
 	if err != nil {
 		if IsAnnotationAlreadySetError(err) {
 			return annotations, err
@@ -1242,7 +1594,7 @@ func UpdateNetworkIDAnnotation(annotations map[string]string, netName string, ne
 // GetNodeNetworkIDsAnnotationNetworkIDs parses the "k8s.ovn.org/network-ids" annotation
 // on a node and returns the map of network name and ids.
 func GetNodeNetworkIDsAnnotationNetworkIDs(node *kapi.Node) (map[string]int, error) {
-	networkIDsStrMap, err := parseNetworkIDsAnnotation(node.Annotations, ovnNetworkIDs)
+	networkIDsStrMap, err := parseNetworkMapAnnotation(node.Annotations, ovnNetworkIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -1288,6 +1640,26 @@ func filterIPVersion(cidrs []netip.Prefix, v6 bool) []netip.Prefix {
 		validCIDRs = append(validCIDRs, cidr)
 	}
 	return validCIDRs
+}
+
+// GetNetworkID will retrieve the network id for the specified network from the
+// first node that contains that network at the network id annotations, it will
+// return at the first ocurrence, rest of nodes will not be parsed.
+func GetNetworkID(nodes []*kapi.Node, nInfo BasicNetInfo) (int, error) {
+	for _, node := range nodes {
+		var err error
+		networkID, err := ParseNetworkIDAnnotation(node, nInfo.GetNetworkName())
+		if err != nil {
+			if IsAnnotationNotSetError(err) {
+				continue
+			}
+			return InvalidID, err
+		}
+		if networkID != InvalidID {
+			return networkID, nil
+		}
+	}
+	return InvalidID, fmt.Errorf("missing network id for network '%s'", nInfo.GetNetworkName())
 }
 
 // findNodeReadyCondition finds node ready condition in conditions array.
@@ -1394,4 +1766,8 @@ func SyncDependentNodeTaints(kube kube.Interface, nodeLister listers.NodeLister,
 			action, err)
 	}
 	return err
+}
+
+func DelNodeHostCIDRs(nodeAnnotator kube.Annotator) {
+	nodeAnnotator.Delete(OVNNodeHostCIDRs)
 }

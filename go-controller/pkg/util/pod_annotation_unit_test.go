@@ -31,6 +31,11 @@ func TestMarshalPodAnnotation(t *testing.T) {
 			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"","mtu":"0"}}`},
 		},
 		{
+			desc:           "PodAnnotation instance when role is set to primary",
+			inpPodAnnot:    PodAnnotation{Role: types.NetworkRolePrimary},
+			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"","role":"primary"}}`},
+		},
+		{
 			desc: "single IP assigned to pod with MAC, Gateway, Routes NOT SPECIFIED",
 			inpPodAnnot: PodAnnotation{
 				IPs: []*net.IPNet{ovntest.MustParseIPNet("192.168.0.5/24")},
@@ -54,8 +59,13 @@ func TestMarshalPodAnnotation(t *testing.T) {
 				Gateways: []net.IP{
 					net.ParseIP("192.168.0.1"),
 				},
+				Role: types.NetworkRoleSecondary,
 			},
+<<<<<<< HEAD
 			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"","gateway_ips":["192.168.0.1"],"mtu":"0","ip_address":"192.168.0.5/24","gateway_ip":"192.168.0.1"}}`},
+=======
+			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"","gateway_ips":["192.168.0.1"],"ip_address":"192.168.0.5/24","gateway_ip":"192.168.0.1","role":"secondary"}}`},
+>>>>>>> ffddd06ec12e43af0397bca8e36adedf8df441b1
 		},
 		{
 			desc:     "verify error thrown when number of gateways greater than one for a single-stack network",
@@ -89,8 +99,13 @@ func TestMarshalPodAnnotation(t *testing.T) {
 						NextHop: net.ParseIP("192.168.1.1"),
 					},
 				},
+				Role: types.NetworkRoleInfrastructure,
 			},
+<<<<<<< HEAD
 			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"","routes":[{"dest":"192.168.1.0/24","nextHop":"192.168.1.1"}],"mtu":"0"}}`},
+=======
+			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"","routes":[{"dest":"192.168.1.0/24","nextHop":"192.168.1.1"}],"role":"infrastructure-locked"}}`},
+>>>>>>> ffddd06ec12e43af0397bca8e36adedf8df441b1
 		},
 		{
 			desc: "next hop not set for route",
@@ -195,6 +210,10 @@ func TestUnmarshalPodAnnotation(t *testing.T) {
 		{
 			desc:        "verify successful unmarshal of pod annotation",
 			inpAnnotMap: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:fd:98:00:01","gateway_ips":["192.168.0.1"],"routes":[{"dest":"192.168.1.0/24","nextHop":"192.168.1.1"}],"mtu":"1500","ip_address":"192.168.0.5/24","gateway_ip":"192.168.0.1"}}`},
+		},
+		{
+			desc:        "verify successful unmarshal of pod annotation when role field is set",
+			inpAnnotMap: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:fd:98:00:01","gateway_ips":["192.168.0.1"],"routes":[{"dest":"192.168.1.0/24","nextHop":"192.168.1.1"}],"ip_address":"192.168.0.5/24","gateway_ip":"192.168.0.1","role":"primary"}}`},
 		},
 		{
 			desc:        "verify successful unmarshal of pod annotation when *only* the MAC address is present",
@@ -356,7 +375,114 @@ func TestGetPodIPsOfNetwork(t *testing.T) {
 func newDummyNetInfo(namespace, networkName string) NetInfo {
 	netInfo, _ := newLayer2NetConfInfo(&ovncnitypes.NetConf{
 		NetConf: cnitypes.NetConf{Name: networkName},
+<<<<<<< HEAD
 	}, nil)
 	netInfo.AddNAD(GetNADName(namespace, networkName), nil)
+=======
+	})
+	netInfo.AddNADs(GetNADName(namespace, networkName))
+>>>>>>> ffddd06ec12e43af0397bca8e36adedf8df441b1
 	return netInfo
+}
+
+func TestUnmarshalUDNOpenPortsAnnotation(t *testing.T) {
+	intRef := func(i int) *int {
+		return &i
+	}
+
+	tests := []struct {
+		desc      string
+		input     string
+		errSubstr string
+		result    []*OpenPort
+	}{
+		{
+			desc:      "protocol without port",
+			input:     `- protocol: tcp`,
+			errSubstr: "port is required",
+		},
+		{
+			desc:      "port without protocol",
+			input:     `- port: 80`,
+			errSubstr: "invalid protocol",
+		},
+		{
+			desc:      "invalid protocol",
+			input:     `- protocol: foo`,
+			errSubstr: "invalid protocol",
+		},
+		{
+			desc: "icmp with port",
+			input: `- protocol: icmp
+  port: 80`,
+			errSubstr: "invalid port 80 for icmp protocol, should be empty",
+		},
+		{
+			desc:  "valid icmp",
+			input: `- protocol: icmp`,
+			result: []*OpenPort{
+				{
+					Protocol: "icmp",
+				},
+			},
+		},
+		{
+			desc: "invalid port",
+			input: `- protocol: tcp
+  port: 100000`,
+			errSubstr: "invalid port",
+		},
+		{
+			desc: "valid tcp",
+			input: `- protocol: tcp
+  port: 80`,
+			result: []*OpenPort{
+				{
+					Protocol: "tcp",
+					Port:     intRef(80),
+				},
+			},
+		},
+		{
+			desc: "valid multiple protocols",
+			input: `- protocol: tcp
+  port: 1
+- protocol: udp
+  port: 2
+- protocol: sctp
+  port: 3
+- protocol: icmp`,
+			result: []*OpenPort{
+				{
+					Protocol: "tcp",
+					Port:     intRef(1),
+				},
+				{
+					Protocol: "udp",
+					Port:     intRef(2),
+				},
+				{
+					Protocol: "sctp",
+					Port:     intRef(3),
+				},
+				{
+					Protocol: "icmp",
+				},
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.desc, func(t *testing.T) {
+			res, err := UnmarshalUDNOpenPortsAnnotation(map[string]string{
+				UDNOpenPortsAnnotationName: tc.input,
+			})
+			if tc.errSubstr != "" {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tc.errSubstr)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tc.result, res)
+			}
+		})
+	}
 }

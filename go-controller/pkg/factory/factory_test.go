@@ -25,6 +25,7 @@ import (
 
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	ipamclaimsapifake "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/clientset/versioned/fake"
+	nadsfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
 
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
@@ -44,7 +45,7 @@ import (
 	ocpconfigapi "github.com/openshift/api/config/v1"
 	ocpcloudnetworkclientsetfake "github.com/openshift/client-go/cloudnetwork/clientset/versioned/fake"
 
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -315,6 +316,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		egressServiceFakeClient             *egressservicefake.Clientset
 		adminNetworkPolicyFakeClient        *anpapifake.Clientset
 		ipamClaimsFakeClient                *ipamclaimsapifake.Clientset
+		nadsFakeClient                      *nadsfake.Clientset
 		podWatch, namespaceWatch, nodeWatch *watch.FakeWatcher
 		policyWatch, serviceWatch           *watch.FakeWatcher
 		endpointSliceWatch                  *watch.FakeWatcher
@@ -370,24 +372,27 @@ var _ = Describe("Watch Factory Operations", func() {
 		egressServiceFakeClient = &egressservicefake.Clientset{}
 		adminNetworkPolicyFakeClient = &anpapifake.Clientset{}
 		ipamClaimsFakeClient = &ipamclaimsapifake.Clientset{}
+		nadsFakeClient = &nadsfake.Clientset{}
 
 		ovnClientset = &util.OVNMasterClientset{
-			KubeClient:           fakeClient,
-			ANPClient:            adminNetworkPolicyFakeClient,
-			EgressIPClient:       egressIPFakeClient,
-			CloudNetworkClient:   cloudNetworkFakeClient,
-			EgressFirewallClient: egressFirewallFakeClient,
-			EgressQoSClient:      egressQoSFakeClient,
-			EgressServiceClient:  egressServiceFakeClient,
-			IPAMClaimsClient:     ipamClaimsFakeClient,
+			KubeClient:            fakeClient,
+			ANPClient:             adminNetworkPolicyFakeClient,
+			EgressIPClient:        egressIPFakeClient,
+			CloudNetworkClient:    cloudNetworkFakeClient,
+			EgressFirewallClient:  egressFirewallFakeClient,
+			EgressQoSClient:       egressQoSFakeClient,
+			EgressServiceClient:   egressServiceFakeClient,
+			IPAMClaimsClient:      ipamClaimsFakeClient,
+			NetworkAttchDefClient: nadsFakeClient,
 		}
 		ovnCMClientset = &util.OVNClusterManagerClientset{
-			KubeClient:           fakeClient,
-			EgressIPClient:       egressIPFakeClient,
-			CloudNetworkClient:   cloudNetworkFakeClient,
-			EgressServiceClient:  egressServiceFakeClient,
-			EgressFirewallClient: egressFirewallFakeClient,
-			IPAMClaimsClient:     ipamClaimsFakeClient,
+			KubeClient:            fakeClient,
+			EgressIPClient:        egressIPFakeClient,
+			CloudNetworkClient:    cloudNetworkFakeClient,
+			EgressServiceClient:   egressServiceFakeClient,
+			EgressFirewallClient:  egressFirewallFakeClient,
+			IPAMClaimsClient:      ipamClaimsFakeClient,
+			NetworkAttchDefClient: nadsFakeClient,
 		}
 
 		pods = make([]*v1.Pod, 0)

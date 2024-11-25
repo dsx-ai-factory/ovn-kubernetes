@@ -67,8 +67,8 @@ func NewZoneTracker(nodeInformer coreinformers.NodeInformer, onZonesUpdate func(
 		nodeLister: nodeInformer.Lister(),
 	}
 
-	controllerConfig := &controller.Config[corev1.Node]{
-		RateLimiter:    workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
+	controllerConfig := &controller.ControllerConfig[corev1.Node]{
+		RateLimiter:    workqueue.NewTypedItemFastSlowRateLimiter[string](time.Second, 5*time.Second, 5),
 		Informer:       nodeInformer.Informer(),
 		Lister:         nodeInformer.Lister().List,
 		ObjNeedsUpdate: zt.needsUpdate,
@@ -80,7 +80,7 @@ func NewZoneTracker(nodeInformer coreinformers.NodeInformer, onZonesUpdate func(
 }
 
 func (zt *ZoneTracker) Start() error {
-	if err := controller.StartControllersWithInitialSync(zt.initialSync, zt.nodeController); err != nil {
+	if err := controller.StartWithInitialSync(zt.initialSync, zt.nodeController); err != nil {
 		return fmt.Errorf("failed to start zone tracker: %w", err)
 	}
 	return nil
@@ -88,7 +88,7 @@ func (zt *ZoneTracker) Start() error {
 
 func (zt *ZoneTracker) Stop() {
 	close(zt.stopChan)
-	controller.StopControllers(zt.nodeController)
+	controller.Stop(zt.nodeController)
 }
 
 func (zt *ZoneTracker) needsUpdate(oldNode, newNode *corev1.Node) bool {

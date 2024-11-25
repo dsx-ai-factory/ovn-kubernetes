@@ -9,6 +9,7 @@ import (
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -202,7 +203,7 @@ var _ = ginkgo.Describe("Pod to external server PMTUD", func() {
 						// flush this on all 3 nodes else we will run into the
 						// bug: https://issues.redhat.com/browse/OCPBUGS-7609.
 						// TODO: Revisit this once https://bugzilla.redhat.com/show_bug.cgi?id=2169839 is fixed.
-						ovnKubeNodePods, err := f.ClientSet.CoreV1().Pods(ovnNs).List(context.TODO(), metav1.ListOptions{
+						ovnKubeNodePods, err := f.ClientSet.CoreV1().Pods(ovnNamespace).List(context.TODO(), metav1.ListOptions{
 							LabelSelector: "name=ovnkube-node",
 						})
 						if err != nil {
@@ -214,7 +215,7 @@ var _ = ginkgo.Describe("Pod to external server PMTUD", func() {
 							if isInterconnectEnabled() {
 								containerName = "ovnkube-controller"
 							}
-							_, err := e2ekubectl.RunKubectl(ovnNs, "exec", ovnKubeNodePod.Name, "--container", containerName, "--",
+							_, err := e2ekubectl.RunKubectl(ovnNamespace, "exec", ovnKubeNodePod.Name, "--container", containerName, "--",
 								"ip", "route", "flush", "cache")
 							framework.ExpectNoError(err, "Flushing the ip route cache failed")
 						}
@@ -234,7 +235,6 @@ var _ = ginkgo.Describe("Pod to pod TCP with low MTU", func() {
 		echoClientPodName         = "echo-client-pod"
 		serverPodPort             = 9899
 		mtu                       = 1400
-		primaryNetworkName        = "kind"
 	)
 
 	f := wrappedTestFramework("pod2pod-tcp-low-mtu")
@@ -354,7 +354,6 @@ var _ = ginkgo.Describe("Pod to pod TCP with low MTU", func() {
 					gomega.Expect(stdout).To(gomega.MatchRegexp("mtu 1342"))
 				}
 			})
-
 		})
 	})
 })

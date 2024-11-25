@@ -730,7 +730,7 @@ type item struct {
 
 type PodRecorder struct {
 	records map[kapimtypes.UID]*record
-	queue   workqueue.Interface
+	queue   workqueue.TypedInterface[*item]
 }
 
 func NewPodRecorder() PodRecorder {
@@ -748,7 +748,7 @@ func (pr *PodRecorder) Run(sbClient libovsdbclient.Client, stop <-chan struct{})
 		prometheus.MustRegister(metricPortBindingChassisLatency)
 	})
 
-	pr.queue = workqueue.New()
+	pr.queue = workqueue.NewTyped[*item]()
 	pr.records = make(map[kapimtypes.UID]*record)
 
 	sbClient.Cache().AddEventHandler(&cache.EventHandlerFuncs{
@@ -757,7 +757,7 @@ func (pr *PodRecorder) Run(sbClient libovsdbclient.Client, stop <-chan struct{})
 				return
 			}
 			if !pr.queueFull() {
-				pr.queue.Add(item{op: addPortBinding, old: model, timestamp: time.Now()})
+				pr.queue.Add(&item{op: addPortBinding, old: model, timestamp: time.Now()})
 			}
 		},
 		UpdateFunc: func(table string, old model.Model, new model.Model) {
@@ -769,12 +769,12 @@ func (pr *PodRecorder) Run(sbClient libovsdbclient.Client, stop <-chan struct{})
 			// chassis assigned
 			if oldRow.Chassis == nil && newRow.Chassis != nil {
 				if !pr.queueFull() {
-					pr.queue.Add(item{op: updatePortBinding, old: old, new: new, timestamp: time.Now()})
+					pr.queue.Add(&item{op: updatePortBinding, old: old, new: new, timestamp: time.Now()})
 				}
 				// port binding up
 			} else if oldRow.Up != nil && !*oldRow.Up && newRow.Up != nil && *newRow.Up {
 				if !pr.queueFull() {
-					pr.queue.Add(item{op: updatePortBinding, old: old, new: new, timestamp: time.Now()})
+					pr.queue.Add(&item{op: updatePortBinding, old: old, new: new, timestamp: time.Now()})
 				}
 			}
 		},
@@ -790,13 +790,13 @@ func (pr *PodRecorder) Run(sbClient libovsdbclient.Client, stop <-chan struct{})
 
 func (pr *PodRecorder) AddPod(podUID kapimtypes.UID) {
 	if pr.queue != nil && !pr.queueFull() {
-		pr.queue.Add(item{op: addPod, uid: podUID, timestamp: time.Now()})
+		pr.queue.Add(&item{op: addPod, uid: podUID, timestamp: time.Now()})
 	}
 }
 
 func (pr *PodRecorder) CleanPod(podUID kapimtypes.UID) {
 	if pr.queue != nil && !pr.queueFull() {
-		pr.queue.Add(item{op: cleanPod, uid: podUID})
+		pr.queue.Add(&item{op: cleanPod, uid: podUID})
 	}
 }
 
@@ -806,7 +806,7 @@ func (pr *PodRecorder) AddLSP(podUID kapimtypes.UID, netInfo util.NetInfo) {
 		return
 	}
 	if pr.queue != nil && !pr.queueFull() {
-		pr.queue.Add(item{op: addLogicalSwitchPort, uid: podUID, timestamp: time.Now()})
+		pr.queue.Add(&item{op: addLogicalSwitchPort, uid: podUID, timestamp: time.Now()})
 	}
 }
 
@@ -885,12 +885,12 @@ func (pr *PodRecorder) processNextItem() bool {
 	if term {
 		return false
 	}
-	pr.processItem(i.(item))
+	pr.processItem(i)
 	pr.queue.Done(i)
 	return true
 }
 
-func (pr *PodRecorder) processItem(i item) {
+func (pr *PodRecorder) processItem(i *item) {
 	switch i.op {
 	case addPortBinding:
 		pr.addPortBinding(i.old, i.timestamp)

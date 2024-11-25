@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-
 	mock_k8s_io_utils_exec "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/utils/exec"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 	"github.com/stretchr/testify/assert"
@@ -245,4 +244,9 @@ func TestGenerateId(t *testing.T) {
 	assert.Equal(t, 10, len(id))
 	matchesPattern, _ := regexp.MatchString("([a-zA-Z0-9-]*)", id)
 	assert.True(t, matchesPattern)
+}
+
+func TestGetNetworkScopedK8sMgmtHostIntfName(t *testing.T) {
+	intfName := GetNetworkScopedK8sMgmtHostIntfName(1245678)
+	assert.Equal(t, "ovn-k8s-mp12456", intfName)
 }

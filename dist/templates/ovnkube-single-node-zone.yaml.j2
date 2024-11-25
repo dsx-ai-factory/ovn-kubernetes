@@ -25,6 +25,7 @@ spec:
         component: network
         type: infra
         kubernetes.io/os: "linux"
+        ovn-db-pod: "true"
       annotations:
         scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
@@ -400,6 +401,10 @@ spec:
           value: "{{ ovn_v4_join_subnet }}"
         - name: OVN_V6_JOIN_SUBNET
           value: "{{ ovn_v6_join_subnet }}"
+        - name: OVN_V4_MASQUERADE_SUBNET
+          value: "{{ ovn_v4_masquerade_subnet }}"
+        - name: OVN_V6_MASQUERADE_SUBNET
+          value: "{{ ovn_v6_masquerade_subnet }}"
         - name: OVN_MULTICAST_ENABLE
           value: "{{ ovn_multicast_enable }}"
         - name: OVN_UNPRIVILEGED_MODE
@@ -426,6 +431,8 @@ spec:
           value: "{{ ovn_lflow_cache_limit_kb }}"
         - name: OVN_MULTI_NETWORK_ENABLE
           value: "{{ ovn_multi_network_enable }}"
+        - name: OVN_NETWORK_SEGMENTATION_ENABLE
+          value: "{{ ovn_network_segmentation_enable }}"
         - name: OVNKUBE_NODE_MGMT_PORT_NETDEV
           value: "{{ ovnkube_node_mgmt_port_netdev }}"
         - name: OVN_EMPTY_LB_EVENTS
@@ -443,6 +450,8 @@ spec:
           value: "local"
         - name: OVN_ENABLE_INTERCONNECT
           value: "{{ ovn_enable_interconnect }}"
+        - name: OVN_OBSERV_ENABLE
+          value: "{{ ovn_observ_enable }}"
         - name: OVN_ENABLE_MULTI_EXTERNAL_GATEWAY
           value: "{{ ovn_enable_multi_external_gateway }}"
         - name: OVN_ENABLE_OVNKUBE_IDENTITY
@@ -451,6 +460,8 @@ spec:
           value: "{{ disable_ovs_metrics }}"
         - name: OVN_ENABLE_SVC_TEMPLATE_SUPPORT
           value: "{{ ovn_enable_svc_template_support }}"
+        - name: OVN_ENABLE_DNSNAMERESOLVER
+          value: "{{ ovn_enable_dnsnameresolver }}"
 
         readinessProbe:
           exec:

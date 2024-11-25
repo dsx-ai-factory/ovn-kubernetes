@@ -3,12 +3,13 @@ package controller
 import (
 	"context"
 	"fmt"
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
 	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -21,8 +22,8 @@ import (
 	"k8s.io/client-go/util/workqueue"
 )
 
-func getDefaultConfig[T any](reconcileCounter *atomic.Uint64) *Config[T] {
-	return &Config[T]{
+func getDefaultConfig[T any](reconcileCounter *atomic.Uint64) *ControllerConfig[T] {
+	return &ControllerConfig[T]{
 		ObjNeedsUpdate: func(oldObj, newObj *T) bool {
 			if oldObj == nil || newObj == nil {
 				return true
@@ -49,24 +50,24 @@ var _ = Describe("Level-driven controller", func() {
 		namespace1Name = "namespace1"
 	)
 
-	startController := func(config *Config[v1.Pod], initialSync func() error, objects ...runtime.Object) {
+	startController := func(config *ControllerConfig[v1.Pod], initialSync func() error, objects ...runtime.Object) {
 		fakeClient = util.GetOVNClientset(objects...).GetClusterManagerClientset()
 		coreFactory := informerfactory.NewSharedInformerFactory(fakeClient.KubeClient, time.Second)
 
 		config.Informer = coreFactory.Core().V1().Pods().Informer()
 		config.Lister = coreFactory.Core().V1().Pods().Lister().List
 		if config.RateLimiter == nil {
-			config.RateLimiter = workqueue.NewItemFastSlowRateLimiter(100*time.Millisecond, 1*time.Second, 5)
+			config.RateLimiter = workqueue.NewTypedItemFastSlowRateLimiter[string](100*time.Millisecond, 1*time.Second, 5)
 		}
 		controller = NewController[v1.Pod]("controller-name", config)
 
 		coreFactory.Start(stopChan)
 
-		err := StartControllersWithInitialSync(initialSync, controller)
+		err := StartWithInitialSync(initialSync, controller)
 		Expect(err).NotTo(HaveOccurred())
 	}
 
-	getDefaultConfig := func() *Config[v1.Pod] {
+	getDefaultConfig := func() *ControllerConfig[v1.Pod] {
 		return getDefaultConfig[v1.Pod](&reconcileCounter)
 	}
 
@@ -87,9 +88,14 @@ var _ = Describe("Level-driven controller", func() {
 
 	AfterEach(func() {
 		close(stopChan)
-		StopControllers(controller)
+		Stop(controller)
 	})
 
+	It("has idempotent Stop", func() {
+		startController(getDefaultConfig(), nil)
+		Stop(controller)
+		Stop(controller)
+	})
 	It("handles initial objects once", func() {
 		namespace := util.NewNamespace(namespace1Name)
 		pod1 := &v1.Pod{
@@ -120,32 +126,31 @@ var _ = Describe("Level-driven controller", func() {
 		time.Sleep(time.Second)
 		Expect(failureCounter.Load()).To(BeEquivalentTo(3))
 	})
-	//TBD merge after maxRetries, program exits, the test case no longer applies
-	//It("drops key after maxRetries", func() {
-	//	namespace := util.NewNamespace(namespace1Name)
-	//	pod := &v1.Pod{
-	//		ObjectMeta: util.NewObjectMeta("pod1", namespace.Name),
-	//	}
-	//	config := getDefaultConfig()
-	//	failureCounter := atomic.Uint64{}
-	//	config.Reconcile = func(key string) error {
-	//		failureCounter.Add(1)
-	//		return fmt.Errorf("failure")
-	//	}
-	//	config.RateLimiter = workqueue.NewItemFastSlowRateLimiter(100*time.Millisecond, 1*time.Second, maxRetries)
-	//	startController(config, nil, namespace, pod)
-	//
-	//	Eventually(failureCounter.Load, (maxRetries+1)*100*time.Millisecond).Should(BeEquivalentTo(maxRetries))
-	//	time.Sleep(1 * time.Second)
-	//	Expect(failureCounter.Load()).To(BeEquivalentTo(maxRetries + 1))
-	//
-	//	// trigger update, check it is handled
-	//	pod.Labels = map[string]string{"key": "value"}
-	//	_, err := fakeClient.KubeClient.CoreV1().Pods(namespace.Name).Update(context.TODO(), pod, metav1.UpdateOptions{})
-	//	Expect(err).NotTo(HaveOccurred())
-	//
-	//	Eventually(func() bool { return failureCounter.Load() > maxRetries+1 }).Should(BeTrue())
-	//})
+	It("drops key after maxRetries", func() {
+		namespace := util.NewNamespace(namespace1Name)
+		pod := &v1.Pod{
+			ObjectMeta: util.NewObjectMeta("pod1", namespace.Name),
+		}
+		config := getDefaultConfig()
+		failureCounter := atomic.Uint64{}
+		config.Reconcile = func(key string) error {
+			failureCounter.Add(1)
+			return fmt.Errorf("failure")
+		}
+		config.RateLimiter = workqueue.NewTypedItemFastSlowRateLimiter[string](100*time.Millisecond, 1*time.Second, maxRetries)
+		startController(config, nil, namespace, pod)
+
+		Eventually(failureCounter.Load, (maxRetries+1)*100*time.Millisecond).Should(BeEquivalentTo(maxRetries))
+		time.Sleep(1 * time.Second)
+		Expect(failureCounter.Load()).To(BeEquivalentTo(maxRetries + 1))
+
+		// trigger update, check it is handled
+		pod.Labels = map[string]string{"key": "value"}
+		_, err := fakeClient.KubeClient.CoreV1().Pods(namespace.Name).Update(context.TODO(), pod, metav1.UpdateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+
+		Eventually(func() bool { return failureCounter.Load() > maxRetries+1 }).Should(BeTrue())
+	})
 	It("ignores events when ObjNeedsUpdate returns false", func() {
 		namespace := util.NewNamespace(namespace1Name)
 		pod := &v1.Pod{
@@ -238,27 +243,27 @@ var _ = Describe("Level-driven controllers with shared initialSync", func() {
 		namespace1Name = "namespace1"
 	)
 
-	startController := func(podConfig *Config[v1.Pod], nsConfig *Config[v1.Namespace], initialSync func() error, objects ...runtime.Object) {
+	startController := func(podConfig *ControllerConfig[v1.Pod], nsConfig *ControllerConfig[v1.Namespace], initialSync func() error, objects ...runtime.Object) {
 		fakeClient = util.GetOVNClientset(objects...).GetClusterManagerClientset()
 		coreFactory := informerfactory.NewSharedInformerFactory(fakeClient.KubeClient, time.Second)
 
 		podConfig.Informer = coreFactory.Core().V1().Pods().Informer()
 		podConfig.Lister = coreFactory.Core().V1().Pods().Lister().List
 		if podConfig.RateLimiter == nil {
-			podConfig.RateLimiter = workqueue.NewItemFastSlowRateLimiter(100*time.Millisecond, 1*time.Second, 5)
+			podConfig.RateLimiter = workqueue.NewTypedItemFastSlowRateLimiter[string](100*time.Millisecond, 1*time.Second, 5)
 		}
 		podController = NewController[v1.Pod]("podController", podConfig)
 
 		nsConfig.Informer = coreFactory.Core().V1().Namespaces().Informer()
 		nsConfig.Lister = coreFactory.Core().V1().Namespaces().Lister().List
 		if nsConfig.RateLimiter == nil {
-			nsConfig.RateLimiter = workqueue.NewItemFastSlowRateLimiter(100*time.Millisecond, 1*time.Second, 5)
+			nsConfig.RateLimiter = workqueue.NewTypedItemFastSlowRateLimiter[string](100*time.Millisecond, 1*time.Second, 5)
 		}
 		namespaceController = NewController[v1.Namespace]("namespaceController", nsConfig)
 
 		coreFactory.Start(stopChan)
 
-		err := StartControllersWithInitialSync(initialSync, podController, namespaceController)
+		err := StartWithInitialSync(initialSync, podController, namespaceController)
 		Expect(err).NotTo(HaveOccurred())
 	}
 
@@ -282,7 +287,7 @@ var _ = Describe("Level-driven controllers with shared initialSync", func() {
 
 	AfterEach(func() {
 		close(stopChan)
-		StopControllers(podController, namespaceController)
+		Stop(podController, namespaceController)
 	})
 
 	It("handle initial objects once", func() {

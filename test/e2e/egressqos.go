@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/sync/errgroup"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+
+	"golang.org/x/sync/errgroup"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
@@ -270,8 +270,7 @@ spec:
 		}()
 
 		_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "create", "-f", egressQoSYaml)
-		framework.ExpectError(err, "a resource not named default should be denied")
-		gomega.Expect(err.Error()).To(gomega.ContainSubstring("Invalid value: \"not-default\""))
+		gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring("Invalid value: \"not-default\"")))
 
 		ginkgo.By("Creating an EgressQoS with bad cidrs")
 		egressQoSConfig = fmt.Sprintf(`
@@ -297,11 +296,10 @@ spec:
 		}
 
 		_, err = e2ekubectl.RunKubectl(f.Namespace.Name, "create", "-f", egressQoSYaml)
-		framework.ExpectError(err, "a resource with bad cidrs should be denied")
-		gomega.Expect(err.Error()).To(gomega.ContainSubstring("Invalid value: \"1.2.3.256/32\""))
-		gomega.Expect(err.Error()).To(gomega.ContainSubstring("Invalid value: \"1.2.3.4/42\""))
-		gomega.Expect(err.Error()).To(gomega.ContainSubstring("Invalid value: \"abc&!ABC/24\""))
-		gomega.Expect(err.Error()).To(gomega.ContainSubstring("Invalid value: \"2001:::::::7334/158\""))
+		gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring("Invalid value: \"1.2.3.256/32\"")))
+		gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring("Invalid value: \"1.2.3.4/42\"")))
+		gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring("Invalid value: \"abc&!ABC/24\"")))
+		gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring("Invalid value: \"2001:::::::7334/158\"")))
 	})
 })
 

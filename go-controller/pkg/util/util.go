@@ -12,15 +12,21 @@ import (
 	"time"
 
 	"golang.org/x/exp/constraints"
+	"k8s.io/client-go/tools/cache"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"crypto/rand"
 
 	"github.com/urfave/cli/v2"
 	v1 "k8s.io/api/core/v1"
+	discovery "k8s.io/api/discovery/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
+	discoverylisters "k8s.io/client-go/listers/discovery/v1"
+
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
@@ -72,6 +78,15 @@ func GetIPNetFullMask(ipStr string) (*net.IPNet, error) {
 	}, nil
 }
 
+// GetIPNetFullMaskFromIP returns an IPNet object for IPV4 or IPV6 address with a full subnet mask
+func GetIPNetFullMaskFromIP(ip net.IP) *net.IPNet {
+	mask := GetIPFullMask(ip)
+	return &net.IPNet{
+		IP:   ip,
+		Mask: mask,
+	}
+}
+
 // GetIPFullMaskString returns /32 if ip is IPV4 family and /128 if ip is IPV6 family
 func GetIPFullMaskString(ip string) string {
 	const (
@@ -96,12 +111,33 @@ func GetIPFullMask(ip net.IP) net.IPMask {
 	return net.CIDRMask(32, 32)
 }
 
+// GetK8sMgmtIntfName returns the management port name for a given node.
+func GetK8sMgmtIntfName(nodeName string) string {
+	return types.K8sPrefix + nodeName
+}
+
 // GetLegacyK8sMgmtIntfName returns legacy management ovs-port name
 func GetLegacyK8sMgmtIntfName(nodeName string) string {
 	if len(nodeName) > 11 {
 		return types.K8sPrefix + (nodeName[:11])
 	}
-	return types.K8sPrefix + nodeName
+	return GetK8sMgmtIntfName(nodeName)
+}
+
+// GetNetworkScopedK8sMgmtHostIntfName returns the management port host interface name for a network id
+// NOTE: network id is used instead of name so we don't reach the linux device name limit of 15 chars
+func GetNetworkScopedK8sMgmtHostIntfName(networkID uint) string {
+	intfName := types.K8sMgmtIntfNamePrefix + fmt.Sprintf("%d", networkID)
+	// We are over linux 15 chars limit for network devices, let's trim it
+	// for the prefix so we keep networkID as much as possible
+	if len(intfName) > 15 {
+		return intfName[:15]
+	}
+	return intfName
+}
+
+func GetVRFDeviceNameForUDN(networkID int) string {
+	return fmt.Sprintf("%s%d%s", types.UDNVRFDevicePrefix, networkID, types.UDNVRFDeviceSuffix)
 }
 
 // GetWorkerFromGatewayRouter determines a node's corresponding worker switch name from a gateway router name
@@ -112,6 +148,23 @@ func GetWorkerFromGatewayRouter(gr string) string {
 // GetGatewayRouterFromNode determines a node's corresponding gateway router name
 func GetGatewayRouterFromNode(node string) string {
 	return types.GWRouterPrefix + node
+}
+
+// GetGatewayRouterFromNode determines a node's corresponding gateway router name
+func GetExtSwitchFromNode(node string) string {
+	return types.ExternalSwitchPrefix + node
+}
+
+// GetExtPortName determines the name of a node's logical port to the external
+// bridge.
+func GetExtPortName(bridgeID, nodeName string) string {
+	return bridgeID + "_" + nodeName
+}
+
+// GetPatchPortName determines the name of the patch port on the external
+// bridge, which connects to br-int
+func GetPatchPortName(bridgeID, nodeName string) string {
+	return types.PatchPortPrefix + GetExtPortName(bridgeID, nodeName) + types.PatchPortSuffix
 }
 
 // GetNodeInternalAddrs returns the first IPv4 and/or IPv6 InternalIP defined
@@ -317,6 +370,46 @@ func IsClusterIP(svcVIP string) bool {
 	return false
 }
 
+type UnprocessedActiveNetworkError struct {
+	namespace string
+	udnName   string
+}
+
+func (m *UnprocessedActiveNetworkError) Error() string {
+	return fmt.Sprintf("primary UDN %q exists in namespace %s, but NAD has not been processed yet",
+		m.udnName, m.namespace)
+}
+
+func IsUnprocessedActiveNetworkError(err error) bool {
+	var unprocessedActiveNetworkError *UnprocessedActiveNetworkError
+	return errors.As(err, &unprocessedActiveNetworkError)
+}
+
+func NewUnprocessedActiveNetworkError(namespace, udnName string) *UnprocessedActiveNetworkError {
+	return &UnprocessedActiveNetworkError{namespace: namespace, udnName: udnName}
+}
+
+func GetUserDefinedNetworkRole(isPrimary bool) string {
+	networkRole := types.NetworkRoleSecondary
+	if isPrimary {
+		networkRole = types.NetworkRolePrimary
+	}
+	return networkRole
+}
+
+// GenerateExternalIDsForSwitchOrRouter returns the external IDs for logical switches and logical routers
+// when it runs on a primary or secondary network. It returns an empty map
+// when on the default cluster network, for backward compatibility.
+func GenerateExternalIDsForSwitchOrRouter(netInfo NetInfo) map[string]string {
+	externalIDs := make(map[string]string)
+	if netInfo.IsSecondary() {
+		externalIDs[types.NetworkExternalID] = netInfo.GetNetworkName()
+		externalIDs[types.NetworkRoleExternalID] = GetUserDefinedNetworkRole(netInfo.IsPrimaryNetwork())
+		externalIDs[types.TopologyExternalID] = netInfo.TopologyType()
+	}
+	return externalIDs
+}
+
 func GetSecondaryNetworkLogicalPortName(podNamespace, podName, nadName string) string {
 	return GetSecondaryNetworkPrefix(nadName) + composePortName(podNamespace, podName)
 }
@@ -420,14 +513,119 @@ func GenerateId(length int) string {
 	return string(b)
 }
 
-// NetworkNameExternalIDExists return true if the expected network name external-ids
-// matches, including the legacy network name external-id.
+// NetworkNameExternalIDExists return true if the expected network name external-ids matches
 func NetworkNameExternalIDExists(externalIDs map[string]string, netName string) bool {
-	name1, ok1 := externalIDs[types.LegacyNetworkExternalID]
-	name2, ok2 := externalIDs[types.NetworkExternalID]
+	name, ok := externalIDs[types.NetworkExternalID]
 
 	if netName == types.DefaultNetworkName {
-		return !ok1 && !ok2
+		return !ok
 	}
-	return (ok1 && name1 == netName) || (ok2 && name2 == netName)
+	return ok && name == netName
+}
+
+// IsMirrorEndpointSlice checks if the provided EndpointSlice is meant for the user defined network
+func IsMirrorEndpointSlice(endpointSlice *discoveryv1.EndpointSlice) bool {
+	_, ok := endpointSlice.Labels[types.LabelUserDefinedServiceName]
+	return ok
+}
+
+// IsDefaultEndpointSlice checks if the provided EndpointSlice is meant for the default network
+func IsDefaultEndpointSlice(endpointSlice *discoveryv1.EndpointSlice) bool {
+	_, ok := endpointSlice.Labels[discoveryv1.LabelServiceName]
+	return ok
+}
+
+// IsEndpointSliceForNetwork checks if the provided EndpointSlice is meant for the given network
+func IsMirroredEndpointSliceForNetwork(endpointSlice *discoveryv1.EndpointSlice, network string) bool {
+	if endpointSliceNetwork, ok := endpointSlice.Labels[types.LabelUserDefinedEndpointSliceNetwork]; ok {
+		return endpointSliceNetwork == network
+	}
+	return false
+}
+
+func GetDefaultEndpointSlicesEventHandler(handlerFuncs cache.ResourceEventHandlerFuncs) cache.ResourceEventHandler {
+	return GetEndpointSlicesEventHandlerForNetwork(handlerFuncs, &DefaultNetInfo{})
+}
+
+// GetEndpointSlicesEventHandlerForNetwork returns an event handler based on the provided handlerFuncs and netInfo.
+// On the default network, it returns a handler that filters out the mirrored EndpointSlices. Conversely in
+// a primary network it returns a handler that only keeps the mirrored EndpointSlices and filters out the original ones.
+// Otherwise, returns handlerFuncs as is.
+func GetEndpointSlicesEventHandlerForNetwork(handlerFuncs cache.ResourceEventHandlerFuncs, netInfo NetInfo) cache.ResourceEventHandler {
+	var eventHandler cache.ResourceEventHandler
+	eventHandler = handlerFuncs
+	if !IsNetworkSegmentationSupportEnabled() {
+		return eventHandler
+	}
+
+	var filterFunc func(obj interface{}) bool
+
+	if netInfo.IsDefault() {
+		// Filter out objects without the "kubernetes.io/service-name" label to exclude mirrored EndpointSlices
+		filterFunc = func(obj interface{}) bool {
+			if endpointSlice, ok := obj.(*discoveryv1.EndpointSlice); ok {
+				return IsDefaultEndpointSlice(endpointSlice)
+			}
+			klog.Errorf("Failed to cast the object to *discovery.EndpointSlice: %v", obj)
+			return true
+		}
+
+	} else if netInfo.IsPrimaryNetwork() {
+		// Only consider mirrored endpointslices for the given network
+		filterFunc = func(obj interface{}) bool {
+			if endpointSlice, ok := obj.(*discoveryv1.EndpointSlice); ok {
+				isDefault := IsDefaultEndpointSlice(endpointSlice)
+				isMirror := IsMirrorEndpointSlice(endpointSlice)
+				isForThisNetwork := IsMirroredEndpointSliceForNetwork(endpointSlice, netInfo.GetNetworkName())
+				return !isDefault && isMirror && isForThisNetwork
+			}
+			klog.Errorf("Failed to cast the object to *discovery.EndpointSlice: %v", obj)
+			return true
+		}
+	}
+	if filterFunc != nil {
+		eventHandler = cache.FilteringResourceEventHandler{
+			FilterFunc: filterFunc,
+			Handler:    handlerFuncs,
+		}
+	}
+
+	return eventHandler
+}
+
+// GetEndpointSlicesBySelector returns a list of EndpointSlices in a given namespace by the label selector
+func GetEndpointSlicesBySelector(namespace string, labelSelector metav1.LabelSelector, endpointSliceLister discoverylisters.EndpointSliceLister) ([]*discoveryv1.EndpointSlice, error) {
+	selector, err := metav1.LabelSelectorAsSelector(&labelSelector)
+	if err != nil {
+		return nil, err
+	}
+	return endpointSliceLister.EndpointSlices(namespace).List(selector)
+}
+
+// GetServiceEndpointSlices returns the endpointSlices associated with a service for the specified network
+// if network is DefaultNetworkName the default endpointSlices are returned, otherwise the function looks for mirror endpointslices
+// for the specified network.
+func GetServiceEndpointSlices(namespace, svcName, network string, endpointSliceLister discoverylisters.EndpointSliceLister) ([]*discovery.EndpointSlice, error) {
+	var selector metav1.LabelSelector
+	if network == types.DefaultNetworkName {
+		selector = metav1.LabelSelector{MatchLabels: map[string]string{
+			discovery.LabelServiceName: svcName,
+		}}
+	} else {
+		selector = metav1.LabelSelector{MatchLabels: map[string]string{
+			types.LabelUserDefinedServiceName:          svcName,
+			types.LabelUserDefinedEndpointSliceNetwork: network,
+		}}
+	}
+	return GetEndpointSlicesBySelector(namespace, selector, endpointSliceLister)
+}
+
+// IsUDNEnabledService checks whether the provided namespaced name key is a UDN enabled service specified in config.Default.UDNAllowedDefaultServices
+func IsUDNEnabledService(key string) bool {
+	for _, enabledService := range config.Default.UDNAllowedDefaultServices {
+		if enabledService == key {
+			return true
+		}
+	}
+	return false
 }

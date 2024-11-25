@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"net"
 	"reflect"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpbrapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
@@ -24,6 +24,8 @@ import (
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	zoneic "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
@@ -31,9 +33,11 @@ import (
 	ovnretry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
+	knet "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -94,6 +98,8 @@ type BaseNetworkController struct {
 	retryNamespaces *ovnretry.RetryFramework
 	// retry framework for network policies
 	retryNetworkPolicies *ovnretry.RetryFramework
+	// retry framework for network policies
+	retryMultiNetworkPolicies *ovnretry.RetryFramework
 	// retry framework for IPAMClaims
 	retryIPAMClaims *ovnretry.RetryFramework
 
@@ -163,6 +169,8 @@ type BaseNetworkController struct {
 	// to the cluster router. Please see zone_interconnect/interconnect_handler.go for more details.
 	zoneICHandler *zoneic.ZoneInterconnectHandler
 
+	// nadController used for getting network information for UDNs
+	nadController nad.NADController
 	// releasedPodsBeforeStartup tracks pods per NAD (map of NADs to pods UIDs)
 	// might have been already be released on startup
 	releasedPodsBeforeStartup  map[string]sets.Set[string]
@@ -191,14 +199,24 @@ type BaseNetworkController struct {
 	// map & workqueue for portmirror operations
 	portMirrors          sync.Map
 	portMirrorRetryQueue workqueue.RateLimitingInterface
+	// IP addresses of OVN Cluster logical router port ("GwRouterToJoinSwitchPrefix + OVNClusterRouter")
+	// connecting to the join switch
+	ovnClusterLRPToJoinIfAddrs []*net.IPNet
+
+	observManager *observability.Manager
 }
 
 // BaseSecondaryNetworkController structure holds per-network fields and network specific
 // configuration for secondary network controller
 type BaseSecondaryNetworkController struct {
 	BaseNetworkController
+
+	networkID *int
+
+	// network policy events factory handler
+	netPolicyHandler *factory.Handler
 	// multi-network policy events factory handler
-	policyHandler *factory.Handler
+	multiNetPolicyHandler *factory.Handler
 }
 
 func getNetworkControllerName(netName string) string {
@@ -245,50 +263,28 @@ func (bnc *BaseNetworkController) AddConfigDurationRecord(kind, namespace, name 
 	return []ovsdb.Operation{}, func() {}, time.Time{}, nil
 }
 
-// createOvnClusterRouter creates the central router for the network
-func (bnc *BaseNetworkController) createOvnClusterRouter() (*nbdb.LogicalRouter, error) {
-	// Create default Control Plane Protection (COPP) entry for routers
-	defaultCOPPUUID, err := EnsureDefaultCOPP(bnc.nbClient)
-	if err != nil {
-		return nil, fmt.Errorf("unable to create router control plane protection: %w", err)
+// getOVNClusterRouterPortToJoinSwitchIPs returns the IP addresses for the
+// logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter" from the
+// config.Gateway.V4JoinSubnet and  config.Gateway.V6JoinSubnet. This will
+// always be the first IP from these subnets.
+func (bnc *BaseNetworkController) getOVNClusterRouterPortToJoinSwitchIfAddrs() (gwLRPIPs []*net.IPNet, err error) {
+	joinSubnetsConfig := []*net.IPNet{}
+	if config.IPv4Mode {
+		joinSubnetsConfig = append(joinSubnetsConfig, bnc.JoinSubnetV4())
 	}
-
-	// Create a single common distributed router for the cluster.
-	macBindingAgeThreshold := "0"
-	for _, ipnet := range bnc.Subnets() {
-		macBindingAgeThreshold += ";" + ipnet.CIDR.String() + ":" + strconv.Itoa(config.Default.ClusterSubnetsMacBindingAging)
+	if config.IPv6Mode {
+		joinSubnetsConfig = append(joinSubnetsConfig, bnc.JoinSubnetV6())
 	}
-
-	logicalRouterName := bnc.GetNetworkScopedName(types.OVNClusterRouter)
-	logicalRouter := nbdb.LogicalRouter{
-		Name: logicalRouterName,
-		ExternalIDs: map[string]string{
-			"k8s-cluster-router": "yes",
-		},
-		Options: map[string]string{
-			"always_learn_from_arp_request": "false",
-			"mac_binding_age_threshold":     macBindingAgeThreshold,
-		},
-		Copp: &defaultCOPPUUID,
-	}
-	if bnc.IsSecondary() {
-		logicalRouter.ExternalIDs[types.NetworkExternalID] = bnc.GetNetworkName()
-		logicalRouter.ExternalIDs[types.TopologyExternalID] = bnc.TopologyType()
-	}
-	if bnc.multicastSupport {
-		logicalRouter.Options = map[string]string{
-			"mcast_relay": "true",
+	for _, joinSubnet := range joinSubnetsConfig {
+		joinSubnetBaseIP := utilnet.BigForIP(joinSubnet.IP)
+		ipnet := &net.IPNet{
+			IP:   utilnet.AddIPOffset(joinSubnetBaseIP, 1),
+			Mask: joinSubnet.Mask,
 		}
+		gwLRPIPs = append(gwLRPIPs, ipnet)
 	}
 
-	err = libovsdbops.CreateOrUpdateLogicalRouter(bnc.nbClient, &logicalRouter, &logicalRouter.Options,
-		&logicalRouter.ExternalIDs, &logicalRouter.Copp)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create distributed router %s, error: %v",
-			logicalRouterName, err)
-	}
-
-	return &logicalRouter, nil
+	return gwLRPIPs, nil
 }
 
 // syncNodeClusterRouterPort ensures a node's LS to the cluster router's LRP is created.
@@ -321,7 +317,7 @@ func (bnc *BaseNetworkController) syncNodeClusterRouterPort(node *kapi.Node, hos
 	}
 
 	switchName := bnc.GetNetworkScopedName(node.Name)
-	logicalRouterName := bnc.GetNetworkScopedName(types.OVNClusterRouter)
+	logicalRouterName := bnc.GetNetworkScopedClusterRouterName()
 	lrpName := types.RouterToSwitchPrefix + switchName
 	lrpNetworks := []string{}
 	for _, hostSubnet := range hostSubnets {
@@ -369,6 +365,38 @@ func (bnc *BaseNetworkController) syncNodeClusterRouterPort(node *kapi.Node, hos
 		}
 	}
 
+	if util.IsNetworkSegmentationSupportEnabled() &&
+		bnc.IsPrimaryNetwork() && !config.OVNKubernetesFeature.EnableInterconnect &&
+		bnc.TopologyType() == types.Layer3Topology {
+		// since in nonIC the ovn_cluster_router is distributed, we must specify the gatewayPort for the
+		// conditional SNATs to signal OVN which gatewayport should be chosen if there are mutiple distributed
+		// gateway ports. Now that the LRP is created, let's update the NATs to reflect that.
+		lrp := nbdb.LogicalRouterPort{
+			Name: lrpName,
+		}
+		logicalRouterPort, err := libovsdbops.GetLogicalRouterPort(bnc.nbClient, &lrp)
+		if err != nil {
+			return fmt.Errorf("failed to fetch gatewayport %s for network %q on node %q, err: %w",
+				lrpName, bnc.GetNetworkName(), node.Name, err)
+		}
+		gatewayPort := logicalRouterPort.UUID
+		p := func(item *nbdb.NAT) bool {
+			return item.ExternalIDs[types.NetworkExternalID] == bnc.GetNetworkName() &&
+				item.LogicalPort != nil && *item.LogicalPort == lrpName && item.Match != ""
+		}
+		nonICConditonalSNATs, err := libovsdbops.FindNATsWithPredicate(bnc.nbClient, p)
+		if err != nil {
+			return fmt.Errorf("failed to fetch conditional NATs %s for network %q on node %q, err: %w",
+				lrpName, bnc.GetNetworkName(), node.Name, err)
+		}
+		for _, nat := range nonICConditonalSNATs {
+			nat.GatewayPort = &gatewayPort
+		}
+		if err := libovsdbops.CreateOrUpdateNATs(bnc.nbClient, &logicalRouter, nonICConditonalSNATs...); err != nil {
+			return fmt.Errorf("failed to fetch conditional NATs %s for network %q on node %q, err: %w",
+				lrpName, bnc.GetNetworkName(), node.Name, err)
+		}
+	}
 	return nil
 }
 
@@ -376,7 +404,7 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 	clusterLoadBalancerGroupUUID, switchLoadBalancerGroupUUID string) error {
 	// logical router port MAC is based on IPv4 subnet if there is one, else IPv6
 	var nodeLRPMAC net.HardwareAddr
-	switchName := bnc.GetNetworkScopedName(nodeName)
+	switchName := bnc.GetNetworkScopedSwitchName(nodeName)
 	for _, hostSubnet := range hostSubnets {
 		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
 		nodeLRPMAC = util.IPAddrToHWAddr(gwIfAddr.IP)
@@ -388,13 +416,8 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 	logicalSwitch := nbdb.LogicalSwitch{
 		Name: switchName,
 	}
-	if bnc.IsSecondary() {
-		logicalSwitch.ExternalIDs = map[string]string{
-			types.NetworkExternalID:  bnc.GetNetworkName(),
-			types.TopologyExternalID: bnc.TopologyType(),
-		}
-	}
 
+	logicalSwitch.ExternalIDs = util.GenerateExternalIDsForSwitchOrRouter(bnc.NetInfo)
 	var v4Gateway, v6Gateway net.IP
 	logicalSwitch.OtherConfig = map[string]string{}
 	for _, hostSubnet := range hostSubnets {
@@ -455,8 +478,10 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 		Addresses: []string{"router"},
 		Options: map[string]string{
 			"router-port": types.RouterToSwitchPrefix + switchName,
-			"arp_proxy":   kubevirt.ComposeARPProxyLSPOption(),
 		},
+	}
+	if bnc.IsDefault() {
+		logicalSwitchPort.Options["arp_proxy"] = kubevirt.ComposeARPProxyLSPOption()
 	}
 	sw := nbdb.LogicalSwitch{Name: switchName}
 	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(bnc.nbClient, &sw, &logicalSwitchPort)
@@ -491,7 +516,7 @@ func (bnc *BaseNetworkController) deleteNodeLogicalNetwork(nodeName string) erro
 		return fmt.Errorf("failed to delete logical switch %s: %v", switchName, err)
 	}
 
-	logicalRouterName := bnc.GetNetworkScopedName(types.OVNClusterRouter)
+	logicalRouterName := bnc.GetNetworkScopedClusterRouterName()
 	logicalRouter := nbdb.LogicalRouter{Name: logicalRouterName}
 	logicalRouterPort := nbdb.LogicalRouterPort{
 		Name: types.RouterToSwitchPrefix + switchName,
@@ -652,6 +677,82 @@ func (bnc *BaseNetworkController) deleteNamespaceLocked(ns string) (*namespaceIn
 	return nsInfo, nil
 }
 
+func (bnc *BaseNetworkController) syncNodeManagementPort(node *kapi.Node, switchName, routerName string, hostSubnets []*net.IPNet) ([]net.IP, error) {
+	macAddress, err := util.ParseNodeManagementPortMACAddresses(node, bnc.GetNetworkName())
+	if err != nil {
+		return nil, err
+	}
+
+	var v4Subnet *net.IPNet
+	addresses := macAddress.String()
+	mgmtPortIPs := []net.IP{}
+	for _, hostSubnet := range hostSubnets {
+		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
+		addresses += " " + mgmtIfAddr.IP.String()
+		mgmtPortIPs = append(mgmtPortIPs, mgmtIfAddr.IP)
+
+		if err := bnc.addAllowACLFromNode(switchName, mgmtIfAddr.IP); err != nil {
+			return nil, err
+		}
+
+		if !utilnet.IsIPv6CIDR(hostSubnet) {
+			v4Subnet = hostSubnet
+		}
+		if config.Gateway.Mode == config.GatewayModeLocal {
+			lrsr := nbdb.LogicalRouterStaticRoute{
+				Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+				IPPrefix: hostSubnet.String(),
+				Nexthop:  mgmtIfAddr.IP.String(),
+			}
+			if bnc.IsSecondary() {
+				lrsr.ExternalIDs = map[string]string{
+					ovntypes.NetworkExternalID:  bnc.GetNetworkName(),
+					ovntypes.TopologyExternalID: bnc.TopologyType(),
+				}
+			}
+			p := func(item *nbdb.LogicalRouterStaticRoute) bool {
+				return item.IPPrefix == lrsr.IPPrefix && libovsdbops.PolicyEqualPredicate(lrsr.Policy, item.Policy)
+			}
+			err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(bnc.nbClient, routerName,
+				&lrsr, p, &lrsr.Nexthop)
+			if err != nil {
+				return nil, fmt.Errorf("error creating static route %+v on router %s: %v", lrsr, routerName, err)
+			}
+		}
+	}
+
+	// Create this node's management logical port on the node switch
+	logicalSwitchPort := nbdb.LogicalSwitchPort{
+		Name:      bnc.GetNetworkScopedK8sMgmtIntfName(node.Name),
+		Addresses: []string{addresses},
+	}
+	sw := nbdb.LogicalSwitch{Name: switchName}
+	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(bnc.nbClient, &sw, &logicalSwitchPort)
+	if err != nil {
+		return nil, err
+	}
+
+	// TODO(dceara): The cluster port group must be per network. So for now skip adding management port to the cluster port
+	// group for secondary network's because the cluster port group is not yet created for secondary networks.
+	if bnc.IsDefault() {
+		clusterPortGroupName := bnc.getClusterPortGroupName(types.ClusterPortGroupNameBase)
+		if err = libovsdbops.AddPortsToPortGroup(bnc.nbClient, clusterPortGroupName, logicalSwitchPort.UUID); err != nil {
+			err1 := fmt.Errorf("failed to add port %s to cluster port group %s (%s): %w",
+				logicalSwitchPort.Name, types.ClusterPortGroupNameBase, clusterPortGroupName, err)
+			klog.Error(err1)
+			return nil, err1
+		}
+	}
+
+	if v4Subnet != nil {
+		if err := libovsdbutil.UpdateNodeSwitchExcludeIPs(bnc.nbClient, bnc.GetNetworkScopedK8sMgmtIntfName(node.Name), bnc.GetNetworkScopedSwitchName(node.Name), node.Name, v4Subnet); err != nil {
+			return nil, err
+		}
+	}
+
+	return mgmtPortIPs, nil
+}
+
 // WatchNodes starts the watching of the nodes resource and calls back the appropriate handler logic
 func (bnc *BaseNetworkController) WatchNodes() error {
 	if bnc.nodeHandler != nil {
@@ -678,6 +779,17 @@ func (bnc *BaseNetworkController) recordNodeErrorEvent(node *kapi.Node, nodeErr 
 
 	klog.V(5).Infof("Posting %s event for Node %s: %v", kapi.EventTypeWarning, node.Name, nodeErr)
 	bnc.recorder.Eventf(nodeRef, kapi.EventTypeWarning, "ErrorReconcilingNode", nodeErr.Error())
+}
+
+func (bnc *BaseNetworkController) recordPodErrorEvent(pod *kapi.Pod, podErr error) {
+	podRef, err := ref.GetReference(scheme.Scheme, pod)
+	if err != nil {
+		klog.Errorf("Couldn't get a reference to pod %s/%s to post an event: '%v'",
+			pod.Namespace, pod.Name, err)
+	} else {
+		klog.V(5).Infof("Posting a %s event for Pod %s/%s", kapi.EventTypeWarning, pod.Namespace, pod.Name)
+		bnc.recorder.Eventf(podRef, kapi.EventTypeWarning, "ErrorReconcilingPod", podErr.Error())
+	}
 }
 
 func (bnc *BaseNetworkController) doesNetworkRequireIPAM() bool {
@@ -744,11 +856,68 @@ func (bnc *BaseNetworkController) isLocalZoneNode(node *kapi.Node) bool {
 	return util.GetNodeZone(node) == bnc.zone
 }
 
+// and is a wrapper around GetActiveNetworkForNamespace
+func (bnc *BaseNetworkController) getActiveNetworkForNamespace(namespace string) (util.NetInfo, error) {
+	return bnc.nadController.GetActiveNetworkForNamespace(namespace)
+}
+
+// GetNetworkRole returns the role of this controller's
+// network for the given pod
+// Expected values are:
+// (1) "primary" if this network is the primary network of the pod.
+//
+//	The "default" network is the primary network of any pod usually
+//	unless user-defined-network-segmentation feature has been activated.
+//	If network segmentation feature is enabled then any user defined
+//	network can be the primary network of the pod.
+//
+// (2) "secondary" if this network is the secondary network of the pod.
+//
+//	Only user defined networks can be secondary networks for a pod.
+//
+// (3) "infrastructure-locked" is applicable only to "default" network if
+//
+//	a user defined network is the "primary" network for this pod. This
+//	signifies the "default" network is only used for probing and
+//	is otherwise locked for all intents and purposes.
+//
+// NOTE: Like in other places, expectation is this function is always called
+// from controller's that have some relation to the given pod, unrelated
+// networks are treated as secondary networks so caller has to be careful
+func (bnc *BaseNetworkController) GetNetworkRole(pod *kapi.Pod) (string, error) {
+	if !util.IsNetworkSegmentationSupportEnabled() {
+		// if user defined network segmentation is not enabled
+		// then we know pod's primary network is "default" and
+		// pod's secondary network is not its NOT primary network
+		if bnc.IsDefault() {
+			return types.NetworkRolePrimary, nil
+		}
+		return types.NetworkRoleSecondary, nil
+	}
+	activeNetwork, err := bnc.getActiveNetworkForNamespace(pod.Namespace)
+	if err != nil {
+		if util.IsUnprocessedActiveNetworkError(err) {
+			bnc.recordPodErrorEvent(pod, err)
+		}
+		return "", err
+	}
+	if activeNetwork.GetNetworkName() == bnc.GetNetworkName() {
+		return types.NetworkRolePrimary, nil
+	}
+	if bnc.IsDefault() {
+		// if default network was not the primary network,
+		// then when UDN is turned on, default network is the
+		// infrastructure-locked network forthis pod
+		return types.NetworkRoleInfrastructure, nil
+	}
+	return types.NetworkRoleSecondary, nil
+}
+
 func (bnc *BaseNetworkController) isLayer2Interconnect() bool {
 	return config.OVNKubernetesFeature.EnableInterconnect && bnc.NetInfo.TopologyType() == types.Layer2Topology
 }
 
-func (bnc *BaseNetworkController) nodeZoneClusterChanged(oldNode, newNode *kapi.Node, newNodeIsLocalZone bool) bool {
+func (bnc *BaseNetworkController) nodeZoneClusterChanged(oldNode, newNode *kapi.Node, newNodeIsLocalZone bool, netName string) bool {
 	// Check if the annotations have changed. Use network topology and local params to skip unnecessary checks
 
 	// NodeIDAnnotationChanged and NodeTransitSwitchPortAddrAnnotationChanged affects local and remote nodes
@@ -760,8 +929,8 @@ func (bnc *BaseNetworkController) nodeZoneClusterChanged(oldNode, newNode *kapi.
 		return true
 	}
 
-	// NodeGatewayRouterLRPAddrAnnotationChanged would not affect local, nor layer3 secondary network
-	if !newNodeIsLocalZone && !bnc.IsSecondary() && util.NodeGatewayRouterLRPAddrAnnotationChanged(oldNode, newNode) {
+	// NodeGatewayRouterLRPAddrsAnnotationChanged would not affect local, nor localnet secondary network
+	if !newNodeIsLocalZone && bnc.NetInfo.TopologyType() != types.LocalnetTopology && joinCIDRChanged(oldNode, newNode, netName) {
 		return true
 	}
 
@@ -1289,4 +1458,97 @@ func (bnc *BaseNetworkController) DisconnectFromNetworks(logicalSwitch *nbdb.Log
 		return fmt.Errorf("failed to delete logical switch port %s from switch %s: %v", logicalSwitchPort.Name, logicalSwitch.Name, err)
 	}
 	return err
+}
+
+func (bnc *BaseNetworkController) AddResourceCommon(objType reflect.Type, obj interface{}) error {
+	switch objType {
+	case factory.PolicyType:
+		np, ok := obj.(*knet.NetworkPolicy)
+		if !ok {
+			return fmt.Errorf("could not cast %T object to *knet.NetworkPolicy", obj)
+		}
+		netinfo, err := bnc.getActiveNetworkForNamespace(np.Namespace)
+		if err != nil {
+			return fmt.Errorf("could not get active network for namespace %s: %v", np.Namespace, err)
+		}
+		if bnc.GetNetworkName() != netinfo.GetNetworkName() {
+			return nil
+		}
+		if err := bnc.addNetworkPolicy(np); err != nil {
+			klog.Infof("Network Policy add failed for %s/%s, will try again later: %v",
+				np.Namespace, np.Name, err)
+			return err
+		}
+	default:
+		klog.Errorf("Can not process add resource event, object type %s is not supported", objType)
+	}
+	return nil
+}
+
+func (bnc *BaseNetworkController) DeleteResourceCommon(objType reflect.Type, obj interface{}) error {
+	switch objType {
+	case factory.PolicyType:
+		knp, ok := obj.(*knet.NetworkPolicy)
+		if !ok {
+			return fmt.Errorf("could not cast obj of type %T to *knet.NetworkPolicy", obj)
+		}
+		netinfo, err := bnc.getActiveNetworkForNamespace(knp.Namespace)
+		if err != nil {
+			return fmt.Errorf("could not get active network for namespace %s: %v", knp.Namespace, err)
+		}
+		if bnc.GetNetworkName() != netinfo.GetNetworkName() {
+			return nil
+		}
+		return bnc.deleteNetworkPolicy(knp)
+	default:
+		klog.Errorf("Can not process delete resource event, object type %s is not supported", objType)
+	}
+	return nil
+}
+
+func initLoadBalancerGroups(nbClient libovsdbclient.Client, netInfo util.NetInfo) (
+	clusterLoadBalancerGroupUUID, switchLoadBalancerGroupUUID, routerLoadBalancerGroupUUID string, err error) {
+
+	loadBalancerGroupName := netInfo.GetNetworkScopedLoadBalancerGroupName(ovntypes.ClusterLBGroupName)
+	clusterLBGroup := nbdb.LoadBalancerGroup{Name: loadBalancerGroupName}
+	ops, err := libovsdbops.CreateOrUpdateLoadBalancerGroupOps(nbClient, nil, &clusterLBGroup)
+	if err != nil {
+		klog.Errorf("Error creating operation for cluster-wide load balancer group %s: %v", loadBalancerGroupName, err)
+		return
+	}
+
+	loadBalancerGroupName = netInfo.GetNetworkScopedLoadBalancerGroupName(ovntypes.ClusterSwitchLBGroupName)
+	clusterSwitchLBGroup := nbdb.LoadBalancerGroup{Name: loadBalancerGroupName}
+	ops, err = libovsdbops.CreateOrUpdateLoadBalancerGroupOps(nbClient, ops, &clusterSwitchLBGroup)
+	if err != nil {
+		klog.Errorf("Error creating operation for cluster-wide switch load balancer group %s: %v", loadBalancerGroupName, err)
+		return
+	}
+
+	loadBalancerGroupName = netInfo.GetNetworkScopedLoadBalancerGroupName(ovntypes.ClusterRouterLBGroupName)
+	clusterRouterLBGroup := nbdb.LoadBalancerGroup{Name: loadBalancerGroupName}
+	ops, err = libovsdbops.CreateOrUpdateLoadBalancerGroupOps(nbClient, ops, &clusterRouterLBGroup)
+	if err != nil {
+		klog.Errorf("Error creating operation for cluster-wide router load balancer group %s: %v", loadBalancerGroupName, err)
+		return
+	}
+
+	lbs := []*nbdb.LoadBalancerGroup{&clusterLBGroup, &clusterSwitchLBGroup, &clusterRouterLBGroup}
+	if _, err = libovsdbops.TransactAndCheckAndSetUUIDs(nbClient, lbs, ops); err != nil {
+		klog.Errorf("Error creating cluster-wide router load balancer group %s: %v", loadBalancerGroupName, err)
+		return
+	}
+
+	clusterLoadBalancerGroupUUID = clusterLBGroup.UUID
+	switchLoadBalancerGroupUUID = clusterSwitchLBGroup.UUID
+	routerLoadBalancerGroupUUID = clusterRouterLBGroup.UUID
+
+	return
+}
+
+func (bnc *BaseNetworkController) GetSamplingConfig() *libovsdbops.SamplingConfig {
+	if bnc.observManager != nil {
+		return bnc.observManager.SamplingConfig()
+	}
+	return nil
 }

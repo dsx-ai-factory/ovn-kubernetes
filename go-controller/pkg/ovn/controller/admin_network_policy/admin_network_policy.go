@@ -33,7 +33,7 @@ func (c *Controller) processNextANPWorkItem(wg *sync.WaitGroup) bool {
 	}
 	defer c.anpQueue.Done(anpKey)
 
-	err := c.syncAdminNetworkPolicy(anpKey.(string))
+	err := c.syncAdminNetworkPolicy(anpKey)
 	if err == nil {
 		c.anpQueue.Forget(anpKey)
 		return true
@@ -352,7 +352,7 @@ func (c *Controller) expandRulePeers(rule *gressRule) error {
 				if util.PodWantsHostNetwork(pod) || util.PodCompleted(pod) || !util.PodScheduled(pod) {
 					continue
 				}
-				podIPs, err := util.GetPodIPsOfNetwork(pod, &util.DefaultNetInfo{})
+				podIPs, err := util.GetPodIPsOfNetwork(pod, c.NetInfo)
 				if err != nil {
 					if errors.Is(err, util.ErrNoPodIPFound) {
 						// we ignore podIPsNotFound error here because onANPPodUpdate
@@ -470,7 +470,7 @@ func (c *Controller) convertANPSubjectToLSPs(anp *adminNetworkPolicyState) ([]*n
 				continue
 			}
 			// we need to collect podIP:cPort information
-			podIPs, err := util.GetPodIPsOfNetwork(pod, &util.DefaultNetInfo{})
+			podIPs, err := util.GetPodIPsOfNetwork(pod, c.NetInfo)
 			if err != nil {
 				if errors.Is(err, util.ErrNoPodIPFound) {
 					// we ignore podIPsNotFound error here because onANPPodUpdate
@@ -571,7 +571,7 @@ func (c *Controller) createNewANP(desiredANPState *adminNetworkPolicyState, desi
 		return fmt.Errorf("failed to create address-sets, %v", err)
 	}
 	ops = append(ops, addrSetOps...)
-	ops, err = libovsdbops.CreateOrUpdateACLsOps(c.nbClient, ops, desiredACLs...)
+	ops, err = libovsdbops.CreateOrUpdateACLsOps(c.nbClient, ops, c.GetSamplingConfig(), desiredACLs...)
 	if err != nil {
 		return fmt.Errorf("failed to create ACL ops: %v", err)
 	}
@@ -672,7 +672,7 @@ func (c *Controller) updateExistingANP(currentANPState, desiredANPState *adminNe
 	if fullPeerRecompute || atLeastOneRuleUpdated || hasPriorityChanged || hasACLLoggingParamsChanged {
 		klog.V(3).Infof("ANP %s with priority %d was updated", desiredANPState.name, desiredANPState.anpPriority)
 		// now update the acls to the desired ones
-		ops, err = libovsdbops.CreateOrUpdateACLsOps(c.nbClient, ops, desiredACLs...)
+		ops, err = libovsdbops.CreateOrUpdateACLsOps(c.nbClient, ops, c.GetSamplingConfig(), desiredACLs...)
 		if err != nil {
 			return fmt.Errorf("failed to create new ACL ops for anp %s: %v", desiredANPState.name, err)
 		}

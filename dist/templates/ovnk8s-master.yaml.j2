@@ -185,6 +185,8 @@ spec:
               value: "{{ ovn_egress_firewall_enable }}"
             - name: OVN_MULTI_NETWORK_ENABLE
               value: "{{ ovn_multi_network_enable }}"
+            - name: OVN_NETWORK_SEGMENTATION_ENABLE
+              value: "{{ ovn_network_segmentation_enable }}"
             - name: OVN_EGRESSQOS_ENABLE
               value: "{{ ovn_egress_qos_enable }}"
             - name: OVN_EGRESSSERVICE_ENABLE
@@ -233,6 +235,8 @@ spec:
               value: "{{ ovn_stateless_netpol_enable }}"
             - name: OVN_ENABLE_MULTI_EXTERNAL_GATEWAY
               value: "{{ ovn_enable_multi_external_gateway }}"
+            - name: OVN_DISABLE_REQUESTEDCHASSIS
+              value: "{{ ovn_disable_requestedchassis }}"
             - name: OVN_HOST_NETWORK_NAMESPACE
               valueFrom:
                 configMapKeyRef:
@@ -244,6 +248,9 @@ spec:
               value: "{{ ovn_cluster_subnets_mac_binding_aging }}"
             - name: OVN_ENABLE_PERSISTENT_IPS
               value: "{{ ovn_enable_persistent_ips }}"
+            - name: OVN_ENABLE_DNSNAMERESOLVER
+              value: "{{ ovn_enable_dnsnameresolver }}"
+
 
           # end of container
 

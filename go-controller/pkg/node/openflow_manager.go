@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	OFManager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/openflow-manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -24,17 +25,35 @@ type openflowManager struct {
 	extGWBridgeFlowID     string
 }
 
-func (bridge *bridgeConfiguration) getBridgeInfo() (string, string, string, string, string, string, string, *sync.Map) {
-	bridge.Lock()
-	defer bridge.Unlock()
-	hostRepName := bridge.hostRepName
-	if config.OvnKubeNode.Mode == types.NodeModeDPU {
-		hostRepName = bridge.dpuHostRepName
-	}
-	return bridge.patchPort, bridge.ofPortPatch,
-		bridge.uplinkName, bridge.ofPortPhys, hostRepName, bridge.ofPortHost,
-		bridge.bridgeName, bridge.localnetPatchPorts
+// UTILs Needed for UDN (also leveraged for default netInfo) in openflowmanager
+
+func (c *openflowManager) getDefaultBridgePortConfigurations() ([]bridgeUDNConfiguration, string, string, string, string, string, *sync.Map) {
+	return c.defaultBridge.getBridgePortConfigurations()
 }
+
+func (c *openflowManager) getExGwBridgePortConfigurations() ([]bridgeUDNConfiguration, string, string, string, string, string, *sync.Map) {
+	return c.externalGatewayBridge.getBridgePortConfigurations()
+}
+
+func (c *openflowManager) addNetwork(nInfo util.NetInfo, masqCTMark uint, v4MasqIPs, v6MasqIPs *udn.MasqueradeIPs) {
+	c.defaultBridge.addNetworkBridgeConfig(nInfo, masqCTMark, v4MasqIPs, v6MasqIPs)
+	if c.externalGatewayBridge != nil {
+		c.externalGatewayBridge.addNetworkBridgeConfig(nInfo, masqCTMark, v4MasqIPs, v6MasqIPs)
+	}
+}
+
+func (c *openflowManager) delNetwork(nInfo util.NetInfo) {
+	c.defaultBridge.delNetworkBridgeConfig(nInfo)
+	if c.externalGatewayBridge != nil {
+		c.externalGatewayBridge.delNetworkBridgeConfig(nInfo)
+	}
+}
+
+func (c *openflowManager) getActiveNetwork(nInfo util.NetInfo) *bridgeUDNConfiguration {
+	return c.defaultBridge.getActiveNetworkBridgeConfig(nInfo)
+}
+
+// END UDN UTILs
 
 func (c *openflowManager) getDefaultBridgeName() string {
 	c.defaultBridge.Lock()
@@ -119,13 +138,13 @@ func (c *openflowManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) 
 			select {
 			case <-timer.C:
 
-				if err := checkPorts(c.defaultBridge.getBridgeInfo()); err != nil {
+				if err := checkPorts(c.getDefaultBridgePortConfigurations()); err != nil {
 					klog.Errorf("Checkports failed %v", err)
 					continue
 				}
 
 				if c.externalGatewayBridge != nil {
-					if err := checkPorts(c.externalGatewayBridge.getBridgeInfo()); err != nil {
+					if err := checkPorts(c.getExGwBridgePortConfigurations()); err != nil {
 						klog.Errorf("Checkports failed %v", err)
 						continue
 					}
@@ -185,23 +204,32 @@ func (c *openflowManager) updateBridgeFlowCache(subnets []*net.IPNet, extraIPs [
 // This assumes ofPortPhys doesn't change, which we'll still consider as fatal.
 // For the N/S gateway we should not have a situation where the patch's OF port changes,
 // so will make this check specific to localnet ports.
-func checkPorts(patchIntf, ofPortPatch, physIntf, ofPortPhys, hostRepName, ofPortHost, bridgeName string,
+func checkPorts(netConfigs []bridgeUDNConfiguration, physIntf, ofPortPhys, hostRepName, ofPortHost, bridgeName string,
 	localnetPatchPorts *sync.Map) error {
 	// it could be that the ovn-controller recreated the patch between the host OVS bridge and
 	// the integration bridge, as a result the ofport number changed for that patch interface
-	curOfportPatch, stderr, err := util.GetOVSOfPort("--if-exists", "get", "Interface", patchIntf, "ofport")
-	if err != nil {
-		return fmt.Errorf("failed to get ofport of %s, stderr: %q: %w", patchIntf, stderr, err)
+	for _, netConfig := range netConfigs {
+		if netConfig.ofPortPatch == "" {
+			continue
+		}
+		curOfportPatch, stderr, err := util.GetOVSOfPort("--if-exists", "get", "Interface", netConfig.patchPort, "ofport")
+		if err != nil {
+			return fmt.Errorf("failed to get ofport of %s, stderr: %q: %w", netConfig.patchPort, stderr, err)
 
-	}
-	if ofPortPatch != curOfportPatch {
-		// XXX- Maybe, use gateway type
-		if strings.Contains(patchIntf, "localnet_port") {
-			xdpCheckPatchPortOFFlows(bridgeName, ofPortPhys, patchIntf, ofPortPatch, curOfportPatch)
-		} else {
-			klog.Errorf("Fatal error: patch port %s ofport changed from %s to %s",
-				patchIntf, ofPortPatch, curOfportPatch)
-			os.Exit(1)
+		}
+		if netConfig.ofPortPatch != curOfportPatch {
+			// XXX- Maybe, use gateway type
+			if strings.Contains(netConfig.patchPort, "localnet_port") {
+				xdpCheckPatchPortOFFlows(bridgeName, ofPortPhys, netConfig.patchPort, netConfig.ofPortPatch, curOfportPatch)
+			} else {
+				if netConfig.isDefaultNetwork() || curOfportPatch != "" {
+					klog.Errorf("Fatal error: patch port %s ofport changed from %s to %s",
+						netConfig.patchPort, netConfig.ofPortPatch, curOfportPatch)
+					os.Exit(1)
+				} else {
+					klog.Warningf("Patch port %s removed for existing network", netConfig.patchPort)
+				}
+			}
 		}
 	}
 
@@ -249,7 +277,7 @@ func checkPorts(patchIntf, ofPortPatch, physIntf, ofPortPhys, hostRepName, ofPor
 
 // bootstrapOVSFlows handles ensuring basic, required flows are in place. This is done before OpenFlow manager has
 // been created/started, and only done when there is just a NORMAL flow programmed and OVN/OVS is already setup
-func bootstrapOVSFlows() error {
+func bootstrapOVSFlows(nodeName string) error {
 	// see if patch port exists already
 	var portsOutput string
 	var stderr string
@@ -260,18 +288,7 @@ func bootstrapOVSFlows() error {
 		return fmt.Errorf("failed to list ports on existing bridge br-int: %s, %w", stderr, err)
 	}
 
-	var bridge string
-	var patchPort string
-	// patch-br-int-to-<bridge name>_<node>
-	r := regexp.MustCompile("^patch-(.*)_.*?-to-br-int$")
-	for _, line := range strings.Split(portsOutput, "\n") {
-		matches := r.FindStringSubmatch(line)
-		if len(matches) == 2 {
-			patchPort = matches[0]
-			bridge = matches[1]
-			break
-		}
-	}
+	bridge, patchPort := localnetPortInfo(nodeName, portsOutput)
 
 	if len(bridge) == 0 {
 		// bridge exists but no patch port was found
@@ -333,4 +350,22 @@ func bootstrapOVSFlows() error {
 	}
 
 	return nil
+}
+
+// localnetPortInfo returns the name of the bridge and the patch port name for the default cluster network
+func localnetPortInfo(nodeName string, portsOutput string) (string, string) {
+	// This needs to work with:
+	// - default network: patch-<bridge name>_<node>-to-br-int
+	// but not with:
+	// - user defined primary network: patch-<bridge name>_<network-name>_<node>-to-br-int
+	// - user defined secondary localnet network: patch-<bridge name>_<network-name>_ovn_localnet_port-to-br-int
+	// TODO: going forward, maybe it would preferable to just read the bridge name from the config.
+	r := regexp.MustCompile(fmt.Sprintf("^patch-([^_]*)_%s-to-br-int$", nodeName))
+	for _, line := range strings.Split(portsOutput, "\n") {
+		matches := r.FindStringSubmatch(line)
+		if len(matches) == 2 {
+			return matches[1], matches[0]
+		}
+	}
+	return "", ""
 }

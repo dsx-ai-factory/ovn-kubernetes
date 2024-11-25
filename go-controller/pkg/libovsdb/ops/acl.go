@@ -7,8 +7,8 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // GetACLName returns the ACL name if it has one otherwise returns
@@ -22,14 +22,14 @@ func GetACLName(acl *nbdb.ACL) string {
 
 func getACLMutableFields(acl *nbdb.ACL) []interface{} {
 	return []interface{}{&acl.Action, &acl.Direction, &acl.ExternalIDs, &acl.Log, &acl.Match, &acl.Meter,
-		&acl.Name, &acl.Options, &acl.Priority, &acl.Severity, &acl.Tier}
+		&acl.Name, &acl.Options, &acl.Priority, &acl.Severity, &acl.Tier, &acl.SampleNew, &acl.SampleEst}
 }
 
 type aclPredicate func(*nbdb.ACL) bool
 
 // FindACLsWithPredicate looks up ACLs from the cache based on a given predicate
 func FindACLsWithPredicate(nbClient libovsdbclient.Client, p aclPredicate) ([]*nbdb.ACL, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 	defer cancel()
 	acls := []*nbdb.ACL{}
 	err := nbClient.WhereCache(p).List(ctx, &acls)
@@ -108,7 +108,7 @@ func SetACLLogging(acl *nbdb.ACL, severity nbdb.ACLSeverity, log bool) {
 
 // CreateOrUpdateACLsOps creates or updates the provided ACLs returning the
 // corresponding ops
-func CreateOrUpdateACLsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, acls ...*nbdb.ACL) ([]libovsdb.Operation, error) {
+func CreateOrUpdateACLsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, samplingConfig *SamplingConfig, acls ...*nbdb.ACL) ([]libovsdb.Operation, error) {
 	opModels := make([]operationModel, 0, len(acls))
 	for i := range acls {
 		// can't use i in the predicate, for loop replaces it in-memory
@@ -118,6 +118,7 @@ func CreateOrUpdateACLsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operat
 			// node ACLs won't have names set
 			*acl.Name = fmt.Sprintf("%.63s", *acl.Name)
 		}
+		opModels = addSample(samplingConfig, opModels, acl)
 		opModel := operationModel{
 			Model:          acl,
 			OnModelUpdates: getACLMutableFields(acl),
@@ -150,8 +151,8 @@ func UpdateACLsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, acl
 }
 
 // CreateOrUpdateACLs creates or updates the provided ACLs
-func CreateOrUpdateACLs(nbClient libovsdbclient.Client, acls ...*nbdb.ACL) error {
-	ops, err := CreateOrUpdateACLsOps(nbClient, nil, acls...)
+func CreateOrUpdateACLs(nbClient libovsdbclient.Client, samplingConfig *SamplingConfig, acls ...*nbdb.ACL) error {
+	ops, err := CreateOrUpdateACLsOps(nbClient, nil, samplingConfig, acls...)
 	if err != nil {
 		return err
 	}

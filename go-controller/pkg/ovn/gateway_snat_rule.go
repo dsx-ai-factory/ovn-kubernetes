@@ -14,8 +14,8 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
-func (oc *DefaultNetworkController) applyGWSnatRule(snatRule *util.GWSNATRule, logicalRouter *nbdb.LogicalRouter, hostSubnets []*net.IPNet, snatMap map[string]bool) error {
-	as, err := oc.addressSetFactory.EnsureAddressSet(getSnatAllowedExtAddrSetDbIDs(logicalRouter.Name, oc.controllerName, &snatRule.ExternalIP))
+func (gw *GatewayManager) applyGWSnatRule(snatRule *util.GWSNATRule, logicalRouter *nbdb.LogicalRouter, hostSubnets []*net.IPNet, snatMap map[string]bool) error {
+	as, err := gw.addressSetFactory.EnsureAddressSet(getSnatAllowedExtAddrSetDbIDs(logicalRouter.Name, gw.controllerName, &snatRule.ExternalIP))
 	if err != nil {
 		return fmt.Errorf("failed to ensure address set for snat IP %s on router %s: %v", snatRule.ExternalIP.String(), logicalRouter.Name, err)
 	}
@@ -41,16 +41,16 @@ func (oc *DefaultNetworkController) applyGWSnatRule(snatRule *util.GWSNATRule, l
 		snats = append(snats, snat)
 		snatMap[simpleNATKey(snat)] = true
 	}
-	err = libovsdbops.CreateOrUpdateNATs(oc.nbClient, logicalRouter, snats...)
+	err = libovsdbops.CreateOrUpdateNATs(gw.nbClient, logicalRouter, snats...)
 	if err != nil {
 		return fmt.Errorf("failed to create SNAT rule for rule %v on router %s: %v", snatRule, logicalRouter.Name, err)
 	}
 	return nil
 }
 
-func (oc *DefaultNetworkController) cleanStaleGwSnatRule(logicalRouter *nbdb.LogicalRouter, desiredNats map[string]bool) error {
+func (gw *GatewayManager) cleanStaleGwSnatRule(logicalRouter *nbdb.LogicalRouter, desiredNats map[string]bool) error {
 	// find stale custom SNATs
-	routerNats, err := libovsdbops.GetRouterNATs(oc.nbClient, logicalRouter)
+	routerNats, err := libovsdbops.GetRouterNATs(gw.nbClient, logicalRouter)
 	if err != nil {
 		if errors.Is(err, libovsdbclient.ErrNotFound) {
 			return nil
@@ -70,12 +70,12 @@ func (oc *DefaultNetworkController) cleanStaleGwSnatRule(logicalRouter *nbdb.Log
 	}
 	if len(staleNats) > 0 {
 		// remove stale SNATs
-		if err := libovsdbops.DeleteNATs(oc.nbClient, logicalRouter, staleNats...); err != nil {
+		if err := libovsdbops.DeleteNATs(gw.nbClient, logicalRouter, staleNats...); err != nil {
 			klog.Warningf("Failed to delete stale custom nats: %v", err)
 		}
 		for _, ip := range staleExtIPs {
 			staleExtIP := net.ParseIP(ip)
-			if err := oc.addressSetFactory.DestroyAddressSet(getSnatAllowedExtAddrSetDbIDs(logicalRouter.Name, oc.controllerName, &staleExtIP)); err != nil {
+			if err := gw.addressSetFactory.DestroyAddressSet(getSnatAllowedExtAddrSetDbIDs(logicalRouter.Name, gw.controllerName, &staleExtIP)); err != nil {
 				klog.Warningf("Failed to delete alternative snat address set for %s: %v", logicalRouter.Name, err)
 			}
 		}

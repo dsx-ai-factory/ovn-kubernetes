@@ -51,19 +51,22 @@ func (nc *SecondaryLocalnetNodeNetworkController) bridgeForXDPInterface() (*brid
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to find uplink for %s", bridgeName)
 	}
-
-	res := bridgeConfiguration{
-		localnetPatchPorts: &sync.Map{},
-	}
-	res.bridgeName = bridgeName
-	res.uplinkName = uplinkName
-
+	// Get ofport of patchPort
 	// the name of the patch port created by ovn-controller is of the form (e.g. for NAD ovn-public)
 	// patch-ovn.public_ovn_localnet_port-to-br-int
 	// TODO(gmoodalbail): can this be nc.NetworkPrefix?
 	patchNADStr := strings.Replace(nc.GetNetworkName(), "-", ".", -1)
-	res.patchPort = "patch-" + patchNADStr + "_ovn_localnet_port-to-br-int"
-	klog.Infof("Patch port for XDP shared gateway for NAD %s is %s", nc.GetNetworkName(), res.patchPort)
+	netconfig := &bridgeUDNConfiguration{
+		patchPort: "patch-" + patchNADStr + "_ovn_localnet_port-to-br-int",
+	}
+	res := bridgeConfiguration{
+		netConfig: map[string]*bridgeUDNConfiguration{
+			nc.GetNetworkName(): netconfig,
+		},
+		bridgeName:         bridgeName,
+		uplinkName:         uplinkName,
+		localnetPatchPorts: &sync.Map{},
+	}
 
 	return &res, nil
 }
@@ -82,12 +85,13 @@ func setXDPBridgePhysOfPorts(bridge *bridgeConfiguration) error {
 
 // XXX We separate this out from phys since, the localnet port could change. Need to take care of
 // that in healthcheck.
-func setXDPBridgePatchOfPorts(bridge *bridgeConfiguration) error {
+func (nc *SecondaryLocalnetNodeNetworkController) setXDPBridgePatchOfPorts(bridge *bridgeConfiguration) error {
+	netconfig := bridge.netConfig[nc.GetNetworkName()]
 	// Get ofport of patchPort
-	ofportPatch, stderr, err := util.GetOVSOfPort("--if-exists", "get", "interface", bridge.patchPort, "ofport")
+	ofportPatch, stderr, err := util.GetOVSOfPort("--if-exists", "get", "interface", netconfig.patchPort, "ofport")
 	if err != nil || len(ofportPatch) == 0 {
 		return fmt.Errorf("patch port %q not created by ovn-controller: "+
-			"stderr: %q, error: %v", bridge.patchPort, stderr, err)
+			"stderr: %q, error: %v", netconfig.patchPort, stderr, err)
 	}
 
 	// Since the localnet patch port could be created/destroyed by ovn-controller as needed,
@@ -96,12 +100,12 @@ func setXDPBridgePatchOfPorts(bridge *bridgeConfiguration) error {
 	// exists and should be the same as bridge.ofPortPatch or the patch port doesn't, in which
 	// case the new value will differ from bridge.ofPortPatch, but there should be no flows
 	// configured. We check just to make sure.
-	if bridge.ofPortPatch != "" && bridge.ofPortPatch != ofportPatch {
-		xdpCheckPatchPortOFFlows(bridge.bridgeName, bridge.ofPortPhys, bridge.patchPort, bridge.ofPortPatch, ofportPatch)
-		klog.Infof("XDP patch port %q changing ofport from %s to %s", bridge.patchPort, bridge.ofPortPatch,
+	if netconfig.ofPortPatch != "" && netconfig.ofPortPatch != ofportPatch {
+		xdpCheckPatchPortOFFlows(bridge.bridgeName, bridge.ofPortPhys, netconfig.patchPort, netconfig.ofPortPatch, ofportPatch)
+		klog.Infof("XDP patch port %q changing ofport from %s to %s", netconfig.patchPort, netconfig.ofPortPatch,
 			ofportPatch)
 	}
-	bridge.ofPortPatch = ofportPatch
+	netconfig.ofPortPatch = ofportPatch
 	return nil
 }
 
@@ -117,7 +121,7 @@ func (nc *SecondaryLocalnetNodeNetworkController) newXDPSharedGateway(isPrimaryD
 
 	gw.readyFunc = func() (bool, error) {
 		klog.Info("Setting patch ports for XDP Shared Gateway Openflow Manager")
-		err := setXDPBridgePatchOfPorts(gwBridge)
+		err := nc.setXDPBridgePatchOfPorts(gwBridge)
 		if err != nil {
 			klog.Infof("Failed setting up  XDP Shared Gateway: %v", err)
 			return false, err

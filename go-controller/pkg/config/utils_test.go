@@ -75,6 +75,12 @@ func TestParseClusterSubnetEntries(t *testing.T) {
 			expectedErr:     true,
 		},
 		{
+			name:            "IPv4 host Subnet invalid",
+			cmdLineArg:      "10.132.0.0/24/33",
+			clusterNetworks: nil,
+			expectedErr:     true,
+		},
+		{
 			name:            "Test that defaulting to hostsubnetlength with 24 bit cluster prefix fails",
 			cmdLineArg:      "10.128.0.0/24",
 			clusterNetworks: nil,
@@ -294,15 +300,15 @@ func Test_checkForOverlap(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		allSubnets := newConfigSubnets()
+		allSubnets := NewConfigSubnets()
 		for _, joinSubnet := range tc.joinSubnetCIDRList {
-			allSubnets.append(configSubnetJoin, joinSubnet)
+			allSubnets.Append(ConfigSubnetJoin, joinSubnet)
 		}
 		for _, subnet := range tc.cidrList {
-			allSubnets.append(configSubnetCluster, subnet)
+			allSubnets.Append(ConfigSubnetCluster, subnet)
 		}
 
-		err := allSubnets.checkForOverlaps()
+		err := allSubnets.CheckForOverlaps()
 		if err == nil && tc.shouldError {
 			t.Errorf("testcase \"%s\" failed to find overlap", tc.name)
 		} else if err != nil && !tc.shouldError {

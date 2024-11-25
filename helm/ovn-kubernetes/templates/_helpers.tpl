@@ -35,6 +35,23 @@ Generate image
 {{- end }}
 
 {{/*
+Generate DPU image
+*/}}
+{{- define "getDPUImage" -}}
+  {{- $image := "" }}
+  {{- if and (ne .Values.global.dpuImage.repository "") (ne .Values.global.dpuImage.tag "") }}
+    {{- $image = printf "%s:%s" .Values.global.dpuImage.repository .Values.global.dpuImage.tag }}
+  {{- else if and (ne .Values.dpuImage.repository "") (ne .Values.dpuImage.tag "") }}
+    {{- $image = printf "%s:%s" .Values.dpuImage.repository .Values.dpuImage.tag }}
+  {{- end }}
+    {{- if eq $image "" }}
+      {{ fail "dpu image not found" }}
+    {{- else }}
+      {{- print $image }}
+    {{- end }}
+{{- end }}
+
+{{/*
 Output "yes" if enableSsl is true, otherwise "no"
 */}}
 {{- define "isSslEnabled" -}}
@@ -56,4 +73,11 @@ Output "yes" if unprivilegedMode is true, otherwise "no"
 {{- else }}
   {{- print "no" }}
 {{- end }}
+{{- end }}
+
+{{/*
+Create dockerconfigjson to access container registry
+*/}}
+{{- define "dockerconfigjson" -}}
+{{- printf "{\"auths\": {\"%s\": {\"auth\": \"%s\"}}}" .registry .auth }}
 {{- end }}

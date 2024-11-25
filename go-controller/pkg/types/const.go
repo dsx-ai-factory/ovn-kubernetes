@@ -12,8 +12,16 @@ const (
 	HybridOverlayPrefix   = "int-"
 	HybridOverlayGRSubfix = "-gr"
 
+	// K8sMgmtIntfNamePrefix name to be used as an OVS internal port on the node as prefix for networs
+	K8sMgmtIntfNamePrefix = "ovn-k8s-mp"
+
+	// UDNVRFDeviceSuffix vrf device suffix associated with every user defined primary network.
+	UDNVRFDeviceSuffix = "-udn-vrf"
+	// UDNVRFDevicePrefix vrf device prefix associated with every user
+	UDNVRFDevicePrefix = "mp"
+
 	// K8sMgmtIntfName name to be used as an OVS internal port on the node
-	K8sMgmtIntfName = "ovn-k8s-mp0"
+	K8sMgmtIntfName = K8sMgmtIntfNamePrefix + "0"
 
 	// PhysicalNetworkName is the name that maps to an OVS bridge that provides
 	// access to physical/external network
@@ -50,6 +58,8 @@ const (
 	EXTSwitchToGWRouterPrefix    = "etor-"
 	GWRouterToExtSwitchPrefix    = "rtoe-"
 	EgressGWSwitchPrefix         = "exgw-"
+	PatchPortPrefix              = "patch-"
+	PatchPortSuffix              = "-to-br-int"
 
 	NodeLocalSwitch = "node_local_switch"
 
@@ -66,7 +76,7 @@ const (
 	TransitSwitchToRouterPrefix = "tstor-"
 	RouterToTransitSwitchPrefix = "rtots-"
 
-	// ACL Priorities
+	// ACL Default Tier Priorities
 
 	// Default routed multicast allow acl rule priority
 	DefaultRoutedMcastAllowPriority = 1013
@@ -79,11 +89,17 @@ const (
 	// Default deny acl rule priority
 	DefaultDenyPriority = 1000
 
+	// ACL PlaceHolderACL Tier Priorities
+	PrimaryUDNAllowPriority = 1001
+	// Default deny acl rule priority
+	PrimaryUDNDenyPriority = 1000
+
 	// ACL Tiers
-	// Tier 0 is currently un-used and is a placeholder tier for future use cases (can be renamed when we have a use for it).
+	// Tier 0 is called Primary as it is evaluated before any other feature-related Tiers.
+	// Currently used for User Defined Network Feature.
 	// NOTE: When we upgrade from an OVN version without tiers to the new version with
-	// tiers, all values in the new ACL.Tier column will be set to 0 a.k.a placeholder tier
-	PlaceHolderACLTier = 0
+	// tiers, all values in the new ACL.Tier column will be set to 0.
+	PrimaryACLTier = 0
 	// Default Tier for all ACLs
 	DefaultACLTier = 2
 	// Default Tier for all ACLs belonging to Admin Network Policy
@@ -97,6 +113,7 @@ const (
 	MGMTPortPolicyPriority                = "1005"
 	NodeSubnetPolicyPriority              = "1004"
 	InterNodePolicyPriority               = "1003"
+	UDNHostCIDRPolicyPriority             = "99"
 	HybridOverlaySubnetPriority           = 1002
 	HybridOverlayReroutePriority          = 501
 	DefaultNoRereoutePriority             = 102
@@ -107,19 +124,29 @@ const (
 	EgressIPRerouteQoSRulePriority        = 103
 	EgressLiveMigrationReroutePiority     = 10
 
+	// EndpointSliceMirrorControllerName mirror EndpointSlice controller name (used as a value for the "endpointslice.kubernetes.io/managed-by" label)
+	EndpointSliceMirrorControllerName = "endpointslice-mirror-controller.k8s.ovn.org"
+	// EndpointSliceDefaultControllerName default kubernetes EndpointSlice controller name (used as a value for the "endpointslice.kubernetes.io/managed-by" label)
+	EndpointSliceDefaultControllerName = "endpointslice-controller.k8s.io"
+	// LabelSourceEndpointSlice label key used in mirrored EndpointSlice
+	// that has the value of the default EndpointSlice name
+	LabelSourceEndpointSlice = "k8s.ovn.org/source-endpointslice"
+	// LabelSourceEndpointSliceVersion label key used in mirrored EndpointSlice
+	// that has the value of the last known default EndpointSlice ResourceVersion
+	LabelSourceEndpointSliceVersion = "k8s.ovn.org/source-endpointslice-version"
+	// LabelUserDefinedEndpointSliceNetwork label key used in mirrored EndpointSlices that contains the current primary user defined network name
+	LabelUserDefinedEndpointSliceNetwork = "k8s.ovn.org/endpointslice-network"
+	// LabelUserDefinedServiceName label key used in mirrored EndpointSlices that contains the service name matching the EndpointSlice
+	LabelUserDefinedServiceName = "k8s.ovn.org/service-name"
+
 	// Packet marking
 	EgressIPNodeConnectionMark         = "1008"
 	EgressIPReplyTrafficConnectionMark = 42
 
-	V6NodeLocalNATSubnet           = "fd99::/64"
-	V6NodeLocalNATSubnetPrefix     = 64
-	V6NodeLocalNATSubnetNextHop    = "fd99::1"
-	V6NodeLocalDistributedGWPortIP = "fd99::2"
-
-	V4NodeLocalNATSubnet           = "169.254.0.0/20"
-	V4NodeLocalNATSubnetPrefix     = 20
-	V4NodeLocalNATSubnetNextHop    = "169.254.0.1"
-	V4NodeLocalDistributedGWPortIP = "169.254.0.2"
+	// primary user defined network's default join subnet value
+	// users can configure custom values using NADs
+	UserDefinedPrimaryNetworkJoinSubnetV4 = "100.65.0.0/16"
+	UserDefinedPrimaryNetworkJoinSubnetV6 = "fd99::/64"
 
 	// OpenFlow and Networking constants
 	RouteAdvertisementICMPType    = 134
@@ -165,10 +192,16 @@ const (
 	ClusterSwitchLBGroupName = "clusterSwitchLBGroup"
 	ClusterRouterLBGroupName = "clusterRouterLBGroup"
 
-	// key for network name external-id
+	// lagacy key for network name external-id
 	LegacyNetworkExternalID = "network_name"
-	NetworkExternalID       = OvnK8sPrefix + "/" + "network"
+	// key for network name external-id
+	NetworkExternalID = OvnK8sPrefix + "/" + "network"
+	// key for node name external-id
+	NodeExternalID = OvnK8sPrefix + "/" + "node"
+	// key for network role external-id: possible values are "default", "primary", "secondary"
+	NetworkRoleExternalID = OvnK8sPrefix + "/" + "role"
 	// key for NAD name external-id, only used for secondary logical switch port of a pod
+	// key for network name external-id
 	NADExternalID = OvnK8sPrefix + "/" + "nad"
 	// key for topology type external-id, only used for secondary network logical entities
 	TopologyExternalID = OvnK8sPrefix + "/" + "topology"
@@ -176,11 +209,25 @@ const (
 	LoadBalancerKindExternalID = OvnK8sPrefix + "/" + "kind"
 	// key for load_balancer service external-id
 	LoadBalancerOwnerExternalID = OvnK8sPrefix + "/" + "owner"
+	// key for UDN enabled services routes
+	UDNEnabledServiceExternalID = OvnK8sPrefix + "/" + "udn-enabled-default-service"
 
 	// different secondary network topology type defined in CNI netconf
 	Layer3Topology   = "layer3"
 	Layer2Topology   = "layer2"
 	LocalnetTopology = "localnet"
+
+	// different types of network roles
+	// defined in CNI netconf as a user defined network
+	NetworkRolePrimary   = "primary"
+	NetworkRoleSecondary = "secondary"
+	NetworkRoleDefault   = "default"
+	// defined internally by ovnkube to recognize "default"
+	// network's role as a "infrastructure-locked" network
+	// when user defined network is the primary network for
+	// the pod which makes "default" network niether primary
+	// nor secondary
+	NetworkRoleInfrastructure = "infrastructure-locked"
 
 	// db index keys
 	// PrimaryIDKey is used as a primary client index

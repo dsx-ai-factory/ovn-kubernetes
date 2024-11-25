@@ -26,6 +26,8 @@ import (
 	cloudprivateipconfiglister "github.com/openshift/client-go/cloudnetwork/listers/cloudnetwork/v1"
 	anplister "sigs.k8s.io/network-policy-api/pkg/client/listers/apis/v1alpha1"
 
+	userdefinednetworklister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/listers/userdefinednetwork/v1"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	listers "k8s.io/client-go/listers/core/v1"
@@ -543,6 +545,10 @@ func newInformerLister(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		return portmirrorlister.NewPortMirrorLister(sharedInformer.GetIndexer()), nil
 	case IPAMClaimsType:
 		return ipamclaimslister.NewIPAMClaimLister(sharedInformer.GetIndexer()), nil
+	case UserDefinedNetworkType:
+		return userdefinednetworklister.NewUserDefinedNetworkLister(sharedInformer.GetIndexer()), nil
+	case ClusterUserDefinedNetworkType:
+		return userdefinednetworklister.NewClusterUserDefinedNetworkLister(sharedInformer.GetIndexer()), nil
 	}
 
 	return nil, fmt.Errorf("cannot create lister from type %v", oType)

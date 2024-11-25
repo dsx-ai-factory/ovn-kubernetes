@@ -4,15 +4,16 @@ import (
 	"context"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/libovsdb/ovsdb"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
-// CreateOrUpdateLoadBalancerGroup creates or updates the provided load balancer
-// group
-func CreateOrUpdateLoadBalancerGroup(nbClient libovsdbclient.Client, group *nbdb.LoadBalancerGroup) error {
+// CreateOrUpdateLoadBalancerGroupOps returns the ops to create or update the
+// provided load balancer group
+func CreateOrUpdateLoadBalancerGroupOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, group *nbdb.LoadBalancerGroup) ([]ovsdb.Operation, error) {
 	// lb group has no fields other than name, safe to update just with non-default values
 	opModel := operationModel{
 		Model:          group,
@@ -22,8 +23,11 @@ func CreateOrUpdateLoadBalancerGroup(nbClient libovsdbclient.Client, group *nbdb
 	}
 
 	m := newModelClient(nbClient)
-	_, err := m.CreateOrUpdate(opModel)
-	return err
+	ops, err := m.CreateOrUpdateOps(ops, opModel)
+	if err != nil {
+		return nil, err
+	}
+	return ops, nil
 }
 
 // AddLoadBalancersToGroupOps adds the provided load balancers to the provided
@@ -76,7 +80,7 @@ type loadBalancerGroupPredicate func(*nbdb.LoadBalancerGroup) bool
 // FindLoadBalancerGroupsWithPredicate looks up load balancer groups from the
 // cache based on a given predicate
 func FindLoadBalancerGroupsWithPredicate(nbClient libovsdbclient.Client, p loadBalancerGroupPredicate) ([]*nbdb.LoadBalancerGroup, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 	defer cancel()
 	groups := []*nbdb.LoadBalancerGroup{}
 	err := nbClient.WhereCache(p).List(ctx, &groups)

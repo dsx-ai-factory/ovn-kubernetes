@@ -112,7 +112,7 @@ func parseNetConfSingle(bytes []byte) (*ovncnitypes.NetConf, error) {
 		return nil, ErrorAttachDefNotOvnManaged
 	}
 
-	err = validateNetConfNameFields(netconf)
+	err = ValidateNetConfNameFields(netconf)
 	if err != nil {
 		return nil, err
 	}
@@ -138,14 +138,14 @@ func parseNetConfList(confList *libcni.NetworkConfigList) (*ovncnitypes.NetConf,
 	netconf.Name = confList.Name
 	netconf.CNIVersion = confList.CNIVersion
 
-	if err := validateNetConfNameFields(netconf); err != nil {
+	if err := ValidateNetConfNameFields(netconf); err != nil {
 		return nil, err
 	}
 
 	return netconf, nil
 }
 
-func validateNetConfNameFields(netconf *ovncnitypes.NetConf) error {
+func ValidateNetConfNameFields(netconf *ovncnitypes.NetConf) error {
 	if netconf.NotDefault {
 		netconf.IsSecondary = true
 	}
@@ -170,8 +170,8 @@ func validateNetConfNameFields(netconf *ovncnitypes.NetConf) error {
 		if len(netconf.LegacySubnets) != 0 {
 			netconf.Subnets = netconf.LegacySubnets
 		}
-		if len(netconf.ExcludeCIDRs) != 0 {
-			netconf.ExcludeSubnets = strings.Join(netconf.ExcludeCIDRs, ",")
+		if len(netconf.LegacyExcludeCIDRs) != 0 {
+			netconf.ExcludeSubnets = strings.Join(netconf.LegacyExcludeCIDRs, ",")
 		}
 	}
 	return nil

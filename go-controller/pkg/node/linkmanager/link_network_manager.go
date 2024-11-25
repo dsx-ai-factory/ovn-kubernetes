@@ -2,6 +2,8 @@ package linkmanager
 
 import (
 	"fmt"
+	"net"
+	"net/netip"
 	"sync"
 	"time"
 
@@ -10,7 +12,7 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
-	"github.com/j-keck/arping"
+	"github.com/mdlayher/arp"
 	"github.com/vishvananda/netlink"
 )
 
@@ -138,7 +140,13 @@ func (c *Controller) DelAddress(address netlink.Addr) error {
 		return fmt.Errorf("address (%s) is not valid", address.String())
 	}
 	link, err := util.GetNetLinkOps().LinkByIndex(address.LinkIndex)
-	if err != nil && !util.GetNetLinkOps().IsLinkNotFoundError(err) {
+	if err != nil {
+		if util.GetNetLinkOps().IsLinkNotFoundError(err) {
+			c.mu.Lock()
+			c.delLinkFromStoreByIndex(address.LinkIndex)
+			c.mu.Unlock()
+			return nil
+		}
 		return fmt.Errorf("no valid link associated with addresses %s: %v", address.String(), err)
 	}
 	klog.Infof("Link manager: deleting address %s from link %s", address.String(), link.Attrs().Name)
@@ -190,7 +198,7 @@ func (c *Controller) syncLink(link netlink.Link) error {
 		// For IPv4, use arping to try to update other hosts ARP caches, in case this IP was
 		// previously active on another node
 		if addressWanted.IP.To4() != nil {
-			if err = arping.GratuitousArpOverIfaceByName(addressWanted.IP, linkName); err != nil {
+			if err = gratuitousArpOverIfaceByName(addressWanted.IP, linkName); err != nil {
 				klog.Errorf("Failed to send a GARP for IP %s over interface %s: %v", addressWanted.IP.String(),
 					linkName, err)
 			}
@@ -245,7 +253,26 @@ func (c *Controller) delAddressFromStore(linkName string, address netlink.Addr) 
 			temp = append(temp, addressSaved)
 		}
 	}
-	c.store[linkName] = temp
+	if len(temp) == 0 {
+		delete(c.store, linkName)
+	} else {
+		c.store[linkName] = temp
+	}
+}
+
+func (c *Controller) delLinkFromStoreByIndex(linkToDelIndex int) {
+	var linkNameToDelete string
+	for linkName, addresses := range c.store {
+		if len(addresses) > 0 {
+			if linkToDelIndex == addresses[0].LinkIndex {
+				linkNameToDelete = linkName
+				break
+			}
+		}
+	}
+	if linkNameToDelete != "" {
+		delete(c.store, linkNameToDelete)
+	}
 }
 
 func (c *Controller) isAddressValid(address netlink.Addr) bool {
@@ -279,4 +306,30 @@ func containsAddress(addresses []netlink.Addr, candidate netlink.Addr) bool {
 		}
 	}
 	return false
+}
+
+func gratuitousArpOverIfaceByName(srcIP net.IP, ifaceName string) error {
+	iface, err := net.InterfaceByName(ifaceName)
+	if err != nil {
+		return fmt.Errorf("failed finding interface '%s': %w", ifaceName, err)
+	}
+
+	c, err := arp.Dial(iface)
+	if err != nil {
+		return fmt.Errorf("failed dialing logical switch interface '%s': %w", ifaceName, err)
+	}
+	defer c.Close()
+	addr, err := netip.ParseAddr(srcIP.String())
+	if err != nil {
+		return fmt.Errorf("failed converting net.IP to netip.Addr: %w", err)
+	}
+	p, err := arp.NewPacket(arp.OperationRequest, iface.HardwareAddr, addr, net.HardwareAddr{0, 0, 0, 0, 0, 0}, addr)
+	if err != nil {
+		return fmt.Errorf("failed create GARP: %w", err)
+	}
+	err = c.WriteTo(p, net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff})
+	if err != nil {
+		return fmt.Errorf("failed sending GARP: %w", err)
+	}
+	return nil
 }

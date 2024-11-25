@@ -18,8 +18,6 @@ spec:
       app: {{ ovnkube_app_name }}
   updateStrategy:
     type: RollingUpdate
-    rollingUpdate:
-      maxUnavailable: 1
   template:
     metadata:
       labels:
@@ -28,17 +26,12 @@ spec:
         component: network
         type: infra
         kubernetes.io/os: "linux"
-        metrics: ovnkube-node
     spec:
-      imagePullSecrets:
-        - name: registry-credentials
       priorityClassName: "system-cluster-critical"
       serviceAccountName: ovnkube-node
       hostNetwork: true
       dnsPolicy: Default
-      {% if ovn_unprivileged_mode=="no" %}
-      hostPID: true
-      {% endif %}
+      {{ "hostPID: true" if ovn_unprivileged_mode=="no" }}
       containers:
       {% if ovnkube_compact_mode_enable=="false" %}
       - name: ovnkube-node
@@ -70,43 +63,10 @@ spec:
 
         terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
-        # /usr/bin/firewall-cmd
-        - mountPath: /host/usr/bin
-          name: host-usr-bin
-          readOnly: true
-        # ubuntu /sbin/iptables - > /etc/alternatives/iptables
-        - mountPath: /host/etc/alternatives
-          name: host-etc-alts
-          readOnly: true
-        # centos /sbin/iptables, /sbin -> /usr/sbin
-        - mountPath: /host/sbin
-          name: host-usr-sbin
-          readOnly: true
-        - mountPath: /host/usr/sbin
-          name: host-usr-sbin
-          readOnly: true
-        # firewall-cmd dependencies
-        - mountPath: /host/usr/lib
-          name: host-usr-lib
-          readOnly: true
-        - mountPath: /host/lib
-          name: host-lib
-          readOnly: true
-        - mountPath: /host/lib64
-          name: host-lib64
-          readOnly: true
-        - mountPath: /host/usr/lib64
-          name: host-usr-lib64
-          readOnly: true
-        - mountPath: /host/usr/libexec
-          name: host-usr-libexec
-          readOnly: true
-        # /usr/local/lib/python3.6/site-packages/six.py
-        - mountPath: /host/usr/local/lib
-          name: host-usr-local-lib
-          readOnly: true
-        - mountPath: /host/run/dbus
-          name: host-var-run-dbus
+        # Common mounts
+        # for the iptables wrapper
+        - mountPath: /host
+          name: host-slash
           readOnly: true
         - mountPath: /var/run/dbus/
           name: host-var-run-dbus
@@ -114,10 +74,9 @@ spec:
         - mountPath: /var/lib/kubelet
           name: host-kubelet
           readOnly: true
-        # ovn-k8s log
         - mountPath: /var/log/ovn-kubernetes/
           name: host-var-log-ovnkube
-        # We mount our socket here
+          # We mount our socket here
         - mountPath: /var/run/ovn-kubernetes
           name: host-var-run-ovn-kubernetes
         # CNI related mounts which we take over
@@ -135,17 +94,11 @@ spec:
         - mountPath: /var/run/ovn/
           name: host-var-run-ovs
         - mountPath: /ovn-cert
-          name: ovn-pki
+          name: host-ovn-cert
           readOnly: true
-        {% if kind is defined and kind -%}
         - mountPath: /etc/openvswitch/
-          name: host-config-openvswitch
+          name: host-etc-ovs
           readOnly: true
-        {% else -%}
-        - mountPath: /etc/openvswitch/
-          name: host-etc-openvswitch
-          readOnly: true
-        {% endif %}
         - mountPath: /etc/ovn/
           name: host-var-lib-ovs
           readOnly: true
@@ -170,8 +123,6 @@ spec:
           value: "{{ ovnkube_logfile_maxbackups }}"
         - name: OVNKUBE_LOGFILE_MAXAGE
           value: "{{ ovnkube_logfile_maxage }}"
-        - name: OVNKUBE_LOGFILE
-          value: "{{ ovnkube_logfile }}"
         - name: OVN_NET_CIDR
           valueFrom:
             configMapKeyRef:
@@ -198,7 +149,11 @@ spec:
               name: ovn-config
               key: routable_mtu
               optional: true
+       {%-if ovnkube_app_name=="ovnkube-node-dpu" %}
+        - name: K8S_NODE_DPU
+       {%- else %}
         - name: K8S_NODE
+       {%- endif %}
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
@@ -242,6 +197,10 @@ spec:
           value: "{{ ovn_ipfix_cache_max_flows }}"
         - name: OVN_IPFIX_CACHE_ACTIVE_TIMEOUT
           value: "{{ ovn_ipfix_cache_active_timeout }}"
+        - name: OVN_V4_JOIN_SUBNET
+          value: "{{ ovn_v4_join_subnet }}"
+        - name: OVN_V6_JOIN_SUBNET
+          value: "{{ ovn_v6_join_subnet }}"
         - name: OVN_V4_MASQUERADE_SUBNET
           value: "{{ ovn_v4_masquerade_subnet }}"
         - name: OVN_V6_MASQUERADE_SUBNET
@@ -255,12 +214,8 @@ spec:
         - name: OVN_ENABLE_OVNKUBE_IDENTITY
           value: "{{ ovn_enable_ovnkube_identity }}"
         {% if ovnkube_app_name!="ovnkube-node-dpu-host" -%}
-        - name: OVNKUBE_DISABLE_OVS_METRICS
-          value: "{{ disable_ovs_metrics }}"         
         - name: OVN_SSL_ENABLE
           value: "{{ ovn_ssl_en }}"
-        - name: OVN_MULTI_NETWORK_ENABLE
-          value: "{{ ovn_multi_network_enable }}"
         - name: OVN_DISABLE_OVN_IFACE_ID_VER
           value: "{{ ovn_disable_ovn_iface_id_ver }}"
         - name: OVN_REMOTE_PROBE_INTERVAL
@@ -277,12 +232,12 @@ spec:
           value: "{{ ovn_lflow_cache_limit_kb }}"
         - name: OVN_MULTI_NETWORK_ENABLE
           value: "{{ ovn_multi_network_enable }}"
+        - name: OVN_NETWORK_SEGMENTATION_ENABLE
+          value: "{{ ovn_network_segmentation_enable }}"
         - name: OVN_ENABLE_INTERCONNECT
           value: "{{ ovn_enable_interconnect }}"
         - name: OVN_ENABLE_MULTI_EXTERNAL_GATEWAY
           value: "{{ ovn_enable_multi_external_gateway }}"
-        - name: OVNKUBE_WAIT_ON_OVN_INSTALL_EXTID
-          value: "{{ ovnkube_wait_on_ovn_install_extid }}"
         {% endif -%}
         {% if ovnkube_app_name=="ovnkube-node-dpu-host" -%}
         - name: OVNKUBE_NODE_MODE
@@ -299,14 +254,6 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: host_network_namespace
-        {% if ovnkube_app_name!="ovnkube-node-dpu" -%}
-        - name: OVNKUBE_DISABLE_FIREWALLD
-          value: "{{ ovnkube_disable_firewalld }}"
-        {% if ovnkube_disable_firewalld=="false" -%}
-        - name: OVNKUBE_ADMIN_FIREWALLD_ZONE
-          value: "{{ ovnkube_admin_firewalld_zone }}
-        {% endif -%}
-        {% endif -%}
         - name: POD_NAME
           valueFrom:
             fieldRef:
@@ -314,13 +261,23 @@ spec:
               fieldPath: metadata.name
 
         readinessProbe:
+        {%- if ovnkube_app_name!="ovnkube-node-dpu" %}
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnkube-node"]
           initialDelaySeconds: 30
           timeoutSeconds: 30
           periodSeconds: 60
+        {%- else %}
+          httpGet:
+            path: /metrics
+            port: 9476
+            scheme: HTTP
+          initialDelaySeconds: 30
+          timeoutSeconds: 5
+          periodSeconds: 30
+        {%- endif %}
       {% endif %}
-      {% if ovnkube_app_name=="ovnkube-node" -%}
+      {% if ovnkube_app_name!="ovnkube-node-dpu-host" -%}
       - name: ovn-controller
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
@@ -346,7 +303,7 @@ spec:
         - mountPath: /var/run/ovn/
           name: host-var-run-ovs
         - mountPath: /ovn-cert
-          name: ovn-pki
+          name: host-ovn-cert
           readOnly: true
 
         resources:
@@ -363,7 +320,11 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: k8s_apiserver
+       {%- if ovnkube_app_name=="ovnkube-node-dpu" %}
+        - name: K8S_NODE_DPU
+       {%- else %}
         - name: K8S_NODE
+       {%- endif %}
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
@@ -440,7 +401,7 @@ spec:
                 operator: DoesNotExist
       {% endif -%}
       volumes:
-      # dbus socket
+      # Common volumes
       - name: host-var-run-dbus
         hostPath:
           path: /var/run/dbus
@@ -459,38 +420,9 @@ spec:
       - name: host-etc-cni-netd
         hostPath:
           path: /etc/cni/net.d
-      # /sbin/iptables on centos, sbin -> /usr/sbin
-      - name: host-usr-sbin
+      - name: host-slash
         hostPath:
-          path: /usr/sbin
-      # /usr/sbin/iptables -> /etc/alternatives/iptables
-      - name: host-etc-alts
-        hostPath:
-          path: /etc/alternatives
-      # /usr/bin/firewall-cmd
-      - name: host-usr-bin
-        hostPath:
-          path: /usr/bin
-      # dependencies
-      - name: host-usr-lib
-        hostPath:
-          path: /usr/lib
-      - name: host-lib
-        hostPath:
-          path: /lib
-      - name: host-lib64
-        hostPath:
-          path: /lib64
-      - name: host-usr-lib64
-        hostPath:
-          path: /usr/lib64
-      - name: host-usr-libexec
-        hostPath:
-          path: /usr/libexec
-      # /usr/local/lib/python3.6/site-packages
-      - name: host-usr-local-lib
-        hostPath:
-          path: /usr/local/lib
+          path: /
       - name: host-netns
         hostPath:
           path: /var/run/netns
@@ -505,27 +437,19 @@ spec:
       - name: host-var-run-ovs
         hostPath:
           path: /var/run/openvswitch
-      - name: ovn-pki
+      - name: host-ovn-cert
         hostPath:
           path: /etc/ovn
           type: DirectoryOrCreate
-      - name: host-etc-openvswitch
-        hostPath:
-          path: /etc/openvswitch
       - name: host-var-lib-ovs
         hostPath:
           path: /var/lib/openvswitch
       - name: host-etc-ovs
         hostPath:
           path: /etc/openvswitch
-      {%- elif ovnkube_app_name=="ovnkube-node-dpu-host" %}
+      {%- else %}
       - name: var-run-ovn
         emptyDir: {}
-      {%- endif %}
-      {% if kind is defined and kind -%}
-      - name: host-config-openvswitch
-        hostPath:
-          path: /etc/origin/openvswitch
       {%- endif %}
 
       tolerations:

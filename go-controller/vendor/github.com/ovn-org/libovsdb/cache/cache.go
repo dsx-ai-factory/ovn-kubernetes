@@ -966,7 +966,7 @@ func (t *TableCache) Populate(tableUpdates ovsdb.TableUpdates) error {
 		}
 		tCache := t.cache[table]
 		for uuid, row := range tu {
-			t.logger.V(6).Info("processing update", "table", table, "uuid", uuid)
+			t.logger.V(5).Info("processing update", "table", table, "uuid", uuid)
 			update := updates.ModelUpdates{}
 			current := tCache.cache[uuid]
 			err := update.AddRowUpdate(t.dbModel, table, uuid, current, *row)
@@ -993,7 +993,7 @@ func (t *TableCache) Populate2(tableUpdates ovsdb.TableUpdates2) error {
 		}
 		tCache := t.cache[table]
 		for uuid, row := range tu {
-			t.logger.V(6).Info("processing update", "table", table, "uuid", uuid)
+			t.logger.V(5).Info("processing update", "table", table, "uuid", uuid)
 			update := updates.ModelUpdates{}
 			current := tCache.cache[uuid]
 			if row.Initial == nil && row.Insert == nil && current == nil {
@@ -1186,21 +1186,21 @@ func (t *TableCache) ApplyCacheUpdate(update cacheUpdate) error {
 		err := update.ForEachModelUpdate(table, func(uuid string, old, new model.Model) error {
 			switch {
 			case old == nil && new != nil:
-				t.logger.V(6).Info("inserting model", "table", table, "uuid", uuid, "model", new)
+				t.logger.V(5).Info("inserting model", "table", table, "uuid", uuid, "model", new)
 				err := tCache.Create(uuid, new, false)
 				if err != nil {
 					return err
 				}
 				t.eventProcessor.AddEvent(addEvent, table, nil, new)
 			case old != nil && new != nil:
-				t.logger.V(6).Info("updating model", "table", table, "uuid", uuid, "old", old, "new", new)
+				t.logger.V(5).Info("updating model", "table", table, "uuid", uuid, "old", old, "new", new)
 				_, err := tCache.Update(uuid, new, false)
 				if err != nil {
 					return err
 				}
 				t.eventProcessor.AddEvent(updateEvent, table, old, new)
 			case new == nil:
-				t.logger.V(6).Info("deleting model", "table", table, "uuid", uuid, "model", old)
+				t.logger.V(5).Info("deleting model", "table", table, "uuid", uuid, "model", old)
 				err := tCache.Delete(uuid)
 				if err != nil {
 					return err
@@ -1260,6 +1260,11 @@ func valueFromColumnKey(info *mapper.Info, columnKey model.ColumnKey) (interface
 		if err != nil {
 			return "", fmt.Errorf("can't get key value from map: %v", err)
 		}
+	}
+	// if the value is a non-nil pointer of an optional, dereference
+	v := reflect.ValueOf(val)
+	if v.Kind() == reflect.Ptr && !v.IsNil() {
+		val = v.Elem().Interface()
 	}
 	return val, err
 }

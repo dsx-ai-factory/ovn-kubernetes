@@ -3,6 +3,7 @@ package util
 import (
 	"fmt"
 	"net"
+	"strconv"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -29,16 +30,16 @@ import (
 // (TODO: FIXME): With this route, we are officially breaking support for IC with zones that have multiple-nodes
 // NOTE: This route is exactly the same as what is added by pod-live-migration feature and we keep the route exactly
 // same across the 3 features so that if the route already exists on the node, this is just a no-op
-func CreateDefaultRouteToExternal(nbClient libovsdbclient.Client, nodeName string) error {
-	gatewayIPs, err := GetLRPAddrs(nbClient, types.GWRouterToJoinSwitchPrefix+types.GWRouterPrefix+nodeName)
+func CreateDefaultRouteToExternal(nbClient libovsdbclient.Client, clusterRouter, gwRouterName string) error {
+	gatewayIPs, err := GetLRPAddrs(nbClient, types.GWRouterToJoinSwitchPrefix+gwRouterName)
 	if err != nil {
-		return fmt.Errorf("attempt at finding node gateway router %s network information failed, err: %w", nodeName, err)
+		return fmt.Errorf("attempt at finding node gateway router %s network information failed, err: %w", gwRouterName, err)
 	}
 	clusterSubnets := util.GetAllClusterSubnets()
 	for _, subnet := range clusterSubnets {
 		gatewayIP, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6String(subnet.IP.String()), gatewayIPs)
 		if err != nil {
-			return fmt.Errorf("could not find gateway IP for node %s with family %v: %v", nodeName, false, err)
+			return fmt.Errorf("could not find gateway IP for gateway router %s with family %v: %v", gwRouterName, false, err)
 		}
 		lrsr := nbdb.LogicalRouterStaticRoute{
 			IPPrefix: subnet.String(),
@@ -54,9 +55,27 @@ func CreateDefaultRouteToExternal(nbClient libovsdbclient.Client, nodeName strin
 				lrsr.Nexthop == gatewayIP.IP.String() &&
 				lrsr.Policy != nil && *lrsr.Policy == nbdb.LogicalRouterStaticRoutePolicySrcIP
 		}
-		if err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient, types.OVNClusterRouter, &lrsr, p); err != nil {
-			return fmt.Errorf("unable to create pod to external catch-all reroute for node %s, err: %v", nodeName, err)
+		if err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient, clusterRouter, &lrsr, p); err != nil {
+			return fmt.Errorf("unable to create pod to external catch-all reroute for gateway router %s, err: %v", gwRouterName, err)
 		}
 	}
 	return nil
+}
+
+func FindPolicyBasedRoutes(netInfo util.NetInfo, nbClient libovsdbclient.Client, priority string) ([]*nbdb.LogicalRouterPolicy, error) {
+	intPriority, _ := strconv.Atoi(priority)
+	networkName := netInfo.GetNetworkName()
+	p := func(item *nbdb.LogicalRouterPolicy) bool {
+		itemNetworkName, isSecondaryNetwork := item.ExternalIDs[types.NetworkExternalID]
+		if !isSecondaryNetwork {
+			itemNetworkName = types.DefaultNetworkName
+		}
+		return itemNetworkName == networkName && item.Priority == intPriority
+	}
+	logicalRouterStaticPolicies, err := libovsdbops.FindLogicalRouterPoliciesWithPredicate(nbClient, p)
+	if err != nil {
+		return nil, fmt.Errorf("unable to find logical router policy: %v", err)
+	}
+
+	return logicalRouterStaticPolicies, nil
 }

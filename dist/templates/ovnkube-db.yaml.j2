@@ -64,17 +64,17 @@ spec:
   template:
     metadata:
       labels:
-        ovn-db-pod: "true"
         name: ovnkube-db
         component: network
         type: infra
         kubernetes.io/os: "linux"
+        ovn-db-pod: "true"
     spec:
+      priorityClassName: "system-cluster-critical"
       imagePullSecrets:
         - name: ovncni-nvcr-ips
       serviceAccountName: ovn-db
       hostNetwork: true
-      priorityClassName: "system-cluster-critical"
       dnsPolicy: Default
       containers:
       # firewall rules for ovn - assumed to be setup

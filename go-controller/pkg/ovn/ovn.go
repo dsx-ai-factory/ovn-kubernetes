@@ -129,10 +129,10 @@ func (oc *DefaultNetworkController) ensurePod(oldPod, pod *kapi.Pod, addPort boo
 		return nil
 	}
 
-	// skip the pods on no host subnet nodes
+	// Add podIPs on no host subnet Nodes to the namespace address_set
 	switchName := pod.Spec.NodeName
 	if oc.lsManager.IsNonHostSubnetSwitch(switchName) {
-		return nil
+		return oc.ensureRemotePodIP(oldPod, pod, addPort)
 	}
 
 	if oc.isPodScheduledinLocalZone(pod) {
@@ -209,6 +209,24 @@ func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *kapi.Pod, ad
 		}
 	}
 
+	// update open ports for UDN pods on pod update.
+	if util.IsNetworkSegmentationSupportEnabled() && !util.PodWantsHostNetwork(pod) && !addPort &&
+		pod != nil && oldPod != nil &&
+		pod.Annotations[util.UDNOpenPortsAnnotationName] != oldPod.Annotations[util.UDNOpenPortsAnnotationName] {
+		networkRole, err := oc.GetNetworkRole(pod)
+		if err != nil {
+			return err
+		}
+		if networkRole != ovntypes.NetworkRolePrimary {
+			// only update for non-default network pods
+			portName := oc.GetLogicalPortName(pod, oc.GetNetworkName())
+			err := oc.setUDNPodOpenPorts(pod.Namespace+"/"+pod.Name, pod.Annotations, portName)
+			if err != nil {
+				return fmt.Errorf("failed to update UDN pod  %s/%s open ports: %w", pod.Namespace, pod.Name, err)
+			}
+		}
+	}
+
 	if kubevirt.IsPodLiveMigratable(pod) {
 		return kubevirt.EnsureLocalZonePodAddressesToNodeRoute(oc.watchFactory, oc.nbClient, oc.lsManager, pod, ovntypes.DefaultNetworkName)
 	}
@@ -216,11 +234,7 @@ func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *kapi.Pod, ad
 	return nil
 }
 
-// ensureRemoteZonePod tries to set up remote zone pod bits required to interconnect it.
-//   - Adds the remote pod ips to the pod namespace address set for network policy and egress gw
-//
-// It returns nil on success and error on failure; failure indicates the pod set up should be retried later.
-func (oc *DefaultNetworkController) ensureRemoteZonePod(oldPod, pod *kapi.Pod, addPort bool) error {
+func (oc *DefaultNetworkController) ensureRemotePodIP(oldPod, pod *kapi.Pod, addPort bool) error {
 	if (addPort || (oldPod != nil && len(pod.Status.PodIPs) != len(oldPod.Status.PodIPs))) && !util.PodWantsHostNetwork(pod) {
 		podIfAddrs, err := util.GetPodCIDRsWithFullMask(pod, oc.NetInfo)
 		if err != nil {
@@ -231,6 +245,17 @@ func (oc *DefaultNetworkController) ensureRemoteZonePod(oldPod, pod *kapi.Pod, a
 		if err := oc.addRemotePodToNamespace(pod.Namespace, podIfAddrs); err != nil {
 			return fmt.Errorf("failed to add remote pod %s/%s to namespace: %w", pod.Namespace, pod.Name, err)
 		}
+	}
+	return nil
+}
+
+// ensureRemoteZonePod tries to set up remote zone pod bits required to interconnect it.
+//   - Adds the remote pod ips to the pod namespace address set for network policy and egress gw
+//
+// It returns nil on success and error on failure; failure indicates the pod set up should be retried later.
+func (oc *DefaultNetworkController) ensureRemoteZonePod(oldPod, pod *kapi.Pod, addPort bool) error {
+	if err := oc.ensureRemotePodIP(oldPod, pod, addPort); err != nil {
+		return err
 	}
 
 	//FIXME: Update comments & reduce code duplication.
@@ -315,12 +340,10 @@ func (oc *DefaultNetworkController) removeLocalZonePod(pod *kapi.Pod, portInfo *
 // It removes the remote pod ips from the namespace address set and if its an external gw pod, removes
 // its routes.
 func (oc *DefaultNetworkController) removeRemoteZonePod(pod *kapi.Pod) error {
-	if util.PodWantsHostNetwork(pod) {
-		// Delete the routes in the namespace associated with this remote pod if it was acting as an external GW
-		if err := oc.deletePodExternalGW(pod); err != nil {
-			return fmt.Errorf("unable to delete external gateway routes for remote pod %s: %w",
-				getPodNamespacedName(pod), err)
-		}
+	// Delete the routes in the namespace associated with this remote pod if it was acting as an external GW
+	if err := oc.deletePodExternalGW(pod); err != nil {
+		return fmt.Errorf("unable to delete external gateway routes for remote pod %s: %w",
+			getPodNamespacedName(pod), err)
 	}
 
 	// while this check is only intended for local pods, we also need it for
@@ -367,13 +390,6 @@ func (oc *DefaultNetworkController) WatchEgressNodes() error {
 	return err
 }
 
-// WatchEgressFwNodes starts the watching of nodes for Egress Firewall where
-// firewall rules may match nodes using a node selector
-func (oc *DefaultNetworkController) WatchEgressFwNodes() error {
-	_, err := oc.retryEgressFwNodes.WatchResource()
-	return err
-}
-
 // WatchEgressIP starts the watching of egressip resource and calls back the
 // appropriate handler logic. It also initiates the other dedicated resource
 // handlers for egress IP setup: namespaces, pods.
@@ -407,7 +423,7 @@ func (oc *DefaultNetworkController) syncNodeGateway(node *kapi.Node, hostSubnets
 	}
 
 	if l3GatewayConfig.Mode == config.GatewayModeDisabled {
-		if err := oc.gatewayCleanup(node.Name); err != nil {
+		if err := oc.newGatewayManager(node.Name).Cleanup(); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
 	} else if hostSubnets != nil {
@@ -418,7 +434,7 @@ func (oc *DefaultNetworkController) syncNodeGateway(node *kapi.Node, hostSubnets
 				return fmt.Errorf("failed to get host CIDRs for node: %s: %v", node.Name, err)
 			}
 		}
-		if err := oc.syncGatewayLogicalNetwork(node, l3GatewayConfig, hostSubnets, hostAddrs); err != nil {
+		if err := oc.syncDefaultGatewayLogicalNetwork(node, l3GatewayConfig, hostSubnets, hostAddrs); err != nil {
 			return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
 		}
 	}
@@ -440,15 +456,21 @@ func hostCIDRsChanged(oldNode, newNode *kapi.Node) bool {
 }
 
 // macAddressChanged() compares old annotations to new and returns true if something has changed.
-func macAddressChanged(oldNode, node *kapi.Node) bool {
-	oldMacAddress, _ := util.ParseNodeManagementPortMACAddress(oldNode)
-	macAddress, _ := util.ParseNodeManagementPortMACAddress(node)
+func macAddressChanged(oldNode, node *kapi.Node, netName string) bool {
+	oldMacAddress, _ := util.ParseNodeManagementPortMACAddresses(oldNode, netName)
+	macAddress, _ := util.ParseNodeManagementPortMACAddresses(node, netName)
 	return !bytes.Equal(oldMacAddress, macAddress)
 }
 
-func nodeSubnetChanged(oldNode, node *kapi.Node) bool {
-	oldSubnets, _ := util.ParseNodeHostSubnetAnnotation(oldNode, ovntypes.DefaultNetworkName)
-	newSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, ovntypes.DefaultNetworkName)
+func nodeSubnetChanged(oldNode, node *kapi.Node, netName string) bool {
+	oldSubnets, _ := util.ParseNodeHostSubnetAnnotation(oldNode, netName)
+	newSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, netName)
+	return !reflect.DeepEqual(oldSubnets, newSubnets)
+}
+
+func joinCIDRChanged(oldNode, node *kapi.Node, netName string) bool {
+	oldSubnets, _ := util.ParseNodeGatewayRouterJoinNetwork(oldNode, netName)
+	newSubnets, _ := util.ParseNodeGatewayRouterJoinNetwork(node, netName)
 	return !reflect.DeepEqual(oldSubnets, newSubnets)
 }
 
@@ -484,7 +506,6 @@ func shouldUpdateNode(node, oldNode *kapi.Node) (bool, error) {
 }
 
 func (oc *DefaultNetworkController) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
-	klog.Infof("Starting OVN Service Controller: Using Endpoint Slices")
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -507,13 +528,13 @@ func (oc *DefaultNetworkController) StartServiceController(wg *sync.WaitGroup, r
 func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssvc_zone.Controller, error) {
 	// If the EgressIP controller is enabled it will take care of creating the
 	// "no reroute" policies - we can pass "noop" functions to the egress service controller.
-	initClusterEgressPolicies := func(libovsdbclient.Client, addressset.AddressSetFactory, string) error { return nil }
-	ensureNodeNoReroutePolicies := func(libovsdbclient.Client, addressset.AddressSetFactory, string, listers.NodeLister) error {
+	initClusterEgressPolicies := func(libovsdbclient.Client, addressset.AddressSetFactory, string, string) error { return nil }
+	ensureNodeNoReroutePolicies := func(libovsdbclient.Client, addressset.AddressSetFactory, string, string, listers.NodeLister) error {
 		return nil
 	}
-	deleteLegacyDefaultNoRerouteNodePolicies := func(libovsdbclient.Client, string) error { return nil }
+	deleteLegacyDefaultNoRerouteNodePolicies := func(libovsdbclient.Client, string, string) error { return nil }
 	// used only when IC=true
-	createDefaultNodeRouteToExternal := func(libovsdbclient.Client, string) error { return nil }
+	createDefaultNodeRouteToExternal := func(libovsdbclient.Client, string, string) error { return nil }
 
 	if !config.OVNKubernetesFeature.EnableEgressIP {
 		initClusterEgressPolicies = InitClusterEgressPolicies
@@ -522,7 +543,7 @@ func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssv
 		createDefaultNodeRouteToExternal = libovsdbutil.CreateDefaultRouteToExternal
 	}
 
-	return egresssvc_zone.NewController(DefaultNetworkControllerName, oc.client, oc.nbClient, oc.addressSetFactory,
+	return egresssvc_zone.NewController(oc.NetInfo, DefaultNetworkControllerName, oc.client, oc.nbClient, oc.addressSetFactory,
 		initClusterEgressPolicies, ensureNodeNoReroutePolicies, deleteLegacyDefaultNoRerouteNodePolicies,
 		createDefaultNodeRouteToExternal,
 		oc.stopChan, oc.watchFactory.EgressServiceInformer(), oc.watchFactory.ServiceCoreInformer(),
@@ -534,6 +555,7 @@ func (oc *DefaultNetworkController) newANPController() error {
 	var err error
 	oc.anpController, err = anpcontroller.NewController(
 		DefaultNetworkControllerName,
+		oc.NetInfo,
 		oc.nbClient,
 		oc.kube.ANPClient,
 		oc.watchFactory.ANPInformer(),
@@ -545,6 +567,7 @@ func (oc *DefaultNetworkController) newANPController() error {
 		oc.isPodScheduledinLocalZone,
 		oc.zone,
 		oc.recorder,
+		oc.observManager,
 	)
 	return err
 }

@@ -5,10 +5,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/apimachinery/pkg/util/wait"
-	e2epodoutput "k8s.io/kubernetes/test/e2e/framework/pod/output"
-	e2eservice "k8s.io/kubernetes/test/e2e/framework/service"
 	"math/big"
 	"math/rand"
 	"net"
@@ -20,12 +16,17 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
+	e2epodoutput "k8s.io/kubernetes/test/e2e/framework/pod/output"
+	e2eservice "k8s.io/kubernetes/test/e2e/framework/service"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -221,7 +222,7 @@ spec:
 						true)
 					Expect(err).NotTo(HaveOccurred())
 
-					ovnkubeNodePods, err := f.ClientSet.CoreV1().Pods("ovn-kubernetes").List(context.TODO(), metav1.ListOptions{
+					ovnkubeNodePods, err := f.ClientSet.CoreV1().Pods(ovnNamespace).List(context.TODO(), metav1.ListOptions{
 						LabelSelector: "app=ovnkube-node",
 						FieldSelector: "spec.nodeName=" + workerNode.Name,
 					})
@@ -258,7 +259,7 @@ spec:
 							By("Setting rollbackNeeded to true")
 							rollbackNeeded = true
 
-							ovnkubeNodePods, err := f.ClientSet.CoreV1().Pods("ovn-kubernetes").List(context.TODO(), metav1.ListOptions{
+							ovnkubeNodePods, err := f.ClientSet.CoreV1().Pods(ovnNamespace).List(context.TODO(), metav1.ListOptions{
 								LabelSelector: "app=ovnkube-node",
 								FieldSelector: "spec.nodeName=" + workerNode.Name,
 							})
@@ -358,7 +359,7 @@ spec:
 							By("Setting rollbackNeeded to true")
 							rollbackNeeded = true
 
-							ovnkubeNodePods, err := f.ClientSet.CoreV1().Pods("ovn-kubernetes").List(context.TODO(), metav1.ListOptions{
+							ovnkubeNodePods, err := f.ClientSet.CoreV1().Pods(ovnNamespace).List(context.TODO(), metav1.ListOptions{
 								LabelSelector: "app=ovnkube-node",
 								FieldSelector: "spec.nodeName=" + workerNode.Name,
 							})
@@ -437,7 +438,7 @@ spec:
 					assignedNodePort = svc.Spec.Ports[0].NodePort
 
 					// find the ovn-kube node pod on this node
-					pods, err := f.ClientSet.CoreV1().Pods("ovn-kubernetes").List(context.TODO(), metav1.ListOptions{
+					pods, err := f.ClientSet.CoreV1().Pods(ovnNamespace).List(context.TODO(), metav1.ListOptions{
 						LabelSelector: "app=ovnkube-node",
 						FieldSelector: "spec.nodeName=" + workerNode.Name,
 					})
@@ -487,7 +488,7 @@ spec:
 							By("Setting rollbackNeeded to true")
 							rollbackNeeded = true
 
-							ovnkubeNodePods, err := f.ClientSet.CoreV1().Pods("ovn-kubernetes").List(context.TODO(), metav1.ListOptions{
+							ovnkubeNodePods, err := f.ClientSet.CoreV1().Pods(ovnNamespace).List(context.TODO(), metav1.ListOptions{
 								LabelSelector: "app=ovnkube-node",
 								FieldSelector: "spec.nodeName=" + workerNode.Name,
 							})
@@ -529,7 +530,6 @@ spec:
 							framework.ExpectNoError(err)
 						})
 				}
-
 			})
 		})
 	}
@@ -537,7 +537,7 @@ spec:
 	When("when MAC address changes", func() {
 		BeforeEach(func() {
 			By("Storing original MAC")
-			ovnkubeNodePods, err := f.ClientSet.CoreV1().Pods("ovn-kubernetes").List(context.TODO(), metav1.ListOptions{
+			ovnkubeNodePods, err := f.ClientSet.CoreV1().Pods(ovnNamespace).List(context.TODO(), metav1.ListOptions{
 				LabelSelector: "app=ovnkube-node",
 				FieldSelector: "spec.nodeName=" + workerNode.Name,
 			})
@@ -759,10 +759,7 @@ func findLastFreeSubnetIP(containerName, containerIP string, excludedIPs []strin
 
 	// We are using 172.18.0.0/16 for the docker subnet. We should be able to find something that we need here and
 	// that's not assigned.
-	broadcastIP, err := subnetBroadcastIP(net.IPNet{IP: parsedNetIPMask.IP, Mask: parsedNetIPMask.Mask})
-	if err != nil {
-		return "", err
-	}
+	broadcastIP := subnetBroadcastIP(net.IPNet{IP: parsedNetIPMask.IP, Mask: parsedNetIPMask.Mask})
 	decrementedIPNet := net.IPNet{IP: broadcastIP, Mask: parsedNetIPMask.Mask}
 
 	var isReachable bool
@@ -789,7 +786,7 @@ outer:
 }
 
 // subnetBroadcastIP returns the IP network's broadcast IP.
-func subnetBroadcastIP(ipnet net.IPNet) (net.IP, error) {
+func subnetBroadcastIP(ipnet net.IPNet) net.IP {
 	// For IPv4.
 	if ipnet.IP.To4() != nil {
 		// ip address in uint32
@@ -804,7 +801,7 @@ func subnetBroadcastIP(ipnet net.IPNet) (net.IP, error) {
 		broadcastIPBits := networkIPBits | invertedMaskBits
 		broadcastIP := make(net.IP, 4)
 		binary.BigEndian.PutUint32(broadcastIP, broadcastIPBits)
-		return broadcastIP, nil
+		return broadcastIP
 	}
 	// For IPv6. This conversion is actually easier, it follows the same principle as above.
 	byteIP := []byte(ipnet.IP)                // []byte representation of IP
@@ -815,7 +812,7 @@ func subnetBroadcastIP(ipnet net.IPNet) (net.IP, error) {
 		byteTargetIP[k] = byteIP[k]&byteMask[k] | invertedMask
 	}
 
-	return net.IP(byteTargetIP), nil
+	return net.IP(byteTargetIP)
 }
 
 // isAddressReachableFromContainer will curl towards targetIP. If the curl succeeds, return true. Otherwise, check the
@@ -863,7 +860,7 @@ func isAddressReachableFromContainer(containerName, targetIP string) (bool, erro
 
 func isOVNEncapIPReady(nodeName, nodeIP, ovnkubePodName string) bool {
 	framework.Logf("Verifying ovn-encap-ip for node %s", nodeName)
-	cmd := []string{"kubectl", "-n", "ovn-kubernetes", "exec", ovnkubePodName, "-c", "ovn-controller",
+	cmd := []string{"kubectl", "-n", ovnNamespace, "exec", ovnkubePodName, "-c", "ovn-controller",
 		"--", "ovs-vsctl", "get", "open_vswitch", ".", "external-ids:ovn-encap-ip"}
 	output, err := runCommand(cmd...)
 	if err != nil {

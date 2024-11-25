@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"regexp"
 	"strings"
 	"sync/atomic"
 
@@ -113,14 +114,14 @@ func (oc *DefaultNetworkController) handleHybridOverlayPort(node *kapi.Node, ann
 			Name:      portName,
 			Addresses: []string{portMAC.String()},
 		}
-		sw := nbdb.LogicalSwitch{Name: node.Name}
+		sw := nbdb.LogicalSwitch{Name: oc.GetNetworkScopedSwitchName(node.Name)}
 
 		err := libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.nbClient, &sw, &lsp)
 		if err != nil {
 			return fmt.Errorf("failed to add hybrid overlay port %+v for node %s: %w", lsp, node.Name, err)
 		}
 		for _, subnet := range subnets {
-			if err := libovsdbutil.UpdateNodeSwitchExcludeIPs(oc.nbClient, node.Name, subnet); err != nil {
+			if err := libovsdbutil.UpdateNodeSwitchExcludeIPs(oc.nbClient, oc.GetNetworkScopedK8sMgmtIntfName(node.Name), oc.GetNetworkScopedSwitchName(node.Name), node.Name, subnet); err != nil {
 				return err
 			}
 		}
@@ -140,7 +141,7 @@ func (oc *DefaultNetworkController) deleteHybridOverlayPort(node *kapi.Node) err
 	klog.Infof("Removing node %s hybrid overlay port", node.Name)
 	portName := util.GetHybridOverlayPortName(node.Name)
 	lsp := nbdb.LogicalSwitchPort{Name: portName}
-	sw := nbdb.LogicalSwitch{Name: node.Name}
+	sw := nbdb.LogicalSwitch{Name: oc.GetNetworkScopedSwitchName(node.Name)}
 	if err := libovsdbops.DeleteLogicalSwitchPorts(oc.nbClient, &sw, &lsp); err != nil {
 		return err
 	}
@@ -227,7 +228,7 @@ func (oc *DefaultNetworkController) setupHybridLRPolicySharedGw(nodeSubnets []*n
 			}
 
 			// Logic route policy to steer packet from external to nodePort service backed by non-ovnkube pods to hybrid overlay nodes
-			gwLRPIfAddrs, err := libovsdbutil.GetLRPAddrs(oc.nbClient, ovntypes.GWRouterToJoinSwitchPrefix+ovntypes.GWRouterPrefix+nodeName)
+			gwLRPIfAddrs, err := libovsdbutil.GetLRPAddrs(oc.nbClient, ovntypes.GWRouterToJoinSwitchPrefix+oc.GetNetworkScopedGWRouterName(nodeName))
 			if err != nil {
 				return err
 			}
@@ -294,7 +295,7 @@ func (oc *DefaultNetworkController) setupHybridLRPolicySharedGw(nodeSubnets []*n
 				},
 			}
 			if err := libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(oc.nbClient,
-				ovntypes.GWRouterPrefix+nodeName, &nodeGWRouterStaticRoutes,
+				oc.GetNetworkScopedGWRouterName(nodeName), &nodeGWRouterStaticRoutes,
 				func(item *nbdb.LogicalRouterStaticRoute) bool {
 					return item.IPPrefix == nodeGWRouterStaticRoutes.IPPrefix &&
 						item.ExternalIDs["name"] == nodeGWRouterStaticRoutes.ExternalIDs["name"] &&
@@ -302,7 +303,7 @@ func (oc *DefaultNetworkController) setupHybridLRPolicySharedGw(nodeSubnets []*n
 				}, &nodeGWRouterStaticRoutes.Nexthop); err != nil {
 				return fmt.Errorf("failed to add policy route static '%s %s' for on %s , error: %w",
 					nodeGWRouterStaticRoutes.IPPrefix, nodeGWRouterStaticRoutes.Nexthop,
-					ovntypes.GWRouterPrefix+nodeName, err)
+					oc.GetNetworkScopedGWRouterName(nodeName), err)
 			}
 			klog.Infof("Created hybrid overlay logical route static route at gateway router for node %s", nodeName)
 		}
@@ -323,10 +324,10 @@ func (oc *DefaultNetworkController) removeHybridLRPolicySharedGW(node *kapi.Node
 	// order is important here to not incur referential integrity violation
 	// first remove GR routes with a specific predicate, then remove the
 	// remaining ones from cluster router with a generic predicate
-	if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(oc.nbClient, ovntypes.GWRouterPrefix+nodeName, func(item *nbdb.LogicalRouterStaticRoute) bool {
+	if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(oc.nbClient, oc.GetNetworkScopedGWRouterName(nodeName), func(item *nbdb.LogicalRouterStaticRoute) bool {
 		return item.ExternalIDs["name"] == name+ovntypes.HybridOverlayGRSubfix
 	}); err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
-		return fmt.Errorf("failed to delete static route %s from %s, error: %w", name+"gr", ovntypes.GWRouterPrefix+nodeName, err)
+		return fmt.Errorf("failed to delete static route %s from %s, error: %w", name+"gr", oc.GetNetworkScopedGWRouterName(nodeName), err)
 	}
 	if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(oc.nbClient, ovntypes.OVNClusterRouter, func(item *nbdb.LogicalRouterStaticRoute) bool {
 		return strings.Contains(item.ExternalIDs["name"], name)
@@ -379,7 +380,7 @@ func (oc *DefaultNetworkController) allocateHybridOverlayDRIP(node *kapi.Node) e
 	return nil
 }
 
-func (oc *DefaultNetworkController) removeRoutesToHONodeSubnet(nodeSubnet *net.IPNet) error {
+func (oc *DefaultNetworkController) removeRoutesToHONodeSubnet(nodeName string, nodeSubnet *net.IPNet) error {
 	klog.Infof("Delete hybrid overlay policy and static routes to %s", nodeSubnet.String())
 
 	// Delete policy to HO subnet from the cluster router
@@ -395,7 +396,10 @@ func (oc *DefaultNetworkController) removeRoutesToHONodeSubnet(nodeSubnet *net.I
 		if !ok {
 			return false
 		}
-		if !strings.Contains(name, ovntypes.HybridSubnetPrefix) || strings.Contains(name, ovntypes.HybridOverlayGRSubfix) {
+		// we delete all the static routes with name match 'hybrid-subnet-<ovn-node-name>:<ho-node-name>'
+		pattern := fmt.Sprintf("^%s.+:%s$", ovntypes.HybridSubnetPrefix, nodeName)
+		re, _ := regexp.Compile(pattern)
+		if !re.MatchString(name) {
 			return false
 		}
 		return item.IPPrefix == nodeSubnet.String() && item.Policy == nil
@@ -411,13 +415,13 @@ func (oc *DefaultNetworkController) removeRoutesToHONodeSubnet(nodeSubnet *net.I
 	for _, node := range nodes {
 		node := *node
 		// Check existence of Gateway Router before removing the static route from it.
-		if _, err := libovsdbops.GetLogicalRouter(oc.nbClient, &nbdb.LogicalRouter{Name: ovntypes.GWRouterPrefix + node.Name}); err != nil {
+		if _, err := libovsdbops.GetLogicalRouter(oc.nbClient, &nbdb.LogicalRouter{Name: oc.GetNetworkScopedGWRouterName(node.Name)}); err != nil {
 			if err == libovsdbclient.ErrNotFound {
 				continue
 			}
-			return fmt.Errorf("failed to get logical router %s, error: %w", ovntypes.GWRouterPrefix+node.Name, err)
+			return fmt.Errorf("failed to get logical router %s, error: %w", oc.GetNetworkScopedGWRouterName(node.Name), err)
 		}
-		if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(oc.nbClient, ovntypes.GWRouterPrefix+node.Name, func(item *nbdb.LogicalRouterStaticRoute) bool {
+		if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(oc.nbClient, oc.GetNetworkScopedGWRouterName(node.Name), func(item *nbdb.LogicalRouterStaticRoute) bool {
 			name, ok := item.ExternalIDs["name"]
 			if !ok {
 				return false
@@ -427,7 +431,7 @@ func (oc *DefaultNetworkController) removeRoutesToHONodeSubnet(nodeSubnet *net.I
 			}
 			return item.IPPrefix == nodeSubnet.String() && item.Policy == nil
 		}); err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
-			return fmt.Errorf("failed to delete static route to %s from %s, error: %w", nodeSubnet, ovntypes.GWRouterPrefix+node.Name, err)
+			return fmt.Errorf("failed to delete static route to %s from %s, error: %w", nodeSubnet, oc.GetNetworkScopedGWRouterName(node.Name), err)
 		}
 	}
 	return nil

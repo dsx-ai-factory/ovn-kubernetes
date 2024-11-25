@@ -38,8 +38,8 @@ import (
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
-	"github.com/onsi/ginkgo"
-	"github.com/onsi/ginkgo/extensions/table"
+	"github.com/onsi/ginkgo/v2"
+
 	"github.com/onsi/gomega"
 	"github.com/vishvananda/netlink"
 )
@@ -229,6 +229,29 @@ func setupFakeTestNode(nodeInitialState nodeConfig) (ns.NetNS, cleanupFn, error)
 	return testNS, cleanupFn, nil
 }
 
+func createVRFAndEnslaveLink(testNS ns.NetNS, linkName, vrfName string, vrfTable uint32) error {
+	vrfLink := &netlink.Vrf{
+		LinkAttrs: netlink.LinkAttrs{Name: vrfName},
+		Table:     vrfTable,
+	}
+	return testNS.Do(func(netNS ns.NetNS) error {
+		if err := netlink.LinkAdd(vrfLink); err != nil {
+			return fmt.Errorf("failed to create VRF link %s and table ID %d: %v", vrfName, vrfTable, err)
+		}
+		if err := netlink.LinkSetUp(vrfLink); err != nil {
+			return fmt.Errorf("failed to set VRF link %s up: %v", vrfName, err)
+		}
+		slaveLink, err := netlink.LinkByName(linkName)
+		if err != nil {
+			return fmt.Errorf("failed to get link %s: %v", linkName, err)
+		}
+		if err = netlink.LinkSetMaster(slaveLink, vrfLink); err != nil {
+			return fmt.Errorf("failed to set link %s master to link %s: %v", linkName, vrfName, err)
+		}
+		return nil
+	})
+}
+
 func initController(namespaces []corev1.Namespace, pods []corev1.Pod, egressIPs []egressipv1.EgressIP, node nodeConfig, v4, v6, createEIPAnnot bool) (*Controller, *egressipfake.Clientset, error) {
 
 	kubeClient := fake.NewSimpleClientset(&corev1.NodeList{Items: []corev1.Node{getNodeObj(node, createEIPAnnot)}},
@@ -390,7 +413,7 @@ func runSubControllers(testNS ns.NetNS, c *Controller, wg *sync.WaitGroup, stopC
 
 // FIXME(mk) - Within GH VM, if I need to create a new NetNs. I see the following error:
 // "failed to create new network namespace: mount --make-rshared /run/user/1001/netns failed: "operation not permitted""
-var _ = table.DescribeTable("EgressIP selectors",
+var _ = ginkgo.DescribeTable("EgressIP selectors",
 	func(expectedEIPConfigs []eipConfig, pods []corev1.Pod, namespaces []corev1.Namespace, nodeConfig nodeConfig) {
 		defer ginkgo.GinkgoRecover()
 		if os.Getenv("NOROOT") == "TRUE" {
@@ -475,7 +498,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 						if err != nil {
 							return err
 						}
-						filter, mask := filterRouteByLinkTable(link.Attrs().Index, getRouteTableID(link.Attrs().Index))
+						filter, mask := filterRouteByLinkTable(link.Attrs().Index, util.CalculateRouteTableID(link.Attrs().Index))
 						existingRoutes, err := netlink.RouteListFiltered(netlink.FAMILY_ALL, filter, mask)
 						if err != nil {
 							return fmt.Errorf("failed to list routes for link %q: %v", expectedEIPConfig.inf, err)
@@ -617,7 +640,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 					if err != nil {
 						return err
 					}
-					filter, mask := filterRouteByLinkTable(link.Attrs().Index, getRouteTableID(link.Attrs().Index))
+					filter, mask := filterRouteByLinkTable(link.Attrs().Index, util.CalculateRouteTableID(link.Attrs().Index))
 					existingRoutes, err := netlink.RouteListFiltered(netlink.FAMILY_ALL, filter, mask)
 					if err != nil {
 						return err
@@ -679,7 +702,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 		gomega.Expect(cleanupControllerFn()).ShouldNot(gomega.HaveOccurred())
 		gomega.Expect(cleanupNodeFn()).ShouldNot(gomega.HaveOccurred())
 	},
-	table.Entry("configures nothing when EIPs dont select anything",
+	ginkgo.Entry("configures nothing when EIPs dont select anything",
 		[]eipConfig{
 			{
 				eIP: newEgressIP(egressIP1Name, egressIP1IPV4, node1Name, namespace1Label, egressPodLabel),
@@ -692,19 +715,19 @@ var _ = table.DescribeTable("EgressIP selectors",
 				{dummyLink2Name, []address{{dummy2IPv4CIDR, false}}}},
 		},
 	),
-	table.Entry("configures one IPv4 EIP and one Pod",
+	ginkgo.Entry("configures one IPv4 EIP and one Pod",
 		[]eipConfig{
 			{
 				newEgressIP(egressIP1Name, egressIP1IPV4, node1Name, namespace1Label, egressPodLabel),
 				[]netlink.Route{getDefaultIPv4Route(getLinkIndex(dummyLink1Name)),
-					getDstWithSrcRoute(getLinkIndex(dummyLink1Name), dummy1IPv4CIDRNetwork, dummy1IPv4)},
+					getDstRoute(getLinkIndex(dummyLink1Name), dummy1IPv4CIDRNetwork)},
 				getNetlinkAddr(egressIP1IPV4, egressIPv4Mask),
 				dummyLink1Name,
 				[]testPodConfig{
 					{
 						pod1Name,
 						getIPTableMasqRule(pod1IPv4CIDR, dummyLink1Name, egressIP1IPV4),
-						getRule(pod1IPv4, getRouteTableID(getLinkIndex(dummyLink1Name))),
+						getRule(pod1IPv4, util.CalculateRouteTableID(getLinkIndex(dummyLink1Name))),
 					},
 				},
 			},
@@ -716,7 +739,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 				{dummyLink2Name, []address{{dummy2IPv4CIDR, false}}}},
 		},
 	),
-	table.Entry("configures one IPv6 EIP and one Pod",
+	ginkgo.Entry("configures one IPv6 EIP and one Pod",
 		[]eipConfig{
 			{
 				newEgressIP(egressIP1Name, egressIP1IPV6Compressed, node1Name, namespace1Label, egressPodLabel),
@@ -729,7 +752,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 					{
 						pod1Name,
 						getIPTableMasqRule(pod1IPv6CIDRCompressed, dummyLink1Name, egressIP1IPV6Compressed),
-						getRule(pod1IPv6Compressed, getRouteTableID(getLinkIndex(dummyLink1Name))),
+						getRule(pod1IPv6Compressed, util.CalculateRouteTableID(getLinkIndex(dummyLink1Name))),
 					},
 				},
 			},
@@ -741,7 +764,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 				{dummyLink2Name, []address{{dummy2IPv6CIDRCompressed, false}}}},
 		},
 	),
-	table.Entry("configures one uncompressed IPv6 EIP and one Pod",
+	ginkgo.Entry("configures one uncompressed IPv6 EIP and one Pod",
 		[]eipConfig{
 			{
 				newEgressIP(egressIP1Name, egressIP1IPV6Uncompressed, node1Name, namespace1Label, egressPodLabel),
@@ -754,7 +777,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 					{
 						pod1Name,
 						getIPTableMasqRule(pod1IPv6CIDRCompressed, dummyLink1Name, egressIP1IPV6Compressed),
-						getRule(pod1IPv6Compressed, getRouteTableID(getLinkIndex(dummyLink1Name))),
+						getRule(pod1IPv6Compressed, util.CalculateRouteTableID(getLinkIndex(dummyLink1Name))),
 					},
 				},
 			},
@@ -766,25 +789,25 @@ var _ = table.DescribeTable("EgressIP selectors",
 				{dummyLink2Name, []address{{dummy2IPv6CIDRCompressed, false}}}},
 		},
 	),
-	table.Entry("configures one IPv4 EIP and multiple pods",
+	ginkgo.Entry("configures one IPv4 EIP and multiple pods",
 		// Test pod and namespace selection -
 		[]eipConfig{
 			{
 				newEgressIP(egressIP1Name, egressIP1IPV4, node1Name, namespace1Label, egressPodLabel),
 				[]netlink.Route{getDefaultIPv4Route(getLinkIndex(dummyLink1Name)),
-					getDstWithSrcRoute(getLinkIndex(dummyLink1Name), dummy1IPv4CIDRNetwork, dummy1IPv4)},
+					getDstRoute(getLinkIndex(dummyLink1Name), dummy1IPv4CIDRNetwork)},
 				getNetlinkAddr(egressIP1IPV4, egressIPv4Mask),
 				dummyLink1Name,
 				[]testPodConfig{
 					{
 						pod1Name,
 						getIPTableMasqRule(pod1IPv4CIDR, dummyLink1Name, egressIP1IPV4),
-						getRule(pod1IPv4, getRouteTableID(getLinkIndex(dummyLink1Name))),
+						getRule(pod1IPv4, util.CalculateRouteTableID(getLinkIndex(dummyLink1Name))),
 					},
 					{
 						pod2Name,
 						getIPTableMasqRule(pod2IPv4CIDR, dummyLink1Name, egressIP1IPV4),
-						getRule(pod2IPv4, getRouteTableID(getLinkIndex(dummyLink1Name))),
+						getRule(pod2IPv4, util.CalculateRouteTableID(getLinkIndex(dummyLink1Name))),
 					},
 				},
 			},
@@ -798,7 +821,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 				{dummyLink2Name, []address{{dummy2IPv4CIDR, false}}}},
 		},
 	),
-	table.Entry("configures one IPv6 EIP and multiple pods",
+	ginkgo.Entry("configures one IPv6 EIP and multiple pods",
 		// Test pod and namespace selection -
 		[]eipConfig{
 			{
@@ -812,12 +835,12 @@ var _ = table.DescribeTable("EgressIP selectors",
 					{
 						pod1Name,
 						getIPTableMasqRule(pod1IPv6CIDRCompressed, dummyLink1Name, egressIP1IPV6Compressed),
-						getRule(pod1IPv6Compressed, getRouteTableID(getLinkIndex(dummyLink1Name))),
+						getRule(pod1IPv6Compressed, util.CalculateRouteTableID(getLinkIndex(dummyLink1Name))),
 					},
 					{
 						pod2Name,
 						getIPTableMasqRule(pod2IPv6CIDRCompressed, dummyLink1Name, egressIP1IPV6Compressed),
-						getRule(pod2IPv6Compressed, getRouteTableID(getLinkIndex(dummyLink1Name))),
+						getRule(pod2IPv6Compressed, util.CalculateRouteTableID(getLinkIndex(dummyLink1Name))),
 					},
 				},
 			},
@@ -831,24 +854,24 @@ var _ = table.DescribeTable("EgressIP selectors",
 				{dummyLink2Name, []address{{dummy2IPv6CIDRCompressed, false}}}},
 		},
 	),
-	table.Entry("configures one IPv4 EIP and multiple namespaces and multiple pods",
+	ginkgo.Entry("configures one IPv4 EIP and multiple namespaces and multiple pods",
 		[]eipConfig{
 			{
 				newEgressIP(egressIP1Name, egressIP1IPV4, node1Name, namespace1Label, egressPodLabel),
 				[]netlink.Route{getDefaultIPv4Route(getLinkIndex(dummyLink1Name)),
-					getDstWithSrcRoute(getLinkIndex(dummyLink1Name), dummy1IPv4CIDRNetwork, dummy1IPv4)},
+					getDstRoute(getLinkIndex(dummyLink1Name), dummy1IPv4CIDRNetwork)},
 				getNetlinkAddr(egressIP1IPV4, egressIPv4Mask),
 				dummyLink1Name,
 				[]testPodConfig{
 					{
 						pod1Name,
 						getIPTableMasqRule(pod1IPv4CIDR, dummyLink1Name, egressIP1IPV4),
-						getRule(pod1IPv4, getRouteTableID(getLinkIndex(dummyLink1Name))),
+						getRule(pod1IPv4, util.CalculateRouteTableID(getLinkIndex(dummyLink1Name))),
 					},
 					{
 						pod2Name,
 						getIPTableMasqRule(pod2IPv4CIDR, dummyLink1Name, egressIP1IPV4),
-						getRule(pod2IPv4, getRouteTableID(getLinkIndex(dummyLink1Name))),
+						getRule(pod2IPv4, util.CalculateRouteTableID(getLinkIndex(dummyLink1Name))),
 					},
 				},
 			},
@@ -864,7 +887,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 				{dummyLink2Name, []address{{dummy2IPv4CIDR, false}}}},
 		},
 	),
-	table.Entry("configures one IPv6 EIP and multiple namespaces and multiple pods",
+	ginkgo.Entry("configures one IPv6 EIP and multiple namespaces and multiple pods",
 		[]eipConfig{
 			{
 				newEgressIP(egressIP1Name, egressIP1IPV6Compressed, node1Name, namespace1Label, egressPodLabel),
@@ -876,12 +899,12 @@ var _ = table.DescribeTable("EgressIP selectors",
 				[]testPodConfig{
 					{pod1Name,
 						getIPTableMasqRule(pod1IPv6CIDRCompressed, dummyLink1Name, egressIP1IPV6Compressed),
-						getRule(pod1IPv6Compressed, getRouteTableID(getLinkIndex(dummyLink1Name))),
+						getRule(pod1IPv6Compressed, util.CalculateRouteTableID(getLinkIndex(dummyLink1Name))),
 					},
 					{
 						pod2Name,
 						getIPTableMasqRule(pod2IPv6CIDRCompressed, dummyLink1Name, egressIP1IPV6Compressed),
-						getRule(pod2IPv6Compressed, getRouteTableID(getLinkIndex(dummyLink1Name))),
+						getRule(pod2IPv6Compressed, util.CalculateRouteTableID(getLinkIndex(dummyLink1Name))),
 					},
 				},
 			},
@@ -897,43 +920,43 @@ var _ = table.DescribeTable("EgressIP selectors",
 				{dummyLink2Name, []address{{dummy2IPv6CIDRCompressed, false}}}},
 		},
 	),
-	table.Entry("configures multiple IPv4 EIPs on different links, multiple namespaces and multiple pods",
+	ginkgo.Entry("configures multiple IPv4 EIPs on different links, multiple namespaces and multiple pods",
 		[]eipConfig{
 			{
 				newEgressIP(egressIP1Name, egressIP1IPV4, node1Name, namespace1Label, egressPodLabel),
 				[]netlink.Route{getDefaultIPv4Route(getLinkIndex(dummyLink1Name)),
-					getDstWithSrcRoute(getLinkIndex(dummyLink1Name), dummy1IPv4CIDRNetwork, dummy1IPv4)},
+					getDstRoute(getLinkIndex(dummyLink1Name), dummy1IPv4CIDRNetwork)},
 				getNetlinkAddr(egressIP1IPV4, egressIPv4Mask),
 				dummyLink1Name,
 				[]testPodConfig{
 					{
 						pod1Name,
 						getIPTableMasqRule(pod1IPv4CIDR, dummyLink1Name, egressIP1IPV4),
-						getRule(pod1IPv4, getRouteTableID(getLinkIndex(dummyLink1Name))),
+						getRule(pod1IPv4, util.CalculateRouteTableID(getLinkIndex(dummyLink1Name))),
 					},
 					{
 						pod2Name,
 						getIPTableMasqRule(pod2IPv4CIDR, dummyLink1Name, egressIP1IPV4),
-						getRule(pod2IPv4, getRouteTableID(getLinkIndex(dummyLink1Name))),
+						getRule(pod2IPv4, util.CalculateRouteTableID(getLinkIndex(dummyLink1Name))),
 					},
 				},
 			},
 			{
 				newEgressIP(egressIP2Name, egressIP2IPV4, node1Name, namespace2Label, egressPodLabel),
 				[]netlink.Route{getDefaultIPv4Route(getLinkIndex(dummyLink2Name)),
-					getDstWithSrcRoute(getLinkIndex(dummyLink2Name), dummy2IPv4CIDRNetwork, dummy2IPv4)},
+					getDstRoute(getLinkIndex(dummyLink2Name), dummy2IPv4CIDRNetwork)},
 				getNetlinkAddr(egressIP2IPV4, egressIPv4Mask),
 				dummyLink2Name,
 				[]testPodConfig{
 					{
 						pod3Name,
 						getIPTableMasqRule(pod3IPv4CIDR, dummyLink2Name, egressIP2IPV4),
-						getRule(pod3IPv4, getRouteTableID(getLinkIndex(dummyLink2Name))),
+						getRule(pod3IPv4, util.CalculateRouteTableID(getLinkIndex(dummyLink2Name))),
 					},
 					{
 						pod4Name,
 						getIPTableMasqRule(pod4IPv4CIDR, dummyLink2Name, egressIP2IPV4),
-						getRule(pod4IPv4, getRouteTableID(getLinkIndex(dummyLink2Name))),
+						getRule(pod4IPv4, util.CalculateRouteTableID(getLinkIndex(dummyLink2Name))),
 					},
 				},
 			},
@@ -951,7 +974,7 @@ var _ = table.DescribeTable("EgressIP selectors",
 				{dummyLink4Name, []address{{dummy4IPv4CIDR, false}}}},
 		},
 	),
-	table.Entry("configures multiple IPv6 EIPs on different links, multiple namespaces and multiple pods",
+	ginkgo.Entry("configures multiple IPv6 EIPs on different links, multiple namespaces and multiple pods",
 		[]eipConfig{
 			{
 				newEgressIP(egressIP1Name, egressIP1IPV6Compressed, node1Name, namespace1Label, egressPodLabel),
@@ -964,12 +987,12 @@ var _ = table.DescribeTable("EgressIP selectors",
 					{
 						pod1Name,
 						getIPTableMasqRule(pod1IPv6CIDRCompressed, dummyLink1Name, egressIP1IPV6Compressed),
-						getRule(pod1IPv6Compressed, getRouteTableID(getLinkIndex(dummyLink1Name))),
+						getRule(pod1IPv6Compressed, util.CalculateRouteTableID(getLinkIndex(dummyLink1Name))),
 					},
 					{
 						pod2Name,
 						getIPTableMasqRule(pod2IPv6CIDRCompressed, dummyLink1Name, egressIP1IPV6Compressed),
-						getRule(pod2IPv6Compressed, getRouteTableID(getLinkIndex(dummyLink1Name))),
+						getRule(pod2IPv6Compressed, util.CalculateRouteTableID(getLinkIndex(dummyLink1Name))),
 					},
 				},
 			},
@@ -984,12 +1007,12 @@ var _ = table.DescribeTable("EgressIP selectors",
 					{
 						pod3Name,
 						getIPTableMasqRule(pod3IPv6CIDRCompressed, dummyLink2Name, egressIP2IPV6Compressed),
-						getRule(pod3IPv6Compressed, getRouteTableID(getLinkIndex(dummyLink2Name))),
+						getRule(pod3IPv6Compressed, util.CalculateRouteTableID(getLinkIndex(dummyLink2Name))),
 					},
 					{
 						pod4Name,
 						getIPTableMasqRule(pod4IPv6CIDRCompressed, dummyLink2Name, egressIP2IPV6Compressed),
-						getRule(pod4IPv6Compressed, getRouteTableID(getLinkIndex(dummyLink2Name))),
+						getRule(pod4IPv6Compressed, util.CalculateRouteTableID(getLinkIndex(dummyLink2Name))),
 					},
 				},
 			},
@@ -1070,7 +1093,56 @@ var _ = ginkgo.Describe("label to annotations migration", func() {
 	})
 })
 
-var _ = table.DescribeTable("repair node", func(expectedStateFollowingClean []eipConfig,
+var _ = ginkgo.Describe("VRF", func() {
+	ginkgo.It("copies routes from the VRF routing table for a link enslaved by VRF device", func() {
+		defer ginkgo.GinkgoRecover()
+		if os.Getenv("NOROOT") == "TRUE" {
+			ginkgo.Skip("Test requires root privileges")
+		}
+		if !commandExists("iptables") {
+			ginkgo.Skip("Test requires iptables tools to be available in PATH")
+		}
+		vrfName := "vrf-dummy"
+		var vrfTable uint32 = 55555
+		ginkgo.By("setup link")
+		nodeConfig := nodeConfig{routes: []netlink.Route{}, linkConfigs: []linkConfig{
+			{dummyLink1Name, []address{{dummy1IPv4CIDR, false}}},
+		}}
+		testNS, cleanupNodeFn, err := setupFakeTestNode(nodeConfig)
+		gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "fake node setup should succeed")
+		ginkgo.By("create VRF and add link")
+		gomega.Expect(createVRFAndEnslaveLink(testNS, dummyLink1Name, vrfName, vrfTable)).Should(gomega.Succeed())
+		ginkgo.By("add route to routing table associated with VRF")
+		vrfRoute := getDstRouteForTable(getLinkIndex(dummyLink1Name), int(vrfTable), dummy3IPv4CIDR)
+		gomega.Expect(testNS.Do(func(netNS ns.NetNS) error {
+			return netlink.RouteAdd(&vrfRoute)
+		})).Should(gomega.Succeed())
+		egressIPList := []egressipv1.EgressIP{*newEgressIP(egressIP1Name, egressIP1IPV4, node1Name, namespace1Label, egressPodLabel)}
+		pods := []corev1.Pod{newPodWithLabels(namespace1, pod1Name, node1Name, pod1IPv4, egressPodLabel)}
+		namespaces := []corev1.Namespace{newNamespaceWithLabels(namespace1, namespace1Label)}
+		ginkgo.By("start controller")
+		c, _, err := initController(namespaces, pods, egressIPList, nodeConfig, true, false, true)
+		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+		cleanupControllerFn, err := runController(testNS, c)
+		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+		ginkgo.By("ensure route previously added is copied to new routing table")
+		eipTable := util.CalculateRouteTableID(getLinkIndex(dummyLink1Name))
+		gomega.Eventually(func() bool {
+			eipRoutes, err := getRoutesFromTable(testNS, eipTable, netlink.FAMILY_V4)
+			gomega.Expect(err).Should(gomega.Succeed())
+			for _, eipRoute := range eipRoutes {
+				if eipRoute.Dst.String() == vrfRoute.Dst.String() {
+					return true
+				}
+			}
+			return false
+		}).Should(gomega.BeTrue(), "route should be copied to new routing table")
+		gomega.Expect(cleanupControllerFn()).ShouldNot(gomega.HaveOccurred())
+		gomega.Expect(cleanupNodeFn()).ShouldNot(gomega.HaveOccurred())
+	})
+})
+
+var _ = ginkgo.DescribeTable("repair node", func(expectedStateFollowingClean []eipConfig,
 	nodeConfigsBeforeRepair nodeConfig, pods []corev1.Pod, namespaces []corev1.Namespace) {
 	// Test using root and a test netns because we want to test between netlink lib
 	// and the egress IP components (link manager, route manager)
@@ -1165,7 +1237,7 @@ var _ = table.DescribeTable("repair node", func(expectedStateFollowingClean []ei
 	close(stopCh)
 	wg.Wait()
 	gomega.Expect(cleanupNodeFn()).ShouldNot(gomega.HaveOccurred())
-}, table.Entry("should not fail when node is clean and nothing to apply",
+}, ginkgo.Entry("should not fail when node is clean and nothing to apply",
 	[]eipConfig{},
 	nodeConfig{
 		linkConfigs: []linkConfig{
@@ -1174,7 +1246,7 @@ var _ = table.DescribeTable("repair node", func(expectedStateFollowingClean []ei
 	},
 	[]corev1.Pod{newPodWithLabels(namespace1, pod1Name, node1Name, pod1IPv4, map[string]string{})},
 	[]corev1.Namespace{newNamespaceWithLabels(namespace1, namespace1Label)}),
-	table.Entry("should remove stale route with no assigned IP",
+	ginkgo.Entry("should remove stale route with no assigned IP",
 		[]eipConfig{},
 		nodeConfig{ // node state before repair
 			routes: []netlink.Route{getDefaultIPv4Route(getLinkIndex(dummyLink1Name))},
@@ -1184,7 +1256,7 @@ var _ = table.DescribeTable("repair node", func(expectedStateFollowingClean []ei
 		},
 		[]corev1.Pod{},
 		[]corev1.Namespace{}),
-	table.Entry("should remove stale address",
+	ginkgo.Entry("should remove stale address",
 		[]eipConfig{},
 		nodeConfig{ // node state before repair
 			linkConfigs: []linkConfig{
@@ -1193,7 +1265,7 @@ var _ = table.DescribeTable("repair node", func(expectedStateFollowingClean []ei
 		},
 		[]corev1.Pod{},
 		[]corev1.Namespace{}),
-	table.Entry("should remove stale route and EIP address on wrong link",
+	ginkgo.Entry("should remove stale route and EIP address on wrong link",
 		[]eipConfig{
 			{
 				eIP: newEgressIP(egressIP1Name, egressIP1IPV4, node1Name, namespace1Label, egressPodLabel),
@@ -1208,7 +1280,7 @@ var _ = table.DescribeTable("repair node", func(expectedStateFollowingClean []ei
 		},
 		[]corev1.Pod{},
 		[]corev1.Namespace{}),
-	table.Entry("should remove stale iptables rules",
+	ginkgo.Entry("should remove stale iptables rules",
 		[]eipConfig{
 			{
 				eIP: newEgressIP(egressIP1Name, egressIP1IPV4, node1Name, namespace1Label, egressPodLabel),
@@ -1220,7 +1292,7 @@ var _ = table.DescribeTable("repair node", func(expectedStateFollowingClean []ei
 		},
 		[]corev1.Pod{},
 		[]corev1.Namespace{}),
-	table.Entry("should remove stale iptables rules but not valid rules",
+	ginkgo.Entry("should remove stale iptables rules but not valid rules",
 		[]eipConfig{
 			{
 				eIP: newEgressIP(egressIP1Name, egressIP1IPV4, node1Name, namespace1Label, egressPodLabel),
@@ -1415,7 +1487,7 @@ func getRoutesForLinkFromTable(testNS ns.NetNS, linkName string) ([]netlink.Rout
 		if err != nil {
 			return err
 		}
-		filterRoute, filterMask := filterRouteByTable(link.Attrs().Index, getRouteTableID(link.Attrs().Index))
+		filterRoute, filterMask := filterRouteByLinkTable(link.Attrs().Index, util.CalculateRouteTableID(link.Attrs().Index))
 		routes, err = netlink.RouteListFiltered(netlink.FAMILY_ALL, filterRoute, filterMask)
 		if err != nil {
 			return err
@@ -1425,12 +1497,25 @@ func getRoutesForLinkFromTable(testNS ns.NetNS, linkName string) ([]netlink.Rout
 	return routes, err
 }
 
-func filterRouteByTable(linkIndex, table int) (*netlink.Route, uint64) {
+func getRoutesFromTable(testNS ns.NetNS, table, family int) ([]netlink.Route, error) {
+	var err error
+	var routes []netlink.Route
+	err = testNS.Do(func(netNS ns.NetNS) error {
+		filterRoute, filterMask := filterRouteByTable(table)
+		routes, err = netlink.RouteListFiltered(family, filterRoute, filterMask)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	return routes, err
+}
+
+func filterRouteByTable(table int) (*netlink.Route, uint64) {
 	return &netlink.Route{
-			LinkIndex: linkIndex,
-			Table:     table,
+			Table: table,
 		},
-		netlink.RT_FILTER_OIF | netlink.RT_FILTER_TABLE
+		netlink.RT_FILTER_TABLE
 }
 
 func newEgressIPMeta(name string) metav1.ObjectMeta {
@@ -1540,20 +1625,25 @@ func isIPTableRuleArgIPV6(ruleArgs []string) bool {
 
 func getDefaultIPv4Route(linkIndex int) netlink.Route {
 	// dst is nil because netlink represents a default route as nil
-	return netlink.Route{LinkIndex: linkIndex, Table: getRouteTableID(linkIndex), Dst: defaultV4AnyCIDR}
+	return netlink.Route{LinkIndex: linkIndex, Table: util.CalculateRouteTableID(linkIndex), Dst: defaultV4AnyCIDR}
 }
 
 func getDefaultIPv6Route(linkIndex int) netlink.Route {
 	// dst is nil because netlink represents a default route as nil
-	return netlink.Route{LinkIndex: linkIndex, Table: getRouteTableID(linkIndex), Dst: defaultV6AnyCIDR}
+	return netlink.Route{LinkIndex: linkIndex, Table: util.CalculateRouteTableID(linkIndex), Dst: defaultV6AnyCIDR}
 }
 
 func getDstRoute(linkIndex int, dst string) netlink.Route {
+	return getDstRouteForTable(linkIndex, util.CalculateRouteTableID(linkIndex), dst)
+
+}
+
+func getDstRouteForTable(linkIndex, table int, dst string) netlink.Route {
 	_, dstIPNet, err := net.ParseCIDR(dst)
 	if err != nil {
 		panic(err.Error())
 	}
-	return netlink.Route{LinkIndex: linkIndex, Dst: dstIPNet, Table: getRouteTableID(linkIndex)}
+	return netlink.Route{LinkIndex: linkIndex, Dst: dstIPNet, Table: table}
 }
 
 func getDstWithSrcRoute(linkIndex int, dst, src string) netlink.Route {
@@ -1565,11 +1655,11 @@ func getDstWithSrcRoute(linkIndex int, dst, src string) netlink.Route {
 	if len(ip) == 0 {
 		panic("invalid src IP")
 	}
-	return netlink.Route{LinkIndex: linkIndex, Dst: dstIPNet, Src: ip, Table: getRouteTableID(linkIndex)}
+	return netlink.Route{LinkIndex: linkIndex, Dst: dstIPNet, Src: ip, Table: util.CalculateRouteTableID(linkIndex)}
 }
 
 func getLinkLocalRoute(linkIndex int) netlink.Route {
-	return netlink.Route{LinkIndex: linkIndex, Dst: linkLocalCIDR, Table: getRouteTableID(linkIndex)}
+	return netlink.Route{LinkIndex: linkIndex, Dst: linkLocalCIDR, Table: util.CalculateRouteTableID(linkIndex)}
 }
 
 func getNetlinkAddr(ip, netmask string) *netlink.Addr {

@@ -5,16 +5,16 @@ import (
 	"net"
 	"strings"
 
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/stretchr/testify/mock"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
-	adminpolicybasedrouteclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
 	factorymocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	kubemocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	linkMock "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
 	coreinformermocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/informers/core/v1"
@@ -98,7 +98,11 @@ var _ = Describe("Node DPU tests", func() {
 	var podLister v1mocks.PodLister
 	var podNamespaceLister v1mocks.PodNamespaceLister
 	var clientset *cni.ClientSet
+<<<<<<< HEAD
 	var fakeIP string
+=======
+	var routeManager *routemanager.Controller
+>>>>>>> ffddd06ec12e43af0397bca8e36adedf8df441b1
 
 	origSriovnetOps := util.GetSriovnetOps()
 	origNetlinkOps := util.GetNetLinkOps()
@@ -115,11 +119,17 @@ var _ = Describe("Node DPU tests", func() {
 		Expect(err).NotTo(HaveOccurred())
 		err = cni.SetExec(execMock)
 		Expect(err).NotTo(HaveOccurred())
+		routeManager = routemanager.NewController()
+		Expect(routeManager).NotTo(BeNil())
 
-		apbExternalRouteClient := adminpolicybasedrouteclient.NewSimpleClientset()
 		factoryMock = factorymocks.NodeWatchFactory{}
-		cnnci := newCommonNodeNetworkControllerInfo(nil, &kubeOVNMock, apbExternalRouteClient, &factoryMock, nil, "", "", "", []string{"00:00:00:01:02:03"})
+<<<<<<< HEAD
+		cnnci := newCommonNodeNetworkControllerInfo(nil, &kubeOVNMock, &factoryMock, nil, "", "", "", []string{"00:00:00:01:02:03"})
 		dnnc = newDefaultNodeNetworkController(cnnci, &util.DefaultNetInfo{}, nil, nil)
+=======
+		cnnci := newCommonNodeNetworkControllerInfo(nil, &kubeMock, &factoryMock, nil, "", routeManager)
+		dnnc = newDefaultNodeNetworkController(cnnci, nil, nil, routeManager)
+>>>>>>> ffddd06ec12e43af0397bca8e36adedf8df441b1
 
 		podInformer = coreinformermocks.PodInformer{}
 		podNamespaceLister = v1mocks.PodNamespaceLister{}

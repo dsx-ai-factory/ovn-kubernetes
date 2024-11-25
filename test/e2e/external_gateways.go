@@ -11,10 +11,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/go-cmp/cmp"
-	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+
+	"github.com/google/go-cmp/cmp"
+	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -82,7 +83,6 @@ var _ = ginkgo.Describe("External Gateway", func() {
 	var _ = ginkgo.Describe("e2e non-vxlan external gateway and update validation", func() {
 		const (
 			svcname             string = "multiple-novxlan-externalgw"
-			ovnNs               string = "ovn-kubernetes"
 			ovnWorkerNode       string = "ovn-worker"
 			ovnContainer        string = "ovnkube-node"
 			gwContainerNameAlt1 string = "gw-novxlan-test-container-alt1"
@@ -698,10 +698,6 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				gatewayPodName2 string = "e2e-gateway-pod2"
 			)
 
-			var (
-				servingNamespace string
-			)
-
 			f := wrappedTestFramework(svcname)
 
 			var (
@@ -710,6 +706,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				nodes                    *v1.NodeList
 				err                      error
 				clientSet                kubernetes.Interface
+				servingNamespace         string
 			)
 
 			ginkgo.BeforeEach(func() {
@@ -732,7 +729,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				servingNamespace = ns.Name
 
 				addressesv4, addressesv6 = setupGatewayContainersForConntrackTest(f, nodes, gwContainer1, gwContainer2, srcPodName)
-				sleepCommand = []string{"bash", "-c", "sleep 20000"}
+				sleepCommand = []string{"bash", "-c", "trap : TERM INT; sleep infinity & wait"}
 				_, err = createGenericPod(f, gatewayPodName1, nodes.Items[0].Name, servingNamespace, sleepCommand)
 				framework.ExpectNoError(err, "Create and annotate the external gw pods to manage the src app pod namespace, failed: %v", err)
 				_, err = createGenericPod(f, gatewayPodName2, nodes.Items[1].Name, servingNamespace, sleepCommand)
@@ -804,7 +801,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				ginkgo.Entry("IPV6 udp", &addressesv6, "udp"),
 				ginkgo.Entry("IPV6 tcp", &addressesv6, "tcp"))
 
-			ginkgo.DescribeTable("ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes", func(addresses *gatewayTestIPs, protocol string) {
+			ginkgo.DescribeTable("ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes", func(addresses *gatewayTestIPs, protocol string, deletePod bool) {
 				if addresses.srcPodIP == "" || addresses.nodeIP == "" {
 					skipper.Skipf("Skipping as pod ip / node ip are not set pod ip %s node ip %s", addresses.srcPodIP, addresses.nodeIP)
 				}
@@ -851,8 +848,16 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				totalPodConnEntries := pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, nil)
 				gomega.Expect(totalPodConnEntries).To(gomega.Equal(6)) // total conntrack entries for this pod/protocol
 
-				ginkgo.By("Remove second external gateway pod's routing-namespace annotation")
-				annotatePodForGateway(gatewayPodName2, servingNamespace, "", addresses.gatewayIPs[1], false)
+				if deletePod {
+					ginkgo.By(fmt.Sprintf("Delete second external gateway pod %s from ns %s", gatewayPodName2, servingNamespace))
+					err = f.ClientSet.CoreV1().Pods(servingNamespace).Delete(context.TODO(), gatewayPodName2, metav1.DeleteOptions{})
+					framework.ExpectNoError(err, "Delete the gateway pod failed: %v", err)
+					// give some time to handle pod delete event
+					time.Sleep(5 * time.Second)
+				} else {
+					ginkgo.By("Remove second external gateway pod's routing-namespace annotation")
+					annotatePodForGateway(gatewayPodName2, servingNamespace, "", addresses.gatewayIPs[1], false)
+				}
 
 				// ensure the conntrack deletion tracker annotation is updated
 				if !isInterconnectEnabled() {
@@ -891,10 +896,13 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				gomega.Expect(podConnEntriesWithMACLabelsSet).To(gomega.Equal(0)) // we don't have any remaining gateways left
 				gomega.Expect(totalPodConnEntries).To(gomega.Equal(4))            // 6-2
 			},
-				ginkgo.Entry("IPV4 udp", &addressesv4, "udp"),
-				ginkgo.Entry("IPV4 tcp", &addressesv4, "tcp"),
-				ginkgo.Entry("IPV6 udp", &addressesv6, "udp"),
-				ginkgo.Entry("IPV6 tcp", &addressesv6, "tcp"))
+				ginkgo.Entry("IPV4 udp", &addressesv4, "udp", false),
+				ginkgo.Entry("IPV4 tcp", &addressesv4, "tcp", false),
+				ginkgo.Entry("IPV6 udp", &addressesv6, "udp", false),
+				ginkgo.Entry("IPV6 tcp", &addressesv6, "tcp", false),
+				ginkgo.Entry("IPV4 udp + pod delete", &addressesv4, "udp", true),
+				ginkgo.Entry("IPV6 tcp + pod delete", &addressesv6, "tcp", true),
+			)
 		})
 
 		// BFD Tests are dual of external gateway. The only difference is that they enable BFD on ovn and
@@ -1329,10 +1337,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				addressesv4, addressesv6 gatewayTestIPs
 				clientSet                kubernetes.Interface
 				servingNamespace         string
-			)
-
-			var (
-				gwContainers []string
+				gwContainers             []string
 			)
 
 			f := wrappedTestFramework(svcname)
@@ -1733,13 +1738,10 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				gatewayPodName2 string = "e2e-gateway-pod2"
 			)
 
-			var (
-				servingNamespace string
-			)
-
 			f := wrappedTestFramework(svcname)
 
 			var (
+				servingNamespace         string
 				addressesv4, addressesv6 gatewayTestIPs
 				sleepCommand             []string
 				nodes                    *v1.NodeList
@@ -1953,10 +1955,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 					addressesv4, addressesv6 gatewayTestIPs
 					clientSet                kubernetes.Interface
 					servingNamespace         string
-				)
-
-				var (
-					gwContainers []string
+					gwContainers             []string
 				)
 
 				f := wrappedTestFramework(svcname)
@@ -2363,10 +2362,7 @@ var _ = ginkgo.Describe("External Gateway", func() {
 				addressesv4, addressesv6 gatewayTestIPs
 				clientSet                kubernetes.Interface
 				servingNamespace         string
-			)
-
-			var (
-				gwContainers []string
+				gwContainers             []string
 			)
 
 			f := wrappedTestFramework(svcname)
@@ -2511,18 +2507,15 @@ var _ = ginkgo.Describe("External Gateway", func() {
 			)
 
 			var (
-				servingNamespace string
-			)
-
-			f := wrappedTestFramework(svcname)
-
-			var (
+				servingNamespace         string
 				addressesv4, addressesv6 gatewayTestIPs
 				sleepCommand             []string
 				nodes                    *v1.NodeList
 				err                      error
 				clientSet                kubernetes.Interface
 			)
+
+			f := wrappedTestFramework(svcname)
 
 			ginkgo.BeforeEach(func() {
 				clientSet = f.ClientSet // so it can be used in AfterEach
@@ -2679,7 +2672,6 @@ var _ = ginkgo.Describe("External Gateway", func() {
 			svcname          string = "novxlan-externalgw-ecmp"
 			gwContainer1     string = "gw-test-container1"
 			gwContainer2     string = "gw-test-container2"
-			testTimeout      string = "30"
 			ecmpRetry        int    = 20
 			srcPodName              = "e2e-exgw-src-pod"
 			externalTCPPort         = 80
@@ -3016,7 +3008,7 @@ func reachPodFromGateway(targetAddress, targetPort, targetPodName, srcContainer,
 	gomega.Expect(strings.Trim(res, "\n")).To(gomega.Equal(targetPodName))
 }
 
-func annotatePodForGateway(podName, podNS, namespace, networkIPs string, bfd bool) {
+func annotatePodForGateway(podName, podNS, targetNamespace, networkIPs string, bfd bool) {
 	if !strings.HasPrefix(networkIPs, "\"") {
 		networkIPs = fmt.Sprintf("\"%s\"", networkIPs)
 	}
@@ -3026,7 +3018,7 @@ func annotatePodForGateway(podName, podNS, namespace, networkIPs string, bfd boo
 	annotateArgs := []string{
 		fmt.Sprintf("k8s.v1.cni.cncf.io/network-status=[{\"name\":\"%s\",\"interface\":"+
 			"\"net1\",\"ips\":[%s],\"mac\":\"%s\"}]", "foo", networkIPs, "01:23:45:67:89:10"),
-		fmt.Sprintf("k8s.ovn.org/routing-namespaces=%s", namespace),
+		fmt.Sprintf("k8s.ovn.org/routing-namespaces=%s", targetNamespace),
 		fmt.Sprintf("k8s.ovn.org/routing-network=%s", "foo"),
 	}
 	if bfd {
@@ -3076,19 +3068,6 @@ func annotateNamespaceForGateway(namespace string, bfd bool, gateways ...string)
 		annotateArgs = append(annotateArgs, "k8s.ovn.org/bfd-enabled=\"\"")
 	}
 	framework.Logf("Annotating the external gateway test namespace to container gateways: %s", externalGateways)
-	e2ekubectl.RunKubectlOrDie(namespace, annotateArgs...)
-}
-
-func removeStaticGatewayAnnotationInNamespace(namespace string) {
-
-	// annotate the test namespace with multiple gateways defined
-	annotateArgs := []string{
-		"annotate",
-		"namespace",
-		namespace,
-		"k8s.ovn.org/routing-external-gws-",
-		"--overwrite",
-	}
 	e2ekubectl.RunKubectlOrDie(namespace, annotateArgs...)
 }
 
@@ -3275,10 +3254,10 @@ func pokeHostnameViaNC(podName, namespace, protocol, target string, port int) st
 // pokeConntrackEntries returns the number of conntrack entries that match the provided pattern, protocol and podIP
 func pokeConntrackEntries(nodeName, podIP, protocol string, patterns []string) int {
 	args := []string{"get", "pods", "--selector=app=ovs-node", "--field-selector", fmt.Sprintf("spec.nodeName=%s", nodeName), "-o", "jsonpath={.items..metadata.name}"}
-	ovsPodName, err := e2ekubectl.RunKubectl("ovn-kubernetes", args...)
+	ovsPodName, err := e2ekubectl.RunKubectl(ovnNamespace, args...)
 	framework.ExpectNoError(err, "failed to get the ovs pod on node %s", nodeName)
 	args = []string{"exec", ovsPodName, "--", "ovs-appctl", "dpctl/dump-conntrack"}
-	conntrackEntries, err := e2ekubectl.RunKubectl("ovn-kubernetes", args...)
+	conntrackEntries, err := e2ekubectl.RunKubectl(ovnNamespace, args...)
 	framework.ExpectNoError(err, "failed to get the conntrack entries from node %s", nodeName)
 	numOfConnEntries := 0
 	for _, connEntry := range strings.Split(conntrackEntries, "\n") {

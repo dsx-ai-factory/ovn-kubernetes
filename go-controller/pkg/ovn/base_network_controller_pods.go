@@ -15,6 +15,7 @@ import (
 	ipallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	subnetipallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	logicalswitchmanager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -124,16 +125,16 @@ func (bnc *BaseNetworkController) deleteStaleLogicalSwitchPorts(expectedLogicalP
 		switchNames = make([]string, 0, len(nodes))
 		for _, n := range nodes {
 			// skip nodes that are not running ovnk (inferred from host subnets)
-			switchName := bnc.GetNetworkScopedName(n.Name)
+			switchName := bnc.GetNetworkScopedSwitchName(n.Name)
 			if bnc.lsManager.IsNonHostSubnetSwitch(switchName) {
 				continue
 			}
 			switchNames = append(switchNames, switchName)
 		}
 	} else if topoType == ovntypes.Layer2Topology {
-		switchNames = []string{bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch)}
+		switchNames = []string{bnc.GetNetworkScopedSwitchName(ovntypes.OVNLayer2Switch)}
 	} else if topoType == ovntypes.LocalnetTopology {
-		switchNames = []string{bnc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch)}
+		switchNames = []string{bnc.GetNetworkScopedSwitchName(ovntypes.OVNLocalnetSwitch)}
 	} else {
 		return fmt.Errorf("topology type %s not supported", topoType)
 	}
@@ -333,8 +334,8 @@ func (bnc *BaseNetworkController) deletePodLogicalPort(pod *kapi.Pod, portInfo *
 // findPodWithIPAddresses finds any pods with the same IPs in a running state on the cluster
 // If nodeName is provided, pods only belonging to the same node will be checked, unless this pod has
 // potentially live migrated.
-func (bnc *BaseNetworkController) findPodWithIPAddresses(needleIPs []net.IP, nodeName string) (*kapi.Pod, error) {
-	allPods, err := bnc.watchFactory.GetAllPods()
+func findPodWithIPAddresses(watchFactory *factory.WatchFactory, netInfo util.NetInfo, needleIPs []net.IP, nodeName string) (*kapi.Pod, error) {
+	allPods, err := watchFactory.GetAllPods()
 	if err != nil {
 		return nil, fmt.Errorf("unable to get pods: %w", err)
 	}
@@ -350,12 +351,12 @@ func (bnc *BaseNetworkController) findPodWithIPAddresses(needleIPs []net.IP, nod
 		// This specifically speeds up a case where a pod may have been annotated by ovnkube-controller, but has not yet
 		// returned from CNI ADD. In that case the GetPodIPsOfNetwork would unmarshal the annotation and take a perf
 		// hit for no reason (since the IP cannot be in the same subnet as what we are looking for).
-		if bnc.TopologyType() == ovntypes.Layer3Topology && !kubevirt.IsPodLiveMigratable(p) && len(nodeName) > 0 && nodeName != p.Spec.NodeName {
+		if netInfo.TopologyType() == ovntypes.Layer3Topology && !kubevirt.IsPodLiveMigratable(p) && len(nodeName) > 0 && nodeName != p.Spec.NodeName {
 			continue
 		}
 
 		// check if the pod addresses match in the OVN annotation
-		haystackPodAddrs, err := util.GetPodIPsOfNetwork(p, bnc.NetInfo)
+		haystackPodAddrs, err := util.GetPodIPsOfNetwork(p, netInfo)
 		if err != nil {
 			continue
 		}
@@ -379,7 +380,7 @@ func (bnc *BaseNetworkController) canReleasePodIPs(podIfAddrs []*net.IPNet, node
 		needleIPs = append(needleIPs, podIPNet.IP)
 	}
 
-	collidingPod, err := bnc.findPodWithIPAddresses(needleIPs, nodeName)
+	collidingPod, err := findPodWithIPAddresses(bnc.watchFactory, bnc.NetInfo, needleIPs, nodeName)
 	if err != nil {
 		return false, fmt.Errorf("unable to determine if pod IPs: %#v are in use by another pod :%w", podIfAddrs, err)
 
@@ -455,11 +456,11 @@ func (bnc *BaseNetworkController) getExpectedSwitchName(pod *kapi.Pod) (string, 
 		topoType := bnc.TopologyType()
 		switch topoType {
 		case ovntypes.Layer3Topology:
-			switchName = bnc.GetNetworkScopedName(pod.Spec.NodeName)
+			switchName = bnc.GetNetworkScopedSwitchName(pod.Spec.NodeName)
 		case ovntypes.Layer2Topology:
-			switchName = bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch)
+			switchName = bnc.GetNetworkScopedSwitchName(ovntypes.OVNLayer2Switch)
 		case ovntypes.LocalnetTopology:
-			switchName = bnc.GetNetworkScopedName(ovntypes.OVNLocalnetSwitch)
+			switchName = bnc.GetNetworkScopedSwitchName(ovntypes.OVNLocalnetSwitch)
 		default:
 			return "", fmt.Errorf("topology type %s not supported", topoType)
 		}
@@ -581,12 +582,20 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 	if !lspExist || len(existingLSP.Options["iface-id-ver"]) != 0 {
 		lsp.Options["iface-id-ver"] = string(pod.UID)
 	}
-	if !config.Kubernetes.SkipRequestedChassis {
-		// Bind the port to the node's chassis; prevents ping-ponging between
-		// chassis if ovnkube-node isn't running correctly and hasn't cleared
-		// out iface-id for an old instance of this pod, and the pod got
-		// rescheduled.
+	// Bind the port to the node's chassis; prevents ping-ponging between
+	// chassis if ovnkube-node isn't running correctly and hasn't cleared
+	// out iface-id for an old instance of this pod, and the pod got
+	// rescheduled.
+
+	if !config.Kubernetes.DisableRequestedChassis {
 		lsp.Options["requested-chassis"] = pod.Spec.NodeName
+	}
+
+	// let's calculate if this network controller's role for this pod
+	// and pass that information while determining the podAnnotations
+	networkRole, err := bnc.GetNetworkRole(pod)
+	if err != nil {
+		return nil, nil, nil, false, err
 	}
 
 	// Although we have different code to allocate the pod annotation for the
@@ -597,9 +606,9 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 	// functionally equivalent going forward.
 	var annotationUpdated bool
 	if bnc.IsSecondary() {
-		podAnnotation, annotationUpdated, err = bnc.allocatePodAnnotationForSecondaryNetwork(pod, skipIPAM, existingLSP, nadName, network)
+		podAnnotation, annotationUpdated, err = bnc.allocatePodAnnotationForSecondaryNetwork(pod, skipIPAM, existingLSP, nadName, network, networkRole)
 	} else {
-		podAnnotation, annotationUpdated, err = bnc.allocatePodAnnotation(pod, skipIPAM, existingLSP, podDesc, nadName, network)
+		podAnnotation, annotationUpdated, err = bnc.allocatePodAnnotation(pod, skipIPAM, existingLSP, podDesc, nadName, network, networkRole)
 	}
 
 	if err != nil {
@@ -920,7 +929,7 @@ func getAllowedMacAddress(lsp *nbdb.LogicalSwitchPort) string {
 }
 
 // allocatePodAnnotation and update the corresponding pod annotation.
-func (bnc *BaseNetworkController) allocatePodAnnotation(pod *kapi.Pod, skipIPAM bool, existingLSP *nbdb.LogicalSwitchPort, podDesc, nadName string, network *nadapi.NetworkSelectionElement) (*util.PodAnnotation, bool, error) {
+func (bnc *BaseNetworkController) allocatePodAnnotation(pod *kapi.Pod, skipIPAM bool, existingLSP *nbdb.LogicalSwitchPort, podDesc, nadName string, network *nadapi.NetworkSelectionElement, networkRole string) (*util.PodAnnotation, bool, error) {
 	var releaseIPs bool
 	var podMac net.HardwareAddr
 	var podIfAddrs []*net.IPNet
@@ -1029,9 +1038,10 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *kapi.Pod, skipIPAM 
 		}
 	}
 	podAnnotation = &util.PodAnnotation{
-		IPs: podIfAddrs,
-		MAC: podMac,
-		MTU: bnc.MTU(),
+		IPs:  podIfAddrs,
+		MAC:  podMac,
+		MTU:  bnc.MTU(),
+		Role: networkRole,
 	}
 	var nodeSubnets []*net.IPNet
 	if nodeSubnets = bnc.lsManager.GetSwitchSubnets(switchName); nodeSubnets == nil && bnc.doesNetworkRequireIPAM() {
@@ -1059,7 +1069,8 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *kapi.Pod, skipIPAM 
 
 // allocatePodAnnotationForSecondaryNetwork and update the corresponding pod
 // annotation.
-func (bnc *BaseNetworkController) allocatePodAnnotationForSecondaryNetwork(pod *kapi.Pod, skipIPAM bool, lsp *nbdb.LogicalSwitchPort, nadName string, network *nadapi.NetworkSelectionElement) (*util.PodAnnotation, bool, error) {
+func (bnc *BaseNetworkController) allocatePodAnnotationForSecondaryNetwork(pod *kapi.Pod, skipIPAM bool, lsp *nbdb.LogicalSwitchPort,
+	nadName string, network *nadapi.NetworkSelectionElement, networkRole string) (*util.PodAnnotation, bool, error) {
 	switchName, err := bnc.getExpectedSwitchName(pod)
 	if err != nil {
 		return nil, false, err
@@ -1107,6 +1118,7 @@ func (bnc *BaseNetworkController) allocatePodAnnotationForSecondaryNetwork(pod *
 		network,
 		reallocate,
 		skipIPAM,
+		networkRole,
 	)
 
 	if err != nil {

@@ -15,22 +15,26 @@ import (
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
+	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
+	"github.com/containernetworking/plugins/pkg/ip"
 	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	honode "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	config "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	adminpolicybasedrouteclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
@@ -43,7 +47,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 
-	"github.com/containernetworking/plugins/pkg/ip"
 	"github.com/vishvananda/netlink"
 )
 
@@ -55,15 +58,16 @@ const (
 )
 
 type CommonNodeNetworkControllerInfo struct {
-	client                 clientset.Interface
-	Kube                   kube.InterfaceOVN
-	watchFactory           factory.NodeWatchFactory
-	recorder               record.EventRecorder
-	name                   string
-	dpuName                string
-	apbExternalRouteClient adminpolicybasedrouteclientset.Interface
-	hostType               string
-	pfMACs                 []string
+	client       clientset.Interface
+	Kube         kube.InterfaceOVN
+	watchFactory factory.NodeWatchFactory
+	recorder     record.EventRecorder
+	name         string
+	dpuName      string
+	hostType     string
+	pfMACs       []string
+	// route manager that creates and manages routes
+	routeManager *routemanager.Controller
 }
 
 // per-NAD Pod Info
@@ -124,37 +128,40 @@ type BaseNodeNetworkController struct {
 	portMirrorInfo
 }
 
-func newCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, kube kube.InterfaceOVN, apbExternalRouteClient adminpolicybasedrouteclientset.Interface, wf factory.NodeWatchFactory, eventRecorder record.EventRecorder, name, dpuName, hostType string, pfMACs []string) *CommonNodeNetworkControllerInfo {
+func newCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, kube kube.InterfaceOVN,
+	wf factory.NodeWatchFactory, eventRecorder record.EventRecorder, name, dpuName, hostType string,
+	pfMACs []string, routeManager *routemanager.Controller) *CommonNodeNetworkControllerInfo {
 
 	return &CommonNodeNetworkControllerInfo{
-		client:                 kubeClient,
-		Kube:                   kube,
-		apbExternalRouteClient: apbExternalRouteClient,
-		watchFactory:           wf,
-		name:                   name,
-		dpuName:                dpuName,
-		recorder:               eventRecorder,
-		hostType:               hostType,
-		pfMACs:                 pfMACs,
+		client:       kubeClient,
+		Kube:         kube,
+		watchFactory: wf,
+		name:         name,
+		dpuName:      dpuName,
+		recorder:     eventRecorder,
+		hostType:     hostType,
+		pfMACs:       pfMACs,
+		routeManager: routeManager,
 	}
 }
 
 // NewCommonNodeNetworkControllerInfo creates and returns the base node network controller info
-func NewCommonNodeNetworkControllerInfo(ovnNodeClient *util.OVNNodeClientset, apbExternalRouteClient adminpolicybasedrouteclientset.Interface, wf factory.NodeWatchFactory, eventRecorder record.EventRecorder, name, dpuName, hostType string, pfMACs []string) *CommonNodeNetworkControllerInfo {
+func NewCommonNodeNetworkControllerInfo(ovnNodeClient *util.OVNNodeClientset, wf factory.NodeWatchFactory, eventRecorder record.EventRecorder,
+	name, dpuName, hostType string, pfMACs []string, routeManager *routemanager.Controller) *CommonNodeNetworkControllerInfo {
 	k := &kube.KubeOVN{
 		Kube: kube.Kube{
 			KClient: ovnNodeClient.KubeClient,
 		},
 		PortMirrorClient: ovnNodeClient.PortMirrorClient,
 	}
-	return newCommonNodeNetworkControllerInfo(ovnNodeClient.KubeClient, k, apbExternalRouteClient, wf, eventRecorder, name, dpuName, hostType, pfMACs)
+	return newCommonNodeNetworkControllerInfo(ovnNodeClient.KubeClient, k, wf, eventRecorder, name, dpuName, hostType, pfMACs, routeManager)
 }
 
 // DefaultNodeNetworkController is the object holder for utilities meant for node management of default network
 type DefaultNodeNetworkController struct {
 	BaseNodeNetworkController
 
-	gateway Gateway
+	Gateway Gateway
 
 	// primary node IP
 	nodePrimaryIP string
@@ -171,15 +178,28 @@ type DefaultNodeNetworkController struct {
 	// stores *k8stypes.NamespacedName for each endpointSlice, nil if firewalld configuration needs to be skipped.
 	skipFirewalldMap               sync.Map
 	apbExternalRouteNodeController *apbroute.ExternalGatewayNodeController
+
+	nadController *nad.NetAttachDefinitionController
+
+	cniServer *cni.Server
+
+	gatewaySetup *preStartSetup
 }
 
-func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, netInfo util.NetInfo, stopChan chan struct{},
-	wg *sync.WaitGroup) *DefaultNodeNetworkController {
+type preStartSetup struct {
+	mgmtPorts      []managementPortEntry
+	mgmtPortConfig *managementPortConfig
+	nodeAddress    net.IP
+	sbZone         string
+}
+
+func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, stopChan chan struct{},
+	wg *sync.WaitGroup, routeManager *routemanager.Controller) *DefaultNodeNetworkController {
 
 	return &DefaultNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
 			CommonNodeNetworkControllerInfo: *cnnci,
-			NetInfo:                         netInfo,
+			NetInfo:                         util.InitDefaultNetInfo(),
 			stopChan:                        stopChan,
 			wg:                              wg,
 			DoSCheckStopChan:                nil,
@@ -188,16 +208,17 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, net
 			},
 		},
 		skipFirewalldMap: sync.Map{},
-		routeManager:     routemanager.NewController(),
+		routeManager:     routeManager,
 	}
 }
 
 // NewDefaultNodeNetworkController creates a new network controller for node management of the default network
-func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, netInfo util.NetInfo) (*DefaultNodeNetworkController, error) {
+func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo,
+	nadController *nad.NetAttachDefinitionController) (*DefaultNodeNetworkController, error) {
 	var err error
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
-	nc := newDefaultNodeNetworkController(cnnci, netInfo, stopChan, wg)
+	nc := newDefaultNodeNetworkController(cnnci, stopChan, wg, cnnci.routeManager)
 
 	if len(config.Kubernetes.HealthzBindAddress) != 0 {
 		klog.Infof("Enable node proxy healthz server on %s", config.Kubernetes.HealthzBindAddress)
@@ -217,6 +238,8 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, net
 		return nil, err
 	}
 
+	nc.nadController = nadController
+
 	nc.initRetryFrameworkForNode()
 
 	return nc, nil
@@ -225,18 +248,6 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, net
 func (nc *DefaultNodeNetworkController) initRetryFrameworkForNode() {
 	nc.retryNamespaces = nc.newRetryFrameworkNode(factory.NamespaceExGwType)
 	nc.retryEndpointSlices = nc.newRetryFrameworkNode(factory.EndpointSliceForStaleConntrackRemovalType)
-}
-
-func (nc *DefaultNodeNetworkController) NADToInterConnect() string {
-	return ""
-}
-
-func (nc *DefaultNodeNetworkController) StartInterConnect(icInfo *util.InterConnectInfo) error {
-	panic("unexpected call for default Node Network Controller")
-}
-
-func (nc *DefaultNodeNetworkController) StopInterConnect(icInfo *util.InterConnectInfo) error {
-	panic("unexpected call for default Node Network Controller")
 }
 
 func clearOVSFlowTargets() error {
@@ -413,8 +424,8 @@ func setupOVNNode(node *kapi.Node) error {
 		)
 	}
 
-	// In the case of DPU, the hostname should be that of the DPU and not the K8s Node.
-	// So, skip setting the incorrect hostname.
+	// In the case of DPU, the hostname should be that of the DPU and not
+	// the K8s Node's. So skip setting the incorrect hostname.
 	if config.OvnKubeNode.Mode != types.NodeModeDPU {
 		setExternalIdsCmd = append(setExternalIdsCmd, fmt.Sprintf("external_ids:hostname=\"%s\"", node.Name))
 	}
@@ -709,7 +720,7 @@ func getMgmtPortAndRepName(node *kapi.Node) (string, string, error) {
 	}
 }
 
-func createNodeManagementPorts(node *kapi.Node, nodeAnnotator kube.Annotator, waiter *startupWaiter,
+func createNodeManagementPorts(node *kapi.Node, nodeLister listers.NodeLister, nodeAnnotator kube.Annotator, kubeInterface kube.Interface, waiter *startupWaiter,
 	subnets []*net.IPNet, routeManager *routemanager.Controller) ([]managementPortEntry, *managementPortConfig, error) {
 	netdevName, rep, err := getMgmtPortAndRepName(node)
 	if err != nil {
@@ -727,7 +738,7 @@ func createNodeManagementPorts(node *kapi.Node, nodeAnnotator kube.Annotator, wa
 	var mgmtPortConfig *managementPortConfig
 	mgmtPorts := make([]managementPortEntry, 0)
 	for _, port := range ports {
-		config, err := port.Create(routeManager, nodeAnnotator, waiter)
+		config, err := port.Create(routeManager, node, nodeLister, kubeInterface, waiter)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -811,10 +822,11 @@ func portExists(namespace, name string) bool {
 
 /** HACK END **/
 
-// Start learns the subnets assigned to it by the master controller
-// and calls the SetupNode script which establishes the logical switch
-func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
-	klog.Infof("Starting the default node network controller")
+// PreStart executes the first steps to start the DefaultNodeNetworkController.
+// It is split from Start() and executed before SecondaryNodeNetworkController (SNNC),
+// to allow SNNC to reference the openflow manager created in PreStart.
+func (nc *DefaultNodeNetworkController) PreStart(ctx context.Context) error {
+	klog.Infof("PreStarting the default node network controller")
 
 	var err error
 	var node *kapi.Node
@@ -822,6 +834,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	var cniServer *cni.Server
 
 	klog.Infof("OVN Kube Node initialization, Mode: %s", config.OvnKubeNode.Mode)
+	gatewaySetup := &preStartSetup{}
 
 	// Setting debug log level during node bring up to expose bring up process.
 	// Log level is returned to configured value when bring up is complete.
@@ -829,15 +842,16 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	if err := level.Set("5"); err != nil {
 		klog.Errorf("Setting klog \"loglevel\" to 5 failed, err: %v", err)
 	}
-	nc.wg.Add(1)
-	go func() {
-		defer nc.wg.Done()
-		nc.routeManager.Run(nc.stopChan, 4*time.Minute)
-	}()
+
+	if config.OvnKubeNode.Mode != types.NodeModeDPU {
+		if err = configureGlobalForwarding(); err != nil {
+			return err
+		}
+	}
 
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		// Bootstrap flows in OVS if just normal flow is present
-		if err := bootstrapOVSFlows(); err != nil {
+		if err := bootstrapOVSFlows(nc.name); err != nil {
 			return fmt.Errorf("failed to bootstrap OVS flows: %w", err)
 		}
 	}
@@ -925,10 +939,80 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		if !ok {
 			return fmt.Errorf("cannot get kubeOVNClient for starting CNI server")
 		}
-		cniServer, err = cni.NewCNIServer(nc.watchFactory, kube.KClient)
+		cniServer, err = cni.NewCNIServer(nc.watchFactory, kube.KClient, nc.nadController)
 		if err != nil {
 			return err
 		}
+		nc.cniServer = cniServer
+	}
+
+	nodeAnnotator := kube.NewNodeAnnotator(nc.Kube, node.Name)
+	waiter := newStartupWaiter()
+
+	// Setup management ports
+	mgmtPorts, mgmtPortConfig, err := createNodeManagementPorts(node, nc.watchFactory.NodeCoreInformer().Lister(), nodeAnnotator,
+		nc.Kube, waiter, subnets, nc.routeManager)
+	if err != nil {
+		return err
+	}
+	gatewaySetup.mgmtPorts = mgmtPorts
+	gatewaySetup.mgmtPortConfig = mgmtPortConfig
+
+	if err := util.SetNodeZone(nodeAnnotator, sbZone); err != nil {
+		return fmt.Errorf("failed to set node zone annotation for node %s: %w", nc.name, err)
+	}
+	if err := nodeAnnotator.Run(); err != nil {
+		return fmt.Errorf("failed to set node %s annotations: %w", nc.name, err)
+	}
+
+	// Connect ovn-controller to SBDB
+	for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
+		if err := auth.SetDBAuth(); err != nil {
+			return fmt.Errorf("unable to set the authentication towards OVN local dbs")
+		}
+	}
+
+	// First part of gateway initialization. It will be completed by (nc *DefaultNodeNetworkController) Start()
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+		// Initialize gateway for OVS internal port or representor management port
+		gw, err := nc.initGatewayPreStart(subnets, nodeAnnotator, mgmtPortConfig, nodeAddr)
+		if err != nil {
+			return err
+		}
+		nc.Gateway = gw
+	}
+
+	if err := level.Set(strconv.Itoa(config.Logging.Level)); err != nil {
+		klog.Errorf("Reset of initial klog \"loglevel\" failed, err: %v", err)
+	}
+	gatewaySetup.sbZone = sbZone
+	nc.gatewaySetup = gatewaySetup
+
+	return nil
+
+}
+
+// Start learns the subnets assigned to it by the master controller
+// and calls the SetupNode script which establishes the logical switch
+func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
+	klog.Infof("Starting the default node network controller")
+
+	var err error
+	var node *kapi.Node
+
+	if nc.gatewaySetup == nil {
+		return fmt.Errorf("default node network controller hasn't been pre-started")
+	}
+
+	// Setting debug log level during node bring up to expose bring up process.
+	// Log level is returned to configured value when bring up is complete.
+	var level klog.Level
+	if err := level.Set("5"); err != nil {
+		klog.Errorf("Setting klog \"loglevel\" to 5 failed, err: %v", err)
+	}
+
+	if node, err = nc.Kube.GetNode(nc.name); err != nil {
+		return fmt.Errorf("error retrieving node %s: %v", nc.name, err)
 	}
 
 	nodeAnnotator := kube.NewNodeAnnotator(nc.Kube, node.Name)
@@ -954,31 +1038,17 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 			config.OvnKubeNode.MgmtPortNetdev, config.OvnKubeNode.MgmtPortDPResourceName)
 	}
 
-	// Setup management ports
-	mgmtPorts, mgmtPortConfig, err := createNodeManagementPorts(node, nodeAnnotator, waiter, subnets, nc.routeManager)
-	if err != nil {
-		return err
-	}
-
-	// Initialize gateway
+	// Complete gateway initialization
 	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
-		err = nc.initGatewayDPUHost(nodeAddr)
+		err = nc.initGatewayDPUHost(nc.gatewaySetup.nodeAddress)
 		if err != nil {
 			return err
 		}
 	} else {
-		// Initialize gateway for OVS internal port or representor management port
-		if err := nc.initGateway(subnets, nodeAnnotator, waiter, mgmtPortConfig, nodeAddr); err != nil {
+		gw := nc.Gateway.(*gateway)
+		if err := nc.initGatewayMainStart(gw, waiter); err != nil {
 			return err
 		}
-	}
-
-	if err := util.SetNodeZone(nodeAnnotator, sbZone); err != nil {
-		return fmt.Errorf("failed to set node zone annotation for node %s: %w", nc.name, err)
-	}
-
-	if err := nodeAnnotator.Run(); err != nil {
-		return fmt.Errorf("failed to set node %s annotations: %w", nc.name, err)
 	}
 
 	// If EncapPort is not the default tell sbdb to use specified port.
@@ -1014,7 +1084,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	//        plumbing (takes 80ms based on what we saw in CI runs so we might still have that small window of disruption).
 	// NOTE: ovnkube-node in DPU host mode doesn't go through upgrades for OVN-IC and has no SBDB to connect to. Thus this part shall be skipped.
 	var syncNodes, syncServices, syncPods bool
-	if config.OvnKubeNode.Mode != types.NodeModeDPUHost && config.OVNKubernetesFeature.EnableInterconnect && sbZone != types.OvnDefaultZone && !util.HasNodeMigratedZone(node) { // so this should be done only once in phase2 (not in phase1)
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost && config.OVNKubernetesFeature.EnableInterconnect && nc.gatewaySetup.sbZone != types.OvnDefaultZone && !util.HasNodeMigratedZone(node) {
 		klog.Info("Upgrade Hack: Interconnect is enabled")
 		var err1 error
 		start := time.Now()
@@ -1096,7 +1166,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("upgrade hack: failed while waiting for the remote ovnkube-controller to be ready: %v, %v", err, err1)
 		}
-		if err := util.SetNodeZoneMigrated(nodeAnnotator, sbZone); err != nil {
+		if err := util.SetNodeZoneMigrated(nodeAnnotator, nc.gatewaySetup.sbZone); err != nil {
 			return fmt.Errorf("upgrade hack: failed to set node zone annotation for node %s: %w", nc.name, err)
 		}
 		if err := nodeAnnotator.Run(); err != nil {
@@ -1118,14 +1188,14 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	if err := waiter.Wait(); err != nil {
 		return err
 	}
-	nc.gateway.Start()
+	nc.Gateway.Start()
 	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
 
 	// Note(adrianc): DPU deployments are expected to support the new shared gateway changes, upgrade flow
 	// is not needed. Future upgrade flows will need to take DPUs into account.
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		if config.OvnKubeNode.Mode == types.NodeModeFull {
-			gwIface := nc.gateway.GetGatewayIface()
+			gwIface := nc.Gateway.GetGatewayIface()
 			// Configure route for svc towards shared gw bridge
 			// Have to have the route to bridge for multi-NIC mode, where the default gateway may go to a non-OVS interface
 			if err := configureSvcRouteViaBridge(nc.routeManager, gwIface); err != nil {
@@ -1173,7 +1243,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	}
 
 	// start management ports health check
-	for _, mgmtPort := range mgmtPorts {
+	for _, mgmtPort := range nc.gatewaySetup.mgmtPorts {
 		mgmtPort.port.CheckManagementPortHealth(nc.routeManager, mgmtPort.config, nc.stopChan)
 		if config.OVNKubernetesFeature.EnableEgressIP {
 			// Start the health checking server used by egressip, if EgressIPNodeHealthCheckPort is specified
@@ -1189,8 +1259,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		// "k8s.ovn.org/external-gw-pod-ips". In that case, we need ovnkube-node to flush
 		// conntrack on every node. In multi-zone-interconnect case, we will handle the flushing
 		// directly on the ovnkube-controller code to avoid an extra namespace annotation
-		if !config.OVNKubernetesFeature.EnableInterconnect || sbZone == types.OvnDefaultZone {
-			util.SetARPTimeout()
+		if !config.OVNKubernetesFeature.EnableInterconnect || nc.gatewaySetup.sbZone == types.OvnDefaultZone {
 			err := nc.WatchNamespaces()
 			if err != nil {
 				return fmt.Errorf("failed to watch namespaces: %w", err)
@@ -1233,8 +1302,10 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}
 	} else {
 		// start the cni server
-		if err := cniServer.Start(cni.ServerRunDir); err != nil {
-			return err
+		if nc.cniServer != nil {
+			if err := nc.cniServer.Start(cni.ServerRunDir); err != nil {
+				return err
+			}
 		}
 
 		// conditionally write cni config file
@@ -1388,6 +1459,16 @@ func (nc *DefaultNodeNetworkController) reconcileConntrackUponEndpointSliceEvent
 }
 
 func (nc *DefaultNodeNetworkController) WatchEndpointSlices() error {
+	if util.IsNetworkSegmentationSupportEnabled() {
+		// Filter out objects without the default serviceName label to exclude mirrored EndpointSlices
+		// Only default EndpointSlices contain the discovery.LabelServiceName label
+		req, err := labels.NewRequirement(discovery.LabelServiceName, selection.Exists, nil)
+		if err != nil {
+			return err
+		}
+		_, err = nc.retryEndpointSlices.WatchResourceFiltered("", labels.NewSelector().Add(*req))
+		return err
+	}
 	_, err := nc.retryEndpointSlices.WatchResource()
 	return err
 }
@@ -1615,6 +1696,46 @@ func updateOVSOtherConfig(key string, value interface{}) error {
 	}
 	if _, stderr, err := util.RunOVSVsctl(args...); err != nil {
 		return fmt.Errorf("error setting/removing other_config:%s: %v\n  %q", key, err, stderr)
+	}
+	return nil
+}
+
+// configureGlobalForwarding configures the global forwarding settings.
+// It sets the FORWARD policy to DROP/ACCEPT based on the config.Gateway.DisableForwarding value for all enabled IP families.
+// For IPv6 it additionally always enables the global forwarding.
+func configureGlobalForwarding() error {
+	// Global forwarding works differently for IPv6:
+	//   conf/all/forwarding - BOOLEAN
+	//    Enable global IPv6 forwarding between all interfaces.
+	//	  IPv4 and IPv6 work differently here; e.g. netfilter must be used
+	//	  to control which interfaces may forward packets and which not.
+	// https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt
+	//
+	// It is not possible to configure the IPv6 forwarding per interface by
+	// setting the net.ipv6.conf.<ifname>.forwarding sysctl. Instead,
+	// the opposite approach is required where the global forwarding
+	// is enabled and an iptables rule is added to restrict it by default.
+	if config.IPv6Mode {
+		if err := ip.EnableIP6Forward(); err != nil {
+			return fmt.Errorf("could not set the correct global forwarding value for ipv6:  %w", err)
+		}
+
+	}
+
+	for _, proto := range clusterIPTablesProtocols() {
+		ipt, err := util.GetIPTablesHelper(proto)
+		if err != nil {
+			return fmt.Errorf("failed to get the iptables helper: %w", err)
+		}
+
+		target := "ACCEPT"
+		if config.Gateway.DisableForwarding {
+			target = "DROP"
+
+		}
+		if err := ipt.ChangePolicy("filter", "FORWARD", target); err != nil {
+			return fmt.Errorf("failed to change the forward policy to %q: %w", target, err)
+		}
 	}
 	return nil
 }

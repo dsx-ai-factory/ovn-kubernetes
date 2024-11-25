@@ -12,8 +12,10 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 
 	"github.com/safchain/ethtool"
 	kapi "k8s.io/api/core/v1"
@@ -219,15 +221,26 @@ func (g *gateway) Init(stopChan <-chan struct{}, wg *sync.WaitGroup) error {
 	g.wg = wg
 
 	var err error
-	if err = g.initFunc(); err != nil {
-		return err
-	}
+
 	g.servicesRetryFramework = g.newRetryFrameworkNode(factory.ServiceForGatewayType)
 	if _, err = g.servicesRetryFramework.WatchResource(); err != nil {
 		return fmt.Errorf("gateway init failed to start watching services: %v", err)
 	}
 
 	endpointSlicesRetryFramework := g.newRetryFrameworkNode(factory.EndpointSliceForGatewayType)
+
+	if util.IsNetworkSegmentationSupportEnabled() {
+		// Filter out objects without the default serviceName label to exclude mirrored EndpointSlices
+		// Only default EndpointSlices contain the discovery.LabelServiceName label
+		req, err := labels.NewRequirement(discovery.LabelServiceName, selection.Exists, nil)
+		if err != nil {
+			return err
+		}
+		if _, err = endpointSlicesRetryFramework.WatchResourceFiltered("", labels.NewSelector().Add(*req)); err != nil {
+			return fmt.Errorf("gateway init failed to start watching endpointslices: %v", err)
+		}
+		return nil
+	}
 	if _, err = endpointSlicesRetryFramework.WatchResource(); err != nil {
 		return fmt.Errorf("gateway init failed to start watching endpointslices: %v", err)
 	}
@@ -338,6 +351,7 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops 
 	l3GwConfig := util.L3GatewayConfig{
 		Mode:           config.Gateway.Mode,
 		ChassisID:      chassisID,
+		BridgeID:       gatewayBridge.bridgeName,
 		InterfaceID:    gatewayBridge.interfaceID,
 		MACAddress:     gatewayBridge.macAddress,
 		IPAddresses:    gatewayBridge.ips,
@@ -395,7 +409,7 @@ func (g *gateway) Reconcile() error {
 	}
 	subnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
 	if err != nil {
-		return fmt.Errorf("failed to get subnets for node: %s for OpenFlow cache update", node.Name)
+		return fmt.Errorf("failed to get subnets for node: %s for OpenFlow cache update; err: %w", node.Name, err)
 	}
 	if err := g.openflowManager.updateBridgeFlowCache(subnets, g.nodeIPManager.ListAddresses()); err != nil {
 		return err
@@ -436,6 +450,7 @@ func (g *gateway) GetGatewayIface() string {
 
 type bridgeConfiguration struct {
 	sync.Mutex
+	nodeName           string
 	bridgeName         string
 	uplinkName         string
 	dpuHostRepName     string // empty in case of non-DPU mode
@@ -444,11 +459,12 @@ type bridgeConfiguration struct {
 	gwIface            string
 	interfaceID        string
 	macAddress         net.HardwareAddr
-	patchPort          string
-	ofPortPatch        string
+	//patchPort          string
+	//ofPortPatch        string  TBD deleted in upstream
 	ofPortPhys         string
 	ofPortHost         string
 	localnetPatchPorts *sync.Map
+	netConfig          map[string]*bridgeUDNConfiguration
 }
 
 // updateInterfaceIPAddresses sets and returns the bridge's current ips
@@ -482,8 +498,15 @@ func (b *bridgeConfiguration) updateInterfaceIPAddresses(node *kapi.Node) ([]*ne
 }
 
 func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []*net.IPNet) (*bridgeConfiguration, error) {
+	defaultNetConfig := &bridgeUDNConfiguration{
+		masqCTMark: ctMarkOVN,
+	}
 	res := bridgeConfiguration{
 		localnetPatchPorts: &sync.Map{},
+		nodeName:           nodeName,
+		netConfig:          map[string]*bridgeUDNConfiguration{
+			types.DefaultNetworkName: defaultNetConfig,
+		},
 	}
 	gwIntf := intfName
 	switchdevMode := false
@@ -573,7 +596,7 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 
 	// the name of the patch port created by ovn-controller is of the form
 	// patch-<logical_port_name_of_localnet_port>-to-br-int
-	res.patchPort = "patch-" + res.bridgeName + "_" + nodeName + "-to-br-int"
+	defaultNetConfig.patchPort = (&util.DefaultNetInfo{}).GetNetworkScopedPatchPortName(res.bridgeName, nodeName)
 
 	// for DPU we use the host MAC address for the Gateway configuration
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {

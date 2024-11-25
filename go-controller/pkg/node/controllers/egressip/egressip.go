@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -109,15 +110,15 @@ type referencedObjects struct {
 type Controller struct {
 	eIPLister         egressiplisters.EgressIPLister
 	eIPInformer       cache.SharedIndexInformer
-	eIPQueue          workqueue.RateLimitingInterface
+	eIPQueue          workqueue.TypedRateLimitingInterface[string]
 	nodeLister        corelisters.NodeLister
 	namespaceLister   corelisters.NamespaceLister
 	namespaceInformer cache.SharedIndexInformer
-	namespaceQueue    workqueue.RateLimitingInterface
+	namespaceQueue    workqueue.TypedRateLimitingInterface[*corev1.Namespace]
 
 	podLister   corelisters.PodLister
 	podInformer cache.SharedIndexInformer
-	podQueue    workqueue.RateLimitingInterface
+	podQueue    workqueue.TypedRateLimitingInterface[*corev1.Pod]
 
 	// cache is a cache of configuration states for EIPs, key is EgressIP Name.
 	cache *syncmap.SyncMap[*state]
@@ -145,22 +146,22 @@ func NewController(k kube.Interface, eIPInformer egressipinformer.EgressIPInform
 	c := &Controller{
 		eIPLister:   eIPInformer.Lister(),
 		eIPInformer: eIPInformer.Informer(),
-		eIPQueue: workqueue.NewNamedRateLimitingQueue(
-			workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
-			"eipeip",
+		eIPQueue: workqueue.NewTypedRateLimitingQueueWithConfig(
+			workqueue.NewTypedItemFastSlowRateLimiter[string](time.Second, 5*time.Second, 5),
+			workqueue.TypedRateLimitingQueueConfig[string]{Name: "eipeip"},
 		),
 		nodeLister:        corelisters.NewNodeLister(nodeInformer.GetIndexer()),
 		namespaceLister:   namespaceInformer.Lister(),
 		namespaceInformer: namespaceInformer.Informer(),
-		namespaceQueue: workqueue.NewNamedRateLimitingQueue(
-			workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
-			"eipnamespace",
+		namespaceQueue: workqueue.NewTypedRateLimitingQueueWithConfig(
+			workqueue.NewTypedItemFastSlowRateLimiter[*corev1.Namespace](time.Second, 5*time.Second, 5),
+			workqueue.TypedRateLimitingQueueConfig[*corev1.Namespace]{Name: "eipnamespace"},
 		),
 		podLister:   podInformer.Lister(),
 		podInformer: podInformer.Informer(),
-		podQueue: workqueue.NewNamedRateLimitingQueue(
-			workqueue.NewItemFastSlowRateLimiter(time.Second, 5*time.Second, 5),
-			"eippods",
+		podQueue: workqueue.NewTypedRateLimitingQueueWithConfig(
+			workqueue.NewTypedItemFastSlowRateLimiter[*corev1.Pod](time.Second, 5*time.Second, 5),
+			workqueue.TypedRateLimitingQueueConfig[*corev1.Pod]{Name: "eippods"},
 		),
 		cache:                 syncmap.NewSyncMap[*state](),
 		referencedObjectsLock: sync.RWMutex{},
@@ -429,7 +430,7 @@ func (c *Controller) processNextEIPWorkItem(wg *sync.WaitGroup) bool {
 	}
 	defer c.eIPQueue.Done(key)
 	klog.V(4).Infof("Processing Egress IP %s", key)
-	if err := c.syncEIP(key.(string)); err != nil {
+	if err := c.syncEIP(key); err != nil {
 		if c.eIPQueue.NumRequeues(key) < maxRetries {
 			klog.V(4).Infof("Error found while processing Egress IP %s: %v", key, err)
 			c.eIPQueue.AddRateLimited(key)
@@ -623,12 +624,28 @@ func generateEIPConfig(link netlink.Link, eIPNet *net.IPNet, isEIPV6 bool) (*eIP
 }
 
 func generateRoutesForLink(link netlink.Link, isV6 bool) ([]netlink.Route, error) {
-	linkRoutes, err := netlink.RouteList(link, util.GetIPFamily(isV6))
+	routeTable := 254 // main table number
+	// check if device is a slave to a VRF device and if so, use VRF devices associated routing table to lookup routes instead of main table
+	if isVRFSlaveDevice(link) {
+		vrfLink, err := util.GetNetLinkOps().LinkByIndex(link.Attrs().MasterIndex)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get VRF link from interface index %d: %w", link.Attrs().MasterIndex, err)
+		}
+		vrf, ok := vrfLink.(*netlink.Vrf)
+		if !ok {
+			actualType := reflect.TypeOf(vrfLink)
+			return nil, fmt.Errorf("expected link %s to be type VRF, instead received type %s", vrfLink.Attrs().Name, actualType)
+		}
+		routeTable = int(vrf.Table)
+	}
+	filterRoute, filterMask := filterRouteByLinkTable(link.Attrs().Index, routeTable)
+	linkRoutes, err := util.GetNetLinkOps().RouteListFiltered(util.GetIPFamily(isV6), filterRoute, filterMask)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get routes for link %s: %v", link.Attrs().Name, err)
 	}
 	linkRoutes = ensureAtLeastOneDefaultRoute(linkRoutes, link.Attrs().Index, isV6)
-	overwriteRoutesTableID(linkRoutes, getRouteTableID(link.Attrs().Index))
+	overwriteRoutesTableID(linkRoutes, util.CalculateRouteTableID(link.Attrs().Index))
+	clearSrcFromRoutes(linkRoutes)
 	return linkRoutes, nil
 }
 
@@ -722,7 +739,10 @@ func (c *Controller) updateEIP(existing *state, update *config) error {
 		}
 		if !isEIPOnLink {
 			for _, routeToDelete := range existing.eIPConfig.routes {
-				c.routeManager.Del(routeToDelete)
+				err = c.routeManager.Del(routeToDelete)
+				if err != nil {
+					return fmt.Errorf("failed to delete egress IP route: %w", err)
+				}
 			}
 		}
 	} else if update != nil && update.eIPConfig != nil && len(update.eIPConfig.routes) > 0 &&
@@ -730,7 +750,10 @@ func (c *Controller) updateEIP(existing *state, update *config) error {
 		// delete delta between existing and update
 		routesToDelete := routeDifference(existing.eIPConfig.routes, update.eIPConfig.routes)
 		for _, routeToDelete := range routesToDelete {
-			c.routeManager.Del(routeToDelete)
+			err := c.routeManager.Del(routeToDelete)
+			if err != nil {
+				return fmt.Errorf("failed to delete egress IP route: %w", err)
+			}
 		}
 	}
 	// apply new changes
@@ -765,7 +788,9 @@ func (c *Controller) updateEIP(existing *state, update *config) error {
 		existing.eIPConfig.addr = update.eIPConfig.addr
 		// route manager manages retry
 		for _, routeToAdd := range update.eIPConfig.routes {
-			c.routeManager.Add(routeToAdd)
+			if err := c.routeManager.Add(routeToAdd); err != nil {
+				return err
+			}
 		}
 		existing.eIPConfig.routes = update.eIPConfig.routes
 	}
@@ -877,7 +902,7 @@ func (c *Controller) repairNode() error {
 				assignedAddrStrToAddrs[addressStr] = address
 			}
 		}
-		filter, mask := filterRouteByLinkTable(linkIdx, getRouteTableID(linkIdx))
+		filter, mask := filterRouteByLinkTable(linkIdx, util.CalculateRouteTableID(linkIdx))
 		existingRoutes, err := util.GetNetLinkOps().RouteListFiltered(netlink.FAMILY_ALL, filter, mask)
 		if err != nil {
 			return fmt.Errorf("unable to get route list using filter (%s): %v", filter.String(), err)
@@ -1215,7 +1240,9 @@ func (c *Controller) removeStaleIPRoutes(staleIPRoutes sets.Set[string], routeSt
 		if !ok {
 			return fmt.Errorf("expected to find route %q in map: %+v", ipRoute, routeStrToNetlinkRoute)
 		}
-		c.routeManager.Del(route)
+		if err := c.routeManager.Del(route); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -1320,8 +1347,10 @@ func overwriteRoutesTableID(routes []netlink.Route, tableID int) {
 	}
 }
 
-func getRouteTableID(ifIndex int) int {
-	return ifIndex + routingTableIDStart
+func clearSrcFromRoutes(routes []netlink.Route) {
+	for i := range routes {
+		routes[i].Src = nil
+	}
 }
 
 func findLinkOnSameNetworkAsIP(ip net.IP, v4, v6 bool) (bool, netlink.Link, error) {
@@ -1437,7 +1466,7 @@ func getNetlinkAddress(addr *net.IPNet, ifindex int) *netlink.Addr {
 // from the links 'ifindex'
 func generateIPRule(srcIP net.IP, isIPv6 bool, ifIndex int) netlink.Rule {
 	r := *netlink.NewRule()
-	r.Table = getRouteTableID(ifIndex)
+	r.Table = util.CalculateRouteTableID(ifIndex)
 	r.Priority = rulePriority
 	var ipFullMask string
 	if isIPv6 {
@@ -1513,4 +1542,8 @@ func getNodeIPFwMarkIPRule(ipFamily int) netlink.Rule {
 	r.Table = 254 // main
 	r.Family = ipFamily
 	return *r
+}
+
+func isVRFSlaveDevice(link netlink.Link) bool {
+	return link.Attrs().Slave != nil && link.Attrs().Slave.SlaveType() == "vrf"
 }

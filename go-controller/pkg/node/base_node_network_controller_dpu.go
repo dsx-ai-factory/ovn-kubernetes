@@ -639,44 +639,56 @@ func (bnnc *BaseNodeNetworkController) updateRateLimitingForPods(nadName string)
 	}
 }
 
-func (bnnc *BaseNodeNetworkController) AddNAD(nadName string, nadConf *util.NADConfig) {
-	if config.OvnKubeNode.Mode == ovntypes.NodeModeDPU {
-		var oldMaxNewConnPPS uint
-		oldNADConfig, ok := bnnc.GetNADConfig(nadName)
-		if !ok || ((nadConf != nil || oldNADConfig != nil) &&
-			(nadConf == nil || oldNADConfig == nil || !reflect.DeepEqual(*oldNADConfig, *nadConf))) {
-			bnnc.NADConfigMap.Store(nadName, nadConf)
-			// Node that NAD update are done serialized, so no locking is needed
-			if oldNADConfig != nil {
-				oldMaxNewConnPPS = oldNADConfig.MaxNewConnPPS
-			}
-			bnnc.totalMaxNewConnPPS -= oldMaxNewConnPPS
-			if nadConf != nil {
-				bnnc.totalMaxNewConnPPS += nadConf.MaxNewConnPPS
-			}
-			// We'll start a checker when any nad on this controller has PPS limit > 0
-			bnnc.enableDoSChecker()
-			bnnc.updateRateLimitingForPods(nadName)
-		}
+func (bnnc *BaseNodeNetworkController) updateNADConfig(nadName string, nadConf, oldNADConfig *util.NADConfig) {
+	var oldMaxNewConnPPS uint
+	bnnc.NADConfigMap.Store(nadName, nadConf)
+	// Node that NAD update are done serialized, so no locking is needed
+	if oldNADConfig != nil {
+		oldMaxNewConnPPS = oldNADConfig.MaxNewConnPPS
 	}
-	bnnc.NetInfo.AddNAD(nadName, nadConf)
+	bnnc.totalMaxNewConnPPS -= oldMaxNewConnPPS
+	if nadConf != nil {
+		bnnc.totalMaxNewConnPPS += nadConf.MaxNewConnPPS
+	}
+	// We'll start a checker when any nad on this controller has PPS limit > 0
+	bnnc.enableDoSChecker()
+	bnnc.updateRateLimitingForPods(nadName)
 }
 
-func (bnnc *BaseNodeNetworkController) DeleteNAD(nadName string) {
-	if config.OvnKubeNode.Mode == ovntypes.NodeModeDPU {
-		v, ok := bnnc.NADConfigMap.Load(nadName)
-		if ok && v != nil {
-			nadConfig := v.(*util.NADConfig)
-			oldTotalMaxNewConnPPS := bnnc.totalMaxNewConnPPS
-			bnnc.totalMaxNewConnPPS -= nadConfig.MaxNewConnPPS
-			if oldTotalMaxNewConnPPS > 0 && bnnc.totalMaxNewConnPPS == 0 {
-				// TBD: stop rate limiting?
-				bnnc.disableDoSChecker()
-			}
-		}
-		bnnc.NADConfigMap.Delete(nadName)
+func (bnnc *BaseNodeNetworkController) deleteNADConfig(nadName string, nadConfig *util.NADConfig) {
+	oldTotalMaxNewConnPPS := bnnc.totalMaxNewConnPPS
+	bnnc.totalMaxNewConnPPS -= nadConfig.MaxNewConnPPS
+	if oldTotalMaxNewConnPPS > 0 && bnnc.totalMaxNewConnPPS == 0 {
+		// TBD: stop rate limiting?
+		bnnc.disableDoSChecker()
 	}
-	bnnc.NetInfo.DeleteNAD(nadName)
+	bnnc.NADConfigMap.Delete(nadName)
+}
+
+func (bnnc *BaseNodeNetworkController) SetNADs(nadConfigs map[string]*util.NADConfig) {
+	if config.OvnKubeNode.Mode == ovntypes.NodeModeDPU {
+		bnnc.NADConfigMap.Range(func(key, v interface{}) bool {
+			var oldNADConfig *util.NADConfig
+			nadName := key.(string)
+			if v != nil {
+				oldNADConfig = v.(*util.NADConfig)
+			}
+			nadConf, ok := nadConfigs[nadName]
+			if ok && (nadConf != nil || oldNADConfig != nil) &&
+				(nadConf == nil || oldNADConfig == nil || !reflect.DeepEqual(*oldNADConfig, *nadConf)) {
+				bnnc.updateNADConfig(nadName, nadConf, oldNADConfig)
+				delete(nadConfigs, nadName)
+			} else if !ok && oldNADConfig != nil {
+				bnnc.deleteNADConfig(nadName, oldNADConfig)
+			}
+			return true
+		})
+		// rest of nadConfigs
+		for nadName, nadConf := range nadConfigs {
+			bnnc.updateNADConfig(nadName, nadConf, nil)
+		}
+	}
+	bnnc.NetInfo.SetNADs(nadConfigs)
 }
 
 func (bnnc *BaseNodeNetworkController) GetNADConfig(nadName string) (*util.NADConfig, bool) {

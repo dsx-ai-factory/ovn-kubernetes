@@ -3,19 +3,19 @@ package ovn
 import (
 	"context"
 	"fmt"
-	"net"
 	"reflect"
 	"sync"
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressqoslisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	anpcontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/admin_network_policy"
 	apbroutecontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
@@ -27,9 +27,11 @@ import (
 	addrsetsyncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/port_group"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/topology"
 	zoneic "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
@@ -62,16 +64,16 @@ type DefaultNetworkController struct {
 	// EgressQoS
 	egressQoSLister egressqoslisters.EgressQoSLister
 	egressQoSSynced cache.InformerSynced
-	egressQoSQueue  workqueue.RateLimitingInterface
+	egressQoSQueue  workqueue.TypedRateLimitingInterface[string]
 	egressQoSCache  sync.Map
 
 	egressQoSPodLister corev1listers.PodLister
 	egressQoSPodSynced cache.InformerSynced
-	egressQoSPodQueue  workqueue.RateLimitingInterface
+	egressQoSPodQueue  workqueue.TypedRateLimitingInterface[string]
 
 	egressQoSNodeLister corev1listers.NodeLister
 	egressQoSNodeSynced cache.InformerSynced
-	egressQoSNodeQueue  workqueue.RateLimitingInterface
+	egressQoSNodeQueue  workqueue.TypedRateLimitingInterface[string]
 
 	// Cluster wide Load_Balancer_Group UUID.
 	// Includes all node switches and node gateway routers.
@@ -88,11 +90,12 @@ type DefaultNetworkController struct {
 	// Cluster-wide router default Control Plane Protection (COPP) UUID
 	defaultCOPPUUID string
 
+	// Controller in charge of services
+	svcController *svccontroller.Controller
+
 	// Controller used for programming OVN for egress IP
 	eIPC egressIPZoneController
 
-	// Controller used to handle services
-	svcController *svccontroller.Controller
 	// Controller used to handle egress services
 	egressSvcController *egresssvc.Controller
 	// Controller used for programming OVN for Admin Network Policy
@@ -103,7 +106,8 @@ type DefaultNetworkController struct {
 
 	// dnsNameResolver is used for resolving the IP addresses of DNS names
 	// used in egress firewall rules
-	dnsNameResolver dnsnameresolver.DNSNameResolver
+	dnsNameResolver  dnsnameresolver.DNSNameResolver
+	efNodeController controller.Controller
 
 	// retry framework for egress firewall
 	retryEgressFirewalls *retry.RetryFramework
@@ -116,8 +120,6 @@ type DefaultNetworkController struct {
 	retryEgressIPPods *retry.RetryFramework
 	// retry framework for Egress nodes
 	retryEgressNodes *retry.RetryFramework
-	// retry framework for Egress Firewall Nodes
-	retryEgressFwNodes *retry.RetryFramework
 
 	// Node-specific syncMaps used by node event handler
 	gatewaysFailed              sync.Map
@@ -132,37 +134,40 @@ type DefaultNetworkController struct {
 	// updated atomically
 	allInitialPodsProcessed uint32
 
-	// IP addresses of OVN Cluster logical router port ("GwRouterToJoinSwitchPrefix + OVNClusterRouter")
-	// connecting to the join switch
-	ovnClusterLRPToJoinIfAddrs []*net.IPNet
-
 	// zoneChassisHandler handles the local node and remote nodes in creating or updating the chassis entries in the OVN Southbound DB.
 	// Please see zone_interconnect/chassis_handler.go for more details.
 	zoneChassisHandler *zoneic.ZoneChassisHandler
+
+	gatewayTopologyFactory *topology.GatewayTopologyFactory
 }
 
 // NewDefaultNetworkController creates a new OVN controller for creating logical network
 // infrastructure and policy for default l3 network
-func NewDefaultNetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo) (*DefaultNetworkController, error) {
+func NewDefaultNetworkController(cnci *CommonNetworkControllerInfo, nadController *nad.NetAttachDefinitionController,
+	observManager *observability.Manager) (*DefaultNetworkController, error) {
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
-	return newDefaultNetworkControllerCommon(cnci, netInfo, stopChan, wg, nil)
+	return newDefaultNetworkControllerCommon(cnci, stopChan, wg, nil, nadController, observManager)
 }
 
-func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo,
+func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 	defaultStopChan chan struct{}, defaultWg *sync.WaitGroup,
-	addressSetFactory addressset.AddressSetFactory) (*DefaultNetworkController, error) {
+	addressSetFactory addressset.AddressSetFactory, nadController *nad.NetAttachDefinitionController,
+	observManager *observability.Manager) (*DefaultNetworkController, error) {
 
 	if addressSetFactory == nil {
 		addressSetFactory = addressset.NewOvnAddressSetFactory(cnci.nbClient, config.IPv4Mode, config.IPv6Mode)
 	}
 
+	netInfo := util.InitDefaultNetInfo()
 	svcController, err := svccontroller.NewController(
 		cnci.client, cnci.nbClient,
 		cnci.watchFactory.ServiceCoreInformer(),
 		cnci.watchFactory.EndpointSliceCoreInformer(),
 		cnci.watchFactory.NodeCoreInformer(),
+		nadController,
 		cnci.recorder,
+		netInfo,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create new service controller while creating new default network controller: %w", err)
@@ -208,9 +213,12 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo, netInf
 			localZoneNodes:              &sync.Map{},
 			zoneICHandler:               zoneICHandler,
 			cancelableCtx:               util.NewCancelableContext(),
+			observManager:               observManager,
+			nadController:               nadController,
 		},
 		externalGatewayRouteInfo: apbExternalRouteController.ExternalGWRouteInfoCache,
 		eIPC: egressIPZoneController{
+			NetInfo:            netInfo,
 			nodeUpdateMutex:    &sync.Mutex{},
 			podAssignmentMutex: &sync.Mutex{},
 			podAssignment:      make(map[string]*podAssignmentState),
@@ -218,15 +226,12 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo, netInf
 			watchFactory:       cnci.watchFactory,
 			nodeZoneState:      syncmap.NewSyncMap[bool](),
 		},
-		loadbalancerClusterCache:     make(map[kapi.Protocol]string),
-		clusterLoadBalancerGroupUUID: "",
-		switchLoadBalancerGroupUUID:  "",
-		routerLoadBalancerGroupUUID:  "",
-		svcController:                svcController,
-		zoneChassisHandler:           zoneChassisHandler,
-		apbExternalRouteController:   apbExternalRouteController,
+		loadbalancerClusterCache:   make(map[kapi.Protocol]string),
+		zoneChassisHandler:         zoneChassisHandler,
+		apbExternalRouteController: apbExternalRouteController,
+		svcController:              svcController,
+		gatewayTopologyFactory:     topology.NewGatewayTopologyFactory(cnci.nbClient),
 	}
-
 	// Allocate IPs for logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter". This should always
 	// allocate the first IPs in the join switch subnets.
 	gwLRPIfAddrs, err := oc.getOVNClusterRouterPortToJoinSwitchIfAddrs()
@@ -250,7 +255,6 @@ func (oc *DefaultNetworkController) initRetryFramework() {
 	oc.retryEgressIPNamespaces = oc.newRetryFramework(factory.EgressIPNamespaceType)
 	oc.retryEgressIPPods = oc.newRetryFramework(factory.EgressIPPodType)
 	oc.retryEgressNodes = oc.newRetryFramework(factory.EgressNodeType)
-	oc.retryEgressFwNodes = oc.newRetryFramework(factory.EgressFwNodeType)
 	oc.retryNamespaces = oc.newRetryFramework(factory.NamespaceType)
 	oc.retryNetworkPolicies = oc.newRetryFramework(factory.PolicyType)
 }
@@ -340,7 +344,13 @@ func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 
 // Stop gracefully stops the controller
 func (oc *DefaultNetworkController) Stop() {
-	oc.dnsNameResolver.Shutdown()
+	if oc.dnsNameResolver != nil {
+		oc.dnsNameResolver.Shutdown()
+	}
+	if oc.efNodeController != nil {
+		controller.Stop(oc.efNodeController)
+	}
+
 	close(oc.stopChan)
 	oc.cancelableCtx.Cancel()
 	oc.wg.Wait()
@@ -372,38 +382,16 @@ func (oc *DefaultNetworkController) Init(ctx context.Context) error {
 	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "Load_Balancer_Group"); err != nil {
 		klog.Warningf("Load Balancer Group support enabled, however version of OVN in use does not support Load Balancer Groups.")
 	} else {
-		loadBalancerGroup := nbdb.LoadBalancerGroup{
-			Name: ovntypes.ClusterLBGroupName,
-		}
-		err := libovsdbops.CreateOrUpdateLoadBalancerGroup(oc.nbClient, &loadBalancerGroup)
+		clusterLBGroupUUID, switchLBGroupUUID, routerLBGroupUUID, err := initLoadBalancerGroups(oc.nbClient, oc.NetInfo)
 		if err != nil {
-			klog.Errorf("Error creating cluster-wide load balancer group %s: %v", ovntypes.ClusterLBGroupName, err)
 			return err
 		}
-		oc.clusterLoadBalancerGroupUUID = loadBalancerGroup.UUID
-
-		loadBalancerGroup = nbdb.LoadBalancerGroup{
-			Name: ovntypes.ClusterSwitchLBGroupName,
-		}
-		err = libovsdbops.CreateOrUpdateLoadBalancerGroup(oc.nbClient, &loadBalancerGroup)
-		if err != nil {
-			klog.Errorf("Error creating cluster-wide switch load balancer group %s: %v", ovntypes.ClusterSwitchLBGroupName, err)
-			return err
-		}
-		oc.switchLoadBalancerGroupUUID = loadBalancerGroup.UUID
-
-		loadBalancerGroup = nbdb.LoadBalancerGroup{
-			Name: ovntypes.ClusterRouterLBGroupName,
-		}
-		err = libovsdbops.CreateOrUpdateLoadBalancerGroup(oc.nbClient, &loadBalancerGroup)
-		if err != nil {
-			klog.Errorf("Error creating cluster-wide router load balancer group %s: %v", ovntypes.ClusterRouterLBGroupName, err)
-			return err
-		}
-		oc.routerLoadBalancerGroupUUID = loadBalancerGroup.UUID
+		oc.clusterLoadBalancerGroupUUID = clusterLBGroupUUID
+		oc.switchLoadBalancerGroupUUID = switchLBGroupUUID
+		oc.routerLoadBalancerGroupUUID = routerLBGroupUUID
 	}
 
-	networkID := util.InvalidNetworkID
+	networkID := util.InvalidID
 	nodeNames := []string{}
 	for _, node := range existingNodes {
 		if util.NoHostSubnet(node) {
@@ -411,7 +399,7 @@ func (oc *DefaultNetworkController) Init(ctx context.Context) error {
 		}
 		nodeNames = append(nodeNames, node.Name)
 
-		if config.OVNKubernetesFeature.EnableInterconnect && networkID == util.InvalidNetworkID {
+		if config.OVNKubernetesFeature.EnableInterconnect && networkID == util.InvalidID {
 			// get networkID from any node in the cluster
 			networkID, _ = util.ParseNetworkIDAnnotation(node, oc.zoneICHandler.GetNetworkName())
 		}
@@ -553,7 +541,8 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		err = oc.WatchEgressFwNodes()
+		oc.efNodeController = oc.newEFNodeController(oc.watchFactory.NodeCoreInformer())
+		err = controller.Start(oc.efNodeController)
 		if err != nil {
 			return err
 		}
@@ -592,7 +581,6 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 		// same process. TODO(tssurya): In upstream ovnk, its possible to run these as different processes
 		// in which case this flushing feature is not supported.
 		if config.OVNKubernetesFeature.EnableInterconnect && oc.zone != ovntypes.OvnDefaultZone {
-			util.SetARPTimeout()
 			// every minute cleanup stale conntrack entries if any
 			go wait.Until(func() {
 				oc.checkAndDeleteStaleConntrackEntries()
@@ -642,30 +630,6 @@ func WithSyncDurationMetricNoError(resourceName string, f func()) {
 		metrics.MetricOVNKubeControllerSyncDuration.WithLabelValues(resourceName).Set(end.Seconds())
 	}()
 	f()
-}
-
-func (oc *DefaultNetworkController) StartInterConnect(icInfo *util.InterConnectInfo) error {
-	logicalSwitch, ok := icInfo.LogicalEntityToConnect.(*nbdb.LogicalSwitch)
-	if !ok {
-		// configuration error, no retry
-		klog.Errorf("Inter-connect error: network %s can only connect to layer 2 network", oc.GetNetworkName())
-		return nil
-	}
-	routerName := ovntypes.OVNClusterRouter
-	logicalRouter := &nbdb.LogicalRouter{Name: routerName}
-	return oc.ConnectToNetworks(logicalSwitch, logicalRouter, icInfo.Subnets)
-}
-
-func (oc *DefaultNetworkController) StopInterConnect(icInfo *util.InterConnectInfo) error {
-	logicalSwitch, ok := icInfo.LogicalEntityToConnect.(*nbdb.LogicalSwitch)
-	if !ok {
-		// configuration error, no retry
-		klog.Errorf("Inter-connect error: network %s can only connect to layer 2 network", oc.GetNetworkName())
-		return nil
-	}
-	routerName := ovntypes.OVNClusterRouter
-	logicalRouter := &nbdb.LogicalRouter{Name: routerName}
-	return oc.DisconnectFromNetworks(logicalSwitch, logicalRouter)
 }
 
 type defaultNetworkControllerEventHandler struct {
@@ -786,18 +750,6 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 		}
 		return h.oc.ensurePod(nil, pod, true)
 
-	case factory.PolicyType:
-		np, ok := obj.(*knet.NetworkPolicy)
-		if !ok {
-			return fmt.Errorf("could not cast %T object to *knet.NetworkPolicy", obj)
-		}
-
-		if err = h.oc.addNetworkPolicy(np); err != nil {
-			klog.Infof("Network Policy add failed for %s/%s, will try again later: %v",
-				np.Namespace, np.Name, err)
-			return err
-		}
-
 	case factory.NodeType:
 		node, ok := obj.(*kapi.Node)
 		if !ok {
@@ -895,14 +847,6 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 		// Egress IP depends on is added from the gateway reconciliation logic
 		return h.oc.addEgressNode(node)
 
-	case factory.EgressFwNodeType:
-		node := obj.(*kapi.Node)
-		if err = h.oc.updateEgressFirewallForNode(nil, node); err != nil {
-			klog.Infof("Node add failed during egress firewall eval for node: %s, will try again later: %v",
-				node.Name, err)
-			return err
-		}
-
 	case factory.NamespaceType:
 		ns, ok := obj.(*kapi.Namespace)
 		if !ok {
@@ -911,10 +855,8 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 		return h.oc.AddNamespace(ns)
 
 	default:
-		return fmt.Errorf("no add function for object type %s", h.objType)
+		return h.oc.AddResourceCommon(h.objType, obj)
 	}
-
-	return nil
 }
 
 // UpdateResource updates the specified object in the cluster to its version in newObj according to its
@@ -972,8 +914,8 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 		// |                    |                   |                                                 |
 		// |--------------------+-------------------+-------------------------------------------------+
 		newNodeIsLocalZoneNode := h.oc.isLocalZoneNode(newNode)
-		zoneClusterChanged := h.oc.nodeZoneClusterChanged(oldNode, newNode, newNodeIsLocalZoneNode)
-		nodeSubnetChanged := nodeSubnetChanged(oldNode, newNode)
+		zoneClusterChanged := h.oc.nodeZoneClusterChanged(oldNode, newNode, newNodeIsLocalZoneNode, types.DefaultNetworkName)
+		nodeSubnetChanged := nodeSubnetChanged(oldNode, newNode, types.DefaultNetworkName)
 		var aggregatedErrors []error
 		if newNodeIsLocalZoneNode {
 			var nodeSyncsParam *nodeSyncs
@@ -983,7 +925,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 				_, failed := h.oc.nodeClusterRouterPortFailed.Load(newNode.Name)
 				clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChanged || h.oc.skipPinnedLSChanged(oldNode, newNode)
 				_, failed = h.oc.mgmtPortFailed.Load(newNode.Name)
-				mgmtSync := failed || macAddressChanged(oldNode, newNode) || nodeSubnetChanged
+				mgmtSync := failed || macAddressChanged(oldNode, newNode, types.DefaultNetworkName) || nodeSubnetChanged
 				_, failed = h.oc.gatewaysFailed.Load(newNode.Name)
 				gwSync := (failed || gatewayChanged(oldNode, newNode) ||
 					nodeSubnetChanged || hostCIDRsChanged(oldNode, newNode) ||
@@ -1075,27 +1017,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 				return err
 			}
 		}
-		return nil
-
-	case factory.EgressFwNodeType:
-		oldNode := oldObj.(*kapi.Node)
-		newNode := newObj.(*kapi.Node)
-
-		// non-OVN managed node cannot be used for EgressIP assignment. For example: DPUs
-		oldNoHostSubnet := util.NoHostSubnet(oldNode)
-		newNoHostSubnet := util.NoHostSubnet(newNode)
-		if oldNoHostSubnet && newNoHostSubnet {
-			return nil
-		} else if oldNoHostSubnet && !newNoHostSubnet {
-			klog.Errorf("Node %s has been marked for OVN management at runtime. This is not supported,"+
-				" so please delete node and add.", oldNode.Name)
-			return nil
-		} else if !oldNoHostSubnet && newNoHostSubnet {
-			klog.Errorf("Node %s has been marked for non-OVN management at runtime. This is not supported,"+
-				" so please delete node and add.", oldNode.Name)
-			return nil
-		}
-		return h.oc.updateEgressFirewallForNode(oldNode, newNode)
+		return h.oc.addEgressNode(newNode)
 
 	case factory.NamespaceType:
 		oldNs, newNs := oldObj.(*kapi.Namespace), newObj.(*kapi.Namespace)
@@ -1117,13 +1039,6 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 			portInfo = cachedObj.(*lpInfo)
 		}
 		return h.oc.removePod(pod, portInfo)
-
-	case factory.PolicyType:
-		knp, ok := obj.(*knet.NetworkPolicy)
-		if !ok {
-			return fmt.Errorf("could not cast obj of type %T to *knet.NetworkPolicy", obj)
-		}
-		return h.oc.deleteNetworkPolicy(knp)
 
 	case factory.NodeType:
 		node, ok := obj.(*kapi.Node)
@@ -1166,19 +1081,12 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 		h.oc.eIPC.nodeZoneState.UnlockKey(node.Name)
 		return nil
 
-	case factory.EgressFwNodeType:
-		node, ok := obj.(*kapi.Node)
-		if !ok {
-			return fmt.Errorf("could not cast obj of type %T to *knet.Node", obj)
-		}
-		return h.oc.updateEgressFirewallForNode(node, nil)
-
 	case factory.NamespaceType:
 		ns := obj.(*kapi.Namespace)
 		return h.oc.deleteNamespace(ns)
 
 	default:
-		return fmt.Errorf("object type %s not supported", h.objType)
+		return h.oc.DeleteResourceCommon(h.objType, obj)
 	}
 }
 
@@ -1207,9 +1115,6 @@ func (h *defaultNetworkControllerEventHandler) SyncFunc(objs []interface{}) erro
 
 		case factory.EgressNodeType:
 			syncFunc = h.oc.initClusterEgressPolicies
-
-		case factory.EgressFwNodeType:
-			syncFunc = nil
 
 		case factory.EgressIPPodType,
 			factory.EgressIPType:

@@ -177,7 +177,7 @@ func setupNetwork(link netlink.Link, ifInfo *PodInterfaceInfo) error {
 	}
 	for _, gw := range ifInfo.Gateways {
 		if err := cniPluginLibOps.AddRoute(nil, gw, link, ifInfo.RoutableMTU); err != nil {
-			return fmt.Errorf("failed to add gateway route: %v", err)
+			return fmt.Errorf("failed to add gateway route to link '%s': %v", link.Attrs().Name, err)
 		}
 	}
 	for _, route := range ifInfo.Routes {
@@ -454,8 +454,8 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 		return fmt.Errorf("failed to get datapath type for bridge br-int : %v", err)
 	}
 
-	klog.Infof("ConfigureOVS: namespace: %s, podName: %s, network: %s, NAD %s, SandboxID: %q, PCI device ID: %s, UID: %q, MAC: %s, IPs: %v, ifaceID: %s, ovn_kube_mode: %s",
-		namespace, podName, ifInfo.NetName, ifInfo.NADName, sandboxID, deviceID, initialPodUID, ifInfo.MAC, ipStrs, ifaceID, ifInfo.OvnKubeMode)
+	klog.Infof("ConfigureOVS: namespace: %s, podName: %s, hostIfaceName: %s, network: %s, NAD %s, SandboxID: %q, PCI device ID: %s, UID: %q, MAC: %s, IPs: %v, ifaceID: %s, ovn_kube_node: %s",
+		namespace, podName, hostIfaceName, ifInfo.NetName, ifInfo.NADName, sandboxID, deviceID, initialPodUID, ifInfo.MAC, ipStrs, ifaceID, ifInfo.OvnKubeMode)
 
 	// Find and remove any existing OVS port with this iface-id. Pods can
 	// have multiple sandboxes if some are waiting for garbage collection,
@@ -629,8 +629,16 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	return nil
 }
 
-// ConfigureInterface sets up the container interface
-func (pr *PodRequest) ConfigureInterface(getter PodInfoGetter, ifInfo *PodInterfaceInfo) ([]*current.Interface, error) {
+type PodRequestInterfaceOps interface {
+	ConfigureInterface(pr *PodRequest, getter PodInfoGetter, ifInfo *PodInterfaceInfo) ([]*current.Interface, error)
+	UnconfigureInterface(pr *PodRequest, ifInfo *PodInterfaceInfo) error
+}
+
+type defaultPodRequestInterfaceOps struct{}
+
+var podRequestInterfaceOps PodRequestInterfaceOps = &defaultPodRequestInterfaceOps{}
+
+func (*defaultPodRequestInterfaceOps) ConfigureInterface(pr *PodRequest, getter PodInfoGetter, ifInfo *PodInterfaceInfo) ([]*current.Interface, error) {
 	klog.V(5).Infof("Set up interface %+v with CNI Conf %v for pod %s/%s on network %s NAD %s",
 		*pr, pr.CNIConf, pr.PodNamespace, pr.PodName, pr.netName, pr.nadName)
 	if pr.CNIConf.DeviceID == "" && ifInfo.IsDPUHostMode {
@@ -658,7 +666,7 @@ func (pr *PodRequest) ConfigureInterface(getter PodInfoGetter, ifInfo *PodInterf
 	if !ifInfo.IsDPUHostMode {
 		err = ConfigureOVS(pr.ctx, pr.PodNamespace, pr.PodName, hostIface.Name, ifInfo, pr.SandboxID, pr.CNIConf.DeviceID, getter)
 		if err != nil {
-			pr.deletePorts(hostIface.Name, pr.PodNamespace, pr.PodName)
+			pr.deletePort(hostIface.Name, pr.PodNamespace, pr.PodName)
 			return nil, err
 		}
 	}
@@ -702,7 +710,7 @@ func (pr *PodRequest) ConfigureInterface(getter PodInfoGetter, ifInfo *PodInterf
 	return []*current.Interface{hostIface, contIface}, nil
 }
 
-func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
+func (*defaultPodRequestInterfaceOps) UnconfigureInterface(pr *PodRequest, ifInfo *PodInterfaceInfo) error {
 	podDesc := fmt.Sprintf("for pod %s/%s NAD %s", pr.PodNamespace, pr.PodName, pr.nadName)
 	klog.V(5).Infof("Tear down interface (%+v) with CNI conf %v %s", *pr, pr.CNIConf, podDesc)
 	if ifInfo.IsDPUHostMode {
@@ -718,6 +726,7 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 	}
 
 	ifnameSuffix := ""
+	isSecondary := pr.netName != types.DefaultNetworkName
 	// nothing needs to be done for the VFIO case in the container namespace
 	if !pr.IsVFIO {
 		netns, err := ns.GetNS(pr.Netns)
@@ -738,7 +747,6 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 		// 1. For SRIOV case, we'd need to move device from container namespace back to the host namespace
 		// 2. If it is secondary network and not dpu-host mode, then get the container interface index
 		//    so that we know the host-side interface name.
-		isSecondary := pr.netName != types.DefaultNetworkName
 		err = netns.Do(func(_ ns.NetNS) error {
 			// container side interface deletion
 			link, err := util.GetNetLinkOps().LinkByName(pr.IfName)
@@ -794,7 +802,11 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 	if !ifInfo.IsDPUHostMode {
 		var err error
 		// host side interface deletion
-		hostIfName := pr.SandboxID[:(15-len(ifnameSuffix))] + ifnameSuffix
+		var hostIfName string
+		if !util.IsNetworkSegmentationSupportEnabled() || isSecondary {
+			// this is a secondary network (not primary) or segmentation is not enabled
+			hostIfName = pr.SandboxID[:(15-len(ifnameSuffix))] + ifnameSuffix
+		}
 		if pr.CNIConf.DeviceID != "" {
 			hostIfName, err = util.GetFunctionRepresentorName(pr.CNIConf.DeviceID)
 			if err != nil {
@@ -813,10 +825,27 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 				}
 			}
 		}
-		if hostIfName != "" {
-			pr.deletePorts(hostIfName, pr.PodNamespace, pr.PodName)
+		portList, err := ovsFind("interface", "name", "external-ids:sandbox="+pr.SandboxID)
+		if err != nil {
+			return fmt.Errorf("failed to list interfaces in OVS during delete for sandbox: %s, err: %w",
+				pr.SandboxID, err)
 		}
-		err = clearPodBandwidth(pr.SandboxID)
+		// hostIfName is not empty if using device ID, a secondary network, or segmentation not enabled
+		// delete the port in traditional fashion
+		if hostIfName != "" {
+			pr.deletePort(hostIfName, pr.PodNamespace, pr.PodName)
+		} else {
+			// this is a primary interface deletion and segmentation is enabled, delete all ports
+			// delete happens in reverse order for attached networks, so this is the final deletion
+			// In other words we dont have to worry about accidentally deleting a secondary network interface at
+			// this point.
+			if len(portList) > 1 {
+				klog.V(5).Infof("Removing multiple interfaces for primary network segmentation (%+v) %s: %s",
+					*pr, podDesc, strings.Join(portList, ","))
+			}
+			pr.deletePorts(portList, pr.PodNamespace, pr.PodName)
+		}
+		err = clearPodBandwidthForPorts(portList, pr.SandboxID)
 		if err != nil {
 			klog.Errorf("Failed to clearPodBandwidth sandbox %v %s: %v", pr.SandboxID, podDesc, err)
 		}
@@ -852,7 +881,7 @@ func (pr *PodRequest) deletePodConntrack() {
 	}
 }
 
-func (pr *PodRequest) deletePorts(ifaceName, podNamespace, podName string) {
+func (pr *PodRequest) deletePort(ifaceName, podNamespace, podName string) {
 	podDesc := fmt.Sprintf("%s/%s", podNamespace, podName)
 
 	out, err := ovsExec("del-port", "br-int", ifaceName)
@@ -877,5 +906,11 @@ func (pr *PodRequest) deletePorts(ifaceName, podNamespace, podName string) {
 		}
 	} else {
 		klog.Warningf("Failed to reset MTU and/or delete the host-side link %s: %v", ifaceName, err)
+	}
+}
+
+func (pr *PodRequest) deletePorts(ifaces []string, podNamespace, podName string) {
+	for _, iface := range ifaces {
+		pr.deletePort(iface, podNamespace, podName)
 	}
 }

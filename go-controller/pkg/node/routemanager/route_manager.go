@@ -3,6 +3,7 @@ package routemanager
 import (
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -18,9 +19,8 @@ import (
 const MainTableID = 254
 
 type Controller struct {
-	store      map[int][]netlink.Route // key is link index
-	addRouteCh chan netlink.Route
-	delRouteCh chan netlink.Route
+	*sync.Mutex
+	store map[int][]netlink.Route // key is link index
 }
 
 // NewController manages routes which include adding and deletion of routes. It also manages restoration of managed routes.
@@ -29,9 +29,8 @@ type Controller struct {
 // All other functions are used internally.
 func NewController() *Controller {
 	return &Controller{
-		store:      make(map[int][]netlink.Route),
-		addRouteCh: make(chan netlink.Route, 5),
-		delRouteCh: make(chan netlink.Route, 5),
+		Mutex: &sync.Mutex{},
+		store: make(map[int][]netlink.Route),
 	}
 }
 
@@ -67,29 +66,31 @@ func (c *Controller) Run(stopCh <-chan struct{}, syncPeriod time.Duration) {
 				subscribed, routeEventCh = subscribeNetlinkRouteEvents(stopCh)
 			}
 			c.sync()
-		case newRoute := <-c.addRouteCh:
-			if err = c.addRoute(newRoute); err != nil {
-				klog.Errorf("Route Manager: failed to add route (%s): %v", newRoute.String(), err)
-			}
-		case delRoute := <-c.delRouteCh:
-			if err = c.delRoute(delRoute); err != nil {
-				klog.Errorf("Route Manager: failed to delete route (%s): %v", delRoute.String(), err)
-			}
 		}
 	}
 }
 
 // Add submits a request to add a route
-func (c *Controller) Add(r netlink.Route) {
-	c.addRouteCh <- r
+func (c *Controller) Add(r netlink.Route) error {
+	if err := c.addRoute(r); err != nil {
+		return fmt.Errorf("route manager: failed to add route (%s): %w", r.String(), err)
+	}
+	return nil
 }
 
 // Del submits a request to del a route
-func (c *Controller) Del(r netlink.Route) {
-	c.delRouteCh <- r
+func (c *Controller) Del(r netlink.Route) error {
+	if err := c.delRoute(r); err != nil {
+		return fmt.Errorf("route manager: failed to delete route (%s): %v", r.String(), err)
+	}
+	return nil
 }
 
+// addRoute attempts to add the route and returns with error
+// if it fails to do so.
 func (c *Controller) addRoute(r netlink.Route) error {
+	c.Lock()
+	defer c.Unlock()
 	klog.Infof("Route Manager: attempting to add route: %s", r.String())
 	// If table is unspecified aka 0, then set it to main table ID. This is done by default when adding a route.
 	// Set it explicitly to aid comparison of routes.
@@ -111,10 +112,18 @@ func (c *Controller) addRoute(r netlink.Route) error {
 	return nil
 }
 
+// delRoute attempts to remove the route and returns with error
+// if it fails to do so.
 func (c *Controller) delRoute(r netlink.Route) error {
+	c.Lock()
+	defer c.Unlock()
 	klog.Infof("Route Manager: attempting to delete route: %s", r.String())
 	link, err := util.GetNetLinkOps().LinkByIndex(r.LinkIndex)
 	if err != nil {
+		if util.GetNetLinkOps().IsLinkNotFoundError(err) {
+			delete(c.store, r.LinkIndex)
+			return nil
+		}
 		return fmt.Errorf("failed to delete route (%s) because unable to get link: %v", r.String(), err)
 	}
 	if err := c.netlinkDelRoute(link, r.Dst, r.Table); err != nil {
@@ -143,6 +152,8 @@ func (c *Controller) delRoute(r netlink.Route) error {
 // processNetlinkEvent will check if a deleted route is managed by route manager and if so, determine if a sync is needed
 // to restore any managed routes.
 func (c *Controller) processNetlinkEvent(ru netlink.RouteUpdate) error {
+	c.Lock()
+	defer c.Unlock()
 	if ru.Type == unix.RTM_NEWROUTE {
 		// An event resulting from `ip route change` will be seen as type RTM_NEWROUTE event and therefore this function will only
 		// log the changes and not attempt to restore the change. This will be accomplished by the sync function.
@@ -236,6 +247,8 @@ func (c *Controller) netlinkDelRoute(link netlink.Link, subnet *net.IPNet, table
 	return nil
 }
 
+// addRouteToStore adds routes to the internal cache
+// Must be called with the controller locked
 func (c *Controller) addRouteToStore(r netlink.Route) bool {
 	existingRoutes, ok := c.store[r.LinkIndex]
 	if !ok {
@@ -254,6 +267,9 @@ func (c *Controller) addRouteToStore(r netlink.Route) bool {
 // sync will iterate through all routes seen on a node and ensure any route manager managed routes are applied. Any additional
 // routes for this link are preserved. sync only inspects routes for links which we managed and ignore routes for non-managed links.
 func (c *Controller) sync() {
+	c.Lock()
+	defer c.Unlock()
+	deletedLinkIndexes := make([]int, 0)
 	for linkIndex, managedRoutes := range c.store {
 		for _, managedRoute := range managedRoutes {
 			filterRoute, filterMask := filterRouteByDstAndTable(linkIndex, managedRoute.Dst, managedRoute.Table)
@@ -272,13 +288,22 @@ func (c *Controller) sync() {
 			if !found {
 				link, err := util.GetNetLinkOps().LinkByIndex(managedRoute.LinkIndex)
 				if err != nil {
-					klog.Errorf("Route Manager: failed to apply route (%s) because unable to retrieve associated link: %v", managedRoute.String(), err)
+					if util.GetNetLinkOps().IsLinkNotFoundError(err) {
+						deletedLinkIndexes = append(deletedLinkIndexes, linkIndex)
+					} else {
+						klog.Errorf("Route Manager: failed to apply route (%s) because unable to retrieve associated link: %v", managedRoute.String(), err)
+					}
+					continue
 				}
 				if err := c.applyRoute(link, managedRoute.Gw, managedRoute.Dst, managedRoute.MTU, managedRoute.Src, managedRoute.Table); err != nil {
 					klog.Errorf("Route Manager: failed to apply route (%s): %v", managedRoute.String(), err)
 				}
 			}
 		}
+	}
+	for _, linkIndex := range deletedLinkIndexes {
+		klog.Infof("Route Manager: removing all routes associated with link index %d because link deleted", linkIndex)
+		delete(c.store, linkIndex)
 	}
 }
 

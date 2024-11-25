@@ -6,7 +6,7 @@ import (
 	"net"
 	"sync"
 
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -15,6 +15,7 @@ import (
 	OFManager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/openflow-manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 	"github.com/urfave/cli/v2"
@@ -45,26 +46,34 @@ func initFakeNodePortWatcher(iptV4, iptV6 util.IPTablesHelper) *nodePortWatcher 
 	}
 
 	f4 := iptV4.(*util.FakeIPTables)
-	err := f4.MatchState(initIPTable)
+	err := f4.MatchState(initIPTable, nil)
 	Expect(err).NotTo(HaveOccurred())
 
 	f6 := iptV6.(*util.FakeIPTables)
-	err = f6.MatchState(initIPTable)
+	err = f6.MatchState(initIPTable, nil)
 	Expect(err).NotTo(HaveOccurred())
 	bridgeName := "brp0"
 
 	id := OFManager.OpenFlowCacheManager.CreateFlowCache(bridgeName)
 	gwMACParsed, _ := net.ParseMAC(gwMAC)
 
+	defaultNetConfig := &bridgeUDNConfiguration{
+		ofPortPatch: "patch-breth0_ov",
+	}
+
 	fNPW := nodePortWatcher{
 		ofportPhys:  "eth0",
-		ofportPatch: "patch-breth0_ov",
 		gatewayIPv4: v4localnetGatewayIP,
 		gatewayIPv6: v6localnetGatewayIP,
 		serviceInfo: make(map[k8stypes.NamespacedName]*serviceConfig),
 		ofm: &openflowManager{
 			defaultBridgeFlowID: id,
-			defaultBridge:       &bridgeConfiguration{macAddress: gwMACParsed},
+			defaultBridge: &bridgeConfiguration{
+				netConfig: map[string]*bridgeUDNConfiguration{
+					types.DefaultNetworkName: defaultNetConfig,
+				},
+				macAddress: gwMACParsed,
+			},
 		},
 	}
 	return &fNPW
@@ -84,7 +93,8 @@ func startNodePortWatcher(n *nodePortWatcher, fakeClient *util.OVNNodeClientset,
 
 	localHostNetEp := "192.168.18.15/32"
 	ip, ipnet, _ := net.ParseCIDR(localHostNetEp)
-	n.nodeIPManager.addAddr(net.IPNet{IP: ip, Mask: ipnet.Mask})
+	ipFullNet := net.IPNet{IP: ip, Mask: ipnet.Mask}
+	n.nodeIPManager.cidrs.Insert(ipFullNet.String())
 
 	// Add or delete iptables rules from FORWARD chain based on DisableForwarding. This is
 	// to imitate addition or deletion of iptales rules done in newNodePortWatcher().
@@ -97,15 +107,9 @@ func startNodePortWatcher(n *nodePortWatcher, fakeClient *util.OVNNodeClientset,
 		if err := initExternalBridgeServiceForwardingRules(subnets); err != nil {
 			return fmt.Errorf("failed to add accept rules in forwarding table for bridge %s: err %v", linkName, err)
 		}
-		if err := initExternalBridgeDropForwardingRules(linkName); err != nil {
-			return fmt.Errorf("failed to add drop rules in forwarding table for bridge %s: err %v", linkName, err)
-		}
 	} else {
 		if err := delExternalBridgeServiceForwardingRules(subnets); err != nil {
 			return fmt.Errorf("failed to delete accept rules in forwarding table for bridge %s: err %v", linkName, err)
-		}
-		if err := delExternalBridgeDropForwardingRules(linkName); err != nil {
-			return fmt.Errorf("failed to delete drop rules in forwarding table for bridge %s: err %v", linkName, err)
 		}
 	}
 
@@ -144,7 +148,8 @@ func startNodePortWatcherWithRetry(n *nodePortWatcher, fakeClient *util.OVNNodeC
 
 	localHostNetEp := "192.168.18.15/32"
 	ip, ipnet, _ := net.ParseCIDR(localHostNetEp)
-	n.nodeIPManager.addAddr(net.IPNet{IP: ip, Mask: ipnet.Mask})
+	ipFullNet := net.IPNet{IP: ip, Mask: ipnet.Mask}
+	n.nodeIPManager.cidrs.Insert(ipFullNet.String())
 
 	nodePortWatcherRetry := n.newRetryFrameworkForTests(factory.ServiceForFakeNodePortWatcherType, stopChan, wg)
 	if _, err := nodePortWatcherRetry.WatchResource(); err != nil {
@@ -375,7 +380,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err := f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				fakeOvnNode.start(ctx,
@@ -424,7 +429,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 = iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				return nil
@@ -501,7 +506,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 				return nil
 			}
@@ -580,7 +585,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 				return nil
 			}
@@ -673,7 +678,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 				flows := fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(BeNil())
@@ -768,7 +773,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 				return nil
 			}
@@ -878,7 +883,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 				flows := fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(BeNil())
@@ -1017,7 +1022,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				Expect(f4.MatchState(expectedTables)).To(Succeed())
+				Expect(f4.MatchState(expectedTables, nil)).To(Succeed())
 				Expect(fNPW.ofm.getFlowCacheEntry("Ingress_namespace1_service1_5.5.5.5_80")).To(Equal(expectedLBIngressFlows))
 				Expect(fNPW.ofm.getFlowCacheEntry("External_namespace1_service1_1.1.1.1_80")).To(Equal(expectedLBExternalIPFlows))
 				return nil
@@ -1122,7 +1127,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 				flows := fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(BeNil())
@@ -1251,7 +1256,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 				flows := fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(Equal(expectedNodePortFlows))
@@ -1341,7 +1346,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables4)
+				err = f4.MatchState(expectedTables4, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables6 := map[string]util.FakeTable{
@@ -1354,7 +1359,7 @@ var _ = Describe("Node Operations", func() {
 					"mangle": {},
 				}
 				f6 := iptV6.(*util.FakeIPTables)
-				err = f6.MatchState(expectedTables6)
+				err = f6.MatchState(expectedTables6, nil)
 				Expect(err).NotTo(HaveOccurred())
 				return nil
 			}
@@ -1437,7 +1442,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables4)
+				err = f4.MatchState(expectedTables4, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables6 := map[string]util.FakeTable{
@@ -1451,7 +1456,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f6 := iptV6.(*util.FakeIPTables)
-				err = f6.MatchState(expectedTables6)
+				err = f6.MatchState(expectedTables6, nil)
 				Expect(err).NotTo(HaveOccurred())
 				return nil
 			}
@@ -1530,7 +1535,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 				expectedTables = map[string]util.FakeTable{
 					"nat":    {},
@@ -1538,7 +1543,7 @@ var _ = Describe("Node Operations", func() {
 					"mangle": {},
 				}
 				f6 := iptV6.(*util.FakeIPTables)
-				err = f6.MatchState(expectedTables)
+				err = f6.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 				return nil
 			}
@@ -1611,7 +1616,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables = map[string]util.FakeTable{
@@ -1621,7 +1626,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f6 := iptV6.(*util.FakeIPTables)
-				err = f6.MatchState(expectedTables)
+				err = f6.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 				return nil
 			}
@@ -1701,7 +1706,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.10.10.1", 8034}, {"10.129.0.2", 8034}})
@@ -1740,7 +1745,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 = iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 				return nil
 			}
@@ -1929,7 +1934,7 @@ var _ = Describe("Node Operations", func() {
 				retry.CheckRetryObjectEventually(key, true, nodePortWatcherRetry)
 				// check iptables
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				// HACK: Fix the service by setting a correct external IP address in newObj field
@@ -1954,7 +1959,7 @@ var _ = Describe("Node Operations", func() {
 				expectedTables["nat"]["OVN-KUBE-EXTERNALIP"] = ovn_kube_external_ip_field
 				Eventually(func(g Gomega) {
 					f4 := iptV4.(*util.FakeIPTables)
-					err = f4.MatchState(expectedTables)
+					err = f4.MatchState(expectedTables, nil)
 					g.Expect(err).NotTo(HaveOccurred())
 				})
 
@@ -2030,7 +2035,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 38034}})
@@ -2069,7 +2074,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 = iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				return nil
@@ -2163,7 +2168,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 				flows := fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(BeNil())
@@ -2204,7 +2209,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 = iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				flows = fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")
@@ -2306,7 +2311,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 				flows := fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(Equal(expectedFlows))
@@ -2347,7 +2352,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 = iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				flows = fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")
@@ -2453,7 +2458,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 				flows := fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(Equal(expectedFlows))
@@ -2494,7 +2499,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 = iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				flows = fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")
@@ -2597,7 +2602,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 				flows := fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(Equal(expectedFlows))
@@ -2638,7 +2643,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 = iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				flows = fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")
@@ -2743,7 +2748,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 				flows := fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(Equal(expectedFlows))
@@ -2784,7 +2789,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 = iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				flows = fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")
@@ -2834,8 +2839,6 @@ var _ = Describe("Node Operations", func() {
 							"-s 172.16.1.0/24 -j ACCEPT",
 							"-d 10.1.0.0/16 -j ACCEPT",
 							"-s 10.1.0.0/16 -j ACCEPT",
-							"-i breth0 -j DROP",
-							"-o breth0 -j DROP",
 						},
 					},
 					"mangle": {
@@ -2847,7 +2850,10 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err := f4.MatchState(expectedTables, map[util.FakePolicyKey]string{{
+					Table: "filter",
+					Chain: "FORWARD",
+				}: "DROP"})
 				Expect(err).NotTo(HaveOccurred())
 				expectedTables = map[string]util.FakeTable{
 					"nat":    {},
@@ -2855,12 +2861,13 @@ var _ = Describe("Node Operations", func() {
 					"mangle": {},
 				}
 				f6 := iptV6.(*util.FakeIPTables)
-				err = f6.MatchState(expectedTables)
+				err = f6.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				// Enable forwarding and test deletion of iptables rules from FORWARD chain
 				config.Gateway.DisableForwarding = false
 				fNPW.watchFactory = fakeOvnNode.watcher
+				Expect(configureGlobalForwarding()).To(Succeed())
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
 				expectedTables = map[string]util.FakeTable{
 					"nat": {
@@ -2896,7 +2903,10 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 = iptV4.(*util.FakeIPTables)
-				err = f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables, map[util.FakePolicyKey]string{{
+					Table: "filter",
+					Chain: "FORWARD",
+				}: "ACCEPT"})
 				Expect(err).NotTo(HaveOccurred())
 				expectedTables = map[string]util.FakeTable{
 					"nat":    {},
@@ -2904,7 +2914,7 @@ var _ = Describe("Node Operations", func() {
 					"mangle": {},
 				}
 				f6 = iptV6.(*util.FakeIPTables)
-				err = f6.MatchState(expectedTables)
+				err = f6.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 				return nil
 			}

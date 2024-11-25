@@ -56,7 +56,8 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotation(
 	ipAllocator subnet.NamedAllocator,
 	pod *v1.Pod,
 	network *nadapi.NetworkSelectionElement,
-	reallocateIP, skipIPAM bool) (
+	reallocateIP, skipIPAM bool,
+	networkRole string) (
 	*v1.Pod,
 	*util.PodAnnotation,
 	error) {
@@ -71,6 +72,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotation(
 		allocator.ipamClaimsReconciler,
 		reallocateIP,
 		skipIPAM,
+		networkRole,
 	)
 }
 
@@ -82,7 +84,8 @@ func allocatePodAnnotation(
 	pod *v1.Pod,
 	network *nadapi.NetworkSelectionElement,
 	claimsReconciler persistentips.PersistentAllocations,
-	reallocateIP, skipIPAM bool) (
+	reallocateIP, skipIPAM bool,
+	networkRole string) (
 	updatedPod *v1.Pod,
 	podAnnotation *util.PodAnnotation,
 	err error) {
@@ -100,7 +103,9 @@ func allocatePodAnnotation(
 			network,
 			claimsReconciler,
 			reallocateIP,
-			skipIPAM)
+			skipIPAM,
+			networkRole,
+		)
 		return pod, rollback, err
 	}
 
@@ -132,7 +137,8 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
 	idAllocator id.NamedAllocator,
 	pod *v1.Pod,
 	network *nadapi.NetworkSelectionElement,
-	reallocateIP, skipIPAM bool) (
+	reallocateIP, skipIPAM bool,
+	networkRole string) (
 	*v1.Pod,
 	*util.PodAnnotation,
 	error) {
@@ -148,6 +154,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
 		allocator.ipamClaimsReconciler,
 		reallocateIP,
 		skipIPAM,
+		networkRole,
 	)
 }
 
@@ -160,7 +167,8 @@ func allocatePodAnnotationWithTunnelID(
 	pod *v1.Pod,
 	network *nadapi.NetworkSelectionElement,
 	claimsReconciler persistentips.PersistentAllocations,
-	reallocateIP, skipIPAM bool) (
+	reallocateIP, skipIPAM bool,
+	networkRole string) (
 	updatedPod *v1.Pod,
 	podAnnotation *util.PodAnnotation,
 	err error) {
@@ -175,7 +183,9 @@ func allocatePodAnnotationWithTunnelID(
 			network,
 			claimsReconciler,
 			reallocateIP,
-			skipIPAM)
+			skipIPAM,
+			networkRole,
+		)
 		return pod, rollback, err
 	}
 
@@ -217,7 +227,8 @@ func allocatePodAnnotationWithRollback(
 	pod *v1.Pod,
 	network *nadapi.NetworkSelectionElement,
 	claimsReconciler persistentips.PersistentAllocations,
-	reallocateIP, skipIPAM bool) (
+	reallocateIP, skipIPAM bool,
+	networkRole string) (
 	updatedPod *v1.Pod,
 	podAnnotation *util.PodAnnotation,
 	rollback func(),
@@ -269,8 +280,9 @@ func allocatePodAnnotationWithRollback(
 		IPs:      podAnnotation.IPs,
 		MAC:      podAnnotation.MAC,
 		TunnelID: podAnnotation.TunnelID,
+		Role:     networkRole,
+		MTU:      netInfo.MTU(),
 	}
-	tentative.MTU = netInfo.MTU()
 
 	hasIDAllocation := util.DoesNetworkRequireTunnelIDs(netInfo)
 	needsID := tentative.TunnelID == 0 && hasIDAllocation

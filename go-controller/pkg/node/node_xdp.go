@@ -110,7 +110,7 @@ func xdpCheckPatchPortOFFlows(bridgeName, ofPortPhys, patchIntf, ofPortPatch, cu
 	}
 }
 
-func xdpSetupOFFlowsForInterface(allowedIPs []string, bridgeName string, vlanID uint, podMAC string,
+func (nc *SecondaryLocalnetNodeNetworkController) xdpSetupOFFlowsForInterface(allowedIPs []string, bridgeName string, vlanID uint, podMAC string,
 	xdpSharedPatchGW *gateway, setup bool) error {
 	var xdpOFFLows []string
 	var cookie, key string
@@ -120,6 +120,7 @@ func xdpSetupOFFlowsForInterface(allowedIPs []string, bridgeName string, vlanID 
 		op = "Tearing Down"
 	}
 	defaultBridge := xdpSharedPatchGW.openflowManager.defaultBridge
+	netconfig := defaultBridge.netConfig[nc.GetNetworkName()]
 	klog.Infof("%s XDP openflow rules for %v", op, allowedIPs)
 
 	// We could be smarter in using the hash of all the ips, or some such, that'll make deletion
@@ -162,11 +163,11 @@ func xdpSetupOFFlowsForInterface(allowedIPs []string, bridgeName string, vlanID 
 	// Vlan modification action.
 	mod_vlan_id := fmt.Sprintf("mod_vlan_vid:%d,", vlanID)
 
-	cookieKey := fmt.Sprintf("%s-%s-%s", bridgeName, defaultBridge.ofPortPhys, defaultBridge.ofPortPatch)
+	cookieKey := fmt.Sprintf("%s-%s-%s", bridgeName, defaultBridge.ofPortPhys, netconfig.ofPortPatch)
 	cookie, err = xdpToCookie(cookieKey)
 	if err != nil {
 		return fmt.Errorf("error generating OF cookie using %s-%s: %v", defaultBridge.ofPortPhys,
-			defaultBridge.ofPortPatch, err)
+			netconfig.ofPortPatch, err)
 	}
 	for _, allowedIP := range allowedIPs {
 		// From the wire to the pod/VM
@@ -185,7 +186,7 @@ func xdpSetupOFFlowsForInterface(allowedIPs []string, bridgeName string, vlanID 
 		xdpOFFLows = append(xdpOFFLows,
 			fmt.Sprintf("cookie=%s, table=%d, priority=%d, in_port=%s, dl_vlan=%d, nw_dst=%s/32, tcp, ct_state=+est+trk,"+
 				"actions=output:%s", cookie, XDPOFLowCTTable, XDPOFHighPriority, defaultBridge.ofPortPhys,
-				vlanID, allowedIP, defaultBridge.ofPortPatch))
+				vlanID, allowedIP, netconfig.ofPortPatch))
 
 		// Flow 3:
 		//	Send the others for XDP processing
@@ -208,7 +209,7 @@ func xdpSetupOFFlowsForInterface(allowedIPs []string, bridgeName string, vlanID 
 		// 	Add a rule to track TCP initiated from the VM to bypass XDP processing
 		xdpOFFLows = append(xdpOFFLows,
 			fmt.Sprintf("cookie=%s, table=0, priority=%d, in_port=%s, dl_vlan=%d, nw_src=%s/32, tcp, "+
-				"actions=ct(table=%d,zone=%d)", cookie, XDPOFHighPriority, defaultBridge.ofPortPatch,
+				"actions=ct(table=%d,zone=%d)", cookie, XDPOFHighPriority, netconfig.ofPortPatch,
 				vlanID, allowedIP, XDPOFLowCTTable, config.Default.HostXDPCTZone))
 
 		// Flow 2:
@@ -216,13 +217,13 @@ func xdpSetupOFFlowsForInterface(allowedIPs []string, bridgeName string, vlanID 
 		xdpOFFLows = append(xdpOFFLows,
 			fmt.Sprintf("cookie=%s, table=%d, priority=%d, in_port=%s, dl_vlan=%d, nw_src=%s/32, tcp, tcp_flags=+syn-ack,"+
 				"actions=ct(commit,zone=%d),output:%s", cookie, XDPOFLowCTTable, XDPOFHighPriority,
-				defaultBridge.ofPortPatch, vlanID, allowedIP, config.Default.HostXDPCTZone, defaultBridge.ofPortPhys))
+				netconfig.ofPortPatch, vlanID, allowedIP, config.Default.HostXDPCTZone, defaultBridge.ofPortPhys))
 
 		// Flow 3:
 		// 	IF it is est send it out, bypassing XDP
 		xdpOFFLows = append(xdpOFFLows,
 			fmt.Sprintf("cookie=%s, table=%d, priority=%d, in_port=%s, dl_vlan=%d, nw_src=%s/32, tcp, ct_state=+est+trk,"+
-				"actions=output:%s", cookie, XDPOFLowCTTable, XDPOFHighPriority, defaultBridge.ofPortPatch,
+				"actions=output:%s", cookie, XDPOFLowCTTable, XDPOFHighPriority, netconfig.ofPortPatch,
 				vlanID, allowedIP, defaultBridge.ofPortPhys))
 
 		// Flow 4:
@@ -230,14 +231,14 @@ func xdpSetupOFFlowsForInterface(allowedIPs []string, bridgeName string, vlanID 
 		xdpOFFLows = append(xdpOFFLows,
 			fmt.Sprintf("cookie=%s, table=%d, priority=%d, in_port=%s, dl_vlan=%d, nw_src=%s/32, tcp,"+
 				"actions=strip_vlan,mod_dl_dst:%s,output:%s", cookie, XDPOFLowCTTable, XDPOFLowPriority,
-				defaultBridge.ofPortPatch, vlanID, allowedIP, xdpVethMAC, xdpVethPortOfPort))
+				netconfig.ofPortPatch, vlanID, allowedIP, xdpVethMAC, xdpVethPortOfPort))
 
 		// Flow 5:
 		//    Add a rule to send packets from XDP veth port to patch port after adding the VLAN
 		xdpOFFLows = append(xdpOFFLows,
 			fmt.Sprintf("cookie=%s, table=0, priority=%d, in_port=%s, ip, nw_dst=%s/32,"+
 				"actions=%soutput:%s", cookie, XDPOFHighPriority, xdpVethPortOfPort,
-				allowedIP, mod_vlan_id, defaultBridge.ofPortPatch))
+				allowedIP, mod_vlan_id, netconfig.ofPortPatch))
 	}
 	xdpSharedPatchGW.openflowManager.updateFlowCacheEntry(key, xdpOFFLows)
 	xdpSharedPatchGW.openflowManager.requestFlowSync()
@@ -258,7 +259,7 @@ func xdpSetupOFFlowsForInterface(allowedIPs []string, bridgeName string, vlanID 
 // makes sure all the routes etc. are around (till deleted), need to add a sync so that we
 // can make sure that is  the case.
 func (nc *SecondaryLocalnetNodeNetworkController) xdpSetupNSForNAD(xdpNS string, setup bool) error {
-	defGWIP := nc.Gateway()
+	defGWIP := nc.Gateways()
 	defGWMAC := nc.GatewayMAC()
 	vlanID := nc.Vlan()
 
@@ -515,12 +516,12 @@ func (nc *SecondaryLocalnetNodeNetworkController) setXDPServiceForInterface(xdpI
 	if err != nil {
 		klog.Errorf("Error %s NS %s, for %v, %s, %s, %s, %v:%v", xdpNS, strings.ToLower(op),
 			xdpInfo.allowedIPs, xdpInfo.mac,
-			nc.Gateway(), nc.GatewayMAC(), nc.Subnets(), err)
+			nc.Gateways(), nc.GatewayMAC(), nc.Subnets(), err)
 		return err
 	}
 
 	klog.Infof("%s XDP OF Flows", op)
-	err = xdpSetupOFFlowsForInterface(xdpInfo.allowedIPs, nc.bridgeName,
+	err = nc.xdpSetupOFFlowsForInterface(xdpInfo.allowedIPs, nc.bridgeName,
 		nc.Vlan(), xdpInfo.mac, nc.gateway.(*gateway), setup)
 	if err != nil {
 		klog.Errorf("Error %s OF flows for %v, %d on %s: %v", strings.ToLower(op),
@@ -549,7 +550,7 @@ func (nc *SecondaryLocalnetNodeNetworkController) UpdateXDPServiceForInterface(o
 	// and tcp will rexmit.
 
 	// Add new flows
-	err := xdpSetupOFFlowsForInterface(newXDPInfo.allowedIPs, nc.bridgeName,
+	err := nc.xdpSetupOFFlowsForInterface(newXDPInfo.allowedIPs, nc.bridgeName,
 		nc.Vlan(), newXDPInfo.mac, nc.gateway.(*gateway), true)
 	if err != nil {
 		// This is problematic, maybe better to panic
@@ -558,7 +559,7 @@ func (nc *SecondaryLocalnetNodeNetworkController) UpdateXDPServiceForInterface(o
 		return err
 	}
 	// Remove old flows
-	err = xdpSetupOFFlowsForInterface(oldXDPInfo.allowedIPs, nc.bridgeName,
+	err = nc.xdpSetupOFFlowsForInterface(oldXDPInfo.allowedIPs, nc.bridgeName,
 		nc.Vlan(), oldXDPInfo.mac, nc.gateway.(*gateway), false)
 	if err != nil {
 		// This is not problematic, per se, so the old flows could be left behind.

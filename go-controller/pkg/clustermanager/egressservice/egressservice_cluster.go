@@ -61,10 +61,10 @@ type Controller struct {
 	watchFactory         *factory.WatchFactory
 	egressServiceLister  egressservicelisters.EgressServiceLister
 	egressServiceSynced  cache.InformerSynced
-	egressServiceQueue   workqueue.RateLimitingInterface
+	egressServiceQueue   workqueue.TypedRateLimitingInterface[string]
 	servicesSynced       cache.InformerSynced
 	endpointSlicesSynced cache.InformerSynced
-	nodesQueue           workqueue.RateLimitingInterface
+	nodesQueue           workqueue.TypedRateLimitingInterface[string]
 	nodesSynced          cache.InformerSynced
 
 	IsReachable func(nodeName string, mgmtIPs []net.IP, healthClient healthcheck.EgressIPHealthClient) bool // TODO: make a universal cache instead
@@ -114,9 +114,9 @@ func NewController(
 	esInformer := wf.EgressServiceInformer()
 	c.egressServiceLister = esInformer.Lister()
 	c.egressServiceSynced = esInformer.Informer().HasSynced
-	c.egressServiceQueue = workqueue.NewNamedRateLimitingQueue(
-		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
-		"egressservices",
+	c.egressServiceQueue = workqueue.NewTypedRateLimitingQueueWithConfig(
+		workqueue.NewTypedItemFastSlowRateLimiter[string](1*time.Second, 5*time.Second, 5),
+		workqueue.TypedRateLimitingQueueConfig[string]{Name: "egressservices"},
 	)
 	_, err := esInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onEgressServiceAdd,
@@ -138,19 +138,22 @@ func NewController(
 	}
 
 	c.endpointSlicesSynced = wf.EndpointSliceInformer().HasSynced
-	_, err = wf.EndpointSliceInformer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
-		AddFunc:    c.onEndpointSliceAdd,
-		UpdateFunc: c.onEndpointSliceUpdate,
-		DeleteFunc: c.onEndpointSliceDelete,
-	}))
+
+	_, err = wf.EndpointSliceInformer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(
+		// TODO: Stop ignoring mirrored EndpointSlices and add support for user-defined networks
+		util.GetDefaultEndpointSlicesEventHandler(cache.ResourceEventHandlerFuncs{
+			AddFunc:    c.onEndpointSliceAdd,
+			UpdateFunc: c.onEndpointSliceUpdate,
+			DeleteFunc: c.onEndpointSliceDelete,
+		})))
 	if err != nil {
 		return nil, err
 	}
 
 	c.nodesSynced = wf.NodeInformer().HasSynced
-	c.nodesQueue = workqueue.NewNamedRateLimitingQueue(
-		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
-		"egressservicenodes",
+	c.nodesQueue = workqueue.NewTypedRateLimitingQueueWithConfig(
+		workqueue.NewTypedItemFastSlowRateLimiter[string](1*time.Second, 5*time.Second, 5),
+		workqueue.TypedRateLimitingQueueConfig[string]{Name: "egressservicenodes"},
 	)
 	_, err = wf.NodeInformer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onNodeAdd,
@@ -440,7 +443,7 @@ func (c *Controller) processNextEgressServiceWorkItem(wg *sync.WaitGroup) bool {
 
 	defer c.egressServiceQueue.Done(key)
 
-	err := c.syncEgressService(key.(string))
+	err := c.syncEgressService(key)
 	if err == nil {
 		c.egressServiceQueue.Forget(key)
 		return true

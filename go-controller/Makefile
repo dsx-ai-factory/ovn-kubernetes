@@ -11,7 +11,7 @@ PKGS ?=
 GOPATH ?= $(shell go env GOPATH)
 TEST_REPORT_DIR?=$(CURDIR)/_artifacts
 export TEST_REPORT_DIR
-GO_VERSION ?= 1.21.9
+GO_VERSION ?= 1.22.0
 GO_DOCKER_IMG = quay.io/giantswarm/golang:${GO_VERSION}
 # CONTAINER_RUNNABLE determines if the tests can be run inside a container. It checks to see if
 # podman/docker is installed on the system.
@@ -22,12 +22,21 @@ else
 CONTAINER_RUNTIME=docker
 endif
 CONTAINER_RUNNABLE ?= $(shell $(CONTAINER_RUNTIME) -v > /dev/null 2>&1; echo $$?)
-OVN_SCHEMA_VERSION ?= v24.03.1
+# FIXME(tssurya): In one week when OVN 24.09 is released change the schema version
+OVN_SCHEMA_VERSION ?= 8efac26f6637fc
 ifeq ($(NOROOT),TRUE)
 C_ARGS = -e NOROOT=TRUE
 else
 C_ARGS = --cap-add=NET_ADMIN --cap-add=SYS_ADMIN
 endif
+
+## Tool Binaries
+TOOLS_OUTPUT_DIR = ${CURDIR}/${OUT_DIR}
+MOCKERY = ${TOOLS_OUTPUT_DIR}/mockery-${MOCKERY_VERSION}
+
+## Tool Versions
+MOCKERY_VERSION ?= v2.43.2
+
 export NOROOT
 
 .PHONY: all build check test
@@ -42,7 +51,7 @@ export NOROOT
 #       (disables symbol table and DWARF generation when building ovnk binaries)
 
 all build:
-	hack/build-go.sh cmd/ovnkube cmd/ovn-k8s-cni-overlay cmd/ovn-kube-util hybrid-overlay/cmd/hybrid-overlay-node cmd/ovndbchecker cmd/ovnkube-trace cmd/ovnkube-identity
+	hack/build-go.sh cmd/ovnkube cmd/ovn-k8s-cni-overlay cmd/ovn-kube-util hybrid-overlay/cmd/hybrid-overlay-node cmd/ovndbchecker cmd/ovnkube-trace cmd/ovnkube-identity cmd/ovnkube-observ
 
 windows:
 	WINDOWS_BUILD="yes" hack/build-go.sh hybrid-overlay/cmd/hybrid-overlay-node
@@ -61,6 +70,10 @@ modelgen: pkg/nbdb/ovn-nb.ovsschema pkg/sbdb/ovn-sb.ovsschema
 
 codegen:
 	hack/update-codegen.sh
+
+.PHONY: mocksgen
+mocksgen: ${MOCKERY}
+	${MOCKERY}
 
 install:
 	install -D -m 755 ${OUT_DIR}/go/bin/ovnkube ${BINDIR}/
@@ -95,3 +108,26 @@ pkg/nbdb/ovn-nb.ovsschema:
 
 pkg/sbdb/ovn-sb.ovsschema:
 	curl -sSL https://raw.githubusercontent.com/ovn-org/ovn/$(OVN_SCHEMA_VERSION)/ovn-sb.ovsschema -o $@
+
+${TOOLS_OUTPUT_DIR}:
+	mkdir -p ${TOOLS_OUTPUT_DIR}
+
+.PHONY: mockery
+mockery: ${MOCKERY} ## Download mockery locally if necessary.
+${MOCKERY}: ${TOOLS_OUTPUT_DIR}
+	$(call go-install-tool,${MOCKERY},github.com/vektra/mockery/v2,${MOCKERY_VERSION})
+
+
+# go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
+# $1 - target path with name of binary (ideally with version)
+# $2 - package url which can be installed
+# $3 - specific version of package
+define go-install-tool
+@[ -f $(1) ] || { \
+set -xe; \
+package=$(2)@$(3) ;\
+echo "Downloading $${package}" ;\
+GOBIN=${TOOLS_OUTPUT_DIR} go install $${package} ;\
+mv "$$(echo "$(1)" | sed "s/-$(3)$$//")" $(1) ;\
+}
+endef

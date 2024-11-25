@@ -9,7 +9,14 @@ import (
 // NetConf is CNI NetConf with DeviceID
 type NetConf struct {
 	types.NetConf
-
+	// Role is valid only on L3 / L2 topologies. Not on localnet.
+	// It allows for using this network to be either secondary or
+	// primary user defined network for the pod.
+	// primary user defined networks are used in order to achieve
+	// native network isolation.
+	// In order to ensure backwards compatibility, if empty the
+	// network is considered secondary
+	Role string `json:"role,omitempty"`
 	// specifies the OVN topology for this network configuration
 	// when not specified, by default it is Layer3AttachDefTopoType
 	Topology string `json:"topology,omitempty"`
@@ -25,6 +32,16 @@ type NetConf struct {
 	// valid for layer2 and localnet network topology
 	// eg. "10.1.130.0/27, 10.1.130.122/32"
 	ExcludeSubnets string `json:"excludeSubnets,omitempty"`
+	// join subnet cidr is required for supporting
+	// services and ingress for user defined networks
+	// in case of dualstack cluster, please do a comma-seperated list
+	// expected format:
+	// 1) V4 single stack: "v4CIDR" (eg: "100.65.0.0/16")
+	// 2) V6 single stack: "v6CIDR" (eg: "fd99::/64")
+	// 3) dualstack: "v4CIDR,v6CIDR" (eg: "100.65.0.0/16,fd99::/64")
+	// valid for UDN layer3/layer2 network topology
+	// default value: 100.65.0.0/16,fd99::/64 if not provided
+	JoinSubnet string `json:"joinSubnet,omitempty"`
 	// VLANID, valid in localnet topology network only
 	VLANID int `json:"vlanID,omitempty"`
 	// Gateway, valid in localnet topology network
@@ -53,9 +70,17 @@ type NetConf struct {
 	//LagacyBridgeName string `json:"bridge_name,omitempty"`
 	// list of IPs, expressed with prefix length, to be excluded from being allocated for Pod
 	// valid for localnet network topology (L2 networks)
-	ExcludeCIDRs []string `json:"exclude_cidrs,omitempty"`
+	LegacyExcludeCIDRs []string `json:"exclude_cidrs,omitempty"`
 
-	// PciAddrs in case of using sriov or auxiliary device name in case of SF
+	// PhysicalNetworkName indicates the name of the physical network to which
+	// the OVN overlay will connect. Only applies to `localnet` topologies.
+	// When omitted, the physical network name of the network will be the value
+	// of the `name` attribute.
+	// This attribute allows multiple overlays to share the same physical
+	// network mapping in the hosts.
+	PhysicalNetworkName string `json:"physicalNetworkName,omitempty"`
+
+	// PciAddrs in case of using sriov or Auxiliry device name in case of SF
 	DeviceID string `json:"deviceID,omitempty"`
 	// LogFile to log all the messages from cni shim binary to
 	LogFile string `json:"logFile,omitempty"`

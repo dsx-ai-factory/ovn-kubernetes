@@ -24,6 +24,7 @@ import (
 	adminpbrapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -647,7 +648,7 @@ func (bnc *BaseNetworkController) syncAdminPBROnNamespaceChange(old, new interfa
 func (bnc *BaseNetworkController) syncAdminPBRPeriodic() {
 	klog.V(4).Infof("Start adminpbr sync for network %s", bnc.GetNetworkName())
 	// get all adminpbr policies from ovn
-	ovnPolicies, err := bnc.findPolicyBasedRoutes(strconv.Itoa(types.AminPBRReroutePriority))
+	ovnPolicies, err := libovsdbutil.FindPolicyBasedRoutes(bnc.NetInfo, bnc.nbClient, strconv.Itoa(types.AminPBRReroutePriority))
 	if err != nil {
 		if !errors.Is(err, libovsdbclient.ErrNotFound) {
 			klog.Errorf("[%s] Failed to retrieve logical router policies from OVN: %v", bnc.GetNetworkName(), err)

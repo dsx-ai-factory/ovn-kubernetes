@@ -25,6 +25,22 @@ func netCIDR(netCIDR string, netPrefixLengthPerNode int) string {
 	return fmt.Sprintf("%s/%d", netCIDR, netPrefixLengthPerNode)
 }
 
+// takes ipv4 and ipv6 cidrs and returns the correct type for the cluster under test
+func correctCIDRFamily(ipv4CIDR, ipv6CIDR string) string {
+	// dual stack cluster
+	if isIPv6Supported() && isIPv4Supported() {
+		return strings.Join([]string{ipv4CIDR, ipv6CIDR}, ",")
+	}
+	// is an ipv6 only cluster
+	if isIPv6Supported() {
+		return ipv6CIDR
+	}
+
+	//ipv4 only cluster
+	return ipv4CIDR
+
+}
+
 func getNetCIDRSubnet(netCIDR string) (string, error) {
 	subStrings := strings.Split(netCIDR, "/")
 	if len(subStrings) == 3 {
@@ -36,14 +52,17 @@ func getNetCIDRSubnet(netCIDR string) (string, error) {
 }
 
 type networkAttachmentConfigParams struct {
-	cidr               string
-	excludeCIDRs       []string
-	namespace          string
-	name               string
-	topology           string
-	networkName        string
-	vlanID             int
-	allowPersistentIPs bool
+	cidr                string
+	excludeCIDRs        []string
+	namespace           string
+	name                string
+	topology            string
+	networkName         string
+	vlanID              int
+	allowPersistentIPs  bool
+	role                string
+	mtu                 int
+	physicalNetworkName string
 }
 
 type networkAttachmentConfig struct {
@@ -66,6 +85,9 @@ func uniqueNadName(originalNetName string) string {
 }
 
 func generateNAD(config networkAttachmentConfig) *nadapi.NetworkAttachmentDefinition {
+	if config.mtu == 0 {
+		config.mtu = 1300
+	}
 	nadSpec := fmt.Sprintf(
 		`
 {
@@ -75,19 +97,24 @@ func generateNAD(config networkAttachmentConfig) *nadapi.NetworkAttachmentDefini
         "topology":%q,
         "subnets": %q,
         "excludeSubnets": %q,
-        "mtu": 1300,
+        "mtu": %d,
         "netAttachDefName": %q,
         "vlanID": %d,
-        "allowPersistentIPs": %t
+        "allowPersistentIPs": %t,
+        "physicalNetworkName": %q,
+        "role": %q
 }
 `,
 		config.networkName,
 		config.topology,
 		config.cidr,
 		strings.Join(config.excludeCIDRs, ","),
+		config.mtu,
 		namespacedName(config.namespace, config.name),
 		config.vlanID,
 		config.allowPersistentIPs,
+		config.physicalNetworkName,
+		config.role,
 	)
 	return generateNetAttachDef(config.namespace, config.name, nadSpec)
 }
@@ -115,7 +142,9 @@ type podConfiguration struct {
 
 func generatePodSpec(config podConfiguration) *v1.Pod {
 	podSpec := e2epod.NewAgnhostPod(config.namespace, config.name, nil, nil, nil, config.containerCmd...)
-	podSpec.Annotations = networkSelectionElements(config.attachments...)
+	if len(config.attachments) > 0 {
+		podSpec.Annotations = networkSelectionElements(config.attachments...)
+	}
 	podSpec.Spec.NodeSelector = config.nodeSelector
 	podSpec.Labels = config.labels
 	if config.isPrivileged {

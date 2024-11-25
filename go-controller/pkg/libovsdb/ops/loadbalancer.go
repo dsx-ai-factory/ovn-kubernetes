@@ -2,11 +2,12 @@ package ops
 
 import (
 	"context"
+
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // getNonZeroLoadBalancerMutableFields builds a list of load balancer
@@ -131,8 +132,20 @@ func DeleteLoadBalancers(nbClient libovsdbclient.Client, lbs []*nbdb.LoadBalance
 // ListLoadBalancers looks up all load balancers from the cache
 func ListLoadBalancers(nbClient libovsdbclient.Client) ([]*nbdb.LoadBalancer, error) {
 	lbs := []*nbdb.LoadBalancer{}
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 	defer cancel()
 	err := nbClient.List(ctx, &lbs)
 	return lbs, err
+}
+
+type loadBalancerPredicate func(*nbdb.LoadBalancer) bool
+
+// FindLoadBalancersWithPredicate looks up loadbalancers from the cache
+// based on a given predicate
+func FindLoadBalancersWithPredicate(nbClient libovsdbclient.Client, p loadBalancerPredicate) ([]*nbdb.LoadBalancer, error) {
+	found := []*nbdb.LoadBalancer{}
+	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
+	defer cancel()
+	err := nbClient.WhereCache(p).List(ctx, &found)
+	return found, err
 }

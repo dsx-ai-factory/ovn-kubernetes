@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
@@ -12,9 +13,13 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
@@ -29,148 +34,88 @@ type nodeNetworkControllerManager struct {
 	Kube          kube.Interface
 	watchFactory  factory.NodeWatchFactory
 	stopChan      chan struct{}
+	wg            *sync.WaitGroup
 	recorder      record.EventRecorder
 	hostType      string
 	pfMACs        []string
 
-	//defaultNodeNetworkController nad.BaseNetworkController
+	defaultNodeNetworkController *node.DefaultNodeNetworkController
 
 	// net-attach-def controller handle net-attach-def and create/delete secondary controllers
 	// nil in dpu-host mode
 	nadController *nad.NetAttachDefinitionController
+	// vrf manager that creates and manages vrfs for all UDNs
+	vrfManager *vrfmanager.Controller
+	// route manager that creates and manages routes
+	routeManager *routemanager.Controller
+	// iprule manager that creates and manages iprules for all UDNs
+	ruleManager *iprulemanager.Controller
 }
 
 // NewNetworkController create secondary node network controllers for the given NetInfo
 func (ncm *nodeNetworkControllerManager) NewNetworkController(nInfo util.NetInfo) (nad.NetworkController, error) {
-	if _, ok := nInfo.(*util.DefaultNetInfo); ok {
-		return node.NewDefaultNodeNetworkController(ncm.newCommonNetworkControllerInfo(), nInfo)
-	}
-
 	topoType := nInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology, ovntypes.Layer2Topology:
-		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(), nInfo), nil
+		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(),
+			nInfo, ncm.vrfManager, ncm.ruleManager, ncm.defaultNodeNetworkController.Gateway)
 	case ovntypes.LocalnetTopology:
-		return node.NewSecondaryLocalnetNodeNetworkController(ncm.newCommonNetworkControllerInfo(), nInfo), nil
+		return node.NewSecondaryLocalnetNodeNetworkController(ncm.newCommonNetworkControllerInfo(),
+			nInfo), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
 
-// CleanupDeletedNetworks is used to upgrade OVS interfaces's stale external-ids, and clean up all stale OVS interfaces.
-// From the allControllers argument, we are able to get all NADs/networks at the time when ovnkube-node restarts,
-// enable us updating the existing OVS interface's stale OVS external-ids.
-func (ncm *nodeNetworkControllerManager) CleanupDeletedNetworks(allControllers []nad.NetworkController) error {
-	if config.OvnKubeNode.Mode == ovntypes.NodeModeDPUHost {
+// CleanupDeletedNetworks cleans up all stale entities giving list of all existing secondary network controllers
+func (ncm *nodeNetworkControllerManager) CleanupDeletedNetworks(validNetworks ...util.BasicNetInfo) error {
+	if !util.IsNetworkSegmentationSupportEnabled() {
 		return nil
 	}
-	klog.V(5).Infof("Upgrade OVS interface's external-ids and delete stale ones")
-	// Get all OVN-K8S OVS interfaces
-	ovsArgs := []string{"external_ids:sandbox!=\"\""}
-	ovsIntefaceToExternalIDMap, err := util.GetOVSInterfaceToExternalIDMapFiltered(ovsArgs)
-	if err != nil {
-		return err
-	}
-	if len(ovsIntefaceToExternalIDMap) == 0 {
-		return nil
-	}
-
-	// list Pods and calculate the expected iface-ids.
-	// Note: we do this after scanning ovs interfaces to avoid deleting ports of pods that where just scheduled
-	// on the node.
-	pods, err := ncm.watchFactory.GetPods("")
-	if err != nil {
-		return fmt.Errorf("failed to get all existing pods %v", err)
-	}
-	expectedPodUIDs := make(map[string]struct{})
-	for _, pod := range pods {
-		if pod.Spec.NodeName == ncm.name && !util.PodWantsHostNetwork(pod) {
-			// Note: wf (WatchFactory) *usually* returns pods assigned to this node, however we dont rely on it
-			// and add this check to filter out pods assigned to other nodes. (e.g when ovnkube master and node
-			// share the same process)
-			expectedPodUIDs[string(pod.UID)] = struct{}{}
-		}
-	}
-
-	// assign an invalid network name for stale OVS interfaces
-	invalidNetworkName := "invalid/network"
-	nadToNetNameMap := map[string]string{}
-	var netName, nadName string
-	for hostIfaceName, extMap := range ovsIntefaceToExternalIDMap {
-		podUID, ok := extMap["iface-id-ver"]
-		if !ok {
+	validVRFDevices := make(sets.Set[string])
+	for _, network := range validNetworks {
+		if !network.IsPrimaryNetwork() {
 			continue
 		}
-		if _, ok = expectedPodUIDs[podUID]; !ok {
-			klog.Warningf("Found stale OVS Interface %s with iface-id-ver %s, deleting it", hostIfaceName, podUID)
-			netName = invalidNetworkName
-		} else {
-			// Add both lagacy and new NAD external_ids to the ovs interfaces if either is missing
-			nadName1, ok1 := extMap[ovntypes.LegacyNetworkExternalID]
-			nadName2, ok2 := extMap[ovntypes.NADExternalID]
-			if (!ok1 && !ok2) || (ok1 && ok2) {
-				// it is either the OVS interface of the default network, or both external_ids exist, nothing to do
-				continue
-			}
-			// OVS interface have either LegacyNetworkExternalID or NADExternalID
-			if ok1 {
-				nadName = nadName1
-			} else {
-				nadName = nadName2
-			}
-			netName = nadToNetNameMap[nadName]
-			if netName == "" {
-				// try to find the network name associated with this NAD
-				for _, oc := range allControllers {
-					if oc.HasNAD(nadName) {
-						netName = oc.GetNetworkName()
-						nadToNetNameMap[nadName] = netName
-						break
-					}
-				}
-				if netName == "" {
-					netName = invalidNetworkName
-					klog.Warningf("Found OVS interface %s of NAD %s which no longer exists, deleting it", hostIfaceName, nadName)
-				}
-			}
-		}
-		if netName == invalidNetworkName {
-			ovsArgs = []string{"--if-exists", "--with-iface", "del-port", hostIfaceName}
-		} else {
-			ovsArgs = []string{"--if-exists", "set", "interface", hostIfaceName}
-			// Set other potential missing external-ids to the OVS port
-			if _, ok = extMap["ovn_kube_mode"]; !ok {
-				ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:ovn_kube_mode=%s", config.OvnKubeNode.Mode))
-				if config.OvnKubeNode.Mode == ovntypes.NodeModeDPU {
-					// in order for VFRep interfaces to participate in the healthcheck, add its netdev-name external-ids
-					ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:netdev-name=%s", hostIfaceName))
-				}
-			}
-
-			// do not remove the legacyNetworkExternalID yet so in case of upgrade failure, we can
-			// still fallback to the old version.
-			// "--", "--if-exists", "remove", "interface", hostIfaceName, "external_ids", ovntypes.LegacyNetworkExternalID)
-			ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:%s=%s", ovntypes.NetworkExternalID, netName),
-				fmt.Sprintf("external_ids:%s=%s", ovntypes.NADExternalID, nadName),
-				fmt.Sprintf("external_ids:%s=%s", ovntypes.LegacyNetworkExternalID, nadName))
-		}
-		_, stderr, err := util.RunOVSVsctl(ovsArgs...)
+		networkID, err := ncm.getNetworkID(network)
 		if err != nil {
-			err = fmt.Errorf("failed to run OVS commands %s for OVS interfaces %s:, stderr: %q, error: %v", ovsArgs, hostIfaceName, stderr, err)
-			return err
+			klog.Errorf("Failed to get network identifier for network %s, error: %s", network.GetNetworkName(), err)
+			continue
 		}
+		validVRFDevices.Insert(util.GetVRFDeviceNameForUDN(networkID))
 	}
+	return ncm.vrfManager.Repair(validVRFDevices)
+}
 
-	return nil
+func (ncm *nodeNetworkControllerManager) getNetworkID(network util.BasicNetInfo) (int, error) {
+	nodes, err := ncm.watchFactory.GetNodes()
+	if err != nil {
+		return util.InvalidID, err
+	}
+	networkID, err := util.GetNetworkID(nodes, network)
+	if err != nil {
+		return util.InvalidID, err
+	}
+	return networkID, nil
 }
 
 // newCommonNetworkControllerInfo creates and returns the base node network controller info
 func (ncm *nodeNetworkControllerManager) newCommonNetworkControllerInfo() *node.CommonNodeNetworkControllerInfo {
-	return node.NewCommonNodeNetworkControllerInfo(ncm.ovnNodeClient, ncm.ovnNodeClient.AdminPolicyRouteClient, ncm.watchFactory, ncm.recorder, ncm.name, ncm.dpuName, ncm.hostType, ncm.pfMACs)
+	return node.NewCommonNodeNetworkControllerInfo(ncm.ovnNodeClient, ncm.watchFactory, ncm.recorder, ncm.name,
+		ncm.dpuName, ncm.hostType, ncm.pfMACs, ncm.routeManager)
+}
+
+// NAD controller should be started on the node side under the following conditions:
+// (1) dpu mode is enabled when secondary networks feature is enabled
+// (2) primary user defined networks is enabled (all modes)
+// (3) whenever these is localnet network, needs to set ovn-bridge-mappings
+func isNodeNADControllerRequired() bool {
+	return config.OVNKubernetesFeature.EnableMultiNetwork ||
+		util.IsNetworkSegmentationSupportEnabled()
 }
 
 // NewNodeNetworkControllerManager creates a new OVN controller manager to manage all the controller for all networks
-func NewNodeNetworkControllerManager(ovnClient *util.OVNClientset, wf factory.NodeWatchFactory, name string, dpuName string,
-	eventRecorder record.EventRecorder) (*nodeNetworkControllerManager, error) {
+func NewNodeNetworkControllerManager(ovnClient *util.OVNClientset, wf factory.NodeWatchFactory, name, dpuName string,
+	wg *sync.WaitGroup, eventRecorder record.EventRecorder, routeManager *routemanager.Controller) (*nodeNetworkControllerManager, error) {
 	ncm := &nodeNetworkControllerManager{
 		name:    name,
 		dpuName: dpuName,
@@ -182,16 +127,24 @@ func NewNodeNetworkControllerManager(ovnClient *util.OVNClientset, wf factory.No
 		Kube:         &kube.Kube{KClient: ovnClient.KubeClient},
 		watchFactory: wf,
 		stopChan:     make(chan struct{}),
+		wg:           wg,
 		recorder:     eventRecorder,
+		routeManager: routeManager,
 	}
 
 	// need to configure OVS interfaces for Pods on secondary networks in the DPU mode
+	// need to start NAD controller on node side to set ovn-bridge-mappings for localnet network
+	// need to start NAD controller on node side for programming gateway pieces for UDNs
 	var err error
-	if config.OVNKubernetesFeature.EnableMultiNetwork {
-		ncm.nadController, err = nad.NewNetAttachDefinitionController("node-network-controller-manager", ncm, ovnClient.NetworkAttchDefClient, eventRecorder)
+	if isNodeNADControllerRequired() {
+		ncm.nadController, err = nad.NewNetAttachDefinitionController("node-network-controller-manager", ncm, wf, nil)
+		if err != nil {
+			return nil, err
+		}
 	}
-	if err != nil {
-		return nil, err
+	if util.IsNetworkSegmentationSupportEnabled() {
+		ncm.vrfManager = vrfmanager.NewController(ncm.routeManager)
+		ncm.ruleManager = iprulemanager.NewController(config.IPv4Mode, config.IPv6Mode)
 	}
 	return ncm, nil
 }
@@ -210,20 +163,20 @@ func (ncm *nodeNetworkControllerManager) getNodeHostType() error {
 	return nil
 }
 
-// // initDefaultNodeNetworkController creates the controller for default network
-//
-//	func (ncm *nodeNetworkControllerManager) initDefaultNodeNetworkController() error {
-//		defaultNodeNetworkController, err := node.NewDefaultNodeNetworkController(ncm.newCommonNetworkControllerInfo())
-//		if err != nil {
-//			return err
-//		}
-//		// Make sure we only set defaultNodeNetworkController in case of no error,
-//		// otherwise we would initialize the interface with a nil implementation
-//		// which is not the same as nil interface.
-//		ncm.defaultNodeNetworkController = defaultNodeNetworkController
-//		return nil
-//	}
-//
+// initDefaultNodeNetworkController creates the controller for default network
+func (ncm *nodeNetworkControllerManager) initDefaultNodeNetworkController() error {
+	defaultNodeNetworkController, err := node.NewDefaultNodeNetworkController(ncm.newCommonNetworkControllerInfo(),
+		ncm.nadController)
+	if err != nil {
+		return err
+	}
+	// Make sure we only set defaultNodeNetworkController in case of no error,
+	// otherwise we would initialize the interface with a nil implementation
+	// which is not the same as nil interface.
+	ncm.defaultNodeNetworkController = defaultNodeNetworkController
+	return nil
+}
+
 // Start the node network controller manager
 func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) {
 	klog.Infof("Starting the node network controller manager, Mode: %s", config.OvnKubeNode.Mode)
@@ -256,6 +209,7 @@ func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) 
 	// make sure we clean up after ourselves on failure
 	defer func() {
 		if err != nil {
+			klog.Errorf("Stopping node network controller manager, err=%v", err)
 			ncm.Stop()
 		}
 	}()
@@ -272,21 +226,57 @@ func (ncm *nodeNetworkControllerManager) Start(ctx context.Context) (err error) 
 		}, time.Minute, ncm.stopChan)
 	}
 
-	//err = ncm.initDefaultNodeNetworkController()
-	//if err != nil {
-	//	return fmt.Errorf("failed to init default node network controller: %v", err)
-	//}
-	//err = ncm.defaultNodeNetworkController.Start(ctx)
-	//if err != nil {
-	//	return fmt.Errorf("failed to start default node network controller: %v", err)
-	//}
-	//
-	// nadController is nil if multi-network is disabled
-	if ncm.nadController != nil {
-		err = ncm.nadController.Start()
+	// Let's create Route manager that will manage routes.
+	ncm.wg.Add(1)
+	go func() {
+		defer ncm.wg.Done()
+		ncm.routeManager.Run(ncm.stopChan, 2*time.Minute)
+	}()
+
+	err = ncm.initDefaultNodeNetworkController()
+	if err != nil {
+		return fmt.Errorf("failed to init default node network controller: %v", err)
+	}
+	err = ncm.defaultNodeNetworkController.PreStart(ctx) // partial gateway init + OpenFlow Manager
+	if err != nil {
+		return fmt.Errorf("failed to start default node network controller: %v", err)
 	}
 
-	return err
+	if ncm.nadController != nil {
+		err = ncm.nadController.Start(ncm.defaultNodeNetworkController)
+		if err != nil {
+			return fmt.Errorf("failed to start NAD controller: %w", err)
+		}
+	}
+
+	err = ncm.defaultNodeNetworkController.Start(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to start default node network controller: %v", err)
+	}
+
+	if ncm.vrfManager != nil {
+		// Let's create VRF manager that will manage VRFs for all UDNs
+		err = ncm.vrfManager.Run(ncm.stopChan, ncm.wg)
+		if err != nil {
+			return fmt.Errorf("failed to run VRF Manager: %w", err)
+		}
+	}
+
+	if ncm.ruleManager != nil {
+		// Let's create rule manager that will manage rules on the vrfs for all UDNs
+		ncm.wg.Add(1)
+		go func() {
+			defer ncm.wg.Done()
+			ncm.ruleManager.Run(ncm.stopChan, 5*time.Minute)
+		}()
+		// Tell rule manager that we want to fully own all rules at a particular priority.
+		// Any rules created with this priority that we do not recognize it, will be
+		// removed by relevant manager.
+		if err := ncm.ruleManager.OwnPriority(node.UDNMasqueradeIPRulePriority); err != nil {
+			return fmt.Errorf("failed to own priority %d for IP rules: %v", node.UDNMasqueradeIPRulePriority, err)
+		}
+	}
+	return nil
 }
 
 // Stop gracefully stops all managed controllers
@@ -294,10 +284,10 @@ func (ncm *nodeNetworkControllerManager) Stop() {
 	// stop stale ovs ports cleanup
 	close(ncm.stopChan)
 
-	//if ncm.defaultNodeNetworkController != nil {
-	//	ncm.defaultNodeNetworkController.Stop()
-	//}
-	//
+	if ncm.defaultNodeNetworkController != nil {
+		ncm.defaultNodeNetworkController.Stop()
+	}
+
 	// stop the NAD controller
 	if ncm.nadController != nil {
 		ncm.nadController.Stop()

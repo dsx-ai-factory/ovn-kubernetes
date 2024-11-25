@@ -74,7 +74,7 @@ docker_disable_ipv6() {
   # internal bridge has IPv6 disable and can't move the IPv6 from the eth0 interface.
   # We can enable IPv6 always in the container, since the docker setup with IPv4 only
   # is not very common.
-  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
+  KIND_NODES=$(kind_get_nodes)
   for n in $KIND_NODES; do
     $OCI_BIN exec "$n" sysctl --ignore net.ipv6.conf.all.disable_ipv6=0
     $OCI_BIN exec "$n" sysctl --ignore net.ipv6.conf.all.forwarding=1
@@ -122,12 +122,13 @@ install_ingress() {
 
 METALLB_DIR="/tmp/metallb"
 install_metallb() {
+  local metallb_version=v0.14.8
   mkdir -p /tmp/metallb
   local builddir
   builddir=$(mktemp -d "${METALLB_DIR}/XXXXXX")
 
   pushd "${builddir}"
-  git clone https://github.com/metallb/metallb.git
+  git clone https://github.com/metallb/metallb.git -b $metallb_version
   cd metallb
   # Use global IP next hops in IPv6
   if  [ "$KIND_IPV6_SUPPORT" == true ]; then
@@ -167,7 +168,7 @@ install_metallb() {
   # Hence remove node.kubernetes.io/exclude-from-external-load-balancers label from control-plane nodes
   # so that they are also available for advertising bgp routes which are needed for ovnkube's service
   # specific e2e tests.
-  MASTER_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sort | head -n "${KIND_NUM_MASTER}")
+  MASTER_NODES=$(kind_get_nodes | sort | head -n "${KIND_NUM_MASTER}")
   for n in $MASTER_NODES; do
     kubectl label node "$n" node.kubernetes.io/exclude-from-external-load-balancers-
   done
@@ -191,7 +192,7 @@ install_metallb() {
   client_subnets_v6=$(echo "${client_subnets}" | cut -d '#' -f 2)
   echo "client subnet IPv6: ${client_subnets_v6}"
 
-  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
+  KIND_NODES=$(kind_get_nodes)
   for n in ${KIND_NODES}; do
     if [ "$KIND_IPV4_SUPPORT" == true ]; then
         docker exec "${n}" ip route add "${client_subnets_v4}" via "${kind_network_v4}"
@@ -217,7 +218,7 @@ install_plugins() {
   git clone https://github.com/containernetworking/plugins.git
   pushd plugins
   CGO_ENABLED=0 ./build_linux.sh
-  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
+  KIND_NODES=$(kind_get_nodes)
   # Opted for not overwritting the existing plugins
   for node in $KIND_NODES; do
     for plugin in bandwidth bridge dhcp dummy firewall host-device ipvlan macvlan sbr static tuning vlan vrf; do
@@ -320,7 +321,13 @@ is_nested_virt_enabled() {
 }
 
 install_kubevirt() {
-    local kubevirt_version="$(curl -L https://storage.googleapis.com/kubevirt-prow/release/kubevirt/kubevirt/stable.txt)"
+    # possible values:
+    # stable - install newest stable (default)
+    # vX.Y.Z - install specific stable (i.e v1.3.1)
+    # nightly - install newest nightly
+    # nightly tag - install specific nightly (i.e 20240910)
+    KUBEVIRT_VERSION=${KUBEVIRT_VERSION:-"stable"}
+
     for node in $(kubectl get node --no-headers  -o custom-columns=":metadata.name"); do
         $OCI_BIN exec -t $node bash -c "echo 'fs.inotify.max_user_watches=1048576' >> /etc/sysctl.conf"
         $OCI_BIN exec -t $node bash -c "echo 'fs.inotify.max_user_instances=512' >> /etc/sysctl.conf"
@@ -329,10 +336,10 @@ install_kubevirt() {
             kubectl label nodes $node node-role.kubernetes.io/worker="" --overwrite=true
         fi
     done
-    local kubevirt_release_url="https://github.com/kubevirt/kubevirt/releases/download/${kubevirt_version}"
 
-    echo "Deploy latest nighly build Kubevirt"
     if [ "$(kubectl get kubevirts -n kubevirt kubevirt -ojsonpath='{.status.phase}')" != "Deployed" ]; then
+      local kubevirt_release_url=$(get_kubevirt_release_url "$KUBEVIRT_VERSION")
+      echo "Deploying Kubevirt from $kubevirt_release_url"
       kubectl apply -f "${kubevirt_release_url}/kubevirt-operator.yaml"
       kubectl apply -f "${kubevirt_release_url}/kubevirt-cr.yaml"
       if ! is_nested_virt_enabled; then
@@ -348,6 +355,12 @@ install_kubevirt() {
             kubectl logs --all-containers=true -n kubevirt $p || true
         done
     fi
+
+    kubectl -n kubevirt patch kubevirt kubevirt --type=json --patch '[{"op":"add","path":"/spec/configuration/developerConfiguration","value":{"featureGates":[]}},{"op":"add","path":"/spec/configuration/developerConfiguration/featureGates/-","value":"NetworkBindingPlugins"}]'
+    
+    local kubevirt_stable_release_url=$(get_kubevirt_release_url "stable")
+    local passt_binding_image="quay.io/kubevirt/network-passt-binding:${kubevirt_stable_release_url##*/}"
+    kubectl -n kubevirt patch kubevirt kubevirt --type=json --patch '[{"op":"add","path":"/spec/configuration/network","value":{}},{"op":"add","path":"/spec/configuration/network/binding","value":{"passt":{"computeResourceOverhead":{"requests":{"memory":"500Mi"}},"migration":{"method":"link-refresh"},"networkAttachmentDefinition":"default/primary-udn-kubevirt-binding","sidecarImage":"'"${passt_binding_image}"'"}}}]'
     
     if [ ! -d "./bin" ]
     then
@@ -363,8 +376,9 @@ install_kubevirt() {
 
     pushd ./bin
        if [ ! -f ./virtctl ]; then
-           cli_name="virtctl-${kubevirt_version}-${OS_TYPE}-${ARCH}"
-           curl -LO "${kubevirt_release_url}/${cli_name}"
+           kubevirt_stable_release_url=$(get_kubevirt_release_url "stable")
+           cli_name="virtctl-${kubevirt_stable_release_url##*/}-${OS_TYPE}-${ARCH}"
+           curl -LO "${kubevirt_stable_release_url}/${cli_name}"
            mv ${cli_name} virtctl
            if_error_exit "Failed to download virtctl!"
        fi
@@ -373,14 +387,265 @@ install_kubevirt() {
     chmod +x ./bin/virtctl
 }
 
-install_kubevirt_ipam_claims() {
+install_cert_manager() {
   local cert_manager_version="v1.14.4"
   echo "Installing cert-manager ..."
   manifest="https://github.com/cert-manager/cert-manager/releases/download/${cert_manager_version}/cert-manager.yaml"
   run_kubectl apply -f "$manifest"
+}
 
-  echo "Installing KubeVirt IPAM manager ..."
-  manifest="https://raw.githubusercontent.com/maiqueb/kubevirt-ipam-claims/main/dist/install.yaml"
+install_kubevirt_ipam_controller() {
+  echo "Installing KubeVirt IPAM controller manager ..."
+  manifest="https://raw.githubusercontent.com/kubevirt/ipam-extensions/main/dist/install.yaml"
   run_kubectl apply -f "$manifest"
-  kubectl wait -n kubevirt-ipam-claims-system deployment kubevirt-ipam-claims-controller-manager --for condition=Available --timeout 2m
+  kubectl wait -n kubevirt-ipam-controller-system deployment kubevirt-ipam-controller-manager --for condition=Available --timeout 2m
+}
+
+install_multus() {
+  local version="v4.1.3"
+  echo "Installing multus-cni $version daemonset ..."
+  wget -qO- "https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/${version}/deployments/multus-daemonset.yml" |\
+    sed -e "s|multus-cni:snapshot|multus-cni:${version}|g" |\
+    run_kubectl apply -f -
+}
+
+install_mpolicy_crd() {
+  echo "Installing multi-network-policy CRD ..."
+  mpolicy_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/multi-networkpolicy/master/scheme.yml"
+  run_kubectl apply -f "$mpolicy_manifest"
+}
+
+install_ipamclaim_crd() {
+  echo "Installing IPAMClaim CRD ..."
+  ipamclaims_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/ipamclaims/v0.4.0-alpha/artifacts/k8s.cni.cncf.io_ipamclaims.yaml"
+  run_kubectl apply -f "$ipamclaims_manifest"
+}
+
+docker_create_second_disconnected_interface() {
+  echo "adding second interfaces to nodes"
+  local bridge_name="${1:-kindexgw}"
+  echo "bridge: $bridge_name"
+
+  if [ "${OCI_BIN}" = "podman" ]; then
+    # docker and podman do different things with the --internal parameter:
+    # - docker installs iptables rules to drop traffic on a different subnet
+    #   than the bridge and we don't want that.
+    # - podman does not set the bridge as default gateway and we want that.
+    # So we need it with podman but not with docker. Neither allows us to create
+    # a bridge network without IPAM which would be ideal, so perhaps the best
+    # option would be a manual setup.
+    local podman_params="--internal"
+  fi
+
+  # Create the network without subnets; ignore if already exists.
+  "$OCI_BIN" network create --driver=bridge ${podman_params-} "$bridge_name" || true
+
+  KIND_NODES=$(kind_get_nodes)
+  for n in $KIND_NODES; do
+    "$OCI_BIN" network connect "$bridge_name" "$n" || true
+  done
+}
+
+enable_multi_net() {
+  install_multus
+  install_mpolicy_crd
+  install_ipamclaim_crd
+  docker_create_second_disconnected_interface "underlay"  # localnet scenarios require an extra interface
+}
+
+kind_get_nodes() {
+  kind get nodes --name "${KIND_CLUSTER_NAME}" | grep -v external-load-balancer
+}
+
+set_dnsnameresolver_images() {
+  if [ "$KIND_LOCAL_REGISTRY" == true ];then
+    COREDNS_WITH_OCP_DNSNAMERESOLVER="localhost:5000/coredns-with-ocp-dnsnameresolver:latest"
+    DNSNAMERESOLVER_OPERATOR="localhost:5000/dnsnameresolver-operator:latest"
+  else
+    COREDNS_WITH_OCP_DNSNAMERESOLVER="localhost/coredns-with-ocp-dnsnameresolver:dev"
+    DNSNAMERESOLVER_OPERATOR="localhost/dnsnameresolver-operator:dev"
+  fi
+}
+
+# build_image accepts three arguments. The first argument is the absolute path to the directory
+# which contains the Dockerfile. The second argument is the image name along with the tag. The
+# third argument is the name of the Dockerfile to use for building the image. 
+build_image() {
+  pushd ${1}
+  $OCI_BIN build -t "${2}" -f ${3} .
+
+  # store in local registry
+  if [ "$KIND_LOCAL_REGISTRY" == true ];then
+    echo "Pushing built image (${2}) to local $OCI_BIN registry"
+    $OCI_BIN push "${2}"
+  fi
+  popd
+}
+
+build_dnsnameresolver_images() {
+  set_dnsnameresolver_images
+  rm -rf /tmp/coredns-ocp-dnsnameresolver
+  git clone https://github.com/openshift/coredns-ocp-dnsnameresolver.git /tmp/coredns-ocp-dnsnameresolver
+  pushd /tmp/coredns-ocp-dnsnameresolver
+  git checkout 850cb5757982d368195744d3565c1565a7f0d43a
+  popd
+ 
+  build_image /tmp/coredns-ocp-dnsnameresolver ${COREDNS_WITH_OCP_DNSNAMERESOLVER} Dockerfile.upstream
+
+  build_image /tmp/coredns-ocp-dnsnameresolver/operator ${DNSNAMERESOLVER_OPERATOR} Dockerfile
+}
+
+# install_image accepts the image name along with the tag as an argument and installs it.
+install_image() {
+  # If local registry is being used push image there for consumption by kind cluster
+  if [ "$KIND_LOCAL_REGISTRY" == true ]; then
+    echo "${1} should already be avaliable in local registry, not loading"
+  else
+    if [ "$OCI_BIN" == "podman" ]; then
+      # podman: cf https://github.com/kubernetes-sigs/kind/issues/2027
+      rm -f /tmp/image.tar
+      podman save -o /tmp/image.tar "${1}"
+      kind load image-archive /tmp/image.tar --name "${KIND_CLUSTER_NAME}"
+    else
+      kind load docker-image "${1}" --name "${KIND_CLUSTER_NAME}"
+    fi
+  fi
+}
+
+install_dnsnameresolver_images() {
+  install_image ${COREDNS_WITH_OCP_DNSNAMERESOLVER}
+  install_image ${DNSNAMERESOLVER_OPERATOR}
+}
+
+install_dnsnameresolver_operator() {
+  pushd /tmp/coredns-ocp-dnsnameresolver/operator
+  
+  # Before installing DNSNameResolver operator, update the args so that the operator
+  # is configured with the correct values.
+  sed -i -e 's/^\(.*--coredns-namespace=\).*/\1kube-system/' \
+    -e 's/^\(.*--coredns-service-name=\).*/\1kube-dns/' \
+    -e 's/^\(.*--dns-name-resolver-namespace=\).*/\1ovn-kubernetes/' \
+    -e 's/^\(.*--coredns-port=\).*/\153/' config/default/manager_auth_proxy_patch.yaml
+
+  make install
+  make deploy IMG=${DNSNAMERESOLVER_OPERATOR}
+  popd
+}
+
+update_clusterrole_coredns() {
+  original_clusterrole=$(kubectl get clusterrole system:coredns -oyaml)
+  echo "Original CoreDNS clusterrole:"
+  echo "${original_clusterrole}"
+  additional_permissions=$(printf '%s' '
+- apiGroups:
+  - network.openshift.io
+  resources:
+  - dnsnameresolvers
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - network.openshift.io
+  resources:
+  - dnsnameresolvers/status
+  verbs:
+  - update
+  - get
+  - patch
+')
+  updated_clusterrole="${original_clusterrole}${additional_permissions}"
+  echo "Patched CoreDNS clusterrole:"
+  echo "${updated_clusterrole}"
+  printf '%s' "${updated_clusterrole}" | kubectl apply -f -
+}
+
+add_ocp_dnsnameresolver_to_coredns_config() {
+  original_corefile=$(kubectl get -n=kube-system configmap/coredns -o=jsonpath="{.data['Corefile']}")
+  if ! grep -wq "ocp_dnsnameresolver" <<< ${original_corefile}; then
+    echo "Original CoreDNS Corefile:"
+    echo "${original_corefile}"
+    updated_corefile=$(
+      printf '%s' "${original_corefile}" | sed -e 's/^\(.*\)\(forward.*\)/\1ocp_dnsnameresolver {\n\1   namespaces ovn-kubernetes\n\1}\n\1\2/'
+    )
+    echo "Patched CoreDNS Corefile:"
+    echo "${updated_corefile}"
+    printf '%s' "${updated_corefile}" > /tmp/Corefile.json
+    updated_coredns=$(kubectl create configmap coredns -n=kube-system --from-file=Corefile=/tmp/Corefile.json -oyaml --dry-run=client)
+    echo "Patched CoreDNS config:"
+    echo "${updated_coredns}"
+    printf '%s' "${updated_coredns}" | kubectl apply -f -
+  fi
+}
+
+update_coredns_deployment_image() {
+  kubectl -n=kube-system set image deploy/coredns coredns=${COREDNS_WITH_OCP_DNSNAMERESOLVER}
+}
+
+# kubectl_wait_dnsnameresolver_pods will set a total timeout of 60s and wait for the pods
+# related to the dns name resolver feature to become "Ready".
+kubectl_wait_dnsnameresolver_pods() {
+  TIMEOUT=60
+
+  # We will make sure that we timeout all commands at current seconds + the desired timeout.
+  endtime=$(( SECONDS + TIMEOUT ))
+
+  timeout=$(calculate_timeout ${endtime})
+  echo "Waiting for pods in dnsnameresolver-operator namespace to become ready (timeout ${timeout})..."
+  kubectl wait -n dnsnameresolver-operator --for=condition=ready pods --all --timeout=${timeout}s
+}
+
+deploy_kubevirt_binding() {
+  cat <<EOF | run_kubectl apply -f -
+---
+apiVersion: "k8s.cni.cncf.io/v1"
+kind: NetworkAttachmentDefinition
+metadata:
+  name: primary-udn-kubevirt-binding
+  namespace: default
+spec:
+  config: '{
+  "cniVersion": "1.0.0",
+  "name": "primary-udn-kubevirt-binding",
+  "plugins": [
+    {
+      "type": "network-passt-binding"
+    }
+  ]
+}'
+EOF
+}
+
+deploy_passt_binary() {
+  echo "Installing passt-binding-cni-ds ..."
+  local manifest="https://raw.githubusercontent.com/kubevirt/ipam-extensions/main/passt/passt-binding-cni-ds.yaml"
+  run_kubectl apply -f "$manifest"
+
+  run_kubectl rollout status -n kube-system daemonset/passt-binding-cni --timeout 2m
+}
+
+get_kubevirt_release_url() {
+    local VERSION="$1"
+
+    local kubevirt_version
+    local kubevirt_release_url
+
+    if [[ "$VERSION" == "stable" ]]; then
+        kubevirt_version=$(curl -sL https://storage.googleapis.com/kubevirt-prow/release/kubevirt/kubevirt/stable.txt)
+        kubevirt_release_url="https://github.com/kubevirt/kubevirt/releases/download/${kubevirt_version}"
+    elif [[ "$VERSION" == v* ]]; then
+        kubevirt_version="$VERSION"
+        kubevirt_release_url="https://github.com/kubevirt/kubevirt/releases/download/${kubevirt_version}"
+    elif [[ "$VERSION" == "nightly" ]]; then
+        kubevirt_version=$(curl -sL https://storage.googleapis.com/kubevirt-prow/devel/nightly/release/kubevirt/kubevirt/latest)
+        kubevirt_release_url="https://storage.googleapis.com/kubevirt-prow/devel/nightly/release/kubevirt/kubevirt/${kubevirt_version}"
+    elif [[ "$VERSION" =~ ^[0-9]{8}$ ]]; then
+        kubevirt_version="$VERSION"
+        kubevirt_release_url="https://storage.googleapis.com/kubevirt-prow/devel/nightly/release/kubevirt/kubevirt/${kubevirt_version}"
+    else
+        echo "Unsupported KUBEVIRT_VERSION value $VERSION (use either stable, vX.Y.Z, nightly or nightly tag)"
+        exit 1
+    fi
+
+    echo "$kubevirt_release_url"
 }

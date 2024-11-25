@@ -8,7 +8,7 @@ import (
 
 	"github.com/containernetworking/cni/pkg/types"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/libovsdb/ovsdb"
+
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -18,6 +18,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -50,6 +51,8 @@ type NetworkControllerManager struct {
 	stopChan chan struct{}
 	wg       *sync.WaitGroup
 
+	defaultNetworkController nad.BaseNetworkController
+
 	// net-attach-def controller handle net-attach-def and create/delete network controllers
 	nadController *nad.NetAttachDefinitionController
 }
@@ -59,17 +62,14 @@ func (cm *NetworkControllerManager) NewNetworkController(nInfo util.NetInfo) (na
 	if err != nil {
 		return nil, fmt.Errorf("failed to create network controller info %w", err)
 	}
-	if _, ok := nInfo.(*util.DefaultNetInfo); ok {
-		return ovn.NewDefaultNetworkController(cnci, nInfo)
-	}
 	topoType := nInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology:
-		return ovn.NewSecondaryLayer3NetworkController(cnci, nInfo), nil
+		return ovn.NewSecondaryLayer3NetworkController(cnci, nInfo, cm.nadController)
 	case ovntypes.Layer2Topology:
-		return ovn.NewSecondaryLayer2NetworkController(cnci, nInfo), nil
+		return ovn.NewSecondaryLayer2NetworkController(cnci, nInfo, cm.nadController)
 	case ovntypes.LocalnetTopology:
-		return ovn.NewSecondaryLocalnetNetworkController(cnci, nInfo), nil
+		return ovn.NewSecondaryLocalnetNetworkController(cnci, nInfo, cm.nadController), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
@@ -83,99 +83,27 @@ func (cm *NetworkControllerManager) newDummyNetworkController(topoType, netName 
 	netInfo, _ := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: topoType}, nil)
 	switch topoType {
 	case ovntypes.Layer3Topology:
-		return ovn.NewSecondaryLayer3NetworkController(cnci, netInfo), nil
+		return ovn.NewSecondaryLayer3NetworkController(cnci, netInfo, cm.nadController)
 	case ovntypes.Layer2Topology:
-		return ovn.NewSecondaryLayer2NetworkController(cnci, netInfo), nil
+		return ovn.NewSecondaryLayer2NetworkController(cnci, netInfo, cm.nadController)
 	case ovntypes.LocalnetTopology:
-		return ovn.NewSecondaryLocalnetNetworkController(cnci, netInfo), nil
+		return ovn.NewSecondaryLocalnetNetworkController(cnci, netInfo, cm.nadController), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
 
-// Cleanup stale logical entities of deleted networks by finding logical entities of legacy network name external-ids
-// Note that there is no topology type information in legacy external-ids, we cannot call dummyController.Cleanup() function.
-func (cm *NetworkControllerManager) cleanupDeletedNetworksWithLegacyNetworkExternalIDs(existingNetworksMap map[string]struct{}) error {
-	// Get all the existing logical entities with legacy network name
-	switches, routers, err := findAllSecondaryNetworkLogicalEntities(cm.nbClient, ovntypes.LegacyNetworkExternalID)
-	if err != nil {
-		return err
-	}
-
-	staleNetworkName := map[string]struct{}{}
-	for _, ls := range switches {
-		netName := ls.ExternalIDs[ovntypes.LegacyNetworkExternalID]
-		if _, ok := existingNetworksMap[netName]; ok {
-			// network still exists, no cleanup to do
-			continue
-		}
-		staleNetworkName[netName] = struct{}{}
-	}
-	for _, lr := range routers {
-		netName := lr.ExternalIDs[ovntypes.LegacyNetworkExternalID]
-		if _, ok := existingNetworksMap[netName]; ok {
-			// network still exists, no cleanup to do
-			continue
-		}
-		staleNetworkName[netName] = struct{}{}
-	}
-
-	klog.Infof("Delete stale logical entities for networks %v", staleNetworkName)
-	var ops []ovsdb.Operation
-	for netName := range staleNetworkName {
-		// cleans up related OVN logical entities
-		var err error
-
-		// Note : Cluster manager removes the subnet annotation for the node.
-
-		klog.Infof("Delete OVN logical entities for network controller of network %s", netName)
-		// first delete logical switches
-		ops, err = libovsdbops.DeleteLogicalSwitchesWithPredicateOps(cm.nbClient, ops,
-			func(item *nbdb.LogicalSwitch) bool {
-				return item.ExternalIDs[ovntypes.LegacyNetworkExternalID] == netName
-			})
-		if err != nil {
-			return fmt.Errorf("failed to get ops for deleting switches of network %s: %v", netName, err)
-		}
-
-		// now delete cluster router
-		ops, err = libovsdbops.DeleteLogicalRoutersWithPredicateOps(cm.nbClient, ops,
-			func(item *nbdb.LogicalRouter) bool {
-				return item.ExternalIDs[ovntypes.LegacyNetworkExternalID] == netName
-			})
-		if err != nil {
-			return fmt.Errorf("failed to get ops for deleting routers of network %s: %v", netName, err)
-		}
-
-		portGroupPredicate := func(item *nbdb.PortGroup) bool {
-			return item.ExternalIDs[ovntypes.LegacyNetworkExternalID] == netName
-		}
-		ops, err = libovsdbops.DeletePortGroupsWithPredicateOps(cm.nbClient, ops, portGroupPredicate)
-		if err != nil {
-			return fmt.Errorf("failed to get ops to delete port group of network %s", netName)
-		}
-
-		asPredicate := func(item *nbdb.AddressSet) bool {
-			return item.ExternalIDs[ovntypes.LegacyNetworkExternalID] == netName
-		}
-		ops, err = libovsdbops.DeleteAddressSetsWithPredicateOps(cm.nbClient, ops, asPredicate)
-		if err != nil {
-			return fmt.Errorf("failed to get ops to delete address set of network %s", netName)
-		}
-	}
-
-	_, err = libovsdbops.TransactAndCheck(cm.nbClient, ops)
-	if err != nil {
-		return fmt.Errorf("failed to delete stale logical OVN entities of deleted networks: %v", err)
-	}
-	return nil
-}
-
 // Find all the OVN logical switches/routers for the secondary networks
-func findAllSecondaryNetworkLogicalEntities(nbClient libovsdbclient.Client, networkNameExtIDKey string) ([]*nbdb.LogicalSwitch,
+func findAllSecondaryNetworkLogicalEntities(nbClient libovsdbclient.Client) ([]*nbdb.LogicalSwitch,
 	[]*nbdb.LogicalRouter, error) {
+
+	belongsToSecondaryNetwork := func(externalIDs map[string]string) bool {
+		_, hasNetworkExternalID := externalIDs[ovntypes.NetworkExternalID]
+		networkRole, hasNetworkRoleExternalID := externalIDs[ovntypes.NetworkRoleExternalID]
+		return hasNetworkExternalID && hasNetworkRoleExternalID && networkRole == ovntypes.NetworkRoleSecondary
+	}
+
 	p1 := func(item *nbdb.LogicalSwitch) bool {
-		_, ok := item.ExternalIDs[networkNameExtIDKey]
-		return ok
+		return belongsToSecondaryNetwork(item.ExternalIDs)
 	}
 	nodeSwitches, err := libovsdbops.FindLogicalSwitchesWithPredicate(nbClient, p1)
 	if err != nil {
@@ -183,8 +111,7 @@ func findAllSecondaryNetworkLogicalEntities(nbClient libovsdbclient.Client, netw
 		return nil, nil, err
 	}
 	p2 := func(item *nbdb.LogicalRouter) bool {
-		_, ok := item.ExternalIDs[networkNameExtIDKey]
-		return ok
+		return belongsToSecondaryNetwork(item.ExternalIDs)
 	}
 	clusterRouters, err := libovsdbops.FindLogicalRoutersWithPredicate(nbClient, p2)
 	if err != nil {
@@ -194,19 +121,14 @@ func findAllSecondaryNetworkLogicalEntities(nbClient libovsdbclient.Client, netw
 	return nodeSwitches, clusterRouters, nil
 }
 
-func (cm *NetworkControllerManager) CleanupDeletedNetworks(allControllers []nad.NetworkController) error {
-	existingNetworksMap := map[string]struct{}{}
-	for _, oc := range allControllers {
-		existingNetworksMap[oc.GetNetworkName()] = struct{}{}
-	}
-
-	err := cm.cleanupDeletedNetworksWithLegacyNetworkExternalIDs(existingNetworksMap)
-	if err != nil {
-		return err
+func (cm *NetworkControllerManager) CleanupDeletedNetworks(validNetworks ...util.BasicNetInfo) error {
+	existingNetworksMap := map[string]string{}
+	for _, network := range validNetworks {
+		existingNetworksMap[network.GetNetworkName()] = network.TopologyType()
 	}
 
 	// Get all the existing secondary networks and its logical entities
-	switches, routers, err := findAllSecondaryNetworkLogicalEntities(cm.nbClient, ovntypes.NetworkExternalID)
+	switches, routers, err := findAllSecondaryNetworkLogicalEntities(cm.nbClient)
 	if err != nil {
 		return err
 	}
@@ -214,12 +136,12 @@ func (cm *NetworkControllerManager) CleanupDeletedNetworks(allControllers []nad.
 	staleNetworkControllers := map[string]nad.NetworkController{}
 	for _, ls := range switches {
 		netName := ls.ExternalIDs[ovntypes.NetworkExternalID]
-		if _, ok := existingNetworksMap[netName]; ok {
+		// TopologyExternalID always co-exists with NetworkExternalID
+		topoType := ls.ExternalIDs[ovntypes.TopologyExternalID]
+		if existingNetworksMap[netName] == topoType {
 			// network still exists, no cleanup to do
 			continue
 		}
-		// TopologyExternalID always co-exists with NetworkExternalID
-		topoType := ls.ExternalIDs[ovntypes.TopologyExternalID]
 		// Create dummy network controllers to clean up logical entities
 		klog.V(5).Infof("Found stale %s network %s", topoType, netName)
 		if oc, err := cm.newDummyNetworkController(topoType, netName); err == nil {
@@ -229,12 +151,12 @@ func (cm *NetworkControllerManager) CleanupDeletedNetworks(allControllers []nad.
 	}
 	for _, lr := range routers {
 		netName := lr.ExternalIDs[ovntypes.NetworkExternalID]
-		if _, ok := existingNetworksMap[netName]; ok {
+		// TopologyExternalID always co-exists with NetworkExternalID
+		topoType := lr.ExternalIDs[ovntypes.TopologyExternalID]
+		if existingNetworksMap[netName] == topoType {
 			// network still exists, no cleanup to do
 			continue
 		}
-		// TopologyExternalID always co-exists with NetworkExternalID
-		topoType := lr.ExternalIDs[ovntypes.TopologyExternalID]
 		// Create dummy network controllers to clean up logical entities
 		klog.V(5).Infof("Found stale %s network %s", topoType, netName)
 		if oc, err := cm.newDummyNetworkController(topoType, netName); err == nil {
@@ -289,7 +211,7 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, wf *factory.Watch
 
 	var err error
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
-		cm.nadController, err = nad.NewNetAttachDefinitionController("network-controller-manager", cm, ovnClient.NetworkAttchDefClient, cm.recorder)
+		cm.nadController, err = nad.NewNetAttachDefinitionController("network-controller-manager", cm, wf, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -383,6 +305,24 @@ func (cm *NetworkControllerManager) newCommonNetworkControllerInfo() (*ovn.Commo
 		cm.sbClient, cm.podRecorder, cm.SCTPSupport, cm.multicastSupport, cm.svcTemplateSupport)
 }
 
+// initDefaultNetworkController creates the controller for default network
+func (cm *NetworkControllerManager) initDefaultNetworkController(nadController *nad.NetAttachDefinitionController,
+	observManager *observability.Manager) error {
+	cnci, err := cm.newCommonNetworkControllerInfo()
+	if err != nil {
+		return fmt.Errorf("failed to create common network controller info: %w", err)
+	}
+	defaultController, err := ovn.NewDefaultNetworkController(cnci, nadController, observManager)
+	if err != nil {
+		return err
+	}
+	// Make sure we only set defaultNetworkController in case of no error,
+	// otherwise we would initialize the interface with a nil implementation
+	// which is not the same as nil interface.
+	cm.defaultNetworkController = defaultController
+	return nil
+}
+
 // Start the ovnkube controller
 func (cm *NetworkControllerManager) Start(ctx context.Context) error {
 	klog.Info("Starting the ovnkube controller")
@@ -472,10 +412,34 @@ func (cm *NetworkControllerManager) Start(ctx context.Context) error {
 		metrics.GetConfigDurationRecorder().Run(cm.nbClient, cm.kube, 10, time.Second*5, cm.stopChan)
 	}
 	cm.podRecorder.Run(cm.sbClient, cm.stopChan)
-
+	
+	var observabilityManager *observability.Manager
+	if config.OVNKubernetesFeature.EnableObservability {
+		observabilityManager = observability.NewManager(cm.nbClient)
+		if err = observabilityManager.Init(); err != nil {
+			return fmt.Errorf("failed to init observability manager: %w", err)
+		}
+	} else {
+		err = observability.Cleanup(cm.nbClient)
+		if err != nil {
+			klog.Warningf("Observability cleanup failed, expected if not all Samples ware deleted yet: %v", err)
+		}
+	}
+	err = cm.initDefaultNetworkController(cm.nadController, observabilityManager)
+	if err != nil {
+		return fmt.Errorf("failed to init default network controller: %v", err)
+	}
+	
 	// nadController is nil if multi-network is disabled
 	if cm.nadController != nil {
-		return cm.nadController.Start()
+		if err = cm.nadController.Start(cm.defaultNetworkController); err != nil {
+			return fmt.Errorf("failed to start NAD Controller :%v", err)
+		}
+	}
+
+	err = cm.defaultNetworkController.Start(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to start default network controller: %v", err)
 	}
 
 	return nil
@@ -485,6 +449,11 @@ func (cm *NetworkControllerManager) Start(ctx context.Context) error {
 func (cm *NetworkControllerManager) Stop() {
 	// stop metric recorders
 	close(cm.stopChan)
+
+	// stop the default network controller
+	if cm.defaultNetworkController != nil {
+		cm.defaultNetworkController.Stop()
+	}
 
 	// stop the NAD controller
 	if cm.nadController != nil {

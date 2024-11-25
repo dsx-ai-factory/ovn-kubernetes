@@ -102,16 +102,17 @@ nav:
       - EgressQoS: api-reference/egress-qos-api-spec.md
       - EgressFirewall: api-reference/egress-firewall-api-spec.md
       - AdminPolicyBasedExternalRoutes: api-reference/admin-epbr-api-spec.md
+      - UserDefinedNetwork: api-reference/userdefinednetwork-api-spec.md
   - Features:
+    - NetworkSecurityControls:
+      - AdminNetworkPolicy: features/network-security-controls/admin-network-policy.md
+      - NetworkPolicy: features/network-security-controls/network-policy.md
+      - EgressFirewall: features/network-security-controls/egress-firewall.md
     - ClusterEgressControls:
       - EgressIP: features/cluster-egress-controls/egress-ip.md
       - EgressService: features/cluster-egress-controls/egress-service.md
       - EgressQoS: features/cluster-egress-controls/egress-qos.md
       - EgressGateway: features/cluster-egress-controls/egress-gateway.md
-    - NetworkSecurityControls:
-      - NetworkPolicy: features/network-security-controls/network-policy.md
-      - AdminNetworkPolicy: features/network-security-controls/admin-network-policy.md
-      - EgressFirewall: features/network-security-controls/egress-firewall.md
     - InfrastructureSecurityControls:
       - NodeIdentity: features/infrastructure-security-controls/node-identity.md
     - MultiNetworking:
@@ -122,8 +123,8 @@ nav:
     - LiveMigration: features/live-migration.md
     - HybridOverlay: features/hybrid-overlay.md
     - Hardware Acceleration:
-      - OVS Acceleration with kernel datapath: features/hardware-offload/ovs_acceleration.md
-      - OVS_DOCA: features/hardware-offload/ovs-doca.md
+      - OVS Acceleration with kernel datapath: features/hardware-offload/ovs-kernel.md
+      - OVS Acceleration with DOCA datapath: features/hardware-offload/ovs-doca.md
   - Troubleshooting:
     - Introduction: troubleshooting/debugging.md
     - OVNKube Trace: troubleshooting/ovnkube-trace.md
@@ -131,6 +132,7 @@ nav:
   - Observability:
     - Metrics: observability/metrics.md
     - SDN Dashboard: observability/sdn-dashboard.md
+    - OVN observability: observability/ovn-observability.md
   - Enhancement Proposals:
     # - FeatureName: okeps/<filename.md>
     - Template: okeps/okep-4368-template.md

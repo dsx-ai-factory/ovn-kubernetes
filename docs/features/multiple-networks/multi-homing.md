@@ -110,6 +110,10 @@ spec:
 - `excludeSubnets` (string, optional): a comma separated list of CIDRs / IPs.
   These IPs will be removed from the assignable IP pool, and never handed over
   to the pods.
+- `allowPersistentIPs` (boolean, optional): persist the OVN Kubernetes assigned
+   IP addresses in a `ipamclaims.k8s.cni.cncf.io` object. This IP addresses will
+   be reused by other pods if requested. Useful for KubeVirt VMs. Only makes
+   sense if the `subnets` attribute is also defined.
 
 **NOTE**
 - when the subnets attribute is omitted, the logical switch implementing the
@@ -161,11 +165,69 @@ localnet network.
   These IPs will be removed from the assignable IP pool, and never handed over
   to the pods.
 - `vlanID` (integer, optional): assign VLAN tag. Defaults to none.
+- `allowPersistentIPs` (boolean, optional): persist the OVN Kubernetes assigned
+   IP addresses in a `ipamclaims.k8s.cni.cncf.io` object. This IP addresses will
+   be reused by other pods if requested. Useful for KubeVirt VMs. Only makes
+   sense if the `subnets` attribute is also defined.
+- `physicalNetworkName` (string, optional): the name of the physical network to
+  which the OVN overlay will connect. When omitted, it will default to the value
+  of the localnet network `name`.
 
 **NOTE**
 - when the subnets attribute is omitted, the logical switch implementing the
   network will only provide layer 2 communication, and the users must configure
   IPs for the pods. Port security will only prevent MAC spoofing.
+
+#### Sharing the same physical network mapping
+To prevent the admin from having to reconfigure the cluster nodes whenever they
+want to - let's say - add a VLAN, OVN-Kubernetes allows multiple network
+overlays to re-use the same physical network mapping.
+
+To do this, the cluster admin would provision two different networks (with
+different VLAN tags) using the **same** physical network name. Please check the
+example below for an example of this configuration:
+```yaml
+---
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: bluenet
+  namespace: test
+spec:
+  config: |
+    {
+            "cniVersion": "0.3.1",
+            "name": "tenantblue",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "localnet",
+            "netAttachDefName": "test/bluenet",
+            "vlanID": 4000,
+            "physicalNetworkName": "physnet"
+    }
+---
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: isolatednet
+  namespace: test
+spec:
+  config: |
+    {
+            "cniVersion": "0.3.1",
+            "name": "sales",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "localnet",
+            "netAttachDefName": "test/isolatednet",
+            "vlanID": 1234,
+            "physicalNetworkName": "physnet"
+    }
+```
+
+> [!WARNING]
+> Keep in mind OVN-Kubernetes does **not** validate the physical network
+> configurations in any way: the admin must ensure these configurations are
+> holistically healthy - e.g. the defined subnets do not overlap, the MTUs make
+> sense, etc.
 
 ## Pod configuration
 The user must specify the secondary network attachments via the
@@ -232,8 +294,97 @@ spec:
 - specifying a static IP address for the pod is only possible when the
   attachment configuration does **not** feature subnets.
 
+## Persistent IP addresses for virtualization workloads
+OVN-Kubernetes provides persistent IP addresses for virtualization workloads,
+allowing VMs to have the same IP addresses when they migrate, when they restart,
+and when they stop, the resume operation.
+
+For that, the network admin must configure the network accordingly - the
+`allowPersistentIPs` flag must be enabled in the NAD of the network. As with the
+other network knobs, all NADs pointing to the same network **must** feature the
+same configuration - i.e. all NADs in the network must either allow (or reject)
+persistent IPs.
+
+The client application (which creates the VM, and manages its lifecycle) is
+responsible for creating the `ipamclaims.k8s.cni.cncf.io` object, and point to
+it in the network selection element upon pod creation; OVN-Kubernetes will then
+persist the IP addresses it has allocated the pod in the `IPAMClaim`. This flow
+is portrayed in the sequence diagram below.
+
+```mermaid
+sequenceDiagram
+  actor user
+  participant KubeVirt
+  participant apiserver
+  participant OVN-Kubernetes
+
+  user->>KubeVirt: createVM(name=vm-a)
+  KubeVirt-->>user: OK
+
+  KubeVirt->>apiserver: createIPAMClaims(networks=...)
+  apiserver-->>KubeVirt: OK
+
+  KubeVirt->>apiserver: createPOD(ipamClaims=...)
+  apiserver-->>KubeVirt: OK
+
+  apiserver->>OVN-Kubernetes: reconcilePod(podKey=...)
+  OVN-Kubernetes->>OVN-Kubernetes: ips = AllocateNextIPs(nad.subnet)
+  OVN-Kubernetes->>apiserver: IPAMClaim.UpdateStatus(status.ips = ips)
+  apiserver-->>OVN-Kubernetes: OK
+```
+
+Whenever a VM is migrated, restarted, or stopped / then started a new pod will
+be scheduled to host the VM; it will also point to the same `IPAMClaim`s, and
+OVN-Kubernetes will fulfill the IP addresses being requested by the client.
+This flow is shown in the sequence diagram below.
+
+```mermaid
+sequenceDiagram
+  actor user
+  participant KubeVirt
+  participant apiserver
+  participant OVN-Kubernetes
+
+  user->>KubeVirt: startVM(vmName) or migrateVM(vmName)
+  KubeVirt-->>user: OK
+
+  note over KubeVirt: podName := "launcher-<vm name>"
+  KubeVirt->>apiserver: createPod(name=podName, ipam-claims=...)
+  apiserver-->>KubeVirt: OK
+
+  apiserver->>OVN-Kubernetes: reconcilePod(podKey=...)
+  OVN-Kubernetes->>OVN-Kubernetes: ipamClaim := readIPAMClaim(claimName)
+  OVN-Kubernetes->>OVN-Kubernetes: allocatePodIPs(ipamClaim.Status.IPs)
+```
+
+Managing the life-cycle of the `IPAMClaim`s objects is the responsibility of the
+client application that created them in the first place. In this case, KubeVirt.
+
+This feature is described in detail in the following KubeVirt
+[design proposal](https://github.com/kubevirt/community/pull/279).
+
+## IPv4 and IPv6 dynamic configuration for virtualization workloads on L2 primary UDN
+For virtualization workloads using a primary UDN with layer2 topology ovn-k 
+configure some DHCP and NDP flows to server ipv4 and ipv6 configuration for them.
+
+For both ipv4 and ipv6 the following parameters are configured using DHCP or RAs:
+- address
+- gateway
+- dns (read notes below)
+- hostname (vm's name)
+- mtu (taken from network attachment definition)
+
+### Configuring dns server
+By default the DHCP server at ovn-kuberntes will configure the kubernetes
+default dns service `kube-system/kube-dns` as the name server. This can be
+overridden with the following command line options:
+- dns-service-namespace
+- dns-service-name
+
 ## Limitations
 OVN-K currently does **not** support:
 - the same attachment configured multiple times in the same pod - i.e.
   `k8s.v1.cni.cncf.io/networks: l3-network,l3-network` is invalid.
 - updates to the network selection elements lists - i.e. `k8s.v1.cni.cncf.io/networks` annotation
+- IPv6 link local addresses not derived from the MAC address as described in RFC 2373, like  Privacy Extensions defined by RFC 4941, 
+  or the Opaque Identifier generation methods defined in RFC 7217.
