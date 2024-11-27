@@ -894,7 +894,11 @@ func geneveInterfaceMetricsUpdate() error {
 	geneveInterfaceName := "genev_sys_6081"
 	link, err := netlink.LinkByName(geneveInterfaceName)
 	if err != nil {
-		return fmt.Errorf("failed to lookup link %s: (%v)", geneveInterfaceName, err)
+		if !util.GetNetLinkOps().IsLinkNotFoundError(err) {
+			return fmt.Errorf("failed to lookup link %s: (%v)",
+				geneveInterfaceName, err)
+		}
+		return nil
 	}
 	ovsInterfaceMetricsDataMap["interface_mtu"].metric.WithLabelValues(
 		"none", "none", geneveInterfaceName).Set(float64(link.Attrs().MTU))
