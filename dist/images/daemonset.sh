@@ -131,6 +131,8 @@ OVNKUBE_ADMIN_FIREWALLD_ZONE="ngn-admin"
 OVN_NORTHD_BACKOFF_INTERVAL=0
 OVNKUBE_WAIT_ON_OVN_INSTALL_EXTID="false"
 OVN_OBSERV_ENABLE="false"
+OVN_UDN_ALLOWED_DEFAULT_SERVICES=
+OVS_DB_TRANSACTION_TIMEOUT=
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -484,6 +486,12 @@ while [ "$1" != "" ]; do
   --ovn_disable_requestedchassis)
     OVN_DISABLE_REQUESTEDCHASSIS=$value
     ;;
+  --ovn_udn_allowed_default_services)
+    OVN_UDN_ALLOWED_DEFAULT_SERVICES=$value
+    ;;
+  --ovs_db_transaction_timeout)
+    OVS_DB_TRANSACTION_TIMEOUT=$value
+    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -734,6 +742,12 @@ echo "ovn_observ_enable: ${ovn_observ_enable}"
 ovn_disable_requestedchassis=${OVN_DISABLE_REQUESTEDCHASSIS}
 echo "ovn_disable_requestedchassis: ${ovn_disable_requestedchassis}"
 
+ovn_udn_allowed_default_services=${OVN_UDN_ALLOWED_DEFAULT_SERVICES}
+echo "ovn_udn_allowed_default_services: ${ovn_udn_allowed_default_services}"
+
+ovs_db_transaction_timeout=${OVS_DB_TRANSACTION_TIMEOUT}
+echo "ovs_db_transaction_timeout: ${ovs_db_transaction_timeout}"
+
 ovn_image=${ovnkube_image} \
   ovnkube_compact_mode_enable=${ovnkube_compact_mode_enable} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -787,6 +801,7 @@ ovn_image=${ovnkube_image} \
   ovnkube_disable_firewalld=${ovnkube_disable_firewalld} \
   ovnkube_admin_firewalld_zone=${ovnkube_admin_firewalld_zone} \
   ovn_observ_enable=${ovn_observ_enable} \
+  ovn_udn_allowed_default_services=${ovn_udn_allowed_default_services} \
   ovnkube_app_name=ovnkube-node \
   jinjanate ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node.yaml
 
@@ -843,6 +858,7 @@ ovn_image=${ovnkube_image} \
   ovn_enable_multi_external_gateway=${ovn_enable_multi_external_gateway} \
   ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
   ovn_observ_enable=${ovn_observ_enable} \
+  ovn_udn_allowed_default_services=${ovn_udn_allowed_default_services} \
   ovnkube_app_name=ovnkube-node-dpu \
   jinjanate ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node-dpu.yaml
 
@@ -949,6 +965,8 @@ ovn_image=${image} \
   ovn_observ_enable=${ovn_observ_enable} \
   ovn_nohostsubnet_label=${ovn_nohostsubnet_label} \
   ovn_disable_requestedchassis=${ovn_disable_requestedchassis} \
+  ovn_udn_allowed_default_services=${ovn_udn_allowed_default_services} \
+  ovs_db_transaction_timeout=${ovs_db_transaction_timeout} \
   jinjanate ../templates/ovnkube-master.yaml.j2 -o ${output_dir}/ovnkube-master.yaml
 
 ovn_image=${image} \
@@ -1338,6 +1356,8 @@ ovn_image=${image} \
   ovn_enable_svc_template_support=${ovn_enable_svc_template_support} \
   ovn_enable_dnsnameresolver=${ovn_enable_dnsnameresolver} \
   ovn_observ_enable=${ovn_observ_enable} \
+  ovn_udn_allowed_default_services=${ovn_udn_allowed_default_services} \
+  ovs_db_transaction_timeout=${ovs_db_transaction_timeout} \
   jinjanate ../templates/ovnkube-single-node-zone.yaml.j2 -o ${output_dir}/ovnkube-single-node-zone.yaml
 
 ovn_image=${image} \
@@ -1403,6 +1423,8 @@ ovn_image=${image} \
   ovn_enable_svc_template_support=${ovn_enable_svc_template_support} \
   ovn_enable_dnsnameresolver=${ovn_enable_dnsnameresolver} \
   ovn_observ_enable=${ovn_observ_enable} \
+  ovn_udn_allowed_default_services=${ovn_udn_allowed_default_services} \
+  ovs_db_transaction_timeout=${ovs_db_transaction_timeout} \
   jinjanate ../templates/ovnkube-zone-controller.yaml.j2 -o ${output_dir}/ovnkube-zone-controller.yaml
 
 ovn_image=${imagec} \
