@@ -7,7 +7,7 @@ if [ "$#" -ne 1 ]; then
 fi
 
 $1 run --security-opt label=disable --rm \
-  -v  ${HOME}/.cache/golangci-lint:/cache -e GOLANGCI_LINT_CACHE=/cache \
+  -v  ${HOME}/.cache:/cache -e GOLANGCI_LINT_CACHE=/cache \
   -v $(pwd):/app -w /app -e GO111MODULE=on docker.io/golangci/golangci-lint:${VERSION} \
 	golangci-lint run --max-same-issues 0 --verbose --print-resources-usage \
 	--modules-download-mode=vendor --timeout=15m0s && \
