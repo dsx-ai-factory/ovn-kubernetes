@@ -13,6 +13,7 @@ import (
 )
 
 var metricsScrapeInterval int
+
 var OvsExporterCommand = cli.Command{
 	Name:  "ovs-exporter",
 	Usage: "",
@@ -23,7 +24,7 @@ var OvsExporterCommand = cli.Command{
 		},
 		&cli.IntFlag{
 			Name:        "metrics-interval",
-			Usage:       "The Interval at which ovs metrics are collected",
+			Usage:       "The interval in seconds at which ovs metrics are collected",
 			Value:       30,
 			Destination: &metricsScrapeInterval,
 		},
@@ -52,12 +53,12 @@ var OvsExporterCommand = cli.Command{
 		}
 
 		wg := &sync.WaitGroup{}
-
 		// start the ovsdb client for ovs metrics monitoring
 		ovsClient, err := libovsdb.NewOVSClient(stopChan)
 		if err != nil {
 			return fmt.Errorf("error when trying to initialize ovs client: %v", err)
 		}
+
 		hostName, err := os.Hostname()
 		if err != nil {
 			return fmt.Errorf("cannot get hostname: %v", err)

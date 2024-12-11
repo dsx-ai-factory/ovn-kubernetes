@@ -9,7 +9,6 @@ import (
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -176,7 +175,6 @@ func (oc *DefaultNetworkController) getRoutingPodGWs(nsInfo *namespaceInfo) map[
 // addLocalPodToNamespace returns pod's routing gateway info and the ops needed
 // to add pod's IP to the namespace's address set and port group.
 func (oc *DefaultNetworkController) addLocalPodToNamespace(ns string, ips []*net.IPNet, portUUID string) (*gatewayInfo, map[string]gatewayInfo, []ovsdb.Operation, error) {
-	var ops []ovsdb.Operation
 	var err error
 	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(ns, true, nil)
 	if err != nil {
@@ -185,16 +183,10 @@ func (oc *DefaultNetworkController) addLocalPodToNamespace(ns string, ips []*net
 
 	defer nsUnlock()
 
-	if ops, err = nsInfo.addressSet.AddAddressesReturnOps(util.IPNetsIPToStringSlice(ips)); err != nil {
+	ops, err := oc.addLocalPodToNamespaceLocked(nsInfo, ips, portUUID)
+	if err != nil {
 		return nil, nil, nil, err
 	}
-
-	if nsInfo.portGroupName != "" {
-		if ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops, nsInfo.portGroupName, portUUID); err != nil {
-			return nil, nil, nil, err
-		}
-	}
-
 	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), ops, nil
 }
 

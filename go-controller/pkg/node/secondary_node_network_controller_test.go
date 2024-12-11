@@ -369,7 +369,7 @@ var _ = Describe("SecondaryNodeNetworkController: UserDefinedPrimaryNetwork Gate
 				return err
 			}).WithTimeout(120 * time.Second).Should(BeNil())
 
-			By("check masquerade iprules are created for the network")
+			By("check iprules are created for the network")
 			rulesFound, err := netlink.RuleList(netlink.FAMILY_ALL)
 			Expect(err).NotTo(HaveOccurred())
 			var udnRules []netlink.Rule
@@ -378,7 +378,7 @@ var _ = Describe("SecondaryNodeNetworkController: UserDefinedPrimaryNetwork Gate
 					udnRules = append(udnRules, rule)
 				}
 			}
-			Expect(udnRules).To(HaveLen(2))
+			Expect(udnRules).To(HaveLen(3))
 
 			By("delete the network and ensure its associated VRF device is also deleted")
 			cnode = node.DeepCopy()

@@ -7,7 +7,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/vswitchd"
 )
 
-// ListBridges looks up all bridges from the cache
+// ListBridges looks up all ovs bridges from the cache
 func ListBridges(ovsClient libovsdbclient.Client) ([]*vswitchd.Bridge, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 	defer cancel()

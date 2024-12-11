@@ -251,65 +251,64 @@ var ovnControllerStopwatchShowMetricsMap = map[string]*stopwatchMetricDetails{
 
 // setOvnControllerConfigurationMetrics updates ovn-controller configuration
 // values (ovn-openflow-probe-interval, ovn-remote-probe-interval, ovn-monitor-all,
-// ovn-encap-ip, ovn-encap-type, ovn-remote) through updates from Open_vSwitch table in OVS DB
+// ovn-encap-ip, ovn-encap-type, ovn-remote) obtained from Open_vSwitch entry updates
 func setOvnControllerConfigurationMetrics(ovsDBClient libovsdbclient.Client) (err error) {
-	openVswitch, err := ovsops.GetOpenvSwitch(ovsDBClient)
+	openvSwitch, err := ovsops.GetOpenvSwitch(ovsDBClient)
 	if err != nil {
-		return fmt.Errorf("failed to get ovsdb openvswitch table :(%v)", err)
+		return fmt.Errorf("failed to get Open_vSwitch entry (%v)", err)
 	}
 
-	// set OpenFlowProbeInterval metric
-	openflowProbeField := openVswitch.ExternalIDs["ovn-openflow-probe-interval"]
-	openflowProbeValue := parseMetricToFloat(MetricOvnSubsystemController, "ovn-openflow-probe-interval", openflowProbeField)
-	metricOpenFlowProbeInterval.Set(openflowProbeValue)
-	// set ovn-remote-probe-interval metric
-	remoteProbeField := openVswitch.ExternalIDs["ovn-remote-probe-interval"]
+	openflowProbeField := openvSwitch.ExternalIDs["ovn-openflow-probe-interval"]
+	openflowProbeVal := parseMetricToFloat(MetricOvnSubsystemController, "ovn-openflow-probe-interval", openflowProbeField)
+	metricOpenFlowProbeInterval.Set(openflowProbeVal)
+
+	remoteProbeField := openvSwitch.ExternalIDs["ovn-remote-probe-interval"]
 	remoteProbeValue := parseMetricToFloat(MetricOvnSubsystemController, "ovn-remote-probe-interval", remoteProbeField)
 	metricRemoteProbeInterval.Set(remoteProbeValue / 1000)
-	// set ovn-monitor-all metric value
+
 	var ovnMonitorValue float64
-	ovnMonitorField := openVswitch.ExternalIDs["ovn-monitor-all"]
+	ovnMonitorField := openvSwitch.ExternalIDs["ovn-monitor-all"]
 	if ovnMonitorField == "true" {
 		ovnMonitorValue = 1
 	}
 	metricMonitorAll.Set(ovnMonitorValue)
-	// set ovn-encap-ip metric
-	encapIPValue := openVswitch.ExternalIDs["ovn-encap-ip"]
+
 	// To update not only values but also labels for metrics, we use Reset() to delete previous labels+value
+	encapIPValue := openvSwitch.ExternalIDs["ovn-encap-ip"]
 	metricEncapIP.Reset()
 	metricEncapIP.WithLabelValues(encapIPValue).Set(1)
-	// set ovn-remote metric
-	ovnRemoteValue := openVswitch.ExternalIDs["ovn-remote"]
-	metricSbConnectionMethod.Reset()
-	metricSbConnectionMethod.WithLabelValues(ovnRemoteValue).Set(1)
-	// set ovn-encap-type metric
-	encapTypeValue := openVswitch.ExternalIDs["ovn-encap-type"]
+
+	encapTypeValue := openvSwitch.ExternalIDs["ovn-encap-type"]
 	metricEncapType.Reset()
 	metricEncapType.WithLabelValues(encapTypeValue).Set(1)
-	// set ovn-k8s-node-port metric
+
+	ovnRemoteValue := openvSwitch.ExternalIDs["ovn-remote"]
+	metricSbConnectionMethod.Reset()
+	metricSbConnectionMethod.WithLabelValues(ovnRemoteValue).Set(1)
+
 	var ovnNodePortValue = 1
-	nodePortField := openVswitch.ExternalIDs["ovn-k8s-node-port"]
+	nodePortField := openvSwitch.ExternalIDs["ovn-k8s-node-port"]
 	if nodePortField == "false" {
 		ovnNodePortValue = 0
 	}
 	metricOvnNodePortEnabled.Set(float64(ovnNodePortValue))
-	// set ovn-bridge-mappings metric
-	bridgeMappingValue := openVswitch.ExternalIDs["ovn-bridge-mappings"]
+
+	bridgeMappingValue := openvSwitch.ExternalIDs["ovn-bridge-mappings"]
 	metricBridgeMappings.Reset()
 	metricBridgeMappings.WithLabelValues(bridgeMappingValue).Set(1)
+
 	return nil
 }
 
-func ovnControllerConfigurationMetricsUpdater(ovsDBClient libovsdbclient.Client,
-	metricsScrapeInterval int, stopChan <-chan struct{}) {
+func ovnControllerConfigurationMetricsUpdater(ovsDBClient libovsdbclient.Client, metricsScrapeInterval int,
+	stopChan <-chan struct{}) {
 	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			err := setOvnControllerConfigurationMetrics(ovsDBClient)
-			if err != nil {
+			if err := setOvnControllerConfigurationMetrics(ovsDBClient); err != nil {
 				klog.Errorf("Setting ovn controller config metrics failed: %s", err.Error())
 			}
 		case <-stopChan:
@@ -401,8 +400,8 @@ func updateSBDBConnectionMetric(ovsAppctl ovsClient, retry int, retrySleep time.
 	}
 }
 
-func RegisterOvnControllerMetrics(ovsDBClient libovsdbclient.Client, metricsScrapeInterval int,
-	stopChan <-chan struct{}) {
+func RegisterOvnControllerMetrics(ovsDBClient libovsdbclient.Client,
+	metricsScrapeInterval int, stopChan <-chan struct{}) {
 	getOvnControllerVersionInfo()
 	prometheus.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
@@ -482,7 +481,8 @@ func RegisterOvnControllerMetrics(ovsDBClient libovsdbclient.Client, metricsScra
 	registerStopwatchShowMetrics(ovnController, MetricOvnNamespace, MetricOvnSubsystemController)
 
 	// ovn-controller configuration metrics updater
-	go ovnControllerConfigurationMetricsUpdater(ovsDBClient, metricsScrapeInterval, stopChan)
+	go ovnControllerConfigurationMetricsUpdater(ovsDBClient,
+		metricsScrapeInterval, stopChan)
 	// ovn-controller coverage show metrics updater
 	go coverageShowMetricsUpdater(ovnController, metricsScrapeInterval, stopChan)
 	// ovn-controller stopwatch show metrics updater

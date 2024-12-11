@@ -160,7 +160,7 @@ func isPodRouteListEqual(routeList1, routeList2 []podRoute) bool {
 }
 
 type OpenPort struct {
-	// valid values are tcp, udp, sctp
+	// valid values are tcp, udp, sctp, icmp
 	Protocol string `json:"protocol"`
 	Port     *int   `json:"port,omitempty"`
 }

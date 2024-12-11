@@ -376,10 +376,6 @@ var _ = Describe("Kubevirt Virtual Machines", func() {
 			GinkgoHelper()
 			checkConnectivity(vmName, endpoints, stage)
 			By("Skip network policy, test should be fixed after OVN bump broke them")
-<<<<<<< HEAD
-			// See: https://github.com/ovn-org/ovn-kubernetes/pull/4457
-=======
->>>>>>> ffddd06ec12e43af0397bca8e36adedf8df441b1
 			/*
 				step := by(vmName, stage+": Create deny all network policy")
 				policy, err := createDenyAllPolicy(vmName)
@@ -888,17 +884,10 @@ passwd:
 
 			By("Wait some time for service to settle")
 			endpoints := []*net.TCPConn{}
-<<<<<<< HEAD
-			Eventually(func() bool {
-				endpoints, err = dialServiceNodePort(svc)
-				return err == nil
-			}).WithPolling(time.Second).WithTimeout(20*time.Second).Should(BeTrue(), "Should dial service port once service settled")
-=======
 			Eventually(func() error {
 				endpoints, err = dialServiceNodePort(svc)
 				return err
 			}).WithPolling(time.Second).WithTimeout(20*time.Second).Should(Succeed(), "Should dial service port once service settled")
->>>>>>> ffddd06ec12e43af0397bca8e36adedf8df441b1
 
 			checkConnectivityAndNetworkPolicies(vm.Name, endpoints, "before live migration")
 			// Do just one migration that will fail
@@ -1223,7 +1212,7 @@ passwd:
 						}, butane)
 					Expect(err).ToNot(HaveOccurred())
 					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].Bridge = nil
-					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].Binding = &kubevirtv1.PluginBinding{Name: "passt"}
+					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].Binding = &kubevirtv1.PluginBinding{Name: "managedTap"}
 					createVirtualMachine(vm)
 					return vm.Name
 				},
@@ -1254,7 +1243,7 @@ passwd:
 						}, butane)
 					Expect(err).ToNot(HaveOccurred())
 					vmi.Spec.Domain.Devices.Interfaces[0].Bridge = nil
-					vmi.Spec.Domain.Devices.Interfaces[0].Binding = &kubevirtv1.PluginBinding{Name: "passt"}
+					vmi.Spec.Domain.Devices.Interfaces[0].Binding = &kubevirtv1.PluginBinding{Name: "managedTap"}
 					createVirtualMachineInstance(vmi)
 					return vmi.Name
 				},
@@ -1274,21 +1263,6 @@ passwd:
 				}
 				return filteredOutIPs
 			}
-			// takes ipv4 and ipv6 cidrs and returns the correct type for the cluster under test
-			correctCIDRFamily = func(ipv4CIDR, ipv6CIDR string) string {
-				// dual stack cluster
-				if isIPv6Supported() && isIPv4Supported() {
-					return strings.Join([]string{ipv4CIDR, ipv6CIDR}, ",")
-				}
-				// is an ipv6 only cluster
-				if isIPv6Supported() {
-					return ipv6CIDR
-				}
-
-				//ipv4 only cluster
-				return ipv4CIDR
-
-			}
 		)
 		type testData struct {
 			description string
@@ -1307,16 +1281,11 @@ passwd:
 					allowPersistentIPs: true,
 					role:               td.role,
 				})
-			expectedNumberOfAddresses := len(strings.Split(netConfig.cidr, ","))
 
 			if td.topology == "localnet" {
 				By("setting up the localnet underlay")
-				err, nodes := ovsPods(clientSet)
-				Expect(err).To(Succeed())
-				if len(nodes) == 0 {
-					Skip("No ovs pods: topology localnet test skipped")
-				}
-
+				nodes := ovsPods(clientSet)
+				Expect(nodes).NotTo(BeEmpty())
 				defer func() {
 					By("tearing down the localnet underlay")
 					Expect(teardownUnderlay(nodes)).To(Succeed())
@@ -1333,11 +1302,6 @@ passwd:
 			Expect(err).ToNot(HaveOccurred())
 			selectedNodes = workerNodeList.Items
 			networkName := fmt.Sprintf("%s/%s", nad.Namespace, nad.Name)
-<<<<<<< HEAD
-			prepareHTTPServerPods(map[string]string{
-				"k8s.v1.cni.cncf.io/networks": fmt.Sprintf(`[{"name": %q}]`, nad.Name),
-			}, checkPodHasIPsAtNetwork(networkName, expectedNumberOfAddresses))
-=======
 			httpServerPodsAnnotations := map[string]string{}
 			if td.role != "primary" {
 				httpServerPodsAnnotations["k8s.v1.cni.cncf.io/networks"] = fmt.Sprintf(`[{"name": %q}]`, nad.Name)
@@ -1351,7 +1315,6 @@ passwd:
 			}
 
 			prepareHTTPServerPods(httpServerPodsAnnotations, httpServerPodCondition)
->>>>>>> ffddd06ec12e43af0397bca8e36adedf8df441b1
 
 			vmiName := td.resource.cmd()
 			vmi = &kubevirtv1.VirtualMachineInstance{
@@ -1364,17 +1327,8 @@ passwd:
 			Expect(crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)).To(Succeed())
 
 			step := by(vmi.Name, "Login to virtual machine for the first time")
-<<<<<<< HEAD
-			Expect(kubevirt.LoginToFedora(vmi, "core", "fedora")).To(Succeed(), step)
-			expectedAddreses = virtualMachineAddressesFromStatus(vmi, expectedNumberOfAddresses)
-			Expect(expectedAddreses).To(HaveLen(expectedNumberOfAddresses), step)
-=======
 			Eventually(func() error {
-				if td.role != "primary" {
-					return kubevirt.LoginToFedora(vmi, "core", "fedora")
-				} else {
-					return kubevirt.LoginToFedoraWithHostname(vmi, "core", "fedora", "localhost")
-				}
+				return kubevirt.LoginToFedora(vmi, "core", "fedora")
 			}).
 				WithTimeout(5*time.Second).
 				WithPolling(time.Second).
@@ -1388,7 +1342,6 @@ passwd:
 			} else {
 				expectedAddreses = virtualMachineAddressesFromGuest(vmi)
 			}
->>>>>>> ffddd06ec12e43af0397bca8e36adedf8df441b1
 
 			step = by(vmi.Name, fmt.Sprintf("Check east/west traffic before %s %s", td.resource.description, td.test.description))
 			testPodsIPs := httpServerTestPodsMultusNetworkIPs(networkName)
@@ -1404,19 +1357,7 @@ passwd:
 			td.test.cmd()
 
 			step = by(vm.Name, fmt.Sprintf("Login to virtual machine after %s %s", td.resource.description, td.test.description))
-<<<<<<< HEAD
 			Expect(kubevirt.LoginToFedora(vmi, "core", "fedora")).To(Succeed(), step)
-			obtainedAddresses := virtualMachineAddressesFromStatus(vmi, expectedNumberOfAddresses)
-			// Note: Cannot compare addresses until we have latest test from upstream.
-			// https://github.com/ovn-org/ovn-kubernetes/pull/4457
-			// Expect(obtainedAddresses).To(Equal(expectedAddreses))
-			Expect(obtainedAddresses).To(HaveLen(expectedNumberOfAddresses), step)
-=======
-			if td.role != "primary" {
-				Expect(kubevirt.LoginToFedora(vmi, "core", "fedora")).To(Succeed(), step)
-			} else {
-				Expect(kubevirt.LoginToFedoraWithHostname(vmi, "core", "fedora", "localhost")).To(Succeed(), step)
-			}
 			var obtainedAddresses []string
 
 			if td.role != "primary" { // expect 2 addresses on dual-stack deployments; 1 on single-stack
@@ -1427,7 +1368,6 @@ passwd:
 			}
 
 			Expect(obtainedAddresses).To(Equal(expectedAddreses))
->>>>>>> ffddd06ec12e43af0397bca8e36adedf8df441b1
 
 			step = by(vmi.Name, fmt.Sprintf("Check east/west traffic after %s %s", td.resource.description, td.test.description))
 			checkEastWestTraffic(vmi, testPodsIPs, step)
@@ -1460,11 +1400,11 @@ passwd:
 				test:     liveMigrate,
 				topology: "localnet",
 			}),
-			// Entry(nil, testData{
-			// 	resource: virtualMachine,
-			// 	test:     liveMigrate,
-			// 	topology: "layer2",
-			// }),
+			Entry(nil, testData{
+				resource: virtualMachine,
+				test:     liveMigrate,
+				topology: "layer2",
+			}),
 			Entry(nil, testData{
 				resource: virtualMachineWithUDN,
 				test:     liveMigrate,
@@ -1476,13 +1416,6 @@ passwd:
 				test:     liveMigrate,
 				topology: "localnet",
 			}),
-<<<<<<< HEAD
-			// Entry(nil, testData{
-			// 	resource: virtualMachineInstance,
-			// 	test:     liveMigrate,
-			// 	topology: "layer2",
-			// }),
-=======
 			Entry(nil, testData{
 				resource: virtualMachineInstance,
 				test:     liveMigrate,
@@ -1494,7 +1427,6 @@ passwd:
 				topology: "layer2",
 				role:     "primary",
 			}),
->>>>>>> ffddd06ec12e43af0397bca8e36adedf8df441b1
 		)
 	})
 	Context("with kubevirt VM using layer2 UDPN", func() {

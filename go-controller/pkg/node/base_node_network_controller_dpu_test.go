@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	factorymocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	kubemocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
@@ -105,6 +106,7 @@ var _ = Describe("Node DPU tests", func() {
 	origNetlinkOps := util.GetNetLinkOps()
 
 	BeforeEach(func() {
+		config.PrepareTestConfig()
 		sriovnetOpsMock = utilMocks.SriovnetOps{}
 		netlinkOpsMock = utilMocks.NetLinkOps{}
 		kubeOVNMock = kubemocks.InterfaceOVN{}
@@ -121,7 +123,7 @@ var _ = Describe("Node DPU tests", func() {
 
 		factoryMock = factorymocks.NodeWatchFactory{}
 		cnnci := newCommonNodeNetworkControllerInfo(nil, &kubeOVNMock, &factoryMock, nil, "", "", "", []string{"00:00:00:01:02:03"}, routeManager)
-		dnnc = newDefaultNodeNetworkController(cnnci, nil, nil, routeManager)
+		dnnc = newDefaultNodeNetworkController(cnnci, nil, nil, routeManager, nil)
 
 		podInformer = coreinformermocks.PodInformer{}
 		podNamespaceLister = v1mocks.PodNamespaceLister{}

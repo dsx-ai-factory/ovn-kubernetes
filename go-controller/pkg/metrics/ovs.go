@@ -310,21 +310,6 @@ func convertToFloat64(val *int) float64 {
 	return value
 }
 
-func getOvsVersionInfo(nodeName string, ovsDBClient libovsdbclient.Client) (err error) {
-	metricOvsVersion.Reset()
-	openVswitch, err := ovsops.GetOpenvSwitch(ovsDBClient)
-	if err != nil {
-		return fmt.Errorf("failed to get ovsdb openvswitch table :(%v)", err)
-	}
-	if openVswitch.OVSVersion != nil {
-		ovsVersion := *openVswitch.OVSVersion
-		metricOvsVersion.WithLabelValues(ovsVersion, nodeName).Set(1)
-	} else {
-		err = fmt.Errorf("failed to get ovs version information")
-	}
-	return err
-}
-
 func OvsVersionInfoUpdater(ovsDBClient libovsdbclient.Client, nodeName string, metricsScrapeInterval int, stopChan <-chan struct{}) {
 	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
 	defer ticker.Stop()
@@ -339,6 +324,21 @@ func OvsVersionInfoUpdater(ovsDBClient libovsdbclient.Client, nodeName string, m
 			return
 		}
 	}
+}
+
+func getOvsVersionInfo(nodeName string, ovsDBClient libovsdbclient.Client) (err error) {
+	metricOvsVersion.Reset()
+	openVswitch, err := ovsops.GetOpenvSwitch(ovsDBClient)
+	if err != nil {
+		return fmt.Errorf("failed to get ovsdb openvswitch table :(%v)", err)
+	}
+	if openVswitch.OVSVersion != nil {
+		ovsVersion := *openVswitch.OVSVersion
+		metricOvsVersion.WithLabelValues(ovsVersion, nodeName).Set(1)
+	} else {
+		err = fmt.Errorf("failed to get ovs version information")
+	}
+	return err
 }
 
 // ovsDatapathLookupsMetrics obtains the ovs datapath
@@ -510,7 +510,7 @@ func setOvsDatapathOffloadMetrics(ovsVswitchdAppctl ovsClient) error {
 	return nil
 }
 
-// ovsDatapathMetricsUpdater updates the ovs datapath metrics for every 30 sec
+// ovsDatapathMetricsUpdater updates the ovs datapath metrics
 func ovsDatapathMetricsUpdater(ovsAppctl, ovsVswitchdAppctl ovsClient, metricsScrapeInterval int, stopChan <-chan struct{}) {
 	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
 	defer ticker.Stop()
@@ -536,10 +536,8 @@ func ovsDatapathMetricsUpdater(ovsAppctl, ovsVswitchdAppctl ovsClient, metricsSc
 	}
 }
 
-// ovsBridgeMetricsUpdater updates bridgeMetrics &
-// ovsInterface metrics & geneveInterface metrics for every 30sec
-func ovsBridgeMetricsUpdater(ovsDBClient libovsdbclient.Client, ovsAppctl ovsClient, metricsScrapeInterval int,
-	stopChan <-chan struct{}) {
+// ovsBridgeMetricsUpdater updates bridge related metrics
+func ovsBridgeMetricsUpdater(ovsDBClient libovsdbclient.Client, ovsAppctl ovsClient, metricsScrapeInterval int, stopChan <-chan struct{}) {
 	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
 	defer ticker.Stop()
 
@@ -561,9 +559,8 @@ func ovsBridgeMetricsUpdater(ovsDBClient libovsdbclient.Client, ovsAppctl ovsCli
 				klog.Errorf("%s", err.Error())
 			}
 			// update ovs bridge metrics
-			err = updateOvsBridgeMetrics(ovsDBClient, ovsAppctl)
-			if err != nil {
-				klog.Errorf("%s", err.Error())
+			if err = updateOvsBridgeMetrics(ovsDBClient, ovsAppctl); err != nil {
+				klog.Errorf("Getting ovs bridge info failed: %s", err.Error())
 			}
 		case <-stopChan:
 			return
@@ -1029,12 +1026,12 @@ func ovsMemoryMetricsUpdater(ovsVswitchdAppctl ovsClient, metricsScrapeInterval 
 	}
 }
 
-// setOvsHwOffloadMetrics updates the hw-offlaod, tc-policy metrics
-// through ovsdb-client from ovs-db Open_vSwitch table updates
+// setOvsHwOffloadMetrics updates the hw-offload, tc-policy metrics
+// obtained from Open_vSwitch table updates
 func setOvsHwOffloadMetrics(ovsDBClient libovsdbclient.Client) (err error) {
-	openVswitch, err := ovsops.GetOpenvSwitch(ovsDBClient)
+	openvSwitch, err := ovsops.GetOpenvSwitch(ovsDBClient)
 	if err != nil {
-		return fmt.Errorf("failed to get ovsdb openvswitch table :(%v)", err)
+		return fmt.Errorf("failed to get ovsdb openvswitch entry :(%v)", err)
 	}
 	var hwOffloadValue = "false"
 	var tcPolicyValue = "none"
@@ -1045,7 +1042,7 @@ func setOvsHwOffloadMetrics(ovsDBClient libovsdbclient.Client) (err error) {
 	}
 
 	// set the hw-offload metric
-	if val, ok := openVswitch.OtherConfig["hw-offload"]; ok {
+	if val, ok := openvSwitch.OtherConfig["hw-offload"]; ok {
 		hwOffloadValue = val
 	}
 	if hwOffloadValue == "false" {
@@ -1054,7 +1051,7 @@ func setOvsHwOffloadMetrics(ovsDBClient libovsdbclient.Client) (err error) {
 		metricOvsHwOffload.Set(1)
 	}
 	// set tc-policy metric
-	if val, ok := openVswitch.OtherConfig["tc-policy"]; ok {
+	if val, ok := openvSwitch.OtherConfig["tc-policy"]; ok {
 		tcPolicyValue = val
 	}
 	metricOvsTcPolicy.Set(tcPolicyMap[tcPolicyValue])
@@ -1062,8 +1059,7 @@ func setOvsHwOffloadMetrics(ovsDBClient libovsdbclient.Client) (err error) {
 
 }
 
-func ovsHwOffloadMetricsUpdater(ovsDBClient libovsdbclient.Client, metricsScrapeInterval int,
-	stopChan <-chan struct{}) {
+func ovsHwOffloadMetricsUpdater(ovsDBClient libovsdbclient.Client, metricsScrapeInterval int, stopChan <-chan struct{}) {
 	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
 	defer ticker.Stop()
 

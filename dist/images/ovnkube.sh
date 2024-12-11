@@ -2374,6 +2374,7 @@ ovnkube-controller-with-node() {
     --mtu=${mtu} \
     --nodeport \
     --pidfile ${OVN_RUNDIR}/ovnkube-controller-with-node.pid \
+    --disable-udn-host-isolation \
     --zone ${ovn_zone} &
 
   wait_for_event attempts=3 process_ready ovnkube-controller-with-node
@@ -3240,6 +3241,7 @@ ovn-node() {
         --mtu=${mtu} \
         --ovn-encap-tos=${ovn_encap_tos} \
         --pidfile ${OVN_RUNDIR}/ovnkube.pid \
+        --disable-udn-host-isolation \
         --zone ${ovn_zone} &
 
   wait_for_event attempts=3 process_ready ovnkube

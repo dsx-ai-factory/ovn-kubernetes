@@ -494,7 +494,7 @@ func (bnc *BaseNetworkController) ensurePodAnnotation(pod *kapi.Pod, nadName str
 }
 
 func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName string,
-	network *nadapi.NetworkSelectionElement) (ops []ovsdb.Operation,
+	network *nadapi.NetworkSelectionElement, enable *bool) (ops []ovsdb.Operation,
 	lsp *nbdb.LogicalSwitchPort, podAnnotation *util.PodAnnotation, newlyCreatedPort bool, err error) {
 	var ls *nbdb.LogicalSwitch
 
@@ -567,6 +567,8 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 		}
 	}
 
+	var customFields []libovsdbops.ModelUpdateField
+
 	lsp.Options = make(map[string]string)
 	// Unique identifier to distinguish interfaces for recreated pods, also set by ovnkube-node
 	// ovn-controller will claim the OVS interface only if external_ids:iface-id
@@ -623,6 +625,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 	}
 
 	lsp.Addresses = addresses
+	customFields = append(customFields, libovsdbops.LogicalSwitchPortAddresses)
 
 	// add external ids
 	lsp.ExternalIDs = map[string]string{"namespace": pod.Namespace, "pod": "true"}
@@ -656,6 +659,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 		} else {
 			lsp.PortSecurity = addresses
 		}
+		customFields = append(customFields, libovsdbops.LogicalSwitchPortPortSecurity)
 	} else {
 		klog.Infof("Skip setting port security for port %s on NAD %s", portName, nadName)
 	}
@@ -667,9 +671,19 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *kapi.Pod, nadName
 		if err != nil {
 			return nil, nil, nil, false, err
 		}
+		if isRemotePort {
+			customFields = append(customFields, libovsdbops.LogicalSwitchPortType)
+		}
+	}
+	if len(lsp.Options) != 0 {
+		customFields = append(customFields, libovsdbops.LogicalSwitchPortOptions)
 	}
 
-	ops, err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitchOps(bnc.nbClient, nil, ls, lsp)
+	lsp.Enabled = enable
+	if lsp.Enabled != nil {
+		customFields = append(customFields, libovsdbops.LogicalSwitchPortEnabled)
+	}
+	ops, err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitchWithCustomFieldsOps(bnc.nbClient, nil, ls, customFields, lsp)
 	if err != nil {
 		return nil, nil, nil, false,
 			fmt.Errorf("error creating logical switch port %+v on switch %+v: %+v", *lsp, *ls, err)

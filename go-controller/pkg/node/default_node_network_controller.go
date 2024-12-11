@@ -28,6 +28,7 @@ import (
 
 	"github.com/containernetworking/plugins/pkg/ip"
 	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+
 	honode "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	config "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -184,6 +185,8 @@ type DefaultNodeNetworkController struct {
 	cniServer *cni.Server
 
 	gatewaySetup *preStartSetup
+
+	udnHostIsolationManager *UDNHostIsolationManager
 }
 
 type preStartSetup struct {
@@ -194,9 +197,9 @@ type preStartSetup struct {
 }
 
 func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, stopChan chan struct{},
-	wg *sync.WaitGroup, routeManager *routemanager.Controller) *DefaultNodeNetworkController {
+	wg *sync.WaitGroup, routeManager *routemanager.Controller, nadController *nad.NetAttachDefinitionController) *DefaultNodeNetworkController {
 
-	return &DefaultNodeNetworkController{
+	c := &DefaultNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
 			CommonNodeNetworkControllerInfo: *cnnci,
 			NetInfo:                         util.InitDefaultNetInfo(),
@@ -210,6 +213,11 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 		skipFirewalldMap: sync.Map{},
 		routeManager:     routeManager,
 	}
+	if util.IsNetworkSegmentationSupportEnabled() && !config.OVNKubernetesFeature.DisableUDNHostIsolation {
+		c.udnHostIsolationManager = NewUDNHostIsolationManager(config.IPv4Mode, config.IPv6Mode,
+			cnnci.watchFactory.PodCoreInformer(), nadController)
+	}
+	return c
 }
 
 // NewDefaultNodeNetworkController creates a new network controller for node management of the default network
@@ -218,7 +226,7 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo,
 	var err error
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
-	nc := newDefaultNodeNetworkController(cnnci, stopChan, wg, cnnci.routeManager)
+	nc := newDefaultNodeNetworkController(cnnci, stopChan, wg, cnnci.routeManager, nadController)
 
 	if len(config.Kubernetes.HealthzBindAddress) != 0 {
 		klog.Infof("Enable node proxy healthz server on %s", config.Kubernetes.HealthzBindAddress)
@@ -912,6 +920,15 @@ func (nc *DefaultNodeNetworkController) PreStart(ctx context.Context) error {
 		err = setupOVNNode(node)
 		if err != nil {
 			return err
+		}
+		if nc.udnHostIsolationManager != nil {
+			if err = nc.udnHostIsolationManager.Start(ctx); err != nil {
+				return err
+			}
+		} else {
+			if err = CleanupUDNHostIsolation(); err != nil {
+				return fmt.Errorf("failed cleaning up UDN host isolation: %w", err)
+			}
 		}
 	}
 
@@ -1698,6 +1715,19 @@ func updateOVSOtherConfig(key string, value interface{}) error {
 		return fmt.Errorf("error setting/removing other_config:%s: %v\n  %q", key, err, stderr)
 	}
 	return nil
+}
+
+// DummyMasqueradeIPs returns the fake host masquerade IPs used for service traffic routing.
+// It is used in: br-ex, where we SNAT the traffic destined towards a service IP
+func DummyMasqueradeIPs() []net.IP {
+	var nextHops []net.IP
+	if config.IPv4Mode {
+		nextHops = append(nextHops, config.Gateway.MasqueradeIPs.V4HostMasqueradeIP)
+	}
+	if config.IPv6Mode {
+		nextHops = append(nextHops, config.Gateway.MasqueradeIPs.V6HostMasqueradeIP)
+	}
+	return nextHops
 }
 
 // configureGlobalForwarding configures the global forwarding settings.

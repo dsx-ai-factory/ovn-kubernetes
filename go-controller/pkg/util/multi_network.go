@@ -958,7 +958,7 @@ func ValidateNetConf(nadName string, netconf *ovncnitypes.NetConf) error {
 
 	if netconf.Topology != types.LocalnetTopology && netconf.Name != types.DefaultNetworkName {
 		if err := subnetOverlapCheck(netconf); err != nil {
-			return fmt.Errorf("invalid subnet cnfiguration: %w", err)
+			return fmt.Errorf("invalid subnet configuration: %w", err)
 		}
 	}
 
