@@ -99,6 +99,7 @@ var _ = Describe("Topology factory", func() {
 				macBindingAgeThreshold += ";" + ipnet.CIDR.String() + ":" + strconv.Itoa(config.Default.ClusterSubnetsMacBindingAging)
 			}
 			expectedOptions["mac_binding_age_threshold"] = macBindingAgeThreshold
+			expectedOptions["always_learn_from_arp_request"] = "false"
 			Expect(clusterRouter).To(
 				WithTransform(
 					removeUUID,

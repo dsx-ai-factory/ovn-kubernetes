@@ -1634,7 +1634,8 @@ func (nc *DefaultNodeNetworkController) reconcileFirewallZoneForEndpointSlice(ol
 					}
 					err = addPortToFirewallZone(config.OvnKubeNode.AdminFirewalldZone, *newPort.Port, *newPort.Protocol)
 					if err != nil {
-						errors = append(errors, fmt.Errorf("error in adding port %d to ngn-admin firewall zone: (%v)", *newPort.Port, err))
+						errors = append(errors, fmt.Errorf("error in adding port %d to %s firewall zone: (%v)",
+							*newPort.Port, config.OvnKubeNode.AdminFirewalldZone, err))
 					}
 				}
 			}
@@ -1661,7 +1662,8 @@ func (nc *DefaultNodeNetworkController) reconcileFirewallZoneForEndpointSlice(ol
 					}
 					err = removePortFromFirewallZone(config.OvnKubeNode.AdminFirewalldZone, *oldPort.Port, *oldPort.Protocol)
 					if err != nil {
-						errors = append(errors, fmt.Errorf("error in removing port %d to ngn-admin firewall zone: (%v)", *oldPort.Port, err))
+						errors = append(errors, fmt.Errorf("error in removing port %d to %s firewall zone: (%v)",
+							*oldPort.Port, config.OvnKubeNode.AdminFirewalldZone, err))
 					}
 				}
 			}

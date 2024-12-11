@@ -426,7 +426,6 @@ func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, 
 			updateNodeAnno = true
 		}
 		if tunnelID != util.NoID {
-			// TBD IsAnnotationAlreadySetError?
 			cnode.Annotations, err = util.UpdateUDNLayer2NodeGRLRPTunnelIDs(cnode.Annotations, networkName, tunnelID)
 			if err != nil {
 				if !util.IsAnnotationAlreadySetError(err) {

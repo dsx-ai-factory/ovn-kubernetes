@@ -218,7 +218,7 @@ func (c *bridgeOpenflowCache) syncFlows() {
 
 	_, stderr, err := util.ReplaceOFFlows(c.bridge, flows)
 	if err != nil {
-		klog.Errorf("Failed to add flows, error: %v, stderr, %s, flows: %s", err, stderr, c.flowCache)
+		klog.Errorf("Failed to add flows %v, error: %v, stderr: %s", flows, err, stderr)
 	}
 }
 

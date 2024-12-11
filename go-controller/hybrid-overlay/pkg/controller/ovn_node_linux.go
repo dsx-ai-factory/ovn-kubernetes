@@ -744,7 +744,7 @@ func (n *NodeController) syncFlows() {
 	}
 	_, stderr, err = util.ReplaceOFFlows(extBridgeName, flows)
 	if err != nil {
-		klog.Errorf("Failed to add flows, error: %v, stderr: %s, flows: %s", err, stderr, flows)
+		klog.Errorf("Failed to add flows, error: %v, stderr: %s, flows: %v", err, stderr, flows)
 	}
 }
 

@@ -567,7 +567,7 @@ func buildNetworkPolicyAddressSets(networkPolicy *knet.NetworkPolicy) []libovsdb
 	for _, egress := range networkPolicy.Spec.Egress {
 		for _, peer := range egress.To {
 			if peer.PodSelector != nil {
-				peerASv4, peerASv6 := buildNetworkPolicyPeerAddressSets(networkPolicy.Namespace, knet.PolicyTypeEgress, peer) // TBD
+				peerASv4, peerASv6 := buildNetworkPolicyPeerAddressSets(networkPolicy.Namespace, knet.PolicyTypeEgress, peer)
 				if config.IPv4Mode {
 					addressSets = append(addressSets, peerASv4)
 				}
@@ -580,7 +580,7 @@ func buildNetworkPolicyAddressSets(networkPolicy *knet.NetworkPolicy) []libovsdb
 	for _, ingress := range networkPolicy.Spec.Ingress {
 		for _, peer := range ingress.From {
 			if peer.PodSelector != nil {
-				peerASv4, peerASv6 := buildNetworkPolicyPeerAddressSets(networkPolicy.Namespace, knet.PolicyTypeIngress, peer) // TBD
+				peerASv4, peerASv6 := buildNetworkPolicyPeerAddressSets(networkPolicy.Namespace, knet.PolicyTypeIngress, peer)
 				if config.IPv4Mode {
 					addressSets = append(addressSets, peerASv4)
 				}
@@ -1846,7 +1846,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 			gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
 		})
 
-		// TBD-merge the host network policy handling are different between upstream/downstream, they have different
+		// commented out as the host network policy handling are different between upstream/downstream, they have different
 		//ginkgo.It("correctly creates networkpolicy targeting hostNetwork pods with non-nil podSelector", func() {
 		//	// check useNamespaceAddrSet function comments to explain this behaviour
 		//	app.Action = func(ctx *cli.Context) error {

@@ -692,7 +692,7 @@ func AddRoutesGatewayIP(
 					continue
 				}
 				// no route needed for directly connected subnets
-				// TBD merge localnet type does need this only for a temp workaround, is it still needed?
+				// TBD-merge localnet type does need this only for a temp workaround, is it still needed?
 				//for _, clusterSubnet := range netinfo.Subnets() {
 				//	if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
 				//		podAnnotation.Routes = append(podAnnotation.Routes, PodRoute{
@@ -716,7 +716,7 @@ func AddRoutesGatewayIP(
 					continue
 				}
 				// no route needed for directly connected subnets
-				// TBD merge layer-2 type does need this only for a temp workaround, is it still needed?
+				// TBD-merge layer-2 type does need this only for a temp workaround, is it still needed?
 				//for _, clusterSubnet := range netinfo.Subnets() {
 				//	if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
 				//		podAnnotation.Routes = append(podAnnotation.Routes, PodRoute{

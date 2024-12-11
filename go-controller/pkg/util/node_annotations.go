@@ -1538,7 +1538,6 @@ func ParseNetworkIDAnnotation(node *kapi.Node, netName string) (int, error) {
 // with the provided ID in 'annotationName's value.  If 'id' is InvalidID (-1)
 // it deletes the annotationName annotation from the map.
 // It is currently used for ovnNetworkIDs annotation updates
-// merge TBD check return error of updateNetworkAnnotation (alreadySet)
 func updateNetworkAnnotation(annotations map[string]string, netName string, id int, annotationName string) error {
 	var bytes []byte
 

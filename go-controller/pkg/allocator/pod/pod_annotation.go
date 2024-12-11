@@ -413,6 +413,9 @@ func allocatePodAnnotationWithRollback(
 	if needsAnnotationUpdate {
 		updatedPod = pod
 		updatedPod.Annotations, err = util.MarshalPodAnnotation(updatedPod.Annotations, tentative, nadName)
+		if util.IsAnnotationAlreadySetError(err) {
+			err = nil
+		}
 		podAnnotation = tentative
 	}
 

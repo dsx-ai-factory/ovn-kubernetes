@@ -346,7 +346,7 @@ func bootstrapOVSFlows(nodeName string) error {
 
 	_, stderr, err = util.ReplaceOFFlows(bridge, dftFlows)
 	if err != nil {
-		return fmt.Errorf("failed to add flows, error: %v, stderr, %s, flows: %s", err, stderr, dftFlows)
+		return fmt.Errorf("failed to add flows, error: %v, stderr, %s, flows: %v", err, stderr, dftFlows)
 	}
 
 	return nil

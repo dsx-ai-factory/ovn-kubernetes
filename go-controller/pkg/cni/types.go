@@ -61,7 +61,7 @@ type PodInterfaceInfo struct {
 	NADName string `json:"nadName"`
 
 	// for multi cluster support
-	OvnKubeMode string `json:"ovnKubeMode"` // TBD - remove it?
+	OvnKubeMode string `json:"ovnKubeMode"`
 }
 
 // Explicit type for CNI commands the server handles

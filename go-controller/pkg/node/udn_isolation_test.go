@@ -501,6 +501,9 @@ func newPodWithIPs(namespace, name string, primaryUDN bool, ips []string, openPo
 			UID:         ktypes.UID(name),
 			Namespace:   namespace,
 			Annotations: annotations,
+			Labels: map[string]string{
+				"k8s.ovn.org/nodeName": "node1",
+			},
 		},
 	}
 }

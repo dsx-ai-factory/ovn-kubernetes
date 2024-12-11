@@ -1690,14 +1690,14 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 			}
 			dftFlows = append(dftFlows,
 				fmt.Sprintf("cookie=%s, priority=200, table=2, ip, ip_src=%s, "+
-					"actions=set_field:%s->eth_dst,%soutput:%s",
+					"actions=set_field:%s->eth_dst,output:%s",
 					defaultOpenFlowCookie, netConfig.v4MasqIPs.ManagementPort.IP,
-					bridgeMacAddress, mod_vlan_id, netConfig.ofPortPatch)) // TBD same VLANID?
+					bridgeMacAddress, netConfig.ofPortPatch))
 			dftFlows = append(dftFlows,
 				fmt.Sprintf("cookie=%s, priority=200, table=2, ip, pkt_mark=%s, "+
-					"actions=set_field:%s->eth_dst,%soutput:%s",
+					"actions=set_field:%s->eth_dst,output:%s",
 					defaultOpenFlowCookie, netConfig.pktMark,
-					bridgeMacAddress, mod_vlan_id, netConfig.ofPortPatch)) // TBD same VLANID?
+					bridgeMacAddress, netConfig.ofPortPatch))
 		}
 	}
 
@@ -1709,14 +1709,14 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 
 			dftFlows = append(dftFlows,
 				fmt.Sprintf("cookie=%s, priority=200, table=2, ip6, ipv6_src=%s, "+
-					"actions=set_field:%s->eth_dst,%soutput:%s",
+					"actions=set_field:%s->eth_dst,output:%s",
 					defaultOpenFlowCookie, netConfig.v6MasqIPs.ManagementPort.IP,
-					bridgeMacAddress, mod_vlan_id, netConfig.ofPortPatch)) // TBD, same VLANID?
+					bridgeMacAddress, netConfig.ofPortPatch))
 			dftFlows = append(dftFlows,
 				fmt.Sprintf("cookie=%s, priority=200, table=2, ip6, pkt_mark=%s, "+
-					"actions=set_field:%s->eth_dst,%soutput:%s",
+					"actions=set_field:%s->eth_dst,output:%s",
 					defaultOpenFlowCookie, netConfig.pktMark,
-					bridgeMacAddress, mod_vlan_id, netConfig.ofPortPatch)) // TBD, same VLANID?
+					bridgeMacAddress, netConfig.ofPortPatch))
 		}
 	}
 
@@ -1782,8 +1782,8 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 			actions += ",output:" + netConfig.ofPortPatch
 		}
 		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=10, table=0, in_port=%s, dl_dst=%s, actions=%s",
-				defaultOpenFlowCookie, ofPortPhys, bridgeMacAddress, actions))
+			fmt.Sprintf("cookie=%s, priority=10, table=0, in_port=%s, %s dl_dst=%s, actions=%s",
+				defaultOpenFlowCookie, ofPortPhys, match_vlan, bridgeMacAddress, actions))
 	}
 
 	// table 0, check packets coming from OVN have the correct mac address. Low priority flows that are a catch all
@@ -2702,6 +2702,9 @@ func updateMasqueradeAnnotation(nodeName string, kube kube.Interface) error {
 	_, v6MasqueradeCIDR, _ := net.ParseCIDR(config.Gateway.V6MasqueradeSubnet)
 	nodeAnnotation, err := util.CreateNodeMasqueradeSubnetAnnotation(nil, v4MasqueradeCIDR, v6MasqueradeCIDR)
 	if err != nil {
+		if util.IsAnnotationAlreadySetError(err) {
+			return nil
+		}
 		return fmt.Errorf("unable to generate masquerade subnet annotation update: %w", err)
 	}
 	if err := kube.SetAnnotationsOnNode(nodeName, nodeAnnotation); err != nil {

@@ -513,7 +513,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			wantPodAnnotation: &util.PodAnnotation{
 				IPs: ovntest.MustParseIPNets("192.168.0.200/24"),
 				MAC: util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.200/24")[0].IP),
-				// TBD merge
+				// TBD-merge
 				//Routes: []util.PodRoute{
 				//	{
 				//		Dest:    ovntest.MustParseIPNet("192.168.0.0/24"),
@@ -549,7 +549,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			wantPodAnnotation: &util.PodAnnotation{
 				IPs: ovntest.MustParseIPNets("192.168.0.3/24"),
 				MAC: util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.3/24")[0].IP),
-				// TBD merge
+				// TBD-merge
 				//Routes: []util.PodRoute{
 				//	{
 				//		Dest:    ovntest.MustParseIPNet("192.168.0.0/24"),
@@ -582,7 +582,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			wantPodAnnotation: &util.PodAnnotation{
 				IPs: ovntest.MustParseIPNets("192.168.0.3/24"),
 				MAC: util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.3/24")[0].IP),
-				// TBD merge
+				// TBD-merge
 				//Routes: []util.PodRoute{
 				//	{
 				//		Dest:    ovntest.MustParseIPNet("192.168.0.0/24"),

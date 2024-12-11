@@ -405,7 +405,7 @@ func ovsDatapathPortMetrics(output, datapath string) {
 
 // getOvsDatapaths gives list of datapaths
 // and updates the corresponding datapath metrics
-func getOvsDatapaths(ovsAppctl ovsClient) (datapathsList []string, err error) {
+func getOvsDatapaths(ovsVswitchdAppctl ovsClient) (datapathsList []string, err error) {
 	var stdout, stderr string
 
 	defer func() {
@@ -415,7 +415,7 @@ func getOvsDatapaths(ovsAppctl ovsClient) (datapathsList []string, err error) {
 		}
 	}()
 
-	stdout, stderr, err = ovsAppctl("dpctl/dump-dps")
+	stdout, stderr, err = ovsVswitchdAppctl("dpctl/dump-dps")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get output of ovs-appctl dpctl/dump-dps "+
 			"stderr(%s) :(%v)", stderr, err)
@@ -436,7 +436,7 @@ func getOvsDatapaths(ovsAppctl ovsClient) (datapathsList []string, err error) {
 	return datapathsList, nil
 }
 
-func setOvsDatapathMetrics(ovsAppctl ovsClient, datapaths []string) (err error) {
+func setOvsDatapathMetrics(ovsVswitchdAppctl ovsClient, datapaths []string) (err error) {
 	var stdout, stderr, datapath string
 
 	defer func() {
@@ -452,7 +452,7 @@ func setOvsDatapathMetrics(ovsAppctl ovsClient, datapaths []string) (err error) 
 		// the datapath type and 'ovs-system' the datapath name. To uniquely
 		// identify a datapath, both are required when querying OVS. If type is
 		// omitted, OVS will assume 'system'.
-		stdout, stderr, err = ovsAppctl("dpctl/show", datapath)
+		stdout, stderr, err = ovsVswitchdAppctl("dpctl/show", datapath)
 		if err != nil {
 			return fmt.Errorf("failed to get datapath stats for %s "+
 				"stderr(%s) :(%v)", datapath, stderr, err)
@@ -518,13 +518,13 @@ func ovsDatapathMetricsUpdater(ovsAppctl, ovsVswitchdAppctl ovsClient, metricsSc
 	for {
 		select {
 		case <-ticker.C:
-			datapaths, err := getOvsDatapaths(ovsAppctl)
+			datapaths, err := getOvsDatapaths(ovsVswitchdAppctl)
 			if err != nil {
 				klog.Errorf("Getting ovs datapath list failed: %s", err.Error())
 				continue
 			}
 
-			if err = setOvsDatapathMetrics(ovsAppctl, datapaths); err != nil {
+			if err = setOvsDatapathMetrics(ovsVswitchdAppctl, datapaths); err != nil {
 				klog.Errorf("Setting ovs datapath metrics failed: %s", err.Error())
 			}
 			if err = setOvsDatapathOffloadMetrics(ovsVswitchdAppctl); err != nil {
