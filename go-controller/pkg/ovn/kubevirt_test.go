@@ -514,8 +514,11 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 					HostSubnetLength: 24,
 				},
 				{
-					CIDR:             parsedClusterCIDRIPv6,
-					HostSubnetLength: 24,
+					CIDR: parsedClusterCIDRIPv6,
+					// fixed upstream, as hostSubnetLength should be greater than CIDR's subnets length
+					// Otherwise, CreateDefaultRouteToExternal() would not replace an existing lrsr
+					// if itemPrefixLen >= clusterSubnet.HostSubnetLength
+					HostSubnetLength: 72,
 				},
 			}
 
