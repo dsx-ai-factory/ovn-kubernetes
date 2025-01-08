@@ -272,7 +272,7 @@ const (
 	// GRMACBindingAgeThreshold is the lifetime in seconds of each MAC binding
 	// entry for the gateway routers. After this time, the entry is removed and
 	// may be refreshed with a new ARP request.
-	GRMACBindingAgeThreshold = "300"
+	GRMACBindingAgeThreshold = "0"
 
 	AdminPBRResyncInterval   = 30 * time.Second
 	CacheIndexPodByIP        = "index-pod-by-ip"
