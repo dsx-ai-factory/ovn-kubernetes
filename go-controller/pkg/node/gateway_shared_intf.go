@@ -1777,10 +1777,11 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration) ([]string, e
 
 	if ofPortPhys != "" {
 		// table 0, we check to see if this dest mac is the shared mac, if so flood to all ports
-		actions := fmt.Sprintf("%soutput:%s", strip_vlan, ofPortHost)
+		actions := ""
 		for _, netConfig := range bridge.patchedNetConfigs() {
-			actions += ",output:" + netConfig.ofPortPatch
+			actions += "output:" + netConfig.ofPortPatch + ","
 		}
+		actions += strip_vlan + "output:" + ofPortHost
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=10, table=0, in_port=%s, %s dl_dst=%s, actions=%s",
 				defaultOpenFlowCookie, ofPortPhys, match_vlan, bridgeMacAddress, actions))
