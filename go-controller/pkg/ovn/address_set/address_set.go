@@ -133,6 +133,19 @@ func (asf *ovnAddressSetFactory) EnsureAddressSet(dbIDs *libovsdbops.DbObjectIDs
 	if err != nil {
 		return nil, err
 	}
+	// get address set from cache
+	addrset, err := asf.GetAddressSet(dbIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to lookup address set by %v: %v", dbIDs, err)
+	}
+	// set uuid as newly created address set doesn't have it in as
+	v4Uuid, v6Uuid := addrset.GetUuids()
+	if as.v4 != nil {
+		as.v4.uuid = v4Uuid
+	}
+	if as.v6 != nil {
+		as.v6.uuid = v6Uuid
+	}
 	return as, nil
 }
 
