@@ -358,13 +358,13 @@ func setupUDPAggregationUplink(ifname string) error {
 
 func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops []net.IP, gwIPs []*net.IPNet, nodeAnnotator kube.Annotator) (
 	*bridgeConfiguration, *bridgeConfiguration, error) {
-	gatewayBridge, err := bridgeForInterface(gwIntf, nodeName, types.PhysicalNetworkName, gwIPs)
+	gatewayBridge, err := bridgeForInterface(gwIntf, nodeName, types.PhysicalNetworkName, gwIPs, gwNextHops)
 	if err != nil {
 		return nil, nil, fmt.Errorf("bridge for interface failed for %s: %w", gwIntf, err)
 	}
 	var egressGWBridge *bridgeConfiguration
 	if egressGatewayIntf != "" {
-		egressGWBridge, err = bridgeForInterface(egressGatewayIntf, nodeName, types.PhysicalNetworkExGwName, nil)
+		egressGWBridge, err = bridgeForInterface(egressGatewayIntf, nodeName, types.PhysicalNetworkExGwName, nil, nil)
 		if err != nil {
 			return nil, nil, fmt.Errorf("bridge for interface failed for %s: %w", egressGatewayIntf, err)
 		}
@@ -564,6 +564,7 @@ type bridgeConfiguration struct {
 	dpuHostRepName     string // empty in case of non-DPU mode
 	hostRepName        string
 	ips                []*net.IPNet
+	gwNextHops         []net.IP
 	gwIface            string
 	interfaceID        string
 	macAddress         net.HardwareAddr
@@ -578,7 +579,7 @@ type bridgeConfiguration struct {
 func (b *bridgeConfiguration) updateInterfaceIPAddresses(node *kapi.Node) ([]*net.IPNet, error) {
 	b.Lock()
 	defer b.Unlock()
-	ifAddrs, err := getNetworkInterfaceIPAddresses(b.gwIface)
+	ifAddrs, err := getNetworkInterfaceIPAddresses(b.gwIface, b.gwNextHops)
 	if err != nil {
 		return nil, err
 	}
@@ -604,12 +605,13 @@ func (b *bridgeConfiguration) updateInterfaceIPAddresses(node *kapi.Node) ([]*ne
 	return ifAddrs, nil
 }
 
-func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []*net.IPNet) (*bridgeConfiguration, error) {
+func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []*net.IPNet, gwNextHops []net.IP) (*bridgeConfiguration, error) {
 	defaultNetConfig := &bridgeUDNConfiguration{
 		masqCTMark: ctMarkOVN,
 	}
 	res := bridgeConfiguration{
 		localnetPatchPorts: &sync.Map{},
+		gwNextHops:         gwNextHops,
 		nodeName:           nodeName,
 		netConfig: map[string]*bridgeUDNConfiguration{
 			types.DefaultNetworkName: defaultNetConfig,
@@ -683,9 +685,9 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 		// use gwIPs if provided
 		res.ips = gwIPs
 	} else {
-		// get IP addresses from OVS bridge. If IP does not exist,
+		// external gateway bridge, gwIPs is nil, try to get IP addresses from OVS bridge.
 		// error out.
-		res.ips, err = getNetworkInterfaceIPAddresses(gwIntf)
+		res.ips, err = getNetworkInterfaceIPAddresses(gwIntf, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get interface details for %s: %w", gwIntf, err)
 		}

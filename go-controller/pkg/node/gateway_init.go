@@ -79,10 +79,19 @@ func bridgedGatewayNodeSetup(nodeName, bridgeName, physicalNetworkName string) (
 }
 
 // getNetworkInterfaceIPAddresses returns the IP addresses for the network interface 'iface'.
-func getNetworkInterfaceIPAddresses(iface string) ([]*net.IPNet, error) {
+func getNetworkInterfaceIPAddresses(iface string, gatewayNextHops []net.IP) ([]*net.IPNet, error) {
 	allIPs, err := util.GetFilteredInterfaceV4V6IPs(iface)
 	if err != nil {
 		return nil, fmt.Errorf("could not find IP addresses: %v", err)
+	}
+
+	var v4GatewayNextHop *net.IP
+	if gatewayNextHops != nil && config.IPv4Mode {
+		v4IP, err := util.MatchFirstIPFamily(false, gatewayNextHops)
+		if err != nil {
+			return nil, fmt.Errorf("could not find IPv4 gateway IP address: %v", err)
+		}
+		v4GatewayNextHop = &v4IP
 	}
 
 	var ips []*net.IPNet
@@ -101,6 +110,18 @@ func getNetworkInterfaceIPAddresses(iface string) ([]*net.IPNet, error) {
 				foundIPv6 = true
 			}
 		} else if config.IPv4Mode && !foundIPv4 {
+			// attempt to find IPv4 IP whose subnet contains the nexthop
+			if v4GatewayNextHop != nil {
+				if ip.Contains(*v4GatewayNextHop) {
+					ips = append(ips, ip)
+					foundIPv4 = true
+				}
+			}
+		}
+	}
+	if config.IPv4Mode && !foundIPv4 {
+		// if failed to find IPv4 IP whose subnet contains the nexthop, get the first v4 IP instead.
+		if ip, err := util.MatchFirstIPNetFamily(false, allIPs); err == nil {
 			ips = append(ips, ip)
 			foundIPv4 = true
 		}
@@ -352,7 +373,7 @@ func (nc *DefaultNodeNetworkController) initGatewayPreStart(subnets []*net.IPNet
 		egressGWInterface = interfaceForEXGW(config.Gateway.EgressGWInterface)
 	}
 
-	ifAddrs, err := getNetworkInterfaceIPAddresses(gatewayIntf)
+	ifAddrs, err := getNetworkInterfaceIPAddresses(gatewayIntf, gatewayNextHops)
 	if err != nil {
 		return nil, err
 	}
@@ -518,12 +539,12 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) er
 	}
 	config.Gateway.Interface = gwIntf
 
-	_, gatewayIntf, err := getGatewayNextHops()
+	gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 	if err != nil {
 		return err
 	}
 
-	ifAddrs, err := getNetworkInterfaceIPAddresses(gatewayIntf)
+	ifAddrs, err := getNetworkInterfaceIPAddresses(gatewayIntf, gatewayNextHops)
 	if err != nil {
 		return err
 	}
