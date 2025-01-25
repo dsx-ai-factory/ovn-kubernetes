@@ -123,7 +123,7 @@ var _ = Describe("Node DPU tests", func() {
 
 		factoryMock = factorymocks.NodeWatchFactory{}
 		cnnci := newCommonNodeNetworkControllerInfo(nil, &kubeOVNMock, &factoryMock, nil, "", "", "", []string{"00:00:00:01:02:03"}, routeManager)
-		dnnc = newDefaultNodeNetworkController(cnnci, nil, nil, routeManager, nil)
+		dnnc = newDefaultNodeNetworkController(cnnci, nil, nil, routeManager)
 
 		podInformer = coreinformermocks.PodInformer{}
 		podNamespaceLister = v1mocks.PodNamespaceLister{}

@@ -17,7 +17,7 @@ import (
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -63,7 +63,7 @@ func NewController(client clientset.Interface,
 	serviceInformer coreinformers.ServiceInformer,
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer,
 	nodeInformer coreinformers.NodeInformer,
-	nadController networkAttachDefController.NADController,
+	networkManager networkmanager.Interface,
 	recorder record.EventRecorder,
 	netInfo util.NetInfo,
 ) (*Controller, error) {
@@ -83,7 +83,7 @@ func NewController(client clientset.Interface,
 		serviceLister:         serviceInformer.Lister(),
 		endpointSliceInformer: endpointSliceInformer,
 		endpointSliceLister:   endpointSliceInformer.Lister(),
-		nadController:         nadController,
+		networkManager:        networkManager,
 
 		eventRecorder: recorder,
 		repair:        newRepair(serviceInformer.Lister(), nbClient),
@@ -117,7 +117,7 @@ type Controller struct {
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer
 	endpointSliceLister   discoverylisters.EndpointSliceLister
 
-	nadController networkAttachDefController.NADController
+	networkManager networkmanager.Interface
 
 	nodesSynced cache.InformerSynced
 
@@ -172,14 +172,21 @@ type Controller struct {
 
 // Run will not return until stopCh is closed. workers determines how many
 // endpoints will be handled in parallel.
-func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGroups, useTemplates bool) error {
-	defer utilruntime.HandleCrash()
-	defer c.queue.ShutDown()
+func (c *Controller) Run(workers int, stopCh <-chan struct{}, wg *sync.WaitGroup, runRepair, useLBGroups, useTemplates bool) error {
+	wg.Add(1)
+	go func() {
+		defer utilruntime.HandleCrash()
+		defer wg.Done()
+		// wait until we're told to stop
+		<-stopCh
+
+		klog.Infof("Shutting down controller %s for network=%s", controllerName, c.netInfo.GetNetworkName())
+		c.queue.ShutDown()
+	}()
 
 	c.useLBGroups = useLBGroups
 	c.useTemplates = useTemplates
 	klog.Infof("Starting controller %s for network=%s", controllerName, c.netInfo.GetNetworkName())
-	defer klog.Infof("Shutting down controller %s for network=%s", controllerName, c.netInfo.GetNetworkName())
 
 	nodeHandler, err := c.nodeTracker.Start(c.nodeInformer)
 	if err != nil {
@@ -245,7 +252,6 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 		go wait.Until(c.worker, c.workerLoopPeriod, stopCh)
 	}
 
-	<-stopCh
 	return nil
 }
 
@@ -569,7 +575,7 @@ func (c *Controller) RequestFullSync(nodeInfos []nodeInfo) {
 // belong to the network that this service controller is responsible for.
 func (c *Controller) skipService(name, namespace string) bool {
 	if util.IsNetworkSegmentationSupportEnabled() {
-		serviceNetwork, err := c.nadController.GetActiveNetworkForNamespace(namespace)
+		serviceNetwork, err := c.networkManager.GetActiveNetworkForNamespace(namespace)
 		if err != nil {
 			utilruntime.HandleError(fmt.Errorf("failed to retrieve network for service %s/%s: %w",
 				namespace, name, err))
@@ -638,12 +644,13 @@ func (c *Controller) onServiceDelete(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
-	klog.V(4).Infof("Deleting service %s for network=%s", key, c.netInfo.GetNetworkName())
 	service := obj.(*v1.Service)
 
 	if c.skipService(service.Name, service.Namespace) {
 		return
 	}
+
+	klog.V(4).Infof("Deleting service %s for network=%s", key, c.netInfo.GetNetworkName())
 
 	metrics.GetConfigDurationRecorder().Start("service", service.Namespace, service.Name)
 	c.queue.Add(key)

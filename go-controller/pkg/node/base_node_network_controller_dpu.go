@@ -16,6 +16,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/nadconfig"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
@@ -111,8 +112,8 @@ func dpuConnectionDetailChanged(oldDPUCD, newDPUCD *util.DPUConnectionDetails) b
 // watchPodsDPU watch updates for pod DPU annotations
 func (bnnc *BaseNodeNetworkController) watchPodsDPU(addFunc func(*kapi.Pod, string) (any, error),
 	delFunc func(*kapi.Pod, string, any) error, updateFunc func(*kapi.Pod, string, any) (any, error)) (*factory.Handler, error) {
-	clientSet := cni.NewClientSet(bnnc.client, corev1listers.NewPodLister(bnnc.watchFactory.LocalPodInformer().GetIndexer()))
 
+	clientSet := cni.NewClientSet(bnnc.client, corev1listers.NewPodLister(bnnc.watchFactory.LocalPodInformer().GetIndexer()))
 	netName := bnnc.GetNetworkName()
 	return bnnc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
@@ -127,7 +128,7 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU(addFunc func(*kapi.Pod, stri
 			// add all the Pod's NADs into Pod's nadToDPUCDMap
 			// For default network, NAD name is DefaultNetworkName.
 			nadToDPUCDMap := map[string]*podNADInfo{}
-			on, networkMap, err := util.GetPodNADToNetworkMapping(pod, bnnc.NetInfo)
+			on, networkMap, err := util.GetPodNADToNetworkMapping(pod, bnnc.GetNetInfo())
 			if err != nil || !on {
 				if err != nil {
 					// configuration error, no need to retry, do not return error
@@ -320,7 +321,7 @@ func (bnnc *BaseNodeNetworkController) addRepPort(pod *kapi.Pod, dpuCD *util.DPU
 	// Update connection-status annotation
 	// TODO(adrianc): we should update Status in case of error as well
 	connStatus := util.DPUConnectionStatus{Status: util.DPUConnectionStatusReady, Reason: ""}
-	nadConf, ok := bnnc.GetNADConfig(nadName)
+	nadConf, ok := bnnc.getNADConfig(nadName)
 	if ok && nadConf != nil {
 		maxNewConnPPS, maxNewConnBurst, disableDoSCheck := nadConf.GetMissRateLimitConfig(bnnc.hostType)
 		if maxNewConnPPS > 0 && !disableDoSCheck {
@@ -484,7 +485,7 @@ func (bnnc *BaseNodeNetworkController) updateRateLimitingForPod(pod *kapi.Pod, n
 		klog.V(5).Infof("DPUConnectionDetails for pod %s/%s, net-attach-def %s not found in cache, skip", pod.Namespace, pod.Name, nadName)
 		return nil
 	}
-	nadConf, ok := bnnc.GetNADConfig(nadName)
+	nadConf, ok := bnnc.getNADConfig(nadName)
 	if !ok || nadConf == nil {
 		klog.V(5).Infof("NAD config not found in cache: %s, skip", nadName)
 		return nil
@@ -639,59 +640,46 @@ func (bnnc *BaseNodeNetworkController) updateRateLimitingForPods(nadName string)
 	}
 }
 
-func (bnnc *BaseNodeNetworkController) updateNADConfig(nadName string, nadConf, oldNADConfig *util.NADConfig) {
-	var oldMaxNewConnPPS uint
-	bnnc.NADConfigMap.Store(nadName, nadConf)
-	// Node that NAD update are done serialized, so no locking is needed
-	if oldNADConfig != nil {
-		oldMaxNewConnPPS = oldNADConfig.MaxNewConnPPS
-	}
-	bnnc.totalMaxNewConnPPS -= oldMaxNewConnPPS
-	if nadConf != nil {
-		bnnc.totalMaxNewConnPPS += nadConf.MaxNewConnPPS
-	}
-	// We'll start a checker when any nad on this controller has PPS limit > 0
-	bnnc.enableDoSChecker()
-	bnnc.updateRateLimitingForPods(nadName)
-}
-
-func (bnnc *BaseNodeNetworkController) deleteNADConfig(nadName string, nadConfig *util.NADConfig) {
-	oldTotalMaxNewConnPPS := bnnc.totalMaxNewConnPPS
-	bnnc.totalMaxNewConnPPS -= nadConfig.MaxNewConnPPS
-	if oldTotalMaxNewConnPPS > 0 && bnnc.totalMaxNewConnPPS == 0 {
-		// TBD: stop rate limiting?
-		bnnc.disableDoSChecker()
-	}
-	bnnc.NADConfigMap.Delete(nadName)
-}
-
-func (bnnc *BaseNodeNetworkController) SetNADs(nadConfigs map[string]*util.NADConfig) {
+func (bnnc *BaseNodeNetworkController) SetNADConfig(nadName string, nadConf *util.NADConfig) error {
 	if config.OvnKubeNode.Mode == ovntypes.NodeModeDPU {
-		bnnc.NADConfigMap.Range(func(key, v interface{}) bool {
-			var oldNADConfig *util.NADConfig
-			nadName := key.(string)
-			if v != nil {
-				oldNADConfig = v.(*util.NADConfig)
+		var oldMaxNewConnPPS uint
+		oldNADConfig, ok := bnnc.getNADConfig(nadName)
+		if !ok || ((nadConf != nil || oldNADConfig != nil) &&
+			(nadConf == nil || oldNADConfig == nil || !reflect.DeepEqual(*oldNADConfig, *nadConf))) {
+			bnnc.NADConfigMap.Store(nadName, nadConf)
+			// Node that NAD update are done serialized, so no locking is needed
+			if oldNADConfig != nil {
+				oldMaxNewConnPPS = oldNADConfig.MaxNewConnPPS
 			}
-			nadConf, ok := nadConfigs[nadName]
-			if ok && (nadConf != nil || oldNADConfig != nil) &&
-				(nadConf == nil || oldNADConfig == nil || !reflect.DeepEqual(*oldNADConfig, *nadConf)) {
-				bnnc.updateNADConfig(nadName, nadConf, oldNADConfig)
-				delete(nadConfigs, nadName)
-			} else if !ok && oldNADConfig != nil {
-				bnnc.deleteNADConfig(nadName, oldNADConfig)
+			bnnc.totalMaxNewConnPPS -= oldMaxNewConnPPS
+			if nadConf != nil {
+				bnnc.totalMaxNewConnPPS += nadConf.MaxNewConnPPS
 			}
-			return true
-		})
-		// rest of nadConfigs
-		for nadName, nadConf := range nadConfigs {
-			bnnc.updateNADConfig(nadName, nadConf, nil)
+			// We'll start a checker when any nad on this controller has PPS limit > 0
+			bnnc.enableDoSChecker()
+			bnnc.updateRateLimitingForPods(nadName)
 		}
 	}
-	bnnc.NetInfo.SetNADs(nadConfigs)
+	return nil
 }
 
-func (bnnc *BaseNodeNetworkController) GetNADConfig(nadName string) (*util.NADConfig, bool) {
+func (bnnc *BaseNodeNetworkController) DeleteNAD(nadName string) {
+	if config.OvnKubeNode.Mode == ovntypes.NodeModeDPU {
+		v, ok := bnnc.NADConfigMap.Load(nadName)
+		if ok && v != nil {
+			nadConfig := v.(*util.NADConfig)
+			oldTotalMaxNewConnPPS := bnnc.totalMaxNewConnPPS
+			bnnc.totalMaxNewConnPPS -= nadConfig.MaxNewConnPPS
+			if oldTotalMaxNewConnPPS > 0 && bnnc.totalMaxNewConnPPS == 0 {
+				// TBD: stop rate limiting?
+				bnnc.disableDoSChecker()
+			}
+		}
+		bnnc.NADConfigMap.Delete(nadName)
+	}
+}
+
+func (bnnc *BaseNodeNetworkController) getNADConfig(nadName string) (*util.NADConfig, bool) {
 	var nadConfig *util.NADConfig
 	if config.OvnKubeNode.Mode == ovntypes.NodeModeDPU {
 		v, ok := bnnc.NADConfigMap.Load(nadName)
@@ -703,4 +691,30 @@ func (bnnc *BaseNodeNetworkController) GetNADConfig(nadName string) (*util.NADCo
 		return nadConfig, ok
 	}
 	return nil, false
+}
+
+func (bnnc *BaseNodeNetworkController) startNADController() error {
+	if config.OvnKubeNode.Mode == ovntypes.NodeModeDPU {
+		var err error
+		bnnc.nadConfigController, err = nadconfig.NewController("node-nad-configuration-controller",
+			bnnc.watchFactory.NADInformer(), bnnc)
+		if err != nil {
+			return fmt.Errorf("failed to initialize NAD controller for DPU node: %w", err)
+		}
+
+		err = bnnc.nadConfigController.Start()
+		if err != nil {
+			return fmt.Errorf("failed to start NAD controller for DPU node: %w", err)
+		}
+
+		bnnc.enableDoSChecker()
+	}
+	return nil
+}
+
+func (bnnc *BaseNodeNetworkController) stopNADController() error {
+	if config.OvnKubeNode.Mode == ovntypes.NodeModeDPU {
+		bnnc.nadConfigController.Stop()
+	}
+	return nil
 }

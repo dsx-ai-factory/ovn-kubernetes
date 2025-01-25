@@ -74,7 +74,7 @@ func NewACLSyncer(nbClient libovsdbclient.Client, existingNodes []*v1.Node,
 }
 
 // controllerName is the name of the new controller that should own all acls without controller
-func NewBaseACLSyncer(nbClient libovsdbclient.Client, controllerName string, netInfo util.NetInfo) *BaseAclSyncer {
+func NewBaseACLSyncer(nbClient libovsdbclient.Client, controllerName string, netInfo util.ReconcilableNetInfo) *BaseAclSyncer {
 	return &BaseAclSyncer{
 		NetInfo:        netInfo,
 		nbClient:       nbClient,

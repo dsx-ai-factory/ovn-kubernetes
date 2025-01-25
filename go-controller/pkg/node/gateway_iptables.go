@@ -14,7 +14,6 @@ import (
 	"github.com/coreos/go-iptables/iptables"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
@@ -94,16 +93,6 @@ func ensureChain(table, chain string) error {
 
 func getGatewayInitRules(chain string, proto iptables.Protocol) []nodeipt.Rule {
 	iptRules := []nodeipt.Rule{}
-	if chain == egressservice.Chain {
-		return []nodeipt.Rule{
-			{
-				Table:    "nat",
-				Chain:    "POSTROUTING",
-				Args:     []string{"-j", chain},
-				Protocol: proto,
-			},
-		}
-	}
 	if chain == iptableITPChain {
 		iptRules = append(iptRules,
 			nodeipt.Rule{
@@ -413,23 +402,9 @@ func getLocalGatewayFilterRules(ifname string, cidr *net.IPNet) []nodeipt.Rule {
 	}
 }
 
-func getLocalGatewayNATRules(cidr *net.IPNet) []nodeipt.Rule {
-	// Allow packets to/from the gateway interface in case defaults deny
+func getLocalGatewayPodSubnetNATRules(cidr *net.IPNet) []nodeipt.Rule {
 	protocol := getIPTablesProtocol(cidr.IP.String())
-	masqueradeIP := config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP
-	if protocol == iptables.ProtocolIPv6 {
-		masqueradeIP = config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP
-	}
-	rules := []nodeipt.Rule{
-		{
-			Table: "nat",
-			Chain: "POSTROUTING",
-			Args: []string{
-				"-s", masqueradeIP.String(),
-				"-j", "MASQUERADE",
-			},
-			Protocol: protocol,
-		},
+	return []nodeipt.Rule{
 		{
 			Table: "nat",
 			Chain: "POSTROUTING",
@@ -440,12 +415,6 @@ func getLocalGatewayNATRules(cidr *net.IPNet) []nodeipt.Rule {
 			Protocol: protocol,
 		},
 	}
-	// FIXME(tssurya): If the feature is disabled we should be removing
-	// these rules
-	if util.IsNetworkSegmentationSupportEnabled() {
-		rules = append(rules, getUDNMasqueradeRules(protocol)...)
-	}
-	return rules
 }
 
 // getUDNMasqueradeRules is only called for local-gateway-mode
@@ -514,6 +483,37 @@ func getUDNMasqueradeRules(protocol iptables.Protocol) []nodeipt.Rule {
 	return rules
 }
 
+func getLocalGatewayNATRules(cidr *net.IPNet) []nodeipt.Rule {
+	// Allow packets to/from the gateway interface in case defaults deny
+	protocol := getIPTablesProtocol(cidr.IP.String())
+	masqueradeIP := config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP
+	if protocol == iptables.ProtocolIPv6 {
+		masqueradeIP = config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP
+	}
+	rules := append(
+		[]nodeipt.Rule{
+			{
+				Table: "nat",
+				Chain: "POSTROUTING",
+				Args: []string{
+					"-s", masqueradeIP.String(),
+					"-j", "MASQUERADE",
+				},
+				Protocol: protocol,
+			},
+		},
+		getLocalGatewayPodSubnetNATRules(cidr)...,
+	)
+
+	// FIXME(tssurya): If the feature is disabled we should be removing
+	// these rules
+	if util.IsNetworkSegmentationSupportEnabled() {
+		rules = append(rules, getUDNMasqueradeRules(protocol)...)
+	}
+
+	return rules
+}
+
 // initLocalGatewayNATRules sets up iptables rules for interfaces
 func initLocalGatewayNATRules(ifname string, cidr *net.IPNet) error {
 	// Insert the filter table rules because they need to be evaluated BEFORE the DROP rules
@@ -528,6 +528,22 @@ func initLocalGatewayNATRules(ifname string, cidr *net.IPNet) error {
 	return appendIptRules(getLocalGatewayNATRules(cidr))
 }
 
+func addLocalGatewayPodSubnetNATRules(cidrs ...*net.IPNet) error {
+	var rules []nodeipt.Rule
+	for _, cidr := range cidrs {
+		rules = append(rules, getLocalGatewayPodSubnetNATRules(cidr)...)
+	}
+	return appendIptRules(rules)
+}
+
+func delLocalGatewayPodSubnetNATRules(cidrs ...*net.IPNet) error {
+	var rules []nodeipt.Rule
+	for _, cidr := range cidrs {
+		rules = append(rules, getLocalGatewayPodSubnetNATRules(cidr)...)
+	}
+	return deleteIptRules(rules)
+}
+
 func addChaintoTable(ipt util.IPTablesHelper, tableName, chain string) {
 	if err := ipt.NewChain(tableName, chain); err != nil {
 		klog.V(5).Infof("Chain: \"%s\" in table: \"%s\" already exists, skipping creation: %v", chain, tableName, err)
@@ -537,7 +553,7 @@ func addChaintoTable(ipt util.IPTablesHelper, tableName, chain string) {
 func handleGatewayIPTables(iptCallback func(rules []nodeipt.Rule) error, genGatewayChainRules func(chain string, proto iptables.Protocol) []nodeipt.Rule) error {
 	rules := make([]nodeipt.Rule, 0)
 	// (NOTE: Order is important, add jump to iptableETPChain before jump to NP/EIP chains)
-	for _, chain := range []string{iptableITPChain, egressservice.Chain, iptableNodePortChain, iptableExternalIPChain, iptableETPChain} {
+	for _, chain := range []string{iptableITPChain, iptableNodePortChain, iptableExternalIPChain, iptableETPChain} {
 		for _, proto := range clusterIPTablesProtocols() {
 			ipt, err := util.GetIPTablesHelper(proto)
 			if err != nil {

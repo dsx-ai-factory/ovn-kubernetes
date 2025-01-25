@@ -35,9 +35,10 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/nadconfig"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/ovspinning"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
@@ -101,7 +102,7 @@ type BaseNodeNetworkController struct {
 	CommonNodeNetworkControllerInfo
 
 	// network information
-	util.NetInfo
+	util.ReconcilableNetInfo
 
 	// podNADToDPUCDMap tracks the NAD/DPU_ConnectionDetails mapping for all NADs that each pod requests.
 	// Key is pod.UUID; value is nadToDPUCDMap (of map[string]*podNADInfo). Key of nadToDPUCDMap
@@ -126,6 +127,7 @@ type BaseNodeNetworkController struct {
 	stopChan chan struct{}
 	wg       *sync.WaitGroup
 
+	nadConfigController *nadconfig.NadConfigController
 	portMirrorInfo
 }
 
@@ -148,7 +150,7 @@ func newCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, kube kub
 
 // NewCommonNodeNetworkControllerInfo creates and returns the base node network controller info
 func NewCommonNodeNetworkControllerInfo(ovnNodeClient *util.OVNNodeClientset, wf factory.NodeWatchFactory, eventRecorder record.EventRecorder,
-	name, dpuName, hostType string, pfMACs []string, routeManager *routemanager.Controller) *CommonNodeNetworkControllerInfo {
+	routeManager *routemanager.Controller, name, dpuName, hostType string, pfMACs []string) *CommonNodeNetworkControllerInfo {
 	k := &kube.KubeOVN{
 		Kube: kube.Kube{
 			KClient: ovnNodeClient.KubeClient,
@@ -170,6 +172,7 @@ type DefaultNodeNetworkController struct {
 	// Node healthcheck server for cloud load balancers
 	healthzServer *proxierHealthUpdater
 	routeManager  *routemanager.Controller
+	linkManager   *linkmanager.Controller
 
 	// retry framework for namespaces, used for the removal of stale conntrack entries for external gateways
 	retryNamespaces *retry.RetryFramework
@@ -180,7 +183,7 @@ type DefaultNodeNetworkController struct {
 	skipFirewalldMap               sync.Map
 	apbExternalRouteNodeController *apbroute.ExternalGatewayNodeController
 
-	nadController *nad.NetAttachDefinitionController
+	networkManager networkmanager.Interface
 
 	cniServer *cni.Server
 
@@ -190,19 +193,19 @@ type DefaultNodeNetworkController struct {
 }
 
 type preStartSetup struct {
-	mgmtPorts      []managementPortEntry
+	mgmtPorts      []*managementPortEntry
 	mgmtPortConfig *managementPortConfig
 	nodeAddress    net.IP
 	sbZone         string
 }
 
 func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, stopChan chan struct{},
-	wg *sync.WaitGroup, routeManager *routemanager.Controller, nadController *nad.NetAttachDefinitionController) *DefaultNodeNetworkController {
+	wg *sync.WaitGroup, routeManager *routemanager.Controller) *DefaultNodeNetworkController {
 
 	c := &DefaultNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
 			CommonNodeNetworkControllerInfo: *cnnci,
-			NetInfo:                         util.InitDefaultNetInfo(),
+			ReconcilableNetInfo:             &util.DefaultNetInfo{},
 			stopChan:                        stopChan,
 			wg:                              wg,
 			DoSCheckStopChan:                nil,
@@ -215,18 +218,18 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 	}
 	if util.IsNetworkSegmentationSupportEnabled() && !config.OVNKubernetesFeature.DisableUDNHostIsolation {
 		c.udnHostIsolationManager = NewUDNHostIsolationManager(config.IPv4Mode, config.IPv6Mode,
-			cnnci.watchFactory.PodCoreInformer(), nadController)
+			cnnci.watchFactory.PodCoreInformer())
 	}
+	c.linkManager = linkmanager.NewController(cnnci.name, config.IPv4Mode, config.IPv6Mode, c.updateGatewayMAC)
 	return c
 }
 
 // NewDefaultNodeNetworkController creates a new network controller for node management of the default network
-func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo,
-	nadController *nad.NetAttachDefinitionController) (*DefaultNodeNetworkController, error) {
+func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, networkManager networkmanager.Interface) (*DefaultNodeNetworkController, error) {
 	var err error
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
-	nc := newDefaultNodeNetworkController(cnnci, stopChan, wg, cnnci.routeManager, nadController)
+	nc := newDefaultNodeNetworkController(cnnci, stopChan, wg, cnnci.routeManager)
 
 	if len(config.Kubernetes.HealthzBindAddress) != 0 {
 		klog.Infof("Enable node proxy healthz server on %s", config.Kubernetes.HealthzBindAddress)
@@ -246,7 +249,7 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo,
 		return nil, err
 	}
 
-	nc.nadController = nadController
+	nc.networkManager = networkManager
 
 	nc.initRetryFrameworkForNode()
 
@@ -256,6 +259,46 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo,
 func (nc *DefaultNodeNetworkController) initRetryFrameworkForNode() {
 	nc.retryNamespaces = nc.newRetryFrameworkNode(factory.NamespaceExGwType)
 	nc.retryEndpointSlices = nc.newRetryFrameworkNode(factory.EndpointSliceForStaleConntrackRemovalType)
+}
+
+func (oc *DefaultNodeNetworkController) shouldReconcileNetworkChange(old, new util.NetInfo) bool {
+	wasPodNetworkAdvertisedAtNode := util.IsPodNetworkAdvertisedAtNode(old, oc.name)
+	isPodNetworkAdvertisedAtNode := util.IsPodNetworkAdvertisedAtNode(new, oc.name)
+	return wasPodNetworkAdvertisedAtNode != isPodNetworkAdvertisedAtNode
+}
+
+func (oc *DefaultNodeNetworkController) Reconcile(netInfo util.NetInfo) error {
+	// inspect changes first
+	reconcilePodNetwork := oc.shouldReconcileNetworkChange(oc.ReconcilableNetInfo, netInfo)
+
+	// reconcile subcontrollers
+	if reconcilePodNetwork {
+		isPodNetworkAdvertisedAtNode := util.IsPodNetworkAdvertisedAtNode(netInfo, oc.name)
+		if oc.Gateway != nil {
+			oc.Gateway.SetPodNetworkAdvertised(isPodNetworkAdvertisedAtNode)
+			err := oc.Gateway.Reconcile()
+			if err != nil {
+				return fmt.Errorf("failed to reconcile gateway: %v", err)
+			}
+		}
+		for _, mgmtPort := range oc.gatewaySetup.mgmtPorts {
+			mgmtPort.SetPodNetworkAdvertised(isPodNetworkAdvertisedAtNode)
+			mgmtPort.Reconcile()
+		}
+	}
+
+	// Update network information. We can do this now because gateway and
+	// management port reconciliation done above does not rely on NetInfo
+	err := util.ReconcileNetInfo(oc.ReconcilableNetInfo, netInfo)
+	if err != nil {
+		return fmt.Errorf("failed to reconcile network %s: %v", oc.GetNetworkName(), err)
+	}
+
+	return nil
+}
+
+func (oc *DefaultNodeNetworkController) isPodNetworkAdvertisedAtNode() bool {
+	return util.IsPodNetworkAdvertisedAtNode(oc, oc.name)
 }
 
 func clearOVSFlowTargets() error {
@@ -371,22 +414,66 @@ func setOVSFlowTargets(node *kapi.Node) error {
 	return nil
 }
 
+// validateEncapIP returns false if there is an error or if the given IP is not known local IP address.
+func validateEncapIP(encapIP string) (bool, error) {
+	links, err := netlink.LinkList()
+	if err != nil {
+		return false, fmt.Errorf("failed to get all the links on the node: %v", err)
+	}
+	for _, link := range links {
+		addrs, err := util.GetFilteredInterfaceAddrs(link, config.IPv4Mode, config.IPv6Mode)
+		if err != nil {
+			return false, err
+		}
+		for _, addr := range addrs {
+			if addr.IP.String() == encapIP {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 func setupOVNNode(node *kapi.Node) error {
 	var err error
 
+	nodePrimaryIP, err := util.GetNodePrimaryIP(node)
+	if err != nil {
+		return fmt.Errorf("failed to obtain local primary IP from node %q: %v", node.Name, err)
+	}
+
 	encapIP := config.Default.EncapIP
 	if encapIP == "" {
-		encapIP, err = util.GetNodePrimaryIP(node)
-		if err != nil {
-			return fmt.Errorf("failed to obtain local IP from node %q: %v", node.Name, err)
-		}
-		config.Default.EncapIP = encapIP
+		config.Default.EffectiveEncapIP = nodePrimaryIP
 	} else {
 		// OVN allows `external_ids:ovn-encap-ip` to be a list of IPs separated by comma.
+		config.Default.EffectiveEncapIP = encapIP
 		ovnEncapIps := strings.Split(encapIP, ",")
 		for _, ovnEncapIp := range ovnEncapIps {
 			if ip := net.ParseIP(strings.TrimSpace(ovnEncapIp)); ip == nil {
 				return fmt.Errorf("invalid IP address %q in provided encap-ip setting %q", ovnEncapIp, encapIP)
+			}
+		}
+		// if there are more than one encap IPs, it must be configured explicitly. otherwise:
+		if len(ovnEncapIps) == 1 {
+			encapIP = ovnEncapIps[0]
+			if encapIP == nodePrimaryIP {
+				// the current encap IP is node primary IP, unset config.Default.EncapIP to indicate it is
+				// implicitly configured through the old external_ids:ovn-encap-ip value and needs to be updated
+				// if node primary IP changes.
+				config.Default.EncapIP = ""
+			} else {
+				// the encap IP may be incorrectly set or;
+				// previous implicitly set with the old primary node IP through the old external_ids:ovn-encap-ip value,
+				// that has changed when ovnkube-node is down.
+				// validate it to see if it is still a valid local IP address.
+				valid, err := validateEncapIP(encapIP)
+				if err != nil {
+					return fmt.Errorf("invalid encap IP %s: %v", encapIP, err)
+				}
+				if !valid {
+					return fmt.Errorf("invalid encap IP %s: does not exist", encapIP)
+				}
 			}
 		}
 	}
@@ -396,9 +483,7 @@ func setupOVNNode(node *kapi.Node) error {
 		"Open_vSwitch",
 		".",
 		fmt.Sprintf("external_ids:ovn-encap-type=%s", config.Default.EncapType),
-		// For a multi-vtep case, if a Port has an ovn-encap-ip configuration,
-		// it takes precedence over Open_vSwitch configuration.
-		fmt.Sprintf("external_ids:ovn-encap-ip=%s", encapIP),
+		fmt.Sprintf("external_ids:ovn-encap-ip=%s", config.Default.EffectiveEncapIP),
 		fmt.Sprintf("external_ids:ovn-remote-probe-interval=%d",
 			config.Default.InactivityProbe),
 		fmt.Sprintf("external_ids:ovn-openflow-probe-interval=%d",
@@ -550,11 +635,6 @@ func isOVNControllerReady() (bool, error) {
 	}
 
 	return true, nil
-}
-
-type managementPortEntry struct {
-	port   ManagementPort
-	config *managementPortConfig
 }
 
 // getEnvNameFromResourceName gets the device plugin env variable from the device plugin resource name.
@@ -729,7 +809,7 @@ func getMgmtPortAndRepName(node *kapi.Node) (string, string, error) {
 }
 
 func createNodeManagementPorts(node *kapi.Node, nodeLister listers.NodeLister, nodeAnnotator kube.Annotator, kubeInterface kube.Interface, waiter *startupWaiter,
-	subnets []*net.IPNet, routeManager *routemanager.Controller) ([]managementPortEntry, *managementPortConfig, error) {
+	subnets []*net.IPNet, routeManager *routemanager.Controller, isRoutingAdvertised bool) ([]*managementPortEntry, *managementPortConfig, error) {
 	netdevName, rep, err := getMgmtPortAndRepName(node)
 	if err != nil {
 		return nil, nil, err
@@ -744,13 +824,14 @@ func createNodeManagementPorts(node *kapi.Node, nodeLister listers.NodeLister, n
 	ports := NewManagementPorts(node.Name, subnets, netdevName, rep)
 
 	var mgmtPortConfig *managementPortConfig
-	mgmtPorts := make([]managementPortEntry, 0)
+	mgmtPorts := make([]*managementPortEntry, 0)
 	for _, port := range ports {
-		config, err := port.Create(routeManager, node, nodeLister, kubeInterface, waiter)
+		config, err := port.Create(isRoutingAdvertised, routeManager, node, nodeLister, kubeInterface, waiter)
 		if err != nil {
 			return nil, nil, err
 		}
-		mgmtPorts = append(mgmtPorts, managementPortEntry{port: port, config: config})
+		mgmtPorts = append(mgmtPorts, NewManagementPortEntry(port, config, routeManager))
+
 		// Save this management port config for later usage.
 		// Since only one OVS internal port / Representor config may exist it is fine just to overwrite it
 		if _, ok := port.(*managementPortNetdev); !ok {
@@ -957,7 +1038,7 @@ func (nc *DefaultNodeNetworkController) PreStart(ctx context.Context) error {
 		if !ok {
 			return fmt.Errorf("cannot get kubeOVNClient for starting CNI server")
 		}
-		cniServer, err = cni.NewCNIServer(nc.watchFactory, kube.KClient, nc.nadController)
+		cniServer, err = cni.NewCNIServer(nc.watchFactory /*kclient.KClient*/, kube.KClient, nc.networkManager) // TBD-merge
 		if err != nil {
 			return err
 		}
@@ -968,13 +1049,21 @@ func (nc *DefaultNodeNetworkController) PreStart(ctx context.Context) error {
 	waiter := newStartupWaiter()
 
 	// Setup management ports
-	mgmtPorts, mgmtPortConfig, err := createNodeManagementPorts(node, nc.watchFactory.NodeCoreInformer().Lister(), nodeAnnotator,
-		nc.Kube, waiter, subnets, nc.routeManager)
+	mgmtPorts, mgmtPortConfig, err := createNodeManagementPorts(
+		node,
+		nc.watchFactory.NodeCoreInformer().Lister(),
+		nodeAnnotator,
+		nc.Kube,
+		waiter,
+		subnets,
+		nc.routeManager,
+		nc.isPodNetworkAdvertisedAtNode())
 	if err != nil {
 		return err
 	}
 	gatewaySetup.mgmtPorts = mgmtPorts
 	gatewaySetup.mgmtPortConfig = mgmtPortConfig
+	gatewaySetup.nodeAddress = nodeAddr
 
 	if err := util.SetNodeZone(nodeAnnotator, sbZone); err != nil {
 		return fmt.Errorf("failed to set node zone annotation for node %s: %w", nc.name, err)
@@ -984,9 +1073,11 @@ func (nc *DefaultNodeNetworkController) PreStart(ctx context.Context) error {
 	}
 
 	// Connect ovn-controller to SBDB
-	for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
-		if err := auth.SetDBAuth(); err != nil {
-			return fmt.Errorf("unable to set the authentication towards OVN local dbs")
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+		for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
+			if err := auth.SetDBAuth(); err != nil {
+				return fmt.Errorf("unable to set the authentication towards OVN local dbs")
+			}
 		}
 	}
 
@@ -1262,7 +1353,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 
 	// start management ports health check
 	for _, mgmtPort := range nc.gatewaySetup.mgmtPorts {
-		mgmtPort.port.CheckManagementPortHealth(nc.routeManager, mgmtPort.config, nc.stopChan)
+		mgmtPort.Start(nc.stopChan)
 		if config.OVNKubernetesFeature.EnableEgressIP {
 			// Start the health checking server used by egressip, if EgressIPNodeHealthCheckPort is specified
 			if err := nc.startEgressIPHealthCheckingServer(mgmtPort); err != nil {
@@ -1299,9 +1390,11 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	}
 
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
-		// TBD
-		nc.enableDoSChecker()
-		_, err := nc.watchPodsDPU(nil, nil, nil)
+		err := nc.startNADController()
+		if err != nil {
+			return err
+		}
+		_, err = nc.watchPodsDPU(nil, nil, nil)
 		if err != nil {
 			return err
 		}
@@ -1357,13 +1450,10 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}
 	}
 
-	// create link manager, will work for egress IP as well as monitoring MAC changes to default gw bridge
-	linkManager := linkmanager.NewController(nc.name, config.IPv4Mode, config.IPv6Mode, nc.updateGatewayMAC)
-
 	if config.OVNKubernetesFeature.EnableEgressIP && !util.PlatformTypeIsEgressIPCloudProvider() {
 		c, err := egressip.NewController(nc.Kube, nc.watchFactory.EgressIPInformer(), nc.watchFactory.NodeInformer(),
-			nc.watchFactory.NamespaceInformer(), nc.watchFactory.PodCoreInformer(), nc.routeManager, config.IPv4Mode,
-			config.IPv6Mode, nc.name, linkManager)
+			nc.watchFactory.NamespaceInformer(), nc.watchFactory.PodCoreInformer(), nc.networkManager.GetActiveNetworkForNamespace,
+			nc.routeManager, config.IPv4Mode, config.IPv6Mode, nc.name, nc.linkManager)
 		if err != nil {
 			return fmt.Errorf("failed to create egress IP controller: %v", err)
 		}
@@ -1374,7 +1464,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		klog.Infof("Egress IP for secondary host network is disabled")
 	}
 
-	linkManager.Run(nc.stopChan, nc.wg)
+	nc.linkManager.Run(nc.stopChan, nc.wg)
 
 	nc.wg.Add(1)
 	go func() {
@@ -1389,6 +1479,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 // Stop gracefully stops the controller
 // deleteLogicalEntities will never be true for default network
 func (nc *DefaultNodeNetworkController) Stop() {
+	nc.stopNADController()
 	close(nc.stopChan)
 	nc.wg.Wait()
 }
@@ -1397,7 +1488,7 @@ func (nc *DefaultNodeNetworkController) Cleanup() error {
 	panic("unexpected call for default network")
 }
 
-func (nc *DefaultNodeNetworkController) startEgressIPHealthCheckingServer(mgmtPortEntry managementPortEntry) error {
+func (nc *DefaultNodeNetworkController) startEgressIPHealthCheckingServer(mgmtPortEntry *managementPortEntry) error {
 	healthCheckPort := config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort
 	if healthCheckPort == 0 {
 		klog.Infof("Egress IP health check server skipped: no port specified")
@@ -1559,11 +1650,11 @@ func (nc *DefaultNodeNetworkController) validateVTEPInterfaceMTU() error {
 	}
 
 	// OVN allows `external_ids:ovn-encap-ip` to be a list of IPs separated by comma
-	ovnEncapIps := strings.Split(config.Default.EncapIP, ",")
+	ovnEncapIps := strings.Split(config.Default.EffectiveEncapIP, ",")
 	for _, ip := range ovnEncapIps {
 		ovnEncapIP := net.ParseIP(strings.TrimSpace(ip))
 		if ovnEncapIP == nil {
-			return fmt.Errorf("invalid IP address %q in provided encap-ip setting %q", ovnEncapIP, config.Default.EncapIP)
+			return fmt.Errorf("invalid IP address %q in provided encap-ip setting %q", ovnEncapIP, config.Default.EffectiveEncapIP)
 		}
 		interfaceName, mtu, err := util.GetIFNameAndMTUForAddress(ovnEncapIP)
 		if err != nil {

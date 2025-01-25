@@ -9,6 +9,7 @@ const (
 	portGroup
 	logicalRouterPolicy
 	qos
+	nat
 )
 
 const (
@@ -36,6 +37,7 @@ const (
 	ClusterSubnetsOwnerType     ownerType = "ClusterSubnets"
 	GatewaySnatRuleType         ownerType = "GatewaySnatRule"
 	VirtualMachineOwnerType     ownerType = "VirtualMachine"
+	UDNEnabledServiceOwnerType  ownerType = "UDNEnabledService"
 	// NetworkPolicyPortIndexOwnerType is the old version of NetworkPolicyOwnerType, kept for sync only
 	NetworkPolicyPortIndexOwnerType ownerType = "NetworkPolicyPortIndexOwnerType"
 	// ClusterOwnerType means the object is cluster-scoped and doesn't belong to any k8s objects
@@ -48,6 +50,7 @@ const (
 	PolicyDirectionKey    ExternalIDKey = "direction"
 	GressIdxKey           ExternalIDKey = "gress-index"
 	IPFamilyKey           ExternalIDKey = "ip-family"
+	NetworkKey            ExternalIDKey = "network"
 	TypeKey               ExternalIDKey = "type"
 	IpKey                 ExternalIDKey = "ip"
 	PortPolicyIndexKey    ExternalIDKey = "port-policy-index"
@@ -127,9 +130,16 @@ var AddressSetEgressIP = newObjectIDsType(addressSet, EgressIPOwnerType, []Exter
 	// cluster-wide address set name
 	ObjectNameKey,
 	IPFamilyKey,
+	NetworkKey,
 })
 
 var AddressSetEgressService = newObjectIDsType(addressSet, EgressServiceOwnerType, []ExternalIDKey{
+	// cluster-wide address set name
+	ObjectNameKey,
+	IPFamilyKey,
+})
+
+var AddressSetUDNEnabledService = newObjectIDsType(addressSet, UDNEnabledServiceOwnerType, []ExternalIDKey{
 	// cluster-wide address set name
 	ObjectNameKey,
 	IPFamilyKey,
@@ -327,6 +337,14 @@ var LogicalRouterPolicyEgressIP = newObjectIDsType(logicalRouterPolicy, EgressIP
 	PriorityKey,
 	// for the reroute policies it should be the "EIPName_Namespace/podName"
 	// for the no-reroute global policies it should be the unique global name
+	ObjectNameKey,
+	// the IP Family for this policy, ip4 or ip6 or ip(dualstack)
+	IPFamilyKey,
+	NetworkKey,
+})
+
+var NATEgressIP = newObjectIDsType(nat, EgressIPOwnerType, []ExternalIDKey{
+	// for the NAT policy, it should be the "EIPName_Namespace/podName"
 	ObjectNameKey,
 	// the IP Family for this policy, ip4 or ip6 or ip(dualstack)
 	IPFamilyKey,

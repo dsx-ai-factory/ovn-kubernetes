@@ -48,7 +48,7 @@ function testrun {
             go_test="sudo ${testfile}"
         fi
     fi
-    if [[ -n "$gingko_focus" ]]; then
+    if [[ -n "$ginkgo_focus" ]]; then
         local ginkgoargs=${ginkgo_focus:-}
     fi
     local path=${pkg#github.com/ovn-org/ovn-kubernetes/go-controller}
@@ -72,7 +72,7 @@ function testrun {
 }
 
 # These packages requires root for network namespace manipulation in unit tests
-root_pkgs=("github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-controller-manager" "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node" "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables" "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/rulemanager" "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager" "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager" "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressip")
+root_pkgs=("github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controllermanager" "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node" "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables" "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/rulemanager" "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager" "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager" "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressip")
 
 # These packages are big and require more than the 10m default to run the unit tests
 big_pkgs=("github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn")

@@ -57,6 +57,8 @@ type NetLinkOps interface {
 	ConntrackDeleteFilter(table netlink.ConntrackTableType, family netlink.InetFamily, filter netlink.CustomConntrackFilter) (uint, error)
 	CountIngressFilters(link netlink.Link) (uint, error)
 	LinkSetVfHardwareAddr(pfLink netlink.Link, vfIndex int, hwaddr net.HardwareAddr) error
+	RouteSubscribeWithOptions(ch chan<- netlink.RouteUpdate, done <-chan struct{}, options netlink.RouteSubscribeOptions) error
+	LinkSubscribeWithOptions(ch chan<- netlink.LinkUpdate, done <-chan struct{}, options netlink.LinkSubscribeOptions) error
 }
 
 type defaultNetLinkOps struct {
@@ -203,6 +205,14 @@ func (defaultNetLinkOps) CountIngressFilters(link netlink.Link) (uint, error) {
 		}
 	}
 	return ingressCounter, nil
+}
+
+func (defaultNetLinkOps) RouteSubscribeWithOptions(ch chan<- netlink.RouteUpdate, done <-chan struct{}, options netlink.RouteSubscribeOptions) error {
+	return netlink.RouteSubscribeWithOptions(ch, done, options)
+}
+
+func (defaultNetLinkOps) LinkSubscribeWithOptions(ch chan<- netlink.LinkUpdate, done <-chan struct{}, options netlink.LinkSubscribeOptions) error {
+	return netlink.LinkSubscribeWithOptions(ch, done, options)
 }
 
 func getFamily(ip net.IP) int {

@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	ovnconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	config "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -50,19 +50,19 @@ func newAddressManager(nodeName string, k kube.Interface, config *managementPort
 // newAddressManagerInternal creates a new address manager; this function is
 // only expose for testcases to disable netlink subscription to ensure
 // reproducibility of unit tests.
-func newAddressManagerInternal(nodeName string, k kube.Interface, config *managementPortConfig, watchFactory factory.NodeWatchFactory, gwBridge *bridgeConfiguration, useNetlink bool) (*addressManager, error) {
+func newAddressManagerInternal(nodeName string, k kube.Interface, mgmtConfig *managementPortConfig, watchFactory factory.NodeWatchFactory, gwBridge *bridgeConfiguration, useNetlink bool) (*addressManager, error) {
 	mgr := &addressManager{
 		nodeName:       nodeName,
 		watchFactory:   watchFactory,
 		cidrs:          sets.New[string](),
-		mgmtPortConfig: config,
+		mgmtPortConfig: mgmtConfig,
 		gatewayBridge:  gwBridge,
 		OnChanged:      func() {},
 		useNetlink:     useNetlink,
 		syncPeriod:     30 * time.Second,
 	}
 	mgr.nodeAnnotator = kube.NewNodeAnnotator(k, nodeName)
-	if ovnconfig.OvnKubeNode.Mode == types.NodeModeDPU {
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		var ifAddrs []*net.IPNet
 
 		// update k8s.ovn.org/host-cidrs
@@ -137,7 +137,7 @@ func (c *addressManager) ListAddresses() []net.IP {
 type subscribeFn func() (bool, chan netlink.AddrUpdate, error)
 
 func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
-	if ovnconfig.OvnKubeNode.Mode == types.NodeModeDPU {
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		return
 	}
 
@@ -250,11 +250,13 @@ func (c *addressManager) handleNodePrimaryAddrChange() {
 		klog.Errorf("Address Manager failed to check node primary address change: %v", err)
 		return
 	}
-	if nodePrimaryAddrChanged {
+	if nodePrimaryAddrChanged && config.Default.EncapIP == "" {
 		// klog.Infof("Node primary address changed to %v. Updating OVN encap IP.", c.nodePrimaryAddr)
 		// updateOVNEncapIPAndReconnect(c.nodePrimaryAddr)
 		// In our setup, encap IP is different from node primary address
-		klog.Infof("Node primary address changed to %v", c.nodePrimaryAddr)
+		klog.Infof("Node primary address changed to %v", c.nodePrimaryAddr)  // TBD-merge 
+		//klog.Infof("Node primary address changed to %v. Updating OVN encap IP.", c.nodePrimaryAddr)
+		//updateOVNEncapIPAndReconnect(c.nodePrimaryAddr)
 	}
 }
 
@@ -310,7 +312,7 @@ func (c *addressManager) updateNodeAddressAnnotations() error {
 }
 
 func (c *addressManager) updateHostCIDRs(node *kapi.Node, ifAddrs []*net.IPNet) error {
-	if ovnconfig.OvnKubeNode.Mode == types.NodeModeDPU {
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		// For DPU mode, here we need to use the DPU host's IP address which is the tenant cluster's
 		// host internal IP address instead.
 		// Currently we are only intentionally supporting IPv4 for DPU here.
@@ -430,14 +432,32 @@ func (c *addressManager) isValidNodeIP(addr net.IP, linkIndex int) bool {
 	if util.IsAddressReservedForInternalUse(addr) {
 		return false
 	}
-	if ovnconfig.OVNKubernetesFeature.EnableEgressIP && !util.PlatformTypeIsEgressIPCloudProvider() {
-		// IPs assigned to host interfaces to support the egress IP multi NIC feature must be excluded.
-		eipAddresses, err := c.getSecondaryHostEgressIPs()
-		if err != nil {
-			klog.Errorf("Failed to get secondary host assigned Egress IPs and ensure they are excluded: %v", err)
+	if config.OVNKubernetesFeature.EnableEgressIP {
+		// EIP assigned to the primary interface which selects pods with a role primary user defined network must be excluded.
+		if util.IsNetworkSegmentationSupportEnabled() && config.OVNKubernetesFeature.EnableInterconnect && config.Gateway.Mode != config.GatewayModeDisabled {
+			// Two methods to lookup EIPs assigned to the gateway bridge. Fast path from a shared cache or slow path from node annotations.
+			// At startup, gateway bridge cache gets sync
+			if c.gatewayBridge.eipMarkIPs != nil && c.gatewayBridge.eipMarkIPs.HasSyncdOnce() && c.gatewayBridge.eipMarkIPs.IsIPPresent(addr) {
+				return false
+			} else {
+				if eipAddresses, err := c.getPrimaryHostEgressIPs(); err != nil {
+					klog.Errorf("Failed to get primary host assigned Egress IPs and ensure they are excluded: %v", err)
+				} else {
+					if eipAddresses.Has(addr.String()) {
+						return false
+					}
+				}
+			}
 		}
-		if eipAddresses.Has(addr.String()) {
-			return false
+		if !util.PlatformTypeIsEgressIPCloudProvider() {
+			// IPs assigned to host interfaces to support the egress IP multi NIC feature must be excluded.
+			if eipAddresses, err := c.getSecondaryHostEgressIPs(); err != nil {
+				klog.Errorf("Failed to get secondary host assigned Egress IPs and ensure they are excluded: %v", err)
+			} else {
+				if eipAddresses.Has(addr.String()) {
+					return false
+				}
+			}
 		}
 	}
 
@@ -445,7 +465,7 @@ func (c *addressManager) isValidNodeIP(addr net.IP, linkIndex int) bool {
 }
 
 func (c *addressManager) sync() {
-	if ovnconfig.OvnKubeNode.Mode == types.NodeModeDPU {
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		return
 	}
 
@@ -507,6 +527,22 @@ func (c *addressManager) getSecondaryHostEgressIPs() (sets.Set[string], error) {
 	return eipAddrs, nil
 }
 
+func (c *addressManager) getPrimaryHostEgressIPs() (sets.Set[string], error) {
+	node, err := c.watchFactory.GetNode(c.nodeName)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get Node from informer: %v", err)
+	}
+	eipAddrs, err := util.ParseNodeBridgeEgressIPsAnnotation(node)
+	if err != nil {
+		if util.IsAnnotationNotSetError(err) {
+			eipAddrs = make([]string, 0)
+		} else {
+			return nil, err
+		}
+	}
+	return sets.New[string](eipAddrs...), nil
+}
+
 //// updateOVNEncapIPAndReconnect updates encap IP to OVS when the node primary IP changed.
 //func updateOVNEncapIPAndReconnect(newIP net.IP) {
 //	checkCmd := []string{
@@ -526,6 +562,7 @@ func (c *addressManager) getSecondaryHostEgressIPs() (sets.Set[string], error) {
 //		}
 //	}
 //
+//	config.Default.EffectiveEncapIP = newIP.String()
 //	confCmd := []string{
 //		"set",
 //		"Open_vSwitch",
@@ -551,9 +588,9 @@ func (c *addressManager) getSecondaryHostEgressIPs() (sets.Set[string], error) {
 
 func getSupportedIPFamily() int {
 	var ipFamily int // value of 0 means include both IP v4 and v6 addresses
-	if ovnconfig.IPv4Mode && !ovnconfig.IPv6Mode {
+	if config.IPv4Mode && !config.IPv6Mode {
 		ipFamily = netlink.FAMILY_V4
-	} else if !ovnconfig.IPv4Mode && ovnconfig.IPv6Mode {
+	} else if !config.IPv4Mode && config.IPv6Mode {
 		ipFamily = netlink.FAMILY_V6
 	}
 	return ipFamily

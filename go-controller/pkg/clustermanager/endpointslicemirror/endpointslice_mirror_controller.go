@@ -22,7 +22,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	networkAttachDefController "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -43,7 +43,7 @@ type Controller struct {
 	endpointSlicesSynced cache.InformerSynced
 	podLister            corelisters.PodLister
 	podsSynced           cache.InformerSynced
-	nadController        *networkAttachDefController.NetAttachDefinitionController
+	networkManager       networkmanager.Interface
 	cancel               context.CancelFunc
 }
 
@@ -111,14 +111,16 @@ func (c *Controller) onEndpointSliceAdd(obj interface{}) {
 
 func NewController(
 	ovnClient *util.OVNClusterManagerClientset,
-	wf *factory.WatchFactory, nadController *networkAttachDefController.NetAttachDefinitionController) (*Controller, error) {
+	wf *factory.WatchFactory,
+	networkManager networkmanager.Interface,
+) (*Controller, error) {
 
 	wg := &sync.WaitGroup{}
 	c := &Controller{
-		kubeClient:    ovnClient.KubeClient,
-		wg:            wg,
-		name:          types.EndpointSliceMirrorControllerName,
-		nadController: nadController,
+		kubeClient:     ovnClient.KubeClient,
+		wg:             wg,
+		name:           types.EndpointSliceMirrorControllerName,
+		networkManager: networkManager,
 	}
 
 	c.queue = workqueue.NewTypedRateLimitingQueueWithConfig(
@@ -244,7 +246,7 @@ func (c *Controller) syncDefaultEndpointSlice(ctx context.Context, key string) e
 		return err
 	}
 
-	namespacePrimaryNetwork, err := c.nadController.GetActiveNetworkForNamespace(namespace)
+	namespacePrimaryNetwork, err := c.networkManager.GetActiveNetworkForNamespace(namespace)
 	if err != nil {
 		return err
 	}
@@ -420,12 +422,13 @@ func (c *Controller) mirrorEndpointSlice(mirroredEndpointSlice, defaultEndpointS
 
 	currentMirror.Endpoints = make([]v1.Endpoint, len(defaultEndpointSlice.Endpoints))
 	isIPv6 := defaultEndpointSlice.AddressType == v1.AddressTypeIPv6
-	if len(network.GetNADConfigs()) != 1 {
-		return nil, fmt.Errorf("expected one NAD in %s network, got: %d", network.GetNetworkName(), len(network.GetNADConfigs()))
+	nadList := network.GetNADs()
+	if len(nadList) != 1 {
+		return nil, fmt.Errorf("expected one NAD in %s network, got: %d", network.GetNetworkName(), len(nadList))
 	}
 	for i, endpoint := range defaultEndpointSlice.Endpoints {
 		if endpoint.TargetRef != nil && endpoint.TargetRef.Kind == "Pod" {
-			podIP, err := c.getPodIP(endpoint.TargetRef.Name, endpoint.TargetRef.Namespace, network.GetFirstNAD(), isIPv6)
+			podIP, err := c.getPodIP(endpoint.TargetRef.Name, endpoint.TargetRef.Namespace, network.GetNADs()[0], isIPv6)
 			if err != nil {
 				return nil, fmt.Errorf("failed to determine the Pod IP of: %s/%s: %v", endpoint.TargetRef.Namespace, endpoint.TargetRef.Name, err)
 			}

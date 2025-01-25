@@ -352,6 +352,8 @@ ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER:-false}
 ovn_multi_network_enable=${OVN_MULTI_NETWORK_ENABLE:-false}
 #OVN_NETWORK_SEGMENTATION_ENABLE - enable user defined primary networks for ovn-kubernetes
 ovn_network_segmentation_enable=${OVN_NETWORK_SEGMENTATION_ENABLE:=false}
+#OVN_NROUTE_ADVERTISEMENTS_ENABLE - enable route advertisements for ovn-kubernetes
+ovn_route_advertisements_enable=${OVN_ROUTE_ADVERTISEMENTS_ENABLE:=false}
 ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
 ovn_netflow_targets=${OVN_NETFLOW_TARGETS:-}
 ovn_sflow_targets=${OVN_SFLOW_TARGETS:-}
@@ -1359,6 +1361,12 @@ ovn-master() {
   fi
   echo "network_segmentation_enabled_flag=${network_segmentation_enabled_flag}"
 
+  route_advertisements_enabled_flag=
+  if [[ ${ovn_route_advertisements_enable} == "true" ]]; then
+	  route_advertisements_enabled_flag="--enable-route-advertisements"
+  fi
+  echo "route_advertisements_enabled_flag=${route_advertisements_enabled_flag}"
+
   egressservice_enabled_flag=
   if [[ ${ovn_egressservice_enable} == "true" ]]; then
 	  egressservice_enabled_flag="--enable-egress-service"
@@ -1511,6 +1519,7 @@ ovn-master() {
     ${multicast_enabled_flag} \
     ${multi_network_enabled_flag} \
     ${network_segmentation_enabled_flag} \
+    ${route_advertisements_enabled_flag} \
     ${nohostsubnet_label_option} \
     ${ovn_acl_logging_rate_limit_flag} \
     ${ovn_enable_svc_template_support_flag} \
@@ -1704,6 +1713,12 @@ ovnkube-controller() {
   fi
   echo "network_segmentation_enabled_flag=${network_segmentation_enabled_flag}"
 
+  route_advertisements_enabled_flag=
+  if [[ ${ovn_route_advertisements_enable} == "true" ]]; then
+	  route_advertisements_enabled_flag="--enable-route-advertisements"
+  fi
+  echo "route_advertisements_enabled_flag=${route_advertisements_enabled_flag}"
+
   egressservice_enabled_flag=
   if [[ ${ovn_egressservice_enable} == "true" ]]; then
 	  egressservice_enabled_flag="--enable-egress-service"
@@ -1818,6 +1833,7 @@ ovnkube-controller() {
     ${multicast_enabled_flag} \
     ${multi_network_enabled_flag} \
     ${network_segmentation_enabled_flag} \
+    ${route_advertisements_enabled_flag} \
     ${ovn_acl_logging_rate_limit_flag} \
     ${ovn_dbs} \
     ${ovn_enable_svc_template_support_flag} \
@@ -2014,6 +2030,12 @@ ovnkube-controller-with-node() {
 	  network_segmentation_enabled_flag="--enable-multi-network --enable-network-segmentation"
   fi
   echo "network_segmentation_enabled_flag=${network_segmentation_enabled_flag}"
+
+  route_advertisements_enabled_flag=
+  if [[ ${ovn_route_advertisements_enable} == "true" ]]; then
+	  route_advertisements_enabled_flag="--enable-route-advertisements"
+  fi
+  echo "route_advertisements_enabled_flag=${route_advertisements_enabled_flag}"
 
   egressservice_enabled_flag=
   if [[ ${ovn_egressservice_enable} == "true" ]]; then
@@ -2327,6 +2349,7 @@ ovnkube-controller-with-node() {
     ${multicast_enabled_flag} \
     ${multi_network_enabled_flag} \
     ${network_segmentation_enabled_flag} \
+    ${route_advertisements_enabled_flag} \
     ${netflow_targets} \
     ${ofctrl_wait_before_clear} \
     ${ovn_acl_logging_rate_limit_flag} \
@@ -2497,6 +2520,12 @@ ovn-cluster-manager() {
   fi
   echo "network_segmentation_enabled_flag=${network_segmentation_enabled_flag}"
 
+  route_advertisements_enabled_flag=
+  if [[ ${ovn_route_advertisements_enable} == "true" ]]; then
+	  route_advertisements_enabled_flag="--enable-route-advertisements"
+  fi
+  echo "route_advertisements_enabled_flag=${route_advertisements_enabled_flag}"
+
   persistent_ips_enabled_flag=
   if [[ ${ovn_enable_persistent_ips} == "true" ]]; then
 	  persistent_ips_enabled_flag="--enable-persistent-ips"
@@ -2565,6 +2594,7 @@ ovn-cluster-manager() {
     ${multicast_enabled_flag} \
     ${multi_network_enabled_flag} \
     ${network_segmentation_enabled_flag} \
+    ${route_advertisements_enabled_flag} \
     ${persistent_ips_enabled_flag} \
     ${ovnkube_enable_interconnect_flag} \
     ${ovnkube_enable_multi_external_gateway_flag} \
@@ -2879,6 +2909,11 @@ ovn-node() {
 	  network_segmentation_enabled_flag="--enable-multi-network --enable-network-segmentation"
   fi
 
+  route_advertisements_enabled_flag=
+  if [[ ${ovn_route_advertisements_enable} == "true" ]]; then
+	  route_advertisements_enabled_flag="--enable-route-advertisements"
+  fi
+
   netflow_targets=
   if [[ -n ${ovn_netflow_targets} ]]; then
       netflow_targets="--netflow-targets ${ovn_netflow_targets}"
@@ -3174,6 +3209,7 @@ ovn-node() {
         ${multicast_enabled_flag} \
         ${multi_network_enabled_flag} \
         ${network_segmentation_enabled_flag} \
+        ${route_advertisements_enabled_flag} \
         ${netflow_targets} \
         ${northd_node_selector_label_flag} \
         ${ofctrl_wait_before_clear} \

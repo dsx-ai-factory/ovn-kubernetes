@@ -648,7 +648,7 @@ func (bnc *BaseNetworkController) syncAdminPBROnNamespaceChange(old, new interfa
 func (bnc *BaseNetworkController) syncAdminPBRPeriodic() {
 	klog.V(4).Infof("Start adminpbr sync for network %s", bnc.GetNetworkName())
 	// get all adminpbr policies from ovn
-	ovnPolicies, err := libovsdbutil.FindPolicyBasedRoutes(bnc.NetInfo, bnc.nbClient, strconv.Itoa(types.AminPBRReroutePriority))
+	ovnPolicies, err := libovsdbutil.FindPolicyBasedRoutes(bnc.ReconcilableNetInfo, bnc.nbClient, strconv.Itoa(types.AminPBRReroutePriority))
 	if err != nil {
 		if !errors.Is(err, libovsdbclient.ErrNotFound) {
 			klog.Errorf("[%s] Failed to retrieve logical router policies from OVN: %v", bnc.GetNetworkName(), err)

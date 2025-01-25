@@ -40,7 +40,7 @@ func NewSecondaryLocalnetNodeNetworkController(cnnci *CommonNodeNetworkControlle
 		SecondaryNodeNetworkController: SecondaryNodeNetworkController{
 			BaseNodeNetworkController: BaseNodeNetworkController{
 				CommonNodeNetworkControllerInfo: *cnnci,
-				NetInfo:                         netInfo,
+				ReconcilableNetInfo:             util.NewReconcilableNetInfo(netInfo),
 				stopChan:                        make(chan struct{}),
 				wg:                              &sync.WaitGroup{},
 				DoSCheckStopChan:                nil,
@@ -200,7 +200,11 @@ func (nc *SecondaryLocalnetNodeNetworkController) Start(ctx context.Context) err
 			}
 		}
 
-		nc.enableDoSChecker()
+		err := nc.startNADController()
+		if err != nil {
+			return err
+		}
+
 		handler, err := nc.watchPodsDPU(nc.addRepPortFunc, nc.delRepPortFunc, nc.updateRepPortFunc)
 		if err != nil {
 			return err
@@ -213,6 +217,8 @@ func (nc *SecondaryLocalnetNodeNetworkController) Start(ctx context.Context) err
 // Stop gracefully stops the controller
 func (nc *SecondaryLocalnetNodeNetworkController) Stop() {
 	nc.SecondaryNodeNetworkController.Stop()
+
+	nc.stopNADController()
 
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		err := nc.updateLocalnetOvnBridgeMapping(false)

@@ -44,11 +44,11 @@ const (
 )
 
 type InitClusterEgressPoliciesFunc func(client libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
-	controllerName, clusterRouter string) error
+	ni util.NetInfo, clusterSubnets []*net.IPNet, controllerName, routerName string) error
 type EnsureNoRerouteNodePoliciesFunc func(client libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
-	controllerName, clusterRouter string, nodeLister corelisters.NodeLister) error
+	networkName, controllerName, clusterRouter string, nodeLister corelisters.NodeLister, v4, v6 bool) error
 type DeleteLegacyDefaultNoRerouteNodePoliciesFunc func(nbClient libovsdbclient.Client, clusterRouter, nodeName string) error
-type CreateDefaultRouteToExternalFunc func(nbClient libovsdbclient.Client, clusterRouter, gwRouterName string) error
+type CreateDefaultRouteToExternalFunc func(nbClient libovsdbclient.Client, clusterRouter, gwRouterName string, clusterSubnets []config.CIDRNetworkEntry) error
 
 type Controller struct {
 	// network information
@@ -60,10 +60,9 @@ type Controller struct {
 	stopCh         <-chan struct{}
 	sync.Mutex
 
-	initClusterEgressPolicies                InitClusterEgressPoliciesFunc
-	ensureNoRerouteNodePolicies              EnsureNoRerouteNodePoliciesFunc
-	deleteLegacyDefaultNoRerouteNodePolicies DeleteLegacyDefaultNoRerouteNodePoliciesFunc
-	createDefaultRouteToExternalForIC        CreateDefaultRouteToExternalFunc
+	initClusterEgressPolicies         InitClusterEgressPoliciesFunc
+	ensureNoRerouteNodePolicies       EnsureNoRerouteNodePoliciesFunc
+	createDefaultRouteToExternalForIC CreateDefaultRouteToExternalFunc
 
 	services       map[string]*svcState  // svc key -> state, for services that have sourceIPBy LBIP
 	nodes          map[string]*nodeState // node name -> state, contains nodes that host an egress service
@@ -121,7 +120,6 @@ func NewController(
 	addressSetFactory addressset.AddressSetFactory,
 	initClusterEgressPolicies InitClusterEgressPoliciesFunc,
 	ensureNoRerouteNodePolicies EnsureNoRerouteNodePoliciesFunc,
-	deleteLegacyDefaultNoRerouteNodePolicies DeleteLegacyDefaultNoRerouteNodePoliciesFunc,
 	createDefaultRouteToExternalForIC CreateDefaultRouteToExternalFunc,
 	stopCh <-chan struct{},
 	esInformer egressserviceinformer.EgressServiceInformer,
@@ -132,20 +130,19 @@ func NewController(
 	klog.Info("Setting up event handlers for Egress Services")
 
 	c := &Controller{
-		NetInfo:                                  netInfo,
-		controllerName:                           controllerName,
-		client:                                   client,
-		nbClient:                                 nbClient,
-		addressSetFactory:                        addressSetFactory,
-		initClusterEgressPolicies:                initClusterEgressPolicies,
-		ensureNoRerouteNodePolicies:              ensureNoRerouteNodePolicies,
-		deleteLegacyDefaultNoRerouteNodePolicies: deleteLegacyDefaultNoRerouteNodePolicies,
-		createDefaultRouteToExternalForIC:        createDefaultRouteToExternalForIC,
-		stopCh:                                   stopCh,
-		services:                                 map[string]*svcState{},
-		nodes:                                    map[string]*nodeState{},
-		nodesZoneState:                           map[string]bool{},
-		zone:                                     zone,
+		NetInfo:                           netInfo,
+		controllerName:                    controllerName,
+		client:                            client,
+		nbClient:                          nbClient,
+		addressSetFactory:                 addressSetFactory,
+		initClusterEgressPolicies:         initClusterEgressPolicies,
+		ensureNoRerouteNodePolicies:       ensureNoRerouteNodePolicies,
+		createDefaultRouteToExternalForIC: createDefaultRouteToExternalForIC,
+		stopCh:                            stopCh,
+		services:                          map[string]*svcState{},
+		nodes:                             map[string]*nodeState{},
+		nodesZoneState:                    map[string]bool{},
+		zone:                              zone,
 	}
 
 	c.egressServiceLister = esInformer.Lister()
@@ -231,8 +228,8 @@ func (c *Controller) Run(wg *sync.WaitGroup, threadiness int) error {
 	if err != nil {
 		klog.Errorf("Failed to repair Egress Services entries: %v", err)
 	}
-
-	err = c.initClusterEgressPolicies(c.nbClient, c.addressSetFactory, c.controllerName, c.GetNetworkScopedClusterRouterName())
+	subnets := util.GetAllClusterSubnetsFromEntries(c.Subnets())
+	err = c.initClusterEgressPolicies(c.nbClient, c.addressSetFactory, c, subnets, c.controllerName, c.GetNetworkScopedClusterRouterName())
 	if err != nil {
 		klog.Errorf("Failed to init Egress Services cluster policies: %v", err)
 	}

@@ -887,7 +887,7 @@ passwd:
 			Eventually(func() error {
 				endpoints, err = dialServiceNodePort(svc)
 				return err
-			}).WithPolling(time.Second).WithTimeout(20*time.Second).Should(Succeed(), "Should dial service port once service settled")
+			}).WithPolling(3*time.Second).WithTimeout(60*time.Second).Should(Succeed(), "Should dial service port once service settled")
 
 			checkConnectivityAndNetworkPolicies(vm.Name, endpoints, "before live migration")
 			// Do just one migration that will fail
@@ -1212,7 +1212,7 @@ passwd:
 						}, butane)
 					Expect(err).ToNot(HaveOccurred())
 					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].Bridge = nil
-					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].Binding = &kubevirtv1.PluginBinding{Name: "managedTap"}
+					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].Binding = &kubevirtv1.PluginBinding{Name: "l2bridge"}
 					createVirtualMachine(vm)
 					return vm.Name
 				},
@@ -1243,7 +1243,7 @@ passwd:
 						}, butane)
 					Expect(err).ToNot(HaveOccurred())
 					vmi.Spec.Domain.Devices.Interfaces[0].Bridge = nil
-					vmi.Spec.Domain.Devices.Interfaces[0].Binding = &kubevirtv1.PluginBinding{Name: "managedTap"}
+					vmi.Spec.Domain.Devices.Interfaces[0].Binding = &kubevirtv1.PluginBinding{Name: "l2bridge"}
 					createVirtualMachineInstance(vmi)
 					return vmi.Name
 				},

@@ -109,6 +109,9 @@ const (
 	// standard linux interfaces and not interfaces of type OVS.
 	OVNNodeSecondaryHostEgressIPs = "k8s.ovn.org/secondary-host-egress-ips"
 
+	// OVNNodeBridgeEgressIPs contains the EIP addresses that are assigned to default external bridge linux interface of type OVS.
+	OVNNodeBridgeEgressIPs = "k8s.ovn.org/bridge-egress-ips"
+
 	// egressIPConfigAnnotationKey is used to indicate the cloud subnet and
 	// capacity for each node. It is set by
 	// openshift/cloud-network-config-controller
@@ -1015,6 +1018,25 @@ func ParseNodeGatewayRouterJoinIPv4(node *kapi.Node, netName string) (net.IP, er
 	return ip, nil
 }
 
+// ParseNodeGatewayRouterJoinIPv6 returns the IPv6 address for the node's gateway router port
+// stored in the 'OVNNodeGRLRPAddrs' annotation
+func ParseNodeGatewayRouterJoinIPv6(node *kapi.Node, netName string) (net.IP, error) {
+	primaryIfAddr, err := ParseNodeGatewayRouterJoinNetwork(node, netName)
+	if err != nil {
+		return nil, err
+	}
+	if primaryIfAddr.IPv6 == "" {
+		return nil, fmt.Errorf("failed to find an IPv6 address for gateway route interface in node: %s, net: %s, "+
+			"annotation values: %+v", node, netName, primaryIfAddr)
+	}
+
+	ip, _, err := net.ParseCIDR(primaryIfAddr.IPv6)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse gateway router IPv6 address %s, err: %w", primaryIfAddr.IPv6, err)
+	}
+	return ip, nil
+}
+
 // ParseNodeGatewayRouterJoinAddrs returns the IPv4 and/or IPv6 addresses for the node's gateway router port
 // stored in the 'OVNNodeGRLRPAddrs' annotation
 func ParseNodeGatewayRouterJoinAddrs(node *kapi.Node, netName string) ([]*net.IPNet, error) {
@@ -1327,6 +1349,27 @@ func ParseNodeSecondaryHostEgressIPsAnnotation(node *kapi.Node) (sets.Set[string
 		return nil, fmt.Errorf("failed to unmarshal %s annotation %s for node %q: %v", OVNNodeSecondaryHostEgressIPs, addrAnnotation, node.Name, err)
 	}
 	return sets.New(cfg...), nil
+}
+
+// IsNodeBridgeEgressIPsAnnotationSet returns true if an annotation that tracks assignment of egress IPs to external bridge (breth0)
+// is set
+func IsNodeBridgeEgressIPsAnnotationSet(node *kapi.Node) bool {
+	_, ok := node.Annotations[OVNNodeBridgeEgressIPs]
+	return ok
+}
+
+// ParseNodeBridgeEgressIPsAnnotation returns egress IPs assigned to the external bridge (breth0)
+func ParseNodeBridgeEgressIPsAnnotation(node *kapi.Node) ([]string, error) {
+	addrAnnotation, ok := node.Annotations[OVNNodeBridgeEgressIPs]
+	if !ok {
+		return nil, newAnnotationNotSetError("%s annotation not found for node %q", OVNNodeBridgeEgressIPs, node.Name)
+	}
+
+	var cfg []string
+	if err := json.Unmarshal([]byte(addrAnnotation), &cfg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal %s annotation %s for node %q: %v", OVNNodeBridgeEgressIPs, addrAnnotation, node.Name, err)
+	}
+	return cfg, nil
 }
 
 // IsSecondaryHostNetworkContainingIP attempts to find a secondary host network that will host the argument IP. If no network is
@@ -1656,7 +1699,7 @@ func filterIPVersion(cidrs []netip.Prefix, v6 bool) []netip.Prefix {
 // GetNetworkID will retrieve the network id for the specified network from the
 // first node that contains that network at the network id annotations, it will
 // return at the first ocurrence, rest of nodes will not be parsed.
-func GetNetworkID(nodes []*kapi.Node, nInfo BasicNetInfo) (int, error) {
+func GetNetworkID(nodes []*kapi.Node, nInfo NetInfo) (int, error) {
 	for _, node := range nodes {
 		var err error
 		networkID, err := ParseNetworkIDAnnotation(node, nInfo.GetNetworkName())

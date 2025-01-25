@@ -185,7 +185,7 @@ func (psas *PodSelectorAddressSet) init(bnc *BaseNetworkController) error {
 			podSelector:          psas.podSelector,
 			namespaceSelector:    psas.namespaceSelector,
 			namespace:            psas.namespace,
-			netInfo:              bnc.NetInfo,
+			netInfo:              bnc.GetNetInfo(),
 			ipv4Mode:             ipv4Mode,
 			ipv6Mode:             ipv6Mode,
 			stopChan:             psas.cancelableContext.Done(),
@@ -508,7 +508,7 @@ func (bnc *BaseNetworkController) podSelectorPodNeedsDelete(pod *kapi.Pod, podHa
 	if !util.PodCompleted(pod) {
 		return "", nil
 	}
-	ips, err := util.GetPodIPsOfNetwork(pod, bnc.NetInfo)
+	ips, err := util.GetPodIPsOfNetwork(pod, bnc.GetNetInfo())
 	if err != nil {
 		// if pod has no IP, nothing to do
 		klog.Warningf("Failed to get IPs of pod %s/%s during address_set pod selector removal: %v",
@@ -523,7 +523,7 @@ func (bnc *BaseNetworkController) podSelectorPodNeedsDelete(pod *kapi.Pod, podHa
 	}
 
 	// completed pod be deleted a long time ago, check if there is a new pod with that same ip
-	collidingPod, err := findPodWithIPAddresses(bnc.watchFactory, bnc.NetInfo, ips, nodeName)
+	collidingPod, err := findPodWithIPAddresses(bnc.watchFactory, bnc.GetNetInfo(), ips, nodeName)
 	if err != nil {
 		return "", fmt.Errorf("lookup for pods with the same IPs [%s] failed: %w", util.JoinIPs(ips, " "), err)
 	}

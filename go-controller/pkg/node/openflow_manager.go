@@ -118,7 +118,8 @@ func newGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration, subnet
 		extGWBridgeFlowID:     extID,
 	}
 
-	if err := ofm.updateBridgeFlowCache(subnets, extraIPs); err != nil {
+	isRoutingAdvertised := false
+	if err := ofm.updateBridgeFlowCache(subnets, extraIPs, isRoutingAdvertised); err != nil {
 		return nil, err
 	}
 
@@ -160,7 +161,7 @@ func (c *openflowManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) 
 
 // updateBridgeFlowCache generates the "static" per-bridge flows
 // note: this is shared between shared and local gateway modes
-func (c *openflowManager) updateBridgeFlowCache(subnets []*net.IPNet, extraIPs []net.IP) error {
+func (c *openflowManager) updateBridgeFlowCache(subnets []*net.IPNet, extraIPs []net.IP, isPodNetworkAdvertised bool) error {
 	// protect defaultBridge config from being updated by gw.nodeIPManager
 	c.defaultBridge.Lock()
 	defer c.defaultBridge.Unlock()
@@ -172,7 +173,7 @@ func (c *openflowManager) updateBridgeFlowCache(subnets []*net.IPNet, extraIPs [
 	if err != nil {
 		return err
 	}
-	dftCommonFlows, err := commonFlows(subnets, c.defaultBridge)
+	dftCommonFlows, err := commonFlows(subnets, c.defaultBridge, isPodNetworkAdvertised)
 	if err != nil {
 		return err
 	}
@@ -186,7 +187,7 @@ func (c *openflowManager) updateBridgeFlowCache(subnets []*net.IPNet, extraIPs [
 		c.externalGatewayBridge.Lock()
 		defer c.externalGatewayBridge.Unlock()
 		c.updateExBridgeFlowCacheEntry("NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
-		exGWBridgeDftFlows, err := commonFlows(subnets, c.externalGatewayBridge)
+		exGWBridgeDftFlows, err := commonFlows(subnets, c.externalGatewayBridge, false)
 		if err != nil {
 			return err
 		}

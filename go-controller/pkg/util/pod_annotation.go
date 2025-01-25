@@ -24,7 +24,7 @@ import (
 )
 
 // This handles the "k8s.ovn.org/pod-networks" annotation on Pods, used to pass
-// information about networking from the master to the nodes. (The PodAnnotation
+// information about networking from the master to the nodes. (The util.PodAnnotation
 // struct is also embedded in the cni.PodInterfaceInfo type that is passed from the
 // cniserver to the CNI shim.)
 //
@@ -368,6 +368,21 @@ func GetPodIPsOfNetwork(pod *v1.Pod, nInfo NetInfo) ([]net.IP, error) {
 	return DefaultNetworkPodIPs(pod)
 }
 
+// GetPodCIDRsWithFullMaskOfNetwork returns the pod's IP addresses in a CIDR with FullMask format
+// from a pod network annotation 'k8s.ovn.org/pod-networks' using key nadName.
+func GetPodCIDRsWithFullMaskOfNetwork(pod *v1.Pod, nadName string) []*net.IPNet {
+	ips := getAnnotatedPodIPs(pod, nadName)
+	ipNets := make([]*net.IPNet, 0, len(ips))
+	for _, ip := range ips {
+		ipNet := net.IPNet{
+			IP:   ip,
+			Mask: GetIPFullMask(ip),
+		}
+		ipNets = append(ipNets, &ipNet)
+	}
+	return ipNets
+}
+
 func DefaultNetworkPodIPs(pod *v1.Pod) ([]net.IP, error) {
 	// Try to use Kube API pod IPs for default network first
 	// This is much faster than trying to unmarshal annotations
@@ -434,7 +449,7 @@ func PodNadNames(pod *v1.Pod, netinfo NetInfo) ([]string, error) {
 }
 
 func GetPrimaryNetworkNADNamesForNamespaceFromNetInfo(namespace string, netinfo NetInfo) ([]string, error) {
-	for nadName := range netinfo.GetNADConfigs() {
+	for _, nadName := range netinfo.GetNADs() {
 		ns, _, err := cache.SplitMetaNamespaceKey(nadName)
 		if err != nil {
 			return nil, fmt.Errorf("error parsing nad name %s from network %s: %v", nadName, netinfo.GetNetworkName(), err)

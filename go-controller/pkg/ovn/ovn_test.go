@@ -27,7 +27,6 @@ import (
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
-	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	egressqos "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
 	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
@@ -38,8 +37,8 @@ import (
 	udnclientfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
 	virtualip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
 	virtualipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/clientset/versioned/fake"
-	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
-	fakenad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/nad"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
+	testnm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/networkmanager"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -80,21 +79,23 @@ type secondaryControllerInfo struct {
 }
 
 type FakeOVN struct {
-	fakeClient    *util.OVNMasterClientset
-	watcher       *factory.WatchFactory
-	controller    *DefaultNetworkController
-	stopChan      chan struct{}
-	wg            *sync.WaitGroup
-	asf           *addressset.FakeAddressSetFactory
-	fakeRecorder  *record.FakeRecorder
-	nbClient      libovsdbclient.Client
-	sbClient      libovsdbclient.Client
-	dbSetup       libovsdbtest.TestSetup
-	nbsbCleanup   *libovsdbtest.Context
-	egressQoSWg   *sync.WaitGroup
-	egressSVCWg   *sync.WaitGroup
-	anpWg         *sync.WaitGroup
-	nadController *nad.NetAttachDefinitionController
+	fakeClient     *util.OVNMasterClientset
+	watcher        *factory.WatchFactory
+	controller     *DefaultNetworkController
+	stopChan       chan struct{}
+	wg             *sync.WaitGroup
+	asf            *addressset.FakeAddressSetFactory
+	fakeRecorder   *record.FakeRecorder
+	nbClient       libovsdbclient.Client
+	sbClient       libovsdbclient.Client
+	dbSetup        libovsdbtest.TestSetup
+	nbsbCleanup    *libovsdbtest.Context
+	egressQoSWg    *sync.WaitGroup
+	egressSVCWg    *sync.WaitGroup
+	anpWg          *sync.WaitGroup
+	networkManager networkmanager.Controller
+	eIPController  *EgressIPController
+	portCache      *PortCache
 
 	// information map of all secondary network controllers
 	secondaryControllers map[string]secondaryControllerInfo
@@ -224,13 +225,50 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	o.stopChan = make(chan struct{})
 	o.wg = &sync.WaitGroup{}
-	o.controller, err = NewOvnController(o.fakeClient, o.watcher,
-		o.stopChan, o.asf,
-		o.nbClient, o.sbClient,
-		o.fakeRecorder, o.wg)
+
+	o.networkManager = networkmanager.Default()
+	if config.OVNKubernetesFeature.EnableMultiNetwork {
+		o.networkManager, err = networkmanager.NewForZone("test", &testnm.FakeControllerManager{}, o.watcher)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	}
+
+	o.portCache = NewPortCache(o.stopChan)
+	kubeOVN := &kube.KubeOVN{
+		Kube:      kube.Kube{KClient: o.fakeClient.KubeClient},
+		EIPClient: o.fakeClient.EgressIPClient,
+	}
+	o.eIPController = NewEIPController(
+		o.nbClient,
+		kubeOVN,
+		o.watcher,
+		o.fakeRecorder,
+		o.portCache,
+		o.networkManager.Interface(),
+		o.asf,
+		config.IPv4Mode,
+		config.IPv6Mode,
+		"",
+		DefaultNetworkControllerName,
+	)
+	if o.asf == nil {
+		o.eIPController.addressSetFactory = addressset.NewOvnAddressSetFactory(o.nbClient, config.IPv4Mode, config.IPv6Mode)
+	}
+
+	o.controller, err = NewOvnController(o.fakeClient,
+		o.watcher,
+		o.stopChan,
+		o.asf,
+		o.networkManager.Interface(),
+		o.nbClient,
+		o.sbClient,
+		o.fakeRecorder,
+		o.wg,
+		o.eIPController,
+		o.portCache,
+	)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	o.controller.multicastSupport = config.EnableMulticast
-	o.nadController = o.controller.nadController.(*nad.NetAttachDefinitionController)
+	o.eIPController.zone = o.controller.zone
 
 	setupCOPP := false
 	setupClusterController(o.controller, setupCOPP)
@@ -241,6 +279,9 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 
 	err = o.watcher.Start()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+	err = o.eIPController.SyncLocalNodeZonesCache()
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "syncing Nodes OVN zones status must succeed to support EgressIP")
 
 	existingNodes, err := o.controller.kube.GetNodes()
 	if err == nil {
@@ -299,9 +340,19 @@ func resetNBClient(ctx context.Context, nbClient libovsdbclient.Client) {
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
-func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFactory, stopChan chan struct{},
-	addressSetFactory addressset.AddressSetFactory, libovsdbOvnNBClient libovsdbclient.Client,
-	libovsdbOvnSBClient libovsdbclient.Client, recorder record.EventRecorder, wg *sync.WaitGroup) (*DefaultNetworkController, error) {
+func NewOvnController(
+	ovnClient *util.OVNMasterClientset,
+	wf *factory.WatchFactory,
+	stopChan chan struct{},
+	addressSetFactory addressset.AddressSetFactory,
+	networkManager networkmanager.Interface,
+	libovsdbOvnNBClient libovsdbclient.Client,
+	libovsdbOvnSBClient libovsdbclient.Client,
+	recorder record.EventRecorder,
+	wg *sync.WaitGroup,
+	eIPController *EgressIPController,
+	portCache *PortCache,
+) (*DefaultNetworkController, error) {
 
 	fakeAddr, ok := addressSetFactory.(*addressset.FakeAddressSetFactory)
 	if addressSetFactory == nil || (ok && fakeAddr == nil) {
@@ -346,20 +397,13 @@ func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFacto
 		return nil, err
 	}
 
-	var nadController *nad.NetAttachDefinitionController
-	if config.OVNKubernetesFeature.EnableMultiNetwork {
-		nadController, err = nad.NewNetAttachDefinitionController("test", &fakenad.FakeNetworkControllerManager{}, wf, nil)
-		if err != nil {
-			return nil, err
-		}
-	}
-	dnc, err := newDefaultNetworkControllerCommon(cnci, stopChan, wg, addressSetFactory, nadController, nil)
+	dnc, err := newDefaultNetworkControllerCommon(cnci, stopChan, wg, addressSetFactory, networkManager, nil, nil, eIPController, portCache)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	if nbZoneFailed {
 		// Delete the NBGlobal row as this function created it.  Otherwise many tests would fail while
 		// checking the expectedData in the NBDB.
-		err = deleteTestNBGlobal(libovsdbOvnNBClient, "global")
+		err = deleteTestNBGlobal(libovsdbOvnNBClient)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	}
 
@@ -391,7 +435,7 @@ func createTestNBGlobal(nbClient libovsdbclient.Client, zone string) error {
 	return nil
 }
 
-func deleteTestNBGlobal(nbClient libovsdbclient.Client, zone string) error {
+func deleteTestNBGlobal(nbClient libovsdbclient.Client) error {
 	p := func(nbGlobal *nbdb.NBGlobal) bool {
 		return true
 	}
@@ -478,22 +522,29 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 		if err != nil {
 			return err
 		}
+
 		asf := addressset.NewFakeAddressSetFactory(getNetworkControllerName(netName))
 
 		switch topoType {
 		case types.Layer3Topology:
-			l3Controller, err := NewSecondaryLayer3NetworkController(cnci, nInfo, o.nadController)
+			l3Controller, err := NewSecondaryLayer3NetworkController(cnci, nInfo, o.networkManager.Interface(), o.eIPController, o.portCache)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			l3Controller.addressSetFactory = asf
+			if o.asf != nil { // use fake asf only when enabled
+				l3Controller.addressSetFactory = asf
+			}
 			secondaryController = &l3Controller.BaseSecondaryNetworkController
 		case types.Layer2Topology:
-			l2Controller, err := NewSecondaryLayer2NetworkController(cnci, nInfo, o.nadController)
+			l2Controller, err := NewSecondaryLayer2NetworkController(cnci, nInfo, o.networkManager.Interface(), o.eIPController, o.portCache)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			l2Controller.addressSetFactory = asf
+			if o.asf != nil { // use fake asf only when enabled
+				l2Controller.addressSetFactory = asf
+			}
 			secondaryController = &l2Controller.BaseSecondaryNetworkController
 		case types.LocalnetTopology:
-			localnetController := NewSecondaryLocalnetNetworkController(cnci, nInfo, o.nadController)
-			localnetController.addressSetFactory = asf
+			localnetController := NewSecondaryLocalnetNetworkController(cnci, nInfo, o.networkManager.Interface())
+			if o.asf != nil { // use fake asf only when enabled
+				localnetController.addressSetFactory = asf
+			}
 			secondaryController = &localnetController.BaseSecondaryNetworkController
 		default:
 			return fmt.Errorf("topology type %s not supported", topoType)
@@ -504,7 +555,7 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 		if nbZoneFailed {
 			// Delete the NBGlobal row as this function created it.  Otherwise many tests would fail while
 			// checking the expectedData in the NBDB.
-			err = deleteTestNBGlobal(o.nbClient, "global")
+			err = deleteTestNBGlobal(o.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		}
 	} else {
@@ -512,7 +563,9 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 	}
 
 	ginkgo.By(fmt.Sprintf("OVN test init: add NAD %s to secondary network controller of %s network %s", nadName, topoType, netName))
-	secondaryController.AddNADs(map[string]*util.NADConfig{nadName: nadConfig})
+	mutableNetInfo := util.NewMutableNetInfo(secondaryController.GetNetInfo())
+	mutableNetInfo.AddNADs(map[string]*util.NADConfig{nadName: nadConfig})
+	_ = util.ReconcileNetInfo(secondaryController.ReconcilableNetInfo, mutableNetInfo)
 	return nil
 }
 
@@ -520,13 +573,13 @@ func (o *FakeOVN) patchEgressIPObj(nodeName, egressIPName, egressIP, network str
 	// NOTE: Cluster manager is the one who patches the egressIP object.
 	// For the sake of unit testing egressip zone controller we need to patch egressIP object manually
 	// There are tests in cluster-manager package covering the patch logic.
-	status := []egressipv1.EgressIPStatusItem{
+	status := []egressip.EgressIPStatusItem{
 		{
 			Node:     nodeName,
 			EgressIP: egressIP,
 		},
 	}
-	err := o.controller.patchReplaceEgressIPStatus(egressIPName, status)
+	err := o.controller.eIPC.patchReplaceEgressIPStatus(egressIPName, status)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }
 

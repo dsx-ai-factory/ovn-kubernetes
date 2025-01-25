@@ -5,7 +5,7 @@ import (
 
 	"k8s.io/klog/v2"
 
-	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -14,14 +14,14 @@ import (
 type podAnnotWaitCond = func(map[string]string, string) (*util.PodAnnotation, bool)
 
 type UserDefinedPrimaryNetwork struct {
-	nadController nad.NADController
-	annotation    *util.PodAnnotation
-	activeNetwork util.NetInfo
+	networkManager networkmanager.Interface
+	annotation     *util.PodAnnotation
+	activeNetwork  util.NetInfo
 }
 
-func NewPrimaryNetwork(nadController nad.NADController) *UserDefinedPrimaryNetwork {
+func NewPrimaryNetwork(networkManager networkmanager.Interface) *UserDefinedPrimaryNetwork {
 	return &UserDefinedPrimaryNetwork{
-		nadController: nadController,
+		networkManager: networkManager,
 	}
 }
 
@@ -49,10 +49,11 @@ func (p *UserDefinedPrimaryNetwork) NADName() string {
 	if p.activeNetwork == nil || p.activeNetwork.IsDefault() {
 		return ""
 	}
-	if len(p.activeNetwork.GetNADConfigs()) < 1 {
+	nads := p.activeNetwork.GetNADs()
+	if len(nads) < 1 {
 		return ""
 	}
-	return p.activeNetwork.GetFirstNAD()
+	return nads[0]
 }
 
 func (p *UserDefinedPrimaryNetwork) MTU() int {
@@ -73,7 +74,7 @@ func (p *UserDefinedPrimaryNetwork) WaitForPrimaryAnnotationFn(namespace string,
 			return nil, false
 		}
 		if err := p.ensure(namespace, annotations, nadName, annotation); err != nil {
-			klog.Errorf("Failed ensuring user defined primary network: %v", err)
+			klog.Errorf("Failed ensuring user defined primary network for nad '%s': %v", nadName, err)
 			return nil, false
 		}
 		return annotation, isReady
@@ -110,10 +111,10 @@ func (p *UserDefinedPrimaryNetwork) ensure(namespace string, annotations map[str
 	}
 
 	if err := p.ensureAnnotation(annotations); err != nil {
-		return fmt.Errorf("failed looking for primary network annotation: %w", err)
+		return fmt.Errorf("failed looking for primary network annotation for nad '%s': %w", nadName, err)
 	}
 	if err := p.ensureActiveNetwork(namespace); err != nil {
-		return fmt.Errorf("failed looking for primary network name: %w", err)
+		return fmt.Errorf("failed looking for primary network name for nad '%s': %w", nadName, err)
 	}
 	return nil
 }
@@ -122,12 +123,12 @@ func (p *UserDefinedPrimaryNetwork) ensureActiveNetwork(namespace string) error 
 	if p.activeNetwork != nil {
 		return nil
 	}
-	activeNetwork, err := p.nadController.GetActiveNetworkForNamespace(namespace)
+	activeNetwork, err := p.networkManager.GetActiveNetworkForNamespace(namespace)
 	if err != nil {
 		return err
 	}
 	if activeNetwork.IsDefault() {
-		return fmt.Errorf("missing primary user defined network NAD")
+		return fmt.Errorf("missing primary user defined network NAD for namespace '%s'", namespace)
 	}
 	p.activeNetwork = activeNetwork
 	return nil

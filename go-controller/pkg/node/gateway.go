@@ -12,6 +12,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -31,6 +32,7 @@ type Gateway interface {
 	Start()
 	GetGatewayBridgeIface() string
 	SetDefaultGatewayBridgeMAC(addr net.HardwareAddr)
+	SetPodNetworkAdvertised(bool)
 	Reconcile() error
 	GetGatewayIface() string
 }
@@ -43,17 +45,21 @@ type gateway struct {
 	// nodePortWatcherIptables is used in Shared GW mode to handle nodePort IPTable rules
 	nodePortWatcherIptables informer.ServiceEventHandler
 	// nodePortWatcher is used in Local+Shared GW modes to handle nodePort flows in shared OVS bridge
-	nodePortWatcher informer.ServiceAndEndpointsEventHandler
-	openflowManager *openflowManager
-	nodeIPManager   *addressManager
-	initFunc        func() error
-	readyFunc       func() (bool, error)
+	nodePortWatcher      informer.ServiceAndEndpointsEventHandler
+	openflowManager      *openflowManager
+	nodeIPManager        *addressManager
+	bridgeEIPAddrManager *bridgeEIPAddrManager
+	initFunc             func() error
+	readyFunc            func() (bool, error)
 
 	servicesRetryFramework *retry.RetryFramework
 
 	watchFactory *factory.WatchFactory // used for retry
 	stopChan     <-chan struct{}
 	wg           *sync.WaitGroup
+
+	isPodNetworkAdvertisedLock sync.Mutex
+	isPodNetworkAdvertised     bool
 }
 
 func (g *gateway) AddService(svc *kapi.Service) error {
@@ -223,7 +229,71 @@ func (g *gateway) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) error {
 		}
 	}
 	return utilerrors.Join(errors...)
+}
 
+func (g *gateway) AddEgressIP(eip *egressipv1.EgressIP) error {
+	if !util.IsNetworkSegmentationSupportEnabled() || !config.OVNKubernetesFeature.EnableInterconnect || config.Gateway.Mode == config.GatewayModeDisabled {
+		return nil
+	}
+	isSyncRequired, err := g.bridgeEIPAddrManager.addEgressIP(eip)
+	if err != nil {
+		return err
+	}
+	if isSyncRequired {
+		if err = g.Reconcile(); err != nil {
+			return fmt.Errorf("failed to sync gateway: %v", err)
+		}
+		g.openflowManager.requestFlowSync()
+	}
+	return nil
+}
+
+func (g *gateway) UpdateEgressIP(oldEIP, newEIP *egressipv1.EgressIP) error {
+	if !util.IsNetworkSegmentationSupportEnabled() || !config.OVNKubernetesFeature.EnableInterconnect || config.Gateway.Mode == config.GatewayModeDisabled {
+		return nil
+	}
+	isSyncRequired, err := g.bridgeEIPAddrManager.updateEgressIP(oldEIP, newEIP)
+	if err != nil {
+		return err
+	}
+	if isSyncRequired {
+		if err = g.Reconcile(); err != nil {
+			return fmt.Errorf("failed to sync gateway: %v", err)
+		}
+		g.openflowManager.requestFlowSync()
+	}
+	return nil
+}
+
+func (g *gateway) DeleteEgressIP(eip *egressipv1.EgressIP) error {
+	if !util.IsNetworkSegmentationSupportEnabled() || !config.OVNKubernetesFeature.EnableInterconnect || config.Gateway.Mode == config.GatewayModeDisabled {
+		return nil
+	}
+	isSyncRequired, err := g.bridgeEIPAddrManager.deleteEgressIP(eip)
+	if err != nil {
+		return err
+	}
+	if isSyncRequired {
+		if err = g.Reconcile(); err != nil {
+			return fmt.Errorf("failed to sync gateway: %v", err)
+		}
+		g.openflowManager.requestFlowSync()
+	}
+	return nil
+}
+
+func (g *gateway) SyncEgressIP(eips []interface{}) error {
+	if !util.IsNetworkSegmentationSupportEnabled() || !config.OVNKubernetesFeature.EnableInterconnect || config.Gateway.Mode == config.GatewayModeDisabled {
+		return nil
+	}
+	if err := g.bridgeEIPAddrManager.syncEgressIP(eips); err != nil {
+		return err
+	}
+	if err := g.Reconcile(); err != nil {
+		return fmt.Errorf("failed to sync gateway: %v", err)
+	}
+	g.openflowManager.requestFlowSync()
+	return nil
 }
 
 func (g *gateway) Init(stopChan <-chan struct{}, wg *sync.WaitGroup) error {
@@ -241,6 +311,14 @@ func (g *gateway) Init(stopChan <-chan struct{}, wg *sync.WaitGroup) error {
 	if _, err = endpointSlicesRetryFramework.WatchResource(); err != nil {
 		return fmt.Errorf("gateway init failed to start watching endpointslices: %v", err)
 	}
+
+	if config.OVNKubernetesFeature.EnableEgressIP {
+		eipRetryFramework := g.newRetryFrameworkNode(factory.EgressIPType)
+		if _, err = eipRetryFramework.WatchResource(); err != nil {
+			return fmt.Errorf("gateway init failed to start watching EgressIPs: %v", err)
+		}
+	}
+
 	return nil
 }
 
@@ -397,6 +475,12 @@ func (g *gateway) SetDefaultGatewayBridgeMAC(macAddr net.HardwareAddr) {
 	klog.Infof("Default gateway bridge MAC address updated to %s", macAddr)
 }
 
+func (g *gateway) SetPodNetworkAdvertised(isPodNetworkAdvertised bool) {
+	g.isPodNetworkAdvertisedLock.Lock()
+	defer g.isPodNetworkAdvertisedLock.Unlock()
+	g.isPodNetworkAdvertised = isPodNetworkAdvertised
+}
+
 // Reconcile handles triggering updates to different components of a gateway, like OFM, Services
 func (g *gateway) Reconcile() error {
 	klog.Info("Reconciling gateway with updates")
@@ -408,7 +492,11 @@ func (g *gateway) Reconcile() error {
 	if err != nil {
 		return fmt.Errorf("failed to get subnets for node: %s for OpenFlow cache update; err: %w", node.Name, err)
 	}
-	if err := g.openflowManager.updateBridgeFlowCache(subnets, g.nodeIPManager.ListAddresses()); err != nil {
+	if err := g.openflowManager.updateBridgeFlowCache(subnets, g.nodeIPManager.ListAddresses(), g.isPodNetworkAdvertised); err != nil {
+		return err
+	}
+	err = g.updateSNATRules()
+	if err != nil {
 		return err
 	}
 	// Services create OpenFlow flows as well, need to update them all
@@ -445,6 +533,25 @@ func (g *gateway) GetGatewayIface() string {
 	return g.openflowManager.defaultBridge.gwIface
 }
 
+func (g *gateway) updateSNATRules() error {
+	g.isPodNetworkAdvertisedLock.Lock()
+	defer g.isPodNetworkAdvertisedLock.Unlock()
+	var ipnets []*net.IPNet
+	if g.nodeIPManager.mgmtPortConfig.ipv4 != nil {
+		ipnets = append(ipnets, g.nodeIPManager.mgmtPortConfig.ipv4.ifAddr)
+	}
+	if g.nodeIPManager.mgmtPortConfig.ipv6 != nil {
+		ipnets = append(ipnets, g.nodeIPManager.mgmtPortConfig.ipv6.ifAddr)
+	}
+	subnets := util.IPsToNetworkIPs(ipnets...)
+
+	if g.isPodNetworkAdvertised || config.Gateway.Mode != config.GatewayModeLocal {
+		return delLocalGatewayPodSubnetNATRules(subnets...)
+	}
+
+	return addLocalGatewayPodSubnetNATRules(subnets...)
+}
+
 type bridgeConfiguration struct {
 	sync.Mutex
 	nodeName           string
@@ -460,6 +567,7 @@ type bridgeConfiguration struct {
 	ofPortHost         string
 	localnetPatchPorts *sync.Map
 	netConfig          map[string]*bridgeUDNConfiguration
+	eipMarkIPs         *markIPsCache
 }
 
 // updateInterfaceIPAddresses sets and returns the bridge's current ips
@@ -502,6 +610,7 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 		netConfig: map[string]*bridgeUDNConfiguration{
 			types.DefaultNetworkName: defaultNetConfig,
 		},
+		eipMarkIPs: newMarkIPsCache(),
 	}
 	gwIntf := intfName
 	switchdevMode := false
