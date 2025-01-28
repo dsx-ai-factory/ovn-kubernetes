@@ -73,7 +73,7 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(controller.watchFactory.Start()).To(Succeed())
 
-		netInfo, _, err := util.ParseNADInfo(nad)
+		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 		controller.ReconcilableNetInfo = util.NewReconcilableNetInfo(netInfo)
 
@@ -102,7 +102,7 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(controller.watchFactory.Start()).To(Succeed())
 
-		netInfo, _, err := util.ParseNADInfo(nad)
+		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 		controller.ReconcilableNetInfo = util.NewReconcilableNetInfo(netInfo)
 
@@ -130,7 +130,7 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		cnnci := CommonNodeNetworkControllerInfo{name: "worker1", watchFactory: &factoryMock}
 		factoryMock.On("GetNode", "worker1").Return(nodeList[0], nil)
 		factoryMock.On("GetNodes").Return(nodeList, nil)
-		NetInfo, _, err := util.ParseNADInfo(nad)
+		NetInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 		controller, err := NewSecondaryNodeNetworkController(&cnnci, NetInfo, nil, nil, &gateway{})
 		Expect(err).NotTo(HaveOccurred())
@@ -162,7 +162,7 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		factoryMock.On("NodeCoreInformer").Return(&nodeInformer)
 		nodeLister := v1mocks.NodeLister{}
 		nodeInformer.On("Lister").Return(&nodeLister)
-		NetInfo, _, err := util.ParseNADInfo(nad)
+		NetInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 		getCreationFakeCommands(fexec, "ovn-k8s-mp3", mgtPortMAC, NetInfo.GetNetworkName(), "worker1", NetInfo.MTU())
 		controller, err := NewSecondaryNodeNetworkController(&cnnci, NetInfo, nil, nil, &gateway{})
@@ -194,7 +194,7 @@ var _ = Describe("SecondaryNodeNetworkController", func() {
 		factoryMock.On("GetNodes").Return(nodeList, nil)
 		nad = ovntest.GenerateNAD("bluenet", "rednad", "greenamespace",
 			types.Layer3Topology, "100.128.0.0/16", types.NetworkRoleSecondary)
-		NetInfo, _, err := util.ParseNADInfo(nad)
+		NetInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 		controller, err := NewSecondaryNodeNetworkController(&cnnci, NetInfo, nil, nil, &gateway{})
 		Expect(err).NotTo(HaveOccurred())
@@ -327,7 +327,7 @@ var _ = Describe("SecondaryNodeNetworkController: UserDefinedPrimaryNetwork Gate
 		By("creating NAD for primary UDN")
 		nad = ovntest.GenerateNAD("bluenet", "rednad", "greenamespace",
 			types.Layer3Topology, "100.128.0.0/16", types.NetworkRolePrimary)
-		NetInfo, _, err := util.ParseNADInfo(nad)
+		NetInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 		_, ipNet, err := net.ParseCIDR(v4NodeSubnet)
 		Expect(err).NotTo(HaveOccurred())

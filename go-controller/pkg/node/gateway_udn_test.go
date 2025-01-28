@@ -380,7 +380,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		}
 		nad := ovntest.GenerateNAD(netName, "rednad", "greenamespace",
 			types.Layer3Topology, "100.128.0.0/16/24,ae70::/60/64", types.NetworkRolePrimary)
-		netInfo, _, err := util.ParseNADInfo(nad)
+		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 		udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, factoryMock.NodeCoreInformer().Lister(),
 			&kubeMock, vrf, nil, &gateway{})
@@ -424,7 +424,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		// must be defined so that the primary user defined network can match the ip families of the underlying cluster
 		config.IPv4Mode = true
 		config.IPv6Mode = true
-		netInfo, _, err := util.ParseNADInfo(nad)
+		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 		udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, factoryMock.NodeCoreInformer().Lister(),
 			&kubeMock, vrf, nil, &gateway{})
@@ -455,7 +455,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		}
 		nad := ovntest.GenerateNAD(netName, "rednad", "greenamespace",
 			types.Layer2Topology, "100.128.0.0/16,ae70::/60", types.NetworkRolePrimary)
-		netInfo, _, err := util.ParseNADInfo(nad)
+		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 		udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, factoryMock.NodeCoreInformer().Lister(),
 			&kubeMock, vrf, nil, &gateway{})
@@ -498,7 +498,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		// must be defined so that the primary user defined network can match the ip families of the underlying cluster
 		config.IPv4Mode = true
 		config.IPv6Mode = true
-		netInfo, _, err := util.ParseNADInfo(nad)
+		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 		udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, factoryMock.NodeCoreInformer().Lister(),
 			&kubeMock, vrf, nil, &gateway{})
@@ -539,7 +539,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		}
 		nad := ovntest.GenerateNAD(netName, "rednad", "greenamespace",
 			types.Layer3Topology, "100.128.0.0/16/24,ae70::/60/64", types.NetworkRolePrimary)
-		netInfo, _, err := util.ParseNADInfo(nad)
+		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 		setUpGatewayFakeOVSCommands(fexec)
 		_, ipNet, err := net.ParseCIDR(v4NodeSubnet)
@@ -756,7 +756,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		}
 		nad := ovntest.GenerateNAD(netName, "rednad", "greenamespace",
 			types.Layer2Topology, "100.128.0.0/16,ae70::/64", types.NetworkRolePrimary)
-		netInfo, _, err := util.ParseNADInfo(nad)
+		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 		_, ipNet, err := net.ParseCIDR(v4NodeSubnet)
 		Expect(err).NotTo(HaveOccurred())
@@ -967,7 +967,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		}
 		nad := ovntest.GenerateNAD(netName, "rednad", "greenamespace",
 			types.Layer3Topology, "100.128.0.0/16/24,ae70::/60/64", types.NetworkRolePrimary)
-		netInfo, _, err := util.ParseNADInfo(nad)
+		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 		udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, nil, nil, vrf, nil, &gateway{})
 		Expect(err).NotTo(HaveOccurred())
@@ -1035,7 +1035,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		}
 		nad := ovntest.GenerateNAD(netName, "rednad", "greenamespace",
 			types.Layer3Topology, "100.128.0.0/16/24,ae70::/60/64", types.NetworkRolePrimary)
-		netInfo, _, err := util.ParseNADInfo(nad)
+		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 		udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, node, nil, nil, vrf, nil, &gateway{})
 		Expect(err).NotTo(HaveOccurred())
@@ -1216,7 +1216,7 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 			}
 			nad := ovntest.GenerateNAD("bluenet", "rednad", "greenamespace",
 				types.Layer3Topology, cidr, types.NetworkRolePrimary)
-			netInfo, _, err := util.ParseNADInfo(nad)
+			netInfo, err := util.ParseNADInfo(nad)
 			g.Expect(err).NotTo(HaveOccurred())
 			udnGateway, err := NewUserDefinedNetworkGateway(netInfo, 3, nil, nil, nil, nil, nil, &gateway{})
 			g.Expect(err).NotTo(HaveOccurred())

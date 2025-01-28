@@ -214,7 +214,7 @@ var _ = Describe("Healthcheck tests", func() {
 			config.OVNKubernetesFeature.EnableMultiNetwork = true
 
 			factoryMock := factoryMocks.NodeWatchFactory{}
-			netInfo, _, err := util.ParseNADInfo(nad)
+			netInfo, err := util.ParseNADInfo(nad)
 			mutableNetInfo := util.NewMutableNetInfo(netInfo)
 			Expect(err).NotTo(HaveOccurred())
 			node := &corev1.Node{

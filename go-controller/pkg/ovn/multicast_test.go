@@ -244,7 +244,7 @@ func getNetInfoFromNAD(nad *nadapi.NetworkAttachmentDefinition) util.NetInfo {
 	if nad == nil {
 		return &util.DefaultNetInfo{}
 	}
-	netInfo, _, err := util.ParseNADInfo(nad)
+	netInfo, err := util.ParseNADInfo(nad)
 	Expect(err).NotTo(HaveOccurred())
 	return netInfo
 }
@@ -319,7 +319,7 @@ func updateMulticast(fakeOvn *FakeOVN, ns *v1.Namespace, enable bool) {
 
 func startBaseNetworkController(fakeOvn *FakeOVN, nad *nadapi.NetworkAttachmentDefinition) (*BaseNetworkController, *addressset.FakeAddressSetFactory) {
 	if nad != nil {
-		netInfo, _, err := util.ParseNADInfo(nad)
+		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(fakeOvn.NewSecondaryNetworkController(nad)).To(Succeed())
 		controller, ok := fakeOvn.secondaryControllers[netInfo.GetNetworkName()]

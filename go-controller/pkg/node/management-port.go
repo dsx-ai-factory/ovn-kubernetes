@@ -103,13 +103,11 @@ func (mp *managementPort) Create(isRoutingAdvertised bool, routeManager *routema
 
 	// Create a OVS internal interface.
 	legacyMgmtIntfName := util.GetLegacyK8sMgmtIntfName(mp.nodeName)
-	macAddress := util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(mp.hostSubnets[0]).IP)
 	stdout, stderr, err := util.RunOVSVsctl(
 		"--", "--if-exists", "del-port", "br-int", legacyMgmtIntfName,
 		"--", "--may-exist", "add-port", "br-int", types.K8sMgmtIntfName,
 		"--", "set", "interface", types.K8sMgmtIntfName, fmt.Sprintf("mac=\"%s\"", macAddr.String()),
 		"type=internal", "mtu_request="+fmt.Sprintf("%d", config.Default.MTU),
-		"mac="+strings.ReplaceAll(macAddress.String(), ":", "\\:"),
 		"external-ids:iface-id="+types.K8sPrefix+mp.nodeName)
 	if err != nil {
 		klog.Errorf("Failed to add port to br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)

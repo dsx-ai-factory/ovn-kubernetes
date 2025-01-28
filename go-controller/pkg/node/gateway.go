@@ -302,6 +302,10 @@ func (g *gateway) Init(stopChan <-chan struct{}, wg *sync.WaitGroup) error {
 
 	var err error
 
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+		go manageOpenFlowsForLocalnetPorts(g)
+	}
+
 	g.servicesRetryFramework = g.newRetryFrameworkNode(factory.ServiceForGatewayType)
 	if _, err = g.servicesRetryFramework.WatchResource(); err != nil {
 		return fmt.Errorf("gateway init failed to start watching services: %v", err)

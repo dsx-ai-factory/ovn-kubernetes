@@ -2450,8 +2450,6 @@ func newGateway(
 		if err := addHostMACBindings(gwBridge.gwIface); err != nil {
 			return fmt.Errorf("failed to add MAC bindings for service routing: %w", err)
 		}
-
-		go manageOpenFlowsForLocalnetPorts(gw)
 		return nil
 	}
 	gw.watchFactory = watchFactory.(*factory.WatchFactory)

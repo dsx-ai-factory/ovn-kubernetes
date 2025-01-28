@@ -203,7 +203,7 @@ func TestSetAdvertisements(t *testing.T) {
 			g.Expect(nm.Start()).To(gomega.Succeed())
 			defer nm.Stop()
 
-			netInfo, err := util.NewNetInfo(tt.network)
+			netInfo, err := util.NewNetInfo(tt.network, nil)
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 			mutableNetInfo := util.NewMutableNetInfo(netInfo)
 			mutableNetInfo.AddNADs(testNADName)

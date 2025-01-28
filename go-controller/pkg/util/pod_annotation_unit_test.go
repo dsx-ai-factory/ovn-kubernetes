@@ -369,7 +369,7 @@ func newDummyNetInfo(namespace, networkName string) NetInfo {
 		NetConf: cnitypes.NetConf{Name: networkName},
 	}, nil)
 	mutableNetInfo := NewMutableNetInfo(netInfo)
-	mutableNetInfo.AddNADs(map[string]*NADConfig{GetNADName(namespace, networkName): nil})
+	mutableNetInfo.AddNADs(GetNADName(namespace, networkName))
 	return mutableNetInfo
 }
 

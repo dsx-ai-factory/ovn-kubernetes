@@ -333,7 +333,7 @@ add rule inet ovn-kubernetes udn-isolation ip6 daddr @udn-pod-default-ips-v6 dro
 
 		fakeClient = util.GetOVNClientset(hostNetPod, notReadyPod).GetNodeClientset()
 		var err error
-		wf, err = factory.NewNodeWatchFactory(fakeClient, "node1")
+		wf, err = factory.NewNodeWatchFactory(fakeClient, []string{"node1"})
 		Expect(err).NotTo(HaveOccurred())
 		manager = NewUDNHostIsolationManager(true, true, wf.PodCoreInformer())
 		nft = nodenft.SetFakeNFTablesHelper()

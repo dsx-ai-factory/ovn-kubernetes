@@ -769,7 +769,7 @@ func setupFakeOvnForLayer2Topology(fakeOvn *FakeOVN, initialDB libovsdbtest.Test
 			return fmt.Errorf("expected pod annotation %q", util.OvnPodAnnotationName)
 		}
 	}
-	if err = fakeOvn.networkManager.Start(); err != nil {
+	if err = fakeOvn.networkManager.Start(nil); err != nil {
 		return err
 	}
 

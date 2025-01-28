@@ -466,7 +466,7 @@ func getExpectedDataPodsSwitchesPortGroup(netInfo util.NetInfo, pods []testPod, 
 		if netInfo.IsDefault() {
 			portName = util.GetLogicalPortName(pod.namespace, pod.podName)
 		} else {
-			portName = util.GetSecondaryNetworkLogicalPortName(pod.namespace, pod.podName, netInfo.GetFirstNAD())
+			portName = util.GetSecondaryNetworkLogicalPortName(pod.namespace, pod.podName, netInfo.GetNADs()[0])
 		}
 		var lspUUID string
 		if len(pod.portUUID) == 0 {
@@ -494,7 +494,7 @@ func getExpectedDataPodsSwitchesPortGroup(netInfo util.NetInfo, pods []testPod, 
 		}
 		if !netInfo.IsDefault() {
 			lsp.ExternalIDs["k8s.ovn.org/network"] = netInfo.GetNetworkName()
-			lsp.ExternalIDs["k8s.ovn.org/nad"] = netInfo.GetFirstNAD()
+			lsp.ExternalIDs["k8s.ovn.org/nad"] = netInfo.GetNADs()[0]
 			lsp.ExternalIDs["k8s.ovn.org/topology"] = netInfo.TopologyType()
 		}
 		logicalSwitchPorts = append(logicalSwitchPorts, lsp)

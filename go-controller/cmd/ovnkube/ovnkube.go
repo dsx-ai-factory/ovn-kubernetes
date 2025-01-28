@@ -290,7 +290,12 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 		// In the case of dpus K8S_NODE will be set to dpu host's name
 		var csrNodeName string
 		if config.OvnKubeNode.Mode == types.NodeModeDPU {
-			csrNodeName = os.Getenv("K8S_NODE_DPU")
+			stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
+				"external_ids:hostname")
+			if err != nil || stdout == "" {
+				return fmt.Errorf("dpu node name not found in external_ids: %v (%q)", err, stderr)
+			}
+			csrNodeName = strings.Split(stdout, "\n")[0]
 		} else {
 			csrNodeName = os.Getenv("K8S_NODE")
 		}
@@ -581,7 +586,9 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 			metrics.RegisterNodeMetrics(config.MetricsScrapeInterval, ctx.Done())
 
 			// initialization the global open flow manager
-			OFManager.NewOpenFlowCacheManager(wg, ctx.Done())
+			if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+				OFManager.NewOpenFlowCacheManager(wg, ctx.Done())
+			}
 
 			nodeControllerManager, err := controllermanager.NewNodeControllerManager(
 				ovnClientset,

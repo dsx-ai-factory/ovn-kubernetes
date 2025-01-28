@@ -149,7 +149,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: secondaryNetworkID}
-				netInfo, err := util.NewNetInfo(&netconf)
+				netInfo, err := util.NewNetInfo(&netconf, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				node1Annotations := map[string]string{
@@ -298,7 +298,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.eIPController.ensureSwitchPoliciesForNode(netInfo, node1Name)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Expect(fakeOvn.networkManager.Start()).Should(gomega.Succeed())
+				gomega.Expect(fakeOvn.networkManager.Start(nil)).Should(gomega.Succeed())
 				defer fakeOvn.networkManager.Stop()
 				err = fakeOvn.controller.WatchEgressIPNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -524,7 +524,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: secondaryNetworkID}
-				netInfo, err := util.NewNetInfo(&netconf)
+				netInfo, err := util.NewNetInfo(&netconf, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				node1Annotations := map[string]string{
@@ -1043,7 +1043,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: secondaryNetworkID}
-				netInfo, err := util.NewNetInfo(&netconf)
+				netInfo, err := util.NewNetInfo(&netconf, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				node1Annotations := map[string]string{
@@ -1536,7 +1536,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: secondaryNetworkID}
-				netInfo, err := util.NewNetInfo(&netconf)
+				netInfo, err := util.NewNetInfo(&netconf, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				node1Annotations := map[string]string{
@@ -1900,7 +1900,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: secondaryNetworkID}
-				netInfo, err := util.NewNetInfo(&netconf)
+				netInfo, err := util.NewNetInfo(&netconf, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				node1Annotations := map[string]string{
@@ -2259,7 +2259,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: secondaryNetworkID}
-				netInfo, err := util.NewNetInfo(&netconf)
+				netInfo, err := util.NewNetInfo(&netconf, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				node1Annotations := map[string]string{

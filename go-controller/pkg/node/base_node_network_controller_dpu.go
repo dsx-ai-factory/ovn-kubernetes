@@ -712,9 +712,8 @@ func (bnnc *BaseNodeNetworkController) startNADController() error {
 	return nil
 }
 
-func (bnnc *BaseNodeNetworkController) stopNADController() error {
+func (bnnc *BaseNodeNetworkController) stopNADController() {
 	if config.OvnKubeNode.Mode == ovntypes.NodeModeDPU {
 		bnnc.nadConfigController.Stop()
 	}
-	return nil
 }

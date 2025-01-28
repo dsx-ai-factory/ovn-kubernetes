@@ -271,11 +271,11 @@ func TestServiceFromEndpointSlice(t *testing.T) {
 			Topology: types.Layer3Topology,
 			Subnets:  "10.1.130.0/16/24",
 			Role:     types.NetworkRolePrimary,
-		})
+		}, nil)
 	defaultNetInfo, _ := NewNetInfo(
 		&ovncnitypes.NetConf{
 			NetConf: cnitypes.NetConf{Name: types.DefaultNetworkName},
-		})
+		}, nil)
 	var tests = []struct {
 		name    string
 		args    args

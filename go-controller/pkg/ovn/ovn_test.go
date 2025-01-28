@@ -472,16 +472,10 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 	var ok bool
 
 	nadName := util.GetNADName(netattachdef.Namespace, netattachdef.Name)
-	nInfo, nadConfig, err := util.ParseNADInfo(netattachdef)
+	nInfo, err := util.ParseNADInfo(netattachdef)
 	if err != nil {
 		return err
 	}
-	if !nInfo.IsSecondary() {
-		o.controller.AddNADs(map[string]*util.NADConfig{nadName: nadConfig})
-		ginkgo.By(fmt.Sprintf("OVN test init: add NAD %s to default network controller", nadName))
-		return nil
-	}
-
 	netName := nInfo.GetNetworkName()
 	topoType := nInfo.TopologyType()
 	ocInfo, ok = o.secondaryControllers[netName]
@@ -564,7 +558,7 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 
 	ginkgo.By(fmt.Sprintf("OVN test init: add NAD %s to secondary network controller of %s network %s", nadName, topoType, netName))
 	mutableNetInfo := util.NewMutableNetInfo(secondaryController.GetNetInfo())
-	mutableNetInfo.AddNADs(map[string]*util.NADConfig{nadName: nadConfig})
+	mutableNetInfo.AddNADs(nadName)
 	_ = util.ReconcileNetInfo(secondaryController.ReconcilableNetInfo, mutableNetInfo)
 	return nil
 }

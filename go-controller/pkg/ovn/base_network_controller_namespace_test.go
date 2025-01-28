@@ -70,7 +70,7 @@ func TestBaseNetworkController_shouldWatchNamespaces(t *testing.T) {
 			config.OVNKubernetesFeature.EnableMultiNetwork = tt.enableNetSeg || tt.enableMultiNetPolicies
 			config.OVNKubernetesFeature.EnableNetworkSegmentation = tt.enableNetSeg
 			config.OVNKubernetesFeature.EnableMultiNetworkPolicy = tt.enableMultiNetPolicies
-			netInfo, err := util.NewNetInfo(tt.netCfg)
+			netInfo, err := util.NewNetInfo(tt.netCfg, nil)
 			assert.Nil(t, err, "failed to create network info")
 			bnc := &BaseNetworkController{
 				ReconcilableNetInfo: util.NewReconcilableNetInfo(netInfo),

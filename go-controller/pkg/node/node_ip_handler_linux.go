@@ -254,7 +254,7 @@ func (c *addressManager) handleNodePrimaryAddrChange() {
 		// klog.Infof("Node primary address changed to %v. Updating OVN encap IP.", c.nodePrimaryAddr)
 		// updateOVNEncapIPAndReconnect(c.nodePrimaryAddr)
 		// In our setup, encap IP is different from node primary address
-		klog.Infof("Node primary address changed to %v", c.nodePrimaryAddr)  // TBD-merge 
+		klog.Infof("Node primary address changed to %v", c.nodePrimaryAddr) // TBD-merge
 		//klog.Infof("Node primary address changed to %v. Updating OVN encap IP.", c.nodePrimaryAddr)
 		//updateOVNEncapIPAndReconnect(c.nodePrimaryAddr)
 	}

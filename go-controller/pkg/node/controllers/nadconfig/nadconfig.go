@@ -17,10 +17,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-const (
-	controller_name = "nad-configuration-controller"
-)
-
 type NADInfo interface {
 	// set per-NAD configration in case of any change
 	SetNADConfig(nadName string, nadConfig *util.NADConfig) error

@@ -7052,7 +7052,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				node1GR.Nat = []string{podEIPSNAT.UUID}
 				egressIPServedPodsASv4.Addresses = []string{"10.128.0.60"}
 
-				podPortInfo, err := fakeOvn.controller.logicalPortCache.get(egressPod1, types.DefaultNetworkName)
+				podPortInfo, err := fakeOvn.controller.logicalPortCache.get(egressPod1.Namespace, egressPod1.Name, types.DefaultNetworkName)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				egressPodIP, _, err = net.ParseCIDR(podPortInfo.ips[0].String())
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())

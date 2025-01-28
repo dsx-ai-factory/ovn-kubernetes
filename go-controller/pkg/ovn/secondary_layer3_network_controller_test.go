@@ -316,7 +316,7 @@ var _ = Describe("OVN Multi-Homed pod operations", func() {
 				nad.Annotations = map[string]string{types.OvnNetworkIDAnnotation: secondaryNetworkID}
 
 				mutableNetworkConfig := util.NewMutableNetInfo(networkConfig)
-				mutableNetworkConfig.SetNADs(map[string]*util.NADConfig{util.GetNADName(nad.Namespace, nad.Name): nil})
+				mutableNetworkConfig.SetNADs(util.GetNADName(nad.Namespace, nad.Name))
 				networkConfig = mutableNetworkConfig
 
 				fakeNetworkManager := &testnm.FakeNetworkManager{
@@ -510,7 +510,7 @@ func (sni *secondaryNetInfo) setupOVNDependencies(dbData *libovsdbtest.TestSetup
 	externalIDs := map[string]string{
 		types.NetworkExternalID:     sni.netName,
 		types.NetworkRoleExternalID: sni.getNetworkRole(),
-		# types.TopologyExternalID:    sni.topology,  TBD-merge
+		types.TopologyExternalID:    sni.topology,
 	}
 	switch sni.topology {
 	case types.Layer2Topology:

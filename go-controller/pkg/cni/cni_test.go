@@ -230,7 +230,7 @@ var _ = Describe("Network Segmentation", func() {
 				nadNamespaceLister := &v1nadmocks.NetworkAttachmentDefinitionNamespaceLister{}
 				nadNamespaceLister.On("List", labels.Everything()).Return([]*nadv1.NetworkAttachmentDefinition{nad}, nil)
 				nadLister.On("NetworkAttachmentDefinitions", "foo-ns").Return(nadNamespaceLister)
-				nadNetwork, _, err := util.ParseNADInfo(nad)
+				nadNetwork, err := util.ParseNADInfo(nad)
 				Expect(err).NotTo(HaveOccurred())
 				fakeNetworkManager = &testnm.FakeNetworkManager{
 					PrimaryNetworks: make(map[string]util.NetInfo),

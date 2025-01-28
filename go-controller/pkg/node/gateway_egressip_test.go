@@ -316,13 +316,16 @@ var _ = ginkgo.Describe("Gateway EgressIP", func() {
 
 func initBridgeEIPAddrManager(nodeName, bridgeName string, bridgeEIPAnnot string) (*bridgeEIPAddrManager, func()) {
 	node := &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{Name: nodeName, Annotations: map[string]string{}},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        nodeName,
+			Annotations: map[string]string{},
+			Labels:      map[string]string{"kubernetes.io/hostname": nodeName}},
 	}
 	if bridgeEIPAnnot != "" {
 		node.Annotations[util.OVNNodeBridgeEgressIPs] = bridgeEIPAnnot
 	}
 	client := fake.NewSimpleClientset(node)
-	watchFactory, err := factory.NewNodeWatchFactory(&util.OVNNodeClientset{KubeClient: client}, nodeName)
+	watchFactory, err := factory.NewNodeWatchFactory(&util.OVNNodeClientset{KubeClient: client}, []string{nodeName})
 	gomega.Expect(watchFactory.Start()).Should(gomega.Succeed(), "watch factory should start")
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "watch factory creation must succeed")
 	linkManager := linkmanager.NewController(nodeName, true, true, nil)
