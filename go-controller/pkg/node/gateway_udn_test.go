@@ -644,6 +644,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			)
 			Expect(err).NotTo(HaveOccurred())
 			stop := make(chan struct{})
+			defer close(stop)
 			wg := &sync.WaitGroup{}
 			OFManager.NewOpenFlowCacheManager(wg, stop)
 			err = localGw.initFunc()
@@ -863,6 +864,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			)
 			Expect(err).NotTo(HaveOccurred())
 			stop := make(chan struct{})
+			defer close(stop)
 			wg := &sync.WaitGroup{}
 			OFManager.NewOpenFlowCacheManager(wg, stop)
 			Expect(localGw.initFunc()).To(Succeed())
