@@ -301,6 +301,8 @@ func (l *mutableNetInfo) copyFrom(r *mutableNetInfo) {
 }
 
 func (nInfo *mutableNetInfo) GetNetworkID() int {
+	nInfo.RLock()
+	defer nInfo.RUnlock()
 	return nInfo.id
 }
 

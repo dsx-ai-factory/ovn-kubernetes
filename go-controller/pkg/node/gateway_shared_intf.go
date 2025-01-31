@@ -568,8 +568,7 @@ func (npw *nodePortWatcher) generateARPBypassFlow(ofPorts []string, ofPortPatch,
 			arpPortsFiltered = append(arpPortsFiltered, port)
 		}
 
-		// If you get vlan tagged traffic from your physical interface, you will have to untag it before sending it to
-		// the access ports (which could be multiple ports).
+		// If vlan tagged traffic is received from physical interface, it has to be untagged before sending to access ports
 		if config.Gateway.VLANID != 0 {
 			match_vlan := fmt.Sprintf("dl_vlan=%d,", config.Gateway.VLANID)
 			arpFlow = fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s,%s, %s=%s, "+

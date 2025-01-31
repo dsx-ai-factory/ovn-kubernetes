@@ -2134,6 +2134,14 @@ ovnkube-controller-with-node() {
     fi
   fi
 
+  if [[ ${ovnkube_node_mode} != "dpu-host" && ! ${ovn_gateway_opts} =~ "gateway-vlanid" ]]; then
+      # get the gateway vlanid
+      gw_vlanid=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-vlanid | tr -d \")
+      if [[ -n ${gw_vlanid} ]]; then
+        ovn_gateway_opts+="--gateway-vlanid=${gw_vlanid}"
+      fi
+  fi
+
   ovnkube_node_mgmt_port_netdev_flag=
   if [[ ${ovnkube_node_mgmt_port_netdev} != "" ]]; then
     ovnkube_node_mgmt_port_netdev_flag="--ovnkube-node-mgmt-port-netdev=${ovnkube_node_mgmt_port_netdev}"
@@ -3093,16 +3101,9 @@ ovn-node() {
         echo "Couldn't get the required OVN Gateway NextHop. Exiting..."
         exit 1
       fi
-      # get the gateway vlanid
-      gw_vlanid=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-vlanid | tr -d \")
-      if [[ ${gw_vlanid} == "" ]]; then
-        echo "Couldn't get the required OVN Gateway VLAN ID. Exiting..."
-        exit 1
-      fi
       ovn_gateway_opts="
         --gateway-interface=${gw_iface}
         --gateway-nexthop=${gw_nexthop}
-        --gateway-vlanid=${gw_vlanid}
       "
     fi
 
@@ -3125,6 +3126,14 @@ ovn-node() {
     if [[ ${representor_metering_nodes} != "" ]]; then
       representor_metering_nodes_flag="--representor-metering-nodes=${representor_metering_nodes}"
     fi
+  fi
+
+  if [[ ${ovnkube_node_mode} != "dpu-host" && ! ${ovn_gateway_opts} =~ "gateway-vlanid" ]]; then
+      # get the gateway vlanid
+      gw_vlanid=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-vlanid | tr -d \")
+      if [[ -n ${gw_vlanid} ]]; then
+        ovn_gateway_opts+="--gateway-vlanid=${gw_vlanid}"
+      fi
   fi
 
   ovnkube_logfile_flag="--logfile /var/log/ovn-kubernetes/ovnkube.log"

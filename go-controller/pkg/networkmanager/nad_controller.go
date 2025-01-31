@@ -24,7 +24,6 @@ import (
 	nadinformers "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
 	nadlisters "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 	rainformers "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions/routeadvertisements/v1"
 	userdefinednetworkinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/informers/externalversions/userdefinednetwork/v1"
@@ -414,11 +413,23 @@ func (c *nadController) GetActiveNetworkForNamespace(namespace string) (util.Net
 	if !util.IsNetworkSegmentationSupportEnabled() {
 		return &util.DefaultNetInfo{}, nil
 	}
+
+	// check if required UDN label is on namespace
+	ns, err := c.namespaceLister.Get(namespace)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get namespace %q: %w", namespace, err)
+	}
+	if _, exists := ns.Labels[types.RequiredUDNNamespaceLabel]; !exists {
+		// UDN required label not set on namespace, assume default network
+		return &util.DefaultNetInfo{}, nil
+	}
+
 	c.RLock()
 	defer c.RUnlock()
 	primaryNAD := c.primaryNADs[namespace]
 	if primaryNAD != "" {
-		// we have a primary NAD, get the network
+		// we have a primary NAD, no need to check for NS UDN annotation because NAD would not have existed otherwise
+		// get the network
 		netName := c.nads[primaryNAD]
 		if netName == "" {
 			// this should never happen where we have a nad keyed in the primaryNADs
@@ -466,7 +477,8 @@ func (c *nadController) GetActiveNetworkForNamespace(namespace string) (util.Net
 		}
 	}
 
-	return &util.DefaultNetInfo{}, nil
+	// namespace has required UDN label, but no UDN was found
+	return nil, util.NewInvalidPrimaryNetworkError(namespace)
 }
 
 func (c *nadController) GetNetwork(name string) util.NetInfo {
@@ -608,6 +620,7 @@ func (c *nadController) handleNetworkID(old util.NetInfo, new util.MutableNetInf
 		delete(annotations, types.OvnNetworkIDAnnotation)
 	}
 	if len(annotations) == 0 {
+		new.SetNetworkID(id)
 		return nil
 	}
 
