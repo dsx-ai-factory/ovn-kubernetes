@@ -200,12 +200,16 @@ type preStartSetup struct {
 }
 
 func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, stopChan chan struct{},
-	wg *sync.WaitGroup, routeManager *routemanager.Controller) *DefaultNodeNetworkController {
+	wg *sync.WaitGroup, routeManager *routemanager.Controller, networkManager networkmanager.Interface) *DefaultNodeNetworkController {
 
+	netInfo := (&util.DefaultNetInfo{}).GetNetInfo()
+	if networkManager != nil {
+		netInfo = networkManager.InitDefaultNetInfo()
+	}
 	c := &DefaultNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
 			CommonNodeNetworkControllerInfo: *cnnci,
-			ReconcilableNetInfo:             &util.DefaultNetInfo{},
+			ReconcilableNetInfo:             util.NewReconcilableNetInfo(netInfo),
 			stopChan:                        stopChan,
 			wg:                              wg,
 			DoSCheckStopChan:                nil,
@@ -230,7 +234,7 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, net
 	var err error
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
-	nc := newDefaultNodeNetworkController(cnnci, stopChan, wg, cnnci.routeManager)
+	nc := newDefaultNodeNetworkController(cnnci, stopChan, wg, cnnci.routeManager, networkManager)
 
 	if len(config.Kubernetes.HealthzBindAddress) != 0 {
 		klog.Infof("Enable node proxy healthz server on %s", config.Kubernetes.HealthzBindAddress)

@@ -174,7 +174,7 @@ func newDefaultNetworkControllerCommon(
 		addressSetFactory = addressset.NewOvnAddressSetFactory(cnci.nbClient, config.IPv4Mode, config.IPv6Mode)
 	}
 
-	netInfo := util.InitDefaultNetInfo()
+	netInfo := networkManager.InitDefaultNetInfo()
 	svcController, err := svccontroller.NewController(
 		cnci.client, cnci.nbClient,
 		cnci.watchFactory.ServiceCoreInformer(),

@@ -22,6 +22,7 @@ const (
 // Interface is the main package entrypoint and provides network related
 // information to the rest of the project.
 type Interface interface {
+	InitDefaultNetInfo() util.NetInfo
 	GetActiveNetworkForNamespace(namespace string) (util.NetInfo, error)
 
 	// GetNetwork returns the network of the given name or nil if unknown
@@ -186,6 +187,10 @@ func (nm defaultNetworkManager) DoWithLock(f func(network util.NetInfo) error) e
 
 func (nm defaultNetworkManager) GetActiveNetworkNamespaces(networkName string) ([]string, error) {
 	return []string{"default"}, nil
+}
+
+func (nm defaultNetworkManager) InitDefaultNetInfo() util.NetInfo {
+	return &util.DefaultNetInfo{}
 }
 
 var def Controller = &defaultNetworkManager{}
