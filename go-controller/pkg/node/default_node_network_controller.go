@@ -216,7 +216,8 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 		skipFirewalldMap: sync.Map{},
 		routeManager:     routeManager,
 	}
-	if util.IsNetworkSegmentationSupportEnabled() && !config.OVNKubernetesFeature.DisableUDNHostIsolation {
+	// TBD-merge
+	if config.OvnKubeNode.Mode != types.NodeModeDPU && util.IsNetworkSegmentationSupportEnabled() && !config.OVNKubernetesFeature.DisableUDNHostIsolation {
 		c.udnHostIsolationManager = NewUDNHostIsolationManager(config.IPv4Mode, config.IPv6Mode,
 			cnnci.watchFactory.PodCoreInformer())
 	}
@@ -1003,6 +1004,8 @@ func (nc *DefaultNodeNetworkController) PreStart(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+	}
+	if config.OvnKubeNode.Mode != types.NodeModeDPU {
 		if nc.udnHostIsolationManager != nil {
 			if err = nc.udnHostIsolationManager.Start(ctx); err != nil {
 				return err
@@ -1038,7 +1041,7 @@ func (nc *DefaultNodeNetworkController) PreStart(ctx context.Context) error {
 		if !ok {
 			return fmt.Errorf("cannot get kubeOVNClient for starting CNI server")
 		}
-		cniServer, err = cni.NewCNIServer(nc.watchFactory /*kclient.KClient*/, kube.KClient, nc.networkManager) // TBD-merge
+		cniServer, err = cni.NewCNIServer(nc.watchFactory, kube.KClient, nc.networkManager)
 		if err != nil {
 			return err
 		}

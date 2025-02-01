@@ -1302,7 +1302,7 @@ passwd:
 
 			if td.topology == "localnet" {
 				By("setting up the localnet underlay")
-				nodes := ovsPods(clientSet)
+				_, nodes := ovsPods(clientSet)
 				Expect(nodes).NotTo(BeEmpty())
 				defer func() {
 					By("tearing down the localnet underlay")

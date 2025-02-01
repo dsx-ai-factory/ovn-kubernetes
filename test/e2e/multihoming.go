@@ -903,7 +903,7 @@ var _ = Describe("Multi Homing", func() {
 			Context("with a trunked configuration", func() {
 				const vlanID = 20
 				BeforeEach(func() {
-					nodes = ovsPods(cs)
+					_, nodes = ovsPods(cs)
 					Expect(nodes).NotTo(BeEmpty())
 
 					// we are setting up the bridge in trunked mode by not

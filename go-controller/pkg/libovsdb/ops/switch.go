@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -22,7 +22,7 @@ type switchPortPredicate func(port *nbdb.LogicalSwitchPort) bool
 // based on a given predicate
 func FindLogicalSwitchPortWithPredicate(nbClient libovsdbclient.Client, p switchPortPredicate) ([]*nbdb.LogicalSwitchPort, error) {
 	found := []*nbdb.LogicalSwitchPort{}
-	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 	defer cancel()
 	err := nbClient.WhereCache(p).List(ctx, &found)
 	return found, err

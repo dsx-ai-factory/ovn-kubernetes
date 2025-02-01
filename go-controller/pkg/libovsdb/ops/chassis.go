@@ -2,9 +2,10 @@ package ops
 
 import (
 	"context"
-	"k8s.io/apimachinery/pkg/util/sets"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	"k8s.io/apimachinery/pkg/util/sets"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 )

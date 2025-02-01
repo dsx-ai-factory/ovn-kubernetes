@@ -159,7 +159,7 @@ func (pr *PodRequest) cmdAddWithGetCNIResultFunc(
 		if !pr.IsVFIO {
 			netdevName, err = getNetdevName(pr.CNIConf.DeviceID, pr.deviceInfo)
 			if err != nil {
-				return nil, fmt.Errorf("failed in cmdAdd while getting Netdevice name: %v", err)
+				return nil, fmt.Errorf("failed in cmdAdd while getting Netdevice name: %w", err)
 			}
 		}
 		if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
@@ -259,6 +259,7 @@ func (pr *PodRequest) cmdDel(clientset *ClientSet) (*Response, error) {
 					pr.PodName, pr.nadName, err)
 				return response, nil
 			}
+
 			// check if this cmdDel is meant for the current sandbox, if not, directly return
 			if dpuCD.SandboxId != pr.SandboxID {
 				klog.Infof("The cmdDel request for sandbox %s is not meant for the currently configured "+

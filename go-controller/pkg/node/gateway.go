@@ -533,6 +533,7 @@ func (g *gateway) addAllServices() []error {
 	g.servicesRetryFramework.RequestRetryObjs()
 	return errs
 }
+
 func (g *gateway) GetGatewayIface() string {
 	return g.openflowManager.defaultBridge.gwIface
 }

@@ -130,7 +130,7 @@ func (mp *managementPortRepresentor) checkRepresentorPortHealth(cfg *managementP
 	// After host reboot, management port link name changes back to default name.
 	link, err := util.GetNetLinkOps().LinkByName(cfg.ifName)
 	if err != nil {
-		klog.Warningf("Failed to get link device %s, error: %v", cfg.ifName, err)
+		klog.Warningf("Failed to get link device %s: %v", cfg.ifName, err)
 		// Get original management port representor link name
 		if config.OvnKubeNode.MgmtPortNetdev == "" {
 			// The representor is identified by k8s.ovn.org/node-mgmt-port annotation
@@ -167,9 +167,6 @@ func (mp *managementPortRepresentor) checkRepresentorPortHealth(cfg *managementP
 }
 
 func (mp *managementPortRepresentor) CheckManagementPortHealth(_ *routemanager.Controller, cfg *managementPortConfig) error {
-	if !config.OvnKubeNode.IsPrimaryDPU {
-		return nil
-	}
 	return mp.checkRepresentorPortHealth(cfg)
 }
 

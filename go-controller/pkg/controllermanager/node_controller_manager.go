@@ -95,7 +95,7 @@ func (ncm *NodeControllerManager) newCommonNetworkControllerInfo() *node.CommonN
 // (2) primary user defined networks is enabled (all modes)
 // (3) whenever these is localnet network, needs to set ovn-bridge-mappings
 func isNetworkManagerRequiredForNode() bool {
-	return (config.OVNKubernetesFeature.EnableMultiNetwork && config.OvnKubeNode.Mode != ovntypes.NodeModeDPUHost) || //TBD-merge DPU only?
+	return (config.OVNKubernetesFeature.EnableMultiNetwork && config.OvnKubeNode.Mode != ovntypes.NodeModeDPUHost) ||
 		util.IsNetworkSegmentationSupportEnabled() ||
 		util.IsRouteAdvertisementsEnabled()
 }

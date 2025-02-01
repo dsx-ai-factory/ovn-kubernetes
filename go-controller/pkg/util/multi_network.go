@@ -98,11 +98,9 @@ type DefaultNetInfo struct {
 	mutableNetInfo
 }
 
-// TBD-merge
-func InitDefaultNetInfo() NetInfo {
+func InitDefaultNetInfo() MutableNetInfo {
 	return &DefaultNetInfo{
 		mutableNetInfo: mutableNetInfo{
-			id:   InvalidID,
 			nads: sets.Set[string]{},
 		},
 	}
@@ -936,6 +934,10 @@ func (nInfo *secondaryNetInfo) copy() *secondaryNetInfo {
 		excludeSubnets:      nInfo.excludeSubnets,
 		joinSubnets:         nInfo.joinSubnets,
 		physicalNetworkName: nInfo.physicalNetworkName,
+		gateways:            nInfo.gateways,
+		gatewayMAC:          nInfo.gatewayMAC,
+		xdpService:          nInfo.xdpService,
+		nadRoutes:           nInfo.nadRoutes,
 	}
 	// copy mutables
 	c.mutableNetInfo.copyFrom(&nInfo.mutableNetInfo)
@@ -1161,7 +1163,6 @@ func newNetInfo(netconf *ovncnitypes.NetConf, annotation map[string]string) (Mut
 	if netconf.Name == types.DefaultNetworkName {
 		return &DefaultNetInfo{
 			mutableNetInfo: mutableNetInfo{
-				id:   InvalidID,
 				nads: sets.Set[string]{},
 			},
 		}, nil

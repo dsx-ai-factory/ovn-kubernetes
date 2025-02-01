@@ -176,6 +176,10 @@ func NewManagementPortEntry(port ManagementPort, cfg *managementPortConfig, rout
 }
 
 func (p *managementPortEntry) Start(stopChan <-chan struct{}) {
+	if p.config.reconcilePeriod == 0 {
+		// non-primary DPU
+		return
+	}
 	go func() {
 		timer := time.NewTicker(p.config.reconcilePeriod)
 		defer timer.Stop()

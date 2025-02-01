@@ -3033,12 +3033,11 @@ ovn-node() {
     node_mgmt_port_netdev_flags="$node_mgmt_port_netdev_flags --ovnkube-node-mgmt-port-dp-resource-name ${ovnkube_node_mgmt_port_dp_resource_name}"
   fi
 
-  local ovn_node_ssl_opts=""
   local export_ovs_metrics_opts=""
   local ovs_other_config_opts=
+  local ovn_node_ssl_opts=""
   if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
       [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
-        # used by gRPC based egress node reachability healthcheck
         ovn_node_ssl_opts="
             --nb-client-privkey ${ovn_controller_pk}
             --nb-client-cert ${ovn_controller_cert}
@@ -3095,16 +3094,15 @@ ovn-node() {
         echo "Couldn't get the required OVN Gateway Interface. Exiting..."
         exit 1
       fi
+      ovn_gateway_opts="--gateway-interface=${gw_iface} "
+
       # get the gateway nexthop
       gw_nexthop=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-nexthop | tr -d \")
       if [[ ${gw_nexthop} == "" ]]; then
         echo "Couldn't get the required OVN Gateway NextHop. Exiting..."
         exit 1
       fi
-      ovn_gateway_opts="
-        --gateway-interface=${gw_iface}
-        --gateway-nexthop=${gw_nexthop}
-      "
+      ovn_gateway_opts+="--gateway-nexthop=${gw_nexthop} "
     fi
 
     # this is required if the DPU and DPU Host are in different subnets

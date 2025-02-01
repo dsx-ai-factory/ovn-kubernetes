@@ -94,7 +94,6 @@ func BuildACL(name string, direction nbdb.ACLDirection, priority int, match stri
 	}
 
 	return acl
-
 }
 
 func SetACLLogging(acl *nbdb.ACL, severity nbdb.ACLSeverity, log bool) {

@@ -910,7 +910,8 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeNames []string
 	// need to configure OVS interfaces for Pods on secondary networks in the DPU mode
 	// need to know what is the primary network for a namespace on the CNI side, which
 	// needs the NAD factory whenever the UDN feature is used.
-	if config.OVNKubernetesFeature.EnableMultiNetwork && (config.OVNKubernetesFeature.EnableNetworkSegmentation || config.OvnKubeNode.Mode == types.NodeModeDPU) {
+	if (config.OVNKubernetesFeature.EnableMultiNetwork && config.OvnKubeNode.Mode != types.NodeModeDPUHost) ||
+		config.OVNKubernetesFeature.EnableNetworkSegmentation || util.IsRouteAdvertisementsEnabled() {
 		wf.nadFactory = nadinformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval)
 		wf.informers[NetworkAttachmentDefinitionType], err = newInformer(NetworkAttachmentDefinitionType, wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer())
 		if err != nil {
@@ -1930,10 +1931,10 @@ func (wf *WatchFactory) FRRConfigurationsInformer() frrinformer.FRRConfiguration
 	return wf.frrFactory.Api().V1beta1().FRRConfigurations()
 }
 
-// noServiceNameSelector returns a LabelSelector (added to the
+// withServiceNameSelector returns a LabelSelector (added to the
 // watcher for EndpointSlices) that will only choose EndpointSlices with a non-empty
 // "kubernetes.io/service-name" label
-func noServiceNameSelector() func(options *metav1.ListOptions) {
+func withServiceNameSelector() func(options *metav1.ListOptions) {
 	// LabelServiceName must exist
 	svcNameLabel, err := labels.NewRequirement(discovery.LabelServiceName, selection.Exists, nil)
 	if err != nil {
@@ -1954,22 +1955,23 @@ func noServiceNameSelector() func(options *metav1.ListOptions) {
 	}
 }
 
-// noHeadlessServiceSelector returns a LabelSelector (added to the
-// watcher for EndpointSlices) that will only choose EndpointSlices without "service.kubernetes.io/headless"
-// label.
-func noHeadlessServiceSelector() func(options *metav1.ListOptions) {
-	// headless service label must not be there
-	noHeadlessService, err := labels.NewRequirement(kapi.IsHeadlessService, selection.DoesNotExist, nil)
-	if err != nil {
-		// cannot occur
-		panic(err)
-	}
-
-	return func(options *metav1.ListOptions) {
-		options.LabelSelector = noHeadlessService.String()
-	}
-}
-
+// // noHeadlessServiceSelector returns a LabelSelector (added to the
+// // watcher for EndpointSlices) that will only choose EndpointSlices without "service.kubernetes.io/headless"
+// // label.
+//
+//	func noHeadlessServiceSelector() func(options *metav1.ListOptions) {
+//		// headless service label must not be there
+//		noHeadlessService, err := labels.NewRequirement(kapi.IsHeadlessService, selection.DoesNotExist, nil)
+//		if err != nil {
+//			// cannot occur
+//			panic(err)
+//		}
+//
+//		return func(options *metav1.ListOptions) {
+//			options.LabelSelector = noHeadlessService.String()
+//		}
+//	}
+//
 // noAlternateProxySelector is a LabelSelector added to the watch for
 // services that excludes services with a well-known label indicating
 // proxying is via an alternate proxy.
@@ -2026,14 +2028,14 @@ func waitForCacheSyncWithTimeout(factory waitForCacheSyncer, stopCh <-chan struc
 }
 
 // getEndpointSliceSelector returns an EndpointSlice selector function used in watchers.
-// When network segmentation is enabled it returns a selector that ignores EndpointSlices for headless services.
-// Otherwise, it returns a selector that excludes EndpointSlices a with missing default service name too.
+// When network segmentation is enabled it returns a nil selector that select all EndpointSlices.
+// Otherwise, it returns a selector that excludes EndpointSlices a with missing default service name.
 func getEndpointSliceSelector() func(options *metav1.ListOptions) {
-	endpointSliceSelector := noServiceNameSelector()
+	endpointSliceSelector := withServiceNameSelector()
 	if util.IsNetworkSegmentationSupportEnabled() {
 		// When network segmentation is enabled we need to watch for mirrored EndpointSlices that do not contain the
 		// default service name.
-		endpointSliceSelector = noHeadlessServiceSelector()
+		endpointSliceSelector = nil
 	}
 	return endpointSliceSelector
 }
