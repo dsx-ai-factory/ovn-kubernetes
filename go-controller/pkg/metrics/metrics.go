@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -99,6 +100,9 @@ var componentCoverageShowMetricsMap = map[string]map[string]*metricDetails{}
 // interested in that output for a given component. We generalize capturing these metrics
 // across all OVN components.
 var componentStopwatchShowMetricsMap = map[string]map[string]*stopwatchMetricDetails{}
+
+// ErrGetNode is the error returned when the node cannot be retrieved.
+var ErrGetNode = errors.New("failed to get node")
 
 func parseMetricToFloat(componentName, metricName, value string) float64 {
 	f64Value, err := strconv.ParseFloat(value, 64)
@@ -455,7 +459,8 @@ func checkPodRunsOnGivenNode(podLister corev1listers.PodLister, labels []string,
 func checkNodeLabel(nodeLister corev1listers.NodeLister, nodeName, selector string) (bool, error) {
 	node, err := nodeLister.Get(nodeName)
 	if err != nil {
-		return false, fmt.Errorf("failed to get node %s", nodeName)
+		klog.Infof("Register Ovn Northd Metrics Operation failed (will retry): %v", err)
+		return false, ErrGetNode
 	}
 
 	nodeSelector, err := metav1.ParseToLabelSelector(selector)

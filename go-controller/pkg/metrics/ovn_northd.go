@@ -1,18 +1,25 @@
 package metrics
 
 import (
+	"context"
+	"errors"
 	"strings"
+	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
+	"k8s.io/apimachinery/pkg/util/wait"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 )
 
 const (
-	nbConnectionStatus = "nb-connection-status"
-	sbConnectionStatus = "sb-connection-status"
+	nbConnectionStatus  = "nb-connection-status"
+	sbConnectionStatus  = "sb-connection-status"
+	maxNodeLabelRetries = 5
+	retryInterval       = time.Second
+	retryFactor         = 2.0
 )
 
 var (
@@ -111,12 +118,31 @@ var ovnNorthdStopwatchShowMetricsMap = map[string]*stopwatchMetricDetails{
 
 func RegisterOvnNorthdMetrics(nodeLister corev1listers.NodeLister, k8sNodeName string,
 	metricsScrapeInterval int, stopChan <-chan struct{}) {
+
 	var match bool
 	var err error
 	if config.Kubernetes.NorthdNodeSelectorLabel != "" {
-		match, err = checkNodeLabel(nodeLister, k8sNodeName, config.Kubernetes.NorthdNodeSelectorLabel)
+		backoff := wait.Backoff{
+			Duration: retryInterval,
+			Steps:    maxNodeLabelRetries,
+			Factor:   retryFactor,
+		}
+
+		ctx := wait.ContextForChannel(stopChan)
+		err = wait.ExponentialBackoffWithContext(ctx, backoff, wait.ConditionWithContextFunc(func(context.Context) (bool, error) {
+			var lastErr error
+			match, lastErr = checkNodeLabel(nodeLister, k8sNodeName, config.Kubernetes.NorthdNodeSelectorLabel)
+			if lastErr != nil {
+				if errors.Is(lastErr, ErrGetNode) {
+					return false, nil // Retryable error
+				}
+				return false, lastErr // Permanent error, don't retry
+			}
+			return true, nil // Success
+		}))
+
 		if err != nil {
-			klog.Infof("Not registering OVN North Metrics because failed to check if OVNKube North Pod is running on this "+
+			klog.Errorf("Not registering OVN North Metrics because failed to check if OVNKube North Pod is running on this "+
 				"node (%s): %v", k8sNodeName, err)
 			return
 		}
