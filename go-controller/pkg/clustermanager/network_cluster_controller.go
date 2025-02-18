@@ -745,3 +745,7 @@ func autoExcludeCIDRs(subnet *net.IPNet) []*net.IPNet {
 		{IP: mgmtPortIP, Mask: util.GetIPFullMask(mgmtPortIP)},
 	}
 }
+
+func (ncc *networkClusterController) GetNetworkInterConnectInfo() *networkmanager.NetworkInterConnectInfo {
+	return nil
+}

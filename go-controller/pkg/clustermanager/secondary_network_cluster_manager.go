@@ -48,7 +48,7 @@ func (sncm *secondaryNetworkClusterManager) SetNetworkStatusReporter(errorReport
 	sncm.errorReporter = errorReporter
 }
 
-func (sncm *secondaryNetworkClusterManager) GetDefaultNetworkController() networkmanager.ReconcilableNetworkController {
+func (sncm *secondaryNetworkClusterManager) GetDefaultNetworkController() networkmanager.BaseNetworkController {
 	return nil
 }
 

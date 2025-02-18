@@ -26,6 +26,10 @@ func (nc *FakeNetworkController) Reconcile(util.NetInfo) error {
 	return nil
 }
 
+func (nc *FakeNetworkController) GetNetworkInterConnectInfo() *networkmanager.NetworkInterConnectInfo {
+	return nil
+}
+
 type FakeControllerManager struct{}
 
 func (fcm *FakeControllerManager) NewNetworkController(netInfo util.NetInfo) (networkmanager.NetworkController, error) {
@@ -36,7 +40,7 @@ func (fcm *FakeControllerManager) CleanupStaleNetworks(validNetworks ...util.Net
 	return nil
 }
 
-func (fcm *FakeControllerManager) GetDefaultNetworkController() networkmanager.ReconcilableNetworkController {
+func (fcm *FakeControllerManager) GetDefaultNetworkController() networkmanager.BaseNetworkController {
 	return nil
 }
 

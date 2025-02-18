@@ -119,7 +119,7 @@ func new(
 // case it has clean-up of it's own to do.
 type ControllerManager interface {
 	NewNetworkController(netInfo util.NetInfo) (NetworkController, error)
-	GetDefaultNetworkController() ReconcilableNetworkController
+	GetDefaultNetworkController() BaseNetworkController
 	CleanupStaleNetworks(validNetworks ...util.NetInfo) error
 
 	// Reconcile informs the manager of network changes that other managed
@@ -146,6 +146,10 @@ type BaseNetworkController interface {
 	ReconcilableNetworkController
 	Start(ctx context.Context) error
 	Stop()
+	// Network Controller capable of network inter-connect will return non-nil NetworkInterConnectInfo
+	// Active side return non-nil NetworkInterConnectInfo.StartInterConnect() and
+	// NetworkInterConnectInfo.StopInterConnect()
+	GetNetworkInterConnectInfo() *NetworkInterConnectInfo
 }
 
 // NetworkController is a BaseNetworkController that can also clean up after

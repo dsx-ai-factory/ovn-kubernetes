@@ -261,7 +261,7 @@ func (cm *ClusterManager) NewNetworkController(netInfo util.NetInfo) (networkman
 	return cm.secondaryNetClusterManager.NewNetworkController(netInfo)
 }
 
-func (cm *ClusterManager) GetDefaultNetworkController() networkmanager.ReconcilableNetworkController {
+func (cm *ClusterManager) GetDefaultNetworkController() networkmanager.BaseNetworkController {
 	return cm.defaultNetClusterController
 }
 

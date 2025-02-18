@@ -14,6 +14,7 @@ import (
 	egressqoslisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
@@ -1223,4 +1224,10 @@ func (h *defaultNetworkControllerEventHandler) SyncFunc(objs []interface{}) erro
 // This is used now for pods that are either in a PodSucceeded or in a PodFailed state.
 func (h *defaultNetworkControllerEventHandler) IsObjectInTerminalState(obj interface{}) bool {
 	return h.baseHandler.isObjectInTerminalState(h.objType, obj)
+}
+
+func (oc *DefaultNetworkController) GetNetworkInterConnectInfo() *networkmanager.NetworkInterConnectInfo {
+	return &networkmanager.NetworkInterConnectInfo{
+		LogicalEntityToConnect: &nbdb.LogicalRouter{Name: oc.GetNetworkScopedName(types.OVNClusterRouter)},
+	}
 }

@@ -1870,3 +1870,6 @@ func configureGlobalForwarding() error {
 	}
 	return nil
 }
+func (bnnc *BaseNodeNetworkController) GetNetworkInterConnectInfo() *networkmanager.NetworkInterConnectInfo {
+	return nil
+}

@@ -1127,3 +1127,9 @@ func (oc *SecondaryLayer3NetworkController) StartServiceController(wg *sync.Wait
 	}
 	return nil
 }
+
+func (oc *SecondaryLayer3NetworkController) GetNetworkInterConnectInfo() *networkmanager.NetworkInterConnectInfo {
+	return &networkmanager.NetworkInterConnectInfo{
+		LogicalEntityToConnect: &nbdb.LogicalRouter{Name: oc.GetNetworkScopedName(types.OVNClusterRouter)},
+	}
+}

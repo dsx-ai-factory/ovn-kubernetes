@@ -827,3 +827,32 @@ func (oc *SecondaryLayer2NetworkController) StartServiceController(wg *sync.Wait
 	}
 	return nil
 }
+
+func (oc *SecondaryLayer2NetworkController) GetNetworkInterConnectInfo() *networkmanager.NetworkInterConnectInfo {
+	return &networkmanager.NetworkInterConnectInfo{
+		LogicalEntityToConnect: &nbdb.LogicalSwitch{Name: oc.GetNetworkScopedName(types.OVNLayer2Switch)},
+		StartInterConnect: func(controller networkmanager.BaseNetworkController, i interface{}) error {
+			layer2ClusterSubnets := oc.Subnets()
+			switchName := oc.GetNetworkScopedName(types.OVNLayer2Switch)
+			logicalSwitch := &nbdb.LogicalSwitch{Name: switchName}
+			logicalRouter, ok := i.(*nbdb.LogicalRouter)
+			if !ok {
+				// configuration error, no retry
+				klog.Errorf("Inter-connect error: network %s can only connect to layer 3 network", oc.GetNetworkName())
+				return nil
+			}
+			return oc.ConnectToNetworks(logicalSwitch, logicalRouter, layer2ClusterSubnets)
+		},
+		StopInterConnect: func(controller networkmanager.BaseNetworkController, i interface{}) error {
+			logicalRouter, ok := i.(*nbdb.LogicalRouter)
+			if !ok {
+				// configuration error, no retry
+				klog.Errorf("Inter-connect error: network %s can only connect to layer 3 network", oc.GetNetworkName())
+				return nil
+			}
+			switchName := oc.GetNetworkScopedName(types.OVNLayer2Switch)
+			logicalSwitch := &nbdb.LogicalSwitch{Name: switchName}
+			return oc.DisconnectFromNetworks(logicalSwitch, logicalRouter)
+		},
+	}
+}

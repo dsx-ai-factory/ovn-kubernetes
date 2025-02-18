@@ -128,7 +128,7 @@ func findAllSecondaryNetworkLogicalEntities(nbClient libovsdbclient.Client) ([]*
 	return nodeSwitches, clusterRouters, nil
 }
 
-func (cm *ControllerManager) GetDefaultNetworkController() networkmanager.ReconcilableNetworkController {
+func (cm *ControllerManager) GetDefaultNetworkController() networkmanager.BaseNetworkController {
 	return cm.defaultNetworkController
 }
 

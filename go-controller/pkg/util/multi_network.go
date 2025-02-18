@@ -52,6 +52,7 @@ type NetInfo interface {
 	XDPService() bool
 	NADRoutes() []*net.IPNet
 	PhysicalNetworkName() string
+	NADToInterConnect() string
 
 	// dynamic information, can change over time
 	GetNADs() []string
@@ -659,6 +660,11 @@ func (nInfo *DefaultNetInfo) PhysicalNetworkName() string {
 	return ""
 }
 
+// NADToInterConnect returns the NAD this network is requested to inter-connect with
+func (nInfo *DefaultNetInfo) NADToInterConnect() string {
+	return ""
+}
+
 // SecondaryNetInfo holds the network name information for secondary network if non-nil
 type secondaryNetInfo struct {
 	mutableNetInfo
@@ -675,6 +681,7 @@ type secondaryNetInfo struct {
 	gatewayMAC         string
 	xdpService         bool
 	nadRoutes          []*net.IPNet
+	connectToNAD       string
 
 	ipv4mode, ipv6mode bool
 	subnets            []config.CIDRNetworkEntry
@@ -843,6 +850,11 @@ func (nInfo *secondaryNetInfo) NADRoutes() []*net.IPNet {
 	return nInfo.nadRoutes
 }
 
+// NADToInterConnect returns the NAD this network is requested to inter-connect with
+func (nInfo *secondaryNetInfo) NADToInterConnect() string {
+	return nInfo.connectToNAD
+}
+
 // JoinSubnetV4 returns the defaultNetConfInfo's JoinSubnetV4 value
 // call when ipv4mode=true
 func (nInfo *secondaryNetInfo) JoinSubnetV4() *net.IPNet {
@@ -902,6 +914,9 @@ func (nInfo *secondaryNetInfo) canReconcile(other NetInfo) bool {
 	if nInfo.primaryNetwork != other.IsPrimaryNetwork() {
 		return false
 	}
+	if nInfo.connectToNAD != other.NADToInterConnect() {
+		return false
+	}
 
 	lessCIDRNetworkEntry := func(a, b config.CIDRNetworkEntry) bool { return a.String() < b.String() }
 	if !cmp.Equal(nInfo.subnets, other.Subnets(), cmpopts.SortSlices(lessCIDRNetworkEntry)) {
@@ -938,6 +953,7 @@ func (nInfo *secondaryNetInfo) copy() *secondaryNetInfo {
 		gatewayMAC:          nInfo.gatewayMAC,
 		xdpService:          nInfo.xdpService,
 		nadRoutes:           nInfo.nadRoutes,
+		connectToNAD:        nInfo.connectToNAD,
 	}
 	// copy mutables
 	c.mutableNetInfo.copyFrom(&nInfo.mutableNetInfo)
@@ -992,6 +1008,7 @@ func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf, annotations map[string]s
 		excludeSubnets:     excludes,
 		mtu:                netconf.MTU,
 		allowPersistentIPs: netconf.AllowPersistentIPs,
+		connectToNAD:       annotations[types.OvnK8sConnectToNad],
 		mutableNetInfo: mutableNetInfo{
 			id:   InvalidID,
 			nads: sets.Set[string]{},

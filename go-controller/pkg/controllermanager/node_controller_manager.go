@@ -65,7 +65,7 @@ func (ncm *NodeControllerManager) NewNetworkController(nInfo util.NetInfo) (netw
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
 
-func (ncm *NodeControllerManager) GetDefaultNetworkController() networkmanager.ReconcilableNetworkController {
+func (ncm *NodeControllerManager) GetDefaultNetworkController() networkmanager.BaseNetworkController {
 	return ncm.defaultNodeNetworkController
 }
 

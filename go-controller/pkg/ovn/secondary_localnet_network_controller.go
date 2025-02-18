@@ -361,3 +361,7 @@ func (oc *SecondaryLocalnetNetworkController) localnetPortNetworkNameOptions() m
 	}
 	return localnetLSPOptions
 }
+
+func (oc *SecondaryLocalnetNetworkController) GetNetworkInterConnectInfo() *networkmanager.NetworkInterConnectInfo {
+	return nil
+}
