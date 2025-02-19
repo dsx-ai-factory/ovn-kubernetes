@@ -589,6 +589,11 @@ type OvnKubeNodeConfig struct {
 	DisableFirewalld bool `gcfg:"disable-firewalld"`
 	// name of admin firewalld zone
 	AdminFirewalldZone string `gcfg:"admin-firewalld-zonename"`
+	// skip ctmark for tcp/udp ports of host services
+	RawSkipCTMarkHostPorts string `gcfg:"skip-ctmark-hostports"`
+	// list of tcp/udp ports of host services that should not be subjected to CT-Marking
+	// map key is protocol type (tcp/udp for now), value is list of ports
+	SkipCTMarkHostPorts map[string][]string
 }
 
 // ClusterManagerConfig holds configuration for ovnkube-cluster-manager
@@ -1771,6 +1776,11 @@ var OvnKubeNodeFlags = []cli.Flag{
 		Usage:       "name of admin firewalld zone",
 		Destination: &cliConfig.OvnKubeNode.AdminFirewalldZone,
 	},
+	&cli.StringFlag{
+		Name:        "skip-ctmark-hostports",
+		Usage:       "list of tcp/udp ports for host services to skip CT-Marking",
+		Destination: &cliConfig.OvnKubeNode.RawSkipCTMarkHostPorts,
+	},
 }
 
 // ClusterManagerFlags captures ovnkube-cluster-manager specific configurations
@@ -2599,6 +2609,10 @@ func completeConfig() error {
 		return err
 	}
 
+	if err := completeOvnKubeNodeConfig(); err != nil {
+		return err
+	}
+
 	if err := completeClusterManagerConfig(allSubnets); err != nil {
 		return err
 	}
@@ -2872,5 +2886,39 @@ func buildOvnKubeNodeConfig(ctx *cli.Context, cli, file *config) error {
 		OvnKubeNode.IsPrimaryDPU = (isPrimaryDPU == "" || strings.ToLower(isPrimaryDPU) == "true")
 	}
 
+	return nil
+}
+
+func completeOvnKubeNodeConfig() error {
+	if OvnKubeNode.Mode == types.NodeModeDPUHost {
+		return nil
+	}
+
+	// RawSkipCTMarkHostPorts is in the form of comma separately list of port/protocol
+	skippedHostPorts := strings.Split(OvnKubeNode.RawSkipCTMarkHostPorts, ",")
+	// support TCP/UDP protocol for now
+	OvnKubeNode.SkipCTMarkHostPorts = map[string][]string{}
+	for _, proto := range []string{"tcp", "udp"} {
+		OvnKubeNode.SkipCTMarkHostPorts[proto] = []string{}
+	}
+
+	for _, portProtocol := range skippedHostPorts {
+		if strings.TrimSpace(portProtocol) == "" {
+			continue
+		}
+		fields := strings.Split(portProtocol, "/")
+		if len(fields) != 2 {
+			return fmt.Errorf("invalid SkipCTMarkHostPorts %s, expected <port>|<udp|tcp>", portProtocol)
+		}
+		proto := strings.ToLower(strings.TrimSpace(fields[1]))
+		if _, ok := OvnKubeNode.SkipCTMarkHostPorts[proto]; !ok {
+			return fmt.Errorf("invalid SkipCTMarkHostPorts %s: unsupported protocol type", portProtocol)
+		}
+		port := strings.TrimSpace(fields[0])
+		if _, err := strconv.Atoi(port); err != nil {
+			return fmt.Errorf("invalid SkipCTMarkHostPorts %s: invalid port number", portProtocol)
+		}
+		OvnKubeNode.SkipCTMarkHostPorts[proto] = append(OvnKubeNode.SkipCTMarkHostPorts[proto], port)
+	}
 	return nil
 }

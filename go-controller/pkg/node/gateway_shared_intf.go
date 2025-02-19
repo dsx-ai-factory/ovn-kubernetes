@@ -1434,22 +1434,20 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 	}
 
 	if config.IPv4Mode {
-		// table0, Geneve packets coming from external. Skip conntrack and go directly to host
-		// if dest mac is the shared mac send directly to host.
 		if ofPortPhys != "" {
-			dftFlows = append(dftFlows,
-				fmt.Sprintf("cookie=%s, priority=205, in_port=%s, dl_dst=%s, udp, udp_dst=%d, "+
-					"actions=output:%s", defaultOpenFlowCookie, ofPortPhys, bridgeMacAddress, config.Default.EncapPort,
-					ofPortHost))
-			// perform NORMAL action otherwise.
-			dftFlows = append(dftFlows,
-				fmt.Sprintf("cookie=%s, priority=200, in_port=%s, udp, udp_dst=%d, "+
-					"actions=NORMAL", defaultOpenFlowCookie, ofPortPhys, config.Default.EncapPort))
-
-			// table0, Geneve packets coming from LOCAL. Skip conntrack and go directly to external
-			dftFlows = append(dftFlows,
-				fmt.Sprintf("cookie=%s, priority=200, in_port=%s, udp, udp_dst=%d, "+
-					"actions=output:%s", defaultOpenFlowCookie, ovsLocalPort, config.Default.EncapPort, ofPortPhys))
+			for proto, ports := range config.OvnKubeNode.SkipCTMarkHostPorts {
+				for _, port := range ports {
+					// table0, for packets of the specified host services ports that configured to skip conntrack,
+					// go directly to host if dest mac is the shared mac send directly to host.
+					dftFlows = append(dftFlows,
+						fmt.Sprintf("cookie=%s, priority=205, in_port=%s, dl_dst=%s, %s, tp_dst=%s, "+
+							"actions=output:%s", defaultOpenFlowCookie, ofPortPhys, bridgeMacAddress, proto, port, ofPortHost))
+					// table0, for packets coming from host, skip conntrack and go directly to external
+					dftFlows = append(dftFlows,
+						fmt.Sprintf("cookie=%s, priority=200, in_port=%s, %s, tp_dst=%s, "+
+							"actions=output:%s", defaultOpenFlowCookie, ofPortHost, proto, port, ofPortPhys))
+				}
+			}
 		}
 		physicalIP, err := util.MatchFirstIPNetFamily(false, bridgeIPs)
 		if err != nil {
@@ -1496,21 +1494,20 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 	}
 	if config.IPv6Mode {
 		if ofPortPhys != "" {
-			// table0, Geneve packets coming from external. Skip conntrack and go directly to host
-			// if dest mac is the shared mac send directly to host.
-			dftFlows = append(dftFlows,
-				fmt.Sprintf("cookie=%s, priority=205, in_port=%s, dl_dst=%s, udp6, udp_dst=%d, "+
-					"actions=output:%s", defaultOpenFlowCookie, ofPortPhys, bridgeMacAddress, config.Default.EncapPort,
-					ofPortHost))
-			// perform NORMAL action otherwise.
-			dftFlows = append(dftFlows,
-				fmt.Sprintf("cookie=%s, priority=200, in_port=%s, udp6, udp_dst=%d, "+
-					"actions=NORMAL", defaultOpenFlowCookie, ofPortPhys, config.Default.EncapPort))
-
-			// table0, Geneve packets coming from LOCAL. Skip conntrack and send to external
-			dftFlows = append(dftFlows,
-				fmt.Sprintf("cookie=%s, priority=200, in_port=%s, udp6, udp_dst=%d, "+
-					"actions=output:%s", defaultOpenFlowCookie, ovsLocalPort, config.Default.EncapPort, ofPortPhys))
+			for proto, ports := range config.OvnKubeNode.SkipCTMarkHostPorts {
+				for _, port := range ports {
+					// table0, for packets of the specified host services ports that configured to skip conntrack,
+					// go directly to host if dest mac is the shared mac send directly to host.
+					dftFlows = append(dftFlows,
+						fmt.Sprintf("cookie=%s, priority=205, in_port=%s, dl_dst=%s, %s6, tp_dst=%s, "+
+							"actions=output:%s", defaultOpenFlowCookie, ofPortPhys, bridgeMacAddress, proto, port,
+							ofPortHost))
+					// table0, for packets coming from host, skip conntrack and go directly to external
+					dftFlows = append(dftFlows,
+						fmt.Sprintf("cookie=%s, priority=200, in_port=%s, %s6, tp_dst=%s, "+
+							"actions=output:%s", defaultOpenFlowCookie, ofPortHost, proto, port, ofPortPhys))
+				}
+			}
 		}
 
 		physicalIP, err := util.MatchFirstIPNetFamily(true, bridgeIPs)

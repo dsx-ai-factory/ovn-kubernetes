@@ -663,7 +663,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			//flowMap := udnGateway.gateway.openflowManager.flowCache
 
 			defaultFlows := udnGateway.gateway.openflowManager.getFlowCacheEntry("DEFAULT")
-			Expect(len(defaultFlows)).To(Equal(45))
+			Expect(len(defaultFlows)).To(Equal(39))
 			Expect(udnGateway.masqCTMark).To(Equal(udnGateway.masqCTMark))
 			var udnFlows int
 			for _, flow := range udnGateway.gateway.openflowManager.getFlowCacheEntry("") {
@@ -679,7 +679,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			Expect(udnGateway.AddNetwork()).To(Succeed())
 			//flowMap = udnGateway.gateway.openflowManager.flowCache
 			defaultFlows = udnGateway.gateway.openflowManager.getFlowCacheEntry("DEFAULT")
-			Expect(len(defaultFlows)).To(Equal(63))                                      // 18 UDN Flows are added by default
+			Expect(len(defaultFlows)).To(Equal(57))                                      // 18 UDN Flows are added by default
 			Expect(len(udnGateway.openflowManager.defaultBridge.netConfig)).To(Equal(2)) // default network + UDN network
 			defaultUdnConfig := udnGateway.openflowManager.defaultBridge.netConfig["default"]
 			bridgeUdnConfig := udnGateway.openflowManager.defaultBridge.netConfig["bluenet"]
@@ -714,7 +714,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			Expect(udnGateway.DelNetwork()).To(Succeed())
 			//flowMap = udnGateway.gateway.openflowManager.flowCache
 			defaultFlows = udnGateway.gateway.openflowManager.getFlowCacheEntry("DEFAULT")
-			Expect(len(defaultFlows)).To(Equal(45))
+			Expect(len(defaultFlows)).To(Equal(39))
 			Expect(len(udnGateway.openflowManager.defaultBridge.netConfig)).To(Equal(1)) // default network only
 			udnFlows = 0
 			for _, flow := range udnGateway.gateway.openflowManager.getFlowCacheEntry("") {
@@ -881,7 +881,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			OFManager.OpenFlowCacheManager.SyncFlows(localGw.openflowManager.defaultBridgeFlowID)
 			//flowMap := udnGateway.gateway.openflowManager.flowCache
 			defaultFlows := udnGateway.gateway.openflowManager.getFlowCacheEntry("DEFAULT")
-			Expect(len(defaultFlows)).To(Equal(45))
+			Expect(len(defaultFlows)).To(Equal(39))
 			Expect(udnGateway.masqCTMark).To(Equal(udnGateway.masqCTMark))
 			var udnFlows int
 			for _, flow := range udnGateway.gateway.openflowManager.getFlowCacheEntry("") {
@@ -897,7 +897,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			Expect(udnGateway.AddNetwork()).To(Succeed())
 			//flowMap = udnGateway.gateway.openflowManager.flowCache
 			defaultFlows = udnGateway.gateway.openflowManager.getFlowCacheEntry("DEFAULT")
-			Expect(len(defaultFlows)).To(Equal(63))                                      // 18 UDN Flows are added by default
+			Expect(len(defaultFlows)).To(Equal(57))                                      // 18 UDN Flows are added by default
 			Expect(len(udnGateway.openflowManager.defaultBridge.netConfig)).To(Equal(2)) // default network + UDN network
 			defaultUdnConfig := udnGateway.openflowManager.defaultBridge.netConfig["default"]
 			bridgeUdnConfig := udnGateway.openflowManager.defaultBridge.netConfig["bluenet"]
@@ -932,7 +932,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			Expect(udnGateway.DelNetwork()).To(Succeed())
 			//flowMap = udnGateway.gateway.openflowManager.flowCache
 			defaultFlows = udnGateway.gateway.openflowManager.getFlowCacheEntry("DEFAULT")
-			Expect(len(defaultFlows)).To(Equal(45))                                      // only default network flows are present
+			Expect(len(defaultFlows)).To(Equal(39))                                      // only default network flows are present
 			Expect(len(udnGateway.openflowManager.defaultBridge.netConfig)).To(Equal(1)) // default network only
 			udnFlows = 0
 			for _, flow := range udnGateway.gateway.openflowManager.getFlowCacheEntry("") {

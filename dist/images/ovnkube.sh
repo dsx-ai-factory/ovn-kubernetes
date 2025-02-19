@@ -120,6 +120,7 @@ BASEDIR=$(dirname $0)
 # OVN_OBSERV_ENABLE - enable observability for ovnkube
 # OVN_UDN_ALLOWED_DEFAULT_SERVICES - list of default cluster network services accessible from primary UDN
 # OVS_DB_TRANSACTION_TIMEOUT - timeout for OVSDB transaction, in seconds
+# OVNKUBE_SKIP_CTMARK_HOSTPORTS - list of tcp/udp ports of host services that must not be subjected to CT-Marking
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -418,6 +419,9 @@ ovn_disable_requestedchassis=${OVN_DISABLE_REQUESTEDCHASSIS:-true}
 ovn_udn_allowed_default_services=${OVN_UDN_ALLOWED_DEFAULT_SERVICES:-"default/kubernetes,kube-system/kube-dns"}
 # OVS_DB_TRANSACTION_TIMEOUT - timeout for OVSDB transaction, in seconds
 ovs_db_transaction_timeout=${OVS_DB_TRANSACTION_TIMEOUT:-100}
+# OVNKUBE_SKIP_CTMARK_HOSTPORTS - list of tcp/udp ports of host services that must not be subjected to CT-Marking.
+# It is a comma separated list of TCP/UDP port, e.g. 4791/udp,6081/udp
+ovnkube_skip_ctmark_hostports=${OVNKUBE_SKIP_CTMARK_HOSTPORTS:-}
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
@@ -1909,9 +1913,15 @@ ovnkube-controller-with-node() {
   # wait for northd to start
   wait_for_event process_ready ovn-northd
 
+  ovnkube_skip_ctmark_hostports_opts=
   if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
     echo "=============== ovnkube-controller-with-node - (ovn-node  wait for ovn-controller.pid)"
     wait_for_event process_ready ovn-controller
+
+    # check if any host service ports needs to skip CT-Marking
+    if [[ ${ovnkube_skip_ctmark_hostports} != "" ]]; then
+      ovnkube_skip_ctmark_hostports_opts="--skip-ctmark-hostports=${ovnkube_skip_ctmark_hostports}"
+    fi
   fi
 
   ovnkube_firewalld_opts=
@@ -2404,6 +2414,7 @@ ovnkube-controller-with-node() {
     ${ovnkube_metrics_tls_opts} \
     ${ovnkube_node_mgmt_port_netdev_flag} \
     ${ovnkube_node_mode_flag} \
+    ${ovnkube_skip_ctmark_hostports_opts} \
     ${OVN_NODE_PORT} \
     ${ovn_enable_dnsnameresolver_flag} \
     ${ovn_stateless_netpol_enable_flag} \
@@ -3033,6 +3044,7 @@ ovn-node() {
     fi
   fi
 
+  ovnkube_skip_ctmark_hostports_opts=
   if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
     # dpu-host mode doesn't require NOTRACK
     echo "=============== ovn-node - disable conntrack on geneve port $ovn_encap_port"
@@ -3043,6 +3055,11 @@ ovn-node() {
     iptables -t raw -C OUTPUT -p udp --dport $ovn_encap_port -j NOTRACK
     if [[ $? != 0 ]]; then
       iptables -t raw -A OUTPUT -p udp --dport $ovn_encap_port -j NOTRACK
+    fi
+
+    # check if any host service ports needs to skip CT-Marking
+    if [[ ${ovnkube_skip_ctmark_hostports} != "" ]]; then
+      ovnkube_skip_ctmark_hostports_opts="--skip-ctmark-hostports=${ovnkube_skip_ctmark_hostports}"
     fi
   fi
 
@@ -3270,6 +3287,7 @@ ovn-node() {
         ${ovnkube_node_certs_flags} \
         ${ovnkube_node_mgmt_port_netdev_flag} \
         ${ovnkube_node_mode_flag} \
+        ${ovnkube_skip_ctmark_hostports_opts} \
         ${ovn_metrics_enable_pprof_flag} \
         ${ovn_node_ssl_opts} \
 	${ovn_udn_allowed_default_services_flag} \
