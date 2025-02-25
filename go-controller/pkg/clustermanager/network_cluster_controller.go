@@ -17,6 +17,7 @@ import (
 
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
+	ipam "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	annotationalloc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/node"
@@ -728,6 +729,20 @@ func newIPAllocatorForNetwork(netInfo util.NetInfo) (subnet.Allocator, error) {
 		excludeSubnets...,
 	); err != nil {
 		return nil, err
+	}
+
+	if netInfo.NADToInterConnect() != "" {
+		gatewayIPS := make([]*net.IPNet, 0, len(subnets))
+		for _, subnet := range subnets {
+			gwIP := util.GetNodeGatewayIfAddr(subnet.CIDR).IP
+			gatewayIPS = append(
+				gatewayIPS,
+				&net.IPNet{IP: gwIP, Mask: util.GetIPFullMask(gwIP)})
+		}
+		err := ipAllocator.AllocateIPPerSubnet(netInfo.GetNetworkName(), gatewayIPS)
+		if err != nil && !ipam.IsErrAllocated(err) {
+			return nil, fmt.Errorf("failed to allocate gatewayIPs %v for %s: %w", netInfo.GetNetworkName(), gatewayIPS, err)
+		}
 	}
 
 	return ipAllocator, nil

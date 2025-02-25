@@ -5,6 +5,7 @@ import (
 	"net"
 	"time"
 
+	ipam "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -190,6 +191,21 @@ func (oc *BaseSecondaryLayer2NetworkController) initializeLogicalSwitch(switchNa
 
 	if err = oc.lsManager.AddOrUpdateSwitch(switchName, hostSubnets, excludeSubnets...); err != nil {
 		return nil, err
+	}
+
+	if oc.NADToInterConnect() != "" {
+		gatewayIPS := make([]*net.IPNet, 0, len(oc.Subnets()))
+		for _, subnet := range oc.Subnets() {
+			gwIP := util.GetNodeGatewayIfAddr(subnet.CIDR).IP
+			gatewayIPS = append(
+				gatewayIPS,
+				&net.IPNet{IP: gwIP, Mask: util.GetIPFullMask(gwIP)})
+		}
+		// It is ok if the gateway IPs are already reserved
+		err = oc.lsManager.AllocateIPs(switchName, gatewayIPS)
+		if err != nil && !ipam.IsErrAllocated(err) {
+			return nil, fmt.Errorf("failed to allocate gatewayIPs %v on %s: %w", gatewayIPS, switchName, err)
+		}
 	}
 
 	return &logicalSwitch, nil
