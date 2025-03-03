@@ -748,7 +748,7 @@ func setOvsInterfaceStatistics(interfaceBridge, interfacePort, interfaceName str
 	}
 }
 
-func setHwOffloadInfoViaEthtool(etHandler *ethtool.Ethtool, interfaceBridge, interfacePort, interfaceName,
+func setSriovInterfaceStatsViaEthtool(etHandler *ethtool.Ethtool, interfaceBridge, interfacePort, interfaceName,
 	interfaceDriverName string) {
 	// Check if this is Representor, skip anything else
 	// For ovs-doca the driver_name is mlx5_pci whereas for ovs-kernel the driver_name is mxl5e_rep
@@ -763,39 +763,46 @@ func setHwOffloadInfoViaEthtool(etHandler *ethtool.Ethtool, interfaceBridge, int
 		return
 	}
 
-	// Pod Receive is VF-Representor transmit
+	// VF-rep and uplink interface have different stats group to count bytes/packets,
+	// see https://docs.kernel.org/networking/device_drivers/ethernet/mellanox/mlx5/counters.html
+	getStatWithFallback := func(k1 string, k2 string) uint64 {
+		if v, ok := ethStats[k1]; ok {
+			return v
+		}
+		if v, ok := ethStats[k2]; ok {
+			return v
+		}
+		return 0
+	}
+
 	swRxBytes := ethStats["tx_bytes"]
 	swRxPackets := ethStats["tx_packets"]
-	totalRxBytes := ethStats["vport_tx_bytes"]
-	totalRxPackets := ethStats["vport_tx_packets"]
-	hwRxBytes := totalRxBytes - swRxBytes
-	hwRxPackets := totalRxPackets - swRxPackets
+	totalRxBytes := getStatWithFallback("vport_tx_bytes", "tx_bytes_phy")
+	totalRxPackets := getStatWithFallback("vport_tx_packets", "tx_packets_phy")
 
 	// Pod Transmit is VF-Representor receive
 	swTxBytes := ethStats["rx_bytes"]
 	swTxPackets := ethStats["rx_packets"]
-	totalTxBytes := ethStats["vport_rx_bytes"]
-	totalTxPackets := ethStats["vport_rx_packets"]
-	hwTxBytes := totalTxBytes - swTxBytes
-	hwTxPackets := totalTxPackets - swTxPackets
+	totalTxBytes := getStatWithFallback("vport_rx_bytes", "rx_bytes_phy")
+	totalTxPackets := getStatWithFallback("vport_rx_packets", "rx_packets_phy")
 
 	ovsInterfaceMetricsDataMap["interface_tx_sw_bytes"].metric.WithLabelValues(
 		interfaceBridge, interfacePort, interfaceName).Set(float64(swTxBytes))
-	ovsInterfaceMetricsDataMap["interface_tx_hw_bytes"].metric.WithLabelValues(
-		interfaceBridge, interfacePort, interfaceName).Set(float64(hwTxBytes))
+	ovsInterfaceMetricsDataMap["interface_tx_total_bytes"].metric.WithLabelValues(
+		interfaceBridge, interfacePort, interfaceName).Set(float64(totalTxBytes))
 	ovsInterfaceMetricsDataMap["interface_tx_sw_packets"].metric.WithLabelValues(
 		interfaceBridge, interfacePort, interfaceName).Set(float64(swTxPackets))
-	ovsInterfaceMetricsDataMap["interface_tx_hw_packets"].metric.WithLabelValues(
-		interfaceBridge, interfacePort, interfaceName).Set(float64(hwTxPackets))
+	ovsInterfaceMetricsDataMap["interface_tx_total_packets"].metric.WithLabelValues(
+		interfaceBridge, interfacePort, interfaceName).Set(float64(totalTxPackets))
 
 	ovsInterfaceMetricsDataMap["interface_rx_sw_bytes"].metric.WithLabelValues(
 		interfaceBridge, interfacePort, interfaceName).Set(float64(swRxBytes))
-	ovsInterfaceMetricsDataMap["interface_rx_hw_bytes"].metric.WithLabelValues(
-		interfaceBridge, interfacePort, interfaceName).Set(float64(hwRxBytes))
+	ovsInterfaceMetricsDataMap["interface_rx_total_bytes"].metric.WithLabelValues(
+		interfaceBridge, interfacePort, interfaceName).Set(float64(totalRxBytes))
 	ovsInterfaceMetricsDataMap["interface_rx_sw_packets"].metric.WithLabelValues(
 		interfaceBridge, interfacePort, interfaceName).Set(float64(swRxPackets))
-	ovsInterfaceMetricsDataMap["interface_rx_hw_packets"].metric.WithLabelValues(
-		interfaceBridge, interfacePort, interfaceName).Set(float64(hwRxPackets))
+	ovsInterfaceMetricsDataMap["interface_rx_total_packets"].metric.WithLabelValues(
+		interfaceBridge, interfacePort, interfaceName).Set(float64(totalRxPackets))
 }
 
 func setOvsPortMissPktsInfo(interfaceBridge, interfacePort, interfaceName, interfaceDriverName string) {
@@ -980,8 +987,8 @@ func ovsInterfaceMetricsUpdate(ovsDBClient libovsdbclient.Client,
 		setOvsInterfaceStatistics(interfaceData.bridge, portName, interfaceName, interfaceInfo.Statistics)
 		// set interface limits, if any, on the number of new connections (i.e. missed packets)  initiated.
 		setOvsPortMissPktsInfo(interfaceData.bridge, portName, interfaceName, interfaceInfo.Status["driver_name"])
-		// set interface hw-offload stats initiated.
-		setHwOffloadInfoViaEthtool(etHandler, interfaceData.bridge, portName, interfaceName, interfaceInfo.Status["driver_name"])
+		// set SR-IOV interface stats.
+		setSriovInterfaceStatsViaEthtool(etHandler, interfaceData.bridge, portName, interfaceName, interfaceInfo.Status["driver_name"])
 	}
 	return nil
 }
@@ -1193,31 +1200,30 @@ var ovsInterfaceMetricsDataMap = map[string]*ovsInterfaceMetricsDetails{
 	"interface_ingress_qdisc_total": {
 		help: "Denotes the total ingress filters on the device",
 	},
-	// Pod transmit metrics
+	// stats from ethtool -S
 	"interface_tx_sw_bytes": {
 		help: "Sent bytes via software OVS path",
 	},
-	"interface_tx_hw_bytes": {
-		help: "Sent bytes via hardware accelerated OVS path",
+	"interface_tx_total_bytes": {
+		help: "Sent bytes in total via net interface",
 	},
 	"interface_tx_sw_packets": {
 		help: "Sent packets via software OVS path",
 	},
-	"interface_tx_hw_packets": {
-		help: "Sent packets via hardware accelerated OVS path",
+	"interface_tx_total_packets": {
+		help: "Sent packets in total via net interface",
 	},
-	// Pod Receive metrics
 	"interface_rx_sw_bytes": {
 		help: "Received bytes via software OVS path",
 	},
-	"interface_rx_hw_bytes": {
-		help: "Received bytes via hardware accelerated OVS path",
+	"interface_rx_total_bytes": {
+		help: "Received bytes in total via net interface",
 	},
 	"interface_rx_sw_packets": {
 		help: "Received packets via software OVS path",
 	},
-	"interface_rx_hw_packets": {
-		help: "Received packets via hardware accelerated OVS path",
+	"interface_rx_total_packets": {
+		help: "Received packets in total via net interface",
 	},
 }
 
