@@ -677,8 +677,12 @@ func (oc *SecondaryLayer2NetworkController) addPortForRemoteNodeGR(node *corev1.
 }
 
 func (oc *SecondaryLayer2NetworkController) deleteNodeEvent(node *corev1.Node) error {
-	if err := oc.gatewayManagerForNode(node.Name).Cleanup(); err != nil {
-		return fmt.Errorf("failed to cleanup gateway on node %q: %w", node.Name, err)
+	// TBD-merge note that gateway Cleanup() will delete the logical router port rtos-<layer2_network_switch>
+	// whose name conflicts with logical router port used for network inter-connect to a layer2/default network
+	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
+		if err := oc.gatewayManagerForNode(node.Name).Cleanup(); err != nil {
+			return fmt.Errorf("failed to cleanup gateway on node %q: %w", node.Name, err)
+		}
 	}
 	oc.gatewayManagers.Delete(node.Name)
 	oc.localZoneNodes.Delete(node.Name)
