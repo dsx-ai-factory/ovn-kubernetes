@@ -1531,7 +1531,7 @@ runcmd:
 
 			if td.topology == "localnet" {
 				By("setting up the localnet underlay")
-				_, nodes := ovsPods(clientSet)
+				nodes, _ := ovsPods(clientSet)
 				Expect(nodes).NotTo(BeEmpty())
 				DeferCleanup(func() {
 					if e2eframework.TestContext.DeleteNamespace && (e2eframework.TestContext.DeleteNamespaceOnFailure || !CurrentSpecReport().Failed()) {

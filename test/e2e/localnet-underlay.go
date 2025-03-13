@@ -54,7 +54,7 @@ func teardownUnderlay(ovsPods []v1.Pod) error {
 	return nil
 }
 
-func ovsPods(clientSet clientset.Interface) (error, []v1.Pod) {
+func ovsPods(clientSet clientset.Interface) ([]v1.Pod, error) {
 	const (
 		ovsNodeLabel = "app=ovs-node"
 	)
@@ -62,7 +62,7 @@ func ovsPods(clientSet clientset.Interface) (error, []v1.Pod) {
 		context.Background(),
 		metav1.ListOptions{LabelSelector: ovsNodeLabel},
 	)
-	return err, pods.Items
+	return pods.Items, err
 }
 
 func addOVSBridge(ovnNodeName string, bridgeName string) error {
