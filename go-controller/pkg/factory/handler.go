@@ -35,11 +35,18 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 )
 
-// Use a pool of internal informers to allow multiplexing of events
-// between multiple internal informers.  This reduces lock contention
-// when adding/removing event handlers by distributing them between
-// internal informers.
-const internalInformerPoolSize int = 201
+var (
+	// Use a pool of internal informers to allow multiplexing of events
+	// between multiple internal informers.  This reduces lock contention
+	// when adding/removing event handlers by distributing them between
+	// internal informers.
+	internalInformerPoolSize int = 201
+)
+
+// Override internal informer pool size.  Used only for tests.
+func SetInternalInformerPoolSize(newInternalInformerPoolSize int) {
+	internalInformerPoolSize = newInternalInformerPoolSize
+}
 
 // Handler represents an event handler and is private to the factory module
 type Handler struct {

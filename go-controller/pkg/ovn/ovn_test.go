@@ -226,7 +226,8 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 	// Use shorter event queues for unit tests (reduce to 10 from the default)
 	// to avoid running out of resources in constrained CI environments
 	// (e.g., on GitHub).
-	factory.SetEventQueueSize(10)
+	factory.SetEventQueueSize(8)
+	factory.SetInternalInformerPoolSize(2)
 
 	o.watcher, err = factory.NewMasterWatchFactory(o.fakeClient)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
