@@ -20,6 +20,7 @@ import (
 	factoryMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	kubemocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
+	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -184,6 +185,7 @@ var _ = Describe("SecondaryNodeNetworkController: UserDefinedPrimaryNetwork Gate
 		// Set up a fake k8sMgmt interface
 		testNS, err = testutils.NewNS()
 		Expect(err).NotTo(HaveOccurred())
+		_ = nodenft.SetFakeNFTablesHelper()
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 			ovntest.AddLink(gatewayInterface)
