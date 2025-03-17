@@ -7,35 +7,38 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cryptorand"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
-
 	ipamclaimslister "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/listers/ipamclaims/v1alpha1"
 	multinetworkpolicylister "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/listers/k8s.cni.cncf.io/v1beta2"
 	networkattachmentdefinitionlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
-	apbrlister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/listers/adminpbr/v1beta1"
+	cloudprivateipconfiglister "github.com/openshift/client-go/cloudnetwork/listers/cloudnetwork/v1"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ktypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/rand"
+	listers "k8s.io/client-go/listers/core/v1"
+	discoverylisters "k8s.io/client-go/listers/discovery/v1"
+	netlisters "k8s.io/client-go/listers/networking/v1"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/klog/v2"
+	anplister "sigs.k8s.io/network-policy-api/pkg/client/listers/apis/v1alpha1"
+
+	apbrlister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/listers/adminpbr/v1beta1"
 	egressfirewalllister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
 	egressiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
 	egressqoslister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
 	egressservicelister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/listers/egressservice/v1"
 	ipreservationlister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/listers/ipreservation/v1beta1"
 	portmirrorlister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/listers/portmirror/v1beta1"
-	virtualiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/listers/virtualip/v1beta1"
-
-	cloudprivateipconfiglister "github.com/openshift/client-go/cloudnetwork/listers/cloudnetwork/v1"
-	anplister "sigs.k8s.io/network-policy-api/pkg/client/listers/apis/v1alpha1"
-
 	userdefinednetworklister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/listers/userdefinednetwork/v1"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	ktypes "k8s.io/apimachinery/pkg/types"
-	listers "k8s.io/client-go/listers/core/v1"
-	discoverylisters "k8s.io/client-go/listers/discovery/v1"
-	netlisters "k8s.io/client-go/listers/networking/v1"
-	"k8s.io/client-go/tools/cache"
-	"k8s.io/klog/v2"
+	virtualiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/listers/virtualip/v1beta1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 )
+
+// Use a pool of internal informers to allow multiplexing of events
+// between multiple internal informers.  This reduces lock contention
+// when adding/removing event handlers by distributing them between
+// internal informers.
+const internalInformerPoolSize int = 201
 
 // Handler represents an event handler and is private to the factory module
 type Handler struct {
@@ -52,6 +55,10 @@ type Handler struct {
 	// example: a handler with priority 0 will process the received event first
 	// before a handler with priority 1.
 	priority int
+
+	// indicates which informer.internalInformers index to use
+	// clients are distributed between internal informers
+	internalInformerIndex int
 }
 
 func (h *Handler) OnAdd(obj interface{}, isInInitialList bool) {
@@ -99,83 +106,55 @@ type queueMapEntry struct {
 	refcount int32
 }
 
-type informer struct {
+type internalInformer struct {
 	sync.RWMutex
 	oType reflect.Type
-	inf   cache.SharedIndexInformer
 	// keyed by priority - used to track the handler's priority of being invoked.
 	// example: a handler with priority 0 will process the received event first
-	// before a handler with priority 1, 0 being the higest priority.
+	// before a handler with priority 1, 0 being the highest priority.
 	// NOTE: we can have multiple handlers with the same priority hence the value
 	// is a map of handlers keyed by its unique id.
 	handlers map[int]map[uint64]*Handler
-	lister   listerInterface
+	// queueMap handles distributing events across a queued handler's queues
+	queueMap *queueMap
+	// hasHandlers is an atomic used to determine if this internal informer actually has handlers attached to it or not
+	hasHandlers uint32
+}
+
+type informer struct {
+	oType  reflect.Type
+	inf    cache.SharedIndexInformer
+	lister listerInterface
 	// initialAddFunc will be called to deliver the initial list of objects
 	// when a handler is added
 	initialAddFunc initialAddFn
 	shutdownWg     sync.WaitGroup
 
-	// queueMap handles distributing events across a queued handler's queues
-	queueMap *queueMap
+	internalInformers []*internalInformer
 }
 
-func (i *informer) forEachQueuedHandler(f func(h *Handler)) {
-	i.RLock()
-	defer i.RUnlock()
-
-	for priority := 0; priority <= minHandlerPriority; priority++ { // loop over priority higest to lowest
-		for _, handler := range i.handlers[priority] {
+func (inf *internalInformer) forEachQueuedHandler(f func(h *Handler)) {
+	inf.RLock()
+	defer inf.RUnlock()
+	for priority := 0; priority <= minHandlerPriority; priority++ { // loop over priority highest to lowest
+		for _, handler := range inf.handlers[priority] {
 			f(handler)
 		}
 	}
 }
 
-func (i *informer) forEachQueuedHandlerReversed(f func(h *Handler)) {
-	i.RLock()
-	defer i.RUnlock()
+func (inf *internalInformer) forEachQueuedHandlerReversed(f func(h *Handler)) {
+	inf.RLock()
+	defer inf.RUnlock()
 
 	for priority := minHandlerPriority; priority >= 0; priority-- { // loop over priority lowest to highest
-		for _, handler := range i.handlers[priority] {
+		for _, handler := range inf.handlers[priority] {
 			f(handler)
 		}
 	}
 }
 
-func (i *informer) forEachHandler(obj interface{}, f func(h *Handler)) {
-	i.RLock()
-	defer i.RUnlock()
-
-	objType := reflect.TypeOf(obj)
-	if objType != i.oType {
-		klog.Errorf("Object type %v did not match expected %v", objType, i.oType)
-		return
-	}
-
-	for priority := 0; priority <= minHandlerPriority; priority++ { // loop over priority higest to lowest
-		for _, handler := range i.handlers[priority] {
-			f(handler)
-		}
-	}
-}
-
-func (i *informer) forEachHandlerReversed(obj interface{}, f func(h *Handler)) {
-	i.RLock()
-	defer i.RUnlock()
-
-	objType := reflect.TypeOf(obj)
-	if objType != i.oType {
-		klog.Errorf("Object type %v did not match expected %v", objType, i.oType)
-		return
-	}
-
-	for priority := minHandlerPriority; priority >= 0; priority-- { // loop over priority lowest to highest
-		for _, handler := range i.handlers[priority] {
-			f(handler)
-		}
-	}
-}
-
-func (i *informer) addHandler(id uint64, priority int, filterFunc func(obj interface{}) bool, funcs cache.ResourceEventHandler, existingItems []interface{}) *Handler {
+func (i *informer) addHandler(internalInformerIndex int, id uint64, priority int, filterFunc func(obj interface{}) bool, funcs cache.ResourceEventHandler, existingItems []interface{}) *Handler {
 	handler := &Handler{
 		cache.FilteringResourceEventHandler{
 			FilterFunc: filterFunc,
@@ -184,6 +163,7 @@ func (i *informer) addHandler(id uint64, priority int, filterFunc func(obj inter
 		id,
 		handlerAlive,
 		priority,
+		internalInformerIndex,
 	}
 
 	// Send existing items to the handler's add function; informers usually
@@ -191,11 +171,13 @@ func (i *informer) addHandler(id uint64, priority int, filterFunc func(obj inter
 	// we must emulate that here
 	i.initialAddFunc(handler, existingItems)
 
-	_, ok := i.handlers[priority]
+	intInf := i.internalInformers[internalInformerIndex]
+
+	_, ok := intInf.handlers[priority]
 	if !ok {
-		i.handlers[priority] = make(map[uint64]*Handler)
+		intInf.handlers[priority] = make(map[uint64]*Handler)
 	}
-	i.handlers[priority][id] = handler
+	intInf.handlers[priority][id] = handler
 
 	return handler
 }
@@ -209,27 +191,38 @@ func (i *informer) removeHandler(handler *Handler) {
 	klog.V(6).Infof("Sending %v event handler %d for removal", i.oType, handler.id)
 
 	go func() {
-		i.Lock()
-		defer i.Unlock()
-		removed := 0
-		for priority := range i.handlers { // loop over priority
-			if _, ok := i.handlers[priority]; !ok {
+		intInf := i.internalInformers[handler.internalInformerIndex]
+
+		intInf.Lock()
+		defer intInf.Unlock()
+		removed := false
+		// track overall how many handlers this internal informer has
+		numHandlers := 0
+		for priority := range intInf.handlers { // loop over priority
+			if _, ok := intInf.handlers[priority]; !ok {
 				continue // protection against nil map as value
 			}
-			if _, ok := i.handlers[priority][handler.id]; ok {
+			if _, ok := intInf.handlers[priority][handler.id]; ok {
 				// Remove the handler
-				delete(i.handlers[priority], handler.id)
-				removed = 1
+				delete(intInf.handlers[priority], handler.id)
+				removed = true
 				klog.V(6).Infof("Removed %v event handler %d", i.oType, handler.id)
 			}
+			numHandlers += len(intInf.handlers[priority])
 		}
-		if removed == 0 {
+
+		// if this internal informer has no handlers, update the atomic
+		if numHandlers == 0 {
+			atomic.StoreUint32(&intInf.hasHandlers, hasNoHandler)
+		}
+
+		if !removed {
 			klog.Warningf("Tried to remove unknown object type %v event handler %d", i.oType, handler.id)
 		}
 	}()
 }
 
-func newQueueMap(numEventQueues, queueLen uint32, wg *sync.WaitGroup, stopChan chan struct{}) *queueMap {
+func newQueueMap(qSize uint32, numEventQueues uint32, wg *sync.WaitGroup, stopChan chan struct{}) *queueMap {
 	qm := &queueMap{
 		entries:  make(map[ktypes.NamespacedName]*queueMapEntry),
 		queues:   make([]chan *event, numEventQueues),
@@ -237,7 +230,7 @@ func newQueueMap(numEventQueues, queueLen uint32, wg *sync.WaitGroup, stopChan c
 		stopChan: stopChan,
 	}
 	for j := 0; j < int(numEventQueues); j++ {
-		qm.queues[j] = make(chan *event, queueLen)
+		qm.queues[j] = make(chan *event, qSize)
 	}
 	return qm
 }
@@ -276,7 +269,10 @@ func (qm *queueMap) shutdown() {
 func (qm *queueMap) getNewQueueNum() uint32 {
 	var j, startIdx, queueIdx uint32
 	numEventQueues := uint32(len(qm.queues))
-	startIdx = uint32(cryptorand.Intn(int64(numEventQueues - 1)))
+	if numEventQueues == 1 {
+		return 0
+	}
+	startIdx = uint32(rand.Intn(int(numEventQueues - 1)))
 	queueIdx = startIdx
 	lowestNum := len(qm.queues[startIdx])
 	for j = 0; j < numEventQueues; j++ {
@@ -392,24 +388,33 @@ func ensureObjectOnDelete(obj interface{}, expectedType reflect.Type) (interface
 	return obj, nil
 }
 
-func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.ResourceEventHandlerFuncs {
+func (i *informer) newFederatedQueuedHandler(internalInformerIndex int) cache.ResourceEventHandlerFuncs {
 	name := i.oType.Elem().Name()
+	intInf := i.internalInformers[internalInformerIndex]
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			i.queueMap.enqueueEvent(nil, obj, i.oType, false, func(e *event) {
+			// do not enqueue events to internal informer that has no handlers for better performance
+			if atomic.LoadUint32(&intInf.hasHandlers) == hasNoHandler {
+				return
+			}
+			intInf.queueMap.enqueueEvent(nil, obj, i.oType, false, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "add").Inc()
 				start := time.Now()
-				i.forEachQueuedHandler(func(h *Handler) {
+				intInf.forEachQueuedHandler(func(h *Handler) {
 					h.OnAdd(e.obj, false)
 				})
 				metrics.MetricResourceAddLatency.Observe(time.Since(start).Seconds())
 			})
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
-			i.queueMap.enqueueEvent(oldObj, newObj, i.oType, false, func(e *event) {
+			// do not enqueue events to internal informer that has no handlers for better performance
+			if atomic.LoadUint32(&intInf.hasHandlers) == hasNoHandler {
+				return
+			}
+			intInf.queueMap.enqueueEvent(oldObj, newObj, i.oType, false, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "update").Inc()
 				start := time.Now()
-				i.forEachQueuedHandler(func(h *Handler) {
+				intInf.forEachQueuedHandler(func(h *Handler) {
 					old := oldObj.(metav1.Object)
 					new := newObj.(metav1.Object)
 					if old.GetUID() != new.GetUID() {
@@ -430,10 +435,14 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 				klog.Errorf(err.Error())
 				return
 			}
-			i.queueMap.enqueueEvent(nil, realObj, i.oType, true, func(e *event) {
+			// do not enqueue events to internal informer that has no handlers for better performance
+			if atomic.LoadUint32(&intInf.hasHandlers) == hasNoHandler {
+				return
+			}
+			intInf.queueMap.enqueueEvent(nil, realObj, i.oType, true, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "delete").Inc()
 				start := time.Now()
-				i.forEachQueuedHandlerReversed(func(h *Handler) {
+				intInf.forEachQueuedHandlerReversed(func(h *Handler) {
 					h.OnDelete(e.obj)
 				})
 				metrics.MetricResourceDeleteLatency.Observe(time.Since(start).Seconds())
@@ -442,57 +451,15 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 	}
 }
 
-func (i *informer) newFederatedHandler() cache.ResourceEventHandlerFuncs {
-	name := i.oType.Elem().Name()
-	return cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			metrics.MetricResourceUpdateCount.WithLabelValues(name, "add").Inc()
-			start := time.Now()
-			i.forEachHandler(obj, func(h *Handler) {
-				h.OnAdd(obj, false)
-			})
-			metrics.MetricResourceAddLatency.Observe(time.Since(start).Seconds())
-		},
-		UpdateFunc: func(oldObj, newObj interface{}) {
-			metrics.MetricResourceUpdateCount.WithLabelValues(name, "update").Inc()
-			start := time.Now()
-			i.forEachHandler(newObj, func(h *Handler) {
-				old := oldObj.(metav1.Object)
-				new := newObj.(metav1.Object)
-				if old.GetUID() != new.GetUID() {
-					// This occurs not so often, so log this occurance.
-					klog.Infof("Object %s/%s is replaced, invoking delete followed by add handler", new.GetNamespace(), new.GetName())
-					h.OnDelete(oldObj)
-					h.OnAdd(newObj, false)
-				} else {
-					h.OnUpdate(oldObj, newObj)
-				}
-			})
-			metrics.MetricResourceUpdateLatency.Observe(time.Since(start).Seconds())
-		},
-		DeleteFunc: func(obj interface{}) {
-			realObj, err := ensureObjectOnDelete(obj, i.oType)
-			if err != nil {
-				klog.Errorf(err.Error())
-				return
+func (inf *informer) removeAllHandlers() {
+	for _, intInf := range inf.internalInformers {
+		intInf.Lock()
+		for _, handlers := range intInf.handlers {
+			for _, handler := range handlers {
+				inf.removeHandler(handler)
 			}
-			metrics.MetricResourceUpdateCount.WithLabelValues(name, "delete").Inc()
-			start := time.Now()
-			i.forEachHandlerReversed(realObj, func(h *Handler) {
-				h.OnDelete(realObj)
-			})
-			metrics.MetricResourceDeleteLatency.Observe(time.Since(start).Seconds())
-		},
-	}
-}
-
-func (i *informer) removeAllHandlers() {
-	i.Lock()
-	defer i.Unlock()
-	for _, handlers := range i.handlers {
-		for _, handler := range handlers {
-			i.removeHandler(handler)
 		}
+		intInf.Unlock()
 	}
 }
 
@@ -561,54 +528,43 @@ func newBaseInformer(oType reflect.Type, sharedInformer cache.SharedIndexInforme
 		return nil, err
 	}
 
+	internalInformers := make([]*internalInformer, 0, internalInformerPoolSize)
+	for i := 0; i < internalInformerPoolSize; i++ {
+		internalInformers = append(internalInformers, &internalInformer{
+			oType:    oType,
+			handlers: make(map[int]map[uint64]*Handler),
+		})
+	}
+
 	return &informer{
-		oType:    oType,
-		inf:      sharedInformer,
-		lister:   lister,
-		handlers: make(map[int]map[uint64]*Handler),
+		oType:             oType,
+		inf:               sharedInformer,
+		lister:            lister,
+		internalInformers: internalInformers,
 	}, nil
 }
 
-func newInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer) (*informer, error) {
-	i, err := newBaseInformer(oType, sharedInformer)
-	if err != nil {
-		return nil, err
-	}
-	i.initialAddFunc = func(h *Handler, items []interface{}) {
-		for _, item := range items {
-			h.OnAdd(item, false)
-		}
-	}
-	_, err = i.inf.AddEventHandler(i.newFederatedHandler())
-	if err != nil {
-		return nil, err
-	}
-	return i, nil
-
-}
-
 func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer,
-	stopChan chan struct{}, numEventQueues, queueLen, numQeueusForInitialAdd, queueLenForIntitialAdd uint32) (*informer, error) {
-	i, err := newBaseInformer(oType, sharedInformer)
+	stopChan chan struct{}, numEventQueues, queueSize, numQeueusForInitialAdd, queueLenForIntitialAdd uint32) (*informer, error) {
+	informer, err := newBaseInformer(oType, sharedInformer)
 	if err != nil {
 		return nil, err
 	}
-	i.queueMap = newQueueMap(numEventQueues, queueLen, &i.shutdownWg, stopChan)
-	i.queueMap.start()
 
-	i.initialAddFunc = func(h *Handler, items []interface{}) {
+	informer.initialAddFunc = func(h *Handler, items []interface{}) {
 		// Make a handler-specific channel array across which the
 		// initial add events will be distributed. When a new handler
 		// is added, only that handler should receive events for all
 		// existing objects.
 		addsWg := &sync.WaitGroup{}
-		addsMap := newQueueMap(numQeueusForInitialAdd, queueLenForIntitialAdd, addsWg, stopChan)
+
+		addsMap := newQueueMap(queueLenForIntitialAdd, numQeueusForInitialAdd, addsWg, stopChan)
 		addsMap.start()
 
 		// Distribute the existing items into the handler-specific
 		// channel array.
 		for _, obj := range items {
-			addsMap.enqueueEvent(nil, obj, i.oType, false, func(e *event) {
+			addsMap.enqueueEvent(nil, obj, informer.oType, false, func(e *event) {
 				h.OnAdd(e.obj, false)
 			})
 		}
@@ -618,11 +574,16 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		addsWg.Wait()
 	}
 
-	_, err = i.inf.AddEventHandler(i.newFederatedQueuedHandler(numEventQueues))
-	if err != nil {
-		return nil, err
+	for i := 0; i < internalInformerPoolSize; i++ {
+		informer.internalInformers[i].queueMap = newQueueMap(queueSize, numEventQueues, &informer.shutdownWg, stopChan)
+		informer.internalInformers[i].queueMap.start()
+
+		_, err = informer.inf.AddEventHandler(informer.newFederatedQueuedHandler(i))
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	return i, nil
+	return informer, nil
 
 }

@@ -8,10 +8,12 @@ import (
 	"strconv"
 	"syscall"
 
+	"github.com/urfave/cli/v2"
+
+	"k8s.io/klog/v2"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/cmd/ovn-kube-util/app"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/urfave/cli/v2"
-	"k8s.io/klog/v2"
 )
 
 func main() {

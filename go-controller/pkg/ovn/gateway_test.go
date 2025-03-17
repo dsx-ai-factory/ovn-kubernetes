@@ -9,8 +9,8 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
-	v1 "k8s.io/api/core/v1"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilnet "k8s.io/utils/net"
 
@@ -252,6 +252,11 @@ func generateGatewayInitExpectedNB(testData []libovsdbtest.TestData, expectedOVN
 	}
 	testData = append(testData, copp)
 
+	dynamicNeighRouters := "true"
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		dynamicNeighRouters = "false"
+	}
+
 	testData = append(testData, &nbdb.LogicalRouter{
 		UUID: GRName + "-UUID",
 		Name: GRName,
@@ -259,7 +264,7 @@ func generateGatewayInitExpectedNB(testData []libovsdbtest.TestData, expectedOVN
 			"lb_force_snat_ip":              "router_ip",
 			"snat-ct-zone":                  "0",
 			"always_learn_from_arp_request": "false",
-			"dynamic_neigh_routers":         "true",
+			"dynamic_neigh_routers":         dynamicNeighRouters,
 			"chassis":                       l3GatewayConfig.ChassisID,
 			"mac_binding_age_threshold":     types.GRMACBindingAgeThreshold,
 		},
@@ -348,15 +353,15 @@ func generateGatewayInitExpectedNB(testData []libovsdbtest.TestData, expectedOVN
 var _ = ginkgo.Describe("Gateway Init Operations", func() {
 	var (
 		fakeOvn  *FakeOVN
-		testNode v1.Node
+		testNode corev1.Node
 	)
 
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
-		config.PrepareTestConfig()
+		gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
 
 		fakeOvn = NewFakeOVN(true)
-		testNode = v1.Node{
+		testNode = corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
 			},
@@ -414,8 +419,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedSwitchLBGroup,
 					expectedRouterLBGroup,
 				},
-			}, &v1.NodeList{
-				Items: []v1.Node{
+			}, &corev1.NodeList{
+				Items: []corev1.Node{
 					testNode,
 				},
 			})
@@ -434,7 +439,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NextHops:       ovntest.MustParseIPs("169.255.33.1"),
 				NodePortEnable: true,
 			}
-			sctpSupport := false
 
 			var err error
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
@@ -445,7 +449,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				clusterIPSubnets,
 				hostSubnets,
 				l3GatewayConfig,
-				sctpSupport,
 				joinLRPIPs,
 				defLRPIPs,
 				extractExternalIPs(l3GatewayConfig),
@@ -479,6 +482,13 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				LogicalPort: types.GWRouterToExtSwitchPrefix + types.GWRouterPrefix + nodeName,
 			}
 			GRName := "GR_" + nodeName
+
+			dynamicNeighRouters := "true"
+
+			if config.OVNKubernetesFeature.EnableInterconnect {
+				dynamicNeighRouters = "false"
+			}
+
 			expectedOVNGatewayRouter := &nbdb.LogicalRouter{
 				UUID: GRName + "-UUID",
 				Name: GRName,
@@ -486,7 +496,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					"lb_force_snat_ip":              "router_ip",
 					"snat-ct-zone":                  "0",
 					"always_learn_from_arp_request": "false",
-					"dynamic_neigh_routers":         "true",
+					"dynamic_neigh_routers":         dynamicNeighRouters,
 					"mac_binding_age_threshold":     types.GRMACBindingAgeThreshold,
 				},
 				StaticRoutes: []string{routeUUID},
@@ -542,7 +552,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NextHops:       ovntest.MustParseIPs("169.255.33.1"),
 				NodePortEnable: true,
 			}
-			sctpSupport := false
 
 			var err error
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
@@ -553,7 +562,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				clusterIPSubnets,
 				hostSubnets,
 				l3GatewayConfig,
-				sctpSupport,
 				joinLRPIPs,
 				defLRPIPs,
 				extractExternalIPs(l3GatewayConfig),
@@ -587,6 +595,12 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				LogicalPort: types.GWRouterToExtSwitchPrefix + types.GWRouterPrefix + nodeName,
 			}
 			GRName := "GR_" + nodeName
+
+			dynamicNeighRouters := "true"
+			if config.OVNKubernetesFeature.EnableInterconnect {
+				dynamicNeighRouters = "false"
+			}
+
 			expectedOVNGatewayRouter := &nbdb.LogicalRouter{
 				UUID: GRName + "-UUID",
 				Name: GRName,
@@ -594,7 +608,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					"lb_force_snat_ip":              "router_ip",
 					"snat-ct-zone":                  "0",
 					"always_learn_from_arp_request": "false",
-					"dynamic_neigh_routers":         "true",
+					"dynamic_neigh_routers":         dynamicNeighRouters,
 					"mac_binding_age_threshold":     types.GRMACBindingAgeThreshold,
 				},
 				StaticRoutes: []string{routeUUID},
@@ -623,7 +637,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			a.Annotations = map[string]string{
 				util.OvnNodeMasqCIDR: "{\"ipv4\":\"170.254.169.0/16\",\"ipv6\":\"fd69::/112\"}",
 			}
-			node1 := v1.Node{ObjectMeta: a}
+			node1 := corev1.Node{ObjectMeta: a}
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					// tests migration from local to shared
@@ -641,7 +655,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedRouterLBGroup,
 				},
 			},
-				&v1.NodeList{Items: []v1.Node{node1}},
+				&corev1.NodeList{Items: []corev1.Node{node1}},
 			)
 
 			clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14")
@@ -657,7 +671,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NextHops:       ovntest.MustParseIPs("169.255.33.1"),
 				NodePortEnable: true,
 			}
-			sctpSupport := false
 
 			var err error
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
@@ -668,7 +681,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				clusterIPSubnets,
 				hostSubnets,
 				l3GatewayConfig,
-				sctpSupport,
 				joinLRPIPs,
 				defLRPIPs,
 				extractExternalIPs(l3GatewayConfig),
@@ -729,8 +741,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedSwitchLBGroup,
 					expectedRouterLBGroup,
 				},
-			}, &v1.NodeList{
-				Items: []v1.Node{
+			}, &corev1.NodeList{
+				Items: []corev1.Node{
 					testNode,
 				},
 			})
@@ -748,7 +760,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				IPAddresses:    ovntest.MustParseIPNets("169.255.33.2/24"),
 				NodePortEnable: true,
 			}
-			sctpSupport := false
 
 			var err error
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
@@ -759,7 +770,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				clusterIPSubnets,
 				hostSubnets,
 				l3GatewayConfig,
-				sctpSupport,
 				joinLRPIPs,
 				defLRPIPs,
 				extractExternalIPs(l3GatewayConfig),
@@ -812,8 +822,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedSwitchLBGroup,
 					expectedRouterLBGroup,
 				},
-			}, &v1.NodeList{
-				Items: []v1.Node{
+			}, &corev1.NodeList{
+				Items: []corev1.Node{
 					testNode,
 				},
 			})
@@ -832,7 +842,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NextHops:       ovntest.MustParseIPs("169.255.33.1"),
 				NodePortEnable: true,
 			}
-			sctpSupport := false
 
 			var err error
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
@@ -850,7 +859,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				clusterIPSubnets,
 				hostSubnets,
 				l3GatewayConfig,
-				sctpSupport,
 				joinLRPIPs,
 				defLRPIPs,
 				extractExternalIPs(l3GatewayConfig),
@@ -870,7 +878,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				clusterIPSubnets,
 				hostSubnets,
 				l3GatewayConfig,
-				sctpSupport,
 				joinLRPIPs,
 				defLRPIPs,
 				extractExternalIPs(l3GatewayConfig),
@@ -933,7 +940,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NextHops:       ovntest.MustParseIPs("169.255.33.1"),
 				NodePortEnable: true,
 			}
-			sctpSupport := false
 
 			var err error
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
@@ -950,7 +956,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				clusterIPSubnets,
 				hostSubnets,
 				l3GatewayConfig,
-				sctpSupport,
 				joinLRPIPs,
 				defLRPIPs,
 				extractExternalIPs(l3GatewayConfig),
@@ -972,7 +977,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				clusterIPSubnets,
 				hostSubnets,
 				l3GatewayConfig,
-				sctpSupport,
 				joinLRPIPs,
 				defLRPIPs,
 				extractExternalIPs(l3GatewayConfig),
@@ -1028,8 +1032,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedSwitchLBGroup,
 					expectedRouterLBGroup,
 				},
-			}, &v1.NodeList{
-				Items: []v1.Node{
+			}, &corev1.NodeList{
+				Items: []corev1.Node{
 					testNode,
 				},
 			})
@@ -1050,7 +1054,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NextHops:       ovntest.MustParseIPs("fd99::1"),
 				NodePortEnable: true,
 			}
-			sctpSupport := false
 
 			var err error
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
@@ -1061,7 +1064,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				clusterIPSubnets,
 				hostSubnets,
 				l3GatewayConfig,
-				sctpSupport,
 				joinLRPIPs,
 				defLRPIPs,
 				extractExternalIPs(l3GatewayConfig),
@@ -1112,8 +1114,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedSwitchLBGroup,
 					expectedRouterLBGroup,
 				},
-			}, &v1.NodeList{
-				Items: []v1.Node{
+			}, &corev1.NodeList{
+				Items: []corev1.Node{
 					testNode,
 				},
 			})
@@ -1132,7 +1134,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				IPAddresses:    ovntest.MustParseIPNets("fd99::2/64"),
 				NodePortEnable: true,
 			}
-			sctpSupport := false
 
 			var err error
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
@@ -1146,7 +1147,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				clusterIPSubnets,
 				hostSubnets,
 				l3GatewayConfig,
-				sctpSupport,
 				joinLRPIPs,
 				defLRPIPs,
 				extractExternalIPs(l3GatewayConfig),
@@ -1198,8 +1198,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedSwitchLBGroup,
 					expectedRouterLBGroup,
 				},
-			}, &v1.NodeList{
-				Items: []v1.Node{
+			}, &corev1.NodeList{
+				Items: []corev1.Node{
 					testNode,
 				},
 			})
@@ -1221,7 +1221,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NextHops:       ovntest.MustParseIPs("169.255.33.1", "fd99::1"),
 				NodePortEnable: true,
 			}
-			sctpSupport := false
 
 			var err error
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
@@ -1232,7 +1231,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				clusterIPSubnets,
 				hostSubnets,
 				l3GatewayConfig,
-				sctpSupport,
 				joinLRPIPs,
 				defLRPIPs,
 				extractExternalIPs(l3GatewayConfig),
@@ -1283,8 +1281,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedSwitchLBGroup,
 					expectedRouterLBGroup,
 				},
-			}, &v1.NodeList{
-				Items: []v1.Node{
+			}, &corev1.NodeList{
+				Items: []corev1.Node{
 					testNode,
 				},
 			})
@@ -1304,7 +1302,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NextHops:       ovntest.MustParseIPs("169.255.33.1"),
 				NodePortEnable: true,
 			}
-			sctpSupport := false
 			config.Gateway.DisableSNATMultipleGWs = true
 
 			var err error
@@ -1316,7 +1313,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				clusterIPSubnets,
 				hostSubnets,
 				l3GatewayConfig,
-				sctpSupport,
 				joinLRPIPs,
 				defLRPIPs,
 				extractExternalIPs(l3GatewayConfig),
@@ -1402,8 +1398,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedSwitchLBGroup,
 					expectedRouterLBGroup,
 				},
-			}, &v1.NodeList{
-				Items: []v1.Node{
+			}, &corev1.NodeList{
+				Items: []corev1.Node{
 					testNode,
 				},
 			})
@@ -1420,7 +1416,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NextHops:       ovntest.MustParseIPs("169.255.33.1"),
 				NodePortEnable: true,
 			}
-			sctpSupport := false
 			config.Gateway.DisableSNATMultipleGWs = true
 
 			var err error
@@ -1432,7 +1427,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				clusterIPSubnets,
 				hostSubnets,
 				l3GatewayConfig,
-				sctpSupport,
 				joinLRPIPs,
 				defLRPIPs,
 				extractExternalIPs(l3GatewayConfig),
@@ -1503,8 +1497,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		//			SBData: []libovsdbtest.TestData{
 		//				datapath,
 		//			},
-		//		}, &v1.NodeList{
-		//			Items: []v1.Node{
+		//		}, &corev1.NodeList{
+		//			Items: []corev1.Node{
 		//				testNode,
 		//			},
 		//		})
@@ -1626,8 +1620,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedSwitchLBGroup,
 					expectedRouterLBGroup,
 				},
-			}, &v1.NodeList{
-				Items: []v1.Node{
+			}, &corev1.NodeList{
+				Items: []corev1.Node{
 					testNode,
 				},
 			})
@@ -1649,7 +1643,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NextHops:       ovntest.MustParseIPs("169.255.33.1", "fd99::1"),
 				NodePortEnable: true,
 			}
-			sctpSupport := false
 
 			var err error
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
@@ -1660,7 +1653,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				clusterIPSubnets,
 				hostSubnets,
 				l3GatewayConfig,
-				sctpSupport,
 				joinLRPIPs,
 				defLRPIPs,
 				extractExternalIPs(l3GatewayConfig),
@@ -1723,8 +1715,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedSwitchLBGroup,
 					expectedRouterLBGroup,
 				},
-			}, &v1.NodeList{
-				Items: []v1.Node{
+			}, &corev1.NodeList{
+				Items: []corev1.Node{
 					testNode,
 				},
 			})
@@ -1741,7 +1733,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NextHops:       ovntest.MustParseIPs("169.255.33.1"),
 				NodePortEnable: true,
 			}
-			sctpSupport := false
 			config.Gateway.DisableSNATMultipleGWs = true
 
 			var err error
@@ -1753,7 +1744,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				clusterIPSubnets,
 				hostSubnets,
 				l3GatewayConfig,
-				sctpSupport,
 				joinLRPIPs,
 				defLRPIPs,
 				extractExternalIPs(l3GatewayConfig),
@@ -1858,7 +1848,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NextHops:       ovntest.MustParseIPs("169.255.33.1"),
 				NodePortEnable: true,
 			}
-			sctpSupport := false
 			config.Gateway.DisableSNATMultipleGWs = true
 
 			var err error
@@ -1871,7 +1860,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				clusterIPSubnets,
 				hostSubnets,
 				l3GatewayConfig,
-				sctpSupport,
 				joinLRPIPs,
 				defLRPIPs,
 				extractExternalIPs(l3GatewayConfig),

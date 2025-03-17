@@ -5,16 +5,16 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	kapi "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/klog/v2"
 
 	portmirror "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/klog/v2"
 )
 
 const (
@@ -118,11 +118,11 @@ func GetPortMirrorOVNName(namespace, name string) string {
 	return fmt.Sprintf("%s_%s", namespace, name)
 }
 
-func GetPortMirrorSourcePodKeyForFailedOps(pod *kapi.Pod) string {
+func GetPortMirrorSourcePodKeyForFailedOps(pod *corev1.Pod) string {
 	return fmt.Sprintf("source pod %s/%s", pod.Namespace, pod.Name)
 }
 
-func GetPortMirrorSinkPodKeyForFailedOps(pod *kapi.Pod) string {
+func GetPortMirrorSinkPodKeyForFailedOps(pod *corev1.Pod) string {
 	return fmt.Sprintf("sink pod %s/%s", pod.Namespace, pod.Name)
 }
 
@@ -130,7 +130,7 @@ func GetPortMirrorKeyForFailedOps(namespace, name string) string {
 	return fmt.Sprintf("portmirror %s/%s", namespace, name)
 }
 
-func NeedsRetry(pod *kapi.Pod, pm *PortMirror) bool {
+func NeedsRetry(pod *corev1.Pod, pm *PortMirror) bool {
 	_, boolVal := pm.SourceDetails.PodRetry.Load(GetNamespacedName(pod.Namespace, pod.Name))
 	return boolVal
 }

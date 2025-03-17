@@ -9,19 +9,19 @@ import (
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	"github.com/onsi/ginkgo/v2"
+	"github.com/onsi/gomega"
+	"github.com/urfave/cli/v2"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/urfave/cli/v2"
-
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	"github.com/onsi/ginkgo/v2"
-	"github.com/onsi/gomega"
 )
 
 var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
@@ -35,7 +35,7 @@ var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
 
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
-		config.PrepareTestConfig()
+		gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
 
 		app = cli.NewApp()
 		app.Name = "test"
@@ -74,7 +74,7 @@ var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
 
 	ginkgo.Context("skip ipam for a pod on given interface", func() {
 		ginkgo.It("reconciles a pod with skip ipam annotation and floating ip", func() {
-			app.Action = func(ctx *cli.Context) error {
+			app.Action = func(_ *cli.Context) error {
 				floatingIP := "10.193.13.5"
 				//nodeSecondarySubnet := "10.193.0.0/26"
 				namespaceT := *newNamespace("namespace1")
@@ -95,18 +95,18 @@ var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
 					"k8s.ovn.org/port-security-info":  fmt.Sprintf(`{"default/skip-ipam-nad": {"ips": ["%s"]}}`, floatingIP),
 				}
 				fakeOvn.startWithDBSetup(initialDB,
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
+					&corev1.NamespaceList{
+						Items: []corev1.Namespace{
 							namespaceT,
 						},
 					},
-					&v1.NodeList{
-						Items: []v1.Node{
+					&corev1.NodeList{
+						Items: []corev1.Node{
 							*newNode(t.nodeName, "192.168.126.202/24"),
 						},
 					},
-					&v1.PodList{
-						Items: []v1.Pod{},
+					&corev1.PodList{
+						Items: []corev1.Pod{},
 					},
 					&nettypes.NetworkAttachmentDefinitionList{
 						Items: []nettypes.NetworkAttachmentDefinition{*nad},
@@ -131,9 +131,9 @@ var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
 					if err != nil && err.Error() == "object not found" {
 						return false
 					}
-					gomega.Expect(len(lsp.PortSecurity)).To(gomega.Equal(1))
+					gomega.Expect(lsp.PortSecurity).To(gomega.HaveLen(1))
 					strs := strings.Split(lsp.PortSecurity[0], " ")
-					gomega.Expect(len(strs)).To(gomega.Equal(2))
+					gomega.Expect(strs).To(gomega.HaveLen(2))
 					gomega.Expect(strs[1]).To(gomega.Equal(floatingIP))
 					return true
 				}, 60*time.Second).Should(gomega.BeTrue())
@@ -143,7 +143,7 @@ var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 		ginkgo.It("reconciles a pod with skip ipam annotation but no floating ip", func() {
-			app.Action = func(ctx *cli.Context) error {
+			app.Action = func(_ *cli.Context) error {
 				namespaceT := *newNamespace("namespace1")
 				t := newTPod(
 					"node1",
@@ -161,18 +161,18 @@ var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
 					"k8s.ovn.org/skip-ip-on-networks": "default/skip-ipam-nad",
 				}
 				fakeOvn.startWithDBSetup(initialDB,
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
+					&corev1.NamespaceList{
+						Items: []corev1.Namespace{
 							namespaceT,
 						},
 					},
-					&v1.NodeList{
-						Items: []v1.Node{
+					&corev1.NodeList{
+						Items: []corev1.Node{
 							*newNode(t.nodeName, "192.168.126.202/24"),
 						},
 					},
-					&v1.PodList{
-						Items: []v1.Pod{},
+					&corev1.PodList{
+						Items: []corev1.Pod{},
 					},
 					&nettypes.NetworkAttachmentDefinitionList{
 						Items: []nettypes.NetworkAttachmentDefinition{*nad},
@@ -197,9 +197,9 @@ var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
 					if err != nil && err.Error() == "object not found" {
 						return false
 					}
-					gomega.Expect(len(lsp.PortSecurity)).To(gomega.Equal(1))
+					gomega.Expect(lsp.PortSecurity).To(gomega.HaveLen(1))
 					strs := strings.Split(lsp.PortSecurity[0], " ")
-					gomega.Expect(len(strs)).To(gomega.Equal(1))
+					gomega.Expect(strs).To(gomega.HaveLen(1))
 					return true
 				}, 60*time.Second).Should(gomega.BeTrue())
 				return nil

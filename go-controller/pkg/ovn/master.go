@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	kapi "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 
@@ -34,7 +34,7 @@ const (
 )
 
 // SetupMaster creates the central router and load-balancers for the network
-func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) error {
+func (oc *DefaultNetworkController) SetupMaster() error {
 	// Create default Control Plane Protection (COPP) entry for routers
 	defaultCOPPUUID, err := EnsureDefaultCOPP(oc.nbClient)
 	if err != nil {
@@ -74,7 +74,7 @@ func (oc *DefaultNetworkController) newClusterRouter() (*nbdb.LogicalRouter, err
 	)
 }
 
-func (oc *DefaultNetworkController) syncNodeManagementPortDefault(node *kapi.Node, switchName string, hostSubnets []*net.IPNet) error {
+func (oc *DefaultNetworkController) syncNodeManagementPortDefault(node *corev1.Node, switchName string, hostSubnets []*net.IPNet) error {
 	mgmtPortIPs, err := oc.syncNodeManagementPort(node, switchName, oc.GetNetworkScopedClusterRouterName(), hostSubnets)
 	if err == nil {
 		return oc.setupUDNACLs(mgmtPortIPs)
@@ -83,7 +83,7 @@ func (oc *DefaultNetworkController) syncNodeManagementPortDefault(node *kapi.Nod
 }
 
 func (oc *DefaultNetworkController) syncDefaultGatewayLogicalNetwork(
-	node *kapi.Node,
+	node *corev1.Node,
 	l3GatewayConfig *util.L3GatewayConfig,
 	hostSubnets []*net.IPNet,
 	hostAddrs []string,
@@ -118,13 +118,12 @@ func (oc *DefaultNetworkController) syncDefaultGatewayLogicalNetwork(
 		hostAddrs,
 		clusterSubnets,
 		gwLRPIPs,
-		oc.SCTPSupport,
 		oc.ovnClusterLRPToJoinIfAddrs,
 		externalIPs,
 	)
 }
 
-func (oc *DefaultNetworkController) addNode(node *kapi.Node) ([]*net.IPNet, error) {
+func (oc *DefaultNetworkController) addNode(node *corev1.Node) ([]*net.IPNet, error) {
 	// Node subnet for the default network is allocated by cluster manager.
 	// Make sure that the node is allocated with the subnet before proceeding
 	// to create OVN Northbound resources.
@@ -161,7 +160,7 @@ func (oc *DefaultNetworkController) addNode(node *kapi.Node) ([]*net.IPNet, erro
 }
 
 // check if any existing chassis entries in the SBDB mismatches with node's chassisID annotation
-func (oc *DefaultNetworkController) checkNodeChassisMismatch(node *kapi.Node) (string, error) {
+func (oc *DefaultNetworkController) checkNodeChassisMismatch(node *corev1.Node) (string, error) {
 	chassisID, err := util.ParseNodeChassisIDAnnotation(node)
 	if err != nil {
 		return "", nil
@@ -181,7 +180,7 @@ func (oc *DefaultNetworkController) checkNodeChassisMismatch(node *kapi.Node) (s
 }
 
 // delete stale chassis in SBDB if system-id of the specific node has changed.
-func (oc *DefaultNetworkController) deleteStaleNodeChassis(node *kapi.Node) error {
+func (oc *DefaultNetworkController) deleteStaleNodeChassis(node *corev1.Node) error {
 	// hostName stored in sbdb will be that of primary DPU for nodes with DPUs
 	staleChassis, err := oc.checkNodeChassisMismatch(node)
 	if err != nil {
@@ -193,7 +192,7 @@ func (oc *DefaultNetworkController) deleteStaleNodeChassis(node *kapi.Node) erro
 		}
 		if err = libovsdbops.DeleteChassisTemplateVar(oc.nbClient, &nbdb.ChassisTemplateVar{Chassis: staleChassis}); err != nil {
 			// Send an event and Log on failure
-			oc.recorder.Eventf(node, kapi.EventTypeWarning, "ErrorMismatchChassis",
+			oc.recorder.Eventf(node, corev1.EventTypeWarning, "ErrorMismatchChassis",
 				"Node %s is now with a new chassis ID. Its stale chassis template vars are still in the NBDB",
 				node.Name)
 			return fmt.Errorf("node %s is now with a new chassis ID. Its stale chassis template vars are still in the NBDB", node.Name)
@@ -204,7 +203,7 @@ func (oc *DefaultNetworkController) deleteStaleNodeChassis(node *kapi.Node) erro
 				return nil
 			}
 			// Send an event and Log on failure
-			oc.recorder.Eventf(node, kapi.EventTypeWarning, "ErrorMismatchChassis",
+			oc.recorder.Eventf(node, corev1.EventTypeWarning, "ErrorMismatchChassis",
 				"Node %s is now with a new chassis ID. Its stale chassis entry %s is still in the SBDB",
 				node.Name, staleChassis)
 			return fmt.Errorf("node %s is now with a new chassis ID. Its stale chassis entry %s is still in the SBDB", node.Name, staleChassis)
@@ -251,8 +250,8 @@ func (oc *DefaultNetworkController) syncNodesPeriodic() {
 		return
 	}
 
-	localZoneKNodes := make([]*kapi.Node, 0, len(kNodes))
-	remoteZoneKNodes := make([]*kapi.Node, 0, len(kNodes))
+	localZoneKNodes := make([]*corev1.Node, 0, len(kNodes))
+	remoteZoneKNodes := make([]*corev1.Node, 0, len(kNodes))
 	for i := range kNodes {
 		if oc.isLocalZoneNode(kNodes[i]) {
 			// For DPU case we might want to propagate DPU NotReady state as a NoSchedule taint to DPU's host
@@ -279,10 +278,10 @@ func (oc *DefaultNetworkController) syncNodesPeriodic() {
 // do not want to delete.
 func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 	foundNodes := sets.New[string]()
-	localZoneKNodes := make([]*kapi.Node, 0, len(kNodes))
-	remoteZoneKNodes := make([]*kapi.Node, 0, len(kNodes))
+	localZoneKNodes := make([]*corev1.Node, 0, len(kNodes))
+	remoteZoneKNodes := make([]*corev1.Node, 0, len(kNodes))
 	for _, tmp := range kNodes {
-		node, ok := tmp.(*kapi.Node)
+		node, ok := tmp.(*corev1.Node)
 		if !ok {
 			klog.Errorf("Spurious object in syncNodes: %v", tmp)
 			continue
@@ -382,7 +381,7 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 
 // Cleanup stale chassis and chassis template variables with no
 // corresponding nodes.
-func (oc *DefaultNetworkController) syncChassis(localZoneNodes, remoteZoneNodes []*kapi.Node) error {
+func (oc *DefaultNetworkController) syncChassis(localZoneNodes, remoteZoneNodes []*corev1.Node) error {
 	chassisList, err := libovsdbops.ListChassis(oc.sbClient)
 	if err != nil {
 		return fmt.Errorf("failed to get chassis list: error: %v", err)
@@ -503,9 +502,10 @@ type nodeSyncs struct {
 	syncGw                bool
 	syncHo                bool
 	syncZoneIC            bool
+	syncReroute           bool
 }
 
-func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
+func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *corev1.Node, nSyncs *nodeSyncs) error {
 	var hostSubnets []*net.IPNet
 	var errs []error
 	var err error
@@ -575,7 +575,7 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 			}
 		}
 
-		// If we succcessfully discovered the host subnets then add the management port.
+		// If we successfully discovered the host subnets then add the management port.
 		if hostSubnets != nil {
 			if err = oc.syncNodeManagementPortDefault(node, oc.GetNetworkScopedSwitchName(node.Name), hostSubnets); err != nil {
 				errs = append(errs, err)
@@ -649,7 +649,7 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 	return utilerrors.Join(errs...)
 }
 
-func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node, syncZoneIC bool) error {
+func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *corev1.Node, syncZoneIC bool) error {
 	// nothing to do for hybrid nodes
 	if util.NoHostSubnet(node) {
 		return nil
@@ -693,7 +693,7 @@ func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node, sy
 	return err
 }
 
-func (oc *DefaultNetworkController) deleteNodeEvent(node *kapi.Node) error {
+func (oc *DefaultNetworkController) deleteNodeEvent(node *corev1.Node) error {
 	klog.V(5).Infof("Deleting Node %q. Removing the node from "+
 		"various caches", node.Name)
 	if config.HybridOverlay.Enabled && util.NoHostSubnet(node) {
@@ -704,7 +704,7 @@ func (oc *DefaultNetworkController) deleteNodeEvent(node *kapi.Node) error {
 	return oc.deleteOVNNodeEvent(node)
 }
 
-func (oc *DefaultNetworkController) deleteOVNNodeEvent(node *kapi.Node) error {
+func (oc *DefaultNetworkController) deleteOVNNodeEvent(node *corev1.Node) error {
 	if config.HybridOverlay.Enabled {
 		if err := oc.deleteHybridOverlayPort(node); err != nil {
 			return fmt.Errorf("failed to delete hybrid overlay switch port for node %s: %w", node.Name, err)
@@ -746,7 +746,7 @@ func (oc *DefaultNetworkController) deleteOVNNodeEvent(node *kapi.Node) error {
 }
 
 // addUpdateHoNodeEvent reconsile ovn nodes when a hybrid overlay node is added.
-func (oc *DefaultNetworkController) addUpdateHoNodeEvent(node *kapi.Node) error {
+func (oc *DefaultNetworkController) addUpdateHoNodeEvent(node *corev1.Node) error {
 	if subnets, _ := util.ParseNodeHostSubnetAnnotation(node, oc.GetNetworkName()); len(subnets) > 0 {
 		klog.Infof("Node %q is used to be a OVN-K managed node, deleting it from OVN topology", node.Name)
 		if err := oc.deleteOVNNodeEvent(node); err != nil {
@@ -782,7 +782,7 @@ func (oc *DefaultNetworkController) addUpdateHoNodeEvent(node *kapi.Node) error 
 	return nil
 }
 
-func (oc *DefaultNetworkController) deleteHoNodeEvent(node *kapi.Node) error {
+func (oc *DefaultNetworkController) deleteHoNodeEvent(node *corev1.Node) error {
 	if oc.lsManager.IsNonHostSubnetSwitch(node.Name) {
 		klog.Infof("Delete hybrid overlay node switch %s", node.Name)
 		oc.lsManager.DeleteSwitch(node.Name)
@@ -805,7 +805,7 @@ func (oc *DefaultNetworkController) deleteHoNodeEvent(node *kapi.Node) error {
 // gateway-router-lrp-ifaddr to address_set created for HostNetworkNamespace.
 // This function gets called from both AddResource & UpdateResource to add IPs
 // to address_set for both local and remote zone nodes.
-func (oc *DefaultNetworkController) addIPToHostNetworkNamespaceAddrSet(node *kapi.Node) error {
+func (oc *DefaultNetworkController) addIPToHostNetworkNamespaceAddrSet(node *corev1.Node) error {
 	var hostNetworkPolicyIPs []net.IP
 
 	if util.NoHostSubnet(node) {
@@ -844,7 +844,7 @@ func (oc *DefaultNetworkController) addIPToHostNetworkNamespaceAddrSet(node *kap
 // gateway-router-lrp-ifaddr from address_set created for HostNetworkNamespace.
 // This function gets called from deleteOVNNodeEvent to remove IPs from address_set
 // for both local and remote zone nodes
-func (oc *DefaultNetworkController) delIPFromHostNetworkNamespaceAddrSet(node *kapi.Node) error {
+func (oc *DefaultNetworkController) delIPFromHostNetworkNamespaceAddrSet(node *corev1.Node) error {
 	var hostNetworkPolicyIPs []net.IP
 
 	if util.NoHostSubnet(node) {

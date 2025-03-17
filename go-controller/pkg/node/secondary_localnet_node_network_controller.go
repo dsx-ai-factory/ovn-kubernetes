@@ -6,12 +6,12 @@ import (
 	"strings"
 	"sync"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
-	kapi "k8s.io/api/core/v1"
-	"k8s.io/klog/v2"
 )
 
 // XDPInfo stores the IP/MAC information used to setup XDP service for a specific NAD
@@ -50,7 +50,7 @@ func NewSecondaryLocalnetNodeNetworkController(cnnci *CommonNodeNetworkControlle
 }
 
 // get needed XDP information from the Pod annotation
-func getPodXDPInfo(pod *kapi.Pod, nadName string) (*XDPInfo, error) {
+func getPodXDPInfo(pod *corev1.Pod, nadName string) (*XDPInfo, error) {
 	var allowedIPs []string
 	netAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
 	if err != nil {
@@ -75,7 +75,7 @@ func getPodXDPInfo(pod *kapi.Pod, nadName string) (*XDPInfo, error) {
 
 // addRepPortFunc is the localnet topology specific function called when specific Pod/NAD is added;
 // nadName is the real NAD name even for default network
-func (nc *SecondaryLocalnetNodeNetworkController) addRepPortFunc(pod *kapi.Pod, nadName string) (any, error) {
+func (nc *SecondaryLocalnetNodeNetworkController) addRepPortFunc(pod *corev1.Pod, nadName string) (any, error) {
 	// Configure XDP for this network
 	if nc.XDPService() {
 		klog.Infof("Setting up XDP service for pod %s/%s NAD %s", pod.Namespace, pod.Name, nadName)
@@ -104,7 +104,7 @@ func (nc *SecondaryLocalnetNodeNetworkController) addRepPortFunc(pod *kapi.Pod, 
 
 // delRepPortFunc is the localnet topology specific function called when specific Pod/NAD is deleted;
 // nadName is the real NAD name even for default network
-func (nc *SecondaryLocalnetNodeNetworkController) delRepPortFunc(pod *kapi.Pod, nadName string, anyInfo any) error {
+func (nc *SecondaryLocalnetNodeNetworkController) delRepPortFunc(pod *corev1.Pod, nadName string, anyInfo any) error {
 	// Remove XDP xonfigurationfor this network
 	if nc.XDPService() {
 		if anyInfo != nil {
@@ -127,7 +127,7 @@ func (nc *SecondaryLocalnetNodeNetworkController) delRepPortFunc(pod *kapi.Pod, 
 // updateRepPortFunc is the localnet topology specific function called when XDPInfo of specific Pod/NAD is updated;
 // nadName is the real NAD name even for default network
 // Note, there is a gap when we teardown old and add new; which might have a brief impact
-func (nc *SecondaryLocalnetNodeNetworkController) updateRepPortFunc(newPod *kapi.Pod, nadName string, oldAnyInfo any) (any, error) {
+func (nc *SecondaryLocalnetNodeNetworkController) updateRepPortFunc(newPod *corev1.Pod, nadName string, oldAnyInfo any) (any, error) {
 	klog.Infof("Updating XDP service for pod %s/%s NAD %s", newPod.Namespace, newPod.Name, nadName)
 	if !nc.XDPService() {
 		return nil, nil
@@ -162,7 +162,7 @@ func (nc *SecondaryLocalnetNodeNetworkController) updateRepPortFunc(newPod *kapi
 }
 
 // Start starts the default controller; handles all events and creates all needed logical entities
-func (nc *SecondaryLocalnetNodeNetworkController) Start(ctx context.Context) error {
+func (nc *SecondaryLocalnetNodeNetworkController) Start(_ context.Context) error {
 	var err error
 	klog.Infof("Start secondary node network controller of network %s", nc.GetNetworkName())
 

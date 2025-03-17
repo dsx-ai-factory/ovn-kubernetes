@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
@@ -68,7 +69,7 @@ func GetNADConfig(netattachdef *nettypes.NetworkAttachmentDefinition) (*NADConfi
 
 // IsNADConfSame compares the given two NADConfig and returns true if they are the same
 func IsNADConfSame(nadConf1 *NADConfig, nadConf2 *NADConfig) bool {
-	if nadConf1 == nil || nadConf2 == nil {
+	if nadConf1 == nil && nadConf2 == nil {
 		return true
 	}
 	if nadConf1 != nil || nadConf2 != nil {

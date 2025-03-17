@@ -5,8 +5,14 @@ import (
 	"net"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	knet "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/klog/v2"
+
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
@@ -14,14 +20,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
-
-	kapi "k8s.io/api/core/v1"
-	knet "k8s.io/api/networking/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/klog/v2"
 )
 
-func getHostNetworkPodIPs(nbClient libovsdbclient.Client, node *kapi.Node, policyType string) ([]net.IP, error) {
+func getHostNetworkPodIPs(nbClient libovsdbclient.Client, node *corev1.Node, policyType string) ([]net.IP, error) {
 	ips := []net.IP{}
 	if policyType == string(knet.PolicyTypeIngress) || policyType == "Both" {
 		// the packets from the host towards the Pod IP will have the source IP of the
@@ -112,7 +113,7 @@ func delHostnetworkPodIPFromAddressSet(nodeName, podName string, addressSet addr
 	return nil
 }
 
-func (oc *DefaultNetworkController) addHostNetworkPodToNamespace(pod *kapi.Pod) error {
+func (oc *DefaultNetworkController) addHostNetworkPodToNamespace(pod *corev1.Pod) error {
 	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(pod.Namespace, false, nil)
 	if err != nil {
 		return err
@@ -123,7 +124,7 @@ func (oc *DefaultNetworkController) addHostNetworkPodToNamespace(pod *kapi.Pod) 
 		pod.Name, "Both", nsInfo.addressSet, nsInfo.nodeHostNetPodsCache)
 }
 
-func (oc *DefaultNetworkController) delHostNetworkPodFromNamespace(pod *kapi.Pod) error {
+func (oc *DefaultNetworkController) delHostNetworkPodFromNamespace(pod *corev1.Pod) error {
 	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(pod.Namespace, false, nil)
 	if err != nil {
 		return err
@@ -205,7 +206,7 @@ func isNamespaceMulticastEnabled(annotations map[string]string) bool {
 }
 
 // AddNamespace creates corresponding addressset in ovn db
-func (oc *DefaultNetworkController) AddNamespace(ns *kapi.Namespace) error {
+func (oc *DefaultNetworkController) AddNamespace(ns *corev1.Namespace) error {
 	klog.Infof("[%s] adding namespace", ns.Name)
 	// Keep track of how long syncs take.
 	start := time.Now()
@@ -223,7 +224,7 @@ func (oc *DefaultNetworkController) AddNamespace(ns *kapi.Namespace) error {
 
 // configureNamespace ensures internal structures are updated based on namespace
 // must be called with nsInfo lock
-func (oc *DefaultNetworkController) configureNamespace(nsInfo *namespaceInfo, ns *kapi.Namespace) error {
+func (oc *DefaultNetworkController) configureNamespace(nsInfo *namespaceInfo, ns *corev1.Namespace) error {
 	var errors []error
 
 	if annotation, ok := ns.Annotations[util.RoutingExternalGWsAnnotation]; ok {
@@ -248,7 +249,7 @@ func (oc *DefaultNetworkController) configureNamespace(nsInfo *namespaceInfo, ns
 	return utilerrors.Join(errors...)
 }
 
-func (oc *DefaultNetworkController) updateNamespace(old, newer *kapi.Namespace) error {
+func (oc *DefaultNetworkController) updateNamespace(old, newer *corev1.Namespace) error {
 	var errors []error
 	klog.Infof("[%s] updating namespace", old.Name)
 
@@ -383,7 +384,7 @@ func (oc *DefaultNetworkController) updateNamespace(old, newer *kapi.Namespace) 
 	return utilerrors.Join(errors...)
 }
 
-func (oc *DefaultNetworkController) deleteNamespace(ns *kapi.Namespace) error {
+func (oc *DefaultNetworkController) deleteNamespace(ns *corev1.Namespace) error {
 	klog.Infof("[%s] deleting namespace", ns.Name)
 
 	nsInfo, err := oc.deleteNamespaceLocked(ns.Name)
@@ -407,7 +408,7 @@ func (oc *DefaultNetworkController) deleteNamespace(ns *kapi.Namespace) error {
 // ensureNamespaceLocked locks namespacesMutex, gets/creates an entry for ns, configures OVN nsInfo, and returns it
 // with its mutex locked.
 // ns is the name of the namespace, while namespace is the optional k8s namespace object
-func (oc *DefaultNetworkController) ensureNamespaceLocked(ns string, readOnly bool, namespace *kapi.Namespace) (*namespaceInfo, func(), error) {
+func (oc *DefaultNetworkController) ensureNamespaceLocked(ns string, readOnly bool, namespace *corev1.Namespace) (*namespaceInfo, func(), error) {
 	ipsGetter := func(ns string) []net.IP {
 		// special handling of host network namespace. issues/3381
 		if config.Kubernetes.HostNetworkNamespace != "" && ns == config.Kubernetes.HostNetworkNamespace {
@@ -445,7 +446,7 @@ func (oc *DefaultNetworkController) getAllHostNamespaceAddresses() []net.IP {
 
 // getHostNamespaceAddressesForNode retrives management port and gateway router LRP
 // IP of a specific node
-func (oc *DefaultNetworkController) getHostNamespaceAddressesForNode(node *kapi.Node) ([]net.IP, error) {
+func (oc *DefaultNetworkController) getHostNamespaceAddressesForNode(node *corev1.Node) ([]net.IP, error) {
 	var ips []net.IP
 	hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
 	if err != nil {

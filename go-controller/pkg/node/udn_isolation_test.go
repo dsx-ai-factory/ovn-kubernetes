@@ -3,18 +3,16 @@ package node
 import (
 	"context"
 	"fmt"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 	"net"
-	"sigs.k8s.io/yaml"
 	"strings"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/knftables"
+	"sigs.k8s.io/yaml"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
@@ -22,6 +20,9 @@ import (
 	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
 var _ = Describe("nftPodElementsSet", func() {
@@ -279,7 +280,7 @@ add rule inet ovn-kubernetes udn-isolation ip6 daddr @udn-pod-default-ips-v6 dro
 		wf, err = factory.NewNodeWatchFactory(fakeClient, []string{"node1"})
 		Expect(err).NotTo(HaveOccurred())
 
-		manager = NewUDNHostIsolationManager(true, true, wf.PodCoreInformer())
+		manager = NewUDNHostIsolationManager(true, true, wf.PodCoreInformer(), "node1", nil)
 
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -295,7 +296,7 @@ add rule inet ovn-kubernetes udn-isolation ip6 daddr @udn-pod-default-ips-v6 dro
 	}
 
 	BeforeEach(func() {
-		config.PrepareTestConfig()
+		Expect(config.PrepareTestConfig()).To(Succeed())
 		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
 		config.OVNKubernetesFeature.EnableMultiNetwork = true
 		config.IPv4Mode = true
@@ -315,19 +316,25 @@ add rule inet ovn-kubernetes udn-isolation ip6 daddr @udn-pod-default-ips-v6 dro
 	})
 
 	It("correctly handles host-network and not ready pods on initial sync", func() {
-		hostNetPod := &v1.Pod{
+		hostNetPod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "hostnet",
 				UID:       ktypes.UID("hostnet"),
 				Namespace: defaultNamespace,
+				Labels: map[string]string{
+					"k8s.ovn.org/nodeName": "node1",
+				},
 			},
 		}
 		hostNetPod.Spec.HostNetwork = true
-		notReadyPod := &v1.Pod{
+		notReadyPod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "notready",
 				UID:       ktypes.UID("notready"),
 				Namespace: defaultNamespace,
+				Labels: map[string]string{
+					"k8s.ovn.org/nodeName": "node1",
+				},
 			},
 		}
 
@@ -335,7 +342,7 @@ add rule inet ovn-kubernetes udn-isolation ip6 daddr @udn-pod-default-ips-v6 dro
 		var err error
 		wf, err = factory.NewNodeWatchFactory(fakeClient, []string{"node1"})
 		Expect(err).NotTo(HaveOccurred())
-		manager = NewUDNHostIsolationManager(true, true, wf.PodCoreInformer())
+		manager = NewUDNHostIsolationManager(true, true, wf.PodCoreInformer(), "node1", nil)
 		nft = nodenft.SetFakeNFTablesHelper()
 		manager.nft = nft
 
@@ -347,6 +354,26 @@ add rule inet ovn-kubernetes udn-isolation ip6 daddr @udn-pod-default-ips-v6 dro
 	It("correctly generates initial rules", func() {
 		start()
 		Expect(nft.Dump()).To(Equal(getExpectedDump(nil, nil)))
+	})
+
+	It("correctly handles not ready pods", func() {
+		notReadyPod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "notready",
+				UID:       ktypes.UID("notready"),
+				Namespace: defaultNamespace,
+				Labels: map[string]string{
+					"k8s.ovn.org/nodeName": "node1",
+				},
+			},
+		}
+		fakeClient = util.GetOVNClientset(notReadyPod).GetNodeClientset()
+		var err error
+		wf, err = factory.NewNodeWatchFactory(fakeClient, []string{"node1"})
+		Expect(err).NotTo(HaveOccurred())
+		manager = NewUDNHostIsolationManager(true, true, wf.PodCoreInformer(), "node1", nil)
+		Expect(wf.Start()).To(Succeed())
+		Expect(manager.reconcilePod(notReadyPod.Namespace + "/" + notReadyPod.Name)).To(Succeed())
 	})
 
 	Context("updates pod IPs", func() {
@@ -449,6 +476,27 @@ add rule inet ovn-kubernetes udn-isolation ip6 daddr @udn-pod-default-ips-v6 dro
 			}).Should(Succeed())
 		})
 
+		It("on pod update", func() {
+			start(
+				newPodWithIPs(nadNamespace, "pod1", true, []string{"1.1.1.1", "2014:100:200::1"}))
+			err := nodenft.MatchNFTRules(getExpectedDumpWithOpenPorts([]string{"1.1.1.1"}, []string{"2014:100:200::1"}, nil), nft.Dump())
+			Expect(err).NotTo(HaveOccurred())
+			pod, err := fakeClient.KubeClient.CoreV1().Pods(nadNamespace).Get(context.TODO(),
+				"pod1", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			pod.Annotations[util.UDNOpenPortsAnnotationName] = getOpenPortAnnotation([]util.OpenPort{{Protocol: "tcp", Port: intRef(80)}})[util.UDNOpenPortsAnnotationName]
+			_, err = fakeClient.KubeClient.CoreV1().Pods(nadNamespace).Update(context.TODO(),
+				pod, metav1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(func() error {
+				return nodenft.MatchNFTRules(getExpectedDumpWithOpenPorts([]string{"1.1.1.1"}, []string{"2014:100:200::1"}, map[string][]*util.OpenPort{
+					"1.1.1.1":         {{Protocol: "tcp", Port: intRef(80)}},
+					"2014:100:200::1": {{Protocol: "tcp", Port: intRef(80)}},
+				}), nft.Dump())
+			}).Should(Succeed())
+		})
+
 		It("on pod delete", func() {
 			start(
 				newPodWithIPs(nadNamespace, "pod1", true, []string{"1.1.1.1", "2014:100:200::1"}, util.OpenPort{Protocol: "tcp", Port: intRef(80)}),
@@ -495,7 +543,7 @@ func getOpenPortAnnotation(openPorts []util.OpenPort) map[string]string {
 }
 
 // newPodWithIPs creates a new pod with the given IPs, only filled for default network.
-func newPodWithIPs(namespace, name string, primaryUDN bool, ips []string, openPorts ...util.OpenPort) *v1.Pod {
+func newPodWithIPs(namespace, name string, primaryUDN bool, ips []string, openPorts ...util.OpenPort) *corev1.Pod {
 	annoPodIPs := make([]string, len(ips))
 	for i, ip := range ips {
 		if net.ParseIP(ip).To4() != nil {
@@ -512,7 +560,7 @@ func newPodWithIPs(namespace, name string, primaryUDN bool, ips []string, openPo
 	annotations[util.OvnPodAnnotationName] = fmt.Sprintf(`{"default": {"role": "%s", "ip_addresses":[%s], "mac_address":"0a:58:0a:f4:02:03"}}`,
 		role, strings.Join(annoPodIPs, ","))
 
-	return &v1.Pod{
+	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        name,
 			UID:         ktypes.UID(name),

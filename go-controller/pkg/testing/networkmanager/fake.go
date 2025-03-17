@@ -12,7 +12,7 @@ type FakeNetworkController struct {
 	util.NetInfo
 }
 
-func (fnc *FakeNetworkController) Start(ctx context.Context) error {
+func (fnc *FakeNetworkController) Start(_ context.Context) error {
 	return nil
 }
 
@@ -36,7 +36,7 @@ func (fcm *FakeControllerManager) NewNetworkController(netInfo util.NetInfo) (ne
 	return &FakeNetworkController{netInfo}, nil
 }
 
-func (fcm *FakeControllerManager) CleanupStaleNetworks(validNetworks ...util.NetInfo) error {
+func (fcm *FakeControllerManager) CleanupStaleNetworks(_ ...util.NetInfo) error {
 	return nil
 }
 
@@ -44,7 +44,7 @@ func (fcm *FakeControllerManager) GetDefaultNetworkController() networkmanager.B
 	return nil
 }
 
-func (fcm *FakeControllerManager) Reconcile(name string, old, new util.NetInfo) error {
+func (fcm *FakeControllerManager) Reconcile(_ string, _, _ util.NetInfo) error {
 	return nil
 }
 

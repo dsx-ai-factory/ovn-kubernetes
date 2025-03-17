@@ -6,11 +6,11 @@ import (
 	"sync"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
-	kapi "k8s.io/api/core/v1"
-	"k8s.io/klog/v2"
 )
 
 type PortCache struct {
@@ -60,7 +60,7 @@ func (c *PortCache) get(podNamespace, podName, nadName string) (*lpInfo, error) 
 	return nil, fmt.Errorf("logical port %s for pod %s not found in cache", logicalPort, podDesc)
 }
 
-func (c *PortCache) getAll(pod *kapi.Pod) (map[string]*lpInfo, error) {
+func (c *PortCache) getAll(pod *corev1.Pod) (map[string]*lpInfo, error) {
 	podName := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
 	c.RLock()
 	defer c.RUnlock()
@@ -75,7 +75,7 @@ func (c *PortCache) getAll(pod *kapi.Pod) (map[string]*lpInfo, error) {
 	return nil, fmt.Errorf("logical port cache for pod %s not found", podName)
 }
 
-func (c *PortCache) add(pod *kapi.Pod, logicalSwitch, nadName, uuid string, mac net.HardwareAddr, ips []*net.IPNet) *lpInfo {
+func (c *PortCache) add(pod *corev1.Pod, logicalSwitch, nadName, uuid string, mac net.HardwareAddr, ips []*net.IPNet) *lpInfo {
 	var logicalPort string
 
 	podName := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
@@ -105,7 +105,7 @@ func (c *PortCache) add(pod *kapi.Pod, logicalSwitch, nadName, uuid string, mac 
 	return portInfo
 }
 
-func (c *PortCache) remove(pod *kapi.Pod, nadName string) {
+func (c *PortCache) remove(pod *corev1.Pod, nadName string) {
 	var logicalPort string
 
 	podName := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)

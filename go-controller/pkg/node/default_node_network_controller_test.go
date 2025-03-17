@@ -8,16 +8,16 @@ import (
 	"github.com/urfave/cli/v2"
 	"github.com/vishvananda/netlink"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
-
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	netlink_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
-	kapi "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -256,14 +256,14 @@ var _ = Describe("Node", func() {
 					interval int    = 100000
 					ofintval int    = 0
 				)
-				node := kapi.Node{
+				node := corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: nodeName,
 					},
-					Status: kapi.NodeStatus{
-						Addresses: []kapi.NodeAddress{
+					Status: corev1.NodeStatus{
+						Addresses: []corev1.NodeAddress{
 							{
-								Type:    kapi.NodeExternalIP,
+								Type:    corev1.NodeExternalIP,
 								Address: nodeIP,
 							},
 						},
@@ -368,14 +368,14 @@ var _ = Describe("Node", func() {
 					interval int    = 100000
 					ofintval int    = 0
 				)
-				node := kapi.Node{
+				node := corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: nodeName,
 					},
-					Status: kapi.NodeStatus{
-						Addresses: []kapi.NodeAddress{
+					Status: corev1.NodeStatus{
+						Addresses: []corev1.NodeAddress{
 							{
-								Type:    kapi.NodeExternalIP,
+								Type:    corev1.NodeExternalIP,
 								Address: nodeIP,
 							},
 						},
@@ -448,14 +448,14 @@ var _ = Describe("Node", func() {
 				)
 				ipfixIP := net.IP{1, 2, 3, 4}
 
-				node := kapi.Node{
+				node := corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: nodeName,
 					},
-					Status: kapi.NodeStatus{
-						Addresses: []kapi.NodeAddress{
+					Status: corev1.NodeStatus{
+						Addresses: []corev1.NodeAddress{
 							{
-								Type:    kapi.NodeExternalIP,
+								Type:    corev1.NodeExternalIP,
 								Address: nodeIP,
 							},
 						},
@@ -533,14 +533,14 @@ var _ = Describe("Node", func() {
 				)
 				ipfixIP := net.IP{1, 2, 3, 4}
 
-				node := kapi.Node{
+				node := corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: nodeName,
 					},
-					Status: kapi.NodeStatus{
-						Addresses: []kapi.NodeAddress{
+					Status: corev1.NodeStatus{
+						Addresses: []corev1.NodeAddress{
 							{
-								Type:    kapi.NodeExternalIP,
+								Type:    corev1.NodeExternalIP,
 								Address: nodeIP,
 							},
 						},
@@ -618,14 +618,14 @@ var _ = Describe("Node", func() {
 					interval int    = 100000
 					ofintval int    = 0
 				)
-				node := kapi.Node{
+				node := corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: nodeName,
 					},
-					Status: kapi.NodeStatus{
-						Addresses: []kapi.NodeAddress{
+					Status: corev1.NodeStatus{
+						Addresses: []corev1.NodeAddress{
 							{
-								Type:    kapi.NodeExternalIP,
+								Type:    corev1.NodeExternalIP,
 								Address: nodeIP,
 							},
 						},
@@ -706,14 +706,14 @@ var _ = Describe("Node", func() {
 					ofintval int    = 0
 					encapIPs string = "10.0.0.1,10.0.0.2,10.0.0.3"
 				)
-				node := kapi.Node{
+				node := corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: nodeName,
 					},
-					Status: kapi.NodeStatus{
-						Addresses: []kapi.NodeAddress{
+					Status: corev1.NodeStatus{
+						Addresses: []corev1.NodeAddress{
 							{
-								Type:    kapi.NodeExternalIP,
+								Type:    corev1.NodeExternalIP,
 								Address: nodeIP,
 							},
 						},

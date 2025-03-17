@@ -3,107 +3,38 @@ package factory
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
 	"reflect"
 	"sync/atomic"
 	"time"
-
-	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
-	anpscheme "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned/scheme"
-	anpinformerfactory "sigs.k8s.io/network-policy-api/pkg/client/informers/externalversions"
-	anpinformer "sigs.k8s.io/network-policy-api/pkg/client/informers/externalversions/apis/v1alpha1"
-
-	ocpnetworkapiv1alpha1 "github.com/openshift/api/network/v1alpha1"
-	ocpnetworkscheme "github.com/openshift/client-go/network/clientset/versioned/scheme"
-	ocpnetworkinformerfactory "github.com/openshift/client-go/network/informers/externalversions"
-	ocpnetworkinformerv1alpha1 "github.com/openshift/client-go/network/informers/externalversions/network/v1alpha1"
-
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
-	egressfirewallscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/scheme"
-	egressfirewallinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/informers/externalversions"
-	egressfirewallinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/informers/externalversions/egressfirewall/v1"
-	egressfirewalllister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
-	egressipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
-	egressipscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/scheme"
-	egressipinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions"
-	egressipinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions/egressip/v1"
-	egressiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
-
-	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
-	ocpcloudnetworkinformerfactory "github.com/openshift/client-go/cloudnetwork/informers/externalversions"
-	ocpcloudnetworklister "github.com/openshift/client-go/cloudnetwork/listers/cloudnetwork/v1"
-
-	egressqosapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
-	egressqosscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/scheme"
-	egressqosinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions"
-	egressqosinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions/egressqos/v1"
-
-	adminpbrapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
-	adminpbrinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/informers/externalversions"
-	adminpbrlisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/listers/adminpbr/v1beta1"
-
-	virtualipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
-	virtualipscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/clientset/versioned/scheme"
-	virtualipinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/informers/externalversions"
-	virtualiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/listers/virtualip/v1beta1"
-
-	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	nadscheme "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/scheme"
-	nadinformerfactory "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions"
-	nadinformer "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
-	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
-
-	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta2"
-	mnpscheme "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/scheme"
-	mnpinformerfactory "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/informers/externalversions"
-	mnplister "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/listers/k8s.cni.cncf.io/v1beta2"
-
-	egressserviceapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
-	egressservicescheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/scheme"
-	egressserviceinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/informers/externalversions"
-	egressserviceinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/informers/externalversions/egressservice/v1"
-
-	ipreservationapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
-	ipreservationscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/clientset/versioned/scheme"
-	ipreservationinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/informers/externalversions"
-	ipresvinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/informers/externalversions/ipreservation/v1beta1"
-	ipreservationlister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/listers/ipreservation/v1beta1"
-
-	adminbasedpolicyapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
-	adminbasedpolicyscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/scheme"
-	adminbasedpolicyinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions"
-	adminpolicybasedrouteinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions/adminpolicybasedroute/v1"
-
-	portmirrorapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
-	portmirrorscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned/scheme"
-	portmirrorinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/informers/externalversions"
-	portmirrorlister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/listers/portmirror/v1beta1"
 
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	ipamclaimsscheme "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/clientset/versioned/scheme"
 	ipamclaimsfactory "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/informers/externalversions"
 	ipamclaimsinformer "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/informers/externalversions/ipamclaims/v1alpha1"
 	ipamclaimslister "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/listers/ipamclaims/v1alpha1"
-
-	userdefinednetworkapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
-	userdefinednetworkscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/scheme"
-	userdefinednetworkapiinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/informers/externalversions"
-	userdefinednetworkinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/informers/externalversions/userdefinednetwork/v1"
-
-	routeadvertisementsapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1"
-	routeadvertisementsscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned/scheme"
-	routeadvertisementsinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions"
-	routeadvertisementsinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions/routeadvertisements/v1"
-
+	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta2"
+	mnpscheme "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/scheme"
+	mnpinformerfactory "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/informers/externalversions"
+	mnplister "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/listers/k8s.cni.cncf.io/v1beta2"
+	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	nadscheme "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/scheme"
+	nadinformerfactory "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions"
+	nadinformer "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
+	nadlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	frrapi "github.com/metallb/frr-k8s/api/v1beta1"
 	frrscheme "github.com/metallb/frr-k8s/pkg/client/clientset/versioned/scheme"
 	frrinformerfactory "github.com/metallb/frr-k8s/pkg/client/informers/externalversions"
 	frrinformer "github.com/metallb/frr-k8s/pkg/client/informers/externalversions/api/v1beta1"
+	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
+	ocpnetworkapiv1alpha1 "github.com/openshift/api/network/v1alpha1"
+	ocpcloudnetworkinformerfactory "github.com/openshift/client-go/cloudnetwork/informers/externalversions"
+	ocpcloudnetworklister "github.com/openshift/client-go/cloudnetwork/listers/cloudnetwork/v1"
+	ocpnetworkscheme "github.com/openshift/client-go/network/clientset/versioned/scheme"
+	ocpnetworkinformerfactory "github.com/openshift/client-go/network/informers/externalversions"
+	ocpnetworkinformerv1alpha1 "github.com/openshift/client-go/network/informers/externalversions/network/v1alpha1"
 
-	kapi "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	knet "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -122,13 +53,70 @@ import (
 	netlisters "k8s.io/client-go/listers/networking/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
+	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
+	anpscheme "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned/scheme"
+	anpinformerfactory "sigs.k8s.io/network-policy-api/pkg/client/informers/externalversions"
+	anpinformer "sigs.k8s.io/network-policy-api/pkg/client/informers/externalversions/apis/v1alpha1"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	adminpbrapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
+	adminpbrinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/informers/externalversions"
+	adminpbrlisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/listers/adminpbr/v1beta1"
+	adminbasedpolicyapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
+	adminbasedpolicyscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/scheme"
+	adminbasedpolicyinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions"
+	adminpolicybasedrouteinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions/adminpolicybasedroute/v1"
+	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+	egressfirewallscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/scheme"
+	egressfirewallinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/informers/externalversions"
+	egressfirewallinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/informers/externalversions/egressfirewall/v1"
+	egressfirewalllister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
+	egressipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
+	egressipscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/scheme"
+	egressipinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions"
+	egressipinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions/egressip/v1"
+	egressiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
+	egressqosapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
+	egressqosscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/scheme"
+	egressqosinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions"
+	egressqosinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions/egressqos/v1"
+	egressserviceapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
+	egressservicescheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/scheme"
+	egressserviceinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/informers/externalversions"
+	egressserviceinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/informers/externalversions/egressservice/v1"
+	ipreservationapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
+	ipreservationscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/clientset/versioned/scheme"
+	ipreservationinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/informers/externalversions"
+	ipresvinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/informers/externalversions/ipreservation/v1beta1"
+	ipreservationlister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/listers/ipreservation/v1beta1"
+	portmirrorapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
+	portmirrorinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/informers/externalversions"
+	portmirrorlister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/listers/portmirror/v1beta1"
+	routeadvertisementsapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1"
+	routeadvertisementsscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned/scheme"
+	routeadvertisementsinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions"
+	routeadvertisementsinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions/routeadvertisements/v1"
+	userdefinednetworkapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
+	userdefinednetworkscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/scheme"
+	userdefinednetworkapiinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/informers/externalversions"
+	userdefinednetworkinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/informers/externalversions/userdefinednetwork/v1"
+	virtualipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
+	virtualipscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/clientset/versioned/scheme"
+	virtualipinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/informers/externalversions"
+	virtualiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/listers/virtualip/v1beta1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
+
+type handlerCounter struct {
+	// Must be first member in the struct due to Golang ARM/x86 32-bit
+	// requirements with atomic accesses
+	counter uint64
+}
 
 // WatchFactory initializes and manages common kube watches
 type WatchFactory struct {
-	// Must be first member in the struct due to Golang ARM/x86 32-bit
-	// requirements with atomic accesses
-	handlerCounter uint64
+	handlerCounter *handlerCounter
 
 	iFactory             informerfactory.SharedInformerFactory
 	anpFactory           anpinformerfactory.SharedInformerFactory
@@ -152,10 +140,45 @@ type WatchFactory struct {
 	informers            map[reflect.Type]*informer
 
 	stopChan chan struct{}
+
+	// Shallow watch factory clones potentially use different internal
+	// informers (to allow multiplexing and load sharing).
+	internalInformerIndex int
+}
+
+func (wf *WatchFactory) ShallowClone() *WatchFactory {
+	return &WatchFactory{
+		handlerCounter:       wf.handlerCounter,
+		iFactory:             wf.iFactory,
+		anpFactory:           wf.anpFactory,
+		eipFactory:           wf.eipFactory,
+		efFactory:            wf.efFactory,
+		dnsFactory:           wf.dnsFactory,
+		cpipcFactory:         wf.cpipcFactory,
+		egressQoSFactory:     wf.egressQoSFactory,
+		mnpFactory:           wf.mnpFactory,
+		egressServiceFactory: wf.egressServiceFactory,
+		apbRouteFactory:      wf.apbRouteFactory,
+		ipamClaimsFactory:    wf.ipamClaimsFactory,
+		nadFactory:           wf.nadFactory,
+		udnFactory:           wf.udnFactory,
+		raFactory:            wf.raFactory,
+		frrFactory:           wf.frrFactory,
+		adminPBRFactory:      wf.adminPBRFactory,
+		vipFactory:           wf.vipFactory,
+		ipresvFactory:        wf.ipresvFactory,
+		portMirrorFactory:    wf.portMirrorFactory,
+		informers:            wf.informers,
+		stopChan:             wf.stopChan,
+
+		// Choose a random internalInformer to use for this clone of the
+		// factory.  Reserve index 0 for default network handlers.
+		internalInformerIndex: rand.IntN(internalInformerPoolSize-1) + 1,
+	}
 }
 
 // WatchFactory implements the ObjectCacheInterface interface.
-var _ ObjectCacheInterface = &WatchFactory{}
+var _ ObjectCacheInterface = &WatchFactory{handlerCounter: &handlerCounter{}}
 
 const (
 	// resync time is 0, none of the resources being watched in ovn-kubernetes have
@@ -170,12 +193,29 @@ const (
 
 	// namespace, node, and pod handlers
 	defaultNumEventQueues uint32 = 15
+	// rest of handlers
+	minNumEventQueues = 1
 
 	// default priorities for various handlers (also the highest priority)
 	defaultHandlerPriority int = 0
 	// lowest priority among various handlers (See GetHandlerPriority for more information)
 	minHandlerPriority int = 4
+
+	// used to determine if an internal informer has handlers attached to it or not
+	hasNoHandler uint32 = 0
+	hasHandler   uint32 = 1
 )
+
+var (
+	// Use a larger queue for incoming events to avoid bottlenecks
+	// due to handlers being slow.
+	eventQueueSize uint32 = 100
+)
+
+// Override default event queue configuration.  Used only for tests.
+func SetEventQueueSize(newEventQueueSize uint32) {
+	eventQueueSize = newEventQueueSize
+}
 
 // types for dynamic handlers created when adding a network policy
 type addressSetNamespaceAndPodSelector struct{}
@@ -197,12 +237,12 @@ type serviceForFakeNodePortWatcher struct{} // only for unit tests
 
 var (
 	// Resource types used in ovnk master
-	PodType                               reflect.Type = reflect.TypeOf(&kapi.Pod{})
-	ServiceType                           reflect.Type = reflect.TypeOf(&kapi.Service{})
+	PodType                               reflect.Type = reflect.TypeOf(&corev1.Pod{})
+	ServiceType                           reflect.Type = reflect.TypeOf(&corev1.Service{})
 	EndpointSliceType                     reflect.Type = reflect.TypeOf(&discovery.EndpointSlice{})
 	PolicyType                            reflect.Type = reflect.TypeOf(&knet.NetworkPolicy{})
-	NamespaceType                         reflect.Type = reflect.TypeOf(&kapi.Namespace{})
-	NodeType                              reflect.Type = reflect.TypeOf(&kapi.Node{})
+	NamespaceType                         reflect.Type = reflect.TypeOf(&corev1.Namespace{})
+	NodeType                              reflect.Type = reflect.TypeOf(&corev1.Node{})
 	EgressFirewallType                    reflect.Type = reflect.TypeOf(&egressfirewallapi.EgressFirewall{})
 	EgressIPType                          reflect.Type = reflect.TypeOf(&egressipapi.EgressIP{})
 	EgressIPNamespaceType                 reflect.Type = reflect.TypeOf(&egressIPNamespace{})
@@ -247,7 +287,9 @@ func NewMasterWatchFactory(ovnClientset *util.OVNMasterClientset) (*WatchFactory
 	}
 	wf.cpipcFactory = ocpcloudnetworkinformerfactory.NewSharedInformerFactory(ovnClientset.CloudNetworkClient, resyncInterval)
 	if util.PlatformTypeIsEgressIPCloudProvider() {
-		wf.informers[CloudPrivateIPConfigType], err = newInformer(CloudPrivateIPConfigType, wf.cpipcFactory.Cloud().V1().CloudPrivateIPConfigs().Informer())
+		wf.informers[CloudPrivateIPConfigType], err = newQueuedInformer(CloudPrivateIPConfigType,
+			wf.cpipcFactory.Cloud().V1().CloudPrivateIPConfigs().Informer(), wf.stopChan, minNumEventQueues,
+			eventQueueSize, minNumEventQueues, eventQueueSize)
 		if err != nil {
 			return nil, err
 		}
@@ -261,8 +303,8 @@ func informerObjectTrim(obj interface{}) (interface{}, error) {
 	if accessor, err := meta.Accessor(obj); err == nil {
 		accessor.SetManagedFields(nil)
 	}
-	if pod, ok := obj.(*kapi.Pod); ok {
-		pod.Spec.Volumes = []kapi.Volume{}
+	if pod, ok := obj.(*corev1.Pod); ok {
+		pod.Spec.Volumes = []corev1.Volume{}
 		for i := range pod.Spec.Containers {
 			pod.Spec.Containers[i].Command = nil
 			pod.Spec.Containers[i].Args = nil
@@ -282,6 +324,7 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 	// the downside of making it tight (like 10 minutes) is needless spinning on all resources
 	// However, AddEventHandlerWithResyncPeriod can specify a per handler resync period
 	wf := &WatchFactory{
+		handlerCounter:       &handlerCounter{},
 		iFactory:             informerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.KubeClient, resyncInterval, informerfactory.WithTransform(informerObjectTrim)),
 		anpFactory:           anpinformerfactory.NewSharedInformerFactory(ovnClientset.ANPClient, resyncInterval),
 		eipFactory:           egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
@@ -351,10 +394,10 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 
 	// For Services and Endpoints, pre-populate the shared Informer with one that
 	// has a label selector excluding headless services.
-	wf.iFactory.InformerFor(&kapi.Service{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+	wf.iFactory.InformerFor(&corev1.Service{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
 		return v1coreinformers.NewFilteredServiceInformer(
 			c,
-			kapi.NamespaceAll,
+			corev1.NamespaceAll,
 			resyncPeriod,
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 			noAlternateProxySelector())
@@ -363,7 +406,7 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 	wf.iFactory.InformerFor(&discovery.EndpointSlice{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
 		return discoveryinformers.NewFilteredEndpointSliceInformer(
 			c,
-			kapi.NamespaceAll,
+			corev1.NamespaceAll,
 			resyncPeriod,
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 			getEndpointSliceSelector())
@@ -372,7 +415,7 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 	var err error
 	// Create our informer-wrapper informer (and underlying shared informer) for types we need
 	wf.informers[PodType], err = newQueuedInformer(PodType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
-		defaultNumEventQueues, 10, 30, 50)
+		defaultNumEventQueues, 10, 30, 50) // TBD-merge upstream: defaultNumEventQueues, eventQueueSize, defaultNumEventQueues, defaultNumEventQueues
 	if err != nil {
 		return nil, err
 	}
@@ -388,46 +431,55 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		return nil, fmt.Errorf("failed to add pod indexers: %v", err)
 	}
 
-	wf.informers[ServiceType], err = newInformer(ServiceType, wf.iFactory.Core().V1().Services().Informer())
+	wf.informers[ServiceType], err = newQueuedInformer(ServiceType, wf.iFactory.Core().V1().Services().Informer(),
+		wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[PolicyType], err = newInformer(PolicyType, wf.iFactory.Networking().V1().NetworkPolicies().Informer())
+	wf.informers[PolicyType], err = newQueuedInformer(PolicyType, wf.iFactory.Networking().V1().NetworkPolicies().Informer(),
+		wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[NamespaceType], err = newQueuedInformer(NamespaceType, wf.iFactory.Core().V1().Namespaces().Informer(),
-		wf.stopChan, defaultNumEventQueues, 10, defaultNumEventQueues, 10)
+	wf.informers[NamespaceType], err = newQueuedInformer(NamespaceType, wf.iFactory.Core().V1().Namespaces().Informer(), wf.stopChan,
+		defaultNumEventQueues, 10, defaultNumEventQueues, 10) // TBD-merge upstream: defaultNumEventQueues, eventQueueSize, defaultNumEventQueues, defaultNumEventQueues
 	if err != nil {
 		return nil, err
 	}
 	wf.informers[NodeType], err = newQueuedInformer(NodeType, wf.iFactory.Core().V1().Nodes().Informer(), wf.stopChan,
-		defaultNumEventQueues, 10, 30, 50)
+		defaultNumEventQueues, 10, 30, 50) // TBD-merge upstream: defaultNumEventQueues, eventQueueSize, defaultNumEventQueues, defaultNumEventQueues
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[EndpointSliceType], err = newInformer(EndpointSliceType, wf.iFactory.Discovery().V1().EndpointSlices().Informer())
+	wf.informers[EndpointSliceType], err = newQueuedInformer(EndpointSliceType, wf.iFactory.Discovery().V1().EndpointSlices().Informer(),
+		wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 	if err != nil {
 		return nil, err
 	}
 	if config.OVNKubernetesFeature.EnableAdminNetworkPolicy {
-		wf.informers[AdminNetworkPolicyType], err = newInformer(AdminNetworkPolicyType, wf.anpFactory.Policy().V1alpha1().AdminNetworkPolicies().Informer())
+		wf.informers[AdminNetworkPolicyType], err = newQueuedInformer(AdminNetworkPolicyType,
+			wf.anpFactory.Policy().V1alpha1().AdminNetworkPolicies().Informer(), wf.stopChan,
+			minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 		if err != nil {
 			return nil, err
 		}
-		wf.informers[BaselineAdminNetworkPolicyType], err = newInformer(BaselineAdminNetworkPolicyType, wf.anpFactory.Policy().V1alpha1().BaselineAdminNetworkPolicies().Informer())
+		wf.informers[BaselineAdminNetworkPolicyType], err = newQueuedInformer(BaselineAdminNetworkPolicyType,
+			wf.anpFactory.Policy().V1alpha1().BaselineAdminNetworkPolicies().Informer(), wf.stopChan,
+			minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 		if err != nil {
 			return nil, err
 		}
 	}
 	if config.OVNKubernetesFeature.EnableEgressIP {
-		wf.informers[EgressIPType], err = newInformer(EgressIPType, wf.eipFactory.K8s().V1().EgressIPs().Informer())
+		wf.informers[EgressIPType], err = newQueuedInformer(EgressIPType, wf.eipFactory.K8s().V1().EgressIPs().Informer(), wf.stopChan,
+			minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 		if err != nil {
 			return nil, err
 		}
 	}
 	if config.OVNKubernetesFeature.EnableEgressFirewall {
-		wf.informers[EgressFirewallType], err = newInformer(EgressFirewallType, wf.efFactory.K8s().V1().EgressFirewalls().Informer())
+		wf.informers[EgressFirewallType], err = newQueuedInformer(EgressFirewallType, wf.efFactory.K8s().V1().EgressFirewalls().Informer(),
+			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 		if err != nil {
 			return nil, err
 		}
@@ -438,13 +490,17 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		}
 	}
 	if config.OVNKubernetesFeature.EnableEgressQoS {
-		wf.informers[EgressQoSType], err = newInformer(EgressQoSType, wf.egressQoSFactory.K8s().V1().EgressQoSes().Informer())
+		wf.informers[EgressQoSType], err = newQueuedInformer(EgressQoSType, wf.egressQoSFactory.K8s().V1().EgressQoSes().Informer(),
+			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
+
 		if err != nil {
 			return nil, err
 		}
 	}
 	if config.OVNKubernetesFeature.EnableEgressService {
-		wf.informers[EgressServiceType], err = newInformer(EgressServiceType, wf.egressServiceFactory.K8s().V1().EgressServices().Informer())
+		wf.informers[EgressServiceType], err = newQueuedInformer(EgressServiceType,
+			wf.egressServiceFactory.K8s().V1().EgressServices().Informer(), wf.stopChan,
+			minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 		if err != nil {
 			return nil, err
 		}
@@ -452,14 +508,18 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
 		wf.nadFactory = nadinformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval)
-		wf.informers[NetworkAttachmentDefinitionType], err = newInformer(NetworkAttachmentDefinitionType, wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer())
+		wf.informers[NetworkAttachmentDefinitionType], err = newQueuedInformer(NetworkAttachmentDefinitionType,
+			wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer(), wf.stopChan,
+			minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 		if err != nil {
 			return nil, err
 		}
 
 		if config.OVNKubernetesFeature.EnablePersistentIPs && !config.OVNKubernetesFeature.EnableInterconnect {
 			wf.ipamClaimsFactory = ipamclaimsfactory.NewSharedInformerFactory(ovnClientset.IPAMClaimsClient, resyncInterval)
-			wf.informers[IPAMClaimsType], err = newInformer(IPAMClaimsType, wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims().Informer())
+			wf.informers[IPAMClaimsType], err = newQueuedInformer(IPAMClaimsType,
+				wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims().Informer(), wf.stopChan,
+				minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 			if err != nil {
 				return nil, err
 			}
@@ -468,7 +528,8 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 
 	if config.OVNKubernetesFeature.EnableIPReservation {
 		wf.ipresvFactory = ipreservationinformerfactory.NewSharedInformerFactory(ovnClientset.IPReservationClient, resyncInterval)
-		wf.informers[IPReservationType], err = newInformer(IPReservationType, wf.ipresvFactory.K8s().V1beta1().IPReservations().Informer())
+		wf.informers[IPReservationType], err = newQueuedInformer(IPReservationType, wf.ipresvFactory.K8s().V1beta1().IPReservations().Informer(),
+			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 		if err != nil {
 			return nil, err
 		}
@@ -476,34 +537,42 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 
 	if util.IsNetworkSegmentationSupportEnabled() {
 		wf.udnFactory = userdefinednetworkapiinformerfactory.NewSharedInformerFactory(ovnClientset.UserDefinedNetworkClient, resyncInterval)
-		wf.informers[UserDefinedNetworkType], err = newInformer(UserDefinedNetworkType, wf.udnFactory.K8s().V1().UserDefinedNetworks().Informer())
+		wf.informers[UserDefinedNetworkType], err = newQueuedInformer(UserDefinedNetworkType,
+			wf.udnFactory.K8s().V1().UserDefinedNetworks().Informer(), wf.stopChan,
+			minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 		if err != nil {
 			return nil, err
 		}
 
-		wf.informers[ClusterUserDefinedNetworkType], err = newInformer(ClusterUserDefinedNetworkType, wf.udnFactory.K8s().V1().ClusterUserDefinedNetworks().Informer())
+		wf.informers[ClusterUserDefinedNetworkType], err = newQueuedInformer(ClusterUserDefinedNetworkType,
+			wf.udnFactory.K8s().V1().ClusterUserDefinedNetworks().Informer(), wf.stopChan,
+			minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	if util.IsMultiNetworkPoliciesSupportEnabled() {
-		wf.informers[MultiNetworkPolicyType], err = newInformer(MultiNetworkPolicyType, wf.mnpFactory.K8sCniCncfIo().V1beta2().MultiNetworkPolicies().Informer())
+		wf.informers[MultiNetworkPolicyType], err = newQueuedInformer(MultiNetworkPolicyType,
+			wf.mnpFactory.K8sCniCncfIo().V1beta2().MultiNetworkPolicies().Informer(), wf.stopChan,
+			minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	if config.OVNKubernetesFeature.EnableAdminPolicyBasedRouting {
-		wf.informers[AdminPBRType], err = newInformer(AdminPBRType,
-			wf.adminPBRFactory.K8s().V1beta1().AdminPolicyBasedRoutes().Informer())
+		wf.informers[AdminPBRType], err = newQueuedInformer(AdminPBRType,
+			wf.adminPBRFactory.K8s().V1beta1().AdminPolicyBasedRoutes().Informer(), wf.stopChan,
+			minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	if config.OVNKubernetesFeature.EnableVirtualIP {
-		wf.informers[VirtualIPType], err = newInformer(VirtualIPType, wf.vipFactory.K8s().V1beta1().VirtualIPs().Informer())
+		wf.informers[VirtualIPType], err = newQueuedInformer(VirtualIPType, wf.vipFactory.K8s().V1beta1().VirtualIPs().Informer(),
+			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 		if err != nil {
 			return nil, err
 		}
@@ -521,7 +590,8 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 	}
 
 	if config.OVNKubernetesFeature.EnablePortMirror {
-		wf.informers[PortMirrorType], err = newInformer(PortMirrorType, wf.portMirrorFactory.K8s().V1beta1().PortMirrors().Informer())
+		wf.informers[PortMirrorType], err = newQueuedInformer(PortMirrorType, wf.portMirrorFactory.K8s().V1beta1().PortMirrors().Informer(),
+			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 		if err != nil {
 			return nil, err
 		}
@@ -740,6 +810,20 @@ func (wf *WatchFactory) Stop() {
 	if wf.frrFactory != nil {
 		wf.frrFactory.Shutdown()
 	}
+	/* FIXME
+	   if wf.adminPBRFactory != nil {
+	           wf.adminPBRFactory.Shutdown()
+	   }
+	   if wf.vipFactory != nil {
+	           wf.vipFactory.Shutdown()
+	   }
+	   if wf.ipresvFactory != nil {
+	           wf.ipresvFactory.Shutdown()
+	   }
+	   if wf.portMirrorFactory != nil {
+	           wf.portMirrorFactory.Shutdown()
+	   }
+	*/
 }
 
 // NewNodeWatchFactory initializes a watch factory with significantly fewer
@@ -750,6 +834,7 @@ func (wf *WatchFactory) Stop() {
 // of the localPodSelector or figure out how to deal with selecting all pods everywhere.
 func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeNames []string) (*WatchFactory, error) {
 	wf := &WatchFactory{
+		handlerCounter:       &handlerCounter{},
 		iFactory:             informerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.KubeClient, resyncInterval, informerfactory.WithTransform(informerObjectTrim)),
 		egressServiceFactory: egressserviceinformerfactory.NewSharedInformerFactory(ovnClientset.EgressServiceClient, resyncInterval),
 		eipFactory:           egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
@@ -778,7 +863,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeNames []string
 	if config.OvnKubeNode.Mode != types.NodeModeDPU && config.OVNKubernetesFeature.EnableEgressIP {
 		var err error
 		wf.informers[PodType], err = newQueuedInformer(PodType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
-			defaultNumEventQueues, 10, 30, 50)
+			defaultNumEventQueues, 10, 30, 50) // TBD-merge upstream: defaultNumEventQueues, eventQueueSize, defaultNumEventQueues, eventQueueSize
 		if err != nil {
 			return nil, err
 		}
@@ -786,17 +871,17 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeNames []string
 
 	if config.OvnKubeNode.Mode == types.NodeModeDPU && config.OVNKubernetesFeature.EnablePortMirror {
 		wf.portMirrorFactory = portmirrorinformerfactory.NewSharedInformerFactory(ovnClientset.PortMirrorClient, resyncInterval)
-		if err := portmirrorapi.AddToScheme(portmirrorscheme.Scheme); err != nil {
+		if err := portmirrorapi.AddToScheme(scheme.Scheme); err != nil {
 			return nil, err
 		}
 	}
 
 	// For Services and Endpoints, pre-populate the shared Informer with one that
 	// has a label selector excluding headless services.
-	wf.iFactory.InformerFor(&kapi.Service{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+	wf.iFactory.InformerFor(&corev1.Service{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
 		return v1coreinformers.NewFilteredServiceInformer(
 			c,
-			kapi.NamespaceAll,
+			corev1.NamespaceAll,
 			resyncPeriod,
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 			noAlternateProxySelector())
@@ -809,10 +894,10 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeNames []string
 	}
 	selector := labels.NewSelector()
 	selector = selector.Add(*req)
-	wf.iFactory.InformerFor(&kapi.Pod{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+	wf.iFactory.InformerFor(&corev1.Pod{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
 		return v1coreinformers.NewFilteredPodInformer(
 			c,
-			kapi.NamespaceAll,
+			corev1.NamespaceAll,
 			resyncPeriod,
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 			func(opts *metav1.ListOptions) {
@@ -823,7 +908,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeNames []string
 	// only the given node is needed if HybridOverlay is not enabled (required by addressManager, addMasqueradeRoute and checking
 	// NorthdNodeSelectorLabel in order to collect northd metrics)
 	if !config.HybridOverlay.Enabled {
-		wf.iFactory.InformerFor(&kapi.Node{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+		wf.iFactory.InformerFor(&corev1.Node{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
 			return v1coreinformers.NewFilteredNodeInformer(
 				c,
 				resyncPeriod,
@@ -835,7 +920,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeNames []string
 	}
 
 	// For namespaces
-	wf.iFactory.InformerFor(&kapi.Namespace{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+	wf.iFactory.InformerFor(&corev1.Namespace{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
 		return v1coreinformers.NewNamespaceInformer(
 			c,
 			resyncPeriod,
@@ -845,47 +930,54 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeNames []string
 	wf.iFactory.InformerFor(&discovery.EndpointSlice{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
 		return discoveryinformers.NewFilteredEndpointSliceInformer(
 			c,
-			kapi.NamespaceAll,
+			corev1.NamespaceAll,
 			resyncPeriod,
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 			getEndpointSliceSelector())
 	})
 
-	wf.informers[NamespaceType], err = newInformer(NamespaceType, wf.iFactory.Core().V1().Namespaces().Informer())
+	wf.informers[NamespaceType], err = newQueuedInformer(NamespaceType, wf.iFactory.Core().V1().Namespaces().Informer(),
+		wf.stopChan, defaultNumEventQueues, eventQueueSize, defaultNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 	if err != nil {
 		return nil, err
 	}
 	wf.informers[PodType], err = newQueuedInformer(PodType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
-		defaultNumEventQueues, 10, defaultNumEventQueues, 10)
+		defaultNumEventQueues, 10, defaultNumEventQueues, 10) // TBD-merge upstream: defaultNumEventQueues, eventQueueSize, defaultNumEventQueues, eventQueueSize
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[ServiceType], err = newInformer(
+	wf.informers[ServiceType], err = newQueuedInformer(
 		ServiceType,
-		wf.iFactory.Core().V1().Services().Informer())
+		wf.iFactory.Core().V1().Services().Informer(), wf.stopChan,
+		minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[EndpointSliceType], err = newInformer(
+	wf.informers[EndpointSliceType], err = newQueuedInformer(
 		EndpointSliceType,
-		wf.iFactory.Discovery().V1().EndpointSlices().Informer())
+		wf.iFactory.Discovery().V1().EndpointSlices().Informer(), wf.stopChan,
+		minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 	if err != nil {
 		return nil, err
 	}
 
-	wf.informers[NodeType], err = newInformer(NodeType, wf.iFactory.Core().V1().Nodes().Informer())
+	wf.informers[NodeType], err = newQueuedInformer(NodeType, wf.iFactory.Core().V1().Nodes().Informer(), wf.stopChan,
+		defaultNumEventQueues, eventQueueSize, defaultNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 	if err != nil {
 		return nil, err
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressService {
-		wf.informers[EgressServiceType], err = newInformer(EgressServiceType, wf.egressServiceFactory.K8s().V1().EgressServices().Informer())
+		wf.informers[EgressServiceType], err = newQueuedInformer(EgressServiceType,
+			wf.egressServiceFactory.K8s().V1().EgressServices().Informer(), wf.stopChan,
+			minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 		if err != nil {
 			return nil, err
 		}
 	}
 	if config.OVNKubernetesFeature.EnableEgressIP {
-		wf.informers[EgressIPType], err = newInformer(EgressIPType, wf.eipFactory.K8s().V1().EgressIPs().Informer())
+		wf.informers[EgressIPType], err = newQueuedInformer(EgressIPType, wf.eipFactory.K8s().V1().EgressIPs().Informer(),
+			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 		if err != nil {
 			return nil, err
 		}
@@ -903,7 +995,8 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeNames []string
 	}
 
 	if config.OvnKubeNode.Mode == types.NodeModeDPU && config.OVNKubernetesFeature.EnablePortMirror {
-		wf.informers[PortMirrorType], err = newInformer(PortMirrorType, wf.portMirrorFactory.K8s().V1beta1().PortMirrors().Informer())
+		wf.informers[PortMirrorType], err = newQueuedInformer(PortMirrorType, wf.portMirrorFactory.K8s().V1beta1().PortMirrors().Informer(),
+			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 		if err != nil {
 			return nil, err
 		}
@@ -915,7 +1008,9 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeNames []string
 	if (config.OVNKubernetesFeature.EnableMultiNetwork && config.OvnKubeNode.Mode != types.NodeModeDPUHost) ||
 		config.OVNKubernetesFeature.EnableNetworkSegmentation || util.IsRouteAdvertisementsEnabled() {
 		wf.nadFactory = nadinformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval)
-		wf.informers[NetworkAttachmentDefinitionType], err = newInformer(NetworkAttachmentDefinitionType, wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer())
+		wf.informers[NetworkAttachmentDefinitionType], err = newQueuedInformer(
+			NetworkAttachmentDefinitionType, wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer(),
+			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 		if err != nil {
 			return nil, err
 		}
@@ -923,12 +1018,16 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeNames []string
 
 	if util.IsNetworkSegmentationSupportEnabled() {
 		wf.udnFactory = userdefinednetworkapiinformerfactory.NewSharedInformerFactory(ovnClientset.UserDefinedNetworkClient, resyncInterval)
-		wf.informers[UserDefinedNetworkType], err = newInformer(UserDefinedNetworkType, wf.udnFactory.K8s().V1().UserDefinedNetworks().Informer())
+		wf.informers[UserDefinedNetworkType], err = newQueuedInformer(
+			UserDefinedNetworkType, wf.udnFactory.K8s().V1().UserDefinedNetworks().Informer(),
+			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 		if err != nil {
 			return nil, err
 		}
 
-		wf.informers[ClusterUserDefinedNetworkType], err = newInformer(ClusterUserDefinedNetworkType, wf.udnFactory.K8s().V1().ClusterUserDefinedNetworks().Informer())
+		wf.informers[ClusterUserDefinedNetworkType], err = newQueuedInformer(
+			ClusterUserDefinedNetworkType, wf.udnFactory.K8s().V1().ClusterUserDefinedNetworks().Informer(),
+			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 		if err != nil {
 			return nil, err
 		}
@@ -942,6 +1041,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeNames []string
 // mode process.
 func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset) (*WatchFactory, error) {
 	wf := &WatchFactory{
+		handlerCounter:       &handlerCounter{},
 		iFactory:             informerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.KubeClient, resyncInterval, informerfactory.WithTransform(informerObjectTrim)),
 		efFactory:            egressfirewallinformerfactory.NewSharedInformerFactory(ovnClientset.EgressFirewallClient, resyncInterval),
 		eipFactory:           egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
@@ -988,10 +1088,10 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 
 	// For Services and Endpoints, pre-populate the shared Informer with one that
 	// has a label selector excluding headless services.
-	wf.iFactory.InformerFor(&kapi.Service{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+	wf.iFactory.InformerFor(&corev1.Service{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
 		return v1coreinformers.NewFilteredServiceInformer(
 			c,
-			kapi.NamespaceAll,
+			corev1.NamespaceAll,
 			resyncPeriod,
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 			noAlternateProxySelector())
@@ -1000,7 +1100,7 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 	wf.iFactory.InformerFor(&discovery.EndpointSlice{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
 		return discoveryinformers.NewFilteredEndpointSliceInformer(
 			c,
-			kapi.NamespaceAll,
+			corev1.NamespaceAll,
 			resyncPeriod,
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 			getEndpointSliceSelector())
@@ -1008,37 +1108,50 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 
 	var err error
 	// Create our informer-wrapper informer (and underlying shared informer) for types we need
-	wf.informers[ServiceType], err = newInformer(ServiceType, wf.iFactory.Core().V1().Services().Informer())
+	wf.informers[ServiceType], err = newQueuedInformer(ServiceType, wf.iFactory.Core().V1().Services().Informer(),
+		wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 	if err != nil {
 		return nil, err
 	}
 
-	wf.informers[EndpointSliceType], err = newInformer(
+	wf.informers[EndpointSliceType], err = newQueuedInformer(
 		EndpointSliceType,
-		wf.iFactory.Discovery().V1().EndpointSlices().Informer())
+		wf.iFactory.Discovery().V1().EndpointSlices().Informer(),
+		wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 	if err != nil {
 		return nil, err
 	}
 
-	wf.informers[NodeType], err = newInformer(NodeType, wf.iFactory.Core().V1().Nodes().Informer())
+	wf.informers[NodeType], err = newQueuedInformer(
+		NodeType, wf.iFactory.Core().V1().Nodes().Informer(),
+		wf.stopChan, defaultNumEventQueues, eventQueueSize, defaultNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 	if err != nil {
 		return nil, err
 	}
 	if config.OVNKubernetesFeature.EnableEgressIP {
-		wf.informers[EgressIPType], err = newInformer(EgressIPType, wf.eipFactory.K8s().V1().EgressIPs().Informer())
+		wf.informers[EgressIPType], err = newQueuedInformer(
+			EgressIPType,
+			wf.eipFactory.K8s().V1().EgressIPs().Informer(),
+			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 		if err != nil {
 			return nil, err
 		}
 	}
 	if util.PlatformTypeIsEgressIPCloudProvider() {
-		wf.informers[CloudPrivateIPConfigType], err = newInformer(CloudPrivateIPConfigType, wf.cpipcFactory.Cloud().V1().CloudPrivateIPConfigs().Informer())
+		wf.informers[CloudPrivateIPConfigType], err = newQueuedInformer(
+			CloudPrivateIPConfigType,
+			wf.cpipcFactory.Cloud().V1().CloudPrivateIPConfigs().Informer(),
+			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressService {
-		wf.informers[EgressServiceType], err = newInformer(EgressServiceType, wf.egressServiceFactory.K8s().V1().EgressServices().Informer())
+		wf.informers[EgressServiceType], err = newQueuedInformer(
+			EgressServiceType,
+			wf.egressServiceFactory.K8s().V1().EgressServices().Informer(),
+			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 		if err != nil {
 			return nil, err
 		}
@@ -1046,21 +1159,28 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
 		wf.nadFactory = nadinformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval)
-		wf.informers[NetworkAttachmentDefinitionType], err = newInformer(NetworkAttachmentDefinitionType, wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer())
+		wf.informers[NetworkAttachmentDefinitionType], err = newQueuedInformer(
+			NetworkAttachmentDefinitionType,
+			wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer(),
+			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 		if err != nil {
 			return nil, err
 		}
 
 		if config.OVNKubernetesFeature.EnableInterconnect {
-			wf.informers[PodType], err = newQueuedInformer(PodType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan, defaultNumEventQueues,
-				10, defaultNumEventQueues, 10)
+			wf.informers[PodType], err = newQueuedInformer(
+				PodType, wf.iFactory.Core().V1().Pods().Informer(),
+				wf.stopChan, defaultNumEventQueues, 10, defaultNumEventQueues, 10) // TBD-merge upstream: defaultNumEventQueues, eventQueueSize, defaultNumEventQueues, eventQueueSize
 			if err != nil {
 				return nil, err
 			}
 
 			if config.OVNKubernetesFeature.EnablePersistentIPs {
 				wf.ipamClaimsFactory = ipamclaimsfactory.NewSharedInformerFactory(ovnClientset.IPAMClaimsClient, resyncInterval)
-				wf.informers[IPAMClaimsType], err = newInformer(IPAMClaimsType, wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims().Informer())
+				wf.informers[IPAMClaimsType], err = newQueuedInformer(
+					IPAMClaimsType,
+					wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims().Informer(),
+					wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 				if err != nil {
 					return nil, err
 				}
@@ -1068,7 +1188,10 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 
 			if config.OVNKubernetesFeature.EnableIPReservation {
 				wf.ipresvFactory = ipreservationinformerfactory.NewSharedInformerFactory(ovnClientset.IPReservationClient, resyncInterval)
-				wf.informers[IPReservationType], err = newInformer(IPReservationType, wf.ipresvFactory.K8s().V1beta1().IPReservations().Informer())
+				wf.informers[IPReservationType], err = newQueuedInformer(
+					IPReservationType,
+					wf.ipresvFactory.K8s().V1beta1().IPReservations().Informer(),
+					wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 				if err != nil {
 					return nil, err
 				}
@@ -1093,11 +1216,17 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 
 	if util.IsNetworkSegmentationSupportEnabled() {
 		wf.udnFactory = userdefinednetworkapiinformerfactory.NewSharedInformerFactory(ovnClientset.UserDefinedNetworkClient, resyncInterval)
-		wf.informers[UserDefinedNetworkType], err = newInformer(UserDefinedNetworkType, wf.udnFactory.K8s().V1().UserDefinedNetworks().Informer())
+		wf.informers[UserDefinedNetworkType], err = newQueuedInformer(
+			UserDefinedNetworkType,
+			wf.udnFactory.K8s().V1().UserDefinedNetworks().Informer(),
+			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 		if err != nil {
 			return nil, err
 		}
-		wf.informers[ClusterUserDefinedNetworkType], err = newInformer(ClusterUserDefinedNetworkType, wf.udnFactory.K8s().V1().ClusterUserDefinedNetworks().Informer())
+		wf.informers[ClusterUserDefinedNetworkType], err = newQueuedInformer(
+			ClusterUserDefinedNetworkType,
+			wf.udnFactory.K8s().V1().ClusterUserDefinedNetworks().Informer(),
+			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
 		if err != nil {
 			return nil, err
 		}
@@ -1136,11 +1265,11 @@ func (wf *WatchFactory) Shutdown() {
 func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, error) {
 	switch objType {
 	case PodType:
-		if pod, ok := obj.(*kapi.Pod); ok {
+		if pod, ok := obj.(*corev1.Pod); ok {
 			return &pod.ObjectMeta, nil
 		}
 	case ServiceType:
-		if service, ok := obj.(*kapi.Service); ok {
+		if service, ok := obj.(*corev1.Service); ok {
 			return &service.ObjectMeta, nil
 		}
 	case PolicyType:
@@ -1156,11 +1285,11 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 			return &baselineAdminNetworkPolicy.ObjectMeta, nil
 		}
 	case NamespaceType:
-		if namespace, ok := obj.(*kapi.Namespace); ok {
+		if namespace, ok := obj.(*corev1.Namespace); ok {
 			return &namespace.ObjectMeta, nil
 		}
 	case NodeType:
-		if node, ok := obj.(*kapi.Node); ok {
+		if node, ok := obj.(*corev1.Node); ok {
 			return &node.ObjectMeta, nil
 		}
 	case EgressFirewallType:
@@ -1199,6 +1328,38 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 		if persistentips, ok := obj.(*ipamclaimsapi.IPAMClaim); ok {
 			return &persistentips.ObjectMeta, nil
 		}
+	case EgressQoSType:
+		if egressQoS, ok := obj.(*egressqosapi.EgressQoS); ok {
+			return &egressQoS.ObjectMeta, nil
+		}
+	case EgressServiceType:
+		if egressService, ok := obj.(*egressserviceapi.EgressService); ok {
+			return &egressService.ObjectMeta, nil
+		}
+	case UserDefinedNetworkType:
+		if udn, ok := obj.(*userdefinednetworkapi.UserDefinedNetwork); ok {
+			return &udn.ObjectMeta, nil
+		}
+	case ClusterUserDefinedNetworkType:
+		if cudn, ok := obj.(*userdefinednetworkapi.ClusterUserDefinedNetwork); ok {
+			return &cudn.ObjectMeta, nil
+		}
+	case AdminPBRType:
+		if adminPBR, ok := obj.(*adminpbrapi.AdminPolicyBasedRoute); ok {
+			return &adminPBR.ObjectMeta, nil
+		}
+	case IPReservationType:
+		if ipResv, ok := obj.(*ipreservationapi.IPReservation); ok {
+			return &ipResv.ObjectMeta, nil
+		}
+	case VirtualIPType:
+		if vip, ok := obj.(*ipreservationapi.IPReservation); ok {
+			return &vip.ObjectMeta, nil
+		}
+	case PortMirrorType:
+		if portMirrow, ok := obj.(*portmirrorapi.PortMirror); ok {
+			return &portMirrow.ObjectMeta, nil
+		}
 	}
 
 	return nil, fmt.Errorf("cannot get ObjectMeta from type %v", objType)
@@ -1235,6 +1396,10 @@ func (wf *WatchFactory) GetHandlerPriority(objType reflect.Type) (priority int) 
 		return 1
 	case VirtualIPType:
 		return 1
+	case PortMirrorType:
+		return 1
+	case IPReservationType:
+		return 1
 	default:
 		return defaultHandlerPriority
 	}
@@ -1244,74 +1409,62 @@ func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandler
 	priority := wf.GetHandlerPriority(objType)
 	switch objType {
 	case NamespaceType, NamespaceExGwType:
-		return func(namespace string, sel labels.Selector,
-			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddNamespaceHandler(funcs, processExisting)
 		}, nil
 
 	case PolicyType:
-		return func(namespace string, sel labels.Selector,
-			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddPolicyHandler(funcs, processExisting)
 		}, nil
 
 	case MultiNetworkPolicyType:
-		return func(namespace string, sel labels.Selector,
-			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddMultiNetworkPolicyHandler(funcs, processExisting)
 		}, nil
 
 	case NodeType, EgressNodeType:
-		return func(namespace string, sel labels.Selector,
-			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddNodeHandler(funcs, processExisting, priority)
 		}, nil
 
 	case ServiceForGatewayType, ServiceForFakeNodePortWatcherType:
-		return func(namespace string, sel labels.Selector,
-			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(namespace string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddFilteredServiceHandler(namespace, funcs, processExisting)
 		}, nil
 
 	case AddressSetPodSelectorType, LocalPodSelectorType, PodType, EgressIPPodType:
-		return func(namespace string, sel labels.Selector,
-			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddFilteredPodHandler(namespace, sel, funcs, processExisting, priority)
 		}, nil
 
 	case AddressSetNamespaceAndPodSelectorType, PeerNamespaceSelectorType, EgressIPNamespaceType:
-		return func(namespace string, sel labels.Selector,
-			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddFilteredNamespaceHandler(namespace, sel, funcs, processExisting, priority)
 		}, nil
 
 	case EgressFirewallType:
-		return func(namespace string, sel labels.Selector,
-			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddEgressFirewallHandler(funcs, processExisting)
 		}, nil
 
 	case EgressIPType:
-		return func(namespace string, sel labels.Selector,
-			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddEgressIPHandler(funcs, processExisting)
 		}, nil
 
 	case CloudPrivateIPConfigType:
-		return func(namespace string, sel labels.Selector,
-			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddCloudPrivateIPConfigHandler(funcs, processExisting)
 		}, nil
 
 	case EndpointSliceForStaleConntrackRemovalType, EndpointSliceForGatewayType:
-		return func(namespace string, sel labels.Selector,
-			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddFilteredEndpointSliceHandler(namespace, sel, funcs, processExisting)
 		}, nil
 
 	case IPAMClaimsType:
-		return func(namespace string, sel labels.Selector,
-			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddIPAMClaimsHandler(funcs, processExisting)
 		}, nil
 	}
@@ -1343,8 +1496,16 @@ func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, sel l
 		return true
 	}
 
-	inf.Lock()
-	defer inf.Unlock()
+	intInf := inf.internalInformers[wf.internalInformerIndex]
+
+	intInf.Lock()
+	defer intInf.Unlock()
+
+	// we are going to add a handler, we need to update the atomic signal that handlers exist now
+	// so that we do not miss events after we list current items.
+	// We need to do this after we get internal informer lock, to preserve that we can be the only one updating
+	// the atomic and preserve known state of the atomic while the handler is going to be added in the future
+	hadZeroHandlers := atomic.CompareAndSwapUint32(&intInf.hasHandlers, hasNoHandler, hasHandler)
 
 	items := make([]interface{}, 0)
 	for _, obj := range inf.inf.GetStore().List() {
@@ -1356,7 +1517,7 @@ func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, sel l
 		// Process existing items as a set so the caller can clean up
 		// after a restart or whatever. We will wrap it with retries to ensure it succeeds.
 		// Being so, processExisting is expected to be idem-potent!
-		err := utilwait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 60*time.Second, true, func(ctx context.Context) (bool, error) {
+		err := utilwait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 60*time.Second, true, func(_ context.Context) (bool, error) {
 			if err := processExisting(items); err != nil {
 				klog.Errorf("Failed (will retry) while processing existing %v items: %v", objType, err)
 				return false, nil
@@ -1364,12 +1525,16 @@ func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, sel l
 			return true, nil
 		})
 		if err != nil {
+			// handler is not going to be added, restore previous value if needed
+			if hadZeroHandlers {
+				atomic.StoreUint32(&intInf.hasHandlers, hasNoHandler)
+			}
 			return nil, err
 		}
 	}
 
-	handlerID := atomic.AddUint64(&wf.handlerCounter, 1)
-	handler := inf.addHandler(handlerID, priority, filterFunc, funcs, items)
+	handlerID := atomic.AddUint64(&wf.handlerCounter.counter, 1)
+	handler := inf.addHandler(wf.internalInformerIndex, handlerID, priority, filterFunc, funcs, items)
 	klog.V(5).Infof("Added %v event handler %d", objType, handler.id)
 	return handler, nil
 }
@@ -1396,8 +1561,16 @@ func (wf *WatchFactory) AddHandlerWithFilterFunc(objType reflect.Type, filterFun
 		klog.Fatalf("Tried to add handler of unknown object type %v", objType)
 	}
 
-	inf.Lock()
-	defer inf.Unlock()
+	intInf := inf.internalInformers[wf.internalInformerIndex]
+
+	intInf.Lock()
+	defer intInf.Unlock()
+
+	// we are going to add a handler, we need to update the atomic signal that handlers exist now
+	// so that we do not miss events after we list current items.
+	// We need to do this after we get internal informer lock, to preserve that we can be the only one updating
+	// the atomic and preserve known state of the atomic while the handler is going to be added in the future
+	hadZeroHandlers := atomic.CompareAndSwapUint32(&intInf.hasHandlers, hasNoHandler, hasHandler)
 
 	items := make([]interface{}, 0)
 	for _, obj := range inf.inf.GetStore().List() {
@@ -1409,7 +1582,7 @@ func (wf *WatchFactory) AddHandlerWithFilterFunc(objType reflect.Type, filterFun
 		// Process existing items as a set so the caller can clean up
 		// after a restart or whatever. We will wrap it with retries to ensure it succeeds.
 		// Being so, processExisting is expected to be idem-potent!
-		err := utilwait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 60*time.Second, true, func(ctx context.Context) (bool, error) {
+		err := utilwait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 60*time.Second, true, func(_ context.Context) (bool, error) {
 			if err := processExisting(items); err != nil {
 				klog.Errorf("Failed (will retry) while processing existing %v items: %v", objType, err)
 				return false, nil
@@ -1417,12 +1590,16 @@ func (wf *WatchFactory) AddHandlerWithFilterFunc(objType reflect.Type, filterFun
 			return true, nil
 		})
 		if err != nil {
+			// handler is not going to be added, restore previous value if needed
+			if hadZeroHandlers {
+				atomic.StoreUint32(&intInf.hasHandlers, hasNoHandler)
+			}
 			return nil, err
 		}
 	}
 
-	handlerID := atomic.AddUint64(&wf.handlerCounter, 1)
-	handler := inf.addHandler(handlerID, priority, filterFunc, handlerFuncs, items)
+	handlerID := atomic.AddUint64(&wf.handlerCounter.counter, 1)
+	handler := inf.addHandler(wf.internalInformerIndex, handlerID, priority, filterFunc, handlerFuncs, items)
 	klog.V(5).Infof("Added %v event handler %d", objType, handler.id)
 	return handler, nil
 }
@@ -1630,25 +1807,25 @@ func (wf *WatchFactory) RemoveIPReservationHandler(handler *Handler) {
 }
 
 // GetPod returns the pod spec given the namespace and pod name
-func (wf *WatchFactory) GetPod(namespace, name string) (*kapi.Pod, error) {
+func (wf *WatchFactory) GetPod(namespace, name string) (*corev1.Pod, error) {
 	podLister := wf.informers[PodType].lister.(listers.PodLister)
 	return podLister.Pods(namespace).Get(name)
 }
 
 // GetAllPods returns all the pods in the cluster
-func (wf *WatchFactory) GetAllPods() ([]*kapi.Pod, error) {
+func (wf *WatchFactory) GetAllPods() ([]*corev1.Pod, error) {
 	podLister := wf.informers[PodType].lister.(listers.PodLister)
 	return podLister.List(labels.Everything())
 }
 
 // GetPods returns all the pods in a given namespace
-func (wf *WatchFactory) GetPods(namespace string) ([]*kapi.Pod, error) {
+func (wf *WatchFactory) GetPods(namespace string) ([]*corev1.Pod, error) {
 	podLister := wf.informers[PodType].lister.(listers.PodLister)
 	return podLister.Pods(namespace).List(labels.Everything())
 }
 
 // GetPodsBySelector returns all the pods in a given namespace by the label selector
-func (wf *WatchFactory) GetPodsBySelector(namespace string, labelSelector metav1.LabelSelector) ([]*kapi.Pod, error) {
+func (wf *WatchFactory) GetPodsBySelector(namespace string, labelSelector metav1.LabelSelector) ([]*corev1.Pod, error) {
 	podLister := wf.informers[PodType].lister.(listers.PodLister)
 	selector, err := metav1.LabelSelectorAsSelector(&labelSelector)
 	if err != nil {
@@ -1658,7 +1835,7 @@ func (wf *WatchFactory) GetPodsBySelector(namespace string, labelSelector metav1
 }
 
 // GetAllPodsBySelector returns all the pods in all namespace by the label selector
-func (wf *WatchFactory) GetAllPodsBySelector(labelSelector metav1.LabelSelector) ([]*kapi.Pod, error) {
+func (wf *WatchFactory) GetAllPodsBySelector(labelSelector metav1.LabelSelector) ([]*corev1.Pod, error) {
 	podLister := wf.informers[PodType].lister.(listers.PodLister)
 	selector, err := metav1.LabelSelectorAsSelector(&labelSelector)
 	if err != nil {
@@ -1668,13 +1845,13 @@ func (wf *WatchFactory) GetAllPodsBySelector(labelSelector metav1.LabelSelector)
 }
 
 // GetPodsOnNode returns all the pods of the specified namespace scheduled on the given node
-func (wf *WatchFactory) GetPodsOnNode(namespace, nodeName string) ([]*kapi.Pod, error) {
+func (wf *WatchFactory) GetPodsOnNode(namespace, nodeName string) ([]*corev1.Pod, error) {
 	podLister := wf.informers[PodType].lister.(listers.PodLister)
 	pods, err := podLister.Pods(namespace).List(labels.Everything())
 	if err != nil {
-		return []*kapi.Pod{}, err
+		return []*corev1.Pod{}, err
 	}
-	ret := make([]*kapi.Pod, 0, len(pods))
+	ret := make([]*corev1.Pod, 0, len(pods))
 	for i := range pods {
 		pod := pods[i]
 		if pod.Spec.NodeName == nodeName {
@@ -1686,24 +1863,24 @@ func (wf *WatchFactory) GetPodsOnNode(namespace, nodeName string) ([]*kapi.Pod, 
 }
 
 // GetNodes returns the node specs of all the nodes
-func (wf *WatchFactory) GetNodes() ([]*kapi.Node, error) {
+func (wf *WatchFactory) GetNodes() ([]*corev1.Node, error) {
 	return wf.ListNodes(labels.Everything())
 }
 
 // ListNodes returns nodes that match a selector
-func (wf *WatchFactory) ListNodes(selector labels.Selector) ([]*kapi.Node, error) {
+func (wf *WatchFactory) ListNodes(selector labels.Selector) ([]*corev1.Node, error) {
 	nodeLister := wf.informers[NodeType].lister.(listers.NodeLister)
 	return nodeLister.List(selector)
 }
 
 // GetNode returns the node spec of a given node by name
-func (wf *WatchFactory) GetNode(name string) (*kapi.Node, error) {
+func (wf *WatchFactory) GetNode(name string) (*corev1.Node, error) {
 	nodeLister := wf.informers[NodeType].lister.(listers.NodeLister)
 	return nodeLister.Get(name)
 }
 
 // GetNodesByLabelSelector returns all the nodes selected by the label selector
-func (wf *WatchFactory) GetNodesByLabelSelector(labelSelector metav1.LabelSelector) ([]*kapi.Node, error) {
+func (wf *WatchFactory) GetNodesByLabelSelector(labelSelector metav1.LabelSelector) ([]*corev1.Node, error) {
 	selector, err := metav1.LabelSelectorAsSelector(&labelSelector)
 	if err != nil {
 		return nil, err
@@ -1712,18 +1889,18 @@ func (wf *WatchFactory) GetNodesByLabelSelector(labelSelector metav1.LabelSelect
 }
 
 // GetNodesBySelector returns all the nodes selected by the selector
-func (wf *WatchFactory) GetNodesBySelector(selector labels.Selector) ([]*kapi.Node, error) {
+func (wf *WatchFactory) GetNodesBySelector(selector labels.Selector) ([]*corev1.Node, error) {
 	return wf.ListNodes(selector)
 }
 
 // GetService returns the service spec of a service in a given namespace
-func (wf *WatchFactory) GetService(namespace, name string) (*kapi.Service, error) {
+func (wf *WatchFactory) GetService(namespace, name string) (*corev1.Service, error) {
 	serviceLister := wf.informers[ServiceType].lister.(listers.ServiceLister)
 	return serviceLister.Services(namespace).Get(name)
 }
 
 // GetServices returns all services
-func (wf *WatchFactory) GetServices() ([]*kapi.Service, error) {
+func (wf *WatchFactory) GetServices() ([]*corev1.Service, error) {
 	serviceLister := wf.informers[ServiceType].lister.(listers.ServiceLister)
 	return serviceLister.List(labels.Everything())
 }
@@ -1744,7 +1921,7 @@ func (wf *WatchFactory) GetEgressIPs() ([]*egressipapi.EgressIP, error) {
 }
 
 // GetNamespace returns a specific namespace
-func (wf *WatchFactory) GetNamespace(name string) (*kapi.Namespace, error) {
+func (wf *WatchFactory) GetNamespace(name string) (*corev1.Namespace, error) {
 	namespaceLister := wf.informers[NamespaceType].lister.(listers.NamespaceLister)
 	return namespaceLister.Get(name)
 }
@@ -1768,13 +1945,13 @@ func (wf *WatchFactory) GetServiceEndpointSlices(namespace, svcName, network str
 }
 
 // GetNamespaces returns a list of namespaces in the cluster
-func (wf *WatchFactory) GetNamespaces() ([]*kapi.Namespace, error) {
+func (wf *WatchFactory) GetNamespaces() ([]*corev1.Namespace, error) {
 	namespaceLister := wf.informers[NamespaceType].lister.(listers.NamespaceLister)
 	return namespaceLister.List(labels.Everything())
 }
 
 // GetNamespacesBySelector returns a list of namespaces in the cluster by the label selector
-func (wf *WatchFactory) GetNamespacesBySelector(labelSelector metav1.LabelSelector) ([]*kapi.Namespace, error) {
+func (wf *WatchFactory) GetNamespacesBySelector(labelSelector metav1.LabelSelector) ([]*corev1.Namespace, error) {
 	namespaceLister := wf.informers[NamespaceType].lister.(listers.NamespaceLister)
 	selector, err := metav1.LabelSelectorAsSelector(&labelSelector)
 	if err != nil {
@@ -1978,7 +2155,7 @@ func withServiceNameSelector() func(options *metav1.ListOptions) {
 //
 //	func noHeadlessServiceSelector() func(options *metav1.ListOptions) {
 //		// headless service label must not be there
-//		noHeadlessService, err := labels.NewRequirement(kapi.IsHeadlessService, selection.DoesNotExist, nil)
+//		noHeadlessService, err := labels.NewRequirement(corev1.IsHeadlessService, selection.DoesNotExist, nil)
 //		if err != nil {
 //			// cannot occur
 //			panic(err)
@@ -1988,7 +2165,7 @@ func withServiceNameSelector() func(options *metav1.ListOptions) {
 //			options.LabelSelector = noHeadlessService.String()
 //		}
 //	}
-//
+
 // noAlternateProxySelector is a LabelSelector added to the watch for
 // services that excludes services with a well-known label indicating
 // proxying is via an alternate proxy.

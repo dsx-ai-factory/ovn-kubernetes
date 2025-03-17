@@ -7,6 +7,14 @@ import (
 	"sync"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	knet "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
+	corev1listers "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/workqueue"
+	"k8s.io/klog/v2"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
@@ -39,14 +47,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
-
-	kapi "k8s.io/api/core/v1"
-	knet "k8s.io/api/networking/v1"
-	"k8s.io/apimachinery/pkg/util/wait"
-	corev1listers "k8s.io/client-go/listers/core/v1"
-	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/util/workqueue"
-	"k8s.io/klog/v2"
 )
 
 const DefaultNetworkControllerName = "default-network-controller"
@@ -58,7 +58,7 @@ type DefaultNetworkController struct {
 
 	// For TCP, UDP, and SCTP type traffic, cache OVN load-balancers used for the
 	// cluster's east-west traffic.
-	loadbalancerClusterCache map[kapi.Protocol]string
+	loadbalancerClusterCache map[corev1.Protocol]string
 
 	externalGatewayRouteInfo *apbroutecontroller.ExternalGatewayRouteInfoCache
 
@@ -133,6 +133,7 @@ type DefaultNetworkController struct {
 	hybridOverlayFailed         sync.Map
 	syncZoneICFailed            sync.Map
 	syncHostNetAddrSetFailed    sync.Map
+	syncEIPNodeRerouteFailed    sync.Map
 
 	// variable to determine if all pods present on the node during startup have been processed
 	// updated atomically
@@ -235,7 +236,7 @@ func newDefaultNetworkControllerCommon(
 		},
 		externalGatewayRouteInfo:   apbExternalRouteController.ExternalGWRouteInfoCache,
 		eIPC:                       eIPController,
-		loadbalancerClusterCache:   make(map[kapi.Protocol]string),
+		loadbalancerClusterCache:   make(map[corev1.Protocol]string),
 		zoneChassisHandler:         zoneChassisHandler,
 		apbExternalRouteController: apbExternalRouteController,
 		svcController:              svcController,
@@ -355,11 +356,11 @@ func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err = oc.Init(ctx); err != nil {
+	if err = oc.init(); err != nil {
 		return err
 	}
 
-	return oc.Run(ctx)
+	return oc.run(ctx)
 }
 
 // Stop gracefully stops the controller
@@ -383,7 +384,7 @@ func (oc *DefaultNetworkController) Cleanup() error {
 	panic("unexpected call for default network")
 }
 
-// Init runs a subnet IPAM and a controller that watches arrival/departure
+// init runs a subnet IPAM and a controller that watches arrival/departure
 // of nodes in the cluster
 // On an addition to the cluster (node create), a new subnet is created for it that will translate
 // to creation of a logical switch (done by the node, but could be created here at the master process too)
@@ -392,7 +393,7 @@ func (oc *DefaultNetworkController) Cleanup() error {
 // TODO: Verify that the cluster was not already called with a different global subnet
 //
 //	If true, then either quit or perform a complete reconfiguration of the cluster (recreate switches/routers with new subnet values)
-func (oc *DefaultNetworkController) Init(ctx context.Context) error {
+func (oc *DefaultNetworkController) init() error {
 	existingNodes, err := oc.watchFactory.GetNodes()
 	if err != nil {
 		klog.Errorf("Error in fetching nodes: %v", err)
@@ -414,20 +415,7 @@ func (oc *DefaultNetworkController) Init(ctx context.Context) error {
 		oc.routerLoadBalancerGroupUUID = routerLBGroupUUID
 	}
 
-	networkID := util.InvalidID
-	nodeNames := []string{}
-	for _, node := range existingNodes {
-		if util.NoHostSubnet(node) {
-			continue
-		}
-		nodeNames = append(nodeNames, node.Name)
-
-		if config.OVNKubernetesFeature.EnableInterconnect && networkID == util.InvalidID {
-			// get networkID from any node in the cluster
-			networkID, _ = util.ParseNetworkIDAnnotation(node, oc.zoneICHandler.GetNetworkName())
-		}
-	}
-	if err := oc.SetupMaster(nodeNames); err != nil {
+	if err := oc.SetupMaster(); err != nil {
 		klog.Errorf("Failed to setup master (%v)", err)
 		return err
 	}
@@ -449,8 +437,8 @@ func (oc *DefaultNetworkController) Init(ctx context.Context) error {
 	return nil
 }
 
-// Run starts the actual watching.
-func (oc *DefaultNetworkController) Run(ctx context.Context) error {
+// run starts the actual watching.
+func (oc *DefaultNetworkController) run(_ context.Context) error {
 	oc.syncPeriodic()
 	klog.Info("Starting all the Watchers...")
 	start := time.Now()
@@ -653,56 +641,10 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 }
 
 func (oc *DefaultNetworkController) Reconcile(netInfo util.NetInfo) error {
-	// gather some information first
-	var err error
-	var retryNodes []*kapi.Node
-	oc.localZoneNodes.Range(func(key, value any) bool {
-		nodeName := key.(string)
-		wasAdvertised := util.IsPodNetworkAdvertisedAtNode(oc, nodeName)
-		isAdvertised := util.IsPodNetworkAdvertisedAtNode(netInfo, nodeName)
-		if wasAdvertised == isAdvertised {
-			// noop
-			return true
-		}
-		var node *kapi.Node
-		node, err = oc.watchFactory.GetNode(nodeName)
-		if err != nil {
-			return false
-		}
-		retryNodes = append(retryNodes, node)
-		return true
-	})
-	if err != nil {
-		return fmt.Errorf("failed to reconcile network %s: %w", oc.GetNetworkName(), err)
-	}
-
-	reconcileRoutes := oc.routeImportManager != nil && oc.routeImportManager.NeedsReconciliation(netInfo)
-
-	// update network information, point of no return
-	err = util.ReconcileNetInfo(oc.ReconcilableNetInfo, netInfo)
-	if err != nil {
-		klog.Errorf("Failed to reconcile network %s: %v", oc.GetNetworkName(), err)
-	}
-
-	if reconcileRoutes {
-		err = oc.routeImportManager.ReconcileNetwork(oc.GetNetworkName())
-		if err != nil {
-			return err
-		}
-	}
-
-	for _, node := range retryNodes {
-		oc.gatewaysFailed.Store(node.Name, true)
-		err = oc.retryNodes.AddRetryObjWithAddNoBackoff(node)
-		if err != nil {
-			klog.Errorf("Failed to retry node %s for network %s: %v", node.Name, oc.GetNetworkName(), err)
-		}
-	}
-	if len(retryNodes) > 0 {
-		oc.retryNodes.RequestRetryObjs()
-	}
-
-	return nil
+	return oc.BaseNetworkController.reconcile(
+		netInfo,
+		func(node string) { oc.gatewaysFailed.Store(node, true) },
+	)
 }
 
 func (oc *DefaultNetworkController) isPodNetworkAdvertisedAtNode(node string) bool {
@@ -736,6 +678,10 @@ type defaultNetworkControllerEventHandler struct {
 	syncFunc        func([]interface{}) error
 }
 
+func (h *defaultNetworkControllerEventHandler) FilterOutResource(_ interface{}) bool {
+	return false
+}
+
 // AreResourcesEqual returns true if, given two objects of a known resource type, the update logic for this resource
 // type considers them equal and therefore no update is needed. It returns false when the two objects are not considered
 // equal and an update needs be executed. This is regardless of how the update is carried out (whether with a dedicated update
@@ -749,7 +695,7 @@ func (h *defaultNetworkControllerEventHandler) AreResourcesEqual(obj1, obj2 inte
 func (h *defaultNetworkControllerEventHandler) GetInternalCacheEntry(obj interface{}) interface{} {
 	switch h.objType {
 	case factory.PodType:
-		pod := obj.(*kapi.Pod)
+		pod := obj.(*corev1.Pod)
 		return h.oc.getPortInfo(pod)
 	default:
 		return nil
@@ -766,7 +712,8 @@ func (h *defaultNetworkControllerEventHandler) GetResourceFromInformerCache(key 
 func (h *defaultNetworkControllerEventHandler) RecordAddEvent(obj interface{}) {
 	switch h.objType {
 	case factory.PodType:
-		pod := obj.(*kapi.Pod)
+		pod := obj.(*corev1.Pod)
+		klog.V(6).Infof("Recording add event on pod %s/%s", pod.Namespace, pod.Name)
 		h.oc.podRecorder.AddPod(pod.UID)
 		metrics.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name)
 	case factory.PolicyType:
@@ -779,7 +726,8 @@ func (h *defaultNetworkControllerEventHandler) RecordAddEvent(obj interface{}) {
 func (h *defaultNetworkControllerEventHandler) RecordUpdateEvent(obj interface{}) {
 	switch h.objType {
 	case factory.PodType:
-		pod := obj.(*kapi.Pod)
+		pod := obj.(*corev1.Pod)
+		klog.V(6).Infof("Recording update event on pod %s/%s", pod.Namespace, pod.Name)
 		metrics.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name)
 	case factory.PolicyType:
 		np := obj.(*knet.NetworkPolicy)
@@ -791,7 +739,8 @@ func (h *defaultNetworkControllerEventHandler) RecordUpdateEvent(obj interface{}
 func (h *defaultNetworkControllerEventHandler) RecordDeleteEvent(obj interface{}) {
 	switch h.objType {
 	case factory.PodType:
-		pod := obj.(*kapi.Pod)
+		pod := obj.(*corev1.Pod)
+		klog.V(6).Infof("Recording delete event on pod %s/%s", pod.Namespace, pod.Name)
 		h.oc.podRecorder.CleanPod(pod.UID)
 		metrics.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name)
 	case factory.PolicyType:
@@ -804,7 +753,8 @@ func (h *defaultNetworkControllerEventHandler) RecordDeleteEvent(obj interface{}
 func (h *defaultNetworkControllerEventHandler) RecordSuccessEvent(obj interface{}) {
 	switch h.objType {
 	case factory.PodType:
-		pod := obj.(*kapi.Pod)
+		pod := obj.(*corev1.Pod)
+		klog.V(6).Infof("Recording success event on pod %s/%s", pod.Namespace, pod.Name)
 		metrics.GetConfigDurationRecorder().End("pod", pod.Namespace, pod.Name)
 	case factory.PolicyType:
 		np := obj.(*knet.NetworkPolicy)
@@ -817,10 +767,12 @@ func (h *defaultNetworkControllerEventHandler) RecordSuccessEvent(obj interface{
 func (h *defaultNetworkControllerEventHandler) RecordErrorEvent(obj interface{}, reason string, err error) {
 	switch h.objType {
 	case factory.PodType:
-		pod := obj.(*kapi.Pod)
+		pod := obj.(*corev1.Pod)
+		klog.V(6).Infof("Recording error event on pod %s/%s", pod.Namespace, pod.Name)
 		h.oc.recordPodEvent(reason, err, pod)
 	case factory.NodeType:
-		node := obj.(*kapi.Node)
+		node := obj.(*corev1.Node)
+		klog.V(6).Infof("Recording error event for node %s", node.Name)
 		h.oc.recordNodeEvent(reason, err, node)
 	}
 }
@@ -839,16 +791,16 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 
 	switch h.objType {
 	case factory.PodType:
-		pod, ok := obj.(*kapi.Pod)
+		pod, ok := obj.(*corev1.Pod)
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *knet.Pod", obj)
 		}
 		return h.oc.ensurePod(nil, pod, true)
 
 	case factory.NodeType:
-		node, ok := obj.(*kapi.Node)
+		node, ok := obj.(*corev1.Node)
 		if !ok {
-			return fmt.Errorf("could not cast %T object to *kapi.Node", obj)
+			return fmt.Errorf("could not cast %T object to *corev1.Node", obj)
 		}
 		if config.HybridOverlay.Enabled {
 			if util.NoHostSubnet(node) {
@@ -871,14 +823,20 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 				_, hoSync := h.oc.hybridOverlayFailed.Load(node.Name)
 				_, zoneICSync := h.oc.syncZoneICFailed.Load(node.Name)
 				nodeParams = &nodeSyncs{
-					nodeSync,
-					clusterRtrSync,
-					mgmtSync,
-					gwSync,
-					hoSync,
-					zoneICSync}
+					syncNode:              nodeSync,
+					syncClusterRouterPort: clusterRtrSync,
+					syncMgmtPort:          mgmtSync,
+					syncGw:                gwSync,
+					syncHo:                hoSync,
+					syncZoneIC:            zoneICSync}
 			} else {
-				nodeParams = &nodeSyncs{true, true, true, true, config.HybridOverlay.Enabled, config.OVNKubernetesFeature.EnableInterconnect}
+				nodeParams = &nodeSyncs{
+					syncNode:              true,
+					syncClusterRouterPort: true,
+					syncMgmtPort:          true,
+					syncGw:                true,
+					syncHo:                config.HybridOverlay.Enabled,
+					syncZoneIC:            config.OVNKubernetesFeature.EnableInterconnect}
 			}
 
 			if err = h.oc.addUpdateLocalNodeEvent(node, nodeParams); err != nil {
@@ -912,40 +870,50 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 		return h.oc.eIPC.reconcileEgressIP(nil, eIP)
 
 	case factory.EgressIPNamespaceType:
-		namespace := obj.(*kapi.Namespace)
+		namespace := obj.(*corev1.Namespace)
 		return h.oc.eIPC.reconcileEgressIPNamespace(nil, namespace)
 
 	case factory.EgressIPPodType:
-		pod := obj.(*kapi.Pod)
+		pod := obj.(*corev1.Pod)
 		return h.oc.eIPC.reconcileEgressIPPod(nil, pod)
 
 	case factory.EgressNodeType:
-		node := obj.(*kapi.Node)
+		node := obj.(*corev1.Node)
 		// Update node in zone cache; value will be true if node is local
 		// to this zone and false if its not
 		h.oc.eIPC.nodeZoneState.LockKey(node.Name)
 		h.oc.eIPC.nodeZoneState.Store(node.Name, h.oc.isLocalZoneNode(node))
 		h.oc.eIPC.nodeZoneState.UnlockKey(node.Name)
-		// add the 103 qos rule to new node's switch
-		// NOTE: We don't need to remove this on node delete since entire node switch will get cleaned up
-		if h.oc.isLocalZoneNode(node) {
-			if err := h.oc.eIPC.ensureDefaultNoRerouteQoSRules(node.Name); err != nil {
+
+		shouldSyncReroute := true
+		if fromRetryLoop {
+			_, shouldSyncReroute = h.oc.syncEIPNodeRerouteFailed.Load(node.Name)
+		}
+
+		if shouldSyncReroute {
+			// add the 103 qos rule to new node's switch
+			// NOTE: We don't need to remove this on node delete since entire node switch will get cleaned up
+			if h.oc.isLocalZoneNode(node) {
+				if err := h.oc.eIPC.ensureDefaultNoRerouteQoSRules(node.Name); err != nil {
+					h.oc.syncEIPNodeRerouteFailed.Store(node.Name, true)
+					return err
+				}
+			}
+			// add the nodeIP to the default LRP (102 priority) destination address-set
+			err := h.oc.eIPC.ensureDefaultNoRerouteNodePolicies()
+			if err != nil {
+				h.oc.syncEIPNodeRerouteFailed.Store(node.Name, true)
 				return err
 			}
-		}
-		// add the nodeIP to the default LRP (102 priority) destination address-set
-		err := h.oc.eIPC.ensureDefaultNoRerouteNodePolicies()
-		if err != nil {
-			return err
 		}
 		// Add routing specific to Egress IP NOTE: GARP configuration that
 		// Egress IP depends on is added from the gateway reconciliation logic
 		return h.oc.eIPC.addEgressNode(node)
 
 	case factory.NamespaceType:
-		ns, ok := obj.(*kapi.Namespace)
+		ns, ok := obj.(*corev1.Namespace)
 		if !ok {
-			return fmt.Errorf("could not cast %T object to *kapi.Namespace", obj)
+			return fmt.Errorf("could not cast %T object to *corev1.Namespace", obj)
 		}
 		return h.oc.AddNamespace(ns)
 
@@ -961,19 +929,19 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryCache bool) error {
 	switch h.objType {
 	case factory.PodType:
-		oldPod := oldObj.(*kapi.Pod)
-		newPod := newObj.(*kapi.Pod)
+		oldPod := oldObj.(*corev1.Pod)
+		newPod := newObj.(*corev1.Pod)
 
 		return h.oc.ensurePod(oldPod, newPod, inRetryCache || util.PodScheduled(oldPod) != util.PodScheduled(newPod))
 
 	case factory.NodeType:
-		newNode, ok := newObj.(*kapi.Node)
+		newNode, ok := newObj.(*corev1.Node)
 		if !ok {
-			return fmt.Errorf("could not cast newObj of type %T to *kapi.Node", newObj)
+			return fmt.Errorf("could not cast newObj of type %T to *corev1.Node", newObj)
 		}
-		oldNode, ok := oldObj.(*kapi.Node)
+		oldNode, ok := oldObj.(*corev1.Node)
 		if !ok {
-			return fmt.Errorf("could not cast oldObj of type %T to *kapi.Node", oldObj)
+			return fmt.Errorf("could not cast oldObj of type %T to *corev1.Node", oldObj)
 		}
 		var switchToOvnNode bool
 		if config.HybridOverlay.Enabled {
@@ -1010,7 +978,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 		// |--------------------+-------------------+-------------------------------------------------+
 		newNodeIsLocalZoneNode := h.oc.isLocalZoneNode(newNode)
 		zoneClusterChanged := h.oc.nodeZoneClusterChanged(oldNode, newNode, newNodeIsLocalZoneNode, types.DefaultNetworkName)
-		nodeSubnetChanged := nodeSubnetChanged(oldNode, newNode, types.DefaultNetworkName)
+		nodeSubnetChange := nodeSubnetChanged(oldNode, newNode, types.DefaultNetworkName)
 		var aggregatedErrors []error
 		if newNodeIsLocalZoneNode {
 			var nodeSyncsParam *nodeSyncs
@@ -1018,28 +986,34 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 				// determine what actually changed in this update
 				_, nodeSync := h.oc.addNodeFailed.Load(newNode.Name)
 				_, failed := h.oc.nodeClusterRouterPortFailed.Load(newNode.Name)
-				clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChanged || h.oc.skipPinnedLSChanged(oldNode, newNode)
+				clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChange || h.oc.skipPinnedLSChanged(oldNode, newNode)
 				_, failed = h.oc.mgmtPortFailed.Load(newNode.Name)
-				mgmtSync := failed || macAddressChanged(oldNode, newNode, types.DefaultNetworkName) || nodeSubnetChanged
+				mgmtSync := failed || nodeSubnetChange
 				_, failed = h.oc.gatewaysFailed.Load(newNode.Name)
-				gwSync := (failed || gatewayChanged(oldNode, newNode) ||
-					nodeSubnetChanged || hostCIDRsChanged(oldNode, newNode) ||
-					nodeGatewayMTUSupportChanged(oldNode, newNode))
+				gwSync := failed || gatewayChanged(oldNode, newNode) || nodeSubnetChange ||
+					hostCIDRsChanged(oldNode, newNode) || nodeGatewayMTUSupportChanged(oldNode, newNode)
 				_, hoSync := h.oc.hybridOverlayFailed.Load(newNode.Name)
 				_, syncZoneIC := h.oc.syncZoneICFailed.Load(newNode.Name)
 				syncZoneIC = syncZoneIC || zoneClusterChanged || primaryAddrChanged(oldNode, newNode)
 				nodeSyncsParam = &nodeSyncs{
-					nodeSync,
-					clusterRtrSync,
-					mgmtSync,
-					gwSync,
-					hoSync,
-					syncZoneIC}
+					syncNode:              nodeSync,
+					syncClusterRouterPort: clusterRtrSync,
+					syncMgmtPort:          mgmtSync,
+					syncGw:                gwSync,
+					syncHo:                hoSync,
+					syncZoneIC:            syncZoneIC,
+				}
 			} else {
 				klog.Infof("Node %s moved from the remote zone %s to local zone %s.",
 					newNode.Name, util.GetNodeZone(oldNode), util.GetNodeZone(newNode))
 				// The node is now a local zone node.  Trigger a full node sync.
-				nodeSyncsParam = &nodeSyncs{true, true, true, true, config.HybridOverlay.Enabled, config.OVNKubernetesFeature.EnableInterconnect}
+				nodeSyncsParam = &nodeSyncs{
+					syncNode:              true,
+					syncClusterRouterPort: true,
+					syncMgmtPort:          true,
+					syncGw:                true,
+					syncHo:                config.HybridOverlay.Enabled,
+					syncZoneIC:            config.OVNKubernetesFeature.EnableInterconnect}
 			}
 
 			if err := h.oc.addUpdateLocalNodeEvent(newNode, nodeSyncsParam); err != nil {
@@ -1051,7 +1025,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 			// Check if the node moved from local zone to remote zone and if so syncZoneIC should be set to true.
 			// Also check if node subnet changed, so static routes are properly set
 			// Also check if the node is used to be a hybrid overlay node
-			syncZoneIC = syncZoneIC || h.oc.isLocalZoneNode(oldNode) || nodeSubnetChanged || zoneClusterChanged || primaryAddrChanged(oldNode, newNode) || switchToOvnNode
+			syncZoneIC = syncZoneIC || h.oc.isLocalZoneNode(oldNode) || nodeSubnetChange || zoneClusterChanged || primaryAddrChanged(oldNode, newNode) || switchToOvnNode
 			if syncZoneIC {
 				klog.Infof("Node %s in remote zone %s needs interconnect zone sync up. Zone cluster changed: %v",
 					newNode.Name, util.GetNodeZone(newNode), zoneClusterChanged)
@@ -1077,45 +1051,45 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 		return h.oc.eIPC.reconcileEgressIP(oldEIP, newEIP)
 
 	case factory.EgressIPNamespaceType:
-		oldNamespace := oldObj.(*kapi.Namespace)
-		newNamespace := newObj.(*kapi.Namespace)
+		oldNamespace := oldObj.(*corev1.Namespace)
+		newNamespace := newObj.(*corev1.Namespace)
 		return h.oc.eIPC.reconcileEgressIPNamespace(oldNamespace, newNamespace)
 
 	case factory.EgressIPPodType:
-		oldPod := oldObj.(*kapi.Pod)
-		newPod := newObj.(*kapi.Pod)
+		oldPod := oldObj.(*corev1.Pod)
+		newPod := newObj.(*corev1.Pod)
 		return h.oc.eIPC.reconcileEgressIPPod(oldPod, newPod)
 
 	case factory.EgressNodeType:
-		oldNode := oldObj.(*kapi.Node)
-		newNode := newObj.(*kapi.Node)
+		oldNode := oldObj.(*corev1.Node)
+		newNode := newObj.(*corev1.Node)
 		// Update node in zone cache; value will be true if node is local
 		// to this zone and false if its not
 		h.oc.eIPC.nodeZoneState.LockKey(newNode.Name)
 		h.oc.eIPC.nodeZoneState.Store(newNode.Name, h.oc.isLocalZoneNode(newNode))
 		h.oc.eIPC.nodeZoneState.UnlockKey(newNode.Name)
-		// try to add the 103 qos rule to new node's switch if it doesn't exist
-		// The reason we call this from update is because in case the add node event
-		// did not succeed and we got an update node event which overrides the add event
-		// and removes the add event from retry cache, we'd need to ensure the qos rule exists
-		// NOTE: We don't need to remove this on node delete since entire node switch will get cleaned up
-		if h.oc.isLocalZoneNode(newNode) {
+
+		_, failed := h.oc.syncEIPNodeRerouteFailed.Load(newNode.Name)
+
+		// node moved from remote -> local or previously failed reroute config
+		if (!h.oc.isLocalZoneNode(oldNode) || failed) && h.oc.isLocalZoneNode(newNode) {
 			if err := h.oc.eIPC.ensureDefaultNoRerouteQoSRules(newNode.Name); err != nil {
 				return err
 			}
 		}
-		// update the nodeIP in the defalt-reRoute (102 priority) destination address-set
-		if util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) {
+		// update the nodeIP in the default-reRoute (102 priority) destination address-set
+		if failed || util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) {
 			klog.Infof("Egress IP detected IP address change for node %s. Updating no re-route policies", newNode.Name)
 			err := h.oc.eIPC.ensureDefaultNoRerouteNodePolicies()
 			if err != nil {
 				return err
 			}
 		}
+		h.oc.syncEIPNodeRerouteFailed.Delete(newNode.Name)
 		return h.oc.eIPC.addEgressNode(newNode)
 
 	case factory.NamespaceType:
-		oldNs, newNs := oldObj.(*kapi.Namespace), newObj.(*kapi.Namespace)
+		oldNs, newNs := oldObj.(*corev1.Namespace), newObj.(*corev1.Namespace)
 		return h.oc.updateNamespace(oldNs, newNs)
 	}
 	return fmt.Errorf("no update function for object type %s", h.objType)
@@ -1128,7 +1102,7 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 	switch h.objType {
 	case factory.PodType:
 		var portInfo *lpInfo
-		pod := obj.(*kapi.Pod)
+		pod := obj.(*corev1.Pod)
 
 		if cachedObj != nil {
 			portInfo = cachedObj.(*lpInfo)
@@ -1136,7 +1110,7 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 		return h.oc.removePod(pod, portInfo)
 
 	case factory.NodeType:
-		node, ok := obj.(*kapi.Node)
+		node, ok := obj.(*corev1.Node)
 		if !ok {
 			return fmt.Errorf("could not cast obj of type %T to *knet.Node", obj)
 		}
@@ -1156,15 +1130,15 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 		return h.oc.eIPC.reconcileEgressIP(eIP, nil)
 
 	case factory.EgressIPNamespaceType:
-		namespace := obj.(*kapi.Namespace)
+		namespace := obj.(*corev1.Namespace)
 		return h.oc.eIPC.reconcileEgressIPNamespace(namespace, nil)
 
 	case factory.EgressIPPodType:
-		pod := obj.(*kapi.Pod)
+		pod := obj.(*corev1.Pod)
 		return h.oc.eIPC.reconcileEgressIPPod(pod, nil)
 
 	case factory.EgressNodeType:
-		node := obj.(*kapi.Node)
+		node := obj.(*corev1.Node)
 		// remove the IPs from the destination address-set of the default LRP (102)
 		err := h.oc.eIPC.ensureDefaultNoRerouteNodePolicies()
 		if err != nil {
@@ -1174,10 +1148,11 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 		h.oc.eIPC.nodeZoneState.LockKey(node.Name)
 		h.oc.eIPC.nodeZoneState.Delete(node.Name)
 		h.oc.eIPC.nodeZoneState.UnlockKey(node.Name)
+		h.oc.syncEIPNodeRerouteFailed.Delete(node.Name)
 		return nil
 
 	case factory.NamespaceType:
-		ns := obj.(*kapi.Namespace)
+		ns := obj.(*corev1.Namespace)
 		return h.oc.deleteNamespace(ns)
 
 	default:

@@ -4,14 +4,17 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/pkg/errors"
+
+	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
+
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/pkg/errors"
-	"k8s.io/klog/v2"
-	utilnet "k8s.io/utils/net"
 )
 
 func (gw *GatewayManager) applyGWSnatRule(snatRule *util.GWSNATRule, logicalRouter *nbdb.LogicalRouter, hostSubnets []*net.IPNet, snatMap map[string]bool) error {

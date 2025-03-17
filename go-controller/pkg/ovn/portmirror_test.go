@@ -5,14 +5,15 @@ import (
 	"net"
 	"time"
 
+	cnitypes "github.com/containernetworking/cni/pkg/types"
+	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	"github.com/urfave/cli/v2"
-	v1 "k8s.io/api/core/v1"
+
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	cnitypes "github.com/containernetworking/cni/pkg/types"
-	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	portmirror "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
@@ -39,7 +40,7 @@ var _ = ginkgo.Describe("PortMirror", func() {
 
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
-		config.PrepareTestConfig()
+		gomega.Expect(config.PrepareTestConfig()).Should(gomega.Succeed())
 		config.OVNKubernetesFeature.EnablePortMirror = true
 		app = cli.NewApp()
 		app.Name = "portmirror"
@@ -60,7 +61,7 @@ var _ = ginkgo.Describe("PortMirror", func() {
 				Subnets:  "10.193.0.0/16/26",
 			},
 		)
-		gomega.Expect(err).To(gomega.BeNil())
+		gomega.Expect(err).ToNot(gomega.HaveOccurred())
 	})
 	ginkgo.AfterEach(func() {
 		ocInfo := fakeOvn.secondaryControllers["ovn-primary"]
@@ -71,7 +72,7 @@ var _ = ginkgo.Describe("PortMirror", func() {
 	ginkgo.Context("PortMirror", func() {
 		ginkgo.It("can create/delete mirror in ovn when portmirror is created/deleted", func() {
 			pm := newPortMirror(portMirrorName, portMirrorNamespace, portmirror.PortMirrorDirectionBoth)
-			app.Action = func(ctx *cli.Context) error {
+			app.Action = func(_ *cli.Context) error {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{},
@@ -94,8 +95,8 @@ var _ = ginkgo.Describe("PortMirror", func() {
 					err := fakeOvn.nbClient.WhereCache(func(mirror *nbdb.Mirror) bool {
 						return mirror.Name == util.GetPortMirrorOVNName(portMirrorNamespace, portMirrorName)
 					}).List(context.TODO(), &mirrors)
-					gomega.Expect(err).To(gomega.BeNil())
-					gomega.Expect(len(mirrors)).To(gomega.Equal(1))
+					gomega.Expect(err).ToNot(gomega.HaveOccurred())
+					gomega.Expect(mirrors).To(gomega.HaveLen(1))
 					return mirrors[0].Name
 				}).Should(gomega.Equal(mirrorName))
 				err = fakeOvn.fakeClient.PortMirrorClient.K8sV1beta1().PortMirrors(portMirrorNamespace).Delete(context.TODO(), portMirrorName, metav1.DeleteOptions{})
@@ -105,7 +106,7 @@ var _ = ginkgo.Describe("PortMirror", func() {
 					err := fakeOvn.nbClient.WhereCache(func(mirror *nbdb.Mirror) bool {
 						return mirror.Name == util.GetPortMirrorOVNName(portMirrorNamespace, portMirrorName)
 					}).List(context.TODO(), &mirrors)
-					gomega.Expect(err).To(gomega.BeNil())
+					gomega.Expect(err).ToNot(gomega.HaveOccurred())
 					return mirrors
 				}, time.Minute).Should(gomega.BeEmpty())
 				return nil
@@ -121,7 +122,7 @@ var _ = ginkgo.Describe("PortMirror", func() {
 			podT.Annotations = map[string]string{
 				"k8s.v1.cni.cncf.io/networks": "default/ovn-primary",
 			}
-			app.Action = func(ctx *cli.Context) error {
+			app.Action = func(_ *cli.Context) error {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
@@ -135,13 +136,13 @@ var _ = ginkgo.Describe("PortMirror", func() {
 							},
 						},
 					},
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
+					&corev1.NamespaceList{
+						Items: []corev1.Namespace{
 							namespaceT,
 						},
 					},
-					&v1.NodeList{
-						Items: []v1.Node{
+					&corev1.NodeList{
+						Items: []corev1.Node{
 							*newNode("node1", "192.168.126.202/24"),
 						},
 					},
@@ -150,8 +151,8 @@ var _ = ginkgo.Describe("PortMirror", func() {
 							*pm,
 						},
 					},
-					&v1.PodList{
-						Items: []v1.Pod{
+					&corev1.PodList{
+						Items: []corev1.Pod{
 							*podT,
 						},
 					},
@@ -174,14 +175,15 @@ var _ = ginkgo.Describe("PortMirror", func() {
 				err = fakeOvn.nbClient.WhereCache(func(mirror *nbdb.Mirror) bool {
 					return mirror.Name == util.GetPortMirrorOVNName(portMirrorNamespace, portMirrorName)
 				}).List(context.TODO(), &mirrors)
-				gomega.Expect(err).To(gomega.BeNil())
-				gomega.Expect(len(mirrors)).To(gomega.Equal(1))
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				gomega.Expect(mirrors).To(gomega.HaveLen(1))
 
 				gomega.Eventually(func() []string {
 					nadName := util.GetNADName("default", "ovn-primary")
 					logicalPortName := util.GetSecondaryNetworkLogicalPortName(portMirrorNamespace, "pod1", nadName)
 					lsp := &nbdb.LogicalSwitchPort{Name: logicalPortName}
-					fakeOvn.nbClient.Get(context.Background(), lsp)
+					err = fakeOvn.nbClient.Get(context.Background(), lsp)
+					gomega.Expect(err).ToNot(gomega.HaveOccurred())
 					return lsp.MirrorRules
 
 				}, time.Minute).Should(gomega.ContainElement(mirrors[0].UUID))
@@ -192,7 +194,8 @@ var _ = ginkgo.Describe("PortMirror", func() {
 					nadName := util.GetNADName("default", "ovn-primary")
 					logicalPortName := util.GetSecondaryNetworkLogicalPortName(portMirrorNamespace, "pod1", nadName)
 					lsp := &nbdb.LogicalSwitchPort{Name: logicalPortName}
-					fakeOvn.nbClient.Get(context.Background(), lsp)
+					err = fakeOvn.nbClient.Get(context.Background(), lsp)
+					gomega.Expect(err).ToNot(gomega.HaveOccurred())
 					return lsp.MirrorRules
 
 				}, time.Minute).Should(gomega.BeEmpty())
@@ -209,7 +212,7 @@ var _ = ginkgo.Describe("PortMirror", func() {
 			pod1.Annotations = map[string]string{
 				"k8s.v1.cni.cncf.io/networks": "default/ovn-primary",
 			}
-			app.Action = func(ctx *cli.Context) error {
+			app.Action = func(_ *cli.Context) error {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
@@ -223,13 +226,13 @@ var _ = ginkgo.Describe("PortMirror", func() {
 							},
 						},
 					},
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
+					&corev1.NamespaceList{
+						Items: []corev1.Namespace{
 							namespaceT,
 						},
 					},
-					&v1.NodeList{
-						Items: []v1.Node{
+					&corev1.NodeList{
+						Items: []corev1.Node{
 							*newNode("node1", "192.168.126.202/24"),
 						},
 					},
@@ -238,8 +241,8 @@ var _ = ginkgo.Describe("PortMirror", func() {
 							*pm,
 						},
 					},
-					&v1.PodList{
-						Items: []v1.Pod{
+					&corev1.PodList{
+						Items: []corev1.Pod{
 							*pod1,
 						},
 					},
@@ -261,14 +264,15 @@ var _ = ginkgo.Describe("PortMirror", func() {
 				err = fakeOvn.nbClient.WhereCache(func(mirror *nbdb.Mirror) bool {
 					return mirror.Name == util.GetPortMirrorOVNName(portMirrorNamespace, portMirrorName)
 				}).List(context.TODO(), &mirrors)
-				gomega.Expect(err).To(gomega.BeNil())
-				gomega.Expect(len(mirrors)).To(gomega.Equal(1))
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				gomega.Expect(mirrors).To(gomega.HaveLen(1))
 
 				gomega.Eventually(func() []string {
 					nadName := util.GetNADName("default", "ovn-primary")
 					logicalPortName := util.GetSecondaryNetworkLogicalPortName(portMirrorNamespace, "pod1", nadName)
 					lsp := &nbdb.LogicalSwitchPort{Name: logicalPortName}
-					fakeOvn.nbClient.Get(context.Background(), lsp)
+					err = fakeOvn.nbClient.Get(context.Background(), lsp)
+					gomega.Expect(err).ToNot(gomega.HaveOccurred())
 					return lsp.MirrorRules
 
 				}, time.Minute).Should(gomega.ContainElement(mirrors[0].UUID))
@@ -280,7 +284,8 @@ var _ = ginkgo.Describe("PortMirror", func() {
 					nadName := util.GetNADName("default", "ovn-primary")
 					logicalPortName := util.GetSecondaryNetworkLogicalPortName(portMirrorNamespace, "pod1", nadName)
 					lsp := &nbdb.LogicalSwitchPort{Name: logicalPortName}
-					fakeOvn.nbClient.Get(context.Background(), lsp)
+					err = fakeOvn.nbClient.Get(context.Background(), lsp)
+					gomega.Expect(err).ToNot(gomega.HaveOccurred())
 					return lsp.MirrorRules
 
 				}, time.Minute).Should(gomega.BeEmpty())
@@ -291,7 +296,7 @@ var _ = ginkgo.Describe("PortMirror", func() {
 		})
 
 		ginkgo.It("Delete stale mirror in ovn when corresponding portmirror is not found", func() {
-			app.Action = func(ctx *cli.Context) error {
+			app.Action = func(_ *cli.Context) error {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
@@ -311,7 +316,7 @@ var _ = ginkgo.Describe("PortMirror", func() {
 					err := fakeOvn.controller.nbClient.WhereCache(func(mirror *nbdb.Mirror) bool {
 						return mirror.Name == "stale_mirror"
 					}).List(context.TODO(), &mirrors)
-					gomega.Expect(err).To(gomega.BeNil())
+					gomega.Expect(err).ToNot(gomega.HaveOccurred())
 					return mirrors
 				}, time.Minute).Should(gomega.BeEmpty())
 				return nil

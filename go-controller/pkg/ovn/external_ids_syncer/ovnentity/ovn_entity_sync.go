@@ -3,14 +3,15 @@ package ovnentity
 import (
 	"fmt"
 
+	"k8s.io/klog/v2"
+
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/libovsdb/ovsdb"
+
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
-	"k8s.io/klog/v2"
 )
 
 type ovnEntitySyncer struct {
@@ -49,7 +50,7 @@ func (syncer *ovnEntitySyncer) SyncLogicalSwitches() error {
 
 	i := 0
 	for i < len(legacyLogicalSwitches) {
-		ops := []libovsdb.Operation{}
+		ops := []ovsdb.Operation{}
 		for j := 0; (j < syncer.txnBatchSize || syncer.txnBatchSize == 0) && i < len(legacyLogicalSwitches); i, j = i+1, j+1 {
 			legacySwitch := legacyLogicalSwitches[i]
 			logicalSwitch := nbdb.LogicalSwitch{
@@ -96,7 +97,7 @@ func (syncer *ovnEntitySyncer) SyncLogicalRouters() error {
 
 	i := 0
 	for i < len(legacyLogicalRouters) {
-		ops := []libovsdb.Operation{}
+		ops := []ovsdb.Operation{}
 		for j := 0; (j < syncer.txnBatchSize || syncer.txnBatchSize == 0) && i < len(legacyLogicalRouters); i, j = i+1, j+1 {
 			legacyRouter := legacyLogicalRouters[i]
 			logicalRouter := nbdb.LogicalRouter{
@@ -142,7 +143,7 @@ func (syncer *ovnEntitySyncer) SyncLogicalSwitchPorts() error {
 
 	i := 0
 	for i < len(legacyLogicalSwitchPorts) {
-		ops := []libovsdb.Operation{}
+		ops := []ovsdb.Operation{}
 		for j := 0; (j < syncer.txnBatchSize || syncer.txnBatchSize == 0) && i < len(legacyLogicalSwitchPorts); i, j = i+1, j+1 {
 			legacySwitchPort := legacyLogicalSwitchPorts[i]
 			// legacySwitchPort may already have the legacy NAD name external_ids, update to the correct key

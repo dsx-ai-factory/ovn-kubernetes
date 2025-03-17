@@ -10,12 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
 	mlxdevm "github.com/Mellanox/mlxdevm-go"
 	utilfs "github.com/Mellanox/sriovnet/pkg/utils/filesystem"
+
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 const (
@@ -339,7 +340,7 @@ func (bnnc *BaseNodeNetworkController) getSFInfo(sfUplinkPort string, sfUplinkPo
 	var auxDevice string
 	// wait for some time, if needed
 	start := time.Now()
-	if err := wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 5*time.Second, true, func(ctx context.Context) (bool, error) {
+	if err := wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 5*time.Second, true, func(_ context.Context) (bool, error) {
 		var errRet error
 		auxDevice, errRet = getSFAuxDev(mirrorSFNum)
 		if errRet != nil {
@@ -361,7 +362,7 @@ func (bnnc *BaseNodeNetworkController) getSFInfo(sfUplinkPort string, sfUplinkPo
 	start = time.Now()
 	var repName string
 	// wait for some time, if needed to get the netdev name and SFrep name
-	if err := wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 5*time.Second, true, func(ctx context.Context) (bool, error) {
+	if err := wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 5*time.Second, true, func(_ context.Context) (bool, error) {
 		var errRet error
 		repName, errRet = getSFRepPort(sfUplinkPortNum, int32(mirrorSFNum))
 		if errRet != nil {

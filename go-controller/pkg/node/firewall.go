@@ -3,8 +3,9 @@ package node
 import (
 	"fmt"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	kapi "k8s.io/api/core/v1"
 )
 
 const (
@@ -67,15 +68,15 @@ func firewallPortExists(zoneName string, port int32, protocol string) (bool, err
 	return false, nil
 }
 
-func addPortToFirewallZone(zoneName string, port int32, protocol kapi.Protocol) error {
+func addPortToFirewallZone(zoneName string, port int32, protocol corev1.Protocol) error {
 	var portType, portArgs string
-	if protocol == kapi.ProtocolTCP {
+	if protocol == corev1.ProtocolTCP {
 		portArgs = fmt.Sprintf("--add-port=%d/tcp", port)
 		portType = "tcp"
-	} else if protocol == kapi.ProtocolUDP {
+	} else if protocol == corev1.ProtocolUDP {
 		portArgs = fmt.Sprintf("--add-port=%d/udp", port)
 		portType = "udp"
-	} else if protocol == kapi.ProtocolSCTP {
+	} else if protocol == corev1.ProtocolSCTP {
 		portArgs = fmt.Sprintf("--add-port=%d/sctp", port)
 		portType = "sctp"
 	} else {
@@ -100,15 +101,15 @@ func addPortToFirewallZone(zoneName string, port int32, protocol kapi.Protocol) 
 	return nil
 }
 
-func removePortFromFirewallZone(zoneName string, port int32, protocol kapi.Protocol) error {
+func removePortFromFirewallZone(zoneName string, port int32, protocol corev1.Protocol) error {
 	var portType, portArgs string
-	if protocol == kapi.ProtocolTCP {
+	if protocol == corev1.ProtocolTCP {
 		portArgs = fmt.Sprintf("--remove-port=%d/tcp", port)
 		portType = "tcp"
-	} else if protocol == kapi.ProtocolUDP {
+	} else if protocol == corev1.ProtocolUDP {
 		portArgs = fmt.Sprintf("--remove-port=%d/udp", port)
 		portType = "udp"
-	} else if protocol == kapi.ProtocolSCTP {
+	} else if protocol == corev1.ProtocolSCTP {
 		portArgs = fmt.Sprintf("--remove-port=%d/sctp", port)
 		portType = "sctp"
 	} else {

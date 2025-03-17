@@ -7,6 +7,12 @@ import (
 	"time"
 
 	"github.com/containernetworking/cni/pkg/types"
+
+	"k8s.io/apimachinery/pkg/util/wait"
+	clientset "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/record"
+	"k8s.io/klog/v2"
+
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
@@ -25,11 +31,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/routeimport"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
-	"k8s.io/apimachinery/pkg/util/wait"
-	clientset "k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/record"
-	"k8s.io/klog/v2"
 )
 
 // ControllerManager structure is the object manages all controllers
@@ -65,7 +66,9 @@ type ControllerManager struct {
 }
 
 func (cm *ControllerManager) NewNetworkController(nInfo util.NetInfo) (networkmanager.NetworkController, error) {
-	cnci, err := cm.newCommonNetworkControllerInfo()
+	// Pass a shallow clone of the watch factory, this allows multiplexing
+	// informers for secondary networks.
+	cnci, err := cm.newCommonNetworkControllerInfo(cm.watchFactory.ShallowClone())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create network controller info %w", err)
 	}
@@ -83,7 +86,9 @@ func (cm *ControllerManager) NewNetworkController(nInfo util.NetInfo) (networkma
 
 // newDummyNetworkController creates a dummy network controller used to clean up specific network
 func (cm *ControllerManager) newDummyNetworkController(topoType, netName string) (networkmanager.NetworkController, error) {
-	cnci, err := cm.newCommonNetworkControllerInfo()
+	// Pass a shallow clone of the watch factory, this allows multiplexing
+	// informers for secondary networks.
+	cnci, err := cm.newCommonNetworkControllerInfo(cm.watchFactory.ShallowClone())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create network controller info %w", err)
 	}
@@ -321,14 +326,14 @@ func (cm *ControllerManager) createACLLoggingMeter() error {
 }
 
 // newCommonNetworkControllerInfo creates and returns the common networkController info
-func (cm *ControllerManager) newCommonNetworkControllerInfo() (*ovn.CommonNetworkControllerInfo, error) {
-	return ovn.NewCommonNetworkControllerInfo(cm.client, cm.kube, cm.watchFactory, cm.recorder, cm.nbClient,
+func (cm *ControllerManager) newCommonNetworkControllerInfo(wf *factory.WatchFactory) (*ovn.CommonNetworkControllerInfo, error) {
+	return ovn.NewCommonNetworkControllerInfo(cm.client, cm.kube, wf, cm.recorder, cm.nbClient,
 		cm.sbClient, cm.podRecorder, cm.SCTPSupport, cm.multicastSupport, cm.svcTemplateSupport)
 }
 
 // initDefaultNetworkController creates the controller for default network
 func (cm *ControllerManager) initDefaultNetworkController(observManager *observability.Manager) error {
-	cnci, err := cm.newCommonNetworkControllerInfo()
+	cnci, err := cm.newCommonNetworkControllerInfo(cm.watchFactory)
 	if err != nil {
 		return fmt.Errorf("failed to create common network controller info: %w", err)
 	}
@@ -354,7 +359,7 @@ func (cm *ControllerManager) Start(ctx context.Context) error {
 	start := time.Now()
 	var zone string
 	var err1 error
-	err := wait.PollUntilContextTimeout(ctx, 250*time.Millisecond, maxTimeout, true, func(ctx context.Context) (bool, error) {
+	err := wait.PollUntilContextTimeout(ctx, 250*time.Millisecond, maxTimeout, true, func(_ context.Context) (bool, error) {
 		zone, err1 = libovsdbutil.GetNBZone(cm.nbClient)
 		if err1 != nil {
 			return false, nil
@@ -383,7 +388,7 @@ func (cm *ControllerManager) Start(ctx context.Context) error {
 	// appears will convert it to local, which may or may not clean up DB resources correctly.
 	klog.Infof("Waiting up to %s for a node to have %q zone", maxTimeout, config.Default.Zone)
 	start = time.Now()
-	err = wait.PollUntilContextTimeout(ctx, 250*time.Millisecond, maxTimeout, true, func(ctx context.Context) (bool, error) {
+	err = wait.PollUntilContextTimeout(ctx, 250*time.Millisecond, maxTimeout, true, func(_ context.Context) (bool, error) {
 		nodes, err := cm.watchFactory.GetNodes()
 		if err != nil {
 			klog.Errorf("Unable to get nodes from informer while waiting for node zone sync")
@@ -511,6 +516,6 @@ func (cm *ControllerManager) Stop() {
 	}
 }
 
-func (cm *ControllerManager) Reconcile(name string, old, new util.NetInfo) error {
+func (cm *ControllerManager) Reconcile(_ string, _, _ util.NetInfo) error {
 	return nil
 }

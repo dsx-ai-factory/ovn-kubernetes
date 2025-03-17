@@ -2,6 +2,7 @@ package clustermanager
 
 import (
 	"github.com/containernetworking/cni/pkg/types"
+
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 
@@ -64,7 +65,7 @@ func (sncm *secondaryNetworkClusterManager) NewNetworkController(nInfo util.NetI
 	sncc := newNetworkClusterController(
 		nInfo,
 		sncm.ovnClient,
-		sncm.watchFactory,
+		sncm.watchFactory.ShallowClone(),
 		sncm.recorder,
 		sncm.networkManager,
 		sncm.errorReporter,

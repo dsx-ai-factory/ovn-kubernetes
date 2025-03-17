@@ -7,10 +7,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"k8s.io/klog/v2"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 type bridgeOpenflowCache struct {

@@ -9,13 +9,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 	current "github.com/containernetworking/cni/pkg/types/100"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/k8snetworkplumbingwg/sriovnet"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	"github.com/vishvananda/netlink"
+
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/kubernetes/fake"
+	kexec "k8s.io/utils/exec"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/mocks"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -27,11 +33,6 @@ import (
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	util_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
-	"github.com/vishvananda/netlink"
-
-	v1 "k8s.io/api/core/v1"
-	"k8s.io/client-go/kubernetes/fake"
-	kexec "k8s.io/utils/exec"
 )
 
 func TestRenameLink(t *testing.T) {
@@ -107,9 +108,9 @@ func TestRenameLink(t *testing.T) {
 			err := util.RenameLink(tc.inpCurrName, tc.inpNewName)
 			t.Log(err)
 			if tc.errExp {
-				assert.Error(t, err)
+				require.Error(t, err)
 			} else {
-				assert.Nil(t, err)
+				require.NoError(t, err)
 			}
 			mockNetLinkOps.AssertExpectations(t)
 		})
@@ -176,7 +177,7 @@ func TestMoveIfToNetns(t *testing.T) {
 			if tc.errMatch != nil {
 				assert.Contains(t, err.Error(), tc.errMatch.Error())
 			} else {
-				assert.Nil(t, err)
+				require.NoError(t, err)
 			}
 			mockNetLinkOps.AssertExpectations(t)
 			mockNetNS.AssertExpectations(t)
@@ -257,7 +258,7 @@ func TestSafeMoveIfToNetns(t *testing.T) {
 			if tc.errMatch != nil {
 				assert.Contains(t, err.Error(), tc.errMatch.Error())
 			} else {
-				assert.Nil(t, err)
+				require.NoError(t, err)
 			}
 			mockNetLinkOps.AssertExpectations(t)
 			mockNetNS.AssertExpectations(t)
@@ -444,7 +445,7 @@ func TestSetupNetwork(t *testing.T) {
 			if tc.errMatch != nil {
 				assert.Contains(t, err.Error(), tc.errMatch.Error())
 			} else {
-				assert.Nil(t, err)
+				require.NoError(t, err)
 			}
 			mockNetLinkOps.AssertExpectations(t)
 			mockLink.AssertExpectations(t)
@@ -535,11 +536,11 @@ func TestSetupInterface(t *testing.T) {
 			hostIface, contIface, err := setupInterface(tc.inpNetNS, tc.inpContID, tc.inpIfaceName, tc.inpPodIfaceInfo)
 			t.Log(hostIface, contIface, err)
 			if tc.errExp {
-				assert.NotNil(t, err)
+				require.Error(t, err)
 			} else if tc.errMatch != nil {
 				assert.Contains(t, err.Error(), tc.errMatch.Error())
 			} else {
-				assert.Nil(t, err)
+				require.NoError(t, err)
 			}
 			mockNetLinkOps.AssertExpectations(t)
 			mockCNIPlugin.AssertExpectations(t)
@@ -607,11 +608,9 @@ func TestSetupSriovInterface(t *testing.T) {
 				PodAnnotation: util.PodAnnotation{},
 				NetdevName:    "en01",
 			},
-			inpPCIAddrs:         "0000:03:00.1",
-			errExp:              true,
-			sriovOpsMockHelper:  []ovntest.TestifyMockHelper{},
-			onRetArgsKexecIface: []ovntest.TestifyMockHelper{{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{mockCmd}}},
-			onRetArgsCmdList:    []ovntest.TestifyMockHelper{{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, fmt.Errorf("failed to run 'ovs-vsctl")}}},
+			inpPCIAddrs:        "0000:03:00.1",
+			errExp:             true,
+			sriovOpsMockHelper: []ovntest.TestifyMockHelper{},
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{nil, fmt.Errorf("mock error")}},
 			},
@@ -626,11 +625,9 @@ func TestSetupSriovInterface(t *testing.T) {
 				PodAnnotation: util.PodAnnotation{},
 				NetdevName:    "en01",
 			},
-			inpPCIAddrs:         "0000:03:00.1",
-			errExp:              true,
-			sriovOpsMockHelper:  []ovntest.TestifyMockHelper{},
-			onRetArgsKexecIface: []ovntest.TestifyMockHelper{{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{mockCmd}}},
-			onRetArgsCmdList:    []ovntest.TestifyMockHelper{{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, nil}}},
+			inpPCIAddrs:        "0000:03:00.1",
+			errExp:             true,
+			sriovOpsMockHelper: []ovntest.TestifyMockHelper{},
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
 				{OnCallMethodName: "LinkSetNsFd", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{nil}},
@@ -652,11 +649,9 @@ func TestSetupSriovInterface(t *testing.T) {
 				PodAnnotation: util.PodAnnotation{},
 				NetdevName:    "en01",
 			},
-			inpPCIAddrs:         "0000:03:00.1",
-			errExp:              true,
-			onRetArgsKexecIface: []ovntest.TestifyMockHelper{{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{mockCmd}}},
-			onRetArgsCmdList:    []ovntest.TestifyMockHelper{{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, fmt.Errorf("failed to run 'ovs-vsctl")}}},
-			runnerInstance:      mockKexecIface,
+			inpPCIAddrs:    "0000:03:00.1",
+			errExp:         true,
+			runnerInstance: mockKexecIface,
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "GetUplinkRepresentor", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"", fmt.Errorf("mock error")}},
 			},
@@ -680,13 +675,9 @@ func TestSetupSriovInterface(t *testing.T) {
 				PodAnnotation: util.PodAnnotation{},
 				NetdevName:    "en01",
 			},
-			inpPCIAddrs: "0000:03:00.1",
-			errExp:      true,
-			onRetArgsKexecIface: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-			},
-			onRetArgsCmdList: []ovntest.TestifyMockHelper{{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, fmt.Errorf("failed to run 'ovs-vsctl")}}},
-			runnerInstance:   mockKexecIface,
+			inpPCIAddrs:    "0000:03:00.1",
+			errExp:         true,
+			runnerInstance: mockKexecIface,
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "GetUplinkRepresentor", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"testlinkrepresentor", nil}},
 				{OnCallMethodName: "GetVfIndexByPciAddress", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{-1, fmt.Errorf("mock error")}},
@@ -711,13 +702,9 @@ func TestSetupSriovInterface(t *testing.T) {
 				PodAnnotation: util.PodAnnotation{},
 				NetdevName:    "en01",
 			},
-			inpPCIAddrs: "0000:03:00.1",
-			errExp:      true,
-			onRetArgsKexecIface: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{mockCmd}},
-			},
-			onRetArgsCmdList: []ovntest.TestifyMockHelper{{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, nil}}},
-			runnerInstance:   mockKexecIface,
+			inpPCIAddrs:    "0000:03:00.1",
+			errExp:         true,
+			runnerInstance: mockKexecIface,
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "GetUplinkRepresentor", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"testlinkrepresentor", nil}},
 				{OnCallMethodName: "GetVfIndexByPciAddress", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{0, nil}},
@@ -747,10 +734,8 @@ func TestSetupSriovInterface(t *testing.T) {
 			errExp:      true,
 			onRetArgsKexecIface: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
 			},
 			onRetArgsCmdList: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, nil}},
 				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, nil}},
 			},
 			runnerInstance: mockKexecIface,
@@ -786,10 +771,8 @@ func TestSetupSriovInterface(t *testing.T) {
 			errMatch:    fmt.Errorf("failed to set MTU on"),
 			onRetArgsKexecIface: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
 			},
 			onRetArgsCmdList: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, nil}},
 				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, nil}},
 			},
 			runnerInstance: mockKexecIface,
@@ -833,13 +816,7 @@ func TestSetupSriovInterface(t *testing.T) {
 			inpPCIAddrs:        "0000:03:00.1",
 			errExp:             false,
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{},
-			onRetArgsKexecIface: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
-			},
-			onRetArgsCmdList: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "CombinedOutput", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil, nil}},
-			},
-			runnerInstance: mockKexecIface,
+			runnerInstance:     mockKexecIface,
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
 				// The below two mock calls are needed for the moveIfToNetns() call that internally invokes them
 				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
@@ -1188,8 +1165,6 @@ func TestSetupSriovInterface(t *testing.T) {
 
 			runner = tc.runnerInstance
 
-			ovsExec()
-
 			netNsDoError = nil
 			hostIface, contIface, err := setupSriovInterface(tc.inpNetNS, tc.inpContID, tc.inpIfaceName, tc.inpPodIfaceInfo, tc.inpPCIAddrs, false)
 			t.Log(hostIface, contIface, err)
@@ -1197,11 +1172,11 @@ func TestSetupSriovInterface(t *testing.T) {
 				err = netNsDoError
 			}
 			if tc.errExp {
-				assert.NotNil(t, err)
+				require.Error(t, err)
 			} else if tc.errMatch != nil {
 				assert.Contains(t, err.Error(), tc.errMatch.Error())
 			} else {
-				assert.Nil(t, err)
+				require.NoError(t, err)
 			}
 			mockNetLinkOps.AssertExpectations(t)
 			mockCNIPlugin.AssertExpectations(t)
@@ -1455,9 +1430,9 @@ func TestConfigureOVS(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockSriovnetOps.Mock, tc.sriovnetOpsMockHelper)
 
 			err := util.SetExec(tc.execMock)
-			assert.Nil(t, err)
+			require.NoError(t, err)
 			err = SetExec(tc.execMock)
-			assert.Nil(t, err)
+			require.NoError(t, err)
 
 			tc.execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: genOVSGetCmd("bridge", "br-int", "datapath_type", ""),
@@ -1540,20 +1515,20 @@ func TestConfigureOVS(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 
-			var pod v1.Pod
+			var pod corev1.Pod
 			pod.UID = "xyz"
 			podNamespaceLister := v1mocks.PodNamespaceLister{}
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
 			var podLister v1mocks.PodLister
 			podLister.On("Pods", mock.AnythingOfType("string")).Return(&podNamespaceLister)
-			fakeClient := fake.NewSimpleClientset(&v1.PodList{Items: []v1.Pod{pod}})
+			fakeClient := fake.NewSimpleClientset(&corev1.PodList{Items: []corev1.Pod{pod}})
 			clientset := NewClientSet(fakeClient, &podLister)
 			err = ConfigureOVS(ctx, tc.podNs, tc.podName, tc.vfRep,
 				tc.ifInfo, sandboxID, vfPciAddress, clientset)
 			if tc.errMatch != nil {
 				assert.Contains(t, err.Error(), tc.errMatch.Error())
 			} else {
-				assert.Nil(t, err)
+				require.NoError(t, err)
 			}
 
 			mockNetLinkOps.AssertExpectations(t)
@@ -1668,16 +1643,16 @@ func TestConfigureOVS_getPfEncapIpWithError(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockSriovnetOps.Mock, tc.sriovnetOpsMockHelper)
 
 			err := util.SetExec(execMock)
-			assert.Nil(t, err)
+			require.NoError(t, err)
 			err = SetExec(execMock)
-			assert.Nil(t, err)
+			require.NoError(t, err)
 
 			execMock.AddFakeCmds(tc.execMockCommands)
 
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 
-			var pod v1.Pod
+			var pod corev1.Pod
 			podNamespaceLister := v1mocks.PodNamespaceLister{}
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
 
@@ -1689,7 +1664,7 @@ func TestConfigureOVS_getPfEncapIpWithError(t *testing.T) {
 			if tc.errMatch != nil {
 				assert.Contains(t, err.Error(), tc.errMatch.Error())
 			} else {
-				assert.Nil(t, err)
+				require.NoError(t, err)
 			}
 
 			mockNetLinkOps.AssertExpectations(t)

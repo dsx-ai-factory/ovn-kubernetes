@@ -8,11 +8,13 @@ import (
 	"sync"
 
 	iputils "github.com/containernetworking/plugins/pkg/ip"
+
+	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
+
 	bitmapallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/bitmap"
 	ipallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"k8s.io/klog/v2"
-	utilnet "k8s.io/utils/net"
 )
 
 // Allocator manages the allocation of IP within specific set of subnets
@@ -238,7 +240,7 @@ func (allocator *allocator) AvailableIPsCount(name string, isIPv4 bool) (int64, 
 		}
 		var usedIPCount int64 = 0
 		maxCount := utilnet.RangeSize(&cidr)
-		ipam.ForEach(func(ip net.IP) { usedIPCount++ })
+		ipam.ForEach(func(_ net.IP) { usedIPCount++ })
 		totalAvailableCount += maxCount - usedIPCount
 	}
 	// don't include the network address and broadcast address

@@ -7,6 +7,18 @@ import (
 	"sync"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/labels"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/reference"
+	"k8s.io/client-go/util/retry"
+	"k8s.io/client-go/util/workqueue"
+	"k8s.io/klog/v2"
+
 	ipallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	ipreservation "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
@@ -18,18 +30,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
-	kapi "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/labels"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/tools/record"
-	"k8s.io/client-go/tools/reference"
-	"k8s.io/client-go/util/retry"
-	"k8s.io/client-go/util/workqueue"
-	"k8s.io/klog/v2"
 )
 
 const (
@@ -241,8 +241,8 @@ func (c *Controller) recordIPReservationEvent(reason string, err string, resvIP 
 		klog.Errorf("Couldn't get a reference to IPReservation %s/%s to post an event: '%v'",
 			resvIP.Namespace, resvIP.Name, refErr)
 	} else {
-		klog.Warningf("Posting a %s event for IPReservation %s/%s", kapi.EventTypeWarning, resvIP.Namespace, resvIP.Name)
-		c.recorder.Eventf(resvIPRef, kapi.EventTypeWarning, reason, err)
+		klog.Warningf("Posting a %s event for IPReservation %s/%s", corev1.EventTypeWarning, resvIP.Namespace, resvIP.Name)
+		c.recorder.Eventf(resvIPRef, corev1.EventTypeWarning, reason, err)
 	}
 }
 
@@ -289,7 +289,7 @@ func (c *Controller) sync(ipresvKey string) error {
 
 	return c.ipresvCache.DoWithLock(ipresvKey, func(key string) error {
 		ipresvObj, err := c.ipresvLister.IPReservations(ns).Get(name)
-		if err != nil && !errors.IsNotFound(err) {
+		if err != nil && !apierrors.IsNotFound(err) {
 			return err
 		}
 		exstingIPResvState, loaded := c.ipresvCache.Load(key)

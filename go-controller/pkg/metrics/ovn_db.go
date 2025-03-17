@@ -8,11 +8,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
+
 	"k8s.io/apimachinery/pkg/util/wait"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 var ovnSouthDbCoverageShowMetricsMap = map[string]*metricDetails{
@@ -446,7 +448,7 @@ func getOvnDbVersionInfo() {
 
 func RegisterOvnDBMetrics(podLister corev1listers.PodLister, k8sNodeName string,
 	metricsScrapeInterval int, stopChan <-chan struct{}) {
-	err := wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 300*time.Second, true, func(ctx context.Context) (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 300*time.Second, true, func(_ context.Context) (bool, error) {
 		return checkPodRunsOnGivenNode(podLister, []string{"name in (ovn-nbdb, ovn-sbdb, ovnkube-db)"}, k8sNodeName, false)
 	})
 	if err != nil {

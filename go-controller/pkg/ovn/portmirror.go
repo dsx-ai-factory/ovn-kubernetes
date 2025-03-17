@@ -5,19 +5,20 @@ import (
 	"fmt"
 	"time"
 
-	kapi "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/klog/v2"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	portmirror "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"k8s.io/klog/v2"
 )
 
 const (
@@ -29,7 +30,7 @@ type portMirrorRetryRequest struct {
 	action     action
 	portMirror *portmirror.PortMirror
 	pm         *util.PortMirror
-	pod        *kapi.Pod
+	pod        *corev1.Pod
 }
 
 // deleteMirrorFromPod deletes the mirrorUUID form pod LSP
@@ -68,7 +69,7 @@ func (bnc *BaseNetworkController) deleteMirrorFromPod(portMirrorUUID, portName s
 	return nil
 }
 
-func (bnc *BaseNetworkController) handlePortMirrorSourcePodDelete(pm *util.PortMirror, pod *kapi.Pod) error {
+func (bnc *BaseNetworkController) handlePortMirrorSourcePodDelete(pm *util.PortMirror, pod *corev1.Pod) error {
 	// portMirrorNameUnlock is used to serialize the portmirror status update
 	portMirrorNameUnlock := util.GetLockByPMName(pm.Namespace, pm.Name)
 	defer portMirrorNameUnlock()
@@ -180,7 +181,7 @@ func (bnc *BaseNetworkController) isNadToBeMirrored(nadName string, podNadInfo m
 	return podNadInfo[nadName]
 }
 
-func (bnc *BaseNetworkController) handlePortMirrorSourcePodAdd(pm *util.PortMirror, pod *kapi.Pod) error {
+func (bnc *BaseNetworkController) handlePortMirrorSourcePodAdd(pm *util.PortMirror, pod *corev1.Pod) error {
 	portMirrorNameUnlock := util.GetLockByPMName(pm.Namespace, pm.Name)
 	defer portMirrorNameUnlock()
 
@@ -348,19 +349,19 @@ func (bnc *BaseNetworkController) handleSourcePodSelectors(pm *util.PortMirror) 
 		sInfo.PodHandler, err = bnc.watchFactory.AddFilteredPodHandler(pm.Namespace, sInfo.PodSelector,
 			cache.ResourceEventHandlerFuncs{
 				AddFunc: func(obj interface{}) {
-					pod := obj.(*kapi.Pod)
+					pod := obj.(*corev1.Pod)
 					if err := bnc.handlePortMirrorSourcePodAdd(pm, pod); err != nil {
 						klog.Errorf(err.Error())
 					}
 				},
 				DeleteFunc: func(obj interface{}) {
-					pod := obj.(*kapi.Pod)
+					pod := obj.(*corev1.Pod)
 					if err := bnc.handlePortMirrorSourcePodDelete(pm, pod); err != nil {
 						klog.Errorf(err.Error())
 					}
 				},
-				UpdateFunc: func(oldObj, newObj interface{}) {
-					newPod := newObj.(*kapi.Pod)
+				UpdateFunc: func(_, newObj interface{}) {
+					newPod := newObj.(*corev1.Pod)
 					if util.NeedsRetry(newPod, pm) {
 						if err := bnc.handlePortMirrorSourcePodAdd(pm, newPod); err != nil {
 							klog.Errorf(err.Error())
@@ -515,7 +516,7 @@ func (bnc *BaseNetworkController) deletePortMirror(portMir *portmirror.PortMirro
 			bnc.watchFactory.RemovePodHandler(pm.SourceDetails.SourceNetInfo[i].PodHandler.(*factory.Handler))
 		}
 	}
-	pm.SourceDetails.SourcePodInfo.Range(func(k, v interface{}) bool {
+	pm.SourceDetails.SourcePodInfo.Range(func(_, v interface{}) bool {
 		podListPortInfo := v.(map[string]string)
 		for portName, nad := range podListPortInfo {
 			klog.Infof("Deleting mirror rules from pod logical switch port %s under portmirror %s/%s for nad %s",
@@ -627,7 +628,7 @@ func (bnc *BaseNetworkController) requeuePortMirror(ra action, portmirror *portm
 	bnc.portMirrorRetryQueue.AddAfter(req, 3*time.Second)
 }
 
-func (bnc *BaseNetworkController) requeuePodAddForPortMirror(ra action, portmirror *util.PortMirror, pod *kapi.Pod) {
+func (bnc *BaseNetworkController) requeuePodAddForPortMirror(ra action, portmirror *util.PortMirror, pod *corev1.Pod) {
 	req := &portMirrorRetryRequest{
 		action: ra,
 		pm:     portmirror,

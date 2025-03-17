@@ -9,14 +9,14 @@ import (
 	"sync"
 	"testing"
 
+	cnitypes "github.com/containernetworking/cni/pkg/types"
+	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
 
-	cnitypes "github.com/containernetworking/cni/pkg/types"
-	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	kapiv1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
@@ -115,21 +115,21 @@ func (tcm *testControllerManager) GetDefaultNetworkController() BaseNetworkContr
 	return tcm.defaultNetwork
 }
 
-func (tcm *testControllerManager) Reconcile(name string, old, new util.NetInfo) error {
+func (tcm *testControllerManager) Reconcile(string, util.NetInfo, util.NetInfo) error {
 	return nil
 }
 
 type fakeNamespaceLister struct{}
 
-func (f *fakeNamespaceLister) List(selector labels.Selector) (ret []*kapiv1.Namespace, err error) {
+func (f *fakeNamespaceLister) List(labels.Selector) (ret []*corev1.Namespace, err error) {
 	return nil, nil
 }
 
 // Get retrieves the Namespace from the index for a given name.
 // Objects returned here must be treated as read-only.
-func (f *fakeNamespaceLister) Get(name string) (*kapiv1.Namespace, error) {
-	return &kapiv1.Namespace{
-		ObjectMeta: v1.ObjectMeta{
+func (f *fakeNamespaceLister) Get(name string) (*corev1.Namespace, error) {
+	return &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
 			Name:   name,
 			Labels: map[string]string{types.RequiredUDNNamespaceLabel: ""},
 		},
@@ -496,7 +496,7 @@ func TestNADController(t *testing.T) {
 				nadClient:          fakeClient.NetworkAttchDefClient,
 				namespaceLister:    &fakeNamespaceLister{},
 			}
-			err = nadController.networkIDAllocator.ReserveID(types.DefaultNetworkName, DefaultNetworkID)
+			err = nadController.networkIDAllocator.ReserveID(types.DefaultNetworkName, types.DefaultNetworkID)
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 			netController := nadController.networkController
 
@@ -512,8 +512,8 @@ func TestNADController(t *testing.T) {
 					args.network.NADName = args.nad
 					nad, err = buildNAD(name, namespace, args.network)
 					g.Expect(err).ToNot(gomega.HaveOccurred())
-					_, err = fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Create(context.Background(), nad, v1.CreateOptions{})
-					g.Expect(err).To(gomega.Or(gomega.Not(gomega.HaveOccurred()), gomega.MatchError(errors.IsAlreadyExists, "AlreadyExists")))
+					_, err = fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Create(context.Background(), nad, metav1.CreateOptions{})
+					g.Expect(err).To(gomega.Or(gomega.Not(gomega.HaveOccurred()), gomega.MatchError(apierrors.IsAlreadyExists, "AlreadyExists")))
 				}
 
 				err = nadController.syncNAD(args.nad, nad)
@@ -692,12 +692,12 @@ func TestSyncAll(t *testing.T) {
 			expectedPrimaryNetworks := map[string]util.NetInfo{}
 			for _, namespace := range []string{"test", "test2"} {
 				_, err = fakeClient.KubeClient.CoreV1().Namespaces().Create(context.TODO(),
-					&kapiv1.Namespace{
-						ObjectMeta: v1.ObjectMeta{
+					&corev1.Namespace{
+						ObjectMeta: metav1.ObjectMeta{
 							Name:   namespace,
 							Labels: map[string]string{types.RequiredUDNNamespaceLabel: ""},
 						},
-					}, v1.CreateOptions{},
+					}, metav1.CreateOptions{},
 				)
 			}
 			g.Expect(err).ToNot(gomega.HaveOccurred())
@@ -714,7 +714,7 @@ func TestSyncAll(t *testing.T) {
 				_, err = fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Create(
 					context.Background(),
 					nad,
-					v1.CreateOptions{},
+					metav1.CreateOptions{},
 				)
 				g.Expect(err).ToNot(gomega.HaveOccurred())
 				netInfo := expectedNetworks[testNAD.netconf.Name]
@@ -753,7 +753,7 @@ func TestSyncAll(t *testing.T) {
 			for name, network := range expectedNetworks {
 				g.Expect(actualNetworks).To(gomega.HaveKey(name))
 				g.Expect(util.AreNetworksCompatible(actualNetworks[name], network)).To(gomega.BeTrue())
-				if network.GetNetworkID() != util.InvalidID {
+				if network.GetNetworkID() != types.InvalidID {
 					g.Expect(actualNetworks[name].GetNetworkID()).To(gomega.Equal(network.GetNetworkID()))
 				}
 			}
@@ -773,7 +773,7 @@ func buildNAD(name, namespace string, network *ovncnitypes.NetConf) (*nettypes.N
 		return nil, err
 	}
 	nad := &nettypes.NetworkAttachmentDefinition{
-		ObjectMeta: v1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
 		},

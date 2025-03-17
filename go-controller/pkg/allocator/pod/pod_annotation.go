@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"net"
 
-	v1 "k8s.io/api/core/v1"
-	listers "k8s.io/client-go/listers/core/v1"
-	"k8s.io/klog/v2"
-
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+
+	corev1 "k8s.io/api/core/v1"
+	listers "k8s.io/client-go/listers/core/v1"
+	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
@@ -54,11 +54,11 @@ func NewPodAnnotationAllocator(
 // false.
 func (allocator *PodAnnotationAllocator) AllocatePodAnnotation(
 	ipAllocator subnet.NamedAllocator,
-	pod *v1.Pod,
+	pod *corev1.Pod,
 	network *nadapi.NetworkSelectionElement,
 	reallocateIP, skipIPAM bool,
 	networkRole string) (
-	*v1.Pod,
+	*corev1.Pod,
 	*util.PodAnnotation,
 	error) {
 
@@ -81,19 +81,19 @@ func allocatePodAnnotation(
 	kube kube.Interface,
 	ipAllocator subnet.NamedAllocator,
 	netInfo util.NetInfo,
-	pod *v1.Pod,
+	pod *corev1.Pod,
 	network *nadapi.NetworkSelectionElement,
 	claimsReconciler persistentips.PersistentAllocations,
 	reallocateIP, skipIPAM bool,
 	networkRole string) (
-	updatedPod *v1.Pod,
+	updatedPod *corev1.Pod,
 	podAnnotation *util.PodAnnotation,
 	err error) {
 
 	// no id allocation
 	var idAllocator id.NamedAllocator
 
-	allocateToPodWithRollback := func(pod *v1.Pod) (*v1.Pod, func(), error) {
+	allocateToPodWithRollback := func(pod *corev1.Pod) (*corev1.Pod, func(), error) {
 		var rollback func()
 		pod, podAnnotation, rollback, err = allocatePodAnnotationWithRollback(
 			ipAllocator,
@@ -135,11 +135,11 @@ func allocatePodAnnotation(
 func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
 	ipAllocator subnet.NamedAllocator,
 	idAllocator id.NamedAllocator,
-	pod *v1.Pod,
+	pod *corev1.Pod,
 	network *nadapi.NetworkSelectionElement,
 	reallocateIP, skipIPAM bool,
 	networkRole string) (
-	*v1.Pod,
+	*corev1.Pod,
 	*util.PodAnnotation,
 	error) {
 
@@ -164,16 +164,16 @@ func allocatePodAnnotationWithTunnelID(
 	ipAllocator subnet.NamedAllocator,
 	idAllocator id.NamedAllocator,
 	netInfo util.NetInfo,
-	pod *v1.Pod,
+	pod *corev1.Pod,
 	network *nadapi.NetworkSelectionElement,
 	claimsReconciler persistentips.PersistentAllocations,
 	reallocateIP, skipIPAM bool,
 	networkRole string) (
-	updatedPod *v1.Pod,
+	updatedPod *corev1.Pod,
 	podAnnotation *util.PodAnnotation,
 	err error) {
 
-	allocateToPodWithRollback := func(pod *v1.Pod) (*v1.Pod, func(), error) {
+	allocateToPodWithRollback := func(pod *corev1.Pod) (*corev1.Pod, func(), error) {
 		var rollback func()
 		pod, podAnnotation, rollback, err = allocatePodAnnotationWithRollback(
 			ipAllocator,
@@ -224,12 +224,12 @@ func allocatePodAnnotationWithRollback(
 	ipAllocator subnet.NamedAllocator,
 	idAllocator id.NamedAllocator,
 	netInfo util.NetInfo,
-	pod *v1.Pod,
+	pod *corev1.Pod,
 	network *nadapi.NetworkSelectionElement,
 	claimsReconciler persistentips.PersistentAllocations,
 	reallocateIP, skipIPAM bool,
 	networkRole string) (
-	updatedPod *v1.Pod,
+	updatedPod *corev1.Pod,
 	podAnnotation *util.PodAnnotation,
 	rollback func(),
 	err error) {

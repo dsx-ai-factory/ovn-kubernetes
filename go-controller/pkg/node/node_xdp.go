@@ -9,10 +9,12 @@ import (
 	"strings"
 
 	"github.com/containernetworking/plugins/pkg/ns"
+	"github.com/vishvananda/netlink"
+
+	"k8s.io/klog/v2"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/vishvananda/netlink"
-	"k8s.io/klog/v2"
 )
 
 var xdpSFMAC string
@@ -278,7 +280,7 @@ func (nc *SecondaryLocalnetNodeNetworkController) xdpSetupNSForNAD(xdpNS string,
 	}
 	defer netns.Close()
 
-	err = netns.Do(func(hostNS ns.NetNS) error {
+	err = netns.Do(func(_ ns.NetNS) error {
 
 		// Get the MAC addresses for the SF and Veth ports to configure OF rules on
 		// the bridge. Assumes veth port is named as "*veth*"
@@ -404,7 +406,7 @@ func xdpSetupNSForInterface(allowedIPs []string, podMAC string, vlanID uint, set
 		return fmt.Errorf("error getting SF interface for XDP")
 	}
 
-	err = netns.Do(func(hostNS ns.NetNS) error {
+	err = netns.Do(func(_ ns.NetNS) error {
 
 		// Get veth link
 		vethLink, err := netlink.LinkByName(xdpVethDev)

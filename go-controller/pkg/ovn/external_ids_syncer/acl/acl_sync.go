@@ -7,20 +7,21 @@ import (
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	knet "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
+
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/libovsdb/ovsdb"
+
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/batching"
-
-	v1 "k8s.io/api/core/v1"
-	knet "k8s.io/api/networking/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/klog/v2"
-	utilnet "k8s.io/utils/net"
 )
 
 const (
@@ -45,7 +46,7 @@ const (
 
 type AclSyncer struct {
 	BaseAclSyncer
-	existingNodes []*v1.Node
+	existingNodes []*corev1.Node
 }
 
 type BaseAclSyncer struct {
@@ -57,7 +58,7 @@ type BaseAclSyncer struct {
 	txnBatchSize int
 }
 
-func NewACLSyncer(nbClient libovsdbclient.Client, existingNodes []*v1.Node,
+func NewACLSyncer(nbClient libovsdbclient.Client, existingNodes []*corev1.Node,
 	controllerName string, netInfo util.NetInfo) *AclSyncer {
 	return &AclSyncer{
 		BaseAclSyncer: BaseAclSyncer{
@@ -87,7 +88,7 @@ func NewBaseACLSyncer(nbClient libovsdbclient.Client, controllerName string, net
 }
 
 func (syncer *AclSyncer) GetUpdatedACLs(legacyACLs []*nbdb.ACL) (updatedACLs []*nbdb.ACL,
-	deleteOps []libovsdb.Operation, err error) {
+	deleteOps []ovsdb.Operation, err error) {
 	multicastACLs := syncer.updateStaleMulticastACLsDbIDs(legacyACLs)
 	klog.Infof("Found %d stale multicast ACLs", len(multicastACLs))
 	updatedACLs = append(updatedACLs, multicastACLs...)
@@ -110,7 +111,7 @@ func (syncer *AclSyncer) GetUpdatedACLs(legacyACLs []*nbdb.ACL) (updatedACLs []*
 }
 
 func (syncer *BaseAclSyncer) GetUpdatedACLs(legacyACLs []*nbdb.ACL) (updatedACLs []*nbdb.ACL,
-	deleteOps []libovsdb.Operation, err error) {
+	deleteOps []ovsdb.Operation, err error) {
 	defaultDenyACLs, deleteACLs, err := syncer.updateStaleDefaultDenyNetpolACLs(legacyACLs)
 	if err != nil {
 		return updatedACLs, deleteOps, fmt.Errorf("failed to update stale default deny netpol ACLs: %w", err)
@@ -129,7 +130,7 @@ func (syncer *BaseAclSyncer) GetUpdatedACLs(legacyACLs []*nbdb.ACL) (updatedACLs
 }
 
 func (syncer *BaseAclSyncer) SyncACLs(getUpdatedACLs func([]*nbdb.ACL) ([]*nbdb.ACL,
-	[]libovsdb.Operation, error)) error {
+	[]ovsdb.Operation, error)) error {
 	// stale acls don't have controller ID
 	legacyAclPred := func(item *nbdb.ACL) bool {
 		return item.ExternalIDs[libovsdbops.OwnerControllerKey.String()] == "" &&
@@ -192,7 +193,7 @@ func (syncer *BaseAclSyncer) SyncACLs(getUpdatedACLs func([]*nbdb.ACL) ([]*nbdb.
 		if err != nil {
 			return fmt.Errorf("unable to find leftover ACLs, cannot update stale data: %v", err)
 		}
-		p := func(item *nbdb.LogicalSwitch) bool { return true }
+		p := func(_ *nbdb.LogicalSwitch) bool { return true }
 		err = libovsdbops.RemoveACLsFromLogicalSwitchesWithPredicate(syncer.nbClient, p, leftoverACLs...)
 		if err != nil {
 			return fmt.Errorf("unable delete leftover ACLs from switches: %v", err)
@@ -327,7 +328,7 @@ func (syncer *AclSyncer) getAllowFromNodeACLDbIDs(nodeName, mgmtPortIP string) *
 // updateStaleNetpolNodeACLs updates allow from node ACLs, that don't have new ExternalIDs based
 // on DbObjectIDs set. Allow from node acls are applied on the node switch, therefore the cleanup for deleted is not needed,
 // since acl will be deleted toegther with the node switch.
-func (syncer *AclSyncer) updateStaleNetpolNodeACLs(legacyACLs []*nbdb.ACL, existingNodes []*v1.Node) []*nbdb.ACL {
+func (syncer *AclSyncer) updateStaleNetpolNodeACLs(legacyACLs []*nbdb.ACL, existingNodes []*corev1.Node) []*nbdb.ACL {
 	// ACL to allow traffic from host via management port has no name or ExternalIDs
 	// The only way to find it is by exact match
 	type aclInfo struct {
@@ -462,7 +463,7 @@ func (syncer *BaseAclSyncer) getDefaultDenyPolicyACLIDs(ns, policyType, defaultA
 }
 
 func (syncer *BaseAclSyncer) updateStaleDefaultDenyNetpolACLs(legacyACLs []*nbdb.ACL) (updatedACLs []*nbdb.ACL,
-	deleteOps []libovsdb.Operation, err error) {
+	deleteOps []ovsdb.Operation, err error) {
 	for _, acl := range legacyACLs {
 		// sync default Deny policies
 		// defaultDenyPolicyTypeACLExtIdKey ExternalID was used by default deny and multicast acls,

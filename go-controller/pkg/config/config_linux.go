@@ -5,10 +5,12 @@ package config
 
 import (
 	"fmt"
+
+	"github.com/vishvananda/netlink"
+
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/vishvananda/netlink"
 )
 
 // ValidateConfig validates the configuration

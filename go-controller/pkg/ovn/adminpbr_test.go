@@ -4,15 +4,16 @@ import (
 	"context"
 	"time"
 
+	cnitypes "github.com/containernetworking/cni/pkg/types"
+	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	"github.com/urfave/cli/v2"
-	v1 "k8s.io/api/core/v1"
+
+	corev1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	cnitypes "github.com/containernetworking/cni/pkg/types"
-	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpbrapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
@@ -48,7 +49,7 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
-		config.PrepareTestConfig()
+		gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
 		config.OVNKubernetesFeature.EnableAdminPolicyBasedRouting = true
 		config.OVNKubernetesFeature.EnableEgressFirewall = false
 		config.OVNKubernetesFeature.EnableEgressIP = false
@@ -71,7 +72,7 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 				Subnets:  "10.193.0.0/16/26",
 			},
 		)
-		gomega.Expect(err).To(gomega.BeNil())
+		gomega.Expect(err).ToNot(gomega.HaveOccurred())
 	})
 	ginkgo.AfterEach(func() {
 		ocInfo := fakeOvn.secondaryControllers["ovn-primary"]
@@ -82,7 +83,7 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 	ginkgo.Context("AdminPBR", func() {
 		ginkgo.It("can create/delete logical_router_policy and address_set in ovn when AdminPolicyBasedRoute is created/deleted", func() {
 			pbr := newAdminPBR(policyName, nextHop)
-			app.Action = func(ctx *cli.Context) error {
+			app.Action = func(_ *cli.Context) error {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
@@ -111,8 +112,8 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 					err := fakeOvn.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
 						return lrp.ExternalIDs[ovntypes.ExternalIDK8sOwner] == util.NamespacedName(pbr)
 					}).List(context.TODO(), &policies)
-					gomega.Expect(err).To(gomega.BeNil())
-					gomega.Expect(len(policies)).To(gomega.Equal(1))
+					gomega.Expect(err).ToNot(gomega.HaveOccurred())
+					gomega.Expect(policies).To(gomega.HaveLen(1))
 					asIndex = getAdminPBRAddrSetDbIDs(pbr.Name, policies[0].ExternalIDs[ovntypes.ExternalIDHash], ocInfo.bnc.controllerName)
 					return policies[0].Nexthops
 				}).Should(gomega.ContainElement(nextHop))
@@ -124,7 +125,7 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 					err := fakeOvn.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
 						return lrp.ExternalIDs[ovntypes.ExternalIDK8sOwner] == util.NamespacedName(pbr)
 					}).List(context.TODO(), &policies)
-					gomega.Expect(err).To(gomega.BeNil())
+					gomega.Expect(err).ToNot(gomega.HaveOccurred())
 					return policies
 				}, time.Minute).Should(gomega.BeEmpty())
 				return nil
@@ -135,7 +136,7 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 
 		ginkgo.It("can add/remove Pod IPs to/from address set when Pod is created/deleted", func() {
 			pbr := newAdminPBR(policyName, nextHop)
-			app.Action = func(ctx *cli.Context) error {
+			app.Action = func(_ *cli.Context) error {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
@@ -153,19 +154,19 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 							*pbr,
 						},
 					},
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
+					&corev1.NamespaceList{
+						Items: []corev1.Namespace{
 							*newNamespaceWithLabels(adminPBRNamespace, map[string]string{}),
 						},
 					},
-					&v1.NodeList{
-						Items: []v1.Node{
+					&corev1.NodeList{
+						Items: []corev1.Node{
 							*newNodeWithLabels(node1Name, node1IP, map[string]string{"ngn2.nvidia.com/igw_vip": "G"}),
 							*newNodeWithLabels(node2Name, node2IP, map[string]string{"ngn2.nvidia.com/igw_vip": "H"}),
 						},
 					},
-					&v1.PodList{
-						Items: []v1.Pod{
+					&corev1.PodList{
+						Items: []corev1.Pod{
 							*newPodWithLabels(adminPBRNamespace, pod1Name, node1Name, pod1IP, map[string]string{"k8s.io/app": app1Name}, node1IP),
 							*newPodWithLabels(adminPBRNamespace, pod2Name, node2Name, pod2IP, map[string]string{"k8s.io/app": app2Name}, node2IP),
 						},
@@ -181,8 +182,8 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 					err := fakeOvn.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
 						return lrp.ExternalIDs[ovntypes.ExternalIDK8sOwner] == util.NamespacedName(pbr)
 					}).List(context.TODO(), &policies)
-					gomega.Expect(err).To(gomega.BeNil())
-					gomega.Expect(len(policies)).To(gomega.Equal(1))
+					gomega.Expect(err).ToNot(gomega.HaveOccurred())
+					gomega.Expect(policies).To(gomega.HaveLen(1))
 					asIndex = getAdminPBRAddrSetDbIDs(pbr.Name, policies[0].ExternalIDs[ovntypes.ExternalIDHash], ocInfo.bnc.controllerName)
 					return policies[0].Nexthops
 				}).Should(gomega.ContainElement(nextHop))
@@ -199,7 +200,7 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 
 		ginkgo.It("can add/remove Pod IPs to/from address set when policy matches/mismatches the node selector", func() {
 			pbr := newAdminPBR(policyName, nextHop)
-			app.Action = func(ctx *cli.Context) error {
+			app.Action = func(_ *cli.Context) error {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
@@ -217,19 +218,19 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 							*pbr,
 						},
 					},
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
+					&corev1.NamespaceList{
+						Items: []corev1.Namespace{
 							*newNamespaceWithLabels(adminPBRNamespace, map[string]string{}),
 						},
 					},
-					&v1.NodeList{
-						Items: []v1.Node{
+					&corev1.NodeList{
+						Items: []corev1.Node{
 							*newNodeWithLabels(node1Name, node1IP, map[string]string{"ngn2.nvidia.com/igw_vip": "G"}),
 							*newNodeWithLabels(node2Name, node2IP, map[string]string{"ngn2.nvidia.com/igw_vip": "H"}),
 						},
 					},
-					&v1.PodList{
-						Items: []v1.Pod{
+					&corev1.PodList{
+						Items: []corev1.Pod{
 							*newPodWithLabels(adminPBRNamespace, pod1Name, node1Name, pod1IP, map[string]string{"k8s.io/app": app1Name}, node1IP),
 							*newPodWithLabels(adminPBRNamespace, pod2Name, node2Name, pod2IP, map[string]string{"k8s.io/app": app2Name}, node2IP),
 						},
@@ -245,8 +246,8 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 					err := fakeOvn.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
 						return lrp.ExternalIDs[ovntypes.ExternalIDK8sOwner] == util.NamespacedName(pbr)
 					}).List(context.TODO(), &policies)
-					gomega.Expect(err).To(gomega.BeNil())
-					gomega.Expect(len(policies)).To(gomega.Equal(1))
+					gomega.Expect(err).ToNot(gomega.HaveOccurred())
+					gomega.Expect(policies).To(gomega.HaveLen(1))
 					asIndex = getAdminPBRAddrSetDbIDs(pbr.Name, policies[0].ExternalIDs[ovntypes.ExternalIDHash], ocInfo.bnc.controllerName)
 					return policies[0].Nexthops
 				}).Should(gomega.ContainElement(nextHop))
@@ -264,7 +265,7 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 
 		ginkgo.It("can add/remove Pod IPs to/from address set when policy matches/mismatches the namespace selector", func() {
 			pbr := newAdminPBR(policyName, nextHop)
-			app.Action = func(ctx *cli.Context) error {
+			app.Action = func(_ *cli.Context) error {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
@@ -282,19 +283,19 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 							*pbr,
 						},
 					},
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
+					&corev1.NamespaceList{
+						Items: []corev1.Namespace{
 							*newNamespaceWithLabels(adminPBRNamespace, map[string]string{}),
 						},
 					},
-					&v1.NodeList{
-						Items: []v1.Node{
+					&corev1.NodeList{
+						Items: []corev1.Node{
 							*newNodeWithLabels(node1Name, node1IP, map[string]string{"ngn2.nvidia.com/igw_vip": "G"}),
 							*newNodeWithLabels(node2Name, node2IP, map[string]string{"ngn2.nvidia.com/igw_vip": "H"}),
 						},
 					},
-					&v1.PodList{
-						Items: []v1.Pod{
+					&corev1.PodList{
+						Items: []corev1.Pod{
 							*newPodWithLabels(adminPBRNamespace, pod1Name, node1Name, pod1IP, map[string]string{"k8s.io/app": app1Name}, node1IP),
 							*newPodWithLabels(adminPBRNamespace, pod2Name, node2Name, pod2IP, map[string]string{"k8s.io/app": app2Name}, node2IP),
 						},
@@ -310,8 +311,8 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 					err := fakeOvn.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
 						return lrp.ExternalIDs[ovntypes.ExternalIDK8sOwner] == util.NamespacedName(pbr)
 					}).List(context.TODO(), &policies)
-					gomega.Expect(err).To(gomega.BeNil())
-					gomega.Expect(len(policies)).To(gomega.Equal(1))
+					gomega.Expect(err).ToNot(gomega.HaveOccurred())
+					gomega.Expect(policies).To(gomega.HaveLen(1))
 					asIndex = getAdminPBRAddrSetDbIDs(pbr.Name, policies[0].ExternalIDs[ovntypes.ExternalIDHash], ocInfo.bnc.controllerName)
 					return policies[0].Nexthops
 				}).Should(gomega.ContainElement(nextHop))
@@ -331,7 +332,7 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 
 		ginkgo.It("can add/remove Pod IPs to/from address set when pods label changes", func() {
 			pbr := newAdminPBR(policyName, nextHop)
-			app.Action = func(ctx *cli.Context) error {
+			app.Action = func(_ *cli.Context) error {
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
@@ -349,19 +350,19 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 							*pbr,
 						},
 					},
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
+					&corev1.NamespaceList{
+						Items: []corev1.Namespace{
 							*newNamespaceWithLabels(adminPBRNamespace, map[string]string{}),
 						},
 					},
-					&v1.NodeList{
-						Items: []v1.Node{
+					&corev1.NodeList{
+						Items: []corev1.Node{
 							*newNodeWithLabels(node1Name, node1IP, map[string]string{"ngn2.nvidia.com/igw_vip": "G"}),
 							*newNodeWithLabels(node2Name, node2IP, map[string]string{"ngn2.nvidia.com/igw_vip": "G"}),
 						},
 					},
-					&v1.PodList{
-						Items: []v1.Pod{
+					&corev1.PodList{
+						Items: []corev1.Pod{
 							*newPodWithLabels(adminPBRNamespace, pod1Name, node1Name, pod1IP, map[string]string{"k8s.io/app": app1Name}, node1IP),
 							*newPodWithLabels(adminPBRNamespace, pod2Name, node2Name, pod2IP, map[string]string{"k8s.io/app": app2Name}, node2IP),
 						},
@@ -377,8 +378,8 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 					err := fakeOvn.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
 						return lrp.ExternalIDs[ovntypes.ExternalIDK8sOwner] == util.NamespacedName(pbr)
 					}).List(context.TODO(), &policies)
-					gomega.Expect(err).To(gomega.BeNil())
-					gomega.Expect(len(policies)).To(gomega.Equal(1))
+					gomega.Expect(err).ToNot(gomega.HaveOccurred())
+					gomega.Expect(policies).To(gomega.HaveLen(1))
 					asIndex = getAdminPBRAddrSetDbIDs(pbr.Name, policies[0].ExternalIDs[ovntypes.ExternalIDHash], ocInfo.bnc.controllerName)
 					return policies[0].Nexthops
 				}).Should(gomega.ContainElement(nextHop))
@@ -399,7 +400,7 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 
 		ginkgo.It("will retry if ovn operation fails", func() {
 			pbr := newAdminPBR(policyName, nextHop)
-			app.Action = func(ctx *cli.Context) error {
+			app.Action = func(_ *cli.Context) error {
 				fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{},
 					&nettypes.NetworkAttachmentDefinitionList{
 						Items: []nettypes.NetworkAttachmentDefinition{*nad},
@@ -409,19 +410,19 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 							*pbr,
 						},
 					},
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
+					&corev1.NamespaceList{
+						Items: []corev1.Namespace{
 							*newNamespaceWithLabels(adminPBRNamespace, map[string]string{}),
 						},
 					},
-					&v1.NodeList{
-						Items: []v1.Node{
+					&corev1.NodeList{
+						Items: []corev1.Node{
 							*newNodeWithLabels(node1Name, node1IP, map[string]string{"ngn2.nvidia.com/igw_vip": "G"}),
 							*newNodeWithLabels(node2Name, node2IP, map[string]string{"ngn2.nvidia.com/igw_vip": "G"}),
 						},
 					},
-					&v1.PodList{
-						Items: []v1.Pod{
+					&corev1.PodList{
+						Items: []corev1.Pod{
 							*newPodWithLabels(adminPBRNamespace, pod1Name, node1Name, pod1IP, map[string]string{"k8s.io/app": app1Name}, node1IP),
 							*newPodWithLabels(adminPBRNamespace, pod2Name, node2Name, pod2IP, map[string]string{"k8s.io/app": app2Name}, node2IP),
 						},
@@ -436,22 +437,22 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 					err := fakeOvn.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
 						return lrp.ExternalIDs[ovntypes.ExternalIDK8sOwner] == util.NamespacedName(pbr)
 					}).List(context.TODO(), &policies)
-					gomega.Expect(err).To(gomega.BeNil())
+					gomega.Expect(err).ToNot(gomega.HaveOccurred())
 					return policies
 				}, 15*time.Second).Should(gomega.BeEmpty())
 				ops, err := fakeOvn.nbClient.Create(&nbdb.LogicalRouter{
 					Name: "ovn.primary_" + ovntypes.OVNClusterRouter,
 					UUID: "ovn.primary_" + ovntypes.OVNClusterRouter + "-UUID",
 				})
-				gomega.Expect(err).To(gomega.BeNil())
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				_, err = fakeOvn.nbClient.Transact(context.TODO(), ops...)
-				gomega.Expect(err).To(gomega.BeNil())
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				gomega.Eventually(func() []nbdb.LogicalRouterPolicy {
 					policies := []nbdb.LogicalRouterPolicy{}
 					err := fakeOvn.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
 						return lrp.ExternalIDs[ovntypes.ExternalIDK8sOwner] == util.NamespacedName(pbr)
 					}).List(context.TODO(), &policies)
-					gomega.Expect(err).To(gomega.BeNil())
+					gomega.Expect(err).ToNot(gomega.HaveOccurred())
 					return policies
 				}, 60*time.Second).Should(gomega.HaveLen(1))
 				return nil
@@ -508,23 +509,23 @@ func newAdminPBR(name, nextHop string) *adminpbrapi.AdminPolicyBasedRoute {
 	}
 }
 
-func newNodeWithLabels(nodeName, nodeIP string, labels map[string]string) *v1.Node {
-	node := &v1.Node{
+func newNodeWithLabels(nodeName, nodeIP string, labels map[string]string) *corev1.Node {
+	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   nodeName,
 			Labels: map[string]string{},
 		},
-		Status: v1.NodeStatus{
-			Addresses: []v1.NodeAddress{
+		Status: corev1.NodeStatus{
+			Addresses: []corev1.NodeAddress{
 				{
-					Type:    v1.NodeInternalIP,
+					Type:    corev1.NodeInternalIP,
 					Address: nodeIP,
 				},
 			},
-			Conditions: []v1.NodeCondition{
+			Conditions: []corev1.NodeCondition{
 				{
-					Type:   v1.NodeReady,
-					Status: v1.ConditionTrue,
+					Type:   corev1.NodeReady,
+					Status: corev1.ConditionTrue,
 				},
 			},
 		},

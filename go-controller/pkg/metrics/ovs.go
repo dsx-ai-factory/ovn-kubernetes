@@ -10,16 +10,19 @@ import (
 	"sync"
 	"time"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	ovsops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/vswitchd"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/safchain/ethtool"
 	"github.com/vishvananda/netlink"
+
 	"k8s.io/klog/v2"
+
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	ovsops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/vswitchd"
 )
 
 // ovs build info
@@ -511,7 +514,7 @@ func setOvsDatapathOffloadMetrics(ovsVswitchdAppctl ovsClient) error {
 }
 
 // ovsDatapathMetricsUpdater updates the ovs datapath metrics
-func ovsDatapathMetricsUpdater(ovsAppctl, ovsVswitchdAppctl ovsClient, metricsScrapeInterval int, stopChan <-chan struct{}) {
+func ovsDatapathMetricsUpdater(_, ovsVswitchdAppctl ovsClient, metricsScrapeInterval int, stopChan <-chan struct{}) {
 	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
 	defer ticker.Stop()
 

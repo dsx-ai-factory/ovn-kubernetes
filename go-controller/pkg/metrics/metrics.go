@@ -16,17 +16,20 @@ import (
 	"sync"
 	"time"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
+
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 const (
@@ -478,7 +481,7 @@ func checkNodeLabel(nodeLister corev1listers.NodeLister, nodeName, selector stri
 // the latest certificate (due to cert rotation on cert expiry)
 func getTLSServer(addr, certFile, privKeyFile string, handler http.Handler) *http.Server {
 	tlsConfig := &tls.Config{
-		GetCertificate: func(info *tls.ClientHelloInfo) (*tls.Certificate, error) {
+		GetCertificate: func(_ *tls.ClientHelloInfo) (*tls.Certificate, error) {
 			cert, err := tls.LoadX509KeyPair(certFile, privKeyFile)
 			if err != nil {
 				return nil, fmt.Errorf("error generating x509 certs for metrics TLS endpoint: %v", err)

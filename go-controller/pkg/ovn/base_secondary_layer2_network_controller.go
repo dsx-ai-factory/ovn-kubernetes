@@ -5,6 +5,10 @@ import (
 	"net"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
+
 	ipam "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -13,10 +17,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
-
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/klog/v2"
-	utilnet "k8s.io/utils/net"
 )
 
 // method/structure shared by all layer 2 network controller, including localnet and layer2 network controllres.
@@ -145,7 +145,7 @@ func (oc *BaseSecondaryLayer2NetworkController) run() error {
 			return err
 		}
 	}
-	if util.IsMultiNetworkPoliciesSupportEnabled() {
+	if util.IsMultiNetworkPoliciesSupportEnabled() && !oc.IsPrimaryNetwork() {
 		// WatchMultiNetworkPolicy depends on WatchPods and WatchNamespaces
 		if err := oc.WatchMultiNetworkPolicy(); err != nil {
 			return err

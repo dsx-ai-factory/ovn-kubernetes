@@ -13,7 +13,18 @@ import (
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+	"github.com/urfave/cli/v2"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/kubernetes/fake"
+	clienttesting "k8s.io/client-go/testing"
+	"k8s.io/client-go/tools/record"
+
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
@@ -21,7 +32,6 @@ import (
 	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
 	portmirrorfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned/fake"
 	virtualipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/clientset/versioned/fake"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
@@ -35,14 +45,6 @@ import (
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/urfave/cli/v2"
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/kubernetes/fake"
-	clienttesting "k8s.io/client-go/testing"
-	"k8s.io/client-go/tools/record"
 )
 
 // Please use following subnets for various networks that we have
@@ -81,8 +83,8 @@ const (
 	ovnNodeSubnets       = "k8s.ovn.org/node-subnets"
 )
 
-func (n tNode) k8sNode(nodeID string) v1.Node {
-	node := v1.Node{
+func (n tNode) k8sNode(nodeID string) corev1.Node {
+	node := corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: n.Name,
 			Annotations: map[string]string{
@@ -92,8 +94,8 @@ func (n tNode) k8sNode(nodeID string) v1.Node {
 				ovnNodePrimaryIfAddr:   fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", fmt.Sprintf("%s/24", n.NodeIP), ""),
 			},
 		},
-		Status: v1.NodeStatus{
-			Addresses: []v1.NodeAddress{{Type: v1.NodeExternalIP, Address: n.NodeIP}},
+		Status: corev1.NodeStatus{
+			Addresses: []corev1.NodeAddress{{Type: corev1.NodeExternalIP, Address: n.NodeIP}},
 		},
 	}
 
@@ -921,7 +923,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 
 		dbSetup        libovsdbtest.TestSetup
 		node1          tNode
-		testNode       v1.Node
+		testNode       corev1.Node
 		fakeClient     *util.OVNMasterClientset
 		kubeFakeClient *fake.Clientset
 		oc             *DefaultNetworkController
@@ -1015,8 +1017,8 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		}
 		testNode = node1.k8sNode("2")
 
-		kubeFakeClient = fake.NewSimpleClientset(&v1.NodeList{
-			Items: []v1.Node{testNode},
+		kubeFakeClient = fake.NewSimpleClientset(&corev1.NodeList{
+			Items: []corev1.Node{testNode},
 		})
 		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 		egressIPFakeClient := &egressipfake.Clientset{}
@@ -1159,7 +1161,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				Nexthop:  "10.244.0.6",
 			}
 			ginkgo.By("Creating stale route")
-			p := func(item *nbdb.LogicalRouterStaticRoute) bool { return false }
+			p := func(*nbdb.LogicalRouterStaticRoute) bool { return false }
 			err = libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient,
 				types.OVNClusterRouter, badRoute, p)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1229,7 +1231,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 	}
 	ginkgo.DescribeTable(
 		"reconciles pod network SNATs from syncGateway",
-		func(condition func(*DefaultNetworkController), expectedExtraNATs ...*nbdb.NAT) {
+		func(condition func(*DefaultNetworkController) error, expectedExtraNATs ...*nbdb.NAT) {
 			app.Action = func(ctx *cli.Context) error {
 				_, err := config.InitConfig(ctx, nil, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1251,7 +1253,8 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// generate specific test conditions
-				condition(oc)
+				err = condition(oc)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// ensure the stale SNAT's are cleaned up
 				gomega.Expect(oc.StartServiceController(wg, false)).To(gomega.Succeed())
@@ -1295,36 +1298,38 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		},
 		ginkgo.Entry(
 			"When DisableSNATMultipleGWs is true",
-			func(*DefaultNetworkController) {
+			func(*DefaultNetworkController) error {
 				config.Gateway.DisableSNATMultipleGWs = true
+				return nil
 			},
 			newNodeSNAT("stale-nodeNAT-UUID-3", "10.0.0.3", Node1GatewayRouterIP), // won't be deleted since pod exists on this node
 			newNodeSNAT("stale-nodeNAT-UUID-4", "10.0.0.3", "172.16.16.3"),        // won't be deleted on this node but will be deleted on the node whose IP is 172.16.16.3 since this pod belongs to this node
 		),
 		ginkgo.Entry(
 			"When DisableSNATMultipleGWs is false",
-			func(*DefaultNetworkController) {
+			func(*DefaultNetworkController) error {
 				config.Gateway.DisableSNATMultipleGWs = false
+				return nil
 			},
 			newNodeSNAT("stale-nodeNAT-UUID-4", "10.0.0.3", "172.16.16.3"), // won't be deleted on this node but will be deleted on the node whose IP is 172.16.16.3 since this pod belongs to this node
 		),
 		ginkgo.Entry(
 			"When pod network is advertised and DisableSNATMultipleGWs is true",
-			func(oc *DefaultNetworkController) {
+			func(oc *DefaultNetworkController) error {
 				config.Gateway.DisableSNATMultipleGWs = true
 				mutableNetInfo := util.NewMutableNetInfo(oc.GetNetInfo())
 				mutableNetInfo.SetPodNetworkAdvertisedVRFs(map[string][]string{"node1": {"vrf"}})
-				oc.Reconcile(mutableNetInfo)
+				return oc.Reconcile(mutableNetInfo)
 			},
 			newNodeSNAT("stale-nodeNAT-UUID-4", "10.0.0.3", "172.16.16.3"), // won't be deleted on this node but will be deleted on the node whose IP is 172.16.16.3 since this pod belongs to this node
 		),
 		ginkgo.Entry(
 			"When pod network is advertised and DisableSNATMultipleGWs is false",
-			func(oc *DefaultNetworkController) {
+			func(oc *DefaultNetworkController) error {
 				config.Gateway.DisableSNATMultipleGWs = false
 				mutableNetInfo := util.NewMutableNetInfo(oc.GetNetInfo())
 				mutableNetInfo.SetPodNetworkAdvertisedVRFs(map[string][]string{"node1": {"vrf"}})
-				oc.Reconcile(mutableNetInfo)
+				return oc.Reconcile(mutableNetInfo)
 			},
 			newNodeSNAT("stale-nodeNAT-UUID-4", "10.0.0.3", "172.16.16.3"), // won't be deleted on this node but will be deleted on the node whose IP is 172.16.16.3 since this pod belongs to this node
 		),
@@ -1347,9 +1352,9 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			ginkgo.By("modifying the node and triggering an update")
 
 			var podsWereListed uint32
-			kubeFakeClient.PrependReactor("list", "pods", func(action clienttesting.Action) (handled bool, ret runtime.Object, err error) {
+			kubeFakeClient.PrependReactor("list", "pods", func(clienttesting.Action) (bool, runtime.Object, error) {
 				atomic.StoreUint32(&podsWereListed, 1)
-				podList := &v1.PodList{}
+				podList := &corev1.PodList{}
 				return true, podList, nil
 			})
 
@@ -1506,7 +1511,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			startFakeController(oc, wg)
-			newNode := &v1.Node{
+			newNode := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "newNode",
 					Annotations: map[string]string{},
@@ -1660,7 +1665,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			newNodeSubnet := "10.1.1.0/24"
-			newNode := &v1.Node{
+			newNode := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "newNode",
 					Annotations: map[string]string{
@@ -1722,7 +1727,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			gomega.Expect(config.IPv6Mode).To(gomega.BeTrue())
 
 			newNodeIpv4Subnet := "10.1.1.0/24"
-			newNode := &v1.Node{
+			newNode := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "newNode",
 					Annotations: map[string]string{
@@ -1818,11 +1823,11 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			// the namespace gets created. Hence starting OVN with an empty NodeList and adding the node
 			// after the namespace is created successfully
 			fakeOvn.startWithDBSetup(dbSetup,
-				&v1.NamespaceList{
-					Items: []v1.Namespace{*newNamespace(config.Kubernetes.HostNetworkNamespace)},
+				&corev1.NamespaceList{
+					Items: []corev1.Namespace{*newNamespace(config.Kubernetes.HostNetworkNamespace)},
 				},
-				&v1.NodeList{
-					Items: []v1.Node{},
+				&corev1.NodeList{
+					Items: []corev1.Node{},
 				},
 			)
 
@@ -2084,7 +2089,7 @@ func TestController_syncNodes(t *testing.T) {
 				wg.Wait()
 			}()
 
-			testNode := v1.Node{
+			testNode := corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "node1",
 				},
@@ -2168,12 +2173,12 @@ func TestController_deleteStaleNodeChassis(t *testing.T) {
 	gomega.RegisterFailHandler(ginkgo.Fail)
 	tests := []struct {
 		name         string
-		node         v1.Node
+		node         corev1.Node
 		initialSBDB  []libovsdbtest.TestData
 		expectedSBDB []libovsdbtest.TestData
 	}{
 		{
-			node: v1.Node{
+			node: corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "node1",
 					Annotations: map[string]string{

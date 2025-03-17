@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pkg/errors"
+
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -20,6 +22,7 @@ import (
 	"k8s.io/klog/v2"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpbrapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -29,8 +32,6 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
-	"github.com/pkg/errors"
 )
 
 const (
@@ -142,7 +143,7 @@ func (pol *internalAdminPBRPolicy) attachPodHandler() {
 			AddFunc: func(obj interface{}) {
 				pol.addPodToAddressSet(obj)
 			},
-			UpdateFunc: func(oldObj, newObj interface{}) {
+			UpdateFunc: func(_, newObj interface{}) {
 				pol.addPodToAddressSet(newObj)
 			},
 			DeleteFunc: func(obj interface{}) {
@@ -564,7 +565,7 @@ func (bnc *BaseNetworkController) syncAdminPBROnNodeChange(old, new interface{})
 		klog.Errorf("Failed to get pods by node ip %s: %v", nodeIP, err)
 		return
 	}
-	bnc.adminPBRStore.Range(func(key interface{}, value interface{}) bool {
+	bnc.adminPBRStore.Range(func(_ interface{}, value interface{}) bool {
 		policyMap := value.(map[string]*internalAdminPBRPolicy)
 		for _, policy := range policyMap {
 			if policy.nodeSelector == nil {
@@ -617,7 +618,7 @@ func (bnc *BaseNetworkController) syncAdminPBROnNamespaceChange(old, new interfa
 		klog.Errorf("Failed to get pods by namespace %s: %v", newNs.Name, err)
 		return
 	}
-	bnc.adminPBRStore.Range(func(key interface{}, value interface{}) bool {
+	bnc.adminPBRStore.Range(func(_ interface{}, value interface{}) bool {
 		policyMap := value.(map[string]*internalAdminPBRPolicy)
 		for _, policy := range policyMap {
 			if policy.namespaceSelector == nil {
@@ -752,7 +753,7 @@ func (bnc *BaseNetworkController) syncAddressSetPeriodic() {
 		klog.Errorf("Error in clean up stale adminPBR address_set: %v", err)
 	}
 
-	bnc.adminPBRStore.Range(func(key interface{}, value interface{}) bool {
+	bnc.adminPBRStore.Range(func(_ interface{}, value interface{}) bool {
 		policyMap := value.(map[string]*internalAdminPBRPolicy)
 		podIndexer := bnc.watchFactory.PodInformer().GetIndexer()
 		for _, pol := range policyMap {

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	kapi "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
@@ -21,7 +21,7 @@ import (
 
 type portMirrorRetryRequestDPU struct {
 	pm  *util.PortMirror
-	pod *kapi.Pod
+	pod *corev1.Pod
 }
 
 func (bnnc *BaseNodeNetworkController) syncPortMirrors(portMirrors []interface{}) error {
@@ -210,7 +210,7 @@ func (bnnc *BaseNodeNetworkController) watchPortMirrorDPU() error {
 	return nil
 }
 
-func (bnnc *BaseNodeNetworkController) retryOnAddFailure(sfInfo *sfDetails, errMsg, key string, pm *util.PortMirror, pod *kapi.Pod) {
+func (bnnc *BaseNodeNetworkController) retryOnAddFailure(sfInfo *sfDetails, errMsg, key string, pm *util.PortMirror, pod *corev1.Pod) {
 	// delete sf
 	if sfInfo != nil {
 		err := bnnc.deleteSF(sfInfo.uplinkPhysPort, sfInfo.portIndex, sfInfo.sfNum)
@@ -224,7 +224,7 @@ func (bnnc *BaseNodeNetworkController) retryOnAddFailure(sfInfo *sfDetails, errM
 
 // handlePortMirrorSinkPodAdd creates an SF for portmirror if there are no SF's
 // associated with mirrorID and then adds the sfRep to br-int.
-func (bnnc *BaseNodeNetworkController) handlePortMirrorSinkPodAdd(pm *util.PortMirror, pod *kapi.Pod) error {
+func (bnnc *BaseNodeNetworkController) handlePortMirrorSinkPodAdd(pm *util.PortMirror, pod *corev1.Pod) error {
 	klog.Infof("Adding mirror rules for sink pod %s/%s under portmirror %s/%s", pod.Namespace, pod.Name, pm.Namespace, pm.Name)
 
 	// for now, sink pod must be a hostnetwork pod.
@@ -361,7 +361,7 @@ func (bnnc *BaseNodeNetworkController) handlePortMirrorSinkPodAdd(pm *util.PortM
 	return nil
 }
 
-func (bnnc *BaseNodeNetworkController) handlePortMirrorSinkPodDelete(pm *util.PortMirror, pod *kapi.Pod) error {
+func (bnnc *BaseNodeNetworkController) handlePortMirrorSinkPodDelete(pm *util.PortMirror, pod *corev1.Pod) error {
 	klog.Infof("Deleting mirror rules for sink pod %s/%s under portmirror %s/%s", pod.Namespace, pod.Name, pm.Namespace, pm.Name)
 	// We wouldn't have configured any for these
 	if !pod.Spec.HostNetwork {
@@ -453,7 +453,7 @@ func (bnnc *BaseNodeNetworkController) handleSinkPodSelectors(pm *util.PortMirro
 			AddFunc: func(obj interface{}) {
 				portMirrorNameUnlock := util.GetLockByPMName(pm.Namespace, pm.Name)
 				defer portMirrorNameUnlock()
-				pod := obj.(*kapi.Pod)
+				pod := obj.(*corev1.Pod)
 				if err := bnnc.handlePortMirrorSinkPodAdd(pm, pod); err != nil {
 					klog.Errorf(err.Error())
 				}
@@ -461,12 +461,12 @@ func (bnnc *BaseNodeNetworkController) handleSinkPodSelectors(pm *util.PortMirro
 			DeleteFunc: func(obj interface{}) {
 				portMirrorNameUnlock := util.GetLockByPMName(pm.Namespace, pm.Name)
 				defer portMirrorNameUnlock()
-				pod := obj.(*kapi.Pod)
+				pod := obj.(*corev1.Pod)
 				if err := bnnc.handlePortMirrorSinkPodDelete(pm, pod); err != nil {
 					klog.Errorf(err.Error())
 				}
 			},
-			UpdateFunc: func(oldObj, newObj interface{}) {
+			UpdateFunc: func(_, _ interface{}) {
 				// Add
 			}}, nil, 1)
 }
@@ -662,7 +662,7 @@ func (bnnc *BaseNodeNetworkController) retryPortMirrorOperationsDPU() bool {
 	// check if the sink pod and corresponding portmirror exists while being retried.
 	// if either of them doesn't exist, stop retrying
 	if _, err := bnnc.watchFactory.GetPortMirror(retry.pm.Namespace, retry.pm.Name); err != nil {
-		if errors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			klog.Infof("Stop retrying sink pod %s/%s addition as corresponding portmirror %s/%s does not exist",
 				retry.pod.Namespace, retry.pod.Name, retry.pm.Namespace, retry.pm.Name)
 		} else {
@@ -673,7 +673,7 @@ func (bnnc *BaseNodeNetworkController) retryPortMirrorOperationsDPU() bool {
 	}
 
 	if _, err := bnnc.watchFactory.GetPod(retry.pod.Namespace, retry.pod.Name); err != nil {
-		if errors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			klog.Infof("Stop retrying pod addition %s/%s as it does not exist",
 				retry.pod.Namespace, retry.pod.Name)
 		} else {
@@ -690,7 +690,7 @@ func (bnnc *BaseNodeNetworkController) retryPortMirrorOperationsDPU() bool {
 	return true
 }
 
-func (bnnc *BaseNodeNetworkController) requeueSinkPodAddForPortMirror(portmirror *util.PortMirror, pod *kapi.Pod) {
+func (bnnc *BaseNodeNetworkController) requeueSinkPodAddForPortMirror(portmirror *util.PortMirror, pod *corev1.Pod) {
 	req := &portMirrorRetryRequestDPU{
 		pm:  portmirror,
 		pod: pod,

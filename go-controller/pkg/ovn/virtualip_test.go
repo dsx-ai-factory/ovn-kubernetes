@@ -8,7 +8,12 @@ import (
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	"github.com/onsi/ginkgo/v2"
+	"github.com/onsi/gomega"
 	"github.com/urfave/cli/v2"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -17,12 +22,6 @@ import (
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
-	"github.com/onsi/ginkgo/v2"
-	"github.com/onsi/gomega"
-
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 var (
@@ -46,7 +45,7 @@ var _ = ginkgo.Describe("VirtualIP", func() {
 	ginkgo.BeforeEach(func() {
 		var err error
 		// Restore global default values before each testcase
-		config.PrepareTestConfig()
+		gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
 		config.OVNKubernetesFeature.EnableVirtualIP = true
 		app = cli.NewApp()
 		app.Name = "VirtualIP"
@@ -88,7 +87,7 @@ var _ = ginkgo.Describe("VirtualIP", func() {
 	ginkgo.Context("VirtualIP", func() {
 		ginkgo.It("can create/delete virtual port in ovn when virtualIP is created/deleted", func() {
 			vip := newVirtualIP(virtualIPName, virtualIPNamespace, vipAddress, nadName)
-			app.Action = func(ctx *cli.Context) error {
+			app.Action = func(_ *cli.Context) error {
 				fakeOvn.startWithDBSetup(initialDB,
 					&virtualip.VirtualIPList{
 						Items: []virtualip.VirtualIP{
@@ -110,17 +109,18 @@ var _ = ginkgo.Describe("VirtualIP", func() {
 					err := fakeOvn.controller.nbClient.WhereCache(func(lsp *nbdb.LogicalSwitchPort) bool {
 						return lsp.Name == getVirtualPortName(virtualIPNamespace, virtualIPName)
 					}).List(context.TODO(), &virtualLSP)
-					gomega.Expect(err).To(gomega.BeNil())
-					gomega.Expect(len(virtualLSP)).To(gomega.Equal(1))
+					gomega.Expect(err).ToNot(gomega.HaveOccurred())
+					gomega.Expect(virtualLSP).To(gomega.HaveLen(1))
 					return virtualLSP[0].Name
 				}).Should(gomega.Equal(vipPortName))
 				err = fakeOvn.fakeClient.VirtualIPClient.K8sV1beta1().VirtualIPs(virtualIPNamespace).Delete(context.TODO(), virtualIPName, metav1.DeleteOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(func() []nbdb.LogicalSwitchPort {
 					virtualLSP := []nbdb.LogicalSwitchPort{}
 					err := fakeOvn.controller.nbClient.WhereCache(func(lsp *nbdb.LogicalSwitchPort) bool {
 						return lsp.Name == getVirtualPortName(virtualIPNamespace, virtualIPName)
 					}).List(context.TODO(), &virtualLSP)
-					gomega.Expect(err).To(gomega.BeNil())
+					gomega.Expect(err).ToNot(gomega.HaveOccurred())
 					return virtualLSP
 				}, time.Minute).Should(gomega.BeEmpty())
 				return nil
@@ -135,20 +135,20 @@ var _ = ginkgo.Describe("VirtualIP", func() {
 			pod1.Annotations = map[string]string{
 				"k8s.v1.cni.cncf.io/networks": nadName,
 			}
-			app.Action = func(ctx *cli.Context) error {
+			app.Action = func(_ *cli.Context) error {
 				fakeOvn.startWithDBSetup(initialDB,
-					&v1.NodeList{
-						Items: []v1.Node{
+					&corev1.NodeList{
+						Items: []corev1.Node{
 							*newNode("node1", "192.168.126.202/24"),
 						},
 					},
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
+					&corev1.NamespaceList{
+						Items: []corev1.Namespace{
 							*newNamespaceWithLabels(virtualIPNamespace, map[string]string{}),
 						},
 					},
-					&v1.PodList{
-						Items: []v1.Pod{
+					&corev1.PodList{
+						Items: []corev1.Pod{
 							*pod1,
 						},
 					},
@@ -175,8 +175,8 @@ var _ = ginkgo.Describe("VirtualIP", func() {
 					err := fakeOvn.controller.nbClient.WhereCache(func(lsp *nbdb.LogicalSwitchPort) bool {
 						return lsp.Name == getVirtualPortName(virtualIPNamespace, virtualIPName)
 					}).List(context.TODO(), &virtualLSP)
-					gomega.Expect(err).To(gomega.BeNil())
-					gomega.Expect(len(virtualLSP)).To(gomega.Equal(1))
+					gomega.Expect(err).ToNot(gomega.HaveOccurred())
+					gomega.Expect(virtualLSP).To(gomega.HaveLen(1))
 					return virtualLSP[0].Name
 				}).Should(gomega.Equal(vipPortName))
 
@@ -189,8 +189,8 @@ var _ = ginkgo.Describe("VirtualIP", func() {
 					err := fakeOvn.controller.nbClient.WhereCache(func(lsp *nbdb.LogicalSwitchPort) bool {
 						return lsp.Name == getVirtualPortName(virtualIPNamespace, virtualIPName)
 					}).List(context.TODO(), &virtualLSP)
-					gomega.Expect(err).To(gomega.BeNil())
-					gomega.Expect(len(virtualLSP)).To(gomega.Equal(1))
+					gomega.Expect(err).ToNot(gomega.HaveOccurred())
+					gomega.Expect(virtualLSP).To(gomega.HaveLen(1))
 					vipParents := virtualLSP[0].Options[optionsVirtualIPParents]
 					return vipParents
 				}).Should(gomega.Equal(lspPod))
@@ -205,8 +205,8 @@ var _ = ginkgo.Describe("VirtualIP", func() {
 					err := fakeOvn.controller.nbClient.WhereCache(func(lsp *nbdb.LogicalSwitchPort) bool {
 						return lsp.Name == getVirtualPortName(virtualIPNamespace, virtualIPName)
 					}).List(context.TODO(), &virtualLSP)
-					gomega.Expect(err).To(gomega.BeNil())
-					gomega.Expect(len(virtualLSP)).To(gomega.Equal(1))
+					gomega.Expect(err).ToNot(gomega.HaveOccurred())
+					gomega.Expect(virtualLSP).To(gomega.HaveLen(1))
 					vipParents := virtualLSP[0].Options[optionsVirtualIPParents]
 					return vipParents
 				}).Should(gomega.Equal(""))
@@ -222,20 +222,20 @@ var _ = ginkgo.Describe("VirtualIP", func() {
 			pod1.Annotations = map[string]string{
 				"k8s.v1.cni.cncf.io/networks": nadName,
 			}
-			app.Action = func(ctx *cli.Context) error {
+			app.Action = func(_ *cli.Context) error {
 				fakeOvn.startWithDBSetup(initialDB,
-					&v1.NodeList{
-						Items: []v1.Node{
+					&corev1.NodeList{
+						Items: []corev1.Node{
 							*newNode("node1", "192.168.126.202/24"),
 						},
 					},
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
+					&corev1.NamespaceList{
+						Items: []corev1.Namespace{
 							*newNamespaceWithLabels(virtualIPNamespace, map[string]string{}),
 						},
 					},
-					&v1.PodList{
-						Items: []v1.Pod{
+					&corev1.PodList{
+						Items: []corev1.Pod{
 							*pod1,
 						},
 					},
@@ -262,8 +262,8 @@ var _ = ginkgo.Describe("VirtualIP", func() {
 					err := fakeOvn.controller.nbClient.WhereCache(func(lsp *nbdb.LogicalSwitchPort) bool {
 						return lsp.Name == getVirtualPortName(virtualIPNamespace, virtualIPName)
 					}).List(context.TODO(), &virtualLSP)
-					gomega.Expect(err).To(gomega.BeNil())
-					gomega.Expect(len(virtualLSP)).To(gomega.Equal(1))
+					gomega.Expect(err).ToNot(gomega.HaveOccurred())
+					gomega.Expect(virtualLSP).To(gomega.HaveLen(1))
 					return virtualLSP[0].Name
 				}).Should(gomega.Equal(vipPortName))
 
@@ -274,8 +274,8 @@ var _ = ginkgo.Describe("VirtualIP", func() {
 					err := fakeOvn.controller.nbClient.WhereCache(func(lsp *nbdb.LogicalSwitchPort) bool {
 						return lsp.Name == util.GetSecondaryNetworkLogicalPortName(virtualIPNamespace, "pod1", nadName)
 					}).List(context.TODO(), &podLSP)
-					gomega.Expect(err).To(gomega.BeNil())
-					gomega.Expect(len(podLSP)).To(gomega.Equal(1))
+					gomega.Expect(err).ToNot(gomega.HaveOccurred())
+					gomega.Expect(podLSP).To(gomega.HaveLen(1))
 					addrList := podLSP[0].PortSecurity
 					var portSecurityFields string
 					for _, addr := range addrList {
@@ -298,8 +298,8 @@ var _ = ginkgo.Describe("VirtualIP", func() {
 					err := fakeOvn.controller.nbClient.WhereCache(func(lsp *nbdb.LogicalSwitchPort) bool {
 						return lsp.Name == util.GetSecondaryNetworkLogicalPortName(virtualIPNamespace, "pod1", nadName)
 					}).List(context.TODO(), &podLSP)
-					gomega.Expect(err).To(gomega.BeNil())
-					gomega.Expect(len(podLSP)).To(gomega.Equal(1))
+					gomega.Expect(err).ToNot(gomega.HaveOccurred())
+					gomega.Expect(podLSP).To(gomega.HaveLen(1))
 					addrList := podLSP[0].PortSecurity
 					var portSecurityFields string
 					for _, addr := range addrList {

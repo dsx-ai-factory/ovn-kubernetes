@@ -6,12 +6,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	OFManager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/openflow-manager"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
 
 	"k8s.io/klog/v2"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	OFManager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/openflow-manager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 // Add OpenFlow flows
@@ -194,7 +195,7 @@ func (nc *SecondaryLocalnetNodeNetworkController) initGatewayDPUXDP() (*gateway,
 	return gw, nil
 }
 
-func (nc *SecondaryLocalnetNodeNetworkController) cleanGatewayDPUXDP(gw *gateway) error {
+func (nc *SecondaryLocalnetNodeNetworkController) cleanGatewayDPUXDP(_ *gateway) error {
 
 	klog.Infof("Destroying XDP for NAD %s", nc.GetNetworkName())
 	err := nc.DestroyXDPServiceForNAD()

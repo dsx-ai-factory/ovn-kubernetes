@@ -6,16 +6,25 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/onsi/ginkgo/v2"
-
+	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	fakeipamclaimclient "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/clientset/versioned/fake"
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta2"
 	mnpfake "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/fake"
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	fakenadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
+	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	ocpnetworkapiv1alpha1 "github.com/openshift/api/network/v1alpha1"
 	ocpnetworkfake "github.com/openshift/client-go/network/clientset/versioned/fake"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/tools/record"
+	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
+	anpfake "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned/fake"
+
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
@@ -37,25 +46,16 @@ import (
 	udnclientfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
 	virtualip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
 	virtualipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/clientset/versioned/fake"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
-	testnm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/networkmanager"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/kubernetes/fake"
-	"k8s.io/client-go/tools/record"
-	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
-	anpfake "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned/fake"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	testnm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -134,6 +134,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 	egressServiceObjects := []runtime.Object{}
 	apbExternalRouteObjects := []runtime.Object{}
 	anpObjects := []runtime.Object{}
+	ipamClaimObjects := []runtime.Object{}
 	virtualIPObjects := []runtime.Object{}
 	portMirrorObjects := []runtime.Object{}
 	v1Objects := []runtime.Object{}
@@ -169,6 +170,8 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 			apbExternalRouteObjects = append(apbExternalRouteObjects, object)
 		case *anpapi.AdminNetworkPolicyList:
 			anpObjects = append(anpObjects, object)
+		case *ipamclaimsapi.IPAMClaimList:
+			ipamClaimObjects = append(ipamClaimObjects, object)
 		case *virtualip.VirtualIPList:
 			virtualIPObjects = append(virtualIPObjects, object)
 		case *portmirror.PortMirrorList:
@@ -187,8 +190,8 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 		AdminPBRClient:           adminpbrfake.NewSimpleClientset(adminPBRObjects...),
 		MultiNetworkPolicyClient: mnpfake.NewSimpleClientset(multiNetworkPolicyObjects...),
 		EgressServiceClient:      egressservicefake.NewSimpleClientset(egressServiceObjects...),
-		IPAMClaimsClient:         fakeipamclaimclient.NewSimpleClientset(),
 		AdminPolicyRouteClient:   adminpolicybasedroutefake.NewSimpleClientset(apbExternalRouteObjects...),
+		IPAMClaimsClient:         fakeipamclaimclient.NewSimpleClientset(ipamClaimObjects...),
 		VirtualIPClient:          virtualipfake.NewSimpleClientset(virtualIPObjects...),
 		PortMirrorClient:         portmirrorfake.NewSimpleClientset(portMirrorObjects...),
 		NetworkAttchDefClient:    nadClient,
@@ -220,6 +223,11 @@ func (o *FakeOVN) shutdown() {
 
 func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 	var err error
+	// Use shorter event queues for unit tests (reduce to 10 from the default)
+	// to avoid running out of resources in constrained CI environments
+	// (e.g., on GitHub).
+	factory.SetEventQueueSize(10)
+
 	o.watcher, err = factory.NewMasterWatchFactory(o.fakeClient)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -300,7 +308,7 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 }
 
 // creates the global entities that should remain after a UDN created and removed
-func generateUDNPostInitDB(testData []libovsdbtest.TestData, netName string) []libovsdbtest.TestData {
+func generateUDNPostInitDB(testData []libovsdbtest.TestData) []libovsdbtest.TestData {
 	testData = append(testData, &nbdb.MeterBand{
 		UUID:   "25-pktps-rate-limiter-UUID",
 		Action: types.MeterAction,
@@ -423,6 +431,7 @@ func NewOvnController(
 			AdminPBRClient:       ovnClient.AdminPBRClient,
 			APBRouteClient:       ovnClient.AdminPolicyRouteClient,
 			EgressQoSClient:      ovnClient.EgressQoSClient,
+			IPAMClaimsClient:     ovnClient.IPAMClaimsClient,
 			PortMirrorClient:     ovnClient.PortMirrorClient,
 		},
 		wf,
@@ -477,7 +486,7 @@ func createTestNBGlobal(nbClient libovsdbclient.Client, zone string) error {
 }
 
 func deleteTestNBGlobal(nbClient libovsdbclient.Client) error {
-	p := func(nbGlobal *nbdb.NBGlobal) bool {
+	p := func(*nbdb.NBGlobal) bool {
 		return true
 	}
 
@@ -539,6 +548,7 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 				Kube:                 kube.Kube{KClient: o.fakeClient.KubeClient},
 				EIPClient:            o.fakeClient.EgressIPClient,
 				EgressFirewallClient: o.fakeClient.EgressFirewallClient,
+				IPAMClaimsClient:     o.fakeClient.IPAMClaimsClient,
 				CloudNetworkClient:   o.fakeClient.CloudNetworkClient,
 				EgressServiceClient:  o.fakeClient.EgressServiceClient,
 				AdminPBRClient:       o.fakeClient.AdminPBRClient,
@@ -605,7 +615,7 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 	return nil
 }
 
-func (o *FakeOVN) patchEgressIPObj(nodeName, egressIPName, egressIP, network string) {
+func (o *FakeOVN) patchEgressIPObj(nodeName, egressIPName, egressIP string) {
 	// NOTE: Cluster manager is the one who patches the egressIP object.
 	// For the sake of unit testing egressip zone controller we need to patch egressIP object manually
 	// There are tests in cluster-manager package covering the patch logic.

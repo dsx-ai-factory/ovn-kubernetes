@@ -3,10 +3,10 @@ package util
 import (
 	"time"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 func GetChildStopChanWithTimeout(parentStopChan <-chan struct{}, duration time.Duration) chan struct{} {

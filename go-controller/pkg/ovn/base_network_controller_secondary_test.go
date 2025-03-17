@@ -3,8 +3,6 @@ package ovn
 import (
 	"context"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	corev1 "k8s.io/api/core/v1"
@@ -12,10 +10,14 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
 var _ = Describe("BaseSecondaryNetworkController", func() {
@@ -27,47 +29,11 @@ var _ = Describe("BaseSecondaryNetworkController", func() {
 		// Restore global default values before each testcase
 		Expect(config.PrepareTestConfig()).To(Succeed())
 	})
-	It("should return networkID from one of the nodes node", func() {
-		fakeOVN := NewFakeOVN(false)
-		fakeOVN.start(&corev1.Node{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "worker1",
-				Annotations: map[string]string{
-					"k8s.ovn.org/network-ids": `{"bluenet": "3"}`,
-				},
-			},
-		})
-		Expect(fakeOVN.NewSecondaryNetworkController(nad)).To(Succeed())
-		controller, ok := fakeOVN.secondaryControllers["bluenet"]
-		Expect(ok).To(BeTrue())
 
-		networkID, err := controller.bnc.getNetworkID()
-		Expect(err).ToNot(HaveOccurred())
-		Expect(networkID).To(Equal(3))
-	})
-	It("should return invalid networkID if network is not found", func() {
-		fakeOVN := NewFakeOVN(false)
-		fakeOVN.start(&corev1.Node{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "worker1",
-				Annotations: map[string]string{
-					"k8s.ovn.org/network-ids": `{"other": "3"}`,
-				},
-			},
-		})
-		Expect(fakeOVN.NewSecondaryNetworkController(nad)).To(Succeed())
-		controller, ok := fakeOVN.secondaryControllers["bluenet"]
-		Expect(ok).To(BeTrue())
-
-		networkID, err := controller.bnc.getNetworkID()
-		Expect(err).To(HaveOccurred())
-		Expect(networkID).To(Equal(util.InvalidID))
-	})
 	type dhcpTest struct {
 		vmName                string
 		ips                   []string
 		dns                   []string
-		gateways              []string
 		expectedDHCPv4Options *nbdb.DHCPOptions
 		expectedDHCPv6Options *nbdb.DHCPOptions
 	}
@@ -241,5 +207,41 @@ var _ = Describe("BaseSecondaryNetworkController", func() {
 			},
 		}),
 	)
+	It("should not fail to sync pods if namespace is gone", func() {
+		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+		config.OVNKubernetesFeature.EnableMultiNetwork = true
+		fakeOVN := NewFakeOVN(false)
+		fakeOVN.start(
+			&corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "worker1",
+					Annotations: map[string]string{
+						"k8s.ovn.org/network-ids": `{"other": "3"}`,
+					},
+				},
+			},
+		)
+		Expect(fakeOVN.NewSecondaryNetworkController(nad)).To(Succeed())
+		controller, ok := fakeOVN.secondaryControllers["bluenet"]
+		Expect(ok).To(BeTrue())
+		// inject a real networkManager instead of a fake one, so getActiveNetworkForNamespace will get called
+		nadController, err := networkmanager.NewForZone("dummyZone", nil, fakeOVN.watcher)
+		Expect(err).NotTo(HaveOccurred())
+		controller.bnc.networkManager = nadController.Interface()
+
+		// simulate that we listed the pod, but namespace was deleted after
+		podWithNoNamespace := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: "doesnotexist",
+				Name:      "dummy",
+			},
+		}
+
+		var initialPodList []interface{}
+		initialPodList = append(initialPodList, podWithNoNamespace)
+
+		err = controller.bnc.syncPodsForSecondaryNetwork(initialPodList)
+		Expect(err).NotTo(HaveOccurred())
+	})
 
 })

@@ -4,17 +4,15 @@ import (
 	"context"
 	"errors"
 
+	"k8s.io/client-go/tools/record"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"k8s.io/client-go/tools/record"
 )
 
 var ErrNetworkControllerTopologyNotManaged = errors.New("no cluster network controller to manage topology")
 
 const (
-	// DefaultNetworkID is the default network.
-	DefaultNetworkID = 0
-
 	// MaxNetworks is the maximum number of networks allowed.
 	MaxNetworks = 4096
 )
@@ -189,7 +187,7 @@ func (nm defaultNetworkManager) DoWithLock(f func(network util.NetInfo) error) e
 	return f(&util.DefaultNetInfo{})
 }
 
-func (nm defaultNetworkManager) GetActiveNetworkNamespaces(networkName string) ([]string, error) {
+func (nm defaultNetworkManager) GetActiveNetworkNamespaces(_ string) ([]string, error) {
 	return []string{"default"}, nil
 }
 

@@ -13,18 +13,19 @@ import (
 	"strings"
 	"time"
 
+	current "github.com/containernetworking/cni/pkg/types/100"
+	"github.com/containernetworking/plugins/pkg/ip"
+	"github.com/containernetworking/plugins/pkg/ns"
+	"github.com/safchain/ethtool"
+	"github.com/vishvananda/netlink"
+
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 
-	current "github.com/containernetworking/cni/pkg/types/100"
-	"github.com/containernetworking/plugins/pkg/ip"
-	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/safchain/ethtool"
-	"github.com/vishvananda/netlink"
 )
 
 type CNIPluginLibOps interface {
@@ -285,47 +286,49 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 		contIface.Name = ifName
 		contIface.Mac = ifInfo.MAC.String()
 		contIface.Sandbox = netns.Path()
-	} else if len(netdevice) != 0 {
-		// 1. Move netdevice to Container namespace
-		newNetdevName, err := safeMoveIfToNetns(netdevice, netns, containerID)
-		if err != nil {
-			return nil, nil, err
-		}
-		err = netns.Do(func(hostNS ns.NetNS) error {
-			contIface.Name = ifName
-			err = util.RenameLink(newNetdevName, contIface.Name)
+	} else {
+		if len(netdevice) != 0 {
+			// 1. Move netdevice to Container namespace
+			newNetdevName, err := safeMoveIfToNetns(netdevice, netns, containerID)
 			if err != nil {
-				return err
+				return nil, nil, err
 			}
-			link, err := util.GetNetLinkOps().LinkByName(contIface.Name)
-			if err != nil {
-				return err
-			}
-			err = util.GetNetLinkOps().LinkSetHardwareAddr(link, ifInfo.MAC)
-			if err != nil {
-				return err
-			}
-			err = util.GetNetLinkOps().LinkSetMTU(link, ifInfo.MTU)
-			if err != nil {
-				return err
-			}
-			err = util.GetNetLinkOps().LinkSetUp(link)
-			if err != nil {
-				return err
-			}
+			err = netns.Do(func(_ ns.NetNS) error {
+				contIface.Name = ifName
+				err = util.RenameLink(newNetdevName, contIface.Name)
+				if err != nil {
+					return err
+				}
+				link, err := util.GetNetLinkOps().LinkByName(contIface.Name)
+				if err != nil {
+					return err
+				}
+				err = util.GetNetLinkOps().LinkSetHardwareAddr(link, ifInfo.MAC)
+				if err != nil {
+					return err
+				}
+				err = util.GetNetLinkOps().LinkSetMTU(link, ifInfo.MTU)
+				if err != nil {
+					return err
+				}
+				err = util.GetNetLinkOps().LinkSetUp(link)
+				if err != nil {
+					return err
+				}
 
-			err = setupNetwork(link, ifInfo)
+				err = setupNetwork(link, ifInfo)
+				if err != nil {
+					return err
+				}
+
+				contIface.Mac = ifInfo.MAC.String()
+				contIface.Sandbox = netns.Path()
+
+				return nil
+			})
 			if err != nil {
-				return err
+				return nil, nil, err
 			}
-
-			contIface.Mac = ifInfo.MAC.String()
-			contIface.Sandbox = netns.Path()
-
-			return nil
-		})
-		if err != nil {
-			return nil, nil, err
 		}
 	}
 
@@ -683,7 +686,7 @@ func (*defaultPodRequestInterfaceOps) ConfigureInterface(pr *PodRequest, getter 
 		}
 	}
 	if haveV6 && !pr.IsVFIO {
-		err = netns.Do(func(hostNS ns.NetNS) error {
+		err = netns.Do(func(_ ns.NetNS) error {
 			// deny IPv6 neighbor solicitations
 			dadSysctlIface := fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/dad_transmits", contIface.Name)
 			if _, err := os.Stat(dadSysctlIface); !os.IsNotExist(err) {

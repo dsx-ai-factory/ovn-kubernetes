@@ -5,18 +5,18 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"golang.org/x/exp/maps"
 
-	kapi "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	knet "k8s.io/utils/net"
-
-	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -56,6 +56,7 @@ type NetInfo interface {
 
 	// dynamic information, can change over time
 	GetNADs() []string
+	EqualNADs(nads ...string) bool
 	HasNAD(nadName string) bool
 	// GetPodNetworkAdvertisedVRFs returns the target VRFs where the pod network
 	// is advertised per node, through a map of node names to slice of VRFs.
@@ -74,7 +75,7 @@ type NetInfo interface {
 	GetEgressIPAdvertisedNodes() []string
 
 	// derived information.
-	GetNamespaces() []string
+	GetNADNamespaces() []string
 	GetNetworkScopedName(name string) string
 	RemoveNetworkScopeFromName(name string) string
 	GetNetworkScopedK8sMgmtIntfName(nodeName string) string
@@ -388,6 +389,17 @@ func (nInfo *mutableNetInfo) GetNADs() []string {
 	return nInfo.getNads().UnsortedList()
 }
 
+// EqualNADs checks if the NADs associated with nInfo are the same as the ones
+// passed in the nads slice.
+func (nInfo *mutableNetInfo) EqualNADs(nads ...string) bool {
+	nInfo.RLock()
+	defer nInfo.RUnlock()
+	if nInfo.getNads().Len() != len(nads) {
+		return false
+	}
+	return nInfo.getNads().HasAll(nads...)
+}
+
 // HasNAD returns true if the given NAD exists, used
 // to check if the network needs to be plumbed over
 func (nInfo *mutableNetInfo) HasNAD(nadName string) bool {
@@ -454,7 +466,7 @@ func (nInfo *mutableNetInfo) getNamespaces() sets.Set[string] {
 	return nInfo.namespaces
 }
 
-func (nInfo *mutableNetInfo) GetNamespaces() []string {
+func (nInfo *mutableNetInfo) GetNADNamespaces() []string {
 	return nInfo.getNamespaces().UnsortedList()
 }
 
@@ -493,7 +505,7 @@ func (nInfo *DefaultNetInfo) IsSecondary() bool {
 	return false
 }
 
-func (nInfo *DefaultNetInfo) GetAnnotationKey(nadName string) string {
+func (nInfo *DefaultNetInfo) GetAnnotationKey(_ string) string {
 	return types.DefaultNetworkName
 }
 
@@ -549,7 +561,7 @@ func (nInfo *DefaultNetInfo) GetNetworkScopedLoadBalancerGroupName(lbGroupName s
 	return nInfo.GetNetworkScopedName(lbGroupName)
 }
 
-func (nInfo *DefaultNetInfo) GetNetworkScopedClusterSubnetSNATMatch(nodeName string) string {
+func (nInfo *DefaultNetInfo) GetNetworkScopedClusterSubnetSNATMatch(_ string) string {
 	return ""
 }
 
@@ -978,7 +990,7 @@ func newLayer3NetConfInfo(netconf *ovncnitypes.NetConf, annotations map[string]s
 		joinSubnets:    joinSubnets,
 		mtu:            netconf.MTU,
 		mutableNetInfo: mutableNetInfo{
-			id:   InvalidID,
+			id:   types.InvalidID,
 			nads: sets.Set[string]{},
 		},
 	}
@@ -1010,7 +1022,7 @@ func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf, annotations map[string]s
 		allowPersistentIPs: netconf.AllowPersistentIPs,
 		connectToNAD:       annotations[types.OvnK8sConnectToNad],
 		mutableNetInfo: mutableNetInfo{
-			id:   InvalidID,
+			id:   types.InvalidID,
 			nads: sets.Set[string]{},
 		},
 	}
@@ -1041,7 +1053,7 @@ func newLocalnetNetConfInfo(netconf *ovncnitypes.NetConf, annotations map[string
 		gatewayMAC:          netconf.GatewayMAC,
 		xdpService:          netconf.XDPService,
 		mutableNetInfo: mutableNetInfo{
-			id:   InvalidID,
+			id:   types.InvalidID,
 			nads: sets.Set[string]{},
 		},
 	}
@@ -1225,23 +1237,36 @@ func GetAnnotatedNetworkName(netattachdef *nettypes.NetworkAttachmentDefinition)
 }
 
 // ParseNADInfo parses config in NAD spec and return a NetAttachDefInfo object for secondary networks
-func ParseNADInfo(netattachdef *nettypes.NetworkAttachmentDefinition) (NetInfo, error) {
-	netconf, err := ParseNetConf(netattachdef)
+func ParseNADInfo(nad *nettypes.NetworkAttachmentDefinition) (NetInfo, error) {
+	netconf, err := ParseNetConf(nad)
 	if err != nil {
 		return nil, err
 	}
 
-	nadName := GetNADName(netattachdef.Namespace, netattachdef.Name)
+	nadName := GetNADName(nad.Namespace, nad.Name)
 	if err := ValidateNetConf(nadName, netconf); err != nil {
 		return nil, err
 	}
 
-	ni, err := NewNetInfo(netconf, netattachdef.Annotations)
+	id := types.InvalidID
+	n, err := newNetInfo(netconf, nad.Annotations)
 	if err != nil {
 		return nil, err
 	}
+	if n.GetNetworkName() == types.DefaultNetworkName {
+		id = types.DefaultNetworkID
+	}
+	if nad.Annotations[types.OvnNetworkIDAnnotation] != "" {
+		annotated := nad.Annotations[types.OvnNetworkIDAnnotation]
+		id, err = strconv.Atoi(annotated)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse annotated network ID: %w", err)
+		}
+	}
 
-	return ni, nil
+	n.SetNetworkID(id)
+
+	return n, nil
 }
 
 // ParseNetConf parses config in NAD spec for secondary networks
@@ -1368,7 +1393,7 @@ var defaultOVNPrimary = nettypes.NetworkSelectionElement{
 //	    for the specified network, key is NADName. Note multiple NADs of the same network are allowed
 //	    on one pod, as long as they are of different NADName.
 //	error:  error in case of failure
-func GetPodNADToNetworkMapping(pod *kapi.Pod, nInfo NetInfo) (bool, map[string]*nettypes.NetworkSelectionElement, error) {
+func GetPodNADToNetworkMapping(pod *corev1.Pod, nInfo NetInfo) (bool, map[string]*nettypes.NetworkSelectionElement, error) {
 	if pod.Spec.HostNetwork {
 		return false, nil, nil
 	}
@@ -1423,7 +1448,7 @@ func GetPodNADToNetworkMapping(pod *kapi.Pod, nInfo NetInfo) (bool, map[string]*
 // GetPodNADToNetworkMappingWithActiveNetwork will call `GetPodNADToNetworkMapping` passing "nInfo" which correspond
 // to the NetInfo representing the NAD, the resulting NetworkSelectingElements will be decorated with the ones
 // from found active network
-func GetPodNADToNetworkMappingWithActiveNetwork(pod *kapi.Pod, nInfo NetInfo, activeNetwork NetInfo) (bool, map[string]*nettypes.NetworkSelectionElement, error) {
+func GetPodNADToNetworkMappingWithActiveNetwork(pod *corev1.Pod, nInfo NetInfo, activeNetwork NetInfo) (bool, map[string]*nettypes.NetworkSelectionElement, error) {
 	on, networkSelections, err := GetPodNADToNetworkMapping(pod, nInfo)
 	if err != nil {
 		return false, nil, err
@@ -1508,8 +1533,12 @@ func GetNetworkVRFName(netInfo NetInfo) string {
 	if netInfo.GetNetworkName() == types.DefaultNetworkName {
 		return types.DefaultNetworkName
 	}
+	vrfDeviceName := netInfo.GetNetworkName()
 	// use the CUDN network name as the VRF name if possible
-	vrfDeviceName := strings.TrimPrefix(netInfo.GetNetworkName(), "cluster.udn.")
+	udnNamespace, udnName := ParseNetworkName(netInfo.GetNetworkName())
+	if udnName != "" && udnNamespace == "" {
+		vrfDeviceName = udnName
+	}
 	switch {
 	case len(vrfDeviceName) > 15:
 		// not possible if longer than the maximum device name length
@@ -1522,4 +1551,122 @@ func GetNetworkVRFName(netInfo NetInfo) string {
 		return fmt.Sprintf("%s%d%s", types.UDNVRFDevicePrefix, netInfo.GetNetworkID(), types.UDNVRFDeviceSuffix)
 	}
 	return vrfDeviceName
+}
+
+// CanServeNamespace determines whether the given network can serve a specific namespace.
+//
+// For default and secondary networks it always returns true.
+// For primary networks, it checks if the namespace is explicitly listed in the network’s
+// associated namespaces.
+func CanServeNamespace(network NetInfo, namespace string) bool {
+	// Default network handles all namespaces
+	// Secondary networks can handle pods from different namespaces
+	if !network.IsPrimaryNetwork() {
+		return true
+	}
+	for _, ns := range network.GetNADNamespaces() {
+		if ns == namespace {
+			return true
+		}
+	}
+	return false
+}
+
+// GetNetworkRole returns the role of this controller's
+// network for the given pod
+// Expected values are:
+// (1) "primary" if this network is the primary network of the pod.
+//
+//	The "default" network is the primary network of any pod usually
+//	unless user-defined-network-segmentation feature has been activated.
+//	If network segmentation feature is enabled then any user defined
+//	network can be the primary network of the pod.
+//
+// (2) "secondary" if this network is the secondary network of the pod.
+//
+//	Only user defined networks can be secondary networks for a pod.
+//
+// (3) "infrastructure-locked" is applicable only to "default" network if
+//
+//	a user defined network is the "primary" network for this pod. This
+//	signifies the "default" network is only used for probing and
+//	is otherwise locked for all intents and purposes.
+//
+// (4) "none" if the pod has no networks on this controller
+func GetNetworkRole(controllerNetInfo NetInfo, getActiveNetworkForNamespace func(namespace string) (NetInfo, error), pod *corev1.Pod) (string, error) {
+
+	// no network segmentation enabled, and is default controller, must be default network
+	if !IsNetworkSegmentationSupportEnabled() && controllerNetInfo.IsDefault() {
+		return types.NetworkRolePrimary, nil
+	}
+
+	var activeNetwork NetInfo
+	var err error
+	// controller is serving primary network or is default, we need to get the active network
+	if controllerNetInfo.IsPrimaryNetwork() || controllerNetInfo.IsDefault() {
+		activeNetwork, err = getActiveNetworkForNamespace(pod.Namespace)
+		if err != nil {
+			return "", err
+		}
+
+		// if active network for pod matches controller network, then primary interface is handled by this controller
+		if activeNetwork.GetNetworkName() == controllerNetInfo.GetNetworkName() {
+			return types.NetworkRolePrimary, nil
+		}
+
+		// otherwise, if this is the default controller, and the pod active network does not match the default network
+		// we know the role for this default controller is infra locked
+		if controllerNetInfo.IsDefault() {
+			return types.NetworkRoleInfrastructure, nil
+		}
+
+		// this is a primary network controller, and it does not match the pod's active network
+		// the controller must not be serving this pod
+		return types.NetworkRoleNone, nil
+	}
+
+	// at this point the controller must be a secondary network
+	on, _, err := GetPodNADToNetworkMapping(pod, controllerNetInfo.GetNetInfo())
+	if err != nil {
+		return "", fmt.Errorf("failed to get pod network mapping: %w", err)
+	}
+
+	if !on {
+		return types.NetworkRoleNone, nil
+	}
+
+	// must be secondary role
+	return types.NetworkRoleSecondary, nil
+}
+
+// (C)UDN network name generation functions must ensure the absence of name conflicts between all (C)UDNs.
+// We use underscore as a separator as it is not allowed in k8s namespaces and names.
+// Network name is then used by GetSecondaryNetworkPrefix function to generate db object names.
+// GetSecondaryNetworkPrefix replaces some characters in the network name to ensure correct db object names,
+// so the network name must be also unique after these replacements.
+
+func GenerateUDNNetworkName(namespace, name string) string {
+	return namespace + "_" + name
+}
+
+func GenerateCUDNNetworkName(name string) string {
+	return "cluster_udn_" + name
+}
+
+// ParseNetworkName parses the network name into UDN namespace and name OR CUDN name.
+// If udnName is empty, then given string is not a (C)UDN-generated network name.
+// If udnNamespace is empty, then udnName is a CUDN name.
+// As any (C)UDN network can also be just NAD-generated network, there is no guarantee that given network
+// is a (C)UDN network. It needs an additional check from the kapi-server.
+// This function has a copy in go-controller/observability-lib/sampledecoder/sample_decoder.go
+// Please update together with this function.
+func ParseNetworkName(networkName string) (udnNamespace, udnName string) {
+	if strings.HasPrefix(networkName, "cluster_udn_") {
+		return "", networkName[len("cluster_udn_"):]
+	}
+	parts := strings.Split(networkName, "_")
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	return "", ""
 }

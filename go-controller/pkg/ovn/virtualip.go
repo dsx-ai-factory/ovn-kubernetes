@@ -8,10 +8,19 @@ import (
 	"sync"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/cache"
+	ref "k8s.io/client-go/tools/reference"
+	"k8s.io/client-go/util/retry"
+	"k8s.io/klog/v2"
+
 	ovsDBCache "github.com/ovn-org/libovsdb/cache"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	virtualipv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
 	virtualipscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/clientset/versioned/scheme"
@@ -22,14 +31,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	corev1 "k8s.io/api/core/v1"
-	kapi "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/cache"
-	ref "k8s.io/client-go/tools/reference"
-	"k8s.io/client-go/util/retry"
-	"k8s.io/klog/v2"
 )
 
 const (
@@ -116,8 +117,8 @@ func (bnc *BaseNetworkController) recordVirtualIPEvent(reason string, err string
 		klog.Errorf("Couldn't get a reference to virtualIP %s/%s to post an event: '%v'",
 			virtualIP.Namespace, virtualIP.Name, refErr)
 	} else {
-		klog.V(5).Infof("Posting a %s event for virtualIP %s/%s", kapi.EventTypeWarning, virtualIP.Namespace, virtualIP.Name)
-		bnc.recorder.Eventf(virtIPRef, kapi.EventTypeWarning, reason, err)
+		klog.V(5).Infof("Posting a %s event for virtualIP %s/%s", corev1.EventTypeWarning, virtualIP.Namespace, virtualIP.Name)
+		bnc.recorder.Eventf(virtIPRef, corev1.EventTypeWarning, reason, err)
 	}
 }
 
@@ -160,7 +161,7 @@ func (bnc *BaseNetworkController) updateVIPActivePodInstance(pb *sbdb.PortBindin
 		vip.activePodInfo = &backingPodInfo{}
 		vip.lastTransitionTime = &metav1.Time{Time: time.Now()}
 	} else {
-		vip.backingPods.Range(func(k, v interface{}) bool {
+		vip.backingPods.Range(func(_, v interface{}) bool {
 			podInfo := v.(*backingPodInfo)
 			if podInfo.GetLogicalPortName(vip.nadName) == *(pb.VirtualParent) {
 				vip.activePodInfo = podInfo
@@ -260,7 +261,7 @@ func (bnc *BaseNetworkController) watchPortBindingTable() error {
 func (vip *virtualIP) getAllBackingPodPortandPodRef() (string, []corev1.ObjectReference) {
 	var portsList = make([]string, 0)
 	var backingPodsRef = make([]corev1.ObjectReference, 0)
-	vip.backingPods.Range(func(k, v interface{}) bool {
+	vip.backingPods.Range(func(_, v interface{}) bool {
 		value := v.(*backingPodInfo)
 		portsList = append(portsList, value.GetLogicalPortName(vip.nadName))
 		backingPodsRef = append(backingPodsRef, value.podRef)
@@ -291,7 +292,7 @@ func (bnc *BaseNetworkController) updateVirtualPortOptions(vip *virtualIP, ports
 	return nil
 }
 
-func (vip *virtualIP) needsRetry(pod *kapi.Pod) bool {
+func (vip *virtualIP) needsRetry(pod *corev1.Pod) bool {
 	_, boolVal := vip.podRetry.Load(getPodKey(pod))
 	return boolVal
 }
@@ -412,7 +413,7 @@ func (bnc *BaseNetworkController) removeVirtualIPFromPodPortSecurity(vipAddress 
 	return nil
 }
 
-func (bnc *BaseNetworkController) handleVIPPodDelete(vip *virtualIP, pod *kapi.Pod) error {
+func (bnc *BaseNetworkController) handleVIPPodDelete(vip *virtualIP, pod *corev1.Pod) error {
 	unlock := util.LockByKey.Acquire(getVirtualIPLockKey(vip.nadName, vip.vipAddress))
 	defer unlock()
 
@@ -495,7 +496,7 @@ func (bnc *BaseNetworkController) addVirtualIPToPodPortSecurity(vipAddress, port
 	return nil
 }
 
-func (bnc *BaseNetworkController) handleVIPPodAdd(vip *virtualIP, pod *kapi.Pod) error {
+func (bnc *BaseNetworkController) handleVIPPodAdd(vip *virtualIP, pod *corev1.Pod) error {
 	unlock := util.LockByKey.Acquire(getVirtualIPLockKey(vip.nadName, vip.vipAddress))
 	defer unlock()
 
@@ -507,7 +508,7 @@ func (bnc *BaseNetworkController) handleVIPPodAdd(vip *virtualIP, pod *kapi.Pod)
 
 		// check whether this pod exists when this pod addition to virtualIP is retried
 		if _, err := bnc.watchFactory.GetPod(pod.Namespace, pod.Name); err != nil {
-			if errors.IsNotFound(err) {
+			if apierrors.IsNotFound(err) {
 				klog.Infof("Stop retrying pod addition %s/%s as it does not exist", pod.Namespace, pod.Name)
 				return nil
 			} else {
@@ -642,7 +643,7 @@ func (bnc *BaseNetworkController) isVirtualIPAddressValid(vip *virtualIP) (bool,
 	// check if virtualIP adddress is duplicate of already existing virtualIP's ipaddress
 	var isDuplicate bool
 	var virtIP *virtualIP
-	bnc.virtualIPs.Range(func(k, v interface{}) bool {
+	bnc.virtualIPs.Range(func(_, v interface{}) bool {
 		virtIP = v.(*virtualIP)
 		if vip.vipAddress == virtIP.vipAddress {
 			isDuplicate = true
@@ -716,7 +717,7 @@ func (bnc *BaseNetworkController) addVirtualIP(virtIP *virtualipv1beta1.VirtualI
 		// check if the virtualIP exists when virtualIP creation in OVN is retried
 		if _, err := bnc.watchFactory.GetVirtualIP(virtIP.Namespace, virtIP.Name); err != nil {
 			var updatedErr error
-			if errors.IsNotFound(err) {
+			if apierrors.IsNotFound(err) {
 				klog.Infof("Stop retrying virtualIP %s/%s as it does not exist", virtIP.Namespace, virtIP.Name)
 			} else {
 				errMsg := fmt.Sprintf("Failed to retrieve virtualIP %s from cache", virtualIPKey)
@@ -761,21 +762,21 @@ func (bnc *BaseNetworkController) addVirtualIP(virtIP *virtualipv1beta1.VirtualI
 	vip.podHandler, _ = bnc.watchFactory.AddFilteredPodHandler(vip.namespace, sel,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
-				pod := obj.(*kapi.Pod)
+				pod := obj.(*corev1.Pod)
 				if err := bnc.handleVIPPodAdd(vip, pod); err != nil {
 					klog.Errorf(err.Error())
 					bnc.recordVirtualIPEvent("VirtualIPPodAddError", err.Error(), virtIP)
 				}
 			},
 			DeleteFunc: func(obj interface{}) {
-				pod := obj.(*kapi.Pod)
+				pod := obj.(*corev1.Pod)
 				if err := bnc.handleVIPPodDelete(vip, pod); err != nil {
 					klog.Errorf(err.Error())
 					bnc.recordVirtualIPEvent("VirtualIPPodDelError", err.Error(), virtIP)
 				}
 			},
-			UpdateFunc: func(oldObj, newObj interface{}) {
-				newPod := newObj.(*kapi.Pod)
+			UpdateFunc: func(_, newObj interface{}) {
+				newPod := newObj.(*corev1.Pod)
 				if vip.needsRetry(newPod) {
 					if err := bnc.handleVIPPodAdd(vip, newPod); err != nil {
 						klog.Errorf(err.Error())
@@ -814,7 +815,7 @@ func (bnc *BaseNetworkController) deleteVirtualIP(virtIP *virtualipv1beta1.Virtu
 	}
 
 	// delete the virtual-ip address from pod port security list backed by this virtual ip
-	vip.backingPods.Range(func(k, v interface{}) bool {
+	vip.backingPods.Range(func(_, v interface{}) bool {
 		value := v.(*backingPodInfo)
 		err := bnc.removeVirtualIPFromPodPortSecurity(vip.vipAddress, value.backingPodNamespace, value.backingPodName, vip.nadName)
 		if err != nil {
@@ -893,7 +894,7 @@ func (bnc *BaseNetworkController) syncVirtualIPsPeriodic() {
 		unlock := util.LockByKey.Acquire(getVirtualIPLockKey(nadName, vipAddress))
 
 		virtIP, err := bnc.watchFactory.GetVirtualIP(vipNamespace, vipName)
-		if err != nil && !errors.IsNotFound(err) {
+		if err != nil && !apierrors.IsNotFound(err) {
 			// skip this virtualIP sync in this round
 			klog.Errorf("Failed to get virtualIP %s/%s from informer cache: (%v)",
 				virtIP.Namespace, virtIP.Name, err)

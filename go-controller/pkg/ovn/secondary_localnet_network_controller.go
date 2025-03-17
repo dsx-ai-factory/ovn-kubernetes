@@ -9,6 +9,9 @@ import (
 
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta2"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -22,9 +25,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/klog/v2"
 )
 
 type secondaryLocalnetNetworkControllerEventHandler struct {
@@ -33,6 +33,10 @@ type secondaryLocalnetNetworkControllerEventHandler struct {
 	objType      reflect.Type
 	oc           *SecondaryLocalnetNetworkController
 	syncFunc     func([]interface{}) error
+}
+
+func (h *secondaryLocalnetNetworkControllerEventHandler) FilterOutResource(obj interface{}) bool {
+	return h.oc.FilterOutResource(h.objType, obj)
 }
 
 // AreResourcesEqual returns true if, given two objects of a known resource type, the update logic for this resource
@@ -81,7 +85,7 @@ func (h *secondaryLocalnetNetworkControllerEventHandler) RecordSuccessEvent(obj 
 }
 
 // RecordErrorEvent records the error event on this given object.
-func (h *secondaryLocalnetNetworkControllerEventHandler) RecordErrorEvent(obj interface{}, reason string, err error) {
+func (h *secondaryLocalnetNetworkControllerEventHandler) RecordErrorEvent(_ interface{}, _ string, _ error) {
 }
 
 // IsResourceScheduled returns true if the given object has been scheduled.
@@ -93,7 +97,7 @@ func (h *secondaryLocalnetNetworkControllerEventHandler) IsResourceScheduled(obj
 // AddResource adds the specified object to the cluster according to its type and returns the error,
 // if any, yielded during object creation.
 // Given an object to add and a boolean specifying if the function was executed from iterateRetryResources
-func (h *secondaryLocalnetNetworkControllerEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
+func (h *secondaryLocalnetNetworkControllerEventHandler) AddResource(obj interface{}, _ bool) error {
 	switch h.objType {
 	case factory.NodeType:
 		node, ok := obj.(*corev1.Node)
@@ -247,8 +251,9 @@ func NewSecondaryLocalnetNetworkController(
 }
 
 // Start starts the secondary localnet controller, handles all events and creates all needed logical entities
-func (oc *SecondaryLocalnetNetworkController) Start(ctx context.Context) error {
+func (oc *SecondaryLocalnetNetworkController) Start(_ context.Context) error {
 	klog.Infof("Starting secondary %s network controller of network %s", oc.TopologyType(), oc.GetNetworkName())
+
 	start := time.Now()
 	defer func() {
 		klog.Infof("Starting controller for secondary network network %s took %v", oc.GetNetworkName(), time.Since(start))
@@ -259,7 +264,7 @@ func (oc *SecondaryLocalnetNetworkController) Start(ctx context.Context) error {
 		return err
 	}
 
-	if err := oc.Init(); err != nil {
+	if err := oc.init(); err != nil {
 		return err
 	}
 
@@ -276,7 +281,7 @@ func (oc *SecondaryLocalnetNetworkController) Cleanup() error {
 	return oc.BaseSecondaryLayer2NetworkController.cleanup()
 }
 
-func (oc *SecondaryLocalnetNetworkController) Init() error {
+func (oc *SecondaryLocalnetNetworkController) init() error {
 	switchName := oc.GetNetworkScopedSwitchName(types.OVNLocalnetSwitch)
 
 	logicalSwitch, err := oc.initializeLogicalSwitch(switchName, oc.Subnets(), oc.ExcludeSubnets(), "", "")
@@ -310,6 +315,13 @@ func (oc *SecondaryLocalnetNetworkController) Init() error {
 func (oc *SecondaryLocalnetNetworkController) Stop() {
 	klog.Infof("Stoping controller for secondary network %s", oc.GetNetworkName())
 	oc.BaseSecondaryLayer2NetworkController.stop()
+}
+
+func (oc *SecondaryLocalnetNetworkController) Reconcile(netInfo util.NetInfo) error {
+	return oc.BaseNetworkController.reconcile(
+		netInfo,
+		func(_ string) {},
+	)
 }
 
 func (oc *SecondaryLocalnetNetworkController) initRetryFramework() {

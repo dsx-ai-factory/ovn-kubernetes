@@ -4,9 +4,6 @@ import (
 	"net"
 	"strconv"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
-
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -17,6 +14,9 @@ import (
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
 var _ = Describe("Topology factory", func() {

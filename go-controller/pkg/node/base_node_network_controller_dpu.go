@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"time"
 
-	kapi "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	corev1listers "k8s.io/client-go/listers/core/v1"
@@ -24,7 +24,7 @@ import (
 
 // Check if the Pod is ready so that we can add its associated DPU to br-int.
 // If true, return its dpuConnDetails, otherwise return nil
-func (bnnc *BaseNodeNetworkController) podReadyToAddDPU(pod *kapi.Pod, nadName string) *util.DPUConnectionDetails {
+func (bnnc *BaseNodeNetworkController) podReadyToAddDPU(pod *corev1.Pod, nadName string) *util.DPUConnectionDetails {
 	if bnnc.name != pod.Spec.NodeName {
 		klog.V(5).Infof("Pod %s/%s is not scheduled on this node %s", pod.Namespace, pod.Name, bnnc.name)
 		return nil
@@ -52,10 +52,10 @@ func (bnnc *BaseNodeNetworkController) podReadyToAddDPU(pod *kapi.Pod, nadName s
 	return nil
 }
 
-func (bnnc *BaseNodeNetworkController) addDPUPodForNAD(pod *kapi.Pod, dpuCD *util.DPUConnectionDetails,
+func (bnnc *BaseNodeNetworkController) addDPUPodForNAD(pod *corev1.Pod, dpuCD *util.DPUConnectionDetails,
 	netName, nadName string, getter cni.PodInfoGetter,
-	addFunc func(*kapi.Pod, string) (any, error),
-	delFunc func(*kapi.Pod, string, any) error) (any, error) {
+	addFunc func(*corev1.Pod, string) (any, error),
+	delFunc func(*corev1.Pod, string, any) error) (any, error) {
 	podDesc := fmt.Sprintf("pod %s/%s for NAD %s", pod.Namespace, pod.Name, nadName)
 	klog.Infof("Adding %s on DPU", podDesc)
 	podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, nil,
@@ -70,8 +70,8 @@ func (bnnc *BaseNodeNetworkController) addDPUPodForNAD(pod *kapi.Pod, dpuCD *uti
 	return anyInfo, nil
 }
 
-func (bnnc *BaseNodeNetworkController) delDPUPodForNAD(pod *kapi.Pod, dpuCD *util.DPUConnectionDetails, anyInfo any, nadName string,
-	podDeleted bool, delFunc func(*kapi.Pod, string, any) error) error {
+func (bnnc *BaseNodeNetworkController) delDPUPodForNAD(pod *corev1.Pod, dpuCD *util.DPUConnectionDetails, anyInfo any, nadName string,
+	podDeleted bool, delFunc func(*corev1.Pod, string, any) error) error {
 	var errs []error
 	podDesc := fmt.Sprintf("pod %s/%s for NAD %s", pod.Namespace, pod.Name, nadName)
 	klog.Infof("Deleting %s from DPU", podDesc)
@@ -110,14 +110,14 @@ func dpuConnectionDetailChanged(oldDPUCD, newDPUCD *util.DPUConnectionDetails) b
 }
 
 // watchPodsDPU watch updates for pod DPU annotations
-func (bnnc *BaseNodeNetworkController) watchPodsDPU(addFunc func(*kapi.Pod, string) (any, error),
-	delFunc func(*kapi.Pod, string, any) error, updateFunc func(*kapi.Pod, string, any) (any, error)) (*factory.Handler, error) {
+func (bnnc *BaseNodeNetworkController) watchPodsDPU(addFunc func(*corev1.Pod, string) (any, error),
+	delFunc func(*corev1.Pod, string, any) error, updateFunc func(*corev1.Pod, string, any) (any, error)) (*factory.Handler, error) {
 	clientSet := cni.NewClientSet(bnnc.client, corev1listers.NewPodLister(bnnc.watchFactory.LocalPodInformer().GetIndexer()))
 
 	netName := bnnc.GetNetworkName()
 	return bnnc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			pod := obj.(*kapi.Pod)
+			pod := obj.(*corev1.Pod)
 			if util.PodWantsHostNetwork(pod) {
 				return
 			}
@@ -162,8 +162,8 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU(addFunc func(*kapi.Pod, stri
 			bnnc.podNADToDPUCDMap.Store(pod.UID, nadToDPUCDMap)
 		},
 		UpdateFunc: func(old, newer interface{}) {
-			oldPod := old.(*kapi.Pod)
-			newPod := newer.(*kapi.Pod)
+			oldPod := old.(*corev1.Pod)
+			newPod := newer.(*corev1.Pod)
 			if util.PodWantsHostNetwork(newPod) {
 				return
 			}
@@ -219,7 +219,7 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU(addFunc func(*kapi.Pod, stri
 			bnnc.podNADToDPUCDMap.Store(newPod.UID, nadToDPUCDMap)
 		},
 		DeleteFunc: func(obj interface{}) {
-			pod := obj.(*kapi.Pod)
+			pod := obj.(*corev1.Pod)
 			// lock pod to avoid racing on `servedCache`
 			unlock := util.LockByKey.Acquire(string(pod.UID))
 			defer unlock()
@@ -245,7 +245,7 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU(addFunc func(*kapi.Pod, stri
 }
 
 // updatePodDPUConnStatusWithRetry update the pod annotion with the givin connection details
-func (bnnc *BaseNodeNetworkController) updatePodDPUConnStatusWithRetry(origPod *kapi.Pod,
+func (bnnc *BaseNodeNetworkController) updatePodDPUConnStatusWithRetry(origPod *corev1.Pod,
 	dpuConnStatus *util.DPUConnectionStatus, nadName string) error {
 	podDesc := fmt.Sprintf("pod %s/%s", origPod.Namespace, origPod.Name)
 	klog.Infof("Updating pod %s with connection status (%+v) for NAD %s", podDesc, dpuConnStatus, nadName)
@@ -260,10 +260,10 @@ func (bnnc *BaseNodeNetworkController) updatePodDPUConnStatusWithRetry(origPod *
 }
 
 // addRepPort adds the representor of the VF to the ovs bridge, nadName is the real NAD name even for the default network
-func (bnnc *BaseNodeNetworkController) addRepPort(pod *kapi.Pod, dpuCD *util.DPUConnectionDetails, nadName string,
+func (bnnc *BaseNodeNetworkController) addRepPort(pod *corev1.Pod, dpuCD *util.DPUConnectionDetails, nadName string,
 	ifInfo *cni.PodInterfaceInfo, getter cni.PodInfoGetter,
-	addFunc func(*kapi.Pod, string) (any, error),
-	delFunc func(*kapi.Pod, string, any) error) (any, error) {
+	addFunc func(*corev1.Pod, string) (any, error),
+	delFunc func(*corev1.Pod, string, any) error) (any, error) {
 
 	podDesc := fmt.Sprintf("pod %s/%s for NAD %s", pod.Namespace, pod.Name, nadName)
 	vfRepName, err := util.GetSriovnetOps().GetVfRepresentorDPU(dpuCD.PfId, dpuCD.VfId)
@@ -370,8 +370,8 @@ func (bnnc *BaseNodeNetworkController) addRepPort(pod *kapi.Pod, dpuCD *util.DPU
 }
 
 // delRepPort delete the representor of the VF from the ovs bridge
-func (bnnc *BaseNodeNetworkController) delRepPort(pod *kapi.Pod, dpuCD *util.DPUConnectionDetails, anyInfo any,
-	vfRepName, nadName string, delFunc func(*kapi.Pod, string, any) error) error {
+func (bnnc *BaseNodeNetworkController) delRepPort(pod *corev1.Pod, dpuCD *util.DPUConnectionDetails, anyInfo any,
+	vfRepName, nadName string, delFunc func(*corev1.Pod, string, any) error) error {
 	//TODO(adrianc): handle: clearPodBandwidth(pr.SandboxID), pr.deletePodConntrack()
 	podDesc := fmt.Sprintf("pod %s/%s for NAD %s", pod.Namespace, pod.Name, nadName)
 	klog.Infof("Delete VF representor %s for %s", vfRepName, podDesc)
@@ -418,7 +418,7 @@ func (bnnc *BaseNodeNetworkController) delRepPort(pod *kapi.Pod, dpuCD *util.DPU
 	}
 
 	// remove from br-int
-	return wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 60*time.Second, true, func(ctx context.Context) (bool, error) {
+	return wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 60*time.Second, true, func(_ context.Context) (bool, error) {
 		_, _, err := util.RunOVSVsctl("--if-exists", "del-port", "br-int", vfRepName)
 		if err != nil {
 			return false, nil
@@ -470,7 +470,7 @@ func (bnnc *BaseNodeNetworkController) disableDoSChecker() {
 }
 
 // updateRateLimitingForPod updates per-NAD rate limiting configuration, nadName is the real NAD name even even for default network
-func (bnnc *BaseNodeNetworkController) updateRateLimitingForPod(pod *kapi.Pod, nadName string) error {
+func (bnnc *BaseNodeNetworkController) updateRateLimitingForPod(pod *corev1.Pod, nadName string) error {
 	// acquire a lock per pod to avoid racing on `servedCache` in pod watcher
 	unlock := util.LockByKey.Acquire(string(pod.UID))
 	defer unlock()
@@ -533,7 +533,7 @@ func (bnnc *BaseNodeNetworkController) updateRateLimitingForPod(pod *kapi.Pod, n
 
 // Caller has lock on the interested pod
 // Walk the pods and get the pod with the interested uid
-func (bnnc *BaseNodeNetworkController) getPodforUID(uid types.UID) (*kapi.Pod, error) {
+func (bnnc *BaseNodeNetworkController) getPodforUID(uid types.UID) (*corev1.Pod, error) {
 	// informer cache has pods filtered by node name
 	pods, err := bnnc.watchFactory.GetAllPods()
 	if err != nil {

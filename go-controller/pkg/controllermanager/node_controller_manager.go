@@ -7,6 +7,12 @@ import (
 	"sync"
 	"time"
 
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/tools/record"
+	"k8s.io/klog/v2"
+	kexec "k8s.io/utils/exec"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -18,12 +24,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
-	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/tools/record"
-	"k8s.io/klog/v2"
-	kexec "k8s.io/utils/exec"
 )
 
 // NodeControllerManager structure is the object manages all controllers for all networks for ovnkube-node
@@ -56,10 +56,14 @@ func (ncm *NodeControllerManager) NewNetworkController(nInfo util.NetInfo) (netw
 	topoType := nInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology, ovntypes.Layer2Topology:
-		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(),
+		// Pass a shallow clone of the watch factory, this allows multiplexing
+		// informers for secondary networks.
+		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(ncm.watchFactory.(*factory.WatchFactory).ShallowClone()),
 			nInfo, ncm.vrfManager, ncm.ruleManager, ncm.defaultNodeNetworkController.Gateway)
 	case ovntypes.LocalnetTopology:
-		return node.NewSecondaryLocalnetNodeNetworkController(ncm.newCommonNetworkControllerInfo(),
+		// Pass a shallow clone of the watch factory, this allows multiplexing
+		// informers for secondary networks.
+		return node.NewSecondaryLocalnetNodeNetworkController(ncm.newCommonNetworkControllerInfo(ncm.watchFactory.(*factory.WatchFactory).ShallowClone()),
 			nInfo), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
@@ -85,8 +89,8 @@ func (ncm *NodeControllerManager) CleanupStaleNetworks(validNetworks ...util.Net
 }
 
 // newCommonNetworkControllerInfo creates and returns the base node network controller info
-func (ncm *NodeControllerManager) newCommonNetworkControllerInfo() *node.CommonNodeNetworkControllerInfo {
-	return node.NewCommonNodeNetworkControllerInfo(ncm.ovnNodeClient, ncm.watchFactory, ncm.recorder, ncm.routeManager, ncm.name, ncm.dpuName, ncm.hostType, ncm.pfMACs)
+func (ncm *NodeControllerManager) newCommonNetworkControllerInfo(wf factory.NodeWatchFactory) *node.CommonNodeNetworkControllerInfo {
+	return node.NewCommonNodeNetworkControllerInfo(ncm.ovnNodeClient, wf, ncm.recorder, ncm.routeManager, ncm.name, ncm.dpuName, ncm.hostType, ncm.pfMACs)
 }
 
 // isNetworkManagerRequiredForNode checks if network manager should be started
@@ -154,7 +158,7 @@ func (ncm *NodeControllerManager) getNodeHostType() error {
 
 // initDefaultNodeNetworkController creates the controller for default network
 func (ncm *NodeControllerManager) initDefaultNodeNetworkController() error {
-	defaultNodeNetworkController, err := node.NewDefaultNodeNetworkController(ncm.newCommonNetworkControllerInfo(), ncm.networkManager.Interface())
+	defaultNodeNetworkController, err := node.NewDefaultNodeNetworkController(ncm.newCommonNetworkControllerInfo(ncm.watchFactory), ncm.networkManager.Interface())
 	if err != nil {
 		return err
 	}
@@ -384,6 +388,6 @@ func checkForStaleOVSInternalPorts() {
 	}
 }
 
-func (ncm *NodeControllerManager) Reconcile(name string, old, new util.NetInfo) error {
+func (ncm *NodeControllerManager) Reconcile(_ string, _, _ util.NetInfo) error {
 	return nil
 }

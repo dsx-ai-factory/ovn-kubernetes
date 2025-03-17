@@ -14,6 +14,15 @@ import (
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 
+	corev1 "k8s.io/api/core/v1"
+	discovery "k8s.io/api/discovery/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	ktypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
+	"sigs.k8s.io/knftables"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -25,15 +34,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
-
-	kapi "k8s.io/api/core/v1"
-	discovery "k8s.io/api/discovery/v1"
-	kerrors "k8s.io/apimachinery/pkg/api/errors"
-	ktypes "k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/klog/v2"
-	utilnet "k8s.io/utils/net"
-	"sigs.k8s.io/knftables"
 )
 
 const (
@@ -213,7 +213,7 @@ type nodePortWatcher struct {
 
 type serviceConfig struct {
 	// Contains the current service
-	service *kapi.Service
+	service *corev1.Service
 	// hasLocalHostNetworkEp will be true for a service if it has at least one endpoint which is "hostnetworked&local-to-this-node".
 	hasLocalHostNetworkEp bool
 	// localEndpoints stores all the local non-host-networked endpoints for this service
@@ -254,7 +254,7 @@ func (npw *nodePortWatcher) updateGatewayIPs(addressManager *addressManager) {
 //
 // `add` parameter indicates if the flows should exist or be removed from the cache
 // `hasLocalHostNetworkEp` indicates if at least one host networked endpoint exists for this service which is local to this node.
-func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, netInfo util.NetInfo, add, hasLocalHostNetworkEp bool) error {
+func (npw *nodePortWatcher) updateServiceFlowCache(service *corev1.Service, netInfo util.NetInfo, add, hasLocalHostNetworkEp bool) error {
 	if config.Gateway.Mode == config.GatewayModeLocal && config.Gateway.AllowNoUplink && npw.ofportPhys == "" {
 		// if LGW mode and no uplink gateway bridge, ingress traffic enters host from node physical interface instead of the breth0. Skip adding these service flows to br-ex.
 		return nil
@@ -450,7 +450,7 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, netInf
 // `actions`: "send to patchport"
 // `externalIPOrLBIngressIP` is either externalIP.IP or LB.status.ingress.IP
 // `ipType` is either "External" or "Ingress"
-func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *kapi.Service, netConfig *bridgeUDNConfiguration, svcPort *kapi.ServicePort, add bool,
+func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *corev1.Service, netConfig *bridgeUDNConfiguration, svcPort *corev1.ServicePort, add bool,
 	hasLocalHostNetworkEp bool, protocol string, actions string, externalIPOrLBIngressIPs []string, ipType string, ofPorts []string) error {
 
 	for _, externalIPOrLBIngressIP := range externalIPOrLBIngressIPs {
@@ -619,7 +619,7 @@ func (npw *nodePortWatcher) getServiceInfo(index ktypes.NamespacedName) (out *se
 }
 
 // getAndSetServiceInfo creates and sets the serviceConfig, returns if it existed and whatever was there
-func (npw *nodePortWatcher) getAndSetServiceInfo(index ktypes.NamespacedName, service *kapi.Service, hasLocalHostNetworkEp bool, localEndpoints sets.Set[string]) (old *serviceConfig, exists bool) {
+func (npw *nodePortWatcher) getAndSetServiceInfo(index ktypes.NamespacedName, service *corev1.Service, hasLocalHostNetworkEp bool, localEndpoints sets.Set[string]) (old *serviceConfig, exists bool) {
 	npw.serviceInfoLock.Lock()
 	defer npw.serviceInfoLock.Unlock()
 
@@ -633,7 +633,7 @@ func (npw *nodePortWatcher) getAndSetServiceInfo(index ktypes.NamespacedName, se
 }
 
 // addOrSetServiceInfo creates and sets the serviceConfig if it doesn't exist
-func (npw *nodePortWatcher) addOrSetServiceInfo(index ktypes.NamespacedName, service *kapi.Service, hasLocalHostNetworkEp bool, localEndpoints sets.Set[string]) (exists bool) {
+func (npw *nodePortWatcher) addOrSetServiceInfo(index ktypes.NamespacedName, service *corev1.Service, hasLocalHostNetworkEp bool, localEndpoints sets.Set[string]) (exists bool) {
 	npw.serviceInfoLock.Lock()
 	defer npw.serviceInfoLock.Unlock()
 
@@ -648,7 +648,7 @@ func (npw *nodePortWatcher) addOrSetServiceInfo(index ktypes.NamespacedName, ser
 
 // updateServiceInfo sets the serviceConfig for a service and returns the existing serviceConfig, if inputs are nil
 // do not update those fields, if it does not exist return nil.
-func (npw *nodePortWatcher) updateServiceInfo(index ktypes.NamespacedName, service *kapi.Service, hasLocalHostNetworkEp *bool, localEndpoints sets.Set[string]) (old *serviceConfig, exists bool) {
+func (npw *nodePortWatcher) updateServiceInfo(index ktypes.NamespacedName, service *corev1.Service, hasLocalHostNetworkEp *bool, localEndpoints sets.Set[string]) (old *serviceConfig, exists bool) {
 
 	npw.serviceInfoLock.Lock()
 	defer npw.serviceInfoLock.Unlock()
@@ -675,7 +675,7 @@ func (npw *nodePortWatcher) updateServiceInfo(index ktypes.NamespacedName, servi
 
 // addServiceRules ensures the correct iptables rules and OpenFlow physical
 // flows are programmed for a given service and endpoint configuration
-func addServiceRules(service *kapi.Service, netInfo util.NetInfo, localEndpoints []string, svcHasLocalHostNetEndPnt bool, npw *nodePortWatcher) error {
+func addServiceRules(service *corev1.Service, netInfo util.NetInfo, localEndpoints []string, svcHasLocalHostNetEndPnt bool, npw *nodePortWatcher) error {
 	// For dpu or Full mode
 	var err error
 	var errors []error
@@ -719,7 +719,7 @@ func addServiceRules(service *kapi.Service, netInfo util.NetInfo, localEndpoints
 
 // delServiceRules deletes all possible iptables rules and OpenFlow physical
 // flows for a service
-func delServiceRules(service *kapi.Service, localEndpoints []string, npw *nodePortWatcher) error {
+func delServiceRules(service *corev1.Service, localEndpoints []string, npw *nodePortWatcher) error {
 	var err error
 	var errors []error
 	// full mode || dpu mode
@@ -807,7 +807,7 @@ func delServiceRules(service *kapi.Service, localEndpoints []string, npw *nodePo
 	return utilerrors.Join(errors...)
 }
 
-func serviceUpdateNotNeeded(old, new *kapi.Service) bool {
+func serviceUpdateNotNeeded(old, new *corev1.Service) bool {
 	return reflect.DeepEqual(new.Spec.Ports, old.Spec.Ports) &&
 		reflect.DeepEqual(new.Spec.ExternalIPs, old.Spec.ExternalIPs) &&
 		reflect.DeepEqual(new.Spec.ClusterIP, old.Spec.ClusterIP) &&
@@ -822,7 +822,7 @@ func serviceUpdateNotNeeded(old, new *kapi.Service) bool {
 }
 
 // AddService handles configuring shared gateway bridge flows to steer External IP, Node Port, Ingress LB traffic into OVN
-func (npw *nodePortWatcher) AddService(service *kapi.Service) error {
+func (npw *nodePortWatcher) AddService(service *corev1.Service) error {
 	var localEndpoints sets.Set[string]
 	var hasLocalHostNetworkEp bool
 	if !util.ServiceTypeHasClusterIP(service) || !util.IsClusterIPSet(service) {
@@ -839,7 +839,7 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) error {
 	name := ktypes.NamespacedName{Namespace: service.Namespace, Name: service.Name}
 	epSlices, err := npw.watchFactory.GetServiceEndpointSlices(service.Namespace, service.Name, netInfo.GetNetworkName())
 	if err != nil {
-		if !kerrors.IsNotFound(err) {
+		if !apierrors.IsNotFound(err) {
 			return fmt.Errorf("error retrieving all endpointslices for service %s/%s during service add: %w",
 				service.Namespace, service.Name, err)
 		}
@@ -871,7 +871,7 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) error {
 	return nil
 }
 
-func (npw *nodePortWatcher) UpdateService(old, new *kapi.Service) error {
+func (npw *nodePortWatcher) UpdateService(old, new *corev1.Service) error {
 	var err error
 	var errors []error
 	name := ktypes.NamespacedName{Namespace: old.Namespace, Name: old.Name}
@@ -920,7 +920,7 @@ func (npw *nodePortWatcher) UpdateService(old, new *kapi.Service) error {
 }
 
 // deleteConntrackForServiceVIP deletes the conntrack entries for the provided svcVIP:svcPort by comparing them to ConntrackOrigDstIP:ConntrackOrigDstPort
-func deleteConntrackForServiceVIP(svcVIPs []string, svcPorts []kapi.ServicePort, ns, name string) error {
+func deleteConntrackForServiceVIP(svcVIPs []string, svcPorts []corev1.ServicePort, ns, name string) error {
 	for _, svcVIP := range svcVIPs {
 		for _, svcPort := range svcPorts {
 			if err := util.DeleteConntrackServicePort(svcVIP, svcPort.Port, svcPort.Protocol,
@@ -934,7 +934,7 @@ func deleteConntrackForServiceVIP(svcVIPs []string, svcPorts []kapi.ServicePort,
 }
 
 // deleteConntrackForService deletes the conntrack entries corresponding to the service VIPs of the provided service
-func (npw *nodePortWatcher) deleteConntrackForService(service *kapi.Service) error {
+func (npw *nodePortWatcher) deleteConntrackForService(service *corev1.Service) error {
 	// remove conntrack entries for LB VIPs and External IPs
 	externalIPs := util.GetExternalAndLBIPs(service)
 	if err := deleteConntrackForServiceVIP(externalIPs, service.Spec.Ports, service.Namespace, service.Name); err != nil {
@@ -961,7 +961,7 @@ func (npw *nodePortWatcher) deleteConntrackForService(service *kapi.Service) err
 	return nil
 }
 
-func (npw *nodePortWatcher) DeleteService(service *kapi.Service) error {
+func (npw *nodePortWatcher) DeleteService(service *corev1.Service) error {
 	var err error
 	var errors []error
 	if !util.ServiceTypeHasClusterIP(service) || !util.IsClusterIPSet(service) {
@@ -997,9 +997,9 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 	var keepIPTRules []nodeipt.Rule
 	var keepNFTSetElems, keepNFTMapElems []*knftables.Element
 	for _, serviceInterface := range services {
-		name := ktypes.NamespacedName{Namespace: serviceInterface.(*kapi.Service).Namespace, Name: serviceInterface.(*kapi.Service).Name}
+		name := ktypes.NamespacedName{Namespace: serviceInterface.(*corev1.Service).Namespace, Name: serviceInterface.(*corev1.Service).Name}
 
-		service, ok := serviceInterface.(*kapi.Service)
+		service, ok := serviceInterface.(*corev1.Service)
 		if !ok {
 			klog.Errorf("Spurious object in syncServices: %v",
 				serviceInterface)
@@ -1018,7 +1018,7 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 
 		epSlices, err := npw.watchFactory.GetServiceEndpointSlices(service.Namespace, service.Name, netInfo.GetNetworkName())
 		if err != nil {
-			if !kerrors.IsNotFound(err) {
+			if !apierrors.IsNotFound(err) {
 				return fmt.Errorf("error retrieving all endpointslices for service %s/%s during SyncServices: %w",
 					service.Namespace, service.Name, err)
 			}
@@ -1085,7 +1085,7 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) error {
 	var err error
 	var errors []error
-	var svc *kapi.Service
+	var svc *corev1.Service
 
 	netInfo, err := npw.networkManager.GetActiveNetworkForNamespace(epSlice.Namespace)
 	if err != nil {
@@ -1096,14 +1096,14 @@ func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) e
 		return nil
 	}
 
-	svcNamespacedName, err := util.ServiceFromEndpointSlice(epSlice, netInfo)
+	svcNamespacedName, err := util.ServiceFromEndpointSlice(epSlice, netInfo.GetNetworkName())
 	if err != nil || svcNamespacedName == nil {
 		return err
 	}
 
 	svc, err = npw.watchFactory.GetService(svcNamespacedName.Namespace, svcNamespacedName.Name)
 	if err != nil {
-		if !kerrors.IsNotFound(err) {
+		if !apierrors.IsNotFound(err) {
 			return fmt.Errorf("error retrieving service %s/%s during endpointslice add: %w",
 				svcNamespacedName.Namespace, svcNamespacedName.Name, err)
 		}
@@ -1163,23 +1163,22 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 	var errors []error
 	var hasLocalHostNetworkEp = false
 
-	netInfo, err := npw.networkManager.GetActiveNetworkForNamespace(epSlice.Namespace)
-	if err != nil {
-		return fmt.Errorf("error getting active network for endpointslice %s in namespace %s: %w", epSlice.Name, epSlice.Namespace, err)
-	}
-	if util.IsNetworkSegmentationSupportEnabled() && !util.IsEndpointSliceForNetwork(epSlice, netInfo) {
-		return nil
+	networkName := types.DefaultNetworkName
+	if util.IsNetworkSegmentationSupportEnabled() {
+		if netName, ok := epSlice.Annotations[types.UserDefinedNetworkEndpointSliceAnnotation]; ok {
+			networkName = netName
+		}
 	}
 
 	klog.V(5).Infof("Deleting endpointslice %s in namespace %s", epSlice.Name, epSlice.Namespace)
 	// remove rules for endpoints and add back normal ones
-	namespacedName, err := util.ServiceFromEndpointSlice(epSlice, netInfo)
+	namespacedName, err := util.ServiceFromEndpointSlice(epSlice, networkName)
 	if err != nil || namespacedName == nil {
 		return err
 	}
-	epSlices, err := npw.watchFactory.GetServiceEndpointSlices(namespacedName.Namespace, namespacedName.Name, netInfo.GetNetworkName())
+	epSlices, err := npw.watchFactory.GetServiceEndpointSlices(namespacedName.Namespace, namespacedName.Name, networkName)
 	if err != nil {
-		if !kerrors.IsNotFound(err) {
+		if !apierrors.IsNotFound(err) {
 			return fmt.Errorf("error retrieving all endpointslices for service %s/%s during endpointslice delete on %s: %w",
 				namespacedName.Namespace, namespacedName.Name, epSlice.Name, err)
 		}
@@ -1190,7 +1189,7 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 	}
 
 	svc, err := npw.watchFactory.GetService(namespacedName.Namespace, namespacedName.Name)
-	if err != nil && !kerrors.IsNotFound(err) {
+	if err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("error retrieving service %s/%s for endpointslice %s during endpointslice delete: %v",
 			namespacedName.Namespace, namespacedName.Name, epSlice.Name, err)
 	}
@@ -1218,7 +1217,7 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 }
 
 // GetLocalEndpointAddresses returns a list of eligible endpoints that are local to the node
-func (npw *nodePortWatcher) GetLocalEligibleEndpointAddresses(endpointSlices []*discovery.EndpointSlice, service *kapi.Service) sets.Set[string] {
+func (npw *nodePortWatcher) GetLocalEligibleEndpointAddresses(endpointSlices []*discovery.EndpointSlice, service *corev1.Service) sets.Set[string] {
 	return util.GetLocalEligibleEndpointAddressesFromSlices(endpointSlices, service, npw.nodeIPManager.nodeName)
 }
 
@@ -1238,12 +1237,12 @@ func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discover
 		return nil
 	}
 
-	namespacedName, err := util.ServiceFromEndpointSlice(newEpSlice, netInfo)
+	namespacedName, err := util.ServiceFromEndpointSlice(newEpSlice, netInfo.GetNetworkName())
 	if err != nil || namespacedName == nil {
 		return err
 	}
 	svc, err := npw.watchFactory.GetService(namespacedName.Namespace, namespacedName.Name)
-	if err != nil && !kerrors.IsNotFound(err) {
+	if err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("error retrieving service %s/%s for endpointslice %s during endpointslice update: %v",
 			namespacedName.Namespace, namespacedName.Name, newEpSlice.Name, err)
 	}
@@ -1277,7 +1276,7 @@ func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discover
 	nodeIPs := npw.nodeIPManager.ListAddresses()
 	epSlices, err := npw.watchFactory.GetServiceEndpointSlices(newEpSlice.Namespace, namespacedName.Name, netInfo.GetNetworkName())
 	if err != nil {
-		if !kerrors.IsNotFound(err) {
+		if !apierrors.IsNotFound(err) {
 			return fmt.Errorf("error retrieving all endpointslices for service %s/%s during endpointslice update on %s: %w",
 				namespacedName.Namespace, namespacedName.Name, newEpSlice.Name, err)
 		}
@@ -1311,7 +1310,7 @@ func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discover
 	return utilerrors.Join(errors...)
 }
 
-func (npwipt *nodePortWatcherIptables) AddService(service *kapi.Service) error {
+func (npwipt *nodePortWatcherIptables) AddService(service *corev1.Service) error {
 	// don't process headless service or services that doesn't have NodePorts or ExternalIPs
 	if !util.ServiceTypeHasClusterIP(service) || !util.IsClusterIPSet(service) {
 		return nil
@@ -1328,7 +1327,7 @@ func (npwipt *nodePortWatcherIptables) AddService(service *kapi.Service) error {
 	return nil
 }
 
-func (npwipt *nodePortWatcherIptables) UpdateService(old, new *kapi.Service) error {
+func (npwipt *nodePortWatcherIptables) UpdateService(old, new *corev1.Service) error {
 	var err error
 	var errors []error
 	if serviceUpdateNotNeeded(old, new) {
@@ -1361,7 +1360,7 @@ func (npwipt *nodePortWatcherIptables) UpdateService(old, new *kapi.Service) err
 
 }
 
-func (npwipt *nodePortWatcherIptables) DeleteService(service *kapi.Service) error {
+func (npwipt *nodePortWatcherIptables) DeleteService(service *corev1.Service) error {
 	// don't process headless service
 	if !util.ServiceTypeHasClusterIP(service) || !util.IsClusterIPSet(service) {
 		return nil
@@ -1379,7 +1378,7 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) erro
 	keepIPTRules := []nodeipt.Rule{}
 	keepNFTElems := []*knftables.Element{}
 	for _, serviceInterface := range services {
-		service, ok := serviceInterface.(*kapi.Service)
+		service, ok := serviceInterface.(*corev1.Service)
 		if !ok {
 			klog.Errorf("Spurious object in syncServices: %v",
 				serviceInterface)
@@ -1442,7 +1441,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 					dftFlows = append(dftFlows,
 						fmt.Sprintf("cookie=%s, priority=205, in_port=%s, dl_dst=%s, %s, tp_dst=%s, "+
 							"actions=output:%s", defaultOpenFlowCookie, ofPortPhys, bridgeMacAddress, proto, port, ofPortHost))
-					// table0, for packets coming from host, skip conntrack and go directly to external
+					// table0, for packets coming from LOCAL/Host OFPort, skip conntrack and go directly to external
 					dftFlows = append(dftFlows,
 						fmt.Sprintf("cookie=%s, priority=200, in_port=%s, %s, tp_dst=%s, "+
 							"actions=output:%s", defaultOpenFlowCookie, ofPortHost, proto, port, ofPortPhys))
@@ -1758,7 +1757,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 	return dftFlows, nil
 }
 
-func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration, isPodNetworkAdvertised bool) ([]string, error) {
+func commonFlows(bridge *bridgeConfiguration) ([]string, error) {
 	// CAUTION: when adding new flows where the in_port is ofPortPatch and the out_port is ofPortPhys, ensure
 	// that dl_src is included in match criteria!
 	ofPortPhys := bridge.ofPortPhys
@@ -1997,7 +1996,7 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration, isPodNetwork
 				fmt.Sprintf("cookie=%s, priority=104, in_port=%s, %s, %s_src=%s, actions=drop",
 					defaultOpenFlowCookie, defaultNetConfig.ofPortPatch, ipv, ipv, cidr))
 		}
-		for _, subnet := range subnets {
+		for _, subnet := range defaultNetConfig.nodeSubnets {
 			ipv := getIPv(subnet)
 			if ofPortPhys != "" {
 				// table 0, commit connections from local pods.
@@ -2012,10 +2011,15 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration, isPodNetwork
 	}
 
 	if ofPortPhys != "" {
-		if config.Gateway.DisableSNATMultipleGWs || isPodNetworkAdvertised {
-			// table 1, traffic to pod subnet go directly to OVN
-			output := defaultNetConfig.ofPortPatch
-			if isPodNetworkAdvertised && config.Gateway.Mode == config.GatewayModeLocal {
+		for _, netConfig := range bridge.patchedNetConfigs() {
+			isNetworkAdvertised := netConfig.advertised.Load()
+			// disableSNATMultipleGWs only applies to default network
+			disableSNATMultipleGWs := netConfig.isDefaultNetwork() && config.Gateway.DisableSNATMultipleGWs
+			if !disableSNATMultipleGWs && !isNetworkAdvertised {
+				continue
+			}
+			output := netConfig.ofPortPatch
+			if isNetworkAdvertised && config.Gateway.Mode == config.GatewayModeLocal {
 				// except if advertised through BGP, go to kernel
 				// TODO: MEG enabled pods should still go through the patch port
 				// but holding this until
@@ -2023,7 +2027,7 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration, isPodNetwork
 				// are assuming MEG & BGP are not used together
 				output = ovsLocalPort
 			}
-			for _, clusterEntry := range config.Default.ClusterSubnets {
+			for _, clusterEntry := range netConfig.subnets {
 				cidr := clusterEntry.CIDR
 				ipv := getIPv(cidr)
 				dftFlows = append(dftFlows,
@@ -2031,9 +2035,9 @@ func commonFlows(subnets []*net.IPNet, bridge *bridgeConfiguration, isPodNetwork
 						"actions=output:%s",
 						defaultOpenFlowCookie, ipv, ipv, cidr, output))
 			}
-			if output == defaultNetConfig.ofPortPatch {
+			if output == netConfig.ofPortPatch {
 				// except node management traffic
-				for _, subnet := range subnets {
+				for _, subnet := range netConfig.nodeSubnets {
 					mgmtIP := util.GetNodeManagementIfAddr(subnet)
 					ipv := getIPv(mgmtIP)
 					dftFlows = append(dftFlows,
@@ -2205,7 +2209,7 @@ func setBridgeOfPorts(bridge *bridgeConfiguration) error {
 		if err != nil {
 			return err
 		}
-		bridge.dpuHostRepName = hostRep
+		bridge.gwIfaceRep = hostRep
 		bridge.ofPortHost, stderr, err = util.RunOVSVsctl("get", "interface", hostRep, "ofport")
 		if err != nil {
 			return fmt.Errorf("failed to get ofport of host interface %s, stderr: %q, error: %v",
@@ -2213,10 +2217,10 @@ func setBridgeOfPorts(bridge *bridgeConfiguration) error {
 		}
 	} else {
 		var err error
-		if bridge.hostRepName != "" {
-			bridge.ofPortHost, _, err = util.RunOVSVsctl("get", "interface", bridge.hostRepName, "ofport")
+		if bridge.gwIfaceRep != "" {
+			bridge.ofPortHost, _, err = util.RunOVSVsctl("get", "interface", bridge.gwIfaceRep, "ofport")
 			if err != nil {
-				return fmt.Errorf("failed to get ofport of bypass rep %s, error: %v", bridge.hostRepName, err)
+				return fmt.Errorf("failed to get ofport of bypass rep %s, error: %v", bridge.gwIfaceRep, err)
 			}
 		} else {
 			bridge.ofPortHost = ovsLocalPort
@@ -2310,8 +2314,9 @@ func newGateway(
 		}
 	}
 
+	advertised := util.IsPodNetworkAdvertisedAtNode(networkManager.GetNetwork(types.DefaultNetworkName), nodeName)
 	gwBridge, exGwBridge, err := gatewayInitInternal(
-		nodeName, gwIntf, egressGWIntf, gwNextHops, gwIPs, nodeAnnotator)
+		nodeName, gwIntf, egressGWIntf, gwNextHops, subnets, gwIPs, advertised, nodeAnnotator)
 	if err != nil {
 		return nil, err
 	}
@@ -2382,15 +2387,15 @@ func newGateway(
 			// Delete stale masquerade resources if there are any. This is to make sure that there
 			// are no Linux resources with IP from old masquerade subnet when masquerade subnet
 			// gets changed as part of day2 operation.
-			if err := deleteStaleMasqueradeResources(gwBridge.gwIface, nodeName, watchFactory); err != nil {
+			if err := deleteStaleMasqueradeResources(gwBridge.getGatewayIface(), nodeName, watchFactory); err != nil {
 				return fmt.Errorf("failed to remove stale masquerade resources: %w", err)
 			}
 
-			if err := setNodeMasqueradeIPOnExtBridge(gwBridge.gwIface); err != nil {
-				return fmt.Errorf("failed to set the node masquerade IP on the ext bridge %s: %v", gwBridge.gwIface, err)
+			if err := setNodeMasqueradeIPOnExtBridge(gwBridge.getGatewayIface()); err != nil {
+				return fmt.Errorf("failed to set the node masquerade IP on the ext bridge %s: %v", gwBridge.getGatewayIface(), err)
 			}
 
-			if err := addMasqueradeRoute(routeManager, gwBridge.gwIface, nodeName, gwIPs, watchFactory); err != nil {
+			if err := addMasqueradeRoute(routeManager, gwBridge.getGatewayIface(), nodeName, gwIPs, watchFactory); err != nil {
 				return fmt.Errorf("failed to set the node masquerade route to OVN: %v", err)
 			}
 
@@ -2400,7 +2405,7 @@ func newGateway(
 			}
 		}
 
-		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, subnets, nodeIPs)
+		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, nodeIPs)
 		if err != nil {
 			return err
 		}
@@ -2408,7 +2413,7 @@ func newGateway(
 		// resync flows on IP change
 		gw.nodeIPManager.OnChanged = func() {
 			klog.V(5).Info("Node addresses changed, re-syncing bridge flows")
-			if err := gw.openflowManager.updateBridgeFlowCache(subnets, gw.nodeIPManager.ListAddresses(), gw.isPodNetworkAdvertised); err != nil {
+			if err := gw.openflowManager.updateBridgeFlowCache(gw.nodeIPManager.ListAddresses()); err != nil {
 				// very unlikely - somehow node has lost its IP address
 				klog.Errorf("Failed to re-generate gateway flows after address change: %v", err)
 			}
@@ -2443,7 +2448,7 @@ func newGateway(
 			gw.openflowManager.requestFlowSync()
 		}
 
-		if err := addHostMACBindings(gwBridge.gwIface); err != nil {
+		if err := addHostMACBindings(gwBridge.getGatewayIface()); err != nil {
 			return fmt.Errorf("failed to add MAC bindings for service routing: %w", err)
 		}
 		return nil
@@ -2499,11 +2504,11 @@ func newNodePortWatcher(
 	subnets = append(subnets, config.Kubernetes.ServiceCIDRs...)
 	if config.Gateway.DisableForwarding {
 		if err := initExternalBridgeServiceForwardingRules(subnets); err != nil {
-			return nil, fmt.Errorf("failed to add accept rules in forwarding table for bridge %s: err %v", gwBridge.gwIface, err)
+			return nil, fmt.Errorf("failed to add accept rules in forwarding table for bridge %s: err %v", gwBridge.getGatewayIface(), err)
 		}
 	} else {
 		if err := delExternalBridgeServiceForwardingRules(subnets); err != nil {
-			return nil, fmt.Errorf("failed to delete accept rules in forwarding table for bridge %s: err %v", gwBridge.gwIface, err)
+			return nil, fmt.Errorf("failed to delete accept rules in forwarding table for bridge %s: err %v", gwBridge.getGatewayIface(), err)
 		}
 	}
 
@@ -2521,7 +2526,7 @@ func newNodePortWatcher(
 		gatewayIPv4:    gatewayIPv4,
 		gatewayIPv6:    gatewayIPv6,
 		ofportPhys:     ofportPhys,
-		gwBridge:       gwBridge.bridgeName,
+		gwBridge:       gwBridge.getGatewayIface(),
 		serviceInfo:    make(map[ktypes.NamespacedName]*serviceConfig),
 		nodeIPManager:  nodeIPManager,
 		ofm:            ofm,
@@ -2620,7 +2625,7 @@ func addMasqueradeRoute(routeManager *routemanager.Controller, netIfaceName, nod
 		return err
 	}
 	for _, nodeAddr := range node.Status.Addresses {
-		if nodeAddr.Type != kapi.NodeInternalIP {
+		if nodeAddr.Type != corev1.NodeInternalIP {
 			continue
 		}
 		nodeIP := utilnet.ParseIPSloppy(nodeAddr.Address)

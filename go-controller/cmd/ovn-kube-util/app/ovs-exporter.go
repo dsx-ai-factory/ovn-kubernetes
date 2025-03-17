@@ -5,11 +5,13 @@ import (
 	"os"
 	"sync"
 
+	"github.com/urfave/cli/v2"
+
+	kexec "k8s.io/utils/exec"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/urfave/cli/v2"
-	kexec "k8s.io/utils/exec"
 )
 
 var metricsScrapeInterval int

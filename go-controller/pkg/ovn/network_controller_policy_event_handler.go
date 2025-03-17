@@ -2,13 +2,14 @@ package ovn
 
 import (
 	"fmt"
+	"reflect"
+
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/tools/cache"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"reflect"
-
-	kapi "k8s.io/api/core/v1"
-	"k8s.io/client-go/tools/cache"
 )
 
 // newNetpolRetryFramework builds and returns a retry framework for the input resource
@@ -59,11 +60,15 @@ type networkControllerPolicyEventHandler struct {
 	syncFunc        func([]interface{}) error
 }
 
+func (h *networkControllerPolicyEventHandler) FilterOutResource(_ interface{}) bool {
+	return false
+}
+
 // AreResourcesEqual returns true if, given two objects of a known resource type, the update logic for this resource
 // type considers them equal and therefore no update is needed. It returns false when the two objects are not considered
 // equal and an update needs be executed. This is regardless of how the update is carried out (whether with a dedicated update
 // function or with a delete on the old obj followed by an add on the new obj).
-func (h *networkControllerPolicyEventHandler) AreResourcesEqual(obj1, obj2 interface{}) (bool, error) {
+func (h *networkControllerPolicyEventHandler) AreResourcesEqual(_, _ interface{}) (bool, error) {
 	// switch based on type
 	switch h.objType {
 	case factory.AddressSetPodSelectorType, //
@@ -84,7 +89,7 @@ func (h *networkControllerPolicyEventHandler) AreResourcesEqual(obj1, obj2 inter
 
 // GetInternalCacheEntry returns the internal cache entry for this object, given an object and its type.
 // This is now used only for pods, which will get their the logical port cache entry.
-func (h *networkControllerPolicyEventHandler) GetInternalCacheEntry(obj interface{}) interface{} {
+func (h *networkControllerPolicyEventHandler) GetInternalCacheEntry(_ interface{}) interface{} {
 	return nil
 }
 
@@ -119,7 +124,7 @@ func (h *networkControllerPolicyEventHandler) GetResourceFromInformerCache(key s
 // AddResource adds the specified object to the cluster according to its type and returns the error,
 // if any, yielded during object creation.
 // Given an object to add and a boolean specifying if the function was executed from iterateRetryResources
-func (h *networkControllerPolicyEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
+func (h *networkControllerPolicyEventHandler) AddResource(obj interface{}, _ bool) error {
 	switch h.objType {
 	case factory.AddressSetPodSelectorType:
 		peerAS := h.extraParameters.(*PodSelectorAddrSetHandlerInfo)
@@ -157,7 +162,7 @@ func hasPolicyResourceAnUpdateFunc(objType reflect.Type) bool {
 // type and returns the error, if any, yielded during the object update.
 // Given an old and a new object; The inRetryCache boolean argument is to indicate if the given resource
 // is in the retryCache or not.
-func (h *networkControllerPolicyEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryCache bool) error {
+func (h *networkControllerPolicyEventHandler) UpdateResource(_, newObj interface{}, _ bool) error {
 	switch h.objType {
 	case factory.AddressSetPodSelectorType:
 		peerAS := h.extraParameters.(*PodSelectorAddrSetHandlerInfo)
@@ -175,7 +180,7 @@ func (h *networkControllerPolicyEventHandler) UpdateResource(oldObj, newObj inte
 // DeleteResource deletes the object from the cluster according to the delete logic of its resource type.
 // Given an object and optionally a cachedObj; cachedObj is the internal cache entry for this object,
 // used for now for pods and network policies.
-func (h *networkControllerPolicyEventHandler) DeleteResource(obj, cachedObj interface{}) error {
+func (h *networkControllerPolicyEventHandler) DeleteResource(obj, _ interface{}) error {
 	switch h.objType {
 	case factory.AddressSetPodSelectorType:
 		peerAS := h.extraParameters.(*PodSelectorAddrSetHandlerInfo)
@@ -230,7 +235,7 @@ func (h *networkControllerPolicyEventHandler) IsObjectInTerminalState(obj interf
 	switch h.objType {
 	case factory.AddressSetPodSelectorType,
 		factory.LocalPodSelectorType:
-		pod := obj.(*kapi.Pod)
+		pod := obj.(*corev1.Pod)
 		return util.PodCompleted(pod)
 
 	default:
@@ -238,6 +243,6 @@ func (h *networkControllerPolicyEventHandler) IsObjectInTerminalState(obj interf
 	}
 }
 
-func needsPolicyResourceUpdateDuringRetry(objType reflect.Type) bool {
+func needsPolicyResourceUpdateDuringRetry(_ reflect.Type) bool {
 	return false
 }

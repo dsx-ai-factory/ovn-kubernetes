@@ -238,12 +238,13 @@ const (
 	NetworkRolePrimary   = "primary"
 	NetworkRoleSecondary = "secondary"
 	NetworkRoleDefault   = "default"
-	// defined internally by ovnkube to recognize "default"
-	// network's role as a "infrastructure-locked" network
-	// when user defined network is the primary network for
-	// the pod which makes "default" network niether primary
+	// NetworkRoleInfrastructure is defined internally by ovnkube to recognize "default"
+	// network's role as an "infrastructure-locked" network
+	// when a user defined network is the primary network for
+	// the pod which makes "default" network neither primary
 	// nor secondary
 	NetworkRoleInfrastructure = "infrastructure-locked"
+	NetworkRoleNone           = "none"
 
 	// db index keys
 	// PrimaryIDKey is used as a primary client index
@@ -300,4 +301,17 @@ const (
 
 	OvnK8sStatusSucceeded OvnK8sStatus = "Succeeded"
 	OvnK8sStatusFailed    OvnK8sStatus = "Failed"
+
+	// InvalidID signifies an invalid ID. Currently used for network and tunnel IDs.
+	InvalidID = -1
+
+	// NoTunnelID signifies an empty/unset ID. Currently used for tunnel ID (reserved as un-usable when the allocator is created)
+	NoTunnelID = 0
+
+	// DefaultNetworkID is reserved for the default network only
+	DefaultNetworkID = 0
+
+	// NoNetworkID is used to signal internally that an ID is empty and should, updates
+	// with this value should be ignored
+	NoNetworkID = -2
 )

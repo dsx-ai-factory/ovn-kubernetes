@@ -3,16 +3,16 @@ package logicalswitchmanager
 import (
 	"net"
 
+	"github.com/onsi/ginkgo/v2"
+	"github.com/onsi/gomega"
 	"github.com/urfave/cli/v2"
+
 	utilnet "k8s.io/utils/net"
 
 	ipallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-
-	"github.com/onsi/ginkgo/v2"
-	"github.com/onsi/gomega"
 )
 
 // test function that returns if an IP address is allocated
@@ -57,7 +57,7 @@ var _ = ginkgo.Describe("OVN Logical Switch Manager operations", func() {
 
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
-		config.PrepareTestConfig()
+		gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
 
 		app = cli.NewApp()
 		app.Name = "test"
@@ -276,7 +276,7 @@ var _ = ginkgo.Describe("OVN Logical Switch Manager operations", func() {
 				// count of available IP now should be 246; reserve 5 IPs
 				ipnets, err := lsManager.AllocateIPsByCount(testNode.switchName, true, 5)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Expect(len(ipnets)).Should(gomega.Equal(5))
+				gomega.Expect(ipnets).Should(gomega.HaveLen(5))
 				for i, ipnet := range ipnets {
 					gomega.Expect(ipnet.String()).Should(gomega.Equal(expectedIPs[i]))
 				}
@@ -333,7 +333,7 @@ var _ = ginkgo.Describe("OVN Logical Switch Manager operations", func() {
 				// reserve 3 IPs and it should pass
 				ipnets, err = lsManager.AllocateIPsByCount(testNode.switchName, true, 3)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Expect(len(ipnets)).Should(gomega.Equal(3))
+				gomega.Expect(ipnets).Should(gomega.HaveLen(3))
 				for i, ipnet := range ipnets {
 					gomega.Expect(ipnet.String()).Should(gomega.Equal(expectedIPs[i]))
 				}
