@@ -1630,8 +1630,8 @@ func getDefaultNoReroutePolicies(controllerName string) []*nbdb.LogicalRouterPol
 		getNoReRouteReplyTrafficPolicy(ovntypes.DefaultNetworkName, controllerName),
 	)
 
-	v4Pod2PodExtIDs := getEgressIPLRPNoReRoutePodToPodDbIDs(IPFamilyValueV4, ovntypes.DefaultNetworkName, controllerName).GetExternalIDs()
-	v6Pod2PodExtIDs := getEgressIPLRPNoReRoutePodToPodDbIDs(IPFamilyValueV6, ovntypes.DefaultNetworkName, controllerName).GetExternalIDs()
+	v4Pod2PodExtIDs := getEgressIPLRPNoReRoutePodToPodDbIDs(IPFamilyValueV4, ovntypes.DefaultNetworkName, controllerName, 0).GetExternalIDs()
+	v6Pod2PodExtIDs := getEgressIPLRPNoReRoutePodToPodDbIDs(IPFamilyValueV6, ovntypes.DefaultNetworkName, controllerName, 0).GetExternalIDs()
 	v4Pod2JoinExtIDs := getEgressIPLRPNoReRoutePodToJoinDbIDs(IPFamilyValueV4, ovntypes.DefaultNetworkName, controllerName).GetExternalIDs()
 	v6Pod2JoinExtIDs := getEgressIPLRPNoReRoutePodToJoinDbIDs(IPFamilyValueV6, ovntypes.DefaultNetworkName, controllerName).GetExternalIDs()
 

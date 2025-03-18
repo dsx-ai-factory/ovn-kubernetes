@@ -83,6 +83,7 @@ func getEgressIPLRPReRouteDbIDs(egressIPName, podNamespace, podName string, ipFa
 		libovsdbops.PriorityKey:   fmt.Sprintf("%d", types.EgressIPReroutePriority),
 		libovsdbops.IPFamilyKey:   string(ipFamily),
 		libovsdbops.NetworkKey:    network,
+		libovsdbops.RuleIndex:     "0",
 	})
 }
 
@@ -104,15 +105,17 @@ func getEgressIPLRPNoReRoutePodToJoinDbIDs(ipFamily egressIPFamilyValue, network
 		libovsdbops.PriorityKey:   fmt.Sprintf("%d", types.DefaultNoRereoutePriority),
 		libovsdbops.IPFamilyKey:   string(ipFamily),
 		libovsdbops.NetworkKey:    network,
+		libovsdbops.RuleIndex:     "0",
 	})
 }
 
-func getEgressIPLRPNoReRoutePodToPodDbIDs(ipFamily egressIPFamilyValue, network, controller string) *libovsdbops.DbObjectIDs {
+func getEgressIPLRPNoReRoutePodToPodDbIDs(ipFamily egressIPFamilyValue, network, controller string, index int) *libovsdbops.DbObjectIDs {
 	return libovsdbops.NewDbObjectIDs(libovsdbops.LogicalRouterPolicyEgressIP, controller, map[libovsdbops.ExternalIDKey]string{
 		libovsdbops.ObjectNameKey: string(NoReRoutePodToPod),
 		libovsdbops.PriorityKey:   fmt.Sprintf("%d", types.DefaultNoRereoutePriority),
 		libovsdbops.IPFamilyKey:   string(ipFamily),
 		libovsdbops.NetworkKey:    network,
+		libovsdbops.RuleIndex:     fmt.Sprintf("%d", index),
 	})
 }
 
@@ -122,6 +125,7 @@ func getEgressIPLRPNoReRoutePodToNodeDbIDs(ipFamily egressIPFamilyValue, network
 		libovsdbops.PriorityKey:   fmt.Sprintf("%d", types.DefaultNoRereoutePriority),
 		libovsdbops.IPFamilyKey:   string(ipFamily),
 		libovsdbops.NetworkKey:    network,
+		libovsdbops.RuleIndex:     "0",
 	})
 }
 
@@ -132,6 +136,7 @@ func getEgressIPLRPNoReRouteDbIDs(priority int, uniqueName egressIPNoReroutePoli
 		libovsdbops.PriorityKey:   fmt.Sprintf("%d", priority),
 		libovsdbops.IPFamilyKey:   string(ipFamily),
 		libovsdbops.NetworkKey:    network,
+		libovsdbops.RuleIndex:     "0",
 	})
 }
 
@@ -142,6 +147,7 @@ func getEgressIPQoSRuleDbIDs(ipFamily egressIPFamilyValue, network, controller s
 		libovsdbops.PriorityKey:   fmt.Sprintf("%d", types.EgressIPRerouteQoSRulePriority),
 		libovsdbops.IPFamilyKey:   string(ipFamily),
 		libovsdbops.NetworkKey:    network,
+		libovsdbops.RuleIndex:     "0",
 	})
 }
 
@@ -151,6 +157,7 @@ func getEgressIPLRPSNATMarkDbIDs(eIPName, podNamespace, podName string, ipFamily
 		libovsdbops.PriorityKey:   fmt.Sprintf("%d", types.EgressIPSNATMarkPriority),
 		libovsdbops.IPFamilyKey:   string(ipFamily),
 		libovsdbops.NetworkKey:    network,
+		libovsdbops.RuleIndex:     "0",
 	})
 }
 
@@ -3200,19 +3207,19 @@ func createDefaultNoRerouteReplyTrafficPolicy(nbClient libovsdbclient.Client, ne
 // createDefaultNoReroutePodPolicies ensures egress pods east<->west traffic with regular pods,
 // i.e: ensuring that an egress pod can still communicate with a regular pod / service backed by regular pods
 func createDefaultNoReroutePodPolicies(nbClient libovsdbclient.Client, network, controller, routerName string, v4ClusterSubnet, v6ClusterSubnet []*net.IPNet) error {
-	for _, v4Subnet1 := range v4ClusterSubnet {
-		for _, v4Subnet2 := range v4ClusterSubnet {
+	for i, v4Subnet1 := range v4ClusterSubnet {
+		for j, v4Subnet2 := range v4ClusterSubnet {
 			match := fmt.Sprintf("ip4.src == %s && ip4.dst == %s", v4Subnet1.String(), v4Subnet2.String())
-			dbIDs := getEgressIPLRPNoReRoutePodToPodDbIDs(IPFamilyValueV4, network, controller)
+			dbIDs := getEgressIPLRPNoReRoutePodToPodDbIDs(IPFamilyValueV4, network, controller, i*len(v4ClusterSubnet)+j)
 			if err := createLogicalRouterPolicy(nbClient, routerName, match, types.DefaultNoRereoutePriority, nil, dbIDs); err != nil {
 				return fmt.Errorf("unable to create IPv4 no-reroute pod policies, err: %v", err)
 			}
 		}
 	}
-	for _, v6Subnet1 := range v6ClusterSubnet {
-		for _, v6Subnet2 := range v6ClusterSubnet {
+	for i, v6Subnet1 := range v6ClusterSubnet {
+		for j, v6Subnet2 := range v6ClusterSubnet {
 			match := fmt.Sprintf("ip6.src == %s && ip6.dst == %s", v6Subnet1.String(), v6Subnet2.String())
-			dbIDs := getEgressIPLRPNoReRoutePodToPodDbIDs(IPFamilyValueV6, network, controller)
+			dbIDs := getEgressIPLRPNoReRoutePodToPodDbIDs(IPFamilyValueV6, network, controller, i*len(v6ClusterSubnet)+j)
 			if err := createLogicalRouterPolicy(nbClient, routerName, match, types.DefaultNoRereoutePriority, nil, dbIDs); err != nil {
 				return fmt.Errorf("unable to create IPv6 no-reroute pod policies, err: %v", err)
 			}

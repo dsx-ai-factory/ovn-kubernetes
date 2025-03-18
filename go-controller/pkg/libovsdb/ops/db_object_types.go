@@ -341,6 +341,7 @@ var LogicalRouterPolicyEgressIP = newObjectIDsType(logicalRouterPolicy, EgressIP
 	// the IP Family for this policy, ip4 or ip6 or ip(dualstack)
 	IPFamilyKey,
 	NetworkKey,
+	RuleIndex,
 })
 
 var NATEgressIP = newObjectIDsType(nat, EgressIPOwnerType, []ExternalIDKey{
