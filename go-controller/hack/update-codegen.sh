@@ -27,6 +27,18 @@ if [[ "${builddir}" == /tmp/* ]]; then #paranoia
     rm -rf "${builddir}"
 fi
 
+# Helper function to get API version for a given CRD
+get_crd_version() {
+  case "$1" in
+    networkqos)
+      echo "v1alpha1"
+      ;;
+    *)
+      echo "v1"
+      ;;
+  esac
+}
+
 # deepcopy for types
 deepcopy-gen \
   --go-header-file hack/boilerplate.go.txt \
@@ -48,7 +60,7 @@ for crd in ${crds}; do
     github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers \
     "$@"
 
-  echo "Generating apply configuration for $crd"
+  echo "Generating apply configuration for $crd ($api_version)"
   applyconfiguration-gen \
     --go-header-file hack/boilerplate.go.txt \
     --output-dir "${SCRIPT_ROOT}"/pkg/crd/$crd/$vers/apis/applyconfiguration \
@@ -56,7 +68,7 @@ for crd in ${crds}; do
     github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers \
     "$@"
 
-  echo "Generating clientset for $crd"
+  echo "Generating clientset for $crd ($api_version)"
   client-gen \
     --go-header-file hack/boilerplate.go.txt \
     --clientset-name "${CLIENTSET_NAME_VERSIONED:-versioned}" \
@@ -68,7 +80,7 @@ for crd in ${crds}; do
     --plural-exceptions="EgressQoS:EgressQoSes,RouteAdvertisements:RouteAdvertisements,NetworkQoS:NetworkQoSes" \
     "$@"
 
-  echo "Generating listers for $crd"
+  echo "Generating listers for $crd ($api_version)"
   lister-gen \
     --go-header-file hack/boilerplate.go.txt \
     --output-dir "${SCRIPT_ROOT}"/pkg/crd/$crd/$vers/apis/listers \
@@ -77,7 +89,7 @@ for crd in ${crds}; do
     github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers \
     "$@"
 
-  echo "Generating informers for $crd"
+  echo "Generating informers for $crd ($api_version)"
   informer-gen \
     --go-header-file hack/boilerplate.go.txt \
     --versioned-clientset-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers/apis/clientset/versioned \
