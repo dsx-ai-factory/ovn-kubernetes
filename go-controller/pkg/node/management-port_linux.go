@@ -161,6 +161,11 @@ func tearDownManagementPortConfig(link netlink.Link, nft knftables.Interface) er
 		return err
 	}
 
+	// Do nothing in case of DPU mode
+	if nft == nil {
+		return nil
+	}
+
 	tx := nft.NewTransaction()
 	// Delete would return an error if we tried to delete a chain that didn't exist, so
 	// we do an Add first (which is a no-op if the chain already exists) and then Delete.
@@ -516,9 +521,12 @@ func unconfigureMgmtNetdevicePort(mgmtPortName string) error {
 	}
 
 	klog.Infof("Found existing management interface. Unconfiguring it")
-	nft, err := nodenft.GetNFTablesHelper()
-	if err != nil {
-		return fmt.Errorf("failed to get nftables: %v", err)
+	var nft knftables.Interface
+	if config.OvnKubeNode.Mode != types.NodeModeDPU {
+		nft, err = nodenft.GetNFTablesHelper()
+		if err != nil {
+			return fmt.Errorf("failed to get nftables: %v", err)
+		}
 	}
 
 	if err := tearDownManagementPortConfig(link, nft); err != nil {
