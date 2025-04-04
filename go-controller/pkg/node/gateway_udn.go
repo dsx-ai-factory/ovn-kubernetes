@@ -88,14 +88,14 @@ type UserDefinedNetworkGateway struct {
 
 // getBridgePortConfigurations returns a slice of Network port configurations along with the
 // uplinkName and physical port's ofport value
-func (b *bridgeConfiguration) getBridgePortConfigurations() ([]*bridgeUDNConfiguration, string, string, string, string, string, *sync.Map) {
+func (b *bridgeConfiguration) getBridgePortConfigurations() ([]*bridgeUDNConfiguration, string, string, string, string, string, string, *sync.Map) {
 	b.Lock()
 	defer b.Unlock()
 	var netConfigs []*bridgeUDNConfiguration
 	for _, netConfig := range b.netConfig {
 		netConfigs = append(netConfigs, netConfig.shallowCopy())
 	}
-	return netConfigs, b.uplinkName, b.ofPortPhys, b.gwIfaceRep, b.ofPortHost, b.bridgeName, b.localnetPatchPorts
+	return netConfigs, b.uplinkName, b.ofPortPhys, b.gwIfaceRep, b.ofPortHost, b.ofPortVMPatch, b.bridgeName, b.localnetPatchPorts
 }
 
 // addNetworkBridgeConfig adds the patchport and ctMark value for the provided netInfo into the bridge configuration cache

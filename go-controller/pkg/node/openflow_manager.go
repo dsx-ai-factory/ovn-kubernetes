@@ -27,11 +27,11 @@ type openflowManager struct {
 
 // UTILs Needed for UDN (also leveraged for default netInfo) in openflowmanager
 
-func (c *openflowManager) getDefaultBridgePortConfigurations() ([]*bridgeUDNConfiguration, string, string, string, string, string, *sync.Map) {
+func (c *openflowManager) getDefaultBridgePortConfigurations() ([]*bridgeUDNConfiguration, string, string, string, string, string, string, *sync.Map) {
 	return c.defaultBridge.getBridgePortConfigurations()
 }
 
-func (c *openflowManager) getExGwBridgePortConfigurations() ([]*bridgeUDNConfiguration, string, string, string, string, string, *sync.Map) {
+func (c *openflowManager) getExGwBridgePortConfigurations() ([]*bridgeUDNConfiguration, string, string, string, string, string, string, *sync.Map) {
 	return c.externalGatewayBridge.getBridgePortConfigurations()
 }
 
@@ -210,7 +210,7 @@ func (c *openflowManager) updateBridgeFlowCache(extraIPs []net.IP) error {
 // This assumes ofPortPhys doesn't change, which we'll still consider as fatal.
 // For the N/S gateway we should not have a situation where the patch's OF port changes,
 // so will make this check specific to localnet ports.
-func checkPorts(netConfigs []*bridgeUDNConfiguration, physIntf, ofPortPhys, hostRepName, ofPortHost, bridgeName string,
+func checkPorts(netConfigs []*bridgeUDNConfiguration, physIntf, ofPortPhys, hostRepName, ofPortHost, ofPortVMPatch, bridgeName string,
 	localnetPatchPorts *sync.Map) error {
 	// it could be that the ovn-controller recreated the patch between the host OVS bridge and
 	// the integration bridge, as a result the ofport number changed for that patch interface
@@ -262,6 +262,24 @@ func checkPorts(netConfigs []*bridgeUDNConfiguration, physIntf, ofPortPhys, host
 			os.Exit(1)
 		}
 	}
+
+	vmPatchPort, _, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".", "external-ids:vm-patch-port")
+	if err == nil && vmPatchPort != "" {
+		currOfPortVMPatch, _, err := util.RunOVSVsctl("get", "interface", vmPatchPort, "ofport")
+		if err != nil {
+			return fmt.Errorf("failed to get ofport of vmPatchPort %s, error: %v", vmPatchPort, err)
+		}
+		if ofPortVMPatch != currOfPortVMPatch {
+			klog.Errorf("Fatal error: VM patch port %s ofport changed from %s to %s",
+				vmPatchPort, ofPortVMPatch, currOfPortVMPatch)
+			os.Exit(1)
+		}
+	} else if ofPortVMPatch != "" {
+		klog.Errorf("Fatal error: VM patch port is no longer defined, current ofport %s",
+			ofPortVMPatch)
+		os.Exit(1)
+	}
+
 	// walk through all the localnet patch ports, if any, and check if the ofport has changed
 	localnetPatchPorts.Range(func(key, value any) bool {
 		patchPortName := key.(string)

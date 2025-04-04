@@ -550,19 +550,20 @@ func (g *gateway) updateSNATRules() error {
 
 type bridgeConfiguration struct {
 	sync.Mutex
-	nodeName    string
-	bridgeName  string
-	uplinkName  string
-	gwIface     string
-	gwIfaceRep  string
-	ips         []*net.IPNet
-	interfaceID string
-	macAddress  net.HardwareAddr
-	ofPortPhys  string
-	ofPortHost  string
-	netConfig   map[string]*bridgeUDNConfiguration
-	eipMarkIPs  *markIPsCache
-	gwNextHops  []net.IP
+	nodeName      string
+	bridgeName    string
+	uplinkName    string
+	gwIface       string
+	gwIfaceRep    string
+	ips           []*net.IPNet
+	interfaceID   string
+	macAddress    net.HardwareAddr
+	ofPortPhys    string
+	ofPortHost    string
+	ofPortVMPatch string
+	netConfig     map[string]*bridgeUDNConfiguration
+	eipMarkIPs    *markIPsCache
+	gwNextHops    []net.IP
 
 	// list of localnet patch ports
 	localnetPatchPorts *sync.Map

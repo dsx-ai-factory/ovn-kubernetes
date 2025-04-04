@@ -138,6 +138,10 @@ func setUpGatewayFakeOVSCommands(fexec *ovntest.FakeExec) {
 		Cmd:    "ovs-vsctl --timeout=15 get interface breth0 ofport",
 		Output: "7",
 	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external-ids:vm-patch-port",
+		Output: "",
+	})
 	//fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 	//	Cmd:    "ovs-vsctl --timeout=15 get Open_vSwitch . external_ids:ovn-encap-ip",
 	//	Output: "192.168.1.10",
@@ -197,6 +201,10 @@ func setUpUDNOpenflowManagerCheckPortsFakeOVSCommands(fexec *ovntest.FakeExec) {
 		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface breth0 ofport",
 		Output: "7",
 	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external-ids:vm-patch-port",
+		Output: "",
+	})
 
 	// After simulated deletion.
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -211,15 +219,20 @@ func setUpUDNOpenflowManagerCheckPortsFakeOVSCommands(fexec *ovntest.FakeExec) {
 		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface breth0 ofport",
 		Output: "7",
 	})
+
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external-ids:vm-patch-port",
+		Output: "",
+	})
 }
 
 func openflowManagerCheckPorts(ofMgr *openflowManager) {
 	GinkgoHelper()
-	netConfigs, uplink, ofPortPhys, gwIfaceRep, ofPortHost, bridgeName, localnetPatchPorts := ofMgr.getDefaultBridgePortConfigurations()
+	netConfigs, uplink, ofPortPhys, gwIfaceRep, ofPortHost, ofPortVMPatch, bridgeName, localnetPatchPorts := ofMgr.getDefaultBridgePortConfigurations()
 	sort.SliceStable(netConfigs, func(i, j int) bool {
 		return netConfigs[i].patchPort < netConfigs[j].patchPort
 	})
-	Expect(checkPorts(netConfigs, uplink, ofPortPhys, gwIfaceRep, ofPortHost, bridgeName, localnetPatchPorts)).To(Succeed())
+	Expect(checkPorts(netConfigs, uplink, ofPortPhys, gwIfaceRep, ofPortHost, ofPortVMPatch, bridgeName, localnetPatchPorts)).To(Succeed())
 }
 
 func checkDefaultSvcIsolationOVSFlows(flows []string, defaultConfig *bridgeUDNConfiguration, ofPortHost, bridgeMAC string, svcCIDR *net.IPNet) {

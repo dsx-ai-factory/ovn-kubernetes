@@ -534,6 +534,8 @@ type GatewayConfig struct {
 	AllowNoUplink bool `gcfg:"allow-no-uplink"`
 	// CustomSnatRules specifies which snat IP to use based on destinations, in the form of `"external_ip1=dest1,dest2;external_ip2=dest3,dest4"`
 	CustomSnatRules string `gcfg:"custom-gwsnat-rules"`
+	// EnableNormalAction enable normal action for external traffic
+	EnableNormalAction bool `gcfg:"enable-ovnkube-node-normal-action"`
 }
 
 // OvnAuthConfig holds client authentication and location details for
@@ -1643,6 +1645,11 @@ var OVNGatewayFlags = []cli.Flag{
 		Name:        "custom-gwsnat-rules",
 		Usage:       "Specifies which snat IP to use based on destinations in the form of \"external_ip1=dest1,dest2;external_ip2=dest3,dest4\"",
 		Destination: &cliConfig.Gateway.CustomSnatRules,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-ovnkube-node-normal-action",
+		Usage:       "Enable normal action for external traffic",
+		Destination: &cliConfig.Gateway.EnableNormalAction,
 	},
 }
 
