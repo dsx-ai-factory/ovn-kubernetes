@@ -10,19 +10,17 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
-func getHostNetworkPodIPs(nbClient libovsdbclient.Client, node *corev1.Node, policyType string) ([]net.IP, error) {
+func getHostNetworkPodIPs(node *corev1.Node, policyType string) ([]net.IP, error) {
 	ips := []net.IP{}
 	if policyType == string(knet.PolicyTypeIngress) || policyType == "Both" {
 		// the packets from the host towards the Pod IP will have the source IP of the
@@ -35,12 +33,13 @@ func getHostNetworkPodIPs(nbClient libovsdbclient.Client, node *corev1.Node, pol
 
 		// the packets from the host towards the Cluster IP will have the source IP of the
 		// Gateway Router to Join Switch port's IP address
-		grJoinIfAddrs, err := libovsdbutil.GetLRPAddrs(nbClient, types.GWRouterToJoinSwitchPrefix+types.GWRouterPrefix+node.Name)
+		lrpIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, types.DefaultNetworkName)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get node %s's gateway router to join switch IP: %v", node.Name, err)
+			return nil, fmt.Errorf("failed to get join switch port IP address for node %s: %v/%v", node.Name, err, err)
 		}
-		for _, grJoinIfAddr := range grJoinIfAddrs {
-			ips = append(ips, grJoinIfAddr.IP)
+
+		for _, lrpIP := range lrpIPs {
+			ips = append(ips, lrpIP.IP)
 		}
 	}
 
@@ -59,7 +58,7 @@ func getHostNetworkPodIPs(nbClient libovsdbclient.Client, node *corev1.Node, pol
 	return ips, nil
 }
 
-func addHostnetworkPodIPToAddressSet(wf *factory.WatchFactory, nbClient libovsdbclient.Client, nodeName, podName, policyType string, addressSet addressset.AddressSet,
+func addHostnetworkPodIPToAddressSet(wf *factory.WatchFactory, nodeName, podName, policyType string, addressSet addressset.AddressSet,
 	nodeHostNetPodsCache map[string]map[string][]net.IP) error {
 
 	node, err := wf.GetNode(nodeName)
@@ -72,7 +71,7 @@ func addHostnetworkPodIPToAddressSet(wf *factory.WatchFactory, nbClient libovsdb
 		return nil
 	}
 
-	ips, err := getHostNetworkPodIPs(nbClient, node, policyType)
+	ips, err := getHostNetworkPodIPs(node, policyType)
 	if err != nil {
 		return fmt.Errorf("failed to get %s policy IPs for host network pod %s schedued on node %s: %v",
 			policyType, podName, nodeName, err)
@@ -120,7 +119,7 @@ func (oc *DefaultNetworkController) addHostNetworkPodToNamespace(pod *corev1.Pod
 	}
 	defer nsUnlock()
 
-	return addHostnetworkPodIPToAddressSet(oc.watchFactory, oc.nbClient, pod.Spec.NodeName,
+	return addHostnetworkPodIPToAddressSet(oc.watchFactory, pod.Spec.NodeName,
 		pod.Name, "Both", nsInfo.addressSet, nsInfo.nodeHostNetPodsCache)
 }
 

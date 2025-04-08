@@ -392,7 +392,7 @@ func (handlerInfo *PodSelectorAddrSetHandlerInfo) addPods(pods ...*corev1.Pod) e
 				continue
 			}
 			handlerInfo.nodeHostNetPodsCacheLock.Lock()
-			err := addHostnetworkPodIPToAddressSet(handlerInfo.watchFactory, handlerInfo.nbClient, pod.Spec.NodeName, fmt.Sprintf("%s/%s", pod.Namespace, pod.Name),
+			err := addHostnetworkPodIPToAddressSet(handlerInfo.watchFactory, pod.Spec.NodeName, fmt.Sprintf("%s/%s", pod.Namespace, pod.Name),
 				handlerInfo.policyType, handlerInfo.addressSet, handlerInfo.nodeHostNetPodsCache)
 			handlerInfo.nodeHostNetPodsCacheLock.Unlock()
 			if err != nil {
