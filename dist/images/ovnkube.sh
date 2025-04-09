@@ -1516,6 +1516,12 @@ ovn-master() {
   ovs_db_transaction_timeout_flag="--db-txn-timeout=${ovs_db_transaction_timeout}s"
   echo "ovs_db_transaction_timeout_flag=${ovs_db_transaction_timeout_flag}"
 
+  ovnkube_enable_interconnect_flag=
+  if [[ ${ovn_enable_interconnect} == "true" ]]; then
+    ovnkube_enable_interconnect_flag="--enable-interconnect"
+  fi
+  echo "ovnkube_enable_interconnect_flag=${ovnkube_enable_interconnect_flag}"
+
   /usr/bin/ovnkube --init-master ${K8S_NODE} \
     ${admin_pbr_enabled_flag} \
     ${anp_enabled_flag} \
@@ -1543,6 +1549,7 @@ ovn-master() {
     ${ovn_enable_svc_template_support_flag} \
     ${ovn_observ_enable_flag} \
     ${ovnkube_config_duration_enable_flag} \
+    ${ovnkube_enable_interconnect_flag} \
     ${ovnkube_enable_multi_external_gateway_flag} \
     ${ovnkube_logfile_flag} \
     ${ovnkube_metrics_scale_enable_flag} \
