@@ -60,7 +60,7 @@ for crd in ${crds}; do
     github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers \
     "$@"
 
-  echo "Generating apply configuration for $crd ($api_version)"
+  echo "Generating apply configuration for $crd ($vers)"
   applyconfiguration-gen \
     --go-header-file hack/boilerplate.go.txt \
     --output-dir "${SCRIPT_ROOT}"/pkg/crd/$crd/$vers/apis/applyconfiguration \
@@ -68,7 +68,7 @@ for crd in ${crds}; do
     github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers \
     "$@"
 
-  echo "Generating clientset for $crd ($api_version)"
+  echo "Generating clientset for $crd ($vers)"
   client-gen \
     --go-header-file hack/boilerplate.go.txt \
     --clientset-name "${CLIENTSET_NAME_VERSIONED:-versioned}" \
@@ -80,7 +80,7 @@ for crd in ${crds}; do
     --plural-exceptions="EgressQoS:EgressQoSes,RouteAdvertisements:RouteAdvertisements,NetworkQoS:NetworkQoSes" \
     "$@"
 
-  echo "Generating listers for $crd ($api_version)"
+  echo "Generating listers for $crd ($vers)"
   lister-gen \
     --go-header-file hack/boilerplate.go.txt \
     --output-dir "${SCRIPT_ROOT}"/pkg/crd/$crd/$vers/apis/listers \
@@ -89,7 +89,7 @@ for crd in ${crds}; do
     github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers \
     "$@"
 
-  echo "Generating informers for $crd ($api_version)"
+  echo "Generating informers for $crd ($vers)"
   informer-gen \
     --go-header-file hack/boilerplate.go.txt \
     --versioned-clientset-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers/apis/clientset/versioned \

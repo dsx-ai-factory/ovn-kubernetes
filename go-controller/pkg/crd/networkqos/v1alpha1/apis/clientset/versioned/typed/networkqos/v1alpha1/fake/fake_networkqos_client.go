@@ -28,7 +28,7 @@ type FakeK8sV1alpha1 struct {
 }
 
 func (c *FakeK8sV1alpha1) NetworkQoSes(namespace string) v1alpha1.NetworkQoSInterface {
-	return newFakeNetworkQoSes(c, namespace)
+	return &FakeNetworkQoSes{c, namespace}
 }
 
 // RESTClient returns a RESTClient that is used to communicate
