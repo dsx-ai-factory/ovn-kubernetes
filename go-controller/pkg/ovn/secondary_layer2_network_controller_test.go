@@ -747,6 +747,13 @@ func setupFakeOvnForLayer2Topology(fakeOvn *FakeOVN, initialDB libovsdbtest.Test
 			return fmt.Errorf("expected pod annotation %q", util.OvnPodAnnotationName)
 		}
 	}
+
+	// default network controller could fail to create pod's logical switch port as node switch does not exists,
+	// and the Pod's IP allocated for default network by retry attempts could be incremental and unexpected
+	// in case of failure.
+	// As all test cases are testing out the secondary layer2 network, just provide the default network IP
+	// address directly so they will be used for for default network pod IP allocation.
+	pod.Annotations[util.OvnPodAnnotationName] = `{"default":{"ip_addresses":["10.128.1.3/24"],"mac_address":"0a:58:0a:80:01:03","ip_address":"10.128.1.3/24"}`
 	if err = fakeOvn.networkManager.Start(); err != nil {
 		return err
 	}
