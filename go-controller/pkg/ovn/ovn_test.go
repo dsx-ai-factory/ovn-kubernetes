@@ -110,7 +110,7 @@ func NewFakeOVN(useFakeAddressSet bool) *FakeOVN {
 	}
 	return &FakeOVN{
 		asf:          asf,
-		fakeRecorder: record.NewFakeRecorder(20),
+		fakeRecorder: record.NewFakeRecorder(4096),
 		egressQoSWg:  &sync.WaitGroup{},
 		egressSVCWg:  &sync.WaitGroup{},
 		anpWg:        &sync.WaitGroup{},

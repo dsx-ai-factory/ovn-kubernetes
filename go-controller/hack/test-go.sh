@@ -61,7 +61,7 @@ function testrun {
     fi
     if grep -q "ginkgo" ."${path}"/*_test.go; then
 	    prefix=$(echo "${path}" | cut -c 2- | sed 's,/,_,g')
-        ginkgoargs="-ginkgo.flake-attempts 4 -ginkgo.v ${ginkgo_focus} -ginkgo.junit-report ${TEST_REPORT_DIR}/junit-${prefix}.xml"
+        ginkgoargs="-ginkgo.v ${ginkgo_focus} -ginkgo.junit-report ${TEST_REPORT_DIR}/junit-${prefix}.xml"
     fi
     args="${args}${otherargs}"
     if [ "$go_test" == "gocmd test -mod=vendor" ]; then
