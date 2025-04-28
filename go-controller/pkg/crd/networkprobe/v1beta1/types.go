@@ -41,6 +41,7 @@ type PacketSpec struct {
 	// DSCP specifies that packets will be sent out with DSCP set to this value.
 	DSCP int `json:"dscp,omitempty"`
 	// PayloadSize specifies that packets will be sent out with this number of bytes as payload
+	// This field is only supported for UDP probes
 	PayloadSize ByteSize `json:"payloadSize,omitempty"`
 }
 

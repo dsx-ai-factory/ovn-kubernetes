@@ -302,8 +302,7 @@ func (c *Controller) NewNetworkProbe(networkProbe *networkprobe.NetworkProbe) (*
 			host: probe.Host,
 			port: probe.Port,
 			packetSpec: pktSpec{
-				dscp:        probe.PacketSpec.DSCP,
-				payloadSize: parsePayloadSize(string(probe.PacketSpec.PayloadSize)),
+				dscp: probe.PacketSpec.DSCP,
 			},
 		}
 		// if tcp probe interval is mentioned, then use that value
