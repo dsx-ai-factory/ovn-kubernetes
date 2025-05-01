@@ -259,7 +259,7 @@ func getAddressSets(addresses []string) (*nbdb.AddressSet, *nbdb.AddressSet, err
 		UUID:        v4DBIDs.String(),
 		Addresses:   v4Addresses,
 		ExternalIDs: v4DBIDs.GetExternalIDs(),
-		Name:        v4DBIDs.String(),
+		Name:        util.HashForOVN(v4DBIDs.String()),
 	}
 
 	v6DBIDs := GetAddressSetDBIDs()
@@ -269,7 +269,7 @@ func getAddressSets(addresses []string) (*nbdb.AddressSet, *nbdb.AddressSet, err
 		UUID:        v6DBIDs.String(),
 		Addresses:   v6Addresses,
 		ExternalIDs: v6DBIDs.GetExternalIDs(),
-		Name:        v6DBIDs.String(),
+		Name:        util.HashForOVN(v6DBIDs.String()),
 	}
 	return v4AS, v6AS, nil
 }
