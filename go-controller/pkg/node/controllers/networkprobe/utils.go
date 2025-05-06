@@ -31,7 +31,13 @@ func parsePayloadSize(size string) int {
 	}
 
 	var value int
-	_, _ = fmt.Sscanf(size, "%d", &value)
+	_, err := fmt.Sscanf(size, "%d", &value)
+	if err != nil {
+		klog.Warningf("Failed to parse payload size '%s': %v, Using size 0.",
+			size, err)
+		return 0
+	}
+
 	return value * multiplier
 }
 
