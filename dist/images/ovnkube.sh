@@ -948,11 +948,12 @@ function memory_trim_on_compaction_supported {
 }
 
 function get_node_zone() {
-  zone="global"
-  if [ "${OVN_ENABLE_INTERCONNECT}" == "true" ]; then
-    zone=$(kubectl --subresource=status --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
-      get node ${K8S_NODE} -o=jsonpath={'.metadata.labels.k8s\.ovn\.org/zone-name'})
-    if [ "$zone" == "" ]; then
+  zone=$(kubectl --subresource=status --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+     get node ${K8S_NODE} -o=jsonpath={'.metadata.labels.k8s\.ovn\.org/zone-name'})
+  if [ -z "$zone" ]; then
+    if [[ ${ovn_enable_interconnect} == "true" ]]; then
+      zone="${K8S_NODE}"
+    else
       zone="global"
     fi
   fi
