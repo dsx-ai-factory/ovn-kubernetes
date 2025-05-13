@@ -35,6 +35,9 @@ func init() {
 	config.IPv4Mode = true
 	config.IPv6Mode = false
 	config.OVNKubernetesFeature.EnableNetworkProbe = true
+
+	// Disabling delay in tests to ensure consistent timing behavior
+	config.EnableNetworkProbeDelay = false
 }
 
 var (

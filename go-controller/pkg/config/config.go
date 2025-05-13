@@ -213,6 +213,10 @@ var (
 		V4TransitSwitchSubnet: "100.88.0.0/16",
 		V6TransitSwitchSubnet: "fd97::/64",
 	}
+
+	// EnableNetworkProbeDelay determines if network probes should have initial delay
+	// Default is true for production, set to false for tests
+	EnableNetworkProbeDelay = true
 )
 
 const (

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"net"
 	"net/http"
 	"reflect"
@@ -19,6 +20,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	networkprobe "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -140,6 +142,18 @@ func (ps *NetworkProbeState) runProbe(probeInterval string, probeFunc func(conte
 	if err != nil {
 		klog.Errorf("Error parsing interval for networkprobe %s/%s: %v", ps.name, ps.namespace, err)
 		return
+	}
+
+	// Apply probe startup delay to avoid all of them starting simultaneously
+	// Only for the first probe run, add a random delay between 0 and Interval-0.001s
+	if sleepDur > time.Millisecond && config.EnableNetworkProbeDelay {
+		// Generate a random value between 0 and interval with up to 3 decimal places
+		maxDelayMs := int64(sleepDur.Milliseconds() - 1)
+
+		delayMs := rand.Int63n(maxDelayMs)
+		delay := time.Duration(delayMs) * time.Millisecond
+		klog.V(5).Infof("Adding initial delay of %v for networkprobe %s/%s", delay, ps.namespace, ps.name)
+		time.Sleep(delay)
 	}
 
 	for {
