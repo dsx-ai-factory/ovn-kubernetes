@@ -261,7 +261,8 @@ func (c *Controller) updateIPReservationStatusWithRetry(namespace, name string, 
 		if status != "" {
 			latestResvIP.Status.Status = status
 		}
-		if messages != nil {
+		// clear the messages if the status is succeeded
+		if messages != nil || status == ovntypes.OvnK8sStatusSucceeded {
 			latestResvIP.Status.Messages = messages
 		}
 		if resvIPs != nil {
