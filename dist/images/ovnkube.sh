@@ -2344,6 +2344,12 @@ ovnkube-controller-with-node() {
   fi
   echo "port_mirror_enabled_flag: ${port_mirror_enabled_flag}"
 
+  networkprobe_enabled_flag=
+  if [[ ${ovn_networkprobe_enable} == "true" ]]; then
+    networkprobe_enabled_flag="--enable-network-probe"
+  fi
+  echo "networkprobe_enabled_flag: ${networkprobe_enabled_flag}"
+
   ovn_conntrack_zone_flag=
   if [[ ${ovn_conntrack_zone} != "" ]]; then
      ovn_conntrack_zone_flag="--conntrack-zone=${ovn_conntrack_zone}"
@@ -2412,6 +2418,7 @@ ovnkube-controller-with-node() {
     ${monitor_all} \
     ${multicast_enabled_flag} \
     ${multi_network_enabled_flag} \
+    ${networkprobe_enabled_flag} \
     ${network_segmentation_enabled_flag} \
     ${route_advertisements_enabled_flag} \
     ${netflow_targets} \
