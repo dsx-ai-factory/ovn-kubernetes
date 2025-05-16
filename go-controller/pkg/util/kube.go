@@ -236,6 +236,7 @@ func (cs *OVNClientset) GetOVNKubeControllerClientset() *OVNKubeControllerClient
 		VirtualIPClient:           cs.VirtualIPClient,
 		IPReservationClient:       cs.IPReservationClient,
 		PortMirrorClient:          cs.PortMirrorClient,
+		NetworkProbeClient:        cs.NetworkProbeClient,
 	}
 }
 

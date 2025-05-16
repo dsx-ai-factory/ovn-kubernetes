@@ -343,6 +343,7 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		adminPBRFactory:      adminpbrinformerfactory.NewSharedInformerFactory(ovnClientset.AdminPBRClient, resyncInterval),
 		vipFactory:           virtualipinformerfactory.NewSharedInformerFactory(ovnClientset.VirtualIPClient, resyncInterval),
 		apbRouteFactory:      adminbasedpolicyinformerfactory.NewSharedInformerFactory(ovnClientset.AdminPolicyRouteClient, resyncInterval),
+		networkprobeFactory:  networkprobeinformerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.NetworkProbeClient, resyncInterval, networkprobeinformerfactory.WithNamespace(config.Kubernetes.OVNConfigNamespace)),
 		portMirrorFactory:    portmirrorinformerfactory.NewSharedInformerFactory(ovnClientset.PortMirrorClient, resyncInterval),
 		informers:            make(map[reflect.Type]*informer),
 		stopChan:             make(chan struct{}),
@@ -380,6 +381,9 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		return nil, err
 	}
 	if err := routeadvertisementsapi.AddToScheme(routeadvertisementsscheme.Scheme); err != nil {
+		return nil, err
+	}
+	if err := networkprobeapi.AddToScheme(scheme.Scheme); err != nil {
 		return nil, err
 	}
 	if err := portmirrorapi.AddToScheme(scheme.Scheme); err != nil {
@@ -594,6 +598,47 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		wf.raFactory = routeadvertisementsinformerfactory.NewSharedInformerFactory(ovnClientset.RouteAdvertisementsClient, resyncInterval)
 		// make sure shared informer is created for a factory, so on wf.raFactory.Start() it is initialized and caches are synced.
 		wf.raFactory.K8s().V1().RouteAdvertisements().Informer()
+	}
+
+	if config.OVNKubernetesFeature.EnableNetworkProbe {
+		wf.informers[NetworkProbeType], err = newQueuedInformer(NetworkProbeType,
+			wf.networkprobeFactory.K8s().V1beta1().NetworkProbes().Informer(),
+			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
+		if err != nil {
+			return nil, err
+		}
+
+		// currently, we need this only for network probe feature
+		// watch configmaps only in ovn-kubernetes namespace
+		wf.iFactory.InformerFor(&corev1.ConfigMap{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+			return v1coreinformers.NewConfigMapInformer(
+				c,
+				config.Kubernetes.OVNConfigNamespace,
+				resyncPeriod,
+				cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
+		})
+		wf.informers[ConfigMapType], err = newQueuedInformer(ConfigMapType,
+			wf.iFactory.Core().V1().ConfigMaps().Informer(),
+			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
+		if err != nil {
+			return nil, err
+		}
+
+		// watch secrets only in ovn-kubernetes namespace
+		wf.iFactory.InformerFor(&corev1.Secret{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+			return v1coreinformers.NewSecretInformer(
+				c,
+				config.Kubernetes.OVNConfigNamespace,
+				resyncPeriod,
+				cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
+		})
+
+		wf.informers[SecretType], err = newQueuedInformer(SecretType,
+			wf.iFactory.Core().V1().Secrets().Informer(),
+			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if config.OVNKubernetesFeature.EnablePortMirror {
