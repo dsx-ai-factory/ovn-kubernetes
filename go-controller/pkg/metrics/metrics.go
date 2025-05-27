@@ -564,9 +564,9 @@ func RegisterOvnNodeMetrics(ovsDBClient libovsdbclient.Client, metricsScrapeInte
 	go RegisterOvnControllerMetrics(ovsDBClient, metricsScrapeInterval, stopChan)
 }
 
-func RegisterOvnCentralMetrics(podLister corev1listers.PodLister, nodeLister corev1listers.NodeLister,
+func RegisterOvnCentralMetrics(podLister corev1listers.PodLister, podSynced func() bool, nodeLister corev1listers.NodeLister,
 	k8sNodeName string, metricsScrapeInterval int, stopChan <-chan struct{}) {
-	go RegisterOvnDBMetrics(podLister, k8sNodeName, metricsScrapeInterval, stopChan)
+	go RegisterOvnDBMetrics(podLister, podSynced, k8sNodeName, metricsScrapeInterval, stopChan)
 	go RegisterOvnNorthdMetrics(nodeLister, k8sNodeName, metricsScrapeInterval, stopChan)
 }
 

@@ -635,7 +635,8 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 				// serve OVN ^ovn_db, ^ovn_northd metrics from the ovnkube-node pod that is matching labels accordingly
 				podLister := corev1listers.NewPodLister(watchFactory.LocalPodInformer().GetIndexer())
 				nodeLister := corev1listers.NewNodeLister(watchFactory.NodeInformer().GetIndexer())
-				metrics.RegisterOvnCentralMetrics(podLister, nodeLister, runMode.identity, config.MetricsScrapeInterval, ctx.Done())
+				podSynced := watchFactory.LocalPodInformer().HasSynced
+				metrics.RegisterOvnCentralMetrics(podLister, podSynced, nodeLister, runMode.identity, config.MetricsScrapeInterval, ctx.Done())
 			}
 		}
 	}

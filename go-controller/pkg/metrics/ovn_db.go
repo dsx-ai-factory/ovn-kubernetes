@@ -446,8 +446,12 @@ func getOvnDbVersionInfo() {
 	}
 }
 
-func RegisterOvnDBMetrics(podLister corev1listers.PodLister, k8sNodeName string,
+func RegisterOvnDBMetrics(podLister corev1listers.PodLister, podSynced func() bool, k8sNodeName string,
 	metricsScrapeInterval int, stopChan <-chan struct{}) {
+	if !util.WaitForInformerCacheSyncWithTimeout("OVN DB Metrics Registration", stopChan, podSynced) {
+		klog.Errorf("Timed out waiting for pod informer caches to sync")
+		return
+	}
 	err := wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 300*time.Second, true, func(_ context.Context) (bool, error) {
 		return checkPodRunsOnGivenNode(podLister, []string{"name in (ovn-nbdb, ovn-sbdb, ovnkube-db)"}, k8sNodeName, false)
 	})
