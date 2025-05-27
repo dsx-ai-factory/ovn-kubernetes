@@ -66,6 +66,8 @@ type networkClusterController struct {
 	nodeAllocator       *node.NodeAllocator
 	ipamClaimReconciler *persistentips.IPAMClaimReconciler
 	subnetAllocator     subnet.Allocator
+	// IP reservation controller, for networks that pod allocation done in cluster manager
+	ipreservController *ipreserv.Controller
 
 	networkManager networkmanager.Interface
 
@@ -225,6 +227,21 @@ func (ncc *networkClusterController) init() error {
 			return fmt.Errorf("could not initialize the IP allocator for network %q: %w", ncc.GetNetworkName(), err)
 		}
 		ncc.subnetAllocator = ipAllocator
+
+		// initialize IP reservation controller and reserve existing IPs allocated for IPReservations
+		if config.OVNKubernetesFeature.EnableIPReservation {
+			ipresvController, err := ipreserv.NewController(
+				ncc.ReconcilableNetInfo,
+				ncc.kube,
+				ncc.watchFactory,
+				ipAllocator.ForSubnet(ncc.GetNetworkName()),
+				ncc.recorder,
+				ncc.stopChan)
+			if err != nil {
+				return err
+			}
+			ncc.ipreservController = ipresvController
+		}
 
 		var (
 			podAllocationAnnotator *annotationalloc.PodAnnotationAllocator
@@ -395,21 +412,6 @@ func (ncc *networkClusterController) Start(_ context.Context) error {
 	}
 
 	if ncc.hasPodAllocation() {
-		// we need to start this before WatchPods so that we can reserve IPs before
-		// it gets assigned to the Pods
-		if config.OVNKubernetesFeature.EnableIPReservation {
-			allocator := ncc.subnetAllocator.ForSubnet(ncc.GetNetworkName())
-			ipresvController, err := ipreserv.NewController(ncc.ReconcilableNetInfo, ncc.kube, ncc.watchFactory, allocator, ncc.recorder, ncc.stopChan)
-			if err != nil {
-				return err
-			}
-			ncc.wg.Add(1)
-			go func() {
-				defer ncc.wg.Done()
-				// Until we have scale issues in future let's spawn only one thread
-				ipresvController.Run(1, ncc.stopChan)
-			}()
-		}
 		if ncc.allowPersistentIPs() {
 			start = time.Now()
 			klog.Infof("Cluster manager network controller %q starting IPAMClaim watcher...", ncc.GetNetworkName())
@@ -432,6 +434,18 @@ func (ncc *networkClusterController) Start(_ context.Context) error {
 		}
 		ncc.podHandler = podHandler
 		klog.Infof("Cluster manager network controller %q completed watch Pods. Took: %v", ncc.GetNetworkName(), time.Since(start))
+
+		// start to allocate IP reservation IPs after pod IP allocation so that it won't re-allocate
+		// IPs that already allocated for Pods.
+		// Note that the existing IP reservation IPs are reserved when ipreservController is initialized.
+		if config.OVNKubernetesFeature.EnableIPReservation {
+			ncc.wg.Add(1)
+			go func() {
+				defer ncc.wg.Done()
+				// Until we have scale issues in future let's spawn only one thread
+				ncc.ipreservController.Run(1, ncc.stopChan)
+			}()
+		}
 	}
 
 	return nil

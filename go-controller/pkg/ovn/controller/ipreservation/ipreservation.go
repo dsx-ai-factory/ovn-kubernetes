@@ -40,10 +40,7 @@ const (
 	// 5ms, 10ms, 20ms, 40ms, 80ms, 160ms, 320ms, 640ms, 1.3s, 2.6s, 5.1s, 10.2s, 20.4s, 41s, 82s
 	// maxRetries = 15
 
-	avoidResync     = 0
-	numberOfWorkers = 2
-	qps             = 15
-	maxRetries      = 10
+	maxRetries = 10
 )
 
 // Controller manages selector-based service endpoints.
@@ -69,9 +66,6 @@ type Controller struct {
 	// necessary.
 	queue workqueue.RateLimitingInterface
 
-	// workerLoopPeriod is the time between worker runs. The workers process the queue of service and pod changes.
-	workerLoopPeriod time.Duration
-
 	stopChan <-chan struct{}
 }
 
@@ -94,7 +88,6 @@ func NewController(netInfo util.ReconcilableNetInfo,
 	c := &Controller{
 		ReconcilableNetInfo: netInfo,
 		queue:               workqueue.NewNamedRateLimitingQueue(workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5), controllerName),
-		workerLoopPeriod:    time.Second,
 		kube:                kube,
 		watchFactory:        watchFactory,
 		ipresvInformer:      watchFactory.IPReservationInformer(),
@@ -183,7 +176,7 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) {
 	klog.Infof("Repairing IP reservetion")
 	wg := &sync.WaitGroup{}
 	// Start the workers after the repair loop to avoid races
-	klog.V(5).Info("Starting Admin Network Policy workers")
+	klog.V(5).Info("Starting IPReservation workers")
 	for i := 0; i < threadiness; i++ {
 		wg.Add(1)
 		go func() {
