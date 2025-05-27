@@ -92,6 +92,11 @@ import (
 	networkprobeapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1"
 	networkprobeinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1/apis/informers/externalversions"
 	networkprobeinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1/apis/informers/externalversions/networkprobe/v1beta1"
+	networkqosapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1"
+	networkqosscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/clientset/versioned/scheme"
+	networkqosinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/informers/externalversions"
+	networkqosinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/informers/externalversions/networkqos/v1alpha1"
+	networkqoslister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/listers/networkqos/v1alpha1"
 	portmirrorapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
 	portmirrorinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/informers/externalversions"
 	portmirrorlister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/listers/portmirror/v1beta1"
@@ -141,6 +146,7 @@ type WatchFactory struct {
 	udnFactory           userdefinednetworkapiinformerfactory.SharedInformerFactory
 	raFactory            routeadvertisementsinformerfactory.SharedInformerFactory
 	frrFactory           frrinformerfactory.SharedInformerFactory
+	networkQoSFactory    networkqosinformerfactory.SharedInformerFactory
 	informers            map[reflect.Type]*informer
 
 	stopChan chan struct{}
@@ -172,6 +178,7 @@ func (wf *WatchFactory) ShallowClone() *WatchFactory {
 		vipFactory:           wf.vipFactory,
 		ipresvFactory:        wf.ipresvFactory,
 		portMirrorFactory:    wf.portMirrorFactory,
+		networkQoSFactory:    wf.networkQoSFactory,
 		informers:            wf.informers,
 		stopChan:             wf.stopChan,
 
@@ -273,6 +280,7 @@ var (
 	IPAMClaimsType                        reflect.Type = reflect.TypeOf(&ipamclaimsapi.IPAMClaim{})
 	UserDefinedNetworkType                reflect.Type = reflect.TypeOf(&userdefinednetworkapi.UserDefinedNetwork{})
 	ClusterUserDefinedNetworkType         reflect.Type = reflect.TypeOf(&userdefinednetworkapi.ClusterUserDefinedNetwork{})
+	NetworkQoSType                        reflect.Type = reflect.TypeOf(&networkqosapi.NetworkQoS{})
 
 	// Resource types used in ovnk node
 	NamespaceExGwType                         reflect.Type = reflect.TypeOf(&namespaceExGw{})
@@ -345,6 +353,7 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		apbRouteFactory:      adminbasedpolicyinformerfactory.NewSharedInformerFactory(ovnClientset.AdminPolicyRouteClient, resyncInterval),
 		networkprobeFactory:  networkprobeinformerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.NetworkProbeClient, resyncInterval, networkprobeinformerfactory.WithNamespace(config.Kubernetes.OVNConfigNamespace)),
 		portMirrorFactory:    portmirrorinformerfactory.NewSharedInformerFactory(ovnClientset.PortMirrorClient, resyncInterval),
+		networkQoSFactory:    networkqosinformerfactory.NewSharedInformerFactory(ovnClientset.NetworkQoSClient, resyncInterval),
 		informers:            make(map[reflect.Type]*informer),
 		stopChan:             make(chan struct{}),
 	}
@@ -400,6 +409,10 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		return nil, err
 	}
 	if err := userdefinednetworkapi.AddToScheme(userdefinednetworkscheme.Scheme); err != nil {
+		return nil, err
+	}
+
+	if err := networkqosapi.AddToScheme(networkqosscheme.Scheme); err != nil {
 		return nil, err
 	}
 
@@ -641,6 +654,14 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		}
 	}
 
+	if config.OVNKubernetesFeature.EnableNetworkQoS {
+		wf.informers[NetworkQoSType], err = newQueuedInformer(NetworkQoSType, wf.networkQoSFactory.K8s().V1alpha1().NetworkQoSes().Informer(),
+			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	if config.OVNKubernetesFeature.EnablePortMirror {
 		wf.informers[PortMirrorType], err = newQueuedInformer(PortMirrorType, wf.portMirrorFactory.K8s().V1beta1().PortMirrors().Informer(),
 			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize) // TBD-merge before calls newInformer()
@@ -796,6 +817,15 @@ func (wf *WatchFactory) Start() error {
 		}
 	}
 
+	if config.OVNKubernetesFeature.EnableNetworkQoS && wf.networkQoSFactory != nil {
+		wf.networkQoSFactory.Start(wf.stopChan)
+		for oType, synced := range waitForCacheSyncWithTimeout(wf.networkQoSFactory, wf.stopChan) {
+			if !synced {
+				return fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
+		}
+	}
+
 	if util.IsNetworkSegmentationSupportEnabled() && wf.udnFactory != nil {
 		wf.udnFactory.Start(wf.stopChan)
 		for oType, synced := range waitForCacheSyncWithTimeout(wf.udnFactory, wf.stopChan) {
@@ -817,6 +847,15 @@ func (wf *WatchFactory) Start() error {
 	if wf.frrFactory != nil {
 		wf.frrFactory.Start(wf.stopChan)
 		for oType, synced := range waitForCacheSyncWithTimeout(wf.frrFactory, wf.stopChan) {
+			if !synced {
+				return fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
+		}
+	}
+
+	if config.OVNKubernetesFeature.EnableNetworkQoS && wf.networkQoSFactory != nil {
+		wf.networkQoSFactory.Start(wf.stopChan)
+		for oType, synced := range waitForCacheSyncWithTimeout(wf.networkQoSFactory, wf.stopChan) {
 			if !synced {
 				return fmt.Errorf("error in syncing cache for %v informer", oType)
 			}
@@ -868,6 +907,7 @@ func (wf *WatchFactory) Stop() {
 	if wf.raFactory != nil {
 		wf.raFactory.Shutdown()
 	}
+
 	if wf.frrFactory != nil {
 		wf.frrFactory.Shutdown()
 	}
@@ -885,6 +925,10 @@ func (wf *WatchFactory) Stop() {
 	           wf.portMirrorFactory.Shutdown()
 	   }
 	*/
+
+	if wf.networkQoSFactory != nil {
+		wf.networkQoSFactory.Shutdown()
+	}
 }
 
 // NewNodeWatchFactory initializes a watch factory with significantly fewer
@@ -1160,6 +1204,7 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 		dnsFactory:           ocpnetworkinformerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.OCPNetworkClient, resyncInterval, ocpnetworkinformerfactory.WithNamespace(config.Kubernetes.OVNConfigNamespace)),
 		apbRouteFactory:      adminbasedpolicyinformerfactory.NewSharedInformerFactory(ovnClientset.AdminPolicyRouteClient, resyncInterval),
 		egressQoSFactory:     egressqosinformerfactory.NewSharedInformerFactory(ovnClientset.EgressQoSClient, resyncInterval),
+		networkQoSFactory:    networkqosinformerfactory.NewSharedInformerFactory(ovnClientset.NetworkQoSClient, resyncInterval),
 		informers:            make(map[reflect.Type]*informer),
 		stopChan:             make(chan struct{}),
 	}
@@ -1481,6 +1526,10 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 	case NetworkProbeType:
 		if networkProbe, ok := obj.(*networkprobeapi.NetworkProbe); ok {
 			return &networkProbe.ObjectMeta, nil
+		}
+	case NetworkQoSType:
+		if networkQoS, ok := obj.(*networkqosapi.NetworkQoS); ok {
+			return &networkQoS.ObjectMeta, nil
 		}
 	}
 
@@ -1809,6 +1858,11 @@ func (wf *WatchFactory) RemoveBaselineAdminNetworkPolicyHandler(handler *Handler
 	wf.removeHandler(BaselineAdminNetworkPolicyType, handler)
 }
 
+// RemoveNetworkQoSHandler removes an NetworkQoS object event handler function
+func (wf *WatchFactory) RemoveNetworkQoSHandler(handler *Handler) {
+	wf.removeHandler(NetworkQoSType, handler)
+}
+
 // AddNetworkAttachmentDefinitionHandler adds a handler function that will be executed on NetworkAttachmentDefinition object changes
 func (wf *WatchFactory) AddNetworkAttachmentDefinitionHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 	return wf.addHandler(NetworkAttachmentDefinitionType, "", nil, handlerFuncs, processExisting, defaultHandlerPriority)
@@ -2101,6 +2155,11 @@ func (wf *WatchFactory) GetEgressFirewall(namespace, name string) (*egressfirewa
 	return egressFirewallLister.EgressFirewalls(namespace).Get(name)
 }
 
+func (wf *WatchFactory) GetNetworkQoSes() ([]*networkqosapi.NetworkQoS, error) {
+	networkQosLister := wf.informers[NetworkQoSType].lister.(networkqoslister.NetworkQoSLister)
+	return networkQosLister.List(labels.Everything())
+}
+
 func (wf *WatchFactory) CertificateSigningRequestInformer() certificatesinformers.CertificateSigningRequestInformer {
 	return wf.iFactory.Certificates().V1().CertificateSigningRequests()
 }
@@ -2255,6 +2314,10 @@ func (wf *WatchFactory) RouteAdvertisementsInformer() routeadvertisementsinforme
 
 func (wf *WatchFactory) FRRConfigurationsInformer() frrinformer.FRRConfigurationInformer {
 	return wf.frrFactory.Api().V1beta1().FRRConfigurations()
+}
+
+func (wf *WatchFactory) NetworkQoSInformer() networkqosinformer.NetworkQoSInformer {
+	return wf.networkQoSFactory.K8s().V1alpha1().NetworkQoSes()
 }
 
 func (wf *WatchFactory) IPReservationInformer() ipresvinformer.IPReservationInformer {

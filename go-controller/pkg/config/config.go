@@ -475,6 +475,7 @@ type OVNKubernetesFeatureConfig struct {
 	EnableIPReservation           bool `gcfg:"enable-ip-reservation"`
 	EnableNetworkProbe            bool `gcfg:"enable-network-probe"`
 	EnablePortMirror              bool `gcfg:"enable-port-mirror"`
+	EnableNetworkQoS              bool `gcfg:"enable-network-qos"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -1267,6 +1268,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use OVN sampling with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableObservability,
 		Value:       OVNKubernetesFeature.EnableObservability,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-network-qos",
+		Usage:       "Configure to use NetworkQoS CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableNetworkQoS,
+		Value:       OVNKubernetesFeature.EnableNetworkQoS,
 	},
 }
 

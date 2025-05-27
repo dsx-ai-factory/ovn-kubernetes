@@ -55,6 +55,7 @@ import (
 	egressserviceclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned"
 	ipresvclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/clientset/versioned"
 	networkprobeclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1/apis/clientset/versioned"
+	networkqosclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/clientset/versioned"
 	portmirrorclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned"
 	routeadvertisementsclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned"
 	userdefinednetworkclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned"
@@ -83,6 +84,7 @@ type OVNClientset struct {
 	IPReservationClient       ipresvclientset.Interface
 	PortMirrorClient          portmirrorclientset.Interface
 	NetworkProbeClient        networkprobeclientset.Interface
+	NetworkQoSClient          networkqosclientset.Interface
 }
 
 // OVNMasterClientset
@@ -107,6 +109,7 @@ type OVNMasterClientset struct {
 	IPReservationClient       ipresvclientset.Interface
 	PortMirrorClient          portmirrorclientset.Interface
 	NetworkProbeClient        networkprobeclientset.Interface
+	NetworkQoSClient          networkqosclientset.Interface
 }
 
 // OVNKubeControllerClientset
@@ -129,6 +132,7 @@ type OVNKubeControllerClientset struct {
 	IPReservationClient       ipresvclientset.Interface
 	PortMirrorClient          portmirrorclientset.Interface
 	NetworkProbeClient        networkprobeclientset.Interface
+	NetworkQoSClient          networkqosclientset.Interface
 }
 
 type OVNNodeClientset struct {
@@ -159,6 +163,7 @@ type OVNClusterManagerClientset struct {
 	UserDefinedNetworkClient  userdefinednetworkclientset.Interface
 	RouteAdvertisementsClient routeadvertisementsclientset.Interface
 	FRRClient                 frrclientset.Interface
+	NetworkQoSClient          networkqosclientset.Interface
 }
 
 const (
@@ -192,6 +197,7 @@ func (cs *OVNClientset) GetMasterClientset() *OVNMasterClientset {
 		VirtualIPClient:           cs.VirtualIPClient,
 		IPReservationClient:       cs.IPReservationClient,
 		PortMirrorClient:          cs.PortMirrorClient,
+		NetworkQoSClient:          cs.NetworkQoSClient,
 	}
 }
 
@@ -214,6 +220,7 @@ func (cs *OVNMasterClientset) GetOVNKubeControllerClientset() *OVNKubeController
 		VirtualIPClient:           cs.VirtualIPClient,
 		IPReservationClient:       cs.IPReservationClient,
 		PortMirrorClient:          cs.PortMirrorClient,
+		NetworkQoSClient:          cs.NetworkQoSClient,
 	}
 }
 
@@ -237,6 +244,7 @@ func (cs *OVNClientset) GetOVNKubeControllerClientset() *OVNKubeControllerClient
 		IPReservationClient:       cs.IPReservationClient,
 		PortMirrorClient:          cs.PortMirrorClient,
 		NetworkProbeClient:        cs.NetworkProbeClient,
+		NetworkQoSClient:          cs.NetworkQoSClient,
 	}
 }
 
@@ -257,6 +265,7 @@ func (cs *OVNClientset) GetClusterManagerClientset() *OVNClusterManagerClientset
 		UserDefinedNetworkClient:  cs.UserDefinedNetworkClient,
 		RouteAdvertisementsClient: cs.RouteAdvertisementsClient,
 		FRRClient:                 cs.FRRClient,
+		NetworkQoSClient:          cs.NetworkQoSClient,
 	}
 }
 
@@ -582,6 +591,11 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		return nil, err
 	}
 
+	networkqosClientset, err := networkqosclientset.NewForConfig(kconfig)
+	if err != nil {
+		return nil, err
+	}
+
 	return &OVNClientset{
 		KubeClient:                kclientset,
 		ANPClient:                 anpClientset,
@@ -603,6 +617,7 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		IPReservationClient:       ipReservationClientset,
 		PortMirrorClient:          portMirrorClientset,
 		NetworkProbeClient:        networkProbeClientset,
+		NetworkQoSClient:          networkqosClientset,
 	}, nil
 }
 

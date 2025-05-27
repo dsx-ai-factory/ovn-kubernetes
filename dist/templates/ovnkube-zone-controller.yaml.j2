@@ -383,6 +383,8 @@ spec:
           value: "{{ ovn_udn_allowed_default_services }}"
         - name: OVS_DB_TRANSACTION_TIMEOUT
           value: "{{ ovs_db_transaction_timeout }}"
+        - name: OVN_NETWORK_QOS_ENABLE
+          value: "{{ ovn_network_qos_enable }}"
         - name: OVN_HOST_NETWORK_NAMESPACE
           valueFrom:
             configMapKeyRef:
