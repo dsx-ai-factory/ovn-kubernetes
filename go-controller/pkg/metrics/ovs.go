@@ -603,7 +603,7 @@ func updateOvsBridgeMetrics(ovsDBClient libovsdbclient.Client, ovsOfctl ovsClien
 			if ports, err := ovsops.FindPortsWithPredicate(ovsDBClient, p); err != nil {
 				klog.V(5).Infof("Failed to get port info for %s :(%v) ", portUUID, err)
 				continue
-			} else {
+			} else if len(ports) > 0 {
 				interfaces := ports[0].Interfaces
 				portName := ports[0].Name
 				for _, interfaceUUID := range interfaces {
