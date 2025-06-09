@@ -113,12 +113,17 @@ func renderNADLabels(obj client.Object) map[string]string {
 // renderNADAnnotations copies annotations from UDN to corresponding NAD
 func renderNADAnnotations(obj client.Object) map[string]string {
 	udnAnnotations := obj.GetAnnotations()
-	if len(udnAnnotations) != 0 {
-		annotations := make(map[string]string)
-		maps.Copy(annotations, udnAnnotations)
-		return annotations
+	annotations := make(map[string]string)
+	for k, v := range udnAnnotations {
+		// skip ovn-k8s annotatoins
+		if !strings.HasPrefix(k, types.OvnK8sPrefix) {
+			annotations[k] = v
+		}
 	}
-	return nil
+	if len(annotations) == 0 {
+		return nil
+	}
+	return annotations
 }
 
 func validateTopology(spec SpecGetter) error {

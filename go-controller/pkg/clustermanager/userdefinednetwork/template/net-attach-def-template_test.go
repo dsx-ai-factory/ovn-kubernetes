@@ -295,7 +295,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 		func(testSpec udnv1.UserDefinedNetworkSpec, expectedNadNetConf string) {
 			testUdn := &udnv1.UserDefinedNetwork{
 				ObjectMeta: metav1.ObjectMeta{Namespace: "mynamespace", Name: "test-net", UID: "1",
-					Annotations: map[string]string{"testAnnotation": "test"},
+					Annotations: map[string]string{"testAnnotation": "test", "k8s.ovn.org/testAnnotation": "test"},
 					Labels:      map[string]string{"testLabel": "test"}},
 				Spec: testSpec,
 			}
