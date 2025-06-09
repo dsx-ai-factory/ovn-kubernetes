@@ -251,7 +251,8 @@ var _ = Describe("NetAttachDefTemplate", func() {
 		func(testSpec udnv1.UserDefinedNetworkSpec, expectedNadNetConf string) {
 			testUdn := &udnv1.UserDefinedNetwork{
 				ObjectMeta: metav1.ObjectMeta{Namespace: "mynamespace", Name: "test-net", UID: "1",
-					Labels: map[string]string{"testLabel": "test"}},
+					Annotations: map[string]string{"testAnnotation": "test"},
+					Labels:      map[string]string{"testLabel": "test"}},
 				Spec: testSpec,
 			}
 			testNs := "mynamespace"
@@ -266,6 +267,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			expectedNAD := &netv1.NetworkAttachmentDefinition{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:            "test-net",
+					Annotations:     map[string]string{"testAnnotation": "test"},
 					Labels:          map[string]string{"k8s.ovn.org/user-defined-network": "", "testLabel": "test"},
 					OwnerReferences: []metav1.OwnerReference{ownerRef},
 					Finalizers:      []string{"k8s.ovn.org/user-defined-network-protection"},
