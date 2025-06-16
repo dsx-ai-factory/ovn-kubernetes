@@ -102,6 +102,9 @@ type BaseNodeNetworkController struct {
 	// network information
 	util.ReconcilableNetInfo
 
+	// networkManager used for getting network information
+	networkManager networkmanager.Interface
+
 	// podNADToDPUCDMap tracks the NAD/DPU_ConnectionDetails mapping for all NADs that each pod requests.
 	// Key is pod.UUID; value is nadToDPUCDMap (of map[string]*podNADInfo). Key of nadToDPUCDMap
 	// is nadName; value is podNADInfo including DPU_ConnectionDetails when VF representor is successfully
@@ -186,8 +189,6 @@ type DefaultNodeNetworkController struct {
 	skipFirewalldMap               sync.Map
 	apbExternalRouteNodeController *apbroute.ExternalGatewayNodeController
 
-	networkManager networkmanager.Interface
-
 	cniServer *cni.Server
 
 	udnHostIsolationManager *UDNHostIsolationManager
@@ -209,6 +210,7 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 		BaseNodeNetworkController: BaseNodeNetworkController{
 			CommonNodeNetworkControllerInfo: *cnnci,
 			ReconcilableNetInfo:             util.NewReconcilableNetInfo(netInfo),
+			networkManager:                  networkManager,
 			stopChan:                        stopChan,
 			wg:                              wg,
 			DoSCheckStopChan:                nil,
@@ -253,8 +255,6 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, net
 	if err != nil {
 		return nil, err
 	}
-
-	nc.networkManager = networkManager
 
 	nc.initRetryFrameworkForNode()
 

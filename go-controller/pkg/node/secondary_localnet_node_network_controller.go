@@ -9,6 +9,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -23,7 +24,7 @@ type SecondaryLocalnetNodeNetworkController struct {
 
 // NewSecondaryLocalnetNodeNetworkController creates a new OVN controller for creating logical network
 // infrastructure and policy for secondary localnet network
-func NewSecondaryLocalnetNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, netInfo util.NetInfo) *SecondaryLocalnetNodeNetworkController {
+func NewSecondaryLocalnetNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, netInfo util.NetInfo, networkManager networkmanager.Interface) *SecondaryLocalnetNodeNetworkController {
 	return &SecondaryLocalnetNodeNetworkController{
 		SecondaryNodeNetworkController: SecondaryNodeNetworkController{
 			BaseNodeNetworkController: BaseNodeNetworkController{
@@ -32,6 +33,7 @@ func NewSecondaryLocalnetNodeNetworkController(cnnci *CommonNodeNetworkControlle
 				stopChan:                        make(chan struct{}),
 				wg:                              &sync.WaitGroup{},
 				DoSCheckStopChan:                nil,
+				networkManager:                  networkManager,
 			},
 		},
 	}

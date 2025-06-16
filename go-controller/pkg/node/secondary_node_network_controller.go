@@ -9,6 +9,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -31,6 +32,7 @@ type SecondaryNodeNetworkController struct {
 func NewSecondaryNodeNetworkController(
 	cnnci *CommonNodeNetworkControllerInfo,
 	netInfo util.NetInfo,
+	networkManager networkmanager.Interface,
 	vrfManager *vrfmanager.Controller,
 	ruleManager *iprulemanager.Controller,
 	defaultNetworkGateway Gateway,
@@ -43,6 +45,7 @@ func NewSecondaryNodeNetworkController(
 			stopChan:                        make(chan struct{}),
 			wg:                              &sync.WaitGroup{},
 			DoSCheckStopChan:                nil,
+			networkManager:                  networkManager,
 		},
 	}
 	if util.IsNetworkSegmentationSupportEnabled() && snnc.IsPrimaryNetwork() {

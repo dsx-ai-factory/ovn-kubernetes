@@ -204,7 +204,7 @@ var _ = Describe("Node DPU tests", func() {
 		It("Fails if GetPCIFromDeviceName fails", func() {
 			sriovnetOpsMock.On("GetVfRepresentorDPU", "0", "9").Return(vfRep, nil)
 			sriovnetOpsMock.On("GetPCIFromDeviceName", vfRep).Return("", fmt.Errorf("could not find PCI Address"))
-			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
+			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
 
 			// call addRepPort()
 			err := dnnc.addRepPort(&pod, &scd, types.DefaultNetworkName, ifInfo, clientset)
