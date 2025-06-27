@@ -1432,6 +1432,16 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 		mod_vlan_id = fmt.Sprintf("mod_vlan_vid:%d,", config.Gateway.VLANID)
 	}
 
+	// For HNA (host network acceleration), we need to drop gARP packets sent by metallb
+	// on the bridge's LOCAL port. That port does not have any IP address. We make an
+	// assumption that if bridge.gwIface != bridge.bridgeName, then it is HNA.
+	// XXX: Remove this flow after HNA is fleet wide and metallb skilift to add bridgeName
+	// to metallb-excludel2 configmap is complete fleetwide in NGN
+	if (bridge.gwIface != bridge.bridgeName) && (bridge.bridgeName == "brbond0") {
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=105, in_port=LOCAL, arp, actions=drop", defaultOpenFlowCookie))
+	}
+
 	if config.IPv4Mode {
 		if ofPortPhys != "" {
 			for proto, ports := range config.OvnKubeNode.SkipCTMarkHostPorts {
