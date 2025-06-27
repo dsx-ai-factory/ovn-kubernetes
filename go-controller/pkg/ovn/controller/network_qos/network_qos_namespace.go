@@ -1,7 +1,6 @@
 package networkqos
 
 import (
-	"fmt"
 	"sync"
 	"time"
 
@@ -26,12 +25,13 @@ func (c *Controller) processNextNQOSNamespaceWorkItem(wg *sync.WaitGroup) bool {
 	defer c.nqosNamespaceQueue.Done(eventData)
 
 	if err := c.syncNetworkQoSNamespace(eventData); err != nil {
+		klog.Warningf("%s: Failed to reconcile namespace %s: %v", c.controllerName, eventData.name(), err)
 		if c.nqosNamespaceQueue.NumRequeues(eventData) < maxRetries {
-			klog.Errorf("%s: Failed to reconcile namespace %s: %v", c.controllerName, eventData.name(), err)
 			c.nqosNamespaceQueue.AddRateLimited(eventData)
 			return true
 		}
-		utilruntime.HandleError(fmt.Errorf("failed to reconcile namespace %s: %v", eventData.name(), err))
+		klog.Errorf("%s: Stop reconciling namespace %s after %d retries", c.controllerName, eventData.name(), maxRetries)
+		utilruntime.HandleError(err)
 	}
 	c.nqosNamespaceQueue.Forget(eventData)
 	return true

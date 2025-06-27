@@ -26,12 +26,13 @@ func (c *Controller) processNextNQOSPodWorkItem(wg *sync.WaitGroup) bool {
 	defer c.nqosPodQueue.Done(eventData)
 
 	if err := c.syncNetworkQoSPod(eventData); err != nil {
+		klog.Warningf("%s: Failed to reconcile pod %s/%s: %v", c.controllerName, eventData.namespace(), eventData.name(), err)
 		if c.nqosPodQueue.NumRequeues(eventData) < maxRetries {
 			c.nqosPodQueue.AddRateLimited(eventData)
 			return true
 		}
-		klog.Errorf("%s: Failed to reconcile pod %s/%s: %v", c.controllerName, eventData.namespace(), eventData.name(), err)
-		utilruntime.HandleError(fmt.Errorf("failed to reconcile pod %s/%s: %v", eventData.namespace(), eventData.name(), err))
+		klog.Errorf("%s: Stop reconciling pod %s/%s after %d retries", c.controllerName, eventData.namespace(), eventData.name(), maxRetries)
+		utilruntime.HandleError(err)
 	}
 	c.nqosPodQueue.Forget(eventData)
 	return true
