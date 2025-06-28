@@ -51,7 +51,7 @@ type Spec struct {
 	// +optional
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf", message="networkSelectors is immutable"
 	// +kubebuilder:validation:XValidation:rule="self.all(sel, sel.networkSelectionType == 'ClusterUserDefinedNetworks' || sel.networkSelectionType == 'NetworkAttachmentDefinitions')", message="Unsupported network selection type"
-	// +kubebuilder:validation:XValidation:rule="self.networkSelectors.filter(sel, sel.networkSelectionType == 'NetworkAttachmentDefinitions').all(sel, has(sel.networkAttachmentDefinitionSelector.networkSelector) && sel.networkAttachmentDefinitionSelector.networkSelector != {})", message="NetworkSelector of NetworkAttachmentDefinitionSelector is required"
+	// +kubebuilder:validation:XValidation:rule="self.filter(sel, sel.networkSelectionType == 'NetworkAttachmentDefinitions').all(sel, has(sel.networkAttachmentDefinitionSelector) && has(sel.networkAttachmentDefinitionSelector.networkSelector) && (has(sel.networkAttachmentDefinitionSelector.networkSelector.matchExpressions) || has(sel.networkAttachmentDefinitionSelector.networkSelector.matchLabels)))", message="networkSelector of networkAttachmentDefinitionSelector is required"
 	NetworkSelectors crdtypes.NetworkSelectors `json:"networkSelectors,omitempty"`
 
 	// podSelector applies the NetworkQoS rule only to the pods in the namespace whose label
