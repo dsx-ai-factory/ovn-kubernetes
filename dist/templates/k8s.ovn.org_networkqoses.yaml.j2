@@ -640,12 +640,12 @@ spec:
                 - message: Unsupported network selection type
                   rule: self.all(sel, sel.networkSelectionType == 'ClusterUserDefinedNetworks'
                     || sel.networkSelectionType == 'NetworkAttachmentDefinitions')
-                - message: NetworkSelector of NetworkAttachmentDefinitionSelector
+                - message: networkSelector of networkAttachmentDefinitionSelector
                     is required
-                  rule: self.networkSelectors.filter(sel, sel.networkSelectionType
-                    == 'NetworkAttachmentDefinitions').all(sel, has(sel.networkAttachmentDefinitionSelector.networkSelector)
-                    && sel.networkAttachmentDefinitionSelector.networkSelector !=
-                    {})
+                  rule: self.filter(sel, sel.networkSelectionType == 'NetworkAttachmentDefinitions').all(sel,
+                    has(sel.networkAttachmentDefinitionSelector) && has(sel.networkAttachmentDefinitionSelector.networkSelector)
+                    && (has(sel.networkAttachmentDefinitionSelector.networkSelector.matchExpressions)
+                    || has(sel.networkAttachmentDefinitionSelector.networkSelector.matchLabels)))
               podSelector:
                 description: |-
                   podSelector applies the NetworkQoS rule only to the pods in the namespace whose label
