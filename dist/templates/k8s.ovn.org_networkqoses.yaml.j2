@@ -326,7 +326,7 @@ spec:
                       description: |-
                         networkAttachmentDefinitionSelector selects networks defined in the
                         selected NetworkAttachmentDefinitions when NetworkSelectionType is
-                        'SecondaryUserDefinedNetworks'.
+                        'NetworkAttachmentDefinitions'.
                       properties:
                         namespaceSelector:
                           description: |-
@@ -635,13 +635,11 @@ spec:
                 - networkSelectionType
                 x-kubernetes-list-type: map
                 x-kubernetes-validations:
-                - message: networkSelectors is immutable
+                - message: networkSelectors are immutable
                   rule: self == oldSelf
-                - message: Unsupported network selection type
-                  rule: self.all(sel, sel.networkSelectionType == 'ClusterUserDefinedNetworks'
-                    || sel.networkSelectionType == 'NetworkAttachmentDefinitions')
-                - message: networkSelector of networkAttachmentDefinitionSelector
-                    is required
+                - message: Unsupported network selection type. Only NetworkAttachmentDefinitions is supported.
+                  rule: self.all(sel, sel.networkSelectionType == 'NetworkAttachmentDefinitions')
+                - message: networkAttachmentDefinitionSelector cannot have an empty networkSelector
                   rule: self.filter(sel, sel.networkSelectionType == 'NetworkAttachmentDefinitions').all(sel,
                     has(sel.networkAttachmentDefinitionSelector) && has(sel.networkAttachmentDefinitionSelector.networkSelector)
                     && (has(sel.networkAttachmentDefinitionSelector.networkSelector.matchExpressions)
@@ -705,6 +703,7 @@ spec:
             required:
             - egress
             - priority
+            - networkSelectors
             type: object
           status:
             description: Status defines the observed state of NetworkQoS

@@ -41,7 +41,7 @@ type NetworkSelector struct {
 
 	// networkAttachmentDefinitionSelector selects networks defined in the
 	// selected NetworkAttachmentDefinitions when NetworkSelectionType is
-	// 'SecondaryUserDefinedNetworks'.
+	// 'NetworkAttachmentDefinitions'.
 	// +kubebuilder:validation:Optional
 	NetworkAttachmentDefinitionSelector *NetworkAttachmentDefinitionSelector `json:"networkAttachmentDefinitionSelector,omitempty"`
 }
