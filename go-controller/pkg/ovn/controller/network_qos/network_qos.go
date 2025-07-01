@@ -360,13 +360,8 @@ func (c *Controller) networkManagedByMe(networkSelectors crdtypes.NetworkSelecto
 			return false, fmt.Errorf("unsupported network selection type %s", networkSelector.NetworkSelectionType)
 		}
 	}
-	if len(selectedNads) == 0 {
-		return false, nil
-	}
 	for _, nad := range selectedNads {
-		nadKey := joinMetaNamespaceAndName(nad.Namespace, nad.Name)
-		if ((nadKey == types.DefaultNetworkName) && c.IsDefault()) ||
-			(!c.IsDefault() && c.HasNAD(nadKey)) {
+		if c.HasNAD(joinMetaNamespaceAndName(nad.Namespace, nad.Name)) {
 			return true, nil
 		}
 	}
