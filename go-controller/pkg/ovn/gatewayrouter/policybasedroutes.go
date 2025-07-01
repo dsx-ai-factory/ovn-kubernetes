@@ -12,6 +12,7 @@ import (
 
 	"github.com/ovn-org/libovsdb/client"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -54,6 +55,28 @@ func (pbr *PolicyBasedRoutesManager) AddSameNodeIPPolicy(nodeName, mgmtPortIP st
 		networkScopedSwitchName := pbr.netInfo.GetNetworkScopedSwitchName(nodeName)
 		matchStr := generateNodeIPMatch(networkScopedSwitchName, l3Prefix, hostIP)
 		matches = matches.Insert(matchStr)
+	}
+
+	// Add Istio Ambient SNAT IP policies if enabled
+	if config.OVNKubernetesFeature.EnableIstioAmbientSupport {
+		istioSNATIPv4 := config.OVNKubernetesFeature.IstioAmbientSNATIPv4
+		istioSNATIPv6 := config.OVNKubernetesFeature.IstioAmbientSNATIPv6
+		mgmtPortIsIPv6 := utilnet.IsIPv6String(mgmtPortIP)
+		networkScopedSwitchName := pbr.netInfo.GetNetworkScopedSwitchName(nodeName)
+
+		// Add IPv4 policy if mgmtPortIP is IPv4 (IPv4 SNAT IP is always configured when feature is enabled)
+		// IP validation is already done in config.ValidateConfig()
+		if !mgmtPortIsIPv6 {
+			istioMatchStr := generateNodeIPMatch(networkScopedSwitchName, "ip4", istioSNATIPv4)
+			matches = matches.Insert(istioMatchStr)
+		}
+
+		// Add IPv6 policy if mgmtPortIP is IPv6 and IPv6 SNAT IP is configured
+		// IP validation is already done in config.ValidateConfig()
+		if mgmtPortIsIPv6 && istioSNATIPv6 != "" {
+			istioMatchStr := generateNodeIPMatch(networkScopedSwitchName, "ip6", istioSNATIPv6)
+			matches = matches.Insert(istioMatchStr)
+		}
 	}
 
 	if err := pbr.sync(

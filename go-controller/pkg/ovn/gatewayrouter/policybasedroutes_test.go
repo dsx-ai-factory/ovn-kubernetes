@@ -13,6 +13,7 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	types2 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -501,6 +502,215 @@ func TestAddSameNodeIPPolicy(t *testing.T) {
 				}
 			}
 			matcher := libovsdbtest.HaveData(tt.expectedDB)
+			success, err := matcher.Match(nbdbClient)
+			if !success {
+				t.Fatal(fmt.Errorf("test: \"%s\" didn't match expected with actual, err: %v", tt.desc, matcher.FailureMessage(nbdbClient)))
+			}
+			if err != nil {
+				t.Fatal(fmt.Errorf("test: \"%s\" encountered error: %v", tt.desc, err))
+			}
+		})
+	}
+}
+
+func TestAddSameNodeIPPolicyWithIstioAmbient(t *testing.T) {
+	const (
+		node1Name            = "node1"
+		node1HostIPv4Str     = "192.168.1.10"
+		node1HostCIDRIPv4Str = node1HostIPv4Str + "/32"
+		node1HostIPv6Str     = "fc00:f853:ccd:e793::10"
+		node1HostCIDRIPv6Str = node1HostIPv6Str + "/128"
+		node1CDNMgntIPv4Str  = "10.244.1.2"
+		node1CDNMgntIPv6Str  = "fd98::2"
+		v4Prefix             = "ip4"
+		v6Prefix             = "ip6"
+		defaultIstioSNATIPv6 = "fd16:9254:7127:1337:ffff:ffff:ffff:ffff"
+		customIstioSNATIPv4  = "169.254.7.100"
+		customIstioSNATIPv6  = "fd16:9254:7127:1337::1"
+	)
+
+	var (
+		defaultIstioSNATIPv4 = "169.254.7.127"
+	)
+
+	var (
+		nodeSubNetPrio, _       = strconv.Atoi(types.NodeSubnetPolicyPriority)
+		_, node1HostCIDRIPv4, _ = net.ParseCIDR(node1HostCIDRIPv4Str)
+		_, node1HostCIDRIPv6, _ = net.ParseCIDR(node1HostCIDRIPv6Str)
+		cdnL3Network            = network{
+			initialLRPs: nil,
+			info:        &util.DefaultNetInfo{},
+			mgntIPv4:    node1CDNMgntIPv4Str,
+			mgntIPv6:    node1CDNMgntIPv6Str,
+		}
+	)
+
+	tests := []struct {
+		desc                            string
+		enableIstioAmbientSupport       bool
+		istioAmbientSNATIPv4            string
+		istioAmbientSNATIPv6            string
+		expectedIstioIPv4MatchGenerated bool
+		expectedIstioIPv6MatchGenerated bool
+		expectedIstioIPv4               string
+		expectedIstioIPv6               string
+	}{
+		{
+			desc:                            "Istio Ambient disabled - no Istio policies generated",
+			enableIstioAmbientSupport:       false,
+			istioAmbientSNATIPv4:            defaultIstioSNATIPv4,
+			istioAmbientSNATIPv6:            defaultIstioSNATIPv6,
+			expectedIstioIPv4MatchGenerated: false,
+			expectedIstioIPv6MatchGenerated: false,
+		},
+		{
+			desc:                            "Istio Ambient enabled IPv4-only with default IP",
+			enableIstioAmbientSupport:       true,
+			istioAmbientSNATIPv4:            defaultIstioSNATIPv4,
+			istioAmbientSNATIPv6:            "",
+			expectedIstioIPv4MatchGenerated: true,
+			expectedIstioIPv6MatchGenerated: false,
+			expectedIstioIPv4:               defaultIstioSNATIPv4,
+		},
+		{
+			desc:                            "Istio Ambient enabled IPv4-only with custom IP",
+			enableIstioAmbientSupport:       true,
+			istioAmbientSNATIPv4:            customIstioSNATIPv4,
+			istioAmbientSNATIPv6:            "",
+			expectedIstioIPv4MatchGenerated: true,
+			expectedIstioIPv6MatchGenerated: false,
+			expectedIstioIPv4:               customIstioSNATIPv4,
+		},
+		{
+			desc:                            "Istio Ambient enabled dual-stack with default IPs",
+			enableIstioAmbientSupport:       true,
+			istioAmbientSNATIPv4:            defaultIstioSNATIPv4,
+			istioAmbientSNATIPv6:            defaultIstioSNATIPv6,
+			expectedIstioIPv4MatchGenerated: true,
+			expectedIstioIPv6MatchGenerated: true,
+			expectedIstioIPv4:               defaultIstioSNATIPv4,
+			expectedIstioIPv6:               defaultIstioSNATIPv6,
+		},
+		{
+			desc:                            "Istio Ambient enabled dual-stack with custom IPs",
+			enableIstioAmbientSupport:       true,
+			istioAmbientSNATIPv4:            customIstioSNATIPv4,
+			istioAmbientSNATIPv6:            customIstioSNATIPv6,
+			expectedIstioIPv4MatchGenerated: true,
+			expectedIstioIPv6MatchGenerated: true,
+			expectedIstioIPv4:               customIstioSNATIPv4,
+			expectedIstioIPv6:               customIstioSNATIPv6,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			// Save original config values
+			origEnableIstioAmbient := config.OVNKubernetesFeature.EnableIstioAmbientSupport
+			origIstioSNATIPv4 := config.OVNKubernetesFeature.IstioAmbientSNATIPv4
+			origIstioSNATIPv6 := config.OVNKubernetesFeature.IstioAmbientSNATIPv6
+
+			// Set test config values
+			config.OVNKubernetesFeature.EnableIstioAmbientSupport = tt.enableIstioAmbientSupport
+			config.OVNKubernetesFeature.IstioAmbientSNATIPv4 = tt.istioAmbientSNATIPv4
+			config.OVNKubernetesFeature.IstioAmbientSNATIPv6 = tt.istioAmbientSNATIPv6
+
+			// Restore original config after test
+			defer func() {
+				config.OVNKubernetesFeature.EnableIstioAmbientSupport = origEnableIstioAmbient
+				config.OVNKubernetesFeature.IstioAmbientSNATIPv4 = origIstioSNATIPv4
+				config.OVNKubernetesFeature.IstioAmbientSNATIPv6 = origIstioSNATIPv6
+			}()
+
+			dbSetup := libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					&nbdb.LogicalRouter{
+						UUID: "cdn-cr-uuid",
+						Name: cdnL3Network.info.GetNetworkScopedClusterRouterName(),
+					},
+				},
+			}
+
+			nbdbClient, cleanup, err := libovsdbtest.NewNBTestHarness(dbSetup, nil)
+			if err != nil {
+				t.Errorf("libovsdb client error: %v", err)
+				return
+			}
+			t.Cleanup(cleanup.Cleanup)
+
+			mgr := NewPolicyBasedRoutesManager(nbdbClient, cdnL3Network.info.GetNetworkScopedClusterRouterName(), cdnL3Network.info)
+
+			// Execute the function under test for IPv4 (simulates real-world call with IPv4 mgmt IP)
+			err = mgr.AddSameNodeIPPolicy(node1Name, node1CDNMgntIPv4Str, node1HostCIDRIPv4, nil)
+			if err != nil {
+				t.Fatalf("AddSameNodeIPPolicy failed for IPv4: %v", err)
+			}
+
+			// For dual-stack tests, also call with IPv6 management IP to create IPv6 policies
+			if tt.expectedIstioIPv6MatchGenerated {
+				err = mgr.AddSameNodeIPPolicy(node1Name, node1CDNMgntIPv6Str, node1HostCIDRIPv6, nil)
+				if err != nil {
+					t.Fatalf("AddSameNodeIPPolicy failed for IPv6: %v", err)
+				}
+			}
+
+			// Build expected database state
+			expectedPolicies := []string{"node-ip-lrp-uuid"}
+			expectedLRPs := []libovsdbtest.TestData{
+				&nbdb.LogicalRouterPolicy{
+					UUID:     "node-ip-lrp-uuid",
+					Priority: nodeSubNetPrio,
+					Match:    generateNodeIPMatch(cdnL3Network.info.GetNetworkScopedSwitchName(node1Name), v4Prefix, node1HostIPv4Str),
+					Action:   nbdb.LogicalRouterPolicyActionReroute,
+					Nexthops: []string{node1CDNMgntIPv4Str},
+				},
+			}
+
+			// For dual-stack tests, also expect IPv6 node policy
+			if tt.expectedIstioIPv6MatchGenerated {
+				expectedPolicies = append(expectedPolicies, "node-ipv6-lrp-uuid")
+				expectedLRPs = append(expectedLRPs, &nbdb.LogicalRouterPolicy{
+					UUID:     "node-ipv6-lrp-uuid",
+					Priority: nodeSubNetPrio,
+					Match:    generateNodeIPMatch(cdnL3Network.info.GetNetworkScopedSwitchName(node1Name), v6Prefix, node1HostIPv6Str),
+					Action:   nbdb.LogicalRouterPolicyActionReroute,
+					Nexthops: []string{node1CDNMgntIPv6Str},
+				})
+			}
+
+			if tt.expectedIstioIPv4MatchGenerated {
+				expectedPolicies = append(expectedPolicies, "istio-ipv4-lrp-uuid")
+				expectedLRPs = append(expectedLRPs, &nbdb.LogicalRouterPolicy{
+					UUID:     "istio-ipv4-lrp-uuid",
+					Priority: nodeSubNetPrio,
+					Match:    generateNodeIPMatch(cdnL3Network.info.GetNetworkScopedSwitchName(node1Name), v4Prefix, tt.expectedIstioIPv4),
+					Action:   nbdb.LogicalRouterPolicyActionReroute,
+					Nexthops: []string{node1CDNMgntIPv4Str},
+				})
+			}
+
+			if tt.expectedIstioIPv6MatchGenerated {
+				expectedPolicies = append(expectedPolicies, "istio-ipv6-lrp-uuid")
+				expectedLRPs = append(expectedLRPs, &nbdb.LogicalRouterPolicy{
+					UUID:     "istio-ipv6-lrp-uuid",
+					Priority: nodeSubNetPrio,
+					Match:    generateNodeIPMatch(cdnL3Network.info.GetNetworkScopedSwitchName(node1Name), v6Prefix, tt.expectedIstioIPv6),
+					Action:   nbdb.LogicalRouterPolicyActionReroute,
+					Nexthops: []string{node1CDNMgntIPv6Str},
+				})
+			}
+
+			expectedDB := []libovsdbtest.TestData{
+				&nbdb.LogicalRouter{
+					UUID:     "cdn-cr-uuid",
+					Name:     cdnL3Network.info.GetNetworkScopedClusterRouterName(),
+					Policies: expectedPolicies,
+				},
+			}
+			expectedDB = append(expectedDB, expectedLRPs...)
+
+			// Verify the results
+			matcher := libovsdbtest.HaveData(expectedDB)
 			success, err := matcher.Match(nbdbClient)
 			if !success {
 				t.Fatal(fmt.Errorf("test: \"%s\" didn't match expected with actual, err: %v", tt.desc, matcher.FailureMessage(nbdbClient)))

@@ -27,6 +27,7 @@ func TestConfig(t *testing.T) {
 func writeConfigFile(cfgFile *os.File, randomOptData bool, args ...string) error {
 	// Convert command-line args into sections and options
 	sections := make(map[string][]string)
+	skipScrambling := make(map[string]bool) // Track which args should not be scrambled
 	for _, arg := range args {
 		var section string
 		switch {
@@ -51,11 +52,35 @@ func writeConfigFile(cfgFile *os.File, randomOptData bool, args ...string) error
 		case strings.HasPrefix(arg, "-sb-"):
 			section = "ovnsouth"
 			arg = arg[4:]
+		case strings.HasPrefix(arg, "--enable-istio-ambient-support"):
+			section = "ovnkubernetesfeature"
+			if randomOptData {
+				arg = "enable-istio-ambient-support=false" // Use a valid boolean for random data
+				skipScrambling[arg] = true                 // Don't scramble this value
+			} else {
+				arg = "enable-istio-ambient-support=true"
+			}
+		case strings.HasPrefix(arg, "--istio-ambient-snat-ipv4"):
+			section = "ovnkubernetesfeature"
+			if randomOptData {
+				arg = "istio-ambient-snat-ipv4=169.254.7.99" // Use a valid IPv4 for random data
+				skipScrambling[arg] = true                   // Don't scramble this value
+			} else {
+				arg = strings.Replace(arg, "--istio-ambient-snat-ipv4", "istio-ambient-snat-ipv4", 1)
+			}
+		case strings.HasPrefix(arg, "--istio-ambient-snat-ipv6"):
+			section = "ovnkubernetesfeature"
+			if randomOptData {
+				arg = "istio-ambient-snat-ipv6=fd16:9254:7127:1337::1" // Use a valid IPv6 for random data
+				skipScrambling[arg] = true                             // Don't scramble this value
+			} else {
+				arg = strings.Replace(arg, "--istio-ambient-snat-ipv6", "istio-ambient-snat-ipv6", 1)
+			}
 		default:
 			return fmt.Errorf("unexpected argument passed")
 		}
 
-		if randomOptData {
+		if randomOptData && !skipScrambling[arg] {
 			parts := strings.Split(arg, "=")
 			gomega.Expect(parts).To(gomega.HaveLen(2))
 			sections[section] = append(sections[section], parts[0]+"=aklsdjfalsdfkjaslfdkjasfdlksa")
@@ -2007,6 +2032,104 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 			}
 			err := buildOvnKubeNodeConfig(&cliConfig, &file)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+		})
+	})
+
+	Context("Istio Ambient Support Configuration", func() {
+		It("should parse Istio Ambient IPv4-only CLI flags correctly", func() {
+			app := cli.NewApp()
+			app.Name = "test"
+			app.Flags = GetFlags(nil)
+
+			err := runInit(app, 1, nil, "--enable-istio-ambient-support", "--istio-ambient-snat-ipv4=169.254.7.100")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(OVNKubernetesFeature.EnableIstioAmbientSupport).To(gomega.BeTrue())
+			gomega.Expect(OVNKubernetesFeature.IstioAmbientSNATIPv4).To(gomega.Equal("169.254.7.100"))
+			gomega.Expect(OVNKubernetesFeature.IstioAmbientSNATIPv6).To(gomega.Equal(""))
+		})
+
+		It("should parse Istio Ambient dual-stack CLI flags correctly", func() {
+			app := cli.NewApp()
+			app.Name = "test"
+			app.Flags = GetFlags(nil)
+
+			err := runInit(app, 1, nil, "--enable-istio-ambient-support",
+				"--istio-ambient-snat-ipv4=169.254.7.100",
+				"--istio-ambient-snat-ipv6=fd16:9254:7127:1337::1")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(OVNKubernetesFeature.EnableIstioAmbientSupport).To(gomega.BeTrue())
+			gomega.Expect(OVNKubernetesFeature.IstioAmbientSNATIPv4).To(gomega.Equal("169.254.7.100"))
+			gomega.Expect(OVNKubernetesFeature.IstioAmbientSNATIPv6).To(gomega.Equal("fd16:9254:7127:1337::1"))
+		})
+
+		It("should use default Istio SNAT IPv4 when flag is enabled but IP not specified", func() {
+			app := cli.NewApp()
+			app.Name = "test"
+			app.Flags = GetFlags(nil)
+
+			err := runInit(app, 1, nil, "--enable-istio-ambient-support")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(OVNKubernetesFeature.EnableIstioAmbientSupport).To(gomega.BeTrue())
+			gomega.Expect(OVNKubernetesFeature.IstioAmbientSNATIPv4).To(gomega.Equal("169.254.7.127"))
+			gomega.Expect(OVNKubernetesFeature.IstioAmbientSNATIPv6).To(gomega.Equal(""))
+		})
+
+		It("should disable Istio Ambient support by default", func() {
+			app := cli.NewApp()
+			app.Name = "test"
+			app.Flags = GetFlags(nil)
+
+			err := runInit(app, 1, nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(OVNKubernetesFeature.EnableIstioAmbientSupport).To(gomega.BeFalse())
+		})
+
+		It("should parse Istio Ambient config file options correctly", func() {
+			app := cli.NewApp()
+			app.Name = "test"
+			app.Flags = GetFlags(nil)
+
+			cfgFile, err := os.CreateTemp(tmpDir, "ovnkube.conf")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			defer cfgFile.Close()
+
+			_, err = cfgFile.WriteString(`[OVNKubernetesFeature]
+enable-istio-ambient-support=true
+istio-ambient-snat-ipv4=169.254.7.200
+istio-ambient-snat-ipv6=fd16:9254:7127:1337::2
+`)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			err = runInit(app, 2, cfgFile)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(OVNKubernetesFeature.EnableIstioAmbientSupport).To(gomega.BeTrue())
+			gomega.Expect(OVNKubernetesFeature.IstioAmbientSNATIPv4).To(gomega.Equal("169.254.7.200"))
+			gomega.Expect(OVNKubernetesFeature.IstioAmbientSNATIPv6).To(gomega.Equal("fd16:9254:7127:1337::2"))
+		})
+
+		It("should allow CLI flags to override config file values", func() {
+			app := cli.NewApp()
+			app.Name = "test"
+			app.Flags = GetFlags(nil)
+
+			cfgFile, err := os.CreateTemp(tmpDir, "ovnkube.conf")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			defer cfgFile.Close()
+
+			_, err = cfgFile.WriteString(`[OVNKubernetesFeature]
+enable-istio-ambient-support=false
+istio-ambient-snat-ipv4=169.254.7.200
+istio-ambient-snat-ipv6=fd16:9254:7127:1337::2
+`)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			err = runInit(app, 3, cfgFile, "--enable-istio-ambient-support",
+				"--istio-ambient-snat-ipv4=169.254.7.150",
+				"--istio-ambient-snat-ipv6=fd16:9254:7127:1337::3")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(OVNKubernetesFeature.EnableIstioAmbientSupport).To(gomega.BeTrue())
+			gomega.Expect(OVNKubernetesFeature.IstioAmbientSNATIPv4).To(gomega.Equal("169.254.7.150"))
+			gomega.Expect(OVNKubernetesFeature.IstioAmbientSNATIPv6).To(gomega.Equal("fd16:9254:7127:1337::3"))
 		})
 	})
 })
