@@ -79,6 +79,9 @@ const (
 	// specified networks
 	skipPinnedLS = "k8s.ovn.org/node-skip-pinned-ls-for-networks"
 
+	// OvnNodeChassisHostname is the hostname set on a node's chassis
+	OvnNodeChassisHostname = "k8s.ovn.org/node-chassis-hostname"
+
 	// OvnNodeIfAddr is the CIDR form representation of primary network interface's attached IP address (i.e: 192.168.126.31/24 or 0:0:0:0:0:feff:c0a8:8e0c/64)
 	OvnNodeIfAddr = "k8s.ovn.org/node-primary-ifaddr"
 
@@ -501,6 +504,24 @@ func GetAllNADsSkipPinnedLS(node *corev1.Node) []string {
 
 func NodeChassisIDAnnotationChanged(oldNode, newNode *corev1.Node) bool {
 	return oldNode.Annotations[OvnNodeChassisID] != newNode.Annotations[OvnNodeChassisID]
+}
+
+func SetNodeChassisHostnameAnnotation(nodeAnnotator kube.Annotator, chassisHostname string) error {
+	if chassisHostname != "" {
+		if err := nodeAnnotator.Set(OvnNodeChassisHostname, chassisHostname); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ParseNodeChassisHostnameAnnotation returns the node's ovnNodeChassisHostname annotation
+func ParseNodeChassisHostnameAnnotation(node *corev1.Node) (string, error) {
+	chassisHostname, ok := node.Annotations[OvnNodeChassisHostname]
+	if !ok {
+		return "", newAnnotationNotSetError("%s annotation not found for node %s", OvnNodeChassisHostname, node.Name)
+	}
+	return chassisHostname, nil
 }
 
 type ManagementPortDetails struct {

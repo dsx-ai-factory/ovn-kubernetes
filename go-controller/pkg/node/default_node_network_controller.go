@@ -1138,6 +1138,17 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 		}
 	}
 
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+		chassisHostname, err := util.GetNodeChassisHostname()
+		if err != nil {
+			return fmt.Errorf("failed to get chassis hostname for node %s: %w", nc.name, err)
+		} else {
+			if err := util.SetNodeChassisHostnameAnnotation(nodeAnnotator, chassisHostname); err != nil {
+				return fmt.Errorf("failed to set node-chassis-hostname  annotation for node %s: %w", nc.name, err)
+			}
+		}
+	}
+
 	if err := nodeAnnotator.Run(); err != nil {
 		return fmt.Errorf("failed to set node %s annotations: %w", nc.name, err)
 	}
