@@ -14,6 +14,8 @@ import (
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -452,17 +454,23 @@ func RegisterOvnDBMetrics(podLister corev1listers.PodLister, podSynced func() bo
 		klog.Errorf("Timed out waiting for pod informer caches to sync")
 		return
 	}
-	err := wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 300*time.Second, true, func(_ context.Context) (bool, error) {
-		return checkPodRunsOnGivenNode(podLister, []string{"name in (ovn-nbdb, ovn-sbdb, ovnkube-db)"}, k8sNodeName, false)
-	})
-	if err != nil {
-		if wait.Interrupted(err) {
-			klog.Errorf("Timed out while checking if OVN DB Pod runs on this %q K8s Node: %v. "+
-				"Not registering OVN DB Metrics on this Node.", k8sNodeName, err)
-		} else {
-			klog.Infof("Not registering OVN DB Metrics on this Node since OVN DBs are not running on this node (%s): %v", k8sNodeName, err)
+	// For nodes in non-IC mode or in the default IC zone, check for its central NBDB/SBDB pods for the cluster/default zone;
+	// Otherwise, each non-global IC zone node has its own NBDB/SBDB.
+	// Needs to retry as node factory only watch for pods whose k8s.ovn.org/nodeName label is set for the current node, and it
+	// takes time for ovnkube-controller to set this label on ovn-db pods.
+	if !config.OVNKubernetesFeature.EnableInterconnect || config.Default.Zone == types.OvnDefaultZone {
+		err := wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 300*time.Second, true, func(_ context.Context) (bool, error) {
+			return checkPodRunsOnGivenNode(podLister, []string{"name in (ovn-nbdb, ovn-sbdb, ovnkube-db)"}, k8sNodeName, true)
+		})
+		if err != nil {
+			if wait.Interrupted(err) {
+				klog.Errorf("Timed out while checking if OVN DB Pod runs on this %q K8s Node: %v. "+
+					"Not registering OVN DB Metrics on this Node.", k8sNodeName, err)
+			} else {
+				klog.Infof("Not registering OVN DB Metrics on this Node since OVN DBs are not running on this node (%s): %v", k8sNodeName, err)
+			}
+			return
 		}
-		return
 	}
 	klog.Info("Found OVN DB Pod running on this node. Registering OVN DB Metrics")
 

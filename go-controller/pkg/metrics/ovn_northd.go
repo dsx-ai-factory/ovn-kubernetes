@@ -13,6 +13,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -123,7 +124,9 @@ func RegisterOvnNorthdMetrics(nodeLister corev1listers.NodeLister, k8sNodeName s
 
 	var match bool
 	var err error
-	if config.Kubernetes.NorthdNodeSelectorLabel != "" {
+
+	if (!config.OVNKubernetesFeature.EnableInterconnect || config.Default.Zone == types.OvnDefaultZone) && config.Kubernetes.NorthdNodeSelectorLabel != "" {
+		// for non-IC mode or the default zone nodes, check if northd is scheduled on this node by the nodeSelectorLabel
 		backoff := wait.Backoff{
 			Duration: retryInterval,
 			Steps:    maxNodeLabelRetries,
@@ -148,8 +151,8 @@ func RegisterOvnNorthdMetrics(nodeLister corev1listers.NodeLister, k8sNodeName s
 				"node (%s): %v", k8sNodeName, err)
 			return
 		}
-	} else if config.OVNKubernetesFeature.EnableInterconnect {
-		// TBD need to revisit for multi-node zone support and for DPU/DPU-HOST setup
+	} else if config.OVNKubernetesFeature.EnableInterconnect && config.Default.Zone != types.OvnDefaultZone {
+		// for non-default zone in IC mode, northd should be running on every node
 		match = true
 	}
 	if !match {

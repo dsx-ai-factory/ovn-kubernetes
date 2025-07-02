@@ -993,9 +993,9 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeNames []string
 	})
 
 	// For Pods, only select pods scheduled to these nodes
-	req, err := labels.NewRequirement("k8s.ovn.org/nodeName", selection.In, nodeNames)
+	req, err := labels.NewRequirement(util.OvnPodNodeNameLabel, selection.In, nodeNames)
 	if err != nil {
-		return nil, fmt.Errorf("error composing label filter  k8s.ovn.org/nodeName to select nodes in \"%v\":%v", nodeNames, err)
+		return nil, fmt.Errorf("error composing label filter %s to select pods on nodes \"%v\":%v", util.OvnPodNodeNameLabel, nodeNames, err)
 	}
 	selector := labels.NewSelector()
 	selector = selector.Add(*req)
