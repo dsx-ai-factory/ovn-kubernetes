@@ -9,6 +9,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -29,7 +30,7 @@ func newManagementPortRepresentor(nodeName string, hostSubnets []*net.IPNet, rep
 	}
 }
 
-func (mp *managementPortRepresentor) Create(isPodNetworkAdvertised bool, _ *routemanager.Controller, _ *corev1.Node, waiter *startupWaiter) (*managementPortConfig, error) {
+func (mp *managementPortRepresentor) Create(nodeAnnotator kube.Annotator, isPodNetworkAdvertised bool, _ *routemanager.Controller, _ *corev1.Node, waiter *startupWaiter) (*managementPortConfig, error) {
 	if !config.OvnKubeNode.IsPrimaryDPU {
 		return &managementPortConfig{}, nil
 	}
@@ -119,6 +120,10 @@ func (mp *managementPortRepresentor) Create(isPodNetworkAdvertised bool, _ *rout
 	}
 	mpcfg.isPodNetworkAdvertised.Store(isPodNetworkAdvertised)
 
+	mgmtPortMac := util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(mp.hostSubnets[0]).IP)
+	if err := util.SetNodeManagementPortMACAddress(nodeAnnotator, mgmtPortMac); err != nil {
+		return nil, err
+	}
 	waiter.AddWait(managementPortReady, nil)
 	return mpcfg, nil
 }
@@ -185,7 +190,7 @@ func newManagementPortNetdev(hostSubnets []*net.IPNet, netdevName string) Manage
 	}
 }
 
-func (mp *managementPortNetdev) Create(isRoutingAdvertised bool, routeManager *routemanager.Controller, _ *corev1.Node, _ *startupWaiter) (*managementPortConfig, error) {
+func (mp *managementPortNetdev) Create(_ kube.Annotator, isRoutingAdvertised bool, routeManager *routemanager.Controller, _ *corev1.Node, _ *startupWaiter) (*managementPortConfig, error) {
 	klog.Infof("Lookup netdevice link and existing management port using '%v'", mp.netdevName)
 	link, err := util.GetNetLinkOps().LinkByName(mp.netdevName)
 	if err != nil {

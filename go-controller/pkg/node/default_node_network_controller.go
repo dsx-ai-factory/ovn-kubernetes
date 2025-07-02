@@ -832,7 +832,7 @@ func createNodeManagementPorts(node *corev1.Node, nodeAnnotator kube.Annotator, 
 	var mgmtPortConfig *managementPortConfig
 	mgmtPorts := make([]*managementPortEntry, 0)
 	for _, port := range ports {
-		config, err := port.Create(isRoutingAdvertised, routeManager, node, waiter)
+		config, err := port.Create(nodeAnnotator, isRoutingAdvertised, routeManager, node, waiter)
 		if err != nil {
 			return nil, nil, err
 		}

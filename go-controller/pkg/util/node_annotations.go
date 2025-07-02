@@ -64,6 +64,10 @@ const (
 	// OvnNodeManagementPort is the constant string representing the annotation key
 	OvnNodeManagementPort = "k8s.ovn.org/node-mgmt-port"
 
+	// DEPRECATED; use OvnNodeManagementPortMacAddresses moving forward, but needed for upgrade
+	// OvnNodeManagementPortMacAddress is the constant string representing the annotation key
+	OvnNodeManagementPortMacAddress = "k8s.ovn.org/node-mgmt-port-mac-address"
+
 	// OvnNodeManagementPortMacAddresses contains all mac addresses of the management ports
 	// on all networks keyed by the network-name
 	// k8s.ovn.org/node-mgmt-port-mac-addresses: {
@@ -527,6 +531,10 @@ func ParseNodeManagementPortAnnotation(node *corev1.Node) (int, int, error) {
 	}
 
 	return cfg.PfId, cfg.FuncId, nil
+}
+
+func SetNodeManagementPortMACAddress(nodeAnnotator kube.Annotator, macAddress net.HardwareAddr) error {
+	return nodeAnnotator.Set(OvnNodeManagementPortMacAddress, macAddress.String())
 }
 
 // UpdateNodeManagementPortMACAddresses used only from unit tests

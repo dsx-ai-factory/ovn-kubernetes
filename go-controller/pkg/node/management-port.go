@@ -12,6 +12,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -21,7 +22,7 @@ import (
 type ManagementPort interface {
 	// Create Management port, use annotator to update node annotation with management port details
 	// and waiter to set up condition to wait on for management port creation
-	Create(isRoutingAdvertised bool, routeManager *routemanager.Controller, node *corev1.Node, waiter *startupWaiter) (*managementPortConfig, error)
+	Create(nodeAnnotator kube.Annotator, isRoutingAdvertised bool, routeManager *routemanager.Controller, node *corev1.Node, waiter *startupWaiter) (*managementPortConfig, error)
 	// CheckManagementPortHealth checks periodically for management port health until stopChan is posted
 	// or closed and reports any warnings/errors to log
 	CheckManagementPortHealth(routeManager *routemanager.Controller, cfg *managementPortConfig) error
@@ -76,7 +77,7 @@ func newManagementPort(nodeName string, hostSubnets []*net.IPNet) ManagementPort
 	}
 }
 
-func (mp *managementPort) Create(isRoutingAdvertised bool, routeManager *routemanager.Controller, node *corev1.Node, waiter *startupWaiter) (*managementPortConfig, error) {
+func (mp *managementPort) Create(nodeAnnotator kube.Annotator, isRoutingAdvertised bool, routeManager *routemanager.Controller, node *corev1.Node, waiter *startupWaiter) (*managementPortConfig, error) {
 	for _, mgmtPortName := range []string{types.K8sMgmtIntfName, types.K8sMgmtIntfName + "_0"} {
 		if err := syncMgmtPortInterface(mgmtPortName, true); err != nil {
 			return nil, fmt.Errorf("failed to sync management port: %v", err)
@@ -90,6 +91,7 @@ func (mp *managementPort) Create(isRoutingAdvertised bool, routeManager *routema
 	if macAddr, err = util.ParseNodeManagementPortMACAddresses(node, types.DefaultNetworkName); err != nil && !util.IsAnnotationNotSetError(err) {
 		return nil, err
 	}
+
 	if len(macAddr) == 0 {
 		// calculate mac from subnets
 		if len(mp.hostSubnets) == 0 {
@@ -113,6 +115,10 @@ func (mp *managementPort) Create(isRoutingAdvertised bool, routeManager *routema
 
 	cfg, err := createPlatformManagementPort(routeManager, types.K8sMgmtIntfName, mp.hostSubnets, isRoutingAdvertised)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := util.SetNodeManagementPortMACAddress(nodeAnnotator, macAddr); err != nil {
 		return nil, err
 	}
 
