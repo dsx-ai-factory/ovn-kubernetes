@@ -385,10 +385,6 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 		}
 	}
 
-	if err := oc.syncChassis(localZoneKNodes, remoteZoneKNodes); err != nil {
-		return fmt.Errorf("failed to sync chassis: error: %v", err)
-	}
-
 	if config.OVNKubernetesFeature.EnableInterconnect {
 		if err := oc.zoneChassisHandler.SyncNodes(kNodes); err != nil {
 			return fmt.Errorf("zoneChassisHandler failed to sync nodes: error: %w", err)
@@ -396,6 +392,10 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 
 		if err := oc.zoneICHandler.SyncNodes(kNodes); err != nil {
 			return fmt.Errorf("zoneICHandler failed to sync nodes: error: %w", err)
+		}
+	} else {
+		if err := oc.syncChassis(localZoneKNodes, remoteZoneKNodes); err != nil {
+			return fmt.Errorf("failed to sync chassis: error: %v", err)
 		}
 	}
 
@@ -449,19 +449,29 @@ func (oc *DefaultNetworkController) syncChassis(localZoneNodes, remoteZoneNodes 
 	}
 
 	reqDPUs := sets.New[string]()
+	var chassisHostname string
+
 	// Delete existing nodes from the chassis map.
 	// Also delete existing templateVars from the template map.
 	// Chassis of dpus that are removed or are not part of cluster should be deleted only
 	// if the corresponding host is removed from the cluster.
 	for _, node := range localZoneNodes {
-		// dpu hosts don't have chassis entry
-		if util.IsDPUHost(node) {
+		// In multi DPU case, chassis-hostname annotation will be that of primary DPU
+		// For central mode we have multiDPU use case, so handle them all here.
+		// Currently for IC mode there is only single DPU which can be handled outside
+		if !config.OVNKubernetesFeature.EnableInterconnect && util.IsDPUHost(node) {
 			if dpus, err := util.GetNodeDPUs(node); err == nil {
 				reqDPUs.Insert(dpus...)
 			}
 			continue
 		}
-		if chassis, exists := chassisHostNameMap[node.Name]; exists {
+		chassisHostname, err = util.ParseNodeChassisHostnameAnnotation(node)
+		if err != nil {
+			klog.Warningf("Skipping node %s from sync due to missing chassis hostname annotation: %v", node.Name, err)
+			continue
+		}
+
+		if chassis, exists := chassisHostNameMap[chassisHostname]; exists {
 			delete(chassisNameMap, chassis.Name)
 			delete(chassisHostNameMap, chassis.Hostname)
 			delete(templateChassisMap, chassis.Name)
@@ -471,14 +481,21 @@ func (oc *DefaultNetworkController) syncChassis(localZoneNodes, remoteZoneNodes 
 	// Delete existing remote zone nodes from the chassis map, but not from the templateVars
 	// as we need to cleanup chassisTemplateVars for the remote zone nodes
 	for _, node := range remoteZoneNodes {
-		// dpu hosts don't have chassis entry
-		if util.IsDPUHost(node) {
+		// In multi DPU case, chassis-hostname annotation will be that of primary DPU
+		// For central mode we have multiDPU use case, so handle them all here.
+		// Currently for IC mode there is only single DPU which can be handled outside
+		if !config.OVNKubernetesFeature.EnableInterconnect && util.IsDPUHost(node) {
 			if dpus, err := util.GetNodeDPUs(node); err == nil {
 				reqDPUs.Insert(dpus...)
 			}
 			continue
 		}
-		if chassis, exists := chassisHostNameMap[node.Name]; exists {
+		chassisHostname, err = util.ParseNodeChassisHostnameAnnotation(node)
+		if err != nil {
+			klog.Warningf("Skipping node %s from sync due to missing chassis hostname annotation: %v", node.Name, err)
+			continue
+		}
+		if chassis, exists := chassisHostNameMap[chassisHostname]; exists {
 			delete(chassisNameMap, chassis.Name)
 			delete(chassisHostNameMap, chassis.Hostname)
 		}
