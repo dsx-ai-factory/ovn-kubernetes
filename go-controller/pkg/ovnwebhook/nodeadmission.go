@@ -29,6 +29,7 @@ var commonNodeAnnotationChecks = map[string]checkNodeAnnot{
 	util.OVNNodeHostCIDRs:                  nil,
 	util.OVNNodeSecondaryHostEgressIPs:     nil,
 	util.OvnNodeL3GatewayConfig:            nil,
+	util.OvnNodeManagementPortMacAddress:   nil,
 	util.OvnNodeManagementPortMacAddresses: nil,
 	util.OvnNodeIfAddr:                     nil,
 	util.OvnNodeMasqCIDR:                   nil,
