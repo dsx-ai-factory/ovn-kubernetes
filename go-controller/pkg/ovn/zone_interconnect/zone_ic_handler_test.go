@@ -756,6 +756,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 					Name: "node1",
 					Annotations: map[string]string{
 						ovnNodeChassisIDAnnotation:         "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6",
+						ovnNodeChassisHostnameAnnotation:   "node1",
 						ovnNodeZoneNameAnnotation:          "global",
 						ovnNodeIDAnnotaton:                 "2",
 						ovnNodeSubnetsAnnotation:           "{\"red\":[\"10.244.2.0/24\"], \"blue\":[\"11.244.2.0/24\"]}",
@@ -773,6 +774,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 					Name: "node2",
 					Annotations: map[string]string{
 						ovnNodeChassisIDAnnotation:         "cb9ec8fa-b409-4ef3-9f42-d9283c47aac7",
+						ovnNodeChassisHostnameAnnotation:   "node2",
 						ovnNodeZoneNameAnnotation:          "foo",
 						ovnNodeIDAnnotaton:                 "3",
 						ovnNodeSubnetsAnnotation:           "{\"red\":[\"10.244.3.0/24\"], \"blue\":[\"11.244.3.0/24\"]}",
@@ -790,6 +792,7 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 					Name: "node3",
 					Annotations: map[string]string{
 						ovnNodeChassisIDAnnotation:         "cb9ec8fa-b409-4ef3-9f42-d9283c47aac8",
+						ovnNodeChassisHostnameAnnotation:   "node3",
 						ovnNodeZoneNameAnnotation:          "foo",
 						ovnNodeIDAnnotaton:                 "4",
 						ovnNodeSubnetsAnnotation:           "{\"red\":[\"10.244.4.0/24\"], \"blue\":[\"11.244.4.0/24\"]}",
