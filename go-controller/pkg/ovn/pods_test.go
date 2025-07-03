@@ -147,10 +147,11 @@ func newNode(nodeName, nodeIPv4CIDR string) *corev1.Node {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: nodeName,
 			Annotations: map[string]string{
-				"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", nodeIPv4CIDR, ""),
-				"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4Node1Subnet),
-				util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", nodeIPv4CIDR),
-				"k8s.ovn.org/zone-name":           "global",
+				"k8s.ovn.org/node-primary-ifaddr":   fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", nodeIPv4CIDR, ""),
+				"k8s.ovn.org/node-subnets":          fmt.Sprintf("{\"default\":\"%s\"}", v4Node1Subnet),
+				util.OVNNodeHostCIDRs:               fmt.Sprintf("[\"%s\"]", nodeIPv4CIDR),
+				"k8s.ovn.org/zone-name":             "global",
+				"k8s.ovn.org/node-chassis-hostname": nodeName,
 			},
 			Labels: map[string]string{
 				"k8s.ovn.org/egress-assignable": "",

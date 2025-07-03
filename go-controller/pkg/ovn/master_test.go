@@ -1736,9 +1736,10 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "newNode",
 					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets":    fmt.Sprintf("{\"default\":[\"%s\", \"fd02:0:0:2::2895/64\"]}", newNodeSubnet),
-						"k8s.ovn.org/node-chassis-id": "2",
-						util.OvnNodeID:                "2",
+						"k8s.ovn.org/node-subnets":          fmt.Sprintf("{\"default\":[\"%s\", \"fd02:0:0:2::2895/64\"]}", newNodeSubnet),
+						"k8s.ovn.org/node-chassis-id":       "2",
+						util.OvnNodeID:                      "2",
+						"k8s.ovn.org/node-chassis-hostname": "newNode",
 					},
 				},
 			}
@@ -1800,6 +1801,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 					Annotations: map[string]string{
 						"k8s.ovn.org/node-subnets":                   fmt.Sprintf("{\"default\":[\"%s\"]}", newNodeIpv4Subnet),
 						"k8s.ovn.org/node-chassis-id":                "2",
+						"k8s.ovn.org/node-chassis-hostname":          "newNode",
 						"k8s.ovn.org/node-gateway-router-lrp-ifaddr": "{\"ipv4\":\"100.64.0.2/16\"}",
 					},
 				},
@@ -1913,6 +1915,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			transitSwitchSubnet := "100.88.0.3/16"
 			testNode.Annotations["k8s.ovn.org/node-subnets"] = fmt.Sprintf("{\"default\":[\"%s\"]}", newNodeSubnet)
 			testNode.Annotations["k8s.ovn.org/node-chassis-id"] = "2"
+			testNode.Annotations["k8s.ovn.org/node-chassis-hostname"] = "node1"
 			testNode.Annotations["k8s.ovn.org/node-transit-switch-port-ifaddr"] = fmt.Sprintf("{\"ipv4\":\"%s\"}", transitSwitchSubnet)
 			testNode.Annotations["k8s.ovn.org/zone-name"] = "foo"
 			updatedNode, err := fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Create(context.TODO(), &testNode, metav1.CreateOptions{})
@@ -2165,10 +2168,16 @@ func TestController_syncNodes(t *testing.T) {
 			testNode := corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "node1",
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-chassis-id":       "chassis-node1",
+						"k8s.ovn.org/node-chassis-hostname": "node1",
+					},
 				},
 			}
 
-			kubeFakeClient := fake.NewSimpleClientset()
+			kubeFakeClient := fake.NewSimpleClientset(&corev1.NodeList{
+				Items: []corev1.Node{testNode},
+			})
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
 			egressQoSFakeClient := &egressqosfake.Clientset{}
@@ -2186,6 +2195,8 @@ func TestController_syncNodes(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s: Error creating master watch factory: %v", tt.name, err)
 			}
+			err = f.Start()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			defer f.Shutdown()
 
 			dbSetup := libovsdbtest.TestSetup{
@@ -2255,7 +2266,8 @@ func TestController_deleteStaleNodeChassis(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "node1",
 					Annotations: map[string]string{
-						"k8s.ovn.org/node-chassis-id": "chassis-node1-dpu",
+						"k8s.ovn.org/node-chassis-id":       "chassis-node1-dpu",
+						"k8s.ovn.org/node-chassis-hostname": "node1-dpu",
 					},
 				},
 			},
