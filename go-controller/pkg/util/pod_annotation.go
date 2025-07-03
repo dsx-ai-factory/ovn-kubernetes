@@ -704,19 +704,15 @@ func AddRoutesGatewayIP(
 					gatewayIP = gatewayIPnet.IP
 				}
 				podAnnotation.Routes = append(podAnnotation.Routes, additionalSubnetsToRoutes(netinfo, isIPv6, gatewayIP)...)
-				if !IsNetworkSegmentationSupportEnabled() || !netinfo.IsPrimaryNetwork() {
-					continue
+				// route for directly connected subnets, needed for VM sidecar
+				for _, clusterSubnet := range netinfo.Subnets() {
+					if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
+						podAnnotation.Routes = append(podAnnotation.Routes, PodRoute{
+							Dest:    clusterSubnet.CIDR,
+							NextHop: gatewayIP,
+						})
+					}
 				}
-				// no route needed for directly connected subnets
-				// TBD-merge localnet type does need this only for a temp workaround, is it still needed?
-				//for _, clusterSubnet := range netinfo.Subnets() {
-				//	if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
-				//		podAnnotation.Routes = append(podAnnotation.Routes, PodRoute{
-				//			Dest:    clusterSubnet.CIDR,
-				//			NextHop: gatewayIP,
-				//		})
-				//	}
-				//}
 			}
 			return nil
 		case types.Layer2Topology:
@@ -728,19 +724,18 @@ func AddRoutesGatewayIP(
 				}
 				gatewayIPnet := GetNodeGatewayIfAddr(nodeSubnet)
 				podAnnotation.Routes = append(podAnnotation.Routes, additionalSubnetsToRoutes(netinfo, isIPv6, gatewayIPnet.IP)...)
+				// route for directly connected subnets, needed for VM sidecar
+				for _, clusterSubnet := range netinfo.Subnets() {
+					if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
+						podAnnotation.Routes = append(podAnnotation.Routes, PodRoute{
+							Dest:    clusterSubnet.CIDR,
+							NextHop: gatewayIPnet.IP,
+						})
+					}
+				}
 				if !IsNetworkSegmentationSupportEnabled() || !netinfo.IsPrimaryNetwork() {
 					continue
 				}
-				// no route needed for directly connected subnets
-				// TBD-merge layer-2 type does need this only for a temp workaround, is it still needed?
-				//for _, clusterSubnet := range netinfo.Subnets() {
-				//	if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
-				//		podAnnotation.Routes = append(podAnnotation.Routes, PodRoute{
-				//			Dest:    clusterSubnet.CIDR,
-				//			NextHop: gatewayIPnet.IP,
-				//		})
-				//	}
-				//}
 				// Ensure default service network traffic always goes to OVN
 				podAnnotation.Routes = append(podAnnotation.Routes, serviceCIDRToRoute(isIPv6, gatewayIPnet.IP)...)
 				// Ensure UDN join subnet traffic always goes to UDN LSP

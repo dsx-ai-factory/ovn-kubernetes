@@ -515,6 +515,10 @@ func dummyL2TestPod(nsName string, info secondaryNetInfo, podIdx, secondaryNetId
 			"primary",
 			0,
 			[]util.PodRoute{
+				{ // directly connected route to layer2 clusterSubnet
+					Dest:    testing.MustParseIPNet("100.200.0.0/16"),
+					NextHop: testing.MustParseIP("100.200.0.1"),
+				},
 				{
 					Dest:    testing.MustParseIPNet("172.16.1.0/24"),
 					NextHop: testing.MustParseIP("100.200.0.1"),
@@ -539,7 +543,12 @@ func dummyL2TestPod(nsName string, info secondaryNetInfo, podIdx, secondaryNetId
 		info.mtu,
 		"secondary",
 		0,
-		[]util.PodRoute{},
+		[]util.PodRoute{
+			{ // directly connected route to layer2 clusterSubnet
+				Dest:    testing.MustParseIPNet("100.200.0.0/16"),
+				NextHop: testing.MustParseIP("100.200.0.1"),
+			},
+		},
 	)
 	return pod
 }
