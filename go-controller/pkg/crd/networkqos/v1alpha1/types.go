@@ -47,9 +47,7 @@ type NetworkQoS struct {
 // Spec defines the desired state of NetworkQoS
 type Spec struct {
 	// networkSelector selects the networks on which the pod IPs need to be added to the source address set.
-	// NetworkQoS controller currently supports `NetworkAttachmentDefinitions` type only.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf", message="networkSelectors are immutable"
-	// +kubebuilder:validation:XValidation:rule="self.all(sel, sel.networkSelectionType == 'NetworkAttachmentDefinitions')", message="Unsupported network selection type. Only NetworkAttachmentDefinitions is supported."
 	// +kubebuilder:validation:XValidation:rule="self.filter(sel, sel.networkSelectionType == 'NetworkAttachmentDefinitions').all(sel, has(sel.networkAttachmentDefinitionSelector) && has(sel.networkAttachmentDefinitionSelector.networkSelector) && (has(sel.networkAttachmentDefinitionSelector.networkSelector.matchExpressions) || has(sel.networkAttachmentDefinitionSelector.networkSelector.matchLabels)))", message="networkAttachmentDefinitionSelector cannot have an empty networkSelector"
 	NetworkSelectors crdtypes.NetworkSelectors `json:"networkSelectors,omitempty"`
 
