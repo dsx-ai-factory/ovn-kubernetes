@@ -20,6 +20,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	k8stypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
@@ -63,6 +64,15 @@ type retryRequest struct {
 	adminpbr *adminpbrapi.AdminPolicyBasedRoute
 	policy   *internalAdminPBRPolicy
 	pod      *corev1.Pod
+}
+
+type transitRouteInfo struct {
+	subnets   sets.Set[string]
+	transitIP net.IP
+}
+
+func (tr *transitRouteInfo) equal(other *transitRouteInfo) bool {
+	return (tr == nil && other == nil) || (tr != nil && other != nil && tr.subnets.Equal(other.subnets) && tr.transitIP.Equal(other.transitIP))
 }
 
 type internalAdminPBRPolicy struct {
@@ -141,7 +151,7 @@ func (pol *internalAdminPBRPolicy) attachPodHandler() {
 	if pol.podHandler != nil {
 		return
 	}
-	pol.podHandler, _ = pol.controller.watchFactory.AddHandlerWithFilterFunc(reflect.TypeOf(&corev1.Pod{}),
+	pol.podHandler, _ = pol.controller.watchFactory.AddHandlerWithFilterFunc(factory.PodType,
 		pol.filterPodsByAllSelectors, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				pol.addPodToAddressSet(obj)
@@ -152,7 +162,7 @@ func (pol *internalAdminPBRPolicy) attachPodHandler() {
 			DeleteFunc: func(obj interface{}) {
 				pol.removePodFromAddressSet(obj)
 			},
-		}, nil, 1 /* TBD: set priority */)
+		}, nil, pol.controller.watchFactory.GetHandlerPriority(factory.PodType))
 }
 
 func (pol *internalAdminPBRPolicy) detachPodHandler() {
@@ -477,7 +487,17 @@ func (bnc *BaseNetworkController) applyAdminPBR(adminpbr *adminpbrapi.AdminPolic
 		types.ExternalIDHash:         policy.hash,
 		types.ExternalIDNetAttachDef: adminpbr.Spec.NetworkAttachmentName,
 		types.ExternalIDRouter:       policy.logicalRouterName,
+		types.NetworkExternalID:      bnc.ReconcilableNetInfo.GetNetworkName(),
 	}
+
+	// for interconnect mode, nexthop may be not directly reachable,
+	// try to find the transit switch port which routes to the
+	// designated nexthop and then make its IP as nexthop
+	mappedNexthops, err := bnc.mapNextHopsToTransitIPs(lrp.Nexthops)
+	if err != nil {
+		return fmt.Errorf("failed to find transit ips for nexthops %v: %v", lrp.Nexthops, err)
+	}
+	lrp.Nexthops = mappedNexthops
 
 	p := func(item *nbdb.LogicalRouterPolicy) bool {
 		return item.Priority == types.AminPBRReroutePriority && item.Match == match &&
@@ -485,7 +505,7 @@ func (bnc *BaseNetworkController) applyAdminPBR(adminpbr *adminpbrapi.AdminPolic
 			item.ExternalIDs[types.ExternalIDNetAttachDef] == adminpbr.Spec.NetworkAttachmentName
 	}
 
-	err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(bnc.nbClient, policy.logicalRouterName, &lrp, p,
+	err = libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(bnc.nbClient, policy.logicalRouterName, &lrp, p,
 		&lrp.Nexthops, &lrp.Match, &lrp.Action, &lrp.Priority, &lrp.ExternalIDs)
 	if err != nil {
 		return fmt.Errorf("unable to apply adminpbr %s, err: %v", ownerVal.String(), err)
@@ -698,12 +718,13 @@ func (bnc *BaseNetworkController) syncAdminPBRPeriodic() {
 		for _, ovnPolicy := range ovnPolicies {
 			hash := ovnPolicy.ExternalIDs[types.ExternalIDHash]
 			var hashFoundInController bool
+			var internalState *internalAdminPBRPolicy
 			value, _ := bnc.adminPBRStore.Load(k8stypes.NamespacedName{Name: apbrName}.String())
 			if value == nil {
 				hashFoundInController = false
 			} else {
 				policyMap := value.(map[string]*internalAdminPBRPolicy)
-				_, hashFoundInController = policyMap[hash]
+				internalState, hashFoundInController = policyMap[hash]
 			}
 			klog.V(5).Infof("[%s] hash=%s, adminpbr not found: %v, hash found: %v", bnc.GetNetworkName(), hash, pbrNotFoundInK8s, hashFoundInController)
 			if pbrNotFoundInK8s || !hashFoundInController {
@@ -711,6 +732,21 @@ func (bnc *BaseNetworkController) syncAdminPBRPeriodic() {
 				if err := bnc.cleanupLogicalRouterPolicy(apbrName, internalPolicyOf(ovnPolicy)); err != nil {
 					klog.Errorf("[%s] Failed to clean up stale logical router policy %s (%s): %v", bnc.GetNetworkName(), apbrName, hash, err)
 				}
+				continue
+			}
+			newMappedNexthops, err := bnc.mapNextHopsToTransitIPs(internalState.nextHopIPs)
+			if err != nil {
+				klog.Errorf("[%s] Failed to map nexthops to transit IPs: %v", bnc.GetNetworkName(), err)
+				continue
+			}
+			ovnNexthopSet := sets.NewString(ovnPolicy.Nexthops...)
+			if ovnNexthopSet.Equal(sets.NewString(newMappedNexthops...)) {
+				continue
+			}
+			if err := bnc.updateLogicalRouterPolicyNexthops(ovnPolicy, newMappedNexthops); err != nil {
+				klog.Errorf("[%s] Failed to update nexthops (%v) of logical router policy %s (%s): %v", bnc.GetNetworkName(), newMappedNexthops, apbrName, hash, err)
+			} else {
+				klog.V(4).Infof("[%s] Updated nexthop of logical router policy %s (%s) to %v", bnc.GetNetworkName(), apbrName, hash, newMappedNexthops)
 			}
 		}
 		unlock()
@@ -797,15 +833,11 @@ func setErrorForAdminPBR(bnc *BaseNetworkController, adminpbr *adminpbrapi.Admin
 }
 
 func (bnc *BaseNetworkController) retryAdminPBROperations() bool {
-	item, quit := bnc.adminPBRRetryQueue.Get()
+	retry, quit := bnc.adminPBRRetryQueue.Get()
 	if quit {
 		return false
 	}
-	bnc.adminPBRRetryQueue.Done(item)
-	retry, ok := item.(*retryRequest)
-	if !ok {
-		return true
-	}
+	bnc.adminPBRRetryQueue.Done(retry)
 	klog.V(4).Infof("Retrying event: %v", retry)
 	switch retry.action {
 	case actionAddAdminPBR, actionUpdateAdminPBR:
@@ -940,6 +972,124 @@ func (bnc *BaseNetworkController) noRerouteToJoinSubnet() error {
 		return fmt.Errorf("unable to add logical router policy for join subnet %s: %v", config.Gateway.V4JoinSubnet, err)
 	}
 	return nil
+}
+
+// if nexthop is not directly reachable, try to find the transit switch port ip through which
+// the nexthop can be reached, and then map the nexthop to the transit switch port ip
+func (bnc *BaseNetworkController) mapNextHopsToTransitIPs(nexthops []string) ([]string, error) {
+	// convert nexthops from strings to net.IPs
+	nexthopIPs := []net.IP{}
+	for _, nexthop := range nexthops {
+		ip := net.ParseIP(nexthop)
+		if ip == nil {
+			return nil, fmt.Errorf("failed to parse nexthop %s", nexthop)
+		}
+		nexthopIPs = append(nexthopIPs, ip)
+	}
+	dstSubnets := []*net.IPNet{}
+	bnc.nodeTransitMapMutex.RLock()
+	defer bnc.nodeTransitMapMutex.RUnlock()
+	subnetsToTransitIPMap := bnc.aggregateTransitRouteInfo()
+	for subnet := range subnetsToTransitIPMap {
+		_, ipnet, err := net.ParseCIDR(subnet)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse CIDR %s: %v", subnet, err)
+		}
+		dstSubnets = append(dstSubnets, ipnet)
+	}
+	// for each nexthop, go through the destination subnets to check if it falls in the range.
+	// if a remote subnet is found, find its corresponding transit switch port ip as the nexthop;
+	// otherwise use the original nexthop, since the nexthop is in the local zone
+	mappedNexthops := []string{}
+	for _, nexthop := range nexthopIPs {
+		if subnet := util.FindSubnetContainingIP(dstSubnets, nexthop); subnet != "" {
+			// nexthop in dest subnets, indicates nexthop is in remote zone, return transit switch port ip as nexthop
+			if transitIP, ok := subnetsToTransitIPMap[subnet]; ok {
+				klog.V(5).Infof("Map nexthop %s to transit IP %s", nexthop.String(), transitIP)
+				mappedNexthops = append(mappedNexthops, transitIP)
+			}
+		} else {
+			// otherwise use the original nexthop, as the nexthop is in the local zone
+			mappedNexthops = append(mappedNexthops, nexthop.String())
+		}
+	}
+	return mappedNexthops, nil
+}
+
+// update subnets to transit IP mapping for interconnect mode
+func (bnc *BaseNetworkController) updateTransitRoutes(oldNode, newNode *corev1.Node) {
+	var newRouteInfo *transitRouteInfo
+	if newNode != nil && !bnc.isLocalZoneNode(newNode) {
+		transitIPs, err := util.ParseNodeTransitSwitchPortAddrs(newNode)
+		if err != nil {
+			klog.Warningf("Failed to parse transit switch port addresses on node %s: %v", newNode.Name, err)
+			// if error happens, continue to delete the route info and reconcile
+		}
+		subnets, err := util.GetNodeSubnetsByNetwork(newNode, bnc.GetNetworkName())
+		if err != nil {
+			klog.Warningf("Failed to get subnets for network %s of node %s: %v", bnc.GetNetworkName(), newNode.Name, err)
+			// if error happens, continue to delete the route info and reconcile
+		}
+		if len(subnets) > 0 && len(transitIPs) > 0 {
+			for _, transitIP := range transitIPs {
+				if transitIP.IP.To4() == nil {
+					// not handling IPv6 for now, will fix in upstream
+					continue
+				}
+				// no newRouteInfo if either subnets or transitIP is empty, and route info for this node will be deleted
+				newRouteInfo = &transitRouteInfo{sets.New(subnets...), transitIP.IP}
+				break
+			}
+		}
+	}
+	var nodeName string
+	if newNode == nil {
+		nodeName = oldNode.Name
+	} else {
+		nodeName = newNode.Name
+	}
+	bnc.nodeTransitMapMutex.Lock()
+	defer bnc.nodeTransitMapMutex.Unlock()
+	if newRouteInfo == nil {
+		klog.V(5).Infof("Deleting transit route info for node %s", nodeName)
+		delete(bnc.nodeTransitMap, nodeName)
+	} else {
+		oldRouteInfo := bnc.nodeTransitMap[nodeName]
+		if newRouteInfo.equal(oldRouteInfo) {
+			return
+		}
+		klog.V(5).Infof("Updating transit route info for node %s: %+v", newNode.Name, newRouteInfo)
+		bnc.nodeTransitMap[newNode.Name] = newRouteInfo
+	}
+	bnc.requestAdminPBRSync()
+}
+
+func (bnc *BaseNetworkController) aggregateTransitRouteInfo() map[string]string {
+	transitRouteInfo := map[string]string{}
+	for _, routeInfo := range bnc.nodeTransitMap {
+		for subnet := range routeInfo.subnets {
+			transitRouteInfo[subnet] = routeInfo.transitIP.String()
+		}
+	}
+	return transitRouteInfo
+}
+
+func (bnc *BaseNetworkController) updateLogicalRouterPolicyNexthops(lrpolicy *nbdb.LogicalRouterPolicy, newNexthops []string) error {
+	p := func(item *nbdb.LogicalRouterPolicy) bool {
+		return item.UUID == lrpolicy.UUID
+	}
+	lrpolicy.Nexthops = newNexthops
+	return libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(bnc.nbClient,
+		bnc.GetNetworkScopedName(types.OVNClusterRouter), lrpolicy, p, &lrpolicy.Nexthops)
+}
+
+func (bnc *BaseNetworkController) requestAdminPBRSync() {
+	select {
+	case bnc.adminPBRSyncChan <- struct{}{}:
+		klog.V(5).Infof("AdminPBR sync requested")
+	default:
+		klog.V(5).Infof("AdminPBR sync already requested")
+	}
 }
 
 func internalPolicyOf(ovnpbr *nbdb.LogicalRouterPolicy) *internalAdminPBRPolicy {

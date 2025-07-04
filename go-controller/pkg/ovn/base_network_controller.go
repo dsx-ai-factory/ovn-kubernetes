@@ -186,12 +186,16 @@ type BaseNetworkController struct {
 	releasedPodsOnStartupMutex sync.Mutex
 
 	// AdminPBR is only supported for default network and secondary layer3 network
+	adminPBRSyncChan         chan struct{}
 	adminPBRHandler          *factory.Handler
 	adminPBRNodeHandler      *factory.Handler
 	adminPBRNamespaceHandler *factory.Handler
 	// map of admin pbr policies
 	adminPBRStore      sync.Map
-	adminPBRRetryQueue workqueue.RateLimitingInterface
+	adminPBRRetryQueue workqueue.TypedRateLimitingInterface[*retryRequest]
+	// map of node subnets to transit switch port IPs
+	nodeTransitMapMutex sync.RWMutex
+	nodeTransitMap      map[string]*transitRouteInfo
 
 	// IP addresses of OVN Cluster logical router port ("GwRouterToJoinSwitchPrefix + OVNClusterRouter")
 	// connecting to the join switch
@@ -1167,8 +1171,10 @@ func (bnc *BaseNetworkController) WatchAdminPolicyBasedRoutes() (err error) {
 	}()
 
 	if !bnc.IsUserDefinedNetwork() || bnc.TopologyType() == types.Layer3Topology {
-		bnc.adminPBRRetryQueue = workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "adminpbr")
+		bnc.adminPBRRetryQueue = workqueue.NewTypedRateLimitingQueueWithConfig(workqueue.DefaultTypedControllerRateLimiter[*retryRequest](), workqueue.TypedRateLimitingQueueConfig[*retryRequest]{Name: "adminpbr"})
 	}
+	bnc.adminPBRSyncChan = make(chan struct{}, 1)
+	bnc.nodeTransitMap = make(map[string]*transitRouteInfo)
 	filterAdminPBR := func(obj interface{}) bool {
 		apbr, ok := obj.(*adminpbrapi.AdminPolicyBasedRoute)
 		if !ok {
@@ -1234,13 +1240,44 @@ func (bnc *BaseNetworkController) WatchAdminPolicyBasedRoutes() (err error) {
 
 	bnc.adminPBRNodeHandler, err = bnc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
+			node, ok := obj.(*corev1.Node)
+			if !ok {
+				klog.Errorf("Not a node: %v", obj)
+				return
+			}
+			if !bnc.isLocalZoneNode(node) {
+				bnc.updateTransitRoutes(nil, node)
+			}
 			bnc.syncAdminPBROnNodeChange(nil, obj)
 		},
 		UpdateFunc: func(old, new interface{}) {
+			oldNode, ok := old.(*corev1.Node)
+			if !ok {
+				klog.Errorf("Not a node: %v", old)
+				return
+			}
+			newNode, ok := new.(*corev1.Node)
+			if !ok {
+				klog.Errorf("Not a node: %v", new)
+				return
+			}
+			if util.NodeTransitSwitchPortAddrAnnotationChanged(oldNode, newNode) || util.NodeSubnetAnnotationChanged(oldNode, newNode) || (bnc.isLocalZoneNode(oldNode) != bnc.isLocalZoneNode(newNode)) {
+				bnc.updateTransitRoutes(oldNode, newNode)
+			}
 			bnc.syncAdminPBROnNodeChange(old, new)
 		},
-		DeleteFunc: func(_ interface{}) {},
-	}, nil, 1 /* TBD: set priority */)
+		DeleteFunc: func(obj interface{}) {
+			node, ok := obj.(*corev1.Node)
+			if !ok {
+				klog.Errorf("Not a node: %v", obj)
+				return
+			}
+			if !bnc.isLocalZoneNode(node) {
+				// updateTransitRoutes will delete the stale mappings
+				bnc.updateTransitRoutes(node, nil)
+			}
+		},
+	}, nil, bnc.watchFactory.GetHandlerPriority(factory.NodeType))
 	if err != nil {
 		return fmt.Errorf("failed to watch for nodes for AdminPolicyBasedRoute for network %s", bnc.GetNetworkName())
 	}
@@ -1253,7 +1290,7 @@ func (bnc *BaseNetworkController) WatchAdminPolicyBasedRoutes() (err error) {
 			bnc.syncAdminPBROnNamespaceChange(old, new)
 		},
 		DeleteFunc: func(_ interface{}) {},
-	}, nil /* TBD: set priority */)
+	}, nil)
 	if err != nil {
 		return fmt.Errorf("failed to watch for namespaces for AdminPolicyBasedRoute for network %s", bnc.GetNetworkName())
 	}
@@ -1264,8 +1301,10 @@ func (bnc *BaseNetworkController) WatchAdminPolicyBasedRoutes() (err error) {
 		for {
 			select {
 			case <-ticker.C:
-				bnc.syncAdminPBRPeriodic()
+				bnc.requestAdminPBRSync()
 				bnc.syncAddressSetPeriodic()
+			case <-bnc.adminPBRSyncChan:
+				bnc.syncAdminPBRPeriodic()
 			case <-bnc.stopChan:
 				ticker.Stop()
 				bnc.adminPBRRetryQueue.ShutDown()

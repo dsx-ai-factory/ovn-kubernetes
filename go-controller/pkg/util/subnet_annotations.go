@@ -299,3 +299,17 @@ func ParseNodesHostSubnetAnnotation(nodes []*corev1.Node, netName string) ([]*ne
 func ParseNodeHostSubnetsAnnotation(node *corev1.Node) (map[string][]*net.IPNet, error) {
 	return parseSubnetAnnotation(node.Annotations, types.NodeSubnetsAnnotation)
 }
+
+// GetNodeSubnetsByNetwork parses the "k8s.ovn.org/node-subnets" annotation
+// on a node and returns the subnets for the given network.
+func GetNodeSubnetsByNetwork(node *corev1.Node, network string) ([]string, error) {
+	subnetsMap, err := parseSubnetAnnotation(node.Annotations, types.NodeSubnetsAnnotation)
+	if err != nil {
+		return nil, err
+	}
+	subnetsOfNetwork := []string{}
+	for _, subnet := range subnetsMap[network] {
+		subnetsOfNetwork = append(subnetsOfNetwork, subnet.String())
+	}
+	return subnetsOfNetwork, nil
+}
