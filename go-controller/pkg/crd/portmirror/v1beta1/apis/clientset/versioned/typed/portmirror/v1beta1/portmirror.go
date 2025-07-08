@@ -19,14 +19,14 @@ package v1beta1
 
 import (
 	"context"
-	"time"
 
 	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
+	portmirrorv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/applyconfiguration/portmirror/v1beta1"
 	scheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned/scheme"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"
-	rest "k8s.io/client-go/rest"
+	gentype "k8s.io/client-go/gentype"
 )
 
 // PortMirrorsGetter has a method to return a PortMirrorInterface.
@@ -39,6 +39,7 @@ type PortMirrorsGetter interface {
 type PortMirrorInterface interface {
 	Create(ctx context.Context, portMirror *v1beta1.PortMirror, opts v1.CreateOptions) (*v1beta1.PortMirror, error)
 	Update(ctx context.Context, portMirror *v1beta1.PortMirror, opts v1.UpdateOptions) (*v1beta1.PortMirror, error)
+	// Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
 	UpdateStatus(ctx context.Context, portMirror *v1beta1.PortMirror, opts v1.UpdateOptions) (*v1beta1.PortMirror, error)
 	Delete(ctx context.Context, name string, opts v1.DeleteOptions) error
 	DeleteCollection(ctx context.Context, opts v1.DeleteOptions, listOpts v1.ListOptions) error
@@ -46,149 +47,26 @@ type PortMirrorInterface interface {
 	List(ctx context.Context, opts v1.ListOptions) (*v1beta1.PortMirrorList, error)
 	Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error)
 	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *v1beta1.PortMirror, err error)
+	Apply(ctx context.Context, portMirror *portmirrorv1beta1.PortMirrorApplyConfiguration, opts v1.ApplyOptions) (result *v1beta1.PortMirror, err error)
+	// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
+	ApplyStatus(ctx context.Context, portMirror *portmirrorv1beta1.PortMirrorApplyConfiguration, opts v1.ApplyOptions) (result *v1beta1.PortMirror, err error)
 	PortMirrorExpansion
 }
 
 // portMirrors implements PortMirrorInterface
 type portMirrors struct {
-	client rest.Interface
-	ns     string
+	*gentype.ClientWithListAndApply[*v1beta1.PortMirror, *v1beta1.PortMirrorList, *portmirrorv1beta1.PortMirrorApplyConfiguration]
 }
 
 // newPortMirrors returns a PortMirrors
 func newPortMirrors(c *K8sV1beta1Client, namespace string) *portMirrors {
 	return &portMirrors{
-		client: c.RESTClient(),
-		ns:     namespace,
+		gentype.NewClientWithListAndApply[*v1beta1.PortMirror, *v1beta1.PortMirrorList, *portmirrorv1beta1.PortMirrorApplyConfiguration](
+			"portmirrors",
+			c.RESTClient(),
+			scheme.ParameterCodec,
+			namespace,
+			func() *v1beta1.PortMirror { return &v1beta1.PortMirror{} },
+			func() *v1beta1.PortMirrorList { return &v1beta1.PortMirrorList{} }),
 	}
-}
-
-// Get takes name of the portMirror, and returns the corresponding portMirror object, and an error if there is any.
-func (c *portMirrors) Get(ctx context.Context, name string, options v1.GetOptions) (result *v1beta1.PortMirror, err error) {
-	result = &v1beta1.PortMirror{}
-	err = c.client.Get().
-		Namespace(c.ns).
-		Resource("portmirrors").
-		Name(name).
-		VersionedParams(&options, scheme.ParameterCodec).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// List takes label and field selectors, and returns the list of PortMirrors that match those selectors.
-func (c *portMirrors) List(ctx context.Context, opts v1.ListOptions) (result *v1beta1.PortMirrorList, err error) {
-	var timeout time.Duration
-	if opts.TimeoutSeconds != nil {
-		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
-	}
-	result = &v1beta1.PortMirrorList{}
-	err = c.client.Get().
-		Namespace(c.ns).
-		Resource("portmirrors").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Timeout(timeout).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// Watch returns a watch.Interface that watches the requested portMirrors.
-func (c *portMirrors) Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-	var timeout time.Duration
-	if opts.TimeoutSeconds != nil {
-		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
-	}
-	opts.Watch = true
-	return c.client.Get().
-		Namespace(c.ns).
-		Resource("portmirrors").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Timeout(timeout).
-		Watch(ctx)
-}
-
-// Create takes the representation of a portMirror and creates it.  Returns the server's representation of the portMirror, and an error, if there is any.
-func (c *portMirrors) Create(ctx context.Context, portMirror *v1beta1.PortMirror, opts v1.CreateOptions) (result *v1beta1.PortMirror, err error) {
-	result = &v1beta1.PortMirror{}
-	err = c.client.Post().
-		Namespace(c.ns).
-		Resource("portmirrors").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Body(portMirror).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// Update takes the representation of a portMirror and updates it. Returns the server's representation of the portMirror, and an error, if there is any.
-func (c *portMirrors) Update(ctx context.Context, portMirror *v1beta1.PortMirror, opts v1.UpdateOptions) (result *v1beta1.PortMirror, err error) {
-	result = &v1beta1.PortMirror{}
-	err = c.client.Put().
-		Namespace(c.ns).
-		Resource("portmirrors").
-		Name(portMirror.Name).
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Body(portMirror).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// UpdateStatus was generated because the type contains a Status member.
-// Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
-func (c *portMirrors) UpdateStatus(ctx context.Context, portMirror *v1beta1.PortMirror, opts v1.UpdateOptions) (result *v1beta1.PortMirror, err error) {
-	result = &v1beta1.PortMirror{}
-	err = c.client.Put().
-		Namespace(c.ns).
-		Resource("portmirrors").
-		Name(portMirror.Name).
-		SubResource("status").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Body(portMirror).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// Delete takes name of the portMirror and deletes it. Returns an error if one occurs.
-func (c *portMirrors) Delete(ctx context.Context, name string, opts v1.DeleteOptions) error {
-	return c.client.Delete().
-		Namespace(c.ns).
-		Resource("portmirrors").
-		Name(name).
-		Body(&opts).
-		Do(ctx).
-		Error()
-}
-
-// DeleteCollection deletes a collection of objects.
-func (c *portMirrors) DeleteCollection(ctx context.Context, opts v1.DeleteOptions, listOpts v1.ListOptions) error {
-	var timeout time.Duration
-	if listOpts.TimeoutSeconds != nil {
-		timeout = time.Duration(*listOpts.TimeoutSeconds) * time.Second
-	}
-	return c.client.Delete().
-		Namespace(c.ns).
-		Resource("portmirrors").
-		VersionedParams(&listOpts, scheme.ParameterCodec).
-		Timeout(timeout).
-		Body(&opts).
-		Do(ctx).
-		Error()
-}
-
-// Patch applies the patch and returns the patched portMirror.
-func (c *portMirrors) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *v1beta1.PortMirror, err error) {
-	result = &v1beta1.PortMirror{}
-	err = c.client.Patch(pt).
-		Namespace(c.ns).
-		Resource("portmirrors").
-		Name(name).
-		SubResource(subresources...).
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Body(data).
-		Do(ctx).
-		Into(result)
-	return
 }

@@ -19,8 +19,8 @@ package v1beta1
 
 import (
 	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/listers"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -37,25 +37,17 @@ type NetworkProbeLister interface {
 
 // networkProbeLister implements the NetworkProbeLister interface.
 type networkProbeLister struct {
-	indexer cache.Indexer
+	listers.ResourceIndexer[*v1beta1.NetworkProbe]
 }
 
 // NewNetworkProbeLister returns a new NetworkProbeLister.
 func NewNetworkProbeLister(indexer cache.Indexer) NetworkProbeLister {
-	return &networkProbeLister{indexer: indexer}
-}
-
-// List lists all NetworkProbes in the indexer.
-func (s *networkProbeLister) List(selector labels.Selector) (ret []*v1beta1.NetworkProbe, err error) {
-	err = cache.ListAll(s.indexer, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1beta1.NetworkProbe))
-	})
-	return ret, err
+	return &networkProbeLister{listers.New[*v1beta1.NetworkProbe](indexer, v1beta1.Resource("networkprobe"))}
 }
 
 // NetworkProbes returns an object that can list and get NetworkProbes.
 func (s *networkProbeLister) NetworkProbes(namespace string) NetworkProbeNamespaceLister {
-	return networkProbeNamespaceLister{indexer: s.indexer, namespace: namespace}
+	return networkProbeNamespaceLister{listers.NewNamespaced[*v1beta1.NetworkProbe](s.ResourceIndexer, namespace)}
 }
 
 // NetworkProbeNamespaceLister helps list and get NetworkProbes.
@@ -73,26 +65,5 @@ type NetworkProbeNamespaceLister interface {
 // networkProbeNamespaceLister implements the NetworkProbeNamespaceLister
 // interface.
 type networkProbeNamespaceLister struct {
-	indexer   cache.Indexer
-	namespace string
-}
-
-// List lists all NetworkProbes in the indexer for a given namespace.
-func (s networkProbeNamespaceLister) List(selector labels.Selector) (ret []*v1beta1.NetworkProbe, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1beta1.NetworkProbe))
-	})
-	return ret, err
-}
-
-// Get retrieves the NetworkProbe from the indexer for a given namespace and name.
-func (s networkProbeNamespaceLister) Get(name string) (*v1beta1.NetworkProbe, error) {
-	obj, exists, err := s.indexer.GetByKey(s.namespace + "/" + name)
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, errors.NewNotFound(v1beta1.Resource("networkprobe"), name)
-	}
-	return obj.(*v1beta1.NetworkProbe), nil
+	listers.ResourceIndexer[*v1beta1.NetworkProbe]
 }

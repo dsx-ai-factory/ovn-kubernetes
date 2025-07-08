@@ -19,8 +19,8 @@ package v1beta1
 
 import (
 	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/listers"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -37,25 +37,17 @@ type IPReservationLister interface {
 
 // iPReservationLister implements the IPReservationLister interface.
 type iPReservationLister struct {
-	indexer cache.Indexer
+	listers.ResourceIndexer[*v1beta1.IPReservation]
 }
 
 // NewIPReservationLister returns a new IPReservationLister.
 func NewIPReservationLister(indexer cache.Indexer) IPReservationLister {
-	return &iPReservationLister{indexer: indexer}
-}
-
-// List lists all IPReservations in the indexer.
-func (s *iPReservationLister) List(selector labels.Selector) (ret []*v1beta1.IPReservation, err error) {
-	err = cache.ListAll(s.indexer, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1beta1.IPReservation))
-	})
-	return ret, err
+	return &iPReservationLister{listers.New[*v1beta1.IPReservation](indexer, v1beta1.Resource("ipreservation"))}
 }
 
 // IPReservations returns an object that can list and get IPReservations.
 func (s *iPReservationLister) IPReservations(namespace string) IPReservationNamespaceLister {
-	return iPReservationNamespaceLister{indexer: s.indexer, namespace: namespace}
+	return iPReservationNamespaceLister{listers.NewNamespaced[*v1beta1.IPReservation](s.ResourceIndexer, namespace)}
 }
 
 // IPReservationNamespaceLister helps list and get IPReservations.
@@ -73,26 +65,5 @@ type IPReservationNamespaceLister interface {
 // iPReservationNamespaceLister implements the IPReservationNamespaceLister
 // interface.
 type iPReservationNamespaceLister struct {
-	indexer   cache.Indexer
-	namespace string
-}
-
-// List lists all IPReservations in the indexer for a given namespace.
-func (s iPReservationNamespaceLister) List(selector labels.Selector) (ret []*v1beta1.IPReservation, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1beta1.IPReservation))
-	})
-	return ret, err
-}
-
-// Get retrieves the IPReservation from the indexer for a given namespace and name.
-func (s iPReservationNamespaceLister) Get(name string) (*v1beta1.IPReservation, error) {
-	obj, exists, err := s.indexer.GetByKey(s.namespace + "/" + name)
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, errors.NewNotFound(v1beta1.Resource("ipreservation"), name)
-	}
-	return obj.(*v1beta1.IPReservation), nil
+	listers.ResourceIndexer[*v1beta1.IPReservation]
 }

@@ -24,10 +24,10 @@ import (
 // NetworkSpecApplyConfiguration represents a declarative configuration of the NetworkSpec type for use
 // with apply.
 type NetworkSpecApplyConfiguration struct {
-	Topology *v1.NetworkTopology             `json:"topology,omitempty"`
-	Layer3   *Layer3ConfigApplyConfiguration `json:"layer3,omitempty"`
-	Layer2   *Layer2ConfigApplyConfiguration `json:"layer2,omitempty"`
-	Localnet *LocalnetConfigApplyConfiguration     `json:"localnet,omitempty"`
+	Topology *v1.NetworkTopology               `json:"topology,omitempty"`
+	Layer3   *Layer3ConfigApplyConfiguration   `json:"layer3,omitempty"`
+	Layer2   *Layer2ConfigApplyConfiguration   `json:"layer2,omitempty"`
+	Localnet *LocalnetConfigApplyConfiguration `json:"localnet,omitempty"`
 }
 
 // NetworkSpecApplyConfiguration constructs a declarative configuration of the NetworkSpec type for use with

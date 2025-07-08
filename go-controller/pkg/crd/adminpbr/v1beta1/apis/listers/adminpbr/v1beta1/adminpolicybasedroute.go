@@ -19,8 +19,8 @@ package v1beta1
 
 import (
 	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/listers"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -38,30 +38,10 @@ type AdminPolicyBasedRouteLister interface {
 
 // adminPolicyBasedRouteLister implements the AdminPolicyBasedRouteLister interface.
 type adminPolicyBasedRouteLister struct {
-	indexer cache.Indexer
+	listers.ResourceIndexer[*v1beta1.AdminPolicyBasedRoute]
 }
 
 // NewAdminPolicyBasedRouteLister returns a new AdminPolicyBasedRouteLister.
 func NewAdminPolicyBasedRouteLister(indexer cache.Indexer) AdminPolicyBasedRouteLister {
-	return &adminPolicyBasedRouteLister{indexer: indexer}
-}
-
-// List lists all AdminPolicyBasedRoutes in the indexer.
-func (s *adminPolicyBasedRouteLister) List(selector labels.Selector) (ret []*v1beta1.AdminPolicyBasedRoute, err error) {
-	err = cache.ListAll(s.indexer, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1beta1.AdminPolicyBasedRoute))
-	})
-	return ret, err
-}
-
-// Get retrieves the AdminPolicyBasedRoute from the index for a given name.
-func (s *adminPolicyBasedRouteLister) Get(name string) (*v1beta1.AdminPolicyBasedRoute, error) {
-	obj, exists, err := s.indexer.GetByKey(name)
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, errors.NewNotFound(v1beta1.Resource("adminpolicybasedroute"), name)
-	}
-	return obj.(*v1beta1.AdminPolicyBasedRoute), nil
+	return &adminPolicyBasedRouteLister{listers.New[*v1beta1.AdminPolicyBasedRoute](indexer, v1beta1.Resource("adminpolicybasedroute"))}
 }
