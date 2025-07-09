@@ -541,12 +541,13 @@ func GenerateId(length int) string {
 
 // NetworkNameExternalIDExists return true if the expected network name external-ids matches
 func NetworkNameExternalIDExists(externalIDs map[string]string, netName string) bool {
-	name, ok := externalIDs[types.NetworkExternalID]
+	name1, ok1 := externalIDs[types.LegacyNetworkExternalID]
+	name2, ok2 := externalIDs[types.NetworkExternalID]
 
 	if netName == types.DefaultNetworkName {
-		return !ok
+		return !ok1 && !ok2
 	}
-	return ok && name == netName
+	return (ok1 && name1 == netName) || (ok2 && name2 == netName)
 }
 
 // IsMirrorEndpointSlice checks if the provided EndpointSlice is meant for the user defined network
