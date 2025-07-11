@@ -3136,17 +3136,16 @@ ovn-node() {
     rm -vf /etc/cni/net.d/10-ovn-kubernetes.conf
   fi
 
+  # ready_to_start_node checks for the NB/SB readiness state.
+  # This is not available on the DPU host when interconnect is enabled,
+  # because the DBs will run locally on the DPU
+
   if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
     echo "=============== ovn-node - (wait for ovs)"
     wait_for_event ovs_ready
-  fi
-
-  if [[ ${ovnkube_node_mode} == "dpu-host" ]] && [[ ${ovn_enable_interconnect} == "true" ]]; then
-    # ready_to_start_node checks for the NB/SB readiness state.
-    # This is not available on the DPU host when interconnect is enabled,
-    # because the DBs will run locally on the DPU
-    echo "skipping ready_to_start_node on DPU Host and when interconnect is true"
-  else
+    echo "=============== ovn-node - (wait for ready_to_start_node)"
+    wait_for_event ready_to_start_node
+  elif [[ ${ovn_enable_interconnect} != "true" ]]; then
     echo "=============== ovn-node - (wait for ready_to_start_node)"
     wait_for_event ready_to_start_node
   fi
