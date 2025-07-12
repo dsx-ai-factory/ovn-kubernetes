@@ -442,6 +442,17 @@ if [[ ! -z $ovn_k8s_node ]]; then
   K8S_NODE=$ovn_k8s_node
 fi
 
+# external_ids:host-k8s-nodename will be set on an Open_vSwitch enabled system if the ovnkube pod
+# should function on behalf of a different host
+# overwrite the K8S_NODE env var with the one found within the OVS metadata in this case
+if [[ ${ovnkube_node_mode} == "dpu" ]]; then
+  K8S_NODE=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:host-k8s-nodename | tr -d '\"')
+  if [[ ${K8S_NODE} == "" ]]; then
+    echo "Trying to run in DPU mode and couldn't get the required Host K8s Nodename. Exiting..."
+    exit 1
+  fi
+fi
+
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
   # ovn-appctl is present. Use new ovn run dir path.
@@ -2353,6 +2364,33 @@ ovnkube-controller-with-node() {
         exit 1
       fi
     fi
+  fi
+
+  if [[ ${ovnkube_node_mode} == "dpu" ]]; then
+    if [[ ${ovn_gateway_opts} == "" ]]; then
+      # get the gateway interface
+      gw_iface=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-interface | tr -d \")
+      if [[ ${gw_iface} == "" ]]; then
+        echo "Couldn't get the required OVN Gateway Interface. Exiting..."
+        exit 1
+      fi
+      ovn_gateway_opts="--gateway-interface=${gw_iface} "
+
+      # get the gateway nexthop
+      gw_nexthop=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-nexthop | tr -d \")
+      if [[ ${gw_nexthop} == "" ]]; then
+        echo "Couldn't get the required OVN Gateway NextHop. Exiting..."
+        exit 1
+      fi
+      ovn_gateway_opts+="--gateway-nexthop=${gw_nexthop} "
+    fi
+
+    # this is required if the DPU and DPU Host are in different subnets
+    if [[ ${ovn_gateway_router_subnet} == "" ]]; then
+      # get the gateway router subnet
+      ovn_gateway_router_subnet=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-router-subnet | tr -d \")
+    fi
+
   fi
 
   if [[ ${ovnkube_node_mode} != "dpu-host" && ! ${ovn_gateway_opts} =~ "gateway-vlanid" ]]; then
