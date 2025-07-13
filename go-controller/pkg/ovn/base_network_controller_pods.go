@@ -499,6 +499,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *corev1.Pod, nadNa
 	network *nadapi.NetworkSelectionElement, enable *bool) (ops []ovsdb.Operation,
 	lsp *nbdb.LogicalSwitchPort, podAnnotation *util.PodAnnotation, newlyCreatedPort bool, err error) {
 	var ls *nbdb.LogicalSwitch
+	var node *corev1.Node
 
 	skipIPAM := util.SkipIPAMForNAD(pod.Annotations, nadName)
 	if skipIPAM && (bnc.TopologyType() != ovntypes.Layer2Topology && bnc.TopologyType() != ovntypes.LocalnetTopology) {
@@ -516,7 +517,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *corev1.Pod, nadNa
 	// a finalizer, and then the node was removed. In this case the pod will still exist in a running state.
 	// Terminating pods should still have network connectivity for pre-stop hooks or termination grace period
 	// We cannot wire a pod that has no node/switch, so retry again later
-	if _, err := bnc.watchFactory.GetNode(pod.Spec.NodeName); apierrors.IsNotFound(err) &&
+	if node, err = bnc.watchFactory.GetNode(pod.Spec.NodeName); apierrors.IsNotFound(err) &&
 		bnc.lsManager.GetSwitchSubnets(switchName) == nil && bnc.doesNetworkRequireIPAM() {
 		podState := "unknown"
 		if util.PodTerminating(pod) {
@@ -592,7 +593,11 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *corev1.Pod, nadNa
 	// rescheduled.
 
 	if !config.Kubernetes.DisableRequestedChassis {
-		lsp.Options[libovsdbops.RequestedChassis] = pod.Spec.NodeName
+		chassis, err := util.ParseNodeChassisHostnameAnnotation(node)
+		if err != nil {
+			return nil, nil, nil, false, fmt.Errorf("[%s] failed getting chassis hostname annotation on node %s: %v", podDesc, node.Name, err)
+		}
+		lsp.Options[libovsdbops.RequestedChassis] = chassis
 	}
 
 	// let's calculate if this network controller's role for this pod

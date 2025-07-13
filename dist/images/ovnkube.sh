@@ -2628,6 +2628,12 @@ ovnkube-controller-with-node() {
   fi
   echo "ovnkube_istio_ambient_snat_ipv6_flag=${ovnkube_istio_ambient_snat_ipv6_flag}"
 
+  ovn_disable_requestedchassis_flag=
+  if [[ ${ovn_disable_requestedchassis} == "true" ]]; then
+	  ovn_disable_requestedchassis_flag="--disable-requestedchassis"
+  fi
+  echo "ovn_disable_requestedchassis_flag=${ovn_disable_requestedchassis_flag}"
+
   echo "=============== ovnkube-controller-with-node --init-ovnkube-controller-with-node=========="
   /usr/bin/ovnkube --init-ovnkube-controller ${K8S_NODE} --init-node ${K8S_NODE} \
     ${admin_pbr_enabled_flag} \
