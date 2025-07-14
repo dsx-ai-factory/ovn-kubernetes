@@ -19,14 +19,14 @@ package v1beta1
 
 import (
 	"context"
-	"time"
 
 	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1"
+	networkprobev1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1/apis/applyconfiguration/networkprobe/v1beta1"
 	scheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1/apis/clientset/versioned/scheme"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"
-	rest "k8s.io/client-go/rest"
+	gentype "k8s.io/client-go/gentype"
 )
 
 // NetworkProbesGetter has a method to return a NetworkProbeInterface.
@@ -39,6 +39,7 @@ type NetworkProbesGetter interface {
 type NetworkProbeInterface interface {
 	Create(ctx context.Context, networkProbe *v1beta1.NetworkProbe, opts v1.CreateOptions) (*v1beta1.NetworkProbe, error)
 	Update(ctx context.Context, networkProbe *v1beta1.NetworkProbe, opts v1.UpdateOptions) (*v1beta1.NetworkProbe, error)
+	// Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
 	UpdateStatus(ctx context.Context, networkProbe *v1beta1.NetworkProbe, opts v1.UpdateOptions) (*v1beta1.NetworkProbe, error)
 	Delete(ctx context.Context, name string, opts v1.DeleteOptions) error
 	DeleteCollection(ctx context.Context, opts v1.DeleteOptions, listOpts v1.ListOptions) error
@@ -46,149 +47,26 @@ type NetworkProbeInterface interface {
 	List(ctx context.Context, opts v1.ListOptions) (*v1beta1.NetworkProbeList, error)
 	Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error)
 	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *v1beta1.NetworkProbe, err error)
+	Apply(ctx context.Context, networkProbe *networkprobev1beta1.NetworkProbeApplyConfiguration, opts v1.ApplyOptions) (result *v1beta1.NetworkProbe, err error)
+	// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
+	ApplyStatus(ctx context.Context, networkProbe *networkprobev1beta1.NetworkProbeApplyConfiguration, opts v1.ApplyOptions) (result *v1beta1.NetworkProbe, err error)
 	NetworkProbeExpansion
 }
 
 // networkProbes implements NetworkProbeInterface
 type networkProbes struct {
-	client rest.Interface
-	ns     string
+	*gentype.ClientWithListAndApply[*v1beta1.NetworkProbe, *v1beta1.NetworkProbeList, *networkprobev1beta1.NetworkProbeApplyConfiguration]
 }
 
 // newNetworkProbes returns a NetworkProbes
 func newNetworkProbes(c *K8sV1beta1Client, namespace string) *networkProbes {
 	return &networkProbes{
-		client: c.RESTClient(),
-		ns:     namespace,
+		gentype.NewClientWithListAndApply[*v1beta1.NetworkProbe, *v1beta1.NetworkProbeList, *networkprobev1beta1.NetworkProbeApplyConfiguration](
+			"networkprobes",
+			c.RESTClient(),
+			scheme.ParameterCodec,
+			namespace,
+			func() *v1beta1.NetworkProbe { return &v1beta1.NetworkProbe{} },
+			func() *v1beta1.NetworkProbeList { return &v1beta1.NetworkProbeList{} }),
 	}
-}
-
-// Get takes name of the networkProbe, and returns the corresponding networkProbe object, and an error if there is any.
-func (c *networkProbes) Get(ctx context.Context, name string, options v1.GetOptions) (result *v1beta1.NetworkProbe, err error) {
-	result = &v1beta1.NetworkProbe{}
-	err = c.client.Get().
-		Namespace(c.ns).
-		Resource("networkprobes").
-		Name(name).
-		VersionedParams(&options, scheme.ParameterCodec).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// List takes label and field selectors, and returns the list of NetworkProbes that match those selectors.
-func (c *networkProbes) List(ctx context.Context, opts v1.ListOptions) (result *v1beta1.NetworkProbeList, err error) {
-	var timeout time.Duration
-	if opts.TimeoutSeconds != nil {
-		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
-	}
-	result = &v1beta1.NetworkProbeList{}
-	err = c.client.Get().
-		Namespace(c.ns).
-		Resource("networkprobes").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Timeout(timeout).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// Watch returns a watch.Interface that watches the requested networkProbes.
-func (c *networkProbes) Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-	var timeout time.Duration
-	if opts.TimeoutSeconds != nil {
-		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
-	}
-	opts.Watch = true
-	return c.client.Get().
-		Namespace(c.ns).
-		Resource("networkprobes").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Timeout(timeout).
-		Watch(ctx)
-}
-
-// Create takes the representation of a networkProbe and creates it.  Returns the server's representation of the networkProbe, and an error, if there is any.
-func (c *networkProbes) Create(ctx context.Context, networkProbe *v1beta1.NetworkProbe, opts v1.CreateOptions) (result *v1beta1.NetworkProbe, err error) {
-	result = &v1beta1.NetworkProbe{}
-	err = c.client.Post().
-		Namespace(c.ns).
-		Resource("networkprobes").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Body(networkProbe).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// Update takes the representation of a networkProbe and updates it. Returns the server's representation of the networkProbe, and an error, if there is any.
-func (c *networkProbes) Update(ctx context.Context, networkProbe *v1beta1.NetworkProbe, opts v1.UpdateOptions) (result *v1beta1.NetworkProbe, err error) {
-	result = &v1beta1.NetworkProbe{}
-	err = c.client.Put().
-		Namespace(c.ns).
-		Resource("networkprobes").
-		Name(networkProbe.Name).
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Body(networkProbe).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// UpdateStatus was generated because the type contains a Status member.
-// Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
-func (c *networkProbes) UpdateStatus(ctx context.Context, networkProbe *v1beta1.NetworkProbe, opts v1.UpdateOptions) (result *v1beta1.NetworkProbe, err error) {
-	result = &v1beta1.NetworkProbe{}
-	err = c.client.Put().
-		Namespace(c.ns).
-		Resource("networkprobes").
-		Name(networkProbe.Name).
-		SubResource("status").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Body(networkProbe).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// Delete takes name of the networkProbe and deletes it. Returns an error if one occurs.
-func (c *networkProbes) Delete(ctx context.Context, name string, opts v1.DeleteOptions) error {
-	return c.client.Delete().
-		Namespace(c.ns).
-		Resource("networkprobes").
-		Name(name).
-		Body(&opts).
-		Do(ctx).
-		Error()
-}
-
-// DeleteCollection deletes a collection of objects.
-func (c *networkProbes) DeleteCollection(ctx context.Context, opts v1.DeleteOptions, listOpts v1.ListOptions) error {
-	var timeout time.Duration
-	if listOpts.TimeoutSeconds != nil {
-		timeout = time.Duration(*listOpts.TimeoutSeconds) * time.Second
-	}
-	return c.client.Delete().
-		Namespace(c.ns).
-		Resource("networkprobes").
-		VersionedParams(&listOpts, scheme.ParameterCodec).
-		Timeout(timeout).
-		Body(&opts).
-		Do(ctx).
-		Error()
-}
-
-// Patch applies the patch and returns the patched networkProbe.
-func (c *networkProbes) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *v1beta1.NetworkProbe, err error) {
-	result = &v1beta1.NetworkProbe{}
-	err = c.client.Patch(pt).
-		Namespace(c.ns).
-		Resource("networkprobes").
-		Name(name).
-		SubResource(subresources...).
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Body(data).
-		Do(ctx).
-		Into(result)
-	return
 }

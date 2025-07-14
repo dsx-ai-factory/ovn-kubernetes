@@ -19,8 +19,8 @@ package v1beta1
 
 import (
 	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/listers"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -37,25 +37,17 @@ type PortMirrorLister interface {
 
 // portMirrorLister implements the PortMirrorLister interface.
 type portMirrorLister struct {
-	indexer cache.Indexer
+	listers.ResourceIndexer[*v1beta1.PortMirror]
 }
 
 // NewPortMirrorLister returns a new PortMirrorLister.
 func NewPortMirrorLister(indexer cache.Indexer) PortMirrorLister {
-	return &portMirrorLister{indexer: indexer}
-}
-
-// List lists all PortMirrors in the indexer.
-func (s *portMirrorLister) List(selector labels.Selector) (ret []*v1beta1.PortMirror, err error) {
-	err = cache.ListAll(s.indexer, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1beta1.PortMirror))
-	})
-	return ret, err
+	return &portMirrorLister{listers.New[*v1beta1.PortMirror](indexer, v1beta1.Resource("portmirror"))}
 }
 
 // PortMirrors returns an object that can list and get PortMirrors.
 func (s *portMirrorLister) PortMirrors(namespace string) PortMirrorNamespaceLister {
-	return portMirrorNamespaceLister{indexer: s.indexer, namespace: namespace}
+	return portMirrorNamespaceLister{listers.NewNamespaced[*v1beta1.PortMirror](s.ResourceIndexer, namespace)}
 }
 
 // PortMirrorNamespaceLister helps list and get PortMirrors.
@@ -73,26 +65,5 @@ type PortMirrorNamespaceLister interface {
 // portMirrorNamespaceLister implements the PortMirrorNamespaceLister
 // interface.
 type portMirrorNamespaceLister struct {
-	indexer   cache.Indexer
-	namespace string
-}
-
-// List lists all PortMirrors in the indexer for a given namespace.
-func (s portMirrorNamespaceLister) List(selector labels.Selector) (ret []*v1beta1.PortMirror, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1beta1.PortMirror))
-	})
-	return ret, err
-}
-
-// Get retrieves the PortMirror from the indexer for a given namespace and name.
-func (s portMirrorNamespaceLister) Get(name string) (*v1beta1.PortMirror, error) {
-	obj, exists, err := s.indexer.GetByKey(s.namespace + "/" + name)
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, errors.NewNotFound(v1beta1.Resource("portmirror"), name)
-	}
-	return obj.(*v1beta1.PortMirror), nil
+	listers.ResourceIndexer[*v1beta1.PortMirror]
 }

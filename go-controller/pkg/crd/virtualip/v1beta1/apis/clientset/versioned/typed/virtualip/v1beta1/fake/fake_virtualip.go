@@ -19,11 +19,13 @@ package fake
 
 import (
 	"context"
+	json "encoding/json"
+	"fmt"
 
 	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
+	virtualipv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/applyconfiguration/virtualip/v1beta1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	labels "k8s.io/apimachinery/pkg/labels"
-	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"
 	testing "k8s.io/client-go/testing"
@@ -35,28 +37,30 @@ type FakeVirtualIPs struct {
 	ns   string
 }
 
-var virtualipsResource = schema.GroupVersionResource{Group: "k8s.ovn.org", Version: "v1beta1", Resource: "virtualips"}
+var virtualipsResource = v1beta1.SchemeGroupVersion.WithResource("virtualips")
 
-var virtualipsKind = schema.GroupVersionKind{Group: "k8s.ovn.org", Version: "v1beta1", Kind: "VirtualIP"}
+var virtualipsKind = v1beta1.SchemeGroupVersion.WithKind("VirtualIP")
 
 // Get takes name of the virtualIP, and returns the corresponding virtualIP object, and an error if there is any.
 func (c *FakeVirtualIPs) Get(ctx context.Context, name string, options v1.GetOptions) (result *v1beta1.VirtualIP, err error) {
+	emptyResult := &v1beta1.VirtualIP{}
 	obj, err := c.Fake.
-		Invokes(testing.NewGetAction(virtualipsResource, c.ns, name), &v1beta1.VirtualIP{})
+		Invokes(testing.NewGetActionWithOptions(virtualipsResource, c.ns, name, options), emptyResult)
 
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*v1beta1.VirtualIP), err
 }
 
 // List takes label and field selectors, and returns the list of VirtualIPs that match those selectors.
 func (c *FakeVirtualIPs) List(ctx context.Context, opts v1.ListOptions) (result *v1beta1.VirtualIPList, err error) {
+	emptyResult := &v1beta1.VirtualIPList{}
 	obj, err := c.Fake.
-		Invokes(testing.NewListAction(virtualipsResource, virtualipsKind, c.ns, opts), &v1beta1.VirtualIPList{})
+		Invokes(testing.NewListActionWithOptions(virtualipsResource, virtualipsKind, c.ns, opts), emptyResult)
 
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 
 	label, _, _ := testing.ExtractFromListOptions(opts)
@@ -75,40 +79,43 @@ func (c *FakeVirtualIPs) List(ctx context.Context, opts v1.ListOptions) (result 
 // Watch returns a watch.Interface that watches the requested virtualIPs.
 func (c *FakeVirtualIPs) Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
 	return c.Fake.
-		InvokesWatch(testing.NewWatchAction(virtualipsResource, c.ns, opts))
+		InvokesWatch(testing.NewWatchActionWithOptions(virtualipsResource, c.ns, opts))
 
 }
 
 // Create takes the representation of a virtualIP and creates it.  Returns the server's representation of the virtualIP, and an error, if there is any.
 func (c *FakeVirtualIPs) Create(ctx context.Context, virtualIP *v1beta1.VirtualIP, opts v1.CreateOptions) (result *v1beta1.VirtualIP, err error) {
+	emptyResult := &v1beta1.VirtualIP{}
 	obj, err := c.Fake.
-		Invokes(testing.NewCreateAction(virtualipsResource, c.ns, virtualIP), &v1beta1.VirtualIP{})
+		Invokes(testing.NewCreateActionWithOptions(virtualipsResource, c.ns, virtualIP, opts), emptyResult)
 
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*v1beta1.VirtualIP), err
 }
 
 // Update takes the representation of a virtualIP and updates it. Returns the server's representation of the virtualIP, and an error, if there is any.
 func (c *FakeVirtualIPs) Update(ctx context.Context, virtualIP *v1beta1.VirtualIP, opts v1.UpdateOptions) (result *v1beta1.VirtualIP, err error) {
+	emptyResult := &v1beta1.VirtualIP{}
 	obj, err := c.Fake.
-		Invokes(testing.NewUpdateAction(virtualipsResource, c.ns, virtualIP), &v1beta1.VirtualIP{})
+		Invokes(testing.NewUpdateActionWithOptions(virtualipsResource, c.ns, virtualIP, opts), emptyResult)
 
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*v1beta1.VirtualIP), err
 }
 
 // UpdateStatus was generated because the type contains a Status member.
 // Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
-func (c *FakeVirtualIPs) UpdateStatus(ctx context.Context, virtualIP *v1beta1.VirtualIP, opts v1.UpdateOptions) (*v1beta1.VirtualIP, error) {
+func (c *FakeVirtualIPs) UpdateStatus(ctx context.Context, virtualIP *v1beta1.VirtualIP, opts v1.UpdateOptions) (result *v1beta1.VirtualIP, err error) {
+	emptyResult := &v1beta1.VirtualIP{}
 	obj, err := c.Fake.
-		Invokes(testing.NewUpdateSubresourceAction(virtualipsResource, "status", c.ns, virtualIP), &v1beta1.VirtualIP{})
+		Invokes(testing.NewUpdateSubresourceActionWithOptions(virtualipsResource, "status", c.ns, virtualIP, opts), emptyResult)
 
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*v1beta1.VirtualIP), err
 }
@@ -116,14 +123,14 @@ func (c *FakeVirtualIPs) UpdateStatus(ctx context.Context, virtualIP *v1beta1.Vi
 // Delete takes name of the virtualIP and deletes it. Returns an error if one occurs.
 func (c *FakeVirtualIPs) Delete(ctx context.Context, name string, opts v1.DeleteOptions) error {
 	_, err := c.Fake.
-		Invokes(testing.NewDeleteAction(virtualipsResource, c.ns, name), &v1beta1.VirtualIP{})
+		Invokes(testing.NewDeleteActionWithOptions(virtualipsResource, c.ns, name, opts), &v1beta1.VirtualIP{})
 
 	return err
 }
 
 // DeleteCollection deletes a collection of objects.
 func (c *FakeVirtualIPs) DeleteCollection(ctx context.Context, opts v1.DeleteOptions, listOpts v1.ListOptions) error {
-	action := testing.NewDeleteCollectionAction(virtualipsResource, c.ns, listOpts)
+	action := testing.NewDeleteCollectionActionWithOptions(virtualipsResource, c.ns, opts, listOpts)
 
 	_, err := c.Fake.Invokes(action, &v1beta1.VirtualIPList{})
 	return err
@@ -131,11 +138,59 @@ func (c *FakeVirtualIPs) DeleteCollection(ctx context.Context, opts v1.DeleteOpt
 
 // Patch applies the patch and returns the patched virtualIP.
 func (c *FakeVirtualIPs) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *v1beta1.VirtualIP, err error) {
+	emptyResult := &v1beta1.VirtualIP{}
 	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceAction(virtualipsResource, c.ns, name, pt, data, subresources...), &v1beta1.VirtualIP{})
+		Invokes(testing.NewPatchSubresourceActionWithOptions(virtualipsResource, c.ns, name, pt, data, opts, subresources...), emptyResult)
 
 	if obj == nil {
+		return emptyResult, err
+	}
+	return obj.(*v1beta1.VirtualIP), err
+}
+
+// Apply takes the given apply declarative configuration, applies it and returns the applied virtualIP.
+func (c *FakeVirtualIPs) Apply(ctx context.Context, virtualIP *virtualipv1beta1.VirtualIPApplyConfiguration, opts v1.ApplyOptions) (result *v1beta1.VirtualIP, err error) {
+	if virtualIP == nil {
+		return nil, fmt.Errorf("virtualIP provided to Apply must not be nil")
+	}
+	data, err := json.Marshal(virtualIP)
+	if err != nil {
 		return nil, err
+	}
+	name := virtualIP.Name
+	if name == nil {
+		return nil, fmt.Errorf("virtualIP.Name must be provided to Apply")
+	}
+	emptyResult := &v1beta1.VirtualIP{}
+	obj, err := c.Fake.
+		Invokes(testing.NewPatchSubresourceActionWithOptions(virtualipsResource, c.ns, *name, types.ApplyPatchType, data, opts.ToPatchOptions()), emptyResult)
+
+	if obj == nil {
+		return emptyResult, err
+	}
+	return obj.(*v1beta1.VirtualIP), err
+}
+
+// ApplyStatus was generated because the type contains a Status member.
+// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
+func (c *FakeVirtualIPs) ApplyStatus(ctx context.Context, virtualIP *virtualipv1beta1.VirtualIPApplyConfiguration, opts v1.ApplyOptions) (result *v1beta1.VirtualIP, err error) {
+	if virtualIP == nil {
+		return nil, fmt.Errorf("virtualIP provided to Apply must not be nil")
+	}
+	data, err := json.Marshal(virtualIP)
+	if err != nil {
+		return nil, err
+	}
+	name := virtualIP.Name
+	if name == nil {
+		return nil, fmt.Errorf("virtualIP.Name must be provided to Apply")
+	}
+	emptyResult := &v1beta1.VirtualIP{}
+	obj, err := c.Fake.
+		Invokes(testing.NewPatchSubresourceActionWithOptions(virtualipsResource, c.ns, *name, types.ApplyPatchType, data, opts.ToPatchOptions(), "status"), emptyResult)
+
+	if obj == nil {
+		return emptyResult, err
 	}
 	return obj.(*v1beta1.VirtualIP), err
 }

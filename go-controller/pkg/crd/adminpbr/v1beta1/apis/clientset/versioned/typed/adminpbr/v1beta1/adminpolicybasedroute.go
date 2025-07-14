@@ -19,14 +19,14 @@ package v1beta1
 
 import (
 	"context"
-	"time"
 
 	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
+	adminpbrv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/applyconfiguration/adminpbr/v1beta1"
 	scheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/clientset/versioned/scheme"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"
-	rest "k8s.io/client-go/rest"
+	gentype "k8s.io/client-go/gentype"
 )
 
 // AdminPolicyBasedRoutesGetter has a method to return a AdminPolicyBasedRouteInterface.
@@ -39,6 +39,7 @@ type AdminPolicyBasedRoutesGetter interface {
 type AdminPolicyBasedRouteInterface interface {
 	Create(ctx context.Context, adminPolicyBasedRoute *v1beta1.AdminPolicyBasedRoute, opts v1.CreateOptions) (*v1beta1.AdminPolicyBasedRoute, error)
 	Update(ctx context.Context, adminPolicyBasedRoute *v1beta1.AdminPolicyBasedRoute, opts v1.UpdateOptions) (*v1beta1.AdminPolicyBasedRoute, error)
+	// Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
 	UpdateStatus(ctx context.Context, adminPolicyBasedRoute *v1beta1.AdminPolicyBasedRoute, opts v1.UpdateOptions) (*v1beta1.AdminPolicyBasedRoute, error)
 	Delete(ctx context.Context, name string, opts v1.DeleteOptions) error
 	DeleteCollection(ctx context.Context, opts v1.DeleteOptions, listOpts v1.ListOptions) error
@@ -46,138 +47,26 @@ type AdminPolicyBasedRouteInterface interface {
 	List(ctx context.Context, opts v1.ListOptions) (*v1beta1.AdminPolicyBasedRouteList, error)
 	Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error)
 	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *v1beta1.AdminPolicyBasedRoute, err error)
+	Apply(ctx context.Context, adminPolicyBasedRoute *adminpbrv1beta1.AdminPolicyBasedRouteApplyConfiguration, opts v1.ApplyOptions) (result *v1beta1.AdminPolicyBasedRoute, err error)
+	// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
+	ApplyStatus(ctx context.Context, adminPolicyBasedRoute *adminpbrv1beta1.AdminPolicyBasedRouteApplyConfiguration, opts v1.ApplyOptions) (result *v1beta1.AdminPolicyBasedRoute, err error)
 	AdminPolicyBasedRouteExpansion
 }
 
 // adminPolicyBasedRoutes implements AdminPolicyBasedRouteInterface
 type adminPolicyBasedRoutes struct {
-	client rest.Interface
+	*gentype.ClientWithListAndApply[*v1beta1.AdminPolicyBasedRoute, *v1beta1.AdminPolicyBasedRouteList, *adminpbrv1beta1.AdminPolicyBasedRouteApplyConfiguration]
 }
 
 // newAdminPolicyBasedRoutes returns a AdminPolicyBasedRoutes
 func newAdminPolicyBasedRoutes(c *K8sV1beta1Client) *adminPolicyBasedRoutes {
 	return &adminPolicyBasedRoutes{
-		client: c.RESTClient(),
+		gentype.NewClientWithListAndApply[*v1beta1.AdminPolicyBasedRoute, *v1beta1.AdminPolicyBasedRouteList, *adminpbrv1beta1.AdminPolicyBasedRouteApplyConfiguration](
+			"adminpolicybasedroutes",
+			c.RESTClient(),
+			scheme.ParameterCodec,
+			"",
+			func() *v1beta1.AdminPolicyBasedRoute { return &v1beta1.AdminPolicyBasedRoute{} },
+			func() *v1beta1.AdminPolicyBasedRouteList { return &v1beta1.AdminPolicyBasedRouteList{} }),
 	}
-}
-
-// Get takes name of the adminPolicyBasedRoute, and returns the corresponding adminPolicyBasedRoute object, and an error if there is any.
-func (c *adminPolicyBasedRoutes) Get(ctx context.Context, name string, options v1.GetOptions) (result *v1beta1.AdminPolicyBasedRoute, err error) {
-	result = &v1beta1.AdminPolicyBasedRoute{}
-	err = c.client.Get().
-		Resource("adminpolicybasedroutes").
-		Name(name).
-		VersionedParams(&options, scheme.ParameterCodec).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// List takes label and field selectors, and returns the list of AdminPolicyBasedRoutes that match those selectors.
-func (c *adminPolicyBasedRoutes) List(ctx context.Context, opts v1.ListOptions) (result *v1beta1.AdminPolicyBasedRouteList, err error) {
-	var timeout time.Duration
-	if opts.TimeoutSeconds != nil {
-		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
-	}
-	result = &v1beta1.AdminPolicyBasedRouteList{}
-	err = c.client.Get().
-		Resource("adminpolicybasedroutes").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Timeout(timeout).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// Watch returns a watch.Interface that watches the requested adminPolicyBasedRoutes.
-func (c *adminPolicyBasedRoutes) Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-	var timeout time.Duration
-	if opts.TimeoutSeconds != nil {
-		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
-	}
-	opts.Watch = true
-	return c.client.Get().
-		Resource("adminpolicybasedroutes").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Timeout(timeout).
-		Watch(ctx)
-}
-
-// Create takes the representation of a adminPolicyBasedRoute and creates it.  Returns the server's representation of the adminPolicyBasedRoute, and an error, if there is any.
-func (c *adminPolicyBasedRoutes) Create(ctx context.Context, adminPolicyBasedRoute *v1beta1.AdminPolicyBasedRoute, opts v1.CreateOptions) (result *v1beta1.AdminPolicyBasedRoute, err error) {
-	result = &v1beta1.AdminPolicyBasedRoute{}
-	err = c.client.Post().
-		Resource("adminpolicybasedroutes").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Body(adminPolicyBasedRoute).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// Update takes the representation of a adminPolicyBasedRoute and updates it. Returns the server's representation of the adminPolicyBasedRoute, and an error, if there is any.
-func (c *adminPolicyBasedRoutes) Update(ctx context.Context, adminPolicyBasedRoute *v1beta1.AdminPolicyBasedRoute, opts v1.UpdateOptions) (result *v1beta1.AdminPolicyBasedRoute, err error) {
-	result = &v1beta1.AdminPolicyBasedRoute{}
-	err = c.client.Put().
-		Resource("adminpolicybasedroutes").
-		Name(adminPolicyBasedRoute.Name).
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Body(adminPolicyBasedRoute).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// UpdateStatus was generated because the type contains a Status member.
-// Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
-func (c *adminPolicyBasedRoutes) UpdateStatus(ctx context.Context, adminPolicyBasedRoute *v1beta1.AdminPolicyBasedRoute, opts v1.UpdateOptions) (result *v1beta1.AdminPolicyBasedRoute, err error) {
-	result = &v1beta1.AdminPolicyBasedRoute{}
-	err = c.client.Put().
-		Resource("adminpolicybasedroutes").
-		Name(adminPolicyBasedRoute.Name).
-		SubResource("status").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Body(adminPolicyBasedRoute).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// Delete takes name of the adminPolicyBasedRoute and deletes it. Returns an error if one occurs.
-func (c *adminPolicyBasedRoutes) Delete(ctx context.Context, name string, opts v1.DeleteOptions) error {
-	return c.client.Delete().
-		Resource("adminpolicybasedroutes").
-		Name(name).
-		Body(&opts).
-		Do(ctx).
-		Error()
-}
-
-// DeleteCollection deletes a collection of objects.
-func (c *adminPolicyBasedRoutes) DeleteCollection(ctx context.Context, opts v1.DeleteOptions, listOpts v1.ListOptions) error {
-	var timeout time.Duration
-	if listOpts.TimeoutSeconds != nil {
-		timeout = time.Duration(*listOpts.TimeoutSeconds) * time.Second
-	}
-	return c.client.Delete().
-		Resource("adminpolicybasedroutes").
-		VersionedParams(&listOpts, scheme.ParameterCodec).
-		Timeout(timeout).
-		Body(&opts).
-		Do(ctx).
-		Error()
-}
-
-// Patch applies the patch and returns the patched adminPolicyBasedRoute.
-func (c *adminPolicyBasedRoutes) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *v1beta1.AdminPolicyBasedRoute, err error) {
-	result = &v1beta1.AdminPolicyBasedRoute{}
-	err = c.client.Patch(pt).
-		Resource("adminpolicybasedroutes").
-		Name(name).
-		SubResource(subresources...).
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Body(data).
-		Do(ctx).
-		Into(result)
-	return
 }
