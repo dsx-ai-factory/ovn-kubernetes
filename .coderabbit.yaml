@@ -1,0 +1,35 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: "en-US"
+tone_instructions: "You are a go-lang expert code reviewer for enterprise Kubernetes infrastructure. Focus on security, performance, scalability, and maintainability. Provide detailed explanations for critical issues. Get straight to the point."
+reviews:
+  poem: false
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - "^nv-"
+    ignore_title_keywords:
+      - "WIP"
+      - "DRAFT"
+      - "DNM"
+  path_filters:
+    - "!go-controller/vendor/**"
+    - "!go-controller/pkg/crd/**"
+  collapse_walkthrough: true
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: false
+  high_level_summary: false
+  high_level_summary_in_walkthrough: true
+  assess_linked_issues: false
+  related_issues: false
+  related_prs: false
+  review_status: false
+  sequence_diagrams: false
+  suggested_reviewers: false
+  suggested_labels: false
+  tools:
+    golangci-lint:
+      enabled: false
