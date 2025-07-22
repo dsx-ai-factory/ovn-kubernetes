@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"flag"
 	"fmt"
 	"net"
@@ -397,6 +398,7 @@ type KubernetesConfig struct {
 	CertDuration            time.Duration `gcfg:"cert-duration"`
 	Kubeconfig              string        `gcfg:"kubeconfig"`
 	CACert                  string        `gcfg:"cacert"`
+	CACertData              string        `gcfg:"cacert-data"`
 	CAData                  []byte
 	APIServer               string `gcfg:"apiserver"`
 	Token                   string `gcfg:"token"`
@@ -1380,6 +1382,11 @@ var K8sFlags = []cli.Flag{
 		Destination: &cliConfig.Kubernetes.CACert,
 	},
 	&cli.StringFlag{
+		Name:        "k8s-cacert-data",
+		Usage:       "the Kubernetes API CA certificate data (not required if --k8s-kubeconfig is given)",
+		Destination: &cliConfig.Kubernetes.CACertData,
+	},
+	&cli.StringFlag{
 		Name:        "k8s-token",
 		Usage:       "the Kubernetes API authentication token (not required if --k8s-kubeconfig is given)",
 		Destination: &cliConfig.Kubernetes.Token,
@@ -1983,6 +1990,7 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 		"BootstrapKubeconfig":  "BOOTSTRAP_KUBECONFIG",
 		"CertDir":              "CERT_DIR",
 		"CACert":               "K8S_CACERT",
+		"CACertData":           "K8S_CACERT_DATA",
 		"APIServer":            "K8S_APISERVER",
 		"Token":                "K8S_TOKEN",
 		"TokenFile":            "K8S_TOKEN_FILE",
@@ -2027,8 +2035,14 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 		return fmt.Errorf("kubernetes kubeconfig file %q not found", Kubernetes.Kubeconfig)
 	}
 
-	if Kubernetes.CACert != "" {
-		bytes, err := os.ReadFile(Kubernetes.CACert)
+	if Kubernetes.CACert != "" || Kubernetes.CACertData != "" {
+		var bytes []byte
+		var err error
+		if Kubernetes.CACert != "" {
+			bytes, err = os.ReadFile(Kubernetes.CACert)
+		} else {
+			bytes, err = base64.StdEncoding.DecodeString(Kubernetes.CACertData)
+		}
 		if err != nil {
 			return err
 		}
@@ -2521,6 +2535,7 @@ func stripTokenFromK8sConfig() KubernetesConfig {
 	// Token and CAData are sensitive fields so stripping
 	// them while logging.
 	k8sConf.Token = ""
+	k8sConf.CACertData = ""
 	k8sConf.CAData = []byte{}
 	return k8sConf
 }
