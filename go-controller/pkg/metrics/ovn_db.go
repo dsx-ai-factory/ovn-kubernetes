@@ -521,19 +521,19 @@ func RegisterOvnDBMetrics(podLister corev1listers.PodLister, podSynced func() bo
 		dbIsClustered = false
 		klog.Info("Found db is standalone, don't register db_cluster metrics")
 	}
+
+	// Register the ovn*_db coverage/show metrics with prometheus
+	componentCoverageShowMetricsMap[ovnNorthDB] = ovnNorthDbCoverageShowMetricsMap
+	registerCoverageShowMetrics(ovnNorthDB, types.MetricOvnNamespace, types.MetricOvnSubsystemDB,
+		map[string]string{"db_name": "OVN_Northbound"})
+	go coverageShowMetricsUpdater(ovnNorthDB, metricsScrapeInterval, stopChan)
+
+	componentCoverageShowMetricsMap[ovnSouthDB] = ovnSouthDbCoverageShowMetricsMap
+	registerCoverageShowMetrics(ovnSouthDB, types.MetricOvnNamespace, types.MetricOvnSubsystemDB,
+		map[string]string{"db_name": "OVN_Southbound"})
+	go coverageShowMetricsUpdater(ovnSouthDB, metricsScrapeInterval, stopChan)
+
 	if dbIsClustered {
-		// Register the ovn*_db coverage/show metrics with prometheus
-
-		componentCoverageShowMetricsMap[ovnNorthDB] = ovnNorthDbCoverageShowMetricsMap
-		registerCoverageShowMetrics(ovnNorthDB, types.MetricOvnNamespace, types.MetricOvnSubsystemDB,
-			map[string]string{"db_name": "OVN_Northbound"})
-		go coverageShowMetricsUpdater(ovnNorthDB, metricsScrapeInterval, stopChan)
-
-		componentCoverageShowMetricsMap[ovnSouthDB] = ovnSouthDbCoverageShowMetricsMap
-		registerCoverageShowMetrics(ovnSouthDB, types.MetricOvnNamespace, types.MetricOvnSubsystemDB,
-			map[string]string{"db_name": "OVN_Southbound"})
-		go coverageShowMetricsUpdater(ovnSouthDB, metricsScrapeInterval, stopChan)
-
 		prometheus.MustRegister(metricDBClusterCID)
 		prometheus.MustRegister(metricDBClusterSID)
 		prometheus.MustRegister(metricDBClusterServerStatus)
