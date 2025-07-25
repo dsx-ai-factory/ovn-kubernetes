@@ -44,6 +44,23 @@ const (
 	metricsUpdateInterval = 5 * time.Minute
 )
 
+// Upstream changed the value of MetricOvnkubeSubsystemController to "controller" when adding IC
+// mode (see https://github.com/ovn-kubernetes/ovn-kubernetes/pull/3723). However, downstream is
+// still using "master", which is referenced in existing dashboards and alerts.
+//
+// Fortunately, NGN uses Central mode and VMaaS uses IC mode, so we can preserve compatibility by:
+// - Using "master" for NGN, which continues to serve current dashboards
+// - Using "controller" for VMaaS, which is adopted by new IC-specific dashboards and alerts
+//
+// This change is downstream-only and will not be upstreamed. Once NGN migrates to IC mode,
+// this hack will be removed.
+func init() {
+	if os.Getenv("OVN_ENABLE_INTERCONNECT") != "true" {
+		types.MetricOvnkubeSubsystemController = "master"
+	}
+
+}
+
 type metricDetails struct {
 	srcName       string
 	aggregateFrom []string

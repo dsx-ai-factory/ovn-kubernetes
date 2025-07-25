@@ -48,7 +48,7 @@ func (nc *DefaultNodeNetworkController) pollCustomGatewaySnatRules(nodeAnnotator
 }
 
 func (nc *DefaultNodeNetworkController) updateL3GatewayConfig(nodeAnnotator kube.Annotator, snatRules []*util.GWSNATRule) error {
-	node, err := nc.Kube.GetNode(nc.name)
+	node, err := nc.watchFactory.GetNode(nc.name)
 	if err != nil {
 		return fmt.Errorf("error retrieving node %s: %v", nc.name, err)
 	}

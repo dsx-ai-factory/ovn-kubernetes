@@ -79,7 +79,6 @@ type Interface interface {
 	UpdatePodStatus(pod *corev1.Pod) error
 	// GetPodsForDBChecker should only be used by legacy DB checker. Use watchFactory instead to get pods.
 	GetPodsForDBChecker(namespace string, opts metav1.ListOptions) ([]*corev1.Pod, error)
-	GetNode(name string) (*corev1.Node, error)
 	// GetNodeForWindows should only be used for windows hybrid overlay binary and never in linux code
 	GetNodeForWindows(name string) (*corev1.Node, error)
 	GetNodesForWindows() ([]*corev1.Node, error)
@@ -383,11 +382,6 @@ func (k *Kube) GetPodsForDBChecker(namespace string, opts metav1.ListOptions) ([
 		return nil
 	})
 	return list, err
-}
-
-// GetNode returns the Node resource from kubernetes apiserver, given its name
-func (k *Kube) GetNode(name string) (*corev1.Node, error) {
-	return k.KClient.CoreV1().Nodes().Get(context.TODO(), name, metav1.GetOptions{})
 }
 
 // GetNodesForWindows returns the list of all Node objects from kubernetes. Only used by windows binary.

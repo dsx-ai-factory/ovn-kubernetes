@@ -360,7 +360,6 @@ const (
 
 	// Metrics
 	MetricOvnkubeNamespace               = "ovnkube"
-	MetricOvnkubeSubsystemController     = "controller"
 	MetricOvnkubeSubsystemClusterManager = "clustermanager"
 	MetricOvnkubeSubsystemNode           = "node"
 	MetricOvnNamespace                   = "ovn"
@@ -381,4 +380,9 @@ const (
 	// management port.
 	NFTMgmtPortNoSNATSubnetsV4 = "mgmtport-no-snat-subnets-v4"
 	NFTMgmtPortNoSNATSubnetsV6 = "mgmtport-no-snat-subnets-v6"
+)
+
+// temporary workaround for non-IC mode metrics name
+var (
+	MetricOvnkubeSubsystemController = "ovn-controller"
 )

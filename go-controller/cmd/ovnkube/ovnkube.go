@@ -13,6 +13,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/urfave/cli/v2"
 
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -532,13 +533,16 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 			defer cancel()
 			defer wg.Done()
 
-			libovsdbOvnNBClient, err := libovsdb.NewNBClient(ctx.Done())
+			enableMetricsOption := client.WithMetricsRegistryNamespaceSubsystem(prometheus.DefaultRegisterer,
+				types.MetricOvnkubeNamespace, types.MetricOvnkubeSubsystemController+"_libovsdb")
+
+			libovsdbOvnNBClient, err := libovsdb.NewNBClient(ctx.Done(), enableMetricsOption)
 			if err != nil {
 				controllerErr = fmt.Errorf("failed to initialize libovsdb NB client: %w", err)
 				return
 			}
 
-			libovsdbOvnSBClient, err := libovsdb.NewSBClient(ctx.Done())
+			libovsdbOvnSBClient, err := libovsdb.NewSBClient(ctx.Done(), enableMetricsOption)
 			if err != nil {
 				controllerErr = fmt.Errorf("failed to initialize libovsdb SB client: %w", err)
 				return

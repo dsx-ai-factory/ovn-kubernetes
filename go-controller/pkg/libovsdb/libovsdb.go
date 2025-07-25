@@ -15,7 +15,6 @@ import (
 	"github.com/cenkalti/backoff/v4"
 	"github.com/go-logr/logr"
 	"github.com/go-logr/stdr"
-	"github.com/prometheus/client_golang/prometheus"
 	"gopkg.in/fsnotify/fsnotify.v1"
 	"gopkg.in/natefinch/lumberjack.v2"
 
@@ -126,21 +125,18 @@ func NewClient(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, stopCh <-c
 }
 
 // NewSBClient creates a new OVN Southbound Database client
-func NewSBClient(stopCh <-chan struct{}) (client.Client, error) {
-	return NewSBClientWithConfig(config.OvnSouth, prometheus.DefaultRegisterer, stopCh, false)
+func NewSBClient(stopCh <-chan struct{}, opts ...client.Option) (client.Client, error) {
+	return NewSBClientWithConfig(config.OvnSouth, stopCh, false, opts...)
 }
 
 // NewSBClientWithConfig creates a new OVN Southbound Database client with the provided configuration
-func NewSBClientWithConfig(cfg config.OvnAuthConfig, promRegistry prometheus.Registerer, stopCh <-chan struct{}, forTesting bool) (client.Client, error) {
+func NewSBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}, forTesting bool, opts ...client.Option) (client.Client, error) {
 	dbModel, err := sbdb.FullDatabaseModel()
 	if err != nil {
 		return nil, err
 	}
 
-	enableMetricsOption := client.WithMetricsRegistryNamespaceSubsystem(promRegistry,
-		"ovnkube", "master_libovsdb")
-
-	c, err := NewClient(cfg, dbModel, stopCh, enableMetricsOption)
+	c, err := NewClient(cfg, dbModel, stopCh, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -185,19 +181,16 @@ func NewSBClientWithConfig(cfg config.OvnAuthConfig, promRegistry prometheus.Reg
 }
 
 // NewNBClient creates a new OVN Northbound Database client
-func NewNBClient(stopCh <-chan struct{}) (client.Client, error) {
-	return NewNBClientWithConfig(config.OvnNorth, prometheus.DefaultRegisterer, stopCh)
+func NewNBClient(stopCh <-chan struct{}, opts ...client.Option) (client.Client, error) {
+	return NewNBClientWithConfig(config.OvnNorth, stopCh, opts...)
 }
 
 // NewNBClientWithConfig creates a new OVN Northbound Database client with the provided configuration
-func NewNBClientWithConfig(cfg config.OvnAuthConfig, promRegistry prometheus.Registerer, stopCh <-chan struct{}) (client.Client, error) {
+func NewNBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}, opts ...client.Option) (client.Client, error) {
 	dbModel, err := nbdb.FullDatabaseModel()
 	if err != nil {
 		return nil, err
 	}
-
-	enableMetricsOption := client.WithMetricsRegistryNamespaceSubsystem(promRegistry, "ovnkube",
-		"master_libovsdb")
 
 	// define client indexes for objects that are using dbIDs
 	dbModel.SetIndexes(map[string][]model.ClientIndex{
@@ -209,7 +202,7 @@ func NewNBClientWithConfig(cfg config.OvnAuthConfig, promRegistry prometheus.Reg
 		nbdb.QoSTable:           {{Columns: []model.ColumnKey{{Column: "external_ids", Key: types.PrimaryIDKey}}}},
 	})
 
-	c, err := NewClient(cfg, dbModel, stopCh, enableMetricsOption)
+	c, err := NewClient(cfg, dbModel, stopCh, opts...)
 	if err != nil {
 		return nil, err
 	}

@@ -17,7 +17,6 @@ import (
 	"github.com/alexflint/go-filemutex"
 	guuid "github.com/google/uuid"
 	"github.com/mitchellh/copystructure"
-	"github.com/prometheus/client_golang/prometheus"
 
 	"k8s.io/apimachinery/pkg/util/wait"
 
@@ -51,7 +50,7 @@ type TestSetup struct {
 
 type TestData interface{}
 
-type clientBuilderFn func(config.OvnAuthConfig, *Context) (libovsdbclient.Client, error)
+type clientBuilderFn func(config.OvnAuthConfig, *Context, ...libovsdbclient.Option) (libovsdbclient.Client, error)
 type serverBuilderFn func(config.OvnAuthConfig, []TestData, bool) (*TestOvsdbServer, error)
 
 var validUUID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
@@ -202,9 +201,9 @@ func clientWaitOnCleanup(testCtx *Context, client libovsdbclient.Client, stopCha
 	}()
 }
 
-func newNBClient(cfg config.OvnAuthConfig, testCtx *Context) (libovsdbclient.Client, error) {
+func newNBClient(cfg config.OvnAuthConfig, testCtx *Context, opts ...libovsdbclient.Option) (libovsdbclient.Client, error) {
 	stopChan := make(chan struct{})
-	nbClient, err := libovsdb.NewNBClientWithConfig(cfg, prometheus.NewRegistry(), stopChan)
+	nbClient, err := libovsdb.NewNBClientWithConfig(cfg, stopChan, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -212,9 +211,9 @@ func newNBClient(cfg config.OvnAuthConfig, testCtx *Context) (libovsdbclient.Cli
 	return nbClient, err
 }
 
-func newSBClient(cfg config.OvnAuthConfig, testCtx *Context) (libovsdbclient.Client, error) {
+func newSBClient(cfg config.OvnAuthConfig, testCtx *Context, opts ...libovsdbclient.Option) (libovsdbclient.Client, error) {
 	stopChan := make(chan struct{})
-	sbClient, err := libovsdb.NewSBClientWithConfig(cfg, prometheus.NewRegistry(), stopChan, true)
+	sbClient, err := libovsdb.NewSBClientWithConfig(cfg, stopChan, true, opts...)
 	if err != nil {
 		return nil, err
 	}
