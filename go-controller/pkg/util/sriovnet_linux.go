@@ -4,6 +4,7 @@
 package util
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -15,6 +16,7 @@ import (
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/k8snetworkplumbingwg/sriovnet"
 	utilfs "github.com/k8snetworkplumbingwg/sriovnet/pkg/utils/filesystem"
+	"golang.org/x/sys/unix"
 
 	"k8s.io/klog/v2"
 )
@@ -189,7 +191,7 @@ func GetNetdevsNameFromDeviceId(deviceId string, deviceInfo nadapi.DeviceInfo) (
 			klog.V(2).Infof("deviceInfo.Vdpa.Driver is virtio, returning netdev %s", vdpaDevice.VirtioNet().NetDev())
 			return []string{vdpaDevice.VirtioNet().NetDev()}, nil
 		}
-		if err != nil {
+		if err != nil && !errors.Is(err, unix.ENOENT) {
 			klog.Warningf("Error when searching for the virtio/vdpa netdev: %v", err)
 		}
 
