@@ -180,7 +180,7 @@ func (pol *internalAdminPBRPolicy) filterPodsByFlags(obj interface{}, filterFlag
 				if !pol.podSelector.Matches(labels.Set(pod.Labels)) {
 					return false
 				}
-				klog.V(4).Infof("Pod %s/%s matches the pod selector of policy %s", pod.Namespace, pod.Name, pol.name)
+				klog.V(6).Infof("Pod %s/%s matches the pod selector of policy %s", pod.Namespace, pod.Name, pol.name)
 			}
 		case APBR_MATCH_NSSEL:
 			if pol.namespaceSelector != nil {

@@ -411,7 +411,7 @@ func (c *Controller) onNQOSPodAdd(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
-	klog.V(5).Infof("Adding Pod in Network QoS controller %s", key)
+	klog.V(6).Infof("Adding Pod in Network QoS controller %s", key)
 	c.nqosPodQueue.Add(key)
 }
 
@@ -446,7 +446,7 @@ func (c *Controller) onNQOSPodUpdate(oldObj, newObj interface{}) {
 	}
 	key, err := cache.MetaNamespaceKeyFunc(newObj)
 	if err == nil {
-		klog.V(5).Infof("Updating Pod in Network QoS controller %s: "+
+		klog.V(6).Infof("Updating Pod in Network QoS controller %s: "+
 			"podLabels %v, podIPs: %v", key, newPodLabels, newPodIPs)
 		c.nqosPodQueue.Add(key)
 	}
@@ -459,7 +459,7 @@ func (c *Controller) onNQOSPodDelete(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
-	klog.V(5).Infof("Deleting Pod Network QoS %s", key)
+	klog.V(6).Infof("Deleting Pod Network QoS %s", key)
 	c.nqosPodQueue.Add(key)
 }
 
