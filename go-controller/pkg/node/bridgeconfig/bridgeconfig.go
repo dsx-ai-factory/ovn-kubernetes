@@ -565,6 +565,7 @@ func bridgedGatewayNodeSetup(nodeName, bridgeName, physicalNetworkName string) (
 		if len(mapString) != 0 {
 			mapString += ","
 		}
+		mapString += physNetBridgeMapping
 
 		_, stderr, err = util.RunOVSVsctl("set", "Open_vSwitch", ".",
 			fmt.Sprintf("external_ids:ovn-bridge-mappings=%s", mapString))
