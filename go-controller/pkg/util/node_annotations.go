@@ -110,6 +110,9 @@ const (
 	// OVNNodeHostCIDRs is used to track the different host IP addresses and subnet masks on the node
 	OVNNodeHostCIDRs = "k8s.ovn.org/host-cidrs"
 
+	// OVNNodePrimaryDPUHostAddr is used to track the primary DPU host address on the node
+	OVNNodePrimaryDPUHostAddr = "k8s.ovn.org/primary-dpu-host-addr"
+
 	// OVNNodeSecondaryHostEgressIPs contains EgressIP addresses that aren't managed by OVN. The EIP addresses are assigned to
 	// standard linux interfaces and not interfaces of type OVS.
 	OVNNodeSecondaryHostEgressIPs = "k8s.ovn.org/secondary-host-egress-ips"
@@ -1191,6 +1194,10 @@ func SetNodeHostCIDRs(nodeAnnotator kube.Annotator, cidrs sets.Set[string]) erro
 	return nodeAnnotator.Set(OVNNodeHostCIDRs, sets.List(cidrs))
 }
 
+func DelNodeHostCIDRs(nodeAnnotator kube.Annotator) {
+	nodeAnnotator.Delete(OVNNodeHostCIDRs)
+}
+
 func NodeHostCIDRsAnnotationChanged(oldNode, newNode *corev1.Node) bool {
 	return oldNode.Annotations[OVNNodeHostCIDRs] != newNode.Annotations[OVNNodeHostCIDRs]
 }
@@ -1728,6 +1735,42 @@ func NodeEncapIPsChanged(oldNode, newNode *corev1.Node) bool {
 	return oldNode.Annotations[OVNNodeEncapIPs] != newNode.Annotations[OVNNodeEncapIPs]
 }
 
+// SetNodePrimaryDPUHostAddr sets the primary DPU host address annotation on a node
+func SetNodePrimaryDPUHostAddr(nodeAnnotator kube.Annotator, ifAddrs []*net.IPNet) error {
+	nodeIPNetv4, _ := MatchFirstIPNetFamily(false, ifAddrs)
+	nodeIPNetv6, _ := MatchFirstIPNetFamily(true, ifAddrs)
+
+	ifAddrAnnotation := ifAddr{}
+	if nodeIPNetv4 != nil {
+		ifAddrAnnotation.IPv4 = nodeIPNetv4.String()
+	}
+	if nodeIPNetv6 != nil {
+		ifAddrAnnotation.IPv6 = nodeIPNetv6.String()
+	}
+	return nodeAnnotator.Set(OVNNodePrimaryDPUHostAddr, ifAddrAnnotation)
+}
+
+// NodePrimaryDPUHostAddrAnnotationChanged returns true if the primary DPU host address annotation changed
+func NodePrimaryDPUHostAddrAnnotationChanged(oldNode, newNode *corev1.Node) bool {
+	return oldNode.Annotations[OVNNodePrimaryDPUHostAddr] != newNode.Annotations[OVNNodePrimaryDPUHostAddr]
+}
+
+// GetNodePrimaryDPUHostAddrAnnotation returns the raw primary DPU host address annotation from a node
+func GetNodePrimaryDPUHostAddrAnnotation(node *corev1.Node) (*ifAddr, error) {
+	addrAnnotation, ok := node.Annotations[OVNNodePrimaryDPUHostAddr]
+	if !ok {
+		return nil, newAnnotationNotSetError("%s annotation not found for node %q", OVNNodePrimaryDPUHostAddr, node.Name)
+	}
+	nodeIfAddr := &ifAddr{}
+	if err := json.Unmarshal([]byte(addrAnnotation), nodeIfAddr); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal annotation: %s for node %q, err: %v", OVNNodePrimaryDPUHostAddr, node.Name, err)
+	}
+	if nodeIfAddr.IPv4 == "" && nodeIfAddr.IPv6 == "" {
+		return nil, fmt.Errorf("node: %q does not have any IP information set", node.Name)
+	}
+	return nodeIfAddr, nil
+}
+
 // findNodeReadyCondition finds node ready condition in conditions array.
 // Returns a pointer within the given node.
 func findNodeReadyCondition(node *corev1.Node) *corev1.NodeCondition {
@@ -1832,8 +1875,4 @@ func SyncDependentNodeTaints(kube kube.Interface, nodeLister listers.NodeLister,
 			action, err)
 	}
 	return err
-}
-
-func DelNodeHostCIDRs(nodeAnnotator kube.Annotator) {
-	nodeAnnotator.Delete(OVNNodeHostCIDRs)
 }

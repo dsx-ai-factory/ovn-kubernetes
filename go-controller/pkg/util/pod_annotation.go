@@ -61,7 +61,7 @@ const (
 	// skipSpoofCheckAnnotationName skips setting Port security on Logical Switch Ports that are
 	// part of the specified networks
 	skipSpoofCheckAnnotationName = "k8s.ovn.org/skip-spoofchk-on-networks"
-	// DefNetworkAnnotation is the pod annotation for the cluster-wide default network
+	// DefNetworkAnnotation is the pod annotation for the cluster-wide active network
 	DefNetworkAnnotation = "v1.multus-cni.io/default-network"
 	// SkipIPOnNetworksAnnotation specifies the NADs that don't require IP allocation
 	SkipIPOnNetworksAnnotation = "k8s.ovn.org/skip-ip-on-networks"
