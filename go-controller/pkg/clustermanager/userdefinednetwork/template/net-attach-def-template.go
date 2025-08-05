@@ -179,7 +179,7 @@ func renderCNINetworkConfig(networkName, nadName string, spec SpecGetter) (map[s
 		}
 	}
 	if netConfSpec.AllowPersistentIPs && !config.OVNKubernetesFeature.EnablePersistentIPs {
-		return nil, fmt.Errorf("allowPersistentIPs is set but persistentIPs feature is Disabled")
+		return nil, fmt.Errorf("allowPersistentIPs is set but persistentIPs is Disabled")
 	}
 
 	if err := util.ValidateNetConf(nadName, netConfSpec); err != nil {
@@ -207,7 +207,7 @@ func renderCNINetworkConfig(networkName, nadName string, spec SpecGetter) (map[s
 		cniNetConf["mtu"] = mtu
 	}
 	if len(netConfSpec.JoinSubnet) > 0 {
-		cniNetConf["joinSubnets"] = netConfSpec.JoinSubnet
+		cniNetConf["joinSubnet"] = netConfSpec.JoinSubnet
 	}
 	if len(netConfSpec.Subnets) > 0 {
 		cniNetConf["subnets"] = netConfSpec.Subnets

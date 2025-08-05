@@ -2,7 +2,6 @@ package node
 
 import (
 	"fmt"
-	"hash/fnv"
 	"net"
 	"os"
 	"os/exec"
@@ -14,7 +13,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
 )
 
 var xdpSFMAC string
@@ -24,10 +23,7 @@ var xdpVethDev string
 var xdpNSPath string
 
 const (
-	XDPOFHighPriority = 1000
-	XDPOFLowPriority  = 500
-	XDPOFLowCTTable   = 8
-	XDPNSPath         = "/run/netns/"
+	XDPNSPath = "/run/netns/"
 )
 
 // Assume this service is not shared by tenant services with different routing
@@ -53,23 +49,28 @@ const (
 // Flow for inserting on the physical side:
 // -----------------------------------------
 // Flow 1:
-//      All TCP packets coming in on the physical port for the tenant VLAN:
-//          strip the vlan, modify the dst mac to that of the XDP SF and send
-//          to the XDP SF port.
+//
+//	All TCP packets coming in on the physical port for the tenant VLAN:
+//	    strip the vlan, modify the dst mac to that of the XDP SF and send
+//	    to the XDP SF port.
+//
 // Flow 2:
-//      All packets coming from the SF port:
-//          add tenant VLAN tag and send on the physical port.
+//
+//	All packets coming from the SF port:
+//	    add tenant VLAN tag and send on the physical port.
 //
 // Flows for inserting on the OVN side:
 // ------------------------------------
 // Flow 3:
-//      All packets coming in from the XDP's veth port:
-//          add tenant VLAN tag and send to the patch port (OVN/br-int)
+//
+//	All packets coming in from the XDP's veth port:
+//	    add tenant VLAN tag and send to the patch port (OVN/br-int)
 //
 // Flow 4:
-//      All packets coming from the patch port (OVN/br-int)
-//          strip the vlan, modify the dst mac to that of the XDP veth and
-//          send to the XDP veth port.
+//
+//	All packets coming from the patch port (OVN/br-int)
+//	    strip the vlan, modify the dst mac to that of the XDP veth and
+//	    send to the XDP veth port.
 //
 // All except Flow 3 are related to the NAD (i.e. VLAN, Gateway etc.); flow3
 // uses the podMAC to configure flows. So, we configure Flows 1,2 and 4 when
@@ -77,53 +78,19 @@ const (
 //
 // Normal Flows
 // ------------
-//     All other flows will take the normal route and should be the same as
-//     if the XDP service doesn't exist (e.g. UDP)
 //
-
-func xdpToCookie(keyStr string) (string, error) {
-	h := fnv.New64a()
-	_, err := h.Write([]byte(keyStr))
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("0x%x", h.Sum64()), nil
-}
-
-// If the patchport OF port changes when in use, exit.
-func xdpCheckPatchPortOFFlows(bridgeName, ofPortPhys, patchIntf, ofPortPatch, curOfportPatch string) {
-	cookieKey := fmt.Sprintf("%s-%s-%s", bridgeName, ofPortPhys, ofPortPatch)
-	oldcookie, err := xdpToCookie(cookieKey)
-	if err != nil {
-		klog.Errorf("Fatal error: error generating cookie to update XDP flows")
-		os.Exit(1)
-	}
-	oldCookieFilter := fmt.Sprintf("cookie=%s/-1", oldcookie)
-	stdout, _, err := util.RunOVSOfctl("dump-aggregate", bridgeName, oldCookieFilter)
-	if err != nil {
-		klog.Errorf("Fatal error: error getting  XDP flows")
-		os.Exit(1)
-	}
-	hasFlowCountZero := strings.Contains(stdout, "flow_count=0")
-	if !hasFlowCountZero {
-		klog.Errorf("Fatal error: patch port %s ofport, still used by flows, changed from %s to %s",
-			patchIntf, ofPortPatch, curOfportPatch)
-		os.Exit(1)
-	}
-}
-
+//	All other flows will take the normal route and should be the same as
+//	if the XDP service doesn't exist (e.g. UDP)
 func (nc *SecondaryLocalnetNodeNetworkController) xdpSetupOFFlowsForInterface(allowedIPs []string, bridgeName string, vlanID uint, podMAC string,
 	xdpSharedPatchGW *gateway, setup bool) error {
 	var xdpOFFLows []string
-	var cookie, key string
+	var key string
 
 	op := "Setting up"
 	if !setup {
 		op = "Tearing Down"
 	}
 	defaultBridge := xdpSharedPatchGW.openflowManager.defaultBridge
-	netconfig := defaultBridge.netConfig[nc.GetNetworkName()]
-	klog.Infof("%s XDP openflow rules for %v", op, allowedIPs)
 
 	// We could be smarter in using the hash of all the ips, or some such, that'll make deletion
 	// easier, but we can cheat a bit as getting a hash of the ips etc might be an overkill, so
@@ -131,7 +98,7 @@ func (nc *SecondaryLocalnetNodeNetworkController) xdpSetupOFFlowsForInterface(al
 	// TODO: generate key string by hashing all the IPs, brdige name and vlan ID
 	ipStr := strings.Join(allowedIPs[:], "-")
 	keyStr := strings.Join([]string{"xdp", ipStr, bridgeName, fmt.Sprintf("%d", vlanID)}, "_")
-	key, err := xdpToCookie(keyStr)
+	key, err := bridgeconfig.XDPToCookie(keyStr)
 	if err != nil {
 		klog.Errorf("Fatal error: error generating cookie to add XDP flows")
 		os.Exit(1)
@@ -145,103 +112,11 @@ func (nc *SecondaryLocalnetNodeNetworkController) xdpSetupOFFlowsForInterface(al
 	}
 
 	// These could be part of XDP bridge.
-
-	// Get SF port's OF port
-	xdpSFPortOfPort, stderr, err := util.GetOVSOfPort("--if-exists", "get",
-		"interface", config.OvnKubeNode.XDPSFRep, "ofport")
+	xdpOFFLows, err = defaultBridge.XDPFlows(allowedIPs, nc.GetNetworkName(), bridgeName, podMAC, xdpSFMAC, xdpVethMAC, vlanID)
 	if err != nil {
-		return fmt.Errorf("error getting ofport for SF port %s for %s:stderr %v, %v",
-			config.OvnKubeNode.XDPSFRep, bridgeName, stderr, err)
+		return err
 	}
 
-	// Get Veth port's OF port
-	xdpVethPortOfPort, stderr, err := util.GetOVSOfPort("--if-exists", "get",
-		"interface", config.OvnKubeNode.XDPVeth, "ofport")
-	if err != nil {
-		return fmt.Errorf("error getting ofport for Veth port %s for %s: stderr %v, %v",
-			config.OvnKubeNode.XDPVeth, bridgeName, stderr, err)
-	}
-
-	// Vlan modification action.
-	mod_vlan_id := fmt.Sprintf("mod_vlan_vid:%d,", vlanID)
-
-	cookieKey := fmt.Sprintf("%s-%s-%s", bridgeName, defaultBridge.ofPortPhys, netconfig.ofPortPatch)
-	cookie, err = xdpToCookie(cookieKey)
-	if err != nil {
-		return fmt.Errorf("error generating OF cookie using %s-%s: %v", defaultBridge.ofPortPhys,
-			netconfig.ofPortPatch, err)
-	}
-	for _, allowedIP := range allowedIPs {
-		// From the wire to the pod/VM
-		// ---------------------------
-
-		// Flow 1:
-		//	Add a rule to send TCP packets for the pod from the wire to the XDP CT zone to check if
-		//	we need to send this for XDP processing.
-		xdpOFFLows = append(xdpOFFLows,
-			fmt.Sprintf("cookie=%s, table=0, priority=%d, in_port=%s, dl_vlan=%d, nw_dst=%s/32, tcp,"+
-				"actions=ct(table=%d,zone=%d)", cookie, XDPOFHighPriority, defaultBridge.ofPortPhys,
-				vlanID, allowedIP, XDPOFLowCTTable, config.Default.HostXDPCTZone))
-
-		// Flow 2:
-		//	For est connections (i.e. initiated from the pod) send to the pod
-		xdpOFFLows = append(xdpOFFLows,
-			fmt.Sprintf("cookie=%s, table=%d, priority=%d, in_port=%s, dl_vlan=%d, nw_dst=%s/32, tcp, ct_state=+est+trk,"+
-				"actions=output:%s", cookie, XDPOFLowCTTable, XDPOFHighPriority, defaultBridge.ofPortPhys,
-				vlanID, allowedIP, netconfig.ofPortPatch))
-
-		// Flow 3:
-		//	Send the others for XDP processing
-		xdpOFFLows = append(xdpOFFLows,
-			fmt.Sprintf("cookie=%s, table=%d, priority=%d, in_port=%s, dl_vlan=%d, nw_dst=%s/32, tcp,"+
-				"actions=strip_vlan,mod_dl_dst:%s,output:%s", cookie, XDPOFLowCTTable, XDPOFLowPriority,
-				defaultBridge.ofPortPhys, vlanID, allowedIP, xdpSFMAC, xdpSFPortOfPort))
-
-		// Flow 4:
-		//    Add a rule to send packets from XDP SF port to uplink port after adding the VLAN
-		xdpOFFLows = append(xdpOFFLows,
-			fmt.Sprintf("cookie=%s, table=0, priority=%d, in_port=%s, nw_src=%s/32, ip, "+
-				"actions=%smod_dl_src:%s,output:%s", cookie, XDPOFHighPriority, xdpSFPortOfPort,
-				allowedIP, mod_vlan_id, podMAC, defaultBridge.ofPortPhys))
-
-		// From the pod/VM to wire
-		// ---------------------------
-
-		// Flow 1:
-		// 	Add a rule to track TCP initiated from the VM to bypass XDP processing
-		xdpOFFLows = append(xdpOFFLows,
-			fmt.Sprintf("cookie=%s, table=0, priority=%d, in_port=%s, dl_vlan=%d, nw_src=%s/32, tcp, "+
-				"actions=ct(table=%d,zone=%d)", cookie, XDPOFHighPriority, netconfig.ofPortPatch,
-				vlanID, allowedIP, XDPOFLowCTTable, config.Default.HostXDPCTZone))
-
-		// Flow 2:
-		// 	IF it is a SYN, commit to match the return traffic and send it out, bypassing XDP/
-		xdpOFFLows = append(xdpOFFLows,
-			fmt.Sprintf("cookie=%s, table=%d, priority=%d, in_port=%s, dl_vlan=%d, nw_src=%s/32, tcp, tcp_flags=+syn-ack,"+
-				"actions=ct(commit,zone=%d),output:%s", cookie, XDPOFLowCTTable, XDPOFHighPriority,
-				netconfig.ofPortPatch, vlanID, allowedIP, config.Default.HostXDPCTZone, defaultBridge.ofPortPhys))
-
-		// Flow 3:
-		// 	IF it is est send it out, bypassing XDP
-		xdpOFFLows = append(xdpOFFLows,
-			fmt.Sprintf("cookie=%s, table=%d, priority=%d, in_port=%s, dl_vlan=%d, nw_src=%s/32, tcp, ct_state=+est+trk,"+
-				"actions=output:%s", cookie, XDPOFLowCTTable, XDPOFHighPriority, netconfig.ofPortPatch,
-				vlanID, allowedIP, defaultBridge.ofPortPhys))
-
-		// Flow 4:
-		// 	Send everything else for XDP processing
-		xdpOFFLows = append(xdpOFFLows,
-			fmt.Sprintf("cookie=%s, table=%d, priority=%d, in_port=%s, dl_vlan=%d, nw_src=%s/32, tcp,"+
-				"actions=strip_vlan,mod_dl_dst:%s,output:%s", cookie, XDPOFLowCTTable, XDPOFLowPriority,
-				netconfig.ofPortPatch, vlanID, allowedIP, xdpVethMAC, xdpVethPortOfPort))
-
-		// Flow 5:
-		//    Add a rule to send packets from XDP veth port to patch port after adding the VLAN
-		xdpOFFLows = append(xdpOFFLows,
-			fmt.Sprintf("cookie=%s, table=0, priority=%d, in_port=%s, ip, nw_dst=%s/32,"+
-				"actions=%soutput:%s", cookie, XDPOFHighPriority, xdpVethPortOfPort,
-				allowedIP, mod_vlan_id, netconfig.ofPortPatch))
-	}
 	xdpSharedPatchGW.openflowManager.updateFlowCacheEntry(key, xdpOFFLows)
 	xdpSharedPatchGW.openflowManager.requestFlowSync()
 
@@ -496,7 +371,7 @@ func (nc *SecondaryLocalnetNodeNetworkController) initializeXDPServiceForNAD(xdp
 	klog.Infof("%s XDP NS configuration for %s", op, nc.GetNetworkName())
 	err := nc.xdpSetupNSForNAD(xdpNS, setup)
 	if err != nil {
-		klog.Errorf(err.Error())
+		klog.Error(err.Error())
 		return err
 	}
 

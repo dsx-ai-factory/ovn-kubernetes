@@ -18,13 +18,13 @@ limitations under the License.
 package v1beta1
 
 import (
-	"context"
+	context "context"
 	time "time"
 
-	virtualipv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
+	crdvirtualipv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
 	versioned "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/clientset/versioned"
 	internalinterfaces "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/informers/externalversions/internalinterfaces"
-	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/listers/virtualip/v1beta1"
+	virtualipv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/listers/virtualip/v1beta1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	watch "k8s.io/apimachinery/pkg/watch"
@@ -35,7 +35,7 @@ import (
 // VirtualIPs.
 type VirtualIPInformer interface {
 	Informer() cache.SharedIndexInformer
-	Lister() v1beta1.VirtualIPLister
+	Lister() virtualipv1beta1.VirtualIPLister
 }
 
 type virtualIPInformer struct {
@@ -70,7 +70,7 @@ func NewFilteredVirtualIPInformer(client versioned.Interface, namespace string, 
 				return client.K8sV1beta1().VirtualIPs(namespace).Watch(context.TODO(), options)
 			},
 		},
-		&virtualipv1beta1.VirtualIP{},
+		&crdvirtualipv1beta1.VirtualIP{},
 		resyncPeriod,
 		indexers,
 	)
@@ -81,9 +81,9 @@ func (f *virtualIPInformer) defaultInformer(client versioned.Interface, resyncPe
 }
 
 func (f *virtualIPInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&virtualipv1beta1.VirtualIP{}, f.defaultInformer)
+	return f.factory.InformerFor(&crdvirtualipv1beta1.VirtualIP{}, f.defaultInformer)
 }
 
-func (f *virtualIPInformer) Lister() v1beta1.VirtualIPLister {
-	return v1beta1.NewVirtualIPLister(f.Informer().GetIndexer())
+func (f *virtualIPInformer) Lister() virtualipv1beta1.VirtualIPLister {
+	return virtualipv1beta1.NewVirtualIPLister(f.Informer().GetIndexer())
 }

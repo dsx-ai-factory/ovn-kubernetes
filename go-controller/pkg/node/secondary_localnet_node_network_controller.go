@@ -169,7 +169,7 @@ func (nc *SecondaryLocalnetNodeNetworkController) Start(_ context.Context) error
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		err = nc.updateLocalnetOvnBridgeMapping(true)
 		if err != nil {
-			return fmt.Errorf(err.Error())
+			return err
 		}
 	}
 
@@ -223,7 +223,7 @@ func (nc *SecondaryLocalnetNodeNetworkController) Stop() {
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		err := nc.updateLocalnetOvnBridgeMapping(false)
 		if err != nil {
-			klog.Errorf(err.Error())
+			klog.Error(err.Error())
 		}
 	}
 

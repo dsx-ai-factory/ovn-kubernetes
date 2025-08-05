@@ -18,10 +18,10 @@ limitations under the License.
 package v1beta1
 
 import (
-	"context"
+	context "context"
 
-	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
-	portmirrorv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/applyconfiguration/portmirror/v1beta1"
+	portmirrorv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
+	applyconfigurationportmirrorv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/applyconfiguration/portmirror/v1beta1"
 	scheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned/scheme"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -37,36 +37,37 @@ type PortMirrorsGetter interface {
 
 // PortMirrorInterface has methods to work with PortMirror resources.
 type PortMirrorInterface interface {
-	Create(ctx context.Context, portMirror *v1beta1.PortMirror, opts v1.CreateOptions) (*v1beta1.PortMirror, error)
-	Update(ctx context.Context, portMirror *v1beta1.PortMirror, opts v1.UpdateOptions) (*v1beta1.PortMirror, error)
+	Create(ctx context.Context, portMirror *portmirrorv1beta1.PortMirror, opts v1.CreateOptions) (*portmirrorv1beta1.PortMirror, error)
+	Update(ctx context.Context, portMirror *portmirrorv1beta1.PortMirror, opts v1.UpdateOptions) (*portmirrorv1beta1.PortMirror, error)
 	// Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
-	UpdateStatus(ctx context.Context, portMirror *v1beta1.PortMirror, opts v1.UpdateOptions) (*v1beta1.PortMirror, error)
+	UpdateStatus(ctx context.Context, portMirror *portmirrorv1beta1.PortMirror, opts v1.UpdateOptions) (*portmirrorv1beta1.PortMirror, error)
 	Delete(ctx context.Context, name string, opts v1.DeleteOptions) error
 	DeleteCollection(ctx context.Context, opts v1.DeleteOptions, listOpts v1.ListOptions) error
-	Get(ctx context.Context, name string, opts v1.GetOptions) (*v1beta1.PortMirror, error)
-	List(ctx context.Context, opts v1.ListOptions) (*v1beta1.PortMirrorList, error)
+	Get(ctx context.Context, name string, opts v1.GetOptions) (*portmirrorv1beta1.PortMirror, error)
+	List(ctx context.Context, opts v1.ListOptions) (*portmirrorv1beta1.PortMirrorList, error)
 	Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error)
-	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *v1beta1.PortMirror, err error)
-	Apply(ctx context.Context, portMirror *portmirrorv1beta1.PortMirrorApplyConfiguration, opts v1.ApplyOptions) (result *v1beta1.PortMirror, err error)
+	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *portmirrorv1beta1.PortMirror, err error)
+	Apply(ctx context.Context, portMirror *applyconfigurationportmirrorv1beta1.PortMirrorApplyConfiguration, opts v1.ApplyOptions) (result *portmirrorv1beta1.PortMirror, err error)
 	// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
-	ApplyStatus(ctx context.Context, portMirror *portmirrorv1beta1.PortMirrorApplyConfiguration, opts v1.ApplyOptions) (result *v1beta1.PortMirror, err error)
+	ApplyStatus(ctx context.Context, portMirror *applyconfigurationportmirrorv1beta1.PortMirrorApplyConfiguration, opts v1.ApplyOptions) (result *portmirrorv1beta1.PortMirror, err error)
 	PortMirrorExpansion
 }
 
 // portMirrors implements PortMirrorInterface
 type portMirrors struct {
-	*gentype.ClientWithListAndApply[*v1beta1.PortMirror, *v1beta1.PortMirrorList, *portmirrorv1beta1.PortMirrorApplyConfiguration]
+	*gentype.ClientWithListAndApply[*portmirrorv1beta1.PortMirror, *portmirrorv1beta1.PortMirrorList, *applyconfigurationportmirrorv1beta1.PortMirrorApplyConfiguration]
 }
 
 // newPortMirrors returns a PortMirrors
 func newPortMirrors(c *K8sV1beta1Client, namespace string) *portMirrors {
 	return &portMirrors{
-		gentype.NewClientWithListAndApply[*v1beta1.PortMirror, *v1beta1.PortMirrorList, *portmirrorv1beta1.PortMirrorApplyConfiguration](
+		gentype.NewClientWithListAndApply[*portmirrorv1beta1.PortMirror, *portmirrorv1beta1.PortMirrorList, *applyconfigurationportmirrorv1beta1.PortMirrorApplyConfiguration](
 			"portmirrors",
 			c.RESTClient(),
 			scheme.ParameterCodec,
 			namespace,
-			func() *v1beta1.PortMirror { return &v1beta1.PortMirror{} },
-			func() *v1beta1.PortMirrorList { return &v1beta1.PortMirrorList{} }),
+			func() *portmirrorv1beta1.PortMirror { return &portmirrorv1beta1.PortMirror{} },
+			func() *portmirrorv1beta1.PortMirrorList { return &portmirrorv1beta1.PortMirrorList{} },
+		),
 	}
 }

@@ -18,7 +18,7 @@ limitations under the License.
 package v1beta1
 
 import (
-	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1"
+	networkprobev1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1"
 )
 
 // DNSProbeApplyConfiguration represents a declarative configuration of the DNSProbe type for use
@@ -27,7 +27,7 @@ type DNSProbeApplyConfiguration struct {
 	LookupName *string                       `json:"lookupName,omitempty"`
 	IPAddress  *string                       `json:"ipAddress,omitempty"`
 	NameServer *string                       `json:"nameServer,omitempty"`
-	Interval   *v1beta1.Duration             `json:"interval,omitempty"`
+	Interval   *networkprobev1beta1.Duration `json:"interval,omitempty"`
 	PacketSpec *PacketSpecApplyConfiguration `json:"packetSpec,omitempty"`
 }
 
@@ -64,7 +64,7 @@ func (b *DNSProbeApplyConfiguration) WithNameServer(value string) *DNSProbeApply
 // WithInterval sets the Interval field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the Interval field is set to the value of the last call.
-func (b *DNSProbeApplyConfiguration) WithInterval(value v1beta1.Duration) *DNSProbeApplyConfiguration {
+func (b *DNSProbeApplyConfiguration) WithInterval(value networkprobev1beta1.Duration) *DNSProbeApplyConfiguration {
 	b.Interval = &value
 	return b
 }

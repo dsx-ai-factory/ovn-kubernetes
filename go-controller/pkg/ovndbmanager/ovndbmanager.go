@@ -132,7 +132,7 @@ func updateDBRetryCounter(retryCounter *int32, db *util.OvsDbProperties) {
 		//delete the db file and start master
 		err := resetRaftDB(db)
 		if err != nil {
-			klog.Warningf(err.Error())
+			klog.Warningf("Could not reset raft DB: %v", err)
 		}
 		*retryCounter = 0
 	} else {
@@ -226,7 +226,7 @@ func ensureClusterRaftMembership(db *util.OvsDbProperties, kclient kube.Interfac
 	r = regexp.MustCompile(`([a-z0-9]{4}) at ` + dbServerRegexp)
 	members := r.FindAllStringSubmatch(out, -1)
 	kickedMembersCount := 0
-	dbPods, err := kclient.GetPods(config.Kubernetes.OVNConfigNamespace, metav1.ListOptions{
+	dbPods, err := kclient.GetPodsForDBChecker(config.Kubernetes.OVNConfigNamespace, metav1.ListOptions{
 		LabelSelector: labels.Set(map[string]string{"ovn-db-pod": "true"}).String(),
 	})
 	if err != nil {

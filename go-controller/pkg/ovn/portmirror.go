@@ -11,7 +11,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	portmirror "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -351,20 +351,20 @@ func (bnc *BaseNetworkController) handleSourcePodSelectors(pm *util.PortMirror) 
 				AddFunc: func(obj interface{}) {
 					pod := obj.(*corev1.Pod)
 					if err := bnc.handlePortMirrorSourcePodAdd(pm, pod); err != nil {
-						klog.Errorf(err.Error())
+						klog.Error(err.Error())
 					}
 				},
 				DeleteFunc: func(obj interface{}) {
 					pod := obj.(*corev1.Pod)
 					if err := bnc.handlePortMirrorSourcePodDelete(pm, pod); err != nil {
-						klog.Errorf(err.Error())
+						klog.Error(err.Error())
 					}
 				},
 				UpdateFunc: func(_, newObj interface{}) {
 					newPod := newObj.(*corev1.Pod)
 					if util.NeedsRetry(newPod, pm) {
 						if err := bnc.handlePortMirrorSourcePodAdd(pm, newPod); err != nil {
-							klog.Errorf(err.Error())
+							klog.Error(err.Error())
 						}
 					}
 				}}, nil, 1)

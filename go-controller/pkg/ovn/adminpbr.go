@@ -21,7 +21,7 @@ import (
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	adminpbrapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
@@ -787,7 +787,7 @@ func (bnc *BaseNetworkController) syncAddressSetPeriodic() {
 }
 
 func setErrorForAdminPBR(bnc *BaseNetworkController, adminpbr *adminpbrapi.AdminPolicyBasedRoute, msg string) {
-	klog.Errorf(msg)
+	klog.Error(msg)
 	if err := bnc.updateAdminPBRStatus(adminpbr, msg, types.OvnK8sStatusFailed); err != nil {
 		klog.Errorf("Failed to set error for adminpbr %s: %v", adminpbr.Name, err)
 	}

@@ -329,7 +329,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 				"netAttachDefName": "mynamespace/test-net",
 				"role": "primary",
 				"topology": "layer3",
-				"joinSubnets": "100.65.0.0/16,fd99::/64",
+				"joinSubnet": "100.65.0.0/16,fd99::/64",
 				"subnets": "192.168.100.0/16,2001:dbb::/60",
 				"mtu": 1500
 			}`,
@@ -353,7 +353,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			  "netAttachDefName": "mynamespace/test-net",
 			  "role": "primary",
 			  "topology": "layer2",
-			  "joinSubnets": "100.65.0.0/16,fd99::/64",
+			  "joinSubnet": "100.65.0.0/16,fd99::/64",
 			  "subnets": "192.168.100.0/24,2001:dbb::/64",
 			  "mtu": 1500,
 			  "allowPersistentIPs": true
@@ -379,7 +379,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			  "netAttachDefName": "mynamespace/test-net",
 			  "role": "primary",
 			  "topology": "layer2",
-			  "joinSubnets": "100.62.0.0/24,fd92::/64",
+			  "joinSubnet": "100.62.0.0/24,fd92::/64",
 			  "subnets": "192.168.100.0/24,2001:dbb::/64",
 			  "mtu": 1500,
 			  "allowPersistentIPs": true
@@ -465,7 +465,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 				"netAttachDefName": "mynamespace/test-net",
 				"role": "primary",
 				"topology": "layer3",
-				"joinSubnets": "100.65.0.0/16,fd99::/64",
+				"joinSubnet": "100.65.0.0/16,fd99::/64",
 				"subnets": "192.168.100.0/16,2001:dbb::/60",
 				"mtu": 1500
 			}`,
@@ -489,7 +489,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			  "netAttachDefName": "mynamespace/test-net",
 			  "role": "primary",
 			  "topology": "layer2",
-			  "joinSubnets": "100.65.0.0/16,fd99::/64",
+			  "joinSubnet": "100.65.0.0/16,fd99::/64",
 			  "subnets": "192.168.100.0/24,2001:dbb::/64",
 			  "mtu": 1500,
 			  "allowPersistentIPs": true
@@ -515,7 +515,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			  "netAttachDefName": "mynamespace/test-net",
 			  "role": "primary",
 			  "topology": "layer2",
-			  "joinSubnets": "100.62.0.0/24,fd92::/64",
+			  "joinSubnet": "100.62.0.0/24,fd92::/64",
 			  "subnets": "192.168.100.0/24,2001:dbb::/64",
 			  "mtu": 1500,
 			  "allowPersistentIPs": true

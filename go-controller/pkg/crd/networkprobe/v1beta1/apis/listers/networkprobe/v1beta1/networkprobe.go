@@ -18,10 +18,10 @@ limitations under the License.
 package v1beta1
 
 import (
-	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/client-go/listers"
-	"k8s.io/client-go/tools/cache"
+	networkprobev1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1"
+	labels "k8s.io/apimachinery/pkg/labels"
+	listers "k8s.io/client-go/listers"
+	cache "k8s.io/client-go/tools/cache"
 )
 
 // NetworkProbeLister helps list NetworkProbes.
@@ -29,7 +29,7 @@ import (
 type NetworkProbeLister interface {
 	// List lists all NetworkProbes in the indexer.
 	// Objects returned here must be treated as read-only.
-	List(selector labels.Selector) (ret []*v1beta1.NetworkProbe, err error)
+	List(selector labels.Selector) (ret []*networkprobev1beta1.NetworkProbe, err error)
 	// NetworkProbes returns an object that can list and get NetworkProbes.
 	NetworkProbes(namespace string) NetworkProbeNamespaceLister
 	NetworkProbeListerExpansion
@@ -37,17 +37,17 @@ type NetworkProbeLister interface {
 
 // networkProbeLister implements the NetworkProbeLister interface.
 type networkProbeLister struct {
-	listers.ResourceIndexer[*v1beta1.NetworkProbe]
+	listers.ResourceIndexer[*networkprobev1beta1.NetworkProbe]
 }
 
 // NewNetworkProbeLister returns a new NetworkProbeLister.
 func NewNetworkProbeLister(indexer cache.Indexer) NetworkProbeLister {
-	return &networkProbeLister{listers.New[*v1beta1.NetworkProbe](indexer, v1beta1.Resource("networkprobe"))}
+	return &networkProbeLister{listers.New[*networkprobev1beta1.NetworkProbe](indexer, networkprobev1beta1.Resource("networkprobe"))}
 }
 
 // NetworkProbes returns an object that can list and get NetworkProbes.
 func (s *networkProbeLister) NetworkProbes(namespace string) NetworkProbeNamespaceLister {
-	return networkProbeNamespaceLister{listers.NewNamespaced[*v1beta1.NetworkProbe](s.ResourceIndexer, namespace)}
+	return networkProbeNamespaceLister{listers.NewNamespaced[*networkprobev1beta1.NetworkProbe](s.ResourceIndexer, namespace)}
 }
 
 // NetworkProbeNamespaceLister helps list and get NetworkProbes.
@@ -55,15 +55,15 @@ func (s *networkProbeLister) NetworkProbes(namespace string) NetworkProbeNamespa
 type NetworkProbeNamespaceLister interface {
 	// List lists all NetworkProbes in the indexer for a given namespace.
 	// Objects returned here must be treated as read-only.
-	List(selector labels.Selector) (ret []*v1beta1.NetworkProbe, err error)
+	List(selector labels.Selector) (ret []*networkprobev1beta1.NetworkProbe, err error)
 	// Get retrieves the NetworkProbe from the indexer for a given namespace and name.
 	// Objects returned here must be treated as read-only.
-	Get(name string) (*v1beta1.NetworkProbe, error)
+	Get(name string) (*networkprobev1beta1.NetworkProbe, error)
 	NetworkProbeNamespaceListerExpansion
 }
 
 // networkProbeNamespaceLister implements the NetworkProbeNamespaceLister
 // interface.
 type networkProbeNamespaceLister struct {
-	listers.ResourceIndexer[*v1beta1.NetworkProbe]
+	listers.ResourceIndexer[*networkprobev1beta1.NetworkProbe]
 }

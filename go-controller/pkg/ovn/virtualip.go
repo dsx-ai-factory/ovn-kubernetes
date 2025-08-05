@@ -16,10 +16,10 @@ import (
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 
-	ovsDBCache "github.com/ovn-org/libovsdb/cache"
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/libovsdb/model"
-	"github.com/ovn-org/libovsdb/ovsdb"
+	ovsDBCache "github.com/ovn-kubernetes/libovsdb/cache"
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/model"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	virtualipv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
@@ -206,7 +206,7 @@ func (bnc *BaseNetworkController) watchPortBindingTable() error {
 			if pb.Type == ovntypes.VirtualPortType {
 				err := bnc.updateVIPActivePodInstance(pb)
 				if err != nil {
-					klog.Errorf(err.Error())
+					klog.Error(err.Error())
 				}
 			}
 		},
@@ -227,7 +227,7 @@ func (bnc *BaseNetworkController) watchPortBindingTable() error {
 			}
 			err := bnc.updateVIPActivePodInstance(newPortBinding)
 			if err != nil {
-				klog.Errorf(err.Error())
+				klog.Error(err.Error())
 			}
 		},
 	})
@@ -340,7 +340,7 @@ func (bnc *BaseNetworkController) updateVirtualIPStatusOnError(vip *virtualIP, e
 	vip.messages = append(vip.messages, errMsg)
 	err := bnc.updateVirtualIPStatusWithRetry(vip.namespace, vip.name, vip.status, vip.messages, nil, nil, nil)
 	if err != nil {
-		klog.Errorf(err.Error())
+		klog.Error(err.Error())
 	}
 }
 
@@ -754,7 +754,7 @@ func (bnc *BaseNetworkController) addVirtualIP(virtIP *virtualipv1beta1.VirtualI
 	bnc.virtualIPs.Store(virtualIPKey, vip)
 	err = bnc.updateVirtualIPStatusWithRetry(vip.namespace, vip.name, vip.status, vip.messages, nil, nil, nil)
 	if err != nil {
-		klog.Errorf(err.Error())
+		klog.Error(err.Error())
 	}
 	unlock()
 
@@ -764,14 +764,14 @@ func (bnc *BaseNetworkController) addVirtualIP(virtIP *virtualipv1beta1.VirtualI
 			AddFunc: func(obj interface{}) {
 				pod := obj.(*corev1.Pod)
 				if err := bnc.handleVIPPodAdd(vip, pod); err != nil {
-					klog.Errorf(err.Error())
+					klog.Error(err.Error())
 					bnc.recordVirtualIPEvent("VirtualIPPodAddError", err.Error(), virtIP)
 				}
 			},
 			DeleteFunc: func(obj interface{}) {
 				pod := obj.(*corev1.Pod)
 				if err := bnc.handleVIPPodDelete(vip, pod); err != nil {
-					klog.Errorf(err.Error())
+					klog.Error(err.Error())
 					bnc.recordVirtualIPEvent("VirtualIPPodDelError", err.Error(), virtIP)
 				}
 			},
@@ -779,7 +779,7 @@ func (bnc *BaseNetworkController) addVirtualIP(virtIP *virtualipv1beta1.VirtualI
 				newPod := newObj.(*corev1.Pod)
 				if vip.needsRetry(newPod) {
 					if err := bnc.handleVIPPodAdd(vip, newPod); err != nil {
-						klog.Errorf(err.Error())
+						klog.Error(err.Error())
 						bnc.recordVirtualIPEvent("VirtualIPPodAddError", err.Error(), virtIP)
 					}
 				}
@@ -862,7 +862,7 @@ func (bnc *BaseNetworkController) syncVirtualIPPods(vip *virtualIP, vipLSP *nbdb
 			vip.namespace, vip.name, parentPorts, updatedVIPParentPorts)
 		err = bnc.updateVirtualPortOptions(vip, updatedVIPParentPorts)
 		if err != nil {
-			klog.Errorf(err.Error())
+			klog.Error(err.Error())
 		}
 	}
 }

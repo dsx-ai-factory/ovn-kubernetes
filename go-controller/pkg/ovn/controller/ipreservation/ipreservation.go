@@ -312,7 +312,7 @@ func (c *Controller) sync(ipresvKey string) error {
 		}
 		resvIPs, err := c.ensureIPReservation(ipresvObj)
 		if err != nil {
-			klog.Errorf(err.Error())
+			klog.Error(err.Error())
 			c.recordIPReservationEvent("IPReservationAddError", err.Error(), ipresvObj)
 			return err
 		}
@@ -335,7 +335,7 @@ func (c *Controller) ensureIPReservation(resvIPObj *ipreservation.IPReservation)
 		// IP reservation is not supported in this network, do nothing and return success
 		msg := fmt.Errorf("the NAD %s of IPReservation %s/%s requested is not a layer2 or localnet network",
 			resvIPObj.Spec.NetworkAttachmentName, resvIPObj.Namespace, resvIPObj.Name)
-		klog.Errorf(msg.Error())
+		klog.Error(msg.Error())
 		err := c.updateIPReservationStatusWithRetry(resvIPObj.Namespace, resvIPObj.Name, ovntypes.OvnK8sStatusFailed,
 			[]string{msg.Error()}, nil)
 		if err != nil {
@@ -358,7 +358,7 @@ func (c *Controller) ensureIPReservation(resvIPObj *ipreservation.IPReservation)
 		tmpErr := c.updateIPReservationStatusWithRetry(resvIPObj.Namespace, resvIPObj.Name, ovntypes.OvnK8sStatusFailed,
 			[]string{err.Error()}, nil)
 		if tmpErr != nil {
-			klog.Errorf(tmpErr.Error())
+			klog.Error(tmpErr.Error())
 		}
 		return nil, err
 	}
@@ -375,7 +375,7 @@ func (c *Controller) ensureIPReservation(resvIPObj *ipreservation.IPReservation)
 			tmpErr := c.updateIPReservationStatusWithRetry(resvIPObj.Namespace, resvIPObj.Name, ovntypes.OvnK8sStatusFailed,
 				[]string{err.Error()}, nil)
 			if tmpErr != nil {
-				klog.Errorf(tmpErr.Error())
+				klog.Error(tmpErr.Error())
 			}
 			return nil, err
 		}
@@ -390,7 +390,7 @@ func (c *Controller) ensureIPReservation(resvIPObj *ipreservation.IPReservation)
 		tmpErr := c.updateIPReservationStatusWithRetry(resvIPObj.Namespace, resvIPObj.Name, ovntypes.OvnK8sStatusFailed,
 			[]string{err.Error()}, nil)
 		if tmpErr != nil {
-			klog.Errorf(tmpErr.Error())
+			klog.Error(tmpErr.Error())
 		}
 		return nil, err
 	}

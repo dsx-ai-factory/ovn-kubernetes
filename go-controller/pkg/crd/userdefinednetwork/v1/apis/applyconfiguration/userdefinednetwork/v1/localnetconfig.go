@@ -18,19 +18,19 @@ limitations under the License.
 package v1
 
 import (
-	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
+	userdefinednetworkv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 )
 
 // LocalnetConfigApplyConfiguration represents a declarative configuration of the LocalnetConfig type for use
 // with apply.
 type LocalnetConfigApplyConfiguration struct {
-	Role                *v1.NetworkRole               `json:"role,omitempty"`
-	PhysicalNetworkName *string                       `json:"physicalNetworkName,omitempty"`
-	Subnets             *v1.DualStackCIDRs            `json:"subnets,omitempty"`
-	ExcludeSubnets      []v1.CIDR                     `json:"excludeSubnets,omitempty"`
-	IPAM                *IPAMConfigApplyConfiguration `json:"ipam,omitempty"`
-	MTU                 *int32                        `json:"mtu,omitempty"`
-	VLAN                *VLANConfigApplyConfiguration `json:"vlan,omitempty"`
+	Role                *userdefinednetworkv1.NetworkRole    `json:"role,omitempty"`
+	PhysicalNetworkName *string                              `json:"physicalNetworkName,omitempty"`
+	Subnets             *userdefinednetworkv1.DualStackCIDRs `json:"subnets,omitempty"`
+	ExcludeSubnets      []userdefinednetworkv1.CIDR          `json:"excludeSubnets,omitempty"`
+	IPAM                *IPAMConfigApplyConfiguration        `json:"ipam,omitempty"`
+	MTU                 *int32                               `json:"mtu,omitempty"`
+	VLAN                *VLANConfigApplyConfiguration        `json:"vlan,omitempty"`
 }
 
 // LocalnetConfigApplyConfiguration constructs a declarative configuration of the LocalnetConfig type for use with
@@ -42,7 +42,7 @@ func LocalnetConfig() *LocalnetConfigApplyConfiguration {
 // WithRole sets the Role field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the Role field is set to the value of the last call.
-func (b *LocalnetConfigApplyConfiguration) WithRole(value v1.NetworkRole) *LocalnetConfigApplyConfiguration {
+func (b *LocalnetConfigApplyConfiguration) WithRole(value userdefinednetworkv1.NetworkRole) *LocalnetConfigApplyConfiguration {
 	b.Role = &value
 	return b
 }
@@ -58,7 +58,7 @@ func (b *LocalnetConfigApplyConfiguration) WithPhysicalNetworkName(value string)
 // WithSubnets sets the Subnets field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the Subnets field is set to the value of the last call.
-func (b *LocalnetConfigApplyConfiguration) WithSubnets(value v1.DualStackCIDRs) *LocalnetConfigApplyConfiguration {
+func (b *LocalnetConfigApplyConfiguration) WithSubnets(value userdefinednetworkv1.DualStackCIDRs) *LocalnetConfigApplyConfiguration {
 	b.Subnets = &value
 	return b
 }
@@ -66,7 +66,7 @@ func (b *LocalnetConfigApplyConfiguration) WithSubnets(value v1.DualStackCIDRs) 
 // WithExcludeSubnets adds the given value to the ExcludeSubnets field in the declarative configuration
 // and returns the receiver, so that objects can be build by chaining "With" function invocations.
 // If called multiple times, values provided by each call will be appended to the ExcludeSubnets field.
-func (b *LocalnetConfigApplyConfiguration) WithExcludeSubnets(values ...v1.CIDR) *LocalnetConfigApplyConfiguration {
+func (b *LocalnetConfigApplyConfiguration) WithExcludeSubnets(values ...userdefinednetworkv1.CIDR) *LocalnetConfigApplyConfiguration {
 	for i := range values {
 		b.ExcludeSubnets = append(b.ExcludeSubnets, values[i])
 	}

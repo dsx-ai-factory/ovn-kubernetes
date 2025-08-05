@@ -180,7 +180,7 @@ func TestParseNetconf(t *testing.T) {
             "netAttachDefName": "default/tenantred"
     }
 `,
-			expectedError: fmt.Errorf("error parsing Network Attachment Definition ns1/nad1: net-attach-def not managed by OVN"),
+			expectedError: fmt.Errorf("net-attach-def not managed by OVN"),
 		},
 		{
 			desc: "attachment definition with IPAM key defined, using a wrong type",
@@ -1154,6 +1154,16 @@ func TestSubnetOverlapCheck(t *testing.T) {
                 }
 			`,
 		},
+		{
+			desc: "return error when the network is not ovnk",
+			inputNetAttachDefConfigSpec: `
+                {
+                    "name": "test",
+                    "type": "sriov-cni"
+                }
+			`,
+			expectedError: ErrorAttachDefNotOvnManaged,
+		},
 	}
 
 	for _, test := range tests {
@@ -1256,6 +1266,34 @@ func TestNewNetInfo(t *testing.T) {
 			} else {
 				g.Expect(err).To(gomega.MatchError(test.expectedError.Error()))
 			}
+		})
+	}
+}
+
+func TestAreNetworksCompatible(t *testing.T) {
+	tests := []struct {
+		desc                   string
+		aNetwork               NetInfo
+		anotherNetwork         NetInfo
+		expectedResult         bool
+		expectationDescription string
+	}{
+		{
+			desc:                   "physical network name update",
+			aNetwork:               &secondaryNetInfo{physicalNetworkName: "A"},
+			anotherNetwork:         &secondaryNetInfo{physicalNetworkName: "B"},
+			expectedResult:         false,
+			expectationDescription: "we should reconcile on physical network name updates",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.desc, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			g.Expect(AreNetworksCompatible(test.aNetwork, test.anotherNetwork)).To(
+				gomega.Equal(test.expectedResult),
+				test.expectationDescription,
+			)
 		})
 	}
 }

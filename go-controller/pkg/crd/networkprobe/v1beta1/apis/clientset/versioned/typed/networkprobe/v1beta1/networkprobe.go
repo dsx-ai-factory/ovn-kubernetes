@@ -18,10 +18,10 @@ limitations under the License.
 package v1beta1
 
 import (
-	"context"
+	context "context"
 
-	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1"
-	networkprobev1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1/apis/applyconfiguration/networkprobe/v1beta1"
+	networkprobev1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1"
+	applyconfigurationnetworkprobev1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1/apis/applyconfiguration/networkprobe/v1beta1"
 	scheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1/apis/clientset/versioned/scheme"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -37,36 +37,37 @@ type NetworkProbesGetter interface {
 
 // NetworkProbeInterface has methods to work with NetworkProbe resources.
 type NetworkProbeInterface interface {
-	Create(ctx context.Context, networkProbe *v1beta1.NetworkProbe, opts v1.CreateOptions) (*v1beta1.NetworkProbe, error)
-	Update(ctx context.Context, networkProbe *v1beta1.NetworkProbe, opts v1.UpdateOptions) (*v1beta1.NetworkProbe, error)
+	Create(ctx context.Context, networkProbe *networkprobev1beta1.NetworkProbe, opts v1.CreateOptions) (*networkprobev1beta1.NetworkProbe, error)
+	Update(ctx context.Context, networkProbe *networkprobev1beta1.NetworkProbe, opts v1.UpdateOptions) (*networkprobev1beta1.NetworkProbe, error)
 	// Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
-	UpdateStatus(ctx context.Context, networkProbe *v1beta1.NetworkProbe, opts v1.UpdateOptions) (*v1beta1.NetworkProbe, error)
+	UpdateStatus(ctx context.Context, networkProbe *networkprobev1beta1.NetworkProbe, opts v1.UpdateOptions) (*networkprobev1beta1.NetworkProbe, error)
 	Delete(ctx context.Context, name string, opts v1.DeleteOptions) error
 	DeleteCollection(ctx context.Context, opts v1.DeleteOptions, listOpts v1.ListOptions) error
-	Get(ctx context.Context, name string, opts v1.GetOptions) (*v1beta1.NetworkProbe, error)
-	List(ctx context.Context, opts v1.ListOptions) (*v1beta1.NetworkProbeList, error)
+	Get(ctx context.Context, name string, opts v1.GetOptions) (*networkprobev1beta1.NetworkProbe, error)
+	List(ctx context.Context, opts v1.ListOptions) (*networkprobev1beta1.NetworkProbeList, error)
 	Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error)
-	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *v1beta1.NetworkProbe, err error)
-	Apply(ctx context.Context, networkProbe *networkprobev1beta1.NetworkProbeApplyConfiguration, opts v1.ApplyOptions) (result *v1beta1.NetworkProbe, err error)
+	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *networkprobev1beta1.NetworkProbe, err error)
+	Apply(ctx context.Context, networkProbe *applyconfigurationnetworkprobev1beta1.NetworkProbeApplyConfiguration, opts v1.ApplyOptions) (result *networkprobev1beta1.NetworkProbe, err error)
 	// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
-	ApplyStatus(ctx context.Context, networkProbe *networkprobev1beta1.NetworkProbeApplyConfiguration, opts v1.ApplyOptions) (result *v1beta1.NetworkProbe, err error)
+	ApplyStatus(ctx context.Context, networkProbe *applyconfigurationnetworkprobev1beta1.NetworkProbeApplyConfiguration, opts v1.ApplyOptions) (result *networkprobev1beta1.NetworkProbe, err error)
 	NetworkProbeExpansion
 }
 
 // networkProbes implements NetworkProbeInterface
 type networkProbes struct {
-	*gentype.ClientWithListAndApply[*v1beta1.NetworkProbe, *v1beta1.NetworkProbeList, *networkprobev1beta1.NetworkProbeApplyConfiguration]
+	*gentype.ClientWithListAndApply[*networkprobev1beta1.NetworkProbe, *networkprobev1beta1.NetworkProbeList, *applyconfigurationnetworkprobev1beta1.NetworkProbeApplyConfiguration]
 }
 
 // newNetworkProbes returns a NetworkProbes
 func newNetworkProbes(c *K8sV1beta1Client, namespace string) *networkProbes {
 	return &networkProbes{
-		gentype.NewClientWithListAndApply[*v1beta1.NetworkProbe, *v1beta1.NetworkProbeList, *networkprobev1beta1.NetworkProbeApplyConfiguration](
+		gentype.NewClientWithListAndApply[*networkprobev1beta1.NetworkProbe, *networkprobev1beta1.NetworkProbeList, *applyconfigurationnetworkprobev1beta1.NetworkProbeApplyConfiguration](
 			"networkprobes",
 			c.RESTClient(),
 			scheme.ParameterCodec,
 			namespace,
-			func() *v1beta1.NetworkProbe { return &v1beta1.NetworkProbe{} },
-			func() *v1beta1.NetworkProbeList { return &v1beta1.NetworkProbeList{} }),
+			func() *networkprobev1beta1.NetworkProbe { return &networkprobev1beta1.NetworkProbe{} },
+			func() *networkprobev1beta1.NetworkProbeList { return &networkprobev1beta1.NetworkProbeList{} },
+		),
 	}
 }

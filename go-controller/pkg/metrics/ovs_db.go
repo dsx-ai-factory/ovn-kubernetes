@@ -10,6 +10,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"k8s.io/klog/v2"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // ovs local db coverage/show metrics
@@ -55,8 +57,8 @@ var ovsDbCoverageShowMetricsMap = map[string]*metricDetails{
 }
 
 var metricOvsDbSize = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemOvsDB,
+	Namespace: types.MetricOvsNamespace,
+	Subsystem: types.MetricOvsSubsystemOvsDB,
 	Name:      "db_size",
 	Help:      "The size of the database file associated with the OVS DB on each node.",
 })
@@ -94,7 +96,7 @@ func RegisterOvsDBMetrics(metricsScrapeInterval int, stopChan <-chan struct{}) {
 		prometheus.MustRegister(metricOvsDbSize)
 		// Register OVSDB coverage/show metrics with prometheus
 		componentCoverageShowMetricsMap[ovsDB] = ovsDbCoverageShowMetricsMap
-		registerCoverageShowMetrics(ovsDB, MetricOvsNamespace, MetricOvsSubsystemOvsDB)
+		registerCoverageShowMetrics(ovsDB, types.MetricOvsNamespace, types.MetricOvsSubsystemOvsDB)
 		// OVSDB coverage/show metrics updater
 		go coverageShowMetricsUpdater(ovsDB, metricsScrapeInterval, stopChan)
 		// OVSDB size metric uodater

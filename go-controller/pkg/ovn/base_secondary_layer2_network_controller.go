@@ -54,6 +54,9 @@ func (oc *BaseSecondaryLayer2NetworkController) stop() {
 	if oc.namespaceHandler != nil {
 		oc.watchFactory.RemoveNamespaceHandler(oc.namespaceHandler)
 	}
+	if oc.routeImportManager != nil && config.Gateway.Mode == config.GatewayModeShared {
+		oc.routeImportManager.ForgetNetwork(oc.GetNetworkName())
+	}
 }
 
 // cleanup cleans up logical entities for the given network, called from net-attach-def routine
@@ -205,6 +208,13 @@ func (oc *BaseSecondaryLayer2NetworkController) run() error {
 		}
 	}
 
+	// Add ourselves to the route import manager
+	if oc.routeImportManager != nil && config.Gateway.Mode == config.GatewayModeShared {
+		err := oc.routeImportManager.AddNetwork(oc.GetNetInfo())
+		if err != nil {
+			return fmt.Errorf("failed to add network %s to the route import manager: %v", oc.GetNetworkName(), err)
+		}
+	}
 	klog.Infof("Completing all the Watchers for network %s took %v", oc.GetNetworkName(), time.Since(start))
 	return nil
 }

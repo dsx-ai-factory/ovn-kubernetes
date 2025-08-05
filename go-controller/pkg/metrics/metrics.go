@@ -26,30 +26,14 @@ import (
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 const (
-	MetricOvnkubeNamespace               = "ovnkube"
-	MetricOvnkubeSubsystemController     = "master"
-	MetricOvnkubeSubsystemClusterManager = "clustermanager"
-	MetricOvnkubeSubsystemNode           = "node"
-	MetricOvnNamespace                   = "ovn"
-	MetricOvnSubsystemDB                 = "db"
-	MetricOvnSubsystemNorthd             = "northd"
-	MetricOvnSubsystemController         = "controller"
-	MetricOvsNamespace                   = "ovs"
-	MetricOvsSubsystemVswitchd           = "vswitchd"
-	MetricOvsSubsystemOvsDB              = "ovsdb"
-	MetricProbeNamespace                 = "network_probe"
-	MetricDNSSubsystem                   = "dns"
-	MetricHttpSubsystem                  = "http"
-	MetricTCPSubsystem                   = "tcp"
-	MetricUDPSubsystem                   = "udp"
-
 	ovnNorthd     = "ovn-northd"
 	ovnController = "ovn-controller"
 	ovsVswitchd   = "ovs-vswitchd"
@@ -92,7 +76,7 @@ type stopwatchStatistics struct {
 // resource reached the maximum retry limit and will not be retried. This metric doesn't
 // need Subsystem string since it is applicable for both master and node.
 var MetricResourceRetryFailuresCount = prometheus.NewCounter(prometheus.CounterOpts{
-	Namespace: MetricOvnkubeNamespace,
+	Namespace: types.MetricOvnkubeNamespace,
 	Name:      "resource_retry_failures_total",
 	Help:      "The total number of times processing a Kubernetes resource reached the maximum retry limit and was no longer processed",
 })

@@ -17,17 +17,18 @@ import (
 
 	"k8s.io/klog/v2"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovsops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/vswitchd"
 )
 
 // ovs build info
 var metricOvsVersion = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
+	Namespace: types.MetricOvsNamespace,
 	Name:      "build_info",
 	Help:      "A metric with a constant '1' value labeled by ovs version."},
 	[]string{
@@ -38,15 +39,15 @@ var metricOvsVersion = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 
 // ovs datapath Metrics
 var metricOvsDpTotal = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
+	Namespace: types.MetricOvsNamespace,
+	Subsystem: types.MetricOvsSubsystemVswitchd,
 	Name:      "dp_total",
 	Help:      "Represents total number of datapaths on the system.",
 })
 
 var metricOvsDp = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
+	Namespace: types.MetricOvsNamespace,
+	Subsystem: types.MetricOvsSubsystemVswitchd,
 	Name:      "dp",
 	Help: "A metric with a constant '1' value labeled by datapath " +
 		"name present on the instance."},
@@ -57,8 +58,8 @@ var metricOvsDp = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricOvsDpIfTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
+	Namespace: types.MetricOvsNamespace,
+	Subsystem: types.MetricOvsSubsystemVswitchd,
 	Name:      "dp_if_total",
 	Help:      "Represents the number of ports connected to the datapath."},
 	[]string{
@@ -67,8 +68,8 @@ var metricOvsDpIfTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricOvsDpIf = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
+	Namespace: types.MetricOvsNamespace,
+	Subsystem: types.MetricOvsSubsystemVswitchd,
 	Name:      "dp_if",
 	Help: "A metric with a constant '1' value labeled by " +
 		"datapath name, port name, port type and datapath port number."},
@@ -81,8 +82,8 @@ var metricOvsDpIf = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricOvsDpFlowsTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
+	Namespace: types.MetricOvsNamespace,
+	Subsystem: types.MetricOvsSubsystemVswitchd,
 	Name:      "dp_flows_total",
 	Help:      "Represents the number of flows in datapath."},
 	[]string{
@@ -91,8 +92,8 @@ var metricOvsDpFlowsTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricOvsDpFlowsLookupHit = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
+	Namespace: types.MetricOvsNamespace,
+	Subsystem: types.MetricOvsSubsystemVswitchd,
 	Name:      "dp_flows_lookup_hit",
 	Help: "Represents number of packets matching the existing flows " +
 		"while processing incoming packets in the datapath."},
@@ -102,8 +103,8 @@ var metricOvsDpFlowsLookupHit = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricOvsDpFlowsLookupMissed = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
+	Namespace: types.MetricOvsNamespace,
+	Subsystem: types.MetricOvsSubsystemVswitchd,
 	Name:      "dp_flows_lookup_missed",
 	Help: "Represents the number of packets not matching any existing " +
 		"flow  and require  user space processing."},
@@ -113,8 +114,8 @@ var metricOvsDpFlowsLookupMissed = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricOvsDpFlowsLookupLost = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
+	Namespace: types.MetricOvsNamespace,
+	Subsystem: types.MetricOvsSubsystemVswitchd,
 	Name:      "dp_flows_lookup_lost",
 	Help: "number of packets destined for user space process but " +
 		"subsequently dropped before  reaching  userspace."},
@@ -124,8 +125,8 @@ var metricOvsDpFlowsLookupLost = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricOvsDpPacketsTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
+	Namespace: types.MetricOvsNamespace,
+	Subsystem: types.MetricOvsSubsystemVswitchd,
 	Name:      "dp_packets_total",
 	Help: "Represents the total number of packets datapath processed " +
 		"which is the sum of hit and missed."},
@@ -135,8 +136,8 @@ var metricOvsDpPacketsTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricOvsdpMasksHit = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
+	Namespace: types.MetricOvsNamespace,
+	Subsystem: types.MetricOvsSubsystemVswitchd,
 	Name:      "dp_masks_hit",
 	Help:      "Represents the total number of masks visited for matching incoming packets.",
 },
@@ -146,8 +147,8 @@ var metricOvsdpMasksHit = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricOvsDpMasksTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
+	Namespace: types.MetricOvsNamespace,
+	Subsystem: types.MetricOvsSubsystemVswitchd,
 	Name:      "dp_masks_total",
 	Help:      "Represents the number of masks in a datapath."},
 	[]string{
@@ -156,8 +157,8 @@ var metricOvsDpMasksTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricOvsDpMasksHitRatio = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
+	Namespace: types.MetricOvsNamespace,
+	Subsystem: types.MetricOvsSubsystemVswitchd,
 	Name:      "dp_masks_hit_ratio",
 	Help: "Represents the average number of masks visited per packet " +
 		"the  ratio between hit and total number of packets processed by the datapath."},
@@ -167,8 +168,8 @@ var metricOvsDpMasksHitRatio = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricOvsDpOffloadedFlowsTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
+	Namespace: types.MetricOvsNamespace,
+	Subsystem: types.MetricOvsSubsystemVswitchd,
 	Name:      "dp_offloaded_flows_total",
 	Help:      "Represents the total offloaded flows in datapath."},
 	[]string{
@@ -178,16 +179,16 @@ var metricOvsDpOffloadedFlowsTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts
 
 // ovs bridge statistics & attributes metrics
 var metricOvsBridgeTotal = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
+	Namespace: types.MetricOvsNamespace,
+	Subsystem: types.MetricOvsSubsystemVswitchd,
 	Name:      "bridge_total",
 	Help:      "Represents total number of OVS bridges on the system.",
 },
 )
 
 var metricOvsBridge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
+	Namespace: types.MetricOvsNamespace,
+	Subsystem: types.MetricOvsSubsystemVswitchd,
 	Name:      "bridge",
 	Help: "A metric with a constant '1' value labeled by bridge name " +
 		"present on the instance."},
@@ -197,8 +198,8 @@ var metricOvsBridge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricOvsBridgePortsTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
+	Namespace: types.MetricOvsNamespace,
+	Subsystem: types.MetricOvsSubsystemVswitchd,
 	Name:      "bridge_ports_total",
 	Help:      "Represents the number of OVS ports on the bridge."},
 	[]string{
@@ -207,8 +208,8 @@ var metricOvsBridgePortsTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricOvsBridgeFlowsTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
+	Namespace: types.MetricOvsNamespace,
+	Subsystem: types.MetricOvsSubsystemVswitchd,
 	Name:      "bridge_flows_total",
 	Help:      "Represents the number of OpenFlow flows on the OVS bridge."},
 	[]string{
@@ -218,8 +219,8 @@ var metricOvsBridgeFlowsTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 
 // ovs interface metrics
 var metricInterfaceDriverName = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
+	Namespace: types.MetricOvsNamespace,
+	Subsystem: types.MetricOvsSubsystemVswitchd,
 	Name:      "interface_driver_name",
 	Help: "A metric with a constant '1' value labeled by driver name that " +
 		"specifies the name of the device driver controlling the network interface"},
@@ -232,8 +233,8 @@ var metricInterfaceDriverName = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricInterfaceDriverVersion = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
+	Namespace: types.MetricOvsNamespace,
+	Subsystem: types.MetricOvsSubsystemVswitchd,
 	Name:      "interface_driver_version",
 	Help: "A metric with a constant '1' value labeled by version name that " +
 		"specifies the driver version of the network driver controlling the network interface."},
@@ -246,8 +247,8 @@ var metricInterfaceDriverVersion = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricInterfaceFirmwareVersion = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
+	Namespace: types.MetricOvsNamespace,
+	Subsystem: types.MetricOvsSubsystemVswitchd,
 	Name:      "interface_firmware_version",
 	Help: "A metric with a constant '1' value labeled by version name that " +
 		"specifies the firmware version of the network adapter."},
@@ -260,8 +261,8 @@ var metricInterfaceFirmwareVersion = prometheus.NewGaugeVec(prometheus.GaugeOpts
 )
 
 var MetricOvsInterfaceUpWait = prometheus.NewCounter(prometheus.CounterOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
+	Namespace: types.MetricOvsNamespace,
+	Subsystem: types.MetricOvsSubsystemVswitchd,
 	Name:      "interface_up_wait_seconds_total",
 	Help: "The total number of seconds that is required to wait for pod " +
 		"Open vSwitch interface until its available",
@@ -269,16 +270,16 @@ var MetricOvsInterfaceUpWait = prometheus.NewCounter(prometheus.CounterOpts{
 
 // ovs memory metrics
 var metricOvsHandlersTotal = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
+	Namespace: types.MetricOvsNamespace,
+	Subsystem: types.MetricOvsSubsystemVswitchd,
 	Name:      "handlers_total",
 	Help: "Represents the number of handlers thread. This thread reads upcalls from dpif, " +
 		"forwards each upcall's packet and possibly sets up a kernel flow as a cache.",
 })
 
 var metricOvsRevalidatorsTotal = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
+	Namespace: types.MetricOvsNamespace,
+	Subsystem: types.MetricOvsSubsystemVswitchd,
 	Name:      "revalidators_total",
 	Help: "Represents the number of revalidators thread. This thread processes datapath flows, " +
 		"updates OpenFlow statistics, and updates or removes them if necessary.",
@@ -286,16 +287,16 @@ var metricOvsRevalidatorsTotal = prometheus.NewGauge(prometheus.GaugeOpts{
 
 // ovs Hw offload metrics
 var metricOvsHwOffload = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
+	Namespace: types.MetricOvsNamespace,
+	Subsystem: types.MetricOvsSubsystemVswitchd,
 	Name:      "hw_offload",
 	Help: "Represents whether netdev flow offload to hardware is enabled " +
 		"or not -- false(0) and true(1).",
 })
 
 var metricOvsTcPolicy = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
+	Namespace: types.MetricOvsNamespace,
+	Subsystem: types.MetricOvsSubsystemVswitchd,
 	Name:      "tc_policy",
 	Help: "Represents the policy used with HW offloading " +
 		"-- none(0), skip_sw(1), and skip_hw(2).",
@@ -355,15 +356,15 @@ func ovsDatapathLookupsMetrics(output, datapath string) {
 		}
 		switch elem[0] {
 		case "hit":
-			value := parseMetricToFloat(MetricOvsSubsystemVswitchd, "dp_flows_lookup_hit", elem[1])
+			value := parseMetricToFloat(types.MetricOvsSubsystemVswitchd, "dp_flows_lookup_hit", elem[1])
 			datapathPacketsTotal += value
 			metricOvsDpFlowsLookupHit.WithLabelValues(datapath).Set(value)
 		case "missed":
-			value := parseMetricToFloat(MetricOvsSubsystemVswitchd, "dp_flows_lookup_missed", elem[1])
+			value := parseMetricToFloat(types.MetricOvsSubsystemVswitchd, "dp_flows_lookup_missed", elem[1])
 			datapathPacketsTotal += value
 			metricOvsDpFlowsLookupMissed.WithLabelValues(datapath).Set(value)
 		case "lost":
-			value := parseMetricToFloat(MetricOvsSubsystemVswitchd, "dp_flows_lookup_lost", elem[1])
+			value := parseMetricToFloat(types.MetricOvsSubsystemVswitchd, "dp_flows_lookup_lost", elem[1])
 			metricOvsDpFlowsLookupLost.WithLabelValues(datapath).Set(value)
 		}
 	}
@@ -380,13 +381,13 @@ func ovsDatapathMasksMetrics(output, datapath string) {
 		}
 		switch elem[0] {
 		case "hit":
-			value := parseMetricToFloat(MetricOvsSubsystemVswitchd, "dp_masks_hit", elem[1])
+			value := parseMetricToFloat(types.MetricOvsSubsystemVswitchd, "dp_masks_hit", elem[1])
 			metricOvsdpMasksHit.WithLabelValues(datapath).Set(value)
 		case "total":
-			value := parseMetricToFloat(MetricOvsSubsystemVswitchd, "dp_masks_total", elem[1])
+			value := parseMetricToFloat(types.MetricOvsSubsystemVswitchd, "dp_masks_total", elem[1])
 			metricOvsDpMasksTotal.WithLabelValues(datapath).Set(value)
 		case "hit/pkt":
-			value := parseMetricToFloat(MetricOvsSubsystemVswitchd, "dp_masks_hit_ratio", elem[1])
+			value := parseMetricToFloat(types.MetricOvsSubsystemVswitchd, "dp_masks_hit_ratio", elem[1])
 			metricOvsDpMasksHitRatio.WithLabelValues(datapath).Set(value)
 		}
 	}
@@ -480,7 +481,7 @@ func setOvsDatapathMetrics(ovsVswitchdAppctl ovsClient, datapaths []string) (err
 				datapathPortCount++
 			} else if strings.HasPrefix(output, "flows:") {
 				flowFields := strings.Fields(output)
-				value := parseMetricToFloat(MetricOvsSubsystemVswitchd, "dp_flows_total", flowFields[1])
+				value := parseMetricToFloat(types.MetricOvsSubsystemVswitchd, "dp_flows_total", flowFields[1])
 				metricOvsDpFlowsTotal.WithLabelValues(datapathName).Set(value)
 			}
 		}
@@ -505,7 +506,7 @@ func setOvsDatapathOffloadMetrics(ovsVswitchdAppctl ovsClient) error {
 		} else if strings.Contains(line, "offloaded flows") {
 			offloadFields := strings.Split(line, ":")
 			offloadValue := strings.TrimSpace(offloadFields[1])
-			value := parseMetricToFloat(MetricOvsSubsystemVswitchd, "dp_offloaded_flows_total", offloadValue)
+			value := parseMetricToFloat(types.MetricOvsSubsystemVswitchd, "dp_offloaded_flows_total", offloadValue)
 			metricOvsDpOffloadedFlowsTotal.WithLabelValues(datapathName).Set(value)
 			break
 		}
@@ -589,7 +590,7 @@ func updateOvsBridgeMetrics(ovsDBClient libovsdbclient.Client, ovsOfctl ovsClien
 		metricOvsBridge.WithLabelValues(brName).Set(1)
 		flowsCount, err := getOvsBridgeOpenFlowsCount(ovsOfctl, brName)
 		if err != nil {
-			klog.Errorf(err.Error())
+			klog.Error(err.Error())
 		}
 
 		metricOvsBridgeFlowsTotal.WithLabelValues(brName).Set(flowsCount)
@@ -641,7 +642,7 @@ func getOvsBridgeOpenFlowsCount(ovsOfctl ovsClient, bridgeName string) (float64,
 		if strings.HasPrefix(kvPair, "flow_count=") {
 			value := strings.Split(kvPair, "=")[1]
 			metricName := bridgeName + "flows_total"
-			return parseMetricToFloat(MetricOvsSubsystemVswitchd, metricName, value), nil
+			return parseMetricToFloat(types.MetricOvsSubsystemVswitchd, metricName, value), nil
 		}
 	}
 	return 0, fmt.Errorf("ovs-ofctl dump-aggregate %s output didn't contain "+
@@ -1014,11 +1015,11 @@ func setOvsMemoryMetrics(ovsVswitchdAppctl ovsClient) (err error) {
 	for _, kvPair := range strings.Fields(stdout) {
 		if strings.HasPrefix(kvPair, "handlers:") {
 			value := strings.Split(kvPair, ":")[1]
-			count := parseMetricToFloat(MetricOvsSubsystemVswitchd, "handlers_total", value)
+			count := parseMetricToFloat(types.MetricOvsSubsystemVswitchd, "handlers_total", value)
 			metricOvsHandlersTotal.Set(count)
 		} else if strings.HasPrefix(kvPair, "revalidators:") {
 			value := strings.Split(kvPair, ":")[1]
-			count := parseMetricToFloat(MetricOvsSubsystemVswitchd, "revalidators_total", value)
+			count := parseMetricToFloat(types.MetricOvsSubsystemVswitchd, "revalidators_total", value)
 			metricOvsRevalidatorsTotal.Set(count)
 		}
 	}
@@ -1437,14 +1438,14 @@ func RegisterOvsMetrics(nodeName string, ovsDBClient libovsdbclient.Client,
 		prometheus.MustRegister(metricOvsHwOffload)
 		prometheus.MustRegister(metricOvsTcPolicy)
 		// Register OVS Interface metrics
-		registerOvsInterfaceMetrics(MetricOvsNamespace, MetricOvsSubsystemVswitchd)
+		registerOvsInterfaceMetrics(types.MetricOvsNamespace, types.MetricOvsSubsystemVswitchd)
 		prometheus.MustRegister(metricInterfaceDriverName)
 		prometheus.MustRegister(metricInterfaceDriverVersion)
 		prometheus.MustRegister(metricInterfaceFirmwareVersion)
 		prometheus.MustRegister(MetricOvsInterfaceUpWait)
 		// Register the OVS coverage/show metrics
 		componentCoverageShowMetricsMap[ovsVswitchd] = ovsVswitchdCoverageShowMetricsMap
-		registerCoverageShowMetrics(ovsVswitchd, MetricOvsNamespace, MetricOvsSubsystemVswitchd)
+		registerCoverageShowMetrics(ovsVswitchd, types.MetricOvsNamespace, types.MetricOvsSubsystemVswitchd)
 		// OVS version updater
 		go OvsVersionInfoUpdater(ovsDBClient, nodeName, metricsScrapeInterval, stopChan)
 
@@ -1453,11 +1454,11 @@ func RegisterOvsMetrics(nodeName string, ovsDBClient libovsdbclient.Client,
 		if !config.UnprivilegedMode {
 			prometheus.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{
 				PidFn:     prometheus.NewPidFileFn("/var/run/openvswitch/ovs-vswitchd.pid"),
-				Namespace: fmt.Sprintf("%s_%s", MetricOvsNamespace, MetricOvsSubsystemVswitchd),
+				Namespace: fmt.Sprintf("%s_%s", types.MetricOvsNamespace, types.MetricOvsSubsystemVswitchd),
 			}))
 			prometheus.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{
 				PidFn:     prometheus.NewPidFileFn("/var/run/openvswitch/ovsdb-server.pid"),
-				Namespace: fmt.Sprintf("%s_%s", MetricOvsNamespace, MetricOvsSubsystemOvsDB),
+				Namespace: fmt.Sprintf("%s_%s", types.MetricOvsNamespace, types.MetricOvsSubsystemOvsDB),
 			}))
 		}
 

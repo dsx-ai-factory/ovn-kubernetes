@@ -12,7 +12,9 @@ import (
 	utilnet "k8s.io/utils/net"
 	"sigs.k8s.io/knftables"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
 	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -31,7 +33,7 @@ import (
 func getNoSNATNodePortRules(svcPort corev1.ServicePort) []*knftables.Element {
 	return []*knftables.Element{
 		{
-			Set: nftablesMgmtPortNoSNATNodePorts,
+			Set: types.NFTMgmtPortNoSNATNodePorts,
 			Key: []string{
 				strings.ToLower(string(svcPort.Protocol)),
 				fmt.Sprintf("%d", svcPort.NodePort),
@@ -49,9 +51,9 @@ func getNoSNATLoadBalancerIPRules(svcPort corev1.ServicePort, localEndpoints []s
 	protocol := strings.ToLower(string(svcPort.Protocol))
 	port := fmt.Sprintf("%v", svcPort.TargetPort.IntValue())
 	for _, ip := range localEndpoints {
-		setName := nftablesMgmtPortNoSNATServicesV4
+		setName := types.NFTMgmtPortNoSNATServicesV4
 		if utilnet.IsIPv6String(ip) {
-			setName = nftablesMgmtPortNoSNATServicesV6
+			setName = types.NFTMgmtPortNoSNATServicesV6
 		}
 
 		nftRules = append(nftRules,
@@ -67,10 +69,10 @@ func getNoSNATLoadBalancerIPRules(svcPort corev1.ServicePort, localEndpoints []s
 // getUDNNodePortMarkNFTRule returns a verdict map element (nftablesUDNMarkNodePortsMap)
 // with a key composed of the svcPort protocol and port.
 // The value is a jump to the UDN chain mark if netInfo is provided, or nil that is useful for map entry removal.
-func getUDNNodePortMarkNFTRule(svcPort corev1.ServicePort, netInfo *bridgeUDNConfiguration) *knftables.Element {
+func getUDNNodePortMarkNFTRule(svcPort corev1.ServicePort, netInfo *bridgeconfig.BridgeUDNConfiguration) *knftables.Element {
 	var val []string
 	if netInfo != nil {
-		val = []string{fmt.Sprintf("jump %s", GetUDNMarkChain(netInfo.pktMark))}
+		val = []string{fmt.Sprintf("jump %s", GetUDNMarkChain(netInfo.PktMark))}
 	}
 	return &knftables.Element{
 		Map:   nftablesUDNMarkNodePortsMap,
@@ -83,12 +85,12 @@ func getUDNNodePortMarkNFTRule(svcPort corev1.ServicePort, netInfo *bridgeUDNCon
 // getUDNExternalIPsMarkNFTRules returns a verdict map elements (nftablesUDNMarkExternalIPsV4Map or nftablesUDNMarkExternalIPsV6Map)
 // with a key composed of the external IP, svcPort protocol and port.
 // The value is a jump to the UDN chain mark if netInfo is provided,  or nil that is useful for map entry removal.
-func getUDNExternalIPsMarkNFTRules(svcPort corev1.ServicePort, externalIPs []string, netInfo *bridgeUDNConfiguration) []*knftables.Element {
+func getUDNExternalIPsMarkNFTRules(svcPort corev1.ServicePort, externalIPs []string, netInfo *bridgeconfig.BridgeUDNConfiguration) []*knftables.Element {
 	var nftRules []*knftables.Element
 	var val []string
 
 	if netInfo != nil {
-		val = []string{fmt.Sprintf("jump %s", GetUDNMarkChain(netInfo.pktMark))}
+		val = []string{fmt.Sprintf("jump %s", GetUDNMarkChain(netInfo.PktMark))}
 	}
 	for _, externalIP := range externalIPs {
 		mapName := nftablesUDNMarkExternalIPsV4Map
@@ -121,7 +123,12 @@ func recreateNFTSet(setName string, keepNFTElems []*knftables.Element) error {
 			tx.Add(elem)
 		}
 	}
-	return nft.Run(context.TODO(), tx)
+	err = nft.Run(context.TODO(), tx)
+	// no error if set is not created and we desire zero NFT elements
+	if knftables.IsNotFound(err) && len(keepNFTElems) == 0 {
+		return nil
+	}
+	return err
 }
 
 func recreateNFTMap(mapName string, keepNFTElems []*knftables.Element) error {
@@ -138,7 +145,12 @@ func recreateNFTMap(mapName string, keepNFTElems []*knftables.Element) error {
 			tx.Add(elem)
 		}
 	}
-	return nft.Run(context.TODO(), tx)
+	err = nft.Run(context.TODO(), tx)
+	// no error if set is not created and we desire zero NFT elements
+	if knftables.IsNotFound(err) && len(keepNFTElems) == 0 {
+		return nil
+	}
+	return err
 }
 
 // getGatewayNFTRules returns nftables rules for service. This must be used in conjunction
@@ -164,7 +176,7 @@ func getGatewayNFTRules(service *corev1.Service, localEndpoints []string, svcHas
 // getUDNNFTRules generates nftables rules for a UDN service.
 // If netConfig is nil, the resulting map elements will have empty values,
 // suitable only for entry removal.
-func getUDNNFTRules(service *corev1.Service, netConfig *bridgeUDNConfiguration) []*knftables.Element {
+func getUDNNFTRules(service *corev1.Service, netConfig *bridgeconfig.BridgeUDNConfiguration) []*knftables.Element {
 	rules := make([]*knftables.Element, 0)
 	for _, svcPort := range service.Spec.Ports {
 		if util.ServiceTypeHasNodePort(service) {

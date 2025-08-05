@@ -18,13 +18,13 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"context"
+	context "context"
 	time "time"
 
-	networkqosv1alpha1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1"
+	crdnetworkqosv1alpha1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1"
 	versioned "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/clientset/versioned"
 	internalinterfaces "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/informers/externalversions/internalinterfaces"
-	v1alpha1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/listers/networkqos/v1alpha1"
+	networkqosv1alpha1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/listers/networkqos/v1alpha1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	watch "k8s.io/apimachinery/pkg/watch"
@@ -35,7 +35,7 @@ import (
 // NetworkQoSes.
 type NetworkQoSInformer interface {
 	Informer() cache.SharedIndexInformer
-	Lister() v1alpha1.NetworkQoSLister
+	Lister() networkqosv1alpha1.NetworkQoSLister
 }
 
 type networkQoSInformer struct {
@@ -70,7 +70,7 @@ func NewFilteredNetworkQoSInformer(client versioned.Interface, namespace string,
 				return client.K8sV1alpha1().NetworkQoSes(namespace).Watch(context.TODO(), options)
 			},
 		},
-		&networkqosv1alpha1.NetworkQoS{},
+		&crdnetworkqosv1alpha1.NetworkQoS{},
 		resyncPeriod,
 		indexers,
 	)
@@ -81,9 +81,9 @@ func (f *networkQoSInformer) defaultInformer(client versioned.Interface, resyncP
 }
 
 func (f *networkQoSInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&networkqosv1alpha1.NetworkQoS{}, f.defaultInformer)
+	return f.factory.InformerFor(&crdnetworkqosv1alpha1.NetworkQoS{}, f.defaultInformer)
 }
 
-func (f *networkQoSInformer) Lister() v1alpha1.NetworkQoSLister {
-	return v1alpha1.NewNetworkQoSLister(f.Informer().GetIndexer())
+func (f *networkQoSInformer) Lister() networkqosv1alpha1.NetworkQoSLister {
+	return networkqosv1alpha1.NewNetworkQoSLister(f.Informer().GetIndexer())
 }

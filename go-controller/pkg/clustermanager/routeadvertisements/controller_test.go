@@ -28,6 +28,8 @@ import (
 	controllerutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 	eiptypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	ratypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1"
+	apitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/types"
+	userdefinednetworkv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -42,6 +44,7 @@ type testRA struct {
 	NetworkSelector          map[string]string
 	NodeSelector             map[string]string
 	FRRConfigurationSelector map[string]string
+	SelectsDefault           bool
 	AdvertisePods            bool
 	AdvertiseEgressIPs       bool
 }
@@ -52,8 +55,10 @@ func (tra testRA) RouteAdvertisements() *ratypes.RouteAdvertisements {
 			Name: tra.Name,
 		},
 		Spec: ratypes.RouteAdvertisementsSpec{
-			TargetVRF:      tra.TargetVRF,
-			Advertisements: []ratypes.AdvertisementType{},
+			TargetVRF:                tra.TargetVRF,
+			Advertisements:           []ratypes.AdvertisementType{},
+			NodeSelector:             metav1.LabelSelector{},
+			FRRConfigurationSelector: metav1.LabelSelector{},
 		},
 	}
 	if tra.AdvertisePods {
@@ -63,9 +68,19 @@ func (tra testRA) RouteAdvertisements() *ratypes.RouteAdvertisements {
 		ra.Spec.Advertisements = append(ra.Spec.Advertisements, ratypes.EgressIP)
 	}
 	if tra.NetworkSelector != nil {
-		ra.Spec.NetworkSelector = metav1.LabelSelector{
-			MatchLabels: tra.NetworkSelector,
-		}
+		ra.Spec.NetworkSelectors = append(ra.Spec.NetworkSelectors, apitypes.NetworkSelector{
+			NetworkSelectionType: apitypes.ClusterUserDefinedNetworks,
+			ClusterUserDefinedNetworkSelector: &apitypes.ClusterUserDefinedNetworkSelector{
+				NetworkSelector: metav1.LabelSelector{
+					MatchLabels: tra.NetworkSelector,
+				},
+			},
+		})
+	}
+	if tra.SelectsDefault {
+		ra.Spec.NetworkSelectors = append(ra.Spec.NetworkSelectors, apitypes.NetworkSelector{
+			NetworkSelectionType: apitypes.DefaultNetwork,
+		})
 	}
 	if tra.NodeSelector != nil {
 		ra.Spec.NodeSelector = metav1.LabelSelector{
@@ -80,14 +95,42 @@ func (tra testRA) RouteAdvertisements() *ratypes.RouteAdvertisements {
 	return ra
 }
 
+var (
+	nodePrimaryAddr = map[string]string{
+		"node": "1.0.1.100/24",
+	}
+	nodePrimaryAddrIPv6 = map[string]string{
+		"node": "fd03::ffff:0100:0050/64",
+	}
+)
+
+type testNamespace struct {
+	Name   string
+	Labels map[string]string
+}
+
+func (tn testNamespace) Namespace() *corev1.Namespace {
+	return &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   tn.Name,
+			Labels: tn.Labels,
+		},
+	}
+}
+
 type testNode struct {
-	Name              string
-	Generation        int
-	Labels            map[string]string
-	SubnetsAnnotation string
+	Name                     string
+	Generation               int
+	Labels                   map[string]string
+	PrimaryAddressAnnotation string
+	SubnetsAnnotation        string
 }
 
 func (tn testNode) Node() *corev1.Node {
+	primaryAddressAnnotation := tn.PrimaryAddressAnnotation
+	if primaryAddressAnnotation == "" {
+		primaryAddressAnnotation = "{\"ipv4\":\"" + nodePrimaryAddr[tn.Name] + "\", \"ipv6\":\"" + nodePrimaryAddrIPv6[tn.Name] + "\"}"
+	}
 	return &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       tn.Name,
@@ -95,6 +138,7 @@ func (tn testNode) Node() *corev1.Node {
 			Generation: int64(tn.Generation),
 			Annotations: map[string]string{
 				"k8s.ovn.org/node-subnets": tn.SubnetsAnnotation,
+				util.OvnNodeIfAddr:         primaryAddressAnnotation,
 			},
 		},
 	}
@@ -133,6 +177,15 @@ func (tn testNeighbor) Neighbor() frrapi.Neighbor {
 		if sep == -1 {
 			continue
 		}
+		if isLayer2 := strings.Count(receive, "/") == 1; isLayer2 {
+			n.ToReceive.Allowed.Prefixes = append(n.ToReceive.Allowed.Prefixes,
+				frrapi.PrefixSelector{
+					Prefix: receive,
+				},
+			)
+			continue
+		}
+
 		first := receive[:sep]
 		last := receive[sep+1:]
 		len := ovntest.MustAtoi(last)
@@ -210,9 +263,10 @@ func (tf testFRRConfig) FRRConfiguration() *frrapi.FRRConfiguration {
 }
 
 type testEIP struct {
-	Name       string
-	Generation int
-	EIPs       map[string]string
+	Name              string
+	Generation        int
+	NamespaceSelector map[string]string
+	EIPs              map[string]string
 }
 
 func (te testEIP) EgressIP() *eiptypes.EgressIP {
@@ -220,6 +274,11 @@ func (te testEIP) EgressIP() *eiptypes.EgressIP {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       te.Name,
 			Generation: int64(te.Generation),
+		},
+		Spec: eiptypes.EgressIPSpec{
+			NamespaceSelector: metav1.LabelSelector{
+				MatchLabels: te.NamespaceSelector,
+			},
 		},
 		Status: eiptypes.EgressIPStatus{
 			Items: []eiptypes.EgressIPStatusItem{},
@@ -256,10 +315,14 @@ func (tn testNAD) NAD() *nadtypes.NetworkAttachmentDefinition {
 			Annotations: tn.Annotations,
 		},
 	}
-	topology := tn.Topology
-	if topology == "" {
-		topology = "layer3"
+	if strings.HasPrefix(tn.Network, types.CUDNPrefix) {
+		ownerRef := *metav1.NewControllerRef(
+			&metav1.ObjectMeta{Name: tn.Network},
+			userdefinednetworkv1.SchemeGroupVersion.WithKind("ClusterUserDefinedNetwork"),
+		)
+		nad.ObjectMeta.OwnerReferences = []metav1.OwnerReference{ownerRef}
 	}
+	topology := tn.Topology
 	switch {
 	case tn.IsSecondary:
 		nad.Spec.Config = fmt.Sprintf("{\"cniVersion\": \"0.4.0\", \"name\": \"%s\", \"type\": \"%s\", \"topology\": \"%s\", \"netAttachDefName\": \"%s\", \"subnets\": \"%s\"}",
@@ -333,6 +396,7 @@ func TestController_reconcile(t *testing.T) {
 		frrConfigs           []*testFRRConfig
 		nads                 []*testNAD
 		nodes                []*testNode
+		namespaces           []*testNamespace
 		eips                 []*testEIP
 		reconcile            string
 		wantErr              bool
@@ -342,7 +406,7 @@ func TestController_reconcile(t *testing.T) {
 	}{
 		{
 			name: "reconciles pod+eip RouteAdvertisement for a single FRR config, node and default network and target VRF",
-			ra:   &testRA{Name: "ra", AdvertisePods: true, AdvertiseEgressIPs: true},
+			ra:   &testRA{Name: "ra", AdvertisePods: true, AdvertiseEgressIPs: true, SelectsDefault: true},
 			frrConfigs: []*testFRRConfig{
 				{
 					Name:      "frrConfig",
@@ -373,7 +437,7 @@ func TestController_reconcile(t *testing.T) {
 		},
 		{
 			name: "reconciles dual-stack pod+eip RouteAdvertisement for a single FRR config, node and default network and target VRF",
-			ra:   &testRA{Name: "ra", AdvertisePods: true, AdvertiseEgressIPs: true},
+			ra:   &testRA{Name: "ra", AdvertisePods: true, AdvertiseEgressIPs: true, SelectsDefault: true},
 			frrConfigs: []*testFRRConfig{
 				{
 					Name:      "frrConfig",
@@ -421,6 +485,8 @@ func TestController_reconcile(t *testing.T) {
 			nads: []*testNAD{
 				{Name: "red", Namespace: "red", Network: util.GenerateCUDNNetworkName("red"), Topology: "layer3", Subnet: "1.2.0.0/16", Labels: map[string]string{"selected": "true"}},
 				{Name: "blue", Namespace: "blue", Network: util.GenerateCUDNNetworkName("blue"), Topology: "layer3", Subnet: "1.3.0.0/16", Labels: map[string]string{"selected": "true"}},
+				{Name: "green", Namespace: "green", Network: util.GenerateCUDNNetworkName("green"), Topology: "layer2", Subnet: "1.4.0.0/16", Labels: map[string]string{"selected": "true"}},
+				{Name: "black", Namespace: "black", Network: util.GenerateCUDNNetworkName("black"), Topology: "layer2", Subnet: "1.5.0.0/16", Labels: map[string]string{"selected": "true"}},
 			},
 			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\", \"cluster_udn_red\":\"1.2.0.0/24\", \"cluster_udn_blue\":\"1.3.0.0/24\"}"}},
 			eips:                 []*testEIP{{Name: "eip", EIPs: map[string]string{"node": "1.0.1.1"}}},
@@ -432,18 +498,20 @@ func TestController_reconcile(t *testing.T) {
 					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
 					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
 					Routers: []*testRouter{
-						{ASN: 1, Prefixes: []string{"1.2.0.0/24", "1.3.0.0/24"}, Imports: []string{"blue", "red"}, Neighbors: []*testNeighbor{
-							{ASN: 1, Address: "1.0.0.100", Advertise: []string{"1.2.0.0/24", "1.3.0.0/24"}, Receive: []string{"1.2.0.0/16/24", "1.3.0.0/16/24"}},
+						{ASN: 1, Prefixes: []string{"1.2.0.0/24", "1.3.0.0/24", "1.4.0.0/16", "1.5.0.0/16"}, Imports: []string{"black", "blue", "green", "red"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "1.0.0.100", Advertise: []string{"1.2.0.0/24", "1.3.0.0/24", "1.4.0.0/16", "1.5.0.0/16"}, Receive: []string{"1.2.0.0/16/24", "1.3.0.0/16/24", "1.4.0.0/16", "1.5.0.0/16"}},
 						}},
+						{ASN: 1, VRF: "black", Imports: []string{"default"}},
 						{ASN: 1, VRF: "blue", Imports: []string{"default"}},
+						{ASN: 1, VRF: "green", Imports: []string{"default"}},
 						{ASN: 1, VRF: "red", Imports: []string{"default"}},
 					}},
 			},
-			expectNADAnnotations: map[string]map[string]string{"red": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}, "blue": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
+			expectNADAnnotations: map[string]map[string]string{"red": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}, "blue": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}, "green": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}, "black": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
 		},
 		{
-			name: "reconciles eip RouteAdvertisement for a single FRR config, node, default network and non default target VRF",
-			ra:   &testRA{Name: "ra", TargetVRF: "red", AdvertiseEgressIPs: true},
+			name: "(layer3) reconciles eip RouteAdvertisement for a single FRR config, node, non default network and non default target VRF",
+			ra:   &testRA{Name: "ra", TargetVRF: "red", AdvertiseEgressIPs: true, NetworkSelector: map[string]string{"selected": "true"}},
 			frrConfigs: []*testFRRConfig{
 				{
 					Name:      "frrConfig",
@@ -455,8 +523,24 @@ func TestController_reconcile(t *testing.T) {
 					},
 				},
 			},
-			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\"}"}},
-			eips:                 []*testEIP{{Name: "eip", EIPs: map[string]string{"node": "1.0.1.1"}}},
+			nads: []*testNAD{
+				{Name: "default", Namespace: "ovn-kubernetes", Network: "default"},
+				{Name: "red", Namespace: "red", Network: "cluster_udn_red", Topology: "layer3", Subnet: "1.2.0.0/16"},
+				{Name: "blue", Namespace: "blue", Network: "cluster_udn_blue", Topology: "layer3", Subnet: "1.3.0.0/16", Labels: map[string]string{"selected": "true"}},
+			},
+			nodes: []*testNode{
+				{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.1.0/24\", \"cluster_udn_red\":\"1.2.1.0/24\", \"cluster_udn_blue\":\"1.3.1.0/24\"}"},
+			},
+			namespaces: []*testNamespace{
+				{Name: "default", Labels: map[string]string{"selected": "default"}},
+				{Name: "red", Labels: map[string]string{"selected": "red"}},
+				{Name: "blue", Labels: map[string]string{"selected": "blue"}},
+			},
+			eips: []*testEIP{
+				{Name: "eip1", EIPs: map[string]string{"node": "172.100.0.16"}, NamespaceSelector: map[string]string{"selected": "blue"}}, // secondary interface EIP also advertised
+				{Name: "eip2", EIPs: map[string]string{"node": "1.0.1.2"}, NamespaceSelector: map[string]string{"selected": "red"}},       // namespace served by unselected network, ignored
+				{Name: "eip3", EIPs: map[string]string{"node": "1.0.1.3"}, NamespaceSelector: map[string]string{"selected": "blue"}},
+			},
 			reconcile:            "ra",
 			expectAcceptedStatus: metav1.ConditionTrue,
 			expectFRRConfigs: []*testFRRConfig{
@@ -465,16 +549,55 @@ func TestController_reconcile(t *testing.T) {
 					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
 					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
 					Routers: []*testRouter{
-						{ASN: 1, VRF: "red", Prefixes: []string{"1.0.1.1/32"}, Neighbors: []*testNeighbor{
-							{ASN: 1, Address: "1.0.0.100", Advertise: []string{"1.0.1.1/32"}},
-						}},
+						{ASN: 1, VRF: "red", Prefixes: []string{"1.0.1.3/32", "172.100.0.16/32"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "1.0.0.100", Advertise: []string{"1.0.1.3/32", "172.100.0.16/32"}},
+						}, Imports: []string{"blue"}},
+						{ASN: 1, VRF: "blue", Imports: []string{"red"}},
 					}},
 			},
-			expectNADAnnotations: map[string]map[string]string{"default": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
+			expectNADAnnotations: map[string]map[string]string{"blue": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
+		},
+		{
+			name: "(layer2) fails to reconcile eip RouteAdvertisement for a single FRR config, node, non default networks and non default target VRF",
+			ra:   &testRA{Name: "ra", TargetVRF: "green", AdvertiseEgressIPs: true, NetworkSelector: map[string]string{"selected": "true"}},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 1, VRF: "green", Prefixes: []string{"1.4.0.0/16"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "1.0.0.100"},
+						}},
+					},
+				},
+			},
+			nads: []*testNAD{
+				{Name: "default", Namespace: "ovn-kubernetes", Network: "default"},
+				{Name: "green", Namespace: "green", Network: util.GenerateCUDNNetworkName("green"), Topology: "layer2", Subnet: "1.4.0.0/16", Labels: map[string]string{"selected": "true"}},
+				{Name: "black", Namespace: "black", Network: util.GenerateCUDNNetworkName("black"), Topology: "layer2", Subnet: "1.5.0.0/16"},
+			},
+			nodes: []*testNode{
+				{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.1.0/24\""},
+			},
+			namespaces: []*testNamespace{
+				{Name: "default", Labels: map[string]string{"selected": "default"}},
+				{Name: "green", Labels: map[string]string{"selected": "green"}},
+				{Name: "black", Labels: map[string]string{"selected": "black"}},
+			},
+			eips: []*testEIP{
+				{Name: "eip1", EIPs: map[string]string{"node": "172.100.0.17"}, NamespaceSelector: map[string]string{"selected": "green"}}, // secondary interface EIP also advertised
+				{Name: "eip2", EIPs: map[string]string{"node": "1.0.1.4"}, NamespaceSelector: map[string]string{"selected": "black"}},      // namespace served by unselected network, ignored
+				{Name: "eip3", EIPs: map[string]string{"node": "1.0.1.5"}, NamespaceSelector: map[string]string{"selected": "green"}},
+			},
+			reconcile: "ra",
+			// EgressIP advertisements for Layer2 UDNs is not supported yet.
+			expectAcceptedStatus: metav1.ConditionFalse,
+			expectFRRConfigs:     []*testFRRConfig{},
+			expectNADAnnotations: map[string]map[string]string{"green": {}},
 		},
 		{
 			name: "reconciles a RouteAdvertisement updating the generated FRRConfigurations if needed",
-			ra:   &testRA{Name: "ra", AdvertisePods: true, AdvertiseEgressIPs: true},
+			ra:   &testRA{Name: "ra", AdvertisePods: true, AdvertiseEgressIPs: true, SelectsDefault: true},
 			frrConfigs: []*testFRRConfig{
 				{
 					Name:      "frrConfig",
@@ -542,11 +665,14 @@ func TestController_reconcile(t *testing.T) {
 				TargetVRF:                "auto",
 				FRRConfigurationSelector: map[string]string{"selected": "true"},
 				NetworkSelector:          map[string]string{"selected": "true"},
+				SelectsDefault:           true,
 			},
 			nads: []*testNAD{
 				{Name: "default", Namespace: "ovn-kubernetes", Network: "default", Labels: map[string]string{"selected": "true"}},
 				{Name: "red", Namespace: "red", Network: util.GenerateCUDNNetworkName("red"), Topology: "layer3", Subnet: "1.2.0.0/16", Labels: map[string]string{"selected": "true"}},
 				{Name: "blue", Namespace: "blue", Network: util.GenerateCUDNNetworkName("blue"), Topology: "layer3"}, // not selected
+				{Name: "green", Namespace: "green", Network: util.GenerateCUDNNetworkName("green"), Topology: "layer2", Subnet: "1.4.0.0/16", Labels: map[string]string{"selected": "true"}},
+				{Name: "black", Namespace: "black", Network: util.GenerateCUDNNetworkName("black"), Topology: "layer2"}, // not selected
 			},
 			frrConfigs: []*testFRRConfig{
 				{
@@ -559,6 +685,9 @@ func TestController_reconcile(t *testing.T) {
 							{ASN: 1, Address: "1.0.0.100"},
 						}},
 						{ASN: 1, VRF: "red", Prefixes: []string{"1.0.2.0/24"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "1.0.0.100"},
+						}},
+						{ASN: 1, VRF: "green", Prefixes: []string{"1.2.0.0/16"}, Neighbors: []*testNeighbor{
 							{ASN: 1, Address: "1.0.0.100"},
 						}},
 					},
@@ -581,6 +710,9 @@ func TestController_reconcile(t *testing.T) {
 					NodeSelector: map[string]string{"node": "node2"},
 					Routers: []*testRouter{
 						{ASN: 1, VRF: "red", Prefixes: []string{"1.0.2.0/24"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "1.0.0.100"},
+						}},
+						{ASN: 1, VRF: "green", Prefixes: []string{"1.2.0.0/16"}, Neighbors: []*testNeighbor{
 							{ASN: 1, Address: "1.0.0.100"},
 						}},
 					},
@@ -613,6 +745,9 @@ func TestController_reconcile(t *testing.T) {
 						{ASN: 1, VRF: "red", Prefixes: []string{"1.2.1.0/24"}, Neighbors: []*testNeighbor{
 							{ASN: 1, Address: "1.0.0.100", Advertise: []string{"1.2.1.0/24"}, Receive: []string{"1.2.0.0/16/24"}},
 						}},
+						{ASN: 1, VRF: "green", Prefixes: []string{"1.4.0.0/16"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "1.0.0.100", Advertise: []string{"1.4.0.0/16"}, Receive: []string{"1.4.0.0/16"}},
+						}},
 					},
 				},
 				{
@@ -633,6 +768,9 @@ func TestController_reconcile(t *testing.T) {
 						{ASN: 1, VRF: "red", Prefixes: []string{"1.2.2.0/24"}, Neighbors: []*testNeighbor{
 							{ASN: 1, Address: "1.0.0.100", Advertise: []string{"1.2.2.0/24"}, Receive: []string{"1.2.0.0/16/24"}},
 						}},
+						{ASN: 1, VRF: "green", Prefixes: []string{"1.4.0.0/16"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "1.0.0.100", Advertise: []string{"1.4.0.0/16"}, Receive: []string{"1.4.0.0/16"}},
+						}},
 					},
 				},
 			},
@@ -648,10 +786,10 @@ func TestController_reconcile(t *testing.T) {
 			expectAcceptedStatus: metav1.ConditionFalse,
 		},
 		{
-			name: "fails to reconcile an unsupported topology",
+			name: "fails to reconcile an non-cluster UDN",
 			ra:   &testRA{Name: "ra", AdvertisePods: true, NetworkSelector: map[string]string{"selected": "true"}},
 			nads: []*testNAD{
-				{Name: "red", Namespace: "red", Network: "red", Topology: "layer2", Subnet: "1.2.0.0/16", Labels: map[string]string{"selected": "true"}},
+				{Name: "red", Namespace: "red", Network: "red", Topology: "layer3", Subnet: "1.2.0.0/16", Labels: map[string]string{"selected": "true"}},
 			},
 			reconcile:            "ra",
 			expectAcceptedStatus: metav1.ConditionFalse,
@@ -721,28 +859,6 @@ func TestController_reconcile(t *testing.T) {
 			expectAcceptedStatus: metav1.ConditionFalse,
 		},
 		{
-			name: "fails to reconcile if egress IPs are advertised for non-default network",
-			ra:   &testRA{Name: "ra", AdvertiseEgressIPs: true, NetworkSelector: map[string]string{"selected": "true"}},
-			nads: []*testNAD{
-				{Name: "red", Namespace: "red", Network: "red", Topology: "layer3", Labels: map[string]string{"selected": "true"}},
-			},
-			frrConfigs: []*testFRRConfig{
-				{
-					Name:      "frrConfig",
-					Namespace: frrNamespace,
-					Routers: []*testRouter{
-						{ASN: 1, Prefixes: []string{"1.1.1.0/24"}, Neighbors: []*testNeighbor{
-							{ASN: 1, Address: "1.0.0.100"},
-						}},
-					},
-				},
-			},
-			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"red\":\"1.1.0.0/24\"}"}},
-			eips:                 []*testEIP{{Name: "eip", EIPs: map[string]string{"node": "1.0.1.1"}}},
-			reconcile:            "ra",
-			expectAcceptedStatus: metav1.ConditionFalse,
-		},
-		{
 			name: "fails to reconcile if a selectd FRRConfiguration has no matching VRF",
 			ra:   &testRA{Name: "ra", TargetVRF: "red", AdvertisePods: true},
 			frrConfigs: []*testFRRConfig{
@@ -761,11 +877,11 @@ func TestController_reconcile(t *testing.T) {
 			expectAcceptedStatus: metav1.ConditionFalse,
 		},
 		{
-			name: "fails to reconcile if not all VRFs were matched on auto",
+			name: "fails to reconcile if not all VRFs were matched with 'auto' target VRF",
 			ra:   &testRA{Name: "ra", TargetVRF: "auto", AdvertisePods: true, NetworkSelector: map[string]string{"selected": "true"}},
 			nads: []*testNAD{
-				{Name: "red", Namespace: "red", Network: "red", Labels: map[string]string{"selected": "true"}},
-				{Name: "blue", Namespace: "blue", Network: "blue", Labels: map[string]string{"selected": "true"}},
+				{Name: "red", Namespace: "red", Network: "cluster_udn_red", Topology: "layer3", Labels: map[string]string{"selected": "true"}},
+				{Name: "blue", Namespace: "blue", Network: "cluster_udn_blue", Topology: "layer2", Subnet: "1.4.0.0/16", Labels: map[string]string{"selected": "true"}},
 			},
 			frrConfigs: []*testFRRConfig{
 				{
@@ -778,15 +894,15 @@ func TestController_reconcile(t *testing.T) {
 					},
 				},
 			},
-			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"red\":\"1.1.0.0/24\", \"blue\":\"1.2.0.0/24\"}"}},
+			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"cluster_udn_red\":\"1.1.0.0/24\"}"}},
 			reconcile:            "ra",
 			expectAcceptedStatus: metav1.ConditionFalse,
 		},
 		{
-			name: "fails to reconcile if network names are too long to fit as a VFR name",
-			ra:   &testRA{Name: "ra", TargetVRF: "auto", AdvertisePods: true, NetworkSelector: map[string]string{"selected": "true"}},
+			name: "fails to reconcile if EgressIP is advertised with 'auto' target VRF",
+			ra:   &testRA{Name: "ra", TargetVRF: "auto", AdvertiseEgressIPs: true, NetworkSelector: map[string]string{"selected": "true"}},
 			nads: []*testNAD{
-				{Name: "red", Namespace: "red", Network: util.GenerateCUDNNetworkName("red.name.too.long"), Labels: map[string]string{"selected": "true"}},
+				{Name: "red", Namespace: "red", Network: "red", Topology: "layer3", Labels: map[string]string{"selected": "true"}},
 			},
 			frrConfigs: []*testFRRConfig{
 				{
@@ -799,28 +915,7 @@ func TestController_reconcile(t *testing.T) {
 					},
 				},
 			},
-			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"cluster_udn_red.name.too.long\":\"1.1.0.0/24\"}"}},
-			reconcile:            "ra",
-			expectAcceptedStatus: metav1.ConditionFalse,
-		},
-		{
-			name: "fails to reconcile if network is not a cluster UDN",
-			ra:   &testRA{Name: "ra", TargetVRF: "auto", AdvertisePods: true, NetworkSelector: map[string]string{"selected": "true"}},
-			nads: []*testNAD{
-				{Name: "red", Namespace: "red", Network: "red", Labels: map[string]string{"selected": "true"}},
-			},
-			frrConfigs: []*testFRRConfig{
-				{
-					Name:      "frrConfig",
-					Namespace: frrNamespace,
-					Routers: []*testRouter{
-						{ASN: 1, VRF: "red", Prefixes: []string{"1.1.1.0/24"}, Neighbors: []*testNeighbor{
-							{ASN: 1, Address: "1.0.0.100"},
-						}},
-					},
-				},
-			},
-			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"red\":\"1.1.0.0/24\"}"}},
+			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"red\":\"1.1.0.0/24\""}},
 			reconcile:            "ra",
 			expectAcceptedStatus: metav1.ConditionFalse,
 		},
@@ -867,8 +962,7 @@ func TestController_reconcile(t *testing.T) {
 			fakeClientset := util.GetOVNClientset().GetClusterManagerClientset()
 			addGenerateNameReactor[*frrfake.Clientset](fakeClientset.FRRClient)
 
-			// create test objects (we could initialize these objects with the
-			// clients but at least for the NADs iit doesn't work)
+			// create test objects
 			if tt.ra != nil {
 				_, err := fakeClientset.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().Create(context.Background(), tt.ra.RouteAdvertisements(), metav1.CreateOptions{})
 				g.Expect(err).ToNot(gomega.HaveOccurred())
@@ -893,6 +987,11 @@ func TestController_reconcile(t *testing.T) {
 				g.Expect(err).ToNot(gomega.HaveOccurred())
 			}
 
+			for _, namespace := range tt.namespaces {
+				_, err := fakeClientset.KubeClient.CoreV1().Namespaces().Create(context.Background(), namespace.Namespace(), metav1.CreateOptions{})
+				g.Expect(err).ToNot(gomega.HaveOccurred())
+			}
+
 			for _, eip := range tt.eips {
 				_, err := fakeClientset.EgressIPClient.K8sV1().EgressIPs().Create(context.Background(), eip.EgressIP(), metav1.CreateOptions{})
 				g.Expect(err).ToNot(gomega.HaveOccurred())
@@ -911,6 +1010,14 @@ func TestController_reconcile(t *testing.T) {
 				defaultNAD, err = c.getOrCreateDefaultNetworkNAD()
 				g.Expect(err).ToNot(gomega.HaveOccurred())
 			}
+			// prime the default network NAD namespace
+			namespace := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: config.Kubernetes.OVNConfigNamespace,
+				},
+			}
+			_, err = fakeClientset.KubeClient.CoreV1().Namespaces().Create(context.Background(), namespace, metav1.CreateOptions{})
+			g.Expect(err).ToNot(gomega.HaveOccurred())
 
 			// update it with the annotation that network manager would set
 			defaultNAD.Annotations = map[string]string{types.OvnNetworkNameAnnotation: types.DefaultNetworkName}
@@ -1111,22 +1218,6 @@ func TestUpdates(t *testing.T) {
 			newObject: &testNAD{Name: "net", Namespace: "net", Network: "net", IsSecondary: true, Topology: "layer3", Labels: map[string]string{"select": "2"}},
 		},
 		{
-			name:      "does not reconcile a new unsupported (layer2 primary) NAD",
-			newObject: &testNAD{Name: "net", Namespace: "net", Network: "net", Topology: "layer2", Subnet: "1.2.0.0/16", Labels: map[string]string{"select": "2"}},
-		},
-		{
-			name:      "does not reconcile an updated unsupported NAD",
-			oldObject: &testNAD{Name: "net", Namespace: "net", Network: "net", Topology: "layer2", Subnet: "1.2.0.0/16", Labels: map[string]string{"select": "2"}},
-			newObject: &testNAD{Name: "net", Namespace: "net", Network: "net", Topology: "layer2", Subnet: "1.2.0.0/16", Labels: map[string]string{"select": "1"}},
-		},
-		{
-			// TODO shouldn't happen but needs FIX in controller utility which
-			// does not call filter predicate on deletes
-			name:              "reconciles all RAs on deleted unsupported NAD",
-			oldObject:         &testNAD{Name: "net", Namespace: "net", Network: "net", Topology: "layer2", Subnet: "1.2.0.0/16", Labels: map[string]string{"select": "2"}},
-			expectedReconcile: []string{"ra1", "ra2", "ra3"},
-		},
-		{
 			name:              "reconciles all RAs that advertise EIPs on new EIP with status",
 			newObject:         &testEIP{Name: "eip", EIPs: map[string]string{"node": "ip"}},
 			expectedReconcile: []string{"ra1", "ra3"},
@@ -1140,6 +1231,18 @@ func TestUpdates(t *testing.T) {
 			name:              "reconciles all RAs that advertise EIPs on updated EIP status",
 			oldObject:         &testEIP{Name: "eip", EIPs: map[string]string{"node": "ip"}},
 			newObject:         &testEIP{Name: "eip", EIPs: map[string]string{"node": "ip2"}},
+			expectedReconcile: []string{"ra1", "ra3"},
+		},
+		{
+			name:              "reconciles all RAs that advertise EIPs on updated EIP status",
+			oldObject:         &testEIP{Name: "eip", EIPs: map[string]string{"node": "ip"}},
+			newObject:         &testEIP{Name: "eip", EIPs: map[string]string{"node": "ip"}, NamespaceSelector: map[string]string{"selected": "true"}},
+			expectedReconcile: []string{"ra1", "ra3"},
+		},
+		{
+			name:              "reconciles all RAs that advertise EIPs on updated namespace labels",
+			oldObject:         &testNamespace{Name: "ns1", Labels: map[string]string{"selected": "true"}},
+			newObject:         &testNamespace{Name: "ns1"},
 			expectedReconcile: []string{"ra1", "ra3"},
 		},
 		{
@@ -1178,6 +1281,12 @@ func TestUpdates(t *testing.T) {
 			name:              "reconciles all RAs on updated Node subnet annotation",
 			oldObject:         &testNode{Name: "eip"},
 			newObject:         &testNode{Name: "eip", SubnetsAnnotation: "subnets"},
+			expectedReconcile: []string{"ra1", "ra2", "ra3"},
+		},
+		{
+			name:              "reconciles all RAs on updated Node primary address annotation",
+			oldObject:         &testNode{Name: "eip", PrimaryAddressAnnotation: "old"},
+			newObject:         &testNode{Name: "eip", PrimaryAddressAnnotation: "new"},
 			expectedReconcile: []string{"ra1", "ra2", "ra3"},
 		},
 		{
@@ -1250,6 +1359,8 @@ func TestUpdates(t *testing.T) {
 					_, err = fakeClientset.EgressIPClient.K8sV1().EgressIPs().Create(context.Background(), t.EgressIP(), metav1.CreateOptions{})
 				case *testNode:
 					_, err = fakeClientset.KubeClient.CoreV1().Nodes().Create(context.Background(), t.Node(), metav1.CreateOptions{})
+				case *testNamespace:
+					_, err = fakeClientset.KubeClient.CoreV1().Namespaces().Create(context.Background(), t.Namespace(), metav1.CreateOptions{})
 				}
 				return err
 			}
@@ -1264,6 +1375,8 @@ func TestUpdates(t *testing.T) {
 					_, err = fakeClientset.EgressIPClient.K8sV1().EgressIPs().Update(context.Background(), t.EgressIP(), metav1.UpdateOptions{})
 				case *testNode:
 					_, err = fakeClientset.KubeClient.CoreV1().Nodes().Update(context.Background(), t.Node(), metav1.UpdateOptions{})
+				case *testNamespace:
+					_, err = fakeClientset.KubeClient.CoreV1().Namespaces().Update(context.Background(), t.Namespace(), metav1.UpdateOptions{})
 				}
 				return err
 			}
@@ -1278,6 +1391,8 @@ func TestUpdates(t *testing.T) {
 					err = fakeClientset.EgressIPClient.K8sV1().EgressIPs().Delete(context.Background(), t.Name, metav1.DeleteOptions{})
 				case *testNode:
 					err = fakeClientset.KubeClient.CoreV1().Nodes().Delete(context.Background(), t.Name, metav1.DeleteOptions{})
+				case *testNamespace:
+					err = fakeClientset.KubeClient.CoreV1().Namespaces().Delete(context.Background(), t.Name, metav1.DeleteOptions{})
 				}
 				return err
 			}

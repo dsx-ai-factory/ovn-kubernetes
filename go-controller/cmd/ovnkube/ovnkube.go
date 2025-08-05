@@ -23,6 +23,8 @@ import (
 	"k8s.io/klog/v2"
 	kexec "k8s.io/utils/exec"
 
+	"github.com/ovn-kubernetes/libovsdb/client"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controllermanager"
@@ -568,6 +570,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 		}()
 	}
 
+	var ovsClient client.Client
 	if runMode.node {
 		wg.Add(1)
 		go func() {
@@ -588,6 +591,15 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 				OFManager.NewOpenFlowCacheManager(wg, ctx.Done())
 			}
 
+			// OVS is not running on dpu-host nodes
+			if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+				ovsClient, err = libovsdb.NewOVSClient(ctx.Done())
+				if err != nil {
+					nodeErr = fmt.Errorf("failed to initialize libovsdb vswitchd client: %w", err)
+					return
+				}
+			}
+
 			nodeControllerManager, err := controllermanager.NewNodeControllerManager(
 				ovnClientset,
 				watchFactory,
@@ -595,7 +607,9 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 				dpuName,
 				wg,
 				eventRecorder,
-				routemanager.NewController())
+				routemanager.NewController(),
+				ovsClient,
+			)
 			if err != nil {
 				nodeErr = fmt.Errorf("failed to create node network controller: %w", err)
 				return
@@ -617,16 +631,17 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 		// start the prometheus server to serve OVS and OVN Node Metrics (default port: 9410)
 		if config.Metrics.BindAddress != "" {
 			if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
-				ovsDBClient, err := libovsdb.NewOVSClient(ctx.Done())
-				if err != nil {
-					// exit gracefully.
-					return fmt.Errorf("error when trying to initialize ovsdb client: %v", err)
+				if ovsClient == nil {
+					ovsClient, err = libovsdb.NewOVSClient(ctx.Done())
+					if err != nil {
+						return fmt.Errorf("failed to initialize libovsdb vswitchd client: %w", err)
+					}
 				}
 				// serve OVN ^ovn_controller metrics
-				metrics.RegisterOvnNodeMetrics(ovsDBClient, config.MetricsScrapeInterval, ctx.Done())
+				metrics.RegisterOvnNodeMetrics(ovsClient, config.MetricsScrapeInterval, ctx.Done())
 				if config.Metrics.ExportOVSMetrics {
 					// serve OVS ^ovs metrics
-					metrics.RegisterOvsMetrics(runMode.identity, ovsDBClient, config.MetricsScrapeInterval, ctx.Done())
+					metrics.RegisterOvsMetrics(runMode.identity, ovsClient, config.MetricsScrapeInterval, ctx.Done())
 					// register ovsDB metrics
 					metrics.RegisterOvsDBMetrics(config.MetricsScrapeInterval, ctx.Done())
 				}

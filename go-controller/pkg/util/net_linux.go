@@ -55,7 +55,7 @@ type NetLinkOps interface {
 	NeighAdd(neigh *netlink.Neigh) error
 	NeighDel(neigh *netlink.Neigh) error
 	NeighList(linkIndex, family int) ([]netlink.Neigh, error)
-	ConntrackDeleteFilter(table netlink.ConntrackTableType, family netlink.InetFamily, filter netlink.CustomConntrackFilter) (uint, error)
+	ConntrackDeleteFilters(table netlink.ConntrackTableType, family netlink.InetFamily, filters ...netlink.CustomConntrackFilter) (uint, error)
 	CountIngressFilters(link netlink.Link) (uint, error)
 	LinkSetVfHardwareAddr(pfLink netlink.Link, vfIndex int, hwaddr net.HardwareAddr) error
 	RouteSubscribeWithOptions(ch chan<- netlink.RouteUpdate, done <-chan struct{}, options netlink.RouteSubscribeOptions) error
@@ -190,8 +190,8 @@ func (defaultNetLinkOps) NeighList(linkIndex, family int) ([]netlink.Neigh, erro
 	return netlink.NeighList(linkIndex, family)
 }
 
-func (defaultNetLinkOps) ConntrackDeleteFilter(table netlink.ConntrackTableType, family netlink.InetFamily, filter netlink.CustomConntrackFilter) (uint, error) {
-	return netlink.ConntrackDeleteFilter(table, family, filter)
+func (defaultNetLinkOps) ConntrackDeleteFilters(table netlink.ConntrackTableType, family netlink.InetFamily, filters ...netlink.CustomConntrackFilter) (uint, error) {
+	return netlink.ConntrackDeleteFilters(table, family, filters...)
 }
 
 func (defaultNetLinkOps) CountIngressFilters(link netlink.Link) (uint, error) {
@@ -427,7 +427,7 @@ func LinkRoutesDel(link netlink.Link, subnets []*net.IPNet) error {
 		if len(subnets) == 0 {
 			err = netLinkOps.RouteDel(&route)
 			if err != nil {
-				return fmt.Errorf("failed to delete route '%s via %s' for link %s : %v\n",
+				return fmt.Errorf("failed to delete route '%s via %s' for link %s : %v",
 					route.Dst.String(), route.Gw.String(), link.Attrs().Name, err)
 			}
 			continue
@@ -448,7 +448,7 @@ func LinkRoutesDel(link netlink.Link, subnets []*net.IPNet) error {
 					if route.Dst != nil {
 						net = route.Dst.String()
 					}
-					return fmt.Errorf("failed to delete route '%s via %s' for link %s : %v\n",
+					return fmt.Errorf("failed to delete route '%s via %s' for link %s : %v",
 						net, route.Gw.String(), link.Attrs().Name, err)
 				}
 				break
@@ -639,11 +639,11 @@ func DeleteConntrack(ip string, port int32, protocol corev1.Protocol, ipFilterTy
 		}
 	}
 	if ipAddress.To4() != nil {
-		if _, err := netLinkOps.ConntrackDeleteFilter(netlink.ConntrackTable, netlink.FAMILY_V4, filter); err != nil {
+		if _, err := netLinkOps.ConntrackDeleteFilters(netlink.ConntrackTable, netlink.FAMILY_V4, filter); err != nil {
 			return err
 		}
 	} else {
-		if _, err := netLinkOps.ConntrackDeleteFilter(netlink.ConntrackTable, netlink.FAMILY_V6, filter); err != nil {
+		if _, err := netLinkOps.ConntrackDeleteFilters(netlink.ConntrackTable, netlink.FAMILY_V6, filter); err != nil {
 			return err
 		}
 	}

@@ -18,10 +18,10 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"context"
+	context "context"
 
-	v1alpha1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1"
-	networkqosv1alpha1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/applyconfiguration/networkqos/v1alpha1"
+	networkqosv1alpha1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1"
+	applyconfigurationnetworkqosv1alpha1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/applyconfiguration/networkqos/v1alpha1"
 	scheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/clientset/versioned/scheme"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -37,36 +37,37 @@ type NetworkQoSesGetter interface {
 
 // NetworkQoSInterface has methods to work with NetworkQoS resources.
 type NetworkQoSInterface interface {
-	Create(ctx context.Context, networkQoS *v1alpha1.NetworkQoS, opts v1.CreateOptions) (*v1alpha1.NetworkQoS, error)
-	Update(ctx context.Context, networkQoS *v1alpha1.NetworkQoS, opts v1.UpdateOptions) (*v1alpha1.NetworkQoS, error)
+	Create(ctx context.Context, networkQoS *networkqosv1alpha1.NetworkQoS, opts v1.CreateOptions) (*networkqosv1alpha1.NetworkQoS, error)
+	Update(ctx context.Context, networkQoS *networkqosv1alpha1.NetworkQoS, opts v1.UpdateOptions) (*networkqosv1alpha1.NetworkQoS, error)
 	// Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
-	UpdateStatus(ctx context.Context, networkQoS *v1alpha1.NetworkQoS, opts v1.UpdateOptions) (*v1alpha1.NetworkQoS, error)
+	UpdateStatus(ctx context.Context, networkQoS *networkqosv1alpha1.NetworkQoS, opts v1.UpdateOptions) (*networkqosv1alpha1.NetworkQoS, error)
 	Delete(ctx context.Context, name string, opts v1.DeleteOptions) error
 	DeleteCollection(ctx context.Context, opts v1.DeleteOptions, listOpts v1.ListOptions) error
-	Get(ctx context.Context, name string, opts v1.GetOptions) (*v1alpha1.NetworkQoS, error)
-	List(ctx context.Context, opts v1.ListOptions) (*v1alpha1.NetworkQoSList, error)
+	Get(ctx context.Context, name string, opts v1.GetOptions) (*networkqosv1alpha1.NetworkQoS, error)
+	List(ctx context.Context, opts v1.ListOptions) (*networkqosv1alpha1.NetworkQoSList, error)
 	Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error)
-	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *v1alpha1.NetworkQoS, err error)
-	Apply(ctx context.Context, networkQoS *networkqosv1alpha1.NetworkQoSApplyConfiguration, opts v1.ApplyOptions) (result *v1alpha1.NetworkQoS, err error)
+	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *networkqosv1alpha1.NetworkQoS, err error)
+	Apply(ctx context.Context, networkQoS *applyconfigurationnetworkqosv1alpha1.NetworkQoSApplyConfiguration, opts v1.ApplyOptions) (result *networkqosv1alpha1.NetworkQoS, err error)
 	// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
-	ApplyStatus(ctx context.Context, networkQoS *networkqosv1alpha1.NetworkQoSApplyConfiguration, opts v1.ApplyOptions) (result *v1alpha1.NetworkQoS, err error)
+	ApplyStatus(ctx context.Context, networkQoS *applyconfigurationnetworkqosv1alpha1.NetworkQoSApplyConfiguration, opts v1.ApplyOptions) (result *networkqosv1alpha1.NetworkQoS, err error)
 	NetworkQoSExpansion
 }
 
 // networkQoSes implements NetworkQoSInterface
 type networkQoSes struct {
-	*gentype.ClientWithListAndApply[*v1alpha1.NetworkQoS, *v1alpha1.NetworkQoSList, *networkqosv1alpha1.NetworkQoSApplyConfiguration]
+	*gentype.ClientWithListAndApply[*networkqosv1alpha1.NetworkQoS, *networkqosv1alpha1.NetworkQoSList, *applyconfigurationnetworkqosv1alpha1.NetworkQoSApplyConfiguration]
 }
 
 // newNetworkQoSes returns a NetworkQoSes
 func newNetworkQoSes(c *K8sV1alpha1Client, namespace string) *networkQoSes {
 	return &networkQoSes{
-		gentype.NewClientWithListAndApply[*v1alpha1.NetworkQoS, *v1alpha1.NetworkQoSList, *networkqosv1alpha1.NetworkQoSApplyConfiguration](
+		gentype.NewClientWithListAndApply[*networkqosv1alpha1.NetworkQoS, *networkqosv1alpha1.NetworkQoSList, *applyconfigurationnetworkqosv1alpha1.NetworkQoSApplyConfiguration](
 			"networkqoses",
 			c.RESTClient(),
 			scheme.ParameterCodec,
 			namespace,
-			func() *v1alpha1.NetworkQoS { return &v1alpha1.NetworkQoS{} },
-			func() *v1alpha1.NetworkQoSList { return &v1alpha1.NetworkQoSList{} }),
+			func() *networkqosv1alpha1.NetworkQoS { return &networkqosv1alpha1.NetworkQoS{} },
+			func() *networkqosv1alpha1.NetworkQoSList { return &networkqosv1alpha1.NetworkQoSList{} },
+		),
 	}
 }

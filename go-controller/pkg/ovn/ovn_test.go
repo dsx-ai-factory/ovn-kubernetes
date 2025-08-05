@@ -25,7 +25,7 @@ import (
 	anpapi "sigs.k8s.io/network-policy-api/apis/v1alpha1"
 	anpfake "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned/fake"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -294,7 +294,7 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 	err = o.eIPController.SyncLocalNodeZonesCache()
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "syncing Nodes OVN zones status must succeed to support EgressIP")
 
-	existingNodes, err := o.controller.kube.GetNodes()
+	existingNodes, err := o.controller.watchFactory.GetNodes()
 	if err == nil {
 		for _, node := range existingNodes {
 			o.controller.localZoneNodes.Store(node.Name, true)
@@ -573,14 +573,14 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 
 		switch topoType {
 		case types.Layer3Topology:
-			l3Controller, err := NewSecondaryLayer3NetworkController(cnci, nInfo, o.networkManager.Interface(), o.eIPController, o.portCache)
+			l3Controller, err := NewSecondaryLayer3NetworkController(cnci, nInfo, o.networkManager.Interface(), nil, o.eIPController, o.portCache)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			if o.asf != nil { // use fake asf only when enabled
 				l3Controller.addressSetFactory = asf
 			}
 			secondaryController = &l3Controller.BaseSecondaryNetworkController
 		case types.Layer2Topology:
-			l2Controller, err := NewSecondaryLayer2NetworkController(cnci, nInfo, o.networkManager.Interface(), o.eIPController, o.portCache)
+			l2Controller, err := NewSecondaryLayer2NetworkController(cnci, nInfo, o.networkManager.Interface(), nil, o.portCache, o.eIPController)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			if o.asf != nil { // use fake asf only when enabled
 				l2Controller.addressSetFactory = asf

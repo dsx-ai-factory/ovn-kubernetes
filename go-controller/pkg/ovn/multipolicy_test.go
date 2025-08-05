@@ -20,21 +20,13 @@ import (
 
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
-
-func ptrInt32ToInt(p *int32) *int {
-	if p == nil {
-		return nil
-	}
-
-	ret := int(*p)
-	return &ret
-}
 
 func convertNetPolicyToMultiNetPolicy(policy *knet.NetworkPolicy) *mnpapi.MultiNetworkPolicy {
 	var mpolicy mnpapi.MultiNetworkPolicy
@@ -52,7 +44,7 @@ func convertNetPolicyToMultiNetPolicy(policy *knet.NetworkPolicy) *mnpapi.MultiN
 			mingress.Ports[j] = mnpapi.MultiNetworkPolicyPort{
 				Protocol: port.Protocol,
 				Port:     port.Port,
-				EndPort:  ptrInt32ToInt(port.EndPort),
+				EndPort:  port.EndPort,
 			}
 		}
 		mingress.From = make([]mnpapi.MultiNetworkPolicyPeer, len(ingress.From))
@@ -77,7 +69,7 @@ func convertNetPolicyToMultiNetPolicy(policy *knet.NetworkPolicy) *mnpapi.MultiN
 			megress.Ports[j] = mnpapi.MultiNetworkPolicyPort{
 				Protocol: port.Protocol,
 				Port:     port.Port,
-				EndPort:  ptrInt32ToInt(port.EndPort),
+				EndPort:  port.EndPort,
 			}
 		}
 		megress.To = make([]mnpapi.MultiNetworkPolicyPeer, len(egress.To))
@@ -161,8 +153,8 @@ func getExpectedDataPodsAndSwitchesForSecondaryNetwork(fakeOvn *FakeOVN, pods []
 						ovntypes.TopologyExternalID: ocInfo.bnc.TopologyType(),
 					},
 					Options: map[string]string{
-						"requested-chassis": pod.nodeName,
-						"iface-id-ver":      pod.podName,
+						libovsdbops.RequestedChassis: pod.nodeName,
+						"iface-id-ver":               pod.podName,
 					},
 
 					PortSecurity: []string{podAddr},

@@ -132,6 +132,12 @@ func newPod(namespace, name, node, podIP string) *corev1.Pod {
 			Phase:  corev1.PodRunning,
 			PodIP:  podIP,
 			PodIPs: podIPs,
+			Conditions: []corev1.PodCondition{
+				{
+					Type:   corev1.PodReady,
+					Status: corev1.ConditionTrue,
+				},
+			},
 		},
 	}
 }
@@ -484,8 +490,8 @@ func getExpectedDataPodsSwitchesPortGroup(netInfo util.NetInfo, pods []testPod, 
 				"namespace": pod.namespace,
 			},
 			Options: map[string]string{
-				"requested-chassis": pod.nodeName,
-				"iface-id-ver":      pod.podName,
+				libovsdbops.RequestedChassis: pod.nodeName,
+				"iface-id-ver":               pod.podName,
 			},
 			PortSecurity: []string{podAddr},
 		}
@@ -2032,7 +2038,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 							},
 							Options: map[string]string{
 								// check requested-chassis will be updated to correct t1.nodeName value
-								"requested-chassis": t2.nodeName,
+								libovsdbops.RequestedChassis: t2.nodeName,
 								// check old value for iface-id-ver will be updated to pod.UID
 								"iface-id-ver": "wrong_value",
 							},
@@ -2047,7 +2053,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 								"namespace": t2.namespace,
 							},
 							Options: map[string]string{
-								"requested-chassis": t2.nodeName,
+								libovsdbops.RequestedChassis: t2.nodeName,
 								//"iface-id-ver": is empty to check that it won't be set on update
 							},
 							PortSecurity: []string{fmt.Sprintf("%s %s", t2.podMAC, t2.podIP)},
@@ -2062,7 +2068,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 							},
 							Options: map[string]string{
 								// check requested-chassis will be updated to correct t1.nodeName value
-								"requested-chassis": t3.nodeName,
+								libovsdbops.RequestedChassis: t3.nodeName,
 								// check old value for iface-id-ver will be updated to pod.UID
 								"iface-id-ver": "wrong_value",
 							},
@@ -2232,7 +2238,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 							},
 							Options: map[string]string{
 								// check requested-chassis will be updated to correct t1.nodeName value
-								"requested-chassis": t1.nodeName,
+								libovsdbops.RequestedChassis: t1.nodeName,
 								// check old value for iface-id-ver will be updated to pod.UID
 								"iface-id-ver": "wrong_value",
 							},

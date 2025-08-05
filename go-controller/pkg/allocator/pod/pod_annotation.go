@@ -54,6 +54,7 @@ func NewPodAnnotationAllocator(
 // false.
 func (allocator *PodAnnotationAllocator) AllocatePodAnnotation(
 	ipAllocator subnet.NamedAllocator,
+	node *corev1.Node,
 	pod *corev1.Pod,
 	network *nadapi.NetworkSelectionElement,
 	reallocateIP, skipIPAM bool,
@@ -67,6 +68,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotation(
 		allocator.kube,
 		ipAllocator,
 		allocator.netInfo,
+		node,
 		pod,
 		network,
 		allocator.ipamClaimsReconciler,
@@ -81,6 +83,7 @@ func allocatePodAnnotation(
 	kube kube.Interface,
 	ipAllocator subnet.NamedAllocator,
 	netInfo util.NetInfo,
+	node *corev1.Node,
 	pod *corev1.Pod,
 	network *nadapi.NetworkSelectionElement,
 	claimsReconciler persistentips.PersistentAllocations,
@@ -99,6 +102,7 @@ func allocatePodAnnotation(
 			ipAllocator,
 			idAllocator,
 			netInfo,
+			node,
 			pod,
 			network,
 			claimsReconciler,
@@ -135,6 +139,7 @@ func allocatePodAnnotation(
 func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
 	ipAllocator subnet.NamedAllocator,
 	idAllocator id.NamedAllocator,
+	node *corev1.Node,
 	pod *corev1.Pod,
 	network *nadapi.NetworkSelectionElement,
 	reallocateIP, skipIPAM bool,
@@ -149,6 +154,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
 		ipAllocator,
 		idAllocator,
 		allocator.netInfo,
+		node,
 		pod,
 		network,
 		allocator.ipamClaimsReconciler,
@@ -164,6 +170,7 @@ func allocatePodAnnotationWithTunnelID(
 	ipAllocator subnet.NamedAllocator,
 	idAllocator id.NamedAllocator,
 	netInfo util.NetInfo,
+	node *corev1.Node,
 	pod *corev1.Pod,
 	network *nadapi.NetworkSelectionElement,
 	claimsReconciler persistentips.PersistentAllocations,
@@ -179,6 +186,7 @@ func allocatePodAnnotationWithTunnelID(
 			ipAllocator,
 			idAllocator,
 			netInfo,
+			node,
 			pod,
 			network,
 			claimsReconciler,
@@ -224,6 +232,7 @@ func allocatePodAnnotationWithRollback(
 	ipAllocator subnet.NamedAllocator,
 	idAllocator id.NamedAllocator,
 	netInfo util.NetInfo,
+	node *corev1.Node,
 	pod *corev1.Pod,
 	network *nadapi.NetworkSelectionElement,
 	claimsReconciler persistentips.PersistentAllocations,
@@ -402,7 +411,7 @@ func allocatePodAnnotationWithRollback(
 		}
 
 		// handle routes & gateways
-		err = util.AddRoutesGatewayIP(netInfo, pod, tentative, network)
+		err = util.AddRoutesGatewayIP(netInfo, node, pod, tentative, network)
 		if err != nil {
 			return
 		}

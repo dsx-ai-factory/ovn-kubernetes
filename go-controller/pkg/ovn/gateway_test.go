@@ -15,7 +15,10 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -30,6 +33,33 @@ func init() {
 	// libovsdb matcher might produce a lengthy output that will be cropped by
 	// default gomega output limit, set to 0 to unlimit.
 	format.MaxLength = 0
+}
+
+func generateAdvertisedUDNIsolationExpectedNB(testData []libovsdbtest.TestData, networkName string, networkID int, clusterIPSubnets []*net.IPNet, nodeSwitch *nbdb.LogicalSwitch, addrSet addressset.AddressSet) []libovsdbtest.TestData {
+	var passMatches []string
+	for _, subnet := range clusterIPSubnets {
+		ipPrefix := "ip4"
+		if utilnet.IsIPv6CIDR(subnet) {
+			ipPrefix = "ip6"
+		}
+		passMatches = append(passMatches, fmt.Sprintf("(%s.src == %s && %s.dst == %s)", ipPrefix, subnet, ipPrefix, subnet))
+
+	}
+	passACL := libovsdbutil.BuildACLWithDefaultTier(
+		GetAdvertisedNetworkSubnetsPassACLdbIDs(DefaultNetworkControllerName, networkName, networkID),
+		types.AdvertisedNetworkPassPriority,
+		strings.Join(passMatches, " || "),
+		nbdb.ACLActionPass,
+		nil,
+		libovsdbutil.LportEgressAfterLB)
+	passACL.Tier = types.PrimaryACLTier
+	passACL.UUID = "advertised-udn-isolation-pass-acl-UUID"
+	dropACL := BuildAdvertisedNetworkSubnetsDropACL(addrSet)
+	dropACL.UUID = "advertised-udn-isolation-drop-acl-UUID"
+	nodeSwitch.ACLs = append(nodeSwitch.ACLs, passACL.UUID, dropACL.UUID)
+	testData = append(testData, passACL, dropACL)
+
+	return testData
 }
 
 func generateGatewayInitExpectedNB(testData []libovsdbtest.TestData, expectedOVNClusterRouter *nbdb.LogicalRouter,
@@ -59,7 +89,7 @@ func generateGatewayInitExpectedNB(testData []libovsdbtest.TestData, expectedOVN
 	var options map[string]string
 	if gatewayMTU != "" {
 		options = map[string]string{
-			"gateway_mtu": gatewayMTU,
+			libovsdbops.GatewayMTU: gatewayMTU,
 		}
 	}
 	testData = append(testData, &nbdb.LogicalRouterPort{
@@ -192,13 +222,17 @@ func generateGatewayInitExpectedNB(testData []libovsdbtest.TestData, expectedOVN
 			natUUID := fmt.Sprintf("nat-%d-UUID", i)
 			natUUIDs = append(natUUIDs, natUUID)
 			physicalIP, _ := util.MatchFirstIPNetFamily(utilnet.IsIPv6CIDR(subnet), l3GatewayConfig.IPAddresses)
-			testData = append(testData, &nbdb.NAT{
+			nat := nbdb.NAT{
 				UUID:       natUUID,
 				ExternalIP: physicalIP.IP.String(),
 				LogicalIP:  subnet.String(),
 				Options:    map[string]string{"stateless": "false"},
 				Type:       nbdb.NATTypeSNAT,
-			})
+			}
+			if config.Gateway.Mode != config.GatewayModeDisabled {
+				nat.ExternalPortRange = config.DefaultEphemeralPortRange
+			}
+			testData = append(testData, &nat)
 		}
 		if len(l3GatewayConfig.GWSNATRules) > 0 {
 			natUUIDs = append(natUUIDs, "nat-gw-snat-rules")
@@ -209,13 +243,17 @@ func generateGatewayInitExpectedNB(testData []libovsdbtest.TestData, expectedOVN
 		natUUID := fmt.Sprintf("nat-join-%d-UUID", i)
 		natUUIDs = append(natUUIDs, natUUID)
 		joinLRPIP, _ := util.MatchFirstIPNetFamily(utilnet.IsIPv6CIDR(physicalIP), joinLRPIPs)
-		testData = append(testData, &nbdb.NAT{
+		nat := nbdb.NAT{
 			UUID:       natUUID,
 			ExternalIP: physicalIP.IP.String(),
 			LogicalIP:  joinLRPIP.IP.String(),
 			Options:    map[string]string{"stateless": "false"},
 			Type:       nbdb.NATTypeSNAT,
-		})
+		}
+		if config.Gateway.Mode != config.GatewayModeDisabled {
+			nat.ExternalPortRange = config.DefaultEphemeralPortRange
+		}
+		testData = append(testData, &nat)
 	}
 
 	testData = append(testData, &nbdb.MeterBand{
@@ -311,7 +349,7 @@ func generateGatewayInitExpectedNB(testData []libovsdbtest.TestData, expectedOVN
 			Type:      "router",
 			Addresses: []string{"router"},
 			Options: map[string]string{
-				"router-port": gwRouterPort,
+				libovsdbops.RouterPort: gwRouterPort,
 			},
 		},
 		&nbdb.LogicalSwitchPort{
@@ -319,7 +357,7 @@ func generateGatewayInitExpectedNB(testData []libovsdbtest.TestData, expectedOVN
 			Name: externalSwitchPortToRouter,
 			Type: "router",
 			Options: map[string]string{
-				"router-port":               externalRouterPort,
+				libovsdbops.RouterPort:      externalRouterPort,
 				"nat-addresses":             "router",
 				"exclude-lb-vips-from-garp": "true",
 			},
@@ -375,6 +413,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 	ginkgo.Context("Gateway Creation Operations Shared Gateway Mode", func() {
 		ginkgo.BeforeEach(func() {
 			config.Gateway.Mode = config.GatewayModeShared
+			config.Gateway.EphemeralPortRange = config.DefaultEphemeralPortRange
 		})
 
 		ginkgo.It("creates an IPv4 gateway in OVN", func() {
@@ -439,19 +478,23 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NextHops:       ovntest.MustParseIPs("169.255.33.1"),
 				NodePortEnable: true,
 			}
+			gwConfig := &GatewayConfig{
+				annoConfig:                 l3GatewayConfig,
+				hostSubnets:                hostSubnets,
+				clusterSubnets:             clusterIPSubnets,
+				gwLRPJoinIPs:               joinLRPIPs,
+				hostAddrs:                  nil,
+				externalIPs:                extractExternalIPs(l3GatewayConfig),
+				ovnClusterLRPToJoinIfAddrs: defLRPIPs,
+			}
 
 			var err error
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
-				clusterIPSubnets,
-				hostSubnets,
-				l3GatewayConfig,
-				joinLRPIPs,
-				defLRPIPs,
-				extractExternalIPs(l3GatewayConfig),
+				gwConfig,
 				true,
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -552,19 +595,23 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NextHops:       ovntest.MustParseIPs("169.255.33.1"),
 				NodePortEnable: true,
 			}
+			gwConfig := &GatewayConfig{
+				annoConfig:                 l3GatewayConfig,
+				hostSubnets:                hostSubnets,
+				clusterSubnets:             clusterIPSubnets,
+				gwLRPJoinIPs:               joinLRPIPs,
+				hostAddrs:                  nil,
+				externalIPs:                extractExternalIPs(l3GatewayConfig),
+				ovnClusterLRPToJoinIfAddrs: defLRPIPs,
+			}
 
 			var err error
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
-				clusterIPSubnets,
-				hostSubnets,
-				l3GatewayConfig,
-				joinLRPIPs,
-				defLRPIPs,
-				extractExternalIPs(l3GatewayConfig),
+				gwConfig,
 				true,
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -671,19 +718,23 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NextHops:       ovntest.MustParseIPs("169.255.33.1"),
 				NodePortEnable: true,
 			}
+			gwConfig := &GatewayConfig{
+				annoConfig:                 l3GatewayConfig,
+				hostSubnets:                hostSubnets,
+				clusterSubnets:             clusterIPSubnets,
+				gwLRPJoinIPs:               joinLRPIPs,
+				hostAddrs:                  nil,
+				externalIPs:                extractExternalIPs(l3GatewayConfig),
+				ovnClusterLRPToJoinIfAddrs: defLRPIPs,
+			}
 
 			var err error
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
-				clusterIPSubnets,
-				hostSubnets,
-				l3GatewayConfig,
-				joinLRPIPs,
-				defLRPIPs,
-				extractExternalIPs(l3GatewayConfig),
+				gwConfig,
 				true,
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -760,19 +811,23 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				IPAddresses:    ovntest.MustParseIPNets("169.255.33.2/24"),
 				NodePortEnable: true,
 			}
+			gwConfig := &GatewayConfig{
+				annoConfig:                 l3GatewayConfig,
+				hostSubnets:                hostSubnets,
+				clusterSubnets:             clusterIPSubnets,
+				gwLRPJoinIPs:               joinLRPIPs,
+				hostAddrs:                  nil,
+				externalIPs:                extractExternalIPs(l3GatewayConfig),
+				ovnClusterLRPToJoinIfAddrs: defLRPIPs,
+			}
 
 			var err error
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
-				clusterIPSubnets,
-				hostSubnets,
-				l3GatewayConfig,
-				joinLRPIPs,
-				defLRPIPs,
-				extractExternalIPs(l3GatewayConfig),
+				gwConfig,
 				true,
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -842,7 +897,15 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NextHops:       ovntest.MustParseIPs("169.255.33.1"),
 				NodePortEnable: true,
 			}
-
+			gwConfig := &GatewayConfig{
+				annoConfig:                 l3GatewayConfig,
+				hostSubnets:                hostSubnets,
+				clusterSubnets:             clusterIPSubnets,
+				gwLRPJoinIPs:               joinLRPIPs,
+				hostAddrs:                  nil,
+				externalIPs:                extractExternalIPs(l3GatewayConfig),
+				ovnClusterLRPToJoinIfAddrs: defLRPIPs,
+			}
 			var err error
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -854,14 +917,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			mgmtPortIP := ""
 
 			// Disable option:gateway_mtu.
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
-				clusterIPSubnets,
-				hostSubnets,
-				l3GatewayConfig,
-				joinLRPIPs,
-				defLRPIPs,
-				extractExternalIPs(l3GatewayConfig),
+				gwConfig,
 				false,
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -873,14 +931,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 			// Enable option:gateway_mtu.
 			expectedOVNClusterRouter.StaticRoutes = []string{}
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
-				clusterIPSubnets,
-				hostSubnets,
-				l3GatewayConfig,
-				joinLRPIPs,
-				defLRPIPs,
-				extractExternalIPs(l3GatewayConfig),
+				gwConfig,
 				true,
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -940,6 +993,15 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NextHops:       ovntest.MustParseIPs("169.255.33.1"),
 				NodePortEnable: true,
 			}
+			gwConfig := &GatewayConfig{
+				annoConfig:                 l3GatewayConfig,
+				hostSubnets:                hostSubnets,
+				clusterSubnets:             clusterIPSubnets,
+				gwLRPJoinIPs:               joinLRPIPs,
+				hostAddrs:                  nil,
+				externalIPs:                extractExternalIPs(l3GatewayConfig),
+				ovnClusterLRPToJoinIfAddrs: defLRPIPs,
+			}
 
 			var err error
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
@@ -951,14 +1013,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			// We don't set up the Allow from mgmt port ACL here
 			mgmtPortIP := ""
 
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
-				clusterIPSubnets,
-				hostSubnets,
-				l3GatewayConfig,
-				joinLRPIPs,
-				defLRPIPs,
-				extractExternalIPs(l3GatewayConfig),
+				gwConfig,
 				false,
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -971,15 +1028,11 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			ginkgo.By("modifying the node join IP")
 			oldJoinLRPIPs := joinLRPIPs
 			joinLRPIPs = ovntest.MustParseIPNets("100.64.0.99/16")
+			gwConfig.gwLRPJoinIPs = joinLRPIPs
 			expectedOVNClusterRouter.StaticRoutes = []string{}
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
-				clusterIPSubnets,
-				hostSubnets,
-				l3GatewayConfig,
-				joinLRPIPs,
-				defLRPIPs,
-				extractExternalIPs(l3GatewayConfig),
+				gwConfig,
 				true,
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1054,19 +1107,23 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NextHops:       ovntest.MustParseIPs("fd99::1"),
 				NodePortEnable: true,
 			}
+			gwConfig := &GatewayConfig{
+				annoConfig:                 l3GatewayConfig,
+				hostSubnets:                hostSubnets,
+				clusterSubnets:             clusterIPSubnets,
+				gwLRPJoinIPs:               joinLRPIPs,
+				hostAddrs:                  nil,
+				externalIPs:                extractExternalIPs(l3GatewayConfig),
+				ovnClusterLRPToJoinIfAddrs: defLRPIPs,
+			}
 
 			var err error
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
-				clusterIPSubnets,
-				hostSubnets,
-				l3GatewayConfig,
-				joinLRPIPs,
-				defLRPIPs,
-				extractExternalIPs(l3GatewayConfig),
+				gwConfig,
 				true,
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1134,6 +1191,15 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				IPAddresses:    ovntest.MustParseIPNets("fd99::2/64"),
 				NodePortEnable: true,
 			}
+			gwConfig := &GatewayConfig{
+				annoConfig:                 l3GatewayConfig,
+				hostSubnets:                hostSubnets,
+				clusterSubnets:             clusterIPSubnets,
+				gwLRPJoinIPs:               joinLRPIPs,
+				hostAddrs:                  nil,
+				externalIPs:                extractExternalIPs(l3GatewayConfig),
+				ovnClusterLRPToJoinIfAddrs: defLRPIPs,
+			}
 
 			var err error
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
@@ -1142,14 +1208,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			config.IPv4Mode = false
 			config.IPv6Mode = true
 
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
-				clusterIPSubnets,
-				hostSubnets,
-				l3GatewayConfig,
-				joinLRPIPs,
-				defLRPIPs,
-				extractExternalIPs(l3GatewayConfig),
+				gwConfig,
 				true,
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1221,19 +1282,23 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NextHops:       ovntest.MustParseIPs("169.255.33.1", "fd99::1"),
 				NodePortEnable: true,
 			}
+			gwConfig := &GatewayConfig{
+				annoConfig:                 l3GatewayConfig,
+				hostSubnets:                hostSubnets,
+				clusterSubnets:             clusterIPSubnets,
+				gwLRPJoinIPs:               joinLRPIPs,
+				hostAddrs:                  nil,
+				externalIPs:                extractExternalIPs(l3GatewayConfig),
+				ovnClusterLRPToJoinIfAddrs: defLRPIPs,
+			}
 
 			var err error
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
-				clusterIPSubnets,
-				hostSubnets,
-				l3GatewayConfig,
-				joinLRPIPs,
-				defLRPIPs,
-				extractExternalIPs(l3GatewayConfig),
+				gwConfig,
 				true,
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1302,20 +1367,24 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NextHops:       ovntest.MustParseIPs("169.255.33.1"),
 				NodePortEnable: true,
 			}
+			gwConfig := &GatewayConfig{
+				annoConfig:                 l3GatewayConfig,
+				hostSubnets:                hostSubnets,
+				clusterSubnets:             clusterIPSubnets,
+				gwLRPJoinIPs:               joinLRPIPs,
+				hostAddrs:                  nil,
+				externalIPs:                extractExternalIPs(l3GatewayConfig),
+				ovnClusterLRPToJoinIfAddrs: defLRPIPs,
+			}
 			config.Gateway.DisableSNATMultipleGWs = true
 
 			var err error
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
-				clusterIPSubnets,
-				hostSubnets,
-				l3GatewayConfig,
-				joinLRPIPs,
-				defLRPIPs,
-				extractExternalIPs(l3GatewayConfig),
+				gwConfig,
 				true,
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1416,20 +1485,24 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NextHops:       ovntest.MustParseIPs("169.255.33.1"),
 				NodePortEnable: true,
 			}
+			gwConfig := &GatewayConfig{
+				annoConfig:                 l3GatewayConfig,
+				hostSubnets:                hostSubnets,
+				clusterSubnets:             clusterIPSubnets,
+				gwLRPJoinIPs:               joinLRPIPs,
+				hostAddrs:                  nil,
+				externalIPs:                extractExternalIPs(l3GatewayConfig),
+				ovnClusterLRPToJoinIfAddrs: defLRPIPs,
+			}
 			config.Gateway.DisableSNATMultipleGWs = true
 
 			var err error
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
-				clusterIPSubnets,
-				hostSubnets,
-				l3GatewayConfig,
-				joinLRPIPs,
-				defLRPIPs,
-				extractExternalIPs(l3GatewayConfig),
+				gwConfig,
 				true,
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1565,6 +1638,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		ginkgo.BeforeEach(func() {
 			config.Gateway.Mode = config.GatewayModeLocal
 			config.IPv6Mode = false
+			config.Gateway.EphemeralPortRange = config.DefaultEphemeralPortRange
 		})
 
 		ginkgo.It("creates a dual-stack gateway in OVN", func() {
@@ -1643,19 +1717,23 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NextHops:       ovntest.MustParseIPs("169.255.33.1", "fd99::1"),
 				NodePortEnable: true,
 			}
+			gwConfig := &GatewayConfig{
+				annoConfig:                 l3GatewayConfig,
+				hostSubnets:                hostSubnets,
+				clusterSubnets:             clusterIPSubnets,
+				gwLRPJoinIPs:               joinLRPIPs,
+				hostAddrs:                  nil,
+				externalIPs:                extractExternalIPs(l3GatewayConfig),
+				ovnClusterLRPToJoinIfAddrs: defLRPIPs,
+			}
 
 			var err error
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
-				clusterIPSubnets,
-				hostSubnets,
-				l3GatewayConfig,
-				joinLRPIPs,
-				defLRPIPs,
-				extractExternalIPs(l3GatewayConfig),
+				gwConfig,
 				true,
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1733,20 +1811,24 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NextHops:       ovntest.MustParseIPs("169.255.33.1"),
 				NodePortEnable: true,
 			}
+			gwConfig := &GatewayConfig{
+				annoConfig:                 l3GatewayConfig,
+				hostSubnets:                hostSubnets,
+				clusterSubnets:             clusterIPSubnets,
+				gwLRPJoinIPs:               joinLRPIPs,
+				hostAddrs:                  nil,
+				externalIPs:                extractExternalIPs(l3GatewayConfig),
+				ovnClusterLRPToJoinIfAddrs: defLRPIPs,
+			}
 			config.Gateway.DisableSNATMultipleGWs = true
 
 			var err error
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
-				clusterIPSubnets,
-				hostSubnets,
-				l3GatewayConfig,
-				joinLRPIPs,
-				defLRPIPs,
-				extractExternalIPs(l3GatewayConfig),
+				gwConfig,
 				true,
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1814,7 +1896,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					&nbdb.LogicalRouterPort{
 						UUID:    types.GWRouterToExtSwitchPrefix + types.GWRouterPrefix + nodeName + "-UUID",
 						Name:    types.GWRouterToExtSwitchPrefix + types.GWRouterPrefix + nodeName,
-						Options: map[string]string{"gateway_mtu": "1400"},
+						Options: map[string]string{libovsdbops.GatewayMTU: "1400"},
 					},
 					expectedGR,
 					expectedOVNClusterRouter,
@@ -1848,6 +1930,15 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NextHops:       ovntest.MustParseIPs("169.255.33.1"),
 				NodePortEnable: true,
 			}
+			gwConfig := &GatewayConfig{
+				annoConfig:                 l3GatewayConfig,
+				hostSubnets:                hostSubnets,
+				clusterSubnets:             clusterIPSubnets,
+				gwLRPJoinIPs:               joinLRPIPs,
+				hostAddrs:                  nil,
+				externalIPs:                extractExternalIPs(l3GatewayConfig),
+				ovnClusterLRPToJoinIfAddrs: defLRPIPs,
+			}
 			config.Gateway.DisableSNATMultipleGWs = true
 
 			var err error
@@ -1855,14 +1946,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			expectedOVNClusterRouter.StaticRoutes = []string{}
-			err = newGatewayManager(fakeOvn, nodeName).GatewayInit(
+			err = newGatewayManager(fakeOvn, nodeName).gatewayInit(
 				nodeName,
-				clusterIPSubnets,
-				hostSubnets,
-				l3GatewayConfig,
-				joinLRPIPs,
-				defLRPIPs,
-				extractExternalIPs(l3GatewayConfig),
+				gwConfig,
 				true,
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())

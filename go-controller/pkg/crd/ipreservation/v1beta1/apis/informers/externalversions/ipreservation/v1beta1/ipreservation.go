@@ -18,13 +18,13 @@ limitations under the License.
 package v1beta1
 
 import (
-	"context"
+	context "context"
 	time "time"
 
-	ipreservationv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
+	crdipreservationv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
 	versioned "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/clientset/versioned"
 	internalinterfaces "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/informers/externalversions/internalinterfaces"
-	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/listers/ipreservation/v1beta1"
+	ipreservationv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/listers/ipreservation/v1beta1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	watch "k8s.io/apimachinery/pkg/watch"
@@ -35,7 +35,7 @@ import (
 // IPReservations.
 type IPReservationInformer interface {
 	Informer() cache.SharedIndexInformer
-	Lister() v1beta1.IPReservationLister
+	Lister() ipreservationv1beta1.IPReservationLister
 }
 
 type iPReservationInformer struct {
@@ -70,7 +70,7 @@ func NewFilteredIPReservationInformer(client versioned.Interface, namespace stri
 				return client.K8sV1beta1().IPReservations(namespace).Watch(context.TODO(), options)
 			},
 		},
-		&ipreservationv1beta1.IPReservation{},
+		&crdipreservationv1beta1.IPReservation{},
 		resyncPeriod,
 		indexers,
 	)
@@ -81,9 +81,9 @@ func (f *iPReservationInformer) defaultInformer(client versioned.Interface, resy
 }
 
 func (f *iPReservationInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&ipreservationv1beta1.IPReservation{}, f.defaultInformer)
+	return f.factory.InformerFor(&crdipreservationv1beta1.IPReservation{}, f.defaultInformer)
 }
 
-func (f *iPReservationInformer) Lister() v1beta1.IPReservationLister {
-	return v1beta1.NewIPReservationLister(f.Informer().GetIndexer())
+func (f *iPReservationInformer) Lister() ipreservationv1beta1.IPReservationLister {
+	return ipreservationv1beta1.NewIPReservationLister(f.Informer().GetIndexer())
 }

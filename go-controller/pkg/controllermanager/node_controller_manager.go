@@ -13,6 +13,8 @@ import (
 	"k8s.io/klog/v2"
 	kexec "k8s.io/utils/exec"
 
+	"github.com/ovn-kubernetes/libovsdb/client"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -49,6 +51,8 @@ type NodeControllerManager struct {
 	routeManager *routemanager.Controller
 	// iprule manager that creates and manages iprules for all UDNs
 	ruleManager *iprulemanager.Controller
+	// ovs client that allows to read ovs info
+	ovsClient client.Client
 }
 
 // NewNetworkController create secondary node network controllers for the given NetInfo
@@ -106,22 +110,23 @@ func isNetworkManagerRequiredForNode() bool {
 
 // NewNodeControllerManager creates a new OVN controller manager to manage all the controller for all networks
 func NewNodeControllerManager(ovnClient *util.OVNClientset, wf factory.NodeWatchFactory, name, dpuName string,
-	wg *sync.WaitGroup, eventRecorder record.EventRecorder, routeManager *routemanager.Controller) (*NodeControllerManager, error) {
+	wg *sync.WaitGroup, eventRecorder record.EventRecorder, routeManager *routemanager.Controller, ovsClient client.Client) (*NodeControllerManager, error) {
 	ncm := &NodeControllerManager{
-		name:    name,
-		dpuName: dpuName,
-		ovnNodeClient: &util.OVNNodeClientset{
-			KubeClient:             ovnClient.KubeClient,
-			AdminPolicyRouteClient: ovnClient.AdminPolicyRouteClient,
-			NetworkProbeClient:     ovnClient.NetworkProbeClient,
-			PortMirrorClient:       ovnClient.PortMirrorClient,
-		},
+		name:         name,
+		dpuName:      dpuName,
 		Kube:         &kube.Kube{KClient: ovnClient.KubeClient},
 		watchFactory: wf,
 		stopChan:     make(chan struct{}),
 		wg:           wg,
 		recorder:     eventRecorder,
 		routeManager: routeManager,
+		ovsClient:    ovsClient,
+		ovnNodeClient: &util.OVNNodeClientset{
+			KubeClient:             ovnClient.KubeClient,
+			AdminPolicyRouteClient: ovnClient.AdminPolicyRouteClient,
+			NetworkProbeClient:     ovnClient.NetworkProbeClient,
+			PortMirrorClient:       ovnClient.PortMirrorClient,
+		},
 	}
 
 	// need to configure OVS interfaces for Pods on secondary networks in the DPU mode
@@ -158,8 +163,8 @@ func (ncm *NodeControllerManager) getNodeHostType() error {
 }
 
 // initDefaultNodeNetworkController creates the controller for default network
-func (ncm *NodeControllerManager) initDefaultNodeNetworkController() error {
-	defaultNodeNetworkController, err := node.NewDefaultNodeNetworkController(ncm.newCommonNetworkControllerInfo(ncm.watchFactory), ncm.networkManager.Interface())
+func (ncm *NodeControllerManager) initDefaultNodeNetworkController(ctx context.Context) error {
+	defaultNodeNetworkController, err := node.NewDefaultNodeNetworkController(ncm.newCommonNetworkControllerInfo(ncm.watchFactory), ncm.networkManager.Interface(), ncm.ovsClient)
 	if err != nil {
 		return err
 	}
@@ -167,7 +172,8 @@ func (ncm *NodeControllerManager) initDefaultNodeNetworkController() error {
 	// otherwise we would initialize the interface with a nil implementation
 	// which is not the same as nil interface.
 	ncm.defaultNodeNetworkController = defaultNodeNetworkController
-	return nil
+
+	return ncm.defaultNodeNetworkController.Init(ctx) // partial gateway init + OpenFlow Manager
 }
 
 // Start the node network controller manager
@@ -226,13 +232,9 @@ func (ncm *NodeControllerManager) Start(ctx context.Context) (err error) {
 		ncm.routeManager.Run(ncm.stopChan, 2*time.Minute)
 	}()
 
-	err = ncm.initDefaultNodeNetworkController()
+	err = ncm.initDefaultNodeNetworkController(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to init default node network controller: %v", err)
-	}
-	err = ncm.defaultNodeNetworkController.PreStart(ctx) // partial gateway init + OpenFlow Manager
-	if err != nil {
-		return fmt.Errorf("failed to start default node network controller: %v", err)
 	}
 
 	if ncm.networkManager != nil {
@@ -297,7 +299,7 @@ func (ncm *NodeControllerManager) checkForStaleOVSRepresentorInterfaces() {
 		fmt.Sprintf("external_ids:ovn_kube_mode=%s", config.OvnKubeNode.Mode)}
 	ovsIntefaceToExternalIDMap, err := util.GetOVSInterfaceToExternalIDMapFiltered(ovsArgs)
 	if err != nil {
-		klog.Errorf(err.Error())
+		klog.Error(err.Error())
 		return
 	}
 

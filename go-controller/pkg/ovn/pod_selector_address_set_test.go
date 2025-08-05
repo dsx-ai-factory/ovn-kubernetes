@@ -261,7 +261,7 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 		peerASKey, _, _, err := fakeOvn.controller.EnsurePodSelectorAddressSet(knet.PolicyTypeIngress,
 			peer.PodSelector, peer.NamespaceSelector, networkPolicy.Namespace, getPolicyKeyWithKind(networkPolicy))
 		// error should happen on address set add
-		gomega.Expect(err.Error()).To(gomega.ContainSubstring(addressset.FakeASFError))
+		gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring(addressset.ErrFakeASF.Error())))
 		// address set should not be created
 		peerASIDs := getPodSelectorAddrSetDbIDs(peerASKey, DefaultNetworkControllerName)
 		fakeOvn.asf.EventuallyExpectNoAddressSet(peerASIDs)
@@ -292,7 +292,7 @@ var _ = ginkgo.Describe("OVN PodSelectorAddressSet", func() {
 		peerASKey, _, _, err := fakeOvn.controller.EnsurePodSelectorAddressSet(knet.PolicyTypeIngress,
 			peer.PodSelector, peer.NamespaceSelector, networkPolicy.Namespace, getPolicyKeyWithKind(networkPolicy))
 		// error should happen on address set add
-		gomega.Expect(err.Error()).To(gomega.ContainSubstring(addressset.FakeASFError))
+		gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring(addressset.ErrFakeASF.Error())))
 		// address set should not be created
 		peerASIDs := getPodSelectorAddrSetDbIDs(peerASKey, DefaultNetworkControllerName)
 		fakeOvn.asf.EventuallyExpectNoAddressSet(peerASIDs)

@@ -18,10 +18,10 @@ limitations under the License.
 package v1beta1
 
 import (
-	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/client-go/listers"
-	"k8s.io/client-go/tools/cache"
+	portmirrorv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
+	labels "k8s.io/apimachinery/pkg/labels"
+	listers "k8s.io/client-go/listers"
+	cache "k8s.io/client-go/tools/cache"
 )
 
 // PortMirrorLister helps list PortMirrors.
@@ -29,7 +29,7 @@ import (
 type PortMirrorLister interface {
 	// List lists all PortMirrors in the indexer.
 	// Objects returned here must be treated as read-only.
-	List(selector labels.Selector) (ret []*v1beta1.PortMirror, err error)
+	List(selector labels.Selector) (ret []*portmirrorv1beta1.PortMirror, err error)
 	// PortMirrors returns an object that can list and get PortMirrors.
 	PortMirrors(namespace string) PortMirrorNamespaceLister
 	PortMirrorListerExpansion
@@ -37,17 +37,17 @@ type PortMirrorLister interface {
 
 // portMirrorLister implements the PortMirrorLister interface.
 type portMirrorLister struct {
-	listers.ResourceIndexer[*v1beta1.PortMirror]
+	listers.ResourceIndexer[*portmirrorv1beta1.PortMirror]
 }
 
 // NewPortMirrorLister returns a new PortMirrorLister.
 func NewPortMirrorLister(indexer cache.Indexer) PortMirrorLister {
-	return &portMirrorLister{listers.New[*v1beta1.PortMirror](indexer, v1beta1.Resource("portmirror"))}
+	return &portMirrorLister{listers.New[*portmirrorv1beta1.PortMirror](indexer, portmirrorv1beta1.Resource("portmirror"))}
 }
 
 // PortMirrors returns an object that can list and get PortMirrors.
 func (s *portMirrorLister) PortMirrors(namespace string) PortMirrorNamespaceLister {
-	return portMirrorNamespaceLister{listers.NewNamespaced[*v1beta1.PortMirror](s.ResourceIndexer, namespace)}
+	return portMirrorNamespaceLister{listers.NewNamespaced[*portmirrorv1beta1.PortMirror](s.ResourceIndexer, namespace)}
 }
 
 // PortMirrorNamespaceLister helps list and get PortMirrors.
@@ -55,15 +55,15 @@ func (s *portMirrorLister) PortMirrors(namespace string) PortMirrorNamespaceList
 type PortMirrorNamespaceLister interface {
 	// List lists all PortMirrors in the indexer for a given namespace.
 	// Objects returned here must be treated as read-only.
-	List(selector labels.Selector) (ret []*v1beta1.PortMirror, err error)
+	List(selector labels.Selector) (ret []*portmirrorv1beta1.PortMirror, err error)
 	// Get retrieves the PortMirror from the indexer for a given namespace and name.
 	// Objects returned here must be treated as read-only.
-	Get(name string) (*v1beta1.PortMirror, error)
+	Get(name string) (*portmirrorv1beta1.PortMirror, error)
 	PortMirrorNamespaceListerExpansion
 }
 
 // portMirrorNamespaceLister implements the PortMirrorNamespaceLister
 // interface.
 type portMirrorNamespaceLister struct {
-	listers.ResourceIndexer[*v1beta1.PortMirror]
+	listers.ResourceIndexer[*portmirrorv1beta1.PortMirror]
 }

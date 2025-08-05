@@ -12,7 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 
-	"github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -26,6 +26,7 @@ import (
 	ipreserv "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/ipreservation"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/routeimport"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/topology"
 	zoneic "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
@@ -107,7 +108,6 @@ func (h *secondaryLayer3NetworkControllerEventHandler) AddResource(obj interface
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *kapi.Node", obj)
 		}
-
 		if h.oc.isLocalZoneNode(node) {
 			var nodeParams *nodeSyncs
 			if fromRetryLoop {
@@ -187,7 +187,8 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 					hostCIDRsChanged(oldNode, newNode) ||
 					nodeGatewayMTUSupportChanged(oldNode, newNode)
 				_, failed = h.oc.syncEIPNodeRerouteFailed.Load(newNode.Name)
-				syncReroute := failed || util.NodeHostCIDRsAnnotationChanged(oldNode, newNode)
+				syncReroute := failed || util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) ||
+					joinCIDRChanged(oldNode, newNode, h.oc.GetNetworkName())
 				nodeSyncsParam = &nodeSyncs{
 					syncNode:              nodeSync,
 					syncClusterRouterPort: clusterRtrSync,
@@ -327,6 +328,7 @@ func NewSecondaryLayer3NetworkController(
 	cnci *CommonNetworkControllerInfo,
 	netInfo util.NetInfo,
 	networkManager networkmanager.Interface,
+	routeImportManager routeimport.Manager,
 	eIPController *EgressIPController,
 	portCache *PortCache,
 ) (*SecondaryLayer3NetworkController, error) {
@@ -355,6 +357,7 @@ func NewSecondaryLayer3NetworkController(
 				localZoneNodes:              &sync.Map{},
 				cancelableCtx:               util.NewCancelableContext(),
 				networkManager:              networkManager,
+				routeImportManager:          routeImportManager,
 			},
 		},
 		mgmtPortFailed:              sync.Map{},
@@ -451,11 +454,7 @@ func (oc *SecondaryLayer3NetworkController) newRetryFramework(
 // Start starts the secondary layer3 controller, handles all events and creates all needed logical entities
 func (oc *SecondaryLayer3NetworkController) Start(_ context.Context) error {
 	klog.Infof("Start secondary %s network controller of network %s", oc.TopologyType(), oc.GetNetworkName())
-	err := oc.syncOVNLogicalEntities()
-	if err != nil {
-		return err
-	}
-	if err = oc.init(); err != nil {
+	if err := oc.init(); err != nil {
 		return err
 	}
 	return oc.run()
@@ -482,6 +481,9 @@ func (oc *SecondaryLayer3NetworkController) Stop() {
 	}
 	if oc.namespaceHandler != nil {
 		oc.watchFactory.RemoveNamespaceHandler(oc.namespaceHandler)
+	}
+	if oc.routeImportManager != nil {
+		oc.routeImportManager.ForgetNetwork(oc.GetNetworkName())
 	}
 }
 
@@ -634,6 +636,14 @@ func (oc *SecondaryLayer3NetworkController) run() error {
 		}
 	}
 
+	// Add ourselves to the route import manager
+	if oc.routeImportManager != nil {
+		err := oc.routeImportManager.AddNetwork(oc.GetNetInfo())
+		if err != nil {
+			return fmt.Errorf("failed to add network %s to the route import manager: %v", oc.GetNetworkName(), err)
+		}
+	}
+
 	// start NetworkQoS controller if feature is enabled
 	if config.OVNKubernetesFeature.EnableNetworkQoS {
 		err := oc.newNetworkQoSController()
@@ -708,7 +718,7 @@ func (oc *SecondaryLayer3NetworkController) init() error {
 		}
 	}
 
-	// FIXME: When https://github.com/ovn-org/libovsdb/issues/235 is fixed,
+	// FIXME: When https://github.com/ovn-kubernetes/libovsdb/issues/235 is fixed,
 	// use IsTableSupported(nbdb.LoadBalancerGroup).
 	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "Load_Balancer_Group"); err != nil {
 		klog.Warningf("Load Balancer Group support enabled, however version of OVN in use does not support Load Balancer Groups.")
@@ -728,7 +738,6 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *corev1
 	var hostSubnets []*net.IPNet
 	var errs []error
 	var err error
-
 	_, _ = oc.localZoneNodes.LoadOrStore(node.Name, true)
 
 	if noHostSubnet := util.NoHostSubnet(node); noHostSubnet {
@@ -739,7 +748,11 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *corev1
 		return nil
 	}
 
-	klog.V(6).Infof("Adding or Updating Node %q for network %s", node.Name, oc.GetNetworkName())
+	if !nodeNeedsSync(nSyncs) {
+		return nil
+	}
+
+	klog.Infof("Adding or Updating local node %q for network %q", node.Name, oc.GetNetworkName())
 	if nSyncs.syncNode {
 		if hostSubnets, err = oc.addNode(node); err != nil {
 			oc.addNodeFailed.Store(node.Name, true)
@@ -798,15 +811,9 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *corev1
 				errs = append(errs, fmt.Errorf("failed to generate node GW configuration: %v", err))
 				oc.gatewaysFailed.Store(node.Name, true)
 			} else {
-				if err := gwManager.syncNodeGateway(
+				if err := gwManager.SyncGateway(
 					node,
-					gwConfig.config,
-					gwConfig.hostSubnets,
-					gwConfig.hostAddrs,
-					gwConfig.clusterSubnets,
-					gwConfig.gwLRPJoinIPs,         // the joinIP allocated to this node for this controller's network
-					oc.ovnClusterLRPToJoinIfAddrs, // the .1 of this controller's global joinSubnet
-					gwConfig.externalIPs,
+					gwConfig,
 				); err != nil {
 					errs = append(errs, fmt.Errorf(
 						"failed to sync node GW for network %q: %v",
@@ -841,7 +848,7 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *corev1
 
 	if config.OVNKubernetesFeature.EnableEgressIP && util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() && nSyncs.syncReroute {
 		rerouteFailed := false
-		if err = oc.eIPController.ensureRouterPoliciesForNetwork(oc.GetNetInfo()); err != nil {
+		if err = oc.eIPController.ensureRouterPoliciesForNetwork(oc.GetNetInfo(), node); err != nil {
 			errs = append(errs, fmt.Errorf("failed to ensure EgressIP router polices for network %s: %v", oc.GetNetworkName(), err))
 			rerouteFailed = true
 		}
@@ -954,8 +961,16 @@ func (oc *SecondaryLayer3NetworkController) addNode(node *corev1.Node) ([]*net.I
 			if err := oc.addUDNNodeSubnetEgressSNAT(hostSubnets, node); err != nil {
 				return nil, err
 			}
+			if util.IsRouteAdvertisementsEnabled() {
+				if err := oc.deleteAdvertisedNetworkIsolation(node.Name); err != nil {
+					return nil, err
+				}
+			}
 		} else {
 			if err := oc.deleteUDNNodeSubnetEgressSNAT(hostSubnets, node); err != nil {
+				return nil, err
+			}
+			if err := oc.addAdvertisedNetworkIsolation(node.Name); err != nil {
 				return nil, err
 			}
 		}
@@ -1062,16 +1077,7 @@ func (oc *SecondaryLayer3NetworkController) gatherJoinSwitchIPs() error {
 	return nil
 }
 
-type SecondaryL3GatewayConfig struct {
-	config         *util.L3GatewayConfig
-	hostSubnets    []*net.IPNet
-	clusterSubnets []*net.IPNet
-	gwLRPJoinIPs   []*net.IPNet
-	hostAddrs      []string
-	externalIPs    []net.IP
-}
-
-func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *corev1.Node) (*SecondaryL3GatewayConfig, error) {
+func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *corev1.Node) (*GatewayConfig, error) {
 	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get node %s network %s L3 gateway config: %v", node.Name, oc.GetNetworkName(), err)
@@ -1121,13 +1127,14 @@ func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *corev1.Node)
 	// Overwrite the primary interface ID with the correct, per-network one.
 	l3GatewayConfig.InterfaceID = oc.GetNetworkScopedExtPortName(l3GatewayConfig.BridgeID, node.Name)
 
-	return &SecondaryL3GatewayConfig{
-		config:         l3GatewayConfig,
-		hostSubnets:    hostSubnets,
-		clusterSubnets: clusterSubnets,
-		gwLRPJoinIPs:   gwLRPJoinIPs,
-		hostAddrs:      hostAddrs,
-		externalIPs:    externalIPs,
+	return &GatewayConfig{
+		annoConfig:                 l3GatewayConfig,
+		hostSubnets:                hostSubnets,
+		clusterSubnets:             clusterSubnets,
+		gwLRPJoinIPs:               gwLRPJoinIPs,
+		hostAddrs:                  hostAddrs,
+		externalIPs:                externalIPs,
+		ovnClusterLRPToJoinIfAddrs: oc.ovnClusterLRPToJoinIfAddrs,
 	}, nil
 }
 

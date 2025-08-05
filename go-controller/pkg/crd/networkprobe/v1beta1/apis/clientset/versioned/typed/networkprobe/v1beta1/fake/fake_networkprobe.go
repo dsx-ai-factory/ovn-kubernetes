@@ -18,179 +18,35 @@ limitations under the License.
 package fake
 
 import (
-	"context"
-	json "encoding/json"
-	"fmt"
-
 	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1"
 	networkprobev1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1/apis/applyconfiguration/networkprobe/v1beta1"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	labels "k8s.io/apimachinery/pkg/labels"
-	types "k8s.io/apimachinery/pkg/types"
-	watch "k8s.io/apimachinery/pkg/watch"
-	testing "k8s.io/client-go/testing"
+	typednetworkprobev1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1/apis/clientset/versioned/typed/networkprobe/v1beta1"
+	gentype "k8s.io/client-go/gentype"
 )
 
-// FakeNetworkProbes implements NetworkProbeInterface
-type FakeNetworkProbes struct {
+// fakeNetworkProbes implements NetworkProbeInterface
+type fakeNetworkProbes struct {
+	*gentype.FakeClientWithListAndApply[*v1beta1.NetworkProbe, *v1beta1.NetworkProbeList, *networkprobev1beta1.NetworkProbeApplyConfiguration]
 	Fake *FakeK8sV1beta1
-	ns   string
 }
 
-var networkprobesResource = v1beta1.SchemeGroupVersion.WithResource("networkprobes")
-
-var networkprobesKind = v1beta1.SchemeGroupVersion.WithKind("NetworkProbe")
-
-// Get takes name of the networkProbe, and returns the corresponding networkProbe object, and an error if there is any.
-func (c *FakeNetworkProbes) Get(ctx context.Context, name string, options v1.GetOptions) (result *v1beta1.NetworkProbe, err error) {
-	emptyResult := &v1beta1.NetworkProbe{}
-	obj, err := c.Fake.
-		Invokes(testing.NewGetActionWithOptions(networkprobesResource, c.ns, name, options), emptyResult)
-
-	if obj == nil {
-		return emptyResult, err
+func newFakeNetworkProbes(fake *FakeK8sV1beta1, namespace string) typednetworkprobev1beta1.NetworkProbeInterface {
+	return &fakeNetworkProbes{
+		gentype.NewFakeClientWithListAndApply[*v1beta1.NetworkProbe, *v1beta1.NetworkProbeList, *networkprobev1beta1.NetworkProbeApplyConfiguration](
+			fake.Fake,
+			namespace,
+			v1beta1.SchemeGroupVersion.WithResource("networkprobes"),
+			v1beta1.SchemeGroupVersion.WithKind("NetworkProbe"),
+			func() *v1beta1.NetworkProbe { return &v1beta1.NetworkProbe{} },
+			func() *v1beta1.NetworkProbeList { return &v1beta1.NetworkProbeList{} },
+			func(dst, src *v1beta1.NetworkProbeList) { dst.ListMeta = src.ListMeta },
+			func(list *v1beta1.NetworkProbeList) []*v1beta1.NetworkProbe {
+				return gentype.ToPointerSlice(list.Items)
+			},
+			func(list *v1beta1.NetworkProbeList, items []*v1beta1.NetworkProbe) {
+				list.Items = gentype.FromPointerSlice(items)
+			},
+		),
+		fake,
 	}
-	return obj.(*v1beta1.NetworkProbe), err
-}
-
-// List takes label and field selectors, and returns the list of NetworkProbes that match those selectors.
-func (c *FakeNetworkProbes) List(ctx context.Context, opts v1.ListOptions) (result *v1beta1.NetworkProbeList, err error) {
-	emptyResult := &v1beta1.NetworkProbeList{}
-	obj, err := c.Fake.
-		Invokes(testing.NewListActionWithOptions(networkprobesResource, networkprobesKind, c.ns, opts), emptyResult)
-
-	if obj == nil {
-		return emptyResult, err
-	}
-
-	label, _, _ := testing.ExtractFromListOptions(opts)
-	if label == nil {
-		label = labels.Everything()
-	}
-	list := &v1beta1.NetworkProbeList{ListMeta: obj.(*v1beta1.NetworkProbeList).ListMeta}
-	for _, item := range obj.(*v1beta1.NetworkProbeList).Items {
-		if label.Matches(labels.Set(item.Labels)) {
-			list.Items = append(list.Items, item)
-		}
-	}
-	return list, err
-}
-
-// Watch returns a watch.Interface that watches the requested networkProbes.
-func (c *FakeNetworkProbes) Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-	return c.Fake.
-		InvokesWatch(testing.NewWatchActionWithOptions(networkprobesResource, c.ns, opts))
-
-}
-
-// Create takes the representation of a networkProbe and creates it.  Returns the server's representation of the networkProbe, and an error, if there is any.
-func (c *FakeNetworkProbes) Create(ctx context.Context, networkProbe *v1beta1.NetworkProbe, opts v1.CreateOptions) (result *v1beta1.NetworkProbe, err error) {
-	emptyResult := &v1beta1.NetworkProbe{}
-	obj, err := c.Fake.
-		Invokes(testing.NewCreateActionWithOptions(networkprobesResource, c.ns, networkProbe, opts), emptyResult)
-
-	if obj == nil {
-		return emptyResult, err
-	}
-	return obj.(*v1beta1.NetworkProbe), err
-}
-
-// Update takes the representation of a networkProbe and updates it. Returns the server's representation of the networkProbe, and an error, if there is any.
-func (c *FakeNetworkProbes) Update(ctx context.Context, networkProbe *v1beta1.NetworkProbe, opts v1.UpdateOptions) (result *v1beta1.NetworkProbe, err error) {
-	emptyResult := &v1beta1.NetworkProbe{}
-	obj, err := c.Fake.
-		Invokes(testing.NewUpdateActionWithOptions(networkprobesResource, c.ns, networkProbe, opts), emptyResult)
-
-	if obj == nil {
-		return emptyResult, err
-	}
-	return obj.(*v1beta1.NetworkProbe), err
-}
-
-// UpdateStatus was generated because the type contains a Status member.
-// Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
-func (c *FakeNetworkProbes) UpdateStatus(ctx context.Context, networkProbe *v1beta1.NetworkProbe, opts v1.UpdateOptions) (result *v1beta1.NetworkProbe, err error) {
-	emptyResult := &v1beta1.NetworkProbe{}
-	obj, err := c.Fake.
-		Invokes(testing.NewUpdateSubresourceActionWithOptions(networkprobesResource, "status", c.ns, networkProbe, opts), emptyResult)
-
-	if obj == nil {
-		return emptyResult, err
-	}
-	return obj.(*v1beta1.NetworkProbe), err
-}
-
-// Delete takes name of the networkProbe and deletes it. Returns an error if one occurs.
-func (c *FakeNetworkProbes) Delete(ctx context.Context, name string, opts v1.DeleteOptions) error {
-	_, err := c.Fake.
-		Invokes(testing.NewDeleteActionWithOptions(networkprobesResource, c.ns, name, opts), &v1beta1.NetworkProbe{})
-
-	return err
-}
-
-// DeleteCollection deletes a collection of objects.
-func (c *FakeNetworkProbes) DeleteCollection(ctx context.Context, opts v1.DeleteOptions, listOpts v1.ListOptions) error {
-	action := testing.NewDeleteCollectionActionWithOptions(networkprobesResource, c.ns, opts, listOpts)
-
-	_, err := c.Fake.Invokes(action, &v1beta1.NetworkProbeList{})
-	return err
-}
-
-// Patch applies the patch and returns the patched networkProbe.
-func (c *FakeNetworkProbes) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *v1beta1.NetworkProbe, err error) {
-	emptyResult := &v1beta1.NetworkProbe{}
-	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceActionWithOptions(networkprobesResource, c.ns, name, pt, data, opts, subresources...), emptyResult)
-
-	if obj == nil {
-		return emptyResult, err
-	}
-	return obj.(*v1beta1.NetworkProbe), err
-}
-
-// Apply takes the given apply declarative configuration, applies it and returns the applied networkProbe.
-func (c *FakeNetworkProbes) Apply(ctx context.Context, networkProbe *networkprobev1beta1.NetworkProbeApplyConfiguration, opts v1.ApplyOptions) (result *v1beta1.NetworkProbe, err error) {
-	if networkProbe == nil {
-		return nil, fmt.Errorf("networkProbe provided to Apply must not be nil")
-	}
-	data, err := json.Marshal(networkProbe)
-	if err != nil {
-		return nil, err
-	}
-	name := networkProbe.Name
-	if name == nil {
-		return nil, fmt.Errorf("networkProbe.Name must be provided to Apply")
-	}
-	emptyResult := &v1beta1.NetworkProbe{}
-	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceActionWithOptions(networkprobesResource, c.ns, *name, types.ApplyPatchType, data, opts.ToPatchOptions()), emptyResult)
-
-	if obj == nil {
-		return emptyResult, err
-	}
-	return obj.(*v1beta1.NetworkProbe), err
-}
-
-// ApplyStatus was generated because the type contains a Status member.
-// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
-func (c *FakeNetworkProbes) ApplyStatus(ctx context.Context, networkProbe *networkprobev1beta1.NetworkProbeApplyConfiguration, opts v1.ApplyOptions) (result *v1beta1.NetworkProbe, err error) {
-	if networkProbe == nil {
-		return nil, fmt.Errorf("networkProbe provided to Apply must not be nil")
-	}
-	data, err := json.Marshal(networkProbe)
-	if err != nil {
-		return nil, err
-	}
-	name := networkProbe.Name
-	if name == nil {
-		return nil, fmt.Errorf("networkProbe.Name must be provided to Apply")
-	}
-	emptyResult := &v1beta1.NetworkProbe{}
-	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceActionWithOptions(networkprobesResource, c.ns, *name, types.ApplyPatchType, data, opts.ToPatchOptions(), "status"), emptyResult)
-
-	if obj == nil {
-		return emptyResult, err
-	}
-	return obj.(*v1beta1.NetworkProbe), err
 }

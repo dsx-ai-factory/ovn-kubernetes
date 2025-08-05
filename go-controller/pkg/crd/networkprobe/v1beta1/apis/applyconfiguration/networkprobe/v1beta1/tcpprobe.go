@@ -18,7 +18,7 @@ limitations under the License.
 package v1beta1
 
 import (
-	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1"
+	networkprobev1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1"
 )
 
 // TCPProbeApplyConfiguration represents a declarative configuration of the TCPProbe type for use
@@ -26,7 +26,7 @@ import (
 type TCPProbeApplyConfiguration struct {
 	Host       *string                       `json:"host,omitempty"`
 	Port       *int32                        `json:"port,omitempty"`
-	Interval   *v1beta1.Duration             `json:"interval,omitempty"`
+	Interval   *networkprobev1beta1.Duration `json:"interval,omitempty"`
 	PacketSpec *PacketSpecApplyConfiguration `json:"packetSpec,omitempty"`
 }
 
@@ -55,7 +55,7 @@ func (b *TCPProbeApplyConfiguration) WithPort(value int32) *TCPProbeApplyConfigu
 // WithInterval sets the Interval field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the Interval field is set to the value of the last call.
-func (b *TCPProbeApplyConfiguration) WithInterval(value v1beta1.Duration) *TCPProbeApplyConfiguration {
+func (b *TCPProbeApplyConfiguration) WithInterval(value networkprobev1beta1.Duration) *TCPProbeApplyConfiguration {
 	b.Interval = &value
 	return b
 }

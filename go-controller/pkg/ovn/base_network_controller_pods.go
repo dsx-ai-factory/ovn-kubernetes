@@ -19,8 +19,8 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/libovsdb/ovsdb"
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	ipallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	subnetipallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
@@ -591,7 +591,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *corev1.Pod, nadNa
 	// rescheduled.
 
 	if !config.Kubernetes.DisableRequestedChassis {
-		lsp.Options["requested-chassis"] = pod.Spec.NodeName
+		lsp.Options[libovsdbops.RequestedChassis] = pod.Spec.NodeName
 	}
 
 	// let's calculate if this network controller's role for this pod
@@ -1073,7 +1073,13 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *corev1.Pod, skipIPA
 		return nil, false, fmt.Errorf("cannot retrieve subnet for assigning gateway routes for pod %s, switch: %s",
 			podDesc, switchName)
 	}
-	err = util.AddRoutesGatewayIP(bnc.GetNetInfo(), pod, podAnnotation, network)
+
+	node, err := bnc.watchFactory.GetNode(pod.Spec.NodeName)
+	if err != nil {
+		return nil, false, err
+	}
+
+	err = util.AddRoutesGatewayIP(bnc.GetNetInfo(), node, pod, podAnnotation, network)
 	if err != nil {
 		return nil, false, err
 	}
@@ -1137,9 +1143,14 @@ func (bnc *BaseNetworkController) allocatePodAnnotationForSecondaryNetwork(pod *
 	if bnc.doesNetworkRequireIPAM() && !skipIPAM {
 		ipAllocator = bnc.lsManager.ForSwitch(switchName)
 	}
-
+	node, err := bnc.watchFactory.GetNode(pod.Spec.NodeName)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to get pod %s/%s/%s node %q: %w",
+			nadName, pod.Namespace, pod.Name, pod.Spec.NodeName, err)
+	}
 	updatedPod, podAnnotation, err := bnc.podAnnotationAllocator.AllocatePodAnnotation(
 		ipAllocator,
+		node,
 		pod,
 		network,
 		reallocate,
@@ -1148,6 +1159,9 @@ func (bnc *BaseNetworkController) allocatePodAnnotationForSecondaryNetwork(pod *
 	)
 
 	if err != nil {
+		if errors.Is(err, ipallocator.ErrFull) {
+			bnc.recordPodErrorEvent(pod, err)
+		}
 		return nil, false, err
 	}
 

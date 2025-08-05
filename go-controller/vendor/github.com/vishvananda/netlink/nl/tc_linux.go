@@ -105,6 +105,7 @@ const (
 	SizeofTcNetemCorr    = 0x0c
 	SizeofTcNetemReorder = 0x08
 	SizeofTcNetemCorrupt = 0x08
+	SizeOfTcNetemRate    = 0x10
 	SizeofTcTbfQopt      = 2*SizeofTcRateSpec + 0x0c
 	SizeofTcHtbCopt      = 2*SizeofTcRateSpec + 0x14
 	SizeofTcHtbGlob      = 0x14
@@ -114,6 +115,7 @@ const (
 	SizeofTcConnmark     = SizeofTcGen + 0x04
 	SizeofTcCsum         = SizeofTcGen + 0x04
 	SizeofTcMirred       = SizeofTcGen + 0x08
+	SizeofTcVlan         = SizeofTcGen + 0x04
 	SizeofTcTunnelKey    = SizeofTcGen + 0x04
 	SizeofTcSkbEdit      = SizeofTcGen
 	SizeofTcPolice       = 2*SizeofTcRateSpec + 0x20
@@ -370,6 +372,26 @@ func DeserializeTcNetemCorrupt(b []byte) *TcNetemCorrupt {
 
 func (x *TcNetemCorrupt) Serialize() []byte {
 	return (*(*[SizeofTcNetemCorrupt]byte)(unsafe.Pointer(x)))[:]
+}
+
+// TcNetemRate is a struct that represents the rate of a netem qdisc
+type TcNetemRate struct {
+	Rate           uint32
+	PacketOverhead int32
+	CellSize       uint32
+	CellOverhead   int32
+}
+
+func (msg *TcNetemRate) Len() int {
+	return SizeofTcRateSpec
+}
+
+func DeserializeTcNetemRate(b []byte) *TcNetemRate {
+	return (*TcNetemRate)(unsafe.Pointer(&b[0:SizeofTcRateSpec][0]))
+}
+
+func (msg *TcNetemRate) Serialize() []byte {
+	return (*(*[SizeOfTcNetemRate]byte)(unsafe.Pointer(msg)))[:]
 }
 
 // struct tc_tbf_qopt {
@@ -796,6 +818,41 @@ func (x *TcMirred) Serialize() []byte {
 }
 
 const (
+	TCA_VLAN_UNSPEC = iota
+	TCA_VLAN_TM
+	TCA_VLAN_PARMS
+	TCA_VLAN_PUSH_VLAN_ID
+	TCA_VLAN_PUSH_VLAN_PROTOCOL
+	TCA_VLAN_PAD
+	TCA_VLAN_PUSH_VLAN_PRIORITY
+	TCA_VLAN_PUSH_ETH_DST
+	TCA_VLAN_PUSH_ETH_SRC
+	TCA_VLAN_MAX
+)
+
+//struct tc_vlan {
+//	tc_gen;
+//	int v_action;
+//};
+
+type TcVlan struct {
+	TcGen
+	Action int32
+}
+
+func (msg *TcVlan) Len() int {
+	return SizeofTcVlan
+}
+
+func DeserializeTcVlan(b []byte) *TcVlan {
+	return (*TcVlan)(unsafe.Pointer(&b[0:SizeofTcVlan][0]))
+}
+
+func (x *TcVlan) Serialize() []byte {
+	return (*(*[SizeofTcVlan]byte)(unsafe.Pointer(x)))[:]
+}
+
+const (
 	TCA_TUNNEL_KEY_UNSPEC = iota
 	TCA_TUNNEL_KEY_TM
 	TCA_TUNNEL_KEY_PARMS
@@ -1218,8 +1275,8 @@ const (
 )
 
 // /* TCA_PEDIT_KEY_EX_HDR_TYPE_NETWROK is a special case for legacy users. It
-//  * means no specific header type - offset is relative to the network layer
-//  */
+//   - means no specific header type - offset is relative to the network layer
+//     */
 type PeditHeaderType uint16
 
 const (

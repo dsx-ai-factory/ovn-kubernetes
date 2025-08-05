@@ -18,7 +18,7 @@ limitations under the License.
 package v1beta1
 
 import (
-	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1"
+	networkprobev1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1"
 	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
@@ -26,7 +26,7 @@ import (
 // with apply.
 type NetworkProbeSpecApplyConfiguration struct {
 	NodeSelector    *v1.LabelSelectorApplyConfiguration `json:"nodeSelector,omitempty"`
-	Interval        *v1beta1.Duration                   `json:"interval,omitempty"`
+	Interval        *networkprobev1beta1.Duration       `json:"interval,omitempty"`
 	Suspend         *bool                               `json:"suspend,omitempty"`
 	DNSProbes       []DNSProbeApplyConfiguration        `json:"dnsProbes,omitempty"`
 	HTTPProbes      []HTTPProbeApplyConfiguration       `json:"httpProbes,omitempty"`
@@ -51,7 +51,7 @@ func (b *NetworkProbeSpecApplyConfiguration) WithNodeSelector(value *v1.LabelSel
 // WithInterval sets the Interval field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the Interval field is set to the value of the last call.
-func (b *NetworkProbeSpecApplyConfiguration) WithInterval(value v1beta1.Duration) *NetworkProbeSpecApplyConfiguration {
+func (b *NetworkProbeSpecApplyConfiguration) WithInterval(value networkprobev1beta1.Duration) *NetworkProbeSpecApplyConfiguration {
 	b.Interval = &value
 	return b
 }

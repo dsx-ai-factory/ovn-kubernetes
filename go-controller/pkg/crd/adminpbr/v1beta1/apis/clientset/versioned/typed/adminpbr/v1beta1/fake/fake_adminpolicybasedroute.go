@@ -18,168 +18,35 @@ limitations under the License.
 package fake
 
 import (
-	"context"
-	json "encoding/json"
-	"fmt"
-
 	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
 	adminpbrv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/applyconfiguration/adminpbr/v1beta1"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	labels "k8s.io/apimachinery/pkg/labels"
-	types "k8s.io/apimachinery/pkg/types"
-	watch "k8s.io/apimachinery/pkg/watch"
-	testing "k8s.io/client-go/testing"
+	typedadminpbrv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/clientset/versioned/typed/adminpbr/v1beta1"
+	gentype "k8s.io/client-go/gentype"
 )
 
-// FakeAdminPolicyBasedRoutes implements AdminPolicyBasedRouteInterface
-type FakeAdminPolicyBasedRoutes struct {
+// fakeAdminPolicyBasedRoutes implements AdminPolicyBasedRouteInterface
+type fakeAdminPolicyBasedRoutes struct {
+	*gentype.FakeClientWithListAndApply[*v1beta1.AdminPolicyBasedRoute, *v1beta1.AdminPolicyBasedRouteList, *adminpbrv1beta1.AdminPolicyBasedRouteApplyConfiguration]
 	Fake *FakeK8sV1beta1
 }
 
-var adminpolicybasedroutesResource = v1beta1.SchemeGroupVersion.WithResource("adminpolicybasedroutes")
-
-var adminpolicybasedroutesKind = v1beta1.SchemeGroupVersion.WithKind("AdminPolicyBasedRoute")
-
-// Get takes name of the adminPolicyBasedRoute, and returns the corresponding adminPolicyBasedRoute object, and an error if there is any.
-func (c *FakeAdminPolicyBasedRoutes) Get(ctx context.Context, name string, options v1.GetOptions) (result *v1beta1.AdminPolicyBasedRoute, err error) {
-	emptyResult := &v1beta1.AdminPolicyBasedRoute{}
-	obj, err := c.Fake.
-		Invokes(testing.NewRootGetActionWithOptions(adminpolicybasedroutesResource, name, options), emptyResult)
-	if obj == nil {
-		return emptyResult, err
+func newFakeAdminPolicyBasedRoutes(fake *FakeK8sV1beta1) typedadminpbrv1beta1.AdminPolicyBasedRouteInterface {
+	return &fakeAdminPolicyBasedRoutes{
+		gentype.NewFakeClientWithListAndApply[*v1beta1.AdminPolicyBasedRoute, *v1beta1.AdminPolicyBasedRouteList, *adminpbrv1beta1.AdminPolicyBasedRouteApplyConfiguration](
+			fake.Fake,
+			"",
+			v1beta1.SchemeGroupVersion.WithResource("adminpolicybasedroutes"),
+			v1beta1.SchemeGroupVersion.WithKind("AdminPolicyBasedRoute"),
+			func() *v1beta1.AdminPolicyBasedRoute { return &v1beta1.AdminPolicyBasedRoute{} },
+			func() *v1beta1.AdminPolicyBasedRouteList { return &v1beta1.AdminPolicyBasedRouteList{} },
+			func(dst, src *v1beta1.AdminPolicyBasedRouteList) { dst.ListMeta = src.ListMeta },
+			func(list *v1beta1.AdminPolicyBasedRouteList) []*v1beta1.AdminPolicyBasedRoute {
+				return gentype.ToPointerSlice(list.Items)
+			},
+			func(list *v1beta1.AdminPolicyBasedRouteList, items []*v1beta1.AdminPolicyBasedRoute) {
+				list.Items = gentype.FromPointerSlice(items)
+			},
+		),
+		fake,
 	}
-	return obj.(*v1beta1.AdminPolicyBasedRoute), err
-}
-
-// List takes label and field selectors, and returns the list of AdminPolicyBasedRoutes that match those selectors.
-func (c *FakeAdminPolicyBasedRoutes) List(ctx context.Context, opts v1.ListOptions) (result *v1beta1.AdminPolicyBasedRouteList, err error) {
-	emptyResult := &v1beta1.AdminPolicyBasedRouteList{}
-	obj, err := c.Fake.
-		Invokes(testing.NewRootListActionWithOptions(adminpolicybasedroutesResource, adminpolicybasedroutesKind, opts), emptyResult)
-	if obj == nil {
-		return emptyResult, err
-	}
-
-	label, _, _ := testing.ExtractFromListOptions(opts)
-	if label == nil {
-		label = labels.Everything()
-	}
-	list := &v1beta1.AdminPolicyBasedRouteList{ListMeta: obj.(*v1beta1.AdminPolicyBasedRouteList).ListMeta}
-	for _, item := range obj.(*v1beta1.AdminPolicyBasedRouteList).Items {
-		if label.Matches(labels.Set(item.Labels)) {
-			list.Items = append(list.Items, item)
-		}
-	}
-	return list, err
-}
-
-// Watch returns a watch.Interface that watches the requested adminPolicyBasedRoutes.
-func (c *FakeAdminPolicyBasedRoutes) Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-	return c.Fake.
-		InvokesWatch(testing.NewRootWatchActionWithOptions(adminpolicybasedroutesResource, opts))
-}
-
-// Create takes the representation of a adminPolicyBasedRoute and creates it.  Returns the server's representation of the adminPolicyBasedRoute, and an error, if there is any.
-func (c *FakeAdminPolicyBasedRoutes) Create(ctx context.Context, adminPolicyBasedRoute *v1beta1.AdminPolicyBasedRoute, opts v1.CreateOptions) (result *v1beta1.AdminPolicyBasedRoute, err error) {
-	emptyResult := &v1beta1.AdminPolicyBasedRoute{}
-	obj, err := c.Fake.
-		Invokes(testing.NewRootCreateActionWithOptions(adminpolicybasedroutesResource, adminPolicyBasedRoute, opts), emptyResult)
-	if obj == nil {
-		return emptyResult, err
-	}
-	return obj.(*v1beta1.AdminPolicyBasedRoute), err
-}
-
-// Update takes the representation of a adminPolicyBasedRoute and updates it. Returns the server's representation of the adminPolicyBasedRoute, and an error, if there is any.
-func (c *FakeAdminPolicyBasedRoutes) Update(ctx context.Context, adminPolicyBasedRoute *v1beta1.AdminPolicyBasedRoute, opts v1.UpdateOptions) (result *v1beta1.AdminPolicyBasedRoute, err error) {
-	emptyResult := &v1beta1.AdminPolicyBasedRoute{}
-	obj, err := c.Fake.
-		Invokes(testing.NewRootUpdateActionWithOptions(adminpolicybasedroutesResource, adminPolicyBasedRoute, opts), emptyResult)
-	if obj == nil {
-		return emptyResult, err
-	}
-	return obj.(*v1beta1.AdminPolicyBasedRoute), err
-}
-
-// UpdateStatus was generated because the type contains a Status member.
-// Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
-func (c *FakeAdminPolicyBasedRoutes) UpdateStatus(ctx context.Context, adminPolicyBasedRoute *v1beta1.AdminPolicyBasedRoute, opts v1.UpdateOptions) (result *v1beta1.AdminPolicyBasedRoute, err error) {
-	emptyResult := &v1beta1.AdminPolicyBasedRoute{}
-	obj, err := c.Fake.
-		Invokes(testing.NewRootUpdateSubresourceActionWithOptions(adminpolicybasedroutesResource, "status", adminPolicyBasedRoute, opts), emptyResult)
-	if obj == nil {
-		return emptyResult, err
-	}
-	return obj.(*v1beta1.AdminPolicyBasedRoute), err
-}
-
-// Delete takes name of the adminPolicyBasedRoute and deletes it. Returns an error if one occurs.
-func (c *FakeAdminPolicyBasedRoutes) Delete(ctx context.Context, name string, opts v1.DeleteOptions) error {
-	_, err := c.Fake.
-		Invokes(testing.NewRootDeleteActionWithOptions(adminpolicybasedroutesResource, name, opts), &v1beta1.AdminPolicyBasedRoute{})
-	return err
-}
-
-// DeleteCollection deletes a collection of objects.
-func (c *FakeAdminPolicyBasedRoutes) DeleteCollection(ctx context.Context, opts v1.DeleteOptions, listOpts v1.ListOptions) error {
-	action := testing.NewRootDeleteCollectionActionWithOptions(adminpolicybasedroutesResource, opts, listOpts)
-
-	_, err := c.Fake.Invokes(action, &v1beta1.AdminPolicyBasedRouteList{})
-	return err
-}
-
-// Patch applies the patch and returns the patched adminPolicyBasedRoute.
-func (c *FakeAdminPolicyBasedRoutes) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *v1beta1.AdminPolicyBasedRoute, err error) {
-	emptyResult := &v1beta1.AdminPolicyBasedRoute{}
-	obj, err := c.Fake.
-		Invokes(testing.NewRootPatchSubresourceActionWithOptions(adminpolicybasedroutesResource, name, pt, data, opts, subresources...), emptyResult)
-	if obj == nil {
-		return emptyResult, err
-	}
-	return obj.(*v1beta1.AdminPolicyBasedRoute), err
-}
-
-// Apply takes the given apply declarative configuration, applies it and returns the applied adminPolicyBasedRoute.
-func (c *FakeAdminPolicyBasedRoutes) Apply(ctx context.Context, adminPolicyBasedRoute *adminpbrv1beta1.AdminPolicyBasedRouteApplyConfiguration, opts v1.ApplyOptions) (result *v1beta1.AdminPolicyBasedRoute, err error) {
-	if adminPolicyBasedRoute == nil {
-		return nil, fmt.Errorf("adminPolicyBasedRoute provided to Apply must not be nil")
-	}
-	data, err := json.Marshal(adminPolicyBasedRoute)
-	if err != nil {
-		return nil, err
-	}
-	name := adminPolicyBasedRoute.Name
-	if name == nil {
-		return nil, fmt.Errorf("adminPolicyBasedRoute.Name must be provided to Apply")
-	}
-	emptyResult := &v1beta1.AdminPolicyBasedRoute{}
-	obj, err := c.Fake.
-		Invokes(testing.NewRootPatchSubresourceActionWithOptions(adminpolicybasedroutesResource, *name, types.ApplyPatchType, data, opts.ToPatchOptions()), emptyResult)
-	if obj == nil {
-		return emptyResult, err
-	}
-	return obj.(*v1beta1.AdminPolicyBasedRoute), err
-}
-
-// ApplyStatus was generated because the type contains a Status member.
-// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
-func (c *FakeAdminPolicyBasedRoutes) ApplyStatus(ctx context.Context, adminPolicyBasedRoute *adminpbrv1beta1.AdminPolicyBasedRouteApplyConfiguration, opts v1.ApplyOptions) (result *v1beta1.AdminPolicyBasedRoute, err error) {
-	if adminPolicyBasedRoute == nil {
-		return nil, fmt.Errorf("adminPolicyBasedRoute provided to Apply must not be nil")
-	}
-	data, err := json.Marshal(adminPolicyBasedRoute)
-	if err != nil {
-		return nil, err
-	}
-	name := adminPolicyBasedRoute.Name
-	if name == nil {
-		return nil, fmt.Errorf("adminPolicyBasedRoute.Name must be provided to Apply")
-	}
-	emptyResult := &v1beta1.AdminPolicyBasedRoute{}
-	obj, err := c.Fake.
-		Invokes(testing.NewRootPatchSubresourceActionWithOptions(adminpolicybasedroutesResource, *name, types.ApplyPatchType, data, opts.ToPatchOptions(), "status"), emptyResult)
-	if obj == nil {
-		return emptyResult, err
-	}
-	return obj.(*v1beta1.AdminPolicyBasedRoute), err
 }

@@ -18,7 +18,7 @@ limitations under the License.
 package v1beta1
 
 import (
-	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1"
+	networkprobev1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1"
 )
 
 // UDPStreamProbeApplyConfiguration represents a declarative configuration of the UDPStreamProbe type for use
@@ -26,9 +26,9 @@ import (
 type UDPStreamProbeApplyConfiguration struct {
 	Host           *string                       `json:"host,omitempty"`
 	Port           *int32                        `json:"port,omitempty"`
-	Interval       *v1beta1.Duration             `json:"interval,omitempty"`
+	Interval       *networkprobev1beta1.Duration `json:"interval,omitempty"`
 	PacketCount    *int32                        `json:"packetCount,omitempty"`
-	PacketInterval *v1beta1.Duration             `json:"packetInterval,omitempty"`
+	PacketInterval *networkprobev1beta1.Duration `json:"packetInterval,omitempty"`
 	PacketSpec     *PacketSpecApplyConfiguration `json:"packetSpec,omitempty"`
 }
 
@@ -57,7 +57,7 @@ func (b *UDPStreamProbeApplyConfiguration) WithPort(value int32) *UDPStreamProbe
 // WithInterval sets the Interval field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the Interval field is set to the value of the last call.
-func (b *UDPStreamProbeApplyConfiguration) WithInterval(value v1beta1.Duration) *UDPStreamProbeApplyConfiguration {
+func (b *UDPStreamProbeApplyConfiguration) WithInterval(value networkprobev1beta1.Duration) *UDPStreamProbeApplyConfiguration {
 	b.Interval = &value
 	return b
 }
@@ -73,7 +73,7 @@ func (b *UDPStreamProbeApplyConfiguration) WithPacketCount(value int32) *UDPStre
 // WithPacketInterval sets the PacketInterval field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the PacketInterval field is set to the value of the last call.
-func (b *UDPStreamProbeApplyConfiguration) WithPacketInterval(value v1beta1.Duration) *UDPStreamProbeApplyConfiguration {
+func (b *UDPStreamProbeApplyConfiguration) WithPacketInterval(value networkprobev1beta1.Duration) *UDPStreamProbeApplyConfiguration {
 	b.PacketInterval = &value
 	return b
 }

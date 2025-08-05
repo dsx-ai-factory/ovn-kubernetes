@@ -18,15 +18,15 @@ limitations under the License.
 package v1beta1
 
 import (
-	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
+	portmirrorv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
 	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
 // PortMirrorSourceApplyConfiguration represents a declarative configuration of the PortMirrorSource type for use
 // with apply.
 type PortMirrorSourceApplyConfiguration struct {
-	PodSelector           *v1.LabelSelectorApplyConfiguration   `json:"podSelector,omitempty"`
-	NetworkAttachmentName []v1beta1.NetworkAttachmentNameString `json:"networkAttachmentNames,omitempty"`
+	PodSelector           *v1.LabelSelectorApplyConfiguration             `json:"podSelector,omitempty"`
+	NetworkAttachmentName []portmirrorv1beta1.NetworkAttachmentNameString `json:"networkAttachmentNames,omitempty"`
 }
 
 // PortMirrorSourceApplyConfiguration constructs a declarative configuration of the PortMirrorSource type for use with
@@ -46,7 +46,7 @@ func (b *PortMirrorSourceApplyConfiguration) WithPodSelector(value *v1.LabelSele
 // WithNetworkAttachmentName adds the given value to the NetworkAttachmentName field in the declarative configuration
 // and returns the receiver, so that objects can be build by chaining "With" function invocations.
 // If called multiple times, values provided by each call will be appended to the NetworkAttachmentName field.
-func (b *PortMirrorSourceApplyConfiguration) WithNetworkAttachmentName(values ...v1beta1.NetworkAttachmentNameString) *PortMirrorSourceApplyConfiguration {
+func (b *PortMirrorSourceApplyConfiguration) WithNetworkAttachmentName(values ...portmirrorv1beta1.NetworkAttachmentNameString) *PortMirrorSourceApplyConfiguration {
 	for i := range values {
 		b.NetworkAttachmentName = append(b.NetworkAttachmentName, values[i])
 	}

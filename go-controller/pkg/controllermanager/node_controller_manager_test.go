@@ -137,7 +137,7 @@ var _ = Describe("Healthcheck tests", func() {
 		BeforeEach(func() {
 			// setup kube output
 			factoryMock.On("NADInformer").Return(nil)
-			ncm, err = NewNodeControllerManager(fakeClient, &factoryMock, nodeName, "", &sync.WaitGroup{}, nil, routeManager)
+			ncm, err = NewNodeControllerManager(fakeClient, &factoryMock, nodeName, "", &sync.WaitGroup{}, nil, routeManager, nil)
 			Expect(err).NotTo(HaveOccurred())
 			factoryMock.On("GetPods", "").Return(podList, nil)
 		})
@@ -228,7 +228,7 @@ var _ = Describe("Healthcheck tests", func() {
 				},
 			}
 			nodeList := []*corev1.Node{node}
-			factoryMock.On("GetNode", nodeName).Return(nodeList[0], nil)
+			factoryMock.On("GetNodeForWindows", nodeName).Return(nodeList[0], nil)
 			factoryMock.On("GetNodes").Return(nodeList, nil)
 			factoryMock.On("UserDefinedNetworkInformer").Return(nil)
 			factoryMock.On("ClusterUserDefinedNetworkInformer").Return(nil)
@@ -244,7 +244,7 @@ var _ = Describe("Healthcheck tests", func() {
 			nodeInformerMock.On("Lister").Return(nodeListerMock)
 			factoryMock.On("NodeCoreInformer").Return(nodeInformerMock)
 
-			ncm, err := NewNodeControllerManager(fakeClient, &factoryMock, nodeName, "", &sync.WaitGroup{}, nil, routeManager)
+			ncm, err := NewNodeControllerManager(fakeClient, &factoryMock, nodeName, "", &sync.WaitGroup{}, nil, routeManager, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = testNS.Do(func(ns.NetNS) error {

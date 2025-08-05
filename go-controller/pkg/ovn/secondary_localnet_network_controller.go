@@ -15,7 +15,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics/recorders"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
@@ -65,7 +65,7 @@ func (h *secondaryLocalnetNetworkControllerEventHandler) RecordAddEvent(obj inte
 	case factory.MultiNetworkPolicyType:
 		mnp := obj.(*mnpapi.MultiNetworkPolicy)
 		klog.V(5).Infof("Recording add event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)
-		metrics.GetConfigDurationRecorder().Start("multinetworkpolicy", mnp.Namespace, mnp.Name)
+		recorders.GetConfigDurationRecorder().Start("multinetworkpolicy", mnp.Namespace, mnp.Name)
 	}
 }
 
@@ -258,11 +258,6 @@ func (oc *SecondaryLocalnetNetworkController) Start(_ context.Context) error {
 	defer func() {
 		klog.Infof("Starting controller for secondary network network %s took %v", oc.GetNetworkName(), time.Since(start))
 	}()
-
-	err := oc.syncOVNLogicalEntities()
-	if err != nil {
-		return err
-	}
 
 	if err := oc.init(); err != nil {
 		return err

@@ -28,7 +28,7 @@ type FakeK8sV1beta1 struct {
 }
 
 func (c *FakeK8sV1beta1) PortMirrors(namespace string) v1beta1.PortMirrorInterface {
-	return &FakePortMirrors{c, namespace}
+	return newFakePortMirrors(c, namespace)
 }
 
 // RESTClient returns a RESTClient that is used to communicate

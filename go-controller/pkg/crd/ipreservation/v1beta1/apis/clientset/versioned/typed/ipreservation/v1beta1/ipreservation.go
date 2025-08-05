@@ -18,10 +18,10 @@ limitations under the License.
 package v1beta1
 
 import (
-	"context"
+	context "context"
 
-	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
-	ipreservationv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/applyconfiguration/ipreservation/v1beta1"
+	ipreservationv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
+	applyconfigurationipreservationv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/applyconfiguration/ipreservation/v1beta1"
 	scheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/clientset/versioned/scheme"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -37,36 +37,37 @@ type IPReservationsGetter interface {
 
 // IPReservationInterface has methods to work with IPReservation resources.
 type IPReservationInterface interface {
-	Create(ctx context.Context, iPReservation *v1beta1.IPReservation, opts v1.CreateOptions) (*v1beta1.IPReservation, error)
-	Update(ctx context.Context, iPReservation *v1beta1.IPReservation, opts v1.UpdateOptions) (*v1beta1.IPReservation, error)
+	Create(ctx context.Context, iPReservation *ipreservationv1beta1.IPReservation, opts v1.CreateOptions) (*ipreservationv1beta1.IPReservation, error)
+	Update(ctx context.Context, iPReservation *ipreservationv1beta1.IPReservation, opts v1.UpdateOptions) (*ipreservationv1beta1.IPReservation, error)
 	// Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
-	UpdateStatus(ctx context.Context, iPReservation *v1beta1.IPReservation, opts v1.UpdateOptions) (*v1beta1.IPReservation, error)
+	UpdateStatus(ctx context.Context, iPReservation *ipreservationv1beta1.IPReservation, opts v1.UpdateOptions) (*ipreservationv1beta1.IPReservation, error)
 	Delete(ctx context.Context, name string, opts v1.DeleteOptions) error
 	DeleteCollection(ctx context.Context, opts v1.DeleteOptions, listOpts v1.ListOptions) error
-	Get(ctx context.Context, name string, opts v1.GetOptions) (*v1beta1.IPReservation, error)
-	List(ctx context.Context, opts v1.ListOptions) (*v1beta1.IPReservationList, error)
+	Get(ctx context.Context, name string, opts v1.GetOptions) (*ipreservationv1beta1.IPReservation, error)
+	List(ctx context.Context, opts v1.ListOptions) (*ipreservationv1beta1.IPReservationList, error)
 	Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error)
-	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *v1beta1.IPReservation, err error)
-	Apply(ctx context.Context, iPReservation *ipreservationv1beta1.IPReservationApplyConfiguration, opts v1.ApplyOptions) (result *v1beta1.IPReservation, err error)
+	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *ipreservationv1beta1.IPReservation, err error)
+	Apply(ctx context.Context, iPReservation *applyconfigurationipreservationv1beta1.IPReservationApplyConfiguration, opts v1.ApplyOptions) (result *ipreservationv1beta1.IPReservation, err error)
 	// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
-	ApplyStatus(ctx context.Context, iPReservation *ipreservationv1beta1.IPReservationApplyConfiguration, opts v1.ApplyOptions) (result *v1beta1.IPReservation, err error)
+	ApplyStatus(ctx context.Context, iPReservation *applyconfigurationipreservationv1beta1.IPReservationApplyConfiguration, opts v1.ApplyOptions) (result *ipreservationv1beta1.IPReservation, err error)
 	IPReservationExpansion
 }
 
 // iPReservations implements IPReservationInterface
 type iPReservations struct {
-	*gentype.ClientWithListAndApply[*v1beta1.IPReservation, *v1beta1.IPReservationList, *ipreservationv1beta1.IPReservationApplyConfiguration]
+	*gentype.ClientWithListAndApply[*ipreservationv1beta1.IPReservation, *ipreservationv1beta1.IPReservationList, *applyconfigurationipreservationv1beta1.IPReservationApplyConfiguration]
 }
 
 // newIPReservations returns a IPReservations
 func newIPReservations(c *K8sV1beta1Client, namespace string) *iPReservations {
 	return &iPReservations{
-		gentype.NewClientWithListAndApply[*v1beta1.IPReservation, *v1beta1.IPReservationList, *ipreservationv1beta1.IPReservationApplyConfiguration](
+		gentype.NewClientWithListAndApply[*ipreservationv1beta1.IPReservation, *ipreservationv1beta1.IPReservationList, *applyconfigurationipreservationv1beta1.IPReservationApplyConfiguration](
 			"ipreservations",
 			c.RESTClient(),
 			scheme.ParameterCodec,
 			namespace,
-			func() *v1beta1.IPReservation { return &v1beta1.IPReservation{} },
-			func() *v1beta1.IPReservationList { return &v1beta1.IPReservationList{} }),
+			func() *ipreservationv1beta1.IPReservation { return &ipreservationv1beta1.IPReservation{} },
+			func() *ipreservationv1beta1.IPReservationList { return &ipreservationv1beta1.IPReservationList{} },
+		),
 	}
 }

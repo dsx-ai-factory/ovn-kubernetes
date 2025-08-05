@@ -102,8 +102,8 @@ var ovnNorthDbCoverageShowMetricsMap = map[string]*metricDetails{
 }
 
 var metricOVNDBSessions = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
-	Subsystem: MetricOvnSubsystemDB,
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemDB,
 	Name:      "jsonrpc_server_sessions",
 	Help:      "Active number of JSON RPC Server sessions to the DB"},
 	[]string{
@@ -112,8 +112,8 @@ var metricOVNDBSessions = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricOVNDBMonitor = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
-	Subsystem: MetricOvnSubsystemDB,
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemDB,
 	Name:      "ovsdb_monitors",
 	Help:      "Number of OVSDB Monitors on the server"},
 	[]string{
@@ -122,8 +122,8 @@ var metricOVNDBMonitor = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricDBSize = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
-	Subsystem: MetricOvnSubsystemDB,
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemDB,
 	Name:      "db_size_bytes",
 	Help:      "The size of the database file associated with the OVN DB component."},
 	[]string{
@@ -133,8 +133,8 @@ var metricDBSize = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 
 // ClusterStatus metrics
 var metricDBClusterCID = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
-	Subsystem: MetricOvnSubsystemDB,
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemDB,
 	Name:      "cluster_id",
 	Help:      "A metric with a constant '1' value labeled by database name and cluster uuid"},
 	[]string{
@@ -144,8 +144,8 @@ var metricDBClusterCID = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricDBClusterSID = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
-	Subsystem: MetricOvnSubsystemDB,
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemDB,
 	Name:      "cluster_server_id",
 	Help: "A metric with a constant '1' value labeled by database name, cluster uuid " +
 		"and server uuid"},
@@ -157,8 +157,8 @@ var metricDBClusterSID = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricDBClusterServerStatus = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
-	Subsystem: MetricOvnSubsystemDB,
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemDB,
 	Name:      "cluster_server_status",
 	Help: "A metric with a constant '1' value labeled by database name, cluster uuid, server uuid " +
 		"server status"},
@@ -171,8 +171,8 @@ var metricDBClusterServerStatus = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricDBClusterServerRole = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
-	Subsystem: MetricOvnSubsystemDB,
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemDB,
 	Name:      "cluster_server_role",
 	Help: "A metric with a constant '1' value labeled by database name, cluster uuid, server uuid " +
 		"and server role"},
@@ -185,8 +185,8 @@ var metricDBClusterServerRole = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricDBClusterTerm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
-	Subsystem: MetricOvnSubsystemDB,
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemDB,
 	Name:      "cluster_term",
 	Help: "A metric that returns the current election term value labeled by database name, cluster uuid, and " +
 		"server uuid"},
@@ -198,8 +198,8 @@ var metricDBClusterTerm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricDBClusterServerVote = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
-	Subsystem: MetricOvnSubsystemDB,
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemDB,
 	Name:      "cluster_server_vote",
 	Help: "A metric with a constant '1' value labeled by database name, cluster uuid, server uuid " +
 		"and server vote"},
@@ -212,8 +212,8 @@ var metricDBClusterServerVote = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricDBClusterElectionTimer = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
-	Subsystem: MetricOvnSubsystemDB,
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemDB,
 	Name:      "cluster_election_timer",
 	Help: "A metric that returns the current election timer value labeled by database name, cluster uuid, " +
 		"and server uuid"},
@@ -225,8 +225,8 @@ var metricDBClusterElectionTimer = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricDBClusterLogIndexStart = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
-	Subsystem: MetricOvnSubsystemDB,
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemDB,
 	Name:      "cluster_log_index_start",
 	Help: "A metric that returns the log entry index start value labeled by database name, cluster uuid, " +
 		"and server uuid"},
@@ -238,8 +238,8 @@ var metricDBClusterLogIndexStart = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricDBClusterLogIndexNext = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
-	Subsystem: MetricOvnSubsystemDB,
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemDB,
 	Name:      "cluster_log_index_next",
 	Help: "A metric that returns the log entry index next value labeled by database name, cluster uuid, " +
 		"and server uuid"},
@@ -251,8 +251,8 @@ var metricDBClusterLogIndexNext = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricDBClusterLogNotCommitted = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
-	Subsystem: MetricOvnSubsystemDB,
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemDB,
 	Name:      "cluster_log_not_committed",
 	Help: "A metric that returns the number of log entries not committed labeled by database name, cluster uuid, " +
 		"and server uuid"},
@@ -264,8 +264,8 @@ var metricDBClusterLogNotCommitted = prometheus.NewGaugeVec(prometheus.GaugeOpts
 )
 
 var metricDBClusterLogNotApplied = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
-	Subsystem: MetricOvnSubsystemDB,
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemDB,
 	Name:      "cluster_log_not_applied",
 	Help: "A metric that returns the number of log entries not applied labeled by database name, cluster uuid, " +
 		"and server uuid"},
@@ -277,8 +277,8 @@ var metricDBClusterLogNotApplied = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricDBClusterConnIn = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
-	Subsystem: MetricOvnSubsystemDB,
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemDB,
 	Name:      "cluster_inbound_connections_total",
 	Help: "A metric that returns the total number of inbound  connections to the server labeled by " +
 		"database name, cluster uuid, and server uuid"},
@@ -290,8 +290,8 @@ var metricDBClusterConnIn = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricDBClusterConnOut = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
-	Subsystem: MetricOvnSubsystemDB,
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemDB,
 	Name:      "cluster_outbound_connections_total",
 	Help: "A metric that returns the total number of outbound connections from the server labeled by " +
 		"database name, cluster uuid, and server uuid"},
@@ -303,8 +303,8 @@ var metricDBClusterConnOut = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricDBClusterConnInErr = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
-	Subsystem: MetricOvnSubsystemDB,
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemDB,
 	Name:      "cluster_inbound_connections_error_total",
 	Help: "A metric that returns the total number of failed inbound connections to the server labeled by " +
 		" database name, cluster uuid, and server uuid"},
@@ -316,8 +316,8 @@ var metricDBClusterConnInErr = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var metricDBClusterConnOutErr = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
-	Subsystem: MetricOvnSubsystemDB,
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemDB,
 	Name:      "cluster_outbound_connections_error_total",
 	Help: "A metric that returns the total number of failed  outbound connections from the server labeled by " +
 		"database name, cluster uuid, and server uuid"},
@@ -481,8 +481,8 @@ func RegisterOvnDBMetrics(podLister corev1listers.PodLister, podSynced func() bo
 	prometheus.MustRegister(metricOVNDBSessions)
 	prometheus.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
-			Namespace: MetricOvnNamespace,
-			Subsystem: MetricOvnSubsystemDB,
+			Namespace: types.MetricOvnNamespace,
+			Subsystem: types.MetricOvnSubsystemDB,
 			Name:      "build_info",
 			Help: "A metric with a constant '1' value labeled by ovsdb-server version and " +
 				"NB and SB schema version",
@@ -525,12 +525,12 @@ func RegisterOvnDBMetrics(podLister corev1listers.PodLister, podSynced func() bo
 		// Register the ovn*_db coverage/show metrics with prometheus
 
 		componentCoverageShowMetricsMap[ovnNorthDB] = ovnNorthDbCoverageShowMetricsMap
-		registerCoverageShowMetrics(ovnNorthDB, MetricOvnNamespace, MetricOvnSubsystemDB,
+		registerCoverageShowMetrics(ovnNorthDB, types.MetricOvnNamespace, types.MetricOvnSubsystemDB,
 			map[string]string{"db_name": "OVN_Northbound"})
 		go coverageShowMetricsUpdater(ovnNorthDB, metricsScrapeInterval, stopChan)
 
 		componentCoverageShowMetricsMap[ovnSouthDB] = ovnSouthDbCoverageShowMetricsMap
-		registerCoverageShowMetrics(ovnSouthDB, MetricOvnNamespace, MetricOvnSubsystemDB,
+		registerCoverageShowMetrics(ovnSouthDB, types.MetricOvnNamespace, types.MetricOvnSubsystemDB,
 			map[string]string{"db_name": "OVN_Southbound"})
 		go coverageShowMetricsUpdater(ovnSouthDB, metricsScrapeInterval, stopChan)
 
@@ -700,7 +700,7 @@ func getOVNDBClusterStatusInfo(timeout int, dbProperties *util.OvsDbProperties) 
 func ovnDBClusterStatusMetricsUpdater(dbProperties *util.OvsDbProperties) {
 	clusterStatus, err := getOVNDBClusterStatusInfo(5, dbProperties)
 	if err != nil {
-		klog.Errorf(err.Error())
+		klog.Errorf("Error getting OVN DB cluster status information: %v", err.Error())
 		return
 	}
 	metricDBClusterCID.WithLabelValues(dbProperties.DbName, clusterStatus.cid).Set(1)

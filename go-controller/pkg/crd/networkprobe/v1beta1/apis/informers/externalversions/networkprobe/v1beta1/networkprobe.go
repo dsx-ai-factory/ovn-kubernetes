@@ -18,13 +18,13 @@ limitations under the License.
 package v1beta1
 
 import (
-	"context"
+	context "context"
 	time "time"
 
-	networkprobev1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1"
+	crdnetworkprobev1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1"
 	versioned "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1/apis/clientset/versioned"
 	internalinterfaces "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1/apis/informers/externalversions/internalinterfaces"
-	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1/apis/listers/networkprobe/v1beta1"
+	networkprobev1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1/apis/listers/networkprobe/v1beta1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	watch "k8s.io/apimachinery/pkg/watch"
@@ -35,7 +35,7 @@ import (
 // NetworkProbes.
 type NetworkProbeInformer interface {
 	Informer() cache.SharedIndexInformer
-	Lister() v1beta1.NetworkProbeLister
+	Lister() networkprobev1beta1.NetworkProbeLister
 }
 
 type networkProbeInformer struct {
@@ -70,7 +70,7 @@ func NewFilteredNetworkProbeInformer(client versioned.Interface, namespace strin
 				return client.K8sV1beta1().NetworkProbes(namespace).Watch(context.TODO(), options)
 			},
 		},
-		&networkprobev1beta1.NetworkProbe{},
+		&crdnetworkprobev1beta1.NetworkProbe{},
 		resyncPeriod,
 		indexers,
 	)
@@ -81,9 +81,9 @@ func (f *networkProbeInformer) defaultInformer(client versioned.Interface, resyn
 }
 
 func (f *networkProbeInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&networkprobev1beta1.NetworkProbe{}, f.defaultInformer)
+	return f.factory.InformerFor(&crdnetworkprobev1beta1.NetworkProbe{}, f.defaultInformer)
 }
 
-func (f *networkProbeInformer) Lister() v1beta1.NetworkProbeLister {
-	return v1beta1.NewNetworkProbeLister(f.Informer().GetIndexer())
+func (f *networkProbeInformer) Lister() networkprobev1beta1.NetworkProbeLister {
+	return networkprobev1beta1.NewNetworkProbeLister(f.Informer().GetIndexer())
 }

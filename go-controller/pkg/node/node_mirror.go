@@ -158,7 +158,7 @@ func (bnnc *BaseNodeNetworkController) watchPortMirrorDPU() error {
 			portmirror := obj.(*portmirror.PortMirror)
 			err := bnnc.addDPUPortMirror(portmirror)
 			if err != nil {
-				klog.Errorf(err.Error())
+				klog.Error(err.Error())
 			}
 		},
 		UpdateFunc: func(old, new interface{}) {
@@ -167,10 +167,10 @@ func (bnnc *BaseNodeNetworkController) watchPortMirrorDPU() error {
 			// Check the changes in the spec; we could check for the sink details specifically.
 			if !reflect.DeepEqual(oldPortMirror.Spec, newPortMirror.Spec) {
 				if err := bnnc.deleteDPUPortMirror(oldPortMirror); err != nil {
-					klog.Errorf(err.Error())
+					klog.Error(err.Error())
 				}
 				if err := bnnc.addDPUPortMirror(newPortMirror); err != nil {
-					klog.Errorf(err.Error())
+					klog.Error(err.Error())
 				}
 			}
 		},
@@ -178,7 +178,7 @@ func (bnnc *BaseNodeNetworkController) watchPortMirrorDPU() error {
 			portmirror := obj.(*portmirror.PortMirror)
 			err := bnnc.deleteDPUPortMirror(portmirror)
 			if err != nil {
-				klog.Errorf(err.Error())
+				klog.Error(err.Error())
 			}
 		},
 	}, bnnc.syncPortMirrors)
@@ -455,7 +455,7 @@ func (bnnc *BaseNodeNetworkController) handleSinkPodSelectors(pm *util.PortMirro
 				defer portMirrorNameUnlock()
 				pod := obj.(*corev1.Pod)
 				if err := bnnc.handlePortMirrorSinkPodAdd(pm, pod); err != nil {
-					klog.Errorf(err.Error())
+					klog.Error(err.Error())
 				}
 			},
 			DeleteFunc: func(obj interface{}) {
@@ -463,7 +463,7 @@ func (bnnc *BaseNodeNetworkController) handleSinkPodSelectors(pm *util.PortMirro
 				defer portMirrorNameUnlock()
 				pod := obj.(*corev1.Pod)
 				if err := bnnc.handlePortMirrorSinkPodDelete(pm, pod); err != nil {
-					klog.Errorf(err.Error())
+					klog.Error(err.Error())
 				}
 			},
 			UpdateFunc: func(_, _ interface{}) {
@@ -637,7 +637,7 @@ func (bnnc *BaseNodeNetworkController) syncPortMirrorsDPUPeriodic() {
 			}
 			err := bnnc.unConfigureSFInterface(sfInfo)
 			if err != nil {
-				klog.Errorf(err.Error())
+				klog.Error(err.Error())
 			}
 		}
 		portMirrorIDUnlock()

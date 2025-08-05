@@ -146,10 +146,6 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				addressIPv6: "fd11::3",
 			},
 		}
-		logicalSwitch                            *nbdb.LogicalSwitch
-		ovnClusterRouter                         *nbdb.LogicalRouter
-		logicalRouterPort                        *nbdb.LogicalRouterPort
-		migrationSourceLSRP, migrationTargetLSRP *nbdb.LogicalSwitchPort
 
 		lrpIP = func(network string) string {
 			return strings.Split(network, "/")[0]
@@ -497,6 +493,12 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 
 	Context("during execution", func() {
 		DescribeTable("reconcile migratable vm pods", func(t testData) {
+			var (
+				logicalSwitch                            *nbdb.LogicalSwitch
+				ovnClusterRouter                         *nbdb.LogicalRouter
+				logicalRouterPort                        *nbdb.LogicalRouterPort
+				migrationSourceLSRP, migrationTargetLSRP *nbdb.LogicalSwitchPort
+			)
 
 			_, parsedClusterCIDRIPv4, err := net.ParseCIDR(clusterCIDRIPv4)
 			Expect(err).ToNot(HaveOccurred())
@@ -543,8 +545,8 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				UUID: ovntypes.SwitchToRouterPrefix + t.nodeName + "-UUID",
 				Type: "router",
 				Options: map[string]string{
-					"router-port": logicalRouterPort.Name,
-					"arp_proxy":   kubevirt.ComposeARPProxyLSPOption(),
+					libovsdbops.RouterPort: logicalRouterPort.Name,
+					"arp_proxy":            kubevirt.ComposeARPProxyLSPOption(),
 				},
 			}
 			logicalSwitch = &nbdb.LogicalSwitch{
@@ -603,8 +605,8 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 					UUID: ovntypes.SwitchToRouterPrefix + t.migrationTarget.nodeName + "-UUID",
 					Type: "router",
 					Options: map[string]string{
-						"router-port": migrationTargetLRP.Name,
-						"arp_proxy":   kubevirt.ComposeARPProxyLSPOption(),
+						libovsdbops.RouterPort: migrationTargetLRP.Name,
+						"arp_proxy":            kubevirt.ComposeARPProxyLSPOption(),
 					},
 				}
 				migrationTargetLS = &nbdb.LogicalSwitch{
@@ -668,6 +670,7 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 									Annotations: map[string]string{
 										"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf(`{"ipv4": %q, "ipv6": %q}`, nodeByName[node1].transitSwitchPortIPv4, nodeByName[node1].transitSwitchPortIPv6),
 										"k8s.ovn.org/node-subnets":                    fmt.Sprintf(`{"default":[%q,%q]}`, nodeByName[node1].subnetIPv4, nodeByName[node1].subnetIPv6),
+										util.OVNNodeGRLRPAddrs:                        fmt.Sprintf(`{"default":{"ipv4":"%s", "ipv6":"%s"}}`, nodeByName[node1].lrpNetworkIPv4, nodeByName[node1].lrpNetworkIPv6),
 									},
 								},
 							},
@@ -677,6 +680,7 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 									Annotations: map[string]string{
 										"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf(`{"ipv4": %q, "ipv6": %q}`, nodeByName[node2].transitSwitchPortIPv4, nodeByName[node2].transitSwitchPortIPv6),
 										"k8s.ovn.org/node-subnets":                    fmt.Sprintf(`{"default":[%q,%q]}`, nodeByName[node2].subnetIPv4, nodeByName[node2].subnetIPv6),
+										util.OVNNodeGRLRPAddrs:                        fmt.Sprintf(`{"default":{"ipv4":"%s", "ipv6":"%s"}}`, nodeByName[node2].lrpNetworkIPv4, nodeByName[node2].lrpNetworkIPv6),
 									},
 								},
 							},
@@ -686,6 +690,7 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 									Annotations: map[string]string{
 										"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf(`{"ipv4": %q, "ipv6": %q}`, nodeByName[node3].transitSwitchPortIPv4, nodeByName[node3].transitSwitchPortIPv6),
 										"k8s.ovn.org/node-subnets":                    fmt.Sprintf(`{"default":[%q,%q]}`, nodeByName[node3].subnetIPv4, nodeByName[node3].subnetIPv6),
+										util.OVNNodeGRLRPAddrs:                        fmt.Sprintf(`{"default":{"ipv4":"%s", "ipv6":"%s"}}`, nodeByName[node3].lrpNetworkIPv4, nodeByName[node3].lrpNetworkIPv6),
 									},
 								},
 							},

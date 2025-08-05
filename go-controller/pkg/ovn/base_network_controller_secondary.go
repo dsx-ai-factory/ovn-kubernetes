@@ -18,8 +18,8 @@ import (
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/ptr"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/libovsdb/ovsdb"
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -28,10 +28,6 @@ import (
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	aclsyncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/acl"
-	addrsetsyncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/address_set"
-	syncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/ovnentity"
-	pgsyncer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/port_group"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -689,7 +685,15 @@ func (bsnc *BaseSecondaryNetworkController) AddNamespaceForSecondaryNetwork(ns *
 	if err != nil {
 		return fmt.Errorf("failed to ensure namespace locked: %v", err)
 	}
-	defer nsUnlock()
+	nsUnlock()
+	// Enqueue the UDN namespace into network policy controller if it needs to be
+	// processed by network policy peer namespace handlers.
+	if bsnc.IsPrimaryNetwork() {
+		err = bsnc.requeuePeerNamespace(ns)
+		if err != nil {
+			return fmt.Errorf("failed to requeue peer namespace %s: %v", ns.Name, err)
+		}
+	}
 	return nil
 }
 
@@ -791,51 +795,6 @@ func cleanupPolicyLogicalEntities(nbClient libovsdbclient.Client, ops []ovsdb.Op
 		return ops, fmt.Errorf("failed to get ops to delete address sets owned by controller %s", controllerName)
 	}
 	return ops, nil
-}
-
-func (bsnc *BaseSecondaryNetworkController) syncOVNLogicalEntities() error {
-	klog.Infof("Sync OVN logical entities for network %s topology type %s", bsnc.GetNetworkName(), bsnc.TopologyType())
-	entitySyncer := syncer.NeOVNEntitySyncer(bsnc.nbClient, bsnc.ReconcilableNetInfo, 200)
-	err := entitySyncer.SyncLogicalRouters()
-	if err != nil {
-		return fmt.Errorf("failed to sync logical routers for network %s: %v", bsnc.GetNetworkName(), err)
-	}
-	err = entitySyncer.SyncLogicalSwitches()
-	if err != nil {
-		return fmt.Errorf("failed to sync logical switches for network %s: %v", bsnc.GetNetworkName(), err)
-	}
-	err = entitySyncer.SyncLogicalSwitchPorts()
-	if err != nil {
-		return fmt.Errorf("failed to sync logical switch ports for network %s: %v", bsnc.GetNetworkName(), err)
-	}
-
-	// sync address sets, only required for network controller, since any old objects in the db without
-	// Owner set are owned by the specific network controller.
-	addrSetSyncer := addrsetsyncer.NewAddressSetSyncer(bsnc.nbClient, bsnc.controllerName, bsnc.GetNetworkName())
-	err = addrSetSyncer.SyncAddressSets()
-	if err != nil {
-		return fmt.Errorf("failed to sync address sets on controller init for network %s: %v", bsnc.GetNetworkName(), err)
-	}
-
-	aclSyncer := aclsyncer.NewBaseACLSyncer(bsnc.nbClient, bsnc.controllerName, bsnc.ReconcilableNetInfo)
-	err = aclSyncer.SyncACLs(aclSyncer.GetUpdatedACLs)
-	if err != nil {
-		return fmt.Errorf("failed to sync acls on controller init for network %s: %v", bsnc.GetNetworkName(), err)
-	}
-
-	pgSyncer := pgsyncer.NewPortGroupSyncer(bsnc.nbClient, bsnc.ReconcilableNetInfo)
-	err = pgSyncer.SyncPortGroups()
-	if err != nil {
-		return fmt.Errorf("failed to sync port group on controller init for network %s: %v", bsnc.GetNetworkName(), err)
-	}
-
-	// sync shared resources
-	// pod selector address sets
-	err = bsnc.cleanupPodSelectorAddressSets()
-	if err != nil {
-		return fmt.Errorf("cleaning up stale pod selector address sets for network %v failed : %w", bsnc.GetNetworkName(), err)
-	}
-	return nil
 }
 
 // WatchIPAMClaims starts the watching of IPAMClaim resources and calls

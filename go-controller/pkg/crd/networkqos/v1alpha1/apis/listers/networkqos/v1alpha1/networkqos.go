@@ -18,10 +18,10 @@ limitations under the License.
 package v1alpha1
 
 import (
-	v1alpha1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/client-go/listers"
-	"k8s.io/client-go/tools/cache"
+	networkqosv1alpha1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1"
+	labels "k8s.io/apimachinery/pkg/labels"
+	listers "k8s.io/client-go/listers"
+	cache "k8s.io/client-go/tools/cache"
 )
 
 // NetworkQoSLister helps list NetworkQoSes.
@@ -29,7 +29,7 @@ import (
 type NetworkQoSLister interface {
 	// List lists all NetworkQoSes in the indexer.
 	// Objects returned here must be treated as read-only.
-	List(selector labels.Selector) (ret []*v1alpha1.NetworkQoS, err error)
+	List(selector labels.Selector) (ret []*networkqosv1alpha1.NetworkQoS, err error)
 	// NetworkQoSes returns an object that can list and get NetworkQoSes.
 	NetworkQoSes(namespace string) NetworkQoSNamespaceLister
 	NetworkQoSListerExpansion
@@ -37,17 +37,17 @@ type NetworkQoSLister interface {
 
 // networkQoSLister implements the NetworkQoSLister interface.
 type networkQoSLister struct {
-	listers.ResourceIndexer[*v1alpha1.NetworkQoS]
+	listers.ResourceIndexer[*networkqosv1alpha1.NetworkQoS]
 }
 
 // NewNetworkQoSLister returns a new NetworkQoSLister.
 func NewNetworkQoSLister(indexer cache.Indexer) NetworkQoSLister {
-	return &networkQoSLister{listers.New[*v1alpha1.NetworkQoS](indexer, v1alpha1.Resource("networkqos"))}
+	return &networkQoSLister{listers.New[*networkqosv1alpha1.NetworkQoS](indexer, networkqosv1alpha1.Resource("networkqos"))}
 }
 
 // NetworkQoSes returns an object that can list and get NetworkQoSes.
 func (s *networkQoSLister) NetworkQoSes(namespace string) NetworkQoSNamespaceLister {
-	return networkQoSNamespaceLister{listers.NewNamespaced[*v1alpha1.NetworkQoS](s.ResourceIndexer, namespace)}
+	return networkQoSNamespaceLister{listers.NewNamespaced[*networkqosv1alpha1.NetworkQoS](s.ResourceIndexer, namespace)}
 }
 
 // NetworkQoSNamespaceLister helps list and get NetworkQoSes.
@@ -55,15 +55,15 @@ func (s *networkQoSLister) NetworkQoSes(namespace string) NetworkQoSNamespaceLis
 type NetworkQoSNamespaceLister interface {
 	// List lists all NetworkQoSes in the indexer for a given namespace.
 	// Objects returned here must be treated as read-only.
-	List(selector labels.Selector) (ret []*v1alpha1.NetworkQoS, err error)
+	List(selector labels.Selector) (ret []*networkqosv1alpha1.NetworkQoS, err error)
 	// Get retrieves the NetworkQoS from the indexer for a given namespace and name.
 	// Objects returned here must be treated as read-only.
-	Get(name string) (*v1alpha1.NetworkQoS, error)
+	Get(name string) (*networkqosv1alpha1.NetworkQoS, error)
 	NetworkQoSNamespaceListerExpansion
 }
 
 // networkQoSNamespaceLister implements the NetworkQoSNamespaceLister
 // interface.
 type networkQoSNamespaceLister struct {
-	listers.ResourceIndexer[*v1alpha1.NetworkQoS]
+	listers.ResourceIndexer[*networkqosv1alpha1.NetworkQoS]
 }

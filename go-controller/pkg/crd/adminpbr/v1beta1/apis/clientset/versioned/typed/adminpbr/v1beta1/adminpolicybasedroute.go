@@ -18,10 +18,10 @@ limitations under the License.
 package v1beta1
 
 import (
-	"context"
+	context "context"
 
-	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
-	adminpbrv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/applyconfiguration/adminpbr/v1beta1"
+	adminpbrv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
+	applyconfigurationadminpbrv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/applyconfiguration/adminpbr/v1beta1"
 	scheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/clientset/versioned/scheme"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -37,36 +37,37 @@ type AdminPolicyBasedRoutesGetter interface {
 
 // AdminPolicyBasedRouteInterface has methods to work with AdminPolicyBasedRoute resources.
 type AdminPolicyBasedRouteInterface interface {
-	Create(ctx context.Context, adminPolicyBasedRoute *v1beta1.AdminPolicyBasedRoute, opts v1.CreateOptions) (*v1beta1.AdminPolicyBasedRoute, error)
-	Update(ctx context.Context, adminPolicyBasedRoute *v1beta1.AdminPolicyBasedRoute, opts v1.UpdateOptions) (*v1beta1.AdminPolicyBasedRoute, error)
+	Create(ctx context.Context, adminPolicyBasedRoute *adminpbrv1beta1.AdminPolicyBasedRoute, opts v1.CreateOptions) (*adminpbrv1beta1.AdminPolicyBasedRoute, error)
+	Update(ctx context.Context, adminPolicyBasedRoute *adminpbrv1beta1.AdminPolicyBasedRoute, opts v1.UpdateOptions) (*adminpbrv1beta1.AdminPolicyBasedRoute, error)
 	// Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
-	UpdateStatus(ctx context.Context, adminPolicyBasedRoute *v1beta1.AdminPolicyBasedRoute, opts v1.UpdateOptions) (*v1beta1.AdminPolicyBasedRoute, error)
+	UpdateStatus(ctx context.Context, adminPolicyBasedRoute *adminpbrv1beta1.AdminPolicyBasedRoute, opts v1.UpdateOptions) (*adminpbrv1beta1.AdminPolicyBasedRoute, error)
 	Delete(ctx context.Context, name string, opts v1.DeleteOptions) error
 	DeleteCollection(ctx context.Context, opts v1.DeleteOptions, listOpts v1.ListOptions) error
-	Get(ctx context.Context, name string, opts v1.GetOptions) (*v1beta1.AdminPolicyBasedRoute, error)
-	List(ctx context.Context, opts v1.ListOptions) (*v1beta1.AdminPolicyBasedRouteList, error)
+	Get(ctx context.Context, name string, opts v1.GetOptions) (*adminpbrv1beta1.AdminPolicyBasedRoute, error)
+	List(ctx context.Context, opts v1.ListOptions) (*adminpbrv1beta1.AdminPolicyBasedRouteList, error)
 	Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error)
-	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *v1beta1.AdminPolicyBasedRoute, err error)
-	Apply(ctx context.Context, adminPolicyBasedRoute *adminpbrv1beta1.AdminPolicyBasedRouteApplyConfiguration, opts v1.ApplyOptions) (result *v1beta1.AdminPolicyBasedRoute, err error)
+	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *adminpbrv1beta1.AdminPolicyBasedRoute, err error)
+	Apply(ctx context.Context, adminPolicyBasedRoute *applyconfigurationadminpbrv1beta1.AdminPolicyBasedRouteApplyConfiguration, opts v1.ApplyOptions) (result *adminpbrv1beta1.AdminPolicyBasedRoute, err error)
 	// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
-	ApplyStatus(ctx context.Context, adminPolicyBasedRoute *adminpbrv1beta1.AdminPolicyBasedRouteApplyConfiguration, opts v1.ApplyOptions) (result *v1beta1.AdminPolicyBasedRoute, err error)
+	ApplyStatus(ctx context.Context, adminPolicyBasedRoute *applyconfigurationadminpbrv1beta1.AdminPolicyBasedRouteApplyConfiguration, opts v1.ApplyOptions) (result *adminpbrv1beta1.AdminPolicyBasedRoute, err error)
 	AdminPolicyBasedRouteExpansion
 }
 
 // adminPolicyBasedRoutes implements AdminPolicyBasedRouteInterface
 type adminPolicyBasedRoutes struct {
-	*gentype.ClientWithListAndApply[*v1beta1.AdminPolicyBasedRoute, *v1beta1.AdminPolicyBasedRouteList, *adminpbrv1beta1.AdminPolicyBasedRouteApplyConfiguration]
+	*gentype.ClientWithListAndApply[*adminpbrv1beta1.AdminPolicyBasedRoute, *adminpbrv1beta1.AdminPolicyBasedRouteList, *applyconfigurationadminpbrv1beta1.AdminPolicyBasedRouteApplyConfiguration]
 }
 
 // newAdminPolicyBasedRoutes returns a AdminPolicyBasedRoutes
 func newAdminPolicyBasedRoutes(c *K8sV1beta1Client) *adminPolicyBasedRoutes {
 	return &adminPolicyBasedRoutes{
-		gentype.NewClientWithListAndApply[*v1beta1.AdminPolicyBasedRoute, *v1beta1.AdminPolicyBasedRouteList, *adminpbrv1beta1.AdminPolicyBasedRouteApplyConfiguration](
+		gentype.NewClientWithListAndApply[*adminpbrv1beta1.AdminPolicyBasedRoute, *adminpbrv1beta1.AdminPolicyBasedRouteList, *applyconfigurationadminpbrv1beta1.AdminPolicyBasedRouteApplyConfiguration](
 			"adminpolicybasedroutes",
 			c.RESTClient(),
 			scheme.ParameterCodec,
 			"",
-			func() *v1beta1.AdminPolicyBasedRoute { return &v1beta1.AdminPolicyBasedRoute{} },
-			func() *v1beta1.AdminPolicyBasedRouteList { return &v1beta1.AdminPolicyBasedRouteList{} }),
+			func() *adminpbrv1beta1.AdminPolicyBasedRoute { return &adminpbrv1beta1.AdminPolicyBasedRoute{} },
+			func() *adminpbrv1beta1.AdminPolicyBasedRouteList { return &adminpbrv1beta1.AdminPolicyBasedRouteList{} },
+		),
 	}
 }

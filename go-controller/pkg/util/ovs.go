@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"regexp"
 	"runtime"
@@ -401,7 +402,7 @@ func RunOVNAppctlWithTimeout(timeout int, args ...string) (string, string, error
 
 // Run the ovn-ctl command and retry if "Connection refused"
 // poll waitng for service to become available
-// FIXME: Remove when https://github.com/ovn-org/libovsdb/issues/235 is fixed
+// FIXME: Remove when https://github.com/ovn-kubernetes/libovsdb/issues/235 is fixed
 func runOVNretry(cmdPath string, envVars []string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
 
 	retriesLeft := ovnCmdRetryCount
@@ -458,14 +459,14 @@ func getNbOVSDBArgs(command string, args ...string) []string {
 }
 
 // RunOVNNbctlWithTimeout runs command via ovn-nbctl with a specific timeout
-// FIXME: Remove when https://github.com/ovn-org/libovsdb/issues/235 is fixed
+// FIXME: Remove when https://github.com/ovn-kubernetes/libovsdb/issues/235 is fixed
 func RunOVNNbctlWithTimeout(timeout int, args ...string) (string, string, error) {
 	stdout, stderr, err := RunOVNNbctlRawOutput(timeout, args...)
 	return strings.Trim(strings.TrimSpace(stdout), "\""), stderr, err
 }
 
 // RunOVNNbctlRawOutput returns the output with no trimming or other string manipulation
-// FIXME: Remove when https://github.com/ovn-org/libovsdb/issues/235 is fixed
+// FIXME: Remove when https://github.com/ovn-kubernetes/libovsdb/issues/235 is fixed
 func RunOVNNbctlRawOutput(timeout int, args ...string) (string, string, error) {
 	cmdArgs, envVars := getNbctlArgsAndEnv(timeout, args...)
 	stdout, stderr, err := runOVNretry(runner.nbctlPath, envVars, cmdArgs...)
@@ -473,13 +474,13 @@ func RunOVNNbctlRawOutput(timeout int, args ...string) (string, string, error) {
 }
 
 // RunOVNNbctl runs a command via ovn-nbctl.
-// FIXME: Remove when https://github.com/ovn-org/libovsdb/issues/235 is fixed
+// FIXME: Remove when https://github.com/ovn-kubernetes/libovsdb/issues/235 is fixed
 func RunOVNNbctl(args ...string) (string, string, error) {
 	return RunOVNNbctlWithTimeout(ovsCommandTimeout, args...)
 }
 
 // RunOVNSbctlWithTimeout runs command via ovn-sbctl with a specific timeout
-// FIXME: Remove when https://github.com/ovn-org/libovsdb/issues/235 is fixed
+// FIXME: Remove when https://github.com/ovn-kubernetes/libovsdb/issues/235 is fixed
 func RunOVNSbctlWithTimeout(timeout int, args ...string) (string, string,
 	error) {
 	var cmdArgs []string
@@ -523,7 +524,7 @@ func RunOVSDBClientOVNNB(command string, args ...string) (string, string, error)
 }
 
 // RunOVNSbctl runs a command via ovn-sbctl.
-// FIXME: Remove when https://github.com/ovn-org/libovsdb/issues/235 is fixed
+// FIXME: Remove when https://github.com/ovn-kubernetes/libovsdb/issues/235 is fixed
 func RunOVNSbctl(args ...string) (string, string, error) {
 	return RunOVNSbctlWithTimeout(ovsCommandTimeout, args...)
 }
@@ -863,6 +864,18 @@ func DetectCheckPktLengthSupport(bridge string) (bool, error) {
 	}
 
 	return false, nil
+}
+
+// SetStaticFDBEntry programs a static MAC entry into the OVS FIB and disables MAC learning for this entry
+func SetStaticFDBEntry(bridge, port string, mac net.HardwareAddr) error {
+	// Assume default VLAN for local port
+	vlan := "0"
+	stdout, stderr, err := RunOVSAppctl("fdb/add", bridge, port, vlan, mac.String())
+	if err != nil {
+		return fmt.Errorf("failed to add FDB entry to OVS for LOCAL port, "+
+			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+	}
+	return nil
 }
 
 // IsOvsHwOffloadEnabled checks if OvS Hardware Offload is enabled.

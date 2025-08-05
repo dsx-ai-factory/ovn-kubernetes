@@ -121,10 +121,6 @@ func parseNetConfSingle(bytes []byte) (*ovncnitypes.NetConf, error) {
 }
 
 func parseNetConfList(confList *libcni.NetworkConfigList) (*ovncnitypes.NetConf, error) {
-	if len(confList.Plugins) > 1 {
-		return nil, ErrorChainingNotSupported
-	}
-
 	netconf := &ovncnitypes.NetConf{MTU: Default.MTU, NotDefault: false, IsSecondary: false}
 	if err := json.Unmarshal(confList.Plugins[0].Bytes, netconf); err != nil {
 		return nil, err
@@ -133,6 +129,10 @@ func parseNetConfList(confList *libcni.NetworkConfigList) (*ovncnitypes.NetConf,
 	// skip non-OVN NAD
 	if netconf.Type != "ovn-k8s-cni-overlay" {
 		return nil, ErrorAttachDefNotOvnManaged
+	}
+
+	if len(confList.Plugins) > 1 {
+		return nil, ErrorChainingNotSupported
 	}
 
 	netconf.Name = confList.Name

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
+	"github.com/google/go-cmp/cmp"
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/onsi/gomega"
@@ -26,7 +27,7 @@ import (
 )
 
 type ipAllocatorStub struct {
-	netxtIPs         []*net.IPNet
+	nextIPs          []*net.IPNet
 	allocateIPsError error
 	releasedIPs      []*net.IPNet
 }
@@ -36,7 +37,7 @@ func (a *ipAllocatorStub) AllocateIPs([]*net.IPNet) error {
 }
 
 func (a *ipAllocatorStub) AllocateNextIPs() ([]*net.IPNet, error) {
-	return a.netxtIPs, nil
+	return a.nextIPs, nil
 }
 
 func (a *ipAllocatorStub) ReleaseIPs(ips []*net.IPNet) error {
@@ -136,6 +137,9 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 		wantReleaseID             bool
 		wantRelasedIDOnRollback   bool
 		wantErr                   bool
+		isSingleStackIPv4         bool
+		isSingleStackIPv6         bool
+		multiNetworkDisabled      bool
 	}{
 		{
 			// on secondary L2 networks with no IPAM, we expect to generate a
@@ -158,7 +162,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			},
 		},
 		{
-			// on secondary L2 network with no IPAM, honor static IP requests
+			// with multiNetwork disabled, on secondary L2 network with no IPAM, honor static IP requests
 			// present in the network selection annotation
 			name: "expect requested static IP, no gateway, no IPAM",
 			args: args{
@@ -166,7 +170,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 					IPRequest: []string{"192.168.0.4/24"},
 				},
 				ipAllocator: &ipAllocatorStub{
-					netxtIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
+					nextIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
 				},
 			},
 			wantUpdatedPod: true,
@@ -175,7 +179,8 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				MAC:  util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.4/24")[0].IP),
 				Role: types.NetworkRolePrimary,
 			},
-			role: types.NetworkRolePrimary,
+			role:                 types.NetworkRolePrimary,
+			multiNetworkDisabled: true,
 		},
 		{
 			// on secondary L2 network with no IPAM, honor static IP and gateway
@@ -187,7 +192,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 					GatewayRequest: ovntest.MustParseIPs("192.168.0.1"),
 				},
 				ipAllocator: &ipAllocatorStub{
-					netxtIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
+					nextIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
 				},
 			},
 			wantUpdatedPod: true,
@@ -219,7 +224,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			ipam: true,
 			args: args{
 				ipAllocator: &ipAllocatorStub{
-					netxtIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
+					nextIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
 				},
 			},
 			wantUpdatedPod: true,
@@ -243,6 +248,113 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				},
 				Role: types.NetworkRolePrimary,
 			},
+			wantReleasedIPsOnRollback: ovntest.MustParseIPNets("192.168.0.3/24"),
+			role:                      types.NetworkRolePrimary,
+		},
+		{
+			name:                   "expect new IP and ipv6 gateway LLA for primary udn layer2 with dual stack",
+			ipam:                   true,
+			idAllocation:           true,
+			persistentIPAllocation: true,
+			args: args{
+				ipAllocator: &ipAllocatorStub{
+					nextIPs: ovntest.MustParseIPNets("192.168.0.3/24", "2010:100:200::3/60"),
+				},
+				idAllocator: &idAllocatorStub{
+					nextID: 100,
+				},
+			},
+			wantUpdatedPod: true,
+			wantPodAnnotation: &util.PodAnnotation{
+				IPs:            ovntest.MustParseIPNets("192.168.0.3/24", "2010:100:200::3/60"),
+				MAC:            util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.3/24")[0].IP),
+				Gateways:       []net.IP{ovntest.MustParseIP("192.168.0.1").To4(), ovntest.MustParseIP("2010:100:200::1")},
+				GatewayIPv6LLA: util.HWAddrToIPv6LLA(util.IPAddrToHWAddr(ovntest.MustParseIP("100.65.0.4"))),
+				Routes: []util.PodRoute{
+					{
+						Dest: &net.IPNet{
+							IP:   ovntest.MustParseIP("100.65.0.0").To4(),
+							Mask: net.CIDRMask(16, 32),
+						},
+						NextHop: ovntest.MustParseIP("192.168.0.1").To4(),
+					},
+					{
+						Dest:    ovntest.MustParseIPNet("fd99::/64"),
+						NextHop: ovntest.MustParseIP("2010:100:200::1"),
+					},
+				},
+				Role:     types.NetworkRolePrimary,
+				TunnelID: 100,
+			},
+			wantRelasedIDOnRollback:   true,
+			wantReleasedIPsOnRollback: ovntest.MustParseIPNets("192.168.0.3/24", "2010:100:200::3/60"),
+			role:                      types.NetworkRolePrimary,
+		},
+		{
+			name:                   "expect new IP and ipv6 gateway LLA for primary udn layer2 with single stack IPv6",
+			isSingleStackIPv6:      true,
+			ipam:                   true,
+			idAllocation:           true,
+			persistentIPAllocation: true,
+			args: args{
+				ipAllocator: &ipAllocatorStub{
+					nextIPs: ovntest.MustParseIPNets("2010:100:200::3/60"),
+				},
+				idAllocator: &idAllocatorStub{
+					nextID: 100,
+				},
+			},
+			wantUpdatedPod: true,
+			wantPodAnnotation: &util.PodAnnotation{
+				IPs:            ovntest.MustParseIPNets("2010:100:200::3/60"),
+				MAC:            util.IPAddrToHWAddr(ovntest.MustParseIPNets("2010:100:200::3/60")[0].IP),
+				Gateways:       []net.IP{ovntest.MustParseIP("2010:100:200::1")},
+				GatewayIPv6LLA: util.HWAddrToIPv6LLA(util.IPAddrToHWAddr(ovntest.MustParseIP("fd99::4"))),
+				Routes: []util.PodRoute{
+					{
+						Dest:    ovntest.MustParseIPNet("fd99::/64"),
+						NextHop: ovntest.MustParseIP("2010:100:200::1"),
+					},
+				},
+				Role:     types.NetworkRolePrimary,
+				TunnelID: 100,
+			},
+			wantRelasedIDOnRollback:   true,
+			wantReleasedIPsOnRollback: ovntest.MustParseIPNets("2010:100:200::3/60"),
+			role:                      types.NetworkRolePrimary,
+		},
+		{
+			name:                   "expect new IP but no ipv6 gateway LLA for primary udn layer2 with single stack IPv4",
+			isSingleStackIPv4:      true,
+			ipam:                   true,
+			idAllocation:           true,
+			persistentIPAllocation: true,
+			args: args{
+				ipAllocator: &ipAllocatorStub{
+					nextIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
+				},
+				idAllocator: &idAllocatorStub{
+					nextID: 100,
+				},
+			},
+			wantUpdatedPod: true,
+			wantPodAnnotation: &util.PodAnnotation{
+				IPs:      ovntest.MustParseIPNets("192.168.0.3/24"),
+				MAC:      util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.3/24")[0].IP),
+				Gateways: []net.IP{ovntest.MustParseIP("192.168.0.1").To4()},
+				Routes: []util.PodRoute{
+					{
+						Dest: &net.IPNet{
+							IP:   ovntest.MustParseIP("100.65.0.0").To4(),
+							Mask: net.CIDRMask(16, 32),
+						},
+						NextHop: ovntest.MustParseIP("192.168.0.1").To4(),
+					},
+				},
+				Role:     types.NetworkRolePrimary,
+				TunnelID: 100,
+			},
+			wantRelasedIDOnRollback:   true,
 			wantReleasedIPsOnRollback: ovntest.MustParseIPNets("192.168.0.3/24"),
 			role:                      types.NetworkRolePrimary,
 		},
@@ -310,7 +422,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 					IPRequest: []string{"192.168.0.4/24"},
 				},
 				ipAllocator: &ipAllocatorStub{
-					netxtIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
+					nextIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
 				},
 			},
 			wantUpdatedPod: true,
@@ -348,7 +460,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 					IPRequest: []string{"192.168.0.4/24"},
 				},
 				ipAllocator: &ipAllocatorStub{
-					netxtIPs:         ovntest.MustParseIPNets("192.168.0.3/24"),
+					nextIPs:          ovntest.MustParseIPNets("192.168.0.3/24"),
 					allocateIPsError: ipam.ErrAllocated,
 				},
 			},
@@ -386,7 +498,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 					IPRequest: []string{"192.168.0.4/24"},
 				},
 				ipAllocator: &ipAllocatorStub{
-					netxtIPs:         ovntest.MustParseIPNets("192.168.0.3/24"),
+					nextIPs:          ovntest.MustParseIPNets("192.168.0.3/24"),
 					allocateIPsError: errors.New("Allocate IPs failed"),
 				},
 			},
@@ -423,7 +535,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 					IPRequest: []string{"ivalid"},
 				},
 				ipAllocator: &ipAllocatorStub{
-					netxtIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
+					nextIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
 				},
 			},
 			wantErr: true,
@@ -437,7 +549,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 					MacRequest: "ivalid",
 				},
 				ipAllocator: &ipAllocatorStub{
-					netxtIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
+					nextIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
 				},
 			},
 			wantErr:         true,
@@ -453,7 +565,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 					MacRequest: requestedMAC,
 				},
 				ipAllocator: &ipAllocatorStub{
-					netxtIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
+					nextIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
 				},
 			},
 			wantUpdatedPod: true,
@@ -490,7 +602,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 					MacRequest: "invalid",
 				},
 				ipAllocator: &ipAllocatorStub{
-					netxtIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
+					nextIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
 				},
 			},
 			invalidNetworkAnnotation: true,
@@ -516,7 +628,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 					},
 				},
 				ipAllocator: &ipAllocatorStub{
-					netxtIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
+					nextIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
 				},
 			},
 			wantUpdatedPod: true,
@@ -550,7 +662,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 					},
 				},
 				ipAllocator: &ipAllocatorStub{
-					netxtIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
+					nextIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
 				},
 			},
 			wantUpdatedPod:            true,
@@ -583,7 +695,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 					Status: ipamclaimsapi.IPAMClaimStatus{},
 				},
 				ipAllocator: &ipAllocatorStub{
-					netxtIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
+					nextIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
 				},
 			},
 			wantUpdatedPod: true,
@@ -697,6 +809,17 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			network.Name = "network"
 			network.Namespace = "namespace"
 
+			config.OVNKubernetesFeature.EnableInterconnect = tt.idAllocation
+			config.OVNKubernetesFeature.EnableMultiNetwork = !tt.multiNetworkDisabled
+			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+			config.IPv4Mode = true
+			if tt.isSingleStackIPv6 {
+				config.IPv4Mode = false
+			}
+			config.IPv6Mode = true
+			if tt.isSingleStackIPv4 {
+				config.IPv6Mode = false
+			}
 			var netInfo util.NetInfo
 			netInfo = &util.DefaultNetInfo{}
 			nadName := types.DefaultNetworkName
@@ -704,7 +827,12 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				nadName = util.GetNADName(network.Namespace, network.Name)
 				var subnets string
 				if tt.ipam {
-					subnets = "192.168.0.0/24"
+					subnets = "192.168.0.0/24,2001:db8::/64"
+					if tt.isSingleStackIPv4 {
+						subnets = "192.168.0.0/24"
+					} else if tt.isSingleStackIPv6 {
+						subnets = "2001:db8::/64"
+					}
 				}
 				netInfo, err = util.NewNetInfo(&ovncnitypes.NetConf{
 					Topology: types.Layer2Topology,
@@ -721,7 +849,20 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				}
 			}
 
-			config.OVNKubernetesFeature.EnableInterconnect = tt.idAllocation
+			ifaddrs := `{"network":{"ipv4":"100.65.0.4/16","ipv6":"fd99::4/64"}}`
+			if tt.isSingleStackIPv4 {
+				ifaddrs = `{"network":{"ipv4":"100.65.0.4/16"}}`
+			} else if tt.isSingleStackIPv6 {
+				ifaddrs = `{"network":{"ipv6":"fd99::4/64"}}`
+			}
+
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": ifaddrs,
+					},
+				},
+			}
 
 			pod := &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
@@ -757,6 +898,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				tt.args.ipAllocator,
 				tt.args.idAllocator,
 				netInfo,
+				node,
 				pod,
 				network,
 				claimsReconciler,
@@ -803,7 +945,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				g.Expect(podAnnotation.MAC[0]&2).To(gomega.BeEquivalentTo(2), "Expected local MAC")
 				return
 			}
-			g.Expect(podAnnotation).To(gomega.Equal(tt.wantPodAnnotation))
+			g.Expect(podAnnotation).To(gomega.Equal(tt.wantPodAnnotation), "diff: %s", cmp.Diff(tt.wantPodAnnotation, podAnnotation))
 
 			if tt.wantUpdatedPod {
 				g.Expect(pod).NotTo(gomega.BeNil(), "Expected an updated pod")

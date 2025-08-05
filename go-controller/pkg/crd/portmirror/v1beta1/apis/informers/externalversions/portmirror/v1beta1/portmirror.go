@@ -18,13 +18,13 @@ limitations under the License.
 package v1beta1
 
 import (
-	"context"
+	context "context"
 	time "time"
 
-	portmirrorv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
+	crdportmirrorv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
 	versioned "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned"
 	internalinterfaces "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/informers/externalversions/internalinterfaces"
-	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/listers/portmirror/v1beta1"
+	portmirrorv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/listers/portmirror/v1beta1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	watch "k8s.io/apimachinery/pkg/watch"
@@ -35,7 +35,7 @@ import (
 // PortMirrors.
 type PortMirrorInformer interface {
 	Informer() cache.SharedIndexInformer
-	Lister() v1beta1.PortMirrorLister
+	Lister() portmirrorv1beta1.PortMirrorLister
 }
 
 type portMirrorInformer struct {
@@ -70,7 +70,7 @@ func NewFilteredPortMirrorInformer(client versioned.Interface, namespace string,
 				return client.K8sV1beta1().PortMirrors(namespace).Watch(context.TODO(), options)
 			},
 		},
-		&portmirrorv1beta1.PortMirror{},
+		&crdportmirrorv1beta1.PortMirror{},
 		resyncPeriod,
 		indexers,
 	)
@@ -81,9 +81,9 @@ func (f *portMirrorInformer) defaultInformer(client versioned.Interface, resyncP
 }
 
 func (f *portMirrorInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&portmirrorv1beta1.PortMirror{}, f.defaultInformer)
+	return f.factory.InformerFor(&crdportmirrorv1beta1.PortMirror{}, f.defaultInformer)
 }
 
-func (f *portMirrorInformer) Lister() v1beta1.PortMirrorLister {
-	return v1beta1.NewPortMirrorLister(f.Informer().GetIndexer())
+func (f *portMirrorInformer) Lister() portmirrorv1beta1.PortMirrorLister {
+	return portmirrorv1beta1.NewPortMirrorLister(f.Informer().GetIndexer())
 }

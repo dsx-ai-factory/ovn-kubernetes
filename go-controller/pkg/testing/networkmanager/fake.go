@@ -50,6 +50,7 @@ func (fcm *FakeControllerManager) Reconcile(_ string, _, _ util.NetInfo) error {
 
 type FakeNetworkManager struct {
 	// namespace -> netInfo
+	// if netInfo is nil, it represents a namespace which contains the required UDN label but with no valid network. It will return invalid network error.
 	PrimaryNetworks map[string]util.NetInfo
 }
 
@@ -62,14 +63,22 @@ func (fnm *FakeNetworkManager) Start() error { return nil }
 func (fnm *FakeNetworkManager) Stop() {}
 
 func (fnm *FakeNetworkManager) GetActiveNetworkForNamespace(namespace string) (util.NetInfo, error) {
-	if primaryNetworks, ok := fnm.PrimaryNetworks[namespace]; ok && primaryNetworks != nil {
-		return primaryNetworks, nil
+	network := fnm.GetActiveNetworkForNamespaceFast(namespace)
+	if network == nil {
+		return nil, util.NewInvalidPrimaryNetworkError(namespace)
 	}
-	return &util.DefaultNetInfo{}, nil
+	return network, nil
 }
 
-func (nc *FakeNetworkManager) GetNetwork(networkName string) util.NetInfo {
-	for _, ni := range nc.PrimaryNetworks {
+func (fnm *FakeNetworkManager) GetActiveNetworkForNamespaceFast(namespace string) util.NetInfo {
+	if primaryNetworks, ok := fnm.PrimaryNetworks[namespace]; ok {
+		return primaryNetworks
+	}
+	return &util.DefaultNetInfo{}
+}
+
+func (fnm *FakeNetworkManager) GetNetwork(networkName string) util.NetInfo {
+	for _, ni := range fnm.PrimaryNetworks {
 		if ni.GetNetworkName() == networkName {
 			return ni
 		}
@@ -77,9 +86,9 @@ func (nc *FakeNetworkManager) GetNetwork(networkName string) util.NetInfo {
 	return &util.DefaultNetInfo{}
 }
 
-func (nc *FakeNetworkManager) GetActiveNetworkNamespaces(networkName string) ([]string, error) {
+func (fnm *FakeNetworkManager) GetActiveNetworkNamespaces(networkName string) ([]string, error) {
 	namespaces := make([]string, 0)
-	for namespaceName, primaryNAD := range nc.PrimaryNetworks {
+	for namespaceName, primaryNAD := range fnm.PrimaryNetworks {
 		nadNetworkName := primaryNAD.GetNADs()[0]
 		if nadNetworkName != networkName {
 			continue
@@ -89,9 +98,9 @@ func (nc *FakeNetworkManager) GetActiveNetworkNamespaces(networkName string) ([]
 	return namespaces, nil
 }
 
-func (nc *FakeNetworkManager) DoWithLock(f func(network util.NetInfo) error) error {
+func (fnm *FakeNetworkManager) DoWithLock(f func(network util.NetInfo) error) error {
 	var errs []error
-	for _, ni := range nc.PrimaryNetworks {
+	for _, ni := range fnm.PrimaryNetworks {
 		if err := f(ni); err != nil {
 			errs = append(errs, err)
 		}

@@ -28,7 +28,7 @@ type FakeK8sV1beta1 struct {
 }
 
 func (c *FakeK8sV1beta1) VirtualIPs(namespace string) v1beta1.VirtualIPInterface {
-	return &FakeVirtualIPs{c, namespace}
+	return newFakeVirtualIPs(c, namespace)
 }
 
 // RESTClient returns a RESTClient that is used to communicate

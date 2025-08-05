@@ -18,10 +18,10 @@ limitations under the License.
 package v1beta1
 
 import (
-	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/client-go/listers"
-	"k8s.io/client-go/tools/cache"
+	ipreservationv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
+	labels "k8s.io/apimachinery/pkg/labels"
+	listers "k8s.io/client-go/listers"
+	cache "k8s.io/client-go/tools/cache"
 )
 
 // IPReservationLister helps list IPReservations.
@@ -29,7 +29,7 @@ import (
 type IPReservationLister interface {
 	// List lists all IPReservations in the indexer.
 	// Objects returned here must be treated as read-only.
-	List(selector labels.Selector) (ret []*v1beta1.IPReservation, err error)
+	List(selector labels.Selector) (ret []*ipreservationv1beta1.IPReservation, err error)
 	// IPReservations returns an object that can list and get IPReservations.
 	IPReservations(namespace string) IPReservationNamespaceLister
 	IPReservationListerExpansion
@@ -37,17 +37,17 @@ type IPReservationLister interface {
 
 // iPReservationLister implements the IPReservationLister interface.
 type iPReservationLister struct {
-	listers.ResourceIndexer[*v1beta1.IPReservation]
+	listers.ResourceIndexer[*ipreservationv1beta1.IPReservation]
 }
 
 // NewIPReservationLister returns a new IPReservationLister.
 func NewIPReservationLister(indexer cache.Indexer) IPReservationLister {
-	return &iPReservationLister{listers.New[*v1beta1.IPReservation](indexer, v1beta1.Resource("ipreservation"))}
+	return &iPReservationLister{listers.New[*ipreservationv1beta1.IPReservation](indexer, ipreservationv1beta1.Resource("ipreservation"))}
 }
 
 // IPReservations returns an object that can list and get IPReservations.
 func (s *iPReservationLister) IPReservations(namespace string) IPReservationNamespaceLister {
-	return iPReservationNamespaceLister{listers.NewNamespaced[*v1beta1.IPReservation](s.ResourceIndexer, namespace)}
+	return iPReservationNamespaceLister{listers.NewNamespaced[*ipreservationv1beta1.IPReservation](s.ResourceIndexer, namespace)}
 }
 
 // IPReservationNamespaceLister helps list and get IPReservations.
@@ -55,15 +55,15 @@ func (s *iPReservationLister) IPReservations(namespace string) IPReservationName
 type IPReservationNamespaceLister interface {
 	// List lists all IPReservations in the indexer for a given namespace.
 	// Objects returned here must be treated as read-only.
-	List(selector labels.Selector) (ret []*v1beta1.IPReservation, err error)
+	List(selector labels.Selector) (ret []*ipreservationv1beta1.IPReservation, err error)
 	// Get retrieves the IPReservation from the indexer for a given namespace and name.
 	// Objects returned here must be treated as read-only.
-	Get(name string) (*v1beta1.IPReservation, error)
+	Get(name string) (*ipreservationv1beta1.IPReservation, error)
 	IPReservationNamespaceListerExpansion
 }
 
 // iPReservationNamespaceLister implements the IPReservationNamespaceLister
 // interface.
 type iPReservationNamespaceLister struct {
-	listers.ResourceIndexer[*v1beta1.IPReservation]
+	listers.ResourceIndexer[*ipreservationv1beta1.IPReservation]
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
 	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	OFManager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/openflow-manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
@@ -59,9 +60,8 @@ func initFakeNodePortWatcher(iptV4, iptV6 util.IPTablesHelper) *nodePortWatcher 
 	id := OFManager.OpenFlowCacheManager.CreateFlowCache(bridgeName)
 	gwMACParsed, _ := net.ParseMAC(gwMAC)
 
-	defaultNetConfig := &bridgeUDNConfiguration{
-		ofPortPatch: "patch-breth0_ov",
-	}
+	defaultBridge := bridgeconfig.TestDefaultBridgeConfig()
+	defaultBridge.SetMAC(gwMACParsed)
 
 	fNPW := nodePortWatcher{
 		ofportPhys:  "eth0",
@@ -70,26 +70,22 @@ func initFakeNodePortWatcher(iptV4, iptV6 util.IPTablesHelper) *nodePortWatcher 
 		serviceInfo: make(map[k8stypes.NamespacedName]*serviceConfig),
 		ofm: &openflowManager{
 			defaultBridgeFlowID: id,
-			defaultBridge: &bridgeConfiguration{
-				netConfig: map[string]*bridgeUDNConfiguration{
-					types.DefaultNetworkName: defaultNetConfig,
-				},
-				macAddress: gwMACParsed,
-			},
+			defaultBridge:       defaultBridge,
 		},
 		networkManager: networkmanager.Default().Interface(),
+		gwBridge:       bridgeconfig.TestBridgeConfig(""),
 	}
 	return &fNPW
 }
 
-func startNodePortWatcher(n *nodePortWatcher, fakeClient *util.OVNNodeClientset, fakeMgmtPortConfig *managementPortConfig) error {
+func startNodePortWatcher(n *nodePortWatcher, fakeClient *util.OVNNodeClientset) error {
 	err := initLocalGatewayIPTables()
 	if err != nil {
 		return err
 	}
 
 	k := &kube.Kube{KClient: fakeClient.KubeClient}
-	n.nodeIPManager, err = newAddressManagerInternal(fakeNodeName, k, fakeMgmtPortConfig, n.watchFactory, nil, false)
+	n.nodeIPManager, err = newAddressManagerInternal(fakeNodeName, k, nil, n.watchFactory, nil, false)
 	if err != nil {
 		return err
 	}
@@ -137,14 +133,14 @@ func startNodePortWatcher(n *nodePortWatcher, fakeClient *util.OVNNodeClientset,
 	return err
 }
 
-func startNodePortWatcherWithRetry(n *nodePortWatcher, fakeClient *util.OVNNodeClientset, fakeMgmtPortConfig *managementPortConfig, stopChan chan struct{}, wg *sync.WaitGroup) (*retry.RetryFramework, error) {
+func startNodePortWatcherWithRetry(n *nodePortWatcher, fakeClient *util.OVNNodeClientset, stopChan chan struct{}, wg *sync.WaitGroup) (*retry.RetryFramework, error) {
 	err := initLocalGatewayIPTables()
 	if err != nil {
 		return nil, err
 	}
 
 	k := &kube.Kube{KClient: fakeClient.KubeClient}
-	n.nodeIPManager, err = newAddressManagerInternal(fakeNodeName, k, fakeMgmtPortConfig, n.watchFactory, nil, false)
+	n.nodeIPManager, err = newAddressManagerInternal(fakeNodeName, k, nil, n.watchFactory, nil, false)
 	if err != nil {
 		return nil, err
 	}
@@ -253,7 +249,7 @@ func addConntrackMocks(nlMock *mocks.NetLinkOps, filterDescs []ctFilterDesc) {
 	ctMocks := make([]ovntest.TestifyMockHelper, 0, len(filterDescs))
 	for _, ctf := range filterDescs {
 		ctMocks = append(ctMocks, ovntest.TestifyMockHelper{
-			OnCallMethodName: "ConntrackDeleteFilter",
+			OnCallMethodName: "ConntrackDeleteFilters",
 			OnCallMethodArgs: []interface{}{
 				netlink.ConntrackTableType(netlink.ConntrackTable),
 				netlink.InetFamily(netlink.FAMILY_V4),
@@ -273,13 +269,12 @@ one and started again to exercise the tests.
 */
 var _ = Describe("Node Operations", func() {
 	var (
-		app                *cli.App
-		fExec              *ovntest.FakeExec
-		iptV4, iptV6       util.IPTablesHelper
-		nft                *knftables.Fake
-		fNPW               *nodePortWatcher
-		fakeMgmtPortConfig managementPortConfig
-		netlinkMock        *mocks.NetLinkOps
+		app          *cli.App
+		fExec        *ovntest.FakeExec
+		iptV4, iptV6 util.IPTablesHelper
+		nft          *knftables.Fake
+		fNPW         *nodePortWatcher
+		netlinkMock  *mocks.NetLinkOps
 
 		nInitialFakeCommands int
 	)
@@ -302,23 +297,8 @@ var _ = Describe("Node Operations", func() {
 
 		iptV4, iptV6 = util.SetFakeIPTablesHelpers()
 		nft = nodenft.SetFakeNFTablesHelper()
-		_, nodeNet, err := net.ParseCIDR("10.1.1.0/24")
-		Expect(err).NotTo(HaveOccurred())
-		// Make a fake MgmtPortConfig with only the fields we care about
-		fakeMgmtPortIPFamilyConfig := managementPortIPFamilyConfig{
-			allSubnets: nil,
-			ifAddr:     nodeNet,
-			gwIP:       nodeNet.IP,
-		}
-		fakeMgmtPortConfig = managementPortConfig{
-			ifName:    fakeNodeName,
-			link:      nil,
-			routerMAC: nil,
-			ipv4:      &fakeMgmtPortIPFamilyConfig,
-			ipv6:      nil,
-		}
 		OFManager.NewOpenFlowCacheManager(&sync.WaitGroup{}, make(chan struct{}))
-		err = setupManagementPortNFTables(&fakeMgmtPortConfig)
+		err = nft.ParseDump(getBaseNFTRules(types.K8sMgmtIntfName))
 		Expect(err).NotTo(HaveOccurred())
 
 		fNPW = initFakeNodePortWatcher(iptV4, iptV6)
@@ -329,7 +309,7 @@ var _ = Describe("Node Operations", func() {
 	})
 
 	Context("on startup", func() {
-		It("removes stale iptables/nftables rules while keeping remaining intact", func() {
+		It("removes stale iptables rules while keeping remaining intact", func() {
 			app.Action = func(*cli.Context) error {
 				// Depending on the order of informer event processing the initial
 				// Service might be "added" once or twice.  Take that into account.
@@ -368,22 +348,6 @@ var _ = Describe("Node Operations", func() {
 				)
 				Expect(insertIptRules(fakeRules)).To(Succeed())
 
-				// Inject rules into SNAT MGMT chain that shouldn't exist and should be cleared on a restore, even if the chain has no rules
-				tx := nft.NewTransaction()
-				tx.Add(&knftables.Chain{
-					Name:    nftablesMgmtPortChain,
-					Comment: knftables.PtrTo("OVN SNAT to Management Port"),
-
-					Type:     knftables.PtrTo(knftables.NATType),
-					Hook:     knftables.PtrTo(knftables.PostroutingHook),
-					Priority: knftables.PtrTo(knftables.SNATPriority),
-				})
-				tx.Add(&knftables.Rule{
-					Chain: nftablesMgmtPortChain,
-					Rule:  "blah blah blah",
-				})
-				Expect(nft.Run(context.Background(), tx)).To(Succeed())
-
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
 						"OVN-KUBE-EXTERNALIP": []string{
@@ -399,10 +363,6 @@ var _ = Describe("Node Operations", func() {
 				err := f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName) + "\nadd rule inet ovn-kubernetes mgmtport-snat blah blah blah\n"
-				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
-				Expect(err).NotTo(HaveOccurred())
-
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service).GetNodeClientset()
 				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
@@ -414,11 +374,10 @@ var _ = Describe("Node Operations", func() {
 				}()
 
 				fNPW.watchFactory = wf
-				Expect(startNodePortWatcher(fNPW, fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				Expect(startNodePortWatcher(fNPW, fakeClient)).To(Succeed())
 				Eventually(func() bool {
 					return fExec.CalledMatchesExpectedAtLeastN(minNFakeCommands)
 				}, "2s").Should(BeTrue(), fExec.ErrorDesc)
-				Expect(setupManagementPortNFTables(&fakeMgmtPortConfig)).To(Succeed())
 
 				expectedTables = map[string]util.FakeTable{
 					"nat": {
@@ -452,8 +411,11 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
-				return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				expectedNFT := getBaseNFTRules(types.K8sMgmtIntfName)
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(err).NotTo(HaveOccurred())
+
+				return nil
 			}
 			err := app.Run([]string{app.Name})
 			Expect(err).NotTo(HaveOccurred())
@@ -492,7 +454,7 @@ var _ = Describe("Node Operations", func() {
 				}()
 
 				fNPW.watchFactory = wf
-				Expect(startNodePortWatcher(fNPW, fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				Expect(startNodePortWatcher(fNPW, fakeClient)).To(Succeed())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -526,7 +488,7 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				expectedNFT := getBaseNFTRules(types.K8sMgmtIntfName)
 				return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 			}
 			err := app.Run([]string{app.Name})
@@ -567,7 +529,7 @@ var _ = Describe("Node Operations", func() {
 				}()
 
 				fNPW.watchFactory = wf
-				Expect(startNodePortWatcher(fNPW, fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				Expect(startNodePortWatcher(fNPW, fakeClient)).To(Succeed())
 				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables := map[string]util.FakeTable{
@@ -602,7 +564,7 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				expectedNFT := getBaseNFTRules(types.K8sMgmtIntfName)
 				return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 			}
 			err := app.Run([]string{app.Name})
@@ -654,7 +616,7 @@ var _ = Describe("Node Operations", func() {
 				}()
 
 				fNPW.watchFactory = wf
-				Expect(startNodePortWatcher(fNPW, fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				Expect(startNodePortWatcher(fNPW, fakeClient)).To(Succeed())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -690,7 +652,7 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				expectedNFT := getBaseNFTRules(types.K8sMgmtIntfName)
 				expectedNFT += fmt.Sprintf("add element inet ovn-kubernetes mgmtport-no-snat-nodeports { tcp . %v }\n", service.Spec.Ports[0].NodePort)
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				Expect(err).NotTo(HaveOccurred())
@@ -751,7 +713,7 @@ var _ = Describe("Node Operations", func() {
 				}()
 
 				fNPW.watchFactory = wf
-				Expect(startNodePortWatcher(fNPW, fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				Expect(startNodePortWatcher(fNPW, fakeClient)).To(Succeed())
 				Eventually(func() bool {
 					return fExec.CalledMatchesExpectedAtLeastN(minNFakeCommands)
 				}, "2s").Should(BeTrue(), fExec.ErrorDesc)
@@ -791,7 +753,7 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				expectedNFT := getBaseNFTRules(types.K8sMgmtIntfName)
 				return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 			}
 			err := app.Run([]string{app.Name})
@@ -849,7 +811,7 @@ var _ = Describe("Node Operations", func() {
 				}()
 
 				fNPW.watchFactory = wf
-				Expect(startNodePortWatcher(fNPW, fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				Expect(startNodePortWatcher(fNPW, fakeClient)).To(Succeed())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -896,7 +858,7 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				expectedNFT := getBaseNFTRules(types.K8sMgmtIntfName)
 				expectedNFT += fmt.Sprintf("add element inet ovn-kubernetes mgmtport-no-snat-nodeports { tcp . %v }\n", service.Spec.Ports[0].NodePort)
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				Expect(err).NotTo(HaveOccurred())
@@ -988,7 +950,7 @@ var _ = Describe("Node Operations", func() {
 				}()
 
 				fNPW.watchFactory = wf
-				Expect(startNodePortWatcher(fNPW, fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				Expect(startNodePortWatcher(fNPW, fakeClient)).To(Succeed())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -1033,7 +995,7 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				Expect(f4.MatchState(expectedTables, nil)).To(Succeed())
 
-				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				expectedNFT := getBaseNFTRules(types.K8sMgmtIntfName)
 				expectedNFT += fmt.Sprintf("add element inet ovn-kubernetes mgmtport-no-snat-services-v4 { %s . tcp . %d }\n", ep1.Addresses[0], int32(service.Spec.Ports[0].TargetPort.IntValue()))
 				expectedNFT += fmt.Sprintf("add element inet ovn-kubernetes mgmtport-no-snat-services-v4 { %s . tcp . %d }\n", ep2.Addresses[0], int32(service.Spec.Ports[0].TargetPort.IntValue()))
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
@@ -1097,7 +1059,7 @@ var _ = Describe("Node Operations", func() {
 				}()
 
 				fNPW.watchFactory = wf
-				Expect(startNodePortWatcher(fNPW, fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				Expect(startNodePortWatcher(fNPW, fakeClient)).To(Succeed())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -1141,7 +1103,7 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				expectedNFT := getBaseNFTRules(types.K8sMgmtIntfName)
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				Expect(err).NotTo(HaveOccurred())
 
@@ -1208,7 +1170,7 @@ var _ = Describe("Node Operations", func() {
 					wf.Shutdown()
 				}()
 				fNPW.watchFactory = wf
-				Expect(startNodePortWatcher(fNPW, fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				Expect(startNodePortWatcher(fNPW, fakeClient)).To(Succeed())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -1267,7 +1229,7 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				expectedNFT := getBaseNFTRules(types.K8sMgmtIntfName)
 				expectedNFT += fmt.Sprintf("add element inet ovn-kubernetes mgmtport-no-snat-nodeports { tcp . %v }\n", service.Spec.Ports[0].NodePort)
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				Expect(err).NotTo(HaveOccurred())
@@ -1323,7 +1285,7 @@ var _ = Describe("Node Operations", func() {
 				}()
 
 				fNPW.watchFactory = wf
-				Expect(startNodePortWatcher(fNPW, fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				Expect(startNodePortWatcher(fNPW, fakeClient)).To(Succeed())
 				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables4 := map[string]util.FakeTable{
@@ -1371,7 +1333,7 @@ var _ = Describe("Node Operations", func() {
 				err = f6.MatchState(expectedTables6, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				expectedNFT := getBaseNFTRules(types.K8sMgmtIntfName)
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				Expect(err).NotTo(HaveOccurred())
 
@@ -1422,7 +1384,7 @@ var _ = Describe("Node Operations", func() {
 				}()
 
 				fNPW.watchFactory = wf
-				Expect(startNodePortWatcher(fNPW, fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				Expect(startNodePortWatcher(fNPW, fakeClient)).To(Succeed())
 				Eventually(func() bool {
 					return fExec.CalledMatchesExpectedAtLeastN(minNFakeCommands)
 				}, "2s").Should(BeTrue(), fExec.ErrorDesc)
@@ -1473,7 +1435,7 @@ var _ = Describe("Node Operations", func() {
 				err = f6.MatchState(expectedTables6, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				expectedNFT := getBaseNFTRules(types.K8sMgmtIntfName)
 				return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 			}
 			err := app.Run([]string{app.Name})
@@ -1515,7 +1477,7 @@ var _ = Describe("Node Operations", func() {
 					wf.Shutdown()
 				}()
 				fNPW.watchFactory = wf
-				Expect(startNodePortWatcher(fNPW, fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				Expect(startNodePortWatcher(fNPW, fakeClient)).To(Succeed())
 
 				addConntrackMocks(netlinkMock, []ctFilterDesc{{"1.1.1.1", 8032}, {"10.129.0.2", 8032}})
 				Expect(fakeClient.KubeClient.CoreV1().Services(service.Namespace).Delete(
@@ -1566,7 +1528,7 @@ var _ = Describe("Node Operations", func() {
 				}, "2s").Should(Succeed())
 
 				Eventually(func() error {
-					expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+					expectedNFT := getBaseNFTRules(types.K8sMgmtIntfName)
 					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}, "2s").Should(Succeed())
 
@@ -1604,7 +1566,7 @@ var _ = Describe("Node Operations", func() {
 				}()
 
 				fNPW.watchFactory = wf
-				Expect(startNodePortWatcher(fNPW, fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				Expect(startNodePortWatcher(fNPW, fakeClient)).To(Succeed())
 
 				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 0}, {"192.168.18.15", 31111}})
 				Expect(fakeClient.KubeClient.CoreV1().Services(service.Namespace).Delete(
@@ -1654,7 +1616,7 @@ var _ = Describe("Node Operations", func() {
 				}, "2s").Should(Succeed())
 
 				Eventually(func() error {
-					expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+					expectedNFT := getBaseNFTRules(types.K8sMgmtIntfName)
 					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}, "2s").Should(Succeed())
 
@@ -1701,7 +1663,7 @@ var _ = Describe("Node Operations", func() {
 				}()
 
 				fNPW.watchFactory = wf
-				Expect(startNodePortWatcher(fNPW, fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				Expect(startNodePortWatcher(fNPW, fakeClient)).To(Succeed())
 				Eventually(func() bool {
 					return fExec.CalledMatchesExpectedAtLeastN(minNFakeCommands)
 				}, "2s").Should(BeTrue(), fExec.ErrorDesc)
@@ -1742,7 +1704,7 @@ var _ = Describe("Node Operations", func() {
 				}).Should(Succeed())
 
 				Eventually(func() error {
-					expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+					expectedNFT := getBaseNFTRules(types.K8sMgmtIntfName)
 					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}).Should(Succeed())
 
@@ -1782,7 +1744,7 @@ var _ = Describe("Node Operations", func() {
 				}, "2s").Should(Succeed())
 
 				Eventually(func() error {
-					expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+					expectedNFT := getBaseNFTRules(types.K8sMgmtIntfName)
 					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}, "2s").Should(Succeed())
 
@@ -1848,7 +1810,7 @@ var _ = Describe("Node Operations", func() {
 				}()
 
 				fNPW.watchFactory = wf
-				Expect(startNodePortWatcher(fNPW, fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				Expect(startNodePortWatcher(fNPW, fakeClient)).To(Succeed())
 
 				expectedLBIngressFlows := []string{
 					"cookie=0x10c6b89e483ea111, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=5.5.5.5, actions=output:LOCAL",
@@ -1944,7 +1906,7 @@ var _ = Describe("Node Operations", func() {
 				By("starting node port watcher retry framework")
 				fNPW.watchFactory = wf
 				nodePortWatcherRetry, err = startNodePortWatcherWithRetry(
-					fNPW, fakeClient, &fakeMgmtPortConfig, stopChan, wg)
+					fNPW, fakeClient, stopChan, wg)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(nodePortWatcherRetry).NotTo(BeNil())
 
@@ -2052,7 +2014,7 @@ var _ = Describe("Node Operations", func() {
 				}()
 
 				fNPW.watchFactory = wf
-				Expect(startNodePortWatcher(fNPW, fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				Expect(startNodePortWatcher(fNPW, fakeClient)).To(Succeed())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables := map[string]util.FakeTable{
@@ -2089,7 +2051,7 @@ var _ = Describe("Node Operations", func() {
 				}).Should(Succeed())
 
 				Eventually(func() error {
-					expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+					expectedNFT := getBaseNFTRules(types.K8sMgmtIntfName)
 					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}).Should(Succeed())
 
@@ -2129,7 +2091,7 @@ var _ = Describe("Node Operations", func() {
 				}, "2s").Should(Succeed())
 
 				Eventually(func() error {
-					expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+					expectedNFT := getBaseNFTRules(types.K8sMgmtIntfName)
 					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}, "2s").Should(Succeed())
 
@@ -2186,7 +2148,7 @@ var _ = Describe("Node Operations", func() {
 				}()
 
 				fNPW.watchFactory = wf
-				Expect(startNodePortWatcher(fNPW, fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				Expect(startNodePortWatcher(fNPW, fakeClient)).To(Succeed())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -2221,7 +2183,7 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				Expect(f4.MatchState(expectedTables, nil)).To(Succeed())
 
-				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				expectedNFT := getBaseNFTRules(types.K8sMgmtIntfName)
 				expectedNFT += fmt.Sprintf("add element inet ovn-kubernetes mgmtport-no-snat-nodeports { tcp . %v }\n", service.Spec.Ports[0].NodePort)
 				Expect(nodenft.MatchNFTRules(expectedNFT, nft.Dump())).To(Succeed())
 
@@ -2264,7 +2226,7 @@ var _ = Describe("Node Operations", func() {
 				}, "2s").Should(Succeed())
 
 				Eventually(func() error {
-					expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
+					expectedNFT = getBaseNFTRules(types.K8sMgmtIntfName)
 					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}, "2s").Should(Succeed())
 
@@ -2326,7 +2288,7 @@ var _ = Describe("Node Operations", func() {
 				}()
 
 				fNPW.watchFactory = wf
-				Expect(startNodePortWatcher(fNPW, fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				Expect(startNodePortWatcher(fNPW, fakeClient)).To(Succeed())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -2365,7 +2327,7 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				Expect(f4.MatchState(expectedTables, nil)).To(Succeed())
 
-				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				expectedNFT := getBaseNFTRules(types.K8sMgmtIntfName)
 				expectedNFT += fmt.Sprintf("add element inet ovn-kubernetes mgmtport-no-snat-nodeports { tcp . %v }\n", service.Spec.Ports[0].NodePort)
 				Expect(nodenft.MatchNFTRules(expectedNFT, nft.Dump())).To(Succeed())
 
@@ -2408,7 +2370,7 @@ var _ = Describe("Node Operations", func() {
 				}, "2s").Should(Succeed())
 
 				Eventually(func() error {
-					expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
+					expectedNFT = getBaseNFTRules(types.K8sMgmtIntfName)
 					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}, "2s").Should(Succeed())
 
@@ -2471,7 +2433,7 @@ var _ = Describe("Node Operations", func() {
 				}()
 
 				fNPW.watchFactory = wf
-				Expect(startNodePortWatcher(fNPW, fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				Expect(startNodePortWatcher(fNPW, fakeClient)).To(Succeed())
 				// to ensure the endpoint is local-host-networked
 				res := fNPW.nodeIPManager.cidrs.Has(fmt.Sprintf("%s/32", ep1.Addresses[0]))
 				Expect(res).To(BeTrue())
@@ -2513,7 +2475,7 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				Expect(f4.MatchState(expectedTables, nil)).To(Succeed())
 
-				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				expectedNFT := getBaseNFTRules(types.K8sMgmtIntfName)
 				Expect(nodenft.MatchNFTRules(expectedNFT, nft.Dump())).To(Succeed())
 
 				flows := fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")
@@ -2555,7 +2517,7 @@ var _ = Describe("Node Operations", func() {
 				}, "2s").Should(Succeed())
 
 				Eventually(func() error {
-					expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
+					expectedNFT = getBaseNFTRules(types.K8sMgmtIntfName)
 					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}, "2s").Should(Succeed())
 
@@ -2614,7 +2576,7 @@ var _ = Describe("Node Operations", func() {
 				}()
 
 				fNPW.watchFactory = wf
-				Expect(startNodePortWatcher(fNPW, fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				Expect(startNodePortWatcher(fNPW, fakeClient)).To(Succeed())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -2641,7 +2603,7 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-ITP",
 						},
 						"OVN-KUBE-ITP": []string{
-							fmt.Sprintf("-p %s -d %s --dport %d -j MARK --set-xmark %s", service.Spec.Ports[0].Protocol, service.Spec.ClusterIP, service.Spec.Ports[0].Port, ovnkubeITPMark),
+							fmt.Sprintf("-p %s -d %s --dport %d -j MARK --set-xmark %s", service.Spec.Ports[0].Protocol, service.Spec.ClusterIP, service.Spec.Ports[0].Port, types.OVNKubeITPMark),
 						},
 					},
 				}
@@ -2655,7 +2617,7 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				Expect(f4.MatchState(expectedTables, nil)).To(Succeed())
 
-				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				expectedNFT := getBaseNFTRules(types.K8sMgmtIntfName)
 				expectedNFT += fmt.Sprintf("add element inet ovn-kubernetes mgmtport-no-snat-nodeports { tcp . %v }\n", service.Spec.Ports[0].NodePort)
 				Expect(nodenft.MatchNFTRules(expectedNFT, nft.Dump())).To(Succeed())
 
@@ -2698,7 +2660,7 @@ var _ = Describe("Node Operations", func() {
 				}, "2s").Should(Succeed())
 
 				Eventually(func() error {
-					expectedNFT = getBaseNFTRules(fakeMgmtPortConfig.ifName)
+					expectedNFT = getBaseNFTRules(types.K8sMgmtIntfName)
 					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}, "2s").Should(Succeed())
 
@@ -2759,7 +2721,7 @@ var _ = Describe("Node Operations", func() {
 				}()
 
 				fNPW.watchFactory = wf
-				Expect(startNodePortWatcher(fNPW, fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				Expect(startNodePortWatcher(fNPW, fakeClient)).To(Succeed())
 				// to ensure the endpoint is local-host-networked
 				res := fNPW.nodeIPManager.cidrs.Has(fmt.Sprintf("%s/32", endpointSlice.Endpoints[0].Addresses[0]))
 				Expect(res).To(BeTrue())
@@ -2802,7 +2764,7 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				Expect(f4.MatchState(expectedTables, nil)).To(Succeed())
 
-				expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+				expectedNFT := getBaseNFTRules(types.K8sMgmtIntfName)
 				Expect(nodenft.MatchNFTRules(expectedNFT, nft.Dump())).To(Succeed())
 
 				Expect(fNPW.ofm.getFlowCacheEntry("NodePort_namespace1_service1_tcp_31111")).To(Equal(expectedFlows))
@@ -2843,7 +2805,7 @@ var _ = Describe("Node Operations", func() {
 				}, "2s").Should(Succeed())
 
 				Eventually(func() error {
-					expectedNFT := getBaseNFTRules(fakeMgmtPortConfig.ifName)
+					expectedNFT := getBaseNFTRules(types.K8sMgmtIntfName)
 					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}, "2s").Should(Succeed())
 
@@ -2876,7 +2838,7 @@ var _ = Describe("Node Operations", func() {
 				}()
 
 				fNPW.watchFactory = wf
-				Expect(startNodePortWatcher(fNPW, fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				Expect(startNodePortWatcher(fNPW, fakeClient)).To(Succeed())
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
 						"PREROUTING": []string{
@@ -2932,7 +2894,7 @@ var _ = Describe("Node Operations", func() {
 				config.Gateway.DisableForwarding = false
 				fNPW.watchFactory = wf
 				Expect(configureGlobalForwarding()).To(Succeed())
-				Expect(startNodePortWatcher(fNPW, fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+				Expect(startNodePortWatcher(fNPW, fakeClient)).To(Succeed())
 				expectedTables = map[string]util.FakeTable{
 					"nat": {
 						"PREROUTING": []string{

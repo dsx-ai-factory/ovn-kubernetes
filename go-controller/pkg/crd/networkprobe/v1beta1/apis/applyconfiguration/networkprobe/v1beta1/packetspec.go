@@ -18,14 +18,14 @@ limitations under the License.
 package v1beta1
 
 import (
-	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1"
+	networkprobev1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1"
 )
 
 // PacketSpecApplyConfiguration represents a declarative configuration of the PacketSpec type for use
 // with apply.
 type PacketSpecApplyConfiguration struct {
-	DSCP        *int              `json:"dscp,omitempty"`
-	PayloadSize *v1beta1.ByteSize `json:"payloadSize,omitempty"`
+	DSCP        *int                          `json:"dscp,omitempty"`
+	PayloadSize *networkprobev1beta1.ByteSize `json:"payloadSize,omitempty"`
 }
 
 // PacketSpecApplyConfiguration constructs a declarative configuration of the PacketSpec type for use with
@@ -45,7 +45,7 @@ func (b *PacketSpecApplyConfiguration) WithDSCP(value int) *PacketSpecApplyConfi
 // WithPayloadSize sets the PayloadSize field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the PayloadSize field is set to the value of the last call.
-func (b *PacketSpecApplyConfiguration) WithPayloadSize(value v1beta1.ByteSize) *PacketSpecApplyConfiguration {
+func (b *PacketSpecApplyConfiguration) WithPayloadSize(value networkprobev1beta1.ByteSize) *PacketSpecApplyConfiguration {
 	b.PayloadSize = &value
 	return b
 }

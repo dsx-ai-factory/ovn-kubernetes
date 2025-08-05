@@ -1,6 +1,7 @@
 package pod
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 
@@ -10,11 +11,13 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes/scheme"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/record"
 	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
+	ipallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -50,6 +53,8 @@ type PodAllocator struct {
 	// release more than once
 	releasedPods      map[string]sets.Set[string]
 	releasedPodsMutex sync.Mutex
+
+	nodeLister corev1listers.NodeLister
 }
 
 // NewPodAllocator builds a new PodAllocator
@@ -61,6 +66,7 @@ func NewPodAllocator(
 	networkManager networkmanager.Interface,
 	recorder record.EventRecorder,
 	idAllocator id.Allocator,
+	nodeLister corev1listers.NodeLister,
 ) *PodAllocator {
 	podAllocator := &PodAllocator{
 		netInfo:                netInfo,
@@ -70,6 +76,7 @@ func NewPodAllocator(
 		networkManager:         networkManager,
 		recorder:               recorder,
 		idAllocator:            idAllocator,
+		nodeLister:             nodeLister,
 	}
 
 	// this network might not have IPAM, we will just allocate MAC addresses
@@ -346,9 +353,15 @@ func (a *PodAllocator) allocatePodOnNAD(pod *corev1.Pod, nad string, network *ne
 		return nil
 	}
 
+	node, err := a.nodeLister.Get(pod.Spec.NodeName)
+	if err != nil {
+		return fmt.Errorf("failed to get node %q: %w", pod.Spec.NodeName, err)
+	}
+
 	updatedPod, podAnnotation, err := a.podAnnotationAllocator.AllocatePodAnnotationWithTunnelID(
 		ipAllocator,
 		idAllocator,
+		node,
 		pod,
 		network,
 		reallocate,
@@ -357,6 +370,9 @@ func (a *PodAllocator) allocatePodOnNAD(pod *corev1.Pod, nad string, network *ne
 	)
 
 	if err != nil {
+		if errors.Is(err, ipallocator.ErrFull) {
+			a.recordPodErrorEvent(pod, err)
+		}
 		return err
 	}
 

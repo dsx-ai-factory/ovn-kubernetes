@@ -18,10 +18,10 @@ limitations under the License.
 package v1beta1
 
 import (
-	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/client-go/listers"
-	"k8s.io/client-go/tools/cache"
+	virtualipv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
+	labels "k8s.io/apimachinery/pkg/labels"
+	listers "k8s.io/client-go/listers"
+	cache "k8s.io/client-go/tools/cache"
 )
 
 // VirtualIPLister helps list VirtualIPs.
@@ -29,7 +29,7 @@ import (
 type VirtualIPLister interface {
 	// List lists all VirtualIPs in the indexer.
 	// Objects returned here must be treated as read-only.
-	List(selector labels.Selector) (ret []*v1beta1.VirtualIP, err error)
+	List(selector labels.Selector) (ret []*virtualipv1beta1.VirtualIP, err error)
 	// VirtualIPs returns an object that can list and get VirtualIPs.
 	VirtualIPs(namespace string) VirtualIPNamespaceLister
 	VirtualIPListerExpansion
@@ -37,17 +37,17 @@ type VirtualIPLister interface {
 
 // virtualIPLister implements the VirtualIPLister interface.
 type virtualIPLister struct {
-	listers.ResourceIndexer[*v1beta1.VirtualIP]
+	listers.ResourceIndexer[*virtualipv1beta1.VirtualIP]
 }
 
 // NewVirtualIPLister returns a new VirtualIPLister.
 func NewVirtualIPLister(indexer cache.Indexer) VirtualIPLister {
-	return &virtualIPLister{listers.New[*v1beta1.VirtualIP](indexer, v1beta1.Resource("virtualip"))}
+	return &virtualIPLister{listers.New[*virtualipv1beta1.VirtualIP](indexer, virtualipv1beta1.Resource("virtualip"))}
 }
 
 // VirtualIPs returns an object that can list and get VirtualIPs.
 func (s *virtualIPLister) VirtualIPs(namespace string) VirtualIPNamespaceLister {
-	return virtualIPNamespaceLister{listers.NewNamespaced[*v1beta1.VirtualIP](s.ResourceIndexer, namespace)}
+	return virtualIPNamespaceLister{listers.NewNamespaced[*virtualipv1beta1.VirtualIP](s.ResourceIndexer, namespace)}
 }
 
 // VirtualIPNamespaceLister helps list and get VirtualIPs.
@@ -55,15 +55,15 @@ func (s *virtualIPLister) VirtualIPs(namespace string) VirtualIPNamespaceLister 
 type VirtualIPNamespaceLister interface {
 	// List lists all VirtualIPs in the indexer for a given namespace.
 	// Objects returned here must be treated as read-only.
-	List(selector labels.Selector) (ret []*v1beta1.VirtualIP, err error)
+	List(selector labels.Selector) (ret []*virtualipv1beta1.VirtualIP, err error)
 	// Get retrieves the VirtualIP from the indexer for a given namespace and name.
 	// Objects returned here must be treated as read-only.
-	Get(name string) (*v1beta1.VirtualIP, error)
+	Get(name string) (*virtualipv1beta1.VirtualIP, error)
 	VirtualIPNamespaceListerExpansion
 }
 
 // virtualIPNamespaceLister implements the VirtualIPNamespaceLister
 // interface.
 type virtualIPNamespaceLister struct {
-	listers.ResourceIndexer[*v1beta1.VirtualIP]
+	listers.ResourceIndexer[*virtualipv1beta1.VirtualIP]
 }

@@ -18,179 +18,33 @@ limitations under the License.
 package fake
 
 import (
-	"context"
-	json "encoding/json"
-	"fmt"
-
 	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
 	portmirrorv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/applyconfiguration/portmirror/v1beta1"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	labels "k8s.io/apimachinery/pkg/labels"
-	types "k8s.io/apimachinery/pkg/types"
-	watch "k8s.io/apimachinery/pkg/watch"
-	testing "k8s.io/client-go/testing"
+	typedportmirrorv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned/typed/portmirror/v1beta1"
+	gentype "k8s.io/client-go/gentype"
 )
 
-// FakePortMirrors implements PortMirrorInterface
-type FakePortMirrors struct {
+// fakePortMirrors implements PortMirrorInterface
+type fakePortMirrors struct {
+	*gentype.FakeClientWithListAndApply[*v1beta1.PortMirror, *v1beta1.PortMirrorList, *portmirrorv1beta1.PortMirrorApplyConfiguration]
 	Fake *FakeK8sV1beta1
-	ns   string
 }
 
-var portmirrorsResource = v1beta1.SchemeGroupVersion.WithResource("portmirrors")
-
-var portmirrorsKind = v1beta1.SchemeGroupVersion.WithKind("PortMirror")
-
-// Get takes name of the portMirror, and returns the corresponding portMirror object, and an error if there is any.
-func (c *FakePortMirrors) Get(ctx context.Context, name string, options v1.GetOptions) (result *v1beta1.PortMirror, err error) {
-	emptyResult := &v1beta1.PortMirror{}
-	obj, err := c.Fake.
-		Invokes(testing.NewGetActionWithOptions(portmirrorsResource, c.ns, name, options), emptyResult)
-
-	if obj == nil {
-		return emptyResult, err
+func newFakePortMirrors(fake *FakeK8sV1beta1, namespace string) typedportmirrorv1beta1.PortMirrorInterface {
+	return &fakePortMirrors{
+		gentype.NewFakeClientWithListAndApply[*v1beta1.PortMirror, *v1beta1.PortMirrorList, *portmirrorv1beta1.PortMirrorApplyConfiguration](
+			fake.Fake,
+			namespace,
+			v1beta1.SchemeGroupVersion.WithResource("portmirrors"),
+			v1beta1.SchemeGroupVersion.WithKind("PortMirror"),
+			func() *v1beta1.PortMirror { return &v1beta1.PortMirror{} },
+			func() *v1beta1.PortMirrorList { return &v1beta1.PortMirrorList{} },
+			func(dst, src *v1beta1.PortMirrorList) { dst.ListMeta = src.ListMeta },
+			func(list *v1beta1.PortMirrorList) []*v1beta1.PortMirror { return gentype.ToPointerSlice(list.Items) },
+			func(list *v1beta1.PortMirrorList, items []*v1beta1.PortMirror) {
+				list.Items = gentype.FromPointerSlice(items)
+			},
+		),
+		fake,
 	}
-	return obj.(*v1beta1.PortMirror), err
-}
-
-// List takes label and field selectors, and returns the list of PortMirrors that match those selectors.
-func (c *FakePortMirrors) List(ctx context.Context, opts v1.ListOptions) (result *v1beta1.PortMirrorList, err error) {
-	emptyResult := &v1beta1.PortMirrorList{}
-	obj, err := c.Fake.
-		Invokes(testing.NewListActionWithOptions(portmirrorsResource, portmirrorsKind, c.ns, opts), emptyResult)
-
-	if obj == nil {
-		return emptyResult, err
-	}
-
-	label, _, _ := testing.ExtractFromListOptions(opts)
-	if label == nil {
-		label = labels.Everything()
-	}
-	list := &v1beta1.PortMirrorList{ListMeta: obj.(*v1beta1.PortMirrorList).ListMeta}
-	for _, item := range obj.(*v1beta1.PortMirrorList).Items {
-		if label.Matches(labels.Set(item.Labels)) {
-			list.Items = append(list.Items, item)
-		}
-	}
-	return list, err
-}
-
-// Watch returns a watch.Interface that watches the requested portMirrors.
-func (c *FakePortMirrors) Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-	return c.Fake.
-		InvokesWatch(testing.NewWatchActionWithOptions(portmirrorsResource, c.ns, opts))
-
-}
-
-// Create takes the representation of a portMirror and creates it.  Returns the server's representation of the portMirror, and an error, if there is any.
-func (c *FakePortMirrors) Create(ctx context.Context, portMirror *v1beta1.PortMirror, opts v1.CreateOptions) (result *v1beta1.PortMirror, err error) {
-	emptyResult := &v1beta1.PortMirror{}
-	obj, err := c.Fake.
-		Invokes(testing.NewCreateActionWithOptions(portmirrorsResource, c.ns, portMirror, opts), emptyResult)
-
-	if obj == nil {
-		return emptyResult, err
-	}
-	return obj.(*v1beta1.PortMirror), err
-}
-
-// Update takes the representation of a portMirror and updates it. Returns the server's representation of the portMirror, and an error, if there is any.
-func (c *FakePortMirrors) Update(ctx context.Context, portMirror *v1beta1.PortMirror, opts v1.UpdateOptions) (result *v1beta1.PortMirror, err error) {
-	emptyResult := &v1beta1.PortMirror{}
-	obj, err := c.Fake.
-		Invokes(testing.NewUpdateActionWithOptions(portmirrorsResource, c.ns, portMirror, opts), emptyResult)
-
-	if obj == nil {
-		return emptyResult, err
-	}
-	return obj.(*v1beta1.PortMirror), err
-}
-
-// UpdateStatus was generated because the type contains a Status member.
-// Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
-func (c *FakePortMirrors) UpdateStatus(ctx context.Context, portMirror *v1beta1.PortMirror, opts v1.UpdateOptions) (result *v1beta1.PortMirror, err error) {
-	emptyResult := &v1beta1.PortMirror{}
-	obj, err := c.Fake.
-		Invokes(testing.NewUpdateSubresourceActionWithOptions(portmirrorsResource, "status", c.ns, portMirror, opts), emptyResult)
-
-	if obj == nil {
-		return emptyResult, err
-	}
-	return obj.(*v1beta1.PortMirror), err
-}
-
-// Delete takes name of the portMirror and deletes it. Returns an error if one occurs.
-func (c *FakePortMirrors) Delete(ctx context.Context, name string, opts v1.DeleteOptions) error {
-	_, err := c.Fake.
-		Invokes(testing.NewDeleteActionWithOptions(portmirrorsResource, c.ns, name, opts), &v1beta1.PortMirror{})
-
-	return err
-}
-
-// DeleteCollection deletes a collection of objects.
-func (c *FakePortMirrors) DeleteCollection(ctx context.Context, opts v1.DeleteOptions, listOpts v1.ListOptions) error {
-	action := testing.NewDeleteCollectionActionWithOptions(portmirrorsResource, c.ns, opts, listOpts)
-
-	_, err := c.Fake.Invokes(action, &v1beta1.PortMirrorList{})
-	return err
-}
-
-// Patch applies the patch and returns the patched portMirror.
-func (c *FakePortMirrors) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *v1beta1.PortMirror, err error) {
-	emptyResult := &v1beta1.PortMirror{}
-	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceActionWithOptions(portmirrorsResource, c.ns, name, pt, data, opts, subresources...), emptyResult)
-
-	if obj == nil {
-		return emptyResult, err
-	}
-	return obj.(*v1beta1.PortMirror), err
-}
-
-// Apply takes the given apply declarative configuration, applies it and returns the applied portMirror.
-func (c *FakePortMirrors) Apply(ctx context.Context, portMirror *portmirrorv1beta1.PortMirrorApplyConfiguration, opts v1.ApplyOptions) (result *v1beta1.PortMirror, err error) {
-	if portMirror == nil {
-		return nil, fmt.Errorf("portMirror provided to Apply must not be nil")
-	}
-	data, err := json.Marshal(portMirror)
-	if err != nil {
-		return nil, err
-	}
-	name := portMirror.Name
-	if name == nil {
-		return nil, fmt.Errorf("portMirror.Name must be provided to Apply")
-	}
-	emptyResult := &v1beta1.PortMirror{}
-	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceActionWithOptions(portmirrorsResource, c.ns, *name, types.ApplyPatchType, data, opts.ToPatchOptions()), emptyResult)
-
-	if obj == nil {
-		return emptyResult, err
-	}
-	return obj.(*v1beta1.PortMirror), err
-}
-
-// ApplyStatus was generated because the type contains a Status member.
-// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
-func (c *FakePortMirrors) ApplyStatus(ctx context.Context, portMirror *portmirrorv1beta1.PortMirrorApplyConfiguration, opts v1.ApplyOptions) (result *v1beta1.PortMirror, err error) {
-	if portMirror == nil {
-		return nil, fmt.Errorf("portMirror provided to Apply must not be nil")
-	}
-	data, err := json.Marshal(portMirror)
-	if err != nil {
-		return nil, err
-	}
-	name := portMirror.Name
-	if name == nil {
-		return nil, fmt.Errorf("portMirror.Name must be provided to Apply")
-	}
-	emptyResult := &v1beta1.PortMirror{}
-	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceActionWithOptions(portmirrorsResource, c.ns, *name, types.ApplyPatchType, data, opts.ToPatchOptions(), "status"), emptyResult)
-
-	if obj == nil {
-		return emptyResult, err
-	}
-	return obj.(*v1beta1.PortMirror), err
 }

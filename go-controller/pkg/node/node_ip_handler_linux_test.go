@@ -21,8 +21,10 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
 	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	nodemocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -400,27 +402,12 @@ func configureKubeOVNContext(nodeName string, useNetlink bool) *testCtx {
 
 	_ = nodenft.SetFakeNFTablesHelper()
 
-	fakeMgmtPortConfig := &managementPortConfig{
-		ifName:    nodeName,
-		link:      nil,
-		routerMAC: nil,
-		ipv4: &managementPortIPFamilyConfig{
-			allSubnets: nil,
-			ifAddr:     tc.mgmtPortIP4,
-			gwIP:       tc.mgmtPortIP4.IP,
-		},
-		ipv6: &managementPortIPFamilyConfig{
-			allSubnets: nil,
-			ifAddr:     tc.mgmtPortIP6,
-			gwIP:       tc.mgmtPortIP6.IP,
-		},
-	}
-	err = setupManagementPortNFTables(fakeMgmtPortConfig)
-	Expect(err).NotTo(HaveOccurred())
+	mpmock := &nodemocks.ManagementPort{}
+	mpmock.On("GetAddresses").Return([]*net.IPNet{tc.mgmtPortIP4, tc.mgmtPortIP6})
 
-	fakeBridgeConfiguration := &bridgeConfiguration{bridgeName: "breth0", gwIface: "breth0", localnetPatchPorts: &sync.Map{}}
+	fakeBridgeConfiguration := bridgeconfig.TestBridgeConfig("breth0")
 
 	k := &kube.Kube{KClient: tc.fakeClient}
-	tc.ipManager, _ = newAddressManagerInternal(nodeName, k, fakeMgmtPortConfig, tc.watchFactory, fakeBridgeConfiguration, useNetlink)
+	tc.ipManager, _ = newAddressManagerInternal(nodeName, k, mpmock, tc.watchFactory, fakeBridgeConfiguration, useNetlink)
 	return tc
 }

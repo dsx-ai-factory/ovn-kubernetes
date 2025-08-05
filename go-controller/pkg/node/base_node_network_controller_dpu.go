@@ -153,7 +153,7 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU(addFunc func(*corev1.Pod, st
 				if dpuCD != nil {
 					anyInfo, err := bnnc.addDPUPodForNAD(pod, dpuCD, netName, nadName, clientSet, addFunc, delFunc)
 					if err != nil {
-						klog.Errorf(err.Error())
+						klog.Errorf("Error adding pod %s/%s for for network %s: %v", pod.Namespace, pod.Name, bnnc.GetNetworkName(), err)
 					} else {
 						nadToDPUCDMap[nadName] = &podNADInfo{dpuCD: dpuCD, anyInfo: anyInfo}
 					}
@@ -187,7 +187,7 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU(addFunc func(*corev1.Pod, st
 						var err error
 						info.anyInfo, err = updateFunc(newPod, nadName, info.anyInfo)
 						if err != nil {
-							klog.Errorf(err.Error())
+							klog.Error(err.Error())
 						}
 					}
 					continue
@@ -199,7 +199,7 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU(addFunc func(*corev1.Pod, st
 						oldDPUCD, newDPUCD)
 					err := bnnc.delDPUPodForNAD(oldPod, oldDPUCD, info.anyInfo, nadName, false, delFunc)
 					if err != nil {
-						klog.Errorf(err.Error())
+						klog.Errorf("Error deleting pod %s/%s for for network %s: %v", oldPod.Namespace, oldPod.Name, bnnc.GetNetworkName(), err)
 					}
 					nadToDPUCDMap[nadName] = &podNADInfo{}
 				}
@@ -209,7 +209,7 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU(addFunc func(*corev1.Pod, st
 						"New connection details (%v)", oldDPUCD, newDPUCD)
 					anyInfo, err := bnnc.addDPUPodForNAD(newPod, newDPUCD, netName, nadName, clientSet, addFunc, delFunc)
 					if err != nil {
-						klog.Errorf(err.Error())
+						klog.Errorf("Error adding pod %s/%s for for network %s: %v", newPod.Namespace, newPod.Name, bnnc.GetNetworkName(), err)
 					} else {
 						nadToDPUCDMap[nadName] = &podNADInfo{dpuCD: newDPUCD, anyInfo: anyInfo}
 					}
@@ -236,7 +236,7 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU(addFunc func(*corev1.Pod, st
 				if info.dpuCD != nil {
 					err := bnnc.delDPUPodForNAD(pod, info.dpuCD, info.anyInfo, nadName, true, delFunc)
 					if err != nil {
-						klog.Errorf(err.Error())
+						klog.Errorf("Error deleting pod %s/%s for for network %s: %v", pod.Namespace, pod.Name, bnnc.GetNetworkName(), err)
 					}
 				}
 			}
@@ -377,7 +377,7 @@ func (bnnc *BaseNodeNetworkController) delRepPort(pod *corev1.Pod, dpuCD *util.D
 	klog.Infof("Delete VF representor %s for %s", vfRepName, podDesc)
 	ifExists, sandbox, expectedNADName, err := util.GetOVSPortPodInfo(vfRepName)
 	if err != nil {
-		return fmt.Errorf(err.Error())
+		return err
 	}
 	if !ifExists {
 		klog.Infof("VF representor %s for %s is not an OVS interface, nothing to do", vfRepName, podDesc)

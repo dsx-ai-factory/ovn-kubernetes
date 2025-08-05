@@ -18,15 +18,15 @@ limitations under the License.
 package v1beta1
 
 import (
-	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
+	ipreservationv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
 )
 
 // IPReservationSpecApplyConfiguration represents a declarative configuration of the IPReservationSpec type for use
 // with apply.
 type IPReservationSpecApplyConfiguration struct {
-	NetworkAttachmentName *string           `json:"networkAttachmentName,omitempty"`
-	IPFamily              *v1beta1.IPFamily `json:"ipfamily,omitempty"`
-	Count                 *int32            `json:"count,omitempty"`
+	NetworkAttachmentName *string                        `json:"networkAttachmentName,omitempty"`
+	IPFamily              *ipreservationv1beta1.IPFamily `json:"ipfamily,omitempty"`
+	Count                 *int32                         `json:"count,omitempty"`
 }
 
 // IPReservationSpecApplyConfiguration constructs a declarative configuration of the IPReservationSpec type for use with
@@ -46,7 +46,7 @@ func (b *IPReservationSpecApplyConfiguration) WithNetworkAttachmentName(value st
 // WithIPFamily sets the IPFamily field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the IPFamily field is set to the value of the last call.
-func (b *IPReservationSpecApplyConfiguration) WithIPFamily(value v1beta1.IPFamily) *IPReservationSpecApplyConfiguration {
+func (b *IPReservationSpecApplyConfiguration) WithIPFamily(value ipreservationv1beta1.IPFamily) *IPReservationSpecApplyConfiguration {
 	b.IPFamily = &value
 	return b
 }

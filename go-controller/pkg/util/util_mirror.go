@@ -196,7 +196,7 @@ func UpdatePortMirrorStatusOnError(pm *PortMirror, kube kube.InterfaceOVN,
 	pm.FailedPortMirrorOps[failedOpsKey] = true
 	err := UpdatePortMirrorStatusWithRetry(kube, pm.Namespace, pm.Name, ovntypes.OvnK8sStatusFailed, "", errMsg)
 	if err != nil {
-		klog.Errorf(err.Error())
+		klog.Error(err.Error())
 	}
 }
 
@@ -207,7 +207,7 @@ func ClearPortMirrorErrorMessage(pm *PortMirror, kube kube.InterfaceOVN, failedO
 	delete(pm.FailedPortMirrorOps, failedOpsKey)
 	err := UpdatePortMirrorStatusWithRetry(kube, pm.Namespace, pm.Name, "", failedOpsKey, "")
 	if err != nil {
-		klog.Errorf(err.Error())
+		klog.Error(err.Error())
 	}
 }
 

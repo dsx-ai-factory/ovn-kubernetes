@@ -7,13 +7,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // MetricCNIRequestDuration is a prometheus metric that tracks the duration
 // of CNI requests
 var MetricCNIRequestDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemNode,
+	Namespace: types.MetricOvnkubeNamespace,
+	Subsystem: types.MetricOvnkubeSubsystemNode,
 	Name:      "cni_request_duration_seconds",
 	Help:      "The duration of CNI server requests.",
 	Buckets:   prometheus.LinearBuckets(1, 1, 15)},
@@ -22,23 +23,23 @@ var MetricCNIRequestDuration = prometheus.NewHistogramVec(prometheus.HistogramOp
 )
 
 var MetricNodeReadyDuration = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemNode,
+	Namespace: types.MetricOvnkubeNamespace,
+	Subsystem: types.MetricOvnkubeSubsystemNode,
 	Name:      "ready_duration_seconds",
 	Help:      "The duration for the node to get to ready state.",
 })
 
 var metricOvnNodePortEnabled = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemNode,
+	Namespace: types.MetricOvnkubeNamespace,
+	Subsystem: types.MetricOvnkubeSubsystemNode,
 	Name:      "nodeport_enabled",
 	Help:      "Specifies if the node port is enabled on this node(1) or not(0).",
 })
 
 // metric to get the size of ovnkube.log file
 var metricOvnKubeNodeLogFileSize = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnkubeNamespace,
-	Subsystem: MetricOvnkubeSubsystemNode,
+	Namespace: types.MetricOvnkubeNamespace,
+	Subsystem: types.MetricOvnkubeSubsystemNode,
 	Name:      "logfile_size",
 	Help:      "The size of ovnkube logfile on the node."},
 	[]string{
@@ -48,8 +49,8 @@ var metricOvnKubeNodeLogFileSize = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 
 // DNS probe metrics
 var MetricDNSResponseTime = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricProbeNamespace,
-	Subsystem: MetricDNSSubsystem,
+	Namespace: types.MetricProbeNamespace,
+	Subsystem: types.MetricDNSSubsystem,
 	Name:      "response_time",
 	Help:      "The response time of the DNS probe.",
 },
@@ -62,8 +63,8 @@ var MetricDNSResponseTime = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var MetricDNSAttemptsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-	Namespace: MetricProbeNamespace,
-	Subsystem: MetricDNSSubsystem,
+	Namespace: types.MetricProbeNamespace,
+	Subsystem: types.MetricDNSSubsystem,
 	Name:      "attempts_total",
 	Help:      "The total number of DNS lookup attempts.",
 },
@@ -76,8 +77,8 @@ var MetricDNSAttemptsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 )
 
 var MetricDNSCompletedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-	Namespace: MetricProbeNamespace,
-	Subsystem: MetricDNSSubsystem,
+	Namespace: types.MetricProbeNamespace,
+	Subsystem: types.MetricDNSSubsystem,
 	Name:      "completed_total",
 	Help:      "The total number of successful DNS lookups.",
 },
@@ -89,8 +90,8 @@ var MetricDNSCompletedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 	})
 
 var MetricDNSErrorsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-	Namespace: MetricProbeNamespace,
-	Subsystem: MetricDNSSubsystem,
+	Namespace: types.MetricProbeNamespace,
+	Subsystem: types.MetricDNSSubsystem,
 	Name:      "errors_total",
 	Help:      "The total number of DNS lookup errors.",
 }, []string{
@@ -103,8 +104,8 @@ var MetricDNSErrorsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 
 // HTTP probe metrics
 var MetricHttpResponseTime = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricProbeNamespace,
-	Subsystem: MetricHttpSubsystem,
+	Namespace: types.MetricProbeNamespace,
+	Subsystem: types.MetricHttpSubsystem,
 	Name:      "response_time",
 	Help:      "The response time of the HTTP probe.",
 },
@@ -117,8 +118,8 @@ var MetricHttpResponseTime = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var MetricHttpAttemptsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-	Namespace: MetricProbeNamespace,
-	Subsystem: MetricHttpSubsystem,
+	Namespace: types.MetricProbeNamespace,
+	Subsystem: types.MetricHttpSubsystem,
 	Name:      "attempts_total",
 	Help:      "The total number of HTTP request attempts.",
 }, []string{
@@ -130,8 +131,8 @@ var MetricHttpAttemptsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 )
 
 var MetricHttpCompletedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-	Namespace: MetricProbeNamespace,
-	Subsystem: MetricHttpSubsystem,
+	Namespace: types.MetricProbeNamespace,
+	Subsystem: types.MetricHttpSubsystem,
 	Name:      "completed_total",
 	Help:      "The total number of successful HTTP requests.",
 }, []string{
@@ -142,8 +143,8 @@ var MetricHttpCompletedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 })
 
 var MetricHttpErrorsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-	Namespace: MetricProbeNamespace,
-	Subsystem: MetricHttpSubsystem,
+	Namespace: types.MetricProbeNamespace,
+	Subsystem: types.MetricHttpSubsystem,
 	Name:      "errors_total",
 	Help:      "The total number of HTTP request errors.",
 }, []string{
@@ -156,8 +157,8 @@ var MetricHttpErrorsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 
 // TCP probe metrics
 var MetricTCPRTTLatency = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricProbeNamespace,
-	Subsystem: MetricTCPSubsystem,
+	Namespace: types.MetricProbeNamespace,
+	Subsystem: types.MetricTCPSubsystem,
 	Name:      "rtt_latency",
 	Help:      "The response time of the TCP probe.",
 },
@@ -170,8 +171,8 @@ var MetricTCPRTTLatency = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var MetricTCPAttemptsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-	Namespace: MetricProbeNamespace,
-	Subsystem: MetricTCPSubsystem,
+	Namespace: types.MetricProbeNamespace,
+	Subsystem: types.MetricTCPSubsystem,
 	Name:      "attempts_total",
 	Help:      "The total number of TCP connection attempts.",
 }, []string{
@@ -182,8 +183,8 @@ var MetricTCPAttemptsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 })
 
 var MetricTCPCompletedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-	Namespace: MetricProbeNamespace,
-	Subsystem: MetricTCPSubsystem,
+	Namespace: types.MetricProbeNamespace,
+	Subsystem: types.MetricTCPSubsystem,
 	Name:      "completed_total",
 	Help:      "The total number of successful TCP connections.",
 }, []string{
@@ -194,8 +195,8 @@ var MetricTCPCompletedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 })
 
 var MetricTCPErrorsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-	Namespace: MetricProbeNamespace,
-	Subsystem: MetricTCPSubsystem,
+	Namespace: types.MetricProbeNamespace,
+	Subsystem: types.MetricTCPSubsystem,
 	Name:      "errors_total",
 	Help:      "The total number of TCP connection errors.",
 }, []string{
@@ -208,8 +209,8 @@ var MetricTCPErrorsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 
 // UDP probe metrics
 var MetricUDPTXLatency = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricProbeNamespace,
-	Subsystem: MetricUDPSubsystem,
+	Namespace: types.MetricProbeNamespace,
+	Subsystem: types.MetricUDPSubsystem,
 	Name:      "tx_latency",
 	Help:      "The latency of the UDP probe from sender to receiver side",
 },
@@ -222,8 +223,8 @@ var MetricUDPTXLatency = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var MetricUDPRXLatency = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricProbeNamespace,
-	Subsystem: MetricUDPSubsystem,
+	Namespace: types.MetricProbeNamespace,
+	Subsystem: types.MetricUDPSubsystem,
 	Name:      "rx_latency",
 	Help:      "The latency of the UDP probe from receiver to sender side",
 },
@@ -236,8 +237,8 @@ var MetricUDPRXLatency = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var MetricUDPRTT = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricProbeNamespace,
-	Subsystem: MetricUDPSubsystem,
+	Namespace: types.MetricProbeNamespace,
+	Subsystem: types.MetricUDPSubsystem,
 	Name:      "rtt_latency",
 	Help:      "The bi-directional latency of the UDP probe.",
 },
@@ -250,8 +251,8 @@ var MetricUDPRTT = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var MetricUDPJitter = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricProbeNamespace,
-	Subsystem: MetricUDPSubsystem,
+	Namespace: types.MetricProbeNamespace,
+	Subsystem: types.MetricUDPSubsystem,
 	Name:      "jitter",
 	Help:      "average variation in packet round trip times for UDP probe",
 },
@@ -264,8 +265,8 @@ var MetricUDPJitter = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var MetricUDPAttemptsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-	Namespace: MetricProbeNamespace,
-	Subsystem: MetricUDPSubsystem,
+	Namespace: types.MetricProbeNamespace,
+	Subsystem: types.MetricUDPSubsystem,
 	Name:      "attempts_total",
 	Help:      "Total number of UDP probe attempts.",
 }, []string{
@@ -276,8 +277,8 @@ var MetricUDPAttemptsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 })
 
 var MetricUDPCompletedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-	Namespace: MetricProbeNamespace,
-	Subsystem: MetricUDPSubsystem,
+	Namespace: types.MetricProbeNamespace,
+	Subsystem: types.MetricUDPSubsystem,
 	Name:      "completed_total",
 	Help:      "Total number of completed UDP probes.",
 }, []string{
@@ -288,8 +289,8 @@ var MetricUDPCompletedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 })
 
 var MetricUDPErrorsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-	Namespace: MetricProbeNamespace,
-	Subsystem: MetricUDPSubsystem,
+	Namespace: types.MetricProbeNamespace,
+	Subsystem: types.MetricUDPSubsystem,
 	Name:      "errors_total",
 	Help:      "Total number of UDP probe errors.",
 }, []string{
@@ -300,8 +301,8 @@ var MetricUDPErrorsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 	"error_type"})
 
 var MetricUDPPacketLossTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricProbeNamespace,
-	Subsystem: MetricUDPSubsystem,
+	Namespace: types.MetricProbeNamespace,
+	Subsystem: types.MetricUDPSubsystem,
 	Name:      "packet_loss_total",
 	Help:      "Total number of Packet lost for UDP probe in percentage",
 }, []string{
@@ -342,8 +343,8 @@ func RegisterNodeMetrics(metricsScrapeInterval int, stopChan <-chan struct{}) {
 		prometheus.MustRegister(MetricUDPPacketLossTotal)
 		prometheus.MustRegister(prometheus.NewGaugeFunc(
 			prometheus.GaugeOpts{
-				Namespace: MetricOvnkubeNamespace,
-				Subsystem: MetricOvnkubeSubsystemNode,
+				Namespace: types.MetricOvnkubeNamespace,
+				Subsystem: types.MetricOvnkubeSubsystemNode,
 				Name:      "build_info",
 				Help: "A metric with a constant '1' value labeled by version, revision, branch, " +
 					"and go version from which ovnkube was built and when and who built it.",
@@ -358,7 +359,7 @@ func RegisterNodeMetrics(metricsScrapeInterval int, stopChan <-chan struct{}) {
 			},
 			func() float64 { return 1 },
 		))
-		registerWorkqueueMetrics(MetricOvnkubeNamespace, MetricOvnkubeSubsystemNode)
+		registerWorkqueueMetrics(types.MetricOvnkubeNamespace, types.MetricOvnkubeSubsystemNode)
 		if err := prometheus.Register(MetricResourceRetryFailuresCount); err != nil {
 			if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
 				panic(err)

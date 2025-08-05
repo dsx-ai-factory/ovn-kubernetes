@@ -18,10 +18,10 @@ limitations under the License.
 package v1beta1
 
 import (
-	"context"
+	context "context"
 
-	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
-	virtualipv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/applyconfiguration/virtualip/v1beta1"
+	virtualipv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
+	applyconfigurationvirtualipv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/applyconfiguration/virtualip/v1beta1"
 	scheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/clientset/versioned/scheme"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -37,36 +37,37 @@ type VirtualIPsGetter interface {
 
 // VirtualIPInterface has methods to work with VirtualIP resources.
 type VirtualIPInterface interface {
-	Create(ctx context.Context, virtualIP *v1beta1.VirtualIP, opts v1.CreateOptions) (*v1beta1.VirtualIP, error)
-	Update(ctx context.Context, virtualIP *v1beta1.VirtualIP, opts v1.UpdateOptions) (*v1beta1.VirtualIP, error)
+	Create(ctx context.Context, virtualIP *virtualipv1beta1.VirtualIP, opts v1.CreateOptions) (*virtualipv1beta1.VirtualIP, error)
+	Update(ctx context.Context, virtualIP *virtualipv1beta1.VirtualIP, opts v1.UpdateOptions) (*virtualipv1beta1.VirtualIP, error)
 	// Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
-	UpdateStatus(ctx context.Context, virtualIP *v1beta1.VirtualIP, opts v1.UpdateOptions) (*v1beta1.VirtualIP, error)
+	UpdateStatus(ctx context.Context, virtualIP *virtualipv1beta1.VirtualIP, opts v1.UpdateOptions) (*virtualipv1beta1.VirtualIP, error)
 	Delete(ctx context.Context, name string, opts v1.DeleteOptions) error
 	DeleteCollection(ctx context.Context, opts v1.DeleteOptions, listOpts v1.ListOptions) error
-	Get(ctx context.Context, name string, opts v1.GetOptions) (*v1beta1.VirtualIP, error)
-	List(ctx context.Context, opts v1.ListOptions) (*v1beta1.VirtualIPList, error)
+	Get(ctx context.Context, name string, opts v1.GetOptions) (*virtualipv1beta1.VirtualIP, error)
+	List(ctx context.Context, opts v1.ListOptions) (*virtualipv1beta1.VirtualIPList, error)
 	Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error)
-	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *v1beta1.VirtualIP, err error)
-	Apply(ctx context.Context, virtualIP *virtualipv1beta1.VirtualIPApplyConfiguration, opts v1.ApplyOptions) (result *v1beta1.VirtualIP, err error)
+	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *virtualipv1beta1.VirtualIP, err error)
+	Apply(ctx context.Context, virtualIP *applyconfigurationvirtualipv1beta1.VirtualIPApplyConfiguration, opts v1.ApplyOptions) (result *virtualipv1beta1.VirtualIP, err error)
 	// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
-	ApplyStatus(ctx context.Context, virtualIP *virtualipv1beta1.VirtualIPApplyConfiguration, opts v1.ApplyOptions) (result *v1beta1.VirtualIP, err error)
+	ApplyStatus(ctx context.Context, virtualIP *applyconfigurationvirtualipv1beta1.VirtualIPApplyConfiguration, opts v1.ApplyOptions) (result *virtualipv1beta1.VirtualIP, err error)
 	VirtualIPExpansion
 }
 
 // virtualIPs implements VirtualIPInterface
 type virtualIPs struct {
-	*gentype.ClientWithListAndApply[*v1beta1.VirtualIP, *v1beta1.VirtualIPList, *virtualipv1beta1.VirtualIPApplyConfiguration]
+	*gentype.ClientWithListAndApply[*virtualipv1beta1.VirtualIP, *virtualipv1beta1.VirtualIPList, *applyconfigurationvirtualipv1beta1.VirtualIPApplyConfiguration]
 }
 
 // newVirtualIPs returns a VirtualIPs
 func newVirtualIPs(c *K8sV1beta1Client, namespace string) *virtualIPs {
 	return &virtualIPs{
-		gentype.NewClientWithListAndApply[*v1beta1.VirtualIP, *v1beta1.VirtualIPList, *virtualipv1beta1.VirtualIPApplyConfiguration](
+		gentype.NewClientWithListAndApply[*virtualipv1beta1.VirtualIP, *virtualipv1beta1.VirtualIPList, *applyconfigurationvirtualipv1beta1.VirtualIPApplyConfiguration](
 			"virtualips",
 			c.RESTClient(),
 			scheme.ParameterCodec,
 			namespace,
-			func() *v1beta1.VirtualIP { return &v1beta1.VirtualIP{} },
-			func() *v1beta1.VirtualIPList { return &v1beta1.VirtualIPList{} }),
+			func() *virtualipv1beta1.VirtualIP { return &virtualipv1beta1.VirtualIP{} },
+			func() *virtualipv1beta1.VirtualIPList { return &virtualipv1beta1.VirtualIPList{} },
+		),
 	}
 }

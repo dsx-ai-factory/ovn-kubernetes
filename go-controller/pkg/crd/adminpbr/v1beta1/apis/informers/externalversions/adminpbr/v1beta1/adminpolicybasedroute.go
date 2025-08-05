@@ -18,13 +18,13 @@ limitations under the License.
 package v1beta1
 
 import (
-	"context"
+	context "context"
 	time "time"
 
-	adminpbrv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
+	crdadminpbrv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
 	versioned "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/clientset/versioned"
 	internalinterfaces "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/informers/externalversions/internalinterfaces"
-	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/listers/adminpbr/v1beta1"
+	adminpbrv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/listers/adminpbr/v1beta1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	watch "k8s.io/apimachinery/pkg/watch"
@@ -35,7 +35,7 @@ import (
 // AdminPolicyBasedRoutes.
 type AdminPolicyBasedRouteInformer interface {
 	Informer() cache.SharedIndexInformer
-	Lister() v1beta1.AdminPolicyBasedRouteLister
+	Lister() adminpbrv1beta1.AdminPolicyBasedRouteLister
 }
 
 type adminPolicyBasedRouteInformer struct {
@@ -69,7 +69,7 @@ func NewFilteredAdminPolicyBasedRouteInformer(client versioned.Interface, resync
 				return client.K8sV1beta1().AdminPolicyBasedRoutes().Watch(context.TODO(), options)
 			},
 		},
-		&adminpbrv1beta1.AdminPolicyBasedRoute{},
+		&crdadminpbrv1beta1.AdminPolicyBasedRoute{},
 		resyncPeriod,
 		indexers,
 	)
@@ -80,9 +80,9 @@ func (f *adminPolicyBasedRouteInformer) defaultInformer(client versioned.Interfa
 }
 
 func (f *adminPolicyBasedRouteInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&adminpbrv1beta1.AdminPolicyBasedRoute{}, f.defaultInformer)
+	return f.factory.InformerFor(&crdadminpbrv1beta1.AdminPolicyBasedRoute{}, f.defaultInformer)
 }
 
-func (f *adminPolicyBasedRouteInformer) Lister() v1beta1.AdminPolicyBasedRouteLister {
-	return v1beta1.NewAdminPolicyBasedRouteLister(f.Informer().GetIndexer())
+func (f *adminPolicyBasedRouteInformer) Lister() adminpbrv1beta1.AdminPolicyBasedRouteLister {
+	return adminpbrv1beta1.NewAdminPolicyBasedRouteLister(f.Informer().GetIndexer())
 }
