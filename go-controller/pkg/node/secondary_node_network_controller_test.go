@@ -287,6 +287,9 @@ var _ = Describe("SecondaryNodeNetworkController: UserDefinedPrimaryNetwork Gate
 		node := &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
+				Labels: map[string]string{
+					"kubernetes.io/hostname": nodeName,
+				},
 				Annotations: map[string]string{
 					"k8s.ovn.org/network-ids":       fmt.Sprintf("{\"%s\": \"%d\"}", netName, netID),
 					"k8s.ovn.org/node-subnets":      fmt.Sprintf("{\"%s\":[\"%s\", \"%s\"]}", netName, v4NodeSubnet, v6NodeSubnet),

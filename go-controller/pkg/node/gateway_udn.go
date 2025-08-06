@@ -379,12 +379,16 @@ func (udng *UserDefinedNetworkGateway) addUDNManagementPort() (netlink.Link, err
 	// STEP3
 	// IPv6 forwarding is enabled globally
 	if ipv4, _ := udng.IPMode(); ipv4 {
-		// we use forward slash as path separator to allow dotted interfaceName e.g. foo.200
-		stdout, stderr, err := util.RunSysctl("-w", fmt.Sprintf("net/ipv4/conf/%s/forwarding=1", interfaceName))
-		// systctl output enforces dot as path separator
+		var stderr string
+		stdout, _, err := util.RunSysctl(fmt.Sprintf("net/ipv4/conf/%s/forwarding", interfaceName))
 		if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.forwarding = 1", strings.ReplaceAll(interfaceName, ".", "/")) {
-			return nil, fmt.Errorf("could not set the correct forwarding value for interface %s: stdout: %v, stderr: %v, err: %v",
-				interfaceName, stdout, stderr, err)
+			// we use forward slash as path separator to allow dotted interfaceName e.g. foo.200
+			stdout, stderr, err = util.RunSysctl("-w", fmt.Sprintf("net/ipv4/conf/%s/forwarding=1", interfaceName))
+			// systctl output enforces dot as path separator
+			if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.forwarding = 1", strings.ReplaceAll(interfaceName, ".", "/")) {
+				return nil, fmt.Errorf("could not set the correct forwarding value for interface %s: stdout: %v, stderr: %v, err: %v",
+					interfaceName, stdout, stderr, err)
+			}
 		}
 	}
 	return mplink, nil

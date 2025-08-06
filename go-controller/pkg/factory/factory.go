@@ -1010,19 +1010,20 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeNames []string
 			})
 	})
 
-	// only the given node is needed if HybridOverlay is not enabled (required by addressManager, addMasqueradeRoute and checking
-	// NorthdNodeSelectorLabel in order to collect northd metrics)
-	if !config.HybridOverlay.Enabled {
-		wf.iFactory.InformerFor(&corev1.Node{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-			return v1coreinformers.NewFilteredNodeInformer(
-				c,
-				resyncPeriod,
-				cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
-				func(opts *metav1.ListOptions) {
-					opts.LabelSelector = fmt.Sprintf("kubernetes.io/hostname=%s", nodeNames[0])
-				})
-		})
-	}
+	// TBD-merge
+	//// only the given node is needed if HybridOverlay is not enabled (required by addressManager, addMasqueradeRoute and checking
+	//// NorthdNodeSelectorLabel in order to collect northd metrics)
+	//if !config.HybridOverlay.Enabled {
+	//	wf.iFactory.InformerFor(&corev1.Node{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+	//		return v1coreinformers.NewFilteredNodeInformer(
+	//			c,
+	//			resyncPeriod,
+	//			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+	//			func(opts *metav1.ListOptions) {
+	//				opts.LabelSelector = fmt.Sprintf("kubernetes.io/hostname=%s", nodeNames[0])
+	//			})
+	//	})
+	//}
 
 	// For namespaces
 	wf.iFactory.InformerFor(&corev1.Namespace{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {

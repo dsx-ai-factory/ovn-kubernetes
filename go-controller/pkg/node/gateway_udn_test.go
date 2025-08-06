@@ -152,7 +152,7 @@ func setUpGatewayFakeOVSCommands(fexec *ovntest.FakeExec) {
 	})
 	if config.IPv4Mode {
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "sysctl -w net/ipv4/conf/breth0/forwarding=1",
+			Cmd:    "sysctl net/ipv4/conf/breth0/forwarding",
 			Output: "net.ipv4.conf.breth0.forwarding = 1",
 		})
 	}
@@ -183,14 +183,14 @@ func setUpGatewayFakeOVSCommands(fexec *ovntest.FakeExec) {
 		Output: "5",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external-ids:vm-patch-port",
+		Output: "",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovs-vsctl --timeout=15 get interface breth0 ofport",
 		Output: "7",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external-ids:vm-patch-port",
-		Output: "",
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{ // TBD-merge not needed for downstream?
 		Cmd:    "ovs-vsctl --timeout=15 get Open_vSwitch . external_ids:ovn-encap-ip",
 		Output: "192.168.1.10",
 	})
@@ -1129,6 +1129,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			)
 			Expect(err).NotTo(HaveOccurred())
 			stop := make(chan struct{})
+			defer close(stop)
 			wg := &sync.WaitGroup{}
 			err = localGw.initFunc()
 			Expect(err).NotTo(HaveOccurred())

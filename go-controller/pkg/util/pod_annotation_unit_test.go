@@ -117,7 +117,7 @@ func TestMarshalPodAnnotation(t *testing.T) {
 			inpPodAnnot: PodAnnotation{
 				GatewayIPv6LLA: ovntest.MustParseIP("fe80::"),
 			},
-			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"","ipv6_lla_gateway_ip":"fe80::"}}`},
+			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"","mtu":"0","ipv6_lla_gateway_ip":"fe80::"}}`},
 		},
 	}
 

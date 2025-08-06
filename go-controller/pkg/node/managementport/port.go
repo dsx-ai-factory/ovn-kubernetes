@@ -65,7 +65,7 @@ func start(mp managementPort, stopChan <-chan struct{}) (func(), error) {
 	reconcileCh := make(chan struct{}, 1)
 	reconcile := func() { reconcileCh <- struct{}{} }
 	go func() {
-		timer := time.NewTicker(mp.reconcilePeriod())
+		timer := time.NewTicker(reconcilePeriod)
 		defer timer.Stop()
 		for {
 			select {
@@ -79,7 +79,7 @@ func start(mp managementPort, stopChan <-chan struct{}) (func(), error) {
 						Duration: 10 * time.Millisecond,
 						Steps:    4,
 						Factor:   5.0,
-						Cap:      mp.reconcilePeriod(),
+						Cap:      reconcilePeriod,
 					},
 					func(error) bool {
 						select {
@@ -95,7 +95,7 @@ func start(mp managementPort, stopChan <-chan struct{}) (func(), error) {
 					klog.Errorf("Failed to reconcile management port: %v", err)
 				}
 			}
-			timer.Reset(mp.reconcilePeriod())
+			timer.Reset(reconcilePeriod)
 		}
 	}()
 	return reconcile, nil

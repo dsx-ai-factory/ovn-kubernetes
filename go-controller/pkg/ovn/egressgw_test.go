@@ -1856,6 +1856,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						gwPod.Annotations["k8s.ovn.org/bfd-enabled"] = ""
 					}
 					gwPod.Spec.HostNetwork = true
+					node2 := newNode("node2", "192.168.126.50/24")
+					node2.Labels["k8s.ovn.org/ovn-managed"] = "false"
 					fakeOvn.startWithDBSetup(
 						libovsdbtest.TestSetup{
 							NBData: []libovsdbtest.TestData{
@@ -1881,7 +1883,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						&corev1.NodeList{
 							Items: []corev1.Node{
 								*newNode("node1", "192.168.126.202/24"),
-								*newNode("node2", "192.168.126.50/24"),
+								*node2,
 							},
 						},
 						&corev1.PodList{

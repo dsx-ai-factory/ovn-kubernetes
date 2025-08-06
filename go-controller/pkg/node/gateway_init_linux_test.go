@@ -152,7 +152,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			"ovs-vsctl --timeout=15 -- --if-exists del-port br-int " + mpPortLegacyName + " -- --may-exist add-port br-int " + mpPortName + " -- set interface " + mpPortName + " mac=\"0a:58:0a:01:01:02\" type=internal mtu_request=" + mtu + " external-ids:iface-id=" + mpPortLegacyName,
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding=1",
+			Cmd:    "sysctl net.ipv4.conf.ovn-k8s-mp0.forwarding",
 			Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
 		})
 
@@ -222,10 +222,6 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Cmd:    "ovs-vsctl --timeout=15 get interface eth0 ofport",
 			Output: "7",
 		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external-ids:vm-patch-port",
-			Output: "",
-		})
 		if setNodeIP {
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovs-vsctl --timeout=15 get Open_vSwitch . external_ids:ovn-encap-ip",
@@ -237,6 +233,10 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 				"ovn-appctl --timeout=5 -t ovn-controller exit --restart",
 			})
 		}
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external-ids:vm-patch-port",
+			Output: "",
+		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ip route replace table 7 172.16.1.0/24 via 10.1.1.1 dev ovn-k8s-mp0",
 			Output: "0",
@@ -1061,7 +1061,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 			"ovs-vsctl --timeout=15 -- --if-exists del-port br-int " + mpPortLegacyName + " -- --may-exist add-port br-int " + mpPortName + " -- set interface " + mpPortName + " mac=\"0a:58:0a:01:01:02\" type=internal mtu_request=" + mtu + " external-ids:iface-id=" + mpPortLegacyName,
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding=1",
+			Cmd:    "sysctl net.ipv4.conf.ovn-k8s-mp0.forwarding",
 			Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
 		})
 
@@ -1139,6 +1139,11 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 get interface eth0 ofport",
 			Output: "7",
+		})
+		// IP already configured, do not try to set it or restart ovn-controller
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 get Open_vSwitch . external_ids:ovn-encap-ip",
+			Output: "192.168.1.10",
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external-ids:vm-patch-port",

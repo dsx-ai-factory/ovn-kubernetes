@@ -486,7 +486,7 @@ var _ = Describe("NetworkProbe Controller", func() {
 					Suspend: false,
 					TCPProbes: []networkprobe.TCPProbe{
 						{
-							Host:     "10.1.128.10",
+							Host:     "192.0.2.1",
 							Port:     &tcpTimeoutPort,
 							Interval: "5s",
 						},
@@ -498,8 +498,8 @@ var _ = Describe("NetworkProbe Controller", func() {
 			metrics.MetricTCPErrorsTotal.Reset()
 			_, err := fakeNetworkProbeClient.K8sV1beta1().NetworkProbes(networkProbeNamespace).Create(context.TODO(), networkProbeObj, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
-			eventuallyEvaluateMetric(metrics.MetricTCPAttemptsTotal.WithLabelValues(networkProbeName, networkProbeNamespace, "10.1.128.10", "12346"), 1.0)
-			eventuallyEvaluateMetric(metrics.MetricTCPErrorsTotal.WithLabelValues(networkProbeName, networkProbeNamespace, "10.1.128.10", "12346", "TIMEOUT"), 1.0)
+			eventuallyEvaluateMetric(metrics.MetricTCPAttemptsTotal.WithLabelValues(networkProbeName, networkProbeNamespace, "192.0.2.1", "12346"), 1.0)
+			eventuallyEvaluateMetric(metrics.MetricTCPErrorsTotal.WithLabelValues(networkProbeName, networkProbeNamespace, "192.0.2.1", "12346", "TIMEOUT"), 1.0)
 
 		})
 	})

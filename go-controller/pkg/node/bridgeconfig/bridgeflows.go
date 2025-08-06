@@ -595,7 +595,7 @@ func (b *BridgeConfiguration) commonFlows(hostSubnets []*net.IPNet) ([]string, e
 					// Allow (a) OVN->host traffic on the same node
 					// (b) host->host traffic on the same node
 					if config.Gateway.Mode == config.GatewayModeShared || config.Gateway.Mode == config.GatewayModeLocal {
-						dftFlows = append(dftFlows, hostNetworkNormalActionFlows(netConfig, bridgeMacAddress, hostSubnets, false)...) // TBD-merge Cathy
+						dftFlows = append(dftFlows, hostNetworkNormalActionFlows(netConfig, bridgeMacAddress, hostSubnets, false)...) // TBD-merge
 					}
 				} else {
 					//  for UDN we additionally SNAT the packet from masquerade IP -> node IP
@@ -647,7 +647,7 @@ func (b *BridgeConfiguration) commonFlows(hostSubnets []*net.IPNet) ([]string, e
 			// resubmit to table 1 to know the state and mark of the connection.
 			// Note, there are higher priority rules that take care of traffic coming from LOCAL and OVN ports.
 			dftFlows = append(dftFlows,
-				fmt.Sprintf("cookie=%s, priority=50, in_port=%s, dl_dst=%s, ip, actions=ct(zone=%d, nat, table=1)", // TBD-merge Cathy upstream does not match in_port
+				fmt.Sprintf("cookie=%s, priority=50, in_port=%s, dl_dst=%s, ip, actions=ct(zone=%d, nat, table=1)", // TBD-merge upstream does not match in_port
 					nodetypes.DefaultOpenFlowCookie, ofPortPhys, bridgeMacAddress, config.Default.ConntrackZone))
 		}
 
@@ -709,7 +709,7 @@ func (b *BridgeConfiguration) commonFlows(hostSubnets []*net.IPNet) ([]string, e
 					// Allow (a) OVN->host traffic on the same node
 					// (b) host->host traffic on the same node
 					if config.Gateway.Mode == config.GatewayModeShared || config.Gateway.Mode == config.GatewayModeLocal {
-						dftFlows = append(dftFlows, hostNetworkNormalActionFlows(netConfig, bridgeMacAddress, hostSubnets, true)...) // TBD-merge Cathy
+						dftFlows = append(dftFlows, hostNetworkNormalActionFlows(netConfig, bridgeMacAddress, hostSubnets, true)...) // TBD-merge
 					}
 				} else {
 					//  for UDN we additionally SNAT the packet from masquerade IP -> node IP

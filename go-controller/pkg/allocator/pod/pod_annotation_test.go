@@ -276,11 +276,19 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				GatewayIPv6LLA: util.HWAddrToIPv6LLA(util.IPAddrToHWAddr(ovntest.MustParseIP("100.65.0.4"))),
 				Routes: []util.PodRoute{
 					{
+						Dest:    ovntest.MustParseIPNet("192.168.0.0/24"),
+						NextHop: ovntest.MustParseIP("192.168.0.1").To4(),
+					},
+					{
 						Dest: &net.IPNet{
 							IP:   ovntest.MustParseIP("100.65.0.0").To4(),
 							Mask: net.CIDRMask(16, 32),
 						},
 						NextHop: ovntest.MustParseIP("192.168.0.1").To4(),
+					},
+					{
+						Dest:    ovntest.MustParseIPNet("2001:db8::/64"),
+						NextHop: ovntest.MustParseIP("2010:100:200::1"),
 					},
 					{
 						Dest:    ovntest.MustParseIPNet("fd99::/64"),
@@ -316,6 +324,10 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				GatewayIPv6LLA: util.HWAddrToIPv6LLA(util.IPAddrToHWAddr(ovntest.MustParseIP("fd99::4"))),
 				Routes: []util.PodRoute{
 					{
+						Dest:    ovntest.MustParseIPNet("2001:db8::/64"),
+						NextHop: ovntest.MustParseIP("2010:100:200::1"),
+					},
+					{
 						Dest:    ovntest.MustParseIPNet("fd99::/64"),
 						NextHop: ovntest.MustParseIP("2010:100:200::1"),
 					},
@@ -347,6 +359,10 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				MAC:      util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.3/24")[0].IP),
 				Gateways: []net.IP{ovntest.MustParseIP("192.168.0.1").To4()},
 				Routes: []util.PodRoute{
+					{
+						Dest:    ovntest.MustParseIPNet("192.168.0.0/24"),
+						NextHop: ovntest.MustParseIP("192.168.0.1").To4(),
+					},
 					{
 						Dest: &net.IPNet{
 							IP:   ovntest.MustParseIP("100.65.0.0").To4(),
@@ -619,6 +635,10 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				Gateways: []net.IP{ovntest.MustParseIP("192.168.0.1").To4()},
 				Routes: []util.PodRoute{
 					{
+						Dest:    ovntest.MustParseIPNet("192.168.0.0/24"),
+						NextHop: ovntest.MustParseIP("192.168.0.1").To4(),
+					},
+					{
 						Dest:    ovntest.MustParseIPNet("100.65.0.0/16"),
 						NextHop: ovntest.MustParseIP("192.168.0.1").To4(),
 					},
@@ -649,6 +669,11 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				Gateways: []net.IP{ovntest.MustParseIP("192.168.0.1").To4()},
 				Routes: []util.PodRoute{
 					{
+						Dest:    ovntest.MustParseIPNet("192.168.0.0/24"),
+						NextHop: ovntest.MustParseIP("192.168.0.1").To4(),
+					},
+					{
+
 						Dest: &net.IPNet{
 							IP:   ovntest.MustParseIP("100.65.0.0").To4(),
 							Mask: net.CIDRMask(16, 32),

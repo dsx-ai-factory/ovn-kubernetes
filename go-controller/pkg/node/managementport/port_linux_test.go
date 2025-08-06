@@ -436,6 +436,7 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 		mgmtPortController, err := NewManagementPortController(node, nodeSubnetCIDRs, netdevName, rep, rm, netInfo)
 		Expect(err).NotTo(HaveOccurred())
 		stop := make(chan struct{})
+		defer close(stop)
 		err = mgmtPortController.Start(stop)
 		Expect(err).NotTo(HaveOccurred())
 		Eventually(func(g Gomega) {
@@ -523,6 +524,7 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 		mgmtPortController, err := NewManagementPortController(node, nodeSubnetCIDRs, netdevName, rep, rm, netInfo)
 		Expect(err).NotTo(HaveOccurred())
 		stop := make(chan struct{})
+		defer close(stop)
 		err = mgmtPortController.Start(stop)
 		Expect(err).NotTo(HaveOccurred())
 		Eventually(func(g Gomega) {
