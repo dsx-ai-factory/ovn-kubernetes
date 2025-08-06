@@ -100,10 +100,6 @@ OVN_EX_GW_NETWORK_INTERFACE=""
 OVNKUBE_NODE_MGMT_PORT_NETDEV=""
 OVN_ENCAP_TOS="inherit"
 OVN_CTINV_FLOWS_DISABLE="true"
-# XDP related information: SF Rep, Veth, NS.
-OVN_XDP_SFREP="xdp_sf"
-OVN_XDP_VETH="xdp_veth"
-OVN_XDP_NS="xdp_ns"
 # ovs "other-config"
 OVS_MAX_REVALIDATOR="5000"
 OVS_MIN_REVALIDATE_PPS="0"
@@ -406,15 +402,6 @@ while [ "$1" != "" ]; do
   --ovn-ctinv-flows-disable)
     OVN_CTINV_FLOWS_DISABLE=$VALUE
     ;;
-  --xdp-sfrep)
-    OVN_XDP_SFREP=$VALUE
-    ;;
-  --xdp-veth)
-    OVN_XDP_VETH=$VALUE
-    ;;
-  --xdp-ns)
-    OVN_XDP_NS=$VALUE
-    ;;
   --max-revalidator)
     OVS_MAX_REVALIDATOR=$VALUE
     ;;
@@ -706,12 +693,6 @@ ovn_encap_tos=${OVN_ENCAP_TOS}
 echo "ovn_encap_tos: ${ovn_encap_tos}"
 ovn_ctinv_flows_disable=${OVN_CTINV_FLOWS_DISABLE}
 echo "ovn_ctinv_flows_disable: ${ovn_ctinv_flows_disable}"
-ovn_xdp_sfrep=${OVN_XDP_SFREP}
-echo "ovn_xdp_sfrep: ${ovn_xdp_sfrep}"
-ovn_xdp_veth=${OVN_XDP_VETH}
-echo "ovn_xdp_veth: ${ovn_xdp_veth}"
-ovn_xdp_ns=${OVN_XDP_NS}
-echo "ovn_xdp_ns: ${ovn_xdp_ns}"
 ovs_max_revalidator=${OVS_MAX_REVALIDATOR}
 echo "ovs_max_revalidator: ${ovs_max_revalidator}"
 ovs_min_revalidate_pps=${OVS_MIN_REVALIDATE_PPS}
@@ -1268,9 +1249,6 @@ ovn_image=${image_ubuntu} \
   ovn_lflow_cache_limit=${ovn_lflow_cache_limit} \
   ovn_lflow_cache_limit_kb=${ovn_lflow_cache_limit_kb} \
   ovn_encap_tos=${ovn_encap_tos} \
-  ovn_xdp_sfrep=${ovn_xdp_sfrep} \
-  ovn_xdp_veth=${ovn_xdp_veth} \
-  ovn_xdp_ns=${ovn_xdp_ns} \
   ovs_max_revalidator=${ovs_max_revalidator} \
   ovs_min_revalidate_pps=${ovs_min_revalidate_pps} \
   ovs_max_idle=${ovs_max_idle} \

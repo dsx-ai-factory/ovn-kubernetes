@@ -31,7 +31,6 @@ import (
 	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
-	OFManager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/openflow-manager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	coreinformermocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/informers/core/v1"
 	v1mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
@@ -417,7 +416,6 @@ var _ = Describe("SecondaryNodeNetworkController: UserDefinedPrimaryNetwork Gate
 			stop := make(chan struct{})
 			defer close(stop)
 			wg := &sync.WaitGroup{}
-			OFManager.NewOpenFlowCacheManager(wg, stop)
 			err = localGw.initFunc()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(localGw.Init(stop, wg)).To(Succeed())
@@ -429,7 +427,7 @@ var _ = Describe("SecondaryNodeNetworkController: UserDefinedPrimaryNetwork Gate
 			// FIXME: extract openflow manager func from the spawning of a go routine so it can be called directly below.
 			err = localGw.openflowManager.updateBridgeFlowCache(localGw.nodeIPManager.ListAddresses())
 			Expect(err).NotTo(HaveOccurred())
-			OFManager.OpenFlowCacheManager.SyncFlows(localGw.openflowManager.defaultBridgeFlowID)
+			localGw.openflowManager.syncFlows()
 
 			By("creating secondary network controller for user defined primary network")
 			cnnci := CommonNodeNetworkControllerInfo{name: nodeName, watchFactory: &factoryMock}

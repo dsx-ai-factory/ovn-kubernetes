@@ -247,8 +247,6 @@ type DefaultConfig struct {
 	OVNMasqConntrackZone int
 	// HostNodePortCTZone is an unexposed config with the value of ConntrackZone+3
 	HostNodePortConntrackZone int
-	// HostXDPCTZone is an unexposed config with the value of ConntrackZone+4
-	HostXDPCTZone int
 	// ReassemblyConntrackZone is an unexposed config with the value of ConntrackZone+5
 	ReassemblyConntrackZone int
 	// EncapType value defines the encapsulation protocol to use to transmit packets between
@@ -607,12 +605,9 @@ type OvnKubeNodeConfig struct {
 	MgmtPortDPResourceName string `gcfg:"mgmt-port-dp-resource-name"`
 	WaitOnOVNInstallExtID  bool   `gcfg:"ovnkube-wait-on-ovn-install-extid"`
 	IsPrimaryDPU           bool
-	XDPSFRep               string `gcfg:"ovn-xdp-sfrep"`
-	XDPVeth                string `gcfg:"ovn-xdp-veth"`
-	XDPNamespace           string `gcfg:"ovn-xdp-ns"`
-	MaxRevalidator         uint   `gcfg:"ovs-max-revalidator"`
-	MinRevalidatePPS       int    `gcfg:"ovs-min-revalidate-pps"`
-	MaxIdle                uint   `gcfg:"ovs-max-idle"`
+	MaxRevalidator         uint `gcfg:"ovs-max-revalidator"`
+	MinRevalidatePPS       int  `gcfg:"ovs-min-revalidate-pps"`
+	MaxIdle                uint `gcfg:"ovs-max-idle"`
 	// RepresentorMeteringNodes is the node label whose value will be used
 	// to determine if representor metering feature will be applied or not
 	RepresentorMeteringNodes string `gcfg:"representor-metering-nodes"`
@@ -1814,24 +1809,6 @@ var OvnKubeNodeFlags = []cli.Flag{
 		Value:       OvnKubeNode.WaitOnOVNInstallExtID,
 		Destination: &cliConfig.OvnKubeNode.WaitOnOVNInstallExtID,
 	},
-	&cli.StringFlag{
-		Name:        "ovn-xdp-sfrep",
-		Usage:       "the name of the SF rep used for XDP",
-		Value:       OvnKubeNode.XDPSFRep,
-		Destination: &cliConfig.OvnKubeNode.XDPSFRep,
-	},
-	&cli.StringFlag{
-		Name:        "ovn-xdp-veth",
-		Usage:       "the name of the Veth used for XDP",
-		Value:       OvnKubeNode.XDPVeth,
-		Destination: &cliConfig.OvnKubeNode.XDPVeth,
-	},
-	&cli.StringFlag{
-		Name:        "ovn-xdp-ns",
-		Usage:       "the name of the namespace used for XDP",
-		Value:       OvnKubeNode.XDPNamespace,
-		Destination: &cliConfig.OvnKubeNode.XDPNamespace,
-	},
 	&cli.UintFlag{
 		Name:        "ovs-max-revalidator",
 		Usage:       "the max time (in ms) that revalidator threads will wait before executing flow revalidation",
@@ -2472,7 +2449,6 @@ func completeDefaultConfig(allSubnets *ConfigSubnets) error {
 	Default.HostMasqConntrackZone = Default.ConntrackZone + 1
 	Default.OVNMasqConntrackZone = Default.ConntrackZone + 2
 	Default.HostNodePortConntrackZone = Default.ConntrackZone + 3
-	Default.HostXDPCTZone = Default.ConntrackZone + 4
 	Default.ReassemblyConntrackZone = Default.ConntrackZone + 5
 	return nil
 }

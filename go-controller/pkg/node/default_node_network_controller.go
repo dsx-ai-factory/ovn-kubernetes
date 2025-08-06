@@ -78,14 +78,6 @@ type CommonNodeNetworkControllerInfo struct {
 	routeManager *routemanager.Controller
 }
 
-// per-NAD Pod Info
-type podNADInfo struct {
-	// DPU connection details of the specific NAD
-	dpuCD *util.DPUConnectionDetails
-	// topology specific opaque info of specific NAD
-	anyInfo any
-}
-
 type portMirrorInfo struct {
 	// Mirroring configuration information.
 	portMirrorMap sync.Map
@@ -1440,7 +1432,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		_, err = nc.watchPodsDPU(nil, nil, nil)
+		_, err = nc.watchPodsDPU()
 		if err != nil {
 			return err
 		}

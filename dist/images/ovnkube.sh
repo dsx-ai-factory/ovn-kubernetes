@@ -101,9 +101,6 @@ BASEDIR=$(dirname $0)
 # OVN_HOST_NETWORK_NAMESPACE - namespace to classify host network traffic for applying network policies
 # OVN_ENCAP_TOS - set a TOS value for the outer header
 # OVN_CTINV_FLOWS_DISABLE - enable/disable northd from configuring CT Invalid flows as it is not offload friendly
-# OVN_XDP_SFREP - Name of the SF rep for XDP
-# OVN_XDP_VETH - Name of the Veth for XDP
-# OVN_XDP_NS - Name of the XDP NS
 # OVS_MAX_REVALIDATOR - The maximum time (in ms) that revalidator threads will wait before executing flow revalidation
 # OVS_MIN_REVALIDATE_PPS - The minimum pps that flow must have in order to be revalidated when revalidation duration exceeds half of max-revalidator config variable
 # OVS_MAX_IDLE - The maximum time (in ms) that idle flows will remain cached in the datapath
@@ -274,12 +271,6 @@ ovn_sb_raft_election_timer=${OVN_SB_RAFT_ELECTION_TIMER:-1000}
 ovn_nb_raft_sched_priority=${OVN_NB_RAFT_SCHED_PRIORITY:--12}
 # OVN_SB_RAFT_SCHED_PRIORITY - ovn south db process priority niceness (default -11)
 ovn_sb_raft_sched_priority=${OVN_SB_RAFT_SCHED_PRIORITY:--11}
-# OVN_XDP_SFREP - XDP SF Rep
-OVN_XDP_SFREP=${OVN_XDP_SFREP:-"xdp_sf"}
-# OVN_XDP_VETH - XDP Veth
-OVN_XDP_VETH=${OVN_XDP_VETH:-"xdp_veth"}
-# OVN_XDP_NS - XDP Namespace
-OVN_XDP_NS=${OVN_XDP_NS:-"xdp_ns"}
 # OVS_MAX_REVALIDATOR, "other_config:max_revalidator" in ovs, default to 5000
 OVS_MAX_REVALIDATOR=${OVS_MAX_REVALIDATOR:-"5000"}
 # OVS_MIN_REVALIDATE_PPS, "other_config:min_revalidate_pps" in ovs, default 1
@@ -3325,7 +3316,6 @@ ovn-node() {
 
   representor_metering_nodes_flag=
   ovn_gateway_router_subnet_opt=
-  ovn_xdp_opts=
   if [[ ${ovnkube_node_mode} == "dpu" ]]; then
     # in the case of dpu mode we want the host K8s Node Name and not the DPU K8s Node Name
     K8S_NODE=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:host-k8s-nodename | tr -d \")
@@ -3367,12 +3357,6 @@ ovn-node() {
       fi
     fi
     ovn_gateway_router_subnet_opt="--gateway-router-subnet=${ovn_gateway_router_subnet}"
-    ovn_xdp_opts="
-      --ovn-xdp-sfrep=${OVN_XDP_SFREP}
-      --ovn-xdp-veth=${OVN_XDP_VETH}
-      --ovn-xdp-ns=${OVN_XDP_NS}
-    "
-
     if [[ ${representor_metering_nodes} != "" ]]; then
       representor_metering_nodes_flag="--representor-metering-nodes=${representor_metering_nodes}"
     fi
@@ -3531,7 +3515,6 @@ ovn-node() {
         ${ovn_unprivileged_flag} \
         ${ovn_v4_masquerade_subnet_opt} \
         ${ovn_v6_masquerade_subnet_opt} \
-        ${ovn_xdp_opts} \
         ${ovs_other_config_opts} \
         ${port_mirror_enabled_flag} \
         ${representor_metering_nodes_flag} \

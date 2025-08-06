@@ -275,14 +275,14 @@ func (b *BridgeConfiguration) UpdateInterfaceIPAddresses(node *corev1.Node) ([]*
 
 // GetPortConfigurations returns a slice of Network port configurations along with the
 // uplinkName and physical port's ofport value
-func (b *BridgeConfiguration) GetPortConfigurations() ([]*BridgeUDNConfiguration, string, string, string, string, string, string, *sync.Map) {
+func (b *BridgeConfiguration) GetPortConfigurations() ([]*BridgeUDNConfiguration, string, string, string, string, string, *sync.Map) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 	var netConfigs []*BridgeUDNConfiguration
 	for _, netConfig := range b.netConfig {
 		netConfigs = append(netConfigs, netConfig.ShallowCopy())
 	}
-	return netConfigs, b.uplinkName, b.ofPortPhys, b.gwIfaceRep, b.ofPortHost, b.ofPortVMPatch, b.bridgeName, b.localnetPatchPorts
+	return netConfigs, b.uplinkName, b.ofPortPhys, b.gwIfaceRep, b.ofPortHost, b.ofPortVMPatch, b.localnetPatchPorts
 }
 
 // AddNetworkConfig adds the patchport and ctMark value for the provided netInfo into the bridge configuration cache

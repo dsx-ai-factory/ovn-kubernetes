@@ -39,7 +39,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/managementport"
 	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
-	OFManager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/openflow-manager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	nodemocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
 	linkMock "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
@@ -386,7 +385,6 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			Expect(err).NotTo(HaveOccurred())
-			OFManager.NewOpenFlowCacheManager(wg, stop)
 
 			ifAddrs := ovntest.MustParseIPNets(eth0CIDR)
 			sharedGw, err := newGateway(
@@ -419,8 +417,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			sharedGw.nodeIPManager.sync()
 			// we cannot start openflow manager directly because it spawns a go routine
 			// FIXME: extract openflow manager func from the spawning of a go routine so it can be called directly below.
-			OFManager.OpenFlowCacheManager.SyncFlows(sharedGw.openflowManager.defaultBridgeFlowID)
-			OFManager.OpenFlowCacheManager.SyncFlows(sharedGw.openflowManager.extGWBridgeFlowID)
+			sharedGw.openflowManager.syncFlows()
 			// Verify the code moved eth0's IP address, MAC, and routes
 			// over to breth0
 			l, err := netlink.LinkByName("breth0")
@@ -789,7 +786,6 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			Expect(err).NotTo(HaveOccurred())
-			OFManager.NewOpenFlowCacheManager(wg, stop)
 			sharedGw, err := newGateway(
 				nodeName,
 				ovntest.MustParseIPNets(nodeSubnet),
@@ -821,8 +817,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			sharedGw.nodeIPManager.sync()
 			// we cannot start openflow manager directly because it spawns a go routine
 			// FIXME: extract openflow manager func from the spawning of a go routine so it can be called directly below.
-			OFManager.OpenFlowCacheManager.SyncFlows(sharedGw.openflowManager.defaultBridgeFlowID)
-			OFManager.OpenFlowCacheManager.SyncFlows(sharedGw.openflowManager.extGWBridgeFlowID)
+			sharedGw.openflowManager.syncFlows()
 
 			// check that the masquerade route was not added
 			l, err := netlink.LinkByName(brphys)
@@ -1294,7 +1289,6 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 			Expect(configureGlobalForwarding()).To(Succeed())
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			Expect(err).NotTo(HaveOccurred())
-			OFManager.NewOpenFlowCacheManager(wg, stop)
 			ifAddrs := ovntest.MustParseIPNets(eth0CIDR)
 			localGw, err := newGateway(
 				nodeName,
@@ -1327,8 +1321,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 			localGw.nodeIPManager.sync()
 			// we cannot start openflow manager directly because it spawns a go routine
 			// FIXME: extract openflow manager func from the spawning of a go routine so it can be called directly below.
-			OFManager.OpenFlowCacheManager.SyncFlows(localGw.openflowManager.defaultBridgeFlowID)
-			OFManager.OpenFlowCacheManager.SyncFlows(localGw.openflowManager.extGWBridgeFlowID)
+			localGw.openflowManager.syncFlows()
 
 			// Verify the code moved eth0's IP address, MAC, and routes
 			// over to breth0

@@ -49,7 +49,6 @@ type NetInfo interface {
 	AllowsPersistentIPs() bool
 	Gateways() string
 	GatewayMAC() string
-	XDPService() bool
 	NADRoutes() []*net.IPNet
 	PhysicalNetworkName() string
 	NADToInterConnect() string
@@ -652,11 +651,6 @@ func (nInfo *DefaultNetInfo) GatewayMAC() string {
 	panic("unexpected call for default network")
 }
 
-// XDPService returns the defaultNetConfInfo's XDPService value
-func (nInfo *DefaultNetInfo) XDPService() bool {
-	panic("unexpected call for default network")
-}
-
 // NADRoutes returns the defaultNetConfInfo's NADRoutes value
 func (nInfo *DefaultNetInfo) NADRoutes() []*net.IPNet {
 	panic("unexpected call for default network")
@@ -686,7 +680,6 @@ type secondaryNetInfo struct {
 	allowPersistentIPs bool
 	gateways           string
 	gatewayMAC         string
-	xdpService         bool
 	nadRoutes          []*net.IPNet
 	connectToNAD       string
 
@@ -840,11 +833,6 @@ func (nInfo *secondaryNetInfo) GatewayMAC() string {
 	return nInfo.gatewayMAC
 }
 
-// XDPService returns the XDPService value
-func (nInfo *secondaryNetInfo) XDPService() bool {
-	return nInfo.xdpService
-}
-
 // NADRoutes returns the NADRoutes value
 func (nInfo *secondaryNetInfo) NADRoutes() []*net.IPNet {
 	return nInfo.nadRoutes
@@ -913,9 +901,6 @@ func (nInfo *secondaryNetInfo) canReconcile(other NetInfo) bool {
 	if nInfo.gatewayMAC != other.GatewayMAC() {
 		return false
 	}
-	if nInfo.xdpService != other.XDPService() {
-		return false
-	}
 	if nInfo.primaryNetwork != other.IsPrimaryNetwork() {
 		return false
 	}
@@ -959,7 +944,6 @@ func (nInfo *secondaryNetInfo) copy() *secondaryNetInfo {
 		physicalNetworkName: nInfo.physicalNetworkName,
 		gateways:            nInfo.gateways,
 		gatewayMAC:          nInfo.gatewayMAC,
-		xdpService:          nInfo.xdpService,
 		nadRoutes:           nInfo.nadRoutes,
 		connectToNAD:        nInfo.connectToNAD,
 	}
@@ -1047,7 +1031,6 @@ func newLocalnetNetConfInfo(netconf *ovncnitypes.NetConf, annotations map[string
 		physicalNetworkName: netconf.PhysicalNetworkName,
 		gateways:            netconf.Gateway,
 		gatewayMAC:          netconf.GatewayMAC,
-		xdpService:          netconf.XDPService,
 		mutableNetInfo: mutableNetInfo{
 			id:   types.InvalidID,
 			nads: sets.Set[string]{},

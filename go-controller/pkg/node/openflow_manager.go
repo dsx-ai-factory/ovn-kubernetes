@@ -15,7 +15,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
 	nodetypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/types"
-	OFManager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/openflow-manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -23,17 +22,22 @@ import (
 type openflowManager struct {
 	defaultBridge         *bridgeconfig.BridgeConfiguration
 	externalGatewayBridge *bridgeconfig.BridgeConfiguration
-	defaultBridgeFlowID   string
-	extGWBridgeFlowID     string
+	// flow cache, use map instead of array for readability when debugging
+	flowCache     map[string][]string
+	flowMutex     sync.Mutex
+	exGWFlowCache map[string][]string
+	exGWFlowMutex sync.Mutex
+	// channel to indicate we need to update flows immediately
+	flowChan chan struct{}
 }
 
 // UTILs Needed for UDN (also leveraged for default netInfo) in openflowmanager
 
-func (c *openflowManager) getDefaultBridgePortConfigurations() ([]*bridgeconfig.BridgeUDNConfiguration, string, string, string, string, string, string, *sync.Map) {
+func (c *openflowManager) getDefaultBridgePortConfigurations() ([]*bridgeconfig.BridgeUDNConfiguration, string, string, string, string, string, *sync.Map) {
 	return c.defaultBridge.GetPortConfigurations()
 }
 
-func (c *openflowManager) getExGwBridgePortConfigurations() ([]*bridgeconfig.BridgeUDNConfiguration, string, string, string, string, string, string, *sync.Map) {
+func (c *openflowManager) getExGwBridgePortConfigurations() ([]*bridgeconfig.BridgeUDNConfiguration, string, string, string, string, string, *sync.Map) {
 	return c.externalGatewayBridge.GetPortConfigurations()
 }
 
@@ -75,25 +79,65 @@ func (c *openflowManager) setDefaultBridgeMAC(macAddr net.HardwareAddr) {
 }
 
 func (c *openflowManager) updateFlowCacheEntry(key string, flows []string) {
-	OFManager.OpenFlowCacheManager.UpdateFlowCacheEntry(c.defaultBridgeFlowID, key, flows, false)
+	c.flowMutex.Lock()
+	defer c.flowMutex.Unlock()
+	c.flowCache[key] = flows
 }
 
 func (c *openflowManager) deleteFlowsByKey(key string) {
-	OFManager.OpenFlowCacheManager.DeleteFlowsByKey(c.defaultBridgeFlowID, key, false)
+	c.flowMutex.Lock()
+	defer c.flowMutex.Unlock()
+	delete(c.flowCache, key)
 }
 
-func (c *openflowManager) getFlowCacheEntry(key string) []string {
-	return OFManager.OpenFlowCacheManager.GetFlowsByKey(c.defaultBridgeFlowID, key)
+func (c *openflowManager) getFlowsByKey(key string) []string {
+	c.flowMutex.Lock()
+	defer c.flowMutex.Unlock()
+	return c.flowCache[key]
 }
 
 func (c *openflowManager) updateExBridgeFlowCacheEntry(key string, flows []string) {
-	OFManager.OpenFlowCacheManager.UpdateFlowCacheEntry(c.extGWBridgeFlowID, key, flows, false)
+	c.exGWFlowMutex.Lock()
+	defer c.exGWFlowMutex.Unlock()
+	c.exGWFlowCache[key] = flows
 }
 
 func (c *openflowManager) requestFlowSync() {
-	OFManager.OpenFlowCacheManager.RequestFlowSync(c.defaultBridgeFlowID)
+	select {
+	case c.flowChan <- struct{}{}:
+		klog.V(5).Infof("Gateway OpenFlow sync requested")
+	default:
+		klog.V(5).Infof("Gateway OpenFlow sync already requested")
+	}
+}
+
+func (c *openflowManager) syncFlows() {
+	c.flowMutex.Lock()
+	defer c.flowMutex.Unlock()
+
+	flows := []string{}
+	for _, entry := range c.flowCache {
+		flows = append(flows, entry...)
+	}
+
+	_, stderr, err := util.ReplaceOFFlows(c.defaultBridge.GetBridgeName(), flows)
+	if err != nil {
+		klog.Errorf("Failed to add flows, error: %v, stderr, %s, flows: %s", err, stderr, c.flowCache)
+	}
+
 	if c.externalGatewayBridge != nil {
-		OFManager.OpenFlowCacheManager.RequestFlowSync(c.extGWBridgeFlowID)
+		c.exGWFlowMutex.Lock()
+		defer c.exGWFlowMutex.Unlock()
+
+		flows := []string{}
+		for _, entry := range c.exGWFlowCache {
+			flows = append(flows, entry...)
+		}
+
+		_, stderr, err := util.ReplaceOFFlows(c.externalGatewayBridge.GetBridgeName(), flows)
+		if err != nil {
+			klog.Errorf("Failed to add flows, error: %v, stderr, %s, flows: %s", err, stderr, c.exGWFlowCache)
+		}
 	}
 }
 
@@ -107,16 +151,14 @@ func (c *openflowManager) requestFlowSync() {
 // -- to handle external -> service(ExternalTrafficPolicy: Local) -> host access without SNAT
 func newGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeconfig.BridgeConfiguration) (*openflowManager, error) {
 	// add health check function to check default OpenFlow flows are on the shared gateway bridge
-	var dftID, extID string
-	dftID = OFManager.OpenFlowCacheManager.CreateFlowCache(gwBridge.GetBridgeName())
-	if exGWBridge != nil {
-		extID = OFManager.OpenFlowCacheManager.CreateFlowCache(exGWBridge.GetBridgeName())
-	}
 	ofm := &openflowManager{
 		defaultBridge:         gwBridge,
 		externalGatewayBridge: exGWBridge,
-		defaultBridgeFlowID:   dftID,
-		extGWBridgeFlowID:     extID,
+		flowCache:             make(map[string][]string),
+		flowMutex:             sync.Mutex{},
+		exGWFlowCache:         make(map[string][]string),
+		exGWFlowMutex:         sync.Mutex{},
+		flowChan:              make(chan struct{}, 1),
 	}
 
 	// defer flowSync until syncService() to prevent the existing service OpenFlows being deleted
@@ -146,13 +188,15 @@ func (c *openflowManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) 
 						continue
 					}
 				}
+				c.syncFlows()
+			case <-c.flowChan:
+				c.syncFlows()
+				timer.Reset(syncPeriod)
 			case <-stopChan:
 				return
 			}
 		}
 	}()
-	OFManager.OpenFlowCacheManager.StartFlowCacheWorker(c.defaultBridgeFlowID)
-	OFManager.OpenFlowCacheManager.StartFlowCacheWorker(c.extGWBridgeFlowID)
 }
 
 func (c *openflowManager) updateBridgePMTUDFlowCache(key string, ipAddrs []string) {
@@ -191,16 +235,10 @@ func (c *openflowManager) updateBridgeFlowCache(hostIPs []net.IP, hostSubnets []
 	return nil
 }
 
-// For XDP gateway the localnet patch port may be deleted and recreated as needed. So, we can't
-// always expect the ofPortPatch to agree. If the ofPortPatch changes we just check if there
-// are any flows using the ofPortPatch and error out if so; i.e. the localnet is deleted
-// but flows using the localnet port are still around.
-// However, if the of ports disagree, but there are no flows that use the old of port,
-// then it is not an error.
 // This assumes ofPortPhys doesn't change, which we'll still consider as fatal.
 // For the N/S gateway we should not have a situation where the patch's OF port changes,
 // so will make this check specific to localnet ports.
-func checkPorts(netConfigs []*bridgeconfig.BridgeUDNConfiguration, physIntf, ofPortPhys, hostRepName, ofPortHost, ofPortVMPatch, bridgeName string,
+func checkPorts(netConfigs []*bridgeconfig.BridgeUDNConfiguration, physIntf, ofPortPhys, hostRepName, ofPortHost, ofPortVMPatch string,
 	localnetPatchPorts *sync.Map) error {
 	// it could be that the ovn-controller recreated the patch between the host OVS bridge and
 	// the integration bridge, as a result the ofport number changed for that patch interface
@@ -220,13 +258,6 @@ func checkPorts(netConfigs []*bridgeconfig.BridgeUDNConfiguration, physIntf, ofP
 				os.Exit(1)
 			} else {
 				klog.Warningf("UDN patch port %s changed for existing network from %v to %v. Expecting bridge config update.", netConfig.PatchPort, netConfig.OfPortPatch, curOfportPatch)
-				if strings.Contains(netConfig.PatchPort, "localnet_port") {
-					err = bridgeconfig.XdpCheckPatchPortOFFlows(bridgeName, ofPortPhys, netConfig.PatchPort, netConfig.OfPortPatch, curOfportPatch)
-					if err != nil {
-						klog.Errorf("Fatal error: %v", err)
-						os.Exit(1)
-					}
-				}
 			}
 		}
 	}

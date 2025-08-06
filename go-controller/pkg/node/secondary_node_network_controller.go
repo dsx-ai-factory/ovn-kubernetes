@@ -67,7 +67,7 @@ func (nc *SecondaryNodeNetworkController) Start(_ context.Context) error {
 
 	// enable adding ovs ports for dpu pods in both primary and secondary user defined networks
 	if (config.OVNKubernetesFeature.EnableMultiNetwork || util.IsNetworkSegmentationSupportEnabled()) && config.OvnKubeNode.Mode == types.NodeModeDPU {
-		handler, err := nc.watchPodsDPU(nil, nil, nil)
+		handler, err := nc.watchPodsDPU()
 		if err != nil {
 			return err
 		}

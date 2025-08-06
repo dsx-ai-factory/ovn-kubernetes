@@ -37,7 +37,6 @@ import (
 	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
-	OFManager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/openflow-manager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	coreinformermocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/informers/core/v1"
 	v1mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
@@ -60,7 +59,7 @@ func getCreationFakeCommands(fexec *ovntest.FakeExec, mgtPort, mgtPortMAC, netNa
 	})
 
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "sysctl net/ipv4/conf/" + mgtPort + "/forwarding=1",
+		Cmd:    "sysctl net/ipv4/conf/" + mgtPort + "/forwarding",
 		Output: "net.ipv4.conf." + mgtPort + ".forwarding = 1",
 	})
 }
@@ -95,7 +94,7 @@ func setManagementPortFakeCommands(fexec *ovntest.FakeExec, nodeName string) {
 		"ovs-vsctl --timeout=15 -- --if-exists del-port br-int " + mpPortLegacyName + " -- --may-exist add-port br-int " + mpPortName + " -- set interface " + mpPortName + " mac=\"0a:58:64:80:00:02\" type=internal mtu_request=1400 external-ids:iface-id=" + mpPortLegacyName,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "sysctl net.ipv4.conf.ovn-k8s-mp0.forwarding=1",
+		Cmd:    "sysctl net.ipv4.conf.ovn-k8s-mp0.forwarding",
 		Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
 	})
 	//fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -123,7 +122,7 @@ func setManagementPortFakeCommands(fexec *ovntest.FakeExec, nodeName string) {
 		Output: "0",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "sysctl net/ipv4/conf/ovn-k8s-mp0/rp_filter",
+		Cmd:    "sysctl net.ipv4.conf.ovn-k8s-mp0.rp_filter",
 		Output: "net.ipv4.conf.ovn-k8s-mp0.rp_filter = 2",
 	})
 }
@@ -253,11 +252,11 @@ func setUpUDNOpenflowManagerCheckPortsFakeOVSCommands(fexec *ovntest.FakeExec) {
 
 func openflowManagerCheckPorts(ofMgr *openflowManager) {
 	GinkgoHelper()
-	netConfigs, uplink, ofPortPhys, gwIfaceRep, ofPortHost, ofPortVMPatch, bridgeName, localnetPatchPorts := ofMgr.getDefaultBridgePortConfigurations()
+	netConfigs, uplink, ofPortPhys, gwIfaceRep, ofPortHost, ofPortVMPatch, localnetPatchPorts := ofMgr.getDefaultBridgePortConfigurations()
 	sort.SliceStable(netConfigs, func(i, j int) bool {
 		return netConfigs[i].PatchPort < netConfigs[j].PatchPort
 	})
-	Expect(checkPorts(netConfigs, uplink, ofPortPhys, gwIfaceRep, ofPortHost, ofPortVMPatch, bridgeName, localnetPatchPorts)).To(Succeed())
+	Expect(checkPorts(netConfigs, uplink, ofPortPhys, gwIfaceRep, ofPortHost, ofPortVMPatch, localnetPatchPorts)).To(Succeed())
 }
 
 func getDummyOpenflowManager() *openflowManager {
@@ -656,7 +655,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			stop := make(chan struct{})
 			defer close(stop)
 			wg := &sync.WaitGroup{}
-			OFManager.NewOpenFlowCacheManager(wg, stop)
 			err = localGw.initFunc()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(localGw.Init(stop, wg)).To(Succeed())
@@ -668,40 +666,44 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			// FIXME: extract openflow manager func from the spawning of a go routine so it can be called directly below.
 			err = localGw.openflowManager.updateBridgeFlowCache(localGw.nodeIPManager.ListAddresses())
 			Expect(err).NotTo(HaveOccurred())
-			OFManager.OpenFlowCacheManager.SyncFlows(localGw.openflowManager.defaultBridgeFlowID)
+			localGw.openflowManager.syncFlows()
 
 			udnGateway, err := NewUserDefinedNetworkGateway(netInfo, node, wf.NodeCoreInformer().Lister(),
 				&kubeMock, vrf, ipRulesManager, localGw)
 			Expect(err).NotTo(HaveOccurred())
-			defaultFlows := udnGateway.gateway.openflowManager.getFlowCacheEntry("DEFAULT")
-			Expect(defaultFlows).To(HaveLen(39))
+			flowMap := udnGateway.gateway.openflowManager.flowCache
+			Expect(flowMap["DEFAULT"]).To(HaveLen(39))
 
 			Expect(udnGateway.masqCTMark).To(Equal(udnGateway.masqCTMark))
 			var udnFlows int
-			for _, flow := range udnGateway.gateway.openflowManager.getFlowCacheEntry("") {
-				mark := fmt.Sprintf("0x%x", udnGateway.masqCTMark)
-				if strings.Contains(flow, mark) {
-					// UDN Flow
-					udnFlows++
+			for _, flows := range flowMap {
+				for _, flow := range flows {
+					mark := fmt.Sprintf("0x%x", udnGateway.masqCTMark)
+					if strings.Contains(flow, mark) {
+						// UDN Flow
+						udnFlows++
+					}
 				}
 			}
 			Expect(udnFlows).To(Equal(0))
 			Expect(udnGateway.openflowManager.defaultBridge.GetNetConfigLen()).To(Equal(1)) // only default network
 
 			Expect(udnGateway.AddNetwork()).To(Succeed())
-			defaultFlows = udnGateway.gateway.openflowManager.getFlowCacheEntry("DEFAULT")
-			Expect(defaultFlows).To(HaveLen(57))                                            // 18 UDN Flows are added by default
+			flowMap = udnGateway.gateway.openflowManager.flowCache
+			Expect(flowMap["DEFAULT"]).To(HaveLen(57))                                      // 18 UDN Flows are added by default
 			Expect(udnGateway.openflowManager.defaultBridge.GetNetConfigLen()).To(Equal(2)) // default network + UDN network
 			defaultUdnConfig := udnGateway.openflowManager.defaultBridge.GetNetworkConfig("default")
 			bridgeUdnConfig := udnGateway.openflowManager.defaultBridge.GetNetworkConfig("bluenet")
 			bridgeMAC := udnGateway.openflowManager.defaultBridge.GetMAC().String()
 			ofPortHost := udnGateway.openflowManager.defaultBridge.GetOfPortHost()
-			for _, flow := range udnGateway.gateway.openflowManager.getFlowCacheEntry("") {
-				if strings.Contains(flow, fmt.Sprintf("0x%x", udnGateway.masqCTMark)) {
-					// UDN Flow
-					udnFlows++
-				} else if strings.Contains(flow, fmt.Sprintf("in_port=%s", bridgeUdnConfig.OfPortPatch)) {
-					udnFlows++
+			for _, flows := range flowMap {
+				for _, flow := range flows {
+					if strings.Contains(flow, fmt.Sprintf("0x%x", udnGateway.masqCTMark)) {
+						// UDN Flow
+						udnFlows++
+					} else if strings.Contains(flow, fmt.Sprintf("in_port=%s", bridgeUdnConfig.OfPortPatch)) {
+						udnFlows++
+					}
 				}
 			}
 			Expect(udnFlows).To(Equal(14))
@@ -709,10 +711,10 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 
 			for _, svcCIDR := range config.Kubernetes.ServiceCIDRs {
 				// Check flows for default network service CIDR.
-				bridgeconfig.CheckDefaultSvcIsolationOVSFlows(defaultFlows, defaultUdnConfig, ofPortHost, bridgeMAC, svcCIDR)
+				bridgeconfig.CheckDefaultSvcIsolationOVSFlows(flowMap["DEFAULT"], defaultUdnConfig, ofPortHost, bridgeMAC, svcCIDR)
 
 				// Expect exactly one flow per UDN for table 2 for service isolation.
-				bridgeconfig.CheckUDNSvcIsolationOVSFlows(defaultFlows, bridgeUdnConfig, "bluenet", svcCIDR, 1)
+				bridgeconfig.CheckUDNSvcIsolationOVSFlows(flowMap["DEFAULT"], bridgeUdnConfig, "bluenet", svcCIDR, 1)
 			}
 
 			// The second call to checkPorts() will return no ofPort for the UDN - simulating a deletion that already was
@@ -723,24 +725,26 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			cnode := node.DeepCopy()
 			kubeMock.On("UpdateNodeStatus", cnode).Return(nil) // check if network key gets deleted from annotation
 			Expect(udnGateway.DelNetwork()).To(Succeed())
-			defaultFlows = udnGateway.gateway.openflowManager.getFlowCacheEntry("DEFAULT")
-			Expect(defaultFlows).To(HaveLen(39))
+			flowMap = udnGateway.gateway.openflowManager.flowCache
+			Expect(flowMap["DEFAULT"]).To(HaveLen(39))                                      // only default network flows are present
 			Expect(udnGateway.openflowManager.defaultBridge.GetNetConfigLen()).To(Equal(1)) // default network only
 			udnFlows = 0
-			for _, flow := range udnGateway.gateway.openflowManager.getFlowCacheEntry("") {
-				if strings.Contains(flow, fmt.Sprintf("0x%x", udnGateway.masqCTMark)) {
-					// UDN Flow
-					udnFlows++
+			for _, flows := range flowMap {
+				for _, flow := range flows {
+					if strings.Contains(flow, fmt.Sprintf("0x%x", udnGateway.masqCTMark)) {
+						// UDN Flow
+						udnFlows++
+					}
 				}
 			}
 			Expect(udnFlows).To(Equal(0))
 
 			for _, svcCIDR := range config.Kubernetes.ServiceCIDRs {
 				// Check flows for default network service CIDR.
-				bridgeconfig.CheckDefaultSvcIsolationOVSFlows(defaultFlows, defaultUdnConfig, ofPortHost, bridgeMAC, svcCIDR)
+				bridgeconfig.CheckDefaultSvcIsolationOVSFlows(flowMap["DEFAULT"], defaultUdnConfig, ofPortHost, bridgeMAC, svcCIDR)
 
 				// Expect no more flows per UDN for table 2 for service isolation.
-				bridgeconfig.CheckUDNSvcIsolationOVSFlows(defaultFlows, bridgeUdnConfig, "bluenet", svcCIDR, 0)
+				bridgeconfig.CheckUDNSvcIsolationOVSFlows(flowMap["DEFAULT"], bridgeUdnConfig, "bluenet", svcCIDR, 0)
 			}
 			return nil
 		})
@@ -886,7 +890,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			stop := make(chan struct{})
 			defer close(stop)
 			wg := &sync.WaitGroup{}
-			OFManager.NewOpenFlowCacheManager(wg, stop)
 			Expect(localGw.initFunc()).To(Succeed())
 			Expect(localGw.Init(stop, wg)).To(Succeed())
 			// we cannot start the shared gw directly because it will spawn a goroutine that may not be bound to the test netns
@@ -897,38 +900,43 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			// FIXME: extract openflow manager func from the spawning of a go routine so it can be called directly below.
 			err = localGw.openflowManager.updateBridgeFlowCache(localGw.nodeIPManager.ListAddresses())
 			Expect(err).NotTo(HaveOccurred())
-			OFManager.OpenFlowCacheManager.SyncFlows(localGw.openflowManager.defaultBridgeFlowID)
+			localGw.openflowManager.syncFlows()
+
 			udnGateway, err := NewUserDefinedNetworkGateway(netInfo, node, wf.NodeCoreInformer().Lister(),
 				&kubeMock, vrf, ipRulesManager, localGw)
 			Expect(err).NotTo(HaveOccurred())
-			defaultFlows := udnGateway.gateway.openflowManager.getFlowCacheEntry("DEFAULT")
-			Expect(defaultFlows).To(HaveLen(39))
+			flowMap := udnGateway.gateway.openflowManager.flowCache
+			Expect(flowMap["DEFAULT"]).To(HaveLen(39))
 			Expect(udnGateway.masqCTMark).To(Equal(udnGateway.masqCTMark))
 			var udnFlows int
-			for _, flow := range udnGateway.gateway.openflowManager.getFlowCacheEntry("") {
-				mark := fmt.Sprintf("0x%x", udnGateway.masqCTMark)
-				if strings.Contains(flow, mark) {
-					// UDN Flow
-					udnFlows++
+			for _, flows := range flowMap {
+				for _, flow := range flows {
+					mark := fmt.Sprintf("0x%x", udnGateway.masqCTMark)
+					if strings.Contains(flow, mark) {
+						// UDN Flow
+						udnFlows++
+					}
 				}
 			}
 			Expect(udnFlows).To(Equal(0))
 			Expect(udnGateway.openflowManager.defaultBridge.GetNetConfigLen()).To(Equal(1)) // only default network
 
 			Expect(udnGateway.AddNetwork()).To(Succeed())
-			defaultFlows = udnGateway.gateway.openflowManager.getFlowCacheEntry("DEFAULT")
-			Expect(defaultFlows).To(HaveLen(57))                                            // 18 UDN Flows are added by default
+			flowMap = udnGateway.gateway.openflowManager.flowCache
+			Expect(flowMap["DEFAULT"]).To(HaveLen(57))                                      // 18 UDN Flows are added by default
 			Expect(udnGateway.openflowManager.defaultBridge.GetNetConfigLen()).To(Equal(2)) // default network + UDN network
 			defaultUdnConfig := udnGateway.openflowManager.defaultBridge.GetNetworkConfig("default")
 			bridgeUdnConfig := udnGateway.openflowManager.defaultBridge.GetNetworkConfig("bluenet")
 			bridgeMAC := udnGateway.openflowManager.defaultBridge.GetMAC().String()
 			ofPortHost := udnGateway.openflowManager.defaultBridge.GetOfPortHost()
-			for _, flow := range udnGateway.gateway.openflowManager.getFlowCacheEntry("") {
-				if strings.Contains(flow, fmt.Sprintf("0x%x", udnGateway.masqCTMark)) {
-					// UDN Flow
-					udnFlows++
-				} else if strings.Contains(flow, fmt.Sprintf("in_port=%s", bridgeUdnConfig.OfPortPatch)) {
-					udnFlows++
+			for _, flows := range flowMap {
+				for _, flow := range flows {
+					if strings.Contains(flow, fmt.Sprintf("0x%x", udnGateway.masqCTMark)) {
+						// UDN Flow
+						udnFlows++
+					} else if strings.Contains(flow, fmt.Sprintf("in_port=%s", bridgeUdnConfig.OfPortPatch)) {
+						udnFlows++
+					}
 				}
 			}
 			Expect(udnFlows).To(Equal(14))
@@ -936,10 +944,10 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 
 			for _, svcCIDR := range config.Kubernetes.ServiceCIDRs {
 				// Check flows for default network service CIDR.
-				bridgeconfig.CheckDefaultSvcIsolationOVSFlows(defaultFlows, defaultUdnConfig, ofPortHost, bridgeMAC, svcCIDR)
+				bridgeconfig.CheckDefaultSvcIsolationOVSFlows(flowMap["DEFAULT"], defaultUdnConfig, ofPortHost, bridgeMAC, svcCIDR)
 
 				// Expect exactly one flow per UDN for tables 0 and 2 for service isolation.
-				bridgeconfig.CheckUDNSvcIsolationOVSFlows(defaultFlows, bridgeUdnConfig, "bluenet", svcCIDR, 1)
+				bridgeconfig.CheckUDNSvcIsolationOVSFlows(flowMap["DEFAULT"], bridgeUdnConfig, "bluenet", svcCIDR, 1)
 			}
 
 			// The second call to checkPorts() will return no ofPort for the UDN - simulating a deletion that already was
@@ -950,24 +958,26 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			cnode := node.DeepCopy()
 			kubeMock.On("UpdateNodeStatus", cnode).Return(nil) // check if network key gets deleted from annotation
 			Expect(udnGateway.DelNetwork()).To(Succeed())
-			defaultFlows = udnGateway.gateway.openflowManager.getFlowCacheEntry("DEFAULT")
-			Expect(defaultFlows).To(HaveLen(39))                                            // only default network flows are present
+			flowMap = udnGateway.gateway.openflowManager.flowCache
+			Expect(flowMap["DEFAULT"]).To(HaveLen(39))                                      // only default network flows are present
 			Expect(udnGateway.openflowManager.defaultBridge.GetNetConfigLen()).To(Equal(1)) // default network only
 			udnFlows = 0
-			for _, flow := range udnGateway.gateway.openflowManager.getFlowCacheEntry("") {
-				if strings.Contains(flow, fmt.Sprintf("0x%x", udnGateway.masqCTMark)) {
-					// UDN Flow
-					udnFlows++
+			for _, flows := range flowMap {
+				for _, flow := range flows {
+					if strings.Contains(flow, fmt.Sprintf("0x%x", udnGateway.masqCTMark)) {
+						// UDN Flow
+						udnFlows++
+					}
 				}
 			}
 			Expect(udnFlows).To(Equal(0))
 
 			for _, svcCIDR := range config.Kubernetes.ServiceCIDRs {
 				// Check flows for default network service CIDR.
-				bridgeconfig.CheckDefaultSvcIsolationOVSFlows(defaultFlows, defaultUdnConfig, ofPortHost, bridgeMAC, svcCIDR)
+				bridgeconfig.CheckDefaultSvcIsolationOVSFlows(flowMap["DEFAULT"], defaultUdnConfig, ofPortHost, bridgeMAC, svcCIDR)
 
 				// Expect no more flows per UDN for tables 0 and 2 for service isolation.
-				bridgeconfig.CheckUDNSvcIsolationOVSFlows(defaultFlows, bridgeUdnConfig, "bluenet", svcCIDR, 0)
+				bridgeconfig.CheckUDNSvcIsolationOVSFlows(flowMap["DEFAULT"], bridgeUdnConfig, "bluenet", svcCIDR, 0)
 			}
 			return nil
 		})
@@ -1131,39 +1141,44 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			// FIXME: extract openflow manager func from the spawning of a go routine so it can be called directly below.
 			err = localGw.openflowManager.updateBridgeFlowCache(localGw.nodeIPManager.ListAddresses())
 			Expect(err).NotTo(HaveOccurred())
-			OFManager.OpenFlowCacheManager.SyncFlows(localGw.openflowManager.defaultBridgeFlowID)
+			localGw.openflowManager.syncFlows()
 
 			udnGateway, err := NewUserDefinedNetworkGateway(mutableNetInfo, node, wf.NodeCoreInformer().Lister(),
 				&kubeMock, vrf, ipRulesManager, localGw)
 			Expect(err).NotTo(HaveOccurred())
-			defaultFlows := udnGateway.gateway.openflowManager.getFlowCacheEntry("DEFAULT")
-			Expect(defaultFlows).To(HaveLen(39))
+			flowMap := udnGateway.gateway.openflowManager.flowCache
+			Expect(flowMap["DEFAULT"]).To(HaveLen(39))
 
 			Expect(udnGateway.masqCTMark).To(Equal(udnGateway.masqCTMark))
 			var udnFlows int
-			for _, flow := range udnGateway.gateway.openflowManager.getFlowCacheEntry("") {
-				mark := fmt.Sprintf("0x%x", udnGateway.masqCTMark)
-				if strings.Contains(flow, mark) {
-					// UDN Flow
-					udnFlows++
+			for _, flows := range flowMap {
+				for _, flow := range flows {
+					mark := fmt.Sprintf("0x%x", udnGateway.masqCTMark)
+					if strings.Contains(flow, mark) {
+						// UDN Flow
+						udnFlows++
+					}
 				}
 			}
 			Expect(udnFlows).To(Equal(0))
 			Expect(udnGateway.openflowManager.defaultBridge.GetNetConfigLen()).To(Equal(1)) // only default network
 
 			Expect(udnGateway.AddNetwork()).To(Succeed())
-			Expect(defaultFlows).To(HaveLen(64))                                            // 18 UDN Flows, 5 advertisedUDN flows, and 2 packet mark flows (IPv4+IPv6) are added by default
+			flowMap = udnGateway.gateway.openflowManager.flowCache
+			Expect(flowMap["DEFAULT"]).To(HaveLen(64))                                      // 18 UDN Flows, 5 advertisedUDN flows, and 2 packet mark flows (IPv4+IPv6) are added by default
 			Expect(udnGateway.openflowManager.defaultBridge.GetNetConfigLen()).To(Equal(2)) // default network + UDN network
 			defaultUdnConfig := udnGateway.openflowManager.defaultBridge.GetNetworkConfig("default")
 			bridgeUdnConfig := udnGateway.openflowManager.defaultBridge.GetNetworkConfig("bluenet")
 			bridgeMAC := udnGateway.openflowManager.defaultBridge.GetMAC().String()
 			ofPortHost := udnGateway.openflowManager.defaultBridge.GetOfPortHost()
-			for _, flow := range udnGateway.gateway.openflowManager.getFlowCacheEntry("") {
-				if strings.Contains(flow, fmt.Sprintf("0x%x", udnGateway.masqCTMark)) {
-					// UDN Flow
-					udnFlows++
-				} else if strings.Contains(flow, fmt.Sprintf("in_port=%s", bridgeUdnConfig.OfPortPatch)) {
-					udnFlows++
+			for _, flows := range flowMap {
+				for _, flow := range flows {
+					if strings.Contains(flow, fmt.Sprintf("0x%x", udnGateway.masqCTMark)) {
+						// UDN Flow
+						udnFlows++
+					} else if strings.Contains(flow, fmt.Sprintf("in_port=%s", bridgeUdnConfig.OfPortPatch)) {
+						udnFlows++
+					}
 				}
 			}
 			Expect(udnFlows).To(Equal(14))
@@ -1171,12 +1186,12 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 
 			for _, svcCIDR := range config.Kubernetes.ServiceCIDRs {
 				// Check flows for default network service CIDR.
-				bridgeconfig.CheckDefaultSvcIsolationOVSFlows(defaultFlows, defaultUdnConfig, ofPortHost, bridgeMAC, svcCIDR)
+				bridgeconfig.CheckDefaultSvcIsolationOVSFlows(flowMap["DEFAULT"], defaultUdnConfig, ofPortHost, bridgeMAC, svcCIDR)
 
 				// Expect exactly two flow per advertised UDN for table 2 and table 0 for service isolation.
 				// but one of the flows used by advertised UDNs is already tracked and used by default UDNs hence not
 				// counted here but in the check above for default svc isolation flows.
-				bridgeconfig.CheckAdvertisedUDNSvcIsolationOVSFlows(defaultFlows, bridgeUdnConfig, "bluenet", svcCIDR, 2)
+				bridgeconfig.CheckAdvertisedUDNSvcIsolationOVSFlows(flowMap["DEFAULT"], bridgeUdnConfig, "bluenet", svcCIDR, 2)
 			}
 
 			// The second call to checkPorts() will return no ofPort for the UDN - simulating a deletion that already was
@@ -1187,23 +1202,26 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			cnode := node.DeepCopy()
 			kubeMock.On("UpdateNodeStatus", cnode).Return(nil) // check if network key gets deleted from annotation
 			Expect(udnGateway.DelNetwork()).To(Succeed())
-			Expect(defaultFlows).To(HaveLen(39))
+			flowMap = udnGateway.gateway.openflowManager.flowCache
+			Expect(flowMap["DEFAULT"]).To(HaveLen(39))                                      // only default network flows are present
 			Expect(udnGateway.openflowManager.defaultBridge.GetNetConfigLen()).To(Equal(1)) // default network only
 			udnFlows = 0
-			for _, flow := range udnGateway.gateway.openflowManager.getFlowCacheEntry("") {
-				if strings.Contains(flow, fmt.Sprintf("0x%x", udnGateway.masqCTMark)) {
-					// UDN Flow
-					udnFlows++
+			for _, flows := range flowMap {
+				for _, flow := range flows {
+					if strings.Contains(flow, fmt.Sprintf("0x%x", udnGateway.masqCTMark)) {
+						// UDN Flow
+						udnFlows++
+					}
 				}
 			}
 			Expect(udnFlows).To(Equal(0))
 
 			for _, svcCIDR := range config.Kubernetes.ServiceCIDRs {
 				// Check flows for default network service CIDR.
-				bridgeconfig.CheckDefaultSvcIsolationOVSFlows(defaultFlows, defaultUdnConfig, ofPortHost, bridgeMAC, svcCIDR)
+				bridgeconfig.CheckDefaultSvcIsolationOVSFlows(flowMap["DEFAULT"], defaultUdnConfig, ofPortHost, bridgeMAC, svcCIDR)
 
 				// Expect no more flows per UDN for table 2 and table0 for service isolation.
-				bridgeconfig.CheckAdvertisedUDNSvcIsolationOVSFlows(defaultFlows, bridgeUdnConfig, "bluenet", svcCIDR, 0)
+				bridgeconfig.CheckAdvertisedUDNSvcIsolationOVSFlows(flowMap["DEFAULT"], bridgeUdnConfig, "bluenet", svcCIDR, 0)
 			}
 			return nil
 		})

@@ -35,7 +35,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	ovnnode "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
-	OFManager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/openflow-manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
@@ -589,11 +588,6 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 
 			// register ovnkube node specific prometheus metrics exported by the node
 			metrics.RegisterNodeMetrics(config.MetricsScrapeInterval, ctx.Done())
-
-			// initialization the global open flow manager
-			if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
-				OFManager.NewOpenFlowCacheManager(wg, ctx.Done())
-			}
 
 			// OVS is not running on dpu-host nodes
 			if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
