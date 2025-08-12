@@ -1700,7 +1700,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 					return fmt.Errorf("NoHostSubnet label to reflected in the watchFactory yet")
 				}
 				return nil
-			}, 10).Should(gomega.BeNil())
+			}, 10).Should(gomega.Succeed())
 
 			ginkgo.By("adding the node becomes possible")
 			gomega.Eventually(oc.retryNodes.ResourceHandler.AddResource).WithArguments(&testNode, false).Should(gomega.Succeed())
