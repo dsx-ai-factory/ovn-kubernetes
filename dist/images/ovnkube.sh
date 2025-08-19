@@ -2392,6 +2392,10 @@ ovnkube-controller-with-node() {
       ovn_gateway_router_subnet=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-router-subnet | tr -d \")
     fi
 
+    representor_metering_nodes_flag=
+    if [[ ${representor_metering_nodes} != "" ]]; then
+      representor_metering_nodes_flag="--representor-metering-nodes=${representor_metering_nodes}"
+    fi
   fi
 
   if [[ ${ovnkube_node_mode} != "dpu-host" && ! ${ovn_gateway_opts} =~ "gateway-vlanid" ]]; then
@@ -2724,6 +2728,7 @@ ovnkube-controller-with-node() {
     ${ovnkube_istio_ambient_snat_ipv6_flag} \
     ${ovn_disable_requestedchassis_flag} \
     ${ovn_external_cluster_access_opts} \
+    ${representor_metering_nodes_flag} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
     --gateway-router-subnet=${ovn_gateway_router_subnet} \
