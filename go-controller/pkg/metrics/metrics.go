@@ -583,6 +583,11 @@ func RegisterOvnNodeMetrics(ovsDBClient libovsdbclient.Client, metricsScrapeInte
 
 func RegisterOvnCentralMetrics(podLister corev1listers.PodLister, podSynced func() bool, nodeLister corev1listers.NodeLister,
 	k8sNodeName string, metricsScrapeInterval int, stopChan <-chan struct{}) {
+	// in IC mode, nb/sb/northd are running on the dpu mode node
+	if config.OVNKubernetesFeature.EnableInterconnect && config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+		return
+	}
+
 	go RegisterOvnDBMetrics(podLister, podSynced, k8sNodeName, metricsScrapeInterval, stopChan)
 	go RegisterOvnNorthdMetrics(nodeLister, k8sNodeName, metricsScrapeInterval, stopChan)
 }
