@@ -1136,9 +1136,7 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 		if err := util.SetNodeEncapIPs(nodeAnnotator, encapIPList); err != nil {
 			return fmt.Errorf("failed to set node-encap-ips annotation for node %s: %w", nc.name, err)
 		}
-	}
 
-	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		chassisHostname, err := util.GetNodeChassisHostname()
 		if err != nil {
 			return fmt.Errorf("failed to get chassis hostname for node %s: %w", nc.name, err)
