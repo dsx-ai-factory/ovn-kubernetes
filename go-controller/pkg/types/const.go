@@ -213,7 +213,7 @@ const (
 	ClusterPortGroupNameBase    = "clusterPortGroup"
 	ClusterRtrPortGroupNameBase = "clusterRtrPortGroup"
 
-	OVSDBTimeout     = 10 * time.Second
+	OVSDBTimeout     = 30 * time.Second
 	OVSDBWaitTimeout = 0
 
 	ClusterLBGroupName       = "clusterLBGroup"
@@ -284,18 +284,18 @@ const (
 	// (last observed 4k egress firewall taking > 30s)
 	// TODO: consider not using a timeout, potentially shifting to configurable
 	// readiness probe
-	InformerSyncTimeout = 60 * time.Second
+	InformerSyncTimeout = 120 * time.Second
 
 	// HandlerSyncTimeout is used when waiting for initial object handler sync.
 	// (i.e. all the ADD events should be processed for the existing objects by the event handler)
-	HandlerSyncTimeout = 180 * time.Second
+	HandlerSyncTimeout = 300 * time.Second
 
 	// GRMACBindingAgeThreshold is the lifetime in seconds of each MAC binding
 	// entry for the gateway routers. After this time, the entry is removed and
 	// may be refreshed with a new ARP request.
 	GRMACBindingAgeThreshold = "0"
 
-	AdminPBRResyncInterval = 30 * time.Second
+	AdminPBRResyncInterval = 60 * time.Second
 
 	CacheIndexPodByIP        = "index-pod-by-ip"
 	CacheIndexPodByNodeIP    = "index-pod-by-node-ip"
