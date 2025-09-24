@@ -328,37 +328,3 @@ func DeletePortGroupsWithPredicate(nbClient libovsdbclient.Client, p portGroupPr
 	_, err = TransactAndCheck(nbClient, ops)
 	return err
 }
-
-// UpdatePortGroupSetNameAndExternalIDsOps returns the txn ops to updates the external IDs and name on the provided logical
-// port group. Empty values means the corresponding keys are to be deleted.
-func UpdatePortGroupSetNameAndExternalIDsOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation,
-	pg *nbdb.PortGroup, newName string) ([]ovsdb.Operation, error) {
-	externalIds := pg.ExternalIDs
-	portGroup, err := GetPortGroup(nbClient, pg)
-	if err != nil {
-		return nil, err
-	}
-	if portGroup.ExternalIDs == nil {
-		portGroup.ExternalIDs = map[string]string{}
-	}
-
-	for k, v := range externalIds {
-		if v == "" {
-			delete(portGroup.ExternalIDs, k)
-		} else {
-			portGroup.ExternalIDs[k] = v
-		}
-	}
-
-	portGroup.Name = newName
-
-	opModel := operationModel{
-		Model:          portGroup,
-		OnModelUpdates: []interface{}{&portGroup.Name, &portGroup.ExternalIDs},
-		ErrNotFound:    true,
-		BulkOp:         false,
-	}
-
-	m := newModelClient(nbClient)
-	return m.CreateOrUpdateOps(ops, opModel)
-}

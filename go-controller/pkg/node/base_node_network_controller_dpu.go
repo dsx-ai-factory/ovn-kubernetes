@@ -174,7 +174,7 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU() (*factory.Handler, error) 
 			if util.PodWantsHostNetwork(newPod) {
 				return
 			}
-			// lock pod to avoid racing on `servedCache`
+			// lock pod to avoid racing on `podNADToDPUCDMap`
 			unlock := util.LockByKey.Acquire(string(oldPod.UID))
 			defer unlock()
 			v, ok := bnnc.podNADToDPUCDMap.Load(newPod.UID)
@@ -218,7 +218,7 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU() (*factory.Handler, error) 
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*corev1.Pod)
-			// lock pod to avoid racing on `servedCache`
+			// lock pod to avoid racing on `podNADToDPUCDMap`
 			unlock := util.LockByKey.Acquire(string(pod.UID))
 			defer unlock()
 			v, ok := bnnc.podNADToDPUCDMap.Load(pod.UID)

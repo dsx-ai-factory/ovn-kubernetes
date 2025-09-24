@@ -42,11 +42,6 @@ import (
 )
 
 const (
-	// nodetype.EtpSvcOpenFlowCookie identifies constant open flow rules added to the host OVS
-	// bridge to move packets between host and external for etp=local traffic.
-	// The hex number 0xe745ecf105, represents etp(e74)-service(5ec)-flows which makes it easier for debugging.
-	EtpSvcOpenFlowCookie = "0xe745ecf105"
-
 	// nftablesUDNServicePreroutingChain is a base chain registered into the prerouting hook,
 	// and it contains one rule that jumps to nftablesUDNServiceMarkChain.
 	// Traffic from the default network's management interface is bypassed

@@ -1010,7 +1010,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeNames []string
 			})
 	})
 
-	// TBD-merge
+	// TBD-merge Cathy
 	//// only the given node is needed if HybridOverlay is not enabled (required by addressManager, addMasqueradeRoute and checking
 	//// NorthdNodeSelectorLabel in order to collect northd metrics)
 	//if !config.HybridOverlay.Enabled {
@@ -1514,17 +1514,9 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 		if cudn, ok := obj.(*userdefinednetworkapi.ClusterUserDefinedNetwork); ok {
 			return &cudn.ObjectMeta, nil
 		}
-	case AdminPBRType:
-		if adminPBR, ok := obj.(*adminpbrapi.AdminPolicyBasedRoute); ok {
-			return &adminPBR.ObjectMeta, nil
-		}
 	case IPReservationType:
 		if ipResv, ok := obj.(*ipreservationapi.IPReservation); ok {
 			return &ipResv.ObjectMeta, nil
-		}
-	case VirtualIPType:
-		if vip, ok := obj.(*ipreservationapi.IPReservation); ok {
-			return &vip.ObjectMeta, nil
 		}
 	case PortMirrorType:
 		if portMirrow, ok := obj.(*portmirrorapi.PortMirror); ok {
