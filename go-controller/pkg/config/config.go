@@ -108,6 +108,7 @@ var (
 		Zone:                          types.OvnDefaultZone,
 		ClusterSubnetsMacBindingAging: 36000, // in Seconds
 		RawUDNAllowedDefaultServices:  "default/kubernetes,kube-system/kube-dns",
+		ClusterDefaultNad:             "default/ovn-primary",
 	}
 
 	// Logging holds logging-related parsed config file parameters and command-line overrides
@@ -354,6 +355,9 @@ type DefaultConfig struct {
 	// UDNAllowedDefaultServices holds a list of namespaced names of
 	// default cluster network services accessible from primary user-defined networks
 	UDNAllowedDefaultServices []string
+
+	// ClusterDefaultNad is the name of the default cluster wide net-attach-def, default to default/ovn-primary
+	ClusterDefaultNad string `gcfg:"cluster-default-nad"`
 }
 
 // LoggingConfig holds logging-related parsed config file parameters and command-line overrides
@@ -1111,6 +1115,12 @@ var CommonFlags = []cli.Flag{
 			"Only used when enable-network-segmentation is set",
 		Value:       Default.RawUDNAllowedDefaultServices,
 		Destination: &cliConfig.Default.RawUDNAllowedDefaultServices,
+	},
+	&cli.StringFlag{
+		Name:        "cluster-default-nad",
+		Usage:       "the name of the default cluster wide net-attach-def, default to default/ovn-primary",
+		Value:       Default.ClusterDefaultNad,
+		Destination: &cliConfig.Default.ClusterDefaultNad,
 	},
 }
 
@@ -2506,6 +2516,9 @@ func completeDefaultConfig(allSubnets *ConfigSubnets) error {
 	Default.OVNMasqConntrackZone = Default.ConntrackZone + 2
 	Default.HostNodePortConntrackZone = Default.ConntrackZone + 3
 	Default.ReassemblyConntrackZone = Default.ConntrackZone + 5
+	if Default.ClusterDefaultNad != "" && !strings.Contains(Default.ClusterDefaultNad, "/") {
+		return fmt.Errorf("cluster-default-nad must be in the format of \"namespace/name\"")
+	}
 	return nil
 }
 

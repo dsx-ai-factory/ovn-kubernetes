@@ -122,6 +122,7 @@ BASEDIR=$(dirname $0)
 # OVN_UDN_ALLOWED_DEFAULT_SERVICES - list of default cluster network services accessible from primary UDN
 # OVS_DB_TRANSACTION_TIMEOUT - timeout for OVSDB transaction, in seconds
 # OVNKUBE_SKIP_CTMARK_HOSTPORTS - list of tcp/udp ports of host services that must not be subjected to CT-Marking
+# OVNKUBE_CLUSTER_DEFAULT_NAD - name of the default cluster wide net-attach-def
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -442,6 +443,15 @@ if [[ ! -z $ovn_k8s_node ]]; then
   echo "host-k8s-nodename is set, overriding K8S_NODE with $ovn_k8s_node"
   K8S_NODE=$ovn_k8s_node
 fi
+# OVNKUBE_CLUSTER_DEFAULT_NAD - name of the default cluster wide net-attach-def
+ovnkube_cluster_default_nad=${OVNKUBE_CLUSTER_DEFAULT_NAD}
+
+# set the custom cluster default nad if env variable is set and not equal to default/ovn-primary
+ovnkube_cluster_default_nad_flag=
+if [[ -n "${ovnkube_cluster_default_nad}" && "${ovnkube_cluster_default_nad}" != "default/ovn-primary" ]]; then
+  ovnkube_cluster_default_nad_flag="--cluster-default-nad=${ovnkube_cluster_default_nad}"
+fi
+echo "ovnkube_cluster_default_nad_flag=${ovnkube_cluster_default_nad_flag}"
 
 # external_ids:host-k8s-nodename will be set on an Open_vSwitch enabled system if the ovnkube pod
 # should function on behalf of a different host
@@ -1680,6 +1690,7 @@ ovn-master() {
     ${ovnkube_istio_ambient_enable_flag} \
     ${ovnkube_istio_ambient_snat_ipv4_flag} \
     ${ovnkube_istio_ambient_snat_ipv6_flag} \
+    ${ovnkube_cluster_default_nad_flag} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
     --host-network-namespace ${ovn_host_network_namespace} \
@@ -2046,6 +2057,7 @@ ovnkube-controller() {
     ${ovnkube_istio_ambient_enable_flag} \
     ${ovnkube_istio_ambient_snat_ipv4_flag} \
     ${ovnkube_istio_ambient_snat_ipv6_flag} \
+    ${ovnkube_cluster_default_nad_flag} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --gateway-mode=${ovn_gateway_mode} \
     --host-network-namespace ${ovn_host_network_namespace} \
@@ -2729,6 +2741,7 @@ ovnkube-controller-with-node() {
     ${ovn_disable_requestedchassis_flag} \
     ${ovn_external_cluster_access_opts} \
     ${representor_metering_nodes_flag} \
+    ${ovnkube_cluster_default_nad_flag} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
     --gateway-router-subnet=${ovn_gateway_router_subnet} \
@@ -3672,6 +3685,7 @@ ovn-node() {
         ${ovnkube_istio_ambient_enable_flag} \
         ${ovnkube_istio_ambient_snat_ipv4_flag} \
         ${ovnkube_istio_ambient_snat_ipv6_flag} \
+        ${ovnkube_cluster_default_nad_flag} \
         --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
         --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
         --host-network-namespace ${ovn_host_network_namespace} \
