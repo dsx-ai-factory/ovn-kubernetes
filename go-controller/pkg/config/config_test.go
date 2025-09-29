@@ -256,6 +256,7 @@ enable-multi-networkpolicy=false
 enable-network-segmentation=false
 enable-preconfigured-udn-addresses=false
 enable-route-advertisements=false
+advertised-udn-isolation-mode=strict
 enable-interconnect=false
 enable-multi-external-gateway=false
 enable-admin-network-policy=false
@@ -373,6 +374,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(OVNKubernetesFeature.EnableMultiExternalGateway).To(gomega.BeFalse())
 			gomega.Expect(OVNKubernetesFeature.EnableAdminNetworkPolicy).To(gomega.BeFalse())
 			gomega.Expect(OVNKubernetesFeature.EnablePersistentIPs).To(gomega.BeFalse())
+			gomega.Expect(OVNKubernetesFeature.AdvertisedUDNIsolationMode).To(gomega.Equal(AdvertisedUDNIsolationModeStrict))
 
 			for _, a := range []OvnAuthConfig{OvnNorth, OvnSouth} {
 				gomega.Expect(a.Scheme).To(gomega.Equal(OvnDBSchemeUnix))
@@ -628,6 +630,7 @@ var _ = Describe("Config Operations", func() {
 			"enable-network-segmentation=true",
 			"enable-preconfigured-udn-addresses=true",
 			"enable-route-advertisements=true",
+			"advertised-udn-isolation-mode=loose",
 			"enable-interconnect=true",
 			"enable-multi-external-gateway=true",
 			"enable-admin-network-policy=true",
@@ -719,6 +722,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(OVNKubernetesFeature.EnableNetworkSegmentation).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnablePreconfiguredUDNAddresses).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableRouteAdvertisements).To(gomega.BeTrue())
+			gomega.Expect(OVNKubernetesFeature.AdvertisedUDNIsolationMode).To(gomega.Equal(AdvertisedUDNIsolationModeLoose))
 			gomega.Expect(OVNKubernetesFeature.EnableInterconnect).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableMultiExternalGateway).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableAdminNetworkPolicy).To(gomega.BeTrue())
@@ -827,6 +831,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(OVNKubernetesFeature.EnableNetworkSegmentation).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnablePreconfiguredUDNAddresses).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableRouteAdvertisements).To(gomega.BeTrue())
+			gomega.Expect(OVNKubernetesFeature.AdvertisedUDNIsolationMode).To(gomega.Equal(AdvertisedUDNIsolationModeLoose))
 			gomega.Expect(OVNKubernetesFeature.EnableMultiNetworkPolicy).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableInterconnect).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableMultiExternalGateway).To(gomega.BeTrue())
@@ -905,6 +910,7 @@ var _ = Describe("Config Operations", func() {
 			"-enable-network-segmentation=true",
 			"-enable-preconfigured-udn-addresses=true",
 			"-enable-route-advertisements=true",
+			"-advertised-udn-isolation-mode=loose",
 			"-enable-interconnect=true",
 			"-enable-multi-external-gateway=true",
 			"-enable-admin-network-policy=true",
@@ -1618,6 +1624,24 @@ foo=bar
 			app.Name,
 			"-config-file=" + cfgFile.Name(),
 		}
+		err = app.Run(cliArgs)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+
+	It("rejects a config with invalid advertised-udn-isolation-mode", func() {
+		err := os.WriteFile(cfgFile.Name(), []byte(`[ovnkubernetesfeature]
+advertised-udn-isolation-mode=foo
+`), 0o644)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			gomega.Expect(err).To(gomega.MatchError(
+				gomega.ContainSubstring("invalid advertised-udn-isolation-mode \"foo\": expect one of strict or loose")),
+			)
+			return nil
+		}
+		cliArgs := []string{app.Name, "-config-file=" + cfgFile.Name()}
 		err = app.Run(cliArgs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})

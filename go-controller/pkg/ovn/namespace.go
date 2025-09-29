@@ -15,6 +15,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -35,7 +36,7 @@ func getHostNetworkPodIPs(node *corev1.Node, policyType string) ([]net.IP, error
 
 		// the packets from the host towards the Cluster IP will have the source IP of the
 		// Gateway Router to Join Switch port's IP address
-		lrpIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, types.DefaultNetworkName)
+		lrpIPs, err := udn.GetGWRouterIPs(node, &util.DefaultNetInfo{})
 		if err != nil {
 			return nil, fmt.Errorf("failed to get join switch port IP address for node %s: %v/%v", node.Name, err, err)
 		}
@@ -486,21 +487,22 @@ func (oc *DefaultNetworkController) getHostNamespaceAddressesForNode(node *corev
 		return nil, err
 	}
 	for _, hostSubnet := range hostSubnets {
-		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
+		mgmtIfAddr := oc.GetNodeManagementIP(hostSubnet)
 		ips = append(ips, mgmtIfAddr.IP)
 	}
 	// for shared gateway mode we will use LRP IPs to SNAT host network traffic
 	// so add these to the address set.
-	lrpIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, oc.GetNetworkName())
-	if err != nil {
-		if util.IsAnnotationNotSetError(err) {
-			// FIXME(tssurya): This is present for backwards compatibility
-			// Remove me a few months from now
-			var err1 error
-			lrpIPs, err1 = util.ParseNodeGatewayRouterLRPAddrs(node)
-			if err1 != nil {
-				return nil, fmt.Errorf("failed to get join switch port IP address for node %s: %v/%v", node.Name, err, err1)
-			}
+	lrpIPs, gwIPsErr := udn.GetGWRouterIPs(node, oc.GetNetInfo())
+	if gwIPsErr != nil {
+		if !util.IsAnnotationNotSetError(gwIPsErr) {
+			return nil, gwIPsErr
+		}
+		// FIXME(tssurya): This is present for backwards compatibility
+		// Remove me a few months from now
+		var lrpAddrsErr error
+		lrpIPs, lrpAddrsErr = util.ParseNodeGatewayRouterLRPAddrs(node)
+		if lrpAddrsErr != nil {
+			return nil, fmt.Errorf("failed to fallback to annotations after error %q: %w", gwIPsErr, lrpAddrsErr)
 		}
 	}
 

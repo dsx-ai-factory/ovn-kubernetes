@@ -64,7 +64,7 @@ var _ = ginkgo.Describe("PortMirror", func() {
 		gomega.Expect(err).ToNot(gomega.HaveOccurred())
 	})
 	ginkgo.AfterEach(func() {
-		ocInfo := fakeOvn.secondaryControllers["ovn-primary"]
+		ocInfo := fakeOvn.userDefinedNetworkControllers["ovn-primary"]
 		gomega.Expect(ocInfo).ToNot(gomega.BeNil())
 		fakeOvn.shutdown()
 	})
@@ -86,7 +86,7 @@ var _ = ginkgo.Describe("PortMirror", func() {
 						Items: []nettypes.NetworkAttachmentDefinition{*nad},
 					},
 				)
-				ocInfo := fakeOvn.secondaryControllers["ovn-primary"]
+				ocInfo := fakeOvn.userDefinedNetworkControllers["ovn-primary"]
 				gomega.Expect(ocInfo).ToNot(gomega.BeNil())
 				err := ocInfo.bnc.WatchPortMirrors()
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
@@ -161,10 +161,10 @@ var _ = ginkgo.Describe("PortMirror", func() {
 					},
 				)
 
-				ocInfo := fakeOvn.secondaryControllers["ovn-primary"]
+				ocInfo := fakeOvn.userDefinedNetworkControllers["ovn-primary"]
 				gomega.Expect(ocInfo).ToNot(gomega.BeNil())
 
-				err := ocInfo.bnc.lsManager.AddOrUpdateSwitch(ocInfo.bnc.GetNetworkScopedName("node1"), []*net.IPNet{ovntest.MustParseIPNet("10.128.1.0/24")})
+				err := ocInfo.bnc.lsManager.AddOrUpdateSwitch(ocInfo.bnc.GetNetworkScopedName("node1"), []*net.IPNet{ovntest.MustParseIPNet("10.128.1.0/24")}, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = ocInfo.bnc.WatchPods()
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
@@ -180,7 +180,7 @@ var _ = ginkgo.Describe("PortMirror", func() {
 
 				gomega.Eventually(func() []string {
 					nadName := util.GetNADName("default", "ovn-primary")
-					logicalPortName := util.GetSecondaryNetworkLogicalPortName(portMirrorNamespace, "pod1", nadName)
+					logicalPortName := util.GetUserDefinedNetworkLogicalPortName(portMirrorNamespace, "pod1", nadName)
 					lsp := &nbdb.LogicalSwitchPort{Name: logicalPortName}
 					err = fakeOvn.nbClient.Get(context.Background(), lsp)
 					gomega.Expect(err).ToNot(gomega.HaveOccurred())
@@ -192,7 +192,7 @@ var _ = ginkgo.Describe("PortMirror", func() {
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				gomega.Eventually(func() []string {
 					nadName := util.GetNADName("default", "ovn-primary")
-					logicalPortName := util.GetSecondaryNetworkLogicalPortName(portMirrorNamespace, "pod1", nadName)
+					logicalPortName := util.GetUserDefinedNetworkLogicalPortName(portMirrorNamespace, "pod1", nadName)
 					lsp := &nbdb.LogicalSwitchPort{Name: logicalPortName}
 					err = fakeOvn.nbClient.Get(context.Background(), lsp)
 					gomega.Expect(err).ToNot(gomega.HaveOccurred())
@@ -251,9 +251,9 @@ var _ = ginkgo.Describe("PortMirror", func() {
 					},
 				)
 
-				ocInfo := fakeOvn.secondaryControllers["ovn-primary"]
+				ocInfo := fakeOvn.userDefinedNetworkControllers["ovn-primary"]
 				gomega.Expect(ocInfo).ToNot(gomega.BeNil())
-				err := ocInfo.bnc.lsManager.AddOrUpdateSwitch(ocInfo.bnc.GetNetworkScopedName("node1"), []*net.IPNet{ovntest.MustParseIPNet("10.128.1.0/24")})
+				err := ocInfo.bnc.lsManager.AddOrUpdateSwitch(ocInfo.bnc.GetNetworkScopedName("node1"), []*net.IPNet{ovntest.MustParseIPNet("10.128.1.0/24")}, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = ocInfo.bnc.WatchPods()
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
@@ -269,7 +269,7 @@ var _ = ginkgo.Describe("PortMirror", func() {
 
 				gomega.Eventually(func() []string {
 					nadName := util.GetNADName("default", "ovn-primary")
-					logicalPortName := util.GetSecondaryNetworkLogicalPortName(portMirrorNamespace, "pod1", nadName)
+					logicalPortName := util.GetUserDefinedNetworkLogicalPortName(portMirrorNamespace, "pod1", nadName)
 					lsp := &nbdb.LogicalSwitchPort{Name: logicalPortName}
 					err = fakeOvn.nbClient.Get(context.Background(), lsp)
 					gomega.Expect(err).ToNot(gomega.HaveOccurred())
@@ -282,7 +282,7 @@ var _ = ginkgo.Describe("PortMirror", func() {
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				gomega.Eventually(func() []string {
 					nadName := util.GetNADName("default", "ovn-primary")
-					logicalPortName := util.GetSecondaryNetworkLogicalPortName(portMirrorNamespace, "pod1", nadName)
+					logicalPortName := util.GetUserDefinedNetworkLogicalPortName(portMirrorNamespace, "pod1", nadName)
 					lsp := &nbdb.LogicalSwitchPort{Name: logicalPortName}
 					err = fakeOvn.nbClient.Get(context.Background(), lsp)
 					gomega.Expect(err).ToNot(gomega.HaveOccurred())

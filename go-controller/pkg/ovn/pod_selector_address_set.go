@@ -388,7 +388,7 @@ func (handlerInfo *PodSelectorAddrSetHandlerInfo) addPods(pods ...*corev1.Pod) e
 		if pod.Spec.HostNetwork {
 			// the NAD should be the default network since we don't allow Multi-homed networks
 			// for host network pods
-			if handlerInfo.netInfo.IsSecondary() {
+			if handlerInfo.netInfo.IsUserDefinedNetwork() {
 				continue
 			}
 			handlerInfo.nodeHostNetPodsCacheLock.Lock()
@@ -414,7 +414,7 @@ func (handlerInfo *PodSelectorAddrSetHandlerInfo) addPods(pods ...*corev1.Pod) e
 // must be called with PodSelectorAddrSetHandlerInfo read lock
 func (handlerInfo *PodSelectorAddrSetHandlerInfo) deletePod(pod *corev1.Pod) error {
 	if pod.Spec.HostNetwork {
-		if handlerInfo.netInfo.IsSecondary() {
+		if handlerInfo.netInfo.IsUserDefinedNetwork() {
 			return nil
 		}
 		handlerInfo.nodeHostNetPodsCacheLock.Lock()

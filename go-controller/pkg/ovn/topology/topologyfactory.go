@@ -48,7 +48,7 @@ func (gtf *GatewayTopologyFactory) NewClusterRouterWithMulticastSupport(
 		macBindingAgeThreshold += ";" + ipnet.CIDR.String() + ":" + strconv.Itoa(config.Default.ClusterSubnetsMacBindingAging)
 	}
 
-	//TBD-merge HZhou? why no always_learn_from_arp_request, need to set mac_binding_age_threshold?
+	//TBD-merge different from upstream
 	routerOptions := map[string]string{"mcast_relay": "true", "always_learn_from_arp_request": "false", "mac_binding_age_threshold": macBindingAgeThreshold}
 	return gtf.newClusterRouter(clusterRouterName, netInfo, coopUUID, routerOptions)
 }
@@ -68,7 +68,7 @@ func (gtf *GatewayTopologyFactory) newClusterRouter(
 		Options: routerOptions,
 		Copp:    &coopUUID,
 	}
-	if netInfo.IsSecondary() {
+	if netInfo.IsUserDefinedNetwork() {
 		logicalRouter.ExternalIDs[types.NetworkExternalID] = netInfo.GetNetworkName()
 		logicalRouter.ExternalIDs[types.TopologyExternalID] = netInfo.TopologyType()
 	}
@@ -97,7 +97,7 @@ func (gtf *GatewayTopologyFactory) NewJoinSwitch(
 	logicalSwitch := nbdb.LogicalSwitch{
 		Name: joinSwitchName,
 	}
-	if netInfo.IsSecondary() {
+	if netInfo.IsUserDefinedNetwork() {
 		logicalSwitch.ExternalIDs = map[string]string{
 			types.NetworkExternalID:  netInfo.GetNetworkName(),
 			types.TopologyExternalID: netInfo.TopologyType(),
@@ -124,7 +124,7 @@ func (gtf *GatewayTopologyFactory) NewJoinSwitch(
 		MAC:      gwLRPMAC.String(),
 		Networks: gwLRPNetworks,
 	}
-	if netInfo.IsSecondary() {
+	if netInfo.IsUserDefinedNetwork() {
 		logicalRouterPort.ExternalIDs = map[string]string{
 			types.NetworkExternalID:  netInfo.GetNetworkName(),
 			types.TopologyExternalID: netInfo.TopologyType(),

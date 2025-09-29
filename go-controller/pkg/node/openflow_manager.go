@@ -33,20 +33,20 @@ type openflowManager struct {
 
 // UTILs Needed for UDN (also leveraged for default netInfo) in openflowmanager
 
-func (c *openflowManager) getDefaultBridgePortConfigurations() ([]*bridgeconfig.BridgeUDNConfiguration, string, string, string, string, string, *sync.Map) {
+func (c *openflowManager) getDefaultBridgePortConfigurations() ([]*bridgeconfig.BridgeUDNConfiguration, string, string, string, string) {
 	return c.defaultBridge.GetPortConfigurations()
 }
 
-func (c *openflowManager) getExGwBridgePortConfigurations() ([]*bridgeconfig.BridgeUDNConfiguration, string, string, string, string, string, *sync.Map) {
+func (c *openflowManager) getExGwBridgePortConfigurations() ([]*bridgeconfig.BridgeUDNConfiguration, string, string, string, string) {
 	return c.externalGatewayBridge.GetPortConfigurations()
 }
 
-func (c *openflowManager) addNetwork(nInfo util.NetInfo, nodeSubnets []*net.IPNet, masqCTMark, pktMark uint, v6MasqIPs, v4MasqIPs *udn.MasqueradeIPs) error {
-	if err := c.defaultBridge.AddNetworkConfig(nInfo, nodeSubnets, masqCTMark, pktMark, v6MasqIPs, v4MasqIPs); err != nil {
+func (c *openflowManager) addNetwork(nInfo util.NetInfo, nodeSubnets, mgmtIPs []*net.IPNet, masqCTMark, pktMark uint, v6MasqIPs, v4MasqIPs *udn.MasqueradeIPs) error {
+	if err := c.defaultBridge.AddNetworkConfig(nInfo, nodeSubnets, mgmtIPs, masqCTMark, pktMark, v6MasqIPs, v4MasqIPs); err != nil {
 		return err
 	}
 	if c.externalGatewayBridge != nil {
-		if err := c.externalGatewayBridge.AddNetworkConfig(nInfo, nodeSubnets, masqCTMark, pktMark, v6MasqIPs, v4MasqIPs); err != nil {
+		if err := c.externalGatewayBridge.AddNetworkConfig(nInfo, nodeSubnets, mgmtIPs, masqCTMark, pktMark, v6MasqIPs, v4MasqIPs); err != nil {
 			return err
 		}
 	}
@@ -76,6 +76,12 @@ func (c *openflowManager) getDefaultBridgeMAC() net.HardwareAddr {
 
 func (c *openflowManager) setDefaultBridgeMAC(macAddr net.HardwareAddr) {
 	c.defaultBridge.SetMAC(macAddr)
+}
+
+// setDefaultBridgeGARPDrop is used to enable or disable whether openflow manager generates ovs flows and adds them to
+// the default ext bridge to drop GARP
+func (c *openflowManager) setDefaultBridgeGARPDrop(isDropped bool) {
+	c.defaultBridge.SetDropGARP(isDropped)
 }
 
 func (c *openflowManager) updateFlowCacheEntry(key string, flows []string) {
@@ -193,6 +199,9 @@ func (c *openflowManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) 
 				c.syncFlows()
 				timer.Reset(syncPeriod)
 			case <-stopChan:
+				// sync before shutting down because flows maybe added, and theres a race between flow channel (req sync)
+				// and stop chan on shutdown. ensure flows are sync before shut down
+				c.syncFlows()
 				return
 			}
 		}
@@ -238,8 +247,7 @@ func (c *openflowManager) updateBridgeFlowCache(hostIPs []net.IP, hostSubnets []
 // This assumes ofPortPhys doesn't change, which we'll still consider as fatal.
 // For the N/S gateway we should not have a situation where the patch's OF port changes,
 // so will make this check specific to localnet ports.
-func checkPorts(netConfigs []*bridgeconfig.BridgeUDNConfiguration, physIntf, ofPortPhys, hostRepName, ofPortHost, ofPortVMPatch string,
-	localnetPatchPorts *sync.Map) error {
+func checkPorts(netConfigs []*bridgeconfig.BridgeUDNConfiguration, physIntf, ofPortPhys, hostRepName, ofPortHost string) error {
 	// it could be that the ovn-controller recreated the patch between the host OVS bridge and
 	// the integration bridge, as a result the ofport number changed for that patch interface
 	for _, netConfig := range netConfigs {
@@ -286,39 +294,6 @@ func checkPorts(netConfigs []*bridgeconfig.BridgeUDNConfiguration, physIntf, ofP
 		}
 	}
 
-	vmPatchPort, _, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".", "external-ids:vm-patch-port")
-	if err == nil && vmPatchPort != "" {
-		currOfPortVMPatch, _, err := util.RunOVSVsctl("get", "interface", vmPatchPort, "ofport")
-		if err != nil {
-			return fmt.Errorf("failed to get ofport of vmPatchPort %s, error: %v", vmPatchPort, err)
-		}
-		if ofPortVMPatch != currOfPortVMPatch {
-			klog.Errorf("Fatal error: VM patch port %s ofport changed from %s to %s",
-				vmPatchPort, ofPortVMPatch, currOfPortVMPatch)
-			os.Exit(1)
-		}
-	} else if ofPortVMPatch != "" {
-		klog.Errorf("Fatal error: VM patch port is no longer defined, current ofport %s",
-			ofPortVMPatch)
-		os.Exit(1)
-	}
-
-	// walk through all the localnet patch ports, if any, and check if the ofport has changed
-	localnetPatchPorts.Range(func(key, value any) bool {
-		patchPortName := key.(string)
-		ofPortPatch := value.(string)
-		curOfportPatch, stderr, err := util.GetOVSOfPort("--if-exists", "get", "interface", patchPortName, "ofport")
-		if err != nil {
-			klog.Warningf("Could not check port %s for change in ofport, err: %v stderr: %q", patchPortName, err, stderr)
-			return true
-		}
-		if curOfportPatch != ofPortPatch {
-			klog.Errorf("Fatal error: patch port %s ofport changed from %s to %s",
-				patchPortName, ofPortPatch, curOfportPatch)
-			os.Exit(1)
-		}
-		return true
-	})
 	return err
 }
 

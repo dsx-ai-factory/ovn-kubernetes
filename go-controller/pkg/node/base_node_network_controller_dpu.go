@@ -151,7 +151,7 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU() (*factory.Handler, error) 
 			for nadName := range networkMap {
 				nadToDPUCDMap[nadName] = nil
 			}
-			if !bnnc.IsSecondary() && len(nadToDPUCDMap) == 0 {
+			if !bnnc.IsUserDefinedNetwork() && len(nadToDPUCDMap) == 0 {
 				nadToDPUCDMap[ovntypes.DefaultNetworkName] = nil
 			}
 

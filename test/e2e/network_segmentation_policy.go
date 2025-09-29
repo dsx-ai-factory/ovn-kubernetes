@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/rand"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
+	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 )
 
 var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.NetworkSegmentation, func() {
@@ -26,8 +27,14 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.Networ
 	ginkgo.Context("on a user defined primary network", func() {
 		const (
 			nadName                      = "tenant-red"
-			userDefinedNetworkIPv4Subnet = "10.128.0.0/16"
+			userDefinedNetworkIPv4Subnet = "172.31.0.0/16" // last subnet in private range 172.16.0.0/12 (rfc1918)
 			userDefinedNetworkIPv6Subnet = "2014:100:200::0/60"
+			customL2IPv4Gateway          = "172.31.0.3"
+			customL2IPv6Gateway          = "2014:100:200::3"
+			customL2IPv4ReservedCIDR     = "172.31.1.0/24"
+			customL2IPv6ReservedCIDR     = "2014:100:200::100/120"
+			customL2IPv4InfraCIDR        = "172.31.0.0/30"
+			customL2IPv6InfraCIDR        = "2014:100:200::/122"
 			nodeHostnameKey              = "kubernetes.io/hostname"
 			workerOneNodeName            = "ovn-worker"
 			workerTwoNodeName            = "ovn-worker2"
@@ -88,7 +95,7 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.Networ
 				netConfig.cidr = filterCIDRsAndJoin(cs, netConfig.cidr)
 				_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(
 					context.Background(),
-					generateNAD(netConfig),
+					generateNAD(netConfig, f.ClientSet),
 					metav1.CreateOptions{},
 				)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -96,6 +103,14 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.Networ
 				ginkgo.By("creating client/server pods")
 				serverPodConfig.namespace = f.Namespace.Name
 				clientPodConfig.namespace = f.Namespace.Name
+				nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), cs, 2)
+				framework.ExpectNoError(err, "")
+				if len(nodes.Items) < 2 {
+					ginkgo.Skip("requires at least 2 Nodes")
+				}
+				serverPodConfig.nodeSelector = map[string]string{nodeHostnameKey: nodes.Items[0].GetName()}
+				clientPodConfig.nodeSelector = map[string]string{nodeHostnameKey: nodes.Items[1].GetName()}
+
 				runUDNPod(cs, f.Namespace.Name, serverPodConfig, nil)
 				runUDNPod(cs, f.Namespace.Name, clientPodConfig, nil)
 
@@ -138,19 +153,38 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.Networ
 				networkAttachmentConfigParams{
 					name:     nadName,
 					topology: "layer2",
-					cidr:     joinCIDRs(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					cidr:     joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 					role:     "primary",
 				},
 				*podConfig(
 					"client-pod",
-					withNodeSelector(map[string]string{nodeHostnameKey: workerOneNodeName}),
 				),
 				*podConfig(
 					"server-pod",
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
-					withNodeSelector(map[string]string{nodeHostnameKey: workerTwoNodeName}),
+				),
+			),
+			ginkgo.Entry(
+				"in L2 dualstack primary UDN with custom network",
+				networkAttachmentConfigParams{
+					name:                nadName,
+					topology:            "layer2",
+					cidr:                joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					role:                "primary",
+					defaultGatewayIPs:   joinStrings(customL2IPv4Gateway, customL2IPv6Gateway),
+					reservedCIDRs:       joinStrings(customL2IPv4ReservedCIDR, customL2IPv6ReservedCIDR),
+					infrastructureCIDRs: joinStrings(customL2IPv4InfraCIDR, customL2IPv6InfraCIDR),
+				},
+				*podConfig(
+					"client-pod",
+				),
+				*podConfig(
+					"server-pod",
+					withCommand(func() []string {
+						return httpServerContainerCmd(port)
+					}),
 				),
 			),
 			ginkgo.Entry(
@@ -158,19 +192,17 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.Networ
 				networkAttachmentConfigParams{
 					name:     nadName,
 					topology: "layer3",
-					cidr:     joinCIDRs(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					cidr:     joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 					role:     "primary",
 				},
 				*podConfig(
 					"client-pod",
-					withNodeSelector(map[string]string{nodeHostnameKey: workerOneNodeName}),
 				),
 				*podConfig(
 					"server-pod",
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
-					withNodeSelector(map[string]string{nodeHostnameKey: workerTwoNodeName}),
 				),
 			),
 		)
@@ -191,25 +223,25 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.Networ
 
 				nad := networkAttachmentConfigParams{
 					topology: topology,
-					cidr:     filterCIDRsAndJoin(cs, joinCIDRs(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet)),
+					cidr:     joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 					// The yellow, blue and red namespaces are going to served by green network.
 					// Use random suffix for the network name to avoid race between tests.
 					networkName: fmt.Sprintf("%s-%s", "green", rand.String(randomStringLength)),
 					role:        "primary",
 				}
+				filterSupportedNetworkConfig(f.ClientSet, &nad)
 
 				// Use random suffix in net conf name to avoid race between tests.
 				netConfName := fmt.Sprintf("sharednet-%s", rand.String(randomStringLength))
 				for _, namespace := range []string{namespaceYellow, namespaceBlue} {
 					ginkgo.By("creating the attachment configuration for " + netConfName + " in namespace " + namespace)
 					netConfig := newNetworkAttachmentConfig(nad)
-					netConfig.cidr = filterCIDRsAndJoin(cs, netConfig.cidr)
 					netConfig.namespace = namespace
 					netConfig.name = netConfName
 
 					_, err := nadClient.NetworkAttachmentDefinitions(namespace).Create(
 						context.Background(),
-						generateNAD(netConfig),
+						generateNAD(netConfig, f.ClientSet),
 						metav1.CreateOptions{},
 					)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -311,7 +343,7 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.Networ
 
 					_, err := nadClient.NetworkAttachmentDefinitions(namespace).Create(
 						context.Background(),
-						generateNAD(netConfig),
+						generateNAD(netConfig, f.ClientSet),
 						metav1.CreateOptions{},
 					)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())

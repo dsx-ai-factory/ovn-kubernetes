@@ -58,7 +58,7 @@ var _ = ginkgo.Describe("VirtualIP", func() {
 					Name: "node1",
 				},
 				&nbdb.LogicalSwitch{
-					Name: util.GetSecondaryNetworkPrefix(vipNetworkName) + ovntypes.OVNLayer2Switch,
+					Name: util.GetUserDefinedNetworkPrefix(vipNetworkName) + ovntypes.OVNLayer2Switch,
 				},
 			},
 		}
@@ -98,9 +98,9 @@ var _ = ginkgo.Describe("VirtualIP", func() {
 						Items: []nettypes.NetworkAttachmentDefinition{*nad},
 					},
 				)
-				ocInfo := fakeOvn.secondaryControllers[vipNetworkName]
+				ocInfo := fakeOvn.userDefinedNetworkControllers[vipNetworkName]
 				subnet := ocInfo.bnc.Subnets()[0]
-				err := ocInfo.bnc.lsManager.AddOrUpdateSwitch(ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch), []*net.IPNet{subnet.CIDR})
+				err := ocInfo.bnc.lsManager.AddOrUpdateSwitch(ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch), []*net.IPNet{subnet.CIDR}, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = ocInfo.bnc.WatchVirtualIPs()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -161,9 +161,9 @@ var _ = ginkgo.Describe("VirtualIP", func() {
 						Items: []nettypes.NetworkAttachmentDefinition{*nad},
 					},
 				)
-				ocInfo := fakeOvn.secondaryControllers[vipNetworkName]
+				ocInfo := fakeOvn.userDefinedNetworkControllers[vipNetworkName]
 				subnet := ocInfo.bnc.Subnets()[0]
-				err := ocInfo.bnc.lsManager.AddOrUpdateSwitch(ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch), []*net.IPNet{subnet.CIDR})
+				err := ocInfo.bnc.lsManager.AddOrUpdateSwitch(ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch), []*net.IPNet{subnet.CIDR}, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				err = ocInfo.bnc.WatchPods()
@@ -182,7 +182,7 @@ var _ = ginkgo.Describe("VirtualIP", func() {
 
 				// check if virtual port virtual-parents options field has been updated with
 				// pod logical switch port
-				lspPod := util.GetSecondaryNetworkLogicalPortName(virtualIPNamespace, "pod1", nadName)
+				lspPod := util.GetUserDefinedNetworkLogicalPortName(virtualIPNamespace, "pod1", nadName)
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				gomega.Eventually(func() string {
 					virtualLSP := []nbdb.LogicalSwitchPort{}
@@ -248,9 +248,9 @@ var _ = ginkgo.Describe("VirtualIP", func() {
 						Items: []nettypes.NetworkAttachmentDefinition{*nad},
 					},
 				)
-				ocInfo := fakeOvn.secondaryControllers[vipNetworkName]
+				ocInfo := fakeOvn.userDefinedNetworkControllers[vipNetworkName]
 				subnet := ocInfo.bnc.Subnets()[0]
-				err := ocInfo.bnc.lsManager.AddOrUpdateSwitch(ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch), []*net.IPNet{subnet.CIDR})
+				err := ocInfo.bnc.lsManager.AddOrUpdateSwitch(ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch), []*net.IPNet{subnet.CIDR}, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				err = ocInfo.bnc.WatchPods()
@@ -272,7 +272,7 @@ var _ = ginkgo.Describe("VirtualIP", func() {
 				gomega.Eventually(func() string {
 					podLSP := []nbdb.LogicalSwitchPort{}
 					err := fakeOvn.controller.nbClient.WhereCache(func(lsp *nbdb.LogicalSwitchPort) bool {
-						return lsp.Name == util.GetSecondaryNetworkLogicalPortName(virtualIPNamespace, "pod1", nadName)
+						return lsp.Name == util.GetUserDefinedNetworkLogicalPortName(virtualIPNamespace, "pod1", nadName)
 					}).List(context.TODO(), &podLSP)
 					gomega.Expect(err).ToNot(gomega.HaveOccurred())
 					gomega.Expect(podLSP).To(gomega.HaveLen(1))
@@ -296,7 +296,7 @@ var _ = ginkgo.Describe("VirtualIP", func() {
 				gomega.Eventually(func() string {
 					podLSP := []nbdb.LogicalSwitchPort{}
 					err := fakeOvn.controller.nbClient.WhereCache(func(lsp *nbdb.LogicalSwitchPort) bool {
-						return lsp.Name == util.GetSecondaryNetworkLogicalPortName(virtualIPNamespace, "pod1", nadName)
+						return lsp.Name == util.GetUserDefinedNetworkLogicalPortName(virtualIPNamespace, "pod1", nadName)
 					}).List(context.TODO(), &podLSP)
 					gomega.Expect(err).ToNot(gomega.HaveOccurred())
 					gomega.Expect(podLSP).To(gomega.HaveLen(1))

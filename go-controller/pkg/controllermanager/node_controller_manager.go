@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -43,7 +44,7 @@ type NodeControllerManager struct {
 
 	defaultNodeNetworkController *node.DefaultNodeNetworkController
 
-	// networkManager creates and deletes secondary network controllers
+	// networkManager creates and deletes user-defined network controllers
 	networkManager networkmanager.Controller
 	// vrf manager that creates and manages vrfs for all UDNs
 	vrfManager *vrfmanager.Controller
@@ -55,19 +56,19 @@ type NodeControllerManager struct {
 	ovsClient client.Client
 }
 
-// NewNetworkController create secondary node network controllers for the given NetInfo
+// NewNetworkController create node user-defined network controllers for the given NetInfo
 func (ncm *NodeControllerManager) NewNetworkController(nInfo util.NetInfo) (networkmanager.NetworkController, error) {
 	topoType := nInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology, ovntypes.Layer2Topology:
 		// Pass a shallow clone of the watch factory, this allows multiplexing
-		// informers for secondary networks.
-		return node.NewSecondaryNodeNetworkController(ncm.newCommonNetworkControllerInfo(ncm.watchFactory.(*factory.WatchFactory).ShallowClone()),
+		// informers for UDNs.
+		return node.NewUserDefinedNodeNetworkController(ncm.newCommonNetworkControllerInfo(ncm.watchFactory.(*factory.WatchFactory).ShallowClone()),
 			nInfo, ncm.networkManager.Interface(), ncm.vrfManager, ncm.ruleManager, ncm.defaultNodeNetworkController.Gateway)
 	case ovntypes.LocalnetTopology:
 		// Pass a shallow clone of the watch factory, this allows multiplexing
 		// informers for secondary networks.
-		return node.NewSecondaryLocalnetNodeNetworkController(ncm.newCommonNetworkControllerInfo(ncm.watchFactory.(*factory.WatchFactory).ShallowClone()),
+		return node.NewUserDefinedLocalnetNodeNetworkController(ncm.newCommonNetworkControllerInfo(ncm.watchFactory.(*factory.WatchFactory).ShallowClone()),
 			nInfo, ncm.networkManager.Interface()), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
@@ -77,7 +78,7 @@ func (ncm *NodeControllerManager) GetDefaultNetworkController() networkmanager.B
 	return ncm.defaultNodeNetworkController
 }
 
-// CleanupStaleNetworks cleans up all stale entities giving list of all existing secondary network controllers
+// CleanupStaleNetworks cleans up all stale entities giving list of all existing node UDN controllers
 func (ncm *NodeControllerManager) CleanupStaleNetworks(validNetworks ...util.NetInfo) error {
 	if !util.IsNetworkSegmentationSupportEnabled() {
 		return nil
@@ -99,9 +100,9 @@ func (ncm *NodeControllerManager) newCommonNetworkControllerInfo(wf factory.Node
 
 // isNetworkManagerRequiredForNode checks if network manager should be started
 // on the node side, which requires any of the following conditions:
-// (1) dpu mode is enabled when secondary networks feature is enabled
-// (2) primary user defined networks is enabled (all modes)
-// (3) whenever these is localnet network, needs to set ovn-bridge-mappings
+// (1) dpu mode is enabled when multiple networks feature is enabled
+// (2) primary user-defined networks is enabled (all modes)
+// (3) whenever these is localnet user-defined network, needs to set ovn-bridge-mappings
 func isNetworkManagerRequiredForNode() bool {
 	return (config.OVNKubernetesFeature.EnableMultiNetwork && config.OvnKubeNode.Mode != ovntypes.NodeModeDPUHost) ||
 		util.IsNetworkSegmentationSupportEnabled() ||
@@ -129,8 +130,8 @@ func NewNodeControllerManager(ovnClient *util.OVNClientset, wf factory.NodeWatch
 		},
 	}
 
-	// need to configure OVS interfaces for Pods on secondary networks in the DPU mode
-	// need to start NAD controller on node side to set ovn-bridge-mappings for localnet network
+	// need to configure OVS interfaces for Pods on UDNs in the DPU mode
+	// need to start NAD controller on node side to set ovn-bridge-mappings for localnet UDNs
 	// need to start NAD controller on node side for programming gateway pieces for UDNs
 	// need to start NAD controller on node side for VRF awareness with BGP
 	var err error
@@ -177,7 +178,7 @@ func (ncm *NodeControllerManager) initDefaultNodeNetworkController(ctx context.C
 }
 
 // Start the node network controller manager
-func (ncm *NodeControllerManager) Start(ctx context.Context) (err error) {
+func (ncm *NodeControllerManager) Start(ctx context.Context, isOVNKubeControllerSyncd *atomic.Bool) (err error) {
 	klog.Infof("Starting the node network controller manager, Mode: %s", config.OvnKubeNode.Mode)
 
 	if config.OvnKubeNode.Mode == ovntypes.NodeModeDPU {
@@ -209,7 +210,7 @@ func (ncm *NodeControllerManager) Start(ctx context.Context) (err error) {
 	defer func() {
 		if err != nil {
 			klog.Errorf("Stopping node network controller manager, err=%v", err)
-			ncm.Stop()
+			ncm.Stop(isOVNKubeControllerSyncd)
 		}
 	}()
 
@@ -271,15 +272,46 @@ func (ncm *NodeControllerManager) Start(ctx context.Context) (err error) {
 			return fmt.Errorf("failed to own priority %d for IP rules: %v", node.UDNMasqueradeIPRulePriority, err)
 		}
 	}
+
+	// start workaround and remove when ovn has native support for silencing GARPs for LRPs
+	// https://issues.redhat.com/browse/FDP-1537
+	// when in mode ovnkube controller with node, wait until ovnkube controller is syncd before removing drop flows for GARPs
+waitForControllerSyncLoop:
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+			if isOVNKubeControllerSyncd != nil && !isOVNKubeControllerSyncd.Load() {
+				klog.V(5).Infof("Waiting for ovnkube controller to start before removing GARP drop flows")
+				time.Sleep(200 * time.Millisecond)
+				continue
+			}
+			klog.Infof("Removing flows to drop GARP")
+			ncm.defaultNodeNetworkController.Gateway.SetDefaultBridgeGARPDropFlows(false)
+			if err := ncm.defaultNodeNetworkController.Gateway.Reconcile(); err != nil {
+				return fmt.Errorf("failed to reconcile gateway after removing GARP drop flows for ext bridge: %v", err)
+			}
+			break waitForControllerSyncLoop
+		}
+	}
+	// end workaround
+
 	return nil
 }
 
 // Stop gracefully stops all managed controllers
-func (ncm *NodeControllerManager) Stop() {
+func (ncm *NodeControllerManager) Stop(isOVNKubeControllerSyncd *atomic.Bool) {
 	// stop stale ovs ports cleanup
 	close(ncm.stopChan)
 
 	if ncm.defaultNodeNetworkController != nil {
+		if isOVNKubeControllerSyncd != nil && ncm.defaultNodeNetworkController.Gateway != nil {
+			ncm.defaultNodeNetworkController.Gateway.SetDefaultBridgeGARPDropFlows(true)
+			if err := ncm.defaultNodeNetworkController.Gateway.Reconcile(); err != nil {
+				klog.Errorf("Failed to reconcile gateway after attempting to add flows to the external bridge to drop GARPs: %v", err)
+			}
+		}
 		ncm.defaultNodeNetworkController.Stop()
 	}
 

@@ -17,15 +17,11 @@ const (
 	// PmtudOpenFlowCookie identifies the flows used to drop ICMP type (3) destination unreachable,
 	// fragmentation-needed (4)
 	PmtudOpenFlowCookie = "0x0304"
-	// LocalnetOpenFlowCookie identifies open flow rules added to the host OVS bridge to
-	// steer traffic from loclanetports towards the HostMAC. To ease debugging, the
-	// hex number 0x10ca1f105, is meant to sound like local flows.
-	LocalnetOpenFlowCookie = "0x10ca1f105"
-	// EtpSvcOpenFlowCookie identifies constant open flow rules added to the host OVS
-	// bridge to move packets between host and external for etp=local traffic.
-	// The hex number 0xe745ecf105, represents etp(e74)-service(5ec)-flows which makes it easier for debugging.
-	EtpSvcOpenFlowCookie = "0xe745ecf105"
 
+	// GARPCookie identifies the flows used to allow node IPs and drop other GARPs from CDN.
+	// Temp workaround until OVN has native supported for silencing GARPs on startup.
+	// https://issues.redhat.com/browse/FDP-1537
+	GARPCookie = "0x0305"
 	// CtMarkHost is the conntrack mark value for host traffic
 	CtMarkHost = "0x2"
 )

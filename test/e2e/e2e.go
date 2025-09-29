@@ -572,7 +572,7 @@ func IsGatewayModeLocal(cs kubernetes.Interface) bool {
 // restartOVNKubeNodePod restarts the ovnkube-node pod from namespace, running on nodeName
 func restartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nodeName string) error {
 	ovnKubeNodePods, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
-		LabelSelector: "name=ovnkube-node",
+		LabelSelector: "app=ovnkube-node",
 		FieldSelector: "spec.nodeName=" + nodeName,
 	})
 	if err != nil {
@@ -591,7 +591,7 @@ func restartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nod
 	framework.Logf("waiting for node %s to have running ovnkube-node pod", nodeName)
 	err = wait.Poll(2*time.Second, 3*time.Minute, func() (bool, error) {
 		ovnKubeNodePods, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
-			LabelSelector: "name=ovnkube-node",
+			LabelSelector: "app=ovnkube-node",
 			FieldSelector: "spec.nodeName=" + nodeName,
 		})
 		if err != nil {
@@ -632,7 +632,7 @@ func restartOVNKubeNodePodsInParallel(clientset kubernetes.Interface, namespace 
 // getOVNKubePodLogsFiltered retrieves logs from ovnkube-node pods and filters logs lines according to filteringRegexp
 func getOVNKubePodLogsFiltered(clientset kubernetes.Interface, namespace, nodeName, filteringRegexp string) (string, error) {
 	ovnKubeNodePods, err := clientset.CoreV1().Pods(namespace).List(context.Background(), metav1.ListOptions{
-		LabelSelector: "name=ovnkube-node",
+		LabelSelector: "app=ovnkube-node",
 		FieldSelector: "spec.nodeName=" + nodeName,
 	})
 	if err != nil {
@@ -1298,7 +1298,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			framework.ExpectNoError(err)
 
 			ginkgo.By("Waiting for the endpoints to pop up")
-			expectedEndpointsNum :=  len(endPoints)
+			expectedEndpointsNum := len(endPoints)
 			if isDualStack {
 				expectedEndpointsNum = expectedEndpointsNum * 2
 			}
@@ -1498,7 +1498,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			framework.ExpectNoError(err)
 
 			ginkgo.By("Waiting for the endpoints to pop up")
-			expectedEndpointsNum :=  len(endPoints)
+			expectedEndpointsNum := len(endPoints)
 			if isDualStack {
 				expectedEndpointsNum = expectedEndpointsNum * 2
 			}
@@ -1586,7 +1586,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			framework.ExpectNoError(err)
 
 			ginkgo.By("Waiting for the endpoints to pop up")
-			expectedEndpointsNum :=  len(endPoints)
+			expectedEndpointsNum := len(endPoints)
 			if isDualStack {
 				expectedEndpointsNum = expectedEndpointsNum * 2
 			}
@@ -1737,7 +1737,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			framework.ExpectNoError(err)
 
 			ginkgo.By("Waiting for the endpoints to pop up")
-			expectedEndpointsNum :=  len(endPoints)
+			expectedEndpointsNum := len(endPoints)
 			if isDualStack {
 				expectedEndpointsNum = expectedEndpointsNum * 2
 			}
@@ -1874,7 +1874,7 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 			nodeTCPPort, nodeUDPPort := nodePortsFromService(np)
 
 			ginkgo.By("Waiting for the endpoints to pop up")
-			expectedEndpointsNum :=  len(endPoints)
+			expectedEndpointsNum := len(endPoints)
 			if isDualStack {
 				expectedEndpointsNum = expectedEndpointsNum * 2
 			}
@@ -2015,7 +2015,7 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 			setUnsetTemplateContainerEnv(f.ClientSet, ovnKubeNamespace, "daemonset/ovnkube-node", getNodeContainerName(), nil, ovnEnvVar)
 
 			ovnKubeNodePods, err := f.ClientSet.CoreV1().Pods(ovnKubeNamespace).List(context.TODO(), metav1.ListOptions{
-				LabelSelector: "name=ovnkube-node",
+				LabelSelector: "app=ovnkube-node",
 			})
 			if err != nil {
 				framework.Failf("could not get ovnkube-node pods: %v", err)
@@ -2051,7 +2051,7 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 
 })
 
-func getNodePodCIDRs(nodeName string) (string, string, error) {
+func getNodePodCIDRs(nodeName, netName string) (string, string, error) {
 	// retrieve the pod cidr for the worker node
 	jsonFlag := "jsonpath='{.metadata.annotations.k8s\\.ovn\\.org/node-subnets}'"
 	kubectlOut, err := e2ekubectl.RunKubectl("default", "get", "node", nodeName, "-o", jsonFlag)
@@ -2066,7 +2066,7 @@ func getNodePodCIDRs(nodeName string) (string, string, error) {
 	ssSubnets := make(map[string]string)
 	if err := json.Unmarshal([]byte(annotation), &ssSubnets); err == nil {
 		// If only one subnet, determine if it's v4 or v6
-		if subnet, ok := ssSubnets["default"]; ok {
+		if subnet, ok := ssSubnets[netName]; ok {
 			if strings.Contains(subnet, ":") {
 				ipv6CIDR = subnet
 			} else {
@@ -2078,7 +2078,7 @@ func getNodePodCIDRs(nodeName string) (string, string, error) {
 
 	dsSubnets := make(map[string][]string)
 	if err := json.Unmarshal([]byte(annotation), &dsSubnets); err == nil {
-		if subnets, ok := dsSubnets["default"]; ok && len(subnets) > 0 {
+		if subnets, ok := dsSubnets[netName]; ok && len(subnets) > 0 {
 			// Classify each subnet as IPv4 or IPv6
 			for _, subnet := range subnets {
 				if strings.Contains(subnet, ":") {
@@ -2091,7 +2091,7 @@ func getNodePodCIDRs(nodeName string) (string, string, error) {
 		}
 	}
 
-	return "", "", fmt.Errorf("could not parse annotation %q", annotation)
+	return "", "", fmt.Errorf("could not parse annotation %q for network %s", annotation, netName)
 }
 
 var _ = ginkgo.Describe("e2e delete databases", func() {

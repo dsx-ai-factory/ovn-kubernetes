@@ -23,28 +23,24 @@ import (
 
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	utilnet "k8s.io/utils/net"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/ip"
 )
 
 func netCIDR(netCIDR string, netPrefixLengthPerNode int) string {
 	return fmt.Sprintf("%s/%d", netCIDR, netPrefixLengthPerNode)
 }
 
-func joinCIDRs(cidrs ...string) string {
-	return strings.Join(cidrs, ",")
-}
-
-func splitCIDRs(cidrs string) []string {
-	if cidrs == "" {
-		return []string{}
-	}
-	return strings.Split(cidrs, ",")
+func joinStrings(vals ...string) string {
+	return strings.Join(vals, ",")
 }
 
 func filterCIDRsAndJoin(cs clientset.Interface, cidrs string) string {
 	if cidrs == "" {
 		return "" // we may not always set CIDR - i.e. CDN
 	}
-	return joinCIDRs(filterCIDRs(cs, splitCIDRs(cidrs)...)...)
+	return joinStrings(filterCIDRs(cs, strings.Split(cidrs, ",")...)...)
 }
 
 func filterCIDRs(cs clientset.Interface, cidrs ...string) []string {
@@ -56,6 +52,29 @@ func filterCIDRs(cs clientset.Interface, cidrs ...string) []string {
 		supportedCIDRs = append(supportedCIDRs, cidr)
 	}
 	return supportedCIDRs
+}
+
+func filterSupportedNetworkConfig(client clientset.Interface, config *networkAttachmentConfigParams) {
+	config.cidr = filterCIDRsAndJoin(client, config.cidr)
+	config.excludeCIDRs = filterCIDRs(client, config.excludeCIDRs...)
+	config.reservedCIDRs = filterCIDRsAndJoin(client, config.reservedCIDRs)
+	config.infrastructureCIDRs = filterCIDRsAndJoin(client, config.infrastructureCIDRs)
+	config.defaultGatewayIPs = filterIPsAndJoin(client, config.defaultGatewayIPs)
+}
+
+func filterIPs(cs clientset.Interface, ips ...string) []string {
+	var supportedIPs []string
+	for _, ip := range ips {
+		isIPv6 := utilnet.IsIPv6String(ip)
+		if (!isIPv6 && isIPv4Supported(cs)) || (isIPv6 && isIPv6Supported(cs)) {
+			supportedIPs = append(supportedIPs, ip)
+		}
+	}
+	return supportedIPs
+}
+
+func filterIPsAndJoin(cs clientset.Interface, ips string) string {
+	return joinStrings(filterIPs(cs, strings.Split(ips, ",")...)...)
 }
 
 func getNetCIDRSubnet(netCIDR string) (string, error) {
@@ -71,6 +90,9 @@ func getNetCIDRSubnet(netCIDR string) (string, error) {
 type networkAttachmentConfigParams struct {
 	cidr                string
 	excludeCIDRs        []string
+	infrastructureCIDRs string
+	defaultGatewayIPs   string
+	reservedCIDRs       string
 	namespace           string
 	name                string
 	topology            string
@@ -114,6 +136,9 @@ func generateNADSpec(config networkAttachmentConfig) string {
         "topology":%q,
         "subnets": %q,
         "excludeSubnets": %q,
+        "reservedSubnets": %q,
+        "infrastructureSubnets": %q,
+		"defaultGatewayIPs": %q,
         "mtu": %d,
         "netAttachDefName": %q,
         "vlanID": %d,
@@ -126,6 +151,9 @@ func generateNADSpec(config networkAttachmentConfig) string {
 		config.topology,
 		config.cidr,
 		strings.Join(config.excludeCIDRs, ","),
+		config.reservedCIDRs,
+		config.infrastructureCIDRs,
+		config.defaultGatewayIPs,
 		config.mtu,
 		namespacedName(config.namespace, config.name),
 		config.vlanID,
@@ -135,7 +163,9 @@ func generateNADSpec(config networkAttachmentConfig) string {
 	)
 }
 
-func generateNAD(config networkAttachmentConfig) *nadapi.NetworkAttachmentDefinition {
+func generateNAD(config networkAttachmentConfig, client clientset.Interface) *nadapi.NetworkAttachmentDefinition {
+	filterSupportedNetworkConfig(client, &config.networkAttachmentConfigParams)
+
 	nadSpec := generateNADSpec(config)
 	return generateNetAttachDef(config.namespace, config.name, nadSpec)
 }
@@ -162,23 +192,37 @@ func patchNADSpec(nadClient nadclient.K8sCniCncfIoV1Interface, name, namespace s
 }
 
 type podConfiguration struct {
-	attachments                  []nadapi.NetworkSelectionElement
-	containerCmd                 []string
-	name                         string
-	namespace                    string
-	nodeSelector                 map[string]string
-	isPrivileged                 bool
-	labels                       map[string]string
-	requiresExtraNamespace       bool
-	hostNetwork                  bool
-	needsIPRequestFromHostSubnet bool
+	attachments            []nadapi.NetworkSelectionElement
+	containerCmd           []string
+	name                   string
+	namespace              string
+	nodeSelector           map[string]string
+	isPrivileged           bool
+	labels                 map[string]string
+	annotations                  map[string]string
+	requiresExtraNamespace bool
+	hostNetwork            bool
+	ipRequestFromSubnet    string
+	usesExternalRouter     bool
 }
 
 func generatePodSpec(config podConfiguration) *v1.Pod {
 	podSpec := e2epod.NewAgnhostPod(config.namespace, config.name, nil, nil, nil, config.containerCmd...)
-	if len(config.attachments) > 0 {
-		podSpec.Annotations = networkSelectionElements(config.attachments...)
+
+	// Merge network attachments and custom annotations
+	if podSpec.Annotations == nil {
+		podSpec.Annotations = make(map[string]string)
 	}
+	if len(config.attachments) > 0 {
+		attachmentAnnotations := networkSelectionElements(config.attachments...)
+		for k, v := range attachmentAnnotations {
+			podSpec.Annotations[k] = v
+		}
+	}
+	for k, v := range config.annotations {
+		podSpec.Annotations[k] = v
+	}
+
 	podSpec.Spec.NodeSelector = config.nodeSelector
 	podSpec.Labels = config.labels
 	podSpec.Spec.HostNetwork = config.hostNetwork
@@ -327,7 +371,7 @@ func pingServer(clientPodConfig podConfiguration, serverIP string, args ...strin
 		clientPodConfig.name,
 		"--",
 		"ping",
-		"-c", "1", // send one ICMP echo request
+		"-c", "3", // send three ICMP echo requests
 		"-W", "2", // timeout after 2 seconds if no response
 	}
 	baseArgs = append(baseArgs, args...)
@@ -377,7 +421,11 @@ func podIPsForAttachment(k8sClient clientset.Interface, podNamespace string, pod
 	if err != nil {
 		return nil, err
 	}
-	if len(netStatus) != 1 {
+
+	if len(netStatus) == 0 {
+		return nil, fmt.Errorf("no status entry for attachment %s on pod %s", attachmentName, namespacedName(podNamespace, podName))
+	}
+	if len(netStatus) > 1 {
 		return nil, fmt.Errorf("more than one status entry for attachment %s on pod %s", attachmentName, namespacedName(podNamespace, podName))
 	}
 	if len(netStatus[0].IPs) == 0 {
@@ -739,4 +787,28 @@ func getPodAnnotationIPsForAttachmentByIndex(k8sClient clientset.Interface, podN
 		return "", fmt.Errorf("attachment for network %q with more than two IPs", attachmentName)
 	}
 	return ipnets[index].IP.String(), nil
+}
+
+// generateIPsFromSubnets generates IP addresses from the given subnets with the specified offset
+func generateIPsFromSubnets(subnets []string, offset int) ([]string, error) {
+	var addrs []string
+	for _, s := range subnets {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		ipGen, err := ip.NewIPGenerator(s)
+		if err != nil {
+			return nil, err
+		}
+		ip, err := ipGen.GenerateIP(offset)
+		if err != nil {
+			return nil, err
+		}
+		addrs = append(addrs, ip.String())
+	}
+	if len(addrs) == 0 {
+		return nil, fmt.Errorf("no valid subnets provided")
+	}
+	return addrs, nil
 }

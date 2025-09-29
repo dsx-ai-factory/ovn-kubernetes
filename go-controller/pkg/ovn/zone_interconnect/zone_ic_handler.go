@@ -16,6 +16,7 @@ import (
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -33,7 +34,7 @@ const (
 /*
  * ZoneInterconnectHandler manages OVN resources required for interconnecting
  * multiple zones. This handler exposes functions which a network controller
- * (default and secondary) is expected to call on different events.
+ * (default and UDN) is expected to call on different events.
 
  * For routed topologies:
  *
@@ -117,7 +118,7 @@ const (
  */
 
 // ZoneInterconnectHandler creates the OVN resources required for interconnecting
-// multiple zones for a network (default or secondary layer 3)
+// multiple zones for a network (default or layer 3) UDN
 type ZoneInterconnectHandler struct {
 	watchFactory *factory.WatchFactory
 	// network which is inter-connected
@@ -155,8 +156,8 @@ func getTransitSwitchName(nInfo util.NetInfo) string {
 
 func (zic *ZoneInterconnectHandler) createOrUpdateTransitSwitch(networkID int) error {
 	externalIDs := make(map[string]string)
-	if zic.IsSecondary() {
-		externalIDs = getSecondaryNetTransitSwitchExtIDs(zic.GetNetworkName(), zic.TopologyType(), zic.IsPrimaryNetwork())
+	if zic.IsUserDefinedNetwork() {
+		externalIDs = getUserDefinedNetTransitSwitchExtIDs(zic.GetNetworkName(), zic.TopologyType(), zic.IsPrimaryNetwork())
 	}
 	ts := &nbdb.LogicalSwitch{
 		Name:        zic.networkTransitSwitchName,
@@ -191,7 +192,7 @@ func (zic *ZoneInterconnectHandler) ensureTransitSwitch(nodes []*corev1.Node) er
 // See createLocalZoneNodeResources() below for more details.
 func (zic *ZoneInterconnectHandler) AddLocalZoneNode(node *corev1.Node) error {
 	klog.Infof("Creating interconnect resources for local zone node %s for the network %s", node.Name, zic.GetNetworkName())
-	nodeID := util.GetNodeID(node)
+	nodeID, _ := util.GetNodeID(node)
 	if nodeID == -1 {
 		// Don't consider this node as cluster-manager has not allocated node id yet.
 		return fmt.Errorf("failed to get node id for node - %s", node.Name)
@@ -209,7 +210,7 @@ func (zic *ZoneInterconnectHandler) AddLocalZoneNode(node *corev1.Node) error {
 func (zic *ZoneInterconnectHandler) AddRemoteZoneNode(node *corev1.Node) error {
 	start := time.Now()
 
-	nodeID := util.GetNodeID(node)
+	nodeID, _ := util.GetNodeID(node)
 	if nodeID == -1 {
 		// Don't consider this node as cluster-manager has not allocated node id yet.
 		return fmt.Errorf("failed to get node id for node - %s", node.Name)
@@ -237,8 +238,8 @@ func (zic *ZoneInterconnectHandler) AddRemoteZoneNode(node *corev1.Node) error {
 	var nodeGRPIPs []*net.IPNet
 	// only primary networks have cluster router connected to join switch+GR
 	// used for adding routes to GR
-	if !zic.IsSecondary() || (util.IsNetworkSegmentationSupportEnabled() && zic.IsPrimaryNetwork()) {
-		nodeGRPIPs, err = util.ParseNodeGatewayRouterJoinAddrs(node, zic.GetNetworkName())
+	if !zic.IsUserDefinedNetwork() || (util.IsNetworkSegmentationSupportEnabled() && zic.IsPrimaryNetwork()) {
+		nodeGRPIPs, err = udn.GetGWRouterIPs(node, zic.GetNetInfo())
 		if err != nil {
 			if util.IsAnnotationNotSetError(err) {
 				// FIXME(tssurya): This is present for backwards compatibility
@@ -647,14 +648,14 @@ func (zic *ZoneInterconnectHandler) deleteLocalNodeStaticRoutes(node *corev1.Nod
 		}
 	}
 
-	if zic.IsSecondary() {
-		// Secondary network cluster router doesn't connect to a join switch
+	if zic.IsUserDefinedNetwork() {
+		// UDN cluster router doesn't connect to a join switch
 		// or to a Gateway router.
 		return nil
 	}
 
 	// Clear the routes connecting to the GW Router for the default network
-	nodeGRPIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, zic.GetNetworkName())
+	nodeGRPIPs, err := udn.GetGWRouterIPs(node, zic.GetNetInfo())
 	if err != nil {
 		if util.IsAnnotationNotSetError(err) {
 			// FIXME(tssurya): This is present for backwards compatibility
@@ -719,7 +720,7 @@ func (zic *ZoneInterconnectHandler) getStaticRoutes(ipPrefixes []*net.IPNet, nex
 	return staticRoutes
 }
 
-func getSecondaryNetTransitSwitchExtIDs(networkName, topology string, isPrimaryUDN bool) map[string]string {
+func getUserDefinedNetTransitSwitchExtIDs(networkName, topology string, isPrimaryUDN bool) map[string]string {
 	return map[string]string{
 		types.NetworkExternalID:     networkName,
 		types.NetworkRoleExternalID: util.GetUserDefinedNetworkRole(isPrimaryUDN),

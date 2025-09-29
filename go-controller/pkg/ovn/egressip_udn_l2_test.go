@@ -41,7 +41,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 		v4Pod1IPNode1Net1       = "20.128.0.5"
 		node1DefaultRtoJIP      = "100.64.0.1"
 		node1DefaultRtoJIPCIDR  = node1DefaultRtoJIP + "/16"
-		node1Network1RtoSIP     = "100.65.0.2"
+		node1Network1RtoSIP     = "100.65.0.1"
 		node1Network1RtoSIPCIDR = node1Network1RtoSIP + "/16"
 		podName3                = "egress-pod3"
 		v4Pod2IPNode1Net1       = "20.128.0.6"
@@ -52,16 +52,16 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 		podName4                = "egress-pod4"
 		v4Pod1IPNode2Net1       = "20.129.0.2"
 		v4Pod2IPNode2Net1       = "20.129.0.3"
-		node2DefaultRtoJIP      = "100.66.0.1"
+		node2DefaultRtoJIP      = "100.64.0.2"
 		node2DefaultRtoJIPCIDR  = node2DefaultRtoJIP + "/16"
-		node2Network1RtoSIP     = "100.67.0.2"
+		node2Network1RtoSIP     = "100.65.0.2"
 		node2Network1RtoSIPCIDR = node2Network1RtoSIP + "/16"
 		eIP1Mark                = 50000
 		eIP2Mark                = 50001
 		layer2SwitchName        = "ovn_layer2_switch"
 		gwIP                    = "192.168.126.1"
 		gwIP2                   = "192.168.127.1"
-		secondaryNetworkID      = "2"
+		userDefinedNetworkID    = "2"
 	)
 
 	getEgressIPStatusLen := func(egressIPName string) func() int {
@@ -156,7 +156,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					netconf,
 				)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: secondaryNetworkID}
+				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: userDefinedNetworkID}
 				netInfo, err := util.NewNetInfo(&netconf, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -166,7 +166,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s/16\"}", v4Node1Tsp),
 					"k8s.ovn.org/zone-name":                       node1Name,
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
-					"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": fmt.Sprintf("{\"default\":{\"ipv4\":\"%s\"},\"%s\":{\"ipv4\":\"%s\"}}", node1DefaultRtoJIPCIDR, networkName1, node1Network1RtoSIPCIDR),
+					util.OvnNodeID:                                "1",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node1IPv4CIDR),
 					util.OvnNodeL3GatewayConfig: fmt.Sprintf(`{"%s":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"%s", "next-hop":"%s", "next-hops": ["%s"]},
 "default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"192.168.126.12/24", "next-hop": "192.168.126.1", "next-hops": ["192.168.126.1"]}}`, networkName1, v4Net1, gwIP, gwIP),
@@ -181,7 +181,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s/16\"}", v4Node2Tsp),
 					"k8s.ovn.org/zone-name":                       node2Name,
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
-					"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": fmt.Sprintf("{\"default\":{\"ipv4\":\"%s\"},\"%s\":{\"ipv4\":\"%s\"}}", node2DefaultRtoJIPCIDR, networkName1, node2Network1RtoSIPCIDR),
+					util.OvnNodeID:                                "2",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node2IPv4CIDR),
 					util.OvnNodeL3GatewayConfig: fmt.Sprintf(`{"%s":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"%s", "next-hop":"%s", "next-hops": ["%s"]},
 "default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"192.168.126.12/24", "next-hop":"192.168.126.1", "next-hops": ["192.168.126.1"]}`, networkName1, v4Net1, gwIP, gwIP),
@@ -524,7 +524,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					netconf,
 				)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: secondaryNetworkID}
+				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: userDefinedNetworkID}
 				netInfo, err := util.NewNetInfo(&netconf, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -535,7 +535,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/zone-name":                       node1Name,
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
 					"k8s.ovn.org/remote-zone-migrated":            node1Name,
-					"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": fmt.Sprintf("{\"default\":{\"ipv4\":\"%s\"},\"%s\":{\"ipv4\":\"%s\"}}", node1DefaultRtoJIPCIDR, networkName1, node1Network1RtoSIPCIDR),
+					util.OvnNodeID:                                "1",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node1IPv4CIDR),
 					util.OvnNodeL3GatewayConfig: fmt.Sprintf(`{"%s":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"%s", "next-hop":"%s", "next-hops": ["%s"]},
 "default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"192.168.126.12/24", "next-hop": "192.168.126.1", "next-hops": ["192.168.126.1"]}}`, networkName1, v4Net1, gwIP, gwIP),
@@ -551,7 +551,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/zone-name":                       node2Name,
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
 					"k8s.ovn.org/remote-zone-migrated":            node2Name,
-					"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": fmt.Sprintf("{\"default\":{\"ipv4\":\"%s\"},\"%s\":{\"ipv4\":\"%s\"}}", node2DefaultRtoJIPCIDR, networkName1, node2Network1RtoSIPCIDR),
+					util.OvnNodeID:                                "2",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node2IPv4CIDR),
 					util.OvnNodeL3GatewayConfig: fmt.Sprintf(`{"%s":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"%s", "next-hop":"%s", "next-hops": ["%s"]},
 "default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"192.168.126.12/24", "next-hop": "192.168.126.1", "next-hops": ["192.168.126.1"]}}`, networkName1, v4Net1, gwIP, gwIP),
@@ -662,14 +662,14 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				fakeOvn.controller.zone = node1.Name
 				fakeOvn.eIPController.zone = node1.Name
 				fakeOvn.controller.logicalPortCache.add(&egressPodCDNLocal, "", ovntypes.DefaultNetworkName, "", nil, []*net.IPNet{nCDN})
-				secConInfo, ok := fakeOvn.secondaryControllers[networkName1]
+				secConInfo, ok := fakeOvn.userDefinedNetworkControllers[networkName1]
 				gomega.Expect(ok).To(gomega.BeTrue())
 				fakeOvn.controller.eIPC.nodeZoneState.Store(node1Name, true)
 				fakeOvn.controller.eIPC.nodeZoneState.Store(node2Name, false)
 				err = fakeOvn.networkManager.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				defer fakeOvn.networkManager.Stop()
-				// simulate Start() of secondary network controller
+				// simulate Start() of UDN controller
 				err = fakeOvn.eIPController.ensureRouterPoliciesForNetwork(secConInfo.bnc.GetNetInfo(), &node1)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.eIPController.ensureSwitchPoliciesForNode(secConInfo.bnc.GetNetInfo(), node1Name)
@@ -1030,7 +1030,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					netconf,
 				)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: secondaryNetworkID}
+				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: userDefinedNetworkID}
 				netInfo, err := util.NewNetInfo(&netconf, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1041,7 +1041,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/zone-name":                       node1Name,
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
 					"k8s.ovn.org/remote-zone-migrated":            node1Name,
-					"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": fmt.Sprintf("{\"default\":{\"ipv4\":\"%s\"},\"%s\":{\"ipv4\":\"%s\"}}", node1DefaultRtoJIPCIDR, networkName1, node1Network1RtoSIPCIDR),
+					util.OvnNodeID:                                "1",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node1IPv4CIDR),
 					util.OvnNodeL3GatewayConfig: fmt.Sprintf(`{"%s":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"%s", "next-hop":"%s", "next-hops": ["%s"]},
 "default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"192.168.126.12/24", "next-hop": "192.168.126.1", "next-hops": ["192.168.126.1"]}}`, networkName1, v4Net1, gwIP, gwIP),
@@ -1057,7 +1057,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/zone-name":                       node2Name,
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
 					"k8s.ovn.org/remote-zone-migrated":            node2Name,
-					"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": fmt.Sprintf("{\"default\":{\"ipv4\":\"%s\"},\"%s\":{\"ipv4\":\"%s\"}}", node2DefaultRtoJIPCIDR, networkName1, node2Network1RtoSIPCIDR),
+					util.OvnNodeID:                                "2",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node2IPv4CIDR),
 					util.OvnNodeL3GatewayConfig: fmt.Sprintf(`{"%s":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"%s", "next-hop":"%s", "next-hops": ["%s"]},
 "default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"192.168.126.12/24", "next-hop": "192.168.126.1", "next-hops": ["192.168.126.1"]}}`, networkName1, v4Net1, gwIP, gwIP),
@@ -1181,7 +1181,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressIP()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				secConInfo, ok := fakeOvn.secondaryControllers[networkName1]
+				secConInfo, ok := fakeOvn.userDefinedNetworkControllers[networkName1]
 				gomega.Expect(ok).To(gomega.BeTrue())
 				// Add pod IPs to UDN cache
 				iUDN, nUDN, _ := net.ParseCIDR(v4Pod1IPNode1Net1 + "/23")
@@ -1512,7 +1512,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					netconf,
 				)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: secondaryNetworkID}
+				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: userDefinedNetworkID}
 				netInfo, err := util.NewNetInfo(&netconf, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1523,7 +1523,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/zone-name":                       node1Name,
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
 					"k8s.ovn.org/remote-zone-migrated":            node1Name,
-					"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": fmt.Sprintf("{\"default\":{\"ipv4\":\"%s\"},\"%s\":{\"ipv4\":\"%s\"}}", node1DefaultRtoJIPCIDR, networkName1, node1Network1RtoSIPCIDR),
+					util.OvnNodeID:                                "1",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node1IPv4CIDR),
 					util.OvnNodeL3GatewayConfig: fmt.Sprintf(`{"%s":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"%s", "next-hop":"%s", "next-hops": ["%s"]},
 "default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"192.168.126.12/24", "next-hop": "192.168.126.1", "next-hops": ["192.168.126.1"]}}`, networkName1, v4Net1, gwIP, gwIP),
@@ -1539,7 +1539,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/zone-name":                       node2Name,
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
 					"k8s.ovn.org/remote-zone-migrated":            node2Name,
-					"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": fmt.Sprintf("{\"default\":{\"ipv4\":\"%s\"},\"%s\":{\"ipv4\":\"%s\"}}", node2DefaultRtoJIPCIDR, networkName1, node2Network1RtoSIPCIDR),
+					util.OvnNodeID:                                "2",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node2IPv4CIDR),
 					util.OvnNodeL3GatewayConfig: fmt.Sprintf(`{"%s":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"%s", "next-hop":"%s", "next-hops": ["%s"]},
 "default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"192.168.126.12/24", "next-hop": "192.168.126.1", "next-hops": ["192.168.126.1"]}}`, networkName1, v4Net1, gwIP, gwIP),
@@ -1672,7 +1672,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressIP()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				secConInfo, ok := fakeOvn.secondaryControllers[networkName1]
+				secConInfo, ok := fakeOvn.userDefinedNetworkControllers[networkName1]
 				gomega.Expect(ok).To(gomega.BeTrue())
 				// Add pod IPs to UDN cache
 				iUDN, nUDN, _ := net.ParseCIDR(v4Pod1IPNode1Net1 + "/23")
@@ -1876,7 +1876,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					netconf,
 				)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: secondaryNetworkID}
+				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: userDefinedNetworkID}
 				netInfo, err := util.NewNetInfo(&netconf, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1887,7 +1887,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/zone-name":                       node1Name,
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
 					"k8s.ovn.org/remote-zone-migrated":            node1Name,
-					"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": fmt.Sprintf("{\"default\":{\"ipv4\":\"%s\"},\"%s\":{\"ipv4\":\"%s\"}}", node1DefaultRtoJIPCIDR, networkName1, node1Network1RtoSIPCIDR),
+					util.OvnNodeID:                                "1",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node1IPv4CIDR),
 					util.OvnNodeL3GatewayConfig: fmt.Sprintf(`{"%s":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"%s", "next-hop":"%s", "next-hops": ["%s"]},
 "default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"192.168.126.12/24", "next-hop": "192.168.126.1", "next-hops": ["192.168.126.1"]}}`, networkName1, v4Net1, gwIP, gwIP),
@@ -1903,7 +1903,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/zone-name":                       node2Name,
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
 					"k8s.ovn.org/remote-zone-migrated":            node2Name,
-					"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": fmt.Sprintf("{\"default\":{\"ipv4\":\"%s\"},\"%s\":{\"ipv4\":\"%s\"}}", node2DefaultRtoJIPCIDR, networkName1, node2Network1RtoSIPCIDR),
+					util.OvnNodeID:                                "2",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node2IPv4CIDR),
 					util.OvnNodeL3GatewayConfig: fmt.Sprintf(`{"%s":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"%s", "next-hop":"%s", "next-hops": ["%s"]},
 "default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"192.168.126.12/24", "next-hop": "192.168.126.1", "next-hops": ["192.168.126.1"]}}`, networkName1, v4Net1, gwIP, gwIP),
@@ -2229,7 +2229,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					netconf,
 				)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: secondaryNetworkID}
+				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: userDefinedNetworkID}
 				netInfo, err := util.NewNetInfo(&netconf, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -2240,7 +2240,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/zone-name":                       node1Name,
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
 					"k8s.ovn.org/remote-zone-migrated":            node1Name,
-					"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": fmt.Sprintf("{\"default\":{\"ipv4\":\"%s\"},\"%s\":{\"ipv4\":\"%s\"}}", node1DefaultRtoJIPCIDR, networkName1, node1Network1RtoSIPCIDR),
+					util.OvnNodeID:                                "1",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node1IPv4CIDR),
 					util.OvnNodeL3GatewayConfig: fmt.Sprintf(`{"%s":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"%s", "next-hop":"%s", "next-hops": ["%s"]},
 "default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"192.168.126.12/24", "next-hop": "192.168.126.1", "next-hops": ["192.168.126.1"]}}`, networkName1, v4Net1, gwIP, gwIP),
@@ -2256,7 +2256,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/zone-name":                       node2Name,
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
 					"k8s.ovn.org/remote-zone-migrated":            node2Name,
-					"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": fmt.Sprintf("{\"default\":{\"ipv4\":\"%s\"},\"%s\":{\"ipv4\":\"%s\"}}", node2DefaultRtoJIPCIDR, networkName1, node2Network1RtoSIPCIDR),
+					util.OvnNodeID:                                "2",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node2IPv4CIDR),
 					util.OvnNodeL3GatewayConfig: fmt.Sprintf(`{"%s":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"%s", "next-hop":"%s", "next-hops": ["%s"]},
 "default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"192.168.126.12/24", "next-hop": "192.168.126.1", "next-hops": ["192.168.126.1"]}}`, networkName1, v4Net1, gwIP, gwIP),
@@ -2383,7 +2383,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressIP()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				secConInfo, ok := fakeOvn.secondaryControllers[networkName1]
+				secConInfo, ok := fakeOvn.userDefinedNetworkControllers[networkName1]
 				gomega.Expect(ok).To(gomega.BeTrue())
 				// Add pod IPs to UDN cache
 				iUDN, nUDN, _ := net.ParseCIDR(v4Pod1IPNode1Net1 + "/23")
@@ -2597,7 +2597,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					netconf,
 				)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: secondaryNetworkID}
+				nad.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: userDefinedNetworkID}
 				netInfo, err := util.NewNetInfo(&netconf, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -2608,7 +2608,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/zone-name":                       node1Name,
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
 					"k8s.ovn.org/remote-zone-migrated":            node1Name,
-					"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": fmt.Sprintf("{\"default\":{\"ipv4\":\"%s\"},\"%s\":{\"ipv4\":\"%s\"}}", node1DefaultRtoJIPCIDR, networkName1, node1Network1RtoSIPCIDR),
+					util.OvnNodeID:                                "1",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node1IPv4CIDR),
 					util.OvnNodeL3GatewayConfig: fmt.Sprintf(`{"%s":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"%s", "next-hop":"%s", "next-hops": ["%s"]},
 "default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"192.168.126.12/24", "next-hop": "192.168.126.1", "next-hops": ["192.168.126.1"]}}`, networkName1, v4Net1, gwIP, gwIP),
@@ -2624,7 +2624,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/zone-name":                       node2Name,
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
 					"k8s.ovn.org/remote-zone-migrated":            node2Name,
-					"k8s.ovn.org/node-gateway-router-lrp-ifaddrs": fmt.Sprintf("{\"default\":{\"ipv4\":\"%s\"},\"%s\":{\"ipv4\":\"%s\"}}", node2DefaultRtoJIPCIDR, networkName1, node2Network1RtoSIPCIDR),
+					util.OvnNodeID:                                "2",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node2IPv4CIDR),
 					util.OvnNodeL3GatewayConfig: fmt.Sprintf(`{"%s":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"%s", "next-hop":"%s", "next-hops": ["%s"]},
 "default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"192.168.126.12/24", "next-hop": "192.168.126.1", "next-hops": ["192.168.126.1"]}}`, networkName1, v4Net1, gwIP, gwIP),
@@ -2734,7 +2734,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				fakeOvn.controller.logicalPortCache.add(&egressPodCDNLocal, "", ovntypes.DefaultNetworkName, "", nil, []*net.IPNet{nCDN})
 				fakeOvn.controller.zone = node1Name
 				fakeOvn.eIPController.zone = node1Name
-				secConInfo, ok := fakeOvn.secondaryControllers[networkName1]
+				secConInfo, ok := fakeOvn.userDefinedNetworkControllers[networkName1]
 				gomega.Expect(ok).To(gomega.BeTrue())
 				err = fakeOvn.eIPController.SyncLocalNodeZonesCache()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())

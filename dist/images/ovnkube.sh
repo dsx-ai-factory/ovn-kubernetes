@@ -356,6 +356,8 @@ ovn_network_segmentation_enable=${OVN_NETWORK_SEGMENTATION_ENABLE:=false}
 ovn_pre_conf_udn_addr_enable=${OVN_PRE_CONF_UDN_ADDR_ENABLE:=false}
 #OVN_NROUTE_ADVERTISEMENTS_ENABLE - enable route advertisements for ovn-kubernetes
 ovn_route_advertisements_enable=${OVN_ROUTE_ADVERTISEMENTS_ENABLE:=false}
+#OVN_ADVERTISED_UDN_ISOLATION_MODE - pod network isolation between advertised UDN networks.
+ovn_advertised_udn_isolation_mode=${OVN_ADVERTISED_UDN_ISOLATION_MODE:=strict}
 ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
 ovn_netflow_targets=${OVN_NETFLOW_TARGETS:-}
 ovn_sflow_targets=${OVN_SFLOW_TARGETS:-}
@@ -523,6 +525,19 @@ wait_for_event() {
   done
 }
 
+# wait_ovnkube_controller_with_node_done - Wait for ovnkube-controller-with-node process to complete
+# Checks if the ovnkube-controller-with-node process is running by looking for its PID file.
+# If the PID file exists, waits for that process to finish before continuing.
+# If the PID file doesnt exist, it means the process has already exited.
+wait_ovnkube_controller_with_node_done() {
+  local pid_file=${OVN_RUNDIR}/ovnkube-controller-with-node.pid
+   if [[ -f ${pid_file} ]]; then
+     echo "info: waiting on ovnkube-controller-with-node process to end"
+     wait $(cat $pid_file)
+     echo "info: done waiting for ovn-controller-with-node to end"
+  fi
+}
+
 # The ovnkube-db kubernetes service must be populated with OVN DB service endpoints
 # before various OVN K8s containers can come up. This function checks for that.
 # If OVN dbs are configured to listen only on unix sockets, then there will not be
@@ -605,6 +620,36 @@ ovs_ready() {
     return 1
   done
   return 0
+}
+
+# get_bridge_name_for_physnet - Extract OVS bridge name for a given OVN physical network
+# Takes an OVN network name for physical networks (physnet) and returns the corresponding
+# OVS bridge name from the ovn-bridge-mappings configuration.
+# Return empty string if not found.
+get_bridge_name_for_physnet() {
+      local physnet="$1"
+      local mappings
+      mappings=$(ovs-vsctl --if-exists get open_vswitch . external_ids:ovn-bridge-mappings)
+      # Extract bridge name after physnet: and before next comma (or end)
+      # regex matches zero or more non-comma characters
+      # cut on colon and return field number 2
+      echo "$mappings" | tr -d "\"" | grep -o "$physnet:[^,]*" | cut -d: -f2
+}
+
+# Adds drop flows for GARPs on patch port to br-int for specified bridge.
+add_garp_drop_flow() {
+    local bridge="$1"
+    local cookie="0x0305"
+    local priority="498"
+    # if bridge exists, and the patch port is created, we expect to add at least one flow to a patch port ending in to-br-int.
+    # FIXME: can we generate the exact name. Its possible we add these flows to the incorrect port when selecting on substring
+    for port_name in $(ovs-vsctl list-ports $bridge); do
+        if [[ "$port_name" == *to-br-int ]]; then
+            local of_port=$(ovs-vsctl get interface $port_name ofport)
+            ovs-ofctl add-flow $bridge "cookie=$cookie,table=0,priority=$priority,in_port=$of_port,arp,arp_op=1,actions=drop" > /dev/null
+            break
+        fi
+    done
 }
 
 # Verify that the process is running either by checking for the PID in `ps` output
@@ -1403,6 +1448,11 @@ ovn-master() {
   fi
   echo "route_advertisements_enabled_flag=${route_advertisements_enabled_flag}"
 
+  advertised_udn_isolation_flag=
+  if [[ -n ${ovn_advertised_udn_isolation_mode} ]]; then
+      advertised_udn_isolation_flag="--advertised-udn-isolation-mode=${ovn_advertised_udn_isolation_mode}"
+  fi
+
   egressservice_enabled_flag=
   if [[ ${ovn_egressservice_enable} == "true" ]]; then
 	  egressservice_enabled_flag="--enable-egress-service"
@@ -1572,6 +1622,7 @@ ovn-master() {
 
   /usr/bin/ovnkube --init-master ${K8S_NODE} \
     ${admin_pbr_enabled_flag} \
+    ${advertised_udn_isolation_flag} \
     ${anp_enabled_flag} \
     ${cluster_subnets_mac_binding_aging_option} \
     ${ctinv_flows_disable_flag} \
@@ -1804,6 +1855,12 @@ ovnkube-controller() {
   fi
   echo "route_advertisements_enabled_flag=${route_advertisements_enabled_flag}"
 
+  advertised_udn_isolation_flag=
+  if [[ -n ${ovn_advertised_udn_isolation_mode} ]]; then
+      advertised_udn_isolation_flag="--advertised-udn-isolation-mode=${ovn_advertised_udn_isolation_mode}"
+  fi
+  echo "advertised_udn_isolation_flag=${advertised_udn_isolation_flag}"
+
   egressservice_enabled_flag=
   if [[ ${ovn_egressservice_enable} == "true" ]]; then
 	  egressservice_enabled_flag="--enable-egress-service"
@@ -1956,6 +2013,7 @@ ovnkube-controller() {
     ${network_segmentation_enabled_flag} \
     ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
+    ${advertised_udn_isolation_flag} \
     ${ovn_acl_logging_rate_limit_flag} \
     ${ovn_dbs} \
     ${ovn_enable_svc_template_support_flag} \
@@ -1999,7 +2057,10 @@ ovnkube-controller() {
 }
 
 ovnkube-controller-with-node() {
-  trap 'kill $(jobs -p) ; rm -f /etc/cni/net.d/10-ovn-kubernetes.conf ; exit 0' TERM
+  # send sig term to background job (ovnkube-node process), remove CNI conf and resume background job until it ends.
+  # currently we the process to background, therefore wait until that process removes its pid file on exit.
+  # if the pid file doesnt exist, we exit immediately.
+  trap 'kill $(jobs -p) ; rm -f /etc/cni/net.d/10-ovn-kubernetes.conf ; wait_ovnkube_controller_with_node_done; exit 0' TERM
   check_ovn_daemonset_version "1.1.0"
   rm -f ${OVN_RUNDIR}/ovnkube-controller-with-node.pid
 
@@ -2036,6 +2097,23 @@ ovnkube-controller-with-node() {
       echo "=============== ovn-node - (create ovn firewall zone)"
       create_ovn_firewall_zone
       ovnkube_firewalld_opts="--admin-firewalld-zonename=${ovnkube_admin_firewalld_zone}"
+    fi
+  fi
+
+  # start temp work around
+  # remove when https://issues.redhat.com/browse/FDP-1537 is avilable
+  if [[ ${ovnkube_node_mode} == "full" && ${ovn_enable_interconnect} == "true" && ${ovn_egressip_enable} == "true" ]]; then
+    echo "=============== ovnkube-controller-with-node - (add GARP drop flows if external bridge exists)"
+    # bridge may not yet exist
+    local bridge_name="$(get_bridge_name_for_physnet 'physnet')"
+    if [[ "$bridge_name" != "" ]]; then
+      echo "=============== ovnkube-controller-with-node - found bridge mapping for physnet: $bridge_name"
+      # nothing to do if the external bridge isn't created.
+      if ovs-vsctl br-exists $bridge_name; then
+        echo "=============== ovnkube-controller-with-node - found bridge $bridge_name"
+        add_garp_drop_flow "$bridge_name"
+        echo "=============== ovnkube-controller-with-node - (finished adding GARP drop flows)"
+      fi
     fi
   fi
 
@@ -2176,6 +2254,12 @@ ovnkube-controller-with-node() {
 	  route_advertisements_enabled_flag="--enable-route-advertisements"
   fi
   echo "route_advertisements_enabled_flag=${route_advertisements_enabled_flag}"
+
+  advertised_udn_isolation_flag=
+  if [[ -n ${ovn_advertised_udn_isolation_mode} ]]; then
+      advertised_udn_isolation_flag="--advertised-udn-isolation-mode=${ovn_advertised_udn_isolation_mode}"
+  fi
+  echo "advertised_udn_isolation_flag=${advertised_udn_isolation_flag}"
 
   egressservice_enabled_flag=
   if [[ ${ovn_egressservice_enable} == "true" ]]; then
@@ -2548,6 +2632,7 @@ ovnkube-controller-with-node() {
     ${network_segmentation_enabled_flag} \
     ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
+    ${advertised_udn_isolation_flag} \
     ${netflow_targets} \
     ${ofctrl_wait_before_clear} \
     ${ovn_acl_logging_rate_limit_flag} \
@@ -2738,6 +2823,11 @@ ovn-cluster-manager() {
   fi
   echo "route_advertisements_enabled_flag=${route_advertisements_enabled_flag}"
 
+  advertised_udn_isolation_flag=
+  if [[ -n ${ovn_advertised_udn_isolation_mode} ]]; then
+      advertised_udn_isolation_flag="--advertised-udn-isolation-mode=${ovn_advertised_udn_isolation_mode}"
+  fi
+
   persistent_ips_enabled_flag=
   if [[ ${ovn_enable_persistent_ips} == "true" ]]; then
 	  persistent_ips_enabled_flag="--enable-persistent-ips"
@@ -2821,6 +2911,7 @@ ovn-cluster-manager() {
     ${network_segmentation_enabled_flag} \
     ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
+    ${advertised_udn_isolation_flag} \
     ${persistent_ips_enabled_flag} \
     ${ovnkube_enable_interconnect_flag} \
     ${ovnkube_enable_multi_external_gateway_flag} \
@@ -3159,6 +3250,11 @@ ovn-node() {
 	  route_advertisements_enabled_flag="--enable-route-advertisements"
   fi
 
+  advertised_udn_isolation_flag=
+  if [[ -n ${ovn_advertised_udn_isolation_mode} ]]; then
+      advertised_udn_isolation_flag="--advertised-udn-isolation-mode=${ovn_advertised_udn_isolation_mode}"
+  fi
+
   netflow_targets=
   if [[ -n ${ovn_netflow_targets} ]]; then
       netflow_targets="--netflow-targets ${ovn_netflow_targets}"
@@ -3490,6 +3586,7 @@ ovn-node() {
         ${network_segmentation_enabled_flag} \
         ${pre_conf_udn_addr_enable_flag} \
         ${route_advertisements_enabled_flag} \
+        ${advertised_udn_isolation_flag} \
         ${netflow_targets} \
         ${northd_node_selector_label_flag} \
         ${ofctrl_wait_before_clear} \

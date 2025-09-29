@@ -10,10 +10,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -273,7 +276,7 @@ func allocatePodAnnotationWithRollback(
 	err error) {
 
 	nadName := types.DefaultNetworkName
-	if netInfo.IsSecondary() {
+	if netInfo.IsUserDefinedNetwork() {
 		nadName = util.GetNADName(network.Namespace, network.Name)
 	}
 	podDesc := fmt.Sprintf("%s/%s/%s", nadName, pod.Namespace, pod.Name)
@@ -309,6 +312,7 @@ func allocatePodAnnotationWithRollback(
 	}()
 
 	podAnnotation, _ = util.UnmarshalPodAnnotation(pod.Annotations, nadName)
+	isNetworkAllocated := podAnnotation != nil
 	if podAnnotation == nil {
 		podAnnotation = &util.PodAnnotation{}
 	}
@@ -393,7 +397,7 @@ func allocatePodAnnotationWithRollback(
 
 	if hasIPAM && !skipIPAM {
 		if len(tentative.IPs) > 0 {
-			if err = ipAllocator.AllocateIPs(tentative.IPs); err != nil && !ip.IsErrAllocated(err) {
+			if err = ipAllocator.AllocateIPs(tentative.IPs); err != nil && !shouldSkipAllocateIPsError(err, isNetworkAllocated, ipamClaim) {
 				err = fmt.Errorf("failed to ensure requested or annotated IPs %v for %s: %w",
 					util.StringSlice(tentative.IPs), podDesc, err)
 				if !reallocateOnNonStaticIPRequest {
@@ -404,7 +408,7 @@ func allocatePodAnnotationWithRollback(
 				tentative.IPs = nil
 			}
 
-			if err == nil && !hasIPAMClaim { // if we have persistentIPs, we should *not* release them on rollback
+			if err == nil && (!hasIPAMClaim || !isNetworkAllocated) {
 				// copy the IPs that would need to be released
 				releaseIPs = util.CopyIPNets(tentative.IPs)
 			}
@@ -439,7 +443,7 @@ func allocatePodAnnotationWithRollback(
 		}
 
 		// handle routes & gateways
-		err = util.AddRoutesGatewayIP(netInfo, node, pod, tentative, network)
+		err = AddRoutesGatewayIP(netInfo, node, pod, tentative, network)
 		if err != nil {
 			return
 		}
@@ -463,4 +467,268 @@ func allocatePodAnnotationWithRollback(
 	}
 
 	return
+}
+
+func joinSubnetToRoute(netinfo util.NetInfo, isIPv6 bool, gatewayIP net.IP) util.PodRoute {
+	joinSubnet := netinfo.JoinSubnetV4()
+	if isIPv6 {
+		joinSubnet = netinfo.JoinSubnetV6()
+	}
+	return util.PodRoute{
+		Dest:    joinSubnet,
+		NextHop: gatewayIP,
+	}
+}
+
+func serviceCIDRToRoute(isIPv6 bool, gatewayIP net.IP) []util.PodRoute {
+	var podRoutes []util.PodRoute
+	for _, serviceSubnet := range config.Kubernetes.ServiceCIDRs {
+		if isIPv6 == utilnet.IsIPv6CIDR(serviceSubnet) {
+			podRoutes = append(podRoutes, util.PodRoute{
+				Dest:    serviceSubnet,
+				NextHop: gatewayIP,
+			})
+		}
+	}
+	return podRoutes
+}
+
+func additionalSubnetsToRoutes(netinfo util.NetInfo, isIPv6 bool, gatewayIP net.IP) []util.PodRoute {
+	podRoutes := []util.PodRoute{}
+	for _, subnet := range netinfo.NADRoutes() {
+		if isIPv6 == utilnet.IsIPv6CIDR(subnet) {
+			podRoutes = append(podRoutes, util.PodRoute{
+				Dest:    subnet,
+				NextHop: gatewayIP,
+			})
+		}
+	}
+	return podRoutes
+}
+
+func hairpinMasqueradeIPToRoute(isIPv6 bool, gatewayIP net.IP) util.PodRoute {
+	ip := config.Gateway.MasqueradeIPs.V4OVNServiceHairpinMasqueradeIP
+	if isIPv6 {
+		ip = config.Gateway.MasqueradeIPs.V6OVNServiceHairpinMasqueradeIP
+	}
+	return util.PodRoute{
+		Dest: &net.IPNet{
+			IP:   ip,
+			Mask: util.GetIPFullMask(ip),
+		},
+		NextHop: gatewayIP,
+	}
+}
+
+// AddRoutesGatewayIP updates the provided pod annotation for the provided pod
+// with the gateways derived from the allocated IPs
+func AddRoutesGatewayIP(
+	netinfo util.NetInfo,
+	node *corev1.Node,
+	pod *corev1.Pod,
+	podAnnotation *util.PodAnnotation,
+	network *nadapi.NetworkSelectionElement) error {
+
+	// generate the nodeSubnets from the allocated IPs
+	nodeSubnets := util.IPsToNetworkIPs(podAnnotation.IPs...)
+
+	if netinfo.IsUserDefinedNetwork() {
+		// for secondary network, see if its network-attachment's annotation has default-route key.
+		// If present, then we need to add default route for it
+		podAnnotation.Gateways = append(podAnnotation.Gateways, network.GatewayRequest...)
+		topoType := netinfo.TopologyType()
+		switch topoType {
+		case types.LocalnetTopology:
+			for _, podIfAddr := range podAnnotation.IPs {
+				var gatewayIP net.IP
+				isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
+				if netinfo.Gateways() != "" {
+					gatewayIP = net.ParseIP(netinfo.Gateways())
+					if utilnet.IsIPv6(gatewayIP) != isIPv6 {
+						return fmt.Errorf("no %s gateway IP value available for network %s", util.IPFamilyName(isIPv6),
+							netinfo.GetNetworkName())
+					}
+				}
+				if gatewayIP == nil {
+					nodeSubnet, err := util.MatchFirstIPNetFamily(isIPv6, nodeSubnets)
+					if err != nil {
+						return err
+					}
+					gatewayIPnet := netinfo.GetNodeGatewayIP(nodeSubnet)
+					gatewayIP = gatewayIPnet.IP
+				}
+				podAnnotation.Routes = append(podAnnotation.Routes, additionalSubnetsToRoutes(netinfo, isIPv6, gatewayIP)...)
+				// route for directly connected subnets, needed for VM sidecar
+				for _, clusterSubnet := range netinfo.Subnets() {
+					if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
+						podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
+							Dest:    clusterSubnet.CIDR,
+							NextHop: gatewayIP,
+						})
+					}
+				}
+			}
+			return nil
+		case types.Layer2Topology:
+			for _, podIfAddr := range podAnnotation.IPs {
+				isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
+				nodeSubnet, err := util.MatchFirstIPNetFamily(isIPv6, nodeSubnets)
+				if err != nil {
+					return err
+				}
+				gatewayIPnet := netinfo.GetNodeGatewayIP(nodeSubnet)
+				podAnnotation.Routes = append(podAnnotation.Routes, additionalSubnetsToRoutes(netinfo, isIPv6, gatewayIPnet.IP)...)
+				// route for directly connected subnets, needed for VM sidecar
+				for _, clusterSubnet := range netinfo.Subnets() {
+					if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
+						podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
+							Dest:    clusterSubnet.CIDR,
+							NextHop: gatewayIPnet.IP,
+						})
+					}
+				}
+				if !util.IsNetworkSegmentationSupportEnabled() || !netinfo.IsPrimaryNetwork() {
+					continue
+				}
+				// Ensure default service network traffic always goes to OVN
+				podAnnotation.Routes = append(podAnnotation.Routes, serviceCIDRToRoute(isIPv6, gatewayIPnet.IP)...)
+				// Ensure UDN join subnet traffic always goes to UDN LSP
+				podAnnotation.Routes = append(podAnnotation.Routes, joinSubnetToRoute(netinfo, isIPv6, gatewayIPnet.IP))
+				if network != nil && len(network.GatewayRequest) == 0 { // if specific default route for pod was not requested then add gatewayIP
+					podAnnotation.Gateways = append(podAnnotation.Gateways, gatewayIPnet.IP)
+				}
+			}
+			// Until https://github.com/ovn-kubernetes/ovn-kubernetes/issues/4876 is fixed, it is limited to IC only
+			if config.OVNKubernetesFeature.EnableInterconnect {
+				if _, isIPv6Mode := netinfo.IPMode(); isIPv6Mode {
+					joinAddrs, err := udn.GetGWRouterIPs(node, netinfo.GetNetInfo())
+					if err != nil {
+						if util.IsAnnotationNotSetError(err) {
+							return types.NewSuppressedError(err)
+						}
+						return fmt.Errorf("failed parsing node gateway router join addresses, network %q, %w", netinfo.GetNetworkName(), err)
+					}
+					podAnnotation.GatewayIPv6LLA = util.HWAddrToIPv6LLA(util.IPAddrToHWAddr(joinAddrs[0].IP))
+				}
+			}
+			return nil
+		case types.Layer3Topology:
+			for _, podIfAddr := range podAnnotation.IPs {
+				isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
+				nodeSubnet, err := util.MatchFirstIPNetFamily(isIPv6, nodeSubnets)
+				if err != nil {
+					return err
+				}
+				gatewayIPnet := netinfo.GetNodeGatewayIP(nodeSubnet)
+				for _, clusterSubnet := range netinfo.Subnets() {
+					if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
+						podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
+							Dest:    clusterSubnet.CIDR,
+							NextHop: gatewayIPnet.IP,
+						})
+					}
+				}
+				podAnnotation.Routes = append(podAnnotation.Routes, additionalSubnetsToRoutes(netinfo, isIPv6, gatewayIPnet.IP)...)
+				if !util.IsNetworkSegmentationSupportEnabled() || !netinfo.IsPrimaryNetwork() {
+					continue
+				}
+				// Ensure default service network traffic always goes to OVN
+				podAnnotation.Routes = append(podAnnotation.Routes, serviceCIDRToRoute(isIPv6, gatewayIPnet.IP)...)
+				// Ensure UDN join subnet traffic always goes to UDN LSP
+				podAnnotation.Routes = append(podAnnotation.Routes, joinSubnetToRoute(netinfo, isIPv6, gatewayIPnet.IP))
+				if network != nil && len(network.GatewayRequest) == 0 { // if specific default route for pod was not requested then add gatewayIP
+					podAnnotation.Gateways = append(podAnnotation.Gateways, gatewayIPnet.IP)
+				}
+			}
+			return nil
+		default:
+			return fmt.Errorf("topology type %s not supported", topoType)
+		}
+	}
+
+	// if there are other network attachments for the pod, then check if those network-attachment's
+	// annotation has default-route key. If present, then we need to skip adding default route for
+	// OVN interface
+	networks, err := util.GetK8sPodAllNetworkSelections(pod)
+	if err != nil {
+		return fmt.Errorf("error while getting network attachment definition for [%s/%s]: %v",
+			pod.Namespace, pod.Name, err)
+	}
+	otherDefaultRouteV4 := false
+	otherDefaultRouteV6 := false
+	for _, network := range networks {
+		for _, gatewayRequest := range network.GatewayRequest {
+			if utilnet.IsIPv6(gatewayRequest) {
+				otherDefaultRouteV6 = true
+			} else {
+				otherDefaultRouteV4 = true
+			}
+		}
+	}
+
+	for _, podIfAddr := range podAnnotation.IPs {
+		isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
+		nodeSubnet, err := util.MatchFirstIPNetFamily(isIPv6, nodeSubnets)
+		if err != nil {
+			return err
+		}
+
+		gatewayIPnet := netinfo.GetNodeGatewayIP(nodeSubnet)
+
+		// Ensure default pod network traffic always goes to OVN
+		for _, clusterSubnet := range config.Default.ClusterSubnets {
+			if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
+				podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
+					Dest:    clusterSubnet.CIDR,
+					NextHop: gatewayIPnet.IP,
+				})
+			}
+		}
+
+		if podAnnotation.Role == types.NetworkRolePrimary {
+			// Ensure default service network traffic always goes to OVN
+			podAnnotation.Routes = append(podAnnotation.Routes, serviceCIDRToRoute(isIPv6, gatewayIPnet.IP)...)
+			// Ensure service hairpin masquerade traffic always goes to OVN
+			podAnnotation.Routes = append(podAnnotation.Routes, hairpinMasqueradeIPToRoute(isIPv6, gatewayIPnet.IP))
+			otherDefaultRoute := otherDefaultRouteV4
+			if isIPv6 {
+				otherDefaultRoute = otherDefaultRouteV6
+			}
+			if !otherDefaultRoute {
+				podAnnotation.Gateways = append(podAnnotation.Gateways, gatewayIPnet.IP)
+			}
+		}
+
+		// Ensure default join subnet traffic always goes to OVN
+		podAnnotation.Routes = append(podAnnotation.Routes, joinSubnetToRoute(netinfo, isIPv6, gatewayIPnet.IP))
+	}
+
+	return nil
+}
+
+// shouldSkipAllocateIPsError determines whether to skip/ignore IP allocation errors
+// in scenarios where IPs may already be legitimately allocated.
+// Returns false if the error is not ErrAllocated or if none of the skip conditions are met. True otherwise.
+func shouldSkipAllocateIPsError(err error, networkAllocated bool, ipamClaim *ipamclaimsapi.IPAMClaim) bool {
+	// Only skip if it's an "already allocated" error
+	if !ip.IsErrAllocated(err) {
+		return false
+	}
+
+	// If PreconfiguredUDNAddressesEnabled is disabled, always skip ErrAllocated
+	if !util.IsPreconfiguredUDNAddressesEnabled() {
+		return true
+	}
+
+	// Always skip ErrAllocated if network annotation already persisted on pod
+	if networkAllocated {
+		return true
+	}
+
+	// For persistent IP VM/Pods, if IPAMClaim already has IPs allocated, then ip already allocated, skip ErrAllocated
+	if ipamClaim != nil && len(ipamClaim.Status.IPs) > 0 {
+		return true
+	}
+
+	return false
 }

@@ -24,6 +24,7 @@ import (
 
 	ipallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	subnetipallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
+	podallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
@@ -116,7 +117,7 @@ func (bnc *BaseNetworkController) deleteStaleLogicalSwitchPorts(expectedLogicalP
 
 	// get all switches that Pod logical port would be reside on.
 	topoType := bnc.TopologyType()
-	if !bnc.IsSecondary() || topoType == ovntypes.Layer3Topology {
+	if !bnc.IsUserDefinedNetwork() || topoType == ovntypes.Layer3Topology {
 		// for default network and layer3 topology type networks, get all local zone node switches
 		nodes, err := bnc.GetLocalZoneNodes()
 		if err != nil {
@@ -453,7 +454,7 @@ func (bnc *BaseNetworkController) podExpectedInLogicalCache(pod *corev1.Pod) boo
 
 func (bnc *BaseNetworkController) getExpectedSwitchName(pod *corev1.Pod) (string, error) {
 	switchName := pod.Spec.NodeName
-	if bnc.IsSecondary() {
+	if bnc.IsUserDefinedNetwork() {
 		topoType := bnc.TopologyType()
 		switch topoType {
 		case ovntypes.Layer3Topology:
@@ -607,14 +608,14 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *corev1.Pod, nadNa
 	}
 
 	// Although we have different code to allocate the pod annotation for the
-	// default network and secondary networks, at the time of this writing they
+	// default network and user-defined networks, at the time of this writing they
 	// are functionally equivalent and the only reason to keep them separated is
-	// to make sure the secondary network code has no bugs before we switch to
+	// to make sure the UDN code has no bugs before we switch to
 	// it for the default network as well. If at all possible, keep them
 	// functionally equivalent going forward.
 	var annotationUpdated bool
-	if bnc.IsSecondary() {
-		podAnnotation, annotationUpdated, err = bnc.allocatePodAnnotationForSecondaryNetwork(pod, skipIPAM, existingLSP, nadName, network, networkRole)
+	if bnc.IsUserDefinedNetwork() {
+		podAnnotation, annotationUpdated, err = bnc.allocatePodAnnotationForUserDefinedNetwork(pod, skipIPAM, existingLSP, nadName, network, networkRole)
 	} else {
 		podAnnotation, annotationUpdated, err = bnc.allocatePodAnnotation(pod, skipIPAM, existingLSP, podDesc, nadName, network, networkRole)
 	}
@@ -645,7 +646,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *corev1.Pod, nadNa
 
 	// add external ids
 	lsp.ExternalIDs = map[string]string{"namespace": pod.Namespace, "pod": "true"}
-	if bnc.IsSecondary() {
+	if bnc.IsUserDefinedNetwork() {
 		lsp.ExternalIDs[ovntypes.NetworkExternalID] = bnc.GetNetworkName()
 		lsp.ExternalIDs[ovntypes.NADExternalID] = nadName
 		lsp.ExternalIDs[ovntypes.TopologyExternalID] = bnc.TopologyType()
@@ -786,7 +787,7 @@ func (bnc *BaseNetworkController) delLSPOps(logicalPort, switchName,
 }
 
 func (bnc *BaseNetworkController) deletePodFromNamespace(ns string, podIfAddrs []*net.IPNet, portUUID string) ([]ovsdb.Operation, error) {
-	// for secondary network, namespace may be not managed
+	// for UDN, namespace may be not managed
 	nsInfo, nsUnlock := bnc.getNamespaceLocked(ns, true)
 	if nsInfo == nil {
 		return nil, nil
@@ -1079,7 +1080,7 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *corev1.Pod, skipIPA
 		return nil, false, err
 	}
 
-	err = util.AddRoutesGatewayIP(bnc.GetNetInfo(), node, pod, podAnnotation, network)
+	err = podallocator.AddRoutesGatewayIP(bnc.GetNetInfo(), node, pod, podAnnotation, network)
 	if err != nil {
 		return nil, false, err
 	}
@@ -1098,9 +1099,9 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *corev1.Pod, skipIPA
 	return podAnnotation, true, nil
 }
 
-// allocatePodAnnotationForSecondaryNetwork and update the corresponding pod
+// allocatePodAnnotationForUserDefinedNetwork and update the corresponding pod
 // annotation.
-func (bnc *BaseNetworkController) allocatePodAnnotationForSecondaryNetwork(pod *corev1.Pod, skipIPAM bool, lsp *nbdb.LogicalSwitchPort,
+func (bnc *BaseNetworkController) allocatePodAnnotationForUserDefinedNetwork(pod *corev1.Pod, skipIPAM bool, lsp *nbdb.LogicalSwitchPort,
 	nadName string, network *nadapi.NetworkSelectionElement, networkRole string) (*util.PodAnnotation, bool, error) {
 	switchName, err := bnc.getExpectedSwitchName(pod)
 	if err != nil {
@@ -1197,7 +1198,7 @@ func (bnc *BaseNetworkController) allocatesPodAnnotation() bool {
 func (bnc *BaseNetworkController) shouldReleaseDeletedPod(pod *corev1.Pod, switchName, nad string, podIfAddrs []*net.IPNet) (bool, error) {
 	var err error
 	var isMigratedSourcePodStale bool
-	if !bnc.IsSecondary() {
+	if !bnc.IsUserDefinedNetwork() {
 		isMigratedSourcePodStale, err = kubevirt.IsMigratedSourcePodStale(bnc.watchFactory, pod)
 		if err != nil {
 			return false, err
@@ -1229,7 +1230,7 @@ func (bnc *BaseNetworkController) shouldReleaseDeletedPod(pod *corev1.Pod, switc
 		// tracked within the zone, nodeName will be empty which will force
 		// canReleasePodIPs to lookup all nodes.
 		nodeName := pod.Spec.NodeName
-		if !bnc.IsSecondary() && kubevirt.IsPodLiveMigratable(pod) {
+		if !bnc.IsUserDefinedNetwork() && kubevirt.IsPodLiveMigratable(pod) {
 			nodeName, _ = bnc.lsManager.GetSubnetName(podIfAddrs)
 		}
 
@@ -1242,7 +1243,7 @@ func (bnc *BaseNetworkController) shouldReleaseDeletedPod(pod *corev1.Pod, switc
 	}
 
 	var shouldRelease bool
-	// for secondary network IPs allocated from cluster manager, we will check
+	// for user-defined network IPs allocated from cluster manager, we will check
 	// if other pods are using the same IPs just in case we are processing
 	// events in different order than cluster manager did (best effort, there
 	// can still be issues with this)

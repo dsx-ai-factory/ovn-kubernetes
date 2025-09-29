@@ -75,7 +75,7 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 		gomega.Expect(err).ToNot(gomega.HaveOccurred())
 	})
 	ginkgo.AfterEach(func() {
-		ocInfo := fakeOvn.secondaryControllers["ovn-primary"]
+		ocInfo := fakeOvn.userDefinedNetworkControllers["ovn-primary"]
 		gomega.Expect(ocInfo).ToNot(gomega.BeNil())
 		fakeOvn.shutdown()
 	})
@@ -102,7 +102,7 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 						},
 					},
 				)
-				ocInfo := fakeOvn.secondaryControllers["ovn-primary"]
+				ocInfo := fakeOvn.userDefinedNetworkControllers["ovn-primary"]
 				gomega.Expect(ocInfo).ToNot(gomega.BeNil())
 				err := ocInfo.bnc.WatchAdminPolicyBasedRoutes()
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
@@ -172,7 +172,7 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 						},
 					},
 				)
-				ocInfo := fakeOvn.secondaryControllers["ovn-primary"]
+				ocInfo := fakeOvn.userDefinedNetworkControllers["ovn-primary"]
 				gomega.Expect(ocInfo).ToNot(gomega.BeNil())
 				err := ocInfo.bnc.WatchAdminPolicyBasedRoutes()
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
@@ -236,7 +236,7 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 						},
 					},
 				)
-				ocInfo := fakeOvn.secondaryControllers["ovn-primary"]
+				ocInfo := fakeOvn.userDefinedNetworkControllers["ovn-primary"]
 				gomega.Expect(ocInfo).ToNot(gomega.BeNil())
 				err := ocInfo.bnc.WatchAdminPolicyBasedRoutes()
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
@@ -301,7 +301,7 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 						},
 					},
 				)
-				ocInfo := fakeOvn.secondaryControllers["ovn-primary"]
+				ocInfo := fakeOvn.userDefinedNetworkControllers["ovn-primary"]
 				gomega.Expect(ocInfo).ToNot(gomega.BeNil())
 				err := ocInfo.bnc.WatchAdminPolicyBasedRoutes()
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
@@ -368,7 +368,7 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 						},
 					},
 				)
-				ocInfo := fakeOvn.secondaryControllers["ovn-primary"]
+				ocInfo := fakeOvn.userDefinedNetworkControllers["ovn-primary"]
 				gomega.Expect(ocInfo).ToNot(gomega.BeNil())
 				err := ocInfo.bnc.WatchAdminPolicyBasedRoutes()
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
@@ -428,7 +428,7 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 						},
 					},
 				)
-				ocInfo := fakeOvn.secondaryControllers["ovn-primary"]
+				ocInfo := fakeOvn.userDefinedNetworkControllers["ovn-primary"]
 				gomega.Expect(ocInfo).ToNot(gomega.BeNil())
 				err := ocInfo.bnc.WatchAdminPolicyBasedRoutes()
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())

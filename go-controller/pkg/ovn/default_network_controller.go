@@ -177,7 +177,7 @@ func newDefaultNetworkControllerCommon(
 		addressSetFactory = addressset.NewOvnAddressSetFactory(cnci.nbClient, config.IPv4Mode, config.IPv6Mode)
 	}
 
-	netInfo := networkManager.InitDefaultNetInfo()
+	defaultNetInfo := networkManager.InitDefaultNetInfo()
 	svcController, err := svccontroller.NewController(
 		cnci.client, cnci.nbClient,
 		cnci.watchFactory.ServiceCoreInformer(),
@@ -185,7 +185,7 @@ func newDefaultNetworkControllerCommon(
 		cnci.watchFactory.NodeCoreInformer(),
 		networkManager,
 		cnci.recorder,
-		netInfo,
+		defaultNetInfo,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create new service controller while creating new default network controller: %w", err)
@@ -194,7 +194,7 @@ func newDefaultNetworkControllerCommon(
 	var zoneICHandler *zoneic.ZoneInterconnectHandler
 	var zoneChassisHandler *zoneic.ZoneChassisHandler
 	if config.OVNKubernetesFeature.EnableInterconnect {
-		zoneICHandler = zoneic.NewZoneInterconnectHandler(netInfo, cnci.nbClient, cnci.sbClient, cnci.watchFactory)
+		zoneICHandler = zoneic.NewZoneInterconnectHandler(defaultNetInfo, cnci.nbClient, cnci.sbClient, cnci.watchFactory)
 		zoneChassisHandler = zoneic.NewZoneChassisHandler(cnci.sbClient)
 	}
 	apbExternalRouteController, err := apbroutecontroller.NewExternalMasterController(
@@ -212,11 +212,12 @@ func newDefaultNetworkControllerCommon(
 	if err != nil {
 		return nil, fmt.Errorf("unable to create new admin policy based external route controller while creating new default network controller :%w", err)
 	}
+
 	oc := &DefaultNetworkController{
 		BaseNetworkController: BaseNetworkController{
 			CommonNetworkControllerInfo: *cnci,
 			controllerName:              DefaultNetworkControllerName,
-			ReconcilableNetInfo:         util.NewReconcilableNetInfo(netInfo),
+			ReconcilableNetInfo:         util.NewReconcilableNetInfo(defaultNetInfo),
 			lsManager:                   lsm.NewLogicalSwitchManager(),
 			logicalPortCache:            portCache,
 			namespaces:                  make(map[string]*namespaceInfo),
@@ -343,9 +344,14 @@ func (oc *DefaultNetworkController) syncDb() error {
 	}
 
 	// NAT syncer must only be run once. It performs OVN NAT updates.
-	nadSyncer := nat.NewNATSyncer(oc.nbClient, oc.controllerName)
-	if err = nadSyncer.Sync(); err != nil {
+	natSyncer := nat.NewNATSyncer(oc.nbClient, oc.controllerName)
+	if err = natSyncer.Sync(); err != nil {
 		return fmt.Errorf("failed to sync NATs: %v", err)
+	}
+
+	// Find ACLs with legacy DBIDs and update them from secondary -> user-defined
+	if err := oc.syncUDNIsolation(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -1016,7 +1022,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 		// |                    |                   |                                                 |
 		// |--------------------+-------------------+-------------------------------------------------+
 		newNodeIsLocalZoneNode := h.oc.isLocalZoneNode(newNode)
-		zoneClusterChanged := h.oc.nodeZoneClusterChanged(oldNode, newNode, newNodeIsLocalZoneNode, types.DefaultNetworkName)
+		zoneClusterChanged := h.oc.nodeZoneClusterChanged(oldNode, newNode)
 		nodeSubnetChange := nodeSubnetChanged(oldNode, newNode, types.DefaultNetworkName)
 		nodeEncapIPsChanged := util.NodeEncapIPsChanged(oldNode, newNode)
 		nodePrimaryDPUHostAddrChanged := util.NodePrimaryDPUHostAddrAnnotationChanged(oldNode, newNode)
@@ -1148,8 +1154,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 		}
 
 		_, syncEIPNodeFailed := h.oc.syncEIPNodeFailed.Load(newNode.Name)
-		// update only if the GR join IP changed for default network
-		if syncEIPNodeFailed || joinCIDRChanged(oldNode, newNode, h.oc.GetNetworkName()) {
+		if syncEIPNodeFailed {
 			err := h.oc.eIPC.addEgressNode(newNode)
 			if err != nil {
 				h.oc.syncEIPNodeFailed.Store(newNode.Name, true)

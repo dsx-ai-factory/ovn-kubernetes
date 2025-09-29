@@ -234,10 +234,6 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			})
 		}
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external-ids:vm-patch-port",
-			Output: "",
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ip route replace table 7 172.16.1.0/24 via 10.1.1.1 dev ovn-k8s-mp0",
 			Output: "0",
 		})
@@ -294,6 +290,8 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		rm := routemanager.NewController()
 		netInfo := &multinetworkmocks.NetInfo{}
 		netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", nodeName).Return(nil)
+		netInfo.On("GetNodeGatewayIP", hostSubnets[0]).Return(util.GetNodeGatewayIfAddr(hostSubnets[0]))
+		netInfo.On("GetNodeManagementIP", hostSubnets[0]).Return(util.GetNodeManagementIfAddr(hostSubnets[0]))
 		mp, err := managementport.NewManagementPortController(&existingNode, hostSubnets, "", "", rm, netInfo)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -700,10 +698,6 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 get interface " + hostRep + " ofport",
 			Output: "9",
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external-ids:vm-patch-port",
-			Output: "",
 		})
 		// cleanup flows
 		fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -1146,10 +1140,6 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 			Output: "192.168.1.10",
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external-ids:vm-patch-port",
-			Output: "",
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ip route replace table 7 172.16.1.0/24 via 10.1.1.1 dev ovn-k8s-mp0",
 			Output: "0",
 		})
@@ -1224,6 +1214,8 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		rm := routemanager.NewController()
 		netInfo := &multinetworkmocks.NetInfo{}
 		netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", nodeName).Return(nil)
+		netInfo.On("GetNodeGatewayIP", hostSubnets[0]).Return(util.GetNodeGatewayIfAddr(hostSubnets[0]))
+		netInfo.On("GetNodeManagementIP", hostSubnets[0]).Return(util.GetNodeManagementIfAddr(hostSubnets[0]))
 		mp, err := managementport.NewManagementPortController(&existingNode, hostSubnets, "", "", rm, netInfo)
 		Expect(err).NotTo(HaveOccurred())
 

@@ -159,7 +159,7 @@ func (ncc *networkClusterController) hasNodeAllocation() bool {
 		return config.OVNKubernetesFeature.EnableInterconnect
 	default:
 		// we need to allocate network IDs and subnets
-		return !ncc.IsSecondary()
+		return !ncc.IsUserDefinedNetwork()
 	}
 }
 
@@ -484,10 +484,10 @@ func (ncc *networkClusterController) newRetryFramework(objectType reflect.Type, 
 	return objretry.NewRetryFramework(ncc.stopChan, ncc.wg, ncc.watchFactory, resourceHandler)
 }
 
-// Cleanup the subnet annotations from the node for the secondary networks
+// Cleanup the subnet annotations from the node for the User Defined Networks
 func (ncc *networkClusterController) Cleanup() error {
-	if !ncc.IsSecondary() {
-		return fmt.Errorf("default network can't be cleaned up")
+	if !ncc.IsUserDefinedNetwork() {
+		return fmt.Errorf("default network cannot be cleaned up")
 	}
 
 	if ncc.hasNodeAllocation() {
@@ -813,22 +813,22 @@ func newIPAllocatorForNetwork(netInfo util.NetInfo) (subnet.Allocator, error) {
 
 	subnets := netInfo.Subnets()
 	ipNets := make([]*net.IPNet, 0, len(subnets))
-	excludeSubnets := netInfo.ExcludeSubnets()
+	excludeSubnets := append(netInfo.ExcludeSubnets(), netInfo.InfrastructureSubnets()...)
+
 	for _, subnet := range subnets {
 		ipNets = append(ipNets, subnet.CIDR)
-		if isLayer2UserDefinedPrimaryNetwork(netInfo) {
-			excludeSubnets = append(
-				excludeSubnets,
-				autoExcludeCIDRs(subnet.CIDR)...,
-			)
-		}
 	}
 
-	if err := ipAllocator.AddOrUpdateSubnet(
-		netInfo.GetNetworkName(),
-		ipNets,
-		excludeSubnets...,
-	); err != nil {
+	if isLayer2UserDefinedPrimaryNetwork(netInfo) && len(netInfo.InfrastructureSubnets()) == 0 {
+		excludeSubnets = append(excludeSubnets, infrastructureExcludeCIDRs(netInfo)...)
+	}
+
+	if err := ipAllocator.AddOrUpdateSubnet(subnet.SubnetConfig{
+		Name:            netInfo.GetNetworkName(),
+		Subnets:         ipNets,
+		ReservedSubnets: netInfo.ReservedSubnets(),
+		ExcludeSubnets:  excludeSubnets,
+	}); err != nil {
 		return nil, err
 	}
 
@@ -853,13 +853,19 @@ func isLayer2UserDefinedPrimaryNetwork(netInfo util.NetInfo) bool {
 	return netInfo.IsPrimaryNetwork() && netInfo.TopologyType() == types.Layer2Topology
 }
 
-func autoExcludeCIDRs(subnet *net.IPNet) []*net.IPNet {
-	gwIP := util.GetNodeGatewayIfAddr(subnet).IP
-	mgmtPortIP := util.GetNodeManagementIfAddr(subnet).IP
-	return []*net.IPNet{
-		{IP: gwIP, Mask: util.GetIPFullMask(gwIP)},
-		{IP: mgmtPortIP, Mask: util.GetIPFullMask(mgmtPortIP)},
+// infrastructureExcludeCIDRs returns a list of IPs that should be excluded from IP allocation (gateway and management port IPs)
+func infrastructureExcludeCIDRs(netInfo util.NetInfo) []*net.IPNet {
+	var excludeCIDRs []*net.IPNet
+
+	for _, subnet := range netInfo.Subnets() {
+		gwIP := netInfo.GetNodeGatewayIP(subnet.CIDR).IP
+		mgmtPortIP := netInfo.GetNodeManagementIP(subnet.CIDR).IP
+		excludeCIDRs = append(excludeCIDRs,
+			&net.IPNet{IP: gwIP, Mask: util.GetIPFullMask(gwIP)},
+			&net.IPNet{IP: mgmtPortIP, Mask: util.GetIPFullMask(mgmtPortIP)},
+		)
 	}
+	return excludeCIDRs
 }
 
 func (ncc *networkClusterController) GetNetworkInterConnectInfo() *networkmanager.NetworkInterConnectInfo {

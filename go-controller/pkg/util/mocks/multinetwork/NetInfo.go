@@ -16,6 +16,44 @@ type NetInfo struct {
 	mock.Mock
 }
 
+func (_m *NetInfo) GetNodeGatewayIP(hostSubnet *net.IPNet) *net.IPNet {
+	ret := _m.Called(hostSubnet)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetNodeGatewayIP")
+	}
+
+	var r0 *net.IPNet
+	if rf, ok := ret.Get(0).(func(*net.IPNet) *net.IPNet); ok {
+		r0 = rf(hostSubnet)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*net.IPNet)
+		}
+	}
+
+	return r0
+}
+
+func (_m *NetInfo) GetNodeManagementIP(hostSubnet *net.IPNet) *net.IPNet {
+	ret := _m.Called(hostSubnet)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetNodeManagementIP")
+	}
+
+	var r0 *net.IPNet
+	if rf, ok := ret.Get(0).(func(*net.IPNet) *net.IPNet); ok {
+		r0 = rf(hostSubnet)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*net.IPNet)
+		}
+	}
+
+	return r0
+}
+
 // AllowsPersistentIPs provides a mock function with given fields:
 func (_m *NetInfo) AllowsPersistentIPs() bool {
 	ret := _m.Called()
@@ -96,6 +134,26 @@ func (_m *NetInfo) GatewayMAC() string {
 	return r0
 }
 
+// InfrastructureSubnets provides a mock function with given fields:
+func (_m *NetInfo) InfrastructureSubnets() []*net.IPNet {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for InfrastructureSubnets")
+	}
+
+	var r0 []*net.IPNet
+	if rf, ok := ret.Get(0).(func() []*net.IPNet); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*net.IPNet)
+		}
+	}
+
+	return r0
+}
+
 // Gateways provides a mock function with given fields:
 func (_m *NetInfo) Gateways() string {
 	ret := _m.Called()
@@ -127,6 +185,26 @@ func (_m *NetInfo) GetAnnotationKey(_a0 string) string {
 		r0 = rf(_a0)
 	} else {
 		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
+// ReservedSubnets provides a mock function with given fields:
+func (_m *NetInfo) ReservedSubnets() []*net.IPNet {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for ReservedSubnets")
+	}
+
+	var r0 []*net.IPNet
+	if rf, ok := ret.Get(0).(func() []*net.IPNet); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*net.IPNet)
+		}
 	}
 
 	return r0
@@ -627,11 +705,11 @@ func (_m *NetInfo) IsPrimaryNetwork() bool {
 }
 
 // IsSecondary provides a mock function with given fields:
-func (_m *NetInfo) IsSecondary() bool {
+func (_m *NetInfo) IsUserDefinedNetwork() bool {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
-		panic("no return value specified for IsSecondary")
+		panic("no return value specified for IsUserDefinedNetwork")
 	}
 
 	var r0 bool

@@ -108,12 +108,6 @@ func (mp *managementPortRepresentor) create() error {
 		return err
 	}
 
-	/* TBD-merge in old (mp *managementPort) Create() to update obsolete portMACaddress annotation, no longer needed
-	if err := util.SetNodeManagementPortMACAddress(nodeAnnotator, macAddr); err != nil {
-		return nil, err
-	}
-	*/
-
 	mp.link = link
 	return nil
 }

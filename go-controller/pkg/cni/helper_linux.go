@@ -422,8 +422,8 @@ func getPfEncapIP(deviceID string) (string, error) {
 // ValidateOVSInterfaceConfiguration checks if the OVS port is configured correctly
 func ValidateOVSInterfaceConfiguration(namespace, podName, hostIfaceName string, ifInfo *PodInterfaceInfo) error {
 	ifaceID := util.GetIfaceId(namespace, podName)
-	if ifInfo.NetName != types.DefaultNetworkName { // secondary network
-		ifaceID = util.GetSecondaryNetworkIfaceId(namespace, podName, ifInfo.NADName)
+	if ifInfo.NetName != types.DefaultNetworkName { // UDN network
+		ifaceID = util.GetUDNIfaceId(namespace, podName, ifInfo.NADName)
 	}
 	// if the specified port was created for other Pod/NAD, return error
 	extIds, err := ovsFind("Interface", "external_ids", "name="+hostIfaceName)
@@ -451,7 +451,7 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 
 	ifaceID := util.GetIfaceId(namespace, podName)
 	if ifInfo.NetName != types.DefaultNetworkName {
-		ifaceID = util.GetSecondaryNetworkIfaceId(namespace, podName, ifInfo.NADName)
+		ifaceID = util.GetUDNIfaceId(namespace, podName, ifInfo.NADName)
 	}
 
 	initialPodUID := ifInfo.PodUID

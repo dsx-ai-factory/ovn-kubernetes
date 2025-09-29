@@ -112,9 +112,9 @@ var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
 						Items: []nettypes.NetworkAttachmentDefinition{*nad},
 					},
 				)
-				ocInfo := fakeOvn.secondaryControllers["skip-ipam-nad"]
+				ocInfo := fakeOvn.userDefinedNetworkControllers["skip-ipam-nad"]
 				subnet := ocInfo.bnc.Subnets()[0]
-				err = ocInfo.bnc.lsManager.AddOrUpdateSwitch(ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch), []*net.IPNet{subnet.CIDR})
+				err = ocInfo.bnc.lsManager.AddOrUpdateSwitch(ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch), []*net.IPNet{subnet.CIDR}, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = ocInfo.bnc.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -178,9 +178,9 @@ var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
 						Items: []nettypes.NetworkAttachmentDefinition{*nad},
 					},
 				)
-				ocInfo := fakeOvn.secondaryControllers["skip-ipam-nad"]
+				ocInfo := fakeOvn.userDefinedNetworkControllers["skip-ipam-nad"]
 				subnet := ocInfo.bnc.Subnets()[0]
-				err = ocInfo.bnc.lsManager.AddOrUpdateSwitch(ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch), []*net.IPNet{subnet.CIDR})
+				err = ocInfo.bnc.lsManager.AddOrUpdateSwitch(ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch), []*net.IPNet{subnet.CIDR}, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = ocInfo.bnc.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())

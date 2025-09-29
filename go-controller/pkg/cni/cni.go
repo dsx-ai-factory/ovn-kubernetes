@@ -249,9 +249,6 @@ func (pr *PodRequest) cmdAddWithGetCNIResultFunc(
 
 	response := &Response{KubeAuth: kubeAuth}
 	if !config.UnprivilegedMode {
-		//TODO: There is nothing technical to run this at unprivileged mode but
-		//      we will tackle that later on.
-
 		netName := pr.netName
 		if pr.CNIConf.PhysicalNetworkName != "" {
 			netName = pr.CNIConf.PhysicalNetworkName

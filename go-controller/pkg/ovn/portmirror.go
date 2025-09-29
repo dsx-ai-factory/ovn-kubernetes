@@ -274,7 +274,7 @@ func (bnc *BaseNetworkController) handlePortMirrorSourcePodAdd(pm *util.PortMirr
 			}
 
 			// for default network controller need to change the nadname to default
-			if !bnc.IsSecondary() {
+			if !bnc.IsUserDefinedNetwork() {
 				nadName = ovntypes.DefaultNetworkName
 			}
 			// check if the network for pod is established
@@ -329,7 +329,7 @@ func (bnc *BaseNetworkController) handleSourcePodSelectors(pm *util.PortMirror) 
 		// default behaviour is to mirror interfaces on default/primaty nad for the pods selected by this source podSelector.
 		// so, pod handler should be registered for only default network controller.
 		var foundNad = false
-		if len(sInfo.PodNetAttachDefMirrorInfo) == 0 && !bnc.IsSecondary() {
+		if len(sInfo.PodNetAttachDefMirrorInfo) == 0 && !bnc.IsUserDefinedNetwork() {
 			foundNad = true
 		}
 

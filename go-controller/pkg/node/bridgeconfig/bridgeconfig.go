@@ -22,15 +22,16 @@ import (
 // BridgeUDNConfiguration holds the patchport and ctMark
 // information for a given network
 type BridgeUDNConfiguration struct {
-	PatchPort   string
-	OfPortPatch string
-	MasqCTMark  string
-	PktMark     string
-	V4MasqIPs   *udn.MasqueradeIPs
-	V6MasqIPs   *udn.MasqueradeIPs
-	Subnets     []config.CIDRNetworkEntry
-	NodeSubnets []*net.IPNet
-	Advertised  atomic.Bool
+	PatchPort     string
+	OfPortPatch   string
+	MasqCTMark    string
+	PktMark       string
+	V4MasqIPs     *udn.MasqueradeIPs
+	V6MasqIPs     *udn.MasqueradeIPs
+	Subnets       []config.CIDRNetworkEntry
+	NodeSubnets   []*net.IPNet
+	Advertised    atomic.Bool
+	ManagementIPs []*net.IPNet
 }
 
 func (netConfig *BridgeUDNConfiguration) ShallowCopy() *BridgeUDNConfiguration {
@@ -82,11 +83,8 @@ type BridgeConfiguration struct {
 	netConfig  map[string]*BridgeUDNConfiguration
 	eipMarkIPs *egressip.MarkIPsCache
 
-	ofPortVMPatch string
-	gwNextHops    []net.IP
-
-	// list of localnet patch ports
-	localnetPatchPorts *sync.Map
+	gwNextHops []net.IP
+	dropGARP   bool
 }
 
 func NewBridgeConfiguration(intfName, nodeName,
@@ -103,16 +101,28 @@ func NewBridgeConfiguration(intfName, nodeName,
 		Subnets:     config.Default.ClusterSubnets,
 		NodeSubnets: nodeSubnets,
 	}
+	for _, subnet := range nodeSubnets {
+		defaultNetConfig.ManagementIPs = append(defaultNetConfig.ManagementIPs, util.GetNodeManagementIfAddr(subnet))
+	}
 	res := BridgeConfiguration{
-		localnetPatchPorts: &sync.Map{},
-		gwNextHops:         gwNextHops,
-		nodeName:           nodeName,
+		gwNextHops: gwNextHops,
+		nodeName:   nodeName,
 		netConfig: map[string]*BridgeUDNConfiguration{
 			types.DefaultNetworkName: defaultNetConfig,
 		},
 		eipMarkIPs: egressip.NewMarkIPsCache(),
 	}
 	res.netConfig[types.DefaultNetworkName].Advertised.Store(advertised)
+
+	// temp workaround for https://issues.redhat.com/browse/FDP-1537
+	// we need to ensure we continue dropping GARPs for any new bridge config if the run mode is ovnkube controller + ovnkube node + IC + single zone node
+	// FIXME: only add if run mode is ovnkube controller + node in single process
+	if config.OVNKubernetesFeature.EnableEgressIP && config.OVNKubernetesFeature.EnableInterconnect && config.OvnKubeNode.Mode == types.NodeModeFull {
+		// drop by default - set to false later when ovnkube controller has sync'd and changes propagated to OVN southbound database
+		// we should also match on run mode here to ensure ovnkube controller + ovnkube node are running in the same process
+		res.dropGARP = true
+	}
+	// end temp work around
 
 	if config.Gateway.GatewayAcceleratedInterface != "" {
 		// Try to get representor for the specified gateway device.
@@ -240,6 +250,10 @@ func (b *BridgeConfiguration) GetGatewayIface() string {
 	return b.gwIface
 }
 
+func (b *BridgeConfiguration) GetGatewayIfaceRep() string {
+	return b.gwIfaceRep
+}
+
 // UpdateInterfaceIPAddresses sets and returns the bridge's current ips
 func (b *BridgeConfiguration) UpdateInterfaceIPAddresses(node *corev1.Node) ([]*net.IPNet, error) {
 	b.mutex.Lock()
@@ -275,22 +289,18 @@ func (b *BridgeConfiguration) UpdateInterfaceIPAddresses(node *corev1.Node) ([]*
 
 // GetPortConfigurations returns a slice of Network port configurations along with the
 // uplinkName and physical port's ofport value
-func (b *BridgeConfiguration) GetPortConfigurations() ([]*BridgeUDNConfiguration, string, string, string, string, string, *sync.Map) {
+func (b *BridgeConfiguration) GetPortConfigurations() ([]*BridgeUDNConfiguration, string, string, string, string) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 	var netConfigs []*BridgeUDNConfiguration
 	for _, netConfig := range b.netConfig {
 		netConfigs = append(netConfigs, netConfig.ShallowCopy())
 	}
-	return netConfigs, b.uplinkName, b.ofPortPhys, b.gwIfaceRep, b.ofPortHost, b.ofPortVMPatch, b.localnetPatchPorts
+	return netConfigs, b.uplinkName, b.ofPortPhys, b.gwIfaceRep, b.ofPortHost
 }
 
 // AddNetworkConfig adds the patchport and ctMark value for the provided netInfo into the bridge configuration cache
-func (b *BridgeConfiguration) AddNetworkConfig(
-	nInfo util.NetInfo,
-	nodeSubnets []*net.IPNet,
-	masqCTMark, pktMark uint,
-	v6MasqIPs, v4MasqIPs *udn.MasqueradeIPs) error {
+func (b *BridgeConfiguration) AddNetworkConfig(nInfo util.NetInfo, nodeSubnets, mgmtIPs []*net.IPNet, masqCTMark, pktMark uint, v6MasqIPs, v4MasqIPs *udn.MasqueradeIPs) error {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
@@ -300,13 +310,14 @@ func (b *BridgeConfiguration) AddNetworkConfig(
 	_, found := b.netConfig[netName]
 	if !found {
 		netConfig := &BridgeUDNConfiguration{
-			PatchPort:   patchPort,
-			MasqCTMark:  fmt.Sprintf("0x%x", masqCTMark),
-			PktMark:     fmt.Sprintf("0x%x", pktMark),
-			V4MasqIPs:   v4MasqIPs,
-			V6MasqIPs:   v6MasqIPs,
-			Subnets:     nInfo.Subnets(),
-			NodeSubnets: nodeSubnets,
+			PatchPort:     patchPort,
+			MasqCTMark:    fmt.Sprintf("0x%x", masqCTMark),
+			PktMark:       fmt.Sprintf("0x%x", pktMark),
+			V4MasqIPs:     v4MasqIPs,
+			V6MasqIPs:     v6MasqIPs,
+			ManagementIPs: mgmtIPs,
+			Subnets:       nInfo.Subnets(),
+			NodeSubnets:   nodeSubnets,
 		}
 		netConfig.Advertised.Store(util.IsPodNetworkAdvertisedAtNode(nInfo, b.nodeName))
 
@@ -380,20 +391,6 @@ func (b *BridgeConfiguration) SetOfPorts() error {
 	for _, netConfig := range b.netConfig {
 		if err := netConfig.setOfPatchPort(); err != nil {
 			return fmt.Errorf("error setting bridge openflow ports for network with patchport %v: err: %v", netConfig.PatchPort, err)
-		}
-		if netConfig.IsDefaultNetwork() {
-			vmPatchPort, _, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".", "external-ids:vm-patch-port")
-			if err == nil {
-				if vmPatchPort != "" {
-					b.ofPortVMPatch, _, err = util.RunOVSVsctl("get", "interface", vmPatchPort, "ofport")
-					if err != nil {
-						return fmt.Errorf("failed to get ofport of vmPatchPort %s, error: %v", vmPatchPort, err)
-					}
-					klog.Infof("Successfully got ofport of vmPatchPort %s, ofport: %s", vmPatchPort, b.ofPortVMPatch)
-				}
-			} else {
-				return fmt.Errorf("failed to get vm-patch-port for bridge %s, error: %v", b.bridgeName, err)
-			}
 		}
 	}
 
@@ -493,6 +490,12 @@ func (b *BridgeConfiguration) SetEIPMarkIPs(eipMarkIPs *egressip.MarkIPsCache) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 	b.eipMarkIPs = eipMarkIPs
+}
+
+func (b *BridgeConfiguration) SetDropGARP(drop bool) {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	b.dropGARP = drop
 }
 
 func gatewayReady(patchPort string) bool {

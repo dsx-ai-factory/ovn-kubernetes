@@ -233,10 +233,10 @@ type testPod struct {
 	noIfaceIdVer bool
 	networkRole  string
 
-	secondaryPodInfos map[string]*secondaryPodInfo
+	udnPodInfos map[string]*udnPodInfo
 }
 
-type secondaryPodInfo struct {
+type udnPodInfo struct {
 	nodeSubnet  string
 	nodeMgtIP   string
 	nodeGWIP    string
@@ -258,19 +258,19 @@ type portInfo struct {
 func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIPs, podMAC, namespace string) testPod {
 	portName := util.GetLogicalPortName(namespace, podName)
 	to := testPod{
-		portUUID:          portName + "-UUID",
-		nodeSubnet:        nodeSubnet,
-		nodeMgtIP:         nodeMgtIP,
-		nodeGWIP:          nodeGWIP,
-		podIP:             podIPs,
-		podMAC:            podMAC,
-		portName:          portName,
-		podMTU:            fmt.Sprintf("%d", config.Default.MTU),
-		nodeName:          nodeName,
-		podName:           podName,
-		namespace:         namespace,
-		secondaryPodInfos: map[string]*secondaryPodInfo{},
-		networkRole:       ovntypes.NetworkRolePrimary, // all tests here run with network-segmentation disabled by default by default
+		portUUID:    portName + "-UUID",
+		nodeSubnet:  nodeSubnet,
+		nodeMgtIP:   nodeMgtIP,
+		nodeGWIP:    nodeGWIP,
+		podIP:       podIPs,
+		podMAC:      podMAC,
+		portName:    portName,
+		podMTU:      fmt.Sprintf("%d", config.Default.MTU),
+		nodeName:    nodeName,
+		podName:     podName,
+		namespace:   namespace,
+		udnPodInfos: map[string]*udnPodInfo{},
+		networkRole: ovntypes.NetworkRolePrimary, // all tests here run with network-segmentation disabled by default by default
 	}
 
 	var routeSources []*net.IPNet
@@ -340,7 +340,7 @@ func (p testPod) populateControllerLogicalSwitchCache(bnc *BaseNetworkController
 	for _, subnet := range strings.Split(p.nodeSubnet, " ") {
 		subnets = append(subnets, ovntest.MustParseIPNet(subnet))
 	}
-	err := bnc.lsManager.AddOrUpdateSwitch(bnc.GetNetworkScopedSwitchName(p.nodeName), subnets)
+	err := bnc.lsManager.AddOrUpdateSwitch(bnc.GetNetworkScopedSwitchName(p.nodeName), subnets, nil)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }
 
@@ -406,11 +406,11 @@ func (p testPod) getAnnotationsJson() string {
 		},
 	}
 
-	for _, portInfos := range p.secondaryPodInfos {
-		var secondaryIfaceRoutes []podRoute
+	for _, portInfos := range p.udnPodInfos {
+		var udnIfaceRoutes []podRoute
 		for _, route := range portInfos.routes {
-			secondaryIfaceRoutes = append(
-				secondaryIfaceRoutes,
+			udnIfaceRoutes = append(
+				udnIfaceRoutes,
 				podRoute{Dest: route.Dest.String(), NextHop: route.NextHop.String()},
 			)
 		}
@@ -430,7 +430,7 @@ func (p testPod) getAnnotationsJson() string {
 				IPs:      []string{ip},
 				TunnelID: portInfo.tunnelID,
 				Role:     portInfos.role,
-				Routes:   secondaryIfaceRoutes,
+				Routes:   udnIfaceRoutes,
 			}
 			if portInfos.nodeGWIP != "" {
 				podAnnotation.Gateway = portInfos.nodeGWIP
@@ -472,7 +472,7 @@ func getExpectedDataPodsSwitchesPortGroup(netInfo util.NetInfo, pods []testPod, 
 		if netInfo.IsDefault() {
 			portName = util.GetLogicalPortName(pod.namespace, pod.podName)
 		} else {
-			portName = util.GetSecondaryNetworkLogicalPortName(pod.namespace, pod.podName, netInfo.GetNADs()[0])
+			portName = util.GetUserDefinedNetworkLogicalPortName(pod.namespace, pod.podName, netInfo.GetNADs()[0])
 		}
 		var lspUUID string
 		if len(pod.portUUID) == 0 {
@@ -1958,7 +1958,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					},
 				)
 
-				err := fakeOvn.controller.lsManager.AddOrUpdateSwitch(testNode.Name, []*net.IPNet{ovntest.MustParseIPNet(v4Node1Subnet)})
+				err := fakeOvn.controller.lsManager.AddOrUpdateSwitch(testNode.Name, []*net.IPNet{ovntest.MustParseIPNet(v4Node1Subnet)}, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -2190,7 +2190,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 						Items: []corev1.Pod{},
 					},
 				)
-				err := fakeOvn.controller.lsManager.AddOrUpdateSwitch(testNodeWithLS.Name, []*net.IPNet{ovntest.MustParseIPNet(v4Node1Subnet)})
+				err := fakeOvn.controller.lsManager.AddOrUpdateSwitch(testNodeWithLS.Name, []*net.IPNet{ovntest.MustParseIPNet(v4Node1Subnet)}, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -2637,7 +2637,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 						Items: []corev1.Pod{*myPod},
 					},
 				)
-				err := fakeOvn.controller.lsManager.AddOrUpdateSwitch(myPod.Spec.NodeName, nil)
+				err := fakeOvn.controller.lsManager.AddOrUpdateSwitch(myPod.Spec.NodeName, nil, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())

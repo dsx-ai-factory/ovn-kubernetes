@@ -126,7 +126,7 @@ func (podInfo *backingPodInfo) GetLogicalPortName(nadName string) string {
 	if podInfo.backingPodNamespace == "" {
 		return ""
 	}
-	return util.GetSecondaryNetworkLogicalPortName(podInfo.backingPodNamespace, podInfo.backingPodName, nadName)
+	return util.GetUserDefinedNetworkLogicalPortName(podInfo.backingPodNamespace, podInfo.backingPodName, nadName)
 }
 
 func (bnc *BaseNetworkController) updateVIPActivePodInstance(pb *sbdb.PortBinding) error {
@@ -365,7 +365,7 @@ func (oc *BaseNetworkController) clearErrorMessage(vip *virtualIP, failedOpsKey 
 func (bnc *BaseNetworkController) removeVirtualIPFromPodPortSecurity(vipAddress string, podNamespace, podName, nadName string) error {
 	// lock using (virtualIP/portName) as key, as same pod may be added to
 	// multiple virtualIP's as backend.
-	portName := util.GetSecondaryNetworkLogicalPortName(podNamespace, podName, nadName)
+	portName := util.GetUserDefinedNetworkLogicalPortName(podNamespace, podName, nadName)
 	unlock := util.LockByKey.Acquire(getVirtualIPPodLockKey(portName))
 	defer unlock()
 
@@ -534,7 +534,7 @@ func (bnc *BaseNetworkController) handleVIPPodAdd(vip *virtualIP, pod *corev1.Po
 		return nil
 	}
 	klog.Infof("Adding pod: %s/%s to VirtualIP: %s/%s", pod.Namespace, pod.Name, vip.namespace, vip.name)
-	portName := util.GetSecondaryNetworkLogicalPortName(pod.Namespace, pod.Name, vip.nadName)
+	portName := util.GetUserDefinedNetworkLogicalPortName(pod.Namespace, pod.Name, vip.nadName)
 	// check if the network for pod is established
 	portInfo, err := bnc.logicalPortCache.get(pod.Namespace, pod.Name, vip.nadName)
 	if err != nil {
@@ -847,7 +847,7 @@ func (bnc *BaseNetworkController) syncVirtualIPPods(vip *virtualIP, vipLSP *nbdb
 	for _, parentPortName := range strings.Split(parentPorts, ",") {
 		for _, pod := range pods {
 			// Get pod logical port name
-			PodPortName := util.GetSecondaryNetworkLogicalPortName(pod.Namespace, pod.Name, vip.nadName)
+			PodPortName := util.GetUserDefinedNetworkLogicalPortName(pod.Namespace, pod.Name, vip.nadName)
 			if parentPortName == PodPortName {
 				updatedVirtualParentPortsList = append(updatedVirtualParentPortsList, parentPortName)
 				break

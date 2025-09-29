@@ -1094,269 +1094,271 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.253.61 }
 			})
 		})
 
-		//      TBD-merge permission denied error in CICD when trying to add a scope_universe address by the netlink.AddrAdd() call
-		//		Context("with a cluster in IPv6 mode", func() {
-		//			const (
-		//				ethName           string = "lo1337"
-		//				nodeIP            string = "2001:db8:1::3"
-		//				ethCIDR           string = nodeIP + "/64"
-		//				otherNodeIP       string = "2001:db8:1::4"
-		//				otherSubnetNodeIP string = "2002:db8:1::4"
-		//				fullMask                 = 128
-		//			)
-		//
-		//			var link netlink.Link
-		//
-		//			BeforeEach(func() {
-		//				config.IPv4Mode = false
-		//				config.IPv6Mode = true
-		//				config.Gateway.Mode = config.GatewayModeShared
-		//
-		//				// Note we must do this in default netNS because
-		//				// nc.WatchNodes() will spawn goroutines which we cannot lock to the testNS
-		//				ovntest.AddLink(ethName)
-		//
-		//				var err error
-		//				link, err = netlink.LinkByName(ethName)
-		//				Expect(err).NotTo(HaveOccurred())
-		//				err = netlink.LinkSetUp(link)
-		//				Expect(err).NotTo(HaveOccurred())
-		//
-		//				// Add an IP address
-		//				addr, err := netlink.ParseAddr(ethCIDR)
-		//				Expect(err).NotTo(HaveOccurred())
-		//				addr.Scope = int(netlink.SCOPE_UNIVERSE)
-		//				err = netlink.AddrAdd(link, addr)
-		//				Expect(err).NotTo(HaveOccurred())
-		//
-		//			})
-		//
-		//			AfterEach(func() {
-		//				err := netlink.LinkDel(link)
-		//				Expect(err).NotTo(HaveOccurred())
-		//			})
-		//
-		//			ovntest.OnSupportedPlatformsIt("adds and removes nftables rule for node in same subnet", func() {
-		//
-		//				app.Action = func(_ *cli.Context) error {
-		//					node := corev1.Node{
-		//						ObjectMeta: metav1.ObjectMeta{
-		//							Name: nodeName,
-		//							Annotations: map[string]string{
-		//								util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s\"]", nodeIP+"/64"),
-		//							},
-		//						},
-		//						Status: corev1.NodeStatus{
-		//							Addresses: []corev1.NodeAddress{
-		//								{
-		//									Type:    corev1.NodeInternalIP,
-		//									Address: nodeIP,
-		//								},
-		//							},
-		//						},
-		//					}
-		//
-		//					otherNode := corev1.Node{
-		//						ObjectMeta: metav1.ObjectMeta{
-		//							Name: remoteNodeName,
-		//							Annotations: map[string]string{
-		//								util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s\"]", otherNodeIP+"/64"),
-		//							},
-		//						},
-		//						Status: corev1.NodeStatus{
-		//							Addresses: []corev1.NodeAddress{
-		//								{
-		//									Type:    corev1.NodeInternalIP,
-		//									Address: otherNodeIP,
-		//								},
-		//							},
-		//						},
-		//					}
-		//					nft := nodenft.SetFakeNFTablesHelper()
-		//
-		//					kubeFakeClient := fake.NewSimpleClientset(&corev1.NodeList{
-		//						Items: []corev1.Node{node, otherNode},
-		//					})
-		//					fakeClient := &util.OVNNodeClientset{
-		//						KubeClient:             kubeFakeClient,
-		//						AdminPolicyRouteClient: adminpolicybasedrouteclient.NewSimpleClientset(),
-		//						NetworkAttchDefClient:  nadfake.NewSimpleClientset(),
-		//					}
-		//
-		//					stop := make(chan struct{})
-		//					wf, err := factory.NewNodeWatchFactory(fakeClient, []string{nodeName})
-		//					Expect(err).NotTo(HaveOccurred())
-		//					wg := &sync.WaitGroup{}
-		//					defer func() {
-		//						close(stop)
-		//						wg.Wait()
-		//						wf.Shutdown()
-		//					}()
-		//
-		//					err = wf.Start()
-		//					Expect(err).NotTo(HaveOccurred())
-		//					routeManager := routemanager.NewController()
-		//					cnnci := NewCommonNodeNetworkControllerInfo(fakeClient, wf, nil, routeManager, nodeName, "", "", nil)
-		//					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
-		//					nc.initRetryFrameworkForNode()
-		//					err = setupRemoteNodeNFTSets()
-		//					Expect(err).NotTo(HaveOccurred())
-		//					err = setupPMTUDNFTChain()
-		//					Expect(err).NotTo(HaveOccurred())
-		//					nc.Gateway = &gateway{
-		//						openflowManager: &openflowManager{
-		//							flowCache:     map[string][]string{},
-		//							defaultBridge: bridgeconfig.TestDefaultBridgeConfig(),
-		//						},
-		//					}
-		//
-		//					// must run route manager manually which is usually started with nc.Start()
-		//					wg.Add(1)
-		//					go func() {
-		//						defer GinkgoRecover()
-		//						defer wg.Done()
-		//						nc.routeManager.Run(stop, 10*time.Second)
-		//						Expect(err).NotTo(HaveOccurred())
-		//					}()
-		//					By("start up should add nftables rules for remote node")
-		//
-		//					err = nc.WatchNodes()
-		//					Expect(err).NotTo(HaveOccurred())
-		//					nftRules := v6PMTUDNFTRules + `
-		//add element inet ovn-kubernetes remote-node-ips-v6 { 2001:db8:1::4 }
-		//`
-		//					err = nodenft.MatchNFTRules(nftRules, nft.Dump())
-		//					Expect(err).NotTo(HaveOccurred())
-		//					gw := nc.Gateway.(*gateway)
-		//					By("start up should add openflow rules for remote node")
-		//					flows := gw.openflowManager.getFlowsByKey(getPMTUDKey(remoteNodeName))
-		//					Expect(flows).To(HaveLen(1))
-		//
-		//					By("deleting the remote node should remove the nftables element")
-		//					err = kubeFakeClient.CoreV1().Nodes().Delete(context.TODO(), remoteNodeName, metav1.DeleteOptions{})
-		//					Expect(err).NotTo(HaveOccurred())
-		//					Eventually(func() error {
-		//						return nodenft.MatchNFTRules(v6PMTUDNFTRules, nft.Dump())
-		//					}).WithTimeout(2 * time.Second).ShouldNot(HaveOccurred())
-		//					Eventually(func() []string { return gw.openflowManager.getFlowsByKey(getPMTUDKey(remoteNodeName)) }).WithTimeout(2 * time.Second).Should(BeEmpty())
-		//					return nil
-		//				}
-		//
-		//				err := app.Run([]string{app.Name})
-		//				Expect(err).NotTo(HaveOccurred())
-		//			})
-		//
-		//			ovntest.OnSupportedPlatformsIt("adds and removes nftables rule for node in different subnet", func() {
-		//
-		//				app.Action = func(_ *cli.Context) error {
-		//					node := corev1.Node{
-		//						ObjectMeta: metav1.ObjectMeta{
-		//							Name: nodeName,
-		//							Annotations: map[string]string{
-		//								util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s\"]", nodeIP+"/64"),
-		//							},
-		//						},
-		//						Status: corev1.NodeStatus{
-		//							Addresses: []corev1.NodeAddress{
-		//								{
-		//									Type:    corev1.NodeInternalIP,
-		//									Address: nodeIP,
-		//								},
-		//							},
-		//						},
-		//					}
-		//
-		//					otherNode := corev1.Node{
-		//						ObjectMeta: metav1.ObjectMeta{
-		//							Name: remoteNodeName,
-		//							Annotations: map[string]string{
-		//								util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s\"]", otherSubnetNodeIP+"/64"),
-		//							},
-		//						},
-		//						Status: corev1.NodeStatus{
-		//							Addresses: []corev1.NodeAddress{
-		//								{
-		//									Type:    corev1.NodeInternalIP,
-		//									Address: otherSubnetNodeIP,
-		//								},
-		//							},
-		//						},
-		//					}
-		//					nft := nodenft.SetFakeNFTablesHelper()
-		//
-		//					kubeFakeClient := fake.NewSimpleClientset(&corev1.NodeList{
-		//						Items: []corev1.Node{node, otherNode},
-		//					})
-		//					fakeClient := &util.OVNNodeClientset{
-		//						KubeClient:             kubeFakeClient,
-		//						AdminPolicyRouteClient: adminpolicybasedrouteclient.NewSimpleClientset(),
-		//						NetworkAttchDefClient:  nadfake.NewSimpleClientset(),
-		//					}
-		//
-		//					stop := make(chan struct{})
-		//					wf, err := factory.NewNodeWatchFactory(fakeClient, []string{nodeName})
-		//					Expect(err).NotTo(HaveOccurred())
-		//					wg := &sync.WaitGroup{}
-		//					defer func() {
-		//						close(stop)
-		//						wg.Wait()
-		//						wf.Shutdown()
-		//					}()
-		//
-		//					err = wf.Start()
-		//					Expect(err).NotTo(HaveOccurred())
-		//					routeManager := routemanager.NewController()
-		//					cnnci := NewCommonNodeNetworkControllerInfo(fakeClient, wf, nil, routeManager, nodeName, "", "", nil)
-		//					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
-		//					nc.initRetryFrameworkForNode()
-		//					err = setupRemoteNodeNFTSets()
-		//					Expect(err).NotTo(HaveOccurred())
-		//					err = setupPMTUDNFTChain()
-		//					Expect(err).NotTo(HaveOccurred())
-		//					nc.Gateway = &gateway{
-		//						openflowManager: &openflowManager{
-		//							flowCache:     map[string][]string{},
-		//							defaultBridge: bridgeconfig.TestDefaultBridgeConfig(),
-		//						},
-		//					}
-		//
-		//					// must run route manager manually which is usually started with nc.Start()
-		//					wg.Add(1)
-		//					go func() {
-		//						defer GinkgoRecover()
-		//						defer wg.Done()
-		//						nc.routeManager.Run(stop, 10*time.Second)
-		//						Expect(err).NotTo(HaveOccurred())
-		//					}()
-		//					By("start up should add nftables rules for remote node")
-		//
-		//					err = nc.WatchNodes()
-		//					Expect(err).NotTo(HaveOccurred())
-		//					nftRules := v6PMTUDNFTRules + `
-		//add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
-		//`
-		//					err = nodenft.MatchNFTRules(nftRules, nft.Dump())
-		//					Expect(err).NotTo(HaveOccurred())
-		//					gw := nc.Gateway.(*gateway)
-		//					By("start up should add openflow rules for remote node")
-		//					flows := gw.openflowManager.getFlowsByKey(getPMTUDKey(remoteNodeName))
-		//					Expect(flows).To(HaveLen(1))
-		//
-		//					By("deleting the remote node should remove the nftables element")
-		//					err = kubeFakeClient.CoreV1().Nodes().Delete(context.TODO(), remoteNodeName, metav1.DeleteOptions{})
-		//					Expect(err).NotTo(HaveOccurred())
-		//					Eventually(func() error {
-		//						return nodenft.MatchNFTRules(v6PMTUDNFTRules, nft.Dump())
-		//					}).WithTimeout(2 * time.Second).ShouldNot(HaveOccurred())
-		//					Eventually(func() []string { return gw.openflowManager.getFlowsByKey(getPMTUDKey(remoteNodeName)) }).WithTimeout(2 * time.Second).Should(BeEmpty())
-		//					return nil
-		//				}
-		//
-		//				err := app.Run([]string{app.Name})
-		//				Expect(err).NotTo(HaveOccurred())
-		//			})
-		//
-		//		})
+		//TBD-merge permission denied error in CICD when trying to add a scope_universe address by the netlink.AddrAdd() call
+		/*
+					Context("with a cluster in IPv6 mode", func() {
+							const (
+							ethName           string = "lo1337"
+							nodeIP            string = "2001:db8:1::3"
+							ethCIDR           string = nodeIP + "/64"
+							otherNodeIP       string = "2001:db8:1::4"
+							otherSubnetNodeIP string = "2002:db8:1::4"
+							fullMask                 = 128
+						)
+
+						var link netlink.Link
+
+						BeforeEach(func() {
+							config.IPv4Mode = false
+							config.IPv6Mode = true
+							config.Gateway.Mode = config.GatewayModeShared
+
+							// Note we must do this in default netNS because
+							// nc.WatchNodes() will spawn goroutines which we cannot lock to the testNS
+							ovntest.AddLink(ethName)
+
+							var err error
+							link, err = netlink.LinkByName(ethName)
+							Expect(err).NotTo(HaveOccurred())
+							err = netlink.LinkSetUp(link)
+							Expect(err).NotTo(HaveOccurred())
+
+							// Add an IP address
+							addr, err := netlink.ParseAddr(ethCIDR)
+							Expect(err).NotTo(HaveOccurred())
+							addr.Scope = int(netlink.SCOPE_UNIVERSE)
+							err = netlink.AddrAdd(link, addr)
+							Expect(err).NotTo(HaveOccurred())
+
+						})
+
+						AfterEach(func() {
+							err := netlink.LinkDel(link)
+							Expect(err).NotTo(HaveOccurred())
+						})
+
+						ovntest.OnSupportedPlatformsIt("adds and removes nftables rule for node in same subnet", func() {
+
+							app.Action = func(_ *cli.Context) error {
+								node := corev1.Node{
+									ObjectMeta: metav1.ObjectMeta{
+										Name: nodeName,
+										Annotations: map[string]string{
+											util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s\"]", nodeIP+"/64"),
+										},
+									},
+									Status: corev1.NodeStatus{
+										Addresses: []corev1.NodeAddress{
+											{
+												Type:    corev1.NodeInternalIP,
+												Address: nodeIP,
+											},
+										},
+									},
+								}
+
+								otherNode := corev1.Node{
+									ObjectMeta: metav1.ObjectMeta{
+										Name: remoteNodeName,
+										Annotations: map[string]string{
+											util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s\"]", otherNodeIP+"/64"),
+										},
+									},
+									Status: corev1.NodeStatus{
+										Addresses: []corev1.NodeAddress{
+											{
+												Type:    corev1.NodeInternalIP,
+												Address: otherNodeIP,
+											},
+										},
+									},
+								}
+								nft := nodenft.SetFakeNFTablesHelper()
+
+								kubeFakeClient := fake.NewSimpleClientset(&corev1.NodeList{
+									Items: []corev1.Node{node, otherNode},
+								})
+								fakeClient := &util.OVNNodeClientset{
+									KubeClient:             kubeFakeClient,
+									AdminPolicyRouteClient: adminpolicybasedrouteclient.NewSimpleClientset(),
+									NetworkAttchDefClient:  nadfake.NewSimpleClientset(),
+								}
+
+								stop := make(chan struct{})
+								wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
+								Expect(err).NotTo(HaveOccurred())
+								wg := &sync.WaitGroup{}
+								defer func() {
+									close(stop)
+									wg.Wait()
+									wf.Shutdown()
+								}()
+
+								err = wf.Start()
+								Expect(err).NotTo(HaveOccurred())
+								routeManager := routemanager.NewController()
+								cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager)
+								nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
+								nc.initRetryFrameworkForNode()
+								err = setupRemoteNodeNFTSets()
+								Expect(err).NotTo(HaveOccurred())
+								err = setupPMTUDNFTChain()
+								Expect(err).NotTo(HaveOccurred())
+								nc.Gateway = &gateway{
+									openflowManager: &openflowManager{
+										flowCache:     map[string][]string{},
+										defaultBridge: bridgeconfig.TestDefaultBridgeConfig(),
+									},
+								}
+
+								// must run route manager manually which is usually started with nc.Start()
+								wg.Add(1)
+								go func() {
+									defer GinkgoRecover()
+									defer wg.Done()
+									nc.routeManager.Run(stop, 10*time.Second)
+									Expect(err).NotTo(HaveOccurred())
+								}()
+								By("start up should add nftables rules for remote node")
+
+								err = nc.WatchNodes()
+								Expect(err).NotTo(HaveOccurred())
+								nftRules := v6PMTUDNFTRules + `
+			add element inet ovn-kubernetes remote-node-ips-v6 { 2001:db8:1::4 }
+			`
+								err = nodenft.MatchNFTRules(nftRules, nft.Dump())
+								Expect(err).NotTo(HaveOccurred())
+								gw := nc.Gateway.(*gateway)
+								By("start up should add openflow rules for remote node")
+								flows := gw.openflowManager.getFlowsByKey(getPMTUDKey(remoteNodeName))
+								Expect(flows).To(HaveLen(1))
+
+								By("deleting the remote node should remove the nftables element")
+								err = kubeFakeClient.CoreV1().Nodes().Delete(context.TODO(), remoteNodeName, metav1.DeleteOptions{})
+								Expect(err).NotTo(HaveOccurred())
+								Eventually(func() error {
+									return nodenft.MatchNFTRules(v6PMTUDNFTRules, nft.Dump())
+								}).WithTimeout(2 * time.Second).ShouldNot(HaveOccurred())
+								Eventually(func() []string { return gw.openflowManager.getFlowsByKey(getPMTUDKey(remoteNodeName)) }).WithTimeout(2 * time.Second).Should(BeEmpty())
+								return nil
+							}
+
+							err := app.Run([]string{app.Name})
+							Expect(err).NotTo(HaveOccurred())
+						})
+
+						ovntest.OnSupportedPlatformsIt("adds and removes nftables rule for node in different subnet", func() {
+
+							app.Action = func(_ *cli.Context) error {
+								node := corev1.Node{
+									ObjectMeta: metav1.ObjectMeta{
+										Name: nodeName,
+										Annotations: map[string]string{
+											util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s\"]", nodeIP+"/64"),
+										},
+									},
+									Status: corev1.NodeStatus{
+										Addresses: []corev1.NodeAddress{
+											{
+												Type:    corev1.NodeInternalIP,
+												Address: nodeIP,
+											},
+										},
+									},
+								}
+
+								otherNode := corev1.Node{
+									ObjectMeta: metav1.ObjectMeta{
+										Name: remoteNodeName,
+										Annotations: map[string]string{
+											util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s\"]", otherSubnetNodeIP+"/64"),
+										},
+									},
+									Status: corev1.NodeStatus{
+										Addresses: []corev1.NodeAddress{
+											{
+												Type:    corev1.NodeInternalIP,
+												Address: otherSubnetNodeIP,
+											},
+										},
+									},
+								}
+								nft := nodenft.SetFakeNFTablesHelper()
+
+								kubeFakeClient := fake.NewSimpleClientset(&corev1.NodeList{
+									Items: []corev1.Node{node, otherNode},
+								})
+								fakeClient := &util.OVNNodeClientset{
+									KubeClient:             kubeFakeClient,
+									AdminPolicyRouteClient: adminpolicybasedrouteclient.NewSimpleClientset(),
+									NetworkAttchDefClient:  nadfake.NewSimpleClientset(),
+								}
+
+								stop := make(chan struct{})
+								wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
+								Expect(err).NotTo(HaveOccurred())
+								wg := &sync.WaitGroup{}
+								defer func() {
+									close(stop)
+									wg.Wait()
+									wf.Shutdown()
+								}()
+
+								err = wf.Start()
+								Expect(err).NotTo(HaveOccurred())
+								routeManager := routemanager.NewController()
+								cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager)
+								nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
+								nc.initRetryFrameworkForNode()
+								err = setupRemoteNodeNFTSets()
+								Expect(err).NotTo(HaveOccurred())
+								err = setupPMTUDNFTChain()
+								Expect(err).NotTo(HaveOccurred())
+								nc.Gateway = &gateway{
+									openflowManager: &openflowManager{
+										flowCache:     map[string][]string{},
+										defaultBridge: bridgeconfig.TestDefaultBridgeConfig(),
+									},
+								}
+
+								// must run route manager manually which is usually started with nc.Start()
+								wg.Add(1)
+								go func() {
+									defer GinkgoRecover()
+									defer wg.Done()
+									nc.routeManager.Run(stop, 10*time.Second)
+									Expect(err).NotTo(HaveOccurred())
+								}()
+								By("start up should add nftables rules for remote node")
+
+								err = nc.WatchNodes()
+								Expect(err).NotTo(HaveOccurred())
+								nftRules := v6PMTUDNFTRules + `
+			add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
+			`
+								err = nodenft.MatchNFTRules(nftRules, nft.Dump())
+								Expect(err).NotTo(HaveOccurred())
+								gw := nc.Gateway.(*gateway)
+								By("start up should add openflow rules for remote node")
+								flows := gw.openflowManager.getFlowsByKey(getPMTUDKey(remoteNodeName))
+								Expect(flows).To(HaveLen(1))
+
+								By("deleting the remote node should remove the nftables element")
+								err = kubeFakeClient.CoreV1().Nodes().Delete(context.TODO(), remoteNodeName, metav1.DeleteOptions{})
+								Expect(err).NotTo(HaveOccurred())
+								Eventually(func() error {
+									return nodenft.MatchNFTRules(v6PMTUDNFTRules, nft.Dump())
+								}).WithTimeout(2 * time.Second).ShouldNot(HaveOccurred())
+								Eventually(func() []string { return gw.openflowManager.getFlowsByKey(getPMTUDKey(remoteNodeName)) }).WithTimeout(2 * time.Second).Should(BeEmpty())
+								return nil
+							}
+
+							err := app.Run([]string{app.Name})
+							Expect(err).NotTo(HaveOccurred())
+						})
+
+					})
+		*/
 
 	})
 

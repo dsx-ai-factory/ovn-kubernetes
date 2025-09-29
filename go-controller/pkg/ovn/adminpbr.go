@@ -377,7 +377,7 @@ func (bnc *BaseNetworkController) onAdminPBRAddOrUpdate(adminpbr *adminpbrapi.Ad
 	unlock := util.LockByKey.Acquire(lockNameOfAdminPBR(adminpbr.Name))
 	defer unlock()
 	// check topo type
-	if bnc.IsSecondary() && bnc.TopologyType() != types.Layer3Topology {
+	if bnc.IsUserDefinedNetwork() && bnc.TopologyType() != types.Layer3Topology {
 		setErrorForAdminPBR(bnc, adminpbr, fmt.Sprintf("Skipping AdminPBR %s for network %s of topology type %s",
 			adminpbr.Name, bnc.GetNetworkName(), bnc.TopologyType()))
 		return

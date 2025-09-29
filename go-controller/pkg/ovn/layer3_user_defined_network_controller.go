@@ -36,15 +36,15 @@ import (
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
-type secondaryLayer3NetworkControllerEventHandler struct {
+type Layer3UserDefinedNetworkControllerEventHandler struct {
 	baseHandler  baseNetworkControllerEventHandler
 	watchFactory *factory.WatchFactory
 	objType      reflect.Type
-	oc           *SecondaryLayer3NetworkController
+	oc           *Layer3UserDefinedNetworkController
 	syncFunc     func([]interface{}) error
 }
 
-func (h *secondaryLayer3NetworkControllerEventHandler) FilterOutResource(obj interface{}) bool {
+func (h *Layer3UserDefinedNetworkControllerEventHandler) FilterOutResource(obj interface{}) bool {
 	return h.oc.FilterOutResource(h.objType, obj)
 }
 
@@ -52,56 +52,56 @@ func (h *secondaryLayer3NetworkControllerEventHandler) FilterOutResource(obj int
 // type considers them equal and therefore no update is needed. It returns false when the two objects are not considered
 // equal and an update needs be executed. This is regardless of how the update is carried out (whether with a dedicated update
 // function or with a delete on the old obj followed by an add on the new obj).
-func (h *secondaryLayer3NetworkControllerEventHandler) AreResourcesEqual(obj1, obj2 interface{}) (bool, error) {
+func (h *Layer3UserDefinedNetworkControllerEventHandler) AreResourcesEqual(obj1, obj2 interface{}) (bool, error) {
 	return h.baseHandler.areResourcesEqual(h.objType, obj1, obj2)
 }
 
 // GetInternalCacheEntry returns the internal cache entry for this object, given an object and its type.
 // This is now used only for pods, which will get their the logical port cache entry.
-func (h *secondaryLayer3NetworkControllerEventHandler) GetInternalCacheEntry(obj interface{}) interface{} {
-	return h.oc.GetInternalCacheEntryForSecondaryNetwork(h.objType, obj)
+func (h *Layer3UserDefinedNetworkControllerEventHandler) GetInternalCacheEntry(obj interface{}) interface{} {
+	return h.oc.GetInternalCacheEntryForUserDefinedNetwork(h.objType, obj)
 }
 
 // GetResourceFromInformerCache returns the latest state of the object, given an object key and its type.
 // from the informers cache.
-func (h *secondaryLayer3NetworkControllerEventHandler) GetResourceFromInformerCache(key string) (interface{}, error) {
+func (h *Layer3UserDefinedNetworkControllerEventHandler) GetResourceFromInformerCache(key string) (interface{}, error) {
 	return h.baseHandler.getResourceFromInformerCache(h.objType, h.watchFactory, key)
 }
 
 // RecordAddEvent records the add event on this given object.
-func (h *secondaryLayer3NetworkControllerEventHandler) RecordAddEvent(obj interface{}) {
+func (h *Layer3UserDefinedNetworkControllerEventHandler) RecordAddEvent(obj interface{}) {
 	h.baseHandler.recordAddEvent(h.objType, obj)
 }
 
 // RecordUpdateEvent records the udpate event on this given object.
-func (h *secondaryLayer3NetworkControllerEventHandler) RecordUpdateEvent(obj interface{}) {
+func (h *Layer3UserDefinedNetworkControllerEventHandler) RecordUpdateEvent(obj interface{}) {
 	h.baseHandler.recordUpdateEvent(h.objType, obj)
 }
 
 // RecordDeleteEvent records the delete event on this given object.
-func (h *secondaryLayer3NetworkControllerEventHandler) RecordDeleteEvent(obj interface{}) {
+func (h *Layer3UserDefinedNetworkControllerEventHandler) RecordDeleteEvent(obj interface{}) {
 	h.baseHandler.recordDeleteEvent(h.objType, obj)
 }
 
 // RecordSuccessEvent records the success event on this given object.
-func (h *secondaryLayer3NetworkControllerEventHandler) RecordSuccessEvent(obj interface{}) {
+func (h *Layer3UserDefinedNetworkControllerEventHandler) RecordSuccessEvent(obj interface{}) {
 	h.baseHandler.recordSuccessEvent(h.objType, obj)
 }
 
 // RecordErrorEvent records the error event on this given object.
-func (h *secondaryLayer3NetworkControllerEventHandler) RecordErrorEvent(_ interface{}, _ string, _ error) {
+func (h *Layer3UserDefinedNetworkControllerEventHandler) RecordErrorEvent(_ interface{}, _ string, _ error) {
 }
 
 // IsResourceScheduled returns true if the given object has been scheduled.
 // Only applied to pods for now. Returns true for all other types.
-func (h *secondaryLayer3NetworkControllerEventHandler) IsResourceScheduled(obj interface{}) bool {
+func (h *Layer3UserDefinedNetworkControllerEventHandler) IsResourceScheduled(obj interface{}) bool {
 	return h.baseHandler.isResourceScheduled(h.objType, obj)
 }
 
 // AddResource adds the specified object to the cluster according to its type and returns the error,
 // if any, yielded during object creation.
 // Given an object to add and a boolean specifying if the function was executed from iterateRetryResources
-func (h *secondaryLayer3NetworkControllerEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
+func (h *Layer3UserDefinedNetworkControllerEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
 	switch h.objType {
 	case factory.NodeType:
 		node, ok := obj.(*corev1.Node)
@@ -146,7 +146,7 @@ func (h *secondaryLayer3NetworkControllerEventHandler) AddResource(obj interface
 			}
 		}
 	default:
-		return h.oc.AddSecondaryNetworkResourceCommon(h.objType, obj)
+		return h.oc.AddUserDefinedNetworkResourceCommon(h.objType, obj)
 	}
 	return nil
 }
@@ -155,7 +155,7 @@ func (h *secondaryLayer3NetworkControllerEventHandler) AddResource(obj interface
 // type and returns the error, if any, yielded during the object update.
 // Given an old and a new object; The inRetryCache boolean argument is to indicate if the given resource
 // is in the retryCache or not.
-func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryCache bool) error {
+func (h *Layer3UserDefinedNetworkControllerEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryCache bool) error {
 	switch h.objType {
 	case factory.NodeType:
 		newNode, ok := newObj.(*corev1.Node)
@@ -167,7 +167,7 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 			return fmt.Errorf("could not cast oldObj of type %T to *kapi.Node", oldObj)
 		}
 		newNodeIsLocalZoneNode := h.oc.isLocalZoneNode(newNode)
-		zoneClusterChanged := h.oc.nodeZoneClusterChanged(oldNode, newNode, newNodeIsLocalZoneNode, h.oc.GetNetworkName())
+		zoneClusterChanged := h.oc.nodeZoneClusterChanged(oldNode, newNode)
 		nodeSubnetChange := nodeSubnetChanged(oldNode, newNode, h.oc.GetNetworkName())
 		if newNodeIsLocalZoneNode {
 			var nodeSyncsParam *nodeSyncs
@@ -187,8 +187,7 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 					hostCIDRsChanged(oldNode, newNode) ||
 					nodeGatewayMTUSupportChanged(oldNode, newNode)
 				_, failed = h.oc.syncEIPNodeRerouteFailed.Load(newNode.Name)
-				syncReroute := failed || util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) ||
-					joinCIDRChanged(oldNode, newNode, h.oc.GetNetworkName())
+				syncReroute := failed || util.NodeHostCIDRsAnnotationChanged(oldNode, newNode)
 				nodeSyncsParam = &nodeSyncs{
 					syncNode:              nodeSync,
 					syncClusterRouterPort: clusterRtrSync,
@@ -225,14 +224,14 @@ func (h *secondaryLayer3NetworkControllerEventHandler) UpdateResource(oldObj, ne
 			return h.oc.addUpdateRemoteNodeEvent(newNode, syncZoneIC)
 		}
 	default:
-		return h.oc.UpdateSecondaryNetworkResourceCommon(h.objType, oldObj, newObj, inRetryCache)
+		return h.oc.UpdateUserDefinedNetworkResourceCommon(h.objType, oldObj, newObj, inRetryCache)
 	}
 }
 
 // DeleteResource deletes the object from the cluster according to the delete logic of its resource type.
 // Given an object and optionally a cachedObj; cachedObj is the internal cache entry for this object,
 // used for now for pods and network policies.
-func (h *secondaryLayer3NetworkControllerEventHandler) DeleteResource(obj, cachedObj interface{}) error {
+func (h *Layer3UserDefinedNetworkControllerEventHandler) DeleteResource(obj, cachedObj interface{}) error {
 	switch h.objType {
 	case factory.NodeType:
 		node, ok := obj.(*corev1.Node)
@@ -242,11 +241,11 @@ func (h *secondaryLayer3NetworkControllerEventHandler) DeleteResource(obj, cache
 		return h.oc.deleteNodeEvent(node)
 
 	default:
-		return h.oc.DeleteSecondaryNetworkResourceCommon(h.objType, obj, cachedObj)
+		return h.oc.DeleteUserDefinedNetworkResourceCommon(h.objType, obj, cachedObj)
 	}
 }
 
-func (h *secondaryLayer3NetworkControllerEventHandler) SyncFunc(objs []interface{}) error {
+func (h *Layer3UserDefinedNetworkControllerEventHandler) SyncFunc(objs []interface{}) error {
 	var syncFunc func([]interface{}) error
 
 	if h.syncFunc != nil {
@@ -255,7 +254,7 @@ func (h *secondaryLayer3NetworkControllerEventHandler) SyncFunc(objs []interface
 	} else {
 		switch h.objType {
 		case factory.PodType:
-			syncFunc = h.oc.syncPodsForSecondaryNetwork
+			syncFunc = h.oc.syncPodsForUserDefinedNetwork
 
 		case factory.NodeType:
 			syncFunc = h.oc.syncNodes
@@ -281,14 +280,14 @@ func (h *secondaryLayer3NetworkControllerEventHandler) SyncFunc(objs []interface
 
 // IsObjectInTerminalState returns true if the given object is a in terminal state.
 // This is used now for pods that are either in a PodSucceeded or in a PodFailed state.
-func (h *secondaryLayer3NetworkControllerEventHandler) IsObjectInTerminalState(obj interface{}) bool {
+func (h *Layer3UserDefinedNetworkControllerEventHandler) IsObjectInTerminalState(obj interface{}) bool {
 	return h.baseHandler.isObjectInTerminalState(h.objType, obj)
 }
 
-// SecondaryLayer3NetworkController is created for logical network infrastructure and policy
-// for a secondary l3 network
-type SecondaryLayer3NetworkController struct {
-	BaseSecondaryNetworkController
+// Layer3UserDefinedNetworkController is created for logical network infrastructure and policy
+// for a l3 UDN
+type Layer3UserDefinedNetworkController struct {
+	BaseUserDefinedNetworkController
 
 	// Node-specific syncMaps used by node event handler
 	mgmtPortFailed              sync.Map
@@ -323,23 +322,23 @@ type SecondaryLayer3NetworkController struct {
 	eIPController *EgressIPController
 }
 
-// NewSecondaryLayer3NetworkController create a new OVN controller for the given secondary layer3 NAD
-func NewSecondaryLayer3NetworkController(
+// NewLayer3UserDefinedNetworkController create a new OVN controller for the given layer3 NAD
+func NewLayer3UserDefinedNetworkController(
 	cnci *CommonNetworkControllerInfo,
 	netInfo util.NetInfo,
 	networkManager networkmanager.Interface,
 	routeImportManager routeimport.Manager,
 	eIPController *EgressIPController,
 	portCache *PortCache,
-) (*SecondaryLayer3NetworkController, error) {
+) (*Layer3UserDefinedNetworkController, error) {
 
 	stopChan := make(chan struct{})
 	ipv4Mode, ipv6Mode := netInfo.IPMode()
 
 	addressSetFactory := addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode)
 
-	oc := &SecondaryLayer3NetworkController{
-		BaseSecondaryNetworkController: BaseSecondaryNetworkController{
+	oc := &Layer3UserDefinedNetworkController{
+		BaseUserDefinedNetworkController: BaseUserDefinedNetworkController{
 			BaseNetworkController: BaseNetworkController{
 				CommonNetworkControllerInfo: *cnci,
 				controllerName:              getNetworkControllerName(netInfo.GetNetworkName()),
@@ -407,7 +406,7 @@ func NewSecondaryLayer3NetworkController(
 	return oc, nil
 }
 
-func (oc *SecondaryLayer3NetworkController) initRetryFramework() {
+func (oc *Layer3UserDefinedNetworkController) initRetryFramework() {
 	oc.retryPods = oc.newRetryFramework(factory.PodType)
 	oc.retryNodes = oc.newRetryFramework(factory.NodeType)
 
@@ -428,9 +427,9 @@ func (oc *SecondaryLayer3NetworkController) initRetryFramework() {
 }
 
 // newRetryFramework builds and returns a retry framework for the input resource type;
-func (oc *SecondaryLayer3NetworkController) newRetryFramework(
+func (oc *Layer3UserDefinedNetworkController) newRetryFramework(
 	objectType reflect.Type) *retry.RetryFramework {
-	eventHandler := &secondaryLayer3NetworkControllerEventHandler{
+	eventHandler := &Layer3UserDefinedNetworkControllerEventHandler{
 		baseHandler:  baseNetworkControllerEventHandler{},
 		objType:      objectType,
 		watchFactory: oc.watchFactory,
@@ -451,9 +450,9 @@ func (oc *SecondaryLayer3NetworkController) newRetryFramework(
 	)
 }
 
-// Start starts the secondary layer3 controller, handles all events and creates all needed logical entities
-func (oc *SecondaryLayer3NetworkController) Start(_ context.Context) error {
-	klog.Infof("Start secondary %s network controller of network %s", oc.TopologyType(), oc.GetNetworkName())
+// Start starts the UDN layer3 controller, handles all events and creates all needed logical entities
+func (oc *Layer3UserDefinedNetworkController) Start(_ context.Context) error {
+	klog.Infof("Start %s UDN controller for network %s", oc.TopologyType(), oc.GetNetworkName())
 	if err := oc.init(); err != nil {
 		return err
 	}
@@ -461,8 +460,8 @@ func (oc *SecondaryLayer3NetworkController) Start(_ context.Context) error {
 }
 
 // Stop gracefully stops the controller, and delete all logical entities for this network if requested
-func (oc *SecondaryLayer3NetworkController) Stop() {
-	klog.Infof("Stop secondary %s network controller of network %s", oc.TopologyType(), oc.GetNetworkName())
+func (oc *Layer3UserDefinedNetworkController) Stop() {
+	klog.Infof("Stop %s UDN controller of network %s", oc.TopologyType(), oc.GetNetworkName())
 	close(oc.stopChan)
 	oc.cancelableCtx.Cancel()
 	oc.wg.Wait()
@@ -489,7 +488,7 @@ func (oc *SecondaryLayer3NetworkController) Stop() {
 
 // Cleanup cleans up logical entities for the given network, called from net-attach-def routine
 // could be called from a dummy Controller (only has CommonNetworkControllerInfo set)
-func (oc *SecondaryLayer3NetworkController) Cleanup() error {
+func (oc *Layer3UserDefinedNetworkController) Cleanup() error {
 	// cleans up related OVN logical entities
 	var ops []ovsdb.Operation
 	var err error
@@ -559,7 +558,7 @@ func (oc *SecondaryLayer3NetworkController) Cleanup() error {
 	return nil
 }
 
-func (oc *SecondaryLayer3NetworkController) run() error {
+func (oc *Layer3UserDefinedNetworkController) run() error {
 	klog.Infof("Starting all the Watchers for network %s ...", oc.GetNetworkName())
 	start := time.Now()
 
@@ -663,7 +662,7 @@ func (oc *SecondaryLayer3NetworkController) run() error {
 	return nil
 }
 
-func (oc *SecondaryLayer3NetworkController) Reconcile(netInfo util.NetInfo) error {
+func (oc *Layer3UserDefinedNetworkController) Reconcile(netInfo util.NetInfo) error {
 	return oc.BaseNetworkController.reconcile(
 		netInfo,
 		func(node string) {
@@ -675,7 +674,7 @@ func (oc *SecondaryLayer3NetworkController) Reconcile(netInfo util.NetInfo) erro
 
 // WatchNodes starts the watching of node resource and calls
 // back the appropriate handler logic
-func (oc *SecondaryLayer3NetworkController) WatchNodes() error {
+func (oc *Layer3UserDefinedNetworkController) WatchNodes() error {
 	if oc.nodeHandler != nil {
 		return nil
 	}
@@ -686,7 +685,7 @@ func (oc *SecondaryLayer3NetworkController) WatchNodes() error {
 	return err
 }
 
-func (oc *SecondaryLayer3NetworkController) init() error {
+func (oc *Layer3UserDefinedNetworkController) init() error {
 	if err := oc.gatherJoinSwitchIPs(); err != nil {
 		return fmt.Errorf("failed to gather join switch IPs for network %s: %v", oc.GetNetworkName(), err)
 	}
@@ -734,7 +733,7 @@ func (oc *SecondaryLayer3NetworkController) init() error {
 	return nil
 }
 
-func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *corev1.Node, nSyncs *nodeSyncs) error {
+func (oc *Layer3UserDefinedNetworkController) addUpdateLocalNodeEvent(node *corev1.Node, nSyncs *nodeSyncs) error {
 	var hostSubnets []*net.IPNet
 	var errs []error
 	var err error
@@ -870,7 +869,7 @@ func (oc *SecondaryLayer3NetworkController) addUpdateLocalNodeEvent(node *corev1
 	return err
 }
 
-func (oc *SecondaryLayer3NetworkController) addUpdateRemoteNodeEvent(node *corev1.Node, syncZoneIc bool) error {
+func (oc *Layer3UserDefinedNetworkController) addUpdateRemoteNodeEvent(node *corev1.Node, syncZoneIc bool) error {
 	_, present := oc.localZoneNodes.Load(node.Name)
 
 	if present {
@@ -905,7 +904,7 @@ func (oc *SecondaryLayer3NetworkController) addUpdateRemoteNodeEvent(node *corev
 // If isUDNAdvertised is true, then we want to SNAT all packets that are coming from pods on this network
 // leaving towards nodeIPs on the cluster to masqueradeIP. If network is advertise then the SNAT looks like this:
 // "eth.dst == 0a:58:5d:5d:00:02 && (ip4.dst == $a712973235162149816)" "169.254.0.36" "93.93.0.0/24"
-func (oc *SecondaryLayer3NetworkController) addOrUpdateUDNNodeSubnetEgressSNAT(localPodSubnets []*net.IPNet, node *corev1.Node, isUDNAdvertised bool) error {
+func (oc *Layer3UserDefinedNetworkController) addOrUpdateUDNNodeSubnetEgressSNAT(localPodSubnets []*net.IPNet, node *corev1.Node, isUDNAdvertised bool) error {
 	outputPort := types.RouterToSwitchPrefix + oc.GetNetworkScopedName(node.Name)
 	nats, err := oc.buildUDNEgressSNAT(localPodSubnets, outputPort, isUDNAdvertised)
 	if err != nil {
@@ -925,13 +924,13 @@ func (oc *SecondaryLayer3NetworkController) addOrUpdateUDNNodeSubnetEgressSNAT(l
 	return nil
 }
 
-func (oc *SecondaryLayer3NetworkController) addNode(node *corev1.Node) ([]*net.IPNet, error) {
-	// Node subnet for the secondary layer3 network is allocated by cluster manager.
+func (oc *Layer3UserDefinedNetworkController) addNode(node *corev1.Node) ([]*net.IPNet, error) {
+	// Node subnet for the layer3 UDN is allocated by cluster manager.
 	// Make sure that the node is allocated with the subnet before proceeding
 	// to create OVN Northbound resources.
 	hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, oc.GetNetworkName())
 	if err != nil || len(hostSubnets) < 1 {
-		return nil, fmt.Errorf("subnet annotation in the node %q for the layer3 secondary network %s is missing : %w", node.Name, oc.GetNetworkName(), err)
+		return nil, fmt.Errorf("subnet annotation in the node %q for the layer3 UDN %s is missing : %w", node.Name, oc.GetNetworkName(), err)
 	}
 
 	err = oc.createNodeLogicalSwitch(node.Name, hostSubnets, oc.clusterLoadBalancerGroupUUID, oc.switchLoadBalancerGroupUUID)
@@ -943,14 +942,13 @@ func (oc *SecondaryLayer3NetworkController) addNode(node *corev1.Node) ([]*net.I
 		if err := oc.addOrUpdateUDNNodeSubnetEgressSNAT(hostSubnets, node, isUDNAdvertised); err != nil {
 			return nil, err
 		}
-		if !isUDNAdvertised {
-			if util.IsRouteAdvertisementsEnabled() {
-				if err := oc.deleteAdvertisedNetworkIsolation(node.Name); err != nil {
-					return nil, err
-				}
+		shouldIsolate := isUDNAdvertised && config.OVNKubernetesFeature.AdvertisedUDNIsolationMode == config.AdvertisedUDNIsolationModeStrict
+		if shouldIsolate {
+			if err = oc.addAdvertisedNetworkIsolation(node.Name); err != nil {
+				return nil, err
 			}
 		} else {
-			if err := oc.addAdvertisedNetworkIsolation(node.Name); err != nil {
+			if err = oc.deleteAdvertisedNetworkIsolation(node.Name); err != nil {
 				return nil, err
 			}
 		}
@@ -958,7 +956,7 @@ func (oc *SecondaryLayer3NetworkController) addNode(node *corev1.Node) ([]*net.I
 	return hostSubnets, nil
 }
 
-func (oc *SecondaryLayer3NetworkController) deleteNodeEvent(node *corev1.Node) error {
+func (oc *Layer3UserDefinedNetworkController) deleteNodeEvent(node *corev1.Node) error {
 	klog.V(5).Infof("Deleting Node %q for network %s. Removing the node from "+
 		"various caches", node.Name, oc.GetNetworkName())
 
@@ -989,7 +987,7 @@ func (oc *SecondaryLayer3NetworkController) deleteNodeEvent(node *corev1.Node) e
 	return nil
 }
 
-func (oc *SecondaryLayer3NetworkController) deleteNode(nodeName string) error {
+func (oc *Layer3UserDefinedNetworkController) deleteNode(nodeName string) error {
 	if err := oc.deleteNodeLogicalNetwork(nodeName); err != nil {
 		return fmt.Errorf("error deleting node %s logical network: %v", nodeName, err)
 	}
@@ -1001,7 +999,7 @@ func (oc *SecondaryLayer3NetworkController) deleteNode(nodeName string) error {
 // watchNodes() will be called for all existing nodes at startup anyway.
 // Note that this list will include the 'join' cluster switch, which we
 // do not want to delete.
-func (oc *SecondaryLayer3NetworkController) syncNodes(nodes []interface{}) error {
+func (oc *Layer3UserDefinedNetworkController) syncNodes(nodes []interface{}) error {
 	foundNodes := sets.New[string]()
 	for _, tmp := range nodes {
 		node, ok := tmp.(*corev1.Node)
@@ -1045,7 +1043,7 @@ func (oc *SecondaryLayer3NetworkController) syncNodes(nodes []interface{}) error
 	return nil
 }
 
-func (oc *SecondaryLayer3NetworkController) gatherJoinSwitchIPs() error {
+func (oc *Layer3UserDefinedNetworkController) gatherJoinSwitchIPs() error {
 	// Allocate IPs for logical router port prefixed with
 	// `GwRouterToJoinSwitchPrefix` for the network managed by this controller.
 	// This should always allocate the first IPs in the join switch subnets.
@@ -1057,7 +1055,7 @@ func (oc *SecondaryLayer3NetworkController) gatherJoinSwitchIPs() error {
 	return nil
 }
 
-func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *corev1.Node) (*GatewayConfig, error) {
+func (oc *Layer3UserDefinedNetworkController) nodeGatewayConfig(node *corev1.Node) (*GatewayConfig, error) {
 	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get node %s network %s L3 gateway config: %v", node.Name, oc.GetNetworkName(), err)
@@ -1099,7 +1097,7 @@ func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *corev1.Node)
 		return nil, fmt.Errorf("failed to get node %q subnet annotation for network %q: %v", node.Name, oc.GetNetworkName(), err)
 	}
 
-	gwLRPJoinIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, oc.GetNetworkName())
+	gwLRPJoinIPs, err := udn.GetGWRouterIPs(node, oc.GetNetInfo())
 	if err != nil {
 		return nil, fmt.Errorf("failed extracting node %q GW router join subnet IP for layer3 network %q: %w", node.Name, networkName, err)
 	}
@@ -1118,7 +1116,7 @@ func (oc *SecondaryLayer3NetworkController) nodeGatewayConfig(node *corev1.Node)
 	}, nil
 }
 
-func (oc *SecondaryLayer3NetworkController) newClusterRouter() (*nbdb.LogicalRouter, error) {
+func (oc *Layer3UserDefinedNetworkController) newClusterRouter() (*nbdb.LogicalRouter, error) {
 	if oc.multicastSupport {
 		return oc.gatewayTopologyFactory.NewClusterRouterWithMulticastSupport(
 			oc.GetNetworkScopedClusterRouterName(),
@@ -1133,7 +1131,7 @@ func (oc *SecondaryLayer3NetworkController) newClusterRouter() (*nbdb.LogicalRou
 	)
 }
 
-func (oc *SecondaryLayer3NetworkController) newGatewayManager(nodeName string) *GatewayManager {
+func (oc *Layer3UserDefinedNetworkController) newGatewayManager(nodeName string) *GatewayManager {
 	return NewGatewayManager(
 		oc.controllerName,
 		nodeName,
@@ -1147,7 +1145,7 @@ func (oc *SecondaryLayer3NetworkController) newGatewayManager(nodeName string) *
 	)
 }
 
-func (oc *SecondaryLayer3NetworkController) gatewayOptions() []GatewayOption {
+func (oc *Layer3UserDefinedNetworkController) gatewayOptions() []GatewayOption {
 	var opts []GatewayOption
 	if oc.clusterLoadBalancerGroupUUID != "" {
 		opts = append(opts, WithLoadBalancerGroups(
@@ -1159,7 +1157,7 @@ func (oc *SecondaryLayer3NetworkController) gatewayOptions() []GatewayOption {
 	return opts
 }
 
-func (oc *SecondaryLayer3NetworkController) gatewayManagerForNode(nodeName string) *GatewayManager {
+func (oc *Layer3UserDefinedNetworkController) gatewayManagerForNode(nodeName string) *GatewayManager {
 	obj, isFound := oc.gatewayManagers.Load(nodeName)
 	if !isFound {
 		return oc.newGatewayManager(nodeName)
@@ -1177,7 +1175,7 @@ func (oc *SecondaryLayer3NetworkController) gatewayManagerForNode(nodeName strin
 	}
 }
 
-func (oc *SecondaryLayer3NetworkController) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
+func (oc *Layer3UserDefinedNetworkController) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
 	useLBGroups := oc.clusterLoadBalancerGroupUUID != ""
 	// use 5 workers like most of the kubernetes controllers in the kubernetes controller-manager
 	// do not use LB templates for UDNs - OVN bug https://issues.redhat.com/browse/FDP-988
@@ -1188,7 +1186,7 @@ func (oc *SecondaryLayer3NetworkController) StartServiceController(wg *sync.Wait
 	return nil
 }
 
-func (oc *SecondaryLayer3NetworkController) GetNetworkInterConnectInfo() *networkmanager.NetworkInterConnectInfo {
+func (oc *Layer3UserDefinedNetworkController) GetNetworkInterConnectInfo() *networkmanager.NetworkInterConnectInfo {
 	return &networkmanager.NetworkInterConnectInfo{
 		LogicalEntityToConnect: &nbdb.LogicalRouter{Name: oc.GetNetworkScopedName(types.OVNClusterRouter)},
 	}

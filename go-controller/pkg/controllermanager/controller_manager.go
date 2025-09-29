@@ -2,6 +2,7 @@ package controllermanager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -69,7 +70,7 @@ type ControllerManager struct {
 
 func (cm *ControllerManager) NewNetworkController(nInfo util.NetInfo) (networkmanager.NetworkController, error) {
 	// Pass a shallow clone of the watch factory, this allows multiplexing
-	// informers for secondary networks.
+	// informers for user-defined networks.
 	cnci, err := cm.newCommonNetworkControllerInfo(cm.watchFactory.ShallowClone())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create network controller info %w", err)
@@ -77,11 +78,11 @@ func (cm *ControllerManager) NewNetworkController(nInfo util.NetInfo) (networkma
 	topoType := nInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology:
-		return ovn.NewSecondaryLayer3NetworkController(cnci, nInfo, cm.networkManager.Interface(), cm.routeImportManager, cm.eIPController, cm.portCache)
+		return ovn.NewLayer3UserDefinedNetworkController(cnci, nInfo, cm.networkManager.Interface(), cm.routeImportManager, cm.eIPController, cm.portCache)
 	case ovntypes.Layer2Topology:
-		return ovn.NewSecondaryLayer2NetworkController(cnci, nInfo, cm.networkManager.Interface(), cm.routeImportManager, cm.portCache, cm.eIPController)
+		return ovn.NewLayer2UserDefinedNetworkController(cnci, nInfo, cm.networkManager.Interface(), cm.routeImportManager, cm.portCache, cm.eIPController)
 	case ovntypes.LocalnetTopology:
-		return ovn.NewSecondaryLocalnetNetworkController(cnci, nInfo, cm.networkManager.Interface()), nil
+		return ovn.NewLocalnetUserDefinedNetworkController(cnci, nInfo, cm.networkManager.Interface()), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
@@ -89,7 +90,7 @@ func (cm *ControllerManager) NewNetworkController(nInfo util.NetInfo) (networkma
 // newDummyNetworkController creates a dummy network controller used to clean up specific network
 func (cm *ControllerManager) newDummyNetworkController(topoType, netName string) (networkmanager.NetworkController, error) {
 	// Pass a shallow clone of the watch factory, this allows multiplexing
-	// informers for secondary networks.
+	// informers for user-defined Networks.
 	cnci, err := cm.newCommonNetworkControllerInfo(cm.watchFactory.ShallowClone())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create network controller info %w", err)
@@ -97,11 +98,11 @@ func (cm *ControllerManager) newDummyNetworkController(topoType, netName string)
 	netInfo, _ := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: topoType}, nil)
 	switch topoType {
 	case ovntypes.Layer3Topology:
-		return ovn.NewSecondaryLayer3NetworkController(cnci, netInfo, cm.networkManager.Interface(), cm.routeImportManager, cm.eIPController, cm.portCache)
+		return ovn.NewLayer3UserDefinedNetworkController(cnci, netInfo, cm.networkManager.Interface(), cm.routeImportManager, cm.eIPController, cm.portCache)
 	case ovntypes.Layer2Topology:
-		return ovn.NewSecondaryLayer2NetworkController(cnci, netInfo, cm.networkManager.Interface(), cm.routeImportManager, cm.portCache, cm.eIPController)
+		return ovn.NewLayer2UserDefinedNetworkController(cnci, netInfo, cm.networkManager.Interface(), cm.routeImportManager, cm.portCache, cm.eIPController)
 	case ovntypes.LocalnetTopology:
-		return ovn.NewSecondaryLocalnetNetworkController(cnci, netInfo, cm.networkManager.Interface()), nil
+		return ovn.NewLocalnetUserDefinedNetworkController(cnci, netInfo, cm.networkManager.Interface()), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
@@ -195,15 +196,15 @@ func (cm *ControllerManager) CleanupStaleNetworks(validNetworks ...util.NetInfo)
 		}
 	}
 
-	if util.IsRouteAdvertisementsEnabled() {
-		// Remove stale subnets from the advertised networks address set used for isolation
-		// NOTE: network reconciliation will take care of removing the subnets for existing networks that are no longer
-		// advertised.
-		addressSetFactory := addressset.NewOvnAddressSetFactory(cm.nbClient, config.IPv4Mode, config.IPv6Mode)
-		advertisedSubnets, err := addressSetFactory.GetAddressSet(ovn.GetAdvertisedNetworkSubnetsAddressSetDBIDs())
-		if err != nil {
-			return fmt.Errorf("failed to get advertised subnets addresset %s: %w", ovn.GetAdvertisedNetworkSubnetsAddressSetDBIDs(), err)
-		}
+	// Remove stale subnets from the advertised networks address set used for isolation
+	// NOTE: network reconciliation will take care of removing the subnets for existing networks that are no longer
+	// advertised.
+	addressSetFactory := addressset.NewOvnAddressSetFactory(cm.nbClient, config.IPv4Mode, config.IPv6Mode)
+	advertisedSubnets, err := addressSetFactory.GetAddressSet(ovn.GetAdvertisedNetworkSubnetsAddressSetDBIDs())
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		return fmt.Errorf("failed to get advertised subnets addresset %s: %w", ovn.GetAdvertisedNetworkSubnetsAddressSetDBIDs(), err)
+	}
+	if advertisedSubnets != nil {
 		v4AdvertisedSubnets, v6AdvertisedSubnets := advertisedSubnets.GetAddresses()
 		var invalidSubnets []string
 		for _, subnet := range append(v4AdvertisedSubnets, v6AdvertisedSubnets...) {

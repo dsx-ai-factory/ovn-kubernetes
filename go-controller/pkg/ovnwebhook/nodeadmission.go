@@ -25,17 +25,18 @@ type checkNodeAnnot func(v annotationChange, nodeName string) error
 
 // commonNodeAnnotationChecks holds annotations allowed for ovnkube-node:<nodeName> users in non-IC and IC environments
 var commonNodeAnnotationChecks = map[string]checkNodeAnnot{
-	util.OVNNodeBridgeEgressIPs:            nil,
-	util.OVNNodeHostCIDRs:                  nil,
-	util.OVNNodeSecondaryHostEgressIPs:     nil,
-	util.OvnNodeL3GatewayConfig:            nil,
-	util.OvnNodeManagementPortMacAddress:   nil,
+	util.OVNNodeBridgeEgressIPs:        nil,
+	util.OVNNodeHostCIDRs:              nil,
+	util.OVNNodeSecondaryHostEgressIPs: nil,
+	util.OvnNodeL3GatewayConfig:        nil,
+	//util.OvnNodeManagementPortMacAddress:   nil,
 	util.OvnNodeManagementPortMacAddresses: nil,
 	util.OvnNodeIfAddr:                     nil,
 	util.OvnNodeMasqCIDR:                   nil,
 	util.OvnNodeGatewayMtuSupport:          nil,
 	util.OvnNodeManagementPort:             nil,
 	util.OvnNodeDontSNATSubnets:            nil,
+	util.OVNNodePrimaryDPUHostAddr:         nil,
 	util.OvnNodeChassisID: func(v annotationChange, _ string) error {
 		if v.action == removed {
 			return fmt.Errorf("%s cannot be removed", util.OvnNodeChassisID)

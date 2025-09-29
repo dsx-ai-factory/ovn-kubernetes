@@ -37,15 +37,15 @@ import (
 
 // method/structure shared by all layer 2 network controller, including localnet and layer2 network controllres.
 
-type secondaryLayer2NetworkControllerEventHandler struct {
+type layer2UserDefinedNetworkControllerEventHandler struct {
 	baseHandler  baseNetworkControllerEventHandler
 	watchFactory *factory.WatchFactory
 	objType      reflect.Type
-	oc           *SecondaryLayer2NetworkController
+	oc           *Layer2UserDefinedNetworkController
 	syncFunc     func([]interface{}) error
 }
 
-func (h *secondaryLayer2NetworkControllerEventHandler) FilterOutResource(obj interface{}) bool {
+func (h *layer2UserDefinedNetworkControllerEventHandler) FilterOutResource(obj interface{}) bool {
 	return h.oc.FilterOutResource(h.objType, obj)
 }
 
@@ -53,56 +53,56 @@ func (h *secondaryLayer2NetworkControllerEventHandler) FilterOutResource(obj int
 // type considers them equal and therefore no update is needed. It returns false when the two objects are not considered
 // equal and an update needs be executed. This is regardless of how the update is carried out (whether with a dedicated update
 // function or with a delete on the old obj followed by an add on the new obj).
-func (h *secondaryLayer2NetworkControllerEventHandler) AreResourcesEqual(obj1, obj2 interface{}) (bool, error) {
+func (h *layer2UserDefinedNetworkControllerEventHandler) AreResourcesEqual(obj1, obj2 interface{}) (bool, error) {
 	return h.baseHandler.areResourcesEqual(h.objType, obj1, obj2)
 }
 
 // GetInternalCacheEntry returns the internal cache entry for this object, given an object and its type.
 // This is now used only for pods, which will get their the logical port cache entry.
-func (h *secondaryLayer2NetworkControllerEventHandler) GetInternalCacheEntry(obj interface{}) interface{} {
-	return h.oc.GetInternalCacheEntryForSecondaryNetwork(h.objType, obj)
+func (h *layer2UserDefinedNetworkControllerEventHandler) GetInternalCacheEntry(obj interface{}) interface{} {
+	return h.oc.GetInternalCacheEntryForUserDefinedNetwork(h.objType, obj)
 }
 
 // GetResourceFromInformerCache returns the latest state of the object, given an object key and its type.
 // from the informers cache.
-func (h *secondaryLayer2NetworkControllerEventHandler) GetResourceFromInformerCache(key string) (interface{}, error) {
+func (h *layer2UserDefinedNetworkControllerEventHandler) GetResourceFromInformerCache(key string) (interface{}, error) {
 	return h.baseHandler.getResourceFromInformerCache(h.objType, h.watchFactory, key)
 }
 
 // RecordAddEvent records the add event on this given object.
-func (h *secondaryLayer2NetworkControllerEventHandler) RecordAddEvent(obj interface{}) {
+func (h *layer2UserDefinedNetworkControllerEventHandler) RecordAddEvent(obj interface{}) {
 	h.baseHandler.recordAddEvent(h.objType, obj)
 }
 
 // RecordUpdateEvent records the udpate event on this given object.
-func (h *secondaryLayer2NetworkControllerEventHandler) RecordUpdateEvent(obj interface{}) {
+func (h *layer2UserDefinedNetworkControllerEventHandler) RecordUpdateEvent(obj interface{}) {
 	h.baseHandler.recordUpdateEvent(h.objType, obj)
 }
 
 // RecordDeleteEvent records the delete event on this given object.
-func (h *secondaryLayer2NetworkControllerEventHandler) RecordDeleteEvent(obj interface{}) {
+func (h *layer2UserDefinedNetworkControllerEventHandler) RecordDeleteEvent(obj interface{}) {
 	h.baseHandler.recordDeleteEvent(h.objType, obj)
 }
 
 // RecordSuccessEvent records the success event on this given object.
-func (h *secondaryLayer2NetworkControllerEventHandler) RecordSuccessEvent(obj interface{}) {
+func (h *layer2UserDefinedNetworkControllerEventHandler) RecordSuccessEvent(obj interface{}) {
 	h.baseHandler.recordSuccessEvent(h.objType, obj)
 }
 
 // RecordErrorEvent records the error event on this given object.
-func (h *secondaryLayer2NetworkControllerEventHandler) RecordErrorEvent(_ interface{}, _ string, _ error) {
+func (h *layer2UserDefinedNetworkControllerEventHandler) RecordErrorEvent(_ interface{}, _ string, _ error) {
 }
 
 // IsResourceScheduled returns true if the given object has been scheduled.
 // Only applied to pods for now. Returns true for all other types.
-func (h *secondaryLayer2NetworkControllerEventHandler) IsResourceScheduled(obj interface{}) bool {
+func (h *layer2UserDefinedNetworkControllerEventHandler) IsResourceScheduled(obj interface{}) bool {
 	return h.baseHandler.isResourceScheduled(h.objType, obj)
 }
 
 // AddResource adds the specified object to the cluster according to its type and returns the error,
 // if any, yielded during object creation.
 // Given an object to add and a boolean specifying if the function was executed from iterateRetryResources
-func (h *secondaryLayer2NetworkControllerEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
+func (h *layer2UserDefinedNetworkControllerEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
 	switch h.objType {
 	case factory.NodeType:
 		node, ok := obj.(*corev1.Node)
@@ -131,14 +131,14 @@ func (h *secondaryLayer2NetworkControllerEventHandler) AddResource(obj interface
 		}
 		return h.oc.addUpdateRemoteNodeEvent(node, config.OVNKubernetesFeature.EnableInterconnect)
 	default:
-		return h.oc.AddSecondaryNetworkResourceCommon(h.objType, obj)
+		return h.oc.AddUserDefinedNetworkResourceCommon(h.objType, obj)
 	}
 }
 
 // DeleteResource deletes the object from the cluster according to the delete logic of its resource type.
 // Given an object and optionally a cachedObj; cachedObj is the internal cache entry for this object,
 // used for now for pods and network policies.
-func (h *secondaryLayer2NetworkControllerEventHandler) DeleteResource(obj, cachedObj interface{}) error {
+func (h *layer2UserDefinedNetworkControllerEventHandler) DeleteResource(obj, cachedObj interface{}) error {
 	switch h.objType {
 	case factory.NodeType:
 		node, ok := obj.(*corev1.Node)
@@ -147,7 +147,7 @@ func (h *secondaryLayer2NetworkControllerEventHandler) DeleteResource(obj, cache
 		}
 		return h.oc.deleteNodeEvent(node)
 	default:
-		return h.oc.DeleteSecondaryNetworkResourceCommon(h.objType, obj, cachedObj)
+		return h.oc.DeleteUserDefinedNetworkResourceCommon(h.objType, obj, cachedObj)
 	}
 }
 
@@ -155,7 +155,7 @@ func (h *secondaryLayer2NetworkControllerEventHandler) DeleteResource(obj, cache
 // type and returns the error, if any, yielded during the object update.
 // Given an old and a new object; The inRetryCache boolean argument is to indicate if the given resource
 // is in the retryCache or not.
-func (h *secondaryLayer2NetworkControllerEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryCache bool) error {
+func (h *layer2UserDefinedNetworkControllerEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryCache bool) error {
 	switch h.objType {
 	case factory.NodeType:
 		newNode, ok := newObj.(*corev1.Node)
@@ -180,8 +180,7 @@ func (h *secondaryLayer2NetworkControllerEventHandler) UpdateResource(oldObj, ne
 					hostCIDRsChanged(oldNode, newNode) ||
 					nodeGatewayMTUSupportChanged(oldNode, newNode)
 				_, syncRerouteFailed := h.oc.syncEIPNodeRerouteFailed.Load(newNode.Name)
-				shouldSyncReroute := syncRerouteFailed || util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) ||
-					joinCIDRChanged(oldNode, newNode, h.oc.GetNetworkName())
+				shouldSyncReroute := syncRerouteFailed || util.NodeHostCIDRsAnnotationChanged(oldNode, newNode)
 				nodeSyncsParam = &nodeSyncs{
 					syncMgmtPort: shouldSyncMgmtPort,
 					syncGw:       shouldSyncGW,
@@ -206,7 +205,7 @@ func (h *secondaryLayer2NetworkControllerEventHandler) UpdateResource(oldObj, ne
 	case factory.PodType:
 		newPod := newObj.(*corev1.Pod)
 		oldPod := oldObj.(*corev1.Pod)
-		if err := h.oc.ensurePodForSecondaryNetwork(oldPod, newPod, shouldAddPort(oldPod, newPod, inRetryCache)); err != nil {
+		if err := h.oc.ensurePodForUserDefinedNetwork(oldPod, newPod, shouldAddPort(oldPod, newPod, inRetryCache)); err != nil {
 			return err
 		}
 
@@ -215,11 +214,11 @@ func (h *secondaryLayer2NetworkControllerEventHandler) UpdateResource(oldObj, ne
 		}
 		return nil
 	default:
-		return h.oc.UpdateSecondaryNetworkResourceCommon(h.objType, oldObj, newObj, inRetryCache)
+		return h.oc.UpdateUserDefinedNetworkResourceCommon(h.objType, oldObj, newObj, inRetryCache)
 	}
 }
 
-func (h *secondaryLayer2NetworkControllerEventHandler) SyncFunc(objs []interface{}) error {
+func (h *layer2UserDefinedNetworkControllerEventHandler) SyncFunc(objs []interface{}) error {
 	var syncFunc func([]interface{}) error
 
 	if h.syncFunc != nil {
@@ -231,7 +230,7 @@ func (h *secondaryLayer2NetworkControllerEventHandler) SyncFunc(objs []interface
 			syncFunc = h.oc.syncNodes
 
 		case factory.PodType:
-			syncFunc = h.oc.syncPodsForSecondaryNetwork
+			syncFunc = h.oc.syncPodsForUserDefinedNetwork
 
 		case factory.NamespaceType:
 			syncFunc = h.oc.syncNamespaces
@@ -257,14 +256,14 @@ func (h *secondaryLayer2NetworkControllerEventHandler) SyncFunc(objs []interface
 
 // IsObjectInTerminalState returns true if the given object is a in terminal state.
 // This is used now for pods that are either in a PodSucceeded or in a PodFailed state.
-func (h *secondaryLayer2NetworkControllerEventHandler) IsObjectInTerminalState(obj interface{}) bool {
+func (h *layer2UserDefinedNetworkControllerEventHandler) IsObjectInTerminalState(obj interface{}) bool {
 	return h.baseHandler.isObjectInTerminalState(h.objType, obj)
 }
 
-// SecondaryLayer2NetworkController is created for logical network infrastructure and policy
-// for a secondary layer2 network
-type SecondaryLayer2NetworkController struct {
-	BaseSecondaryLayer2NetworkController
+// Layer2UserDefinedNetworkController is created for logical network infrastructure and policy
+// for a layer2 UDN
+type Layer2UserDefinedNetworkController struct {
+	BaseLayer2UserDefinedNetworkController
 
 	// Node-specific syncMaps used by node event handler
 	mgmtPortFailed           sync.Map
@@ -299,34 +298,44 @@ type SecondaryLayer2NetworkController struct {
 	defaultGatewayReconciler *kubevirt.DefaultGatewayReconciler
 }
 
-// NewSecondaryLayer2NetworkController create a new OVN controller for the given secondary layer2 nad
-func NewSecondaryLayer2NetworkController(
+// NewLayer2UserDefinedNetworkController create a new OVN controller for the given layer2 NAD
+func NewLayer2UserDefinedNetworkController(
 	cnci *CommonNetworkControllerInfo,
 	netInfo util.NetInfo,
 	networkManager networkmanager.Interface,
 	routeImportManager routeimport.Manager,
 	portCache *PortCache,
-	eIPController *EgressIPController) (*SecondaryLayer2NetworkController, error) {
+	eIPController *EgressIPController) (*Layer2UserDefinedNetworkController, error) {
 
 	stopChan := make(chan struct{})
 
 	ipv4Mode, ipv6Mode := netInfo.IPMode()
 	addressSetFactory := addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode)
 
-	lsManagerFactoryFn := lsm.NewL2SwitchManager
+	lsManager := lsm.NewL2SwitchManager()
 	if netInfo.IsPrimaryNetwork() {
-		lsManagerFactoryFn = lsm.NewL2SwitchManagerForUserDefinedPrimaryNetwork
+		var gatewayIPs, mgmtIPs []*net.IPNet
+		for _, subnet := range netInfo.Subnets() {
+			if gwIP := netInfo.GetNodeGatewayIP(subnet.CIDR); gwIP != nil {
+				gatewayIPs = append(gatewayIPs, gwIP)
+			}
+			if mgmtIP := netInfo.GetNodeManagementIP(subnet.CIDR); mgmtIP != nil {
+				mgmtIPs = append(mgmtIPs, mgmtIP)
+			}
+		}
+
+		lsManager = lsm.NewL2SwitchManagerForUserDefinedPrimaryNetwork(gatewayIPs, mgmtIPs)
 	}
 
-	oc := &SecondaryLayer2NetworkController{
-		BaseSecondaryLayer2NetworkController: BaseSecondaryLayer2NetworkController{
+	oc := &Layer2UserDefinedNetworkController{
+		BaseLayer2UserDefinedNetworkController: BaseLayer2UserDefinedNetworkController{
 
-			BaseSecondaryNetworkController: BaseSecondaryNetworkController{
+			BaseUserDefinedNetworkController: BaseUserDefinedNetworkController{
 				BaseNetworkController: BaseNetworkController{
 					CommonNetworkControllerInfo: *cnci,
 					controllerName:              getNetworkControllerName(netInfo.GetNetworkName()),
 					ReconcilableNetInfo:         util.NewReconcilableNetInfo(netInfo),
-					lsManager:                   lsManagerFactoryFn(),
+					lsManager:                   lsManager,
 					logicalPortCache:            portCache,
 					namespaces:                  make(map[string]*namespaceInfo),
 					namespacesMutex:             sync.Mutex{},
@@ -396,13 +405,13 @@ func NewSecondaryLayer2NetworkController(
 	return oc, nil
 }
 
-// Start starts the secondary layer2 controller, handles all events and creates all needed logical entities
-func (oc *SecondaryLayer2NetworkController) Start(_ context.Context) error {
-	klog.Infof("Start secondary %s network controller of network %s", oc.TopologyType(), oc.GetNetworkName())
+// Start starts the layer2 UDN controller, handles all events and creates all needed logical entities
+func (oc *Layer2UserDefinedNetworkController) Start(_ context.Context) error {
+	klog.Infof("Starting controller for UDN %s", oc.GetNetworkName())
 
 	start := time.Now()
 	defer func() {
-		klog.Infof("Starting controller for secondary network %s took %v", oc.GetNetworkName(), time.Since(start))
+		klog.Infof("Starting controller for UDN %s took %v", oc.GetNetworkName(), time.Since(start))
 	}()
 
 	if err := oc.init(); err != nil {
@@ -412,8 +421,8 @@ func (oc *SecondaryLayer2NetworkController) Start(_ context.Context) error {
 	return oc.run()
 }
 
-func (oc *SecondaryLayer2NetworkController) run() error {
-	err := oc.BaseSecondaryLayer2NetworkController.run()
+func (oc *Layer2UserDefinedNetworkController) run() error {
+	err := oc.BaseLayer2UserDefinedNetworkController.run()
 	if err != nil {
 		return err
 	}
@@ -433,9 +442,9 @@ func (oc *SecondaryLayer2NetworkController) run() error {
 
 // Cleanup cleans up logical entities for the given network, called from net-attach-def routine
 // could be called from a dummy Controller (only has CommonNetworkControllerInfo set)
-func (oc *SecondaryLayer2NetworkController) Cleanup() error {
+func (oc *Layer2UserDefinedNetworkController) Cleanup() error {
 	networkName := oc.GetNetworkName()
-	if err := oc.BaseSecondaryLayer2NetworkController.cleanup(); err != nil {
+	if err := oc.BaseLayer2UserDefinedNetworkController.cleanup(); err != nil {
 		return fmt.Errorf("failed to cleanup network %q: %w", networkName, err)
 	}
 
@@ -467,7 +476,7 @@ func (oc *SecondaryLayer2NetworkController) Cleanup() error {
 	return nil
 }
 
-func (oc *SecondaryLayer2NetworkController) init() error {
+func (oc *Layer2UserDefinedNetworkController) init() error {
 	// Create default Control Plane Protection (COPP) entry for routers
 	defaultCOPPUUID, err := EnsureDefaultCOPP(oc.nbClient)
 	if err != nil {
@@ -482,11 +491,14 @@ func (oc *SecondaryLayer2NetworkController) init() error {
 	oc.clusterLoadBalancerGroupUUID = clusterLBGroupUUID
 	oc.switchLoadBalancerGroupUUID = switchLBGroupUUID
 	oc.routerLoadBalancerGroupUUID = routerLBGroupUUID
+	excludeSubnets := oc.ExcludeSubnets()
+	excludeSubnets = append(excludeSubnets, oc.InfrastructureSubnets()...)
 
 	_, err = oc.initializeLogicalSwitch(
 		oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch),
 		oc.Subnets(),
-		oc.ExcludeSubnets(),
+		excludeSubnets,
+		oc.ReservedSubnets(),
 		oc.clusterLoadBalancerGroupUUID,
 		oc.switchLoadBalancerGroupUUID,
 	)
@@ -508,19 +520,19 @@ func (oc *SecondaryLayer2NetworkController) init() error {
 	return err
 }
 
-func (oc *SecondaryLayer2NetworkController) Stop() {
-	klog.Infof("Stoping controller for secondary network %s", oc.GetNetworkName())
-	oc.BaseSecondaryLayer2NetworkController.stop()
+func (oc *Layer2UserDefinedNetworkController) Stop() {
+	klog.Infof("Stoping controller for UDN %s", oc.GetNetworkName())
+	oc.BaseLayer2UserDefinedNetworkController.stop()
 }
 
-func (oc *SecondaryLayer2NetworkController) Reconcile(netInfo util.NetInfo) error {
+func (oc *Layer2UserDefinedNetworkController) Reconcile(netInfo util.NetInfo) error {
 	return oc.BaseNetworkController.reconcile(
 		netInfo,
 		func(node string) { oc.gatewaysFailed.Store(node, true) },
 	)
 }
 
-func (oc *SecondaryLayer2NetworkController) initRetryFramework() {
+func (oc *Layer2UserDefinedNetworkController) initRetryFramework() {
 	oc.retryNodes = oc.newRetryFramework(factory.NodeType)
 	oc.retryPods = oc.newRetryFramework(factory.PodType)
 	if oc.allocatesPodAnnotation() && oc.AllowsPersistentIPs() {
@@ -544,9 +556,9 @@ func (oc *SecondaryLayer2NetworkController) initRetryFramework() {
 }
 
 // newRetryFramework builds and returns a retry framework for the input resource type;
-func (oc *SecondaryLayer2NetworkController) newRetryFramework(
+func (oc *Layer2UserDefinedNetworkController) newRetryFramework(
 	objectType reflect.Type) *retry.RetryFramework {
-	eventHandler := &secondaryLayer2NetworkControllerEventHandler{
+	eventHandler := &layer2UserDefinedNetworkControllerEventHandler{
 		baseHandler:  baseNetworkControllerEventHandler{},
 		objType:      objectType,
 		watchFactory: oc.watchFactory,
@@ -567,7 +579,7 @@ func (oc *SecondaryLayer2NetworkController) newRetryFramework(
 	)
 }
 
-func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1.Node, nSyncs *nodeSyncs) error {
+func (oc *Layer2UserDefinedNetworkController) addUpdateLocalNodeEvent(node *corev1.Node, nSyncs *nodeSyncs) error {
 	var errs []error
 
 	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
@@ -591,14 +603,13 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 				if err != nil {
 					return err
 				}
-				if !isUDNAdvertised {
-					if util.IsRouteAdvertisementsEnabled() {
-						if err = oc.deleteAdvertisedNetworkIsolation(node.Name); err != nil {
-							return err
-						}
+				shouldIsolate := isUDNAdvertised && config.OVNKubernetesFeature.AdvertisedUDNIsolationMode == config.AdvertisedUDNIsolationModeStrict
+				if shouldIsolate {
+					if err = oc.addAdvertisedNetworkIsolation(node.Name); err != nil {
+						return err
 					}
 				} else {
-					if err = oc.addAdvertisedNetworkIsolation(node.Name); err != nil {
+					if err = oc.deleteAdvertisedNetworkIsolation(node.Name); err != nil {
 						return err
 					}
 				}
@@ -648,7 +659,7 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 		}
 	}
 
-	errs = append(errs, oc.BaseSecondaryLayer2NetworkController.addUpdateLocalNodeEvent(node))
+	errs = append(errs, oc.BaseLayer2UserDefinedNetworkController.addUpdateLocalNodeEvent(node))
 
 	err := utilerrors.Join(errs...)
 	if err != nil {
@@ -657,7 +668,7 @@ func (oc *SecondaryLayer2NetworkController) addUpdateLocalNodeEvent(node *corev1
 	return err
 }
 
-func (oc *SecondaryLayer2NetworkController) addUpdateRemoteNodeEvent(node *corev1.Node, syncZoneIC bool) error {
+func (oc *Layer2UserDefinedNetworkController) addUpdateRemoteNodeEvent(node *corev1.Node, syncZoneIC bool) error {
 	var errs []error
 
 	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
@@ -672,7 +683,7 @@ func (oc *SecondaryLayer2NetworkController) addUpdateRemoteNodeEvent(node *corev
 		}
 	}
 
-	errs = append(errs, oc.BaseSecondaryLayer2NetworkController.addUpdateRemoteNodeEvent(node))
+	errs = append(errs, oc.BaseLayer2UserDefinedNetworkController.addUpdateRemoteNodeEvent(node))
 
 	err := utilerrors.Join(errs...)
 	if err != nil {
@@ -681,8 +692,8 @@ func (oc *SecondaryLayer2NetworkController) addUpdateRemoteNodeEvent(node *corev
 	return err
 }
 
-func (oc *SecondaryLayer2NetworkController) addPortForRemoteNodeGR(node *corev1.Node) error {
-	nodeJoinSubnetIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, oc.GetNetworkName())
+func (oc *Layer2UserDefinedNetworkController) addPortForRemoteNodeGR(node *corev1.Node) error {
+	nodeJoinSubnetIPs, err := udn.GetGWRouterIPs(node, oc.GetNetInfo())
 	if err != nil {
 		if util.IsAnnotationNotSetError(err) {
 			// remote node may not have the annotation yet, suppress it
@@ -734,7 +745,7 @@ func (oc *SecondaryLayer2NetworkController) addPortForRemoteNodeGR(node *corev1.
 	return nil
 }
 
-func (oc *SecondaryLayer2NetworkController) deleteNodeEvent(node *corev1.Node) error {
+func (oc *Layer2UserDefinedNetworkController) deleteNodeEvent(node *corev1.Node) error {
 	// TBD-merge note that gateway Cleanup() will delete the logical router port rtos-<layer2_network_switch>
 	// whose name conflicts with logical router port used for network inter-connect to a layer2/default network
 	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
@@ -763,7 +774,7 @@ func (oc *SecondaryLayer2NetworkController) deleteNodeEvent(node *corev1.Node) e
 // If isUDNAdvertised is true, then we want to SNAT all packets that are coming from pods on this network
 // leaving towards nodeIPs on the cluster to masqueradeIP. If network is advertise then the SNAT looks like this:
 // "eth.dst == 0a:58:5d:5d:00:02 && (ip4.dst == $a712973235162149816)" "169.254.0.36" "93.93.0.0/16"
-func (oc *SecondaryLayer2NetworkController) addOrUpdateUDNClusterSubnetEgressSNAT(localPodSubnets []*net.IPNet, gwRouterName string, isUDNAdvertised bool) error {
+func (oc *Layer2UserDefinedNetworkController) addOrUpdateUDNClusterSubnetEgressSNAT(localPodSubnets []*net.IPNet, gwRouterName string, isUDNAdvertised bool) error {
 	outputPort := types.GWRouterToJoinSwitchPrefix + gwRouterName
 	nats, err := oc.buildUDNEgressSNAT(localPodSubnets, outputPort, isUDNAdvertised)
 	if err != nil {
@@ -782,7 +793,7 @@ func (oc *SecondaryLayer2NetworkController) addOrUpdateUDNClusterSubnetEgressSNA
 	return nil
 }
 
-func (oc *SecondaryLayer2NetworkController) nodeGatewayConfig(node *corev1.Node) (*GatewayConfig, error) {
+func (oc *Layer2UserDefinedNetworkController) nodeGatewayConfig(node *corev1.Node) (*GatewayConfig, error) {
 	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get node %s network %s L3 gateway config: %v", node.Name, oc.GetNetworkName(), err)
@@ -815,7 +826,7 @@ func (oc *SecondaryLayer2NetworkController) nodeGatewayConfig(node *corev1.Node)
 
 	// at layer2 the GR LRP should be different per node same we do for layer3
 	// since they should not collide at the distributed switch later on
-	gwLRPJoinIPs, err := util.ParseNodeGatewayRouterJoinAddrs(node, networkName)
+	gwLRPJoinIPs, err := udn.GetGWRouterIPs(node, oc.GetNetInfo())
 	if err != nil {
 		return nil, fmt.Errorf("failed composing LRP addresses for layer2 network %s: %w", oc.GetNetworkName(), err)
 	}
@@ -833,7 +844,7 @@ func (oc *SecondaryLayer2NetworkController) nodeGatewayConfig(node *corev1.Node)
 	}, nil
 }
 
-func (oc *SecondaryLayer2NetworkController) newGatewayManager(nodeName string) *GatewayManager {
+func (oc *Layer2UserDefinedNetworkController) newGatewayManager(nodeName string) *GatewayManager {
 	return NewGatewayManagerForLayer2Topology(
 		oc.controllerName,
 		nodeName,
@@ -847,7 +858,7 @@ func (oc *SecondaryLayer2NetworkController) newGatewayManager(nodeName string) *
 	)
 }
 
-func (oc *SecondaryLayer2NetworkController) gatewayManagerForNode(nodeName string) *GatewayManager {
+func (oc *Layer2UserDefinedNetworkController) gatewayManagerForNode(nodeName string) *GatewayManager {
 	obj, isFound := oc.gatewayManagers.Load(nodeName)
 	if !isFound {
 		return oc.newGatewayManager(nodeName)
@@ -865,7 +876,7 @@ func (oc *SecondaryLayer2NetworkController) gatewayManagerForNode(nodeName strin
 	}
 }
 
-func (oc *SecondaryLayer2NetworkController) gatewayOptions() []GatewayOption {
+func (oc *Layer2UserDefinedNetworkController) gatewayOptions() []GatewayOption {
 	var opts []GatewayOption
 	if oc.clusterLoadBalancerGroupUUID != "" {
 		opts = append(opts, WithLoadBalancerGroups(
@@ -877,7 +888,7 @@ func (oc *SecondaryLayer2NetworkController) gatewayOptions() []GatewayOption {
 	return opts
 }
 
-func (oc *SecondaryLayer2NetworkController) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
+func (oc *Layer2UserDefinedNetworkController) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
 	useLBGroups := oc.clusterLoadBalancerGroupUUID != ""
 	// use 5 workers like most of the kubernetes controllers in the kubernetes controller-manager
 	// do not use LB templates for UDNs - OVN bug https://issues.redhat.com/browse/FDP-988
@@ -888,7 +899,7 @@ func (oc *SecondaryLayer2NetworkController) StartServiceController(wg *sync.Wait
 	return nil
 }
 
-func (oc *SecondaryLayer2NetworkController) updateLocalPodEvent(pod *corev1.Pod) error {
+func (oc *Layer2UserDefinedNetworkController) updateLocalPodEvent(pod *corev1.Pod) error {
 	if kubevirt.IsPodAllowedForMigration(pod, oc.GetNetInfo()) {
 		kubevirtLiveMigrationStatus, err := kubevirt.DiscoverLiveMigrationStatus(oc.watchFactory, pod)
 		if err != nil {
@@ -903,7 +914,7 @@ func (oc *SecondaryLayer2NetworkController) updateLocalPodEvent(pod *corev1.Pod)
 	return nil
 }
 
-func (oc *SecondaryLayer2NetworkController) reconcileLiveMigrationTargetZone(kubevirtLiveMigrationStatus *kubevirt.LiveMigrationStatus) error {
+func (oc *Layer2UserDefinedNetworkController) reconcileLiveMigrationTargetZone(kubevirtLiveMigrationStatus *kubevirt.LiveMigrationStatus) error {
 	if oc.defaultGatewayReconciler == nil {
 		return nil
 	}
@@ -923,7 +934,7 @@ func (oc *SecondaryLayer2NetworkController) reconcileLiveMigrationTargetZone(kub
 	return nil
 }
 
-func (oc *SecondaryLayer2NetworkController) GetNetworkInterConnectInfo() *networkmanager.NetworkInterConnectInfo {
+func (oc *Layer2UserDefinedNetworkController) GetNetworkInterConnectInfo() *networkmanager.NetworkInterConnectInfo {
 	return &networkmanager.NetworkInterConnectInfo{
 		LogicalEntityToConnect: &nbdb.LogicalSwitch{Name: oc.GetNetworkScopedName(types.OVNLayer2Switch)},
 		StartInterConnect: func(_ networkmanager.BaseNetworkController, i interface{}) error {

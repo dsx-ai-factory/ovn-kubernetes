@@ -28,13 +28,15 @@ import (
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/udnenabledsvc"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
-func (bsnc *BaseSecondaryNetworkController) getPortInfoForSecondaryNetwork(pod *corev1.Pod) map[string]*lpInfo {
+func (bsnc *BaseUserDefinedNetworkController) getPortInfoForUserDefinedNetwork(pod *corev1.Pod) map[string]*lpInfo {
 	if util.PodWantsHostNetwork(pod) {
 		return nil
 	}
@@ -42,35 +44,35 @@ func (bsnc *BaseSecondaryNetworkController) getPortInfoForSecondaryNetwork(pod *
 	return portInfoMap
 }
 
-// GetInternalCacheEntryForSecondaryNetwork returns the internal cache entry for this object, given an object and its type.
+// GetInternalCacheEntryForUserDefinedNetwork returns the internal cache entry for this object, given an object and its type.
 // This is now used only for pods, which will get their the logical port cache entry.
-func (bsnc *BaseSecondaryNetworkController) GetInternalCacheEntryForSecondaryNetwork(objType reflect.Type, obj interface{}) interface{} {
+func (bsnc *BaseUserDefinedNetworkController) GetInternalCacheEntryForUserDefinedNetwork(objType reflect.Type, obj interface{}) interface{} {
 	switch objType {
 	case factory.PodType:
 		pod := obj.(*corev1.Pod)
-		return bsnc.getPortInfoForSecondaryNetwork(pod)
+		return bsnc.getPortInfoForUserDefinedNetwork(pod)
 	default:
 		return nil
 	}
 }
 
-// AddSecondaryNetworkResourceCommon adds the specified object to the cluster according to its type and returns the error,
-// if any, yielded during object creation. This function is called for secondary network only.
-func (bsnc *BaseSecondaryNetworkController) AddSecondaryNetworkResourceCommon(objType reflect.Type, obj interface{}) error {
+// AddUserDefinedNetworkResourceCommon adds the specified object to the cluster according to its type and returns the error,
+// if any, yielded during object creation. This function is called for User Defined Networks only.
+func (bsnc *BaseUserDefinedNetworkController) AddUserDefinedNetworkResourceCommon(objType reflect.Type, obj interface{}) error {
 	switch objType {
 	case factory.PodType:
 		pod, ok := obj.(*corev1.Pod)
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *knet.Pod", obj)
 		}
-		return bsnc.ensurePodForSecondaryNetwork(nil, pod, true)
+		return bsnc.ensurePodForUserDefinedNetwork(nil, pod, true)
 
 	case factory.NamespaceType:
 		ns, ok := obj.(*corev1.Namespace)
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *kapi.Namespace", obj)
 		}
-		return bsnc.AddNamespaceForSecondaryNetwork(ns)
+		return bsnc.AddNamespaceForUserDefinedNetwork(ns)
 
 	case factory.MultiNetworkPolicyType:
 		mp, ok := obj.(*mnpapi.MultiNetworkPolicy)
@@ -100,22 +102,22 @@ func (bsnc *BaseSecondaryNetworkController) AddSecondaryNetworkResourceCommon(ob
 	return nil
 }
 
-// UpdateSecondaryNetworkResourceCommon updates the specified object in the cluster to its version in newObj
+// UpdateUserDefinedNetworkResourceCommon updates the specified object in the cluster to its version in newObj
 // according to its type and returns the error, if any, yielded during the object update. This function is
-// called for secondary network only.
+// called for User Defined Networks only.
 // Given an old and a new object; The inRetryCache boolean argument is to indicate if the given resource
 // is in the retryCache or not.
-func (bsnc *BaseSecondaryNetworkController) UpdateSecondaryNetworkResourceCommon(objType reflect.Type, oldObj, newObj interface{}, inRetryCache bool) error {
+func (bsnc *BaseUserDefinedNetworkController) UpdateUserDefinedNetworkResourceCommon(objType reflect.Type, oldObj, newObj interface{}, inRetryCache bool) error {
 	switch objType {
 	case factory.PodType:
 		oldPod := oldObj.(*corev1.Pod)
 		newPod := newObj.(*corev1.Pod)
 
-		return bsnc.ensurePodForSecondaryNetwork(oldPod, newPod, shouldAddPort(oldPod, newPod, inRetryCache))
+		return bsnc.ensurePodForUserDefinedNetwork(oldPod, newPod, shouldAddPort(oldPod, newPod, inRetryCache))
 
 	case factory.NamespaceType:
 		oldNs, newNs := oldObj.(*corev1.Namespace), newObj.(*corev1.Namespace)
-		return bsnc.updateNamespaceForSecondaryNetwork(oldNs, newNs)
+		return bsnc.updateNamespaceForUserDefinedNetwork(oldNs, newNs)
 
 	case factory.MultiNetworkPolicyType:
 		oldMp, ok := oldObj.(*mnpapi.MultiNetworkPolicy)
@@ -162,11 +164,11 @@ func (bsnc *BaseSecondaryNetworkController) UpdateSecondaryNetworkResourceCommon
 	return nil
 }
 
-// DeleteResource deletes the object from the cluster according to the delete logic of its resource type.
+// DeleteUserDefinedNetworkResourceCommon deletes the object from the cluster according to the delete logic of its resource type.
 // Given an object and optionally a cachedObj; cachedObj is the internal cache entry for this object,
 // used for now for pods.
-// This function is called for secondary network only.
-func (bsnc *BaseSecondaryNetworkController) DeleteSecondaryNetworkResourceCommon(objType reflect.Type, obj, cachedObj interface{}) error {
+// This function is called for User Defined Networks only.
+func (bsnc *BaseUserDefinedNetworkController) DeleteUserDefinedNetworkResourceCommon(objType reflect.Type, obj, cachedObj interface{}) error {
 	switch objType {
 	case factory.PodType:
 		var portInfoMap map[string]*lpInfo
@@ -175,11 +177,11 @@ func (bsnc *BaseSecondaryNetworkController) DeleteSecondaryNetworkResourceCommon
 		if cachedObj != nil {
 			portInfoMap = cachedObj.(map[string]*lpInfo)
 		}
-		return bsnc.removePodForSecondaryNetwork(pod, portInfoMap)
+		return bsnc.removePodForUserDefinedNetwork(pod, portInfoMap)
 
 	case factory.NamespaceType:
 		ns := obj.(*corev1.Namespace)
-		return bsnc.deleteNamespace4SecondaryNetwork(ns)
+		return bsnc.deleteNamespaceForUserDefinedNetwork(ns)
 
 	case factory.MultiNetworkPolicyType:
 		mp, ok := obj.(*mnpapi.MultiNetworkPolicy)
@@ -222,9 +224,9 @@ func (bsnc *BaseSecondaryNetworkController) DeleteSecondaryNetworkResourceCommon
 	return nil
 }
 
-// ensurePodForSecondaryNetwork tries to set up secondary network for a pod. It returns nil on success and error
+// ensurePodForUserDefinedNetwork tries to set up the User Defined Network for a pod. It returns nil on success and error
 // on failure; failure indicates the pod set up should be retried later.
-func (bsnc *BaseSecondaryNetworkController) ensurePodForSecondaryNetwork(oldPod, pod *corev1.Pod, addPort bool) error {
+func (bsnc *BaseUserDefinedNetworkController) ensurePodForUserDefinedNetwork(oldPod, pod *corev1.Pod, addPort bool) error {
 
 	// Try unscheduled pods later
 	if !util.PodScheduled(pod) {
@@ -304,7 +306,7 @@ func (bsnc *BaseSecondaryNetworkController) ensurePodForSecondaryNetwork(oldPod,
 	return nil
 }
 
-func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *corev1.Pod, nadName, switchName string,
+func (bsnc *BaseUserDefinedNetworkController) addLogicalPortToNetworkForNAD(pod *corev1.Pod, nadName, switchName string,
 	network *nadapi.NetworkSelectionElement, kubevirtLiveMigrationStatus *kubevirt.LiveMigrationStatus) error {
 	var libovsdbExecuteTime time.Duration
 
@@ -384,7 +386,7 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *c
 		if lsp != nil {
 			portUUID = lsp.UUID
 		}
-		addOps, err := bsnc.addPodToNamespaceForSecondaryNetwork(pod.Namespace, podAnnotation.IPs, portUUID)
+		addOps, err := bsnc.addPodToNamespaceForUserDefinedNetwork(pod.Namespace, podAnnotation.IPs, portUUID)
 		if err != nil {
 			return err
 		}
@@ -424,9 +426,9 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *c
 	return nil
 }
 
-// removePodForSecondaryNetwork tried to tear down a pod. It returns nil on success and error on failure;
+// removePodForUserDefinedNetwork tried to tear down a pod. It returns nil on success and error on failure;
 // failure indicates the pod tear down should be retried later.
-func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *corev1.Pod, portInfoMap map[string]*lpInfo) error {
+func (bsnc *BaseUserDefinedNetworkController) removePodForUserDefinedNetwork(pod *corev1.Pod, portInfoMap map[string]*lpInfo) error {
 	if util.PodWantsHostNetwork(pod) || !util.PodScheduled(pod) {
 		return nil
 	}
@@ -529,7 +531,7 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *co
 
 // hasIPAMClaim determines whether a pod's IPAM is being handled by IPAMClaim CR.
 // pod passed should already be validated as having a network connection to nadName
-func (bsnc *BaseSecondaryNetworkController) hasIPAMClaim(pod *corev1.Pod, nadNamespacedName string) (bool, error) {
+func (bsnc *BaseUserDefinedNetworkController) hasIPAMClaim(pod *corev1.Pod, nadNamespacedName string) (bool, error) {
 	if !bsnc.AllowsPersistentIPs() {
 		return false, nil
 	}
@@ -580,7 +582,7 @@ func (bsnc *BaseSecondaryNetworkController) hasIPAMClaim(pod *corev1.Pod, nadNam
 	return hasIPAMClaim, nil
 }
 
-func (bsnc *BaseSecondaryNetworkController) syncPodsForSecondaryNetwork(pods []interface{}) error {
+func (bsnc *BaseUserDefinedNetworkController) syncPodsForUserDefinedNetwork(pods []interface{}) error {
 	annotatedLocalPods := map[*corev1.Pod]map[string]*util.PodAnnotation{}
 	// get the list of logical switch ports (equivalent to pods). Reserve all existing Pod IPs to
 	// avoid subsequent new Pods getting the same duplicate Pod IP.
@@ -659,10 +661,10 @@ func (bsnc *BaseSecondaryNetworkController) syncPodsForSecondaryNetwork(pods []i
 	return bsnc.deleteStaleLogicalSwitchPorts(expectedLogicalPorts)
 }
 
-// addPodToNamespaceForSecondaryNetwork returns the ops needed to add pod's IP to the namespace's address set.
-func (bsnc *BaseSecondaryNetworkController) addPodToNamespaceForSecondaryNetwork(ns string, ips []*net.IPNet, portUUID string) ([]ovsdb.Operation, error) {
+// addPodToNamespaceForUserDefinedNetwork returns the ops needed to add pod's IP to the namespace's address set.
+func (bsnc *BaseUserDefinedNetworkController) addPodToNamespaceForUserDefinedNetwork(ns string, ips []*net.IPNet, portUUID string) ([]ovsdb.Operation, error) {
 	var err error
-	nsInfo, nsUnlock, err := bsnc.ensureNamespaceLockedForSecondaryNetwork(ns, true, nil)
+	nsInfo, nsUnlock, err := bsnc.ensureNamespaceLockedForUserDefinedNetwork(ns, true, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to ensure namespace locked: %v", err)
 	}
@@ -672,8 +674,8 @@ func (bsnc *BaseSecondaryNetworkController) addPodToNamespaceForSecondaryNetwork
 	return bsnc.addLocalPodToNamespaceLocked(nsInfo, ips, portUUID)
 }
 
-// AddNamespaceForSecondaryNetwork creates corresponding addressset in ovn db for secondary network
-func (bsnc *BaseSecondaryNetworkController) AddNamespaceForSecondaryNetwork(ns *corev1.Namespace) error {
+// AddNamespaceForUserDefinedNetwork creates corresponding addressset in ovn db for User Defined Network
+func (bsnc *BaseUserDefinedNetworkController) AddNamespaceForUserDefinedNetwork(ns *corev1.Namespace) error {
 	klog.Infof("[%s] adding namespace for network %s", ns.Name, bsnc.GetNetworkName())
 	// Keep track of how long syncs take.
 	start := time.Now()
@@ -681,7 +683,7 @@ func (bsnc *BaseSecondaryNetworkController) AddNamespaceForSecondaryNetwork(ns *
 		klog.Infof("[%s] adding namespace took %v for network %s", ns.Name, time.Since(start), bsnc.GetNetworkName())
 	}()
 
-	_, nsUnlock, err := bsnc.ensureNamespaceLockedForSecondaryNetwork(ns.Name, false, ns)
+	_, nsUnlock, err := bsnc.ensureNamespaceLockedForUserDefinedNetwork(ns.Name, false, ns)
 	if err != nil {
 		return fmt.Errorf("failed to ensure namespace locked: %v", err)
 	}
@@ -697,14 +699,14 @@ func (bsnc *BaseSecondaryNetworkController) AddNamespaceForSecondaryNetwork(ns *
 	return nil
 }
 
-// ensureNamespaceLockedForSecondaryNetwork locks namespacesMutex, gets/creates an entry for ns, configures OVN nsInfo,
+// ensureNamespaceLockedForUserDefinedNetwork locks namespacesMutex, gets/creates an entry for ns, configures OVN nsInfo,
 // and returns it with its mutex locked.
 // ns is the name of the namespace, while namespace is the optional k8s namespace object
-func (bsnc *BaseSecondaryNetworkController) ensureNamespaceLockedForSecondaryNetwork(ns string, readOnly bool, namespace *corev1.Namespace) (*namespaceInfo, func(), error) {
+func (bsnc *BaseUserDefinedNetworkController) ensureNamespaceLockedForUserDefinedNetwork(ns string, readOnly bool, namespace *corev1.Namespace) (*namespaceInfo, func(), error) {
 	return bsnc.ensureNamespaceLockedCommon(ns, readOnly, namespace, bsnc.getAllNamespacePodAddresses, bsnc.configureNamespaceCommon)
 }
 
-func (bsnc *BaseSecondaryNetworkController) updateNamespaceForSecondaryNetwork(old, newer *corev1.Namespace) error {
+func (bsnc *BaseUserDefinedNetworkController) updateNamespaceForUserDefinedNetwork(old, newer *corev1.Namespace) error {
 	var errors []error
 	klog.Infof("[%s] updating namespace for network %s", old.Name, bsnc.GetNetworkName())
 
@@ -730,7 +732,7 @@ func (bsnc *BaseSecondaryNetworkController) updateNamespaceForSecondaryNetwork(o
 	return utilerrors.Join(errors...)
 }
 
-func (bsnc *BaseSecondaryNetworkController) deleteNamespace4SecondaryNetwork(ns *corev1.Namespace) error {
+func (bsnc *BaseUserDefinedNetworkController) deleteNamespaceForUserDefinedNetwork(ns *corev1.Namespace) error {
 	klog.Infof("[%s] deleting namespace for network %s", ns.Name, bsnc.GetNetworkName())
 
 	nsInfo, err := bsnc.deleteNamespaceLocked(ns.Name)
@@ -750,7 +752,7 @@ func (bsnc *BaseSecondaryNetworkController) deleteNamespace4SecondaryNetwork(ns 
 
 // WatchNetworkPolicy starts the watching of networkpolicy resource and calls
 // back the appropriate handler logic
-func (bsnc *BaseSecondaryNetworkController) WatchNetworkPolicy() error {
+func (bsnc *BaseUserDefinedNetworkController) WatchNetworkPolicy() error {
 	if bsnc.netPolicyHandler != nil {
 		return nil
 	}
@@ -764,7 +766,7 @@ func (bsnc *BaseSecondaryNetworkController) WatchNetworkPolicy() error {
 
 // WatchMultiNetworkPolicy starts the watching of multinetworkpolicy resource and calls
 // back the appropriate handler logic
-func (bsnc *BaseSecondaryNetworkController) WatchMultiNetworkPolicy() error {
+func (bsnc *BaseUserDefinedNetworkController) WatchMultiNetworkPolicy() error {
 	if bsnc.multiNetPolicyHandler != nil {
 		return nil
 	}
@@ -799,7 +801,7 @@ func cleanupPolicyLogicalEntities(nbClient libovsdbclient.Client, ops []ovsdb.Op
 
 // WatchIPAMClaims starts the watching of IPAMClaim resources and calls
 // back the appropriate handler logic
-func (bsnc *BaseSecondaryNetworkController) WatchIPAMClaims() error {
+func (bsnc *BaseUserDefinedNetworkController) WatchIPAMClaims() error {
 	if bsnc.ipamClaimsHandler != nil {
 		return nil
 	}
@@ -810,7 +812,7 @@ func (bsnc *BaseSecondaryNetworkController) WatchIPAMClaims() error {
 	return err
 }
 
-func (oc *BaseSecondaryNetworkController) allowPersistentIPs() bool {
+func (oc *BaseUserDefinedNetworkController) allowPersistentIPs() bool {
 	return config.OVNKubernetesFeature.EnablePersistentIPs &&
 		util.DoesNetworkRequireIPAM(oc.GetNetInfo()) &&
 		util.AllowsPersistentIPs(oc.GetNetInfo())
@@ -818,7 +820,7 @@ func (oc *BaseSecondaryNetworkController) allowPersistentIPs() bool {
 
 // buildUDNEgressSNAT is used to build the conditional SNAT required on L3 and L2 UDNs to
 // steer traffic correctly via mp0 when leaving OVN to the host
-func (bsnc *BaseSecondaryNetworkController) buildUDNEgressSNAT(localPodSubnets []*net.IPNet, outputPort string, isUDNAdvertised bool) ([]*nbdb.NAT, error) {
+func (bsnc *BaseUserDefinedNetworkController) buildUDNEgressSNAT(localPodSubnets []*net.IPNet, outputPort string, isUDNAdvertised bool) ([]*nbdb.NAT, error) {
 	if len(localPodSubnets) == 0 {
 		return nil, nil // nothing to do
 	}
@@ -827,13 +829,42 @@ func (bsnc *BaseSecondaryNetworkController) buildUDNEgressSNAT(localPodSubnets [
 	var err error
 	networkID := bsnc.GetNetworkID()
 	// calculate MAC
-	dstMac := util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(localPodSubnets[0]).IP)
+	dstMac := util.IPAddrToHWAddr(bsnc.GetNodeManagementIP(localPodSubnets[0]).IP)
+	dstMacMatch := getMasqueradeManagementIPSNATMatch(dstMac.String())
 
 	extIDs := map[string]string{
 		types.NetworkExternalID:  bsnc.GetNetworkName(),
 		types.TopologyExternalID: bsnc.TopologyType(),
 	}
+
+	var nodeIPsAS, svcIPsAS addressset.AddressSet
+	if isUDNAdvertised {
+		// For advertised networks, we need to SNAT any traffic leaving the
+		// pods from these networks towards the node IPs in the cluster. In
+		// order to do such a conditional SNAT, we need an address set that
+		// contains the node IPs in the cluster. Given that egressIP feature
+		// already has an address set containing these nodeIPs owned by the
+		// default network controller, let's re-use it.
+		nodeIPsASIDs := getEgressIPAddrSetDbIDs(NodeIPAddrSetName, types.DefaultNetworkName, DefaultNetworkControllerName)
+		nodeIPsAS, err = bsnc.addressSetFactory.GetAddressSet(nodeIPsASIDs)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get address set with IDs %v: %w", nodeIPsASIDs, err)
+		}
+
+		// We also need to SNAT any traffic leaving the pods from these
+		// networks towards the default network service cluster IPs
+		// accessible from UDNs: we want the reply traffic to hit the
+		// masquerade IP rule rather than the UDN subnet ip rule to allow
+		// for overlaps in VRF-Lite configurations
+		svcIPsASIDs := udnenabledsvc.GetAddressSetDBIDs()
+		svcIPsAS, err = bsnc.addressSetFactory.GetAddressSet(svcIPsASIDs)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get address set with IDs %v: %w", svcIPsASIDs, err)
+		}
+	}
+
 	for _, localPodSubnet := range localPodSubnets {
+		snatMatch := dstMacMatch
 		ipFamily := utilnet.IPv4
 		masqIP, err = udn.AllocateV4MasqueradeIPs(networkID)
 		if utilnet.IsIPv6CIDR(localPodSubnet) {
@@ -846,25 +877,24 @@ func (bsnc *BaseSecondaryNetworkController) buildUDNEgressSNAT(localPodSubnets [
 		if masqIP == nil {
 			return nil, fmt.Errorf("masquerade IP cannot be empty network %s (%d): %v", bsnc.GetNetworkName(), networkID, err)
 		}
-		if !isUDNAdvertised {
-			snats = append(snats, libovsdbops.BuildSNATWithMatch(&masqIP.ManagementPort.IP, localPodSubnet, outputPort,
-				extIDs, getMasqueradeManagementIPSNATMatch(dstMac.String())))
-		} else {
-			// For advertised networks, we need to SNAT any traffic leaving the pods from these networks towards the node IPs
-			// in the cluster. In order to do such a conditional SNAT, we need an address set that contains the node IPs in the cluster.
-			// Given that egressIP feature already has an address set containing these nodeIPs owned by the default network controller, let's re-use it.
-			dbIDs := getEgressIPAddrSetDbIDs(NodeIPAddrSetName, types.DefaultNetworkName, DefaultNetworkControllerName)
-			addrSet, err := bsnc.addressSetFactory.GetAddressSet(dbIDs)
-			if err != nil {
-				return nil, fmt.Errorf("cannot ensure that addressSet %s exists: %w", NodeIPAddrSetName, err)
-			}
-			ipv4ClusterNodeIPAS, ipv6ClusterNodeIPAS := addrSet.GetASHashNames()
 
-			snats = append(snats, libovsdbops.BuildSNATWithMatch(&masqIP.ManagementPort.IP, localPodSubnet, outputPort,
-				extIDs, fmt.Sprintf("%s && (%s)", getMasqueradeManagementIPSNATMatch(dstMac.String()),
-					getClusterNodesDestinationBasedSNATMatch(ipv4ClusterNodeIPAS, ipv6ClusterNodeIPAS, ipFamily))))
+		if isUDNAdvertised {
+			additionalSNATMatch := getClusterNodesDestinationBasedSNATMatch(ipFamily, nodeIPsAS, svcIPsAS)
+			if additionalSNATMatch != "" {
+				snatMatch = fmt.Sprintf("%s && %s", snatMatch, additionalSNATMatch)
+			}
 		}
+
+		snat := libovsdbops.BuildSNATWithMatch(
+			&masqIP.ManagementPort.IP,
+			localPodSubnet,
+			outputPort,
+			extIDs,
+			snatMatch,
+		)
+		snats = append(snats, snat)
 	}
+
 	return snats, nil
 }
 
@@ -872,18 +902,31 @@ func getMasqueradeManagementIPSNATMatch(dstMac string) string {
 	return fmt.Sprintf("eth.dst == %s", dstMac)
 }
 
-// getClusterNodesDestinationBasedSNATMatch creates destination-based SNAT match for the specified IP family
-func getClusterNodesDestinationBasedSNATMatch(ipv4ClusterNodeIPAS, ipv6ClusterNodeIPAS string, ipFamily utilnet.IPFamily) string {
-	var match string
-	if ipFamily == utilnet.IPv4 {
-		match = fmt.Sprintf("ip4.dst == $%s", ipv4ClusterNodeIPAS)
-	} else {
-		match = fmt.Sprintf("ip6.dst == $%s", ipv6ClusterNodeIPAS)
+// getClusterNodesDestinationBasedSNATMatch creates destination-based SNAT match
+// for the specified IP family. Returns an empty string if there is no address
+// set for the provided IP family.
+func getClusterNodesDestinationBasedSNATMatch(ipFamily utilnet.IPFamily, addressSets ...addressset.AddressSet) string {
+	asMatches := make([]string, 0, len(addressSets))
+	for _, as := range addressSets {
+		asIPv4, asIPv6 := as.GetASHashNames()
+		switch {
+		case ipFamily == utilnet.IPv4 && asIPv4 != "":
+			asMatches = append(asMatches, fmt.Sprintf("ip4.dst == $%s", asIPv4))
+		case ipFamily == utilnet.IPv6 && asIPv6 != "":
+			asMatches = append(asMatches, fmt.Sprintf("ip6.dst == $%s", asIPv6))
+		}
 	}
-	return match
+	switch len(asMatches) {
+	case 0:
+		return ""
+	case 1:
+		return asMatches[0]
+	default:
+		return fmt.Sprintf("(%s)", strings.Join(asMatches, " || "))
+	}
 }
 
-func (bsnc *BaseSecondaryNetworkController) ensureDHCP(pod *corev1.Pod, podAnnotation *util.PodAnnotation, lsp *nbdb.LogicalSwitchPort) error {
+func (bsnc *BaseUserDefinedNetworkController) ensureDHCP(pod *corev1.Pod, podAnnotation *util.PodAnnotation, lsp *nbdb.LogicalSwitchPort) error {
 	opts := []kubevirt.DHCPConfigsOpt{}
 
 	ipv4DNSServer, ipv6DNSServer, err := kubevirt.RetrieveDNSServiceClusterIPs(bsnc.watchFactory)
@@ -905,7 +948,7 @@ func (bsnc *BaseSecondaryNetworkController) ensureDHCP(pod *corev1.Pod, podAnnot
 	return kubevirt.EnsureDHCPOptionsForLSP(bsnc.controllerName, bsnc.nbClient, pod, podAnnotation.IPs, lsp, opts...)
 }
 
-func (bsnc *BaseSecondaryNetworkController) requireDHCP(pod *corev1.Pod) bool {
+func (bsnc *BaseUserDefinedNetworkController) requireDHCP(pod *corev1.Pod) bool {
 	// Configure DHCP only for kubevirt VMs layer2 primary udn with subnets
 	return kubevirt.IsPodOwnedByVirtualMachine(pod) &&
 		util.IsNetworkSegmentationSupportEnabled() &&
@@ -913,7 +956,7 @@ func (bsnc *BaseSecondaryNetworkController) requireDHCP(pod *corev1.Pod) bool {
 		bsnc.TopologyType() == types.Layer2Topology
 }
 
-func (bsnc *BaseSecondaryNetworkController) setPodLogicalSwitchPortAddressesAndEnabledField(
+func (bsnc *BaseUserDefinedNetworkController) setPodLogicalSwitchPortAddressesAndEnabledField(
 	pod *corev1.Pod, nadName string, mac string, ips []string, enabled bool, ops []ovsdb.Operation) ([]ovsdb.Operation, *nbdb.LogicalSwitchPort, error) {
 	lsp := &nbdb.LogicalSwitchPort{Name: bsnc.GetLogicalPortName(pod, nadName)}
 	lsp.Enabled = ptr.To(enabled)
@@ -948,7 +991,7 @@ func (bsnc *BaseSecondaryNetworkController) setPodLogicalSwitchPortAddressesAndE
 	return ops, lsp, nil
 }
 
-func (bsnc *BaseSecondaryNetworkController) disableLiveMigrationSourceLSPOps(
+func (bsnc *BaseUserDefinedNetworkController) disableLiveMigrationSourceLSPOps(
 	kubevirtLiveMigrationStatus *kubevirt.LiveMigrationStatus,
 	nadName string, ops []ovsdb.Operation) ([]ovsdb.Operation, error) {
 	// closing the sourcePod lsp to ensure traffic goes to the now ready targetPod.
@@ -956,7 +999,7 @@ func (bsnc *BaseSecondaryNetworkController) disableLiveMigrationSourceLSPOps(
 	return ops, err
 }
 
-func (bsnc *BaseSecondaryNetworkController) enableSourceLSPFailedLiveMigration(pod *corev1.Pod, nadName string, mac string, ips []string) error {
+func (bsnc *BaseUserDefinedNetworkController) enableSourceLSPFailedLiveMigration(pod *corev1.Pod, nadName string, mac string, ips []string) error {
 	kubevirtLiveMigrationStatus, err := kubevirt.DiscoverLiveMigrationStatus(bsnc.watchFactory, pod)
 	if err != nil {
 		return fmt.Errorf("failed to discover Live-migration status after pod termination: %w", err)

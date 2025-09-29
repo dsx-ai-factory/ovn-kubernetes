@@ -308,9 +308,9 @@ func (oc *BaseNetworkController) doReconcile(reconcileRoutes, reconcilePendingPo
 	}
 }
 
-// BaseSecondaryNetworkController structure holds per-network fields and network specific
-// configuration for secondary network controller
-type BaseSecondaryNetworkController struct {
+// BaseUserDefinedNetworkController structure holds per-network fields and network specific
+// configuration for UDN controller
+type BaseUserDefinedNetworkController struct {
 	BaseNetworkController
 
 	// network policy events factory handler
@@ -319,7 +319,7 @@ type BaseSecondaryNetworkController struct {
 	multiNetPolicyHandler *factory.Handler
 }
 
-func (oc *BaseSecondaryNetworkController) FilterOutResource(objType reflect.Type, obj interface{}) bool {
+func (oc *BaseUserDefinedNetworkController) FilterOutResource(objType reflect.Type, obj interface{}) bool {
 	switch objType {
 	case factory.NamespaceType:
 		ns, ok := obj.(*corev1.Namespace)
@@ -368,19 +368,19 @@ func NewCommonNetworkControllerInfo(client clientset.Interface, kube *kube.KubeO
 }
 
 func (bnc *BaseNetworkController) GetLogicalPortName(pod *corev1.Pod, nadName string) string {
-	if !bnc.IsSecondary() {
+	if !bnc.IsUserDefinedNetwork() {
 		return util.GetLogicalPortName(pod.Namespace, pod.Name)
 	} else {
-		return util.GetSecondaryNetworkLogicalPortName(pod.Namespace, pod.Name, nadName)
+		return util.GetUserDefinedNetworkLogicalPortName(pod.Namespace, pod.Name, nadName)
 	}
 }
 
 func (bnc *BaseNetworkController) AddConfigDurationRecord(kind, namespace, name string) (
 	[]ovsdb.Operation, func(), time.Time, error) {
-	if !bnc.IsSecondary() {
+	if !bnc.IsUserDefinedNetwork() {
 		return recorders.GetConfigDurationRecorder().AddOVN(bnc.nbClient, kind, namespace, name)
 	}
-	// TBD: no op for secondary network for now
+	// TBD: no-op for UDN for now
 	return []ovsdb.Operation{}, func() {}, time.Time{}, nil
 }
 
@@ -430,7 +430,7 @@ func (bnc *BaseNetworkController) syncNodeClusterRouterPort(node *corev1.Node, h
 	// logical router port MAC is based on IPv4 subnet if there is one, else IPv6
 	var nodeLRPMAC net.HardwareAddr
 	for _, hostSubnet := range hostSubnets {
-		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
+		gwIfAddr := bnc.GetNodeGatewayIP(hostSubnet)
 		nodeLRPMAC = util.IPAddrToHWAddr(gwIfAddr.IP)
 		if !utilnet.IsIPv6CIDR(hostSubnet) {
 			break
@@ -442,7 +442,7 @@ func (bnc *BaseNetworkController) syncNodeClusterRouterPort(node *corev1.Node, h
 	lrpName := types.RouterToSwitchPrefix + switchName
 	lrpNetworks := []string{}
 	for _, hostSubnet := range hostSubnets {
-		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
+		gwIfAddr := bnc.GetNodeGatewayIP(hostSubnet)
 		lrpNetworks = append(lrpNetworks, gwIfAddr.String())
 	}
 
@@ -536,7 +536,7 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 	var nodeLRPMAC net.HardwareAddr
 	switchName := bnc.GetNetworkScopedSwitchName(nodeName)
 	for _, hostSubnet := range hostSubnets {
-		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
+		gwIfAddr := bnc.GetNodeGatewayIP(hostSubnet)
 		nodeLRPMAC = util.IPAddrToHWAddr(gwIfAddr.IP)
 		if !utilnet.IsIPv6CIDR(hostSubnet) {
 			break
@@ -551,8 +551,8 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 	var v4Gateway, v6Gateway net.IP
 	logicalSwitch.OtherConfig = map[string]string{}
 	for _, hostSubnet := range hostSubnets {
-		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
-		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
+		gwIfAddr := bnc.GetNodeGatewayIP(hostSubnet)
+		mgmtIfAddr := bnc.GetNodeManagementIP(hostSubnet)
 
 		if utilnet.IsIPv6CIDR(hostSubnet) {
 			v6Gateway = gwIfAddr.IP
@@ -632,7 +632,7 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 		return fmt.Errorf("failed finding migratable pod IPs belonging to %s: %v", nodeName, err)
 	}
 
-	return bnc.lsManager.AddOrUpdateSwitch(logicalSwitch.Name, hostSubnets, migratableIPsByPod...)
+	return bnc.lsManager.AddOrUpdateSwitch(logicalSwitch.Name, hostSubnets, nil, migratableIPsByPod...)
 }
 
 // deleteNodeLogicalNetwork removes the logical switch and logical router port associated with the node
@@ -823,14 +823,14 @@ func (bnc *BaseNetworkController) syncNodeManagementPort(node *corev1.Node, swit
 		if len(hostSubnets) == 0 {
 			return nil, fmt.Errorf("unable to generate MAC address, no subnets provided for network: %s", bnc.GetNetworkName())
 		}
-		macAddress = util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(hostSubnets[0]).IP)
+		macAddress = util.IPAddrToHWAddr(bnc.GetNodeManagementIP(hostSubnets[0]).IP)
 	}
 
 	var v4Subnet *net.IPNet
 	addresses := macAddress.String()
 	mgmtPortIPs := []net.IP{}
 	for _, hostSubnet := range hostSubnets {
-		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
+		mgmtIfAddr := bnc.GetNodeManagementIP(hostSubnet)
 		addresses += " " + mgmtIfAddr.IP.String()
 		mgmtPortIPs = append(mgmtPortIPs, mgmtIfAddr.IP)
 
@@ -847,7 +847,7 @@ func (bnc *BaseNetworkController) syncNodeManagementPort(node *corev1.Node, swit
 				IPPrefix: hostSubnet.String(),
 				Nexthop:  mgmtIfAddr.IP.String(),
 			}
-			if bnc.IsSecondary() {
+			if bnc.IsUserDefinedNetwork() {
 				lrsr.ExternalIDs = map[string]string{
 					types.NetworkExternalID:  bnc.GetNetworkName(),
 					types.TopologyExternalID: bnc.TopologyType(),
@@ -884,7 +884,7 @@ func (bnc *BaseNetworkController) syncNodeManagementPort(node *corev1.Node, swit
 	}
 
 	if v4Subnet != nil {
-		if err := libovsdbutil.UpdateNodeSwitchExcludeIPs(bnc.nbClient, bnc.GetNetworkScopedK8sMgmtIntfName(node.Name), bnc.GetNetworkScopedSwitchName(node.Name), node.Name, v4Subnet); err != nil {
+		if err := libovsdbutil.UpdateNodeSwitchExcludeIPs(bnc.nbClient, bnc.GetNetworkScopedK8sMgmtIntfName(node.Name), bnc.GetNetworkScopedSwitchName(node.Name), node.Name, v4Subnet, bnc.GetNodeManagementIP(v4Subnet)); err != nil {
 			return nil, err
 		}
 	}
@@ -926,8 +926,8 @@ func (bnc *BaseNetworkController) WatchNodes() error {
 }
 
 func (bnc *BaseNetworkController) recordNodeErrorEvent(node *corev1.Node, nodeErr error) {
-	if bnc.IsSecondary() {
-		// TBD, no op for secondary network for now
+	if bnc.IsUserDefinedNetwork() {
+		// TBD, noop for UDN for now
 		return
 	}
 	nodeRef, err := ref.GetReference(scheme.Scheme, node)
@@ -956,7 +956,7 @@ func (bnc *BaseNetworkController) doesNetworkRequireIPAM() bool {
 }
 
 func (bnc *BaseNetworkController) getPodNADNames(pod *corev1.Pod) []string {
-	if !bnc.IsSecondary() {
+	if !bnc.IsUserDefinedNetwork() {
 		return []string{types.DefaultNetworkName}
 	}
 	podNadNames, _ := util.PodNadNames(pod, bnc.GetNetInfo())
@@ -1033,7 +1033,7 @@ func (bnc *BaseNetworkController) isLayer2Interconnect() bool {
 	return config.OVNKubernetesFeature.EnableInterconnect && bnc.TopologyType() == types.Layer2Topology
 }
 
-func (bnc *BaseNetworkController) nodeZoneClusterChanged(oldNode, newNode *corev1.Node, newNodeIsLocalZone bool, netName string) bool {
+func (bnc *BaseNetworkController) nodeZoneClusterChanged(oldNode, newNode *corev1.Node) bool {
 	// Check if the annotations have changed. Use network topology and local params to skip unnecessary checks
 
 	// NodeIDAnnotationChanged and NodeTransitSwitchPortAddrAnnotationChanged affects local and remote nodes
@@ -1044,18 +1044,12 @@ func (bnc *BaseNetworkController) nodeZoneClusterChanged(oldNode, newNode *corev
 	if util.NodeTransitSwitchPortAddrAnnotationChanged(oldNode, newNode) {
 		return true
 	}
-
-	// NodeGatewayRouterLRPAddrsAnnotationChanged would not affect local, nor localnet secondary network
-	if !newNodeIsLocalZone && bnc.TopologyType() != types.LocalnetTopology && joinCIDRChanged(oldNode, newNode, netName) {
-		return true
-	}
-
 	return false
 }
 
 func (bnc *BaseNetworkController) findMigratablePodIPsForSubnets(subnets []*net.IPNet) ([]*net.IPNet, error) {
-	// live migration is not supported in combination with secondary networks
-	if bnc.IsSecondary() {
+	// live migration is not supported in combination with UDNs
+	if bnc.IsUserDefinedNetwork() {
 		return nil, nil
 	}
 
@@ -1115,7 +1109,7 @@ func (bnc *BaseNetworkController) WatchAdminPolicyBasedRoutes() (err error) {
 		return nil
 	}
 	start := time.Now()
-	if !bnc.IsSecondary() {
+	if !bnc.IsUserDefinedNetwork() {
 		// delete logical router policies created by egressip since they would block rerouting between pods
 		if err := bnc.deleteLogicalRouterPoliciesByPriority(types.DefaultNoRereoutePriority); err != nil {
 			if err != libovsdbclient.ErrNotFound {
@@ -1147,7 +1141,7 @@ func (bnc *BaseNetworkController) WatchAdminPolicyBasedRoutes() (err error) {
 		}
 	}()
 
-	if !bnc.IsSecondary() || bnc.TopologyType() == types.Layer3Topology {
+	if !bnc.IsUserDefinedNetwork() || bnc.TopologyType() == types.Layer3Topology {
 		bnc.adminPBRRetryQueue = workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "adminpbr")
 	}
 	filterAdminPBR := func(obj interface{}) bool {
@@ -1167,7 +1161,7 @@ func (bnc *BaseNetworkController) WatchAdminPolicyBasedRoutes() (err error) {
 			bnc.onAdminPBRAddOrUpdate(apbr)
 		},
 		UpdateFunc: func(old, new interface{}) {
-			if bnc.IsSecondary() && bnc.TopologyType() != types.Layer3Topology {
+			if bnc.IsUserDefinedNetwork() && bnc.TopologyType() != types.Layer3Topology {
 				klog.V(5).Infof("Skipping AdminPBR event since network %s is of topology %s",
 					bnc.GetNetworkName(), bnc.TopologyType())
 				return
@@ -1191,7 +1185,7 @@ func (bnc *BaseNetworkController) WatchAdminPolicyBasedRoutes() (err error) {
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
-			if bnc.IsSecondary() && bnc.TopologyType() != types.Layer3Topology {
+			if bnc.IsUserDefinedNetwork() && bnc.TopologyType() != types.Layer3Topology {
 				klog.V(5).Infof("Skipping AdminPBR event since network %s is of topology %s",
 					bnc.GetNetworkName(), bnc.TopologyType())
 				return
@@ -1208,7 +1202,7 @@ func (bnc *BaseNetworkController) WatchAdminPolicyBasedRoutes() (err error) {
 		return fmt.Errorf("failed to watch for AdminPolicyBasedRoute CRD for network %s", bnc.GetNetworkName())
 	}
 
-	if bnc.IsSecondary() && bnc.TopologyType() != types.Layer3Topology {
+	if bnc.IsUserDefinedNetwork() && bnc.TopologyType() != types.Layer3Topology {
 		klog.V(4).Infof("Skip periodical sync for network %s of topology type %s", bnc.GetNetworkName(), bnc.TopologyType())
 		return nil
 	}
@@ -1414,7 +1408,7 @@ func (bnc *BaseNetworkController) WatchPortMirrors() error {
 				// run syncPortMirrorsPeriodic for only primary controller,
 				// as the operations performed in syncPortMirrorsPeriodic
 				// will be repititive for other controllers
-				if !bnc.IsSecondary() {
+				if !bnc.IsUserDefinedNetwork() {
 					bnc.syncPortMirrorsPeriodic()
 				}
 			case <-bnc.stopChan:
@@ -1444,7 +1438,7 @@ func (bnc *BaseNetworkController) shouldSkipPinnedLS(node *corev1.Node) bool {
 	nadNames := strings.Split(skip, ",")
 	for _, nadName := range nadNames {
 		nadName = strings.TrimSpace(nadName)
-		if !bnc.IsSecondary() {
+		if !bnc.IsUserDefinedNetwork() {
 			if nadName == types.DefaultNetworkName {
 				return true
 			}

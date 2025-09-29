@@ -240,9 +240,8 @@ func (c *addressManager) handleNodePrimaryAddrChange() {
 		klog.Errorf("Address Manager failed to check node primary address change: %v", err)
 		return
 	}
-	if nodePrimaryAddrChanged && config.Default.EncapIP == "" {
-		// In our setup, encap IP is different from node primary address
-		klog.Infof("Node primary address changed to %v", c.nodePrimaryAddr) // TBD-merge
+	if nodePrimaryAddrChanged && config.Default.EncapIP == "" && config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+		klog.Infof("Node primary address changed to %v. Updating OVN encap IP.", c.nodePrimaryAddr)
 		c.updateOVNEncapIPAndReconnect(c.nodePrimaryAddr)
 	}
 }

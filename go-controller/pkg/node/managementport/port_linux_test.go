@@ -235,26 +235,18 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 		}
 		isRoutingAdvertised = isRoutingAdvertised || cfg.isRoutingAdvertised
 	}
-	/* TBD-merge in old code
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovs-vsctl --timeout=15 get interface " + mgtPort + " ofport",
-		Output: "1",
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovs-ofctl --no-stats --no-names dump-flows br-int table=65,out_port=1",
-		Output: " table=65, priority=100,reg15=0x2,metadata=0x2 actions=output:1",
-	})
-	*/
-
 	err := util.SetExec(fexec)
 	Expect(err).NotTo(HaveOccurred())
 
 	nodeSubnetCIDRs := make([]*net.IPNet, len(configs))
 	mgtPortAddrs := make([]*netlink.Addr, len(configs))
+	netInfo := &multinetworkmocks.NetInfo{}
 
 	for i, cfg := range configs {
 		nodeSubnetCIDRs[i] = cfg.GetNodeSubnetCIDR()
 		mgtPortAddrs[i] = cfg.GetMgtPortAddr()
+		netInfo.On("GetNodeGatewayIP", nodeSubnetCIDRs[i]).Return(util.GetNodeGatewayIfAddr(nodeSubnetCIDRs[i]))
+		netInfo.On("GetNodeManagementIP", nodeSubnetCIDRs[i]).Return(util.GetNodeManagementIfAddr(nodeSubnetCIDRs[i]))
 	}
 
 	existingNode := corev1.Node{ObjectMeta: metav1.ObjectMeta{
@@ -276,13 +268,11 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 		KubeClient: fakeClient,
 	}
 
-	netInfo := &multinetworkmocks.NetInfo{}
 	if isRoutingAdvertised {
 		netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", nodeName).Return([]string{"vrf"})
 	} else {
 		netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", nodeName).Return(nil)
 	}
-
 	_, err = config.InitConfig(ctx, fexec, nil)
 	Expect(err).NotTo(HaveOccurred())
 	kubeInterface := &kube.KubeOVN{Kube: kube.Kube{KClient: fakeClient}, ANPClient: anpfake.NewSimpleClientset(),
@@ -365,24 +355,15 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 			mgtPort, mgtPort, "k8s-"+nodeName, mgmtPortNetdev),
 	})
 
-	/* TBD-merge in old code
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovs-vsctl --timeout=15 get interface " + mgtPort + " ofport",
-		Output: "1",
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovs-ofctl --no-stats --no-names dump-flows br-int table=65,out_port=1",
-		Output: " table=65, priority=100,reg15=0x2,metadata=0x2 actions=output:1",
-	})
-	*/
-
 	err := util.SetExec(fexec)
 	Expect(err).NotTo(HaveOccurred())
 
 	nodeSubnetCIDRs := make([]*net.IPNet, len(configs))
-
+	netInfo := &multinetworkmocks.NetInfo{}
 	for i, cfg := range configs {
 		nodeSubnetCIDRs[i] = cfg.GetNodeSubnetCIDR()
+		netInfo.On("GetNodeGatewayIP", nodeSubnetCIDRs[i]).Return(util.GetNodeGatewayIfAddr(nodeSubnetCIDRs[i]))
+		netInfo.On("GetNodeManagementIP", nodeSubnetCIDRs[i]).Return(util.GetNodeManagementIfAddr(nodeSubnetCIDRs[i]))
 	}
 
 	existingNode := corev1.Node{ObjectMeta: metav1.ObjectMeta{
@@ -399,7 +380,6 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 		KubeClient: fakeClient,
 	}
 
-	netInfo := &multinetworkmocks.NetInfo{}
 	netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", nodeName).Return(nil)
 
 	_, err = config.InitConfig(ctx, fexec, nil)
@@ -488,13 +468,14 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 
 	nodeSubnetCIDRs := make([]*net.IPNet, len(configs))
 	mgtPortAddrs := make([]*netlink.Addr, len(configs))
-
+	netInfo := &multinetworkmocks.NetInfo{}
 	for i, cfg := range configs {
 		nodeSubnetCIDRs[i] = cfg.GetNodeSubnetCIDR()
 		mgtPortAddrs[i] = cfg.GetMgtPortAddr()
+		netInfo.On("GetNodeGatewayIP", nodeSubnetCIDRs[i]).Return(util.GetNodeGatewayIfAddr(nodeSubnetCIDRs[i]))
+		netInfo.On("GetNodeManagementIP", nodeSubnetCIDRs[i]).Return(util.GetNodeManagementIfAddr(nodeSubnetCIDRs[i]))
 	}
 
-	netInfo := &multinetworkmocks.NetInfo{}
 	netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", nodeName).Return(nil)
 
 	_, err = config.InitConfig(ctx, fexec, nil)
@@ -804,10 +785,12 @@ var _ = Describe("Management Port tests", func() {
 				nft := nodenft.SetFakeNFTablesHelper()
 
 				netInfo := &multinetworkmocks.NetInfo{}
-				netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", "").Return(nil)
-
-				// Make a fake MgmtPortConfig with only the fields we care about
 				nodeNet := ovntest.MustParseIPNet("10.1.1.0/24")
+
+				netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", "").Return(nil)
+				netInfo.On("GetNodeGatewayIP", nodeNet).Return(util.GetNodeGatewayIfAddr(nodeNet))
+				netInfo.On("GetNodeManagementIP", nodeNet).Return(util.GetNodeManagementIfAddr(nodeNet))
+				// Make a fake MgmtPortConfig with only the fields we care about
 				fakeMgmtPortIPFamilyConfig := managementPortIPFamilyConfig{
 					ifAddr: nodeNet,
 				}
@@ -1208,7 +1191,8 @@ var _ = Describe("Management Port tests", func() {
 		netdevName, rep := "ens1f0v0", "ens1f0_0"
 		netInfo := &multinetworkmocks.NetInfo{}
 		netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", "worker-node").Return(nil)
-
+		netInfo.On("GetNodeGatewayIP", hostSubnets[0]).Return(util.GetNodeGatewayIfAddr(hostSubnets[0]))
+		netInfo.On("GetNodeManagementIP", hostSubnets[0]).Return(util.GetNodeManagementIfAddr(hostSubnets[0]))
 		It("Creates managementPort by default", func() {
 			mgmtPort, err := NewManagementPortController(node, hostSubnets, netdevName, rep, nil, netInfo)
 			Expect(err).NotTo(HaveOccurred())

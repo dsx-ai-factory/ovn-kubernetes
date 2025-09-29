@@ -33,6 +33,7 @@ import (
 	portmirrorfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned/fake"
 	virtualipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -80,7 +81,6 @@ const (
 	// ovnNodeID is the id (of type integer) of a node. It is set by cluster-manager.
 	ovnNodeID            = "k8s.ovn.org/node-id"
 	ovnNodePrimaryIfAddr = "k8s.ovn.org/node-primary-ifaddr"
-	ovnNodeSubnets       = "k8s.ovn.org/node-subnets"
 )
 
 func (n tNode) k8sNode(nodeID string) corev1.Node {
@@ -88,10 +88,9 @@ func (n tNode) k8sNode(nodeID string) corev1.Node {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: n.Name,
 			Annotations: map[string]string{
-				ovnNodeID:              nodeID,
-				util.OVNNodeGRLRPAddrs: "{\"default\":{\"ipv4\": \"100.64.0." + nodeID + "/16\"}}",
-				util.OVNNodeHostCIDRs:  fmt.Sprintf("[\"%s\"]", fmt.Sprintf("%s/24", n.NodeIP)),
-				ovnNodePrimaryIfAddr:   fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", fmt.Sprintf("%s/24", n.NodeIP), ""),
+				ovnNodeID:             nodeID,
+				util.OVNNodeHostCIDRs: fmt.Sprintf("[\"%s\"]", fmt.Sprintf("%s/24", n.NodeIP)),
+				ovnNodePrimaryIfAddr:  fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", fmt.Sprintf("%s/24", n.NodeIP), ""),
 			},
 		},
 		Status: corev1.NodeStatus{
@@ -493,8 +492,6 @@ var _ = ginkgo.Describe("Master Operations", func() {
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient}, testNode.Name)
 			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{Mode: config.GatewayModeDisabled})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(mgmtMAC))
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = nodeAnnotator.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -599,8 +596,6 @@ var _ = ginkgo.Describe("Master Operations", func() {
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient}, testNode.Name)
 			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{Mode: config.GatewayModeDisabled})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(mgmtMAC))
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = nodeAnnotator.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -701,8 +696,6 @@ var _ = ginkgo.Describe("Master Operations", func() {
 			populatePortAddresses(nodeName, lsp, hybMAC, hybIP, mockOVNNBClient)
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient}, testNode.Name)
 			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{Mode: config.GatewayModeDisabled})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(mgmtMAC))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(nodeSubnet))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -862,8 +855,6 @@ subnet=%s
 
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient}, masterNode.Name)
 			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{Mode: config.GatewayModeDisabled})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(masterMgmtPortMAC))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(masterSubnet))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1270,6 +1261,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 	ginkgo.DescribeTable(
 		"reconciles pod network SNATs from syncGateway",
 		func(condition func(*DefaultNetworkController) error, expectedExtraNATs ...*nbdb.NAT) {
+			config.OVNKubernetesFeature.AdvertisedUDNIsolationMode = config.AdvertisedUDNIsolationModeStrict
 			app.Action = func(ctx *cli.Context) error {
 				// Initialize config from CLI flags (including --init-gateways)
 				_, err := config.InitConfig(ctx, nil, nil)
@@ -1568,45 +1560,62 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
-	ginkgo.It("doesn't retry deleting a node that doesn't have a node-subnet annotation", func() {
-		app.Action = func(ctx *cli.Context) error {
-			_, err := config.InitConfig(ctx, nil, nil)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			startFakeController(oc, wg)
-			newNode := &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        "newNode",
-					Annotations: map[string]string{},
-				},
+	ginkgo.DescribeTable("doesn't retry deleting a node that is missing annotation",
+		func(node *corev1.Node) {
+			app.Action = func(ctx *cli.Context) error {
+				_, err := config.InitConfig(ctx, nil, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				startFakeController(oc, wg)
+				ginkgo.By("create new node with no annotation defined and ensure there's a retry entry")
+				_, err = kubeFakeClient.CoreV1().Nodes().Create(context.TODO(), node, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				retry.CheckRetryObjectMultipleFieldsEventually(
+					node.Name,
+					oc.retryNodes,
+					gomega.BeNil(),             // oldObj should be nil
+					gomega.Not(gomega.BeNil()), // newObj should not be nil
+				)
+				keyExists := true
+				retry.CheckRetryObjectEventually(node.Name, keyExists, oc.retryNodes)
+				ginkgo.By("delete node and check that there are no retries for the deleted node")
+				err = kubeFakeClient.CoreV1().Nodes().Delete(context.TODO(), node.Name, metav1.DeleteOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				retry.CheckRetryObjectEventually(node.Name, !keyExists, oc.retryNodes)
+				ginkgo.By("ensure failures for sync host network address or adding nodes are cleared")
+				gomega.Eventually(func() bool {
+					_, foundSyncHostNetAddrSetFailed := oc.syncHostNetAddrSetFailed.Load(node.Name)
+					_, foundAddNodeFailed := oc.addNodeFailed.Load(node.Name)
+					return foundSyncHostNetAddrSetFailed || foundAddNodeFailed
+				}).Should(gomega.BeFalse())
+				return nil
 			}
-			ginkgo.By("create new node with no host-subnet annotation defined and ensure theres a retry entry")
-			_, err = kubeFakeClient.CoreV1().Nodes().Create(context.TODO(), newNode, metav1.CreateOptions{})
+			err := app.Run([]string{
+				app.Name,
+			})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			retry.CheckRetryObjectMultipleFieldsEventually(
-				newNode.Name,
-				oc.retryNodes,
-				gomega.BeNil(),             // oldObj should be nil
-				gomega.Not(gomega.BeNil()), // newObj should not be nil
-			)
-			keyExists := true
-			retry.CheckRetryObjectEventually(newNode.Name, keyExists, oc.retryNodes)
-			ginkgo.By("delete node and check that there are no retries for the deleted node")
-			err = kubeFakeClient.CoreV1().Nodes().Delete(context.TODO(), newNode.Name, metav1.DeleteOptions{})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			retry.CheckRetryObjectEventually(newNode.Name, !keyExists, oc.retryNodes)
-			ginkgo.By("ensure failures for sync host network address or adding nodes are cleared")
-			gomega.Eventually(func() bool {
-				_, foundSyncHostNetAddrSetFailed := oc.syncHostNetAddrSetFailed.Load(newNode.Name)
-				_, foundAddNodeFailed := oc.addNodeFailed.Load(newNode.Name)
-				return foundSyncHostNetAddrSetFailed || foundAddNodeFailed
-			}).Should(gomega.BeFalse())
-			return nil
-		}
-		err := app.Run([]string{
-			app.Name,
-		})
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	})
+
+		},
+		ginkgo.Entry("k8s.ovn.org/node-subnets",
+			&corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "newNode",
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-id": "2",
+					},
+				},
+			},
+		),
+		ginkgo.Entry("k8s.ovn.org/node-id",
+			&corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "newNode",
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-subnets": "{\"default\": [\"10.130.0.0/23\", \"fd01:0:0:2::/64\"]}",
+					},
+				},
+			},
+		),
+	)
 
 	ginkgo.It("delete a partially constructed node", func() {
 		app.Action = func(ctx *cli.Context) error {
@@ -1729,7 +1738,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 					Annotations: map[string]string{
 						"k8s.ovn.org/node-subnets":    fmt.Sprintf("{\"default\":[\"%s\", \"fd02:0:0:2::2895/64\"]}", newNodeSubnet),
 						"k8s.ovn.org/node-chassis-id": "2",
-						util.OVNNodeGRLRPAddrs:        "{\"default\":{\"ipv4\":\"100.64.0.2/16\"}}",
+						util.OvnNodeID:                "2",
 					},
 				},
 			}
@@ -1916,7 +1925,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			mgmt_ips := util.GetNodeManagementIfAddr(hostSubnets[0])
 			ips = append(ips, mgmt_ips.IP.String())
-			lrpips, err := util.ParseNodeGatewayRouterJoinAddrs(updatedNode, types.DefaultNetworkName)
+			lrpips, err := udn.GetGWRouterIPs(updatedNode, oc.GetNetInfo())
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			lrpip, _, _ := net.ParseCIDR(lrpips[0].String())
 			ips = append(ips, lrpip.String())

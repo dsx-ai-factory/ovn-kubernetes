@@ -14,19 +14,20 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-// SecondaryNodeNetworkController structure is the object which holds the controls for starting
+// TBD-merge rename secondary network to UDN
+// UserDefinedNodeNetworkController structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints) for secondary network
-type SecondaryLocalnetNodeNetworkController struct {
-	SecondaryNodeNetworkController
+type UserDefinedLocalnetNodeNetworkController struct {
+	UserDefinedNodeNetworkController
 	// bridge name for this localnet network
 	bridgeName string
 }
 
-// NewSecondaryLocalnetNodeNetworkController creates a new OVN controller for creating logical network
-// infrastructure and policy for secondary localnet network
-func NewSecondaryLocalnetNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, netInfo util.NetInfo, networkManager networkmanager.Interface) *SecondaryLocalnetNodeNetworkController {
-	return &SecondaryLocalnetNodeNetworkController{
-		SecondaryNodeNetworkController: SecondaryNodeNetworkController{
+// NewUserDefinedLocalnetNodeNetworkController creates a new OVN controller for creating logical network
+// infrastructure and policy for user defined localnet network
+func NewUserDefinedLocalnetNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, netInfo util.NetInfo, networkManager networkmanager.Interface) *UserDefinedLocalnetNodeNetworkController {
+	return &UserDefinedLocalnetNodeNetworkController{
+		UserDefinedNodeNetworkController: UserDefinedNodeNetworkController{
 			BaseNodeNetworkController: BaseNodeNetworkController{
 				CommonNodeNetworkControllerInfo: *cnnci,
 				ReconcilableNetInfo:             util.NewReconcilableNetInfo(netInfo),
@@ -40,7 +41,7 @@ func NewSecondaryLocalnetNodeNetworkController(cnnci *CommonNodeNetworkControlle
 }
 
 // Start starts the default controller; handles all events and creates all needed logical entities
-func (nc *SecondaryLocalnetNodeNetworkController) Start(_ context.Context) error {
+func (nc *UserDefinedLocalnetNodeNetworkController) Start(_ context.Context) error {
 	var err error
 	klog.Infof("Start secondary node network controller of network %s", nc.GetNetworkName())
 
@@ -67,8 +68,8 @@ func (nc *SecondaryLocalnetNodeNetworkController) Start(_ context.Context) error
 }
 
 // Stop gracefully stops the controller
-func (nc *SecondaryLocalnetNodeNetworkController) Stop() {
-	nc.SecondaryNodeNetworkController.Stop()
+func (nc *UserDefinedLocalnetNodeNetworkController) Stop() {
+	nc.UserDefinedNodeNetworkController.Stop()
 
 	nc.stopNADController()
 
@@ -81,13 +82,13 @@ func (nc *SecondaryLocalnetNodeNetworkController) Stop() {
 }
 
 // Cleanup cleans up node entities for the given secondary network
-func (nc *SecondaryLocalnetNodeNetworkController) Cleanup() error {
+func (nc *UserDefinedLocalnetNodeNetworkController) Cleanup() error {
 	return nil
 }
 
 var ovsMutex = sync.Mutex{}
 
-func (nc *SecondaryLocalnetNodeNetworkController) updateLocalnetOvnBridgeMapping(toAdd bool) error {
+func (nc *UserDefinedLocalnetNodeNetworkController) updateLocalnetOvnBridgeMapping(toAdd bool) error {
 	// The NAD controller may have multiple workers that call this function concurrently.
 	// A mutex is required to prevent concurrent overwrites of external_ids:ovn-bridge-mappings.
 	ovsMutex.Lock()

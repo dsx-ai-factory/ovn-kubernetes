@@ -37,6 +37,7 @@ type Gateway interface {
 	GetGatewayIface() string
 	SetDefaultGatewayBridgeMAC(addr net.HardwareAddr)
 	SetDefaultPodNetworkAdvertised(bool)
+	SetDefaultBridgeGARPDropFlows(bool)
 	Reconcile() error
 }
 
@@ -300,10 +301,6 @@ func (g *gateway) Init(stopChan <-chan struct{}, wg *sync.WaitGroup) error {
 
 	var err error
 
-	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
-		go g.manageOpenFlowsForLocalnetPorts()
-	}
-
 	g.servicesRetryFramework = g.newRetryFrameworkNode(factory.ServiceForGatewayType)
 	if _, err = g.servicesRetryFramework.WatchResource(); err != nil {
 		return fmt.Errorf("gateway init failed to start watching services: %v", err)
@@ -432,8 +429,14 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops 
 		}
 	}
 
-	// Set static FDB entry for LOCAL port
-	if err := util.SetStaticFDBEntry(gatewayBridge.GetBridgeName(), gatewayBridge.GetBridgeName(), gatewayBridge.GetMAC()); err != nil {
+	// Set static FDB entry for sharedGW MAC.
+	// If `GatewayIfaceRep` port is present, use it instead of LOCAL (bridge name).
+	gwport := gatewayBridge.GetBridgeName()                           // Default is LOCAL port for the bridge.
+	if repPort := gatewayBridge.GetGatewayIfaceRep(); repPort != "" { // We have an accelerated switchdev device for GW.
+		gwport = repPort
+	}
+
+	if err := util.SetStaticFDBEntry(gatewayBridge.GetBridgeName(), gwport, gatewayBridge.GetMAC()); err != nil {
 		return nil, nil, err
 	}
 
@@ -484,6 +487,15 @@ func (g *gateway) SetDefaultPodNetworkAdvertised(isPodNetworkAdvertised bool) {
 
 func (g *gateway) GetDefaultPodNetworkAdvertised() bool {
 	return g.openflowManager.defaultBridge.GetNetworkConfig(types.DefaultNetworkName).Advertised.Load()
+}
+
+// SetDefaultBridgeGARPDropFlows will enable flows to drop GARPs if the openflow
+// manager has been initialized.
+func (g *gateway) SetDefaultBridgeGARPDropFlows(isDropped bool) {
+	if g.openflowManager == nil {
+		return
+	}
+	g.openflowManager.setDefaultBridgeGARPDrop(isDropped)
 }
 
 // Reconcile handles triggering updates to different components of a gateway, like OFM, Services
