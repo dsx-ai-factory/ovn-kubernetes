@@ -760,7 +760,7 @@ func addRPFilterLooseModeForManagementPort(mgmtPortName string) error {
 	if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.rp_filter = %s", mgmtPortName, rpFilterLooseMode) {
 		stdout, stderr, err = util.RunSysctl("-w", fmt.Sprintf("net/ipv4/conf/%s/rp_filter=%s", mgmtPortName, rpFilterLooseMode))
 		if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.rp_filter = %s", mgmtPortName, rpFilterLooseMode) {
-			return fmt.Errorf("could not set the correct rp_filter value for interface %s: stdout: %v, stderr: %v, err: %v",
+			klog.Errorf("Could not set the correct rp_filter value for interface %s: stdout: %v, stderr: %v, err: %v",
 				mgmtPortName, stdout, stderr, err)
 		}
 	}

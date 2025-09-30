@@ -768,7 +768,7 @@ func initMgmPortRoutingRules(mgmtCfg *managementPortConfig) error {
 	if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.rp_filter = %s", types.K8sMgmtIntfName, rpFilterLooseMode) {
 		stdout, stderr, err = util.RunSysctl("-w", fmt.Sprintf("net.ipv4.conf.%s.rp_filter=%s", types.K8sMgmtIntfName, rpFilterLooseMode))
 		if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.rp_filter = %s", types.K8sMgmtIntfName, rpFilterLooseMode) {
-			return fmt.Errorf("could not set the correct rp_filter value for interface %s: stdout: %v, stderr: %v, err: %v",
+			klog.Errorf("Could not set the correct rp_filter value for interface %s: stdout: %v, stderr: %v, err: %v",
 				types.K8sMgmtIntfName, stdout, stderr, err)
 		}
 	}
