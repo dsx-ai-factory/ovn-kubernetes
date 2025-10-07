@@ -121,7 +121,6 @@ BASEDIR=$(dirname $0)
 # OVN_UDN_ALLOWED_DEFAULT_SERVICES - list of default cluster network services accessible from primary UDN
 # OVS_DB_TRANSACTION_TIMEOUT - timeout for OVSDB transaction, in seconds
 # OVNKUBE_SKIP_CTMARK_HOSTPORTS - list of tcp/udp ports of host services that must not be subjected to CT-Marking
-# OVNKUBE_NODE_USE_NORMAL_ACTION - use NORMAL action for external packets (allow traffic to VMs on the same node)
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -432,8 +431,6 @@ ovs_db_transaction_timeout=${OVS_DB_TRANSACTION_TIMEOUT:-100}
 # OVNKUBE_SKIP_CTMARK_HOSTPORTS - list of tcp/udp ports of host services that must not be subjected to CT-Marking.
 # It is a comma separated list of TCP/UDP port, e.g. 4791/udp,6081/udp
 ovnkube_skip_ctmark_hostports=${OVNKUBE_SKIP_CTMARK_HOSTPORTS:-}
-# OVNKUBE_NODE_USE_NORMAL_ACTION - use NORMAL action for external packets (allow traffic to VMs on the same node)
-ovnkube_node_use_normal_action=${OVNKUBE_NODE_USE_NORMAL_ACTION:="false"}
 
 # external_ids:host-k8s-nodename is set on an Open_vSwitch enabled system if the ovnkube stack
 # should function on behalf of a different host than external_ids:hostname. This includes
@@ -2575,12 +2572,6 @@ ovnkube-controller-with-node() {
   ovs_db_transaction_timeout_flag="--db-txn-timeout=${ovs_db_transaction_timeout}s"
   echo "ovs_db_transaction_timeout_flag=${ovs_db_transaction_timeout_flag}"
 
-  ovnkube_node_normal_action_flag=
-  if [[ ${ovnkube_node_use_normal_action} == "true" ]]; then
-	  ovnkube_node_normal_action_flag="--enable-ovnkube-node-normal-action"
-  fi
-  echo "ovnkube_node_normal_action_flag: ${ovnkube_node_normal_action_flag}"
-
   ovnkube_istio_ambient_enable_flag=
   if [[ ${ovnkube_istio_ambient_enable} == "true" ]]; then
     ovnkube_istio_ambient_enable_flag="--enable-istio-ambient-support"
@@ -2651,7 +2642,6 @@ ovnkube-controller-with-node() {
     ${ovnkube_metrics_tls_opts} \
     ${ovnkube_node_mgmt_port_netdev_flag} \
     ${ovnkube_node_mode_flag} \
-    ${ovnkube_node_normal_action_flag} \
     ${ovnkube_skip_ctmark_hostports_opts} \
     ${OVN_NODE_PORT} \
     ${ovn_enable_dnsnameresolver_flag} \
@@ -3509,17 +3499,12 @@ ovn-node() {
   echo "ovn_conntrack_zone_flag=${ovn_conntrack_zone_flag}"
 
   custom_gwsnat_rules_opts=""
-  ovnkube_node_normal_action_flag=
   if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
     custom_gwsnat_rules=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:custom-gwsnat-rules | tr -d \")
     if [[ -n ${custom_gwsnat_rules} ]]; then
       custom_gwsnat_rules_opts="--custom-gwsnat-rules=\"${custom_gwsnat_rules}\""
     fi
     echo "custom_gwsnat_rules_opts: ${custom_gwsnat_rules_opts}"
-    if [[ ${ovnkube_node_use_normal_action} == "true" ]]; then
-      ovnkube_node_normal_action_flag="--enable-ovnkube-node-normal-action"
-    fi
-    echo "ovnkube_node_normal_action_flag: ${ovnkube_node_normal_action_flag}"
   fi
 
   network_qos_enabled_flag=
@@ -3604,7 +3589,6 @@ ovn-node() {
         ${ovnkube_node_certs_flags} \
         ${ovnkube_node_mgmt_port_netdev_flag} \
         ${ovnkube_node_mode_flag} \
-	${ovnkube_node_normal_action_flag} \
         ${ovnkube_skip_ctmark_hostports_opts} \
         ${ovn_metrics_enable_pprof_flag} \
         ${ovn_node_ssl_opts} \
