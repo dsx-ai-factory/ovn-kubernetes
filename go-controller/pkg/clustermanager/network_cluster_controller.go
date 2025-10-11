@@ -22,6 +22,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	ipam "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/mac"
 	annotationalloc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/node"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/pod"
@@ -249,7 +250,8 @@ func (ncc *networkClusterController) init() error {
 			ipamClaimsReconciler   persistentips.PersistentAllocations
 		)
 
-		if ncc.allowPersistentIPs() {
+		persistentIPsEnabled := ncc.allowPersistentIPs()
+		if persistentIPsEnabled {
 			ncc.retryIPAMClaims = ncc.newRetryFramework(factory.IPAMClaimsType, true)
 			ncc.ipamClaimReconciler = persistentips.NewIPAMClaimReconciler(
 				ncc.kube,
@@ -259,11 +261,20 @@ func (ncc *networkClusterController) init() error {
 			ipamClaimsReconciler = ncc.ipamClaimReconciler
 		}
 
+		var podAllocOpts []annotationalloc.AllocatorOption
+		if util.IsPreconfiguredUDNAddressesEnabled() &&
+			ncc.IsPrimaryNetwork() &&
+			persistentIPsEnabled &&
+			ncc.TopologyType() == types.Layer2Topology {
+			podAllocOpts = append(podAllocOpts, annotationalloc.WithMACRegistry(mac.NewManager()))
+		}
+
 		podAllocationAnnotator = annotationalloc.NewPodAnnotationAllocator(
 			ncc.GetNetInfo(),
 			ncc.watchFactory.PodCoreInformer().Lister(),
 			ncc.kube,
 			ipamClaimsReconciler,
+			podAllocOpts...,
 		)
 
 		ncc.podAllocator = pod.NewPodAllocator(

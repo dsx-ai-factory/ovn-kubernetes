@@ -18,6 +18,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
 	ipam "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/mac"
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
@@ -101,6 +102,22 @@ func ipamClaimKey(namespace string, claimName string) string {
 	return fmt.Sprintf("%s/%s", namespace, claimName)
 }
 
+type macRegistryStub struct {
+	reserveErr  error
+	releaseMAC  net.HardwareAddr
+	reservedMAC net.HardwareAddr
+}
+
+func (m *macRegistryStub) Reserve(_ string, mac net.HardwareAddr) error {
+	m.reservedMAC = mac
+	return m.reserveErr
+}
+
+func (m *macRegistryStub) Release(_ string, mac net.HardwareAddr) error {
+	m.releaseMAC = mac
+	return nil
+}
+
 func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 	randomMac, err := util.GenerateRandMAC()
 	if err != nil {
@@ -116,6 +133,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 	type args struct {
 		ipAllocator subnet.NamedAllocator
 		idAllocator id.NamedAllocator
+		macRegistry *macRegistryStub
 		network     *nadapi.NetworkSelectionElement
 		ipamClaim   *ipamclaimsapi.IPAMClaim
 		reallocate  bool
@@ -137,6 +155,8 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 		wantPodAnnotation               *util.PodAnnotation
 		wantReleasedIPs                 []*net.IPNet
 		wantReleasedIPsOnRollback       []*net.IPNet
+		wantReservedMAC                 net.HardwareAddr
+		wantReleaseMACOnRollback        net.HardwareAddr
 		wantReleaseID                   bool
 		wantRelasedIDOnRollback         bool
 		wantErr                         bool
@@ -1077,6 +1097,21 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			},
 			wantErr: true, // Should fail because ErrAllocated is not skipped
 		},
+		{
+			// In a scenario of VM migration multiple pods using the same network configuration including the MAC address.
+			// When the migration destination pod is created, the pod-allocator should relax ErrMACReserved error
+			// to allow the migration destination pod use the same MAC as the migration source pod, for the migration to succeed.
+			name: "macRegistry should not release already reserved MAC on rollback",
+			args: args{
+				network:     &nadapi.NetworkSelectionElement{MacRequest: requestedMAC},
+				macRegistry: &macRegistryStub{reserveErr: mac.ErrMACReserved},
+			},
+			wantPodAnnotation: &util.PodAnnotation{
+				MAC: requestedMACParsed,
+			},
+			wantReservedMAC:          requestedMACParsed,
+			wantReleaseMACOnRollback: nil,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1095,6 +1130,13 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			config.OVNKubernetesFeature.EnableMultiNetwork = !tt.multiNetworkDisabled
 			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
 			config.OVNKubernetesFeature.EnablePreconfiguredUDNAddresses = tt.enablePreconfiguredUDNAddresses
+
+			var macRegistry mac.Register
+			macRegistry = mac.NewManager()
+			if tt.args.macRegistry != nil {
+				macRegistry = tt.args.macRegistry
+			}
+
 			config.IPv4Mode = true
 			if tt.isSingleStackIPv6 {
 				config.IPv4Mode = false
@@ -1179,6 +1221,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				pod,
 				network,
 				claimsReconciler,
+				macRegistry,
 				tt.args.reallocate,
 				false,
 				tt.role,
@@ -1196,6 +1239,12 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				tt.args.idAllocator.(*idAllocatorStub).releasedID = false
 			}
 
+			if tt.args.macRegistry != nil {
+				reservedMAC := tt.args.macRegistry.reservedMAC
+				g.Expect(reservedMAC).To(gomega.Equal(tt.wantReservedMAC), "Reserve MAC on error behaved unexpectedly")
+				tt.args.macRegistry.reservedMAC = nil
+			}
+
 			rollback()
 
 			if tt.args.ipAllocator != nil {
@@ -1206,6 +1255,12 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			if tt.args.idAllocator != nil {
 				releasedID := tt.args.idAllocator.(*idAllocatorStub).releasedID
 				g.Expect(releasedID).To(gomega.Equal(tt.wantRelasedIDOnRollback), "Release ID on rollback behaved unexpectedly")
+			}
+
+			if tt.args.macRegistry != nil {
+				releaseMAC := tt.args.macRegistry.releaseMAC
+				g.Expect(releaseMAC).To(gomega.Equal(tt.wantReleaseMACOnRollback), "Release MAC on rollback behaved unexpectedly")
+				tt.args.macRegistry.releaseMAC = nil
 			}
 
 			if tt.wantErr {
