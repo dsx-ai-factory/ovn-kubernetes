@@ -515,7 +515,7 @@ func setOvsDatapathOffloadMetrics(ovsVswitchdAppctl ovsClient) error {
 }
 
 // ovsDatapathMetricsUpdater updates the ovs datapath metrics
-func ovsDatapathMetricsUpdater(_, ovsVswitchdAppctl ovsClient, metricsScrapeInterval int, stopChan <-chan struct{}) {
+func ovsDatapathMetricsUpdater(ovsVswitchdAppctl ovsClient, metricsScrapeInterval int, stopChan <-chan struct{}) {
 	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
 	defer ticker.Stop()
 
@@ -1463,7 +1463,7 @@ func RegisterOvsMetrics(nodeName string, ovsDBClient libovsdbclient.Client,
 		}
 
 		// OVS datapath metrics updater
-		go ovsDatapathMetricsUpdater(util.RunOVSAppctl, util.RunOvsVswitchdAppCtl, metricsScrapeInterval, stopChan)
+		go ovsDatapathMetricsUpdater(util.RunOvsVswitchdAppCtl, metricsScrapeInterval, stopChan)
 		// OVS bridge metrics updater
 		go ovsBridgeMetricsUpdater(ovsDBClient, util.RunOVSOfctl, metricsScrapeInterval, stopChan)
 		// OVS memory metrics updater
