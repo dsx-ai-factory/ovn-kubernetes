@@ -14,6 +14,7 @@ import (
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	ipreserv "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/ipreservation"
+	zoneinterconnect "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
@@ -237,7 +238,14 @@ func (oc *BaseLayer2UserDefinedNetworkController) initializeLogicalSwitch(switch
 	}
 
 	if oc.isLayer2Interconnect() {
-		err := oc.zoneICHandler.AddTransitSwitchConfig(&logicalSwitch)
+		tunnelKey := zoneinterconnect.BaseTransitSwitchTunnelKey + oc.GetNetworkID()
+		if config.Layer2UsesTransitRouter && oc.IsPrimaryNetwork() {
+			if len(oc.GetTunnelKeys()) != 2 {
+				return nil, fmt.Errorf("layer2 network %s with transit router enabled requires exactly 2 tunnel keys, got: %v", oc.GetNetworkName(), oc.GetTunnelKeys())
+			}
+			tunnelKey = oc.GetTunnelKeys()[0]
+		}
+		err := oc.zoneICHandler.AddTransitSwitchConfig(&logicalSwitch, tunnelKey)
 		if err != nil {
 			return nil, err
 		}
