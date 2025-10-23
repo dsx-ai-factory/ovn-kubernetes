@@ -1589,10 +1589,13 @@ func SubnetOverlapCheck(netconf *ovncnitypes.NetConf) (*net.IPNet, *net.IPNet, e
 	return nil, nil, nil
 }
 
-var defaultOVNPrimary = nettypes.NetworkSelectionElement{
-	Namespace: "default",
-	Name:      "ovn-primary",
-}
+var defaultOVNPrimary = sync.OnceValue(func() *nettypes.NetworkSelectionElement {
+	nsAndName := strings.Split(config.Default.ClusterDefaultNad, "/")
+	return &nettypes.NetworkSelectionElement{
+		Namespace: nsAndName[0],
+		Name:      nsAndName[1],
+	}
+})
 
 // GetPodNADToNetworkMapping sees if the given pod needs to plumb over this given network specified by netconf,
 // and return the matching NetworkSelectionElement if any exists.
@@ -1608,7 +1611,6 @@ func GetPodNADToNetworkMapping(pod *corev1.Pod, nInfo NetInfo) (bool, map[string
 	if pod.Spec.HostNetwork {
 		return false, nil, nil
 	}
-
 	networkSelections := map[string]*nettypes.NetworkSelectionElement{}
 	podDesc := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
 	if !nInfo.IsUserDefinedNetwork() {
@@ -1618,7 +1620,7 @@ func GetPodNADToNetworkMapping(pod *corev1.Pod, nInfo NetInfo) (bool, map[string
 			return false, nil, fmt.Errorf("error getting default-network's network-attachment for pod %s: %v", podDesc, err)
 		}
 		if network == nil {
-			network = &defaultOVNPrimary
+			network = defaultOVNPrimary()
 		}
 		nadName := GetNADName(network.Namespace, network.Name)
 		if !nInfo.HasNAD(nadName) {
