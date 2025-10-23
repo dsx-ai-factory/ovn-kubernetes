@@ -617,6 +617,15 @@ func unconfigureMgmtRepresentorPort(mgmtPortName string) error {
 		klog.Warningf("Failed to get external-ds:ovn-orig-mgmt-port-rep-name: %s", stderr)
 	}
 
+	if savedName != "" && savedName != mgmtPortName {
+		if _, err = util.GetNetLinkOps().LinkByName(savedName); err == nil {
+			// saved name already be taken by other link
+			klog.Warningf("Saved management port representor name for %s is %s, but is already taken by another link",
+				mgmtPortName, savedName)
+			savedName = ""
+		}
+	}
+
 	if savedName == "" {
 		// rename to "rep" + "ddmmyyHHMMSS"
 		savedName = time.Now().Format("rep010206150405")
@@ -637,8 +646,10 @@ func unconfigureMgmtRepresentorPort(mgmtPortName string) error {
 		return fmt.Errorf("failed to set link down: %v", err)
 	}
 
-	if err := util.GetNetLinkOps().LinkSetName(link, savedName); err != nil {
-		return fmt.Errorf("failed to rename %s link to %s: %v", mgmtPortName, savedName, err)
+	if mgmtPortName != savedName {
+		if err := util.GetNetLinkOps().LinkSetName(link, savedName); err != nil {
+			return fmt.Errorf("failed to rename %s representor link to %s: %v", mgmtPortName, savedName, err)
+		}
 	}
 	return nil
 }
@@ -678,6 +689,17 @@ func unconfigureMgmtNetdevicePort(mgmtPortName string) error {
 			klog.Warningf("Failed to get external-ds:ovn-orig-mgmt-port-netdev-name: %s", stderr)
 		}
 		savedName = stdout
+		if savedName == mgmtPortName {
+			return nil
+		}
+		if savedName != "" {
+			if _, err = util.GetNetLinkOps().LinkByName(savedName); err == nil {
+				// saved name already be taken by other link
+				klog.Warningf("Saved management port netdevice name for %s is %s, but is already taken by another link",
+					mgmtPortName, savedName)
+				savedName = ""
+			}
+		}
 	}
 
 	if savedName == "" {
@@ -688,7 +710,7 @@ func unconfigureMgmtNetdevicePort(mgmtPortName string) error {
 
 	// rename to PortName + "-ddmmyyHHMMSS"
 	if err := util.GetNetLinkOps().LinkSetName(link, savedName); err != nil {
-		return fmt.Errorf("failed to rename %s link to %s: %v", mgmtPortName, savedName, err)
+		return fmt.Errorf("failed to rename %s netdev link to %s: %v", mgmtPortName, savedName, err)
 	}
 	return nil
 }

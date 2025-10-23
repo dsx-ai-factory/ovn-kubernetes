@@ -605,6 +605,7 @@ var _ = Describe("Management Port tests", func() {
 					Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external-ids:ovn-orig-mgmt-port-netdev-name",
 					Output: netdevName,
 				})
+				netlinkOpsMock.On("LinkByName", netdevName).Return(linkMock, netlinkMockErr)
 				netlinkOpsMock.On("LinkByName", mgmtPortName).Return(linkMock, nil)
 				netlinkOpsMock.On("AddrList", linkMock, netlink.FAMILY_ALL).Return([]netlink.Addr{}, nil)
 				netlinkOpsMock.On("RouteList", linkMock, netlink.FAMILY_ALL).Return([]netlink.Route{}, nil)
@@ -622,6 +623,7 @@ var _ = Describe("Management Port tests", func() {
 					Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external-ids:ovn-orig-mgmt-port-netdev-name",
 					Output: netdevName,
 				})
+				netlinkOpsMock.On("LinkByName", netdevName).Return(linkMock, netlinkMockErr)
 				netlinkOpsMock.On("LinkByName", mgmtPortName).Return(linkMock, nil)
 				netlinkOpsMock.On("AddrList", linkMock, netlink.FAMILY_ALL).Return([]netlink.Addr{}, nil)
 				netlinkOpsMock.On("RouteList", linkMock, netlink.FAMILY_ALL).Return([]netlink.Route{}, nil)
@@ -751,6 +753,7 @@ var _ = Describe("Management Port tests", func() {
 				execMock.AddFakeCmdsNoOutputNoError([]string{
 					"ovs-vsctl --timeout=15 --if-exists del-port br-int " + mgmtPortName,
 				})
+				netlinkOpsMock.On("LinkByName", repName).Return(linkMock, netlinkMockErr)
 				netlinkOpsMock.On("LinkByName", mgmtPortName).Return(linkMock, nil)
 				netlinkOpsMock.On("LinkSetDown", linkMock).Return(nil)
 				netlinkOpsMock.On("LinkSetName", linkMock, repName).Return(netlinkMockErr)
@@ -771,6 +774,7 @@ var _ = Describe("Management Port tests", func() {
 				execMock.AddFakeCmdsNoOutputNoError([]string{
 					"ovs-vsctl --timeout=15 --if-exists del-port br-int " + mgmtPortName,
 				})
+				netlinkOpsMock.On("LinkByName", repName).Return(linkMock, netlinkMockErr)
 				netlinkOpsMock.On("LinkByName", mgmtPortName).Return(linkMock, nil)
 				netlinkOpsMock.On("LinkSetDown", linkMock).Return(nil)
 				netlinkOpsMock.On("LinkSetName", linkMock, repName).Return(nil)
