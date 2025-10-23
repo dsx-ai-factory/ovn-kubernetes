@@ -322,7 +322,7 @@ var _ = Describe("Healthcheck tests", func() {
 			nodeInformerMock.On("Lister").Return(nodeListerMock)
 			factoryMock.On("NodeCoreInformer").Return(nodeInformerMock)
 			Expect(err).NotTo(HaveOccurred())
-			ncm, err := NewNodeControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager, nil)
+			ncm, err := NewNodeControllerManager(fakeClient, &factoryMock, nodeName, "", &sync.WaitGroup{}, nil, routeManager, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = testNS.Do(func(ns.NetNS) error {

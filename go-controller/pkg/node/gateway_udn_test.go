@@ -804,7 +804,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		}
 
 		stop := make(chan struct{})
-		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
+		wf, err := factory.NewNodeWatchFactory(fakeClient, []string{nodeName})
 		Expect(err).NotTo(HaveOccurred())
 		defer func() {
 			close(stop)
@@ -906,7 +906,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 				&kubeMock, vrf, &iprulemanager.FakeControllerWithError{}, localGw)
 			Expect(err).NotTo(HaveOccurred())
 			flowMap := udnGateway.gateway.openflowManager.flowCache
-			Expect(flowMap["DEFAULT"]).To(HaveLen(50))
+			Expect(flowMap["DEFAULT"]).To(HaveLen(43))
 
 			Expect(udnGateway.masqCTMark).To(Equal(udnGateway.masqCTMark))
 			var udnFlows int
@@ -926,7 +926,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			Expect(err).To(MatchError(ContainSubstring("fake delete metadata error")))
 			By("Ensuring everything else was still cleaned up correctly")
 			flowMap = udnGateway.gateway.openflowManager.flowCache
-			Expect(flowMap["DEFAULT"]).To(HaveLen(50))                                      // only default network flows are present
+			Expect(flowMap["DEFAULT"]).To(HaveLen(43))                                      // only default network flows are present
 			Expect(udnGateway.openflowManager.defaultBridge.GetNetConfigLen()).To(Equal(1)) // default network only
 			udnFlows = 0
 			for _, flows := range flowMap {

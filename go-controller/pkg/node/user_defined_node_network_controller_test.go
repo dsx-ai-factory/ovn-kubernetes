@@ -12,6 +12,7 @@ import (
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
 	nadfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/mock"
 	"github.com/vishvananda/netlink"
 
@@ -303,6 +304,13 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 				{Type: corev1.NodeInternalIP, Address: strings.Split(v6NodeIP, "/")[0]}},
 			},
 		}
+
+		// Setup mock filesystem for ovs-vswitchd.pid file needed by ovs-appctl commands
+		err := util.AppFs.MkdirAll("/var/run/openvswitch/", 0o755)
+		Expect(err).NotTo(HaveOccurred())
+		err = afero.WriteFile(util.AppFs, "/var/run/openvswitch/ovs-vswitchd.pid", []byte("1234"), 0o644)
+		Expect(err).NotTo(HaveOccurred())
+
 		nodeList := []*corev1.Node{node}
 		factoryMock.On("GetNode", nodeName).Return(nodeList[0], nil)
 		factoryMock.On("GetNodes").Return(nodeList, nil)
