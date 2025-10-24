@@ -193,6 +193,7 @@ node-server-privkey=/path/to/node-metrics-private.key
 node-server-cert=/path/to/node-metrics.crt
 enable-config-duration=true
 enable-scale-metrics=true
+enable-ovs-native-metrics=false
 
 [logging]
 loglevel=5
@@ -635,6 +636,7 @@ var _ = Describe("Config Operations", func() {
 			"enable-multi-external-gateway=true",
 			"enable-admin-network-policy=true",
 			"enable-persistent-ips=true",
+			"enable-ovs-native-metrics=true",
 			"zone=foo",
 		)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -686,6 +688,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Metrics.NodeServerCert).To(gomega.Equal("/path/to/node-metrics.crt"))
 			gomega.Expect(Metrics.EnableConfigDuration).To(gomega.BeTrue())
 			gomega.Expect(Metrics.EnableScaleMetrics).To(gomega.BeTrue())
+			gomega.Expect(Metrics.EnableOvsNativeMetrics).To(gomega.BeTrue())
 
 			gomega.Expect(OvnNorth.Scheme).To(gomega.Equal(OvnDBSchemeSSL))
 			gomega.Expect(OvnNorth.PrivKey).To(gomega.Equal("/path/to/nb-client-private.key"))
@@ -798,6 +801,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Metrics.NodeServerCert).To(gomega.Equal("/tls/nodecert"))
 			gomega.Expect(Metrics.EnableConfigDuration).To(gomega.BeTrue())
 			gomega.Expect(Metrics.EnableScaleMetrics).To(gomega.BeTrue())
+			gomega.Expect(Metrics.EnableOvsNativeMetrics).To(gomega.BeTrue())
 
 			gomega.Expect(OvnNorth.Scheme).To(gomega.Equal(OvnDBSchemeSSL))
 			gomega.Expect(OvnNorth.PrivKey).To(gomega.Equal("/client/privkey"))
@@ -915,6 +919,7 @@ var _ = Describe("Config Operations", func() {
 			"-enable-multi-external-gateway=true",
 			"-enable-admin-network-policy=true",
 			"-enable-persistent-ips=true",
+			"-enable-ovs-native-metrics=true",
 			"-healthz-bind-address=0.0.0.0:4321",
 			"-zone=bar",
 			"-dns-service-namespace=kube-system-2",

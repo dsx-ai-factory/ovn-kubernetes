@@ -381,5 +381,5 @@ const (
 
 // temporary workaround for non-IC mode metrics name
 var (
-	MetricOvnkubeSubsystemController = "ovn-controller"
+	MetricOvnkubeSubsystemController = "controller"
 )

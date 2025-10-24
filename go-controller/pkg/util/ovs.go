@@ -614,6 +614,27 @@ func RunOvsVswitchdAppCtl(args ...string) (string, string, error) {
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
+// RunOvsVswitchdAppCtlMetricsShow runs an 'ovs-appctl -t ovs-vswitchd.pid.ctl metrics/show' command.
+// It is requred because we don't want to retry the command, and considering the size of the output of metrics/show
+// could be too large, we may use a pipe to read the output and running `ovs-appctl metrics/show` non-blocking.
+// TODO: If this command causes memory issues at scale, use a pipe to read the output
+// and run `ovs-appctl metrics/show` in non-blocking mode.
+func RunOvsVswitchdAppCtlMetricsShow() (*bytes.Buffer, *bytes.Buffer, error) {
+	var cmdArgs []string
+	pid, err := GetOvsVSwitchdPID()
+	if err != nil {
+		return nil, nil, err
+	}
+	cmdArgs = []string{
+		"-t",
+		savedOVSRunDir + fmt.Sprintf("ovs-vswitchd.%s.ctl", pid),
+	}
+	cmdArgs = append(cmdArgs, "metrics/show")
+
+	stdout, stderr, err := runWithEnvVars(runner.appctlPath, nil, cmdArgs...)
+	return stdout, stderr, err
+}
+
 // RunOvsDbServerAppCtl runs an 'ovs-appctl -t /var/run/openvswitch/ovsdb-server.pid.ctl command'
 func RunOvsDbServerAppCtl(args ...string) (string, string, error) {
 	var cmdArgs []string

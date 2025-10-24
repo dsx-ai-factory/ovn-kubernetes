@@ -29,6 +29,7 @@ import (
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -228,6 +229,34 @@ func ovnKubeLogFileSizeMetricsUpdater(ovnKubeLogFileMetric *prometheus.GaugeVec,
 	}
 }
 
+func setCoverageShowMetric(component string) {
+	coverageShowOutputMap, err := getCoverageShowOutputMap(component)
+	if err != nil {
+		klog.Errorf("Getting coverage/show metrics for %s failed: %s", component, err.Error())
+		return
+	}
+	coverageShowMetricsMap := componentCoverageShowMetricsMap[component]
+	for metricName, metricInfo := range coverageShowMetricsMap {
+		var metricValue float64
+		if metricInfo.srcName != "" {
+			metricName = metricInfo.srcName
+		}
+		if metricInfo.aggregateFrom != nil {
+			for _, aggregateMetricName := range metricInfo.aggregateFrom {
+				if value, ok := coverageShowOutputMap[aggregateMetricName]; ok {
+					metricValue += parseMetricToFloat(component, aggregateMetricName, value)
+				}
+			}
+		} else {
+			if value, ok := coverageShowOutputMap[metricName]; ok {
+				metricValue = parseMetricToFloat(component, metricName, value)
+			}
+		}
+		metricInfo.metric.Set(metricValue)
+	}
+
+}
+
 // coverageShowMetricsUpdater updates the metric by obtaining values from
 // getCoverageShowOutputMap for specified component. The counters displayed
 // by coverage/show output are called events. It could be that the event never
@@ -240,30 +269,7 @@ func coverageShowMetricsUpdater(component string, metricsScrapeInterval int, sto
 	for {
 		select {
 		case <-ticker.C:
-			coverageShowOutputMap, err := getCoverageShowOutputMap(component)
-			if err != nil {
-				klog.Errorf("Getting coverage/show metrics for %s failed: %s", component, err.Error())
-				continue
-			}
-			coverageShowMetricsMap := componentCoverageShowMetricsMap[component]
-			for metricName, metricInfo := range coverageShowMetricsMap {
-				var metricValue float64
-				if metricInfo.srcName != "" {
-					metricName = metricInfo.srcName
-				}
-				if metricInfo.aggregateFrom != nil {
-					for _, aggregateMetricName := range metricInfo.aggregateFrom {
-						if value, ok := coverageShowOutputMap[aggregateMetricName]; ok {
-							metricValue += parseMetricToFloat(component, aggregateMetricName, value)
-						}
-					}
-				} else {
-					if value, ok := coverageShowOutputMap[metricName]; ok {
-						metricValue = parseMetricToFloat(component, metricName, value)
-					}
-				}
-				metricInfo.metric.Set(metricValue)
-			}
+			setCoverageShowMetric(component)
 		case <-stopChan:
 			return
 		}
@@ -573,8 +579,25 @@ func StartMetricsServer(bindAddress string, pprofBindAddress string, certFile st
 
 // StartOVNMetricsServer runs the prometheus listener so that OVN metrics can be collected
 func StartOVNMetricsServer(bindAddress, pprofBindAddress, certFile, keyFile string,
-	stopChan <-chan struct{}, wg *sync.WaitGroup) {
-	startMetricsServer(bindAddress, pprofBindAddress, certFile, keyFile, promhttp.Handler(), stopChan, wg)
+	stopChan <-chan struct{}, wg *sync.WaitGroup, nodeName string) error {
+
+	if config.Metrics.EnableOvsNativeMetrics {
+		ovsDBClient, err := libovsdb.NewOVSClient(stopChan)
+		if err != nil {
+			return fmt.Errorf("error when trying to initialize ovsdb client: %v", err)
+		}
+
+		ovsMetricsHandler := &ovsNativeMetricsHandler{
+			ovsDBClient: ovsDBClient,
+			nodeName:    nodeName,
+		}
+		metricsHandler := promhttp.InstrumentMetricHandler(prometheus.DefaultRegisterer, http.HandlerFunc(ovsMetricsHandler.handleMetricsRequest))
+		startMetricsServer(bindAddress, pprofBindAddress, certFile, keyFile, metricsHandler, stopChan, wg)
+	} else {
+		startMetricsServer(bindAddress, pprofBindAddress, certFile, keyFile, promhttp.Handler(), stopChan, wg)
+	}
+
+	return nil
 }
 
 func RegisterOvnNodeMetrics(ovsDBClient libovsdbclient.Client, metricsScrapeInterval int, stopChan <-chan struct{}) {
