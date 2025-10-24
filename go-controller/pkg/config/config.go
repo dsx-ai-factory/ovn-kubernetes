@@ -476,6 +476,8 @@ type MetricsConfig struct {
 	// configuration duration and optionally, its application to all nodes
 	EnableConfigDuration bool `gcfg:"enable-config-duration"`
 	EnableScaleMetrics   bool `gcfg:"enable-scale-metrics"`
+	// Collect OVS native metrics from `metrics/show` output.
+	EnableOvsNativeMetrics bool `gcfg:"enable-ovs-native-metrics"`
 }
 
 // OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
@@ -1541,6 +1543,11 @@ var MetricsFlags = []cli.Flag{
 		Name:        "metrics-enable-scale",
 		Usage:       "Enables metrics related to scaling",
 		Destination: &cliConfig.Metrics.EnableScaleMetrics,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-ovs-native-metrics",
+		Usage:       "Use OVS native metrics from the `metrics/show` output. Only supported in IC mode for now.",
+		Destination: &cliConfig.Metrics.EnableOvsNativeMetrics,
 	},
 }
 

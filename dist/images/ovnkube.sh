@@ -77,6 +77,7 @@ BASEDIR=$(dirname $0)
 # OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
 # OVN_METRICS_SCRAPE_INTERVAL - ovn & ovnkube metrics scrape interval in sec (default 30)
 # OVS_METRICS_SCRAPE_INTERVAL - ovs metrics scrape interval in sec (default 30)
+# OVS_ENABLE_NATIVE_METRICS - enable ovs native metrics if ovs-vswitchd supports metrics/show (default: false)
 # OVN_METRICS_ENABLE_PPROF - Enable/Disable pprof server
 # OVN_MONITOR_ALL - ovn-controller monitor all data in SB DB
 # OVN_OFCTRL_WAIT_BEFORE_CLEAR - ovn-controller wait time in ms before clearing OpenFlow rules during start up
@@ -2651,6 +2652,20 @@ ovnkube-controller-with-node() {
   fi
   echo "ovn_disable_requestedchassis_flag=${ovn_disable_requestedchassis_flag}"
 
+  # Only support OVS native metrics in IC mode for now.
+  # Central mode remains on legacy metrics and dashboards, since it is being deprecated
+  # and NGN will eventually migrate to IC mode.
+  enable_ovs_native_metrics_flag=""
+  if [[ $OVS_ENABLE_NATIVE_METRICS == "true" && ${ovnkube_node_mode} != "dpu-host" ]]; then
+    pid_file=${OVS_RUNDIR}/ovs-vswitchd.pid
+    ctl_file=${OVS_RUNDIR}/ovs-vswitchd.$(cat ${pid_file}).ctl
+    if $(ovs-appctl -t $ctl_file list-commands | grep metrics/show > /dev/null ); then
+      echo "metrics/show is available"
+      enable_ovs_native_metrics_flag="--enable-ovs-native-metrics"
+    fi
+  fi
+  echo "enable_ovs_native_metrics_flag=${enable_ovs_native_metrics_flag}"
+
   ovn_external_cluster_access_opts=
   # We need to provide k8s credentials explicitly to access an external cluster from this node
   if [[ -n ${K8S_TOKEN} ]]; then
@@ -2742,6 +2757,7 @@ ovnkube-controller-with-node() {
     ${ovn_external_cluster_access_opts} \
     ${representor_metering_nodes_flag} \
     ${ovnkube_cluster_default_nad_flag} \
+    ${enable_ovs_native_metrics_flag} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
     --gateway-router-subnet=${ovn_gateway_router_subnet} \
@@ -3624,6 +3640,20 @@ ovn-node() {
   fi
   echo "ovnkube_istio_ambient_snat_ipv6_flag=${ovnkube_istio_ambient_snat_ipv6_flag}"
 
+  # Only support OVS native metrics in IC mode for now.
+  # Central mode remains on legacy metrics and dashboards, since it is being deprecated
+  # and NGN will eventually migrate to IC mode.
+  enable_ovs_native_metrics_flag=""
+  if [[ $OVS_ENABLE_NATIVE_METRICS == "true" && ${ovnkube_node_mode} != "dpu-host" ]]; then
+    pid_file=${OVS_RUNDIR}/ovs-vswitchd.pid
+    ctl_file=${OVS_RUNDIR}/ovs-vswitchd.$(cat ${pid_file}).ctl
+    if $(ovs-appctl -t $ctl_file list-commands | grep metrics/show > /dev/null ); then
+      echo "metrics/show is available"
+      enable_ovs_native_metrics_flag="--enable-ovs-native-metrics"
+    fi
+  fi
+  echo "enable_ovs_native_metrics_flag=${enable_ovs_native_metrics_flag}"
+
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
         ${anp_enabled_flag} \
@@ -3686,6 +3716,7 @@ ovn-node() {
         ${ovnkube_istio_ambient_snat_ipv4_flag} \
         ${ovnkube_istio_ambient_snat_ipv6_flag} \
         ${ovnkube_cluster_default_nad_flag} \
+        ${enable_ovs_native_metrics_flag} \
         --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
         --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
         --host-network-namespace ${ovn_host_network_namespace} \

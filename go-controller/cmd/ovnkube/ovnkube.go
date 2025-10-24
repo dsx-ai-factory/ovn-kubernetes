@@ -327,8 +327,11 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 			if config.Metrics.EnablePprof {
 				pprofBindAddress = "127.0.0.1:19410"
 			}
-			metrics.StartOVNMetricsServer(config.Metrics.BindAddress, pprofBindAddress,
-				config.Metrics.NodeServerCert, config.Metrics.NodeServerPrivKey, ctx.Done(), ovnKubeStartWg)
+			if err := metrics.StartOVNMetricsServer(config.Metrics.BindAddress, pprofBindAddress,
+				config.Metrics.NodeServerCert, config.Metrics.NodeServerPrivKey, ctx.Done(), ovnKubeStartWg,
+				runMode.identity); err != nil {
+				return err
+			}
 		} else {
 			if config.Metrics.EnablePprof {
 				pprofBindAddress = "127.0.0.1:19409"
