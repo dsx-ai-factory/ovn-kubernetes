@@ -145,6 +145,7 @@ func NewSBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}, for
 	go func() {
 		<-stopCh
 		cancel()
+		c.Close()
 	}()
 
 	// Only Monitor Required SBDB tables to reduce memory overhead
@@ -173,6 +174,7 @@ func NewSBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}, for
 		c.NewMonitor(monitorOptionTable...),
 	)
 	if err != nil {
+		cancel()
 		c.Close()
 		return nil, err
 	}
@@ -211,10 +213,12 @@ func NewNBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}, opt
 	go func() {
 		<-stopCh
 		cancel()
+		c.Close()
 	}()
 
 	_, err = c.MonitorAll(ctx)
 	if err != nil {
+		cancel()
 		c.Close()
 		return nil, err
 	}
@@ -245,6 +249,7 @@ func NewOVSClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (c
 	go func() {
 		<-stopCh
 		cancel()
+		c.Close()
 	}()
 
 	_, err = c.Monitor(ctx,
@@ -256,6 +261,7 @@ func NewOVSClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (c
 		),
 	)
 	if err != nil {
+		cancel()
 		c.Close()
 		return nil, err
 	}
