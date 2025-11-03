@@ -446,6 +446,23 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHostPreStart(kubeNodeIP ne
 		return err
 	}
 
+	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+		macAddr, err := util.GetLinkHardwareAddr(kubeIntf)
+		if err != nil {
+			return err
+		}
+
+		// Set the primary MAC address as a label on the node
+		// Replace colons with dashes for label value compatibility
+		macAddrLabel := strings.ReplaceAll(macAddr.String(), ":", "-")
+		labels := map[string]interface{}{util.OvnNodeMacAddr: macAddrLabel}
+		err = nc.Kube.SetLabelsOnNode(nc.name, labels)
+		if err != nil {
+			klog.Errorf("Unable to set primary MAC Address label on node %s, err: %v", nc.name, err)
+			return err
+		}
+	}
+
 	// Set the host CIDRs annotation to include all detected network addresses
 	// This helps with routing decisions for traffic coming from the host
 	if err := util.SetNodeHostCIDRs(nodeAnnotator, nodeAddrSet); err != nil {

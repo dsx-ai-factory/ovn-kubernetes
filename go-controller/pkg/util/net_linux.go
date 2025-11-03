@@ -981,3 +981,16 @@ func SetRPFilterLooseModeForInterface(ifName string) {
 		}
 	}
 }
+
+// GetLinkHardwareAddr returns the MAC address of the given interface
+func GetLinkHardwareAddr(iface string) (net.HardwareAddr, error) {
+	link, err := netLinkOps.LinkByName(iface)
+	if err != nil {
+		return nil, fmt.Errorf("failed to lookup link %s: %v", iface, err)
+	}
+	macAddr := link.Attrs().HardwareAddr
+	if len(macAddr) == 0 {
+		return nil, fmt.Errorf("failed to get MAC address for link %s", iface)
+	}
+	return macAddr, nil
+}
