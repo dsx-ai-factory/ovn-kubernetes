@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -50,19 +51,14 @@ const (
 const (
 	nbdbCtlFileName = "ovnnb_db.ctl"
 	sbdbCtlFileName = "ovnsb_db.ctl"
-	OvnNbdbLocation = "/etc/ovn/ovnnb_db.db"
-	OvnSbdbLocation = "/etc/ovn/ovnsb_db.db"
 	FloodAction     = "FLOOD"
 	NormalAction    = "NORMAL"
 )
 
 var (
 	// These are variables (not constants) so that testcases can modify them
-	ovsRunDir string = "/var/run/openvswitch/"
-	ovnRunDir string = "/var/run/ovn/"
-
-	savedOVSRunDir = ovsRunDir
-	savedOVNRunDir = ovnRunDir
+	ovsRunDir string = config.OvsPaths.RunDir
+	ovnRunDir string = config.OvnSouth.RunDir
 )
 
 var ovnCmdRetryCount = 200
@@ -71,8 +67,8 @@ var AppFs = afero.NewOsFs()
 // PrepareTestConfig restores default config values. Used by testcases to
 // provide a pristine environment between tests.
 func PrepareTestConfig() {
-	ovsRunDir = savedOVSRunDir
-	ovnRunDir = savedOVNRunDir
+	ovsRunDir = config.OvsPaths.RunDir
+	ovnRunDir = config.OvnSouth.RunDir
 }
 
 // SetupMockOVSPidFile setup mock filesystem for ovs-vswitchd.pid file.
@@ -210,12 +206,14 @@ func SetExec(exec kexec.Interface) error {
 		// openvswitch.
 		runner.ovnappctlPath = runner.appctlPath
 		runner.ovnctlPath = "/usr/share/openvswitch/scripts/ovn-ctl"
-		runner.ovnRunDir = ovsRunDir
+		runner.ovnRunDir = config.OvsPaths.RunDir
 	} else {
 		// If ovn-appctl command is available, it means OVN
 		// has its own separate rundir, logdir, sharedir.
 		runner.ovnctlPath = "/usr/share/ovn/scripts/ovn-ctl"
-		runner.ovnRunDir = ovnRunDir
+
+		// OvnNorth.RunDir should be the same as OvnSouth.RunDir.
+		runner.ovnRunDir = config.OvnNorth.RunDir
 	}
 
 	runner.nbctlPath, err = exec.LookPath(ovnNbctlCommand)
@@ -616,7 +614,7 @@ func RunOvsVswitchdAppCtl(args ...string) (string, string, error) {
 
 	cmdArgs = []string{
 		"-t",
-		savedOVSRunDir + fmt.Sprintf("ovs-vswitchd.%s.ctl", pid),
+		filepath.Join(config.OvsPaths.RunDir, fmt.Sprintf("ovs-vswitchd.%s.ctl", pid)),
 	}
 	cmdArgs = append(cmdArgs, args...)
 	stdout, stderr, err := runOVNretry(runner.appctlPath, nil, cmdArgs...)
@@ -636,7 +634,7 @@ func RunOvsVswitchdAppCtlMetricsShow() (*bytes.Buffer, *bytes.Buffer, error) {
 	}
 	cmdArgs = []string{
 		"-t",
-		savedOVSRunDir + fmt.Sprintf("ovs-vswitchd.%s.ctl", pid),
+		filepath.Join(config.OvsPaths.RunDir, fmt.Sprintf("ovs-vswitchd.%s.ctl", pid)),
 	}
 	cmdArgs = append(cmdArgs, "metrics/show")
 
@@ -647,13 +645,13 @@ func RunOvsVswitchdAppCtlMetricsShow() (*bytes.Buffer, *bytes.Buffer, error) {
 // RunOvsDbServerAppCtl runs an 'ovs-appctl -t /var/run/openvswitch/ovsdb-server.pid.ctl command'
 func RunOvsDbServerAppCtl(args ...string) (string, string, error) {
 	var cmdArgs []string
-	pid, err := os.ReadFile(savedOVSRunDir + "ovsdb-server.pid")
+	pid, err := os.ReadFile(filepath.Join(config.OvsPaths.RunDir, "ovsdb-server.pid"))
 	if err != nil {
 		return "", "", fmt.Errorf("failed to get ovsdb-server pid : %v", err)
 	}
 	cmdArgs = []string{
 		"-t",
-		savedOVSRunDir + fmt.Sprintf("ovsdb-server.%s.ctl", strings.TrimSpace(string(pid))),
+		filepath.Join(config.OvsPaths.RunDir, fmt.Sprintf("ovsdb-server.%s.ctl", strings.TrimSpace(string(pid)))),
 	}
 	cmdArgs = append(cmdArgs, args...)
 	stdout, stderr, err := runOVNretry(runner.appctlPath, nil, cmdArgs...)
@@ -662,7 +660,7 @@ func RunOvsDbServerAppCtl(args ...string) (string, string, error) {
 
 // GetOvsVSwitchdPID retrieves the Process IDentifier for ovs-vswitchd daemon.
 func GetOvsVSwitchdPID() (string, error) {
-	pid, err := afero.ReadFile(AppFs, savedOVSRunDir+"ovs-vswitchd.pid")
+	pid, err := afero.ReadFile(AppFs, filepath.Join(config.OvsPaths.RunDir, "ovs-vswitchd.pid"))
 	if err != nil {
 		return "", fmt.Errorf("failed to get ovs-vswitch pid : %v", err)
 	}
@@ -672,7 +670,7 @@ func GetOvsVSwitchdPID() (string, error) {
 
 // GetOvsDBServerPID retrieves the Process IDentifier for ovs-vswitchd daemon.
 func GetOvsDBServerPID() (string, error) {
-	pid, err := afero.ReadFile(AppFs, savedOVSRunDir+"ovsdb-server.pid")
+	pid, err := afero.ReadFile(AppFs, filepath.Join(config.OvsPaths.RunDir, "ovsdb-server.pid"))
 	if err != nil {
 		return "", fmt.Errorf("failed to get ovsdb-server pid : %v", err)
 	}
@@ -814,7 +812,7 @@ type queryResult struct {
 }
 
 func GetOVNDBServerInfo(timeout int, direction, database string) (*OVNDBServerStatus, error) {
-	sockPath := fmt.Sprintf("unix:/var/run/openvswitch/ovn%s_db.sock", direction)
+	sockPath := fmt.Sprintf("unix:%s", filepath.Join(config.OvsPaths.RunDir, fmt.Sprintf("ovn%s_db.sock", direction)))
 	transact := fmt.Sprintf(`["_Server", {"op":"select", "table":"Database", "where":[["name", "==", "%s"]], `+
 		`"columns": ["connected", "leader", "index"]}]`, database)
 
