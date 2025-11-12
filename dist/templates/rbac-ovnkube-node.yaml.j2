@@ -118,8 +118,8 @@ metadata:
 rules:
     - apiGroups: [""]
       resources:
-          - nodes/status
-      verbs: [ "get" ]
+          - nodes
+      verbs: [ "get", "list", "watch" ]
 
 ---
 # RBAC policies for ovnk8s-node and ovnk8s-node-dpu
