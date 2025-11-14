@@ -1,7 +1,6 @@
 package metrics
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"strconv"
@@ -10,8 +9,6 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"k8s.io/apimachinery/pkg/util/wait"
-	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -410,7 +407,7 @@ var (
 )
 
 func getNBDBSockPath() (string, error) {
-	paths := []string{"/var/run/openvswitch/", "/var/run/ovn/"}
+	paths := []string{config.OvsPaths.RunDir, config.OvnNorth.RunDir}
 	for _, basePath := range paths {
 		if _, err := os.Stat(basePath + "ovnnb_db.sock"); err == nil {
 			klog.Infof("ovnnb_db.sock found at %s", basePath)
@@ -448,31 +445,13 @@ func getOvnDbVersionInfo() {
 	}
 }
 
-func RegisterOvnDBMetrics(podLister corev1listers.PodLister, podSynced func() bool, k8sNodeName string,
-	metricsScrapeInterval int, stopChan <-chan struct{}) {
-	if !util.WaitForInformerCacheSyncWithTimeout("OVN DB Metrics Registration", stopChan, podSynced) {
-		klog.Errorf("Timed out waiting for pod informer caches to sync")
+func RegisterOvnDBMetrics(waitTimeoutFunc func() bool, metricsScrapeInterval int, stopChan <-chan struct{}) {
+	if ok := waitTimeoutFunc(); !ok {
+		klog.Info("OVN DB metrics registration on this node skipped: readiness gate not satisfied")
 		return
 	}
-	// For nodes in non-IC mode or in the default IC zone, check for its central NBDB/SBDB pods for the cluster/default zone;
-	// Otherwise, each non-global IC zone node has its own NBDB/SBDB.
-	// Needs to retry as node factory only watch for pods whose k8s.ovn.org/nodeName label is set for the current node, and it
-	// takes time for ovnkube-controller to set this label on ovn-db pods.
-	if !config.OVNKubernetesFeature.EnableInterconnect || config.Default.Zone == types.OvnDefaultZone {
-		err := wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 300*time.Second, true, func(_ context.Context) (bool, error) {
-			return checkPodRunsOnGivenNode(podLister, []string{"name in (ovn-nbdb, ovn-sbdb, ovnkube-db)"}, k8sNodeName, true)
-		})
-		if err != nil {
-			if wait.Interrupted(err) {
-				klog.Errorf("Timed out while checking if OVN DB Pod runs on this %q K8s Node: %v. "+
-					"Not registering OVN DB Metrics on this Node.", k8sNodeName, err)
-			} else {
-				klog.Infof("Not registering OVN DB Metrics on this Node since OVN DBs are not running on this node (%s): %v", k8sNodeName, err)
-			}
-			return
-		}
-	}
-	klog.Info("Found OVN DB Pod running on this node. Registering OVN DB Metrics")
+
+	klog.Info("Registering OVN DB Metrics on this Node")
 
 	// get the ovsdb server version info
 	getOvnDbVersionInfo()
@@ -495,13 +474,13 @@ func RegisterOvnDBMetrics(podLister corev1listers.PodLister, podSynced func() bo
 		func() float64 { return 1 },
 	))
 	var dbProperties []*util.OvsDbProperties
-	nbdbProps, err := util.GetOvsDbProperties(util.OvnNbdbLocation)
+	nbdbProps, err := util.GetOvsDbProperties(config.OvnNorth.DbLocation)
 	if err != nil {
 		klog.Errorf("Failed to init nbdb properties: %s", err)
 	} else {
 		dbProperties = append(dbProperties, nbdbProps)
 	}
-	sbdbProps, err := util.GetOvsDbProperties(util.OvnSbdbLocation)
+	sbdbProps, err := util.GetOvsDbProperties(config.OvnSouth.DbLocation)
 	if err != nil {
 		klog.Errorf("Failed to init sbdb properties: %s", err)
 	} else {

@@ -503,7 +503,12 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 		wg.Add(1)
 		go func() {
 			defer cancel()
-			defer wg.Done()
+			defer func() {
+				if managerErr != nil {
+					klog.Errorf("Failed to run cluster manager: %v", managerErr)
+				}
+				wg.Done()
+			}()
 
 			clusterManager, err := clustermanager.NewClusterManager(
 				ovnClientset.GetClusterManagerClientset(),
@@ -543,7 +548,12 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 		wg.Add(1)
 		go func() {
 			defer cancel()
-			defer wg.Done()
+			defer func() {
+				if controllerErr != nil {
+					klog.Errorf("Failed to run ovnkube controller: %v", controllerErr)
+				}
+				wg.Done()
+			}()
 
 			enableMetricsOption := client.WithMetricsRegistryNamespaceSubsystem(prometheus.DefaultRegisterer,
 				types.MetricOvnkubeNamespace, types.MetricOvnkubeSubsystemController+"_libovsdb")
@@ -601,7 +611,12 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 		wg.Add(1)
 		go func() {
 			defer cancel()
-			defer wg.Done()
+			defer func() {
+				if nodeErr != nil {
+					klog.Errorf("Failed to run k8s node controller: %v", nodeErr)
+				}
+				wg.Done()
+			}()
 
 			klog.Infof("Initializing K8s nodes: %v", nodeNames)
 			if config.Kubernetes.Token == "" {
@@ -675,7 +690,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 				podLister := corev1listers.NewPodLister(watchFactory.LocalPodInformer().GetIndexer())
 				nodeLister := corev1listers.NewNodeLister(watchFactory.NodeInformer().GetIndexer())
 				podSynced := watchFactory.LocalPodInformer().HasSynced
-				metrics.RegisterOvnCentralMetrics(podLister, podSynced, nodeLister, runMode.identity, config.MetricsScrapeInterval, ctx.Done())
+				metrics.RegisterOvnMetrics(podLister, podSynced, nodeLister, runMode.identity, config.MetricsScrapeInterval, ctx.Done())
 			}
 		}
 	}

@@ -486,23 +486,26 @@ func checkPodRunsOnGivenNode(podLister corev1listers.PodLister, labels []string,
 		strings.Join(labels, ","), k8sNodeName)
 }
 
-// checkNodeLabel checks if the give node matches the given labelSelector.
-func checkNodeLabel(nodeLister corev1listers.NodeLister, nodeName, selector string) (bool, error) {
+// checkNodeLabel checks if the give node matches the given labelSelector. Return nil if it matches
+func checkNodeLabel(nodeLister corev1listers.NodeLister, nodeName, selector string) error {
 	node, err := nodeLister.Get(nodeName)
 	if err != nil {
 		klog.Infof("Register Ovn Northd Metrics Operation failed (will retry): %v", err)
-		return false, ErrGetNode
+		return ErrGetNode
 	}
 
 	nodeSelector, err := metav1.ParseToLabelSelector(selector)
 	if err != nil {
-		return false, fmt.Errorf("failed to check node with invalid label selector %s: %v", selector, err)
+		return fmt.Errorf("failed to check node with invalid label selector %s: %v", selector, err)
 	}
 	ls, err := metav1.LabelSelectorAsSelector(nodeSelector)
 	if err != nil {
-		return false, fmt.Errorf("failed to check node with invalid label selector %s: %v", selector, err)
+		return fmt.Errorf("failed to check node with invalid label selector %s: %v", selector, err)
 	}
-	return ls.Matches(labels.Set(node.Labels)), nil
+	if !ls.Matches(labels.Set(node.Labels)) {
+		return fmt.Errorf("node does not have the expected label %q", node.Labels)
+	}
+	return nil
 }
 
 // using the cyrpto/tls module's GetCertificate() callback function helps in picking up
@@ -604,17 +607,6 @@ func RegisterOvnNodeMetrics(ovsDBClient libovsdbclient.Client, metricsScrapeInte
 	go RegisterOvnControllerMetrics(ovsDBClient, metricsScrapeInterval, stopChan)
 }
 
-func RegisterOvnCentralMetrics(podLister corev1listers.PodLister, podSynced func() bool, nodeLister corev1listers.NodeLister,
-	k8sNodeName string, metricsScrapeInterval int, stopChan <-chan struct{}) {
-	// in IC mode, nb/sb/northd are running on the dpu mode node
-	if config.OVNKubernetesFeature.EnableInterconnect && config.OvnKubeNode.Mode == types.NodeModeDPUHost {
-		return
-	}
-
-	go RegisterOvnDBMetrics(podLister, podSynced, k8sNodeName, metricsScrapeInterval, stopChan)
-	go RegisterOvnNorthdMetrics(nodeLister, k8sNodeName, metricsScrapeInterval, stopChan)
-}
-
 func startMetricsServer(bindAddress, pprofBindAddress, certFile, keyFile string, handler http.Handler,
 	stopChan <-chan struct{}, wg *sync.WaitGroup) {
 	mux := http.NewServeMux()
@@ -683,4 +675,79 @@ func startMetricsServer(bindAddress, pprofBindAddress, certFile, keyFile string,
 			}
 		}, 5*time.Second, stopChan)
 	}()
+}
+
+func RegisterOvnMetrics(podLister corev1listers.PodLister, podSynced func() bool, nodeLister corev1listers.NodeLister,
+	k8sNodeName string, metricsScrapeInterval int, stopChan <-chan struct{}) {
+	// in IC mode, nb/sb/northd are running on the dpu mode node
+	if config.OVNKubernetesFeature.EnableInterconnect && config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+		return
+	}
+
+	go RegisterOvnDBMetrics(
+		func() bool {
+			if !util.WaitForInformerCacheSyncWithTimeout("OVN DB Metrics Registration", stopChan, podSynced) {
+				klog.Errorf("Timed out waiting for pod informer caches to sync")
+				return false
+			}
+			// For nodes in non-IC mode or in the default IC zone, check for its central NBDB/SBDB pods for the cluster/default zone;
+			// Otherwise, each non-global IC zone node has its own NBDB/SBDB.
+			// Needs to retry as node factory only watch for pods whose k8s.ovn.org/nodeName label is set for the current node, and it
+			// takes time for ovnkube-controller to set this label on ovn-db pods.
+			if !config.OVNKubernetesFeature.EnableInterconnect || config.Default.Zone == types.OvnDefaultZone {
+				err := utilwait.PollUntilContextTimeout(context.Background(), 1*time.Second, 300*time.Second, true, func(_ context.Context) (bool, error) {
+					return checkPodRunsOnGivenNode(podLister, []string{"name in (ovn-nbdb, ovn-sbdb, ovnkube-db)"}, k8sNodeName, true)
+				})
+				if err != nil {
+					if utilwait.Interrupted(err) {
+						klog.Errorf("Timed out while checking if OVN DB Pod runs on this node (%s): %v. "+
+							"Not registering OVN DB Metrics on this node.", k8sNodeName, err)
+					} else {
+						klog.Infof("Not registering OVN DB Metrics on this node (%s) since OVN DBs are not running on it: %v", k8sNodeName, err)
+					}
+					return false
+				}
+				return true
+			}
+			return true
+		},
+		metricsScrapeInterval,
+		stopChan,
+	)
+	go RegisterOvnNorthdMetrics(
+		func() bool {
+			if (!config.OVNKubernetesFeature.EnableInterconnect || config.Default.Zone == types.OvnDefaultZone) && config.Kubernetes.NorthdNodeSelectorLabel != "" {
+				// for non-IC mode or the default zone nodes, check if northd is scheduled on this node by the nodeSelectorLabel
+				backoff := utilwait.Backoff{
+					Duration: retryInterval,
+					Steps:    maxNodeLabelRetries,
+					Factor:   retryFactor,
+				}
+
+				ctx := utilwait.ContextForChannel(stopChan)
+				err := utilwait.ExponentialBackoffWithContext(ctx, backoff, utilwait.ConditionWithContextFunc(func(context.Context) (bool, error) {
+					lastErr := checkNodeLabel(nodeLister, k8sNodeName, config.Kubernetes.NorthdNodeSelectorLabel)
+					if lastErr != nil {
+						if errors.Is(lastErr, ErrGetNode) {
+							return false, nil // Retryable error
+						}
+						return false, lastErr // Permanent error, don't retry
+					}
+					return true, nil // Success
+				}))
+
+				if err != nil {
+					klog.Errorf("Not registering OVN North Metrics on this node (%s) because failed to check if OVNKube North Pod is running on it: %v", k8sNodeName, err)
+					return false
+				}
+				return true
+			} else if config.OVNKubernetesFeature.EnableInterconnect && config.Default.Zone != types.OvnDefaultZone {
+				// for non-default zone in IC mode, northd should be running on every node
+				return true
+			}
+			return false
+		},
+		metricsScrapeInterval,
+		stopChan,
+	)
 }

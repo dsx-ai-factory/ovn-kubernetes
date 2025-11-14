@@ -17,8 +17,6 @@ import (
 
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
-	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressqoslisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -30,6 +28,7 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	anpcontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/admin_network_policy"
 	apbroutecontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
+	efcontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egressfirewall"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egressservice"
 	ipreserv "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/ipreservation"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
@@ -60,9 +59,6 @@ type DefaultNetworkController struct {
 	loadbalancerClusterCache map[corev1.Protocol]string
 
 	externalGatewayRouteInfo *apbroutecontroller.ExternalGatewayRouteInfoCache
-
-	// egressFirewalls is a map of namespaces and the egressFirewall attached to it
-	egressFirewalls sync.Map
 
 	// EgressQoS
 	egressQoSLister egressqoslisters.EgressQoSLister
@@ -109,11 +105,8 @@ type DefaultNetworkController struct {
 
 	// dnsNameResolver is used for resolving the IP addresses of DNS names
 	// used in egress firewall rules
-	dnsNameResolver  dnsnameresolver.DNSNameResolver
-	efNodeController controller.Controller
-
-	// retry framework for egress firewall
-	retryEgressFirewalls *retry.RetryFramework
+	dnsNameResolver dnsnameresolver.DNSNameResolver
+	efController    *efcontroller.EFController
 
 	// retry framework for egress IP
 	retryEgressIPs *retry.RetryFramework
@@ -261,7 +254,6 @@ func (oc *DefaultNetworkController) initRetryFramework() {
 	// egress IP (and dependent namespaces, pods, nodes), cloud private ip config.
 	oc.retryPods = oc.newRetryFramework(factory.PodType)
 	oc.retryNodes = oc.newRetryFramework(factory.NodeType)
-	oc.retryEgressFirewalls = oc.newRetryFramework(factory.EgressFirewallType)
 	oc.retryEgressIPs = oc.newRetryFramework(factory.EgressIPType)
 	oc.retryEgressIPNamespaces = oc.newRetryFramework(factory.EgressIPNamespaceType)
 	oc.retryEgressIPPods = oc.newRetryFramework(factory.EgressIPPodType)
@@ -376,8 +368,8 @@ func (oc *DefaultNetworkController) Stop() {
 	if oc.dnsNameResolver != nil {
 		oc.dnsNameResolver.Shutdown()
 	}
-	if oc.efNodeController != nil {
-		controller.Stop(oc.efNodeController)
+	if oc.efController != nil {
+		oc.efController.Stop()
 	}
 	if oc.routeImportManager != nil {
 		oc.routeImportManager.ForgetNetwork(oc.GetNetworkName())
@@ -530,7 +522,7 @@ func (oc *DefaultNetworkController) run(_ context.Context) error {
 
 	if config.OVNKubernetesFeature.EnableEgressIP {
 		// This is probably the best starting order for all egress IP handlers.
-		// WatchEgressIPNamespaces and WatchEgressIPPods only use the informer
+		// WatchEgressIPPods and WatchEgressIPNamespaces only use the informer
 		// cache to retrieve the egress IPs when determining if namespace/pods
 		// match. It is thus better if we initialize them first and allow
 		// WatchEgressNodes / WatchEgressIP to initialize after. Those handlers
@@ -539,10 +531,14 @@ func (oc *DefaultNetworkController) run(_ context.Context) error {
 		// risk performing a bunch of modifications on the EgressIP objects when
 		// we restart and then have these handlers act on stale data when they
 		// sync.
-		if err := WithSyncDurationMetric("egress ip namespace", oc.WatchEgressIPNamespaces); err != nil {
+		// Initialize WatchEgressIPPods before WatchEgressIPNamespaces to ensure
+		// that no pod events are missed by the EgressIPController. It's acceptable
+		// to miss a namespace event, as it will be handled indirectly through
+		// the pod delete event within that namespace.
+		if err := WithSyncDurationMetric("egress ip pod", oc.WatchEgressIPPods); err != nil {
 			return err
 		}
-		if err := WithSyncDurationMetric("egress ip pod", oc.WatchEgressIPPods); err != nil {
+		if err := WithSyncDurationMetric("egress ip namespace", oc.WatchEgressIPNamespaces); err != nil {
 			return err
 		}
 		if err := WithSyncDurationMetric("egress node", oc.WatchEgressNodes); err != nil {
@@ -571,12 +567,14 @@ func (oc *DefaultNetworkController) run(_ context.Context) error {
 		if err != nil {
 			return err
 		}
-		err = WithSyncDurationMetric("egress firewall", oc.WatchEgressFirewall)
+
+		oc.efController, err = efcontroller.NewEFController("egress-firewall-controller", oc.zone, oc.kube, oc.nbClient,
+			oc.watchFactory.NamespaceInformer().Lister(), oc.watchFactory.NodeCoreInformer(), oc.watchFactory.EgressFirewallInformer(),
+			oc.networkManager, oc.dnsNameResolver, oc.observManager)
 		if err != nil {
 			return err
 		}
-		oc.efNodeController = oc.newEFNodeController(oc.watchFactory.NodeCoreInformer())
-		err = controller.Start(oc.efNodeController)
+		err = oc.efController.Start()
 		if err != nil {
 			return err
 		}
@@ -890,15 +888,6 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 		}
 		return utilerrors.Join(aggregatedErrors...)
 
-	case factory.EgressFirewallType:
-		egressFirewall := obj.(*egressfirewall.EgressFirewall).DeepCopy()
-		err := h.oc.addEgressFirewall(egressFirewall)
-		if statusErr := h.oc.setEgressFirewallStatus(egressFirewall, err); statusErr != nil {
-			klog.Errorf("Failed to update egress firewall status %s, error: %v",
-				getEgressFirewallNamespacedName(egressFirewall), statusErr)
-		}
-		return err
-
 	case factory.EgressIPType:
 		eIP := obj.(*egressipv1.EgressIP)
 		return h.oc.eIPC.reconcileEgressIP(nil, eIP)
@@ -1192,15 +1181,6 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 		}
 		return h.oc.deleteNodeEvent(node)
 
-	case factory.EgressFirewallType:
-		egressFirewall := obj.(*egressfirewall.EgressFirewall)
-		if err := h.oc.deleteEgressFirewall(egressFirewall); err != nil {
-			return err
-		}
-		metrics.UpdateEgressFirewallRuleCount(float64(-len(egressFirewall.Spec.Egress)))
-		metrics.DecrementEgressFirewallCount()
-		return nil
-
 	case factory.EgressIPType:
 		eIP := obj.(*egressipv1.EgressIP)
 		return h.oc.eIPC.reconcileEgressIP(eIP, nil)
@@ -1254,16 +1234,13 @@ func (h *defaultNetworkControllerEventHandler) SyncFunc(objs []interface{}) erro
 		case factory.NodeType:
 			syncFunc = h.oc.syncNodes
 
-		case factory.EgressFirewallType:
-			syncFunc = h.oc.syncEgressFirewall
-
-		case factory.EgressIPNamespaceType:
+		case factory.EgressIPPodType:
 			syncFunc = h.oc.eIPC.syncEgressIPs
 
 		case factory.EgressNodeType:
 			syncFunc = h.oc.eIPC.initClusterEgressPolicies
 
-		case factory.EgressIPPodType,
+		case factory.EgressIPNamespaceType,
 			factory.EgressIPType:
 			syncFunc = nil
 

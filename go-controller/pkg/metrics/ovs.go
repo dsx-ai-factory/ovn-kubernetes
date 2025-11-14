@@ -5,6 +5,7 @@ package metrics
 
 import (
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -1486,11 +1487,11 @@ func RegisterOvsMetrics(nodeName string, ovsDBClient libovsdbclient.Client,
 		// and therefore it can monitor OVS running on the host using PID.
 		if !config.UnprivilegedMode {
 			prometheus.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{
-				PidFn:     prometheus.NewPidFileFn("/var/run/openvswitch/ovs-vswitchd.pid"),
+				PidFn:     prometheus.NewPidFileFn(filepath.Join(config.OvsPaths.RunDir, "ovs-vswitchd.pid")),
 				Namespace: fmt.Sprintf("%s_%s", types.MetricOvsNamespace, types.MetricOvsSubsystemVswitchd),
 			}))
 			prometheus.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{
-				PidFn:     prometheus.NewPidFileFn("/var/run/openvswitch/ovsdb-server.pid"),
+				PidFn:     prometheus.NewPidFileFn(filepath.Join(config.OvsPaths.RunDir, "ovsdb-server.pid")),
 				Namespace: fmt.Sprintf("%s_%s", types.MetricOvsNamespace, types.MetricOvsSubsystemOvsDB),
 			}))
 		}

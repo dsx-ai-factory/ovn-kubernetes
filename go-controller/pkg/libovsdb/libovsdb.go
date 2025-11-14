@@ -230,7 +230,7 @@ func NewNBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}, opt
 func NewOVSClient(stopCh <-chan struct{}) (client.Client, error) {
 	cfg := &config.OvnAuthConfig{
 		Scheme:  config.OvnDBSchemeUnix,
-		Address: "unix:/var/run/openvswitch/db.sock",
+		Address: fmt.Sprintf("unix:%s", filepath.Join(config.OvsPaths.RunDir, "db.sock")),
 	}
 
 	return NewOVSClientWithConfig(*cfg, stopCh)

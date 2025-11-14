@@ -2424,7 +2424,7 @@ ovnkube-controller-with-node() {
     ovnkube_node_mgmt_port_netdev_flag="--ovnkube-node-mgmt-port-netdev=${ovnkube_node_mgmt_port_netdev}"
   fi
   if [[ -n "${ovnkube_node_mgmt_port_dp_resource_name}" ]] ; then
-    node_mgmt_port_netdev_flags="$node_mgmt_port_netdev_flags --ovnkube-node-mgmt-port-dp-resource-name ${ovnkube_node_mgmt_port_dp_resource_name}"
+    ovnkube_node_mgmt_port_netdev_flag="--ovnkube-node-mgmt-port-dp-resource-name=${ovnkube_node_mgmt_port_dp_resource_name}"
   fi
 
   ovn_unprivileged_flag="--unprivileged-mode"
@@ -3452,7 +3452,7 @@ ovn-node() {
     ovnkube_node_mgmt_port_netdev_flag="--ovnkube-node-mgmt-port-netdev=${ovnkube_node_mgmt_port_netdev}"
   fi
   if [[ -n "${ovnkube_node_mgmt_port_dp_resource_name}" ]] ; then
-    node_mgmt_port_netdev_flags="$node_mgmt_port_netdev_flags --ovnkube-node-mgmt-port-dp-resource-name ${ovnkube_node_mgmt_port_dp_resource_name}"
+    ovnkube_node_mgmt_port_netdev_flag="--ovnkube-node-mgmt-port-dp-resource-name=${ovnkube_node_mgmt_port_dp_resource_name}"
   fi
 
   local export_ovs_metrics_opts=""

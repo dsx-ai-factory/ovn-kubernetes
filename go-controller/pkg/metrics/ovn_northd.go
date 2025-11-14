@@ -1,18 +1,13 @@
 package metrics
 
 import (
-	"context"
-	"errors"
 	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"k8s.io/apimachinery/pkg/util/wait"
-	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -119,48 +114,16 @@ var ovnNorthdStopwatchShowMetricsMap = map[string]*stopwatchMetricDetails{
 	"ovnsb_db_run":     {},
 }
 
-func RegisterOvnNorthdMetrics(nodeLister corev1listers.NodeLister, k8sNodeName string,
-	metricsScrapeInterval int, stopChan <-chan struct{}) {
-
-	var match bool
-	var err error
-
-	if (!config.OVNKubernetesFeature.EnableInterconnect || config.Default.Zone == types.OvnDefaultZone) && config.Kubernetes.NorthdNodeSelectorLabel != "" {
-		// for non-IC mode or the default zone nodes, check if northd is scheduled on this node by the nodeSelectorLabel
-		backoff := wait.Backoff{
-			Duration: retryInterval,
-			Steps:    maxNodeLabelRetries,
-			Factor:   retryFactor,
-		}
-
-		ctx := wait.ContextForChannel(stopChan)
-		err = wait.ExponentialBackoffWithContext(ctx, backoff, wait.ConditionWithContextFunc(func(context.Context) (bool, error) {
-			var lastErr error
-			match, lastErr = checkNodeLabel(nodeLister, k8sNodeName, config.Kubernetes.NorthdNodeSelectorLabel)
-			if lastErr != nil {
-				if errors.Is(lastErr, ErrGetNode) {
-					return false, nil // Retryable error
-				}
-				return false, lastErr // Permanent error, don't retry
-			}
-			return true, nil // Success
-		}))
-
-		if err != nil {
-			klog.Errorf("Not registering OVN North Metrics because failed to check if OVNKube North Pod is running on this "+
-				"node (%s): %v", k8sNodeName, err)
-			return
-		}
-	} else if config.OVNKubernetesFeature.EnableInterconnect && config.Default.Zone != types.OvnDefaultZone {
-		// for non-default zone in IC mode, northd should be running on every node
-		match = true
-	}
-	if !match {
-		klog.Infof("Not registering OVN North Metrics because OVNKube North Pods is not running on this "+
-			"node (%s)", k8sNodeName)
+func RegisterOvnNorthdMetrics(
+	waitTimeoutFunc func() bool,
+	metricsScrapeInterval int,
+	stopChan <-chan struct{},
+) {
+	if ok := waitTimeoutFunc(); !ok {
+		klog.Info("OVN Northd metrics registration on this node skipped: readiness gate not satisfied")
 		return
 	}
-	klog.Info("Found OVN North Pod running on this node. Registering OVN North Metrics")
+	klog.Info("Registering OVN North metrics on this node")
 
 	// ovn-northd metrics
 	getOvnNorthdVersionInfo()

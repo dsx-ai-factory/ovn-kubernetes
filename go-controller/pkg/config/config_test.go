@@ -219,6 +219,8 @@ client-privkey=/path/to/nb-client-private.key
 client-cert=/path/to/nb-client.crt
 client-cacert=/path/to/nb-client-ca.crt
 cert-common-name=cfg-nbcommonname
+run-dir=/custom/ovn/run/
+db-location=/custom/ovn/nb.db
 
 [ovnsouth]
 address=ssl:1.2.3.4:6642
@@ -226,6 +228,11 @@ client-privkey=/path/to/sb-client-private.key
 client-cert=/path/to/sb-client.crt
 client-cacert=/path/to/sb-client-ca.crt
 cert-common-name=cfg-sbcommonname
+run-dir=/custom/ovn/run/
+db-location=/custom/ovn/sb.db
+
+[ovspaths]
+run-dir=/custom/ovs/run/
 
 [gateway]
 mode=shared
@@ -696,6 +703,8 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(OvnNorth.CACert).To(gomega.Equal("/path/to/nb-client-ca.crt"))
 			gomega.Expect(OvnNorth.Address).To(gomega.Equal("ssl:1.2.3.4:6641"))
 			gomega.Expect(OvnNorth.CertCommonName).To(gomega.Equal("cfg-nbcommonname"))
+			gomega.Expect(OvnNorth.RunDir).To(gomega.Equal("/custom/ovn/run/"))
+			gomega.Expect(OvnNorth.DbLocation).To(gomega.Equal("/custom/ovn/nb.db"))
 
 			gomega.Expect(OvnSouth.Scheme).To(gomega.Equal(OvnDBSchemeSSL))
 			gomega.Expect(OvnSouth.PrivKey).To(gomega.Equal("/path/to/sb-client-private.key"))
@@ -703,6 +712,8 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(OvnSouth.CACert).To(gomega.Equal("/path/to/sb-client-ca.crt"))
 			gomega.Expect(OvnSouth.Address).To(gomega.Equal("ssl:1.2.3.4:6642"))
 			gomega.Expect(OvnSouth.CertCommonName).To(gomega.Equal("cfg-sbcommonname"))
+			gomega.Expect(OvnSouth.RunDir).To(gomega.Equal("/custom/ovn/run/"))
+			gomega.Expect(OvnSouth.DbLocation).To(gomega.Equal("/custom/ovn/sb.db"))
 
 			gomega.Expect(Gateway.Mode).To(gomega.Equal(GatewayModeShared))
 			gomega.Expect(Gateway.Interface).To(gomega.Equal("eth1"))
@@ -735,6 +746,8 @@ var _ = Describe("Config Operations", func() {
 			}))
 			gomega.Expect(ClusterManager.V4TransitSubnet).To(gomega.Equal("100.89.0.0/16"))
 			gomega.Expect(ClusterManager.V6TransitSubnet).To(gomega.Equal("fd98::/64"))
+
+			gomega.Expect(OvsPaths.RunDir).To(gomega.Equal("/custom/ovs/run/"))
 
 			return nil
 		}
@@ -2165,6 +2178,46 @@ istio-ambient-snat-ipv6=fd16:9254:7127:1337::2
 			gomega.Expect(OVNKubernetesFeature.EnableIstioAmbientSupport).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.IstioAmbientSNATIPv4).To(gomega.Equal("169.254.7.150"))
 			gomega.Expect(OVNKubernetesFeature.IstioAmbientSNATIPv6).To(gomega.Equal("fd16:9254:7127:1337::3"))
+		})
+	})
+
+	Describe("Path configurations", func() {
+		It("has correct default OvsPaths values", func() {
+			gomega.Expect(OvsPaths.RunDir).To(gomega.Equal("/var/run/openvswitch/"))
+		})
+
+		It("has correct default OvnNorth values", func() {
+			gomega.Expect(OvnNorth.RunDir).To(gomega.Equal("/var/run/ovn/"))
+			gomega.Expect(OvnNorth.DbLocation).To(gomega.Equal("/etc/ovn/ovnnb_db.db"))
+		})
+
+		It("has correct default OvnSouth values", func() {
+			gomega.Expect(OvnSouth.RunDir).To(gomega.Equal("/var/run/ovn/"))
+			gomega.Expect(OvnSouth.DbLocation).To(gomega.Equal("/etc/ovn/ovnsb_db.db"))
+		})
+
+		It("overrides path values with CLI flags", func() {
+			app.Action = func(ctx *cli.Context) error {
+				_, err := InitConfig(ctx, kexec.New(), nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				gomega.Expect(OvsPaths.RunDir).To(gomega.Equal("/cli/ovs/run/"))
+				gomega.Expect(OvnNorth.RunDir).To(gomega.Equal("/cli/nb/run/"))
+				gomega.Expect(OvnNorth.DbLocation).To(gomega.Equal("/cli/nb.db"))
+				gomega.Expect(OvnSouth.RunDir).To(gomega.Equal("/cli/sb/run/"))
+				gomega.Expect(OvnSouth.DbLocation).To(gomega.Equal("/cli/sb.db"))
+
+				return nil
+			}
+			err := app.Run([]string{
+				app.Name,
+				"-ovs-run-dir=/cli/ovs/run/",
+				"-nb-run-dir=/cli/nb/run/",
+				"-nb-db-location=/cli/nb.db",
+				"-sb-run-dir=/cli/sb/run/",
+				"-sb-db-location=/cli/sb.db",
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 	})
 })

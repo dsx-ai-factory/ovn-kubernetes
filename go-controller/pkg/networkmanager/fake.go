@@ -2,8 +2,10 @@ package networkmanager
 
 import (
 	"context"
+	"sync"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
+	"k8s.io/apimachinery/pkg/util/sets"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
@@ -26,13 +28,13 @@ func (nc *FakeNetworkController) Reconcile(util.NetInfo) error {
 	return nil
 }
 
-func (nc *FakeNetworkController) GetNetworkInterConnectInfo() *networkmanager.NetworkInterConnectInfo {
+func (nc *FakeNetworkController) GetNetworkInterConnectInfo() *NetworkInterConnectInfo {
 	return nil
 }
 
 type FakeControllerManager struct{}
 
-func (fcm *FakeControllerManager) NewNetworkController(netInfo util.NetInfo) (networkmanager.NetworkController, error) {
+func (fcm *FakeControllerManager) NewNetworkController(netInfo util.NetInfo) (NetworkController, error) {
 	return &FakeNetworkController{netInfo}, nil
 }
 
@@ -40,7 +42,7 @@ func (fcm *FakeControllerManager) CleanupStaleNetworks(_ ...util.NetInfo) error 
 	return nil
 }
 
-func (fcm *FakeControllerManager) GetDefaultNetworkController() networkmanager.BaseNetworkController {
+func (fcm *FakeControllerManager) GetDefaultNetworkController() BaseNetworkController {
 	return nil
 }
 
@@ -49,9 +51,32 @@ func (fcm *FakeControllerManager) Reconcile(_ string, _, _ util.NetInfo) error {
 }
 
 type FakeNetworkManager struct {
+	sync.Mutex
 	// namespace -> netInfo
 	// if netInfo is nil, it represents a namespace which contains the required UDN label but with no valid network. It will return invalid network error.
 	PrimaryNetworks map[string]util.NetInfo
+	HandlerFuncs    []handlerFunc
+	// UDNNamespaces are a list of namespaces that require UDN for primary network
+	UDNNamespaces sets.Set[string]
+}
+
+func (fnm *FakeNetworkManager) RegisterNADHandler(h handlerFunc) error {
+	fnm.Lock()
+	defer fnm.Unlock()
+	fnm.HandlerFuncs = append(fnm.HandlerFuncs, h)
+	return nil
+}
+
+func (fnm *FakeNetworkManager) TriggerHandlers(nadName string, info util.NetInfo, removed bool) {
+	fnm.Lock()
+	defer fnm.Unlock()
+	for _, h := range fnm.HandlerFuncs {
+		h(nadName, info, removed)
+	}
+}
+
+func (fnm *FakeNetworkManager) Interface() Interface {
+	return fnm
 }
 
 func (fnm *FakeNetworkManager) InitDefaultNetInfo() util.NetInfo {
@@ -71,8 +96,13 @@ func (fnm *FakeNetworkManager) GetActiveNetworkForNamespace(namespace string) (u
 }
 
 func (fnm *FakeNetworkManager) GetActiveNetworkForNamespaceFast(namespace string) util.NetInfo {
+	fnm.Lock()
+	defer fnm.Unlock()
 	if primaryNetworks, ok := fnm.PrimaryNetworks[namespace]; ok {
 		return primaryNetworks
+	}
+	if fnm.UDNNamespaces != nil && fnm.UDNNamespaces.Has(namespace) {
+		return nil
 	}
 	return &util.DefaultNetInfo{}
 }
