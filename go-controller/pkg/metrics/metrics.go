@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
@@ -126,7 +127,7 @@ func parseMetricToFloat(componentName, metricName, value string) float64 {
 
 // registerCoverageShowMetrics registers coverage/show metricss for
 // various components(ovn-northd, ovn-controller, and ovs-vswitchd) with prometheus
-func registerCoverageShowMetrics(target string, metricNamespace string, metricSubsystem string, constLabelsOpts ...map[string]string) {
+func registerCoverageShowMetrics(ovnRegistry prometheus.Registerer, target string, metricNamespace string, metricSubsystem string, constLabelsOpts ...map[string]string) {
 	coverageShowMetricsMap := componentCoverageShowMetricsMap[target]
 	for metricName, metricInfo := range coverageShowMetricsMap {
 		constLabels := make(map[string]string)
@@ -142,7 +143,7 @@ func registerCoverageShowMetrics(target string, metricNamespace string, metricSu
 			Help:        metricInfo.help,
 			ConstLabels: constLabels,
 		})
-		prometheus.MustRegister(metricInfo.metric)
+		ovnRegistry.MustRegister(metricInfo.metric)
 	}
 }
 
@@ -257,28 +258,41 @@ func setCoverageShowMetric(component string) {
 
 }
 
-// coverageShowMetricsUpdater updates the metric by obtaining values from
+// coverageShowMetricsUpdate updates the metric by obtaining values from
 // getCoverageShowOutputMap for specified component. The counters displayed
 // by coverage/show output are called events. It could be that the event never
 // happened, and therefore there will be no counter for it in the output. In such
 // cases the default value of the counter will be 0.
-func coverageShowMetricsUpdater(component string, metricsScrapeInterval int, stopChan <-chan struct{}) {
-	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			setCoverageShowMetric(component)
-		case <-stopChan:
-			return
+func coverageShowMetricsUpdate(component string) {
+	coverageShowOutputMap, err := getCoverageShowOutputMap(component)
+	if err != nil {
+		klog.Errorf("Getting coverage/show metrics for %s failed: %s", component, err.Error())
+		return
+	}
+	coverageShowMetricsMap := componentCoverageShowMetricsMap[component]
+	for metricName, metricInfo := range coverageShowMetricsMap {
+		var metricValue float64
+		if metricInfo.srcName != "" {
+			metricName = metricInfo.srcName
 		}
+		if metricInfo.aggregateFrom != nil {
+			for _, aggregateMetricName := range metricInfo.aggregateFrom {
+				if value, ok := coverageShowOutputMap[aggregateMetricName]; ok {
+					metricValue += parseMetricToFloat(component, aggregateMetricName, value)
+				}
+			}
+		} else {
+			if value, ok := coverageShowOutputMap[metricName]; ok {
+				metricValue = parseMetricToFloat(component, metricName, value)
+			}
+		}
+		metricInfo.metric.Set(metricValue)
 	}
 }
 
 // registerStopwatchShowMetrics registers stopwatch/show metrics for
 // various components(ovn-northd, ovn-controller) with prometheus
-func registerStopwatchShowMetrics(component string, metricNamespace string, metricSubsystem string) {
+func registerStopwatchShowMetrics(ovnRegistry prometheus.Registerer, component string, metricNamespace string, metricSubsystem string) {
 	stopwatchShowMetricsMap := componentStopwatchShowMetricsMap[component]
 	for metricName, metricInfo := range stopwatchShowMetricsMap {
 		metricInfo.metrics.totalSamples = prometheus.NewGauge(prometheus.GaugeOpts{
@@ -317,12 +331,12 @@ func registerStopwatchShowMetrics(component string, metricNamespace string, metr
 			Name:      fmt.Sprintf("%s_long_term_avg", metricName),
 		})
 
-		prometheus.MustRegister(metricInfo.metrics.totalSamples)
-		prometheus.MustRegister(metricInfo.metrics.min)
-		prometheus.MustRegister(metricInfo.metrics.max)
-		prometheus.MustRegister(metricInfo.metrics.percentile95th)
-		prometheus.MustRegister(metricInfo.metrics.shortTermAvg)
-		prometheus.MustRegister(metricInfo.metrics.longTermAvg)
+		ovnRegistry.MustRegister(metricInfo.metrics.totalSamples)
+		ovnRegistry.MustRegister(metricInfo.metrics.min)
+		ovnRegistry.MustRegister(metricInfo.metrics.max)
+		ovnRegistry.MustRegister(metricInfo.metrics.percentile95th)
+		ovnRegistry.MustRegister(metricInfo.metrics.shortTermAvg)
+		ovnRegistry.MustRegister(metricInfo.metrics.longTermAvg)
 	}
 }
 
@@ -403,53 +417,45 @@ func parseStopwatchShowOutput(output string) map[string]stopwatchStatistics {
 	return result
 }
 
-// stopwatchShowMetricsUpdater updates the metric by obtaining the stopwatch/show
+// stopwatchShowMetricsUpdate updates the metric by obtaining the stopwatch/show
 // metrics for the specified component.
-func stopwatchShowMetricsUpdater(component string, stopChan <-chan struct{}) {
-	ticker := time.NewTicker(metricsUpdateInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			stopwatchShowOutputMap, err := getStopwatchShowOutputMap(component)
-			if err != nil {
-				klog.Errorf("Getting stopwatch/show metrics for %s failed: %s", component, err.Error())
-				continue
-			}
-
-			if len(stopwatchShowOutputMap) == 0 {
-				klog.Warningf("No stopwatch/show metrics for component %s", component)
-				continue
-			}
-
-			stopwatchShowInterestingMetrics := componentStopwatchShowMetricsMap[component]
-			for metricName, metricInfo := range stopwatchShowInterestingMetrics {
-				var totalSamplesMetricValue, maxMetricValue, minMetricValue, percentile95thMetricValue, shortTermAvgMetricValue, longTermAvgMetricValue float64
-
-				if metricInfo.srcName != "" {
-					metricName = metricInfo.srcName
-				}
-
-				if value, ok := stopwatchShowOutputMap[metricName]; ok {
-					totalSamplesMetricValue = parseMetricToFloat(component, metricName, value.totalSamples)
-					minMetricValue = parseMetricToFloat(component, metricName, value.min)
-					maxMetricValue = parseMetricToFloat(component, metricName, value.max)
-					percentile95thMetricValue = parseMetricToFloat(component, metricName, value.percentile95th)
-					shortTermAvgMetricValue = parseMetricToFloat(component, metricName, value.shortTermAvg)
-					longTermAvgMetricValue = parseMetricToFloat(component, metricName, value.longTermAvg)
-				}
-
-				metricInfo.metrics.totalSamples.Set(totalSamplesMetricValue)
-				metricInfo.metrics.min.Set(minMetricValue / 1000)
-				metricInfo.metrics.max.Set(maxMetricValue / 1000)
-				metricInfo.metrics.percentile95th.Set(percentile95thMetricValue / 1000)
-				metricInfo.metrics.shortTermAvg.Set(shortTermAvgMetricValue / 1000)
-				metricInfo.metrics.longTermAvg.Set(longTermAvgMetricValue / 1000)
-			}
-		case <-stopChan:
-			return
-		}
+func stopwatchShowMetricsUpdate(component string) {
+	stopwatchShowOutputMap, err := getStopwatchShowOutputMap(component)
+	if err != nil {
+		klog.Errorf("Getting stopwatch/show metrics for %s failed: %s", component, err.Error())
+		return
 	}
+
+	if len(stopwatchShowOutputMap) == 0 {
+		klog.Warningf("No stopwatch/show metrics for component %s", component)
+		return
+	}
+
+	stopwatchShowInterestingMetrics := componentStopwatchShowMetricsMap[component]
+	for metricName, metricInfo := range stopwatchShowInterestingMetrics {
+		var totalSamplesMetricValue, maxMetricValue, minMetricValue, percentile95thMetricValue, shortTermAvgMetricValue, longTermAvgMetricValue float64
+
+		if metricInfo.srcName != "" {
+			metricName = metricInfo.srcName
+		}
+
+		if value, ok := stopwatchShowOutputMap[metricName]; ok {
+			totalSamplesMetricValue = parseMetricToFloat(component, metricName, value.totalSamples)
+			minMetricValue = parseMetricToFloat(component, metricName, value.min)
+			maxMetricValue = parseMetricToFloat(component, metricName, value.max)
+			percentile95thMetricValue = parseMetricToFloat(component, metricName, value.percentile95th)
+			shortTermAvgMetricValue = parseMetricToFloat(component, metricName, value.shortTermAvg)
+			longTermAvgMetricValue = parseMetricToFloat(component, metricName, value.longTermAvg)
+		}
+
+		metricInfo.metrics.totalSamples.Set(totalSamplesMetricValue)
+		metricInfo.metrics.min.Set(minMetricValue / 1000)
+		metricInfo.metrics.max.Set(maxMetricValue / 1000)
+		metricInfo.metrics.percentile95th.Set(percentile95thMetricValue / 1000)
+		metricInfo.metrics.shortTermAvg.Set(shortTermAvgMetricValue / 1000)
+		metricInfo.metrics.longTermAvg.Set(longTermAvgMetricValue / 1000)
+	}
+
 }
 
 // The `keepTrying` boolean when set to true will not return an error if we can't find pods with one of the given labels.
@@ -474,6 +480,33 @@ func checkPodRunsOnGivenNode(podLister corev1listers.PodLister, labels []string,
 			// Note: wf (WatchFactory) *usually* returns pods assigned to this node, however we dont rely on it
 			// and add this check to filter out pods assigned to other nodes. (e.g when ovnkube master and node
 			// share the same process)
+			if pod.Spec.NodeName == k8sNodeName {
+				return true, nil
+			}
+		}
+	}
+	if keepTrying {
+		return false, nil
+	}
+	return false, fmt.Errorf("a Pod matching at least one of the labels %q doesn't exist on this node %s",
+		strings.Join(labels, ","), k8sNodeName)
+}
+
+// CheckPodRunsOnGivenNode checks if a pod with one of the given labels is running on the given node.
+// Uses kubernetes.Interface for direct API access (used by ovnkube.go).
+// The `keepTrying` boolean when set to true will not return an error if we can't find pods with one of the given labels.
+func CheckPodRunsOnGivenNode(clientset kubernetes.Interface, labels []string, k8sNodeName string,
+	keepTrying bool) (bool, error) {
+	for _, label := range labels {
+		pods, err := clientset.CoreV1().Pods(config.Kubernetes.OVNConfigNamespace).List(context.TODO(), metav1.ListOptions{
+			LabelSelector:   label,
+			ResourceVersion: "0",
+		})
+		if err != nil {
+			klog.V(5).Infof("Failed to list Pods with label %q: %v. Retrying..", label, err)
+			return false, nil
+		}
+		for _, pod := range pods.Items {
 			if pod.Spec.NodeName == k8sNodeName {
 				return true, nil
 			}
@@ -603,8 +636,31 @@ func StartOVNMetricsServer(bindAddress, pprofBindAddress, certFile, keyFile stri
 	return nil
 }
 
+// StartOVNMetricsServerWithOptions starts the OVN metrics server using MetricServerOptions.
+// This is the new upstream signature that uses MetricServer for request-based metrics.
+func StartOVNMetricsServerWithOptions(opts MetricServerOptions,
+	ovsClient libovsdbclient.Client,
+	kubeClient kubernetes.Interface,
+	stopChan <-chan struct{}, wg *sync.WaitGroup) *MetricServer {
+
+	klog.Infof("Create OVN Metrics Server on address: %s", opts.BindAddress)
+	metricsServer := NewMetricServer(opts, ovsClient, kubeClient)
+	metricsServer.registerMetrics()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		klog.Infof("OVN Metrics Server starts to run ...")
+		metricsServer.Run(stopChan)
+	}()
+
+	return metricsServer
+}
+
 func RegisterOvnNodeMetrics(ovsDBClient libovsdbclient.Client, metricsScrapeInterval int, stopChan <-chan struct{}) {
-	go RegisterOvnControllerMetrics(ovsDBClient, metricsScrapeInterval, stopChan)
+	// Note: RegisterOvnControllerMetrics signature changed in upstream to (client, registry)
+	// For downstream compatibility, we still register to the default registry
+	go RegisterOvnControllerMetrics(ovsDBClient, nil)
 }
 
 func startMetricsServer(bindAddress, pprofBindAddress, certFile, keyFile string, handler http.Handler,
@@ -677,6 +733,7 @@ func startMetricsServer(bindAddress, pprofBindAddress, certFile, keyFile string,
 	}()
 }
 
+// keep it for now, when review code remember to sync up with ovnkube.go and remove this function.
 func RegisterOvnMetrics(podLister corev1listers.PodLister, podSynced func() bool, nodeLister corev1listers.NodeLister,
 	k8sNodeName string, metricsScrapeInterval int, stopChan <-chan struct{}) {
 	// in IC mode, nb/sb/northd are running on the dpu mode node
@@ -684,70 +741,72 @@ func RegisterOvnMetrics(podLister corev1listers.PodLister, podSynced func() bool
 		return
 	}
 
-	go RegisterOvnDBMetrics(
-		func() bool {
-			if !util.WaitForInformerCacheSyncWithTimeout("OVN DB Metrics Registration", stopChan, podSynced) {
-				klog.Errorf("Timed out waiting for pod informer caches to sync")
-				return false
-			}
-			// For nodes in non-IC mode or in the default IC zone, check for its central NBDB/SBDB pods for the cluster/default zone;
-			// Otherwise, each non-global IC zone node has its own NBDB/SBDB.
-			// Needs to retry as node factory only watch for pods whose k8s.ovn.org/nodeName label is set for the current node, and it
-			// takes time for ovnkube-controller to set this label on ovn-db pods.
-			if !config.OVNKubernetesFeature.EnableInterconnect || config.Default.Zone == types.OvnDefaultZone {
-				err := utilwait.PollUntilContextTimeout(context.Background(), 1*time.Second, 300*time.Second, true, func(_ context.Context) (bool, error) {
-					return checkPodRunsOnGivenNode(podLister, []string{"name in (ovn-nbdb, ovn-sbdb, ovnkube-db)"}, k8sNodeName, true)
-				})
-				if err != nil {
-					if utilwait.Interrupted(err) {
-						klog.Errorf("Timed out while checking if OVN DB Pod runs on this node (%s): %v. "+
-							"Not registering OVN DB Metrics on this node.", k8sNodeName, err)
-					} else {
-						klog.Infof("Not registering OVN DB Metrics on this node (%s) since OVN DBs are not running on it: %v", k8sNodeName, err)
-					}
-					return false
+	// Register OVN DB metrics with readiness check
+	go func() {
+		// Readiness check for OVN DB metrics
+		if !util.WaitForInformerCacheSyncWithTimeout("OVN DB Metrics Registration", stopChan, podSynced) {
+			klog.Errorf("Timed out waiting for pod informer caches to sync")
+			return
+		}
+		// For nodes in non-IC mode or in the default IC zone, check for its central NBDB/SBDB pods for the cluster/default zone;
+		// Otherwise, each non-global IC zone node has its own NBDB/SBDB.
+		// Needs to retry as node factory only watch for pods whose k8s.ovn.org/nodeName label is set for the current node, and it
+		// takes time for ovnkube-controller to set this label on ovn-db pods.
+		if !config.OVNKubernetesFeature.EnableInterconnect || config.Default.Zone == types.OvnDefaultZone {
+			err := utilwait.PollUntilContextTimeout(context.Background(), 1*time.Second, 300*time.Second, true, func(_ context.Context) (bool, error) {
+				return checkPodRunsOnGivenNode(podLister, []string{"name in (ovn-nbdb, ovn-sbdb, ovnkube-db)"}, k8sNodeName, true)
+			})
+			if err != nil {
+				if utilwait.Interrupted(err) {
+					klog.Errorf("Timed out while checking if OVN DB Pod runs on this node (%s): %v. "+
+						"Not registering OVN DB Metrics on this node.", k8sNodeName, err)
+				} else {
+					klog.Infof("Not registering OVN DB Metrics on this node (%s) since OVN DBs are not running on it: %v", k8sNodeName, err)
 				}
-				return true
+				return
 			}
-			return true
-		},
-		metricsScrapeInterval,
-		stopChan,
-	)
-	go RegisterOvnNorthdMetrics(
-		func() bool {
-			if (!config.OVNKubernetesFeature.EnableInterconnect || config.Default.Zone == types.OvnDefaultZone) && config.Kubernetes.NorthdNodeSelectorLabel != "" {
-				// for non-IC mode or the default zone nodes, check if northd is scheduled on this node by the nodeSelectorLabel
-				backoff := utilwait.Backoff{
-					Duration: retryInterval,
-					Steps:    maxNodeLabelRetries,
-					Factor:   retryFactor,
-				}
+		}
+		// Readiness check passed, register metrics
+		// Note: Using nil registry since downstream registers to DefaultRegistry
+		RegisterOvnDBMetrics(nil)
+	}()
 
-				ctx := utilwait.ContextForChannel(stopChan)
-				err := utilwait.ExponentialBackoffWithContext(ctx, backoff, utilwait.ConditionWithContextFunc(func(context.Context) (bool, error) {
-					lastErr := checkNodeLabel(nodeLister, k8sNodeName, config.Kubernetes.NorthdNodeSelectorLabel)
-					if lastErr != nil {
-						if errors.Is(lastErr, ErrGetNode) {
-							return false, nil // Retryable error
-						}
-						return false, lastErr // Permanent error, don't retry
-					}
-					return true, nil // Success
-				}))
-
-				if err != nil {
-					klog.Errorf("Not registering OVN North Metrics on this node (%s) because failed to check if OVNKube North Pod is running on it: %v", k8sNodeName, err)
-					return false
-				}
-				return true
-			} else if config.OVNKubernetesFeature.EnableInterconnect && config.Default.Zone != types.OvnDefaultZone {
-				// for non-default zone in IC mode, northd should be running on every node
-				return true
+	// Register OVN Northd metrics with readiness check
+	go func() {
+		// Readiness check for OVN Northd metrics
+		if (!config.OVNKubernetesFeature.EnableInterconnect || config.Default.Zone == types.OvnDefaultZone) && config.Kubernetes.NorthdNodeSelectorLabel != "" {
+			// for non-IC mode or the default zone nodes, check if northd is scheduled on this node by the nodeSelectorLabel
+			backoff := utilwait.Backoff{
+				Duration: retryInterval,
+				Steps:    maxNodeLabelRetries,
+				Factor:   retryFactor,
 			}
-			return false
-		},
-		metricsScrapeInterval,
-		stopChan,
-	)
+
+			ctx := utilwait.ContextForChannel(stopChan)
+			err := utilwait.ExponentialBackoffWithContext(ctx, backoff, utilwait.ConditionWithContextFunc(func(context.Context) (bool, error) {
+				lastErr := checkNodeLabel(nodeLister, k8sNodeName, config.Kubernetes.NorthdNodeSelectorLabel)
+				if lastErr != nil {
+					if errors.Is(lastErr, ErrGetNode) {
+						return false, nil // Retryable error
+					}
+					return false, lastErr // Permanent error, don't retry
+				}
+				return true, nil
+			}))
+
+			if err != nil {
+				klog.Errorf("Not registering OVN North Metrics on this node (%s) because failed to check if OVNKube North Pod is running on it: %v", k8sNodeName, err)
+				return
+			}
+		} else if !config.OVNKubernetesFeature.EnableInterconnect && config.Default.Zone == types.OvnDefaultZone {
+			// Non-IC mode without node selector - don't register
+			return
+		} else if config.OVNKubernetesFeature.EnableInterconnect && config.Default.Zone == types.OvnDefaultZone {
+			// IC mode in default zone without node selector - don't register
+			return
+		}
+		// Readiness check passed (or IC mode non-default zone), register metrics
+		// Note: Using nil registry since downstream registers to DefaultRegistry
+		RegisterOvnNorthdMetrics(nil)
+	}()
 }

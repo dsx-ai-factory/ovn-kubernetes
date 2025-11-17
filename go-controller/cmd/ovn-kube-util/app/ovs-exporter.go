@@ -1,20 +1,21 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/urfave/cli/v2"
 
+	"k8s.io/klog/v2"
 	kexec "k8s.io/utils/exec"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
-
-var metricsScrapeInterval int
 
 var OvsExporterCommand = cli.Command{
 	Name:  "ovs-exporter",
@@ -23,12 +24,6 @@ var OvsExporterCommand = cli.Command{
 		&cli.StringFlag{
 			Name:  "metrics-bind-address",
 			Usage: `The IP address and port for the metrics server to serve on (default ":9310")`,
-		},
-		&cli.IntFlag{
-			Name:        "metrics-interval",
-			Usage:       "The interval in seconds at which ovs metrics are collected",
-			Value:       30,
-			Destination: &metricsScrapeInterval,
 		},
 		&cli.StringFlag{
 			Name:  "tls-cert-file",
@@ -40,14 +35,16 @@ var OvsExporterCommand = cli.Command{
 		},
 	},
 	Action: func(ctx *cli.Context) error {
-		stopChan := make(chan struct{})
+		innerCtx, cancel := context.WithCancel(ctx.Context)
+		defer cancel()
+
 		bindAddress := ctx.String("metrics-bind-address")
 		if bindAddress == "" {
 			bindAddress = "0.0.0.0:9310"
 		}
 
-		tlsCertFile := ctx.String("tls-cert-file")
-		tlsKeyFile := ctx.String("tls-key-file")
+		certFile := ctx.String("tls-cert-file")
+		keyFile := ctx.String("tls-key-file")
 
 		if err := util.SetSpecificExec(kexec.New(), "ovs-vsctl", "ovs-dpctl",
 			"ovs-ofctl", "ovs-appctl", "ovsdb-client"); err != nil {
@@ -56,27 +53,45 @@ var OvsExporterCommand = cli.Command{
 
 		wg := &sync.WaitGroup{}
 		// start the ovsdb client for ovs metrics monitoring
-		ovsClient, err := libovsdb.NewOVSClient(stopChan)
+		ovsClient, err := libovsdb.NewOVSClient(innerCtx.Done())
 		if err != nil {
-			return fmt.Errorf("error when trying to initialize ovs client: %v", err)
+			klog.Errorf("Error initializing ovs client: %v", err)
+			return err
 		}
-
 		hostName, err := os.Hostname()
 		if err != nil {
 			return fmt.Errorf("cannot get hostname: %v", err)
 		}
-		// register ovs metrics that will be served off of /metrics path
-		metrics.RegisterOvsMetrics(hostName, ovsClient, metricsScrapeInterval, stopChan)
-		// register ovsDB metrics
-		metrics.RegisterOvsDBMetrics(metricsScrapeInterval, stopChan)
-		// start the prometheus server to serve OVS Metrics (default port: 9310)
-		// use TLS if cert and key file were provided at the command line
-		metrics.StartMetricsServer(bindAddress, "", tlsCertFile, tlsKeyFile, stopChan, wg)
 
-		// run until cancelled
-		<-ctx.Context.Done()
-		close(stopChan)
-		wg.Wait()
+		opts := metrics.MetricServerOptions{
+			BindAddress:      bindAddress,
+			CertFile:         certFile,
+			KeyFile:          keyFile,
+			EnableOVSMetrics: true,
+			OnFatalError:     cancel,
+			NodeName:         hostName,
+		}
+
+		_ = metrics.StartOVNMetricsServerWithOptions(opts, ovsClient, nil, innerCtx.Done(), wg)
+
+		// run until cancelled (by OS signal or fatal error)
+		<-innerCtx.Done()
+		klog.Info("Shutdown signal received, stopping metrics server...")
+
+		// Wait for all goroutines to finish with a timeout
+		done := make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			klog.Info("Metrics server stopped gracefully")
+		case <-time.After(10 * time.Second):
+			klog.Warning("Timeout waiting for metrics server to stop")
+		}
+
 		return nil
 	},
 }

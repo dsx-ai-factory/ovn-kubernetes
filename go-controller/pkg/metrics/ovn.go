@@ -3,7 +3,6 @@ package metrics
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -310,23 +309,6 @@ func setOvnControllerConfigurationMetrics(ovsDBClient libovsdbclient.Client) (er
 	return nil
 }
 
-func ovnControllerConfigurationMetricsUpdater(ovsDBClient libovsdbclient.Client, metricsScrapeInterval int,
-	stopChan <-chan struct{}) {
-	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			if err := setOvnControllerConfigurationMetrics(ovsDBClient); err != nil {
-				klog.Errorf("Setting ovn controller config metrics failed: %s", err.Error())
-			}
-		case <-stopChan:
-			return
-		}
-	}
-}
-
 func getPortCount(ovsDBClient libovsdbclient.Client, portType string) float64 {
 	var portCount float64
 	p := func(item *vswitchd.Interface) bool {
@@ -352,55 +334,26 @@ func getPortCount(ovsDBClient libovsdbclient.Client, portType string) float64 {
 	return portCount
 }
 
-// ovnControllerSBDBConnectionCheckUpdater blocks until stopCh closed but before then polls ovn-controllers connection status with
-// southbound database periodically.
-func ovnControllerSBDBConnectionCheckUpdater(stopCh <-chan struct{}, ovsAppctl ovsClient, period time.Duration) {
-	// There maybe transient connection issues to SB DB. We want to minimise the risk of reporting this as the current state between
-	// long poll intervals.
-	retry := 5
-	retrySleep := 5 * time.Second
-	retryTotal := retrySleep * time.Duration(retry)
-
-	if retryTotal >= period {
-		panic("period must be greater than retry total time")
-	}
-	// update metric to a good initial state
-	updateSBDBConnectionMetric(ovsAppctl, retry, retrySleep)
-
-	ticker := time.NewTicker(period)
-	for {
-		select {
-		case <-ticker.C:
-			updateSBDBConnectionMetric(ovsAppctl, retry, retrySleep)
-		case <-stopCh:
-			ticker.Stop()
-			return
-		}
-	}
-}
-
-func updateSBDBConnectionMetric(ovsAppctl ovsClient, retry int, retrySleep time.Duration) {
+// updateSBDBConnectionMetric updates the connection status with southbound database
+func updateSBDBConnectionMetric(ovsAppctl ovsClient) {
+	// NOTE: This metric had a retry logic, which is removed because metrics should reflect the reality.
+	// Instead, alert rules should be configured with appropriate thresholds (e.g., "for: 2m") to handle
+	// transient connection issues and only fire alerts for sustained problems.
 	var stdOut, stdErr string
 	var err error
-	var connected bool
-	connected = false
-	for i := 0; i < retry && !connected; i++ {
-		stdOut, stdErr, err = ovsAppctl("connection-status")
-		if err != nil {
-			klog.Errorf("Failed to get OVN controller southbound database connection status before utilizing "+
-				"client ovs-appctl: %v", err)
-		} else if stdErr != "" {
-			klog.Errorf("Failed to get OVN controller southbound database connection status because "+
-				"ovs-appctl command returned an error: %s", stdErr)
-		} else if stdOut == "" {
-			klog.Errorf("Unexpected blank output while attempting to retrieve OVN controller southbound " +
-				"database connection status")
-		} else if strings.HasPrefix(stdOut, "connected") {
-			connected = true
-		} else {
-			// sleep and retry
-			time.Sleep(retrySleep)
-		}
+	connected := false
+	stdOut, stdErr, err = ovsAppctl("connection-status")
+	if err != nil {
+		klog.Errorf("Failed to get OVN controller southbound database connection status before utilizing "+
+			"client ovs-appctl: %v", err)
+	} else if stdErr != "" {
+		klog.Errorf("Failed to get OVN controller southbound database connection status because "+
+			"ovs-appctl command returned an error: %s", stdErr)
+	} else if stdOut == "" {
+		klog.Errorf("Unexpected blank output while attempting to retrieve OVN controller southbound " +
+			"database connection status")
+	} else if strings.HasPrefix(stdOut, "connected") {
+		connected = true
 	}
 
 	if connected {
@@ -410,10 +363,10 @@ func updateSBDBConnectionMetric(ovsAppctl ovsClient, retry int, retrySleep time.
 	}
 }
 
-func RegisterOvnControllerMetrics(ovsDBClient libovsdbclient.Client,
-	metricsScrapeInterval int, stopChan <-chan struct{}) {
+// RegisterOvnControllerMetrics registers the ovn-controller metrics
+func RegisterOvnControllerMetrics(ovsDBClient libovsdbclient.Client, ovnRegistry *prometheus.Registry) {
 	getOvnControllerVersionInfo()
-	prometheus.MustRegister(prometheus.NewGaugeFunc(
+	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: types.MetricOvnNamespace,
 			Subsystem: types.MetricOvnSubsystemController,
@@ -429,8 +382,8 @@ func RegisterOvnControllerMetrics(ovsDBClient libovsdbclient.Client,
 	))
 
 	// ovn-controller metrics
-	prometheus.MustRegister(metricOVNControllerSBDBConnection)
-	prometheus.MustRegister(prometheus.NewCounterFunc(
+	ovnRegistry.MustRegister(metricOVNControllerSBDBConnection)
+	ovnRegistry.MustRegister(prometheus.NewCounterFunc(
 		prometheus.CounterOpts{
 			Namespace: types.MetricOvnNamespace,
 			Subsystem: types.MetricOvnSubsystemController,
@@ -452,7 +405,7 @@ func RegisterOvnControllerMetrics(ovsDBClient libovsdbclient.Client,
 			}
 			return 0
 		}))
-	prometheus.MustRegister(prometheus.NewGaugeFunc(
+	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: types.MetricOvnNamespace,
 			Subsystem: types.MetricOvnSubsystemController,
@@ -463,7 +416,7 @@ func RegisterOvnControllerMetrics(ovsDBClient libovsdbclient.Client,
 		func() float64 {
 			return getPortCount(ovsDBClient, "patch")
 		}))
-	prometheus.MustRegister(prometheus.NewGaugeFunc(
+	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: types.MetricOvnNamespace,
 			Subsystem: types.MetricOvnSubsystemController,
@@ -475,28 +428,18 @@ func RegisterOvnControllerMetrics(ovsDBClient libovsdbclient.Client,
 		}))
 
 	// register ovn-controller configuration metrics
-	prometheus.MustRegister(metricRemoteProbeInterval)
-	prometheus.MustRegister(metricOpenFlowProbeInterval)
-	prometheus.MustRegister(metricMonitorAll)
-	prometheus.MustRegister(metricEncapIP)
-	prometheus.MustRegister(metricSbConnectionMethod)
-	prometheus.MustRegister(metricEncapType)
-	prometheus.MustRegister(metricBridgeMappings)
+	ovnRegistry.MustRegister(metricRemoteProbeInterval)
+	ovnRegistry.MustRegister(metricOpenFlowProbeInterval)
+	ovnRegistry.MustRegister(metricMonitorAll)
+	ovnRegistry.MustRegister(metricEncapIP)
+	ovnRegistry.MustRegister(metricSbConnectionMethod)
+	ovnRegistry.MustRegister(metricEncapType)
+	ovnRegistry.MustRegister(metricBridgeMappings)
 	// Register the ovn-controller coverage/show metrics
 	componentCoverageShowMetricsMap[ovnController] = ovnControllerCoverageShowMetricsMap
-	registerCoverageShowMetrics(ovnController, types.MetricOvnNamespace, types.MetricOvnSubsystemController)
+	registerCoverageShowMetrics(ovnRegistry, ovnController, types.MetricOvnNamespace, types.MetricOvnSubsystemController)
 
-	// Register the ovn-controller coverage/show metrics
+	// Register the ovn-controller stopwatch/show metrics
 	componentStopwatchShowMetricsMap[ovnController] = ovnControllerStopwatchShowMetricsMap
-	registerStopwatchShowMetrics(ovnController, types.MetricOvnNamespace, types.MetricOvnSubsystemController)
-
-	// ovn-controller configuration metrics updater
-	go ovnControllerConfigurationMetricsUpdater(ovsDBClient,
-		metricsScrapeInterval, stopChan)
-	// ovn-controller coverage show metrics updater
-	go coverageShowMetricsUpdater(ovnController, metricsScrapeInterval, stopChan)
-	// ovn-controller stopwatch show metrics updater
-	go stopwatchShowMetricsUpdater(ovnController, stopChan)
-	// ovn-controller southbound database connection status updater
-	go ovnControllerSBDBConnectionCheckUpdater(stopChan, util.RunOVNControllerAppCtl, time.Minute*2)
+	registerStopwatchShowMetrics(ovnRegistry, ovnController, types.MetricOvnNamespace, types.MetricOvnSubsystemController)
 }

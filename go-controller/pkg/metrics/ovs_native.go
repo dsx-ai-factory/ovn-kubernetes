@@ -74,9 +74,7 @@ func (h *ovsNativeMetricsHandler) handleMetricsRequest(w http.ResponseWriter, r 
 func (h *ovsNativeMetricsHandler) updateNonNativeMetrics() {
 
 	// OVS version updater
-	if err := getOvsVersionInfo(h.nodeName, h.ovsDBClient); err != nil {
-		klog.Errorf("Error getting ovs version: %v", err)
-	}
+	getOvsVersionInfo(h.nodeName, h.ovsDBClient)
 
 	// OVS datapath metrics updater
 	updateOvsDatapathMetrics(util.RunOvsVswitchdAppCtl)
@@ -138,37 +136,37 @@ func registerOvsInterfaceExtraMetrics(metricNamespace, metricSubsystem string) {
 
 var registerOvsNativeMetricsOnce sync.Once
 
-func RegisterAdditionalOvsMetrics() {
+func RegisterAdditionalOvsMetrics(registry prometheus.Registerer) {
 	registerOvsNativeMetricsOnce.Do(func() {
-		prometheus.MustRegister(metricOvsVersion)
+		registry.MustRegister(metricOvsVersion)
 
 		// Register OVS datapath metrics.
-		prometheus.MustRegister(metricOvsDpTotal)
-		prometheus.MustRegister(metricOvsDp)
-		prometheus.MustRegister(metricOvsDpIfTotal)
-		prometheus.MustRegister(metricOvsDpIf)
-		prometheus.MustRegister(metricOvsDpMasksHitRatio)
-		prometheus.MustRegister(metricOvsDpOffloadedFlowsTotal)
+		registry.MustRegister(metricOvsDpTotal)
+		registry.MustRegister(metricOvsDp)
+		registry.MustRegister(metricOvsDpIfTotal)
+		registry.MustRegister(metricOvsDpIf)
+		registry.MustRegister(metricOvsDpMasksHitRatio)
+		registry.MustRegister(metricOvsDpOffloadedFlowsTotal)
 
 		// Register OVS HW offload metrics
-		prometheus.MustRegister(metricOvsHwOffload)
-		prometheus.MustRegister(metricOvsTcPolicy)
+		registry.MustRegister(metricOvsHwOffload)
+		registry.MustRegister(metricOvsTcPolicy)
 		// Register OVS Interface metrics
 		registerOvsInterfaceExtraMetrics(types.MetricOvsNamespace, types.MetricOvsSubsystemVswitchd)
 
-		prometheus.MustRegister(MetricOvsInterfaceUpWait)
+		registry.MustRegister(MetricOvsInterfaceUpWait)
 		// Register the OVS coverage/show metrics
 		componentCoverageShowMetricsMap[ovsVswitchd] = ovsVswitchdCoverageShowMetricsMap
-		registerCoverageShowMetrics(ovsVswitchd, types.MetricOvsNamespace, types.MetricOvsSubsystemVswitchd)
+		registerCoverageShowMetrics(registry, ovsVswitchd, types.MetricOvsNamespace, types.MetricOvsSubsystemVswitchd)
 
 		// When ovnkube-node is running in privileged mode, the hostPID will be set to true,
 		// and therefore it can monitor OVS running on the host using PID.
 		if !config.UnprivilegedMode {
-			prometheus.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{
+			registry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{
 				PidFn:     prometheus.NewPidFileFn("/var/run/openvswitch/ovs-vswitchd.pid"),
 				Namespace: fmt.Sprintf("%s_%s", types.MetricOvsNamespace, types.MetricOvsSubsystemVswitchd),
 			}))
-			prometheus.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{
+			registry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{
 				PidFn:     prometheus.NewPidFileFn("/var/run/openvswitch/ovsdb-server.pid"),
 				Namespace: fmt.Sprintf("%s_%s", types.MetricOvsNamespace, types.MetricOvsSubsystemOvsDB),
 			}))

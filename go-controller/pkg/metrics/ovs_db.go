@@ -91,16 +91,11 @@ func ovsDbSizeMetricUpdater(metricsScrapeInterval int, stopChan <-chan struct{})
 
 var registerOvsDBMetricsOnce sync.Once
 
-func RegisterOvsDBMetrics(metricsScrapeInterval int, stopChan <-chan struct{}) {
+func RegisterOvsDBMetrics(registry prometheus.Registerer) {
 	registerOvsDBMetricsOnce.Do(func() {
-		prometheus.MustRegister(metricOvsDbSize)
+		registry.MustRegister(metricOvsDbSize)
 		// Register OVSDB coverage/show metrics with prometheus
 		componentCoverageShowMetricsMap[ovsDB] = ovsDbCoverageShowMetricsMap
-		registerCoverageShowMetrics(ovsDB, types.MetricOvsNamespace, types.MetricOvsSubsystemOvsDB)
-		// OVSDB coverage/show metrics updater
-		go coverageShowMetricsUpdater(ovsDB, metricsScrapeInterval, stopChan)
-		// OVSDB size metric uodater
-		go ovsDbSizeMetricUpdater(metricsScrapeInterval, stopChan)
-
+		registerCoverageShowMetrics(registry, ovsDB, types.MetricOvsNamespace, types.MetricOvsSubsystemOvsDB)
 	})
 }

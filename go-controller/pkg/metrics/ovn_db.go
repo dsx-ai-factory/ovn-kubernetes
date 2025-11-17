@@ -2,10 +2,8 @@ package metrics
 
 import (
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -325,7 +323,8 @@ var metricDBClusterConnOutErr = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	},
 )
 
-func ovnDBSizeMetricsUpdater(dbProps *util.OvsDbProperties) {
+// updateOvnDBSizeMetrics collects and updates the OVN DB size metric
+func updateOvnDBSizeMetrics(dbProps *util.OvsDbProperties) {
 	if size, err := getOvnDBSizeViaPath(dbProps); err != nil {
 		klog.Errorf("Failed to update OVN DB size metric: %v", err)
 	} else {
@@ -350,7 +349,7 @@ func isOvnDBFoundViaPath(dbProperties []*util.OvsDbProperties) bool {
 }
 
 func getOvnDBSizeViaPath(dbProperties *util.OvsDbProperties) (int64, error) {
-	fileInfo, err := os.Stat(dbProperties.DbAlias)
+	fileInfo, err := util.AppFs.Stat(dbProperties.DbAlias)
 	if err != nil {
 		return 0, fmt.Errorf("failed to find OVN DB database %s at path %s: %v",
 			dbProperties.DbName, dbProperties.DbAlias, err)
@@ -358,7 +357,8 @@ func getOvnDBSizeViaPath(dbProperties *util.OvsDbProperties) (int64, error) {
 	return fileInfo.Size(), nil
 }
 
-func ovnDBMemoryMetricsUpdater(dbProperties *util.OvsDbProperties) {
+// updateOvnDBMemoryMetrics collects and updates the OVN DB memory metric
+func updateOvnDBMemoryMetrics(dbProperties *util.OvsDbProperties) {
 	var stdout, stderr string
 	var err error
 
@@ -409,7 +409,7 @@ var (
 func getNBDBSockPath() (string, error) {
 	paths := []string{config.OvsPaths.RunDir, config.OvnNorth.RunDir}
 	for _, basePath := range paths {
-		if _, err := os.Stat(basePath + "ovnnb_db.sock"); err == nil {
+		if _, err := util.AppFs.Stat(basePath + "ovnnb_db.sock"); err == nil {
 			klog.Infof("ovnnb_db.sock found at %s", basePath)
 			return basePath, nil
 		} else {
@@ -445,20 +445,13 @@ func getOvnDbVersionInfo() {
 	}
 }
 
-func RegisterOvnDBMetrics(waitTimeoutFunc func() bool, metricsScrapeInterval int, stopChan <-chan struct{}) {
-	if ok := waitTimeoutFunc(); !ok {
-		klog.Info("OVN DB metrics registration on this node skipped: readiness gate not satisfied")
-		return
-	}
-
-	klog.Info("Registering OVN DB Metrics on this Node")
-
+func RegisterOvnDBMetrics(ovnRegistry *prometheus.Registry) ([]*util.OvsDbProperties, bool, bool) {
 	// get the ovsdb server version info
 	getOvnDbVersionInfo()
 	// register metrics that will be served off of /metrics path
-	prometheus.MustRegister(metricOVNDBMonitor)
-	prometheus.MustRegister(metricOVNDBSessions)
-	prometheus.MustRegister(prometheus.NewGaugeFunc(
+	ovnRegistry.MustRegister(metricOVNDBMonitor)
+	ovnRegistry.MustRegister(metricOVNDBSessions)
+	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: types.MetricOvnNamespace,
 			Subsystem: types.MetricOvnSubsystemDB,
@@ -478,17 +471,19 @@ func RegisterOvnDBMetrics(waitTimeoutFunc func() bool, metricsScrapeInterval int
 	if err != nil {
 		klog.Errorf("Failed to init nbdb properties: %s", err)
 	} else {
+		klog.Infof("Found OVN NB DB: %v", nbdbProps)
 		dbProperties = append(dbProperties, nbdbProps)
 	}
 	sbdbProps, err := util.GetOvsDbProperties(config.OvnSouth.DbLocation)
 	if err != nil {
 		klog.Errorf("Failed to init sbdb properties: %s", err)
 	} else {
+		klog.Infof("Found OVN SB DB: %v", sbdbProps)
 		dbProperties = append(dbProperties, sbdbProps)
 	}
 	if len(dbProperties) == 0 {
 		klog.Errorf("Failed to init properties for all databases")
-		return
+		return nil, false, false
 	}
 	// check if DB is clustered or not
 	// the usual way would be to call `ovsdb-tool db-is-standalone`,
@@ -502,71 +497,43 @@ func RegisterOvnDBMetrics(waitTimeoutFunc func() bool, metricsScrapeInterval int
 	}
 
 	// Register the ovn*_db coverage/show metrics with prometheus
+	// Note: Periodic updaters removed - metrics will be updated on-demand when /metrics is requested
 	componentCoverageShowMetricsMap[ovnNorthDB] = ovnNorthDbCoverageShowMetricsMap
-	registerCoverageShowMetrics(ovnNorthDB, types.MetricOvnNamespace, types.MetricOvnSubsystemDB,
+	registerCoverageShowMetrics(ovnRegistry, ovnNorthDB, types.MetricOvnNamespace, types.MetricOvnSubsystemDB,
 		map[string]string{"db_name": "OVN_Northbound"})
-	go coverageShowMetricsUpdater(ovnNorthDB, metricsScrapeInterval, stopChan)
 
 	componentCoverageShowMetricsMap[ovnSouthDB] = ovnSouthDbCoverageShowMetricsMap
-	registerCoverageShowMetrics(ovnSouthDB, types.MetricOvnNamespace, types.MetricOvnSubsystemDB,
+	registerCoverageShowMetrics(ovnRegistry, ovnSouthDB, types.MetricOvnNamespace, types.MetricOvnSubsystemDB,
 		map[string]string{"db_name": "OVN_Southbound"})
-	go coverageShowMetricsUpdater(ovnSouthDB, metricsScrapeInterval, stopChan)
 
 	if dbIsClustered {
-		prometheus.MustRegister(metricDBClusterCID)
-		prometheus.MustRegister(metricDBClusterSID)
-		prometheus.MustRegister(metricDBClusterServerStatus)
-		prometheus.MustRegister(metricDBClusterTerm)
-		prometheus.MustRegister(metricDBClusterServerRole)
-		prometheus.MustRegister(metricDBClusterServerVote)
-		prometheus.MustRegister(metricDBClusterElectionTimer)
-		prometheus.MustRegister(metricDBClusterLogIndexStart)
-		prometheus.MustRegister(metricDBClusterLogIndexNext)
-		prometheus.MustRegister(metricDBClusterLogNotCommitted)
-		prometheus.MustRegister(metricDBClusterLogNotApplied)
-		prometheus.MustRegister(metricDBClusterConnIn)
-		prometheus.MustRegister(metricDBClusterConnOut)
-		prometheus.MustRegister(metricDBClusterConnInErr)
-		prometheus.MustRegister(metricDBClusterConnOutErr)
+		klog.Info("Found db is clustered, register db_cluster metrics")
+		ovnRegistry.MustRegister(metricDBClusterCID)
+		ovnRegistry.MustRegister(metricDBClusterSID)
+		ovnRegistry.MustRegister(metricDBClusterServerStatus)
+		ovnRegistry.MustRegister(metricDBClusterTerm)
+		ovnRegistry.MustRegister(metricDBClusterServerRole)
+		ovnRegistry.MustRegister(metricDBClusterServerVote)
+		ovnRegistry.MustRegister(metricDBClusterElectionTimer)
+		ovnRegistry.MustRegister(metricDBClusterLogIndexStart)
+		ovnRegistry.MustRegister(metricDBClusterLogIndexNext)
+		ovnRegistry.MustRegister(metricDBClusterLogNotCommitted)
+		ovnRegistry.MustRegister(metricDBClusterLogNotApplied)
+		ovnRegistry.MustRegister(metricDBClusterConnIn)
+		ovnRegistry.MustRegister(metricDBClusterConnOut)
+		ovnRegistry.MustRegister(metricDBClusterConnInErr)
+		ovnRegistry.MustRegister(metricDBClusterConnOutErr)
 	}
 
 	dbFoundViaPath := isOvnDBFoundViaPath(dbProperties)
 
 	if dbFoundViaPath {
-		prometheus.MustRegister(metricDBSize)
+		ovnRegistry.MustRegister(metricDBSize)
 	} else {
 		klog.Infof("Unable to enable OVN DB size metric because no OVN DBs found")
 	}
-	// functions responsible for collecting the values and updating the prometheus metrics
-	go func() {
-		ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
-		defer ticker.Stop()
 
-		for {
-			select {
-			case <-ticker.C:
-				// To update not only values but also labels for metrics, we use Reset() to delete previous labels+value
-				if dbIsClustered {
-					resetOvnDbClusterMetrics()
-				}
-				if dbFoundViaPath {
-					resetOvnDbSizeMetric()
-				}
-				resetOvnDbMemoryMetrics()
-				for _, dbProperty := range dbProperties {
-					if dbIsClustered {
-						ovnDBClusterStatusMetricsUpdater(dbProperty)
-					}
-					if dbFoundViaPath {
-						ovnDBSizeMetricsUpdater(dbProperty)
-					}
-					ovnDBMemoryMetricsUpdater(dbProperty)
-				}
-			case <-stopChan:
-				return
-			}
-		}
-	}()
+	return dbProperties, dbIsClustered, dbFoundViaPath
 }
 
 type OVNDBClusterStatus struct {
