@@ -150,6 +150,10 @@ func (a *idAllocatorStub) AllocateID(string) (int, error) {
 	panic("not implemented") // TODO: Implement
 }
 
+func (a *idAllocatorStub) GetID(string) int {
+	panic("not implemented") // TODO: Implement
+}
+
 func (a *idAllocatorStub) ReserveID(string, int) error {
 	panic("not implemented") // TODO: Implement
 }

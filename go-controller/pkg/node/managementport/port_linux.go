@@ -210,7 +210,6 @@ func tearDownManagementPortConfig(link netlink.Link) error {
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		return nil
 	}
-
 	nft, err := nodenft.GetNFTablesHelper()
 	if err != nil {
 		return fmt.Errorf("failed to get nftables: %v", err)
@@ -630,7 +629,7 @@ func unconfigureMgmtNetdevicePort(mgmtPortName string) error {
 	}
 
 	klog.Infof("Found existing management interface %s. Unconfiguring it", mgmtPortName)
-	if err := tearDownManagementPortConfig(link); err != nil {
+	if err = tearDownManagementPortConfig(link); err != nil {
 		return fmt.Errorf("teardown failed: %v", err)
 	}
 
