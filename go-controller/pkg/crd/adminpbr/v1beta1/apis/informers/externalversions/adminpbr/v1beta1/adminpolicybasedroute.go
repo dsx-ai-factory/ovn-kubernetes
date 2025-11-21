@@ -60,13 +60,25 @@ func NewFilteredAdminPolicyBasedRouteInformer(client versioned.Interface, resync
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.K8sV1beta1().AdminPolicyBasedRoutes().List(context.TODO(), options)
+				return client.K8sV1beta1().AdminPolicyBasedRoutes().List(context.Background(), options)
 			},
 			WatchFunc: func(options v1.ListOptions) (watch.Interface, error) {
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.K8sV1beta1().AdminPolicyBasedRoutes().Watch(context.TODO(), options)
+				return client.K8sV1beta1().AdminPolicyBasedRoutes().Watch(context.Background(), options)
+			},
+			ListWithContextFunc: func(ctx context.Context, options v1.ListOptions) (runtime.Object, error) {
+				if tweakListOptions != nil {
+					tweakListOptions(&options)
+				}
+				return client.K8sV1beta1().AdminPolicyBasedRoutes().List(ctx, options)
+			},
+			WatchFuncWithContext: func(ctx context.Context, options v1.ListOptions) (watch.Interface, error) {
+				if tweakListOptions != nil {
+					tweakListOptions(&options)
+				}
+				return client.K8sV1beta1().AdminPolicyBasedRoutes().Watch(ctx, options)
 			},
 		},
 		&crdadminpbrv1beta1.AdminPolicyBasedRoute{},
