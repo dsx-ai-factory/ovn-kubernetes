@@ -42,7 +42,7 @@ func generateAdvertisedUDNIsolationExpectedNB(testData []libovsdbtest.TestData, 
 		if utilnet.IsIPv6CIDR(subnet) {
 			ipPrefix = "ip6"
 		}
-		passMatches = append(passMatches, fmt.Sprintf("(%s.src == %s && %s.dst == %s)", ipPrefix, subnet, ipPrefix, subnet))
+		passMatches = append(passMatches, fmt.Sprintf("((%s.src == %s) && (%s.dst == %s))", ipPrefix, subnet, ipPrefix, subnet))
 
 	}
 	passACL := libovsdbutil.BuildACLWithDefaultTier(

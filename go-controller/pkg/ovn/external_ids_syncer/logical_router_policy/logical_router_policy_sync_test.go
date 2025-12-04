@@ -181,7 +181,7 @@ var _ = ginkgo.Describe("OVN Logical Router Syncer", func() {
 						Match:       fmt.Sprintf("ip4.src == %s && ip4.dst == %s", v4PodClusterSubnetStr, v4PodClusterSubnetStr),
 						Action:      nbdb.LogicalRouterPolicyActionAllow,
 						UUID:        "default-no-reroute-UUID",
-						ExternalIDs: getEgressIPLRPNoReRoutePodToPodDbIDs(v4IPFamilyValue, defaultNetworkName, defaultNetworkControllerName, 0).GetExternalIDs(),
+						ExternalIDs: getEgressIPLRPNoReRoutePodToPodDbIDs(v4IPFamilyValue, defaultNetworkName, defaultNetworkControllerName).GetExternalIDs(),
 					},
 					{
 						Priority:    types.DefaultNoRereoutePriority,
@@ -246,7 +246,7 @@ var _ = ginkgo.Describe("OVN Logical Router Syncer", func() {
 						Match:       fmt.Sprintf("ip6.src == %s && ip6.dst == %s", v6PodClusterSubnetStr, v6PodClusterSubnetStr),
 						Action:      nbdb.LogicalRouterPolicyActionAllow,
 						UUID:        "default-no-reroute-UUID",
-						ExternalIDs: getEgressIPLRPNoReRoutePodToPodDbIDs(v6IPFamilyValue, defaultNetworkName, defaultNetworkControllerName, 0).GetExternalIDs(),
+						ExternalIDs: getEgressIPLRPNoReRoutePodToPodDbIDs(v6IPFamilyValue, defaultNetworkName, defaultNetworkControllerName).GetExternalIDs(),
 					},
 					{
 						Priority:    types.DefaultNoRereoutePriority,
@@ -328,7 +328,7 @@ var _ = ginkgo.Describe("OVN Logical Router Syncer", func() {
 						Match:       fmt.Sprintf("ip4.src == %s && ip4.dst == %s", v4PodClusterSubnetStr, v4PodClusterSubnetStr),
 						Action:      nbdb.LogicalRouterPolicyActionAllow,
 						UUID:        "v4-default-no-reroute-UUID",
-						ExternalIDs: getEgressIPLRPNoReRoutePodToPodDbIDs(v4IPFamilyValue, defaultNetworkName, defaultNetworkControllerName, 0).GetExternalIDs(),
+						ExternalIDs: getEgressIPLRPNoReRoutePodToPodDbIDs(v4IPFamilyValue, defaultNetworkName, defaultNetworkControllerName).GetExternalIDs(),
 					},
 					{
 						Priority:    types.DefaultNoRereoutePriority,
@@ -350,7 +350,7 @@ var _ = ginkgo.Describe("OVN Logical Router Syncer", func() {
 						Match:       fmt.Sprintf("ip6.src == %s && ip6.dst == %s", v6PodClusterSubnetStr, v6PodClusterSubnetStr),
 						Action:      nbdb.LogicalRouterPolicyActionAllow,
 						UUID:        "v6-default-no-reroute-UUID",
-						ExternalIDs: getEgressIPLRPNoReRoutePodToPodDbIDs(v6IPFamilyValue, defaultNetworkName, defaultNetworkControllerName, 0).GetExternalIDs(),
+						ExternalIDs: getEgressIPLRPNoReRoutePodToPodDbIDs(v6IPFamilyValue, defaultNetworkName, defaultNetworkControllerName).GetExternalIDs(),
 					},
 					{
 						Priority:    types.DefaultNoRereoutePriority,
@@ -490,7 +490,6 @@ func getEgressIPLRPNoReRouteDbIDs(priority int, uniqueName, ipFamily, network, c
 		libovsdbops.PriorityKey:   fmt.Sprintf("%d", priority),
 		libovsdbops.IPFamilyKey:   ipFamily,
 		libovsdbops.NetworkKey:    network,
-		libovsdbops.RuleIndex:     "0",
 	})
 }
 

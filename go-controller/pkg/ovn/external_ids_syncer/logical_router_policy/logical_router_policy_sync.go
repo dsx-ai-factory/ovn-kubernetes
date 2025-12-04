@@ -269,7 +269,6 @@ func (syncer *LRPSyncer) syncEgressIPNoReroutePodToJoin(v4ClusterSubnets, v6Clus
 	return nil
 }
 
-// TBD-merge, needs to uprade to DBIDs with index key.
 func (syncer *LRPSyncer) syncEgressIPNoReroutePodToPod(v4ClusterSubnets, v6ClusterSubnets []*net.IPNet) error {
 	noOwnerFn := libovsdbops.GetNoOwnerPredicate[*nbdb.LogicalRouterPolicy]()
 	p := func(item *nbdb.LogicalRouterPolicy) bool {
@@ -306,7 +305,7 @@ func (syncer *LRPSyncer) syncEgressIPNoReroutePodToPod(v4ClusterSubnets, v6Clust
 				continue
 			}
 		}
-		lrp.ExternalIDs = getEgressIPLRPNoReRoutePodToPodDbIDs(ipFamily, defaultNetworkName, syncer.controllerName, 0).GetExternalIDs()
+		lrp.ExternalIDs = getEgressIPLRPNoReRoutePodToPodDbIDs(ipFamily, defaultNetworkName, syncer.controllerName).GetExternalIDs()
 		ops, err = libovsdbops.UpdateLogicalRouterPoliciesOps(syncer.nbClient, ops, lrp)
 		if err != nil {
 			return fmt.Errorf("failed to create logical router policy ops: %v", err)
@@ -391,7 +390,6 @@ func getEgressIPLRPReRouteDbIDs(egressIPName, podNamespace, podName string, ipFa
 		libovsdbops.PriorityKey:   fmt.Sprintf("%d", ovntypes.EgressIPReroutePriority),
 		libovsdbops.IPFamilyKey:   string(ipFamily),
 		libovsdbops.NetworkKey:    network,
-		libovsdbops.RuleIndex:     "0",
 	})
 }
 
@@ -401,17 +399,15 @@ func getEgressIPLRPNoReRoutePodToJoinDbIDs(ipFamily egressIPFamilyValue, network
 		libovsdbops.PriorityKey:   fmt.Sprintf("%d", ovntypes.DefaultNoRereoutePriority),
 		libovsdbops.IPFamilyKey:   string(ipFamily),
 		libovsdbops.NetworkKey:    network,
-		libovsdbops.RuleIndex:     "0",
 	})
 }
 
-func getEgressIPLRPNoReRoutePodToPodDbIDs(ipFamily egressIPFamilyValue, network, controller string, index int) *libovsdbops.DbObjectIDs {
+func getEgressIPLRPNoReRoutePodToPodDbIDs(ipFamily egressIPFamilyValue, network, controller string) *libovsdbops.DbObjectIDs {
 	return libovsdbops.NewDbObjectIDs(libovsdbops.LogicalRouterPolicyEgressIP, controller, map[libovsdbops.ExternalIDKey]string{
 		libovsdbops.ObjectNameKey: string(noReRoutePodToPod),
 		libovsdbops.PriorityKey:   fmt.Sprintf("%d", ovntypes.DefaultNoRereoutePriority),
 		libovsdbops.IPFamilyKey:   string(ipFamily),
 		libovsdbops.NetworkKey:    network,
-		libovsdbops.RuleIndex:     fmt.Sprintf("%d", index),
 	})
 }
 
@@ -421,7 +417,6 @@ func getEgressIPLRPNoReRoutePodToNodeDbIDs(ipFamily egressIPFamilyValue, network
 		libovsdbops.PriorityKey:   fmt.Sprintf("%d", ovntypes.DefaultNoRereoutePriority),
 		libovsdbops.IPFamilyKey:   string(ipFamily),
 		libovsdbops.NetworkKey:    network,
-		libovsdbops.RuleIndex:     "0",
 	})
 }
 
