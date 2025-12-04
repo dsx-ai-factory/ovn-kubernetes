@@ -17,7 +17,7 @@ func (pr *PodRequest) updatePodDPUConnDetailsWithRetry(kube kube.Interface, podL
 		dpuConnDetails, pr.nadName)
 	pod, err := podLister.Pods(pr.PodNamespace).Get(pr.PodName)
 	if err != nil {
-		return fmt.Errorf("Failed to get pod %s/%s to update connection details for NAD %s: %v", pod.Namespace, pr.PodName, pr.nadName, err)
+		return fmt.Errorf("failed to get pod %s/%s to update connection details for NAD %s: %v", pod.Namespace, pr.PodName, pr.nadName, err)
 	}
 	err = util.UpdatePodDPUConnDetailsWithRetry(
 		podLister,
