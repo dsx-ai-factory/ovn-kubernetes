@@ -227,7 +227,6 @@ func (bsnc *BaseUserDefinedNetworkController) DeleteUserDefinedNetworkResourceCo
 // ensurePodForUserDefinedNetwork tries to set up the User Defined Network for a pod. It returns nil on success and error
 // on failure; failure indicates the pod set up should be retried later.
 func (bsnc *BaseUserDefinedNetworkController) ensurePodForUserDefinedNetwork(oldPod, pod *corev1.Pod, addPort bool) error {
-
 	// Try unscheduled pods later
 	if !util.PodScheduled(pod) {
 		return nil
@@ -307,7 +306,8 @@ func (bsnc *BaseUserDefinedNetworkController) ensurePodForUserDefinedNetwork(old
 }
 
 func (bsnc *BaseUserDefinedNetworkController) addLogicalPortToNetworkForNAD(pod *corev1.Pod, nadName, switchName string,
-	network *nadapi.NetworkSelectionElement, kubevirtLiveMigrationStatus *kubevirt.LiveMigrationStatus) error {
+	network *nadapi.NetworkSelectionElement, kubevirtLiveMigrationStatus *kubevirt.LiveMigrationStatus,
+) error {
 	var libovsdbExecuteTime time.Duration
 
 	start := time.Now()
@@ -926,28 +926,6 @@ func getClusterNodesDestinationBasedSNATMatch(ipFamily utilnet.IPFamily, address
 	}
 }
 
-func (bsnc *BaseUserDefinedNetworkController) ensureDHCP(pod *corev1.Pod, podAnnotation *util.PodAnnotation, lsp *nbdb.LogicalSwitchPort) error {
-	opts := []kubevirt.DHCPConfigsOpt{}
-
-	ipv4DNSServer, ipv6DNSServer, err := kubevirt.RetrieveDNSServiceClusterIPs(bsnc.watchFactory)
-	if err != nil {
-		return err
-	}
-
-	ipv4Gateway, _ := util.MatchFirstIPFamily(false /*ipv4*/, podAnnotation.Gateways)
-	if ipv4Gateway != nil {
-		opts = append(opts, kubevirt.WithIPv4Router(ipv4Gateway.String()))
-	}
-
-	if bsnc.MTU() > 0 {
-		opts = append(opts, kubevirt.WithIPv4MTU(bsnc.MTU()))
-	}
-
-	opts = append(opts, kubevirt.WithIPv4DNSServer(ipv4DNSServer), kubevirt.WithIPv6DNSServer(ipv6DNSServer))
-
-	return kubevirt.EnsureDHCPOptionsForLSP(bsnc.controllerName, bsnc.nbClient, pod, podAnnotation.IPs, lsp, opts...)
-}
-
 func (bsnc *BaseUserDefinedNetworkController) requireDHCP(pod *corev1.Pod) bool {
 	// Configure DHCP only for kubevirt VMs layer2 primary udn with subnets
 	return kubevirt.IsPodOwnedByVirtualMachine(pod) &&
@@ -957,7 +935,8 @@ func (bsnc *BaseUserDefinedNetworkController) requireDHCP(pod *corev1.Pod) bool 
 }
 
 func (bsnc *BaseUserDefinedNetworkController) setPodLogicalSwitchPortAddressesAndEnabledField(
-	pod *corev1.Pod, nadName string, mac string, ips []string, enabled bool, ops []ovsdb.Operation) ([]ovsdb.Operation, *nbdb.LogicalSwitchPort, error) {
+	pod *corev1.Pod, nadName string, mac string, ips []string, enabled bool, ops []ovsdb.Operation,
+) ([]ovsdb.Operation, *nbdb.LogicalSwitchPort, error) {
 	lsp := &nbdb.LogicalSwitchPort{Name: bsnc.GetLogicalPortName(pod, nadName)}
 	lsp.Enabled = ptr.To(enabled)
 	customFields := []libovsdbops.ModelUpdateField{
@@ -993,7 +972,8 @@ func (bsnc *BaseUserDefinedNetworkController) setPodLogicalSwitchPortAddressesAn
 
 func (bsnc *BaseUserDefinedNetworkController) disableLiveMigrationSourceLSPOps(
 	kubevirtLiveMigrationStatus *kubevirt.LiveMigrationStatus,
-	nadName string, ops []ovsdb.Operation) ([]ovsdb.Operation, error) {
+	nadName string, ops []ovsdb.Operation,
+) ([]ovsdb.Operation, error) {
 	// closing the sourcePod lsp to ensure traffic goes to the now ready targetPod.
 	ops, _, err := bsnc.setPodLogicalSwitchPortAddressesAndEnabledField(kubevirtLiveMigrationStatus.SourcePod, nadName, "", nil, false, ops)
 	return ops, err
