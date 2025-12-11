@@ -8,7 +8,7 @@
 #
 # So this file will change over time.
 
-# TBD-merge FROM ubuntu:25.04
+# TBD-merge FROM ubuntu:25.10
 FROM ubuntu:24.10
 
 USER root
