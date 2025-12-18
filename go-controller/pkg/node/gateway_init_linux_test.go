@@ -1006,6 +1006,24 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 				}
 				return nil
 			}, 1*time.Second).ShouldNot(HaveOccurred())
+
+			// check that the MAC address label was set
+			updatedNode, err := kubeFakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			macAddrLabel, ok := updatedNode.Labels[util.OvnNodeMacAddr]
+			Expect(ok).To(BeTrue(), "MAC address label should be set")
+			Expect(macAddrLabel).NotTo(BeEmpty(), "MAC address should not be empty")
+
+			// Validate it's a valid MAC address format (convert dashes back to colons for parsing)
+			macAddrWithColons := strings.ReplaceAll(macAddrLabel, "-", ":")
+			_, err = net.ParseMAC(macAddrWithColons)
+			Expect(err).NotTo(HaveOccurred(), "MAC address should be in valid format")
+
+			// Verify the MAC address matches the interface MAC
+			expectedMAC := link.Attrs().HardwareAddr.String()
+			Expect(macAddrWithColons).To(Equal(expectedMAC), "MAC address label should match interface MAC")
+
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
