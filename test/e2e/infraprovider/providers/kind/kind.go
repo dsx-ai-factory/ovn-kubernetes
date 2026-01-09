@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/containerengine"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/images"
@@ -530,11 +532,17 @@ func (c *contextKind) SetupUnderlay(f *framework.Framework, underlay api.Underla
 				}
 			}
 		}
+
+		// NVIDIA: add br-localnet suffix to network name; we keep original downstream behavior when creating
+		// localnet ports in localnet controllers, which we have to match here.
+		networkName := fmt.Sprintf("%s%s", util.GetUserDefinedNetworkPrefix(underlay.LogicalNetworkName),
+			types.LocalNetBridgeName)
+
 		if err := configureBridgeMappings(
 			ovsPod.Namespace,
 			ovsPod.Name,
 			defaultNetworkBridgeMapping(),
-			bridgeMapping(underlay.LogicalNetworkName, underlay.BridgeName),
+			bridgeMapping(networkName, underlay.BridgeName),
 		); err != nil {
 			return fmt.Errorf("failed to configure bridge mappings for pod %s/%s for logical network %s to bridge %s: %w", ovsPod.Namespace, ovsPod.Name, underlay.LogicalNetworkName, underlay.BridgeName, err)
 		}

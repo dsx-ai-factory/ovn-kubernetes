@@ -360,6 +360,8 @@ func (oc *LocalnetUserDefinedNetworkController) newRetryFramework(
 }
 
 func (oc *LocalnetUserDefinedNetworkController) localnetPortNetworkNameOptions() map[string]string {
+	// NVIDIA: add br-localnet suffix to retain original downstream behavior. Otherwise we'd have to
+	// change bridge mappings on all nodes to use the new suffix-less names.
 	localnetLSPOptions := map[string]string{
 		"network_name": oc.GetNetworkScopedName(types.LocalNetBridgeName),
 	}
