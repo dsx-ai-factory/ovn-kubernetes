@@ -285,7 +285,12 @@ func UnmarshalPodAnnotation(annotations map[string]string, nadKey string) (*PodA
 		}
 	}
 
-	if SkipIPAMForNAD(annotations, nadKey) {
+	var skip bool
+	skip, err = SkipIPAMForNAD(annotations, nadKey)
+	if err != nil {
+		return nil, err
+	}
+	if skip {
 		// pod doesn't require IP for this network
 		return podAnnotation, nil
 	}
@@ -533,20 +538,34 @@ func GetK8sPodAllNetworkSelections(pod *corev1.Pod) ([]*nadapi.NetworkSelectionE
 	return networks, nil
 }
 
-// SkipSpoofCheckForNAD checks whether we should skip spoof check for the given NAD
-// nadName is namespace/name of the secondary network NAD and "default" for default network NAD
-func SkipSpoofCheckForNAD(annotations map[string]string, nadName string) bool {
-	skipSpoofCheckForNetworks, ok := annotations[skipSpoofCheckAnnotationName]
-	if !ok {
-		return false
-	}
-	for _, name := range strings.Split(skipSpoofCheckForNetworks, ",") {
-		name = strings.TrimSpace(name)
-		if name == nadName {
-			return true
+// SkipSpoofCheckForNAD checks whether we should skip spoof check for the given NAD key.
+// nadKey is namespace/name/index of the secondary network NAD and "default" for default network NAD
+// Note that SkipSpoofCheckForNAD does not work with Pod interfaces of multiple same secondary UDN.
+func SkipSpoofCheckForNAD(annotations map[string]string, nadKey string) (bool, error) {
+	var err error
+
+	nadName := nadKey
+	if nadKey != types.DefaultNetworkName {
+		nadName, _, err = GetNadFromIndexedNADKey(nadKey)
+		if err != nil {
+			return false, err
 		}
 	}
-	return false
+	nads, ok := annotations[skipSpoofCheckAnnotationName]
+	if !ok {
+		return false, nil
+	}
+	for _, nad := range strings.Split(nads, ",") {
+		nad = strings.TrimSpace(nad)
+		if nad == nadName {
+			if nadName != nadKey {
+				return false, fmt.Errorf("%s pod config does not work with multiple same secondary UDN pod interfaces", skipSpoofCheckAnnotationName)
+			} else {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 func IsNadForPodClampedDown(podAnnotation map[string]string, nadName string) bool {
@@ -558,19 +577,34 @@ func IsNadForPodClampedDown(podAnnotation map[string]string, nadName string) boo
 	return false
 }
 
-// SkipIPAMForNAD return true if nadName is part of value of SkipIPOnNetworksAnnotation annotation
-// nadName is namespace/name of the secondary network NAD and "default" for default network NAD
-func SkipIPAMForNAD(annotations map[string]string, nadName string) bool {
-	skipIPNetworks := annotations[SkipIPOnNetworksAnnotation]
-	if skipIPNetworks == "" {
-		return false
-	}
-	for _, skipNadName := range strings.Split(skipIPNetworks, ",") {
-		if skipNadName == nadName {
-			return true
+// SkipIPAMForNAD return true if nadKey is part of value of SkipIPOnNetworksAnnotation annotation
+// nadKey is namespace/name/index of the secondary network NAD and "default" for default network NAD
+// Note that SkipIPAMForNAD does not work with Pod interfaces of multiple same secondary UDN.
+func SkipIPAMForNAD(annotations map[string]string, nadKey string) (bool, error) {
+	var err error
+
+	nadName := nadKey
+	if nadKey != types.DefaultNetworkName {
+		nadName, _, err = GetNadFromIndexedNADKey(nadKey)
+		if err != nil {
+			return false, err
 		}
 	}
-	return false
+	nads, ok := annotations[SkipIPOnNetworksAnnotation]
+	if !ok {
+		return false, nil
+	}
+	for _, nad := range strings.Split(nads, ",") {
+		nad = strings.TrimSpace(nad)
+		if nad == nadName {
+			if nadName != nadKey {
+				return false, fmt.Errorf("%s pod config does not work with multiple same secondary UDN pod interfaces", SkipIPOnNetworksAnnotation)
+			} else {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 type portSecurityInfo struct {

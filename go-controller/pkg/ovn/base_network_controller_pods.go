@@ -69,7 +69,10 @@ func (bnc *BaseNetworkController) allocatePodIPsOnSwitch(pod *corev1.Pod,
 		return "", nil
 	}
 
-	skipIPAM := util.SkipIPAMForNAD(pod.Annotations, nadKey)
+	skipIPAM, err := util.SkipIPAMForNAD(pod.Annotations, nadKey)
+	if err != nil {
+		return "", err
+	}
 
 	expectedLogicalPortName = bnc.GetLogicalPortName(pod, nadKey)
 
@@ -504,7 +507,10 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *corev1.Pod, nadKe
 	var ls *nbdb.LogicalSwitch
 	var node *corev1.Node
 
-	skipIPAM := util.SkipIPAMForNAD(pod.Annotations, nadKey)
+	skipIPAM, err := util.SkipIPAMForNAD(pod.Annotations, nadKey)
+	if err != nil {
+		return nil, nil, nil, false, err
+	}
 	if skipIPAM && (bnc.TopologyType() != ovntypes.Layer2Topology && bnc.TopologyType() != ovntypes.LocalnetTopology) {
 		return nil, nil, nil, false,
 			fmt.Errorf("%s annotation applied on %s network, but it can only be applied on %s and %s network",
@@ -665,28 +671,38 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *corev1.Pod, nadKe
 	// ex: for IGW's private and public underlay networks we need the port security to be disabled
 	// on the corresponding LSP so that it can provide high availability for the default gateway IP.
 	// TODO(gmoodalbail): need a correct way to disable portSecurity for default network
-	skipPortSecurity := util.SkipSpoofCheckForNAD(pod.Annotations, nadKey)
+	skipPortSecurity, err := util.SkipSpoofCheckForNAD(pod.Annotations, nadKey)
+	if err != nil {
+		return nil, nil, nil, false, fmt.Errorf("error creating logical switch port for pod %s: %+v", podDesc, err)
+	}
 	if !skipPortSecurity {
 		// CNI depends on the flows from port security, delay setting it until end
 		if skipIPAM {
 			if portSecInfo, err := util.GetPortSecurityInfo(pod.Annotations); err != nil {
 				return nil, nil, nil, false, err
-			} else if allowedIPs := portSecInfo[nadKey]; allowedIPs != nil && len(allowedIPs.IPs) > 0 {
-				allowedAddresses := []string{}
-				for _, ip := range allowedIPs.IPs {
-					allowedAddresses = append(allowedAddresses, fmt.Sprintf("%s %s", podAnnotation.MAC.String(), ip))
-					lsp.PortSecurity = allowedAddresses
-				}
 			} else {
-				klog.V(5).Infof("No allowed IPs are specified for skip-ipam port %s, adding mac %s only", portName, podAnnotation.MAC.String())
-				lsp.PortSecurity = []string{podAnnotation.MAC.String()}
+				nadName, index, _ := util.GetNadFromIndexedNADKey(nadKey)
+				if allowedIPs := portSecInfo[nadName]; allowedIPs != nil && len(allowedIPs.IPs) > 0 {
+					if index != 0 {
+						return nil, nil, nil, false, fmt.Errorf("port security is not support for port %s with multiple same secondary UDN %s",
+							portName, nadKey)
+					}
+					allowedAddresses := []string{}
+					for _, ip := range allowedIPs.IPs {
+						allowedAddresses = append(allowedAddresses, fmt.Sprintf("%s %s", podAnnotation.MAC.String(), ip))
+						lsp.PortSecurity = allowedAddresses
+					}
+				} else {
+					klog.V(5).Infof("No allowed IPs are specified for skip-ipam port %s, adding mac %s only", portName, podAnnotation.MAC.String())
+					lsp.PortSecurity = []string{podAnnotation.MAC.String()}
+				}
 			}
 		} else {
 			lsp.PortSecurity = addresses
 		}
 		customFields = append(customFields, libovsdbops.LogicalSwitchPortPortSecurity)
 	} else {
-		klog.Infof("Skip setting port security for port %s on NAD %s", portName, nadKey)
+		klog.Infof("Skip setting port security for port %s on NAD key %s", portName, nadKey)
 	}
 
 	// On layer2 topology with interconnect, we need to add specific port config
@@ -897,8 +913,9 @@ func (bnc *BaseNetworkController) updatePortSecurity(oldPod, newPod *corev1.Pod)
 		if err != nil {
 			return err
 		}
-		oldPortSecInfo, oldPortSecInfoExists := oldPortSecInfoMap[nadKey]
-		newPortSecInfo, newPortSecInfoExists := newPortSecInfoMap[nadKey]
+		nadName, index, _ := util.GetNadFromIndexedNADKey(nadKey)
+		oldPortSecInfo, oldPortSecInfoExists := oldPortSecInfoMap[nadName]
+		newPortSecInfo, newPortSecInfoExists := newPortSecInfoMap[nadName]
 		if !oldPortSecInfoExists && !newPortSecInfoExists {
 			// port security info for this nad doesn't exist before and now
 			continue
@@ -925,6 +942,10 @@ func (bnc *BaseNetworkController) updatePortSecurity(oldPod, newPod *corev1.Pod)
 		}
 		addresses := []string{}
 		if newPortSecInfo != nil && len(newPortSecInfo.IPs) > 0 {
+			if index != 0 {
+				return fmt.Errorf("port security is not support for port %s with multiple same secondary UDN %s",
+					portName, nadKey)
+			}
 			for _, ip := range newPortSecInfo.IPs {
 				addresses = append(addresses, fmt.Sprintf("%s %s", allowedMac, ip))
 			}

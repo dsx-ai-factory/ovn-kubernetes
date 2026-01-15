@@ -18,6 +18,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
+// TBD SDN-3998 support dpu rate limiting for multiple secondary UDN pods
 type NADInfo interface {
 	// set per-NAD configration in case of any change
 	SetNADConfig(nadName string, nadConfig *util.NADConfig) error

@@ -136,6 +136,10 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, podNADAnnotation *ut
 		return nil, err
 	}
 
+	skipSpoofCheck, err := util.SkipSpoofCheckForNAD(podAnnotation, nadKey)
+	if err != nil {
+		return nil, err
+	}
 	podInterfaceInfo := &PodInterfaceInfo{
 		PodAnnotation:         *podNADAnnotation,
 		RoutableMTU:           config.Default.RoutableMTU, // TBD, configurable for UDNs?
@@ -148,7 +152,7 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, podNADAnnotation *ut
 		NetName:               netName,
 		NADKey:                nadKey,
 		EnableUDPAggregation:  config.Default.EnableUDPAggregation,
-		SkipSpoofCheck:        util.SkipSpoofCheckForNAD(podAnnotation, nadKey),
+		SkipSpoofCheck:        skipSpoofCheck,
 		OvnKubeMode:           config.OvnKubeNode.Mode,
 	}
 	return podInterfaceInfo, nil

@@ -343,7 +343,10 @@ func (a *PodAllocator) allocatePodOnNAD(pod *corev1.Pod, nadKey string, network 
 	if util.DoesNetworkRequireIPAM(a.netInfo) {
 		ipAllocator = a.ipAllocator.ForSubnet(a.netInfo.GetNetworkName())
 	}
-	skipIPAM := util.SkipIPAMForNAD(pod.Annotations, nadKey)
+	skipIPAM, err := util.SkipIPAMForNAD(pod.Annotations, nadKey)
+	if err != nil {
+		return err
+	}
 	if skipIPAM && (a.netInfo.TopologyType() != types.Layer2Topology && a.netInfo.TopologyType() != types.LocalnetTopology) {
 		return fmt.Errorf("%s annotation applied on %s network, but it can only be applied on %s and %s network",
 			a.netInfo.GetNetworkName(), util.SkipIPOnNetworksAnnotation, types.Layer2Topology, types.LocalnetTopology)
