@@ -73,10 +73,10 @@ OVN_EGRESSFIREWALL_ENABLE="true"
 OVN_EGRESSQOS_ENABLE="false"
 OVN_EGRESSSERVICE_ENABLE="false"
 OVN_NETWORKPROBE_ENABLE="true"
-OVN_DISABLE_OVN_IFACE_ID_VER="true"
 OVN_MULTI_NETWORK_ENABLE="true"
 OVN_ADMIN_PBR_ENABLE="true"
 OVN_NETWORK_SEGMENTATION_ENABLE=
+OVN_NETWORK_CONNECT_ENABLE=
 OVN_PRE_CONF_UDN_ADDR_ENABLE=
 OVN_ROUTE_ADVERTISEMENTS_ENABLE=
 OVN_VIRTUALIP_ENABLE="true"
@@ -134,6 +134,8 @@ OVNKUBE_WAIT_ON_OVN_INSTALL_EXTID="false"
 OVN_OBSERV_ENABLE="false"
 OVN_UDN_ALLOWED_DEFAULT_SERVICES=
 OVS_DB_TRANSACTION_TIMEOUT=
+ENABLE_COREDUMPS="false"
+METRICS_IP=""
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -301,9 +303,6 @@ while [ "$1" != "" ]; do
     ;;
   --multi-networkpolicy-enable)
     ;;
-  --disable-ovn-iface-id-ver)
-    OVN_DISABLE_OVN_IFACE_ID_VER=$VALUE
-    ;;
   --ovnkube-wait-on-ovn-install-extid)
     OVNKUBE_WAIT_ON_OVN_INSTALL_EXTID=$VALUE
     ;;
@@ -327,6 +326,9 @@ while [ "$1" != "" ]; do
     ;;
   --network-segmentation-enable)
     OVN_NETWORK_SEGMENTATION_ENABLE=$VALUE
+    ;;
+  --network-connect-enable)
+    OVN_NETWORK_CONNECT_ENABLE=$VALUE
     ;;
   --preconfigured-udn-addresses-enable)
     OVN_PRE_CONF_UDN_ADDR_ENABLE=$VALUE
@@ -433,6 +435,9 @@ while [ "$1" != "" ]; do
   --ovnkube-metrics-scale-enable)
     OVNKUBE_METRICS_SCALE_ENABLE=$VALUE
     ;;
+  --metrics-ip)
+    METRICS_IP=$VALUE
+    ;;
   --in-upgrade)
     IN_UPGRADE=true
     ;;
@@ -486,6 +491,9 @@ while [ "$1" != "" ]; do
     ;;
   --enable-observ)
     OVN_OBSERV_ENABLE=$VALUE
+    ;;
+  --enable-coredumps)
+    ENABLE_COREDUMPS=$VALUE
     ;;
   --no-hostsubnet-label)
     OVN_NOHOSTSUBNET_LABEL=$VALUE
@@ -597,14 +605,14 @@ ovn_networkprobe_enable=${OVN_NETWORKPROBE_ENABLE}
 echo "ovn_networkprobe_enable: ${ovn_networkprobe_enable}"
 ovn_port_mirror_enable=${OVN_PORT_MIRROR_ENABLE}
 echo "ovn_port_mirror_enable: ${ovn_port_mirror_enable}"
-ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER}
-echo "ovn_disable_ovn_iface_id_ver: ${ovn_disable_ovn_iface_id_ver}"
 ovnkube_wait_on_ovn_install_extid=${OVNKUBE_WAIT_ON_OVN_INSTALL_EXTID}
 echo "ovnkube_wait_on_ovn_install_extid: ${ovnkube_wait_on_ovn_install_extid}"
 ovn_multi_network_enable=${OVN_MULTI_NETWORK_ENABLE}
 echo "ovn_multi_network_enable: ${ovn_multi_network_enable}"
 ovn_network_segmentation_enable=${OVN_NETWORK_SEGMENTATION_ENABLE}
 echo "ovn_network_segmentation_enable: ${ovn_network_segmentation_enable}"
+ovn_network_connect_enable=${OVN_NETWORK_CONNECT_ENABLE}
+echo "ovn_network_connect_enable: ${ovn_network_connect_enable}"
 ovn_pre_conf_udn_addr_enable=${OVN_PRE_CONF_UDN_ADDR_ENABLE}
 echo "ovn_pre_conf_udn_addr_enable: ${ovn_pre_conf_udn_addr_enable}"
 ovn_route_advertisements_enable=${OVN_ROUTE_ADVERTISEMENTS_ENABLE}
@@ -717,6 +725,8 @@ coredns_cluster_ip=${COREDNS_CLUSTER_IP}
 echo "coredns_cluster_ip: ${coredns_cluster_ip}"
 ovnkube_metrics_scale_enable=${OVNKUBE_METRICS_SCALE_ENABLE}
 echo "ovnkube_metrics_scale_enable: ${ovnkube_metrics_scale_enable}"
+metrics_ip=${METRICS_IP}
+echo "metrics_ip: ${metrics_ip}"
 ovn_stateless_netpol_enable=${OVN_STATELESS_NETPOL_ENABLE}
 echo "ovn_stateless_netpol_enable: ${ovn_stateless_netpol_enable}"
 ovnkube_compact_mode_enable=${COMPACT_MODE:-"false"}
@@ -755,6 +765,10 @@ ovn_enable_dnsnameresolver=${OVN_ENABLE_DNSNAMERESOLVER}
 echo "ovn_enable_dnsnameresolver: ${ovn_enable_dnsnameresolver}"
 ovn_observ_enable=${OVN_OBSERV_ENABLE}
 echo "ovn_observ_enable: ${ovn_observ_enable}"
+
+enable_coredumps=${ENABLE_COREDUMPS}
+echo "enable_coredumps: ${enable_coredumps}"
+
 ovn_disable_requestedchassis=${OVN_DISABLE_REQUESTEDCHASSIS}
 echo "ovn_disable_requestedchassis: ${ovn_disable_requestedchassis}"
 
@@ -791,6 +805,7 @@ ovn_image=${ovnkube_image} \
   ovn_egress_ip_healthcheck_port=${ovn_egress_ip_healthcheck_port} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
+  ovn_network_connect_enable=${ovn_network_connect_enable} \
   ovn_pre_conf_udn_addr_enable=${ovn_pre_conf_udn_addr_enable} \
   ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
   ovn_advertised_udn_isolation_mode=${ovn_advertised_udn_isolation_mode} \
@@ -809,7 +824,6 @@ ovn_image=${ovnkube_image} \
   ovn_ipfix_cache_max_flows=${ovn_ipfix_cache_max_flows} \
   ovn_ipfix_cache_active_timeout=${ovn_ipfix_cache_active_timeout} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
-  ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
   ovnkube_wait_on_ovn_install_extid=${ovnkube_wait_on_ovn_install_extid} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
   disable_ovs_metrics=${disable_ovs_metrics} \
@@ -821,6 +835,8 @@ ovn_image=${ovnkube_image} \
   ovn_observ_enable=${ovn_observ_enable} \
   ovn_udn_allowed_default_services=${ovn_udn_allowed_default_services} \
   ovn_network_qos_enable=${ovn_network_qos_enable} \
+  enable_coredumps=${enable_coredumps} \
+  metrics_ip=${metrics_ip} \
   ovnkube_app_name=ovnkube-node \
   jinjanate ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node.yaml
 
@@ -853,6 +869,7 @@ ovn_image=${ovnkube_image} \
   ovn_egress_ip_healthcheck_port=${ovn_egress_ip_healthcheck_port} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
+  ovn_network_connect_enable=${ovn_network_connect_enable} \
   ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
   ovn_advertised_udn_isolation_mode=${ovn_advertised_udn_isolation_mode} \
   ovn_egress_service_enable=${ovn_egress_service_enable} \
@@ -870,7 +887,6 @@ ovn_image=${ovnkube_image} \
   ovn_ipfix_cache_max_flows=${ovn_ipfix_cache_max_flows} \
   ovn_ipfix_cache_active_timeout=${ovn_ipfix_cache_active_timeout} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
-  ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
   ovnkube_wait_on_ovn_install_extid=${ovnkube_wait_on_ovn_install_extid} \
   disable_ovs_metrics=${disable_ovs_metrics} \
@@ -880,6 +896,7 @@ ovn_image=${ovnkube_image} \
   ovn_observ_enable=${ovn_observ_enable} \
   ovn_udn_allowed_default_services=${ovn_udn_allowed_default_services} \
   ovn_network_qos_enable=${ovn_network_qos_enable} \
+  metrics_ip=${metrics_ip} \
   ovnkube_app_name=ovnkube-node-dpu \
   jinjanate ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node-dpu.yaml
 
@@ -927,6 +944,7 @@ ovn_image=${image} \
   ovnkube_admin_firewalld_zone=${ovnkube_admin_firewalld_zone} \
   ovn_networkprobe_enable=${ovn_networkprobe_enable} \
   ovn_network_qos_enable=${ovn_network_qos_enable} \
+  metrics_ip=${metrics_ip} \
   ovnkube_app_name=ovnkube-node-dpu-host \
   jinjanate ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node-dpu-host.yaml
 
@@ -941,6 +959,7 @@ ovn_image=${image} \
   ovnkube_libovsdb_client_logfile=${ovnkube_libovsdb_client_logfile} \
   ovnkube_config_duration_enable=${ovnkube_config_duration_enable} \
   ovnkube_metrics_scale_enable=${ovnkube_metrics_scale_enable} \
+  metrics_ip=${metrics_ip} \
   ovn_acl_logging_rate_limit=${ovn_acl_logging_rate_limit} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
@@ -965,6 +984,7 @@ ovn_image=${image} \
   ovn_egress_service_enable=${ovn_egress_service_enable} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
+  ovn_network_connect_enable=${ovn_network_connect_enable} \
   ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
   ovn_admin_pbr_enable=${ovn_admin_pbr_enable} \
   ovn_virtual_ip_enable=${ovn_virtual_ip_enable} \
@@ -992,6 +1012,8 @@ ovn_image=${image} \
   ovn_disable_requestedchassis=${ovn_disable_requestedchassis} \
   ovn_udn_allowed_default_services=${ovn_udn_allowed_default_services} \
   ovs_db_transaction_timeout=${ovs_db_transaction_timeout} \
+  enable_coredumps=${enable_coredumps} \
+  metrics_ip=${metrics_ip} \
   jinjanate ../templates/ovnkube-master.yaml.j2 -o ${output_dir}/ovnkube-master.yaml
 
 ovn_image=${image} \
@@ -1003,6 +1025,7 @@ ovn_image=${image} \
   ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
   ovnkube_config_duration_enable=${ovnkube_config_duration_enable} \
   ovnkube_metrics_scale_enable=${ovnkube_metrics_scale_enable} \
+  metrics_ip=${metrics_ip} \
   ovn_acl_logging_rate_limit=${ovn_acl_logging_rate_limit} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
@@ -1021,6 +1044,7 @@ ovn_image=${image} \
   ovn_egress_qos_enable=${ovn_egress_qos_enable} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
+  ovn_network_connect_enable=${ovn_network_connect_enable} \
   ovn_pre_conf_udn_addr_enable=${ovn_pre_conf_udn_addr_enable} \
   ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
   ovn_advertised_udn_isolation_mode=${ovn_advertised_udn_isolation_mode} \
@@ -1038,6 +1062,8 @@ ovn_image=${image} \
   ovn_enable_persistent_ips=${ovn_enable_persistent_ips} \
   ovn_enable_dnsnameresolver=${ovn_enable_dnsnameresolver} \
   ovn_observ_enable=${ovn_observ_enable} \
+  enable_coredumps=${enable_coredumps} \
+  metrics_ip=${metrics_ip} \
   jinjanate ../templates/ovnkube-control-plane.yaml.j2 -o ${output_dir}/ovnkube-control-plane.yaml
 
 ovn_image=${image} \
@@ -1106,6 +1132,7 @@ ovn_image=${image} \
   ovn_enable_persistent_ips=${ovn_enable_persistent_ips} \
   ovn_enable_svc_template_support=${ovn_enable_svc_template_support} \
   ovn_observ_enable=${ovn_observ_enable} \
+  metrics_ip=${metrics_ip} \
   jinjanate ../templates/ovnk8s-master.yaml.j2 -o ${output_dir}/ovnk8s-master.yaml
 
 ovn_image=${image} \
@@ -1154,7 +1181,6 @@ ovn_image=${image} \
   ovn_ipfix_cache_max_flows=${ovn_ipfix_cache_max_flows} \
   ovn_ipfix_cache_active_timeout=${ovn_ipfix_cache_active_timeout} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
-  ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
   ovs_max_revalidator=${ovs_max_revalidator} \
   ovs_min_revalidate_pps=${ovs_min_revalidate_pps} \
   ovs_max_idle=${ovs_max_idle} \
@@ -1170,6 +1196,7 @@ ovn_image=${image} \
   ovn_observ_enable=${ovn_observ_enable} \
   ovn_networkprobe_enable=${ovn_networkprobe_enable} \
   ovnkube_app_name=ovnkube-node \
+  metrics_ip=${metrics_ip} \
   jinjanate ../templates/ovnk8s-node.yaml.j2 -o ${output_dir}/ovnk8s-node.yaml
 
 ovn_image=${image} \
@@ -1216,6 +1243,7 @@ ovn_image=${image} \
   ovnkube_admin_firewalld_zone=${ovnkube_admin_firewalld_zone} \
   ovn_networkprobe_enable=${ovn_networkprobe_enable} \
   ovnkube_app_name=ovnkube-node-dpu-host \
+  metrics_ip=${metrics_ip} \
   jinjanate ../templates/ovnk8s-node.yaml.j2 -o ${output_dir}/ovnk8s-node-dpu-host.yaml
 
 ovn_image=${image_ubuntu} \
@@ -1252,7 +1280,6 @@ ovn_image=${image_ubuntu} \
   ovn_sflow_targets=${ovn_sflow_targets} \
   ovn_ipfix_targets=${ovn_ipfix_targets} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
-  ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
   ovn_ofctrl_wait_before_clear=${ovn_ofctrl_wait_before_clear} \
   ovn_monitor_all=${ovn_monitor_all} \
   ovn_enable_lflow_cache=${ovn_enable_lflow_cache} \
@@ -1269,6 +1296,7 @@ ovn_image=${image_ubuntu} \
   disable_ovs_metrics=${disable_ovs_metrics} \
   ovn_observ_enable=${ovn_observ_enable} \
   ovn_port_mirror_enable=${ovn_port_mirror_enable} \
+  metrics_ip=${metrics_ip} \
   jinjanate ../templates/ovnk8s-node-dpu.yaml.j2 -o ${output_dir}/ovnk8s-node-dpu.yaml
 
 ovn_image=${imagec} \
@@ -1290,6 +1318,7 @@ ovn_image=${imagec} \
   ovn_nb_enable_leader_xfer_for_snapshot=${ovn_nb_enable_leader_xfer_for_snapshot} \
   enable_ipsec=${enable_ipsec} \
   ovn_northd_backoff_interval=${ovn_northd_backoff_interval} \
+  enable_coredumps=${enable_coredumps} \
   jinjanate ../templates/ovn-nbdb-raft.yaml.j2 -o ${output_dir}/ovn-nbdb-raft.yaml
 
 ovn_image=${imagec} \
@@ -1303,6 +1332,7 @@ ovn_image=${imagec} \
   ovn_sb_raft_port=${ovn_sb_raft_port} \
   ovn_sb_enable_leader_xfer_for_snapshot=${ovn_sb_enable_leader_xfer_for_snapshot} \
   enable_ipsec=${enable_ipsec} \
+  enable_coredumps=${enable_coredumps} \
   jinjanate ../templates/ovn-sbdb-raft.yaml.j2 -o ${output_dir}/ovn-sbdb-raft.yaml
 
 ovn_image=${imagec} \
@@ -1332,6 +1362,7 @@ ovn_image=${image} \
   ovnkube_config_duration_enable=${ovnkube_config_duration_enable} \
   ovnkube_metrics_scale_enable=${ovnkube_metrics_scale_enable} \
   ovnkube_wait_on_ovn_install_extid=${ovnkube_wait_on_ovn_install_extid} \
+  metrics_ip=${metrics_ip} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
@@ -1350,6 +1381,7 @@ ovn_image=${image} \
   ovn_egress_qos_enable=${ovn_egress_qos_enable} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
+  ovn_network_connect_enable=${ovn_network_connect_enable} \
   ovn_pre_conf_udn_addr_enable=${ovn_pre_conf_udn_addr_enable} \
   ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
   ovn_advertised_udn_isolation_mode=${ovn_advertised_udn_isolation_mode} \
@@ -1369,7 +1401,6 @@ ovn_image=${image} \
   ovn_ipfix_cache_active_timeout=${ovn_ipfix_cache_active_timeout} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
-  ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
   disable_ovs_metrics=${disable_ovs_metrics} \
   ovnkube_master_loglevel=${master_loglevel} \
   ovn_loglevel_northd=${ovn_loglevel_northd} \
@@ -1388,6 +1419,7 @@ ovn_image=${image} \
   ovn_observ_enable=${ovn_observ_enable} \
   ovn_udn_allowed_default_services=${ovn_udn_allowed_default_services} \
   ovs_db_transaction_timeout=${ovs_db_transaction_timeout} \
+  enable_coredumps=${enable_coredumps} \
   jinjanate ../templates/ovnkube-single-node-zone.yaml.j2 -o ${output_dir}/ovnkube-single-node-zone.yaml
 
 ovn_image=${image} \
@@ -1404,6 +1436,7 @@ ovn_image=${image} \
   ovnkube_libovsdb_client_logfile=${ovnkube_libovsdb_client_logfile} \
   ovnkube_config_duration_enable=${ovnkube_config_duration_enable} \
   ovnkube_metrics_scale_enable=${ovnkube_metrics_scale_enable} \
+  metrics_ip=${metrics_ip} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
@@ -1422,6 +1455,7 @@ ovn_image=${image} \
   ovn_egress_qos_enable=${ovn_egress_qos_enable} \
   ovn_multi_network_enable=${ovn_multi_network_enable} \
   ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
+  ovn_network_connect_enable=${ovn_network_connect_enable} \
   ovn_pre_conf_udn_addr_enable=${ovn_pre_conf_udn_addr_enable} \
   ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
   ovn_advertised_udn_isolation_mode=${ovn_advertised_udn_isolation_mode} \
@@ -1440,7 +1474,6 @@ ovn_image=${image} \
   ovn_ipfix_cache_active_timeout=${ovn_ipfix_cache_active_timeout} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
-  ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
   ovnkube_master_loglevel=${master_loglevel} \
   ovn_loglevel_northd=${ovn_loglevel_northd} \
   ovn_loglevel_nbctld=${ovn_loglevel_nbctld} \
@@ -1458,6 +1491,8 @@ ovn_image=${image} \
   ovn_observ_enable=${ovn_observ_enable} \
   ovn_udn_allowed_default_services=${ovn_udn_allowed_default_services} \
   ovs_db_transaction_timeout=${ovs_db_transaction_timeout} \
+  enable_coredumps=${enable_coredumps} \
+  metrics_ip=${metrics_ip} \
   jinjanate ../templates/ovnkube-zone-controller.yaml.j2 -o ${output_dir}/ovnkube-zone-controller.yaml
 
 ovn_image=${imagec} \
@@ -1487,6 +1522,7 @@ ovn_image=${image} \
   webhook_cert=$(cat "${path_prefix}.crt" | base64 -w0) \
   ovn_enable_multi_node_zone=${ovn_enable_multi_node_zone} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
+  enable_coredumps=${enable_coredumps} \
   jinjanate ../templates/ovnkube-identity.yaml.j2 -o ${output_dir}/ovnkube-identity.yaml
 fi
 

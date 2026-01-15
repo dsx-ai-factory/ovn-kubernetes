@@ -58,6 +58,7 @@ var _ = Describe("cni_dpu tests", func() {
 			IsVFIO:     false,
 			netName:    ovntypes.DefaultNetworkName,
 			nadName:    ovntypes.DefaultNetworkName,
+			nadKey:     ovntypes.DefaultNetworkName,
 			deviceInfo: nadapi.DeviceInfo{},
 		}
 		pod = &corev1.Pod{

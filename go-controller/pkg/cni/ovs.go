@@ -237,7 +237,7 @@ func doPodFlowsExist(mac string, ifAddrs []*net.IPNet, ofPort int) bool {
 // have a 1:1 relationship determined by pod UID. If we detect that the pod
 // has changed either UID or MAC terminate this sandbox request early instead
 // of waiting for OVN to set up flows that will never exist.
-func checkCancelSandbox(mac string, getter PodInfoGetter, namespace, name, nadName, initialPodUID string) error {
+func checkCancelSandbox(mac string, getter PodInfoGetter, namespace, name, nadKey, initialPodUID string) error {
 	// Not all node CNI modes may have access to kube api, those will pass nil as getter.
 	if getter == nil {
 		return nil
@@ -257,7 +257,7 @@ func checkCancelSandbox(mac string, getter PodInfoGetter, namespace, name, nadNa
 		return fmt.Errorf("canceled old pod sandbox")
 	}
 
-	ovnAnnot, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
+	ovnAnnot, err := util.UnmarshalPodAnnotation(pod.Annotations, nadKey)
 	if err != nil {
 		return fmt.Errorf("pod OVN annotations deleted or invalid")
 	}
@@ -331,7 +331,7 @@ func waitForPodInterface(ctx context.Context, ifInfo *PodInterfaceInfo,
 				return nil
 			}
 
-			if err := checkCancelSandbox(mac, getter, namespace, name, ifInfo.NADName, initialPodUID); err != nil {
+			if err := checkCancelSandbox(mac, getter, namespace, name, ifInfo.NADKey, initialPodUID); err != nil {
 				return fmt.Errorf("%v waiting for OVS port binding for %s %v", err, mac, ifAddrs)
 			}
 

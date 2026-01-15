@@ -861,6 +861,8 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 							},
 						},
 					})
+					egressFirewall.ResourceVersion = "1"
+					egressFirewall1.ResourceVersion = "2"
 
 					startOvn(dbSetup, []corev1.Namespace{namespace1}, []egressfirewallapi.EgressFirewall{*egressFirewall}, true)
 
@@ -1099,6 +1101,8 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 							},
 						},
 					})
+					egressFirewall.ResourceVersion = "1"
+					egressFirewall1.ResourceVersion = "2"
 
 					startOvn(dbSetup, []corev1.Namespace{namespace1}, []egressfirewallapi.EgressFirewall{*egressFirewall}, true)
 

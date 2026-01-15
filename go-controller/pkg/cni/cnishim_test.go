@@ -119,14 +119,14 @@ func TestCmdAdd_UnprivilegedMode(t *testing.T) {
 			PodIFInfo: &PodInterfaceInfo{
 				PodAnnotation: *defaultPodNADAnnotation,
 				NetName:       "default",
-				NADName:       "foo-ns/default",
+				NADKey:        "foo-ns/default",
 				// hack to bypass OVS exec check
 				IsDPUHostMode: true,
 			},
 			PrimaryUDNPodInfo: &PodInterfaceInfo{
 				PodAnnotation: *udnPodNADAnnotation,
 				NetName:       "tenantred",
-				NADName:       "foo-ns/meganet",
+				NADKey:        "foo-ns/meganet",
 				// hack to bypass OVS exec check
 				IsDPUHostMode: true,
 			},
@@ -253,12 +253,12 @@ func TestCmdDel_UnprivilegedMode(t *testing.T) {
 			Result: nil,
 			PodIFInfo: &PodInterfaceInfo{
 				NetName:       "default",
-				NADName:       "foo-ns/default",
+				NADKey:        "foo-ns/default",
 				IsDPUHostMode: true,
 			},
 			PrimaryUDNPodInfo: &PodInterfaceInfo{
 				NetName:       "tenantred",
-				NADName:       "foo-ns/meganet",
+				NADKey:        "foo-ns/meganet",
 				IsDPUHostMode: true,
 			},
 			PrimaryUDNPodReq: &PodRequest{
