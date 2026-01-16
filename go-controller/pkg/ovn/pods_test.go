@@ -1266,7 +1266,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		ginkgo.It("correctly stops retrying adding a pod after failing n times", func() {
+		ginkgo.It("doesn't stop retrying adding a pod after failing n times", func() {
 			app.Action = func(*cli.Context) error {
 				namespace1 := *newNamespace("namespace1")
 				podTest := newTPod(
@@ -1351,12 +1351,13 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					gomega.BeNumerically("==", retry.MaxFailedAttempts), // failedAttempts should reach the max
 				)
 
-				// restore nbdb, trigger a retry and verify that the retry entry gets deleted
-				// because it reached retry.MaxFailedAttempts and the corresponding pod has NOT been added to OVN
+				// restore nbdb, trigger a retry and verify that the pod is added
 				connCtx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 				defer cancel()
 				resetNBClient(connCtx, fakeOvn.controller.nbClient)
 
+				// reset backoff for immediate retry
+				retry.SetRetryObjWithNoBackoff(key, fakeOvn.controller.retryPods)
 				fakeOvn.controller.retryPods.RequestRetryObjs()
 				// check that pod is in API server
 				pod, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podTest.namespace).Get(
@@ -1367,9 +1368,9 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				// check that the retry cache no longer has the entry
 				retry.CheckRetryObjectEventually(key, false, fakeOvn.controller.retryPods)
 
-				// check that pod doesn't appear in OVN
+				// check that pod is configured in OVN
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(
-					getDefaultNetExpectedPodsAndSwitches([]testPod{}, []string{"node1"})...))
+					getDefaultNetExpectedPodsAndSwitches([]testPod{podTest}, []string{"node1"})...))
 
 				return nil
 			}
@@ -1378,7 +1379,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		ginkgo.It("correctly stops retrying deleting a pod after failing n times", func() {
+		ginkgo.It("doesn't stop retrying deleting a pod after failing n times", func() {
 			app.Action = func(*cli.Context) error {
 				namespace1 := *newNamespace("namespace1")
 				podTest := newTPod(
@@ -1464,12 +1465,13 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					gomega.BeNumerically("==", retry.MaxFailedAttempts), // failedAttempts should be the max
 				)
 
-				// restore nbdb and verify that the retry entry gets deleted because it reached
-				// retry.MaxFailedAttempts and the corresponding pod has NOT been deleted from OVN
+				// restore nbdb and verify that the pod is deleted
 				connCtx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 				defer cancel()
 				resetNBClient(connCtx, fakeOvn.controller.nbClient)
 
+				// reset backoff for immediate retry
+				retry.SetRetryObjWithNoBackoff(key, fakeOvn.controller.retryPods)
 				fakeOvn.controller.retryPods.RequestRetryObjs()
 
 				// check that the pod is not in API server
@@ -1480,8 +1482,9 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				// check that the retry cache no longer has the entry
 				retry.CheckRetryObjectEventually(key, false, fakeOvn.controller.retryPods)
 
-				// check that the pod is still in OVN
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedData...))
+				// check that the pod is deleted in OVN
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(
+					getDefaultNetExpectedPodsAndSwitches([]testPod{}, []string{"node1"})...))
 
 				return nil
 			}

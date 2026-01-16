@@ -24,20 +24,20 @@ import (
 
 // Check if the Pod is ready so that we can add its associated DPU to br-int.
 // If true, return its dpuConnDetails, otherwise return nil
-func (bnnc *BaseNodeNetworkController) podReadyToAddDPU(pod *corev1.Pod, nadName string) *util.DPUConnectionDetails {
+func (bnnc *BaseNodeNetworkController) podReadyToAddDPU(pod *corev1.Pod, nadKey string) *util.DPUConnectionDetails {
 	if bnnc.name != pod.Spec.NodeName {
 		klog.V(5).Infof("Pod %s/%s is not scheduled on this node %s", pod.Namespace, pod.Name, bnnc.name)
 		return nil
 	}
 
-	dpuCD, err := util.UnmarshalPodDPUConnDetails(pod.Annotations, nadName)
+	dpuCD, err := util.UnmarshalPodDPUConnDetails(pod.Annotations, nadKey)
 	if err != nil {
 		if !util.IsAnnotationNotSetError(err) {
 			klog.Errorf("Failed to get DPU annotation for pod %s/%s NAD %s: %v",
-				pod.Namespace, pod.Name, nadName, err)
+				pod.Namespace, pod.Name, nadKey, err)
 		} else {
 			klog.V(5).Infof("DPU connection details annotation still not found for %s/%s for NAD %s",
-				pod.Namespace, pod.Name, nadName)
+				pod.Namespace, pod.Name, nadKey)
 		}
 		return nil
 	}
@@ -48,34 +48,34 @@ func (bnnc *BaseNodeNetworkController) podReadyToAddDPU(pod *corev1.Pod, nadName
 			return dpuCD
 		}
 	}
-	klog.V(5).Infof("Pod %s/%s on NAD %s is not associated with this dpu", pod.Namespace, pod.Name, nadName)
+	klog.V(5).Infof("Pod %s/%s on NAD %s is not associated with this dpu", pod.Namespace, pod.Name, nadKey)
 	return nil
 }
 
 func (bnnc *BaseNodeNetworkController) addDPUPodForNAD(pod *corev1.Pod, dpuCD *util.DPUConnectionDetails,
-	netName, nadName string, getter cni.PodInfoGetter) error {
-	podDesc := fmt.Sprintf("pod %s/%s for NAD %s", pod.Namespace, pod.Name, nadName)
+	netName, nadKey string, getter cni.PodInfoGetter) error {
+	podDesc := fmt.Sprintf("pod %s/%s for NAD %s", pod.Namespace, pod.Name, nadKey)
 	klog.Infof("Adding %s on DPU", podDesc)
 	podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, nil,
-		string(pod.UID), "", bnnc.GetAnnotationKey(nadName), netName)
+		string(pod.UID), "", bnnc.GetAnnotationKey(nadKey), netName)
 	if err != nil {
 		return fmt.Errorf("failed to get pod interface information of %s: %v. retrying", podDesc, err)
 	}
-	err = bnnc.addRepPort(pod, dpuCD, nadName, podInterfaceInfo, getter)
+	err = bnnc.addRepPort(pod, dpuCD, nadKey, podInterfaceInfo, getter)
 	if err != nil {
 		return fmt.Errorf("failed to add rep port for %s, %v. retrying", podDesc, err)
 	}
 	return nil
 }
 
-func (bnnc *BaseNodeNetworkController) delDPUPodForNAD(pod *corev1.Pod, dpuCD *util.DPUConnectionDetails, nadName string, podDeleted bool) error {
+func (bnnc *BaseNodeNetworkController) delDPUPodForNAD(pod *corev1.Pod, dpuCD *util.DPUConnectionDetails, nadKey string, podDeleted bool) error {
 	var errs []error
-	podDesc := fmt.Sprintf("pod %s/%s for NAD %s", pod.Namespace, pod.Name, nadName)
+	podDesc := fmt.Sprintf("pod %s/%s for NAD %s", pod.Namespace, pod.Name, nadKey)
 	klog.Infof("Deleting %s from DPU", podDesc)
 
 	// no need to unset connection status annotation if pod is deleted anyway
 	if !podDeleted {
-		err := bnnc.updatePodDPUConnStatusWithRetry(pod, nil, bnnc.GetAnnotationKey(nadName))
+		err := bnnc.updatePodDPUConnStatusWithRetry(pod, nil, bnnc.GetAnnotationKey(nadKey))
 		if err != nil {
 			errs = append(errs, fmt.Errorf("failed to remove the old DPU connection status annotation for %s: %v", podDesc, err))
 		}
@@ -84,7 +84,7 @@ func (bnnc *BaseNodeNetworkController) delDPUPodForNAD(pod *corev1.Pod, dpuCD *u
 	if err != nil {
 		errs = append(errs, fmt.Errorf("failed to get old VF representor for %s, dpuConnDetail %+v Representor port may have been deleted: %v", podDesc, dpuCD, err))
 	} else {
-		err = bnnc.delRepPort(pod, dpuCD, vfRepName, nadName)
+		err = bnnc.delRepPort(pod, dpuCD, vfRepName, nadKey)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("failed to delete VF representor for %s: %v", podDesc, err))
 		}
@@ -148,21 +148,21 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU() (*factory.Handler, error) 
 				return
 			}
 			klog.V(5).Infof("Add for Pod: %s/%s for network %s", pod.Namespace, pod.Name, netName)
-			for nadName := range networkMap {
-				nadToDPUCDMap[nadName] = nil
+			for nadKey := range networkMap {
+				nadToDPUCDMap[nadKey] = nil
 			}
 			if !bnnc.IsUserDefinedNetwork() && len(nadToDPUCDMap) == 0 {
 				nadToDPUCDMap[ovntypes.DefaultNetworkName] = nil
 			}
 
-			for nadName := range nadToDPUCDMap {
-				dpuCD := bnnc.podReadyToAddDPU(pod, bnnc.GetAnnotationKey(nadName))
+			for nadKey := range nadToDPUCDMap {
+				dpuCD := bnnc.podReadyToAddDPU(pod, bnnc.GetAnnotationKey(nadKey))
 				if dpuCD != nil {
-					err = bnnc.addDPUPodForNAD(pod, dpuCD, netName, nadName, clientSet)
+					err = bnnc.addDPUPodForNAD(pod, dpuCD, netName, nadKey, clientSet)
 					if err != nil {
 						klog.Errorf("Error adding pod %s/%s for for network %s: %v", pod.Namespace, pod.Name, bnnc.GetNetworkName(), err)
 					} else {
-						nadToDPUCDMap[nadName] = dpuCD
+						nadToDPUCDMap[nadKey] = dpuCD
 					}
 				}
 			}
@@ -185,9 +185,9 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU() (*factory.Handler, error) 
 			}
 			klog.V(5).Infof("Update for Pod: %s/%s for network %s", newPod.Namespace, newPod.Name, netName)
 			nadToDPUCDMap := v.(map[string]*util.DPUConnectionDetails)
-			for nadName := range nadToDPUCDMap {
-				oldDPUCD := nadToDPUCDMap[nadName]
-				newDPUCD := bnnc.podReadyToAddDPU(newPod, bnnc.GetAnnotationKey(nadName))
+			for nadKey := range nadToDPUCDMap {
+				oldDPUCD := nadToDPUCDMap[nadKey]
+				newDPUCD := bnnc.podReadyToAddDPU(newPod, bnnc.GetAnnotationKey(nadKey))
 				if !dpuConnectionDetailChanged(oldDPUCD, newDPUCD) {
 					continue
 				}
@@ -196,21 +196,21 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU() (*factory.Handler, error) 
 					klog.Infof("Deleting the old VF since either kubelet issued cmdDEL or assigned a new VF or "+
 						"the sandbox id itself changed. Old connection details (%v), New connection details (%v)",
 						oldDPUCD, newDPUCD)
-					err := bnnc.delDPUPodForNAD(oldPod, oldDPUCD, nadName, false)
+					err := bnnc.delDPUPodForNAD(oldPod, oldDPUCD, nadKey, false)
 					if err != nil {
 						klog.Errorf("Error deleting pod %s/%s for for network %s: %v", oldPod.Namespace, oldPod.Name, bnnc.GetNetworkName(), err)
 					}
-					nadToDPUCDMap[nadName] = nil
+					nadToDPUCDMap[nadKey] = nil
 				}
 				if newDPUCD != nil {
 					klog.Infof("Adding VF during update because either during Pod Add we failed to add VF or "+
 						"connection details weren't present or the VF ID has changed. Old connection details (%v), "+
 						"New connection details (%v)", oldDPUCD, newDPUCD)
-					err := bnnc.addDPUPodForNAD(newPod, newDPUCD, netName, nadName, clientSet)
+					err := bnnc.addDPUPodForNAD(newPod, newDPUCD, netName, nadKey, clientSet)
 					if err != nil {
 						klog.Errorf("Error adding pod %s/%s for for network %s: %v", newPod.Namespace, newPod.Name, bnnc.GetNetworkName(), err)
 					} else {
-						nadToDPUCDMap[nadName] = newDPUCD
+						nadToDPUCDMap[nadKey] = newDPUCD
 					}
 				}
 			}
@@ -230,9 +230,9 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU() (*factory.Handler, error) 
 			klog.V(5).Infof("Delete for Pod: %s/%s for network %s", pod.Namespace, pod.Name, netName)
 			nadToDPUCDMap := v.(map[string]*util.DPUConnectionDetails)
 			bnnc.podNADToDPUCDMap.Delete(pod.UID)
-			for nadName, dpuCD := range nadToDPUCDMap {
+			for nadKey, dpuCD := range nadToDPUCDMap {
 				if dpuCD != nil {
-					err := bnnc.delDPUPodForNAD(pod, dpuCD, nadName, true)
+					err := bnnc.delDPUPodForNAD(pod, dpuCD, nadKey, true)
 					if err != nil {
 						klog.Errorf("Error deleting pod %s/%s for for network %s: %v", pod.Namespace, pod.Name, bnnc.GetNetworkName(), err)
 					}
@@ -244,24 +244,24 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU() (*factory.Handler, error) 
 
 // updatePodDPUConnStatusWithRetry update the pod annotion with the givin connection details
 func (bnnc *BaseNodeNetworkController) updatePodDPUConnStatusWithRetry(origPod *corev1.Pod,
-	dpuConnStatus *util.DPUConnectionStatus, nadName string) error {
+	dpuConnStatus *util.DPUConnectionStatus, nadKey string) error {
 	podDesc := fmt.Sprintf("pod %s/%s", origPod.Namespace, origPod.Name)
-	klog.Infof("Updating pod %s with connection status (%+v) for NAD %s", podDesc, dpuConnStatus, nadName)
+	klog.Infof("Updating pod %s with connection status (%+v) for NAD %s", podDesc, dpuConnStatus, nadKey)
 	err := util.UpdatePodDPUConnStatusWithRetry(
 		bnnc.watchFactory.PodCoreInformer().Lister(),
 		bnnc.Kube,
 		origPod,
 		dpuConnStatus,
-		nadName,
+		nadKey,
 	)
 	return err
 }
 
-// addRepPort adds the representor of the VF to the ovs bridge, nadName is the real NAD name even for the default network
-func (bnnc *BaseNodeNetworkController) addRepPort(pod *corev1.Pod, dpuCD *util.DPUConnectionDetails, nadName string,
+// addRepPort adds the representor of the VF to the ovs bridge, nadKey is the real NAD key even for the default network
+func (bnnc *BaseNodeNetworkController) addRepPort(pod *corev1.Pod, dpuCD *util.DPUConnectionDetails, nadKey string,
 	ifInfo *cni.PodInterfaceInfo, getter cni.PodInfoGetter) error {
 
-	podDesc := fmt.Sprintf("pod %s/%s for NAD %s", pod.Namespace, pod.Name, nadName)
+	podDesc := fmt.Sprintf("pod %s/%s for NAD %s", pod.Namespace, pod.Name, nadKey)
 	vfRepName, err := util.GetSriovnetOps().GetVfRepresentorDPU(dpuCD.PfId, dpuCD.VfId)
 	if err != nil {
 		klog.Infof("Failed to get VF representor for %s dpuConnDetail %+v: %v", podDesc, dpuCD, err)
@@ -282,10 +282,10 @@ func (bnnc *BaseNodeNetworkController) addRepPort(pod *corev1.Pod, dpuCD *util.D
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	klog.Infof("Adding VF representor %s for %s", vfRepName, podDesc)
 	defer cancel()
-	err = cni.ConfigureOVS(ctx, pod.Namespace, pod.Name, vfRepName, ifInfo, dpuCD.SandboxId, vfPciAddress, getter)
+	err = cni.ConfigureOVS(ctx, pod.Namespace, pod.Name, "", vfRepName, ifInfo, dpuCD.SandboxId, vfPciAddress, getter)
 	if err != nil {
 		// Note(adrianc): we are lenient with cleanup in this method as pod is going to be retried anyway.
-		_ = bnnc.delRepPort(pod, dpuCD, vfRepName, nadName)
+		_ = bnnc.delRepPort(pod, dpuCD, vfRepName, nadKey)
 		return err
 	}
 	klog.Infof("Port %s added to bridge br-int", vfRepName)
@@ -293,31 +293,31 @@ func (bnnc *BaseNodeNetworkController) addRepPort(pod *corev1.Pod, dpuCD *util.D
 	// set the Pod interface's MAC address on the corresponding VF Port
 	err = util.GetSriovnetOps().SetRepresentorPeerMacAddress(vfRepName, ifInfo.MAC)
 	if err != nil {
-		_ = bnnc.delRepPort(pod, dpuCD, vfRepName, nadName)
+		_ = bnnc.delRepPort(pod, dpuCD, vfRepName, nadKey)
 		return fmt.Errorf("failed to set the MAC address %s on VF reprentor %s: %v",
 			ifInfo.MAC.String(), vfRepName, err)
 	}
 
 	link, err := util.GetNetLinkOps().LinkByName(vfRepName)
 	if err != nil {
-		_ = bnnc.delRepPort(pod, dpuCD, vfRepName, nadName)
+		_ = bnnc.delRepPort(pod, dpuCD, vfRepName, nadKey)
 		return fmt.Errorf("failed to get link device for interface %s", vfRepName)
 	}
 
 	if err = util.GetNetLinkOps().LinkSetMTU(link, ifInfo.MTU); err != nil {
-		_ = bnnc.delRepPort(pod, dpuCD, vfRepName, nadName)
+		_ = bnnc.delRepPort(pod, dpuCD, vfRepName, nadKey)
 		return fmt.Errorf("failed to setup representor port. failed to set MTU for interface %s", vfRepName)
 	}
 
 	if err = util.GetNetLinkOps().LinkSetUp(link); err != nil {
-		_ = bnnc.delRepPort(pod, dpuCD, vfRepName, nadName)
+		_ = bnnc.delRepPort(pod, dpuCD, vfRepName, nadKey)
 		return fmt.Errorf("failed to setup representor port. failed to set link up for interface %s", vfRepName)
 	}
 
 	// Update connection-status annotation
 	// TODO(adrianc): we should update Status in case of error as well
 	connStatus := util.DPUConnectionStatus{Status: util.DPUConnectionStatusReady, Reason: ""}
-	nadConf, ok := bnnc.getNADConfig(nadName)
+	nadConf, ok := bnnc.getNADConfig(nadKey)
 	if ok && nadConf != nil {
 		maxNewConnPPS, maxNewConnBurst, disableDoSCheck := nadConf.GetMissRateLimitConfig(bnnc.hostType)
 		if maxNewConnPPS > 0 && !disableDoSCheck {
@@ -326,7 +326,7 @@ func (bnnc *BaseNodeNetworkController) addRepPort(pod *corev1.Pod, dpuCD *util.D
 			// We use the Pod annotation to see if it is clamped down for this NAD instead of checking the existing
 			// value on the VF. Reason being if the DPU reboots, we'll lose the VF configuration so we can't rely
 			// on that.
-			nadClampedDown := util.IsNadForPodClampedDown(pod.Annotations, bnnc.GetAnnotationKey(nadName))
+			nadClampedDown := util.IsNadForPodClampedDown(pod.Annotations, bnnc.GetAnnotationKey(nadKey))
 			if nadClampedDown {
 				maxNewConnPPS = ClampdownDoSRate
 				maxNewConnBurst = ClampdownDoSBurst
@@ -335,7 +335,7 @@ func (bnnc *BaseNodeNetworkController) addRepPort(pod *corev1.Pod, dpuCD *util.D
 			} else {
 				// Collect the drop statistics so we can initialize it.
 				if dpuCD.ConnPrivateInfo.MissRateLimitDropInitial, err = util.GetSriovnetOps().GetRepresentorVFMissPktDrops(vfRepName); err != nil {
-					_ = bnnc.delRepPort(pod, dpuCD, vfRepName, nadName)
+					_ = bnnc.delRepPort(pod, dpuCD, vfRepName, nadKey)
 					return fmt.Errorf("failed to get initial Miss RL drops for %s dpuConnDetail +%v: %v", podDesc, dpuCD, err)
 				} else {
 					klog.V(5).Infof("DoS: Initial Drop limit for VF representor %s for %s: %v", vfRepName, podDesc, dpuCD.ConnPrivateInfo.MissRateLimitDropInitial)
@@ -345,26 +345,25 @@ func (bnnc *BaseNodeNetworkController) addRepPort(pod *corev1.Pod, dpuCD *util.D
 		klog.Infof("Adding Limit %v/%v for VF representor %s for %s", maxNewConnPPS, maxNewConnBurst, vfRepName, podDesc)
 		// set the VF rate limit configured for this network. This rate is for the allowed no. of new connections.
 		if err = util.GetSriovnetOps().SetRepresentorVFMissPktRate(vfRepName, maxNewConnPPS, maxNewConnBurst); err != nil {
-			_ = bnnc.delRepPort(pod, dpuCD, vfRepName, nadName)
+			_ = bnnc.delRepPort(pod, dpuCD, vfRepName, nadKey)
 			return fmt.Errorf("failed to setup Rate limiting  for interface %s: %v", vfRepName, err)
 		}
 	}
-	err = bnnc.updatePodDPUConnStatusWithRetry(pod, &connStatus, bnnc.GetAnnotationKey(nadName))
+	err = bnnc.updatePodDPUConnStatusWithRetry(pod, &connStatus, bnnc.GetAnnotationKey(nadKey))
 	if err != nil {
 		_ = util.GetNetLinkOps().LinkSetDown(link)
-		_ = bnnc.delRepPort(pod, dpuCD, vfRepName, nadName)
+		_ = bnnc.delRepPort(pod, dpuCD, vfRepName, nadKey)
 		return fmt.Errorf("failed to setup representor port. failed to set pod annotations. %v", err)
 	}
 	return nil
 }
 
 // delRepPort delete the representor of the VF from the ovs bridge
-func (bnnc *BaseNodeNetworkController) delRepPort(pod *corev1.Pod, dpuCD *util.DPUConnectionDetails,
-	vfRepName, nadName string) error {
+func (bnnc *BaseNodeNetworkController) delRepPort(pod *corev1.Pod, dpuCD *util.DPUConnectionDetails, vfRepName, nadKey string) error {
 	//TODO(adrianc): handle: clearPodBandwidth(pr.SandboxID), pr.deletePodConntrack()
-	podDesc := fmt.Sprintf("pod %s/%s for NAD %s", pod.Namespace, pod.Name, nadName)
+	podDesc := fmt.Sprintf("pod %s/%s for NAD %s", pod.Namespace, pod.Name, nadKey)
 	klog.Infof("Delete VF representor %s for %s", vfRepName, podDesc)
-	ifExists, sandbox, expectedNADName, err := util.GetOVSPortPodInfo(vfRepName)
+	ifExists, sandbox, expectedNADKey, err := util.GetOVSPortPodInfo(vfRepName)
 	if err != nil {
 		return err
 	}
@@ -375,8 +374,8 @@ func (bnnc *BaseNodeNetworkController) delRepPort(pod *corev1.Pod, dpuCD *util.D
 	if sandbox != dpuCD.SandboxId {
 		return fmt.Errorf("OVS port %s was added for sandbox (%s), expecting (%s)", vfRepName, sandbox, dpuCD.SandboxId)
 	}
-	if expectedNADName != bnnc.GetAnnotationKey(nadName) {
-		return fmt.Errorf("OVS port %s was added for NAD (%s), expecting (%s)", vfRepName, expectedNADName, nadName)
+	if expectedNADKey != bnnc.GetAnnotationKey(nadKey) {
+		return fmt.Errorf("OVS port %s was added for NAD key (%s), expecting (%s)", vfRepName, expectedNADKey, nadKey)
 	}
 
 	// Set link down for representor port
@@ -451,8 +450,8 @@ func (bnnc *BaseNodeNetworkController) disableDoSChecker() {
 	}
 }
 
-// updateRateLimitingForPod updates per-NAD rate limiting configuration, nadName is the real NAD name even even for default network
-func (bnnc *BaseNodeNetworkController) updateRateLimitingForPod(pod *corev1.Pod, nadName string) error {
+// updateRateLimitingForPod updates per-NAD rate limiting configuration, nadKey is the real NAD key even even for default network
+func (bnnc *BaseNodeNetworkController) updateRateLimitingForPod(pod *corev1.Pod, nadKey string) error {
 	// acquire a lock per pod to avoid racing on `servedCache` in pod watcher
 	unlock := util.LockByKey.Acquire(string(pod.UID))
 	defer unlock()
@@ -462,20 +461,20 @@ func (bnnc *BaseNodeNetworkController) updateRateLimitingForPod(pod *corev1.Pod,
 		return nil
 	}
 	nadToDPUCDMap := val.(map[string]*util.DPUConnectionDetails)
-	dpuCD, ok := nadToDPUCDMap[nadName]
+	dpuCD, ok := nadToDPUCDMap[nadKey]
 	if !ok || dpuCD == nil {
-		klog.V(5).Infof("DPUConnectionDetails for pod %s/%s, net-attach-def %s not found in cache, skip", pod.Namespace, pod.Name, nadName)
+		klog.V(5).Infof("DPUConnectionDetails for pod %s/%s, net-attach-def %s not found in cache, skip", pod.Namespace, pod.Name, nadKey)
 		return nil
 	}
-	nadConf, ok := bnnc.getNADConfig(nadName)
+	nadConf, ok := bnnc.getNADConfig(nadKey)
 	if !ok || nadConf == nil {
-		klog.V(5).Infof("NAD config not found in cache: %s, skip", nadName)
+		klog.V(5).Infof("NAD config not found in cache: %s, skip", nadKey)
 		return nil
 	}
 	vfRepName := dpuCD.ConnPrivateInfo.ConnVFRepName
 	maxNewConnPPS, maxNewConnBurst, disableDoSCheck := nadConf.GetMissRateLimitConfig(bnnc.hostType)
 	if !disableDoSCheck && dpuCD.ConnPrivateInfo.ConnClampedDown {
-		klog.V(5).Infof("Skip setting limit for VF representor %s/%s/%s on NAD %s since it is clamped down", pod.Namespace, pod.Name, vfRepName, nadName)
+		klog.V(5).Infof("Skip setting limit for VF representor %s/%s/%s on NAD %s since it is clamped down", pod.Namespace, pod.Name, vfRepName, nadKey)
 		return nil
 	}
 	err := util.GetSriovnetOps().SetRepresentorVFMissPktRate(vfRepName, maxNewConnPPS, maxNewConnBurst)
@@ -488,7 +487,7 @@ func (bnnc *BaseNodeNetworkController) updateRateLimitingForPod(pod *corev1.Pod,
 		if dpuCD.ConnPrivateInfo.ConnClampedDown {
 			dpuCD.ConnPrivateInfo.ConnClampedDown = false
 			connStatus := util.DPUConnectionStatus{Status: util.DPUConnectionStatusReady, Reason: ""}
-			err = bnnc.updatePodDPUConnStatusWithRetry(pod, &connStatus, bnnc.GetAnnotationKey(nadName))
+			err = bnnc.updatePodDPUConnStatusWithRetry(pod, &connStatus, bnnc.GetAnnotationKey(nadKey))
 			if err != nil {
 				klog.Errorf("Failed to update connection status annotation the pod %s/%s: %v", pod.Namespace, pod.Name, err)
 			}
@@ -508,7 +507,7 @@ func (bnnc *BaseNodeNetworkController) updateRateLimitingForPod(pod *corev1.Pod,
 			klog.Infof("DoS: Initial Drop limit for VF representor %s for %s/%s: %v", vfRepName, pod.Namespace, pod.Name, dpuCD.ConnPrivateInfo.MissRateLimitDropInitial)
 		}
 	}
-	klog.V(4).Infof("Rate limit of %s/%s/%s updated to %v/%v based on NAD %s", pod.Namespace, pod.Name, vfRepName, maxNewConnPPS, maxNewConnBurst, nadName)
+	klog.V(4).Infof("Rate limit of %s/%s/%s updated to %v/%v based on NAD %s", pod.Namespace, pod.Name, vfRepName, maxNewConnPPS, maxNewConnBurst, nadKey)
 	return nil
 }
 
@@ -533,7 +532,7 @@ func (bnnc *BaseNodeNetworkController) getPodforUID(uid types.UID) (*corev1.Pod,
 // clampdown, which will still let offloaded traffic to contine, so it is not
 // completely stopping the interface).
 func (bnnc *BaseNodeNetworkController) checkPodForDoS(uid types.UID, nadToDPUCDMap map[string]*util.DPUConnectionDetails) {
-	for nadName, dpuCD := range nadToDPUCDMap {
+	for nadKey, dpuCD := range nadToDPUCDMap {
 		if dpuCD == nil {
 			continue
 		}
@@ -573,7 +572,7 @@ func (bnnc *BaseNodeNetworkController) checkPodForDoS(uid types.UID, nadToDPUCDM
 			}
 			dpuCD.ConnPrivateInfo.ConnClampedDown = true
 			connStatus := util.DPUConnectionStatus{Status: util.DPUConnectionStatusClampedDown, Reason: ""}
-			err = bnnc.updatePodDPUConnStatusWithRetry(pod, &connStatus, bnnc.GetAnnotationKey(nadName))
+			err = bnnc.updatePodDPUConnStatusWithRetry(pod, &connStatus, bnnc.GetAnnotationKey(nadKey))
 			// If this  fails, then the rate is already adjusted, so there'll be a mismatch.
 			if err != nil {
 				klog.Errorf("Failed to update connection status annotation the pod %s/%s: %v", pod.Namespace, pod.Name, err)
@@ -605,7 +604,7 @@ func (bnnc *BaseNodeNetworkController) checkforDoSSuspects() {
 }
 
 // go through pods to update rate limit config
-func (bnnc *BaseNodeNetworkController) updateRateLimitingForPods(nadName string) {
+func (bnnc *BaseNodeNetworkController) updateRateLimitingForPods(nadKey string) {
 	// informer cache has pods filtered by node name
 	pods, err := bnnc.watchFactory.GetAllPods()
 	if err != nil {
@@ -614,19 +613,19 @@ func (bnnc *BaseNodeNetworkController) updateRateLimitingForPods(nadName string)
 	}
 	for _, pod := range pods {
 		klog.V(5).Infof("Updating rate limit config for pod %s/%s", pod.Namespace, pod.Name)
-		if err := bnnc.updateRateLimitingForPod(pod, nadName); err != nil {
+		if err := bnnc.updateRateLimitingForPod(pod, nadKey); err != nil {
 			klog.Error(err)
 		}
 	}
 }
 
-func (bnnc *BaseNodeNetworkController) SetNADConfig(nadName string, nadConf *util.NADConfig) error {
+func (bnnc *BaseNodeNetworkController) SetNADConfig(nadKey string, nadConf *util.NADConfig) error {
 	if config.OvnKubeNode.Mode == ovntypes.NodeModeDPU {
 		var oldMaxNewConnPPS uint
-		oldNADConfig, ok := bnnc.getNADConfig(nadName)
+		oldNADConfig, ok := bnnc.getNADConfig(nadKey)
 		if !ok || ((nadConf != nil || oldNADConfig != nil) &&
 			(nadConf == nil || oldNADConfig == nil || !reflect.DeepEqual(*oldNADConfig, *nadConf))) {
-			bnnc.NADConfigMap.Store(nadName, nadConf)
+			bnnc.NADConfigMap.Store(nadKey, nadConf)
 			// Node that NAD update are done serialized, so no locking is needed
 			if oldNADConfig != nil {
 				oldMaxNewConnPPS = oldNADConfig.MaxNewConnPPS
@@ -637,15 +636,15 @@ func (bnnc *BaseNodeNetworkController) SetNADConfig(nadName string, nadConf *uti
 			}
 			// We'll start a checker when any nad on this controller has PPS limit > 0
 			bnnc.enableDoSChecker()
-			bnnc.updateRateLimitingForPods(nadName)
+			bnnc.updateRateLimitingForPods(nadKey)
 		}
 	}
 	return nil
 }
 
-func (bnnc *BaseNodeNetworkController) DeleteNAD(nadName string) {
+func (bnnc *BaseNodeNetworkController) DeleteNAD(nadKey string) {
 	if config.OvnKubeNode.Mode == ovntypes.NodeModeDPU {
-		v, ok := bnnc.NADConfigMap.Load(nadName)
+		v, ok := bnnc.NADConfigMap.Load(nadKey)
 		if ok && v != nil {
 			nadConfig := v.(*util.NADConfig)
 			oldTotalMaxNewConnPPS := bnnc.totalMaxNewConnPPS
@@ -655,14 +654,14 @@ func (bnnc *BaseNodeNetworkController) DeleteNAD(nadName string) {
 				bnnc.disableDoSChecker()
 			}
 		}
-		bnnc.NADConfigMap.Delete(nadName)
+		bnnc.NADConfigMap.Delete(nadKey)
 	}
 }
 
-func (bnnc *BaseNodeNetworkController) getNADConfig(nadName string) (*util.NADConfig, bool) {
+func (bnnc *BaseNodeNetworkController) getNADConfig(nadKey string) (*util.NADConfig, bool) {
 	var nadConfig *util.NADConfig
 	if config.OvnKubeNode.Mode == ovntypes.NodeModeDPU {
-		v, ok := bnnc.NADConfigMap.Load(nadName)
+		v, ok := bnnc.NADConfigMap.Load(nadKey)
 		if ok {
 			if v != nil {
 				nadConfig = v.(*util.NADConfig)

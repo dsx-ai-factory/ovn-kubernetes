@@ -816,7 +816,7 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 	case factory.PodType:
 		pod, ok := obj.(*corev1.Pod)
 		if !ok {
-			return fmt.Errorf("could not cast %T object to *knet.Pod", obj)
+			return fmt.Errorf("could not cast %T object to *corev1.Pod", obj)
 		}
 		return h.oc.ensurePod(nil, pod, true)
 

@@ -18,6 +18,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider/api"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider/portalloc"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -131,6 +132,72 @@ func (k *kind) GetExternalContainerPort() uint16 {
 
 func (k *kind) GetK8HostPort() uint16 {
 	return k.hostPort.Allocate()
+}
+
+func (k *kind) GetDefaultTimeoutContext() *framework.TimeoutContext {
+	return framework.NewTimeoutContext()
+}
+
+// getContainerState returns the state of a container by name
+// Returns empty string if container doesn't exist
+func getContainerState(containerName string) (string, error) {
+	stdOut, err := exec.Command(containerengine.Get().String(), "ps", "-a", "-f", fmt.Sprintf("name=^%s$", containerName), "--format", "{{.State}}").CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("failed to check container state for %s: %s (%s)", containerName, err, stdOut)
+	}
+
+	state := strings.TrimSpace(string(stdOut))
+	return state, nil
+}
+
+func (k *kind) ShutdownNode(nodeName string) error {
+	state, err := getContainerState(nodeName)
+	if err != nil {
+		return err
+	}
+
+	if state == "" {
+		return fmt.Errorf("cannot shutdown node %q because it doesn't exist: %w", nodeName, api.NotFound)
+	}
+
+	// If container is already stopped/exited, consider it success
+	if state == "exited" || state == "stopped" {
+		framework.Logf("Node %s is already stopped (state: %s)", nodeName, state)
+		return nil
+	}
+
+	framework.Logf("Shutting down node %s (current state: %s)", nodeName, state)
+	stdOut, err := exec.Command(containerengine.Get().String(), "stop", nodeName).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to shutdown node %s: %s (%s)", nodeName, err, stdOut)
+	}
+	framework.Logf("Successfully shut down node %s", nodeName)
+	return nil
+}
+
+func (k *kind) StartNode(nodeName string) error {
+	state, err := getContainerState(nodeName)
+	if err != nil {
+		return err
+	}
+
+	if state == "" {
+		return fmt.Errorf("cannot start node %q because it doesn't exist: %w", nodeName, api.NotFound)
+	}
+
+	// If container is already running, consider it success
+	if state == "running" || state == "up" {
+		framework.Logf("Node %s is already running (state: %s)", nodeName, state)
+		return nil
+	}
+
+	framework.Logf("Starting node %s (current state: %s)", nodeName, state)
+	stdOut, err := exec.Command(containerengine.Get().String(), "start", nodeName).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to start node %s: %s (%s)", nodeName, err, stdOut)
+	}
+	framework.Logf("Successfully started node %s", nodeName)
+	return nil
 }
 
 func (k *kind) NewTestContext() api.Context {
@@ -417,33 +484,39 @@ func (c *contextKind) SetupUnderlay(f *framework.Framework, underlay api.Underla
 		underlay.BridgeName = secondaryBridge
 	}
 
-	const (
-		ovsKubeNodeLabel = "app=ovnkube-node"
-	)
+	c.AddCleanUpFn(func() error {
+		// Find the OVS pods again to cover cases that restart the PODs
+		ovsPods, err := findOVSPods(f)
+		if err != nil {
+			return fmt.Errorf("failed finding OVS pods during kind underlay tear down: %w", err)
+		}
+		for _, ovsPod := range ovsPods {
+			if underlay.BridgeName != deploymentconfig.Get().ExternalBridgeName() {
+				if err := removeOVSBridge(ovsPod.Namespace, ovsPod.Name, underlay.BridgeName); err != nil {
+					return fmt.Errorf("failed to remove OVS bridge %s for pod %s/%s during cleanup: %w", underlay.BridgeName, ovsPod.Namespace, ovsPod.Name, err)
+				}
+			}
+			if err := configureBridgeMappings(
+				ovsPod.Namespace,
+				ovsPod.Name,
+				defaultNetworkBridgeMapping(),
+			); err != nil {
+				return fmt.Errorf("failed to restore default bridge mappings for pod %s/%s during cleanup: %w", ovsPod.Namespace, ovsPod.Name, err)
+			}
+		}
+		return nil
+	})
 
-	ovsPodList, err := f.ClientSet.CoreV1().Pods(deploymentconfig.Get().OVNKubernetesNamespace()).List(
-		context.Background(),
-		metav1.ListOptions{LabelSelector: ovsKubeNodeLabel},
-	)
+	ovsPods, err := findOVSPods(f)
 	if err != nil {
-		return fmt.Errorf("failed to list OVS pods with label %q at namespace %q: %w", ovsKubeNodeLabel, deploymentconfig.Get().OVNKubernetesNamespace(), err)
+		return fmt.Errorf("failed finding OVS pods during kind underlay setup: %w", err)
 	}
-
-	if len(ovsPodList.Items) == 0 {
-		return fmt.Errorf("no pods with label %q in namespace %q", ovsKubeNodeLabel, deploymentconfig.Get().OVNKubernetesNamespace())
-	}
-	for _, ovsPod := range ovsPodList.Items {
+	for _, ovsPod := range ovsPods {
 		if underlay.BridgeName != deploymentconfig.Get().ExternalBridgeName() {
 			underlayInterface, err := getNetworkInterface(ovsPod.Spec.NodeName, underlay.PhysicalNetworkName)
 			if err != nil {
 				return fmt.Errorf("failed to get underlay interface for network %s on node %s: %w", underlay.PhysicalNetworkName, ovsPod.Spec.NodeName, err)
 			}
-			c.AddCleanUpFn(func() error {
-				if err := removeOVSBridge(ovsPod.Namespace, ovsPod.Name, underlay.BridgeName); err != nil {
-					return fmt.Errorf("failed to remove OVS bridge %s for pod %s/%s during cleanup: %w", underlay.BridgeName, ovsPod.Namespace, ovsPod.Name, err)
-				}
-				return nil
-			})
 			if err := ensureOVSBridge(ovsPod.Namespace, ovsPod.Name, underlay.BridgeName); err != nil {
 				return fmt.Errorf("failed to add OVS bridge %s for pod %s/%s: %w", underlay.BridgeName, ovsPod.Namespace, ovsPod.Name, err)
 			}
@@ -457,17 +530,6 @@ func (c *contextKind) SetupUnderlay(f *framework.Framework, underlay api.Underla
 				}
 			}
 		}
-		c.AddCleanUpFn(func() error {
-			if err := configureBridgeMappings(
-				ovsPod.Namespace,
-				ovsPod.Name,
-				defaultNetworkBridgeMapping(),
-			); err != nil {
-				return fmt.Errorf("failed to restore default bridge mappings for pod %s/%s during cleanup: %w", ovsPod.Namespace, ovsPod.Name, err)
-			}
-			return nil
-		})
-
 		if err := configureBridgeMappings(
 			ovsPod.Namespace,
 			ovsPod.Name,
@@ -477,8 +539,8 @@ func (c *contextKind) SetupUnderlay(f *framework.Framework, underlay api.Underla
 			return fmt.Errorf("failed to configure bridge mappings for pod %s/%s for logical network %s to bridge %s: %w", ovsPod.Namespace, ovsPod.Name, underlay.LogicalNetworkName, underlay.BridgeName, err)
 		}
 	}
-	return nil
 
+	return nil
 }
 
 func (c *contextKind) AddCleanUpFn(cleanUpFn func() error) {
@@ -557,15 +619,12 @@ func isNetworkAttachedToContainer(networkName, containerName string) bool {
 }
 
 func doesContainerNameExist(name string) (bool, error) {
-	// check if it is present before retrieving logs
-	stdOut, err := exec.Command(containerengine.Get().String(), "ps", "-f", fmt.Sprintf("name=^%s$", name), "-q").CombinedOutput()
+	state, err := getContainerState(name)
 	if err != nil {
-		return false, fmt.Errorf("failed to check if external container (%s) exists: %v (%s)", name, err, stdOut)
+		return false, err
 	}
-	if string(stdOut) == "" {
-		return false, nil
-	}
-	return true, nil
+	// Empty state means container doesn't exist
+	return state != "", nil
 }
 
 func doesNetworkExist(networkName string) (bool, error) {
@@ -781,4 +840,20 @@ func condenseErrors(errs []error) error {
 		err = errors.Join(err, e)
 	}
 	return err
+}
+
+func findOVSPods(f *framework.Framework) ([]corev1.Pod, error) {
+	const ovsKubeNodeLabel = "app=ovnkube-node"
+	ovsPodList, err := f.ClientSet.CoreV1().Pods(deploymentconfig.Get().OVNKubernetesNamespace()).List(
+		context.Background(),
+		metav1.ListOptions{LabelSelector: ovsKubeNodeLabel},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list OVS pods with label %q at namespace %q: %w", ovsKubeNodeLabel, deploymentconfig.Get().OVNKubernetesNamespace(), err)
+	}
+
+	if len(ovsPodList.Items) == 0 {
+		return nil, fmt.Errorf("no pods with label %q in namespace %q", ovsKubeNodeLabel, deploymentconfig.Get().OVNKubernetesNamespace())
+	}
+	return ovsPodList.Items, nil
 }

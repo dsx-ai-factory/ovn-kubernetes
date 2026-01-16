@@ -1722,7 +1722,7 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.253.61 }
 			})
 
 			Context("when gateway interface is set to derive-from-mgmt-port", func() {
-				It("should resolve gateway interface from PCI address successfully", func() {
+				ovntest.OnSupportedPlatformsIt("should resolve gateway interface from PCI address successfully", func() {
 					// Mock getManagementPortNetDev to return the management port device
 					netlinkOpsMock.On("LinkByName", mgmtPortNetdev).Return(netlinkLinkMock, nil)
 					netlinkLinkMock.On("Attrs").Return(&netlink.LinkAttrs{
@@ -1762,7 +1762,7 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.253.61 }
 					Expect(selectedNetdev).To(Equal(expectedGatewayIntf))
 				})
 
-				It("should return error when no network devices found for PCI address", func() {
+				ovntest.OnSupportedPlatformsIt("should return error when no network devices found for PCI address", func() {
 					// Mock getManagementPortNetDev to return the management port device
 					netlinkOpsMock.On("LinkByName", mgmtPortNetdev).Return(netlinkLinkMock, nil)
 					netlinkLinkMock.On("Attrs").Return(&netlink.LinkAttrs{
@@ -1796,7 +1796,7 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.253.61 }
 					Expect(netdevs).To(BeEmpty())
 				})
 
-				It("should return error when GetPciFromNetDevice fails", func() {
+				ovntest.OnSupportedPlatformsIt("should return error when GetPciFromNetDevice fails", func() {
 					// Mock getManagementPortNetDev to return the management port device
 					netlinkOpsMock.On("LinkByName", mgmtPortNetdev).Return(netlinkLinkMock, nil)
 					netlinkLinkMock.On("Attrs").Return(&netlink.LinkAttrs{
@@ -1815,7 +1815,7 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.253.61 }
 					Expect(err.Error()).To(ContainSubstring("failed to get PCI address"))
 				})
 
-				It("should return error when GetPfPciFromVfPci fails", func() {
+				ovntest.OnSupportedPlatformsIt("should return error when GetPfPciFromVfPci fails", func() {
 					// Mock getManagementPortNetDev to return the management port device
 					netlinkOpsMock.On("LinkByName", mgmtPortNetdev).Return(netlinkLinkMock, nil)
 					netlinkLinkMock.On("Attrs").Return(&netlink.LinkAttrs{
@@ -1840,7 +1840,7 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.253.61 }
 					Expect(err.Error()).To(ContainSubstring("failed to get PF PCI address"))
 				})
 
-				It("should return error when GetNetDevicesFromPci fails", func() {
+				ovntest.OnSupportedPlatformsIt("should return error when GetNetDevicesFromPci fails", func() {
 					// Mock getManagementPortNetDev to return the management port device
 					netlinkOpsMock.On("LinkByName", mgmtPortNetdev).Return(netlinkLinkMock, nil)
 					netlinkLinkMock.On("Attrs").Return(&netlink.LinkAttrs{

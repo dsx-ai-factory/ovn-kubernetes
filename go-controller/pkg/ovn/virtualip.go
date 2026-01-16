@@ -437,7 +437,7 @@ func (bnc *BaseNetworkController) handleVIPPodDelete(vip *virtualIP, pod *corev1
 
 	// if skipSpoofCheck annotation is added and this virtualIP nad is in that list,
 	// we can skip the deletion part as virtualIP address is not added to pod port security
-	skipPortSecurity := util.SkipSpoofCheckForNAD(pod.Annotations, vip.nadName)
+	skipPortSecurity, _ := util.SkipSpoofCheckForNAD(pod.Annotations, vip.nadName)
 	if !skipPortSecurity {
 		podInfo := val.(*backingPodInfo)
 		err = bnc.removeVirtualIPFromPodPortSecurity(vip.vipAddress, podInfo.backingPodNamespace, podInfo.backingPodName, vip.nadName)
@@ -560,7 +560,7 @@ func (bnc *BaseNetworkController) handleVIPPodAdd(vip *virtualIP, pod *corev1.Po
 	// this virtualIP address
 	// if skipSpoofcheckannotation is present on pod for this nad,
 	// then don't add this virtualIP address to pod lsp port security
-	skipPortSecurity := util.SkipSpoofCheckForNAD(pod.Annotations, vip.nadName)
+	skipPortSecurity, _ := util.SkipSpoofCheckForNAD(pod.Annotations, vip.nadName)
 	if !skipPortSecurity {
 		err = bnc.addVirtualIPToPodPortSecurity(vip.vipAddress, portName, portInfo.mac.String())
 		if err != nil {

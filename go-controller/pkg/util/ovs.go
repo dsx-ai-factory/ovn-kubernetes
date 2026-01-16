@@ -978,12 +978,12 @@ func GetOVSPortPodInfo(hostIfName string) (bool, string, string, error) {
 		return false, "", "", nil
 	}
 	sandbox := GetExternalIDValByKey(stdout, "sandbox")
-	nadName := GetExternalIDValByKey(stdout, types.NADExternalID)
+	nadKey := GetExternalIDValByKey(stdout, types.NADExternalID)
 	// if NAD does not exists, it is default network
-	if nadName == "" {
-		nadName = types.DefaultNetworkName
+	if nadKey == "" {
+		nadKey = types.DefaultNetworkName
 	}
-	return true, sandbox, nadName, nil
+	return true, sandbox, nadKey, nil
 }
 
 // GetOVSInterfaceToPodUIDMapFiltered gets OVS interface name to its associated PodUID mapping, for all OVS interfaces listed
