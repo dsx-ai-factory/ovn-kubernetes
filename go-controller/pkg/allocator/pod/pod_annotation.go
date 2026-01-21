@@ -690,15 +690,6 @@ func AddRoutesGatewayIP(
 				}
 				gatewayIPnet := netinfo.GetNodeGatewayIP(nodeSubnet)
 				podAnnotation.Routes = append(podAnnotation.Routes, additionalSubnetsToRoutes(netinfo, isIPv6, gatewayIPnet.IP)...)
-				// route for directly connected subnets, needed for VM sidecar
-				for _, clusterSubnet := range netinfo.Subnets() {
-					if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
-						podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
-							Dest:    clusterSubnet.CIDR,
-							NextHop: gatewayIPnet.IP,
-						})
-					}
-				}
 				if !util.IsNetworkSegmentationSupportEnabled() || !netinfo.IsPrimaryNetwork() {
 					continue
 				}
