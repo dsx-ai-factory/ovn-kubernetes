@@ -618,10 +618,14 @@ func checkBridgeMapping(ovsClient client.Client, topology string, networkName st
 
 	ovnBridgeMappings := openvSwitch.ExternalIDs["ovn-bridge-mappings"]
 
+	// NVIDIA: we add br-localnet suffix to retain original downstream behavior. Check for that.
+	expectedName := fmt.Sprintf("%s%s", util.GetUserDefinedNetworkPrefix(networkName),
+		types.LocalNetBridgeName)
+
 	bridgeMappings := strings.Split(ovnBridgeMappings, ",")
 	for _, bridgeMapping := range bridgeMappings {
 		networkBridgeAssociation := strings.Split(bridgeMapping, ":")
-		if len(networkBridgeAssociation) == 2 && networkBridgeAssociation[0] == networkName {
+		if len(networkBridgeAssociation) == 2 && networkBridgeAssociation[0] == expectedName {
 			return nil
 		}
 	}

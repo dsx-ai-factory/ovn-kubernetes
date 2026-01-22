@@ -413,7 +413,8 @@ var _ = Describe("checkBridgeMapping", func() {
 	Context("when bridge mapping exists in external IDs", func() {
 		It("should return nil if the bridge mapping is found", func() {
 			ovsClient, err := newOVSClientWithExternalIDs(map[string]string{
-				"ovn-bridge-mappings": "test-network:br-int",
+				// NVIDIA: we add br-localnet suffix to retain original downstream behavior. Check for that.
+				"ovn-bridge-mappings": "test.network_br-localnet:br-int",
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(checkBridgeMapping(ovsClient, ovntypes.LocalnetTopology, networkName)).To(Succeed())
@@ -421,7 +422,8 @@ var _ = Describe("checkBridgeMapping", func() {
 
 		It("should return error if the bridge mapping isn't found", func() {
 			ovsClient, err := newOVSClientWithExternalIDs(map[string]string{
-				"ovn-bridge-mappings": "other-network:br-int",
+				// NVIDIA: we add br-localnet suffix to retain original downstream behavior. Check for that.
+				"ovn-bridge-mappings": "other.network_br-localnet:br-int",
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(checkBridgeMapping(ovsClient, ovntypes.LocalnetTopology, networkName).Error()).To(

@@ -138,6 +138,9 @@ func (nc *UserDefinedLocalnetNodeNetworkController) updateLocalnetOvnBridgeMappi
 	// that provides connectivity to that network. It is in the form of physnet1:br1,physnet2:br2.
 	// Note that there may be multiple ovs bridge mappings, be sure not to override
 	// the mappings for the other physical network
+
+	// NVIDIA: add br-localnet suffix to retain original downstream behavior. Otherwise we'd have to
+	// change bridge mappings on all nodes to use the new suffix-less names.
 	networkName := nc.GetNetworkScopedName(types.LocalNetBridgeName)
 	stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
 		"external_ids:ovn-bridge-mappings")
