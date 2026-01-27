@@ -1,9 +1,14 @@
 package metrics
 
 import (
+	"fmt"
+	"sync/atomic"
+
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cryptorand"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics/mocks"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/vswitchd"
@@ -30,13 +35,14 @@ func (c *fakeOVSClient) FakeCall(...string) (string, string, error) {
 	return output.stdout, output.stderr, output.err
 }
 
-/*
 // buildNamedUUID builds an id that can be used as a named-uuid
 func buildUUID() string {
 	namedUUIDPrefix := 'u'
 	namedUUIDCounter := cryptorand.Uint32()
 	return fmt.Sprintf("%c%010d", namedUUIDPrefix, atomic.AddUint32(&namedUUIDCounter, 1))
 }
+
+/*
 
 const (
 	ovsAppctlDumpAggregateSampleOutput = "NXST_AGGREGATE reply (xid=0x4): packet_count=856244 byte_count=3464651294 flow_count=30"
@@ -45,6 +51,7 @@ const (
 
 var _ = ginkgo.Describe("OVS metrics", func() {
 	var hwOffloadMock, tcPolicyMock *mocks.GaugeMock
+	var origMetricOvsHwOffload, origMetricOvsTcPolicy prometheus.Gauge
 	/*
 		var stopChan chan struct{}
 		var resetsTotalMock, rxDroppedTotalMock, txDroppedTotalMock *mocks.GaugeMock
@@ -227,11 +234,20 @@ var _ = ginkgo.Describe("OVS metrics", func() {
 
 	ginkgo.Context("On update of OVS HwOffload metrics", func() {
 		ginkgo.BeforeEach(func() {
+			// save the original metrics
+			origMetricOvsHwOffload = metricOvsHwOffload
+			origMetricOvsTcPolicy = metricOvsTcPolicy
 			// replace all the prom gauges with mocks
 			hwOffloadMock = mocks.NewGaugeMock()
 			metricOvsHwOffload = hwOffloadMock
 			tcPolicyMock = mocks.NewGaugeMock()
 			metricOvsTcPolicy = tcPolicyMock
+		})
+
+		ginkgo.AfterEach(func() {
+			// restore the original metrics
+			metricOvsHwOffload = origMetricOvsHwOffload
+			metricOvsTcPolicy = origMetricOvsTcPolicy
 		})
 
 		ginkgo.It("sets Hw offload metrics when input is valid", func() {

@@ -238,6 +238,11 @@ metrics_master_port=${OVN_METRICS_MASTER_PORT:-9409}
 # set metrics worker port
 metrics_worker_port=${OVN_METRICS_WORKER_PORT:-9410}
 
+# set metrics bind port
+# upstream default is 9476, so two endpoints are used
+# downstream set it to 9410 to use single endpoints
+metrics_bind_port=${OVN_METRICS_BIND_PORT:-9410}
+
 # set metrics exporter port
 metrics_exporter_port=${OVN_METRICS_EXPORTER_PORT:-9310}
 
@@ -2569,7 +2574,9 @@ ovnkube-controller-with-node() {
     ovn_unprivileged_flag=""
   fi
 
+  ovn_metrics_bind_address="${metrics_endpoint_ip}:${metrics_bind_port}"
   metrics_bind_address="${metrics_endpoint_ip}:${metrics_worker_port}"
+  echo "ovn_metrics_bind_address=${ovn_metrics_bind_address}"
   echo "metrics_bind_address=${metrics_bind_address}"
 
   local ovnkube_metrics_tls_opts=""
@@ -2908,6 +2915,7 @@ ovnkube-controller-with-node() {
     --metrics-enable-pprof \
     --mtu=${mtu} \
     --nodeport \
+    --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
     --pidfile ${OVN_RUNDIR}/ovnkube-controller-with-node.pid \
     --zone ${ovn_zone} &
 
@@ -3657,6 +3665,7 @@ ovn-node() {
       fi
   fi
 
+  ovn_metrics_bind_address="${metrics_endpoint_ip}:${metrics_bind_port}"
   ovnkube_node_metrics_bind_address="${metrics_endpoint_ip}:${metrics_worker_port}"
 
   ovn_unprivileged_flag="--unprivileged-mode"
@@ -3873,6 +3882,7 @@ ovn-node() {
         --logfile-maxsize=${ovnkube_logfile_maxsize} \
         --loglevel=${ovnkube_loglevel} \
         --metrics-bind-address ${ovnkube_node_metrics_bind_address} \
+        --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
         --metrics-interval ${ovn_metrics_scrape_interval} \
         --gateway-router-subnet=${ovn_gateway_router_subnet} \
         --mtu=${mtu} \

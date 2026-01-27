@@ -4,8 +4,6 @@ package metrics
 
 import (
 	"os"
-	"sync"
-	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -63,39 +61,25 @@ var metricOvsDbSize = prometheus.NewGauge(prometheus.GaugeOpts{
 	Help:      "The size of the database file associated with the OVS DB on each node.",
 })
 
-func ovsDbSizeMetricUpdater(metricsScrapeInterval int, stopChan <-chan struct{}) {
-	ticker := time.NewTicker(time.Duration(metricsScrapeInterval) * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			dbFile := "/etc/openvswitch/conf.db"
-			// container case, /host mountPath
-			fileInfo, err := os.Stat("/host/" + dbFile)
-			if err != nil {
-				// host case
-				fileInfo, err = os.Stat(dbFile)
-			}
-			if err != nil {
-				klog.Errorf("Failed to get the OVS DB size :(%v)", err)
-			} else {
-				metricOvsDbSize.Set(float64(fileInfo.Size()))
-			}
-		case <-stopChan:
-			return
-
-		}
+// updateOvsDbSizeMetric updates the OVS DB size metric
+func updateOvsDbSizeMetric() {
+	dbFile := "/etc/openvswitch/conf.db"
+	// container case, /host mountPath
+	fileInfo, err := os.Stat("/host/" + dbFile)
+	if err != nil {
+		// host case
+		fileInfo, err = os.Stat(dbFile)
+	}
+	if err != nil {
+		klog.Errorf("Failed to get the OVS DB size :(%v)", err)
+	} else {
+		metricOvsDbSize.Set(float64(fileInfo.Size()))
 	}
 }
 
-var registerOvsDBMetricsOnce sync.Once
-
 func RegisterOvsDBMetrics(registry prometheus.Registerer) {
-	registerOvsDBMetricsOnce.Do(func() {
-		registry.MustRegister(metricOvsDbSize)
-		// Register OVSDB coverage/show metrics with prometheus
-		componentCoverageShowMetricsMap[ovsDB] = ovsDbCoverageShowMetricsMap
-		registerCoverageShowMetrics(registry, ovsDB, types.MetricOvsNamespace, types.MetricOvsSubsystemOvsDB)
-	})
+	registry.MustRegister(metricOvsDbSize)
+	// Register OVSDB coverage/show metrics with prometheus
+	componentCoverageShowMetricsMap[ovsDB] = ovsDbCoverageShowMetricsMap
+	registerCoverageShowMetrics(registry, ovsDB, types.MetricOvsNamespace, types.MetricOvsSubsystemOvsDB)
 }

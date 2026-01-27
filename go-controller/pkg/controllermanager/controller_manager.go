@@ -327,7 +327,7 @@ func (cm *ControllerManager) configureSvcTemplateSupport() {
 
 func (cm *ControllerManager) configureMetrics(stopChan <-chan struct{}) {
 	metrics.RegisterOVNKubeControllerPerformance(cm.nbClient)
-	metrics.RegisterOVNKubeControllerFunctional(config.MetricsScrapeInterval, stopChan)
+	metrics.RegisterOVNKubeControllerFunctional()
 	metrics.RunTimestamp(stopChan, cm.sbClient, cm.nbClient)
 	metrics.MonitorIPSec(cm.nbClient)
 }

@@ -6,7 +6,6 @@ package metrics
 import (
 	"fmt"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"sync"
 
@@ -604,7 +603,7 @@ func getOvsBridgeOpenFlowsCount(ovsOfctl ovsClient, bridgeName string) (float64,
 		"flow_count field", bridgeName)
 }
 
-func registerOvsInterfaceMetrics(metricNamespace, metricSubsystem string) {
+func registerOvsInterfaceMetrics(registry prometheus.Registerer, metricNamespace, metricSubsystem string) {
 	// The metrics not covered by the OVS native metrics are moved to ovsInterfaceExtraMetricsDataMap,
 	// so the ovsInterfaceExtraMetricsDataMap can be used to register them when OVS native metrics is enabled.
 	// This function is only called when OVS native metrics is disabled, so merge them into ovsInterfaceMetricsDataMap to
@@ -625,7 +624,7 @@ func registerOvsInterfaceMetrics(metricNamespace, metricSubsystem string) {
 				"port",
 				"interface",
 			})
-		prometheus.MustRegister(InterfaceMetricInfo.metric)
+		registry.MustRegister(InterfaceMetricInfo.metric)
 	}
 }
 
@@ -829,62 +828,6 @@ func setOvsInterfaceStatusFields(interfaceBridge, interfacePort, interfaceName s
 	firmwareVersion := statusMap["firmware_version"]
 	metricInterfaceFirmwareVersion.WithLabelValues(interfaceBridge, interfacePort,
 		interfaceName, firmwareVersion).Set(1)
-}
-
-func getGeneveInterfaceStatsFieldValue(stats *netlink.LinkStatistics, field string) float64 {
-	r := reflect.ValueOf(stats)
-	fieldValue := reflect.Indirect(r).FieldByName(field)
-	return float64(fieldValue.Uint())
-}
-
-func setGeneveInterfaceStatistics(geneveInterfaceName string, link netlink.Link) {
-	var geneveInterfaceStatsMap = map[string]string{
-		"rx_packets":   "RxPackets",
-		"rx_bytes":     "RxBytes",
-		"rx_dropped":   "RxDropped",
-		"rx_frame_err": "RxFrameErrors",
-		"rx_over_err":  "RxOverErrors",
-		"rx_crc_err":   "RxCrcErrors",
-		"rx_errors":    "RxErrors",
-		"tx_packets":   "TxPackets",
-		"tx_bytes":     "TxBytes",
-		"tx_dropped":   "TxDropped",
-		"collisions":   "Collisions",
-		"tx_errors":    "TxErrors",
-	}
-
-	for statsName, geneveStatsName := range geneveInterfaceStatsMap {
-		metricName := "interface_" + statsName
-		metricValue := getGeneveInterfaceStatsFieldValue(link.Attrs().Statistics, geneveStatsName)
-		ovsInterfaceMetricsDataMap[metricName].metric.WithLabelValues(
-			"none", "none", geneveInterfaceName).Set(metricValue)
-	}
-}
-
-// geneveInterfaceMetricsUpdate updates the geneve interface
-// metrics obtained through netlink library equivalent to
-// (ip -s li show genev_sys_6081)
-func geneveInterfaceMetricsUpdate() error {
-	geneveInterfaceName := "genev_sys_6081"
-	link, err := netlink.LinkByName(geneveInterfaceName)
-	if err != nil {
-		if !util.GetNetLinkOps().IsLinkNotFoundError(err) {
-			return fmt.Errorf("failed to lookup link %s: (%v)",
-				geneveInterfaceName, err)
-		}
-		return nil
-	}
-	ovsInterfaceMetricsDataMap["interface_mtu"].metric.WithLabelValues(
-		"none", "none", geneveInterfaceName).Set(float64(link.Attrs().MTU))
-	geneveInterfaceLinkState := link.Attrs().OperState.String()
-	geneveInterfaceLinkStateValue := getOvsInterfaceState(&geneveInterfaceLinkState)
-	ovsInterfaceMetricsDataMap["interface_link_state"].metric.WithLabelValues(
-		"none", "none", geneveInterfaceName).Set(geneveInterfaceLinkStateValue)
-	ovsInterfaceMetricsDataMap["interface_ifindex"].metric.WithLabelValues(
-		"none", "none", geneveInterfaceName).Set(float64(link.Attrs().Index))
-	setGeneveInterfaceStatistics(geneveInterfaceName, link)
-	setOvsInterfaceQdiscIngress(geneveInterfaceName, "none", "none", link)
-	return nil
 }
 
 // ovsInterfaceMetricsUpdater updates the ovs interface metrics
@@ -1350,7 +1293,14 @@ var ovsVswitchdCoverageShowMetricsMap = map[string]*metricDetails{
 var registerOvsMetricsOnce sync.Once
 
 // registerOvsMetrics registers the ovs metrics
-func registerOvsMetrics(ovsDBClient libovsdbclient.Client, registry prometheus.Registerer) {
+func registerOvsMetrics(registry prometheus.Registerer) {
+	if config.Metrics.EnableOvsNativeMetrics {
+		// When OVS native metrics are enabled, only need to register the additional metrics
+		// which are not covered by the OVS native metrics
+		RegisterAdditionalOvsMetrics(registry)
+		return
+	}
+
 	registerOvsMetricsOnce.Do(func() {
 		// Register OVS datapath metrics.
 		registry.MustRegister(metricOvsVersion)
@@ -1379,7 +1329,7 @@ func registerOvsMetrics(ovsDBClient libovsdbclient.Client, registry prometheus.R
 		registry.MustRegister(metricOvsHwOffload)
 		registry.MustRegister(metricOvsTcPolicy)
 		// Register OVS Interface metrics
-		registerOvsInterfaceMetrics(types.MetricOvsNamespace, types.MetricOvsSubsystemVswitchd)
+		registerOvsInterfaceMetrics(registry, types.MetricOvsNamespace, types.MetricOvsSubsystemVswitchd)
 		registry.MustRegister(metricInterfaceDriverName)
 		registry.MustRegister(metricInterfaceDriverVersion)
 		registry.MustRegister(metricInterfaceFirmwareVersion)

@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -48,7 +49,7 @@ func TestNewMetricServerRunAndShutdown(t *testing.T) {
 	server := NewMetricServer(opts, ovsDBClient, kubeClient)
 	require.NotNil(t, server, "Server should not be nil")
 	require.NotNil(t, server.mux, "Server mux should not be nil")
-	require.NotNil(t, server.ovnRegistry, "Server OVN registry should not be nil")
+	require.NotNil(t, server.registerer, "Server registerer should not be nil")
 
 	// Start server in background
 	serverDone := make(chan struct{})
@@ -109,7 +110,7 @@ func TestNewMetricServerRunAndFailOnFatalError(t *testing.T) {
 	server := NewMetricServer(opts, ovsDBClient, kubeClient)
 	require.NotNil(t, server, "Server should not be nil")
 	require.NotNil(t, server.mux, "Server mux should not be nil")
-	require.NotNil(t, server.ovnRegistry, "Server OVN registry should not be nil")
+	require.NotNil(t, server.registerer, "Server registerer should not be nil")
 
 	// Start server in background
 	serverDone := make(chan struct{})
@@ -261,6 +262,18 @@ nln_changed                0.0/sec     0.000/sec        0.0000/sec   total: 230
 NXST_AGGREGATE reply (xid=0x4): packet_count=12345 byte_count=67890 flow_count=18000
 `
 
+	upcallShowOutput = `doca@ovs-doca:
+  flows         : (current 529) (avg 563) (max 773) (limit 200000)
+  offloaded flows : 345
+  dump duration : 7ms
+  ufid enabled : true
+`
+
+	ovsNativeMetricsOutput = `# HELP ovs_vswitchd_bridge_n_bridges Number of bridges present in the instance.
+# TYPE ovs_vswitchd_bridge_n_bridges gauge
+ovs_vswitchd_bridge_n_bridges 6
+`
+
 	ovnDBMemoryShowOutput = `atoms:324341 cells:307671 monitors:2 n-weak-refs:5627 raft-connections:4 raft-log:3403 sessions:12 txn-history:100 txn-history-atoms:52811`
 
 	ovnControllerDumpAggregateOutput = `NXST_AGGREGATE reply (xid=0x4): packet_count=9945601440 byte_count=33370900148508 flow_count=12062`
@@ -311,13 +324,15 @@ Open vSwitch Library 3.5.0
 )
 
 type metricsTestCase struct {
-	name                string
-	enableOVS           bool
-	enableOVNDB         bool
-	enableOVNController bool
-	enableOVNNorthd     bool
-	mockRunCommands     []ovntest.TestifyMockHelper
-	expectedMetrics     []string
+	name                   string
+	enableOVS              bool
+	enableOVSNativeMetrics bool
+	enableOVNDB            bool
+	enableOVNController    bool
+	enableOVNNorthd        bool
+	registerer             prometheus.Registerer
+	mockRunCommands        []ovntest.TestifyMockHelper
+	expectedMetrics        []string
 }
 
 func TestHandleMetrics(t *testing.T) {
@@ -325,9 +340,11 @@ func TestHandleMetrics(t *testing.T) {
 	savedUnprivilegedMode := config.UnprivilegedMode
 	config.UnprivilegedMode = true
 	savedRunner := util.RunCmdExecRunner
+	savedEnableOvsNativeMetrics := config.Metrics.EnableOvsNativeMetrics
 	defer func() {
 		config.UnprivilegedMode = savedUnprivilegedMode
 		util.RunCmdExecRunner = savedRunner
+		config.Metrics.EnableOvsNativeMetrics = savedEnableOvsNativeMetrics
 	}()
 
 	setupAppFs(t)
@@ -379,6 +396,11 @@ func TestHandleMetrics(t *testing.T) {
 	}
 	defer libovsdbCleanup.Cleanup()
 
+	// Register OVN-Kube controller base metrics into the default registry, so the
+	// metrics in default registry can be tested.
+	RegisterOVNKubeControllerBase()
+	MetricOVNKubeControllerSyncDuration.WithLabelValues("pods").Set(0)
+
 	testCases := []metricsTestCase{
 		{
 			name:      "OVS metrics",
@@ -395,6 +417,12 @@ func TestHandleMetrics(t *testing.T) {
 					OnCallMethodName: "RunCmd",
 					OnCallMethodArgs: []interface{}{mock.AnythingOfType("*mocks.Cmd"), mock.AnythingOfType("string"), mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "dpctl/show", "system@ovs-system"},
 					RetArgList:       []interface{}{bytes.NewBuffer([]byte(dpctlShowOutput)), bytes.NewBuffer([]byte("")), nil},
+				},
+				// upcall/show
+				{
+					OnCallMethodName: "RunCmd",
+					OnCallMethodArgs: []interface{}{mock.AnythingOfType("*mocks.Cmd"), mock.AnythingOfType("string"), mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "upcall/show"},
+					RetArgList:       []interface{}{bytes.NewBuffer([]byte(upcallShowOutput)), bytes.NewBuffer([]byte("")), nil},
 				},
 				// memory/show
 				{
@@ -417,6 +445,18 @@ func TestHandleMetrics(t *testing.T) {
 			},
 			expectedMetrics: []string{
 				"ovs_build_info",
+				"ovs_ovsdb_db_size",
+				"ovs_ovsdb_hmap_expand",
+				"ovs_ovsdb_hmap_pathological",
+				"ovs_ovsdb_lockfile_lock",
+				"ovs_ovsdb_poll_create_node",
+				"ovs_ovsdb_poll_zero_timeout",
+				"ovs_ovsdb_pstream_open",
+				"ovs_ovsdb_seq_change",
+				"ovs_ovsdb_stream_open",
+				"ovs_ovsdb_unixctl_received",
+				"ovs_ovsdb_unixctl_replied",
+				"ovs_ovsdb_util_xalloc",
 				"ovs_vswitchd_bridge_flows_total",
 				"ovs_vswitchd_bridge_ports_total",
 				"ovs_vswitchd_bridge_reconfigure",
@@ -427,9 +467,11 @@ func TestHandleMetrics(t *testing.T) {
 				"ovs_vswitchd_dp_flows_lookup_missed",
 				"ovs_vswitchd_dp_flows_total",
 				"ovs_vswitchd_dp_if_total",
+				"ovs_vswitchd_dp_if",
 				"ovs_vswitchd_dp_masks_hit_ratio",
 				"ovs_vswitchd_dp_masks_hit",
 				"ovs_vswitchd_dp_masks_total",
+				"ovs_vswitchd_dp_offloaded_flows_total",
 				"ovs_vswitchd_dp_packets_total",
 				"ovs_vswitchd_dp_total",
 				"ovs_vswitchd_dp",
@@ -442,14 +484,34 @@ func TestHandleMetrics(t *testing.T) {
 				"ovs_vswitchd_dpif_port_del",
 				"ovs_vswitchd_handlers_total",
 				"ovs_vswitchd_hw_offload",
-				"ovs_vswitchd_interface_collisions_total",
-				"ovs_vswitchd_interface_resets_total",
-				"ovs_vswitchd_interface_rx_dropped_total",
-				"ovs_vswitchd_interface_rx_errors_total",
-				"ovs_vswitchd_interface_tx_dropped_total",
-				"ovs_vswitchd_interface_tx_errors_total",
+				"ovs_vswitchd_interface_admin_state",
+				"ovs_vswitchd_interface_collisions",
+				"ovs_vswitchd_interface_driver_name",
+				"ovs_vswitchd_interface_driver_version",
+				"ovs_vswitchd_interface_duplex",
+				"ovs_vswitchd_interface_firmware_version",
+				"ovs_vswitchd_interface_ifindex",
+				"ovs_vswitchd_interface_ingress_policing_burst",
+				"ovs_vswitchd_interface_ingress_policing_rate",
+				"ovs_vswitchd_interface_ingress_qdisc_total",
+				"ovs_vswitchd_interface_link_resets",
+				"ovs_vswitchd_interface_link_speed",
+				"ovs_vswitchd_interface_link_state",
+				"ovs_vswitchd_interface_mtu",
+				"ovs_vswitchd_interface_of_port",
+				"ovs_vswitchd_interface_rx_bytes",
+				"ovs_vswitchd_interface_rx_crc_err",
+				"ovs_vswitchd_interface_rx_dropped",
+				"ovs_vswitchd_interface_rx_errors",
+				"ovs_vswitchd_interface_rx_frame_err",
+				"ovs_vswitchd_interface_rx_over_err",
+				"ovs_vswitchd_interface_rx_packets",
+				"ovs_vswitchd_interface_tx_bytes",
+				"ovs_vswitchd_interface_tx_dropped",
+				"ovs_vswitchd_interface_tx_errors",
+				"ovs_vswitchd_interface_tx_packets",
+				"ovs_vswitchd_interface_type",
 				"ovs_vswitchd_interface_up_wait_seconds_total",
-				"ovs_vswitchd_interfaces_total",
 				"ovs_vswitchd_netlink_overflow",
 				"ovs_vswitchd_netlink_received",
 				"ovs_vswitchd_netlink_recv_jumbo",
@@ -466,6 +528,7 @@ func TestHandleMetrics(t *testing.T) {
 				"ovs_vswitchd_rconn_overflow",
 				"ovs_vswitchd_rconn_queued",
 				"ovs_vswitchd_rconn_sent",
+				"ovs_vswitchd_revalidate_missed_dp_flow",
 				"ovs_vswitchd_revalidators_total",
 				"ovs_vswitchd_stream_open",
 				"ovs_vswitchd_tc_policy",
@@ -476,6 +539,136 @@ func TestHandleMetrics(t *testing.T) {
 				"ovs_vswitchd_txn_try_again",
 				"ovs_vswitchd_txn_unchanged",
 				"ovs_vswitchd_txn_uncommitted",
+				"ovs_vswitchd_upcall_flow_del_idle_or_limit",
+				"ovs_vswitchd_upcall_flow_del_no_rev",
+				"ovs_vswitchd_upcall_flow_del_purge",
+				"ovs_vswitchd_upcall_flow_del_rev",
+				"ovs_vswitchd_upcall_flow_limit_hit",
+				"ovs_vswitchd_upcall_flow_limit_kill",
+				"ovs_vswitchd_vconn_open",
+				"ovs_vswitchd_vconn_received",
+				"ovs_vswitchd_vconn_sent",
+				"ovs_vswitchd_xlate_actions_oversize",
+				"ovs_vswitchd_xlate_actions_too_many_output",
+				"ovs_vswitchd_xlate_actions",
+				"promhttp_metric_handler_requests_in_flight",
+				"promhttp_metric_handler_requests_total",
+			},
+		},
+		{
+			name:                   "OVS native metrics",
+			enableOVS:              true,
+			enableOVSNativeMetrics: true,
+			mockRunCommands: []ovntest.TestifyMockHelper{
+				// dpctl/dump-dps
+				{
+					OnCallMethodName: "RunCmd",
+					OnCallMethodArgs: []interface{}{mock.AnythingOfType("*mocks.Cmd"), mock.AnythingOfType("string"), mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "dpctl/dump-dps"},
+					RetArgList:       []interface{}{bytes.NewBuffer([]byte("system@ovs-system")), bytes.NewBuffer([]byte("")), nil},
+				},
+				// dpctl/show
+				{
+					OnCallMethodName: "RunCmd",
+					OnCallMethodArgs: []interface{}{mock.AnythingOfType("*mocks.Cmd"), mock.AnythingOfType("string"), mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "dpctl/show", "system@ovs-system"},
+					RetArgList:       []interface{}{bytes.NewBuffer([]byte(dpctlShowOutput)), bytes.NewBuffer([]byte("")), nil},
+				},
+				// upcall/show
+				{
+					OnCallMethodName: "RunCmd",
+					OnCallMethodArgs: []interface{}{mock.AnythingOfType("*mocks.Cmd"), mock.AnythingOfType("string"), mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "upcall/show"},
+					RetArgList:       []interface{}{bytes.NewBuffer([]byte(upcallShowOutput)), bytes.NewBuffer([]byte("")), nil},
+				},
+				// memory/show
+				{
+					OnCallMethodName: "RunCmd",
+					OnCallMethodArgs: []interface{}{mock.AnythingOfType("*mocks.Cmd"), mock.AnythingOfType("string"), mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "memory/show"},
+					RetArgList:       []interface{}{bytes.NewBuffer([]byte(ovsMemoryShowOutput)), bytes.NewBuffer([]byte("")), nil},
+				},
+				// coverage/show
+				{
+					OnCallMethodName: "RunCmd",
+					OnCallMethodArgs: []interface{}{mock.AnythingOfType("*mocks.Cmd"), mock.AnythingOfType("string"), mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "coverage/show"},
+					RetArgList:       []interface{}{bytes.NewBuffer([]byte(coverageShowOutput)), bytes.NewBuffer([]byte("")), nil},
+				},
+				// ovs-ofctl dump-aggregate br-int
+				{
+					OnCallMethodName: "RunCmd",
+					OnCallMethodArgs: []interface{}{mock.AnythingOfType("*mocks.Cmd"), mock.AnythingOfType("string"), mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "dump-aggregate", "br-int"},
+					RetArgList:       []interface{}{bytes.NewBuffer([]byte(ovsOfctlDumpAggregateOutput)), bytes.NewBuffer([]byte("")), nil},
+				},
+				// metrics/show (OVS native metrics)
+				{
+					OnCallMethodName: "RunCmd",
+					OnCallMethodArgs: []interface{}{mock.AnythingOfType("*mocks.Cmd"), mock.AnythingOfType("string"), mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "metrics/show"},
+					RetArgList:       []interface{}{bytes.NewBuffer([]byte(ovsNativeMetricsOutput)), bytes.NewBuffer([]byte("")), nil},
+				},
+			},
+			expectedMetrics: []string{
+				// Native metrics from metrics/show output
+				"ovs_vswitchd_bridge_n_bridges",
+				// OVS DB metrics
+				"ovs_ovsdb_db_size",
+				"ovs_ovsdb_hmap_expand",
+				"ovs_ovsdb_hmap_pathological",
+				"ovs_ovsdb_lockfile_lock",
+				"ovs_ovsdb_poll_create_node",
+				"ovs_ovsdb_poll_zero_timeout",
+				"ovs_ovsdb_pstream_open",
+				"ovs_ovsdb_seq_change",
+				"ovs_ovsdb_stream_open",
+				"ovs_ovsdb_unixctl_received",
+				"ovs_ovsdb_unixctl_replied",
+				"ovs_ovsdb_util_xalloc",
+				// Additional OVS metrics (not covered by native)
+				"ovs_build_info",
+				"ovs_vswitchd_dp",
+				"ovs_vswitchd_dp_if",
+				"ovs_vswitchd_dp_if_total",
+				"ovs_vswitchd_dp_masks_hit_ratio",
+				"ovs_vswitchd_dp_offloaded_flows_total",
+				"ovs_vswitchd_dp_total",
+				"ovs_vswitchd_hw_offload",
+				"ovs_vswitchd_interface_ingress_qdisc_total",
+				"ovs_vswitchd_interface_up_wait_seconds_total",
+				"ovs_vswitchd_tc_policy",
+				// Coverage/show metrics for vswitchd
+				"ovs_vswitchd_bridge_reconfigure",
+				"ovs_vswitchd_dpif_execute",
+				"ovs_vswitchd_dpif_flow_del",
+				"ovs_vswitchd_dpif_flow_flush",
+				"ovs_vswitchd_dpif_flow_get",
+				"ovs_vswitchd_dpif_flow_put",
+				"ovs_vswitchd_dpif_port_add",
+				"ovs_vswitchd_dpif_port_del",
+				"ovs_vswitchd_netlink_overflow",
+				"ovs_vswitchd_netlink_received",
+				"ovs_vswitchd_netlink_recv_jumbo",
+				"ovs_vswitchd_netlink_sent",
+				"ovs_vswitchd_ofproto_dpif_expired",
+				"ovs_vswitchd_ofproto_flush",
+				"ovs_vswitchd_ofproto_packet_out",
+				"ovs_vswitchd_ofproto_recv_openflow",
+				"ovs_vswitchd_ofproto_reinit_ports",
+				"ovs_vswitchd_packet_in_drop",
+				"ovs_vswitchd_packet_in",
+				"ovs_vswitchd_pstream_open",
+				"ovs_vswitchd_rconn_discarded",
+				"ovs_vswitchd_rconn_overflow",
+				"ovs_vswitchd_rconn_queued",
+				"ovs_vswitchd_rconn_sent",
+				"ovs_vswitchd_revalidate_missed_dp_flow",
+				"ovs_vswitchd_stream_open",
+				"ovs_vswitchd_txn_aborted",
+				"ovs_vswitchd_txn_error",
+				"ovs_vswitchd_txn_incomplete",
+				"ovs_vswitchd_txn_success",
+				"ovs_vswitchd_txn_try_again",
+				"ovs_vswitchd_txn_unchanged",
+				"ovs_vswitchd_txn_uncommitted",
+				"ovs_vswitchd_upcall_flow_del_idle_or_limit",
+				"ovs_vswitchd_upcall_flow_del_no_rev",
+				"ovs_vswitchd_upcall_flow_del_purge",
+				"ovs_vswitchd_upcall_flow_del_rev",
 				"ovs_vswitchd_upcall_flow_limit_hit",
 				"ovs_vswitchd_upcall_flow_limit_kill",
 				"ovs_vswitchd_vconn_open",
@@ -532,8 +725,19 @@ func TestHandleMetrics(t *testing.T) {
 			expectedMetrics: []string{
 				"ovn_db_build_info",
 				"ovn_db_db_size_bytes",
+				"ovn_db_hmap_expand",
+				"ovn_db_hmap_pathological",
 				"ovn_db_jsonrpc_server_sessions",
+				"ovn_db_lockfile_lock",
 				"ovn_db_ovsdb_monitors",
+				"ovn_db_poll_create_node",
+				"ovn_db_poll_zero_timeout",
+				"ovn_db_pstream_open",
+				"ovn_db_seq_change",
+				"ovn_db_stream_open",
+				"ovn_db_unixctl_received",
+				"ovn_db_unixctl_replied",
+				"ovn_db_util_xalloc",
 				"promhttp_metric_handler_requests_in_flight",
 				"promhttp_metric_handler_requests_total",
 			},
@@ -778,17 +982,72 @@ func TestHandleMetrics(t *testing.T) {
 				"promhttp_metric_handler_requests_total",
 			},
 		},
+		{
+			name:       "default registry metrics",
+			registerer: prometheus.DefaultRegisterer,
+			expectedMetrics: []string{
+				"ovnkube_master_build_info",
+				"ovnkube_master_leader",
+				"ovnkube_master_ready_duration_seconds",
+				"ovnkube_master_sync_duration_seconds",
+				"go_gc_duration_seconds",
+				"go_gc_gogc_percent",
+				"go_gc_gomemlimit_bytes",
+				"go_goroutines",
+				"go_info",
+				"go_memstats_alloc_bytes",
+				"go_memstats_alloc_bytes_total",
+				"go_memstats_buck_hash_sys_bytes",
+				"go_memstats_frees_total",
+				"go_memstats_gc_sys_bytes",
+				"go_memstats_heap_alloc_bytes",
+				"go_memstats_heap_idle_bytes",
+				"go_memstats_heap_inuse_bytes",
+				"go_memstats_heap_objects",
+				"go_memstats_heap_released_bytes",
+				"go_memstats_heap_sys_bytes",
+				"go_memstats_last_gc_time_seconds",
+				"go_memstats_mallocs_total",
+				"go_memstats_mcache_inuse_bytes",
+				"go_memstats_mcache_sys_bytes",
+				"go_memstats_mspan_inuse_bytes",
+				"go_memstats_mspan_sys_bytes",
+				"go_memstats_next_gc_bytes",
+				"go_memstats_other_sys_bytes",
+				"go_memstats_stack_inuse_bytes",
+				"go_memstats_stack_sys_bytes",
+				"go_memstats_sys_bytes",
+				"go_sched_gomaxprocs_threads",
+				"go_threads",
+				"process_cpu_seconds_total",
+				"process_max_fds",
+				"process_network_receive_bytes_total",
+				"process_network_transmit_bytes_total",
+				"process_open_fds",
+				"process_resident_memory_bytes",
+				"process_start_time_seconds",
+				"process_virtual_memory_bytes",
+				"process_virtual_memory_max_bytes",
+				"promhttp_metric_handler_requests_in_flight",
+				"promhttp_metric_handler_requests_total",
+			},
+		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			// Set config for OVS native metrics if enabled
+			config.Metrics.EnableOvsNativeMetrics = tc.enableOVSNativeMetrics
+
 			// Configure server options
 			opts := MetricServerOptions{
 				BindAddress:                "127.0.0.1:0", // Use random port for testing
 				EnableOVSMetrics:           tc.enableOVS,
+				EnableOVSNativeMetrics:     tc.enableOVSNativeMetrics,
 				EnableOVNDBMetrics:         tc.enableOVNDB,
 				EnableOVNControllerMetrics: tc.enableOVNController,
 				EnableOVNNorthdMetrics:     tc.enableOVNNorthd,
+				Registerer:                 tc.registerer,
 			}
 			// Mock the exec runner for RunOvsVswitchdAppCtl calls
 			mockCmd := new(mock_k8s_io_utils_exec.Cmd)
@@ -813,8 +1072,8 @@ func TestHandleMetrics(t *testing.T) {
 			server := NewMetricServer(opts, ovsDBClient, kubeClient)
 			server.registerMetrics()
 
-			// iterate s.ovnRegistry to list all registered metrics' names
-			regMetrics, err := server.ovnRegistry.Gather()
+			// Iterate server registry to list all registered metric names.
+			regMetrics, err := server.registerer.(prometheus.Gatherer).Gather()
 			if err != nil {
 				t.Fatalf("Failed to gather metrics: %v", err)
 			}
@@ -827,7 +1086,7 @@ func TestHandleMetrics(t *testing.T) {
 			// Test the /metrics endpoint
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest("GET", "/metrics", nil)
-			server.handleMetrics(rec, req)
+			server.mux.ServeHTTP(rec, req)
 			if rec.Code != http.StatusOK {
 				t.Errorf("Expected status 200, got %d", rec.Code)
 			}

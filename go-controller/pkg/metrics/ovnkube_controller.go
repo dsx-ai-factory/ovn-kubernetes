@@ -478,7 +478,7 @@ func RegisterOVNKubeControllerPerformance(nbClient libovsdbclient.Client) {
 
 // RegisterOVNKubeControllerFunctional is a collection of metrics that help us understand ovnkube-controller functions. Call once after
 // LE is won.
-func RegisterOVNKubeControllerFunctional(metricsScrapeInterval int, stopChan <-chan struct{}) {
+func RegisterOVNKubeControllerFunctional() {
 	// No need to unregister because process exits when leadership is lost.
 	if config.Metrics.EnableScaleMetrics {
 		klog.Infof("Scale metrics are enabled")
@@ -503,7 +503,7 @@ func RegisterOVNKubeControllerFunctional(metricsScrapeInterval int, stopChan <-c
 	}
 	// ovnkube-controller logfile size metric
 	prometheus.MustRegister(metricOvnKubeControllerLogFileSize)
-	go ovnKubeLogFileSizeMetricsUpdater(metricOvnKubeControllerLogFileSize, metricsScrapeInterval, stopChan)
+	registerOvnKubeLogFileSizeMetricsUpdater(metricOvnKubeControllerLogFileSize)
 }
 
 func registerOVNKubeFeatureDBObjectsMetrics() {
