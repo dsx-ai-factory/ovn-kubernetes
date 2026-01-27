@@ -169,12 +169,12 @@ func newDefaultNetworkControllerCommon(
 	eIPController *EgressIPController,
 	portCache *PortCache,
 ) (*DefaultNetworkController, error) {
+	defaultNetInfo := &util.DefaultNetInfo{}
 
 	if addressSetFactory == nil {
 		addressSetFactory = addressset.NewOvnAddressSetFactory(cnci.nbClient, config.IPv4Mode, config.IPv6Mode)
 	}
 
-	defaultNetInfo := networkManager.InitDefaultNetInfo()
 	svcController, err := svccontroller.NewController(
 		cnci.client, cnci.nbClient,
 		cnci.watchFactory.ServiceCoreInformer(),
@@ -214,7 +214,7 @@ func newDefaultNetworkControllerCommon(
 		BaseNetworkController: BaseNetworkController{
 			CommonNetworkControllerInfo: *cnci,
 			controllerName:              DefaultNetworkControllerName,
-			ReconcilableNetInfo:         util.NewReconcilableNetInfo(defaultNetInfo),
+			ReconcilableNetInfo:         defaultNetInfo,
 			lsManager:                   lsm.NewLogicalSwitchManager(),
 			logicalPortCache:            portCache,
 			namespaces:                  make(map[string]*namespaceInfo),
@@ -387,9 +387,11 @@ func (oc *DefaultNetworkController) Stop() {
 	oc.wg.Wait()
 }
 
+/* TBD-merge
 func (oc *DefaultNetworkController) Cleanup() error {
 	panic("unexpected call for default network")
 }
+*/
 
 // init runs a subnet IPAM and a controller that watches arrival/departure
 // of nodes in the cluster

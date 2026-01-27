@@ -947,7 +947,7 @@ func (c *networkController) networkDisconnect(bnc BaseNetworkController) {
 // This is an O(1) lookup using an internal index.
 func (c *networkController) GetNetworkByID(id int) util.NetInfo {
 	if id == types.DefaultNetworkID {
-		return c.networks[types.DefaultNetworkName]
+		return &util.DefaultNetInfo{}
 	}
 	c.RLock()
 	defer c.RUnlock()

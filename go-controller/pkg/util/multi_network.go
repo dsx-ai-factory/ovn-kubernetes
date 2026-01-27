@@ -114,14 +114,6 @@ type DefaultNetInfo struct {
 	mutableNetInfo
 }
 
-func InitDefaultNetInfo() MutableNetInfo {
-	return &DefaultNetInfo{
-		mutableNetInfo: mutableNetInfo{
-			nads: sets.Set[string]{},
-		},
-	}
-}
-
 // MutableNetInfo is a NetInfo where selected information can be changed.
 // Intended to be used by network managers that aggregate network information
 // from multiple sources that can change over time.
@@ -1486,11 +1478,7 @@ func NewNetInfo(netconf *ovncnitypes.NetConf, annotation map[string]string) (Net
 
 func newNetInfo(netconf *ovncnitypes.NetConf, annotation map[string]string) (MutableNetInfo, error) {
 	if netconf.Name == types.DefaultNetworkName {
-		return &DefaultNetInfo{
-			mutableNetInfo: mutableNetInfo{
-				nads: sets.Set[string]{},
-			},
-		}, nil
+		return &DefaultNetInfo{}, nil
 	}
 	var ni MutableNetInfo
 	var err error

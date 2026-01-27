@@ -42,7 +42,6 @@ type watchFactory interface {
 // Interface is the main package entrypoint and provides network related
 // information to the rest of the project.
 type Interface interface {
-	InitDefaultNetInfo() util.NetInfo
 	// GetActiveNetworkForNamespace returns a copy of the primary network for
 	// the namespace if any or the default network otherwise. If there is a
 	// primary UDN defined but the NAD has not been processed yet, returns
@@ -282,10 +281,6 @@ func (nm defaultNetworkManager) DoWithLock(f func(network util.NetInfo) error) e
 
 func (nm defaultNetworkManager) GetActiveNetworkNamespaces(_ string) ([]string, error) {
 	return []string{"default"}, nil
-}
-
-func (nm defaultNetworkManager) InitDefaultNetInfo() util.NetInfo {
-	return &util.DefaultNetInfo{}
 }
 
 func (nm defaultNetworkManager) GetActiveNetwork(network string) util.NetInfo {

@@ -119,7 +119,6 @@ func newANPControllerWithDBSetup(dbSetup libovsdbtest.TestSetup, initANPs anpapi
 	recorder := record.NewFakeRecorder(10)
 	controller, err := NewController(
 		"default-network-controller",
-		util.InitDefaultNetInfo(),
 		nbClient,
 		fakeClient.ANPClient,
 		watcher.ANPInformer(),

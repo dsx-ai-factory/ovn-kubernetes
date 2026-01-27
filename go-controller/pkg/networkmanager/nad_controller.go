@@ -343,12 +343,6 @@ func (c *nadController) Interface() Interface {
 	return c
 }
 
-func (c *nadController) InitDefaultNetInfo() util.NetInfo {
-	netInfo := util.InitDefaultNetInfo()
-	c.networkController.setNetwork(netInfo.GetNetworkName(), netInfo)
-	return netInfo
-}
-
 func (c *nadController) Start() error {
 	// initial sync here will ensure networks in network manager
 	// network manager will use this initial set of ensured networks to consider

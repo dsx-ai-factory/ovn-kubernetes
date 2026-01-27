@@ -540,7 +540,6 @@ func (oc *DefaultNetworkController) newANPController() error {
 	var err error
 	oc.anpController, err = anpcontroller.NewController(
 		DefaultNetworkControllerName,
-		oc.ReconcilableNetInfo,
 		oc.nbClient,
 		oc.kube.ANPClient,
 		oc.watchFactory.ANPInformer(),
