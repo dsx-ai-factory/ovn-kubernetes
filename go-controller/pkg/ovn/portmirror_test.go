@@ -42,6 +42,7 @@ var _ = ginkgo.Describe("PortMirror", func() {
 		// Restore global default values before each testcase
 		gomega.Expect(config.PrepareTestConfig()).Should(gomega.Succeed())
 		config.OVNKubernetesFeature.EnablePortMirror = true
+		config.OVNKubernetesFeature.EnableMultiNetwork = true
 		app = cli.NewApp()
 		app.Name = "portmirror"
 		app.Flags = config.Flags

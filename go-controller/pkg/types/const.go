@@ -74,6 +74,12 @@ const (
 	TransitRouterToSwitchPrefix = "trtos-"
 	SwitchToTransitRouterPrefix = "stotr-"
 
+	// Connect router prefix (for ClusterNetworkConnect feature)
+	ConnectRouterPrefix = "connect_router_"
+	// Connect router port prefixes (for ClusterNetworkConnect)
+	ConnectRouterToRouterPrefix = "crtor-"
+	RouterToConnectRouterPrefix = "rtocr-"
+
 	// DefaultACLTier Priorities
 
 	// Default routed multicast allow acl rule priority
@@ -123,6 +129,7 @@ const (
 	AminPBRReroutePriority                = 80
 	NoRerouteJoinSubnetPriority           = 81
 	EgressIPRerouteQoSRulePriority        = 103
+	NetworkConnectPolicyPriority          = 9001
 	// priority of logical router policies on a nodes gateway router
 	EgressIPSNATMarkPriority           = 95
 	EgressLiveMigrationReroutePriority = 10
@@ -161,6 +168,9 @@ const (
 	OvnRateLimitingMeter = "rate-limiter"
 	PacketsPerSecond     = "pktps"
 	MeterAction          = "drop"
+
+	// Default COPP object name
+	DefaultCOPPName = "ovnkube-default"
 
 	// OVN-K8S annotation & taint constants
 	OvnK8sPrefix = "k8s.ovn.org"

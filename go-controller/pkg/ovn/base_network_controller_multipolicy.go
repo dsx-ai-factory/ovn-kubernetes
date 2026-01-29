@@ -55,7 +55,8 @@ func (bsnc *BaseUserDefinedNetworkController) shouldApplyMultiPolicy(mpolicy *mn
 			networkName = substrings[1]
 			networkNamespace = substrings[0]
 		}
-		if bsnc.HasNAD(util.GetNADName(networkNamespace, networkName)) {
+		nadKey := util.GetNADName(networkNamespace, networkName)
+		if bsnc.networkManager.GetNetworkNameForNADKey(nadKey) == bsnc.GetNetworkName() {
 			return true
 		}
 	}

@@ -47,6 +47,7 @@ var _ = ginkgo.Describe("VirtualIP", func() {
 		// Restore global default values before each testcase
 		gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
 		config.OVNKubernetesFeature.EnableVirtualIP = true
+		config.OVNKubernetesFeature.EnableMultiNetwork = true
 		app = cli.NewApp()
 		app.Name = "VirtualIP"
 		app.Flags = config.Flags

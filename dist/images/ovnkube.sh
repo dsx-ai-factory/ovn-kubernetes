@@ -357,10 +357,16 @@ ovn_network_segmentation_enable=${OVN_NETWORK_SEGMENTATION_ENABLE:=false}
 ovn_network_connect_enable=${OVN_NETWORK_CONNECT_ENABLE:=false}
 #OVN_PRE_CONF_UDN_ADDR_ENABLE - enable connecting workloads with custom network configuration to UDNs
 ovn_pre_conf_udn_addr_enable=${OVN_PRE_CONF_UDN_ADDR_ENABLE:=false}
-#OVN_NROUTE_ADVERTISEMENTS_ENABLE - enable route advertisements for ovn-kubernetes
+#OVN_ROUTE_ADVERTISEMENTS_ENABLE - enable route advertisements for ovn-kubernetes
 ovn_route_advertisements_enable=${OVN_ROUTE_ADVERTISEMENTS_ENABLE:=false}
+#OVN_EVPN_ENABLE - enable EVPN for ovn-kubernetes
+ovn_evpn_enable=${OVN_EVPN_ENABLE:=false}
 #OVN_ADVERTISED_UDN_ISOLATION_MODE - pod network isolation between advertised UDN networks.
 ovn_advertised_udn_isolation_mode=${OVN_ADVERTISED_UDN_ISOLATION_MODE:=strict}
+#OVN_DYNAMIC_UDN_ALLOCATION - dynamic UDN allocation when a node requires it (pod or egress IP)
+ovn_enable_dynamic_udn_allocation=${OVN_DYNAMIC_UDN_ALLOCATION}
+#OVN_DYNAMIC_UDN_GRACE_PERIOD - period of time before an inactive UDN will be garbage collected
+ovn_dynamic_udn_grace_period=${OVN_DYNAMIC_UDN_GRACE_PERIOD:-}
 ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
 ovn_netflow_targets=${OVN_NETFLOW_TARGETS:-}
 ovn_sflow_targets=${OVN_SFLOW_TARGETS:-}
@@ -1479,10 +1485,28 @@ ovn-master() {
   fi
   echo "route_advertisements_enabled_flag=${route_advertisements_enabled_flag}"
 
+  evpn_enabled_flag=
+  if [[ ${ovn_evpn_enable} == "true" ]]; then
+	  evpn_enabled_flag="--enable-evpn"
+  fi
+  echo "evpn_enabled_flag=${evpn_enabled_flag}"
+
   advertised_udn_isolation_flag=
   if [[ -n ${ovn_advertised_udn_isolation_mode} ]]; then
       advertised_udn_isolation_flag="--advertised-udn-isolation-mode=${ovn_advertised_udn_isolation_mode}"
   fi
+
+  dynamic_udn_allocation_flag=
+  if [[ ${ovn_enable_dynamic_udn_allocation} == "true" ]]; then
+    dynamic_udn_allocation_flag="--enable-dynamic-udn-allocation"
+  fi
+  echo "dynamic_udn_allocation_flag=${dynamic_udn_allocation_flag}"
+
+  dynamic_udn_grace_period=
+  if [[ -n ${ovn_dynamic_udn_grace_period} ]]; then
+    dynamic_udn_grace_period="--udn-deletion-grace-period ${ovn_dynamic_udn_grace_period}"
+  fi
+  echo "dynamic_udn_grace_period=${dynamic_udn_grace_period}"
 
   egressservice_enabled_flag=
   if [[ ${ovn_egressservice_enable} == "true" ]]; then
@@ -1665,6 +1689,7 @@ ovn-master() {
     ${egressip_reachability_timeout_flag} \
     ${egressqos_enabled_flag} \
     ${egressservice_enabled_flag} \
+    ${evpn_enabled_flag} \
     ${empty_lb_events_flag} \
     ${hybrid_overlay_flags} \
     ${init_node_flags} \
@@ -1672,9 +1697,7 @@ ovn-master() {
     ${libovsdb_client_logfile_flag} \
     ${multicast_enabled_flag} \
     ${multi_network_enabled_flag} \
-    ${network_qos_enabled_flag} \
     ${network_segmentation_enabled_flag} \
-    ${nohostsubnet_label_option} \
     ${ovn_acl_logging_rate_limit_flag} \
     ${ovn_enable_svc_template_support_flag} \
     ${ovn_observ_enable_flag} \
@@ -1684,11 +1707,8 @@ ovn-master() {
     ${ovnkube_logfile_flag} \
     ${ovnkube_metrics_scale_enable_flag} \
     ${ovnkube_metrics_tls_opts} \
-    ${ovn_enable_dnsnameresolver_flag} \
     ${ovn_master_ha_opts} \
     ${ovn_master_ssl_opts} \
-    ${ovn_disable_requestedchassis_flag} \
-    ${ovn_stateless_netpol_enable_flag} \
     ${ovn_udn_allowed_default_services_flag} \
     ${ovn_v4_join_subnet_opt} \
     ${ovn_v4_masquerade_subnet_opt} \
@@ -1703,6 +1723,13 @@ ovn-master() {
     ${ovnkube_istio_ambient_snat_ipv4_flag} \
     ${ovnkube_istio_ambient_snat_ipv6_flag} \
     ${ovnkube_cluster_default_nad_flag} \
+    ${network_qos_enabled_flag} \
+    ${ovn_enable_dnsnameresolver_flag} \
+    ${nohostsubnet_label_option} \
+    ${ovn_stateless_netpol_enable_flag} \
+    ${ovn_disable_requestedchassis_flag} \
+    ${dynamic_udn_allocation_flag} \
+    ${dynamic_udn_grace_period} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
     --host-network-namespace ${ovn_host_network_namespace} \
@@ -1887,11 +1914,29 @@ ovnkube-controller() {
   fi
   echo "pre_conf_udn_addr_enable_flag=${pre_conf_udn_addr_enable_flag}"
 
+  dynamic_udn_allocation_flag=
+  if [[ ${ovn_enable_dynamic_udn_allocation} == "true" ]]; then
+    dynamic_udn_allocation_flag="--enable-dynamic-udn-allocation"
+  fi
+  echo "dynamic_udn_allocation_flag=${dynamic_udn_allocation_flag}"
+
+  dynamic_udn_grace_period=
+  if [[ -n ${ovn_dynamic_udn_grace_period} ]]; then
+    dynamic_udn_grace_period="--udn-deletion-grace-period ${ovn_dynamic_udn_grace_period}"
+  fi
+  echo "dynamic_udn_grace_period=${dynamic_udn_grace_period}"
+
   route_advertisements_enabled_flag=
   if [[ ${ovn_route_advertisements_enable} == "true" ]]; then
 	  route_advertisements_enabled_flag="--enable-route-advertisements"
   fi
   echo "route_advertisements_enabled_flag=${route_advertisements_enabled_flag}"
+
+  evpn_enabled_flag=
+  if [[ ${ovn_evpn_enable} == "true" ]]; then
+	  evpn_enabled_flag="--enable-evpn"
+  fi
+  echo "evpn_enabled_flag=${evpn_enabled_flag}"
 
   advertised_udn_isolation_flag=
   if [[ -n ${ovn_advertised_udn_isolation_mode} ]]; then
@@ -2052,6 +2097,7 @@ ovnkube-controller() {
     ${network_connect_enabled_flag} \
     ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
+    ${evpn_enabled_flag} \
     ${advertised_udn_isolation_flag} \
     ${ovn_acl_logging_rate_limit_flag} \
     ${ovn_dbs} \
@@ -2077,6 +2123,8 @@ ovnkube-controller() {
     ${ovnkube_istio_ambient_snat_ipv4_flag} \
     ${ovnkube_istio_ambient_snat_ipv6_flag} \
     ${ovnkube_cluster_default_nad_flag} \
+    ${dynamic_udn_allocation_flag} \
+    ${dynamic_udn_grace_period} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --gateway-mode=${ovn_gateway_mode} \
     --host-network-namespace ${ovn_host_network_namespace} \
@@ -2300,6 +2348,12 @@ ovnkube-controller-with-node() {
 	  route_advertisements_enabled_flag="--enable-route-advertisements"
   fi
   echo "route_advertisements_enabled_flag=${route_advertisements_enabled_flag}"
+
+  evpn_enabled_flag=
+  if [[ ${ovn_evpn_enable} == "true" ]]; then
+	  evpn_enabled_flag="--enable-evpn"
+  fi
+  echo "evpn_enabled_flag=${evpn_enabled_flag}"
 
   advertised_udn_isolation_flag=
   if [[ -n ${ovn_advertised_udn_isolation_mode} ]]; then
@@ -2560,12 +2614,6 @@ ovnkube-controller-with-node() {
   fi
   echo "ovn_enable_svc_template_support_flag=${ovn_enable_svc_template_support_flag}"
 
-  ovn_stateless_netpol_enable_flag=
-  if [[ ${ovn_stateless_netpol_enable} == "true" ]]; then
-          ovn_stateless_netpol_enable_flag="--enable-stateless-netpol"
-  fi
-  echo "ovn_stateless_netpol_enable_flag: ${ovn_stateless_netpol_enable_flag}"
-
   cluster_subnets_mac_binding_aging_option=
   if [[ ${cluster_subnets_mac_binding_aging} != "" ]]; then
       cluster_subnets_mac_binding_aging_option="--cluster-subnets-mac-binding-aging=${cluster_subnets_mac_binding_aging}"
@@ -2634,6 +2682,24 @@ ovnkube-controller-with-node() {
     ovn_observ_enable_flag="--enable-observability"
   fi
   echo "ovn_observ_enable_flag=${ovn_observ_enable_flag}"
+
+  ovn_stateless_netpol_enable_flag=
+  if [[ ${ovn_stateless_netpol_enable} == "true" ]]; then
+          ovn_stateless_netpol_enable_flag="--enable-stateless-netpol"
+  fi
+  echo "ovn_stateless_netpol_enable_flag: ${ovn_stateless_netpol_enable_flag}"
+
+  dynamic_udn_allocation_flag=
+  if [[ ${ovn_enable_dynamic_udn_allocation} == "true" ]]; then
+    dynamic_udn_allocation_flag="--enable-dynamic-udn-allocation"
+  fi
+  echo "dynamic_udn_allocation_flag=${dynamic_udn_allocation_flag}"
+
+  dynamic_udn_grace_period=
+  if [[ -n ${ovn_dynamic_udn_grace_period} ]]; then
+    dynamic_udn_grace_period="--udn-deletion-grace-period ${ovn_dynamic_udn_grace_period}"
+  fi
+  echo "dynamic_udn_grace_period=${dynamic_udn_grace_period}"
 
   ovn_disable_requestedchassis_flag=
   if [[ ${ovn_disable_requestedchassis} == "true" ]]; then
@@ -2732,6 +2798,7 @@ ovnkube-controller-with-node() {
     ${network_connect_enabled_flag} \
     ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
+    ${evpn_enabled_flag} \
     ${advertised_udn_isolation_flag} \
     ${netflow_targets} \
     ${ofctrl_wait_before_clear} \
@@ -2766,6 +2833,8 @@ ovnkube-controller-with-node() {
     ${routable_mtu_flag} \
     ${sflow_targets} \
     ${ssl_opts} \
+    ${dynamic_udn_allocation_flag} \
+    ${dynamic_udn_grace_period} \
     ${network_qos_enabled_flag} \
     ${virtualip_enabled_flag} \
     ${wait_on_ovn_install_extid_flag} \
@@ -2932,6 +3001,12 @@ ovn-cluster-manager() {
   fi
   echo "route_advertisements_enabled_flag=${route_advertisements_enabled_flag}"
 
+  evpn_enabled_flag=
+  if [[ ${ovn_evpn_enable} == "true" ]]; then
+	  evpn_enabled_flag="--enable-evpn"
+  fi
+  echo "evpn_enabled_flag=${evpn_enabled_flag}"
+
   advertised_udn_isolation_flag=
   if [[ -n ${ovn_advertised_udn_isolation_mode} ]]; then
       advertised_udn_isolation_flag="--advertised-udn-isolation-mode=${ovn_advertised_udn_isolation_mode}"
@@ -3004,6 +3079,18 @@ ovn-cluster-manager() {
   fi
   echo "ovn_enable_dnsnameresolver_flag=${ovn_enable_dnsnameresolver_flag}"
 
+  dynamic_udn_allocation_flag=
+  if [[ ${ovn_enable_dynamic_udn_allocation} == "true" ]]; then
+    dynamic_udn_allocation_flag="--enable-dynamic-udn-allocation"
+  fi
+  echo "dynamic_udn_allocation_flag=${dynamic_udn_allocation_flag}"
+
+  dynamic_udn_grace_period=
+  if [[ -n ${ovn_dynamic_udn_grace_period} ]]; then
+    dynamic_udn_grace_period="--udn-deletion-grace-period ${ovn_dynamic_udn_grace_period}"
+  fi
+  echo "dynamic_udn_grace_period=${dynamic_udn_grace_period}"
+
   echo "=============== ovn-cluster-manager ========== MASTER ONLY"
   /usr/bin/ovnkube --init-cluster-manager ${K8S_NODE} \
     ${anp_enabled_flag} \
@@ -3021,6 +3108,7 @@ ovn-cluster-manager() {
     ${network_connect_enabled_flag} \
     ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
+    ${evpn_enabled_flag} \
     ${advertised_udn_isolation_flag} \
     ${persistent_ips_enabled_flag} \
     ${ovnkube_enable_interconnect_flag} \
@@ -3034,6 +3122,8 @@ ovn-cluster-manager() {
     ${ovn_v4_transit_subnet_opt} \
     ${ovn_v6_transit_subnet_opt} \
     ${network_qos_enabled_flag} \
+    ${dynamic_udn_allocation_flag} \
+    ${dynamic_udn_grace_period} \
     ${ovn_enable_dnsnameresolver_flag} \
     --gateway-mode=${ovn_gateway_mode} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
@@ -3360,6 +3450,11 @@ ovn-node() {
 	  route_advertisements_enabled_flag="--enable-route-advertisements"
   fi
 
+  evpn_enabled_flag=
+  if [[ ${ovn_evpn_enable} == "true" ]]; then
+	  evpn_enabled_flag="--enable-evpn"
+  fi
+
   advertised_udn_isolation_flag=
   if [[ -n ${ovn_advertised_udn_isolation_mode} ]]; then
       advertised_udn_isolation_flag="--advertised-udn-isolation-mode=${ovn_advertised_udn_isolation_mode}"
@@ -3681,6 +3776,18 @@ ovn-node() {
   fi
   echo "enable_ovs_native_metrics_flag=${enable_ovs_native_metrics_flag}"
 
+  dynamic_udn_allocation_flag=
+  if [[ ${ovn_enable_dynamic_udn_allocation} == "true" ]]; then
+    dynamic_udn_allocation_flag="--enable-dynamic-udn-allocation"
+  fi
+  echo "dynamic_udn_allocation_flag=${dynamic_udn_allocation_flag}"
+
+  dynamic_udn_grace_period=
+  if [[ -n ${ovn_dynamic_udn_grace_period} ]]; then
+    dynamic_udn_grace_period="--udn-deletion-grace-period ${ovn_dynamic_udn_grace_period}"
+  fi
+  echo "dynamic_udn_grace_period=${dynamic_udn_grace_period}"
+
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
         ${anp_enabled_flag} \
@@ -3705,6 +3812,7 @@ ovn-node() {
         ${network_connect_enabled_flag} \
         ${pre_conf_udn_addr_enable_flag} \
         ${route_advertisements_enabled_flag} \
+        ${evpn_enabled_flag} \
         ${advertised_udn_isolation_flag} \
         ${netflow_targets} \
         ${northd_node_selector_label_flag} \
@@ -3738,6 +3846,8 @@ ovn-node() {
         ${wait_on_ovn_install_extid_flag} \
         ${custom_gwsnat_rules_opts} \
         ${networkprobe_enabled_flag} \
+        ${dynamic_udn_allocation_flag} \
+        ${dynamic_udn_grace_period} \
         ${network_qos_enabled_flag} \
         ${ovnkube_istio_ambient_enable_flag} \
         ${ovnkube_istio_ambient_snat_ipv4_flag} \

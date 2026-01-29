@@ -176,19 +176,20 @@ func (psas *PodSelectorAddressSet) init(bnc *BaseNetworkController) error {
 		}
 		ipv4Mode, ipv6Mode := bnc.IPMode()
 		psas.handlerResources = &PodSelectorAddrSetHandlerInfo{
-			watchFactory:         bnc.watchFactory,
-			nbClient:             bnc.nbClient,
-			nodeHostNetPodsCache: make(map[string]map[string][]net.IP),
-			policyType:           psas.policyType,
-			addressSet:           as,
-			key:                  psas.key,
-			podSelector:          psas.podSelector,
-			namespaceSelector:    psas.namespaceSelector,
-			namespace:            psas.namespace,
-			netInfo:              bnc.GetNetInfo(),
-			ipv4Mode:             ipv4Mode,
-			ipv6Mode:             ipv6Mode,
-			stopChan:             psas.cancelableContext.Done(),
+			watchFactory:            bnc.watchFactory,
+			nbClient:                bnc.nbClient,
+			nodeHostNetPodsCache:    make(map[string]map[string][]net.IP),
+			policyType:              psas.policyType,
+			addressSet:              as,
+			key:                     psas.key,
+			podSelector:             psas.podSelector,
+			namespaceSelector:       psas.namespaceSelector,
+			namespace:               psas.namespace,
+			netInfo:                 bnc.GetNetInfo(),
+			getNetworkNameForNADKey: bnc.getNetworkNameForNADKeyFunc(),
+			ipv4Mode:                ipv4Mode,
+			ipv6Mode:                ipv6Mode,
+			stopChan:                psas.cancelableContext.Done(),
 		}
 	}
 
@@ -333,9 +334,10 @@ type PodSelectorAddrSetHandlerInfo struct {
 	// namespace is used when namespaceSelector is nil to set static namespace
 	namespace string
 
-	netInfo  util.NetInfo
-	ipv4Mode bool
-	ipv6Mode bool
+	netInfo                 util.NetInfo
+	getNetworkNameForNADKey func(nadKey string) string
+	ipv4Mode                bool
+	ipv6Mode                bool
 
 	stopChan <-chan struct{}
 }
@@ -400,7 +402,7 @@ func (handlerInfo *PodSelectorAddrSetHandlerInfo) addPods(pods ...*corev1.Pod) e
 					pod.Namespace, pod.Name, pod.Spec.NodeName, err)
 			}
 		} else {
-			podIPs, err := util.GetPodIPsOfNetwork(pod, handlerInfo.netInfo)
+			podIPs, err := util.GetPodIPsOfNetwork(pod, handlerInfo.netInfo, handlerInfo.getNetworkNameForNADKey)
 			if err != nil {
 				// not finding pod IPs on a remote pod is common until the other node wires the pod, suppress it
 				return ovntypes.NewSuppressedError(err)
@@ -422,7 +424,7 @@ func (handlerInfo *PodSelectorAddrSetHandlerInfo) deletePod(pod *corev1.Pod) err
 		return delHostnetworkPodIPFromAddressSet(pod.Spec.NodeName, fmt.Sprintf("%s/%s", pod.Namespace, pod.Name),
 			handlerInfo.addressSet, handlerInfo.nodeHostNetPodsCache)
 	}
-	ips, err := util.GetPodIPsOfNetwork(pod, handlerInfo.netInfo)
+	ips, err := util.GetPodIPsOfNetwork(pod, handlerInfo.netInfo, handlerInfo.getNetworkNameForNADKey)
 	if err != nil {
 		// if pod ips can't be fetched on delete, we don't expect that information about ips will ever be updated,
 		// therefore just log the error and return.
@@ -508,7 +510,7 @@ func (bnc *BaseNetworkController) podSelectorPodNeedsDelete(pod *corev1.Pod, pod
 	if !util.PodCompleted(pod) {
 		return "", nil
 	}
-	ips, err := util.GetPodIPsOfNetwork(pod, bnc.GetNetInfo())
+	ips, err := util.GetPodIPsOfNetwork(pod, bnc.GetNetInfo(), bnc.getNetworkNameForNADKeyFunc())
 	if err != nil {
 		// if pod has no IP, nothing to do
 		klog.Warningf("Failed to get IPs of pod %s/%s during address_set pod selector removal: %v",
@@ -523,7 +525,7 @@ func (bnc *BaseNetworkController) podSelectorPodNeedsDelete(pod *corev1.Pod, pod
 	}
 
 	// completed pod be deleted a long time ago, check if there is a new pod with that same ip
-	collidingPod, err := findPodWithIPAddresses(bnc.watchFactory, bnc.GetNetInfo(), ips, nodeName)
+	collidingPod, err := findPodWithIPAddresses(bnc.watchFactory, bnc.GetNetInfo(), ips, nodeName, bnc.getNetworkNameForNADKeyFunc())
 	if err != nil {
 		return "", fmt.Errorf("lookup for pods with the same IPs [%s] failed: %w", util.JoinIPs(ips, " "), err)
 	}

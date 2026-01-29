@@ -661,7 +661,7 @@ func (bnc *BaseNetworkController) syncAdminPBRPeriodic() {
 	for index := range ovnPolicies {
 		policy := ovnPolicies[index]
 		nad := policy.ExternalIDs[types.ExternalIDNetAttachDef]
-		if !bnc.HasNAD(nad) {
+		if bnc.networkManager.GetNetworkNameForNADKey(nad) != bnc.GetNetworkName() {
 			// not managed by this controller
 			continue
 		}

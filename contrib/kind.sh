@@ -53,8 +53,11 @@ usage() {
     echo "                 [-ic | --enable-interconnect]"
     echo "                 [-nce | --network-connect-enable]"
     echo "                 [-uae | --preconfigured-udn-addresses-enable]"
-    echo "                 [-rae | --enable-route-advertisements]"
+    echo "                 [-rae | --route-advertisements-enable]"
+    echo "                 [-evpn | --evpn-enable]"
     echo "                 [-rud | --routed-udn-isolation-disable]"
+    echo "                 [-dudn | --dynamic-udn-allocation]"
+    echo "                 [-dug | --dynamic-udn-removal-grace-period <seconds>]"
     echo "                 [-adv | --advertise-default-network]"
     echo "                 [-nqe | --network-qos-enable]"
     echo "                 [--isolated]"
@@ -132,7 +135,10 @@ echo "--add-nodes                                   Adds nodes to an existing cl
 echo "-dns | --enable-dnsnameresolver               Enable DNSNameResolver for resolving the DNS names used in the DNS rules of EgressFirewall."
 echo "-obs | --observability                        Enable OVN Observability feature."
 echo "-uae | --preconfigured-udn-addresses-enable   Enable connecting workloads with preconfigured network to user-defined networks"
-echo "-rae | --enable-route-advertisements          Enable route advertisements"
+echo "-rae | --route-advertisements-enable          Enable route advertisements"
+echo "-evpn | --evpn-enable                         Enable EVPN"
+echo "-dudn | --dynamic-udn-allocation              Enable dynamic UDN allocation"
+echo "-dug | --dynamic-udn-removal-grace-period <seconds>     Configure the grace period in seconds for dynamic UDN removal. DEFAULT: 120 seconds"
 echo "-adv | --advertise-default-network            Applies a RouteAdvertisements configuration to advertise the default network on all nodes"
 echo "-rud | --routed-udn-isolation-disable         Disable isolation across BGP-advertised UDNs (sets advertised-udn-isolation-mode=loose). DEFAULT: strict."
 echo "-mps | --multi-pod-subnet                     Use multiple subnets for the default cluster network"
@@ -340,6 +346,8 @@ parse_args() {
                                                   ;;
             -rae | --route-advertisements-enable) ENABLE_ROUTE_ADVERTISEMENTS=true
                                                   ;;
+            -evpn | --evpn-enable)              ENABLE_EVPN=true
+                                                  ;;
             -adv | --advertise-default-network) ADVERTISE_DEFAULT_NETWORK=true
                                                   ;;
             -rud | --routed-udn-isolation-disable) ADVERTISED_UDN_ISOLATION_MODE=loose
@@ -347,6 +355,19 @@ parse_args() {
             -ce | --enable-central )              echo "WARNING: --enable-central is deprecated. OVN Central (Legacy Architecture) will be removed in a future release." >&2
                                                   OVN_ENABLE_INTERCONNECT=false
                                                   CENTRAL_ARG_PROVIDED=true
+                                                  ;;
+            -dudn | --dynamic-udn-allocation)     DYNAMIC_UDN_ALLOCATION=true
+                                                  ;;
+            -dug  | --dynamic-udn-removal-grace-period) shift
+                                                  if [[ -z "${1:-}" || "${1:-}" == -* ]]; then
+                                                    echo "Missing value for --dynamic-udn-removal-grace-period" >&2
+                                                    usage
+                                                    exit 1
+                                                  fi
+                                                  DYNAMIC_UDN_GRACE_PERIOD=$1
+                                                  if [[ "$DYNAMIC_UDN_GRACE_PERIOD" =~ ^[0-9]+$ ]]; then
+                                                    DYNAMIC_UDN_GRACE_PERIOD="${DYNAMIC_UDN_GRACE_PERIOD}s"
+                                                  fi
                                                   ;;
             -ic | --enable-interconnect )         OVN_ENABLE_INTERCONNECT=true
                                                   IC_ARG_PROVIDED=true
@@ -450,9 +471,12 @@ print_params() {
      echo "ENABLE_NETWORK_SEGMENTATION= $ENABLE_NETWORK_SEGMENTATION"
      echo "ENABLE_NETWORK_CONNECT = $ENABLE_NETWORK_CONNECT"
      echo "ENABLE_ROUTE_ADVERTISEMENTS= $ENABLE_ROUTE_ADVERTISEMENTS"
+     echo "ENABLE_EVPN= $ENABLE_EVPN"
      echo "ADVERTISED_UDN_ISOLATION_MODE= $ADVERTISED_UDN_ISOLATION_MODE"
      echo "ADVERTISE_DEFAULT_NETWORK = $ADVERTISE_DEFAULT_NETWORK"
      echo "ENABLE_PRE_CONF_UDN_ADDR = $ENABLE_PRE_CONF_UDN_ADDR"
+     echo "DYNAMIC_UDN_ALLOCATION = $DYNAMIC_UDN_ALLOCATION"
+     echo "DYNAMIC_UDN_GRACE_PERIOD =  $DYNAMIC_UDN_GRACE_PERIOD"
      echo "OVN_ENABLE_INTERCONNECT = $OVN_ENABLE_INTERCONNECT"
      if [ "$OVN_ENABLE_INTERCONNECT" == true ]; then
        echo "KIND_NUM_NODES_PER_ZONE = $KIND_NUM_NODES_PER_ZONE"
@@ -700,6 +724,12 @@ set_default_params() {
     exit 1
   fi
 
+  ENABLE_EVPN=${ENABLE_EVPN:-false}
+  if [ "$ENABLE_EVPN" == true ] && [ "$ENABLE_ROUTE_ADVERTISEMENTS" != true ]; then
+    echo "EVPN requires Route advertisements to be enabled (-rae)"
+    exit 1
+  fi
+
   ENABLE_PRE_CONF_UDN_ADDR=${ENABLE_PRE_CONF_UDN_ADDR:-false}
   if [[ $ENABLE_PRE_CONF_UDN_ADDR == true && $ENABLE_NETWORK_SEGMENTATION != true ]]; then
     echo "Preconfigured UDN addresses requires network-segmentation to be enabled (-nse)"
@@ -709,11 +739,19 @@ set_default_params() {
     echo "Preconfigured UDN addresses requires interconnect to be enabled (-ic)"
     exit 1
   fi
+
   ENABLE_NETWORK_CONNECT=${ENABLE_NETWORK_CONNECT:-false}
   if [[ $ENABLE_NETWORK_CONNECT == true && $ENABLE_NETWORK_SEGMENTATION != true ]]; then
     echo "Network connect requires network-segmentation to be enabled (-nse)"
     exit 1
   fi
+
+  DYNAMIC_UDN_ALLOCATION=${DYNAMIC_UDN_ALLOCATION:-false}
+  if [[ $DYNAMIC_UDN_ALLOCATION == true && $ENABLE_NETWORK_SEGMENTATION != true ]]; then
+      echo "Dynamic UDN allocation requires network-segmentation to be enabled (-nse)"
+      exit 1
+  fi
+  DYNAMIC_UDN_GRACE_PERIOD=${DYNAMIC_UDN_GRACE_PERIOD:-120s}
   ADVERTISED_UDN_ISOLATION_MODE=${ADVERTISED_UDN_ISOLATION_MODE:-strict}
   ADVERTISE_DEFAULT_NETWORK=${ADVERTISE_DEFAULT_NETWORK:-false}
   OVN_COMPACT_MODE=${OVN_COMPACT_MODE:-false}
@@ -995,7 +1033,10 @@ create_ovn_kube_manifests() {
     --network-segmentation-enable="${ENABLE_NETWORK_SEGMENTATION}" \
     --network-connect-enable="${ENABLE_NETWORK_CONNECT}" \
     --preconfigured-udn-addresses-enable="${ENABLE_PRE_CONF_UDN_ADDR}" \
+    --enable-dynamic-udn-allocation="${DYNAMIC_UDN_ALLOCATION}" \
+    --udn-deletion-grace-period="${DYNAMIC_UDN_GRACE_PERIOD}" \
     --route-advertisements-enable="${ENABLE_ROUTE_ADVERTISEMENTS}" \
+    --evpn-enable="${ENABLE_EVPN}" \
     --advertise-default-network="${ADVERTISE_DEFAULT_NETWORK}" \
     --advertised-udn-isolation-mode="${ADVERTISED_UDN_ISOLATION_MODE}" \
     --ovnkube-metrics-scale-enable="${OVN_METRICS_SCALE_ENABLE}" \
@@ -1102,6 +1143,7 @@ install_ovn() {
   if [ "$ENABLE_NETWORK_CONNECT" == true ]; then
     run_kubectl apply -f k8s.ovn.org_clusternetworkconnects.yaml
   fi
+  run_kubectl apply -f k8s.ovn.org_vteps.yaml
   # NOTE: When you update vendoring versions for the ANP & BANP APIs, we must update the version of the CRD we pull from in the below URL
   run_kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.5/config/crd/experimental/policy.networking.k8s.io_adminnetworkpolicies.yaml
   run_kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.5/config/crd/experimental/policy.networking.k8s.io_baselineadminnetworkpolicies.yaml

@@ -162,11 +162,12 @@ var (
 	// Metrics holds Prometheus metrics-related parameters.
 	Metrics MetricsConfig
 
-	// OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
+	// OVNKubernetesFeature config holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
 	OVNKubernetesFeature = OVNKubernetesFeatureConfig{
 		EgressIPReachabiltyTotalTimeout: 1,
 		IstioAmbientSNATIPv4:            "169.254.7.127",
 		AdvertisedUDNIsolationMode:      AdvertisedUDNIsolationModeStrict,
+		UDNDeletionGracePeriod:          120 * time.Second,
 	}
 
 	// OvnNorth holds northbound OVN database client and server authentication and location details
@@ -508,6 +509,7 @@ type OVNKubernetesFeatureConfig struct {
 	EnableNetworkConnect            bool `gcfg:"enable-network-connect"`
 	EnablePreconfiguredUDNAddresses bool `gcfg:"enable-preconfigured-udn-addresses"`
 	EnableRouteAdvertisements       bool `gcfg:"enable-route-advertisements"`
+	EnableEVPN                      bool `gcfg:"enable-evpn"`
 	EnableMultiNetworkPolicy        bool `gcfg:"enable-multi-networkpolicy"`
 	EnableStatelessNetPol           bool `gcfg:"enable-stateless-netpol"`
 	EnableInterconnect              bool `gcfg:"enable-interconnect"`
@@ -537,6 +539,10 @@ type OVNKubernetesFeatureConfig struct {
 	// This feature requires a kernel fix https://github.com/torvalds/linux/commit/7f3287db654395f9c5ddd246325ff7889f550286
 	// to work on a kind cluster. Flag allows to disable it for current CI, will be turned on when github runners have this fix.
 	AdvertisedUDNIsolationMode string `gcfg:"advertised-udn-isolation-mode"`
+	EnableDynamicUDNAllocation bool   `gcfg:"enable-dynamic-udn-allocation"`
+	// UDNDeletionGracePeriod specified in number of seconds to wait before garbage collecting a UDN. Applies
+	// only when Dynamic UDN Allocation is enabled.
+	UDNDeletionGracePeriod time.Duration `gcfg:"udn-deletion-grace-period"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -1298,6 +1304,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Destination: &cliConfig.OVNKubernetesFeature.EnableRouteAdvertisements,
 		Value:       OVNKubernetesFeature.EnableRouteAdvertisements,
 	},
+	&cli.BoolFlag{
+		Name:        "enable-evpn",
+		Usage:       "Use EVPN feature with ovn-kubernetes. Requires route advertisements.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableEVPN,
+		Value:       OVNKubernetesFeature.EnableEVPN,
+	},
 	&cli.StringFlag{
 		Name:        "advertised-udn-isolation-mode",
 		Usage:       "Use pod isolation for BGP advertised UDN networks. Valid values are 'strict' or 'loose'.",
@@ -1393,6 +1405,19 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "The IPv6 SNAT IP address used by Istio Ambient for kubelet health checks. If specified, enables dual-stack mode. If empty, only IPv4 mode is used.",
 		Destination: &cliConfig.OVNKubernetesFeature.IstioAmbientSNATIPv6,
 		Value:       OVNKubernetesFeature.IstioAmbientSNATIPv6,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-dynamic-udn-allocation",
+		Usage:       "Configure to use the dynamic UDN allocation feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableDynamicUDNAllocation,
+		Value:       OVNKubernetesFeature.EnableDynamicUDNAllocation,
+	},
+	&cli.DurationFlag{
+		Name: "udn-deletion-grace-period",
+		Usage: "Delay time in seconds that a node will wait before removing a UDN when the dynamic UDN allocation " +
+			"feature is used.",
+		Destination: &cliConfig.OVNKubernetesFeature.UDNDeletionGracePeriod,
+		Value:       OVNKubernetesFeature.UDNDeletionGracePeriod,
 	},
 }
 
@@ -2372,6 +2397,12 @@ func buildOVNKubernetesFeatureConfig(cli, file *config) error {
 		return fmt.Errorf("invalid advertised-udn-isolation-mode %q: expect one of %s or %s",
 			OVNKubernetesFeature.AdvertisedUDNIsolationMode, AdvertisedUDNIsolationModeStrict, AdvertisedUDNIsolationModeLoose)
 	}
+	if OVNKubernetesFeature.EnableEVPN && !OVNKubernetesFeature.EnableRouteAdvertisements {
+		return fmt.Errorf("invalid feature configuration: EVPN requires route advertisements but route advertisements are disabled")
+	}
+	if OVNKubernetesFeature.EnableDynamicUDNAllocation && !OVNKubernetesFeature.EnableNetworkSegmentation {
+		return fmt.Errorf("the Dynamic UDN Allocation feature cannot be enabled without also enabling Network Segmentation")
+	}
 	return nil
 }
 
@@ -2827,6 +2858,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
+	klog.V(5).Infof("Features config: %+v", OVNKubernetesFeature)
 	klog.V(5).Infof("Default config: %+v", Default)
 	klog.V(5).Infof("Logging config: %+v", Logging)
 	klog.V(5).Infof("Monitoring config: %+v", Monitoring)

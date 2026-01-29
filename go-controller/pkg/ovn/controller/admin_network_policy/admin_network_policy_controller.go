@@ -517,8 +517,8 @@ func (c *Controller) onANPPodUpdate(oldObj, newObj interface{}) {
 	// zones. Rest of the cases we may return
 	oldPodLabels := labels.Set(oldPod.Labels)
 	newPodLabels := labels.Set(newPod.Labels)
-	oldPodIPs, _ := util.GetPodIPsOfNetwork(oldPod, c.NetInfo)
-	newPodIPs, _ := util.GetPodIPsOfNetwork(newPod, c.NetInfo)
+	oldPodIPs, _ := util.GetPodIPsOfNetwork(oldPod, c.NetInfo, nil)
+	newPodIPs, _ := util.GetPodIPsOfNetwork(newPod, c.NetInfo, nil)
 	oldPodRunning := util.PodRunning(oldPod)
 	newPodRunning := util.PodRunning(newPod)
 	oldPodCompleted := util.PodCompleted(oldPod)
