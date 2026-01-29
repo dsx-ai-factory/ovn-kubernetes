@@ -1261,6 +1261,10 @@ func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf, annotations map[string]s
 	if err != nil {
 		return nil, err
 	}
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		// NAD interconnect is not supported in IC mode yet
+		ni.connectToNAD = ""
+	}
 	ni.ipv4mode, ni.ipv6mode = getIPMode(subnets)
 	return ni, nil
 }
