@@ -345,8 +345,6 @@ ovn_admin_pbr_enable=${OVN_ADMIN_PBR_ENABLE:-false}
 ovn_virtualip_enable=${OVN_VIRTUALIP_ENABLE:-false}
 #OVN_IPRESERVATION_ENABLE - enable ipreservation for ovn-kubernetes
 ovn_ipreservation_enable=${OVN_IPRESERVATION_ENABLE:-false}
-#OVN_NETWORKPROBE_ENABLE - enable networkprobe for ovn-kubernetes
-ovn_networkprobe_enable=${OVN_NETWORKPROBE_ENABLE:-false}
 #OVN_PORT_MIRROR_ENABLE - enable port mirror for ovn-kubernetes
 ovn_port_mirror_enable=${OVN_PORT_MIRROR_ENABLE:-false}
 #OVN_MULTI_NETWORK_ENABLE - enable multiple network support for ovn-kubernetes
@@ -2644,12 +2642,6 @@ ovnkube-controller-with-node() {
   fi
   echo "port_mirror_enabled_flag: ${port_mirror_enabled_flag}"
 
-  networkprobe_enabled_flag=
-  if [[ ${ovn_networkprobe_enable} == "true" ]]; then
-    networkprobe_enabled_flag="--enable-network-probe"
-  fi
-  echo "networkprobe_enabled_flag: ${networkprobe_enabled_flag}"
-
   ovn_conntrack_zone_flag=
   if [[ ${ovn_conntrack_zone} != "" ]]; then
      ovn_conntrack_zone_flag="--conntrack-zone=${ovn_conntrack_zone}"
@@ -2793,7 +2785,6 @@ ovnkube-controller-with-node() {
     ${monitor_all} \
     ${multicast_enabled_flag} \
     ${multi_network_enabled_flag} \
-    ${networkprobe_enabled_flag} \
     ${network_segmentation_enabled_flag} \
     ${network_connect_enabled_flag} \
     ${pre_conf_udn_addr_enable_flag} \
@@ -3414,11 +3405,6 @@ ovn-node() {
 	  port_mirror_enabled_flag="--enable-port-mirror"
   fi
 
-  networkprobe_enabled_flag=
-  if [[ ${ovnkube_node_mode} != "dpu" ]] && [[ ${ovn_networkprobe_enable} == "true" ]]; then
-    networkprobe_enabled_flag="--enable-network-probe"
-  fi
-
   wait_on_ovn_install_extid_flag=
   if [[ ${ovnkube_wait_on_ovn_install_extid} == "true" ]]; then
       wait_on_ovn_install_extid_flag="--ovnkube-wait-on-ovn-install-extid"
@@ -3845,7 +3831,6 @@ ovn-node() {
         ${sflow_targets} \
         ${wait_on_ovn_install_extid_flag} \
         ${custom_gwsnat_rules_opts} \
-        ${networkprobe_enabled_flag} \
         ${dynamic_udn_allocation_flag} \
         ${dynamic_udn_grace_period} \
         ${network_qos_enabled_flag} \

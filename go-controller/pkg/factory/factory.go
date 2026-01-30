@@ -93,9 +93,6 @@ import (
 	ipreservationinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/informers/externalversions"
 	ipresvinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/informers/externalversions/ipreservation/v1beta1"
 	ipreservationlister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/listers/ipreservation/v1beta1"
-	networkprobeapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1"
-	networkprobeinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1/apis/informers/externalversions"
-	networkprobeinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1/apis/informers/externalversions/networkprobe/v1beta1"
 	networkqosapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1"
 	networkqosscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/clientset/versioned/scheme"
 	networkqosinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/informers/externalversions"
@@ -142,7 +139,6 @@ type WatchFactory struct {
 	adminPBRFactory      adminpbrinformerfactory.SharedInformerFactory
 	vipFactory           virtualipinformerfactory.SharedInformerFactory
 	ipresvFactory        ipreservationinformerfactory.SharedInformerFactory
-	networkprobeFactory  networkprobeinformerfactory.SharedInformerFactory
 	apbRouteFactory      adminbasedpolicyinformerfactory.SharedInformerFactory
 	portMirrorFactory    portmirrorinformerfactory.SharedInformerFactory
 	ipamClaimsFactory    ipamclaimsfactory.SharedInformerFactory
@@ -281,7 +277,6 @@ var (
 	NetworkAttachmentDefinitionType       reflect.Type = reflect.TypeOf(&nadapi.NetworkAttachmentDefinition{})
 	MultiNetworkPolicyType                reflect.Type = reflect.TypeOf(&mnpapi.MultiNetworkPolicy{})
 	IPReservationType                     reflect.Type = reflect.TypeOf(&ipreservationapi.IPReservation{})
-	NetworkProbeType                      reflect.Type = reflect.TypeOf(&networkprobeapi.NetworkProbe{})
 	PortMirrorType                        reflect.Type = reflect.TypeOf(&portmirrorapi.PortMirror{})
 	IPAMClaimsType                        reflect.Type = reflect.TypeOf(&ipamclaimsapi.IPAMClaim{})
 	UserDefinedNetworkType                reflect.Type = reflect.TypeOf(&userdefinednetworkapi.UserDefinedNetwork{})
@@ -357,7 +352,6 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		adminPBRFactory:      adminpbrinformerfactory.NewSharedInformerFactory(ovnClientset.AdminPBRClient, resyncInterval),
 		vipFactory:           virtualipinformerfactory.NewSharedInformerFactory(ovnClientset.VirtualIPClient, resyncInterval),
 		apbRouteFactory:      adminbasedpolicyinformerfactory.NewSharedInformerFactory(ovnClientset.AdminPolicyRouteClient, resyncInterval),
-		networkprobeFactory:  networkprobeinformerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.NetworkProbeClient, resyncInterval, networkprobeinformerfactory.WithNamespace(config.Kubernetes.OVNConfigNamespace)),
 		portMirrorFactory:    portmirrorinformerfactory.NewSharedInformerFactory(ovnClientset.PortMirrorClient, resyncInterval),
 		networkQoSFactory:    networkqosinformerfactory.NewSharedInformerFactory(ovnClientset.NetworkQoSClient, resyncInterval),
 		informers:            make(map[reflect.Type]*informer),
@@ -396,9 +390,6 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		return nil, err
 	}
 	if err := routeadvertisementsapi.AddToScheme(routeadvertisementsscheme.Scheme); err != nil {
-		return nil, err
-	}
-	if err := networkprobeapi.AddToScheme(scheme.Scheme); err != nil {
 		return nil, err
 	}
 	if err := portmirrorapi.AddToScheme(scheme.Scheme); err != nil {
@@ -623,46 +614,6 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		wf.raFactory.K8s().V1().RouteAdvertisements().Informer()
 	}
 
-	if config.OVNKubernetesFeature.EnableNetworkProbe {
-		wf.informers[NetworkProbeType], err = newQueuedInformer(NetworkProbeType,
-			wf.networkprobeFactory.K8s().V1beta1().NetworkProbes().Informer(),
-			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize)
-		if err != nil {
-			return nil, err
-		}
-
-		// currently, we need this only for network probe feature
-		// watch configmaps only in ovn-kubernetes namespace
-		wf.iFactory.InformerFor(&corev1.ConfigMap{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-			return v1coreinformers.NewConfigMapInformer(
-				c,
-				config.Kubernetes.OVNConfigNamespace,
-				resyncPeriod,
-				cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
-		})
-		wf.informers[ConfigMapType], err = newQueuedInformer(ConfigMapType,
-			wf.iFactory.Core().V1().ConfigMaps().Informer(),
-			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize)
-		if err != nil {
-			return nil, err
-		}
-
-		// watch secrets only in ovn-kubernetes namespace
-		wf.iFactory.InformerFor(&corev1.Secret{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-			return v1coreinformers.NewSecretInformer(
-				c,
-				config.Kubernetes.OVNConfigNamespace,
-				resyncPeriod,
-				cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
-		})
-
-		wf.informers[SecretType], err = newQueuedInformer(SecretType,
-			wf.iFactory.Core().V1().Secrets().Informer(),
-			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize)
-		if err != nil {
-			return nil, err
-		}
-	}
 	if util.IsNetworkConnectEnabled() {
 		wf.cncFactory = networkconnectinformerfactory.NewSharedInformerFactory(ovnClientset.NetworkConnectClient, resyncInterval)
 		wf.informers[ClusterNetworkConnectType], err = newQueuedInformer(ClusterNetworkConnectType, wf.cncFactory.K8s().V1().ClusterNetworkConnects().Informer(),
@@ -754,15 +705,6 @@ func (wf *WatchFactory) Start() error {
 	if config.OVNKubernetesFeature.EnableIPReservation && wf.ipresvFactory != nil {
 		wf.ipresvFactory.Start(wf.stopChan)
 		for oType, synced := range wf.ipresvFactory.WaitForCacheSync(wf.stopChan) {
-			if !synced {
-				return fmt.Errorf("error in syncing cache for %v informer", oType)
-			}
-		}
-	}
-
-	if config.OVNKubernetesFeature.EnableNetworkProbe && wf.networkprobeFactory != nil {
-		wf.networkprobeFactory.Start(wf.stopChan)
-		for oType, synced := range wf.networkprobeFactory.WaitForCacheSync(wf.stopChan) {
 			if !synced {
 				return fmt.Errorf("error in syncing cache for %v informer", oType)
 			}
@@ -1129,55 +1071,6 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeNames []string
 		}
 	}
 
-	if config.OVNKubernetesFeature.EnableNetworkProbe && config.OvnKubeNode.Mode != types.NodeModeDPU {
-		wf.networkprobeFactory = networkprobeinformerfactory.NewSharedInformerFactoryWithOptions(
-			ovnClientset.NetworkProbeClient,
-			resyncInterval,
-			networkprobeinformerfactory.WithNamespace(config.Kubernetes.OVNConfigNamespace))
-
-		if err := networkprobeapi.AddToScheme(scheme.Scheme); err != nil {
-			return nil, err
-		}
-		wf.informers[NetworkProbeType], err = newQueuedInformer(NetworkProbeType,
-			wf.networkprobeFactory.K8s().V1beta1().NetworkProbes().Informer(),
-			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize)
-		if err != nil {
-			return nil, err
-		}
-
-		// currently, we need this only for network probe feature
-		// watch configmaps only in ovn-kubernetes namespace
-		wf.iFactory.InformerFor(&corev1.ConfigMap{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-			return v1coreinformers.NewConfigMapInformer(
-				c,
-				config.Kubernetes.OVNConfigNamespace,
-				resyncPeriod,
-				cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
-		})
-		wf.informers[ConfigMapType], err = newQueuedInformer(ConfigMapType,
-			wf.iFactory.Core().V1().ConfigMaps().Informer(),
-			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize)
-		if err != nil {
-			return nil, err
-		}
-
-		// watch secrets only in ovn-kubernetes namespace
-		wf.iFactory.InformerFor(&corev1.Secret{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-			return v1coreinformers.NewSecretInformer(
-				c,
-				config.Kubernetes.OVNConfigNamespace,
-				resyncPeriod,
-				cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
-		})
-
-		wf.informers[SecretType], err = newQueuedInformer(SecretType,
-			wf.iFactory.Core().V1().Secrets().Informer(),
-			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	return wf, nil
 }
 
@@ -1528,10 +1421,6 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 		if portMirrow, ok := obj.(*portmirrorapi.PortMirror); ok {
 			return &portMirrow.ObjectMeta, nil
 		}
-	case NetworkProbeType:
-		if networkProbe, ok := obj.(*networkprobeapi.NetworkProbe); ok {
-			return &networkProbe.ObjectMeta, nil
-		}
 	case ClusterNetworkConnectType:
 		if cnc, ok := obj.(*networkconnectapi.ClusterNetworkConnect); ok {
 			return &cnc.ObjectMeta, nil
@@ -1579,8 +1468,6 @@ func (wf *WatchFactory) GetHandlerPriority(objType reflect.Type) (priority int) 
 	case PortMirrorType:
 		return 1
 	case IPReservationType:
-		return 1
-	case NetworkProbeType:
 		return 1
 	default:
 		return defaultHandlerPriority
@@ -2275,10 +2162,6 @@ func (wf *WatchFactory) EgressServiceInformer() egressserviceinformer.EgressServ
 
 func (wf *WatchFactory) APBRouteInformer() adminpolicybasedrouteinformer.AdminPolicyBasedExternalRouteInformer {
 	return wf.apbRouteFactory.K8s().V1().AdminPolicyBasedExternalRoutes()
-}
-
-func (wf *WatchFactory) NetworkProbeInformer() networkprobeinformer.NetworkProbeInformer {
-	return wf.networkprobeFactory.K8s().V1beta1().NetworkProbes()
 }
 
 func (wf *WatchFactory) ANPInformer() anpinformer.AdminNetworkPolicyInformer {

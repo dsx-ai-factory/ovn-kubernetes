@@ -1,3 +1,0 @@
-FROM alpine:edge
-COPY ovnkube-networkprobe-target /usr/bin/
-ENTRYPOINT ["ovnkube-networkprobe-target"]

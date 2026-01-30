@@ -55,7 +55,6 @@ import (
 	egressqosclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned"
 	egressserviceclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned"
 	ipresvclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/clientset/versioned"
-	networkprobeclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1/apis/clientset/versioned"
 	networkqosclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/clientset/versioned"
 	portmirrorclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned"
 	routeadvertisementsclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned"
@@ -85,7 +84,6 @@ type OVNClientset struct {
 	VirtualIPClient           virtualipclientset.Interface
 	IPReservationClient       ipresvclientset.Interface
 	PortMirrorClient          portmirrorclientset.Interface
-	NetworkProbeClient        networkprobeclientset.Interface
 	NetworkQoSClient          networkqosclientset.Interface
 }
 
@@ -110,7 +108,6 @@ type OVNMasterClientset struct {
 	VirtualIPClient           virtualipclientset.Interface
 	IPReservationClient       ipresvclientset.Interface
 	PortMirrorClient          portmirrorclientset.Interface
-	NetworkProbeClient        networkprobeclientset.Interface
 	NetworkQoSClient          networkqosclientset.Interface
 }
 
@@ -133,7 +130,6 @@ type OVNKubeControllerClientset struct {
 	VirtualIPClient           virtualipclientset.Interface
 	IPReservationClient       ipresvclientset.Interface
 	PortMirrorClient          portmirrorclientset.Interface
-	NetworkProbeClient        networkprobeclientset.Interface
 	NetworkQoSClient          networkqosclientset.Interface
 	NetworkConnectClient      networkconnectclientset.Interface
 }
@@ -147,7 +143,6 @@ type OVNNodeClientset struct {
 	UserDefinedNetworkClient  userdefinednetworkclientset.Interface
 	RouteAdvertisementsClient routeadvertisementsclientset.Interface
 	PortMirrorClient          portmirrorclientset.Interface
-	NetworkProbeClient        networkprobeclientset.Interface
 }
 
 type OVNClusterManagerClientset struct {
@@ -247,7 +242,6 @@ func (cs *OVNClientset) GetOVNKubeControllerClientset() *OVNKubeControllerClient
 		VirtualIPClient:           cs.VirtualIPClient,
 		IPReservationClient:       cs.IPReservationClient,
 		PortMirrorClient:          cs.PortMirrorClient,
-		NetworkProbeClient:        cs.NetworkProbeClient,
 		NetworkQoSClient:          cs.NetworkQoSClient,
 		NetworkConnectClient:      cs.NetworkConnectClient,
 	}
@@ -285,7 +279,6 @@ func (cs *OVNClientset) GetNodeClientset() *OVNNodeClientset {
 		UserDefinedNetworkClient:  cs.UserDefinedNetworkClient,
 		RouteAdvertisementsClient: cs.RouteAdvertisementsClient,
 		PortMirrorClient:          cs.PortMirrorClient,
-		NetworkProbeClient:        cs.NetworkProbeClient,
 	}
 }
 
@@ -296,7 +289,6 @@ func (cs *OVNMasterClientset) GetNodeClientset() *OVNNodeClientset {
 		EgressIPClient:            cs.EgressIPClient,
 		NetworkAttchDefClient:     cs.NetworkAttchDefClient,
 		RouteAdvertisementsClient: cs.RouteAdvertisementsClient,
-		NetworkProbeClient:        cs.NetworkProbeClient,
 	}
 }
 
@@ -573,10 +565,6 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 	if err != nil {
 		return nil, err
 	}
-	networkProbeClientset, err := networkprobeclientset.NewForConfig(kconfig)
-	if err != nil {
-		return nil, err
-	}
 	portMirrorClientset, err := portmirrorclientset.NewForConfig(kconfig)
 	if err != nil {
 		return nil, err
@@ -628,7 +616,6 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		VirtualIPClient:           virtualIPClientset,
 		IPReservationClient:       ipReservationClientset,
 		PortMirrorClient:          portMirrorClientset,
-		NetworkProbeClient:        networkProbeClientset,
 		NetworkQoSClient:          networkqosClientset,
 	}, nil
 }
