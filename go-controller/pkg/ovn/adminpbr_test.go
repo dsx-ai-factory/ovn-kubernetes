@@ -53,6 +53,7 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 		config.OVNKubernetesFeature.EnableAdminPolicyBasedRouting = true
 		config.OVNKubernetesFeature.EnableEgressFirewall = false
 		config.OVNKubernetesFeature.EnableEgressIP = false
+		config.OVNKubernetesFeature.EnableMultiNetwork = true
 		app = cli.NewApp()
 		app.Name = "adminpbr"
 		app.Flags = config.Flags

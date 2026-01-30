@@ -201,14 +201,10 @@ type DefaultNodeNetworkController struct {
 func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, stopChan chan struct{},
 	wg *sync.WaitGroup, routeManager *routemanager.Controller, networkManager networkmanager.Interface, ovsClient client.Client) *DefaultNodeNetworkController {
 
-	netInfo := (&util.DefaultNetInfo{}).GetNetInfo()
-	if networkManager != nil {
-		netInfo = networkManager.InitDefaultNetInfo()
-	}
 	c := &DefaultNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
 			CommonNodeNetworkControllerInfo: *cnnci,
-			ReconcilableNetInfo:             util.NewReconcilableNetInfo(netInfo),
+			ReconcilableNetInfo:             &util.DefaultNetInfo{},
 			networkManager:                  networkManager,
 			stopChan:                        stopChan,
 			wg:                              wg,

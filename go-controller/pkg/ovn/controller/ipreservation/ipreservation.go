@@ -27,6 +27,7 @@ import (
 	ipresvlisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/listers/ipreservation/v1beta1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -58,6 +59,7 @@ type Controller struct {
 	allocator         subnet.NamedAllocator
 	controllerName    string
 	ipresvCache       *syncmap.SyncMap[*ipReservationState]
+	networkManager    networkmanager.Interface
 
 	// Services that need to be updated. A channel is inappropriate here,
 	// because it allows services with lots of pods to be serviced much
@@ -82,6 +84,7 @@ func NewController(netInfo util.ReconcilableNetInfo,
 	allocator subnet.NamedAllocator,
 	recorder record.EventRecorder,
 	stopChan <-chan struct{},
+	networkManager networkmanager.Interface,
 ) (*Controller, error) {
 	var err error
 	controllerName := netInfo.GetNetworkName()
@@ -96,6 +99,7 @@ func NewController(netInfo util.ReconcilableNetInfo,
 		recorder:            recorder,
 		allocator:           allocator,
 		controllerName:      controllerName,
+		networkManager:      networkManager,
 		ipresvCache:         syncmap.NewSyncMap[*ipReservationState](),
 		stopChan:            stopChan,
 	}
@@ -323,7 +327,8 @@ func (c *Controller) sync(ipresvKey string) error {
 }
 
 func (c *Controller) ensureIPReservation(resvIPObj *ipreservation.IPReservation) ([]string, error) {
-	if !c.HasNAD(resvIPObj.Spec.NetworkAttachmentName) {
+	networkName := c.networkManager.GetNetworkNameForNADKey(resvIPObj.Spec.NetworkAttachmentName)
+	if networkName == "" || networkName != c.GetNetworkName() {
 		// IP reservation does not apply to this network, do nothing and return success
 		return nil, nil
 	}
@@ -462,7 +467,8 @@ func (c *Controller) syncIPReservations() error {
 			continue
 		}
 		// Check the IP reservation is for this network
-		if !c.HasNAD(resvIPObj.Spec.NetworkAttachmentName) {
+		networkName := c.networkManager.GetNetworkNameForNADKey(resvIPObj.Spec.NetworkAttachmentName)
+		if networkName == "" || networkName != c.GetNetworkName() {
 			continue
 		}
 		// no IPs to reserve if the status is not succeeded

@@ -128,7 +128,7 @@ func (oc *BaseLayer2UserDefinedNetworkController) run() error {
 			switchName = types.OVNLayer2Switch
 		}
 		ipresvController, err := ipreserv.NewController(oc.ReconcilableNetInfo, oc.kube, oc.watchFactory,
-			oc.lsManager.ForSwitch(oc.GetNetworkScopedName(switchName)), oc.recorder, oc.stopChan)
+			oc.lsManager.ForSwitch(oc.GetNetworkScopedName(switchName)), oc.recorder, oc.stopChan, oc.networkManager)
 		if err != nil {
 			return err
 		}

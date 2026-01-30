@@ -4,6 +4,10 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
+# Add GOBIN to PATH so installed tools can be found
+GOPATH=${GOPATH:-$(go env GOPATH)}
+export PATH="${GOPATH}/bin:${PATH}"
+
 crds=$(ls pkg/crd 2> /dev/null)
 if [ -z "${crds}" ]; then
   exit
@@ -33,6 +37,9 @@ get_crd_version() {
     networkqos)
       echo "v1alpha1"
       ;;
+    adminpbr|ipreservation|portmirror|virtualip)
+      echo "v1beta1"
+      ;;
     *)
       echo "v1"
       ;;
@@ -47,57 +54,62 @@ deepcopy-gen \
   github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/types
 
 for crd in ${crds}; do
-  vers=$(ls pkg/crd/$crd 2> /dev/null)
 
   # for types we already generated deepcopy above which is all we need
   [ "$crd" = "types" ] && continue
   
-  echo "Generating deepcopy funcs for $crd:$vers"
+  api_version=$(get_crd_version "${crd}")
+
+  # Clean up previously generated files to avoid stale copies
+  echo "Cleaning up existing generated files for $crd ($api_version)"
+  rm -rf "${SCRIPT_ROOT}"/pkg/crd/$crd/${api_version}/apis
+
+  echo "Generating deepcopy funcs for $crd ($api_version)"
   deepcopy-gen \
     --go-header-file hack/boilerplate.go.txt \
     --output-file zz_generated.deepcopy.go \
     --bounding-dirs github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd \
-    github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers \
+    github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/${api_version} \
     "$@"
 
-  echo "Generating apply configuration for $crd ($vers)"
+  echo "Generating apply configuration for $crd ($api_version)"
   applyconfiguration-gen \
     --go-header-file hack/boilerplate.go.txt \
-    --output-dir "${SCRIPT_ROOT}"/pkg/crd/$crd/$vers/apis/applyconfiguration \
-    --output-pkg github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers/apis/applyconfiguration \
-    github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers \
+    --output-dir "${SCRIPT_ROOT}"/pkg/crd/$crd/${api_version}/apis/applyconfiguration \
+    --output-pkg github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/${api_version}/apis/applyconfiguration \
+    github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/${api_version} \
     "$@"
 
-  echo "Generating clientset for $crd ($vers)"
+  echo "Generating clientset for $crd ($api_version)"
   client-gen \
     --go-header-file hack/boilerplate.go.txt \
     --clientset-name "${CLIENTSET_NAME_VERSIONED:-versioned}" \
     --input-base "" \
-    --input github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers \
-    --output-dir "${SCRIPT_ROOT}"/pkg/crd/$crd/$vers/apis/clientset \
-    --output-pkg github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers/apis/clientset \
-    --apply-configuration-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers/apis/applyconfiguration \
+    --input github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/${api_version} \
+    --output-dir "${SCRIPT_ROOT}"/pkg/crd/$crd/${api_version}/apis/clientset \
+    --output-pkg github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/${api_version}/apis/clientset \
+    --apply-configuration-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/${api_version}/apis/applyconfiguration \
     --plural-exceptions="EgressQoS:EgressQoSes,RouteAdvertisements:RouteAdvertisements,NetworkQoS:NetworkQoSes" \
     "$@"
 
-  echo "Generating listers for $crd ($vers)"
+  echo "Generating listers for $crd ($api_version)"
   lister-gen \
     --go-header-file hack/boilerplate.go.txt \
-    --output-dir "${SCRIPT_ROOT}"/pkg/crd/$crd/$vers/apis/listers \
-    --output-pkg github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers/apis/listers \
+    --output-dir "${SCRIPT_ROOT}"/pkg/crd/$crd/${api_version}/apis/listers \
+    --output-pkg github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/${api_version}/apis/listers \
     --plural-exceptions="EgressQoS:EgressQoSes,RouteAdvertisements:RouteAdvertisements,NetworkQoS:NetworkQoSes" \
-    github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers \
+    github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/${api_version} \
     "$@"
 
-  echo "Generating informers for $crd ($vers)"
+  echo "Generating informers for $crd ($api_version)"
   informer-gen \
     --go-header-file hack/boilerplate.go.txt \
-    --versioned-clientset-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers/apis/clientset/versioned \
-    --listers-package  github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers/apis/listers \
-    --output-dir "${SCRIPT_ROOT}"/pkg/crd/$crd/$vers/apis/informers \
-    --output-pkg github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers/apis/informers \
+    --versioned-clientset-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/${api_version}/apis/clientset/versioned \
+    --listers-package  github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/${api_version}/apis/listers \
+    --output-dir "${SCRIPT_ROOT}"/pkg/crd/$crd/${api_version}/apis/informers \
+    --output-pkg github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/${api_version}/apis/informers \
     --plural-exceptions="EgressQoS:EgressQoSes,RouteAdvertisements:RouteAdvertisements,NetworkQoS:NetworkQoSes" \
-    github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/$vers \
+    github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/${api_version} \
     "$@"
 
 done
@@ -110,23 +122,20 @@ echo "Editing egressFirewall CRD"
 ## way that we can put a pattern for validation on the name of the object which is embedded in
 ## metav1.ObjectMeta it is required that we add it after the generation of the CRD.
 sed -i -e':begin;$!N;s/.*metadata:\n.*type: object/&\n            properties:\n              name:\n                type: string\n                pattern: ^default$/;P;D' \
-	$(pwd)/_output/crds/k8s.ovn.org_egressfirewalls.yaml
+	_output/crds/k8s.ovn.org_egressfirewalls.yaml
 
 echo "Editing EgressQoS CRD"
 ## We desire that only EgressQoS with the name "default" are accepted by the apiserver.
 sed -i -e':begin;$!N;s/.*metadata:\n.*type: object/&\n            properties:\n              name:\n                type: string\n                pattern: ^default$/;P;D' \
-	$(pwd)/_output/crds/k8s.ovn.org_egressqoses.yaml
+	_output/crds/k8s.ovn.org_egressqoses.yaml
 
 echo "Copying the CRDs to dist/templates as j2 files... Add them to your commit..."
 echo "Copying egressFirewall CRD"
-cp $(pwd)/_output/crds/k8s.ovn.org_egressfirewalls.yaml ../dist/templates/k8s.ovn.org_egressfirewalls.yaml.j2
+cp _output/crds/k8s.ovn.org_egressfirewalls.yaml ../dist/templates/k8s.ovn.org_egressfirewalls.yaml.j2
 echo "Copying egressIP CRD"
-cp $(pwd)/_output/crds/k8s.ovn.org_egressips.yaml ../dist/templates/k8s.ovn.org_egressips.yaml.j2
+cp _output/crds/k8s.ovn.org_egressips.yaml ../dist/templates/k8s.ovn.org_egressips.yaml.j2
 echo "Copying egressQoS CRD"
 cp _output/crds/k8s.ovn.org_egressqoses.yaml ../dist/templates/k8s.ovn.org_egressqoses.yaml.j2
-cp $(pwd)/_output/crds/k8s.ovn.org_egressqoses.yaml ../dist/templates/k8s.ovn.org_egressqoses.yaml.j2
-echo "Copying networkProbe CRD"
-cp $(pwd)/_output/crds/k8s.ovn.org_networkprobes.yaml ../dist/templates/k8s.ovn.org_networkprobes.yaml.j2
 echo "Copying adminpolicybasedexternalroutes CRD"
 cp _output/crds/k8s.ovn.org_adminpolicybasedexternalroutes.yaml ../dist/templates/k8s.ovn.org_adminpolicybasedexternalroutes.yaml.j2
 echo "Copying egressService CRD"
@@ -141,3 +150,5 @@ echo "Copying routeAdvertisements CRD"
 cp _output/crds/k8s.ovn.org_routeadvertisements.yaml ../dist/templates/k8s.ovn.org_routeadvertisements.yaml.j2
 echo "Copying clusterNetworkConnect CRD"
 cp _output/crds/k8s.ovn.org_clusternetworkconnects.yaml ../dist/templates/k8s.ovn.org_clusternetworkconnects.yaml.j2
+echo "Copying vtep CRD"
+cp _output/crds/k8s.ovn.org_vteps.yaml ../dist/templates/k8s.ovn.org_vteps.yaml.j2

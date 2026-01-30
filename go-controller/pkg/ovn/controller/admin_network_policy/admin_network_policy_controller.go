@@ -106,7 +106,6 @@ type Controller struct {
 // NewController returns a new *Controller.
 func NewController(
 	controllerName string,
-	netInfo util.NetInfo,
 	nbClient libovsdbclient.Client,
 	anpClient anpclientset.Interface,
 	anpInformer anpinformer.AdminNetworkPolicyInformer,
@@ -122,7 +121,6 @@ func NewController(
 
 	c := &Controller{
 		controllerName:            controllerName,
-		NetInfo:                   netInfo,
 		nbClient:                  nbClient,
 		anpClientSet:              anpClient,
 		addressSetFactory:         addressSetFactory,
@@ -517,8 +515,8 @@ func (c *Controller) onANPPodUpdate(oldObj, newObj interface{}) {
 	// zones. Rest of the cases we may return
 	oldPodLabels := labels.Set(oldPod.Labels)
 	newPodLabels := labels.Set(newPod.Labels)
-	oldPodIPs, _ := util.GetPodIPsOfNetwork(oldPod, c.NetInfo)
-	newPodIPs, _ := util.GetPodIPsOfNetwork(newPod, c.NetInfo)
+	oldPodIPs, _ := util.GetPodIPsOfNetwork(oldPod, &util.DefaultNetInfo{}, nil)
+	newPodIPs, _ := util.GetPodIPsOfNetwork(newPod, &util.DefaultNetInfo{}, nil)
 	oldPodRunning := util.PodRunning(oldPod)
 	newPodRunning := util.PodRunning(newPod)
 	oldPodCompleted := util.PodCompleted(oldPod)

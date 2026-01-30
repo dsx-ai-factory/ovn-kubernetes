@@ -31,6 +31,7 @@ import (
 	efcontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egressfirewall"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egressservice"
 	ipreserv "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/ipreservation"
+	networkconnectcontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/networkconnect"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
 	dnsnameresolver "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/dns_name_resolver"
@@ -100,6 +101,9 @@ type DefaultNetworkController struct {
 	// Controller used for programming OVN for Admin Network Policy
 	anpController *anpcontroller.Controller
 
+	// Controller used for programming OVN for Network Connect
+	networkConnectController *networkconnectcontroller.Controller
+
 	// Controller used to handle the admin policy based external route resources
 	apbExternalRouteController *apbroutecontroller.ExternalGatewayMasterController
 
@@ -165,12 +169,12 @@ func newDefaultNetworkControllerCommon(
 	eIPController *EgressIPController,
 	portCache *PortCache,
 ) (*DefaultNetworkController, error) {
+	defaultNetInfo := &util.DefaultNetInfo{}
 
 	if addressSetFactory == nil {
 		addressSetFactory = addressset.NewOvnAddressSetFactory(cnci.nbClient, config.IPv4Mode, config.IPv6Mode)
 	}
 
-	defaultNetInfo := networkManager.InitDefaultNetInfo()
 	svcController, err := svccontroller.NewController(
 		cnci.client, cnci.nbClient,
 		cnci.watchFactory.ServiceCoreInformer(),
@@ -210,7 +214,7 @@ func newDefaultNetworkControllerCommon(
 		BaseNetworkController: BaseNetworkController{
 			CommonNetworkControllerInfo: *cnci,
 			controllerName:              DefaultNetworkControllerName,
-			ReconcilableNetInfo:         util.NewReconcilableNetInfo(defaultNetInfo),
+			ReconcilableNetInfo:         defaultNetInfo,
 			lsManager:                   lsm.NewLogicalSwitchManager(),
 			logicalPortCache:            portCache,
 			namespaces:                  make(map[string]*namespaceInfo),
@@ -374,15 +378,20 @@ func (oc *DefaultNetworkController) Stop() {
 	if oc.routeImportManager != nil {
 		oc.routeImportManager.ForgetNetwork(oc.GetNetworkName())
 	}
+	if oc.networkConnectController != nil {
+		oc.networkConnectController.Stop()
+	}
 
 	close(oc.stopChan)
 	oc.cancelableCtx.Cancel()
 	oc.wg.Wait()
 }
 
+/* TBD-merge
 func (oc *DefaultNetworkController) Cleanup() error {
 	panic("unexpected call for default network")
 }
+*/
 
 // init runs a subnet IPAM and a controller that watches arrival/departure
 // of nodes in the cluster
@@ -468,7 +477,8 @@ func (oc *DefaultNetworkController) run(_ context.Context) error {
 	// we need to start this before WatchPods so that we can reserve IPs before
 	// it gets assigned to the Pods
 	if config.OVNKubernetesFeature.EnableIPReservation {
-		ipresvController, err := ipreserv.NewController(oc.ReconcilableNetInfo, oc.kube, oc.watchFactory, nil, oc.recorder, oc.stopChan)
+		ipresvController, err := ipreserv.NewController(oc.ReconcilableNetInfo, oc.kube, oc.watchFactory,
+			nil, oc.recorder, oc.stopChan, oc.networkManager)
 		if err != nil {
 			return err
 		}
@@ -631,6 +641,16 @@ func (oc *DefaultNetworkController) run(_ context.Context) error {
 			// Until we have scale issues in future let's spawn only one thread
 			oc.nqosController.Run(1, oc.stopChan)
 		}()
+	}
+
+	if util.IsNetworkConnectEnabled() {
+		err := oc.newNetworkConnectController()
+		if err != nil {
+			return fmt.Errorf("unable to create network connect controller, err: %w", err)
+		}
+		if err := oc.networkConnectController.Start(); err != nil {
+			return fmt.Errorf("unable to start network connect controller, err: %w", err)
+		}
 	}
 
 	end := time.Since(start)

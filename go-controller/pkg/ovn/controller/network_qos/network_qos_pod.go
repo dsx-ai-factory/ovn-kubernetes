@@ -61,7 +61,7 @@ func (c *Controller) syncNetworkQoSPod(podKey string) error {
 // - match source: add the ip to source address set, bind qos rule to the switch
 // - match dest: add the ip to the destination address set
 func (c *Controller) setPodForNQOS(pod *corev1.Pod, nqosState *networkQoSState, namespace *corev1.Namespace, addressSetMap map[string]sets.Set[string]) error {
-	addresses, err := getPodAddresses(pod, c.NetInfo)
+	addresses, err := getPodAddresses(pod, c.NetInfo, c.podNetworkResolver())
 	if err == nil && len(addresses) == 0 {
 		// pod either is not attached to this network, or hasn't been annotated with addresses yet, return without retry
 		klog.V(6).Infof("Pod %s/%s doesn't have addresses on network %s, skip NetworkQoS processing", pod.Namespace, pod.Name, c.GetNetworkName())
@@ -140,7 +140,8 @@ func (c *Controller) getNetworkQosForPodChange(podKey string) (sets.Set[string],
 		}
 	} else if pod.DeletionTimestamp == nil {
 		// skip reconcile if pod labels and IPs don't change
-		if podIPs, err = util.GetPodIPsOfNetwork(pod, c.NetInfo); err != nil {
+		resolver := c.podNetworkResolver()
+		if podIPs, err = util.GetPodIPsOfNetwork(pod, c.NetInfo, resolver); err != nil {
 			klog.Errorf("Failed to get IPs from pod %s/%s: %v", pod.Namespace, pod.Name, err)
 		}
 		if labels.Equals(c.podLabelsCache[podKey], pod.Labels) && util.IPsAreEqual(podIPs, c.podIPCache[podKey]) {

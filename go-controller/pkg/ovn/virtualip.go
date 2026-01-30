@@ -527,7 +527,11 @@ func (bnc *BaseNetworkController) handleVIPPodAdd(vip *virtualIP, pod *corev1.Po
 		return nil
 	}
 
-	on, _, err := util.GetPodNADToNetworkMapping(pod, bnc.ReconcilableNetInfo)
+	on, _, err := util.GetUDNPodNADToNetworkMapping(
+		pod,
+		bnc.GetNetInfo(),
+		bnc.networkManager.GetNetworkNameForNADKey,
+	)
 	if err != nil || !on {
 		// pod is not attached to this specific network
 		klog.Errorf("Pod %s is not attached to network %s error (%v)", pod.Name, bnc.GetNetworkName(), err)

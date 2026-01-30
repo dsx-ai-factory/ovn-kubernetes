@@ -231,7 +231,11 @@ func (bnc *BaseNetworkController) handlePortMirrorSourcePodAdd(pm *util.PortMirr
 		}
 	}
 
-	on, nseMap, err := util.GetPodNADToNetworkMapping(pod, bnc.ReconcilableNetInfo)
+	on, nseMap, err := util.GetUDNPodNADToNetworkMapping(
+		pod,
+		bnc.GetNetInfo(),
+		bnc.networkManager.GetNetworkNameForNADKey,
+	)
 	if err != nil {
 		return fmt.Errorf("failed to get network info map for pod %s/%s :(%v)", pod.Namespace, pod.Name, err)
 	} else if !on {
@@ -334,7 +338,7 @@ func (bnc *BaseNetworkController) handleSourcePodSelectors(pm *util.PortMirror) 
 		}
 
 		for nad := range sInfo.PodNetAttachDefMirrorInfo {
-			if bnc.HasNAD(nad) {
+			if bnc.networkManager.GetNetworkNameForNADKey(nad) == bnc.GetNetworkName() {
 				foundNad = true
 				break
 			}

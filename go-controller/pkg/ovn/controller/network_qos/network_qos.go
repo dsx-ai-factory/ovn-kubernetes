@@ -25,6 +25,7 @@ import (
 	crdtypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/types"
 	udnv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 func (c *Controller) processNextNQOSWorkItem(wg *sync.WaitGroup) bool {
@@ -383,7 +384,23 @@ func (c *Controller) networkManagedByMe(networkSelectors crdtypes.NetworkSelecto
 		}
 	}
 	for _, nad := range selectedNads {
-		if c.HasNAD(joinMetaNamespaceAndName(nad.Namespace, nad.Name)) {
+		networkName := util.GetAnnotatedNetworkName(nad)
+		if networkName == "" {
+			nadInfo, err := util.ParseNADInfo(nad)
+			if err == nil && nadInfo != nil {
+				networkName = nadInfo.GetNetworkName()
+			}
+		}
+		if networkName == "" {
+			continue
+		}
+		if networkName == types.DefaultNetworkName && c.IsDefault() {
+			return true, nil
+		}
+		if c.IsDefault() {
+			continue
+		}
+		if networkName == c.GetNetworkName() {
 			return true, nil
 		}
 	}
