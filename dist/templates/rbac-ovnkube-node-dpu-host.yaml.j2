@@ -101,11 +101,3 @@ rules:
     resources:
       - endpoints
     verbs: ["get"]
-  - apiGroups: ["k8s.ovn.org"]
-    resources:
-      - networkprobes
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["k8s.ovn.org"]
-    resources:
-      - networkprobes/status
-    verbs: ["update"]

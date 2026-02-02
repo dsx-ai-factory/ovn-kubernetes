@@ -20,8 +20,6 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 
-	networkprobev1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkprobe/v1beta1/apis/informers/externalversions/networkprobe/v1beta1"
-
 	routeadvertisementsv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions/routeadvertisements/v1"
 
 	userdefinednetworkv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/informers/externalversions/userdefinednetwork/v1"
@@ -830,26 +828,6 @@ func (_m *NodeWatchFactory) NamespaceInformer() informerscorev1.NamespaceInforme
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(informerscorev1.NamespaceInformer)
-		}
-	}
-
-	return r0
-}
-
-// NetworkProbeInformer provides a mock function with given fields:
-func (_m *NodeWatchFactory) NetworkProbeInformer() networkprobev1beta1.NetworkProbeInformer {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for NetworkProbeInformer")
-	}
-
-	var r0 networkprobev1beta1.NetworkProbeInformer
-	if rf, ok := ret.Get(0).(func() networkprobev1beta1.NetworkProbeInformer); ok {
-		r0 = rf()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(networkprobev1beta1.NetworkProbeInformer)
 		}
 	}
 

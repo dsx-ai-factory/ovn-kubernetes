@@ -42,7 +42,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/nadconfig"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/networkprobe"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/managementport"
 	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
@@ -155,8 +154,7 @@ func NewCommonNodeNetworkControllerInfo(ovnNodeClient *util.OVNNodeClientset, wf
 		Kube: kube.Kube{
 			KClient: ovnNodeClient.KubeClient,
 		},
-		PortMirrorClient:   ovnNodeClient.PortMirrorClient,
-		NetworkProbeClient: ovnNodeClient.NetworkProbeClient,
+		PortMirrorClient: ovnNodeClient.PortMirrorClient,
 	}
 	return newCommonNodeNetworkControllerInfo(ovnNodeClient.KubeClient, k, wf, eventRecorder, name, dpuName, hostType, pfMACs, routeManager)
 }
@@ -1409,22 +1407,6 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	}
 
 	nc.linkManager.Run(nc.stopChan, nc.wg)
-
-	if config.OVNKubernetesFeature.EnableNetworkProbe && config.OvnKubeNode.Mode != types.NodeModeDPU {
-		kubeOvn, ok := nc.Kube.(*kube.KubeOVN)
-		if !ok {
-			return fmt.Errorf("cannot get kubeOVNClient for starting networkprobe controller")
-		}
-		wf := nc.watchFactory.(*factory.WatchFactory)
-		c, err := networkprobe.NewController(
-			kubeOvn.NetworkProbeClient, nc.stopChan, wf.NetworkProbeInformer(), wf.NodeCoreInformer(), wf.ConfigMapCoreInformer(), wf.SecretCoreInformer(), nc.name, nc.recorder)
-		if err != nil {
-			return fmt.Errorf("failed to create network probe controller: %v", err)
-		}
-		if err = c.Run(nc.wg, 1); err != nil {
-			return err
-		}
-	}
 
 	nc.wg.Add(1)
 	go func() {

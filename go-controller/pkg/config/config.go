@@ -251,10 +251,6 @@ var (
 		MinRevalidatePPS: -1,
 	}
 
-	// EnableNetworkProbeDelay determines if network probes should have initial delay
-	// Default is true for production, set to false for tests
-	EnableNetworkProbeDelay = true
-
 	ClusterManager = ClusterManagerConfig{
 		V4TransitSubnet: "100.88.0.0/16",
 		V6TransitSubnet: "fd97::/64",
@@ -523,7 +519,6 @@ type OVNKubernetesFeatureConfig struct {
 	EnableAdminPolicyBasedRouting bool `gcfg:"enable-admin-pbr"`
 	EnableVirtualIP               bool `gcfg:"enable-virtual-ip"`
 	EnableIPReservation           bool `gcfg:"enable-ip-reservation"`
-	EnableNetworkProbe            bool `gcfg:"enable-network-probe"`
 	EnablePortMirror              bool `gcfg:"enable-port-mirror"`
 	// EnableIstioAmbientSupport enables support for Istio Ambient mesh by adding
 	// logical router policies for custom SNAT IPs used by Istio for kubelet health checks
@@ -1333,12 +1328,6 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Use EgressService CRD feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableEgressService,
 		Value:       OVNKubernetesFeature.EnableEgressService,
-	},
-	&cli.BoolFlag{
-		Name:        "enable-network-probe",
-		Usage:       "Configure to use NetworkProbe CRD feature with ovn-kubernetes.",
-		Destination: &cliConfig.OVNKubernetesFeature.EnableNetworkProbe,
-		Value:       OVNKubernetesFeature.EnableNetworkProbe,
 	},
 	&cli.BoolFlag{
 		Name:        "enable-multi-external-gateway",
