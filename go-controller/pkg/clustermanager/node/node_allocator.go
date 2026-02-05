@@ -474,6 +474,11 @@ func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, 
 func (na *NodeAllocator) Cleanup() error {
 	networkName := na.netInfo.GetNetworkName()
 
+	// Delete subnet metrics for the deleted network so they don't persist
+	// until the cluster manager is restarted. Do this first so that even if
+	// the cleanup below fails, stale metrics are removed.
+	metrics.DeleteSubnetMetrics(networkName)
+
 	// remove hostsubnet annotation for this network
 	klog.Infof("Remove node-subnets annotation for network %s on all nodes", networkName)
 	existingNodes, err := na.nodeLister.List(labels.Everything())

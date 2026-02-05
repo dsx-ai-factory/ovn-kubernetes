@@ -194,6 +194,16 @@ func RecordSubnetCount(v4SubnetCount, v6SubnetCount float64, networkName string)
 	metricV6HostSubnetCount.WithLabelValues(networkName).Set(v6SubnetCount)
 }
 
+// DeleteSubnetMetrics removes the subnet metric labels for a given network
+// name. This should be called when a network is deleted so that stale metrics
+// don't persist until a restart.
+func DeleteSubnetMetrics(networkName string) {
+	metricV4HostSubnetCount.DeleteLabelValues(networkName)
+	metricV6HostSubnetCount.DeleteLabelValues(networkName)
+	metricV4AllocatedHostSubnetCount.DeleteLabelValues(networkName)
+	metricV6AllocatedHostSubnetCount.DeleteLabelValues(networkName)
+}
+
 // RecordEgressIPReachableNode records how many times EgressIP detected an unuseable node.
 func RecordEgressIPUnreachableNode() {
 	metricEgressIPNodeUnreacheableCount.Inc()
