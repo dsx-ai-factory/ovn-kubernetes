@@ -583,6 +583,8 @@ spec:
             - matchExpressions:
               - key: k8s.ovn.org/dpu-host
                 operator: DoesNotExist
+              - key: k8s.ovn.org/dpu
+                operator: DoesNotExist
       volumes:
       # Common volumes
       - name: host-var-run-dbus
