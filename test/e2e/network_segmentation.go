@@ -47,6 +47,7 @@ import (
 const openDefaultPortsAnnotation = "k8s.ovn.org/open-default-ports"
 const RequiredUDNNamespaceLabel = "k8s.ovn.org/primary-user-defined-network"
 const OvnPodAnnotationName = "k8s.ovn.org/pod-networks"
+const expectedUDNCNIVersion = "1.1.0"
 
 var _ = Describe("Network Segmentation", feature.NetworkSegmentation, func() {
 	f := wrappedTestFramework("network-segmentation")
@@ -2093,7 +2094,7 @@ func assertL2SecondaryNetAttachDefManifest(nadClient nadclient.K8sCniCncfIoV1Int
 	expectedNetworkName := namespace + "_" + udnName
 	expectedNadName := namespace + "/" + udnName
 	ExpectWithOffset(1, nad.Spec.Config).To(MatchJSON(`{
-		"cniVersion":"1.0.0",
+		"cniVersion":"` + expectedUDNCNIVersion + `",
 		"type": "ovn-k8s-cni-overlay",
 		"name": "` + expectedNetworkName + `",
 		"netAttachDefName": "` + expectedNadName + `",
@@ -2158,7 +2159,7 @@ func assertClusterNADManifest(nadClient nadclient.K8sCniCncfIoV1Interface, names
 	expectedNetworkName := "cluster_udn_" + udnName
 	expectedNadName := namespace + "/" + udnName
 	ExpectWithOffset(1, nad.Spec.Config).To(MatchJSON(`{
-		"cniVersion":"1.0.0",
+		"cniVersion":"` + expectedUDNCNIVersion + `",
 		"type": "ovn-k8s-cni-overlay",
 		"name": "` + expectedNetworkName + `",
 		"netAttachDefName": "` + expectedNadName + `",
