@@ -1214,7 +1214,7 @@ local-nb-ovsdb() {
     ${OVNCTL_PATH} run_nb_ovsdb --no-monitor \
     --ovn-nb-log="${ovn_loglevel_nb}" &
 
-  wait_for_event attempts=3 process_ready ovnnb_db
+  wait_for_event attempts=10 process_ready ovnnb_db
   echo "=============== nb-ovsdb (unix sockets only) ========== RUNNING"
 
  [[ "local" == "${OVN_GATEWAY_MODE}" &&  "true" == "${OVN_ROUTE_ADVERTISEMENTS_ENABLE}" ]] && {
@@ -1248,7 +1248,7 @@ local-sb-ovsdb() {
     ${OVNCTL_PATH} run_sb_ovsdb --no-monitor \
     --ovn-sb-log="${ovn_loglevel_sb}" &
 
-  wait_for_event attempts=3 process_ready ovnsb_db
+  wait_for_event attempts=10 process_ready ovnsb_db
   echo "=============== sb-ovsdb (unix sockets only) ========== RUNNING"
 
   tail --follow=name ${OVN_LOGDIR}/ovsdb-server-sb.log &
