@@ -113,6 +113,8 @@ import (
 	virtualipscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/clientset/versioned/scheme"
 	virtualipinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/informers/externalversions"
 	virtualiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/listers/virtualip/v1beta1"
+	vtepinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/informers/externalversions"
+	vtepinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/informers/externalversions/vtep/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -148,6 +150,7 @@ type WatchFactory struct {
 	raFactory            routeadvertisementsinformerfactory.SharedInformerFactory
 	frrFactory           frrinformerfactory.SharedInformerFactory
 	networkQoSFactory    networkqosinformerfactory.SharedInformerFactory
+	vtepFactory          vtepinformerfactory.SharedInformerFactory
 	informers            map[reflect.Type]*informer
 
 	stopChan chan struct{}
@@ -181,6 +184,7 @@ func (wf *WatchFactory) ShallowClone() *WatchFactory {
 		ipresvFactory:        wf.ipresvFactory,
 		portMirrorFactory:    wf.portMirrorFactory,
 		networkQoSFactory:    wf.networkQoSFactory,
+		vtepFactory:          wf.vtepFactory,
 		informers:            wf.informers,
 		stopChan:             wf.stopChan,
 
@@ -309,6 +313,13 @@ func NewMasterWatchFactory(ovnClientset *util.OVNMasterClientset) (*WatchFactory
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	// Initialize VTEP factory for EVPN support in combined mode (cluster-manager + ovnkube-controller).
+	if util.IsEVPNEnabled() {
+		wf.vtepFactory = vtepinformerfactory.NewSharedInformerFactory(ovnClientset.VTEPClient, resyncInterval)
+		// make sure shared informer is created for a factory, so on wf.vtepFactory.Start() it is initialized and caches are synced.
+		wf.vtepFactory.K8s().V1().VTEPs().Informer()
 	}
 
 	return wf, nil
@@ -775,6 +786,13 @@ func (wf *WatchFactory) Start() error {
 		}
 	}
 
+	if wf.vtepFactory != nil {
+		wf.vtepFactory.Start(wf.stopChan)
+		if err := waitForCacheSyncWithTimeout(wf.vtepFactory, wf.stopChan); err != nil {
+			return err
+		}
+	}
+
 	if wf.raFactory != nil {
 		wf.raFactory.Start(wf.stopChan)
 		if err := waitForCacheSyncWithTimeout(wf.raFactory, wf.stopChan); err != nil {
@@ -833,6 +851,10 @@ func (wf *WatchFactory) Stop() {
 
 	if wf.cncFactory != nil {
 		wf.cncFactory.Shutdown()
+	}
+
+	if wf.vtepFactory != nil {
+		wf.vtepFactory.Shutdown()
 	}
 
 	if wf.raFactory != nil {
@@ -1278,6 +1300,13 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 
 		// make sure pod informer cache is initialized and synced when on Start().
 		wf.iFactory.Core().V1().Pods().Informer()
+	}
+
+	// Initialize VTEP factory for EVPN support.
+	if util.IsEVPNEnabled() {
+		wf.vtepFactory = vtepinformerfactory.NewSharedInformerFactory(ovnClientset.VTEPClient, resyncInterval)
+		// make sure shared informer is created for a factory, so on wf.vtepFactory.Start() it is initialized and caches are synced.
+		wf.vtepFactory.K8s().V1().VTEPs().Informer()
 	}
 
 	if util.IsNetworkConnectEnabled() {
@@ -2198,6 +2227,10 @@ func (wf *WatchFactory) ClusterUserDefinedNetworkInformer() userdefinednetworkin
 
 func (wf *WatchFactory) ClusterNetworkConnectInformer() networkconnectinformer.ClusterNetworkConnectInformer {
 	return wf.cncFactory.K8s().V1().ClusterNetworkConnects()
+}
+
+func (wf *WatchFactory) VTEPInformer() vtepinformer.VTEPInformer {
+	return wf.vtepFactory.K8s().V1().VTEPs()
 }
 
 func (wf *WatchFactory) DNSNameResolverInformer() ocpnetworkinformerv1alpha1.DNSNameResolverInformer {

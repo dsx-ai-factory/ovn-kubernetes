@@ -57,11 +57,7 @@ func (zch *ZoneChassisHandler) DeleteRemoteZoneNode(node *corev1.Node) error {
 	if err != nil {
 		// if the chassis annotation wasn't found, there's no chance we'll find it at the next retry, since
 		// we'd be inspecting the exact same node resource, which we received together with the delete event.
-		// So delete the remote node by node name instead which will work for non DPU-host nodes
-		// For DPU-hosts the chassis hostname comes from its DPU and parsed from node-chassis-hostname annotation,
-		// which also may not be present if chassis annotation is not found. Deletion of such chassis can be handled
-		// during syncNodesPeriodic routine.
-
+		// So delete the remote node by node name instead.
 		klog.Infof("Failed to parse node chassis-id for node - %s, will remove chassis by node name; error: %v", node.Name, err)
 		p := func(chassis *sbdb.Chassis) bool {
 			return chassis.Hostname == node.Name && chassis.OtherConfig != nil && strings.ToLower(chassis.OtherConfig["is-remote"]) == "true"
@@ -72,14 +68,9 @@ func (zch *ZoneChassisHandler) DeleteRemoteZoneNode(node *corev1.Node) error {
 		return nil
 	}
 
-	chassisHostname, err := util.ParseNodeChassisHostnameAnnotation(node)
-	if err != nil {
-		return fmt.Errorf("failed to get the chassis hostname annotation for the remote zone node %s, error: %w", node.Name, err)
-	}
-
 	ch := &sbdb.Chassis{
 		Name:     chassisID,
-		Hostname: chassisHostname,
+		Hostname: node.Name,
 	}
 
 	chassis, err := libovsdbops.GetChassis(zch.sbClient, ch)
@@ -107,24 +98,19 @@ func (zic *ZoneChassisHandler) SyncNodes(kNodes []interface{}) error {
 		return fmt.Errorf("failed to get the list of chassis from OVN Southbound db : %w", err)
 	}
 
-	foundNodesChassisHostname := sets.New[string]()
+	foundNodes := sets.New[string]()
 	for _, tmp := range kNodes {
 		node, ok := tmp.(*corev1.Node)
 		if !ok {
 			klog.Errorf("Spurious object in syncNodes: %v", tmp)
 			continue
 		}
-		chassisHostname, err := util.ParseNodeChassisHostnameAnnotation(node)
-		if err != nil {
-			klog.Warningf("Skipping node %s from sync due to missing chassis hostname annotation: %v", node.Name, err)
-			continue
-		}
-		foundNodesChassisHostname.Insert(chassisHostname)
+		foundNodes.Insert(node.Name)
 	}
 
 	for _, ch := range chassis {
 		if ch.OtherConfig != nil && strings.ToLower(ch.OtherConfig["is-remote"]) == "true" {
-			if !foundNodesChassisHostname.Has(ch.Hostname) {
+			if !foundNodes.Has(ch.Hostname) {
 				// Its a stale remote chassis, delete it.
 				if err = libovsdbops.DeleteChassis(zic.sbClient, ch); err != nil {
 					return fmt.Errorf("failed to delete remote stale chassis for node %s : %w", ch.Hostname, err)
@@ -147,12 +133,6 @@ func (zch *ZoneChassisHandler) createOrUpdateNodeChassis(node *corev1.Node, isRe
 		}
 		return fmt.Errorf("failed to parse node chassis-id for node - %s, error: %w",
 			node.Name, parsedErr)
-	}
-
-	chassisHostname, err := util.ParseNodeChassisHostnameAnnotation(node)
-	if err != nil {
-		return fmt.Errorf("failed to parse node-chassis-hostname annotation for node %s, error: %w",
-			node.Name, err)
 	}
 
 	// Get the encap IPs.
@@ -181,11 +161,17 @@ func (zch *ZoneChassisHandler) createOrUpdateNodeChassis(node *corev1.Node, isRe
 	}
 
 	chassis := sbdb.Chassis{
-		Name:     chassisID,
-		Hostname: chassisHostname,
+		Name: chassisID,
 		OtherConfig: map[string]string{
 			"is-remote": strconv.FormatBool(isRemote),
 		},
+	}
+	if isRemote {
+		// For debugging purposes we add KAPI node name as the chassis hostname.
+		// It is not used for anything other than a helpful hint for debugging.
+		// There is no need to set it for the local node, as ovn-controller will
+		// set it automatically from the OVS external_id:hostname field.
+		chassis.Hostname = node.Name
 	}
 
 	return libovsdbops.CreateOrUpdateChassis(zch.sbClient, &chassis, encaps...)

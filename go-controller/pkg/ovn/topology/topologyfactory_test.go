@@ -94,13 +94,12 @@ var _ = Describe("Topology factory", func() {
 				ovntypes.TopologyExternalID: ovntypes.Layer3Topology,
 				"k8s-cluster-router":        "yes",
 			}
-			expectedOptions := map[string]string{"mcast_relay": "true"}
+			expectedOptions := map[string]string{"mcast_relay": "true", "always_learn_from_arp_request": "false"}
 			macBindingAgeThreshold := "0"
 			for _, ipnet := range netInfo.Subnets() {
 				macBindingAgeThreshold += ";" + ipnet.CIDR.String() + ":" + strconv.Itoa(config.Default.ClusterSubnetsMacBindingAging)
 			}
 			expectedOptions["mac_binding_age_threshold"] = macBindingAgeThreshold
-			expectedOptions["always_learn_from_arp_request"] = "false"
 			Expect(clusterRouter).To(
 				WithTransform(
 					removeUUID,

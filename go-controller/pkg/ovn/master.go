@@ -170,6 +170,11 @@ func (oc *DefaultNetworkController) addNode(node *corev1.Node) ([]*net.IPNet, er
 			node.Name, config.IPv4Mode, haveV4, config.IPv6Mode, haveV6)
 	}
 
+	// delete stale chassis in SBDB if any
+	if err = oc.deleteStaleNodeChassis(node); err != nil {
+		return nil, err
+	}
+
 	// Ensure that the node's logical network has been created. Note that if the
 	// subsequent operation in addNode() fails, oc.lsManager.DeleteNode(node.Name)
 	// needs to be done, otherwise, this node's IPAM will be overwritten and the
@@ -204,7 +209,6 @@ func (oc *DefaultNetworkController) checkNodeChassisMismatch(node *corev1.Node) 
 
 // delete stale chassis in SBDB if system-id of the specific node has changed.
 func (oc *DefaultNetworkController) deleteStaleNodeChassis(node *corev1.Node) error {
-	// hostName stored in sbdb will be that of primary DPU for nodes with DPUs
 	staleChassis, err := oc.checkNodeChassisMismatch(node)
 	if err != nil {
 		return fmt.Errorf("failed to check if there is any stale chassis for node %s in SBDB: %v", node.Name, err)
@@ -227,9 +231,9 @@ func (oc *DefaultNetworkController) deleteStaleNodeChassis(node *corev1.Node) er
 			}
 			// Send an event and Log on failure
 			oc.recorder.Eventf(node, corev1.EventTypeWarning, "ErrorMismatchChassis",
-				"Node %s is now with a new chassis ID. Its stale chassis entry %s is still in the SBDB",
-				node.Name, staleChassis)
-			return fmt.Errorf("node %s is now with a new chassis ID. Its stale chassis entry %s is still in the SBDB", node.Name, staleChassis)
+				"Node %s is now with a new chassis ID. Its stale chassis entry is still in the SBDB",
+				node.Name)
+			return fmt.Errorf("node %s is now with a new chassis ID. Its stale chassis entry is still in the SBDB", node.Name)
 		}
 	}
 	return nil
@@ -273,24 +277,17 @@ func (oc *DefaultNetworkController) syncNodesPeriodic() {
 		return
 	}
 
-	localZoneKNodes := make([]*corev1.Node, 0, len(kNodes))
-	remoteZoneKNodes := make([]*corev1.Node, 0, len(kNodes))
+	localZoneNodes := make([]*corev1.Node, 0, len(kNodes))
+	remoteZoneNodes := make([]*corev1.Node, 0, len(kNodes))
 	for i := range kNodes {
 		if oc.isLocalZoneNode(kNodes[i]) {
-			// For DPU case we might want to propagate DPU NotReady state as a NoSchedule taint to DPU's host
-			if util.IsDPU(kNodes[i]) {
-				err := util.SyncDependentNodeTaints(oc.kube, oc.watchFactory.NodeCoreInformer().Lister(), kNodes[i])
-				if err != nil {
-					klog.Warning(err.Error())
-				}
-			}
-			localZoneKNodes = append(localZoneKNodes, kNodes[i])
+			localZoneNodes = append(localZoneNodes, kNodes[i])
 		} else {
-			remoteZoneKNodes = append(remoteZoneKNodes, kNodes[i])
+			remoteZoneNodes = append(remoteZoneNodes, kNodes[i])
 		}
 	}
 
-	if err := oc.syncChassis(localZoneKNodes, remoteZoneKNodes); err != nil {
+	if err := oc.syncChassis(localZoneNodes, remoteZoneNodes); err != nil {
 		klog.Errorf("Failed to sync chassis: error: %v", err)
 	}
 }
@@ -301,8 +298,8 @@ func (oc *DefaultNetworkController) syncNodesPeriodic() {
 // do not want to delete.
 func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 	foundNodes := sets.New[string]()
-	localZoneKNodes := make([]*corev1.Node, 0, len(kNodes))
-	remoteZoneKNodes := make([]*corev1.Node, 0, len(kNodes))
+	localZoneNodes := make([]*corev1.Node, 0, len(kNodes))
+	remoteZoneNodes := make([]*corev1.Node, 0, len(kNodes))
 	for _, tmp := range kNodes {
 		node, ok := tmp.(*corev1.Node)
 		if !ok {
@@ -318,9 +315,9 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 		if oc.isLocalZoneNode(node) {
 			foundNodes.Insert(node.Name)
 			oc.localZoneNodes.Store(node.Name, true)
-			localZoneKNodes = append(localZoneKNodes, node)
+			localZoneNodes = append(localZoneNodes, node)
 		} else {
-			remoteZoneKNodes = append(remoteZoneKNodes, node)
+			remoteZoneNodes = append(remoteZoneNodes, node)
 		}
 	}
 
@@ -385,17 +382,28 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 		}
 	}
 
+	if err := oc.syncChassis(localZoneNodes, remoteZoneNodes); err != nil {
+		return fmt.Errorf("failed to sync chassis: error: %v", err)
+	}
+
 	if config.OVNKubernetesFeature.EnableInterconnect {
+		// Chassis cleanup should happen regardless of transport mode to cleanup
+		// any stale remote chassis entries (e.g., from overlay->no-overlay migration)
 		if err := oc.zoneChassisHandler.SyncNodes(kNodes); err != nil {
 			return fmt.Errorf("zoneChassisHandler failed to sync nodes: error: %w", err)
 		}
 
-		if err := oc.zoneICHandler.SyncNodes(kNodes); err != nil {
-			return fmt.Errorf("zoneICHandler failed to sync nodes: error: %w", err)
-		}
-	} else {
-		if err := oc.syncChassis(localZoneKNodes, remoteZoneKNodes); err != nil {
-			return fmt.Errorf("failed to sync chassis: error: %v", err)
+		// Interconnect resource sync depends on transport mode:
+		// - For overlay: ensure transit switch exists and cleanup stale resources
+		// - For no-overlay: cleanup all interconnect resources (nodes and transit switch)
+		if oc.Transport() == types.NetworkTransportNoOverlay {
+			if err := oc.zoneICHandler.Cleanup(); err != nil {
+				return fmt.Errorf("zoneICHandler failed to cleanup: error: %w", err)
+			}
+		} else {
+			if err := oc.zoneICHandler.CleanupStaleNodes(kNodes); err != nil {
+				return fmt.Errorf("zoneICHandler failed to cleanup stale nodes: error: %w", err)
+			}
 		}
 	}
 
@@ -425,10 +433,8 @@ func (oc *DefaultNetworkController) syncChassis(localZoneNodes, remoteZoneNodes 
 		}
 	}
 
-	chassisHostNameMap := map[string]*sbdb.Chassis{}
 	chassisNameMap := map[string]*sbdb.Chassis{}
 	for _, chassis := range chassisList {
-		chassisHostNameMap[chassis.Hostname] = chassis
 		chassisNameMap[chassis.Name] = chassis
 	}
 
@@ -448,86 +454,48 @@ func (oc *DefaultNetworkController) syncChassis(localZoneNodes, remoteZoneNodes 
 		templateChassisMap[templateVar.Chassis] = templateVar
 	}
 
-	reqDPUs := sets.New[string]()
-	var chassisHostname string
-
 	// Delete existing nodes from the chassis map.
 	// Also delete existing templateVars from the template map.
-	// Chassis of dpus that are removed or are not part of cluster should be deleted only
-	// if the corresponding host is removed from the cluster.
 	for _, node := range localZoneNodes {
-		// In multi DPU case, chassis-hostname annotation will be that of primary DPU
-		// For central mode we have multiDPU use case, so handle them all here.
-		// Currently for IC mode there is only single DPU which can be handled outside
-		if !config.OVNKubernetesFeature.EnableInterconnect && util.IsDPUHost(node) {
-			if dpus, err := util.GetNodeDPUs(node); err == nil {
-				reqDPUs.Insert(dpus...)
-			}
-			continue
-		}
-		chassisHostname, err = util.ParseNodeChassisHostnameAnnotation(node)
+		chassisID, err := util.ParseNodeChassisIDAnnotation(node)
 		if err != nil {
-			klog.Warningf("Skipping node %s from sync due to missing chassis hostname annotation: %v", node.Name, err)
+			klog.Warningf("Unable to parse local node %s chassis-id annotation. Chassis may be removed during sync",
+				node.Name)
 			continue
 		}
-
-		if chassis, exists := chassisHostNameMap[chassisHostname]; exists {
-			delete(chassisNameMap, chassis.Name)
-			delete(chassisHostNameMap, chassis.Hostname)
-			delete(templateChassisMap, chassis.Name)
-		}
+		delete(chassisNameMap, chassisID)
+		delete(templateChassisMap, chassisID)
 	}
 
 	// Delete existing remote zone nodes from the chassis map, but not from the templateVars
 	// as we need to cleanup chassisTemplateVars for the remote zone nodes
 	for _, node := range remoteZoneNodes {
-		// In multi DPU case, chassis-hostname annotation will be that of primary DPU
-		// For central mode we have multiDPU use case, so handle them all here.
-		// Currently for IC mode there is only single DPU which can be handled outside
-		if !config.OVNKubernetesFeature.EnableInterconnect && util.IsDPUHost(node) {
-			if dpus, err := util.GetNodeDPUs(node); err == nil {
-				reqDPUs.Insert(dpus...)
-			}
-			continue
-		}
-		chassisHostname, err = util.ParseNodeChassisHostnameAnnotation(node)
+		chassisID, err := util.ParseNodeChassisIDAnnotation(node)
 		if err != nil {
-			klog.Warningf("Skipping node %s from sync due to missing chassis hostname annotation: %v", node.Name, err)
+			klog.Warningf("Unable to parse remote node %s chassis-id annotation. Chassis may be removed during sync",
+				node.Name)
 			continue
 		}
-		if chassis, exists := chassisHostNameMap[chassisHostname]; exists {
-			delete(chassisNameMap, chassis.Name)
-			delete(chassisHostNameMap, chassis.Hostname)
-		}
+		delete(chassisNameMap, chassisID)
 	}
 
-	// Don't add chassis of dpus that should be retained to stalechassis list
 	staleChassis := make([]*sbdb.Chassis, 0, len(chassisNameMap))
-	for _, chassis := range chassisNameMap {
-		if len(reqDPUs) != 0 && reqDPUs.Has(chassis.Hostname) {
-			delete(chassisNameMap, chassis.Name)
-			continue
-		}
+	for name, chassis := range chassisNameMap {
 		staleChassis = append(staleChassis, chassis)
+		klog.Infof("Removing stale chassis with ID/Name: %s, hostname: %s", name, chassis.Hostname)
 	}
 
 	staleChassisTemplateVars := make([]*nbdb.ChassisTemplateVar, 0, len(templateChassisMap))
-	for chassisName, template := range templateChassisMap {
-		if _, ok := chassisNameMap[chassisName]; ok {
-			delete(templateChassisMap, chassisName)
-			continue
-		}
+	for _, template := range templateChassisMap {
 		staleChassisTemplateVars = append(staleChassisTemplateVars, template)
 	}
 
-	klog.V(5).Infof("syncChassis(): Deleting Stale Chassis: %v", chassisNameMap)
 	if err := libovsdbops.DeleteChassis(oc.sbClient, staleChassis...); err != nil {
-		return fmt.Errorf("failed Deleting chassis %v error: %v", chassisNameMap, err)
+		return fmt.Errorf("failed Deleting chassis %#v error: %v", chassisNameMap, err)
 	}
 
-	klog.V(5).Infof("syncChassis(): Deleting Stale Chassis_Template_Var: %v", templateChassisMap)
 	if err := libovsdbops.DeleteChassisTemplateVar(oc.nbClient, staleChassisTemplateVars...); err != nil {
-		return fmt.Errorf("failed Deleting chassis template vars %v error: %v", templateChassisMap, err)
+		return fmt.Errorf("failed Deleting chassis template vars %#v error: %v", staleChassisTemplateVars, err)
 	}
 
 	return nil
@@ -690,21 +658,33 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *corev1.Node, n
 	}
 
 	if nSyncs.syncZoneIC && config.OVNKubernetesFeature.EnableInterconnect {
-		// Call zone chassis handler's AddLocalZoneNode function to mark
+		// Always call zone chassis handler's AddLocalZoneNode function to mark
 		// this node's chassis record in Southbound db as a local zone chassis.
-		// This is required when a node moves from a remote zone to local zone
+		// This is required even when the default network uses no-overlay transport,
+		// because user-defined networks may still use overlay transport and require
+		// the chassis entries for their transit switch connectivity.
+		chassisFailed := false
 		if err := oc.zoneChassisHandler.AddLocalZoneNode(node); err != nil {
 			errs = append(errs, err)
 			oc.syncZoneICFailed.Store(node.Name, true)
-		} else {
+			chassisFailed = true
+		}
+
+		// For no-overlay transport, the default network's interconnect resources are not needed.
+		// The transit switch and its resources are cleaned up during sync, so we only need
+		// to create IC resources for overlay transport.
+		if oc.Transport() != types.NetworkTransportNoOverlay {
 			// Call zone IC handler's AddLocalZoneNode function to create
 			// interconnect resources in the OVN Northbound db for this local zone node.
 			if err := oc.zoneICHandler.AddLocalZoneNode(node); err != nil {
 				errs = append(errs, err)
 				oc.syncZoneICFailed.Store(node.Name, true)
-			} else {
+			} else if !chassisFailed {
 				oc.syncZoneICFailed.Delete(node.Name)
 			}
+		} else if !chassisFailed {
+			// In no-overlay mode, if chassis handler succeeded, clear the failed state
+			oc.syncZoneICFailed.Delete(node.Name)
 		}
 	}
 
@@ -732,25 +712,34 @@ func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *corev1.Node, 
 
 	var err error
 	if syncZoneIC && config.OVNKubernetesFeature.EnableInterconnect {
-		// Call zone chassis handler's AddRemoteZoneNode function to creates
-		// the remote chassis for the remote zone node in the SB DB or mark
-		// the entry as remote if it was local chassis earlier
+		// Always create remote chassis entry with geneve encapsulation.
+		// This is needed even when the default network uses no-overlay transport,
+		// because user-defined networks may still use overlay transport and require
+		// the remote chassis entries for their transit switch connectivity.
 		if err = oc.zoneChassisHandler.AddRemoteZoneNode(node); err != nil {
 			err = fmt.Errorf("adding or updating remote node chassis %s failed, err - %w", node.Name, err)
 			oc.syncZoneICFailed.Store(node.Name, true)
 			return err
 		}
 
-		// Call zone IC handler's AddRemoteZoneNode function to create
-		// interconnect resources in the OVN NBDB for this remote zone node.
-		// Also, create the remote port binding in SBDB
-		if err = oc.zoneICHandler.AddRemoteZoneNode(node); err != nil {
-			err = fmt.Errorf("adding or updating remote node IC resources %s failed, err - %w", node.Name, err)
-			oc.syncZoneICFailed.Store(node.Name, true)
+		// For no-overlay transport, the default network's interconnect resources are not needed.
+		// The transit switch and its resources are cleaned up during sync, so we only need
+		// to create IC resources for overlay transport.
+		if oc.Transport() != types.NetworkTransportNoOverlay {
+			// Call zone IC handler's AddRemoteZoneNode function to create
+			// interconnect resources in the OVN NBDB for this remote zone node.
+			// Also, create the remote port binding in SBDB
+			if err = oc.zoneICHandler.AddRemoteZoneNode(node); err != nil {
+				err = fmt.Errorf("adding or updating remote node IC resources %s failed, err - %w", node.Name, err)
+				oc.syncZoneICFailed.Store(node.Name, true)
+			} else {
+				oc.syncZoneICFailed.Delete(node.Name)
+			}
+			klog.V(5).Infof("Creating Interconnect resources for remote node %q on network %q took: %s", node.Name, oc.GetNetworkName(), time.Since(start))
 		} else {
+			// In no-overlay mode, if chassis handler succeeded, clear the failed state
 			oc.syncZoneICFailed.Delete(node.Name)
 		}
-		klog.V(5).Infof("Creating Interconnect resources for remote node %q on network %q took: %s", node.Name, oc.GetNetworkName(), time.Since(start))
 	}
 	return err
 }

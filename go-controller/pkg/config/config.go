@@ -105,10 +105,11 @@ var (
 		EncapToSValue:                 "none",
 		DisableCTInvFlows:             false,
 		DoSCheckInterval:              100, // in Milliseconds
+		ClusterDefaultNad:             "default/ovn-primary",
 		Zone:                          types.OvnDefaultZone,
 		ClusterSubnetsMacBindingAging: 36000, // in Seconds
 		RawUDNAllowedDefaultServices:  "default/kubernetes,kube-system/kube-dns",
-		ClusterDefaultNad:             "default/ovn-primary",
+		Transport:                     types.NetworkTransportGeneve,
 	}
 
 	// Logging holds logging-related parsed config file parameters and command-line overrides
@@ -256,6 +257,14 @@ var (
 		V6TransitSubnet: "fd97::/64",
 	}
 
+	// NoOverlay holds no-overlay mode configuration
+	NoOverlay = NoOverlayConfig{}
+
+	// ManagedBGP holds managed BGP configuration
+	ManagedBGP = ManagedBGPConfig{
+		ASNumber: 64512, // Default AS number
+	}
+
 	// Layer2UsesTransitRouter indicated whether the layer2 primary networks will use transit router.
 	// It is a per-node setting and is also reflected in the node annotations.
 	Layer2UsesTransitRouter bool
@@ -265,6 +274,22 @@ const (
 	kubeServiceAccountPath       string = "/var/run/secrets/kubernetes.io/serviceaccount/"
 	kubeServiceAccountFileToken  string = "token"
 	kubeServiceAccountFileCACert string = "ca.crt"
+)
+
+// No-overlay mode configuration option constants
+const (
+	// NoOverlayRoutingManaged indicates OVN-Kubernetes manages the routing
+	NoOverlayRoutingManaged string = "managed"
+	// NoOverlayRoutingUnmanaged indicates users manage the routing themselves
+	NoOverlayRoutingUnmanaged string = "unmanaged"
+
+	// ManagedBGPTopologyFullMesh represents a full-mesh BGP topology
+	ManagedBGPTopologyFullMesh string = "full-mesh"
+
+	// NoOverlaySNATEnabled enables SNAT for outbound traffic
+	NoOverlaySNATEnabled string = "enabled"
+	// NoOverlaySNATDisabled disables SNAT for outbound traffic
+	NoOverlaySNATDisabled string = "disabled"
 )
 
 // DefaultConfig holds parsed config file parameters and command-line overrides
@@ -366,6 +391,11 @@ type DefaultConfig struct {
 
 	// ClusterDefaultNad is the name of the default cluster wide net-attach-def, default to default/ovn-primary
 	ClusterDefaultNad string `gcfg:"cluster-default-nad"`
+
+	// Transport specifies the transport technology used for the default network.
+	// Accepts: "geneve" or "no-overlay".
+	// Defaults to "geneve".
+	Transport string `gcfg:"transport"`
 }
 
 // LoggingConfig holds logging-related parsed config file parameters and command-line overrides
@@ -695,6 +725,32 @@ type ClusterManagerConfig struct {
 	V6TransitSubnet string `gcfg:"v6-transit-subnet"`
 }
 
+// NoOverlayConfig holds configuration for no-overlay mode
+type NoOverlayConfig struct {
+	// OutboundSNAT configures SNAT behavior for outbound traffic from pods on the default network.
+	// Supported values: "enabled" or "disabled".
+	// Required when transport=no-overlay.
+	OutboundSNAT string `gcfg:"outbound-snat"`
+	// Routing configures whether the pod network routing configuration is managed by
+	// OVN-Kubernetes or users. Supported values: "managed" or "unmanaged".
+	// Required when transport=no-overlay.
+	Routing string `gcfg:"routing"`
+}
+
+// ManagedBGPConfig holds configuration for managed BGP
+type ManagedBGPConfig struct {
+	// ASNumber specifies the AS number to be used by the BGP speakers on each node for its
+	// default VRF when no-overlay networks are configured with managed routing.
+	// It is shared by both the cluster default network and CUDNs.
+	// Supports both 16-bit (1-65535) and 32-bit (1-4294967295) AS numbers.
+	// Optional. Defaults to 64512 if not specified.
+	ASNumber uint32 `gcfg:"as-number"`
+	// Topology configures the BGP peering topology when routing is managed.
+	// Supported values: "full-mesh".
+	// Required when transport=no-overlay and routing=managed.
+	Topology string `gcfg:"topology"`
+}
+
 // OvnDBScheme describes the OVN database connection transport method
 type OvnDBScheme string
 
@@ -726,6 +782,8 @@ type config struct {
 	OvnKubeNode          OvnKubeNodeConfig
 	ClusterManager       ClusterManagerConfig
 	OvsPaths             OvsPathConfig
+	NoOverlay            NoOverlayConfig  `gcfg:"no-overlay"`
+	ManagedBGP           ManagedBGPConfig `gcfg:"bgp-managed"`
 }
 
 var (
@@ -746,6 +804,8 @@ var (
 	savedOvnKubeNode          OvnKubeNodeConfig
 	savedClusterManager       ClusterManagerConfig
 	savedOvsPaths             OvsPathConfig
+	savedNoOverlay            NoOverlayConfig
+	savedManagedBGP           ManagedBGPConfig
 
 	// legacy service-cluster-ip-range CLI option
 	serviceClusterIPRange string
@@ -776,6 +836,8 @@ func init() {
 	savedOvnKubeNode = OvnKubeNode
 	savedClusterManager = ClusterManager
 	savedOvsPaths = OvsPaths
+	savedNoOverlay = NoOverlay
+	savedManagedBGP = ManagedBGP
 	cli.VersionPrinter = func(_ *cli.Context) {
 		fmt.Printf("Version: %s\n", Version)
 		fmt.Printf("Git commit: %s\n", Commit)
@@ -807,6 +869,8 @@ func PrepareTestConfig() error {
 	OvnKubeNode = savedOvnKubeNode
 	ClusterManager = savedClusterManager
 	OvsPaths = savedOvsPaths
+	NoOverlay = savedNoOverlay
+	ManagedBGP = savedManagedBGP
 	Kubernetes.DisableRequestedChassis = false
 	EnableMulticast = false
 	UnprivilegedMode = false
@@ -829,6 +893,7 @@ func PrepareTestConfig() error {
 	// Don't pick up defaults from the environment
 	os.Unsetenv("KUBECONFIG")
 	os.Unsetenv("K8S_CACERT")
+	os.Unsetenv("K8S_CACERT_DATA")
 	os.Unsetenv("K8S_APISERVER")
 	os.Unsetenv("K8S_TOKEN")
 	os.Unsetenv("K8S_TOKEN_FILE")
@@ -945,7 +1010,7 @@ var CommonFlags = []cli.Flag{
 	},
 	&cli.StringFlag{
 		Name:        "encap-type",
-		Usage:       "The encapsulation protocol to use to transmit packets between hypervisors",
+		Usage:       "The encapsulation protocol to use to transmit packets between hypervisors by OVN in overlay mode (geneve, vxlan, gre)",
 		Destination: &cliConfig.Default.EncapType,
 		Value:       Default.EncapType,
 	},
@@ -1039,6 +1104,12 @@ var CommonFlags = []cli.Flag{
 			"hostsubnet-prefix should be specified, but for backward compatibility " +
 			"it defaults to 24 if unspecified.",
 		Destination: &cliConfig.Default.RawClusterSubnets,
+	},
+	&cli.StringFlag{
+		Name:        "transport",
+		Value:       Default.Transport,
+		Usage:       "Transport technology used for the default network, default to geneve if unspecified. (geneve, no-overlay)",
+		Destination: &cliConfig.Default.Transport,
 	},
 	&cli.BoolFlag{
 		Name:        "unprivileged-mode",
@@ -1465,7 +1536,7 @@ var K8sFlags = []cli.Flag{
 	},
 	&cli.StringFlag{
 		Name:        "k8s-cacert-data",
-		Usage:       "the Kubernetes API CA certificate data (not required if --k8s-kubeconfig is given)",
+		Usage:       "the Base64 encoded Kubernetes API CA certificate data (not required if --k8s-kubeconfig is given)",
 		Destination: &cliConfig.Kubernetes.CACertData,
 	},
 	&cli.StringFlag{
@@ -2082,8 +2153,46 @@ func getOVSExternalID(exec kexec.Interface, name string) string {
 	return out
 }
 
+// reconcileKubernetesAuthFields ensures that if a config stage provides Token/TokenFile
+// or CACert/CACertData, stale value for any of these set by previous stage is cleared.
+// This is required since any combination of these fields could be set by any stage
+// and might get overwritten only partially.
+func reconcileKubernetesAuthFields(k *KubernetesConfig, override *KubernetesConfig) {
+	// If this stage provided either Token or TokenFile, clear the other field
+	// not provided by this stage.
+	overrideHasToken := override.Token != ""
+	overrideHasTokenFile := override.TokenFile != ""
+
+	if overrideHasToken || overrideHasTokenFile {
+		if !overrideHasToken {
+			k.Token = ""
+		}
+		if !overrideHasTokenFile {
+			k.TokenFile = ""
+		}
+	}
+
+	// If this stage provided either CACert or CACertData, clear the other field
+	// not provided by this stage.
+	overrideHasCACert := override.CACert != ""
+	overrideHasCACertData := override.CACertData != ""
+
+	if overrideHasCACert || overrideHasCACertData {
+		if !overrideHasCACert {
+			k.CACert = ""
+		}
+		if !overrideHasCACertData {
+			k.CACertData = ""
+		}
+	}
+}
+
 func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath string, defaults *Defaults) error {
-	// token adn ca.crt may be from files mounted in container.
+	// values for token, cacert, kubeconfig, api-server may be found in several places.
+	// Priority order (highest first): OVS config, command line options, config file,
+	// environment variables, service account files
+
+	// token and ca.crt may be from files mounted in container.
 	saConfig := savedKubernetes
 	if data, err := os.ReadFile(filepath.Join(saPath, kubeServiceAccountFileToken)); err == nil {
 		saConfig.Token = string(data)
@@ -2096,10 +2205,6 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 	if err := overrideFields(&Kubernetes, &saConfig, &savedKubernetes); err != nil {
 		return err
 	}
-
-	// values for token, cacert, kubeconfig, api-server may be found in several places.
-	// Priority order (highest first): OVS config, command line options, config file,
-	// environment variables, service account files
 
 	envConfig := savedKubernetes
 	envVarsMap := map[string]string{
@@ -2122,16 +2227,19 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 	if err := overrideFields(&Kubernetes, &envConfig, &savedKubernetes); err != nil {
 		return err
 	}
+	reconcileKubernetesAuthFields(&Kubernetes, &envConfig)
 
 	// Copy config file values over default values
 	if err := overrideFields(&Kubernetes, &file.Kubernetes, &savedKubernetes); err != nil {
 		return err
 	}
+	reconcileKubernetesAuthFields(&Kubernetes, &file.Kubernetes)
 
 	// And CLI overrides over config file and default values
 	if err := overrideFields(&Kubernetes, &cli.Kubernetes, &savedKubernetes); err != nil {
 		return err
 	}
+	reconcileKubernetesAuthFields(&Kubernetes, &cli.Kubernetes)
 
 	// Grab default values from OVS external IDs
 	if defaults.K8sAPIServer {
@@ -2160,6 +2268,7 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 		} else {
 			bytes, err = base64.StdEncoding.DecodeString(Kubernetes.CACertData)
 		}
+
 		if err != nil {
 			return err
 		}
@@ -2539,6 +2648,115 @@ func buildClusterManagerConfig(cli, file *config) error {
 	return nil
 }
 
+// buildNoOverlayConfig updates NoOverlay config from config file only
+// NoOverlay configuration is only available in config file, not via CLI flags
+func buildNoOverlayConfig(file *config) error {
+	// Copy config file values over default values
+	if err := overrideFields(&NoOverlay, &file.NoOverlay, &savedNoOverlay); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateNoOverlayConfig validates the no-overlay configuration
+func validateNoOverlayConfig() error {
+	// Validate transport option
+	if Default.Transport != types.NetworkTransportGeneve && Default.Transport != types.NetworkTransportNoOverlay {
+		return fmt.Errorf("invalid transport %q: must be %q or %q", Default.Transport, types.NetworkTransportGeneve, types.NetworkTransportNoOverlay)
+	}
+
+	// If transport is no-overlay, validate required no-overlay options
+	if Default.Transport == types.NetworkTransportNoOverlay {
+		if !OVNKubernetesFeature.EnableRouteAdvertisements {
+			return fmt.Errorf("enable-route-advertisements must be true when transport=%q", types.NetworkTransportNoOverlay)
+		}
+		if NoOverlay.OutboundSNAT == "" {
+			return fmt.Errorf("outbound-snat is required when transport=no-overlay")
+		}
+		if NoOverlay.OutboundSNAT != NoOverlaySNATEnabled && NoOverlay.OutboundSNAT != NoOverlaySNATDisabled {
+			return fmt.Errorf("invalid outbound-snat %q: must be %q or %q", NoOverlay.OutboundSNAT, NoOverlaySNATEnabled, NoOverlaySNATDisabled)
+		}
+
+		if NoOverlay.Routing == "" {
+			return fmt.Errorf("routing is required when transport=no-overlay")
+		}
+		if NoOverlay.Routing != NoOverlayRoutingManaged && NoOverlay.Routing != NoOverlayRoutingUnmanaged {
+			return fmt.Errorf("invalid routing %q: must be %q or %q", NoOverlay.Routing, NoOverlayRoutingManaged, NoOverlayRoutingUnmanaged)
+		}
+
+		// If routing is managed, topology is required
+		if NoOverlay.Routing == NoOverlayRoutingManaged {
+			if ManagedBGP.Topology == "" {
+				return fmt.Errorf("topology is required when routing=managed")
+			}
+			if ManagedBGP.Topology != ManagedBGPTopologyFullMesh {
+				return fmt.Errorf("invalid topology %q: must be %q", ManagedBGP.Topology, ManagedBGPTopologyFullMesh)
+			}
+		}
+	} else {
+		// Warn if no-overlay or BGP config is specified but transport is not no-overlay
+		if NoOverlay.OutboundSNAT != "" || NoOverlay.Routing != "" {
+			klog.Warningf("[no-overlay] configuration specified but transport is %q; configuration will be ignored", Default.Transport)
+		}
+	}
+
+	return nil
+}
+
+// validateConfig performs all configuration validations after configs are built and completed.
+// This is the centralized place called after completeConfig() that orchestrates all validations.
+func validateConfig() error {
+	// Validate managed BGP configuration
+	if err := validateManagedBGPConfig(); err != nil {
+		return err
+	}
+
+	// Validate no-overlay/transport configuration
+	if err := validateNoOverlayConfig(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// buildManagedBGPConfig updates managed BGP config from config file only
+// ManagedBGP configuration is only available in config file, not via CLI flags
+func buildManagedBGPConfig(file *config) error {
+	// Copy config file values over default values
+	if err := overrideFields(&ManagedBGP, &file.ManagedBGP, &savedManagedBGP); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateManagedBGPConfig validates the managed BGP configuration
+func validateManagedBGPConfig() error {
+	// Validate AS number is in valid range
+	// Valid AS numbers: 1-4294967295 (32-bit)
+	// Reserved ranges:
+	//   0                    - Reserved (RFC 7607)
+	//   23456                - AS_TRANS (RFC 6793)
+	//   65535                - Reserved (RFC 7300)
+	//   4294967295           - Reserved (RFC 7300)
+
+	if ManagedBGP.ASNumber == 0 {
+		return fmt.Errorf("invalid as-number: 0 is reserved")
+	}
+	if ManagedBGP.ASNumber == 23456 {
+		return fmt.Errorf("invalid as-number: 23456 is reserved (AS_TRANS for 16-bit to 32-bit AS translation)")
+	}
+	if ManagedBGP.ASNumber == 65535 {
+		return fmt.Errorf("invalid as-number: 65535 is reserved")
+	}
+	if ManagedBGP.ASNumber == 4294967295 {
+		return fmt.Errorf("invalid as-number: 4294967295 is reserved")
+	}
+
+	return nil
+}
+
 // completeClusterManagerConfig completes the ClusterManager config by parsing raw values
 // into their final form.
 func completeClusterManagerConfig(allSubnets *ConfigSubnets) error {
@@ -2591,6 +2809,7 @@ func buildDefaultConfig(cli, file *config) error {
 	if Default.Zone == "" {
 		Default.Zone = types.OvnDefaultZone
 	}
+
 	return nil
 }
 
@@ -2706,6 +2925,8 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		OvnKubeNode:          savedOvnKubeNode,
 		ClusterManager:       savedClusterManager,
 		OvsPaths:             savedOvsPaths,
+		NoOverlay:            savedNoOverlay,
+		ManagedBGP:           savedManagedBGP,
 	}
 
 	configFile, configFileIsDefault = getConfigFilePath(ctx)
@@ -2831,6 +3052,14 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
+	if err = buildNoOverlayConfig(&cfg); err != nil {
+		return "", err
+	}
+
+	if err = buildManagedBGPConfig(&cfg); err != nil {
+		return "", err
+	}
+
 	tmpAuth, err := buildOvnAuth(exec, true, &cliConfig.OvnNorth, &cfg.OvnNorth, defaults.OvnNorthAddress)
 	if err != nil {
 		return "", err
@@ -2844,6 +3073,11 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	OvnSouth = *tmpAuth
 
 	if err := completeConfig(); err != nil {
+		return "", err
+	}
+
+	// Perform cross-configuration validations
+	if err := validateConfig(); err != nil {
 		return "", err
 	}
 
@@ -2863,6 +3097,8 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	klog.V(5).Infof("Ovnkube Feature config: %+v", OVNKubernetesFeature)
 	klog.V(5).Infof("Ovnkube Cluster Manager config: %+v", ClusterManager)
 	klog.V(5).Infof("OVS Paths config: %+v", OvsPaths)
+	klog.V(5).Infof("No Overlay config: %+v", NoOverlay)
+	klog.V(5).Infof("Managed BGP config: %+v", ManagedBGP)
 
 	return retConfigFile, nil
 }

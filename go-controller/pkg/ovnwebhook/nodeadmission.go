@@ -55,20 +55,11 @@ var commonNodeAnnotationChecks = map[string]checkNodeAnnot{
 
 		return fmt.Errorf("%s can only be set to %s or %s, it cannot be removed", util.OvnNodeZoneName, types.OvnDefaultZone, nodeName)
 	},
-	util.OVNNodeEncapIPs:        nil,
-	util.OvnNodeChassisHostname: nil,
+	util.OVNNodeEncapIPs: nil,
 }
 
 // interconnectNodeAnnotationChecks holds annotations allowed for ovnkube-node:<nodeName> users in IC environments
 var interconnectNodeAnnotationChecks = map[string]checkNodeAnnot{
-	util.OvnNodeMigratedZoneName: func(v annotationChange, nodeName string) error {
-		// it is allowed for the annotation to be set to <nodeName>
-		if (v.action == added || v.action == changed) && v.value == nodeName {
-			return nil
-		}
-
-		return fmt.Errorf("%s can only be set to %s, it cannot be removed", util.OvnNodeMigratedZoneName, nodeName)
-	},
 	util.Layer2TopologyVersion: func(v annotationChange, _ string) error {
 		// it is allowed for the annotation to be added or removed
 		if v.action == added || v.action == removed {

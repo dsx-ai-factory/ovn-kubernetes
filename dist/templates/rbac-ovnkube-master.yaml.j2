@@ -1,22 +1,22 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: ovn-master
-  namespace: ovn-kubernetes
+    name: ovnkube-master
+    namespace: ovn-kubernetes
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: ovnkube-master
+    name: ovnkube-master
 roleRef:
-  name: ovnkube-master
-  kind: ClusterRole
-  apiGroup: rbac.authorization.k8s.io
+    name: ovnkube-master
+    kind: ClusterRole
+    apiGroup: rbac.authorization.k8s.io
 subjects:
-- kind: ServiceAccount
-  name: ovn-master
-  namespace: ovn-kubernetes
+    - kind: ServiceAccount
+      name: ovnkube-master
+      namespace: ovn-kubernetes
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -30,7 +30,7 @@ roleRef:
     apiGroup: rbac.authorization.k8s.io
 subjects:
     - kind: ServiceAccount
-      name: ovn-master
+      name: ovnkube-master
       namespace: ovn-kubernetes
 
 ---
@@ -45,16 +45,15 @@ roleRef:
     apiGroup: rbac.authorization.k8s.io
 subjects:
     - kind: ServiceAccount
-      name: ovn-master
+      name: ovnkube-master
       namespace: ovn-kubernetes
 
 
 ---
-# RBAC policies for ovnk8s-master
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: ovnkube-master
+    name: ovnkube-master
 rules:
     - apiGroups: [""]
       resources:
@@ -62,7 +61,7 @@ rules:
           - nodes
           - pods
           - services
-          # - endpoints downstream does not have it  TBD
+          - endpoints
       verbs: [ "get", "list", "watch" ]
     - apiGroups: ["discovery.k8s.io"]
       resources:
@@ -84,13 +83,10 @@ rules:
           - egressqoses
           - egressservices
           - adminpolicybasedexternalroutes
-          # upstream does not have it - adminpolicybasedroutes TBD
-          - virtualips
-          - ipreservations
-          - portmirrors
           - userdefinednetworks
           - clusteruserdefinednetworks
           - networkqoses
+          - vteps
       verbs: [ "get", "list", "watch" ]
     - apiGroups: ["k8s.cni.cncf.io"]
       resources:
@@ -120,9 +116,6 @@ rules:
           - egressservices/status
           - adminpolicybasedexternalroutes/status
           - egressqoses/status
-          - virtualips/status
-          - ipreservations/status
-          - portmirrors/status
           - userdefinednetworks
           - userdefinednetworks/status
           - clusteruserdefinednetworks
@@ -137,8 +130,6 @@ rules:
       verbs: ["create", "patch", "update"]
     - apiGroups: [""]
       resources:
-          - pods  # needed for set label on pods
-          - nodes # needed for set taint on nodes
           - nodes/status
           - pods/status
           - services/status
@@ -168,22 +159,7 @@ metadata:
 rules:
     - apiGroups: [""]
       resources: ["configmaps"]
-      verbs: ["create", "patch", "update"] # delete in downstream, TBD-merge
-   
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  namespace: ovn-kubernetes
-  name: ovn-k8s-lease
-roleRef:
-  name: ovn-master-lease
-  kind: Role
-  apiGroup: rbac.authorization.k8s.io
-subjects:
-  - kind: ServiceAccount
-    namespace: ovn-kubernetes
-    name: ovn-master
+      verbs: ["create", "patch", "update"]
 
 ---
 apiVersion: admissionregistration.k8s.io/v1
@@ -255,3 +231,44 @@ spec:
         operations:  ["UPDATE"]
         resources:   ["pods"]
 {%- endif %}
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: egressip-mark-annotation-validation
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["k8s.ovn.org"]
+      apiVersions: ["v1"]
+      operations: ["CREATE", "UPDATE"]
+      resources: ["egressips"]
+  validations:
+  # Prevent creating EgressIP with the annotation
+  - expression: 'request.operation != "CREATE" || !has(object.metadata.annotations) || !("k8s.ovn.org/egressip-mark" in object.metadata.annotations)'
+    message: 'EgressIP resources cannot be created with the "k8s.ovn.org/egressip-mark" annotation. This annotation is managed by the system.'
+    reason: Invalid
+  # Prevent modifying or removing the annotation once set
+  - expression: 'request.operation != "UPDATE" || !has(oldObject.metadata.annotations) || !("k8s.ovn.org/egressip-mark" in oldObject.metadata.annotations) ||
+      (has(object.metadata.annotations) && ("k8s.ovn.org/egressip-mark" in object.metadata.annotations) && oldObject.metadata.annotations["k8s.ovn.org/egressip-mark"] == object.metadata.annotations["k8s.ovn.org/egressip-mark"])'
+    message: 'The "k8s.ovn.org/egressip-mark" annotation cannot be modified or removed once set. This annotation is managed by the system.'
+    reason: Invalid
+  # Only OVN controller service account can add the annotation
+  {% if ovn_enable_interconnect == "true" -%}
+  - expression: 'request.operation != "UPDATE" || !has(object.metadata.annotations) || !("k8s.ovn.org/egressip-mark" in object.metadata.annotations) || (has(oldObject.metadata.annotations) && ("k8s.ovn.org/egressip-mark" in oldObject.metadata.annotations)) || request.userInfo.username == "system:serviceaccount:ovn-kubernetes:ovnkube-cluster-manager"'
+  {% else %}
+  - expression: 'request.operation != "UPDATE" || !has(object.metadata.annotations) || !("k8s.ovn.org/egressip-mark" in object.metadata.annotations) || (has(oldObject.metadata.annotations) && ("k8s.ovn.org/egressip-mark" in oldObject.metadata.annotations)) || request.userInfo.username == "system:serviceaccount:ovn-kubernetes:ovnkube-master"'
+  {%- endif %}
+    message: 'A regular user must not add "k8s.ovn.org/egressip-mark" annotation to an EgressIP custom resource.'
+    reason: Invalid
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: egressip-mark-annotation-validation-binding
+spec:
+  policyName: egressip-mark-annotation-validation
+  validationActions: [Deny]

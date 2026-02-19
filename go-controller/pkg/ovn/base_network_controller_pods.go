@@ -505,7 +505,6 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *corev1.Pod, nadKe
 	network *nadapi.NetworkSelectionElement, enable *bool) (ops []ovsdb.Operation,
 	lsp *nbdb.LogicalSwitchPort, podAnnotation *util.PodAnnotation, newlyCreatedPort bool, err error) {
 	var ls *nbdb.LogicalSwitch
-	var node *corev1.Node
 
 	skipIPAM, err := util.SkipIPAMForNAD(pod.Annotations, nadKey)
 	if err != nil {
@@ -526,7 +525,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *corev1.Pod, nadKe
 	// a finalizer, and then the node was removed. In this case the pod will still exist in a running state.
 	// Terminating pods should still have network connectivity for pre-stop hooks or termination grace period
 	// We cannot wire a pod that has no node/switch, so retry again later
-	if node, err = bnc.watchFactory.GetNode(pod.Spec.NodeName); apierrors.IsNotFound(err) &&
+	if _, err := bnc.watchFactory.GetNode(pod.Spec.NodeName); apierrors.IsNotFound(err) &&
 		bnc.lsManager.GetSwitchSubnets(switchName) == nil && bnc.doesNetworkRequireIPAM() {
 		podState := "unknown"
 		if util.PodTerminating(pod) {
@@ -596,19 +595,6 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *corev1.Pod, nadKe
 	if !lspExist || len(existingLSP.Options["iface-id-ver"]) != 0 {
 		lsp.Options["iface-id-ver"] = string(pod.UID)
 	}
-	// Bind the port to the node's chassis; prevents ping-ponging between
-	// chassis if ovnkube-node isn't running correctly and hasn't cleared
-	// out iface-id for an old instance of this pod, and the pod got
-	// rescheduled.
-
-	if !config.Kubernetes.DisableRequestedChassis {
-		chassis, err := util.ParseNodeChassisHostnameAnnotation(node)
-		if err != nil {
-			return nil, nil, nil, false, fmt.Errorf("[%s] failed getting chassis hostname annotation on node %s: %v", podDesc, node.Name, err)
-		}
-		lsp.Options[libovsdbops.RequestedChassis] = chassis
-	}
-
 	// let's calculate if this network controller's role for this pod
 	// and pass that information while determining the podAnnotations
 	networkRole, err := bnc.GetNetworkRole(pod)
@@ -619,6 +605,28 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *corev1.Pod, nadKe
 	if networkRole == ovntypes.NetworkRoleNone {
 		// pod not on this controller, nothing to do
 		return nil, nil, nil, false, nil
+	}
+
+	// Bind the port to the node's chassis.
+	// For IC this is required for Layer 2 networks with remote ports.
+	// For Legacy with OVN Central Mode it prevents ping-ponging between
+	// chassis if ovnkube-node isn't running correctly and hasn't cleared
+	// out iface-id for an old instance of this pod, and the pod got
+	// rescheduled.
+	var node *corev1.Node
+	if !config.Kubernetes.DisableRequestedChassis {
+		node, err = bnc.watchFactory.GetNode(pod.Spec.NodeName)
+		if err != nil {
+			return nil, nil, nil, false, err
+		}
+		chassisID, err := util.ParseNodeChassisIDAnnotation(node)
+		if err != nil {
+			if util.IsAnnotationNotSetError(err) {
+				return nil, nil, nil, false, ovntypes.NewSuppressedError(err)
+			}
+			return nil, nil, nil, false, err
+		}
+		lsp.Options[libovsdbops.RequestedChassis] = chassisID
 	}
 
 	// Although we have different code to allocate the pod annotation for the
@@ -984,7 +992,8 @@ func getAllowedMacAddress(lsp *nbdb.LogicalSwitchPort) string {
 }
 
 // allocatePodAnnotation and update the corresponding pod annotation.
-func (bnc *BaseNetworkController) allocatePodAnnotation(pod *corev1.Pod, skipIPAM bool, existingLSP *nbdb.LogicalSwitchPort, podDesc, nadKey string, network *nadapi.NetworkSelectionElement, networkRole string) (*util.PodAnnotation, bool, error) {
+func (bnc *BaseNetworkController) allocatePodAnnotation(pod *corev1.Pod, skipIPAM bool, existingLSP *nbdb.LogicalSwitchPort, podDesc,
+	nadKey string, network *nadapi.NetworkSelectionElement, networkRole string) (*util.PodAnnotation, bool, error) {
 	var releaseIPs bool
 	var podMac net.HardwareAddr
 	var podIfAddrs []*net.IPNet
