@@ -31,13 +31,11 @@ spec:
         type: infra
         kubernetes.io/os: "linux"
     spec:
-      imagePullSecrets:
-        - name: registry-credentials
+      priorityClassName: "system-cluster-critical"
       # Requires fairly broad permissions - ability to read all services and network functions as well
       # as all pods.
       serviceAccountName: ovnkube-master
       hostNetwork: true
-      priorityClassName: "system-cluster-critical"
       dnsPolicy: Default
       {% if ovnkube_compact_mode_enable=="true" and ovn_unprivileged_mode=="no" %}
       hostPID: true
@@ -95,7 +93,7 @@ spec:
         - mountPath: /var/run/ovn/
           name: host-var-run-ovs
         - mountPath: /ovn-cert
-          name: ovn-pki
+          name: host-ovn-cert
           readOnly: true
 
         resources:
@@ -170,7 +168,10 @@ spec:
         - mountPath: /var/run/ovn/
           name: host-var-run-ovs
         - mountPath: /ovn-cert
-          name: ovn-pki
+          name: host-ovn-cert
+          readOnly: true
+        - mountPath: /run/ovnkube-config
+          name: ovnkube-config
           readOnly: true
         {% if ovnkube_compact_mode_enable=="true" %}
         # Common mounts
@@ -214,8 +215,6 @@ spec:
           value: "{{ ovnkube_logfile_maxbackups }}"
         - name: OVNKUBE_LOGFILE_MAXAGE
           value: "{{ ovnkube_logfile_maxage }}"
-        - name: OVNKUBE_LOGFILE
-          value: "{{ ovnkube_logfile }}"
         - name: OVNKUBE_LIBOVSDB_CLIENT_LOGFILE
           value: "{{ ovnkube_libovsdb_client_logfile }}"
         - name: OVNKUBE_CONFIG_DURATION_ENABLE
@@ -241,11 +240,6 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: k8s_apiserver
-        - name: OVN_MTU
-          valueFrom:
-            configMapKeyRef:
-              name: ovn-config
-              key: mtu
         - name: K8S_NODE
           valueFrom:
             fieldRef:
@@ -266,18 +260,12 @@ spec:
           value: "{{ ovn_egress_ip_enable }}"
         - name: OVN_EGRESSIP_HEALTHCHECK_PORT
           value: "{{ ovn_egress_ip_healthcheck_port }}"
-        - name: OVN_EGRESSIP_REACHABILITY_TIMEOUT
-          value: "{{ ovn_egress_ip_reachability_timeout }}"
         - name: OVN_EGRESSFIREWALL_ENABLE
           value: "{{ ovn_egress_firewall_enable }}"
-        - name: OVN_MULTI_NETWORK_ENABLE
-          value: "{{ ovn_multi_network_enable }}"
         - name: OVN_EGRESSQOS_ENABLE
           value: "{{ ovn_egress_qos_enable }}"
-        - name: OVN_ADMIN_PBR_ENABLE
-          value: "{{ ovn_admin_pbr_enable }}"
-        - name: OVN_VIRTUALIP_ENABLE
-          value: "{{ ovn_virtual_ip_enable }}"
+        - name: OVN_MULTI_NETWORK_ENABLE
+          value: "{{ ovn_multi_network_enable }}"
         - name: OVN_NETWORK_SEGMENTATION_ENABLE
           value: "{{ ovn_network_segmentation_enable }}"
         - name: OVN_ROUTE_ADVERTISEMENTS_ENABLE
@@ -290,10 +278,10 @@ spec:
           value: "{{ ovn_enable_dynamic_udn_allocation }}"
         - name: OVN_DYNAMIC_UDN_GRACE_PERIOD
           value: "{{ ovn_dynamic_udn_grace_period }}"
+        - name: OVN_NO_OVERLAY_ENABLE
+          value: "{{ ovn_no_overlay_enable }}"
         - name: OVN_EGRESSSERVICE_ENABLE
           value: "{{ ovn_egress_service_enable }}"
-        - name: OVN_IPRESERVATION_ENABLE
-          value: "{{ ovn_ipreservation_enable }}"
         - name: OVN_HYBRID_OVERLAY_NET_CIDR
           value: "{{ ovn_hybrid_overlay_net_cidr }}"
         - name: OVN_DISABLE_SNAT_MULTIPLE_GWS
@@ -322,8 +310,6 @@ spec:
           value: "{{ ovn_multicast_enable }}"
         - name: OVN_ACL_LOGGING_RATE_LIMIT
           value: "{{ ovn_acl_logging_rate_limit }}"
-        - name: OVN_NOHOSTSUBNET_LABEL
-          value: "{{ ovn_nohostsubnet_label }}"
         - name: OVN_STATELESS_NETPOL_ENABLE
           value: "{{ ovn_stateless_netpol_enable }}"
         - name: OVN_ENABLE_MULTI_EXTERNAL_GATEWAY
@@ -334,19 +320,11 @@ spec:
           value: "{{ ovn_nohostsubnet_label }}"
         - name: OVN_DISABLE_REQUESTEDCHASSIS
           value: "{{ ovn_disable_requestedchassis }}"
-        - name: OVN_UDN_ALLOWED_DEFAULT_SERVICES
-          value: "{{ ovn_udn_allowed_default_services }}"
-        - name: OVS_DB_TRANSACTION_TIMEOUT
-          value: "{{ ovs_db_transaction_timeout }}"
         - name: OVN_HOST_NETWORK_NAMESPACE
           valueFrom:
             configMapKeyRef:
               name: ovn-config
               key: host_network_namespace
-        - name: OVN_CTINV_FLOWS_DISABLE
-          value: "{{ ovn_ctinv_flows_disable }}"
-        - name: OVN_CLUSTER_SUBNETS_MAC_BINDING_AGING
-          value: "{{ ovn_cluster_subnets_mac_binding_aging }}"
         - name: OVN_ENABLE_PERSISTENT_IPS
           value: "{{ ovn_enable_persistent_ips }}"
         - name: OVN_NETWORK_QOS_ENABLE
@@ -369,10 +347,13 @@ spec:
       - name: host-var-run-ovs
         hostPath:
           path: /var/run/openvswitch
-      - name: ovn-pki
+      - name: host-ovn-cert
         hostPath:
           path: /etc/ovn
           type: DirectoryOrCreate
+      - name: ovnkube-config
+        configMap:
+          name: ovnkube-config
       {% if ovnkube_compact_mode_enable=="true" %}
       - name: host-slash
         hostPath:

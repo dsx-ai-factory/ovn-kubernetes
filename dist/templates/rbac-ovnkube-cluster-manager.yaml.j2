@@ -35,21 +35,6 @@ subjects:
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  namespace: ovn-kubernetes
-  name: ovn-cluster-manager-lease
-roleRef:
-  name: ovn-k8s-lease
-  kind: Role
-  apiGroup: rbac.authorization.k8s.io
-subjects:
-  - kind: ServiceAccount
-    namespace: ovn-kubernetes
-    name: ovnkube-cluster-manager
-
----
-apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
     name: ovnkube-cluster-manager
@@ -93,6 +78,7 @@ rules:
           - routeadvertisements
           - networkqoses
           - clusternetworkconnects
+          - vteps
       verbs: [ "get", "list", "watch" ]
     - apiGroups: ["k8s.ovn.org"]
       resources:
@@ -150,5 +136,5 @@ rules:
     - apiGroups: ["frrk8s.metallb.io"]
       resources:
           - frrconfigurations
-      verbs: [ "create", "delete", "list", "patch", "update", "watch" ]
+      verbs: [ "create", "delete", "get", "list", "patch", "update", "watch" ]
     {%- endif %}

@@ -114,6 +114,7 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU() (*factory.Handler, error) 
 	return bnnc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			var activeNetwork util.NetInfo
+			var err error
 
 			pod := obj.(*corev1.Pod)
 			if util.PodWantsHostNetwork(pod) {
@@ -127,26 +128,19 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU() (*factory.Handler, error) 
 			// For default network, NAD name is DefaultNetworkName.
 			nadToDPUCDMap := map[string]*util.DPUConnectionDetails{}
 			if bnnc.IsPrimaryNetwork() {
-				// check to see if the primary NAD is even applicable to our controller
-				foundNamespaceNAD, err := bnnc.networkManager.GetPrimaryNADForNamespace(pod.Namespace)
-				if err != nil {
-					klog.Errorf("Failed to get primary network NAD for namespace %s: %v", pod.Namespace, err)
-					return
-				}
-				if foundNamespaceNAD == ovntypes.DefaultNetworkName {
-					return
-				}
-				networkName := bnnc.networkManager.GetNetworkNameForNADKey(foundNamespaceNAD)
-				if networkName != "" && networkName != netName {
-					return
-				}
 				activeNetwork, err = bnnc.networkManager.GetActiveNetworkForNamespace(pod.Namespace)
 				if err != nil {
 					klog.Errorf("Failed looking for the active network for namespace %s: %v", pod.Namespace, err)
 					return
 				}
+				if activeNetwork == nil {
+					klog.Errorf("Unable to find an active network for namespace %s", pod.Namespace)
+					return
+				}
+				if activeNetwork.GetNetworkName() != netName {
+					return
+				}
 			}
-
 			on, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(
 				pod,
 				bnnc.GetNetInfo(),
@@ -160,11 +154,12 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU() (*factory.Handler, error) 
 					klog.Errorf("Error getting network-attachment for pod %s/%s network %s: %v",
 						pod.Namespace, pod.Name, bnnc.GetNetworkName(), err)
 				} else {
-					klog.V(6).Infof("Skipping Pod %s/%s as it is not attached to network: %s",
+					klog.V(5).Infof("Skipping Pod %s/%s as it is not attached to network: %s",
 						pod.Namespace, pod.Name, netName)
 				}
 				return
 			}
+
 			klog.V(5).Infof("Add for Pod: %s/%s for network %s", pod.Namespace, pod.Name, netName)
 			for nadKey := range networkMap {
 				nadToDPUCDMap[nadKey] = nil

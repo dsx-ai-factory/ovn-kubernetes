@@ -154,7 +154,7 @@ func getExpectedDataPodsAndSwitchesForUserDefinedNetwork(fakeOvn *FakeOVN, pods 
 						ovntypes.TopologyExternalID: ocInfo.bnc.TopologyType(),
 					},
 					Options: map[string]string{
-						libovsdbops.RequestedChassis: pod.nodeName,
+						libovsdbops.RequestedChassis: requestedChassisForPod(pod),
 						"iface-id-ver":               pod.podName,
 					},
 
@@ -428,7 +428,6 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 
 				watchNodes := false
 				node := *newNode(nodeName, "192.168.126.202/24")
-				node.Annotations["k8s.ovn.org/node-chassis-hostname"] = nodeName
 
 				startOvn(initialDB, watchNodes, []corev1.Node{node}, []corev1.Namespace{namespace1, namespace2}, nil, nil,
 					[]nettypes.NetworkAttachmentDefinition{*nad, *nad2}, nil, nil)
@@ -473,7 +472,6 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 
 				watchNodes := false
 				node := *newNode(nodeName, "192.168.126.202/24")
-				node.Annotations["k8s.ovn.org/node-chassis-hostname"] = nodeName
 
 				startOvn(initialDB, watchNodes, []corev1.Node{node}, []corev1.Namespace{namespace1}, nil, nil,
 					[]nettypes.NetworkAttachmentDefinition{*nad}, []testPod{nPodTest}, map[string]string{labelName: labelVal})
@@ -561,7 +559,6 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 
 					watchNodes := true
 					node := *newNode(nodeName, "192.168.126.202/24")
-					node.Annotations["k8s.ovn.org/node-chassis-hostname"] = nodeName
 
 					// set L3 specific node annotations
 					if topology == ovntypes.Layer3Topology {
@@ -577,7 +574,6 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 					if remote {
 						config.OVNKubernetesFeature.EnableInterconnect = true
 						node.Annotations["k8s.ovn.org/zone-name"] = "remote"
-						node.Annotations["k8s.ovn.org/remote-zone-migrated"] = "remote"
 						node.Annotations, err = util.UpdateNetworkIDAnnotation(node.Annotations, ovntypes.DefaultNetworkName, 0)
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
 						if topology != ovntypes.LocalnetTopology {

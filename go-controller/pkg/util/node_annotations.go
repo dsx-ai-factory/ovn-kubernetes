@@ -8,14 +8,11 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gaissmai/cidrtree"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/util/retry"
 	utilnet "k8s.io/utils/net"
 
@@ -79,9 +76,6 @@ const (
 	// specified networks
 	skipPinnedLS = "k8s.ovn.org/node-skip-pinned-ls-for-networks"
 
-	// OvnNodeChassisHostname is the hostname set on a node's chassis
-	OvnNodeChassisHostname = "k8s.ovn.org/node-chassis-hostname"
-
 	// OvnNodeIfAddr is the CIDR form representation of primary network interface's attached IP address (i.e: 192.168.126.31/24 or 0:0:0:0:0:feff:c0a8:8e0c/64)
 	OvnNodeIfAddr = "k8s.ovn.org/node-primary-ifaddr"
 
@@ -131,22 +125,6 @@ const (
 	// OvnNodeZoneName is the zone to which the node belongs to. It is set by ovnkube-node.
 	// ovnkube-node gets the node's zone from the OVN Southbound database.
 	OvnNodeZoneName = "k8s.ovn.org/zone-name"
-
-	/** HACK BEGIN **/
-	// TODO(tssurya): Remove this annotation a few months from now (when one or two release jump
-	// upgrades are done). This has been added only to minimize disruption for upgrades when
-	// moving to interconnect=true.
-	// We want the legacy ovnkube-master to wait for remote ovnkube-node to
-	// signal it using "k8s.ovn.org/remote-zone-migrated" annotation before
-	// considering a node as remote when we upgrade from "global" (1 zone IC)
-	// zone to multi-zone. This is so that network disruption for the existing workloads
-	// is negligible and until the point where ovnkube-node flips the switch to connect
-	// to the new SBDB, it would continue talking to the legacy RAFT ovnkube-sbdb to ensure
-	// OVN/OVS flows are intact.
-	// OvnNodeMigratedZoneName is the zone to which the node belongs to. It is set by ovnkube-node.
-	// ovnkube-node gets the node's zone from the OVN Southbound database.
-	OvnNodeMigratedZoneName = "k8s.ovn.org/remote-zone-migrated"
-	/** HACK END **/
 
 	// OvnTransitSwitchPortAddr is the annotation to store the node Transit switch port ips.
 	// It is set by cluster manager.
@@ -507,24 +485,6 @@ func GetAllNADsSkipPinnedLS(node *corev1.Node) []string {
 
 func NodeChassisIDAnnotationChanged(oldNode, newNode *corev1.Node) bool {
 	return oldNode.Annotations[OvnNodeChassisID] != newNode.Annotations[OvnNodeChassisID]
-}
-
-func SetNodeChassisHostnameAnnotation(nodeAnnotator kube.Annotator, chassisHostname string) error {
-	if chassisHostname != "" {
-		if err := nodeAnnotator.Set(OvnNodeChassisHostname, chassisHostname); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// ParseNodeChassisHostnameAnnotation returns the node's ovnNodeChassisHostname annotation
-func ParseNodeChassisHostnameAnnotation(node *corev1.Node) (string, error) {
-	chassisHostname, ok := node.Annotations[OvnNodeChassisHostname]
-	if !ok {
-		return "", newAnnotationNotSetError("%s annotation not found for node %s", OvnNodeChassisHostname, node.Name)
-	}
-	return chassisHostname, nil
 }
 
 // Deprecated
@@ -1354,26 +1314,6 @@ func SetNodeZone(nodeAnnotator kube.Annotator, zoneName string) error {
 	return nodeAnnotator.Set(OvnNodeZoneName, zoneName)
 }
 
-/** HACK BEGIN **/
-// TODO(tssurya): Remove this a few months from now
-// SetNodeZoneMigrated sets the node's zone in the 'ovnNodeMigratedZoneName' node annotation.
-func SetNodeZoneMigrated(nodeAnnotator kube.Annotator, zoneName string) error {
-	return nodeAnnotator.Set(OvnNodeMigratedZoneName, zoneName)
-}
-
-// HasNodeMigratedZone returns true if node has its ovnNodeMigratedZoneName set already
-func HasNodeMigratedZone(node *corev1.Node) bool {
-	_, ok := node.Annotations[OvnNodeMigratedZoneName]
-	return ok
-}
-
-// NodeMigratedZoneAnnotationChanged returns true if the ovnNodeMigratedZoneName annotation changed for the node
-func NodeMigratedZoneAnnotationChanged(oldNode, newNode *corev1.Node) bool {
-	return oldNode.Annotations[OvnNodeMigratedZoneName] != newNode.Annotations[OvnNodeMigratedZoneName]
-}
-
-/** HACK END **/
-
 // GetNodeZone returns the zone of the node set in the 'ovnNodeZoneName' node annotation.
 // If the annotation is not set, it returns the 'default' zone name.
 func GetNodeZone(node *corev1.Node) string {
@@ -1608,110 +1548,4 @@ func GetNodePrimaryDPUHostAddrAnnotation(node *corev1.Node) (*ifAddr, error) {
 		return nil, fmt.Errorf("node: %q does not have any IP information set", node.Name)
 	}
 	return nodeIfAddr, nil
-}
-
-// findNodeReadyCondition finds node ready condition in conditions array.
-// Returns a pointer within the given node.
-func findNodeReadyCondition(node *corev1.Node) *corev1.NodeCondition {
-	for i, condition := range node.Status.Conditions {
-		if condition.Type == corev1.NodeReady {
-			return &node.Status.Conditions[i]
-		}
-	}
-	return nil
-}
-
-// XXX should come from config
-const noSchedTaintKey = "ngn2.nvidia.com/ovn"
-const nodeDependentsAnnotationKey = "ngn2.nvidia.com/dpu-host-hostname"
-const depedentTypeLabelKey = "ngn2.nvidia.com/dpu-hosttype"
-
-var dependentTypesPropagated = map[string]bool{
-	"GS": true,
-}
-
-// dependentNodename returns (dependentNodename, true) if the node has an annotation to indicate is has dependents
-func dependentNodename(node *corev1.Node) (string, bool) {
-	dep, present := node.Annotations[nodeDependentsAnnotationKey]
-	return dep, present
-}
-
-// Return true if this node type must propagate not ready conditions to any dependent node.
-func nodePropagatesReadiness(node *corev1.Node) bool {
-	if hostTypeLabel, present := node.Labels[depedentTypeLabelKey]; present {
-		_, present = dependentTypesPropagated[hostTypeLabel]
-		return present
-	}
-	return false
-}
-
-// SyncDependentNodeTaints syncs the taints on a dependent node with the ready condition of
-// the node subject to reconciliation. If the 'within' duration is nonzero then the last
-// transition time of the ready condition must be no older than that duration from now - within
-// should be non-zero for Update events, to avoid a GET on every reconciliation of a node
-// that has a dependent (e.g., within of 1m for updates).
-func SyncDependentNodeTaints(kube kube.Interface, nodeLister listers.NodeLister, node *corev1.Node) error {
-	if !nodePropagatesReadiness(node) {
-		return nil
-	}
-
-	dependentNodeName, present := dependentNodename(node)
-	if !present {
-		return nil
-	}
-
-	ourReadyCondition := findNodeReadyCondition(node)
-	// if DPU is in this condition for more than 3 minutes, then try to add/remove the taint.
-	// this is so that we don't act on dpu node flapping between Ready/NotReady state.
-	if ourReadyCondition == nil || time.Since(ourReadyCondition.LastTransitionTime.Time) < 3*time.Minute {
-		return nil
-	}
-
-	noSchedTaint := &corev1.Taint{
-		Key:       noSchedTaintKey,
-		Value:     "dpuNotReady",
-		Effect:    corev1.TaintEffectNoSchedule,
-		TimeAdded: &metav1.Time{Time: time.Now()},
-	}
-	// Verify if the above taint is already present or not on the dependentNodeName.
-	// This call is inexpensive since we are checking from the informer cache. It is
-	// fine if the informer cache is stale, since NodeUpdate events happen every few
-	// seconds, and we will reconcile in the next update.
-	dependentNode, err := nodeLister.Get(dependentNodeName)
-	if err != nil {
-		return fmt.Errorf("SyncDependentNodeTaints error while determining if taint is present or not on node %q "+
-			"error: %v", dependentNodeName, err)
-	}
-	taintAlreadyPresent := false
-	nodeTaints := dependentNode.Spec.Taints
-	for i := range nodeTaints {
-		if noSchedTaint.MatchTaint(&nodeTaints[i]) {
-			taintAlreadyPresent = true
-			break
-		}
-	}
-	action := ""
-	switch ourReadyCondition.Status {
-	case corev1.ConditionTrue:
-		if taintAlreadyPresent {
-			action = "removing taint"
-			err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
-				return kube.RemoveTaintFromNode(dependentNodeName, noSchedTaint)
-			})
-		}
-
-	case corev1.ConditionFalse, corev1.ConditionUnknown:
-		if !taintAlreadyPresent {
-			action = "adding taint"
-			err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
-				return kube.SetTaintOnNode(dependentNodeName, noSchedTaint)
-			})
-		}
-	}
-
-	if err != nil {
-		err = fmt.Errorf("SyncDependentNodeTaints error syncing ready condition to dependent node taint, %s error: %v",
-			action, err)
-	}
-	return err
 }

@@ -335,6 +335,9 @@ func createOrUpdateLogicalSwitchPortsOps(nbClient libovsdbclient.Client, ops []o
 	opModels := make([]operationModel, 0, len(lsps)+1)
 
 	for _, lsp := range lsps {
+		if err := validateRequestedChassisOption(lsp.Options); err != nil {
+			return nil, err
+		}
 		opModel := createOrUpdateLogicalSwitchPortOpModelWithCustomFields(sw, lsp, createLSP, customFields)
 		opModels = append(opModels, opModel)
 	}
@@ -493,41 +496,6 @@ func DeleteLogicalSwitchPortsWithPredicateOps(nbClient libovsdbclient.Client, op
 	return m.DeleteOps(ops, opModels...)
 }
 
-// UpdateLogicalSwitchPortSetOptions sets options on the provided logical switch
-// port adding any missing, removing the ones set to an empty value and updating
-// existing
-func UpdateLogicalSwitchPortSetOptions(nbClient libovsdbclient.Client, lsp *nbdb.LogicalSwitchPort) error {
-	options := lsp.Options
-	lsp, err := GetLogicalSwitchPort(nbClient, lsp)
-	if err != nil {
-		return err
-	}
-
-	if lsp.Options == nil {
-		lsp.Options = map[string]string{}
-	}
-
-	for k, v := range options {
-		if v == "" {
-			delete(lsp.Options, k)
-		} else {
-			lsp.Options[k] = v
-		}
-	}
-
-	opModel := operationModel{
-		// For LSP's Name is a valid index, so no predicate is needed
-		Model:          lsp,
-		OnModelUpdates: []interface{}{&lsp.Options},
-		ErrNotFound:    true,
-		BulkOp:         false,
-	}
-
-	m := newModelClient(nbClient)
-	_, err = m.CreateOrUpdate(opModel)
-	return err
-}
-
 // FindLogicalSwitchPortsWithPredicate looks up logical switch Ports from the cache
 // based on a given predicate
 func FindLogicalSwitchPortsWithPredicate(nbClient libovsdbclient.Client, sw *nbdb.LogicalSwitch, p logicalSwitchPortPredicate) ([]*nbdb.LogicalSwitchPort, error) {
@@ -551,47 +519,4 @@ func FindLogicalSwitchPortsWithPredicate(nbClient libovsdbclient.Client, sw *nbd
 		}
 	}
 	return lsps, nil
-}
-
-// FindAllLogicalSwitchPortsWithPredicate looks up all logical switch Ports from the cache
-// based on a given predicate
-func FindAllLogicalSwitchPortsWithPredicate(nbClient libovsdbclient.Client, p logicalSwitchPortPredicate) ([]*nbdb.LogicalSwitchPort, error) {
-	found := []*nbdb.LogicalSwitchPort{}
-	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
-	defer cancel()
-	err := nbClient.WhereCache(p).List(ctx, &found)
-	return found, err
-}
-
-// UpdateLogicalSwitchPortSetExternalIDsOps returns the txn ops to updates the external IDs on the provided logical
-// switch port. Empty values means the corresponding keys are to be deleted.
-func UpdateLogicalSwitchPortSetExternalIDsOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation,
-	lsp *nbdb.LogicalSwitchPort) ([]ovsdb.Operation, error) {
-	externalIds := lsp.ExternalIDs
-	logicalSwitchPort, err := GetLogicalSwitchPort(nbClient, lsp)
-	if err != nil {
-		return nil, err
-	}
-
-	if logicalSwitchPort.ExternalIDs == nil {
-		logicalSwitchPort.ExternalIDs = map[string]string{}
-	}
-
-	for k, v := range externalIds {
-		if v == "" {
-			delete(logicalSwitchPort.ExternalIDs, k)
-		} else {
-			logicalSwitchPort.ExternalIDs[k] = v
-		}
-	}
-
-	opModel := operationModel{
-		Model:          logicalSwitchPort,
-		OnModelUpdates: []interface{}{&logicalSwitchPort.ExternalIDs},
-		ErrNotFound:    true,
-		BulkOp:         false,
-	}
-
-	m := newModelClient(nbClient)
-	return m.CreateOrUpdateOps(ops, opModel)
 }

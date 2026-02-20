@@ -1,41 +1,25 @@
-# Northbound service to expose the ovn-nbdb pod
+# service to expose the ovnkube-db pod
 apiVersion: v1
 kind: Service
 metadata:
-  name: ovn-nbdb
+  name: ovnkube-db
   namespace: ovn-kubernetes
-  annotations:
-    k8s.ovn.org/skip-firewalld: "true"
 spec:
   ports:
-    - name: north
-      port: {{ ovn_nb_port }}
-      protocol: TCP
-      targetPort: {{ ovn_nb_port }}
+  - name: north
+    port: {{ ovn_nb_port }}
+    protocol: TCP
+    targetPort: {{ ovn_nb_port }}
+  - name: south
+    port: {{ ovn_sb_port }}
+    protocol: TCP
+    targetPort: {{ ovn_sb_port }}
   sessionAffinity: None
   clusterIP: None
   type: ClusterIP
 
 ---
-# Southbound service to expose the ovn-sbdb pod
-apiVersion: v1
-kind: Service
-metadata:
-  name: ovn-sbdb
-  namespace: ovn-kubernetes
-  annotations:
-    k8s.ovn.org/skip-firewalld: "true"
-spec:
-  ports:
-    - name: south
-      port: {{ ovn_sb_port }}
-      protocol: TCP
-      targetPort: {{ ovn_sb_port }}
-  sessionAffinity: None
-  clusterIP: None
-  type: ClusterIP
 
----
 # ovnkube-db
 # daemonset version 3
 # starts ovn NB/SB ovsdb daemons, each in a separate container
@@ -71,9 +55,9 @@ spec:
         ovn-db-pod: "true"
     spec:
       priorityClassName: "system-cluster-critical"
-      imagePullSecrets:
-        - name: ovncni-nvcr-ips
-      serviceAccountName: ovn-db
+      # Requires fairly broad permissions - ability to read all services and network functions as well
+      # as all pods.
+      serviceAccountName: ovnkube-db
       hostNetwork: true
       dnsPolicy: Default
       containers:
@@ -107,7 +91,7 @@ spec:
         - mountPath: /var/log/ovn/
           name: host-var-log-ovs
         - mountPath: /ovn-cert
-          name: ovn-pki
+          name: host-ovn-cert
           readOnly: true
         - mountPath: /var/run/ovn/
           name: host-var-run-ovs
@@ -178,7 +162,7 @@ spec:
         - mountPath: /var/log/ovn/
           name: host-var-log-ovs
         - mountPath: /ovn-cert
-          name: ovn-pki
+          name: host-ovn-cert
           readOnly: true
         - mountPath: /var/run/ovn/
           name: host-var-run-ovs
@@ -194,8 +178,6 @@ spec:
           value: "1.2.0"
         - name: OVN_LOGLEVEL_SB
           value: "{{ ovn_loglevel_sb }}"
-        - name: OVN_NORTHD_PROBE_INTERVAL
-          value: "50000"
         - name: K8S_APISERVER
           valueFrom:
             configMapKeyRef:
@@ -232,7 +214,7 @@ spec:
       - name: host-var-log-ovs
         hostPath:
           path: /var/log/openvswitch
-      - name: ovn-pki
+      - name: host-ovn-cert
         hostPath:
           path: /etc/ovn
           type: DirectoryOrCreate

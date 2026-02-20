@@ -30,10 +30,8 @@ spec:
     spec:
       priorityClassName: "system-cluster-critical"
       hostNetwork: true
-      {% if ovn_unprivileged_mode=="no" -%}
-      hostPID: true
-      {% endif %}
       dnsPolicy: Default
+      {{ "hostPID: true" if ovn_unprivileged_mode=="no" }}
       containers:
 
       # ovsdb-server and ovs-switchd daemons
@@ -87,9 +85,6 @@ spec:
           requests:
             cpu: 100m
             memory: 300Mi
-          limits:
-            cpu: 500m
-            memory: 500Mi
         env:
         - name: OVN_DAEMONSET_VERSION
           value: "1.2.0"

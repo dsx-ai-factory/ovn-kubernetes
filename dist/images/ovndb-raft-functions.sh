@@ -9,7 +9,7 @@ verify-ovsdb-raft() {
     exit 1
   fi
 
-  replicas=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+  replicas=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${k8s_cacert} \
     get statefulset -n ${ovn_kubernetes_namespace} ${sts_name} -o=jsonpath='{.spec.replicas}')
   if [[ ${replicas} -lt 3 || $((${replicas} % 2)) -eq 0 ]]; then
     echo "at least 3 nodes need to be configured, and it must be odd number of nodes"
@@ -25,7 +25,7 @@ db_part_of_cluster() {
   local db=${2}
   local port=${3}
   echo "Checking if ${pod} is part of cluster"
-  init_ip=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+  init_ip=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${k8s_cacert} \
     get pod -n ${ovn_kubernetes_namespace} ${pod} -o=jsonpath='{.status.podIP}')
   if [[ $? != 0 ]]; then
     echo "Unable to get ${pod} ip "
@@ -51,7 +51,7 @@ cluster_exists() {
   local db=${1}
   local port=${2}
 
-  db_pods=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+  db_pods=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${k8s_cacert} \
     get pod -n ${ovn_kubernetes_namespace} -o=jsonpath='{.items[*].metadata.name}' | egrep -o "${sts_name}[^ ]+")
 
   for db_pod in $db_pods; do
@@ -62,7 +62,7 @@ cluster_exists() {
   done
 
   # if we get here  there is no cluster, set init_ip and get out
-  init_ip="$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+  init_ip="$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${k8s_cacert} \
     get pod -n ${ovn_kubernetes_namespace} ${sts_name}-0 -o=jsonpath='{.status.podIP}')"
   if [[ $? != 0 ]]; then
     return 1
@@ -89,7 +89,7 @@ check_and_apply_ovnkube_db_ep() {
   local port=${2}
 
   # return if ovn db service endpoint already exists
-  result=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+  result=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${k8s_cacert} \
       get ep -n ${ovn_kubernetes_namespace} ${sts_name} 2>&1)
   test $? -eq 0 && return
   if ! echo ${result} | grep -q "NotFound"; then
@@ -99,7 +99,7 @@ check_and_apply_ovnkube_db_ep() {
   # Get IPs of all OVN DB PODs
   ips=()
   for ((i = 0; i < ${replicas}; i++)); do
-    ip=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+    ip=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${k8s_cacert} \
       get pod -n ${ovn_kubernetes_namespace} ${sts_name}-${i} -o=jsonpath='{.status.podIP}')
     if [[ ${ip} == "" ]]; then
       break
@@ -437,7 +437,7 @@ ovsdb_ensure_schema() {
 
 upgrade_annotation_is_expected() {
   expected_anno=${1}
-  anno=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+  anno=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${k8s_cacert} \
     get statefulset -n ${ovn_kubernetes_namespace} ${sts_name} -o=jsonpath='{.metadata.annotations.k8s\.ovn\.org/ovsdb-server-upgrade}')
   if [[ ${anno} == ${expected_anno} ]]; then
     return 0
@@ -447,7 +447,7 @@ upgrade_annotation_is_expected() {
 
 upgrade_annotation_all_pods_are_done() {
   for ((i = 0; i < ${replicas}; i++)); do
-    anno=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+    anno=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${k8s_cacert} \
       get statefulset -n ${ovn_kubernetes_namespace} ${sts_name} -o=jsonpath="{.metadata.annotations.k8s\.ovn\.org/ovsdb-server-upgrade-${sts_name}-${i}}")
     if [[ ${anno} != "done" ]]; then
       return 1
@@ -483,7 +483,7 @@ ovsdb-raft() {
   if [[ ! -e ${ovn_db_file} ]] || ovsdb-tool db-is-standalone ${ovn_db_file}; then
     initialize="true"
     # fresh new cluster, set annotation k8s.ovn.org/ovsdb-server-upgrade=done
-    kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+    kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${k8s_cacert} \
       annotate statefulset -n ${ovn_kubernetes_namespace} ${sts_name} "k8s.ovn.org/ovsdb-server-upgrade"="done" --overwrite
     if [[ $? != 0 ]]; then
       echo "Failed to annotate k8s.ovn.org/ovsdb-server-upgrade=done"
@@ -492,7 +492,7 @@ ovsdb-raft() {
     upgrade_annotation="done"
   else
     # upgrade is only needed when there was already ovsdb raft cluster exists
-    upgrade_annotation=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+    upgrade_annotation=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${k8s_cacert} \
       get statefulset -n ${ovn_kubernetes_namespace} ${sts_name} -o=jsonpath='{.metadata.annotations.k8s\.ovn\.org/ovsdb-server-upgrade}')
     if [[ $? != 0 ]]; then
       echo "Failed to find out if upgrade if needed"
@@ -668,7 +668,7 @@ ovsdb-raft() {
     if [[ "${POD_NAME}" == ${sts_name}"-0" ]]; then
       echo "update ovsdb-server-upgrade annotation to ready"
       # during rolling upgrade, when the last pod ${sts_name}"-0" is upgraded, update ovsdb-server-upgrade to be ready
-      kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+      kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${k8s_cacert} \
         annotate statefulset -n ${ovn_kubernetes_namespace} ${sts_name} "k8s.ovn.org/ovsdb-server-upgrade"="ready" --overwrite
       if [[ $? != 0 ]]; then
         echo "Failed to annotate ovsdb-server-upgrade=ready"
@@ -683,7 +683,7 @@ ovsdb-raft() {
   fi
   if [[ ${upgrade_annotation} == "ready" ]]; then
     echo "ovsdb-server-upgrade annotation is now ready"
-    local upgrade_pod_annotation=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+    local upgrade_pod_annotation=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${k8s_cacert} \
       get statefulset -n ${ovn_kubernetes_namespace} ${sts_name} -o=jsonpath="{.metadata.annotations.k8s\.ovn\.org/ovsdb-server-upgrade-${POD_NAME}}")
     if [[ $? != 0 ]]; then
       echo "Failed to find out if upgrade if needed"
@@ -701,7 +701,7 @@ ovsdb-raft() {
           fi
       fi
       echo "update ovsdb-server-upgrade-${POD_NAME} annotation to done"
-      kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+      kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${k8s_cacert} \
         annotate statefulset -n ${ovn_kubernetes_namespace} ${sts_name} "k8s.ovn.org/ovsdb-server-upgrade-${POD_NAME}"="done" --overwrite
       if [[ $? != 0 ]]; then
         echo "Failed to annotate k8s.ovn.org/ovsdb-server-upgrade-${POD_NAME}=done"
@@ -713,7 +713,7 @@ ovsdb-raft() {
       echo "wait_for all ovsdb-server-upgrade-${sts_name}-n annotation to be done"
       # when all pods set k8s.ovn.org/ovsdb-server-upgrade-${POD_NAME}=done, upgrade completed, set k8s.ovn.org/ovsdb-server-upgrade=done
       wait_for_event attempts=30 upgrade_annotation_all_pods_are_done
-      kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+      kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${k8s_cacert} \
         annotate statefulset -n ${ovn_kubernetes_namespace} ${sts_name} "k8s.ovn.org/ovsdb-server-upgrade"="done" --overwrite
       if [[ $? != 0 ]]; then
         echo "Failed to annotate ovsdb-server-upgrade=done"
@@ -721,7 +721,7 @@ ovsdb-raft() {
       fi
       # remove all k8s.ovn.org/ovsdb-server-upgrade-${POD_NAME} annotation, it is ok to fail here.
       for ((i = 0; i < ${replicas}; i++)); do
-        kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+        kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${k8s_cacert} \
           annotate statefulset -n ${ovn_kubernetes_namespace} ${sts_name} "k8s.ovn.org/ovsdb-server-upgrade-${sts_name}-${i}"-
       done
     else

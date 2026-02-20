@@ -48,7 +48,6 @@ func (gtf *GatewayTopologyFactory) NewClusterRouterWithMulticastSupport(
 		macBindingAgeThreshold += ";" + ipnet.CIDR.String() + ":" + strconv.Itoa(config.Default.ClusterSubnetsMacBindingAging)
 	}
 
-	//TBD-merge different from upstream
 	routerOptions := map[string]string{"mcast_relay": "true", "always_learn_from_arp_request": "false", "mac_binding_age_threshold": macBindingAgeThreshold}
 	return gtf.newClusterRouter(clusterRouterName, netInfo, coopUUID, routerOptions)
 }

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	"github.com/urfave/cli/v2"
@@ -147,11 +148,11 @@ func newNode(nodeName, nodeIPv4CIDR string) *corev1.Node {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: nodeName,
 			Annotations: map[string]string{
-				"k8s.ovn.org/node-primary-ifaddr":   fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", nodeIPv4CIDR, ""),
-				"k8s.ovn.org/node-subnets":          fmt.Sprintf("{\"default\":\"%s\"}", v4Node1Subnet),
-				util.OVNNodeHostCIDRs:               fmt.Sprintf("[\"%s\"]", nodeIPv4CIDR),
-				"k8s.ovn.org/zone-name":             "global",
-				"k8s.ovn.org/node-chassis-hostname": nodeName,
+				"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", nodeIPv4CIDR, ""),
+				"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4Node1Subnet),
+				util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", nodeIPv4CIDR),
+				util.OvnNodeChassisID:             chassisIDForNode(nodeName),
+				"k8s.ovn.org/zone-name":           "global",
 			},
 			Labels: map[string]string{
 				"k8s.ovn.org/egress-assignable": "",
@@ -176,6 +177,7 @@ func newNodeGlobalZoneNotEgressableV4Only(nodeName, nodeIPv4 string) *corev1.Nod
 				"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", nodeIPv4, ""),
 				"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4Node1Subnet),
 				util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", nodeIPv4),
+				util.OvnNodeChassisID:             chassisIDForNode(nodeName),
 				"k8s.ovn.org/zone-name":           "global",
 			},
 		},
@@ -198,6 +200,7 @@ func newNodeGlobalZoneNotEgressableV6Only(nodeName, nodeIPv6 string) *corev1.Nod
 				"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", "", nodeIPv6),
 				"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v6Node1Subnet),
 				util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", nodeIPv6),
+				util.OvnNodeChassisID:             chassisIDForNode(nodeName),
 				"k8s.ovn.org/zone-name":           "global",
 			},
 		},
@@ -219,20 +222,21 @@ func newNodeGlobalZoneNotEgressableV6Only(nodeName, nodeIPv6 string) *corev1.Nod
 }
 
 type testPod struct {
-	portUUID     string
-	nodeName     string
-	nodeSubnet   string
-	nodeMgtIP    string
-	nodeGWIP     string
-	podName      string
-	podIP        string
-	podMAC       string
-	namespace    string
-	portName     string
-	podMTU       string
-	routes       []util.PodRoute
-	noIfaceIdVer bool
-	networkRole  string
+	portUUID      string
+	nodeName      string
+	nodeChassisID string
+	nodeSubnet    string
+	nodeMgtIP     string
+	nodeGWIP      string
+	podName       string
+	podIP         string
+	podMAC        string
+	namespace     string
+	portName      string
+	podMTU        string
+	routes        []util.PodRoute
+	noIfaceIdVer  bool
+	networkRole   string
 
 	udnPodInfos map[string]*udnPodInfo
 }
@@ -256,22 +260,41 @@ type portInfo struct {
 	prefixLen int
 }
 
+func chassisIDForNode(nodeName string) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(nodeName)).String()
+}
+
+func requestedChassisForPod(pod testPod) string {
+	if pod.nodeChassisID != "" {
+		return pod.nodeChassisID
+	}
+	if pod.nodeName == "" {
+		return ""
+	}
+	return chassisIDForNode(pod.nodeName)
+}
+
 func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIPs, podMAC, namespace string) testPod {
 	portName := util.GetLogicalPortName(namespace, podName)
+	nodeChassisID := ""
+	if nodeName != "" {
+		nodeChassisID = chassisIDForNode(nodeName)
+	}
 	to := testPod{
-		portUUID:    portName + "-UUID",
-		nodeSubnet:  nodeSubnet,
-		nodeMgtIP:   nodeMgtIP,
-		nodeGWIP:    nodeGWIP,
-		podIP:       podIPs,
-		podMAC:      podMAC,
-		portName:    portName,
-		podMTU:      fmt.Sprintf("%d", config.Default.MTU),
-		nodeName:    nodeName,
-		podName:     podName,
-		namespace:   namespace,
-		udnPodInfos: map[string]*udnPodInfo{},
-		networkRole: ovntypes.NetworkRolePrimary, // all tests here run with network-segmentation disabled by default by default
+		portUUID:      portName + "-UUID",
+		nodeSubnet:    nodeSubnet,
+		nodeMgtIP:     nodeMgtIP,
+		nodeGWIP:      nodeGWIP,
+		podIP:         podIPs,
+		podMAC:        podMAC,
+		portName:      portName,
+		podMTU:        fmt.Sprintf("%d", config.Default.MTU),
+		nodeName:      nodeName,
+		nodeChassisID: nodeChassisID,
+		podName:       podName,
+		namespace:     namespace,
+		udnPodInfos:   map[string]*udnPodInfo{},
+		networkRole:   ovntypes.NetworkRolePrimary, // all tests here run with network-segmentation disabled by default by default
 	}
 
 	var routeSources []*net.IPNet
@@ -494,7 +517,7 @@ func getExpectedDataPodsSwitchesPortGroup(netInfo util.NetInfo, pods []testPod, 
 				"namespace": pod.namespace,
 			},
 			Options: map[string]string{
-				libovsdbops.RequestedChassis: pod.nodeName,
+				libovsdbops.RequestedChassis: requestedChassisForPod(pod),
 				"iface-id-ver":               pod.podName,
 			},
 			PortSecurity: []string{podAddr},
@@ -2045,7 +2068,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 							},
 							Options: map[string]string{
 								// check requested-chassis will be updated to correct t1.nodeName value
-								libovsdbops.RequestedChassis: t2.nodeName,
+								libovsdbops.RequestedChassis: requestedChassisForPod(t2),
 								// check old value for iface-id-ver will be updated to pod.UID
 								"iface-id-ver": "wrong_value",
 							},
@@ -2060,7 +2083,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 								"namespace": t2.namespace,
 							},
 							Options: map[string]string{
-								libovsdbops.RequestedChassis: t2.nodeName,
+								libovsdbops.RequestedChassis: requestedChassisForPod(t2),
 								//"iface-id-ver": is empty to check that it won't be set on update
 							},
 							PortSecurity: []string{fmt.Sprintf("%s %s", t2.podMAC, t2.podIP)},
@@ -2075,7 +2098,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 							},
 							Options: map[string]string{
 								// check requested-chassis will be updated to correct t1.nodeName value
-								libovsdbops.RequestedChassis: t3.nodeName,
+								libovsdbops.RequestedChassis: requestedChassisForPod(t3),
 								// check old value for iface-id-ver will be updated to pod.UID
 								"iface-id-ver": "wrong_value",
 							},
@@ -2245,7 +2268,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 							},
 							Options: map[string]string{
 								// check requested-chassis will be updated to correct t1.nodeName value
-								libovsdbops.RequestedChassis: t1.nodeName,
+								libovsdbops.RequestedChassis: requestedChassisForPod(t1),
 								// check old value for iface-id-ver will be updated to pod.UID
 								"iface-id-ver": "wrong_value",
 							},

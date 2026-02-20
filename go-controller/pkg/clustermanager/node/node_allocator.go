@@ -344,7 +344,6 @@ func (na *NodeAllocator) syncNodeNetworkAnnotations(node *corev1.Node) error {
 func (na *NodeAllocator) HandleDeleteNode(node *corev1.Node) error {
 	if na.hasHybridOverlayAllocation() {
 		na.releaseHybridOverlayNodeSubnet(node.Name)
-		return nil
 	}
 
 	if na.hasNodeSubnetAllocation() || na.hasHybridOverlayAllocationUnmanaged() {
