@@ -88,6 +88,21 @@ func (nc *UserDefinedLocalnetNodeNetworkController) Cleanup() error {
 
 var ovsMutex = sync.Mutex{}
 
+// updateLocalnetOvnBridgeMapping reconciles this network's entry in
+// Open_vSwitch.external_ids:ovn-bridge-mappings.
+//
+// On add (toAdd=true), it discovers whether this node should host the network
+// by looking up ngn-localnet-bridge-mappings, and records the selected bridge
+// in nc.bridgeName. If no bridge is selected, the network is considered not
+// needed on this node and no ovn-bridge-mappings update is performed.
+//
+// On remove (toAdd=false), it only removes the mapping when nc.bridgeName is
+// set, meaning this controller previously managed the mapping on this node.
+// This ownership check prevents deleting mappings that were configured by
+// external actors (e.g. test harness or bootstrap scripts).
+//
+// Calls are serialized with ovsMutex because multiple NAD workers can update
+// ovn-bridge-mappings concurrently.
 func (nc *UserDefinedLocalnetNodeNetworkController) updateLocalnetOvnBridgeMapping(toAdd bool) error {
 	// The NAD controller may have multiple workers that call this function concurrently.
 	// A mutex is required to prevent concurrent overwrites of external_ids:ovn-bridge-mappings.
@@ -95,6 +110,9 @@ func (nc *UserDefinedLocalnetNodeNetworkController) updateLocalnetOvnBridgeMappi
 	defer ovsMutex.Unlock()
 	bridgeName := ""
 	if toAdd {
+		// Reset any stale value from a previous run before trying to discover
+		// whether this node should manage bridge-mappings for the network.
+		nc.bridgeName = ""
 		// ngn-localnet-bridge-mappings exernal_ids is in the form of "<network_prefix1>:<br1>,<network_prefix2>:<br2>...".
 		// It sets all the possible localnet networks and associated bridge names on this node.
 		stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
@@ -132,6 +150,11 @@ func (nc *UserDefinedLocalnetNodeNetworkController) updateLocalnetOvnBridgeMappi
 		}
 		klog.V(5).Infof("Set bridge %s for localnet network %s", bridgeName, nc.GetNetworkName())
 		nc.bridgeName = bridgeName
+	} else if nc.bridgeName == "" {
+		// If this node never selected a bridge for this network, the mapping was
+		// not managed by this controller and should not be removed on stop.
+		klog.V(5).Infof("Skip removing bridge mapping for localnet network %s on node %s: not managed by this controller", nc.GetNetworkName(), nc.name)
+		return nil
 	}
 
 	// ovn-bridge-mappings maps a physical network name to a local ovs bridge
