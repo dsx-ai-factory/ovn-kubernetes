@@ -662,11 +662,11 @@ func (oc *Layer3UserDefinedNetworkController) run() error {
 			return fmt.Errorf("unable to create network qos controller, err: %w", err)
 		}
 		oc.wg.Add(1)
-		go func() {
+		go func(ch <-chan struct{}) {
 			defer oc.wg.Done()
 			// Until we have scale issues in future let's spawn only one thread
-			oc.nqosController.Run(1, oc.stopChan)
-		}()
+			oc.nqosController.Run(1, ch)
+		}(oc.stopChan)
 	}
 
 	klog.Infof("Completing all the Watchers for network %s took %v", oc.GetNetworkName(), time.Since(start))
