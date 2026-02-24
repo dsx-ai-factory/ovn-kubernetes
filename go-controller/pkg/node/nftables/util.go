@@ -34,7 +34,10 @@ func DeleteNFTElements(elements []*knftables.Element) error {
 
 	tx := nft.NewTransaction()
 	for _, elem := range elements {
-		tx.Destroy(elem)
+		// We add+delete the elements, rather than just deleting them, so that if
+		// they weren't already in the set/map, we won't get an error on delete.
+		tx.Add(elem)
+		tx.Delete(elem)
 	}
 	return nft.Run(context.TODO(), tx)
 }
