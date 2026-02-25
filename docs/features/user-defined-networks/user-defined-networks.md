@@ -151,7 +151,7 @@ same layer2 flat switch.
     during live migration
   * Can be of type `primary` or `secondary`
 
-![l2-UDN](images/L2DeepDive-2segments.png)
+![l2-UDN](images/L2DeepDive-2segments.jpg)
 
 Here we can see a blue and green P-UDN. On node1, pod1 is part of green UDN and
 pod2 is part of blue UDN. They each have a udn-0 interface that is attached to
