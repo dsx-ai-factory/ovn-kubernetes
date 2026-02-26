@@ -2131,8 +2131,8 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 		})
 
 		It("validates transport option correctly", func() {
-			// Test valid geneve transport
-			Default.Transport = types.NetworkTransportGeneve
+			// Test valid default transport (empty string = use OVN default overlay)
+			Default.Transport = ""
 			err := validateNoOverlayConfig()
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 
