@@ -126,7 +126,10 @@ func NewMetricServer(opts MetricServerOptions, ovsDBClient libovsdbclient.Client
 
 	server.mux = http.NewServeMux()
 	tg := prometheus.ToTransactionalGatherer(server.registerer.(prometheus.Gatherer))
-	metricsHandler := promhttp.HandlerForTransactional(tg, promhttp.HandlerOpts{})
+	handlerOpts := promhttp.HandlerOpts{
+		DisableCompression: true,
+	}
+	metricsHandler := promhttp.HandlerForTransactional(tg, handlerOpts)
 
 	server.mux.Handle("/metrics", promhttp.InstrumentMetricHandler(
 		server.registerer,
