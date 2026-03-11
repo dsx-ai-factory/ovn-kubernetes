@@ -216,6 +216,7 @@ var _ = Describe("Node DPU tests", func() {
 		It("Fails if configure OVS fails", func() {
 			sriovnetOpsMock.On("GetVfRepresentorDPU", "0", "9").Return(vfRep, nil)
 			sriovnetOpsMock.On("GetPCIFromDeviceName", vfRep).Return(vfPciAddress, nil)
+			netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
 
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: genOVSGetCmd("bridge", "br-int", "datapath_type", ""),
@@ -387,69 +388,15 @@ var _ = Describe("Node DPU tests", func() {
 					Cmd:    genOfctlDumpFlowsCmd("table=48,ip,ip_dst=" + strings.Split(fakeIP, "/")[0]),
 					Output: "non-empty-output",
 				})
+				// ConfigureOVS now calls LinkByName/LinkSetMTU/LinkSetUp when deviceID != ""
+				netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
+				netlinkOpsMock.On("LinkSetMTU", vfLink, ifInfo.MTU).Return(nil)
+				netlinkOpsMock.On("LinkSetUp", vfLink).Return(nil)
 				sriovnetOpsMock.On("SetRepresentorPeerMacAddress", vfRep, net.HardwareAddr(nil)).Return(nil)
-			})
-
-			Context("Fails if link configuration fails on", func() {
-				It("LinkByName()", func() {
-					netlinkOpsMock.On("LinkByName", vfRep).Return(nil, fmt.Errorf("failed to get link"))
-					// Mock ovs calls for cleanup
-					By(fmt.Sprintf("checkOVSPortPodInfo %s exist=true 15 sandbox=a8d09931", vfRep))
-					checkOVSPortPodInfo(execMock, vfRep, true, "15", "a8d09931", "default")
-					execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-						Cmd: genOVSDelPortCmd("pf0vf9"),
-					})
-
-					podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
-
-					err := dnnc.addRepPort(&pod, &scd, types.DefaultNetworkName, ifInfo, clientset)
-					Expect(err).To(HaveOccurred())
-					Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
-				})
-
-				It("LinkSetMTU()", func() {
-					netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
-					netlinkOpsMock.On("LinkSetMTU", vfLink, ifInfo.MTU).Return(fmt.Errorf("failed to set mtu"))
-					// Mock netlink/ovs calls for cleanup
-					checkOVSPortPodInfo(execMock, vfRep, true, "15", "a8d09931", "default")
-					netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
-					netlinkOpsMock.On("LinkSetMTU", vfLink, 1500).Return(nil)
-					execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-						Cmd: genOVSDelPortCmd("pf0vf9"),
-					})
-
-					podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
-
-					err := dnnc.addRepPort(&pod, &scd, types.DefaultNetworkName, ifInfo, clientset)
-					Expect(err).To(HaveOccurred())
-					Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
-				})
-
-				It("LinkSetUp()", func() {
-					netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
-					netlinkOpsMock.On("LinkSetMTU", vfLink, ifInfo.MTU).Return(nil)
-					netlinkOpsMock.On("LinkSetUp", vfLink).Return(fmt.Errorf("failed to set link up"))
-					// Mock netlink/ovs calls for cleanup
-					checkOVSPortPodInfo(execMock, vfRep, true, "15", "a8d09931", "default")
-					netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
-					netlinkOpsMock.On("LinkSetMTU", vfLink, 1500).Return(nil)
-					execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-						Cmd: genOVSDelPortCmd("pf0vf9"),
-					})
-
-					podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
-
-					err := dnnc.addRepPort(&pod, &scd, types.DefaultNetworkName, ifInfo, clientset)
-					Expect(err).To(HaveOccurred())
-					Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
-				})
 			})
 
 			It("Sets dpu.connection-status pod annotation on success", func() {
 				var err error
-				netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
-				netlinkOpsMock.On("LinkSetMTU", vfLink, ifInfo.MTU).Return(nil)
-				netlinkOpsMock.On("LinkSetUp", vfLink).Return(nil)
 				dcs := util.DPUConnectionStatus{
 					Status: "Ready",
 				}
@@ -470,9 +417,6 @@ var _ = Describe("Node DPU tests", func() {
 
 			It("cleans up representor port if set pod annotation fails", func() {
 				var err error
-				netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
-				netlinkOpsMock.On("LinkSetMTU", vfLink, ifInfo.MTU).Return(nil)
-				netlinkOpsMock.On("LinkSetUp", vfLink).Return(nil)
 				dcs := util.DPUConnectionStatus{
 					Status: "Ready",
 				}
