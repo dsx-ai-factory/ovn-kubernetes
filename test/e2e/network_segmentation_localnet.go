@@ -54,11 +54,10 @@ var _ = Describe("Network Segmentation: Localnet", feature.NetworkSegmentation, 
 		physicalNetworkName := uniqueMetaName("localnet1")
 
 		By("setup the localnet underlay")
-		c := networkAttachmentConfig{networkAttachmentConfigParams: networkAttachmentConfigParams{networkName: physicalNetworkName, vlanID: vlan}}
 		Expect(providerCtx.SetupUnderlay(f, infraapi.Underlay{
-			BridgeName:         ovsBrName,
-			LogicalNetworkName: c.networkName,
-			VlanID:             c.vlanID,
+			BridgeName:          ovsBrName,
+			PhysicalNetworkName: physicalNetworkName,
+			VlanID:              vlan,
 		})).To(Succeed())
 
 		By("create test namespaces")
@@ -155,11 +154,10 @@ var _ = Describe("Network Segmentation: Localnet", feature.NetworkSegmentation, 
 		)
 
 		By("setup the localnet underlay")
-		c := networkAttachmentConfig{networkAttachmentConfigParams: networkAttachmentConfigParams{networkName: physicalNetworkName, vlanID: vlan}}
 		Expect(providerCtx.SetupUnderlay(f, infraapi.Underlay{
-			BridgeName:         ovsBrName,
-			LogicalNetworkName: c.networkName,
-			VlanID:             c.vlanID,
+			BridgeName:          ovsBrName,
+			PhysicalNetworkName: physicalNetworkName,
+			VlanID:              vlan,
 		})).To(Succeed())
 
 		By("create test namespace")

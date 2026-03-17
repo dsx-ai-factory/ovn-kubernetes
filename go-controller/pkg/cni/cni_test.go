@@ -430,6 +430,25 @@ var _ = Describe("checkBridgeMapping", func() {
 				Equal(`failed to find OVN bridge-mapping for network: "test-network"`))
 		})
 	})
+
+	Context("when bridge mapping exists with direct network name", func() {
+		It("should return nil if the bridge mapping is found", func() {
+			ovsClient, err := newOVSClientWithExternalIDs(map[string]string{
+				"ovn-bridge-mappings": "my-physnet:br-int",
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(checkBridgeMapping(ovsClient, ovntypes.LocalnetTopology, "my-physnet")).To(Succeed())
+		})
+
+		It("should return error if the bridge mapping isn't found", func() {
+			ovsClient, err := newOVSClientWithExternalIDs(map[string]string{
+				"ovn-bridge-mappings": "other-physnet:br-int",
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(checkBridgeMapping(ovsClient, ovntypes.LocalnetTopology, "my-physnet").Error()).To(
+				Equal(`failed to find OVN bridge-mapping for network: "my-physnet"`))
+		})
+	})
 })
 
 func newOVSClientWithExternalIDs(externalIDs map[string]string) (client.Client, error) {

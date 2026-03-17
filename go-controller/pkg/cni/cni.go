@@ -618,14 +618,21 @@ func checkBridgeMapping(ovsClient client.Client, topology string, networkName st
 
 	ovnBridgeMappings := openvSwitch.ExternalIDs["ovn-bridge-mappings"]
 
-	// NVIDIA: we add br-localnet suffix to retain original downstream behavior. Check for that.
-	expectedName := fmt.Sprintf("%s%s", util.GetUserDefinedNetworkPrefix(networkName),
-		types.LocalNetBridgeName)
+	// NVIDIA: first try the network name directly; if that fails, try with br-localnet suffix
+	// to retain original downstream behavior.
+	// WARNING: this will not catch a - arguably unlikely but technically possible? - situation
+	// where a CUDN with physicalNetworkName is used but misconfigured with a br-localnet suffix.
+	// We are patching it in this way to limit the code changes applied to the upstream code to
+	// avoid future git conflicts on upstream merges.
+	expectedNames := []string{
+		networkName,
+		fmt.Sprintf("%s%s", util.GetUserDefinedNetworkPrefix(networkName), types.LocalNetBridgeName),
+	}
 
 	bridgeMappings := strings.Split(ovnBridgeMappings, ",")
 	for _, bridgeMapping := range bridgeMappings {
 		networkBridgeAssociation := strings.Split(bridgeMapping, ":")
-		if len(networkBridgeAssociation) == 2 && networkBridgeAssociation[0] == expectedName {
+		if len(networkBridgeAssociation) == 2 && (networkBridgeAssociation[0] == expectedNames[0] || networkBridgeAssociation[0] == expectedNames[1]) {
 			return nil
 		}
 	}

@@ -533,10 +533,15 @@ func (c *contextKind) SetupUnderlay(f *framework.Framework, underlay api.Underla
 			}
 		}
 
-		// NVIDIA: add br-localnet suffix to network name; we keep original downstream behavior when creating
-		// localnet ports in localnet controllers, which we have to match here.
-		networkName := fmt.Sprintf("%s%s", util.GetUserDefinedNetworkPrefix(underlay.LogicalNetworkName),
-			types.LocalNetBridgeName)
+		// NVIDIA: when physicalNetworkName is set, use it directly as the bridge mapping name.
+		// Otherwise, use the network-scoped name with br-localnet suffix to retain original downstream behavior.
+		var networkName string
+		if underlay.PhysicalNetworkName != "" {
+			networkName = underlay.PhysicalNetworkName
+		} else {
+			networkName = fmt.Sprintf("%s%s", util.GetUserDefinedNetworkPrefix(underlay.LogicalNetworkName),
+				types.LocalNetBridgeName)
+		}
 
 		if err := configureBridgeMappings(
 			ovsPod.Namespace,
