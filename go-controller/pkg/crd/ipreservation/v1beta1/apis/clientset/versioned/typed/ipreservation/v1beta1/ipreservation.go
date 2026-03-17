@@ -20,9 +20,9 @@ package v1beta1
 import (
 	context "context"
 
-	ipreservationv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
-	applyconfigurationipreservationv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/applyconfiguration/ipreservation/v1beta1"
-	scheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/clientset/versioned/scheme"
+	ipreservationv1beta1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
+	applyconfigurationipreservationv1beta1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/applyconfiguration/ipreservation/v1beta1"
+	scheme "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/clientset/versioned/scheme"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"

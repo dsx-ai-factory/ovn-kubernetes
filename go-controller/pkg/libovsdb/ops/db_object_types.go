@@ -1,6 +1,6 @@
 package ops
 
-import "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+import "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 
 const (
 	addressSet dbObjType = iota
@@ -188,6 +188,20 @@ var AddressSetAdvertisedNetwork = newObjectIDsType(addressSet, AdvertisedNetwork
 	IPFamilyKey,
 })
 
+var AddressSetClusterNetworkConnect = newObjectIDsType(addressSet, ClusterNetworkConnectOwnerType, []ExternalIDKey{
+	// CNC name
+	ObjectNameKey,
+	// IP family: v4 or v6
+	IPFamilyKey,
+})
+
+var AddressSetNoOverlaySNATExemption = newObjectIDsType(addressSet, ClusterOwnerType, []ExternalIDKey{
+	// Address set for no-overlay SNAT exemption containing cluster pod subnet CIDRs and local zone node IPs
+	ObjectNameKey,
+	IPFamilyKey,
+	NetworkKey,
+})
+
 var ACLAdvertisedNetwork = newObjectIDsType(acl, AdvertisedNetworkOwnerType, []ExternalIDKey{
 	// ACL name
 	ObjectNameKey,
@@ -272,9 +286,10 @@ var ACLNetworkPolicyPortIndex = newObjectIDsType(acl, NetworkPolicyPortIndexOwne
 // ingress/egress + NetworkPolicy[In/E]gressRule idx - defines given gressPolicy.
 // ACLs are created for gp.portPolicies which are grouped by protocol:
 // - for empty policy (no selectors and no ip blocks) - empty ACL (see allIPsMatch)
+// with idx=emptyIdx (-1)
 // OR
-// - all selector-based peers ACL
-// - for every IPBlock +1 ACL
+// - all selector-based peers ACL with idx=emptyIdx (-1)
+// - all ipBlocks combined into a single ACL with idx=ipBlockCombinedIdx (-2)
 // Therefore unique id for a given gressPolicy is protocol name + IPBlock idx
 // (protocol will be "None" if no port policy is defined, and empty policy and all
 // selector-based peers ACLs will have idx=-1)
@@ -311,6 +326,13 @@ var ACLUDN = newObjectIDsType(acl, UDNIsolationOwnerType, []ExternalIDKey{
 	ObjectNameKey,
 	// egress or ingress
 	PolicyDirectionKey,
+})
+
+var ACLClusterNetworkConnect = newObjectIDsType(acl, ClusterNetworkConnectOwnerType, []ExternalIDKey{
+	// CNC name
+	ObjectNameKey,
+	// type of ACL: allow-service, drop-pod, or allow-same-network-{networkID}
+	TypeKey,
 })
 
 var VirtualMachineDHCPOptions = newObjectIDsType(dhcpOptions, VirtualMachineOwnerType, []ExternalIDKey{

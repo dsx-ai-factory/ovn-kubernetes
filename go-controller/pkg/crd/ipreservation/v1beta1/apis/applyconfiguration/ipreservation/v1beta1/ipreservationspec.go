@@ -18,7 +18,7 @@ limitations under the License.
 package v1beta1
 
 import (
-	ipreservationv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
+	ipreservationv1beta1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
 )
 
 // IPReservationSpecApplyConfiguration represents a declarative configuration of the IPReservationSpec type for use

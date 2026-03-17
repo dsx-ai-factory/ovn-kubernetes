@@ -18,9 +18,9 @@ limitations under the License.
 package fake
 
 import (
-	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
-	adminpbrv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/applyconfiguration/adminpbr/v1beta1"
-	typedadminpbrv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/clientset/versioned/typed/adminpbr/v1beta1"
+	v1beta1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
+	adminpbrv1beta1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/applyconfiguration/adminpbr/v1beta1"
+	typedadminpbrv1beta1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/clientset/versioned/typed/adminpbr/v1beta1"
 	gentype "k8s.io/client-go/gentype"
 )
 

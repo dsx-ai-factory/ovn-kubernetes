@@ -18,7 +18,7 @@ limitations under the License.
 package fake
 
 import (
-	k8sv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
+	k8sv1beta1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"

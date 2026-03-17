@@ -18,9 +18,9 @@ limitations under the License.
 package fake
 
 import (
-	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
-	ipreservationv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/applyconfiguration/ipreservation/v1beta1"
-	typedipreservationv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/clientset/versioned/typed/ipreservation/v1beta1"
+	v1beta1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
+	ipreservationv1beta1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/applyconfiguration/ipreservation/v1beta1"
+	typedipreservationv1beta1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/clientset/versioned/typed/ipreservation/v1beta1"
 	gentype "k8s.io/client-go/gentype"
 )
 

@@ -18,7 +18,7 @@ limitations under the License.
 package v1beta1
 
 import (
-	types "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	types "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // AdminPolicyBasedRouteStatusApplyConfiguration represents a declarative configuration of the AdminPolicyBasedRouteStatus type for use

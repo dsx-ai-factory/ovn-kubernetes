@@ -7,11 +7,11 @@ import (
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
 type GatewayTopologyFactory struct {
@@ -29,12 +29,15 @@ func (gtf *GatewayTopologyFactory) NewClusterRouter(
 	netInfo util.NetInfo,
 	coopUUID string,
 ) (*nbdb.LogicalRouter, error) {
-	macBindingAgeThreshold := "0"
-	for _, ipnet := range netInfo.Subnets() {
-		macBindingAgeThreshold += ";" + ipnet.CIDR.String() + ":" + strconv.Itoa(config.Default.ClusterSubnetsMacBindingAging)
+	routerOptions := map[string]string{"always_learn_from_arp_request": "false"}
+	if netInfo.TopologyType() != types.Layer2Topology {
+		macBindingAgeThreshold := "0"
+		for _, ipnet := range netInfo.Subnets() {
+			macBindingAgeThreshold += ";" + ipnet.CIDR.String() + ":" + strconv.Itoa(config.Default.ClusterSubnetsMacBindingAging)
+		}
+		routerOptions["mac_binding_age_threshold"] = macBindingAgeThreshold
 	}
 
-	routerOptions := map[string]string{"always_learn_from_arp_request": "false", "mac_binding_age_threshold": macBindingAgeThreshold}
 	return gtf.newClusterRouter(clusterRouterName, netInfo, coopUUID, routerOptions)
 }
 
@@ -43,22 +46,25 @@ func (gtf *GatewayTopologyFactory) NewClusterRouterWithMulticastSupport(
 	netInfo util.NetInfo,
 	coopUUID string,
 ) (*nbdb.LogicalRouter, error) {
+	routerOptions := map[string]string{"mcast_relay": "true", "always_learn_from_arp_request": "false"}
 	macBindingAgeThreshold := "0"
-	for _, ipnet := range netInfo.Subnets() {
-		macBindingAgeThreshold += ";" + ipnet.CIDR.String() + ":" + strconv.Itoa(config.Default.ClusterSubnetsMacBindingAging)
+	if netInfo.TopologyType() != types.Layer2Topology {
+		for _, ipnet := range netInfo.Subnets() {
+			macBindingAgeThreshold += ";" + ipnet.CIDR.String() + ":" + strconv.Itoa(config.Default.ClusterSubnetsMacBindingAging)
+		}
+		routerOptions["mac_binding_age_threshold"] = macBindingAgeThreshold
 	}
-
-	routerOptions := map[string]string{"mcast_relay": "true", "always_learn_from_arp_request": "false", "mac_binding_age_threshold": macBindingAgeThreshold}
 	return gtf.newClusterRouter(clusterRouterName, netInfo, coopUUID, routerOptions)
 }
 
 func (gtf *GatewayTopologyFactory) NewTransitRouter(
+	transitRouterName string,
 	netInfo util.NetInfo,
 	coopUUID string,
 	tunnelKey string,
 ) (*nbdb.LogicalRouter, error) {
 	routerOptions := map[string]string{libovsdbops.RequestedTnlKey: tunnelKey}
-	return gtf.newClusterRouter(netInfo.GetNetworkScopedClusterRouterName(), netInfo, coopUUID, routerOptions)
+	return gtf.newClusterRouter(transitRouterName, netInfo, coopUUID, routerOptions)
 }
 
 func (gtf *GatewayTopologyFactory) newClusterRouter(

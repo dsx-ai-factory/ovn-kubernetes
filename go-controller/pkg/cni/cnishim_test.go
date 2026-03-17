@@ -15,8 +15,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
 func TestCmdAdd_PrivilegedMode(t *testing.T) {
@@ -49,7 +49,7 @@ func TestCmdAdd_PrivilegedMode(t *testing.T) {
 	}()
 
 	args := &skel.CmdArgs{
-		StdinData:   []byte(`{"cniVersion":"1.0.0","name":"mynet","type":"ovn-k8s-cni-overlay"}`),
+		StdinData:   []byte(`{"cniVersion":"1.1.0","name":"mynet","type":"ovn-k8s-cni-overlay"}`),
 		ContainerID: "cid",
 		Netns:       "/var/run/netns/test",
 		IfName:      "eth0",
@@ -66,7 +66,7 @@ func TestCmdAdd_PrivilegedMode(t *testing.T) {
 	}
 
 	expected := `{
-    "cniVersion": "1.0.0",
+    "cniVersion": "1.1.0",
     "interfaces": [
         {
             "name": "serverWired"
@@ -154,7 +154,7 @@ func TestCmdAdd_UnprivilegedMode(t *testing.T) {
 		}()
 
 		args := &skel.CmdArgs{
-			StdinData:   []byte(`{"cniVersion":"1.0.0","name":"mynet","type":"ovn-k8s-cni-overlay"}`),
+			StdinData:   []byte(`{"cniVersion":"1.1.0","name":"mynet","type":"ovn-k8s-cni-overlay"}`),
 			ContainerID: "cid",
 			Netns:       "/var/run/netns/test",
 			IfName:      "eth0",
@@ -176,7 +176,7 @@ func TestCmdAdd_UnprivilegedMode(t *testing.T) {
 
 		// Expected output includes both interfaces wired by CNIShim
 		expected := `{
-  "cniVersion": "1.0.0",
+  "cniVersion": "1.1.0",
   "interfaces": [
     {
       "name": "eth0",
@@ -230,7 +230,7 @@ func TestCmdDel_PrivilegedMode(t *testing.T) {
 	}
 
 	args := &skel.CmdArgs{
-		StdinData:   []byte(`{"cniVersion":"1.0.0","name":"mynet","type":"ovn-k8s-cni-overlay"}`),
+		StdinData:   []byte(`{"cniVersion":"1.1.0","name":"mynet","type":"ovn-k8s-cni-overlay"}`),
 		ContainerID: "cid",
 		Netns:       "/var/run/netns/test",
 		IfName:      "eth0",
@@ -275,7 +275,7 @@ func TestCmdDel_UnprivilegedMode(t *testing.T) {
 		}
 
 		args := &skel.CmdArgs{
-			StdinData:   []byte(`{"cniVersion":"1.0.0","name":"mynet","type":"ovn-k8s-cni-overlay"}`),
+			StdinData:   []byte(`{"cniVersion":"1.1.0","name":"mynet","type":"ovn-k8s-cni-overlay"}`),
 			ContainerID: "cid",
 			Netns:       "/var/run/netns/test",
 			IfName:      "eth0",
@@ -287,6 +287,16 @@ func TestCmdDel_UnprivilegedMode(t *testing.T) {
 			t.Fatalf("no unconfigured interfaces found")
 		}
 	})
+}
+
+func TestCmdGC(t *testing.T) {
+	p := &Plugin{}
+	args := &skel.CmdArgs{
+		StdinData: []byte(`{"cniVersion":"1.1.0","name":"mynet","type":"ovn-k8s-cni-overlay"}`),
+	}
+
+	err := p.CmdGC(args)
+	require.NoError(t, err)
 }
 
 func withCNIEnv(t *testing.T, fn func()) {

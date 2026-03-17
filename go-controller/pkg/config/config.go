@@ -27,7 +27,7 @@ import (
 	kexec "k8s.io/utils/exec"
 	utilnet "k8s.io/utils/net"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // getSupportedPlatformTypes returns a list of all supported platform types
@@ -109,7 +109,7 @@ var (
 		Zone:                          types.OvnDefaultZone,
 		ClusterSubnetsMacBindingAging: 36000, // in Seconds
 		RawUDNAllowedDefaultServices:  "default/kubernetes,kube-system/kube-dns",
-		Transport:                     types.NetworkTransportGeneve,
+		Transport:                     "",
 	}
 
 	// Logging holds logging-related parsed config file parameters and command-line overrides
@@ -246,10 +246,12 @@ var (
 	MetricsScrapeInterval int
 	// OvnKubeNode holds ovnkube-node parsed config file parameters and command-line overrides
 	OvnKubeNode = OvnKubeNodeConfig{
-		Mode:             types.NodeModeFull,
-		IsPrimaryDPU:     true,
-		DisableFirewalld: false,
-		MinRevalidatePPS: -1,
+		Mode:                      types.NodeModeFull,
+		IsPrimaryDPU:              true,
+		DisableFirewalld:          false,
+		MinRevalidatePPS:          -1,
+		DPUNodeLeaseRenewInterval: 10,
+		DPUNodeLeaseDuration:      40,
 	}
 
 	ClusterManager = ClusterManagerConfig{
@@ -285,11 +287,6 @@ const (
 
 	// ManagedBGPTopologyFullMesh represents a full-mesh BGP topology
 	ManagedBGPTopologyFullMesh string = "full-mesh"
-
-	// NoOverlaySNATEnabled enables SNAT for outbound traffic
-	NoOverlaySNATEnabled string = "enabled"
-	// NoOverlaySNATDisabled disables SNAT for outbound traffic
-	NoOverlaySNATDisabled string = "disabled"
 )
 
 // DefaultConfig holds parsed config file parameters and command-line overrides
@@ -393,8 +390,8 @@ type DefaultConfig struct {
 	ClusterDefaultNad string `gcfg:"cluster-default-nad"`
 
 	// Transport specifies the transport technology used for the default network.
-	// Accepts: "geneve" or "no-overlay".
-	// Defaults to "geneve".
+	// Accepts: "" (empty, uses OVN default overlay) or "no-overlay".
+	// Defaults to "" (empty).
 	Transport string `gcfg:"transport"`
 }
 
@@ -545,6 +542,7 @@ type OVNKubernetesFeatureConfig struct {
 	EnableServiceTemplateSupport    bool `gcfg:"enable-svc-template-support"`
 	EnableObservability             bool `gcfg:"enable-observability"`
 	EnableNetworkQoS                bool `gcfg:"enable-network-qos"`
+	AllowICMPNetworkPolicy          bool `gcfg:"allow-icmp-network-policy"`
 	// EnableAdminPolicyBasedRouting allows admin to manage PBR rules
 	EnableAdminPolicyBasedRouting bool `gcfg:"enable-admin-pbr"`
 	EnableVirtualIP               bool `gcfg:"enable-virtual-ip"`
@@ -695,14 +693,16 @@ type HybridOverlayConfig struct {
 
 // OvnKubeNodeConfig holds ovnkube-node configurations
 type OvnKubeNodeConfig struct {
-	Mode                   string `gcfg:"mode"`
-	MgmtPortNetdev         string `gcfg:"mgmt-port-netdev"`
-	MgmtPortDPResourceName string `gcfg:"mgmt-port-dp-resource-name"`
-	WaitOnOVNInstallExtID  bool   `gcfg:"ovnkube-wait-on-ovn-install-extid"`
-	IsPrimaryDPU           bool
-	MaxRevalidator         uint `gcfg:"ovs-max-revalidator"`
-	MinRevalidatePPS       int  `gcfg:"ovs-min-revalidate-pps"`
-	MaxIdle                uint `gcfg:"ovs-max-idle"`
+	Mode                      string `gcfg:"mode"`
+	MgmtPortNetdev            string `gcfg:"mgmt-port-netdev"`
+	MgmtPortDPResourceName    string `gcfg:"mgmt-port-dp-resource-name"`
+	WaitOnOVNInstallExtID     bool   `gcfg:"ovnkube-wait-on-ovn-install-extid"`
+	IsPrimaryDPU              bool
+	MaxRevalidator            uint `gcfg:"ovs-max-revalidator"`
+	MinRevalidatePPS          int  `gcfg:"ovs-min-revalidate-pps"`
+	MaxIdle                   uint `gcfg:"ovs-max-idle"`
+	DPUNodeLeaseRenewInterval int  `gcfg:"dpu-node-lease-renew-interval"`
+	DPUNodeLeaseDuration      int  `gcfg:"dpu-node-lease-duration"`
 	// RepresentorMeteringNodes is the node label whose value will be used
 	// to determine if representor metering feature will be applied or not
 	RepresentorMeteringNodes string `gcfg:"representor-metering-nodes"`
@@ -1108,7 +1108,7 @@ var CommonFlags = []cli.Flag{
 	&cli.StringFlag{
 		Name:        "transport",
 		Value:       Default.Transport,
-		Usage:       "Transport technology used for the default network, default to geneve if unspecified. (geneve, no-overlay)",
+		Usage:       "Transport technology for the default network. When unset, the OVN default overlay transport is used. (no-overlay)",
 		Destination: &cliConfig.Default.Transport,
 	},
 	&cli.BoolFlag{
@@ -1387,6 +1387,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Use stateless network policy feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableStatelessNetPol,
 		Value:       OVNKubernetesFeature.EnableStatelessNetPol,
+	},
+	&cli.BoolFlag{
+		Name:        "allow-icmp-network-policy",
+		Usage:       "Allow ICMP/ICMPv6 traffic to bypass NetworkPolicy default-deny rules.",
+		Destination: &cliConfig.OVNKubernetesFeature.AllowICMPNetworkPolicy,
+		Value:       OVNKubernetesFeature.AllowICMPNetworkPolicy,
 	},
 	&cli.BoolFlag{
 		Name:        "enable-interconnect",
@@ -2043,6 +2049,18 @@ var OvnKubeNodeFlags = []cli.Flag{
 		Usage:       "list of tcp/udp ports for host services to skip CT-Marking",
 		Destination: &cliConfig.OvnKubeNode.RawSkipCTMarkHostPorts,
 	},
+	&cli.IntFlag{
+		Name:        "dpu-node-lease-renew-interval",
+		Usage:       "Interval in seconds at which the DPU updates its custom node lease. Set to 0 to disable DPU health checking",
+		Value:       OvnKubeNode.DPUNodeLeaseRenewInterval,
+		Destination: &cliConfig.OvnKubeNode.DPUNodeLeaseRenewInterval,
+	},
+	&cli.IntFlag{
+		Name:        "dpu-node-lease-duration",
+		Usage:       "Lease duration in seconds before the DPU is considered unhealthy",
+		Value:       OvnKubeNode.DPUNodeLeaseDuration,
+		Destination: &cliConfig.OvnKubeNode.DPUNodeLeaseDuration,
+	},
 }
 
 // ClusterManagerFlags captures ovnkube-cluster-manager specific configurations
@@ -2661,9 +2679,9 @@ func buildNoOverlayConfig(file *config) error {
 
 // validateNoOverlayConfig validates the no-overlay configuration
 func validateNoOverlayConfig() error {
-	// Validate transport option
-	if Default.Transport != types.NetworkTransportGeneve && Default.Transport != types.NetworkTransportNoOverlay {
-		return fmt.Errorf("invalid transport %q: must be %q or %q", Default.Transport, types.NetworkTransportGeneve, types.NetworkTransportNoOverlay)
+	// Validate transport option; empty string means default OVN overlay transport
+	if Default.Transport != "" && Default.Transport != types.NetworkTransportNoOverlay {
+		return fmt.Errorf("invalid transport %q: must be empty (default OVN overlay) or %q", Default.Transport, types.NetworkTransportNoOverlay)
 	}
 
 	// If transport is no-overlay, validate required no-overlay options
@@ -2674,8 +2692,8 @@ func validateNoOverlayConfig() error {
 		if NoOverlay.OutboundSNAT == "" {
 			return fmt.Errorf("outbound-snat is required when transport=no-overlay")
 		}
-		if NoOverlay.OutboundSNAT != NoOverlaySNATEnabled && NoOverlay.OutboundSNAT != NoOverlaySNATDisabled {
-			return fmt.Errorf("invalid outbound-snat %q: must be %q or %q", NoOverlay.OutboundSNAT, NoOverlaySNATEnabled, NoOverlaySNATDisabled)
+		if NoOverlay.OutboundSNAT != types.NoOverlaySNATEnabled && NoOverlay.OutboundSNAT != types.NoOverlaySNATDisabled {
+			return fmt.Errorf("invalid outbound-snat %q: must be %q or %q", NoOverlay.OutboundSNAT, types.NoOverlaySNATEnabled, types.NoOverlaySNATDisabled)
 		}
 
 		if NoOverlay.Routing == "" {
@@ -3375,6 +3393,17 @@ func buildOvnKubeNodeConfig(cli, file *config) error {
 	// ovnkube-node-mode dpu/dpu-host does not support hybrid overlay
 	if OvnKubeNode.Mode != types.NodeModeFull && HybridOverlay.Enabled {
 		return fmt.Errorf("hybrid overlay is not supported with ovnkube-node mode %s", OvnKubeNode.Mode)
+	}
+
+	if OvnKubeNode.DPUNodeLeaseRenewInterval < 0 {
+		return fmt.Errorf("invalid dpu-node-lease-renew-interval '%d'. must be >= 0", OvnKubeNode.DPUNodeLeaseRenewInterval)
+	}
+	if OvnKubeNode.DPUNodeLeaseDuration <= 0 {
+		return fmt.Errorf("invalid dpu-node-lease-duration '%d'. must be > 0", OvnKubeNode.DPUNodeLeaseDuration)
+	}
+	if OvnKubeNode.DPUNodeLeaseDuration <= OvnKubeNode.DPUNodeLeaseRenewInterval {
+		return fmt.Errorf("invalid dpu-node-lease-duration '%d'. must be > dpu-node-lease-renew-interval '%d'",
+			OvnKubeNode.DPUNodeLeaseDuration, OvnKubeNode.DPUNodeLeaseRenewInterval)
 	}
 
 	// Warn the user if both MgmtPortNetdev and MgmtPortDPResourceName are specified since they
