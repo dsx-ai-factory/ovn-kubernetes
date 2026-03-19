@@ -533,10 +533,11 @@ func (c *contextKind) SetupUnderlay(f *framework.Framework, underlay api.Underla
 			}
 		}
 
-		// NVIDIA: when physicalNetworkName is set, use it directly as the bridge mapping name.
-		// Otherwise, use the network-scoped name with br-localnet suffix to retain original downstream behavior.
+		// NVIDIA: SetupUnderlay defaults an empty PhysicalNetworkName to "underlay" above for
+		// kind network lookup, so only treat values other than that sentinel as explicit physnets.
+		// Legacy callers still need the logical-network-derived bridge mapping with the br-localnet suffix.
 		var networkName string
-		if underlay.PhysicalNetworkName != "" {
+		if underlay.PhysicalNetworkName != "underlay" {
 			networkName = underlay.PhysicalNetworkName
 		} else {
 			networkName = fmt.Sprintf("%s%s", util.GetUserDefinedNetworkPrefix(underlay.LogicalNetworkName),
