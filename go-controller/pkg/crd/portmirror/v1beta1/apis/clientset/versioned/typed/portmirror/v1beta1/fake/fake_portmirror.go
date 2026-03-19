@@ -18,9 +18,9 @@ limitations under the License.
 package fake
 
 import (
-	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
-	portmirrorv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/applyconfiguration/portmirror/v1beta1"
-	typedportmirrorv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned/typed/portmirror/v1beta1"
+	v1beta1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
+	portmirrorv1beta1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/applyconfiguration/portmirror/v1beta1"
+	typedportmirrorv1beta1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned/typed/portmirror/v1beta1"
 	gentype "k8s.io/client-go/gentype"
 )
 

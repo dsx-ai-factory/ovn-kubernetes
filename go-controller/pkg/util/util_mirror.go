@@ -12,9 +12,9 @@ import (
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 
-	portmirror "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	portmirror "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 )
 
 const (

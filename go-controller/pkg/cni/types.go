@@ -17,9 +17,9 @@ import (
 
 	"github.com/ovn-kubernetes/libovsdb/client"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
 // ServerRunDir is the default directory for CNIServer runtime files
@@ -83,6 +83,12 @@ const CNIDel command = "DEL"
 
 // CNICheck is the command representing check operation on a pod
 const CNICheck command = "CHECK"
+
+// CNIStatus is the command representing a plugin readiness check
+const CNIStatus command = "STATUS"
+
+// CNIGC is the command representing CNI runtime garbage collection
+const CNIGC command = "GC"
 
 // Request sent to the Server by the OVN CNI plugin
 type Request struct {
@@ -204,6 +210,11 @@ func NewClientSet(kclient kubernetes.Interface, podLister corev1listers.PodListe
 	}
 }
 
+// DPUStatusProvider reports whether the DPU is ready to service CNI requests.
+type DPUStatusProvider interface {
+	Ready() (bool, string)
+}
+
 // Server object that listens for JSON-marshaled Request objects
 // on a private root-only Unix domain socket.
 type Server struct {
@@ -213,4 +224,5 @@ type Server struct {
 	kubeAuth             *KubeAPIAuth
 	networkManager       networkmanager.Interface
 	ovsClient            client.Client
+	dpuHealth            DPUStatusProvider
 }

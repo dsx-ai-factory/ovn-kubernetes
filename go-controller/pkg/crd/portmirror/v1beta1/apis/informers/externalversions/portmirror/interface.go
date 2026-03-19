@@ -18,8 +18,8 @@ limitations under the License.
 package portmirror
 
 import (
-	internalinterfaces "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/informers/externalversions/internalinterfaces"
-	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/informers/externalversions/portmirror/v1beta1"
+	internalinterfaces "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/informers/externalversions/internalinterfaces"
+	v1beta1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/informers/externalversions/portmirror/v1beta1"
 )
 
 // Interface provides access to each of this group's versions.

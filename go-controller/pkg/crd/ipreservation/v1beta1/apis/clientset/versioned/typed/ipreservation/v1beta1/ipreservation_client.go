@@ -20,8 +20,8 @@ package v1beta1
 import (
 	http "net/http"
 
-	ipreservationv1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
-	scheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/clientset/versioned/scheme"
+	ipreservationv1beta1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
+	scheme "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/clientset/versioned/scheme"
 	rest "k8s.io/client-go/rest"
 )
 

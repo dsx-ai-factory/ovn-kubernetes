@@ -18,8 +18,8 @@ limitations under the License.
 package adminpbr
 
 import (
-	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/informers/externalversions/adminpbr/v1beta1"
-	internalinterfaces "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/informers/externalversions/internalinterfaces"
+	v1beta1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/informers/externalversions/adminpbr/v1beta1"
+	internalinterfaces "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/informers/externalversions/internalinterfaces"
 )
 
 // Interface provides access to each of this group's versions.

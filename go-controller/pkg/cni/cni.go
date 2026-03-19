@@ -20,15 +20,15 @@ import (
 
 	"github.com/ovn-kubernetes/libovsdb/client"
 
-	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/udn"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/udn"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kubevirt"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
 var (
@@ -39,6 +39,8 @@ var (
 	netDevPollTimeout  = 5 * time.Second
 	netDevPollInterval = 200 * time.Millisecond
 )
+
+const dpuNotReadyMsg = "DPU Not Ready"
 
 type direction int
 
@@ -494,7 +496,12 @@ func HandlePodRequest(
 		response, err = request.cmdDel(clientset)
 	case CNICheck:
 		err = request.cmdCheck()
+	case CNIUpdate:
+		// No-op update path today
+	case CNIStatus:
+		// handled by DPU health check gating before reaching here
 	default:
+		err = fmt.Errorf("unsupported CNI command %s", request.Command)
 	}
 
 	if response != nil {

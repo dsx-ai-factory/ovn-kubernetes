@@ -18,7 +18,7 @@ limitations under the License.
 package v1beta1
 
 import (
-	types "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	types "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )

@@ -18,7 +18,7 @@ limitations under the License.
 package v1beta1
 
 import (
-	types "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	types "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // PortMirrorStatusApplyConfiguration represents a declarative configuration of the PortMirrorStatus type for use

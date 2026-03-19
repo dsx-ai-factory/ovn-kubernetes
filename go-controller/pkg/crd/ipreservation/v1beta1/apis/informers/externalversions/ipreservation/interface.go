@@ -18,8 +18,8 @@ limitations under the License.
 package ipreservation
 
 import (
-	internalinterfaces "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/informers/externalversions/internalinterfaces"
-	v1beta1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/informers/externalversions/ipreservation/v1beta1"
+	internalinterfaces "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/informers/externalversions/internalinterfaces"
+	v1beta1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/informers/externalversions/ipreservation/v1beta1"
 )
 
 // Interface provides access to each of this group's versions.

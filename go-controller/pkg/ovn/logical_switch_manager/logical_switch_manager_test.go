@@ -9,10 +9,10 @@ import (
 
 	utilnet "k8s.io/utils/net"
 
-	ipallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	ipallocator "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/ip"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
+	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // test function that returns if an IP address is allocated
