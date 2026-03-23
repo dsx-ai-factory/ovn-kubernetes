@@ -160,11 +160,11 @@ func (oc *BaseLayer2UserDefinedNetworkController) run() error {
 		// re-allocate IPs that already allocated for Pods.
 		// Note that the existing IP reservation IPs are reserved when ipreservController is initialized.
 		oc.wg.Add(1)
-		go func() {
+		go func(ch <-chan struct{}) {
 			defer oc.wg.Done()
 			// Until we have scale issues in future let's spawn only one thread
-			oc.ipreservController.Run(1, oc.stopChan)
-		}()
+			oc.ipreservController.Run(1, ch)
+		}(oc.stopChan)
 	}
 
 	if config.OVNKubernetesFeature.EnableVirtualIP {
