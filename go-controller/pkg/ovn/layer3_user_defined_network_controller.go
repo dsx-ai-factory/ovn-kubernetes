@@ -643,11 +643,11 @@ func (oc *Layer3UserDefinedNetworkController) run() error {
 			return err
 		}
 		oc.wg.Add(1)
-		go func() {
+		go func(ch <-chan struct{}) {
 			defer oc.wg.Done()
 			// Until we have scale issues in future let's spawn only one thread
-			ipresvController.Run(1, oc.stopChan)
-		}()
+			ipresvController.Run(1, ch)
+		}(oc.stopChan)
 	}
 
 	if oc.svcController != nil {
