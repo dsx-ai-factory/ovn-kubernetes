@@ -526,10 +526,19 @@ func (c *contextKind) SetupUnderlay(f *framework.Framework, underlay api.Underla
 	}
 	for _, ovsPod := range ovsPods {
 		if underlay.BridgeName != deploymentconfig.Get().ExternalBridgeName() {
-			underlayInterface, err := getNetworkInterface(ovsPod.Spec.NodeName, underlay.PhysicalNetworkName)
-			if err != nil {
-				return fmt.Errorf("failed to get underlay interface for network %s on node %s: %w", underlay.PhysicalNetworkName, ovsPod.Spec.NodeName, err)
+			underlayInterface := api.NetworkInterface{InfName: underlay.PortName}
+			if underlayInterface.InfName == "" {
+				underlayInterface, err = getNetworkInterface(ovsPod.Spec.NodeName, underlay.PhysicalNetworkName)
+				if err != nil {
+					return fmt.Errorf("failed to get underlay interface for network %s on node %s: %w", underlay.PhysicalNetworkName, ovsPod.Spec.NodeName, err)
+				}
+			} else {
+				// NVIDIA: when a test needs a custom physicalNetworkName for downstream bridge-mapping
+				// checks, it may still want to attach the standard kind underlay interface instead of a
+				// same-named kind network. Use the explicit port in that case so we don't conflate the
+				// port attachment with the downstream br-localnet-related mapping name.
 			}
+
 			if err := ensureOVSBridge(ovsPod.Namespace, ovsPod.Name, underlay.BridgeName); err != nil {
 				return fmt.Errorf("failed to add OVS bridge %s for pod %s/%s: %w", underlay.BridgeName, ovsPod.Namespace, ovsPod.Name, err)
 			}
