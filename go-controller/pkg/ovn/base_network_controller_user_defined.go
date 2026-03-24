@@ -3,8 +3,10 @@ package ovn
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -247,18 +249,8 @@ func (bsnc *BaseUserDefinedNetworkController) ensurePodForUserDefinedNetwork(old
 	}
 	updatePort := kubevirtLiveMigrationStatus != nil && pod.Name == kubevirtLiveMigrationStatus.TargetPod.Name
 
-	if !addPort && !updatePort {
-		if util.PortSecurityAnnotationChanged(oldPod, pod) {
-			if err := bsnc.updatePortSecurity(oldPod, pod); err != nil {
-				return fmt.Errorf("failed to update port security for %s/%s network %s: %v", pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
-			}
-		}
-		return nil
-	}
-
 	// If a node does not have an assigned hostsubnet don't wait for the logical switch to appear
-	var switchName string
-	switchName, err = bsnc.getExpectedSwitchName(pod)
+	switchName, err := bsnc.getExpectedSwitchName(pod)
 	if err != nil {
 		return err
 	}
@@ -306,6 +298,15 @@ func (bsnc *BaseUserDefinedNetworkController) ensurePodForUserDefinedNetwork(old
 		// the pod is not attached to this specific network
 		klog.V(5).Infof("Pod %s/%s is not attached on this network controller %s",
 			pod.Namespace, pod.Name, bsnc.GetNetworkName())
+		return nil
+	}
+
+	if !addPort && !updatePort {
+		if util.PortSecurityAnnotationChanged(oldPod, pod) {
+			if err := bsnc.updatePortSecurity(oldPod, pod, slices.Collect(maps.Keys(networkMap))); err != nil {
+				return fmt.Errorf("failed to update port security for %s/%s network %s: %v", pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
+			}
+		}
 		return nil
 	}
 
