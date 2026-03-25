@@ -316,7 +316,7 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 			continue
 		}
 
-		if config.HybridOverlay.Enabled && util.NoHostSubnet(node) {
+		if util.NoHostSubnet(node) {
 			continue
 		}
 
@@ -771,7 +771,7 @@ func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *corev1.Node, 
 func (oc *DefaultNetworkController) deleteNodeEvent(node *corev1.Node) error {
 	klog.V(5).Infof("Deleting Node %q. Removing the node from "+
 		"various caches", node.Name)
-	if config.HybridOverlay.Enabled && util.NoHostSubnet(node) {
+	if util.NoHostSubnet(node) {
 		if err := oc.deleteHoNodeEvent(node); err != nil {
 			return err
 		}
