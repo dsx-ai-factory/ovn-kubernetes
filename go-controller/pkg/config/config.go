@@ -3202,6 +3202,18 @@ func ovnKubeNodeModeSupported(mode string) error {
 	return nil
 }
 
+func IsModeFull() bool {
+	return OvnKubeNode.Mode == types.NodeModeFull
+}
+
+func IsModeDPU() bool {
+	return OvnKubeNode.Mode == types.NodeModeDPU
+}
+
+func IsModeDPUHost() bool {
+	return OvnKubeNode.Mode == types.NodeModeDPUHost
+}
+
 // buildOvnKubeNodeConfig updates OvnKubeNode config from cli and config file
 func buildOvnKubeNodeConfig(cli, file *config) error {
 	// Copy config file values over default values
@@ -3220,7 +3232,7 @@ func buildOvnKubeNodeConfig(cli, file *config) error {
 	}
 
 	// ovnkube-node-mode dpu/dpu-host does not support hybrid overlay
-	if OvnKubeNode.Mode != types.NodeModeFull && HybridOverlay.Enabled {
+	if (IsModeDPU() || IsModeDPUHost()) && HybridOverlay.Enabled {
 		return fmt.Errorf("hybrid overlay is not supported with ovnkube-node mode %s", OvnKubeNode.Mode)
 	}
 
@@ -3247,13 +3259,13 @@ func buildOvnKubeNodeConfig(cli, file *config) error {
 	// when DPU is used, management port is always backed by a representor. On the
 	// host side, it needs to be provided through --ovnkube-node-mgmt-port-netdev.
 	// On the DPU, it is derrived from the annotation exposed on the host side.
-	if OvnKubeNode.Mode == types.NodeModeDPU && !(OvnKubeNode.MgmtPortNetdev == "" && OvnKubeNode.MgmtPortDPResourceName == "") {
+	if IsModeDPU() && !(OvnKubeNode.MgmtPortNetdev == "" && OvnKubeNode.MgmtPortDPResourceName == "") {
 		return fmt.Errorf("ovnkube-node-mgmt-port-netdev or ovnkube-node-mgmt-port-dp-resource-name must not be provided")
 	}
-	if OvnKubeNode.Mode == types.NodeModeDPUHost && OvnKubeNode.MgmtPortNetdev == "" && OvnKubeNode.MgmtPortDPResourceName == "" {
+	if IsModeDPUHost() && OvnKubeNode.MgmtPortNetdev == "" && OvnKubeNode.MgmtPortDPResourceName == "" {
 		return fmt.Errorf("ovnkube-node-mgmt-port-netdev or ovnkube-node-mgmt-port-dp-resource-name must be provided")
 	}
-	if OVNKubernetesFeature.EnableNetworkSegmentation && OvnKubeNode.Mode == types.NodeModeDPUHost && OvnKubeNode.MgmtPortDPResourceName == "" {
+	if OVNKubernetesFeature.EnableNetworkSegmentation && IsModeDPUHost() && OvnKubeNode.MgmtPortDPResourceName == "" {
 		return fmt.Errorf("ovnkube-node-mgmt-port-dp-resource-name must be provided on dpu-host mode if network segmentation is enabled")
 	}
 	return nil
