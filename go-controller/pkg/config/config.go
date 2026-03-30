@@ -547,6 +547,12 @@ type GatewayConfig struct {
 	// on the external bridge. The Host IP would be on this device.
 	// Should be used mutually exclusive to the `--gateway-interface` flag.
 	GatewayAcceleratedInterface string `gcfg:"gateway-accelerated-interface"`
+	// DPUHostGatewayRepresentorInterface is the DPU-side representor of the host's
+	// uplink (PF). For some DPUs this is discovered automatically via
+	// phys_port_name via switchdev metadata. In simulated environments or other
+	// interpretations of DPUs, it must be specified explicitly
+	// because the interface has no switchdev metadata.
+	DPUHostGatewayRepresentorInterface string `gcfg:"dpu-host-gateway-representor-interface"`
 	// Egress gateway interface is the optional network interface to use for external gw pods traffic.
 	EgressGWInterface string `gcfg:"egw-interface"`
 	// NextHop is the gateway IP address of Interface; will be autodetected if not given
@@ -1647,6 +1653,13 @@ var OVNGatewayFlags = []cli.Flag{
 			"This is typically a VF or SF device. When specified it would be used as the in_port for Openflow rules " +
 			"on the external bridge. The Host IP would be on this device.",
 		Destination: &cliConfig.Gateway.GatewayAcceleratedInterface,
+	},
+	&cli.StringFlag{
+		Name: "dpu-host-gateway-representor-interface",
+		Usage: "The DPU-side representor interface for the host's uplink (PF). For some DPUs this is discovered " +
+			"automatically via phys_port_name via switchdev metadata. In simulated environments or other interpretations of " +
+			"DPUs, it must be specified explicitly because the interface has no switchdev metadata.",
+		Destination: &cliConfig.Gateway.DPUHostGatewayRepresentorInterface,
 	},
 	&cli.StringFlag{
 		Name: "exgw-interface",

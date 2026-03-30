@@ -178,6 +178,17 @@ func NewBridgeConfiguration(intfName, nodeName,
 		if err != nil {
 			return nil, fmt.Errorf("nicToBridge failed for %s: %w", intfName, err)
 		}
+		if config.Gateway.DPUHostGatewayRepresentorInterface != "" {
+			_, stderr, repErr := util.RunOVSVsctl(
+				"--", "--may-exist", "add-port", bridgeName, config.Gateway.DPUHostGatewayRepresentorInterface,
+				"--", "set", "port", config.Gateway.DPUHostGatewayRepresentorInterface, "other-config:transient=true",
+			)
+			if repErr != nil {
+				return nil, fmt.Errorf("failed to add DPU host gateway representor %s to bridge %s: %w, stderr: %s",
+					config.Gateway.DPUHostGatewayRepresentorInterface, bridgeName, repErr, stderr)
+			}
+			klog.Infof("Adding host representor interface %s to bridge %s", config.Gateway.DPUHostGatewayRepresentorInterface, bridgeName)
+		}
 		res.bridgeName = bridgeName
 		res.gwIface = bridgeName
 		res.uplinkName = intfName
