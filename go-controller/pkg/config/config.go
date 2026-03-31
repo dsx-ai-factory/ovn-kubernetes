@@ -651,6 +651,7 @@ type OvnKubeNodeConfig struct {
 	MgmtPortDPResourceName    string `gcfg:"mgmt-port-dp-resource-name"`
 	DPUNodeLeaseRenewInterval int    `gcfg:"dpu-node-lease-renew-interval"`
 	DPUNodeLeaseDuration      int    `gcfg:"dpu-node-lease-duration"`
+	SimulateDPU               bool   `gcfg:"simulate-dpu"`
 }
 
 // ClusterManagerConfig holds configuration for ovnkube-cluster-manager
@@ -1870,6 +1871,12 @@ var OvnKubeNodeFlags = []cli.Flag{
 		Usage:       "Lease duration in seconds before the DPU is considered unhealthy",
 		Value:       OvnKubeNode.DPUNodeLeaseDuration,
 		Destination: &cliConfig.OvnKubeNode.DPUNodeLeaseDuration,
+	},
+	&cli.BoolFlag{
+		Name:        "simulate-dpu",
+		Usage:       "Use simulated DPU operations instead of real SR-IOV/switchdev hardware. Required for Kind and VM-based DPU simulation environments.",
+		Value:       OvnKubeNode.SimulateDPU,
+		Destination: &cliConfig.OvnKubeNode.SimulateDPU,
 	},
 }
 

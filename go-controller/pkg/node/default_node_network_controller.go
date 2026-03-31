@@ -606,11 +606,7 @@ func configureGatewayInterfaceFromMgmtPort() error {
 
 func exportManagementPortAnnotation(netdevName string, nodeAnnotator kube.Annotator) error {
 	klog.Infof("Exporting management port annotation for default network: netdev '%v'", netdevName)
-	deviceID, err := util.GetDeviceIDFromNetdevice(netdevName)
-	if err != nil {
-		return err
-	}
-	cfg, err := util.GetNetworkDeviceDetails(deviceID)
+	cfg, err := util.GetDPUOps().ResolveDeviceDetails(netdevName)
 	if err != nil {
 		return err
 	}
@@ -670,7 +666,7 @@ func getMgmtPortAndRepNameModeDPU(node *corev1.Node) (string, string, error) {
 	if !ok {
 		return "", "", fmt.Errorf("failed to find management port details for %s network", types.DefaultNetworkName)
 	}
-	rep, err := util.GetSriovnetOps().GetVfRepresentorDPU(fmt.Sprintf("%d", cfg.PfId), fmt.Sprintf("%d", cfg.FuncId))
+	rep, err := util.GetDPUOps().GetPortRepresentor(fmt.Sprintf("%d", cfg.PfId), fmt.Sprintf("%d", cfg.FuncId))
 	return "", rep, err
 }
 

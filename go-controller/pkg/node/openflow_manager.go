@@ -332,11 +332,7 @@ func bootstrapOVSFlows(nodeName string) error {
 
 	var bridgeMACAddress net.HardwareAddr
 	if config.IsModeDPU() {
-		hostRep, err := util.GetDPUHostInterface(bridge)
-		if err != nil {
-			return err
-		}
-		bridgeMACAddress, err = util.GetSriovnetOps().GetRepresentorPeerMacAddress(hostRep)
+		bridgeMACAddress, err = util.GetDPUOps().GetHostGatewayMACAddress(bridge, nodeName)
 		if err != nil {
 			return err
 		}

@@ -239,11 +239,7 @@ func NewBridgeConfiguration(intfName, nodeName,
 
 	// for DPU we use the host MAC address for the Gateway configuration
 	if config.IsModeDPU() {
-		hostRep, err := util.GetDPUHostInterface(res.bridgeName)
-		if err != nil {
-			return nil, err
-		}
-		res.macAddress, err = util.GetSriovnetOps().GetRepresentorPeerMacAddress(hostRep)
+		res.macAddress, err = util.GetDPUOps().GetHostGatewayMACAddress(res.bridgeName, nodeName)
 		if err != nil {
 			return nil, err
 		}
@@ -419,7 +415,7 @@ func (b *BridgeConfiguration) ConfigureBridgePorts() error {
 	var hostOVSInterfaceName string
 	if config.IsModeDPU() {
 		var stderr string
-		hostRep, err := util.GetDPUHostInterface(b.bridgeName)
+		hostRep, err := util.GetDPUOps().GetDPUHostInterface(b.bridgeName)
 		if err != nil {
 			return err
 		}
