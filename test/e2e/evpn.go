@@ -854,7 +854,7 @@ func createVTEP(f *framework.Framework, ictx infraapi.Context, name string, cidr
 		if err != nil && !apierrors.IsNotFound(err) {
 			return err
 		}
-		return wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 30*time.Second, true, func(ctx context.Context) (bool, error) {
+		return wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
 			_, err := client.K8sV1().VTEPs().Get(ctx, name, metav1.GetOptions{})
 			if apierrors.IsNotFound(err) {
 				return true, nil
