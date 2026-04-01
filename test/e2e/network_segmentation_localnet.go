@@ -59,6 +59,7 @@ var _ = Describe("Network Segmentation: Localnet", feature.NetworkSegmentation, 
 			BridgeName:          ovsBrName,
 			LogicalNetworkName:  c.networkName,
 			PhysicalNetworkName: physicalNetworkName,
+			PortName:            "eth1",
 			VlanID:              c.vlanID,
 		})).To(Succeed())
 
@@ -161,6 +162,7 @@ var _ = Describe("Network Segmentation: Localnet", feature.NetworkSegmentation, 
 			BridgeName:          ovsBrName,
 			LogicalNetworkName:  c.networkName,
 			PhysicalNetworkName: physicalNetworkName,
+			PortName:            "eth1",
 			VlanID:              c.vlanID,
 		})).To(Succeed())
 
