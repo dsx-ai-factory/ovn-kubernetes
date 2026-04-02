@@ -2182,7 +2182,7 @@ ip route add %[3]s via %[4]s
 				// At restart we need re-connect
 				Expect(startEastWestIperfTraffic(vmi, testPodsIPs, step)).To(Succeed(), step)
 				if td.role == udnv1.NetworkRolePrimary {
-					output, err := virtClient.RunCommand(vmi, "/tmp/iperf-server.sh &", time.Minute)
+					output, err := virtClient.RunCommand(vmi, "/tmp/iperf-server.sh", time.Minute)
 					Expect(err).NotTo(HaveOccurred(), step+": "+output)
 					Expect(startNorthSouthIngressIperfTraffic(externalContainer, serverIPs, serverPort, step)).To(Succeed())
 					if td.evpn != nil {
