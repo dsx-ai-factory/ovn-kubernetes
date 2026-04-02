@@ -648,6 +648,8 @@ type GatewayConfig struct {
 	EphemeralPortRange string `gcfg:"ephemeral-port-range"`
 	// CustomSnatRules specifies which snat IP to use based on destinations, in the form of `"external_ip1=dest1,dest2;external_ip2=dest3,dest4"`
 	CustomSnatRules string `gcfg:"custom-gwsnat-rules"`
+	// SecureManagementPort (disabled by default) controls if the management port is secured by ACLs.
+	SecureManagementPort bool `gcfg:"secure-mgmt-port"`
 }
 
 // OvnAuthConfig holds client authentication and location details for
@@ -1926,6 +1928,11 @@ var OVNGatewayFlags = []cli.Flag{
 		Name:        "custom-gwsnat-rules",
 		Usage:       "Specifies which snat IP to use based on destinations in the form of \"external_ip1=dest1,dest2;external_ip2=dest3,dest4\"",
 		Destination: &cliConfig.Gateway.CustomSnatRules,
+	},
+	&cli.BoolFlag{
+		Name:        "secure-mgmt-port",
+		Usage:       "Secure the management port by ACLs. Disabled by default.",
+		Destination: &cliConfig.Gateway.SecureManagementPort,
 	},
 }
 

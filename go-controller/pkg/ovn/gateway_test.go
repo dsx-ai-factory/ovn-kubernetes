@@ -358,8 +358,13 @@ func generateGatewayInitExpectedNBWithPodNetworkAdvertised(testData []libovsdbte
 	if len(nodeMgmtPortIP) != 0 {
 		nodeACL := getAllowFromNodeExpectedACL(nodeName, nodeMgmtPortIP, nil, types.DefaultNetworkControllerName)
 		testData = append(testData, nodeACL)
-
 		expectedNodeSwitch.ACLs = append(expectedNodeSwitch.ACLs, nodeACL.UUID)
+
+		mgmtPortACLs := getMgmtPortIngressExpectedACLs(nodeName, nodeMgmtPortIP, "", types.DefaultNetworkControllerName)
+		for _, acl := range mgmtPortACLs {
+			testData = append(testData, acl)
+			expectedNodeSwitch.ACLs = append(expectedNodeSwitch.ACLs, acl.UUID)
+		}
 	}
 
 	testData = append(testData, expectedNodeSwitch)

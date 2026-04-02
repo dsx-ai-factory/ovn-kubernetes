@@ -859,6 +859,12 @@ func (bnc *BaseNetworkController) syncNodeManagementPort(node *corev1.Node, swit
 			return nil, err
 		}
 
+		if config.Gateway.SecureManagementPort {
+			if err := bnc.addMgmtPortIngressACLs(node.Name, switchName, mgmtIfAddr.IP); err != nil {
+				return nil, err
+			}
+		}
+
 		if !utilnet.IsIPv6CIDR(hostSubnet) {
 			v4Subnet = hostSubnet
 		}
