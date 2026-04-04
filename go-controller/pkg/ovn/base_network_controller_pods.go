@@ -907,20 +907,19 @@ func calculateStaticMAC(podDesc string, mac string) (net.HardwareAddr, error) {
 	return podMac, nil
 }
 
-func (bnc *BaseNetworkController) updatePortSecurity(oldPod, newPod *corev1.Pod) (err error) {
+func (bnc *BaseNetworkController) updatePortSecurity(oldPod, newPod *corev1.Pod, nadKeys []string) (err error) {
 	if util.PodWantsHostNetwork(newPod) {
 		return nil
 	}
-	nadKeys := bnc.getPodNADKeys(newPod)
+	oldPortSecInfoMap, err := util.GetPortSecurityInfo(oldPod.Annotations)
+	if err != nil {
+		return err
+	}
+	newPortSecInfoMap, err := util.GetPortSecurityInfo(newPod.Annotations)
+	if err != nil {
+		return err
+	}
 	for _, nadKey := range nadKeys {
-		oldPortSecInfoMap, err := util.GetPortSecurityInfo(oldPod.Annotations)
-		if err != nil {
-			return err
-		}
-		newPortSecInfoMap, err := util.GetPortSecurityInfo(newPod.Annotations)
-		if err != nil {
-			return err
-		}
 		nadName, index, _ := util.GetNadFromIndexedNADKey(nadKey)
 		oldPortSecInfo, oldPortSecInfoExists := oldPortSecInfoMap[nadName]
 		newPortSecInfo, newPortSecInfoExists := newPortSecInfoMap[nadName]

@@ -457,8 +457,7 @@ func (oc *DefaultNetworkController) getAllHostNamespaceAddresses() []net.IP {
 	} else {
 		ips = make([]net.IP, 0, len(existingNodes))
 		for _, node := range existingNodes {
-			if config.HybridOverlay.Enabled || util.NoHostSubnet(node) {
-				// skip hybrid overlay nodes
+			if util.NoHostSubnet(node) {
 				continue
 			}
 			hostNetworkIPs, err := oc.getHostNamespaceAddressesForNode(node)

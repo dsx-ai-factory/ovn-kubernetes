@@ -132,8 +132,7 @@ func (zcc *zoneClusterController) Stop() {
 }
 
 func needsZoneAllocation(node *corev1.Node) bool {
-	if config.HybridOverlay.Enabled && util.NoHostSubnet(node) {
-		// skip hybrid overlay nodes
+	if util.NoHostSubnet(node) {
 		return false
 	}
 
@@ -152,8 +151,7 @@ func needsZoneAllocation(node *corev1.Node) bool {
 func (zcc *zoneClusterController) handleAddUpdateNodeEvent(node *corev1.Node) error {
 	var updateNodeAnno bool
 
-	if config.HybridOverlay.Enabled && util.NoHostSubnet(node) {
-		// skip hybrid overlay nodes
+	if util.NoHostSubnet(node) {
 		return nil
 	}
 	allocatedNodeID, err := zcc.nodeIDAllocator.AllocateID(node.Name)

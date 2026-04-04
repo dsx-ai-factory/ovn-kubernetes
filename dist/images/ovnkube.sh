@@ -1897,6 +1897,12 @@ ovnkube-controller() {
   fi
   echo "empty_lb_events_flag=${empty_lb_events_flag}"
 
+  nohostsubnet_label_option=
+  if [[ ${ovn_nohostsubnet_label} != "" ]]; then
+	  nohostsubnet_label_option="--no-hostsubnet-nodes=${ovn_nohostsubnet_label}"
+  fi
+  echo "nohostsubnet_label_option=${nohostsubnet_label_option}"
+
   ovn_v4_join_subnet_opt=
   if [[ -n ${ovn_v4_join_subnet} ]]; then
       ovn_v4_join_subnet_opt="--gateway-v4-join-subnet=${ovn_v4_join_subnet}"
@@ -2197,6 +2203,7 @@ ovnkube-controller() {
     ${multi_network_enabled_flag} \
     ${network_segmentation_enabled_flag} \
     ${network_connect_enabled_flag} \
+    ${nohostsubnet_label_option} \
     ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
     ${evpn_enabled_flag} \
@@ -2358,6 +2365,12 @@ ovnkube-controller-with-node() {
       empty_lb_events_flag="--ovn-empty-lb-events"
   fi
   echo "empty_lb_events_flag=${empty_lb_events_flag}"
+
+  nohostsubnet_label_option=
+  if [[ ${ovn_nohostsubnet_label} != "" ]]; then
+	  nohostsubnet_label_option="--no-hostsubnet-nodes=${ovn_nohostsubnet_label}"
+  fi
+  echo "nohostsubnet_label_option=${nohostsubnet_label_option}"
 
   ovn_v4_join_subnet_opt=
   if [[ -n ${ovn_v4_join_subnet} ]]; then
@@ -2873,6 +2886,7 @@ ovnkube-controller-with-node() {
     ${multi_network_enabled_flag} \
     ${network_segmentation_enabled_flag} \
     ${network_connect_enabled_flag} \
+    ${nohostsubnet_label_option} \
     ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
     ${evpn_enabled_flag} \
@@ -3150,6 +3164,12 @@ ovn-cluster-manager() {
   fi
   echo "empty_lb_events_flag=${empty_lb_events_flag}"
 
+  nohostsubnet_label_option=
+  if [[ ${ovn_nohostsubnet_label} != "" ]]; then
+	  nohostsubnet_label_option="--no-hostsubnet-nodes=${ovn_nohostsubnet_label}"
+  fi
+  echo "nohostsubnet_label_option=${nohostsubnet_label_option}"
+
   network_qos_enabled_flag=
   if [[ ${ovn_network_qos_enable} == "true" ]]; then
       network_qos_enabled_flag="--enable-network-qos"
@@ -3195,6 +3215,7 @@ ovn-cluster-manager() {
     ${multi_network_enabled_flag} \
     ${network_segmentation_enabled_flag} \
     ${network_connect_enabled_flag} \
+    ${nohostsubnet_label_option} \
     ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
     ${evpn_enabled_flag} \

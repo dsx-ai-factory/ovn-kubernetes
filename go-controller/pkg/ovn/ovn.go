@@ -208,7 +208,7 @@ func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *corev1.Pod, 
 		}
 	} else {
 		if !util.PodWantsHostNetwork(pod) && util.PortSecurityAnnotationChanged(oldPod, pod) {
-			if err := oc.updatePortSecurity(oldPod, pod); err != nil {
+			if err := oc.updatePortSecurity(oldPod, pod, []string{ovntypes.DefaultNetworkName}); err != nil {
 				oc.recordPodEvent("ErrorUpdatingPortSecurity", err, pod)
 				return fmt.Errorf("failed to update port security for %s/%s network %s: %v", pod.Namespace, pod.Name, oc.GetNetworkName(), err)
 			}
