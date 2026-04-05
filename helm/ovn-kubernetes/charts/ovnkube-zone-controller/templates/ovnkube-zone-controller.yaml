@@ -56,11 +56,14 @@ spec:
         terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         # ovn db is stored in the pod in /etc/openvswitch
-        # (or in /etc/ovn if OVN from new repository is used)
+        # (or in /etc/ovn if OVN from new repository is used,
+        # or in /var/lib/ovn if using Debian/Ubuntu packages)
         # and on the host in /var/lib/openvswitch/
         - mountPath: /etc/openvswitch/
           name: host-etc-ovs
         - mountPath: /etc/ovn/
+          name: host-var-lib-ovs
+        - mountPath: /var/lib/ovn/
           name: host-var-lib-ovs
         - mountPath: /var/log/openvswitch/
           name: host-var-log-ovs
@@ -127,11 +130,14 @@ spec:
         terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         # ovn db is stored in the pod in /etc/openvswitch
-        # (or in /etc/ovn if OVN from new repository is used)
+        # (or in /etc/ovn if OVN from new repository is used,
+        # or in /var/lib/ovn if using Debian/Ubuntu packages)
         # and on the host in /var/lib/openvswitch/
         - mountPath: /etc/openvswitch/
           name: host-etc-ovs
         - mountPath: /etc/ovn/
+          name: host-var-lib-ovs
+        - mountPath: /var/lib/ovn/
           name: host-var-lib-ovs
         - mountPath: /var/log/openvswitch/
           name: host-var-log-ovs

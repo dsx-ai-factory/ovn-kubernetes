@@ -173,6 +173,9 @@ spec:
         - mountPath: /etc/ovn/
           name: host-var-lib-ovs
           readOnly: true
+        - mountPath: /var/lib/ovn/
+          name: host-var-lib-ovs
+          readOnly: true
         - mountPath: /var/run/ovn-kubernetes
           name: host-var-run-ovn-kubernetes
         {{- end }}
