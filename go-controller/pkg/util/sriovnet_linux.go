@@ -185,8 +185,12 @@ func GetNetdevNameFromDeviceId(deviceId string, deviceInfo nadapi.DeviceInfo) (s
 		}
 
 		netdevices, err = GetSriovnetOps().GetNetDevicesFromPci(deviceId)
-	} else { // Auxiliary network device
+	} else if IsAuxDeviceName(deviceId) {
 		netdevices, err = GetSriovnetOps().GetNetDevicesFromAux(deviceId)
+	} else {
+		// In simulated DPU environments the device ID is already the netdev name; return it directly.
+		klog.V(2).Infof("Device ID %s is not PCI/Aux, treating as simulated netdev name", deviceId)
+		return deviceId, nil
 	}
 	if err != nil {
 		return "", err

@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/k8snetworkplumbingwg/sriovnet"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
@@ -43,10 +44,11 @@ type DPUOps interface {
 	// nodeName is the K8s node name of the host this DPU operates behalf of.
 	GetHostGatewayMACAddress(bridgeName, nodeName string) (net.HardwareAddr, error)
 
-	// ResolveDeviceDetails probes a netdev (e.g. VF) interface and returns device
-	// details including PF and VF indices. In simulation this follows the
-	// pattern <prefix><pfId>-<funcId> (e.g. "eth0-1" → PfId=0, FuncId=1).
-	ResolveDeviceDetails(netdevName string) (*NetworkDeviceDetails, error)
+	// ResolveDeviceDetails returns PF and VF indices for a device identified
+	// by either a PCI address (e.g. "0000:03:00.2") or a netdev name
+	// (e.g. "eth0-1"). It is up to the implementation to interpret the deviceID
+	// for the underlying platform.
+	ResolveDeviceDetails(deviceID string) (*NetworkDeviceDetails, error)
 
 	// GetPortRepresentor finds the DPU-side representor (VF representor in the case of switchdev hardware)
 	// for the given PF and function indices. On simulation this follows the
@@ -56,30 +58,42 @@ type DPUOps interface {
 	// GetDeviceAddress returns an opaque, platform-specific identifier for
 	// a representor interface. On switchdev hardware this is a PCI address
 	// (e.g. "0000:01:00.2"); on simulated platforms it is the netdev name
-	// itself.
-	GetDeviceAddress(repName string) string
+	// itself. On switchdev, failure to resolve PCI for the representor is an error.
+	GetDeviceAddress(repName string) (string, error)
 }
 
 // ---------------------------------------------------------------------------
 // DPUOps singleton
 // ---------------------------------------------------------------------------
 
-var dpuOps DPUOps
+var (
+	dpuOps     DPUOps
+	dpuOpsOnce sync.Once
+)
+
+func initDPUOps() {
+	if IsSimulatedDPU() {
+		dpuOps = &SimulatedDPUOps{}
+		klog.Infof("DPUOps initialised: Simulated DPU environment")
+	} else {
+		dpuOps = &SwitchdevDPUOps{}
+		klog.Infof("DPUOps initialised: Switchdev hardware DPU environment")
+	}
+}
 
 // GetDPUOps returns the current DPUOps singleton. If the singleton has not
 // been initialised, it defaults to SwitchdevDPUOps (SR-IOV / switchdev hardware).
 func GetDPUOps() DPUOps {
-	if dpuOps == nil {
-		if config.IsModeDPU() || config.IsModeDPUHost() {
-			if config.OvnKubeNode.SimulateDPU {
-				dpuOps = &SimulatedDPUOps{}
-				klog.Infof("DPUOps initialised: simulated DPU environment")
-				return dpuOps
-			}
-		}
-		dpuOps = &SwitchdevDPUOps{}
-	}
+	dpuOpsOnce.Do(initDPUOps)
 	return dpuOps
+}
+
+// IsSimulatedDPU returns true if we are in a Simulated DPU environment.
+func IsSimulatedDPU() bool {
+	if config.IsModeDPU() || config.IsModeDPUHost() {
+		return config.OvnKubeNode.SimulateDPU
+	}
+	return false
 }
 
 // ---------------------------------------------------------------------------
@@ -122,29 +136,28 @@ func (n *SwitchdevDPUOps) GetHostGatewayMACAddress(bridgeName, _ string) (net.Ha
 	return GetSriovnetOps().GetRepresentorPeerMacAddress(hostRep)
 }
 
-func (n *SwitchdevDPUOps) ResolveDeviceDetails(netdevName string) (*NetworkDeviceDetails, error) {
-	deviceID, err := GetDeviceIDFromNetdevice(netdevName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read sysfs device link for %s: %v", netdevName, err)
+func (n *SwitchdevDPUOps) ResolveDeviceDetails(deviceID string) (*NetworkDeviceDetails, error) {
+	if IsPCIDeviceName(deviceID) {
+		return GetNetworkDeviceDetails(deviceID)
 	}
-	return GetNetworkDeviceDetails(deviceID)
+	// deviceID is a netdev name – look up its PCI address via sysfs first.
+	pciAddr, err := GetDeviceIDFromNetdevice(deviceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read sysfs device link for %s: %v", deviceID, err)
+	}
+	return GetNetworkDeviceDetails(pciAddr)
 }
 
 func (n *SwitchdevDPUOps) GetPortRepresentor(pfId, funcId string) (string, error) {
 	return GetSriovnetOps().GetVfRepresentorDPU(pfId, funcId)
 }
 
-func (n *SwitchdevDPUOps) GetRepresentorForPod(pfId, vfId string) (string, error) {
-	return GetSriovnetOps().GetVfRepresentorDPU(pfId, vfId)
-}
-
-func (n *SwitchdevDPUOps) GetDeviceAddress(repName string) string {
+func (n *SwitchdevDPUOps) GetDeviceAddress(repName string) (string, error) {
 	addr, err := GetSriovnetOps().GetPCIFromDeviceName(repName)
 	if err != nil {
-		klog.Warningf("Failed to get PCI address for %s: %v, using device name", repName, err)
-		return repName
+		return "", err
 	}
-	return addr
+	return addr, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -205,22 +218,22 @@ func (s *SimulatedDPUOps) GetHostGatewayMACAddress(_, nodeName string) (net.Hard
 	return mac, nil
 }
 
-func (s *SimulatedDPUOps) ResolveDeviceDetails(netdevName string) (*NetworkDeviceDetails, error) {
-	matches := reSimulationNetdevFunc.FindStringSubmatch(netdevName)
+func (s *SimulatedDPUOps) ResolveDeviceDetails(deviceID string) (*NetworkDeviceDetails, error) {
+	matches := reSimulationNetdevFunc.FindStringSubmatch(deviceID)
 	if len(matches) != 3 {
-		return nil, fmt.Errorf("interface %s does not match simulated naming pattern *<pfId>-<funcId>", netdevName)
+		return nil, fmt.Errorf("interface %s does not match simulated naming pattern *<pfId>-<funcId>", deviceID)
 	}
 	pfId, err := strconv.Atoi(matches[1])
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse PF index from %q: %v", netdevName, err)
+		return nil, fmt.Errorf("failed to parse PF index from %q: %v", deviceID, err)
 	}
 	funcId, err := strconv.Atoi(matches[2])
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse Function index from %q: %v", netdevName, err)
+		return nil, fmt.Errorf("failed to parse Function index from %q: %v", deviceID, err)
 	}
-	klog.Infof("Interface %s resolved as simulated netdev: PfId=%d, FuncId=%d", netdevName, pfId, funcId)
+	klog.Infof("Device %s resolved as simulated netdev: PfId=%d, FuncId=%d", deviceID, pfId, funcId)
 	return &NetworkDeviceDetails{
-		DeviceId: netdevName,
+		DeviceId: deviceID,
 		PfId:     pfId,
 		FuncId:   funcId,
 	}, nil
@@ -230,6 +243,6 @@ func (s *SimulatedDPUOps) GetPortRepresentor(pfId, funcId string) (string, error
 	return s.getDPURepresentor(pfId, funcId)
 }
 
-func (s *SimulatedDPUOps) GetDeviceAddress(repName string) string {
-	return repName
+func (s *SimulatedDPUOps) GetDeviceAddress(repName string) (string, error) {
+	return repName, nil
 }

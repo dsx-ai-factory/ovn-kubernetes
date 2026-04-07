@@ -270,7 +270,11 @@ func (bnnc *BaseNodeNetworkController) addRepPort(pod *corev1.Pod, dpuCD *util.D
 	// set netdevName so OVS interface can be added with external_ids:vf-netdev-name, and is able to
 	// be part of healthcheck.
 	ifInfo.NetdevName = vfRepName
-	deviceID := util.GetDPUOps().GetDeviceAddress(vfRepName)
+	deviceID, err := util.GetDPUOps().GetDeviceAddress(vfRepName)
+	if err != nil {
+		klog.Infof("Failed to get PCI address of VF rep %s: %v", vfRepName, err)
+		return err
+	}
 
 	klog.Infof("Adding VF representor %s for %s", vfRepName, podDesc)
 	err = cni.ConfigureOVS(context.TODO(), pod.Namespace, pod.Name, "", vfRepName, ifInfo, dpuCD.SandboxId, deviceID, getter)
