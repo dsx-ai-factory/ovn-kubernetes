@@ -1141,7 +1141,7 @@ func (nInfo *userDefinedNetInfo) canReconcile(other NetInfo) bool {
 		return false
 	}
 
-	lessIPNet := func(a, b net.IPNet) bool { return a.String() < b.String() }
+	lessIPNet := func(a, b *net.IPNet) bool { return a.String() < b.String() }
 	if !cmp.Equal(nInfo.nadRoutes, other.NADRoutes(), cmpopts.SortSlices(lessIPNet)) {
 		return false
 	}
