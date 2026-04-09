@@ -135,6 +135,7 @@ type OVNKubeControllerClientset struct {
 	PortMirrorClient          portmirrorclientset.Interface
 	NetworkQoSClient          networkqosclientset.Interface
 	NetworkConnectClient      networkconnectclientset.Interface
+	VTEPClient                vtepclientset.Interface
 }
 
 type OVNNodeClientset struct {
@@ -146,6 +147,7 @@ type OVNNodeClientset struct {
 	UserDefinedNetworkClient  userdefinednetworkclientset.Interface
 	RouteAdvertisementsClient routeadvertisementsclientset.Interface
 	PortMirrorClient          portmirrorclientset.Interface
+	VTEPClient                vtepclientset.Interface
 }
 
 type OVNClusterManagerClientset struct {
@@ -225,6 +227,7 @@ func (cs *OVNMasterClientset) GetOVNKubeControllerClientset() *OVNKubeController
 		IPReservationClient:       cs.IPReservationClient,
 		PortMirrorClient:          cs.PortMirrorClient,
 		NetworkQoSClient:          cs.NetworkQoSClient,
+		VTEPClient:                cs.VTEPClient,
 	}
 }
 
@@ -249,6 +252,7 @@ func (cs *OVNClientset) GetOVNKubeControllerClientset() *OVNKubeControllerClient
 		PortMirrorClient:          cs.PortMirrorClient,
 		NetworkQoSClient:          cs.NetworkQoSClient,
 		NetworkConnectClient:      cs.NetworkConnectClient,
+		VTEPClient:                cs.VTEPClient,
 	}
 }
 
@@ -285,6 +289,7 @@ func (cs *OVNClientset) GetNodeClientset() *OVNNodeClientset {
 		UserDefinedNetworkClient:  cs.UserDefinedNetworkClient,
 		RouteAdvertisementsClient: cs.RouteAdvertisementsClient,
 		PortMirrorClient:          cs.PortMirrorClient,
+		VTEPClient:                cs.VTEPClient,
 	}
 }
 
@@ -295,6 +300,7 @@ func (cs *OVNMasterClientset) GetNodeClientset() *OVNNodeClientset {
 		EgressIPClient:            cs.EgressIPClient,
 		NetworkAttchDefClient:     cs.NetworkAttchDefClient,
 		RouteAdvertisementsClient: cs.RouteAdvertisementsClient,
+		VTEPClient:                cs.VTEPClient,
 	}
 }
 

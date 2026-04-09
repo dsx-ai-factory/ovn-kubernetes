@@ -19,6 +19,7 @@ import (
 	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
+	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
@@ -78,7 +79,7 @@ var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
 			app.Action = func(_ *cli.Context) error {
 				floatingIP := "10.193.13.5"
 				//nodeSecondarySubnet := "10.193.0.0/26"
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *ovntest.NewNamespace("namespace1")
 				t := newTPod(
 					"node1",
 					"10.128.1.0/24",
@@ -89,7 +90,7 @@ var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
 					"0a:58:0a:80:01:03",
 					namespaceT.Name,
 				)
-				pod := newPod(t.namespace, t.podName, t.nodeName, t.podIP)
+				pod := ovntest.NewPod(t.namespace, t.podName, t.nodeName, t.podIP)
 				pod.Annotations = map[string]string{
 					"k8s.v1.cni.cncf.io/networks":     `[{"interface":"net1","name":"skip-ipam-nad","namespace":"default"}]`,
 					"k8s.ovn.org/skip-ip-on-networks": "default/skip-ipam-nad",
@@ -119,8 +120,6 @@ var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = ocInfo.bnc.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = ocInfo.bnc.WatchNodes()
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = ocInfo.bnc.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
@@ -145,7 +144,7 @@ var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
 		})
 		ginkgo.It("reconciles a pod with skip ipam annotation but no floating ip", func() {
 			app.Action = func(_ *cli.Context) error {
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *ovntest.NewNamespace("namespace1")
 				t := newTPod(
 					"node1",
 					"10.128.1.0/24",
@@ -156,7 +155,7 @@ var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
 					"0a:58:0a:80:01:03",
 					namespaceT.Name,
 				)
-				pod := newPod(t.namespace, t.podName, t.nodeName, t.podIP)
+				pod := ovntest.NewPod(t.namespace, t.podName, t.nodeName, t.podIP)
 				pod.Annotations = map[string]string{
 					"k8s.v1.cni.cncf.io/networks":     `[{"interface":"net1","name":"skip-ipam-nad","namespace":"default"}]`,
 					"k8s.ovn.org/skip-ip-on-networks": "default/skip-ipam-nad",
@@ -184,8 +183,6 @@ var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
 				err = ocInfo.bnc.lsManager.AddOrUpdateSwitch(ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch), []*net.IPNet{subnet.CIDR}, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = ocInfo.bnc.WatchNamespaces()
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = ocInfo.bnc.WatchNodes()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = ocInfo.bnc.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())

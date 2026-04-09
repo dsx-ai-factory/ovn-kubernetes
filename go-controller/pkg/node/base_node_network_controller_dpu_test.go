@@ -408,7 +408,7 @@ var _ = Describe("Node DPU tests", func() {
 				podInformer.On("Lister").Return(&podLister)
 				podLister.On("Pods", mock.AnythingOfType("string")).Return(&podNamespaceLister)
 				podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
-				kubeOVNMock.On("UpdatePodStatus", cpod).Return(nil)
+				kubeOVNMock.On("PatchPodStatusAnnotations", &pod, cpod).Return(nil)
 
 				err = dnnc.addRepPort(&pod, &scd, types.DefaultNetworkName, ifInfo, clientset)
 				Expect(err).ToNot(HaveOccurred())
@@ -435,7 +435,7 @@ var _ = Describe("Node DPU tests", func() {
 				podInformer.On("Lister").Return(&podLister)
 				podLister.On("Pods", mock.AnythingOfType("string")).Return(&podNamespaceLister)
 				podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
-				kubeOVNMock.On("UpdatePodStatus", cpod).Return(fmt.Errorf("failed to set pod annotations"))
+				kubeOVNMock.On("PatchPodStatusAnnotations", &pod, cpod).Return(fmt.Errorf("failed to set pod annotations"))
 
 				err = dnnc.addRepPort(&pod, &scd, types.DefaultNetworkName, ifInfo, clientset)
 				Expect(err).To(HaveOccurred())

@@ -19,6 +19,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	virtualip "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
+	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
@@ -132,7 +133,7 @@ var _ = ginkgo.Describe("VirtualIP", func() {
 
 		ginkgo.It("can add/delete pod logical switch port to virtual port virtual-parents field", func() {
 			vip := newVirtualIP(virtualIPName, virtualIPNamespace, vipAddress, nadName)
-			pod1 := newPodWithLabels(virtualIPNamespace, "pod1", "node1", "10.192.1.11", map[string]string{"k8s.io/app": virtualIPApp}, "10.128.1.12")
+			pod1 := ovntest.NewPodWithLabels(virtualIPNamespace, "pod1", "node1", "10.192.1.11", map[string]string{"k8s.io/app": virtualIPApp})
 			pod1.Annotations = map[string]string{
 				"k8s.v1.cni.cncf.io/networks": nadName,
 			}
@@ -145,7 +146,7 @@ var _ = ginkgo.Describe("VirtualIP", func() {
 					},
 					&corev1.NamespaceList{
 						Items: []corev1.Namespace{
-							*newNamespaceWithLabels(virtualIPNamespace, map[string]string{}),
+							*ovntest.NewNamespaceWithLabels(virtualIPNamespace, map[string]string{}),
 						},
 					},
 					&corev1.PodList{
@@ -196,7 +197,7 @@ var _ = ginkgo.Describe("VirtualIP", func() {
 					return vipParents
 				}).Should(gomega.Equal(lspPod))
 
-				podDelta := newPodWithLabels(virtualIPNamespace, "pod1", "node1", "10.192.1.11", map[string]string{"k8s.io/app": "something_else"}, "10.128.1.12")
+				podDelta := ovntest.NewPodWithLabels(virtualIPNamespace, "pod1", "node1", "10.192.1.11", map[string]string{"k8s.io/app": "something_else"})
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(virtualIPNamespace).Update(context.TODO(), podDelta, metav1.UpdateOptions{})
 				// now virtual port virtual-parents field should be empty,
 				// as pod1 label has been changed
@@ -219,7 +220,7 @@ var _ = ginkgo.Describe("VirtualIP", func() {
 
 		ginkgo.It("can add/delete virtualip address to pod logical switch port port security field", func() {
 			vip := newVirtualIP(virtualIPName, virtualIPNamespace, vipAddress, nadName)
-			pod1 := newPodWithLabels(virtualIPNamespace, "pod1", "node1", "10.192.1.11", map[string]string{"k8s.io/app": virtualIPApp}, "10.128.1.12")
+			pod1 := ovntest.NewPodWithLabels(virtualIPNamespace, "pod1", "node1", "10.192.1.11", map[string]string{"k8s.io/app": virtualIPApp})
 			pod1.Annotations = map[string]string{
 				"k8s.v1.cni.cncf.io/networks": nadName,
 			}
@@ -232,7 +233,7 @@ var _ = ginkgo.Describe("VirtualIP", func() {
 					},
 					&corev1.NamespaceList{
 						Items: []corev1.Namespace{
-							*newNamespaceWithLabels(virtualIPNamespace, map[string]string{}),
+							*ovntest.NewNamespaceWithLabels(virtualIPNamespace, map[string]string{}),
 						},
 					},
 					&corev1.PodList{

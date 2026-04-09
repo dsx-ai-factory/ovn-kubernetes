@@ -39,110 +39,6 @@ func getPodAnnotations(fakeClient kubernetes.Interface, namespace, name string) 
 	return pod.Annotations[util.OvnPodAnnotationName]
 }
 
-func newPodMeta(namespace, name string, additionalLabels map[string]string) metav1.ObjectMeta {
-	labels := map[string]string{
-		"name": name,
-	}
-	for k, v := range additionalLabels {
-		labels[k] = v
-	}
-	return metav1.ObjectMeta{
-		Name:      name,
-		UID:       types.UID(name),
-		Namespace: namespace,
-		Labels:    labels,
-	}
-}
-
-func newPodWithLabelsAllIPFamilies(namespace, name, node string, podIPs []string, additionalLabels map[string]string) *corev1.Pod {
-	podIPList := []corev1.PodIP{}
-	for _, podIP := range podIPs {
-		podIPList = append(podIPList, corev1.PodIP{IP: podIP})
-	}
-	return &corev1.Pod{
-		ObjectMeta: newPodMeta(namespace, name, additionalLabels),
-		Spec: corev1.PodSpec{
-			Containers: []corev1.Container{
-				{
-					Name:  "containerName",
-					Image: "containerImage",
-				},
-			},
-			NodeName: node,
-		},
-		Status: corev1.PodStatus{
-			Phase:  corev1.PodRunning,
-			PodIP:  podIPList[0].IP,
-			PodIPs: podIPList,
-		},
-	}
-}
-
-func newPodWithLabels(namespace, name, node, podIP string, additionalLabels map[string]string, hostIP ...string) *corev1.Pod {
-	podIPs := []corev1.PodIP{}
-	if podIP != "" {
-		podIPs = append(podIPs, corev1.PodIP{IP: podIP})
-	}
-	_hostIP := ""
-	if len(hostIP) > 0 {
-		_hostIP = hostIP[0]
-	}
-	return &corev1.Pod{
-		ObjectMeta: newPodMeta(namespace, name, additionalLabels),
-		Spec: corev1.PodSpec{
-			Containers: []corev1.Container{
-				{
-					Name:  "containerName",
-					Image: "containerImage",
-				},
-			},
-			NodeName:    node,
-			HostNetwork: false,
-		},
-		Status: corev1.PodStatus{
-			Phase:  corev1.PodRunning,
-			PodIP:  podIP,
-			PodIPs: podIPs,
-			HostIP: _hostIP,
-		},
-	}
-}
-
-func newPod(namespace, name, node, podIP string) *corev1.Pod {
-	podIPs := []corev1.PodIP{}
-	ips := strings.Split(podIP, " ")
-	if len(ips) > 0 {
-		podIP = ips[0]
-		for _, ip := range ips {
-			podIPs = append(podIPs, corev1.PodIP{IP: ip})
-		}
-	}
-	return &corev1.Pod{
-		ObjectMeta: newPodMeta(namespace, name, nil),
-		Spec: corev1.PodSpec{
-			Containers: []corev1.Container{
-				{
-					Name:  "containerName",
-					Image: "containerImage",
-				},
-			},
-			NodeName:    node,
-			HostNetwork: false,
-		},
-		Status: corev1.PodStatus{
-			Phase:  corev1.PodRunning,
-			PodIP:  podIP,
-			PodIPs: podIPs,
-			Conditions: []corev1.PodCondition{
-				{
-					Type:   corev1.PodReady,
-					Status: corev1.ConditionTrue,
-				},
-			},
-		},
-	}
-}
-
 func newNode(nodeName, nodeIPv4CIDR string) *corev1.Node {
 	return &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
@@ -550,7 +446,7 @@ func getExpectedDataPodsSwitchesPortGroup(netInfo util.NetInfo, pods []testPod, 
 	}
 	if namespacedPortGroup != "" {
 		// namespace port group is created
-		pgIDs := getNamespacePortGroupDbIDs(namespacedPortGroup, DefaultNetworkControllerName)
+		pgIDs := getNamespacePortGroupDbIDs(namespacedPortGroup, ovntypes.DefaultNetworkControllerName)
 		pg := libovsdbutil.BuildPortGroup(pgIDs, logicalSwitchPorts, nil)
 		pg.UUID = pg.Name + "-UUID"
 		data = append(data, pg)
@@ -600,7 +496,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 			app.Action = func(*cli.Context) error {
 				// this flag will create namespaced port group
 				config.OVNKubernetesFeature.EnableEgressFirewall = true
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *ovntest.NewNamespace("namespace1")
 				// Setup an unassigned pod, perform an update later on which assigns it.
 				t := newTPod(
 					"",
@@ -626,7 +522,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					},
 					&corev1.PodList{
 						Items: []corev1.Pod{
-							*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
+							*ovntest.NewPod(t.namespace, t.podName, t.nodeName, t.podIP),
 						},
 					},
 				)
@@ -659,7 +555,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				t.populateLogicalSwitchCache(fakeOvn)
 
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Update(context.TODO(),
-					newPod(t.namespace, t.podName, t.nodeName, t.podIP), metav1.UpdateOptions{})
+					ovntest.NewPod(t.namespace, t.podName, t.nodeName, t.podIP), metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				gomega.Eventually(func() string {
@@ -678,7 +574,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 		ginkgo.It("reconciles a new pod", func() {
 			app.Action = func(*cli.Context) error {
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *ovntest.NewNamespace("namespace1")
 				t := newTPod(
 					"node1",
 					"10.128.1.0/24",
@@ -716,7 +612,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(err).To(gomega.MatchError(apierrors.IsNotFound, "IsNotFound"))
 
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(),
-					newPod(t.namespace, t.podName, t.nodeName, t.podIP), metav1.CreateOptions{})
+					ovntest.NewPod(t.namespace, t.podName, t.nodeName, t.podIP), metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				gomega.Eventually(func() string {
@@ -733,7 +629,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 		ginkgo.It("allows allocation after pods are completed", func() {
 			app.Action = func(*cli.Context) error {
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *ovntest.NewNamespace("namespace1")
 				t := newTPod(
 					"node1",
 					"10.128.1.0/24",
@@ -770,7 +666,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
 				gomega.Expect(err).To(gomega.MatchError(apierrors.IsNotFound, "IsNotFound"))
 
-				myPod := newPod(t.namespace, t.podName, t.nodeName, t.podIP)
+				myPod := ovntest.NewPod(t.namespace, t.podName, t.nodeName, t.podIP)
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(),
 					myPod, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -799,7 +695,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				)
 
 				myPod2, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(),
-					newPod(t2.namespace, t2.podName, t2.nodeName, ""), metav1.CreateOptions{})
+					ovntest.NewPod(t2.namespace, t2.podName, t2.nodeName, ""), metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(func() string {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t2.namespace, t2.podName)
@@ -846,7 +742,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 		ginkgo.It("should not deallocate in-use and previously freed completed pods IP", func() {
 			app.Action = func(*cli.Context) error {
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *ovntest.NewNamespace("namespace1")
 				t := newTPod(
 					"node1",
 					"10.128.1.0/24",
@@ -883,7 +779,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
 				gomega.Expect(err).To(gomega.MatchError(apierrors.IsNotFound, "IsNotFound"))
 
-				myPod := newPod(t.namespace, t.podName, t.nodeName, t.podIP)
+				myPod := ovntest.NewPod(t.namespace, t.podName, t.nodeName, t.podIP)
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(),
 					myPod, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -912,7 +808,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				)
 
 				myPod2, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(),
-					newPod(t2.namespace, t2.podName, t2.nodeName, ""), metav1.CreateOptions{})
+					ovntest.NewPod(t2.namespace, t2.podName, t2.nodeName, ""), metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(func() string {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t2.namespace, t2.podName)
@@ -998,7 +894,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				)
 
 				myPod3, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(),
-					newPod(t3.namespace, t3.podName, t3.nodeName, t3.podIP), metav1.CreateOptions{})
+					ovntest.NewPod(t3.namespace, t3.podName, t3.nodeName, t3.podIP), metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(func() string {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t3.namespace, t3.podName)
@@ -1019,7 +915,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 		ginkgo.It("should not allocate a completed pod on start up", func() {
 			app.Action = func(*cli.Context) error {
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *ovntest.NewNamespace("namespace1")
 				t := newTPod(
 					"node1",
 					"10.128.1.0/24",
@@ -1030,7 +926,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					"0a:58:0a:80:01:03",
 					namespaceT.Name,
 				)
-				myPod := newPod(t.namespace, t.podName, t.nodeName, t.podIP)
+				myPod := ovntest.NewPod(t.namespace, t.podName, t.nodeName, t.podIP)
 				myPod.Status.Phase = corev1.PodSucceeded
 
 				fakeOvn.startWithDBSetup(initialDB,
@@ -1069,7 +965,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 		ginkgo.It("retryPod cache operations while adding a new pod", func() {
 			app.Action = func(*cli.Context) error {
 				config.Gateway.DisableSNATMultipleGWs = true
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *ovntest.NewNamespace("namespace1")
 				t := newTPod(
 					"node1",
 					"10.128.1.0/24",
@@ -1140,7 +1036,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 		ginkgo.It("correctly retries a failure while adding a pod", func() {
 			app.Action = func(*cli.Context) error {
-				namespace1 := *newNamespace("namespace1")
+				namespace1 := *ovntest.NewNamespace("namespace1")
 				podTest := newTPod(
 					"node1",
 					"10.128.1.0/24",
@@ -1151,7 +1047,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					"0a:58:0a:80:01:03",
 					namespace1.Name,
 				)
-				pod := newPod(podTest.namespace, podTest.podName, podTest.nodeName, podTest.podIP)
+				pod := ovntest.NewPod(podTest.namespace, podTest.podName, podTest.nodeName, podTest.podIP)
 
 				key, err := retry.GetResourceKey(pod)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1217,7 +1113,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 		ginkgo.It("correctly retries a failure while deleting a pod", func() {
 			app.Action = func(*cli.Context) error {
-				namespace1 := *newNamespace("namespace1")
+				namespace1 := *ovntest.NewNamespace("namespace1")
 				podTest := newTPod(
 					"node1",
 					"10.128.1.0/24",
@@ -1228,7 +1124,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					"0a:58:0a:80:01:03",
 					namespace1.Name,
 				)
-				pod := newPod(podTest.namespace, podTest.podName, podTest.nodeName, podTest.podIP)
+				pod := ovntest.NewPod(podTest.namespace, podTest.podName, podTest.nodeName, podTest.podIP)
 				expectedData := []libovsdbtest.TestData{getDefaultNetExpectedPodsAndSwitches([]testPod{podTest}, []string{"node1"})}
 				key, err := retry.GetResourceKey(pod)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1294,7 +1190,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 		ginkgo.It("doesn't stop retrying adding a pod after failing n times", func() {
 			app.Action = func(*cli.Context) error {
-				namespace1 := *newNamespace("namespace1")
+				namespace1 := *ovntest.NewNamespace("namespace1")
 				podTest := newTPod(
 					"node1",
 					"10.128.1.0/24",
@@ -1305,7 +1201,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					"0a:58:0a:80:01:03",
 					namespace1.Name,
 				)
-				pod := newPod(podTest.namespace, podTest.podName,
+				pod := ovntest.NewPod(podTest.namespace, podTest.podName,
 					podTest.nodeName, podTest.podIP)
 
 				key, err := retry.GetResourceKey(pod)
@@ -1407,7 +1303,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 		ginkgo.It("doesn't stop retrying deleting a pod after failing n times", func() {
 			app.Action = func(*cli.Context) error {
-				namespace1 := *newNamespace("namespace1")
+				namespace1 := *ovntest.NewNamespace("namespace1")
 				podTest := newTPod(
 					"node1",
 					"10.128.1.0/24",
@@ -1418,7 +1314,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					"0a:58:0a:80:01:03",
 					namespace1.Name,
 				)
-				pod := newPod(podTest.namespace, podTest.podName, podTest.nodeName, podTest.podIP)
+				pod := ovntest.NewPod(podTest.namespace, podTest.podName, podTest.nodeName, podTest.podIP)
 				expectedData := []libovsdbtest.TestData{getDefaultNetExpectedPodsAndSwitches(
 					[]testPod{podTest},
 					[]string{"node1"})}
@@ -1521,7 +1417,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 		ginkgo.It("correctly remove a LSP from a pod that has stale nodeName annotation", func() {
 			app.Action = func(*cli.Context) error {
-				namespace1 := *newNamespace("namespace1")
+				namespace1 := *ovntest.NewNamespace("namespace1")
 				podTest := newTPod(
 					"node1",
 					"10.128.1.0/24",
@@ -1532,7 +1428,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					"0a:58:0a:80:01:03",
 					namespace1.Name,
 				)
-				pod := newPod(podTest.namespace, podTest.podName, podTest.nodeName, podTest.podIP)
+				pod := ovntest.NewPod(podTest.namespace, podTest.podName, podTest.nodeName, podTest.podIP)
 				expectedData := []libovsdbtest.TestData{getDefaultNetExpectedPodsAndSwitches([]testPod{podTest}, []string{"node1"})}
 				key, err := retry.GetResourceKey(pod)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1607,7 +1503,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 		ginkgo.It("remove a LSP from a pod that has no OVN annotations", func() {
 			app.Action = func(*cli.Context) error {
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *ovntest.NewNamespace("namespace1")
 				t := newTPod(
 					"node1",
 					"10.128.1.0/24",
@@ -1618,7 +1514,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					"0a:58:0a:80:01:03",
 					namespaceT.Name,
 				)
-				pod := newPod(t.namespace, t.podName, t.nodeName, t.podIP)
+				pod := ovntest.NewPod(t.namespace, t.podName, t.nodeName, t.podIP)
 				fakeOvn.startWithDBSetup(initialDB,
 					&corev1.NamespaceList{
 						Items: []corev1.Namespace{
@@ -1653,7 +1549,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 		ginkgo.It("reconciles a deleted pod", func() {
 			app.Action = func(*cli.Context) error {
 
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *ovntest.NewNamespace("namespace1")
 				// Setup an assigned pod
 				t := newTPod(
 					"node1",
@@ -1679,7 +1575,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					},
 					&corev1.PodList{
 						Items: []corev1.Pod{
-							*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
+							*ovntest.NewPod(t.namespace, t.podName, t.nodeName, t.podIP),
 						},
 					},
 				)
@@ -1713,7 +1609,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 		ginkgo.It("retries a failed pod Add on Update", func() {
 			app.Action = func(*cli.Context) error {
 
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *ovntest.NewNamespace("namespace1")
 				// Setup an unassigned pod, perform an update later on which assigns it.
 				t := newTPod(
 					"node1",
@@ -1739,7 +1635,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					},
 					&corev1.PodList{
 						Items: []corev1.Pod{
-							*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
+							*ovntest.NewPod(t.namespace, t.podName, t.nodeName, t.podIP),
 						},
 					},
 				)
@@ -1779,7 +1675,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 		ginkgo.It("pod Add should succeed even when namespace doesn't yet exist", func() {
 			app.Action = func(*cli.Context) error {
 
-				namespaceT := newNamespace("namespace1")
+				namespaceT := ovntest.NewNamespace("namespace1")
 				t := newTPod(
 					"node1",
 					"10.128.1.0/24",
@@ -1807,7 +1703,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 				// Add pod before namespace; pod will be annotated
 				// but namespace address set will not exist
-				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(), newPod(t.namespace, t.podName, t.nodeName, t.podIP), metav1.CreateOptions{})
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(), ovntest.NewPod(t.namespace, t.podName, t.nodeName, t.podIP), metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(podJSON))
 
@@ -1829,7 +1725,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 		ginkgo.It("reconciles a new pod", func() {
 			app.Action = func(*cli.Context) error {
 
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *ovntest.NewNamespace("namespace1")
 				t := newTPod(
 					"node1",
 					"10.128.1.0/24",
@@ -1854,7 +1750,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					},
 					&corev1.PodList{
 						Items: []corev1.Pod{
-							*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
+							*ovntest.NewPod(t.namespace, t.podName, t.nodeName, t.podIP),
 						},
 					},
 				)
@@ -1888,7 +1784,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 		ginkgo.It("reconciles an existing pod without an existing logical switch port", func() {
 			app.Action = func(*cli.Context) error {
 
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *ovntest.NewNamespace("namespace1")
 				t := newTPod(
 					"node1",
 					"10.128.1.0/24",
@@ -1899,7 +1795,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					"0a:58:0a:80:01:03",
 					namespaceT.Name,
 				)
-				pod := newPod(t.namespace, t.podName, t.nodeName, t.podIP)
+				pod := ovntest.NewPod(t.namespace, t.podName, t.nodeName, t.podIP)
 				setPodAnnotations(pod, t)
 				fakeOvn.startWithDBSetup(initialDB,
 					&corev1.NamespaceList{
@@ -1945,7 +1841,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 		ginkgo.It("reconciles an existing logical switch port without an existing pod", func() {
 			app.Action = func(*cli.Context) error {
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *ovntest.NewNamespace("namespace1")
 				// create ovsdb with no pod
 				initialDB = libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
@@ -2017,7 +1913,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 		ginkgo.It("reconciles an existing pod with an existing logical switch port", func() {
 			app.Action = func(*cli.Context) error {
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *ovntest.NewNamespace("namespace1")
 				// use 3 pods for different test options
 				t1 := newTPod(
 					"node1",
@@ -2117,11 +2013,11 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				// update TestPod to check nbdb lsp later
 				t2.noIfaceIdVer = true
 
-				pod1 := newPod(t1.namespace, t1.podName, t1.nodeName, t1.podIP)
+				pod1 := ovntest.NewPod(t1.namespace, t1.podName, t1.nodeName, t1.podIP)
 				setPodAnnotations(pod1, t1)
-				pod2 := newPod(t2.namespace, t2.podName, t2.nodeName, t2.podIP)
+				pod2 := ovntest.NewPod(t2.namespace, t2.podName, t2.nodeName, t2.podIP)
 				setPodAnnotations(pod2, t2)
-				pod3 := newPod(t3.namespace, t3.podName, t3.nodeName, t3.podIP)
+				pod3 := ovntest.NewPod(t3.namespace, t3.podName, t3.nodeName, t3.podIP)
 				setPodAnnotations(pod3, t3)
 				fakeOvn.startWithDBSetup(initialDB,
 					&corev1.NamespaceList{
@@ -2243,7 +2139,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 		ginkgo.It("Negative test: fails to add existing pod with an existing logical switch port on wrong node", func() {
 			app.Action = func(*cli.Context) error {
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *ovntest.NewNamespace("namespace1")
 				// use 2 pods for different test options
 				t1 := newTPod(
 					"node1",
@@ -2285,7 +2181,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					},
 				}
 
-				pod1 := newPod(t1.namespace, t1.podName, t1.nodeName, t1.podIP)
+				pod1 := ovntest.NewPod(t1.namespace, t1.podName, t1.nodeName, t1.podIP)
 				setPodAnnotations(pod1, t1)
 				fakeOvn.startWithDBSetup(initialDB,
 					&corev1.NamespaceList{
@@ -2327,7 +2223,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 		ginkgo.It("reconciles a terminating pod with no node", func() {
 			app.Action = func(*cli.Context) error {
 
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *ovntest.NewNamespace("namespace1")
 				t := newTPod(
 					"node1",
 					"10.128.1.0/24",
@@ -2339,7 +2235,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					namespaceT.Name,
 				)
 
-				p := newPod(t.namespace, t.podName, t.nodeName, t.podIP)
+				p := ovntest.NewPod(t.namespace, t.podName, t.nodeName, t.podIP)
 				now := metav1.Now()
 				p.SetDeletionTimestamp(&now)
 
@@ -2387,7 +2283,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 		ginkgo.It("deletes an outdated hybrid overlay subnet route in dual stack configuration", func() {
 			app.Action = func(*cli.Context) error {
 
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *ovntest.NewNamespace("namespace1")
 				t := newTPod(
 					"node1",
 					"10.128.1.0/24 fd11::/64",
@@ -2412,7 +2308,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				)
 
 				// set annotattions on pod with the oudated HO route
-				pod := newPod(t.namespace, t.podName, t.nodeName, t.podIP)
+				pod := ovntest.NewPod(t.namespace, t.podName, t.nodeName, t.podIP)
 				setPodAnnotations(pod, t)
 
 				fakeOvn.startWithDBSetup(initialDB,
@@ -2460,7 +2356,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 		ginkgo.It("won't release a completed pod IP if a running pod has the same IP", func() {
 			app.Action = func(*cli.Context) error {
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *ovntest.NewNamespace("namespace1")
 
 				completedTPod := newTPod(
 					"node1",
@@ -2472,7 +2368,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					"0a:58:0a:80:01:03",
 					namespaceT.Name,
 				)
-				completedPod := newPod(completedTPod.namespace, completedTPod.podName, completedTPod.nodeName, completedTPod.podIP)
+				completedPod := ovntest.NewPod(completedTPod.namespace, completedTPod.podName, completedTPod.nodeName, completedTPod.podIP)
 				setPodAnnotations(completedPod, completedTPod)
 				completedPod.UID = types.UID(completedPod.ObjectMeta.Name)
 				completedPod.Status.Phase = corev1.PodSucceeded
@@ -2487,7 +2383,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					"0a:58:0a:80:01:03",
 					namespaceT.Name,
 				)
-				runningPod := newPod(runningTPod.namespace, runningTPod.podName, runningTPod.nodeName, runningTPod.podIP)
+				runningPod := ovntest.NewPod(runningTPod.namespace, runningTPod.podName, runningTPod.nodeName, runningTPod.podIP)
 				setPodAnnotations(runningPod, runningTPod)
 				runningPod.UID = types.UID(runningPod.ObjectMeta.Name)
 
@@ -2529,7 +2425,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 		ginkgo.It("should handle a scheduled or failed remote pod with no IPs annotated", func() {
 			app.Action = func(*cli.Context) error {
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *ovntest.NewNamespace("namespace1")
 				t := newTPod(
 					"node1",
 					"10.128.1.0/24",
@@ -2540,7 +2436,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					"0a:58:0a:80:01:03",
 					namespaceT.Name,
 				)
-				myPod := newPod(t.namespace, t.podName, t.nodeName, t.podIP)
+				myPod := ovntest.NewPod(t.namespace, t.podName, t.nodeName, t.podIP)
 
 				// testing how a scheduled non-annotated pod is handled is
 				// tricky, let's settle with a failed pod which should be
@@ -2587,9 +2483,44 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
+
+		ginkgo.It("falls back to node zone lookup when localZoneNodes misses", func() {
+			app.Action = func(*cli.Context) error {
+				config.OVNKubernetesFeature.EnableInterconnect = true
+				localNode := newNode(node1Name, "192.168.126.202/24")
+				localNode.Annotations[util.OvnNodeZoneName] = ovntypes.OvnDefaultZone
+				remoteNode := newNode(node2Name, "192.168.126.203/24")
+				remoteNode.Annotations[util.OvnNodeZoneName] = "remote-zone"
+
+				fakeOvn.startWithDBSetup(initialDB,
+					&corev1.NodeList{
+						Items: []corev1.Node{
+							*localNode,
+							*remoteNode,
+						},
+					},
+				)
+
+				// Simulate a startup window where node cache entries are not yet populated.
+				fakeOvn.controller.localZoneNodes = &sync.Map{}
+
+				localPod := ovntest.NewPod("ns1", "local-pod", node1Name, "10.128.1.3")
+				remotePod := ovntest.NewPod("ns1", "remote-pod", node2Name, "10.128.1.4")
+				unscheduledPod := ovntest.NewPod("ns1", "unscheduled-pod", "", "")
+
+				gomega.Expect(fakeOvn.controller.isPodScheduledinLocalZone(localPod)).To(gomega.BeTrue())
+				gomega.Expect(fakeOvn.controller.isPodScheduledinLocalZone(remotePod)).To(gomega.BeFalse())
+				gomega.Expect(fakeOvn.controller.isPodScheduledinLocalZone(unscheduledPod)).To(gomega.BeFalse())
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
 		ginkgo.It("should correctly handle a pod running on no node", func() {
 			app.Action = func(*cli.Context) error {
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *ovntest.NewNamespace("namespace1")
 				t := newTPod(
 					"node1",
 					"10.128.1.0/24",
@@ -2600,7 +2531,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					"0a:58:0a:80:01:03",
 					namespaceT.Name,
 				)
-				myPod := newPod(t.namespace, t.podName, t.nodeName, t.podIP)
+				myPod := ovntest.NewPod(t.namespace, t.podName, t.nodeName, t.podIP)
 				myPod.Status.Phase = corev1.PodRunning
 				setPodAnnotations(myPod, t)
 				initialDB = libovsdbtest.TestSetup{
@@ -2633,8 +2564,8 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 			app.Action = func(*cli.Context) error {
 				testNs := "namespace1"
 				testPodIP := "10.128.1.3"
-				namespaceT := *newNamespace(testNs)
-				myPod := newPod(testNs, "myPod", node2Name, testPodIP)
+				namespaceT := *ovntest.NewNamespace(testNs)
+				myPod := ovntest.NewPod(testNs, "myPod", node2Name, testPodIP)
 				myPod.Status.Phase = corev1.PodRunning
 				initialDB = libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{},

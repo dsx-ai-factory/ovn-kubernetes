@@ -2321,6 +2321,7 @@ istio-ambient-snat-ipv6=fd16:9254:7127:1337::2
 			NoOverlay.OutboundSNAT = types.NoOverlaySNATEnabled
 			NoOverlay.Routing = NoOverlayRoutingManaged
 			ManagedBGP.Topology = ManagedBGPTopologyFullMesh
+			ManagedBGP.FRRNamespace = "frr-k8s-system"
 			err = validateNoOverlayConfig()
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 
@@ -2336,6 +2337,7 @@ istio-ambient-snat-ipv6=fd16:9254:7127:1337::2
 			NoOverlay.OutboundSNAT = ""
 			NoOverlay.Routing = NoOverlayRoutingManaged
 			ManagedBGP.Topology = ManagedBGPTopologyFullMesh
+			ManagedBGP.FRRNamespace = "frr-k8s-system"
 			err := validateNoOverlayConfig()
 			gomega.Expect(err).To(gomega.HaveOccurred())
 			gomega.Expect(err.Error()).To(gomega.ContainSubstring("outbound-snat is required"))
@@ -2345,6 +2347,7 @@ istio-ambient-snat-ipv6=fd16:9254:7127:1337::2
 			Default.Transport = types.NetworkTransportNoOverlay
 			NoOverlay.Routing = NoOverlayRoutingManaged
 			ManagedBGP.Topology = ManagedBGPTopologyFullMesh
+			ManagedBGP.FRRNamespace = "frr-k8s-system"
 
 			// Test valid enable
 			NoOverlay.OutboundSNAT = types.NoOverlaySNATEnabled
@@ -2379,6 +2382,7 @@ istio-ambient-snat-ipv6=fd16:9254:7127:1337::2
 			// Test valid managed (requires topology)
 			NoOverlay.Routing = NoOverlayRoutingManaged
 			ManagedBGP.Topology = ManagedBGPTopologyFullMesh
+			ManagedBGP.FRRNamespace = "frr-k8s-system"
 			err := validateNoOverlayConfig()
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 
@@ -2432,6 +2436,7 @@ istio-ambient-snat-ipv6=fd16:9254:7127:1337::2
 
 			// Test valid full-mesh
 			ManagedBGP.Topology = ManagedBGPTopologyFullMesh
+			ManagedBGP.FRRNamespace = "frr-k8s-system"
 			err := validateNoOverlayConfig()
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 
@@ -2462,14 +2467,16 @@ istio-ambient-snat-ipv6=fd16:9254:7127:1337::2
 		It("parses BGP config from file with all fields set", func() {
 			fileConfig := config{
 				ManagedBGP: ManagedBGPConfig{
-					Topology: ManagedBGPTopologyFullMesh,
-					ASNumber: 64500,
+					Topology:     ManagedBGPTopologyFullMesh,
+					ASNumber:     64500,
+					FRRNamespace: "custom-frr-namespace",
 				},
 			}
 			err := buildManagedBGPConfig(&fileConfig)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(ManagedBGP.Topology).To(gomega.Equal(ManagedBGPTopologyFullMesh))
 			gomega.Expect(ManagedBGP.ASNumber).To(gomega.Equal(uint32(64500)))
+			gomega.Expect(ManagedBGP.FRRNamespace).To(gomega.Equal("custom-frr-namespace"))
 		})
 
 		It("handles partial BGP config in file", func() {
@@ -2477,6 +2484,7 @@ istio-ambient-snat-ipv6=fd16:9254:7127:1337::2
 				ManagedBGP: savedManagedBGP,
 			}
 			fileConfig.ManagedBGP.Topology = ManagedBGPTopologyFullMesh
+			fileConfig.ManagedBGP.FRRNamespace = "frr-k8s-system"
 
 			err := buildManagedBGPConfig(&fileConfig)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
@@ -2493,6 +2501,7 @@ istio-ambient-snat-ipv6=fd16:9254:7127:1337::2
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			// Should retain default values without panicking
 			gomega.Expect(ManagedBGP.ASNumber).To(gomega.Equal(uint32(64512))) // default value
+			gomega.Expect(ManagedBGP.FRRNamespace).To(gomega.Equal(""))        // no default, set by templates
 		})
 
 		It("validates reserved AS number 0", func() {

@@ -163,17 +163,17 @@ func (_m *Interface) PatchNode(old *corev1.Node, new *corev1.Node) error {
 	return r0
 }
 
-// RemoveTaintFromNode provides a mock function with given fields: nodeName, taint
-func (_m *Interface) RemoveTaintFromNode(nodeName string, taint *corev1.Taint) error {
-	ret := _m.Called(nodeName, taint)
+// PatchPodStatusAnnotations provides a mock function with given fields: oldPod, newPod
+func (_m *Interface) PatchPodStatusAnnotations(oldPod *corev1.Pod, newPod *corev1.Pod) error {
+	ret := _m.Called(oldPod, newPod)
 
 	if len(ret) == 0 {
-		panic("no return value specified for RemoveTaintFromNode")
+		panic("no return value specified for PatchPodStatusAnnotations")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, *corev1.Taint) error); ok {
-		r0 = rf(nodeName, taint)
+	if rf, ok := ret.Get(0).(func(*corev1.Pod, *corev1.Pod) error); ok {
+		r0 = rf(oldPod, newPod)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -210,6 +210,24 @@ func (_m *Interface) SetAnnotationsOnNode(nodeName string, annotations map[strin
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, map[string]interface{}) error); ok {
 		r0 = rf(nodeName, annotations)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// SetAnnotationsOnNodeWithFieldManager provides a mock function with given fields: nodeName, annotations, fieldManager
+func (_m *Interface) SetAnnotationsOnNodeWithFieldManager(nodeName string, annotations map[string]interface{}, fieldManager string) error {
+	ret := _m.Called(nodeName, annotations, fieldManager)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetAnnotationsOnNodeWithFieldManager")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, map[string]interface{}, string) error); ok {
+		r0 = rf(nodeName, annotations, fieldManager)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -289,24 +307,6 @@ func (_m *Interface) SetLabelsOnPod(pod *corev1.Pod, labels map[string]string) e
 	return r0
 }
 
-// SetTaintOnNode provides a mock function with given fields: nodeName, taint
-func (_m *Interface) SetTaintOnNode(nodeName string, taint *corev1.Taint) error {
-	ret := _m.Called(nodeName, taint)
-
-	if len(ret) == 0 {
-		panic("no return value specified for SetTaintOnNode")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(string, *corev1.Taint) error); ok {
-		r0 = rf(nodeName, taint)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
 // UpdateNodeStatus provides a mock function with given fields: node
 func (_m *Interface) UpdateNodeStatus(node *corev1.Node) error {
 	ret := _m.Called(node)
@@ -318,24 +318,6 @@ func (_m *Interface) UpdateNodeStatus(node *corev1.Node) error {
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*corev1.Node) error); ok {
 		r0 = rf(node)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// UpdatePodStatus provides a mock function with given fields: pod
-func (_m *Interface) UpdatePodStatus(pod *corev1.Pod) error {
-	ret := _m.Called(pod)
-
-	if len(ret) == 0 {
-		panic("no return value specified for UpdatePodStatus")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(*corev1.Pod) error); ok {
-		r0 = rf(pod)
 	} else {
 		r0 = ret.Error(0)
 	}
