@@ -1242,8 +1242,7 @@ func wrappedTestFramework(basename string) *framework.Framework {
 
 func newPrivelegedTestFramework(basename string) *framework.Framework {
 	f := framework.NewDefaultFramework(basename)
-	f.NamespacePodSecurityEnforceLevel = admissionapi.LevelPrivileged
-	f.NamespacePodSecurityWarnLevel = admissionapi.LevelPrivileged
+	f.NamespacePodSecurityLevel = admissionapi.LevelPrivileged
 	f.DumpAllNamespaceInfo = func(ctx context.Context, f *framework.Framework, namespace string) {
 		debug.DumpAllNamespaceInfo(context.TODO(), f.ClientSet, namespace)
 	}
@@ -1645,12 +1644,21 @@ func matchIPv6StringFamily(ipStrings []string) (string, error) {
 	return util.MatchIPStringFamily(true /*ipv6*/, ipStrings)
 }
 
-func matchCIDRStringsByIPFamily(cidrs []string, families ...utilnet.IPFamily) []string {
+func matchCIDRStringsByIPFamilySet(cidrs []string, ipFamilySet sets.Set[utilnet.IPFamily]) []string {
 	var r []string
-	familySet := sets.New(families...)
 	for _, cidr := range cidrs {
-		if familySet.Has(utilnet.IPFamilyOfCIDRString(cidr)) {
+		if ipFamilySet.Has(utilnet.IPFamilyOfCIDRString(cidr)) {
 			r = append(r, cidr)
+		}
+	}
+	return r
+}
+
+func matchIPStringsByIPFamilySet(ips []string, ipFamilySet sets.Set[utilnet.IPFamily]) []string {
+	var r []string
+	for _, ip := range ips {
+		if ipFamilySet.Has(utilnet.IPFamilyOfString(ip)) {
+			r = append(r, ip)
 		}
 	}
 	return r

@@ -38,6 +38,7 @@ func (oc *BaseLayer2UserDefinedNetworkController) stop() {
 		return
 	}
 	klog.Infof("Stop secondary %s network controller of network %s", oc.TopologyType(), oc.GetNetworkName())
+	oc.DeregisterNodeHandler()
 	close(oc.stopChan)
 	oc.stopChan = nil
 	oc.cancelableCtx.Cancel()
@@ -114,7 +115,7 @@ func (oc *BaseLayer2UserDefinedNetworkController) run() error {
 	start := time.Now()
 
 	// WatchNamespaces() should be started first because it has no other
-	// dependencies, and WatchNodes() depends on it
+	// dependencies.
 	if err := oc.WatchNamespaces(); err != nil {
 		return err
 	}
@@ -134,10 +135,6 @@ func (oc *BaseLayer2UserDefinedNetworkController) run() error {
 			return err
 		}
 		oc.ipreservController = ipresvController
-	}
-
-	if err := oc.WatchNodes(); err != nil {
-		return err
 	}
 
 	// when on IC, it will be the NetworkController that returns the IPAMClaims
@@ -307,6 +304,23 @@ func (oc *BaseLayer2UserDefinedNetworkController) initializeLogicalSwitch(switch
 		return nil, fmt.Errorf("failed to create logical switch %+v: %v", logicalSwitch, err)
 	}
 
+	// Add the MACVRF port to ClusterRtrPortGroupNameBase so the
+	// higher-priority AllowInterNode multicast ACL overrides the
+	// default deny multicast ACL and permits multicast traffic
+	// to/from the EVPN fabric.
+	if oc.multicastSupport && oc.Transport() == types.NetworkTransportEVPN {
+		for _, lsp := range lsps {
+			if lsp.Name == util.GetMACVRFPortName(switchName) {
+				ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops,
+					oc.getClusterPortGroupName(types.ClusterRtrPortGroupNameBase), lsp.UUID)
+				if err != nil {
+					return nil, fmt.Errorf("failed to create ops to add MACVRF port to router port group: %w", err)
+				}
+				break
+			}
+		}
+	}
+
 	_, err = libovsdbops.TransactAndCheckAndSetUUIDs(oc.nbClient, lsps, ops)
 	if err != nil {
 		return nil, fmt.Errorf("failed to transact logical switch operations: %w", err)
@@ -427,7 +441,7 @@ func getDenyARPAndNSOnMACVRF(controllerName, macvrfportName string, nodeLRPMAC n
 			),
 			types.DefaultDenyPriority,
 			fmt.Sprintf(
-				"outport==%q && eth.dst==%s && arp & arp.op==1 && arp.tpa==%s",
+				"outport==%q && eth.dst==%s && arp && arp.op==1 && arp.tpa==%s",
 				macvrfportName,
 				nodeLRPMAC.String(),
 				gwIfAddrv4.IP.String(),
@@ -452,7 +466,7 @@ func getDenyARPAndNSOnMACVRF(controllerName, macvrfportName string, nodeLRPMAC n
 				"outport==%q && eth.dst==%s && nd && icmp.type==135 && nd.target==%s",
 				macvrfportName,
 				nodeLRPMAC.String(),
-				gwIfAddrv4.IP.String(),
+				gwIfAddrv6.IP.String(),
 			),
 			nbdb.ACLActionDrop,
 			nil,

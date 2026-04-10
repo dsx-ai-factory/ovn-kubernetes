@@ -235,9 +235,7 @@ func SetEventQueueSize(newEventQueueSize uint32) {
 }
 
 // types for dynamic handlers created when adding a network policy
-type addressSetNamespaceAndPodSelector struct{}
 type peerNamespaceSelector struct{}
-type addressSetPodSelector struct{}
 type localPodSelector struct{}
 
 // types for handlers related to egress IP
@@ -254,39 +252,37 @@ type serviceForFakeNodePortWatcher struct{} // only for unit tests
 
 var (
 	// Resource types used in ovnk master
-	PodType                               reflect.Type = reflect.TypeOf(&corev1.Pod{})
-	ServiceType                           reflect.Type = reflect.TypeOf(&corev1.Service{})
-	EndpointSliceType                     reflect.Type = reflect.TypeOf(&discovery.EndpointSlice{})
-	PolicyType                            reflect.Type = reflect.TypeOf(&knet.NetworkPolicy{})
-	NamespaceType                         reflect.Type = reflect.TypeOf(&corev1.Namespace{})
-	NodeType                              reflect.Type = reflect.TypeOf(&corev1.Node{})
-	ConfigMapType                         reflect.Type = reflect.TypeOf(&corev1.ConfigMap{})
-	SecretType                            reflect.Type = reflect.TypeOf(&corev1.Secret{})
-	EgressFirewallType                    reflect.Type = reflect.TypeOf(&egressfirewallapi.EgressFirewall{})
-	EgressIPType                          reflect.Type = reflect.TypeOf(&egressipapi.EgressIP{})
-	EgressIPNamespaceType                 reflect.Type = reflect.TypeOf(&egressIPNamespace{})
-	EgressIPPodType                       reflect.Type = reflect.TypeOf(&egressIPPod{})
-	EgressNodeType                        reflect.Type = reflect.TypeOf(&egressNode{})
-	CloudPrivateIPConfigType              reflect.Type = reflect.TypeOf(&ocpcloudnetworkapi.CloudPrivateIPConfig{})
-	EgressQoSType                         reflect.Type = reflect.TypeOf(&egressqosapi.EgressQoS{})
-	EgressServiceType                     reflect.Type = reflect.TypeOf(&egressserviceapi.EgressService{})
-	AdminNetworkPolicyType                reflect.Type = reflect.TypeOf(&anpapi.AdminNetworkPolicy{})
-	BaselineAdminNetworkPolicyType        reflect.Type = reflect.TypeOf(&anpapi.BaselineAdminNetworkPolicy{})
-	AddressSetNamespaceAndPodSelectorType reflect.Type = reflect.TypeOf(&addressSetNamespaceAndPodSelector{})
-	PeerNamespaceSelectorType             reflect.Type = reflect.TypeOf(&peerNamespaceSelector{})
-	AddressSetPodSelectorType             reflect.Type = reflect.TypeOf(&addressSetPodSelector{})
-	LocalPodSelectorType                  reflect.Type = reflect.TypeOf(&localPodSelector{})
-	AdminPBRType                          reflect.Type = reflect.TypeOf(&adminpbrapi.AdminPolicyBasedRoute{})
-	VirtualIPType                         reflect.Type = reflect.TypeOf(&virtualipapi.VirtualIP{})
-	NetworkAttachmentDefinitionType       reflect.Type = reflect.TypeOf(&nadapi.NetworkAttachmentDefinition{})
-	MultiNetworkPolicyType                reflect.Type = reflect.TypeOf(&mnpapi.MultiNetworkPolicy{})
-	IPReservationType                     reflect.Type = reflect.TypeOf(&ipreservationapi.IPReservation{})
-	PortMirrorType                        reflect.Type = reflect.TypeOf(&portmirrorapi.PortMirror{})
-	IPAMClaimsType                        reflect.Type = reflect.TypeOf(&ipamclaimsapi.IPAMClaim{})
-	UserDefinedNetworkType                reflect.Type = reflect.TypeOf(&userdefinednetworkapi.UserDefinedNetwork{})
-	ClusterUserDefinedNetworkType         reflect.Type = reflect.TypeOf(&userdefinednetworkapi.ClusterUserDefinedNetwork{})
-	NetworkQoSType                        reflect.Type = reflect.TypeOf(&networkqosapi.NetworkQoS{})
-	ClusterNetworkConnectType             reflect.Type = reflect.TypeOf(&networkconnectapi.ClusterNetworkConnect{})
+	PodType                         reflect.Type = reflect.TypeOf(&corev1.Pod{})
+	ServiceType                     reflect.Type = reflect.TypeOf(&corev1.Service{})
+	EndpointSliceType               reflect.Type = reflect.TypeOf(&discovery.EndpointSlice{})
+	PolicyType                      reflect.Type = reflect.TypeOf(&knet.NetworkPolicy{})
+	NamespaceType                   reflect.Type = reflect.TypeOf(&corev1.Namespace{})
+	NodeType                        reflect.Type = reflect.TypeOf(&corev1.Node{})
+	ConfigMapType                   reflect.Type = reflect.TypeOf(&corev1.ConfigMap{})
+	SecretType                      reflect.Type = reflect.TypeOf(&corev1.Secret{})
+	EgressFirewallType              reflect.Type = reflect.TypeOf(&egressfirewallapi.EgressFirewall{})
+	EgressIPType                    reflect.Type = reflect.TypeOf(&egressipapi.EgressIP{})
+	EgressIPNamespaceType           reflect.Type = reflect.TypeOf(&egressIPNamespace{})
+	EgressIPPodType                 reflect.Type = reflect.TypeOf(&egressIPPod{})
+	EgressNodeType                  reflect.Type = reflect.TypeOf(&egressNode{})
+	CloudPrivateIPConfigType        reflect.Type = reflect.TypeOf(&ocpcloudnetworkapi.CloudPrivateIPConfig{})
+	EgressQoSType                   reflect.Type = reflect.TypeOf(&egressqosapi.EgressQoS{})
+	EgressServiceType               reflect.Type = reflect.TypeOf(&egressserviceapi.EgressService{})
+	AdminNetworkPolicyType          reflect.Type = reflect.TypeOf(&anpapi.AdminNetworkPolicy{})
+	BaselineAdminNetworkPolicyType  reflect.Type = reflect.TypeOf(&anpapi.BaselineAdminNetworkPolicy{})
+	PeerNamespaceSelectorType       reflect.Type = reflect.TypeOf(&peerNamespaceSelector{})
+	LocalPodSelectorType            reflect.Type = reflect.TypeOf(&localPodSelector{})
+	AdminPBRType                    reflect.Type = reflect.TypeOf(&adminpbrapi.AdminPolicyBasedRoute{})
+	VirtualIPType                   reflect.Type = reflect.TypeOf(&virtualipapi.VirtualIP{})
+	NetworkAttachmentDefinitionType reflect.Type = reflect.TypeOf(&nadapi.NetworkAttachmentDefinition{})
+	MultiNetworkPolicyType          reflect.Type = reflect.TypeOf(&mnpapi.MultiNetworkPolicy{})
+	IPReservationType               reflect.Type = reflect.TypeOf(&ipreservationapi.IPReservation{})
+	PortMirrorType                  reflect.Type = reflect.TypeOf(&portmirrorapi.PortMirror{})
+	IPAMClaimsType                  reflect.Type = reflect.TypeOf(&ipamclaimsapi.IPAMClaim{})
+	UserDefinedNetworkType          reflect.Type = reflect.TypeOf(&userdefinednetworkapi.UserDefinedNetwork{})
+	ClusterUserDefinedNetworkType   reflect.Type = reflect.TypeOf(&userdefinednetworkapi.ClusterUserDefinedNetwork{})
+	NetworkQoSType                  reflect.Type = reflect.TypeOf(&networkqosapi.NetworkQoS{})
+	ClusterNetworkConnectType       reflect.Type = reflect.TypeOf(&networkconnectapi.ClusterNetworkConnect{})
 	// Resource types used in ovnk node
 	NamespaceExGwType                         reflect.Type = reflect.TypeOf(&namespaceExGw{})
 	EndpointSliceForStaleConntrackRemovalType reflect.Type = reflect.TypeOf(&endpointSliceForStaleConntrackRemoval{})
@@ -338,12 +334,42 @@ func informerObjectTrim(obj interface{}) (interface{}, error) {
 		accessor.SetManagedFields(nil)
 	}
 	if pod, ok := obj.(*corev1.Pod); ok {
+		// OVN-K does not consume pod volumes from informer cache.
 		pod.Spec.Volumes = []corev1.Volume{}
+		// Scheduling-only pod fields are not read from the informer cache.
+		pod.Spec.Tolerations = nil
+		pod.Spec.Affinity = nil
+		pod.Spec.NodeSelector = nil
+		pod.OwnerReferences = nil
+		// OVN-K only walks pod containers for named ports, so trim the per-container
+		// runtime and resource payload that is not read from the informer cache.
 		for i := range pod.Spec.Containers {
 			pod.Spec.Containers[i].Command = nil
 			pod.Spec.Containers[i].Args = nil
 			pod.Spec.Containers[i].Env = nil
+			pod.Spec.Containers[i].EnvFrom = nil
 			pod.Spec.Containers[i].VolumeMounts = nil
+			pod.Spec.Containers[i].Resources = corev1.ResourceRequirements{}
+			pod.Spec.Containers[i].LivenessProbe = nil
+			pod.Spec.Containers[i].ReadinessProbe = nil
+			pod.Spec.Containers[i].StartupProbe = nil
+			pod.Spec.Containers[i].Lifecycle = nil
+			pod.Spec.Containers[i].SecurityContext = nil
+		}
+		// Init and ephemeral containers are not read from the informer cache.
+		pod.Spec.InitContainers = nil
+		pod.Spec.EphemeralContainers = nil
+		// OVN-K only needs pod phase/IPs/host IP and a small subset of conditions.
+		// Container status arrays are retained heavily in heap profiles and are not read.
+		pod.Status.ContainerStatuses = nil
+		pod.Status.InitContainerStatuses = nil
+		pod.Status.EphemeralContainerStatuses = nil
+		// Current informer consumers only read condition type/status/transition time.
+		for i := range pod.Status.Conditions {
+			pod.Status.Conditions[i].LastProbeTime = metav1.Time{}
+			pod.Status.Conditions[i].Reason = ""
+			pod.Status.Conditions[i].Message = ""
+			pod.Status.Conditions[i].ObservedGeneration = 0
 		}
 	}
 	return obj, nil
@@ -632,17 +658,17 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		wf.raFactory.K8s().V1().RouteAdvertisements().Informer()
 	}
 
-	if util.IsNetworkConnectEnabled() {
-		wf.cncFactory = networkconnectinformerfactory.NewSharedInformerFactory(ovnClientset.NetworkConnectClient, resyncInterval)
-		wf.informers[ClusterNetworkConnectType], err = newQueuedInformer(ClusterNetworkConnectType, wf.cncFactory.K8s().V1().ClusterNetworkConnects().Informer(),
+	if config.OVNKubernetesFeature.EnableNetworkQoS {
+		wf.informers[NetworkQoSType], err = newQueuedInformer(NetworkQoSType, wf.networkQoSFactory.K8s().V1alpha1().NetworkQoSes().Informer(),
 			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	if config.OVNKubernetesFeature.EnableNetworkQoS {
-		wf.informers[NetworkQoSType], err = newQueuedInformer(NetworkQoSType, wf.networkQoSFactory.K8s().V1alpha1().NetworkQoSes().Informer(),
+	if util.IsNetworkConnectEnabled() {
+		wf.cncFactory = networkconnectinformerfactory.NewSharedInformerFactory(ovnClientset.NetworkConnectClient, resyncInterval)
+		wf.informers[ClusterNetworkConnectType], err = newQueuedInformer(ClusterNetworkConnectType, wf.cncFactory.K8s().V1().ClusterNetworkConnects().Informer(),
 			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize)
 		if err != nil {
 			return nil, err
@@ -656,6 +682,13 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 			return nil, err
 		}
 	}
+
+	if util.IsEVPNEnabled() {
+		wf.vtepFactory = vtepinformerfactory.NewSharedInformerFactory(ovnClientset.VTEPClient, resyncInterval)
+		// make sure shared informer is created for a factory, so on wf.vtepFactory.Start() it is initialized and caches are synced.
+		wf.vtepFactory.K8s().V1().VTEPs().Informer()
+	}
+
 	return wf, nil
 }
 
@@ -1069,6 +1102,12 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeNames []string
 		}
 	}
 
+	if util.IsEVPNEnabled() {
+		wf.vtepFactory = vtepinformerfactory.NewSharedInformerFactory(ovnClientset.VTEPClient, resyncInterval)
+		// make sure shared informer is created for a factory, so on wf.vtepFactory.Start() it is initialized and caches are synced.
+		wf.vtepFactory.K8s().V1().VTEPs().Informer()
+	}
+
 	// need to configure OVS interfaces for Pods on secondary networks in the DPU mode
 	// need to know what is the primary network for a namespace on the CNI side, which
 	// needs the NAD factory whenever the UDN feature is used.
@@ -1475,26 +1514,22 @@ type AddHandlerFuncType func(namespace string, sel labels.Selector, funcs cache.
 // GetHandlerPriority returns the priority of each objType's handler
 // Priority of the handler is what determine which handler would get an event first
 // This is relevant only for handlers that are sharing the same resources:
-// Pods: shared by PodType (0), EgressIPPodType (1), AddressSetPodSelectorType (2), LocalPodSelectorType (3)
-// Namespaces: shared by NamespaceType (0), EgressIPNamespaceType (1), PeerNamespaceSelectorType (3), AddressSetNamespaceAndPodSelectorType (4)
+// Pods: shared by PodType (0), EgressIPPodType (1), LocalPodSelectorType (3)
+// Namespaces: shared by NamespaceType (0), EgressIPNamespaceType (1), PeerNamespaceSelectorType (2)
 // Nodes: shared by NodeType (0), EgressNodeType (1)
 // By default handlers get the defaultHandlerPriority which is 0 (highest priority). Higher the number, lower the priority to get an event.
-// Example: EgressIPPodType will always get the pod event after PodType and AddressSetPodSelectorType will always get the event after PodType and EgressIPPodType
+// Example: EgressIPPodType will always get the pod event after PodType
 // NOTE: If you are touching this function to add a new object type that uses shared objects, please make sure to update `minHandlerPriority` if needed
 func (wf *WatchFactory) GetHandlerPriority(objType reflect.Type) (priority int) {
 	switch objType {
 	case EgressIPPodType:
 		return 1
-	case AddressSetPodSelectorType:
-		return 2
 	case LocalPodSelectorType:
 		return 3
 	case EgressIPNamespaceType:
 		return 1
 	case PeerNamespaceSelectorType:
 		return 2
-	case AddressSetNamespaceAndPodSelectorType:
-		return 3
 	case EgressNodeType:
 		return 1
 	case AdminPBRType:
@@ -1538,12 +1573,12 @@ func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandler
 			return wf.AddFilteredServiceHandler(namespace, funcs, processExisting)
 		}, nil
 
-	case AddressSetPodSelectorType, LocalPodSelectorType, PodType, EgressIPPodType:
+	case LocalPodSelectorType, PodType, EgressIPPodType:
 		return func(namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddFilteredPodHandler(namespace, sel, funcs, processExisting, priority)
 		}, nil
 
-	case AddressSetNamespaceAndPodSelectorType, PeerNamespaceSelectorType, EgressIPNamespaceType:
+	case PeerNamespaceSelectorType, EgressIPNamespaceType:
 		return func(namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddFilteredNamespaceHandler(namespace, sel, funcs, processExisting, priority)
 		}, nil

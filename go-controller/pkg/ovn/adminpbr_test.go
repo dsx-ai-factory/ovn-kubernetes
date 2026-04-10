@@ -19,6 +19,7 @@ import (
 	adminpbrapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
+	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
@@ -157,7 +158,7 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 					},
 					&corev1.NamespaceList{
 						Items: []corev1.Namespace{
-							*newNamespaceWithLabels(adminPBRNamespace, map[string]string{}),
+							*ovntest.NewNamespaceWithLabels(adminPBRNamespace, map[string]string{}),
 						},
 					},
 					&corev1.NodeList{
@@ -168,8 +169,8 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 					},
 					&corev1.PodList{
 						Items: []corev1.Pod{
-							*newPodWithLabels(adminPBRNamespace, pod1Name, node1Name, pod1IP, map[string]string{"k8s.io/app": app1Name}, node1IP),
-							*newPodWithLabels(adminPBRNamespace, pod2Name, node2Name, pod2IP, map[string]string{"k8s.io/app": app2Name}, node2IP),
+							*newPodWithLabelsAndHostIP(adminPBRNamespace, pod1Name, node1Name, pod1IP, map[string]string{"k8s.io/app": app1Name}, node1IP),
+							*newPodWithLabelsAndHostIP(adminPBRNamespace, pod2Name, node2Name, pod2IP, map[string]string{"k8s.io/app": app2Name}, node2IP),
 						},
 					},
 				)
@@ -221,7 +222,7 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 					},
 					&corev1.NamespaceList{
 						Items: []corev1.Namespace{
-							*newNamespaceWithLabels(adminPBRNamespace, map[string]string{}),
+							*ovntest.NewNamespaceWithLabels(adminPBRNamespace, map[string]string{}),
 						},
 					},
 					&corev1.NodeList{
@@ -232,8 +233,8 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 					},
 					&corev1.PodList{
 						Items: []corev1.Pod{
-							*newPodWithLabels(adminPBRNamespace, pod1Name, node1Name, pod1IP, map[string]string{"k8s.io/app": app1Name}, node1IP),
-							*newPodWithLabels(adminPBRNamespace, pod2Name, node2Name, pod2IP, map[string]string{"k8s.io/app": app2Name}, node2IP),
+							*newPodWithLabelsAndHostIP(adminPBRNamespace, pod1Name, node1Name, pod1IP, map[string]string{"k8s.io/app": app1Name}, node1IP),
+							*newPodWithLabelsAndHostIP(adminPBRNamespace, pod2Name, node2Name, pod2IP, map[string]string{"k8s.io/app": app2Name}, node2IP),
 						},
 					},
 				)
@@ -286,7 +287,7 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 					},
 					&corev1.NamespaceList{
 						Items: []corev1.Namespace{
-							*newNamespaceWithLabels(adminPBRNamespace, map[string]string{}),
+							*ovntest.NewNamespaceWithLabels(adminPBRNamespace, map[string]string{}),
 						},
 					},
 					&corev1.NodeList{
@@ -297,8 +298,8 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 					},
 					&corev1.PodList{
 						Items: []corev1.Pod{
-							*newPodWithLabels(adminPBRNamespace, pod1Name, node1Name, pod1IP, map[string]string{"k8s.io/app": app1Name}, node1IP),
-							*newPodWithLabels(adminPBRNamespace, pod2Name, node2Name, pod2IP, map[string]string{"k8s.io/app": app2Name}, node2IP),
+							*newPodWithLabelsAndHostIP(adminPBRNamespace, pod1Name, node1Name, pod1IP, map[string]string{"k8s.io/app": app1Name}, node1IP),
+							*newPodWithLabelsAndHostIP(adminPBRNamespace, pod2Name, node2Name, pod2IP, map[string]string{"k8s.io/app": app2Name}, node2IP),
 						},
 					},
 				)
@@ -319,7 +320,7 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 				}).Should(gomega.ContainElement(nextHop))
 				ocInfo.asf.EventuallyExpectAddressSet(asIndex)
 				ocInfo.asf.ExpectAddressSetWithAddresses(asIndex, []string{pod1IP})
-				nsDelta := newNamespaceWithLabels(adminPBRNamespace, map[string]string{
+				nsDelta := ovntest.NewNamespaceWithLabels(adminPBRNamespace, map[string]string{
 					"ngn.nvidia.com/infrastructure": "",
 				})
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), nsDelta, metav1.UpdateOptions{})
@@ -353,7 +354,7 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 					},
 					&corev1.NamespaceList{
 						Items: []corev1.Namespace{
-							*newNamespaceWithLabels(adminPBRNamespace, map[string]string{}),
+							*ovntest.NewNamespaceWithLabels(adminPBRNamespace, map[string]string{}),
 						},
 					},
 					&corev1.NodeList{
@@ -364,8 +365,8 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 					},
 					&corev1.PodList{
 						Items: []corev1.Pod{
-							*newPodWithLabels(adminPBRNamespace, pod1Name, node1Name, pod1IP, map[string]string{"k8s.io/app": app1Name}, node1IP),
-							*newPodWithLabels(adminPBRNamespace, pod2Name, node2Name, pod2IP, map[string]string{"k8s.io/app": app2Name}, node2IP),
+							*newPodWithLabelsAndHostIP(adminPBRNamespace, pod1Name, node1Name, pod1IP, map[string]string{"k8s.io/app": app1Name}, node1IP),
+							*newPodWithLabelsAndHostIP(adminPBRNamespace, pod2Name, node2Name, pod2IP, map[string]string{"k8s.io/app": app2Name}, node2IP),
 						},
 					},
 				)
@@ -386,10 +387,10 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 				}).Should(gomega.ContainElement(nextHop))
 				ocInfo.asf.EventuallyExpectAddressSet(asIndex)
 				ocInfo.asf.ExpectAddressSetWithAddresses(asIndex, []string{pod1IP})
-				podDelta := newPodWithLabels(adminPBRNamespace, pod1Name, node1Name, pod1IP, map[string]string{"k8s.io/app": "something_else"}, node1IP)
+				podDelta := newPodWithLabelsAndHostIP(adminPBRNamespace, pod1Name, node1Name, pod1IP, map[string]string{"k8s.io/app": "something_else"}, node1IP)
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(adminPBRNamespace).Update(context.TODO(), podDelta, metav1.UpdateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				podDelta = newPodWithLabels(adminPBRNamespace, pod2Name, node2Name, pod2IP, map[string]string{"k8s.io/app": app1Name}, node2IP)
+				podDelta = newPodWithLabelsAndHostIP(adminPBRNamespace, pod2Name, node2Name, pod2IP, map[string]string{"k8s.io/app": app1Name}, node2IP)
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(adminPBRNamespace).Update(context.TODO(), podDelta, metav1.UpdateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				ocInfo.asf.EventuallyExpectAddressSetWithAddresses(asIndex, []string{pod2IP})
@@ -413,7 +414,7 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 					},
 					&corev1.NamespaceList{
 						Items: []corev1.Namespace{
-							*newNamespaceWithLabels(adminPBRNamespace, map[string]string{}),
+							*ovntest.NewNamespaceWithLabels(adminPBRNamespace, map[string]string{}),
 						},
 					},
 					&corev1.NodeList{
@@ -424,8 +425,8 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 					},
 					&corev1.PodList{
 						Items: []corev1.Pod{
-							*newPodWithLabels(adminPBRNamespace, pod1Name, node1Name, pod1IP, map[string]string{"k8s.io/app": app1Name}, node1IP),
-							*newPodWithLabels(adminPBRNamespace, pod2Name, node2Name, pod2IP, map[string]string{"k8s.io/app": app2Name}, node2IP),
+							*newPodWithLabelsAndHostIP(adminPBRNamespace, pod1Name, node1Name, pod1IP, map[string]string{"k8s.io/app": app1Name}, node1IP),
+							*newPodWithLabelsAndHostIP(adminPBRNamespace, pod2Name, node2Name, pod2IP, map[string]string{"k8s.io/app": app2Name}, node2IP),
 						},
 					},
 				)
@@ -508,6 +509,12 @@ func newAdminPBR(name, nextHop string) *adminpbrapi.AdminPolicyBasedRoute {
 			},
 		},
 	}
+}
+
+func newPodWithLabelsAndHostIP(namespace, name, node, podIP string, labels map[string]string, hostIP string) *corev1.Pod {
+	pod := ovntest.NewPodWithLabels(namespace, name, node, podIP, labels)
+	pod.Status.HostIP = hostIP
+	return pod
 }
 
 func newNodeWithLabels(nodeName, nodeIP string, labels map[string]string) *corev1.Node {

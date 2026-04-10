@@ -2,7 +2,6 @@ package udn
 
 import (
 	"fmt"
-	"sort"
 
 	"gopkg.in/k8snetworkplumbingwg/multus-cni.v4/pkg/kubeletclient"
 	"gopkg.in/k8snetworkplumbingwg/multus-cni.v4/pkg/types"
@@ -26,7 +25,6 @@ func getPodResourceInfo(pod *corev1.Pod, resourceName string) (*types.ResourceIn
 		return nil, fmt.Errorf("failed to get resources allocated for pod %s: no resources for resource %s", podDesc, resourceName)
 	}
 	klog.V(5).Infof("ResourceMap for pod %s resource %s: %+v", podDesc, resourceName, entry)
-	sort.Strings(entry.DeviceIDs)
 	return entry, nil
 }
 

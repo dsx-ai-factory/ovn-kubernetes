@@ -118,8 +118,8 @@ var _ = ginkgo.Describe("PortMirror", func() {
 
 		ginkgo.It("can create/delete mirrorID to pod LSP in ovn when portmirror's are created/deleted", func() {
 			pm := newPortMirror(portMirrorName, portMirrorNamespace, portmirror.PortMirrorDirectionBoth)
-			namespaceT := *newNamespace(portMirrorNamespace)
-			podT := newPodWithLabels(portMirrorNamespace, "pod1", "node1", "10.128.1.12", map[string]string{"k8s.io/app": portMirrorApp}, "10.192.1.11")
+			namespaceT := *ovntest.NewNamespace(portMirrorNamespace)
+			podT := ovntest.NewPodWithLabels(portMirrorNamespace, "pod1", "node1", "10.128.1.12", map[string]string{"k8s.io/app": portMirrorApp})
 			podT.Annotations = map[string]string{
 				"k8s.v1.cni.cncf.io/networks": "default/ovn-primary",
 			}
@@ -208,8 +208,8 @@ var _ = ginkgo.Describe("PortMirror", func() {
 
 		ginkgo.It("can create/delete mirrorID to pod LSP in ovn when pod label changes", func() {
 			pm := newPortMirror(portMirrorName, portMirrorNamespace, portmirror.PortMirrorDirectionBoth)
-			namespaceT := *newNamespace(portMirrorNamespace)
-			pod1 := newPodWithLabels(portMirrorNamespace, "pod1", "node1", "10.128.1.12", map[string]string{"k8s.io/app": portMirrorApp}, "10.192.1.11")
+			namespaceT := *ovntest.NewNamespace(portMirrorNamespace)
+			pod1 := ovntest.NewPodWithLabels(portMirrorNamespace, "pod1", "node1", "10.128.1.12", map[string]string{"k8s.io/app": portMirrorApp})
 			pod1.Annotations = map[string]string{
 				"k8s.v1.cni.cncf.io/networks": "default/ovn-primary",
 			}
@@ -278,7 +278,7 @@ var _ = ginkgo.Describe("PortMirror", func() {
 
 				}, time.Minute).Should(gomega.ContainElement(mirrors[0].UUID))
 
-				podDelta := newPodWithLabels(portMirrorNamespace, "pod1", "node1", "10.128.1.12", map[string]string{"k8s.io/app": "something_else"}, "10.192.1.11")
+				podDelta := ovntest.NewPodWithLabels(portMirrorNamespace, "pod1", "node1", "10.128.1.12", map[string]string{"k8s.io/app": "something_else"})
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(portMirrorNamespace).Update(context.TODO(), podDelta, metav1.UpdateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				gomega.Eventually(func() []string {
