@@ -231,12 +231,13 @@ func cniRequestToPodRequest(cr *Request) (*PodRequest, error) {
 		} else if util.IsAuxDeviceName(conf.DeviceID) {
 			// DeviceID is an Auxiliary device name - <driver_name>.<kind_of_a_type>.<id>
 			chunks := strings.Split(conf.DeviceID, ".")
-			if chunks[1] != "sf" {
-				return nil, fmt.Errorf("only SF auxiliary devices are supported")
+			if len(chunks) < 2 {
+				return nil, fmt.Errorf("invalid auxiliary device name %q: expected driver.<type>.<id>", conf.DeviceID)
 			}
-		} else {
-			return nil, fmt.Errorf("expected PCI or Auxiliary device name, got - %s", conf.DeviceID)
-		}
+			if chunks[1] != "sf" {
+				return nil, fmt.Errorf("only SF auxiliary devices are supported, device name %q is not supported", conf.DeviceID)
+			}
+		} // else it is a netdev name, which is used for simulated DPU environments.
 	}
 
 	// Match the Kubelet default CRI operation timeout of 2m.
