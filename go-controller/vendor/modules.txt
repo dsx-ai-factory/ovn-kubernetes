@@ -7,34 +7,6 @@ github.com/Mellanox/mlxdevm-go
 # github.com/Mellanox/sriovnet v1.1.0
 ## explicit; go 1.13
 github.com/Mellanox/sriovnet/pkg/utils/filesystem
-# github.com/Microsoft/go-winio v0.6.2
-## explicit; go 1.21
-github.com/Microsoft/go-winio
-github.com/Microsoft/go-winio/internal/fs
-github.com/Microsoft/go-winio/internal/socket
-github.com/Microsoft/go-winio/internal/stringbuffer
-github.com/Microsoft/go-winio/pkg/guid
-github.com/Microsoft/go-winio/pkg/security
-github.com/Microsoft/go-winio/vhd
-# github.com/Microsoft/hcsshim v0.13.0 => github.com/Microsoft/hcsshim v0.8.20
-## explicit; go 1.13
-github.com/Microsoft/hcsshim/computestorage
-github.com/Microsoft/hcsshim/hcn
-github.com/Microsoft/hcsshim/internal/cni
-github.com/Microsoft/hcsshim/internal/cow
-github.com/Microsoft/hcsshim/internal/hcs
-github.com/Microsoft/hcsshim/internal/hcs/schema1
-github.com/Microsoft/hcsshim/internal/hcs/schema2
-github.com/Microsoft/hcsshim/internal/hcserror
-github.com/Microsoft/hcsshim/internal/interop
-github.com/Microsoft/hcsshim/internal/log
-github.com/Microsoft/hcsshim/internal/logfields
-github.com/Microsoft/hcsshim/internal/oc
-github.com/Microsoft/hcsshim/internal/regstate
-github.com/Microsoft/hcsshim/internal/runhcs
-github.com/Microsoft/hcsshim/internal/timeout
-github.com/Microsoft/hcsshim/internal/vmcompute
-github.com/Microsoft/hcsshim/osversion
 # github.com/alexflint/go-filemutex v1.3.0
 ## explicit; go 1.13
 github.com/alexflint/go-filemutex
@@ -44,11 +16,6 @@ github.com/asaskevich/govalidator
 # github.com/beorn7/perks v1.0.1
 ## explicit; go 1.11
 github.com/beorn7/perks/quantile
-# github.com/bhendo/go-powershell v0.0.0-20190719160123-219e7fb4e41e
-## explicit
-github.com/bhendo/go-powershell
-github.com/bhendo/go-powershell/backend
-github.com/bhendo/go-powershell/utils
 # github.com/blang/semver/v4 v4.0.0
 ## explicit; go 1.14
 github.com/blang/semver/v4
@@ -65,9 +32,6 @@ github.com/cenkalti/rpc2/jsonrpc
 # github.com/cespare/xxhash/v2 v2.3.0
 ## explicit; go 1.11
 github.com/cespare/xxhash/v2
-# github.com/containerd/cgroups v1.1.0
-## explicit; go 1.17
-github.com/containerd/cgroups/stats/v1
 # github.com/containernetworking/cni v1.3.0
 ## explicit; go 1.21
 github.com/containernetworking/cni/libcni
@@ -166,14 +130,6 @@ github.com/go-task/slim-sprig/v3
 # github.com/godbus/dbus/v5 v5.1.0
 ## explicit; go 1.12
 github.com/godbus/dbus/v5
-# github.com/gogo/protobuf v1.3.2 => github.com/gogo/protobuf v1.3.2
-## explicit; go 1.15
-github.com/gogo/protobuf/gogoproto
-github.com/gogo/protobuf/proto
-github.com/gogo/protobuf/protoc-gen-gogo/descriptor
-# github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da
-## explicit
-github.com/golang/groupcache/lru
 # github.com/google/btree v1.1.3
 ## explicit; go 1.18
 github.com/google/btree
@@ -220,11 +176,6 @@ github.com/josharian/native
 # github.com/json-iterator/go v1.1.12
 ## explicit; go 1.12
 github.com/json-iterator/go
-# github.com/juju/errors v0.0.0-20200330140219-3fe23663418f
-## explicit
-github.com/juju/errors
-# github.com/juju/testing v0.0.0-20200706033705-4c23f9c453cd
-## explicit; go 1.14
 # github.com/k8snetworkplumbingwg/govdpa v0.1.5-0.20230926073613-07c1031aea47
 ## explicit; go 1.17
 github.com/k8snetworkplumbingwg/govdpa/pkg/kvdpa
@@ -473,9 +424,6 @@ github.com/russross/blackfriday/v2
 # github.com/safchain/ethtool v0.6.2
 ## explicit; go 1.23.0
 github.com/safchain/ethtool
-# github.com/sirupsen/logrus v1.9.3
-## explicit; go 1.13
-github.com/sirupsen/logrus
 # github.com/spf13/afero v1.14.0
 ## explicit; go 1.23.0
 github.com/spf13/afero
@@ -522,13 +470,6 @@ github.com/x448/float16
 # github.com/xrash/smetrics v0.0.0-20240312152122-5f08fbb34913
 ## explicit; go 1.15.0
 github.com/xrash/smetrics
-# go.opencensus.io v0.24.0
-## explicit; go 1.13
-go.opencensus.io
-go.opencensus.io/internal
-go.opencensus.io/trace
-go.opencensus.io/trace/internal
-go.opencensus.io/trace/tracestate
 # go.opentelemetry.io/otel v1.39.0
 ## explicit; go 1.24.0
 go.opentelemetry.io/otel/attribute
@@ -595,7 +536,6 @@ golang.org/x/sys/cpu
 golang.org/x/sys/plan9
 golang.org/x/sys/unix
 golang.org/x/sys/windows
-golang.org/x/sys/windows/registry
 golang.org/x/sys/windows/svc
 # golang.org/x/term v0.38.0
 ## explicit; go 1.24.0
