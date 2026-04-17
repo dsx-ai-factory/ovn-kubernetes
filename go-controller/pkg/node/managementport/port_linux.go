@@ -101,12 +101,20 @@ func NewManagementPortController(
 			}
 		}
 		if deviceID == "" {
-			var err error
-			deviceID, err = util.GetDeviceIDFromNetdevice(netdevDevName)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get PCI device ID for %s: %v", netdevDevName, err)
+			if util.IsSimulatedDPU() {
+				// Simulated DPUs use veth/virtio netdevices without a PCI sysfs link; the
+				// netdev name is the opaque device id (see SimulatedDPUOps.ResolveDeviceDetails).
+				// Annotation may not be visible on the in-memory node yet on first start.
+				deviceID = netdevDevName
+				klog.Infof("Management port device ID: %s (simulated DPU; netdev as opaque id)", deviceID)
+			} else {
+				var err error
+				deviceID, err = util.GetDeviceIDFromNetdevice(netdevDevName)
+				if err != nil {
+					return nil, fmt.Errorf("failed to get PCI device ID for %s: %v", netdevDevName, err)
+				}
+				klog.Infof("Management port PCI device ID: %s (resolved from netdev %s)", deviceID, netdevDevName)
 			}
-			klog.Infof("Management port PCI device ID: %s (resolved from netdev %s)", deviceID, netdevDevName)
 		}
 		c.ports[netdevPort] = newManagementPortNetdev(deviceID, cfg, routeManager)
 	}
