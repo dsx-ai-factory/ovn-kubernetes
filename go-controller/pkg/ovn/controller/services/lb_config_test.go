@@ -4577,3 +4577,156 @@ func Test_makeNodeSwitchTargetIPs(t *testing.T) {
 		})
 	}
 }
+
+func Test_needsPreferLocal(t *testing.T) {
+	tests := []struct {
+		name    string
+		service *corev1.Service
+		want    bool
+	}{
+		{"with pod prefix", &corev1.Service{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{preferLocalAnnotation: "node-local-dns"}}}, true},
+		{"empty value", &corev1.Service{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{preferLocalAnnotation: ""}}}, false},
+		{"no annotation", &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "kube-dns"}}, false},
+		{"nil", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, needsPreferLocal(tt.service))
+		})
+	}
+}
+
+func Test_buildPerNodeLBs_DNSPreferLocal(t *testing.T) {
+	oldClusterSubnet := globalconfig.Default.ClusterSubnets
+	oldGwMode := globalconfig.Gateway.Mode
+	oldServiceCIDRs := globalconfig.Kubernetes.ServiceCIDRs
+	oldIPv4Mode := globalconfig.IPv4Mode
+	defer func() {
+		globalconfig.IPv4Mode = oldIPv4Mode
+		globalconfig.Gateway.Mode = oldGwMode
+		globalconfig.Default.ClusterSubnets = oldClusterSubnet
+		globalconfig.Kubernetes.ServiceCIDRs = oldServiceCIDRs
+	}()
+
+	_, cidr4, _ := net.ParseCIDR("10.128.0.0/16")
+	_, cidr6, _ := net.ParseCIDR("fe00::/64")
+	globalconfig.Default.ClusterSubnets = []globalconfig.CIDRNetworkEntry{{CIDR: cidr4, HostSubnetLength: 26}, {CIDR: cidr6, HostSubnetLength: 26}}
+	_, svcCIDRv4, _ := net.ParseCIDR("192.168.0.0/24")
+	globalconfig.Kubernetes.ServiceCIDRs = []*net.IPNet{svcCIDRv4}
+	globalconfig.IPv4Mode = true
+
+	l3UDN, err := getSampleUDNNetInfo("kube-system", "layer3")
+	require.NoError(t, err)
+
+	// cs-01 has local DNS overlay pod at 10.128.0.5 (auto-detected by pod name prefix).
+	// cs-02 has local DNS overlay pod at 10.128.4.5.
+	// core-01 has a non-local DNS endpoint at 10.128.1.5.
+	// localSelectedIPs are identified via pod name prefix detection.
+	nodes := []nodeInfo{
+		{name: "cs-01", l3gatewayAddresses: []net.IP{net.ParseIP("10.0.0.1")}, hostAddresses: []net.IP{net.ParseIP("10.0.0.1")},
+			gatewayRouterName: "gr-cs-01", switchName: "switch-cs-01",
+			podSubnets: []net.IPNet{{IP: net.ParseIP("10.128.0.0"), Mask: net.CIDRMask(24, 32)}}},
+		{name: "cs-02", l3gatewayAddresses: []net.IP{net.ParseIP("10.0.0.5")}, hostAddresses: []net.IP{net.ParseIP("10.0.0.5")},
+			gatewayRouterName: "gr-cs-02", switchName: "switch-cs-02",
+			podSubnets: []net.IPNet{{IP: net.ParseIP("10.128.4.0"), Mask: net.CIDRMask(24, 32)}}},
+		{name: "core-01", l3gatewayAddresses: []net.IP{net.ParseIP("10.0.0.2")}, hostAddresses: []net.IP{net.ParseIP("10.0.0.2")},
+			gatewayRouterName: "gr-core-01", switchName: "switch-core-01",
+			podSubnets: []net.IPNet{{IP: net.ParseIP("10.128.1.0"), Mask: net.CIDRMask(24, 32)}}},
+		{name: "br2-001-a", l3gatewayAddresses: []net.IP{net.ParseIP("10.0.0.4")}, hostAddresses: []net.IP{net.ParseIP("10.0.0.4")},
+			gatewayRouterName: "gr-br2", switchName: "switch-br2",
+			podSubnets: []net.IPNet{{IP: net.ParseIP("10.128.3.0"), Mask: net.CIDRMask(24, 32)}}},
+	}
+
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "kube-dns",
+			Namespace:   "kube-system",
+			Annotations: map[string]string{preferLocalAnnotation: "node-local-dns"},
+		},
+		Spec: corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP},
+	}
+
+	localSelectedIPSet := sets.New[string]("10.128.0.5", "10.128.4.5")
+
+	configs := []lbConfig{{
+		vips:     []string{"10.96.0.10"},
+		protocol: corev1.ProtocolUDP,
+		inport:   53,
+		clusterEndpoints: util.LBEndpoints{
+			V4IPs: []string{"10.128.0.5", "10.128.4.5", "10.128.1.5"},
+			Port:  53,
+		},
+		nodeEndpoints: map[string]util.LBEndpoints{
+			"cs-01":   {V4IPs: []string{"10.128.0.5"}, Port: 53},
+			"cs-02":   {V4IPs: []string{"10.128.4.5"}, Port: 53},
+			"core-01": {V4IPs: []string{"10.128.1.5"}, Port: 53},
+		},
+		localSelectedIPs: localSelectedIPSet,
+	}}
+
+	findSwitchTargets := func(switchName string, lbs []LB) []string {
+		for i := range lbs {
+			for _, sw := range lbs[i].Switches {
+				if sw == switchName {
+					var ips []string
+					for _, r := range lbs[i].Rules {
+						for _, tgt := range r.Targets {
+							ips = append(ips, tgt.IP)
+						}
+					}
+					return ips
+				}
+			}
+		}
+		return nil
+	}
+
+	// --- All local DNS pods healthy ---
+	lbs := buildPerNodeLBs(svc, configs, nodes, l3UDN)
+
+	// cs-01: has local DNS endpoint → only local DNS
+	assert.ElementsMatch(t, []string{"10.128.0.5"}, findSwitchTargets("switch-cs-01", lbs),
+		"cs-01 should target only its local DNS pod")
+
+	// cs-02: has local DNS endpoint → only local DNS
+	assert.ElementsMatch(t, []string{"10.128.4.5"}, findSwitchTargets("switch-cs-02", lbs),
+		"cs-02 should target only its local DNS pod")
+
+	// core-01: no local DNS endpoint → non-local DNS only
+	assert.ElementsMatch(t, []string{"10.128.1.5"}, findSwitchTargets("switch-core-01", lbs),
+		"core-01 should get only non-local DNS endpoints")
+
+	// br2: no local DNS, no local endpoint → non-local DNS only
+	assert.ElementsMatch(t, []string{"10.128.1.5"}, findSwitchTargets("switch-br2", lbs),
+		"br2 should get only non-local DNS endpoints")
+
+	// --- cs-01 local DNS pod dies ---
+	configsDown := []lbConfig{{
+		vips:     []string{"10.96.0.10"},
+		protocol: corev1.ProtocolUDP,
+		inport:   53,
+		clusterEndpoints: util.LBEndpoints{
+			V4IPs: []string{"10.128.4.5", "10.128.1.5"},
+			Port:  53,
+		},
+		nodeEndpoints: map[string]util.LBEndpoints{
+			"cs-02":   {V4IPs: []string{"10.128.4.5"}, Port: 53},
+			"core-01": {V4IPs: []string{"10.128.1.5"}, Port: 53},
+		},
+		localSelectedIPs: sets.New[string]("10.128.4.5"),
+	}}
+
+	lbsDown := buildPerNodeLBs(svc, configsDown, nodes, l3UDN)
+
+	// cs-01: local DNS down → fallback only (cs-02's local DNS excluded)
+	assert.ElementsMatch(t, []string{"10.128.1.5"}, findSwitchTargets("switch-cs-01", lbsDown),
+		"cs-01 fallback should have only non-local DNS endpoints")
+
+	// cs-02: local DNS still healthy → only its local DNS
+	assert.ElementsMatch(t, []string{"10.128.4.5"}, findSwitchTargets("switch-cs-02", lbsDown),
+		"cs-02 should still target its local DNS pod")
+
+	// core-01: non-local DNS only (unchanged)
+	assert.ElementsMatch(t, []string{"10.128.1.5"}, findSwitchTargets("switch-core-01", lbsDown),
+		"core-01 should still get only non-local DNS endpoints")
+}

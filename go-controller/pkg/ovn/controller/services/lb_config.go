@@ -25,6 +25,20 @@ import (
 // ips should be substituted in
 const placeholderNodeIPs = "node"
 
+// preferLocalAnnotation enables per-node switch LBs with local-first endpoint selection.
+// The annotation value is the pod name prefix used to identify local endpoints. Endpoints
+// matching this prefix are preferred on nodes where they run; all other nodes get only
+// non-matching (fallback) endpoints.
+// Example: kubectl annotate svc kube-dns -n kube-system k8s.ovn.org/prefer-local-with-fallback=node-local-dns
+const preferLocalAnnotation = "k8s.ovn.org/prefer-local-with-fallback"
+
+func needsPreferLocal(service *corev1.Service) bool {
+	if service == nil || service.Annotations == nil {
+		return false
+	}
+	return service.Annotations[preferLocalAnnotation] != ""
+}
+
 // lbConfig is the abstract desired load balancer configuration.
 // vips and endpoints are mixed families.
 type lbConfig struct {
@@ -34,6 +48,7 @@ type lbConfig struct {
 
 	clusterEndpoints util.LBEndpoints            // addresses of cluster-wide endpoints
 	nodeEndpoints    map[string]util.LBEndpoints // node -> addresses of local endpoints
+	localSelectedIPs sets.Set[string]            // IPs of pods matching the prefer-local annotation pod name prefix
 
 	// if true, then vips added on the router are in "local" mode
 	// that means, skipSNAT, and remove any non-local endpoints.
@@ -143,8 +158,25 @@ func buildServiceLBConfigs(service *corev1.Service, endpointSlices []*discovery.
 		nodes.Insert(n.name)
 	}
 	// get all the endpoints classified by port and by port,node
-	needsLocalEndpoints := util.ServiceExternalTrafficPolicyLocal(service) || util.ServiceInternalTrafficPolicyLocal(service)
+	preferLocal := needsPreferLocal(service)
+	needsLocalEndpoints := util.ServiceExternalTrafficPolicyLocal(service) || util.ServiceInternalTrafficPolicyLocal(service) || preferLocal
 	portToClusterEndpoints, portToNodeToEndpoints, err := util.GetEndpointsForService(endpointSlices, service, nodes, true, needsLocalEndpoints)
+
+	// Detect local DNS endpoint IPs by pod name prefix from the annotation value.
+	var localSelectedIPs sets.Set[string]
+	if preferLocal {
+		localSelectedIPs = sets.New[string]()
+		prefix := service.Annotations[preferLocalAnnotation]
+		for _, slice := range endpointSlices {
+			for _, endpoint := range slice.Endpoints {
+				if endpoint.TargetRef != nil && strings.HasPrefix(endpoint.TargetRef.Name, prefix) {
+					for _, addr := range endpoint.Addresses {
+						localSelectedIPs.Insert(addr)
+					}
+				}
+			}
+		}
+	}
 	if err != nil {
 		if service != nil {
 			klog.Warningf("Failed to get endpoints for service %s/%s during LB config build: %v", service.Namespace, service.Name, err)
@@ -217,6 +249,7 @@ func buildServiceLBConfigs(service *corev1.Service, endpointSlices []*discovery.
 			vips:                 vips,
 			clusterEndpoints:     clusterEndpoints,
 			nodeEndpoints:        nodeEndpoints,
+			localSelectedIPs:     localSelectedIPs,
 			externalTrafficLocal: false, // always false for ClusterIPs
 			internalTrafficLocal: internalTrafficLocal,
 			hasNodePort:          false,
@@ -226,9 +259,10 @@ func buildServiceLBConfigs(service *corev1.Service, endpointSlices []*discovery.
 		// unless any of the following are true:
 		// - Any of the endpoints are host-network
 		// - ETP=local service backed by non-local-host-networked endpoints
+		// - Service has the prefer-local annotation (per-node LB with local-first + fallback)
 		//
 		// In that case, we need to create per-node LBs.
-		if hasHostEndpoints(clusterEndpoints.V4IPs, netInfo) || hasHostEndpoints(clusterEndpoints.V6IPs, netInfo) || internalTrafficLocal {
+		if hasHostEndpoints(clusterEndpoints.V4IPs, netInfo) || hasHostEndpoints(clusterEndpoints.V6IPs, netInfo) || internalTrafficLocal || preferLocal {
 			perNodeConfigs = append(perNodeConfigs, clusterIPConfig)
 		} else {
 			clusterConfigs = append(clusterConfigs, clusterIPConfig)
@@ -635,6 +669,47 @@ func buildPerNodeLBs(service *corev1.Service, configs []lbConfig, nodes []nodeIn
 
 				switchV4targets := joinHostsPort(cfg.clusterEndpoints.V4IPs, cfg.clusterEndpoints.Port)
 				switchV6targets := joinHostsPort(cfg.clusterEndpoints.V6IPs, cfg.clusterEndpoints.Port)
+				if needsPreferLocal(service) && cfg.localSelectedIPs.Len() > 0 {
+					// Build fallback targets (strip selected local IPs from cluster endpoints).
+					var fallbackV4, fallbackV6 []string
+					for _, ip := range cfg.clusterEndpoints.V4IPs {
+						if !cfg.localSelectedIPs.Has(ip) {
+							fallbackV4 = append(fallbackV4, ip)
+						}
+					}
+					for _, ip := range cfg.clusterEndpoints.V6IPs {
+						if !cfg.localSelectedIPs.Has(ip) {
+							fallbackV6 = append(fallbackV6, ip)
+						}
+					}
+
+					// Switch: use selected local endpoints if this node has any, otherwise fallback only.
+					switchV4targets = joinHostsPort(fallbackV4, cfg.clusterEndpoints.Port)
+					switchV6targets = joinHostsPort(fallbackV6, cfg.clusterEndpoints.Port)
+					if localEPs, ok := cfg.nodeEndpoints[node.name]; ok {
+						var selectedV4, selectedV6 []string
+						for _, ip := range localEPs.V4IPs {
+							if cfg.localSelectedIPs.Has(ip) {
+								selectedV4 = append(selectedV4, ip)
+							}
+						}
+						for _, ip := range localEPs.V6IPs {
+							if cfg.localSelectedIPs.Has(ip) {
+								selectedV6 = append(selectedV6, ip)
+							}
+						}
+						if len(selectedV4) > 0 {
+							switchV4targets = joinHostsPort(selectedV4, localEPs.Port)
+						}
+						if len(selectedV6) > 0 {
+							switchV6targets = joinHostsPort(selectedV6, localEPs.Port)
+						}
+					}
+
+					// Router: always fallback only.
+					routerV4targets = joinHostsPort(fallbackV4, cfg.clusterEndpoints.Port)
+					routerV6targets = joinHostsPort(fallbackV6, cfg.clusterEndpoints.Port)
+				}
 
 				// Substitute the special vip "node" for the node's physical ips
 				// This is used for nodeport
