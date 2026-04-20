@@ -13,7 +13,6 @@ import (
 	"syscall"
 
 	"github.com/k8snetworkplumbingwg/sriovnet"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/vishvananda/netlink"
 
 	"k8s.io/klog/v2"
@@ -241,13 +240,6 @@ func NicToBridge(iface string) (string, error) {
 		fmt.Sprintf("other_config:hwaddr=%s", ifaceLink.Attrs().HardwareAddr),
 		"--", "--may-exist", "add-port", bridge, iface,
 		"--", "set", "port", iface, "other-config:transient=true",
-	}
-
-	if config.Gateway.DPUHostGatewayRepresentorInterface != "" {
-		ovsArgs = append(ovsArgs,
-			"--", "--may-exist", "add-port", bridge, config.Gateway.DPUHostGatewayRepresentorInterface,
-			"--", "set", "port", config.Gateway.DPUHostGatewayRepresentorInterface, "other-config:transient=true")
-		klog.Infof("Adding host representor interface %s to bridge %s", config.Gateway.DPUHostGatewayRepresentorInterface, bridge)
 	}
 	stdout, stderr, err := RunOVSVsctl(ovsArgs...)
 	if err != nil {

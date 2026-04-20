@@ -16,8 +16,10 @@ import (
 	"sync"
 
 	"github.com/k8snetworkplumbingwg/sriovnet"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+
 	"k8s.io/klog/v2"
+
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 )
 
 // DPU operations abstraction.
@@ -198,7 +200,7 @@ func (s *SimulatedDPUOps) getDPURepresentor(pfId, funcId string) (string, error)
 	return rep, nil
 }
 
-func (s *SimulatedDPUOps) GetDPUHostInterface(bridgeName string) (string, error) {
+func (s *SimulatedDPUOps) GetDPUHostInterface(_ string) (string, error) {
 	return SimulationHostGatewayPeerInterface, nil
 }
 
