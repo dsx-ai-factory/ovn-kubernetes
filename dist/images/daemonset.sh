@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+# SPDX-License-Identifier: Apache-2.0
+
 #set -x
 
 #Always exit on errors
@@ -1064,6 +1067,8 @@ ovn_image=${ovnkube_image} \
   ovn_ipfix_cache_active_timeout=${ovn_ipfix_cache_active_timeout} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
+  ovnkube_node_mgmt_port_dp_resource_name=${ovnkube_node_mgmt_port_dp_resource_name} \
+  mgmt_port_vfs_count=${mgmt_port_vfs_count} \
   ovnkube_master_loglevel=${master_loglevel} \
   ovn_loglevel_northd=${ovn_loglevel_northd} \
   ovn_loglevel_nbctld=${ovn_loglevel_nbctld} \
