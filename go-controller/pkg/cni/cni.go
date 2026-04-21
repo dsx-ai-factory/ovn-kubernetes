@@ -5,8 +5,10 @@ package cni
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"time"
 
@@ -278,6 +280,13 @@ func (pr *PodRequest) cmdAddWithGetCNIResultFunc(
 
 	podInterfaceInfo.SkipIPConfig = kubevirt.IsPodLiveMigratable(pod)
 
+	if pr.IsVFIO && len(config.Default.KataDanConfDir) > 0 &&
+		pod.Spec.RuntimeClassName != nil && strings.HasPrefix(*pod.Spec.RuntimeClassName, KataRuntime) {
+		if err = pr.generateDanConfig(podInterfaceInfo, pr.CNIConf.DeviceID); err != nil {
+			return nil, fmt.Errorf("failed to generate DAN config for pod %s/%s: %v", pr.PodNamespace, pr.PodName, err)
+		}
+	}
+
 	response := &Response{KubeAuth: kubeAuth}
 	if !config.UnprivilegedMode {
 		netName := pr.netName
@@ -345,6 +354,18 @@ func (pr *PodRequest) cmdDel(clientset *ClientSet) (*Response, error) {
 	podName := pr.PodName
 	if namespace == "" || podName == "" {
 		return nil, fmt.Errorf("required CNI variable missing")
+	}
+	if pr.IsVFIO && len(config.Default.KataDanConfDir) > 0 {
+		danConfigPath := getDanConfigPath(config.Default.KataDanConfDir, pr.SandboxID)
+		if err := os.Remove(danConfigPath); err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				klog.Warningf("Failed to remove DAN config %s for pod %s/%s on NAD %s with sandbox %s: %v",
+					danConfigPath, pr.PodNamespace, pr.PodName, pr.nadName, pr.SandboxID, err)
+			}
+		} else {
+			klog.V(5).Infof("Removed DAN config for pod %s/%s on NAD %s with sandbox %s (path %s).",
+				pr.PodNamespace, pr.PodName, pr.nadName, pr.SandboxID, danConfigPath)
+		}
 	}
 
 	pod, err := clientset.getPod(pr.PodNamespace, pr.PodName)
