@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package ovn
 
 import (
@@ -383,9 +386,6 @@ func (oc *Layer3UserDefinedNetworkController) Stop() {
 	if oc.podHandler != nil {
 		oc.watchFactory.RemovePodHandler(oc.podHandler)
 	}
-	if oc.nodeHandler != nil {
-		oc.watchFactory.RemoveNodeHandler(oc.nodeHandler)
-	}
 	if oc.namespaceHandler != nil {
 		oc.watchFactory.RemoveNamespaceHandler(oc.namespaceHandler)
 	}
@@ -454,6 +454,13 @@ func (oc *Layer3UserDefinedNetworkController) Cleanup() error {
 	ops, err = cleanupPolicyLogicalEntities(oc.nbClient, ops, oc.controllerName)
 	if err != nil {
 		return err
+	}
+
+	// cleanup address sets after ACLs are deleted to avoid ovn-controller errors
+	if oc.addressSetManager != nil {
+		if err = oc.addressSetManager.CleanupForController(oc.controllerName); err != nil {
+			return fmt.Errorf("failed to cleanup address sets for controller %s: %v", oc.controllerName, err)
+		}
 	}
 
 	// Delete QoS rows for this network (e.g. from NetworkQoS controller). Applies to primary and
@@ -689,7 +696,8 @@ func (oc *Layer3UserDefinedNetworkController) ReconcileNode(oldNode, newNode *co
 			syncZoneIC = syncZoneIC || zoneClusterChanged
 			_, failed = oc.gatewaysFailed.Load(newNode.Name)
 			syncGw := failed ||
-				gatewayChanged(oldNode, newNode) ||
+				gatewayChanged(oldNode, newNode, oldState, newState, oc.GetNetworkName()) ||
+				nodeChassisChanged(oldNode, newNode) ||
 				nodeSubnetChange ||
 				hostCIDRsChanged(oldNode, newNode) ||
 				nodeGatewayMTUSupportChanged(oldNode, newNode)
@@ -816,6 +824,8 @@ func (oc *Layer3UserDefinedNetworkController) addUpdateLocalNodeEvent(node *core
 	klog.Infof("Adding or Updating local node %q for network %q", node.Name, oc.GetNetworkName())
 	if nSyncs.syncNode {
 		if hostSubnets, err = oc.addNode(node); err != nil {
+			// Evict stale subnet from IPAM to prevent pods from getting IPs from an outdated subnet.
+			oc.lsManager.DeleteSwitch(oc.GetNetworkScopedSwitchName(node.Name))
 			oc.addNodeFailed.Store(node.Name, true)
 			oc.nodeClusterRouterPortFailed.Store(node.Name, true)
 			oc.mgmtPortFailed.Store(node.Name, true)
