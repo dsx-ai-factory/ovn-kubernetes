@@ -2602,8 +2602,16 @@ ovnkube-controller-with-node() {
       fi
   fi
 
+  # Detect management port netdev from OVS external_ids first (same logic as
+  # ovn-node uses), then fall back to the OVNKUBE_NODE_MGMT_PORT_NETDEV env var.
   ovnkube_node_mgmt_port_netdev_flag=
-  if [[ ${ovnkube_node_mgmt_port_netdev} != "" ]]; then
+  local_node_mgmt_port_netdev=""
+  if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
+    local_node_mgmt_port_netdev=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-k8s-mp-netdev 2>/dev/null | tr -d '\"')
+  fi
+  if [[ -n "${local_node_mgmt_port_netdev}" ]]; then
+    ovnkube_node_mgmt_port_netdev_flag="--ovnkube-node-mgmt-port-netdev=${local_node_mgmt_port_netdev}"
+  elif [[ ${ovnkube_node_mgmt_port_netdev} != "" ]]; then
     ovnkube_node_mgmt_port_netdev_flag="--ovnkube-node-mgmt-port-netdev=${ovnkube_node_mgmt_port_netdev}"
   fi
   if [[ -n "${ovnkube_node_mgmt_port_dp_resource_name}" ]] ; then
