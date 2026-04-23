@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 
 # This script is run by init container of static ovnkube-node Pod on VMAAS DPU,
 # it is used to populate the external_ids in OVS DB which is required by ovnkube-node.
