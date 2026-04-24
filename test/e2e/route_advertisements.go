@@ -918,8 +918,10 @@ var _ = ginkgo.Describe("BGP: Pod to external server when CUDN network is advert
 		ginkgo.Entry("layer3",
 			&udnv1.ClusterUserDefinedNetwork{
 				ObjectMeta: metav1.ObjectMeta{
-					GenerateName: "bgp-udn-layer3-network",
-					Labels:       map[string]string{"bgp-udn-layer3-network": ""},
+					// Keep generated CUDN names under the Linux 15-byte interface
+					// limit so the VRF name is unique instead of network ID based.
+					GenerateName: "bgp-l3-",
+					Labels:       map[string]string{"bgp-l3": ""},
 				},
 				Spec: udnv1.ClusterUserDefinedNetworkSpec{
 					Network: udnv1.NetworkSpec{
@@ -939,7 +941,7 @@ var _ = ginkgo.Describe("BGP: Pod to external server when CUDN network is advert
 			},
 			&rav1.RouteAdvertisements{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "bgp-udn-layer3-network-ra",
+					Name: "bgp-l3-ra",
 				},
 				Spec: rav1.RouteAdvertisementsSpec{
 					NetworkSelectors: apitypes.NetworkSelectors{
@@ -947,7 +949,7 @@ var _ = ginkgo.Describe("BGP: Pod to external server when CUDN network is advert
 							NetworkSelectionType: apitypes.ClusterUserDefinedNetworks,
 							ClusterUserDefinedNetworkSelector: &apitypes.ClusterUserDefinedNetworkSelector{
 								NetworkSelector: metav1.LabelSelector{
-									MatchLabels: map[string]string{"bgp-udn-layer3-network": ""},
+									MatchLabels: map[string]string{"bgp-l3": ""},
 								},
 							},
 						},
@@ -963,8 +965,8 @@ var _ = ginkgo.Describe("BGP: Pod to external server when CUDN network is advert
 		ginkgo.Entry("layer2",
 			&udnv1.ClusterUserDefinedNetwork{
 				ObjectMeta: metav1.ObjectMeta{
-					GenerateName: "bgp-udn-layer2-network",
-					Labels:       map[string]string{"bgp-udn-layer2-network": ""},
+					GenerateName: "bgp-l2-",
+					Labels:       map[string]string{"bgp-l2": ""},
 				},
 				Spec: udnv1.ClusterUserDefinedNetworkSpec{
 					Network: udnv1.NetworkSpec{
@@ -978,7 +980,7 @@ var _ = ginkgo.Describe("BGP: Pod to external server when CUDN network is advert
 			},
 			&rav1.RouteAdvertisements{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "bgp-udn-layer2-network-ra",
+					Name: "bgp-l2-ra",
 				},
 				Spec: rav1.RouteAdvertisementsSpec{
 					NetworkSelectors: apitypes.NetworkSelectors{
@@ -986,7 +988,7 @@ var _ = ginkgo.Describe("BGP: Pod to external server when CUDN network is advert
 							NetworkSelectionType: apitypes.ClusterUserDefinedNetworks,
 							ClusterUserDefinedNetworkSelector: &apitypes.ClusterUserDefinedNetworkSelector{
 								NetworkSelector: metav1.LabelSelector{
-									MatchLabels: map[string]string{"bgp-udn-layer2-network": ""},
+									MatchLabels: map[string]string{"bgp-l2": ""},
 								},
 							},
 						},
@@ -1242,8 +1244,8 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 				for _, serverContainerIP := range serverContainerIPs {
 					for _, node := range nodes.Items {
 						if cudnA.Spec.Network.Topology == udnv1.NetworkTopologyLayer3 {
-							checkL3NodePodRoute(node, serverContainerIP, routerContainerName, types.CUDNPrefix+cudnATemplate.Name)
-							checkL3NodePodRoute(node, serverContainerIP, routerContainerName, types.CUDNPrefix+cudnBTemplate.Name)
+							checkL3NodePodRoute(node, serverContainerIP, routerContainerName, types.CUDNPrefix+cudnA.Name)
+							checkL3NodePodRoute(node, serverContainerIP, routerContainerName, types.CUDNPrefix+cudnB.Name)
 						} else {
 							checkL2NodePodRoute(node, serverContainerIP, routerContainerName, cudnATemplate.Spec.Network.Layer2.Subnets)
 							checkL2NodePodRoute(node, serverContainerIP, routerContainerName, cudnBTemplate.Spec.Network.Layer2.Subnets)
@@ -1382,9 +1384,9 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 						clientPod := podsNetA[0]
 						srvPod := podsNetA[1]
 
-						clientPodStatus, err := getPodAnnotationForAttachment(clientPod, namespacedName(clientPod.Namespace, cudnATemplate.Name))
+						clientPodStatus, err := getPodAnnotationForAttachment(clientPod, namespacedName(clientPod.Namespace, cudnA.Name))
 						framework.ExpectNoError(err)
-						srvPodStatus, err := getPodAnnotationForAttachment(srvPod, namespacedName(srvPod.Namespace, cudnATemplate.Name))
+						srvPodStatus, err := getPodAnnotationForAttachment(srvPod, namespacedName(srvPod.Namespace, cudnA.Name))
 						framework.ExpectNoError(err)
 						return clientPod.Name, clientPod.Namespace, net.JoinHostPort(getFirstCIDROfFamily(ipFamily, srvPodStatus.IPs).IP.String(), "8080") + "/clientip",
 							getFirstCIDROfFamily(ipFamily, clientPodStatus.IPs).IP.String(), false
@@ -1395,9 +1397,9 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 						clientPod := podsNetA[0]
 						srvPod := podsNetA[2]
 
-						clientPodStatus, err := getPodAnnotationForAttachment(clientPod, namespacedName(clientPod.Namespace, cudnATemplate.Name))
+						clientPodStatus, err := getPodAnnotationForAttachment(clientPod, namespacedName(clientPod.Namespace, cudnA.Name))
 						framework.ExpectNoError(err)
-						srvPodStatus, err := getPodAnnotationForAttachment(srvPod, namespacedName(srvPod.Namespace, cudnATemplate.Name))
+						srvPodStatus, err := getPodAnnotationForAttachment(srvPod, namespacedName(srvPod.Namespace, cudnA.Name))
 						framework.ExpectNoError(err)
 						return clientPod.Name, clientPod.Namespace, net.JoinHostPort(getFirstCIDROfFamily(ipFamily, srvPodStatus.IPs).IP.String(), "8080") + "/clientip",
 							getFirstCIDROfFamily(ipFamily, clientPodStatus.IPs).IP.String(), false
@@ -1408,7 +1410,7 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 						clientPod := podsNetA[2]
 						srvPod := podNetB
 
-						srvPodStatus, err := getPodAnnotationForAttachment(srvPod, namespacedName(srvPod.Namespace, cudnBTemplate.Name))
+						srvPodStatus, err := getPodAnnotationForAttachment(srvPod, namespacedName(srvPod.Namespace, cudnB.Name))
 						framework.ExpectNoError(err)
 						var (
 							curlOutput string
@@ -1418,7 +1420,7 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 						// - "loose": Pod connectivity is allowed, test expects success
 						// - anything else (including unset): Treated as "strict", pod connectivity is blocked
 						if os.Getenv("ADVERTISED_UDN_ISOLATION_MODE") == "loose" {
-							clientPodStatus, err := getPodAnnotationForAttachment(clientPod, namespacedName(clientPod.Namespace, cudnATemplate.Name))
+							clientPodStatus, err := getPodAnnotationForAttachment(clientPod, namespacedName(clientPod.Namespace, cudnA.Name))
 							framework.ExpectNoError(err)
 
 							// With the above underlay routing configuration client pod can reach server pod.
@@ -1438,14 +1440,14 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 						clientPod := podsNetA[0]
 						srvPod := podNetB
 
-						srvPodStatus, err := getPodAnnotationForAttachment(srvPod, namespacedName(srvPod.Namespace, cudnBTemplate.Name))
+						srvPodStatus, err := getPodAnnotationForAttachment(srvPod, namespacedName(srvPod.Namespace, cudnB.Name))
 						framework.ExpectNoError(err)
 						var (
 							curlOutput string
 							curlErr    bool
 						)
 						if os.Getenv("ADVERTISED_UDN_ISOLATION_MODE") == "loose" {
-							clientPodStatus, err := getPodAnnotationForAttachment(clientPod, namespacedName(clientPod.Namespace, cudnATemplate.Name))
+							clientPodStatus, err := getPodAnnotationForAttachment(clientPod, namespacedName(clientPod.Namespace, cudnA.Name))
 							framework.ExpectNoError(err)
 
 							curlOutput = getFirstCIDROfFamily(ipFamily, clientPodStatus.IPs).IP.String()
@@ -1463,7 +1465,7 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 						clientPod := podNetDefault
 						srvPod := podNetB
 
-						srvPodStatus, err := getPodAnnotationForAttachment(srvPod, namespacedName(srvPod.Namespace, cudnBTemplate.Name))
+						srvPodStatus, err := getPodAnnotationForAttachment(srvPod, namespacedName(srvPod.Namespace, cudnB.Name))
 						framework.ExpectNoError(err)
 						return clientPod.Name, clientPod.Namespace, net.JoinHostPort(getFirstCIDROfFamily(ipFamily, srvPodStatus.IPs).IP.String(), "8080") + "/clientip",
 							curlConnectionTimeoutCode, true
@@ -1474,7 +1476,7 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 						clientPod := podNetDefault
 						srvPod := podsNetA[0]
 
-						srvPodStatus, err := getPodAnnotationForAttachment(srvPod, namespacedName(srvPod.Namespace, cudnATemplate.Name))
+						srvPodStatus, err := getPodAnnotationForAttachment(srvPod, namespacedName(srvPod.Namespace, cudnA.Name))
 						framework.ExpectNoError(err)
 						return clientPod.Name, clientPod.Namespace, net.JoinHostPort(getFirstCIDROfFamily(ipFamily, srvPodStatus.IPs).IP.String(), "8080") + "/clientip",
 							curlConnectionTimeoutCode, true
@@ -1533,7 +1535,7 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 						clientNode := podsNetA[0].Spec.NodeName
 						srvPod := podsNetA[0]
 
-						srvPodStatus, err := getPodAnnotationForAttachment(srvPod, namespacedName(srvPod.Namespace, cudnATemplate.Name))
+						srvPodStatus, err := getPodAnnotationForAttachment(srvPod, namespacedName(srvPod.Namespace, cudnA.Name))
 						framework.ExpectNoError(err)
 						return clientNode, "", net.JoinHostPort(getFirstCIDROfFamily(ipFamily, srvPodStatus.IPs).IP.String(), "8080") + "/clientip",
 							curlConnectionTimeoutCode, true
@@ -1544,7 +1546,7 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 						clientNode := podsNetA[2].Spec.NodeName
 						srvPod := podsNetA[0]
 
-						srvPodStatus, err := getPodAnnotationForAttachment(srvPod, namespacedName(srvPod.Namespace, cudnATemplate.Name))
+						srvPodStatus, err := getPodAnnotationForAttachment(srvPod, namespacedName(srvPod.Namespace, cudnA.Name))
 						framework.ExpectNoError(err)
 						return clientNode, "", net.JoinHostPort(getFirstCIDROfFamily(ipFamily, srvPodStatus.IPs).IP.String(), "8080") + "/clientip",
 							curlConnectionTimeoutCode, true
@@ -1879,8 +1881,8 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 	ginkgo.Entry("Layer3",
 		&udnv1.ClusterUserDefinedNetwork{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:   "bgp-udn-layer3-network-a",
-				Labels: map[string]string{"bgp-udn-layer3-network-a": ""},
+				GenerateName: "bgp-l3a-",
+				Labels:       map[string]string{"bgp-l3a": ""},
 			},
 			Spec: udnv1.ClusterUserDefinedNetworkSpec{
 				Network: udnv1.NetworkSpec{
@@ -1899,8 +1901,8 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 			},
 		}, &udnv1.ClusterUserDefinedNetwork{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:   "bgp-udn-layer3-network-b",
-				Labels: map[string]string{"bgp-udn-layer3-network-b": ""},
+				GenerateName: "bgp-l3b-",
+				Labels:       map[string]string{"bgp-l3b": ""},
 			},
 			Spec: udnv1.ClusterUserDefinedNetworkSpec{
 				Network: udnv1.NetworkSpec{
@@ -1922,8 +1924,8 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 	ginkgo.Entry("Layer2",
 		&udnv1.ClusterUserDefinedNetwork{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:   "bgp-udn-layer2-network-a",
-				Labels: map[string]string{"bgp-udn-layer2-network-a": ""},
+				GenerateName: "bgp-l2a-",
+				Labels:       map[string]string{"bgp-l2a": ""},
 			},
 			Spec: udnv1.ClusterUserDefinedNetworkSpec{
 				Network: udnv1.NetworkSpec{
@@ -1936,8 +1938,8 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 			},
 		}, &udnv1.ClusterUserDefinedNetwork{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:   "bgp-udn-layer2-network-b",
-				Labels: map[string]string{"bgp-udn-layer2-network-b": ""},
+				GenerateName: "bgp-l2b-",
+				Labels:       map[string]string{"bgp-l2b": ""},
 			},
 			Spec: udnv1.ClusterUserDefinedNetworkSpec{
 				Network: udnv1.NetworkSpec{
