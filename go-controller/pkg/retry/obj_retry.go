@@ -519,7 +519,7 @@ func (r *RetryFramework) processObjectInTerminalState(obj interface{}, lockedKey
 	_, loaded := r.terminatedObjects.LoadOrStore(lockedKey, true)
 	if loaded {
 		// object was already terminated
-		klog.V(5).Infof("%s: detected object %s of type %s in terminal state (e.g. completed) will be "+
+		klog.V(6).Infof("%s: detected object %s of type %s in terminal state (e.g. completed) will be "+
 			"ignored as it has already been processed", r.name, lockedKey, r.ResourceHandler.ObjType)
 		return
 	}
@@ -610,7 +610,7 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 						r.increaseFailedAttemptsCounter(retryObj)
 						return
 					}
-					klog.V(5).Infof("%s: creating %s %s took: %v", r.name, r.ResourceHandler.ObjType, key, time.Since(start))
+					klog.V(6).Infof("%s: creating %s %s took: %v", r.name, r.ResourceHandler.ObjType, key, time.Since(start))
 					// delete retryObj if handling was successful
 					r.DeleteRetryObj(key)
 					r.ResourceHandler.RecordSuccessEvent(obj)
@@ -676,7 +676,7 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 								r.processObjectInTerminalState(newer, newKey, resourceEventUpdate)
 							})
 						} else {
-							klog.V(5).Infof("%s: ignoring update event for %s %s as it was not found in"+
+							klog.V(6).Infof("%s: ignoring update event for %s %s as it was not found in"+
 								" informer cache and is not in a terminal state", r.name, r.ResourceHandler.ObjType, newKey)
 						}
 					} else {
@@ -804,7 +804,7 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 					klog.Errorf("%s: delete of %s failed: %v", r.name, r.ResourceHandler.ObjType, err)
 					return
 				}
-				klog.V(5).Infof("%s: delete event received for %s %s", r.name, r.ResourceHandler.ObjType, key)
+				klog.V(6).Infof("%s: delete event received for %s %s", r.name, r.ResourceHandler.ObjType, key)
 				// If object is in terminal state, we would have already deleted it during update.
 				// No reason to attempt to delete it here again.
 				if r.ResourceHandler.IsObjectInTerminalState(obj) {

@@ -106,7 +106,7 @@ func (c *Controller) runInternal(stopChan <-chan struct{}, doneWg *sync.WaitGrou
 
 			case <-linkSyncTimer.C:
 				if subscribed {
-					klog.V(5).Info("Link manager calling sync() explicitly")
+					klog.V(6).Info("Link manager calling sync() explicitly")
 					c.sync()
 				} else {
 					if subscribed, addrChan, err = subscribe(); err != nil {

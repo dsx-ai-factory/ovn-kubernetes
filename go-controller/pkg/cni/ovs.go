@@ -143,7 +143,7 @@ func ofctlExec(args ...string) (string, error) {
 	cmd.SetStderr(&stderr)
 
 	cmdStr := strings.Join(args, " ")
-	klog.V(5).Infof("Exec: %s %s", ofctlPath, cmdStr)
+	klog.V(6).Infof("Exec: %s %s", ofctlPath, cmdStr)
 
 	err := cmd.Run()
 	if err != nil {
@@ -152,7 +152,7 @@ func ofctlExec(args ...string) (string, error) {
 		return "", fmt.Errorf("failed to run '%s %s': %v\n  %q", ofctlPath, cmdStr, err, stderrStr)
 	}
 	stdoutStr := stdout.String()
-	klog.V(5).Infof("Exec: %s %s: stdout: %q", ofctlPath, cmdStr, stdoutStr)
+	klog.V(6).Infof("Exec: %s %s: stdout: %q", ofctlPath, cmdStr, stdoutStr)
 
 	trimmed := strings.TrimSpace(stdoutStr)
 	// If output is a single line, strip the trailing newline
@@ -229,6 +229,7 @@ func doPodFlowsExist(mac string, ifAddrs []*net.IPNet, ofPort int) bool {
 			}
 		}
 		if !found {
+			klog.Infof("doPodFlowsExist: no match found for query: %+v", query)
 			return false
 		}
 	}
