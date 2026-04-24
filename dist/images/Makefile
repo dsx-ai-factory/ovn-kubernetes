@@ -46,6 +46,19 @@ ifeq ($(ARCH),amd64)
               "ovn-kube-ubuntu:latest"
 endif
 
+ubuntu-nv-image: NV_UBUNTU_BASE_IMAGE ?= urm.nvidia.com/sw-ipp-lws2-internal-docker/base-container/ubuntu:24.04-fips-stig_lws_pb
+
+ubuntu-nv-image:
+	cd $(abspath $(CURDIR)/../..) && ${OCI_BIN} build \
+		-t ovn-kube-ubuntu$(IMAGE_ARCH) \
+		--build-arg ARTIFACTORY_CERT=${JFROG_CREDENTIAL} \
+		-f dist/images/Dockerfile.ubuntu.nv \
+		--build-arg OVN_VER=${OVN_VER} \
+		--build-arg OVS_VER=${OVS_VER} \
+		--build-arg BASE_IMAGE=${NV_UBUNTU_BASE_IMAGE} .
+	${OCI_BIN} tag "ovn-kube-ubuntu$(IMAGE_ARCH):latest" \
+		"${OVNKUBE_NV_IMAGE}"
+
 define docker_build_args
        $(if $(K8S_VER), --build-arg K8S_VER=-$(K8S_VER))
 endef
