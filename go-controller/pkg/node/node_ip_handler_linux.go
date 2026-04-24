@@ -225,7 +225,7 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, subscribe subscri
 			}
 		case <-addressSyncTimer.C:
 			if subscribed {
-				klog.V(5).Info("Node IP manager calling sync() explicitly")
+				klog.V(6).Info("Node IP manager calling sync() explicitly")
 				c.sync()
 			} else {
 				if subscribed, addrChan, err = subscribe(); err != nil {
@@ -560,7 +560,7 @@ func (c *addressManager) sync() {
 	currAddresses := sets.New[string]()
 	for _, addr := range addrs {
 		if !c.isValidNodeIP(addr.IP, addr.LinkIndex) {
-			klog.V(5).Infof("Skipping non-useable IP address for host: %s", addr.String())
+			klog.V(6).Infof("Skipping non-useable IP address for host: %s", addr.String())
 			continue
 		}
 		netAddr := net.IPNet{IP: addr.IP, Mask: addr.Mask}

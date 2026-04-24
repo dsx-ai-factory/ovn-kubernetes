@@ -611,7 +611,7 @@ func checkForStaleOVSInternalPorts() {
 	// Track how long scrubbing stale interfaces takes
 	start := time.Now()
 	defer func() {
-		klog.V(5).Infof("CheckForStaleOVSInternalPorts took %v", time.Since(start))
+		klog.V(6).Infof("CheckForStaleOVSInternalPorts took %v", time.Since(start))
 	}()
 
 	stdout, _, err := util.RunOVSVsctl("--data=bare", "--no-headings", "--columns=name", "find",

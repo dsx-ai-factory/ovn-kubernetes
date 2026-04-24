@@ -148,7 +148,7 @@ func (oc *DefaultNetworkController) deleteHybridOverlayPort(node *corev1.Node) e
 		}
 	} else {
 		sw := nbdb.LogicalSwitch{Name: oc.GetNetworkScopedSwitchName(node.Name)}
-		klog.Infof("Removing node %s hybrid overlay port", node.Name)
+		klog.V(6).Infof("Removing node %s hybrid overlay port", node.Name)
 		if err := libovsdbops.DeleteLogicalSwitchPorts(oc.nbClient, &sw, &lsp); err != nil {
 			return err
 		}
