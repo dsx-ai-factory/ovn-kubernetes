@@ -1239,6 +1239,27 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 					return condition.Reason
 				}, 30*time.Second, time.Second).Should(gomega.Equal("Accepted"))
 
+				// Check CUDN TransportAccepted condition is True after RA is created
+				if cudnATemplate.Spec.Network.Transport != "" && cudnATemplate.Spec.Network.Transport != udnv1.TransportOption("Geneve") {
+					ginkgo.By("ensure CUDN TransportAccepted condition is True")
+					for _, cudnName := range []string{cudnA.Name, cudnB.Name} {
+						gomega.Eventually(func(g gomega.Gomega) {
+							cudnObj, err := f.DynamicClient.Resource(clusterUDNGVR).Get(context.Background(), cudnName, metav1.GetOptions{}, "status")
+							g.Expect(err).NotTo(gomega.HaveOccurred())
+							conditions, err := getConditions(cudnObj)
+							g.Expect(err).NotTo(gomega.HaveOccurred())
+							for _, condition := range conditions {
+								if condition.Type == "TransportAccepted" {
+									g.Expect(string(condition.Status)).To(gomega.Equal("True"))
+									g.Expect(condition.Message).To(gomega.Equal("Transport has been configured as 'no-overlay'."))
+									return
+								}
+							}
+							g.Expect(false).To(gomega.BeTrue(), "TransportAccepted condition not found in CUDN %s", cudnName)
+						}, 30*time.Second, time.Second).Should(gomega.Succeed())
+					}
+				}
+
 				ginkgo.By("ensure routes from UDNs are learned by the external FRR router")
 				serverContainerIPs := getBGPServerContainerIPs(f)
 				for _, serverContainerIP := range serverContainerIPs {
@@ -1656,6 +1677,9 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 					}),
 				ginkgo.Entry("[ETP=Cluster] UDN pod to a different node nodeport service in same UDN network should work",
 					func(ipFamily utilnet.IPFamily) (clientName string, clientNamespace string, dst string, expectedOutput string, expectErr bool) {
+						if cudnATemplate.Spec.Network.Transport == udnv1.TransportOptionNoOverlay {
+							e2eskipper.Skipf("ETP=Cluster cross-node NodePort not supported for NoOverlay networks, see https://github.com/ovn-kubernetes/ovn-kubernetes/issues/6316")
+						}
 						clientPod := podsNetA[0]
 						// The service is backed by pods in podsNetA.
 						// We want to hit the nodeport on a different node.
@@ -1698,6 +1722,9 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 					}),
 				ginkgo.Entry("[ETP=Cluster] UDN pod to a different node nodeport service in different UDN network should work",
 					func(ipFamily utilnet.IPFamily) (clientName string, clientNamespace string, dst string, expectedOutput string, expectErr bool) {
+						if cudnATemplate.Spec.Network.Transport == udnv1.TransportOptionNoOverlay {
+							e2eskipper.Skipf("ETP=Cluster cross-node NodePort not supported for NoOverlay networks, see https://github.com/ovn-kubernetes/ovn-kubernetes/issues/6316")
+						}
 						clientPod := podsNetA[0]
 						// The service is backed by podNetB.
 						// We want to hit the nodeport on a different node from the client.
@@ -1916,6 +1943,59 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 							CIDR:       "2014:100:200::0/60",
 							HostSubnet: 64,
 						}},
+					},
+				},
+			},
+		},
+	),
+	ginkgo.Entry("Layer3 no-overlay SNAT disabled unmanaged routing", feature.NoOverlay,
+		&udnv1.ClusterUserDefinedNetwork{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   "bgp-l3-noovl-unmgd-net-a",
+				Labels: map[string]string{"bgp-l3-noovl-unmgd-net-a": ""},
+			},
+			Spec: udnv1.ClusterUserDefinedNetworkSpec{
+				Network: udnv1.NetworkSpec{
+					Topology: udnv1.NetworkTopologyLayer3,
+					Layer3: &udnv1.Layer3Config{
+						Role: "Primary",
+						Subnets: []udnv1.Layer3Subnet{{
+							CIDR:       "102.102.0.0/16",
+							HostSubnet: 24,
+						}, {
+							CIDR:       "2013:100:200::0/60",
+							HostSubnet: 64,
+						}},
+					},
+					Transport: udnv1.TransportOptionNoOverlay,
+					NoOverlay: &udnv1.NoOverlayConfig{
+						OutboundSNAT: udnv1.SNATDisabled,
+						Routing:      udnv1.RoutingUnmanaged,
+					},
+				},
+			},
+		}, &udnv1.ClusterUserDefinedNetwork{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   "bgp-l3-noovl-unmgd-net-b",
+				Labels: map[string]string{"bgp-l3-noovl-unmgd-net-b": ""},
+			},
+			Spec: udnv1.ClusterUserDefinedNetworkSpec{
+				Network: udnv1.NetworkSpec{
+					Topology: udnv1.NetworkTopologyLayer3,
+					Layer3: &udnv1.Layer3Config{
+						Role: "Primary",
+						Subnets: []udnv1.Layer3Subnet{{
+							CIDR:       "103.103.0.0/16",
+							HostSubnet: 24,
+						}, {
+							CIDR:       "2014:100:200::0/60",
+							HostSubnet: 64,
+						}},
+					},
+					Transport: udnv1.TransportOptionNoOverlay,
+					NoOverlay: &udnv1.NoOverlayConfig{
+						OutboundSNAT: udnv1.SNATDisabled,
+						Routing:      udnv1.RoutingUnmanaged,
 					},
 				},
 			},
