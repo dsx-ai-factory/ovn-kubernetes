@@ -381,7 +381,7 @@ func (bnc *BaseNetworkController) addMgmtPortIngressACLs(nodeName, switchName st
 
 	// Allow EgressIP health check port when configured
 	if config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort > 0 {
-		hcMatch := fmt.Sprintf("%s.dst==%s && output==%s && tcp.dst==%d", ipFamily, mgmtIP, mgmtPortName, config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort)
+		hcMatch := fmt.Sprintf("%s.dst==%s && outport==%q && tcp.dst==%d", ipFamily, mgmtIP, mgmtPortName, config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort)
 		hcIDs := getMgmtPortIngressACLDbIDs(switchName, mgmtIP, "AllowEIPHealthCheck", bnc.controllerName)
 		hcACL := libovsdbutil.BuildACLWithDefaultTier(hcIDs, types.DefaultAllowPriority, hcMatch,
 			nbdb.ACLActionAllowRelated, nil, libovsdbutil.LportIngress)
@@ -389,7 +389,7 @@ func (bnc *BaseNetworkController) addMgmtPortIngressACLs(nodeName, switchName st
 	}
 
 	// Drop new direct ingress to management port
-	dropMatch := fmt.Sprintf("%s.dst==%s && output==%s", ipFamily, mgmtIP, mgmtPortName)
+	dropMatch := fmt.Sprintf("%s.dst==%s && outport==%q", ipFamily, mgmtIP, mgmtPortName)
 	dropIDs := getMgmtPortIngressACLDbIDs(switchName, mgmtIP, "DenyNew", bnc.controllerName)
 	dropACL := libovsdbutil.BuildACLWithDefaultTier(dropIDs, types.DefaultDenyPriority, dropMatch,
 		nbdb.ACLActionDrop, nil, libovsdbutil.LportIngress)

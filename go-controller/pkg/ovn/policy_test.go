@@ -2374,7 +2374,7 @@ func getMgmtPortIngressExpectedACLs(nodeName, mgmtIP, mgmtPortName string, contr
 
 	// Allow EgressIP health check port when configured
 	if config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort > 0 {
-		hcMatch := fmt.Sprintf("%s.dst==%s && outport==%s && tcp.dst==%d", ipFamily, mgmtIP, mgmtPortName, config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort)
+		hcMatch := fmt.Sprintf("%s.dst==%s && outport==%q && tcp.dst==%d", ipFamily, mgmtIP, mgmtPortName, config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort)
 		hcIDs := getMgmtPortIngressACLDbIDs(nodeName, mgmtIP, "AllowEIPHealthCheck", controllerName)
 		hcACL := libovsdbops.BuildACL(
 			libovsdbutil.GetACLName(hcIDs),
@@ -2392,7 +2392,7 @@ func getMgmtPortIngressExpectedACLs(nodeName, mgmtIP, mgmtPortName string, contr
 		acls = append(acls, hcACL)
 	}
 	// Drop new
-	dropMatch := fmt.Sprintf("%s.dst==%s && outport==%s", ipFamily, mgmtIP, mgmtPortName)
+	dropMatch := fmt.Sprintf("%s.dst==%s && outport==%q", ipFamily, mgmtIP, mgmtPortName)
 	dropIDs := getMgmtPortIngressACLDbIDs(nodeName, mgmtIP, "DenyNew", controllerName)
 	dropACL := libovsdbops.BuildACL(
 		libovsdbutil.GetACLName(dropIDs),
