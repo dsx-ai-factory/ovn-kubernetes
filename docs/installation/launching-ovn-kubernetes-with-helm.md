@@ -61,6 +61,8 @@ networking:
   kubeProxyMode: none
 ```
 
+For a multi-VM cluster instead of Kind, see [Launching OVN-Kubernetes with kubeadm](INSTALL.KUBEADM.md) for an example walkthrough.
+
 - Optional: build local image and load it into Kind nodes
 ```
 # cd dist/images
