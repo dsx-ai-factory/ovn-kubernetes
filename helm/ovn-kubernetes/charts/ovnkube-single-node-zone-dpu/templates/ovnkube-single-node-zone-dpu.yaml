@@ -84,6 +84,8 @@ spec:
           value: {{ default "-vconsole:info -vfile:info" .Values.nbLogLevel | quote }}
         - name: OVN_NORTHD_BACKOFF_INTERVAL
           value: {{ default "0" .Values.northdBackoffInterval | quote }}
+        - name: ENABLE_IPSEC
+          value: {{ hasKey .Values.global "enableIpsec" | ternary .Values.global.enableIpsec false | quote }}
         - name: OVN_KUBERNETES_NAMESPACE
           valueFrom:
             fieldRef:

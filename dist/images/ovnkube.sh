@@ -1144,6 +1144,11 @@ local-nb-ovsdb() {
   ovn-nbctl set NB_Global . name=${K8S_NODE}
   ovn-nbctl set NB_Global . options:name=${K8S_NODE}
 
+  [[ "true" == "${ENABLE_IPSEC}" ]] && {
+    ovn-nbctl set NB_Global . ipsec=true
+    echo "=============== nb-ovsdb ========== reconfigured for ipsec"
+  }
+
   tail --follow=name ${OVN_LOGDIR}/ovsdb-server-nb.log &
   ovn_tail_pid=$!
 
