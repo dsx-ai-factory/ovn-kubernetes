@@ -755,22 +755,6 @@ func setupMACVRFAgnhost(ictx infraapi.Context, containerName, networkName, bridg
 // IP-VRF Agnhost Utilities
 // =============================================================================
 
-func getIPVRFAgnhostIPs(containerName, networkName string, ipFamilySet sets.Set[utilnet.IPFamily]) ([]string, error) {
-	network, err := infraprovider.Get().GetNetwork(networkName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get network %s: %w", networkName, err)
-	}
-
-	agnhostNetInf, err := infraprovider.Get().GetExternalContainerNetworkInterface(
-		infraapi.ExternalContainer{Name: containerName}, network)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get agnhost network interface: %w", err)
-	}
-
-	ipVRFAgnhostIPs := matchIPStringsByIPFamilySet([]string{agnhostNetInf.IPv4, agnhostNetInf.IPv6}, ipFamilySet)
-	return ipVRFAgnhostIPs, nil
-}
-
 // setupIPVRFAgnhost creates an agnhost container connected to the external FRR's VRF
 // for IP-VRF (Layer 3) connectivity testing.
 //
