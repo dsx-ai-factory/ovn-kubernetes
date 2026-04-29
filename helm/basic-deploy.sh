@@ -46,6 +46,8 @@ fi
 IMG_PREFIX='ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-ubuntu'
 TAG='master'
 IMG="${IMG_PREFIX}:${TAG}"
+KIND_IMAGE=${KIND_IMAGE:-kindest/node}
+K8S_VERSION=${K8S_VERSION:-v1.35.0}
 
 if [[ "$BUILD_IMAGE" == "true" ]]; then
   check_command go # Only check for Go when building the image
@@ -70,7 +72,7 @@ sudo sysctl fs.inotify.max_user_instances=512
 # Create a kind cluster
 kind_cluster_name=ovn-helm
 kind delete clusters $kind_cluster_name || true
-cat <<EOF | kind create cluster --name $kind_cluster_name --config=-
+cat <<EOF | kind create cluster --name $kind_cluster_name --image "${KIND_IMAGE}:${K8S_VERSION}" --config=-
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:

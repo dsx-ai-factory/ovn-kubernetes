@@ -65,14 +65,14 @@ CNI features, this can be done by editing `tags` section in values.yaml file.
   contrib/kind-helm.sh -ic -wk 3 -npz 2
   ```
 
-## Manual steps:
+## Step-by-step (alternative to `contrib/kind-helm.sh`):
 - Disable IPv6 of `kind` docker network, otherwise ovnkube-node will fail to start
 ```
 # docker network rm kind (delete `kind` network if it already exists)
 # docker network create kind -o "com.docker.network.bridge.enable_ip_masquerade"="true" -o "com.docker.network.driver.mtu"="1500"
 ```
 
-- Launch a Kind cluster without CNI and kubeproxy (additional controle-plane or worker nodes can be added)
+- Launch a Kind cluster without CNI and kubeproxy (additional control-plane or worker nodes can be added). Save the following as `kind.yaml` and run `kind create cluster --image kindest/node:v1.35.0 --config kind.yaml`:
 ```
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
@@ -92,7 +92,7 @@ networking:
 # kind load docker-image ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-ubuntu:master
 ```
 
-- Run `helm install` with propery `k8sAPIServer` image repo and tag
+- Run `helm install` with proper `k8sAPIServer` image repo and tag
 ```
 # cd helm/ovn-kubernetes
 # helm install ovn-kubernetes . -f values.yaml --set k8sAPIServer="https://$(kubectl get pods -n kube-system -l component=kube-apiserver -o jsonpath='{.items[0].status.hostIP}'):6443" --set global.image.repository=ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-ubuntu --set global.image.tag=master

@@ -67,9 +67,9 @@ CNI features, this can be done by editing `tags` section in values.yaml file.
   contrib/kind-helm.sh -ic -wk 3 -npz 2
   ```
 
-## Manual steps:
+## Step-by-step (alternative to `contrib/kind-helm.sh`):
 
-- Launch a Kind cluster without CNI and kubeproxy (additional controle-plane or worker nodes can be added)
+- Launch a Kind cluster without CNI and kubeproxy (additional control-plane or worker nodes can be added). Save the following as `kind.yaml` and run `kind create cluster --image kindest/node:v1.35.0 --config kind.yaml`:
 ```
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
@@ -91,20 +91,21 @@ networking:
 
 This chart does not use a `values.yaml` by default. You must specify a values file during installation.
 
-- Run `helm install` with the appropriate `k8sAPIServer`, `ovnkube-identity.replicas`, image repo and tag
+- Run `helm install` with the appropriate `k8sAPIServer`, image repo and tag
 ```
 # cd helm/ovn-kubernetes
-# helm install ovn-kubernetes . -f values-no-ic.yaml --set k8sAPIServer="https://$(kubectl get pods -n kube-system -l component=kube-apiserver -o jsonpath='{.items[0].status.hostIP}'):6443" --set ovnkube-identity.replicas=$(kubectl get node -l node-role.kubernetes.io/control-plane --no-headers | wc -l) --set global.image.repository=ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-ubuntu --set global.image.tag=master
+# helm install ovn-kubernetes . -f values-no-ic.yaml --set k8sAPIServer="https://$(kubectl get pods -n kube-system -l component=kube-apiserver -o jsonpath='{.items[0].status.hostIP}'):6443" --set global.image.repository=ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-ubuntu --set global.image.tag=master
 ```
 
 ## Alternative Configurations
 
 To deploy ovn-kubernetes in interconnect mode, use `-f values-single-node-zone.yaml` instead of `-f values-no-ic.yaml`.
-Additionally, you must set the zone annotation on each node before deploying.
+Additionally, you must set the zone label on each node before deploying.
 
-Here is an example of how to set the annotation in a Kind cluster:
+Here is an example of how to set the label in a Kind cluster:
 
 ```
+kind_cluster_name=ovn-helm
 for n in $(kind get nodes --name "${kind_cluster_name}"); do
   kubectl label node "${n}" k8s.ovn.org/zone-name=${n} --overwrite
 done
@@ -689,15 +690,6 @@ false
 </pre>
 </td>
 			<td>MTU of network interface in a Kubernetes pod</td>
-		</tr>
-		<tr>
-			<td>ovnkube-identity.replicas</td>
-			<td>int</td>
-			<td><pre lang="json">
-1
-</pre>
-</td>
-			<td>number of ovnube-identity pods, co-located with kube-apiserver process, so need to be the same number of control plane nodes</td>
 		</tr>
 		<tr>
 			<td>ovnkube-master.replicas</td>
