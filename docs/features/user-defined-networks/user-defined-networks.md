@@ -66,6 +66,16 @@ construct and reuse the user-defined network controllers.
 
 Always check the dependencies on the [Requirements page](../requirements.md)
 
+## Performance/Scale Optimizations for UDN
+
+UDN scale is currently constrained to a couple of hundred UDNs when every UDN is
+rendered on every node in the cluster. If you need to scale beyond that, use the
+Dynamic UDN feature which can reduce per-node OVN-Kubernetes workload, 
+avoid unused per-node UDN state, and avoid per-node allocations until resources
+that need the UDN are scheduled on that node.
+See the [Dynamic UDN feature page](dynamic-udn.md) for enablement,
+observability, and limitations.
+
 ## Workflow Description
 
 A tenant consists of one or more namespaces in a cluster. Network segmentation
