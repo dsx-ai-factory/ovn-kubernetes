@@ -1240,7 +1240,21 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 				}, 30*time.Second, time.Second).Should(gomega.Equal("Accepted"))
 
 				// Check CUDN TransportAccepted condition is True after RA is created
-				if cudnATemplate.Spec.Network.Transport != "" && cudnATemplate.Spec.Network.Transport != udnv1.TransportOption("Geneve") {
+				expectedTransportMsg := func(t udnv1.TransportOption) string {
+					switch t {
+					case udnv1.TransportOptionNoOverlay:
+						return "Transport has been configured as 'no-overlay'."
+					case udnv1.TransportOptionEVPN:
+						return "Transport has been configured as 'EVPN'."
+					default:
+						return ""
+					}
+				}
+				expectedMsgByCUDN := map[string]string{
+					cudnA.Name: expectedTransportMsg(cudnATemplate.Spec.Network.Transport),
+					cudnB.Name: expectedTransportMsg(cudnBTemplate.Spec.Network.Transport),
+				}
+				if expectedMsgByCUDN[cudnA.Name] != "" || expectedMsgByCUDN[cudnB.Name] != "" {
 					ginkgo.By("ensure CUDN TransportAccepted condition is True")
 					for _, cudnName := range []string{cudnA.Name, cudnB.Name} {
 						gomega.Eventually(func(g gomega.Gomega) {
@@ -1251,7 +1265,7 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 							for _, condition := range conditions {
 								if condition.Type == "TransportAccepted" {
 									g.Expect(string(condition.Status)).To(gomega.Equal("True"))
-									g.Expect(condition.Message).To(gomega.Equal("Transport has been configured as 'no-overlay'."))
+									g.Expect(condition.Message).To(gomega.Equal(expectedMsgByCUDN[cudnName]))
 									return
 								}
 							}
