@@ -167,18 +167,6 @@ func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *corev1.Pod, 
 		}()
 	}
 
-	if util.PodWantsHostNetwork(pod) && (oldPod == nil || oldPod.Spec.NodeName != pod.Spec.NodeName) {
-		if oldPod != nil && util.PodScheduled(oldPod) {
-			if err := oc.delHostNetworkPodFromNamespace(oldPod); err != nil {
-				return fmt.Errorf("failed to delete host network pod %s/%s's IPs on node %s from the namespace address_set: %v",
-					oldPod.Namespace, oldPod.Name, oldPod.Spec.NodeName, err)
-			}
-		}
-		if err := oc.addHostNetworkPodToNamespace(pod); err != nil {
-			return fmt.Errorf("failed to add host network pod %s/%s's IPs on node %s to the namespace address_set: %v",
-				pod.Namespace, pod.Name, pod.Spec.NodeName, err)
-		}
-	}
 	if oldPod != nil && (exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod)) {
 		// No matter if a pod is ovn networked, or host networked, we still need to check for exgw
 		// annotations. If the pod is ovn networked and is in update reschedule, addLogicalPort will take
@@ -325,17 +313,12 @@ func (oc *DefaultNetworkController) removeLocalZonePod(pod *corev1.Pod, portInfo
 		}()
 	}
 	if util.PodWantsHostNetwork(pod) {
-		if err := oc.delHostNetworkPodFromNamespace(pod); err != nil {
-			return fmt.Errorf("failed to delete host network pod %s/%s's IPs on node %s from the namespace address_set: %v",
-				pod.Namespace, pod.Name, pod.Spec.NodeName, err)
-		}
 		if err := oc.deletePodExternalGW(pod); err != nil {
 			return fmt.Errorf("unable to delete external gateway routes for pod %s: %w",
 				getPodNamespacedName(pod), err)
 		}
 		return nil
 	}
-
 	if err := oc.deleteLogicalPort(pod, portInfo); err != nil {
 		return fmt.Errorf("deleteLogicalPort failed for pod %s: %w",
 			getPodNamespacedName(pod), err)
