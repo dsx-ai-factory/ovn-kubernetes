@@ -147,6 +147,7 @@ nav:
       - OVS Acceleration with DOCA datapath: features/hardware-offload/ovs-doca.md
     - BGP Integration:
       - Route Advertisements: features/bgp-integration/route-advertisements.md
+      - No-Overlay Mode: features/bgp-integration/no-overlay.md
   - Troubleshooting:
     - Introduction: troubleshooting/debugging.md
     - OVNKube Trace: troubleshooting/ovnkube-trace.md
