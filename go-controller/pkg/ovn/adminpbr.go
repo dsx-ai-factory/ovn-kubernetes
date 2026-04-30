@@ -892,8 +892,9 @@ func (bnc *BaseNetworkController) cleanupLogicalRouterPolicy(adminPBRName string
 }
 
 func (bnc *BaseNetworkController) deleteLogicalRouterPoliciesByPriority(priority int) error {
+	networkName := bnc.GetNetworkName()
 	return libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(bnc.nbClient, bnc.GetNetworkScopedName(types.OVNClusterRouter), func(item *nbdb.LogicalRouterPolicy) bool {
-		return item.Priority == priority
+		return item.Priority == priority && item.ExternalIDs[string(libovsdbops.NetworkKey)] == networkName
 	})
 }
 

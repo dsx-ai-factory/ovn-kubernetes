@@ -10,7 +10,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	knet "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
@@ -19,127 +18,11 @@ import (
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/generator/udn"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
 )
-
-func getHostNetworkPodIPs(node *corev1.Node, policyType string) ([]net.IP, error) {
-	ips := []net.IP{}
-	if policyType == string(knet.PolicyTypeIngress) || policyType == "Both" {
-		// the packets from the host towards the Pod IP will have the source IP of the
-		// OVN K8s Management Port
-		mgmtIPs, err := util.GetNodeMgmtIPs(node)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get node %s's management IPs: %v", node.Name, err)
-		}
-		ips = append(ips, mgmtIPs...)
-
-		// the packets from the host towards the Cluster IP will have the source IP of the
-		// Gateway Router to Join Switch port's IP address
-		lrpIPs, err := udn.GetGWRouterIPs(node, &util.DefaultNetInfo{})
-		if err != nil {
-			return nil, fmt.Errorf("failed to get join switch port IP address for node %s: %v/%v", node.Name, err, err)
-		}
-
-		for _, lrpIP := range lrpIPs {
-			ips = append(ips, lrpIP.IP)
-		}
-	}
-
-	if policyType == string(knet.PolicyTypeEgress) || policyType == "Both" {
-		ipstr, err := util.GetNodePrimaryIP(node)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get node %s's primary IP: %v", node.Name, err)
-		}
-
-		ip := net.ParseIP(ipstr)
-		if ip == nil {
-			return nil, fmt.Errorf("invalid node %s's primary IP: %s", node.Name, ipstr)
-		}
-		ips = append(ips, ip)
-	}
-	return ips, nil
-}
-
-func addHostnetworkPodIPToAddressSet(wf *factory.WatchFactory, nodeName, podName, policyType string, addressSet addressset.AddressSet,
-	nodeHostNetPodsCache map[string]map[string][]net.IP) error {
-
-	node, err := wf.GetNode(nodeName)
-	if err != nil {
-		return fmt.Errorf("failed to get node %s: %v", nodeName, err)
-	}
-
-	// if the node is not managed by OVN, then we have nothing to do
-	if util.NoHostSubnet(node) {
-		return nil
-	}
-
-	ips, err := getHostNetworkPodIPs(node, policyType)
-	if err != nil {
-		return fmt.Errorf("failed to get %s policy IPs for host network pod %s schedued on node %s: %v",
-			policyType, podName, nodeName, err)
-	}
-	// it is ok to add the same addresses to the addressset multiple times. If they already exist, it would be no-op
-	if err := addressSet.AddAddresses(util.StringSlice(ips)); err != nil {
-		return fmt.Errorf("failed to add host network Pod IPs %v to address_set %s", ips, addressSet.GetName())
-	}
-
-	if _, ok := nodeHostNetPodsCache[nodeName]; !ok {
-		nodeHostNetPodsCache[nodeName] = map[string][]net.IP{}
-	}
-	nodeHostNetPodsCache[nodeName][podName] = ips
-	return nil
-}
-
-func delHostnetworkPodIPFromAddressSet(nodeName, podName string, addressSet addressset.AddressSet,
-	nodeHostNetPodsCache map[string]map[string][]net.IP) error {
-
-	if podMap, ok := nodeHostNetPodsCache[nodeName]; ok {
-		if ips, ok := podMap[podName]; ok {
-			delete(podMap, podName)
-
-			// If no host network pods on this node, delete the node IPs from the network addressSet
-			if len(podMap) == 0 {
-				delete(nodeHostNetPodsCache, nodeName)
-				err := addressSet.DeleteAddresses(util.StringSlice(ips))
-				if err != nil {
-					return fmt.Errorf("failed to delete host network Pod IPs %v from address_set %s",
-						ips, addressSet.GetName())
-				}
-			}
-			return nil
-		}
-	}
-	klog.Warningf("Host network IPs of Pod %s on node %s are not in the addressSet %s", podName, nodeName,
-		addressSet.GetName())
-	return nil
-}
-
-func (oc *DefaultNetworkController) addHostNetworkPodToNamespace(pod *corev1.Pod) error {
-	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(pod.Namespace, false, nil)
-	if err != nil {
-		return err
-	}
-	defer nsUnlock()
-
-	return addHostnetworkPodIPToAddressSet(oc.watchFactory, pod.Spec.NodeName,
-		pod.Name, "Both", nsInfo.addressSet, nsInfo.nodeHostNetPodsCache)
-}
-
-func (oc *DefaultNetworkController) delHostNetworkPodFromNamespace(pod *corev1.Pod) error {
-	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(pod.Namespace, false, nil)
-	if err != nil {
-		return err
-	}
-	defer nsUnlock()
-
-	return delHostnetworkPodIPFromAddressSet(pod.Spec.NodeName, pod.Name, nsInfo.addressSet, nsInfo.nodeHostNetPodsCache)
-}
 
 func (oc *DefaultNetworkController) getRoutingExternalGWs(nsInfo *namespaceInfo) *gatewayInfo {
 	res := gatewayInfo{}
@@ -440,96 +323,5 @@ func (oc *DefaultNetworkController) deleteNamespace(ns *corev1.Namespace) error 
 // with its mutex locked.
 // ns is the name of the namespace, while namespace is the optional k8s namespace object
 func (oc *DefaultNetworkController) ensureNamespaceLocked(ns string, readOnly bool, namespace *corev1.Namespace) (*namespaceInfo, func(), error) {
-	ipsGetter := func(ns string) []net.IP {
-		// special handling of host network namespace. issues/3381
-		if config.Kubernetes.HostNetworkNamespace != "" && ns == config.Kubernetes.HostNetworkNamespace {
-			return oc.getAllHostNamespaceAddresses()
-		}
-		return oc.getAllNamespacePodAddresses(ns)
-	}
-	return oc.ensureNamespaceLockedCommon(ns, readOnly, namespace, ipsGetter, oc.configureNamespace)
-}
-
-// getAllHostNamespaceAddresses retrives management port and gateway router LRP
-// IP for all nodes in the cluster
-func (oc *DefaultNetworkController) getAllHostNamespaceAddresses() []net.IP {
-	var ips []net.IP
-	// add the mp0 interface addresses to this namespace.
-	existingNodes, err := oc.watchFactory.GetNodes()
-	if err != nil {
-		klog.Errorf("Failed to get all nodes (%v)", err)
-	} else {
-		ips = make([]net.IP, 0, len(existingNodes))
-		for _, node := range existingNodes {
-			if util.NoHostSubnet(node) {
-				continue
-			}
-			hostNetworkIPs, err := oc.getHostNamespaceAddressesForNode(node)
-			if err != nil {
-				klog.Errorf("Error parsing annotation for node %s: %v", node.Name, err)
-			}
-			ips = append(ips, hostNetworkIPs...)
-		}
-	}
-	return ips
-}
-
-// getHostNamespaceAddressesForNode retrives management port and gateway router LRP
-// IP of a specific node
-func (oc *DefaultNetworkController) getHostNamespaceAddressesForNode(node *corev1.Node) ([]net.IP, error) {
-	var ips []net.IP
-	hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
-	if err != nil {
-		return nil, err
-	}
-	for _, hostSubnet := range hostSubnets {
-		mgmtIfAddr := oc.GetNodeManagementIP(hostSubnet)
-		ips = append(ips, mgmtIfAddr.IP)
-	}
-	// for shared gateway mode we will use LRP IPs to SNAT host network traffic
-	// so add these to the address set.
-	lrpIPs, gwIPsErr := udn.GetGWRouterIPs(node, oc.GetNetInfo())
-	if gwIPsErr != nil {
-		if !util.IsAnnotationNotSetError(gwIPsErr) {
-			return nil, gwIPsErr
-		}
-		// FIXME(tssurya): This is present for backwards compatibility
-		// Remove me a few months from now
-		var lrpAddrsErr error
-		lrpIPs, lrpAddrsErr = util.ParseNodeGatewayRouterLRPAddrs(node)
-		if lrpAddrsErr != nil {
-			return nil, fmt.Errorf("failed to fallback to annotations after error %q: %w", gwIPsErr, lrpAddrsErr)
-		}
-	}
-
-	for _, lrpIP := range lrpIPs {
-		ips = append(ips, lrpIP.IP)
-	}
-
-	// When NoOverlay mode is enabled, also include the node's primary physical interface IP
-	if oc.GetNetInfo().Transport() == types.NetworkTransportNoOverlay {
-		nodeIfAddr, err := util.GetNodeIfAddrAnnotation(node)
-		if err != nil {
-			if !util.IsAnnotationNotSetError(err) {
-				return nil, fmt.Errorf("failed to get node primary interface address: %w", err)
-			}
-		} else {
-			if nodeIfAddr.IPv4 != "" {
-				ipv4, _, err := net.ParseCIDR(nodeIfAddr.IPv4)
-				if err != nil {
-					return nil, fmt.Errorf("failed to parse node primary IPv4 address %s: %w", nodeIfAddr.IPv4, err)
-				}
-				ips = append(ips, ipv4)
-			}
-			if nodeIfAddr.IPv6 != "" {
-				ipv6, _, err := net.ParseCIDR(nodeIfAddr.IPv6)
-				if err != nil {
-					return nil, fmt.Errorf("failed to parse node primary IPv6 address %s: %w", nodeIfAddr.IPv6, err)
-				}
-				ips = append(ips, ipv6)
-			}
-		}
-	}
-
-	return ips, nil
+	return oc.ensureNamespaceLockedCommon(ns, readOnly, namespace, oc.configureNamespace)
 }
