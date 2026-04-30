@@ -44,54 +44,47 @@ every layer is a subchart by itself. Based on the deployment needs, all or
 some of these subcharts are installed to provide the aforementioned OVN K8s
 CNI features, this can be done by editing `tags` section in values.yaml file.
 
-## Quickstart:
-Run script `helm/basic-deploy.sh` to set up a basic OVN/Kubernetes cluster.
+## Pre-requisites
 
-## Step-by-step (alternative to `basic-deploy.sh`):
+This guide assumes you already have a running Kubernetes cluster reachable via `KUBECONFIG`, with **no CNI installed** and **kube-proxy disabled** — OVN-Kubernetes provides both.
 
-- Launch a Kind cluster without CNI and kubeproxy (additional control-plane or worker nodes can be added). Save the following as `kind.yaml` and run `kind create cluster --image kindest/node:v1.35.0 --config kind.yaml`:
+If you don't have such a cluster, you can create one with:
+
+- [Launching OVN-Kubernetes with kubeadm](INSTALL.KUBEADM.md) — multi-VM walkthrough on a `kubeadm`-bootstrapped cluster.
+
+## Quickstart
+
+Once you have a cluster matching the pre-requisites above, run `helm/basic-deploy.sh` from the repo to install OVN-Kubernetes via Helm against the cluster `KUBECONFIG` points at.
+
+The chart uses `values-single-node-zone.yaml` by default.
+
+## Step-by-step install
+
+
+- Set the zone label on each node (required for interconnect mode):
 ```
-kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-nodes:
-- role: control-plane
-- role: worker
-networking:
-  disableDefaultCNI: true
-  kubeProxyMode: none
+for n in $(kubectl get nodes -o jsonpath='{.items[*].metadata.name}'); do
+  kubectl label node "${n}" k8s.ovn.org/zone-name=${n} --overwrite
+done
 ```
 
-For a multi-VM cluster instead of Kind, see [Launching OVN-Kubernetes with kubeadm](INSTALL.KUBEADM.md) for an example walkthrough.
+- Run `helm install` with the appropriate `k8sAPIServer`, image repo and tag:
+```
+# cd helm/ovn-kubernetes
+# helm install ovn-kubernetes . -f values-single-node-zone.yaml --set k8sAPIServer="https://$(kubectl get pods -n kube-system -l component=kube-apiserver -o jsonpath='{.items[0].status.hostIP}'):6443" --set global.image.repository=ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-ubuntu --set global.image.tag=master
+```
 
-- Optional: build local image and load it into Kind nodes
+- Optional: build a custom OVN-Kubernetes image, push it to a registry the cluster nodes can pull from, and point `helm install` at it via `--set global.image.repository=...` / `--set global.image.tag=...`:
 ```
 # cd dist/images
 # make ubuntu-image
-# docker tag ovn-kube-ubuntu:latest ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-ubuntu:master
-# kind load docker-image ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-ubuntu:master
-```
-
-This chart does not use a `values.yaml` by default. You must specify a values file during installation.
-
-- Run `helm install` with proper `k8sAPIServer` image repo and tag
-```
-# cd helm/ovn-kubernetes
-# helm install ovn-kubernetes . -f values-no-ic.yaml --set k8sAPIServer="https://$(kubectl get pods -n kube-system -l component=kube-apiserver -o jsonpath='{.items[0].status.hostIP}'):6443" --set global.image.repository=ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-ubuntu --set global.image.tag=master
+# docker tag ovn-kube-ubuntu:latest <your-registry>/ovn-kube-ubuntu:<tag>
+# docker push <your-registry>/ovn-kube-ubuntu:<tag>
 ```
 
 ## Alternative Configurations
 
-To deploy ovn-kubernetes in interconnect mode, use `-f values-single-node-zone.yaml` instead of `-f values-no-ic.yaml`.
-Additionally, you must set the zone label on each node before deploying.
-
-Here is an example of how to set the label in a Kind cluster:
-
-```
-kind_cluster_name=ovn-helm
-for n in $(kind get nodes --name "${kind_cluster_name}"); do
-  kubectl label node "${n}" k8s.ovn.org/zone-name=${n} --overwrite
-done
-```
+The deprecated central mode topology is available via `-f values-no-ic.yaml`.
 
 ## Values
 
