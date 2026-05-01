@@ -5,6 +5,9 @@
 
 set -ex
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+cd "${SCRIPT_DIR}/.."
+
 # setting this env prevents ginkgo e2e from trying to run provider setup
 export KUBERNETES_CONFORMANCE_TEST=y
 export KUBECONFIG=${KUBECONFIG:-${HOME}/ovn.conf}
@@ -257,6 +260,13 @@ if [ "$ENABLE_NO_OVERLAY" == true ]; then
   skip "Pod to pod TCP with low MTU"
 fi
 
+# Downstream branches can append branch-specific skips and late environment
+# settings without carrying a fork of this runner.
+if [ -n "${E2E_CP_DOWNSTREAM_HOOK:-}" ]; then
+  # shellcheck source=/dev/null
+  source "${E2E_CP_DOWNSTREAM_HOOK}"
+fi
+
 # setting these is required to make RuntimeClass tests work ... :/
 export KUBE_CONTAINER_RUNTIME=remote
 export KUBE_CONTAINER_RUNTIME_ENDPOINT=unix:///run/containerd/containerd.sock
@@ -272,7 +282,16 @@ GO_TEST_TIMEOUT=$((TEST_TIMEOUT + 5))
 
 pushd e2e
 
-go mod download
+GO_MOD_DOWNLOAD_TIMEOUT=${GO_MOD_DOWNLOAD_TIMEOUT:-300}
+end=$((SECONDS + GO_MOD_DOWNLOAD_TIMEOUT))
+until go mod download; do
+  if (( SECONDS >= end )); then
+    echo "go mod download failed after multiple attempts"
+    exit 1
+  fi
+  echo "Retrying go mod download in 10 seconds..."
+  sleep 10
+done
 
 if [ "$ENABLE_EVPN" = true ]; then
   # EVPN tests are parallel-safe (unique per-test resource names, randomized
@@ -294,7 +313,8 @@ if [ "$ENABLE_EVPN" = true ]; then
         -provider skeleton \
         -kubeconfig "${KUBECONFIG}" \
         ${NUM_NODES:+"--num-nodes=${NUM_NODES}"} \
-        ${E2E_REPORT_DIR:+"--report-dir=${E2E_REPORT_DIR}"}
+        ${E2E_REPORT_DIR:+"--report-dir=${E2E_REPORT_DIR}"} \
+        ${E2E_REPORT_PREFIX:+"--report-prefix=${E2E_REPORT_PREFIX}"}
 else
   go test -test.timeout ${GO_TEST_TIMEOUT}m -v . \
           -ginkgo.v \
@@ -307,6 +327,7 @@ else
           -provider skeleton \
           -kubeconfig ${KUBECONFIG} \
           ${NUM_NODES:+"--num-nodes=${NUM_NODES}"} \
-          ${E2E_REPORT_DIR:+"--report-dir=${E2E_REPORT_DIR}"}
+          ${E2E_REPORT_DIR:+"--report-dir=${E2E_REPORT_DIR}"} \
+          ${E2E_REPORT_PREFIX:+"--report-prefix=${E2E_REPORT_PREFIX}"}
 fi
 popd
