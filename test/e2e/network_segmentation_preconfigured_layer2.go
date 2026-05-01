@@ -144,6 +144,9 @@ var _ = Describe("Network Segmentation: Preconfigured Layer2 UDN", feature.Netwo
 		netConfig     *networkAttachmentConfigParams
 		expectedError interface{}
 	}
+	maskedNetworkAddressError := func(field string) OmegaMatcher {
+		return MatchRegexp(fmt.Sprintf(`Invalid value: (?:"object": )?%s must be a masked network address \(no host bits set\)`, field))
+	}
 	DescribeTable("unmasked reserved / infrastructure subnets are not allowed",
 		func(config invalidAPITestConfig) {
 			podIPs := filterCIDRs(f.ClientSet, config.netConfig.cidr)
@@ -169,9 +172,7 @@ var _ = Describe("Network Segmentation: Preconfigured Layer2 UDN", feature.Netwo
 				role:          "primary",
 				reservedCIDRs: "172.16.0.10/30",
 			},
-			expectedError: ContainSubstring(
-				"Invalid value: \"object\": reservedSubnets must be a masked network address (no host bits set)",
-			),
+			expectedError: maskedNetworkAddressError("reservedSubnets"),
 		}),
 		Entry("Layer2 with unmasked IPv6 reserved subnets", invalidAPITestConfig{
 			netConfig: &networkAttachmentConfigParams{
@@ -181,9 +182,7 @@ var _ = Describe("Network Segmentation: Preconfigured Layer2 UDN", feature.Netwo
 				role:          "primary",
 				reservedCIDRs: "2014:100:200::88/122",
 			},
-			expectedError: ContainSubstring(
-				"Invalid value: \"object\": reservedSubnets must be a masked network address (no host bits set)",
-			),
+			expectedError: maskedNetworkAddressError("reservedSubnets"),
 		}),
 		Entry("Layer2 with unmasked IPv4 infrastructure subnets", invalidAPITestConfig{
 			netConfig: &networkAttachmentConfigParams{
@@ -193,9 +192,7 @@ var _ = Describe("Network Segmentation: Preconfigured Layer2 UDN", feature.Netwo
 				role:                "primary",
 				infrastructureCIDRs: "172.16.0.10/30",
 			},
-			expectedError: ContainSubstring(
-				"Invalid value: \"object\": infrastructureSubnets must be a masked network address (no host bits set)",
-			),
+			expectedError: maskedNetworkAddressError("infrastructureSubnets"),
 		}),
 		Entry("Layer2 with unmasked IPv6 infrastructure subnets", invalidAPITestConfig{
 			netConfig: &networkAttachmentConfigParams{
@@ -205,9 +202,7 @@ var _ = Describe("Network Segmentation: Preconfigured Layer2 UDN", feature.Netwo
 				role:                "primary",
 				infrastructureCIDRs: "2014:100:200::88/122",
 			},
-			expectedError: ContainSubstring(
-				"Invalid value: \"object\": infrastructureSubnets must be a masked network address (no host bits set)",
-			),
+			expectedError: maskedNetworkAddressError("infrastructureSubnets"),
 		}),
 	)
 
