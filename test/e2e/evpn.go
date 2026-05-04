@@ -242,7 +242,7 @@ func setupSVIOnExternalFRR(ictx infraapi.Context, vid int, bridgeName, vrfName s
 		_, err := infraprovider.Get().ExecExternalContainerCommand(frr,
 			[]string{"ip", "link", "del", sviName})
 		if err != nil {
-			framework.Logf("Warning: failed to delete SVI %s: %v", sviName, err)
+			return fmt.Errorf("failed to delete SVI %s: %v", sviName, err)
 		}
 
 		framework.Logf("SVI %s cleanup complete on %s (VID %d, VRF: %q)", sviName, externalFRRContainerName, vid, vrfName)
@@ -341,7 +341,7 @@ func setupIPVRFOnExternalFRR(ictx infraapi.Context, vrfName string, vni, vid int
 		_, err = infraprovider.Get().ExecExternalContainerCommand(frr,
 			[]string{"ip", "link", "del", vrfName})
 		if err != nil {
-			framework.Logf("Warning: failed to delete Linux VRF %s: %v", vrfName, err)
+			return fmt.Errorf("failed to delete Linux VRF %s: %v", vrfName, err)
 		}
 
 		// Delete FRR VRF definition (now that Linux VRF is gone, FRR should allow this)
@@ -349,7 +349,7 @@ func setupIPVRFOnExternalFRR(ictx infraapi.Context, vrfName string, vni, vid int
 			"configure terminal", fmt.Sprintf("no vrf %s", vrfName), "end",
 		))
 		if err != nil {
-			framework.Logf("Warning: failed to delete FRR VRF definition %s: %v", vrfName, err)
+			return fmt.Errorf("failed to delete FRR VRF definition %s: %v", vrfName, err)
 		}
 
 		framework.Logf("IP-VRF cleanup complete on %s (VNI %d)", externalFRRContainerName, vni)
@@ -496,14 +496,14 @@ func setupIPVRFBGPOnExternalFRR(ictx infraapi.Context, vrfName string, asn, vni 
 			"configure terminal", fmt.Sprintf("vrf %s", vrfName), fmt.Sprintf("no vni %d", vni), "exit-vrf", "end",
 		))
 		if err != nil {
-			framework.Logf("Warning: failed to remove VNI binding (may already be cleaned up): %v", err)
+			return fmt.Errorf("failed to remove VNI binding (may already be cleaned up): %v", err)
 		}
 
 		_, err = infraprovider.Get().ExecExternalContainerCommand(frr, vtyshCommand(
 			"configure terminal", fmt.Sprintf("no router bgp %d vrf %s", asn, vrfName), "end",
 		))
 		if err != nil {
-			framework.Logf("Warning: failed to remove BGP VRF (may already be cleaned up): %v", err)
+			return fmt.Errorf("failed to remove BGP VRF (may already be cleaned up): %v", err)
 		}
 
 		// NOTE: We intentionally do NOT run "no vrf" here.
@@ -971,7 +971,10 @@ func ensureVTEPLoopbackIPs(
 		for i, node := range nodeList.Items {
 			for _, ipNet := range parsedCIDRs {
 				ip := incrementIP(ipNet.IP, i+1)
-				_, _ = infraprovider.Get().ExecK8NodeCommand(node.Name, []string{"ip", "addr", "del", ip.String() + "/32", "dev", "lo"})
+				_, err = infraprovider.Get().ExecK8NodeCommand(node.Name, []string{"ip", "addr", "del", ip.String() + "/32", "dev", "lo"})
+				if err != nil {
+					return fmt.Errorf("failed to delete VTEP IP %s to loopback on node %s: %w", ip, node.Name, err)
+				}
 			}
 		}
 		return nil
