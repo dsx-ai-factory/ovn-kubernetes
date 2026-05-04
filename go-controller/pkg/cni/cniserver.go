@@ -15,15 +15,20 @@ import (
 	"time"
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
+	current "github.com/containernetworking/cni/pkg/types/100"
 	"github.com/gorilla/mux"
 	nadv1Listers "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
+	nadutils "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils"
 
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-kubernetes/libovsdb/client"
 
+	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/udn"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
@@ -33,6 +38,7 @@ import (
 )
 
 const kubeletDefaultCRIOperationTimeout = 2 * time.Minute
+const resourceNameAnnot = "k8s.v1.cni.cncf.io/resourceName"
 
 // *** The Server is PRIVATE API between OVN components and may be
 // changed at any time.  It is in no way a supported interface or API. ***
@@ -213,26 +219,35 @@ func cniRequestToPodRequest(cr *Request, ctx context.Context) (*PodRequest, erro
 	req.netName = conf.Name
 	if req.netName == types.DefaultNetworkName {
 		req.nadName = types.DefaultNetworkName
+		req.nadKey = types.DefaultNetworkName
 	} else {
 		req.nadName = conf.NADName
 	}
 
-	if conf.DeviceID != "" {
-		if util.IsPCIDeviceName(conf.DeviceID) {
-			// DeviceID is a PCI address
-			req.IsVFIO = util.GetSriovnetOps().IsVfPciVfioBound(conf.DeviceID)
-		} else if util.IsAuxDeviceName(conf.DeviceID) {
-			// DeviceID is an Auxiliary device name - <driver_name>.<kind_of_a_type>.<id>
-			chunks := strings.Split(conf.DeviceID, ".")
-			if len(chunks) < 2 {
-				return nil, fmt.Errorf("invalid auxiliary device name %q: expected driver.<type>.<id>", conf.DeviceID)
-			}
-			if chunks[1] != "sf" {
-				return nil, fmt.Errorf("only SF auxiliary devices are supported, device name %q is not supported", conf.DeviceID)
-			}
-		} // else it is a netdev name, which is used for simulated DPU environments.
+	if err = updateDeviceInfo(req); err != nil {
+		return nil, err
 	}
 	return req, nil
+}
+
+func updateDeviceInfo(pr *PodRequest) error {
+	if pr.CNIConf.DeviceID == "" {
+		return nil
+	}
+	if util.IsPCIDeviceName(pr.CNIConf.DeviceID) {
+		// DeviceID is a PCI address
+		pr.IsVFIO = util.GetSriovnetOps().IsVfPciVfioBound(pr.CNIConf.DeviceID)
+	} else if util.IsAuxDeviceName(pr.CNIConf.DeviceID) {
+		// DeviceID is an Auxiliary device name - <driver_name>.<kind_of_a_type>.<id>
+		chunks := strings.Split(pr.CNIConf.DeviceID, ".")
+		if len(chunks) < 2 {
+			return fmt.Errorf("invalid auxiliary device name %q: expected driver.<type>.<id>", pr.CNIConf.DeviceID)
+		}
+		if chunks[1] != "sf" {
+			return fmt.Errorf("only SF auxiliary devices are supported, device name %q is not supported", pr.CNIConf.DeviceID)
+		}
+	} // else it is a netdev name, which is used for simulated DPU environments.
+	return nil
 }
 
 // Dispatch a pod request to the request handler and return the result to the
@@ -296,7 +311,7 @@ func (s *Server) handleCNIRequest(r *http.Request) (result []byte, err error) {
 	klog.Infof("%s %s starting CNI request", request, request.Command)
 	switch request.Command {
 	case CNIAdd:
-		response, err = request.cmdAdd(s.kubeAuth, s.clientSet, s.networkManager, s.ovsClient)
+		response, err = request.cmdAdd(s.kubeAuth, s.clientSet, s.ovsClient)
 	case CNIDel:
 		response, err = request.cmdDel(s.clientSet)
 	default:
@@ -307,11 +322,141 @@ func (s *Server) handleCNIRequest(r *http.Request) (result []byte, err error) {
 		return nil, err
 	}
 
+	// check if this is a default network request for a pod with primary UDN
+	// and create a primary interface if so
+	if request.Command == CNIAdd {
+		// We don't do anything extra for CNIDel, because UnconfigureInterface already deletes all ports
+		// for a given pod from OVS, also some other cleanup are done in batch in cmdDel
+		primaryPodRequest, err := s.getPrimaryUDNPodRequest(request)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get primary UDN pod request: %v", err)
+		}
+		if primaryPodRequest != nil {
+			klog.V(4).Infof("Pod %s/%s primaryUDN podRequest %v", primaryPodRequest.PodNamespace, primaryPodRequest.PodName, primaryPodRequest)
+			primaryResponse, err := primaryPodRequest.cmdAdd(s.kubeAuth, s.clientSet, s.ovsClient)
+			if err != nil {
+				return nil, fmt.Errorf("failed to add primary UDN pod request: %v", err)
+			}
+			// merge primary response into the original response
+			mergePrimaryUDNResponse(response, primaryResponse, primaryPodRequest)
+		}
+	}
+
 	if result, err = response.Marshal(); err != nil {
 		return nil, fmt.Errorf("failed to marshal result: %v", err)
 	}
 
 	return result, nil
+}
+
+func (s *Server) getPrimaryUDNPodRequest(originalPodRequest *PodRequest) (*PodRequest, error) {
+	if !util.IsNetworkSegmentationSupportEnabled() {
+		return nil, nil
+	}
+	// check if this a default network request for a pod with primary UDN
+	// and create a primary interface if so
+	if originalPodRequest.nadName != types.DefaultNetworkName {
+		return nil, nil
+	}
+	podNamespace := originalPodRequest.PodNamespace
+	podName := originalPodRequest.PodName
+	// this function is only called after the default network is set up, so the pod should already be in the
+	// network manager's cache and have an active network
+	activeNetwork, err := s.networkManager.GetActiveNetworkForNamespace(podNamespace)
+	if err != nil {
+		return nil, err
+	}
+	// CNI should always have an active network for a pod on our node
+	if activeNetwork == nil {
+		return nil, fmt.Errorf("no active network found for namespace %s", podNamespace)
+	}
+	if activeNetwork.IsDefault() {
+		// there is no primary NAD
+		return nil, nil
+	}
+	primaryNADKey, err := s.networkManager.GetPrimaryNADForNamespace(podNamespace)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get primary NAD for namespace %s: %v", podNamespace, err)
+	}
+
+	primaryPodRequest := &PodRequest{
+		Command:      originalPodRequest.Command,
+		PodNamespace: originalPodRequest.PodNamespace,
+		PodName:      originalPodRequest.PodName,
+		PodUID:       originalPodRequest.PodUID,
+		SandboxID:    originalPodRequest.SandboxID,
+		Netns:        originalPodRequest.Netns,
+		IfName:       "ovn-udn1",
+		timestamp:    time.Now(),
+		ctx:          originalPodRequest.ctx,
+		CNIConf: &ovncnitypes.NetConf{
+			// primary UDN MTU will be taken from config.Default.MTU
+			// if not specified at the NAD
+			MTU: activeNetwork.MTU(),
+		},
+		netName: activeNetwork.GetNetworkName(),
+		nadName: primaryNADKey,
+		nadKey:  primaryNADKey,
+	}
+	// To support for non VFIO devices like SRIOV, get the primary UDN's resource name
+	nadNamespace, nadName, err := cache.SplitMetaNamespaceKey(primaryNADKey)
+	if err != nil {
+		return nil, fmt.Errorf("invalid NAD name %s", primaryNADKey)
+	}
+	nad, err := s.clientSet.nadLister.NetworkAttachmentDefinitions(nadNamespace).Get(nadName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get primary UDN's network-attachment-definition %s: %v", nadName, err)
+	}
+	resourceName := nad.Annotations[resourceNameAnnot]
+	if resourceName != "" {
+		pod, err := s.clientSet.getPod(podNamespace, podName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get pod %s/%s: %v", podNamespace, podName, err)
+		}
+		deviceID, err := udn.GetPodPrimaryUDNDeviceID(pod, resourceName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get primary UDN device ID for pod %s/%s resource %s: %v",
+				pod.Namespace, pod.Name, resourceName, err)
+		}
+		primaryPodRequest.CNIConf.DeviceID = deviceID
+		deviceInfo, err := nadutils.LoadDeviceInfoFromDP(resourceName, deviceID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load primary UDN's device info for pod %s/%s resource %s deviceID %s: %w",
+				pod.Namespace, pod.Name, resourceName, deviceID, err)
+		}
+		primaryPodRequest.deviceInfo = *deviceInfo
+	}
+	if err = updateDeviceInfo(primaryPodRequest); err != nil {
+		return nil, err
+	}
+	return primaryPodRequest, nil
+}
+
+func mergePrimaryUDNResponse(originalResponse, primaryResponse *Response, primaryPodRequest *PodRequest) {
+	// merge primary response into the original response
+	if originalResponse == nil || primaryResponse == nil {
+		return
+	}
+	if !config.UnprivilegedMode {
+		result := originalResponse.Result
+		primaryUDNResult := primaryResponse.Result
+		result.Routes = append(result.Routes, primaryUDNResult.Routes...)
+		numOfInitialIPs := len(result.IPs)
+		numOfInitialIfaces := len(result.Interfaces)
+		result.Interfaces = append(result.Interfaces, primaryUDNResult.Interfaces...)
+		result.IPs = append(result.IPs, primaryUDNResult.IPs...)
+
+		// Offset the index of the default network IPs to correctly point to the default network interfaces
+		for i := numOfInitialIPs; i < len(result.IPs); i++ {
+			ifaceIPConfig := result.IPs[i].Copy()
+			if result.IPs[i].Interface != nil {
+				result.IPs[i].Interface = current.Int(*ifaceIPConfig.Interface + numOfInitialIfaces)
+			}
+		}
+	} else {
+		originalResponse.PrimaryUDNPodReq = primaryPodRequest
+		originalResponse.PrimaryUDNPodInfo = primaryResponse.PodIFInfo
+	}
 }
 
 func (s *Server) handleCNIMetrics(w http.ResponseWriter, r *http.Request) {

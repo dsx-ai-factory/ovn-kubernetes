@@ -141,10 +141,10 @@ func TestCNIServer(t *testing.T) {
 	// annotation above + the podRequestInterfaceOps.
 	expectedIP, expectedNet, _ := net.ParseCIDR("10.0.0.2/24")
 	expectedResult = &current.Result{
-		Interfaces: []*current.Interface{{
-			Name:    "eth0",
-			Sandbox: "/var/run/netns/" + namespace + "_" + name,
-		}},
+		Interfaces: []*current.Interface{
+			{Name: "host_eth0"},
+			{Name: "eth0", Sandbox: "/var/run/netns/" + namespace + "_" + name},
+		},
 		IPs: []*current.IPConfig{{
 			Interface: current.Int(1),
 			Address:   net.IPNet{IP: expectedIP, Mask: expectedNet.Mask},

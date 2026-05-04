@@ -187,8 +187,6 @@ type PodRequest struct {
 	deviceInfo nadapi.DeviceInfo
 }
 
-type getCNIResultFunc func(request *PodRequest, getter PodInfoGetter, podInterfaceInfo *PodInterfaceInfo) (*current.Result, error)
-
 type PodInfoGetter interface {
 	getPod(namespace, name string) (*corev1.Pod, error)
 }
