@@ -98,7 +98,9 @@ var _ = Describe("Network Segmentation", func() {
 			nadName:   ovntypes.DefaultNetworkName,
 			nadKey:    ovntypes.DefaultNetworkName,
 		}
-		pr.ctx, pr.cancel = context.WithTimeout(context.Background(), 2*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		DeferCleanup(cancel)
+		pr.ctx = ctx
 
 		podNamespaceLister = v1mocks.PodNamespaceLister{}
 		podLister = v1mocks.PodLister{}

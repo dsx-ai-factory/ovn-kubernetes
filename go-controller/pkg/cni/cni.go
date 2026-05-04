@@ -4,7 +4,6 @@
 package cni
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"strings"
@@ -431,65 +430,6 @@ func (pr *PodRequest) cmdDel(clientset *ClientSet) (*Response, error) {
 	return response, nil
 }
 
-func (pr *PodRequest) cmdCheck() error {
-	// noop...CMD check is not considered useful, and has a considerable performance impact
-	// to pod bring up times with CRIO. This is due to the fact that CRIO currently calls check
-	// after CNI ADD before it finishes bringing the container up
-	return nil
-}
-
-// HandlePodRequest is the callback for all the requests
-// coming to the cniserver after being processed into PodRequest objects
-// Argument '*PodRequest' encapsulates all the necessary information
-// kclient is passed in so that clientset can be reused from the server
-// Return value is the actual bytes to be sent back without further processing.
-func HandlePodRequest(
-	request *PodRequest,
-	clientset *ClientSet,
-	kubeAuth *KubeAPIAuth,
-	networkManager networkmanager.Interface,
-	ovsClient client.Client,
-) ([]byte, error) {
-	var result, resultForLogging []byte
-	var response *Response
-	var err, err1 error
-
-	klog.Infof("%s %s starting CNI request %+v", request, request.Command, request)
-	switch request.Command {
-	case CNIAdd:
-		response, err = request.cmdAdd(kubeAuth, clientset, networkManager, ovsClient)
-	case CNIDel:
-		response, err = request.cmdDel(clientset)
-	case CNICheck:
-		err = request.cmdCheck()
-	case CNIUpdate:
-		// No-op update path today
-	case CNIStatus:
-		// handled by DPU health check gating before reaching here
-	default:
-		err = fmt.Errorf("unsupported CNI command %s", request.Command)
-	}
-
-	if response != nil {
-		if result, err1 = response.Marshal(); err1 != nil {
-			return nil, fmt.Errorf("%s %s CNI request %+v failed to marshal result: %v",
-				request, request.Command, request, err1)
-		}
-		if resultForLogging, err1 = response.MarshalForLogging(); err1 != nil {
-			klog.Errorf("%s %s CNI request %+v, %v", request, request.Command, request, err1)
-		}
-	}
-
-	klog.Infof("%s %s finished CNI request %+v, result %q, err %v",
-		request, request.Command, request, string(resultForLogging), err)
-
-	if err != nil {
-		// Prefix errors with request info for easier failure debugging
-		return nil, fmt.Errorf("%s %v", request, err)
-	}
-	return result, nil
-}
-
 // getCNIResult get result from pod interface info.
 // PodInfoGetter is used to check if sandbox is still valid for the current
 // instance of the pod in the apiserver, see checkCancelSandbox for more info.
@@ -562,9 +502,9 @@ func (pr *PodRequest) buildPrimaryUDNPodRequest(
 		nadName:    primaryUDN.NADName(),
 		nadKey:     primaryUDN.NADName(),
 		deviceInfo: *deviceInfo,
+		ctx:        pr.ctx,
 	}
 
-	req.ctx, req.cancel = context.WithCancel(pr.ctx)
 	return req
 }
 
