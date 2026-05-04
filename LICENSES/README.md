@@ -7,6 +7,7 @@ Only legal files shipped in the downloaded module source trees are collected
 here, with a few narrow built-in exceptions in the generator for modules that
 need special handling.
 
-To refresh this tree, run `make -C go-controller third-party-licenses`.
-To verify that the checked-in tree is up to date, run
-`make -C go-controller verify-third-party-licenses`.
+To refresh this tree, run `make -C go-controller third-party-licenses`. (Don't
+forget to `git add LICENSES` when committing the change.) To verify that the
+checked-in tree is up to date, run `make -C go-controller
+verify-third-party-licenses`.
