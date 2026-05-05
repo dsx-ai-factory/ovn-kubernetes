@@ -36,10 +36,10 @@ import (
 // The singleton is selected by the --simulate-dpu configuration flag.
 // When the flag is absent (the default), SwitchdevDPUOps is used.
 type DPUOps interface {
-	// GetDPUHostInterface returns the host representor interface attached to bridge
+	// GetDPUHostRepInterface returns the host representor interface attached to bridge
 	// On switchdev hardware this discovers the VF/SF representor via sriovnet.
 	// On simulated platforms this is either a veth peer or virtio interface.
-	GetDPUHostInterface(bridgeName string) (string, error)
+	GetDPUHostRepInterface(bridgeName string) (string, error)
 
 	// GetHostGatewayMACAddress returns the MAC address of the host-side
 	// interface that corresponds to the DPU-side Host representor.
@@ -104,7 +104,7 @@ func IsSimulatedDPU() bool {
 
 type SwitchdevDPUOps struct{}
 
-func (n *SwitchdevDPUOps) GetDPUHostInterface(bridgeName string) (string, error) {
+func (n *SwitchdevDPUOps) GetDPUHostRepInterface(bridgeName string) (string, error) {
 	portsToInterfaces, err := getBridgePortsInterfaces(bridgeName)
 	if err != nil {
 		return "", err
@@ -131,7 +131,7 @@ func (n *SwitchdevDPUOps) GetDPUHostInterface(bridgeName string) (string, error)
 }
 
 func (n *SwitchdevDPUOps) GetHostGatewayMACAddress(bridgeName, _ string) (net.HardwareAddr, error) {
-	hostRep, err := n.GetDPUHostInterface(bridgeName)
+	hostRep, err := n.GetDPUHostRepInterface(bridgeName)
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +200,7 @@ func (s *SimulatedDPUOps) getDPURepresentor(pfId, funcId string) (string, error)
 	return rep, nil
 }
 
-func (s *SimulatedDPUOps) GetDPUHostInterface(_ string) (string, error) {
+func (s *SimulatedDPUOps) GetDPUHostRepInterface(_ string) (string, error) {
 	return SimulationHostGatewayPeerInterface, nil
 }
 

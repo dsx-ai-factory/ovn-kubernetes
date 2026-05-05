@@ -415,7 +415,7 @@ func (b *BridgeConfiguration) ConfigureBridgePorts() error {
 	var hostOVSInterfaceName string
 	if config.IsModeDPU() {
 		var stderr string
-		hostRep, err := util.GetDPUOps().GetDPUHostInterface(b.bridgeName)
+		hostRep, err := util.GetDPUOps().GetDPUHostRepInterface(b.bridgeName)
 		if err != nil {
 			return err
 		}
