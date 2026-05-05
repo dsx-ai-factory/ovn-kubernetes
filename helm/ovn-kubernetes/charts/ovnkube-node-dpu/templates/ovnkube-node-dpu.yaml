@@ -104,6 +104,9 @@ spec:
         - mountPath: /etc/ovn/
           name: host-var-lib-ovs
           readOnly: true
+        - mountPath: /var/lib/ovn/
+          name: host-var-lib-ovs
+          readOnly: true
         - mountPath: /run/systemd/private
           name: run-systemd
           subPath: private
