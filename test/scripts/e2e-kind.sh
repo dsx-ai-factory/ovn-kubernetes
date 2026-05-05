@@ -5,10 +5,22 @@
 
 set -ex
 
-SHARD=$1
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+cd "${SCRIPT_DIR}/.."
+
+SHARD=${1:-${SHARD:-}}
 
 groomTestList() {
 	echo $(echo "${1}" | sed -e '/^\($\|#\)/d' -e 's/ /\\s/g' | tr '\n' '|' | sed -e 's/|$//')
+}
+
+skip() {
+	SKIPPED_TESTS="${SKIPPED_TESTS}
+$*"
+}
+
+e2e_kind_preflight() {
+	:
 }
 
 SKIPPED_TESTS="
@@ -160,6 +172,11 @@ if [ "$ADVERTISE_DEFAULT_NETWORK" == true ]; then
   SKIPPED_TESTS=$SKIPPED_TESTS$RA_SKIPPED_TESTS
 fi
 
+if [ -n "${E2E_KIND_DOWNSTREAM_HOOK:-}" ]; then
+  # shellcheck source=/dev/null
+  source "${E2E_KIND_DOWNSTREAM_HOOK}"
+fi
+
 SKIPPED_TESTS="$(groomTestList "${SKIPPED_TESTS}")"
 
 # if we set PARALLEL=true, skip serial test
@@ -187,6 +204,7 @@ esac
 
 # setting this env prevents ginkgo e2e from trying to run provider setup
 export KUBERNETES_CONFORMANCE_TEST='y'
+export KUBECONFIG=${KUBECONFIG:-${HOME}/ovn.conf}
 # setting these is required to make RuntimeClass tests work ... :/
 export KUBE_CONTAINER_RUNTIME=remote
 export KUBE_CONTAINER_RUNTIME_ENDPOINT=unix:///run/containerd/containerd.sock
@@ -208,16 +226,25 @@ fi
 # the timeout happened.
 TEST_TIMEOUT=${TEST_TIMEOUT:-120m}
 
-ginkgo --nodes=${NUM_NODES} \
-	--focus=${FOCUS} \
-	--skip=${SKIPPED_TESTS} \
-	--timeout=${TEST_TIMEOUT} \
-	--flake-attempts=${FLAKE_ATTEMPTS} \
-	/usr/local/bin/e2e.test \
-	-- \
-	--kubeconfig=${HOME}/ovn.conf \
-	--provider=local \
-	--dump-logs-on-failure=false \
-	--report-dir=${E2E_REPORT_DIR}	\
-	--disable-log-dump=true \
-	--num-nodes=${NUM_WORKER_NODES}
+e2e_kind_preflight
+
+COMMON_FLAGS=(
+	--focus="${FOCUS}"
+	--skip="${SKIPPED_TESTS}"
+	--timeout="${TEST_TIMEOUT}"
+	--flake-attempts="${FLAKE_ATTEMPTS}"
+	/usr/local/bin/e2e.test
+	--
+	--kubeconfig="${KUBECONFIG}"
+	--provider=local
+	--dump-logs-on-failure=false
+	--report-dir="${E2E_REPORT_DIR}"
+	--disable-log-dump=true
+	--num-nodes="${NUM_WORKER_NODES}"
+)
+
+if [ "${E2E_KIND_DRY_RUN:-false}" = "true" ]; then
+	ginkgo --dry-run --v "${COMMON_FLAGS[@]}"
+fi
+
+ginkgo --nodes="${NUM_NODES}" "${COMMON_FLAGS[@]}"
