@@ -8,7 +8,7 @@ KIND (Kubernetes in Docker) deployment of OVN kubernetes is a fast and easy mean
 - Docker run time or podman
 - [KIND](https://kubernetes.io/docs/setup/learning-environment/kind/)
    - Installation instructions can be found at https://github.com/kubernetes-sigs/kind#installation-and-usage. 
-   - NOTE: The OVN-Kubernetes [ovn-kubernetes/contrib/kind.sh](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/contrib/kind.sh) and [ovn-kubernetes/contrib/kind.yaml.j2](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/contrib/kind.yaml.j2) files provision port 11337. If firewalld is enabled, this port will need to be unblocked:
+   - NOTE: The [ovn-kubernetes/contrib/kind.sh](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/contrib/kind.sh) and [ovn-kubernetes/contrib/kind.yaml.j2](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/contrib/kind.yaml.j2) files provision port 11337. If firewalld is enabled, this port will need to be unblocked:
 
       ```
       sudo firewall-cmd --permanent --add-port=11337/tcp; sudo firewall-cmd --reload
