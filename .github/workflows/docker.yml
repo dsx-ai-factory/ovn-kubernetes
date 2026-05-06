@@ -197,29 +197,10 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Set up environment
-      run: |
-        export GOPATH=$(go env GOPATH)
-        echo "GOPATH=$GOPATH" >> $GITHUB_ENV
-        echo "$GOPATH/bin" >> $GITHUB_PATH
-
-    - name: Build ovnkube-binaries copy to context 
+    # TODO: this is not hermetic; switch to in-docker build of binaries
+    - name: Build ovnkube-binaries and stage image context
       run: | 
-        pushd go-controller 
-         make 
-        popd 
-
-        pushd dist/images
-          cp -r ../../go-controller/_output/go/bin/* .
-        popd 
-    
-    - name: Generate git-info to write to image
-      run: | 
-        BRANCH=$(git rev-parse --short "$GITHUB_SHA")
-        COMMIT=$(git rev-parse  HEAD)
-        pushd dist/images
-          echo "ref: ${BRANCH}  commit: ${COMMIT}" > git_info
-        popd 
+        make -C dist/images bld
 
     - name: Set up Docker Buildx
       id: buildx
