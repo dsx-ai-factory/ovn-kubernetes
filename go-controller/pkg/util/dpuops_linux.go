@@ -10,7 +10,6 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"net"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,6 +17,8 @@ import (
 	"github.com/k8snetworkplumbingwg/sriovnet"
 
 	"k8s.io/klog/v2"
+
+	"github.com/ovn-kubernetes/dpu-simulator/lib/dpusim"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 )
@@ -172,15 +173,6 @@ func (n *SwitchdevDPUOps) GetDeviceAddress(repName string) (string, error) {
 
 type SimulatedDPUOps struct{}
 
-// Update when simulation code uses different constants
-const (
-	SimulationHostGatewayInterface      = "eth0-0"
-	SimulationHostGatewayInterfaceIndex = 0
-	SimulationHostGatewayPeerInterface  = "rep0-0"
-)
-
-var reSimulationNetdevFunc = regexp.MustCompile(`(\d+)-(\d+)$`)
-
 // generateMACForHostToDpu returns a deterministic MAC for a host-to-DPU data
 // interface. The hash is over nodeName + role("host" or "dpu"); the index is
 // encoded in the last octet so each channel in a pair has a unique MAC.
@@ -188,12 +180,12 @@ var reSimulationNetdevFunc = regexp.MustCompile(`(\d+)-(\d+)$`)
 // locally administered.
 func (s *SimulatedDPUOps) generateMACForHostToDpu(nodeName, role string, index int) string {
 	h := sha256.Sum256([]byte(nodeName + "\x00" + role))
-	return fmt.Sprintf("52:54:00:%02x:%02x:%02x", h[0], h[1], index&0xff)
+	return fmt.Sprintf("%s:%02x:%02x:%02x", dpusim.MacOUI, h[0], h[1], index&0xff)
 }
 
 // getDPURepresentor builds rep<pfId>-<funcId> and verifies the link exists.
 func (s *SimulatedDPUOps) getDPURepresentor(pfId, funcId string) (string, error) {
-	rep := fmt.Sprintf("rep%s-%s", pfId, funcId)
+	rep := fmt.Sprintf(dpusim.DPURepresentorFmt, pfId, funcId)
 	if _, err := GetNetLinkOps().LinkByName(rep); err != nil {
 		return "", fmt.Errorf("simulated representor %s not found: %v", rep, err)
 	}
@@ -201,7 +193,7 @@ func (s *SimulatedDPUOps) getDPURepresentor(pfId, funcId string) (string, error)
 }
 
 func (s *SimulatedDPUOps) GetDPUHostRepInterface(_ string) (string, error) {
-	return SimulationHostGatewayPeerInterface, nil
+	return dpusim.HostGatewayPeerInterface, nil
 }
 
 func (s *SimulatedDPUOps) GetHostGatewayMACAddress(_, nodeName string) (net.HardwareAddr, error) {
@@ -210,7 +202,7 @@ func (s *SimulatedDPUOps) GetHostGatewayMACAddress(_, nodeName string) (net.Hard
 	}
 
 	// TODO: This identifies a need to have an API to get reliable information from the host (requested by the DPU)
-	macStr := s.generateMACForHostToDpu(nodeName, "host", SimulationHostGatewayInterfaceIndex)
+	macStr := s.generateMACForHostToDpu(nodeName, "host", dpusim.HostGatewayInterfaceIndex)
 	mac, err := net.ParseMAC(macStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse generated MAC %s: %v", macStr, err)
@@ -221,7 +213,7 @@ func (s *SimulatedDPUOps) GetHostGatewayMACAddress(_, nodeName string) (net.Hard
 }
 
 func (s *SimulatedDPUOps) ResolveDeviceDetails(deviceID string) (*NetworkDeviceDetails, error) {
-	matches := reSimulationNetdevFunc.FindStringSubmatch(deviceID)
+	matches := dpusim.ReSimulationNetdevFunc.FindStringSubmatch(deviceID)
 	if len(matches) != 3 {
 		return nil, fmt.Errorf("interface %s does not match simulated naming pattern *<pfId>-<funcId>", deviceID)
 	}
