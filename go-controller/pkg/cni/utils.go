@@ -140,24 +140,18 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, podNADAnnotation *ut
 		return nil, err
 	}
 
-	skipSpoofCheck, err := util.SkipSpoofCheckForNAD(podAnnotation, nadKey)
-	if err != nil {
-		return nil, err
-	}
 	podInterfaceInfo := &PodInterfaceInfo{
-		PodAnnotation:         *podNADAnnotation,
-		RoutableMTU:           config.Default.RoutableMTU, // TBD, configurable for UDNs?
-		Ingress:               ingress,
-		Egress:                egress,
-		WaitOnOVNInstallExtID: config.OvnKubeNode.WaitOnOVNInstallExtID,
-		IsDPUHostMode:         config.OvnKubeNode.Mode == types.NodeModeDPUHost,
-		PodUID:                podUID,
-		NetdevName:            netdevname,
-		NetName:               netName,
-		NADKey:                nadKey,
-		EnableUDPAggregation:  config.Default.EnableUDPAggregation,
-		SkipSpoofCheck:        skipSpoofCheck,
-		OvnKubeMode:           config.OvnKubeNode.Mode,
+		PodAnnotation:        *podNADAnnotation,
+		RoutableMTU:          config.Default.RoutableMTU,
+		Ingress:              ingress,
+		Egress:               egress,
+		IsDPUHostMode:        config.OvnKubeNode.Mode == types.NodeModeDPUHost,
+		PodUID:               podUID,
+		NetdevName:           netdevname,
+		NetName:              netName,
+		NADKey:               nadKey,
+		EnableUDPAggregation: config.Default.EnableUDPAggregation,
+		OvnKubeMode:          config.OvnKubeNode.Mode,
 	}
 	return podInterfaceInfo, nil
 }

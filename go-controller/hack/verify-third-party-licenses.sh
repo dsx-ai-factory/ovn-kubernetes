@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+# SPDX-License-Identifier: Apache-2.0
 
 set -o errexit
 set -o nounset
@@ -78,7 +80,7 @@ elif ! cmp -s "${REPO_ROOT}/LICENSE" "${GENERATED_LICENSES_DIR}/LICENSE"; then
 fi
 
 if [[ ${DIFF_FOUND} -ne 0 ]]; then
-    echo "third-party license files are out of date; run 'make -C go-controller third-party-licenses'" >&2
+    echo "third-party license files are out of date; run 'make -C go-controller third-party-licenses && git add LICENSES'" >&2
     exit 1
 fi
 

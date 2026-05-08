@@ -21,7 +21,7 @@ import (
 
 	"github.com/ovn-kubernetes/libovsdb/client"
 
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
+	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -53,16 +53,14 @@ type KubeAPIAuth struct {
 type PodInterfaceInfo struct {
 	util.PodAnnotation
 
-	RoutableMTU           int    `json:"routable-mtu"`
-	Ingress               int64  `json:"ingress"`
-	Egress                int64  `json:"egress"`
-	WaitOnOVNInstallExtID bool   `json:"wait-on-ovn-install-extid"`
-	IsDPUHostMode         bool   `json:"is-dpu-host-mode"`
-	SkipIPConfig          bool   `json:"skip-ip-config"`
-	PodUID                string `json:"pod-uid"`
-	NetdevName            string `json:"netdev-name"`
-	EnableUDPAggregation  bool   `json:"enable-udp-aggregation"`
-	SkipSpoofCheck        bool   `json:"skip-spoof-check"`
+	RoutableMTU          int    `json:"routable-mtu"`
+	Ingress              int64  `json:"ingress"`
+	Egress               int64  `json:"egress"`
+	IsDPUHostMode        bool   `json:"is-dpu-host-mode"`
+	SkipIPConfig         bool   `json:"skip-ip-config"`
+	PodUID               string `json:"pod-uid"`
+	NetdevName           string `json:"netdev-name"`
+	EnableUDPAggregation bool   `json:"enable-udp-aggregation"`
 
 	// network name, for default network, it is "default", otherwise it is net-attach-def's netconf spec name
 	NetName string `json:"netName"`
@@ -169,7 +167,7 @@ type PodRequest struct {
 	// Interface name to be configured
 	IfName string
 	// CNI conf obtained from stdin conf
-	CNIConf *types.NetConf
+	CNIConf *ovncnitypes.NetConf
 	// Timestamp when the request was started
 	timestamp time.Time
 	// ctx is a context tracking this request's lifetime
@@ -179,7 +177,7 @@ type PodRequest struct {
 	// if CNIConf.DeviceID is present, then captures if the VF is of type VFIO or not
 	IsVFIO bool
 
-	// network name, for default network, this will be types.DefaultNetworkName
+	// network name, for default network, this will be ovncnitypes.DefaultNetworkName
 	netName string
 
 	// for ovs interfaces plumbed for UDNs, their iface-id's prefix is derived from the specific nadName;

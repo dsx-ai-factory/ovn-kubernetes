@@ -306,7 +306,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *corev1.Pod) (err error) 
 	}
 
 	// Ensure the namespace/nsInfo exists
-	routingExternalGWs, routingPodGWs, addOps, err := oc.addLocalPodToNamespace(pod.Namespace, podAnnotation.IPs, lsp.UUID)
+	routingExternalGWs, routingPodGWs, addOps, err := oc.addLocalPodToNamespace(pod.Namespace, lsp.UUID)
 	if err != nil {
 		return err
 	}

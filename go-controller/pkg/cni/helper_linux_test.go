@@ -31,7 +31,7 @@ import (
 	"sigs.k8s.io/knftables"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/mocks"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
+	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 	cni_type_mocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/containernetworking/cni/pkg/types"
@@ -1194,7 +1194,7 @@ func TestPodRequest_deletePodConntrack(t *testing.T) {
 		{
 			desc: "test code path when CNIConf.PrevResult == nil",
 			inpPodRequest: PodRequest{
-				CNIConf: &types.NetConf{
+				CNIConf: &ovncnitypes.NetConf{
 					NetConf: cnitypes.NetConf{
 						PrevResult: nil,
 					},
@@ -1204,7 +1204,7 @@ func TestPodRequest_deletePodConntrack(t *testing.T) {
 		{
 			desc: "test code path NewResultFromResult returns error",
 			inpPodRequest: PodRequest{
-				CNIConf: &types.NetConf{
+				CNIConf: &ovncnitypes.NetConf{
 					NetConf: cnitypes.NetConf{
 						PrevResult: mockTypeResult,
 					},
@@ -1217,7 +1217,7 @@ func TestPodRequest_deletePodConntrack(t *testing.T) {
 		{
 			desc: "test code path when ip.Interface != nil and path when Sandbox is empty value",
 			inpPodRequest: PodRequest{
-				CNIConf: &types.NetConf{
+				CNIConf: &ovncnitypes.NetConf{
 					NetConf: cnitypes.NetConf{
 						PrevResult: mockTypeResult,
 					},
@@ -1232,7 +1232,7 @@ func TestPodRequest_deletePodConntrack(t *testing.T) {
 		{
 			desc: "test code path when DeleteConntrack returns error",
 			inpPodRequest: PodRequest{
-				CNIConf: &types.NetConf{
+				CNIConf: &ovncnitypes.NetConf{
 					NetConf: cnitypes.NetConf{
 						PrevResult: mockTypeResult,
 					},
@@ -1325,7 +1325,7 @@ func TestPodRequest_generateDanConfig(t *testing.T) {
 						IsVFIO:       true,
 						netName:      "default",
 						nadName:      "default",
-						CNIConf: &types.NetConf{
+						CNIConf: &ovncnitypes.NetConf{
 							DeviceID: "0000:84:02.0",
 						},
 					},
@@ -1357,7 +1357,7 @@ func TestPodRequest_generateDanConfig(t *testing.T) {
 						IsVFIO:       true,
 						netName:      "default",
 						nadName:      "default",
-						CNIConf: &types.NetConf{
+						CNIConf: &ovncnitypes.NetConf{
 							DeviceID: "0000:84:02.0",
 						},
 					},
@@ -1385,7 +1385,7 @@ func TestPodRequest_generateDanConfig(t *testing.T) {
 						IsVFIO:       true,
 						netName:      "stream",
 						nadName:      "stream",
-						CNIConf: &types.NetConf{
+						CNIConf: &ovncnitypes.NetConf{
 							DeviceID: "0000:84:02.1",
 						},
 					},
@@ -1464,11 +1464,10 @@ func TestConfigureOVS(t *testing.T) {
 				PodAnnotation: util.PodAnnotation{
 					IPs: []*net.IPNet{ipnet},
 				},
-				WaitOnOVNInstallExtID: true,
-				IsDPUHostMode:         false,
-				NetName:               ovntypes.DefaultNetworkName,
-				NetdevName:            "enp1s0f0v1",
-				PodUID:                "xyz",
+				IsDPUHostMode: false,
+				NetName:       ovntypes.DefaultNetworkName,
+				NetdevName:    "enp1s0f0v1",
+				PodUID:        "xyz",
 			},
 			ovnPfEncapIpMapping: ovnPfEncapIpMapping,
 			errMatch:            nil,
@@ -1493,11 +1492,10 @@ func TestConfigureOVS(t *testing.T) {
 				PodAnnotation: util.PodAnnotation{
 					IPs: []*net.IPNet{ipnet},
 				},
-				WaitOnOVNInstallExtID: true,
-				IsDPUHostMode:         false,
-				NetName:               ovntypes.DefaultNetworkName,
-				NetdevName:            "enp999s0f0v1",
-				PodUID:                "xyz",
+				IsDPUHostMode: false,
+				NetName:       ovntypes.DefaultNetworkName,
+				NetdevName:    "enp999s0f0v1",
+				PodUID:        "xyz",
 			},
 			ovnPfEncapIpMapping: ovnPfEncapIpMapping,
 			errMatch:            nil,
@@ -1522,11 +1520,10 @@ func TestConfigureOVS(t *testing.T) {
 				PodAnnotation: util.PodAnnotation{
 					IPs: []*net.IPNet{ipnet},
 				},
-				WaitOnOVNInstallExtID: true,
-				IsDPUHostMode:         false,
-				NetName:               ovntypes.DefaultNetworkName,
-				NetdevName:            "enp1s0f0v1",
-				PodUID:                "xyz",
+				IsDPUHostMode: false,
+				NetName:       ovntypes.DefaultNetworkName,
+				NetdevName:    "enp1s0f0v1",
+				PodUID:        "xyz",
 			},
 			ovnPfEncapIpMapping:   "", // no external_ids:ovn-pf-encap-ip-mapping config
 			errMatch:              nil,
@@ -1549,11 +1546,10 @@ func TestConfigureOVS(t *testing.T) {
 				PodAnnotation: util.PodAnnotation{
 					IPs: []*net.IPNet{ipnet},
 				},
-				WaitOnOVNInstallExtID: true,
-				IsDPUHostMode:         false,
-				NetName:               ovntypes.DefaultNetworkName,
-				NetdevName:            "enp1s0f0v1",
-				PodUID:                "xyz",
+				IsDPUHostMode: false,
+				NetName:       ovntypes.DefaultNetworkName,
+				NetdevName:    "enp1s0f0v1",
+				PodUID:        "xyz",
 			},
 			ovnPfEncapIpMapping: ovnPfEncapIpMapping,
 			errMatch:            nil,
@@ -1582,11 +1578,10 @@ func TestConfigureOVS(t *testing.T) {
 				PodAnnotation: util.PodAnnotation{
 					IPs: []*net.IPNet{ipnet},
 				},
-				WaitOnOVNInstallExtID: true,
-				IsDPUHostMode:         false,
-				NetName:               ovntypes.DefaultNetworkName,
-				NetdevName:            "enp1s0f0v1",
-				PodUID:                "xyz",
+				IsDPUHostMode: false,
+				NetName:       ovntypes.DefaultNetworkName,
+				NetdevName:    "enp1s0f0v1",
+				PodUID:        "xyz",
 			},
 			ovnPfEncapIpMapping: ovnPfEncapIpMapping,
 			errMatch:            fmt.Errorf("failed to find interface"),
@@ -1608,11 +1603,10 @@ func TestConfigureOVS(t *testing.T) {
 				PodAnnotation: util.PodAnnotation{
 					IPs: []*net.IPNet{ipnet},
 				},
-				WaitOnOVNInstallExtID: true,
-				IsDPUHostMode:         false,
-				NetName:               ovntypes.DefaultNetworkName,
-				NetdevName:            "enp1s0f0v1",
-				PodUID:                "xyz",
+				IsDPUHostMode: false,
+				NetName:       ovntypes.DefaultNetworkName,
+				NetdevName:    "enp1s0f0v1",
+				PodUID:        "xyz",
 			},
 			ovnPfEncapIpMapping: ovnPfEncapIpMapping,
 			errMatch:            fmt.Errorf("failed to set MTU on"),
@@ -1636,11 +1630,10 @@ func TestConfigureOVS(t *testing.T) {
 				PodAnnotation: util.PodAnnotation{
 					IPs: []*net.IPNet{ipnet},
 				},
-				WaitOnOVNInstallExtID: true,
-				IsDPUHostMode:         false,
-				NetName:               ovntypes.DefaultNetworkName,
-				NetdevName:            "enp1s0f0v1",
-				PodUID:                "xyz",
+				IsDPUHostMode: false,
+				NetName:       ovntypes.DefaultNetworkName,
+				NetdevName:    "enp1s0f0v1",
+				PodUID:        "xyz",
 			},
 			ovnPfEncapIpMapping: ovnPfEncapIpMapping,
 			errMatch:            fmt.Errorf("failed to set link UP on"),
@@ -1733,18 +1726,6 @@ func TestConfigureOVS(t *testing.T) {
 			tc.execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    genOVSGetCmd("Interface", tc.vfRep, "external-ids", "iface-id"),
 				Output: genIfaceID(tc.podNs, tc.podName),
-			})
-			tc.execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    genOfctlDumpFlowsCmd("table=8,dl_src="),
-				Output: "non-empty-output",
-			})
-			tc.execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    genOfctlDumpFlowsCmd("table=0,in_port=1"),
-				Output: "non-empty-output",
-			})
-			tc.execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    genOfctlDumpFlowsCmd("table=48,ip,ip_dst=" + strings.Split(fakeIP, "/")[0]),
-				Output: "non-empty-output",
 			})
 
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -1942,8 +1923,4 @@ func genOVSGetCmd(table, record, column, key string, timeout ...int) string {
 
 func genIfaceID(podNamespace, podName string) string {
 	return fmt.Sprintf("%s_%s", podNamespace, podName)
-}
-
-func genOfctlDumpFlowsCmd(queryStr string) string {
-	return fmt.Sprintf("ovs-ofctl --timeout=10 --no-stats --strict dump-flows br-int %s", queryStr)
 }
