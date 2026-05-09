@@ -15,7 +15,7 @@ BASEDIR=$(dirname $0)
 . ${BASEDIR}/ovndb-raft-functions.sh
 
 # This script is the entrypoint to the image.
-# Supports version 1.2.0 daemonsets
+# Supports version 1.3.0 daemonsets
 #    Keep the daemonset versioning aligned with the ovnkube release versions
 # Commands ($1 values)
 #    ovs-server     Runs the ovs daemons - ovsdb-server and ovs-switchd (v3)
@@ -33,7 +33,7 @@ BASEDIR=$(dirname $0)
 #    ovn_debug      Displays ovn/ovs configuration and flows
 
 # NOTE: The script/image must be compatible with the daemonset.
-# This script supports version 1.2.0 daemonsets
+# This script supports version 1.3.0 daemonsets
 #      When called, it starts all needed daemons.
 # Currently the version here is used to match with the image version
 # It must be updated during every release
@@ -51,7 +51,7 @@ BASEDIR=$(dirname $0)
 # OVN_METRICS_MASTER_PORT - metrics port which will be exposed by ovnkube-master (default 9409)
 # OVN_METRICS_WORKER_PORT - metrics port which will be exposed by ovnkube-node (default 9410)
 # OVN_METRICS_EXPORTER_PORT - ovs-metrics exporter port (default 9310)
-# OVN_DAEMONSET_VERSION - version match daemonset and image - v1.2.0
+# OVN_DAEMONSET_VERSION - version match daemonset and image - v1.3.0
 # K8S_TOKEN - the apiserver token. Automatically detected when running in a pod - v3
 # K8S_CACERT - the apiserver CA. Automatically detected when running in a pod - v3
 # K8S_TOKEN_FILE - the apiserver token file. Automatically detected when running in a pod - v3
@@ -163,11 +163,11 @@ ovn_master_ha_election_retry_period=${OVN_HA_RETRY_PERIOD:-"2"}
 ovnkube_libovsdb_client_logfile=${OVNKUBE_LIBOVSDB_CLIENT_LOGFILE:-}
 
 # ovnkube.sh version (Update during each release)
-ovnkube_version="1.2.0"
+ovnkube_version="1.3.0"
 
 # The daemonset version must be compatible with this script.
 # The default when OVN_DAEMONSET_VERSION is not set is version 3
-ovn_daemonset_version=${OVN_DAEMONSET_VERSION:-"1.2.0"}
+ovn_daemonset_version=${OVN_DAEMONSET_VERSION:-"1.3.0"}
 
 # hostname is the host's hostname when using host networking,
 # This is useful on the master
@@ -424,9 +424,6 @@ ovnkube_disable_firewalld=${OVNKUBE_DISABLE_FIREWALLD:-"false"}
 ovnkube_admin_firewalld_zone=${OVNKUBE_ADMIN_FIREWALLD_ZONE:-"ngn-admin"}
 # OVN_ENABLE_SVC_TEMPLATE_SUPPORT - enable svc template support
 ovn_enable_svc_template_support=${OVN_ENABLE_SVC_TEMPLATE_SUPPORT:-false}
-# OVNKUBE_WAIT_ON_OVN_INSTALL_EXTID - check ovn-installed external-ids for pod OVS interface readiness
-ovnkube_wait_on_ovn_install_extid=${OVNKUBE_WAIT_ON_OVN_INSTALL_EXTID:-"false"}
-
 #OVN_NETWORK_QOS_ENABLE - enable network QoS for ovn-kubernetes
 ovn_network_qos_enable=${OVN_NETWORK_QOS_ENABLE:-false}
 # OVN_ENABLE_DNSNAMERESOLVER - enable dns name resolver support
@@ -1133,10 +1130,10 @@ function get_ovnkube_zone_db_ep() {
   fi
 }
 
-# v1.2.0 - run nb_ovsdb in a separate container
+# v1.3.0 - run nb_ovsdb in a separate container
 nb-ovsdb() {
   trap 'ovsdb_cleanup nb' TERM
-  check_ovn_daemonset_version "1.2.0"
+  check_ovn_daemonset_version "1.3.0"
   rm -f ${OVN_RUNDIR}/ovnnb_db.pid
 
   if [[ ${ovn_db_host} == "" ]]; then
@@ -1195,10 +1192,10 @@ nb-ovsdb() {
   echo "=============== run nb_ovsdb ========== terminated"
 }
 
-# v1.2.0 - run sb_ovsdb in a separate container
+# v1.3.0 - run sb_ovsdb in a separate container
 sb-ovsdb() {
   trap 'ovsdb_cleanup sb' TERM
-  check_ovn_daemonset_version "1.2.0"
+  check_ovn_daemonset_version "1.3.0"
   rm -f ${OVN_RUNDIR}/ovnsb_db.pid
 
   if [[ ${ovn_db_host} == "" ]]; then
@@ -1244,10 +1241,10 @@ sb-ovsdb() {
   echo "=============== run sb_ovsdb ========== terminated"
 }
 
-# v1.2.0 - Runs ovn-dbchecker on ovnkube-db pod.
+# v1.3.0 - Runs ovn-dbchecker on ovnkube-db pod.
 ovn-dbchecker() {
   trap 'kill $(jobs -p); exit 0' TERM
-  check_ovn_daemonset_version "1.2.0"
+  check_ovn_daemonset_version "1.3.0"
   rm -f ${OVN_RUNDIR}/ovn-dbchecker.pid
 
   # wait for ready_to_start_node
@@ -1295,11 +1292,11 @@ ovn-dbchecker() {
   exit 11
 }
 
-# v1.2.0 - run nb_ovsdb in a separate container listening only on
+# v1.3.0 - run nb_ovsdb in a separate container listening only on
 # unix sockets
 local-nb-ovsdb() {
   trap 'ovsdb_cleanup nb' TERM
-  check_ovn_daemonset_version "1.2.0"
+  check_ovn_daemonset_version "1.3.0"
   rm -f ${OVN_RUNDIR}/ovnnb_db.pid
 
   echo "=============== run nb-ovsdb (unix sockets only) =========="
@@ -1322,6 +1319,11 @@ local-nb-ovsdb() {
   ovn-nbctl set NB_Global . name=${K8S_NODE}
   ovn-nbctl set NB_Global . options:name=${K8S_NODE}
 
+  [[ "true" == "${ENABLE_IPSEC}" ]] && {
+    ovn-nbctl set NB_Global . ipsec=true
+    echo "=============== nb-ovsdb ========== reconfigured for ipsec"
+  }
+
   tail --follow=name ${OVN_LOGDIR}/ovsdb-server-nb.log &
   ovn_tail_pid=$!
 
@@ -1329,11 +1331,11 @@ local-nb-ovsdb() {
   echo "=============== run nb-ovsdb (unix sockets only) ========== terminated"
 }
 
-# v1.2.0 - run sb_ovsdb in a separate container listening only on
+# v1.3.0 - run sb_ovsdb in a separate container listening only on
 # unix sockets
 local-sb-ovsdb() {
   trap 'ovsdb_cleanup sb' TERM
-  check_ovn_daemonset_version "1.2.0"
+  check_ovn_daemonset_version "1.3.0"
   rm -f ${OVN_RUNDIR}/ovnsb_db.pid
 
   echo "=============== run sb-ovsdb (unix sockets only) ========== "
@@ -1351,10 +1353,10 @@ local-sb-ovsdb() {
   echo "=============== run sb-ovsdb (unix sockets only) ========== terminated"
 }
 
-# v1.2.0 - Runs northd on master. Does not run nb_ovsdb, and sb_ovsdb
+# v1.3.0 - Runs northd on master. Does not run nb_ovsdb, and sb_ovsdb
 run-ovn-northd() {
   trap 'ovn-appctl -t ovn-northd exit >/dev/null 2>&1; exit 0' TERM
-  check_ovn_daemonset_version "1.2.0"
+  check_ovn_daemonset_version "1.3.0"
   rm -f ${OVN_RUNDIR}/ovn-northd.pid
   rm -f ${OVN_RUNDIR}/ovn-northd.*.ctl
 
@@ -1404,10 +1406,10 @@ run-ovn-northd() {
   exit 8
 }
 
-# v1.2.0 -  run ovnkube-identity
+# v1.3.0 -  run ovnkube-identity
 ovnkube-identity() {
     trap 'kill $(jobs -p); exit 0' TERM
-    check_ovn_daemonset_version "1.2.0"
+    check_ovn_daemonset_version "1.3.0"
     rm -f ${OVN_RUNDIR}/ovnkube-identity.pid
 
     ovnkube_enable_interconnect_flag=
@@ -1434,10 +1436,10 @@ ovnkube-identity() {
     exit 9
 }
 
-# v1.2.0 - run ovnkube --master (both cluster-manager and ovnkube-controller)
+# v1.3.0 - run ovnkube --master (both cluster-manager and ovnkube-controller)
 ovn-master() {
   trap 'kill $(jobs -p); exit 0' TERM
-  check_ovn_daemonset_version "1.2.0"
+  check_ovn_daemonset_version "1.3.0"
   rm -f ${OVN_RUNDIR}/ovnkube-master.pid
 
   echo "=============== ovn-master (wait for ready_to_start_node) ========== MASTER ONLY"
@@ -1857,10 +1859,10 @@ ovn-master() {
   exit 9
 }
 
-# v1.2.0 - run ovnkube --ovnkube-controller
+# v1.3.0 - run ovnkube --ovnkube-controller
 ovnkube-controller() {
   trap 'kill $(jobs -p); exit 0' TERM
-  check_ovn_daemonset_version "1.2.0"
+  check_ovn_daemonset_version "1.3.0"
   rm -f ${OVN_RUNDIR}/ovnkube-controller.pid
 
   echo "=============== ovnkube-controller (wait for ready_to_start_node) =========="
@@ -2271,7 +2273,7 @@ ovnkube-controller-with-node() {
   # currently we the process to background, therefore wait until that process removes its pid file on exit.
   # if the pid file doesnt exist, we exit immediately.
   trap 'kill $(jobs -p) ; rm -f /etc/cni/net.d/10-ovn-kubernetes.conf ; wait_ovnkube_controller_with_node_done; exit 0' TERM
-  check_ovn_daemonset_version "1.2.0"
+  check_ovn_daemonset_version "1.3.0"
   rm -f ${OVN_RUNDIR}/ovnkube-controller-with-node.pid
 
   if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
@@ -2497,11 +2499,6 @@ ovnkube-controller-with-node() {
 	  egressservice_enabled_flag="--enable-egress-service"
   fi
   echo "egressservice_enabled_flag=${egressservice_enabled_flag}"
-
-  wait_on_ovn_install_extid_flag=
-  if [[ ${ovnkube_wait_on_ovn_install_extid} == "true" ]]; then
-      wait_on_ovn_install_extid_flag="--ovnkube-wait-on-ovn-install-extid"
-  fi
 
   netflow_targets=
   if [[ -n ${ovn_netflow_targets} ]]; then
@@ -2948,7 +2945,6 @@ ovnkube-controller-with-node() {
     ${dynamic_udn_grace_period} \
     ${network_qos_enabled_flag} \
     ${virtualip_enabled_flag} \
-    ${wait_on_ovn_install_extid_flag} \
     ${ovnkube_istio_ambient_enable_flag} \
     ${ovnkube_istio_ambient_snat_ipv4_flag} \
     ${ovnkube_istio_ambient_snat_ipv6_flag} \
@@ -2991,7 +2987,7 @@ ovnkube-controller-with-node() {
 # run ovnkube --cluster-manager.
 ovn-cluster-manager() {
   trap 'kill $(jobs -p); exit 0' TERM
-  check_ovn_daemonset_version "1.2.0"
+  check_ovn_daemonset_version "1.3.0"
 
   ovn_encap_port_flag=
     if [[ -n "${ovn_encap_port}" ]]; then
@@ -3280,7 +3276,7 @@ ovn-cluster-manager() {
 # ovn-controller - all nodes
 ovn-controller() {
   trap 'ovs-appctl -t ovn-controller exit --restart >/dev/null 2>&1; exit 0' TERM
-  check_ovn_daemonset_version "1.2.0"
+  check_ovn_daemonset_version "1.3.0"
   rm -f ${OVN_RUNDIR}/ovn-controller.pid
 
   echo "=============== ovn-controller - (wait for ovs)"
@@ -3406,7 +3402,7 @@ create_ovn_firewall_zone() {
 # ovn-node - all nodes
 ovn-node() {
   trap 'kill $(jobs -p) ; exit 0' TERM
-  check_ovn_daemonset_version "1.2.0"
+  check_ovn_daemonset_version "1.3.0"
   rm -f ${OVN_RUNDIR}/ovnkube.pid
 
   northd_node_selector_label_flag=
@@ -3544,11 +3540,6 @@ ovn-node() {
   port_mirror_enabled_flag=
   if [[ ${ovn_port_mirror_enable} == "true" ]]; then
 	  port_mirror_enabled_flag="--enable-port-mirror"
-  fi
-
-  wait_on_ovn_install_extid_flag=
-  if [[ ${ovnkube_wait_on_ovn_install_extid} == "true" ]]; then
-      wait_on_ovn_install_extid_flag="--ovnkube-wait-on-ovn-install-extid"
   fi
 
   multi_network_enabled_flag=
@@ -3942,7 +3933,6 @@ ovn-node() {
         ${representor_metering_nodes_flag} \
         ${routable_mtu_flag} \
         ${sflow_targets} \
-        ${wait_on_ovn_install_extid_flag} \
         ${custom_gwsnat_rules_opts} \
         ${dynamic_udn_allocation_flag} \
         ${dynamic_udn_grace_period} \
@@ -3983,7 +3973,7 @@ ovn-node() {
 
 # cleanup-ovn-node - all nodes
 cleanup-ovn-node() {
-  check_ovn_daemonset_version "1.2.0"
+  check_ovn_daemonset_version "1.3.0"
 
   rm -f /etc/cni/net.d/10-ovn-kubernetes.conf
 
@@ -4008,9 +3998,9 @@ cleanup-ovn-node() {
 
 }
 
-# v1.2.0 - Runs ovn-kube-util in daemon mode to export prometheus metrics related to OVS.
+# v1.3.0 - Runs ovn-kube-util in daemon mode to export prometheus metrics related to OVS.
 ovs-metrics() {
-  check_ovn_daemonset_version "1.2.0"
+  check_ovn_daemonset_version "1.3.0"
 
   echo "=============== ovs-metrics - (wait for ovs_ready)"
   wait_for_event ovs_ready

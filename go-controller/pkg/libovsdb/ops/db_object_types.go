@@ -134,6 +134,7 @@ var AddressSetNetworkPolicy = newObjectIDsType(addressSet, NetworkPolicyOwnerTyp
 	IPFamilyKey,
 })
 
+// deprecated, should only be used for sync.
 var AddressSetNamespace = newObjectIDsType(addressSet, NamespaceOwnerType, []ExternalIDKey{
 	// namespace
 	ObjectNameKey,

@@ -176,7 +176,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 				// pod exists, networks annotations don't
 				pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podInfo.namespace).Get(context.Background(), podInfo.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
-				_, ok := pod.Annotations[util.OvnPodAnnotationName]
+				_, ok := pod.Annotations[types.OvnPodAnnotationName]
 				Expect(ok).To(BeFalse())
 
 				// succeed the check for Load_Balancer_Group support
@@ -418,7 +418,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 				// pod exists, networks annotations don't
 				pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podInfo.namespace).Get(context.Background(), podInfo.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
-				_, ok := pod.Annotations[util.OvnPodAnnotationName]
+				_, ok := pod.Annotations[types.OvnPodAnnotationName]
 				Expect(ok).To(BeFalse())
 
 				// succeed the check for Load_Balancer_Group support

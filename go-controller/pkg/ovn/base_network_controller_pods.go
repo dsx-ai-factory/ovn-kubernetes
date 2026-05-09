@@ -21,7 +21,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
-	utilnet "k8s.io/utils/net"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
@@ -160,8 +159,6 @@ func (bnc *BaseNetworkController) deleteStaleLogicalSwitchPortsOnSwitches(switch
 	var ops []ovsdb.Operation
 	var err error
 
-	// get the list of namespaces need update
-	nsNeedUpdate := make(map[string][]*net.IPNet)
 	for _, switchName := range switchNames {
 		p := func(item *nbdb.LogicalSwitchPort) bool {
 			return item.ExternalIDs["pod"] == "true" && !expectedLogicalPorts[item.Name]
@@ -170,45 +167,10 @@ func (bnc *BaseNetworkController) deleteStaleLogicalSwitchPortsOnSwitches(switch
 			Name: switchName,
 		}
 
-		lsps, err := libovsdbops.FindLogicalSwitchPortsWithPredicate(bnc.nbClient, &sw, p)
-		if err != nil {
-			return fmt.Errorf("could not get all stale ports from logical switch %s (%+v)", switchName, err)
-		}
-		for _, lsp := range lsps {
-			_, ips, err := libovsdbutil.ExtractPortAddresses(lsp)
-			// need update address_set later
-			if err == nil {
-				ns := lsp.ExternalIDs["namespace"]
-				if len(ns) != 0 {
-					ipNets := nsNeedUpdate[ns]
-					for _, ip := range ips {
-						ipv6 := utilnet.IsIPv6(ip)
-						ip = ip.To16()
-						mask := net.CIDRMask(48, 128)
-						if !ipv6 {
-							mask = net.CIDRMask(128, 128)
-						}
-						ipNets = append(ipNets, &net.IPNet{IP: ip, Mask: mask})
-						nsNeedUpdate[ns] = ipNets
-					}
-				}
-			}
-		}
-
 		ops, err = libovsdbops.DeleteLogicalSwitchPortsWithPredicateOps(bnc.nbClient, ops, &sw, p)
 		if err != nil {
 			return fmt.Errorf("could not generate ops to delete stale ports from logical switch %s (%+v)", switchName, err)
 		}
-	}
-
-	// update namespace addressSet has stale ips
-	for ns, ipNets := range nsNeedUpdate {
-		klog.Infof("Found stale IPs %+v in Namespace %s. Removing them", ipNets, ns)
-		delOps, err := bnc.deletePodFromNamespace(ns, ipNets, "")
-		if err != nil {
-			return fmt.Errorf("unable to delete IP %+v from namespace: %w", ipNets, err)
-		}
-		ops = append(ops, delOps...)
 	}
 
 	_, err = libovsdbops.TransactAndCheck(bnc.nbClient, ops)
@@ -303,14 +265,12 @@ func (bnc *BaseNetworkController) deletePodLogicalPort(pod *corev1.Pod, portInfo
 
 	var allOps, ops []ovsdb.Operation
 
-	// if the ip is in use by another pod we should not try to remove it from the address set
-	if shouldRelease {
-		if ops, err = bnc.deletePodFromNamespace(pod.Namespace,
-			podIfAddrs, portUUID); err != nil {
-			return nil, fmt.Errorf("unable to delete pod %s from namespace: %w", podDesc, err)
-		}
-		allOps = append(allOps, ops...)
+	if ops, err = bnc.deletePodFromNamespace(pod.Namespace,
+		portUUID); err != nil {
+		return nil, fmt.Errorf("unable to delete pod %s from namespace: %w", podDesc, err)
 	}
+	allOps = append(allOps, ops...)
+
 	ops, err = bnc.delLSPOps(logicalPort, switchName, portUUID)
 	// Tolerate cases where logical switch of the logical port no longer exist in OVN.
 	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
@@ -824,7 +784,7 @@ func (bnc *BaseNetworkController) delLSPOps(logicalPort, switchName,
 	return ops, nil
 }
 
-func (bnc *BaseNetworkController) deletePodFromNamespace(ns string, podIfAddrs []*net.IPNet, portUUID string) ([]ovsdb.Operation, error) {
+func (bnc *BaseNetworkController) deletePodFromNamespace(ns string, portUUID string) ([]ovsdb.Operation, error) {
 	// for UDN, namespace may be not managed
 	nsInfo, nsUnlock := bnc.getNamespaceLocked(ns, true)
 	if nsInfo == nil {
@@ -833,11 +793,6 @@ func (bnc *BaseNetworkController) deletePodFromNamespace(ns string, podIfAddrs [
 	defer nsUnlock()
 	var ops []ovsdb.Operation
 	var err error
-	if nsInfo.addressSet != nil {
-		if ops, err = nsInfo.addressSet.DeleteAddressesReturnOps(util.IPNetsIPToStringSlice(podIfAddrs)); err != nil {
-			return nil, err
-		}
-	}
 
 	if nsInfo.portGroupName != "" && len(portUUID) > 0 {
 		if ops, err = libovsdbops.DeletePortsFromPortGroupOps(bnc.nbClient, ops, nsInfo.portGroupName, portUUID); err != nil {

@@ -57,8 +57,6 @@ import (
 // values.)
 
 const (
-	// OvnPodAnnotationName is the constant string representing the POD annotation key
-	OvnPodAnnotationName = "k8s.ovn.org/pod-networks"
 	// OvnPodNodeNameLabel is the constant label key representing the node on which Pod is scheduled
 	OvnPodNodeNameLabel = "k8s.ovn.org/nodeName"
 	// skipSpoofCheckAnnotationName skips setting Port security on Logical Switch Ports that are
@@ -213,7 +211,7 @@ func MarshalPodAnnotation(annotations map[string]string, podInfo *PodAnnotation,
 		ipSame := IsStringListEqual(existingPa.IPs, pa.IPs)
 		if ipSame && isPodRouteListEqual(existingPa.Routes, pa.Routes) && existingPa.MAC == pa.MAC && existingPa.TunnelID == pa.TunnelID {
 			return annotations, newAnnotationAlreadySetError("OVN %s annotation for NAD %s already exists",
-				OvnPodAnnotationName, nadKey)
+				types.OvnPodAnnotationName, nadKey)
 		} else if !ipSame || existingPa.MAC != pa.MAC {
 			return nil, ErrOverridePodAddresses
 		}
@@ -245,14 +243,14 @@ func MarshalPodAnnotation(annotations map[string]string, podInfo *PodAnnotation,
 	if err != nil {
 		return nil, fmt.Errorf("failed marshaling podNetworks map %v", podNetworks)
 	}
-	annotations[OvnPodAnnotationName] = string(bytes)
+	annotations[types.OvnPodAnnotationName] = string(bytes)
 	return annotations, nil
 }
 
 // UnmarshalPodAnnotation returns the Pod's network info of the given network from pod.Annotations
 func UnmarshalPodAnnotation(annotations map[string]string, nadKey string) (*PodAnnotation, error) {
 	var err error
-	ovnAnnotation, ok := annotations[OvnPodAnnotationName]
+	ovnAnnotation, ok := annotations[types.OvnPodAnnotationName]
 	if !ok {
 		return nil, newAnnotationNotSetError("could not find OVN pod annotation in %v", annotations)
 	}
@@ -361,7 +359,7 @@ func UnmarshalPodAnnotation(annotations map[string]string, nadKey string) (*PodA
 
 func UnmarshalPodAnnotationAllNetworks(annotations map[string]string) (map[string]podAnnotation, error) {
 	podNetworks := make(map[string]podAnnotation)
-	ovnAnnotation, ok := annotations[OvnPodAnnotationName]
+	ovnAnnotation, ok := annotations[types.OvnPodAnnotationName]
 	if ok {
 		if err := json.Unmarshal([]byte(ovnAnnotation), &podNetworks); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal ovn pod annotation %q: %v",

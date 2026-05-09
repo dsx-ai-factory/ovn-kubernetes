@@ -83,7 +83,7 @@ var (
 	// ovn-kubernetes build date
 	BuildDate = ""
 	// ovn-kubernetes version, to be changed with every release
-	Version = "1.2.0"
+	Version = "1.3.0"
 	// version of the go runtime used to compile ovn-kubernetes
 	GoVersion = runtime.Version()
 	// os and architecture used to build ovn-kubernetes
@@ -704,7 +704,6 @@ type OvnKubeNodeConfig struct {
 	Mode                      string `gcfg:"mode"`
 	MgmtPortNetdev            string `gcfg:"mgmt-port-netdev"`
 	MgmtPortDPResourceName    string `gcfg:"mgmt-port-dp-resource-name"`
-	WaitOnOVNInstallExtID     bool   `gcfg:"ovnkube-wait-on-ovn-install-extid"`
 	IsPrimaryDPU              bool
 	MaxRevalidator            uint `gcfg:"ovs-max-revalidator"`
 	MinRevalidatePPS          int  `gcfg:"ovs-min-revalidate-pps"`
@@ -2022,12 +2021,6 @@ var OvnKubeNodeFlags = []cli.Flag{
 			"and used to allow host network services and pods to access k8s pod and service networks. ",
 		Value:       OvnKubeNode.MgmtPortDPResourceName,
 		Destination: &cliConfig.OvnKubeNode.MgmtPortDPResourceName,
-	},
-	&cli.BoolFlag{
-		Name:        "ovnkube-wait-on-ovn-install-extid",
-		Usage:       "check existence ovn-installed external-ids to determine if Pod's OVS interface is ready, default is false",
-		Value:       OvnKubeNode.WaitOnOVNInstallExtID,
-		Destination: &cliConfig.OvnKubeNode.WaitOnOVNInstallExtID,
 	},
 	&cli.UintFlag{
 		Name:        "ovs-max-revalidator",
