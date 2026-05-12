@@ -315,6 +315,9 @@ func (c *Controller) sync(ipresvKey string) error {
 					return err
 				}
 				c.ipresvCache.Delete(key)
+			} else if len(exstingIPResvState.reservedIPs) > 0 {
+				// IPs already reserved and status already Succeeded in API.
+				return nil
 			}
 		}
 		resvIPs, err := c.ensureIPReservation(ipresvObj)
