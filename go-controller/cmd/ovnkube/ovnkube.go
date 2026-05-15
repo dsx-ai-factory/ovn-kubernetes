@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -23,8 +22,6 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apimachinery/pkg/util/wait"
-	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/tools/record"
@@ -118,7 +115,7 @@ func main() {
 	cli.HelpPrinterCustom = printOvnKubeHelp
 	c := cli.NewApp()
 	c.Name = "ovnkube"
-	c.Usage = "run ovnkube to start master, node, and gateway services"
+	c.Usage = "run ovnkube to start control plane, node, and gateway services"
 	c.Version = config.Version
 	c.CustomAppHelpTemplate = CustomAppHelpTemplate
 	c.Flags = config.GetFlags(nil)
@@ -196,8 +193,8 @@ func setupPIDFile(pidfile string) error {
 
 // ovnkubeRunMode object stores the run mode of the ovnkube
 type ovnkubeRunMode struct {
-	ovnkubeController bool // ovnkube controller (--init-ovnkube-controller or --init-master) is enabled
-	clusterManager    bool // cluster manager (--init-cluster-manager or --init-master) is enabled
+	ovnkubeController bool // ovnkube controller (--init-ovnkube-controller) is enabled
+	clusterManager    bool // cluster manager (--init-cluster-manager) is enabled
 	node              bool // node (--init-node) is enabled
 	cleanupNode       bool // cleanup (--cleanup-node) is enabled
 
@@ -211,24 +208,15 @@ type ovnkubeRunMode struct {
 // determineOvnkubeRunMode determines the run modes of ovnkube
 // based on the init flags set.  It is possible to run ovnkube in
 // multiple modes.  Allowed multiple modes are:
-//   - master (ovnkube controller + cluster manager) + node
 //   - ovnkube controller + cluster manager
 //   - ovnkube controller + node
 func determineOvnkubeRunMode(ctx *cli.Context) (*ovnkubeRunMode, error) {
 	mode := &ovnkubeRunMode{}
 
-	master := ctx.String("init-master")
 	cm := ctx.String("init-cluster-manager")
 	ovnkController := ctx.String("init-ovnkube-controller")
 	node := ctx.String("init-node")
 	cleanup := ctx.String("cleanup-node")
-
-	if master != "" {
-		// If init-master is set, then both ovnkube controller and cluster manager
-		// are enabled
-		mode.ovnkubeController = true
-		mode.clusterManager = true
-	}
 
 	if cm != "" {
 		mode.clusterManager = true
@@ -258,7 +246,7 @@ func determineOvnkubeRunMode(ctx *cli.Context) (*ovnkubeRunMode, error) {
 		return nil, fmt.Errorf("cannot run in both cluster manager and node mode")
 	}
 
-	identities := sets.NewString(master, cm, ovnkController, node, cleanup)
+	identities := sets.NewString(cm, ovnkController, node, cleanup)
 	identities.Delete("")
 	if identities.Len() != 1 {
 		return nil, fmt.Errorf("provided no identity or different identities for different modes")
@@ -275,7 +263,7 @@ func combineMetricsEndpoints(runMode *ovnkubeRunMode) bool {
 		runMode.node &&
 		config.Metrics.BindAddress != "" &&
 		config.Metrics.BindAddress == config.Metrics.OVNMetricsBindAddress &&
-		config.OvnKubeNode.Mode != types.NodeModeDPUHost
+		(config.IsModeDPU() || config.IsModeFull())
 }
 
 func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
@@ -312,7 +300,7 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	if config.Kubernetes.BootstrapKubeconfig != "" {
 		// In the case of dpus K8S_NODE will be set to dpu host's name
 		var csrNodeName string
-		if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		if config.IsModeDPU() {
 			stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
 				"external_ids:hostname")
 			if err != nil || stdout == "" {
@@ -543,7 +531,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 	// Remove when OVN supports native silencing of GARPs on startup: https://issues.redhat.com/browse/FDP-1537
 	// isOVNKubeControllerSyncd is true when ovnkube controller has sync and changes are in OVN Southbound database.
 	var isOVNKubeControllerSyncd *atomic.Bool
-	if runMode.ovnkubeController && runMode.node && config.OVNKubernetesFeature.EnableEgressIP && config.OVNKubernetesFeature.EnableInterconnect && config.OvnKubeNode.Mode == types.NodeModeFull {
+	if runMode.ovnkubeController && runMode.node && config.OVNKubernetesFeature.EnableEgressIP && config.IsModeFull() {
 		isOVNKubeControllerSyncd = &atomic.Bool{}
 	}
 
@@ -631,7 +619,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 			metrics.RegisterNodeMetrics()
 
 			// OVS is not running on dpu-host nodes
-			if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+			if config.IsModeDPU() || config.IsModeFull() {
 				ovsClient, err = libovsdb.NewOVSClient(ctx.Done())
 				if err != nil {
 					nodeErr = fmt.Errorf("failed to initialize libovsdb vswitchd client: %w", err)
@@ -670,7 +658,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 	}
 	// start the prometheus server to serve OVS and OVN Metrics (default port: 9476)
 	// Note: for ovnkube node mode dpu-host no metrics is required as ovs/ovn is not running on the node.
-	if runMode.node && config.OvnKubeNode.Mode != types.NodeModeDPUHost && config.Metrics.OVNMetricsBindAddress != "" {
+	if runMode.node && (config.IsModeDPU() || config.IsModeFull()) && config.Metrics.OVNMetricsBindAddress != "" {
 
 		if ovsClient == nil {
 			ovsClient, err = libovsdb.NewOVSClient(ctx.Done())
@@ -696,69 +684,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 				opts.EnablePprof = config.Metrics.EnablePprof
 			}
 
-			if !config.OVNKubernetesFeature.EnableInterconnect || config.Default.Zone == types.OvnDefaultZone {
-				// In Central mode, OVNKube Node doesn't need to register OVN Northd and DB metrics unless
-				// OVNKube Master Pod is running on this node.
-				opts.EnableOVNNorthdMetrics = false
-				opts.EnableOVNDBMetrics = false
-			}
-
-			metricsServer := metrics.StartOVNMetricsServer(opts, ovsClient, ovnClientset.KubeClient, ctx.Done(), wg)
-
-			if !config.OVNKubernetesFeature.EnableInterconnect || config.Default.Zone == types.OvnDefaultZone {
-				// Check if OVN DB pods (ovn-nbdb, ovn-sbdb) are running on this node
-				// Downstream deploys ovn-nbdb and ovn-sbdb as separate StatefulSets
-
-				podLister := corev1listers.NewPodLister(watchFactory.LocalPodInformer().GetIndexer())
-				nodeLister := corev1listers.NewNodeLister(watchFactory.NodeInformer().GetIndexer())
-				podSynced := watchFactory.LocalPodInformer().HasSynced
-
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-
-					if !util.WaitForInformerCacheSyncWithTimeout("OVN DB Metrics Registration", ctx.Done(), podSynced) {
-						klog.Errorf("OVN DB metrics registration on this node skipped, timed out waiting for pod informer caches to sync")
-						return
-					}
-
-					err := wait.PollUntilContextTimeout(ctx, 5*time.Second, 300*time.Second, true, func(_ context.Context) (bool, error) {
-						return metrics.CheckPodRunsOnGivenNode(podLister, []string{"name in (ovn-nbdb, ovn-sbdb, ovnkube-db)"}, runMode.identity, true)
-					})
-					if err != nil {
-						klog.Infof("Not registering OVN DB Metrics on this node (%s) since OVN DBs are not running on it", runMode.identity)
-					} else {
-						klog.Infof("Found OVN DB Pod running on this node (%s), registering OVN DB Metrics", runMode.identity)
-						metricsServer.EnableOVNDBMetrics()
-					}
-				}()
-
-				// Check if OVN Northd should run on this node using node label selector
-				// Downstream deploys ovn-northd as a separate Deployment with node selector
-				if config.Kubernetes.NorthdNodeSelectorLabel != "" {
-					wg.Add(1)
-					go func() {
-						defer wg.Done()
-						err := wait.PollUntilContextTimeout(ctx, 5*time.Second, 300*time.Second, true, func(_ context.Context) (bool, error) {
-							lastErr := metrics.CheckNodeLabel(nodeLister, runMode.identity, config.Kubernetes.NorthdNodeSelectorLabel)
-							if lastErr != nil {
-								if errors.Is(lastErr, metrics.ErrGetNode) {
-									return false, nil // Retryable error
-								}
-								return false, lastErr // Permanent error, don't retry
-							}
-							return true, nil // Success
-
-						})
-						if err != nil {
-							klog.Infof("Not registering OVN Northd Metrics on this node (%s): %v", runMode.identity, err)
-						} else {
-							klog.Infof("Node (%s) matches northd node selector, registering OVN Northd Metrics", runMode.identity)
-							metricsServer.EnableOVNNorthdMetrics()
-						}
-					}()
-				}
-			}
+			metrics.StartOVNMetricsServer(opts, ovsClient, ovnClientset.KubeClient, ctx.Done(), wg)
 		}
 	}
 

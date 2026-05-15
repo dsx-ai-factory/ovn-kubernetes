@@ -355,13 +355,6 @@ const (
 	// portMirror constants
 	PortMirrorResyncInterval = 30 * time.Second
 
-	// virtual port constants
-	VirtualIPResyncInterval = 30 * time.Second
-
-	VirtualPortType   = "virtual"
-	TablePortBinding  = "Port_Binding"
-	VirtualPortPrefix = "ovn_k8s_vport"
-
 	OvnK8sStatusSucceeded OvnK8sStatus = "Succeeded"
 	OvnK8sStatusFailed    OvnK8sStatus = "Failed"
 

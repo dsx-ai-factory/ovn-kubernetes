@@ -5,7 +5,6 @@
 package metrics
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,10 +17,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
-	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
@@ -39,23 +35,6 @@ const (
 	ovnNorthDB    = "ovnnb-db"
 	ovnSouthDB    = "ovnsb-db"
 )
-
-// Upstream changed the value of MetricOvnkubeSubsystemController to "controller" when adding IC
-// mode (see https://github.com/ovn-kubernetes/ovn-kubernetes/pull/3723). However, downstream is
-// still using "master", which is referenced in existing dashboards and alerts.
-//
-// Fortunately, NGN uses Central mode and VMaaS uses IC mode, so we can preserve compatibility by:
-// - Using "master" for NGN, which continues to serve current dashboards
-// - Using "controller" for VMaaS, which is adopted by new IC-specific dashboards and alerts
-//
-// This change is downstream-only and will not be upstreamed. Once NGN migrates to IC mode,
-// this hack will be removed.
-func init() {
-	if os.Getenv("OVN_ENABLE_INTERCONNECT") != "true" {
-		types.MetricOvnkubeSubsystemController = "master"
-	}
-
-}
 
 type metricDetails struct {
 	srcName       string
@@ -105,9 +84,6 @@ var componentCoverageShowMetricsMap = map[string]map[string]*metricDetails{}
 // interested in that output for a given component. We generalize capturing these metrics
 // across all OVN components.
 var componentStopwatchShowMetricsMap = map[string]map[string]*stopwatchMetricDetails{}
-
-// ErrGetNode is the error returned when the node cannot be retrieved.
-var ErrGetNode = errors.New("failed to get node")
 
 func parseMetricToFloat(componentName, metricName, value string) float64 {
 	f64Value, err := strconv.ParseFloat(value, 64)
@@ -416,61 +392,6 @@ func stopwatchShowMetricsUpdate(component string) {
 
 }
 
-// CheckPodRunsOnGivenNode checks if a pod with one of the given labels is running on the given node.
-// Uses kubernetes.Interface for direct API access (used by ovnkube.go).
-// The `keepTrying` boolean when set to true will not return an error if we can't find pods with one of the given labels.
-func CheckPodRunsOnGivenNode(podLister corev1listers.PodLister, labels []string, k8sNodeName string,
-	keepTrying bool) (bool, error) {
-	for _, label := range labels {
-		podSelector, err := metav1.ParseToLabelSelector(label)
-		if err != nil {
-			return false, fmt.Errorf("failed to check Pods with invalid label %s: %v", label, err)
-		}
-		selector, err := metav1.LabelSelectorAsSelector(podSelector)
-		if err != nil {
-			return false, fmt.Errorf("failed to check Pods with invalid label %s: %v", label, err)
-		}
-
-		pods, err := podLister.Pods(config.Kubernetes.OVNConfigNamespace).List(selector)
-		if err != nil {
-			klog.V(5).Infof("Failed to list Pods with label %q: %v. Retrying..", label, err)
-			return false, nil
-		}
-		for _, pod := range pods {
-			if pod.Spec.NodeName == k8sNodeName {
-				return true, nil
-			}
-		}
-	}
-	if keepTrying {
-		return false, nil
-	}
-	return false, fmt.Errorf("a Pod matching at least one of the labels %q doesn't exist on this node %s",
-		strings.Join(labels, ","), k8sNodeName)
-}
-
-// CheckNodeLabel checks if the give node matches the given labelSelector. Return nil if it matches
-func CheckNodeLabel(nodeLister corev1listers.NodeLister, nodeName, selector string) error {
-	node, err := nodeLister.Get(nodeName)
-	if err != nil {
-		klog.Infof("Register Ovn Northd Metrics Operation failed (will retry): %v", err)
-		return ErrGetNode
-	}
-
-	nodeSelector, err := metav1.ParseToLabelSelector(selector)
-	if err != nil {
-		return fmt.Errorf("failed to check node with invalid label selector %s: %v", selector, err)
-	}
-	ls, err := metav1.LabelSelectorAsSelector(nodeSelector)
-	if err != nil {
-		return fmt.Errorf("failed to check node with invalid label selector %s: %v", selector, err)
-	}
-	if !ls.Matches(labels.Set(node.Labels)) {
-		return fmt.Errorf("node does not have the expected label %q", node.Labels)
-	}
-	return nil
-}
-
 // stringFlagSetterFunc is a func used for setting string type flag.
 type stringFlagSetterFunc func(string) (string, error)
 
@@ -544,7 +465,7 @@ func StartMetricsServer(bindAddress string, enablePprof bool, certFile string, k
 func StartOVNMetricsServer(opts MetricServerOptions,
 	ovsClient libovsdbclient.Client,
 	kubeClient kubernetes.Interface,
-	stopChan <-chan struct{}, wg *sync.WaitGroup) *MetricServer {
+	stopChan <-chan struct{}, wg *sync.WaitGroup) {
 
 	if config.Metrics.EnableOvsNativeMetrics {
 		opts.EnableOVSNativeMetrics = true
@@ -560,6 +481,4 @@ func StartOVNMetricsServer(opts MetricServerOptions,
 		klog.Infof("OVN Metrics Server starts to run ...")
 		metricsServer.Run(stopChan)
 	}()
-
-	return metricsServer
 }

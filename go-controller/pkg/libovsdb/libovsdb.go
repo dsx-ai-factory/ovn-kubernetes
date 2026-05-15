@@ -130,11 +130,11 @@ func NewClient(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, stopCh <-c
 
 // NewSBClient creates a new OVN Southbound Database client
 func NewSBClient(stopCh <-chan struct{}, opts ...client.Option) (client.Client, error) {
-	return NewSBClientWithConfig(config.OvnSouth, stopCh, false, opts...)
+	return NewSBClientWithConfig(config.OvnSouth, stopCh, opts...)
 }
 
 // NewSBClientWithConfig creates a new OVN Southbound Database client with the provided configuration
-func NewSBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}, forTesting bool, opts ...client.Option) (client.Client, error) {
+func NewSBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}, opts ...client.Option) (client.Client, error) {
 	dbModel, err := sbdb.FullDatabaseModel()
 	if err != nil {
 		return nil, err
@@ -160,19 +160,16 @@ func NewSBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}, for
 		client.WithTable(&sbdb.ControllerEvent{}),
 		// used by node sync
 		client.WithTable(&sbdb.Chassis{}),
+		// used by zone interconnect
+		client.WithTable(&sbdb.Encap{}),
 		// used by node sync, only interested in names
 		client.WithTable(&chassisPrivate, &chassisPrivate.Name),
 		// used by node sync, only interested in Chassis reference
 		client.WithTable(&igmpGroup, &igmpGroup.Chassis),
 		// used for metrics
 		client.WithTable(&sbdb.SBGlobal{}),
-	}
-	// Both zone interconnect and testing also need to monitor the encap and port binding tables
-	if forTesting || config.OVNKubernetesFeature.EnableInterconnect {
-		// used by zone interconnect
-		monitorOptionTable = append(monitorOptionTable, client.WithTable(&sbdb.Encap{}))
-		// used for metrics/zone interconnect
-		monitorOptionTable = append(monitorOptionTable, client.WithTable(&sbdb.PortBinding{}))
+		// used for metrics
+		client.WithTable(&sbdb.PortBinding{}),
 	}
 	_, err = c.Monitor(ctx,
 		c.NewMonitor(monitorOptionTable...),

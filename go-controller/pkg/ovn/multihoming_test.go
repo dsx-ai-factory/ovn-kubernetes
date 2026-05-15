@@ -81,11 +81,10 @@ func splitPodIPMaskLength(podIP string) (int, string) {
 type option func(machine *userDefinedNetworkExpectationMachine)
 
 type userDefinedNetworkExpectationMachine struct {
-	fakeOvn               *FakeOVN
-	pods                  []testPod
-	gatewayConfig         *util.L3GatewayConfig
-	isInterconnectCluster bool
-	hasClusterPortGroup   bool
+	fakeOvn             *FakeOVN
+	pods                []testPod
+	gatewayConfig       *util.L3GatewayConfig
+	hasClusterPortGroup bool
 }
 
 func newUserDefinedNetworkExpectationMachine(fakeOvn *FakeOVN, pods []testPod, opts ...option) *userDefinedNetworkExpectationMachine {
@@ -103,12 +102,6 @@ func newUserDefinedNetworkExpectationMachine(fakeOvn *FakeOVN, pods []testPod, o
 func withGatewayConfig(config *util.L3GatewayConfig) option {
 	return func(machine *userDefinedNetworkExpectationMachine) {
 		machine.gatewayConfig = config
-	}
-}
-
-func withInterconnectCluster() option {
-	return func(machine *userDefinedNetworkExpectationMachine) {
-		machine.isInterconnectCluster = true
 	}
 }
 
@@ -250,12 +243,10 @@ func (em *userDefinedNetworkExpectationMachine) expectedLogicalSwitchesAndPortsW
 
 			hasEVPN := ocInfo.bnc.GetNetInfo().Transport() == ovntypes.NetworkTransportEVPN
 			if ocInfo.bnc.TopologyType() == ovntypes.Layer2Topology {
-				if em.isInterconnectCluster || hasEVPN {
-					otherConfig["mcast_snoop"] = "true"
-					otherConfig["mcast_flood_unregistered"] = "true"
-					otherConfig["mcast_querier"] = "false"
-				}
-				if em.isInterconnectCluster && !hasEVPN {
+				otherConfig["mcast_snoop"] = "true"
+				otherConfig["mcast_flood_unregistered"] = "true"
+				otherConfig["mcast_querier"] = "false"
+				if !hasEVPN {
 					otherConfig[libovsdbops.RequestedTnlKey] = "16711685"
 					otherConfig["interconn-ts"] = switchName
 				}
@@ -307,7 +298,7 @@ func (em *userDefinedNetworkExpectationMachine) expectedLogicalSwitchesAndPortsW
 				}
 			}
 			if _, alreadyAdded := alreadyAddedManagementElements[pod.nodeName]; !alreadyAdded &&
-				em.isInterconnectCluster && ocInfo.bnc.TopologyType() == ovntypes.Layer3Topology && !hasEVPN {
+				ocInfo.bnc.TopologyType() == ovntypes.Layer3Topology && !hasEVPN {
 				transitSwitchName := ocInfo.bnc.GetNetworkName() + "_transit_switch"
 				extIDs := map[string]string{
 					ovntypes.NetworkExternalID:     ocInfo.bnc.GetNetworkName(),
@@ -448,35 +439,11 @@ func minimalFeatureConfig() *config.OVNKubernetesFeatureConfig {
 	}
 }
 
-func enableICFeatureConfig() *config.OVNKubernetesFeatureConfig {
-	featConfig := minimalFeatureConfig()
-	featConfig.EnableInterconnect = true
-	return featConfig
-}
-
-func enableNonICFeatureConfig() *config.OVNKubernetesFeatureConfig {
-	featConfig := minimalFeatureConfig()
-	featConfig.EnableInterconnect = false
-	featConfig.EnablePersistentIPs = true
-	return featConfig
-}
-
 type testConfigOpt = func(*testConfiguration)
 
 func icClusterTestConfiguration(opts ...testConfigOpt) testConfiguration {
 	config := testConfiguration{
-		configToOverride:   enableICFeatureConfig(),
-		expectationOptions: []option{withInterconnectCluster()},
-	}
-	for _, opt := range opts {
-		opt(&config)
-	}
-	return config
-}
-
-func nonICClusterTestConfiguration(opts ...testConfigOpt) testConfiguration {
-	config := testConfiguration{
-		configToOverride: enableNonICFeatureConfig(),
+		configToOverride: minimalFeatureConfig(),
 	}
 	for _, opt := range opts {
 		opt(&config)
@@ -525,11 +492,9 @@ func newMultiHomedPod(testPod testPod, multiHomingConfigs ...userDefinedNetInfo)
 	}
 	serializedNetworkSelectionElements, _ := json.Marshal(secondaryNetworks)
 	pod.Annotations[nadapi.NetworkAttachmentAnnot] = string(serializedNetworkSelectionElements)
-	if config.OVNKubernetesFeature.EnableInterconnect {
-		dummyOVNNetAnnotations := dummyOVNPodNetworkAnnotations(testPod.udnPodInfos, multiHomingConfigs)
-		if dummyOVNNetAnnotations != "{}" {
-			pod.Annotations["k8s.ovn.org/pod-networks"] = dummyOVNNetAnnotations
-		}
+	dummyOVNNetAnnotations := dummyOVNPodNetworkAnnotations(testPod.udnPodInfos, multiHomingConfigs)
+	if dummyOVNNetAnnotations != "{}" {
+		pod.Annotations["k8s.ovn.org/pod-networks"] = dummyOVNNetAnnotations
 	}
 	return pod
 }

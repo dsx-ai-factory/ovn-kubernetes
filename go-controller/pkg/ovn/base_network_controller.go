@@ -36,7 +36,6 @@ import (
 	nodecontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controllers/node"
 	adminpbrapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
 	portmirror "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
-	virtualip "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kubevirt"
@@ -199,14 +198,6 @@ type BaseNetworkController struct {
 	// map of admin pbr policies
 	adminPBRStore      sync.Map
 	adminPBRRetryQueue workqueue.RateLimitingInterface
-
-	// VirtualIP is only supported by secondary layer2 network
-	virtualIPHandler *factory.Handler
-	// libovsdb southbound client interface to monitor VIP port bindings
-	vipSBClient libovsdbclient.Client
-	// map & workqueue for virtualIP operations
-	virtualIPs          sync.Map
-	virtualIPRetryQueue workqueue.RateLimitingInterface
 
 	// map & workqueue for portmirror operations
 	portMirrors          sync.Map
@@ -569,39 +560,6 @@ func (bnc *BaseNetworkController) syncNodeClusterRouterPort(node *corev1.Node, h
 		}
 	}
 
-	if util.IsNetworkSegmentationSupportEnabled() &&
-		bnc.IsPrimaryNetwork() && !config.OVNKubernetesFeature.EnableInterconnect &&
-		(bnc.TopologyType() == types.Layer3Topology ||
-			bnc.TopologyType() == types.Layer2Topology) {
-		// since in nonIC the ovn_cluster_router is distributed, we must specify the gatewayPort for the
-		// conditional SNATs to signal OVN which gatewayport should be chosen if there are mutiple distributed
-		// gateway ports. Now that the LRP is created, let's update the NATs to reflect that.
-		lrp := nbdb.LogicalRouterPort{
-			Name: lrpName,
-		}
-		logicalRouterPort, err := libovsdbops.GetLogicalRouterPort(bnc.nbClient, &lrp)
-		if err != nil {
-			return fmt.Errorf("failed to fetch gatewayport %s for network %q on node %q, err: %w",
-				lrpName, bnc.GetNetworkName(), node.Name, err)
-		}
-		gatewayPort := logicalRouterPort.UUID
-		p := func(item *nbdb.NAT) bool {
-			return item.ExternalIDs[types.NetworkExternalID] == bnc.GetNetworkName() &&
-				item.LogicalPort != nil && *item.LogicalPort == lrpName && item.Match != ""
-		}
-		nonICConditonalSNATs, err := libovsdbops.FindNATsWithPredicate(bnc.nbClient, p)
-		if err != nil {
-			return fmt.Errorf("failed to fetch conditional NATs %s for network %q on node %q, err: %w",
-				lrpName, bnc.GetNetworkName(), node.Name, err)
-		}
-		for _, nat := range nonICConditonalSNATs {
-			nat.GatewayPort = &gatewayPort
-		}
-		if err := libovsdbops.CreateOrUpdateNATs(bnc.nbClient, &logicalRouter, nonICConditonalSNATs...); err != nil {
-			return fmt.Errorf("failed to fetch conditional NATs %s for network %q on node %q, err: %w",
-				lrpName, bnc.GetNetworkName(), node.Name, err)
-		}
-	}
 	return nil
 }
 
@@ -1030,9 +988,6 @@ func (bnc *BaseNetworkController) GetNetworkRole(pod *corev1.Pod) (string, error
 // that have no overlay or that use EVPN, and this method would typically be
 // used to inhibit the configuration of interconnect resources in those cases.
 func (bnc *BaseNetworkController) hasInterconnectTransport() bool {
-	if !config.OVNKubernetesFeature.EnableInterconnect {
-		return false
-	}
 	switch bnc.Transport() {
 	case types.NetworkTransportEVPN, types.NetworkTransportNoOverlay:
 		return false
@@ -1271,112 +1226,6 @@ func (bnc *BaseNetworkController) WatchAdminPolicyBasedRoutes() (err error) {
 		for bnc.retryAdminPBROperations() {
 		}
 	}()
-	return nil
-}
-
-// WatchVirtualIPs starts the watching of virtual-ip resources and calls
-// back the appropriate handler logic
-func (bnc *BaseNetworkController) WatchVirtualIPs() (err error) {
-	if bnc.virtualIPHandler != nil {
-		// WatchVirtualIPs has succeeded and this is from retry
-		return nil
-	}
-	defer func() {
-		if err != nil {
-			if bnc.vipSBClient != nil {
-				bnc.vipSBClient.Close()
-			}
-			if bnc.virtualIPHandler != nil {
-				bnc.watchFactory.RemoveVirtualIPHandler(bnc.virtualIPHandler)
-			}
-			if bnc.virtualIPRetryQueue != nil {
-				bnc.virtualIPRetryQueue.ShutDown()
-			}
-			bnc.virtualIPHandler = nil
-			bnc.vipSBClient = nil
-			bnc.virtualIPRetryQueue = nil
-		}
-	}()
-	start := time.Now()
-	if bnc.TopologyType() == types.Layer2Topology {
-		bnc.virtualIPRetryQueue = workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "virtualIP")
-	}
-	// filterVirtualIP checks if the virtualIP nad belongs to this controller and
-	filterVirtualIP := func(obj interface{}) bool {
-		virtIP, ok := obj.(*virtualip.VirtualIP)
-		if !ok {
-			return false
-		}
-		return bnc.networkManager.GetNetworkNameForNADKey(virtIP.Spec.NetworkAttachmentName) == bnc.GetNetworkName()
-	}
-	// creates corresponding add/update/delete handlers
-	bnc.virtualIPHandler, err = bnc.watchFactory.AddHandlerWithFilterFunc(reflect.TypeOf(&virtualip.VirtualIP{}), filterVirtualIP, cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			virtIP := obj.(*virtualip.VirtualIP)
-			if bnc.TopologyType() != types.Layer2Topology {
-				errMsg := fmt.Sprintf("VirtualIP's network-attachment-defintion %s is not %s type",
-					virtIP.Spec.NetworkAttachmentName, types.Layer2Topology)
-				err = bnc.updateVirtualIPStatusWithRetry(virtIP.Namespace, virtIP.Name, types.OvnK8sStatusFailed,
-					[]string{errMsg}, nil, nil, nil)
-			} else {
-				err = bnc.addVirtualIP(virtIP)
-			}
-			if err != nil {
-				klog.Error(err.Error())
-				bnc.recordVirtualIPEvent("VirtualIPAddError", err.Error(), virtIP)
-			}
-		},
-		UpdateFunc: func(old, newer interface{}) {
-			if bnc.TopologyType() == types.Layer2Topology {
-				oldVirtIP := old.(*virtualip.VirtualIP)
-				newVirtIP := newer.(*virtualip.VirtualIP)
-				// only compare spec changes as we constantly do updates for
-				// virtualIP status.
-				if !reflect.DeepEqual(oldVirtIP.Spec, newVirtIP.Spec) {
-					if err := bnc.deleteVirtualIP(oldVirtIP); err != nil {
-						klog.Error(err.Error())
-					}
-					if err := bnc.addVirtualIP(newVirtIP); err != nil {
-						klog.Error(err.Error())
-					}
-				}
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			if bnc.TopologyType() == types.Layer2Topology {
-				virtIP := obj.(*virtualip.VirtualIP)
-				if err := bnc.deleteVirtualIP(virtIP); err != nil {
-					klog.Error(err)
-				}
-			}
-		},
-	}, nil, bnc.watchFactory.GetHandlerPriority(factory.VirtualIPType))
-	if err != nil {
-		return err
-	}
-
-	if bnc.TopologyType() == types.Layer2Topology {
-		go func() {
-			ticker := time.NewTicker(types.VirtualIPResyncInterval)
-			for {
-				select {
-				case <-ticker.C:
-					bnc.syncVirtualIPsPeriodic()
-				case <-bnc.stopChan:
-					ticker.Stop()
-					bnc.virtualIPRetryQueue.ShutDown()
-					return
-				}
-			}
-		}()
-		// for virtualIPRetry operations
-		go func() {
-			for bnc.retryVirtualIPOperations() {
-			}
-		}()
-	}
-
-	klog.Infof("Bootstrapping existing virtualIPs and cleaning stale virtualIPs for network %s took %v", bnc.GetNetworkName(), time.Since(start))
 	return nil
 }
 

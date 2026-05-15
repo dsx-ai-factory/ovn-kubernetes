@@ -21,9 +21,12 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/managementport"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -36,6 +39,7 @@ type addressManager struct {
 	cidrs         sets.Set[string]
 	nodeAnnotator kube.Annotator
 	mgmtPort      managementport.Interface
+	ovsClient     libovsdbclient.Client
 	// useNetlink indicates the addressManager should use machine
 	// information from netlink. Set to false for testcases.
 	useNetlink bool
@@ -55,26 +59,27 @@ type addressManager struct {
 }
 
 // initializes a new address manager which will hold all the IPs on a node
-func newAddressManager(nodeName string, k kube.Interface, mgmtPort managementport.Interface, watchFactory factory.NodeWatchFactory, gwBridge *bridgeconfig.BridgeConfiguration) (*addressManager, error) {
-	return newAddressManagerInternal(nodeName, k, mgmtPort, watchFactory, gwBridge, true)
+func newAddressManager(nodeName string, k kube.Interface, mgmtPort managementport.Interface, watchFactory factory.NodeWatchFactory, gwBridge *bridgeconfig.BridgeConfiguration, ovsClient libovsdbclient.Client) (*addressManager, error) {
+	return newAddressManagerInternal(nodeName, k, mgmtPort, watchFactory, gwBridge, ovsClient, true)
 }
 
 // newAddressManagerInternal creates a new address manager; this function is
 // only expose for testcases to disable netlink subscription to ensure
 // reproducibility of unit tests.
-func newAddressManagerInternal(nodeName string, k kube.Interface, mgmtPort managementport.Interface, watchFactory factory.NodeWatchFactory, gwBridge *bridgeconfig.BridgeConfiguration, useNetlink bool) (*addressManager, error) {
+func newAddressManagerInternal(nodeName string, k kube.Interface, mgmtPort managementport.Interface, watchFactory factory.NodeWatchFactory, gwBridge *bridgeconfig.BridgeConfiguration, ovsClient libovsdbclient.Client, useNetlink bool) (*addressManager, error) {
 	mgr := &addressManager{
 		nodeName:              nodeName,
 		watchFactory:          watchFactory,
 		cidrs:                 sets.New[string](),
 		mgmtPort:              mgmtPort,
 		gatewayBridge:         gwBridge,
+		ovsClient:             ovsClient,
 		OnMasqueradeIPChanged: func() {},
 		useNetlink:            useNetlink,
 		syncPeriod:            30 * time.Second,
 	}
 	mgr.nodeAnnotator = kube.NewNodeAnnotator(k, nodeName)
-	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+	if config.IsModeDPU() {
 		if err := mgr.updateHostCIDRs(); err != nil {
 			return nil, fmt.Errorf("failed to update host-cidrs annotations on node %s: %v", nodeName, err)
 		}
@@ -157,7 +162,7 @@ func (c *addressManager) notifyAddressesChanged() {
 type subscribeFn func() (bool, chan netlink.AddrUpdate, error)
 
 func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
-	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+	if config.IsModeDPU() {
 		return
 	}
 
@@ -306,7 +311,7 @@ func (c *addressManager) handleNodePrimaryAddrChange() {
 		klog.Errorf("Address Manager failed to check node primary address change: %v", err)
 		return
 	}
-	if nodePrimaryAddrChanged && config.Default.EncapIP == "" && config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+	if nodePrimaryAddrChanged && config.Default.EncapIP == "" && (config.IsModeDPU() || config.IsModeFull()) {
 		klog.Infof("Node primary address changed to %v. Updating OVN encap IP.", c.nodePrimaryAddr)
 		c.updateOVNEncapIPAndReconnect(c.nodePrimaryAddr)
 	}
@@ -364,7 +369,7 @@ func (c *addressManager) updateNodeAddressAnnotations() error {
 }
 
 func (c *addressManager) updateHostCIDRs() error {
-	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+	if config.IsModeDPU() {
 		// For DPU mode, we don't need to update the host-cidrs annotation.
 		return nil
 	}
@@ -481,7 +486,7 @@ func (c *addressManager) isValidNodeIP(addr net.IP, linkIndex int) bool {
 	}
 	if config.OVNKubernetesFeature.EnableEgressIP {
 		// EIP assigned to the primary interface which selects pods with a role primary user defined network must be excluded.
-		if util.IsNetworkSegmentationSupportEnabled() && config.OVNKubernetesFeature.EnableInterconnect && config.Gateway.Mode != config.GatewayModeDisabled {
+		if util.IsNetworkSegmentationSupportEnabled() && config.Gateway.Mode != config.GatewayModeDisabled {
 			// Two methods to lookup EIPs assigned to the gateway bridge. Fast path from a shared cache or slow path from node annotations.
 			// At startup, gateway bridge cache gets sync
 			eipMarkIPs := c.gatewayBridge.GetEIPMarkIPs()
@@ -531,7 +536,7 @@ func (c *addressManager) refreshGatewayIfIndex() {
 }
 
 func (c *addressManager) sync() {
-	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+	if config.IsModeDPU() {
 		return
 	}
 	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
@@ -616,44 +621,33 @@ func (c *addressManager) getPrimaryHostEgressIPs() (sets.Set[string], error) {
 
 // updateOVNEncapIPAndReconnect updates encap IP to OVS when the node primary IP changed.
 func (c *addressManager) updateOVNEncapIPAndReconnect(newIP net.IP) {
-	checkCmd := []string{
-		"get",
-		"Open_vSwitch",
-		".",
-		"external_ids:ovn-encap-ip",
-	}
-	encapIP, stderr, err := util.RunOVSVsctl(checkCmd...)
+	alreadyConfigured := false
+	ovs, err := ovsops.GetOpenvSwitch(c.ovsClient)
 	if err != nil {
-		klog.Warningf("Unable to retrieve configured ovn-encap-ip from OVS: %v, %q", err, stderr)
-	} else {
-		encapIP = strings.TrimSuffix(encapIP, "\n")
-		if len(encapIP) > 0 && newIP.String() == encapIP {
-			klog.V(4).Infof("Will not update encap IP %s - it is already configured", newIP.String())
+		klog.Warningf("Unable to retrieve configured ovn-encap-ip from OVS: %v", err)
+	} else if encapIP := ovs.ExternalIDs["ovn-encap-ip"]; encapIP != "" && newIP.String() == encapIP {
+		klog.V(4).Infof("Will not update encap IP %s - it is already configured", newIP.String())
+		alreadyConfigured = true
+	}
+
+	if !alreadyConfigured {
+		if err := ovsops.UpdateOpenvSwitchExternalIDs(c.ovsClient, map[string]string{
+			"ovn-encap-ip": newIP.String(),
+		}); err != nil {
+			klog.Errorf("Error setting OVS encap IP %s: %v", newIP.String(), err)
 			return
 		}
 	}
-
 	config.Default.EffectiveEncapIP = newIP.String()
-	confCmd := []string{
-		"set",
-		"Open_vSwitch",
-		".",
-		fmt.Sprintf("external_ids:ovn-encap-ip=%s", newIP),
-	}
 
-	_, stderr, err = util.RunOVSVsctl(confCmd...)
-	if err != nil {
-		klog.Errorf("Error setting OVS encap IP %s: %v %q", newIP.String(), err, stderr)
-		return
-	}
-
-	// force ovn-controller to reconnect SB with new encap IP immediately.
-	// otherwise there will be a max delay of 200s due to the 100s
-	// ovn-controller inactivity probe.
-	_, stderr, err = util.RunOVNAppctlWithTimeout(5, "-t", "ovn-controller", "exit", "--restart")
-	if err != nil {
-		klog.Errorf("Failed to exit ovn-controller %v %q", err, stderr)
-		return
+	if !alreadyConfigured {
+		// force ovn-controller to reconnect SB with new encap IP immediately.
+		// otherwise there will be a max delay of 200s due to the 100s
+		// ovn-controller inactivity probe. Best-effort: still let the
+		// annotation below converge on failure.
+		if _, stderr, err := util.RunOVNAppctlWithTimeout(5, "-t", "ovn-controller", "exit", "--restart"); err != nil {
+			klog.Errorf("Failed to exit ovn-controller %v %q", err, stderr)
+		}
 	}
 
 	// Update node-encap-ips annotation

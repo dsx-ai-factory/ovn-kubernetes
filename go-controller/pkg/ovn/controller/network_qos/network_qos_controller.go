@@ -27,6 +27,7 @@ import (
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
+	controllerutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
 	networkqosapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1"
 	networkqosclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/clientset/versioned"
 	networkqosinformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/informers/externalversions/networkqos/v1alpha1"
@@ -144,7 +145,7 @@ func NewController(
 	c.nqosLister = nqosInformer.Lister()
 	c.nqosCacheSynced = nqosInformer.Informer().HasSynced
 	c.nqosQueue = workqueue.NewTypedRateLimitingQueueWithConfig(
-		workqueue.NewTypedItemFastSlowRateLimiter[string](1*time.Second, 5*time.Second, 5),
+		controllerutil.DefaultRateLimiter[string](),
 		workqueue.TypedRateLimitingQueueConfig[string]{Name: "networkQoS"},
 	)
 	_, err := nqosInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
@@ -160,7 +161,7 @@ func NewController(
 	c.nqosNamespaceLister = namespaceInformer.Lister()
 	c.nqosNamespaceSynced = namespaceInformer.Informer().HasSynced
 	c.nqosNamespaceQueue = workqueue.NewTypedRateLimitingQueueWithConfig(
-		workqueue.NewTypedItemFastSlowRateLimiter[string](1*time.Second, 5*time.Second, 5),
+		controllerutil.DefaultRateLimiter[string](),
 		workqueue.TypedRateLimitingQueueConfig[string]{Name: "nqosNamespaces"},
 	)
 	_, err = namespaceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
@@ -176,7 +177,7 @@ func NewController(
 	c.nqosPodLister = podInformer.Lister()
 	c.nqosPodSynced = podInformer.Informer().HasSynced
 	c.nqosPodQueue = workqueue.NewTypedRateLimitingQueueWithConfig(
-		workqueue.NewTypedItemFastSlowRateLimiter[string](1*time.Second, 5*time.Second, 5),
+		controllerutil.DefaultRateLimiter[string](),
 		workqueue.TypedRateLimitingQueueConfig[string]{Name: "nqosPods"},
 	)
 	_, err = podInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
@@ -192,7 +193,7 @@ func NewController(
 	c.nqosNodeLister = nodeInformer.Lister()
 	c.nqosNodeSynced = nodeInformer.Informer().HasSynced
 	c.nqosNodeQueue = workqueue.NewTypedRateLimitingQueueWithConfig(
-		workqueue.NewTypedItemFastSlowRateLimiter[string](1*time.Second, 5*time.Second, 5),
+		controllerutil.DefaultRateLimiter[string](),
 		workqueue.TypedRateLimitingQueueConfig[string]{Name: "nqosNodes"},
 	)
 	_, err = nodeInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{

@@ -1307,10 +1307,8 @@ func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf, annotations map[string]s
 	if err != nil {
 		return nil, err
 	}
-	if config.OVNKubernetesFeature.EnableInterconnect {
-		// NAD interconnect is not supported in IC mode yet
-		ni.connectToNAD = ""
-	}
+	// NAD interconnect is not supported in IC mode yet
+	ni.connectToNAD = ""
 	ni.ipv4mode, ni.ipv6mode = getIPMode(subnets)
 	return ni, nil
 }
@@ -2021,8 +2019,7 @@ func DoesNetworkRequireIPAM(netInfo NetInfo) bool {
 }
 
 func DoesNetworkRequireTunnelIDs(netInfo NetInfo) bool {
-	// Layer2Topology with IC require that we allocate tunnel IDs for each pod
-	return netInfo.TopologyType() == types.Layer2Topology && config.OVNKubernetesFeature.EnableInterconnect
+	return netInfo.TopologyType() == types.Layer2Topology
 }
 
 func AllowsPersistentIPs(netInfo NetInfo) bool {

@@ -192,18 +192,6 @@ func (s *MetricServer) registerMetrics() {
 	}
 }
 
-func (s *MetricServer) EnableOVNNorthdMetrics() {
-	s.opts.EnableOVNNorthdMetrics = true
-	klog.Infof("MetricServer registers OVN Northd metrics")
-	RegisterOvnNorthdMetrics(s.registerer)
-}
-
-func (s *MetricServer) EnableOVNDBMetrics() {
-	s.opts.EnableOVNDBMetrics = true
-	klog.Infof("MetricServer registers OVN DB metrics")
-	s.ovsDbProperties, s.opts.dbIsClustered, s.opts.dbFoundViaPath = RegisterOvnDBMetrics(s.registerer)
-}
-
 // updateOvsMetrics updates the OVS metrics.
 // When EnableOvsNativeMetrics is true, OVS native metrics are collected via
 // `ovs-appctl metrics/show`, so only update the metrics not covered by native metrics.

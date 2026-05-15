@@ -268,9 +268,7 @@ func NewLayer3UserDefinedNetworkController(
 		}
 	}
 
-	if config.OVNKubernetesFeature.EnableInterconnect {
-		oc.zoneICHandler = zoneic.NewZoneInterconnectHandler(oc.GetNetInfo(), cnci.nbClient, cnci.sbClient, cnci.watchFactory)
-	}
+	oc.zoneICHandler = zoneic.NewZoneInterconnectHandler(oc.GetNetInfo(), cnci.nbClient, cnci.sbClient, cnci.watchFactory)
 
 	if util.IsNetworkSegmentationSupportEnabled() && netInfo.IsPrimaryNetwork() {
 		var err error
@@ -479,10 +477,8 @@ func (oc *Layer3UserDefinedNetworkController) Cleanup() error {
 		return fmt.Errorf("failed to deleting routers/switches of network %s: %v", netName, err)
 	}
 
-	if config.OVNKubernetesFeature.EnableInterconnect {
-		if err = oc.zoneICHandler.Cleanup(); err != nil {
-			return fmt.Errorf("failed to delete interconnect transit switch of network %s: %v", netName, err)
-		}
+	if err = oc.zoneICHandler.Cleanup(); err != nil {
+		return fmt.Errorf("failed to delete interconnect transit switch of network %s: %v", netName, err)
 	}
 
 	// Delete all load balancers owned by this network to prevent orphaned LBs.
@@ -553,11 +549,6 @@ func (oc *Layer3UserDefinedNetworkController) run() error {
 		return err
 	}
 
-	if config.OVNKubernetesFeature.EnableVirtualIP {
-		if err := oc.WatchVirtualIPs(); err != nil {
-			return err
-		}
-	}
 	if config.OVNKubernetesFeature.EnableAdminPolicyBasedRouting {
 		if err := oc.WatchAdminPolicyBasedRoutes(); err != nil {
 			return err
@@ -678,7 +669,7 @@ func (oc *Layer3UserDefinedNetworkController) ReconcileNode(oldNode, newNode *co
 					syncNode:              true,
 					syncClusterRouterPort: true,
 					syncMgmtPort:          true,
-					syncZoneIC:            config.OVNKubernetesFeature.EnableInterconnect,
+					syncZoneIC:            true,
 					syncGw:                true,
 					syncReroute:           true,
 				}
@@ -719,7 +710,7 @@ func (oc *Layer3UserDefinedNetworkController) ReconcileNode(oldNode, newNode *co
 				syncNode:              true,
 				syncClusterRouterPort: true,
 				syncMgmtPort:          true,
-				syncZoneIC:            config.OVNKubernetesFeature.EnableInterconnect,
+				syncZoneIC:            true,
 				syncGw:                true,
 				syncReroute:           true,
 			}
@@ -737,7 +728,7 @@ func (oc *Layer3UserDefinedNetworkController) ReconcileNode(oldNode, newNode *co
 	}
 
 	if oldNode == nil {
-		return oc.addUpdateRemoteNodeEvent(newNode, config.OVNKubernetesFeature.EnableInterconnect)
+		return oc.addUpdateRemoteNodeEvent(newNode, true)
 	}
 
 	zoneClusterChanged := oc.nodeZoneClusterChanged(oldNode, newNode)

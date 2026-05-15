@@ -19,7 +19,6 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/generator/udn"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
 	nodetypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/types"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -349,12 +348,8 @@ func bootstrapOVSFlows(nodeName string) error {
 	}
 
 	var bridgeMACAddress net.HardwareAddr
-	if config.OvnKubeNode.Mode == types.NodeModeDPU {
-		hostRep, err := util.GetDPUHostInterface(bridge)
-		if err != nil {
-			return err
-		}
-		bridgeMACAddress, err = util.GetSriovnetOps().GetRepresentorPeerMacAddress(hostRep)
+	if config.IsModeDPU() {
+		bridgeMACAddress, err = util.GetDPUOps().GetHostGatewayMACAddress(bridge, nodeName)
 		if err != nil {
 			return err
 		}

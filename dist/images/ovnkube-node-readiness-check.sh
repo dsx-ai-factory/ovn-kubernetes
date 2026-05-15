@@ -2,9 +2,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# source the functions in ovndb-raft-functions.sh
-BASEDIR=$(dirname $0)
-. ${BASEDIR}/ovndb-raft-functions.sh
+bracketify() { case "$1" in *:*) echo "[$1]" ;; *) echo "$1" ;; esac; }
 
 metrics_endpoint_ip=${OVN_METRICS_ENDPOINT_IP}
 if [[ -z ${metrics_endpoint_ip} ]]; then

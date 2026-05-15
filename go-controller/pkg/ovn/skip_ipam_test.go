@@ -99,6 +99,13 @@ var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
 					"k8s.ovn.org/skip-ip-on-networks": "default/skip-ipam-nad",
 					"k8s.ovn.org/port-security-info":  fmt.Sprintf(`{"default/skip-ipam-nad": {"ips": ["%s"]}}`, floatingIP),
 				}
+				// simulate cluster manager setting a MAC-only pod annotation (with tunnel ID) for the skip-ipam network
+				hwAddr, _ := net.ParseMAC("0a:58:0a:80:01:03")
+				pod.Annotations, err = util.MarshalPodAnnotation(pod.Annotations,
+					&util.PodAnnotation{MAC: hwAddr, TunnelID: 1},
+					util.GetNADName("default", "skip-ipam-nad"),
+				)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				fakeOvn.startWithDBSetup(initialDB,
 					&corev1.NamespaceList{
 						Items: []corev1.Namespace{
@@ -163,6 +170,13 @@ var _ = ginkgo.Describe("Skip IPAM on a given network", func() {
 					"k8s.v1.cni.cncf.io/networks":     `[{"interface":"net1","name":"skip-ipam-nad","namespace":"default"}]`,
 					"k8s.ovn.org/skip-ip-on-networks": "default/skip-ipam-nad",
 				}
+				// simulate cluster manager setting a MAC-only pod annotation (with tunnel ID) for the skip-ipam network
+				hwAddr, _ := net.ParseMAC("0a:58:0a:80:01:03")
+				pod.Annotations, err = util.MarshalPodAnnotation(pod.Annotations,
+					&util.PodAnnotation{MAC: hwAddr, TunnelID: 1},
+					util.GetNADName("default", "skip-ipam-nad"),
+				)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				fakeOvn.startWithDBSetup(initialDB,
 					&corev1.NamespaceList{
 						Items: []corev1.Namespace{

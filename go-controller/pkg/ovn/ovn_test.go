@@ -47,8 +47,6 @@ import (
 	portmirror "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
 	portmirrorfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned/fake"
 	udnclientfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
-	virtualip "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
-	virtualipfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/clientset/versioned/fake"
 	vtepfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
@@ -172,7 +170,6 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 	apbExternalRouteObjects := []runtime.Object{}
 	anpObjects := []runtime.Object{}
 	ipamClaimObjects := []runtime.Object{}
-	virtualIPObjects := []runtime.Object{}
 	portMirrorObjects := []runtime.Object{}
 	v1Objects := []runtime.Object{}
 	nads := []nettypes.NetworkAttachmentDefinition{}
@@ -209,8 +206,6 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 			anpObjects = append(anpObjects, object)
 		case *ipamclaimsapi.IPAMClaimList:
 			ipamClaimObjects = append(ipamClaimObjects, object)
-		case *virtualip.VirtualIPList:
-			virtualIPObjects = append(virtualIPObjects, object)
 		case *portmirror.PortMirrorList:
 			portMirrorObjects = append(portMirrorObjects, object)
 		default:
@@ -229,7 +224,6 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 		EgressServiceClient:      egressservicefake.NewSimpleClientset(egressServiceObjects...),
 		AdminPolicyRouteClient:   adminpolicybasedroutefake.NewSimpleClientset(apbExternalRouteObjects...),
 		IPAMClaimsClient:         fakeipamclaimclient.NewSimpleClientset(ipamClaimObjects...),
-		VirtualIPClient:          virtualipfake.NewSimpleClientset(virtualIPObjects...),
 		PortMirrorClient:         portmirrorfake.NewSimpleClientset(portMirrorObjects...),
 		NetworkAttchDefClient:    nadClient,
 		UserDefinedNetworkClient: udnclientfake.NewSimpleClientset(),
@@ -611,7 +605,7 @@ func (o *FakeOVN) NewUserDefinedNetworkController(netattachdef *nettypes.Network
 		if err != nil {
 			nbZoneFailed = true
 			zone := types.OvnDefaultZone
-			if config.OVNKubernetesFeature.EnableInterconnect && config.Default.Zone != "" {
+			if config.Default.Zone != "" {
 				zone = config.Default.Zone
 			}
 			err = createTestNBGlobal(o.nbClient, zone)
@@ -629,7 +623,6 @@ func (o *FakeOVN) NewUserDefinedNetworkController(netattachdef *nettypes.Network
 				CloudNetworkClient:   o.fakeClient.CloudNetworkClient,
 				EgressServiceClient:  o.fakeClient.EgressServiceClient,
 				AdminPBRClient:       o.fakeClient.AdminPBRClient,
-				VIPClient:            o.fakeClient.VirtualIPClient,
 				PortMirrorClient:     o.fakeClient.PortMirrorClient,
 			},
 			o.watcher,

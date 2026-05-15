@@ -2479,7 +2479,6 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 		ginkgo.It("falls back to node zone lookup when localZoneNodes misses", func() {
 			app.Action = func(*cli.Context) error {
-				config.OVNKubernetesFeature.EnableInterconnect = true
 				localNode := newNode(node1Name, "192.168.126.202/24")
 				localNode.Annotations[util.OvnNodeZoneName] = ovntypes.OvnDefaultZone
 				remoteNode := newNode(node2Name, "192.168.126.203/24")
