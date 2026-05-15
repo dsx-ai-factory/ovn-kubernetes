@@ -2300,16 +2300,14 @@ ovnkube-controller-with-node() {
   fi
 
   ovnkube_firewalld_opts=
-  if [[ ${ovnkube_node_mode} != "dpu" ]]; then
-    if [[ ${ovnkube_disable_firewalld} == "true" ]]; then
-      ovnkube_firewalld_opts="--disable-firewalld"
-    elif [[ ${ovnkube_disable_firewalld} == "false" ]]; then
-      echo "=============== ovn-node - (check for firewall service status)"
-      check_firewall_state
-      echo "=============== ovn-node - (create ovn firewall zone)"
-      create_ovn_firewall_zone
-      ovnkube_firewalld_opts="--admin-firewalld-zonename=${ovnkube_admin_firewalld_zone}"
-    fi
+  if [[ ${ovnkube_node_mode} == "dpu" || ${ovnkube_disable_firewalld} == "true" ]]; then
+    ovnkube_firewalld_opts="--disable-firewalld"
+  elif [[ ${ovnkube_disable_firewalld} == "false" ]]; then
+    echo "=============== ovn-node - (check for firewall service status)"
+    check_firewall_state
+    echo "=============== ovn-node - (create ovn firewall zone)"
+    create_ovn_firewall_zone
+    ovnkube_firewalld_opts="--admin-firewalld-zonename=${ovnkube_admin_firewalld_zone}"
   fi
 
   # start temp work around
@@ -3461,16 +3459,14 @@ ovn-node() {
   }
 
   ovnkube_firewalld_opts=
-  if [[ ${ovnkube_node_mode} != "dpu" ]]; then
-    if [[ ${ovnkube_disable_firewalld} == "true" ]]; then
-      ovnkube_firewalld_opts="--disable-firewalld"
-    elif [[ ${ovnkube_disable_firewalld} == "false" ]]; then
-      echo "=============== ovn-node - (check for firewall service status)"
-      check_firewall_state
-      echo "=============== ovn-node - (create ovn firewall zone)"
-      create_ovn_firewall_zone
-      ovnkube_firewalld_opts="--admin-firewalld-zonename=${ovnkube_admin_firewalld_zone}"
-    fi
+  if [[ ${ovnkube_node_mode} == "dpu" || ${ovnkube_disable_firewalld} == "true" ]]; then
+    ovnkube_firewalld_opts="--disable-firewalld"
+  elif [[ ${ovnkube_disable_firewalld} == "false" ]]; then
+    echo "=============== ovn-node - (check for firewall service status)"
+    check_firewall_state
+    echo "=============== ovn-node - (create ovn firewall zone)"
+    create_ovn_firewall_zone
+    ovnkube_firewalld_opts="--admin-firewalld-zonename=${ovnkube_admin_firewalld_zone}"
   fi
 
   ovn_routable_mtu_flag=
