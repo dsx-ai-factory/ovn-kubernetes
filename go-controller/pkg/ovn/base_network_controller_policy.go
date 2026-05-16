@@ -360,6 +360,59 @@ func (bnc *BaseNetworkController) addAllowACLFromNode(switchName string, mgmtPor
 	return nil
 }
 
+func getMgmtPortIngressACLDbIDs(switchName, mgmtPortIP, aclType, controller string) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLMgmtPort, controller,
+		map[libovsdbops.ExternalIDKey]string{
+			libovsdbops.ObjectNameKey: switchName,
+			libovsdbops.IpKey:         mgmtPortIP,
+			libovsdbops.TypeKey:       aclType,
+		})
+}
+
+func (bnc *BaseNetworkController) addMgmtPortIngressACLs(nodeName, switchName string, mgmtPortIP net.IP) error {
+	ipFamily := "ip4"
+	if utilnet.IsIPv6(mgmtPortIP) {
+		ipFamily = "ip6"
+	}
+	mgmtIP := mgmtPortIP.String()
+	mgmtPortName := bnc.GetNetworkScopedK8sMgmtIntfName(nodeName)
+
+	var acls []*nbdb.ACL
+
+	// Allow EgressIP health check port when configured
+	if config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort > 0 {
+		hcMatch := fmt.Sprintf("%s.dst==%s && outport==%q && tcp.dst==%d", ipFamily, mgmtIP, mgmtPortName, config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort)
+		hcIDs := getMgmtPortIngressACLDbIDs(switchName, mgmtIP, "AllowEIPHealthCheck", bnc.controllerName)
+		hcACL := libovsdbutil.BuildACLWithDefaultTier(hcIDs, types.DefaultAllowPriority, hcMatch,
+			nbdb.ACLActionAllowRelated, nil, libovsdbutil.LportIngress)
+		acls = append(acls, hcACL)
+	}
+
+	// Drop new direct ingress to management port
+	dropMatch := fmt.Sprintf("%s.dst==%s && outport==%q", ipFamily, mgmtIP, mgmtPortName)
+	dropIDs := getMgmtPortIngressACLDbIDs(switchName, mgmtIP, "DenyNew", bnc.controllerName)
+	dropACL := libovsdbutil.BuildACLWithDefaultTier(dropIDs, types.DefaultDenyPriority, dropMatch,
+		nbdb.ACLActionDrop, nil, libovsdbutil.LportIngress)
+	acls = append(acls, dropACL)
+
+	ops, err := libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, nil, bnc.GetSamplingConfig(), acls...)
+	if err != nil {
+		return fmt.Errorf("failed to create or update mgmt port ingress ACLs: %v", err)
+	}
+
+	ops, err = libovsdbops.AddACLsToLogicalSwitchOps(bnc.nbClient, ops, switchName, acls...)
+	if err != nil {
+		return fmt.Errorf("failed to add mgmt port ingress ACLs to switch %s: %v", switchName, err)
+	}
+
+	_, err = libovsdbops.TransactAndCheck(bnc.nbClient, ops)
+	if err != nil {
+		return err
+	}
+	klog.Infof("Added ACLs for management port %s to switch %s", mgmtPortIP.String(), switchName)
+	return nil
+}
+
 func (bnc *BaseNetworkController) getDefaultDenyPolicyACLIDs(ns string, aclDir libovsdbutil.ACLDirection,
 	defaultACLType netpolDefaultDenyACLType) *libovsdbops.DbObjectIDs {
 	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLNetpolNamespace, bnc.controllerName,

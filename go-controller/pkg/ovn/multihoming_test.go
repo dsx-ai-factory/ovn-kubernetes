@@ -188,6 +188,12 @@ func (em *userDefinedNetworkExpectationMachine) expectedLogicalSwitchesAndPortsW
 							allowAllFromMgmtPort(aclUUID, managementIP.String(), switchName),
 						)
 						acls[switchName] = append(acls[switchName], aclUUID)
+
+						mgmtPortACLs := getMgmtPortIngressExpectedACLs(switchName, managementIP.String(), mgmtPortName, ocInfo.bnc.GetNetworkName()+"-network-controller")
+						for _, acl := range mgmtPortACLs {
+							data = append(data, acl)
+							acls[switchName] = append(acls[switchName], acl.UUID)
+						}
 					}
 				case ovntypes.Layer2Topology:
 					switchName = ocInfo.bnc.GetNetworkScopedName(ovntypes.OVNLayer2Switch)
@@ -220,6 +226,12 @@ func (em *userDefinedNetworkExpectationMachine) expectedLogicalSwitchesAndPortsW
 						const aclUUID = "acl1-UUID"
 						data = append(data, allowAllFromMgmtPort(aclUUID, managementIP.String(), switchName))
 						acls[switchName] = append(acls[switchName], aclUUID)
+
+						mgmtPortACLs := getMgmtPortIngressExpectedACLs(switchName, managementIP.String(), mgmtPortName, ocInfo.bnc.GetNetworkName()+"-network-controller")
+						for _, acl := range mgmtPortACLs {
+							data = append(data, acl)
+							acls[switchName] = append(acls[switchName], acl.UUID)
+						}
 					}
 
 				case ovntypes.LocalnetTopology:

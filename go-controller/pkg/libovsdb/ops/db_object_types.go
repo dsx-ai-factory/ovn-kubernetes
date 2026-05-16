@@ -39,6 +39,7 @@ const (
 	MulticastNamespaceOwnerType ownerType = "MulticastNS"
 	MulticastClusterOwnerType   ownerType = "MulticastCluster"
 	NetpolNodeOwnerType         ownerType = "NetpolNode"
+	MgmtPortOwnerType           ownerType = "MgmtPort"
 	NetpolNamespaceOwnerType    ownerType = "NetpolNamespace"
 	AdminPBROwnerType           ownerType = "AdminPBR"
 	ClusterSubnetsOwnerType     ownerType = "ClusterSubnets"
@@ -263,6 +264,15 @@ var ACLNetpolNode = newObjectIDsType(acl, NetpolNodeOwnerType, []ExternalIDKey{
 	ObjectNameKey,
 	// exact ip for management port, every node may have more than 1 management ip
 	IpKey,
+})
+
+var ACLMgmtPort = newObjectIDsType(acl, MgmtPortOwnerType, []ExternalIDKey{
+	// switch name (node name)
+	ObjectNameKey,
+	// exact ip for management port
+	IpKey,
+	// ACL sub-type: "AllowEstablished", "AllowHealthCheck", "DenyNew"
+	TypeKey,
 })
 
 // ACLNetworkPolicyPortIndex define a unique index for every network policy ACL.

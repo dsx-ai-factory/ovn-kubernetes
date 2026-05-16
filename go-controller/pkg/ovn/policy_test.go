@@ -2357,6 +2357,61 @@ func getAllowFromNodeExpectedACL(nodeName, mgmtIP string, logicalSwitch *nbdb.Lo
 	return nodeACL
 }
 
+func getMgmtPortIngressExpectedACLs(nodeName, mgmtIP, mgmtPortName string, controllerName string) []*nbdb.ACL {
+	if !config.Gateway.SecureManagementPort {
+		return nil
+	}
+	var ipFamily = "ip4"
+	if utilnet.IsIPv6(ovntest.MustParseIP(mgmtIP)) {
+		ipFamily = "ip6"
+	}
+
+	if mgmtPortName == "" {
+		mgmtPortName = types.K8sPrefix + nodeName
+	}
+
+	var acls []*nbdb.ACL
+
+	// Allow EgressIP health check port when configured
+	if config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort > 0 {
+		hcMatch := fmt.Sprintf("%s.dst==%s && outport==%q && tcp.dst==%d", ipFamily, mgmtIP, mgmtPortName, config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort)
+		hcIDs := getMgmtPortIngressACLDbIDs(nodeName, mgmtIP, "AllowEIPHealthCheck", controllerName)
+		hcACL := libovsdbops.BuildACL(
+			libovsdbutil.GetACLName(hcIDs),
+			nbdb.ACLDirectionToLport,
+			types.DefaultAllowPriority,
+			hcMatch,
+			nbdb.ACLActionAllowRelated,
+			types.OvnACLLoggingMeter,
+			"",
+			false,
+			hcIDs.GetExternalIDs(),
+			nil,
+			types.DefaultACLTier)
+		hcACL.UUID = hcIDs.String() + "-UUID"
+		acls = append(acls, hcACL)
+	}
+	// Drop new
+	dropMatch := fmt.Sprintf("%s.dst==%s && outport==%q", ipFamily, mgmtIP, mgmtPortName)
+	dropIDs := getMgmtPortIngressACLDbIDs(nodeName, mgmtIP, "DenyNew", controllerName)
+	dropACL := libovsdbops.BuildACL(
+		libovsdbutil.GetACLName(dropIDs),
+		nbdb.ACLDirectionToLport,
+		types.DefaultDenyPriority,
+		dropMatch,
+		nbdb.ACLActionDrop,
+		types.OvnACLLoggingMeter,
+		"",
+		false,
+		dropIDs.GetExternalIDs(),
+		nil,
+		types.DefaultACLTier)
+	dropACL.UUID = dropIDs.String() + "-UUID"
+	acls = append(acls, dropACL)
+
+	return acls
+}
+
 func getAllowFromNodeStaleACL(nodeName, mgmtIP string, logicalSwitch *nbdb.LogicalSwitch, controllerName string) *nbdb.ACL {
 	acl := getAllowFromNodeExpectedACL(nodeName, mgmtIP, logicalSwitch, controllerName)
 	newName := ""

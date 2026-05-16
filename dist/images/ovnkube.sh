@@ -123,6 +123,7 @@ fi
 # OVS_DB_TRANSACTION_TIMEOUT - timeout for OVSDB transaction, in seconds
 # OVNKUBE_SKIP_CTMARK_HOSTPORTS - list of tcp/udp ports of host services that must not be subjected to CT-Marking
 # OVNKUBE_CLUSTER_DEFAULT_NAD - name of the default cluster wide net-attach-def
+# OVNKUBE_SECURE_MGMT_PORT - secure the management port by ACLs. Disabled by default.
 # OVNKUBE_ENABLE_KATA_DAN - when true, enable Kata DAN config generation support
 
 # The argument to the command is the operation to be performed
@@ -455,6 +456,14 @@ if [[ -n "${ovnkube_cluster_default_nad}" && "${ovnkube_cluster_default_nad}" !=
   ovnkube_cluster_default_nad_flag="--cluster-default-nad=${ovnkube_cluster_default_nad}"
 fi
 echo "ovnkube_cluster_default_nad_flag=${ovnkube_cluster_default_nad_flag}"
+
+# OVNKUBE_SECURE_MGMT_PORT - enable secure management port
+ovnkube_secure_mgmt_port_flag=
+ovnkube_secure_mgmt_port=${OVNKUBE_SECURE_MGMT_PORT:-false}
+if [[ ${ovnkube_secure_mgmt_port} == "true" ]]; then
+  ovnkube_secure_mgmt_port_flag="--secure-mgmt-port"
+fi
+echo "ovnkube_secure_mgmt_port_flag=${ovnkube_secure_mgmt_port_flag}"
 
 # external_ids:host-k8s-nodename will be set on an Open_vSwitch enabled system if the ovnkube pod
 # should function on behalf of a different host
@@ -1778,6 +1787,7 @@ ovnkube-controller() {
     ${ovnkube_cluster_default_nad_flag} \
     ${dynamic_udn_allocation_flag} \
     ${dynamic_udn_grace_period} \
+    ${ovnkube_secure_mgmt_port_flag} \
     ${ovn_allow_icmp_netpol_flag} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --gateway-mode=${ovn_gateway_mode} \
@@ -2482,6 +2492,7 @@ ovnkube-controller-with-node() {
     ${ovnkube_cluster_default_nad_flag} \
     ${enable_ovs_native_metrics_flag} \
     ${cluster_access_opts} \
+    ${ovnkube_secure_mgmt_port_flag} \
     ${ovn_allow_icmp_netpol_flag} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
