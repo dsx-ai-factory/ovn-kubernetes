@@ -216,7 +216,7 @@ func newNBClient(cfg config.OvnAuthConfig, testCtx *Context, opts ...libovsdbcli
 
 func newSBClient(cfg config.OvnAuthConfig, testCtx *Context, opts ...libovsdbclient.Option) (libovsdbclient.Client, error) {
 	stopChan := make(chan struct{})
-	sbClient, err := libovsdb.NewSBClientWithConfig(cfg, stopChan, true, opts...)
+	sbClient, err := libovsdb.NewSBClientWithConfig(cfg, stopChan, opts...)
 	if err != nil {
 		return nil, err
 	}

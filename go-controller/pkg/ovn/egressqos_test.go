@@ -820,7 +820,6 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 				},
 			)
 
-			config.OVNKubernetesFeature.EnableInterconnect = true
 			i, n, _ := net.ParseCIDR("10.128.1.3" + "/23")
 			n.IP = i
 			fakeOVN.controller.logicalPortCache.add(podLocalT, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})

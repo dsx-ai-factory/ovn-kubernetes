@@ -84,7 +84,7 @@ func (bnnc *BaseNodeNetworkController) delDPUPodForNAD(pod *corev1.Pod, dpuCD *u
 			errs = append(errs, fmt.Errorf("failed to remove the old DPU connection status annotation for %s: %v", podDesc, err))
 		}
 	}
-	vfRepName, err := util.GetSriovnetOps().GetVfRepresentorDPU(dpuCD.PfId, dpuCD.VfId)
+	vfRepName, err := util.GetDPUOps().GetPortRepresentor(dpuCD.PfId, dpuCD.VfId)
 	if err != nil {
 		errs = append(errs, fmt.Errorf("failed to get old VF representor for %s, dpuConnDetail %+v Representor port may have been deleted: %v", podDesc, dpuCD, err))
 	} else {
@@ -279,7 +279,7 @@ func (bnnc *BaseNodeNetworkController) addRepPort(pod *corev1.Pod, dpuCD *util.D
 	ifInfo *cni.PodInterfaceInfo, getter cni.PodInfoGetter) error {
 
 	podDesc := fmt.Sprintf("pod %s/%s for NAD %s", pod.Namespace, pod.Name, nadKey)
-	vfRepName, err := util.GetSriovnetOps().GetVfRepresentorDPU(dpuCD.PfId, dpuCD.VfId)
+	vfRepName, err := util.GetDPUOps().GetPortRepresentor(dpuCD.PfId, dpuCD.VfId)
 	if err != nil {
 		klog.Infof("Failed to get VF representor for %s dpuConnDetail %+v: %v", podDesc, dpuCD, err)
 		return err
@@ -290,7 +290,7 @@ func (bnnc *BaseNodeNetworkController) addRepPort(pod *corev1.Pod, dpuCD *util.D
 	// set netdevName so OVS interface can be added with external_ids:netdev-name, and is able to
 	// be part of healthcheck.
 	ifInfo.NetdevName = vfRepName
-	vfPciAddress, err := util.GetSriovnetOps().GetPCIFromDeviceName(vfRepName)
+	deviceID, err := util.GetDPUOps().GetDeviceAddress(vfRepName)
 	if err != nil {
 		klog.Infof("Failed to get PCI address of VF rep %s: %v", vfRepName, err)
 		return err
@@ -299,7 +299,7 @@ func (bnnc *BaseNodeNetworkController) addRepPort(pod *corev1.Pod, dpuCD *util.D
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	klog.Infof("Adding VF representor %s for %s", vfRepName, podDesc)
 	defer cancel()
-	err = cni.ConfigureOVS(ctx, pod.Namespace, pod.Name, "", vfRepName, ifInfo, dpuCD.SandboxId, vfPciAddress, getter)
+	err = cni.ConfigureOVS(ctx, pod.Namespace, pod.Name, "", vfRepName, ifInfo, dpuCD.SandboxId, deviceID, getter)
 	if err != nil {
 		// Note(adrianc): we are lenient with cleanup in this method as pod is going to be retried anyway.
 		_ = bnnc.delRepPort(pod, dpuCD, vfRepName, nadKey)

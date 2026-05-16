@@ -36,7 +36,6 @@ import (
 	networkqoslister "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/listers/networkqos/v1alpha1"
 	portmirrorlister "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/listers/portmirror/v1beta1"
 	userdefinednetworklister "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/listers/userdefinednetwork/v1"
-	virtualiplister "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/listers/virtualip/v1beta1"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
 )
 
@@ -519,8 +518,6 @@ func newInformerLister(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		return egressqoslister.NewEgressQoSLister(sharedInformer.GetIndexer()), nil
 	case AdminPBRType:
 		return apbrlister.NewAdminPolicyBasedRouteLister(sharedInformer.GetIndexer()), nil
-	case VirtualIPType:
-		return virtualiplister.NewVirtualIPLister(sharedInformer.GetIndexer()), nil
 	case NetworkAttachmentDefinitionType:
 		return networkattachmentdefinitionlister.NewNetworkAttachmentDefinitionLister(sharedInformer.GetIndexer()), nil
 	case MultiNetworkPolicyType:

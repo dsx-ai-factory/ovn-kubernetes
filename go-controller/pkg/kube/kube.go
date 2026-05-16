@@ -41,8 +41,6 @@ import (
 	networkqosclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/clientset/versioned"
 	portmirrorv1beta1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
 	portmirrorclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned"
-	virtualipv1beta1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
-	virtualipclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/clientset/versioned"
 )
 
 // InterfaceOVN represents the exported methods for dealing with getting/setting
@@ -60,9 +58,7 @@ type InterfaceOVN interface {
 	DeleteCloudPrivateIPConfig(name string) error
 	UpdateEgressServiceStatus(namespace, name, host string) error
 	UpdateIPAMClaimIPs(updatedIPAMClaim *ipamclaimsapi.IPAMClaim) error
-	UpdateVirtualIPStatus(vip *virtualipv1beta1.VirtualIP) error
 	UpdateAdminPBRStatus(adminpbr *adminpbrv1beta1.AdminPolicyBasedRoute) (*adminpbrv1beta1.AdminPolicyBasedRoute, error)
-	GetVirtualIP(namespace, name string) (*virtualipv1beta1.VirtualIP, error)
 	UpdateIPReservationStatus(status *ipreservationv1beta1.IPReservation) error
 	UpdatePortMirrorStatus(pm *portmirrorv1beta1.PortMirror) error
 	GetPortMirror(namespace, name string) (*portmirrorv1beta1.PortMirror, error)
@@ -81,8 +77,6 @@ type Interface interface {
 	PatchNode(old, new *corev1.Node) error
 	UpdateNodeStatus(node *corev1.Node) error
 	PatchPodStatusAnnotations(oldPod, newPod *corev1.Pod) error
-	// GetPodsForDBChecker should only be used by legacy DB checker. Use watchFactory instead to get pods.
-	GetPodsForDBChecker(namespace string, opts metav1.ListOptions) ([]*corev1.Pod, error)
 	// GetNodeForWindows should only be used for windows hybrid overlay binary and never in linux code
 	GetNodeForWindows(name string) (*corev1.Node, error)
 	GetNodesForWindows() ([]*corev1.Node, error)
@@ -109,7 +103,6 @@ type KubeOVN struct {
 	IPAMClaimsClient     ipamclaimssclientset.Interface
 	NADClient            nadclientset.Interface
 	AdminPBRClient       adminpbrclientset.Interface
-	VIPClient            virtualipclientset.Interface
 	IPReservationClient  ipreservationclientset.Interface
 	APBRouteClient       adminpolicybasedrouteclientset.Interface
 	PortMirrorClient     portmirrorclientset.Interface
@@ -441,19 +434,6 @@ func (k *Kube) UpdateNodeStatus(node *corev1.Node) error {
 	return err
 }
 
-// GetPodsForDBChecker returns the list of all Pod objects in a namespace matching the options. Only used by the legacy db checker.
-func (k *Kube) GetPodsForDBChecker(namespace string, opts metav1.ListOptions) ([]*corev1.Pod, error) {
-	list := []*corev1.Pod{}
-	opts.ResourceVersion = "0"
-	err := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
-		return k.KClient.CoreV1().Pods(namespace).List(ctx, opts)
-	}).EachListItem(context.TODO(), opts, func(obj runtime.Object) error {
-		list = append(list, obj.(*corev1.Pod))
-		return nil
-	})
-	return list, err
-}
-
 // GetNodesForWindows returns the list of all Node objects from kubernetes. Only used by windows binary.
 func (k *Kube) GetNodesForWindows() ([]*corev1.Node, error) {
 	list := []*corev1.Node{}
@@ -593,18 +573,6 @@ func (k *KubeOVN) SetAnnotationsOnNAD(namespace, name string, annotations map[st
 func (k *KubeOVN) UpdateAdminPBRStatus(adminpbr *adminpbrv1beta1.AdminPolicyBasedRoute) (*adminpbrv1beta1.AdminPolicyBasedRoute, error) {
 	klog.V(5).Infof("Updating status of AdminPolicyBasedRoute %s to %v", adminpbr.Name, adminpbr.Status)
 	return k.AdminPBRClient.K8sV1beta1().AdminPolicyBasedRoutes().UpdateStatus(context.TODO(), adminpbr, metav1.UpdateOptions{})
-}
-
-// UpdateVirtualIPStatus updates the VirtualIP with the provided VirtualIP data
-func (k *KubeOVN) UpdateVirtualIPStatus(vip *virtualipv1beta1.VirtualIP) error {
-	klog.Infof("Updating status of VirtualIP %s/%s", vip.Namespace, vip.Name)
-	_, err := k.VIPClient.K8sV1beta1().VirtualIPs(vip.Namespace).UpdateStatus(context.TODO(), vip, metav1.UpdateOptions{})
-	return err
-}
-
-// GetVirtualIP returns virtualIP resource
-func (k *KubeOVN) GetVirtualIP(namespace, name string) (*virtualipv1beta1.VirtualIP, error) {
-	return k.VIPClient.K8sV1beta1().VirtualIPs(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 }
 
 // UpdateIPReservationStatus updates the IPReservation with the provided IPReservation data

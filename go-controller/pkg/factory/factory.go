@@ -113,10 +113,6 @@ import (
 	userdefinednetworkscheme "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/scheme"
 	userdefinednetworkapiinformerfactory "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/informers/externalversions"
 	userdefinednetworkinformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/informers/externalversions/userdefinednetwork/v1"
-	virtualipapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1"
-	virtualipscheme "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/clientset/versioned/scheme"
-	virtualipinformerfactory "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/informers/externalversions"
-	virtualiplister "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/listers/virtualip/v1beta1"
 	vtepinformerfactory "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/informers/externalversions"
 	vtepinformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/informers/externalversions/vtep/v1"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -143,7 +139,6 @@ type WatchFactory struct {
 	mnpFactory           mnpinformerfactory.SharedInformerFactory
 	egressServiceFactory egressserviceinformerfactory.SharedInformerFactory
 	adminPBRFactory      adminpbrinformerfactory.SharedInformerFactory
-	vipFactory           virtualipinformerfactory.SharedInformerFactory
 	ipresvFactory        ipreservationinformerfactory.SharedInformerFactory
 	apbRouteFactory      adminbasedpolicyinformerfactory.SharedInformerFactory
 	portMirrorFactory    portmirrorinformerfactory.SharedInformerFactory
@@ -184,7 +179,6 @@ func (wf *WatchFactory) ShallowClone() *WatchFactory {
 		raFactory:            wf.raFactory,
 		frrFactory:           wf.frrFactory,
 		adminPBRFactory:      wf.adminPBRFactory,
-		vipFactory:           wf.vipFactory,
 		ipresvFactory:        wf.ipresvFactory,
 		portMirrorFactory:    wf.portMirrorFactory,
 		networkQoSFactory:    wf.networkQoSFactory,
@@ -275,7 +269,6 @@ var (
 	BaselineAdminNetworkPolicyType  reflect.Type = reflect.TypeOf(&anpapi.BaselineAdminNetworkPolicy{})
 	LocalPodSelectorType            reflect.Type = reflect.TypeOf(&localPodSelector{})
 	AdminPBRType                    reflect.Type = reflect.TypeOf(&adminpbrapi.AdminPolicyBasedRoute{})
-	VirtualIPType                   reflect.Type = reflect.TypeOf(&virtualipapi.VirtualIP{})
 	NetworkAttachmentDefinitionType reflect.Type = reflect.TypeOf(&nadapi.NetworkAttachmentDefinition{})
 	MultiNetworkPolicyType          reflect.Type = reflect.TypeOf(&mnpapi.MultiNetworkPolicy{})
 	IPReservationType               reflect.Type = reflect.TypeOf(&ipreservationapi.IPReservation{})
@@ -396,7 +389,6 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		mnpFactory:           mnpinformerfactory.NewSharedInformerFactory(ovnClientset.MultiNetworkPolicyClient, resyncInterval),
 		egressServiceFactory: egressserviceinformerfactory.NewSharedInformerFactory(ovnClientset.EgressServiceClient, resyncInterval),
 		adminPBRFactory:      adminpbrinformerfactory.NewSharedInformerFactory(ovnClientset.AdminPBRClient, resyncInterval),
-		vipFactory:           virtualipinformerfactory.NewSharedInformerFactory(ovnClientset.VirtualIPClient, resyncInterval),
 		apbRouteFactory:      adminbasedpolicyinformerfactory.NewSharedInformerFactory(ovnClientset.AdminPolicyRouteClient, resyncInterval),
 		portMirrorFactory:    portmirrorinformerfactory.NewSharedInformerFactory(ovnClientset.PortMirrorClient, resyncInterval),
 		networkQoSFactory:    networkqosinformerfactory.NewSharedInformerFactory(ovnClientset.NetworkQoSClient, resyncInterval),
@@ -427,9 +419,6 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		return nil, err
 	}
 	if err := adminpbrapi.AddToScheme(scheme.Scheme); err != nil {
-		return nil, err
-	}
-	if err := virtualipapi.AddToScheme(virtualipscheme.Scheme); err != nil {
 		return nil, err
 	}
 	if err := adminbasedpolicyapi.AddToScheme(adminbasedpolicyscheme.Scheme); err != nil {
@@ -586,15 +575,6 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 			return nil, err
 		}
 
-		if config.OVNKubernetesFeature.EnablePersistentIPs && !config.OVNKubernetesFeature.EnableInterconnect {
-			wf.ipamClaimsFactory = ipamclaimsfactory.NewSharedInformerFactory(ovnClientset.IPAMClaimsClient, resyncInterval)
-			wf.informers[IPAMClaimsType], err = newQueuedInformer(IPAMClaimsType,
-				wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims().Informer(), wf.stopChan,
-				minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize)
-			if err != nil {
-				return nil, err
-			}
-		}
 	}
 
 	if config.OVNKubernetesFeature.EnableIPReservation {
@@ -636,14 +616,6 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		wf.informers[AdminPBRType], err = newQueuedInformer(AdminPBRType,
 			wf.adminPBRFactory.K8s().V1beta1().AdminPolicyBasedRoutes().Informer(), wf.stopChan,
 			minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if config.OVNKubernetesFeature.EnableVirtualIP {
-		wf.informers[VirtualIPType], err = newQueuedInformer(VirtualIPType, wf.vipFactory.K8s().V1beta1().VirtualIPs().Informer(),
-			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize)
 		if err != nil {
 			return nil, err
 		}
@@ -742,14 +714,6 @@ func (wf *WatchFactory) Start() error {
 	if config.OVNKubernetesFeature.EnableAdminPolicyBasedRouting && wf.adminPBRFactory != nil {
 		wf.adminPBRFactory.Start(wf.stopChan)
 		for oType, synced := range wf.adminPBRFactory.WaitForCacheSync(wf.stopChan) {
-			if !synced {
-				return fmt.Errorf("error in syncing cache for %v informer", oType)
-			}
-		}
-	}
-	if config.OVNKubernetesFeature.EnableVirtualIP && wf.vipFactory != nil {
-		wf.vipFactory.Start(wf.stopChan)
-		for oType, synced := range wf.vipFactory.WaitForCacheSync(wf.stopChan) {
 			if !synced {
 				return fmt.Errorf("error in syncing cache for %v informer", oType)
 			}
@@ -1113,8 +1077,8 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeNames []string
 	// need to configure OVS interfaces for Pods on secondary networks in the DPU mode
 	// need to know what is the primary network for a namespace on the CNI side, which
 	// needs the NAD factory whenever the UDN feature is used.
-	if (config.OVNKubernetesFeature.EnableMultiNetwork && config.OvnKubeNode.Mode != types.NodeModeDPUHost) ||
-		config.OVNKubernetesFeature.EnableNetworkSegmentation || util.IsRouteAdvertisementsEnabled() {
+	if config.OVNKubernetesFeature.EnableMultiNetwork && (config.OVNKubernetesFeature.EnableNetworkSegmentation || !config.IsModeDPUHost()) {
+		// TBD-merge util.IsRouteAdvertisementsEnabled()) {
 		wf.nadFactory = nadinformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval)
 		wf.informers[NetworkAttachmentDefinitionType], err = newQueuedInformer(
 			NetworkAttachmentDefinitionType, wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer(),
@@ -1279,34 +1243,32 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 			return nil, err
 		}
 
-		if config.OVNKubernetesFeature.EnableInterconnect {
-			wf.informers[PodType], err = newQueuedInformer(
-				PodType, wf.iFactory.Core().V1().Pods().Informer(),
-				wf.stopChan, defaultNumEventQueues, 10, defaultNumEventQueues, 10)
+		wf.informers[PodType], err = newQueuedInformer(
+			PodType, wf.iFactory.Core().V1().Pods().Informer(),
+			wf.stopChan, defaultNumEventQueues, 10, defaultNumEventQueues, 10)
+		if err != nil {
+			return nil, err
+		}
+
+		if config.OVNKubernetesFeature.EnablePersistentIPs {
+			wf.ipamClaimsFactory = ipamclaimsfactory.NewSharedInformerFactory(ovnClientset.IPAMClaimsClient, resyncInterval)
+			wf.informers[IPAMClaimsType], err = newQueuedInformer(
+				IPAMClaimsType,
+				wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims().Informer(),
+				wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize)
 			if err != nil {
 				return nil, err
 			}
+		}
 
-			if config.OVNKubernetesFeature.EnablePersistentIPs {
-				wf.ipamClaimsFactory = ipamclaimsfactory.NewSharedInformerFactory(ovnClientset.IPAMClaimsClient, resyncInterval)
-				wf.informers[IPAMClaimsType], err = newQueuedInformer(
-					IPAMClaimsType,
-					wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims().Informer(),
-					wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize)
-				if err != nil {
-					return nil, err
-				}
-			}
-
-			if config.OVNKubernetesFeature.EnableIPReservation {
-				wf.ipresvFactory = ipreservationinformerfactory.NewSharedInformerFactory(ovnClientset.IPReservationClient, resyncInterval)
-				wf.informers[IPReservationType], err = newQueuedInformer(
-					IPReservationType,
-					wf.ipresvFactory.K8s().V1beta1().IPReservations().Informer(),
-					wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize)
-				if err != nil {
-					return nil, err
-				}
+		if config.OVNKubernetesFeature.EnableIPReservation {
+			wf.ipresvFactory = ipreservationinformerfactory.NewSharedInformerFactory(ovnClientset.IPReservationClient, resyncInterval)
+			wf.informers[IPReservationType], err = newQueuedInformer(
+				IPReservationType,
+				wf.ipresvFactory.K8s().V1beta1().IPReservations().Informer(),
+				wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize)
+			if err != nil {
+				return nil, err
 			}
 		}
 	}
@@ -1458,10 +1420,6 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 		if routePolicy, ok := obj.(*adminpbrapi.AdminPolicyBasedRoute); ok {
 			return &routePolicy.ObjectMeta, nil
 		}
-	case VirtualIPType:
-		if virtualIP, ok := obj.(*virtualipapi.VirtualIP); ok {
-			return &virtualIP.ObjectMeta, nil
-		}
 	case NetworkAttachmentDefinitionType:
 		if networkAttachmentDefinition, ok := obj.(*nadapi.NetworkAttachmentDefinition); ok {
 			return &networkAttachmentDefinition.ObjectMeta, nil
@@ -1533,8 +1491,6 @@ func (wf *WatchFactory) GetHandlerPriority(objType reflect.Type) (priority int) 
 	case EgressNodeType:
 		return 1
 	case AdminPBRType:
-		return 1
-	case VirtualIPType:
 		return 1
 	case PortMirrorType:
 		return 1
@@ -1868,26 +1824,6 @@ func (wf *WatchFactory) AddMultiNetworkPolicyHandler(handlerFuncs cache.Resource
 // RemoveMultiNetworkPolicyHandler removes an MultiNetworkPolicy object event handler function
 func (wf *WatchFactory) RemoveMultiNetworkPolicyHandler(handler *Handler) {
 	wf.removeHandler(MultiNetworkPolicyType, handler)
-}
-
-// AddVirtualIPHandler adds a handler function that will be executed on VirtualIP object changes
-func (wf *WatchFactory) AddVirtualIPHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
-	return wf.addHandler(VirtualIPType, "", nil, handlerFuncs, processExisting, wf.GetHandlerPriority(VirtualIPType))
-}
-
-// RemoveVirtualIPHandler removes an VirtualIP object event handler function
-func (wf *WatchFactory) RemoveVirtualIPHandler(handler *Handler) {
-	wf.removeHandler(VirtualIPType, handler)
-}
-
-func (wf *WatchFactory) GetVirtualIPs() ([]*virtualipapi.VirtualIP, error) {
-	vipLister := wf.informers[VirtualIPType].lister.(virtualiplister.VirtualIPLister)
-	return vipLister.List(labels.Everything())
-}
-
-func (wf *WatchFactory) GetVirtualIP(namespace string, name string) (*virtualipapi.VirtualIP, error) {
-	vipLister := wf.informers[VirtualIPType].lister.(virtualiplister.VirtualIPLister)
-	return vipLister.VirtualIPs(namespace).Get(name)
 }
 
 func (wf *WatchFactory) GetIPReservation(namespace string, name string) (*ipreservationapi.IPReservation, error) {

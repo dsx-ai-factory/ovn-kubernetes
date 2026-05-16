@@ -173,14 +173,6 @@ func (oc *BaseLayer2UserDefinedNetworkController) run() error {
 		}(oc.stopChan)
 	}
 
-	if config.OVNKubernetesFeature.EnableVirtualIP {
-		if err := oc.watchPortBindingTable(); err != nil {
-			return err
-		}
-		if err := oc.WatchVirtualIPs(); err != nil {
-			return err
-		}
-	}
 	if config.OVNKubernetesFeature.EnableAdminPolicyBasedRouting {
 		if err := oc.WatchAdminPolicyBasedRoutes(); err != nil {
 			return err

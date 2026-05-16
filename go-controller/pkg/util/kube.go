@@ -63,7 +63,6 @@ import (
 	portmirrorclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned"
 	routeadvertisementsclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned"
 	userdefinednetworkclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned"
-	virtualipclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/virtualip/v1beta1/apis/clientset/versioned"
 	vtepclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/clientset/versioned"
 )
 
@@ -86,7 +85,6 @@ type OVNClientset struct {
 	RouteAdvertisementsClient routeadvertisementsclientset.Interface
 	FRRClient                 frrclientset.Interface
 	AdminPBRClient            adminpbrclientset.Interface
-	VirtualIPClient           virtualipclientset.Interface
 	IPReservationClient       ipresvclientset.Interface
 	PortMirrorClient          portmirrorclientset.Interface
 	NetworkQoSClient          networkqosclientset.Interface
@@ -111,7 +109,6 @@ type OVNMasterClientset struct {
 	RouteAdvertisementsClient routeadvertisementsclientset.Interface
 	FRRClient                 frrclientset.Interface
 	AdminPBRClient            adminpbrclientset.Interface
-	VirtualIPClient           virtualipclientset.Interface
 	IPReservationClient       ipresvclientset.Interface
 	PortMirrorClient          portmirrorclientset.Interface
 	NetworkQoSClient          networkqosclientset.Interface
@@ -134,7 +131,6 @@ type OVNKubeControllerClientset struct {
 	UserDefinedNetworkClient  userdefinednetworkclientset.Interface
 	RouteAdvertisementsClient routeadvertisementsclientset.Interface
 	AdminPBRClient            adminpbrclientset.Interface
-	VirtualIPClient           virtualipclientset.Interface
 	IPReservationClient       ipresvclientset.Interface
 	PortMirrorClient          portmirrorclientset.Interface
 	NetworkQoSClient          networkqosclientset.Interface
@@ -203,7 +199,6 @@ func (cs *OVNClientset) GetMasterClientset() *OVNMasterClientset {
 		RouteAdvertisementsClient: cs.RouteAdvertisementsClient,
 		FRRClient:                 cs.FRRClient,
 		AdminPBRClient:            cs.AdminPBRClient,
-		VirtualIPClient:           cs.VirtualIPClient,
 		IPReservationClient:       cs.IPReservationClient,
 		PortMirrorClient:          cs.PortMirrorClient,
 		NetworkQoSClient:          cs.NetworkQoSClient,
@@ -227,7 +222,6 @@ func (cs *OVNMasterClientset) GetOVNKubeControllerClientset() *OVNKubeController
 		UserDefinedNetworkClient:  cs.UserDefinedNetworkClient,
 		RouteAdvertisementsClient: cs.RouteAdvertisementsClient,
 		AdminPBRClient:            cs.AdminPBRClient,
-		VirtualIPClient:           cs.VirtualIPClient,
 		IPReservationClient:       cs.IPReservationClient,
 		PortMirrorClient:          cs.PortMirrorClient,
 		NetworkQoSClient:          cs.NetworkQoSClient,
@@ -251,7 +245,6 @@ func (cs *OVNClientset) GetOVNKubeControllerClientset() *OVNKubeControllerClient
 		UserDefinedNetworkClient:  cs.UserDefinedNetworkClient,
 		RouteAdvertisementsClient: cs.RouteAdvertisementsClient,
 		AdminPBRClient:            cs.AdminPBRClient,
-		VirtualIPClient:           cs.VirtualIPClient,
 		IPReservationClient:       cs.IPReservationClient,
 		PortMirrorClient:          cs.PortMirrorClient,
 		NetworkQoSClient:          cs.NetworkQoSClient,
@@ -573,10 +566,6 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 	if err != nil {
 		return nil, err
 	}
-	virtualIPClientset, err := virtualipclientset.NewForConfig(kconfig)
-	if err != nil {
-		return nil, err
-	}
 	ipReservationClientset, err := ipresvclientset.NewForConfig(kconfig)
 	if err != nil {
 		return nil, err
@@ -634,7 +623,6 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		RouteAdvertisementsClient: routeAdvertisementsClientset,
 		FRRClient:                 frrClientset,
 		AdminPBRClient:            adminPBRClientset,
-		VirtualIPClient:           virtualIPClientset,
 		IPReservationClient:       ipReservationClientset,
 		PortMirrorClient:          portMirrorClientset,
 		NetworkQoSClient:          networkqosClientset,

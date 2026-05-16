@@ -88,7 +88,6 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 		testVirtLauncherPod
 		migrationTarget      testMigrationTarget
 		remoteNodes          []string
-		interconnected       bool
 		ipv4                 bool
 		ipv6                 bool
 		replaceNode          string
@@ -172,10 +171,6 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				addressIPv4: "10.128.1.3",
 				addressIPv6: "fd11::3",
 			},
-		}
-
-		lrpIP = func(network string) string {
-			return strings.Split(network, "/")[0]
 		}
 
 		phasePointer = func(phase corev1.PodPhase) *corev1.PodPhase {
@@ -707,7 +702,6 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 
 			config.IPv4Mode = t.ipv4
 			config.IPv6Mode = t.ipv6
-			config.OVNKubernetesFeature.EnableInterconnect = t.interconnected
 
 			if t.testVirtLauncherPod.vmName != "" {
 				initVirtLauncherPod(&t.testVirtLauncherPod)
@@ -1034,7 +1028,6 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 			}),
 			Entry("for single stack ipv4 at local zone", testData{
 				ipv4:                true,
-				interconnected:      true,
 				lrpNetworks:         []string{nodeByName[node1].lrpNetworkIPv4},
 				dnsServiceIPs:       []string{dnsServiceIPv4},
 				testVirtLauncherPod: virtLauncher1(node1, vm1),
@@ -1046,7 +1039,6 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 			}),
 			Entry("for single stack ipv4 at remote zone", testData{
 				ipv4:                true,
-				interconnected:      true,
 				remoteNodes:         []string{node1},
 				lrpNetworks:         []string{nodeByName[node1].lrpNetworkIPv4},
 				dnsServiceIPs:       []string{dnsServiceIPv4},
@@ -1067,7 +1059,6 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				ipv6:                true,
 				lrpNetworks:         []string{nodeByName[node1].lrpNetworkIPv6},
 				dnsServiceIPs:       []string{dnsServiceIPv6},
-				interconnected:      true,
 				testVirtLauncherPod: virtLauncher1(node1, vm1),
 				expectedDhcpv6: []testDHCPOptions{{
 					cidr:     nodeByName[node1].subnetIPv6,
@@ -1079,7 +1070,6 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				ipv6:                true,
 				lrpNetworks:         []string{nodeByName[node1].lrpNetworkIPv6},
 				dnsServiceIPs:       []string{dnsServiceIPv6},
-				interconnected:      true,
 				remoteNodes:         []string{node1},
 				testVirtLauncherPod: virtLauncher1(node1, vm1),
 			}),
@@ -1103,7 +1093,6 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 			Entry("for dual stack at local zone", testData{
 				ipv4:                true,
 				ipv6:                true,
-				interconnected:      true,
 				lrpNetworks:         []string{nodeByName[node1].lrpNetworkIPv4, nodeByName[node1].lrpNetworkIPv6},
 				dnsServiceIPs:       []string{dnsServiceIPv4, dnsServiceIPv6},
 				testVirtLauncherPod: virtLauncher1(node1, vm1),
@@ -1121,64 +1110,18 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 			Entry("for dual stack at remote zone", testData{
 				ipv4:                true,
 				ipv6:                true,
-				interconnected:      true,
 				remoteNodes:         []string{node1},
 				lrpNetworks:         []string{nodeByName[node1].lrpNetworkIPv4, nodeByName[node1].lrpNetworkIPv6},
 				dnsServiceIPs:       []string{dnsServiceIPv4, dnsServiceIPv6},
 				testVirtLauncherPod: virtLauncher1(node1, vm1),
 			}),
 
-			Entry("for pre-copy live migration at global zone", testData{
-				ipv4:                true,
-				ipv6:                true,
-				lrpNetworks:         []string{nodeByName[node1].lrpNetworkIPv4, nodeByName[node1].lrpNetworkIPv6},
-				dnsServiceIPs:       []string{dnsServiceIPv4, dnsServiceIPv6},
-				testVirtLauncherPod: virtLauncher1(node1, vm1),
-				migrationTarget: testMigrationTarget{
-					lrpNetworks:         []string{nodeByName[node2].lrpNetworkIPv4, nodeByName[node2].lrpNetworkIPv6},
-					testVirtLauncherPod: virtLauncher2(node2, vm1),
-				},
-				replaceNode: node1,
-				expectedDhcpv4: []testDHCPOptions{{
-					cidr:     nodeByName[node1].subnetIPv4,
-					dns:      dnsServiceIPv4,
-					hostname: vm1,
-				}},
-				expectedDhcpv6: []testDHCPOptions{{
-					cidr:     nodeByName[node1].subnetIPv6,
-					dns:      dnsServiceIPv6,
-					hostname: vm1,
-				}},
-				expectedPolicies: []testPolicy{
-					{
-						match:   "ip4.src == " + vmByName[vm1].addressIPv4,
-						nexthop: lrpIP(nodeByName[node2].lrpNetworkIPv4),
-					},
-					{
-						match:   "ip6.src == " + vmByName[vm1].addressIPv6,
-						nexthop: lrpIP(nodeByName[node2].lrpNetworkIPv6),
-					},
-				},
-				expectedStaticRoutes: []testStaticRoute{
-					{
-						prefix:     vmByName[vm1].addressIPv4,
-						nexthop:    vmByName[vm1].addressIPv4,
-						outputPort: ovntypes.RouterToSwitchPrefix + node2,
-					},
-					{
-						prefix:     vmByName[vm1].addressIPv6,
-						nexthop:    vmByName[vm1].addressIPv6,
-						outputPort: ovntypes.RouterToSwitchPrefix + node2,
-					},
-				},
-			}),
 			Entry("for pre-copy live migration at local zone", testData{
-				interconnected: true,
-				ipv4:           true,
-				ipv6:           true,
-				remoteNodes:    []string{node1},
-				lrpNetworks:    []string{nodeByName[node1].lrpNetworkIPv4, nodeByName[node1].lrpNetworkIPv6},
-				dnsServiceIPs:  []string{dnsServiceIPv4, dnsServiceIPv6},
+				ipv4:          true,
+				ipv6:          true,
+				remoteNodes:   []string{node1},
+				lrpNetworks:   []string{nodeByName[node1].lrpNetworkIPv4, nodeByName[node1].lrpNetworkIPv6},
+				dnsServiceIPs: []string{dnsServiceIPv4, dnsServiceIPv6},
 				testVirtLauncherPod: testVirtLauncherPod{
 					suffix: "1",
 					testPod: testPod{
@@ -1227,12 +1170,11 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				},
 			}),
 			Entry("for pre-copy live migration between zones that do not own the original subnet", testData{
-				interconnected: true,
-				ipv4:           true,
-				ipv6:           true,
-				remoteNodes:    []string{node3},
-				lrpNetworks:    []string{nodeByName[node3].lrpNetworkIPv4, nodeByName[node3].lrpNetworkIPv6},
-				dnsServiceIPs:  []string{dnsServiceIPv4, dnsServiceIPv6},
+				ipv4:          true,
+				ipv6:          true,
+				remoteNodes:   []string{node3},
+				lrpNetworks:   []string{nodeByName[node3].lrpNetworkIPv4, nodeByName[node3].lrpNetworkIPv6},
+				dnsServiceIPs: []string{dnsServiceIPv4, dnsServiceIPv6},
 				testVirtLauncherPod: testVirtLauncherPod{
 					suffix: "1",
 					testPod: testPod{
@@ -1292,12 +1234,11 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				},
 			}),
 			Entry("for pre-copy live migration at remote zone", testData{
-				interconnected: true,
-				ipv4:           true,
-				ipv6:           true,
-				remoteNodes:    []string{node2},
-				lrpNetworks:    []string{nodeByName[node1].lrpNetworkIPv4, nodeByName[node1].lrpNetworkIPv6},
-				dnsServiceIPs:  []string{dnsServiceIPv4, dnsServiceIPv6},
+				ipv4:          true,
+				ipv6:          true,
+				remoteNodes:   []string{node2},
+				lrpNetworks:   []string{nodeByName[node1].lrpNetworkIPv4, nodeByName[node1].lrpNetworkIPv6},
+				dnsServiceIPs: []string{dnsServiceIPv4, dnsServiceIPv6},
 				testVirtLauncherPod: testVirtLauncherPod{
 					suffix: "1",
 					testPod: testPod{
@@ -1319,64 +1260,12 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 					},
 				},
 			}),
-			Entry("for pre-copy live migration to node owning subnet at global zone", testData{
+			Entry("for pre-copy live migration to node owning subnet at remote zone", testData{
 				ipv4:          true,
 				ipv6:          true,
+				remoteNodes:   []string{node1},
 				lrpNetworks:   []string{nodeByName[node2].lrpNetworkIPv4, nodeByName[node2].lrpNetworkIPv6},
 				dnsServiceIPs: []string{dnsServiceIPv4, dnsServiceIPv6},
-				policies: []testPolicy{
-					{
-						match:   "ip4.src == " + vmByName[vm1].addressIPv4,
-						nexthop: nodeByName[node2].lrpNetworkIPv4,
-					},
-					{
-						match:   "ip6.src == " + vmByName[vm1].addressIPv6,
-						nexthop: nodeByName[node2].lrpNetworkIPv6,
-					},
-				},
-				staticRoutes: []testStaticRoute{
-					{
-						prefix:     vmByName[vm1].addressIPv4,
-						nexthop:    vmByName[vm1].addressIPv4,
-						outputPort: ovntypes.RouterToSwitchPrefix + node2,
-					},
-					{
-						prefix:     vmByName[vm1].addressIPv6,
-						nexthop:    vmByName[vm1].addressIPv6,
-						outputPort: ovntypes.RouterToSwitchPrefix + node2,
-					},
-				},
-				testVirtLauncherPod: testVirtLauncherPod{
-					suffix: "1",
-					testPod: testPod{
-						nodeName: node2,
-					},
-					vmName:             vm1,
-					skipPodAnnotations: false, /* add ovn pod annotation */
-				},
-				migrationTarget: testMigrationTarget{
-					lrpNetworks:         []string{nodeByName[node1].lrpNetworkIPv4, nodeByName[node1].lrpNetworkIPv6},
-					testVirtLauncherPod: virtLauncher2(node1, vm1),
-				},
-				replaceNode: node1,
-				expectedDhcpv4: []testDHCPOptions{{
-					cidr:     nodeByName[node1].subnetIPv4,
-					dns:      dnsServiceIPv4,
-					hostname: vm1,
-				}},
-				expectedDhcpv6: []testDHCPOptions{{
-					cidr:     nodeByName[node1].subnetIPv6,
-					dns:      dnsServiceIPv6,
-					hostname: vm1,
-				}},
-			}),
-			Entry("for pre-copy live migration to node owning subnet at remote zone", testData{
-				ipv4:           true,
-				ipv6:           true,
-				interconnected: true,
-				remoteNodes:    []string{node1},
-				lrpNetworks:    []string{nodeByName[node2].lrpNetworkIPv4, nodeByName[node2].lrpNetworkIPv6},
-				dnsServiceIPs:  []string{dnsServiceIPv4, dnsServiceIPv6},
 				policies: []testPolicy{
 					{
 						match:   "ip4.src == " + vmByName[vm1].addressIPv4,
@@ -1408,12 +1297,11 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				},
 			}),
 			Entry("for pre-copy live migration to node owning subnet at local", testData{
-				ipv4:           true,
-				ipv6:           true,
-				interconnected: true,
-				remoteNodes:    []string{node2},
-				lrpNetworks:    []string{nodeByName[node1].lrpNetworkIPv4, nodeByName[node1].lrpNetworkIPv6},
-				dnsServiceIPs:  []string{dnsServiceIPv4, dnsServiceIPv6},
+				ipv4:          true,
+				ipv6:          true,
+				remoteNodes:   []string{node2},
+				lrpNetworks:   []string{nodeByName[node1].lrpNetworkIPv4, nodeByName[node1].lrpNetworkIPv6},
+				dnsServiceIPs: []string{dnsServiceIPv4, dnsServiceIPv6},
 				staticRoutes: []testStaticRoute{
 					{
 						prefix:  vmByName[vm1].addressIPv4,
@@ -1471,16 +1359,6 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 					dns:      dnsServiceIPv6,
 					hostname: vm1,
 				}},
-				expectedPolicies: []testPolicy{
-					{
-						match:   "ip4.src == " + vmByName[vm1].addressIPv4,
-						nexthop: lrpIP(nodeByName[node2].lrpNetworkIPv4),
-					},
-					{
-						match:   "ip6.src == " + vmByName[vm1].addressIPv6,
-						nexthop: lrpIP(nodeByName[node2].lrpNetworkIPv6),
-					},
-				},
 				expectedStaticRoutes: []testStaticRoute{
 					{
 						prefix:     vmByName[vm1].addressIPv4,
@@ -1491,6 +1369,18 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 						prefix:     vmByName[vm1].addressIPv6,
 						nexthop:    vmByName[vm1].addressIPv6,
 						outputPort: ovntypes.RouterToSwitchPrefix + node2,
+					},
+					{
+						prefix:      clusterCIDRIPv4,
+						nexthop:     strings.Split(nodeByName[node2].lrpNetworkIPv4, "/")[0],
+						policy:      &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+						externalIDs: map[string]string{},
+					},
+					{
+						prefix:      clusterCIDRIPv6,
+						nexthop:     strings.Split(nodeByName[node2].lrpNetworkIPv6, "/")[0],
+						policy:      &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+						externalIDs: map[string]string{},
 					},
 				},
 			}),
@@ -1551,16 +1441,6 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 					dns:      dnsServiceIPv6,
 					hostname: vm1,
 				}},
-				expectedPolicies: []testPolicy{
-					{
-						match:   "ip4.src == " + vmByName[vm1].addressIPv4,
-						nexthop: lrpIP(nodeByName[node2].lrpNetworkIPv4),
-					},
-					{
-						match:   "ip6.src == " + vmByName[vm1].addressIPv6,
-						nexthop: lrpIP(nodeByName[node2].lrpNetworkIPv6),
-					},
-				},
 				expectedStaticRoutes: []testStaticRoute{
 					{
 						prefix:     vmByName[vm1].addressIPv4,
@@ -1571,6 +1451,18 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 						prefix:     vmByName[vm1].addressIPv6,
 						nexthop:    vmByName[vm1].addressIPv6,
 						outputPort: ovntypes.RouterToSwitchPrefix + node2,
+					},
+					{
+						prefix:      clusterCIDRIPv4,
+						nexthop:     strings.Split(nodeByName[node2].lrpNetworkIPv4, "/")[0],
+						policy:      &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+						externalIDs: map[string]string{},
+					},
+					{
+						prefix:      clusterCIDRIPv6,
+						nexthop:     strings.Split(nodeByName[node2].lrpNetworkIPv6, "/")[0],
+						policy:      &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+						externalIDs: map[string]string{},
 					},
 				},
 			}),
@@ -1608,16 +1500,6 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 					dns:      dnsServiceIPv6,
 					hostname: vm1,
 				}},
-				expectedPolicies: []testPolicy{
-					{
-						match:   "ip4.src == " + vmByName[vm1].addressIPv4,
-						nexthop: lrpIP(nodeByName[node2].lrpNetworkIPv4),
-					},
-					{
-						match:   "ip6.src == " + vmByName[vm1].addressIPv6,
-						nexthop: lrpIP(nodeByName[node2].lrpNetworkIPv6),
-					},
-				},
 				expectedStaticRoutes: []testStaticRoute{
 					{
 						prefix:     vmByName[vm1].addressIPv4,
@@ -1628,6 +1510,18 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 						prefix:     vmByName[vm1].addressIPv6,
 						nexthop:    vmByName[vm1].addressIPv6,
 						outputPort: ovntypes.RouterToSwitchPrefix + node2,
+					},
+					{
+						prefix:      clusterCIDRIPv4,
+						nexthop:     strings.Split(nodeByName[node2].lrpNetworkIPv4, "/")[0],
+						policy:      &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+						externalIDs: map[string]string{},
+					},
+					{
+						prefix:      clusterCIDRIPv6,
+						nexthop:     strings.Split(nodeByName[node2].lrpNetworkIPv6, "/")[0],
+						policy:      &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+						externalIDs: map[string]string{},
 					},
 				},
 			}),
