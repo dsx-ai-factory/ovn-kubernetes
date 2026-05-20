@@ -18,7 +18,6 @@ import (
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
-	ipreserv "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/ipreservation"
 	zoneinterconnect "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
@@ -31,8 +30,6 @@ import (
 // configuration for secondary layer2/localnet network controller
 type BaseLayer2UserDefinedNetworkController struct {
 	BaseUserDefinedNetworkController
-	// IP reservation controller, for networks that pod allocation done in ovnkube-controller
-	ipreservController *ipreserv.Controller
 }
 
 // stop gracefully stops the controller, and delete all logical entities for this network if requested
@@ -129,23 +126,6 @@ func (oc *BaseLayer2UserDefinedNetworkController) run() error {
 		return err
 	}
 
-	// we need to start this before WatchPods so that we can reserve existing IPs reserved
-	// for IP reservation before it gets assigned to the Pods
-	if config.OVNKubernetesFeature.EnableIPReservation && oc.allocatesPodAnnotation() {
-		var switchName string
-		if oc.TopologyType() == types.LocalnetTopology {
-			switchName = types.OVNLocalnetSwitch
-		} else {
-			switchName = types.OVNLayer2Switch
-		}
-		ipresvController, err := ipreserv.NewController(oc.ReconcilableNetInfo, oc.kube, oc.watchFactory,
-			oc.lsManager.ForSwitch(oc.GetNetworkScopedName(switchName)), oc.recorder, oc.stopChan, oc.networkManager)
-		if err != nil {
-			return err
-		}
-		oc.ipreservController = ipresvController
-	}
-
 	// when on IC, it will be the NetworkController that returns the IPAMClaims
 	// IPs back to the pool
 	if oc.allocatesPodAnnotation() && oc.allowPersistentIPs() {
@@ -159,18 +139,6 @@ func (oc *BaseLayer2UserDefinedNetworkController) run() error {
 
 	if err := oc.WatchPods(); err != nil {
 		return err
-	}
-
-	if config.OVNKubernetesFeature.EnableIPReservation && oc.allocatesPodAnnotation() {
-		// start to allocate IP reservation IPs after pod IP allocation so that it won't
-		// re-allocate IPs that already allocated for Pods.
-		// Note that the existing IP reservation IPs are reserved when ipreservController is initialized.
-		oc.wg.Add(1)
-		go func(ch <-chan struct{}) {
-			defer oc.wg.Done()
-			// Until we have scale issues in future let's spawn only one thread
-			oc.ipreservController.Run(1, ch)
-		}(oc.stopChan)
 	}
 
 	if config.OVNKubernetesFeature.EnableAdminPolicyBasedRouting {
