@@ -76,9 +76,6 @@ var MetricOVNKubeControllerReadyDuration prometheus.Gauge
 // Resource name is in the label.
 var MetricOVNKubeControllerSyncDuration *prometheus.GaugeVec
 
-// MetricOVNKubeControllerLeader identifies whether this instance of ovnkube-controller is a leader or not
-var MetricOVNKubeControllerLeader prometheus.Gauge
-
 // metric to get the size of ovnkube-master.log files
 var metricOvnKubeControllerLogFileSize *prometheus.GaugeVec
 
@@ -225,18 +222,11 @@ func init() {
 			"resource_name",
 		})
 
-	MetricOVNKubeControllerLeader = prometheus.NewGauge(prometheus.GaugeOpts{
-		Namespace: types.MetricOvnkubeNamespace,
-		Subsystem: types.MetricOvnkubeSubsystemController,
-		Name:      "leader",
-		Help:      "Identifies whether the instance of ovnkube-controller is a leader(1) or not(0).",
-	})
-
 	metricOvnKubeControllerLogFileSize = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: types.MetricOvnkubeNamespace,
 		Subsystem: types.MetricOvnkubeSubsystemController,
 		Name:      "logfile_size",
-		Help:      "The size of ovnkube-master logfile on master node."},
+		Help:      "The size of ovnkube-controller log file."},
 		[]string{
 			"logfile_name",
 		},
@@ -432,7 +422,6 @@ const (
 // RegisterOVNKubeControllerBase registers ovnkube controller base metrics with the Prometheus registry.
 // This function should only be called once.
 func RegisterOVNKubeControllerBase() {
-	prometheus.MustRegister(MetricOVNKubeControllerLeader)
 	prometheus.MustRegister(MetricOVNKubeControllerReadyDuration)
 	prometheus.MustRegister(MetricOVNKubeControllerSyncDuration)
 	prometheus.MustRegister(prometheus.NewGaugeFunc(

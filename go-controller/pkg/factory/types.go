@@ -14,6 +14,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 
 	adminpolicybasedrouteinformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions/adminpolicybasedroute/v1"
+	networkconnectinformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1/apis/informers/externalversions/clusternetworkconnect/v1"
 	egressipinformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions/egressip/v1"
 	portmirrorapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
 	routeadvertisementsinformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions/routeadvertisements/v1"
@@ -69,6 +70,7 @@ type NodeWatchFactory interface {
 	APBRouteInformer() adminpolicybasedrouteinformer.AdminPolicyBasedExternalRouteInformer
 	EgressIPInformer() egressipinformer.EgressIPInformer
 	NADInformer() nadinformer.NetworkAttachmentDefinitionInformer
+	ClusterNetworkConnectInformer() networkconnectinformer.ClusterNetworkConnectInformer
 	UserDefinedNetworkInformer() userdefinednetworkinformer.UserDefinedNetworkInformer
 	ClusterUserDefinedNetworkInformer() userdefinednetworkinformer.ClusterUserDefinedNetworkInformer
 	RouteAdvertisementsInformer() routeadvertisementsinformer.RouteAdvertisementsInformer

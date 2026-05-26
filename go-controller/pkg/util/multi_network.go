@@ -252,8 +252,10 @@ type mutableNetInfo struct {
 	podNetworkAdvertisements map[string][]string
 	eipAdvertisements        map[string][]string
 
-	// information generated from previous fields, not used in comparisons
+	// subnets can be added for Layer3 networks
+	subnets []config.CIDRNetworkEntry
 
+	// information generated from previous fields, not used in comparisons
 	// namespaces from nads
 	namespaces sets.Set[string]
 }
@@ -288,11 +290,14 @@ func (l *mutableNetInfo) equals(r *mutableNetInfo) bool {
 	defer l.RUnlock()
 	r.RLock()
 	defer r.RUnlock()
+
+	lessCIDR := func(a, b config.CIDRNetworkEntry) bool { return a.String() < b.String() }
 	return reflect.DeepEqual(l.id, r.id) &&
 		reflect.DeepEqual(l.tunnelKeys, r.tunnelKeys) &&
 		reflect.DeepEqual(l.nads, r.nads) &&
 		reflect.DeepEqual(l.podNetworkAdvertisements, r.podNetworkAdvertisements) &&
-		reflect.DeepEqual(l.eipAdvertisements, r.eipAdvertisements)
+		reflect.DeepEqual(l.eipAdvertisements, r.eipAdvertisements) &&
+		cmp.Equal(l.subnets, r.subnets, cmpopts.SortSlices(lessCIDR))
 }
 
 func (l *mutableNetInfo) copyFrom(r *mutableNetInfo) {
@@ -306,6 +311,7 @@ func (l *mutableNetInfo) copyFrom(r *mutableNetInfo) {
 	aux.nads = r.nads.Clone()
 	aux.setPodNetworkAdvertisedOnVRFs(r.podNetworkAdvertisements)
 	aux.setEgressIPAdvertisedAtNodes(r.eipAdvertisements)
+	aux.subnets = append([]config.CIDRNetworkEntry(nil), r.subnets...)
 	aux.namespaces = r.namespaces.Clone()
 	r.RUnlock()
 	l.Lock()
@@ -315,6 +321,7 @@ func (l *mutableNetInfo) copyFrom(r *mutableNetInfo) {
 	l.nads = aux.nads
 	l.podNetworkAdvertisements = aux.podNetworkAdvertisements
 	l.eipAdvertisements = aux.eipAdvertisements
+	l.subnets = aux.subnets
 	l.namespaces = aux.namespaces
 }
 
@@ -765,7 +772,6 @@ type userDefinedNetInfo struct {
 	connectToNAD       string
 
 	ipv4mode, ipv6mode    bool
-	subnets               []config.CIDRNetworkEntry
 	excludeSubnets        []*net.IPNet
 	reservedSubnets       []*net.IPNet
 	infrastructureSubnets []*net.IPNet
@@ -1010,7 +1016,9 @@ func (nInfo *userDefinedNetInfo) IPMode() (bool, bool) {
 
 // Subnets returns the Subnets value
 func (nInfo *userDefinedNetInfo) Subnets() []config.CIDRNetworkEntry {
-	return nInfo.subnets
+	nInfo.RLock()
+	defer nInfo.RUnlock()
+	return append([]config.CIDRNetworkEntry(nil), nInfo.mutableNetInfo.subnets...)
 }
 
 // ExcludeSubnets returns the ExcludeSubnets value
@@ -1079,6 +1087,10 @@ func (nInfo *userDefinedNetInfo) TransitSubnets() []*net.IPNet {
 	return nInfo.transitSubnets
 }
 
+func (nInfo *userDefinedNetInfo) reconcile(other NetInfo) {
+	nInfo.mutableNetInfo.reconcile(other)
+}
+
 func (nInfo *userDefinedNetInfo) canReconcile(other NetInfo) bool {
 	if (nInfo == nil) != (other == nil) {
 		return false
@@ -1141,8 +1153,12 @@ func (nInfo *userDefinedNetInfo) canReconcile(other NetInfo) bool {
 	}
 
 	lessCIDRNetworkEntry := func(a, b config.CIDRNetworkEntry) bool { return a.String() < b.String() }
-	if !cmp.Equal(nInfo.subnets, other.Subnets(), cmpopts.SortSlices(lessCIDRNetworkEntry)) {
-		return false
+	if !cmp.Equal(nInfo.Subnets(), other.Subnets(), cmpopts.SortSlices(lessCIDRNetworkEntry)) {
+		// For Layer3 topology, adding subnets is considered compatible and reconcilable
+		// CRD validation ensures only subnet additions are allowed
+		if nInfo.topology != types.Layer3Topology {
+			return false
+		}
 	}
 
 	lessIPNet := func(a, b *net.IPNet) bool { return a.String() < b.String() }
@@ -1176,7 +1192,6 @@ func (nInfo *userDefinedNetInfo) copy() *userDefinedNetInfo {
 		allowPersistentIPs:    nInfo.allowPersistentIPs,
 		ipv4mode:              nInfo.ipv4mode,
 		ipv6mode:              nInfo.ipv6mode,
-		subnets:               nInfo.subnets,
 		excludeSubnets:        nInfo.excludeSubnets,
 		reservedSubnets:       nInfo.reservedSubnets,
 		infrastructureSubnets: nInfo.infrastructureSubnets,
@@ -1211,14 +1226,14 @@ func newLayer3NetConfInfo(netconf *ovncnitypes.NetConf, annotations map[string]s
 		netName:        netconf.Name,
 		primaryNetwork: netconf.Role == types.NetworkRolePrimary,
 		topology:       types.Layer3Topology,
-		subnets:        subnets,
 		joinSubnets:    joinSubnets,
 		mtu:            netconf.MTU,
 		transport:      netconf.Transport,
 		evpn:           netconf.EVPN,
 		mutableNetInfo: mutableNetInfo{
-			id:   types.InvalidID,
-			nads: sets.Set[string]{},
+			id:      types.InvalidID,
+			nads:    sets.Set[string]{},
+			subnets: append([]config.CIDRNetworkEntry(nil), subnets...),
 		},
 	}
 	ni.nadRoutes, err = getNADRoutesConfig(annotations)
@@ -1285,7 +1300,6 @@ func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf, annotations map[string]s
 		netName:               netconf.Name,
 		primaryNetwork:        netconf.Role == types.NetworkRolePrimary,
 		topology:              types.Layer2Topology,
-		subnets:               subnets,
 		joinSubnets:           joinSubnets,
 		transitSubnets:        transitSubnets,
 		excludeSubnets:        excludes,
@@ -1299,8 +1313,9 @@ func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf, annotations map[string]s
 		transport:             netconf.Transport,
 		evpn:                  netconf.EVPN,
 		mutableNetInfo: mutableNetInfo{
-			id:   types.InvalidID,
-			nads: sets.Set[string]{},
+			id:      types.InvalidID,
+			nads:    sets.Set[string]{},
+			subnets: append([]config.CIDRNetworkEntry(nil), subnets...),
 		},
 	}
 	ni.nadRoutes, err = getNADRoutesConfig(annotations)
@@ -1331,7 +1346,6 @@ func newLocalnetNetConfInfo(netconf *ovncnitypes.NetConf, annotations map[string
 	ni := &userDefinedNetInfo{
 		netName:             netconf.Name,
 		topology:            types.LocalnetTopology,
-		subnets:             subnets,
 		excludeSubnets:      excludes,
 		mtu:                 netconf.MTU,
 		vlan:                uint(netconf.VLANID),
@@ -1340,8 +1354,9 @@ func newLocalnetNetConfInfo(netconf *ovncnitypes.NetConf, annotations map[string
 		gateways:            netconf.Gateway,
 		gatewayMAC:          netconf.GatewayMAC,
 		mutableNetInfo: mutableNetInfo{
-			id:   types.InvalidID,
-			nads: sets.Set[string]{},
+			id:      types.InvalidID,
+			nads:    sets.Set[string]{},
+			subnets: append([]config.CIDRNetworkEntry(nil), subnets...),
 		},
 	}
 	ni.nadRoutes, err = getNADRoutesConfig(annotations)

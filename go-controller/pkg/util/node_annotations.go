@@ -26,7 +26,7 @@ import (
 )
 
 // This handles the annotations used by the node to pass information about its local
-// network configuration to the master:
+// network configuration to the ovnkube controller:
 //
 //   annotations:
 //     k8s.ovn.org/l3-gateway-config: |

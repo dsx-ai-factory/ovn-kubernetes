@@ -28,6 +28,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node"
@@ -235,7 +236,6 @@ func (ncm *NodeControllerManager) CleanupStaleNetworks(validNetworks ...util.Net
 		errs = append(errs, err)
 	}
 
-	// in DPU mode, vrfManager would be nil
 	if ncm.vrfManager != nil {
 		validVRFDevices := make(sets.Set[string])
 		for _, network := range validNetworks {
@@ -314,8 +314,14 @@ func NewNodeControllerManager(ovnClient *util.OVNClientset, wf factory.NodeWatch
 		}
 	}
 
-	if util.IsNetworkSegmentationSupportEnabled() && config.OvnKubeNode.Mode != ovntypes.NodeModeDPU {
+	if util.IsNetworkSegmentationSupportEnabled() {
+		// DPU-host mode uses the VRF manager for management-port VRFs,
+		// IP rules, and host kernel traffic. DPU mode only needs the VRF
+		// device as the table anchor for reflecting FRR-learned BGP
+		// routes into OVN. Full mode uses one VRF manager for both.
 		ncm.vrfManager = vrfmanager.NewController(ncm.routeManager)
+	}
+	if util.IsNetworkSegmentationSupportEnabled() && config.OvnKubeNode.Mode != ovntypes.NodeModeDPU {
 		ncm.ruleManager = iprulemanager.NewController(config.IPv4Mode, config.IPv6Mode)
 	}
 
@@ -418,7 +424,7 @@ func (ncm *NodeControllerManager) Start(ctx context.Context, isOVNKubeController
 			if config.OvnKubeNode.Mode == ovntypes.NodeModeFull {
 				checkForStaleOVSInternalPorts()
 			}
-			ncm.checkForStaleOVSRepresentorInterfaces()
+			ncm.checkForStaleOVSPodInterfaces()
 		}, time.Minute, ncm.stopChan)
 	}
 
@@ -552,21 +558,25 @@ func (ncm *NodeControllerManager) Stop(isOVNKubeControllerSyncd *atomic.Bool) {
 	}
 }
 
-// checkForStaleOVSRepresentorInterfaces checks for stale OVS ports backed by Repreresentor interfaces,
-// derive iface-id from pod name and namespace then remove any interfaces assoicated with a sandbox that are
-// not scheduled to the node.
-func (ncm *NodeControllerManager) checkForStaleOVSRepresentorInterfaces() {
-	// Get all representor interfaces. these are OVS interfaces that have their external_ids:sandbox, netdev-name
-	// and ovn_kube_mode set.
-	ovsArgs := []string{"external_ids:sandbox!=\"\"", "external_ids:netdev-name!=\"\"",
-		fmt.Sprintf("external_ids:ovn_kube_mode=%s", config.OvnKubeNode.Mode)}
-	ovsIntefaceToExternalIDMap, err := util.GetOVSInterfaceToExternalIDMapFiltered(ovsArgs)
+// checkForStaleOVSPodInterfaces checks for stale Pod OVS ports, including SR-IOV
+// representors (with kernel driver) or VFIO representors (with VFIO driver) and
+// host side of veth interfaces
+func (ncm *NodeControllerManager) checkForStaleOVSPodInterfaces() {
+	// Find all ovn-k8s managed pod OVS interfaces (those with sandbox and iface-id-ver set).
+	// This covers veth host-side interfaces, kernel-driver SR-IOV representors, and
+	// VFIO/DPDK representors.
+	p := func(item *vswitchd.Interface) bool {
+		return len(item.ExternalIDs) != 0 && item.ExternalIDs["sandbox"] != "" &&
+			item.ExternalIDs["iface-id-ver"] != "" &&
+			item.ExternalIDs["ovn_kube_mode"] == config.OvnKubeNode.Mode
+	}
+	ovsInterfaces, err := ovsops.FindInterfacesWithPredicate(ncm.ovsClient, p)
 	if err != nil {
-		klog.Error(err.Error())
+		klog.Errorf("Failed to list OVS Pod interfaces: %v", err)
 		return
 	}
 
-	if len(ovsIntefaceToExternalIDMap) == 0 {
+	if len(ovsInterfaces) == 0 {
 		return
 	}
 
@@ -582,24 +592,19 @@ func (ncm *NodeControllerManager) checkForStaleOVSRepresentorInterfaces() {
 	for _, pod := range pods {
 		if pod.Spec.NodeName == ncm.name && !util.PodWantsHostNetwork(pod) {
 			// Note: wf (WatchFactory) *usually* returns pods assigned to this node, however we dont rely on it
-			// and add this check to filter out pods assigned to other nodes. (e.g when ovnkube master and node
-			// share the same process)
+			// and add this check to filter out pods assigned to other nodes. (e.g when ovnkube controller and
+			// node share the same process)
 			expectedPodUIDs[string(pod.UID)] = struct{}{}
 		}
 	}
 
-	// Remove any stale representor ports
-	for hostIfaceName, extMap := range ovsIntefaceToExternalIDMap {
-		podUID, ok := extMap["iface-id-ver"]
-		if !ok {
-			continue
-		}
-		if _, ok = expectedPodUIDs[podUID]; !ok {
-			klog.Warningf("Found stale OVS Interface %s with iface-id-ver %s, deleting it", hostIfaceName, podUID)
-			_, stderr, err := util.RunOVSVsctl("--if-exists", "--with-iface", "del-port", hostIfaceName)
-			if err != nil {
-				klog.Errorf("Failed to delete stale interface %s, stderr: %q, error: %v",
-					hostIfaceName, stderr, err)
+	// Remove any stale Pod OVS interfaces
+	for _, ovsIface := range ovsInterfaces {
+		podUID := ovsIface.ExternalIDs["iface-id-ver"]
+		if _, ok := expectedPodUIDs[podUID]; !ok {
+			klog.Warningf("Found stale OVS Interface %s with iface-id-ver %s, deleting it", ovsIface.Name, podUID)
+			if err := libovsdbops.DeletePortWithInterfaces(ncm.ovsClient, "br-int", ovsIface.Name); err != nil {
+				klog.Errorf("Failed to delete stale interface %s: %v", ovsIface.Name, err)
 			}
 		}
 	}
