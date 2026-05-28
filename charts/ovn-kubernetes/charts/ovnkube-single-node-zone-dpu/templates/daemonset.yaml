@@ -148,10 +148,6 @@ spec:
         image: {{ include "ovn-kubernetes.generateContainerImageString" (dict "image" .Values.ovnkubeSingleNodeZoneNbdb.image "Values" $.Values) }}
         imagePullPolicy: "IfNotPresent"
         command: ["/root/ovnkube.sh", "local-nb-ovsdb"]
-        securityContext:
-          runAsUser: 0
-          capabilities:
-            add: ["NET_ADMIN"]
         terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         - mountPath: /etc/openvswitch/
@@ -199,10 +195,6 @@ spec:
         image: {{ include "ovn-kubernetes.generateContainerImageString" (dict "image" .Values.ovnkubeSingleNodeZoneSbdb.image "Values" $.Values) }}
         imagePullPolicy: "IfNotPresent"
         command: ["/root/ovnkube.sh", "local-sb-ovsdb"]
-        securityContext:
-          runAsUser: 0
-          capabilities:
-            add: ["NET_ADMIN"]
         terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         - mountPath: /etc/openvswitch/
