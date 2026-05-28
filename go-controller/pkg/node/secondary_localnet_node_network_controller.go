@@ -151,6 +151,15 @@ func (nc *UserDefinedLocalnetNodeNetworkController) updateLocalnetOvnBridgeMappi
 			klog.V(5).Infof("Localnet network %s is not needed on this node %s", nc.GetNetworkName(), nc.name)
 			return nil
 		}
+		// The bridge selected from ngn-localnet-bridge-mappings must actually
+		// exist on this node. A missing bridge means the node was misconfigured
+		// and silently continuing would leave ovn-bridge-mappings pointing at a
+		// non-existent bridge, breaking localnet traffic. Fail fatally so the
+		// misconfiguration is surfaced immediately.
+		if _, stderr, err := util.RunOVSVsctl("br-exists", bridgeName); err != nil {
+			klog.Fatalf("Bridge %s configured in ngn-localnet-bridge-mappings for localnet network %s does not exist on node %s, stderr: %s, err: %v",
+				bridgeName, nc.GetNetworkName(), nc.name, stderr, err)
+		}
 		klog.V(5).Infof("Set bridge %s for localnet network %s", bridgeName, nc.GetNetworkName())
 		nc.bridgeName = bridgeName
 	} else if nc.bridgeName == "" {
