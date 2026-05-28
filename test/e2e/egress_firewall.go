@@ -66,6 +66,12 @@ func egressFirewallPolicyValidationTests(useUDN bool, udnTopology string) {
 		)
 
 		waitForEFApplied := func(namespace string) {
+			// Allow up to 60s: when this runs in a UDN namespace, the OVN
+			// egress-firewall ACL can only be applied after the UDN's network
+			// controller has finished starting up. With back-to-back UDN
+			// teardown/setup the controller startup can take ~30-45s while
+			// it works through stale informer-cache pods, so the previous
+			// 10s timeout was racy.
 			gomega.Eventually(func() bool {
 				status, err := e2ekubectl.RunKubectl(namespace, "get", "egressfirewall", "default",
 					"-o", "jsonpath={.status.status}")
@@ -77,7 +83,7 @@ func egressFirewallPolicyValidationTests(useUDN bool, udnTopology string) {
 				}
 				framework.Logf("egressfirewall %q in namespace %s is not applied. Status: %s", "default", namespace, status)
 				return false
-			}, 10*time.Second).Should(gomega.BeTrue(),
+			}, 60*time.Second).Should(gomega.BeTrue(),
 				fmt.Sprintf("expected egress firewall in namespace %s to be successfully applied", namespace))
 		}
 
