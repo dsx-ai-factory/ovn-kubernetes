@@ -1232,6 +1232,7 @@ func (oc *Layer3UserDefinedNetworkController) newGatewayManager(nodeName string)
 		oc.watchFactory,
 		oc.addressSetFactory,
 		oc.nodeAnnotationCache,
+		oc.addressSetManager,
 		oc.gatewayOptions()...,
 	)
 }
