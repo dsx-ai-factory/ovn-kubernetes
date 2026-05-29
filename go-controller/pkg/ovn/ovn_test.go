@@ -108,7 +108,7 @@ func (ni *testNetInfo) OutboundSNAT() string {
 }
 
 type FakeOVN struct {
-	fakeClient        *util.OVNMasterClientset
+	fakeClient        *util.OVNKubeControllerClientset
 	watcher           *factory.WatchFactory
 	controller        *DefaultNetworkController
 	stopChan          chan struct{}
@@ -212,7 +212,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 			v1Objects = append(v1Objects, object)
 		}
 	}
-	o.fakeClient = &util.OVNMasterClientset{
+	o.fakeClient = &util.OVNKubeControllerClientset{
 		KubeClient:               fake.NewSimpleClientset(v1Objects...),
 		ANPClient:                anpfake.NewSimpleClientset(anpObjects...),
 		EgressIPClient:           egressipfake.NewSimpleClientset(egressIPObjects...),
@@ -273,7 +273,7 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 	factory.SetEventQueueSize(8)
 	factory.SetInternalInformerPoolSize(2)
 
-	o.watcher, err = factory.NewMasterWatchFactory(o.fakeClient)
+	o.watcher, err = factory.NewOVNKubeControllerWatchFactory(o.fakeClient)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	o.nbClient, o.sbClient, o.nbsbCleanup, err = libovsdbtest.NewNBSBTestHarness(o.dbSetup)
@@ -451,7 +451,7 @@ func resetNBClient(ctx context.Context, nbClient libovsdbclient.Client) {
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
 func NewOvnController(
-	ovnClient *util.OVNMasterClientset,
+	ovnClient *util.OVNKubeControllerClientset,
 	wf *factory.WatchFactory,
 	stopChan chan struct{},
 	addressSetFactory addressset.AddressSetFactory,
@@ -620,7 +620,6 @@ func (o *FakeOVN) NewUserDefinedNetworkController(netattachdef *nettypes.Network
 				EIPClient:            o.fakeClient.EgressIPClient,
 				EgressFirewallClient: o.fakeClient.EgressFirewallClient,
 				IPAMClaimsClient:     o.fakeClient.IPAMClaimsClient,
-				CloudNetworkClient:   o.fakeClient.CloudNetworkClient,
 				EgressServiceClient:  o.fakeClient.EgressServiceClient,
 				AdminPBRClient:       o.fakeClient.AdminPBRClient,
 				PortMirrorClient:     o.fakeClient.PortMirrorClient,
@@ -645,7 +644,7 @@ func (o *FakeOVN) NewUserDefinedNetworkController(netattachdef *nettypes.Network
 		switch topoType {
 		case types.Layer3Topology:
 			l3Controller, err := NewLayer3UserDefinedNetworkController(cnci, mutableNetInfo, o.networkManager.Interface(), nil,
-				o.eIPController, o.portCache, o.addressSetManager, o.udnNodeController)
+				o.eIPController, o.portCache, o.addressSetManager, o.udnNodeController, o.controller.ServiceController())
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			if o.asf != nil { // use fake asf only when enabled
 				l3Controller.addressSetFactory = asf
@@ -654,7 +653,7 @@ func (o *FakeOVN) NewUserDefinedNetworkController(netattachdef *nettypes.Network
 			o.fullL3UDNControllers[netName] = l3Controller
 		case types.Layer2Topology:
 			l2Controller, err := NewLayer2UserDefinedNetworkController(cnci, mutableNetInfo, o.networkManager.Interface(), nil,
-				o.portCache, o.eIPController, o.addressSetManager, o.udnNodeController)
+				o.portCache, o.eIPController, o.addressSetManager, o.udnNodeController, o.controller.ServiceController())
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			if o.asf != nil { // use fake asf only when enabled
 				l2Controller.addressSetFactory = asf

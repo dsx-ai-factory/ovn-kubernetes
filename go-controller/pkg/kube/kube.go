@@ -99,12 +99,12 @@ type KubeOVN struct {
 	EgressFirewallClient egressfirewallclientset.Interface
 	CloudNetworkClient   ocpcloudnetworkclientset.Interface
 	EgressServiceClient  egressserviceclientset.Interface
+	APBRouteClient       adminpolicybasedrouteclientset.Interface
 	EgressQoSClient      egressqosclientset.Interface
 	IPAMClaimsClient     ipamclaimssclientset.Interface
 	NADClient            nadclientset.Interface
 	AdminPBRClient       adminpbrclientset.Interface
 	IPReservationClient  ipreservationclientset.Interface
-	APBRouteClient       adminpolicybasedrouteclientset.Interface
 	PortMirrorClient     portmirrorclientset.Interface
 	NetworkQoSClient     networkqosclientset.Interface
 }
