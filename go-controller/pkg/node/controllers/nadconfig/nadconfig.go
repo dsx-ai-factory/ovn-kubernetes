@@ -90,6 +90,12 @@ func (c *NadConfigController) Start() error {
 }
 
 func (c *NadConfigController) Stop() {
+	// c may be nil if the owning node network controller failed to
+	// initialize before the NAD controller was created (e.g. gateway
+	// init failure), and Stop() is then called during cleanup.
+	if c == nil {
+		return
+	}
 	controller.Stop(c.controller)
 }
 
