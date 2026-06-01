@@ -276,6 +276,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 		KubeClient: fakeClient,
 	}
 
+	netInfo.On("Transport").Return("")
 	if isRoutingAdvertised {
 		netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", nodeName).Return([]string{"vrf"})
 	} else {
@@ -383,6 +384,7 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 		KubeClient: fakeClient,
 	}
 
+	netInfo.On("Transport").Return("")
 	netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", nodeName).Return(nil)
 
 	_, err = config.InitConfig(ctx, fexec, nil)
@@ -498,6 +500,7 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 		netInfo.On("GetNodeManagementIP", nodeSubnetCIDRs[i]).Return(util.GetNodeManagementIfAddr(nodeSubnetCIDRs[i]))
 	}
 
+	netInfo.On("Transport").Return("")
 	netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", nodeName).Return(nil)
 
 	_, err = config.InitConfig(ctx, fexec, nil)
@@ -840,6 +843,7 @@ var _ = Describe("Management Port tests", func() {
 				netInfo := &multinetworkmocks.NetInfo{}
 				nodeNet := ovntest.MustParseIPNet("10.1.1.0/24")
 
+				netInfo.On("Transport").Return("")
 				netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", "").Return(nil)
 				netInfo.On("GetNodeGatewayIP", nodeNet).Return(util.GetNodeGatewayIfAddr(nodeNet))
 				netInfo.On("GetNodeManagementIP", nodeNet).Return(util.GetNodeManagementIfAddr(nodeNet))
@@ -1253,6 +1257,7 @@ var _ = Describe("Management Port tests", func() {
 		hostSubnets := []*net.IPNet{ovntest.MustParseIPNet("10.1.1.0/24")}
 		netdevName, rep := "ens1f0v0", "ens1f0_0"
 		netInfo := &multinetworkmocks.NetInfo{}
+		netInfo.On("Transport").Return("")
 		netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", "worker-node").Return(nil)
 		netInfo.On("GetNodeGatewayIP", hostSubnets[0]).Return(util.GetNodeGatewayIfAddr(hostSubnets[0]))
 		netInfo.On("GetNodeManagementIP", hostSubnets[0]).Return(util.GetNodeManagementIfAddr(hostSubnets[0]))

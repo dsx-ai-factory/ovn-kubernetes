@@ -413,6 +413,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			config.Default.MTU = 1400
 			netInfoMock := &multinetworkmocks.NetInfo{}
 			netInfoMock.On("IsPrimaryNetwork").Return(false)
+			netInfoMock.On("Transport").Return("")
 			netInfoMock.On("GetPodNetworkAdvertisedOnNodeVRFs", mock.Anything).Return(nil)
 			cfg := &managementPortConfig{
 				hostSubnets: []*net.IPNet{ipnet},
@@ -440,6 +441,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			config.OvnKubeNode.Mode = types.NodeModeDPUHost
 			netInfoMock := &multinetworkmocks.NetInfo{}
 			netInfoMock.On("IsPrimaryNetwork").Return(false)
+			netInfoMock.On("Transport").Return("")
 			netInfoMock.On("GetPodNetworkAdvertisedOnNodeVRFs", mock.Anything).Return(nil)
 			cfg := &managementPortConfig{
 				hostSubnets: []*net.IPNet{ipnet},
