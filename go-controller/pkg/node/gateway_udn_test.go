@@ -652,7 +652,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		}
 
 		stop := make(chan struct{})
-		wf, err := factory.NewNodeWatchFactory(fakeClient, []string{nodeName})
+		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 		Expect(err).NotTo(HaveOccurred())
 		defer func() {
 			close(stop)
@@ -887,7 +887,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		}
 
 		stop := make(chan struct{})
-		wf, err := factory.NewNodeWatchFactory(fakeClient, []string{nodeName})
+		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 		Expect(err).NotTo(HaveOccurred())
 		defer func() {
 			close(stop)
@@ -1091,7 +1091,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		}
 
 		stop := make(chan struct{})
-		wf, err := factory.NewNodeWatchFactory(fakeClient, []string{nodeName})
+		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 		Expect(err).NotTo(HaveOccurred())
 		wg := &sync.WaitGroup{}
 		defer func() {
@@ -1332,7 +1332,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		}
 
 		stop := make(chan struct{})
-		wf, err := factory.NewNodeWatchFactory(fakeClient, []string{nodeName})
+		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 		Expect(err).NotTo(HaveOccurred())
 		defer func() {
 			close(stop)
@@ -1816,7 +1816,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			Protocol: corev1.ProtocolTCP, Port: int32(8080)}}, corev1.ServiceTypeNodePort, []string{}, corev1.ServiceStatus{},
 			true, false)
 		fakeClient := util.GetOVNClientset(service, namespace)
-		wf, err := factory.NewNodeWatchFactory(fakeClient.GetNodeClientset(), []string{"node"})
+		wf, err := factory.NewNodeWatchFactory(fakeClient.GetNodeClientset(), "node")
 		Expect(err).ToNot(HaveOccurred(), "must get new node watch factory")
 		Expect(wf.Start()).NotTo(HaveOccurred(), "must start Node watch factory")
 		defer func() {

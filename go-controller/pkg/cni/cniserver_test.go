@@ -109,8 +109,7 @@ func TestCNIServer(t *testing.T) {
 	fakeClientset := &util.OVNNodeClientset{
 		KubeClient: fakeClient,
 	}
-	nodeNames := []string{nodeName}
-	wf, err := factory.NewNodeWatchFactory(fakeClientset, nodeNames)
+	wf, err := factory.NewNodeWatchFactory(fakeClientset, nodeName)
 	if err != nil {
 		t.Fatalf("failed to create watch factory: %v", err)
 	}
@@ -341,7 +340,7 @@ func TestCNIServerStatusNotReady(t *testing.T) {
 	fakeClientset := &util.OVNNodeClientset{
 		KubeClient: fakeClient,
 	}
-	wf, err := factory.NewNodeWatchFactory(fakeClientset, []string{nodeName})
+	wf, err := factory.NewNodeWatchFactory(fakeClientset, nodeName)
 	if err != nil {
 		t.Fatalf("failed to create watch factory: %v", err)
 	}

@@ -263,7 +263,7 @@ func initController(namespaces []corev1.Namespace, pods []corev1.Pod, egressIPs 
 	rm := routemanager.NewController()
 	ovnconfig.OVNKubernetesFeature.EnableMultiNetwork = true // force addition of NAD informer for node watch factory
 	ovnconfig.OVNKubernetesFeature.EnableEgressIP = true
-	watchFactory, err := factory.NewNodeWatchFactory(ovnNodeClient, []string{node1Name})
+	watchFactory, err := factory.NewNodeWatchFactory(ovnNodeClient, node1Name)
 	if err != nil {
 		return nil, nil, err
 	}

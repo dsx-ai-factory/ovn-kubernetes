@@ -296,7 +296,7 @@ var _ = Describe("DeleteEndpointSlice", func() {
 		fakeClient.NetworkAttchDefClient = nadfake.NewSimpleClientset()
 		fakeClient.UserDefinedNetworkClient = udnfakeclient.NewSimpleClientset()
 
-		watcher, err = factory.NewNodeWatchFactory(fakeClient, []string{nodeName})
+		watcher, err = factory.NewNodeWatchFactory(fakeClient, nodeName)
 		Expect(err).NotTo(HaveOccurred())
 		err = watcher.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -418,7 +418,7 @@ var _ = Describe("SyncServices", func() {
 		fakeClient.NetworkAttchDefClient = nadfake.NewSimpleClientset()
 		fakeClient.UserDefinedNetworkClient = udnfakeclient.NewSimpleClientset()
 
-		watcher, err = factory.NewNodeWatchFactory(fakeClient, []string{nodeName})
+		watcher, err = factory.NewNodeWatchFactory(fakeClient, nodeName)
 		Expect(err).NotTo(HaveOccurred())
 		err = watcher.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -551,7 +551,7 @@ var _ = Describe("masqueradeReconciler", func() {
 		rm = routemanager.NewController()
 		fakeClient := fake.NewSimpleClientset()
 		var err error
-		wf, err = factory.NewNodeWatchFactory(&util.OVNNodeClientset{KubeClient: fakeClient}, []string{"node1"})
+		wf, err = factory.NewNodeWatchFactory(&util.OVNNodeClientset{KubeClient: fakeClient}, "node1")
 		Expect(err).NotTo(HaveOccurred())
 	})
 

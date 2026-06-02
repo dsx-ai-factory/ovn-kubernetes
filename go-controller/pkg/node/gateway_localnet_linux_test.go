@@ -354,7 +354,7 @@ var _ = Describe("Node Operations", func() {
 
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -434,7 +434,7 @@ var _ = Describe("Node Operations", func() {
 
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -509,7 +509,7 @@ var _ = Describe("Node Operations", func() {
 
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service, &endpointSlice).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -598,7 +598,7 @@ var _ = Describe("Node Operations", func() {
 
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service, &endpointSlice).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -695,7 +695,7 @@ var _ = Describe("Node Operations", func() {
 
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service, &endpointSlice).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -793,7 +793,7 @@ var _ = Describe("Node Operations", func() {
 
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service, &endpointSlice).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -935,7 +935,7 @@ var _ = Describe("Node Operations", func() {
 
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service, &endpointSlice).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -1071,7 +1071,7 @@ var _ = Describe("Node Operations", func() {
 
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service, &endpointSlice).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{nodeName})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -1193,7 +1193,7 @@ var _ = Describe("Node Operations", func() {
 
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service, &endpointSlice).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -1305,7 +1305,7 @@ var _ = Describe("Node Operations", func() {
 
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service, &endpointSlice).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -1452,7 +1452,7 @@ var _ = Describe("Node Operations", func() {
 
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service, &endpointSlice).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{nodeName})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -1587,7 +1587,7 @@ var _ = Describe("Node Operations", func() {
 
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service, &endpointSlice).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -1686,7 +1686,7 @@ var _ = Describe("Node Operations", func() {
 
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -1780,7 +1780,7 @@ var _ = Describe("Node Operations", func() {
 
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -1868,7 +1868,7 @@ var _ = Describe("Node Operations", func() {
 
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -1959,7 +1959,7 @@ var _ = Describe("Node Operations", func() {
 
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -2035,7 +2035,7 @@ var _ = Describe("Node Operations", func() {
 
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -2109,7 +2109,7 @@ var _ = Describe("Node Operations", func() {
 
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -2160,7 +2160,7 @@ var _ = Describe("Node Operations", func() {
 
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -2231,7 +2231,7 @@ var _ = Describe("Node Operations", func() {
 
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -2300,7 +2300,7 @@ var _ = Describe("Node Operations", func() {
 
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -2374,7 +2374,7 @@ var _ = Describe("Node Operations", func() {
 
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -2521,7 +2521,7 @@ var _ = Describe("Node Operations", func() {
 
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service, &endpointSlice).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -2614,7 +2614,7 @@ var _ = Describe("Node Operations", func() {
 				wg := &sync.WaitGroup{}
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset().GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -2725,7 +2725,7 @@ var _ = Describe("Node Operations", func() {
 
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -2860,7 +2860,7 @@ var _ = Describe("Node Operations", func() {
 				wg := &sync.WaitGroup{}
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service, &endpointSlice).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -3002,7 +3002,7 @@ var _ = Describe("Node Operations", func() {
 				wg := &sync.WaitGroup{}
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service, &endpointSlice).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -3151,7 +3151,7 @@ var _ = Describe("Node Operations", func() {
 
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service, &endpointSlice).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -3296,7 +3296,7 @@ var _ = Describe("Node Operations", func() {
 
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service, &endpointSlice).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -3444,7 +3444,7 @@ var _ = Describe("Node Operations", func() {
 
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset(&service, &endpointSlice).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -3561,7 +3561,7 @@ var _ = Describe("Node Operations", func() {
 
 				stopChan := make(chan struct{})
 				fakeClient := util.GetOVNClientset().GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {

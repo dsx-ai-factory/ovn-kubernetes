@@ -771,7 +771,7 @@ func configureKubeOVNContext(nodeName string, useNetlink bool) *testCtx {
 	fakeClientset := &util.OVNNodeClientset{
 		KubeClient: tc.fakeClient,
 	}
-	tc.watchFactory, err = factory.NewNodeWatchFactory(fakeClientset, []string{nodeName})
+	tc.watchFactory, err = factory.NewNodeWatchFactory(fakeClientset, nodeName)
 	Expect(err).NotTo(HaveOccurred())
 	err = tc.watchFactory.Start()
 	Expect(err).NotTo(HaveOccurred())

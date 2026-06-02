@@ -818,7 +818,7 @@ var _ = Describe("EVPN node controller", func() {
 				UserDefinedNetworkClient:  udnfake.NewClientset(),
 				RouteAdvertisementsClient: routeadvertisementsfake.NewClientset(),
 				VTEPClient:                vtepClient,
-			}, []string{nodeName})
+			}, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(wf.Start()).To(Succeed())
 

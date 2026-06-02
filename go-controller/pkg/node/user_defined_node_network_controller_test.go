@@ -368,7 +368,7 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 			"k8s.ovn.org/node-primary-ifaddr": "{\"ipv4\":\"192.168.1.10/24\",\"ipv6\":\"fc00:f853:ccd:e793::3/64\"}",
 		}).Return(nil)
 
-		wf, err := factory.NewNodeWatchFactory(fakeClient, []string{nodeName})
+		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 		Expect(err).NotTo(HaveOccurred())
 		wg := &sync.WaitGroup{}
 		defer func() {

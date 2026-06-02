@@ -309,8 +309,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		}
 
 		stop := make(chan struct{})
-		nodeNames := []string{nodeName}
-		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeNames)
+		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 		Expect(err).NotTo(HaveOccurred())
 		wg := &sync.WaitGroup{}
 		defer func() {
@@ -776,8 +775,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		}
 
 		stop := make(chan struct{})
-		nodeNames := []string{nodeName}
-		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeNames)
+		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 		Expect(err).NotTo(HaveOccurred())
 		wg := &sync.WaitGroup{}
 		defer func() {
@@ -941,8 +939,7 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		}
 
 		stop := make(chan struct{})
-		nodeNames := []string{nodeName}
-		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeNames)
+		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 		Expect(err).NotTo(HaveOccurred())
 		wg := &sync.WaitGroup{}
 		defer func() {
@@ -1314,8 +1311,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		}
 
 		stop := make(chan struct{})
-		nodeNames := []string{nodeName}
-		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeNames)
+		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 		Expect(err).NotTo(HaveOccurred())
 		wg := &sync.WaitGroup{}
 		defer func() {

@@ -395,7 +395,6 @@ var _ = Describe("Watch Factory Operations", func() {
 		networkQoSes                        []*networkqos.NetworkQoS
 		err                                 error
 		shutdown                            bool
-		nodeNames                           []string
 	)
 
 	const (
@@ -404,7 +403,6 @@ var _ = Describe("Watch Factory Operations", func() {
 
 	BeforeEach(func() {
 
-		nodeNames = []string{nodeName}
 		// Restore global default values before each testcase
 		Expect(config.PrepareTestConfig()).To(Succeed())
 		config.OVNKubernetesFeature.EnableEgressIP = true
@@ -602,7 +600,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	Context("when a processExisting is given", func() {
 		testExisting := func(objType reflect.Type, namespace string, sel labels.Selector, priority int) {
 			if objType == EndpointSliceType {
-				wf, err = NewNodeWatchFactory(ovnNodeClientset, nodeNames)
+				wf, err = NewNodeWatchFactory(ovnNodeClientset, nodeName)
 			} else if objType == CloudPrivateIPConfigType || objType == IPAMClaimsType {
 				wf, err = NewClusterManagerWatchFactory(ovnCMClientset)
 			} else {
@@ -626,7 +624,7 @@ var _ = Describe("Watch Factory Operations", func() {
 
 		testExistingFilteredHandler := func(objType reflect.Type, realObj reflect.Type, namespace string, sel labels.Selector, priority int) {
 			if objType == EndpointSliceType {
-				wf, err = NewNodeWatchFactory(ovnNodeClientset, nodeNames)
+				wf, err = NewNodeWatchFactory(ovnNodeClientset, nodeName)
 			} else if objType == CloudPrivateIPConfigType || objType == IPAMClaimsType {
 				wf, err = NewClusterManagerWatchFactory(ovnCMClientset)
 			} else {
@@ -756,7 +754,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	Context("when existing items are known to the informer", func() {
 		testExisting := func(objType reflect.Type) {
 			if objType == EndpointSliceType {
-				wf, err = NewNodeWatchFactory(ovnNodeClientset, nodeNames)
+				wf, err = NewNodeWatchFactory(ovnNodeClientset, nodeName)
 			} else if objType == CloudPrivateIPConfigType {
 				wf, err = NewClusterManagerWatchFactory(ovnCMClientset)
 			} else {
@@ -1688,7 +1686,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to endpointslices add/update/delete events", func() {
-		wf, err = NewNodeWatchFactory(ovnNodeClientset, nodeNames)
+		wf, err = NewNodeWatchFactory(ovnNodeClientset, nodeName)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())

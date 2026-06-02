@@ -187,7 +187,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			fakeNodeClient := &util.OVNNodeClientset{
 				KubeClient: fakeClient,
 			}
-			watchFactory, err := factory.NewNodeWatchFactory(fakeNodeClient, []string{node.Name})
+			watchFactory, err := factory.NewNodeWatchFactory(fakeNodeClient, node.Name)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(watchFactory.Start()).To(Succeed())
 
@@ -238,7 +238,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			fakeNodeClient := &util.OVNNodeClientset{
 				KubeClient: fakeClient,
 			}
-			watchFactory, err := factory.NewNodeWatchFactory(fakeNodeClient, []string{node.Name})
+			watchFactory, err := factory.NewNodeWatchFactory(fakeNodeClient, node.Name)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(watchFactory.Start()).To(Succeed())
 
