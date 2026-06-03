@@ -131,6 +131,11 @@ var _ = Describe("Topology factory", func() {
 				"always_learn_from_arp_request": "false",
 				"ct-commit-all":                 "true",
 			}
+			macBindingAgeThreshold := "0"
+			for _, ipnet := range netInfo.Subnets() {
+				macBindingAgeThreshold += ";" + ipnet.CIDR.String() + ":" + strconv.Itoa(config.Default.ClusterSubnetsMacBindingAging)
+			}
+			expectedOptions["mac_binding_age_threshold"] = macBindingAgeThreshold
 			Expect(clusterRouter).To(
 				WithTransform(
 					removeUUID,
@@ -185,6 +190,11 @@ var _ = Describe("Topology factory", func() {
 				"k8s-cluster-router":        "yes",
 			}
 			expectedOptions := map[string]string{"always_learn_from_arp_request": "false"}
+			macBindingAgeThreshold := "0"
+			for _, ipnet := range netInfo.Subnets() {
+				macBindingAgeThreshold += ";" + ipnet.CIDR.String() + ":" + strconv.Itoa(config.Default.ClusterSubnetsMacBindingAging)
+			}
+			expectedOptions["mac_binding_age_threshold"] = macBindingAgeThreshold
 			Expect(clusterRouter).To(
 				WithTransform(
 					removeUUID,
@@ -206,6 +216,11 @@ var _ = Describe("Topology factory", func() {
 			Expect(err).NotTo(HaveOccurred())
 			expectedExternalIDs := map[string]string{"k8s-cluster-router": "yes"}
 			expectedOptions := map[string]string{"always_learn_from_arp_request": "false"}
+			macBindingAgeThreshold := "0"
+			for _, ipnet := range defaultNetInfo.Subnets() {
+				macBindingAgeThreshold += ";" + ipnet.CIDR.String() + ":" + strconv.Itoa(config.Default.ClusterSubnetsMacBindingAging)
+			}
+			expectedOptions["mac_binding_age_threshold"] = macBindingAgeThreshold
 			Expect(clusterRouter).To(
 				WithTransform(
 					removeUUID,
