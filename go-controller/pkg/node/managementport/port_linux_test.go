@@ -288,7 +288,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 		EIPClient: egressipv1fake.NewSimpleClientset(), EgressFirewallClient: &egressfirewallfake.Clientset{},
 		EgressServiceClient: &egressservicefake.Clientset{}, NetworkQoSClient: &networkqosfake.Clientset{}}
 	nodeAnnotator := kube.NewNodeAnnotator(kubeInterface, existingNode.Name)
-	watchFactory, err := factory.NewNodeWatchFactory(fakeNodeClient, []string{nodeName})
+	watchFactory, err := factory.NewNodeWatchFactory(fakeNodeClient, nodeName)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(watchFactory.Start()).To(Succeed())
 	wg := &sync.WaitGroup{}
@@ -392,7 +392,7 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 
 	kubeInterface := &kube.KubeOVN{Kube: kube.Kube{KClient: fakeClient}, ANPClient: anpfake.NewSimpleClientset(), EIPClient: egressipv1fake.NewSimpleClientset(), EgressFirewallClient: &egressfirewallfake.Clientset{}, EgressServiceClient: &egressservicefake.Clientset{}, NetworkQoSClient: &networkqosfake.Clientset{}}
 	nodeAnnotator := kube.NewNodeAnnotator(kubeInterface, existingNode.Name)
-	watchFactory, err := factory.NewNodeWatchFactory(fakeNodeClient, []string{nodeName})
+	watchFactory, err := factory.NewNodeWatchFactory(fakeNodeClient, nodeName)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(watchFactory.Start()).To(Succeed())
 	wg := &sync.WaitGroup{}

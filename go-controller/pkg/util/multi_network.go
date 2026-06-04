@@ -782,8 +782,9 @@ type userDefinedNetInfo struct {
 	defaultGatewayIPs   []net.IP
 	managementIPs       []net.IP
 
-	transport string
-	evpn      *ovncnitypes.EVPNConfig
+	transport    string
+	evpn         *ovncnitypes.EVPNConfig
+	outboundSNAT string
 }
 
 func (nInfo *userDefinedNetInfo) GetNetInfo() NetInfo {
@@ -925,8 +926,7 @@ func (nInfo *userDefinedNetInfo) Transport() string {
 
 // OutboundSNAT() string returns the outbound SNAT configuration for this network when using no-overlay transport.
 func (nInfo *userDefinedNetInfo) OutboundSNAT() string {
-	// TODO: implement per-network no-overlay outbound SNAT configuration
-	return ""
+	return nInfo.outboundSNAT
 }
 
 // EVPNVTEPName returns the name of the VTEP CR for EVPN
@@ -1151,6 +1151,9 @@ func (nInfo *userDefinedNetInfo) canReconcile(other NetInfo) bool {
 	if nInfo.EVPNIPVRFRouteTarget() != other.EVPNIPVRFRouteTarget() {
 		return false
 	}
+	if nInfo.OutboundSNAT() != other.OutboundSNAT() {
+		return false
+	}
 
 	lessCIDRNetworkEntry := func(a, b config.CIDRNetworkEntry) bool { return a.String() < b.String() }
 	if !cmp.Equal(nInfo.Subnets(), other.Subnets(), cmpopts.SortSlices(lessCIDRNetworkEntry)) {
@@ -1206,6 +1209,7 @@ func (nInfo *userDefinedNetInfo) copy() *userDefinedNetInfo {
 		connectToNAD:          nInfo.connectToNAD,
 		transport:             nInfo.transport,
 		evpn:                  nInfo.evpn,
+		outboundSNAT:          nInfo.outboundSNAT,
 	}
 	// copy mutables
 	c.mutableNetInfo.copyFrom(&nInfo.mutableNetInfo)
@@ -1230,6 +1234,7 @@ func newLayer3NetConfInfo(netconf *ovncnitypes.NetConf, annotations map[string]s
 		mtu:            netconf.MTU,
 		transport:      netconf.Transport,
 		evpn:           netconf.EVPN,
+		outboundSNAT:   netconf.OutboundSNAT,
 		mutableNetInfo: mutableNetInfo{
 			id:      types.InvalidID,
 			nads:    sets.Set[string]{},
@@ -1676,6 +1681,18 @@ func ValidateNetConf(nadName string, netconf *ovncnitypes.NetConf) error {
 			types.NetworkTransportNoOverlay,
 			types.NetworkTransportEVPN,
 		})
+	}
+	if netconf.OutboundSNAT != "" {
+		if netconf.Transport != types.NetworkTransportNoOverlay {
+			return fmt.Errorf("outboundSNAT is only valid when transport is %q", types.NetworkTransportNoOverlay)
+		}
+		if netconf.OutboundSNAT != types.NoOverlaySNATEnabled &&
+			netconf.OutboundSNAT != types.NoOverlaySNATDisabled {
+			return fmt.Errorf("invalid outboundSNAT %q: must be one of %q", netconf.OutboundSNAT, []string{
+				types.NoOverlaySNATEnabled,
+				types.NoOverlaySNATDisabled,
+			})
+		}
 	}
 
 	if netconf.JoinSubnet != "" && netconf.Topology == types.LocalnetTopology {

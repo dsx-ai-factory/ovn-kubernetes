@@ -65,7 +65,7 @@ func setupInitTestEnv(
 	fakeClient := fake.NewSimpleClientset(
 		&corev1.NodeList{Items: []corev1.Node{*node}})
 	fakeNodeClient := &util.OVNNodeClientset{KubeClient: fakeClient}
-	wf, err := factory.NewNodeWatchFactory(fakeNodeClient, []string{testNodeName})
+	wf, err := factory.NewNodeWatchFactory(fakeNodeClient, testNodeName)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(wf.Start()).To(Succeed())
 

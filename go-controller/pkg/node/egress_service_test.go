@@ -292,7 +292,7 @@ var _ = Describe("Egress Service Operations", func() {
 				stopChan := make(chan struct{})
 				wg := &sync.WaitGroup{}
 				fakeClient := util.GetOVNClientset(objects...).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -398,7 +398,7 @@ add element inet ovn-kubernetes egress-service-snat-v4 { 10.128.0.4 comment "nam
 				stopChan := make(chan struct{})
 				wg := &sync.WaitGroup{}
 				fakeClient := util.GetOVNClientset(objects...).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -603,7 +603,7 @@ add element inet ovn-kubernetes egress-service-snat-v4 { 10.128.0.3 comment "nam
 				stopChan := make(chan struct{})
 				wg := &sync.WaitGroup{}
 				fakeClient := util.GetOVNClientset(objects...).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -798,7 +798,7 @@ add element inet ovn-kubernetes egress-service-snat-v4 { 10.128.0.11 comment "na
 				stopChan := make(chan struct{})
 				wg := &sync.WaitGroup{}
 				fakeClient := util.GetOVNClientset(objects...).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {
@@ -957,7 +957,7 @@ add element inet ovn-kubernetes egress-service-snat-v4 { 10.128.0.11 comment "na
 				stopChan := make(chan struct{})
 				wg := &sync.WaitGroup{}
 				fakeClient := util.GetOVNClientset(objects...).GetNodeClientset()
-				wf, err := factory.NewNodeWatchFactory(fakeClient, []string{"node"})
+				wf, err := factory.NewNodeWatchFactory(fakeClient, "node")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(wf.Start()).To(Succeed())
 				defer func() {

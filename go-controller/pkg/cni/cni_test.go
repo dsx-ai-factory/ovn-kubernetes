@@ -165,7 +165,7 @@ var _ = Describe("Network Segmentation", func() {
 	startCNIServer := func(objects ...runtime.Object) {
 		fakeClient := util.GetOVNClientset(objects...).GetNodeClientset()
 		var err error
-		wf, err = factory.NewNodeWatchFactory(fakeClient, []string{nodeName})
+		wf, err = factory.NewNodeWatchFactory(fakeClient, nodeName)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(wf.Start()).To(Succeed())
 

@@ -43,6 +43,7 @@ import (
 	knet "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
@@ -859,7 +860,7 @@ func (wf *WatchFactory) Stop() {
 // TODO(jtanenba) originally the pod selector was only supposed to select pods local to the node
 // commit 91046e889... changed that and pod selector selects all pods in the cluster fix the naming
 // of the localPodSelector or figure out how to deal with selecting all pods everywhere.
-func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeNames []string) (*WatchFactory, error) {
+func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (*WatchFactory, error) {
 	wf := &WatchFactory{
 		handlerCounter:       &handlerCounter{},
 		iFactory:             informerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.KubeClient, resyncInterval, informerfactory.WithTransform(informerObjectTrim)),
@@ -886,9 +887,9 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeNames []string
 		return nil, err
 	}
 
+	var err error
 	// EgressIP support needs to watch for Pods that not scheduled on the specific node ovnkube-node is running on.
 	if config.OvnKubeNode.Mode != types.NodeModeDPU && config.OVNKubernetesFeature.EnableEgressIP {
-		var err error
 		wf.informers[PodType], err = newQueuedInformer(PodType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
 			defaultNumEventQueues, 10, 30, 50)
 		if err != nil {
@@ -914,13 +915,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeNames []string
 			noAlternateProxySelector())
 	})
 
-	// For Pods, only select pods scheduled to these nodes
-	req, err := labels.NewRequirement(util.OvnPodNodeNameLabel, selection.In, nodeNames)
-	if err != nil {
-		return nil, fmt.Errorf("error composing label filter %s to select pods on nodes \"%v\":%v", util.OvnPodNodeNameLabel, nodeNames, err)
-	}
-	selector := labels.NewSelector()
-	selector = selector.Add(*req)
+	// For Pods, only select pods scheduled to this node
 	wf.iFactory.InformerFor(&corev1.Pod{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
 		return v1coreinformers.NewFilteredPodInformer(
 			c,
@@ -928,24 +923,9 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeNames []string
 			resyncPeriod,
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 			func(opts *metav1.ListOptions) {
-				opts.LabelSelector = selector.String()
+				opts.FieldSelector = fields.OneTermEqualSelector("spec.nodeName", nodeName).String()
 			})
 	})
-
-	// TBD-merge
-	//// only the given node is needed if HybridOverlay is not enabled (required by addressManager, addMasqueradeRoute and checking
-	//// NorthdNodeSelectorLabel in order to collect northd metrics)
-	//if !config.HybridOverlay.Enabled {
-	//	wf.iFactory.InformerFor(&corev1.Node{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-	//		return v1coreinformers.NewFilteredNodeInformer(
-	//			c,
-	//			resyncPeriod,
-	//			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
-	//			func(opts *metav1.ListOptions) {
-	//				opts.LabelSelector = fmt.Sprintf("kubernetes.io/hostname=%s", nodeNames[0])
-	//			})
-	//	})
-	//}
 
 	// For namespaces
 	wf.iFactory.InformerFor(&corev1.Namespace{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {

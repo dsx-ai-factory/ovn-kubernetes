@@ -280,7 +280,7 @@ add rule inet ovn-kubernetes udn-isolation ip6 daddr @udn-pod-default-ips-v6 dro
 	start := func(objects ...runtime.Object) {
 		fakeClient = util.GetOVNClientset(objects...).GetNodeClientset()
 		var err error
-		wf, err = factory.NewNodeWatchFactory(fakeClient, []string{"node1"})
+		wf, err = factory.NewNodeWatchFactory(fakeClient, "node1")
 		Expect(err).NotTo(HaveOccurred())
 
 		manager = NewUDNHostIsolationManager(true, true, wf.PodCoreInformer(), "node1", nil)
@@ -324,9 +324,6 @@ add rule inet ovn-kubernetes udn-isolation ip6 daddr @udn-pod-default-ips-v6 dro
 				Name:      "hostnet",
 				UID:       ktypes.UID("hostnet"),
 				Namespace: defaultNamespace,
-				Labels: map[string]string{
-					"k8s.ovn.org/nodeName": "node1",
-				},
 			},
 		}
 		hostNetPod.Spec.HostNetwork = true
@@ -335,15 +332,12 @@ add rule inet ovn-kubernetes udn-isolation ip6 daddr @udn-pod-default-ips-v6 dro
 				Name:      "notready",
 				UID:       ktypes.UID("notready"),
 				Namespace: defaultNamespace,
-				Labels: map[string]string{
-					"k8s.ovn.org/nodeName": "node1",
-				},
 			},
 		}
 
 		fakeClient = util.GetOVNClientset(hostNetPod, notReadyPod).GetNodeClientset()
 		var err error
-		wf, err = factory.NewNodeWatchFactory(fakeClient, []string{"node1"})
+		wf, err = factory.NewNodeWatchFactory(fakeClient, "node1")
 		Expect(err).NotTo(HaveOccurred())
 		manager = NewUDNHostIsolationManager(true, true, wf.PodCoreInformer(), "node1", nil)
 		nft = nodenft.SetFakeNFTablesHelper()
@@ -365,14 +359,11 @@ add rule inet ovn-kubernetes udn-isolation ip6 daddr @udn-pod-default-ips-v6 dro
 				Name:      "notready",
 				UID:       ktypes.UID("notready"),
 				Namespace: defaultNamespace,
-				Labels: map[string]string{
-					"k8s.ovn.org/nodeName": "node1",
-				},
 			},
 		}
 		fakeClient = util.GetOVNClientset(notReadyPod).GetNodeClientset()
 		var err error
-		wf, err = factory.NewNodeWatchFactory(fakeClient, []string{"node1"})
+		wf, err = factory.NewNodeWatchFactory(fakeClient, "node1")
 		Expect(err).NotTo(HaveOccurred())
 		manager = NewUDNHostIsolationManager(true, true, wf.PodCoreInformer(), "node1", nil)
 		Expect(wf.Start()).To(Succeed())
@@ -569,9 +560,6 @@ func newPodWithIPs(namespace, name string, primaryUDN bool, ips []string, openPo
 			UID:         ktypes.UID(name),
 			Namespace:   namespace,
 			Annotations: annotations,
-			Labels: map[string]string{
-				"k8s.ovn.org/nodeName": "node1",
-			},
 		},
 	}
 }

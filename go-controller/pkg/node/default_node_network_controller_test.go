@@ -926,7 +926,7 @@ var _ = Describe("Node", func() {
 					}
 
 					stop := make(chan struct{})
-					wf, err := factory.NewNodeWatchFactory(fakeClient, []string{nodeName})
+					wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 					Expect(err).NotTo(HaveOccurred())
 					wg := &sync.WaitGroup{}
 					defer func() {
@@ -1037,7 +1037,7 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.254.61 }
 					}
 
 					stop := make(chan struct{})
-					wf, err := factory.NewNodeWatchFactory(fakeClient, []string{nodeName})
+					wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 					Expect(err).NotTo(HaveOccurred())
 					wg := &sync.WaitGroup{}
 					defer func() {
@@ -1192,7 +1192,7 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.253.61 }
 								}
 
 								stop := make(chan struct{})
-								wf, err := factory.NewNodeWatchFactory(fakeClient, []string{nodeName})
+								wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 								Expect(err).NotTo(HaveOccurred())
 								wg := &sync.WaitGroup{}
 								defer func() {
@@ -1302,7 +1302,7 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.253.61 }
 								}
 
 								stop := make(chan struct{})
-								wf, err := factory.NewNodeWatchFactory(fakeClient, []string{nodeName})
+								wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 								Expect(err).NotTo(HaveOccurred())
 								wg := &sync.WaitGroup{}
 								defer func() {
@@ -1464,7 +1464,7 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.253.61 }
 					}
 
 					stop := make(chan struct{})
-					wf, err := factory.NewNodeWatchFactory(fakeClient, []string{nodeName})
+					wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 					Expect(err).NotTo(HaveOccurred())
 					wg := &sync.WaitGroup{}
 					defer func() {
@@ -1586,7 +1586,7 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.253.61 }
 					}
 
 					stop := make(chan struct{})
-					wf, err := factory.NewNodeWatchFactory(fakeClient, []string{nodeName})
+					wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 					Expect(err).NotTo(HaveOccurred())
 					wg := &sync.WaitGroup{}
 					defer func() {
@@ -2036,7 +2036,7 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.253.61 }
 
 				wf, err := factory.NewNodeWatchFactory(&util.OVNNodeClientset{
 					KubeClient: fakeClient,
-				}, []string{"test-node"})
+				}, "test-node")
 				Expect(err).NotTo(HaveOccurred())
 				defer wf.Shutdown()
 
@@ -2337,7 +2337,7 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.253.61 }
 
 			nft := nodenft.SetFakeNFTablesHelper()
 			ovnClient := util.GetOVNClientset()
-			wf, err := factory.NewNodeWatchFactory(ovnClient.GetNodeClientset(), []string{nodeName})
+			wf, err := factory.NewNodeWatchFactory(ovnClient.GetNodeClientset(), nodeName)
 			Expect(err).NotTo(HaveOccurred())
 			defer wf.Shutdown()
 

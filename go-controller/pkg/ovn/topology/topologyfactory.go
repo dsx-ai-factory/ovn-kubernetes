@@ -86,6 +86,14 @@ func (gtf *GatewayTopologyFactory) newClusterRouter(
 		Options: routerOptions,
 		Copp:    &coopUUID,
 	}
+	if netInfo.IsUserDefinedNetwork() &&
+		config.Gateway.Mode == config.GatewayModeLocal &&
+		clusterRouterName == netInfo.GetNetworkScopedClusterRouterName() {
+		// The LGW UDN cluster router owns the conditional UDN subnet SNAT. Commit
+		// all traffic in that router's CT zone so replies do not enter the SNAT
+		// zone as new flows and hit that SNAT before service reverse NAT.
+		logicalRouter.Options["ct-commit-all"] = "true"
+	}
 	if netInfo.IsUserDefinedNetwork() {
 		logicalRouter.ExternalIDs[types.NetworkExternalID] = netInfo.GetNetworkName()
 		logicalRouter.ExternalIDs[types.TopologyExternalID] = netInfo.TopologyType()

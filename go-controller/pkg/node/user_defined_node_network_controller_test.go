@@ -368,7 +368,7 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 			"k8s.ovn.org/node-primary-ifaddr": "{\"ipv4\":\"192.168.1.10/24\",\"ipv6\":\"fc00:f853:ccd:e793::3/64\"}",
 		}).Return(nil)
 
-		wf, err := factory.NewNodeWatchFactory(fakeClient, []string{nodeName})
+		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 		Expect(err).NotTo(HaveOccurred())
 		wg := &sync.WaitGroup{}
 		defer func() {
@@ -497,7 +497,24 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 					udnRules = append(udnRules, rule)
 				}
 			}
-			Expect(udnRules).To(HaveLen(3))
+			Expect(udnRules).To(HaveLen(4))
+			var v4PacketMarkRule, v6PacketMarkRule, v4MasqIPRule, v6MasqIPRule bool
+			for _, rule := range udnRules {
+				switch {
+				case rule.Family == netlink.FAMILY_V4 && rule.Mark != 0:
+					v4PacketMarkRule = true
+				case rule.Family == netlink.FAMILY_V6 && rule.Mark != 0:
+					v6PacketMarkRule = true
+				case rule.Family == netlink.FAMILY_V4 && rule.Dst != nil:
+					v4MasqIPRule = true
+				case rule.Family == netlink.FAMILY_V6 && rule.Dst != nil:
+					v6MasqIPRule = true
+				}
+			}
+			Expect(v4PacketMarkRule).To(BeTrue())
+			Expect(v6PacketMarkRule).To(BeTrue())
+			Expect(v4MasqIPRule).To(BeTrue())
+			Expect(v6MasqIPRule).To(BeTrue())
 
 			By("delete the network and ensure its associated VRF device is also deleted")
 			cnode := node.DeepCopy()

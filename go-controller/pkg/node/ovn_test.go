@@ -89,8 +89,7 @@ func (o *FakeOVNNode) init(ctx context.Context) {
 	o.stopChan = make(chan struct{})
 	o.wg = &sync.WaitGroup{}
 
-	fakeNodeNames := []string{fakeNodeName}
-	o.watcher, err = factory.NewNodeWatchFactory(o.fakeClient, fakeNodeNames)
+	o.watcher, err = factory.NewNodeWatchFactory(o.fakeClient, fakeNodeName)
 	Expect(err).NotTo(HaveOccurred())
 
 	cnnci := NewCommonNodeNetworkControllerInfo(o.fakeClient, o.watcher, o.recorder,

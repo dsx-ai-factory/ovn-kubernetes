@@ -446,23 +446,17 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 	if runMode.cleanupNode {
 		return ovnnode.CleanupClusterNode(runMode.identity)
 	}
-
-	nodeNames := []string{}
 	dpuName := ""
-	if runMode.node {
-		nodeNames = append(nodeNames, runMode.identity)
-		if config.OvnKubeNode.Mode == types.NodeModeDPU {
-			stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
-				"external_ids:hostname")
-			if err != nil || stdout == "" {
-				return fmt.Errorf("dpu node name not found in external_ids: %v (%q)", err, stderr)
-			}
-			dpuName = strings.Split(stdout, "\n")[0]
-			klog.Infof("Initializing K8s DPU node: %v", dpuName)
-			nodeNames = append(nodeNames, dpuName)
+	if runMode.node && config.OvnKubeNode.Mode == types.NodeModeDPU {
+		stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".", "external_ids:hostname")
+		if err != nil || stdout == "" {
+			return fmt.Errorf("dpu node name not found in external_ids: %v (%q)", err, stderr)
 		}
+		dpuName = strings.Split(stdout, "\n")[0]
+		klog.Infof("Initializing K8s DPU node: %v", dpuName)
 	}
-	watchFactory, err := newWatchFactory(runMode, ovnClientset, nodeNames)
+
+	watchFactory, err := newWatchFactory(runMode, ovnClientset)
 	if err != nil {
 		return fmt.Errorf("failed to initialize watch factory: %w", err)
 	}
@@ -593,7 +587,6 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 				wg.Done()
 			}()
 
-			klog.Infof("Initializing K8s nodes: %v", nodeNames)
 			if config.Kubernetes.Token == "" {
 				nodeErr = fmt.Errorf("cannot initialize node without service account 'token'. Please provide one with --k8s-token argument")
 				return
@@ -690,14 +683,14 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 
 // newWatchFactory returns the proper watch factory to use depending on the run
 // mode
-func newWatchFactory(runMode *ovnkubeRunMode, ovnClientset *util.OVNClientset, nodeNames []string) (watchFactory *factory.WatchFactory, err error) {
+func newWatchFactory(runMode *ovnkubeRunMode, ovnClientset *util.OVNClientset) (watchFactory *factory.WatchFactory, err error) {
 	switch {
 	case runMode.clusterManager:
 		watchFactory, err = factory.NewClusterManagerWatchFactory(ovnClientset.GetClusterManagerClientset())
 	case runMode.ovnkubeController:
 		watchFactory, err = factory.NewOVNKubeControllerWatchFactory(ovnClientset.GetOVNKubeControllerClientset())
 	case runMode.node:
-		watchFactory, err = factory.NewNodeWatchFactory(ovnClientset.GetNodeClientset(), nodeNames)
+		watchFactory, err = factory.NewNodeWatchFactory(ovnClientset.GetNodeClientset(), runMode.identity)
 	default:
 		err = fmt.Errorf("unsupported ovnkube run mode: %+v", runMode)
 	}

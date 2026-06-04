@@ -428,7 +428,7 @@ func initBridgeEIPAddrManagerWithHostCIDRs(nodeName, bridgeName string, bridgeEI
 		node.Annotations[util.OVNNodeHostCIDRs] = string(cidrsJSON)
 	}
 	client := fake.NewSimpleClientset(node)
-	watchFactory, err := factory.NewNodeWatchFactory(&util.OVNNodeClientset{KubeClient: client}, []string{nodeName})
+	watchFactory, err := factory.NewNodeWatchFactory(&util.OVNNodeClientset{KubeClient: client}, nodeName)
 	gomega.Expect(watchFactory.Start()).Should(gomega.Succeed(), "watch factory should start")
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "watch factory creation must succeed")
 	linkManager := linkmanager.NewController(nodeName, true, true, nil)
