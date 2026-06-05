@@ -203,6 +203,7 @@ const (
 	OvnK8sSmallMTUTaintKey    = OvnK8sPrefix + "/" + "mtu-too-small"
 	OvnRouteAdvertisementsKey = OvnK8sPrefix + "/route-advertisements"
 	OvnK8sConnectToNad        = OvnK8sPrefix + "/" + "connect-to-nad"
+	OvnDPUHostNodeLabel       = OvnK8sPrefix + "/dpu-host"
 
 	// name of the configmap used to synchronize status (e.g. watch for topology changes)
 	OvnK8sStatusCMName         = "control-plane-status"
