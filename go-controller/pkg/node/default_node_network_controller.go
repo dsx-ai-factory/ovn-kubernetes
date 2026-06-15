@@ -963,7 +963,11 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 		if !ok {
 			return fmt.Errorf("cannot get kubeOVNClient for starting CNI server")
 		}
-		cniServer, err = cni.NewCNIServer(nc.watchFactory, kube.KClient, nc.networkManager, nc.ovsClient, nc.dpuNodeLeaseManager)
+		var dpuHealth cni.DPUStatusProvider
+		if nc.dpuNodeLeaseManager != nil {
+			dpuHealth = nc.dpuNodeLeaseManager
+		}
+		cniServer, err = cni.NewCNIServer(nc.watchFactory, kube.KClient, nc.networkManager, nc.ovsClient, dpuHealth)
 		if err != nil {
 			return err
 		}
