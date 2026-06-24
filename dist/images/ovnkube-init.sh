@@ -112,12 +112,13 @@ echo "set external_ids:host-k8s-nodename to ${external_ids["host-k8s-nodename"]}
 
 # ovn-encap-ip
 OVN_VTEP_IFACE=${OVN_VTEP_IFACE:-br-dpu}
-encap_ip=$(ip -4 addr show dev $OVN_VTEP_IFACE | awk '/inet / {print $2}')
+encap_ip=$(ip -4 -o addr show dev $OVN_VTEP_IFACE scope global \
+  | awk '{print $4}' | grep -v '^169\.254\.' | head -n1)
 if [ -z "$encap_ip" ]; then
   echo "failed to get ovn-encap-ip from interface $OVN_VTEP_IFACE"
   exit 1
 fi
-external_ids["ovn-encap-ip"]=`echo $encap_ip | cut -d '/' -f 1`
+external_ids["ovn-encap-ip"]=${encap_ip%/*}
 echo "set external_ids:ovn-encap-ip to ${external_ids["ovn-encap-ip"]}"
 
 # ovn-gw-interface
@@ -133,10 +134,21 @@ if [ -z "$host_cidrs" ]; then
 fi
 host_cidrs=${host_cidrs//[\[\]\"]/}
 cidr=$(echo $host_cidrs | awk -F',' '{print $1}')
-# output is like: network=10.192.0.0/16 gateway=10.192.0.1
-output=`python3 -c "import ipaddress; net=ipaddress.ip_network(\"$cidr\", strict=False); print('network=%s\ngateway=%s'%(net, net.network_address + 1))"`
-network=$(echo "$output" | awk -F= '/^network=/ {print $2}')
-gateway=$(echo "$output" | awk -F= '/^gateway=/ {print $2}')
+suffix=${cidr##*/}
+if [ "$suffix" == "31" ]; then
+  # dpu-host is L3-routed with a /31: the host holds the odd (.1) address and the
+  # DPU holds the even (.0) address, which is our next hop. Since cidr comes from
+  # the host's k8s.ovn.org/host-cidrs annotation, net.network_address is the DPU.
+  # output is like: network=10.192.0.0/31 gateway=10.192.0.0
+  output=`python3 -c "import ipaddress; net=ipaddress.ip_network(\"$cidr\", strict=False); print('network=%s\ngateway=%s'%(net, net.network_address))"`
+  network=$(echo "$output" | awk -F= '/^network=/ {print $2}')
+  gateway=$(echo "$output" | awk -F= '/^gateway=/ {print $2}')
+else
+  # gateway is on the switch, output is like: network=10.192.0.0/16 gateway=10.192.0.1
+  output=`python3 -c "import ipaddress; net=ipaddress.ip_network(\"$cidr\", strict=False); print('network=%s\ngateway=%s'%(net, net.network_address + 1))"`
+  network=$(echo "$output" | awk -F= '/^network=/ {print $2}')
+  gateway=$(echo "$output" | awk -F= '/^gateway=/ {print $2}')
+fi
 if [ -z "$network" ] || [ -z "$gateway" ]; then
   echo "failed to get network and gateway from $cidr, exiting..."
   exit 1
@@ -153,9 +165,22 @@ if [ -n "$OVN_GW_VLANID" ]; then
   echo "set external_ids:ovn-gw-vlanid to ${external_ids["ovn-gw-vlanid"]}"
 fi
 
+ovn_datapath_type=${OVN_DATAPATH_TYPE:-""}
+if [ -n "$ovn_datapath_type" ]; then
+  external_ids["ovn-bridge-datapath-type"]="$ovn_datapath_type"
+  echo "set external_ids:ovn-bridge-datapath-type to ${external_ids["ovn-bridge-datapath-type"]}"
+fi
+
 echo "write external_ids to OVSDB..."
-args=$(for k in "${!external_ids[@]}"; do echo -n "$k=${external_ids[$k]} "; done)
-ovs-vsctl set Open_vSwitch . $args
+args=()
+for k in "${!external_ids[@]}"; do
+  args+=("external_ids:${k}=${external_ids[$k]}")
+done
+ovs-vsctl set Open_vSwitch . "${args[@]}"
+if [[ $? != 0 ]]; then
+  echo "failed to update Open_vSwitch, exiting..."
+  exit 1
+fi
 
 echo "OVS external_ids after update:"
 ovs-vsctl get Open_vSwitch . external_ids
