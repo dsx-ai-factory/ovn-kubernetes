@@ -67,12 +67,20 @@ if [ "$HOST_CGROUP_VERSION" = "1" ]; then
   skip "is isolated from the default network"
 fi
 
-# Revisit if and when routeAdvertisementsEnable, BGP, EVPN, and NoOverlay are
-# enabled in the downstream ovn-k helm chart.
-skip "BGP"
-skip_label "Feature:RouteAdvertisements"
-skip_label "Feature:EVPN"
-skip_label "Feature:NoOverlay"
+# BGP/route-advertisements, EVPN, and no-overlay tests are only meaningful when
+# the corresponding feature is enabled for this lane (downstream ovn-k helm chart
+# + kind-e2e env). Keep skipping them by default; un-skip per feature when the
+# lane explicitly enables it. 
+if [ "${ENABLE_ROUTE_ADVERTISEMENTS:-false}" != true ]; then
+  skip "BGP"
+  skip_label "Feature:RouteAdvertisements"
+fi
+if [ "${ENABLE_EVPN:-false}" != true ]; then
+  skip_label "Feature:EVPN"
+fi
+if [ "${ENABLE_NO_OVERLAY:-false}" != true ]; then
+  skip_label "Feature:NoOverlay"
+fi
 
 if [ "${KIND_INSTALL_METALLB:-false}" = "false" ]; then
   skip "EgressService|Egress Services|Load Balancer Service Tests with MetalLB"
