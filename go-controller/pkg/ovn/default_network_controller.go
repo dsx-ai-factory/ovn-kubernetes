@@ -94,6 +94,9 @@ type DefaultNetworkController struct {
 	// Cluster-wide router default Control Plane Protection (COPP) UUID
 	defaultCOPPUUID string
 
+	duplicateNoOverlayClusterSNATCleanupLock        sync.Mutex
+	duplicateNoOverlayClusterSNATCleanupDoneRouters map[string]struct{}
+
 	// Controller in charge of services
 	svcController *svccontroller.Controller
 

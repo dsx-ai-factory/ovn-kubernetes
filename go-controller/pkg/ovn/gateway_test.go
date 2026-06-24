@@ -2409,6 +2409,192 @@ func extractExternalIPs(l3GatewayConfig *util.L3GatewayConfig) []net.IP {
 	return externalIPs
 }
 
+var _ = ginkgo.Describe("No-overlay cluster SNAT cleanup", func() {
+	var fakeOvn *FakeOVN
+
+	ginkgo.BeforeEach(func() {
+		gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+		config.Gateway.Mode = config.GatewayModeShared
+		config.Gateway.EphemeralPortRange = config.DefaultEphemeralPortRange
+		fakeOvn = NewFakeOVN(false)
+	})
+
+	ginkgo.AfterEach(func() {
+		fakeOvn.shutdown()
+	})
+
+	ginkgo.It("removes duplicate cluster subnet SNATs with missing or stale exemptions", func() {
+		externalIP := net.ParseIP("172.18.0.5")
+		clusterSubnet := ovntest.MustParseIPNets("10.244.0.0/16")[0]
+		joinSubnet := ovntest.MustParseIPNets("100.64.0.2/32")[0]
+
+		plainSNAT := libovsdbops.BuildSNATWithExemptedExtIPs(&externalIP, clusterSubnet, "", nil, "", "")
+		plainSNAT.UUID = "plain-snat-UUID"
+		desiredSNAT := libovsdbops.BuildSNATWithExemptedExtIPs(&externalIP, clusterSubnet, "", nil, "", "desired-as-UUID")
+		desiredSNAT.UUID = "desired-snat-UUID"
+		staleSNAT := libovsdbops.BuildSNATWithExemptedExtIPs(&externalIP, clusterSubnet, "", nil, "", "stale-as-UUID")
+		staleSNAT.UUID = "stale-snat-UUID"
+		joinSNAT := libovsdbops.BuildSNAT(&externalIP, joinSubnet, "", nil)
+		joinSNAT.UUID = "join-snat-UUID"
+		desiredAddressSet := &nbdb.AddressSet{
+			UUID: "desired-as-UUID",
+			Name: "desired-as",
+		}
+		staleAddressSet := &nbdb.AddressSet{
+			UUID: "stale-as-UUID",
+			Name: "stale-as",
+		}
+
+		gwRouter := &nbdb.LogicalRouter{
+			UUID: "GR_" + nodeName + "-UUID",
+			Name: "GR_" + nodeName,
+			Nat:  []string{plainSNAT.UUID, desiredSNAT.UUID, staleSNAT.UUID, joinSNAT.UUID},
+		}
+		fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
+			NBData: []libovsdbtest.TestData{gwRouter, plainSNAT, desiredSNAT, staleSNAT, joinSNAT, desiredAddressSet, staleAddressSet},
+		})
+		desiredAddressSet, err := libovsdbops.GetAddressSet(fakeOvn.nbClient, &nbdb.AddressSet{Name: desiredAddressSet.Name})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		desiredSNAT.ExemptedExtIPs = &desiredAddressSet.UUID
+
+		gw := newGatewayManager(fakeOvn, nodeName)
+		err = gw.cleanupDuplicateNoOverlayClusterSNATs(gwRouter, []*nbdb.NAT{desiredSNAT})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		routerNATs, err := libovsdbops.GetRouterNATs(fakeOvn.nbClient, gwRouter)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		remainingClusterSNATs := []*nbdb.NAT{}
+		remainingJoinSNATs := []*nbdb.NAT{}
+		for _, nat := range routerNATs {
+			switch nat.LogicalIP {
+			case clusterSubnet.String():
+				remainingClusterSNATs = append(remainingClusterSNATs, nat)
+			case "100.64.0.2":
+				remainingJoinSNATs = append(remainingJoinSNATs, nat)
+			}
+		}
+		gomega.Expect(remainingClusterSNATs).To(gomega.HaveLen(1))
+		gomega.Expect(remainingClusterSNATs[0].ExemptedExtIPs).NotTo(gomega.BeNil())
+		gomega.Expect(*remainingClusterSNATs[0].ExemptedExtIPs).To(gomega.Equal(desiredAddressSet.UUID))
+		gomega.Expect(remainingJoinSNATs).To(gomega.HaveLen(1))
+
+		clusterSNATs, err := libovsdbops.FindNATsWithPredicate(fakeOvn.nbClient, func(nat *nbdb.NAT) bool {
+			return nat.Type == nbdb.NATTypeSNAT &&
+				nat.ExternalIP == externalIP.String() &&
+				nat.LogicalIP == clusterSubnet.String()
+		})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(clusterSNATs).To(gomega.HaveLen(1))
+	})
+
+	ginkgo.It("retries cleanup when duplicate SNATs are visible before the desired exemption", func() {
+		externalIP := net.ParseIP("172.18.0.5")
+		clusterSubnet := ovntest.MustParseIPNets("10.244.0.0/16")[0]
+
+		plainSNAT := libovsdbops.BuildSNATWithExemptedExtIPs(&externalIP, clusterSubnet, "", nil, "", "")
+		plainSNAT.UUID = "plain-snat-UUID"
+		staleSNAT := libovsdbops.BuildSNATWithExemptedExtIPs(&externalIP, clusterSubnet, "", nil, "", "stale-as-UUID")
+		staleSNAT.UUID = "stale-snat-UUID"
+		desiredSNAT := libovsdbops.BuildSNATWithExemptedExtIPs(&externalIP, clusterSubnet, "", nil, "", "desired-as-UUID")
+		desiredSNAT.UUID = "desired-snat-UUID"
+		desiredAddressSet := &nbdb.AddressSet{
+			UUID: "desired-as-UUID",
+			Name: "desired-as",
+		}
+		staleAddressSet := &nbdb.AddressSet{
+			UUID: "stale-as-UUID",
+			Name: "stale-as",
+		}
+
+		gwRouter := &nbdb.LogicalRouter{
+			UUID: "GR_" + nodeName + "-UUID",
+			Name: "GR_" + nodeName,
+			Nat:  []string{plainSNAT.UUID, staleSNAT.UUID},
+		}
+		fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
+			NBData: []libovsdbtest.TestData{gwRouter, plainSNAT, staleSNAT, desiredAddressSet, staleAddressSet},
+		})
+		desiredAddressSet, err := libovsdbops.GetAddressSet(fakeOvn.nbClient, &nbdb.AddressSet{Name: desiredAddressSet.Name})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		desiredSNAT.ExemptedExtIPs = &desiredAddressSet.UUID
+
+		gw := newGatewayManager(fakeOvn, nodeName)
+		err = fakeOvn.controller.cleanupDuplicateNoOverlayClusterSNATsOnce(gw, gwRouter, []*nbdb.NAT{desiredSNAT})
+		gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring("unable to find desired NAT with exempted_ext_ips")))
+
+		err = libovsdbops.CreateOrUpdateNATs(fakeOvn.nbClient, gwRouter, desiredSNAT)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		err = fakeOvn.controller.cleanupDuplicateNoOverlayClusterSNATsOnce(gw, gwRouter, []*nbdb.NAT{desiredSNAT})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		routerNATs, err := libovsdbops.GetRouterNATs(fakeOvn.nbClient, gwRouter)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		remainingClusterSNATs := []*nbdb.NAT{}
+		for _, nat := range routerNATs {
+			if nat.LogicalIP == clusterSubnet.String() {
+				remainingClusterSNATs = append(remainingClusterSNATs, nat)
+			}
+		}
+		gomega.Expect(remainingClusterSNATs).To(gomega.HaveLen(1))
+		gomega.Expect(remainingClusterSNATs[0].ExemptedExtIPs).NotTo(gomega.BeNil())
+		gomega.Expect(*remainingClusterSNATs[0].ExemptedExtIPs).To(gomega.Equal(desiredAddressSet.UUID))
+	})
+
+	ginkgo.It("tracks one-shot cleanup per gateway router", func() {
+		externalIP := net.ParseIP("172.18.0.5")
+		clusterSubnet := ovntest.MustParseIPNets("10.244.0.0/16")[0]
+		desiredAddressSet := &nbdb.AddressSet{
+			UUID: "desired-as-UUID",
+			Name: "desired-as",
+		}
+		testData := []libovsdbtest.TestData{desiredAddressSet}
+		gwRouters := []*nbdb.LogicalRouter{}
+		desiredSNATs := map[string]*nbdb.NAT{}
+
+		for _, nodeName := range []string{"test-node-a", "test-node-b"} {
+			plainSNAT := libovsdbops.BuildSNATWithExemptedExtIPs(&externalIP, clusterSubnet, "", nil, "", "")
+			plainSNAT.UUID = "plain-snat-" + nodeName + "-UUID"
+			desiredSNAT := libovsdbops.BuildSNATWithExemptedExtIPs(&externalIP, clusterSubnet, "", nil, "", desiredAddressSet.UUID)
+			desiredSNAT.UUID = "desired-snat-" + nodeName + "-UUID"
+			gwRouter := &nbdb.LogicalRouter{
+				UUID: "GR_" + nodeName + "-UUID",
+				Name: "GR_" + nodeName,
+				Nat:  []string{plainSNAT.UUID, desiredSNAT.UUID},
+			}
+			gwRouters = append(gwRouters, gwRouter)
+			desiredSNATs[gwRouter.Name] = desiredSNAT
+			testData = append(testData, gwRouter, plainSNAT, desiredSNAT)
+		}
+
+		fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{NBData: testData})
+		desiredAddressSet, err := libovsdbops.GetAddressSet(fakeOvn.nbClient, &nbdb.AddressSet{Name: desiredAddressSet.Name})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		for _, desiredSNAT := range desiredSNATs {
+			desiredSNAT.ExemptedExtIPs = &desiredAddressSet.UUID
+		}
+
+		gw := newGatewayManager(fakeOvn, nodeName)
+		for _, gwRouter := range gwRouters {
+			err = fakeOvn.controller.cleanupDuplicateNoOverlayClusterSNATsOnce(gw, gwRouter, []*nbdb.NAT{desiredSNATs[gwRouter.Name]})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		}
+
+		for _, gwRouter := range gwRouters {
+			routerNATs, err := libovsdbops.GetRouterNATs(fakeOvn.nbClient, gwRouter)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			remainingClusterSNATs := []*nbdb.NAT{}
+			for _, nat := range routerNATs {
+				if nat.LogicalIP == clusterSubnet.String() {
+					remainingClusterSNATs = append(remainingClusterSNATs, nat)
+				}
+			}
+			gomega.Expect(remainingClusterSNATs).To(gomega.HaveLen(1))
+			gomega.Expect(remainingClusterSNATs[0].ExemptedExtIPs).NotTo(gomega.BeNil())
+			gomega.Expect(*remainingClusterSNATs[0].ExemptedExtIPs).To(gomega.Equal(desiredAddressSet.UUID))
+		}
+	})
+})
+
 var _ = ginkgo.Describe("GetNetworkScopedClusterSubnetSNATMatch", func() {
 	var (
 		fakeOvn           *FakeOVN
