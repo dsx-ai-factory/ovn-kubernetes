@@ -46,7 +46,7 @@ ifeq ($(ARCH),amd64)
               "ovn-kube-ubuntu:latest"
 endif
 
-ubuntu-nv-image: NV_UBUNTU_BASE_IMAGE ?= urm.nvidia.com/sw-ipp-lws2-internal-docker/base-container/ubuntu:24.04-fips-stig_lws_pb
+ubuntu-nv-image: NV_UBUNTU_BASE_IMAGE ?= artifactory.nvidia.com/sw-ipp-lws2-internal-docker/base-container/ubuntu:24.04-fips-stig_lws_pb
 
 ubuntu-nv-image:
 	cd $(abspath $(CURDIR)/../..) && ${OCI_BIN} build \
