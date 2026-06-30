@@ -1163,17 +1163,34 @@ readonly FRR_DEPLOYED_IMAGE=quay.io/frrouting/frr:10.6.0
 # Override to test newer FRR builds in the in-cluster frr-k8s daemonset
 # without changing the pinned frr-k8s release.
 FRR_K8S_FRR_IMAGE=${FRR_K8S_FRR_IMAGE:-${FRR_DEPLOYED_IMAGE}}
-readonly FRR_EXTERNAL_DEMO_IMAGE=${FRR_DEPLOYED_IMAGE}
+# Allow downstream callers to use the same FRR image for the external BGP demo
+# container as the frr-k8s daemonset.
+FRR_EXTERNAL_DEMO_IMAGE=${FRR_EXTERNAL_DEMO_IMAGE:-${FRR_DEPLOYED_IMAGE}}
+readonly FRR_EXTERNAL_DEMO_IMAGE
 readonly FRR_TMP_DIR=$(mktemp -d -u)
+
+prepare_frr_k8s_source() {
+  if [ -n "${FRR_K8S_SOURCE_DIR:-}" ]; then
+    [ -d "$FRR_K8S_SOURCE_DIR" ] || {
+      echo "Prepared frr-k8s checkout not found at $FRR_K8S_SOURCE_DIR"
+      exit 1
+    }
+    # clone_frr patches the demo below, so preserve the prepared checkout.
+    cp -a "$FRR_K8S_SOURCE_DIR" frr-k8s
+    return
+  fi
+
+  git clone --no-tags --single-branch --branch main https://github.com/metallb/frr-k8s
+  pushd frr-k8s
+  git checkout --detach "$FRR_K8S_GIT_REF"
+  popd
+}
 
 clone_frr() {
   [ -d "$FRR_TMP_DIR" ] || {
     mkdir -p "$FRR_TMP_DIR" && trap 'rm -rf $FRR_TMP_DIR' EXIT
     pushd "$FRR_TMP_DIR" || exit 1
-    git clone --no-tags --single-branch --branch main https://github.com/metallb/frr-k8s
-    pushd frr-k8s
-    git checkout --detach "$FRR_K8S_GIT_REF"
-    popd
+    prepare_frr_k8s_source
 
     # Download the patches
     curl -Ls https://github.com/jcaamano/frr-k8s/archive/refs/heads/ovnk-bgp-v0.0.21.tar.gz | tar xzvf - frr-k8s-ovnk-bgp-v0.0.21/patches --strip-components 1
