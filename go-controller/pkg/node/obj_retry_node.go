@@ -5,6 +5,7 @@
 package node
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"reflect"
@@ -155,7 +156,7 @@ func (h *nodeEventHandler) GetResourceFromInformerCache(key string) (interface{}
 // the function was executed from iterateRetryResources, AddResource adds the
 // specified object to the cluster according to its type and returns the error,
 // if any, yielded during object creation.
-func (h *nodeEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
+func (h *nodeEventHandler) AddResource(_ context.Context, obj interface{}, fromRetryLoop bool) error {
 	switch h.objType {
 	case factory.EndpointSliceForStaleConntrackRemovalType:
 		if config.OvnKubeNode.Mode != types.NodeModeDPU {

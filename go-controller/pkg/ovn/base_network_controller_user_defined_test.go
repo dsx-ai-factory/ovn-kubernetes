@@ -555,7 +555,7 @@ var _ = Describe("BaseUserDefinedNetworkController", func() {
 		})
 
 		It("ensurePod with addPort=true returns an error until the namespace is in the informer", func() {
-			err := bnc.ensurePodForUserDefinedNetwork(nil, pod, true)
+			err := bnc.ensurePodForUserDefinedNetwork(context.Background(), nil, pod, true)
 			Expect(err).To(MatchError(ContainSubstring("failed to get primary network namespace NAD")))
 			Expect(err).To(MatchError(apierrors.IsNotFound, "IsNotFound"))
 
@@ -578,7 +578,7 @@ var _ = Describe("BaseUserDefinedNetworkController", func() {
 			Expect(libovsdbops.CreateOrUpdateLogicalSwitch(fakeOVN.nbClient, &nbdb.LogicalSwitch{Name: switchName})).To(Succeed())
 
 			Eventually(func() error {
-				return bnc.ensurePodForUserDefinedNetwork(nil, pod, true)
+				return bnc.ensurePodForUserDefinedNetwork(context.Background(), nil, pod, true)
 			}).Should(Succeed())
 
 			updatedPod, err := fakeOVN.fakeClient.KubeClient.CoreV1().Pods(pod.Namespace).Get(
@@ -629,7 +629,7 @@ var _ = Describe("BaseUserDefinedNetworkController", func() {
 			Expect(lsps).To(HaveLen(1))
 			Expect(lsps[0]).To(Equal(lsp))
 
-			Expect(bnc.removePodForUserDefinedNetwork(pod, map[string]*lpInfo{
+			Expect(bnc.removePodForUserDefinedNetwork(context.Background(), pod, map[string]*lpInfo{
 				nadKey: {
 					name:          lspName,
 					uuid:          lsp.UUID,
@@ -723,7 +723,7 @@ var _ = Describe("BaseUserDefinedNetworkController", func() {
 				foreignLSP.UUID, podMAC, podIPs),
 		}
 		Expect(controller.bnc.removePodForUserDefinedNetwork(
-			pod, portInfoMap)).To(Succeed())
+			context.Background(), pod, portInfoMap)).To(Succeed())
 
 		expectedSwitch := logicalSwitch.DeepCopy()
 		expectedSwitch.Ports = nil

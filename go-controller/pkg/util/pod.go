@@ -9,6 +9,10 @@ import (
 	"fmt"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -17,6 +21,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/tracing"
 )
 
 const (
@@ -42,12 +47,21 @@ func IsPodAnnotationUpdateRetryable(err error) bool {
 
 // UpdatePodWithRetryOrRollback updates pod annotations with the result of the
 // allocate function. If the pod update fails, it applies the rollback provided by
-// the allocate function.
-func UpdatePodWithRetryOrRollback(podLister listers.PodLister, kube kube.Interface, pod *corev1.Pod, allocate AllocateToPodWithRollbackFunc) error {
+// the allocate function. Retry details are recorded on the active span in ctx.
+func UpdatePodWithRetryOrRollback(ctx context.Context, podLister listers.PodLister, kube kube.Interface, pod *corev1.Pod, allocate AllocateToPodWithRollbackFunc) error {
 	start := time.Now()
 	defer func() {
 		klog.V(5).Infof("[%s/%s] pod update took %v", pod.Namespace, pod.Name, time.Since(start))
 	}()
+
+	span := trace.SpanFromContext(ctx)
+	patchAttempts := 0
+	defer func() {
+		span.SetAttributes(
+			attribute.Int(tracing.SpanAttrPodAnnotationPatchAttempts, patchAttempts),
+		)
+	}()
+
 	var failedResourceVersion string
 	var failedPatchErr error
 	err := retry.OnError(OvnConflictBackoff, IsPodAnnotationUpdateRetryable, func() error {
@@ -86,6 +100,18 @@ func UpdatePodWithRetryOrRollback(podLister listers.PodLister, kube kube.Interfa
 		if updatedPod == nil {
 			return nil
 		}
+
+		patchAttempts++
+		_, patchSpan := tracing.StartSpan(ctx, tracing.SpanNameUpdatePodAnnotation)
+		patchSpan.SetAttributes(tracing.PodAttrs(pod.Namespace, pod.Name, string(pod.UID))...)
+		patchSpan.SetAttributes(attribute.Int(tracing.SpanAttrPodAnnotationPatchAttempts, patchAttempts))
+		defer func() {
+			if err != nil {
+				patchSpan.RecordError(err)
+				patchSpan.SetStatus(codes.Error, err.Error())
+			}
+			patchSpan.End()
+		}()
 
 		err = kube.PatchPodStatusAnnotations(oldPod, updatedPod)
 		if err != nil && rollback != nil {

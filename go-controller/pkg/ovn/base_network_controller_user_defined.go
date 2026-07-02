@@ -5,6 +5,7 @@
 package ovn
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"net"
@@ -15,6 +16,9 @@ import (
 
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta2"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -36,6 +40,7 @@ import (
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/addresssetmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/udnenabledsvc"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/tracing"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
@@ -61,16 +66,28 @@ func (bsnc *BaseUserDefinedNetworkController) GetInternalCacheEntryForUserDefine
 	}
 }
 
+func (bsnc *BaseUserDefinedNetworkController) startTrace(ctx context.Context, pod *corev1.Pod) (context.Context, trace.Span) {
+	ctx = tracing.ContextWithSpanNamePrefix(ctx, tracing.NodeNetworkControllerPodSpanPrefix)
+	ctx, span := tracing.StartTrace(ctx, pod.Annotations)
+	span.SetAttributes(tracing.PodAttrs(pod.Namespace, pod.Name, string(pod.UID))...)
+	span.SetAttributes(util.OvnNetworkSpanAttrs(bsnc.GetNetInfo())...)
+	if tracing.RetryLoopFromContext(ctx) {
+		span.SetAttributes(attribute.Bool(tracing.SpanAttrRetryLoop, true))
+	}
+	return ctx, span
+}
+
 // AddUserDefinedNetworkResourceCommon adds the specified object to the cluster according to its type and returns the error,
 // if any, yielded during object creation. This function is called for User Defined Networks only.
-func (bsnc *BaseUserDefinedNetworkController) AddUserDefinedNetworkResourceCommon(objType reflect.Type, obj interface{}) error {
+func (bsnc *BaseUserDefinedNetworkController) AddUserDefinedNetworkResourceCommon(ctx context.Context, objType reflect.Type, obj interface{}) error {
 	switch objType {
 	case factory.PodType:
 		pod, ok := obj.(*corev1.Pod)
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *knet.Pod", obj)
 		}
-		return bsnc.ensurePodForUserDefinedNetwork(nil, pod, true)
+		ctx = tracing.ContextWithOperation(ctx, tracing.OperationAdd)
+		return bsnc.ensurePodForUserDefinedNetwork(ctx, nil, pod, true)
 
 	case factory.NamespaceType:
 		ns, ok := obj.(*corev1.Namespace)
@@ -108,17 +125,17 @@ func (bsnc *BaseUserDefinedNetworkController) AddUserDefinedNetworkResourceCommo
 // UpdateUserDefinedNetworkResourceCommon updates the specified object in the cluster to its version in newObj
 // according to its type and returns the error, if any, yielded during the object update. This function is
 // called for User Defined Networks only.
-// Given an old and a new object; The inRetryCache boolean argument is to indicate if the given resource
-// is in the retryCache or not.
 func (bsnc *BaseUserDefinedNetworkController) UpdateUserDefinedNetworkResourceCommon(objType reflect.Type, oldObj, newObj interface{}, inRetryCache bool) error {
 	switch objType {
 	case factory.PodType:
 		oldPod := oldObj.(*corev1.Pod)
 		newPod := newObj.(*corev1.Pod)
 
-		addPort := shouldAddPort(oldPod, newPod, inRetryCache) ||
+		ctx := tracing.ContextWithRetryLoop(context.Background(), inRetryCache)
+		ctx = tracing.ContextWithOperation(ctx, tracing.OperationUpdate)
+		needsAdd := shouldAddPort(oldPod, newPod, inRetryCache) ||
 			bsnc.dhcpPodNetworkUpdated(oldPod, newPod)
-		return bsnc.ensurePodForUserDefinedNetwork(oldPod, newPod, addPort)
+		return bsnc.ensurePodForUserDefinedNetwork(ctx, oldPod, newPod, needsAdd)
 
 	case factory.NamespaceType:
 		oldNs, newNs := oldObj.(*corev1.Namespace), newObj.(*corev1.Namespace)
@@ -171,7 +188,7 @@ func (bsnc *BaseUserDefinedNetworkController) UpdateUserDefinedNetworkResourceCo
 // Given an object and optionally a cachedObj; cachedObj is the internal cache entry for this object,
 // used for now for pods.
 // This function is called for User Defined Networks only.
-func (bsnc *BaseUserDefinedNetworkController) DeleteUserDefinedNetworkResourceCommon(objType reflect.Type, obj, cachedObj interface{}) error {
+func (bsnc *BaseUserDefinedNetworkController) DeleteUserDefinedNetworkResourceCommon(ctx context.Context, objType reflect.Type, obj, cachedObj interface{}) error {
 	switch objType {
 	case factory.PodType:
 		var portInfoMap map[string]*lpInfo
@@ -180,7 +197,8 @@ func (bsnc *BaseUserDefinedNetworkController) DeleteUserDefinedNetworkResourceCo
 		if cachedObj != nil {
 			portInfoMap = cachedObj.(map[string]*lpInfo)
 		}
-		return bsnc.removePodForUserDefinedNetwork(pod, portInfoMap)
+		ctx = tracing.ContextWithOperation(ctx, tracing.OperationDelete)
+		return bsnc.removePodForUserDefinedNetwork(ctx, pod, portInfoMap)
 
 	case factory.NamespaceType:
 		ns := obj.(*corev1.Namespace)
@@ -210,7 +228,10 @@ func (bsnc *BaseUserDefinedNetworkController) DeleteUserDefinedNetworkResourceCo
 
 // ensurePodForUserDefinedNetwork tries to set up the User Defined Network for a pod. It returns nil on success and error
 // on failure; failure indicates the pod set up should be retried later.
-func (bsnc *BaseUserDefinedNetworkController) ensurePodForUserDefinedNetwork(oldPod, pod *corev1.Pod, addPort bool) error {
+func (bsnc *BaseUserDefinedNetworkController) ensurePodForUserDefinedNetwork(ctx context.Context, oldPod, pod *corev1.Pod, addPort bool) (err error) {
+	if !bsnc.isPodScheduledOnLocalNode(pod) {
+		ctx = tracing.ContextWithSpansDisabled(ctx)
+	}
 	// Try unscheduled pods later
 	if !util.PodScheduled(pod) {
 		return nil
@@ -221,7 +242,6 @@ func (bsnc *BaseUserDefinedNetworkController) ensurePodForUserDefinedNetwork(old
 	}
 
 	var kubevirtLiveMigrationStatus *kubevirt.LiveMigrationStatus
-	var err error
 
 	if kubevirt.IsPodAllowedForMigration(pod, bsnc.GetNetInfo()) {
 		kubevirtLiveMigrationStatus, err = kubevirt.DiscoverLiveMigrationStatus(bsnc.watchFactory.PodCoreInformer().Lister(), pod)
@@ -298,9 +318,28 @@ func (bsnc *BaseUserDefinedNetworkController) ensurePodForUserDefinedNetwork(old
 		return nil
 	}
 
+	ctx, rootSpan := bsnc.startTrace(ctx, pod)
+	defer func() {
+		if err != nil {
+			rootSpan.RecordError(err)
+			rootSpan.SetStatus(codes.Error, err.Error())
+		}
+		rootSpan.End()
+	}()
+
+	ctx, span := tracing.StartSpan(ctx, tracing.SpanNameSetupLocalPodNetwork)
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
+	span.SetAttributes(tracing.PodAttrs(pod.Namespace, pod.Name, string(pod.UID))...)
+
 	var errs []error
 	for nadKey, network := range networkMap {
-		if err = bsnc.addLogicalPortToNetworkForNAD(pod, nadKey, switchName, network, kubevirtLiveMigrationStatus); err != nil {
+		if err = bsnc.addLogicalPortToNetworkForNAD(ctx, pod, nadKey, switchName, network, kubevirtLiveMigrationStatus); err != nil {
 			errs = append(errs, fmt.Errorf("failed to add logical port of Pod %s/%s for NAD key %s: %w", pod.Namespace, pod.Name, nadKey, err))
 		}
 	}
@@ -310,7 +349,7 @@ func (bsnc *BaseUserDefinedNetworkController) ensurePodForUserDefinedNetwork(old
 	return nil
 }
 
-func (bsnc *BaseUserDefinedNetworkController) addLogicalPortToNetworkForNAD(pod *corev1.Pod, nadKey, switchName string,
+func (bsnc *BaseUserDefinedNetworkController) addLogicalPortToNetworkForNAD(ctx context.Context, pod *corev1.Pod, nadKey, switchName string,
 	network *nadapi.NetworkSelectionElement, kubevirtLiveMigrationStatus *kubevirt.LiveMigrationStatus,
 ) error {
 	var libovsdbExecuteTime time.Duration
@@ -343,7 +382,7 @@ func (bsnc *BaseUserDefinedNetworkController) addLogicalPortToNetworkForNAD(pod 
 	requiresLogicalPort := isLocalPod || bsnc.isLayer2WithInterconnectTransport()
 
 	if requiresLogicalPort {
-		ops, lsp, podAnnotation, newlyCreated, err = bsnc.addLogicalPortToNetwork(pod, nadKey, network, lspEnabled)
+		ops, lsp, podAnnotation, newlyCreated, err = bsnc.addLogicalPortToNetwork(ctx, pod, nadKey, network, lspEnabled)
 		if err != nil {
 			return err
 		}
@@ -447,7 +486,10 @@ func (bsnc *BaseUserDefinedNetworkController) addLogicalPortToNetworkForNAD(pod 
 
 // removePodForUserDefinedNetwork tried to tear down a pod. It returns nil on success and error on failure;
 // failure indicates the pod tear down should be retried later.
-func (bsnc *BaseUserDefinedNetworkController) removePodForUserDefinedNetwork(pod *corev1.Pod, portInfoMap map[string]*lpInfo) error {
+func (bsnc *BaseUserDefinedNetworkController) removePodForUserDefinedNetwork(ctx context.Context, pod *corev1.Pod, portInfoMap map[string]*lpInfo) (err error) {
+	if !bsnc.isPodScheduledOnLocalNode(pod) {
+		ctx = tracing.ContextWithSpansDisabled(ctx)
+	}
 	if util.PodWantsHostNetwork(pod) || !util.PodScheduled(pod) {
 		return nil
 	}
@@ -466,8 +508,10 @@ func (bsnc *BaseUserDefinedNetworkController) removePodForUserDefinedNetwork(pod
 		portInfoMap = map[string]*lpInfo{}
 	}
 
-	var alreadyProcessed bool
-	for nadKey, podAnnotation := range podNetworks {
+	// collect the NADs managed by this controller up front so that the trace is
+	// only started when there is something to tear down
+	nadKeys := make([]string, 0, len(podNetworks))
+	for nadKey := range podNetworks {
 		networkName := bsnc.networkManager.GetNetworkNameForNADKey(nadKey)
 		portInfo := portInfoMap[nadKey]
 		if networkName == "" && portInfo != nil {
@@ -487,6 +531,34 @@ func (bsnc *BaseUserDefinedNetworkController) removePodForUserDefinedNetwork(pod
 		if networkName != bsnc.GetNetworkName() {
 			continue
 		}
+		nadKeys = append(nadKeys, nadKey)
+	}
+	if len(nadKeys) == 0 {
+		return nil
+	}
+
+	ctx, rootSpan := bsnc.startTrace(ctx, pod)
+	defer func() {
+		if err != nil {
+			rootSpan.RecordError(err)
+			rootSpan.SetStatus(codes.Error, err.Error())
+		}
+		rootSpan.End()
+	}()
+
+	_, span := tracing.StartSpan(ctx, tracing.SpanNameTeardownLocalPodNetwork)
+	span.SetAttributes(tracing.PodAttrs(pod.Namespace, pod.Name, string(pod.UID))...)
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
+
+	var alreadyProcessed bool
+	for _, nadKey := range nadKeys {
+		podAnnotation := podNetworks[nadKey]
 
 		// pod has a network managed by this controller
 		klog.Infof("Deleting pod: %s for network %s, NAD key: %s", podDesc, bsnc.GetNetworkName(), nadKey)
@@ -508,7 +580,7 @@ func (bsnc *BaseUserDefinedNetworkController) removePodForUserDefinedNetwork(pod
 			}
 		}
 		bsnc.logicalPortCache.remove(pod, nadKey)
-		pInfo, err := bsnc.deletePodLogicalPort(pod, portInfo, nadKey)
+		pInfo, err := bsnc.deletePodLogicalPort(pod, portInfoMap[nadKey], nadKey)
 		if err != nil {
 			return err
 		}

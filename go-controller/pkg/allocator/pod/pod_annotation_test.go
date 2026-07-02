@@ -4,6 +4,7 @@
 package pod
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -178,6 +179,7 @@ func Test_allocatePodAnnotationReturnsUpdatedPod(t *testing.T) {
 	}
 
 	updatedPod, podAnnotation, err := allocatePodAnnotation(
+		context.Background(),
 		corelisters.NewPodLister(podIndexer),
 		&kube.Kube{KClient: fake.NewSimpleClientset(pod.DeepCopy())},
 		&ipAllocatorStub{nextIPs: ovntest.MustParseIPNets("10.128.0.3/24")},
@@ -248,6 +250,7 @@ func Test_allocatePodAnnotationWithTunnelIDReturnsUpdatedPod(t *testing.T) {
 	g.Expect(podIndexer.Add(pod)).To(gomega.Succeed())
 
 	updatedPod, podAnnotation, err := allocatePodAnnotationWithTunnelID(
+		context.Background(),
 		corelisters.NewPodLister(podIndexer),
 		&kube.Kube{KClient: fake.NewSimpleClientset(pod.DeepCopy())},
 		nil,

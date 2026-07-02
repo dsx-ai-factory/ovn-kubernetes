@@ -5,6 +5,7 @@
 package pod
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -76,6 +77,7 @@ func WithMACRegistry(m mac.Register) AllocatorOption {
 // honored, a new set of IPs will be allocated unless reallocateIP is set to
 // false.
 func (allocator *PodAnnotationAllocator) AllocatePodAnnotation(
+	ctx context.Context,
 	ipAllocator subnet.NamedAllocator,
 	node *corev1.Node,
 	pod *corev1.Pod,
@@ -88,6 +90,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotation(
 	error) {
 
 	return allocatePodAnnotation(
+		ctx,
 		allocator.podLister,
 		allocator.kube,
 		ipAllocator,
@@ -105,6 +108,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotation(
 }
 
 func allocatePodAnnotation(
+	ctx context.Context,
 	podLister listers.PodLister,
 	kube kube.Interface,
 	ipAllocator subnet.NamedAllocator,
@@ -144,6 +148,7 @@ func allocatePodAnnotation(
 	}
 
 	err = util.UpdatePodWithRetryOrRollback(
+		ctx,
 		podLister,
 		kube,
 		pod,
@@ -167,6 +172,7 @@ func allocatePodAnnotation(
 // honored, a new set of IPs will be allocated unless reallocateIP is set to
 // false.
 func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
+	ctx context.Context,
 	ipAllocator subnet.NamedAllocator,
 	idAllocator id.NamedAllocator,
 	node *corev1.Node,
@@ -180,6 +186,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
 	error) {
 
 	return allocatePodAnnotationWithTunnelID(
+		ctx,
 		allocator.podLister,
 		allocator.kube,
 		ipAllocator,
@@ -198,6 +205,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
 }
 
 func allocatePodAnnotationWithTunnelID(
+	ctx context.Context,
 	podLister listers.PodLister,
 	kube kube.Interface,
 	ipAllocator subnet.NamedAllocator,
@@ -235,6 +243,7 @@ func allocatePodAnnotationWithTunnelID(
 	}
 
 	err = util.UpdatePodWithRetryOrRollback(
+		ctx,
 		podLister,
 		kube,
 		pod,

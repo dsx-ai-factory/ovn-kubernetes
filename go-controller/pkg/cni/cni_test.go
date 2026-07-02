@@ -1049,7 +1049,7 @@ var _ = Describe("updateDHCPAndDPUAnnotations pod identity guard", func() {
 	It("writes the staged entry when the pod is the one the request read", func() {
 		pod := newPodWithUID("uid-a")
 		cs, kubecli := start(testing.NewNamespace(podNamespace), pod)
-		pr := &PodRequest{PodNamespace: podNamespace, PodName: podName, PodUID: "uid-a", nadKey: nadKey, Netns: newTestNetns()}
+		pr := &PodRequest{PodNamespace: podNamespace, PodName: podName, PodUID: "uid-a", nadKey: nadKey, Netns: newTestNetns(), ctx: context.Background()}
 
 		Expect(pr.updateDHCPAndDPUAnnotations(cs, kubecli, pod, newDHCPEntry(), nil)).To(Succeed())
 
@@ -1064,7 +1064,7 @@ var _ = Describe("updateDHCPAndDPUAnnotations pod identity guard", func() {
 		// while the in-flight request staged its entry against the old one
 		stalePod := newPodWithUID("uid-a")
 		// the runtime's request carries the old instance's UID
-		pr := &PodRequest{PodNamespace: podNamespace, PodName: podName, PodUID: "uid-a", nadKey: nadKey, Netns: newTestNetns()}
+		pr := &PodRequest{PodNamespace: podNamespace, PodName: podName, PodUID: "uid-a", nadKey: nadKey, Netns: newTestNetns(), ctx: context.Background()}
 
 		err := pr.updateDHCPAndDPUAnnotations(cs, kubecli, stalePod, newDHCPEntry(), nil)
 		Expect(err).To(MatchError(ContainSubstring("was replaced while staging CNI annotations")))

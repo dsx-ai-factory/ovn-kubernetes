@@ -4,6 +4,7 @@
 package util
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -127,7 +128,7 @@ func TestUpdatePodWithAllocationOrRollback(t *testing.T) {
 				kubeMock.On("PatchPodStatusAnnotations", pod, mock.AnythingOfType("*v1.Pod")).Return(nil)
 			}
 
-			err := UpdatePodWithRetryOrRollback(podListerMock, kubeMock, &corev1.Pod{}, allocate)
+			err := UpdatePodWithRetryOrRollback(context.Background(), podListerMock, kubeMock, &corev1.Pod{}, allocate)
 
 			if (err != nil) != tt.expectErr {
 				t.Errorf("UpdatePodWithAllocationOrRollback() error = %v, expectErr %v", err, tt.expectErr)
@@ -173,7 +174,7 @@ func TestUpdatePodWaitsForInformerBeforeRetry(t *testing.T) {
 	allocate := func(pod *corev1.Pod) (*corev1.Pod, func(), error) {
 		return pod, nil, nil
 	}
-	err := UpdatePodWithRetryOrRollback(podListerMock, kubeMock, podV1, allocate)
+	err := UpdatePodWithRetryOrRollback(context.Background(), podListerMock, kubeMock, podV1, allocate)
 	if err != nil {
 		t.Fatalf("expected cache-advanced retry to succeed: %v", err)
 	}
@@ -203,7 +204,7 @@ func TestUpdatePodDoesNotRepeatPatchFromStaleInformer(t *testing.T) {
 	allocate := func(pod *corev1.Pod) (*corev1.Pod, func(), error) {
 		return pod, nil, nil
 	}
-	err := UpdatePodWithRetryOrRollback(podListerMock, kubeMock, pod, allocate)
+	err := UpdatePodWithRetryOrRollback(context.Background(), podListerMock, kubeMock, pod, allocate)
 	if !apierrors.IsConflict(err) {
 		t.Fatalf("expected the original conflict, got %v", err)
 	}
