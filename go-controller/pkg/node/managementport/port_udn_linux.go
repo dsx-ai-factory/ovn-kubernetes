@@ -299,14 +299,17 @@ func (mp *udnManagementPortOVS) create() error {
 	klog.V(3).Infof("Setup management port link %s for network %s succeeded", mp.ifName, mp.GetNetworkName())
 
 	// STEP3
+	// A per-interface sysctl failure here is logged but not fatal, mirroring the
+	// default network management port (see setupManagementPortIPFamilyConfig), so
+	// that one interface's kernel-config hiccup cannot crash-loop the whole node.
 	err = util.SetForwardingModeForInterface(mp.ifName)
 	if err != nil {
-		return err
+		klog.Warningf("Failed to set forwarding on management port %s for network %s: %v", mp.ifName, mp.GetNetworkName(), err)
 	}
 
 	// add loose mode for rp filter on management port
 	if err = util.SetRPFilterLooseModeForInterface(mp.ifName); err != nil {
-		return err
+		klog.Warningf("Failed to set rp_filter loose mode on management port %s for network %s: %v", mp.ifName, mp.GetNetworkName(), err)
 	}
 	return nil
 }
@@ -361,16 +364,19 @@ func (mp *udnManagementPortNetdev) create() error {
 		return fmt.Errorf("bring up management port %s for network %s failed: %v", mp.ifName, mp.GetNetworkName(), err)
 	}
 
+	// A per-interface sysctl failure here is logged but not fatal, mirroring the
+	// default network management port (see setupManagementPortIPFamilyConfig), so
+	// that one interface's kernel-config hiccup cannot crash-loop the whole node.
 	err = util.SetForwardingModeForInterface(mp.ifName)
 	if err != nil {
-		return err
+		klog.Warningf("Failed to set forwarding on management port %s for network %s: %v", mp.ifName, mp.GetNetworkName(), err)
 	}
 
 	// add loose mode for rp filter on management port
 	if err = util.SetRPFilterLooseModeForInterface(mp.ifName); err != nil {
-		return err
+		klog.Warningf("Failed to set rp_filter loose mode on management port %s for network %s: %v", mp.ifName, mp.GetNetworkName(), err)
 	}
-	return err
+	return nil
 }
 
 func (mp *udnManagementPortNetdev) delete() error {
