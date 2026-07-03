@@ -1133,18 +1133,21 @@ func sysctlIfName(ifName string) string {
 
 // SetForwardingModeForInterface updates the forwarding options for the specified interface
 func SetForwardingModeForInterface(ifName string) error {
+	// Do not put spaces around '=': procps-ng < 4.x does not trim them and
+	// would treat the trailing space as part of the sysctl key path. Compare
+	// the echo-back with whitespace stripped since procps echoes "key = value".
 	if config.IPv4Mode {
-		setVal := fmt.Sprintf("net.ipv4.conf.%s.forwarding = 1", sysctlIfName(ifName))
+		setVal := fmt.Sprintf("net.ipv4.conf.%s.forwarding=1", sysctlIfName(ifName))
 		stdout, stderr, err := RunSysctl("-w", setVal)
-		if err != nil || stdout != setVal {
+		if err != nil || strings.ReplaceAll(stdout, " ", "") != setVal {
 			return fmt.Errorf("could not set the correct IPv4 forwarding value for interface %s: stdout: %v, stderr: %v, err: %v",
 				ifName, stdout, stderr, err)
 		}
 	}
 	if config.IPv6Mode && SupportsIPv6InterfaceForwarding() {
-		setVal := fmt.Sprintf("net.ipv6.conf.%s.force_forwarding = 1", sysctlIfName(ifName))
+		setVal := fmt.Sprintf("net.ipv6.conf.%s.force_forwarding=1", sysctlIfName(ifName))
 		stdout, stderr, err := RunSysctl("-w", setVal)
-		if err != nil || stdout != setVal {
+		if err != nil || strings.ReplaceAll(stdout, " ", "") != setVal {
 			return fmt.Errorf("could not set the correct IPv6 forwarding value for interface %s: stdout: %v, stderr: %v, err: %v",
 				ifName, stdout, stderr, err)
 		}
@@ -1159,9 +1162,12 @@ const rpFilterLooseMode = "2"
 // managementport interface.
 // NOTE: v6 doesn't have rp_filter strict mode block
 func SetRPFilterLooseModeForInterface(ifName string) error {
-	setVal := fmt.Sprintf("net.ipv4.conf.%s.rp_filter = %s", sysctlIfName(ifName), rpFilterLooseMode)
+	// Do not put spaces around '=': procps-ng < 4.x does not trim them and
+	// would treat the trailing space as part of the sysctl key path. Compare
+	// the echo-back with whitespace stripped since procps echoes "key = value".
+	setVal := fmt.Sprintf("net.ipv4.conf.%s.rp_filter=%s", sysctlIfName(ifName), rpFilterLooseMode)
 	stdout, stderr, err := RunSysctl("-w", setVal)
-	if err != nil || stdout != setVal {
+	if err != nil || strings.ReplaceAll(stdout, " ", "") != setVal {
 		return fmt.Errorf("could not set the correct rp_filter value for interface %s: stdout: %v, stderr: %v, err: %v",
 			ifName, stdout, stderr, err)
 	}
