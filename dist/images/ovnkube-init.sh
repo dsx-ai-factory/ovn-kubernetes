@@ -133,7 +133,22 @@ if [ -z "$host_cidrs" ]; then
   exit 1
 fi
 host_cidrs=${host_cidrs//[\[\]\"]/}
-cidr=$(echo $host_cidrs | awk -F',' '{print $1}')
+# The host may expose several CIDRs (e.g. 10.0.1.2/24, 172.17.0.1/16,
+# 7.243.100.81/31), so we cannot just pick the first entry. Use the node's K8s
+# InternalIP to select the matching host-cidr; that entry also carries the
+# correct prefix length used by the /31-vs-larger logic below.
+node_ip=$(kubectl get node $k8s_nodename -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}')
+node_ip=$(echo $node_ip | awk '{print $1}')
+if [ -z "$node_ip" ]; then
+  echo "failed to get InternalIP address from node $k8s_nodename, exiting..."
+  exit 1
+fi
+# Find the host-cidr whose address equals the node's InternalIP to recover its prefix.
+cidr=$(echo "$host_cidrs" | tr ',' '\n' | awk -F'/' -v ip="$node_ip" '$1==ip {print; exit}')
+if [ -z "$cidr" ]; then
+  echo "failed to find host-cidr matching node InternalIP $node_ip in [$host_cidrs], exiting..."
+  exit 1
+fi
 suffix=${cidr##*/}
 if [ "$suffix" == "31" ]; then
   # dpu-host is L3-routed with a /31: the host holds the odd (.1) address and the
