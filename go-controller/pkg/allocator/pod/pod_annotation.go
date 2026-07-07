@@ -124,14 +124,14 @@ func allocatePodAnnotation(
 	// no id allocation
 	var idAllocator id.NamedAllocator
 
-	allocateToPodWithRollback := func(pod *corev1.Pod) (*corev1.Pod, func(), error) {
+	allocateToPodWithRollback := func(currentPod *corev1.Pod) (*corev1.Pod, func(), error) {
 		var rollback func()
-		pod, podAnnotation, rollback, err = allocatePodAnnotationWithRollback(
+		updatedPod, podAnnotation, rollback, err = allocatePodAnnotationWithRollback(
 			ipAllocator,
 			idAllocator,
 			netInfo,
 			node,
-			pod,
+			currentPod,
 			nadKey,
 			network,
 			claimsReconciler,
@@ -140,7 +140,7 @@ func allocatePodAnnotation(
 			skipIPAM,
 			networkRole,
 		)
-		return pod, rollback, err
+		return updatedPod, rollback, err
 	}
 
 	err = util.UpdatePodWithRetryOrRollback(
@@ -154,7 +154,7 @@ func allocatePodAnnotation(
 		return nil, nil, err
 	}
 
-	return pod, podAnnotation, nil
+	return updatedPod, podAnnotation, nil
 }
 
 // AllocatePodAnnotationWithTunnelID allocates the PodAnnotation which includes
@@ -215,14 +215,14 @@ func allocatePodAnnotationWithTunnelID(
 	podAnnotation *util.PodAnnotation,
 	err error) {
 
-	allocateToPodWithRollback := func(pod *corev1.Pod) (*corev1.Pod, func(), error) {
+	allocateToPodWithRollback := func(currentPod *corev1.Pod) (*corev1.Pod, func(), error) {
 		var rollback func()
-		pod, podAnnotation, rollback, err = allocatePodAnnotationWithRollback(
+		updatedPod, podAnnotation, rollback, err = allocatePodAnnotationWithRollback(
 			ipAllocator,
 			idAllocator,
 			netInfo,
 			node,
-			pod,
+			currentPod,
 			nadKey,
 			network,
 			claimsReconciler,
@@ -231,7 +231,7 @@ func allocatePodAnnotationWithTunnelID(
 			skipIPAM,
 			networkRole,
 		)
-		return pod, rollback, err
+		return updatedPod, rollback, err
 	}
 
 	err = util.UpdatePodWithRetryOrRollback(
@@ -245,7 +245,7 @@ func allocatePodAnnotationWithTunnelID(
 		return nil, nil, err
 	}
 
-	return pod, podAnnotation, nil
+	return updatedPod, podAnnotation, nil
 }
 
 // validateStaticIPRequest checks if a static IP request can be honored when IPAM is enabled for the given network.
