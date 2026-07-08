@@ -762,13 +762,6 @@ func getMgmtPortAndRepNameModeFull() (string, string, error) {
 // In DPU mode, read the annotation from the host side which should have been
 // exported by ovn-k running in DPU host mode.
 func getMgmtPortAndRepNameModeDPU(node *corev1.Node) (string, string, error) {
-	if config.OvnKubeNode.MgmtPortNetdev != "" {
-		rep, err := getManagementPortNetDev(config.OvnKubeNode.MgmtPortNetdev)
-		if err != nil {
-			return "", "", err
-		}
-		return "", rep, nil
-	}
 	cfgs, err := util.ParseNodeManagementPortAnnotation(node)
 	if err != nil {
 		return "", "", err
