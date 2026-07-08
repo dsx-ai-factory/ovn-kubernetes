@@ -66,15 +66,15 @@ func getCreationFakeCommands(fexec *ovntest.FakeExec, mgtPort, mgtPortMAC, netNa
 	})
 
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "sysctl -w net.ipv4.conf." + mgtPort + ".forwarding = 1",
-		Output: "net.ipv4.conf." + mgtPort + ".forwarding = 1",
+		Cmd:    "sysctl -w net.ipv4.conf." + mgtPort + ".forwarding=1",
+		Output: "net.ipv4.conf." + mgtPort + ".forwarding=1",
 	})
 }
 
 func getRPFilterLooseModeFakeCommands(fexec *ovntest.FakeExec) {
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp3.rp_filter = 2",
-		Output: "net.ipv4.conf.ovn-k8s-mp3.rp_filter = 2",
+		Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp3.rp_filter=2",
+		Output: "net.ipv4.conf.ovn-k8s-mp3.rp_filter=2",
 	})
 }
 
@@ -101,8 +101,8 @@ func setManagementPortFakeCommands(fexec *ovntest.FakeExec, nodeName string) {
 		"ovs-vsctl --timeout=15 -- --if-exists del-port br-int " + mpPortLegacyName + " -- --may-exist add-port br-int " + mpPortName + " -- set interface " + mpPortName + " mac=\"0a:58:64:80:00:02\" type=internal mtu_request=1400 external-ids:iface-id=" + mpPortLegacyName,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
-		Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
+		Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding=1",
+		Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding=1",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ip route replace table 7 172.16.1.0/24 via 100.128.0.1 dev ovn-k8s-mp0",
@@ -131,8 +131,8 @@ func setManagementPortFakeCommands(fexec *ovntest.FakeExec, nodeName string) {
 		Output: "0",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.rp_filter = 2",
-		Output: "net.ipv4.conf.ovn-k8s-mp0.rp_filter = 2",
+		Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.rp_filter=2",
+		Output: "net.ipv4.conf.ovn-k8s-mp0.rp_filter=2",
 	})
 }
 
@@ -161,8 +161,8 @@ func setUpGatewayFakeOVSCommands(fexec *ovntest.FakeExec) {
 	})
 	if config.IPv4Mode {
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "sysctl -w net.ipv4.conf.breth0.forwarding = 1",
-			Output: "net.ipv4.conf.breth0.forwarding = 1",
+			Cmd:    "sysctl -w net.ipv4.conf.breth0.forwarding=1",
+			Output: "net.ipv4.conf.breth0.forwarding=1",
 		})
 	}
 	// ovn-bridge-mappings get/set are now handled via libovsdb in

@@ -424,8 +424,8 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			netlinkOpsMock.On("LinkSetUp", linkMock).Return(nil)
 
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
-				Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
+				Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding=1",
+				Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding=1",
 			})
 
 			err = mgmtPort.doReconcile()
@@ -462,8 +462,8 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			netlinkOpsMock.On("LinkSetUp", linkMock).Return(nil)
 
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
-				Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
+				Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding=1",
+				Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding=1",
 			})
 
 			err = mgmtPort.doReconcile()
