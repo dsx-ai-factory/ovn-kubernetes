@@ -1446,6 +1446,23 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				_, failed := oc.gatewaysFailed.Load(node1.Name)
 				return failed
 			}).Should(gomega.BeFalse())
+			// The gateway router is created during the syncGw step, which runs
+			// before syncZoneIC in addUpdateLocalNodeEvent. Wait for the zoneIC
+			// transit switch port too, otherwise the bootstrap add can still be
+			// mid-syncZoneIC when we take NBDB down below. In that case the failed
+			// bootstrap keeps the node marked for reconciliation and every retry
+			// replays only the failed syncZoneIC piece (syncGw=false), so the
+			// gateway-config change is never synced and gatewaysFailed is never set.
+			gomega.Eventually(func() error {
+				_, err := libovsdbops.GetLogicalSwitchPort(nbClient, &nbdb.LogicalSwitchPort{
+					Name: types.TransitSwitchToRouterPrefix + node1.Name,
+				})
+				return err
+			}, 10*time.Second).Should(gomega.Succeed())
+			gomega.Eventually(func() bool {
+				_, failed := oc.syncZoneICFailed.Load(node1.Name)
+				return failed
+			}, 10*time.Second).Should(gomega.BeFalse())
 
 			ginkgo.By("Bringing down NBDB")
 			oc.nbClient.Close()
@@ -1460,10 +1477,12 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			gomega.Expect(nodeAnnotator.Run()).To(gomega.Succeed())
 
 			ginkgo.By("waiting for the gateway sync to fail and set the marker")
+			// The gateway transact blocks for one OVSDBTxnTimeout before failing;
+			// allow a little extra headroom for scheduling under CI load.
 			gomega.Eventually(func() bool {
 				_, failed := oc.gatewaysFailed.Load(node1.Name)
 				return failed
-			}, config.Default.OVSDBTxnTimeout+time.Second).Should(gomega.BeTrue())
+			}, config.Default.OVSDBTxnTimeout+5*time.Second).Should(gomega.BeTrue())
 
 			ginkgo.By("bringing NBDB back up")
 			connCtx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
