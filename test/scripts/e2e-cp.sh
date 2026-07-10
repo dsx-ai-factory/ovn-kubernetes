@@ -110,6 +110,11 @@ if [ "$ENABLE_MULTI_NET" != "true" ]; then
   skip "Multi Homing"
 fi
 
+TRACING_TESTS="Tracing"
+if [ "$ENABLE_TRACING" != "true" ]; then
+  skip_label "Feature:Tracing"
+fi
+
 if [ "$OVN_NETWORK_QOS_ENABLE" != "true" ]; then
   skip "e2e NetworkQoS validation"
 fi
