@@ -2104,6 +2104,13 @@ ovnkube-controller-with-node() {
   }
   echo "ssl_opts=${ssl_opts}"
 
+  kata_dan_conf_dir_flag=
+  if [[ ${ovnkube_enable_kata_dan} == "true" ]]; then
+    mkdir -p -m 0700 ${kata_dan_conf_dir}
+    kata_dan_conf_dir_flag="--kata-dan-conf-dir=${kata_dan_conf_dir}"
+  fi
+  echo "kata_dan_conf_dir_flag=${kata_dan_conf_dir_flag}"
+
   # Pass DPU Host cluster access credentials provided via environment variables in case of DPU
   cluster_access_opts=""
   if [[ ${ovnkube_node_mode} == "dpu" ]]; then
@@ -2193,6 +2200,7 @@ ovnkube-controller-with-node() {
     ${representor_metering_nodes_flag} \
     ${ovnkube_cluster_default_nad_flag} \
     ${enable_ovs_native_metrics_flag} \
+    ${kata_dan_conf_dir_flag} \
     ${cluster_access_opts} \
     ${ovnkube_secure_mgmt_port_flag} \
     ${ovn_allow_icmp_netpol_flag} \
@@ -3056,6 +3064,7 @@ ovn-node() {
     fi
   fi
   echo "enable_ovs_native_metrics_flag=${enable_ovs_native_metrics_flag}"
+
   kata_dan_conf_dir_flag=
   if [[ ${ovnkube_enable_kata_dan} == "true" ]]; then
     mkdir -p -m 0700 ${kata_dan_conf_dir}
