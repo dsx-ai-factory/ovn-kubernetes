@@ -104,7 +104,7 @@ func (mp *managementPortRepresentor) checkRepresentorPortHealth() error {
 		origName := config.OvnKubeNode.MgmtPortNetdev
 		link, err := util.GetNetLinkOps().LinkByName(origName)
 		if err != nil {
-			return fmt.Errorf("failed to get link device %s: %w", origName, err)
+			klog.Fatalf("Can't find neither renamed management port %s nor original link device %s: %v, inconsistent state, crashing to recover with fresh start", mp.ifName, origName, err)
 		}
 		err = bringupManagementPortLink(types.DefaultNetworkName, link, nil, mp.ifName, config.Default.MTU)
 		if err != nil {

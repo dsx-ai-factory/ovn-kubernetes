@@ -750,9 +750,6 @@ func configureKubeOVNContext(nodeName string, useNetlink bool) *testCtx {
 				util.OVNNodeHostCIDRs:           `["10.1.1.10/24", "2001:db8::10/64"]`,
 				"k8s.ovn.org/l3-gateway-config": `{"default":{"mac-address":"52:54:00:e2:ed:d0","ip-addresses":["10.1.1.10/24"],"ip-address":"10.1.1.10/24","next-hops":["10.1.1.1"],"next-hop":"10.1.1.1"}}`,
 			},
-			Labels: map[string]string{
-				"kubernetes.io/hostname": nodeName,
-			},
 		},
 		Status: corev1.NodeStatus{
 			Addresses: []corev1.NodeAddress{{Address: "10.1.1.10", Type: corev1.NodeInternalIP}, {Address: "2001:db8::10", Type: corev1.NodeInternalIP}},

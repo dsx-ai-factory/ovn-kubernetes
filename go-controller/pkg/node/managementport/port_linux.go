@@ -310,23 +310,10 @@ func setupManagementPortIPFamilyConfig(link netlink.Link, mpcfg *managementPortC
 				klog.Warningf("Could not remove remove stale IP neighbor entry for IP %s, on iface %s: %v", cfg.gwIP.String(), types.K8sMgmtIntfName, err)
 			}
 		}
-		err = util.LinkNeighAdd(link, cfg.gwIP, mpcfg.gwMAC)
+		err = util.LinkNeighSet(link, cfg.gwIP, mpcfg.gwMAC)
 	}
 	if err != nil {
 		return err
-	}
-
-	protocol := iptables.ProtocolIPv4
-	if mpcfg.ipv6 != nil && cfg == mpcfg.ipv6 {
-		protocol = iptables.ProtocolIPv6
-	}
-
-	// IPv6 forwarding is enabled globally
-	if protocol == iptables.ProtocolIPv4 {
-		err = util.SetforwardingModeForInterface(types.K8sMgmtIntfName)
-		if err != nil {
-			klog.Warning(err)
-		}
 	}
 
 	return nil
@@ -340,6 +327,10 @@ func setupManagementPortConfig(link netlink.Link, cfg *managementPortConfig, rou
 	}
 	if cfg.ipv6 != nil && err == nil {
 		err = setupManagementPortIPFamilyConfig(link, cfg, cfg.ipv6, routeManager)
+	}
+
+	if err == nil {
+		err = util.SetForwardingModeForInterface(types.K8sMgmtIntfName)
 	}
 
 	return err
@@ -749,7 +740,7 @@ func initMgmPortRoutingRules(mgmtCfg *managementPortConfig) error {
 	// lastly update the reverse path filtering options for ovn-k8s-mp0 interface to avoid dropping return packets
 	// NOTE: v6 doesn't have rp_filter strict mode block
 	if config.IPv4Mode {
-		util.SetRPFilterLooseModeForInterface(types.K8sMgmtIntfName)
+		return util.SetRPFilterLooseModeForInterface(types.K8sMgmtIntfName)
 	}
 	return nil
 }

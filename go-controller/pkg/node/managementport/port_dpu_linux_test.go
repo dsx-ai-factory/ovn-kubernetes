@@ -147,9 +147,6 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			node := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "k8s-worker0",
-					Labels: map[string]string{
-						"kubernetes.io/hostname": "k8s-worker0",
-					},
 					Annotations: map[string]string{
 						"k8s.ovn.org/node-mgmt-port-mac-addresses": fmt.Sprintf(`{"default":"%s"}`, expectedMgmtPortMac.String()),
 					},
@@ -205,9 +202,6 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			node := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "k8s-worker0",
-					Labels: map[string]string{
-						"kubernetes.io/hostname": "k8s-worker0",
-					},
 					Annotations: map[string]string{
 						"k8s.ovn.org/node-mgmt-port-mac-addresses": fmt.Sprintf(`{"default":"%s"}`, expectedMgmtPortMac.String()),
 					},
@@ -429,6 +423,11 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			netlinkOpsMock.On("LinkByName", types.K8sMgmtIntfName).Return(linkMock, nil)
 			netlinkOpsMock.On("LinkSetUp", linkMock).Return(nil)
 
+			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
+				Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
+			})
+
 			err = mgmtPort.doReconcile()
 			Expect(err).NotTo(HaveOccurred())
 		})
@@ -461,6 +460,11 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			mockDeviceIDToNetdev(deviceID, types.K8sMgmtIntfName)
 			netlinkOpsMock.On("LinkByName", types.K8sMgmtIntfName).Return(linkMock, nil)
 			netlinkOpsMock.On("LinkSetUp", linkMock).Return(nil)
+
+			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
+				Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
+			})
 
 			err = mgmtPort.doReconcile()
 			Expect(err).NotTo(HaveOccurred())

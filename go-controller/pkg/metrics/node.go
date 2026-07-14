@@ -77,7 +77,6 @@ func RegisterNodeMetrics() {
 			},
 			func() float64 { return 1 },
 		))
-		registerWorkqueueMetrics(types.MetricOvnkubeNamespace, types.MetricOvnkubeSubsystemNode)
 		if err := prometheus.Register(MetricResourceRetryFailuresCount); err != nil {
 			if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
 				panic(err)

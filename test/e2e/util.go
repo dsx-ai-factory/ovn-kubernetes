@@ -57,8 +57,6 @@ const (
 	ovnGatewayMTUSupport = "k8s.ovn.org/gateway-mtu-support"
 )
 
-var singleNodePerZoneResult *bool
-
 type IpNeighbor struct {
 	Dst    string `json:"dst"`
 	Lladdr string `json:"lladdr"`
@@ -381,8 +379,8 @@ func pokeEndpointViaNode(nodeName, protocol, targetHost string, localPort, targe
 
 // wrapper logic around pokeEndpoint
 // contact the ExternalIP service until each endpoint returns its hostname and return true, or false otherwise
-func pokeExternalIpService(externalContainer infraapi.ExternalContainer, protocol, externalAddress string, externalPort int32, maxTries int, nodesHostnames sets.String) bool {
-	responses := sets.NewString()
+func pokeExternalIpService(externalContainer infraapi.ExternalContainer, protocol, externalAddress string, externalPort int32, maxTries int, nodesHostnames sets.Set[string]) bool {
+	responses := sets.New[string]()
 
 	for i := 0; i < maxTries; i++ {
 		epHostname := pokeEndpointViaExternalContainer(externalContainer, protocol, externalAddress, externalPort, "hostname")
@@ -965,185 +963,6 @@ func patchService(c kubernetes.Interface, serviceName, serviceNamespace, jsonPat
 	return nil
 }
 
-func getNodeIPTRules(nodeName string) string {
-	ipt4Rules, err := infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"iptables-save", "-c"})
-	framework.ExpectNoError(err, "failed to get iptables rules from node %s", nodeName)
-	ipt6Rules, err := infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"ip6tables-save", "-c"})
-	framework.ExpectNoError(err, "failed to get ip6tables rules from node %s", nodeName)
-	iptRules := ipt4Rules + ipt6Rules
-	framework.Logf("DEBUG: Dumping IPTRules %v", iptRules)
-	return iptRules
-}
-
-// pokeNodeIPTableRules returns the number of iptables (both ipv6 and ipv4) rules that match the provided pattern
-func pokeNodeIPTableRules(nodeName, pattern string) int {
-	iptRules := getNodeIPTRules(nodeName)
-	numOfMatchRules := 0
-	for _, iptRule := range strings.Split(iptRules, "\n") {
-		match := strings.Contains(iptRule, pattern)
-		if match {
-			framework.Logf("DEBUG: Matched rule %s for pattern %s", iptRule, pattern)
-			numOfMatchRules++
-		}
-	}
-	return numOfMatchRules
-}
-
-func countIPTablesRulesMatches(nodeName string, patterns []string) int {
-	numMatches := 0
-	iptRules := getNodeIPTRules(nodeName)
-	for _, pattern := range patterns {
-		for _, iptRule := range strings.Split(iptRules, "\n") {
-			matched, err := regexp.MatchString(pattern, iptRule)
-			if err == nil && matched {
-				numMatches++
-			}
-		}
-	}
-	return numMatches
-}
-
-type Elem []string
-
-func (e *Elem) UnmarshalJSON(data []byte) error {
-	var str string
-	var i int
-	var concatenation map[string][]json.RawMessage
-	if err := json.Unmarshal(data, &str); err == nil {
-		*e = []string{str}
-		return nil
-	}
-	if err := json.Unmarshal(data, &i); err == nil {
-		*e = []string{fmt.Sprintf("%d", i)}
-		return nil
-	}
-	if err := json.Unmarshal(data, &concatenation); err == nil {
-		concat := concatenation["concat"]
-		for _, rawMsg := range concat {
-			var str string
-			var i int
-			if err := json.Unmarshal(rawMsg, &str); err == nil {
-				*e = append(*e, str)
-			}
-			if err := json.Unmarshal(rawMsg, &i); err == nil {
-				*e = append(*e, fmt.Sprintf("%d", i))
-			}
-		}
-		return nil
-	}
-	return fmt.Errorf("could not unmarshal %s", string(data))
-}
-
-func getNFTablesElements(nodeName, name string) ([]Elem, error) {
-	array := []Elem{}
-
-	nftCmd := []string{"nft", "-j", "list", "set", "inet", "ovn-kubernetes", name}
-	nftElements, err := infraprovider.Get().ExecK8NodeCommand(nodeName, nftCmd)
-	if err != nil {
-		return array, err
-	}
-	framework.Logf("DEBUG: Dumping NFTElements %v", nftElements)
-	// The output will look like
-	//
-	// {
-	//   "nftables": [
-	//     {
-	//       "metainfo": {
-	//         ...
-	//       }
-	//     },
-	//     {
-	//       "set": {
-	//         ...
-	//         "elem": [
-	//           ...
-	//         ]
-	//       }
-	//     }
-	//   ]
-	// }
-	//
-	// (Where the "elem" element will be omitted if the set is empty.)
-
-	jsonResult := map[string][]map[string]map[string]json.RawMessage{}
-	if err := json.Unmarshal([]byte(nftElements), &jsonResult); err != nil {
-		return array, err
-	}
-	elem := jsonResult["nftables"][1]["set"]["elem"]
-	if elem == nil {
-		return array, err
-	}
-	err = json.Unmarshal(elem, &array)
-	return array, err
-}
-
-// countNFTablesElements returns the number of nftables elements in the indicated set
-// of the "ovn-kubernetes" table.
-func countNFTablesElements(nodeName, name string) int {
-	defer ginkgo.GinkgoRecover()
-	array, err := getNFTablesElements(nodeName, name)
-	framework.ExpectNoError(err, "failed to get nftables elements from node %s", nodeName)
-	return len(array)
-}
-
-func countNFTablesRulesMatches(nodeName, name string, sets [][]string) int {
-	numMatches := 0
-	array, err := getNFTablesElements(nodeName, name)
-	framework.ExpectNoError(err, "failed to get nftables elements from node %s", nodeName)
-	for _, set := range sets {
-		for _, elem := range array {
-			if slices.Equal(set, elem) {
-				numMatches++
-			}
-		}
-	}
-	return numMatches
-}
-
-func checkNumberOfETPRules(backendNodeName string, value int, pattern string) wait.ConditionFunc {
-	return func() (bool, error) {
-		numberOfETPRules := pokeNodeIPTableRules(backendNodeName, pattern)
-		isExpected := numberOfETPRules == value
-		if !isExpected {
-			framework.Logf("numberOfETPRules got: %d, expected: %d", numberOfETPRules, value)
-		}
-		return isExpected, nil
-	}
-}
-func checkNumberOfNFTElements(backendNodeName string, value int, name string) wait.ConditionFunc {
-	return func() (bool, error) {
-		numberOfNFTElements := countNFTablesElements(backendNodeName, name)
-		isExpected := numberOfNFTElements == value
-		if !isExpected {
-			framework.Logf("numberOfNFTElements got: %d, expected: %d", numberOfNFTElements, value)
-		}
-		return isExpected, nil
-	}
-}
-
-func checkIPTablesRulesPresent(backendNodeName string, patterns []string) wait.ConditionFunc {
-	return func() (bool, error) {
-		numMatches := countIPTablesRulesMatches(backendNodeName, patterns)
-		isExpected := numMatches == len(patterns)
-		if !isExpected {
-			framework.Logf("checkIPTablesRulesPresent got: numMatches: %d, expected: %d",
-				numMatches, len(patterns))
-		}
-		return isExpected, nil
-	}
-}
-func checkNFTElementsPresent(backendNodeName, name string, sets [][]string) wait.ConditionFunc {
-	return func() (bool, error) {
-		numMatches := countNFTablesRulesMatches(backendNodeName, name, sets)
-		isExpected := numMatches == len(sets)
-		if !isExpected {
-			framework.Logf("checkNFTElementsPresent got: numMatches: %d, expected: %d",
-				numMatches, len(sets))
-		}
-		return isExpected, nil
-	}
-}
-
 // isDualStackCluster returns 'true' if at least one of the nodes has more than one node subnet.
 func isDualStackCluster(nodes *v1.NodeList) bool {
 	for _, node := range nodes.Items {
@@ -1457,27 +1276,8 @@ func isPreConfiguredUdnAddressesEnabled() bool {
 	return val == "true"
 }
 
-func singleNodePerZone() bool {
-	if singleNodePerZoneResult == nil {
-		args := []string{"get", "pods", "--selector=app=ovnkube-node", "-o", "jsonpath={.items[0].spec.containers[*].name}"}
-		containerNames := e2ekubectl.RunKubectlOrDie(deploymentconfig.Get().OVNKubernetesNamespace(), args...)
-		result := true
-		for _, containerName := range strings.Split(containerNames, " ") {
-			if containerName == "ovnkube-node" {
-				result = false
-				break
-			}
-		}
-		singleNodePerZoneResult = &result
-	}
-	return *singleNodePerZoneResult
-}
-
 func getNodeContainerName() string {
-	if singleNodePerZone() {
-		return "ovnkube-controller"
-	}
-	return "ovnkube-node"
+	return "ovnkube-controller"
 }
 
 // getNodeZone returns the node's zone
@@ -1986,6 +1786,35 @@ func waitOVNKubernetesHealthy(f *framework.Framework) error {
 	})
 }
 
+// secondToLastIP returns the second-to-last usable IP in the given subnet.
+// Using the high end of the range avoids collisions with both OVN IPAM
+// (which allocates from lower end onwards) and Docker IPAM (which allocates from lower end onwards).
+// This assumes OVN-K CUDN IPAM won't allocate IPs from the top of the subnet range
+// for pods in these e2e tests.
+// Example: "10.100.0.0/24" -> 10.100.0.253, "fd00:100::/64" -> fd00:100::ffff:ffff:ffff:fffe
+func secondToLastIP(ipNet *net.IPNet) net.IP {
+	// Compute broadcast: network OR inverted mask
+	broadcast := make(net.IP, len(ipNet.IP))
+	for i := range ipNet.IP {
+		broadcast[i] = ipNet.IP[i] | ^ipNet.Mask[i]
+	}
+	// Subtract 2 from broadcast to get second-to-last usable IP
+	result := make(net.IP, len(broadcast))
+	copy(result, broadcast)
+	borrow := byte(2)
+	for i := len(result) - 1; i >= 0 && borrow > 0; i-- {
+		diff := int(result[i]) - int(borrow)
+		if diff < 0 {
+			result[i] = byte(diff + 256)
+			borrow = 1
+		} else {
+			result[i] = byte(diff)
+			borrow = 0
+		}
+	}
+	return result
+}
+
 // waitForNodeReadyState waits for the specified node to reach the desired Ready state within the given timeout
 func waitForNodeReadyState(f *framework.Framework, nodeName string, timeout time.Duration, desiredReady bool) {
 	var stateDescription, expectationMessage string
@@ -2015,4 +1844,18 @@ func waitForNodeReadyState(f *framework.Framework, nodeName string, timeout time
 		}
 		return false
 	}, timeout, 10*time.Second).Should(gomega.BeTrue(), expectationMessage)
+}
+
+// firstSubnetOf returns the first subnet of a given size within the provided
+// subnet
+func firstSubnetOf(subnet string, subnetSize int) string {
+	_, ipNet, err := net.ParseCIDR(subnet)
+	if err != nil {
+		panic(fmt.Sprintf("firstSubnetOf: invalid subnet %q: %v", subnet, err))
+	}
+	ones, bits := ipNet.Mask.Size()
+	if subnetSize < ones || subnetSize > bits {
+		panic(fmt.Sprintf("firstSubnetOf: requested size /%d is not between min /%d and max /%d for %s", subnetSize, ones, bits, subnet))
+	}
+	return fmt.Sprintf("%s/%d", ipNet.IP, subnetSize)
 }

@@ -410,10 +410,7 @@ func initBridgeEIPAddrManager(nodeName, bridgeName string, bridgeEIPAnnot string
 // initBridgeEIPAddrManagerWithHostCIDRs is a variant of initBridgeEIPAddrManager that sets the host-cidrs annotation
 func initBridgeEIPAddrManagerWithHostCIDRs(nodeName, bridgeName string, bridgeEIPAnnot string, hostCIDRs []string) (*BridgeEIPAddrManager, func()) {
 	node := &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:        nodeName,
-			Annotations: map[string]string{},
-			Labels:      map[string]string{"kubernetes.io/hostname": nodeName}},
+		ObjectMeta: metav1.ObjectMeta{Name: nodeName, Annotations: map[string]string{}},
 	}
 	if bridgeEIPAnnot != "" {
 		node.Annotations[util.OVNNodeBridgeEgressIPs] = bridgeEIPAnnot

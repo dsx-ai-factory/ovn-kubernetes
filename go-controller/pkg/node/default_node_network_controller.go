@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/containernetworking/plugins/pkg/ip"
+	"github.com/coreos/go-iptables/iptables"
 	"github.com/vishvananda/netlink"
 
 	corev1 "k8s.io/api/core/v1"
@@ -53,6 +54,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/podresourcesapi"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	nodetypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/types"
+	nodeutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/retry"
@@ -1443,28 +1445,34 @@ func exGatewayPodsAnnotationsChanged(oldNs, newNs *corev1.Namespace) bool {
 	// In reality we only care about exgw pod deletions, however since the list of IPs is not expected to change
 	// that often, let's check for *any* changes to these annotations compared to their previous state and trigger
 	// the logic for checking if we need to delete any conntrack entries
-	return (oldNs.Annotations[util.ExternalGatewayPodIPsAnnotation] != newNs.Annotations[util.ExternalGatewayPodIPsAnnotation]) ||
-		(oldNs.Annotations[util.RoutingExternalGWsAnnotation] != newNs.Annotations[util.RoutingExternalGWsAnnotation])
+	return oldNs.Annotations[util.ExternalGatewayPodIPsAnnotation] != newNs.Annotations[util.ExternalGatewayPodIPsAnnotation]
 }
 
 func (nc *DefaultNodeNetworkController) checkAndDeleteStaleConntrackEntries() {
 	namespaces, err := nc.watchFactory.GetNamespaces()
 	if err != nil {
-		klog.Errorf("Unable to get pods from informer: %v", err)
+		klog.Errorf("Unable to get namespaces from informer: %v", err)
 	}
 	for _, namespace := range namespaces {
-		_, foundRoutingExternalGWsAnnotation := namespace.Annotations[util.RoutingExternalGWsAnnotation]
-		_, foundExternalGatewayPodIPsAnnotation := namespace.Annotations[util.ExternalGatewayPodIPsAnnotation]
-		if foundRoutingExternalGWsAnnotation || foundExternalGatewayPodIPsAnnotation {
-			pods, err := nc.watchFactory.GetPodsOnNode(namespace.Name, nc.name)
-			if err != nil {
-				klog.Warningf("Unable to get pods from informer for namespace %s: %v", namespace.Name, err)
-			}
-			if len(pods) > 0 || err != nil {
-				// we only need to proceed if there is at least one pod in this namespace on this node
-				// OR if we couldn't fetch the pods for some reason at this juncture
-				_ = nc.syncConntrackForExternalGateways(namespace)
-			}
+		// Only namespaces targeted by an AdminPolicyBasedExternalRoute can have
+		// external-gateway ECMP conntrack entries to reconcile (the legacy
+		// routing-external-gws annotation is no longer supported).
+		gatewayIPs, err := nc.apbExternalRouteNodeController.GetAdminPolicyBasedExternalRouteIPsForTargetNamespace(namespace.Name)
+		if err != nil {
+			klog.Errorf("Unable to retrieve gateway IPs for Admin Policy Based External Route objects for namespace %s: %v", namespace.Name, err)
+			continue
+		}
+		if gatewayIPs.Len() == 0 {
+			continue
+		}
+		pods, err := nc.watchFactory.GetPodsOnNode(namespace.Name, nc.name)
+		if err != nil {
+			klog.Warningf("Unable to get pods from informer for namespace %s: %v", namespace.Name, err)
+		}
+		if len(pods) > 0 || err != nil {
+			// we only need to proceed if there is at least one pod in this namespace on this node
+			// OR if we couldn't fetch the pods for some reason at this juncture
+			_ = nc.syncConntrackForExternalGateways(namespace)
 		}
 	}
 }
@@ -1474,10 +1482,8 @@ func (nc *DefaultNodeNetworkController) syncConntrackForExternalGateways(newNs *
 	if err != nil {
 		return fmt.Errorf("unable to retrieve gateway IPs for Admin Policy Based External Route objects: %w", err)
 	}
-	// loop through all the IPs on the annotations; ARP for their MACs and form an allowlist
-	gatewayIPs = gatewayIPs.Insert(strings.Split(newNs.Annotations[util.ExternalGatewayPodIPsAnnotation], ",")...)
-	gatewayIPs = gatewayIPs.Insert(strings.Split(newNs.Annotations[util.RoutingExternalGWsAnnotation], ",")...)
-
+	// ARP for the gateway IPs' MACs to form an allowlist; conntrack entries whose
+	// destination MAC is no longer valid (e.g. after a gateway MAC change) are removed.
 	return util.SyncConntrackForExternalGateways(gatewayIPs, nil, func() ([]*corev1.Pod, error) {
 		return nc.watchFactory.GetPodsOnNode(newNs.Name, nc.name)
 	})
@@ -1833,22 +1839,20 @@ func DummyMasqueradeIPs() []net.IP {
 	return nextHops
 }
 
-// configureGlobalForwarding configures the global forwarding settings.
-// It sets the FORWARD policy to DROP/ACCEPT based on the config.Gateway.DisableForwarding value for all enabled IP families.
-// For IPv6 it additionally always enables the global forwarding.
+// configureGlobalForwarding configures the global forwarding settings for IPv6 when
+// per-interface forwarding is not available. It enables global forwarding, and sets the
+// ip6tables FORWARD policy to DROP if config.Gateway.DisableForwarding is set (or sets it
+// back to ACCEPT if it had previously set it DROP and DisableForwarding is now unset).
+//
+// This function assumes that other forwarding setup will also be performed. Specifically,
+// you must call util.SetForwardingModeForInterface() to enable per-interface
+// forwarding on the interfaces that need it (the bridge and management port interfaces).
+// And if config.Gateway.DisableForwarding is set, you must call
+// initExternalBridgeServiceForwardingRules() to create netfilter rules to forward the
+// traffic that OVN-Kubernetes needs, and block other traffic from being forwarded.
 func configureGlobalForwarding() error {
-	// Global forwarding works differently for IPv6:
-	//   conf/all/forwarding - BOOLEAN
-	//    Enable global IPv6 forwarding between all interfaces.
-	//	  IPv4 and IPv6 work differently here; e.g. netfilter must be used
-	//	  to control which interfaces may forward packets and which not.
-	// https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt
-	//
-	// It is not possible to configure the IPv6 forwarding per interface by
-	// setting the net.ipv6.conf.<ifname>.forwarding sysctl. Instead,
-	// the opposite approach is required where the global forwarding
-	// is enabled and an iptables rule is added to restrict it by default.
-	if config.IPv6Mode {
+	if config.IPv6Mode && !util.SupportsIPv6InterfaceForwarding() {
+		// Enable global forwarding since per-interface forwarding isn't available.
 		if err := ip.EnableIP6Forward(); err != nil {
 			return fmt.Errorf("could not set the correct global forwarding value for ipv6:  %w", err)
 		}
@@ -1861,15 +1865,34 @@ func configureGlobalForwarding() error {
 			return fmt.Errorf("failed to get the iptables helper: %w", err)
 		}
 
-		target := "ACCEPT"
-		if config.Gateway.DisableForwarding {
-			target = "DROP"
-
+		desiredPolicy := ""
+		if nodeutil.NeedIPTablesForwardingRules(proto) {
+			desiredPolicy = "DROP"
+		} else {
+			// If there's evidence that we previously configured
+			// DisableForwarding, then change the policy back to ACCEPT now.
+			// (Note that the rules we look for here will be deleted later
+			// by the gateway setup.)
+			masqueradeIP := config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP
+			if proto == iptables.ProtocolIPv6 {
+				masqueradeIP = config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP
+			}
+			forwardRules := getMasqueradeIpTablesForwardRules(masqueradeIP, proto)
+			if len(forwardRules) != 0 {
+				rule := forwardRules[0]
+				if ruleExists, _ := ipt.Exists(rule.Table, rule.Chain, rule.Args...); ruleExists {
+					desiredPolicy = "ACCEPT"
+				}
+			}
 		}
-		if err := ipt.ChangePolicy("filter", "FORWARD", target); err != nil {
-			return fmt.Errorf("failed to change the forward policy to %q: %w", target, err)
+
+		if desiredPolicy != "" {
+			if err := ipt.ChangePolicy("filter", "FORWARD", desiredPolicy); err != nil {
+				return fmt.Errorf("failed to change the forward policy to %q: %w", desiredPolicy, err)
+			}
 		}
 	}
+
 	return nil
 }
 
