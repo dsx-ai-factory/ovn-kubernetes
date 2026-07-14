@@ -94,17 +94,10 @@ func (mp *managementPortRepresentor) checkRepresentorPortHealth() error {
 	link, err := util.GetNetLinkOps().LinkByName(mp.ifName)
 	if err != nil {
 		klog.Warningf("Failed to get link device %s: %v", mp.ifName, err)
-		// Get original management port representor link name
-		if config.OvnKubeNode.MgmtPortNetdev == "" {
-			// The representor is identified by k8s.ovn.org/node-mgmt-port annotation
-			errStr := fmt.Sprintf("Management port representor link name %s has changed, fatal error", mp.ifName)
-			klog.Fatalf("%v", errStr)
-			return fmt.Errorf("%v", errStr)
-		}
-		origName := config.OvnKubeNode.MgmtPortNetdev
-		link, err := util.GetNetLinkOps().LinkByName(origName)
+		// Get management port representor by name
+		link, err := util.GetNetLinkOps().LinkByName(mp.repDevName)
 		if err != nil {
-			return fmt.Errorf("failed to get link device %s: %w", origName, err)
+			klog.Fatalf("Can't find neither renamed management port %s nor original representor device %s: %v, inconsistent state, crashing to recover with fresh start", mp.ifName, mp.repDevName, err)
 		}
 		err = bringupManagementPortLink(types.DefaultNetworkName, link, nil, mp.ifName, config.Default.MTU)
 		if err != nil {

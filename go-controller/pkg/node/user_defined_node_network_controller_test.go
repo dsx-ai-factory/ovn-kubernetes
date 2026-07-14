@@ -82,9 +82,6 @@ var _ = Describe("UserDefinedNodeNetworkController", func() {
 			{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "worker1",
-					Labels: map[string]string{
-						"kubernetes.io/hostname": "worker1",
-					},
 					Annotations: map[string]string{
 						"k8s.ovn.org/network-ids": `{"bluenet": "3"}`,
 					},
@@ -110,9 +107,6 @@ var _ = Describe("UserDefinedNodeNetworkController", func() {
 			{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "worker1",
-					Labels: map[string]string{
-						"kubernetes.io/hostname": "worker1",
-					},
 					Annotations: map[string]string{
 						"k8s.ovn.org/network-ids": `{"bluenet": "3"}`,
 					},
@@ -145,9 +139,6 @@ var _ = Describe("UserDefinedNodeNetworkController", func() {
 			{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "worker1",
-					Labels: map[string]string{
-						"kubernetes.io/hostname": "worker1",
-					},
 					Annotations: map[string]string{
 						"k8s.ovn.org/network-ids": `{"bluenet": "3"}`,
 					},
@@ -304,9 +295,6 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 		node := &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
-				Labels: map[string]string{
-					"kubernetes.io/hostname": nodeName,
-				},
 				Annotations: map[string]string{
 					"k8s.ovn.org/network-ids":       fmt.Sprintf("{\"%s\": \"%d\"}", netName, netID),
 					"k8s.ovn.org/node-subnets":      fmt.Sprintf("{\"%s\":[\"%s\", \"%s\"]}", netName, v4NodeSubnet, v6NodeSubnet),

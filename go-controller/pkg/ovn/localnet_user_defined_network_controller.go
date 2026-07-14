@@ -26,7 +26,6 @@ import (
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/addresssetmanager"
 	lsm "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/persistentips"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -139,9 +138,6 @@ func (h *LocalnetUserDefinedNetworkControllerEventHandler) SyncFunc(objs []inter
 		case factory.MultiNetworkPolicyType:
 			syncFunc = h.oc.syncMultiNetworkPolicies
 
-		case factory.IPAMClaimsType:
-			syncFunc = h.oc.syncIPAMClaims
-
 		default:
 			return fmt.Errorf("no sync function for object type %s", h.objType)
 		}
@@ -209,21 +205,11 @@ func NewLocalnetUserDefinedNetworkController(
 	}
 
 	if oc.allocatesPodAnnotation() {
-		var claimsReconciler persistentips.PersistentAllocations
-		if oc.allowPersistentIPs() {
-			ipamClaimsReconciler := persistentips.NewIPAMClaimReconciler(
-				oc.kube,
-				oc.GetNetInfo(),
-				oc.watchFactory.IPAMClaimsInformer().Lister(),
-			)
-			oc.ipamClaimsReconciler = ipamClaimsReconciler
-			claimsReconciler = ipamClaimsReconciler
-		}
 		oc.podAnnotationAllocator = pod.NewPodAnnotationAllocator(
 			netInfo,
 			cnci.watchFactory.PodCoreInformer().Lister(),
 			cnci.kube,
-			claimsReconciler)
+			nil)
 	}
 
 	// disable multicast support for UDNs
@@ -331,9 +317,6 @@ func (oc *LocalnetUserDefinedNetworkController) SyncNodes(nodes []*corev1.Node) 
 
 func (oc *LocalnetUserDefinedNetworkController) initRetryFramework() {
 	oc.retryPods = oc.newRetryFramework(factory.PodType)
-	if oc.allocatesPodAnnotation() && oc.AllowsPersistentIPs() {
-		oc.retryIPAMClaims = oc.newRetryFramework(factory.IPAMClaimsType)
-	}
 
 	// For secondary networks, we don't have to watch namespace events if
 	// multi-network policy support is not enabled. We don't support

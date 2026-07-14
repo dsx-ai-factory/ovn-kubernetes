@@ -74,9 +74,10 @@ var OvsExporterCommand = cli.Command{
 			EnableOVSMetrics: true,
 			OnFatalError:     cancel,
 			NodeName:         hostName,
+			OVSDBClient:      ovsClient,
 		}
 
-		metrics.StartOVNMetricsServer(opts, ovsClient, nil, innerCtx.Done(), wg)
+		_ = metrics.StartMetricsServer(opts, innerCtx.Done(), wg)
 
 		// run until cancelled (by OS signal or fatal error)
 		<-innerCtx.Done()

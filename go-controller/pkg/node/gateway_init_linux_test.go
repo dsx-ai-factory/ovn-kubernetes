@@ -145,8 +145,8 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			"ovs-vsctl --timeout=15 -- --if-exists del-port br-int " + mpPortLegacyName + " -- --may-exist add-port br-int " + mpPortName + " -- set interface " + mpPortName + " mac=\"0a:58:0a:01:01:02\" type=internal mtu_request=" + mtu + " external-ids:iface-id=" + mpPortLegacyName,
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "sysctl net/ipv4/conf/ovn-k8s-mp0/forwarding",
-			Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
+			Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding=1",
+			Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding=1",
 		})
 
 		// gateway commands
@@ -175,8 +175,8 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		})
 		if config.IPv4Mode {
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl net/ipv4/conf/breth0/forwarding",
-				Output: "net.ipv4.conf.breth0.forwarding = 1",
+				Cmd:    "sysctl -w net.ipv4.conf.breth0.forwarding=1",
+				Output: "net.ipv4.conf.breth0.forwarding=1",
 			})
 		}
 
@@ -222,8 +222,8 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Output: "0",
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "sysctl net/ipv4/conf/ovn-k8s-mp0/rp_filter",
-			Output: "net.ipv4.conf.ovn-k8s-mp0.rp_filter = 2",
+			Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.rp_filter=2",
+			Output: "net.ipv4.conf.ovn-k8s-mp0.rp_filter=2",
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovs-ofctl -O OpenFlow13 --bundle replace-flows breth0 -",
@@ -268,8 +268,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 
 		existingNode := corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:   nodeName,
-				Labels: map[string]string{"kubernetes.io/hostname": nodeName},
+				Name: nodeName,
 				Annotations: map[string]string{
 					// add some fake previous subnets to force OVNK to try to clean it
 					util.OvnNodeMasqCIDR: "{\"ipv4\":\"170.254.0.0/16\",\"ipv6\":\"fa69::/112\"}",
@@ -649,13 +648,13 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		})
 		if config.IPv4Mode {
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl net/ipv4/conf/brp0/forwarding",
-				Output: "net.ipv4.conf.brp0.forwarding = 1",
+				Cmd:    "sysctl -w net.ipv4.conf.brp0.forwarding=1",
+				Output: "net.ipv4.conf.brp0.forwarding=1",
 			})
 		}
 		if config.IPv6Mode {
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl net/ipv6/conf/brp0/forwarding",
+				Cmd:    "sysctl -w net/ipv6/conf/brp0/forwarding=1",
 				Output: "net.ipv6.conf.brp0.forwarding = 1",
 			})
 		}
@@ -760,8 +759,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 
 		nodeAddr := corev1.NodeAddress{Type: corev1.NodeInternalIP, Address: dpuIP}
 		existingNode := corev1.Node{ObjectMeta: metav1.ObjectMeta{
-			Name:   nodeName,
-			Labels: map[string]string{"kubernetes.io/hostname": nodeName},
+			Name: nodeName,
 		},
 			Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{nodeAddr}},
 		}
@@ -922,8 +920,7 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 
 		nodeAddr := corev1.NodeAddress{Type: corev1.NodeInternalIP, Address: hostIP}
 		existingNode := corev1.Node{ObjectMeta: metav1.ObjectMeta{
-			Name:   nodeName,
-			Labels: map[string]string{"kubernetes.io/hostname": nodeName},
+			Name: nodeName,
 		},
 			Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{nodeAddr}},
 		}
@@ -1123,8 +1120,8 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 			"ovs-vsctl --timeout=15 -- --if-exists del-port br-int " + mpPortLegacyName + " -- --may-exist add-port br-int " + mpPortName + " -- set interface " + mpPortName + " mac=\"0a:58:0a:01:01:02\" type=internal mtu_request=" + mtu + " external-ids:iface-id=" + mpPortLegacyName,
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "sysctl net/ipv4/conf/ovn-k8s-mp0/forwarding",
-			Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
+			Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding=1",
+			Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding=1",
 		})
 
 		// gateway commands
@@ -1162,8 +1159,8 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		})
 		if config.IPv4Mode {
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl net/ipv4/conf/breth0/forwarding",
-				Output: "net.ipv4.conf.breth0.forwarding = 1",
+				Cmd:    "sysctl -w net.ipv4.conf.breth0.forwarding=1",
+				Output: "net.ipv4.conf.breth0.forwarding=1",
 			})
 		}
 
@@ -1211,8 +1208,8 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 			Output: "0",
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "sysctl net/ipv4/conf/ovn-k8s-mp0/rp_filter",
-			Output: "net.ipv4.conf.ovn-k8s-mp0.rp_filter = 2",
+			Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.rp_filter=2",
+			Output: "net.ipv4.conf.ovn-k8s-mp0.rp_filter=2",
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-ofctl show breth0",
@@ -1255,8 +1252,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		Expect(err).NotTo(HaveOccurred())
 		nodeAddr := corev1.NodeAddress{Type: corev1.NodeInternalIP, Address: expectedAddr.IP.String()}
 		existingNode := corev1.Node{ObjectMeta: metav1.ObjectMeta{
-			Name:   nodeName,
-			Labels: map[string]string{"kubernetes.io/hostname": nodeName},
+			Name: nodeName,
 		},
 			Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{nodeAddr}},
 		}
@@ -1463,21 +1459,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 				"OVN-KUBE-ETP": []string{},
 				"OVN-KUBE-ITP": []string{},
 			},
-			"filter": {
-				"FORWARD": []string{
-					"-d 169.254.169.1 -j ACCEPT",
-					"-s 169.254.169.1 -j ACCEPT",
-					"-d 172.16.1.0/24 -j ACCEPT",
-					"-s 172.16.1.0/24 -j ACCEPT",
-					"-d 10.1.0.0/16 -j ACCEPT",
-					"-s 10.1.0.0/16 -j ACCEPT",
-					"-i ovn-k8s-mp0 -j ACCEPT",
-					"-o ovn-k8s-mp0 -j ACCEPT",
-				},
-				"INPUT": []string{
-					"-i ovn-k8s-mp0 -m comment --comment from OVN to localhost -j ACCEPT",
-				},
-			},
+			"filter": {},
 			"mangle": {
 				"OUTPUT": []string{
 					"-j OVN-KUBE-ITP",
@@ -1486,10 +1468,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 			},
 		}
 		f4 := iptV4.(*util.FakeIPTables)
-		err = f4.MatchState(expectedTables, map[util.FakePolicyKey]string{{
-			Table: "filter",
-			Chain: "FORWARD",
-		}: "DROP"})
+		err = f4.MatchState(expectedTables, nil)
 		Expect(err).NotTo(HaveOccurred())
 
 		expectedTables = map[string]util.FakeTable{
@@ -1941,6 +1920,52 @@ var _ = Describe("Gateway unit tests", func() {
 			}()
 			err = configureSvcRouteViaInterface(rm, "ens1f0", gwIPs)
 			Expect(err).To(HaveOccurred())
+		})
+	})
+
+	Context("configureDPUHostNoOverlayPodCIDRRoute", func() {
+		It("configures pod CIDR routes on interface without a route source", func() {
+			_, ipnet, err := net.ParseCIDR("10.244.0.0/16")
+			Expect(err).ToNot(HaveOccurred())
+			config.Default.ClusterSubnets = []config.CIDRNetworkEntry{{CIDR: ipnet, HostSubnetLength: 24}}
+			gwIPs := []net.IP{net.ParseIP("169.254.0.4")}
+
+			lnk := &linkMock.Link{}
+			lnkAttr := &netlink.LinkAttrs{
+				Name:  "ens1f0",
+				Index: 5,
+			}
+			expectedRoute := &netlink.Route{
+				Dst:       ipnet,
+				LinkIndex: 5,
+				Scope:     netlink.SCOPE_UNIVERSE,
+				Gw:        gwIPs[0],
+				MTU:       config.Default.MTU,
+				Table:     syscall.RT_TABLE_MAIN,
+			}
+
+			lnk.On("Attrs").Return(lnkAttr)
+			netlinkMock.On("LinkByName", lnkAttr.Name).Return(lnk, nil)
+			netlinkMock.On("LinkByIndex", lnkAttr.Index).Return(lnk, nil)
+			netlinkMock.On("LinkSetUp", mock.Anything).Return(nil)
+			netlinkMock.On("RouteReplace", expectedRoute).Return(nil)
+
+			wg := &sync.WaitGroup{}
+			rm := routemanager.NewController()
+			util.SetNetLinkOpMockInst(netlinkMock)
+			stopCh := make(chan struct{})
+			wg.Add(1)
+			go func() {
+				rm.Run(stopCh, 10*time.Second)
+				wg.Done()
+			}()
+			defer func() {
+				close(stopCh)
+				wg.Wait()
+			}()
+
+			err = configureDPUHostNoOverlayPodCIDRRoute(rm, "ens1f0", gwIPs)
+			Expect(err).ToNot(HaveOccurred())
 		})
 	})
 

@@ -31,6 +31,7 @@ import (
 	kexec "k8s.io/utils/exec"
 	utilnet "k8s.io/utils/net"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/tls"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 )
 
@@ -70,6 +71,15 @@ const DefaultDBTxnTimeout = time.Second * 100
 
 // DefaultEphemeralPortRange is used for unit testing only
 const DefaultEphemeralPortRange = "32768-60999"
+
+// MinimumRoutingTableIDStart is the lowest allowed start of OVN-managed Linux route table IDs.
+const MinimumRoutingTableIDStart = 1000
+
+// MaximumRoutingTableIDStart is capped so adding any Linux interface index still fits in a uint32 route table ID.
+const MaximumRoutingTableIDStart = 1<<31 - 1
+
+// DefaultRoutingTableIDStart is the default start of OVN-managed Linux route table IDs.
+const DefaultRoutingTableIDStart = MinimumRoutingTableIDStart
 
 // The following are global config parameters that other modules may access directly
 var (
@@ -168,6 +178,9 @@ var (
 	// Metrics holds Prometheus metrics-related parameters.
 	Metrics MetricsConfig
 
+	// TLS holds TLS-related configuration parameters.
+	TLS TLSConfig
+
 	// OVNKubernetesFeature config holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
 	OVNKubernetesFeature = OVNKubernetesFeatureConfig{
 		EgressIPReachabiltyTotalTimeout: 1,
@@ -248,6 +261,7 @@ var (
 		MinRevalidatePPS:          -1,
 		DPUNodeLeaseRenewInterval: 10,
 		DPUNodeLeaseDuration:      40,
+		RoutingTableIDStart:       DefaultRoutingTableIDStart,
 	}
 
 	ClusterManager = ClusterManagerConfig{
@@ -514,6 +528,30 @@ type MetricsConfig struct {
 	EnableOvsNativeMetrics bool `gcfg:"enable-ovs-native-metrics"`
 }
 
+// TLSConfig holds TLS-related configuration parameters.
+type TLSConfig struct {
+	MinVersion   string `gcfg:"tls-min-version"`
+	CipherSuites string `gcfg:"tls-cipher-suites"`
+
+	// ApplyOptions is the parsed and validated TLS configuration function
+	// that can be applied to tls.Config. This is populated during config
+	// initialization and should not be set via config file or CLI.
+	ApplyOptions tls.ApplyConfigOptions
+}
+
+// ParseCipherSuites parses the comma-separated CipherSuites string into a slice.
+// Trims whitespace and filters out empty strings.
+func (c *TLSConfig) ParseCipherSuites() []string {
+	suites := strings.Split(c.CipherSuites, ",")
+	result := make([]string, 0, len(suites))
+	for _, suite := range suites {
+		if trimmed := strings.TrimSpace(suite); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
 // OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
 type OVNKubernetesFeatureConfig struct {
 	// Admin Network Policy feature is enabled
@@ -609,7 +647,7 @@ type GatewayConfig struct {
 	VLANID uint `gcfg:"vlan-id"`
 	// NodeportEnable sets whether to provide Kubernetes NodePort service or not
 	NodeportEnable bool `gcfg:"nodeport"`
-	// DisableSNATMultipleGws sets whether to disable SNAT of egress traffic in namespaces annotated with routing-external-gws
+	// DisableSNATMultipleGws sets whether to disable SNAT of egress traffic in namespaces with external gateways configured via AdminPolicyBasedExternalRoute CRs
 	// only applicable to the default network not for UDNs
 	DisableSNATMultipleGWs bool `gcfg:"disable-snat-multiple-gws"`
 	// V4JoinSubnet to be used in the cluster
@@ -633,7 +671,7 @@ type GatewayConfig struct {
 	RouterSubnet string `gcfg:"router-subnet"`
 	// SingeNode indicates the cluster has only one node
 	SingleNode bool `gcfg:"single-node"`
-	// DisableForwarding (enabled by default) controls if forwarding is allowed on OVNK controlled interfaces
+	// DisableForwarding controls if IPv6 forwarding is blocked on non-OVNK controlled interfaces when using older kernels
 	DisableForwarding bool `gcfg:"disable-forwarding"`
 	// AllowNoUplink (disabled by default) controls if the external gateway bridge without an uplink port is allowed in local gateway mode.
 	AllowNoUplink bool `gcfg:"allow-no-uplink"`
@@ -706,13 +744,10 @@ type HybridOverlayConfig struct {
 
 // OvnKubeNodeConfig holds ovnkube-node configurations
 type OvnKubeNodeConfig struct {
-	Mode                   string `gcfg:"mode"`
-	MgmtPortNetdev         string `gcfg:"mgmt-port-netdev"`
-	MgmtPortDPResourceName string `gcfg:"mgmt-port-dp-resource-name"`
-	IsPrimaryDPU           bool
-	MaxRevalidator         uint `gcfg:"ovs-max-revalidator"`
-	MinRevalidatePPS       int  `gcfg:"ovs-min-revalidate-pps"`
-	MaxIdle                uint `gcfg:"ovs-max-idle"`
+	IsPrimaryDPU     bool
+	MaxRevalidator   uint `gcfg:"ovs-max-revalidator"`
+	MinRevalidatePPS int  `gcfg:"ovs-min-revalidate-pps"`
+	MaxIdle          uint `gcfg:"ovs-max-idle"`
 	// RepresentorMeteringNodes is the node label whose value will be used
 	// to determine if representor metering feature will be applied or not
 	RepresentorMeteringNodes string `gcfg:"representor-metering-nodes"`
@@ -726,9 +761,14 @@ type OvnKubeNodeConfig struct {
 	// map key is protocol type (tcp/udp for now), value is list of ports
 	SkipCTMarkHostPorts map[string][]string
 
-	DPUNodeLeaseRenewInterval int  `gcfg:"dpu-node-lease-renew-interval"`
-	DPUNodeLeaseDuration      int  `gcfg:"dpu-node-lease-duration"`
-	SimulateDPU               bool `gcfg:"simulate-dpu"`
+	Mode                      string `gcfg:"mode"`
+	MgmtPortNetdev            string `gcfg:"mgmt-port-netdev"`
+	MgmtPortDPResourceName    string `gcfg:"mgmt-port-dp-resource-name"`
+	DPUNodeLeaseRenewInterval int    `gcfg:"dpu-node-lease-renew-interval"`
+	DPUNodeLeaseDuration      int    `gcfg:"dpu-node-lease-duration"`
+	SimulateDPU               bool   `gcfg:"simulate-dpu"`
+	// RoutingTableIDStart is added to interface indexes to derive OVN-managed Linux route table IDs.
+	RoutingTableIDStart int `gcfg:"routing-table-id-start"`
 }
 
 // ClusterManagerConfig holds configuration for ovnkube-cluster-manager
@@ -780,6 +820,7 @@ type config struct {
 	OVNKubernetesFeature OVNKubernetesFeatureConfig
 	Kubernetes           KubernetesConfig
 	Metrics              MetricsConfig
+	TLS                  TLSConfig
 	OvnNorth             OvnAuthConfig
 	OvnSouth             OvnAuthConfig
 	Gateway              GatewayConfig
@@ -801,6 +842,7 @@ var (
 	savedOVNKubernetesFeature OVNKubernetesFeatureConfig
 	savedKubernetes           KubernetesConfig
 	savedMetrics              MetricsConfig
+	savedTLS                  TLSConfig
 	savedOvnNorth             OvnAuthConfig
 	savedOvnSouth             OvnAuthConfig
 	savedGateway              GatewayConfig
@@ -832,6 +874,7 @@ func init() {
 	savedOVNKubernetesFeature = OVNKubernetesFeature
 	savedKubernetes = Kubernetes
 	savedMetrics = Metrics
+	savedTLS = TLS
 	savedOvnNorth = OvnNorth
 	savedOvnSouth = OvnSouth
 	savedGateway = Gateway
@@ -865,6 +908,7 @@ func PrepareTestConfig() error {
 	OVNKubernetesFeature = savedOVNKubernetesFeature
 	Kubernetes = savedKubernetes
 	Metrics = savedMetrics
+	TLS = savedTLS
 	OvnNorth = savedOvnNorth
 	OvnSouth = savedOvnSouth
 	Gateway = savedGateway
@@ -1658,6 +1702,20 @@ var MetricsFlags = []cli.Flag{
 	},
 }
 
+// TLSFlags capture TLS-related options
+var TLSFlags = []cli.Flag{
+	&cli.StringFlag{
+		Name:        "tls-min-version",
+		Usage:       "Minimum TLS version supported",
+		Destination: &cliConfig.TLS.MinVersion,
+	},
+	&cli.StringFlag{
+		Name:        "tls-cipher-suites",
+		Usage:       "Comma-separated list of cipher suites (TLS 1.0-1.2 only; ignored for TLS 1.3)",
+		Destination: &cliConfig.TLS.CipherSuites,
+	},
+}
+
 // OvnNBFlags capture OVN northbound database options. The cert/key flags
 // below are no longer used for OVN DB connection (which is unix-socket only)
 // but their values are still consumed by the Egress IP gRPC health-check
@@ -1778,8 +1836,9 @@ var OVNGatewayFlags = []cli.Flag{
 		Destination: &cliConfig.Gateway.DisableSNATMultipleGWs,
 	},
 	&cli.BoolFlag{
-		Name:        "disable-forwarding",
-		Usage:       "Disable forwarding on OVNK controlled interfaces.",
+		Name: "disable-forwarding",
+		Usage: "Disable IPv6 forwarding except on OVNK controlled interfaces when using " +
+			"an older kernel that doesn't allow per-interface IPv6 forwarding.",
 		Destination: &cliConfig.Gateway.DisableForwarding,
 	},
 	&cli.StringFlag{
@@ -1989,6 +2048,14 @@ var OvnKubeNodeFlags = []cli.Flag{
 		Value:       OvnKubeNode.SimulateDPU,
 		Destination: &cliConfig.OvnKubeNode.SimulateDPU,
 	},
+	&cli.IntFlag{
+		Name: "ovnkube-node-routing-table-id-start",
+		Usage: fmt.Sprintf("Start of the Linux route table ID range managed by ovnkube-node "+
+			"for generated VRF and route tables. Must be between %d and %d",
+			MinimumRoutingTableIDStart, MaximumRoutingTableIDStart),
+		Value:       OvnKubeNode.RoutingTableIDStart,
+		Destination: &cliConfig.OvnKubeNode.RoutingTableIDStart,
+	},
 }
 
 // ClusterManagerFlags captures ovnkube-cluster-manager specific configurations
@@ -2029,6 +2096,7 @@ func GetFlags(customFlags []cli.Flag) []cli.Flag {
 	flags = append(flags, OVNK8sFeatureFlags...)
 	flags = append(flags, K8sFlags...)
 	flags = append(flags, MetricsFlags...)
+	flags = append(flags, TLSFlags...)
 	flags = append(flags, OvnNBFlags...)
 	flags = append(flags, OvnSBFlags...)
 	flags = append(flags, OVNGatewayFlags...)
@@ -2297,6 +2365,27 @@ func buildMetricsConfig(cli, file *config) error {
 	// And CLI overrides over config file, Kubernetes, and default values
 	if err := overrideFields(&Metrics, &cli.Metrics, &savedMetrics); err != nil {
 		return err
+	}
+
+	return nil
+}
+
+func buildTLSConfig(cli, file *config) error {
+	// Copy config file values over default values
+	if err := overrideFields(&TLS, &file.TLS, &savedTLS); err != nil {
+		return err
+	}
+
+	// And CLI overrides over config file and default values
+	if err := overrideFields(&TLS, &cli.TLS, &savedTLS); err != nil {
+		return err
+	}
+
+	// Parse and validate the TLS config, storing the result
+	var err error
+	TLS.ApplyOptions, err = tls.NewApplyConfigOptions(TLS.MinVersion, TLS.ParseCipherSuites())
+	if err != nil {
+		return fmt.Errorf("invalid TLS configuration: %v", err)
 	}
 
 	return nil
@@ -2933,6 +3022,10 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
+	if err = buildTLSConfig(&cliConfig, &cfg); err != nil {
+		return "", err
+	}
+
 	if err = buildOVNKubernetesFeatureConfig(&cliConfig, &cfg); err != nil {
 		return "", err
 	}
@@ -3167,6 +3260,14 @@ func buildOvnKubeNodeConfig(cli, file *config) error {
 	if OvnKubeNode.DPUNodeLeaseDuration <= OvnKubeNode.DPUNodeLeaseRenewInterval {
 		return fmt.Errorf("invalid dpu-node-lease-duration '%d'. must be > dpu-node-lease-renew-interval '%d'",
 			OvnKubeNode.DPUNodeLeaseDuration, OvnKubeNode.DPUNodeLeaseRenewInterval)
+	}
+	if OvnKubeNode.RoutingTableIDStart < MinimumRoutingTableIDStart {
+		return fmt.Errorf("invalid routing-table-id-start '%d'. must be >= %d",
+			OvnKubeNode.RoutingTableIDStart, MinimumRoutingTableIDStart)
+	}
+	if OvnKubeNode.RoutingTableIDStart > MaximumRoutingTableIDStart {
+		return fmt.Errorf("invalid routing-table-id-start '%d'. must be <= %d",
+			OvnKubeNode.RoutingTableIDStart, MaximumRoutingTableIDStart)
 	}
 
 	// Warn the user if both MgmtPortNetdev and MgmtPortDPResourceName are specified since they
