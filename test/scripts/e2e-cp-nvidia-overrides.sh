@@ -87,7 +87,6 @@ if [ "${KIND_INSTALL_METALLB:-false}" = "false" ]; then
 fi
 
 # NVIDIA known unsupported tests.
-skip "e2e delete databases"
 skip "Pod to external server PMTUD"
 skip "Should validate correct DSCP value on pod labels changes"
 skip "Node IP address migration"
