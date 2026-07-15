@@ -2172,7 +2172,6 @@ ovnkube-controller-with-node() {
     --metrics-bind-address ${metrics_bind_address} \
     --metrics-enable-pprof \
     --mtu=${mtu} \
-    --nodeport \
     --ovn-config-namespace ${ovn_kubernetes_namespace} \
     --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
     --pidfile ${OVN_RUNDIR}/ovnkube-controller-with-node.pid \
