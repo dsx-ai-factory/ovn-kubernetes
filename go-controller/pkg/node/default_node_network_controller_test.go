@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"syscall"
@@ -1125,6 +1126,9 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.253.61 }
 				Expect(err).NotTo(HaveOccurred())
 				err = netlink.LinkSetUp(link)
 				Expect(err).NotTo(HaveOccurred())
+
+				// New dummy links may inherit disable_ipv6=1; enable before AddrAdd.
+				Expect(os.WriteFile(fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/disable_ipv6", ethName), []byte("0\n"), 0o644)).To(Succeed())
 
 				// Add an IP address
 				addr, err := netlink.ParseAddr(ethCIDR)
