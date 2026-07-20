@@ -3151,14 +3151,26 @@ spec:
 
 				ctx, ctxCancel := context.WithCancel(context.Background())
 				monitorOutput := ""
+				monitorReady := make(chan struct{})
 				finishedMonitor := make(chan struct{})
 				go func() {
+					defer ginkgo.GinkgoRecover()
 					defer close(finishedMonitor)
 					var monitorErr error
-					monitorOutput, monitorErr = monitorTcpdumpOnNode(ctx, f, monitorPodName, egress1Node.name, secondaryIface.InfName,
+					monitorOutput, monitorErr = monitorTcpdumpOnNode(ctx, f, monitorReady, monitorPodName, egress1Node.name, secondaryIface.InfName,
 						"-n -vv -l", monitorFilter)
 					framework.ExpectNoError(monitorErr, "Failed to read monitor pod logs")
 				}()
+				// Wait until the monitor pod is actually capturing before generating traffic,
+				// otherwise the capture window can miss the EgressIP transition (and ctxCancel in
+				// Step 8 could race the pod's startup). If the goroutine finishes before signalling
+				// readiness, the monitor pod failed to start: abort instead of running a meaningless
+				// leak check (the goroutine's GinkgoRecover has already recorded the failure).
+				select {
+				case <-monitorReady:
+				case <-finishedMonitor:
+					framework.Failf("Traffic monitor pod failed to start on node %s; aborting leak test", egress1Node.name)
+				}
 				framework.Logf("Traffic monitor pod started on node %s", egress1Node.name)
 
 				ginkgo.By(fmt.Sprintf("Step 4: Create %d pods FIRST (before EgressIP exists)", numTestPods))

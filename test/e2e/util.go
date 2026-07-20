@@ -1862,10 +1862,11 @@ func firstSubnetOf(subnet string, subnetSize int) string {
 }
 
 // monitorTcpdumpOnNode creates a privileged host-network pod on the given node that runs
-// tcpdump on the specified interface with the provided filter. It blocks until ctx is
-// cancelled, then fetches the pod logs and deletes the monitor pod. Returns all captured
-// tcpdump output.
-func monitorTcpdumpOnNode(ctx context.Context, f *framework.Framework,
+// tcpdump on the specified interface with the provided filter. It closes ready once the
+// monitor pod is Running (so callers can ensure capture is active before generating
+// traffic), then blocks until ctx is cancelled and fetches the pod logs. Returns all
+// captured tcpdump output.
+func monitorTcpdumpOnNode(ctx context.Context, f *framework.Framework, ready chan<- struct{},
 	name, nodeName, nodeIface, options, filter string) (string, error) {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1899,6 +1900,9 @@ func monitorTcpdumpOnNode(ctx context.Context, f *framework.Framework,
 	framework.ExpectNoError(err, "Failed to create traffic monitor pod")
 	err = e2epod.WaitForPodRunningInNamespace(ctx, f.ClientSet, createdPod)
 	framework.ExpectNoError(err, "Monitor pod failed to start")
+	if ready != nil {
+		close(ready)
+	}
 
 	<-ctx.Done()
 	logs, err := e2ekubectl.RunKubectl(f.Namespace.Name, "logs", name)
