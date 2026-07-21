@@ -62,6 +62,7 @@ import (
 	networkqosclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/clientset/versioned"
 	portmirrorclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned"
 	routeadvertisementsclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned"
+	uplinkclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/uplink/v1alpha1/apis/clientset/versioned"
 	userdefinednetworkclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned"
 	vtepclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/clientset/versioned"
 )
@@ -88,6 +89,7 @@ type OVNClientset struct {
 	IPReservationClient       ipresvclientset.Interface
 	PortMirrorClient          portmirrorclientset.Interface
 	NetworkQoSClient          networkqosclientset.Interface
+	UplinkClient              uplinkclientset.Interface
 	VTEPClient                vtepclientset.Interface
 }
 
@@ -111,6 +113,7 @@ type OVNKubeControllerClientset struct {
 	PortMirrorClient          portmirrorclientset.Interface
 	NetworkQoSClient          networkqosclientset.Interface
 	NetworkConnectClient      networkconnectclientset.Interface
+	UplinkClient              uplinkclientset.Interface
 	VTEPClient                vtepclientset.Interface
 }
 
@@ -123,6 +126,7 @@ type OVNNodeClientset struct {
 	UserDefinedNetworkClient  userdefinednetworkclientset.Interface
 	RouteAdvertisementsClient routeadvertisementsclientset.Interface
 	PortMirrorClient          portmirrorclientset.Interface
+	UplinkClient              uplinkclientset.Interface
 	VTEPClient                vtepclientset.Interface
 }
 
@@ -144,6 +148,7 @@ type OVNClusterManagerClientset struct {
 	RouteAdvertisementsClient routeadvertisementsclientset.Interface
 	FRRClient                 frrclientset.Interface
 	NetworkQoSClient          networkqosclientset.Interface
+	UplinkClient              uplinkclientset.Interface
 	VTEPClient                vtepclientset.Interface
 }
 
@@ -177,6 +182,7 @@ func (cs *OVNClientset) GetOVNKubeControllerClientset() *OVNKubeControllerClient
 		PortMirrorClient:          cs.PortMirrorClient,
 		NetworkQoSClient:          cs.NetworkQoSClient,
 		NetworkConnectClient:      cs.NetworkConnectClient,
+		UplinkClient:              cs.UplinkClient,
 		VTEPClient:                cs.VTEPClient,
 	}
 }
@@ -200,6 +206,7 @@ func (cs *OVNClientset) GetClusterManagerClientset() *OVNClusterManagerClientset
 		RouteAdvertisementsClient: cs.RouteAdvertisementsClient,
 		FRRClient:                 cs.FRRClient,
 		NetworkQoSClient:          cs.NetworkQoSClient,
+		UplinkClient:              cs.UplinkClient,
 		VTEPClient:                cs.VTEPClient,
 	}
 }
@@ -214,6 +221,7 @@ func (cs *OVNClientset) GetNodeClientset() *OVNNodeClientset {
 		UserDefinedNetworkClient:  cs.UserDefinedNetworkClient,
 		RouteAdvertisementsClient: cs.RouteAdvertisementsClient,
 		PortMirrorClient:          cs.PortMirrorClient,
+		UplinkClient:              cs.UplinkClient,
 		VTEPClient:                cs.VTEPClient,
 	}
 }
@@ -517,6 +525,11 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		return nil, err
 	}
 
+	uplinkClientset, err := uplinkclientset.NewForConfig(kconfig)
+	if err != nil {
+		return nil, err
+	}
+
 	vtepClientset, err := vtepclientset.NewForConfig(kconfig)
 	if err != nil {
 		return nil, err
@@ -543,6 +556,7 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		IPReservationClient:       ipReservationClientset,
 		PortMirrorClient:          portMirrorClientset,
 		NetworkQoSClient:          networkqosClientset,
+		UplinkClient:              uplinkClientset,
 		VTEPClient:                vtepClientset,
 	}, nil
 }
