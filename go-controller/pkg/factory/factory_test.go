@@ -604,7 +604,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			} else if objType == CloudPrivateIPConfigType || objType == IPAMClaimsType {
 				wf, err = NewClusterManagerWatchFactory(ovnCMClientset)
 			} else {
-				wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+				wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 			}
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
@@ -628,7 +628,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			} else if objType == CloudPrivateIPConfigType || objType == IPAMClaimsType {
 				wf, err = NewClusterManagerWatchFactory(ovnCMClientset)
 			} else {
-				wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+				wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 			}
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
@@ -758,7 +758,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			} else if objType == CloudPrivateIPConfigType {
 				wf, err = NewClusterManagerWatchFactory(ovnCMClientset)
 			} else {
-				wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+				wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 			}
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
@@ -860,7 +860,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			for i := uint32(1); i <= defaultNumEventQueues*15; i++ {
 				pods = append(pods, newPod(fmt.Sprintf("pod%d", i), "default"))
 			}
-			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -879,7 +879,7 @@ var _ = Describe("Watch Factory Operations", func() {
 
 	Context("when EgressIP is disabled", func() {
 		testExisting := func(objType reflect.Type) {
-			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -892,7 +892,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 	Context("when EgressFirewall is disabled", func() {
 		testExisting := func(objType reflect.Type) {
-			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -905,7 +905,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 	Context("when EgressQoS is disabled", func() {
 		testExisting := func(objType reflect.Type) {
-			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -918,7 +918,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 	Context("when EgressService is disabled", func() {
 		testExisting := func(objType reflect.Type) {
-			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -931,7 +931,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 	Context("when Admin Network Policy is disabled", func() {
 		testExisting := func(objType reflect.Type) {
-			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -963,7 +963,7 @@ var _ = Describe("Watch Factory Operations", func() {
 
 	Context("when NetworkQoS is disabled", func() {
 		testExisting := func(objType reflect.Type) {
-			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -1008,7 +1008,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	}
 
 	It("responds to pod add/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1044,7 +1044,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to pod replace with create/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1087,7 +1087,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to multiple pod add/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		// remove index-pod-by-node-name indexer as it will cause data race in test
 		indexers := wf.PodInformer().GetIndexer().GetIndexers()
@@ -1173,7 +1173,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to namespace add/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1209,7 +1209,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to node add/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1245,7 +1245,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to multiple node add/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1343,7 +1343,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			nodes = append(nodes, node)
 		}
 
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1422,7 +1422,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			namespaces = append(namespaces, namespace)
 		}
 
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1508,7 +1508,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			namespaces = append(namespaces, namespace)
 		}
 
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1650,7 +1650,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to policy add/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1724,7 +1724,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to service add/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1760,7 +1760,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to egressFirewall add/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1795,7 +1795,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf.RemoveEgressFirewallHandler(h)
 	})
 	It("responds to egressIP add/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1865,7 +1865,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf.RemoveCloudPrivateIPConfigHandler(h)
 	})
 	It("responds to egressQoS add/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1900,7 +1900,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf.RemoveEgressQoSHandler(h)
 	})
 	It("responds to egressService add/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1943,7 +1943,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf.RemoveEgressServiceHandler(h)
 	})
 	It("responds to admin network policy add/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1978,7 +1978,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf.RemoveAdminNetworkPolicyHandler(h)
 	})
 	It("responds to baseline admin network policy add/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -2060,7 +2060,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to networkQoS add/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -2096,7 +2096,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("stops processing events after the handler is removed", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -2127,7 +2127,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("filters correctly by label and namespace", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -2199,7 +2199,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("correctly handles object updates that cause filter changes", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())

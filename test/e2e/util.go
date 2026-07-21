@@ -29,6 +29,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 	infraapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 
+	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1858,4 +1859,55 @@ func firstSubnetOf(subnet string, subnetSize int) string {
 		panic(fmt.Sprintf("firstSubnetOf: requested size /%d is not between min /%d and max /%d for %s", subnetSize, ones, bits, subnet))
 	}
 	return fmt.Sprintf("%s/%d", ipNet.IP, subnetSize)
+}
+
+// monitorTcpdumpOnNode creates a privileged host-network pod on the given node that runs
+// tcpdump on the specified interface with the provided filter. It closes ready once the
+// monitor pod is Running (so callers can ensure capture is active before generating
+// traffic), then blocks until ctx is cancelled and fetches the pod logs. Returns all
+// captured tcpdump output.
+func monitorTcpdumpOnNode(ctx context.Context, f *framework.Framework, ready chan<- struct{},
+	name, nodeName, nodeIface, options, filter string) (string, error) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: f.Namespace.Name,
+		},
+		Spec: corev1.PodSpec{
+			NodeSelector: map[string]string{
+				"kubernetes.io/hostname": nodeName,
+			},
+			HostNetwork: true,
+			Containers: []corev1.Container{
+				{
+					Name:  "traffic-monitor",
+					Image: images.Netshoot(),
+					Command: []string{
+						"/bin/bash",
+						"-c",
+						fmt.Sprintf("exec tcpdump -i %s %s %s", nodeIface, options, filter),
+					},
+					SecurityContext: &corev1.SecurityContext{
+						Privileged: func(b bool) *bool { return &b }(true),
+					},
+				},
+			},
+			RestartPolicy: corev1.RestartPolicyNever,
+		},
+	}
+
+	createdPod, err := f.ClientSet.CoreV1().Pods(f.Namespace.Name).Create(ctx, pod, metav1.CreateOptions{})
+	framework.ExpectNoError(err, "Failed to create traffic monitor pod")
+	err = e2epod.WaitForPodRunningInNamespace(ctx, f.ClientSet, createdPod)
+	framework.ExpectNoError(err, "Monitor pod failed to start")
+	if ready != nil {
+		close(ready)
+	}
+
+	<-ctx.Done()
+	logs, err := e2ekubectl.RunKubectl(f.Namespace.Name, "logs", name)
+	if err != nil {
+		return "", err
+	}
+	return logs, nil
 }

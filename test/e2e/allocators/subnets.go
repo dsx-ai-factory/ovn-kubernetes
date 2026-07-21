@@ -36,8 +36,8 @@ var (
 	udnSubnets  = "10.0.0.0/10/20"
 	udnSubnets6 = "fd10::/42/52"
 
-	// BGP peering, 1024 available each
-	bgpPeerSubnets  = "172.25.0.0/19/29"
+	// BGP peering docker networks; /28 fits all kind nodes plus an external peer (512 available)
+	bgpPeerSubnets  = "172.25.0.0/19/28"
 	bgpPeerSubnets6 = "fd25::/102/112"
 
 	// EVPN IP-VRF subnets, 1024 available

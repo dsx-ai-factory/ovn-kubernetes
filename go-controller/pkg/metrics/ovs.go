@@ -23,7 +23,7 @@ import (
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
-	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
+	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/vswitchd"
@@ -559,7 +559,7 @@ func updateOvsBridgeMetrics(ovsDBClient libovsdbclient.Client, ovsOfctl ovsClien
 			p := func(item *vswitchd.Port) bool {
 				return item.UUID == portUUID
 			}
-			if ports, err := ovsops.FindPortsWithPredicate(ovsDBClient, p); err != nil {
+			if ports, err := ovsops.FindOVSPortsWithPredicate(ovsDBClient, p); err != nil {
 				klog.V(5).Infof("Failed to get port info for %s :(%v) ", portUUID, err)
 				continue
 			} else if len(ports) > 0 {

@@ -42,6 +42,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/controllers/egressip"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
@@ -109,6 +110,10 @@ type BaseNodeNetworkController struct {
 
 	// networkManager used for getting network information
 	networkManager networkmanager.Interface
+
+	// ovsClient is the libovsdb client connected to the local ovsdb-server.
+	// Used by DPU representor cleanup and other OVS-aware bookkeeping.
+	ovsClient client.Client
 
 	// podNADToDPUCDMap tracks the NAD/DPU_ConnectionDetails mapping for all NADs that each pod requests.
 	// Key is pod.UUID; value is nadToDPUCDMap (of map[string]*podNADInfo). Key of nadToDPUCDMap
@@ -203,8 +208,6 @@ type DefaultNodeNetworkController struct {
 
 	nodeAddress net.IP
 	sbZone      string
-
-	ovsClient client.Client
 }
 
 func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, stopChan chan struct{},
@@ -221,10 +224,10 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 			portMirrorInfo: portMirrorInfo{
 				usedSFPortNumMap: make(map[uint32]bool),
 			},
+			ovsClient: ovsClient,
 		},
 		skipFirewalldMap: sync.Map{},
 		routeManager:     routeManager,
-		ovsClient:        ovsClient,
 	}
 	if util.IsNetworkSegmentationSupportEnabled() && (config.IsModeDPUHost() || config.IsModeFull()) {
 		c.udnHostIsolationManager = NewUDNHostIsolationManager(config.IPv4Mode, config.IPv6Mode,
@@ -646,7 +649,7 @@ func setEncapPort(ctx context.Context) error {
 	return nil
 }
 
-func isOVNControllerReady() (bool, error) {
+func isOVNControllerReady(ovsClient client.Client) (bool, error) {
 	// check node's connection status
 	ret, _, err := util.RunOVNControllerAppCtl("connection-status")
 	if err != nil {
@@ -658,8 +661,10 @@ func isOVNControllerReady() (bool, error) {
 	}
 
 	// check whether br-int exists on node
-	_, _, err = util.RunOVSVsctl("--", "br-exists", "br-int")
-	if err != nil {
+	if _, err := ovsops.GetBridge(ovsClient, "br-int"); err != nil {
+		if !errors.Is(err, client.ErrNotFound) {
+			return false, fmt.Errorf("could not check br-int bridge existence: %w", err)
+		}
 		return false, nil
 	}
 
@@ -855,7 +860,7 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 
 	if (config.IsModeDPU() && config.OvnKubeNode.IsPrimaryDPU) || config.IsModeFull() {
 		// Bootstrap flows in OVS if just normal flow is present. Should not do it on non-primary DPU
-		if err := bootstrapOVSFlows(nc.name); err != nil {
+		if err := bootstrapOVSFlows(nc.ovsClient, nc.name); err != nil {
 			return fmt.Errorf("failed to bootstrap OVS flows: %w", err)
 		}
 	}
@@ -1135,13 +1140,11 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}(nc.stopChan)
 	} else if config.IsModeDPU() || config.IsModeFull() {
 		// attempt to cleanup the possibly stale bridge
-		_, stderr, err := util.RunOVSVsctl("--if-exists", "del-br", "br-ext")
-		if err != nil {
-			klog.Errorf("Deletion of bridge br-ext failed: %v (%v)", err, stderr)
+		if err := ovsops.DeleteBridge(nc.ovsClient, "br-ext"); err != nil {
+			klog.Errorf("Deletion of bridge br-ext failed: %v", err)
 		}
-		_, stderr, err = util.RunOVSVsctl("--if-exists", "del-port", "br-int", "int")
-		if err != nil {
-			klog.Errorf("Deletion of port int on  br-int failed: %v (%v)", err, stderr)
+		if err := ovsops.DeletePortWithInterfaces(nc.ovsClient, "br-int", "int"); err != nil {
+			klog.Errorf("Deletion of port int on br-int failed: %v", err)
 		}
 	}
 

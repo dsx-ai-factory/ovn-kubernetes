@@ -46,6 +46,8 @@ import (
 	egressservicefake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
 	portmirror "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
 	portmirrorfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned/fake"
+	uplinkv1alpha1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/uplink/v1alpha1"
+	uplinkfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/uplink/v1alpha1/apis/clientset/versioned/fake"
 	udnclientfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
 	vtepfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
@@ -171,6 +173,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 	anpObjects := []runtime.Object{}
 	ipamClaimObjects := []runtime.Object{}
 	portMirrorObjects := []runtime.Object{}
+	uplinkObjects := []runtime.Object{}
 	v1Objects := []runtime.Object{}
 	nads := []nettypes.NetworkAttachmentDefinition{}
 	nadClient := fakenadclient.NewSimpleClientset()
@@ -208,6 +211,14 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 			ipamClaimObjects = append(ipamClaimObjects, object)
 		case *portmirror.PortMirrorList:
 			portMirrorObjects = append(portMirrorObjects, object)
+		case *uplinkv1alpha1.UplinkList:
+			for i := range o.Items {
+				uplinkObjects = append(uplinkObjects, &o.Items[i])
+			}
+		case *uplinkv1alpha1.UplinkStateList:
+			for i := range o.Items {
+				uplinkObjects = append(uplinkObjects, &o.Items[i])
+			}
 		default:
 			v1Objects = append(v1Objects, object)
 		}
@@ -227,6 +238,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 		PortMirrorClient:         portmirrorfake.NewSimpleClientset(portMirrorObjects...),
 		NetworkAttchDefClient:    nadClient,
 		UserDefinedNetworkClient: udnclientfake.NewSimpleClientset(),
+		UplinkClient:             uplinkfake.NewSimpleClientset(uplinkObjects...),
 		VTEPClient:               vtepfake.NewSimpleClientset(),
 	}
 	o.init(nads)
@@ -273,7 +285,7 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 	factory.SetEventQueueSize(8)
 	factory.SetInternalInformerPoolSize(2)
 
-	o.watcher, err = factory.NewOVNKubeControllerWatchFactory(o.fakeClient)
+	o.watcher, err = factory.NewOVNKubeControllerWatchFactory(o.fakeClient, "test-node")
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	o.nbClient, o.sbClient, o.nbsbCleanup, err = libovsdbtest.NewNBSBTestHarness(o.dbSetup)

@@ -64,6 +64,7 @@ type NetLinkOps interface {
 	RouteListFiltered(family int, filter *netlink.Route, filterMask uint64) ([]netlink.Route, error)
 	RuleListFiltered(family int, filter *netlink.Rule, filterMask uint64) ([]netlink.Rule, error)
 	RuleAdd(rule *netlink.Rule) error
+	RuleDel(rule *netlink.Rule) error
 	NeighAdd(neigh *netlink.Neigh) error
 	NeighSet(neigh *netlink.Neigh) error
 	NeighDel(neigh *netlink.Neigh) error
@@ -245,6 +246,10 @@ func (defaultNetLinkOps) RuleListFiltered(family int, filter *netlink.Rule, filt
 
 func (defaultNetLinkOps) RuleAdd(rule *netlink.Rule) error {
 	return netlink.RuleAdd(rule)
+}
+
+func (defaultNetLinkOps) RuleDel(rule *netlink.Rule) error {
+	return netlink.RuleDel(rule)
 }
 
 func (defaultNetLinkOps) NeighAdd(neigh *netlink.Neigh) error {
@@ -1185,4 +1190,16 @@ func GetLinkHardwareAddr(iface string) (net.HardwareAddr, error) {
 		return nil, fmt.Errorf("failed to get MAC address for link %s", iface)
 	}
 	return macAddr, nil
+}
+
+// SetIPv6KeepAddrOnDownForInterface preserves global IPv6 addresses when an
+// interface changes state while it is attached to or detached from a VRF.
+func SetIPv6KeepAddrOnDownForInterface(ifName string) error {
+	setVal := fmt.Sprintf("net.ipv6.conf.%s.keep_addr_on_down = 1", sysctlIfName(ifName))
+	stdout, stderr, err := RunSysctl("-w", setVal)
+	if err != nil || stdout != setVal {
+		return fmt.Errorf("could not enable IPv6 address retention for interface %s: stdout: %v, stderr: %v, err: %v",
+			ifName, stdout, stderr, err)
+	}
+	return nil
 }

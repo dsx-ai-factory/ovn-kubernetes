@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
@@ -17,10 +18,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/tools/cache"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	uplinkfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/uplink/v1alpha1/apis/clientset/versioned/fake"
+	uplinkinformerfactory "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/uplink/v1alpha1/apis/informers/externalversions"
 	factoryMocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/routemanager"
@@ -65,6 +69,23 @@ func newTestOVSClient(ovsData []libovsdbtest.TestData) (libovsdbclient.Client, *
 func ovsPortAndInterface(portUUID, ifaceUUID, name string, extIDs map[string]string) (*vswitchd.Port, *vswitchd.Interface) {
 	return &vswitchd.Port{UUID: portUUID, Name: name, Interfaces: []string{ifaceUUID}},
 		&vswitchd.Interface{UUID: ifaceUUID, Name: name, ExternalIDs: extIDs}
+}
+
+func expectUplinkInformers(factoryMock *factoryMocks.NodeWatchFactory) {
+	uplinkClient := uplinkfake.NewSimpleClientset()
+	uplinkFactory := uplinkinformerfactory.NewSharedInformerFactory(uplinkClient, time.Second)
+
+	factoryMock.On("UplinkInformer").Return(uplinkFactory.K8s().V1alpha1().Uplinks())
+	factoryMock.On("UplinkStateInformer").Return(uplinkFactory.K8s().V1alpha1().UplinkStates())
+}
+
+func expectNodeInformer(nodeInformerMock *coreinformermocks.NodeInformer) {
+	nodeInformerMock.On("Informer").Return(cache.NewSharedIndexInformer(
+		&cache.ListWatch{},
+		&corev1.Node{},
+		time.Second,
+		cache.Indexers{},
+	))
 }
 
 var _ = Describe("Healthcheck tests", func() {
@@ -275,6 +296,41 @@ var _ = Describe("Healthcheck tests", func() {
 
 	})
 
+	Describe("NewNodeControllerManager", func() {
+		It("creates a VRF manager in DPU mode", func() {
+			Expect(config.PrepareTestConfig()).To(Succeed())
+			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+			config.OVNKubernetesFeature.EnableMultiNetwork = true
+			config.OvnKubeNode.Mode = types.NodeModeDPU
+
+			factoryMock := factoryMocks.NodeWatchFactory{}
+			factoryMock.On("UserDefinedNetworkInformer").Return(nil)
+			factoryMock.On("ClusterUserDefinedNetworkInformer").Return(nil)
+			factoryMock.On("NamespaceInformer").Return(nil)
+			nadListerMock := &nadlistermocks.NetworkAttachmentDefinitionLister{}
+			nadInformerMock := &nadinformermocks.NetworkAttachmentDefinitionInformer{}
+			nadInformerMock.On("Lister").Return(nadListerMock)
+			nadInformerMock.On("Informer").Return(nil)
+			factoryMock.On("NADInformer").Return(nadInformerMock)
+			nodeInformerMock := &coreinformermocks.NodeInformer{}
+			nodeListerMock := &corelistermocks.NodeLister{}
+			nodeInformerMock.On("Lister").Return(nodeListerMock)
+			expectNodeInformer(nodeInformerMock)
+			factoryMock.On("NodeCoreInformer").Return(nodeInformerMock)
+			fakeClient := &util.OVNClientset{
+				KubeClient:   fake.NewSimpleClientset(),
+				UplinkClient: uplinkfake.NewSimpleClientset(),
+			}
+			expectUplinkInformers(&factoryMock)
+
+			ncm, err := NewNodeControllerManager(fakeClient, &factoryMock, "worker1", "",
+				&sync.WaitGroup{}, nil, routemanager.NewController(), nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ncm.vrfManager).NotTo(BeNil())
+			Expect(ncm.ruleManager).To(BeNil())
+		})
+	})
+
 	Context("verify cleanup of deleted networks", func() {
 		var (
 			staleNetID uint = 1000
@@ -298,7 +354,8 @@ var _ = Describe("Healthcheck tests", func() {
 			Expect(err).NotTo(HaveOccurred())
 			v1Objects := []runtime.Object{}
 			fakeClient = &util.OVNClientset{
-				KubeClient: fake.NewSimpleClientset(v1Objects...),
+				KubeClient:   fake.NewSimpleClientset(v1Objects...),
+				UplinkClient: uplinkfake.NewSimpleClientset(),
 			}
 		})
 
@@ -338,7 +395,9 @@ var _ = Describe("Healthcheck tests", func() {
 			nodeListerMock.On("List", mock.Anything).Return(nodeList, nil)
 			nodeInformerMock := &coreinformermocks.NodeInformer{}
 			nodeInformerMock.On("Lister").Return(nodeListerMock)
+			expectNodeInformer(nodeInformerMock)
 			factoryMock.On("NodeCoreInformer").Return(nodeInformerMock)
+			expectUplinkInformers(&factoryMock)
 
 			ncm, err := NewNodeControllerManager(fakeClient, &factoryMock, nodeName, "", &sync.WaitGroup{}, nil, routeManager, nil)
 			Expect(err).NotTo(HaveOccurred())
@@ -414,7 +473,9 @@ var _ = Describe("Healthcheck tests", func() {
 			nodeListerMock.On("List", mock.Anything).Return(nodeList, nil)
 			nodeInformerMock := &coreinformermocks.NodeInformer{}
 			nodeInformerMock.On("Lister").Return(nodeListerMock)
+			expectNodeInformer(nodeInformerMock)
 			factoryMock.On("NodeCoreInformer").Return(nodeInformerMock)
+			expectUplinkInformers(&factoryMock)
 			Expect(err).NotTo(HaveOccurred())
 			ncm, err := NewNodeControllerManager(fakeClient, &factoryMock, nodeName, "", &sync.WaitGroup{}, nil, routeManager, nil)
 			Expect(err).NotTo(HaveOccurred())

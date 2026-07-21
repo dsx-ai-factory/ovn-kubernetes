@@ -28,8 +28,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
-	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
+	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/controllers/evpn"
@@ -37,6 +36,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/managementport"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/netlinkdevicemanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/routemanager"
+	nodeuplink "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/uplink"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
@@ -80,6 +80,10 @@ type NodeControllerManager struct {
 	ndm *netlinkdevicemanager.Controller
 	// evpn controller that manages EVPN datapath
 	evpnController *evpn.Controller
+	// uplink controller that publishes node-local UplinkState
+	uplinkController *nodeuplink.Controller
+	// coordinates aggregate gateway programming for CUDNs using each Uplink
+	uplinkGatewayController *node.UplinkGatewayController
 }
 
 // NewNetworkController create node user-defined network controllers for the given NetInfo
@@ -96,7 +100,8 @@ func (ncm *NodeControllerManager) NewNetworkController(nInfo util.NetInfo) (netw
 		// Pass a shallow clone of the watch factory, this allows multiplexing
 		// informers for UDNs.
 		udnc, err := node.NewUserDefinedNodeNetworkController(ncm.newCommonNetworkControllerInfo(ncm.watchFactory.(*factory.WatchFactory).ShallowClone()),
-			nInfo, ncm.networkManager.Interface(), ncm.vrfManager, ncm.ruleManager, ncm.mpdm, ncm.defaultNodeNetworkController.Gateway)
+			nInfo, ncm.networkManager.Interface(), ncm.vrfManager, ncm.ruleManager, ncm.mpdm,
+			ncm.defaultNodeNetworkController.Gateway, ncm.ovsClient, ncm.uplinkGatewayController)
 		if err != nil && ncm.mpdm != nil && util.IsNetworkSegmentationSupportEnabled() && nInfo.IsPrimaryNetwork() {
 			_ = ncm.mpdm.ReleaseDeviceIDForNetwork(nInfo.GetNetworkName())
 		}
@@ -230,13 +235,15 @@ func (ncm *NodeControllerManager) CleanupStaleNetworks(validNetworks ...util.Net
 	if !util.IsNetworkSegmentationSupportEnabled() {
 		return nil
 	}
+	if err := ncm.uplinkGatewayController.SyncNetworks(validNetworks...); err != nil {
+		errs = append(errs, err)
+	}
 
 	err := ncm.syncManagementPorts(validNetworks...)
 	if err != nil {
 		errs = append(errs, err)
 	}
 
-	// in DPU mode, vrfManager would be nil
 	if ncm.vrfManager != nil {
 		validVRFDevices := make(sets.Set[string])
 		for _, network := range validNetworks {
@@ -272,8 +279,14 @@ func isNetworkManagerRequiredForNode() bool {
 func NewNodeControllerManager(ovnClient *util.OVNClientset, wf factory.NodeWatchFactory, name, dpuName string,
 	wg *sync.WaitGroup, eventRecorder record.EventRecorder, routeManager *routemanager.Controller, ovsClient client.Client) (*NodeControllerManager, error) {
 	ncm := &NodeControllerManager{
-		name:         name,
-		dpuName:      dpuName,
+		name:    name,
+		dpuName: dpuName,
+		ovnNodeClient: &util.OVNNodeClientset{
+			KubeClient:             ovnClient.KubeClient,
+			AdminPolicyRouteClient: ovnClient.AdminPolicyRouteClient,
+			UplinkClient:           ovnClient.UplinkClient,
+			PortMirrorClient:       ovnClient.PortMirrorClient,
+		},
 		Kube:         &kube.Kube{KClient: ovnClient.KubeClient},
 		watchFactory: wf,
 		stopChan:     make(chan struct{}),
@@ -281,11 +294,6 @@ func NewNodeControllerManager(ovnClient *util.OVNClientset, wf factory.NodeWatch
 		recorder:     eventRecorder,
 		routeManager: routeManager,
 		ovsClient:    ovsClient,
-		ovnNodeClient: &util.OVNNodeClientset{
-			KubeClient:             ovnClient.KubeClient,
-			AdminPolicyRouteClient: ovnClient.AdminPolicyRouteClient,
-			PortMirrorClient:       ovnClient.PortMirrorClient,
-		},
 	}
 
 	// need to configure OVS interfaces for Pods on UDNs in the DPU mode
@@ -315,9 +323,23 @@ func NewNodeControllerManager(ovnClient *util.OVNClientset, wf factory.NodeWatch
 		}
 	}
 
-	if util.IsNetworkSegmentationSupportEnabled() && config.OvnKubeNode.Mode != ovntypes.NodeModeDPU {
+	if util.IsNetworkSegmentationSupportEnabled() {
+		// DPU-host mode uses the VRF manager for management-port VRFs,
+		// IP rules, and host kernel traffic. DPU mode only needs the VRF
+		// device as the table anchor for reflecting FRR-learned BGP
+		// routes into OVN. Full mode uses one VRF manager for both.
 		ncm.vrfManager = vrfmanager.NewController(ncm.routeManager)
+	}
+	if util.IsNetworkSegmentationSupportEnabled() && config.OvnKubeNode.Mode != ovntypes.NodeModeDPU {
 		ncm.ruleManager = iprulemanager.NewController(config.IPv4Mode, config.IPv6Mode)
+	}
+	if util.IsNetworkSegmentationSupportEnabled() {
+		ncm.uplinkController = nodeuplink.NewController(name, wf, ncm.ovnNodeClient, ncm.ovsClient)
+		ncm.uplinkGatewayController = node.NewUplinkGatewayController(
+			name,
+			ncm.ovnNodeClient.UplinkClient,
+			wf.UplinkStateInformer().Lister(),
+		)
 	}
 
 	return ncm, nil
@@ -450,6 +472,12 @@ func (ncm *NodeControllerManager) Start(ctx context.Context, isOVNKubeController
 		}
 	}
 
+	if ncm.uplinkController != nil {
+		if err := ncm.uplinkController.Start(); err != nil {
+			return fmt.Errorf("failed to start Uplink controller: %w", err)
+		}
+	}
+
 	err = ncm.defaultNodeNetworkController.Start(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to start default node network controller: %v", err)
@@ -533,6 +561,10 @@ func (ncm *NodeControllerManager) Stop(isOVNKubeControllerSyncd *atomic.Bool) {
 	if ncm.evpnController != nil {
 		ncm.evpnController.Stop()
 	}
+	if ncm.uplinkController != nil {
+		ncm.uplinkController.Stop()
+		ncm.uplinkController = nil
+	}
 
 	// stop stale ovs ports cleanup
 	close(ncm.stopChan)
@@ -598,7 +630,7 @@ func (ncm *NodeControllerManager) checkForStaleOVSPodInterfaces() {
 		podUID := ovsIface.ExternalIDs["iface-id-ver"]
 		if _, ok := expectedPodUIDs[podUID]; !ok {
 			klog.Warningf("Found stale OVS Interface %s with iface-id-ver %s, deleting it", ovsIface.Name, podUID)
-			if err := libovsdbops.DeletePortWithInterfaces(ncm.ovsClient, "br-int", ovsIface.Name); err != nil {
+			if err := ovsops.DeletePortWithInterfaces(ncm.ovsClient, "br-int", ovsIface.Name); err != nil {
 				klog.Errorf("Failed to delete stale interface %s: %v", ovsIface.Name, err)
 			}
 		}
@@ -654,6 +686,9 @@ func checkForStaleOVSInternalPorts() {
 	}
 }
 
-func (ncm *NodeControllerManager) Reconcile(_ string, _, _ util.NetInfo) error {
-	return nil
+func (ncm *NodeControllerManager) Reconcile(_ string, current, network util.NetInfo) error {
+	if !util.IsNetworkSegmentationSupportEnabled() || current != nil || network == nil || network.Uplink() == "" {
+		return nil
+	}
+	return ncm.uplinkGatewayController.PrepareNetwork(network)
 }
