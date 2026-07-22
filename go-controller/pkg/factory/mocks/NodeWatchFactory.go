@@ -30,8 +30,6 @@ import (
 
 	v1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions/adminpolicybasedroute/v1"
 
-	v1beta1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
-
 	v1alpha1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/uplink/v1alpha1/apis/informers/externalversions/uplink/v1alpha1"
 
 	vtepv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/informers/externalversions/vtep/v1"
@@ -615,66 +613,6 @@ func (_m *NodeWatchFactory) GetPodsOnNode(namespace string, nodeName string) ([]
 
 	if rf, ok := ret.Get(1).(func(string, string) error); ok {
 		r1 = rf(namespace, nodeName)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// GetPortMirror provides a mock function with given fields: namespace, name
-func (_m *NodeWatchFactory) GetPortMirror(namespace string, name string) (*v1beta1.PortMirror, error) {
-	ret := _m.Called(namespace, name)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetPortMirror")
-	}
-
-	var r0 *v1beta1.PortMirror
-	var r1 error
-	if rf, ok := ret.Get(0).(func(string, string) (*v1beta1.PortMirror, error)); ok {
-		return rf(namespace, name)
-	}
-	if rf, ok := ret.Get(0).(func(string, string) *v1beta1.PortMirror); ok {
-		r0 = rf(namespace, name)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*v1beta1.PortMirror)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(string, string) error); ok {
-		r1 = rf(namespace, name)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// GetPortMirrors provides a mock function with given fields:
-func (_m *NodeWatchFactory) GetPortMirrors() ([]*v1beta1.PortMirror, error) {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetPortMirrors")
-	}
-
-	var r0 []*v1beta1.PortMirror
-	var r1 error
-	if rf, ok := ret.Get(0).(func() ([]*v1beta1.PortMirror, error)); ok {
-		return rf()
-	}
-	if rf, ok := ret.Get(0).(func() []*v1beta1.PortMirror); ok {
-		r0 = rf()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*v1beta1.PortMirror)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func() error); ok {
-		r1 = rf()
 	} else {
 		r1 = ret.Error(1)
 	}

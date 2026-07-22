@@ -103,9 +103,6 @@ import (
 	networkqosinformerfactory "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/informers/externalversions"
 	networkqosinformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/informers/externalversions/networkqos/v1alpha1"
 	networkqoslister "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/listers/networkqos/v1alpha1"
-	portmirrorapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
-	portmirrorinformerfactory "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/informers/externalversions"
-	portmirrorlister "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/listers/portmirror/v1beta1"
 	routeadvertisementsapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1"
 	routeadvertisementsscheme "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned/scheme"
 	routeadvertisementsinformerfactory "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions"
@@ -147,7 +144,6 @@ type WatchFactory struct {
 	adminPBRFactory      adminpbrinformerfactory.SharedInformerFactory
 	ipresvFactory        ipreservationinformerfactory.SharedInformerFactory
 	apbRouteFactory      adminbasedpolicyinformerfactory.SharedInformerFactory
-	portMirrorFactory    portmirrorinformerfactory.SharedInformerFactory
 	ipamClaimsFactory    ipamclaimsfactory.SharedInformerFactory
 	nadFactory           nadinformerfactory.SharedInformerFactory
 	udnFactory           userdefinednetworkapiinformerfactory.SharedInformerFactory
@@ -188,7 +184,6 @@ func (wf *WatchFactory) ShallowClone() *WatchFactory {
 		frrFactory:           wf.frrFactory,
 		adminPBRFactory:      wf.adminPBRFactory,
 		ipresvFactory:        wf.ipresvFactory,
-		portMirrorFactory:    wf.portMirrorFactory,
 		networkQoSFactory:    wf.networkQoSFactory,
 		uplinkFactory:        wf.uplinkFactory,
 		uplinkStateFactory:   wf.uplinkStateFactory,
@@ -282,7 +277,6 @@ var (
 	NetworkAttachmentDefinitionType reflect.Type = reflect.TypeOf(&nadapi.NetworkAttachmentDefinition{})
 	MultiNetworkPolicyType          reflect.Type = reflect.TypeOf(&mnpapi.MultiNetworkPolicy{})
 	IPReservationType               reflect.Type = reflect.TypeOf(&ipreservationapi.IPReservation{})
-	PortMirrorType                  reflect.Type = reflect.TypeOf(&portmirrorapi.PortMirror{})
 	IPAMClaimsType                  reflect.Type = reflect.TypeOf(&ipamclaimsapi.IPAMClaim{})
 	UserDefinedNetworkType          reflect.Type = reflect.TypeOf(&userdefinednetworkapi.UserDefinedNetwork{})
 	ClusterUserDefinedNetworkType   reflect.Type = reflect.TypeOf(&userdefinednetworkapi.ClusterUserDefinedNetwork{})
@@ -382,7 +376,6 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		egressServiceFactory: egressserviceinformerfactory.NewSharedInformerFactory(ovnClientset.EgressServiceClient, resyncInterval),
 		adminPBRFactory:      adminpbrinformerfactory.NewSharedInformerFactory(ovnClientset.AdminPBRClient, resyncInterval),
 		apbRouteFactory:      adminbasedpolicyinformerfactory.NewSharedInformerFactory(ovnClientset.AdminPolicyRouteClient, resyncInterval),
-		portMirrorFactory:    portmirrorinformerfactory.NewSharedInformerFactory(ovnClientset.PortMirrorClient, resyncInterval),
 		networkQoSFactory:    networkqosinformerfactory.NewSharedInformerFactory(ovnClientset.NetworkQoSClient, resyncInterval),
 		informers:            make(map[reflect.Type]*informer),
 		stopChan:             make(chan struct{}),
@@ -417,9 +410,6 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		return nil, err
 	}
 	if err := routeadvertisementsapi.AddToScheme(routeadvertisementsscheme.Scheme); err != nil {
-		return nil, err
-	}
-	if err := portmirrorapi.AddToScheme(scheme.Scheme); err != nil {
 		return nil, err
 	}
 	if err := nadapi.AddToScheme(nadscheme.Scheme); err != nil {
@@ -657,14 +647,6 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		}
 	}
 
-	if config.OVNKubernetesFeature.EnablePortMirror {
-		wf.informers[PortMirrorType], err = newQueuedInformer(PortMirrorType, wf.portMirrorFactory.K8s().V1beta1().PortMirrors().Informer(),
-			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	if util.IsEVPNEnabled() {
 		wf.vtepFactory = vtepinformerfactory.NewSharedInformerFactory(ovnClientset.VTEPClient, resyncInterval)
 		// make sure shared informer is created for a factory, so on wf.vtepFactory.Start() it is initialized and caches are synced.
@@ -754,14 +736,6 @@ func (wf *WatchFactory) Start() error {
 		wf.apbRouteFactory.Start(wf.stopChan)
 		if err := waitForCacheSyncWithTimeout(wf.apbRouteFactory, wf.stopChan); err != nil {
 			return err
-		}
-	}
-	if config.OVNKubernetesFeature.EnablePortMirror && wf.portMirrorFactory != nil {
-		wf.portMirrorFactory.Start(wf.stopChan)
-		for oType, synced := range wf.portMirrorFactory.WaitForCacheSync(wf.stopChan) {
-			if !synced {
-				return fmt.Errorf("error in syncing cache for %v informer", oType)
-			}
 		}
 	}
 
@@ -908,9 +882,6 @@ func (wf *WatchFactory) Stop() {
 	   if wf.ipresvFactory != nil {
 	           wf.ipresvFactory.Shutdown()
 	   }
-	   if wf.portMirrorFactory != nil {
-	           wf.portMirrorFactory.Shutdown()
-	   }
 	*/
 
 	if wf.networkQoSFactory != nil {
@@ -960,13 +931,6 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 		wf.informers[PodType], err = newQueuedInformer(PodType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
 			defaultNumEventQueues, 10, 30, 50)
 		if err != nil {
-			return nil, err
-		}
-	}
-
-	if config.OvnKubeNode.Mode == types.NodeModeDPU && config.OVNKubernetesFeature.EnablePortMirror {
-		wf.portMirrorFactory = portmirrorinformerfactory.NewSharedInformerFactory(ovnClientset.PortMirrorClient, resyncInterval)
-		if err := portmirrorapi.AddToScheme(scheme.Scheme); err != nil {
 			return nil, err
 		}
 	}
@@ -1068,14 +1032,6 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 		wf.raFactory = routeadvertisementsinformerfactory.NewSharedInformerFactory(ovnClientset.RouteAdvertisementsClient, resyncInterval)
 		// make sure shared informer is created for a factory, so on wf.raFactory.Start() it is initialized and caches are synced.
 		wf.raFactory.K8s().V1().RouteAdvertisements().Informer()
-	}
-
-	if config.OvnKubeNode.Mode == types.NodeModeDPU && config.OVNKubernetesFeature.EnablePortMirror {
-		wf.informers[PortMirrorType], err = newQueuedInformer(PortMirrorType, wf.portMirrorFactory.K8s().V1beta1().PortMirrors().Informer(),
-			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize)
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	if util.IsEVPNEnabled() {
@@ -1494,10 +1450,6 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 		if ipResv, ok := obj.(*ipreservationapi.IPReservation); ok {
 			return &ipResv.ObjectMeta, nil
 		}
-	case PortMirrorType:
-		if portMirrow, ok := obj.(*portmirrorapi.PortMirror); ok {
-			return &portMirrow.ObjectMeta, nil
-		}
 	case UplinkType:
 		if uplink, ok := obj.(*uplinkapi.Uplink); ok {
 			return &uplink.ObjectMeta, nil
@@ -1541,8 +1493,6 @@ func (wf *WatchFactory) GetHandlerPriority(objType reflect.Type) (priority int) 
 	case EgressNodeType:
 		return 1
 	case AdminPBRType:
-		return 1
-	case PortMirrorType:
 		return 1
 	case IPReservationType:
 		return 1
@@ -2115,26 +2065,6 @@ func (wf *WatchFactory) GetNetworkQoSes() ([]*networkqosapi.NetworkQoS, error) {
 
 func (wf *WatchFactory) CertificateSigningRequestInformer() certificatesinformers.CertificateSigningRequestInformer {
 	return wf.iFactory.Certificates().V1().CertificateSigningRequests()
-}
-
-// AddPortMirrorHandler adds a handler function that will be executed on PortMirror object changes
-func (wf *WatchFactory) AddPortMirrorHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
-	return wf.addHandler(PortMirrorType, "", nil, handlerFuncs, processExisting, wf.GetHandlerPriority(PortMirrorType))
-}
-
-// RemovePortMirrorHandler removes an PortMirror object event handler function
-func (wf *WatchFactory) RemovePortMirrorHandler(handler *Handler) {
-	wf.removeHandler(PortMirrorType, handler)
-}
-
-func (wf *WatchFactory) GetPortMirrors() ([]*portmirrorapi.PortMirror, error) {
-	portMirrorLister := wf.informers[PortMirrorType].lister.(portmirrorlister.PortMirrorLister)
-	return portMirrorLister.List(labels.Everything())
-}
-
-func (wf *WatchFactory) GetPortMirror(namespace string, name string) (*portmirrorapi.PortMirror, error) {
-	portMirrorLister := wf.informers[PortMirrorType].lister.(portmirrorlister.PortMirrorLister)
-	return portMirrorLister.PortMirrors(namespace).Get(name)
 }
 
 // GetIPAMClaim gets a specific IPAMClaim by the namespace/name

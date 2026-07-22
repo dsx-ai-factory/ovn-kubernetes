@@ -562,13 +562,6 @@ func (oc *Layer3UserDefinedNetworkController) run() error {
 		}
 	}
 
-	if config.OVNKubernetesFeature.EnablePortMirror {
-		err := oc.WatchPortMirrors()
-		if err != nil {
-			return err
-		}
-	}
-
 	// Add ourselves to the route import manager
 	if oc.routeImportManager != nil {
 		err := oc.routeImportManager.AddNetwork(oc.GetNetInfo())

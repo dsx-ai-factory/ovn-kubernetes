@@ -261,7 +261,8 @@ func (ncm *NodeControllerManager) CleanupStaleNetworks(validNetworks ...util.Net
 
 // newCommonNetworkControllerInfo creates and returns the base node network controller info
 func (ncm *NodeControllerManager) newCommonNetworkControllerInfo(wf factory.NodeWatchFactory) *node.CommonNodeNetworkControllerInfo {
-	return node.NewCommonNodeNetworkControllerInfo(ncm.ovnNodeClient, wf, ncm.recorder, ncm.routeManager, ncm.name, ncm.dpuName, ncm.hostType, ncm.pfMACs)
+	return node.NewCommonNodeNetworkControllerInfo(ncm.ovnNodeClient.KubeClient, ncm.ovnNodeClient.AdminPolicyRouteClient, wf, ncm.recorder, ncm.name, ncm.routeManager,
+		ncm.dpuName, ncm.hostType, ncm.pfMACs)
 }
 
 // isNetworkManagerRequiredForNode checks if network manager should be started
@@ -285,7 +286,6 @@ func NewNodeControllerManager(ovnClient *util.OVNClientset, wf factory.NodeWatch
 			KubeClient:             ovnClient.KubeClient,
 			AdminPolicyRouteClient: ovnClient.AdminPolicyRouteClient,
 			UplinkClient:           ovnClient.UplinkClient,
-			PortMirrorClient:       ovnClient.PortMirrorClient,
 		},
 		Kube:         &kube.Kube{KClient: ovnClient.KubeClient},
 		watchFactory: wf,

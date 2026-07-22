@@ -284,7 +284,6 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 
 	existingNode := corev1.Node{ObjectMeta: metav1.ObjectMeta{
 		Name: nodeName,
-		//Labels: map[string]string{"kubernetes.io/hostname": nodeName},
 	}}
 
 	if legacy {
@@ -425,7 +424,6 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: nodeName,
-			//Labels: map[string]string{"kubernetes.io/hostname": nodeName},
 		},
 	}
 
@@ -450,7 +448,6 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 
 	existingNode := corev1.Node{ObjectMeta: metav1.ObjectMeta{
 		Name: nodeName,
-		//Labels: map[string]string{"kubernetes.io/hostname": nodeName},
 	}}
 
 	fakeClient := fake.NewSimpleClientset(&corev1.NodeList{
@@ -1449,7 +1446,6 @@ var _ = Describe("Management Port tests", func() {
 		node := &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "worker-node",
-				//Labels: map[string]string{"kubernetes.io/hostname": "worker-node"},
 				Annotations: map[string]string{
 					util.OvnNodeManagementPortMacAddresses: "{\"default\": \"00:11:22:33:44:55\"}",
 				},

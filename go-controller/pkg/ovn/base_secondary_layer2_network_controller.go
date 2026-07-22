@@ -160,13 +160,6 @@ func (oc *BaseLayer2UserDefinedNetworkController) run() error {
 		}(oc.stopChan)
 	}
 
-	if config.OVNKubernetesFeature.EnablePortMirror {
-		err := oc.WatchPortMirrors()
-		if err != nil {
-			return err
-		}
-	}
-
 	// Add ourselves to the route import manager
 	if oc.routeImportManager != nil && config.Gateway.Mode == config.GatewayModeShared {
 		err := oc.routeImportManager.AddNetwork(oc.GetNetInfo())

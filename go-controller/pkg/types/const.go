@@ -369,12 +369,6 @@ const (
 	ExternalIDHash         = "hash"
 	ExternalIDNetAttachDef = "nad_name"
 	ExternalIDRouter       = "logical_router_name"
-	ExternalIDName         = "name"
-	ExternalIDNamespace    = "namespace"
-	ExternalIDUID          = "uid"
-
-	// portMirror constants
-	PortMirrorResyncInterval = 30 * time.Second
 
 	OvnK8sStatusSucceeded OvnK8sStatus = "Succeeded"
 	OvnK8sStatusFailed    OvnK8sStatus = "Failed"

@@ -44,8 +44,6 @@ import (
 	egressqosfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
 	egressservice "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
 	egressservicefake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
-	portmirror "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
-	portmirrorfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned/fake"
 	uplinkv1alpha1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/uplink/v1alpha1"
 	uplinkfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/uplink/v1alpha1/apis/clientset/versioned/fake"
 	udnclientfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
@@ -172,7 +170,6 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 	apbExternalRouteObjects := []runtime.Object{}
 	anpObjects := []runtime.Object{}
 	ipamClaimObjects := []runtime.Object{}
-	portMirrorObjects := []runtime.Object{}
 	uplinkObjects := []runtime.Object{}
 	v1Objects := []runtime.Object{}
 	nads := []nettypes.NetworkAttachmentDefinition{}
@@ -209,8 +206,6 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 			anpObjects = append(anpObjects, object)
 		case *ipamclaimsapi.IPAMClaimList:
 			ipamClaimObjects = append(ipamClaimObjects, object)
-		case *portmirror.PortMirrorList:
-			portMirrorObjects = append(portMirrorObjects, object)
 		case *uplinkv1alpha1.UplinkList:
 			for i := range o.Items {
 				uplinkObjects = append(uplinkObjects, &o.Items[i])
@@ -235,7 +230,6 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 		EgressServiceClient:      egressservicefake.NewSimpleClientset(egressServiceObjects...),
 		AdminPolicyRouteClient:   adminpolicybasedroutefake.NewSimpleClientset(apbExternalRouteObjects...),
 		IPAMClaimsClient:         fakeipamclaimclient.NewSimpleClientset(ipamClaimObjects...),
-		PortMirrorClient:         portmirrorfake.NewSimpleClientset(portMirrorObjects...),
 		NetworkAttchDefClient:    nadClient,
 		UserDefinedNetworkClient: udnclientfake.NewSimpleClientset(),
 		UplinkClient:             uplinkfake.NewSimpleClientset(uplinkObjects...),
@@ -508,7 +502,6 @@ func NewOvnController(
 			APBRouteClient:       ovnClient.AdminPolicyRouteClient,
 			EgressQoSClient:      ovnClient.EgressQoSClient,
 			IPAMClaimsClient:     ovnClient.IPAMClaimsClient,
-			PortMirrorClient:     ovnClient.PortMirrorClient,
 		},
 		wf,
 		recorder,
@@ -636,7 +629,6 @@ func (o *FakeOVN) NewUserDefinedNetworkController(netattachdef *nettypes.Network
 				IPAMClaimsClient:     o.fakeClient.IPAMClaimsClient,
 				EgressServiceClient:  o.fakeClient.EgressServiceClient,
 				AdminPBRClient:       o.fakeClient.AdminPBRClient,
-				PortMirrorClient:     o.fakeClient.PortMirrorClient,
 			},
 			o.watcher,
 			o.fakeRecorder,

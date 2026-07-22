@@ -34,7 +34,6 @@ import (
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedrouteclient "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
-	portmirrorclient "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned/fake"
 	uplinkfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/uplink/v1alpha1/apis/clientset/versioned/fake"
 	udnfakeclient "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
@@ -891,7 +890,6 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 			KubeClient:             kubeFakeClient,
 			AdminPolicyRouteClient: adminpolicybasedrouteclient.NewSimpleClientset(),
 			NetworkAttchDefClient:  nadfake.NewSimpleClientset(),
-			PortMirrorClient:       portmirrorclient.NewSimpleClientset(),
 			UplinkClient:           uplinkfake.NewSimpleClientset(),
 		}
 
@@ -910,7 +908,8 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		Expect(err).NotTo(HaveOccurred())
 		ipnet.IP = ip
 		routeManager := routemanager.NewController()
-		cnnci := NewCommonNodeNetworkControllerInfo(fakeClient, wf, nil, routeManager, nodeName, "", "", []string{})
+		cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager,
+			"", "", []string{})
 		nc := newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
 		// must run route manager manually which is usually started with nc.Start()
 		wg.Add(1)

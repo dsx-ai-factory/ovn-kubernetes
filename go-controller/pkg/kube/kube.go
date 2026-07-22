@@ -39,8 +39,6 @@ import (
 	ipreservationv1beta1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
 	ipreservationclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/clientset/versioned"
 	networkqosclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/clientset/versioned"
-	portmirrorv1beta1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
-	portmirrorclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned"
 )
 
 // InterfaceOVN represents the exported methods for dealing with getting/setting
@@ -60,8 +58,6 @@ type InterfaceOVN interface {
 	UpdateIPAMClaimIPs(updatedIPAMClaim *ipamclaimsapi.IPAMClaim) error
 	UpdateAdminPBRStatus(adminpbr *adminpbrv1beta1.AdminPolicyBasedRoute) (*adminpbrv1beta1.AdminPolicyBasedRoute, error)
 	UpdateIPReservationStatus(status *ipreservationv1beta1.IPReservation) error
-	UpdatePortMirrorStatus(pm *portmirrorv1beta1.PortMirror) error
-	GetPortMirror(namespace, name string) (*portmirrorv1beta1.PortMirror, error)
 }
 
 // Interface represents the exported methods for dealing with getting/setting
@@ -108,7 +104,6 @@ type KubeOVN struct {
 	NADClient            nadclientset.Interface
 	AdminPBRClient       adminpbrclientset.Interface
 	IPReservationClient  ipreservationclientset.Interface
-	PortMirrorClient     portmirrorclientset.Interface
 	NetworkQoSClient     networkqosclientset.Interface
 }
 
@@ -589,16 +584,4 @@ func (k *KubeOVN) UpdateIPReservationStatus(ipresv *ipreservationv1beta1.IPReser
 	klog.Infof("Updating status of IPRseservation %s/%s", ipresv.Namespace, ipresv.Name)
 	_, err := k.IPReservationClient.K8sV1beta1().IPReservations(ipresv.Namespace).UpdateStatus(context.TODO(), ipresv, metav1.UpdateOptions{})
 	return err
-}
-
-// UpdatePortMirrorStatus updates the portMirror object with the provided portMirror data
-func (k *KubeOVN) UpdatePortMirrorStatus(pm *portmirrorv1beta1.PortMirror) error {
-	klog.Infof("Updating status of portMirror %s/%s", pm.Namespace, pm.Name)
-	_, err := k.PortMirrorClient.K8sV1beta1().PortMirrors(pm.Namespace).UpdateStatus(context.TODO(), pm, metav1.UpdateOptions{})
-	return err
-}
-
-// GetPortMirror returns PortMirror resource
-func (k *KubeOVN) GetPortMirror(namespace, name string) (*portmirrorv1beta1.PortMirror, error) {
-	return k.PortMirrorClient.K8sV1beta1().PortMirrors(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 }

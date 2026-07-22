@@ -18,7 +18,6 @@ import (
 	adminpolicybasedrouteclient "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
 	egressserviceapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
 	egressservicefake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
-	portmirrorclient "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned/fake"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
@@ -70,7 +69,6 @@ func (o *FakeOVNNode) Start(ctx *cli.Context, objects ...runtime.Object) {
 		KubeClient:             fake.NewSimpleClientset(v1Objects...),
 		EgressServiceClient:    egressservicefake.NewSimpleClientset(egressServiceObjects...),
 		AdminPolicyRouteClient: adminpolicybasedrouteclient.NewSimpleClientset(),
-		PortMirrorClient:       portmirrorclient.NewSimpleClientset(),
 		NetworkAttchDefClient:  nadfake.NewSimpleClientset(),
 	}
 	o.init(ctx.Context) // initializes the node
@@ -92,8 +90,8 @@ func (o *FakeOVNNode) init(ctx context.Context) {
 	o.watcher, err = factory.NewNodeWatchFactory(o.fakeClient, fakeNodeName)
 	Expect(err).NotTo(HaveOccurred())
 
-	cnnci := NewCommonNodeNetworkControllerInfo(o.fakeClient, o.watcher, o.recorder,
-		routemanager.NewController(), fakeNodeName, "", "", []string{})
+	cnnci := NewCommonNodeNetworkControllerInfo(o.fakeClient.KubeClient, o.fakeClient.AdminPolicyRouteClient, o.watcher, o.recorder, fakeNodeName, routemanager.NewController(),
+		"", "", []string{})
 	o.nc = newDefaultNodeNetworkController(cnnci, o.stopChan, o.wg, routemanager.NewController(), nil, nil)
 	// watcher is started by nodeControllerManager, not by nodeNetworkController, so start it here.
 	Expect(o.watcher.Start()).To(Succeed())
