@@ -1854,6 +1854,19 @@ ovnkube-controller-with-node() {
     export_ovs_metrics_opts="--export-ovs-metrics"
   fi
 
+  local ovs_other_config_opts=
+  if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
+    virt_type=$(/usr/bin/systemd-detect-virt -v)
+    if [[ "${virt_type}" == "none" ]]; then
+      # "none" indicates baremetal
+      ovs_other_config_opts="
+        --ovs-max-revalidator=${OVS_MAX_REVALIDATOR}
+        --ovs-min-revalidate-pps=${OVS_MIN_REVALIDATE_PPS}
+        --ovs-max-idle=${OVS_MAX_IDLE}
+      "
+    fi
+  fi
+
   ovnkube_config_duration_enable_flag=
   if [[ ${ovnkube_config_duration_enable} == "true" ]]; then
     ovnkube_config_duration_enable_flag="--metrics-enable-config-duration"
@@ -2140,6 +2153,7 @@ ovnkube-controller-with-node() {
     ${dynamic_udn_allocation_flag} \
     ${dynamic_udn_grace_period} \
     ${network_qos_enabled_flag} \
+    ${ovs_other_config_opts} \
     ${ovnkube_istio_ambient_enable_flag} \
     ${ovnkube_istio_ambient_snat_ipv4_flag} \
     ${ovnkube_istio_ambient_snat_ipv6_flag} \
@@ -2165,6 +2179,7 @@ ovnkube-controller-with-node() {
     --metrics-enable-pprof \
     --mtu=${mtu} \
     --ovn-config-namespace ${ovn_kubernetes_namespace} \
+    --ovn-encap-tos=${ovn_encap_tos} \
     --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
     --pidfile ${OVN_RUNDIR}/ovnkube-controller-with-node.pid \
     --zone ${ovn_zone} &
