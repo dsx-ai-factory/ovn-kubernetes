@@ -24,6 +24,8 @@ endif
 K8S_VER ?=
 
 IMAGE ?= ovn-daemonset-fedora
+UBUNTU_IMAGE ?= $(if $(filter ovn-daemonset-fedora,$(IMAGE)),ovn-kube-ubuntu$(IMAGE_ARCH),$(IMAGE))
+UBUNTU_IMAGE_LATEST ?= $(if $(filter ovn-daemonset-fedora,$(IMAGE)),ovn-kube-ubuntu,$(IMAGE))
 
 OVN_REPO ?= https://github.com/ovn-org/ovn
 OVN_GITREF ?=
@@ -33,17 +35,19 @@ else
 OVN_FROM := source
 OVN_GITSHA := $(shell git ls-remote "${OVN_REPO}" "${OVN_GITREF}" | sort -k2  -V  |tail -1 | awk '{ print $$1 }')
 endif
-GO_VERSION ?= 1.25
+GO_VERSION ?= 1.26
 GO_IMAGE = quay.io/projectquay/golang:${GO_VERSION}
 
 OCI_BIN ?= docker
 
 # The image of ovnkube/ovn-daemonset-ubuntu should be multi-arched before using it on arm64
 ubuntu-image: bld
-	${OCI_BIN} build -t ovn-kube-ubuntu$(IMAGE_ARCH) --build-arg ARTIFACTORY_CERT=${JFROG_CREDENTIAL} -f Dockerfile.ubuntu$(DOCKERFILE_ARCH) .
+	${OCI_BIN} build -t ${UBUNTU_IMAGE} --build-arg ARTIFACTORY_CERT=${JFROG_CREDENTIAL} -f Dockerfile.ubuntu$(DOCKERFILE_ARCH) .
 ifeq ($(ARCH),amd64)
-	${OCI_BIN} tag "ovn-kube-ubuntu$(IMAGE_ARCH):latest" \
-              "ovn-kube-ubuntu:latest"
+ifneq ($(UBUNTU_IMAGE),$(UBUNTU_IMAGE_LATEST))
+	${OCI_BIN} tag "${UBUNTU_IMAGE}" \
+              "${UBUNTU_IMAGE_LATEST}"
+endif
 endif
 
 ubuntu-nv-image: NV_UBUNTU_BASE_IMAGE ?= artifactory.nvidia.com/sw-ipp-lws2-internal-docker/base-container/ubuntu:24.04-fips-stig_lws_pb
