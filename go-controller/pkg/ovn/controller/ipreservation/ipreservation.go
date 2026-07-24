@@ -242,7 +242,7 @@ func (c *Controller) recordIPReservationEvent(reason string, err string, resvIP 
 			resvIP.Namespace, resvIP.Name, refErr)
 	} else {
 		klog.Warningf("Posting a %s event for IPReservation %s/%s", corev1.EventTypeWarning, resvIP.Namespace, resvIP.Name)
-		c.recorder.Eventf(resvIPRef, corev1.EventTypeWarning, reason, err)
+		c.recorder.Eventf(resvIPRef, corev1.EventTypeWarning, reason, "%s", err)
 	}
 }
 
