@@ -1950,6 +1950,12 @@ ovnkube-controller-with-node() {
   fi
   echo "ipreservation_enabled_flag: ${ipreservation_enabled_flag}"
 
+  ctinv_flows_disable_flag=
+  if [[ ${ovn_ctinv_flows_disable} == "true" ]]; then
+      ctinv_flows_disable_flag="--ovn-ctinv-flows-disable"
+  fi
+  echo "ctinv_flows_disable_flag=${ctinv_flows_disable_flag}"
+
   ovn_conntrack_zone_flag=
   if [[ ${ovn_conntrack_zone} != "" ]]; then
      ovn_conntrack_zone_flag="--conntrack-zone=${ovn_conntrack_zone}"
@@ -2087,6 +2093,7 @@ ovnkube-controller-with-node() {
     ${admin_pbr_enabled_flag} \
     ${anp_enabled_flag} \
     ${cluster_subnets_mac_binding_aging_option} \
+    ${ctinv_flows_disable_flag} \
     ${custom_gwsnat_rules_opts} \
     ${disable_forwarding_flag} \
     ${disable_pkt_mtu_check_flag} \
@@ -2215,7 +2222,12 @@ ovn-cluster-manager() {
   if [[ -n "${ovn_egress_ip_healthcheck_port}" ]]; then
       egressip_healthcheck_port_flag="--egressip-node-healthcheck-port=${ovn_egress_ip_healthcheck_port}"
   fi
-  echo "egressip_flags: ${egressip_enabled_flag}, ${egressip_healthcheck_port_flag}"
+
+  egressip_reachability_timeout_flag=
+  if [[ -n "${ovn_egress_ip_reachability_timeout}" ]]; then
+      egressip_reachability_timeout_flag="--egressip-reachability-total-timeout=${ovn_egress_ip_reachability_timeout}"
+  fi
+  echo "egressip_flags: ${egressip_enabled_flag}, ${egressip_healthcheck_port_flag}, ${egressip_reachability_timeout_flag}"
 
   egressservice_enabled_flag=
   if [[ ${ovn_egressservice_enable} == "true" ]]; then
@@ -2451,6 +2463,7 @@ ovn-cluster-manager() {
     ${egressfirewall_enabled_flag} \
     ${egressip_enabled_flag} \
     ${egressip_healthcheck_port_flag} \
+    ${egressip_reachability_timeout_flag} \
     ${egressqos_enabled_flag} \
     ${egressservice_enabled_flag} \
     ${empty_lb_events_flag} \
@@ -2494,6 +2507,7 @@ ovn-cluster-manager() {
     --metrics-bind-address ${ovnkube_cluster_manager_metrics_bind_address} \
     --metrics-enable-pprof \
     --ovn-config-namespace ${ovn_kubernetes_namespace} \
+    --mtu=${mtu} \
     --pidfile ${OVN_RUNDIR}/ovnkube-cluster-manager.pid &
 
   echo "=============== ovn-cluster-manager ========== running"
