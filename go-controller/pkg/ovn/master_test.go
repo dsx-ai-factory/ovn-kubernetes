@@ -789,6 +789,12 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			config.Default.Transport = types.NetworkTransportNoOverlay
 			config.NoOverlay.OutboundSNAT = types.NoOverlaySNATEnabled
 
+			// gateway sync adds the node's stor port to the global advertised network
+			// isolation port group, which ovnkube-controller normally creates at startup.
+			if oc.isPodNetworkAdvertisedAtNode(node1.Name) {
+				gomega.Expect(ConfigureAdvertisedNetworkIsolation(nbClient)).To(gomega.Succeed())
+			}
+
 			recordingClient := &recordingNBClient{Client: nbClient}
 			oc.nbClient = recordingClient
 			node, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
@@ -879,6 +885,9 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				err = condition(oc)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+				if oc.isPodNetworkAdvertisedAtNode(node1.Name) {
+					gomega.Expect(ConfigureAdvertisedNetworkIsolation(nbClient)).To(gomega.Succeed())
+				}
 				startDefaultNodeController(oc)
 				gomega.Eventually(func() error {
 					_, err := libovsdbops.GetLogicalRouter(nbClient, &nbdb.LogicalRouter{
