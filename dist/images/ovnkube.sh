@@ -397,11 +397,16 @@ ovn_disable_requestedchassis=${OVN_DISABLE_REQUESTEDCHASSIS:-true}
 # external_ids:host-k8s-nodename is set on an Open_vSwitch enabled system if the ovnkube stack
 # should function on behalf of a different host than external_ids:hostname. This includes
 # all the components that belond in an ovnkube stack (i.e. NB DB, SB DB, ovnkube etc)
-# overwrite the K8S_NODE env var with the one found within the OVS metadata in this case
-ovn_k8s_node=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:host-k8s-nodename | tr -d '\"')
-if [[ ! -z $ovn_k8s_node ]]; then
-  echo "host-k8s-nodename is set, overriding K8S_NODE with $ovn_k8s_node"
-  K8S_NODE=$ovn_k8s_node
+# overwrite the K8S_NODE env var with the one found within the OVS metadata in this case.
+# Only the DPU side runs an OVS holding this key (ovnkube-init.sh sets it there), and this
+# runs before any ovs_ready gate, so never query OVS from a dpu-host.
+ovn_k8s_node=
+if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
+  ovn_k8s_node=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:host-k8s-nodename | tr -d '\"')
+  if [[ ! -z $ovn_k8s_node ]]; then
+    echo "host-k8s-nodename is set, overriding K8S_NODE with $ovn_k8s_node"
+    K8S_NODE=$ovn_k8s_node
+  fi
 fi
 
 
@@ -423,15 +428,11 @@ if [[ ${ovnkube_secure_mgmt_port} == "true" ]]; then
 fi
 echo "ovnkube_secure_mgmt_port_flag=${ovnkube_secure_mgmt_port_flag}"
 
-# external_ids:host-k8s-nodename will be set on an Open_vSwitch enabled system if the ovnkube pod
-# should function on behalf of a different host
-# overwrite the K8S_NODE env var with the one found within the OVS metadata in this case
-if [[ ${ovnkube_node_mode} == "dpu" ]]; then
-  K8S_NODE=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:host-k8s-nodename | tr -d '\"')
-  if [[ ${K8S_NODE} == "" ]]; then
-    echo "Trying to run in DPU mode and couldn't get the required Host K8s Nodename. Exiting..."
-    exit 1
-  fi
+# The host-k8s-nodename override above is optional in general, but mandatory in
+# DPU mode: without it the DPU would act on behalf of itself instead of its host.
+if [[ ${ovnkube_node_mode} == "dpu" && -z ${ovn_k8s_node} ]]; then
+  echo "Trying to run in DPU mode and couldn't get the required Host K8s Nodename. Exiting..."
+  exit 1
 fi
 # OVNKUBE_ENABLE_KATA_DAN - enable Kata DAN config generation support
 ovnkube_enable_kata_dan=${OVNKUBE_ENABLE_KATA_DAN:-"false"}
