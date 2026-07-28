@@ -11,6 +11,8 @@ import (
 
 	"k8s.io/klog/v2"
 
+	"github.com/ovn-kubernetes/libovsdb/client"
+
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -28,7 +30,8 @@ type UserDefinedLocalnetNodeNetworkController struct {
 
 // NewUserDefinedLocalnetNodeNetworkController creates a new OVN controller for creating logical network
 // infrastructure and policy for user defined localnet network
-func NewUserDefinedLocalnetNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, netInfo util.NetInfo, networkManager networkmanager.Interface) *UserDefinedLocalnetNodeNetworkController {
+func NewUserDefinedLocalnetNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, netInfo util.NetInfo,
+	networkManager networkmanager.Interface, ovsClient client.Client) *UserDefinedLocalnetNodeNetworkController {
 	return &UserDefinedLocalnetNodeNetworkController{
 		UserDefinedNodeNetworkController: UserDefinedNodeNetworkController{
 			BaseNodeNetworkController: BaseNodeNetworkController{
@@ -38,6 +41,7 @@ func NewUserDefinedLocalnetNodeNetworkController(cnnci *CommonNodeNetworkControl
 				wg:                              &sync.WaitGroup{},
 				DoSCheckStopChan:                nil,
 				networkManager:                  networkManager,
+				ovsClient:                       ovsClient,
 			},
 		},
 	}
