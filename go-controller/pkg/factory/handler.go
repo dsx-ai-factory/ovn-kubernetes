@@ -403,11 +403,11 @@ func ensureObjectOnDelete(obj interface{}, expectedType reflect.Type) (interface
 	return obj, nil
 }
 
-func (i *informer) newFederatedQueuedHandler(internalInformerIndex int) cache.ResourceEventHandlerFuncs {
+func (i *informer) newFederatedQueuedHandler(internalInformerIndex int) cache.ResourceEventHandlerDetailedFuncs {
 	name := i.oType.Elem().Name()
 	intInf := i.internalInformers[internalInformerIndex]
-	return cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
+	return cache.ResourceEventHandlerDetailedFuncs{
+		AddFunc: func(obj interface{}, isInInitialList bool) {
 			// do not enqueue events to internal informer that has no handlers for better performance
 			if atomic.LoadUint32(&intInf.hasHandlers) == hasNoHandler {
 				return
@@ -415,7 +415,7 @@ func (i *informer) newFederatedQueuedHandler(internalInformerIndex int) cache.Re
 			intInf.queueMap.enqueueEvent(nil, obj, i.oType, false, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "add").Inc()
 				intInf.forEachQueuedHandler(func(h *Handler) {
-					h.OnAdd(e.obj, false)
+					h.OnAdd(e.obj, isInInitialList)
 				})
 			})
 		},
@@ -581,7 +581,7 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		// channel array.
 		for _, obj := range items {
 			addsMap.enqueueEvent(nil, obj, informer.oType, false, func(e *event) {
-				h.OnAdd(e.obj, false)
+				h.OnAdd(e.obj, true)
 			})
 		}
 
