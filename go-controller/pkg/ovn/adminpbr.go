@@ -396,8 +396,7 @@ func (bnc *BaseNetworkController) onAdminPBRAddOrUpdate(adminpbr *adminpbrapi.Ad
 		return
 	}
 	// check if adminpbr exists or not for retry path
-	var err error
-	if adminpbr, err = bnc.watchFactory.GetAdminPBR(adminpbr.Name); err != nil {
+	if reloaded, err := bnc.watchFactory.GetAdminPBR(adminpbr.Name); err != nil {
 		if apierrors.IsNotFound(err) {
 			klog.Infof("Stop handling adminpbr %s as it does not exist", adminpbr.Name)
 		} else {
@@ -405,6 +404,8 @@ func (bnc *BaseNetworkController) onAdminPBRAddOrUpdate(adminpbr *adminpbrapi.Ad
 			bnc.requeueAdminPBR(actionAddAdminPBR, adminpbr)
 		}
 		return
+	} else {
+		adminpbr = reloaded
 	}
 	policies := map[string]*internalAdminPBRPolicy{}
 	val, ok := bnc.adminPBRStore.Load(util.NamespacedName(adminpbr))
