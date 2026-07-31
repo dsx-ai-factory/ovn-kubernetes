@@ -28,7 +28,6 @@ import (
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedrouteclient "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
-	portmirrorclient "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1/apis/clientset/versioned/fake"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube/mocks"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
@@ -65,7 +64,7 @@ var _ = Describe("Node", func() {
 
 	Describe("validateMTU", func() {
 		var (
-			kubeOVNMock     *mocks.InterfaceOVN
+			kubeMock        *mocks.Interface
 			netlinkOpsMock  *utilMocks.NetLinkOps
 			netlinkLinkMock *netlink_mocks.Link
 
@@ -90,7 +89,7 @@ var _ = Describe("Node", func() {
 		)
 
 		BeforeEach(func() {
-			kubeOVNMock = new(mocks.InterfaceOVN)
+			kubeMock = new(mocks.Interface)
 			netlinkOpsMock = new(utilMocks.NetLinkOps)
 			netlinkLinkMock = new(netlink_mocks.Link)
 
@@ -105,7 +104,7 @@ var _ = Describe("Node", func() {
 				BaseNodeNetworkController: BaseNodeNetworkController{
 					CommonNodeNetworkControllerInfo: CommonNodeNetworkControllerInfo{
 						name: nodeName,
-						Kube: kubeOVNMock,
+						Kube: kubeMock,
 					},
 					ReconcilableNetInfo: &util.DefaultNetInfo{},
 				},
@@ -937,7 +936,8 @@ var _ = Describe("Node", func() {
 					err = wf.Start()
 					Expect(err).NotTo(HaveOccurred())
 					routeManager := routemanager.NewController()
-					cnnci := NewCommonNodeNetworkControllerInfo(fakeClient, wf, nil, routeManager, nodeName, "", "", nil)
+					cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager,
+						"", "", nil)
 					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
 					nc.initRetryFrameworkForNode()
 					err = setupRemoteNodeNFTSets()
@@ -1048,7 +1048,8 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.254.61 }
 					err = wf.Start()
 					Expect(err).NotTo(HaveOccurred())
 					routeManager := routemanager.NewController()
-					cnnci := NewCommonNodeNetworkControllerInfo(fakeClient, wf, nil, routeManager, nodeName, "", "", nil)
+					cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager,
+						"", "", nil)
 					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
 					nc.initRetryFrameworkForNode()
 					err = setupRemoteNodeNFTSets()
@@ -1204,7 +1205,8 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.253.61 }
 					err = wf.Start()
 					Expect(err).NotTo(HaveOccurred())
 					routeManager := routemanager.NewController()
-					cnnci := NewCommonNodeNetworkControllerInfo(fakeClient, wf, nil, routeManager, nodeName, "", "", nil)
+					cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager,
+						"", "", nil)
 					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
 					nc.initRetryFrameworkForNode()
 					err = setupRemoteNodeNFTSets()
@@ -1314,7 +1316,8 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2001:db8:1::4 }
 					err = wf.Start()
 					Expect(err).NotTo(HaveOccurred())
 					routeManager := routemanager.NewController()
-					cnnci := NewCommonNodeNetworkControllerInfo(fakeClient, wf, nil, routeManager, nodeName, "", "", nil)
+					cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager,
+						"", "", nil)
 					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
 					nc.initRetryFrameworkForNode()
 					err = setupRemoteNodeNFTSets()
@@ -1365,6 +1368,7 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 			})
 
 		})
+
 	})
 
 	Describe("node ingress snat exclude subnets", func() {
@@ -1474,7 +1478,8 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 					err = wf.Start()
 					Expect(err).NotTo(HaveOccurred())
 					routeManager := routemanager.NewController()
-					cnnci := NewCommonNodeNetworkControllerInfo(fakeClient, wf, nil, routeManager, nodeName, "", "", nil)
+					cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager,
+						"", "", nil)
 					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
 					nc.initRetryFrameworkForNode()
 					err = setupRemoteNodeNFTSets()
@@ -1580,7 +1585,6 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 						KubeClient:             kubeFakeClient,
 						AdminPolicyRouteClient: adminpolicybasedrouteclient.NewSimpleClientset(),
 						NetworkAttchDefClient:  nadfake.NewSimpleClientset(),
-						PortMirrorClient:       portmirrorclient.NewSimpleClientset(),
 					}
 
 					stop := make(chan struct{})
@@ -1596,7 +1600,8 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 					err = wf.Start()
 					Expect(err).NotTo(HaveOccurred())
 					routeManager := routemanager.NewController()
-					cnnci := NewCommonNodeNetworkControllerInfo(fakeClient, wf, nil, routeManager, nodeName, "", "", nil)
+					cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager,
+						"", "", nil)
 					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
 					nc.initRetryFrameworkForNode()
 					err = setupRemoteNodeNFTSets()
@@ -1677,7 +1682,7 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 
 		Describe("derive-from-mgmt-port gateway interface resolution", func() {
 			var (
-				kubeMock        *mocks.InterfaceOVN
+				kubeMock        *mocks.Interface
 				sriovnetMock    utilMocks.SriovnetOps
 				netlinkOpsMock  *utilMocks.NetLinkOps
 				netlinkLinkMock *netlink_mocks.Link
@@ -1692,7 +1697,7 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 			)
 
 			BeforeEach(func() {
-				kubeMock = new(mocks.InterfaceOVN)
+				kubeMock = new(mocks.Interface)
 				sriovnetMock = utilMocks.SriovnetOps{}
 				netlinkOpsMock = new(utilMocks.NetLinkOps)
 				netlinkLinkMock = new(netlink_mocks.Link)
@@ -2340,7 +2345,8 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 			defer wf.Shutdown()
 
 			routeManager := routemanager.NewController()
-			cnnci := NewCommonNodeNetworkControllerInfo(ovnClient.GetNodeClientset(), wf, nil, routeManager, nodeName, "", "", nil)
+			cnnci := NewCommonNodeNetworkControllerInfo(ovnClient.KubeClient, ovnClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager,
+				"", "", nil)
 			_, err = NewDefaultNodeNetworkController(cnnci, nil, nil)
 			Expect(err).NotTo(HaveOccurred())
 

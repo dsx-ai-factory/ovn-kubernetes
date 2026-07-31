@@ -22,6 +22,7 @@ import (
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	adminpolicybasedrouteclient "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
 	factorymocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	kubemocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube/mocks"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/routemanager"
@@ -147,7 +148,7 @@ var _ = Describe("Node DPU tests", func() {
 	var sriovnetOpsMock utilMocks.SriovnetOps
 	var netlinkOpsMock utilMocks.NetLinkOps
 	var execMock *ovntest.FakeExec
-	var kubeOVNMock kubemocks.InterfaceOVN
+	var kubeMock kubemocks.Interface
 	var factoryMock factorymocks.NodeWatchFactory
 	var pod corev1.Pod
 	var dnnc *DefaultNodeNetworkController
@@ -165,7 +166,6 @@ var _ = Describe("Node DPU tests", func() {
 		Expect(config.PrepareTestConfig()).To(Succeed())
 		sriovnetOpsMock = utilMocks.SriovnetOps{}
 		netlinkOpsMock = utilMocks.NetLinkOps{}
-		kubeOVNMock = kubemocks.InterfaceOVN{}
 		execMock = ovntest.NewFakeExec()
 
 		util.SetSriovnetOpsInst(&sriovnetOpsMock)
@@ -177,8 +177,11 @@ var _ = Describe("Node DPU tests", func() {
 		routeManager = routemanager.NewController()
 		Expect(routeManager).NotTo(BeNil())
 
+		kubeMock = kubemocks.Interface{}
+		apbExternalRouteClient := adminpolicybasedrouteclient.NewSimpleClientset()
 		factoryMock = factorymocks.NodeWatchFactory{}
-		cnnci := newCommonNodeNetworkControllerInfo(nil, &kubeOVNMock, &factoryMock, nil, "", "", "", []string{"00:00:00:01:02:03"}, routeManager)
+		cnnci := newCommonNodeNetworkControllerInfo(nil, &kubeMock, apbExternalRouteClient, &factoryMock, nil, "", routeManager,
+			"", "", []string{"00:00:00:01:02:03"})
 		dnnc = newDefaultNodeNetworkController(cnnci, nil, nil, routeManager, nil, nil)
 
 		podInformer = coreinformermocks.PodInformer{}
@@ -385,7 +388,7 @@ var _ = Describe("Node DPU tests", func() {
 				podInformer.On("Lister").Return(&podLister)
 				podLister.On("Pods", mock.AnythingOfType("string")).Return(&podNamespaceLister)
 				podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
-				kubeOVNMock.On("PatchPodStatusAnnotations", &pod, cpod).Return(nil)
+				kubeMock.On("PatchPodStatusAnnotations", &pod, cpod).Return(nil)
 
 				err = dnnc.addRepPort(&pod, &scd, types.DefaultNetworkName, ifInfo, clientset)
 				Expect(err).ToNot(HaveOccurred())
@@ -409,7 +412,7 @@ var _ = Describe("Node DPU tests", func() {
 				podInformer.On("Lister").Return(&podLister)
 				podLister.On("Pods", mock.AnythingOfType("string")).Return(&podNamespaceLister)
 				podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
-				kubeOVNMock.On("PatchPodStatusAnnotations", &pod, cpod).Return(fmt.Errorf("failed to set pod annotations"))
+				kubeMock.On("PatchPodStatusAnnotations", &pod, cpod).Return(fmt.Errorf("failed to set pod annotations"))
 
 				err = dnnc.addRepPort(&pod, &scd, types.DefaultNetworkName, ifInfo, clientset)
 				Expect(err).To(HaveOccurred())

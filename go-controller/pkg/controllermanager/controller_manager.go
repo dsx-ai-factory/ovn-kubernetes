@@ -267,7 +267,6 @@ func NewControllerManager(ovnClient *util.OVNClientset, wf *factory.WatchFactory
 			APBRouteClient:       ovnClient.AdminPolicyRouteClient,
 			EgressQoSClient:      ovnClient.EgressQoSClient,
 			IPAMClaimsClient:     ovnClient.IPAMClaimsClient,
-			PortMirrorClient:     ovnClient.PortMirrorClient,
 			NetworkQoSClient:     ovnClient.NetworkQoSClient,
 			NADClient:            ovnClient.NetworkAttchDefClient,
 		},

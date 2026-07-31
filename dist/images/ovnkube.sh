@@ -301,8 +301,6 @@ ovn_egressservice_enable=${OVN_EGRESSSERVICE_ENABLE:-false}
 ovn_admin_pbr_enable=${OVN_ADMIN_PBR_ENABLE:-false}
 #OVN_IPRESERVATION_ENABLE - enable ipreservation for ovn-kubernetes
 ovn_ipreservation_enable=${OVN_IPRESERVATION_ENABLE:-false}
-#OVN_PORT_MIRROR_ENABLE - enable port mirror for ovn-kubernetes
-ovn_port_mirror_enable=${OVN_PORT_MIRROR_ENABLE:-false}
 #OVN_MULTI_NETWORK_ENABLE - enable multiple network support for ovn-kubernetes
 ovn_multi_network_enable=${OVN_MULTI_NETWORK_ENABLE:-false}
 #OVN_NETWORK_SEGMENTATION_ENABLE - enable user defined primary networks for ovn-kubernetes
@@ -1938,12 +1936,6 @@ ovnkube-controller-with-node() {
   fi
   echo "ipreservation_enabled_flag: ${ipreservation_enabled_flag}"
 
-  port_mirror_enabled_flag=
-  if [[ ${ovn_port_mirror_enable} == "true" ]]; then
-	  port_mirror_enabled_flag="--enable-port-mirror"
-  fi
-  echo "port_mirror_enabled_flag: ${port_mirror_enabled_flag}"
-
   ovn_conntrack_zone_flag=
   if [[ ${ovn_conntrack_zone} != "" ]]; then
      ovn_conntrack_zone_flag="--conntrack-zone=${ovn_conntrack_zone}"
@@ -2141,7 +2133,6 @@ ovnkube-controller-with-node() {
     ${ovn_v4_masquerade_subnet_opt} \
     ${ovn_v6_join_subnet_opt} \
     ${ovn_v6_masquerade_subnet_opt} \
-    ${port_mirror_enabled_flag} \
     ${ovs_db_transaction_timeout_flag} \
     ${routable_mtu_flag} \
     ${sflow_targets} \
@@ -2730,11 +2721,6 @@ ovn-node() {
 	  egressservice_enabled_flag="--enable-egress-service"
   fi
 
-  port_mirror_enabled_flag=
-  if [[ ${ovn_port_mirror_enable} == "true" ]]; then
-	  port_mirror_enabled_flag="--enable-port-mirror"
-  fi
-
   multi_network_enabled_flag=
   if [[ ${ovn_multi_network_enable} == "true" ]]; then
 	  multi_network_enabled_flag="--enable-multi-network --enable-multi-networkpolicy"
@@ -3114,7 +3100,6 @@ ovn-node() {
         ${ovn_v4_masquerade_subnet_opt} \
         ${ovn_v6_masquerade_subnet_opt} \
         ${ovs_other_config_opts} \
-        ${port_mirror_enabled_flag} \
         ${representor_metering_nodes_flag} \
         ${routable_mtu_flag} \
         ${sflow_targets} \

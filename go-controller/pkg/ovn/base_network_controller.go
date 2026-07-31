@@ -36,7 +36,6 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	nodecontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controllers/node"
 	adminpbrapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
-	portmirror "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/portmirror/v1beta1"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kubevirt"
@@ -194,9 +193,6 @@ type BaseNetworkController struct {
 	adminPBRStore      sync.Map
 	adminPBRRetryQueue workqueue.RateLimitingInterface
 
-	// map & workqueue for portmirror operations
-	portMirrors          sync.Map
-	portMirrorRetryQueue workqueue.RateLimitingInterface
 	// IP addresses of OVN Cluster logical router port ("GwRouterToJoinSwitchPrefix + OVNClusterRouter")
 	// connecting to the join switch
 	ovnClusterLRPToJoinIfAddrs []*net.IPNet
@@ -1281,74 +1277,6 @@ func (bnc *BaseNetworkController) WatchAdminPolicyBasedRoutes() (err error) {
 		for bnc.retryAdminPBROperations() {
 		}
 	}()
-	return nil
-}
-
-// WatchPortMirrors starts the watching of portMirror resources and calls
-// back the appropriate handler logic
-func (bnc *BaseNetworkController) WatchPortMirrors() error {
-	start := time.Now()
-	bnc.portMirrorRetryQueue = workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "portMirror")
-	// creates corresponding add/update/delete handlers
-	_, err := bnc.watchFactory.AddPortMirrorHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			portMirror := obj.(*portmirror.PortMirror)
-			err := bnc.addPortMirror(portMirror)
-			if err != nil {
-				klog.Error(err.Error())
-			}
-		},
-		UpdateFunc: func(old, newer interface{}) {
-			oldPortMirror := old.(*portmirror.PortMirror)
-			newPortMirror := newer.(*portmirror.PortMirror)
-			// only compare spec changes as we constantly do updates for
-			// portMirror status.
-			if !reflect.DeepEqual(oldPortMirror.Spec, newPortMirror.Spec) {
-				if err := bnc.deletePortMirror(oldPortMirror); err != nil {
-					klog.Error(err.Error())
-				}
-				if err := bnc.addPortMirror(newPortMirror); err != nil {
-					klog.Error(err.Error())
-				}
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			portMirror := obj.(*portmirror.PortMirror)
-			if err := bnc.deletePortMirror(portMirror); err != nil {
-				klog.Error(err)
-			}
-		},
-	}, nil)
-
-	if err != nil {
-		return err
-	}
-	go func() {
-		ticker := time.NewTicker(types.PortMirrorResyncInterval)
-		for {
-			select {
-			case <-ticker.C:
-				// run syncPortMirrorsPeriodic for only primary controller,
-				// as the operations performed in syncPortMirrorsPeriodic
-				// will be repititive for other controllers
-				if !bnc.IsUserDefinedNetwork() {
-					bnc.syncPortMirrorsPeriodic()
-				}
-			case <-bnc.stopChan:
-				ticker.Stop()
-				bnc.portMirrorRetryQueue.ShutDown()
-				return
-			}
-		}
-	}()
-
-	// for portmirror retry operations
-	go func() {
-		for bnc.retryPortMirrorOperations() {
-		}
-	}()
-
-	klog.Infof("Bootstrapping existing portMirrors and cleaning stale portMirrors for network %s took %v", bnc.GetNetworkName(), time.Since(start))
 	return nil
 }
 

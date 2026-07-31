@@ -582,7 +582,6 @@ type OVNKubernetesFeatureConfig struct {
 	// EnableAdminPolicyBasedRouting allows admin to manage PBR rules
 	EnableAdminPolicyBasedRouting bool `gcfg:"enable-admin-pbr"`
 	EnableIPReservation           bool `gcfg:"enable-ip-reservation"`
-	EnablePortMirror              bool `gcfg:"enable-port-mirror"`
 	// EnableIstioAmbientSupport enables support for Istio Ambient mesh by adding
 	// logical router policies for custom SNAT IPs used by Istio for kubelet health checks
 	EnableIstioAmbientSupport bool `gcfg:"enable-istio-ambient-support"`
@@ -1460,12 +1459,6 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use IPReservation CRD feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableIPReservation,
 		Value:       OVNKubernetesFeature.EnableIPReservation,
-	},
-	&cli.BoolFlag{
-		Name:        "enable-port-mirror",
-		Usage:       "Configure to use PortMirror CRD feature with ovn-kubernetes.",
-		Destination: &cliConfig.OVNKubernetesFeature.EnablePortMirror,
-		Value:       OVNKubernetesFeature.EnablePortMirror,
 	},
 	&cli.BoolFlag{
 		Name:        "enable-svc-template-support",
