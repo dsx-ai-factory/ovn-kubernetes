@@ -116,16 +116,118 @@ func GetNetLinkOps() NetLinkOps {
 	return netLinkOps
 }
 
+// The three RTM_GETLINK wrappers below exist only to leave IFLA_EXT_MASK off the
+// request. The netlink library hardcodes IFLA_EXT_MASK=RTEXT_FILTER_VF, which
+// makes the kernel walk every VF of a PF under the RTNL lock, calling
+// ndo_get_vf_stats per VF. On mlx5 that is a QUERY_VPORT_COUNTER firmware
+// command, so one lookup of a 176-VF PF issues 176 of them, and LinkList pays
+// the same because a dump includes the PF. Everything else needing RTNL stalls
+// behind it, including ovs-vswitchd's single main thread, until the ovs-vsctl
+// binding a pod interface times out: the failure reported in SDN-4021.
+//
+// Nothing here reads Attrs().Vfs, so dropping the flag is free.
+// RTEXT_FILTER_SKIP_STATS is the narrower alternative. NVP kernel honours it and
+// it does suppress ndo_get_vf_stats, but rtnl_fill_vfinfo still walks every VF
+// and calls ndo_get_vf_config before it consults the flag, and stock 4.18 lacks
+// the backport and ignores it outright. Clearing the mask needs neither.
+// Attrs().Statistics is unaffected either way, since IFLA_STATS64 is not gated on
+// the filter mask.
+//
+// TODO: drop all of this once the vendored github.com/vishvananda/netlink is
+// bumped to a version providing HandleOptions.DisableVFInfoCollection, which
+// omits IFLA_EXT_MASK in exactly the same way.
+// See https://github.com/vishvananda/netlink/blob/main/link_linux.go#L2032-L2034
+// Then newGetLinkRequest, execGetLinkRequest and the three overrides below can be deleted, the methods
+// can go back to one-line passthroughs to netlink.LinkList/LinkByName/
+// LinkByIndex, and the package-wide handle can be configured once at startup:
+//
+//	func init() {
+//		// ovn-kubernetes never reads Attrs().Vfs, and collecting VF info
+//		// holds RTNL for seconds on a PF with many VFs. See SDN-4021.
+//		if err := netlink.ConfigureHandle(netlink.HandleOptions{
+//			DisableVFInfoCollection: true,
+//		}); err != nil {
+//			panic(fmt.Sprintf("failed to configure netlink handle: %v", err))
+//		}
+//	}
+//
+// That also covers netlink.LinkByAlias and any direct netlink calls elsewhere,
+// which these overrides cannot reach.
+
+// newGetLinkRequest builds an RTM_GETLINK request without IFLA_EXT_MASK, so the
+// kernel skips the per-VF collection described above.
+func newGetLinkRequest(flags int, msg *nl.IfInfomsg) *nl.NetlinkRequest {
+	req := nl.NewNetlinkRequest(unix.RTM_GETLINK, flags)
+	req.AddData(msg)
+	return req
+}
+
+// execGetLinkRequest runs an RTM_GETLINK request expected to match one link.
+func execGetLinkRequest(req *nl.NetlinkRequest) (netlink.Link, error) {
+	msgs, err := req.Execute(unix.NETLINK_ROUTE, 0)
+	if err != nil {
+		return nil, err
+	}
+	if len(msgs) != 1 {
+		return nil, fmt.Errorf("expected exactly one link, got %d", len(msgs))
+	}
+	return netlink.LinkDeserialize(nil, msgs[0])
+}
+
+// LinkList is netlink.LinkList, minus the per-VF information.
 func (defaultNetLinkOps) LinkList() ([]netlink.Link, error) {
-	return netlink.LinkList()
+	req := newGetLinkRequest(unix.NLM_F_DUMP, nl.NewIfInfomsg(unix.AF_UNSPEC))
+
+	msgs, err := req.Execute(unix.NETLINK_ROUTE, unix.RTM_NEWLINK)
+	if err != nil {
+		return nil, err
+	}
+
+	links := make([]netlink.Link, 0, len(msgs))
+	for _, msg := range msgs {
+		link, err := netlink.LinkDeserialize(nil, msg)
+		if err != nil {
+			return nil, err
+		}
+		links = append(links, link)
+	}
+
+	return links, nil
 }
 
+// LinkByName is netlink.LinkByName, minus the per-VF information.
 func (defaultNetLinkOps) LinkByName(ifaceName string) (netlink.Link, error) {
-	return netlink.LinkByName(ifaceName)
+	req := newGetLinkRequest(unix.NLM_F_ACK, nl.NewIfInfomsg(unix.AF_UNSPEC))
+	nameAttr := unix.IFLA_IFNAME
+	if len(ifaceName) > unix.IFNAMSIZ-1 {
+		nameAttr = unix.IFLA_ALT_IFNAME
+	}
+	req.AddData(nl.NewRtAttr(nameAttr, nl.ZeroTerminated(ifaceName)))
+
+	link, err := execGetLinkRequest(req)
+	if err != nil {
+		// Retry through the library so callers keep seeing its own error
+		// values, in particular LinkNotFoundError, whose only field is
+		// unexported and so cannot be constructed here. This also inherits its
+		// fallback to a dump on kernels that reject IFLA_IFNAME lookups. The
+		// retry is free in practice: a lookup that failed did no per-VF work.
+		return netlink.LinkByName(ifaceName)
+	}
+	return link, nil
 }
 
+// LinkByIndex is netlink.LinkByIndex, minus the per-VF information.
 func (defaultNetLinkOps) LinkByIndex(index int) (netlink.Link, error) {
-	return netlink.LinkByIndex(index)
+	msg := nl.NewIfInfomsg(unix.AF_UNSPEC)
+	msg.Index = int32(index)
+	req := newGetLinkRequest(unix.NLM_F_ACK, msg)
+
+	link, err := execGetLinkRequest(req)
+	if err != nil {
+		// See LinkByName.
+		return netlink.LinkByIndex(index)
+	}
+	return link, nil
 }
 
 func (defaultNetLinkOps) LinkSetDown(link netlink.Link) error {

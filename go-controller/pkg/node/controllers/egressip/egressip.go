@@ -1491,7 +1491,7 @@ func getPodNamespacedName(pod *corev1.Pod) ktypes.NamespacedName {
 }
 
 func isEgressIPOnLink(linkIndex, ipFamily int, assignedEIPs sets.Set[string]) (bool, error) {
-	link, err := netlink.LinkByIndex(linkIndex)
+	link, err := util.GetNetLinkOps().LinkByIndex(linkIndex)
 	if err != nil {
 		// If the link doesn't exist, there can't be an EgressIP on it.
 		// This can happen when a route is added/deleted causing the interface

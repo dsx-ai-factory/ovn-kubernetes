@@ -1319,3 +1319,122 @@ func getAnyNetwork(v6 bool) *net.IPNet {
 	}
 	return ipNet
 }
+
+// The tests below exercise defaultNetLinkOps against a real kernel rather than a
+// mock, because the code under test is the hand-built RTM_GETLINK request that
+// replaces the netlink library's own. Mocking netLinkOps would skip it entirely.
+
+// linkFingerprint captures the link attributes ovn-kubernetes actually reads, so
+// the tests can assert that leaving IFLA_EXT_MASK off the request changes nothing
+// else. Statistics are included deliberately: dropping RTEXT_FILTER_VF must not
+// cost us IFLA_STATS64, which the geneve interface metrics depend on.
+type linkFingerprint struct {
+	Name      string
+	Index     int
+	Type      string
+	MTU       int
+	Flags     string
+	Master    int
+	HwAddr    string
+	OperState netlink.LinkOperState
+	HasStats  bool
+}
+
+func fingerprintLink(link netlink.Link) linkFingerprint {
+	attrs := link.Attrs()
+	return linkFingerprint{
+		Name:      attrs.Name,
+		Index:     attrs.Index,
+		Type:      link.Type(),
+		MTU:       attrs.MTU,
+		Flags:     attrs.Flags.String(),
+		Master:    attrs.MasterIndex,
+		HwAddr:    attrs.HardwareAddr.String(),
+		OperState: attrs.OperState,
+		HasStats:  attrs.Statistics != nil,
+	}
+}
+
+func fingerprintLinks(links []netlink.Link) map[string]linkFingerprint {
+	out := make(map[string]linkFingerprint, len(links))
+	for _, link := range links {
+		out[link.Attrs().Name] = fingerprintLink(link)
+	}
+	return out
+}
+
+// TestLinkListMatchesNetlinkLinkList checks that leaving out the per-VF
+// information does not otherwise change what LinkList reports. Links can appear
+// or disappear between the two dumps, so only the interfaces common to both are
+// compared.
+func TestLinkListMatchesNetlinkLinkList(t *testing.T) {
+	t.Cleanup(ResetNetLinkOpMockInst)
+	ResetNetLinkOpMockInst()
+
+	upstream, err := netlink.LinkList()
+	require.NoError(t, err)
+	ours, err := GetNetLinkOps().LinkList()
+	require.NoError(t, err)
+
+	upstreamFPs := fingerprintLinks(upstream)
+	ourFPs := fingerprintLinks(ours)
+
+	compared := 0
+	for name, want := range upstreamFPs {
+		got, ok := ourFPs[name]
+		if !ok {
+			continue
+		}
+		assert.Equal(t, want, got, "link %q differs", name)
+		assert.True(t, got.HasStats, "link %q lost IFLA_STATS64", name)
+		compared++
+	}
+	require.NotZero(t, compared, "no links in common to compare")
+	assert.Contains(t, ourFPs, "lo")
+}
+
+// TestLinkByNameAndIndexMatchNetlink checks the single-link lookups against the
+// library for an interface guaranteed to exist in every network namespace.
+func TestLinkByNameAndIndexMatchNetlink(t *testing.T) {
+	t.Cleanup(ResetNetLinkOpMockInst)
+	ResetNetLinkOpMockInst()
+
+	upstream, err := netlink.LinkByName("lo")
+	require.NoError(t, err)
+	want := fingerprintLink(upstream)
+	require.True(t, want.HasStats)
+
+	byName, err := GetNetLinkOps().LinkByName("lo")
+	require.NoError(t, err)
+	assert.Equal(t, want, fingerprintLink(byName))
+
+	byIndex, err := GetNetLinkOps().LinkByIndex(upstream.Attrs().Index)
+	require.NoError(t, err)
+	assert.Equal(t, want, fingerprintLink(byIndex))
+}
+
+// TestLinkByNameNotFoundIsTyped guards the fallback in LinkByName: callers rely
+// on IsLinkNotFoundError, and netlink.LinkNotFoundError cannot be constructed
+// outside its own package. The name has to fit in IFNAMSIZ-1, or the kernel
+// rejects IFLA_IFNAME with ERANGE before it ever looks a link up.
+func TestLinkByNameNotFoundIsTyped(t *testing.T) {
+	t.Cleanup(ResetNetLinkOpMockInst)
+	ResetNetLinkOpMockInst()
+
+	_, err := GetNetLinkOps().LinkByName("ovnk-absent0")
+	require.Error(t, err)
+	assert.True(t, GetNetLinkOps().IsLinkNotFoundError(err),
+		"expected netlink.LinkNotFoundError, got %T: %v", err, err)
+}
+
+// TestLinkByIndexNotFoundIsTyped is TestLinkByNameNotFoundIsTyped for the index
+// lookup.
+func TestLinkByIndexNotFoundIsTyped(t *testing.T) {
+	t.Cleanup(ResetNetLinkOpMockInst)
+	ResetNetLinkOpMockInst()
+
+	_, err := GetNetLinkOps().LinkByIndex(1 << 24)
+	require.Error(t, err)
+	assert.True(t, GetNetLinkOps().IsLinkNotFoundError(err),
+		"expected netlink.LinkNotFoundError, got %T: %v", err, err)
+}

@@ -510,9 +510,9 @@ func (udng *UserDefinedNetworkGateway) addNetwork() error {
 		}
 	} else if config.IsModeDPUHost() || config.IsModeFull() {
 		mgmtPortName := util.GetNetworkScopedK8sMgmtHostIntfName(uint(udng.GetNetworkID()))
-		mplink, err := util.LinkByName(mgmtPortName)
+		mplink, err := util.GetNetLinkOps().LinkByName(mgmtPortName)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to lookup link %s: %w", mgmtPortName, err)
 		}
 
 		vrfTableId := util.CalculateRouteTableID(mplink.Attrs().Index)
