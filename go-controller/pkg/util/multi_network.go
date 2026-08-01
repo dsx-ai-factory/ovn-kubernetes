@@ -2048,9 +2048,8 @@ func GetPodNADToNetworkMappingWithActiveNetwork(
 		}
 	}
 
-	// Feature gate integration: EnablePreconfiguredUDNAddresses controls default network IP/MAC transfer to active network,
-	// we don't need to explicitly check this is primary UDN since the "active network" concept is exactly that.
-	if IsPreconfiguredUDNAddressesEnabled() && defaultNSE != nil {
+	// Downstream specific: as long as NetworkSegmentation support is enabled, transfer default network IP/MAC to active network
+	if IsNetworkSegmentationSupportEnabled() && defaultNSE != nil {
 		if err := overrideActiveNSEWithDefaultNSE(defaultNSE, activeNSE, activeNetwork.TopologyType()); err != nil {
 			return false, nil, err
 		}
