@@ -42,7 +42,7 @@ OCI_BIN ?= docker
 
 # The image of ovnkube/ovn-daemonset-ubuntu should be multi-arched before using it on arm64
 ubuntu-image: bld
-	${OCI_BIN} build -t ${UBUNTU_IMAGE} --build-arg ARTIFACTORY_CERT=${JFROG_CREDENTIAL} -f Dockerfile.ubuntu$(DOCKERFILE_ARCH) .
+	${OCI_BIN} build -t ${UBUNTU_IMAGE} --build-arg ARTIFACTORY_CERT=${NV_ARTIFACTORY_CERT} -f Dockerfile.ubuntu$(DOCKERFILE_ARCH) .
 ifeq ($(ARCH),amd64)
 ifneq ($(UBUNTU_IMAGE),$(UBUNTU_IMAGE_LATEST))
 	${OCI_BIN} tag "${UBUNTU_IMAGE}" \
@@ -55,7 +55,7 @@ ubuntu-nv-image: NV_UBUNTU_BASE_IMAGE ?= artifactory.nvidia.com/sw-ipp-lws2-inte
 ubuntu-nv-image:
 	cd $(abspath $(CURDIR)/../..) && ${OCI_BIN} build \
 		-t ovn-kube-ubuntu$(IMAGE_ARCH) \
-		--build-arg ARTIFACTORY_CERT=${JFROG_CREDENTIAL} \
+		--build-arg ARTIFACTORY_CERT=${NV_ARTIFACTORY_CERT} \
 		-f dist/images/Dockerfile.ubuntu.nv \
 		--build-arg OVN_VER=${OVN_VER} \
 		--build-arg OVS_VER=${OVS_VER} \
@@ -75,12 +75,12 @@ centos: bld
 	${OCI_BIN} build $(docker_build_args) \
 		$(docker_build_ver_args) \
 		--build-arg ARCH=$(ARCH) \
-                --build-arg ARTIFACTORY_CERT=${JFROG_CREDENTIAL} \
+                --build-arg ARTIFACTORY_CERT=${NV_ARTIFACTORY_CERT} \
 		--target ovn -t quay.io/nvidia/ovn-c:latest .
 	${OCI_BIN} build $(docker_build_args) \
 		$(docker_build_ver_args) \
 		--build-arg ARCH=$(ARCH) \
-                --build-arg ARTIFACTORY_CERT=${JFROG_CREDENTIAL} \
+                --build-arg ARTIFACTORY_CERT=${NV_ARTIFACTORY_CERT} \
 		--target ovnkube -t quay.io/nvidia/ovnkube-c:latest .
 	./daemonset.sh --image=quay.io/nvidia/ovnkube-c:latest \
 		       --imagec=quay.io/nvidia/ovn-c:latest
