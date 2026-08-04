@@ -51,9 +51,10 @@ ReYNnyicsbkqWletNw+vHX/bvZ8=
 
 func TestNewClientset(t *testing.T) {
 	tests := []struct {
-		desc        string
-		inpConfig   config.KubernetesConfig
-		errExpected bool
+		desc              string
+		inpConfig         config.KubernetesConfig
+		errExpected       bool
+		clearInClusterEnv bool
 	}{
 		{
 			desc: "error: cover code path --> config.KubernetesConfig.Kubeconfig != ``",
@@ -93,14 +94,19 @@ func TestNewClientset(t *testing.T) {
 			},
 		},
 		{
-			desc:        "error: cover code path that assumes client running inside container environment",
-			inpConfig:   config.KubernetesConfig{},
-			errExpected: true,
+			desc:              "error: in-cluster configuration unavailable",
+			inpConfig:         config.KubernetesConfig{},
+			errExpected:       true,
+			clearInClusterEnv: true,
 		},
 	}
 
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			if tc.clearInClusterEnv {
+				t.Setenv("KUBERNETES_SERVICE_HOST", "")
+				t.Setenv("KUBERNETES_SERVICE_PORT", "")
+			}
 			res, e := NewOVNClientset(&tc.inpConfig)
 			t.Log(res, e)
 			if tc.errExpected {
