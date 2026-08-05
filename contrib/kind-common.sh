@@ -70,7 +70,7 @@ set_common_default_params() {
   KIND_CREATE=${KIND_CREATE:-true}
   KIND_IMAGE=${KIND_IMAGE:-kindest/node}
   KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}
-  K8S_VERSION=${K8S_VERSION:-v1.36.2}
+  K8S_VERSION=${K8S_VERSION:-v1.36.1}
   KIND_SETTLE_DURATION=${KIND_SETTLE_DURATION:-30}
   KIND_CONFIG=${KIND_CONFIG:-${DIR}/kind.yaml.j2}
   KIND_LOCAL_REGISTRY=${KIND_LOCAL_REGISTRY:-false}
@@ -215,6 +215,12 @@ set_common_default_params() {
   ENABLE_NETWORK_CONNECT=${ENABLE_NETWORK_CONNECT:-false}
   if [[ $ENABLE_NETWORK_CONNECT == true && $ENABLE_NETWORK_SEGMENTATION != true ]]; then
     echo "Network connect requires network-segmentation to be enabled (-nse)"
+    exit 1
+  fi
+
+  ENABLE_UPLINK=${ENABLE_UPLINK:-false}
+  if [[ $ENABLE_UPLINK == true && $ENABLE_NETWORK_SEGMENTATION != true ]]; then
+    echo "Uplink requires network-segmentation to be enabled (-nse)"
     exit 1
   fi
 
