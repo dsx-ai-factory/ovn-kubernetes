@@ -516,13 +516,10 @@ func newMultiHomedPod(testPod testPod, multiHomingConfigs ...userDefinedNetInfo)
 }
 
 func generateDefaultNSEAnnotation(multiHomingConf userDefinedNetInfo) string {
-	nadNamePair := strings.Split(multiHomingConf.nadName, "/")
-	if len(nadNamePair) != 2 {
-		panic("failed to generate default NSE: invalid NAD name. Expected NAD name format: '<namespace>/<name>'")
-	}
+	defaultNAD := config.Default.ClusterDefaultNetworkNAD
 	bytes, err := json.Marshal([]nadapi.NetworkSelectionElement{{
-		Namespace:          nadNamePair[0],
-		Name:               nadNamePair[1],
+		Namespace:          defaultNAD.Namespace,
+		Name:               defaultNAD.Name,
 		IPAMClaimReference: multiHomingConf.ipamClaimReference,
 	}})
 	if err != nil {

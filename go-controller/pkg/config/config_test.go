@@ -268,6 +268,7 @@ enable-multi-network=false
 enable-multi-networkpolicy=false
 enable-network-segmentation=false
 enable-network-connect=false
+enable-uplink=false
 enable-preconfigured-udn-addresses=false
 enable-route-advertisements=false
 advertised-udn-isolation-mode=strict
@@ -384,6 +385,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(OVNKubernetesFeature.EnableMultiNetwork).To(gomega.BeFalse())
 			gomega.Expect(OVNKubernetesFeature.EnableNetworkSegmentation).To(gomega.BeFalse())
 			gomega.Expect(OVNKubernetesFeature.EnableNetworkConnect).To(gomega.BeFalse())
+			gomega.Expect(OVNKubernetesFeature.EnableUplink).To(gomega.BeFalse())
 			gomega.Expect(OVNKubernetesFeature.EnablePreconfiguredUDNAddresses).To(gomega.BeFalse())
 			gomega.Expect(OVNKubernetesFeature.EnableRouteAdvertisements).To(gomega.BeFalse())
 			gomega.Expect(OVNKubernetesFeature.EnableMultiNetworkPolicy).To(gomega.BeFalse())
@@ -535,6 +537,7 @@ routing-table-id-start=2002
 			"enable-multi-networkpolicy=true",
 			"enable-network-segmentation=true",
 			"enable-network-connect=true",
+			"enable-uplink=true",
 			"enable-preconfigured-udn-addresses=true",
 			"enable-route-advertisements=true",
 			"advertised-udn-isolation-mode=loose",
@@ -637,6 +640,7 @@ routing-table-id-start=2002
 			gomega.Expect(OVNKubernetesFeature.EnableMultiNetwork).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableNetworkSegmentation).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableNetworkConnect).To(gomega.BeTrue())
+			gomega.Expect(OVNKubernetesFeature.EnableUplink).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnablePreconfiguredUDNAddresses).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableRouteAdvertisements).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.AdvertisedUDNIsolationMode).To(gomega.Equal(AdvertisedUDNIsolationModeLoose))
@@ -751,6 +755,7 @@ routing-table-id-start=2002
 			gomega.Expect(OVNKubernetesFeature.EnableMultiNetwork).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableNetworkSegmentation).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableNetworkConnect).To(gomega.BeTrue())
+			gomega.Expect(OVNKubernetesFeature.EnableUplink).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnablePreconfiguredUDNAddresses).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableRouteAdvertisements).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.AdvertisedUDNIsolationMode).To(gomega.Equal(AdvertisedUDNIsolationModeLoose))
@@ -826,6 +831,7 @@ routing-table-id-start=2002
 			"-enable-multi-networkpolicy=true",
 			"-enable-network-segmentation=true",
 			"-enable-network-connect=true",
+			"-enable-uplink=true",
 			"-enable-preconfigured-udn-addresses=true",
 			"-enable-route-advertisements=true",
 			"-advertised-udn-isolation-mode=loose",
@@ -1515,6 +1521,69 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 		}
 		err = app.Run(cliArgs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+
+	Describe("parseClusterDefaultNAD", func() {
+		It("parses a namespace/name value", func() {
+			nad, err := parseClusterDefaultNAD("custom-namespace/custom-nad")
+
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(nad.Namespace).To(gomega.Equal("custom-namespace"))
+			gomega.Expect(nad.Name).To(gomega.Equal("custom-nad"))
+		})
+
+		DescribeTable("rejects malformed values",
+			func(value string) {
+				nad, err := parseClusterDefaultNAD(value)
+
+				gomega.Expect(err).To(gomega.MatchError(
+					fmt.Sprintf(`cluster-default-nad %q must be in the format of "namespace/name"`, value),
+				))
+				gomega.Expect(nad).To(gomega.BeNil())
+			},
+			Entry("empty value", ""),
+			Entry("missing namespace", "/name"),
+			Entry("missing name", "namespace/"),
+			Entry("missing separator", "name"),
+			Entry("too many separators", "namespace/name/extra"),
+			Entry("empty component between separators", "namespace//name"),
+			Entry("leading and trailing separators", "/namespace/name/"),
+			Entry("only separators", "//"),
+		)
+
+		It("rejects an invalid namespace", func() {
+			nad, err := parseClusterDefaultNAD("BadNS/default")
+
+			gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring(
+				`cluster-default-nad "BadNS/default" has an invalid namespace`,
+			)))
+			gomega.Expect(nad).To(gomega.BeNil())
+		})
+
+		DescribeTable("rejects a name that is not a DNS-1123 subdomain",
+			func(value string) {
+				nad, err := parseClusterDefaultNAD(value)
+
+				gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring(
+					fmt.Sprintf(`cluster-default-nad %q has an invalid name`, value),
+				)))
+				gomega.Expect(nad).To(gomega.BeNil())
+			},
+			Entry("underscore", "namespace/invalid_name"),
+			Entry("uppercase", "namespace/UpperCase"),
+			Entry("dot", "namespace/."),
+			Entry("dot dot", "namespace/.."),
+			Entry("percent", "namespace/a%b"),
+			Entry("leading dash", "namespace/-name"),
+		)
+
+		It("accepts a dotted name", func() {
+			nad, err := parseClusterDefaultNAD("namespace/my.nad")
+
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(nad.Namespace).To(gomega.Equal("namespace"))
+			gomega.Expect(nad.Name).To(gomega.Equal("my.nad"))
+		})
 	})
 
 	// This testcase factory function exists only to ensure that 'runType'

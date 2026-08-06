@@ -1,12 +1,6 @@
 # github.com/Masterminds/semver/v3 v3.4.0
 ## explicit; go 1.21
 github.com/Masterminds/semver/v3
-# github.com/Mellanox/mlxdevm-go v0.3.1-0.20240213073146-ea70276e64ba
-## explicit; go 1.21
-github.com/Mellanox/mlxdevm-go
-# github.com/Mellanox/sriovnet v1.1.0
-## explicit; go 1.13
-github.com/Mellanox/sriovnet/pkg/utils/filesystem
 # github.com/alexflint/go-filemutex v1.3.0
 ## explicit; go 1.13
 github.com/alexflint/go-filemutex
@@ -510,7 +504,7 @@ go.yaml.in/yaml/v2
 # go.yaml.in/yaml/v3 v3.0.4
 ## explicit; go 1.16
 go.yaml.in/yaml/v3
-# golang.org/x/crypto v0.51.0
+# golang.org/x/crypto v0.52.0
 ## explicit; go 1.25.0
 golang.org/x/crypto/cryptobyte
 golang.org/x/crypto/cryptobyte/asn1

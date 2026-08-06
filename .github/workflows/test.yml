@@ -69,6 +69,25 @@ jobs:
         working-directory: go-controller
         args: --modules-download-mode=vendor --timeout=15m0s --verbose
 
+  verify-codegen:
+    name: Verify codegen
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v6
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version-file: 'go-controller/go.mod'
+        cache: false
+      id: go
+
+    - name: Verify generated code is up to date
+      run: |
+        cd go-controller
+        make verify-codegen
+
   build-base:
     name: Build-base
     runs-on: ubuntu-24.04
@@ -557,6 +576,7 @@ jobs:
       ENABLE_EVPN: "${{ matrix.target == 'evpn' || matrix.evpn == 'enable-evpn' }}"
       ADVERTISE_DEFAULT_NETWORK:  "${{ matrix.routeadvertisements == 'advertise-default' }}"
       ENABLE_NETWORK_CONNECT: "${{ startsWith(matrix.target, 'network-segmentation') }}"
+      ENABLE_UPLINK: "${{ startsWith(matrix.target, 'network-segmentation') || matrix.network-segmentation == 'enable-network-segmentation' }}"
       ENABLE_PRE_CONF_UDN_ADDR: "${{ matrix.ic == 'ic-single-node-zones' && (startsWith(matrix.target, 'network-segmentation') || matrix.network-segmentation == 'enable-network-segmentation') }}"
       ADVERTISED_UDN_ISOLATION_MODE: "${{ matrix.advertised-udn-isolation-mode }}"
       # Override PARALLEL=true for Serial tests target to run Serial tests
