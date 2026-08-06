@@ -5,8 +5,6 @@ go 1.26.0
 toolchain go1.26.3
 
 require (
-	github.com/Mellanox/mlxdevm-go v0.3.1-0.20240213073146-ea70276e64ba
-	github.com/Mellanox/sriovnet v1.1.0
 	github.com/alexflint/go-filemutex v1.3.0
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/containernetworking/cni v1.3.0
@@ -138,7 +136,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.41.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
-	golang.org/x/crypto v0.51.0 // indirect
+	golang.org/x/crypto v0.52.0 // indirect
 	golang.org/x/mod v0.35.0 // indirect
 	golang.org/x/oauth2 v0.34.0 // indirect
 	golang.org/x/term v0.43.0 // indirect

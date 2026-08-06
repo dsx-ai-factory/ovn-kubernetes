@@ -114,7 +114,6 @@ fi
 # OVN_UDN_ALLOWED_DEFAULT_SERVICES - list of default cluster network services accessible from primary UDN
 # OVS_DB_TRANSACTION_TIMEOUT - timeout for OVSDB transaction, in seconds
 # OVNKUBE_SKIP_CTMARK_HOSTPORTS - list of tcp/udp ports of host services that must not be subjected to CT-Marking
-# OVNKUBE_CLUSTER_DEFAULT_NAD - name of the default cluster wide net-attach-def
 # OVNKUBE_SECURE_MGMT_PORT - secure the management port by ACLs. Disabled by default.
 # OVNKUBE_ENABLE_KATA_DAN - when true, enable Kata DAN config generation support
 
@@ -307,6 +306,8 @@ ovn_multi_network_enable=${OVN_MULTI_NETWORK_ENABLE:-false}
 ovn_network_segmentation_enable=${OVN_NETWORK_SEGMENTATION_ENABLE:=false}
 #OVN_NETWORK_CONNECT_ENABLE - enable network connect for ovn-kubernetes
 ovn_network_connect_enable=${OVN_NETWORK_CONNECT_ENABLE:=false}
+#OVN_UPLINK_ENABLE - enable uplink for ovn-kubernetes
+ovn_uplink_enable=${OVN_UPLINK_ENABLE:=false}
 #OVN_PRE_CONF_UDN_ADDR_ENABLE - enable connecting workloads with custom network configuration to UDNs
 ovn_pre_conf_udn_addr_enable=${OVN_PRE_CONF_UDN_ADDR_ENABLE:=false}
 #OVN_ROUTE_ADVERTISEMENTS_ENABLE - enable route advertisements for ovn-kubernetes
@@ -334,6 +335,16 @@ ovn_enable_multi_external_gateway=${OVN_ENABLE_MULTI_EXTERNAL_GATEWAY:-false}
 ovn_enable_ovnkube_identity=${OVN_ENABLE_OVNKUBE_IDENTITY:-true}
 #OVN_ENABLE_PERSISTENT_IPS - enable IPAM for virtualization workloads (KubeVirt persistent IPs)
 ovn_enable_persistent_ips=${OVN_ENABLE_PERSISTENT_IPS:-false}
+# OVNKUBE_CLUSTER_DEFAULT_NAD - namespace/name of the default cluster wide net-attach-def.
+# When unset, ovnkube defaults to <ovn-config-namespace>/default.
+ovnkube_cluster_default_nad=${OVNKUBE_CLUSTER_DEFAULT_NAD:-}
+
+# only pass the flag when the env variable is set, otherwise let ovnkube
+# resolve the default
+ovnkube_cluster_default_nad_flag=
+if [[ -n "${ovnkube_cluster_default_nad}" ]]; then
+  ovnkube_cluster_default_nad_flag="--cluster-default-nad=${ovnkube_cluster_default_nad}"
+fi
 
 # OVNKUBE_NODE_MODE - is the mode which ovnkube node operates
 ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
@@ -403,17 +414,6 @@ if [[ ! -z $ovn_k8s_node ]]; then
   echo "host-k8s-nodename is set, overriding K8S_NODE with $ovn_k8s_node"
   K8S_NODE=$ovn_k8s_node
 fi
-
-
-# OVNKUBE_CLUSTER_DEFAULT_NAD - name of the default cluster wide net-attach-def
-ovnkube_cluster_default_nad=${OVNKUBE_CLUSTER_DEFAULT_NAD}
-
-# set the custom cluster default nad if env variable is set and not equal to default/ovn-primary
-ovnkube_cluster_default_nad_flag=
-if [[ -n "${ovnkube_cluster_default_nad}" && "${ovnkube_cluster_default_nad}" != "default/ovn-primary" ]]; then
-  ovnkube_cluster_default_nad_flag="--cluster-default-nad=${ovnkube_cluster_default_nad}"
-fi
-echo "ovnkube_cluster_default_nad_flag=${ovnkube_cluster_default_nad_flag}"
 
 # OVNKUBE_SECURE_MGMT_PORT - enable secure management port
 ovnkube_secure_mgmt_port_flag=
@@ -1251,6 +1251,12 @@ ovnkube-controller() {
   fi
   echo "network_connect_enabled_flag=${network_connect_enabled_flag}"
 
+  uplink_enabled_flag=
+  if [[ ${ovn_uplink_enable} == "true" ]]; then
+	  uplink_enabled_flag="--enable-uplink"
+  fi
+  echo "uplink_enabled_flag=${uplink_enabled_flag}"
+
   pre_conf_udn_addr_enable_flag=
   if [[ ${ovn_pre_conf_udn_addr_enable} == "true" ]]; then
 	  pre_conf_udn_addr_enable_flag="--enable-preconfigured-udn-addresses"
@@ -1434,6 +1440,7 @@ ovnkube-controller() {
     ${network_segmentation_enabled_flag} \
     ${network_connect_enabled_flag} \
     ${nohostsubnet_label_option} \
+    ${uplink_enabled_flag} \
     ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
     ${evpn_enabled_flag} \
@@ -1459,10 +1466,10 @@ ovnkube-controller() {
     ${ovnkube_istio_ambient_enable_flag} \
     ${ovnkube_istio_ambient_snat_ipv4_flag} \
     ${ovnkube_istio_ambient_snat_ipv6_flag} \
-    ${ovnkube_cluster_default_nad_flag} \
     ${dynamic_udn_allocation_flag} \
     ${dynamic_udn_grace_period} \
     ${ovnkube_secure_mgmt_port_flag} \
+    ${ovnkube_cluster_default_nad_flag} \
     ${ovn_allow_icmp_netpol_flag} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --gateway-mode=${ovn_gateway_mode} \
@@ -1665,6 +1672,12 @@ ovnkube-controller-with-node() {
 	  network_connect_enabled_flag="--enable-network-connect"
   fi
   echo "network_connect_enabled_flag=${network_connect_enabled_flag}"
+
+  uplink_enabled_flag=
+  if [[ ${ovn_uplink_enable} == "true" ]]; then
+	  uplink_enabled_flag="--enable-uplink"
+  fi
+  echo "uplink_enabled_flag=${uplink_enabled_flag}"
 
   pre_conf_udn_addr_enable_flag=
   if [[ ${ovn_pre_conf_udn_addr_enable} == "true" ]]; then
@@ -2099,6 +2112,7 @@ ovnkube-controller-with-node() {
     ${network_segmentation_enabled_flag} \
     ${network_connect_enabled_flag} \
     ${nohostsubnet_label_option} \
+    ${uplink_enabled_flag} \
     ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
     ${evpn_enabled_flag} \
@@ -2138,13 +2152,13 @@ ovnkube-controller-with-node() {
     ${sflow_targets} \
     ${dynamic_udn_allocation_flag} \
     ${dynamic_udn_grace_period} \
+    ${ovnkube_cluster_default_nad_flag} \
     ${network_qos_enabled_flag} \
     ${ovnkube_istio_ambient_enable_flag} \
     ${ovnkube_istio_ambient_snat_ipv4_flag} \
     ${ovnkube_istio_ambient_snat_ipv6_flag} \
     ${ovn_disable_requestedchassis_flag} \
     ${representor_metering_nodes_flag} \
-    ${ovnkube_cluster_default_nad_flag} \
     ${enable_ovs_native_metrics_flag} \
     ${kata_dan_conf_dir_flag} \
     ${cluster_access_opts} \
@@ -2293,6 +2307,12 @@ ovn-cluster-manager() {
 	  network_connect_enabled_flag="--enable-network-connect"
   fi
   echo "network_connect_enabled_flag=${network_connect_enabled_flag}"
+
+  uplink_enabled_flag=
+  if [[ ${ovn_uplink_enable} == "true" ]]; then
+	  uplink_enabled_flag="--enable-uplink"
+  fi
+  echo "uplink_enabled_flag=${uplink_enabled_flag}"
 
   pre_conf_udn_addr_enable_flag=
   if [[ ${ovn_pre_conf_udn_addr_enable} == "true" ]]; then
@@ -2445,6 +2465,7 @@ ovn-cluster-manager() {
     ${network_segmentation_enabled_flag} \
     ${network_connect_enabled_flag} \
     ${nohostsubnet_label_option} \
+    ${uplink_enabled_flag} \
     ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
     ${evpn_enabled_flag} \
@@ -2464,6 +2485,7 @@ ovn-cluster-manager() {
     ${network_qos_enabled_flag} \
     ${dynamic_udn_allocation_flag} \
     ${dynamic_udn_grace_period} \
+    ${ovnkube_cluster_default_nad_flag} \
     ${ovn_enable_dnsnameresolver_flag} \
     ${ovn_allow_icmp_netpol_flag} \
     ${ovnkube_metrics_scale_enable_flag} \
@@ -2736,6 +2758,12 @@ ovn-node() {
 	  network_connect_enabled_flag="--enable-network-connect"
   fi
   echo "network_connect_enabled_flag=${network_connect_enabled_flag}"
+
+  uplink_enabled_flag=
+  if [[ ${ovn_uplink_enable} == "true" ]]; then
+	  uplink_enabled_flag="--enable-uplink"
+  fi
+  echo "uplink_enabled_flag=${uplink_enabled_flag}"
 
   pre_conf_udn_addr_enable_flag=
   if [[ ${ovn_pre_conf_udn_addr_enable} == "true" ]]; then
@@ -3071,6 +3099,7 @@ ovn-node() {
         ${multi_network_enabled_flag} \
         ${network_segmentation_enabled_flag} \
         ${network_connect_enabled_flag} \
+        ${uplink_enabled_flag} \
         ${pre_conf_udn_addr_enable_flag} \
         ${route_advertisements_enabled_flag} \
         ${evpn_enabled_flag} \
@@ -3106,11 +3135,11 @@ ovn-node() {
         ${custom_gwsnat_rules_opts} \
         ${dynamic_udn_allocation_flag} \
         ${dynamic_udn_grace_period} \
+        ${ovnkube_cluster_default_nad_flag} \
         ${network_qos_enabled_flag} \
         ${ovnkube_istio_ambient_enable_flag} \
         ${ovnkube_istio_ambient_snat_ipv4_flag} \
         ${ovnkube_istio_ambient_snat_ipv6_flag} \
-        ${ovnkube_cluster_default_nad_flag} \
         ${enable_ovs_native_metrics_flag} \
         ${kata_dan_conf_dir_flag} \
         --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \

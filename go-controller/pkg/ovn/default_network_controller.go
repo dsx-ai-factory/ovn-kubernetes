@@ -255,7 +255,7 @@ func newDefaultNetworkControllerCommon(
 		svcController:              svcController,
 		gatewayTopologyFactory:     topology.NewGatewayTopologyFactory(cnci.nbClient),
 	}
-	if util.IsNetworkSegmentationSupportEnabled() {
+	if util.IsUplinkEnabled() {
 		oc.uplinkStateController = newUplinkStateController(
 			cnci.watchFactory.UplinkStateInformer(),
 			networkManager,
