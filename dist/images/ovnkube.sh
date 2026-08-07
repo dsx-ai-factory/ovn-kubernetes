@@ -408,11 +408,16 @@ ovn_disable_requestedchassis=${OVN_DISABLE_REQUESTEDCHASSIS:-true}
 # external_ids:host-k8s-nodename is set on an Open_vSwitch enabled system if the ovnkube stack
 # should function on behalf of a different host than external_ids:hostname. This includes
 # all the components that belond in an ovnkube stack (i.e. NB DB, SB DB, ovnkube etc)
-# overwrite the K8S_NODE env var with the one found within the OVS metadata in this case
-ovn_k8s_node=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:host-k8s-nodename | tr -d '\"')
-if [[ ! -z $ovn_k8s_node ]]; then
-  echo "host-k8s-nodename is set, overriding K8S_NODE with $ovn_k8s_node"
-  K8S_NODE=$ovn_k8s_node
+# overwrite the K8S_NODE env var with the one found within the OVS metadata in this case.
+# Only the DPU side runs an OVS holding this key (ovnkube-init.sh sets it there), and this
+# runs before any ovs_ready gate, so never query OVS from a dpu-host.
+ovn_k8s_node=
+if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
+  ovn_k8s_node=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:host-k8s-nodename | tr -d '\"')
+  if [[ ! -z $ovn_k8s_node ]]; then
+    echo "host-k8s-nodename is set, overriding K8S_NODE with $ovn_k8s_node"
+    K8S_NODE=$ovn_k8s_node
+  fi
 fi
 
 # OVNKUBE_SECURE_MGMT_PORT - enable secure management port
@@ -423,15 +428,11 @@ if [[ ${ovnkube_secure_mgmt_port} == "true" ]]; then
 fi
 echo "ovnkube_secure_mgmt_port_flag=${ovnkube_secure_mgmt_port_flag}"
 
-# external_ids:host-k8s-nodename will be set on an Open_vSwitch enabled system if the ovnkube pod
-# should function on behalf of a different host
-# overwrite the K8S_NODE env var with the one found within the OVS metadata in this case
-if [[ ${ovnkube_node_mode} == "dpu" ]]; then
-  K8S_NODE=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:host-k8s-nodename | tr -d '\"')
-  if [[ ${K8S_NODE} == "" ]]; then
-    echo "Trying to run in DPU mode and couldn't get the required Host K8s Nodename. Exiting..."
-    exit 1
-  fi
+# The host-k8s-nodename override above is optional in general, but mandatory in
+# DPU mode: without it the DPU would act on behalf of itself instead of its host.
+if [[ ${ovnkube_node_mode} == "dpu" && -z ${ovn_k8s_node} ]]; then
+  echo "Trying to run in DPU mode and couldn't get the required Host K8s Nodename. Exiting..."
+  exit 1
 fi
 # OVNKUBE_ENABLE_KATA_DAN - enable Kata DAN config generation support
 ovnkube_enable_kata_dan=${OVNKUBE_ENABLE_KATA_DAN:-"false"}
@@ -1866,6 +1867,19 @@ ovnkube-controller-with-node() {
     export_ovs_metrics_opts="--export-ovs-metrics"
   fi
 
+  local ovs_other_config_opts=
+  if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
+    virt_type=$(/usr/bin/systemd-detect-virt -v)
+    if [[ "${virt_type}" == "none" ]]; then
+      # "none" indicates baremetal
+      ovs_other_config_opts="
+        --ovs-max-revalidator=${OVS_MAX_REVALIDATOR}
+        --ovs-min-revalidate-pps=${OVS_MIN_REVALIDATE_PPS}
+        --ovs-max-idle=${OVS_MAX_IDLE}
+      "
+    fi
+  fi
+
   ovnkube_config_duration_enable_flag=
   if [[ ${ovnkube_config_duration_enable} == "true" ]]; then
     ovnkube_config_duration_enable_flag="--metrics-enable-config-duration"
@@ -1948,6 +1962,12 @@ ovnkube-controller-with-node() {
           ipreservation_enabled_flag="--enable-ip-reservation"
   fi
   echo "ipreservation_enabled_flag: ${ipreservation_enabled_flag}"
+
+  ctinv_flows_disable_flag=
+  if [[ ${ovn_ctinv_flows_disable} == "true" ]]; then
+      ctinv_flows_disable_flag="--ovn-ctinv-flows-disable"
+  fi
+  echo "ctinv_flows_disable_flag=${ctinv_flows_disable_flag}"
 
   ovn_conntrack_zone_flag=
   if [[ ${ovn_conntrack_zone} != "" ]]; then
@@ -2086,6 +2106,7 @@ ovnkube-controller-with-node() {
     ${admin_pbr_enabled_flag} \
     ${anp_enabled_flag} \
     ${cluster_subnets_mac_binding_aging_option} \
+    ${ctinv_flows_disable_flag} \
     ${custom_gwsnat_rules_opts} \
     ${disable_forwarding_flag} \
     ${disable_pkt_mtu_check_flag} \
@@ -2154,6 +2175,7 @@ ovnkube-controller-with-node() {
     ${dynamic_udn_grace_period} \
     ${ovnkube_cluster_default_nad_flag} \
     ${network_qos_enabled_flag} \
+    ${ovs_other_config_opts} \
     ${ovnkube_istio_ambient_enable_flag} \
     ${ovnkube_istio_ambient_snat_ipv4_flag} \
     ${ovnkube_istio_ambient_snat_ipv6_flag} \
@@ -2178,6 +2200,7 @@ ovnkube-controller-with-node() {
     --metrics-enable-pprof \
     --mtu=${mtu} \
     --ovn-config-namespace ${ovn_kubernetes_namespace} \
+    --ovn-encap-tos=${ovn_encap_tos} \
     --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
     --pidfile ${OVN_RUNDIR}/ovnkube-controller-with-node.pid \
     --zone ${ovn_zone} &
@@ -2213,7 +2236,12 @@ ovn-cluster-manager() {
   if [[ -n "${ovn_egress_ip_healthcheck_port}" ]]; then
       egressip_healthcheck_port_flag="--egressip-node-healthcheck-port=${ovn_egress_ip_healthcheck_port}"
   fi
-  echo "egressip_flags: ${egressip_enabled_flag}, ${egressip_healthcheck_port_flag}"
+
+  egressip_reachability_timeout_flag=
+  if [[ -n "${ovn_egress_ip_reachability_timeout}" ]]; then
+      egressip_reachability_timeout_flag="--egressip-reachability-total-timeout=${ovn_egress_ip_reachability_timeout}"
+  fi
+  echo "egressip_flags: ${egressip_enabled_flag}, ${egressip_healthcheck_port_flag}, ${egressip_reachability_timeout_flag}"
 
   egressservice_enabled_flag=
   if [[ ${ovn_egressservice_enable} == "true" ]]; then
@@ -2455,6 +2483,7 @@ ovn-cluster-manager() {
     ${egressfirewall_enabled_flag} \
     ${egressip_enabled_flag} \
     ${egressip_healthcheck_port_flag} \
+    ${egressip_reachability_timeout_flag} \
     ${egressqos_enabled_flag} \
     ${egressservice_enabled_flag} \
     ${empty_lb_events_flag} \
@@ -2500,6 +2529,7 @@ ovn-cluster-manager() {
     --metrics-bind-address ${ovnkube_cluster_manager_metrics_bind_address} \
     --metrics-enable-pprof \
     --ovn-config-namespace ${ovn_kubernetes_namespace} \
+    --mtu=${mtu} \
     --pidfile ${OVN_RUNDIR}/ovnkube-cluster-manager.pid &
 
   echo "=============== ovn-cluster-manager ========== running"

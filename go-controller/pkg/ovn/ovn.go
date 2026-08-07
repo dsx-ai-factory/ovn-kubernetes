@@ -136,14 +136,6 @@ func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *corev1.Pod, 
 		}()
 	}
 
-	nodeNameLabel := map[string]string{util.OvnPodNodeNameLabel: pod.Spec.NodeName}
-	if podNodeNameLabelChanged(pod, nodeNameLabel) {
-		err := oc.kube.SetLabelsOnPod(pod, nodeNameLabel)
-		if err != nil {
-			return fmt.Errorf("failed to set %s labels on pod %s: %v", util.OvnPodNodeNameLabel, pod.Name, err)
-		}
-	}
-
 	if !util.PodWantsHostNetwork(pod) && addPort {
 		if err := oc.addLogicalPort(pod); err != nil {
 			failure := fmt.Errorf("addLogicalPort failed for %s/%s network %s: %w", pod.Namespace, pod.Name, oc.GetNetworkName(), err)
@@ -156,6 +148,14 @@ func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *corev1.Pod, 
 				oc.recordPodEvent("ErrorUpdatingPortSecurity", err, pod)
 				return fmt.Errorf("failed to update port security for %s/%s network %s: %v", pod.Namespace, pod.Name, oc.GetNetworkName(), err)
 			}
+		}
+	}
+
+	nodeNameLabel := map[string]string{util.OvnPodNodeNameLabel: pod.Spec.NodeName}
+	if podNodeNameLabelChanged(pod, nodeNameLabel) {
+		err := oc.kube.SetLabelsOnPod(pod, nodeNameLabel)
+		if err != nil {
+			return fmt.Errorf("failed to set %s labels on pod %s: %v", util.OvnPodNodeNameLabel, pod.Name, err)
 		}
 	}
 
