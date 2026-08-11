@@ -362,7 +362,6 @@ func (m *UDNHostIsolationManager) runKubeletRestartTracker(ctx context.Context) 
 					// Channel was closed, connection is shutting down
 					return
 				}
-				klog.V(5).Infof("D-Bus event received: %#v", signal)
 				// Extract unit name from path
 				unitPath := signal.Path
 				parts := strings.Split(string(unitPath), "/")
@@ -373,6 +372,7 @@ func (m *UDNHostIsolationManager) runKubeletRestartTracker(ctx context.Context) 
 				unitName := strings.ReplaceAll(escapedUnit, "_2e", ".")
 
 				if unitName == "kubelet.service" {
+					klog.V(5).Infof("D-Bus event received: %#v", signal)
 					changes := signal.Body[1].(map[string]dbus.Variant)
 					if state, exists := changes["ActiveState"]; exists {
 						newState := state.Value().(string)
