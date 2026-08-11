@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -177,8 +178,16 @@ func setupPIDFile(pidfile string) error {
 		if err != nil {
 			return fmt.Errorf("pidfile %s exists but can't be read: %v", pidfile, err)
 		}
-		_, err1 := os.Stat("/proc/" + string(pid[:]) + "/cmdline")
-		if os.IsNotExist(err1) {
+		pidStr := strings.TrimSpace(string(pid))
+		pidInt, err := strconv.Atoi(pidStr)
+		if err != nil {
+			return fmt.Errorf("pidfile %s contains invalid PID %q: %v", pidfile, pidStr, err)
+		}
+		if pidInt <= 0 {
+			return fmt.Errorf("pidfile %s contains invalid PID %q: must be positive", pidfile, pidStr)
+		}
+		_, err = os.Stat("/proc/" + strconv.Itoa(pidInt) + "/cmdline")
+		if os.IsNotExist(err) {
 			// Left over pid from dead process
 			if err := os.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644); err != nil {
 				klog.Errorf("Failed to write pidfile %s (%v). Ignoring..", pidfile, err)

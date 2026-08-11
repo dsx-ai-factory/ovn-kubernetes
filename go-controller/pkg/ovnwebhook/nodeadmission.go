@@ -174,7 +174,9 @@ func (p NodeAdmission) ValidateUpdate(ctx context.Context, oldNode, newNode *cor
 	oldNodeShallowCopy.ManagedFields = nil
 	newNodeShallowCopy.ManagedFields = nil
 
-	if strings.HasPrefix(newNode.Spec.ProviderID, "gce") {
+	// Use the existing (old) ProviderID so a status update cannot unlock this
+	// exception by presenting a crafted gce:// ProviderID on the new object.
+	if strings.HasPrefix(oldNode.Spec.ProviderID, "gce") {
 		oldId, oldCondition := nodeutil.GetNodeCondition(&(oldNodeShallowCopy.Status), corev1.NodeNetworkUnavailable)
 		_, newCondition := nodeutil.GetNodeCondition(&(newNodeShallowCopy.Status), corev1.NodeNetworkUnavailable)
 
