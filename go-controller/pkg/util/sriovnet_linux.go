@@ -20,6 +20,7 @@ import (
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/k8snetworkplumbingwg/sriovnet"
 	utilfs "github.com/k8snetworkplumbingwg/sriovnet/pkg/utils/filesystem"
+	"github.com/k8snetworkplumbingwg/sriovnet/pkg/utils/netlinkops"
 	"golang.org/x/sys/unix"
 
 	"k8s.io/klog/v2"
@@ -49,6 +50,7 @@ type SriovnetOps interface {
 	IsVfPciVfioBound(pciAddr string) bool
 	GetRepresentorPeerMacAddress(netdev string) (net.HardwareAddr, error)
 	SetRepresentorPeerMacAddress(netdev string, mac net.HardwareAddr) error
+	GetDevlinkPortFunctionMacAddress(netdev string) (net.HardwareAddr, error)
 	GetRepresentorPortFlavour(netdev string) (sriovnet.PortFlavour, error)
 	SetRepresentorVFMissPktRate(netdev string, maxPPS, maxBurst uint) error
 	GetRepresentorVFMissPktRate(netdev string) (uint64, uint64, error)
@@ -131,6 +133,28 @@ func (defaultSriovnetOps) GetRepresentorPeerMacAddress(netdev string) (net.Hardw
 
 func (defaultSriovnetOps) SetRepresentorPeerMacAddress(netdev string, mac net.HardwareAddr) error {
 	return sriovnet.SetRepresentorPeerMacAddress(netdev, mac)
+}
+
+// GetDevlinkPortFunctionMacAddress returns the hardware address reported by the
+// devlink port function backing netdev. On a DPU this is the MAC of the host
+// side function that peers with the given representor. Unlike
+// sriovnet.GetRepresentorPeerMacAddress, which only accepts PF representors,
+// this works for PF, VF and SF representors, so it is the only way to resolve
+// the host MAC of a VF or SF backed uplink. It requires devlink port function
+// attributes, available since kernel 5.9.
+func (defaultSriovnetOps) GetDevlinkPortFunctionMacAddress(netdev string) (net.HardwareAddr, error) {
+	port, err := netlinkops.GetNetlinkOps().DevLinkGetPortByNetdevName(netdev)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get devlink port for netdev %s: %w", netdev, err)
+	}
+	if port.Fn == nil {
+		return nil, fmt.Errorf("devlink port for netdev %s does not report function attributes", netdev)
+	}
+	// Drivers may report an unset function MAC as 00:00:00:00:00:00.
+	if !IsUsableEthernetMAC(port.Fn.HwAddr) {
+		return nil, fmt.Errorf("devlink port function for netdev %s does not report a usable hardware address", netdev)
+	}
+	return port.Fn.HwAddr, nil
 }
 
 func (defaultSriovnetOps) GetRepresentorPortFlavour(netdev string) (sriovnet.PortFlavour, error) {

@@ -178,7 +178,7 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU() (*factory.Handler, error) 
 				if dpuCD != nil {
 					err = bnnc.addDPUPodForNAD(pod, dpuCD, netName, nadKey, clientSet)
 					if err != nil {
-						klog.Errorf("Error adding pod %s/%s for for network %s: %v", pod.Namespace, pod.Name, bnnc.GetNetworkName(), err)
+						klog.Errorf("Error adding pod %s/%s for network %s: %v", pod.Namespace, pod.Name, bnnc.GetNetworkName(), err)
 					} else {
 						nadToDPUCDMap[nadKey] = dpuCD
 					}
@@ -216,7 +216,7 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU() (*factory.Handler, error) 
 						oldDPUCD, newDPUCD)
 					err := bnnc.delDPUPodForNAD(oldPod, oldDPUCD, nadKey, false)
 					if err != nil {
-						klog.Errorf("Error deleting pod %s/%s for for network %s: %v", oldPod.Namespace, oldPod.Name, bnnc.GetNetworkName(), err)
+						klog.Errorf("Error deleting pod %s/%s for network %s: %v", oldPod.Namespace, oldPod.Name, bnnc.GetNetworkName(), err)
 					}
 					nadToDPUCDMap[nadKey] = nil
 				}
@@ -226,7 +226,7 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU() (*factory.Handler, error) 
 						"New connection details (%v)", oldDPUCD, newDPUCD)
 					err := bnnc.addDPUPodForNAD(newPod, newDPUCD, netName, nadKey, clientSet)
 					if err != nil {
-						klog.Errorf("Error adding pod %s/%s for for network %s: %v", newPod.Namespace, newPod.Name, bnnc.GetNetworkName(), err)
+						klog.Errorf("Error adding pod %s/%s for network %s: %v", newPod.Namespace, newPod.Name, bnnc.GetNetworkName(), err)
 					} else {
 						nadToDPUCDMap[nadKey] = newDPUCD
 					}
@@ -252,7 +252,7 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU() (*factory.Handler, error) 
 				if dpuCD != nil {
 					err := bnnc.delDPUPodForNAD(pod, dpuCD, nadKey, true)
 					if err != nil {
-						klog.Errorf("Error deleting pod %s/%s for for network %s: %v", pod.Namespace, pod.Name, bnnc.GetNetworkName(), err)
+						klog.Errorf("Error deleting pod %s/%s for network %s: %v", pod.Namespace, pod.Name, bnnc.GetNetworkName(), err)
 					}
 				}
 			}

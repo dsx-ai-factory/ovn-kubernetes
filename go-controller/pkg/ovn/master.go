@@ -656,20 +656,20 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *corev1.Node, n
 	// NAT creation needs the address set UUID to avoid creating a plain SNAT
 	// that must be fixed by a later reconciliation.
 	if util.IsNoOverlaySNATExemptionNeeded(oc) && (nSyncs.syncNode || nSyncs.syncGw) {
+		var addressSetErr error
 		hostAddrs, err := util.GetNodeHostAddrs(node)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("failed to get host addresses for node %s: %w", node.Name, err))
+			addressSetErr = fmt.Errorf("failed to get host addresses for node %s: %w", node.Name, err)
+		} else if err := syncNoOverlaySNATExemptionAddressSet(oc.addressSetFactory, oc.GetNetInfo(), oc.controllerName, hostAddrs); err != nil {
+			addressSetErr = fmt.Errorf("failed to sync no-overlay SNAT exemption address set for node %s: %w", node.Name, err)
+		}
+		if addressSetErr != nil {
+			errs = append(errs, addressSetErr)
 			if nSyncs.syncGw {
+				// don't sync the gateway without the address set; mark it failed
+				// so that gateway sync is retried on the next event
 				nSyncs.syncGw = false
 				oc.gatewaysFailed.Store(node.Name, true)
-			}
-		} else {
-			if err := syncNoOverlaySNATExemptionAddressSet(oc.addressSetFactory, oc.GetNetInfo(), oc.controllerName, hostAddrs); err != nil {
-				errs = append(errs, fmt.Errorf("failed to sync no-overlay SNAT exemption address set: %w", err))
-				if nSyncs.syncGw {
-					nSyncs.syncGw = false
-					oc.gatewaysFailed.Store(node.Name, true)
-				}
 			}
 		}
 	}
@@ -904,25 +904,5 @@ func (oc *DefaultNetworkController) gatewayOptions() []GatewayOption {
 			oc.switchLoadBalancerGroupUUID,
 		))
 	}
-	if util.IsNoOverlaySNATExemptionNeeded(oc) {
-		opts = append(opts, WithDuplicateNoOverlayClusterSNATCleanup(oc.cleanupDuplicateNoOverlayClusterSNATsOnce))
-	}
 	return opts
-}
-
-func (oc *DefaultNetworkController) cleanupDuplicateNoOverlayClusterSNATsOnce(gw *GatewayManager, gwRouter *nbdb.LogicalRouter, desiredNATs []*nbdb.NAT) error {
-	oc.duplicateNoOverlayClusterSNATCleanupLock.Lock()
-	defer oc.duplicateNoOverlayClusterSNATCleanupLock.Unlock()
-
-	if oc.duplicateNoOverlayClusterSNATCleanupDoneRouters == nil {
-		oc.duplicateNoOverlayClusterSNATCleanupDoneRouters = map[string]struct{}{}
-	}
-	if _, ok := oc.duplicateNoOverlayClusterSNATCleanupDoneRouters[gwRouter.Name]; ok {
-		return nil
-	}
-	if err := gw.cleanupDuplicateNoOverlayClusterSNATs(gwRouter, desiredNATs); err != nil {
-		return err
-	}
-	oc.duplicateNoOverlayClusterSNATCleanupDoneRouters[gwRouter.Name] = struct{}{}
-	return nil
 }
