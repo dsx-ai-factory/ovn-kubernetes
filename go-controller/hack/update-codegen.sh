@@ -45,7 +45,7 @@ get_crd_version() {
     networkqos)
       echo "v1alpha1"
       ;;
-    adminpbr|ipreservation|portmirror|virtualip)
+    adminpbr|ipreservation)
       echo "v1beta1"
       ;;
     *)

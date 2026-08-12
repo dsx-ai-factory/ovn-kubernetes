@@ -6,8 +6,11 @@
 package v1beta1
 
 import (
+	adminpbrv1beta1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
+	internal "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1/apis/applyconfiguration/internal"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
@@ -39,6 +42,46 @@ func AdminPolicyBasedRoute(name string) *AdminPolicyBasedRouteApplyConfiguration
 	b.WithKind("AdminPolicyBasedRoute")
 	b.WithAPIVersion("k8s.ovn.org/v1beta1")
 	return b
+}
+
+// ExtractAdminPolicyBasedRouteFrom extracts the applied configuration owned by fieldManager from
+// adminPolicyBasedRoute for the specified subresource. Pass an empty string for subresource to extract
+// the main resource. Common subresources include "status", "scale", etc.
+// adminPolicyBasedRoute must be a unmodified AdminPolicyBasedRoute API object that was retrieved from the Kubernetes API.
+// ExtractAdminPolicyBasedRouteFrom provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractAdminPolicyBasedRouteFrom(adminPolicyBasedRoute *adminpbrv1beta1.AdminPolicyBasedRoute, fieldManager string, subresource string) (*AdminPolicyBasedRouteApplyConfiguration, error) {
+	b := &AdminPolicyBasedRouteApplyConfiguration{}
+	err := managedfields.ExtractInto(adminPolicyBasedRoute, internal.Parser().Type("com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.adminpbr.v1beta1.AdminPolicyBasedRoute"), fieldManager, b, subresource)
+	if err != nil {
+		return nil, err
+	}
+	b.WithName(adminPolicyBasedRoute.Name)
+
+	b.WithKind("AdminPolicyBasedRoute")
+	b.WithAPIVersion("k8s.ovn.org/v1beta1")
+	return b, nil
+}
+
+// ExtractAdminPolicyBasedRoute extracts the applied configuration owned by fieldManager from
+// adminPolicyBasedRoute. If no managedFields are found in adminPolicyBasedRoute for fieldManager, a
+// AdminPolicyBasedRouteApplyConfiguration is returned with only the Name, Namespace (if applicable),
+// APIVersion and Kind populated. It is possible that no managed fields were found for because other
+// field managers have taken ownership of all the fields previously owned by fieldManager, or because
+// the fieldManager never owned fields any fields.
+// adminPolicyBasedRoute must be a unmodified AdminPolicyBasedRoute API object that was retrieved from the Kubernetes API.
+// ExtractAdminPolicyBasedRoute provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractAdminPolicyBasedRoute(adminPolicyBasedRoute *adminpbrv1beta1.AdminPolicyBasedRoute, fieldManager string) (*AdminPolicyBasedRouteApplyConfiguration, error) {
+	return ExtractAdminPolicyBasedRouteFrom(adminPolicyBasedRoute, fieldManager, "")
+}
+
+// ExtractAdminPolicyBasedRouteStatus extracts the applied configuration owned by fieldManager from
+// adminPolicyBasedRoute for the status subresource.
+func ExtractAdminPolicyBasedRouteStatus(adminPolicyBasedRoute *adminpbrv1beta1.AdminPolicyBasedRoute, fieldManager string) (*AdminPolicyBasedRouteApplyConfiguration, error) {
+	return ExtractAdminPolicyBasedRouteFrom(adminPolicyBasedRoute, fieldManager, "status")
 }
 
 func (b AdminPolicyBasedRouteApplyConfiguration) IsApplyConfiguration() {}

@@ -539,7 +539,7 @@ func schema_go_controller_pkg_crd_types_NetworkSelector(ref common.ReferenceCall
 					},
 					"networkAttachmentDefinitionSelector": {
 						SchemaProps: spec.SchemaProps{
-							Description: "networkAttachmentDefinitionSelector selects networks defined in the selected NetworkAttachmentDefinitions when NetworkSelectionType is 'SecondaryUserDefinedNetworks'.",
+							Description: "networkAttachmentDefinitionSelector selects networks defined in the selected NetworkAttachmentDefinitions when NetworkSelectionType is 'NetworkAttachmentDefinitions'.",
 							Ref:         ref(types.NetworkAttachmentDefinitionSelector{}.OpenAPIModelName()),
 						},
 					},

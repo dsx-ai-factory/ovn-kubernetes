@@ -6,8 +6,11 @@
 package v1beta1
 
 import (
+	ipreservationv1beta1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
+	internal "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1/apis/applyconfiguration/internal"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
@@ -36,6 +39,47 @@ func IPReservation(name, namespace string) *IPReservationApplyConfiguration {
 	b.WithKind("IPReservation")
 	b.WithAPIVersion("k8s.ovn.org/v1beta1")
 	return b
+}
+
+// ExtractIPReservationFrom extracts the applied configuration owned by fieldManager from
+// iPReservation for the specified subresource. Pass an empty string for subresource to extract
+// the main resource. Common subresources include "status", "scale", etc.
+// iPReservation must be a unmodified IPReservation API object that was retrieved from the Kubernetes API.
+// ExtractIPReservationFrom provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractIPReservationFrom(iPReservation *ipreservationv1beta1.IPReservation, fieldManager string, subresource string) (*IPReservationApplyConfiguration, error) {
+	b := &IPReservationApplyConfiguration{}
+	err := managedfields.ExtractInto(iPReservation, internal.Parser().Type("com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.ipreservation.v1beta1.IPReservation"), fieldManager, b, subresource)
+	if err != nil {
+		return nil, err
+	}
+	b.WithName(iPReservation.Name)
+	b.WithNamespace(iPReservation.Namespace)
+
+	b.WithKind("IPReservation")
+	b.WithAPIVersion("k8s.ovn.org/v1beta1")
+	return b, nil
+}
+
+// ExtractIPReservation extracts the applied configuration owned by fieldManager from
+// iPReservation. If no managedFields are found in iPReservation for fieldManager, a
+// IPReservationApplyConfiguration is returned with only the Name, Namespace (if applicable),
+// APIVersion and Kind populated. It is possible that no managed fields were found for because other
+// field managers have taken ownership of all the fields previously owned by fieldManager, or because
+// the fieldManager never owned fields any fields.
+// iPReservation must be a unmodified IPReservation API object that was retrieved from the Kubernetes API.
+// ExtractIPReservation provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractIPReservation(iPReservation *ipreservationv1beta1.IPReservation, fieldManager string) (*IPReservationApplyConfiguration, error) {
+	return ExtractIPReservationFrom(iPReservation, fieldManager, "")
+}
+
+// ExtractIPReservationStatus extracts the applied configuration owned by fieldManager from
+// iPReservation for the status subresource.
+func ExtractIPReservationStatus(iPReservation *ipreservationv1beta1.IPReservation, fieldManager string) (*IPReservationApplyConfiguration, error) {
+	return ExtractIPReservationFrom(iPReservation, fieldManager, "status")
 }
 
 func (b IPReservationApplyConfiguration) IsApplyConfiguration() {}

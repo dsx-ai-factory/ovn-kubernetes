@@ -878,9 +878,6 @@ func (wf *WatchFactory) Stop() {
 	   if wf.adminPBRFactory != nil {
 	           wf.adminPBRFactory.Shutdown()
 	   }
-	   if wf.vipFactory != nil {
-	           wf.vipFactory.Shutdown()
-	   }
 	   if wf.ipresvFactory != nil {
 	           wf.ipresvFactory.Shutdown()
 	   }

@@ -7,7 +7,6 @@ package types
 import "time"
 
 type OvnK8sStatus string
-type PortMirrorType string
 
 const (
 	// Default network name

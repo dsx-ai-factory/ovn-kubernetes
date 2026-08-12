@@ -407,7 +407,7 @@ func schema_pkg_crd_networkqos_v1alpha1_Spec(ref common.ReferenceCallback) commo
 				Properties: map[string]spec.Schema{
 					"networkSelectors": {
 						SchemaProps: spec.SchemaProps{
-							Description: "networkSelector selects the networks on which the pod IPs need to be added to the source address set. NetworkQoS controller currently supports `NetworkAttachmentDefinitions` type only.",
+							Description: "networkSelector selects the networks on which the pod IPs need to be added to the source address set.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
@@ -593,7 +593,7 @@ func schema_go_controller_pkg_crd_types_NetworkSelector(ref common.ReferenceCall
 					},
 					"networkAttachmentDefinitionSelector": {
 						SchemaProps: spec.SchemaProps{
-							Description: "networkAttachmentDefinitionSelector selects networks defined in the selected NetworkAttachmentDefinitions when NetworkSelectionType is 'SecondaryUserDefinedNetworks'.",
+							Description: "networkAttachmentDefinitionSelector selects networks defined in the selected NetworkAttachmentDefinitions when NetworkSelectionType is 'NetworkAttachmentDefinitions'.",
 							Ref:         ref(types.NetworkAttachmentDefinitionSelector{}.OpenAPIModelName()),
 						},
 					},
