@@ -2735,7 +2735,19 @@ spec:
 			}, 10*time.Second, 2*time.Second).Should(BeEmpty(), "MAC_Bindings for %s should be cleared", senderNodeIPv4)
 
 			By("sending ARP for target node IP from sender node")
-			arpCmd := fmt.Sprintf("arping -c 3 -w 5 -I %s %s", bridgeName, targetNodeIPv4)
+			// TBD: upstream runs "arping -c 3 -w 5" here. Restore that and drop
+			// this workaround once our image ships iputils newer than 20240117.
+			//
+			// The fan-out under test answers one request several times, which is
+			// expected: a passing upstream run reports 1 probe sent and 3 replies
+			// received, all from the bridge MAC. Downstream builds ovnkube-node on
+			// Ubuntu noble, which pins iputils 20240117, and that version also
+			// requires probes sent to equal replies received, so it exits non-zero
+			// on a successful exchange. Later versions dropped that rule, and
+			// upstream builds on Fedora, so upstream never hits this. Omitting -c
+			// and bounding the run with -w alone exits 0 on any reply in both
+			// versions, and still fails when nothing answers.
+			arpCmd := fmt.Sprintf("arping -w 5 -I %s %s", bridgeName, targetNodeIPv4)
 			_, err = e2epodoutput.RunHostCmdWithRetries(senderOvnkPod.Namespace, senderOvnkPod.Name, arpCmd, framework.Poll, 30*time.Second)
 			framework.ExpectNoError(err, "arping from sender to %s failed", targetNodeIPv4)
 
