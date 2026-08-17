@@ -82,6 +82,15 @@ if [ "${ENABLE_NO_OVERLAY:-false}" != true ]; then
   skip_label "Feature:NoOverlay"
 fi
 
+# Generic route-advertisement tests expect every UDN to be active on every node,
+# which does not hold with dynamic UDN allocation. Dedicated dynamic UDN route-
+# advertisement coverage runs with the control-plane tests.
+if [[ "${WHAT:-}" == "Network Segmentation"* ]] &&
+   [[ "${ENABLE_ROUTE_ADVERTISEMENTS:-false}" == true ]] &&
+   [[ "${DYNAMIC_UDN_ALLOCATION:-false}" == true ]]; then
+  skip_label "Feature:RouteAdvertisements"
+fi
+
 if [ "${KIND_INSTALL_METALLB:-false}" = "false" ]; then
   skip "EgressService|Egress Services|Load Balancer Service Tests with MetalLB"
 fi
