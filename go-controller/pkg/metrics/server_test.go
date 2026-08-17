@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
@@ -23,6 +24,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	kexec "k8s.io/utils/exec"
 
@@ -127,22 +129,23 @@ var _ = Describe("MetricServer", func() {
 	When("EnablePprof", func() {
 		BeforeEach(func() {
 			t.opts.EnablePprof = true
+			t.opts.PprofPort = getFreePort()
 		})
 
-		It("should serve pprof endpoints", func() {
-			baseURL := fmt.Sprintf("http://%s", t.opts.BindAddress)
+		It("should serve pprof endpoints on the loopback listener, not the metrics port", func() {
+			pprofURL := fmt.Sprintf("http://127.0.0.1:%d", t.opts.PprofPort)
 
-			// Test the pprof index endpoint
+			// Test the pprof index endpoint on the dedicated loopback listener
 			Eventually(func(g Gomega) {
-				resp, err := http.Get(baseURL + "/debug/pprof/")
+				resp, err := http.Get(pprofURL + "/debug/pprof/")
 				g.Expect(err).NotTo(HaveOccurred())
 				defer resp.Body.Close()
 				g.Expect(resp.StatusCode).To(Equal(http.StatusOK))
 			}).Within(5 * time.Second).Should(Succeed())
 
-			// Test the log level endpoint
+			// Test the log level endpoint on the dedicated loopback listener
 			Eventually(func(g Gomega) {
-				req, err := http.NewRequest("PUT", baseURL+"/debug/flags/v", strings.NewReader("2"))
+				req, err := http.NewRequest("PUT", pprofURL+"/debug/flags/v", strings.NewReader("2"))
 				g.Expect(err).NotTo(HaveOccurred())
 
 				resp, err := http.DefaultClient.Do(req)
@@ -153,6 +156,14 @@ var _ = Describe("MetricServer", func() {
 				body, err := io.ReadAll(resp.Body)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(string(body)).To(ContainSubstring("successfully set klog.logging.verbosity to 2"))
+			}).Within(5 * time.Second).Should(Succeed())
+
+			// The routable metrics port must never expose the debug endpoints.
+			Eventually(func(g Gomega) {
+				resp, err := http.Get(fmt.Sprintf("http://%s/debug/pprof/", t.opts.BindAddress))
+				g.Expect(err).NotTo(HaveOccurred())
+				defer resp.Body.Close()
+				g.Expect(resp.StatusCode).To(Equal(http.StatusNotFound))
 			}).Within(5 * time.Second).Should(Succeed())
 		})
 	})
@@ -1426,3 +1437,49 @@ Open vSwitch Library 2.13.0.f945b5c5
 Open vSwitch Library 3.5.0
 `
 )
+
+// TestPprofEndpointsNotOnMetricsMux verifies pprof and /debug/flags/v are never
+// registered on the routable metrics mux, even with pprof enabled. They are only
+// served on the dedicated loopback listener (see startPprofServers).
+func TestPprofEndpointsNotOnMetricsMux(t *testing.T) {
+	mux := NewMetricServer(MetricServerOptions{EnablePprof: true, BindAddress: "0.0.0.0:9410"}).mux
+
+	for _, ep := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/debug/pprof/"},
+		{http.MethodGet, "/debug/pprof/profile"},
+		{http.MethodPut, "/debug/flags/v"},
+	} {
+		req := httptest.NewRequest(ep.method, ep.path, nil)
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, req)
+		if rr.Code != http.StatusNotFound {
+			t.Errorf("%s %s on metrics mux: got status %d, want %d (must not be exposed on the metrics port)",
+				ep.method, ep.path, rr.Code, http.StatusNotFound)
+		}
+	}
+}
+
+// TestPprofMuxServesDebugEndpoints is the positive counterpart to
+// TestPprofEndpointsNotOnMetricsMux: with pprof enabled the dedicated loopback
+// mux must actually serve the /debug/pprof/* handlers.
+func TestPprofMuxServesDebugEndpoints(t *testing.T) {
+	server := NewMetricServer(MetricServerOptions{EnablePprof: true, BindAddress: "0.0.0.0:9410"})
+	require.NotNil(t, server.pprofMux, "pprofMux must be created when pprof is enabled")
+
+	for _, path := range []string{"/debug/pprof/", "/debug/pprof/cmdline"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rr := httptest.NewRecorder()
+		server.pprofMux.ServeHTTP(rr, req)
+		require.Equalf(t, http.StatusOK, rr.Code, "GET %s on pprof mux", path)
+	}
+}
+
+// TestPprofMuxNilWhenDisabled verifies the pprof mux is not created when pprof
+// is disabled, so the /debug endpoints are never served at all.
+func TestPprofMuxNilWhenDisabled(t *testing.T) {
+	server := NewMetricServer(MetricServerOptions{EnablePprof: false, BindAddress: "0.0.0.0:9410"})
+	require.Nil(t, server.pprofMux, "pprofMux must not be created when pprof is disabled")
+}

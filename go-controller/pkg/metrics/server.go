@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/pprof"
 	"runtime/debug"
@@ -106,6 +107,11 @@ type MetricServerOptions struct {
 	EnableOVNNorthdMetrics     bool
 	EnablePprof                bool
 
+	// PprofPort is the loopback port for the pprof/debug listener. When pprof is
+	// enabled it is a validated, explicit port (1-65535) supplied via
+	// --metrics-pprof-port; see config.buildMetricsConfig.
+	PprofPort int
+
 	// Enable OVS native metrics (downstream-specific)
 	// When enabled, collects metrics via `ovs-appctl metrics/show`
 	EnableOVSNativeMetrics bool
@@ -135,6 +141,10 @@ type MetricServer struct {
 	// HTTP server
 	server *http.Server
 	mux    *http.ServeMux
+
+	// pprofMux serves pprof and /debug/flags/v on a dedicated loopback-only
+	// listener (see Run); it is nil unless pprof is enabled.
+	pprofMux *http.ServeMux
 
 	// Prometheus registry
 	registerer prometheus.Registerer
@@ -182,17 +192,63 @@ func NewMetricServer(opts MetricServerOptions) *MetricServer {
 	))
 
 	if opts.EnablePprof {
-		server.mux.HandleFunc("/debug/pprof/", pprof.Index)
-		server.mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-		server.mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-		server.mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-		server.mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+		// pprof (heap/goroutine dumps, CPU profiling) and /debug/flags/v (runtime
+		// klog verbosity changes) are unauthenticated and powerful. Keep them off
+		// the routable metrics mux and serve them on a dedicated loopback listener
+		// instead (see Run/startPprofServers).
+		server.pprofMux = http.NewServeMux()
+		server.pprofMux.HandleFunc("/debug/pprof/", pprof.Index)
+		server.pprofMux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		server.pprofMux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		server.pprofMux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		server.pprofMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 
 		// Allow changes to log level at runtime
-		server.mux.HandleFunc("/debug/flags/v", stringFlagPutHandler(klogSetter))
+		server.pprofMux.HandleFunc("/debug/flags/v", stringFlagPutHandler(klogSetter))
 	}
 
 	return server
+}
+
+// startPprofServers starts loopback-only HTTP servers for the pprof and
+// /debug/flags/v endpoints when pprof is enabled. Binding to loopback means the
+// endpoints are reachable locally (kubectl exec/port-forward) but never from the
+// routable metrics address. Both IPv4 and IPv6 loopback are used so debugging
+// works regardless of the node's IP family; each is best-effort, so failing to
+// bind one family (e.g. ::1 on an IPv4-only node) does not affect the other.
+func (s *MetricServer) startPprofServers(stopChan <-chan struct{}) {
+	if !s.opts.EnablePprof {
+		return
+	}
+	port := strconv.Itoa(s.opts.PprofPort)
+	addrs := []string{net.JoinHostPort("127.0.0.1", port), net.JoinHostPort("::1", port)}
+	for _, addr := range addrs {
+		srv := &http.Server{
+			Addr:              addr,
+			Handler:           s.pprofMux,
+			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       10 * time.Second,
+			IdleTimeout:       120 * time.Second,
+			// WriteTimeout is intentionally left unset: /debug/pprof/profile and
+			// /debug/pprof/trace stream for a client-specified duration, so a write
+			// deadline would truncate those captures. ReadHeaderTimeout already
+			// bounds slow-client (Slowloris) connection holding.
+		}
+		go func() {
+			klog.Infof("Starting pprof server on %s", addr)
+			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				klog.Warningf("Pprof server on %s stopped: %v", addr, err)
+			}
+		}()
+		go func() {
+			<-stopChan
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := srv.Shutdown(shutdownCtx); err != nil {
+				klog.Errorf("Error stopping pprof server on %s: %v", addr, err)
+			}
+		}()
+	}
 }
 
 // registerMetrics registers the metrics to the OVN registry
@@ -330,6 +386,7 @@ func (s *MetricServer) handleMetrics(r *http.Request) {
 
 // Run runs the metrics server and blocks until graceful shutdown
 func (s *MetricServer) Run(stopChan <-chan struct{}) {
+	s.startPprofServers(stopChan)
 	utilwait.Until(func() {
 		s.server = &http.Server{
 			Addr:    s.opts.BindAddress,
