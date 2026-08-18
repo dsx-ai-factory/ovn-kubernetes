@@ -7,6 +7,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -85,6 +86,9 @@ func TestOpenFlowManagerCleansUnusedUplinkBridgeFlows(t *testing.T) {
 }
 
 func TestOpenFlowManagerSyncsUplinkBridgeFlows(t *testing.T) {
+	if err := config.PrepareTestConfig(); err != nil {
+		t.Fatalf("failed to prepare test config: %v", err)
+	}
 	fexec := ovntest.NewFakeExec()
 	if err := util.SetExec(fexec); err != nil {
 		t.Fatalf("failed to set fake exec: %v", err)
@@ -245,5 +249,20 @@ patch-br-ex_multi-homing-worker-0.maiqueb.org-to-br-int`,
 				t.Errorf("Expected patch port name %q got %q", tc.expectedPatchPortName, patchPortName)
 			}
 		})
+	}
+}
+
+// --allow-no-uplink can leave physIntf empty. checkPorts must skip the phys
+// ofport check in that case (GetOVSInterface("") cannot look up a zero Name).
+func TestCheckPortsAllowNoUplink(t *testing.T) {
+	if err := config.PrepareTestConfig(); err != nil {
+		t.Fatalf("PrepareTestConfig: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = config.PrepareTestConfig()
+	})
+	config.Gateway.AllowNoUplink = true
+	if err := checkPorts(nil, nil, "", "", "", ""); err != nil {
+		t.Fatalf("checkPorts with AllowNoUplink and empty physIntf: %v", err)
 	}
 }
