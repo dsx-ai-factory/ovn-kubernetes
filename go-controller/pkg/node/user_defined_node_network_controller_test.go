@@ -219,9 +219,12 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 					Name:  "breth0",
 					Ports: []string{"breth0-port-uuid", "eth0-port-uuid"},
 				},
+				// Local port of the bridge (hidden by GetPortBridge / port-to-br).
 				&vswitchd.Port{UUID: "breth0-port-uuid", Name: "breth0", Interfaces: []string{"breth0-iface-uuid"}},
-				&vswitchd.Interface{UUID: "breth0-iface-uuid", Name: "breth0", Type: "system"},
-				&vswitchd.Port{UUID: "eth0-port-uuid", Name: "eth0"},
+				&vswitchd.Interface{UUID: "breth0-iface-uuid", Name: "breth0", Type: "internal", Ofport: ptr.To(65534)},
+				// Physical uplink: system-typed so GetNicName resolves eth0.
+				&vswitchd.Port{UUID: "eth0-port-uuid", Name: "eth0", Interfaces: []string{"eth0-iface-uuid"}},
+				&vswitchd.Interface{UUID: "eth0-iface-uuid", Name: "eth0", Type: "system", Ofport: ptr.To(7)},
 			},
 		})
 		Expect(ovsErr).NotTo(HaveOccurred())
@@ -497,6 +500,7 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 			controller.gateway.kubeInterface = &kubeMock
 
 			By("starting UDN controller for user-defined primary network")
+			addOVSPatchPortInterface(ovsClient, "breth0", "patch-breth0_bluenet_worker1-to-br-int", 15)
 			err = controller.Start(context.Background())
 			Expect(err).NotTo(HaveOccurred())
 
@@ -549,8 +553,6 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 			Expect(v6MasqIPRule).To(BeTrue())
 
 			By("delete the network and ensure its associated VRF device is also deleted")
-			cnode := node.DeepCopy()
-			kubeMock.On("UpdateNodeStatus", cnode).Return(nil)
 			err = controller.Cleanup()
 			Expect(err).NotTo(HaveOccurred())
 			Eventually(func() error {

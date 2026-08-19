@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
+	"syscall"
 	"time"
 
 	"github.com/vishvananda/netlink"
@@ -555,6 +557,22 @@ func (udng *UserDefinedNetworkGateway) addNetwork() error {
 		}
 	}
 
+	// Add static kernel neighbor entries for per-CUDN masquerade IPs on
+	// the gateway bridge so that the kernel never sends ARP/NS for these
+	// addresses. Without this, IPv6 NDP resolution for masquerade IPs
+	// fails because NS packets are not forwarded to CUDN patch ports
+	// (blocked by NO_FLOOD).
+	if config.IsModeFull() {
+		bridgeName := udng.openflowManager.getDefaultBridgeName()
+		if uplinkBridge != nil {
+			bridgeName = uplinkBridge.GetGatewayIface()
+		}
+		if err = addUDNMasqIPNeighbors(bridgeName, udng.v4MasqIPs, udng.v6MasqIPs); err != nil {
+			return fmt.Errorf("failed to add masquerade IP neighbor entries on %s for network %s: %w",
+				bridgeName, udng.GetNetworkName(), err)
+		}
+	}
+
 	if config.IsModeDPU() || config.IsModeFull() {
 		var mgmtIPs []*net.IPNet
 		for _, subnet := range nodeSubnets {
@@ -655,6 +673,16 @@ func (udng *UserDefinedNetworkGateway) delNetwork() error {
 			}
 		}
 	}
+	if config.IsModeFull() && udng.openflowManager != nil {
+		bridgeName := udng.openflowManager.getDefaultBridgeName()
+		if udng.Uplink() != "" && udng.gwInterfaceName != "" {
+			bridgeName = udng.gwInterfaceName
+		}
+		if err := delUDNMasqIPNeighbors(bridgeName, udng.v4MasqIPs, udng.v6MasqIPs); err != nil {
+			errs = append(errs, fmt.Errorf("failed to delete masquerade IP neighbor entries on %s for network %s: %w",
+				bridgeName, udng.GetNetworkName(), err))
+		}
+	}
 	if udng.openflowManager != nil || config.IsModeDPUHost() {
 		if err := udng.gateway.Reconcile(); err != nil {
 			errs = append(errs, fmt.Errorf("failed to reconcile default gateway for network %s, err: %v", udng.GetNetworkName(), err))
@@ -688,6 +716,64 @@ func (udng *UserDefinedNetworkGateway) delNetwork() error {
 	}
 
 	return nil
+}
+
+// addUDNMasqIPNeighbors adds permanent kernel neighbor entries for a
+// user-defined network's gateway router masquerade IPs on the given bridge
+// interface. These IPs are internal to the node and handled entirely by OVS
+// flows, so they will never respond to ARP/NS on the wire. Static entries
+// prevent the kernel from sending ARP/NS requests that would otherwise fail
+// (IPv6 NS is blocked by NO_FLOOD on CUDN patch ports).
+func addUDNMasqIPNeighbors(bridgeName string, v4MasqIPs, v6MasqIPs *udn.MasqueradeIPs) error {
+	link, err := util.LinkSetUp(bridgeName)
+	if err != nil {
+		return fmt.Errorf("unable to get link for %s: %v", bridgeName, err)
+	}
+	for _, ip := range udnMasqGatewayRouterIPs(v4MasqIPs, v6MasqIPs) {
+		mac := util.IPAddrToHWAddr(ip)
+		klog.Infof("Ensuring UDN masquerade IP neighbor entry: %s -> %s on %s", ip, mac, bridgeName)
+		if exists, err := util.LinkNeighExists(link, ip, mac); err == nil && !exists {
+			if err = util.LinkNeighDel(link, ip); err != nil {
+				klog.Warningf("Failed to remove stale neighbor entry for %s on %s: %v",
+					ip, bridgeName, err)
+			}
+			if err = util.LinkNeighSet(link, ip, mac); err != nil {
+				return fmt.Errorf("failed to add neighbor %s -> %s on %s: %v",
+					ip, mac, bridgeName, err)
+			}
+		} else if err != nil {
+			return fmt.Errorf("failed to check neighbor %s on %s: %v", ip, bridgeName, err)
+		}
+	}
+	return nil
+}
+
+// delUDNMasqIPNeighbors removes the kernel neighbor entries previously added
+// by addUDNMasqIPNeighbors.
+func delUDNMasqIPNeighbors(bridgeName string, v4MasqIPs, v6MasqIPs *udn.MasqueradeIPs) error {
+	link, err := util.LinkSetUp(bridgeName)
+	if err != nil {
+		return fmt.Errorf("unable to get link for %s: %v", bridgeName, err)
+	}
+	var errs []error
+	for _, ip := range udnMasqGatewayRouterIPs(v4MasqIPs, v6MasqIPs) {
+		if err := util.LinkNeighDel(link, ip); err != nil && !errors.Is(err, syscall.ENOENT) {
+			errs = append(errs, fmt.Errorf("failed to delete neighbor %s on %s: %v", ip, bridgeName, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// udnMasqGatewayRouterIPs returns the gateway router masquerade IPs for a UDN.
+func udnMasqGatewayRouterIPs(v4MasqIPs, v6MasqIPs *udn.MasqueradeIPs) []net.IP {
+	var ips []net.IP
+	if v4MasqIPs != nil && v4MasqIPs.GatewayRouter != nil {
+		ips = append(ips, v4MasqIPs.GatewayRouter.IP)
+	}
+	if v6MasqIPs != nil && v6MasqIPs.GatewayRouter != nil {
+		ips = append(ips, v6MasqIPs.GatewayRouter.IP)
+	}
+	return ips
 }
 
 // getLocalSubnets returns pod subnets used by the current node.
@@ -1028,11 +1114,11 @@ func (udng *UserDefinedNetworkGateway) getV6MasqueradeIP() (*net.IPNet, error) {
 // 2000:	from all fwmark 0x1001 lookup 1007
 // 2000:	from all to 10.132.0.0/14 lookup 1007
 // 2000:	from all to 169.254.0.12 lookup 1007
-func (udng *UserDefinedNetworkGateway) constructUDNVRFIPRules() ([]netlink.Rule, []netlink.Rule, error) {
-	var addIPRules []netlink.Rule
-	var delIPRules []netlink.Rule
-	var masqIPRules []netlink.Rule
-	var subnetIPRules []netlink.Rule
+func (udng *UserDefinedNetworkGateway) constructUDNVRFIPRules() ([]iprulemanager.IPRule, []iprulemanager.IPRule, error) {
+	var addIPRules []iprulemanager.IPRule
+	var delIPRules []iprulemanager.IPRule
+	var masqIPRules []iprulemanager.IPRule
+	var subnetIPRules []iprulemanager.IPRule
 	masqIPv4, err := udng.getV4MasqueradeIP()
 	if err != nil {
 		return nil, nil, err
@@ -1073,39 +1159,47 @@ func (udng *UserDefinedNetworkGateway) constructUDNVRFIPRules() ([]netlink.Rule,
 	return addIPRules, delIPRules, nil
 }
 
-func generateIPRuleForPacketMark(mark uint, isIPv6 bool, vrfTableId uint) netlink.Rule {
-	r := *netlink.NewRule()
-	r.Table = int(vrfTableId)
-	r.Priority = UDNMasqueradeIPRulePriority
-	r.Family = netlink.FAMILY_V4
+func generateIPRuleForPacketMark(mark uint, isIPv6 bool, vrfTableId uint) iprulemanager.IPRule {
+	family := netlink.FAMILY_V4
 	if isIPv6 {
-		r.Family = netlink.FAMILY_V6
+		family = netlink.FAMILY_V6
 	}
-	r.Mark = uint32(mark)
-	return r
-}
-func generateIPRuleForMasqIP(masqIP net.IP, isIPv6 bool, vrfTableId uint) netlink.Rule {
-	r := *netlink.NewRule()
-	r.Table = int(vrfTableId)
-	r.Priority = UDNMasqueradeIPRulePriority
-	r.Family = netlink.FAMILY_V4
-	if isIPv6 {
-		r.Family = netlink.FAMILY_V6
+	return iprulemanager.IPRule{
+		Table:    int(vrfTableId),
+		Priority: UDNMasqueradeIPRulePriority,
+		Family:   family,
+		Mark:     uint32(mark),
 	}
-	r.Dst = util.GetIPNetFullMaskFromIP(masqIP)
-	return r
 }
 
-func generateIPRuleForUDNSubnet(udnIP *net.IPNet, isIPv6 bool, vrfTableId uint) netlink.Rule {
-	r := *netlink.NewRule()
-	r.Table = int(vrfTableId)
-	r.Priority = UDNMasqueradeIPRulePriority
-	r.Family = netlink.FAMILY_V4
+func generateIPRuleForMasqIP(masqIP net.IP, isIPv6 bool, vrfTableId uint) iprulemanager.IPRule {
+	family := netlink.FAMILY_V4
 	if isIPv6 {
-		r.Family = netlink.FAMILY_V6
+		family = netlink.FAMILY_V6
 	}
-	r.Dst = udnIP
-	return r
+	addr, _ := netip.AddrFromSlice(masqIP)
+	addr = addr.Unmap()
+	return iprulemanager.IPRule{
+		Table:    int(vrfTableId),
+		Priority: UDNMasqueradeIPRulePriority,
+		Family:   family,
+		Dst:      netip.PrefixFrom(addr, addr.BitLen()),
+	}
+}
+
+func generateIPRuleForUDNSubnet(udnIP *net.IPNet, isIPv6 bool, vrfTableId uint) iprulemanager.IPRule {
+	family := netlink.FAMILY_V4
+	if isIPv6 {
+		family = netlink.FAMILY_V6
+	}
+	addr, _ := netip.AddrFromSlice(udnIP.IP)
+	ones, _ := udnIP.Mask.Size()
+	return iprulemanager.IPRule{
+		Table:    int(vrfTableId),
+		Priority: UDNMasqueradeIPRulePriority,
+		Family:   family,
+		Dst:      netip.PrefixFrom(addr.Unmap(), ones),
+	}
 }
 
 func (udng *UserDefinedNetworkGateway) run() {

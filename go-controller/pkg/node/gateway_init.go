@@ -523,7 +523,7 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHostPreStart(kubeNodeIP ne
 func (nc *DefaultNodeNetworkController) initGatewayDPUHost() error {
 	// A DPU host gateway is complementary to the shared gateway running
 	// on the DPU embedded CPU. it performs some initializations and
-	// watch on services for iptable rule updates and run a loadBalancerHealth checker
+	// watch on services for nftables rule updates and run a loadBalancerHealth checker
 	// Note: all K8s Node related annotations are handled from DPU.
 	klog.Info("Initializing Shared Gateway Functionality for Gateway Start on DPU host")
 	var err error
@@ -531,7 +531,7 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost() error {
 	gw := nc.Gateway.(*gateway)
 	gw.nodeIPManager, _ = newAddressManager(nc.name, nc.Kube, nil, nc.watchFactory, nil, nc.ovsClient)
 	if config.Gateway.NodeportEnable {
-		if err := initSharedGatewayIPTables(); err != nil {
+		if err := initGatewayNFTables(); err != nil {
 			return err
 		}
 		if util.IsNetworkSegmentationSupportEnabled() {
@@ -539,7 +539,7 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost() error {
 				return fmt.Errorf("unable to configure UDN nftables: %w", err)
 			}
 		}
-		gw.nodePortWatcherIptables = newNodePortWatcherIptables(nc.networkManager)
+		gw.nodePortWatcherNFTables = newNodePortWatcherNFTables(nc.networkManager)
 		gw.loadBalancerHealthChecker = newLoadBalancerHealthChecker(nc.name, nc.watchFactory)
 		portClaimWatcher, err := newPortClaimWatcher(nc.recorder)
 		if err != nil {
@@ -586,7 +586,7 @@ func CleanupClusterNode(name string) error {
 			}
 		}
 		// cleanupSharedGateway handles both the OVS-side (no-op when ovsClient
-		// is nil) and the host-side iptables chains.
+		// is nil) and the host-side nftables chains.
 		if sharedErr := cleanupSharedGateway(ovsClient); sharedErr != nil {
 			klog.Errorf("Failed to cleanup Gateway, error: %v", sharedErr)
 			err = sharedErr

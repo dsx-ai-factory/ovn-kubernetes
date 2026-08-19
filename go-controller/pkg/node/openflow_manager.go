@@ -478,6 +478,9 @@ func (b *openflowBridge) syncFlows() error {
 			stderr, len(flows), err)
 	}
 	b.deleteStaleGroups()
+	if err := b.SyncNoFlood(); err != nil {
+		return fmt.Errorf("failed to sync no-flood port config: %w", err)
+	}
 	return nil
 }
 
@@ -732,6 +735,12 @@ func checkPorts(ovsClient libovsdbclient.Client, netConfigs []*bridgeconfig.Brid
 				klog.Warningf("UDN patch port %s changed for existing network from %v to %v. Expecting bridge config update.", netConfig.PatchPort, netConfig.OfPortPatch, curOfportPatch)
 			}
 		}
+	}
+
+	// With --allow-no-uplink, NewBridgeConfiguration may leave physIntf empty.
+	// There is then no physical ofport to track.
+	if config.Gateway.AllowNoUplink && physIntf == "" {
+		return nil
 	}
 
 	// it could be that someone removed the physical interface and added it back on the OVS host
