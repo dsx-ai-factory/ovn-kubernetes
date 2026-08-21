@@ -450,20 +450,15 @@ func generateGatewayInitExpectedNBWithPodNetworkAdvertised(testData []libovsdbte
 
 var _ = ginkgo.Describe("Gateway Init Operations", func() {
 	var (
-		fakeOvn  *FakeOVN
-		testNode corev1.Node
+		fakeOvn *FakeOVN
+		//testNode corev1.Node
 	)
 
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
 		gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
 
-		fakeOvn = NewFakeOVN(true)
-		testNode = corev1.Node{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: nodeName,
-			},
-		}
+		fakeOvn = NewFakeOVN(true, nodeName)
 	})
 
 	ginkgo.AfterEach(func() {
@@ -517,10 +512,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedClusterLBGroup,
 					expectedSwitchLBGroup,
 					expectedRouterLBGroup,
-				},
-			}, &corev1.NodeList{
-				Items: []corev1.Node{
-					testNode,
 				},
 			})
 
@@ -845,10 +836,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedSwitchLBGroup,
 					expectedRouterLBGroup,
 				},
-			}, &corev1.NodeList{
-				Items: []corev1.Node{
-					testNode,
-				},
 			})
 
 			clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14")
@@ -929,10 +916,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedClusterLBGroup,
 					expectedSwitchLBGroup,
 					expectedRouterLBGroup,
-				},
-			}, &corev1.NodeList{
-				Items: []corev1.Node{
-					testNode,
 				},
 			})
 
@@ -1138,10 +1121,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedSwitchLBGroup,
 					expectedRouterLBGroup,
 				},
-			}, &corev1.NodeList{
-				Items: []corev1.Node{
-					testNode,
-				},
 			})
 
 			config.IPv4Mode = false
@@ -1223,10 +1202,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedClusterLBGroup,
 					expectedSwitchLBGroup,
 					expectedRouterLBGroup,
-				},
-			}, &corev1.NodeList{
-				Items: []corev1.Node{
-					testNode,
 				},
 			})
 
@@ -1312,10 +1287,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedSwitchLBGroup,
 					expectedRouterLBGroup,
 				},
-			}, &corev1.NodeList{
-				Items: []corev1.Node{
-					testNode,
-				},
 			})
 
 			config.IPv4Mode = true
@@ -1398,10 +1369,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedClusterLBGroup,
 					expectedSwitchLBGroup,
 					expectedRouterLBGroup,
-				},
-			}, &corev1.NodeList{
-				Items: []corev1.Node{
-					testNode,
 				},
 			})
 
@@ -1520,10 +1487,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedSwitchLBGroup,
 					expectedRouterLBGroup,
 				},
-			}, &corev1.NodeList{
-				Items: []corev1.Node{
-					testNode,
-				},
 			})
 			clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14")
 			defLRPIPs := ovntest.MustParseIPNets("100.64.0.1/16")
@@ -1622,10 +1585,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		//			},
 		//			SBData: []libovsdbtest.TestData{
 		//				datapath,
-		//			},
-		//		}, &corev1.NodeList{
-		//			Items: []corev1.Node{
-		//				testNode,
 		//			},
 		//		})
 		//
@@ -1747,10 +1706,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedSwitchLBGroup,
 					expectedRouterLBGroup,
 				},
-			}, &corev1.NodeList{
-				Items: []corev1.Node{
-					testNode,
-				},
 			})
 
 			config.IPv4Mode = true
@@ -1845,10 +1800,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedClusterLBGroup,
 					expectedSwitchLBGroup,
 					expectedRouterLBGroup,
-				},
-			}, &corev1.NodeList{
-				Items: []corev1.Node{
-					testNode,
 				},
 			})
 			clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14")
@@ -2303,7 +2254,7 @@ var _ = ginkgo.Describe("Gateway Router static routes to the distributed router"
 		gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
 		config.Gateway.Mode = config.GatewayModeShared
 		config.Gateway.EphemeralPortRange = config.DefaultEphemeralPortRange
-		fakeOvn = NewFakeOVN(true)
+		fakeOvn = NewFakeOVN(true, nodeName)
 	})
 
 	ginkgo.AfterEach(func() {
@@ -2448,7 +2399,7 @@ var _ = ginkgo.Describe("No-overlay cluster SNAT cleanup", func() {
 		gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
 		config.Gateway.Mode = config.GatewayModeShared
 		config.Gateway.EphemeralPortRange = config.DefaultEphemeralPortRange
-		fakeOvn = NewFakeOVN(false)
+		fakeOvn = NewFakeOVN(false, nodeName)
 	})
 
 	ginkgo.AfterEach(func() {
@@ -2714,7 +2665,7 @@ var _ = ginkgo.Describe("GetNetworkScopedClusterSubnetSNATMatch", func() {
 
 	ginkgo.BeforeEach(func() {
 		gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
-		fakeOvn = NewFakeOVN(false)
+		fakeOvn = NewFakeOVN(false, nodeName)
 		fakeOvn.start()
 		netInfo = &testNetInfo{
 			NetInfo: fakeOvn.controller.GetNetInfo(),
@@ -2866,7 +2817,7 @@ var _ = ginkgo.Describe("AddPodSNATOps", func() {
 
 	ginkgo.BeforeEach(func() {
 		gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
-		fakeOvn = NewFakeOVN(false)
+		fakeOvn = NewFakeOVN(false, nodeName)
 
 		// Create the gateway router in the fake database
 		gwRouterName := "GR_" + nodeName
@@ -3097,7 +3048,7 @@ var _ = ginkgo.Describe("cleanupStalePodSNATs", func() {
 
 	ginkgo.BeforeEach(func() {
 		gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
-		fakeOvn = NewFakeOVN(true)
+		fakeOvn = NewFakeOVN(true, testNode)
 	})
 
 	ginkgo.AfterEach(func() {

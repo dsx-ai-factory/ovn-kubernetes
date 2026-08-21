@@ -78,8 +78,7 @@ func (nc *DefaultNodeNetworkController) newRetryFrameworkNode(objectType reflect
 // object and then add the new one.
 func hasResourceAnUpdateFunc(objType reflect.Type) bool {
 	switch objType {
-	case factory.NamespaceExGwType,
-		factory.EndpointSliceForStaleConntrackRemovalType,
+	case factory.EndpointSliceForStaleConntrackRemovalType,
 		factory.NodeType:
 		return true
 	}
@@ -89,8 +88,7 @@ func hasResourceAnUpdateFunc(objType reflect.Type) bool {
 // Given an object type, needsUpdateDuringRetry returns true if the object needs to invoke update during iterate retry.
 func needsUpdateDuringRetry(objType reflect.Type) bool {
 	switch objType {
-	case factory.NamespaceExGwType,
-		factory.EndpointSliceForStaleConntrackRemovalType,
+	case factory.EndpointSliceForStaleConntrackRemovalType,
 		factory.NodeType:
 		return true
 	}
@@ -104,18 +102,6 @@ func needsUpdateDuringRetry(objType reflect.Type) bool {
 func (h *nodeEventHandler) AreResourcesEqual(obj1, obj2 interface{}) (bool, error) {
 	// switch based on type
 	switch h.objType {
-	case factory.NamespaceExGwType:
-		ns1, ok := obj1.(*corev1.Namespace)
-		if !ok {
-			return false, fmt.Errorf("could not cast obj1 of type %T to *kapi.Namespace", obj1)
-		}
-		ns2, ok := obj2.(*corev1.Namespace)
-		if !ok {
-			return false, fmt.Errorf("could not cast obj2 of type %T to *kapi.Namespace", obj2)
-		}
-
-		return !exGatewayPodsAnnotationsChanged(ns1, ns2), nil
-
 	case factory.EndpointSliceForStaleConntrackRemovalType:
 		// always run update code
 		return false, nil
@@ -151,9 +137,6 @@ func (h *nodeEventHandler) GetResourceFromInformerCache(key string) (interface{}
 
 	switch h.objType {
 
-	case factory.NamespaceExGwType:
-		obj, err = h.nc.watchFactory.GetNamespace(name)
-
 	case factory.EndpointSliceForStaleConntrackRemovalType:
 		obj, err = h.nc.watchFactory.GetEndpointSlice(namespace, name)
 
@@ -174,9 +157,6 @@ func (h *nodeEventHandler) GetResourceFromInformerCache(key string) (interface{}
 // if any, yielded during object creation.
 func (h *nodeEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
 	switch h.objType {
-	case factory.NamespaceExGwType:
-		// no action needed upon add event
-		return nil
 	case factory.EndpointSliceForStaleConntrackRemovalType:
 		if config.OvnKubeNode.Mode != types.NodeModeDPU {
 			var skipFirewalldChecked bool
@@ -245,22 +225,6 @@ func (h *nodeEventHandler) AddResource(obj interface{}, fromRetryLoop bool) erro
 // boolean argument is to indicate if the given resource is in the retryCache or not.
 func (h *nodeEventHandler) UpdateResource(oldObj, newObj interface{}, _ bool) error {
 	switch h.objType {
-	case factory.NamespaceExGwType:
-		// This handler runs in single-zone deployments (default zone), where
-		// ovnkube-controller patches the "k8s.ovn.org/external-gw-pod-ips"
-		// namespace annotation and ovnkube-node reacts here to flush conntrack on
-		// every node. In multi-zone interconnect, ovnkube-controller flushes
-		// conntrack directly and this annotation is not used.
-		node, err := h.nc.watchFactory.GetNode(h.nc.name)
-		if err != nil {
-			return fmt.Errorf("error retrieving node %s: %v", h.nc.name, err)
-		}
-		if util.GetNodeZone(node) == types.OvnDefaultZone {
-			newNs := newObj.(*corev1.Namespace)
-			return h.nc.syncConntrackForExternalGateways(newNs)
-		}
-		return nil
-
 	case factory.EndpointSliceForStaleConntrackRemovalType:
 		errors := []error{}
 		oldEndpointSlice := oldObj.(*discovery.EndpointSlice)
@@ -386,10 +350,6 @@ func (h *nodeEventHandler) UpdateResource(oldObj, newObj interface{}, _ bool) er
 // policies.
 func (h *nodeEventHandler) DeleteResource(obj, _ interface{}) error {
 	switch h.objType {
-	case factory.NamespaceExGwType:
-		// no action needed upon delete event
-		return nil
-
 	case factory.EndpointSliceForStaleConntrackRemovalType:
 		errors := []error{}
 		endpointslice := obj.(*discovery.EndpointSlice)
@@ -454,17 +414,14 @@ func (h *nodeEventHandler) SyncFunc(objs []interface{}) error {
 	} else {
 
 		switch h.objType {
-		case factory.NamespaceExGwType:
-			// no sync needed
-			syncFunc = nil
-		case factory.NodeType:
-			syncFunc = h.nc.syncNodes
-
 		case factory.EndpointSliceForStaleConntrackRemovalType:
 			syncFunc = nil
 			if config.OvnKubeNode.Mode != types.NodeModeDPU {
 				syncFunc = h.nc.syncFirewallZoneForEndpointSlices
 			}
+
+		case factory.NodeType:
+			syncFunc = h.nc.syncNodes
 
 		default:
 			return fmt.Errorf("no sync function for object type %s", h.objType)
