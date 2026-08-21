@@ -4,7 +4,6 @@
 package uplink
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -1305,58 +1304,9 @@ func (r defaultOVSBridgeResolver) ResolveByHostFunction(
 	nodeName string,
 ) (string, error) {
 	function := hostFunctionName(details)
-	// TODO: this lookup relies on sriovnet's deprecated
-	// GetVfRepresentorDPU/GetPfRepresentorDPU, which only accept PF
-	// indices 0 and 1 and only match c1/legacy phys_port_name patterns:
-	// multi-host DPUs (controllers other than c1) and cards with more
-	// than two PFs cannot be resolved this way, and (pfID, vfID) alone
-	// is ambiguous across DPUs and controllers in any case; such layouts
-	// take the MAC scan on every reconcile. The way out is publishing an
-	// unambiguous anchor, the MAC of the backing PF, and resolving
-	// through sriovnet's port params API
-	// (GetPFRepresentorPortParamsFromMAC and the
-	// Get*RepresentorFromPortParams lookups), which works on any
-	// controller and PF count.
-	var rep string
-	var err error
-	if details.VFID != nil {
-		rep, err = util.GetDPUOps().GetPortRepresentor(
-			fmt.Sprintf("%d", details.PFID),
-			fmt.Sprintf("%d", *details.VFID),
-		)
-	} else {
-		rep, err = util.GetDPUOps().GetPFRepresentor(fmt.Sprintf("%d", details.PFID))
-	}
+	rep, err := util.FindHostRepresentorByFunction(details.PFID, details.VFID, hostMAC, nodeName)
 	if err != nil {
-		return "", newDiscoveryError(
-			uplinkv1alpha1.UplinkStateReasonBridgeNotFound,
-			fmt.Errorf("failed to find representor for host function %s: %w", function, err),
-		)
-	}
-	// The published MAC is the uplink's identity: indices of a host function
-	// on some other SR-IOV device could still resolve a representor here.
-	// The representor's host-side peer MAC — the eswitch's record of the
-	// host function MAC, read via devlink, not the representor netdev's own
-	// address — must therefore equal the published MAC when it is readable,
-	// or the representor is not a match. A representor with no readable
-	// peer MAC (hardware that leaves representor function MACs unset
-	// reports errors or all zeroes) offers no identity to compare, and no
-	// way to resolve by MAC at all, so the published indices stand on their
-	// own there.
-	peerMAC, err := util.GetDPUOps().GetHostPeerMACAddress(rep, nodeName)
-	switch {
-	case err != nil:
-		klog.V(2).Infof("Uplink host function %s representor %s has no readable host peer MAC, "+
-			"skipping identity verification: %v", function, rep, err)
-	case !util.IsUsableEthernetMAC(peerMAC):
-		klog.V(2).Infof("Uplink host function %s representor %s host peer MAC %s is unusable, "+
-			"skipping identity verification", function, rep, peerMAC)
-	case !bytes.Equal(peerMAC, hostMAC):
-		return "", newDiscoveryError(
-			uplinkv1alpha1.UplinkStateReasonBridgeNotFound,
-			fmt.Errorf("representor %s for host function %s peers with MAC %s, not the published host MAC %s",
-				rep, function, peerMAC, hostMAC),
-		)
+		return "", newDiscoveryError(uplinkv1alpha1.UplinkStateReasonBridgeNotFound, err)
 	}
 	bridgeName, err := r.bridgeForPortOrInterface(rep)
 	if err != nil {
@@ -1374,10 +1324,7 @@ func (r defaultOVSBridgeResolver) ResolveByHostFunction(
 // hostFunctionName renders host function as pf<N> or pf<N>vf<M> for logs
 // and error messages.
 func hostFunctionName(details *uplinkv1alpha1.HostFunction) string {
-	if details.VFID != nil {
-		return fmt.Sprintf("pf%dvf%d", details.PFID, *details.VFID)
-	}
-	return fmt.Sprintf("pf%d", details.PFID)
+	return util.HostFunctionName(details.PFID, details.VFID)
 }
 
 func (r defaultOVSBridgeResolver) ResolveByHostMAC(hostMAC net.HardwareAddr, nodeName string) (string, error) {
