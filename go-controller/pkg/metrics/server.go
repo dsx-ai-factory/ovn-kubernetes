@@ -12,6 +12,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/pprof"
+	"runtime/debug"
+	"strconv"
 	"sync"
 	"time"
 
@@ -26,6 +28,18 @@ import (
 
 	ovntls "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/tls"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+)
+
+const (
+	// metricsScrapeBudgetFallback bounds metric collection when Prometheus does not
+	// advertise its scrape timeout. Kept below the typical 10s scrape_timeout so the
+	// handler still returns in time to serve the last known values (up stays 1).
+	metricsScrapeBudgetFallback = 8 * time.Second
+
+	// metricsScrapeBudgetSlack is subtracted from the advertised scrape timeout to
+	// leave promhttp room to serialize and write the response before Prometheus'
+	// deadline; without it a cached write can lose the race and flap up to 0.
+	metricsScrapeBudgetSlack = 500 * time.Millisecond
 )
 
 // metricsUpdaters holds registered metric update functions that are called
@@ -52,6 +66,27 @@ func runRegisteredMetricsUpdaters() {
 	for _, updater := range metricsUpdaters {
 		updater()
 	}
+}
+
+// scrapeBudget returns how long metric collection may run before the handler gives
+// up and serves the last known values. It honors Prometheus'
+// X-Prometheus-Scrape-Timeout-Seconds header (minus slack) when present, otherwise
+// falls back to metricsScrapeBudgetFallback.
+func scrapeBudget(r *http.Request) time.Duration {
+	if v := r.Header.Get("X-Prometheus-Scrape-Timeout-Seconds"); v != "" {
+		if secs, err := strconv.ParseFloat(v, 64); err == nil && secs > 0 {
+			// Honor the advertised deadline minus slack, never the larger fallback.
+			// If that leaves no room, use the full advertised value rather than skip
+			// collection entirely.
+			advertised := time.Duration(secs * float64(time.Second))
+			if budget := advertised - metricsScrapeBudgetSlack; budget > 0 {
+				return budget
+			}
+			return advertised
+		}
+	}
+	// No header, or an unparseable/non-positive one: fall back.
+	return metricsScrapeBudgetFallback
 }
 
 // MetricServerOptions defines the configuration options for the new MetricServer
@@ -215,13 +250,13 @@ func (s *MetricServer) updateOvnControllerMetrics() {
 		klog.Errorf("Setting ovn controller config metrics failed: %s", err.Error())
 	}
 
+	coverageShowMetricsUpdate(ovnController)
+	stopwatchShowMetricsUpdate(ovnController)
+
 	// Update SBDB connection status metric
 	updateSBDBConnectionMetric(func(args ...string) (string, string, error) {
 		return util.RunOVNControllerAppCtlWithTimeout(metricsAppctlTimeout, args...)
 	})
-
-	coverageShowMetricsUpdate(ovnController)
-	stopwatchShowMetricsUpdate(ovnController)
 }
 
 // updateOvnNorthdMetrics updates the OVN Northd metrics
@@ -245,25 +280,52 @@ func (s *MetricServer) updateOvnDBMetrics() {
 	}
 }
 
-// handleMetrics handles the /metrics request
+// handleMetrics refreshes the OVS/OVN metrics before they are emitted. Collection
+// execs ovs-appctl/ovn-appctl subprocesses (each bounded by metricsAppctlTimeout)
+// in a separate goroutine under a scrape budget: if the daemons are slow and it
+// overruns, the handler returns and promhttp serves the last known values, keeping
+// the scrape under Prometheus' scrape_timeout (up stays 1). The goroutine keeps
+// running to refresh the registry for the next scrape.
 func (s *MetricServer) handleMetrics(r *http.Request) {
 	klog.V(5).Infof("MetricServer starts to handle metrics request from %s", r.RemoteAddr)
 
-	if s.opts.EnableOVSMetrics {
-		s.updateOvsMetrics()
-	}
-	if s.opts.EnableOVNDBMetrics {
-		s.updateOvnDBMetrics()
-	}
-	if s.opts.EnableOVNControllerMetrics {
-		s.updateOvnControllerMetrics()
-	}
-	if s.opts.EnableOVNNorthdMetrics {
-		s.updateOvnNorthdMetrics()
-	}
+	ctx, cancel := context.WithTimeout(r.Context(), scrapeBudget(r))
+	defer cancel()
 
-	// Run all registered metric updaters
-	runRegisteredMetricsUpdaters()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// Nothing recovers this detached goroutine, so recover here: a panic in a
+		// metric path must only fail this scrape, not crash ovnkube-node.
+		defer func() {
+			if r := recover(); r != nil {
+				klog.Errorf("MetricServer recovered from panic during metric collection: %v\n%s", r, debug.Stack())
+			}
+		}()
+
+		if s.opts.EnableOVSMetrics {
+			s.updateOvsMetrics()
+		}
+		if s.opts.EnableOVNDBMetrics {
+			s.updateOvnDBMetrics()
+		}
+		if s.opts.EnableOVNControllerMetrics {
+			s.updateOvnControllerMetrics()
+		}
+		if s.opts.EnableOVNNorthdMetrics {
+			s.updateOvnNorthdMetrics()
+		}
+
+		// Run all registered metric updaters within the same scrape budget.
+		runRegisteredMetricsUpdaters()
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		klog.Errorf("MetricServer metric collection exceeded the scrape budget for request from %s; "+
+			"serving last known values (%v)", r.RemoteAddr, ctx.Err())
+	}
 }
 
 // Run runs the metrics server and blocks until graceful shutdown
