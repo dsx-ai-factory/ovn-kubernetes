@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 	"golang.org/x/time/rate"
 
 	corev1 "k8s.io/api/core/v1"
@@ -1037,7 +1038,17 @@ func (d netlinkHostInterfaceDiscoverer) Discover(hostInterfaceName string) (*hos
 				hostInterfaceName, err),
 		)
 	}
-	routes, err := util.GetNetLinkOps().RouteList(link, netlink.FAMILY_ALL)
+	// A dump filtered by output interface alone reports main table routes
+	// only, and the uplink interface is enslaved to the network's VRF once a
+	// CUDN uses it, which moves all of its routes, the default route
+	// included, into the VRF's table. Ask for the table that actually holds
+	// them.
+	routeFilter := &netlink.Route{
+		LinkIndex: link.Attrs().Index,
+		Table:     hostInterfaceRouteTable(link),
+	}
+	routes, err := util.GetNetLinkOps().RouteListFiltered(netlink.FAMILY_ALL, routeFilter,
+		netlink.RT_FILTER_OIF|netlink.RT_FILTER_TABLE)
 	if err != nil {
 		return nil, newDiscoveryError(
 			uplinkv1alpha1.UplinkStateReasonGatewayInfoUnavailable,
@@ -1083,6 +1094,16 @@ func discoverHostFunction(hostInterfaceName string) *uplinkv1alpha1.HostFunction
 	klog.V(5).Infof("No host function for host interface %s: not a VF (%v), not a PF (%v)",
 		hostInterfaceName, vfErr, pfErr)
 	return nil
+}
+
+// hostInterfaceRouteTable returns the routing table holding the routes of the
+// uplink host interface: the table of the VRF it is enslaved to, or the main
+// table when it is not enslaved.
+func hostInterfaceRouteTable(link netlink.Link) int {
+	if slave, ok := link.Attrs().Slave.(*netlink.VrfSlave); ok && slave.Table != 0 {
+		return int(slave.Table)
+	}
+	return unix.RT_TABLE_MAIN
 }
 
 func isDefaultRoute(route netlink.Route) bool {
