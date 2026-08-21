@@ -55,7 +55,7 @@ ubuntu-nv-image: NV_UBUNTU_BASE_IMAGE ?= artifactory.nvidia.com/sw-ipp-lws2-inte
 ubuntu-nv-image:
 	cd $(abspath $(CURDIR)/../..) && ${OCI_BIN} build \
 		-t ovn-kube-ubuntu$(IMAGE_ARCH) \
-		--build-arg ARTIFACTORY_CERT=${NV_ARTIFACTORY_CERT} \
+		--secret id=artifactory_cert,env=NV_ARTIFACTORY_CERT \
 		-f dist/images/Dockerfile.ubuntu.nv \
 		--build-arg OVN_VER=${OVN_VER} \
 		--build-arg OVS_VER=${OVS_VER} \
