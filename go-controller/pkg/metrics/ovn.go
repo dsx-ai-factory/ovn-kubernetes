@@ -116,7 +116,7 @@ var (
 )
 
 func getOvnControllerVersionInfo() {
-	stdout, _, err := util.RunOVNControllerAppCtl("version")
+	stdout, _, err := util.RunOVNControllerAppCtlWithTimeout(metricsAppctlTimeout, "version")
 	if err != nil {
 		return
 	}

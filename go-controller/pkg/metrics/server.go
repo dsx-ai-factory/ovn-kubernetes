@@ -187,15 +187,17 @@ func (s *MetricServer) registerMetrics() {
 func (s *MetricServer) updateOvsMetrics() {
 	getOvsVersionInfo(s.opts.NodeName, s.opts.OVSDBClient)
 
-	updateOvsDatapathMetrics(util.RunOvsVswitchdAppCtl)
+	ovsVswitchdAppctl := func(args ...string) (string, string, error) {
+		return util.RunOvsVswitchdAppCtlWithTimeout(metricsAppctlTimeout, args...)
+	}
+	updateOvsDatapathMetrics(ovsVswitchdAppctl)
 
 	// Reset and update ovs bridge/interface metrics
 	resetOvsBridgeMetrics()
 	if err := updateOvsBridgeMetrics(s.opts.OVSDBClient, util.RunOVSOfctl); err != nil {
 		klog.Errorf("Updating ovs bridge metrics failed: %s", err.Error())
 	}
-
-	if err := setOvsMemoryMetrics(util.RunOvsVswitchdAppCtl); err != nil {
+	if err := setOvsMemoryMetrics(ovsVswitchdAppctl); err != nil {
 		klog.Errorf("Updating ovs memory metrics failed: %s", err.Error())
 	}
 
@@ -214,7 +216,9 @@ func (s *MetricServer) updateOvnControllerMetrics() {
 	}
 
 	// Update SBDB connection status metric
-	updateSBDBConnectionMetric(util.RunOVNControllerAppCtl)
+	updateSBDBConnectionMetric(func(args ...string) (string, string, error) {
+		return util.RunOVNControllerAppCtlWithTimeout(metricsAppctlTimeout, args...)
+	})
 
 	coverageShowMetricsUpdate(ovnController)
 	stopwatchShowMetricsUpdate(ovnController)

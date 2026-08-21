@@ -29,7 +29,7 @@ var (
 )
 
 func getOvnNorthdVersionInfo() {
-	stdout, _, err := util.RunOVNNorthAppCtl("version")
+	stdout, _, err := util.RunOVNNorthAppCtlWithTimeout(metricsAppctlTimeout, "version")
 	if err != nil {
 		return
 	}
@@ -47,7 +47,7 @@ func getOvnNorthdVersionInfo() {
 }
 
 func getOvnNorthdConnectionStatusInfo(command string) float64 {
-	stdout, stderr, err := util.RunOVNNorthAppCtl(command)
+	stdout, stderr, err := util.RunOVNNorthAppCtlWithTimeout(metricsAppctlTimeout, command)
 	if err != nil {
 		klog.Errorf("Failed to get ovn-northd %s stderr(%s): (%v)", command, stderr, err)
 		return -1
@@ -142,7 +142,7 @@ func RegisterOvnNorthdMetrics(ovnRegistry prometheus.Registerer) {
 			Name:      "status",
 			Help:      "Specifies whether this instance of ovn-northd is standby(0) or active(1) or paused(2).",
 		}, func() float64 {
-			stdout, stderr, err := util.RunOVNNorthAppCtl("status")
+			stdout, stderr, err := util.RunOVNNorthAppCtlWithTimeout(metricsAppctlTimeout, "status")
 			if err != nil {
 				klog.Errorf("Failed to get ovn-northd status "+
 					"stderr(%s) :(%v)", stderr, err)
