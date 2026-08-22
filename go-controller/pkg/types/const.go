@@ -162,6 +162,13 @@ const (
 	// LabelUserDefinedServiceName label key used in mirrored EndpointSlices that contains the service name matching the EndpointSlice
 	LabelUserDefinedServiceName = "k8s.ovn.org/service-name"
 
+	// IFAProtOVNK is the IFA_PROTO value used to mark addresses as
+	// OVN-Kubernetes-managed. Value 85 is used instead of RTPROT_OVN (84)
+	// so we do not reuse a protocol identifier already owned by OVN.
+	// IFA_PROTO requires Linux kernel 5.18+; on older kernels the
+	// attribute is silently ignored.
+	IFAProtOVNK = 85
+
 	// Packet marking
 	EgressIPNodeConnectionMark         = "1008"
 	EgressIPReplyTrafficConnectionMark = 42
@@ -327,8 +334,6 @@ const (
 	// db index keys
 	// PrimaryIDKey is used as a primary client index
 	PrimaryIDKey = OvnK8sPrefix + "/id"
-
-	OvnDefaultZone = "global"
 
 	// EgressService "reserved" hosts - when set on an EgressService they have a special meaning
 

@@ -238,7 +238,6 @@ func NewLayer3UserDefinedNetworkController(
 				sharedNetpolPortGroups:      syncmap.NewSyncMap[*defaultDenyPortGroups](),
 				stopChan:                    stopChan,
 				wg:                          &sync.WaitGroup{},
-				localZoneNodes:              &sync.Map{},
 				cancelableCtx:               util.NewCancelableContext(),
 				networkManager:              networkManager,
 				routeImportManager:          routeImportManager,
@@ -589,22 +588,18 @@ func (oc *Layer3UserDefinedNetworkController) run() error {
 }
 
 func (oc *Layer3UserDefinedNetworkController) waitForLocalZoneNodeLogicalSwitches() error {
-	nodes, err := oc.GetLocalZoneNodes()
+	node, err := oc.GetLocalNode()
 	if err != nil {
-		return fmt.Errorf("failed to get local zone nodes for network %s: %w", oc.GetNetworkName(), err)
+		return fmt.Errorf("failed to get local node for network %s: %w", oc.GetNetworkName(), err)
 	}
-
-	for _, node := range nodes {
-		if util.NoHostSubnet(node) {
-			continue
-		}
-		switchName := oc.GetNetworkScopedSwitchName(node.Name)
-		if _, err := oc.waitForNodeLogicalSwitch(switchName); err != nil {
-			return fmt.Errorf("failed waiting for local zone node %s logical switch %s for network %s: %w",
-				node.Name, switchName, oc.GetNetworkName(), err)
-		}
+	if util.NoHostSubnet(node) {
+		return nil
 	}
-
+	switchName := oc.GetNetworkScopedSwitchName(node.Name)
+	if _, err := oc.waitForNodeLogicalSwitch(switchName); err != nil {
+		return fmt.Errorf("failed waiting for local node %s logical switch %s for network %s: %w",
+			node.Name, switchName, oc.GetNetworkName(), err)
+	}
 	return nil
 }
 
@@ -640,7 +635,7 @@ func (oc *Layer3UserDefinedNetworkController) ReconcileNode(oldNode, newNode *co
 		return oc.deleteNodeEvent(oldNode)
 	}
 
-	if oc.isLocalZoneNode(newNode) {
+	if oc.isLocalNode(newNode) {
 		var nodeParams *nodeSyncs
 		if oldNode == nil {
 			_, nodeSync := oc.addNodeFailed.Load(newNode.Name)
@@ -668,7 +663,7 @@ func (oc *Layer3UserDefinedNetworkController) ReconcileNode(oldNode, newNode *co
 					syncReroute:           true,
 				}
 			}
-		} else if oc.isLocalZoneNode(oldNode) {
+		} else {
 			zoneClusterChanged := oc.nodeZoneClusterChanged(oldNode, newNode)
 			nodeSubnetChange := nodeSubnetChangedForUDN(oldNode, newNode, oc.GetNetworkName(), oldState, newState)
 
@@ -697,17 +692,6 @@ func (oc *Layer3UserDefinedNetworkController) ReconcileNode(oldNode, newNode *co
 				syncGw:                syncGw,
 				syncReroute:           syncReroute,
 			}
-		} else {
-			klog.Infof("Node %s moved from the remote zone %s to local zone %s.",
-				newNode.Name, util.GetNodeZone(oldNode), util.GetNodeZone(newNode))
-			nodeParams = &nodeSyncs{
-				syncNode:              true,
-				syncClusterRouterPort: true,
-				syncMgmtPort:          true,
-				syncZoneIC:            true,
-				syncGw:                true,
-				syncReroute:           true,
-			}
 		}
 		return oc.addUpdateLocalNodeEvent(newNode, nodeParams)
 	}
@@ -728,10 +712,10 @@ func (oc *Layer3UserDefinedNetworkController) ReconcileNode(oldNode, newNode *co
 	zoneClusterChanged := oc.nodeZoneClusterChanged(oldNode, newNode)
 	nodeSubnetChange := nodeSubnetChangedForUDN(oldNode, newNode, oc.GetNetworkName(), oldState, newState)
 	_, syncZoneIC := oc.syncZoneICFailed.Load(newNode.Name)
-	syncZoneIC = syncZoneIC || oc.isLocalZoneNode(oldNode) || nodeSubnetChange || zoneClusterChanged
+	syncZoneIC = syncZoneIC || nodeSubnetChange || zoneClusterChanged
 	if syncZoneIC {
 		klog.Infof("Node %s in remote zone %s needs interconnect zone sync up. Zone cluster changed: %v",
-			newNode.Name, util.GetNodeZone(newNode), zoneClusterChanged)
+			newNode.Name, newNode.Name, zoneClusterChanged)
 	}
 	return oc.addUpdateRemoteNodeEvent(newNode, syncZoneIC)
 }
@@ -812,8 +796,6 @@ func (oc *Layer3UserDefinedNetworkController) addUpdateLocalNodeEvent(node *core
 	var hostSubnets []*net.IPNet
 	var errs []error
 	var err error
-	_, _ = oc.localZoneNodes.LoadOrStore(node.Name, true)
-
 	if noHostSubnet := util.NoHostSubnet(node); noHostSubnet {
 		err := oc.lsManager.AddNoHostSubnetSwitch(oc.GetNetworkScopedName(node.Name))
 		if err != nil {
@@ -975,14 +957,6 @@ func (oc *Layer3UserDefinedNetworkController) addUpdateLocalNodeEvent(node *core
 }
 
 func (oc *Layer3UserDefinedNetworkController) addUpdateRemoteNodeEvent(node *corev1.Node, syncZoneIc bool) error {
-	_, present := oc.localZoneNodes.Load(node.Name)
-
-	if present {
-		if err := oc.deleteNodeEvent(node); err != nil {
-			return err
-		}
-	}
-
 	var err error
 	if oc.hasInterconnectTransport() && syncZoneIc {
 		if err = oc.zoneICHandler.AddRemoteZoneNode(node); err != nil {
@@ -1068,7 +1042,7 @@ func (oc *Layer3UserDefinedNetworkController) deleteNodeEvent(node *corev1.Node)
 	klog.V(5).Infof("Deleting Node %q for network %s. Removing the node from "+
 		"various caches", node.Name, oc.GetNetworkName())
 
-	if _, local := oc.localZoneNodes.Load(node.Name); local {
+	if oc.isLocalNode(node) {
 		if err := oc.deleteNode(node.Name); err != nil {
 			return err
 		}
@@ -1099,7 +1073,6 @@ func (oc *Layer3UserDefinedNetworkController) deleteNodeEvent(node *corev1.Node)
 		}
 	}
 	oc.syncZoneICFailed.Delete(node.Name)
-	oc.localZoneNodes.Delete(node.Name)
 	oc.syncEIPNodeRerouteFailed.Delete(node.Name)
 	return nil
 }
@@ -1133,10 +1106,9 @@ func (oc *Layer3UserDefinedNetworkController) syncNodes(nodes []interface{}) err
 			continue
 		}
 
-		// Add the node to the foundNodes only if it belongs to the local zone.
-		if oc.isLocalZoneNode(node) {
+		// Add the node to foundNodes only if it is managed by this controller.
+		if oc.isLocalNode(node) {
 			foundNodes.Insert(node.Name)
-			oc.localZoneNodes.Store(node.Name, true)
 			if dynamicUDN {
 				activeNodes = append(activeNodes, node)
 			}

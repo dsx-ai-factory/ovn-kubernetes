@@ -119,8 +119,7 @@ var (
 		RawClusterSubnets:             "10.128.0.0/14/23",
 		EncapToSValue:                 "none",
 		DisableCTInvFlows:             false,
-		DoSCheckInterval:              100, // in Milliseconds
-		Zone:                          types.OvnDefaultZone,
+		DoSCheckInterval:              100,   // in Milliseconds
 		ClusterSubnetsMacBindingAging: 36000, // in Seconds
 		RawUDNAllowedDefaultServices:  "default/kubernetes,kube-system/kube-dns",
 		Transport:                     "",
@@ -189,17 +188,21 @@ var (
 		UDNDeletionGracePeriod:          120 * time.Second,
 	}
 
-	// OvnNorth holds northbound OVN database client and server authentication and location details
-	OvnNorth = OvnAuthConfig{
+	// OvnNorth holds local northbound database paths.
+	OvnNorth = OvnDBConfig{
+		northbound: true,
 		RunDir:     "/var/run/ovn/",
 		DbLocation: "/etc/ovn/ovnnb_db.db",
 	}
 
-	// OvnSouth holds southbound OVN database client and server authentication and location details
-	OvnSouth = OvnAuthConfig{
+	// OvnSouth holds local southbound database paths.
+	OvnSouth = OvnDBConfig{
 		RunDir:     "/var/run/ovn/",
 		DbLocation: "/etc/ovn/ovnsb_db.db",
 	}
+
+	// EgressIPHealthCheckTLS holds TLS settings for the Egress IP gRPC health-check channel.
+	EgressIPHealthCheckTLS EgressIPHealthCheckTLSConfig
 
 	// OvsPaths holds OVS location details
 	OvsPaths = OvsPathConfig{
@@ -384,9 +387,6 @@ type DefaultConfig struct {
 	// in large scale environments. The aging configuration is to avoid such MAC binding
 	// entries accumulation over time.
 	ClusterSubnetsMacBindingAging int `gcfg:"cluster-subnets-mac-binding-aging"`
-
-	// Zone name to which ovnkube-node/ovnkube-controller belongs to
-	Zone string `gcfg:"zone"`
 
 	// RawUDNAllowedDefaultServices holds the unparsed UDNAllowedDefaultServices. Should only be
 	// used inside config module.
@@ -689,25 +689,18 @@ type GatewayConfig struct {
 	SecureManagementPort bool `gcfg:"secure-mgmt-port"`
 }
 
-// OvnAuthConfig holds client authentication and location details for
-// an OVN database (either northbound or southbound). Since central mode
-// was removed, ovnkube components always connect to a local OVN NB/SB
-// database via unix sockets; the connection address is derived from
-// RunDir + northbound and is not user-configurable.
-type OvnAuthConfig struct {
-	// TODO: PrivKey/Cert/CACert/CertCommonName are no longer used for OVN
-	// DB connection (which is unix-socket only since central mode was
-	// removed). They remain here because
-	// pkg/ovn/healthcheck/egressip_healthcheck.go reads them from
-	// config.OvnNorth as TLS material for the Egress IP gRPC health-check
-	// channel — a historical artifact of central mode where ovnkube-node
-	// already had OVN-NB SSL certs mounted. They should be moved to a
-	// dedicated NodeCert / EgressIPTLS struct in a follow-up PR.
+// EgressIPHealthCheckTLSConfig holds TLS settings for the Egress IP gRPC
+// health-check channel.
+type EgressIPHealthCheckTLSConfig struct {
 	PrivKey        string `gcfg:"client-privkey"`
 	Cert           string `gcfg:"client-cert"`
 	CACert         string `gcfg:"client-cacert"`
 	CertCommonName string `gcfg:"cert-common-name"`
+}
 
+// OvnDBConfig holds local OVN database paths. OVN databases are accessed
+// through Unix sockets, whose addresses are derived from RunDir.
+type OvnDBConfig struct {
 	northbound bool
 	// RunDir is OVN run directory.
 	RunDir string `gcfg:"run-dir"`
@@ -715,6 +708,15 @@ type OvnAuthConfig struct {
 	DbLocation string `gcfg:"db-location"`
 
 	exec kexec.Interface
+}
+
+// legacyOvnNorthConfig preserves the historical [ovnnorth] config-file layout
+// as a legacy input. New configurations should use
+// [egressip-healthcheck-tls] for Egress IP health-check TLS settings. Runtime
+// state keeps the concerns separate.
+type legacyOvnNorthConfig struct {
+	OvnDBConfig
+	EgressIPHealthCheckTLSConfig
 }
 
 // OvsPathConfig holds OVS location details.
@@ -816,47 +818,49 @@ type ManagedBGPConfig struct {
 
 // Config is used to read the structured config file and to cache config in testcases
 type config struct {
-	Default              DefaultConfig
-	Logging              LoggingConfig
-	Monitoring           MonitoringConfig
-	IPFIX                IPFIXConfig
-	CNI                  CNIConfig
-	OVNKubernetesFeature OVNKubernetesFeatureConfig
-	Kubernetes           KubernetesConfig
-	Metrics              MetricsConfig
-	TLS                  TLSConfig
-	OvnNorth             OvnAuthConfig
-	OvnSouth             OvnAuthConfig
-	Gateway              GatewayConfig
-	ClusterMgrHA         HAConfig
-	HybridOverlay        HybridOverlayConfig
-	OvnKubeNode          OvnKubeNodeConfig
-	ClusterManager       ClusterManagerConfig
-	OvsPaths             OvsPathConfig
-	NoOverlay            NoOverlayConfig  `gcfg:"no-overlay"`
-	ManagedBGP           ManagedBGPConfig `gcfg:"bgp-managed"`
+	Default                DefaultConfig
+	Logging                LoggingConfig
+	Monitoring             MonitoringConfig
+	IPFIX                  IPFIXConfig
+	CNI                    CNIConfig
+	OVNKubernetesFeature   OVNKubernetesFeatureConfig
+	Kubernetes             KubernetesConfig
+	Metrics                MetricsConfig
+	TLS                    TLSConfig
+	EgressIPHealthCheckTLS EgressIPHealthCheckTLSConfig `gcfg:"egressip-healthcheck-tls"`
+	OvnNorth               legacyOvnNorthConfig
+	OvnSouth               OvnDBConfig
+	Gateway                GatewayConfig
+	ClusterMgrHA           HAConfig
+	HybridOverlay          HybridOverlayConfig
+	OvnKubeNode            OvnKubeNodeConfig
+	ClusterManager         ClusterManagerConfig
+	OvsPaths               OvsPathConfig
+	NoOverlay              NoOverlayConfig  `gcfg:"no-overlay"`
+	ManagedBGP             ManagedBGPConfig `gcfg:"bgp-managed"`
 }
 
 var (
-	savedDefault              DefaultConfig
-	savedLogging              LoggingConfig
-	savedMonitoring           MonitoringConfig
-	savedIPFIX                IPFIXConfig
-	savedCNI                  CNIConfig
-	savedOVNKubernetesFeature OVNKubernetesFeatureConfig
-	savedKubernetes           KubernetesConfig
-	savedMetrics              MetricsConfig
-	savedTLS                  TLSConfig
-	savedOvnNorth             OvnAuthConfig
-	savedOvnSouth             OvnAuthConfig
-	savedGateway              GatewayConfig
-	savedClusterMgrHA         HAConfig
-	savedHybridOverlay        HybridOverlayConfig
-	savedOvnKubeNode          OvnKubeNodeConfig
-	savedClusterManager       ClusterManagerConfig
-	savedOvsPaths             OvsPathConfig
-	savedNoOverlay            NoOverlayConfig
-	savedManagedBGP           ManagedBGPConfig
+	savedDefault                DefaultConfig
+	savedLogging                LoggingConfig
+	savedMonitoring             MonitoringConfig
+	savedIPFIX                  IPFIXConfig
+	savedCNI                    CNIConfig
+	savedOVNKubernetesFeature   OVNKubernetesFeatureConfig
+	savedKubernetes             KubernetesConfig
+	savedMetrics                MetricsConfig
+	savedTLS                    TLSConfig
+	savedOvnNorth               OvnDBConfig
+	savedOvnSouth               OvnDBConfig
+	savedEgressIPHealthCheckTLS EgressIPHealthCheckTLSConfig
+	savedGateway                GatewayConfig
+	savedClusterMgrHA           HAConfig
+	savedHybridOverlay          HybridOverlayConfig
+	savedOvnKubeNode            OvnKubeNodeConfig
+	savedClusterManager         ClusterManagerConfig
+	savedOvsPaths               OvsPathConfig
+	savedNoOverlay              NoOverlayConfig
+	savedManagedBGP             ManagedBGPConfig
 
 	// legacy service-cluster-ip-range CLI option
 	serviceClusterIPRange string
@@ -889,6 +893,7 @@ func init() {
 	savedTLS = TLS
 	savedOvnNorth = OvnNorth
 	savedOvnSouth = OvnSouth
+	savedEgressIPHealthCheckTLS = EgressIPHealthCheckTLS
 	savedGateway = Gateway
 	savedClusterMgrHA = ClusterMgrHA
 	savedHybridOverlay = HybridOverlay
@@ -923,6 +928,7 @@ func PrepareTestConfig() error {
 	TLS = savedTLS
 	OvnNorth = savedOvnNorth
 	OvnSouth = savedOvnSouth
+	EgressIPHealthCheckTLS = savedEgressIPHealthCheckTLS
 	Gateway = savedGateway
 	HybridOverlay = savedHybridOverlay
 	OvnKubeNode = savedOvnKubeNode
@@ -1027,7 +1033,7 @@ var CommonFlags = []cli.Flag{
 	},
 	&cli.StringFlag{
 		Name:  "init-ovnkube-controller",
-		Usage: "initialize ovnkube-controller (but not cluster-manager), requires the hostname as argument",
+		Usage: "initialize ovnkube-controller (but not cluster-manager), requires the Kubernetes node name as argument",
 	},
 	&cli.StringFlag{
 		Name:  "init-node",
@@ -1248,12 +1254,6 @@ var CommonFlags = []cli.Flag{
 		Usage:       "Interval in milliseconds to check if any Pod is a source of DoS attack",
 		Destination: &cliConfig.Default.DoSCheckInterval,
 		Value:       Default.DoSCheckInterval,
-	},
-	&cli.StringFlag{
-		Name:        "zone",
-		Usage:       "zone name to which ovnkube-node/ovnkube-controller belongs to",
-		Value:       Default.Zone,
-		Destination: &cliConfig.Default.Zone,
 	},
 	&cli.IntFlag{
 		Name:        "cluster-subnets-mac-binding-aging",
@@ -1729,26 +1729,23 @@ var TLSFlags = []cli.Flag{
 	},
 }
 
-// OvnNBFlags capture OVN northbound database options. The cert/key flags
-// below are no longer used for OVN DB connection (which is unix-socket only)
-// but their values are still consumed by the Egress IP gRPC health-check
-// channel via pkg/ovn/healthcheck/egressip_healthcheck.go reading
-// config.OvnNorth — see TODO on OvnAuthConfig.
-var OvnNBFlags = []cli.Flag{
+// EgressIPHealthCheckTLSFlags capture Egress IP gRPC health-check TLS options.
+// Their nb-* names are retained for command-line compatibility.
+var EgressIPHealthCheckTLSFlags = []cli.Flag{
 	&cli.StringFlag{
 		Name:        "nb-client-privkey",
 		Usage:       "Private key used by node↔node Egress IP gRPC health-check channel (historical name).",
-		Destination: &cliConfig.OvnNorth.PrivKey,
+		Destination: &cliConfig.EgressIPHealthCheckTLS.PrivKey,
 	},
 	&cli.StringFlag{
 		Name:        "nb-client-cert",
 		Usage:       "Client certificate used by node↔node Egress IP gRPC health-check channel (historical name).",
-		Destination: &cliConfig.OvnNorth.Cert,
+		Destination: &cliConfig.EgressIPHealthCheckTLS.Cert,
 	},
 	&cli.StringFlag{
 		Name:        "nb-client-cacert",
 		Usage:       "CA certificate used by node↔node Egress IP gRPC health-check channel (historical name).",
-		Destination: &cliConfig.OvnNorth.CACert,
+		Destination: &cliConfig.EgressIPHealthCheckTLS.CACert,
 	},
 	&cli.StringFlag{
 		Name: "nb-cert-common-name",
@@ -1756,18 +1753,22 @@ var OvnNBFlags = []cli.Flag{
 			"the Egress IP gRPC health-check channel. In cases where the certificate doesn't have " +
 			"any SAN Extensions, this parameter should match the DNS(hostname) of the server. In " +
 			"case the certificate has a SAN extension, this parameter should match one of the SAN fields.",
-		Destination: &cliConfig.OvnNorth.CertCommonName,
+		Destination: &cliConfig.EgressIPHealthCheckTLS.CertCommonName,
 	},
+}
+
+// OvnNBFlags capture OVN northbound database options.
+var OvnNBFlags = []cli.Flag{
 	&cli.StringFlag{
 		Name:        "nb-run-dir",
 		Usage:       "OVN northbound run directory path",
-		Destination: &cliConfig.OvnNorth.RunDir,
+		Destination: &cliConfig.OvnNorth.OvnDBConfig.RunDir,
 		Value:       OvnNorth.RunDir,
 	},
 	&cli.StringFlag{
 		Name:        "nb-db-location",
 		Usage:       "OVN northbound database file location",
-		Destination: &cliConfig.OvnNorth.DbLocation,
+		Destination: &cliConfig.OvnNorth.OvnDBConfig.DbLocation,
 		Value:       OvnNorth.DbLocation,
 	},
 }
@@ -2110,6 +2111,7 @@ func GetFlags(customFlags []cli.Flag) []cli.Flag {
 	flags = append(flags, K8sFlags...)
 	flags = append(flags, MetricsFlags...)
 	flags = append(flags, TLSFlags...)
+	flags = append(flags, EgressIPHealthCheckTLSFlags...)
 	flags = append(flags, OvnNBFlags...)
 	flags = append(flags, OvnSBFlags...)
 	flags = append(flags, OVNGatewayFlags...)
@@ -2176,6 +2178,18 @@ func getOVSExternalID(exec kexec.Interface, name string) string {
 		return ""
 	}
 	return out
+}
+
+func setOVSExternalID(exec kexec.Interface, key, value string) error {
+	out, err := runOVSVsctl(exec,
+		"set",
+		"Open_vSwitch",
+		".",
+		fmt.Sprintf("external_ids:%s=%s", key, value))
+	if err != nil {
+		return fmt.Errorf("error setting OVS external ID '%s=%s': %v\n  %q", key, value, err, out)
+	}
+	return nil
 }
 
 // reconcileKubernetesAuthFields ensures that if a config stage provides Token/TokenFile
@@ -2833,10 +2847,6 @@ func buildDefaultConfig(cli, file *config) error {
 		return fmt.Errorf("cluster subnet is required")
 	}
 
-	if Default.Zone == "" {
-		Default.Zone = types.OvnDefaultZone
-	}
-
 	return nil
 }
 
@@ -2978,16 +2988,20 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		CNI:                  savedCNI,
 		OVNKubernetesFeature: savedOVNKubernetesFeature,
 		Kubernetes:           savedKubernetes,
-		OvnNorth:             savedOvnNorth,
-		OvnSouth:             savedOvnSouth,
-		Gateway:              savedGateway,
-		ClusterMgrHA:         savedClusterMgrHA,
-		HybridOverlay:        savedHybridOverlay,
-		OvnKubeNode:          savedOvnKubeNode,
-		ClusterManager:       savedClusterManager,
-		OvsPaths:             savedOvsPaths,
-		NoOverlay:            savedNoOverlay,
-		ManagedBGP:           savedManagedBGP,
+		OvnNorth: legacyOvnNorthConfig{
+			OvnDBConfig:                  savedOvnNorth,
+			EgressIPHealthCheckTLSConfig: savedEgressIPHealthCheckTLS,
+		},
+		OvnSouth:               savedOvnSouth,
+		EgressIPHealthCheckTLS: savedEgressIPHealthCheckTLS,
+		Gateway:                savedGateway,
+		ClusterMgrHA:           savedClusterMgrHA,
+		HybridOverlay:          savedHybridOverlay,
+		OvnKubeNode:            savedOvnKubeNode,
+		ClusterManager:         savedClusterManager,
+		OvsPaths:               savedOvsPaths,
+		NoOverlay:              savedNoOverlay,
+		ManagedBGP:             savedManagedBGP,
 	}
 
 	configFile, configFileIsDefault = getConfigFilePath(ctx)
@@ -3121,17 +3135,27 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
-	tmpAuth, err := buildOvnAuth(exec, true, &cliConfig.OvnNorth, &cfg.OvnNorth)
+	tmpDBConfig, err := buildOvnDBConfig(exec, true, &cliConfig.OvnNorth.OvnDBConfig, &cfg.OvnNorth.OvnDBConfig)
 	if err != nil {
 		return "", err
 	}
-	OvnNorth = *tmpAuth
+	OvnNorth = *tmpDBConfig
 
-	tmpAuth, err = buildOvnAuth(exec, false, &cliConfig.OvnSouth, &cfg.OvnSouth)
+	tmpDBConfig, err = buildOvnDBConfig(exec, false, &cliConfig.OvnSouth, &cfg.OvnSouth)
 	if err != nil {
 		return "", err
 	}
-	OvnSouth = *tmpAuth
+	OvnSouth = *tmpDBConfig
+
+	tlsConfig, err := buildEgressIPHealthCheckTLSConfig(
+		&cfg.OvnNorth.EgressIPHealthCheckTLSConfig,
+		&cfg.EgressIPHealthCheckTLS,
+		&cliConfig.EgressIPHealthCheckTLS,
+	)
+	if err != nil {
+		return "", err
+	}
+	EgressIPHealthCheckTLS = *tlsConfig
 
 	if err := completeConfig(); err != nil {
 		return "", err
@@ -3153,6 +3177,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	klog.V(5).Infof("Metrics config: %+v", Metrics)
 	klog.V(5).Infof("OVN North config: %+v", OvnNorth)
 	klog.V(5).Infof("OVN South config: %+v", OvnSouth)
+	klog.V(5).Infof("Egress IP health-check TLS config: %+v", EgressIPHealthCheckTLS)
 	klog.V(5).Infof("Hybrid Overlay config: %+v", HybridOverlay)
 	klog.V(5).Infof("Ovnkube Node config: %+v", OvnKubeNode)
 	klog.V(5).Infof("Ovnkube Feature config: %+v", OVNKubernetesFeature)
@@ -3213,43 +3238,67 @@ func pathExists(path string) bool {
 	return true
 }
 
-// buildOvnAuth returns an OvnAuthConfig describing how to connect to a local
+// buildOvnDBConfig returns an OvnDBConfig describing how to connect to a local
 // OVN database via unix socket.
-func buildOvnAuth(exec kexec.Interface, northbound bool, cliAuth, confAuth *OvnAuthConfig) (*OvnAuthConfig, error) {
-	var defaultAuth *OvnAuthConfig
+func buildOvnDBConfig(exec kexec.Interface, northbound bool, cliDB, fileDB *OvnDBConfig) (*OvnDBConfig, error) {
+	var defaultConfig *OvnDBConfig
 	if northbound {
-		defaultAuth = &savedOvnNorth
+		defaultConfig = &savedOvnNorth
 	} else {
-		defaultAuth = &savedOvnSouth
+		defaultConfig = &savedOvnSouth
 	}
 
-	auth := &OvnAuthConfig{
+	dbConfig := &OvnDBConfig{
 		northbound: northbound,
 		exec:       exec,
-		RunDir:     defaultAuth.RunDir,
-		DbLocation: defaultAuth.DbLocation,
+		RunDir:     defaultConfig.RunDir,
+		DbLocation: defaultConfig.DbLocation,
 	}
 
-	// Apply config-file then CLI overrides for RunDir / DbLocation
-	// and the Egress IP gRPC cert/key fields (see TODO on OvnAuthConfig).
-	if err := overrideFields(auth, confAuth, defaultAuth); err != nil {
+	if err := overrideFields(dbConfig, fileDB, defaultConfig); err != nil {
 		return nil, err
 	}
-	if err := overrideFields(auth, cliAuth, defaultAuth); err != nil {
+	if err := overrideFields(dbConfig, cliDB, defaultConfig); err != nil {
 		return nil, err
 	}
 
-	return auth, nil
+	return dbConfig, nil
+}
+
+// buildEgressIPHealthCheckTLSConfig merges the deprecated [ovnnorth] TLS
+// fields, the canonical [egressip-healthcheck-tls] section, and command-line
+// flags in increasing order of precedence.
+func buildEgressIPHealthCheckTLSConfig(legacyFileTLS, fileTLS, cliTLS *EgressIPHealthCheckTLSConfig) (*EgressIPHealthCheckTLSConfig, error) {
+	tlsConfig := savedEgressIPHealthCheckTLS
+	if err := overrideFields(&tlsConfig, legacyFileTLS, &savedEgressIPHealthCheckTLS); err != nil {
+		return nil, err
+	}
+	if err := overrideFields(&tlsConfig, fileTLS, &savedEgressIPHealthCheckTLS); err != nil {
+		return nil, err
+	}
+	if err := overrideFields(&tlsConfig, cliTLS, &savedEgressIPHealthCheckTLS); err != nil {
+		return nil, err
+	}
+	return &tlsConfig, nil
 }
 
 // GetURL returns the local unix-socket URL of the OVN northbound or southbound
 // database, derived from RunDir.
-func (a *OvnAuthConfig) GetURL() string {
+func (a *OvnDBConfig) GetURL() string {
 	direction := "sb"
 	if a.northbound {
 		direction = "nb"
 	}
 	return fmt.Sprintf("unix:%s", filepath.Join(a.RunDir, fmt.Sprintf("ovn%s_db.sock", direction)))
+}
+
+// SetOVNRemote tells ovn-controller where to find the local SB database via
+// the "ovn-remote" external ID.
+func (a *OvnDBConfig) SetOVNRemote() error {
+	if a.northbound {
+		return fmt.Errorf("cannot configure ovn-controller with the northbound database")
+	}
+	return setOVSExternalID(a.exec, "ovn-remote", "\""+a.GetURL()+"\"")
 }
 
 // ovnKubeNodeModeSupported validates the provided mode is supported by ovnkube node

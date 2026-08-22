@@ -61,7 +61,7 @@ var _ = ginkgo.Describe("AdminPBR", func() {
 		app = cli.NewApp()
 		app.Name = "adminpbr"
 		app.Flags = config.Flags
-		fakeOvn = NewFakeOVN(true)
+		fakeOvn = NewFakeOVN(true, node1Name)
 
 		var err error
 		nad, err = newNetworkAttachmentDefinition(

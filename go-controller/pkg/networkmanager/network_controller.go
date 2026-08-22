@@ -41,11 +41,10 @@ const (
 	defaultNetworkReconcilerThreadiness = 5
 )
 
-func newNetworkController(name, zone, node string, cm ControllerManager, wf watchFactory) *networkController {
+func newNetworkController(name, node string, cm ControllerManager, wf watchFactory) *networkController {
 	nc := &networkController{
 		name:                   fmt.Sprintf("[%s network controller]", name),
 		node:                   node,
-		zone:                   zone,
 		cm:                     cm,
 		networks:               map[string]util.MutableNetInfo{},
 		networksByID:           map[int]string{},
@@ -53,7 +52,6 @@ func newNetworkController(name, zone, node string, cm ControllerManager, wf watc
 		pendingNetworkRefNodes: map[string]sets.Set[string]{},
 		networkRefStates:       map[string]map[string]bool{},
 
-		enableInterConnect:      zone != "",
 		perNetworkConnectToNADs: map[string]*interConnectState{},
 	}
 
@@ -117,7 +115,6 @@ type networkController struct {
 	sync.RWMutex
 
 	name string
-	zone string
 	node string
 
 	nadLister  nadlisters.NetworkAttachmentDefinitionLister
@@ -133,8 +130,6 @@ type networkController struct {
 	networksByID       map[int]string // reverse index: network ID -> network name for O(1) lookup
 	networkControllers map[string]*networkControllerState
 
-	// network inter-connect needed
-	enableInterConnect bool
 	// maps the networkName of the inter-connect state this network connects to.
 	// For every such networkName, we capture the interconnection state.
 	// key is network name of the active side (layer2 network),
@@ -672,18 +667,12 @@ func (c *networkController) hasRouteAdvertisements() bool {
 }
 
 func (c *networkController) isNodeManaged(node *corev1.Node) bool {
-	switch {
-	case c.node == "" && c.zone == "":
+	if c.node == "" {
 		// cluster manager manages all nodes
 		return true
-	case util.GetNodeZone(node) == c.zone:
-		// ovnkube-controller manages nodes of its zone
-		return true
-	case node.Name == c.node:
-		// ovnkube-node only manages a specific node
-		return true
 	}
-	return false
+	// ovnkube-node only manages its own node.
+	return node.Name == c.node
 }
 
 func raNeedsUpdate(oldRA, newRA *ratypes.RouteAdvertisements) bool {
@@ -730,7 +719,7 @@ func nodeNeedsUpdate(oldNode, newNode *corev1.Node) bool {
 		return false
 	}
 
-	return !reflect.DeepEqual(oldNode.Labels, newNode.Labels) || oldNode.Annotations[util.OvnNodeZoneName] != newNode.Annotations[util.OvnNodeZoneName]
+	return !reflect.DeepEqual(oldNode.Labels, newNode.Labels)
 }
 
 func (c *networkController) getRunningNetwork(id int) string {
@@ -777,7 +766,7 @@ func (ics *interConnectState) init(nadToConnect string) {
 }
 
 func (c *networkController) activeNetworkConnectToPassiveNAD(activeController BaseNetworkController) {
-	if !c.enableInterConnect {
+	if activeController.GetNetworkInterConnectInfo() == nil {
 		return
 	}
 	nadToConnect := activeController.NADToInterConnect()
@@ -854,7 +843,7 @@ func (c *networkController) activeNetworkConnectToPassiveNAD(activeController Ba
 // already connected active network
 func (c *networkController) passiveNADConnectToActiveNetwork(passiveController BaseNetworkController, update bool) {
 	errors := []error{}
-	if !c.enableInterConnect {
+	if passiveController.GetNetworkInterConnectInfo() == nil {
 		return
 	}
 	c.Lock()
@@ -925,7 +914,7 @@ func (c *networkController) passiveNADConnectToActiveNetwork(passiveController B
 }
 
 func (c *networkController) networkDisconnect(bnc BaseNetworkController) {
-	if !c.enableInterConnect {
+	if bnc.GetNetworkInterConnectInfo() == nil {
 		return
 	}
 
