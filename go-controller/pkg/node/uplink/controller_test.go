@@ -13,6 +13,7 @@ import (
 	"github.com/k8snetworkplumbingwg/sriovnet"
 	"github.com/onsi/gomega"
 	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -75,6 +76,44 @@ func TestIsDefaultRoute(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			g := gomega.NewWithT(t)
 			g.Expect(isDefaultRoute(tt.route)).To(gomega.Equal(tt.expected))
+		})
+	}
+}
+
+func TestHostInterfaceRouteTable(t *testing.T) {
+	tests := []struct {
+		name     string
+		link     netlink.Link
+		expected int
+	}{
+		{
+			name:     "not enslaved",
+			link:     &netlink.Device{LinkAttrs: netlink.LinkAttrs{Index: 6}},
+			expected: unix.RT_TABLE_MAIN,
+		},
+		{
+			name: "enslaved to a VRF",
+			link: &netlink.Device{LinkAttrs: netlink.LinkAttrs{
+				Index: 6,
+				Slave: &netlink.VrfSlave{Table: 1015},
+			}},
+			expected: 1015,
+		},
+		{
+			name: "enslaved to a bond",
+			link: &netlink.Device{LinkAttrs: netlink.LinkAttrs{
+				Index: 6,
+				Slave: &netlink.BondSlave{},
+			}},
+			expected: unix.RT_TABLE_MAIN,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			g.Expect(hostInterfaceRouteTable(tt.link)).To(gomega.Equal(tt.expected),
+				"the uplink's default route lives in this table")
 		})
 	}
 }
@@ -1208,15 +1247,23 @@ func TestNodeUplinkControllerRecreatesDeletedState(t *testing.T) {
 }
 
 type fakeGatewayStateManager struct {
-	republished []string
-	invalidated []string
-	deleted     []string
-	err         error
+	republished   []string
+	invalidated   []string
+	deleted       []string
+	err           error
+	conditionType string
 }
 
 func (f *fakeGatewayStateManager) RepublishGatewayCondition(uplinkName string) error {
 	f.republished = append(f.republished, uplinkName)
 	return f.err
+}
+
+func (f *fakeGatewayStateManager) ConditionType() string {
+	if f.conditionType != "" {
+		return f.conditionType
+	}
+	return uplinkv1alpha1.UplinkStateConditionGatewayReady
 }
 
 func (f *fakeGatewayStateManager) InvalidateGatewayState(uplinkName string) {
@@ -1265,6 +1312,24 @@ func TestNodeUplinkControllerRepublishesGatewayCondition(t *testing.T) {
 
 		g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
 		g.Expect(publisher.republished).To(gomega.BeEmpty())
+	})
+
+	// On a DPU-host the manager publishes HostGatewayReady: a GatewayReady
+	// republished by the DPU on the recreated UplinkState must not close the
+	// gate for the manager's own condition.
+	t.Run("gates on the manager's own condition type", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		state := newUplinkState("br-blue.node-a", "br-blue", "node-a")
+		state.Status.Conditions = []metav1.Condition{{
+			Type:   uplinkv1alpha1.UplinkStateConditionGatewayReady,
+			Status: metav1.ConditionTrue,
+			Reason: uplinkv1alpha1.UplinkStateReasonGatewayConfigured,
+		}}
+		controller, publisher := newController(g, state)
+		publisher.conditionType = uplinkv1alpha1.UplinkStateConditionHostGatewayReady
+
+		g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+		g.Expect(publisher.republished).To(gomega.ConsistOf("br-blue"))
 	})
 
 	// A failed republish must fail the reconcile so it is retried.

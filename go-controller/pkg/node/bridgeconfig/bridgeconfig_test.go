@@ -10,7 +10,10 @@ import (
 	"github.com/k8snetworkplumbingwg/sriovnet"
 	"github.com/onsi/gomega"
 
+	"k8s.io/utils/ptr"
+
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	uplinkv1alpha1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/uplink/v1alpha1"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -156,12 +159,95 @@ func TestNewUnmanagedBridgeConfigurationResolvesDPUHostRepresentor(t *testing.T)
 		"physnet-blue",
 		ovntest.MustParseIPNets("172.28.0.2/24"),
 		ovntest.MustParseMAC("00:11:22:33:44:55"),
+		nil,
 	)
 	g.Expect(err).NotTo(gomega.HaveOccurred(), "the PF-backed unmanaged bridge configuration must succeed")
 	g.Expect(bridge.GetGatewayIfaceRep()).To(gomega.Equal("pfhpf0"),
 		"the PF representor must be selected as the gateway representor")
 	g.Expect(bridge.GetStaticFDBPort()).To(gomega.Equal("pfhpf0"),
 		"the static FDB entry must be pinned to the PF representor")
+	g.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc())
+}
+
+// TestNewUnmanagedBridgeConfigurationResolvesDPUHostFunctionRepresentor covers
+// the common host VF layout: the host assigns its own VF MAC, so the DPU
+// eswitch reports no function MAC for the VF representor and only the published
+// host function indices can identify it.
+func TestNewUnmanagedBridgeConfigurationResolvesDPUHostFunctionRepresentor(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	t.Cleanup(func() {
+		_ = config.PrepareTestConfig()
+		util.ResetRunner()
+	})
+	config.IPv4Mode = false
+	config.OvnKubeNode.Mode = ovntypes.NodeModeDPU
+
+	bridgeUUID := "br-hostvf0-uuid"
+	uplinkPortUUID := "eth1-port-uuid"
+	uplinkInterfaceUUID := "eth1-interface-uuid"
+	vf0PortUUID := "pf0vf0-port-uuid"
+	vf0InterfaceUUID := "pf0vf0-interface-uuid"
+	ovsClient, ovsCleanup, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{
+		OVSData: []libovsdbtest.TestData{
+			&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{bridgeUUID}},
+			&vswitchd.Bridge{
+				UUID:  bridgeUUID,
+				Name:  "br-hostvf0",
+				Ports: []string{uplinkPortUUID, vf0PortUUID},
+			},
+			&vswitchd.Port{UUID: uplinkPortUUID, Name: "eth1", Interfaces: []string{uplinkInterfaceUUID}},
+			&vswitchd.Interface{UUID: uplinkInterfaceUUID, Name: "eth1", Type: "system"},
+			&vswitchd.Port{UUID: vf0PortUUID, Name: "pf0vf0", Interfaces: []string{vf0InterfaceUUID}},
+			&vswitchd.Interface{UUID: vf0InterfaceUUID, Name: "pf0vf0", Type: "system"},
+		},
+	})
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	t.Cleanup(ovsCleanup.Cleanup)
+
+	fexec := ovntest.NewLooseCompareFakeExec()
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovs-vsctl --timeout=15 port-to-br pf0vf0",
+		Output: "br-hostvf0",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovs-vsctl --timeout=15 get interface eth1 ofport",
+		Output: "7",
+	})
+	g.Expect(util.SetExec(fexec)).To(gomega.Succeed())
+
+	sriovOps := utilmocks.NewSriovnetOps(t)
+	origSriovOps := util.GetSriovnetOps()
+	util.SetSriovnetOpsInst(sriovOps)
+	t.Cleanup(func() {
+		util.SetSriovnetOpsInst(origSriovOps)
+	})
+	sriovOps.On("GetVfRepresentorDPU", "0", "0").Return("pf0vf0", nil)
+	sriovOps.On("GetRepresentorPortFlavour", "eth1").
+		Return(sriovnet.PortFlavour(sriovnet.PORT_FLAVOUR_UNKNOWN), fmt.Errorf("not a representor"))
+	sriovOps.On("GetRepresentorPortFlavour", "pf0vf0").
+		Return(sriovnet.PortFlavour(sriovnet.PORT_FLAVOUR_PCI_VF), nil)
+	// The eswitch holds no function MAC for a host assigned VF MAC, so the
+	// representor offers no identity to verify against.
+	sriovOps.On("GetDevlinkPortFunctionMacAddress", "pf0vf0").
+		Return(nil, fmt.Errorf("devlink port function for netdev pf0vf0 does not report a usable hardware address"))
+
+	bridge, err := NewUnmanagedBridgeConfiguration(
+		ovsClient,
+		"br-hostvf0",
+		"enp4s0f0v0",
+		"node-a",
+		"physnet-blue",
+		ovntest.MustParseIPNets("172.28.0.2/24"),
+		ovntest.MustParseMAC("4e:68:cd:ae:2b:f5"),
+		&uplinkv1alpha1.HostFunction{PFID: 0, VFID: ptr.To(int32(0))},
+	)
+	g.Expect(err).NotTo(gomega.HaveOccurred(),
+		"an unreadable eswitch function MAC must not block gateway representor resolution")
+	g.Expect(bridge.GetGatewayIfaceRep()).To(gomega.Equal("pf0vf0"),
+		"the representor of the published host function must be selected as the gateway representor")
+	g.Expect(bridge.GetStaticFDBPort()).To(gomega.Equal("pf0vf0"),
+		"the static FDB entry must be pinned to the host function representor")
 	g.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc())
 }
 
@@ -240,6 +326,7 @@ func TestNewUnmanagedBridgeConfigurationResolvesDPUHostVFRepresentor(t *testing.
 		"physnet-blue",
 		ovntest.MustParseIPNets("172.28.0.2/24"),
 		ovntest.MustParseMAC("00:11:22:33:44:55"),
+		nil,
 	)
 	g.Expect(err).NotTo(gomega.HaveOccurred(), "the VF-backed unmanaged bridge configuration must succeed")
 	g.Expect(bridge.GetGatewayIfaceRep()).To(gomega.Equal("pf0vf7"),
