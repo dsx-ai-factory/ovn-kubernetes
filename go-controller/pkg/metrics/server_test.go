@@ -599,28 +599,28 @@ var (
 			{
 				OnCallMethodName: "RunCmd",
 				OnCallMethodArgs: []interface{}{mock.AnythingOfType("*mocks.Cmd"), mock.AnythingOfType("string"),
-					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "--timeout=2", "dpctl/dump-dps"},
+					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "dpctl/dump-dps"},
 				RetArgList: []interface{}{bytes.NewBuffer([]byte("system@ovs-system")), bytes.NewBuffer([]byte("")), nil},
 			},
 			// dpctl/show
 			{
 				OnCallMethodName: "RunCmd",
 				OnCallMethodArgs: []interface{}{mock.AnythingOfType("*mocks.Cmd"), mock.AnythingOfType("string"),
-					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "--timeout=2", "dpctl/show", "system@ovs-system"},
+					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "dpctl/show", "system@ovs-system"},
 				RetArgList: []interface{}{bytes.NewBuffer([]byte(dpctlShowOutput)), bytes.NewBuffer([]byte("")), nil},
 			},
 			// memory/show
 			{
 				OnCallMethodName: "RunCmd",
 				OnCallMethodArgs: []interface{}{mock.AnythingOfType("*mocks.Cmd"), mock.AnythingOfType("string"),
-					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "--timeout=2", "memory/show"},
+					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "memory/show"},
 				RetArgList: []interface{}{bytes.NewBuffer([]byte(ovsMemoryShowOutput)), bytes.NewBuffer([]byte("")), nil},
 			},
 			// coverage/show
 			{
 				OnCallMethodName: "RunCmd",
 				OnCallMethodArgs: []interface{}{mock.AnythingOfType("*mocks.Cmd"), mock.AnythingOfType("string"),
-					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "--timeout=2", "coverage/show"},
+					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "coverage/show"},
 				RetArgList: []interface{}{bytes.NewBuffer([]byte(coverageShowOutput)), bytes.NewBuffer([]byte("")), nil},
 			},
 			// ovs-ofctl dump-aggregate br-int
@@ -770,7 +770,7 @@ var (
 			{
 				OnCallMethodName: "RunCmd",
 				OnCallMethodArgs: []interface{}{mock.AnythingOfType("*mocks.Cmd"), mock.AnythingOfType("string"),
-					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "--timeout=2", "coverage/show"},
+					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "coverage/show"},
 				RetArgList: []interface{}{bytes.NewBuffer([]byte(ovnControllercoverageShowOutput)), bytes.NewBuffer([]byte("")), nil},
 			},
 			// ovs-appctl -t  /var/run/openvswitch/ovn-controller.113.ctl version
@@ -784,7 +784,7 @@ var (
 			{
 				OnCallMethodName: "RunCmd",
 				OnCallMethodArgs: []interface{}{mock.AnythingOfType("*mocks.Cmd"), mock.AnythingOfType("string"),
-					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "--timeout=2", "connection-status"},
+					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "connection-status"},
 				RetArgList: []interface{}{bytes.NewBuffer([]byte("connected")), bytes.NewBuffer([]byte("")), nil},
 			},
 		},
@@ -897,7 +897,7 @@ var (
 			{
 				OnCallMethodName: "RunCmd",
 				OnCallMethodArgs: []interface{}{mock.AnythingOfType("*mocks.Cmd"), mock.AnythingOfType("string"),
-					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "--timeout=2", "status"},
+					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "status"},
 				RetArgList: []interface{}{bytes.NewBuffer([]byte("Status: standby")), bytes.NewBuffer([]byte("")), nil},
 				CallTimes:  2,
 			},
@@ -905,7 +905,7 @@ var (
 			{
 				OnCallMethodName: "RunCmd",
 				OnCallMethodArgs: []interface{}{mock.AnythingOfType("*mocks.Cmd"), mock.AnythingOfType("string"),
-					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "--timeout=2", "sb-connection-status"},
+					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "sb-connection-status"},
 				RetArgList: []interface{}{bytes.NewBuffer([]byte("connected")), bytes.NewBuffer([]byte("")), nil},
 				CallTimes:  2,
 			},
@@ -913,7 +913,7 @@ var (
 			{
 				OnCallMethodName: "RunCmd",
 				OnCallMethodArgs: []interface{}{mock.AnythingOfType("*mocks.Cmd"), mock.AnythingOfType("string"),
-					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "--timeout=2", "nb-connection-status"},
+					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "nb-connection-status"},
 				RetArgList: []interface{}{bytes.NewBuffer([]byte("connected")), bytes.NewBuffer([]byte("")), nil},
 				CallTimes:  2,
 			},

@@ -172,9 +172,7 @@ func (s *MetricServer) updateOvsMetrics() {
 	if err := updateOvsInterfaceMetrics(s.opts.OVSDBClient); err != nil {
 		klog.Errorf("Updating ovs interface metrics failed: %s", err.Error())
 	}
-	if err := setOvsMemoryMetrics(func(args ...string) (string, string, error) {
-		return util.RunOvsVswitchdAppCtlWithTimeout(metricsAppctlTimeout, args...)
-	}); err != nil {
+	if err := setOvsMemoryMetrics(util.RunOvsVswitchdAppCtl); err != nil {
 		klog.Errorf("Updating ovs memory metrics failed: %s", err.Error())
 	}
 	if err := setOvsHwOffloadMetrics(s.opts.OVSDBClient); err != nil {
@@ -191,9 +189,7 @@ func (s *MetricServer) updateOvnControllerMetrics() {
 
 	coverageShowMetricsUpdate(ovnController)
 	stopwatchShowMetricsUpdate(ovnController)
-	updateSBDBConnectionMetric(func(args ...string) (string, string, error) {
-		return util.RunOVNControllerAppCtlWithTimeout(metricsAppctlTimeout, args...)
-	})
+	updateSBDBConnectionMetric(util.RunOVNControllerAppCtl)
 
 }
 

@@ -30,12 +30,6 @@ const (
 	ovsVswitchd   = "ovs-vswitchd"
 
 	metricsUpdateInterval = 5 * time.Minute
-
-	// metricsAppctlTimeout (seconds) bounds every ovs-appctl/ovn-appctl subprocess on
-	// the scrape path via --timeout=N. A saturated daemon (e.g. ovn-controller) would
-	// otherwise block the call and pin the scrape past Prometheus' scrape_timeout,
-	// flapping up to 0. Healthy appctls answer in ms, so a low bound sheds stuck calls.
-	metricsAppctlTimeout = 2
 )
 
 type metricDetails struct {
@@ -125,11 +119,11 @@ func getCoverageShowOutputMap(component string) (map[string]string, error) {
 	}()
 
 	if component == ovnController {
-		stdout, stderr, err = util.RunOVNControllerAppCtlWithTimeout(metricsAppctlTimeout, "coverage/show")
+		stdout, stderr, err = util.RunOVNControllerAppCtl("coverage/show")
 	} else if component == ovnNorthd {
-		stdout, stderr, err = util.RunOVNNorthAppCtlWithTimeout(metricsAppctlTimeout, "coverage/show")
+		stdout, stderr, err = util.RunOVNNorthAppCtl("coverage/show")
 	} else if component == ovsVswitchd {
-		stdout, stderr, err = util.RunOvsVswitchdAppCtlWithTimeout(metricsAppctlTimeout, "coverage/show")
+		stdout, stderr, err = util.RunOvsVswitchdAppCtl("coverage/show")
 	} else {
 		return nil, fmt.Errorf("component is unknown, and it isn't %s, %s, or %s",
 			ovnNorthd, ovnController, ovsVswitchd)
@@ -285,9 +279,9 @@ func getStopwatchShowOutputMap(component string) (map[string]stopwatchStatistics
 
 	switch component {
 	case ovnController:
-		stdout, stderr, err = util.RunOVNControllerAppCtlWithTimeout(metricsAppctlTimeout, "stopwatch/show")
+		stdout, stderr, err = util.RunOVNControllerAppCtl("stopwatch/show")
 	case ovnNorthd:
-		stdout, stderr, err = util.RunOVNNorthAppCtlWithTimeout(metricsAppctlTimeout, "stopwatch/show")
+		stdout, stderr, err = util.RunOVNNorthAppCtl("stopwatch/show")
 	default:
 		return nil, fmt.Errorf("unknown component %s for stopwatch/show", component)
 	}
