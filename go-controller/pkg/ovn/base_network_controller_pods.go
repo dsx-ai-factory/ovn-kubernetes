@@ -991,7 +991,7 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *corev1.Pod, skipIPA
 	// It is possible that IPs have already been allocated for this pod and annotation has been updated, then the last
 	// addLogicalPortToNetwork() failed afterwards. In the current retry attempt, if the input pod argument got from
 	// the informer cache still lags behind, we would fail to get the updated pod annotation. Just continue to allocate
-	// new IPs and this function will eventually fail in updatePodAnnotationWithRetry() with ErrOverridePodIPs
+	// new IPs and this function will eventually fail in updatePodAnnotationWithRetry() with ErrOverridePodAddresses
 	// when it tries to override the pod IP annotation. Newly allocated IPs will be released then.
 	if existingLSP != nil {
 		// try to get the MAC and IPs from existing OVN port first
@@ -1097,9 +1097,13 @@ func (bnc *BaseNetworkController) allocatePodAnnotationForUserDefinedNetwork(pod
 	if !bnc.allocatesPodAnnotation() {
 		podAnnotation, _ := util.UnmarshalPodAnnotation(pod.Annotations, nadKey)
 		if !util.IsValidPodAnnotation(podAnnotation) {
+			allocator := "cluster manager"
+			if bnc.IPAMType() == ovntypes.IPAMTypeDHCP {
+				allocator = "the CNI"
+			}
 			return nil, false, ovntypes.NewSuppressedError(fmt.Errorf(
-				"failed to get PodAnnotation for %s/%s/%s, cluster manager might have not allocated it yet",
-				nadKey, pod.Namespace, pod.Name))
+				"failed to get PodAnnotation for %s/%s/%s, %s might have not allocated it yet",
+				nadKey, pod.Namespace, pod.Name, allocator))
 		}
 
 		return podAnnotation, false, nil
@@ -1174,8 +1178,9 @@ func (bnc *BaseNetworkController) allocatesPodAnnotation() bool {
 		return false
 	case ovntypes.LocalnetTopology:
 		// on localnet topologies with IPAM, cluster manager allocates IPs and
-		// sets the PodAnnotation
-		return !bnc.doesNetworkRequireIPAM()
+		// sets the PodAnnotation. On DHCP IPAM the CNI writes it (the MAC at
+		// CNI ADD, the DHCP-learned IPs after the exchange).
+		return !bnc.doesNetworkRequireIPAM() && bnc.IPAMType() != ovntypes.IPAMTypeDHCP
 	}
 	return true
 }
