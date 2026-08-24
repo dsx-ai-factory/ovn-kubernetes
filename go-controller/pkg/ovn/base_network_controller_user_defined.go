@@ -380,6 +380,14 @@ func (bsnc *BaseUserDefinedNetworkController) addLogicalPortToNetworkForNAD(pod 
 	if podAnnotation == nil {
 		podAnnotation, err = util.UnmarshalPodAnnotation(pod.Annotations, nadKey)
 		if err != nil {
+			if util.IsAnnotationNotSetError(err) {
+				// The pod's own zone has not published the annotation for this
+				// NAD yet. Every other zone observes the pod at the same time
+				// and lands here too, so a routine pod start would otherwise
+				// log an error on every remote node until the annotation
+				// appears. Retry quietly instead.
+				return types.NewSuppressedError(err)
+			}
 			return err
 		}
 	}
