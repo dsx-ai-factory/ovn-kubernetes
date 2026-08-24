@@ -27,6 +27,7 @@ import (
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	ovntls "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/tls"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -213,16 +214,46 @@ func NewMetricServer(opts MetricServerOptions) *MetricServer {
 // startPprofServers starts loopback-only HTTP servers for the pprof and
 // /debug/flags/v endpoints when pprof is enabled. Binding to loopback means the
 // endpoints are reachable locally (kubectl exec/port-forward) but never from the
-// routable metrics address. Both IPv4 and IPv6 loopback are used so debugging
-// works regardless of the node's IP family; each is best-effort, so failing to
-// bind one family (e.g. ::1 on an IPv4-only node) does not affect the other.
-func (s *MetricServer) startPprofServers(stopChan <-chan struct{}) {
+// routable metrics address. A listener is started per enabled cluster IP family
+// (config.IPv4Mode -> 127.0.0.1, config.IPv6Mode -> ::1), so we don't perpetually
+// retry binding a loopback family the cluster doesn't use (e.g. ::1 on a
+// single-stack IPv4 cluster). Each listener is independent; the per-address
+// goroutines are tracked in wg so Run can wait for their shutdown to complete
+// before returning.
+func (s *MetricServer) startPprofServers(stopChan <-chan struct{}, wg *sync.WaitGroup) {
 	if !s.opts.EnablePprof {
 		return
 	}
 	port := strconv.Itoa(s.opts.PprofPort)
-	addrs := []string{net.JoinHostPort("127.0.0.1", port), net.JoinHostPort("::1", port)}
+	var addrs []string
+	if config.IPv4Mode {
+		addrs = append(addrs, net.JoinHostPort("127.0.0.1", port))
+	}
+	if config.IPv6Mode {
+		addrs = append(addrs, net.JoinHostPort("::1", port))
+	}
+	if len(addrs) == 0 {
+		// No IP family resolved from config (should not happen once config is
+		// completed); fall back to IPv4 loopback so pprof is not silently dropped.
+		klog.Warningf("No cluster IP family enabled; defaulting pprof listener to 127.0.0.1")
+		addrs = append(addrs, net.JoinHostPort("127.0.0.1", port))
+	}
 	for _, addr := range addrs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.servePprof(addr, stopChan)
+		}()
+	}
+}
+
+// servePprof runs the pprof HTTP listener on addr, retrying every 5s until
+// stopChan is closed, mirroring the retry loop the main metrics server uses in
+// Run. This keeps pprof reachable even if the loopback port is momentarily
+// unavailable (e.g. a stale holder across a restart). Each loopback address has
+// its own independent loop, so one family stopping does not affect the other.
+func (s *MetricServer) servePprof(addr string, stopChan <-chan struct{}) {
+	utilwait.Until(func() {
 		srv := &http.Server{
 			Addr:              addr,
 			Handler:           s.pprofMux,
@@ -234,21 +265,26 @@ func (s *MetricServer) startPprofServers(stopChan <-chan struct{}) {
 			// deadline would truncate those captures. ReadHeaderTimeout already
 			// bounds slow-client (Slowloris) connection holding.
 		}
+		// Buffered so the ListenAndServe goroutine can always send its result and
+		// exit, even when the select below has already taken the stopChan branch.
+		errCh := make(chan error, 1)
 		go func() {
 			klog.Infof("Starting pprof server on %s", addr)
-			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				klog.Warningf("Pprof server on %s stopped: %v", addr, err)
-			}
+			errCh <- srv.ListenAndServe()
 		}()
-		go func() {
-			<-stopChan
+		select {
+		case err := <-errCh:
+			if !errors.Is(err, http.ErrServerClosed) {
+				klog.Warningf("Pprof server on %s stopped, will retry: %v", addr, err)
+			}
+		case <-stopChan:
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			if err := srv.Shutdown(shutdownCtx); err != nil {
 				klog.Errorf("Error stopping pprof server on %s: %v", addr, err)
 			}
-		}()
-	}
+		}
+	}, 5*time.Second, stopChan)
 }
 
 // registerMetrics registers the metrics to the OVN registry
@@ -386,7 +422,8 @@ func (s *MetricServer) handleMetrics(r *http.Request) {
 
 // Run runs the metrics server and blocks until graceful shutdown
 func (s *MetricServer) Run(stopChan <-chan struct{}) {
-	s.startPprofServers(stopChan)
+	var pprofWg sync.WaitGroup
+	s.startPprofServers(stopChan, &pprofWg)
 	utilwait.Until(func() {
 		s.server = &http.Server{
 			Addr:    s.opts.BindAddress,
@@ -435,4 +472,9 @@ func (s *MetricServer) Run(stopChan <-chan struct{}) {
 			}
 		}
 	}, 5*time.Second, stopChan)
+
+	// stopChan is now closed; wait for the pprof listeners to finish shutting
+	// down so a caller's WaitGroup doesn't complete before their Shutdown
+	// returns.
+	pprofWg.Wait()
 }

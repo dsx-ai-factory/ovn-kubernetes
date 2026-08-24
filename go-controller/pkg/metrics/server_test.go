@@ -130,6 +130,14 @@ var _ = Describe("MetricServer", func() {
 		BeforeEach(func() {
 			t.opts.EnablePprof = true
 			t.opts.PprofPort = getFreePort()
+
+			// startPprofServers binds a loopback listener per enabled cluster IP
+			// family; this test exercises the IPv4 (127.0.0.1) listener.
+			savedIPv4Mode := config.IPv4Mode
+			config.IPv4Mode = true
+			DeferCleanup(func() {
+				config.IPv4Mode = savedIPv4Mode
+			})
 		})
 
 		It("should serve pprof endpoints on the loopback listener, not the metrics port", func() {
