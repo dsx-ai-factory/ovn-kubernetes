@@ -74,9 +74,15 @@ func (c *ClientSet) getPod(namespace, name string) (*corev1.Pod, error) {
 	if pod == nil {
 		// If the pod wasn't in our local cache, ask for it directly
 		pod, err = c.kclient.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
+		if err != nil {
+			// unlike the lister, the typed client returns a non-nil empty
+			// Pod alongside the error; return nil explicitly so callers
+			// that tolerate IsNotFound (cmdDel of a force-deleted pod)
+			// can rely on pod != nil
+			return nil, err
+		}
 	}
-
-	return pod, err
+	return pod, nil
 }
 
 // rateLimitedGetPod reads a Pod object from the informer cache. On a cache miss,

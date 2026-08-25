@@ -5,21 +5,17 @@
 package cni
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net"
 	"os"
 	"strings"
-	"time"
 
 	current "github.com/containernetworking/cni/pkg/types/100"
-	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
@@ -37,9 +33,6 @@ var (
 	minRsrc           = resource.MustParse("1k")
 	maxRsrc           = resource.MustParse("1P")
 	BandwidthNotFound = &notFoundError{}
-
-	netDevPollTimeout  = 5 * time.Second
-	netDevPollInterval = 200 * time.Millisecond
 )
 
 const dpuNotReadyMsg = "DPU Not Ready"
@@ -121,30 +114,6 @@ func (pr *PodRequest) checkOrUpdatePodUID(pod *corev1.Pod) error {
 	return nil
 }
 
-// getNetdevName returns the netdevice name from the passed device ID.
-func getNetdevName(deviceId string, deviceInfo v1.DeviceInfo) (string, error) {
-	var netdevices []string
-
-	retries := 0
-	err := wait.PollUntilContextTimeout(context.Background(), netDevPollInterval, netDevPollTimeout, true, func(_ context.Context) (bool, error) {
-		var localError error
-		netdevices, localError = util.GetNetdevsNameFromDeviceId(deviceId, deviceInfo)
-		retries++
-		return len(netdevices) != 0, localError
-	})
-	if err != nil {
-		return "", err
-	}
-
-	// Make sure we have 1 netdevice per pci address
-	numNetDevices := len(netdevices)
-	if numNetDevices != 1 {
-		return "", fmt.Errorf("failed to get one netdevice interface (count %d) for %s after %d retries", numNetDevices, deviceId, retries)
-	}
-	klog.V(6).Infof("Found netdev %s after %d retries", netdevices[0], retries)
-	return netdevices[0], nil
-}
-
 func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet, ovsClient client.Client) (*Response, error) {
 	namespace := pr.PodNamespace
 	podName := pr.PodName
@@ -163,6 +132,13 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet, ovsCli
 		return nil, fmt.Errorf("failed to get pod %s/%s: %v", namespace, podName, err)
 	}
 
+	// The lookup above is by namespace/name, so a same-name recreation would
+	// return the new pod. Verify the fetched pod against the runtime's UID
+	// before anything is staged or written for it.
+	if err = pr.checkOrUpdatePodUID(pod); err != nil {
+		return nil, err
+	}
+
 	// nadKey is only set for default network and primary UDN
 	if pr.nadKey == "" {
 		nadKey, err := GetCNINADKey(pod, pr.IfName, pr.nadName)
@@ -173,25 +149,70 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet, ovsCli
 	}
 
 	annotCondFn := isOvnReady
+	var dhcpAnnotation *util.PodAnnotation
+	var needsDHCPWrite bool
+	var dpuConnDetails *util.DPUConnectionDetails
+	// On localnet topologies with DHCP IPAM the pod-networks entry is
+	// written by the CNI itself, so the wait condition resolves to the
+	// locally allocated annotation.
+	if pr.CNIConf.IPAM.Type == types.IPAMTypeDHCP {
+		// unprivileged mode cannot run the DHCP exchange, so fail now,
+		// before any annotation is written
+		if config.UnprivilegedMode {
+			return nil, fmt.Errorf("dhcp IPAM mode for localnet topology is not supported in unprivileged mode")
+		}
+		dhcpAnnotation, needsDHCPWrite, err = pr.allocateDHCPMACAnnotation(pod)
+		if err != nil {
+			return nil, fmt.Errorf("failed to allocate the DHCP pod-networks entry for pod %s/%s: %w",
+				namespace, podName, err)
+		}
+		// Wait until the informer cache reflects the MAC-only entry staged
+		// above: the lease patch after the DHCP exchange rebuilds the
+		// annotation from the cache on every retry, and a stale base fails
+		// its JSON-patch test op. The wait also spans the write itself,
+		// which happens between here and the GetPodWithAnnotations call.
+		annotCondFn = func(pod *corev1.Pod, _ string) (*util.PodAnnotation, bool, error) {
+			a, err := util.UnmarshalPodAnnotation(pod.Annotations, pr.nadKey)
+			if err != nil || !util.IsValidPodAnnotation(a) ||
+				a.MAC.String() != dhcpAnnotation.MAC.String() || len(a.IPs) > 0 {
+				return nil, false, nil
+			}
+			return dhcpAnnotation, true, nil
+		}
+	}
 	netdevName := ""
 	if pr.CNIConf.DeviceID != "" {
 		var err error
 
 		if !pr.IsVFIO {
-			netdevName, err = getNetdevName(pr.CNIConf.DeviceID, pr.deviceInfo)
+			netdevName, err = getNetdevName(pr.ctx, pr.CNIConf.DeviceID, pr.deviceInfo)
 			if err != nil {
 				return nil, fmt.Errorf("failed in cmdAdd while getting Netdevice name: %w", err)
 			}
 		}
 		if config.IsModeDPUHost() {
-			// Add DPU connection-details annotation so ovnkube-node running on DPU
+			// Resolve the DPU connection details so ovnkube-node running on DPU
 			// performs the needed network plumbing.
-			if err = pr.addDPUConnectionDetailsAnnot(kubecli, clientset.podLister, netdevName); err != nil {
+			if dpuConnDetails, err = pr.allocateDPUConnectionDetails(netdevName); err != nil {
 				return nil, err
 			}
 			// Defer default-network DPU readiness gating so the primary UDN annotation/DPU readiness can progress in parallel when present.
 		}
 		// For CX5 ASAP2 VF case we rely on udev rules to restore the VF name, so skip storing the original VF name
+	}
+
+	// When a DHCP entry is staged, it and the DPU connection details
+	// are written in a single update. When a DPU-only write is needed,
+	// it goes through the DPU flow's own writer.
+	if needsDHCPWrite {
+		if err := pr.updateDHCPAndDPUAnnotations(clientset, kubecli, pod, dhcpAnnotation, dpuConnDetails); err != nil {
+			return nil, err
+		}
+	} else if dpuConnDetails != nil {
+		if err := pr.updatePodDPUConnDetailsWithRetry(kubecli, clientset.podLister, dpuConnDetails); err != nil {
+			return nil, fmt.Errorf("failed to update the DPU connection details annotation of pod %s/%s: %w",
+				pr.PodNamespace, pr.PodName, err)
+		}
 	}
 
 	// now checks for default network's DPU connection status
@@ -231,6 +252,17 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet, ovsCli
 		}
 	}
 
+	// On a DHCP IPAM network the annotation's L3 config only reports the
+	// previous sandbox's lease, which was released on DEL. Re-applying it on
+	// a repeat ADD would program a stale IP and a conflicting default route,
+	// failing the ADD forever. Clear it so the DHCP exchange below is the
+	// only source of addressing.
+	if podNADAnnotation.IPAMMode == types.IPAMTypeDHCP {
+		podInterfaceInfo.IPs = nil
+		podInterfaceInfo.Gateways = nil
+		podInterfaceInfo.Routes = nil
+	}
+
 	response := &Response{KubeAuth: kubeAuth}
 	if !config.UnprivilegedMode {
 		if ovsClient == nil && !config.IsModeDPUHost() {
@@ -252,6 +284,70 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet, ovsCli
 		response.Result, err = getCNIResult(pr, ovsClient, clientset, podInterfaceInfo)
 		if err != nil {
 			return nil, err
+		}
+
+		// If IPAM mode is DHCP, obtain IP configuration from an external DHCP
+		// server. The lease-handling behavior is selected by workload type:
+		//   - KubeVirt VMs: perform a one-shot DHCP discovery to learn the IP and
+		//     report it via the pod annotation only. The IP is never applied to the
+		//     interface (a VFIO VF loses it on rebind; a non-VFIO VM would start
+		//     KubeVirt's in-pod dnsmasq). The guest runs its own DHCP client.
+		//   - Regular pods: delegate to the DHCP CNI plugin daemon, which applies
+		//     the IP and maintains the lease for the pod's lifetime.
+		//
+		// The two paths differ in lease identity across sandbox recreations:
+		//   - KubeVirt VMs: the one-shot exchange presents the annotation MAC
+		//     as the DHCP client-id and the lease is never released on DEL
+		//     (the guest owns it), so a recreated sandbox re-acquires the
+		//     same lease and IP.
+		//   - Regular pods: the delegated daemon presents
+		//     containerID/network-name/ifName as the client-id and the lease
+		//     is released on DEL, so a recreated sandbox is a new DHCP client
+		//     and may be assigned a different IP, which ovnkube-controller
+		//     absorbs by reprocessing the port on the annotation patch below
+		//     (see dhcpPodNetworkUpdated).
+		//
+		// In both cases the learned IPs are merged into the CNI result (multus
+		// network-status) and patched into the k8s.ovn.org/pod-networks
+		// annotation so ovnkube-controller programs the logical switch port and
+		// IP-based features (MultiNetworkPolicy, NetworkQoS) see the address.
+		if pr.CNIConf.IPAM.Type == types.IPAMTypeDHCP {
+			var dhcpResult *current.Result
+			if kubevirt.IsPodOwnedByVirtualMachine(pod) {
+				dhcpResult, err = dhcpOps.DoOneShot(pr)
+				if err != nil {
+					return nil, fmt.Errorf("VM DHCP discovery failed for pod %s/%s: %v",
+						pr.PodNamespace, pr.PodName, err)
+				}
+			} else {
+				// A VFIO device exposes no netdev in the pod netns for the
+				// DORA exchange. Reject here instead of failing it in the DHCP plugin.
+				if pr.IsVFIO {
+					return nil, fmt.Errorf("dhcp IPAM mode is not supported for VFIO device %s on regular pod %s/%s: "+
+						"DHCP with VFIO is only supported for KubeVirt VM pods",
+						pr.CNIConf.DeviceID, pr.PodNamespace, pr.PodName)
+				}
+				// An attachment carrying the default-route key owns the pod's
+				// default route (the primary network yields it, see
+				// allocator/pod), so keep the DHCP-provided default routes
+				// instead of filtering them out
+				nse, err := util.GetK8sPodNetworkSelection(pod, pr.nadKey)
+				if err != nil {
+					return nil, fmt.Errorf("failed to get the network selection of pod %s/%s for NAD %s: %w",
+						pr.PodNamespace, pr.PodName, pr.nadKey, err)
+				}
+				defaultRouteRequested := nse != nil && len(nse.GatewayRequest) > 0
+				dhcpResult, err = dhcpOps.ExecAdd(pr, defaultRouteRequested)
+				if err != nil {
+					return nil, fmt.Errorf("DHCP IPAM ADD failed for pod %s/%s: %v",
+						pr.PodNamespace, pr.PodName, err)
+				}
+			}
+			mergeDHCPResultIntoCNIResult(dhcpResult, response.Result)
+			if err := pr.updatePodNetworksAnnotationWithDHCPResult(clientset, dhcpResult); err != nil {
+				return nil, fmt.Errorf("failed to report DHCP IPs in pod-networks annotation for pod %s/%s: %v",
+					pr.PodNamespace, pr.PodName, err)
+			}
 		}
 	} else {
 		response.PodIFInfo = podInterfaceInfo
@@ -297,6 +393,30 @@ func (pr *PodRequest) cmdDel(clientset *ClientSet) (*Response, error) {
 		pr.nadKey = nadKey
 	} else {
 		pr.nadKey = pr.nadName
+	}
+
+	// Release the DHCP lease before the teardown below removes the transmit
+	// path. The dhcp plugin daemon tracks its own leases and no-ops for
+	// containers it never served, so it is safe to always invoke it; a
+	// missing plugin binary means no lease exists (ADD hard-requires it) and
+	// a VFIO device's lease is owned by the guest. Releases are best-effort:
+	// when one fails, the server simply expires the lease once its time
+	// runs out.
+	if !config.UnprivilegedMode && pr.CNIConf.IPAM.Type == types.IPAMTypeDHCP && !pr.IsVFIO {
+		if _, err := getDHCPPluginPath(getCNIPath()); err != nil {
+			klog.V(5).Infof("DHCP: plugin not found in CNI_PATH, no lease to release for pod %s/%s: %v",
+				pr.PodNamespace, pr.PodName, err)
+		} else {
+			klog.Infof("DHCP: releasing lease for pod %s/%s iface %s netns %s container %s",
+				pr.PodNamespace, pr.PodName, pr.IfName, pr.Netns, pr.SandboxID)
+			if delErr := dhcpOps.ExecDel(pr); delErr != nil {
+				klog.Warningf("DHCP: failed to release the lease of pod %s/%s (sandbox %s, iface %s), "+
+					"it expires on the server instead: %v",
+					pr.PodNamespace, pr.PodName, pr.SandboxID, pr.IfName, delErr)
+			} else {
+				klog.Infof("DHCP: released lease for pod %s/%s", pr.PodNamespace, pr.PodName)
+			}
+		}
 	}
 
 	netdevName := ""
@@ -402,6 +522,10 @@ func (pr *PodRequest) cmdDel(clientset *ClientSet) (*Response, error) {
 		// succeed, return an empty Result
 	} else {
 		// pass the isDPU flag and vfNetdevName back to cniShim
+		if pr.CNIConf.IPAM.Type == types.IPAMTypeDHCP {
+			klog.Warningf("DHCP lease release skipped for pod %s/%s: not supported in unprivileged mode",
+				pr.PodNamespace, pr.PodName)
+		}
 		response.Result = nil
 		response.PodIFInfo = podInterfaceInfo
 	}
