@@ -139,11 +139,11 @@ func getCoverageShowOutputMap(component string) (map[string]string, error) {
 	} else if component == ovsVswitchd {
 		stdout, stderr, err = util.RunOvsVswitchdAppCtlWithTimeout(metricsAppctlTimeout, "coverage/show")
 	} else if component == ovsDB {
-		stdout, stderr, err = util.RunOvsDbServerAppCtl("coverage/show")
+		stdout, stderr, err = util.RunOvsDbServerAppCtlWithTimeout(metricsAppctlTimeout, "coverage/show")
 	} else if component == ovnNorthDB {
-		stdout, stderr, err = util.RunOVNNBAppCtl("coverage/show")
+		stdout, stderr, err = util.RunOVNNBAppCtlWithTimeout(metricsAppctlTimeout, "coverage/show")
 	} else if component == ovnSouthDB {
-		stdout, stderr, err = util.RunOVNSBAppCtl("coverage/show")
+		stdout, stderr, err = util.RunOVNSBAppCtlWithTimeout(metricsAppctlTimeout, "coverage/show")
 	} else {
 		return nil, fmt.Errorf("unknown coverage/show component: %s", component)
 	}

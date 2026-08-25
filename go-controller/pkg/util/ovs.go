@@ -691,6 +691,15 @@ func RunOvsVswitchdAppCtlMetricsShow() (*bytes.Buffer, *bytes.Buffer, error) {
 	return stdout, stderr, err
 }
 
+// RunOvsDbServerAppCtlWithTimeout runs an 'ovs-appctl -t ovsdb-server.pid.ctl command'
+// with a --timeout so the subprocess self-terminates instead of blocking indefinitely
+// on a busy daemon.
+func RunOvsDbServerAppCtlWithTimeout(timeout int, args ...string) (string, string, error) {
+	cmdArgs := []string{fmt.Sprintf("--timeout=%d", timeout)}
+	cmdArgs = append(cmdArgs, args...)
+	return RunOvsDbServerAppCtl(cmdArgs...)
+}
+
 // RunOvsDbServerAppCtl runs an 'ovs-appctl -t /var/run/openvswitch/ovsdb-server.pid.ctl command'
 func RunOvsDbServerAppCtl(args ...string) (string, string, error) {
 	var cmdArgs []string
