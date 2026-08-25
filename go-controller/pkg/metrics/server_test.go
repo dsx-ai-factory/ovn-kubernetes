@@ -452,6 +452,33 @@ type metricsTestCase struct {
 }
 
 var (
+	ovsDocaMetrics = []string{
+		"ovs_vswitchd_doca_datapath_drop_hw_miss_recover",
+		"ovs_vswitchd_doca_datapath_drop_invalid_bond",
+		"ovs_vswitchd_doca_datapath_drop_invalid_mark",
+		"ovs_vswitchd_doca_datapath_drop_invalid_partial_flow",
+		"ovs_vswitchd_doca_datapath_drop_invalid_port",
+		"ovs_vswitchd_doca_datapath_drop_invalid_tnl_port",
+		"ovs_vswitchd_doca_datapath_drop_lock_error",
+		"ovs_vswitchd_doca_datapath_drop_meter",
+		"ovs_vswitchd_doca_datapath_drop_recirc_error",
+		"ovs_vswitchd_doca_datapath_drop_rx_invalid_packet",
+		"ovs_vswitchd_doca_datapath_drop_tunnel_pop_error",
+		"ovs_vswitchd_doca_datapath_drop_tunnel_push_error",
+		"ovs_vswitchd_doca_datapath_drop_tunnel_tso_recirc",
+		"ovs_vswitchd_doca_datapath_drop_upcall_error",
+		"ovs_vswitchd_doca_datapath_drop_userspace_action_error",
+		"ovs_vswitchd_doca_invalid_classify_port",
+		"ovs_vswitchd_doca_invalid_meta_header",
+		"ovs_vswitchd_doca_no_mark",
+		"ovs_vswitchd_doca_pipe_resize",
+		"ovs_vswitchd_doca_pipe_resize_over_10_ms",
+		"ovs_vswitchd_doca_queue_empty",
+		"ovs_vswitchd_doca_queue_none_processed",
+		"ovs_vswitchd_doca_resize_block",
+		"ovs_vswitchd_netdev_doca_drop_oversized",
+	}
+
 	OVSMetricsTestCase = metricsTestCase{
 		enableOVS: true,
 		mockRunCommands: []ovntest.TestifyMockHelper{
@@ -498,7 +525,7 @@ var (
 				RetArgList: []interface{}{bytes.NewBuffer([]byte(ovsOfctlDumpAggregateOutput)), bytes.NewBuffer([]byte("")), nil},
 			},
 		},
-		expectedMetrics: []string{
+		expectedMetrics: append([]string{
 			"ovs_build_info",
 			"ovs_ovsdb_db_size",
 			"ovs_ovsdb_hmap_expand",
@@ -608,7 +635,7 @@ var (
 			"ovs_vswitchd_xlate_actions",
 			"promhttp_metric_handler_requests_in_flight",
 			"promhttp_metric_handler_requests_total",
-		},
+		}, ovsDocaMetrics...),
 	}
 
 	OVSNativeMetricsTestCase = metricsTestCase{
@@ -665,7 +692,7 @@ var (
 				RetArgList: []interface{}{bytes.NewBuffer([]byte(ovsNativeMetricsOutput)), bytes.NewBuffer([]byte("")), nil},
 			},
 		},
-		expectedMetrics: []string{
+		expectedMetrics: append([]string{
 			// Native metrics from metrics/show output
 			"ovs_vswitchd_bridge_n_bridges",
 			// OVS DB metrics
@@ -741,7 +768,7 @@ var (
 			"ovs_vswitchd_xlate_actions",
 			"promhttp_metric_handler_requests_in_flight",
 			"promhttp_metric_handler_requests_total",
-		},
+		}, ovsDocaMetrics...),
 	}
 
 	OVNDBMetricsTestCase = metricsTestCase{

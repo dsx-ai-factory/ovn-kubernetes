@@ -1293,6 +1293,80 @@ var ovsVswitchdCoverageShowMetricsMap = map[string]*metricDetails{
 	"upcall_flow_limit_hit": {
 		help: "Counter is increased when datapath reaches the dynamic limit of flows",
 	},
+	"doca_no_mark": {
+		srcName: "ovs_doca_no_mark",
+		help:    "Counts received packets dropped because they lacked a flow mark used for port classification.",
+	},
+	"doca_invalid_classify_port": {
+		srcName: "ovs_doca_invalid_classify_port",
+		help:    "Counts received packets dropped because their flow mark contained an invalid DPDK port ID.",
+	},
+	"doca_queue_empty": {
+		help: "Counts polling iterations where the DOCA offload queue had no pending entries to process.",
+	},
+	"doca_queue_none_processed": {
+		help: "Counts polling iterations that processed no entries despite expecting room in the queue, indicating possible processing stalls.",
+	},
+	"doca_resize_block": {
+		help: "Counts instances where a pipe resize operation blocked queue processing for an excessive number of retries.",
+	},
+	"doca_pipe_resize": {
+		help: "Counts the number of DOCA pipe resize operations triggered when a pipe reaches its capacity threshold.",
+	},
+	"doca_pipe_resize_over_10_ms": {
+		help: "Counts DOCA pipe resize operations that took longer than 10 milliseconds to complete, indicating potential performance concerns.",
+	},
+	"doca_invalid_meta_header": {
+		help: "Counts packets that failed to parse their DOCA metadata header during hardware miss recovery.",
+	},
+	"doca_datapath_drop_meter": {
+		help: "Counts packets dropped by software meters due to rate limiting.",
+	},
+	"doca_datapath_drop_upcall_error": {
+		help: "Counts packets dropped due to errors during upcall processing to userspace.",
+	},
+	"doca_datapath_drop_lock_error": {
+		help: "Counts packets dropped because the flow lookup rule lock could not be acquired.",
+	},
+	"doca_datapath_drop_userspace_action_error": {
+		help: "Counts packets dropped due to failures in executing userspace actions.",
+	},
+	"doca_datapath_drop_tunnel_push_error": {
+		help: "Counts packets dropped due to errors when pushing tunnel encapsulation headers.",
+	},
+	"doca_datapath_drop_tunnel_pop_error": {
+		help: "Counts packets dropped due to errors when popping tunnel decapsulation headers.",
+	},
+	"doca_datapath_drop_tunnel_tso_recirc": {
+		help: "Counts packets dropped because TSO (TCP Segmentation Offload) packets cannot be recirculated through a tunnel.",
+	},
+	"doca_datapath_drop_recirc_error": {
+		help: "Counts packets dropped because the maximum recirculation depth was exceeded.",
+	},
+	"doca_datapath_drop_invalid_port": {
+		help: "Counts packets dropped because the output port was not found in the send port cache.",
+	},
+	"doca_datapath_drop_invalid_bond": {
+		help: "Counts packets dropped because the specified bond was not found in the bond table.",
+	},
+	"doca_datapath_drop_invalid_tnl_port": {
+		help: "Counts packets dropped because the tunnel port was not found in the tunnel port cache.",
+	},
+	"doca_datapath_drop_invalid_mark": {
+		help: "Counts packets dropped because no flow was found associated with the packet's flow mark.",
+	},
+	"doca_datapath_drop_invalid_partial_flow": {
+		help: "Counts packets dropped because a partially offloaded flow could not determine its remaining software actions.",
+	},
+	"doca_datapath_drop_rx_invalid_packet": {
+		help: "Counts received packets dropped because they were smaller than the minimum Ethernet header length.",
+	},
+	"doca_datapath_drop_hw_miss_recover": {
+		help: "Counts packets dropped due to errors during hardware miss recovery processing.",
+	},
+	"netdev_doca_drop_oversized": {
+		help: "Counts packets dropped on transmit because they exceeded the device's maximum packet length (excluding TSO packets).",
+	},
 }
 var registerOvsMetricsOnce sync.Once
 
