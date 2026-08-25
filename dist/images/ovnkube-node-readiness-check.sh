@@ -28,8 +28,15 @@ if [ $return_value != 0 ]; then
 	exit $return_value
 fi
 coredns_cluster_ip=${COREDNS_CLUSTER_IP:-10.223.0.3}
-nslookup google.com $coredns_cluster_ip >/root/health 2>&1
-return_value=$?
+dns_names=${EXTERNAL_DNS_NAMES:-"google.com cloudflare.com"}
+echo "" > /root/health
+for dns_name in $dns_names; do
+	nslookup $dns_name $coredns_cluster_ip >>/root/health 2>&1
+	return_value=$?
+	if [ $return_value == 0 ]; then
+		break
+	fi
+done
 if [ $return_value != 0 ]; then
 	echo "connectivity check on cluster endpoint $coredns_cluster_ip:53 failed"
 	echo "$(< /root/health)"
