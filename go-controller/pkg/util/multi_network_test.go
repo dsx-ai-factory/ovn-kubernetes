@@ -2889,7 +2889,7 @@ func TestGetNetworkVRFName(t *testing.T) {
 				netInfo, err = NewNetInfo(&ovncnitypes.NetConf{
 					NetConf:  cnitypes.NetConf{Name: tc.networkName},
 					Topology: ovntypes.Layer2Topology,
-				})
+				}, nil)
 				g.Expect(err).NotTo(gomega.HaveOccurred())
 			}
 			mutableNetInfo := NewMutableNetInfo(netInfo)
