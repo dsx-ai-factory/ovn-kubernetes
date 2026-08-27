@@ -24,6 +24,13 @@ const (
 	// UDNVRFDevicePrefix vrf device prefix associated with every user
 	UDNVRFDevicePrefix = "mp"
 
+	// MaxInterfaceNameLength is the maximum length of a Linux network
+	// interface name: IFNAMSIZ - 1, where IFNAMSIZ (16) includes the NUL
+	// terminator. Kept as a literal rather than unix.IFNAMSIZ - 1 because
+	// this package also builds on Windows (hybrid-overlay), where
+	// golang.org/x/sys/unix is not available.
+	MaxInterfaceNameLength = 15
+
 	// K8sMgmtIntfName name to be used as an OVS internal port on the node
 	K8sMgmtIntfName = K8sMgmtIntfNamePrefix + "0"
 
@@ -437,6 +444,14 @@ const (
 	// NFTNoOverlaySNATExemptV6 is a set used for no-overlay mode with outbound SNAT enabled.
 	// Contains cluster CIDRs + local node IPv6 addresses that should be exempted from SNAT.
 	NFTNoOverlaySNATExemptV6 = "no-overlay-snat-exempt-v6"
+
+	// NFTEgressIPARPBlockV4 is a set in the dedicated ovn-kubernetes-egressip-ipv4 ARP table
+	// used during application restart to block ARP responses for IPv4 egress IPs
+	NFTEgressIPARPBlockV4 = "egressip-v4"
+
+	// NFTEgressIPNDPBlockV6 is a set in the dedicated ovn-kubernetes-egressip-ipv6 inet table
+	// used during application restart to block NDP responses for IPv6 egress IPs
+	NFTEgressIPNDPBlockV6 = "egressip-v6"
 
 	// Metrics
 	MetricOvnkubeNamespace               = "ovnkube"
