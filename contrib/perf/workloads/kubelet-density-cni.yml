@@ -9,19 +9,19 @@ global:
       - name: ovnkube-controller
         namespace: "ovn-kubernetes"
         labelSelector: {app: ovnkube-node}
-        url: http://localhost:9410/debug/pprof/profile?seconds=30
+        url: http://localhost:19410/debug/pprof/profile?seconds=30
       - name: ovnkube-control-plane
         namespace: "ovn-kubernetes"
         labelSelector: {name: ovnkube-control-plane}
-        url: http://localhost:9411/debug/pprof/profile?seconds=30
+        url: http://localhost:19411/debug/pprof/profile?seconds=30
       - name: ovnkube-controller-heap
         namespace: "ovn-kubernetes"
         labelSelector: {app: ovnkube-node}
-        url: http://localhost:9410/debug/pprof/heap
+        url: http://localhost:19410/debug/pprof/heap
       - name: ovnkube-control-plane-heap
         namespace: "ovn-kubernetes"
         labelSelector: {name: ovnkube-control-plane}
-        url: http://localhost:9411/debug/pprof/heap
+        url: http://localhost:19411/debug/pprof/heap
 jobs:
   - name: kubelet-density-cni
     jobIterations: 100

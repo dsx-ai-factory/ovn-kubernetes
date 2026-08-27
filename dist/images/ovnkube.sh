@@ -65,6 +65,9 @@ fi
 # OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
 # OVS_ENABLE_NATIVE_METRICS - enable ovs native metrics if ovs-vswitchd supports metrics/show (default: false)
 # OVN_METRICS_ENABLE_PPROF - Enable/Disable pprof server
+# OVN_METRICS_CONTROLLER_PPROF_PORT - loopback pprof/debug port for ovnkube-controller (default 19409)
+# OVN_METRICS_NODE_PPROF_PORT - loopback pprof/debug port for ovn-node/ovnkube-controller-with-node (default 19410)
+# OVN_METRICS_CLUSTER_MANAGER_PPROF_PORT - loopback pprof/debug port for ovnkube-cluster-manager (default 19411)
 # OVN_MONITOR_ALL - ovn-controller monitor all data in SB DB
 # OVN_OFCTRL_WAIT_BEFORE_CLEAR - ovn-controller wait time in ms before clearing OpenFlow rules during start up
 # OVN_ENABLE_LFLOW_CACHE - enable ovn-controller lflow-cache
@@ -282,6 +285,23 @@ echo "ovn_metrics_enable_pprof=${ovn_metrics_enable_pprof}"
 if [[ ${ovn_metrics_enable_pprof} == "true" ]]; then
   ovn_metrics_enable_pprof_flag="--metrics-enable-pprof"
 fi
+
+# OVN_METRICS_<COMPONENT>_PPROF_PORT - loopback pprof/debug listener port for a
+# component. Each component gets its own fixed default port so co-located
+# processes (a node also running cluster-manager, or ovnkube-controller-with-node
+# alongside cluster-manager) never collide on the shared host loopback; override
+# per component via the env var. ovnkube-controller-with-node is a single process
+# that runs both the controller and the node and binds the node metrics port, so
+# it uses the node port (OVN_METRICS_NODE_PPROF_PORT).
+# Set unconditionally: some components (ovnkube-controller-with-node,
+# ovn-cluster-manager, and ovnkube-controller with metrics-scale) enable pprof
+# independently of OVN_METRICS_ENABLE_PPROF, so gating the port flag would
+# silently drop OVN_METRICS_*_PPROF_PORT for them. --metrics-pprof-port is
+# ignored when pprof is off, so setting it unconditionally is safe.
+ovnkube_controller_pprof_port_flag="--metrics-pprof-port ${OVN_METRICS_CONTROLLER_PPROF_PORT:-19409}"
+ovnkube_node_pprof_port_flag="--metrics-pprof-port ${OVN_METRICS_NODE_PPROF_PORT:-19410}"
+ovnkube_cluster_manager_pprof_port_flag="--metrics-pprof-port ${OVN_METRICS_CLUSTER_MANAGER_PPROF_PORT:-19411}"
+
 #OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 ovn_egressip_enable=${OVN_EGRESSIP_ENABLE:-false}
 #OVN_EGRESSIP_HEALTHCHECK_PORT - egress IP node check to use grpc on this port
@@ -1470,6 +1490,7 @@ ovnkube-controller() {
     --logfile /var/log/ovn-kubernetes/ovnkube-controller.log \
     --loglevel=${ovnkube_loglevel} \
     --metrics-bind-address ${ovnkube_controller_metrics_bind_address} \
+    ${ovnkube_controller_pprof_port_flag} \
     --ovn-config-namespace ${ovn_kubernetes_namespace} \
     --pidfile ${OVN_RUNDIR}/ovnkube-controller.pid &
 
@@ -2183,6 +2204,7 @@ ovnkube-controller-with-node() {
     --loglevel=${ovnkube_loglevel} \
     --metrics-bind-address ${metrics_bind_address} \
     --metrics-enable-pprof \
+    ${ovnkube_node_pprof_port_flag} \
     --mtu=${mtu} \
     --ovn-config-namespace ${ovn_kubernetes_namespace} \
     --ovn-encap-tos=${ovn_encap_tos} \
@@ -2512,6 +2534,7 @@ ovn-cluster-manager() {
     --loglevel=${ovnkube_loglevel} \
     --metrics-bind-address ${ovnkube_cluster_manager_metrics_bind_address} \
     --metrics-enable-pprof \
+    ${ovnkube_cluster_manager_pprof_port_flag} \
     --ovn-config-namespace ${ovn_kubernetes_namespace} \
     --mtu=${mtu} \
     --pidfile ${OVN_RUNDIR}/ovnkube-cluster-manager.pid &
@@ -3132,6 +3155,7 @@ ovn-node() {
         ${ovnkube_node_mode_flag} \
         ${ovnkube_skip_ctmark_hostports_opts} \
         ${ovn_metrics_enable_pprof_flag} \
+        ${ovnkube_node_pprof_port_flag} \
         ${ovn_simulate_dpu_flag} \
         ${ovn_dpu_host_gateway_representor_interface_flag} \
         ${ovn_node_ssl_opts} \

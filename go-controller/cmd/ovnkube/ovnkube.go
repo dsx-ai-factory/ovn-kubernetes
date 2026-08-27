@@ -348,6 +348,7 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 			CertFile:    config.Metrics.NodeServerCert,
 			KeyFile:     config.Metrics.NodeServerPrivKey,
 			EnablePprof: config.Metrics.EnablePprof,
+			PprofPort:   config.Metrics.PprofPort,
 			// Use default registry so existing metric registrations keep working.
 			Registerer:      prometheus.DefaultRegisterer,
 			ApplyTLSOptions: config.TLS.ApplyOptions,
@@ -682,6 +683,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 				// Reuse the default registry (and its gatherer) so ovnkube-node metrics and OVN metrics share one endpoint.
 				opts.Registerer = prometheus.DefaultRegisterer
 				opts.EnablePprof = config.Metrics.EnablePprof
+				opts.PprofPort = config.Metrics.PprofPort
 			}
 
 			metrics.StartMetricsServer(opts, ctx.Done(), wg)

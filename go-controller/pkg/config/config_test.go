@@ -191,6 +191,7 @@ bind-address=1.1.1.1:8080
 ovn-metrics-bind-address=1.1.1.2:8081
 export-ovs-metrics=true
 enable-pprof=true
+pprof-port=19409
 node-server-privkey=/path/to/node-metrics-private.key
 node-server-cert=/path/to/node-metrics.crt
 enable-config-duration=true
@@ -581,6 +582,7 @@ routing-table-id-start=2002
 			gomega.Expect(Metrics.OVNMetricsBindAddress).To(gomega.Equal("1.1.1.2:8081"))
 			gomega.Expect(Metrics.ExportOVSMetrics).To(gomega.BeTrue())
 			gomega.Expect(Metrics.EnablePprof).To(gomega.BeTrue())
+			gomega.Expect(Metrics.PprofPort).To(gomega.Equal(19409))
 			gomega.Expect(Metrics.NodeServerPrivKey).To(gomega.Equal("/path/to/node-metrics-private.key"))
 			gomega.Expect(Metrics.NodeServerCert).To(gomega.Equal("/path/to/node-metrics.crt"))
 			gomega.Expect(Metrics.EnableConfigDuration).To(gomega.BeTrue())
@@ -699,6 +701,7 @@ routing-table-id-start=2002
 			gomega.Expect(Metrics.OVNMetricsBindAddress).To(gomega.Equal("2.2.2.3:8081"))
 			gomega.Expect(Metrics.ExportOVSMetrics).To(gomega.BeTrue())
 			gomega.Expect(Metrics.EnablePprof).To(gomega.BeTrue())
+			gomega.Expect(Metrics.PprofPort).To(gomega.Equal(19409))
 			gomega.Expect(Metrics.NodeServerPrivKey).To(gomega.Equal("/tls/nodeprivkey"))
 			gomega.Expect(Metrics.NodeServerCert).To(gomega.Equal("/tls/nodecert"))
 			gomega.Expect(Metrics.EnableConfigDuration).To(gomega.BeTrue())
@@ -1064,6 +1067,9 @@ mode=shared
 metrics-bind-address=1.1.1.1:8080
 ovn-metrics-bind-address=1.1.1.2:8081
 metrics-enable-pprof=true
+
+[metrics]
+pprof-port=19409
 `), 0o644)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1075,6 +1081,7 @@ metrics-enable-pprof=true
 			gomega.Expect(Metrics.BindAddress).To(gomega.Equal("1.1.1.1:8080"))
 			gomega.Expect(Metrics.OVNMetricsBindAddress).To(gomega.Equal("1.1.1.2:8081"))
 			gomega.Expect(Metrics.EnablePprof).To(gomega.BeTrue())
+			gomega.Expect(Metrics.PprofPort).To(gomega.Equal(19409))
 			return nil
 		}
 		cliArgs := []string{
@@ -1095,6 +1102,7 @@ metrics-enable-pprof=false
 bind-address=2.2.2.2:8080
 ovn-metrics-bind-address=2.2.2.3:8081
 enable-pprof=true
+pprof-port=19409
 `), 0o644)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1106,6 +1114,7 @@ enable-pprof=true
 			gomega.Expect(Metrics.BindAddress).To(gomega.Equal("2.2.2.2:8080"))
 			gomega.Expect(Metrics.OVNMetricsBindAddress).To(gomega.Equal("2.2.2.3:8081"))
 			gomega.Expect(Metrics.EnablePprof).To(gomega.BeTrue())
+			gomega.Expect(Metrics.PprofPort).To(gomega.Equal(19409))
 			return nil
 		}
 		cliArgs := []string{
@@ -2315,4 +2324,34 @@ istio-ambient-snat-ipv6=fd16:9254:7127:1337::2
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 		})
 	})
+})
+
+var _ = Describe("buildMetricsConfig pprof port", func() {
+	BeforeEach(func() {
+		gomega.Expect(PrepareTestConfig()).To(gomega.Succeed())
+	})
+
+	DescribeTable("resolves the pprof port",
+		func(enablePprof bool, pprofPort, wantPort int, wantErr bool) {
+			// Both callers leave pprof off by default; the CLI/file config
+			// carries the caller-provided enable flag and port.
+			cliCfg := &config{}
+			cliCfg.Metrics.EnablePprof = enablePprof
+			cliCfg.Metrics.PprofPort = pprofPort
+
+			err := buildMetricsConfig(cliCfg, &config{})
+			if wantErr {
+				gomega.Expect(err).To(gomega.HaveOccurred())
+				return
+			}
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(Metrics.PprofPort).To(gomega.Equal(wantPort))
+		},
+		Entry("leaves the port untouched when pprof is disabled", false, 0, 0, false),
+		Entry("does not validate the port when pprof is disabled", false, 70000, 70000, false),
+		Entry("rejects a missing port when enabled", true, 0, 0, true),
+		Entry("respects an explicit port when enabled", true, 12345, 12345, false),
+		Entry("rejects an out-of-range port when enabled", true, 70000, 0, true),
+		Entry("rejects a negative port when enabled", true, -1, 0, true),
+	)
 })

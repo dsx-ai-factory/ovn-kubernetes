@@ -524,6 +524,10 @@ type MetricsConfig struct {
 	EnablePprof           bool   `gcfg:"enable-pprof"`
 	NodeServerPrivKey     string `gcfg:"node-server-privkey"`
 	NodeServerCert        string `gcfg:"node-server-cert"`
+	// PprofPort is the localhost port for the pprof/debug endpoints. It must be
+	// set (1-65535) when pprof is enabled; deployments set a distinct
+	// per-component port via dist/images/ovnkube.sh.
+	PprofPort int `gcfg:"pprof-port"`
 	// EnableConfigDuration holds the boolean flag to enable ovnkube controller to monitor ovnkube controller
 	// configuration duration and optionally, its application to all nodes
 	EnableConfigDuration bool `gcfg:"enable-config-duration"`
@@ -1684,9 +1688,15 @@ var MetricsFlags = []cli.Flag{
 	},
 	&cli.BoolFlag{
 		Name:        "metrics-enable-pprof",
-		Usage:       "If true, then also accept pprof requests on the metrics port.",
+		Usage:       "If true, serve pprof and /debug/flags/v on a loopback-only debug listener, reachable via localhost only.",
 		Destination: &cliConfig.Metrics.EnablePprof,
 		Value:       Metrics.EnablePprof,
+	},
+	&cli.IntFlag{
+		Name:        "metrics-pprof-port",
+		Usage:       "Loopback port for the pprof/debug listener. Required (1-65535) when pprof is enabled; ovnkube.sh passes a distinct explicit port per component.",
+		Destination: &cliConfig.Metrics.PprofPort,
+		Value:       Metrics.PprofPort,
 	},
 	&cli.StringFlag{
 		Name:        "node-server-privkey",
@@ -2392,6 +2402,17 @@ func buildMetricsConfig(cli, file *config) error {
 	// And CLI overrides over config file, Kubernetes, and default values
 	if err := overrideFields(&Metrics, &cli.Metrics, &savedMetrics); err != nil {
 		return err
+	}
+
+	// The pprof/debug listener only runs when pprof is enabled, so only validate
+	// its port in that case. dist/images/ovnkube.sh passes an explicit,
+	// per-component port (ovnkube-controller, ovnkube-node and
+	// ovn-cluster-manager each get their own, overridable via
+	// OVN_METRICS_*_PPROF_PORT), so enabling pprof requires an explicit port.
+	if Metrics.EnablePprof {
+		if Metrics.PprofPort < 1 || Metrics.PprofPort > 65535 {
+			return fmt.Errorf("metrics pprof port %d is invalid; --metrics-pprof-port must be set to 1-65535 when pprof is enabled", Metrics.PprofPort)
+		}
 	}
 
 	return nil
