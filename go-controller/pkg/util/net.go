@@ -618,3 +618,22 @@ func NetworksOverlap(n1, n2 []*net.IPNet) bool {
 	}
 	return false
 }
+
+func FindSubnetContainingIP(subnets []*net.IPNet, ip net.IP) string {
+	var best *net.IPNet
+	bestMask := -1
+	for _, subnet := range subnets {
+		if subnet == nil || !subnet.Contains(ip) {
+			continue
+		}
+		ones, _ := subnet.Mask.Size()
+		if ones > bestMask {
+			best = subnet
+			bestMask = ones
+		}
+	}
+	if best == nil {
+		return ""
+	}
+	return best.String()
+}
