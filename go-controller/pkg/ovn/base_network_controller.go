@@ -1223,7 +1223,7 @@ func (bnc *BaseNetworkController) WatchAdminPolicyBasedRoutes() (err error) {
 				klog.Errorf("Not a node: %v", obj)
 				return
 			}
-			if !bnc.isLocalZoneNode(node) {
+			if !bnc.isLocalNode(node) {
 				bnc.updateTransitRoutes(nil, node)
 			}
 			bnc.syncAdminPBROnNodeChange(nil, obj)
@@ -1239,7 +1239,7 @@ func (bnc *BaseNetworkController) WatchAdminPolicyBasedRoutes() (err error) {
 				klog.Errorf("Not a node: %v", new)
 				return
 			}
-			if util.NodeTransitSwitchPortAddrAnnotationChanged(oldNode, newNode) || util.NodeSubnetAnnotationChanged(oldNode, newNode) || (bnc.isLocalZoneNode(oldNode) != bnc.isLocalZoneNode(newNode)) {
+			if util.NodeTransitSwitchPortAddrAnnotationChanged(oldNode, newNode) || util.NodeSubnetAnnotationChanged(oldNode, newNode) || (bnc.isLocalNode(oldNode) != bnc.isLocalNode(newNode)) {
 				bnc.updateTransitRoutes(oldNode, newNode)
 			}
 			bnc.syncAdminPBROnNodeChange(old, new)
@@ -1250,7 +1250,7 @@ func (bnc *BaseNetworkController) WatchAdminPolicyBasedRoutes() (err error) {
 				klog.Errorf("Not a node: %v", obj)
 				return
 			}
-			if !bnc.isLocalZoneNode(node) {
+			if !bnc.isLocalNode(node) {
 				// updateTransitRoutes will delete the stale mappings
 				bnc.updateTransitRoutes(node, nil)
 			}
