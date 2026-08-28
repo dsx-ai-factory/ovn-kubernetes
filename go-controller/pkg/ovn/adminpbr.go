@@ -1020,7 +1020,7 @@ func (bnc *BaseNetworkController) mapNextHopsToTransitIPs(nexthops []string) ([]
 // update subnets to transit IP mapping for interconnect mode
 func (bnc *BaseNetworkController) updateTransitRoutes(oldNode, newNode *corev1.Node) {
 	var newRouteInfo *transitRouteInfo
-	if newNode != nil && !bnc.isLocalZoneNode(newNode) {
+	if newNode != nil && !bnc.isLocalNode(newNode) {
 		transitIPs, err := util.ParseNodeTransitSwitchPortAddrs(newNode)
 		if err != nil {
 			klog.Warningf("Failed to parse transit switch port addresses on node %s: %v", newNode.Name, err)
