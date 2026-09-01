@@ -19,6 +19,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -347,6 +348,32 @@ func (oc *BaseUserDefinedNetworkController) FilterOutResource(objType reflect.Ty
 	}
 }
 
+// FilterOutDeleteResource keeps pod delete events that still have resources
+// owned by this controller, even if the live primary-NAD mapping is gone.
+func (oc *BaseUserDefinedNetworkController) FilterOutDeleteResource(objType reflect.Type, obj interface{}) bool {
+	filterOut := oc.FilterOutResource(objType, obj)
+	if objType != factory.PodType || !filterOut {
+		return filterOut
+	}
+
+	pod, ok := obj.(*corev1.Pod)
+	if !ok {
+		klog.Errorf("Failed to cast the provided object to a pod")
+		return false
+	}
+	expectedSwitchName, err := oc.getExpectedSwitchName(pod)
+	if err != nil {
+		klog.Errorf("Failed to determine the expected switch for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+		return true
+	}
+	for _, portInfo := range oc.getPortInfoForUserDefinedNetwork(pod) {
+		if portInfo != nil && portInfo.logicalSwitch == expectedSwitchName {
+			return false
+		}
+	}
+	return true
+}
+
 // shouldFilterNamespace reports whether namespace's events should be filtered out because
 // it doesn't belong to this network. For primary networks, this asks the network manager
 // for the namespace's actual primary NAD rather than checking this controller's own NetInfo,
@@ -363,6 +390,9 @@ func (bnc *BaseNetworkController) shouldFilterNamespace(namespace string) bool {
 
 	nadKey, err := bnc.networkManager.GetPrimaryNADForNamespace(namespace)
 	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return false
+		}
 		return util.IsInvalidPrimaryNetworkError(err)
 	}
 	if nadKey == types.DefaultNetworkName {
