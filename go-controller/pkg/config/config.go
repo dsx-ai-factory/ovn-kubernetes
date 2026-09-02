@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -779,6 +780,9 @@ type OvnKubeNodeConfig struct {
 	SimulateDPU               bool   `gcfg:"simulate-dpu"`
 	// RoutingTableIDStart is added to interface indexes to derive OVN-managed Linux route table IDs.
 	RoutingTableIDStart int `gcfg:"routing-table-id-start"`
+	// KubeletCgroupPath is the cgroup v2 path kubelet runs under, relative to
+	// /sys/fs/cgroup. When empty, the kubelet.service cgroup is looked up instead.
+	KubeletCgroupPath string `gcfg:"kubelet-cgroup-path"`
 }
 
 // ClusterManagerConfig holds configuration for ovnkube-cluster-manager
@@ -2058,6 +2062,17 @@ var OvnKubeNodeFlags = []cli.Flag{
 		Usage:       "list of tcp/udp ports for host services to skip CT-Marking",
 		Destination: &cliConfig.OvnKubeNode.RawSkipCTMarkHostPorts,
 	},
+	&cli.StringFlag{
+		Name: "kubelet-cgroup-path",
+		Usage: "The cgroup v2 path kubelet runs under, relative to /sys/fs/cgroup, for example " +
+			"\"kubelet.slice/kubelet.service\". Used by UDN host isolation to allow kubelet probes to " +
+			"primary UDN pods. Every process in this cgroup is allowed to reach them, so it should be " +
+			"the cgroup of kubelet itself rather than a parent it shares with other workloads. " +
+			"When unset, the kubelet.service cgroup is looked up instead, which requires kubelet to be " +
+			"managed by systemd. Only used when enable-network-segmentation is set",
+		Value:       OvnKubeNode.KubeletCgroupPath,
+		Destination: &cliConfig.OvnKubeNode.KubeletCgroupPath,
+	},
 	&cli.IntFlag{
 		Name:        "dpu-node-lease-renew-interval",
 		Usage:       "Interval in seconds at which the DPU updates its custom node lease. Set to 0 to disable DPU health checking",
@@ -3214,8 +3229,68 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	return retConfigFile, nil
 }
 
+// completeOvnKubeNodeConfig normalizes and validates the ovnkube-node configuration.
+func completeOvnKubeNodeConfig() error {
+	if OvnKubeNode.Mode != types.NodeModeDPU {
+		if OvnKubeNode.KubeletCgroupPath != "" {
+			// cgroup paths are slash separated whatever the host, so they are not file paths.
+			// ".." is rejected before cleaning, which would resolve it away.
+			for _, element := range strings.Split(OvnKubeNode.KubeletCgroupPath, "/") {
+				if element == ".." {
+					return fmt.Errorf("kubelet cgroup path %q must not contain %q elements",
+						OvnKubeNode.KubeletCgroupPath, "..")
+				}
+			}
+			cgroupPath := strings.TrimPrefix(path.Clean("/"+OvnKubeNode.KubeletCgroupPath), "/")
+			if cgroupPath == "" {
+				// the cgroup root holds every process on the host, so matching on it would
+				// let all of them reach primary UDN pods.
+				return fmt.Errorf("kubelet cgroup path %q must not be the cgroup root",
+					OvnKubeNode.KubeletCgroupPath)
+			}
+			OvnKubeNode.KubeletCgroupPath = cgroupPath
+		}
+	}
+
+	if OvnKubeNode.Mode == types.NodeModeDPUHost {
+		return nil
+	}
+
+	// RawSkipCTMarkHostPorts is in the form of comma separately list of port/protocol
+	skippedHostPorts := strings.Split(OvnKubeNode.RawSkipCTMarkHostPorts, ",")
+	// support TCP/UDP protocol for now
+	OvnKubeNode.SkipCTMarkHostPorts = map[string][]string{}
+	for _, proto := range []string{"tcp", "udp"} {
+		OvnKubeNode.SkipCTMarkHostPorts[proto] = []string{}
+	}
+
+	for _, portProtocol := range skippedHostPorts {
+		if strings.TrimSpace(portProtocol) == "" {
+			continue
+		}
+		fields := strings.Split(portProtocol, "/")
+		if len(fields) != 2 {
+			return fmt.Errorf("invalid SkipCTMarkHostPorts %s, expected <port>|<udp|tcp>", portProtocol)
+		}
+		proto := strings.ToLower(strings.TrimSpace(fields[1]))
+		if _, ok := OvnKubeNode.SkipCTMarkHostPorts[proto]; !ok {
+			return fmt.Errorf("invalid SkipCTMarkHostPorts %s: unsupported protocol type", portProtocol)
+		}
+		port := strings.TrimSpace(fields[0])
+		if _, err := strconv.Atoi(port); err != nil {
+			return fmt.Errorf("invalid SkipCTMarkHostPorts %s: invalid port number", portProtocol)
+		}
+		OvnKubeNode.SkipCTMarkHostPorts[proto] = append(OvnKubeNode.SkipCTMarkHostPorts[proto], port)
+	}
+	return nil
+}
+
 func completeConfig() error {
 	allSubnets := NewConfigSubnets()
+
+	if err := completeOvnKubeNodeConfig(); err != nil {
+		return err
+	}
 
 	if err := completeKubernetesConfig(allSubnets); err != nil {
 		return err
@@ -3231,10 +3306,6 @@ func completeConfig() error {
 		return err
 	}
 	if err := completeHybridOverlayConfig(allSubnets); err != nil {
-		return err
-	}
-
-	if err := completeOvnKubeNodeConfig(); err != nil {
 		return err
 	}
 
@@ -3424,39 +3495,5 @@ func buildOvnKubeNodeConfig(cli, file *config) error {
 		return fmt.Errorf("ovnkube-node-mgmt-port-dp-resource-name must be provided on dpu-host mode if network segmentation is enabled")
 	}
 
-	return nil
-}
-
-func completeOvnKubeNodeConfig() error {
-	if OvnKubeNode.Mode == types.NodeModeDPUHost {
-		return nil
-	}
-
-	// RawSkipCTMarkHostPorts is in the form of comma separately list of port/protocol
-	skippedHostPorts := strings.Split(OvnKubeNode.RawSkipCTMarkHostPorts, ",")
-	// support TCP/UDP protocol for now
-	OvnKubeNode.SkipCTMarkHostPorts = map[string][]string{}
-	for _, proto := range []string{"tcp", "udp"} {
-		OvnKubeNode.SkipCTMarkHostPorts[proto] = []string{}
-	}
-
-	for _, portProtocol := range skippedHostPorts {
-		if strings.TrimSpace(portProtocol) == "" {
-			continue
-		}
-		fields := strings.Split(portProtocol, "/")
-		if len(fields) != 2 {
-			return fmt.Errorf("invalid SkipCTMarkHostPorts %s, expected <port>|<udp|tcp>", portProtocol)
-		}
-		proto := strings.ToLower(strings.TrimSpace(fields[1]))
-		if _, ok := OvnKubeNode.SkipCTMarkHostPorts[proto]; !ok {
-			return fmt.Errorf("invalid SkipCTMarkHostPorts %s: unsupported protocol type", portProtocol)
-		}
-		port := strings.TrimSpace(fields[0])
-		if _, err := strconv.Atoi(port); err != nil {
-			return fmt.Errorf("invalid SkipCTMarkHostPorts %s: invalid port number", portProtocol)
-		}
-		OvnKubeNode.SkipCTMarkHostPorts[proto] = append(OvnKubeNode.SkipCTMarkHostPorts[proto], port)
-	}
 	return nil
 }
