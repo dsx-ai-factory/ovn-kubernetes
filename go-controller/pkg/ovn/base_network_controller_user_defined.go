@@ -278,7 +278,7 @@ func (bsnc *BaseUserDefinedNetworkController) ensurePodForUserDefinedNetwork(old
 
 	if !on {
 		// the pod is not attached to this specific network
-		klog.V(5).Infof("Pod %s/%s is not attached on this network controller %s",
+		klog.V(6).Infof("Pod %s/%s is not attached on this network controller %s",
 			pod.Namespace, pod.Name, bsnc.GetNetworkName())
 		return nil
 	}

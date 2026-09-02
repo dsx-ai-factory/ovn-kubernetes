@@ -713,7 +713,7 @@ func (bnc *BaseNetworkController) getNewLocalPolicyPorts(np *networkPolicy,
 // getExistingLocalPolicyPorts will find and return port info for every given pod obj, that is present in np.localPods.
 func (bnc *BaseNetworkController) getExistingLocalPolicyPorts(np *networkPolicy,
 	objs ...interface{}) (policyPortsToUUIDs map[string]string, policyPortUUIDs []string, err error) {
-	klog.Infof("Processing NetworkPolicy %s/%s to delete %d local pods...", np.namespace, np.name, len(objs))
+	klog.V(6).Infof("Processing NetworkPolicy %s/%s to delete %d local pods...", np.namespace, np.name, len(objs))
 
 	policyPortUUIDs = []string{}
 	policyPortsToUUIDs = map[string]string{}
