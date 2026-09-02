@@ -225,6 +225,8 @@ func resolveCollectionInterval(d time.Duration) time.Duration {
 // scrape has data) and then on every CollectionInterval tick until stopChan is
 // closed. A plain ticker loop serializes cycles: an over-running collect just
 // delays the next one, so cycles never overlap and no locking is needed.
+// Each collect runs in a goroutine so shutdown can proceed without waiting for
+// a stalled extraction operation to finish.
 func (s *MetricServer) runCollectionLoop(stopChan <-chan struct{}) {
 	interval := resolveCollectionInterval(s.opts.CollectionInterval)
 	klog.Infof("MetricServer collection loop running every %s", interval)
@@ -236,7 +238,19 @@ func (s *MetricServer) runCollectionLoop(stopChan <-chan struct{}) {
 	for {
 		select {
 		case <-ticker.C:
-			s.collect()
+			collectDone := make(chan struct{})
+			go func() {
+				defer close(collectDone)
+				s.collect()
+			}()
+			// Wait for this cycle to complete or shutdown to signal. If shutdown
+			// signals while collection is in-flight, we exit immediately without
+			// waiting; the in-flight goroutine finishes asynchronously.
+			select {
+			case <-collectDone:
+			case <-stopChan:
+				return
+			}
 		case <-stopChan:
 			return
 		}
