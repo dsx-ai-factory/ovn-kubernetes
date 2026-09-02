@@ -515,7 +515,7 @@ func (pr *PodRequest) cmdDel(clientset *ClientSet) (*Response, error) {
 		NADKey:        pr.nadKey,
 	}
 	if !config.UnprivilegedMode {
-		err := podRequestInterfaceOps.UnconfigureInterface(pr, podInterfaceInfo)
+		err := podRequestInterfaceOps.UnconfigureInterface(pr, podInterfaceInfo, clientset.podLister, pod)
 		if err != nil {
 			return nil, err
 		}

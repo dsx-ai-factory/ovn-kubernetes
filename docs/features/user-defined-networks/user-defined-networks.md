@@ -23,13 +23,13 @@ can use the same IP address ranges for pods, expanding deployment scenarios.
 
 See the [enhancement] for more details.
 
-[enhancement]: https://ovn-kubernetes.io/okeps/okep-5193-user-defined-networks/
+[enhancement]: ../../okeps/okep-5193-user-defined-networks.md
 
 ### User-Stories/Use-Cases
 
 See the [user-stories] defined in the enhancement.
 
-[user-stories]: https://ovn-kubernetes.io/okeps/okep-5193-user-defined-networks/#user-storiesuse-cases
+[user-stories]: ../../okeps/okep-5193-user-defined-networks.md#user-storiesuse-cases
 
 The two main user stories are:
 
@@ -115,7 +115,7 @@ will not be considered for UDN creation.
 
 See the [api-specification-docs] for information on each of the fields
 
-[api-specification-docs]: https://ovn-kubernetes.io/api-reference/userdefinednetwork-api-spec/
+[api-specification-docs]: ../../api-reference/userdefinednetwork-api-spec.md
 
 ### OVN-Kubernetes Implementation Details
 
@@ -261,6 +261,51 @@ spec:
     - cidr: 203.203.0.0/16
       hostSubnet: 24
 ```
+
+### Expanding a Primary Layer3 UDN with additional cluster subnets
+
+A Primary Layer3 UDN or CUDN can have multiple cluster subnets in each IP
+family. This allows an operator to add address space when the existing cluster
+subnet no longer has enough host subnets for additional nodes.
+
+Each node is allocated one host subnet per IP family from the configured
+cluster subnet pool.
+
+To expand the pool, append a subnet to `spec.layer3.subnets`. For example, the
+`blue-network` UDN from the previous section can be expanded with another IPv4
+cluster subnet:
+
+```yaml
+apiVersion: k8s.ovn.org/v1
+kind: UserDefinedNetwork
+metadata:
+  name: blue-network
+  namespace: blue
+spec:
+  topology: Layer3
+  layer3:
+    role: Primary
+    subnets:
+    - cidr: 103.103.0.0/16
+      hostSubnet: 24
+    - cidr: 103.104.0.0/16
+      hostSubnet: 24
+```
+
+Existing node and pod assignments remain unchanged. The added range is
+available for nodes that do not yet have a host subnet, including newly added
+nodes.
+
+The following restrictions apply:
+
+* Multiple cluster subnets are supported only for Primary Layer3 UDNs and
+  CUDNs.
+* Existing subnet entries cannot be removed or modified; expansion is
+  append-only.
+* Cluster subnets must not overlap or contain one another.
+* All cluster subnets in the same IP family must use the same `hostSubnet`
+  value. IPv4 and IPv6 can use different values and can be expanded
+  independently.
 
 ### Inspecting a UDN Pod
 
