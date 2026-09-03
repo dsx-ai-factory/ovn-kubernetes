@@ -102,11 +102,22 @@ fi
 echo "find P0 MAC address: $mac"
 # Get k8s node by k8s.ovn.org/node-primary-mac-addr label
 mac="${mac//:/-}"
-k8s_nodename=$(kubectl get node -l k8s.ovn.org/node-primary-mac-addr=$mac -o jsonpath='{.items[0].metadata.name}')
-if [ -z "$k8s_nodename" ]; then
-  echo "failed to get k8s node with k8s.ovn.org/node-primary-mac-addr=$mac, exiting..."
-  exit 1
-fi
+
+# The label is applied by ovnkube-node running in dpu-host mode, which may not
+# have come up yet when the DPU boots, so this is retried by wait_for_event.
+find_k8s_nodename() {
+  local names
+  # Select with {.items[*]...} rather than {.items[0]...}: the latter makes
+  # kubectl fail with an "array index out of bounds" jsonpath error instead of
+  # returning an empty result when no node carries the label yet.
+  names=$(kubectl get node -l "k8s.ovn.org/node-primary-mac-addr=$mac" \
+    -o jsonpath='{.items[*].metadata.name}') || return 1
+  k8s_nodename=$(echo "$names" | awk '{print $1}')
+  [ -n "$k8s_nodename" ]
+}
+
+echo "Wait for k8s node with k8s.ovn.org/node-primary-mac-addr=$mac ..."
+wait_for_event attempts=60 find_k8s_nodename
 external_ids["host-k8s-nodename"]="$k8s_nodename"
 echo "set external_ids:host-k8s-nodename to ${external_ids["host-k8s-nodename"]}"
 
