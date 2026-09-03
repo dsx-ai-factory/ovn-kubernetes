@@ -49,18 +49,6 @@ var metricPodCreationLatency prometheus.Histogram
 // MetricResourceUpdateCount is the number of times a particular resource's UpdateFunc has been called.
 var MetricResourceUpdateCount *prometheus.CounterVec
 
-// MetricResourceAddLatency is the time taken to complete resource update by an handler.
-// This measures the latency for all of the handlers for a given resource.
-var MetricResourceAddLatency prometheus.Histogram
-
-// MetricResourceUpdateLatency is the time taken to complete resource update by an handler.
-// This measures the latency for all of the handlers for a given resource.
-var MetricResourceUpdateLatency prometheus.Histogram
-
-// MetricResourceDeleteLatency is the time taken to complete resource update by an handler.
-// This measures the latency for all of the handlers for a given resource.
-var MetricResourceDeleteLatency prometheus.Histogram
-
 // MetricRequeueServiceCount is the number of times a particular service has been requeued.
 var MetricRequeueServiceCount prometheus.Counter
 
@@ -158,30 +146,6 @@ func init() {
 			"name",
 			"event",
 		},
-	)
-
-	MetricResourceAddLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
-		Namespace: types.MetricOvnkubeNamespace,
-		Subsystem: types.MetricOvnkubeSubsystemController,
-		Name:      "resource_add_latency_seconds",
-		Help:      "The duration to process all handlers for a given resource event - add.",
-		Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
-	)
-
-	MetricResourceUpdateLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
-		Namespace: types.MetricOvnkubeNamespace,
-		Subsystem: types.MetricOvnkubeSubsystemController,
-		Name:      "resource_update_latency_seconds",
-		Help:      "The duration to process all handlers for a given resource event - update.",
-		Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
-	)
-
-	MetricResourceDeleteLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
-		Namespace: types.MetricOvnkubeNamespace,
-		Subsystem: types.MetricOvnkubeSubsystemController,
-		Name:      "resource_delete_latency_seconds",
-		Help:      "The duration to process all handlers for a given resource event - delete.",
-		Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
 	)
 
 	MetricRequeueServiceCount = prometheus.NewCounter(prometheus.CounterOpts{
@@ -449,9 +413,6 @@ func RegisterOVNKubeControllerPerformance(nbClient libovsdbclient.Client) {
 	// No need to unregister because process exits when leadership is lost.
 	prometheus.MustRegister(metricPodCreationLatency)
 	prometheus.MustRegister(MetricResourceUpdateCount)
-	prometheus.MustRegister(MetricResourceAddLatency)
-	prometheus.MustRegister(MetricResourceUpdateLatency)
-	prometheus.MustRegister(MetricResourceDeleteLatency)
 	prometheus.MustRegister(MetricRequeueServiceCount)
 	prometheus.MustRegister(MetricSyncServiceCount)
 	prometheus.MustRegister(MetricSyncServiceLatency)
