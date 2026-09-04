@@ -20,12 +20,6 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/vswitchd"
 )
 
-const (
-	// ovsOfctlTimeout (seconds) bounds the ovs-ofctl dump-aggregate command used to
-	// extract integration bridge OpenFlow flow counts.
-	ovsOfctlTimeout = "5"
-)
-
 // ovnController Configuration metrics
 var metricRemoteProbeInterval = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: types.MetricOvnNamespace,
@@ -355,7 +349,7 @@ func setOvnControllerConfigurationMetrics(ovsDBClient libovsdbclient.Client) (er
 	return nil
 }
 
-func getPortCount(ovsDBClient libovsdbclient.Client, portType string) (float64, error) {
+func getPortCount(ovsDBClient libovsdbclient.Client, portType string) float64 {
 	var portCount float64
 	p := func(item *vswitchd.Interface) bool {
 		return item.Type == portType
@@ -364,7 +358,7 @@ func getPortCount(ovsDBClient libovsdbclient.Client, portType string) (float64, 
 	intfList, err := ovsops.FindInterfacesWithPredicate(ovsDBClient, p)
 	if err != nil {
 		klog.Errorf("Failed to get %s interface count: %v", portType, err)
-		return 0, fmt.Errorf("failed to query %s interfaces: %v", portType, err)
+		return 0
 	}
 	if portType == "patch" {
 		for _, intf := range intfList {
@@ -377,45 +371,32 @@ func getPortCount(ovsDBClient libovsdbclient.Client, portType string) (float64, 
 		portCount = float64(len(intfList))
 	}
 
-	return portCount, nil
+	return portCount
 }
 
 // getIntegrationBridgeOpenFlowCount returns the OpenFlow flow count of br-int.
-func getIntegrationBridgeOpenFlowCount() (float64, error) {
-	stdout, stderr, err := util.RunOVSOfctl("-t", ovsOfctlTimeout, "dump-aggregate", "br-int")
+func getIntegrationBridgeOpenFlowCount() float64 {
+	stdout, stderr, err := util.RunOVSOfctl("-t", "5", "dump-aggregate", "br-int")
 	if err != nil {
 		klog.Errorf("Failed to get flow count for br-int, stderr(%s): (%v)", stderr, err)
-		return 0, fmt.Errorf("failed to dump br-int OpenFlow flows: %v", err)
+		return 0
 	}
 	for _, kvPair := range strings.Fields(stdout) {
 		if strings.HasPrefix(kvPair, "flow_count=") {
 			value := strings.Split(kvPair, "=")[1]
-			flowCount := parseMetricToFloat(types.MetricOvnSubsystemController, "integration_bridge_openflow_total", value)
-			return flowCount, nil
+			return parseMetricToFloat(types.MetricOvnSubsystemController, "integration_bridge_openflow_total", value)
 		}
 	}
-	klog.Errorf("Failed to find flow_count in ovs-ofctl dump-aggregate output: %q", stdout)
-	return 0, fmt.Errorf("flow_count not found in dump-aggregate output")
+	return 0
 }
 
 // updateOvnControllerIntegrationBridgeMetrics refreshes the br-int flow/port
 // metrics. Called from the background collection loop so the ovs-ofctl exec and
 // OVSDB queries never run on the scrape path.
-// Metrics are conditionally updated upon extraction success, otherwise
-// maintained with the previous value, this makes the zero value representative.
 func updateOvnControllerIntegrationBridgeMetrics(ovsDBClient libovsdbclient.Client) {
-	bridgeofCount, err := getIntegrationBridgeOpenFlowCount()
-	if err == nil {
-		metricIntegrationBridgeOpenFlowTotal.Set(bridgeofCount)
-	}
-	portCountPatch, err := getPortCount(ovsDBClient, "patch")
-	if err == nil {
-		metricIntegrationBridgePatchPorts.Set(portCountPatch)
-	}
-	portCountGeneve, err := getPortCount(ovsDBClient, "geneve")
-	if err == nil {
-		metricIntegrationBridgeGenevePorts.Set(portCountGeneve)
-	}
+	metricIntegrationBridgeOpenFlowTotal.Set(getIntegrationBridgeOpenFlowCount())
+	metricIntegrationBridgePatchPorts.Set(getPortCount(ovsDBClient, "patch"))
+	metricIntegrationBridgeGenevePorts.Set(getPortCount(ovsDBClient, "geneve"))
 }
 
 // updateSBDBConnectionMetric updates the connection status with southbound database
