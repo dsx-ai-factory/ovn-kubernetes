@@ -326,7 +326,7 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 		o.addressSetManager,
 		config.IPv4Mode,
 		config.IPv6Mode,
-		"",
+		o.nodeName,
 		types.DefaultNetworkControllerName,
 	)
 
@@ -350,7 +350,6 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 	)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	o.controller.multicastSupport = config.EnableMulticast
-	o.eIPController.zone = o.controller.nodeName
 	o.udnNodeController = o.controller.nodeReconciler
 
 	setupCOPP := false
@@ -372,8 +371,8 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 	err = o.networkManager.Start()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-	err = o.eIPController.SyncLocalNodeZonesCache()
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "syncing Nodes OVN zones status must succeed to support EgressIP")
+	err = o.eIPController.SyncNodeCache()
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "syncing EgressIP node state must succeed")
 
 }
 
