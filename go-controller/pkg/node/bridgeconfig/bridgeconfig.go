@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -806,7 +807,7 @@ func dpuGatewayRepresentor(ovsClient libovsdbclient.Client, bridge *vswitchd.Bri
 	if hostFunction != nil {
 		rep, err := util.FindHostRepresentorByFunction(hostFunction.PFID, hostFunction.VFID, macAddress, nodeName)
 		if err == nil {
-			err = representorOnBridge(bridge.Name, rep)
+			err = representorOnBridge(ovsClient, bridge, rep)
 		}
 		if err == nil {
 			klog.Infof("Bridge %s: host function %s resolved gateway representor %s", bridge.Name,
@@ -814,28 +815,34 @@ func dpuGatewayRepresentor(ovsClient libovsdbclient.Client, bridge *vswitchd.Bri
 			return rep, nil
 		}
 		functionErr = err
+		klog.Warningf("Bridge %s: host function %s did not resolve a gateway representor, "+
+			"falling back to the host MAC scan: %v",
+			bridge.Name, util.HostFunctionName(hostFunction.PFID, hostFunction.VFID), err)
 	}
 
 	rep, err := util.GetDPUOps().FindHostRepresentorByPeerMAC(ovsClient, bridge, macAddress, nodeName)
 	if err != nil && functionErr != nil {
-		return "", fmt.Errorf("%w; host function %s did not resolve one either: %v", err,
+		return "", fmt.Errorf("%w; host function %s did not resolve one either: %w", err,
 			util.HostFunctionName(hostFunction.PFID, hostFunction.VFID), functionErr)
 	}
 	return rep, err
 }
 
-// representorOnBridge errors unless rep is attached to bridgeName.
-func representorOnBridge(bridgeName, rep string) error {
-	bridgeForRep, stderr, err := util.RunOVSVsctl("port-to-br", rep)
+// representorOnBridge errors unless rep is attached to bridge, either as a
+// port of its own or as an interface of another port (e.g. a bond member),
+// the same membership the uplink discovery accepts when it resolves the
+// bridge from the representor.
+func representorOnBridge(ovsClient libovsdbclient.Client, bridge *vswitchd.Bridge, rep string) error {
+	ports, err := ovsops.FindPortsForPortOrInterface(ovsClient, rep)
 	if err != nil {
-		return fmt.Errorf("failed to resolve OVS bridge for representor %s, stderr: %q, error: %w",
-			rep, stderr, err)
+		return fmt.Errorf("failed to look up representor %s: %w", rep, err)
 	}
-	if bridgeForRep = strings.TrimSpace(bridgeForRep); bridgeForRep != bridgeName {
-		return fmt.Errorf("representor %s belongs to OVS bridge %s, expected %s",
-			rep, bridgeForRep, bridgeName)
+	for _, port := range ports {
+		if slices.Contains(bridge.Ports, port.UUID) {
+			return nil
+		}
 	}
-	return nil
+	return fmt.Errorf("representor %s is not attached to OVS bridge %s", rep, bridge.Name)
 }
 
 func gatewayHostOVSInterface(bridgeName, gwIface string) (string, error) {

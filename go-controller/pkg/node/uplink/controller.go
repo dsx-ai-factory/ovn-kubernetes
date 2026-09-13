@@ -413,7 +413,7 @@ func (c *Controller) reconcileUplinkState(key string) error {
 			if err != nil {
 				klog.Warningf("UplinkState %s: host function %s did not resolve an OVS bridge, "+
 					"falling back to the host MAC scan: %v",
-					state.Name, hostFunctionName(hostState.hostFunction), err)
+					state.Name, util.HostFunctionName(hostState.hostFunction.PFID, hostState.hostFunction.VFID), err)
 				bridgeName, err = c.bridgeResolver.ResolveByHostMAC(hostState.macAddress, c.nodeName)
 			} else {
 				resolvedVia = "host function"
@@ -1162,14 +1162,10 @@ func (r defaultOVSBridgeResolver) BridgeUplink(bridgeName string) (string, error
 		)
 	}
 
-	bridgePortIDs := make(map[string]struct{}, len(bridge.Ports))
-	for _, portID := range bridge.Ports {
-		bridgePortIDs[portID] = struct{}{}
-	}
-	ports, err := libovsdbops.FindOVSPortsWithPredicate(r.ovsClient, func(port *vswitchd.Port) bool {
-		_, ok := bridgePortIDs[port.UUID]
-		return ok
-	})
+	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
+	ports := []*vswitchd.Port{}
+	err = r.ovsClient.WhereCacheByUUIDs(func(*vswitchd.Port) bool { return true }, bridge.Ports...).List(ctx, &ports)
+	cancel()
 	if err != nil {
 		return "", newDiscoveryError(
 			uplinkv1alpha1.UplinkStateReasonBridgeUplinkNotFound,
@@ -1177,16 +1173,14 @@ func (r defaultOVSBridgeResolver) BridgeUplink(bridgeName string) (string, error
 		)
 	}
 
-	interfaceIDs := map[string]struct{}{}
+	interfaceIDs := []string{}
 	for _, port := range ports {
-		for _, interfaceID := range port.Interfaces {
-			interfaceIDs[interfaceID] = struct{}{}
-		}
+		interfaceIDs = append(interfaceIDs, port.Interfaces...)
 	}
-	interfaces, err := ovsops.FindInterfacesWithPredicate(r.ovsClient, func(iface *vswitchd.Interface) bool {
-		_, ok := interfaceIDs[iface.UUID]
-		return ok
-	})
+	interfaces := []*vswitchd.Interface{}
+	ctx, cancel = context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
+	err = r.ovsClient.WhereCacheByUUIDs(func(*vswitchd.Interface) bool { return true }, interfaceIDs...).List(ctx, &interfaces)
+	cancel()
 	if err != nil {
 		return "", newDiscoveryError(
 			uplinkv1alpha1.UplinkStateReasonBridgeUplinkNotFound,
@@ -1303,7 +1297,7 @@ func (r defaultOVSBridgeResolver) ResolveByHostFunction(
 	hostMAC net.HardwareAddr,
 	nodeName string,
 ) (string, error) {
-	function := hostFunctionName(details)
+	function := util.HostFunctionName(details.PFID, details.VFID)
 	rep, err := util.FindHostRepresentorByFunction(details.PFID, details.VFID, hostMAC, nodeName)
 	if err != nil {
 		return "", newDiscoveryError(uplinkv1alpha1.UplinkStateReasonBridgeNotFound, err)
@@ -1319,12 +1313,6 @@ func (r defaultOVSBridgeResolver) ResolveByHostFunction(
 	klog.Infof("Resolved Uplink host function %s to OVS bridge %s via DPU representor %s",
 		function, bridgeName, rep)
 	return bridgeName, nil
-}
-
-// hostFunctionName renders host function as pf<N> or pf<N>vf<M> for logs
-// and error messages.
-func hostFunctionName(details *uplinkv1alpha1.HostFunction) string {
-	return util.HostFunctionName(details.PFID, details.VFID)
 }
 
 func (r defaultOVSBridgeResolver) ResolveByHostMAC(hostMAC net.HardwareAddr, nodeName string) (string, error) {
@@ -1366,30 +1354,9 @@ func (r defaultOVSBridgeResolver) ResolveByHostMAC(hostMAC net.HardwareAddr, nod
 }
 
 func (r defaultOVSBridgeResolver) bridgeForPortOrInterface(name string) (string, error) {
-	interfaces, err := ovsops.FindInterfacesWithPredicate(r.ovsClient, func(iface *vswitchd.Interface) bool {
-		return iface.Name == name
-	})
+	ports, err := libovsdbops.FindPortsForPortOrInterface(r.ovsClient, name)
 	if err != nil {
-		return "", fmt.Errorf("failed to look up OVS interface %s: %w", name, err)
-	}
-	interfaceIDs := make(map[string]struct{}, len(interfaces))
-	for _, iface := range interfaces {
-		interfaceIDs[iface.UUID] = struct{}{}
-	}
-
-	ports, err := libovsdbops.FindOVSPortsWithPredicate(r.ovsClient, func(port *vswitchd.Port) bool {
-		if port.Name == name {
-			return true
-		}
-		for _, interfaceID := range port.Interfaces {
-			if _, ok := interfaceIDs[interfaceID]; ok {
-				return true
-			}
-		}
-		return false
-	})
-	if err != nil {
-		return "", fmt.Errorf("failed to look up OVS port for %s: %w", name, err)
+		return "", err
 	}
 	if len(ports) == 0 {
 		return "", fmt.Errorf("OVS port or interface %s not found: %w", name, libovsdbclient.ErrNotFound)
